@@ -1,7 +1,8 @@
 // aivis.rs - 同梱 AivisSpeech Engine の接続確認と裏起動を管理する。
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::process::{Child, ExitStatus, Stdio};
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -91,15 +92,75 @@ fn use_gpu(state: &AppState) -> bool {
     {
         "gpu" => true,
         "cpu" => false,
-        _ => false,
+        _ => true,
     }
+}
+
+fn log_path(app: &tauri::AppHandle) -> PathBuf {
+    app.path()
+        .app_log_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("aivis.log")
+}
+
+fn log_tail(app: &tauri::AppHandle) -> String {
+    let path = log_path(app);
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let tail = text
+        .lines()
+        .rev()
+        .take(20)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    if tail.is_empty() {
+        format!("ログ: {}", path.display())
+    } else {
+        format!("ログ: {}\n{}", path.display(), tail)
+    }
+}
+
+fn child_exit_status(app: &tauri::AppHandle) -> Option<ExitStatus> {
+    let state = app.try_state::<AivisState>()?;
+    let mut child = state.child.lock().unwrap();
+    match child
+        .as_mut()
+        .and_then(|child| child.try_wait().ok())
+        .flatten()
+    {
+        Some(status) => {
+            *child = None;
+            Some(status)
+        }
+        None => None,
+    }
+}
+
+fn has_running_child(app: &tauri::AppHandle) -> bool {
+    let Some(state) = app.try_state::<AivisState>() else {
+        return false;
+    };
+    let mut child = state.child.lock().unwrap();
+    if let Some(process) = child.as_mut() {
+        if matches!(process.try_wait(), Ok(None)) {
+            return true;
+        }
+        *child = None;
+    }
+    false
 }
 
 fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
     }
+    let work_dir = path.parent().map(Path::to_path_buf);
     let mut command = std::process::Command::new(path);
+    if let Some(dir) = work_dir {
+        command.current_dir(dir);
+    }
     command.args(["--host", "127.0.0.1", "--port"]);
     command.arg(BUNDLED_PORT.to_string());
     if let Some(app_state) = app.try_state::<AppState>() {
@@ -110,10 +171,28 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
         }
     }
     command.args(["--disable_sentry", "--output_log_utf8"]);
+    let log_path = log_path(app);
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    writeln!(
+        log,
+        "\n==== Aivis 起動: device={} ====",
+        if let Some(app_state) = app.try_state::<AppState>() {
+            app_state.config.get("PICOAGENT_TTS_DEVICE", DEFAULT_DEVICE)
+        } else {
+            DEFAULT_DEVICE.to_string()
+        }
+    )?;
+    let err_log = log.try_clone()?;
     command
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(err_log));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -127,10 +206,8 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
 }
 
 pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
-    if let Some(state) = app.try_state::<AivisState>() {
-        if state.child.lock().unwrap().is_some() {
-            return Ok(());
-        }
+    if has_running_child(app) {
+        return Ok(());
     }
     let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
     spawn_engine(path, app)
@@ -148,10 +225,20 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
         if is_up(&endpoint).await {
             return Ok(());
         }
+        if let Some(status) = child_exit_status(app) {
+            anyhow::bail!(
+                "AivisSpeech Engine が起動直後に終了しました: {}\n{}",
+                status,
+                log_tail(app)
+            );
+        }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     stop(app);
-    anyhow::bail!("AivisSpeech Engine の起動がタイムアウトしました")
+    anyhow::bail!(
+        "AivisSpeech Engine の起動がタイムアウトしました\n{}",
+        log_tail(app)
+    )
 }
 
 pub fn stop(app: &tauri::AppHandle) {

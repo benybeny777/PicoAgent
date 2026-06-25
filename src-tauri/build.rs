@@ -59,9 +59,7 @@ fn generate_mods(dir: &str, out_name: &str) {
         for n in &names {
             // include! 経由だと mod 解決位置が OUT_DIR 基準になるため、生成先から
             // 実ファイルへの相対パスを #[path] で明示する。
-            let source_path = Path::new(&manifest_dir)
-                .join(dir)
-                .join(format!("{}.rs", n));
+            let source_path = Path::new(&manifest_dir).join(dir).join(format!("{}.rs", n));
             let rel = relative_path(Path::new(&out_dir), &source_path)
                 .to_string_lossy()
                 .replace('\\', "/");

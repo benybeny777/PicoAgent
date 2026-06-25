@@ -190,9 +190,17 @@ function stopVoice(toIdle = true) {
 }
 async function speakReply(text) {
   stopVoice(false);
+  let prepareTimer = null;
   try {
+    const startedAt = Date.now();
     status.textContent = "読み上げ準備中…";
+    prepareTimer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      status.textContent = `読み上げ準備中… ${seconds}秒`;
+    }, 1000);
     const result = await window.picoagent.speak(text);
+    clearInterval(prepareTimer);
+    prepareTimer = null;
     if (!result?.enabled) {
       status.textContent = "";
       return;
@@ -210,9 +218,10 @@ async function speakReply(text) {
     status.textContent = "読み上げ中…";
     setAnimation("talking", true);
   } catch (error) {
+    if (prepareTimer) clearInterval(prepareTimer);
     stopVoice();
     status.textContent = `読み上げに失敗: ${error.message || error}`;
-    setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 3200);
+    setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 12000);
   }
 }
 async function renderReplySpeaking(text) {

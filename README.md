@@ -109,7 +109,7 @@ graph LR
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中のキャラクターID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
-| `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` / `cpu` / `gpu`） |
+| `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` は GPU 優先 / `cpu` / `gpu`） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き |
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
@@ -138,9 +138,9 @@ npm run build
 
 `src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。推論エンジンは同梱されますが、モデル GGUF（数 GB）は含めず初回起動時に取得します。
 
-AivisSpeech Engine は `npm run dev` / `npm run build` の起動前に、同梱フォルダへ未取得なら自動取得されます（手動実行は `npm run setup:aivis`）。公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/aivis/` へ展開します（更新時は `AIVIS_RELEASE=latest` またはタグを指定）。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。読み上げには同梱 Aivis だけを使い、`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に `127.0.0.1:10102` で裏起動します。推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選べます。`auto` は安定優先で CPU を使い、GPU 搭載PCでは設定画面から GPU 固定にできます。アプリが起動した Aivis 子プロセスは終了時に停止します。
+AivisSpeech Engine は `npm run dev` / `npm run build` の起動前に、同梱フォルダへ未取得なら自動取得されます（手動実行は `npm run setup:aivis`）。公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/aivis/` へ展開します（更新時は `AIVIS_RELEASE=latest` またはタグを指定）。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。読み上げには同梱 Aivis だけを使い、`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に `127.0.0.1:10102` で裏起動します。推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選べます。`auto` は GPU 優先で起動し、CPU に固定したい場合だけ設定画面で CPU 固定にします。アプリが起動した Aivis 子プロセスは終了時に停止します。
 同梱 Aivis の初回起動ではモデル確認や BERT 読み込みで数十秒かかることがあります。
-初回の読み上げでは話者モデルのロードに時間がかかるため、音声が出るまでしばらく「読み上げ準備中…」になることがあります。
+初回の読み上げでは話者モデルのロードに時間がかかるため、音声が出るまでしばらく「読み上げ準備中…」になることがあります。Aivis の起動ログはアプリログディレクトリの `aivis.log` に保存され、起動失敗時は末尾がエラー表示に含まれます。
 キャラクターごとの speaker ID は設定画面の「キャラクター」タブで指定できます。未指定のキャラクターは共通の `PICOAGENT_TTS_SPEAKER` を使います。
 
 - アプリ識別子 `com.picoagent.app`（旧 `com.coda.app`。設定とモデルは `app_config_dir`/`app_data_dir` 配下に保存され、識別子変更時はそのフォルダ名を新識別子へリネームして引き継ぐ）、アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
