@@ -191,14 +191,23 @@ function stopVoice(toIdle = true) {
 async function speakReply(text) {
   stopVoice(false);
   try {
+    status.textContent = "読み上げ準備中…";
     const result = await window.picoagent.speak(text);
-    if (!result?.enabled || result.skipped || !result.audio?.length) return;
+    if (!result?.enabled) {
+      status.textContent = "";
+      return;
+    }
+    if (result.skipped || !result.audio?.length) {
+      status.textContent = "";
+      return;
+    }
     const bytes = new Uint8Array(result.audio);
     const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
     currentVoice = new Audio(url);
-    currentVoice.addEventListener("ended", () => finishVoice(true), { once: true });
-    currentVoice.addEventListener("error", () => finishVoice(true), { once: true });
+    currentVoice.addEventListener("ended", () => { finishVoice(true); status.textContent = ""; }, { once: true });
+    currentVoice.addEventListener("error", () => { finishVoice(true); status.textContent = "音声再生に失敗"; }, { once: true });
     await currentVoice.play();
+    status.textContent = "読み上げ中…";
     setAnimation("talking", true);
   } catch (error) {
     stopVoice();

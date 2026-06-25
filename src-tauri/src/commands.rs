@@ -238,7 +238,7 @@ pub async fn pet_speak(
     let endpoint = aivis::endpoint(&app, &state);
     let speaker = effective_tts_speaker(&state);
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(180))
         .build()
         .map_err(|error| error.to_string())?;
     let query_url = format!("{endpoint}/audio_query");

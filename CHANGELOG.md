@@ -33,12 +33,13 @@
 - 設定画面を **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブ構成にし、ジャンルごとに設定項目を探しやすくした。
 - AivisSpeech Engine 連携の読み上げ設定を追加した。`PICOAGENT_TTS_ENABLED` が有効な場合、回答を `/audio_query` → `/synthesis` で WAV 化して再生する。接続先と speaker ID は設定画面から変更できる。
 - Aivis 読み上げが有効な場合は、音声再生中も会話アニメーションを維持し、再生終了時に待機へ戻すようにした。
-- `PICOAGENT_TTS_AUTOSTART` と `PICOAGENT_TTS_ENGINE_PATH` を追加し、Aivis 未起動時に同梱配置・設定パス・既定インストール場所から AivisSpeech Engine を裏起動できるようにした。アプリが起動した Aivis 子プロセスは終了時に停止する。
+- Aivis 未起動時に同梱配置から AivisSpeech Engine を裏起動できるようにした。アプリが起動した Aivis 子プロセスは終了時に停止する。
 - `src-tauri/resources/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
-- 同梱版 Aivis が存在する場合は、PC にインストール済みの Aivis や設定パスより同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）で起動して接続するようにした。
+- 読み上げは同梱版 Aivis だけを使う方針にし、接続先・自動起動・実行ファイルパス・同梱ポートの設定項目を削除した。同梱版は内部固定の `127.0.0.1:10102` で起動する。
 - `PICOAGENT_TTS_CHARACTER_OVERRIDES` を追加し、設定画面の「キャラクター」タブでキャラごとの Aivis speaker ID を指定できるようにした。未指定時は共通の `PICOAGENT_TTS_SPEAKER` を使う。
 - `npm run setup:aivis` を追加し、AivisSpeech Engine 公式 GitHub Releases から同梱用実行ファイル一式を `src-tauri/resources/aivis/` へ取得できるようにした。`npm run dev` / `npm run build` では起動前に同梱 Aivis がなければ自動取得する。
 - Aivis 初回起動が数十秒かかる場合に備え、起動待ちを 180 秒へ延長した。
+- Aivis 初回合成で話者モデルロードが 30 秒を超える場合があるため、音声クエリ・合成の HTTP タイムアウトも 180 秒へ延長し、フロントに読み上げ準備中/読み上げ中の状態を表示するようにした。
 - 設定画面に「導入済みスキル（エージェント機能）」と「導入済みキャラクター」の読み取り専用一覧を追加した。設定項目を持たないツールも含め登録済みのものが一覧表示される。
 - `settings_load` のツール情報に `description` を追加し、各スキルの説明を表示できるようにした。
 - Ollama を選んだ時はローカルのモデル一覧を読み込み、モデル欄に候補を反映するようにした。保存時は選択モデルを `OLLAMA_MODEL` にも保存する。

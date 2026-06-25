@@ -146,11 +146,7 @@ async function render() {
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
-  voiceSec.append(field("PICOAGENT_TTS_AUTOSTART", "未起動なら Aivis を裏で起動する", "checkbox", v.PICOAGENT_TTS_AUTOSTART === true));
-  voiceSec.append(field("PICOAGENT_TTS_ENDPOINT", "Aivis 接続先", "text", v.PICOAGENT_TTS_ENDPOINT ?? "", "http://127.0.0.1:10101"));
-  voiceSec.append(field("PICOAGENT_TTS_BUNDLED_PORT", "同梱 Aivis のポート", "text", v.PICOAGENT_TTS_BUNDLED_PORT ?? "", "10102"));
   voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "共通 Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
-  voiceSec.append(field("PICOAGENT_TTS_ENGINE_PATH", "Aivis 実行ファイル", "text", v.PICOAGENT_TTS_ENGINE_PATH ?? "", "同梱配置がない場合の明示パス"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
 

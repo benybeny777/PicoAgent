@@ -1,4 +1,4 @@
-// aivis.rs - AivisSpeech Engine の接続確認と任意の裏起動を管理する。
+// aivis.rs - 同梱 AivisSpeech Engine の接続確認と裏起動を管理する。
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 use crate::commands::AppState;
+
+const BUNDLED_PORT: u16 = 10102;
 
 pub struct AivisState {
     child: Mutex<Option<Child>>,
@@ -26,30 +28,8 @@ impl Default for AivisState {
     }
 }
 
-fn configured_endpoint(state: &AppState) -> String {
-    state
-        .config
-        .get("PICOAGENT_TTS_ENDPOINT", "http://127.0.0.1:10101")
-        .trim_end_matches('/')
-        .to_string()
-}
-
-fn bundled_port(state: &AppState) -> u16 {
-    state
-        .config
-        .get("PICOAGENT_TTS_BUNDLED_PORT", "10102")
-        .parse::<u16>()
-        .ok()
-        .filter(|port| *port > 0)
-        .unwrap_or(10102)
-}
-
-pub fn endpoint(app: &tauri::AppHandle, state: &AppState) -> String {
-    if state.config.get_bool("PICOAGENT_TTS_AUTOSTART", false) && bundled_engine_path(app).is_some()
-    {
-        return format!("http://127.0.0.1:{}", bundled_port(state));
-    }
-    configured_endpoint(state)
+pub fn endpoint(_app: &tauri::AppHandle, _state: &AppState) -> String {
+    format!("http://127.0.0.1:{BUNDLED_PORT}")
 }
 
 async fn is_up(endpoint: &str) -> bool {
@@ -64,16 +44,6 @@ async fn is_up(endpoint: &str) -> bool {
             .map(|response| response.status().is_success())
             .unwrap_or(false),
         Err(_) => false,
-    }
-}
-
-fn configured_path(state: &AppState) -> Option<PathBuf> {
-    let raw = state.config.get("PICOAGENT_TTS_ENGINE_PATH", "");
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
     }
 }
 
@@ -103,60 +73,21 @@ fn bundled_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     bundled_candidates(app).into_iter().find_map(existing)
 }
 
-fn installed_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    #[cfg(windows)]
-    {
-        candidates.push(PathBuf::from(
-            r"C:\Program Files\AivisSpeech\AivisSpeech-Engine\run.exe",
-        ));
-        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-            candidates.push(
-                PathBuf::from(local_app_data)
-                    .join("Programs")
-                    .join("AivisSpeech")
-                    .join("AivisSpeech-Engine")
-                    .join("run.exe"),
-            );
-        }
-        candidates.push(PathBuf::from(
-            r"C:\Program Files\AivisSpeech-Engine\run.exe",
-        ));
-    }
-    candidates
-}
-
-fn resolve_engine_path(state: &AppState, app: &tauri::AppHandle) -> Option<PathBuf> {
-    if let Some(path) = bundled_engine_path(app) {
-        return Some(path);
-    }
-    if let Some(path) = configured_path(state) {
-        return existing(path);
-    }
-    installed_candidates().into_iter().find_map(existing)
-}
-
 fn path_hint() -> &'static str {
-    "Aivis の実行ファイルが見つかりません。設定で PICOAGENT_TTS_ENGINE_PATH を指定するか、src-tauri/resources/aivis/ に配置してください。"
+    "同梱 Aivis の実行ファイルが見つかりません。npm run setup:aivis を実行してください。"
 }
 
 fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
-fn spawn_engine(
-    path: PathBuf,
-    app: &tauri::AppHandle,
-    bundled_port: Option<u16>,
-) -> anyhow::Result<()> {
+fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
     }
     let mut command = std::process::Command::new(path);
-    if let Some(port) = bundled_port {
-        command.args(["--host", "127.0.0.1", "--port"]);
-        command.arg(port.to_string());
-    }
+    command.args(["--host", "127.0.0.1", "--port"]);
+    command.arg(BUNDLED_PORT.to_string());
     command.args(["--disable_sentry", "--output_log_utf8"]);
     command
         .stdin(Stdio::null())
@@ -180,15 +111,9 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if is_up(&endpoint).await {
         return Ok(());
     }
-    if !app_state.config.get_bool("PICOAGENT_TTS_AUTOSTART", false) {
-        anyhow::bail!("AivisSpeech Engine が起動していません");
-    }
     stop(app);
-    let path = resolve_engine_path(&app_state, app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
-    let port = bundled_engine_path(app)
-        .filter(|bundled| bundled == &path)
-        .map(|_| bundled_port(&app_state));
-    spawn_engine(path, app, port)?;
+    let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
+    spawn_engine(path, app)?;
     for _ in 0..360 {
         if is_up(&endpoint).await {
             return Ok(());
