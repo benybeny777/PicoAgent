@@ -11,7 +11,17 @@ use crate::message::Message;
 use crate::providers;
 use crate::tools;
 
-pub const DEFAULT_SYSTEM_PROMPT: &str = "あなたは小さなデスクトップペットです。日本語で、親しみやすく簡潔に話します。選択中キャラクターの人格設定を守り、ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+const LEGACY_DEFAULT_SYSTEM_PROMPT: &str = "あなたは小さなデスクトップペットです。日本語で、親しみやすく簡潔に話します。選択中キャラクターの人格設定を守り、ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+
+fn effective_system_prompt(config: &Config) -> String {
+    let prompt = config.get("CODA_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+    if prompt == LEGACY_DEFAULT_SYSTEM_PROMPT {
+        DEFAULT_SYSTEM_PROMPT.to_string()
+    } else {
+        prompt
+    }
+}
 
 pub struct AppState {
     pub config: Config,
@@ -34,7 +44,7 @@ impl AppState {
 
     /// 会話履歴を初期化（system プロンプトは設定から読む）。
     pub fn reset_conversation(&self) {
-        let mut prompt = self.config.get("CODA_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+        let mut prompt = effective_system_prompt(&self.config);
         let character_profile = self.character_profile.lock().unwrap().clone();
         if !character_profile.is_empty() {
             prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
@@ -155,6 +165,15 @@ pub async fn pet_send(text: String, state: State<'_, AppState>) -> Result<Value,
 pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
+    let mut values = state.config.get_all();
+    if values.get("CODA_SYSTEM_PROMPT").and_then(Value::as_str)
+        == Some(LEGACY_DEFAULT_SYSTEM_PROMPT)
+    {
+        values.insert(
+            "CODA_SYSTEM_PROMPT".to_string(),
+            Value::String(DEFAULT_SYSTEM_PROMPT.to_string()),
+        );
+    }
 
     let provider_list: Vec<Value> = providers::all()
         .iter()
@@ -181,7 +200,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         .collect();
 
     Ok(json!({
-        "values": state.config.get_all(),
+        "values": values,
         "active": { "providerId": provider_id, "model": model },
         "defaults": { "systemPrompt": DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
