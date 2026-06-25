@@ -26,6 +26,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
             commands::pet_send,
+            commands::pet_idle_chatter,
             commands::pet_speak,
             commands::aivis_status,
             commands::pet_set_bubble_size,

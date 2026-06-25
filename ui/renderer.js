@@ -11,6 +11,9 @@ const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 let busy = false;
 const conversationHistory = [];
+// アイドル時の自発雑談（雑談スキル）設定とタイマー。
+const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
+let chatterTimer = null;
 
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 let characterRoot = "assets/characters/mugi";
@@ -111,7 +114,7 @@ function animate(now) {
 }
 requestAnimationFrame(animate);
 
-function openComposer() { if (busy) return; composer.hidden = false; reply.classList.add("compact"); input.focus(); }
+function openComposer() { if (busy) return; composer.hidden = false; reply.classList.add("compact"); input.focus(); scheduleChatter(); }
 function closeComposer() { composer.hidden = true; reply.classList.remove("compact"); }
 
 // ダブルクリックでウィンドウをフルスクリーン化し、その中でフキダシを大きく広げる／元に戻すトグル。
@@ -318,11 +321,12 @@ composer.addEventListener("submit", async event => {
     addHistory("assistant", result.reply);
   }
   busy = false;
+  scheduleChatter(); // 会話後はアイドル計測をやり直す。
 });
 input.addEventListener("keydown", event => { if (event.key === "Escape") closeComposer(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
 document.addEventListener("keydown", event => { if (event.key === "Escape") exitBubbleFullscreen(); });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
-window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); renderReply("新しい話をしよう。"); closeComposer(); });
+window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); renderReply("新しい話をしよう。"); closeComposer(); scheduleChatter(); });
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
@@ -366,6 +370,7 @@ window.picoagent.on("pet:ui", (ui) => {
   if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
     status.textContent = `キャラクター変更に失敗: ${error.message}`;
   });
+  applyChatterConfig(ui); // 設定変更を即反映。
 });
 
 // TTS 有効時は同梱 Aivis が応答するまで待ってからキャラを描画する（無効時は待たない）。
@@ -383,6 +388,47 @@ async function waitForAivisReady() {
     if (s && s.up) break;
   }
   if (status.textContent === "音声エンジンを起動中…") status.textContent = "";
+}
+
+// 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
+function clampSecs(value, fallback) {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(3600, Math.max(30, n));
+}
+function applyChatterConfig(c) {
+  if (!c) return;
+  chatterCfg.enabled = Boolean(c.chatterEnabled);
+  chatterCfg.minSecs = clampSecs(c.chatterMinSecs, 90);
+  chatterCfg.maxSecs = Math.max(chatterCfg.minSecs, clampSecs(c.chatterMaxSecs, 240));
+  scheduleChatter();
+}
+// 次の自発雑談を [min, max] 秒のランダム遅延で予約する。呼ぶたびにアイドル計測をやり直す。
+function scheduleChatter() {
+  if (chatterTimer) { clearTimeout(chatterTimer); chatterTimer = null; }
+  if (!chatterCfg.enabled) return;
+  const span = chatterCfg.maxSecs - chatterCfg.minSecs;
+  const delay = (chatterCfg.minSecs + Math.random() * span) * 1000;
+  chatterTimer = setTimeout(fireChatter, delay);
+}
+async function fireChatter() {
+  chatterTimer = null;
+  // 入力中・応答中・読み上げ中・全画面表示中は割り込まず、次の機会に回す。
+  if (busy || !composer.hidden || currentVoice || bubble.classList.contains("fullscreen")) {
+    scheduleChatter();
+    return;
+  }
+  try {
+    const res = await window.picoagent.idleChatter();
+    if (res?.enabled === false) { chatterCfg.enabled = false; return; }
+    const line = (res?.reply || "").trim();
+    if (line && !busy && composer.hidden && !currentVoice) {
+      renderReply(line);
+      addHistory("assistant", line);
+      speakReply(line);
+    }
+  } catch { /* 失敗は無視して次回へ */ }
+  finally { scheduleChatter(); }
 }
 
 (async () => {
@@ -406,4 +452,5 @@ async function waitForAivisReady() {
   if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}
+  applyChatterConfig(info); // アイドル雑談タイマーを開始。
 })();

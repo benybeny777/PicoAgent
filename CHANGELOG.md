@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### アイドル時の自発雑談スキル（chitchat）
+
+- アイドル（待機）中にキャラクターが自発的にひとこと雑談する機能を、スキルコネクタ `skills/chitchat.rs` として追加。設定画面の「スキル」タブで ON/OFF と発話間隔（最短/最長秒）を変更でき、設定値はスキルの `config_schema` で自動表示される（`PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_MIN_SECS` / `PICOAGENT_CHATTER_MAX_SECS`）。
+- 生成は `pet_idle_chatter` command が選択中キャラの人格込みで `provider.chat`（tools 無し＝Web検索なし）に依頼し、会話履歴には積まない。フロントは `[min,max]` 秒のランダム間隔で発火し、入力・応答・読み上げ・全画面中は割り込まず、ユーザー操作や設定変更でタイマーを張り直す。
+- `Tool` トレイトに `agent_callable`（既定 true）を追加し、`chitchat` のように会話中にモデルへ提示しない内部スキルを `build_schemas` から除外できるようにした。`Field` に `checkbox` 型を明記。
+
 ### 会話・フキダシ・起動描画の改善
 
 - むぎの人格から「小さく分けて」「一つずつ」など作業分解を促す重複表現を整理し、同じ言い回しを毎回繰り返さないよう明記（`characters/mugi/character.json`）。同型の表現を多用する応答を抑える。

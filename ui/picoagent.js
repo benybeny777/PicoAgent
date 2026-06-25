@@ -9,6 +9,7 @@ const { getCurrentWindow } = window.__TAURI__.window;
 window.picoagent = {
   init: () => invoke("pet_init"),
   send: (text) => invoke("pet_send", { text }),
+  idleChatter: () => invoke("pet_idle_chatter"),
   speak: (text) => invoke("pet_speak", { text }),
   aivisStatus: () => invoke("aivis_status"),
   // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。

@@ -42,7 +42,7 @@ impl Message {
 pub struct Field {
     pub key: String,
     pub label: String,
-    /// "text" | "password" | "textarea"
+    /// "text" | "password" | "textarea" | "checkbox"
     pub r#type: String,
     pub placeholder: String,
 }

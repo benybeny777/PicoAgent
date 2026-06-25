@@ -22,6 +22,12 @@ pub trait Tool: Send + Sync {
     fn config_schema(&self) -> Vec<Field> {
         Vec::new()
     }
+    /// エージェントループでモデルに function として提示するか。
+    /// アプリ側が直接 `dispatch` するだけの内部スキル（例: 自発雑談）は false にして、
+    /// モデルが会話中に誤って呼ばないようにする（`dispatch` 自体は false でも実行できる）。
+    fn agent_callable(&self) -> bool {
+        true
+    }
     async fn run(&self, cfg: &Config, args: Value) -> String;
 }
 
@@ -44,6 +50,7 @@ pub fn all() -> Vec<Box<dyn Tool>> {
 pub fn build_schemas() -> Vec<Value> {
     all()
         .iter()
+        .filter(|t| t.agent_callable())
         .map(|t| {
             json!({
                 "type": "function",

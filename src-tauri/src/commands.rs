@@ -82,6 +82,9 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
         "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
         "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
+        "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
+        "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
     }))
 }
 
@@ -175,6 +178,32 @@ pub async fn pet_send(text: String, state: State<'_, AppState>) -> Result<Value,
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
         }
         Err(e) => Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", e) })),
+    }
+}
+
+// アイドル時の自発雑談を生成する。雑談スキル(chitchat)が指示文を提供し、ここで
+// 選択中キャラの人格(system)込みでプロバイダへ依頼する。Web検索やツールは使わない。
+// 会話履歴には積まない（独り言で本来の文脈を膨らませない）。
+#[tauri::command]
+pub async fn pet_idle_chatter(state: State<'_, AppState>) -> Result<Value, String> {
+    if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
+        return Ok(json!({ "enabled": false }));
+    }
+    let id = state.provider_id.lock().unwrap().clone();
+    let model = state.model.lock().unwrap().clone();
+    let provider = match providers::get(&id) {
+        Some(p) => p,
+        None => return Ok(json!({ "enabled": true, "reply": "" })),
+    };
+
+    // 雑談スキルから独り言用の指示文を受け取り、現在の人格付き会話のクローンへ一時的に積む。
+    let instruction = tools::dispatch(&state.config, "chitchat", json!({})).await;
+    let mut convo = state.messages.lock().unwrap().clone();
+    convo.push(Message::new("user", instruction));
+
+    match provider.chat(&state.config, &model, &convo, &[]).await {
+        Ok(message) => Ok(json!({ "enabled": true, "reply": message.content })),
+        Err(error) => Err(format!("自発雑談の生成に失敗しました: {error}")),
     }
 }
 
@@ -410,6 +439,9 @@ pub async fn settings_save(
                 "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
                 "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
                 "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+                "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
+                "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
+                "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
             }),
         );
     }
