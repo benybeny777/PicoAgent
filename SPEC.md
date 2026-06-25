@@ -141,7 +141,8 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 `PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。
 
 - `PICOAGENT_TTS_AUTOSTART` が有効で接続先 `/version` が未応答なら、アプリが AivisSpeech Engine を裏で起動する。
-- 実行ファイルは `PICOAGENT_TTS_ENGINE_PATH`、同梱配置 `src-tauri/resources/aivis/`、既定インストール場所の順に探す。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
+- 実行ファイルは同梱配置 `src-tauri/resources/aivis/`、`PICOAGENT_TTS_ENGINE_PATH`、既定インストール場所の順に探す。同梱配置がある場合は、PC にインストール済みの Aivis より同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）を `--port` に渡して起動した同梱版へ接続する。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
+- speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
 ---
@@ -230,8 +231,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
 | `PICOAGENT_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
 | `PICOAGENT_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
+| `PICOAGENT_TTS_BUNDLED_PORT` | `10102` | 音声 | 同梱 AivisSpeech Engine を起動するポート |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
-| `PICOAGENT_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き |
+| `PICOAGENT_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。同梱配置がない場合の明示パス |
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |

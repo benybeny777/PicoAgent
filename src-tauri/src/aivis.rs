@@ -26,12 +26,30 @@ impl Default for AivisState {
     }
 }
 
-pub fn endpoint(state: &AppState) -> String {
+fn configured_endpoint(state: &AppState) -> String {
     state
         .config
         .get("PICOAGENT_TTS_ENDPOINT", "http://127.0.0.1:10101")
         .trim_end_matches('/')
         .to_string()
+}
+
+fn bundled_port(state: &AppState) -> u16 {
+    state
+        .config
+        .get("PICOAGENT_TTS_BUNDLED_PORT", "10102")
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .unwrap_or(10102)
+}
+
+pub fn endpoint(app: &tauri::AppHandle, state: &AppState) -> String {
+    if state.config.get_bool("PICOAGENT_TTS_AUTOSTART", false) && bundled_engine_path(app).is_some()
+    {
+        return format!("http://127.0.0.1:{}", bundled_port(state));
+    }
+    configured_endpoint(state)
 }
 
 async fn is_up(endpoint: &str) -> bool {
@@ -78,6 +96,15 @@ fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
         candidates.push(cwd.join("resources/aivis").join(exe));
         candidates.push(cwd.join("src-tauri/resources/aivis").join(exe));
     }
+    candidates
+}
+
+fn bundled_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    bundled_candidates(app).into_iter().find_map(existing)
+}
+
+fn installed_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
     #[cfg(windows)]
     {
         candidates.push(PathBuf::from(
@@ -91,10 +118,13 @@ fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
 }
 
 fn resolve_engine_path(state: &AppState, app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Some(path) = bundled_engine_path(app) {
+        return Some(path);
+    }
     if let Some(path) = configured_path(state) {
         return existing(path);
     }
-    bundled_candidates(app).into_iter().find_map(existing)
+    installed_candidates().into_iter().find_map(existing)
 }
 
 fn path_hint() -> &'static str {
@@ -105,11 +135,19 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
-fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
+fn spawn_engine(
+    path: PathBuf,
+    app: &tauri::AppHandle,
+    bundled_port: Option<u16>,
+) -> anyhow::Result<()> {
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
     }
     let mut command = std::process::Command::new(path);
+    if let Some(port) = bundled_port {
+        command.args(["--host", "127.0.0.1", "--port"]);
+        command.arg(port.to_string());
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -128,7 +166,7 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
 
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     let app_state = app.state::<AppState>();
-    let endpoint = endpoint(&app_state);
+    let endpoint = endpoint(app, &app_state);
     if is_up(&endpoint).await {
         return Ok(());
     }
@@ -137,7 +175,10 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     }
     stop(app);
     let path = resolve_engine_path(&app_state, app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
-    spawn_engine(path, app)?;
+    let port = bundled_engine_path(app)
+        .filter(|bundled| bundled == &path)
+        .map(|_| bundled_port(&app_state));
+    spawn_engine(path, app, port)?;
     for _ in 0..30 {
         if is_up(&endpoint).await {
             return Ok(());

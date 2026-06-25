@@ -10,8 +10,10 @@ const modelOptions = document.getElementById("modelOptions");
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
 let characterOverrides = {};
+let characterVoiceOverrides = {};
 let characterSelect;
 let characterPersona;
+let characterSpeaker;
 let characterCatalog;
 let modelInput;
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
@@ -103,6 +105,19 @@ async function loadCharacterPersona(id) {
   characterPersona.value = characterOverrides[id] || defaultText;
 }
 
+function saveCurrentCharacterVoice(id) {
+  if (!characterSpeaker) return;
+  const current = characterVoiceOverrides[id] || {};
+  const speaker = characterSpeaker.value.trim();
+  characterVoiceOverrides[id] = { ...current, speaker };
+}
+
+function loadCharacterVoice(id) {
+  const current = characterVoiceOverrides[id] || {};
+  characterSpeaker.value = current.speaker || "";
+  characterSpeaker.placeholder = inputs.get("PICOAGENT_TTS_SPEAKER")?.value || "888753760";
+}
+
 async function render() {
   form.innerHTML = "";
   const v = data.values;
@@ -133,8 +148,9 @@ async function render() {
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   voiceSec.append(field("PICOAGENT_TTS_AUTOSTART", "未起動なら Aivis を裏で起動する", "checkbox", v.PICOAGENT_TTS_AUTOSTART === true));
   voiceSec.append(field("PICOAGENT_TTS_ENDPOINT", "Aivis 接続先", "text", v.PICOAGENT_TTS_ENDPOINT ?? "", "http://127.0.0.1:10101"));
-  voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
-  voiceSec.append(field("PICOAGENT_TTS_ENGINE_PATH", "Aivis 実行ファイル", "text", v.PICOAGENT_TTS_ENGINE_PATH ?? "", "空なら同梱配置または既定インストール場所を探す"));
+  voiceSec.append(field("PICOAGENT_TTS_BUNDLED_PORT", "同梱 Aivis のポート", "text", v.PICOAGENT_TTS_BUNDLED_PORT ?? "", "10102"));
+  voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "共通 Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
+  voiceSec.append(field("PICOAGENT_TTS_ENGINE_PATH", "Aivis 実行ファイル", "text", v.PICOAGENT_TTS_ENGINE_PATH ?? "", "同梱配置がない場合の明示パス"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
 
@@ -143,6 +159,7 @@ async function render() {
   if (!characterResponse.ok) throw new Error(`キャラクター一覧: HTTP ${characterResponse.status}`);
   characterCatalog = await characterResponse.json();
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
+  characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const selectedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
@@ -153,13 +170,18 @@ async function render() {
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
+  characterSpeaker = el("input", { type: "text", placeholder: "888753760" });
+  characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの Aivis speaker ID" }), characterSpeaker]));
   await loadCharacterPersona(selectedCharacter);
+  loadCharacterVoice(selectedCharacter);
   let previousCharacter = selectedCharacter;
   characterSelect.addEventListener("change", async () => {
     characterOverrides[previousCharacter] = characterPersona.value;
+    saveCurrentCharacterVoice(previousCharacter);
     previousCharacter = characterSelect.value;
     try { await loadCharacterPersona(previousCharacter); }
     catch (error) { statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`; }
+    loadCharacterVoice(previousCharacter);
   });
   panels.character.append(characterSec);
 
@@ -254,7 +276,9 @@ function collect() {
   if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
   if (patch.PICOAGENT_PROVIDER === "openai" && patch.PICOAGENT_MODEL) patch.OPENAI_MODEL = patch.PICOAGENT_MODEL;
   if (characterSelect && characterPersona) characterOverrides[characterSelect.value] = characterPersona.value;
+  if (characterSelect && characterSpeaker) saveCurrentCharacterVoice(characterSelect.value);
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
+  patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   return patch;
 }
 

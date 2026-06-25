@@ -111,8 +111,10 @@ graph LR
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
 | `PICOAGENT_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
 | `PICOAGENT_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
+| `PICOAGENT_TTS_BUNDLED_PORT` | `10102` | 音声 | 同梱 AivisSpeech Engine を起動するポート |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
-| `PICOAGENT_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き |
+| `PICOAGENT_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。同梱配置がない場合の明示パス |
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
@@ -139,7 +141,8 @@ npm run build
 
 `src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。推論エンジンは同梱されますが、モデル GGUF（数 GB）は含めず初回起動時に取得します。
 
-AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行ファイル一式を `src-tauri/resources/aivis/` に配置します。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。設定の `PICOAGENT_TTS_AUTOSTART` を有効にすると、Aivis が未起動のときだけ同梱配置、設定パス、既定インストール場所の順に探して裏で起動します。アプリが起動した Aivis 子プロセスは終了時に停止します。
+AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行ファイル一式を `src-tauri/resources/aivis/` に配置します。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。設定の `PICOAGENT_TTS_AUTOSTART` を有効にすると、Aivis が未起動のときだけ同梱配置、設定パス、既定インストール場所の順に探して裏で起動します。同梱配置がある場合は、PC にインストール済みの Aivis より同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）で起動して接続します。アプリが起動した Aivis 子プロセスは終了時に停止します。
+キャラクターごとの speaker ID は設定画面の「キャラクター」タブで指定できます。未指定のキャラクターは共通の `PICOAGENT_TTS_SPEAKER` を使います。
 
 - アプリ識別子 `com.picoagent.app`（旧 `com.coda.app`。設定とモデルは `app_config_dir`/`app_data_dir` 配下に保存され、識別子変更時はそのフォルダ名を新識別子へリネームして引き継ぐ）、アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
 - コード署名（Authenticode）・自動更新（`tauri-plugin-updater`）はリリース時に鍵・証明書を用意して有効化します（現状は未設定）。

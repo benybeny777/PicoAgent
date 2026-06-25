@@ -35,6 +35,8 @@
 - Aivis 読み上げが有効な場合は、音声再生中も会話アニメーションを維持し、再生終了時に待機へ戻すようにした。
 - `PICOAGENT_TTS_AUTOSTART` と `PICOAGENT_TTS_ENGINE_PATH` を追加し、Aivis 未起動時に同梱配置・設定パス・既定インストール場所から AivisSpeech Engine を裏起動できるようにした。アプリが起動した Aivis 子プロセスは終了時に停止する。
 - `src-tauri/resources/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
+- 同梱版 Aivis が存在する場合は、PC にインストール済みの Aivis や設定パスより同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）で起動して接続するようにした。
+- `PICOAGENT_TTS_CHARACTER_OVERRIDES` を追加し、設定画面の「キャラクター」タブでキャラごとの Aivis speaker ID を指定できるようにした。未指定時は共通の `PICOAGENT_TTS_SPEAKER` を使う。
 - 設定画面に「導入済みスキル（エージェント機能）」と「導入済みキャラクター」の読み取り専用一覧を追加した。設定項目を持たないツールも含め登録済みのものが一覧表示される。
 - `settings_load` のツール情報に `description` を追加し、各スキルの説明を表示できるようにした。
 - Ollama を選んだ時はローカルのモデル一覧を読み込み、モデル欄に候補を反映するようにした。保存時は選択モデルを `OLLAMA_MODEL` にも保存する。

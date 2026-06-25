@@ -118,7 +118,10 @@ pub fn pet_set_bubble_size(
         return Err("フキダシのサイズが許可範囲外です。".to_string());
     }
     let mut patch = Map::new();
-    patch.insert("PICOAGENT_BUBBLE_WIDTH_PX".to_string(), json!(width.to_string()));
+    patch.insert(
+        "PICOAGENT_BUBBLE_WIDTH_PX".to_string(),
+        json!(width.to_string()),
+    );
     patch.insert(
         "PICOAGENT_BUBBLE_HEIGHT_PX".to_string(),
         json!(height.to_string()),
@@ -199,6 +202,23 @@ fn speech_text(text: &str) -> String {
         .join(" ")
 }
 
+fn effective_tts_speaker(state: &AppState) -> String {
+    let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+    if let Some(speaker) = state
+        .config
+        .get_all()
+        .get("PICOAGENT_TTS_CHARACTER_OVERRIDES")
+        .and_then(|value| value.get(&character_id))
+        .and_then(|value| value.get("speaker"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return speaker.to_string();
+    }
+    state.config.get("PICOAGENT_TTS_SPEAKER", "888753760")
+}
+
 #[tauri::command]
 pub async fn pet_speak(
     text: String,
@@ -215,8 +235,8 @@ pub async fn pet_speak(
     aivis::ensure_started(&app)
         .await
         .map_err(|error| error.to_string())?;
-    let endpoint = aivis::endpoint(&state);
-    let speaker = state.config.get("PICOAGENT_TTS_SPEAKER", "888753760");
+    let endpoint = aivis::endpoint(&app, &state);
+    let speaker = effective_tts_speaker(&state);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -264,9 +284,13 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let mut values = state.config.get_all();
-    if values.get("PICOAGENT_SYSTEM_PROMPT").and_then(Value::as_str)
+    if values
+        .get("PICOAGENT_SYSTEM_PROMPT")
+        .and_then(Value::as_str)
         == Some(LEGACY_DEFAULT_SYSTEM_PROMPT)
-        || values.get("PICOAGENT_SYSTEM_PROMPT").and_then(Value::as_str)
+        || values
+            .get("PICOAGENT_SYSTEM_PROMPT")
+            .and_then(Value::as_str)
             == Some(PREVIOUS_DEFAULT_SYSTEM_PROMPT)
     {
         values.insert(
