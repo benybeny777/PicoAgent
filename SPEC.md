@@ -86,7 +86,7 @@ graph TD
 通常の質問では、ローカルモデルの `tool_calls` 対応状況に依存させず、最初の `chat()` より前に
 `web_search` を実行する。短い挨拶は検索結果に引っ張られて表記解説へ逸れやすいため検索を省き、キャラクター本人として返す指示だけを追加する。検索結果は外部の信頼できない参考データとして区切ってユーザーメッセージへ
 付加し、結果内の指示には従わないよう明記する。検索失敗もモデルへ渡し、ユーザーへ明示させる。
-参照元はMarkdownハイパーリンクで回答させ、フキダシはMarkdownリンクと通常のURLを安全なDOMリンクへ変換する。
+参照元はMarkdownハイパーリンクで回答させ、フキダシはMarkdownリンクと通常のURLを安全なDOMリンクへ変換する。さらに、事前検索で得た参照元URLのうち本文に未掲載のものを、最終応答の末尾へ `参考:` として確定的に添える（モデルがリンクを出し損ねても参照元が残る）。URL 行は読み上げ（`speech_text`）で除外されるため音声には乗らない。
 
 `messages` は `&mut Vec<Message>` を破壊的に伸ばす。
 
@@ -137,6 +137,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
      既定の同梱ビルドは Vulkan(GPU) 版で、`-ngl 999` により全レイヤを GPU へオフロードする（GPU 非対応環境では自動 CPU フォールバック）。
      `/health` が 200 になったら `engine:status {phase:"ready"}`。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
+- 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
 
@@ -146,6 +147,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - 推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選ぶ。`auto` と `gpu` は `--use_gpu`、`cpu` は `--no-use_gpu` で起動する。設定画面で ON/OFF やデバイスを変更した場合は、保存後に同梱 Aivis を停止/再起動して即時反映する。
 - 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。
 - Aivis の stdout/stderr はアプリログディレクトリの `aivis.log` に追記し、プロセスが起動直後に終了した場合や ready 待ちがタイムアウトした場合は、ログ末尾をエラー文字列に含めてフロントへ返す。
+- 状態は `aivis_status` command（`{ enabled, up }`）で取得できる。TTS 有効時、フロントは Aivis が `up` になるまでキャラクターの描画を保留し（`.character.is-loading`）、準備完了後に描画＋挨拶読み上げを行う。起動失敗で固まらないよう約120秒で諦めて描画する。TTS 無効時（`enabled=false`）は待たずに即描画する。
 - 実行ファイルは同梱配置 `src-tauri/resources/aivis/` だけを探す。同梱配置は `npm run dev` / `npm run build` の起動前に、未取得なら `scripts/fetch-aivis.mjs` が公式 GitHub Releases から既定 `1.2.0` を取得する（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
 - speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。

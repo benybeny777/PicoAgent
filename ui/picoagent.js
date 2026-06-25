@@ -10,6 +10,7 @@ window.picoagent = {
   init: () => invoke("pet_init"),
   send: (text) => invoke("pet_send", { text }),
   speak: (text) => invoke("pet_speak", { text }),
+  aivisStatus: () => invoke("aivis_status"),
   // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。
   setFullscreen: (on) => getCurrentWindow().setFullscreen(on),
   setBubbleSize: (width, height) => invoke("pet_set_bubble_size", { width, height }),

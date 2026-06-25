@@ -244,7 +244,12 @@ async function renderReplySpeaking(text) {
   if (!currentVoice) setAnimation("idle");
 }
 
-bubble.addEventListener("click", event => { if (!event.target.closest("button,a")) openComposer(); });
+bubble.addEventListener("click", event => {
+  if (event.target.closest("button,a,textarea")) return;
+  // テキスト選択中（コピー操作）はフキダシを入力欄へ切り替えない。
+  if (String(window.getSelection?.() ?? "").trim()) return;
+  openComposer();
+});
 character.addEventListener("dblclick", toggleBubbleFullscreen);
 // フキダシ自体をダブルクリックしても、画面最大化のように大きく広げる／戻す。
 bubble.addEventListener("dblclick", event => {
@@ -353,13 +358,32 @@ window.picoagent.on("pet:ui", (ui) => {
   });
 });
 
+// TTS 有効時は同梱 Aivis が応答するまで待ってからキャラを描画する（無効時は待たない）。
+// 起動失敗で永久に出ないことを避けるため、上限（約120秒）を超えたら諦めて描画する。
+async function waitForAivisReady() {
+  let s;
+  try { s = await window.picoagent.aivisStatus(); }
+  catch { return; }
+  if (!s || !s.enabled || s.up) return;
+  status.textContent = "音声エンジンを起動中…";
+  for (let i = 0; i < 240; i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    try { s = await window.picoagent.aivisStatus(); }
+    catch { break; }
+    if (s && s.up) break;
+  }
+  if (status.textContent === "音声エンジンを起動中…") status.textContent = "";
+}
+
 (async () => {
   const info = await window.picoagent.init();
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
   applyBubbleSize(info.bubbleWidth, info.bubbleHeight);
+  await waitForAivisReady();
   try { await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}); }
   catch (error) { status.textContent = `キャラクター読込に失敗: ${error.message}`; }
+  finally { character.classList.remove("is-loading"); }
   if (!info.up) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}

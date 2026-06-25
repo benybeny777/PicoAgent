@@ -85,6 +85,18 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     }))
 }
 
+// 同梱 Aivis の状態を返す。TTS 無効時は enabled=false（待たずにキャラ描画してよい合図）。
+#[tauri::command]
+pub async fn aivis_status(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+    let enabled = state.config.get_bool("PICOAGENT_TTS_ENABLED", false);
+    let up = if enabled {
+        aivis::is_ready(&app, &state).await
+    } else {
+        false
+    };
+    Ok(json!({ "enabled": enabled, "up": up }))
+}
+
 #[tauri::command]
 pub fn pet_set_character_profile(
     character_id: String,

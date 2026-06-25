@@ -213,6 +213,11 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
     spawn_engine(path, app)
 }
 
+// 同梱 Aivis が応答可能（/version が 200）かを返す。接続不可は false に正規化する。
+pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> bool {
+    is_up(&endpoint(app, state)).await
+}
+
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     let app_state = app.state::<AppState>();
     let endpoint = endpoint(app, &app_state);
