@@ -249,7 +249,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
 - フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_size` で設定へ永続化する。
 - キャラクターのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを大きく広げる（`.bubble.fullscreen`）。右側にキャラ分の余白を残して口元からしっぽが伸びる吹き出しの形を保ち、キャラ全身と送信ボタンに被らないようにする。解除はキャラ／フキダシのダブルクリックまたは `Esc` でフルスクリーンを解除する。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
-- ウィンドウ: 透明・枠なし・常に手前・タスクバー非表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
+- ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
 - アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill する。さらに dev/build 前フック（`beforeDevCommand`/`beforeBuildCommand`）で `scripts/stop-stale.mjs` が前回の残存プロセスを停止し、同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / event / webview 生成）。
 - 製品化: `productName=PicoAgent` / `identifier=com.coda.app`（既存ユーザーのデータ互換のため識別子は据え置き）。Windows バンドルは NSIS（`bundle.targets`）。
