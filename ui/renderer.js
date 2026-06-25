@@ -157,8 +157,11 @@ async function renderReplySpeaking(text) {
 
 bubble.addEventListener("click", event => { if (!event.target.closest("button,a")) openComposer(); });
 character.addEventListener("dblclick", toggleBubbleFullscreen);
-// 全画面中はキャラがクリック透過になるため、フキダシのダブルクリックでも解除できるようにする。
-bubble.addEventListener("dblclick", () => { if (bubble.classList.contains("fullscreen")) exitBubbleFullscreen(); });
+// フキダシ自体をダブルクリックしても、画面最大化のように大きく広げる／戻す。
+bubble.addEventListener("dblclick", event => {
+  if (event.target.closest("button,a,textarea,.bubble-resize")) return;
+  toggleBubbleFullscreen();
+});
 document.addEventListener("contextmenu", event => { event.preventDefault(); window.coda.menu(); });
 
 // 右下のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。

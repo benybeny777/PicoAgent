@@ -26,13 +26,11 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .online[data-up="true"] { background:var(--mint); }
 .bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 32px); max-height:calc(100% - 52px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }
 .bubble::after { content:""; position:absolute; right:-15px; bottom:auto; top:42%; width:26px; height:30px; background:var(--paper); clip-path:polygon(0 0,100% 50%,0 100%); filter:drop-shadow(1px 1px 0 rgba(71,52,76,.11)); }
-/* ダブルクリックでフキダシを大きく広げる全画面表示。右側はキャラ分の余白を残し、口元からしっぽが伸びる普通の吹き出しの形を保つ。 */
-.bubble.fullscreen { z-index:6; top:8px; left:8px; right:278px; bottom:8px; width:auto!important; height:auto!important; max-width:none; max-height:none; border-radius:20px 20px 7px 20px; }
-/* しっぽはキャラクターの口元へ向けて右向きに伸ばす。 */
-.bubble.fullscreen::after { right:-15px; bottom:auto; top:44%; width:26px; height:30px; clip-path:polygon(0 0,100% 50%,0 100%); }
+/* ダブルクリックでフキダシを画面最大化のように大きく広げる。 */
+.bubble.fullscreen { z-index:8; top:14px; left:14px; right:14px; bottom:14px; width:auto!important; height:auto!important; max-width:none; max-height:none; padding:22px 24px 18px; border-radius:18px; box-shadow:0 14px 40px rgba(42,31,46,.18); }
+.bubble.fullscreen::after { display:none; }
 .bubble.fullscreen .bubble-resize { display:none; }
-/* 全画面表示中もキャラクターを最前面に出して全身を見せる（フキダシは右側を避けるので送信ボタンと被らない）。 */
-.bubble.fullscreen ~ .character { z-index:7; }
+.bubble.fullscreen ~ .character { z-index:7; opacity:.18; pointer-events:none; transform:translate(34px,34px) scale(.82); }
 .reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:text; overflow:auto; }
 .reply a { color:#b94f68; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
 .reply a:hover { color:var(--accent); }

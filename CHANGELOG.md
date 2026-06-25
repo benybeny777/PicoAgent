@@ -31,7 +31,7 @@
 ### ダブルクリックでフキダシを全画面表示
 
 - キャラクターのダブルクリックで透明ウィンドウがネイティブ最大化され画面が崩れる問題を修正した。`tauri.conf.json` に `maximizable:false` を加えてドラッグ領域ダブルクリックの最大化を無効化した。
-- ダブルクリックの挙動を、ウィンドウをフルスクリーン化しその中でフキダシを大きく広げるトグルに変更した（`getCurrentWindow().setFullscreen` + `.bubble.fullscreen`）。右側にキャラ分の余白を残して全身と送信ボタンに被らないようにし、しっぽは口元へ向ける。解除はキャラ／フキダシのダブルクリックまたは `Esc`。`capabilities/default.json` に `core:window:allow-set-fullscreen` を追加。
+- ダブルクリックの挙動を、ウィンドウをフルスクリーン化しその中でフキダシを画面最大化のように広げるトグルに変更した（`getCurrentWindow().setFullscreen` + `.bubble.fullscreen`）。キャラまたはフキダシのダブルクリックで切り替え、最大化中はキャラを薄く背面化する。解除は再度ダブルクリックまたは `Esc`。`capabilities/default.json` に `core:window:allow-set-fullscreen` を追加。
 - 透明・枠なしのペットウィンドウは維持したまま、タスクバーには表示するようにした。
 
 ### 新キャラ「むぎ」を既定化
