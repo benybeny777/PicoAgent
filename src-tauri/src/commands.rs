@@ -12,11 +12,12 @@ use crate::providers;
 use crate::tools;
 
 const LEGACY_DEFAULT_SYSTEM_PROMPT: &str = "あなたは小さなデスクトップペットです。日本語で、親しみやすく簡潔に話します。選択中キャラクターの人格設定を守り、ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+const PREVIOUS_DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
 
 fn effective_system_prompt(config: &Config) -> String {
     let prompt = config.get("CODA_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-    if prompt == LEGACY_DEFAULT_SYSTEM_PROMPT {
+    if prompt == LEGACY_DEFAULT_SYSTEM_PROMPT || prompt == PREVIOUS_DEFAULT_SYSTEM_PROMPT {
         DEFAULT_SYSTEM_PROMPT.to_string()
     } else {
         prompt
@@ -261,6 +262,8 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
     let mut values = state.config.get_all();
     if values.get("CODA_SYSTEM_PROMPT").and_then(Value::as_str)
         == Some(LEGACY_DEFAULT_SYSTEM_PROMPT)
+        || values.get("CODA_SYSTEM_PROMPT").and_then(Value::as_str)
+            == Some(PREVIOUS_DEFAULT_SYSTEM_PROMPT)
     {
         values.insert(
             "CODA_SYSTEM_PROMPT".to_string(),
