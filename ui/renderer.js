@@ -9,8 +9,10 @@ const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 let busy = false;
 
+const characterManifestCacheKey = "2026-06-25-mugi-expression-v4";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
+let characterAssetVersion = "";
 let loadedCharacterSignature = "";
 let animations = {
   idle: { path: "animations/idle", frames: 6, fps: 3.6, motion: "breathe" },
@@ -25,7 +27,8 @@ let lastFrameAt = 0;
 
 function frameUrl(name, index) {
   const animation = animations[name] || animations.idle;
-  return `${characterRoot}/${animation.path}/${String(index).padStart(2, "0")}.png`;
+  const url = `${characterRoot}/${animation.path}/${String(index).padStart(2, "0")}.png`;
+  return characterAssetVersion ? `${url}?v=${encodeURIComponent(characterAssetVersion)}` : url;
 }
 
 function preloadAnimations() {
@@ -51,21 +54,23 @@ function personaText(manifest, override) {
 }
 
 async function loadCharacter(characterId, overrides = {}) {
-  const catalogResponse = await fetch("assets/characters/index.json");
+  const catalogResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!catalogResponse.ok) throw new Error(`キャラクター一覧: HTTP ${catalogResponse.status}`);
   const catalog = await catalogResponse.json();
   const entry = catalog.characters.find(character => character.id === characterId)
     || catalog.characters.find(character => character.id === catalog.default);
   if (!entry) throw new Error("利用できるキャラクターがありません");
-  const manifestResponse = await fetch(`assets/characters/${entry.manifest}`);
+  const manifestResponse = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!manifestResponse.ok) throw new Error(`キャラクター定義: HTTP ${manifestResponse.status}`);
   const manifest = await manifestResponse.json();
   if (!manifest.animations?.idle) throw new Error("idle アニメーションが定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
-  const signature = `${manifest.id}\n${profile}`;
+  const assetVersion = String(manifest.assetVersion || "");
+  const signature = `${manifest.id}\n${assetVersion}\n${profile}`;
   if (signature === loadedCharacterSignature) return;
   characterRoot = `assets/characters/${entry.manifest.replace(/\/character\.json$/, "")}`;
   characterManifest = manifest;
+  characterAssetVersion = assetVersion;
   animations = manifest.animations;
   preloadAnimations();
   frame = 0;
@@ -166,7 +171,7 @@ bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 
 composer.addEventListener("submit", async event => {
   event.preventDefault(); const text = input.value.trim(); if (!text || busy) return;
-  busy = true; closeComposer(); input.value = ""; status.textContent = "考え中…"; setAnimation("thinking"); reply.textContent = text;
+  busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text;
   const result = await window.coda.send(text);
   renderReply(result.reply); status.textContent = result.error ? "接続を確認してね" : ""; setAnimation(result.error ? "sad" : "talking");
   setTimeout(() => setAnimation("idle"), Math.min(5000, 900 + result.reply.length * 25)); busy = false;

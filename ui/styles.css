@@ -18,10 +18,10 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes pet-thinking { 0%,100%{transform:translateY(0) rotate(-.45deg)} 50%{transform:translateY(-4px) rotate(.55deg)} }
 @keyframes pet-talking { 0%,100%{transform:translateY(0) rotate(0)} 30%{transform:translateY(-3px) rotate(-.6deg)} 68%{transform:translateY(-1px) rotate(.7deg)} }
 @keyframes pet-sad { 0%,100%{transform:translateY(1px) rotate(0)} 50%{transform:translateY(4px) rotate(-.35deg)} }
-@keyframes pet-live2d-idle { 0%,100%{transform:translateY(0) rotate(-.3deg) scale(1)} 45%{transform:translateY(-5px) rotate(.45deg) scale(1.012,1.018)} 70%{transform:translateY(-2px) rotate(.15deg) scale(1.006)} }
-@keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) rotate(-1deg) scale(1)} 35%{transform:translateY(-6px) rotate(1.15deg) scale(1.018)} 68%{transform:translateY(-2px) rotate(-.35deg) scale(1.006)} }
-@keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) rotate(0) scale(1)} 24%{transform:translateY(-4px) rotate(-.9deg) scale(1.014,1.018)} 56%{transform:translateY(-1px) rotate(.9deg) scale(1.008)} 78%{transform:translateY(-3px) rotate(-.35deg) scale(1.012)} }
-@keyframes pet-live2d-sad { 0%,100%{transform:translateY(4px) rotate(-.8deg) scale(.992,.986)} 50%{transform:translateY(9px) rotate(-1.4deg) scale(.986,.98)} }
+@keyframes pet-live2d-idle { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-3px) scale(1.006,1.01)} }
+@keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) scale(1)} 38%{transform:translateY(-8px) scale(1.012,1.018)} 70%{transform:translateY(-2px) scale(1.004)} }
+@keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) scale(1)} 28%{transform:translateY(-5px) scale(1.01,1.014)} 62%{transform:translateY(-2px) scale(1.006)} }
+@keyframes pet-live2d-sad { 0%,100%{transform:translateY(4px) scale(.992,.986)} 50%{transform:translateY(11px) scale(.982,.972)} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
 .bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 32px); max-height:calc(100% - 52px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }

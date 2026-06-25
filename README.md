@@ -170,3 +170,4 @@ npm run build
 - **`read_file` が拒否される** → 許可ルート（既定はホーム）外。`CODA_TOOLS_ROOT` を設定するか、ルート配下のパスを指定。
 - **Web検索に失敗する** → インターネット接続を確認。短時間の連続検索で拒否された場合は、時間を置いて再試行。
 - **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
+- **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。dev/build 前に `scripts/stop-stale.mjs` が自動で停止する（`beforeDevCommand`/`beforeBuildCommand`）ため通常は再発しないが、手動で止めたいときは `npm run stop`。

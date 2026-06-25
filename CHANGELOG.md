@@ -6,6 +6,11 @@
 
 ## 2026-06-25
 
+### dev/build 前に残存プロセスを自動停止（DLL ロック対策）
+
+- 前回の `llama-server` / アプリ本体が同梱 DLL を掴んでビルドが `os error 32` で失敗する問題に対し、`scripts/stop-stale.mjs` を追加し `beforeDevCommand` / `beforeBuildCommand` で dev/build 前に自動停止するようにした。手動停止は `npm run stop`。
+- アプリ正常終了時は従来どおり `RunEvent::Exit` → `engine::stop` で子プロセスを kill する。
+
 ### アプリ名を PicoAgent に変更・キャラをむぎのみに整理
 
 - アプリの表示名を **Coda → PicoAgent** に変更した（`productName` / ウィンドウタイトル / 設定ウィンドウ / 右クリックメニュー「終了」/ 入力欄プレースホルダ / `package.json` / `Cargo.toml` の説明 / ドキュメント）。バンドル識別子（`com.coda.app`）と内部 JS API（`window.coda`）・Rust クレート名（`coda` / `coda_lib`）は既存データ互換と影響範囲の都合で据え置き。
@@ -31,7 +36,10 @@
 
 - 添付イラストを透過切り抜きし、`mugi` キャラクターパックとして追加した。
 - 待機・思考・会話・落胆の連番フレームを作成し、既存のLive2D風モーションで揺れるようにした。
-- `CODA_CHARACTER` の既定値と初期表示を `mugi` に変更した。設定画面のキャラクター選択には `むぎ` / `ラボメイト` / `こはる` / `コーダ（旧）` を残し、保存後すぐ切り替えられる。
+- 待機・思考・落胆にまばたき、会話中に口パクの表情フレームを追加した。横揺れは抑え、上下の小さな動きで状態差を出す。表情差分は作業用PSD（`characters/mugi/mugi_expressions.psd`）にもまとめた。
+- むぎの人格設定を、話し方・根拠の扱い・Web検索結果の使い方・作業支援の距離感まで含めて詳細化した。
+- キャラクター定義に `assetVersion` を追加し、同名PNGの更新後もWebViewが古いフレームをキャッシュし続けないようにした。`index.json` と `character.json` もキャッシュ無効化付きで取得する。
+- `CODA_CHARACTER` の既定値と初期表示を `mugi` に変更した。
 
 ### Live2D風の新キャラ「ラボメイト」を既定化
 

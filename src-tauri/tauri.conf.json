@@ -5,8 +5,8 @@
   "identifier": "com.coda.app",
   "build": {
     "frontendDist": "../ui",
-    "beforeDevCommand": "node scripts/sync-characters.mjs",
-    "beforeBuildCommand": "node scripts/sync-characters.mjs"
+    "beforeDevCommand": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs",
+    "beforeBuildCommand": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs"
   },
   "app": {
     "withGlobalTauri": true,

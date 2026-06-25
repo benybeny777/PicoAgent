@@ -240,7 +240,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 ### キャラクターパック
 
 - `characters/index.json` に `{ id, name, manifest }` を追加し、各フォルダへ `character.json` と連番フレームを置く（`ui/assets/characters/` へは `sync-characters.mjs` が同期）。
-- `character.json` は `name`、`description`、`greeting`、`persona`、`animations` を持つ。人格には性格・口調・一人称・ユーザーの呼び方・追加指示を定義できる。
+- `character.json` は `name`、`description`、`greeting`、`persona`、`animations` を持つ。任意で `assetVersion` を持て、同名フレーム更新時の画像キャッシュ回避に使う。人格には性格・口調・一人称・ユーザーの呼び方・追加指示を定義できる。
 - 各アニメーションは `path`、`frames`、`fps`、`motion` を持つ。フロントは画像フレームとCSS補間動作を組み合わせる。
 - 選択中キャラの人格は `pet_set_character_profile` でシステムプロンプトへ追加する。設定画面のキャラ別上書きは `CODA_CHARACTER_OVERRIDES` に保存する。
 
@@ -250,6 +250,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_size` で設定へ永続化する。
 - キャラクターのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを大きく広げる（`.bubble.fullscreen`）。右側にキャラ分の余白を残して口元からしっぽが伸びる吹き出しの形を保ち、キャラ全身と送信ボタンに被らないようにする。解除はキャラ／フキダシのダブルクリックまたは `Esc` でフルスクリーンを解除する。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー非表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
+- アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill する。さらに dev/build 前フック（`beforeDevCommand`/`beforeBuildCommand`）で `scripts/stop-stale.mjs` が前回の残存プロセスを停止し、同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / event / webview 生成）。
 - 製品化: `productName=PicoAgent` / `identifier=com.coda.app`（既存ユーザーのデータ互換のため識別子は据え置き）。Windows バンドルは NSIS（`bundle.targets`）。
   アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
