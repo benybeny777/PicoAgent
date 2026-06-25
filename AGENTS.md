@@ -88,7 +88,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ## フォルダ構成
 
 ```text
-20_agt/
+20_PicoAgent/
 ├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/                     ← エージェント機能（スキル）連結ファイル（.rs を足すと自動登録）
 │   └── {time,read_file,web_search}.rs

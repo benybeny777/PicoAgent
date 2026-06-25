@@ -151,7 +151,7 @@ AivisSpeech Engine は `npm run dev` / `npm run build` の起動前に、同梱�
 ## 📁 フォルダ構成
 
 ```text
-20_agt/
+20_PicoAgent/
 ├── characters/          ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/              ← エージェント機能（スキル）コネクタ（.rs を足すと自動登録）
 ├── ui/                  ← webview フロント（picoagent.js シム・ペット UI・設定画面）
