@@ -161,6 +161,99 @@ pub async fn pet_send(text: String, state: State<'_, AppState>) -> Result<Value,
     }
 }
 
+fn speech_text(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            let mut label = String::new();
+            while let Some(c) = chars.next() {
+                if c == ']' {
+                    if chars.peek() == Some(&'(') {
+                        let _ = chars.next();
+                        while let Some(u) = chars.next() {
+                            if u == ')' {
+                                break;
+                            }
+                        }
+                        out.push_str(&label);
+                    } else {
+                        out.push('[');
+                        out.push_str(&label);
+                        out.push(']');
+                    }
+                    break;
+                }
+                label.push(c);
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[tauri::command]
+pub async fn pet_speak(text: String, state: State<'_, AppState>) -> Result<Value, String> {
+    if !state.config.get_bool("CODA_TTS_ENABLED", false) {
+        return Ok(json!({ "enabled": false }));
+    }
+    let text = speech_text(&text);
+    if text.trim().is_empty() {
+        return Ok(json!({ "enabled": true, "skipped": true }));
+    }
+    let endpoint = state
+        .config
+        .get("CODA_TTS_ENDPOINT", "http://127.0.0.1:10101")
+        .trim_end_matches('/')
+        .to_string();
+    let speaker = state.config.get("CODA_TTS_SPEAKER", "888753760");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let query_url = format!("{endpoint}/audio_query");
+    let query = client
+        .post(&query_url)
+        .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
+        .send()
+        .await
+        .map_err(|error| format!("Aivis の音声クエリ作成に失敗しました: {error}"))?;
+    if !query.status().is_success() {
+        return Err(format!(
+            "Aivis の音声クエリ作成に失敗しました: HTTP {}",
+            query.status()
+        ));
+    }
+    let audio_query: Value = query
+        .json()
+        .await
+        .map_err(|error| format!("Aivis の音声クエリを読めませんでした: {error}"))?;
+    let synthesis_url = format!("{endpoint}/synthesis");
+    let wav = client
+        .post(&synthesis_url)
+        .query(&[("speaker", speaker.as_str())])
+        .json(&audio_query)
+        .send()
+        .await
+        .map_err(|error| format!("Aivis の音声合成に失敗しました: {error}"))?;
+    if !wav.status().is_success() {
+        return Err(format!(
+            "Aivis の音声合成に失敗しました: HTTP {}",
+            wav.status()
+        ));
+    }
+    let bytes = wav
+        .bytes()
+        .await
+        .map_err(|error| format!("Aivis の音声データを読めませんでした: {error}"))?;
+    Ok(json!({ "enabled": true, "mime": "audio/wav", "audio": bytes.to_vec() }))
+}
+
 #[tauri::command]
 pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();

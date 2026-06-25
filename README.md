@@ -108,6 +108,9 @@ graph LR
 | `CODA_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `CODA_CHARACTER` | `mugi` | 基本 | 選択中のキャラクターID |
 | `CODA_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
+| `CODA_TTS_ENABLED` | `false` | 基本 | Aivis で回答を読み上げる |
+| `CODA_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 基本 | AivisSpeech Engine の接続先 |
+| `CODA_TTS_SPEAKER` | `888753760` | 基本 | Aivis の speaker/style ID |
 | `CODA_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
 | `CODA_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `CODA_LOCAL_CTX` | `4096` | local | コンテキスト長 |

@@ -138,6 +138,29 @@ function renderReply(text) {
 }
 
 let speakingToken = 0;
+let currentVoice = null;
+function stopVoice() {
+  if (!currentVoice) return;
+  currentVoice.pause();
+  URL.revokeObjectURL(currentVoice.src);
+  currentVoice = null;
+}
+async function speakReply(text) {
+  stopVoice();
+  try {
+    const result = await window.coda.speak(text);
+    if (!result?.enabled || result.skipped || !result.audio?.length) return;
+    const bytes = new Uint8Array(result.audio);
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
+    currentVoice = new Audio(url);
+    currentVoice.addEventListener("ended", stopVoice, { once: true });
+    currentVoice.addEventListener("error", stopVoice, { once: true });
+    await currentVoice.play();
+  } catch (error) {
+    status.textContent = `読み上げに失敗: ${error.message || error}`;
+    setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 3200);
+  }
+}
 async function renderReplySpeaking(text) {
   const token = ++speakingToken;
   const source = String(text ?? "");
@@ -203,11 +226,14 @@ composer.addEventListener("submit", async event => {
   status.textContent = result.error ? "接続を確認してね" : "";
   if (result.error) {
     ++speakingToken;
+    stopVoice();
     renderReply(result.reply);
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } else {
+    const speech = speakReply(result.reply);
     await renderReplySpeaking(result.reply);
+    await speech.catch(() => {});
   }
   busy = false;
 });

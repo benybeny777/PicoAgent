@@ -128,7 +128,12 @@ async function render() {
   global.append(field("CODA_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.CODA_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
   global.append(field("CODA_BUBBLE_HEIGHT_PX", "フキダシの高さ(px)", "text", v.CODA_BUBBLE_HEIGHT_PX ?? "", "ドラッグで設定"));
   global.append(field("CODA_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.CODA_ALWAYS_ON_TOP !== false));
+  const voiceSec = section("読み上げ");
+  voiceSec.append(field("CODA_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.CODA_TTS_ENABLED === true));
+  voiceSec.append(field("CODA_TTS_ENDPOINT", "Aivis 接続先", "text", v.CODA_TTS_ENDPOINT ?? "", "http://127.0.0.1:10101"));
+  voiceSec.append(field("CODA_TTS_SPEAKER", "Aivis speaker ID", "text", v.CODA_TTS_SPEAKER ?? "", "888753760"));
   panels.basic.append(global);
+  panels.basic.append(voiceSec);
 
   // --- キャラクター ---
   const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });

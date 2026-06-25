@@ -23,6 +23,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
             commands::pet_send,
+            commands::pet_speak,
             commands::pet_set_bubble_size,
             commands::pet_set_character_profile,
             commands::settings_load,

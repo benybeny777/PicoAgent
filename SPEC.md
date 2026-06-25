@@ -201,7 +201,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
 - 画面は **基本** / **キャラクター** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` を読み取り専用カードで表示する（設定項目を持たないツールもここに並ぶ）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
-- `Field` の項目: `{ key, label, type:"text"|"password"|"textarea", placeholder }`。
+- `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化し、実行中の状態（プロバイダ・モデル・システムプロンプト・常に手前）へ即反映する。コネクタ固有設定は `cfg.get()` 都度読みのため自動反映。Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `CODA_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
 
 ---
@@ -219,6 +219,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `CODA_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `CODA_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `CODA_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
+| `CODA_TTS_ENABLED` | `false` | 基本 | Aivis で回答を読み上げる |
+| `CODA_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 基本 | AivisSpeech Engine の接続先 |
+| `CODA_TTS_SPEAKER` | `888753760` | 基本 | Aivis の speaker/style ID |
 | `CODA_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `CODA_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `CODA_LOCAL_CTX` | `4096` | local | コンテキスト長 |
