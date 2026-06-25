@@ -14,6 +14,7 @@
 ### dev/build 前に残存プロセスを自動停止（DLL ロック対策）
 
 - 前回の `llama-server` / アプリ本体が同梱 DLL を掴んでビルドが `os error 32` で失敗する問題に対し、`scripts/stop-stale.mjs` を追加し `beforeDevCommand` / `beforeBuildCommand` で dev/build 前に自動停止するようにした。手動停止は `npm run stop`。
+- Windows で `beforeDevCommand` の停止処理が新しく起動した dev 用 `picoagent.exe` を巻き込むレースを避けるため、`npm run dev` / `npm run build` の npm スクリプト側で `stop-stale` とキャラクター同期を同期実行してから Tauri を起動する形に変更した。
 - アプリ正常終了時は従来どおり `RunEvent::Exit` → `engine::stop` で子プロセスを kill する。
 
 ### アプリ名を PicoAgent に変更・キャラをむぎのみに整理
@@ -24,7 +25,7 @@
 ### キャラ・スキルをプロジェクト直下へ移動（扱いやすい配置）
 
 - スキル（ツール）の連結ファイルを `src-tauri/src/tools/` から**プロジェクト直下の `skills/`** へ移動した。`Tool` トレイト・レジストリ本体（`tools/mod.rs`）は src に残し、`build.rs` の走査先を `../skills` に変更した。`.rs` を1枚置けば自動登録される動作は維持。
-- キャラクターの正本を `ui/assets/characters/` から**プロジェクト直下の `characters/`** へ移動した。webview は `ui/` 配下しか配信できないため、`scripts/sync-characters.mjs` が `ui/assets/characters/` へ同期し、`tauri.conf.json` の `beforeDevCommand` / `beforeBuildCommand` で dev/build 前に自動実行する。配信コピー（`ui/assets/characters/`）は `.gitignore` 対象。
+- キャラクターの正本を `ui/assets/characters/` から**プロジェクト直下の `characters/`** へ移動した。webview は `ui/` 配下しか配信できないため、`scripts/sync-characters.mjs` が `ui/assets/characters/` へ同期し、`npm run dev` / `npm run build` で Tauri 起動前に自動実行する。配信コピー（`ui/assets/characters/`）は `.gitignore` 対象。
 - `npm run sync:characters` で手動同期も可能。
 
 ### 設定画面に導入済みスキル・キャラクター一覧を表示

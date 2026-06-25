@@ -6,8 +6,8 @@
     "setup:engine": "node scripts/fetch-engine.mjs",
     "sync:characters": "node scripts/sync-characters.mjs",
     "stop": "node scripts/stop-stale.mjs",
-    "dev": "tauri dev",
-    "build": "tauri build",
+    "dev": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs && tauri dev",
+    "build": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs && tauri build",
     "tauri": "tauri"
   },
   "engines": {

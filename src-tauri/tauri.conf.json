@@ -4,9 +4,7 @@
   "version": "1.0.0",
   "identifier": "com.picoagent.app",
   "build": {
-    "frontendDist": "../ui",
-    "beforeDevCommand": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs",
-    "beforeBuildCommand": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs"
+    "frontendDist": "../ui"
   },
   "app": {
     "withGlobalTauri": true,

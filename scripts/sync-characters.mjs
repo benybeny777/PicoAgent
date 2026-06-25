@@ -2,7 +2,7 @@
 //
 // キャラは扱いやすいようプロジェクト直下の characters/ を正本（実体）とし、webview は
 // frontendDist（ui/）配下しか配信できないため、dev / build 前にここへコピーして配る。
-// tauri.conf.json の beforeDevCommand / beforeBuildCommand から呼ばれる。
+// npm run dev / npm run build の前処理として呼ばれる。
 // 生成物（ui/assets/characters/）は .gitignore 対象。
 
 import { cpSync, existsSync, rmSync, mkdirSync } from "node:fs";
