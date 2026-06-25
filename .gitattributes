@@ -1,0 +1,16 @@
+# 既定: テキストは自動判定し、リポジトリ内では LF に正規化する。
+* text=auto eol=lf
+
+# バイナリ（差分・改行変換しない）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.icns binary
+*.gguf binary
+*.dll  binary
+*.exe  binary
+*.woff  binary
+*.woff2 binary
