@@ -47,10 +47,10 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             state.config.load(config_dir.join("config.json"));
 
-            let pid = state.config.get("CODA_PROVIDER", "local");
+            let pid = state.config.get("PICOAGENT_PROVIDER", "local");
             *state.provider_id.lock().unwrap() = pid.clone();
             let model = {
-                let m = state.config.get("CODA_MODEL", "");
+                let m = state.config.get("PICOAGENT_MODEL", "");
                 if m.is_empty() {
                     providers::get(&pid)
                         .map(|p| p.default_model(&state.config))
@@ -64,7 +64,7 @@ pub fn run() {
 
             // メインウィンドウを作業領域の右下へ寄せ、設定値で常に手前を反映。
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_always_on_top(state.config.get_bool("CODA_ALWAYS_ON_TOP", true));
+                let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
                 if let (Ok(Some(monitor)), Ok(size)) = (win.current_monitor(), win.outer_size()) {
                     let area = monitor.size();
                     let x = area.width as i32 - size.width as i32 - 20;

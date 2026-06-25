@@ -78,7 +78,7 @@ async function loadCharacter(characterId, overrides = {}) {
   frame = 0;
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
-  await window.coda.setCharacterProfile(manifest.id, profile);
+  await window.picoagent.setCharacterProfile(manifest.id, profile);
   loadedCharacterSignature = signature;
   if (manifest.greeting) renderReply(manifest.greeting);
 }
@@ -114,7 +114,7 @@ async function setBubbleFullscreen(on) {
   if (bubble.classList.contains("fullscreen") === on) return;
   bubble.classList.toggle("fullscreen", on);
   renderHistory();
-  try { await window.coda.setFullscreen(on); }
+  try { await window.picoagent.setFullscreen(on); }
   catch (error) { bubble.classList.toggle("fullscreen", !on); status.textContent = `全画面切替に失敗: ${error}`; }
 }
 function toggleBubbleFullscreen() { setBubbleFullscreen(!bubble.classList.contains("fullscreen")); }
@@ -191,7 +191,7 @@ function stopVoice(toIdle = true) {
 async function speakReply(text) {
   stopVoice(false);
   try {
-    const result = await window.coda.speak(text);
+    const result = await window.picoagent.speak(text);
     if (!result?.enabled || result.skipped || !result.audio?.length) return;
     const bytes = new Uint8Array(result.audio);
     const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
@@ -230,7 +230,7 @@ bubble.addEventListener("dblclick", event => {
   if (event.target.closest("button,a,textarea,.bubble-resize")) return;
   toggleBubbleFullscreen();
 });
-document.addEventListener("contextmenu", event => { event.preventDefault(); window.coda.menu(); });
+document.addEventListener("contextmenu", event => { event.preventDefault(); window.picoagent.menu(); });
 
 // 右下のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
 let resizeStart = null;
@@ -256,7 +256,7 @@ async function finishBubbleResize(event) {
   if (bubbleResize.hasPointerCapture(event.pointerId)) bubbleResize.releasePointerCapture(event.pointerId);
   const rect = bubble.getBoundingClientRect();
   try {
-    await window.coda.setBubbleSize(Math.round(rect.width), Math.round(rect.height));
+    await window.picoagent.setBubbleSize(Math.round(rect.width), Math.round(rect.height));
   } catch (error) {
     status.textContent = `サイズを保存できませんでした: ${error}`;
   }
@@ -267,7 +267,7 @@ bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 composer.addEventListener("submit", async event => {
   event.preventDefault(); const text = input.value.trim(); if (!text || busy) return;
   busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text; addHistory("user", text);
-  const result = await window.coda.send(text);
+  const result = await window.picoagent.send(text);
   status.textContent = result.error ? "接続を確認してね" : "";
   if (result.error) {
     ++speakingToken;
@@ -285,8 +285,8 @@ composer.addEventListener("submit", async event => {
 });
 input.addEventListener("keydown", event => { if (event.key === "Escape") closeComposer(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
 document.addEventListener("keydown", event => { if (event.key === "Escape") exitBubbleFullscreen(); });
-window.coda.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
-window.coda.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); renderReply("新しい話をしよう。"); closeComposer(); });
+window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
+window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); renderReply("新しい話をしよう。"); closeComposer(); });
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
@@ -306,7 +306,7 @@ function applyEngineStatus(s) {
     online.dataset.up = false;
   }
 }
-window.coda.on("engine:status", applyEngineStatus);
+window.picoagent.on("engine:status", applyEngineStatus);
 
 // フキダシの文字サイズを適用する（小さくて見えない問題への対応。設定で変更可能）。
 function applyFontPx(px) {
@@ -323,7 +323,7 @@ function applyBubbleSize(width, height) {
   if (Number.isFinite(w) && w >= 180) bubble.style.width = `${w}px`;
   if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
 }
-window.coda.on("pet:ui", (ui) => {
+window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
   applyBubbleSize(ui.bubbleWidth, ui.bubbleHeight);
@@ -333,7 +333,7 @@ window.coda.on("pet:ui", (ui) => {
 });
 
 (async () => {
-  const info = await window.coda.init();
+  const info = await window.picoagent.init();
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
   applyBubbleSize(info.bubbleWidth, info.bubbleHeight);
@@ -341,5 +341,5 @@ window.coda.on("pet:ui", (ui) => {
   catch (error) { status.textContent = `キャラクター読込に失敗: ${error.message}`; }
   if (!info.up) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
-  try { applyEngineStatus(await window.coda.engineStatus()); } catch {}
+  try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}
 })();

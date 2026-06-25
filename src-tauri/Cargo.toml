@@ -1,5 +1,5 @@
 [package]
-name = "coda"
+name = "picoagent"
 version = "1.0.0"
 description = "PicoAgent - コネクタ駆動のデスクトップペット"
 authors = ["PicoAgent"]
@@ -7,7 +7,7 @@ edition = "2021"
 rust-version = "1.77"
 
 [lib]
-name = "coda_lib"
+name = "picoagent_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

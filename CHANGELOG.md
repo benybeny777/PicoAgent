@@ -6,6 +6,11 @@
 
 ## 2026-06-25
 
+### 命名を picoagent に統一
+
+- クレート名・バンドル識別子・設定キー接頭辞・内部 JS API・互換シム名を `picoagent` 系へ統一した（dev 実行ファイル `picoagent.exe`、識別子 `com.picoagent.app`、設定キー `PICOAGENT_*`、`window.picoagent`、`ui/picoagent.js`）。`OPENAI_*` / `OLLAMA_*` キーは変更なし。
+- 既存環境は `app_config_dir`/`app_data_dir` のフォルダ名と `config.json` のキー接頭辞を新名へ移行して設定・DL 済みモデルを引き継ぐ（再ダウンロード回避）。`README.md` / `SPEC.md` の設定キー一覧も更新。
+
 ### dev/build 前に残存プロセスを自動停止（DLL ロック対策）
 
 - 前回の `llama-server` / アプリ本体が同梱 DLL を掴んでビルドが `os error 32` で失敗する問題に対し、`scripts/stop-stale.mjs` を追加し `beforeDevCommand` / `beforeBuildCommand` で dev/build 前に自動停止するようにした。手動停止は `npm run stop`。
@@ -13,8 +18,8 @@
 
 ### アプリ名を PicoAgent に変更・キャラをむぎのみに整理
 
-- アプリの表示名を **Coda → PicoAgent** に変更した（`productName` / ウィンドウタイトル / 設定ウィンドウ / 右クリックメニュー「終了」/ `package.json` / `Cargo.toml` の説明 / ドキュメント）。入力欄プレースホルダは、既定キャラに話しかける文言として「むぎに話しかける…」にした。バンドル識別子（`com.coda.app`）と内部 JS API（`window.coda`）・Rust クレート名（`coda` / `coda_lib`）は既存データ互換と影響範囲の都合で据え置き。
-- キャラクターを **むぎのみ** に整理し、`coda`（旧）/ `koharu` / `lab_mate` を削除（`characters/` 実体と `index.json`）。`default` は `mugi`。
+- アプリの表示名を **PicoAgent** に統一した（`productName` / ウィンドウタイトル / 設定ウィンドウ / 右クリックメニュー「終了」/ `package.json` / `Cargo.toml` の説明 / ドキュメント）。入力欄プレースホルダは、既定キャラに話しかける文言として「むぎに話しかける…」にした。
+- キャラクターを **むぎのみ** に整理し、`koharu` / `lab_mate` などの旧キャラを削除（`characters/` 実体と `index.json`）。`default` は `mugi`。
 
 ### キャラ・スキルをプロジェクト直下へ移動（扱いやすい配置）
 
@@ -25,9 +30,9 @@
 ### 設定画面に導入済みスキル・キャラクター一覧を表示
 
 - 設定画面を **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブ構成にし、ジャンルごとに設定項目を探しやすくした。
-- AivisSpeech Engine 連携の読み上げ設定を追加した。`CODA_TTS_ENABLED` が有効な場合、回答を `/audio_query` → `/synthesis` で WAV 化して再生する。接続先と speaker ID は設定画面から変更できる。
+- AivisSpeech Engine 連携の読み上げ設定を追加した。`PICOAGENT_TTS_ENABLED` が有効な場合、回答を `/audio_query` → `/synthesis` で WAV 化して再生する。接続先と speaker ID は設定画面から変更できる。
 - Aivis 読み上げが有効な場合は、音声再生中も会話アニメーションを維持し、再生終了時に待機へ戻すようにした。
-- `CODA_TTS_AUTOSTART` と `CODA_TTS_ENGINE_PATH` を追加し、Aivis 未起動時に同梱配置・設定パス・既定インストール場所から AivisSpeech Engine を裏起動できるようにした。アプリが起動した Aivis 子プロセスは終了時に停止する。
+- `PICOAGENT_TTS_AUTOSTART` と `PICOAGENT_TTS_ENGINE_PATH` を追加し、Aivis 未起動時に同梱配置・設定パス・既定インストール場所から AivisSpeech Engine を裏起動できるようにした。アプリが起動した Aivis 子プロセスは終了時に停止する。
 - `src-tauri/resources/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
 - 設定画面に「導入済みスキル（エージェント機能）」と「導入済みキャラクター」の読み取り専用一覧を追加した。設定項目を持たないツールも含め登録済みのものが一覧表示される。
 - `settings_load` のツール情報に `description` を追加し、各スキルの説明を表示できるようにした。
@@ -50,13 +55,13 @@
 - キャラクター定義に任意の `frameDurations` を追加し、まばたきだけ短く抜けるようにした。回答は文字を表示している間だけ口パクし、全文表示後に待機へ戻す。
 - 考え中・Web検索中のフレームは口を固定し、口パクは最終回答を返している間だけ出るようにした。
 - 既定システムプロンプトから「デスクトップペット」としての自己紹介誘導を外し、挨拶・自己紹介では選択中キャラクター本人として名乗るようにした。保存済みの旧既定プロンプトは実行時と設定表示時に新既定へ正規化する。
-- `CODA_CHARACTER` の既定値と初期表示を `mugi` に変更した。
+- `PICOAGENT_CHARACTER` の既定値と初期表示を `mugi` に変更した。
 
 ### Live2D風の新キャラ「ラボメイト」を既定化
 
 - 添付イラストから中央の全身キャラを透過切り抜きし、`lab_mate` キャラクターパックとして追加した。
 - 待機・思考・会話・落胆の連番フレームと `live2d-*` CSSモーションを組み合わせ、静止絵でもLive2D風に揺れて見えるようにした。
-- `CODA_CHARACTER` の既定値と初期表示を `lab_mate` に変更し、設定画面から従来の `こはる` / `コーダ（旧）` へ戻せる構成は維持した。
+- `PICOAGENT_CHARACTER` の既定値と初期表示を `lab_mate` に変更し、設定画面から従来の `こはる` へ戻せる構成は維持した。
 
 ---
 
@@ -70,7 +75,7 @@
 
 ### 右クリックメニューを簡素化
 
-- 右クリックメニューを「設定…」「常に手前に表示」「コーダを終了」の3項目だけにした。プロバイダとモデルの設定は設定画面へ集約した。
+- 右クリックメニューを「設定…」「常に手前に表示」「PicoAgent を終了」の3項目だけにした。プロバイダとモデルの設定は設定画面へ集約した。
 
 ### Web検索ツールを追加
 
@@ -86,20 +91,20 @@
 
 ### Ollama 非依存化 — gemma4(Gemma 3n E2B) を同梱エンジンで既定化
 
-- 推論エンジン llama.cpp（`llama-server`）をアプリに同梱し、起動時に spawn して OpenAI 互換 API をローカルに立てる新プロバイダ **`local`** を追加し、これを既定（`CODA_PROVIDER=local`）にした。**Ollama なしで動作**する。
+- 推論エンジン llama.cpp（`llama-server`）をアプリに同梱し、起動時に spawn して OpenAI 互換 API をローカルに立てる新プロバイダ **`local`** を追加し、これを既定（`PICOAGENT_PROVIDER=local`）にした。**Ollama なしで動作**する。
 - エンジン本体はリポジトリに含めず `scripts/fetch-engine.mjs`（`npm run setup:engine`）で取得し、`src-tauri/resources/engine/` に配置して `tauri.conf.json` の `bundle.resources` で同梱する。
 - モデル GGUF（既定: Gemma 3n E2B の Q4_K_M、約3〜4GB）は配布物に含めず、**初回起動時に `app_data_dir/models/` へダウンロード**する（以後オフライン）。進捗・状態は `engine:status` イベントで UI に表示する（`engine.rs`）。
 - `local` プロバイダは OpenAI 互換変換（`openai.rs` の `to_wire`/`from_wire`）を再利用。tools 非対応テンプレートのモデルでも会話が成立するよう、tools 付きで失敗したら tools 無しで再試行する。
-- 設定キー追加: `CODA_MODEL_URL` / `CODA_LOCAL_PORT` / `CODA_LOCAL_CTX`。Ollama プロバイダは任意利用として存続。
+- 設定キー追加: `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX`。Ollama プロバイダは任意利用として存続。
 
 ### Electron を Tauri へ全面移行（Rust バックエンド・製品化対応）
 
 - ランタイムを Electron から **Tauri 2** へ置換し、`electron/` と Node の `src/*.js`、`start.cjs`、electron 依存を削除した。フロントは `ui/` の静的 webview として配信する。
 - コネクタ/エージェント/設定/ツールのロジックを **すべて Rust（`src-tauri/`）で再実装**した。`message.rs`（正規形）/ `config.rs`（設定の正本）/ `agent.rs`（ループ）/ `providers/`（ollama・openai）/ `tools/`（time・read_file）/ `commands.rs` / `menu.rs`。
 - コネクタの自動登録を `inventory` crate ＋ `build.rs` のモジュール自動生成で実現し、「`.rs` を1枚置くだけ」でコネクタを追加できる思想を Rust でも維持した。
-- 旧 `window.coda`（Electron preload）を Tauri 上で再現する互換シム `ui/coda.js` を追加し、`renderer.js` / `settings.js` をほぼ無改変で流用した。ウィンドウのドラッグは `data-tauri-drag-region` に置換。
+- 旧 `window.picoagent`（Electron preload）を Tauri 上で再現する互換シム `ui/picoagent.js` を追加し、`renderer.js` / `settings.js` をほぼ無改変で流用した。ウィンドウのドラッグは `data-tauri-drag-region` に置換。
 - 設定の正本を `app_config_dir/config.json` に移し、優先順位は永続ファイル > 環境変数 > 既定値を踏襲した。
-- 製品化対応: `productName=Coda` / `identifier=com.coda.app`、アイコン一式（`src-tauri/icons/`）、Windows NSIS インストーラのバンドル設定を追加。署名・自動更新はリリース時設定の道筋として記載。
+- 製品化対応: `productName=PicoAgent` / `identifier=com.picoagent.app`、アイコン一式（`src-tauri/icons/`）、Windows NSIS インストーラのバンドル設定を追加。署名・自動更新はリリース時設定の道筋として記載。
 
 ### 設定ウィンドウを追加し、全設定を GUI 化
 

@@ -29,7 +29,7 @@ impl Default for AivisState {
 pub fn endpoint(state: &AppState) -> String {
     state
         .config
-        .get("CODA_TTS_ENDPOINT", "http://127.0.0.1:10101")
+        .get("PICOAGENT_TTS_ENDPOINT", "http://127.0.0.1:10101")
         .trim_end_matches('/')
         .to_string()
 }
@@ -50,7 +50,7 @@ async fn is_up(endpoint: &str) -> bool {
 }
 
 fn configured_path(state: &AppState) -> Option<PathBuf> {
-    let raw = state.config.get("CODA_TTS_ENGINE_PATH", "");
+    let raw = state.config.get("PICOAGENT_TTS_ENGINE_PATH", "");
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         None
@@ -98,7 +98,7 @@ fn resolve_engine_path(state: &AppState, app: &tauri::AppHandle) -> Option<PathB
 }
 
 fn path_hint() -> &'static str {
-    "Aivis の実行ファイルが見つかりません。設定で CODA_TTS_ENGINE_PATH を指定するか、src-tauri/resources/aivis/ に配置してください。"
+    "Aivis の実行ファイルが見つかりません。設定で PICOAGENT_TTS_ENGINE_PATH を指定するか、src-tauri/resources/aivis/ に配置してください。"
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -132,7 +132,7 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if is_up(&endpoint).await {
         return Ok(());
     }
-    if !app_state.config.get_bool("CODA_TTS_AUTOSTART", false) {
+    if !app_state.config.get_bool("PICOAGENT_TTS_AUTOSTART", false) {
         anyhow::bail!("AivisSpeech Engine が起動していません");
     }
     stop(app);

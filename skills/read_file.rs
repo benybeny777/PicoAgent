@@ -1,6 +1,6 @@
 // tools/read_file.rs - エージェント機能コネクタ（例）: ローカルのテキストファイルを読む。
 //
-// 安全策: 許可ルート CODA_TOOLS_ROOT（既定はホーム）配下に限定。正規化してルート外・
+// 安全策: 許可ルート PICOAGENT_TOOLS_ROOT（既定はホーム）配下に限定。正規化してルート外・
 // トラバーサル（..）を拒否。サイズ上限でトリム。
 
 use std::path::{Path, PathBuf};
@@ -23,7 +23,7 @@ fn home() -> String {
 }
 
 fn root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("CODA_TOOLS_ROOT", &home()))
+    PathBuf::from(cfg.get("PICOAGENT_TOOLS_ROOT", &home()))
 }
 
 // パスを正規化（存在しない要素も含め論理的に .. を解決）する。
@@ -69,7 +69,7 @@ impl Tool for ReadFileTool {
         })
     }
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new("CODA_TOOLS_ROOT", "read_file の許可ルート", "text", &home())]
+        vec![Field::new("PICOAGENT_TOOLS_ROOT", "read_file の許可ルート", "text", &home())]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {

@@ -130,18 +130,18 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`scripts/fetch-engine.mjs`（`npm run setup:engine`）で
   `src-tauri/resources/engine/` に取得。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
-  1. モデル GGUF（既定: Gemma 3n E2B Q4_K_M）が `app_data_dir/models/` に無ければ `CODA_MODEL_URL` から
+  1. モデル GGUF（既定: Gemma 3n E2B Q4_K_M）が `app_data_dir/models/` に無ければ `PICOAGENT_MODEL_URL` から
      ストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。
-  2. `llama-server -m <model> --host 127.0.0.1 --port <CODA_LOCAL_PORT> -c <CODA_LOCAL_CTX> --jinja` を spawn
+  2. `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> --jinja` を spawn
      （Windows は CREATE_NO_WINDOW）。`/health` が 200 になったら `engine:status {phase:"ready"}`。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
 
-`CODA_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。
+`PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。
 
-- `CODA_TTS_AUTOSTART` が有効で接続先 `/version` が未応答なら、アプリが AivisSpeech Engine を裏で起動する。
-- 実行ファイルは `CODA_TTS_ENGINE_PATH`、同梱配置 `src-tauri/resources/aivis/`、既定インストール場所の順に探す。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
+- `PICOAGENT_TTS_AUTOSTART` が有効で接続先 `/version` が未応答なら、アプリが AivisSpeech Engine を裏で起動する。
+- 実行ファイルは `PICOAGENT_TTS_ENGINE_PATH`、同梱配置 `src-tauri/resources/aivis/`、既定インストール場所の順に探す。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
 ---
@@ -172,7 +172,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | name | 機能 | 安全策 |
 |---|---|---|
 | `get_time` | 現在の日付・時刻（任意で IANA タイムゾーン、`chrono-tz`） | 副作用なし |
-| `read_file` | ローカルのテキストファイル読込 | 許可ルート `CODA_TOOLS_ROOT`（既定はホーム）配下に限定、`..` 等のルート外を拒否、64KB で打ち切り |
+| `read_file` | ローカルのテキストファイル読込 | 許可ルート `PICOAGENT_TOOLS_ROOT`（既定はホーム）配下に限定、`..` 等のルート外を拒否、64KB で打ち切り |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
 
 ---
@@ -205,12 +205,12 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 ### 設定画面（右クリック →「設定…」）
 
-- `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/coda.js` の `window.coda.settings.*` →
+- `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/picoagent.js` の `window.picoagent.settings.*` →
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
 - 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` を読み取り専用カードで表示する（設定項目を持たないツールもここに並ぶ）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
-- 保存は `config.set_all()` で永続化し、実行中の状態（プロバイダ・モデル・システムプロンプト・常に手前）へ即反映する。コネクタ固有設定は `cfg.get()` 都度読みのため自動反映。Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `CODA_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
+- 保存は `config.set_all()` で永続化し、実行中の状態（プロバイダ・モデル・システムプロンプト・常に手前）へ即反映する。コネクタ固有設定は `cfg.get()` 都度読みのため自動反映。Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `PICOAGENT_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
 
 ---
 
@@ -218,31 +218,31 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
-| `CODA_PROVIDER` | `local` | 基本 | 選択中の叩く AI の id |
-| `CODA_MODEL` | プロバイダ既定 | 基本 | 選択中モデル |
-| `CODA_SYSTEM_PROMPT` | 既定プロンプト | 基本 | system メッセージ |
-| `CODA_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |
-| `CODA_BUBBLE_WIDTH_PX` | 自動 | 基本 | フキダシ右下のドラッグで保存する幅(px)。`pet:ui` で即反映 |
-| `CODA_BUBBLE_HEIGHT_PX` | 自動 | 基本 | フキダシ右下のドラッグで保存する高さ(px)。`pet:ui` で即反映 |
-| `CODA_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
-| `CODA_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
-| `CODA_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
-| `CODA_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
-| `CODA_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
-| `CODA_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
-| `CODA_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
-| `CODA_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
-| `CODA_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
-| `CODA_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
-| `CODA_LOCAL_CTX` | `4096` | local | コンテキスト長 |
+| `PICOAGENT_PROVIDER` | `local` | 基本 | 選択中の叩く AI の id |
+| `PICOAGENT_MODEL` | プロバイダ既定 | 基本 | 選択中モデル |
+| `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | 基本 | system メッセージ |
+| `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |
+| `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 基本 | フキダシ右下のドラッグで保存する幅(px)。`pet:ui` で即反映 |
+| `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 基本 | フキダシ右下のドラッグで保存する高さ(px)。`pet:ui` で即反映 |
+| `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
+| `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
+| `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
+| `PICOAGENT_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
+| `PICOAGENT_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
+| `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
+| `PICOAGENT_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
+| `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
+| `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
+| `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
 | `OLLAMA_MODEL` | `qwen3:8b` | ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | openai | OpenAI 互換エンドポイント |
 | `OPENAI_API_KEY` | （なし） | openai | OpenAI 互換の API キー。未設定なら選択不可 |
 | `OPENAI_MODEL` | `gpt-4o-mini` | openai | OpenAI 互換の既定モデル |
-| `CODA_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` が読み取れるルート |
-| `CODA_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
-| `CODA_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
+| `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` が読み取れるルート |
+| `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
+| `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
 
 各キーは環境変数としても渡せる（既定値としての参照のみ。保存先は常に `config.json`）。
 
@@ -255,10 +255,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `characters/index.json` に `{ id, name, manifest }` を追加し、各フォルダへ `character.json` と連番フレームを置く（`ui/assets/characters/` へは `sync-characters.mjs` が同期）。
 - `character.json` は `name`、`description`、`greeting`、`persona`、`animations` を持つ。任意で `assetVersion` を持て、同名フレーム更新時の画像キャッシュ回避に使う。人格には性格・口調・一人称・ユーザーの呼び方・追加指示を定義できる。
 - 各アニメーションは `path`、`frames`、`fps`、`motion` を持つ。任意で `frameDurations`（ミリ秒配列）を持て、まばたきや口パクなど均等 `fps` だと不自然になるフレームだけ表示時間を調整できる。フロントは画像フレームとCSS補間動作を組み合わせる。
-- 選択中キャラの人格は `pet_set_character_profile` でシステムプロンプトへ追加する。既定プロンプトは挨拶・自己紹介でアプリ説明ではなくキャラクター本人として名乗ることを優先する。設定画面のキャラ別上書きは `CODA_CHARACTER_OVERRIDES` に保存する。
+- 選択中キャラの人格は `pet_set_character_profile` でシステムプロンプトへ追加する。既定プロンプトは挨拶・自己紹介でアプリ説明ではなくキャラクター本人として名乗ることを優先する。設定画面のキャラ別上書きは `PICOAGENT_CHARACTER_OVERRIDES` に保存する。
 
 - フロント（`ui/`）は Vite 等のバンドラを使わず、Tauri の静的 `frontendDist` で配信。`withGlobalTauri:true` で
-  `window.__TAURI__` を有効化し、`ui/coda.js` が旧 `window.coda`（init/send/menu/on/settings.*）を再現する。
+  `window.__TAURI__` を有効化し、`ui/picoagent.js` が旧 `window.picoagent`（init/send/menu/on/settings.*）を再現する。
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
 - フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_size` で設定へ永続化する。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを画面最大化のように広げる（`.bubble.fullscreen`）。最大化中はキャラを薄く背面化し、送信ボタンや入力欄と被らないようにする。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
@@ -266,6 +266,6 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
 - アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。さらに dev/build 前フック（`beforeDevCommand`/`beforeBuildCommand`）で `scripts/stop-stale.mjs` が前回の残存プロセスを停止し、同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / event / webview 生成）。
-- 製品化: `productName=PicoAgent` / `identifier=com.coda.app`（既存ユーザーのデータ互換のため識別子は据え置き）。Windows バンドルは NSIS（`bundle.targets`）。
+- 製品化: `productName=PicoAgent` / `identifier=com.picoagent.app`（旧 `com.coda.app` から改名。既存環境は `app_config_dir`/`app_data_dir` のフォルダ名を新識別子へリネーム移行する）。Windows バンドルは NSIS（`bundle.targets`）。
   アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
   署名（Authenticode）・自動更新（`tauri-plugin-updater`）はリリース時に鍵・証明書を用意して設定する（現状未設定）。

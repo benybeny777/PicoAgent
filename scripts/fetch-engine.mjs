@@ -27,14 +27,14 @@ function assetPattern() {
 }
 
 async function ghJson(url) {
-  const res = await fetch(url, { headers: { "User-Agent": "coda-setup", Accept: "application/vnd.github+json" } });
+  const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup", Accept: "application/vnd.github+json" } });
   if (!res.ok) throw new Error(`GitHub API ${res.status}: ${url}`);
   return res.json();
 }
 
 async function download(url, dest) {
   console.log("download:", url);
-  const res = await fetch(url, { headers: { "User-Agent": "coda-setup" }, redirect: "follow" });
+  const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup" }, redirect: "follow" });
   if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
   const buf = Buffer.from(await res.arrayBuffer());
   await writeFile(dest, buf);
@@ -77,7 +77,7 @@ async function main() {
   const asset = (rel.assets || []).find((a) => pat.test(a.name));
   if (!asset) throw new Error(`一致するアセットが見つかりません: ${pat}. 利用可能: ${(rel.assets || []).map((a) => a.name).join(", ")}`);
 
-  const work = join(tmpdir(), "coda-engine");
+  const work = join(tmpdir(), "picoagent-engine");
   await rm(work, { recursive: true, force: true });
   await mkdir(work, { recursive: true });
   const zip = join(work, asset.name);

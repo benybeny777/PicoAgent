@@ -6,8 +6,8 @@
 
 import { spawnSync } from "node:child_process";
 
-// dev のクレート名 coda.exe / 配布名 PicoAgent.exe / 同梱エンジン llama-server.exe を対象にする。
-const images = ["llama-server.exe", "coda.exe", "PicoAgent.exe"];
+// dev のクレート名 picoagent.exe / 配布名 PicoAgent.exe / 同梱エンジン llama-server.exe を対象にする。
+const images = ["llama-server.exe", "picoagent.exe", "PicoAgent.exe"];
 
 if (process.platform === "win32") {
   for (const image of images) {
@@ -17,7 +17,7 @@ if (process.platform === "win32") {
   }
 } else {
   // macOS / Linux: pkill で名前一致を停止（未起動は無視）。
-  for (const name of ["llama-server", "PicoAgent", "coda"]) {
+  for (const name of ["llama-server", "PicoAgent", "picoagent"]) {
     spawnSync("pkill", ["-f", name], { encoding: "utf8" });
   }
 }

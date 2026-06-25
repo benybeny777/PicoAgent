@@ -12,7 +12,7 @@ use crate::message::{Field, Message};
 pub struct Local;
 
 pub fn port(cfg: &Config) -> u16 {
-    cfg.get("CODA_LOCAL_PORT", "11435").parse().unwrap_or(11435)
+    cfg.get("PICOAGENT_LOCAL_PORT", "11435").parse().unwrap_or(11435)
 }
 fn base_url(cfg: &Config) -> String {
     format!("http://127.0.0.1:{}/v1", port(cfg))
@@ -29,17 +29,17 @@ impl Provider for Local {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new(
-                "CODA_MODEL_URL",
+                "PICOAGENT_MODEL_URL",
                 "モデル GGUF の取得元 URL",
                 "text",
                 "https://huggingface.co/.../gemma-3n-E2B-it-Q4_K_M.gguf",
             ),
-            Field::new("CODA_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
-            Field::new("CODA_LOCAL_CTX", "コンテキスト長", "text", "4096"),
+            Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
+            Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "4096"),
         ]
     }
     fn default_model(&self, cfg: &Config) -> String {
-        cfg.get("CODA_MODEL", "gemma-3n-e2b")
+        cfg.get("PICOAGENT_MODEL", "gemma-3n-e2b")
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {

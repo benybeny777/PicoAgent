@@ -1,4 +1,4 @@
-// coda.js - 旧 Electron preload（window.coda）を Tauri 上で再現する互換シム。
+// picoagent.js - 旧 Electron preload（window.picoagent）を Tauri 上で再現する互換シム。
 // tauri.conf.json の app.withGlobalTauri=true により window.__TAURI__ が使える前提。
 // これにより renderer.js / settings.js は Electron 版とほぼ同じコードで動く。
 
@@ -6,7 +6,7 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 
-window.coda = {
+window.picoagent = {
   init: () => invoke("pet_init"),
   send: (text) => invoke("pet_send", { text }),
   speak: (text) => invoke("pet_speak", { text }),

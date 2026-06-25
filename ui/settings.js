@@ -35,7 +35,7 @@ function field(key, label, type, value, placeholder) {
     return el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]);
   }
   const input = el("input", { type: type === "password" ? "password" : "text", value: value ?? "", placeholder: placeholder || "" });
-  if (key === "CODA_MODEL") input.setAttribute("list", "modelOptions");
+  if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   inputs.set(key, input);
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
 }
@@ -120,21 +120,21 @@ async function render() {
   for (const p of data.providers) {
     providerSelect.append(el("option", { value: p.id, textContent: p.label, selected: p.id === data.active.providerId }));
   }
-  inputs.set("CODA_PROVIDER", providerSelect);
+  inputs.set("PICOAGENT_PROVIDER", providerSelect);
   global.append(el("div", { className: "field" }, [el("label", { textContent: "叩く AI（プロバイダ）" }), providerSelect]));
-  global.append(field("CODA_MODEL", "モデル", "text", v.CODA_MODEL ?? data.active.model, data.active.model));
-  modelInput = inputs.get("CODA_MODEL");
-  global.append(field("CODA_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.CODA_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
-  global.append(field("CODA_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.CODA_BUBBLE_FONT_PX ?? "", "13"));
-  global.append(field("CODA_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.CODA_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
-  global.append(field("CODA_BUBBLE_HEIGHT_PX", "フキダシの高さ(px)", "text", v.CODA_BUBBLE_HEIGHT_PX ?? "", "ドラッグで設定"));
-  global.append(field("CODA_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.CODA_ALWAYS_ON_TOP !== false));
+  global.append(field("PICOAGENT_MODEL", "モデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model));
+  modelInput = inputs.get("PICOAGENT_MODEL");
+  global.append(field("PICOAGENT_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
+  global.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
+  global.append(field("PICOAGENT_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.PICOAGENT_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
+  global.append(field("PICOAGENT_BUBBLE_HEIGHT_PX", "フキダシの高さ(px)", "text", v.PICOAGENT_BUBBLE_HEIGHT_PX ?? "", "ドラッグで設定"));
+  global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   const voiceSec = section("読み上げ");
-  voiceSec.append(field("CODA_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.CODA_TTS_ENABLED === true));
-  voiceSec.append(field("CODA_TTS_AUTOSTART", "未起動なら Aivis を裏で起動する", "checkbox", v.CODA_TTS_AUTOSTART === true));
-  voiceSec.append(field("CODA_TTS_ENDPOINT", "Aivis 接続先", "text", v.CODA_TTS_ENDPOINT ?? "", "http://127.0.0.1:10101"));
-  voiceSec.append(field("CODA_TTS_SPEAKER", "Aivis speaker ID", "text", v.CODA_TTS_SPEAKER ?? "", "888753760"));
-  voiceSec.append(field("CODA_TTS_ENGINE_PATH", "Aivis 実行ファイル", "text", v.CODA_TTS_ENGINE_PATH ?? "", "空なら同梱配置または既定インストール場所を探す"));
+  voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
+  voiceSec.append(field("PICOAGENT_TTS_AUTOSTART", "未起動なら Aivis を裏で起動する", "checkbox", v.PICOAGENT_TTS_AUTOSTART === true));
+  voiceSec.append(field("PICOAGENT_TTS_ENDPOINT", "Aivis 接続先", "text", v.PICOAGENT_TTS_ENDPOINT ?? "", "http://127.0.0.1:10101"));
+  voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
+  voiceSec.append(field("PICOAGENT_TTS_ENGINE_PATH", "Aivis 実行ファイル", "text", v.PICOAGENT_TTS_ENGINE_PATH ?? "", "空なら同梱配置または既定インストール場所を探す"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
 
@@ -142,14 +142,14 @@ async function render() {
   const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!characterResponse.ok) throw new Error(`キャラクター一覧: HTTP ${characterResponse.status}`);
   characterCatalog = await characterResponse.json();
-  characterOverrides = v.CODA_CHARACTER_OVERRIDES || {};
+  characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
-  const selectedCharacter = v.CODA_CHARACTER || characterCatalog.default;
+  const selectedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", { value: character.id, textContent: character.name, selected: character.id === selectedCharacter }));
   }
-  inputs.set("CODA_CHARACTER", characterSelect);
+  inputs.set("PICOAGENT_CHARACTER", characterSelect);
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
@@ -228,7 +228,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   statusEl.textContent = providerId === "ollama" ? "Ollama のモデル一覧を取得中…" : "";
   let models = [];
   try {
-    models = await window.coda.settings.listModels(providerId);
+    models = await window.picoagent.settings.listModels(providerId);
   } catch (error) {
     statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
     return;
@@ -251,10 +251,10 @@ function collect() {
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }
-  if (patch.CODA_PROVIDER === "ollama" && patch.CODA_MODEL) patch.OLLAMA_MODEL = patch.CODA_MODEL;
-  if (patch.CODA_PROVIDER === "openai" && patch.CODA_MODEL) patch.OPENAI_MODEL = patch.CODA_MODEL;
+  if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
+  if (patch.PICOAGENT_PROVIDER === "openai" && patch.PICOAGENT_MODEL) patch.OPENAI_MODEL = patch.PICOAGENT_MODEL;
   if (characterSelect && characterPersona) characterOverrides[characterSelect.value] = characterPersona.value;
-  patch.CODA_CHARACTER_OVERRIDES = characterOverrides;
+  patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   return patch;
 }
 
@@ -262,7 +262,7 @@ saveBtn.addEventListener("click", async () => {
   saveBtn.disabled = true;
   statusEl.textContent = "保存中…";
   try {
-    const res = await window.coda.settings.save(collect());
+    const res = await window.picoagent.settings.save(collect());
     statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
   } catch (error) {
     statusEl.textContent = `保存に失敗: ${error.message}`;
@@ -272,7 +272,7 @@ saveBtn.addEventListener("click", async () => {
 });
 
 (async () => {
-  data = await window.coda.settings.load();
+  data = await window.picoagent.settings.load();
   try { await render(); }
   catch (error) { statusEl.textContent = `設定画面の読み込みに失敗: ${error.message}`; }
 })();

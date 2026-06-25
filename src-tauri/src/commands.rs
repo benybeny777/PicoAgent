@@ -1,4 +1,4 @@
-// commands.rs - Tauri command（フロントの window.coda が叩く入口）と共有状態。
+// commands.rs - Tauri command（フロントの window.picoagent が叩く入口）と共有状態。
 
 use std::sync::Mutex;
 
@@ -17,7 +17,7 @@ const PREVIOUS_DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人�
 pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
 
 fn effective_system_prompt(config: &Config) -> String {
-    let prompt = config.get("CODA_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+    let prompt = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
     if prompt == LEGACY_DEFAULT_SYSTEM_PROMPT || prompt == PREVIOUS_DEFAULT_SYSTEM_PROMPT {
         DEFAULT_SYSTEM_PROMPT.to_string()
     } else {
@@ -77,11 +77,11 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     Ok(json!({
         "model": model,
         "up": current_up(&state).await,
-        "fontPx": state.config.get("CODA_BUBBLE_FONT_PX", "13"),
-        "bubbleWidth": state.config.get("CODA_BUBBLE_WIDTH_PX", ""),
-        "bubbleHeight": state.config.get("CODA_BUBBLE_HEIGHT_PX", ""),
-        "characterId": state.config.get("CODA_CHARACTER", "mugi"),
-        "characterOverrides": state.config.get_all().get("CODA_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
+        "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
+        "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
+        "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
+        "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
     }))
 }
 
@@ -118,9 +118,9 @@ pub fn pet_set_bubble_size(
         return Err("フキダシのサイズが許可範囲外です。".to_string());
     }
     let mut patch = Map::new();
-    patch.insert("CODA_BUBBLE_WIDTH_PX".to_string(), json!(width.to_string()));
+    patch.insert("PICOAGENT_BUBBLE_WIDTH_PX".to_string(), json!(width.to_string()));
     patch.insert(
-        "CODA_BUBBLE_HEIGHT_PX".to_string(),
+        "PICOAGENT_BUBBLE_HEIGHT_PX".to_string(),
         json!(height.to_string()),
     );
     state
@@ -205,7 +205,7 @@ pub async fn pet_speak(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    if !state.config.get_bool("CODA_TTS_ENABLED", false) {
+    if !state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
         return Ok(json!({ "enabled": false }));
     }
     let text = speech_text(&text);
@@ -216,7 +216,7 @@ pub async fn pet_speak(
         .await
         .map_err(|error| error.to_string())?;
     let endpoint = aivis::endpoint(&state);
-    let speaker = state.config.get("CODA_TTS_SPEAKER", "888753760");
+    let speaker = state.config.get("PICOAGENT_TTS_SPEAKER", "888753760");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -264,13 +264,13 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let mut values = state.config.get_all();
-    if values.get("CODA_SYSTEM_PROMPT").and_then(Value::as_str)
+    if values.get("PICOAGENT_SYSTEM_PROMPT").and_then(Value::as_str)
         == Some(LEGACY_DEFAULT_SYSTEM_PROMPT)
-        || values.get("CODA_SYSTEM_PROMPT").and_then(Value::as_str)
+        || values.get("PICOAGENT_SYSTEM_PROMPT").and_then(Value::as_str)
             == Some(PREVIOUS_DEFAULT_SYSTEM_PROMPT)
     {
         values.insert(
-            "CODA_SYSTEM_PROMPT".to_string(),
+            "PICOAGENT_SYSTEM_PROMPT".to_string(),
             Value::String(DEFAULT_SYSTEM_PROMPT.to_string()),
         );
     }
@@ -326,16 +326,16 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
-    let has_system_prompt = patch.contains_key("CODA_SYSTEM_PROMPT");
+    let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
     state.config.set_all(patch).map_err(|e| e.to_string())?;
 
     // グローバル設定を実行中へ反映。
-    let pid = state.config.get("CODA_PROVIDER", "local");
+    let pid = state.config.get("PICOAGENT_PROVIDER", "local");
     *state.provider_id.lock().unwrap() = pid.clone();
     let provider =
         providers::get(&pid).ok_or_else(|| format!("プロバイダ \"{}\" が見つかりません。", pid))?;
     let model = {
-        let m = state.config.get("CODA_MODEL", "");
+        let m = state.config.get("PICOAGENT_MODEL", "");
         if m.is_empty() {
             provider.default_model(&state.config)
         } else {
@@ -347,17 +347,17 @@ pub async fn settings_save(
         state.reset_conversation();
     }
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_always_on_top(state.config.get_bool("CODA_ALWAYS_ON_TOP", true));
+        let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
         let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));
         // フキダシの見た目（文字サイズ）を実行中へ即反映。
         let _ = win.emit(
             "pet:ui",
             json!({
-                "fontPx": state.config.get("CODA_BUBBLE_FONT_PX", "13"),
-                "bubbleWidth": state.config.get("CODA_BUBBLE_WIDTH_PX", ""),
-                "bubbleHeight": state.config.get("CODA_BUBBLE_HEIGHT_PX", ""),
-                "characterId": state.config.get("CODA_CHARACTER", "mugi"),
-                "characterOverrides": state.config.get_all().get("CODA_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+                "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
+                "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
+                "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
+                "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
+                "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
             }),
         );
     }

@@ -136,8 +136,8 @@ impl Tool for WebSearchTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("CODA_WEB_SEARCH_MAX_RESULTS", "Web検索の結果件数（1〜8）", "text", "5"),
-            Field::new("CODA_WEB_SEARCH_TIMEOUT_SECS", "Web検索の待ち時間（秒、3〜60）", "text", "15"),
+            Field::new("PICOAGENT_WEB_SEARCH_MAX_RESULTS", "Web検索の結果件数（1〜8）", "text", "5"),
+            Field::new("PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "Web検索の待ち時間（秒、3〜60）", "text", "15"),
         ]
     }
 
@@ -150,7 +150,7 @@ impl Tool for WebSearchTool {
             return format!("エラー: query は {} 文字以内で指定してください。", MAX_QUERY_CHARS);
         }
 
-        let configured_results = match parse_setting(cfg, "CODA_WEB_SEARCH_MAX_RESULTS", "5", 1, MAX_RESULTS_LIMIT) {
+        let configured_results = match parse_setting(cfg, "PICOAGENT_WEB_SEARCH_MAX_RESULTS", "5", 1, MAX_RESULTS_LIMIT) {
             Ok(value) => value,
             Err(error) => return format!("エラー: {}", error),
         };
@@ -161,7 +161,7 @@ impl Tool for WebSearchTool {
                 _ => return format!("エラー: max_results は 1〜{} の整数で指定してください。", MAX_RESULTS_LIMIT),
             },
         };
-        let timeout_secs = match parse_setting(cfg, "CODA_WEB_SEARCH_TIMEOUT_SECS", "15", 3, 60) {
+        let timeout_secs = match parse_setting(cfg, "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "15", 3, 60) {
             Ok(value) => value,
             Err(error) => return format!("エラー: {}", error),
         };

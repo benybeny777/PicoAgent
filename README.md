@@ -99,31 +99,31 @@ graph LR
 
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
-| `CODA_PROVIDER` | `local` | 基本 | 選択中の叩く AI |
-| `CODA_MODEL` | プロバイダ既定 | 基本 | 選択中モデル |
-| `CODA_SYSTEM_PROMPT` | 既定プロンプト | 基本 | システムプロンプト |
-| `CODA_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px) |
-| `CODA_BUBBLE_WIDTH_PX` | 自動 | 基本 | ドラッグで保存したフキダシの幅(px) |
-| `CODA_BUBBLE_HEIGHT_PX` | 自動 | 基本 | ドラッグで保存したフキダシの高さ(px) |
-| `CODA_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
-| `CODA_CHARACTER` | `mugi` | 基本 | 選択中のキャラクターID |
-| `CODA_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
-| `CODA_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
-| `CODA_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
-| `CODA_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
-| `CODA_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
-| `CODA_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
-| `CODA_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
-| `CODA_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
-| `CODA_LOCAL_CTX` | `4096` | local | コンテキスト長 |
+| `PICOAGENT_PROVIDER` | `local` | 基本 | 選択中の叩く AI |
+| `PICOAGENT_MODEL` | プロバイダ既定 | 基本 | 選択中モデル |
+| `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | 基本 | システムプロンプト |
+| `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px) |
+| `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 基本 | ドラッグで保存したフキダシの幅(px) |
+| `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 基本 | ドラッグで保存したフキダシの高さ(px) |
+| `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中のキャラクターID |
+| `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
+| `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
+| `PICOAGENT_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
+| `PICOAGENT_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
+| `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
+| `PICOAGENT_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
+| `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
+| `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
+| `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama | Ollama 接続先 |
 | `OLLAMA_MODEL` | `qwen3:8b` | Ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI | OpenAI 互換エンドポイント |
 | `OPENAI_API_KEY` | （なし） | OpenAI | OpenAI 互換の API キー |
 | `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI | OpenAI 互換の既定モデル |
-| `CODA_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` ツールが読めるルート |
-| `CODA_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
-| `CODA_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
+| `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` ツールが読めるルート |
+| `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
+| `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
 
 > [!TIP]
 > 各キーは環境変数としても渡せます（既定値としての参照のみ。保存先は常に `config.json`）。
@@ -139,9 +139,9 @@ npm run build
 
 `src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。推論エンジンは同梱されますが、モデル GGUF（数 GB）は含めず初回起動時に取得します。
 
-AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行ファイル一式を `src-tauri/resources/aivis/` に配置します。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。設定の `CODA_TTS_AUTOSTART` を有効にすると、Aivis が未起動のときだけ同梱配置、設定パス、既定インストール場所の順に探して裏で起動します。アプリが起動した Aivis 子プロセスは終了時に停止します。
+AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行ファイル一式を `src-tauri/resources/aivis/` に配置します。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。設定の `PICOAGENT_TTS_AUTOSTART` を有効にすると、Aivis が未起動のときだけ同梱配置、設定パス、既定インストール場所の順に探して裏で起動します。アプリが起動した Aivis 子プロセスは終了時に停止します。
 
-- アプリ識別子 `com.coda.app`、アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
+- アプリ識別子 `com.picoagent.app`（旧 `com.coda.app`。設定とモデルは `app_config_dir`/`app_data_dir` 配下に保存され、識別子変更時はそのフォルダ名を新識別子へリネームして引き継ぐ）、アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
 - コード署名（Authenticode）・自動更新（`tauri-plugin-updater`）はリリース時に鍵・証明書を用意して有効化します（現状は未設定）。
 
 ---
@@ -152,7 +152,7 @@ AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行フ�
 20_agt/
 ├── characters/          ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/              ← エージェント機能（スキル）コネクタ（.rs を足すと自動登録）
-├── ui/                  ← webview フロント（coda.js シム・ペット UI・設定画面）
+├── ui/                  ← webview フロント（picoagent.js シム・ペット UI・設定画面）
 │                          ※ assets/characters/ は characters/ の配信コピー（自動生成）
 ├── src-tauri/
 │   ├── Cargo.toml / build.rs / tauri.conf.json / capabilities / icons
@@ -169,12 +169,12 @@ AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行フ�
 
 ## 🛟 トラブルシューティング
 
-- **「モデルを準備中…」のまま** → 初回のモデル DL 中（数 GB）。ネット接続を確認。`CODA_MODEL_URL` を変えると別モデルを取得。
+- **「モデルを準備中…」のまま** → 初回のモデル DL 中（数 GB）。ネット接続を確認。`PICOAGENT_MODEL_URL` を変えると別モデルを取得。
 - **「準備に失敗」と出る** → `npm run setup:engine` でエンジンが入っているか、DL 元 URL が有効か確認。
 - **オンライン表示が赤い / 応答しない（Ollama 利用時）** → `ollama serve` を起動。設定の `OLLAMA_HOST` も確認。
 - **AIプロバイダで OpenAI が「未接続」** → `OPENAI_API_KEY` 未設定。設定画面で入力して保存。
 - **ツールが呼ばれない** → モデルが function calling 非対応の可能性。`qwen3:8b` などツール対応モデルを使う。
-- **`read_file` が拒否される** → 許可ルート（既定はホーム）外。`CODA_TOOLS_ROOT` を設定するか、ルート配下のパスを指定。
+- **`read_file` が拒否される** → 許可ルート（既定はホーム）外。`PICOAGENT_TOOLS_ROOT` を設定するか、ルート配下のパスを指定。
 - **Web検索に失敗する** → インターネット接続を確認。短時間の連続検索で拒否された場合は、時間を置いて再試行。
 - **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
 - **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。dev/build 前に `scripts/stop-stale.mjs` が自動で停止する（`beforeDevCommand`/`beforeBuildCommand`）ため通常は再発しないが、手動で止めたいときは `npm run stop`。

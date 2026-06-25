@@ -52,7 +52,7 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                 }
                 let mut patch = serde_json::Map::new();
                 patch.insert(
-                    "CODA_ALWAYS_ON_TOP".to_string(),
+                    "PICOAGENT_ALWAYS_ON_TOP".to_string(),
                     serde_json::Value::Bool(next),
                 );
                 let state = app.state::<AppState>();

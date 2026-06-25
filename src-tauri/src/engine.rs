@@ -64,7 +64,7 @@ fn model_url(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     // 既定は Gemma 3n E2B の Q4_K_M GGUF（unsloth 提供）。設定で差し替え可能。
     state.config.get(
-        "CODA_MODEL_URL",
+        "PICOAGENT_MODEL_URL",
         "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf",
     )
 }
@@ -130,7 +130,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     })?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
-    let ctx = state.config.get("CODA_LOCAL_CTX", "4096");
+    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "4096");
 
     let mut cmd = std::process::Command::new(&server);
     cmd.arg("-m")

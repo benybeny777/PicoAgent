@@ -15,7 +15,7 @@
 - 常に Codex / Claude の利用クレジット消費を抑えて作業する。不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
 - PowerShell で日本語ファイルを確認するときは、文字化けを避けるため UTF-8 を明示する。表示が文字化けしても、すぐにソース破損と判断せず UTF-8 で読み直してから判断する。
 - 既に未コミット変更がある場合は、ユーザーまたは別エージェントの作業として扱い、勝手に巻き戻さない。
-- ユーザーから特に指示がない限り、コミット・プッシュはユーザーの指示があったときに行う。
+- 修正・作業が完了したら、ユーザーからの個別指示がなくても、その変更をコミットして `origin` へプッシュまで行う（コミットメッセージは日本語。本ファイルの他ルールに従う）。破壊的な履歴操作（force push・reset --hard など）や、未完了・検証前の変更のプッシュはしない。
 
 ## エラー処理・リソース
 
@@ -38,7 +38,7 @@ PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント
 
 - **プロバイダコネクタ** は `src-tauri/src/providers/` に置き、`Provider` トレイトを実装して `inventory::submit! { ProviderReg { make: || Box::new(<型>) } }` で登録する。`chat()` は正規形メッセージ（`message.rs`）を受け取り正規形 assistant を返す。プロバイダ固有のワイヤ形式変換は各コネクタ内に閉じ込め、`agent.rs` に漏らさない。
 - **スキル（ツール）コネクタ** はプロジェクト直下の `skills/` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
-- システムに副作用を持つツール（ファイル・ネットワーク・プロセス等）は、必ず境界（許可ルート・サイズ上限・確認など）を設ける。例: `tools/read_file.rs` は `CODA_TOOLS_ROOT` 配下に限定しトラバーサルを拒否する。
+- システムに副作用を持つツール（ファイル・ネットワーク・プロセス等）は、必ず境界（許可ルート・サイズ上限・確認など）を設ける。例: `tools/read_file.rs` は `PICOAGENT_TOOLS_ROOT` 配下に限定しトラバーサルを拒否する。
 - コネクタが設定値を必要とするなら `config_schema()` で申告する。値はフィールドに固定せず**メソッド内で `cfg.get()` から都度読む**（設定画面での変更を再起動なしに反映するため）。
 - コネクタを追加・変更したら `SPEC.md` のインターフェース定義と一覧、必要なら `README.md` の設定キーを更新する。
 - メッセージ正規形（コネクタ間の共通言語）を崩さない。詳細は [SPEC.md](SPEC.md) を参照。
@@ -81,7 +81,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `skills/{time,read_file,web_search}.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。`.rs` を足すと自動登録） |
 | `characters/` | キャラクター正本（一覧 `index.json`・人格定義・連番フレーム） |
 | `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
-| `ui/coda.js` | 旧 `window.coda` を Tauri 上で再現する互換シム |
+| `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
 | `ui/index.html` / `renderer.js` / `styles.css` | ペット UI |
 | `ui/settings.{html,js,css}` | 設定ウィンドウ（全設定の GUI 編集） |
 
@@ -93,7 +93,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── skills/                     ← エージェント機能（スキル）連結ファイル（.rs を足すと自動登録）
 │   └── {time,read_file,web_search}.rs
 ├── ui/                         ← webview フロント（frontendDist）
-│   ├── coda.js                 ← window.coda 互換シム（Tauri invoke/listen）
+│   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
 │   ├── index.html / renderer.js / styles.css       ← ペット UI
 │   ├── settings.html / settings.js / settings.css  ← 設定ウィンドウ
 │   └── assets/characters/      ← characters/ の配信コピー（git 管理外、sync:characters で生成）
