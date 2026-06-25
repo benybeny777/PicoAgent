@@ -132,8 +132,10 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
   1. モデル GGUF（既定: Gemma 3n E2B Q4_K_M）が `app_data_dir/models/` に無ければ `PICOAGENT_MODEL_URL` から
      ストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。
-  2. `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> --jinja` を spawn
-     （Windows は CREATE_NO_WINDOW）。`/health` が 200 になったら `engine:status {phase:"ready"}`。
+  2. `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja`
+     を spawn（`PICOAGENT_LOCAL_GPU_DEVICE` 指定時は `--device <値>` を追加。Windows は CREATE_NO_WINDOW）。
+     既定の同梱ビルドは Vulkan(GPU) 版で、`-ngl 999` により全レイヤを GPU へオフロードする（GPU 非対応環境では自動 CPU フォールバック）。
+     `/health` が 200 になったら `engine:status {phase:"ready"}`。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
@@ -238,6 +240,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
+| `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
+| `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`） |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
 | `OLLAMA_MODEL` | `qwen3:8b` | ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | openai | OpenAI 互換エンドポイント |

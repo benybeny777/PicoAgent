@@ -2,7 +2,8 @@
 // src-tauri/resources/engine/ へ展開する。リポジトリには含めず各環境で取得する。
 //
 // 使い方: npm run setup:engine
-// 既定は Windows x64 の CPU ビルド。別 OS/版は環境変数で上書き可能。
+// 既定は Windows x64 の Vulkan(GPU) ビルド。別 OS/版・CPU ビルドは環境変数で上書き可能
+//   （例: CPU 固定なら LLAMACPP_ASSET="llama-.*-bin-win-cpu-x64.zip"）。
 //   LLAMACPP_RELEASE  … リリースタグ（既定 latest を解決）
 //   LLAMACPP_ASSET    … zip アセット名を直接指定（最優先）
 
@@ -21,7 +22,7 @@ const API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
 function assetPattern() {
   if (process.env.LLAMACPP_ASSET) return new RegExp(process.env.LLAMACPP_ASSET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const p = platform();
-  if (p === "win32") return /llama-.*-bin-win-cpu-x64\.zip$/; // Windows CPU x64
+  if (p === "win32") return /llama-.*-bin-win-vulkan-x64\.zip$/; // Windows Vulkan x64（GPU 優先・NVIDIA/Intel 兼用）
   if (p === "darwin") return arch() === "arm64" ? /llama-.*-bin-macos-arm64\.zip$/ : /llama-.*-bin-macos-x64\.zip$/;
   return /llama-.*-bin-ubuntu-x64\.zip$/;
 }

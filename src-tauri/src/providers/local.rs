@@ -36,6 +36,18 @@ impl Provider for Local {
             ),
             Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
             Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "4096"),
+            Field::new(
+                "PICOAGENT_LOCAL_NGL",
+                "GPU へオフロードするレイヤ数（999=全レイヤ優先 / 0=CPU 固定）",
+                "text",
+                "999",
+            ),
+            Field::new(
+                "PICOAGENT_LOCAL_GPU_DEVICE",
+                "使用 GPU（空=既定先頭 / 複数 GPU は Vulkan1 等を指定）",
+                "text",
+                "",
+            ),
         ]
     }
     fn default_model(&self, cfg: &Config) -> String {

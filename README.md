@@ -35,7 +35,7 @@
 
 ```powershell
 npm install
-npm run setup:engine   # 同梱推論エンジン(llama-server)を取得
+npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
 npm run dev
 ```
 
@@ -115,6 +115,8 @@ graph LR
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
+| `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
+| `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定。複数 GPU 環境で discrete GPU を選ぶ場合に `Vulkan1` 等を指定 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama | Ollama 接続先 |
 | `OLLAMA_MODEL` | `qwen3:8b` | Ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI | OpenAI 互換エンドポイント |

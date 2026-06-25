@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### Aivis 同梱の取りこぼし修正と LLM の GPU 実行
+
+- `tauri.conf.json` の `bundle.resources` を `resources/{engine,aivis}/*` から `**/*` に変更。`*` ではサブフォルダ（Aivis の `engine_internal/` 等）が同梱・dev コピーされず、`run.exe` が `python311.dll` をロードできずに即終了していた不具合を修正した。
+- 同梱 llama.cpp を Windows で **Vulkan(GPU) ビルド**取得に変更（`fetch-engine.mjs`）。従来は CPU 専用ビルドのため GPU が一切使われていなかった。
+- `engine.rs` の `llama-server` 起動に `-ngl`（既定 `999`=全レイヤ GPU オフロード）と、複数 GPU 環境向けの `--device`（`PICOAGENT_LOCAL_GPU_DEVICE`）を追加。設定キー `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` を `local` プロバイダの設定スキーマに追加した。
+
 ### コネクタ自動生成パスを相対化
 
 - `build.rs` が生成するコネクタ `#[path]` を、ビルド生成先から各 `.rs` への相対パスに変更した。作業フォルダ名を変更した後でも、古い絶対パスを含む生成物に引きずられにくくした。
