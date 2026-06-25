@@ -136,6 +136,14 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
      （Windows は CREATE_NO_WINDOW）。`/health` が 200 になったら `engine:status {phase:"ready"}`。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
 
+### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
+
+`CODA_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。
+
+- `CODA_TTS_AUTOSTART` が有効で接続先 `/version` が未応答なら、アプリが AivisSpeech Engine を裏で起動する。
+- 実行ファイルは `CODA_TTS_ENGINE_PATH`、同梱配置 `src-tauri/resources/aivis/`、既定インストール場所の順に探す。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
+- アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
+
 ---
 
 ## スキル（ツール）コネクタ
@@ -199,7 +207,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 - `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/coda.js` の `window.coda.settings.*` →
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
-- 画面は **基本** / **キャラクター** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
+- 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` を読み取り専用カードで表示する（設定項目を持たないツールもここに並ぶ）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化し、実行中の状態（プロバイダ・モデル・システムプロンプト・常に手前）へ即反映する。コネクタ固有設定は `cfg.get()` 都度読みのため自動反映。Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `CODA_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
@@ -219,9 +227,11 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `CODA_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `CODA_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `CODA_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
-| `CODA_TTS_ENABLED` | `false` | 基本 | Aivis で回答を読み上げる |
-| `CODA_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 基本 | AivisSpeech Engine の接続先 |
-| `CODA_TTS_SPEAKER` | `888753760` | 基本 | Aivis の speaker/style ID |
+| `CODA_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
+| `CODA_TTS_AUTOSTART` | `false` | 音声 | 未起動なら AivisSpeech Engine を裏で起動する |
+| `CODA_TTS_ENDPOINT` | `http://127.0.0.1:10101` | 音声 | AivisSpeech Engine の接続先 |
+| `CODA_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
+| `CODA_TTS_ENGINE_PATH` | （なし） | 音声 | Aivis 実行ファイル。空なら同梱配置または既定インストール場所を探す |
 | `CODA_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `CODA_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `CODA_LOCAL_CTX` | `4096` | local | コンテキスト長 |
@@ -252,8 +262,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
 - フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_size` で設定へ永続化する。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを画面最大化のように広げる（`.bubble.fullscreen`）。最大化中はキャラを薄く背面化し、送信ボタンや入力欄と被らないようにする。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
+- 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。`pet:reset` では履歴もクリアする。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
-- アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill する。さらに dev/build 前フック（`beforeDevCommand`/`beforeBuildCommand`）で `scripts/stop-stale.mjs` が前回の残存プロセスを停止し、同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。
+- アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。さらに dev/build 前フック（`beforeDevCommand`/`beforeBuildCommand`）で `scripts/stop-stale.mjs` が前回の残存プロセスを停止し、同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / event / webview 生成）。
 - 製品化: `productName=PicoAgent` / `identifier=com.coda.app`（既存ユーザーのデータ互換のため識別子は据え置き）。Windows バンドルは NSIS（`bundle.targets`）。
   アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。

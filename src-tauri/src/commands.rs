@@ -3,9 +3,10 @@
 use std::sync::Mutex;
 
 use serde_json::{json, Map, Value};
-use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::agent;
+use crate::aivis;
 use crate::config::Config;
 use crate::message::Message;
 use crate::providers;
@@ -199,7 +200,11 @@ fn speech_text(text: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn pet_speak(text: String, state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn pet_speak(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
     if !state.config.get_bool("CODA_TTS_ENABLED", false) {
         return Ok(json!({ "enabled": false }));
     }
@@ -207,11 +212,10 @@ pub async fn pet_speak(text: String, state: State<'_, AppState>) -> Result<Value
     if text.trim().is_empty() {
         return Ok(json!({ "enabled": true, "skipped": true }));
     }
-    let endpoint = state
-        .config
-        .get("CODA_TTS_ENDPOINT", "http://127.0.0.1:10101")
-        .trim_end_matches('/')
-        .to_string();
+    aivis::ensure_started(&app)
+        .await
+        .map_err(|error| error.to_string())?;
+    let endpoint = aivis::endpoint(&state);
     let speaker = state.config.get("CODA_TTS_SPEAKER", "888753760");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

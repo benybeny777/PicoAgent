@@ -109,6 +109,7 @@ async function render() {
   const panels = createTabs([
     { id: "basic", label: "基本" },
     { id: "character", label: "キャラクター" },
+    { id: "voice", label: "音声" },
     { id: "providers", label: "叩くAI" },
     { id: "tools", label: "スキル" },
   ]);
@@ -130,10 +131,12 @@ async function render() {
   global.append(field("CODA_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.CODA_ALWAYS_ON_TOP !== false));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("CODA_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.CODA_TTS_ENABLED === true));
+  voiceSec.append(field("CODA_TTS_AUTOSTART", "未起動なら Aivis を裏で起動する", "checkbox", v.CODA_TTS_AUTOSTART === true));
   voiceSec.append(field("CODA_TTS_ENDPOINT", "Aivis 接続先", "text", v.CODA_TTS_ENDPOINT ?? "", "http://127.0.0.1:10101"));
   voiceSec.append(field("CODA_TTS_SPEAKER", "Aivis speaker ID", "text", v.CODA_TTS_SPEAKER ?? "", "888753760"));
+  voiceSec.append(field("CODA_TTS_ENGINE_PATH", "Aivis 実行ファイル", "text", v.CODA_TTS_ENGINE_PATH ?? "", "空なら同梱配置または既定インストール場所を探す"));
   panels.basic.append(global);
-  panels.basic.append(voiceSec);
+  panels.voice.append(voiceSec);
 
   // --- キャラクター ---
   const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });

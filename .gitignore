@@ -7,6 +7,8 @@ src-tauri/gen/
 
 # 同梱推論エンジン（npm run setup:engine で取得）・モデル重み（巨大なので含めない）
 src-tauri/resources/engine/
+src-tauri/resources/aivis/*
+!src-tauri/resources/aivis/.gitkeep
 *.gguf
 
 # 生成物・一時ファイル

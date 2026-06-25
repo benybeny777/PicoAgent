@@ -1,4 +1,5 @@
 const bubble = document.getElementById("bubble");
+const historyLog = document.getElementById("historyLog");
 const reply = document.getElementById("reply");
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
@@ -8,6 +9,7 @@ const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 let busy = false;
+const conversationHistory = [];
 
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 let characterRoot = "assets/characters/mugi";
@@ -111,30 +113,65 @@ function closeComposer() { composer.hidden = true; reply.classList.remove("compa
 async function setBubbleFullscreen(on) {
   if (bubble.classList.contains("fullscreen") === on) return;
   bubble.classList.toggle("fullscreen", on);
+  renderHistory();
   try { await window.coda.setFullscreen(on); }
   catch (error) { bubble.classList.toggle("fullscreen", !on); status.textContent = `全画面切替に失敗: ${error}`; }
 }
 function toggleBubbleFullscreen() { setBubbleFullscreen(!bubble.classList.contains("fullscreen")); }
 function exitBubbleFullscreen() { setBubbleFullscreen(false); }
 
-// Markdownリンクと通常のURLだけを安全なDOMリンクへ変換する。
-function renderReply(text) {
-  reply.replaceChildren();
+function appendLinkedText(container, text) {
   const source = String(text ?? "");
   const links = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g;
   let offset = 0;
   for (const match of source.matchAll(links)) {
-    reply.append(document.createTextNode(source.slice(offset, match.index)));
+    container.append(document.createTextNode(source.slice(offset, match.index)));
     const href = match[2] || match[3];
     const anchor = document.createElement("a");
     anchor.href = href;
     anchor.textContent = match[1] || href;
     anchor.target = "_blank";
     anchor.rel = "noopener noreferrer";
-    reply.append(anchor);
+    container.append(anchor);
     offset = match.index + match[0].length;
   }
-  reply.append(document.createTextNode(source.slice(offset)));
+  container.append(document.createTextNode(source.slice(offset)));
+}
+
+// Markdownリンクと通常のURLだけを安全なDOMリンクへ変換する。
+function renderReply(text) {
+  reply.replaceChildren();
+  appendLinkedText(reply, text);
+}
+
+function addHistory(role, text) {
+  const content = String(text ?? "").trim();
+  if (!content) return;
+  conversationHistory.push({ role, content });
+  if (conversationHistory.length > 80) conversationHistory.shift();
+  renderHistory();
+}
+
+function renderHistory() {
+  if (!historyLog) return;
+  historyLog.replaceChildren();
+  if (!conversationHistory.length) {
+    historyLog.append(document.createElement("div"));
+    return;
+  }
+  for (const item of conversationHistory) {
+    const row = document.createElement("div");
+    row.className = `history-item ${item.role}`;
+    const label = document.createElement("div");
+    label.className = "history-role";
+    label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+    const body = document.createElement("div");
+    body.className = "history-body";
+    appendLinkedText(body, item.content);
+    row.append(label, body);
+    historyLog.append(row);
+  }
+  historyLog.scrollTop = historyLog.scrollHeight;
 }
 
 let speakingToken = 0;
@@ -229,25 +266,27 @@ bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 
 composer.addEventListener("submit", async event => {
   event.preventDefault(); const text = input.value.trim(); if (!text || busy) return;
-  busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text;
+  busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text; addHistory("user", text);
   const result = await window.coda.send(text);
   status.textContent = result.error ? "接続を確認してね" : "";
   if (result.error) {
     ++speakingToken;
     stopVoice();
     renderReply(result.reply);
+    addHistory("assistant", result.reply);
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } else {
     speakReply(result.reply);
     await renderReplySpeaking(result.reply);
+    addHistory("assistant", result.reply);
   }
   busy = false;
 });
 input.addEventListener("keydown", event => { if (event.key === "Escape") closeComposer(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
 document.addEventListener("keydown", event => { if (event.key === "Escape") exitBubbleFullscreen(); });
 window.coda.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
-window.coda.on("pet:reset", () => { renderReply("新しい話をしよう。"); closeComposer(); });
+window.coda.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); renderReply("新しい話をしよう。"); closeComposer(); });
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {

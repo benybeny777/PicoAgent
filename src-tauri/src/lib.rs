@@ -2,6 +2,7 @@
 // コネクタ（providers / tools）・設定・エージェント・コマンド・メニューを束ねて起動する。
 
 mod agent;
+mod aivis;
 mod commands;
 mod config;
 mod engine;
@@ -12,6 +13,7 @@ mod tools;
 
 use tauri::{Manager, PhysicalPosition, RunEvent};
 
+use aivis::AivisState;
 use commands::AppState;
 use engine::EngineState;
 
@@ -20,6 +22,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(AppState::new())
         .manage(EngineState::new())
+        .manage(AivisState::new())
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
             commands::pet_send,
@@ -80,9 +83,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building PicoAgent");
 
-    // 終了時に同梱エンジンの子プロセスを確実に止める。
+    // 終了時にアプリが裏起動した子プロセスを確実に止める。
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
+            aivis::stop(app_handle);
             engine::stop(app_handle);
         }
     });
