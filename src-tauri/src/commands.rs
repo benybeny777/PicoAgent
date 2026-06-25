@@ -351,6 +351,8 @@ pub async fn settings_save(
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
     let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
+    let has_tts_enabled = patch.contains_key("PICOAGENT_TTS_ENABLED");
+    let has_tts_device = patch.contains_key("PICOAGENT_TTS_DEVICE");
     state.config.set_all(patch).map_err(|e| e.to_string())?;
 
     // グローバル設定を実行中へ反映。
@@ -369,6 +371,20 @@ pub async fn settings_save(
     *state.model.lock().unwrap() = model.clone();
     if has_system_prompt {
         state.reset_conversation();
+    }
+    if has_tts_enabled || has_tts_device {
+        aivis::stop(&app);
+        if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+            let handle = app.clone();
+            if let Err(error) = aivis::start_background(&handle) {
+                eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+            }
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = aivis::ensure_started(&handle).await {
+                    eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                }
+            });
+        }
     }
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));

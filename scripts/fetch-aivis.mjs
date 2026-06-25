@@ -2,7 +2,7 @@
 // src-tauri/resources/aivis/ へ展開する。実体は巨大なので Git には含めない。
 //
 // 使い方: npm run setup:aivis
-//   AIVIS_RELEASE … リリースタグ（既定 latest を解決）
+//   AIVIS_RELEASE … リリースタグ（既定 1.2.0。latest を指定すると最新版）
 //   AIVIS_ASSET   … アセット名を直接指定（正規表現ではなく完全一致に近い文字列）
 
 import { mkdir, rm, readdir, cp, writeFile, stat } from "node:fs/promises";
@@ -15,14 +15,15 @@ import { spawnSync } from "node:child_process";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AIVIS_DIR = join(HERE, "..", "src-tauri", "resources", "aivis");
 const API_ROOT = "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases";
+const DEFAULT_RELEASE = "1.2.0";
 
 function bundledRunPath() {
   return join(AIVIS_DIR, platform() === "win32" ? "run.exe" : "run");
 }
 
 function releaseUrl() {
-  const tag = process.env.AIVIS_RELEASE?.trim();
-  return tag ? `${API_ROOT}/tags/${encodeURIComponent(tag)}` : `${API_ROOT}/latest`;
+  const tag = process.env.AIVIS_RELEASE?.trim() || DEFAULT_RELEASE;
+  return tag === "latest" ? `${API_ROOT}/latest` : `${API_ROOT}/tags/${encodeURIComponent(tag)}`;
 }
 
 function assetPattern() {

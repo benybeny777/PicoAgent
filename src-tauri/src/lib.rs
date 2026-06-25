@@ -45,7 +45,8 @@ pub fn run() {
                 .path()
                 .app_config_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
-            state.config.load(config_dir.join("config.json"));
+            let config_path = config_dir.join("config.json");
+            state.config.load(config_path.clone());
 
             let pid = state.config.get("PICOAGENT_PROVIDER", "local");
             *state.provider_id.lock().unwrap() = pid.clone();
@@ -64,7 +65,8 @@ pub fn run() {
 
             // メインウィンドウを作業領域の右下へ寄せ、設定値で常に手前を反映。
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
+                let _ =
+                    win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
                 if let (Ok(Some(monitor)), Ok(size)) = (win.current_monitor(), win.outer_size()) {
                     let area = monitor.size();
                     let x = area.width as i32 - size.width as i32 - 20;
@@ -77,6 +79,17 @@ pub fn run() {
             if pid == "local" {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(engine::ensure_and_start(handle));
+            }
+            if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+                let handle = app.handle().clone();
+                if let Err(error) = aivis::start_background(&handle) {
+                    eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                }
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = aivis::ensure_started(&handle).await {
+                        eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                    }
+                });
             }
             Ok(())
         })

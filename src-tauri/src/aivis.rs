@@ -9,6 +9,7 @@ use tauri::Manager;
 use crate::commands::AppState;
 
 const BUNDLED_PORT: u16 = 10102;
+const DEFAULT_DEVICE: &str = "auto";
 
 pub struct AivisState {
     child: Mutex<Option<Child>>,
@@ -81,6 +82,19 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
+fn use_gpu(state: &AppState) -> bool {
+    match state
+        .config
+        .get("PICOAGENT_TTS_DEVICE", DEFAULT_DEVICE)
+        .to_lowercase()
+        .as_str()
+    {
+        "gpu" => true,
+        "cpu" => false,
+        _ => false,
+    }
+}
+
 fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
@@ -88,6 +102,13 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
     let mut command = std::process::Command::new(path);
     command.args(["--host", "127.0.0.1", "--port"]);
     command.arg(BUNDLED_PORT.to_string());
+    if let Some(app_state) = app.try_state::<AppState>() {
+        if use_gpu(&app_state) {
+            command.arg("--use_gpu");
+        } else {
+            command.arg("--no-use_gpu");
+        }
+    }
     command.args(["--disable_sentry", "--output_log_utf8"]);
     command
         .stdin(Stdio::null())
@@ -105,6 +126,16 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    if let Some(state) = app.try_state::<AivisState>() {
+        if state.child.lock().unwrap().is_some() {
+            return Ok(());
+        }
+    }
+    let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
+    spawn_engine(path, app)
+}
+
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     let app_state = app.state::<AppState>();
     let endpoint = endpoint(app, &app_state);
@@ -112,8 +143,7 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     stop(app);
-    let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
-    spawn_engine(path, app)?;
+    start_background(app)?;
     for _ in 0..360 {
         if is_up(&endpoint).await {
             return Ok(());

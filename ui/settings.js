@@ -42,6 +42,19 @@ function field(key, label, type, value, placeholder) {
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
 }
 
+function selectField(key, label, value, options) {
+  const select = el("select");
+  for (const option of options) {
+    select.append(el("option", {
+      value: option.value,
+      textContent: option.label,
+      selected: option.value === value,
+    }));
+  }
+  inputs.set(key, select);
+  return el("div", { className: "field" }, [el("label", { textContent: label }), select]);
+}
+
 function section(title) {
   return el("div", { className: "section" }, [el("h2", { textContent: title })]);
 }
@@ -146,6 +159,11 @@ async function render() {
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
+  voiceSec.append(selectField("PICOAGENT_TTS_DEVICE", "Aivis 推論デバイス", v.PICOAGENT_TTS_DEVICE || "auto", [
+    { value: "auto", label: "自動（安定優先）" },
+    { value: "cpu", label: "CPU固定" },
+    { value: "gpu", label: "GPU固定" },
+  ]));
   voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "共通 Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);

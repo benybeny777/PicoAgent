@@ -37,9 +37,12 @@
 - `src-tauri/resources/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
 - 読み上げは同梱版 Aivis だけを使う方針にし、接続先・自動起動・実行ファイルパス・同梱ポートの設定項目を削除した。同梱版は内部固定の `127.0.0.1:10102` で起動する。
 - `PICOAGENT_TTS_CHARACTER_OVERRIDES` を追加し、設定画面の「キャラクター」タブでキャラごとの Aivis speaker ID を指定できるようにした。未指定時は共通の `PICOAGENT_TTS_SPEAKER` を使う。
-- `npm run setup:aivis` を追加し、AivisSpeech Engine 公式 GitHub Releases から同梱用実行ファイル一式を `src-tauri/resources/aivis/` へ取得できるようにした。`npm run dev` / `npm run build` では起動前に同梱 Aivis がなければ自動取得する。
+- `npm run setup:aivis` を追加し、AivisSpeech Engine 公式 GitHub Releases から同梱用実行ファイル一式を `src-tauri/resources/aivis/` へ取得できるようにした。`npm run dev` / `npm run build` では起動前に同梱 Aivis がなければ自動取得する。再配布ビルドの再現性のため既定取得版は `1.2.0` に固定し、更新時だけ `AIVIS_RELEASE` で差し替える。
 - Aivis 初回起動が数十秒かかる場合に備え、起動待ちを 180 秒へ延長した。
 - Aivis 初回合成で話者モデルロードが 30 秒を超える場合があるため、音声クエリ・合成の HTTP タイムアウトも 180 秒へ延長し、フロントに読み上げ準備中/読み上げ中の状態を表示するようにした。
+- `PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 Aivis を即 spawn し、設定画面で ON にした場合も保存後すぐ起動するようにした。
+- `PICOAGENT_TTS_DEVICE` を追加し、同梱 Aivis の推論デバイスを自動 / CPU固定 / GPU固定から選べるようにした。自動は安定優先で CPU を使う。
+- 読み上げ ON/OFF と Aivis 推論デバイスの変更は、保存時に同梱 Aivis を停止/再起動して即時反映するようにした。
 - 設定画面に「導入済みスキル（エージェント機能）」と「導入済みキャラクター」の読み取り専用一覧を追加した。設定項目を持たないツールも含め登録済みのものが一覧表示される。
 - `settings_load` のツール情報に `description` を追加し、各スキルの説明を表示できるようにした。
 - Ollama を選んだ時はローカルのモデル一覧を読み込み、モデル欄に候補を反映するようにした。保存時は選択モデルを `OLLAMA_MODEL` にも保存する。
