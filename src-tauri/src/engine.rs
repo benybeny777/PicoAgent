@@ -204,6 +204,7 @@ pub fn stop(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
         if let Some(mut child) = engine.child.lock().unwrap().take() {
             let _ = child.kill();
+            let _ = child.wait(); // kill 後に wait してプロセスハンドルを回収する。
         }
     }
 }

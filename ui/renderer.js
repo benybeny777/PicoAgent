@@ -1,3 +1,4 @@
+const petApp = document.getElementById("petApp");
 const bubble = document.getElementById("bubble");
 const historyLog = document.getElementById("historyLog");
 const reply = document.getElementById("reply");
@@ -55,7 +56,7 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
-async function loadCharacter(characterId, overrides = {}) {
+async function loadCharacter(characterId, overrides = {}, options = {}) {
   const catalogResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!catalogResponse.ok) throw new Error(`キャラクター一覧: HTTP ${catalogResponse.status}`);
   const catalog = await catalogResponse.json();
@@ -82,7 +83,8 @@ async function loadCharacter(characterId, overrides = {}) {
   loadedCharacterSignature = signature;
   if (manifest.greeting) {
     renderReply(manifest.greeting);
-    speakReply(manifest.greeting); // 起動時・キャラ変更時の挨拶も Aivis で読み上げる
+    // 起動時は描画と同時に再生するため、ここでは合成しない（boot 側が事前合成→表示と同時再生）。
+    if (options.speakGreeting !== false) speakReply(manifest.greeting);
   }
 }
 function setAnimation(name, force = false) {
@@ -191,8 +193,27 @@ function stopVoice(toIdle = true) {
   currentVoice.pause();
   finishVoice(toIdle);
 }
-async function speakReply(text) {
+// 合成のみ行い、再生はしない（起動時に描画と同時再生するための事前合成）。失敗・無効・空は null。
+async function prepareSpeech(text) {
+  try {
+    const result = await window.picoagent.speak(text);
+    if (!result?.enabled || result.skipped || !result.audio?.length) return null;
+    return result;
+  } catch { return null; }
+}
+// 事前合成済みの音声を再生し、会話アニメを開始する。再生終了・失敗時に Object URL を解放する。
+function playPreparedSpeech(result) {
   stopVoice(false);
+  const bytes = new Uint8Array(result.audio);
+  const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
+  currentVoice = new Audio(url);
+  currentVoice.addEventListener("ended", () => { finishVoice(true); status.textContent = ""; }, { once: true });
+  currentVoice.addEventListener("error", () => { finishVoice(true); status.textContent = "音声再生に失敗"; }, { once: true });
+  currentVoice.play().catch(() => { finishVoice(true); });
+  status.textContent = "読み上げ中…";
+  setAnimation("talking", true);
+}
+async function speakReply(text) {
   let prepareTimer = null;
   try {
     const startedAt = Date.now();
@@ -204,22 +225,11 @@ async function speakReply(text) {
     const result = await window.picoagent.speak(text);
     clearInterval(prepareTimer);
     prepareTimer = null;
-    if (!result?.enabled) {
+    if (!result?.enabled || result.skipped || !result.audio?.length) {
       status.textContent = "";
       return;
     }
-    if (result.skipped || !result.audio?.length) {
-      status.textContent = "";
-      return;
-    }
-    const bytes = new Uint8Array(result.audio);
-    const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
-    currentVoice = new Audio(url);
-    currentVoice.addEventListener("ended", () => { finishVoice(true); status.textContent = ""; }, { once: true });
-    currentVoice.addEventListener("error", () => { finishVoice(true); status.textContent = "音声再生に失敗"; }, { once: true });
-    await currentVoice.play();
-    status.textContent = "読み上げ中…";
-    setAnimation("talking", true);
+    playPreparedSpeech(result);
   } catch (error) {
     if (prepareTimer) clearInterval(prepareTimer);
     stopVoice();
@@ -381,10 +391,19 @@ async function waitForAivisReady() {
   if (info.fontPx != null) applyFontPx(info.fontPx);
   applyBubbleSize(info.bubbleWidth, info.bubbleHeight);
   await waitForAivisReady();
-  try { await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}); }
-  catch (error) { status.textContent = `キャラクター読込に失敗: ${error.message}`; }
-  finally { character.classList.remove("is-loading"); }
-  if (!info.up) status.textContent = "起動中…";
+  let preparedGreeting = null;
+  try {
+    // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
+    await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}, { speakGreeting: false });
+    if (characterManifest?.greeting) preparedGreeting = await prepareSpeech(characterManifest.greeting);
+  } catch (error) {
+    status.textContent = `キャラクター読込に失敗: ${error.message}`;
+  } finally {
+    // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
+    petApp.classList.remove("is-booting");
+    if (preparedGreeting) playPreparedSpeech(preparedGreeting);
+  }
+  if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}
 })();
