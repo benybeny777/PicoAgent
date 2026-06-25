@@ -13,6 +13,7 @@ let characterOverrides = {};
 let characterSelect;
 let characterPersona;
 let characterCatalog;
+let modelInput;
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 
 function el(tag, props = {}, children = []) {
@@ -73,6 +74,7 @@ async function render() {
   inputs.set("CODA_PROVIDER", providerSelect);
   global.append(el("div", { className: "field" }, [el("label", { textContent: "叩く AI（プロバイダ）" }), providerSelect]));
   global.append(field("CODA_MODEL", "モデル", "text", v.CODA_MODEL ?? data.active.model, data.active.model));
+  modelInput = inputs.get("CODA_MODEL");
   global.append(field("CODA_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.CODA_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
   global.append(field("CODA_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.CODA_BUBBLE_FONT_PX ?? "", "13"));
   global.append(field("CODA_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.CODA_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
@@ -148,15 +150,40 @@ async function render() {
   }
   if (toolSec.querySelector(".field")) form.append(toolSec);
 
-  // プロバイダ変更でモデル候補を更新。
-  providerSelect.addEventListener("change", () => loadModels(providerSelect.value));
+  // プロバイダ変更でモデル候補を更新し、候補が取れたらモデル欄へ反映する。
+  providerSelect.addEventListener("change", () => loadModels(providerSelect.value, true));
   loadModels(providerSelect.value);
 }
 
-async function loadModels(providerId) {
+function providerDefaultModel(providerId) {
+  const provider = data.providers.find(p => p.id === providerId);
+  if (!provider) return "";
+  if (providerId === "ollama") return inputs.get("OLLAMA_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "openai") return inputs.get("OPENAI_MODEL")?.value || provider.defaultModel || "";
+  return provider.defaultModel || "";
+}
+
+async function loadModels(providerId, applyProviderDefault = false) {
   modelOptions.innerHTML = "";
-  const models = await window.coda.settings.listModels(providerId);
+  statusEl.textContent = providerId === "ollama" ? "Ollama のモデル一覧を取得中…" : "";
+  let models = [];
+  try {
+    models = await window.coda.settings.listModels(providerId);
+  } catch (error) {
+    statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
+    return;
+  }
   for (const m of models) modelOptions.append(el("option", { value: m }));
+  if (!modelInput) return;
+  const preferred = providerDefaultModel(providerId);
+  if (applyProviderDefault) {
+    modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
+  } else if (providerId === data.active.providerId && !models.includes(modelInput.value)) {
+    modelInput.value = models.includes(preferred) ? preferred : (models[0] || modelInput.value);
+  }
+  statusEl.textContent = providerId === "ollama"
+    ? (models.length ? `${models.length}件の Ollama モデルを読み込みました。` : "Ollama のモデルが見つかりません。")
+    : "";
 }
 
 function collect() {
@@ -164,6 +191,8 @@ function collect() {
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }
+  if (patch.CODA_PROVIDER === "ollama" && patch.CODA_MODEL) patch.OLLAMA_MODEL = patch.CODA_MODEL;
+  if (patch.CODA_PROVIDER === "openai" && patch.CODA_MODEL) patch.OPENAI_MODEL = patch.CODA_MODEL;
   if (characterSelect && characterPersona) characterOverrides[characterSelect.value] = characterPersona.value;
   patch.CODA_CHARACTER_OVERRIDES = characterOverrides;
   return patch;
