@@ -423,9 +423,12 @@ async function fireChatter() {
     if (res?.enabled === false) { chatterCfg.enabled = false; return; }
     const line = (res?.reply || "").trim();
     if (line && !busy && composer.hidden && !currentVoice) {
+      // 先に音声を合成し、合成完了後に文字を表示して即時に読み上げる（表示と音声を同時に）。
+      const prepared = await prepareSpeech(line);
+      if (busy || !composer.hidden || currentVoice) return; // 合成中に状況が変わったら出さない。
       renderReply(line);
       addHistory("assistant", line);
-      speakReply(line);
+      if (prepared) playPreparedSpeech(prepared);
     }
   } catch { /* 失敗は無視して次回へ */ }
   finally { scheduleChatter(); }
