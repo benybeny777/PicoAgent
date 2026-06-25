@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read", "Edit", "Write", "Glob", "Grep",
+      "Bash(cargo *)", "Bash(rustc *)",
+      "Bash(npm *)", "Bash(npx *)", "Bash(node *)",
+      "Bash(git *)", "Bash(cygpath *)", "Bash(taskkill *)"
+    ]
+  }
+}

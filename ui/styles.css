@@ -1,0 +1,49 @@
+:root { --ink:#342b3b; --muted:#817587; --paper:#fffdf8; --accent:#f27e91; --mint:#64c99b; }
+* { box-sizing:border-box; }
+html,body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; font-family:"Segoe UI","Yu Gothic UI",system-ui,sans-serif; }
+.pet-app { position:relative; width:100%; height:100%; user-select:none; }
+.character { position:absolute; right:6px; bottom:2px; width:265px; height:315px; display:grid; place-items:end center; cursor:grab; }
+.character::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
+.character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)); pointer-events:none; will-change:transform; }
+.character[data-motion="breathe"] img { animation:pet-breathe 3.8s ease-in-out infinite; }
+.character[data-motion="thinking"] img { animation:pet-thinking 1.15s ease-in-out infinite; }
+.character[data-motion="talking"] img { animation:pet-talking 1.35s ease-in-out infinite; }
+.character[data-motion="sad"] img { animation:pet-sad 2.2s ease-in-out infinite; }
+.character[data-motion="live2d-idle"] img { animation:pet-live2d-idle 3.2s ease-in-out infinite; }
+.character[data-motion="live2d-thinking"] img { animation:pet-live2d-thinking 1.45s ease-in-out infinite; }
+.character[data-motion="live2d-talking"] img { animation:pet-live2d-talking 1.1s ease-in-out infinite; }
+.character[data-motion="live2d-sad"] img { animation:pet-live2d-sad 2.1s ease-in-out infinite; }
+.character:hover img { filter:drop-shadow(0 9px 7px rgba(242,126,145,.22)) brightness(1.035); }
+@keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-2px) scale(1.008,1.012)} }
+@keyframes pet-thinking { 0%,100%{transform:translateY(0) rotate(-.45deg)} 50%{transform:translateY(-4px) rotate(.55deg)} }
+@keyframes pet-talking { 0%,100%{transform:translateY(0) rotate(0)} 30%{transform:translateY(-3px) rotate(-.6deg)} 68%{transform:translateY(-1px) rotate(.7deg)} }
+@keyframes pet-sad { 0%,100%{transform:translateY(1px) rotate(0)} 50%{transform:translateY(4px) rotate(-.35deg)} }
+@keyframes pet-live2d-idle { 0%,100%{transform:translateY(0) rotate(-.3deg) scale(1)} 45%{transform:translateY(-5px) rotate(.45deg) scale(1.012,1.018)} 70%{transform:translateY(-2px) rotate(.15deg) scale(1.006)} }
+@keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) rotate(-1deg) scale(1)} 35%{transform:translateY(-6px) rotate(1.15deg) scale(1.018)} 68%{transform:translateY(-2px) rotate(-.35deg) scale(1.006)} }
+@keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) rotate(0) scale(1)} 24%{transform:translateY(-4px) rotate(-.9deg) scale(1.014,1.018)} 56%{transform:translateY(-1px) rotate(.9deg) scale(1.008)} 78%{transform:translateY(-3px) rotate(-.35deg) scale(1.012)} }
+@keyframes pet-live2d-sad { 0%,100%{transform:translateY(4px) rotate(-.8deg) scale(.992,.986)} 50%{transform:translateY(9px) rotate(-1.4deg) scale(.986,.98)} }
+.online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
+.online[data-up="true"] { background:var(--mint); }
+.bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 32px); max-height:calc(100% - 52px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }
+.bubble::after { content:""; position:absolute; right:-15px; bottom:auto; top:42%; width:26px; height:30px; background:var(--paper); clip-path:polygon(0 0,100% 50%,0 100%); filter:drop-shadow(1px 1px 0 rgba(71,52,76,.11)); }
+/* ダブルクリックでフキダシを大きく広げる全画面表示。右側はキャラ分の余白を残し、口元からしっぽが伸びる普通の吹き出しの形を保つ。 */
+.bubble.fullscreen { z-index:6; top:8px; left:8px; right:278px; bottom:8px; width:auto!important; height:auto!important; max-width:none; max-height:none; border-radius:20px 20px 7px 20px; }
+/* しっぽはキャラクターの口元へ向けて右向きに伸ばす。 */
+.bubble.fullscreen::after { right:-15px; bottom:auto; top:44%; width:26px; height:30px; clip-path:polygon(0 0,100% 50%,0 100%); }
+.bubble.fullscreen .bubble-resize { display:none; }
+/* 全画面表示中もキャラクターを最前面に出して全身を見せる（フキダシは右側を避けるので送信ボタンと被らない）。 */
+.bubble.fullscreen ~ .character { z-index:7; }
+.reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:text; overflow:auto; }
+.reply a { color:#b94f68; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.reply a:hover { color:var(--accent); }
+.reply.compact { flex:1 1 auto; max-height:none; color:var(--muted); font-size:11px; }
+.composer { position:relative; z-index:2; flex:0 0 auto; margin-top:auto; padding-top:10px; }
+.composer[hidden] { display:none; }
+textarea { display:block; width:100%; min-height:62px; resize:none; padding:10px 58px 10px 11px; border:1px solid #ded6df; border-radius:13px; outline:none; background:#faf7f9; color:var(--ink); font:13px/1.5 inherit; user-select:text; }
+textarea:focus { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.1); }
+button { position:absolute; right:7px; bottom:7px; height:32px; padding:0 12px; border:0; border-radius:9px; color:white; background:var(--accent); font-weight:700; font-size:11px; cursor:pointer; }
+.bubble-resize { position:absolute; z-index:4; right:3px; bottom:3px; width:16px; height:16px; padding:0; border:0; border-radius:0 0 5px 0; background:linear-gradient(135deg,transparent 0 42%,rgba(129,117,135,.55) 43% 51%,transparent 52% 62%,rgba(129,117,135,.55) 63% 71%,transparent 72%); cursor:nwse-resize; touch-action:none; }
+.bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
+.bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.status { flex:0 0 auto; min-height:14px; margin-top:6px; color:var(--muted); font-size:9px; }
+@media (prefers-reduced-motion:reduce) { .character img { animation:none!important; transform:none!important; } }

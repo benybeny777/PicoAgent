@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PicoAgent</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="petApp" class="pet-app" data-tauri-drag-region>
+    <section id="bubble" class="bubble" aria-live="polite">
+      <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>
+      <form id="composer" class="composer" hidden>
+        <textarea id="input" rows="2" placeholder="PicoAgent に話しかける…"></textarea>
+        <button type="submit" aria-label="送信">送る</button>
+      </form>
+      <div id="status" class="status"></div>
+      <button id="bubbleResize" class="bubble-resize" type="button" aria-label="フキダシのサイズを変更" title="ドラッグしてサイズ変更"></button>
+    </section>
+    <section id="character" class="character" title="右クリックで設定" data-tauri-drag-region>
+      <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" />
+      <span id="online" class="online"></span>
+    </section>
+  </main>
+  <script src="coda.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

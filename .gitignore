@@ -1,0 +1,20 @@
+# Node
+node_modules/
+
+# Rust / Tauri ビルド成果物
+src-tauri/target/
+src-tauri/gen/
+
+# 同梱推論エンジン（npm run setup:engine で取得）・モデル重み（巨大なので含めない）
+src-tauri/resources/engine/
+*.gguf
+
+# 生成物・一時ファイル
+dist/
+.tmp/
+
+# キャラの配信コピー（正本は characters/。sync:characters / beforeDevCommand で生成）
+ui/assets/characters/
+
+# ローカル設定（個人 PC 専用。app_config_dir に保存されるが念のため）
+config.json

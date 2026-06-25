@@ -1,0 +1,6 @@
+{
+  "default": "mugi",
+  "characters": [
+    { "id": "mugi", "name": "むぎ", "manifest": "mugi/character.json" }
+  ]
+}
