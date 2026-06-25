@@ -89,11 +89,33 @@ impl Tool for ChitchatTool {
         ]
     }
 
-    async fn run(&self, _cfg: &Config, _args: Value) -> String {
-        format!(
+    async fn run(&self, _cfg: &Config, args: Value) -> String {
+        let mut prompt = format!(
             "{CHATTER_INSTRUCTION}\n今回の話題のヒント: {}（このヒントは出力に書かず、内容の参考にだけ使う）。",
             pick_topic_hint()
-        )
+        );
+        // 直近に言った独り言があれば、それらと内容も言い回しも変えるよう明示する。
+        let avoid: Vec<String> = args
+            .get("avoid")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !avoid.is_empty() {
+            prompt.push_str("\n直前までに言った独り言（内容も言い回しも必ず変える。同じことを言わない）:");
+            for line in &avoid {
+                prompt.push_str("\n- ");
+                prompt.push_str(line);
+            }
+        }
+        prompt
     }
 }
 

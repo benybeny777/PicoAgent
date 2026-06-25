@@ -6,6 +6,7 @@ mod aivis;
 mod commands;
 mod config;
 mod engine;
+mod history;
 mod menu;
 mod message;
 mod providers;
@@ -64,6 +65,11 @@ pub fn run() {
             };
             *state.model.lock().unwrap() = model;
             state.reset_conversation();
+            // 直近の会話履歴をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
+            let recent = history::load_recent(&app.handle());
+            if !recent.is_empty() {
+                state.messages.lock().unwrap().extend(recent);
+            }
 
             // メインウィンドウを作業領域の右下へ寄せ、設定値で常に手前を反映。
             if let Some(win) = app.get_webview_window("main") {

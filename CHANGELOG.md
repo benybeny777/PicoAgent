@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### 会話履歴の永続化と直近会話の文脈復元
+
+- 会話履歴を `app_data_dir/history.json` に永続化する `history.rs` を追加。`pet_send` のたびに「system + クリーンな直近発話（最大24件）」へ圧縮して保存し、起動時に末尾20件を文脈へ復元する。再起動をまたいで直近の会話を踏まえて話せるようにした（対話データなので config.json とは分離）。
+- `reset_conversation` を会話保持型に変更（人格・プロンプト変更で直近文脈を失わない）。右クリックメニューに「会話をリセット」を追加し、文脈・履歴ファイル・直近雑談を消して `pet:reset` を通知する。
+- 自発雑談の「毎回同じことを言う」対策として、直近の独り言（最大6件）を「避ける文」として生成プロンプトへ渡し、繰り返しを抑制（`AppState.recent_chatter`）。
+
 ### アイドル時の自発雑談スキル（chitchat）
 
 - アイドル（待機）中にキャラクターが自発的にひとこと雑談する機能を、スキルコネクタ `skills/chitchat.rs` として追加。設定画面の「スキル」タブで ON/OFF と発話間隔（最短/最長秒）を変更でき、設定値はスキルの `config_schema` で自動表示される（`PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_MIN_SECS` / `PICOAGENT_CHATTER_MAX_SECS`）。

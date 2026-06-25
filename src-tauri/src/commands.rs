@@ -25,12 +25,17 @@ fn effective_system_prompt(config: &Config) -> String {
     }
 }
 
+// 会話の文脈に保持する最大メッセージ数（system 除く）。小型モデルのコンテキスト超過を避ける。
+const MAX_CONTEXT_MESSAGES: usize = 24;
+
 pub struct AppState {
     pub config: Config,
     pub provider_id: Mutex<String>,
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
     pub character_profile: Mutex<String>,
+    /// 直近の自発雑談（独り言）。繰り返しを避けるため次回生成へ「避ける文」として渡す。
+    pub recent_chatter: Mutex<Vec<String>>,
 }
 
 impl AppState {
@@ -41,10 +46,12 @@ impl AppState {
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
             character_profile: Mutex::new(String::new()),
+            recent_chatter: Mutex::new(Vec::new()),
         }
     }
 
-    /// 会話履歴を初期化（system プロンプトは設定から読む）。
+    /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
+    /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
         let mut prompt = effective_system_prompt(&self.config);
         let character_profile = self.character_profile.lock().unwrap().clone();
@@ -52,7 +59,65 @@ impl AppState {
             prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
             prompt.push_str(&character_profile);
         }
+        let mut messages = self.messages.lock().unwrap();
+        let kept: Vec<Message> = messages
+            .iter()
+            .filter(|m| m.role != "system")
+            .cloned()
+            .collect();
+        let mut next = Vec::with_capacity(kept.len() + 1);
+        next.push(Message::new("system", prompt));
+        next.extend(kept);
+        *messages = next;
+    }
+
+    /// 会話を完全に初期化する（system のみに戻す）。「新しい会話」用。
+    pub fn clear_conversation(&self) {
+        let prompt = {
+            let mut prompt = effective_system_prompt(&self.config);
+            let character_profile = self.character_profile.lock().unwrap().clone();
+            if !character_profile.is_empty() {
+                prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
+                prompt.push_str(&character_profile);
+            }
+            prompt
+        };
         *self.messages.lock().unwrap() = vec![Message::new("system", prompt)];
+    }
+}
+
+// 完了したターンから、文脈・履歴に残す「発話」だけを取り出す（user と、本文のある
+// assistant のみ）。途中の tool 呼び出し/結果は残すとメッセージ順序が壊れるため落とす。
+fn clean_turns(messages: &[Message]) -> Vec<Message> {
+    messages
+        .iter()
+        .filter(|m| {
+            m.role == "user"
+                || (m.role == "assistant" && m.tool_calls.is_none() && !m.content.is_empty())
+        })
+        .cloned()
+        .collect()
+}
+
+// 会話を「system + クリーンな直近発話（最大 MAX_CONTEXT_MESSAGES 件）」へ圧縮する。
+fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
+    let mut turns = clean_turns(convo);
+    if turns.len() > MAX_CONTEXT_MESSAGES {
+        turns.drain(0..turns.len() - MAX_CONTEXT_MESSAGES);
+    }
+    let mut next: Vec<Message> = convo.iter().filter(|m| m.role == "system").cloned().collect();
+    next.extend(turns);
+    next
+}
+
+/// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
+pub fn clear_conversation_and_history(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    state.clear_conversation();
+    state.recent_chatter.lock().unwrap().clear();
+    crate::history::clear(app);
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit("pet:reset", ());
     }
 }
 
@@ -149,7 +214,11 @@ pub fn pet_set_bubble_size(
 }
 
 #[tauri::command]
-pub async fn pet_send(text: String, state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn pet_send(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
@@ -171,7 +240,10 @@ pub async fn pet_send(text: String, state: State<'_, AppState>) -> Result<Value,
     convo.push(Message::new("user", text));
 
     let result = agent::run(&state.config, provider.as_ref(), &model, &mut convo, 5).await;
-    *state.messages.lock().unwrap() = convo;
+    // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
+    let compacted = compacted_conversation(&convo);
+    *state.messages.lock().unwrap() = compacted.clone();
+    crate::history::save(&app, &compacted);
 
     match result {
         Ok(reply) => {
@@ -196,13 +268,28 @@ pub async fn pet_idle_chatter(state: State<'_, AppState>) -> Result<Value, Strin
         None => return Ok(json!({ "enabled": true, "reply": "" })),
     };
 
+    // 直近の独り言を「避ける文」として渡し、毎回ちがう内容にする。
+    let avoid = state.recent_chatter.lock().unwrap().clone();
     // 雑談スキルから独り言用の指示文を受け取り、現在の人格付き会話のクローンへ一時的に積む。
-    let instruction = tools::dispatch(&state.config, "chitchat", json!({})).await;
+    // 会話文脈（直近の会話）も含むため、最近の話題を踏まえた独り言になる。
+    let instruction = tools::dispatch(&state.config, "chitchat", json!({ "avoid": avoid })).await;
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", instruction));
 
     match provider.chat(&state.config, &model, &convo, &[]).await {
-        Ok(message) => Ok(json!({ "enabled": true, "reply": message.content })),
+        Ok(message) => {
+            let reply = message.content.trim().to_string();
+            // 直近の独り言として記録（末尾 6 件まで保持）。次回の重複回避に使う。
+            if !reply.is_empty() {
+                let mut recent = state.recent_chatter.lock().unwrap();
+                recent.push(reply.clone());
+                let len = recent.len();
+                if len > 6 {
+                    recent.drain(0..len - 6);
+                }
+            }
+            Ok(json!({ "enabled": true, "reply": reply }))
+        }
         Err(error) => Err(format!("自発雑談の生成に失敗しました: {error}")),
     }
 }

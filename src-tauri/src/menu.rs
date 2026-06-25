@@ -4,7 +4,7 @@
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
 use tauri::Manager;
 
-use crate::commands::{open_settings, AppState};
+use crate::commands::{clear_conversation_and_history, open_settings, AppState};
 
 #[tauri::command]
 pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
@@ -16,6 +16,9 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .checked(is_always_on_top)
         .build(&app)
         .map_err(|e| e.to_string())?;
+    let reset = MenuItemBuilder::with_id("reset", "会話をリセット")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
     let quit = MenuItemBuilder::with_id("quit", "PicoAgent を終了")
         .build(&app)
         .map_err(|e| e.to_string())?;
@@ -24,6 +27,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .item(&settings)
         .separator()
         .item(&ontop)
+        .item(&reset)
         .item(&quit)
         .build()
         .map_err(|e| e.to_string())?;
@@ -61,6 +65,7 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                 }
             }
         }
+        "reset" => clear_conversation_and_history(app),
         "quit" => app.exit(0),
         _ => {}
     }
