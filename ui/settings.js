@@ -44,6 +44,48 @@ function section(title) {
   return el("div", { className: "section" }, [el("h2", { textContent: title })]);
 }
 
+function createTabs(items) {
+  const tabs = el("div", { className: "tabs", role: "tablist" });
+  const panels = el("div", { className: "tab-panels" });
+  const byId = {};
+  items.forEach((item, index) => {
+    const selected = index === 0;
+    const button = el("button", {
+      className: selected ? "tab active" : "tab",
+      id: `tab-${item.id}`,
+      textContent: item.label,
+      type: "button",
+    });
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.setAttribute("aria-controls", `panel-${item.id}`);
+    const panel = el("div", {
+      className: selected ? "tab-panel active" : "tab-panel",
+      id: `panel-${item.id}`,
+    });
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", button.id);
+    if (!selected) panel.hidden = true;
+    button.addEventListener("click", () => {
+      for (const tab of tabs.querySelectorAll(".tab")) {
+        const active = tab === button;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      }
+      for (const current of panels.querySelectorAll(".tab-panel")) {
+        const active = current === panel;
+        current.classList.toggle("active", active);
+        current.hidden = !active;
+      }
+    });
+    tabs.append(button);
+    panels.append(panel);
+    byId[item.id] = panel;
+  });
+  form.append(tabs, panels);
+  return byId;
+}
+
 async function loadCharacterPersona(id) {
   const entry = characterCatalog.characters.find(character => character.id === id);
   if (!entry) throw new Error(`キャラクター ${id} が一覧にありません`);
@@ -64,6 +106,12 @@ async function loadCharacterPersona(id) {
 async function render() {
   form.innerHTML = "";
   const v = data.values;
+  const panels = createTabs([
+    { id: "basic", label: "基本" },
+    { id: "character", label: "キャラクター" },
+    { id: "providers", label: "叩くAI" },
+    { id: "tools", label: "スキル" },
+  ]);
 
   // --- グローバル設定 ---
   const global = section("基本");
@@ -79,19 +127,24 @@ async function render() {
   global.append(field("CODA_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.CODA_BUBBLE_FONT_PX ?? "", "13"));
   global.append(field("CODA_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.CODA_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
   global.append(field("CODA_BUBBLE_HEIGHT_PX", "フキダシの高さ(px)", "text", v.CODA_BUBBLE_HEIGHT_PX ?? "", "ドラッグで設定"));
+  global.append(field("CODA_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.CODA_ALWAYS_ON_TOP !== false));
+  panels.basic.append(global);
+
+  // --- キャラクター ---
   const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!characterResponse.ok) throw new Error(`キャラクター一覧: HTTP ${characterResponse.status}`);
   characterCatalog = await characterResponse.json();
   characterOverrides = v.CODA_CHARACTER_OVERRIDES || {};
+  const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const selectedCharacter = v.CODA_CHARACTER || characterCatalog.default;
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", { value: character.id, textContent: character.name, selected: character.id === selectedCharacter }));
   }
   inputs.set("CODA_CHARACTER", characterSelect);
-  global.append(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]));
+  characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
-  global.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
+  characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
   let previousCharacter = selectedCharacter;
   characterSelect.addEventListener("change", async () => {
@@ -100,8 +153,7 @@ async function render() {
     try { await loadCharacterPersona(previousCharacter); }
     catch (error) { statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`; }
   });
-  global.append(field("CODA_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.CODA_ALWAYS_ON_TOP !== false));
-  form.append(global);
+  panels.character.append(characterSec);
 
   // --- 導入済みスキル（エージェント機能）の一覧（読み取り専用） ---
   const skillSec = section("導入済みスキル（エージェント機能）");
@@ -117,7 +169,7 @@ async function render() {
     }
     skillSec.append(list);
   }
-  form.append(skillSec);
+  panels.tools.append(skillSec);
 
   // --- 導入済みキャラクターの一覧（読み取り専用） ---
   const charSec = section("導入済みキャラクター");
@@ -130,7 +182,7 @@ async function render() {
     ]));
   }
   charSec.append(charList);
-  form.append(charSec);
+  panels.character.append(charSec);
 
   // --- 叩く AI コネクタごとの設定 ---
   const provSec = section("叩く AI コネクタ");
@@ -139,7 +191,7 @@ async function render() {
     provSec.append(el("div", { className: "subhead", textContent: p.label }));
     for (const f of p.configSchema) provSec.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
   }
-  if (provSec.querySelector(".field")) form.append(provSec);
+  if (provSec.querySelector(".field")) panels.providers.append(provSec);
 
   // --- エージェント機能コネクタごとの設定 ---
   const toolSec = section("エージェント機能コネクタ");
@@ -148,7 +200,7 @@ async function render() {
     toolSec.append(el("div", { className: "subhead", textContent: t.label }));
     for (const f of t.configSchema) toolSec.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
   }
-  if (toolSec.querySelector(".field")) form.append(toolSec);
+  if (toolSec.querySelector(".field")) panels.tools.append(toolSec);
 
   // プロバイダ変更でモデル候補を更新し、候補が取れたらモデル欄へ反映する。
   providerSelect.addEventListener("change", () => loadModels(providerSelect.value, true));

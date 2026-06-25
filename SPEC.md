@@ -199,7 +199,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 - `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/coda.js` の `window.coda.settings.*` →
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
-- 画面は **基本設定** ＋ **導入済みスキル（エージェント機能）一覧** ＋ **導入済みキャラクター一覧** ＋ **各コネクタの `config_schema()`** を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
+- 画面は **基本** / **キャラクター** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` を読み取り専用カードで表示する（設定項目を持たないツールもここに並ぶ）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea", placeholder }`。
 - 保存は `config.set_all()` で永続化し、実行中の状態（プロバイダ・モデル・システムプロンプト・常に手前）へ即反映する。コネクタ固有設定は `cfg.get()` 都度読みのため自動反映。Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `CODA_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
