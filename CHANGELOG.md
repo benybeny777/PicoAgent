@@ -6,6 +6,10 @@
 
 ## 2026-06-26
 
+### 起動時の挨拶も読み上げ
+
+- 起動時・キャラクター変更時に吹き出しへ出る挨拶（`greeting`）も Aivis で読み上げるようにした（`renderer.js`）。従来は通常回答のみ読み上げていた。
+
 ### Aivis 同梱の取りこぼし修正と LLM の GPU 実行
 
 - `tauri.conf.json` の `bundle.resources` を `resources/{engine,aivis}/*` から `**/*` に変更。`*` ではサブフォルダ（Aivis の `engine_internal/` 等）が同梱・dev コピーされず、`run.exe` が `python311.dll` をロードできずに即終了していた不具合を修正した。

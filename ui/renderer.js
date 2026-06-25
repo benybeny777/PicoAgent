@@ -80,7 +80,10 @@ async function loadCharacter(characterId, overrides = {}) {
   character.title = `${manifest.name}：右クリックで設定`;
   await window.picoagent.setCharacterProfile(manifest.id, profile);
   loadedCharacterSignature = signature;
-  if (manifest.greeting) renderReply(manifest.greeting);
+  if (manifest.greeting) {
+    renderReply(manifest.greeting);
+    speakReply(manifest.greeting); // 起動時・キャラ変更時の挨拶も Aivis で読み上げる
+  }
 }
 function setAnimation(name, force = false) {
   if (!force && animationName === name) return;
