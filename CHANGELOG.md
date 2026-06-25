@@ -13,7 +13,7 @@
 
 ### アプリ名を PicoAgent に変更・キャラをむぎのみに整理
 
-- アプリの表示名を **Coda → PicoAgent** に変更した（`productName` / ウィンドウタイトル / 設定ウィンドウ / 右クリックメニュー「終了」/ 入力欄プレースホルダ / `package.json` / `Cargo.toml` の説明 / ドキュメント）。バンドル識別子（`com.coda.app`）と内部 JS API（`window.coda`）・Rust クレート名（`coda` / `coda_lib`）は既存データ互換と影響範囲の都合で据え置き。
+- アプリの表示名を **Coda → PicoAgent** に変更した（`productName` / ウィンドウタイトル / 設定ウィンドウ / 右クリックメニュー「終了」/ `package.json` / `Cargo.toml` の説明 / ドキュメント）。入力欄プレースホルダは、既定キャラに話しかける文言として「むぎに話しかける…」にした。バンドル識別子（`com.coda.app`）と内部 JS API（`window.coda`）・Rust クレート名（`coda` / `coda_lib`）は既存データ互換と影響範囲の都合で据え置き。
 - キャラクターを **むぎのみ** に整理し、`coda`（旧）/ `koharu` / `lab_mate` を削除（`characters/` 実体と `index.json`）。`default` は `mugi`。
 
 ### キャラ・スキルをプロジェクト直下へ移動（扱いやすい配置）
