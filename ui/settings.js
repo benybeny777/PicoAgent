@@ -13,6 +13,7 @@ let characterOverrides = {};
 let characterSelect;
 let characterPersona;
 let characterCatalog;
+const characterManifestCacheKey = "2026-06-25-mugi-expression-v10";
 
 function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);
@@ -45,7 +46,7 @@ function section(title) {
 async function loadCharacterPersona(id) {
   const entry = characterCatalog.characters.find(character => character.id === id);
   if (!entry) throw new Error(`キャラクター ${id} が一覧にありません`);
-  const response = await fetch(`assets/characters/${entry.manifest}?v=2026-06-25-mugi-expression-v4`, { cache: "no-store" });
+  const response = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`キャラクター定義: HTTP ${response.status}`);
   const manifest = await response.json();
   const persona = manifest.persona || {};
@@ -76,7 +77,7 @@ async function render() {
   global.append(field("CODA_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.CODA_BUBBLE_FONT_PX ?? "", "13"));
   global.append(field("CODA_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.CODA_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
   global.append(field("CODA_BUBBLE_HEIGHT_PX", "フキダシの高さ(px)", "text", v.CODA_BUBBLE_HEIGHT_PX ?? "", "ドラッグで設定"));
-  const characterResponse = await fetch("assets/characters/index.json?v=2026-06-25-mugi-expression-v4", { cache: "no-store" });
+  const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!characterResponse.ok) throw new Error(`キャラクター一覧: HTTP ${characterResponse.status}`);
   characterCatalog = await characterResponse.json();
   characterOverrides = v.CODA_CHARACTER_OVERRIDES || {};

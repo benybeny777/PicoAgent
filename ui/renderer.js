@@ -9,7 +9,7 @@ const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 let busy = false;
 
-const characterManifestCacheKey = "2026-06-25-mugi-expression-v4";
+const characterManifestCacheKey = "2026-06-25-mugi-expression-v10";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
