@@ -9,7 +9,7 @@ const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 let busy = false;
 
-const characterManifestCacheKey = "2026-06-25-mugi-expression-v10";
+const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
@@ -82,14 +82,20 @@ async function loadCharacter(characterId, overrides = {}) {
 }
 function setAnimation(name, force = false) {
   if (!force && animationName === name) return;
-  animationName = animations[name] ? name : "idle"; frame = 0; lastFrameAt = 0;
+  animationName = animations[name] ? name : "idle"; frame = 0; lastFrameAt = performance.now();
   character.dataset.motion = animations[animationName].motion || animationName;
   petSprite.src = frameUrl(animationName, 0);
+}
+function frameDuration(animation, index) {
+  const duration = animation.frameDurations?.[index];
+  if (Number.isFinite(duration) && duration > 0) return duration;
+  return 1000 / animation.fps;
 }
 function animate(now) {
   if (reduceMotion) { petSprite.src = frameUrl("idle", 0); return; }
   const animation = animations[animationName] || animations.idle;
-  if (!lastFrameAt || now - lastFrameAt >= 1000 / animation.fps) {
+  if (!lastFrameAt) lastFrameAt = now;
+  if (now - lastFrameAt >= frameDuration(animation, frame)) {
     frame = (frame + 1) % animation.frames;
     petSprite.src = frameUrl(animationName, frame);
     lastFrameAt = now;
@@ -129,6 +135,24 @@ function renderReply(text) {
     offset = match.index + match[0].length;
   }
   reply.append(document.createTextNode(source.slice(offset)));
+}
+
+let speakingToken = 0;
+async function renderReplySpeaking(text) {
+  const token = ++speakingToken;
+  const source = String(text ?? "");
+  const chars = [...source];
+  reply.textContent = "";
+  setAnimation("talking", true);
+  const stepMs = chars.length > 180 ? 14 : 22;
+  for (let index = 0; index < chars.length; index += 1) {
+    if (token !== speakingToken) return;
+    reply.textContent += chars[index];
+    await new Promise(resolve => setTimeout(resolve, stepMs));
+  }
+  if (token !== speakingToken) return;
+  renderReply(source);
+  setAnimation("idle");
 }
 
 bubble.addEventListener("click", event => { if (!event.target.closest("button,a")) openComposer(); });
@@ -173,8 +197,16 @@ composer.addEventListener("submit", async event => {
   event.preventDefault(); const text = input.value.trim(); if (!text || busy) return;
   busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text;
   const result = await window.coda.send(text);
-  renderReply(result.reply); status.textContent = result.error ? "接続を確認してね" : ""; setAnimation(result.error ? "sad" : "talking");
-  setTimeout(() => setAnimation("idle"), Math.min(5000, 900 + result.reply.length * 25)); busy = false;
+  status.textContent = result.error ? "接続を確認してね" : "";
+  if (result.error) {
+    ++speakingToken;
+    renderReply(result.reply);
+    setAnimation("sad");
+    setTimeout(() => setAnimation("idle"), 2200);
+  } else {
+    await renderReplySpeaking(result.reply);
+  }
+  busy = false;
 });
 input.addEventListener("keydown", event => { if (event.key === "Escape") closeComposer(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
 document.addEventListener("keydown", event => { if (event.key === "Escape") exitBubbleFullscreen(); });

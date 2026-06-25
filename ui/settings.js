@@ -13,7 +13,7 @@ let characterOverrides = {};
 let characterSelect;
 let characterPersona;
 let characterCatalog;
-const characterManifestCacheKey = "2026-06-25-mugi-expression-v10";
+const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 
 function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);

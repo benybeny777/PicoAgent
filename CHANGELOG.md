@@ -39,6 +39,7 @@
 - 待機・思考・落胆にまばたき、会話中に口パクの表情フレームを追加した。横揺れは抑え、上下の小さな動きで状態差を出す。表情差分は作業用PSD（`characters/mugi/mugi_expressions.psd`）にもまとめ、生成元の確認用シート（`characters/mugi/source-expression-sheet.png`）も保存した。
 - むぎの人格設定を、話し方・根拠の扱い・Web検索結果の使い方・作業支援の距離感まで含めて詳細化した。
 - キャラクター定義に `assetVersion` を追加し、同名PNGの更新後もWebViewが古いフレームをキャッシュし続けないようにした。`index.json` と `character.json` もキャッシュ無効化付きで取得する。
+- キャラクター定義に任意の `frameDurations` を追加し、まばたきだけ短く抜けるようにした。回答は文字を表示している間だけ口パクし、全文表示後に待機へ戻す。
 - `CODA_CHARACTER` の既定値と初期表示を `mugi` に変更した。
 
 ### Live2D風の新キャラ「ラボメイト」を既定化
