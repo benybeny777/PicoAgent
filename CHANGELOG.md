@@ -37,6 +37,8 @@
 - `src-tauri/resources/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
 - 同梱版 Aivis が存在する場合は、PC にインストール済みの Aivis や設定パスより同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）で起動して接続するようにした。
 - `PICOAGENT_TTS_CHARACTER_OVERRIDES` を追加し、設定画面の「キャラクター」タブでキャラごとの Aivis speaker ID を指定できるようにした。未指定時は共通の `PICOAGENT_TTS_SPEAKER` を使う。
+- `npm run setup:aivis` を追加し、AivisSpeech Engine 公式 GitHub Releases から同梱用実行ファイル一式を `src-tauri/resources/aivis/` へ取得できるようにした。`npm run dev` / `npm run build` では起動前に同梱 Aivis がなければ自動取得する。
+- Aivis 初回起動が数十秒かかる場合に備え、起動待ちを 180 秒へ延長した。
 - 設定画面に「導入済みスキル（エージェント機能）」と「導入済みキャラクター」の読み取り専用一覧を追加した。設定項目を持たないツールも含め登録済みのものが一覧表示される。
 - `settings_load` のツール情報に `description` を追加し、各スキルの説明を表示できるようにした。
 - Ollama を選んだ時はローカルのモデル一覧を読み込み、モデル欄に候補を反映するようにした。保存時は選択モデルを `OLLAMA_MODEL` にも保存する。

@@ -110,6 +110,15 @@ fn installed_candidates() -> Vec<PathBuf> {
         candidates.push(PathBuf::from(
             r"C:\Program Files\AivisSpeech\AivisSpeech-Engine\run.exe",
         ));
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            candidates.push(
+                PathBuf::from(local_app_data)
+                    .join("Programs")
+                    .join("AivisSpeech")
+                    .join("AivisSpeech-Engine")
+                    .join("run.exe"),
+            );
+        }
         candidates.push(PathBuf::from(
             r"C:\Program Files\AivisSpeech-Engine\run.exe",
         ));
@@ -148,6 +157,7 @@ fn spawn_engine(
         command.args(["--host", "127.0.0.1", "--port"]);
         command.arg(port.to_string());
     }
+    command.args(["--disable_sentry", "--output_log_utf8"]);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -179,7 +189,7 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
         .filter(|bundled| bundled == &path)
         .map(|_| bundled_port(&app_state));
     spawn_engine(path, app, port)?;
-    for _ in 0..30 {
+    for _ in 0..360 {
         if is_up(&endpoint).await {
             return Ok(());
         }

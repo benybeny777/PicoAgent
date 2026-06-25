@@ -141,7 +141,8 @@ npm run build
 
 `src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。推論エンジンは同梱されますが、モデル GGUF（数 GB）は含めず初回起動時に取得します。
 
-AivisSpeech Engine も同梱したい場合は、配布ビルド前に実行ファイル一式を `src-tauri/resources/aivis/` に配置します。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。設定の `PICOAGENT_TTS_AUTOSTART` を有効にすると、Aivis が未起動のときだけ同梱配置、設定パス、既定インストール場所の順に探して裏で起動します。同梱配置がある場合は、PC にインストール済みの Aivis より同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）で起動して接続します。アプリが起動した Aivis 子プロセスは終了時に停止します。
+AivisSpeech Engine は `npm run dev` / `npm run build` の起動前に、同梱フォルダへ未取得なら自動取得されます（手動実行は `npm run setup:aivis`）。公式 GitHub Releases から実行ファイル一式を `src-tauri/resources/aivis/` へ展開します。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。設定の `PICOAGENT_TTS_AUTOSTART` を有効にすると、Aivis が未起動のときだけ同梱配置、設定パス、既定インストール場所の順に探して裏で起動します。同梱配置がある場合は、PC にインストール済みの Aivis より同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）で起動して接続します。アプリが起動した Aivis 子プロセスは終了時に停止します。
+同梱 Aivis の初回起動ではモデル確認や BERT 読み込みで数十秒かかることがあります。
 キャラクターごとの speaker ID は設定画面の「キャラクター」タブで指定できます。未指定のキャラクターは共通の `PICOAGENT_TTS_SPEAKER` を使います。
 
 - アプリ識別子 `com.picoagent.app`（旧 `com.coda.app`。設定とモデルは `app_config_dir`/`app_data_dir` 配下に保存され、識別子変更時はそのフォルダ名を新識別子へリネームして引き継ぐ）、アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。

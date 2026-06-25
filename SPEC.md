@@ -141,7 +141,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 `PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。
 
 - `PICOAGENT_TTS_AUTOSTART` が有効で接続先 `/version` が未応答なら、アプリが AivisSpeech Engine を裏で起動する。
-- 実行ファイルは同梱配置 `src-tauri/resources/aivis/`、`PICOAGENT_TTS_ENGINE_PATH`、既定インストール場所の順に探す。同梱配置がある場合は、PC にインストール済みの Aivis より同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）を `--port` に渡して起動した同梱版へ接続する。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
+- 実行ファイルは同梱配置 `src-tauri/resources/aivis/`、`PICOAGENT_TTS_ENGINE_PATH`、既定インストール場所の順に探す。同梱配置は `npm run dev` / `npm run build` の起動前に、未取得なら `scripts/fetch-aivis.mjs` が公式 GitHub Releases から取得する（手動実行は `npm run setup:aivis`）。同梱配置がある場合は、PC にインストール済みの Aivis より同梱版を優先し、`PICOAGENT_TTS_BUNDLED_PORT`（既定 `10102`）を `--port` に渡して起動した同梱版へ接続する。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
 - speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
