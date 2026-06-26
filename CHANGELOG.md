@@ -6,6 +6,11 @@
 
 ## 2026-06-26
 
+### 目覚ましの専用UIとアプリアイコン更新
+
+- 目覚まし時計の設定を、設定画面で時刻ピッカー＋曜日チェック＋繰り返し/有効/ラベル/追加/削除の専用フォームにした（`settings.js` の `buildAlarmEditor`、`settings.css`）。JSON直書きは不要になり、保存時に `PICOAGENT_ALARMS` を組み立てる。
+- アプリ／タスクバーのアイコンをむぎの立ち絵に更新（`icon-source.png` を差し替え、`npx tauri icon` で各サイズ・`icon.ico` を再生成）。
+
 ### ローカルモデル変更時の自動DLと設定画面のスキル設定整理
 
 - 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルのプリセット（small/balanced/large）を切り替えたとき、取得URLにその選択を反映し（`local::model_url`）、`settings_save` の再起動トリガーに `PICOAGENT_MODEL` を追加。これにより未取得モデルへ切り替えると自動でダウンロード→エンジン再起動するようにした（従来はプリセット欄/URL変更時のみ）。

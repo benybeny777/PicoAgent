@@ -16,6 +16,7 @@ let characterPersona;
 let characterSpeaker;
 let characterCatalog;
 let modelInput;
+let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 
 function el(tag, props = {}, children = []) {
@@ -68,6 +69,79 @@ function localModelPresetHint(value) {
   const preset = (data.localModelPresets || []).find(item => item.id === value);
   if (!preset) return "";
   return `${preset.note} 推奨VRAM: ${preset.recommendedVramGb}GB以上、推奨RAM: ${preset.recommendedRamGb}GB以上、ダウンロード目安: ${preset.downloadSize}`;
+}
+
+// 目覚ましの専用エディタ（時刻ピッカー＋曜日チェック＋繰り返し/有効/ラベル/削除/追加）。
+// 保存時は alarmEditorState.getJson() で PICOAGENT_ALARMS（JSON文字列）を組み立てる。
+const ALARM_WEEKDAYS = [
+  ["mon", "月"], ["tue", "火"], ["wed", "水"], ["thu", "木"],
+  ["fri", "金"], ["sat", "土"], ["sun", "日"],
+];
+function buildAlarmEditor(currentJson) {
+  let alarms = [];
+  try {
+    const parsed = JSON.parse(currentJson || "[]");
+    if (Array.isArray(parsed)) alarms = parsed;
+  } catch { alarms = []; }
+
+  const wrap = el("div", { className: "alarm-editor" });
+  const listEl = el("div", { className: "alarm-list" });
+  wrap.append(listEl);
+  const rows = [];
+
+  function addRow(a = {}) {
+    const time = el("input", { type: "time", value: a.time || "07:00", className: "alarm-time" });
+    const label = el("input", { type: "text", placeholder: "ラベル（任意）", value: a.label || "", className: "alarm-label" });
+    const repeat = el("input", { type: "checkbox", checked: a.repeat !== false });
+    const enabled = el("input", { type: "checkbox", checked: a.enabled !== false });
+    const dayBoxes = ALARM_WEEKDAYS.map(([code, jp]) => {
+      const cb = el("input", { type: "checkbox", checked: Array.isArray(a.days) && a.days.includes(code) });
+      return { code, cb, label: el("label", { className: "alarm-day" }, [cb, document.createTextNode(jp)]) };
+    });
+    const del = el("button", { type: "button", className: "alarm-del", textContent: "削除" });
+    const row = el("div", { className: "alarm-row" }, [
+      el("div", { className: "alarm-row-top" }, [time, el("span", { className: "alarm-days" }, dayBoxes.map(d => d.label))]),
+      el("div", { className: "alarm-row-bottom" }, [
+        el("label", { className: "alarm-opt" }, [repeat, document.createTextNode("繰り返し")]),
+        el("label", { className: "alarm-opt" }, [enabled, document.createTextNode("有効")]),
+        label,
+        del,
+      ]),
+    ]);
+    const entry = {
+      id: a.id || `al${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+      time, label, repeat, enabled, dayBoxes, row,
+    };
+    del.addEventListener("click", () => {
+      listEl.removeChild(row);
+      const idx = rows.indexOf(entry);
+      if (idx >= 0) rows.splice(idx, 1);
+    });
+    rows.push(entry);
+    listEl.append(row);
+  }
+
+  for (const a of alarms) addRow(a);
+
+  const addBtn = el("button", { type: "button", className: "alarm-add", textContent: "＋ 目覚ましを追加" });
+  addBtn.addEventListener("click", () => addRow({}));
+  const hint = el("div", { className: "hint", textContent: "曜日を選ばないと毎日鳴ります。「繰り返し」OFFは一度だけ鳴って自動で無効になります。アプリ起動中のみ鳴ります。" });
+  wrap.append(addBtn, hint);
+
+  alarmEditorState = {
+    getJson() {
+      const out = rows.map(r => ({
+        id: r.id,
+        time: r.time.value || "07:00",
+        days: r.dayBoxes.filter(d => d.cb.checked).map(d => d.code),
+        repeat: r.repeat.checked,
+        label: r.label.value.trim(),
+        enabled: r.enabled.checked,
+      }));
+      return JSON.stringify(out);
+    },
+  };
+  return wrap;
 }
 
 function selectField(key, label, value, options) {
@@ -247,7 +321,12 @@ async function render() {
       if (hasConfig) {
         const panel = el("div", { className: "card-config" });
         panel.hidden = true;
-        for (const f of t.configSchema) panel.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+        if (t.name === "alarm") {
+          // 目覚ましは JSON ではなく、時刻ピッカー＋曜日チェックの専用フォームで編集する。
+          panel.append(buildAlarmEditor(v.PICOAGENT_ALARMS));
+        } else {
+          for (const f of t.configSchema) panel.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+        }
         // パネル内のクリックで閉じないように（入力操作を妨げない）。
         panel.addEventListener("click", event => event.stopPropagation());
         card.addEventListener("click", () => {
@@ -346,6 +425,7 @@ function collect() {
   if (characterSelect && characterSpeaker) saveCurrentCharacterVoice(characterSelect.value);
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
+  if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   return patch;
 }
 
