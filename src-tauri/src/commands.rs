@@ -34,6 +34,8 @@ pub struct AppState {
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
     pub character_profile: Mutex<String>,
+    /// 会話から暗黙的に抽出した長期メモリ。system 文脈へ差し込む。
+    pub memory_context: Mutex<String>,
     /// 直近の自発雑談（独り言）。繰り返しを避けるため次回生成へ「避ける文」として渡す。
     pub recent_chatter: Mutex<Vec<String>>,
 }
@@ -46,6 +48,7 @@ impl AppState {
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
             character_profile: Mutex::new(String::new()),
+            memory_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
         }
     }
@@ -58,6 +61,11 @@ impl AppState {
         if !character_profile.is_empty() {
             prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
             prompt.push_str(&character_profile);
+        }
+        let memory_context = self.memory_context.lock().unwrap().clone();
+        if !memory_context.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(&memory_context);
         }
         let mut messages = self.messages.lock().unwrap();
         let kept: Vec<Message> = messages
@@ -79,6 +87,11 @@ impl AppState {
             if !character_profile.is_empty() {
                 prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
                 prompt.push_str(&character_profile);
+            }
+            let memory_context = self.memory_context.lock().unwrap().clone();
+            if !memory_context.is_empty() {
+                prompt.push_str("\n\n");
+                prompt.push_str(&memory_context);
             }
             prompt
         };
@@ -119,7 +132,9 @@ pub fn clear_conversation_and_history(app: &AppHandle) {
     let state = app.state::<AppState>();
     state.clear_conversation();
     state.recent_chatter.lock().unwrap().clear();
+    state.memory_context.lock().unwrap().clear();
     crate::history::clear(app);
+    crate::memory::clear(app);
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit("pet:reset", ());
     }
@@ -227,6 +242,7 @@ pub async fn pet_send(
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
+    let user_text = text.clone();
 
     let id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
@@ -248,6 +264,16 @@ pub async fn pet_send(
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
     crate::history::save(&app, &compacted);
+    if result.is_ok() {
+        if let Some(memory_context) =
+            crate::memory::update_from_turn(&app, &state.config, &user_text)
+        {
+            *state.memory_context.lock().unwrap() = memory_context;
+            state.reset_conversation();
+            let refreshed = state.messages.lock().unwrap().clone();
+            crate::history::save(&app, &refreshed);
+        }
+    }
 
     match result {
         Ok(reply) => {
@@ -259,9 +285,10 @@ pub async fn pet_send(
 
 // アイドル時の自発雑談を生成する。雑談スキル(chitchat)が指示文を提供し、ここで
 // 選択中キャラの人格(system)込みでプロバイダへ依頼する。Web検索やツールは使わない。
-// 会話履歴には積まない（独り言で本来の文脈を膨らませない）。
+// 生成後は「直前の自発雑談」として会話文脈にも短く残す。
+// ユーザーが「今の雑談は何の話？」と聞いたとき、モデルが直前の独り言を参照できるようにするため。
 #[tauri::command]
-pub async fn pet_idle_chatter(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
         return Ok(json!({ "enabled": false }));
     }
@@ -291,6 +318,16 @@ pub async fn pet_idle_chatter(state: State<'_, AppState>) -> Result<Value, Strin
                 if len > 6 {
                     recent.drain(0..len - 6);
                 }
+                let compacted = {
+                    let mut messages = state.messages.lock().unwrap();
+                    messages.push(Message::new(
+                        "assistant",
+                        format!("直前の自発雑談: {reply}"),
+                    ));
+                    compacted_conversation(&messages)
+                };
+                *state.messages.lock().unwrap() = compacted.clone();
+                crate::history::save(&app, &compacted);
             }
             Ok(json!({ "enabled": true, "reply": reply }))
         }
@@ -329,6 +366,8 @@ fn speech_text(text: &str) -> String {
     }
     out.lines()
         .map(str::trim)
+        .take_while(|line| !line.starts_with("参考:") && !line.starts_with("参考："))
+        .filter(|line| !line.is_empty())
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
         .collect::<Vec<_>>()
         .join(" ")
@@ -493,6 +532,8 @@ pub async fn settings_save(
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
     let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
+    let has_memory_setting = patch.contains_key("PICOAGENT_MEMORY_ENABLED")
+        || patch.contains_key("PICOAGENT_MEMORY_MAX_ITEMS");
     let has_tts_enabled = patch.contains_key("PICOAGENT_TTS_ENABLED");
     let has_tts_device = patch.contains_key("PICOAGENT_TTS_DEVICE");
     let local_engine_changed = patch.contains_key("PICOAGENT_LOCAL_MODEL_PRESET")
@@ -517,7 +558,8 @@ pub async fn settings_save(
         }
     };
     *state.model.lock().unwrap() = model.clone();
-    if has_system_prompt {
+    if has_system_prompt || has_memory_setting {
+        *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
         state.reset_conversation();
     }
     if has_tts_enabled || has_tts_device {
@@ -582,4 +624,22 @@ pub fn open_settings(app: &tauri::AppHandle) {
         .inner_size(560.0, 640.0)
         .min_inner_size(420.0, 480.0)
         .build();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::speech_text;
+
+    #[test]
+    fn 読み上げでは参考ブロックを除外する() {
+        let text =
+            "今日は晴れです。\n\n参考:\n- [天気](https://example.com)\nhttps://example.com/raw";
+        assert_eq!(speech_text(text), "今日は晴れです。");
+    }
+
+    #[test]
+    fn 読み上げでは本文内リンクをラベルだけ読む() {
+        let text = "[公式サイト](https://example.com)を確認しました。";
+        assert_eq!(speech_text(text), "公式サイトを確認しました。");
+    }
 }

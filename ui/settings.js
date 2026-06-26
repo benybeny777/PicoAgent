@@ -185,6 +185,8 @@ async function render() {
   global.append(field("PICOAGENT_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.PICOAGENT_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
   global.append(field("PICOAGENT_BUBBLE_HEIGHT_PX", "フキダシの高さ(px)", "text", v.PICOAGENT_BUBBLE_HEIGHT_PX ?? "", "ドラッグで設定"));
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
+  global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
+  global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   voiceSec.append(selectField("PICOAGENT_TTS_DEVICE", "Aivis 推論デバイス", v.PICOAGENT_TTS_DEVICE || "auto", [

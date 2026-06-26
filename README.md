@@ -95,7 +95,7 @@ graph LR
 
 右クリック →「**設定…**」で設定ウィンドウを開き、すべての設定を編集できます。保存するとアプリ再起動なしで反映されます。設定は `app_config_dir/config.json`（個人 PC ローカル）に保存されます。
 
-会話履歴は `app_data_dir/history.json`（個人 PC ローカル）に保存され、起動時に直近の会話を文脈へ復元します（再起動をまたいで直近の話を踏まえて話します）。履歴を消したいときは右クリック →「**会話をリセット**」を選びます。
+会話履歴は `app_data_dir/history.json`（個人 PC ローカル）に保存され、起動時に直近の会話を文脈へ復元します（再起動をまたいで直近の話を踏まえて話します）。さらに、好み・自己情報・継続指示らしい発話だけを暗黙的な長期メモリとして `app_data_dir/memory.json` に保存し、次回以降の会話で参照します。履歴とメモリを消したいときは右クリック →「**会話をリセット**」を選びます。
 
 設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル」のタブで構成されます。各コネクタが申告した設定も自動で増えます。
 
@@ -108,6 +108,8 @@ graph LR
 | `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 基本 | ドラッグで保存したフキダシの幅(px) |
 | `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 基本 | ドラッグで保存したフキダシの高さ(px) |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に覚える |
+| `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリの最大件数（10〜200） |
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中のキャラクターID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
