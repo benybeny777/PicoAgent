@@ -12,6 +12,7 @@
 - ワークスペース操作として `workspace_files`（許可ルート内の一覧・読込・書込・追記・フォルダ作成・情報取得）と `run_command`（既定無効、allowlist prefix 一致のみ、shell 不使用、timeout 付き）を追加。危険な削除操作や任意 shell 実行は入れず、設定画面から許可範囲を明示する構成にした。
 - Office/PDF 操作として `ms_office`（Microsoft Office COM による Word/Excel/PowerPoint の文字列置換・PDF出力）、`document_convert`（LibreOffice headless による高精度変換）、`pdf_tools`（qpdf によるページ抽出・結合・回転・線形化）を追加。低精度なOOXML直接編集は採用せず、専用API/専用エンジンを使うルートに寄せた。
 - 普段使い向けに `weather`（Open-Meteo 天気）、`currency_rates`（Frankfurter 為替換算）、`rss_feed`（RSS/Atom 更新取得）、`google_tasks`（Google Tasks の一覧・作成・完了）を追加。天気・為替・RSSはAPIキーなしで使える。
+- SNS系スキルとして `x_twitter`（X API v2 投稿・検索）、`mastodon`（投稿・タイムライン・検索）、`bluesky`（AT Protocol 投稿・検索・プロフィール）、`reddit`（投稿・hot取得・コメント）、`linkedin`（プロフィール取得・UGC投稿）、`misskey`（ノート投稿・タイムライン・ユーザー検索）を追加。各サービスの token / app password は設定から都度読み、秘密値をエラーやログへ出さない。
 
 ### 会話履歴の永続化と直近会話の文脈復元
 

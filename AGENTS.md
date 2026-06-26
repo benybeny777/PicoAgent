@@ -95,7 +95,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 20_PicoAgent/
 ├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/                     ← エージェント機能（スキル）連結ファイル（.rs を足すと自動登録）
-│   └── {time,weather,currency_rates,rss_feed,read_file,web_search,web_fetch,chitchat,workspace_files,run_command,slack,gmail,google_calendar,google_docs,google_drive,google_sheets,google_tasks,github,notion,discord,microsoft_graph,jira,linear,trello,todoist,http_api,ms_office,document_convert,pdf_tools}.rs
+│   └── {time,weather,currency_rates,rss_feed,read_file,web_search,web_fetch,chitchat,workspace_files,run_command,slack,gmail,google_calendar,google_docs,google_drive,google_sheets,google_tasks,github,notion,discord,x_twitter,mastodon,bluesky,reddit,linkedin,misskey,microsoft_graph,jira,linear,trello,todoist,http_api,ms_office,document_convert,pdf_tools}.rs
 ├── ui/                         ← webview フロント（frontendDist）
 │   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
 │   ├── index.html / renderer.js / styles.css       ← ペット UI

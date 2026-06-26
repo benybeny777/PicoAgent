@@ -199,6 +199,12 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `github_issue` | GitHub Issue の一覧取得・作成 | token は設定から都度取得、秘密値を出力しない、作成は token 必須、件名/本文サイズ上限、timeout |
 | `notion` | Notion のページ検索・データベースページ作成 | integration token は設定から都度取得、秘密値を出力しない、タイトル/本文サイズ上限、timeout |
 | `discord_send_message` | Discord Webhook でメッセージ送信 | webhook は設定から都度取得、秘密値を出力しない、本文2000文字、timeout |
+| `x_twitter` | X API v2 のポスト投稿・最近のポスト検索・ユーザーポスト取得 | OAuth2 bearer token は設定から都度取得、秘密値を出力しない、本文280文字、timeout |
+| `mastodon` | Mastodon の投稿・ホームタイムライン・検索 | instance URL/access token は設定から都度取得、秘密値を出力しない、timeout |
+| `bluesky` | Bluesky AT Protocol の投稿・投稿検索・プロフィール取得 | identifier/app password でセッション作成、秘密値を出力しない、本文300文字、timeout |
+| `reddit` | Reddit のテキスト投稿・subreddit hot取得・コメント投稿 | OAuth bearer token は設定から都度取得、User-Agent設定、秘密値を出力しない、timeout |
+| `linkedin` | LinkedIn のプロフィール取得・UGCテキスト投稿 | access token/author URN は設定から都度取得、秘密値を出力しない、timeout |
+| `misskey` | Misskey のノート投稿・タイムライン・ユーザー検索 | instance URL/API token は設定から都度取得、秘密値を出力しない、timeout |
 | `microsoft_graph` | Outlook メール送信、予定一覧/作成、Teams チャンネル送信 | OAuth access token は設定から都度取得、秘密値を出力しない、timeout |
 | `jira` | Jira Cloud の課題検索・作成 | base URL/email/API token は設定から都度取得、秘密値を出力しない、timeout |
 | `linear` | Linear の Issue 一覧・作成 | API key は設定から都度取得、秘密値を出力しない、timeout |
@@ -323,6 +329,26 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_NOTION_TIMEOUT_SECS` | `20` | notion | Notion API の待ち時間（秒、3〜60） |
 | `PICOAGENT_DISCORD_WEBHOOK_URL` | （なし） | discord_send_message | Discord Webhook URL |
 | `PICOAGENT_DISCORD_TIMEOUT_SECS` | `15` | discord_send_message | Discord Webhook の待ち時間（秒、3〜60） |
+| `PICOAGENT_X_BEARER_TOKEN` | （なし） | x_twitter | X OAuth2 bearer token |
+| `PICOAGENT_X_USER_ID` | （なし） | x_twitter | X 既定 user ID |
+| `PICOAGENT_X_TIMEOUT_SECS` | `20` | x_twitter | X API の待ち時間（秒、3〜60） |
+| `PICOAGENT_MASTODON_BASE_URL` | `https://mastodon.social` | mastodon | Mastodon instance URL |
+| `PICOAGENT_MASTODON_ACCESS_TOKEN` | （なし） | mastodon | Mastodon access token |
+| `PICOAGENT_MASTODON_TIMEOUT_SECS` | `20` | mastodon | Mastodon API の待ち時間（秒、3〜60） |
+| `PICOAGENT_BLUESKY_BASE_URL` | `https://bsky.social` | bluesky | Bluesky PDS URL |
+| `PICOAGENT_BLUESKY_IDENTIFIER` | （なし） | bluesky | Bluesky identifier |
+| `PICOAGENT_BLUESKY_APP_PASSWORD` | （なし） | bluesky | Bluesky app password |
+| `PICOAGENT_BLUESKY_TIMEOUT_SECS` | `20` | bluesky | Bluesky API の待ち時間（秒、3〜60） |
+| `PICOAGENT_REDDIT_BEARER_TOKEN` | （なし） | reddit | Reddit OAuth bearer token |
+| `PICOAGENT_REDDIT_USER_AGENT` | `PicoAgent/1.0` | reddit | Reddit User-Agent |
+| `PICOAGENT_REDDIT_SUBREDDIT` | （なし） | reddit | Reddit 既定 subreddit |
+| `PICOAGENT_REDDIT_TIMEOUT_SECS` | `20` | reddit | Reddit API の待ち時間（秒、3〜60） |
+| `PICOAGENT_LINKEDIN_ACCESS_TOKEN` | （なし） | linkedin | LinkedIn access token |
+| `PICOAGENT_LINKEDIN_AUTHOR_URN` | （なし） | linkedin | LinkedIn author URN |
+| `PICOAGENT_LINKEDIN_TIMEOUT_SECS` | `20` | linkedin | LinkedIn API の待ち時間（秒、3〜60） |
+| `PICOAGENT_MISSKEY_BASE_URL` | `https://misskey.io` | misskey | Misskey instance URL |
+| `PICOAGENT_MISSKEY_TOKEN` | （なし） | misskey | Misskey API token |
+| `PICOAGENT_MISSKEY_TIMEOUT_SECS` | `20` | misskey | Misskey API の待ち時間（秒、3〜60） |
 | `PICOAGENT_MS_GRAPH_ACCESS_TOKEN` | （なし） | microsoft_graph | Microsoft Graph OAuth access token |
 | `PICOAGENT_MS_GRAPH_TEAM_ID` | （なし） | microsoft_graph | Microsoft Teams 既定 team ID |
 | `PICOAGENT_MS_GRAPH_CHANNEL_ID` | （なし） | microsoft_graph | Microsoft Teams 既定 channel ID |
