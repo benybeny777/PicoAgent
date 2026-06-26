@@ -6,6 +6,10 @@
 
 ## 2026-06-26
 
+### Gemma の「ロール交互」400 エラーを修正
+
+- 自発雑談が `assistant` 発話を履歴へ積むことや履歴復元により、会話が「assistant 連続」「先頭 assistant」になり、Gemma のチャットテンプレートが 400「Conversation roles must alternate user/assistant」を返してチャットが失敗していた不具合を修正。`local` プロバイダ送信直前に `normalize_for_local` で user/assistant の交互・user 始まりへ正規化する（system を先頭集約、先頭の純 assistant 除去、連続同 role を連結）。実機で「連続assistant→400 / 正規化後→200」を確認。
+
 ### コンテキスト拡大と叩くAI/モデル選択のUI整理
 
 - ローカルエンジンの既定コンテキスト長を `4096` → `8192` に拡大（`PICOAGENT_LOCAL_CTX` 既定とプリセット ctx、`engine.rs`/`local.rs`）。Web検索結果を含む長めの文脈でも切り詰めにくくした。
