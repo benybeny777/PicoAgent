@@ -105,8 +105,24 @@ fn generate_skill_mods(dir: &str, out_name: &str) {
     println!("cargo:rerun-if-changed={}", dir);
 }
 
+fn rerun_if_changed_recursive(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        println!("cargo:rerun-if-changed={}", path.display());
+        if path.is_dir() {
+            rerun_if_changed_recursive(&path);
+        }
+    }
+}
+
 fn main() {
     generate_mods("src/providers", "provider_mods.rs");
     generate_skill_mods("../skills", "tool_mods.rs");
+    // スキル固有の補助モジュール・スクリプト・テンプレートも各スキル配下へ置くため、
+    // mod.rs 以外の追加や変更でもビルドが追従するよう再帰的に監視する。
+    rerun_if_changed_recursive(Path::new("../skills"));
     tauri_build::build();
 }

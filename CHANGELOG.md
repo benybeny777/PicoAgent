@@ -6,6 +6,11 @@
 
 ## 2026-06-26
 
+### スキル補助ファイルの同梱ルール
+
+- スキル専用の補助モジュール・スクリプト・テンプレートは `skills/<スキル名>/` 配下へ同梱するルールを明文化し、`build.rs` が `skills/` 配下を再帰的に変更監視するようにした。
+- `ms_office` のPowerShell実行スクリプトを `mod.rs` の巨大文字列から `skills/ms_office/scripts/office.ps1` へ移し、`include_str!` でスキル本体へ同梱する構成に変更した。
+
 ### 自発雑談の話題取得と起動待ち画面
 
 - `chitchat` スキルに `skills/chitchat/trends.rs` を同梱し、自発雑談の素材として X API（Bearer Token 設定時）→ Google Trends RSS → ニュースRSSの順に話題メモを取得するようにした。X API 未設定時も急上昇ワードやトップニュースから話題を拾い、低精度なSNSスクレイピングでX由来と断定しない。
