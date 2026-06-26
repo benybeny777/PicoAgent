@@ -81,14 +81,14 @@ impl Tool for WeatherTool {
             args.get("longitude").and_then(Value::as_f64),
         ) {
             (lat, lon, format!("{},{}", lat, lon))
-        } else if let Some(location) = explicit_location {
-            // 地名が明示された場合はそれを優先。
-            match geocode(&client, &location).await {
-                Ok(found) => found,
-                Err(error) => return format!("エラー: {}", error),
-            }
+        } else if let Some(found) = match &explicit_location {
+            // 地名が明示された場合はそれを優先（解決できなければ下のフォールバックへ）。
+            Some(location) => geocode(&client, location).await.ok(),
+            None => None,
+        } {
+            found
         } else {
-            // 地名指定が無ければ、まず IP から現在地を推定（有効時）。失敗したら既定地点。
+            // 地名が無い／解決失敗時は、まず IP から現在地を推定（有効時）。最後は既定地点。
             let auto = !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false);
             match if auto { ip_geolocate(&client).await } else { None } {
                 Some(found) => found,

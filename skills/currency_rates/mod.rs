@@ -130,11 +130,20 @@ impl Tool for CurrencyRatesTool {
         };
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        if status.is_success() {
-            body
-        } else {
-            format!("エラー: 為替APIが HTTP {} を返しました。", status)
+        if !status.is_success() {
+            return format!("エラー: 為替APIが HTTP {} を返しました。", status);
         }
+        let data: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let date = data.get("date").and_then(Value::as_str).unwrap_or("");
+        let Some(rates) = data.get("rates").and_then(Value::as_object) else {
+            return body; // 想定外の形式はそのまま返す。
+        };
+        let mut lines: Vec<String> = rates
+            .iter()
+            .filter_map(|(sym, value)| value.as_f64().map(|rate| format!("{amount:.0} {base} = {rate:.3} {sym}")))
+            .collect();
+        lines.sort();
+        format!("為替レート（{date}）\n{}", lines.join("\n"))
     }
 }
 
