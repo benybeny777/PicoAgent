@@ -4,11 +4,16 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
-pub fn log_dir(app: &AppHandle) -> PathBuf {
+pub fn data_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir().join("PicoAgent"))
-        .join("log")
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("PicoAgent")))
+        .unwrap_or_else(|| std::env::temp_dir().join("PicoAgent"))
+}
+
+pub fn log_dir(app: &AppHandle) -> PathBuf {
+    data_dir(app).join("log")
 }
 
 pub fn log_file(app: &AppHandle, name: &str) -> PathBuf {
@@ -22,14 +27,20 @@ pub fn ensure_log_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
 }
 
 pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
-    let Ok(old_dir) = app.path().app_log_dir() else {
-        return;
-    };
-    let old_path = old_dir.join(name);
     let new_path = log_file(app, name);
-    if !old_path.exists() || new_path.exists() {
+    if new_path.exists() {
         return;
     }
+    let mut old_paths = Vec::new();
+    if let Ok(old_dir) = app.path().app_log_dir() {
+        old_paths.push(old_dir.join(name));
+    }
+    if let Ok(old_data_dir) = app.path().app_data_dir() {
+        old_paths.push(old_data_dir.join("log").join(name));
+    }
+    let Some(old_path) = old_paths.into_iter().find(|path| path.exists()) else {
+        return;
+    };
     let result = (|| -> anyhow::Result<()> {
         if let Some(parent) = new_path.parent() {
             std::fs::create_dir_all(parent)?;

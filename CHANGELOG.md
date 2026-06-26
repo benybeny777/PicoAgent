@@ -6,15 +6,20 @@
 
 ## 2026-06-27
 
+### Aivis とログの保存先を PicoAgent ディレクトリへ移動
+
+- 実行時に自動取得する Aivis の保存先を旧 `app_data_dir/aivis/` からユーザーデータ配下の `PicoAgent/aivis/` へ変更した。旧保存先に取得済みの Aivis がある場合は初回に新保存先へ移行する。
+- 実行時ログも `app_data_dir/log/` ではなく `PicoAgent/log/` へ集約するようにした。旧 `app_log_dir` / `app_data_dir/log` の Aivis ログは新ログ未作成時にコピーする。
+
 ### Aivis の実行時自動取得を追加
 
-- 配布後に同梱 Aivis が見つからない場合、初回の読み上げ起動時に公式 GitHub Releases から既定 `1.2.0` を `app_data_dir/aivis/` へ自動取得して使うようにした。
+- 配布後に同梱 Aivis が見つからない場合、初回の読み上げ起動時に公式 GitHub Releases から既定 `1.2.0` を `PicoAgent/aivis/` へ自動取得して使うようにした。
 - 既に同梱または取得済みの Aivis がある場合は追加ダウンロードせず、それを優先して起動する。
 
 ### 実行時ログを log ディレクトリへ集約
 
-- Aivis のログ保存先を旧 `app_log_dir/aivis.log` から `app_data_dir/log/aivis.log` へ移し、旧ログは新ログ未作成時にコピーするようにした。
-- 同梱 llama-server の stdout/stderr も `app_data_dir/log/engine.log` に保存し、Aivis と推論エンジンのログを同じ `log` ディレクトリで確認できるようにした。
+- Aivis のログ保存先を旧 `app_log_dir/aivis.log` から `PicoAgent/log/aivis.log` へ移し、旧ログは新ログ未作成時にコピーするようにした。
+- 同梱 llama-server の stdout/stderr も `PicoAgent/log/engine.log` に保存し、Aivis と推論エンジンのログを同じ `log` ディレクトリで確認できるようにした。
 
 ### 天気・為替・市場指数のスキル直行を安定化
 

@@ -67,9 +67,7 @@ fn existing(path: PathBuf) -> Option<PathBuf> {
 fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
     let mut candidates = Vec::new();
-    if let Ok(data_dir) = app.path().app_data_dir() {
-        candidates.push(data_dir.join("aivis").join(exe));
-    }
+    candidates.push(crate::log_paths::data_dir(app).join("aivis").join(exe));
     if let Ok(res) = app.path().resource_dir() {
         candidates.push(res.join("resources/aivis").join(exe));
         candidates.push(res.join("aivis").join(exe));
@@ -184,7 +182,14 @@ fn log_tail(app: &tauri::AppHandle) -> String {
 }
 
 fn install_dir(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(app.path().app_data_dir()?.join("aivis"))
+    Ok(crate::log_paths::data_dir(app).join("aivis"))
+}
+
+fn legacy_install_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|path| path.join("aivis"))
 }
 
 fn release_asset_pattern() -> &'static str {
@@ -356,6 +361,7 @@ fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
 }
 
 async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+    migrate_legacy_install(app)?;
     if let Some(path) = bundled_engine_path(app) {
         return Ok(path);
     }
@@ -398,6 +404,36 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     })?;
     append_log(app, &format!("Aivis 自動取得完了: {}", installed.display()))?;
     Ok(installed)
+}
+
+fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    let Some(old_dir) = legacy_install_dir(app) else {
+        return Ok(());
+    };
+    let new_dir = install_dir(app)?;
+    let exe = if cfg!(windows) { "run.exe" } else { "run" };
+    if !old_dir.join(exe).exists() || new_dir.join(exe).exists() {
+        return Ok(());
+    }
+    append_log(
+        app,
+        &format!(
+            "旧 Aivis 配置を PicoAgent ディレクトリへ移行します: {} -> {}",
+            old_dir.display(),
+            new_dir.display()
+        ),
+    )?;
+    if let Some(parent) = new_dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match std::fs::rename(&old_dir, &new_dir) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_dir_all(&old_dir, &new_dir)?;
+            let _ = std::fs::remove_dir_all(old_dir);
+            Ok(())
+        }
+    }
 }
 
 fn child_exit_status(app: &tauri::AppHandle) -> Option<ExitStatus> {
@@ -614,6 +650,7 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if has_running_child(app) {
         return Ok(());
     }
+    migrate_legacy_install(app)?;
     let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
     let mode = app
         .try_state::<AppState>()
