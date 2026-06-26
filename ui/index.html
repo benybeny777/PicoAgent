@@ -8,6 +8,19 @@
 </head>
 <body>
   <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
+    <section id="bootScreen" class="boot-screen" aria-live="polite" data-tauri-drag-region>
+      <div class="boot-stage">
+        <div class="boot-mugi">
+          <img id="bootSprite" src="assets/characters/mugi/animations/idle/00.png" alt="起動を待つむぎ" draggable="false" />
+          <span class="boot-shadow" aria-hidden="true"></span>
+        </div>
+        <div class="boot-zzz" aria-hidden="true">
+          <span>Z</span><span>Z</span><span>Z</span>
+        </div>
+        <div class="boot-progress" aria-hidden="true"><span></span></div>
+        <div id="bootStatus" class="boot-status">起動準備中…</div>
+      </div>
+    </section>
     <section id="bubble" class="bubble" aria-live="polite">
       <div id="historyLog" class="history-log" aria-label="会話履歴"></div>
       <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>

@@ -13,10 +13,12 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 
+mod trends;
+
 // 自発雑談で使う「独り言を1つ」生成させる指示文。
 // 重要: 挨拶・名乗り・自己紹介・特技説明（「むぎだよ」「観察しながら…」等の決まり文句）は禁止。
 // 待機中にふと漏らす独り言だけを求める。
-const CHATTER_INSTRUCTION: &str = "いまは誰も話しかけていない待機中に、ふと漏らす自発的な独り言です。選択中キャラクター本人の口調で、いま思いついたような短い独り言を1つだけ言ってください。厳守: 挨拶（こんにちは等）・名乗り・自己紹介・自分の特技や役割の説明は絶対にしない（「むぎだよ」「観察しながら手伝う」のような決まり文句は禁止）。相手に話しかけず、質問・指示・催促もしない。30文字程度までの1文。Web検索や事実確認はしない。URL・箇条書き・絵文字の多用はしない。前回までと違う話題にし、同じ言い回しを繰り返さない。";
+const CHATTER_INSTRUCTION: &str = "いまは誰も話しかけていない待機中に、ふと漏らす自発的な独り言です。選択中キャラクター本人の口調で、いま思いついたような短い独り言を1つだけ言ってください。厳守: 挨拶（こんにちは等）・名乗り・自己紹介・自分の特技や役割の説明は絶対にしない（「むぎだよ」「観察しながら手伝う」のような決まり文句は禁止）。相手に話しかけず、質問・指示・催促もしない。45文字程度までの1文。URL・箇条書き・絵文字の多用はしない。前回までと違う話題にし、同じ言い回しを繰り返さない。提示された話題メモがある場合は、その事実だけを軽く参考にする。メモにない詳細や数字を作らない。";
 
 // 毎回ちがう切り口にするための話題ヒント（小型モデルが定型文へ寄らないよう揺らぎを与える）。
 const TOPIC_HINTS: &[&str] = &[
@@ -86,14 +88,48 @@ impl Tool for ChitchatTool {
                 "text",
                 "240",
             ),
+            Field::new(
+                "PICOAGENT_CHATTER_TOPIC_MODE",
+                "自発雑談の話題ソース（auto/x/trends/news/off）",
+                "text",
+                "auto",
+            ),
+            Field::new(
+                "PICOAGENT_CHATTER_X_QUERY",
+                "自発雑談のX検索クエリ",
+                "text",
+                "lang:ja -is:retweet min_faves:1000",
+            ),
+            Field::new(
+                "PICOAGENT_CHATTER_TRENDS_RSS_URLS",
+                "自発雑談の急上昇RSS URL（カンマ区切り）",
+                "textarea",
+                "https://trends.google.com/trending/rss?geo=JP",
+            ),
+            Field::new(
+                "PICOAGENT_CHATTER_NEWS_RSS_URLS",
+                "自発雑談のニュースRSS URL（カンマ区切り）",
+                "textarea",
+                "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja",
+            ),
+            Field::new(
+                "PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS",
+                "自発雑談の話題取得待ち時間（秒、3〜30）",
+                "text",
+                "8",
+            ),
         ]
     }
 
-    async fn run(&self, _cfg: &Config, args: Value) -> String {
+    async fn run(&self, cfg: &Config, args: Value) -> String {
         let mut prompt = format!(
             "{CHATTER_INSTRUCTION}\n今回の話題のヒント: {}（このヒントは出力に書かず、内容の参考にだけ使う）。",
             pick_topic_hint()
         );
+        if let Some(topic) = trends::topic_brief(cfg).await {
+            prompt.push_str("\nいまの話題メモ（このメモをそのまま読まず、短い独り言の素材にだけ使う）:\n");
+            prompt.push_str(&topic);
+        }
         // 直近に言った独り言があれば、それらと内容も言い回しも変えるよう明示する。
         let avoid: Vec<String> = args
             .get("avoid")

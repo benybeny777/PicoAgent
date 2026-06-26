@@ -5,6 +5,8 @@ const reply = document.getElementById("reply");
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const status = document.getElementById("status");
+const bootStatus = document.getElementById("bootStatus");
+const bootSprite = document.getElementById("bootSprite");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
@@ -30,6 +32,13 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
 let animationName = "idle";
 let frame = 0;
 let lastFrameAt = 0;
+
+function setStatus(text) {
+  status.textContent = text;
+  if (bootStatus && petApp.classList.contains("is-booting")) {
+    bootStatus.textContent = text || "起動準備中…";
+  }
+}
 
 function frameUrl(name, index) {
   const animation = animations[name] || animations.idle;
@@ -108,6 +117,9 @@ function animate(now) {
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
     frame = (frame + 1) % animation.frames;
     petSprite.src = frameUrl(animationName, frame);
+    if (bootSprite && petApp.classList.contains("is-booting")) {
+      bootSprite.src = frameUrl("idle", frame % (animations.idle?.frames || 1));
+    }
     lastFrameAt = now;
   }
   requestAnimationFrame(animate);
@@ -332,17 +344,17 @@ window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderH
 function applyEngineStatus(s) {
   if (!s || !s.phase) return;
   if (s.phase === "download") {
-    status.textContent = `モデルを準備中… ${s.percent ?? 0}%`;
+    setStatus(`モデルを準備中… ${s.percent ?? 0}%`);
     online.dataset.up = false;
   } else if (s.phase === "starting") {
-    status.textContent = "エンジンを起動中…";
+    setStatus("エンジンを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
-    status.textContent = "準備ができたよ。";
+    setStatus("準備ができたよ。");
     online.dataset.up = true;
     setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
   } else if (s.phase === "error") {
-    status.textContent = `準備に失敗: ${s.message || "不明なエラー"}`;
+    setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
     online.dataset.up = false;
   }
 }
@@ -380,14 +392,14 @@ async function waitForAivisReady() {
   try { s = await window.picoagent.aivisStatus(); }
   catch { return; }
   if (!s || !s.enabled || s.up) return;
-  status.textContent = "音声エンジンを起動中…";
+  setStatus("音声エンジンを起動中…");
   for (let i = 0; i < 240; i += 1) {
     await new Promise(resolve => setTimeout(resolve, 500));
     try { s = await window.picoagent.aivisStatus(); }
     catch { break; }
     if (s && s.up) break;
   }
-  if (status.textContent === "音声エンジンを起動中…") status.textContent = "";
+  if (status.textContent === "音声エンジンを起動中…") setStatus("");
 }
 
 // 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
@@ -446,9 +458,10 @@ async function fireChatter() {
     await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}, { speakGreeting: false });
     if (characterManifest?.greeting) preparedGreeting = await prepareSpeech(characterManifest.greeting);
   } catch (error) {
-    status.textContent = `キャラクター読込に失敗: ${error.message}`;
+    setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
+    if (!status.textContent) setStatus("むぎを起こしているよ…");
     petApp.classList.remove("is-booting");
     if (preparedGreeting) playPreparedSpeech(preparedGreeting);
   }

@@ -189,7 +189,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
 | `read_file` | ローカルのテキストファイル読込 | 許可ルート `PICOAGENT_TOOLS_ROOT`（既定はホーム）配下に限定、`..` 等のルート外を拒否、64KB で打ち切り |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
-| `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | 生成は人格込みで `provider.chat`（tools 無し＝Web検索なし）。会話履歴には積まない |
+| `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | `skills/chitchat/trends.rs` で X API / 急上昇RSS / ニュースRSSの話題メモを取得し、生成は人格込みで `provider.chat`（tools 無し）。会話履歴には積まない |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし |
 | `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限 |
 | `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信 | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、timeout |
@@ -291,6 +291,11 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_CHATTER_ENABLED` | `false` | chitchat | アイドル時に自発的な雑談をする |
 | `PICOAGENT_CHATTER_MIN_SECS` | `90` | chitchat | 自発雑談の最短間隔（秒、30〜3600） |
 | `PICOAGENT_CHATTER_MAX_SECS` | `240` | chitchat | 自発雑談の最長間隔（秒、30〜3600） |
+| `PICOAGENT_CHATTER_TOPIC_MODE` | `auto` | chitchat | 自発雑談の話題ソース（`auto` / `x` / `trends` / `news` / `off`） |
+| `PICOAGENT_CHATTER_X_QUERY` | `lang:ja -is:retweet min_faves:1000` | chitchat | X API 利用時の自発雑談向け検索クエリ |
+| `PICOAGENT_CHATTER_TRENDS_RSS_URLS` | `https://trends.google.com/trending/rss?geo=JP` | chitchat | X API 未設定時にも使う急上昇RSS URL（カンマ区切り） |
+| `PICOAGENT_CHATTER_NEWS_RSS_URLS` | `https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja` | chitchat | 自発雑談向けニュースRSS URL（カンマ区切り） |
+| `PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS` | `8` | chitchat | 自発雑談の話題取得待ち時間（秒、3〜30） |
 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` | `Tokyo` | weather | 天気の既定地点 |
 | `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |
 | `PICOAGENT_CURRENCY_DEFAULT_BASE` | `USD` | currency_rates | 為替の既定換算元 |
@@ -398,7 +403,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `character.json` は `name`、`description`、`greeting`、`persona`、`animations` を持つ。任意で `assetVersion` を持て、同名フレーム更新時の画像キャッシュ回避に使う。人格には性格・口調・一人称・ユーザーの呼び方・追加指示を定義できる。
 - 各アニメーションは `path`、`frames`、`fps`、`motion` を持つ。任意で `frameDurations`（ミリ秒配列）を持て、まばたきや口パクなど均等 `fps` だと不自然になるフレームだけ表示時間を調整できる。フロントは画像フレームとCSS補間動作を組み合わせる。
 - 選択中キャラの人格は `pet_set_character_profile` でシステムプロンプトへ追加する。既定プロンプトは挨拶・自己紹介でアプリ説明ではなくキャラクター本人として名乗ることを優先する。設定画面のキャラ別上書きは `PICOAGENT_CHARACTER_OVERRIDES` に保存する。
-- 自発雑談（雑談スキル `chitchat`）: `PICOAGENT_CHATTER_ENABLED` が ON のとき、フロントは `[min, max]` 秒のランダム間隔の待機タイマーで `pet_idle_chatter` を呼ぶ。生成した独り言は**先に音声を合成（`prepareSpeech`）してから文字を表示し、表示と同時に読み上げる**（`playPreparedSpeech`。挨拶と同じ同期再生）。入力中・応答中・読み上げ中・全画面中は割り込まず次回へ送る。ユーザー操作（送信・入力欄を開く・会話リセット）や設定変更（`pet:ui`）のたびにタイマーを張り直す。生成はWeb検索やツールを使わず会話履歴にも積まない。挨拶・名乗り・自己紹介は出さず、毎回ちがう話題になるよう話題ヒントを擬似ランダムで与え、さらに直近の独り言（`AppState.recent_chatter`、末尾6件）を「避ける文」として渡して繰り返しを防ぐ。生成時の文脈には直近の会話（復元済み履歴含む）が入るため、最近の話題を踏まえた独り言になる。
+- 自発雑談（雑談スキル `chitchat`）: `PICOAGENT_CHATTER_ENABLED` が ON のとき、フロントは `[min, max]` 秒のランダム間隔の待機タイマーで `pet_idle_chatter` を呼ぶ。生成した独り言は**先に音声を合成（`prepareSpeech`）してから文字を表示し、表示と同時に読み上げる**（`playPreparedSpeech`。挨拶と同じ同期再生）。入力中・応答中・読み上げ中・全画面中は割り込まず次回へ送る。ユーザー操作（送信・入力欄を開く・会話リセット）や設定変更（`pet:ui`）のたびにタイマーを張り直す。`skills/chitchat/trends.rs` は `PICOAGENT_CHATTER_TOPIC_MODE=auto` で X API（`PICOAGENT_X_BEARER_TOKEN` がある場合）→ Google Trends RSS → ニュースRSSの順に話題メモを取る。`x` / `trends` / `news` / `off` でソースを固定または無効化できる。X API 未設定時は公式X投稿とは断定せず、急上昇ワードやトップニュースの候補として扱う。生成はWeb検索ツールを使わず会話履歴にも積まない。挨拶・名乗り・自己紹介は出さず、毎回ちがう話題になるよう話題ヒントを擬似ランダムで与え、さらに直近の独り言（`AppState.recent_chatter`、末尾6件）を「避ける文」として渡して繰り返しを防ぐ。
+- 起動待ち画面: `#petApp.is-booting` 中は通常のフキダシとキャラクターを隠し、`#bootScreen` にむぎの既存フレームを使った睡眠ループ風の待機画面を表示する。`renderer.js` の `setStatus()` がモデルDL、同梱エンジン起動、Aivis 起動待ちの文言を `#bootStatus` に同期し、準備完了時に `is-booting` を外して通常表示へ切り替える。
 
 - フロント（`ui/`）は Vite 等のバンドラを使わず、Tauri の静的 `frontendDist` で配信。`withGlobalTauri:true` で
   `window.__TAURI__` を有効化し、`ui/picoagent.js` が旧 `window.picoagent`（init/send/menu/on/settings.*）を再現する。

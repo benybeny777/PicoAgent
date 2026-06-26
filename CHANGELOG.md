@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### 自発雑談の話題取得と起動待ち画面
+
+- `chitchat` スキルに `skills/chitchat/trends.rs` を同梱し、自発雑談の素材として X API（Bearer Token 設定時）→ Google Trends RSS → ニュースRSSの順に話題メモを取得するようにした。X API 未設定時も急上昇ワードやトップニュースから話題を拾い、低精度なSNSスクレイピングでX由来と断定しない。
+- 設定画面に `PICOAGENT_CHATTER_TOPIC_MODE` / `PICOAGENT_CHATTER_X_QUERY` / `PICOAGENT_CHATTER_TRENDS_RSS_URLS` / `PICOAGENT_CHATTER_NEWS_RSS_URLS` / `PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS` を追加し、話題ソース・RSS・待ち時間を変更できるようにした。
+- 初期起動や音声エンジン待ちの間、通常のフキダシとキャラクターを隠す代わりに、既存のむぎ素材を使った睡眠ループ風ローディング画面を表示するようにした。
+
 ### コネクタレジストリの効率化
 
 - プロバイダ/スキルのレジストリを `OnceLock` で静的キャッシュ化し、設定画面表示・会話開始・ツール dispatch のたびに全コネクタを `Box` 再生成しないようにした。スキル名/プロバイダIDのインデックスもキャッシュし、dispatch/get の線形生成探索を避ける。

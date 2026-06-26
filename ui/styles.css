@@ -3,9 +3,25 @@
 html,body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; font-family:"Segoe UI","Yu Gothic UI",system-ui,sans-serif; }
 .pet-app { position:relative; width:100%; height:100%; user-select:none; }
 .character { position:absolute; right:6px; bottom:2px; width:265px; height:315px; display:grid; place-items:end center; cursor:grab; }
-/* 起動直後（音声エンジン準備待ち）はキャラ・フキダシを含む全 UI を描画しない。
+/* 起動直後（音声エンジン準備待ち）は通常のキャラ・フキダシを隠し、待機画面だけを見せる。
    準備完了で is-booting を外し、その瞬間に挨拶を再生する。 */
-.pet-app.is-booting { visibility:hidden; }
+.boot-screen { position:absolute; inset:0; z-index:20; display:grid; place-items:center; padding:18px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; }
+.pet-app.is-booting .boot-screen { visibility:visible; opacity:1; pointer-events:auto; }
+.pet-app.is-booting .bubble,
+.pet-app.is-booting .character { visibility:hidden; }
+.boot-stage { position:relative; width:min(290px,calc(100vw - 36px)); min-height:330px; display:grid; place-items:center; align-content:center; padding:18px 18px 20px; border:1px solid rgba(71,52,76,.12); border-radius:20px; background:linear-gradient(180deg,rgba(255,253,248,.97),rgba(247,251,246,.94)); box-shadow:0 12px 28px rgba(42,31,46,.16); overflow:hidden; }
+.boot-stage::before { content:""; position:absolute; left:18px; right:18px; bottom:72px; height:28px; border-radius:50%; background:rgba(92,65,98,.1); filter:blur(4px); animation:boot-shadow 3.8s ease-in-out infinite; }
+.boot-mugi { position:relative; width:210px; height:230px; display:grid; place-items:end center; transform-origin:50% 78%; animation:boot-sleep 3.8s ease-in-out infinite; }
+.boot-mugi img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 7px 5px rgba(37,25,43,.12)); transform:rotate(-7deg) translateY(7px); pointer-events:none; }
+.boot-shadow { position:absolute; z-index:1; left:42px; right:42px; bottom:15px; height:18px; border-radius:50%; background:rgba(72,53,82,.16); filter:blur(5px); }
+.boot-zzz { position:absolute; top:55px; right:44px; width:72px; height:96px; color:#b65d76; font-weight:800; letter-spacing:0; pointer-events:none; }
+.boot-zzz span { position:absolute; opacity:0; animation:boot-zzz 3.6s ease-in-out infinite; text-shadow:0 2px 0 rgba(255,255,255,.8); }
+.boot-zzz span:nth-child(1) { left:4px; bottom:10px; font-size:16px; animation-delay:.1s; }
+.boot-zzz span:nth-child(2) { left:25px; bottom:34px; font-size:20px; animation-delay:.75s; }
+.boot-zzz span:nth-child(3) { left:50px; bottom:60px; font-size:24px; animation-delay:1.4s; }
+.boot-progress { position:relative; width:140px; height:4px; margin-top:4px; overflow:hidden; border-radius:999px; background:rgba(129,117,135,.16); }
+.boot-progress span { position:absolute; top:0; bottom:0; width:42%; border-radius:999px; background:linear-gradient(90deg,#f27e91,#64c99b); animation:boot-progress 1.55s ease-in-out infinite; }
+.boot-status { width:100%; min-height:18px; margin-top:11px; color:var(--muted); font-size:11px; line-height:1.55; text-align:center; word-break:keep-all; overflow-wrap:anywhere; }
 .character::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)); pointer-events:none; will-change:transform; }
 .character[data-motion="breathe"] img { animation:pet-breathe 3.8s ease-in-out infinite; }
@@ -25,6 +41,10 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) scale(1)} 38%{transform:translateY(-8px) scale(1.012,1.018)} 70%{transform:translateY(-2px) scale(1.004)} }
 @keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) scale(1)} 28%{transform:translateY(-5px) scale(1.01,1.014)} 62%{transform:translateY(-2px) scale(1.006)} }
 @keyframes pet-live2d-sad { 0%,100%{transform:translateY(4px) scale(.992,.986)} 50%{transform:translateY(11px) scale(.982,.972)} }
+@keyframes boot-sleep { 0%,100%{transform:translateY(1px) rotate(-1deg) scale(1)} 50%{transform:translateY(-6px) rotate(1deg) scale(1.012,.996)} }
+@keyframes boot-shadow { 0%,100%{transform:scaleX(.94); opacity:.72} 50%{transform:scaleX(1.08); opacity:.48} }
+@keyframes boot-zzz { 0%{transform:translate(0,10px) scale(.74); opacity:0} 24%{opacity:.9} 72%{opacity:.55} 100%{transform:translate(18px,-22px) scale(1.08); opacity:0} }
+@keyframes boot-progress { 0%{left:-45%} 55%{left:32%} 100%{left:105%} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
 .bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 32px); max-height:calc(100% - 52px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }
@@ -56,4 +76,4 @@ button { position:absolute; right:7px; bottom:7px; height:32px; padding:0 12px; 
 .bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
 .bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .status { flex:0 0 auto; min-height:14px; margin-top:6px; color:var(--muted); font-size:9px; }
-@media (prefers-reduced-motion:reduce) { .character img { animation:none!important; transform:none!important; } }
+@media (prefers-reduced-motion:reduce) { .character img,.boot-mugi,.boot-stage::before,.boot-zzz span,.boot-progress span { animation:none!important; } }
