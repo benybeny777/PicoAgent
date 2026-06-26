@@ -213,6 +213,61 @@ fn parse_days(text: &str) -> Option<i64> {
     None
 }
 
+fn direct_answer(messages: &mut Vec<Message>, answer: String) -> anyhow::Result<String> {
+    messages.push(Message::new("assistant", answer.clone()));
+    Ok(answer)
+}
+
+fn market_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let market_words = [
+        "日経平均",
+        "日系平均",
+        "nikkei",
+        "n225",
+        "topix",
+        "トピックス",
+        "ダウ",
+        "dow",
+        "nasdaq",
+        "ナスダック",
+        "s&p",
+        "sp500",
+        "s&p500",
+        "株価指数",
+        "市場",
+    ];
+    if !market_words
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        return None;
+    }
+    let symbol = if lower.contains("topix") || text.contains("トピックス") {
+        "topix"
+    } else if lower.contains("dow") || text.contains("ダウ") {
+        "dow"
+    } else if lower.contains("nasdaq") || text.contains("ナスダック") {
+        "nasdaq"
+    } else if lower.contains("s&p") || lower.contains("sp500") {
+        "sp500"
+    } else {
+        "nikkei225"
+    };
+    let chart = ["推移", "チャート", "グラフ", "trend"]
+        .iter()
+        .any(|word| lower.contains(word));
+    let mut args = serde_json::Map::new();
+    args.insert("symbol".to_string(), serde_json::json!(symbol));
+    if chart {
+        args.insert("chart".to_string(), serde_json::json!(true));
+        if let Some(days) = parse_days(text) {
+            args.insert("days".to_string(), serde_json::json!(days));
+        }
+    }
+    Some(serde_json::Value::Object(args))
+}
+
 fn normalized_short_text(text: &str) -> String {
     text.trim()
         .trim_matches(|c: char| c.is_whitespace() || "、。,.！？!?：:".contains(c))
@@ -382,14 +437,22 @@ pub async fn run(
                 Some(location) => serde_json::json!({ "location": location }),
                 None => serde_json::json!({}),
             };
-            return Ok(tools::dispatch(cfg, "weather", args).await);
+            let answer = tools::dispatch(cfg, "weather", args).await;
+            return direct_answer(messages, answer);
         } else if let Some(args) = currency_query(&user_text) {
             // 為替もモデルに任せず currency_rates の整形済み出力（レート/推移チャート）を直接返す。
-            return Ok(tools::dispatch(cfg, "currency_rates", args).await);
+            let answer = tools::dispatch(cfg, "currency_rates", args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = market_query(&user_text) {
+            // 市場指数もモデルに任せず、専用スキルの取得結果を直接返す。
+            let answer = tools::dispatch(cfg, "market_indices", args).await;
+            return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
-            return Ok(tools::dispatch(cfg, tool, args).await);
+            let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
         } else if is_daily_briefing_query(&user_text) {
-            return Ok(tools::dispatch(cfg, "daily_briefing", serde_json::json!({})).await);
+            let answer = tools::dispatch(cfg, "daily_briefing", serde_json::json!({})).await;
+            return direct_answer(messages, answer);
         } else if is_clipboard_query(&user_text) {
             let mode = if user_text.contains("todo")
                 || user_text.contains("TODO")
@@ -459,7 +522,8 @@ pub async fn run(
 mod tests {
     use super::{
         append_sources, currency_query, direct_local_tool_query, extract_source_urls,
-        is_local_action_query, is_simple_greeting, is_weather_query, web_search_query,
+        is_local_action_query, is_simple_greeting, is_weather_query, market_query,
+        web_search_query,
     };
 
     #[test]
@@ -480,6 +544,18 @@ mod tests {
         assert_eq!(plain.get("chart"), None); // チャート語が無ければレート表示
 
         assert!(currency_query("今日の予定は？").is_none()); // 通貨意図なし
+    }
+
+    #[test]
+    fn 市場指数の意図を読み取る() {
+        let nikkei = market_query("日経平均のチャートを見せて").unwrap();
+        assert_eq!(nikkei["symbol"], "nikkei225");
+        assert_eq!(nikkei["chart"], true);
+
+        let typo = market_query("日系平均どう？").unwrap();
+        assert_eq!(typo["symbol"], "nikkei225");
+
+        assert!(market_query("今日の天気は？").is_none());
     }
 
     #[test]

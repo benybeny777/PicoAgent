@@ -211,7 +211,7 @@ function skillCategory(tool) {
   if (["alarm", "reminder", "focus_timer", "praise_log", "daily_briefing", "clipboard_text", "chitchat"].includes(name)) {
     return "daily";
   }
-  if (["get_time", "weather", "currency_rates", "rss_feed", "web_search", "web_fetch"].includes(name)) {
+  if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch"].includes(name)) {
     return "info";
   }
   if (["read_file", "workspace_files", "run_command", "http_api"].includes(name)) {

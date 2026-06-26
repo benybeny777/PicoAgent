@@ -147,7 +147,7 @@ graph LR
 | `PICOAGENT_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini | Gemini の既定モデル |
 | `PICOAGENT_GEMINI_BASE_URL` | `.../v1beta/openai` | Gemini | Gemini の OpenAI 互換エンドポイント |
 
-#### スキル：情報・日常（検索 / 雑談 / 目覚まし / 天気 / 為替 / RSS）
+#### スキル：情報・日常（検索 / 雑談 / 目覚まし / 天気 / 為替 / 市場指数 / RSS）
 
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
@@ -172,6 +172,7 @@ graph LR
 | `PICOAGENT_CURRENCY_DEFAULT_BASE` | `USD` | currency_rates | 為替の既定換算元 |
 | `PICOAGENT_CURRENCY_DEFAULT_SYMBOLS` | `JPY` | currency_rates | 為替の既定換算先 |
 | `PICOAGENT_CURRENCY_TIMEOUT_SECS` | `15` | currency_rates | 為替API待ち時間（秒、3〜60） |
+| `PICOAGENT_MARKET_TIMEOUT_SECS` | `15` | market_indices | 市場指数API待ち時間（秒、3〜60） |
 | `PICOAGENT_RSS_DEFAULT_URL` | （なし） | rss_feed | RSS既定URL |
 | `PICOAGENT_RSS_TIMEOUT_SECS` | `15` | rss_feed | RSS取得待ち時間（秒、3〜60） |
 
