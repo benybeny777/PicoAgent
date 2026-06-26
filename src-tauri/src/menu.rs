@@ -45,13 +45,19 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                 let now = match win.is_always_on_top() {
                     Ok(now) => now,
                     Err(error) => {
-                        eprintln!("常に手前の状態取得に失敗しました: {error}");
+                        crate::log_paths::append_app_log(
+                            app,
+                            &format!("常に手前の状態取得に失敗しました: {error}"),
+                        );
                         return;
                     }
                 };
                 let next = !now;
                 if let Err(error) = win.set_always_on_top(next) {
-                    eprintln!("常に手前の切り替えに失敗しました: {error}");
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("常に手前の切り替えに失敗しました: {error}"),
+                    );
                     return;
                 }
                 let mut patch = serde_json::Map::new();
@@ -61,7 +67,10 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                 );
                 let state = app.state::<AppState>();
                 if let Err(error) = state.config.set_all(patch) {
-                    eprintln!("常に手前の設定保存に失敗しました: {error}");
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("常に手前の設定保存に失敗しました: {error}"),
+                    );
                 }
             }
         }

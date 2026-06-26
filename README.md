@@ -290,11 +290,12 @@ npm run setup:engine   # 同梱エンジンを resources/bundled/engine へ取�
 npm run build
 ```
 
-`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。推論エンジンは同梱されますが、モデル GGUF（数 GB）は含めず初回起動時に `%APPDATA%\PicoAgent\bundled\models\`（macOS/Linux は同等のユーザーデータ配下 `PicoAgent/bundled/models/`）へ取得します。`llama-server` を実行時配置で差し替える場合も `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します。
+`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は同梱エンジンと Aivis を事前確認し、未取得なら `src-tauri/resources/bundled/` へ取得してから Tauri を起動します。推論エンジンは同梱されますが、モデル GGUF（数 GB）は含めず初回起動時に `%APPDATA%\PicoAgent\bundled\models\`（macOS/Linux は同等のユーザーデータ配下 `PicoAgent/bundled/models/`）へ取得します。`llama-server` を実行時配置で差し替える場合も `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します。
 
 AivisSpeech Engine は `npm run dev` / `npm run build` の起動前に、同梱フォルダへ未取得なら自動取得されます（手動実行は `npm run setup:aivis`）。公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/bundled/aivis/` へ展開します（更新時は `AIVIS_RELEASE=latest` またはタグを指定）。このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物へ含まれますが、巨大ファイルやライセンス確認が必要な実体は Git には含めません。配布後に同梱 Aivis が見つからない場合は、初回の読み上げ起動時に同じ公式リリースを `%APPDATA%\PicoAgent\bundled\aivis\`（macOS/Linux は同等のユーザーデータ配下 `PicoAgent/bundled/aivis/`）へ自動取得して展開します（展開には実行環境の `7z` / `7za` / `tar` のいずれかを使います）。読み上げには同梱または自動取得した Aivis を使い、`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に `127.0.0.1:10102` で裏起動します。推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選べます。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを候補として、候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動します。AMD CPU だけの環境は GPU 候補にしません。CPU/GPU を固定したい場合は設定画面で明示指定します。アプリが起動した Aivis 子プロセスは終了時に停止します。
+Windows の NSIS アンインストーラは関連プロセスを停止してから、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\`、旧 `com.picoagent.app` / `com.coda.app` の設定・キャッシュ、PicoAgent 用一時ディレクトリを削除します。PicoAgent が起動する Aivis は子プロセスの `APPDATA` / `LOCALAPPDATA` を `%APPDATA%\PicoAgent\aivis-userdata\` へ向けるため、Aivis のモデル・辞書・キャッシュも PicoAgent のアンインストール対象に含まれます。
 同梱 Aivis の初回起動ではモデル確認や BERT 読み込みで数十秒かかることがあります。
-初回の読み上げでは話者モデルのロードに時間がかかるため、音声が出るまでしばらく「読み上げ準備中…」になることがあります。ログは `%APPDATA%\PicoAgent\log\`（macOS/Linux は同等のユーザーデータ配下 `PicoAgent/log/`）にまとめて保存します。Aivis の起動ログは `aivis.log`、同梱 llama-server のログは `engine.log` です。Aivis 起動失敗時は `aivis.log` の末尾がエラー表示に含まれます。
+初回の読み上げでは話者モデルのロードに時間がかかるため、音声が出るまでしばらく「読み上げ準備中…」になることがあります。ログは `%APPDATA%\PicoAgent\log\`（macOS/Linux は同等のユーザーデータ配下 `PicoAgent/log/`）にまとめて保存します。アプリ本体とフロントのエラーは `app.log`、Aivis の起動ログは `aivis.log`、同梱 llama-server のログは `engine.log` です。Aivis 起動失敗時は `aivis.log` の末尾がエラー表示に含まれます。
 キャラクターごとの speaker ID は設定画面の「キャラクター」タブで指定できます。未指定のキャラクターは共通の `PICOAGENT_TTS_SPEAKER` を使います。
 
 - アプリ識別子 `com.picoagent.app`（旧 `com.coda.app`。設定・履歴・メモリは `app_config_dir`/`app_data_dir` 配下に保存し、同梱系の実行時取得物はユーザーデータ配下の `PicoAgent/bundled/`、ログは `PicoAgent/log/` にまとめる）、アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。

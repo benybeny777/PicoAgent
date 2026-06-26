@@ -19,6 +19,27 @@ let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 
+function errorDetail(error) {
+  if (!error) return "";
+  if (error instanceof Error) return error.stack || error.message;
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error); }
+  catch { return String(error); }
+}
+
+function logApp(level, message, detail) {
+  try {
+    window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(() => {});
+  } catch {}
+}
+
+window.addEventListener("error", event => {
+  logApp("error", "設定画面の未捕捉エラー", `${event.message || ""} ${event.filename || ""}:${event.lineno || ""}:${event.colno || ""}\n${errorDetail(event.error)}`);
+});
+window.addEventListener("unhandledrejection", event => {
+  logApp("error", "設定画面の未処理 Promise rejection", errorDetail(event.reason));
+});
+
 function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);
   for (const c of children) node.append(c);
@@ -505,6 +526,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   try {
     models = await window.picoagent.settings.listModels(providerId);
   } catch (error) {
+    logApp("warn", "モデル一覧を取得できませんでした", errorDetail(error));
     statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
     return;
   }
@@ -547,6 +569,7 @@ saveBtn.addEventListener("click", async () => {
     const res = await window.picoagent.settings.save(collect());
     statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
   } catch (error) {
+    logApp("error", "設定保存に失敗しました", errorDetail(error));
     statusEl.textContent = `保存に失敗: ${error.message}`;
   } finally {
     saveBtn.disabled = false;
@@ -556,5 +579,11 @@ saveBtn.addEventListener("click", async () => {
 (async () => {
   data = await window.picoagent.settings.load();
   try { await render(); }
-  catch (error) { statusEl.textContent = `設定画面の読み込みに失敗: ${error.message}`; }
-})();
+  catch (error) {
+    logApp("error", "設定画面の読み込みに失敗しました", errorDetail(error));
+    statusEl.textContent = `設定画面の読み込みに失敗: ${error.message}`;
+  }
+})().catch(error => {
+  logApp("error", "設定初期化に失敗しました", errorDetail(error));
+  statusEl.textContent = `設定初期化に失敗: ${error?.message || error}`;
+});

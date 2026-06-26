@@ -17,7 +17,7 @@ fn sparkline(values: &[f64]) -> String {
     const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if !(max > min) {
+    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
         return BARS[0].to_string().repeat(values.len());
     }
     values

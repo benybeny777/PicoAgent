@@ -48,7 +48,7 @@ pub fn save(app: &AppHandle, messages: &[Message]) {
     })();
     // フォールバック許可: 履歴保存の失敗は会話継続を優先し、ログのみに留める。
     if let Err(error) = result {
-        eprintln!("会話履歴の保存に失敗しました: {error}");
+        crate::log_paths::append_app_log(app, &format!("会話履歴の保存に失敗しました: {error}"));
     }
 }
 

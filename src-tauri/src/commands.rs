@@ -155,6 +155,12 @@ async fn current_up(state: &AppState) -> bool {
     }
 }
 
+fn log_command_error(app: &AppHandle, context: &str, error: impl std::fmt::Display) -> String {
+    let message = format!("{context}: {error}");
+    crate::log_paths::append_app_log(app, &message);
+    message
+}
+
 #[tauri::command]
 pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     let model = state.model.lock().unwrap().clone();
@@ -310,7 +316,10 @@ pub async fn pet_send(
         Ok(reply) => {
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
         }
-        Err(e) => Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", e) })),
+        Err(e) => {
+            let message = log_command_error(&app, "AI応答に失敗しました", e);
+            Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))
+        }
     }
 }
 
@@ -452,15 +461,19 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
             };
             Ok(json!({ "enabled": true, "reply": display }))
         }
-        Err(error) => Err(format!("自発雑談の生成に失敗しました: {error}")),
+        Err(error) => Err(log_command_error(
+            &app,
+            "自発雑談の生成に失敗しました",
+            error,
+        )),
     }
 }
 
 #[tauri::command]
-pub fn pet_daily_events(state: State<'_, AppState>) -> Result<Value, String> {
+pub fn pet_daily_events(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     match crate::daily::due_events(&state.config) {
         Ok(events) => Ok(json!({ "events": events })),
-        Err(error) => Err(format!("通知の確認に失敗しました: {error}")),
+        Err(error) => Err(log_command_error(&app, "通知の確認に失敗しました", error)),
     }
 }
 
@@ -509,7 +522,11 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
 
 // 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。
 #[tauri::command]
-pub async fn pet_alarm_wake(id: String, state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn pet_alarm_wake(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
     let mut alarms = crate::alarm::load(&state.config);
     let target = alarms.iter().find(|a| a.id == id).cloned();
     let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();
@@ -522,7 +539,10 @@ pub async fn pet_alarm_wake(id: String, state: State<'_, AppState>) -> Result<Va
                 }
             }
             if let Err(error) = crate::alarm::save(&state.config, &alarms) {
-                eprintln!("目覚ましの無効化保存に失敗しました: {error}");
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("目覚ましの無効化保存に失敗しました: {error}"),
+                );
             }
         }
     }
@@ -603,30 +623,33 @@ pub async fn pet_speak(
     }
     aivis::ensure_started(&app)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
     let endpoint = aivis::endpoint(&app, &state);
     let speaker = effective_tts_speaker(&state);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            log_command_error(&app, "Aivis HTTP クライアント作成に失敗しました", error)
+        })?;
     let query_url = format!("{endpoint}/audio_query");
     let query = client
         .post(&query_url)
         .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
         .send()
         .await
-        .map_err(|error| format!("Aivis の音声クエリ作成に失敗しました: {error}"))?;
+        .map_err(|error| log_command_error(&app, "Aivis の音声クエリ作成に失敗しました", error))?;
     if !query.status().is_success() {
-        return Err(format!(
-            "Aivis の音声クエリ作成に失敗しました: HTTP {}",
-            query.status()
+        return Err(log_command_error(
+            &app,
+            "Aivis の音声クエリ作成に失敗しました",
+            format!("HTTP {}", query.status()),
         ));
     }
     let audio_query: Value = query
         .json()
         .await
-        .map_err(|error| format!("Aivis の音声クエリを読めませんでした: {error}"))?;
+        .map_err(|error| log_command_error(&app, "Aivis の音声クエリを読めませんでした", error))?;
     let synthesis_url = format!("{endpoint}/synthesis");
     let wav = client
         .post(&synthesis_url)
@@ -634,17 +657,18 @@ pub async fn pet_speak(
         .json(&audio_query)
         .send()
         .await
-        .map_err(|error| format!("Aivis の音声合成に失敗しました: {error}"))?;
+        .map_err(|error| log_command_error(&app, "Aivis の音声合成に失敗しました", error))?;
     if !wav.status().is_success() {
-        return Err(format!(
-            "Aivis の音声合成に失敗しました: HTTP {}",
-            wav.status()
+        return Err(log_command_error(
+            &app,
+            "Aivis の音声合成に失敗しました",
+            format!("HTTP {}", wav.status()),
         ));
     }
     let bytes = wav
         .bytes()
         .await
-        .map_err(|error| format!("Aivis の音声データを読めませんでした: {error}"))?;
+        .map_err(|error| log_command_error(&app, "Aivis の音声データを読めませんでした", error))?;
     Ok(json!({ "enabled": true, "mime": "audio/wav", "audio": bytes.to_vec() }))
 }
 
@@ -741,7 +765,10 @@ pub async fn settings_save(
         || patch.contains_key("PICOAGENT_LOCAL_CTX")
         || patch.contains_key("PICOAGENT_LOCAL_NGL")
         || patch.contains_key("PICOAGENT_LOCAL_GPU_DEVICE");
-    state.config.set_all(patch).map_err(|e| e.to_string())?;
+    state
+        .config
+        .set_all(patch)
+        .map_err(|e| log_command_error(&app, "設定保存に失敗しました", e))?;
 
     // グローバル設定を実行中へ反映。
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
@@ -766,11 +793,17 @@ pub async fn settings_save(
         if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
             let handle = app.clone();
             if let Err(error) = aivis::start_background(&handle) {
-                eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                crate::log_paths::append_app_log(
+                    &handle,
+                    &format!("設定保存後の同梱 Aivis バックグラウンド起動に失敗しました: {error}"),
+                );
             }
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = aivis::ensure_started(&handle).await {
-                    eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                    crate::log_paths::append_app_log(
+                        &handle,
+                        &format!("設定保存後の同梱 Aivis 起動確認に失敗しました: {error}"),
+                    );
                 }
             });
         }
@@ -810,6 +843,26 @@ pub async fn engine_status(app: tauri::AppHandle) -> Result<Value, String> {
         Some(e) => Ok(e.status.lock().unwrap().clone()),
         None => Ok(json!({ "phase": "idle" })),
     }
+}
+
+#[tauri::command]
+pub async fn pet_log(
+    level: String,
+    message: String,
+    detail: Option<String>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let level = match level.as_str() {
+        "debug" | "info" | "warn" | "error" => level,
+        _ => "info".to_string(),
+    };
+    let detail = detail
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| format!(" detail={value}"))
+        .unwrap_or_default();
+    crate::log_paths::append_app_log(&app, &format!("[frontend:{level}] {message}{detail}"));
+    Ok(())
 }
 
 /// 設定ウィンドウを開く（既にあれば前面化）。

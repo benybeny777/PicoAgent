@@ -44,6 +44,7 @@ pub fn run() {
             commands::settings_list_models,
             commands::settings_save,
             commands::engine_status,
+            commands::pet_log,
             menu::pet_menu,
         ])
         .on_menu_event(|app, event| {
@@ -61,6 +62,8 @@ pub fn run() {
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
             if let Err(error) = log_paths::ensure_log_dir(app.handle()) {
                 eprintln!("ログディレクトリの作成に失敗しました: {error}");
+            } else {
+                log_paths::append_app_log(app.handle(), "PicoAgent を起動しました。");
             }
 
             let pid = state.config.get("PICOAGENT_PROVIDER", "local");
@@ -104,11 +107,17 @@ pub fn run() {
             if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
                 let handle = app.handle().clone();
                 if let Err(error) = aivis::start_background(&handle) {
-                    eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                    log_paths::append_app_log(
+                        &handle,
+                        &format!("同梱 Aivis のバックグラウンド起動に失敗しました: {error}"),
+                    );
                 }
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = aivis::ensure_started(&handle).await {
-                        eprintln!("同梱 Aivis の起動に失敗しました: {error}");
+                        log_paths::append_app_log(
+                            &handle,
+                            &format!("同梱 Aivis の起動確認に失敗しました: {error}"),
+                        );
                     }
                 });
             }

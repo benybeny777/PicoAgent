@@ -99,7 +99,10 @@ impl Tool for GoogleSheetsTool {
                     return "エラー: values は1000行以内で指定してください。".to_string();
                 }
                 let payload = json!({ "values": values });
-                let action = args.get("action").and_then(Value::as_str).unwrap();
+                let action = match args.get("action").and_then(Value::as_str) {
+                    Some(action @ ("update" | "append")) => action,
+                    _ => return "エラー: action は update または append を指定してください。".to_string(),
+                };
                 let url = if action == "append" {
                     format!("{}/{}/values/{}:append", SHEETS_BASE, spreadsheet_id, encoded_range)
                 } else {

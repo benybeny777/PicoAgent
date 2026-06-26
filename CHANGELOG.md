@@ -6,6 +6,14 @@
 
 ## 2026-06-27
 
+### NSIS アンインストールと配布前チェックを強化
+
+- NSIS の `installerHooks` を追加し、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、旧識別子 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除するようにした。
+- PicoAgent が起動する Aivis 子プロセスの `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/` へ向け、Aivis のモデル・辞書・キャッシュも PicoAgent のアンインストール対象に含めた。外部の AivisSpeech インストールが使う通常の `%APPDATA%\AivisSpeech-Engine` は削除対象にしない。
+- `npm run dev` / `npm run build` で Aivis だけでなく同梱 `llama-server` も事前確認・取得するようにし、クリーン環境の配布ビルドで同梱 LLM が欠ける穴を塞いだ。
+- 同梱 Aivis 更新時は配布リソース側の `run.exe` がユーザーデータ側より新しければ `PicoAgent/bundled/aivis/` を上書き更新するようにした。
+- アプリ本体・フロント・設定画面・音声再生の主要エラーを `PicoAgent/log/app.log` に記録するようにした。Aivis と llama-server の専用ログは従来どおり `aivis.log` / `engine.log` に分離する。
+
 ### release 版の Aivis 読み上げ再生を修正
 
 - Tauri の CSP に `media-src 'self' blob: data:` を追加し、`pet_speak` が返した WAV を `Blob` / `Audio` で再生できるようにした。release / インストーラ版で Aivis 側の合成は成功しているのに音が出ない問題への対応。

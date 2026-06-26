@@ -22,6 +22,27 @@ let alarmTimer = null;
 const firedAlarms = new Set();
 let activeAlarmSnooze = null;
 
+function errorDetail(error) {
+  if (!error) return "";
+  if (error instanceof Error) return error.stack || error.message;
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error); }
+  catch { return String(error); }
+}
+
+function logApp(level, message, detail) {
+  try {
+    window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(() => {});
+  } catch {}
+}
+
+window.addEventListener("error", event => {
+  logApp("error", "未捕捉フロントエラー", `${event.message || ""} ${event.filename || ""}:${event.lineno || ""}:${event.colno || ""}\n${errorDetail(event.error)}`);
+});
+window.addEventListener("unhandledrejection", event => {
+  logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
+});
+
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
@@ -229,7 +250,10 @@ async function prepareSpeech(text) {
     const result = await window.picoagent.speak(text);
     if (!result?.enabled || result.skipped || !result.audio?.length) return null;
     return result;
-  } catch { return null; }
+  } catch (error) {
+    logApp("warn", "音声の事前合成に失敗しました", errorDetail(error));
+    return null;
+  }
 }
 // 事前合成済みの音声を再生し、会話アニメを開始する。再生終了・失敗時に Object URL を解放する。
 function playPreparedSpeech(result) {
@@ -242,11 +266,14 @@ function playPreparedSpeech(result) {
     if (!activeAlarmSnooze) status.textContent = "";
   }, { once: true });
   currentVoice.addEventListener("error", () => {
+    const audioError = currentVoice?.error?.message || "";
     finishVoice(true);
+    logApp("error", "音声データの読み込みに失敗しました", audioError);
     status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗: 音声データを読み込めません";
   }, { once: true });
   currentVoice.play().catch(error => {
     finishVoice(true);
+    logApp("error", "音声再生に失敗しました", errorDetail(error));
     if (!activeAlarmSnooze) {
       status.textContent = `音声再生に失敗: ${error?.message || error || "再生がブロックされました"}`;
     }
@@ -274,6 +301,7 @@ async function speakReply(text) {
   } catch (error) {
     if (prepareTimer) clearInterval(prepareTimer);
     stopVoice();
+    logApp("error", "読み上げに失敗しました", errorDetail(error));
     status.textContent = `読み上げに失敗: ${error.message || error}`;
     setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 12000);
   }
@@ -348,6 +376,7 @@ composer.addEventListener("submit", async event => {
   const result = await window.picoagent.send(text);
   status.textContent = result.error ? "接続を確認してね" : "";
   if (result.error) {
+    logApp("error", "AI応答がエラーを返しました", result.reply || "");
     ++speakingToken;
     stopVoice();
     renderReply(result.reply);
@@ -413,6 +442,7 @@ window.picoagent.on("pet:ui", (ui) => {
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
   applyBubbleSize(ui.bubbleWidth, ui.bubbleHeight);
   if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
+    logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
     status.textContent = `キャラクター変更に失敗: ${error.message}`;
   });
   applyChatterConfig(ui); // 設定変更を即反映。
@@ -423,13 +453,19 @@ window.picoagent.on("pet:ui", (ui) => {
 async function waitForAivisReady() {
   let s;
   try { s = await window.picoagent.aivisStatus(); }
-  catch { return; }
+  catch (error) {
+    logApp("warn", "Aivis 状態取得に失敗しました", errorDetail(error));
+    return;
+  }
   if (!s || !s.enabled || s.up) return;
   setStatus("音声エンジンを起動中…");
   for (let i = 0; i < 240; i += 1) {
     await new Promise(resolve => setTimeout(resolve, 500));
     try { s = await window.picoagent.aivisStatus(); }
-    catch { break; }
+    catch (error) {
+      logApp("warn", "Aivis 起動待ち中の状態取得に失敗しました", errorDetail(error));
+      break;
+    }
     if (s && s.up) break;
   }
   if (status.textContent === "音声エンジンを起動中…") setStatus("");
@@ -476,14 +512,19 @@ async function fireChatter() {
     if (res?.enabled === false) { chatterCfg.enabled = false; return; }
     const line = (res?.reply || "").trim();
     await showAssistantNotice(line);
-  } catch { /* 失敗は無視して次回へ */ }
+  } catch (error) {
+    logApp("warn", "自発雑談の取得に失敗しました", errorDetail(error));
+  }
   finally { scheduleChatter(); }
 }
 
 async function checkDailyEvents() {
   let res;
   try { res = await window.picoagent.dailyEvents(); }
-  catch { return; }
+  catch (error) {
+    logApp("warn", "日次イベント取得に失敗しました", errorDetail(error));
+    return;
+  }
   const events = Array.isArray(res?.events) ? res.events : [];
   if (!events.length) return;
   const line = (events[0]?.text || "時間だよ。").trim();
@@ -527,7 +568,10 @@ async function checkAlarms() {
   }
   let res;
   try { res = await window.picoagent.alarms(); }
-  catch { return; }
+  catch (error) {
+    logApp("warn", "目覚まし一覧取得に失敗しました", errorDetail(error));
+    return;
+  }
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
   const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
@@ -550,7 +594,9 @@ async function fireAlarm(a) {
   try {
     const res = await window.picoagent.alarmWake(a.id);
     line = (res?.reply || "").trim();
-  } catch { /* 生成失敗時は固定文で起こす */ }
+  } catch (error) {
+    logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
+  }
   if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
   // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
   const prepared = await prepareSpeech(line);
@@ -580,12 +626,15 @@ function startAlarmPolling() {
     try {
       const daily = await window.picoagent.dailyGreeting();
       if (daily?.reply) greeting = `${greeting}\n${daily.reply}`.trim();
-    } catch { /* 動的あいさつに失敗しても通常挨拶で続行する */ }
+    } catch (error) {
+      logApp("warn", "動的あいさつの取得に失敗しました", errorDetail(error));
+    }
     if (greeting) {
       characterManifest.greeting = greeting;
       preparedGreeting = await prepareSpeech(greeting);
     }
   } catch (error) {
+    logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
@@ -595,8 +644,13 @@ function startAlarmPolling() {
   }
   if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
-  try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}
+  try { applyEngineStatus(await window.picoagent.engineStatus()); }
+  catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
   applyChatterConfig(info); // アイドル雑談タイマーを開始。
   startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
-})();
+})().catch(error => {
+  logApp("error", "起動初期化に失敗しました", errorDetail(error));
+  setStatus(`起動初期化に失敗: ${error?.message || error}`);
+  petApp.classList.remove("is-booting");
+});

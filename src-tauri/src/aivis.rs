@@ -92,6 +92,23 @@ fn resource_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     candidates
 }
 
+fn resource_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    resource_candidates(app).into_iter().find_map(existing)
+}
+
+fn resource_is_newer(resource: &Path, installed: &Path) -> bool {
+    let Ok(resource_time) = resource.metadata().and_then(|metadata| metadata.modified()) else {
+        return false;
+    };
+    let Ok(installed_time) = installed
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+    else {
+        return true;
+    };
+    resource_time > installed_time
+}
+
 fn path_hint() -> &'static str {
     "Aivis の実行ファイルが見つかりません。ネットワーク接続を確認するか、npm run setup:aivis を実行してください。"
 }
@@ -371,7 +388,7 @@ fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
 }
 
 fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<PathBuf>> {
-    let Some(resource_run) = resource_candidates(app).into_iter().find_map(existing) else {
+    let Some(resource_run) = resource_engine_path(app) else {
         return Ok(None);
     };
     let resource_root = resource_run
@@ -400,6 +417,13 @@ fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<Pat
 async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     migrate_legacy_install(app)?;
     if let Some(path) = runtime_engine_path(app) {
+        if let Some(resource) = resource_engine_path(app) {
+            if resource_is_newer(&resource, &path) {
+                if let Some(copied) = copy_resource_to_install(app)? {
+                    return Ok(copied);
+                }
+            }
+        }
         return Ok(path);
     }
     if let Some(path) = copy_resource_to_install(app)? {
@@ -662,6 +686,13 @@ fn spawn_engine(
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    #[cfg(windows)]
+    {
+        let aivis_user_root = crate::log_paths::data_dir(app).join("aivis-userdata");
+        std::fs::create_dir_all(&aivis_user_root)?;
+        command.env("APPDATA", &aivis_user_root);
+        command.env("LOCALAPPDATA", &aivis_user_root);
+    }
     let mut log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -694,7 +725,20 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     migrate_legacy_install(app)?;
-    let path = runtime_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
+    let path = match runtime_engine_path(app) {
+        Some(path) => {
+            if let Some(resource) = resource_engine_path(app) {
+                if resource_is_newer(&resource, &path) {
+                    copy_resource_to_install(app)?.unwrap_or(path)
+                } else {
+                    path
+                }
+            } else {
+                path
+            }
+        }
+        None => copy_resource_to_install(app)?.ok_or_else(|| anyhow::anyhow!(path_hint()))?,
+    };
     let mode = app
         .try_state::<AppState>()
         .map(|state| device_mode(&state))
@@ -771,7 +815,7 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
 
 async fn wait_until_ready(app: &tauri::AppHandle, endpoint: &str) -> StartupWait {
     for _ in 0..STARTUP_CHECKS {
-        if is_up(&endpoint).await {
+        if is_up(endpoint).await {
             return StartupWait::Ready;
         }
         if let Some(status) = child_exit_status(app) {

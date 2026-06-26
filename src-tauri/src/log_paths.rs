@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use chrono::Local;
 use tauri::{AppHandle, Manager};
 
 pub fn data_dir(app: &AppHandle) -> PathBuf {
@@ -30,6 +31,29 @@ pub fn ensure_log_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
+pub fn append_log(app: &AppHandle, name: &str, message: &str) -> anyhow::Result<()> {
+    let path = log_file(app, name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let now = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = message.replace('\r', "\\r").replace('\n', "\\n");
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "[{now}] {line}")?;
+    Ok(())
+}
+
+pub fn append_app_log(app: &AppHandle, message: &str) {
+    // フォールバック許可: ログ書き込み失敗時もアプリ動作を止めない。
+    if let Err(error) = append_log(app, "app.log", message) {
+        eprintln!("app.log への書き込みに失敗しました: {error}");
+    }
+}
+
 pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
     let new_path = log_file(app, name);
     if new_path.exists() {
@@ -54,6 +78,6 @@ pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
     })();
     // フォールバック許可: 旧ログ移行に失敗しても起動とログ出力は継続する。
     if let Err(error) = result {
-        eprintln!("旧ログの移行に失敗しました: {error}");
+        append_app_log(app, &format!("旧ログの移行に失敗しました: {error}"));
     }
 }

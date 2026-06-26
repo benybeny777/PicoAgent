@@ -52,9 +52,9 @@ pub fn save(app: &AppHandle, store: &MemoryStore) {
         std::fs::write(&target, serde_json::to_string_pretty(store)?)?;
         Ok(())
     })();
-    // フォールバック許可: メモリ保存失敗は会話を止めず、標準エラーへ記録する。
+    // フォールバック許可: メモリ保存失敗は会話を止めず、ログのみに留める。
     if let Err(error) = result {
-        eprintln!("長期メモリの保存に失敗しました: {error}");
+        crate::log_paths::append_app_log(app, &format!("長期メモリの保存に失敗しました: {error}"));
     }
 }
 

@@ -188,7 +188,7 @@ fn weather_icon(code: i64) -> (&'static str, &'static str) {
         51 | 53 | 55 | 56 | 57 => ("🌦️", "霧雨"),
         61 | 63 | 65 | 66 | 67 => ("🌧️", "雨"),
         71 | 73 | 75 | 77 => ("❄️", "雪"),
-        80 | 81 | 82 => ("🌦️", "にわか雨"),
+        80..=82 => ("🌦️", "にわか雨"),
         85 | 86 => ("🌨️", "にわか雪"),
         95 | 96 | 99 => ("⛈️", "雷雨"),
         _ => ("🌡️", "—"),
@@ -200,7 +200,7 @@ fn sparkline(values: &[f64]) -> String {
     const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if !(max > min) {
+    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
         return BARS[3].to_string().repeat(values.len());
     }
     values
