@@ -74,7 +74,7 @@ graph LR
 ```
 
 - **叩く AI を増やす**: `src-tauri/src/providers/` に `Provider` トレイトを実装した `.rs` を置き、`inventory::submit!` で登録。
-- **エージェント機能を増やす**: プロジェクト直下の `skills/` に `Tool` トレイトを実装した `.rs` を置き、`inventory::submit!` で登録。
+- **エージェント機能を増やす**: プロジェクト直下の `skills/<スキル名>/mod.rs` に `Tool` トレイトを実装し、`inventory::submit!` で登録。
 
 `build.rs` が `.rs` を自動で `mod` 取り込みし、再ビルドで**自動登録**されます（`mod.rs` 編集不要）。書き方は [SPEC.md](SPEC.md#新しいコネクタの作り方) を参照。
 
@@ -254,7 +254,7 @@ AivisSpeech Engine は `npm run dev` / `npm run build` の起動前に、同梱�
 ```text
 20_PicoAgent/
 ├── characters/          ← キャラクター正本（index.json・人格定義・連番フレーム）
-├── skills/              ← エージェント機能（スキル）コネクタ（.rs を足すと自動登録）
+├── skills/              ← エージェント機能（スキル）コネクタ（<スキル名>/mod.rs を足すと自動登録）
 ├── ui/                  ← webview フロント（picoagent.js シム・ペット UI・設定画面）
 │                          ※ assets/characters/ は characters/ の配信コピー（自動生成）
 ├── src-tauri/

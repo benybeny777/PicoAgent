@@ -37,10 +37,10 @@
 
 ## コネクタ開発ルール（このプロジェクトの中核）
 
-PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント機能（スキル/ツール）」をコネクタとして拡張する。**どちらも該当フォルダに `.rs` を1枚置けば自動登録される**。`build.rs` が `src/providers/*.rs`・ルートの `skills/*.rs` を走査して `#[path] pub mod` を生成し、各ファイルの `inventory::submit!` で登録されるため、`mod.rs` の編集は不要。スキルの連結ファイルは扱いやすいようプロジェクト直下の `skills/` に置く（トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`）。
+PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント機能（スキル/ツール）」をコネクタとして拡張する。**どちらも決まった場所へファイルを置けば自動登録される**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して `#[path] pub mod` を生成し、各ファイルの `inventory::submit!` で登録されるため、中央の `mod.rs` 編集は不要。スキルは扱いやすいようプロジェクト直下の `skills/<スキル名>/mod.rs` に置く（トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`）。
 
 - **プロバイダコネクタ** は `src-tauri/src/providers/` に置き、`Provider` トレイトを実装して `inventory::submit! { ProviderReg { make: || Box::new(<型>) } }` で登録する。`chat()` は正規形メッセージ（`message.rs`）を受け取り正規形 assistant を返す。プロバイダ固有のワイヤ形式変換は各コネクタ内に閉じ込め、`agent.rs` に漏らさない。
-- **スキル（ツール）コネクタ** はプロジェクト直下の `skills/` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
+- **スキル（ツール）コネクタ** はプロジェクト直下の `skills/<スキル名>/mod.rs` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
 - システムに副作用を持つツール（ファイル・ネットワーク・プロセス等）は、必ず境界（許可ルート・サイズ上限・確認など）を設ける。例: `tools/read_file.rs` は `PICOAGENT_TOOLS_ROOT` 配下に限定しトラバーサルを拒否する。
 - コネクタが設定値を必要とするなら `config_schema()` で申告する。値はフィールドに固定せず**メソッド内で `cfg.get()` から都度読む**（設定画面での変更を再起動なしに反映するため）。
 - コネクタを追加・変更したら `SPEC.md` のインターフェース定義と一覧、必要なら `README.md` の設定キーを更新する。
@@ -82,7 +82,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
 | `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
-| `skills/*.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。`.rs` を足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
+| `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
 | `characters/` | キャラクター正本（一覧 `index.json`・人格定義・連番フレーム） |
 | `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
 | `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
@@ -94,8 +94,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ```text
 20_PicoAgent/
 ├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
-├── skills/                     ← エージェント機能（スキル）連結ファイル（.rs を足すと自動登録）
-│   └── {time,weather,currency_rates,rss_feed,read_file,web_search,web_fetch,chitchat,workspace_files,run_command,slack,gmail,google_calendar,google_docs,google_drive,google_sheets,google_tasks,github,notion,discord,x_twitter,mastodon,bluesky,reddit,linkedin,misskey,microsoft_graph,jira,linear,trello,todoist,http_api,ms_office,document_convert,pdf_tools}.rs
+├── skills/                     ← エージェント機能（スキル）連結ディレクトリ（<スキル名>/mod.rs を足すと自動登録）
+│   └── {time,weather,currency_rates,...}/mod.rs
 ├── ui/                         ← webview フロント（frontendDist）
 │   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
 │   ├── index.html / renderer.js / styles.css       ← ペット UI

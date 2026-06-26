@@ -1,10 +1,10 @@
 // build.rs - Tauri ビルド準備 ＋ コネクタの自動 mod 生成。
 //
-// src/providers/*.rs と ルートの skills/*.rs を走査し、各ファイルの
+// src/providers/*.rs と ルートの skills/<スキル名>/mod.rs を走査し、各ファイルの
 // `pub mod <名前>;` 宣言を OUT_DIR へ生成する。providers/mod.rs・tools/mod.rs が
-// これを include! することで、「.rs を1枚置くだけ」でコネクタが追加できる
-// （中央レジストリの編集不要）思想を Rust でも維持する。スキル（ツール）の連結
-// ファイルは扱いやすいようプロジェクト直下の skills/ に置く（トレイトは tools/mod.rs）。
+// これを include! することで、「決まった場所にファイルを置くだけ」でコネクタが追加できる
+// （中央レジストリの編集不要）思想を Rust でも維持する。スキル（ツール）は
+// プロジェクト直下の skills/<スキル名>/mod.rs に置く（トレイトは tools/mod.rs）。
 
 use std::{
     env, fs,
@@ -70,8 +70,43 @@ fn generate_mods(dir: &str, out_name: &str) {
     println!("cargo:rerun-if-changed={}", dir);
 }
 
+fn generate_skill_mods(dir: &str, out_name: &str) {
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut decls = String::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        let mut modules: Vec<(String, PathBuf)> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let p = e.path();
+                if !p.is_dir() {
+                    return None;
+                }
+                let name = p.file_name()?.to_str()?.to_string();
+                let mod_path = p.join("mod.rs");
+                if mod_path.is_file() {
+                    Some((name, mod_path))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        modules.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, path) in &modules {
+            let source_path = Path::new(&manifest_dir).join(path);
+            let rel = relative_path(Path::new(&out_dir), &source_path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            decls.push_str(&format!("#[path = \"{}\"]\npub mod {};\n", rel, name));
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+    fs::write(Path::new(&out_dir).join(out_name), decls).unwrap();
+    println!("cargo:rerun-if-changed={}", dir);
+}
+
 fn main() {
     generate_mods("src/providers", "provider_mods.rs");
-    generate_mods("../skills", "tool_mods.rs");
+    generate_skill_mods("../skills", "tool_mods.rs");
     tauri_build::build();
 }

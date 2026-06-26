@@ -6,6 +6,10 @@
 
 ## 2026-06-26
 
+### スキル配置をディレクトリ階層へ変更
+
+- スキルコネクタの配置を `skills/<スキル名>.rs` から `skills/<スキル名>/mod.rs` に変更。`build.rs` は `skills/<スキル名>/mod.rs` を走査して `#[path] pub mod` を生成するため、中央の `mod.rs` 編集不要の自動登録は維持。
+
 ### 外部サービス連携とワークスペース操作スキル
 
 - OpenClaw 系の実用スキルに近い外部連携として、Slack 送信スキル `slack_send_message`、Gmail 送信/下書きスキル `gmail_message`、Google Calendar 予定操作 `google_calendar`、Google Docs 文書操作 `google_docs`、Google Drive ファイル操作 `google_drive`、Google Sheets 範囲操作 `google_sheets`、GitHub Issue 操作 `github_issue`、Notion 検索/ページ作成 `notion`、Discord 送信 `discord_send_message`、Microsoft Graph 連携 `microsoft_graph`、Jira `jira`、Linear `linear`、Trello `trello`、Todoist `todoist`、URL本文取得 `web_fetch`、汎用HTTP/API呼び出し `http_api` を追加。各サービスの token / Webhook URL / OAuth access token は設定から都度読み、秘密値をエラーやログへ出さない。
@@ -22,7 +26,7 @@
 
 ### アイドル時の自発雑談スキル（chitchat）
 
-- アイドル（待機）中にキャラクターが自発的にひとこと雑談する機能を、スキルコネクタ `skills/chitchat.rs` として追加。設定画面の「スキル」タブで ON/OFF と発話間隔（最短/最長秒）を変更でき、設定値はスキルの `config_schema` で自動表示される（`PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_MIN_SECS` / `PICOAGENT_CHATTER_MAX_SECS`）。
+- アイドル（待機）中にキャラクターが自発的にひとこと雑談する機能を、スキルコネクタ `skills/chitchat/mod.rs` として追加。設定画面の「スキル」タブで ON/OFF と発話間隔（最短/最長秒）を変更でき、設定値はスキルの `config_schema` で自動表示される（`PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_MIN_SECS` / `PICOAGENT_CHATTER_MAX_SECS`）。
 - 生成は `pet_idle_chatter` command が選択中キャラの人格込みで `provider.chat`（tools 無し＝Web検索なし）に依頼し、会話履歴には積まない。フロントは `[min,max]` 秒のランダム間隔で発火し、入力・応答・読み上げ・全画面中は割り込まず、ユーザー操作や設定変更でタイマーを張り直す。
 - `Tool` トレイトに `agent_callable`（既定 true）を追加し、`chitchat` のように会話中にモデルへ提示しない内部スキルを `build_schemas` から除外できるようにした。`Field` に `checkbox` 型を明記。
 
@@ -75,7 +79,7 @@
 
 ### キャラ・スキルをプロジェクト直下へ移動（扱いやすい配置）
 
-- スキル（ツール）の連結ファイルを `src-tauri/src/tools/` から**プロジェクト直下の `skills/`** へ移動した。`Tool` トレイト・レジストリ本体（`tools/mod.rs`）は src に残し、`build.rs` の走査先を `../skills` に変更した。`.rs` を1枚置けば自動登録される動作は維持。
+- スキル（ツール）の連結ファイルを `src-tauri/src/tools/` から**プロジェクト直下の `skills/`** へ移動した。当時は `skills/<スキル名>.rs` を走査していたが、現在は `skills/<スキル名>/mod.rs` を走査する。`Tool` トレイト・レジストリ本体（`tools/mod.rs`）は src に残し、中央レジストリ編集不要の自動登録は維持。
 - キャラクターの正本を `ui/assets/characters/` から**プロジェクト直下の `characters/`** へ移動した。webview は `ui/` 配下しか配信できないため、`scripts/sync-characters.mjs` が `ui/assets/characters/` へ同期し、`npm run dev` / `npm run build` で Tauri 起動前に自動実行する。配信コピー（`ui/assets/characters/`）は `.gitignore` 対象。
 - `npm run sync:characters` で手動同期も可能。
 

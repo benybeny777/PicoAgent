@@ -12,7 +12,7 @@ PicoAgent は透明な **Tauri** ウィンドウに常駐する、キャラク�
 「叩く AI（LLM バックエンド）」と「エージェント機能（ツール）」をコネクタとして拡張できる。
 
 - **叩く AI** → プロバイダコネクタ（`src-tauri/src/providers/`）。**既定は `local`（同梱 llama-server、Ollama 不要）**、Ollama / OpenAI 互換も同梱。
-- **エージェント機能** → スキル（ツール）コネクタ（連結ファイルはプロジェクト直下の `skills/`、トレイトは `src-tauri/src/tools/mod.rs`）。モデルが function calling で呼び出す。
+- **エージェント機能** → スキル（ツール）コネクタ（連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、トレイトは `src-tauri/src/tools/mod.rs`）。モデルが function calling で呼び出す。
 - **キャラクター** → 正本はプロジェクト直下の `characters/index.json` と各 `character.json`。`sync-characters.mjs` が `ui/assets/characters/` へ同期し webview が配信。見た目・アニメーション・人格を一体で切り替える。
 - **両者をつなぐ中核** → エージェントループ（`src-tauri/src/agent.rs`）。
 
@@ -47,12 +47,12 @@ graph TD
     A -->|chat| P[プロバイダコネクタ<br/>providers/*]
     P -->|reqwest| LLM[(叩く AI<br/>Ollama / OpenAI互換)]
     LLM -->|tool_calls| A
-    A -->|dispatch| T[スキルコネクタ<br/>skills/*]
+    A -->|dispatch| T[スキルコネクタ<br/>skills/*/mod.rs]
     T -->|結果| A
     A -->|最終応答| CMD -->|return| R
 ```
 
-- コネクタは **`inventory` でコンパイル時自動登録**。`build.rs` が `src/providers/*.rs`・ルートの `skills/*.rs` を走査して
+- コネクタは **`inventory` でコンパイル時自動登録**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して
   `#[path] pub mod` を生成するため、**`.rs` を1枚置くだけ**でコネクタ追加（`mod.rs` 編集不要）。
 - `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談を保持。プロバイダとモデルは設定画面から切替。
 - 設定の正本は `config.rs`（`app_config_dir/config.json`）。コネクタは `cfg.get()` で都度読むため、設定変更は再起動なしに反映。
@@ -157,7 +157,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 ## スキル（ツール）コネクタ
 
-連結ファイルはプロジェクト直下の `skills/`、`Tool` トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
+連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、`Tool` トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
 
 `Tool` トレイトを実装し、`inventory::submit!` で登録する。
 
@@ -228,11 +228,11 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 ### エージェント機能を増やす（例: Web 検索）
 
-1. `skills/web_search.rs` を作り、`Tool` を実装して `inventory::submit!` する。副作用があるなら境界（タイムアウト・件数上限）を設ける。
+1. `skills/web_search/mod.rs` を作り、`Tool` を実装して `inventory::submit!` する。副作用があるなら境界（タイムアウト・件数上限）を設ける。
 2. 再ビルドすると、ツールスキーマが自動でモデルへ渡る。
 3. `SPEC.md` の同梱ツール表を更新。
 
-どちらも **`mod.rs` の編集は不要**。フォルダに `.rs` を置くだけで検出される。設定値が要るなら `config_schema()` で申告すれば設定画面に項目が並ぶ。
+どちらも中央の **`mod.rs` の編集は不要**。プロバイダは `src/providers/*.rs`、スキルは `skills/<スキル名>/mod.rs` を置くだけで検出される。設定値が要るなら `config_schema()` で申告すれば設定画面に項目が並ぶ。
 
 ---
 
