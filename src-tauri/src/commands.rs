@@ -287,6 +287,34 @@ pub async fn pet_send(
 // 選択中キャラの人格(system)込みでプロバイダへ依頼する。Web検索やツールは使わない。
 // 生成後は「直前の自発雑談」として会話文脈にも短く残す。
 // ユーザーが「今の雑談は何の話？」と聞いたとき、モデルが直前の独り言を参照できるようにするため。
+// 現在のローカル日時と時間帯を、雑談が時間に合った内容を言えるよう短く渡す。
+fn current_time_context() -> String {
+    use chrono::{Datelike, Local, Timelike};
+    let now = Local::now();
+    let weekday = ["月", "火", "水", "木", "金", "土", "日"]
+        [now.weekday().num_days_from_monday() as usize];
+    let hour = now.hour();
+    let part = match hour {
+        5..=10 => "朝",
+        11..=16 => "昼",
+        17..=18 => "夕方",
+        _ => "夜",
+    };
+    // 夜・早朝に「日差し」「昼の景色」など時間に合わない描写をしないよう明示する。
+    let caution = if (5..=18).contains(&hour) {
+        ""
+    } else {
+        "。いまは夜なので、日差しや昼の景色など昼前提の描写はしない"
+    };
+    format!(
+        "現在の日時: {}年{}月{}日({weekday}) {hour:02}:{:02}、時間帯は「{part}」です。独り言は必ずこの時間帯に合う内容にする{caution}。",
+        now.year(),
+        now.month(),
+        now.day(),
+        now.minute(),
+    )
+}
+
 #[tauri::command]
 pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
@@ -301,11 +329,24 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
 
     // 直近の独り言を「避ける文」として渡し、毎回ちがう内容にする。
     let avoid = state.recent_chatter.lock().unwrap().clone();
-    // 雑談スキルから独り言用の指示文を受け取り、現在の人格付き会話のクローンへ一時的に積む。
-    // 会話文脈（直近の会話）も含むため、最近の話題を踏まえた独り言になる。
     let instruction = tools::dispatch(&state.config, "chitchat", json!({ "avoid": avoid })).await;
-    let mut convo = state.messages.lock().unwrap().clone();
-    convo.push(Message::new("user", instruction));
+    // 雑談は「人格(system)＋現在時刻＋指示」だけで生成する。直近の会話（ユーザー発話）は
+    // 文脈へ入れない（小型モデルが入力をオウム返しするのを防ぐため）。
+    let system = state
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|m| m.role == "system")
+        .cloned();
+    let mut convo: Vec<Message> = Vec::new();
+    if let Some(system) = system {
+        convo.push(system);
+    }
+    convo.push(Message::new(
+        "user",
+        format!("{}\n\n{instruction}", current_time_context()),
+    ));
 
     match provider.chat(&state.config, &model, &convo, &[]).await {
         Ok(message) => {

@@ -328,7 +328,8 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } else {
-    speakReply(result.reply);
+    // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
+    if (String(result.reply ?? "").trim() !== text) speakReply(result.reply);
     await renderReplySpeaking(result.reply);
     addHistory("assistant", result.reply);
   }

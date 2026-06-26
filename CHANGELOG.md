@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### 自発雑談の時間整合とオウム返し防止
+
+- 自発雑談の生成を「人格(system)＋現在時刻＋指示」だけで行い、ユーザー発話（会話履歴）を文脈に含めないようにした。小型モデルがユーザー入力をオウム返しして読み上げる挙動を解消（`pet_idle_chatter`）。
+- `current_time_context()` で現在のローカル日時・時間帯（朝/昼/夕方/夜）を雑談へ渡し、夜なのに「日差し」など時間に合わない独り言を出さないようにした。
+- 通常会話でも、返信がユーザー入力のオウム返しになった場合は読み上げないようにした（`renderer.js`）。
+
 ### Gemma の「ロール交互」400 エラーを修正
 
 - 自発雑談が `assistant` 発話を履歴へ積むことや履歴復元により、会話が「assistant 連続」「先頭 assistant」になり、Gemma のチャットテンプレートが 400「Conversation roles must alternate user/assistant」を返してチャットが失敗していた不具合を修正。`local` プロバイダ送信直前に `normalize_for_local` で user/assistant の交互・user 始まりへ正規化する（system を先頭集約、先頭の純 assistant 除去、連続同 role を連結）。実機で「連続assistant→400 / 正規化後→200」を確認。
