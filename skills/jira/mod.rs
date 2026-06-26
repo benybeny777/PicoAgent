@@ -1,4 +1,4 @@
-// tools/jira.rs - Jira Cloud の課題検索・作成スキル。
+// skills/jira/mod.rs - Jira Cloud の課題検索・作成スキル。
 
 use std::time::Duration;
 
@@ -61,7 +61,7 @@ impl Tool for JiraTool {
         let email = cfg.get("PICOAGENT_JIRA_EMAIL", "");
         let token = cfg.get("PICOAGENT_JIRA_API_TOKEN", "");
         if base.is_empty() || email.is_empty() || token.is_empty() {
-            return "エラー: PICOAGENT_JIRA_BASE_URL / PICOAGENT_JIRA_EMAIL / PICOAGENT_JIRA_API_TOKEN が未設定です。".to_string();
+            return super::config_guide("Jira", &["PICOAGENT_JIRA_BASE_URL", "PICOAGENT_JIRA_EMAIL", "PICOAGENT_JIRA_API_TOKEN"], "Jira Cloud のサイトURL、メールアドレス、API token を入れてください。");
         }
         let timeout = cfg
             .get("PICOAGENT_JIRA_TIMEOUT_SECS", "20")
@@ -103,7 +103,7 @@ impl Tool for JiraTool {
                     return "エラー: summary が指定されていません。".to_string();
                 };
                 if project_key.is_empty() {
-                    return "エラー: project_key または PICOAGENT_JIRA_PROJECT_KEY が未設定です。".to_string();
+                    return super::config_guide("Jira", &["PICOAGENT_JIRA_PROJECT_KEY"], "依頼で project_key を渡すか、既定のプロジェクトキーを設定してください。");
                 }
                 let issue_type = args.get("issue_type").and_then(Value::as_str).unwrap_or("Task");
                 let description = args.get("description").and_then(Value::as_str).unwrap_or("");

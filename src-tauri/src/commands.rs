@@ -308,7 +308,7 @@ fn speech_text(text: &str) -> String {
                 if c == ']' {
                     if chars.peek() == Some(&'(') {
                         let _ = chars.next();
-                        while let Some(u) = chars.next() {
+                        for u in chars.by_ref() {
                             if u == ')' {
                                 break;
                             }
@@ -460,6 +460,16 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "active": { "providerId": provider_id, "model": model },
         "defaults": { "systemPrompt": DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
+        "localModelPresets": crate::providers::local::LOCAL_MODEL_PRESETS.iter().map(|preset| json!({
+            "id": preset.id,
+            "label": preset.label,
+            "url": preset.url,
+            "ctx": preset.ctx,
+            "recommendedVramGb": preset.recommended_vram_gb,
+            "recommendedRamGb": preset.recommended_ram_gb,
+            "downloadSize": preset.download_size,
+            "note": preset.note,
+        })).collect::<Vec<Value>>(),
         "tools": tool_list,
     }))
 }
@@ -485,6 +495,12 @@ pub async fn settings_save(
     let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
     let has_tts_enabled = patch.contains_key("PICOAGENT_TTS_ENABLED");
     let has_tts_device = patch.contains_key("PICOAGENT_TTS_DEVICE");
+    let local_engine_changed = patch.contains_key("PICOAGENT_LOCAL_MODEL_PRESET")
+        || patch.contains_key("PICOAGENT_MODEL_URL")
+        || patch.contains_key("PICOAGENT_LOCAL_PORT")
+        || patch.contains_key("PICOAGENT_LOCAL_CTX")
+        || patch.contains_key("PICOAGENT_LOCAL_NGL")
+        || patch.contains_key("PICOAGENT_LOCAL_GPU_DEVICE");
     state.config.set_all(patch).map_err(|e| e.to_string())?;
 
     // グローバル設定を実行中へ反映。
@@ -517,6 +533,11 @@ pub async fn settings_save(
                 }
             });
         }
+    }
+    if pid == "local" && local_engine_changed {
+        crate::engine::stop(&app);
+        let handle = app.clone();
+        tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
     }
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));

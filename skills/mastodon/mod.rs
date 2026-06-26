@@ -1,4 +1,4 @@
-// tools/mastodon.rs - Mastodon API の投稿・タイムライン・検索スキル。
+// skills/mastodon/mod.rs - Mastodon API の投稿・タイムライン・検索スキル。
 
 use std::time::Duration;
 
@@ -52,7 +52,7 @@ impl Tool for MastodonTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_MASTODON_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_MASTODON_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Mastodon", &["PICOAGENT_MASTODON_ACCESS_TOKEN"], "投稿やホームタイムライン取得に使う Mastodon access token が必要です。");
         }
         let base = cfg
             .get("PICOAGENT_MASTODON_BASE_URL", "https://mastodon.social")

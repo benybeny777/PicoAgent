@@ -1,4 +1,4 @@
-// tools/trello.rs - Trello のカード一覧・作成スキル。
+// skills/trello/mod.rs - Trello のカード一覧・作成スキル。
 
 use std::time::Duration;
 
@@ -53,7 +53,7 @@ impl Tool for TrelloTool {
         let key = cfg.get("PICOAGENT_TRELLO_KEY", "");
         let token = cfg.get("PICOAGENT_TRELLO_TOKEN", "");
         if key.is_empty() || token.is_empty() {
-            return "エラー: PICOAGENT_TRELLO_KEY / PICOAGENT_TRELLO_TOKEN が未設定です。".to_string();
+            return super::config_guide("Trello", &["PICOAGENT_TRELLO_KEY", "PICOAGENT_TRELLO_TOKEN"], "Trello API key と token が必要です。");
         }
         let list_id = args
             .get("list_id")
@@ -63,7 +63,7 @@ impl Tool for TrelloTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_TRELLO_LIST_ID", ""));
         if list_id.is_empty() {
-            return "エラー: list_id または PICOAGENT_TRELLO_LIST_ID が未設定です。".to_string();
+            return super::config_guide("Trello", &["PICOAGENT_TRELLO_LIST_ID"], "依頼で list_id を渡すか、既定のリストIDを設定してください。");
         }
         let timeout = cfg
             .get("PICOAGENT_TRELLO_TIMEOUT_SECS", "15")

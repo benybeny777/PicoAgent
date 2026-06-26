@@ -1,4 +1,4 @@
-// tools/http_api.rs - 汎用HTTP API/Webhook呼び出しスキル。
+// skills/http_api/mod.rs - 汎用HTTP API/Webhook呼び出しスキル。
 //
 // 未個別対応のSaaS連携用。許可ドメインと任意のBearer/API keyを設定で制限する。
 

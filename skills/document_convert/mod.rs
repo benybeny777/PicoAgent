@@ -1,4 +1,4 @@
-// tools/document_convert.rs - LibreOffice による Office/PDF 変換スキル。
+// skills/document_convert/mod.rs - LibreOffice による Office/PDF 変換スキル。
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

@@ -1,4 +1,4 @@
-// tools/notion.rs - Notion の検索・データベースページ作成スキル。
+// skills/notion/mod.rs - Notion の検索・データベースページ作成スキル。
 
 use std::time::Duration;
 
@@ -70,7 +70,7 @@ impl Tool for NotionTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_NOTION_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_NOTION_TOKEN が未設定です。".to_string();
+            return super::config_guide("Notion", &["PICOAGENT_NOTION_TOKEN"], "Notion integration token が必要です。対象ページ/DBをintegrationへ共有してください。");
         }
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
         let client = match reqwest::Client::builder()
@@ -126,7 +126,7 @@ impl Tool for NotionTool {
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_NOTION_DATABASE_ID", ""));
                 if database_id.is_empty() {
-                    return "エラー: database_id または PICOAGENT_NOTION_DATABASE_ID が未設定です。".to_string();
+                    return super::config_guide("Notion", &["PICOAGENT_NOTION_DATABASE_ID"], "ページ作成時は依頼で database_id を渡すか、既定の database ID を設定してください。");
                 }
                 let title = match args.get("title").and_then(Value::as_str).map(str::trim) {
                     Some(title) if !title.is_empty() => title,

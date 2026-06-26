@@ -1,4 +1,4 @@
-// tools/misskey.rs - Misskey API のノート投稿・タイムライン取得スキル。
+// skills/misskey/mod.rs - Misskey API のノート投稿・タイムライン取得スキル。
 
 use std::time::Duration;
 
@@ -52,7 +52,7 @@ impl Tool for MisskeyTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_MISSKEY_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_MISSKEY_TOKEN が未設定です。".to_string();
+            return super::config_guide("Misskey", &["PICOAGENT_MISSKEY_TOKEN"], "Misskey API token が必要です。");
         }
         let base = cfg
             .get("PICOAGENT_MISSKEY_BASE_URL", "https://misskey.io")

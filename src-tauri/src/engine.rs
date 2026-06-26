@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::Child;
 use std::sync::Mutex;
 
+use serde_json::Map;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -62,11 +63,7 @@ fn server_path(app: &AppHandle) -> Option<PathBuf> {
 
 fn model_url(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
-    // 既定は Gemma 3n E2B の Q4_K_M GGUF（unsloth 提供）。設定で差し替え可能。
-    state.config.get(
-        "PICOAGENT_MODEL_URL",
-        "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf",
-    )
+    local::model_url(&state.config)
 }
 
 fn model_path(app: &AppHandle) -> PathBuf {
@@ -121,6 +118,114 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn total_memory_bytes() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+            ])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+        let kb = text.lines().find_map(|line| {
+            line.strip_prefix("MemTotal:")
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|value| value.parse::<u64>().ok())
+        })?;
+        return Some(kb.saturating_mul(1024));
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        None
+    }
+}
+
+fn gpu_vram_bytes() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty AdapterRAM",
+            ])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse::<u64>().ok())
+            .max()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+fn auto_model_preset() -> &'static str {
+    let vram = gpu_vram_bytes().unwrap_or(0);
+    let ram = total_memory_bytes().unwrap_or(0);
+    let gib = 1024_u64.pow(3);
+    if vram >= 6 * gib && ram >= 24 * gib {
+        "large"
+    } else if vram >= 3 * gib || ram >= 16 * gib {
+        "balanced"
+    } else {
+        "small"
+    }
+}
+
+fn ensure_local_model_selection(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let requested = state.config.get("PICOAGENT_LOCAL_MODEL_PRESET", "auto");
+    let should_auto = requested == "auto"
+        || (!state.config.has_value("PICOAGENT_LOCAL_MODEL_PRESET")
+            && !state.config.has_value("PICOAGENT_MODEL_URL"));
+    let selected = if should_auto {
+        auto_model_preset()
+    } else if local::preset(&requested).is_some() || requested == "custom" {
+        requested.as_str()
+    } else {
+        "balanced"
+    };
+    if selected == "custom" {
+        return;
+    }
+    let Some(preset) = local::preset(selected) else {
+        return;
+    };
+    let mut patch = Map::new();
+    if requested != selected {
+        patch.insert(
+            "PICOAGENT_LOCAL_MODEL_PRESET".to_string(),
+            Value::String(selected.to_string()),
+        );
+    }
+    if !state.config.has_value("PICOAGENT_MODEL") {
+        patch.insert(
+            "PICOAGENT_MODEL".to_string(),
+            Value::String(preset.id.to_string()),
+        );
+    }
+    if !state.config.has_value("PICOAGENT_LOCAL_CTX") {
+        patch.insert(
+            "PICOAGENT_LOCAL_CTX".to_string(),
+            Value::String(preset.ctx.to_string()),
+        );
+    }
+    if !patch.is_empty() {
+        let _ = state.config.set_all(patch);
+        *state.model.lock().unwrap() = preset.id.to_string();
+    }
+}
+
 // llama-server を起動する。
 fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     let server = server_path(app).ok_or_else(|| {
@@ -167,6 +272,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
 
 // モデル取得→エンジン起動→ready 検知までを通しで行う（async タスクから呼ぶ）。
 pub async fn ensure_and_start(app: AppHandle) {
+    ensure_local_model_selection(&app);
     let model = model_path(&app);
     if !model.exists() {
         if let Err(e) = download_model(&app, &model).await {

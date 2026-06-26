@@ -26,6 +26,9 @@ function el(tag, props = {}, children = []) {
 
 // 1つの設定項目を描画して inputs に登録する。
 function field(key, label, type, value, placeholder) {
+  if (key === "PICOAGENT_LOCAL_MODEL_PRESET") {
+    return localModelPresetField(key, label, value || "auto");
+  }
   if (type === "textarea") {
     const ta = el("textarea", { value: value ?? "", placeholder: placeholder || "" });
     inputs.set(key, ta);
@@ -40,6 +43,31 @@ function field(key, label, type, value, placeholder) {
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   inputs.set(key, input);
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
+}
+
+function localModelPresetField(key, label, value) {
+  const options = [
+    { value: "auto", label: "自動（初回だけPC性能から選ぶ）" },
+    ...(data.localModelPresets || []).map(preset => ({
+      value: preset.id,
+      label: `${preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize}`,
+    })),
+    { value: "custom", label: "カスタムURLを使う" },
+  ];
+  const wrapper = selectField(key, label, value, options);
+  const hint = el("div", { className: "hint", textContent: localModelPresetHint(value) });
+  const select = wrapper.querySelector("select");
+  select.addEventListener("change", () => { hint.textContent = localModelPresetHint(select.value); });
+  wrapper.append(hint);
+  return wrapper;
+}
+
+function localModelPresetHint(value) {
+  if (value === "auto") return "初回起動時にVRAM/RAM目安で small / balanced / large を選び、以後は選定結果を保存します。";
+  if (value === "custom") return "下のカスタムモデルURLを使います。GGUFファイルの直接URLを指定してください。";
+  const preset = (data.localModelPresets || []).find(item => item.id === value);
+  if (!preset) return "";
+  return `${preset.note} 推奨VRAM: ${preset.recommendedVramGb}GB以上、推奨RAM: ${preset.recommendedRamGb}GB以上、ダウンロード目安: ${preset.downloadSize}`;
 }
 
 function selectField(key, label, value, options) {
@@ -248,6 +276,11 @@ async function render() {
 
   // プロバイダ変更でモデル候補を更新し、候補が取れたらモデル欄へ反映する。
   providerSelect.addEventListener("change", () => loadModels(providerSelect.value, true));
+  inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
+    if (providerSelect.value !== "local" || !modelInput) return;
+    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
+    modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
+  });
   loadModels(providerSelect.value);
 }
 
@@ -256,6 +289,10 @@ function providerDefaultModel(providerId) {
   if (!provider) return "";
   if (providerId === "ollama") return inputs.get("OLLAMA_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "openai") return inputs.get("OPENAI_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "local") {
+    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || provider.defaultModel || "balanced";
+    return preset === "auto" ? (provider.defaultModel || "balanced") : preset;
+  }
   return provider.defaultModel || "";
 }
 
@@ -289,6 +326,10 @@ function collect() {
   }
   if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
   if (patch.PICOAGENT_PROVIDER === "openai" && patch.PICOAGENT_MODEL) patch.OPENAI_MODEL = patch.PICOAGENT_MODEL;
+  if (patch.PICOAGENT_PROVIDER === "local") {
+    const preset = patch.PICOAGENT_LOCAL_MODEL_PRESET || "auto";
+    patch.PICOAGENT_MODEL = preset === "auto" ? "" : preset;
+  }
   if (characterSelect && characterPersona) characterOverrides[characterSelect.value] = characterPersona.value;
   if (characterSelect && characterSpeaker) saveCurrentCharacterVoice(characterSelect.value);
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;

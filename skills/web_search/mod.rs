@@ -1,4 +1,4 @@
-// tools/web_search.rs - Web検索結果をモデルへ返すエージェント機能コネクタ。
+// skills/web_search/mod.rs - Web検索結果をモデルへ返すエージェント機能コネクタ。
 //
 // DuckDuckGo の軽量HTML検索を利用し、検索語・件数・応答サイズ・待ち時間に境界を設ける。
 

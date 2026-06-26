@@ -1,4 +1,4 @@
-// tools/google_drive.rs - Google Drive の検索・テキストファイル作成スキル。
+// skills/google_drive/mod.rs - Google Drive の検索・テキストファイル作成スキル。
 
 use std::time::Duration;
 
@@ -64,7 +64,7 @@ impl Tool for GoogleDriveTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Google Drive", &["PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN"], "Google Drive API を使える OAuth access token が必要です。");
         }
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs(cfg)))

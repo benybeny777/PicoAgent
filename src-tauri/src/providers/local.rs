@@ -11,6 +11,68 @@ use crate::message::{Field, Message};
 
 pub struct Local;
 
+pub struct LocalModelPreset {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub url: &'static str,
+    pub ctx: &'static str,
+    pub recommended_vram_gb: u64,
+    pub recommended_ram_gb: u64,
+    pub download_size: &'static str,
+    pub note: &'static str,
+}
+
+pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
+    LocalModelPreset {
+        id: "small",
+        label: "軽量: Gemma 3 1B Q4（低VRAM/CPU向け）",
+        url: "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf",
+        ctx: "4096",
+        recommended_vram_gb: 0,
+        recommended_ram_gb: 8,
+        download_size: "約0.8GB",
+        note: "VRAMが少ないPCやCPU中心の環境向け。",
+    },
+    LocalModelPreset {
+        id: "balanced",
+        label: "標準: Gemma 3n E2B Q4（推奨）",
+        url: "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf",
+        ctx: "4096",
+        recommended_vram_gb: 4,
+        recommended_ram_gb: 16,
+        download_size: "約3.0GB",
+        note: "通常利用の推奨。4GB級VRAMまたは十分なRAMがあるPC向け。",
+    },
+    LocalModelPreset {
+        id: "large",
+        label: "高品質: Gemma 3n E4B Q4（VRAM 6GB以上推奨）",
+        url: "https://huggingface.co/unsloth/gemma-3n-E4B-it-GGUF/resolve/main/gemma-3n-E4B-it-Q4_K_M.gguf",
+        ctx: "4096",
+        recommended_vram_gb: 6,
+        recommended_ram_gb: 24,
+        download_size: "約4.5GB",
+        note: "品質優先。起動や応答は重くなる。",
+    },
+];
+
+pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
+    LOCAL_MODEL_PRESETS.iter().find(|preset| preset.id == id)
+}
+
+pub fn preset_url(id: &str) -> Option<&'static str> {
+    preset(id).map(|preset| preset.url)
+}
+
+pub fn model_url(cfg: &Config) -> String {
+    let preset_id = cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", "balanced");
+    if preset_id != "custom" {
+        if let Some(url) = preset_url(&preset_id) {
+            return url.to_string();
+        }
+    }
+    cfg.get("PICOAGENT_MODEL_URL", LOCAL_MODEL_PRESETS[1].url)
+}
+
 pub fn port(cfg: &Config) -> u16 {
     cfg.get("PICOAGENT_LOCAL_PORT", "11435").parse().unwrap_or(11435)
 }
@@ -24,15 +86,21 @@ impl Provider for Local {
         "local"
     }
     fn label(&self) -> &'static str {
-        "ローカル(gemma4)"
+        "ローカル"
     }
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new(
-                "PICOAGENT_MODEL_URL",
-                "モデル GGUF の取得元 URL",
+                "PICOAGENT_LOCAL_MODEL_PRESET",
+                "ローカルモデル（auto/small/balanced/large/custom）",
                 "text",
-                "https://huggingface.co/.../gemma-3n-E2B-it-Q4_K_M.gguf",
+                "auto",
+            ),
+            Field::new(
+                "PICOAGENT_MODEL_URL",
+                "カスタムモデル GGUF の取得元 URL",
+                "text",
+                LOCAL_MODEL_PRESETS[1].url,
             ),
             Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
             Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "4096"),
@@ -51,21 +119,30 @@ impl Provider for Local {
         ]
     }
     fn default_model(&self, cfg: &Config) -> String {
-        cfg.get("PICOAGENT_MODEL", "gemma-3n-e2b")
+        cfg.get("PICOAGENT_MODEL", &cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", "balanced"))
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/models", base_url(cfg));
-        let res = reqwest::Client::new()
+        let local_presets: Vec<String> = LOCAL_MODEL_PRESETS
+            .iter()
+            .map(|preset| preset.id.to_string())
+            .chain(std::iter::once("custom".to_string()))
+            .collect();
+        let res = match reqwest::Client::new()
             .get(&url)
             .timeout(std::time::Duration::from_secs(2))
             .send()
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(_) => return Ok(local_presets),
+        };
         if !res.status().is_success() {
-            anyhow::bail!("local /models failed: {}", res.status());
+            return Ok(local_presets);
         }
         let data: Value = res.json().await?;
-        Ok(data
+        let mut out: Vec<String> = data
             .get("data")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -73,7 +150,13 @@ impl Provider for Local {
                     .filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(String::from))
                     .collect()
             })
-            .unwrap_or_default())
+            .unwrap_or_default();
+        for preset in local_presets {
+            if !out.contains(&preset) {
+                out.push(preset);
+            }
+        }
+        Ok(out)
     }
 
     async fn is_up(&self, cfg: &Config) -> bool {

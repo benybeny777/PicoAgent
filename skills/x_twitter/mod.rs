@@ -1,4 +1,4 @@
-// tools/x_twitter.rs - X API v2 の投稿・検索スキル。
+// skills/x_twitter/mod.rs - X API v2 の投稿・検索スキル。
 
 use std::time::Duration;
 
@@ -53,7 +53,7 @@ impl Tool for XTwitterTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_X_BEARER_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_X_BEARER_TOKEN が未設定です。".to_string();
+            return super::config_guide("X連携", &["PICOAGENT_X_BEARER_TOKEN"], "X API v2 の OAuth2 bearer token が必要です。検索/投稿に必要な権限とAPIプランも確認してください。");
         }
         let timeout = timeout_secs(cfg, "PICOAGENT_X_TIMEOUT_SECS", 20);
         let client = match reqwest::Client::builder()
@@ -107,7 +107,7 @@ impl Tool for XTwitterTool {
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_X_USER_ID", ""));
                 if user_id.is_empty() {
-                    return "エラー: user_id または PICOAGENT_X_USER_ID が未設定です。".to_string();
+                    return super::config_guide("X連携", &["PICOAGENT_X_USER_ID"], "依頼で user_id を渡すか、既定のX user IDを設定してください。");
                 }
                 let max_results = max_results(&args, 5, 100, 10).to_string();
                 handle_text_response(

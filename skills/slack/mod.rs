@@ -1,4 +1,4 @@
-// tools/slack.rs - Slack へメッセージを送るスキル。
+// skills/slack/mod.rs - Slack へメッセージを送るスキル。
 //
 // Bot token + channel または Incoming Webhook URL を設定から都度読み、秘密値は出力しない。
 
@@ -113,7 +113,7 @@ impl Tool for SlackTool {
 
         let token = cfg.get("PICOAGENT_SLACK_BOT_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_SLACK_BOT_TOKEN または PICOAGENT_SLACK_WEBHOOK_URL が未設定です。".to_string();
+            return super::config_guide("Slack送信", &["PICOAGENT_SLACK_WEBHOOK_URL", "PICOAGENT_SLACK_BOT_TOKEN"], "Incoming Webhook URL、または Bot token を設定してください。Bot token 利用時は送信先チャンネルも必要です。");
         }
         let channel = args
             .get("channel")
@@ -123,7 +123,7 @@ impl Tool for SlackTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_SLACK_CHANNEL", ""));
         if channel.is_empty() {
-            return "エラー: channel または PICOAGENT_SLACK_CHANNEL が未設定です。".to_string();
+            return super::config_guide("Slack送信", &["PICOAGENT_SLACK_CHANNEL"], "Bot token 利用時は依頼で channel を渡すか、既定の送信先チャンネルを設定してください。");
         }
 
         let response = client

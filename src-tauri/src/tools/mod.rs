@@ -41,6 +41,22 @@ inventory::collect!(ToolReg);
 // build.rs が生成した `pub mod time; pub mod read_file; ...` を取り込む。
 include!(concat!(env!("OUT_DIR"), "/tool_mods.rs"));
 
+pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
+    let mut out = format!(
+        "エラー: {tool_label} を使うには設定が必要です。\n設定画面（右クリック →「設定…」→「スキル」）で次の項目を入力して保存してください:"
+    );
+    for key in keys {
+        out.push_str("\n- ");
+        out.push_str(key);
+    }
+    if !note.trim().is_empty() {
+        out.push_str("\n補足: ");
+        out.push_str(note.trim());
+    }
+    out.push_str("\n保存後、もう一度同じ依頼をしてください。APIキーやトークンの値はチャット・ログ・ドキュメントへ貼らないでください。");
+    out
+}
+
 static TOOLS: OnceLock<Vec<Box<dyn Tool>>> = OnceLock::new();
 static TOOL_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
 static TOOL_SCHEMAS: OnceLock<Vec<Value>> = OnceLock::new();

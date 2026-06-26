@@ -1,4 +1,4 @@
-// tools/google_calendar.rs - Google Calendar の予定確認・作成スキル。
+// skills/google_calendar/mod.rs - Google Calendar の予定確認・作成スキル。
 
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ impl Tool for GoogleCalendarTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Google Calendar", &["PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN"], "Google Calendar API を使える OAuth access token が必要です。");
         }
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
         let calendar_id = args

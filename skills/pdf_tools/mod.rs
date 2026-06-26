@@ -1,4 +1,4 @@
-// tools/pdf_tools.rs - qpdf による PDF 編集スキル。
+// skills/pdf_tools/mod.rs - qpdf による PDF 編集スキル。
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

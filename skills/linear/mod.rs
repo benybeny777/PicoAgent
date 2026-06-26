@@ -1,4 +1,4 @@
-// tools/linear.rs - Linear GraphQL API の Issue 検索・作成スキル。
+// skills/linear/mod.rs - Linear GraphQL API の Issue 検索・作成スキル。
 
 use std::time::Duration;
 
@@ -51,7 +51,7 @@ impl Tool for LinearTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_LINEAR_API_KEY", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_LINEAR_API_KEY が未設定です。".to_string();
+            return super::config_guide("Linear", &["PICOAGENT_LINEAR_API_KEY"], "Linear の API key を入れてください。");
         }
         let timeout = cfg
             .get("PICOAGENT_LINEAR_TIMEOUT_SECS", "20")
@@ -83,7 +83,7 @@ impl Tool for LinearTool {
                     return "エラー: title が指定されていません。".to_string();
                 };
                 if team_id.is_empty() {
-                    return "エラー: team_id または PICOAGENT_LINEAR_TEAM_ID が未設定です。".to_string();
+                    return super::config_guide("Linear", &["PICOAGENT_LINEAR_TEAM_ID"], "依頼で team_id を渡すか、既定の team ID を設定してください。");
                 }
                 json!({
                     "query": "mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier title url } } }",

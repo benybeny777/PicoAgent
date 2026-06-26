@@ -1,4 +1,4 @@
-// tools/microsoft_graph.rs - Microsoft Graph のメール・予定・Teams送信スキル。
+// skills/microsoft_graph/mod.rs - Microsoft Graph のメール・予定・Teams送信スキル。
 
 use std::time::Duration;
 
@@ -76,7 +76,7 @@ impl Tool for MicrosoftGraphTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_MS_GRAPH_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_MS_GRAPH_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Microsoft Graph", &["PICOAGENT_MS_GRAPH_ACCESS_TOKEN"], "Outlook/Teams/予定表にアクセスできる OAuth access token が必要です。");
         }
         let timeout = cfg
             .get("PICOAGENT_MS_GRAPH_TIMEOUT_SECS", "20")
@@ -176,7 +176,7 @@ impl Tool for MicrosoftGraphTool {
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_MS_GRAPH_CHANNEL_ID", ""));
                 if team_id.is_empty() || channel_id.is_empty() {
-                    return "エラー: team_id/channel_id または設定値が未設定です。".to_string();
+                    return super::config_guide("Microsoft Graph", &["PICOAGENT_MS_GRAPH_TEAM_ID", "PICOAGENT_MS_GRAPH_CHANNEL_ID"], "Teams送信では依頼で team_id/channel_id を渡すか、既定値を設定してください。");
                 }
                 let body = args.get("body").and_then(Value::as_str).unwrap_or("");
                 handle_text_response(

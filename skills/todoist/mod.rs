@@ -1,4 +1,4 @@
-// tools/todoist.rs - Todoist のタスク一覧・作成・完了スキル。
+// skills/todoist/mod.rs - Todoist のタスク一覧・作成・完了スキル。
 
 use std::time::Duration;
 
@@ -54,7 +54,7 @@ impl Tool for TodoistTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_TODOIST_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_TODOIST_TOKEN が未設定です。".to_string();
+            return super::config_guide("Todoist", &["PICOAGENT_TODOIST_TOKEN"], "Todoist API token が必要です。");
         }
         let timeout = cfg
             .get("PICOAGENT_TODOIST_TIMEOUT_SECS", "15")

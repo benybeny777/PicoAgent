@@ -1,4 +1,4 @@
-// tools/weather.rs - Open-Meteo による天気取得スキル。
+// skills/weather/mod.rs - Open-Meteo による天気取得スキル。
 
 use std::time::Duration;
 

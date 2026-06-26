@@ -1,4 +1,4 @@
-// tools/time.rs - エージェント機能コネクタ（例）: 現在時刻を返す。副作用なし。
+// skills/time/mod.rs - エージェント機能コネクタ（例）: 現在時刻を返す。副作用なし。
 
 use async_trait::async_trait;
 use chrono::Local;

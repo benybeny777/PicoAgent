@@ -1,4 +1,4 @@
-// tools/ms_office.rs - Microsoft Office COM による高精度な Office ファイル編集スキル。
+// skills/ms_office/mod.rs - Microsoft Office COM による高精度な Office ファイル編集スキル。
 //
 // Windows + Microsoft Office インストール環境向け。Word/Excel/PowerPoint の実エンジンを使う。
 

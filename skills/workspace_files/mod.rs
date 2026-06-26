@@ -1,4 +1,4 @@
-// tools/workspace_files.rs - 許可ルート内のワークスペースファイル操作スキル。
+// skills/workspace_files/mod.rs - 許可ルート内のワークスペースファイル操作スキル。
 //
 // 読み書きは PICOAGENT_WORKSPACE_ROOT 配下に限定し、サイズ上限を設ける。
 

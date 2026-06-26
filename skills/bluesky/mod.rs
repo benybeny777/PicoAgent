@@ -1,4 +1,4 @@
-// tools/bluesky.rs - Bluesky AT Protocol の投稿・検索スキル。
+// skills/bluesky/mod.rs - Bluesky AT Protocol の投稿・検索スキル。
 
 use std::time::Duration;
 
@@ -59,7 +59,7 @@ impl Tool for BlueskyTool {
         let identifier = cfg.get("PICOAGENT_BLUESKY_IDENTIFIER", "");
         let password = cfg.get("PICOAGENT_BLUESKY_APP_PASSWORD", "");
         if identifier.is_empty() || password.is_empty() {
-            return "エラー: PICOAGENT_BLUESKY_IDENTIFIER / PICOAGENT_BLUESKY_APP_PASSWORD が未設定です。".to_string();
+            return super::config_guide("Bluesky", &["PICOAGENT_BLUESKY_IDENTIFIER", "PICOAGENT_BLUESKY_APP_PASSWORD"], "Bluesky のハンドル/メールアドレスと app password を入れてください。");
         }
         let timeout = cfg
             .get("PICOAGENT_BLUESKY_TIMEOUT_SECS", "20")

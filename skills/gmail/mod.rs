@@ -1,4 +1,4 @@
-// tools/gmail.rs - Gmail API でメール送信または下書き作成を行うスキル。
+// skills/gmail/mod.rs - Gmail API でメール送信または下書き作成を行うスキル。
 //
 // OAuth アクセストークンは設定から都度読み、エラー文へ秘密値を出さない。
 
@@ -64,7 +64,7 @@ fn optional_list(args: &Value, key: &str) -> Result<Vec<String>, String> {
 }
 
 fn header_value(value: &str) -> String {
-    value.replace('\r', " ").replace('\n', " ")
+    value.replace(['\r', '\n'], " ")
 }
 
 fn message_id(response: &Value) -> &str {
@@ -157,7 +157,7 @@ impl Tool for GmailTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GMAIL_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_GMAIL_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Gmail", &["PICOAGENT_GMAIL_ACCESS_TOKEN"], "Gmail API の送信/下書き作成スコープを持つ OAuth access token が必要です。");
         }
         let timeout_secs = match parse_timeout(cfg) {
             Ok(timeout) => timeout,

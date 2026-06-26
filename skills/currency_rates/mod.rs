@@ -1,4 +1,4 @@
-// tools/currency_rates.rs - Frankfurter API による為替レート取得・換算スキル。
+// skills/currency_rates/mod.rs - Frankfurter API による為替レート取得・換算スキル。
 
 use std::time::Duration;
 

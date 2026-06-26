@@ -1,4 +1,4 @@
-// tools/linkedin.rs - LinkedIn API のプロフィール取得・UGC投稿スキル。
+// skills/linkedin/mod.rs - LinkedIn API のプロフィール取得・UGC投稿スキル。
 
 use std::time::Duration;
 
@@ -52,7 +52,7 @@ impl Tool for LinkedInTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_LINKEDIN_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_LINKEDIN_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("LinkedIn", &["PICOAGENT_LINKEDIN_ACCESS_TOKEN"], "LinkedIn API の access token が必要です。");
         }
         let timeout = cfg
             .get("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "20")
@@ -93,7 +93,7 @@ impl Tool for LinkedInTool {
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_LINKEDIN_AUTHOR_URN", ""));
                 if author.is_empty() {
-                    return "エラー: author_urn または PICOAGENT_LINKEDIN_AUTHOR_URN が未設定です。".to_string();
+                    return super::config_guide("LinkedIn", &["PICOAGENT_LINKEDIN_AUTHOR_URN"], "投稿時は依頼で author_urn を渡すか、既定の author URN を設定してください。");
                 }
                 let visibility = args.get("visibility").and_then(Value::as_str).unwrap_or("PUBLIC");
                 let payload = json!({

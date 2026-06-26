@@ -1,4 +1,4 @@
-// tools/run_command.rs - allowlist 制限付きのコマンド実行スキル。
+// skills/run_command/mod.rs - allowlist 制限付きのコマンド実行スキル。
 //
 // shell は使わず program + args で起動する。既定は無効で、設定で有効化し、
 // PICOAGENT_COMMAND_ALLOWLIST に一致する prefix だけを実行する。

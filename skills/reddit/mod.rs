@@ -1,4 +1,4 @@
-// tools/reddit.rs - Reddit OAuth API の投稿・取得スキル。
+// skills/reddit/mod.rs - Reddit OAuth API の投稿・取得スキル。
 
 use std::time::Duration;
 
@@ -56,7 +56,7 @@ impl Tool for RedditTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_REDDIT_BEARER_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_REDDIT_BEARER_TOKEN が未設定です。".to_string();
+            return super::config_guide("Reddit", &["PICOAGENT_REDDIT_BEARER_TOKEN"], "Reddit OAuth bearer token が必要です。");
         }
         let timeout = cfg
             .get("PICOAGENT_REDDIT_TIMEOUT_SECS", "20")
@@ -76,7 +76,7 @@ impl Tool for RedditTool {
             "submit_text" => {
                 let subreddit = subreddit(cfg, &args);
                 if subreddit.is_empty() {
-                    return "エラー: subreddit または PICOAGENT_REDDIT_SUBREDDIT が未設定です。".to_string();
+                    return super::config_guide("Reddit", &["PICOAGENT_REDDIT_SUBREDDIT"], "依頼で subreddit を渡すか、既定の subreddit を設定してください。");
                 }
                 let title = match text_arg(&args, "title", MAX_TITLE_CHARS) {
                     Ok(title) => title,
@@ -106,7 +106,7 @@ impl Tool for RedditTool {
             "subreddit_hot" => {
                 let subreddit = subreddit(cfg, &args);
                 if subreddit.is_empty() {
-                    return "エラー: subreddit または PICOAGENT_REDDIT_SUBREDDIT が未設定です。".to_string();
+                    return super::config_guide("Reddit", &["PICOAGENT_REDDIT_SUBREDDIT"], "依頼で subreddit を渡すか、既定の subreddit を設定してください。");
                 }
                 let limit = args
                     .get("limit")

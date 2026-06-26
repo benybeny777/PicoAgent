@@ -67,6 +67,19 @@ impl Config {
         fallback
     }
 
+    /// 永続設定または環境変数に空でない値があるか。
+    pub fn has_value(&self, key: &str) -> bool {
+        if let Some(v) = self.values.lock().unwrap().get(key) {
+            if let Some(s) = v.as_str() {
+                return !s.is_empty();
+            }
+            return !v.is_null();
+        }
+        std::env::var(key)
+            .map(|value| !value.is_empty())
+            .unwrap_or(false)
+    }
+
     /// 永続化されている生の値一式（設定画面の初期表示用）。
     pub fn get_all(&self) -> Map<String, Value> {
         self.values.lock().unwrap().clone()

@@ -1,4 +1,4 @@
-// tools/web_fetch.rs - URL の本文を取得するスキル。
+// skills/web_fetch/mod.rs - URL の本文を取得するスキル。
 //
 // 任意のURL取得は prompt injection の入口になり得るため、結果は外部データとして扱う。
 

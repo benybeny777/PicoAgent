@@ -1,4 +1,4 @@
-// tools/google_tasks.rs - Google Tasks のタスク一覧・作成・完了スキル。
+// skills/google_tasks/mod.rs - Google Tasks のタスク一覧・作成・完了スキル。
 
 use std::time::Duration;
 
@@ -53,7 +53,7 @@ impl Tool for GoogleTasksTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Google Tasks", &["PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN"], "Google Tasks API を使える OAuth access token が必要です。");
         }
         let timeout = cfg
             .get("PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS", "15")

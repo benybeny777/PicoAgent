@@ -1,4 +1,4 @@
-// tools/discord.rs - Discord Webhook へメッセージを送るスキル。
+// skills/discord/mod.rs - Discord Webhook へメッセージを送るスキル。
 
 use std::time::Duration;
 
@@ -48,7 +48,7 @@ impl Tool for DiscordTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let webhook = cfg.get("PICOAGENT_DISCORD_WEBHOOK_URL", "");
         if webhook.is_empty() {
-            return "エラー: PICOAGENT_DISCORD_WEBHOOK_URL が未設定です。".to_string();
+            return super::config_guide("Discord送信", &["PICOAGENT_DISCORD_WEBHOOK_URL"], "Discord の Incoming Webhook URL を入れてください。");
         }
         let content = match args.get("content").and_then(Value::as_str).map(str::trim) {
             Some(content) if !content.is_empty() => content,

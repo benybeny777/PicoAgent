@@ -1,4 +1,4 @@
-// tools/github.rs - GitHub Issue の一覧取得・作成スキル。
+// skills/github/mod.rs - GitHub Issue の一覧取得・作成スキル。
 
 use std::time::Duration;
 
@@ -70,7 +70,7 @@ impl Tool for GitHubTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_GITHUB_REPO", ""));
         if owner.is_empty() || repo.is_empty() {
-            return "エラー: owner/repo または PICOAGENT_GITHUB_OWNER/PICOAGENT_GITHUB_REPO が未設定です。".to_string();
+            return super::config_guide("GitHub Issue", &["PICOAGENT_GITHUB_OWNER", "PICOAGENT_GITHUB_REPO"], "依頼で owner/repo を渡すか、既定のリポジトリを設定してください。");
         }
         let timeout_secs = cfg
             .get("PICOAGENT_GITHUB_TIMEOUT_SECS", "20")
@@ -122,7 +122,7 @@ impl Tool for GitHubTool {
             }
             "create" => {
                 if token.is_empty() {
-                    return "エラー: Issue作成には PICOAGENT_GITHUB_TOKEN が必要です。".to_string();
+                    return super::config_guide("GitHub Issue", &["PICOAGENT_GITHUB_TOKEN"], "Issue 作成や private repo 操作には GitHub token が必要です。");
                 }
                 let title = match args.get("title").and_then(Value::as_str).map(str::trim) {
                     Some(title) if !title.is_empty() => title,

@@ -1,4 +1,4 @@
-// tools/google_docs.rs - Google Docs API の文書取得・作成・置換スキル。
+// skills/google_docs/mod.rs - Google Docs API の文書取得・作成・置換スキル。
 //
 // Google Docs は Drive の .gdoc ファイルではなく Docs API を正ルートにする。
 
@@ -93,7 +93,7 @@ impl Tool for GoogleDocsTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Google Docs", &["PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN"], "Google Docs API を使える OAuth access token が必要です。");
         }
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs(cfg)))

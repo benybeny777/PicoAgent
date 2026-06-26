@@ -1,4 +1,4 @@
-// tools/rss_feed.rs - RSS/Atom フィードの最新記事取得スキル。
+// skills/rss_feed/mod.rs - RSS/Atom フィードの最新記事取得スキル。
 
 use std::io::Cursor;
 use std::time::Duration;
@@ -56,7 +56,7 @@ impl Tool for RssFeedTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_RSS_DEFAULT_URL", ""));
         if url.is_empty() {
-            return "エラー: url または PICOAGENT_RSS_DEFAULT_URL が未設定です。".to_string();
+            return super::config_guide("RSS取得", &["PICOAGENT_RSS_DEFAULT_URL"], "依頼で url を渡すか、既定のRSS/Atom URLを設定してください。");
         }
         let max_items = args
             .get("max_items")

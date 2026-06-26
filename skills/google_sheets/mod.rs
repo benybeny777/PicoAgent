@@ -1,4 +1,4 @@
-// tools/google_sheets.rs - Google Sheets の範囲読み取り・更新・追記スキル。
+// skills/google_sheets/mod.rs - Google Sheets の範囲読み取り・更新・追記スキル。
 
 use std::time::Duration;
 
@@ -51,7 +51,7 @@ impl Tool for GoogleSheetsTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return "エラー: PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN が未設定です。".to_string();
+            return super::config_guide("Google Sheets", &["PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN"], "Google Sheets API を使える OAuth access token が必要です。");
         }
         let spreadsheet_id = args
             .get("spreadsheet_id")
@@ -61,7 +61,7 @@ impl Tool for GoogleSheetsTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_GOOGLE_SHEETS_ID", ""));
         if spreadsheet_id.is_empty() {
-            return "エラー: spreadsheet_id または PICOAGENT_GOOGLE_SHEETS_ID が未設定です。".to_string();
+            return super::config_guide("Google Sheets", &["PICOAGENT_GOOGLE_SHEETS_ID"], "依頼で spreadsheet_id を渡すか、既定の spreadsheet ID を設定してください。");
         }
         let Some(range) = args.get("range").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
             return "エラー: range が指定されていません。".to_string();
