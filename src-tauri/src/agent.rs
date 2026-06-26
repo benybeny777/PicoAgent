@@ -97,7 +97,7 @@ pub async fn run(
     messages: &mut Vec<Message>,
     max_steps: usize,
 ) -> anyhow::Result<String> {
-    let schemas = tools::build_schemas();
+    let mut schemas = tools::schemas_for_text("");
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
     let mut sources: Vec<String> = Vec::new();
@@ -106,6 +106,7 @@ pub async fn run(
     // ただし短い挨拶は検索結果に引っ張られやすいため、キャラ本人として返す指示だけを追加する。
     if let Some(user_index) = messages.iter().rposition(|message| message.role == "user") {
         let user_text = messages[user_index].content.clone();
+        schemas = tools::schemas_for_text(&user_text);
         if is_simple_greeting(&user_text) {
             messages[user_index].content = format!(
                 "{user_text}\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。"

@@ -54,7 +54,7 @@ graph TD
 
 - コネクタは **`inventory` でコンパイル時自動登録**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して
   `#[path] pub mod` を生成するため、**`.rs` を1枚置くだけ**でコネクタ追加（`mod.rs` 編集不要）。
-- 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。
+- 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。
 - `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談を保持。プロバイダとモデルは設定画面から切替。
 - 設定の正本は `config.rs`（`app_config_dir/config.json`）。コネクタは `cfg.get()` で都度読むため、設定変更は再起動なしに反映。
 - 会話履歴は `history.rs` が `app_data_dir/history.json` に永続化する（対話データなので config とは分離）。`pet_send` のたびに「system + クリーンな直近発話（最大 24 件）」へ圧縮して保存し、起動時に末尾 20 件を文脈へ復元する。これにより再起動をまたいで直近の会話を踏まえて話す。途中の tool 呼び出し/結果は順序破綻を避けるため文脈・履歴に残さない。人格やプロンプトの変更（`reset_conversation`）では会話の流れを保持し、右クリックメニュー「会話をリセット」（`clear_conversation_and_history`）で文脈・履歴ファイル・直近雑談を消して `pet:reset` を通知する。
@@ -177,6 +177,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `tools::build_schemas()` が `{ type:"function", function:{name,description,parameters} }` 形式の配列を生成しプロバイダへ渡す。
 - `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。
 - スキル実体、名前インデックス、function schema は `OnceLock` でキャッシュする。多数のスキルを導入しても会話ごとの schema 構築や dispatch 時の全スキル再生成を避ける。
+- `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
 
 ### 同梱ツール
 
