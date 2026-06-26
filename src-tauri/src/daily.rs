@@ -50,7 +50,9 @@ pub fn now_local_minute() -> String {
 }
 
 pub fn after_minutes(minutes: i64) -> String {
-    (Local::now() + Duration::minutes(minutes.max(1))).format("%Y-%m-%dT%H:%M").to_string()
+    (Local::now() + Duration::minutes(minutes.max(1)))
+        .format("%Y-%m-%dT%H:%M")
+        .to_string()
 }
 
 pub fn parse_local_minute(input: &str) -> Option<NaiveDateTime> {

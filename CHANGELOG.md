@@ -6,6 +6,11 @@
 
 ## 2026-06-27
 
+### Aivis の推論デバイス判定を改善
+
+- `PICOAGENT_TTS_DEVICE=auto` で同梱 Aivis を起動する際、起動前に GPU 候補を確認し、GPU 候補がなければ最初から CPU 起動（`--no-use_gpu`）を選ぶようにした。Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを GPU 候補として扱い、AMD CPU だけの環境は GPU 候補にしない。`cpu` / `gpu` の明示指定は自動判定より優先する。
+- 設定画面の「叩くAI」プロバイダ一覧は、まぎらわしさを減らすため既定の `local` を常に先頭に表示するようにした。
+
 ### 日常補助スキルと操作系スキル優先ルートを追加
 
 - `reminder` / `focus_timer` / `praise_log` / `daily_briefing` / `clipboard_text` を追加。リマインダー、集中タイマー、作業見守り、できたことメモ、おでかけ前チェック、クリップボード要約に対応した。

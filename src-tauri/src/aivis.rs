@@ -1,9 +1,10 @@
 // aivis.rs - 同梱 AivisSpeech Engine の接続確認と裏起動を管理する。
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus, Stdio};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::Manager;
 
@@ -11,6 +12,8 @@ use crate::commands::AppState;
 
 const BUNDLED_PORT: u16 = 10102;
 const DEFAULT_DEVICE: &str = "auto";
+const STARTUP_CHECKS: usize = 360;
+const GPU_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct AivisState {
     child: Mutex<Option<Child>>,
@@ -83,16 +86,56 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
-fn use_gpu(state: &AppState) -> bool {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeviceMode {
+    Auto,
+    Cpu,
+    Gpu,
+}
+
+enum StartupWait {
+    Ready,
+    Exited(ExitStatus),
+    Timeout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LaunchDevice {
+    Cpu,
+    Gpu,
+}
+
+impl LaunchDevice {
+    fn use_gpu(self) -> bool {
+        matches!(self, LaunchDevice::Gpu)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            LaunchDevice::Cpu => "cpu",
+            LaunchDevice::Gpu => "gpu",
+        }
+    }
+
+    fn flag(self) -> &'static str {
+        if self.use_gpu() {
+            "--use_gpu"
+        } else {
+            "--no-use_gpu"
+        }
+    }
+}
+
+fn device_mode(state: &AppState) -> DeviceMode {
     match state
         .config
         .get("PICOAGENT_TTS_DEVICE", DEFAULT_DEVICE)
         .to_lowercase()
         .as_str()
     {
-        "gpu" => true,
-        "cpu" => false,
-        _ => true,
+        "gpu" => DeviceMode::Gpu,
+        "cpu" => DeviceMode::Cpu,
+        _ => DeviceMode::Auto,
     }
 }
 
@@ -101,6 +144,19 @@ fn log_path(app: &tauri::AppHandle) -> PathBuf {
         .app_log_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
         .join("aivis.log")
+}
+
+fn append_log(app: &tauri::AppHandle, message: &str) -> anyhow::Result<()> {
+    let log_path = log_path(app);
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+    writeln!(log, "{message}")?;
+    Ok(())
 }
 
 fn log_tail(app: &tauri::AppHandle) -> String {
@@ -152,7 +208,139 @@ fn has_running_child(app: &tauri::AppHandle) -> bool {
     false
 }
 
-fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
+fn wait_child_with_timeout(
+    child: &mut Child,
+    timeout: Duration,
+) -> std::io::Result<Option<ExitStatus>> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if started.elapsed() >= timeout {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(windows)]
+fn gpu_probe_output() -> std::io::Result<String> {
+    let script = "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }";
+    let mut command = std::process::Command::new("powershell");
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]);
+    command.stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = command.stdout(Stdio::piped()).spawn()?;
+    match wait_child_with_timeout(&mut child, GPU_PROBE_TIMEOUT)? {
+        Some(status) if status.success() => {
+            let mut output = Vec::new();
+            if let Some(mut stdout) = child.stdout.take() {
+                stdout.read_to_end(&mut output)?;
+            }
+            let _ = child.wait();
+            Ok(String::from_utf8_lossy(&output).to_string())
+        }
+        Some(_) => Ok(String::new()),
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(String::new())
+        }
+    }
+}
+
+#[cfg(windows)]
+fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
+    let Ok(output) = gpu_probe_output() else {
+        let _ = append_log(
+            app,
+            "GPU候補確認に失敗したため、auto は CPU 起動を選びます。",
+        );
+        return false;
+    };
+    let has_gpu = output.lines().any(|line| {
+        let name = line.trim().to_lowercase();
+        !name.is_empty()
+            && !name.contains("microsoft basic")
+            && !name.contains("basic render")
+            && !name.contains("remote display")
+            && (name.contains("nvidia")
+                || name.contains("geforce")
+                || name.contains("rtx")
+                || name.contains("gtx")
+                || name.contains("quadro")
+                || name.contains("radeon")
+                || name.contains("vega")
+                || name.contains("graphics")
+                || name.contains("intel")
+                || name.contains("arc"))
+    });
+    let _ = append_log(
+        app,
+        if has_gpu {
+            "GPU候補確認: GPU候補が見つかったため auto は GPU 起動を選びます。"
+        } else {
+            "GPU候補確認: GPU候補が見つからないため auto は CPU 起動を選びます。"
+        },
+    );
+    has_gpu
+}
+
+#[cfg(target_os = "linux")]
+fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
+    let has_gpu = std::path::Path::new("/proc/driver/nvidia/version").exists()
+        || std::fs::read_dir("/dev/dri")
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+            })
+            .unwrap_or(false);
+    let _ = append_log(
+        app,
+        if has_gpu {
+            "GPU候補確認: GPU候補が見つかったため auto は GPU 起動を選びます。"
+        } else {
+            "GPU候補確認: GPU候補が見つからないため auto は CPU 起動を選びます。"
+        },
+    );
+    has_gpu
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
+fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
+    let _ = append_log(
+        app,
+        "GPU候補確認: このOSでは事前判定を行わず auto は GPU 起動を選びます。",
+    );
+    true
+}
+
+fn auto_launch_device(app: &tauri::AppHandle) -> LaunchDevice {
+    if gpu_candidate_available(app) {
+        LaunchDevice::Gpu
+    } else {
+        LaunchDevice::Cpu
+    }
+}
+
+fn spawn_engine(
+    path: PathBuf,
+    app: &tauri::AppHandle,
+    device: LaunchDevice,
+    label: &str,
+) -> anyhow::Result<()> {
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
     }
@@ -163,12 +351,10 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
     }
     command.args(["--host", "127.0.0.1", "--port"]);
     command.arg(BUNDLED_PORT.to_string());
-    if let Some(app_state) = app.try_state::<AppState>() {
-        if use_gpu(&app_state) {
-            command.arg("--use_gpu");
-        } else {
-            command.arg("--no-use_gpu");
-        }
+    if device.use_gpu() {
+        command.arg("--use_gpu");
+    } else {
+        command.arg("--no-use_gpu");
     }
     command.args(["--disable_sentry", "--output_log_utf8"]);
     let log_path = log_path(app);
@@ -181,12 +367,9 @@ fn spawn_engine(path: PathBuf, app: &tauri::AppHandle) -> anyhow::Result<()> {
         .open(&log_path)?;
     writeln!(
         log,
-        "\n==== Aivis 起動: device={} ====",
-        if let Some(app_state) = app.try_state::<AppState>() {
-            app_state.config.get("PICOAGENT_TTS_DEVICE", DEFAULT_DEVICE)
-        } else {
-            DEFAULT_DEVICE.to_string()
-        }
+        "\n==== Aivis 起動: device={} ({}) ====",
+        label,
+        device.flag()
     )?;
     let err_log = log.try_clone()?;
     command
@@ -210,7 +393,26 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
-    spawn_engine(path, app)
+    let mode = app
+        .try_state::<AppState>()
+        .map(|state| device_mode(&state))
+        .unwrap_or(DeviceMode::Auto);
+    let device = match mode {
+        DeviceMode::Cpu => LaunchDevice::Cpu,
+        DeviceMode::Gpu => LaunchDevice::Gpu,
+        DeviceMode::Auto => auto_launch_device(app),
+    };
+    let label = match mode {
+        DeviceMode::Auto => {
+            if device == LaunchDevice::Gpu {
+                "auto/gpu"
+            } else {
+                "auto/cpu"
+            }
+        }
+        _ => device.label(),
+    };
+    spawn_engine(path, app, device, label)
 }
 
 // 同梱 Aivis が応答可能（/version が 200）かを返す。接続不可は false に正規化する。
@@ -224,26 +426,77 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if is_up(&endpoint).await {
         return Ok(());
     }
-    stop(app);
-    start_background(app)?;
-    for _ in 0..360 {
+    let mode = device_mode(&app_state);
+    let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
+
+    if has_running_child(app) {
+        match wait_until_ready(app, &endpoint).await {
+            StartupWait::Ready => return Ok(()),
+            StartupWait::Exited(status) if mode != DeviceMode::Auto => {
+                anyhow::bail!(
+                    "AivisSpeech Engine が起動直後に終了しました: {}\n{}",
+                    status,
+                    log_tail(app)
+                );
+            }
+            StartupWait::Exited(_) | StartupWait::Timeout => {
+                stop(app);
+            }
+        }
+    }
+
+    match mode {
+        DeviceMode::Cpu => {
+            spawn_engine(path, app, LaunchDevice::Cpu, "cpu")?;
+            wait_ready_or_bail(app, &endpoint, "AivisSpeech Engine のCPU起動").await
+        }
+        DeviceMode::Gpu => {
+            spawn_engine(path, app, LaunchDevice::Gpu, "gpu")?;
+            wait_ready_or_bail(app, &endpoint, "AivisSpeech Engine のGPU起動").await
+        }
+        DeviceMode::Auto => {
+            let device = auto_launch_device(app);
+            if device == LaunchDevice::Gpu {
+                spawn_engine(path, app, LaunchDevice::Gpu, "auto/gpu")?;
+                wait_ready_or_bail(app, &endpoint, "AivisSpeech Engine のGPU起動").await
+            } else {
+                spawn_engine(path, app, LaunchDevice::Cpu, "auto/cpu")?;
+                wait_ready_or_bail(app, &endpoint, "AivisSpeech Engine のCPU起動").await
+            }
+        }
+    }
+}
+
+async fn wait_until_ready(app: &tauri::AppHandle, endpoint: &str) -> StartupWait {
+    for _ in 0..STARTUP_CHECKS {
         if is_up(&endpoint).await {
-            return Ok(());
+            return StartupWait::Ready;
         }
         if let Some(status) = child_exit_status(app) {
-            anyhow::bail!(
-                "AivisSpeech Engine が起動直後に終了しました: {}\n{}",
-                status,
-                log_tail(app)
-            );
+            return StartupWait::Exited(status);
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    stop(app);
-    anyhow::bail!(
-        "AivisSpeech Engine の起動がタイムアウトしました\n{}",
-        log_tail(app)
-    )
+    StartupWait::Timeout
+}
+
+async fn wait_ready_or_bail(
+    app: &tauri::AppHandle,
+    endpoint: &str,
+    label: &str,
+) -> anyhow::Result<()> {
+    match wait_until_ready(app, endpoint).await {
+        StartupWait::Ready => Ok(()),
+        StartupWait::Exited(status) => anyhow::bail!(
+            "{label}が起動直後に終了しました: {}\n{}",
+            status,
+            log_tail(app)
+        ),
+        StartupWait::Timeout => {
+            stop(app);
+            anyhow::bail!("{label}がタイムアウトしました\n{}", log_tail(app))
+        }
+    }
 }
 
 pub fn stop(app: &tauri::AppHandle) {

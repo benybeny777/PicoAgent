@@ -322,8 +322,8 @@ pub async fn pet_send(
 fn current_time_context() -> String {
     use chrono::{Datelike, Local, Timelike};
     let now = Local::now();
-    let weekday = ["月", "火", "水", "木", "金", "土", "日"]
-        [now.weekday().num_days_from_monday() as usize];
+    let weekday =
+        ["月", "火", "水", "木", "金", "土", "日"][now.weekday().num_days_from_monday() as usize];
     let hour = now.hour();
     let part = match hour {
         5..=10 => "朝",
@@ -348,7 +348,10 @@ fn current_time_context() -> String {
 
 // 返信と記事タイトルの「内容のある文字バイグラム」の重なりから、最も関連する出典URLを選ぶ。
 // ASCII・記号は除外し、地震→地震ニュースのように話題に触れたときだけURLを添えるための簡易一致。
-fn best_source_url(reply: &str, sources: &[crate::tools::chitchat::trends::TopicSource]) -> Option<String> {
+fn best_source_url(
+    reply: &str,
+    sources: &[crate::tools::chitchat::trends::TopicSource],
+) -> Option<String> {
     fn content_bigrams(s: &str) -> std::collections::HashSet<(char, char)> {
         let chars: Vec<char> = s
             .chars()
@@ -440,7 +443,10 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
             }
             // 雑談が話題メモ（ニュース等）に触れていれば、一致する出典URLを末尾に添える。
             // URL 行は読み上げ（speech_text）で除外されるため音声には乗らない。
-            let display = match brief.as_ref().and_then(|b| best_source_url(&reply, &b.sources)) {
+            let display = match brief
+                .as_ref()
+                .and_then(|b| best_source_url(&reply, &b.sources))
+            {
                 Some(url) if !reply.is_empty() => format!("{reply}\n\n参考:\n{url}"),
                 _ => reply,
             };
@@ -489,7 +495,10 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
     );
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", instruction));
-    let message = provider.chat(&state.config, &model, &convo, &[]).await.ok()?;
+    let message = provider
+        .chat(&state.config, &model, &convo, &[])
+        .await
+        .ok()?;
     let reply = message.content.trim().to_string();
     if reply.is_empty() {
         None
@@ -500,10 +509,7 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
 
 // 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。
 #[tauri::command]
-pub async fn pet_alarm_wake(
-    id: String,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
+pub async fn pet_alarm_wake(id: String, state: State<'_, AppState>) -> Result<Value, String> {
     let mut alarms = crate::alarm::load(&state.config);
     let target = alarms.iter().find(|a| a.id == id).cloned();
     let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();

@@ -47,10 +47,12 @@ static PROVIDER_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
 pub fn all() -> &'static [Box<dyn Provider>] {
     PROVIDERS
         .get_or_init(|| {
-            inventory::iter::<ProviderReg>
+            let mut providers: Vec<Box<dyn Provider>> = inventory::iter::<ProviderReg>
                 .into_iter()
                 .map(|r| (r.make)())
-                .collect()
+                .collect();
+            providers.sort_by_key(|provider| (provider.id() != "local", provider.label()));
+            providers
         })
         .as_slice()
 }

@@ -157,14 +157,21 @@ mod tests {
             vec!["mon", "tue", "wed", "thu", "fri"]
         );
         assert!(normalize_days(&["毎日".to_string()]).is_empty());
-        assert_eq!(normalize_days(&["日".to_string(), "土".to_string()]), vec!["sat", "sun"]);
-        assert_eq!(days_label(&["mon".to_string(), "fri".to_string()]), "月・金");
+        assert_eq!(
+            normalize_days(&["日".to_string(), "土".to_string()]),
+            vec!["sat", "sun"]
+        );
+        assert_eq!(
+            days_label(&["mon".to_string(), "fri".to_string()]),
+            "月・金"
+        );
         assert_eq!(days_label(&[]), "毎日");
     }
 
     #[test]
     fn 古い目覚まし_json_はスヌーズ五分で読む() {
-        let raw = r#"[{"id":"a","time":"07:00","days":[],"repeat":true,"label":"朝","enabled":true}]"#;
+        let raw =
+            r#"[{"id":"a","time":"07:00","days":[],"repeat":true,"label":"朝","enabled":true}]"#;
         let alarms: Vec<Alarm> = serde_json::from_str(raw).unwrap();
         assert_eq!(alarms[0].snooze_minutes, 5);
     }

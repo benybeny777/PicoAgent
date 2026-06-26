@@ -82,9 +82,40 @@ fn is_weather_query(text: &str) -> bool {
 fn extract_weather_location(text: &str) -> Option<String> {
     let mut query = text.to_string();
     for word in [
-        "天気", "天候", "気象", "気温", "降水確率", "降水", "予報", "weather", "明後日", "明日",
-        "あした", "今日", "きょう", "現在", "いまの", "今の", "今", "この", "教えて", "おしえて",
-        "ですか", "を", "は", "の", "が", "って", "?", "？", "。", "、", "!", "！", " ", "　",
+        "天気",
+        "天候",
+        "気象",
+        "気温",
+        "降水確率",
+        "降水",
+        "予報",
+        "weather",
+        "明後日",
+        "明日",
+        "あした",
+        "今日",
+        "きょう",
+        "現在",
+        "いまの",
+        "今の",
+        "今",
+        "この",
+        "教えて",
+        "おしえて",
+        "ですか",
+        "を",
+        "は",
+        "の",
+        "が",
+        "って",
+        "?",
+        "？",
+        "。",
+        "、",
+        "!",
+        "！",
+        " ",
+        "　",
     ] {
         query = query.replace(word, "");
     }
@@ -102,10 +133,23 @@ fn currency_query(text: &str) -> Option<serde_json::Value> {
     let lower = text.to_lowercase();
     // JPY 以外の通貨を出現位置が最も早いものから拾う（豪ドル等の複合語が先勝ち）。
     const NON_JPY: &[(&str, &str)] = &[
-        ("豪ドル", "AUD"), ("カナダドル", "CAD"), ("人民元", "CNY"), ("ドル", "USD"),
-        ("ユーロ", "EUR"), ("ポンド", "GBP"), ("ウォン", "KRW"), ("フラン", "CHF"),
-        ("元", "CNY"), ("usd", "USD"), ("eur", "EUR"), ("gbp", "GBP"), ("aud", "AUD"),
-        ("cny", "CNY"), ("krw", "KRW"), ("chf", "CHF"), ("cad", "CAD"),
+        ("豪ドル", "AUD"),
+        ("カナダドル", "CAD"),
+        ("人民元", "CNY"),
+        ("ドル", "USD"),
+        ("ユーロ", "EUR"),
+        ("ポンド", "GBP"),
+        ("ウォン", "KRW"),
+        ("フラン", "CHF"),
+        ("元", "CNY"),
+        ("usd", "USD"),
+        ("eur", "EUR"),
+        ("gbp", "GBP"),
+        ("aud", "AUD"),
+        ("cny", "CNY"),
+        ("krw", "KRW"),
+        ("chf", "CHF"),
+        ("cad", "CAD"),
     ];
     let base = NON_JPY
         .iter()
@@ -121,8 +165,7 @@ fn currency_query(text: &str) -> Option<serde_json::Value> {
         .any(|word| lower.contains(word));
 
     // 為替意図の判定: 明示語 / JPY以外の通貨 / (円＋チャート or 換算) のいずれか。
-    let intent =
-        strong || base.is_some() || (has_jpy && (chart || lower.contains("換算")));
+    let intent = strong || base.is_some() || (has_jpy && (chart || lower.contains("換算")));
     if !intent {
         return None;
     }
@@ -194,7 +237,9 @@ fn is_simple_greeting(text: &str) -> bool {
 }
 
 fn is_explicit_web_search_request(text: &str) -> bool {
-    WEB_SEARCH_REQUESTS.iter().any(|marker| text.contains(marker))
+    WEB_SEARCH_REQUESTS
+        .iter()
+        .any(|marker| text.contains(marker))
 }
 
 fn is_local_action_query(text: &str) -> bool {
@@ -277,7 +322,8 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
             ));
         }
     }
-    if lower.contains("pomodoro") || text.contains("ポモドーロ") || text.contains("集中タイマー") {
+    if lower.contains("pomodoro") || text.contains("ポモドーロ") || text.contains("集中タイマー")
+    {
         let minutes = number_before(text, "分").unwrap_or(25).clamp(1, 240);
         return Some((
             "focus_timer",
@@ -301,7 +347,10 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
         {
             return Some(("praise_log", serde_json::json!({ "action": "list" })));
         }
-        return Some(("praise_log", serde_json::json!({ "action": "add", "text": text })));
+        return Some((
+            "praise_log",
+            serde_json::json!({ "action": "add", "text": text }),
+        ));
     }
     None
 }
@@ -342,7 +391,10 @@ pub async fn run(
         } else if is_daily_briefing_query(&user_text) {
             return Ok(tools::dispatch(cfg, "daily_briefing", serde_json::json!({})).await);
         } else if is_clipboard_query(&user_text) {
-            let mode = if user_text.contains("todo") || user_text.contains("TODO") || user_text.contains("タスク") {
+            let mode = if user_text.contains("todo")
+                || user_text.contains("TODO")
+                || user_text.contains("タスク")
+            {
                 "todo"
             } else if user_text.contains("返信") || user_text.contains("返事") {
                 "reply"

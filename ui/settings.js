@@ -383,7 +383,7 @@ async function render() {
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   voiceSec.append(selectField("PICOAGENT_TTS_DEVICE", "Aivis 推論デバイス", v.PICOAGENT_TTS_DEVICE || "auto", [
-    { value: "auto", label: "自動（GPU優先）" },
+    { value: "auto", label: "自動判定（GPU候補があればGPU）" },
     { value: "cpu", label: "CPU固定" },
     { value: "gpu", label: "GPU固定" },
   ]));
