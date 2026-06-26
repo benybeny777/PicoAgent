@@ -6,6 +6,11 @@
 
 ## 2026-06-26
 
+### ローカルモデル変更時の自動DLと設定画面のスキル設定整理
+
+- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルのプリセット（small/balanced/large）を切り替えたとき、取得URLにその選択を反映し（`local::model_url`）、`settings_save` の再起動トリガーに `PICOAGENT_MODEL` を追加。これにより未取得モデルへ切り替えると自動でダウンロード→エンジン再起動するようにした（従来はプリセット欄/URL変更時のみ）。
+- 設定画面のスキル設定を、下部の長い一覧から「スキル一覧をクリックでその場に展開」するアコーディオン方式へ変更（`settings.js` / `settings.css`）。設定を持つスキルには ⚙ を表示し、クリックでそのスキルの設定だけを開ける。
+
 ### 目覚まし時計スキル（声でやさしく起こす）
 
 - 目覚まし時計を追加。中核 `src-tauri/src/alarm.rs`（config `PICOAGENT_ALARMS` に保存、曜日/時刻の正規化）＋チャット用スキル `skills/alarm/mod.rs`（add/list/remove/clear/enable/disable）で構成。「平日の7時に起こして」のようにチャットで設定でき、設定画面の「スキル」タブから JSON でも編集できる。

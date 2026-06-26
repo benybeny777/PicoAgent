@@ -229,17 +229,34 @@ async function render() {
   });
   panels.character.append(characterSec);
 
-  // --- 導入済みスキル（エージェント機能）の一覧（読み取り専用） ---
+  // --- 導入済みスキル（エージェント機能）。設定があるスキルはクリックでその場に開く ---
   const skillSec = section("導入済みスキル（エージェント機能）");
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
+    skillSec.append(el("p", { className: "hint", textContent: "⚙ のあるスキルをクリックすると、そのスキルの設定をその場で開けます。" }));
     const list = el("div", { className: "card-list" });
     for (const t of data.tools) {
-      list.append(el("div", { className: "card-item" }, [
-        el("div", { className: "card-name", textContent: t.label || t.name }),
+      const hasConfig = !!t.configSchema?.length;
+      const name = el("div", { className: "card-name", textContent: hasConfig ? `${t.label || t.name}　⚙` : (t.label || t.name) });
+      const card = el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
+        name,
         el("div", { className: "card-desc", textContent: t.description || "" }),
-      ]));
+      ]);
+      list.append(card);
+      if (hasConfig) {
+        const panel = el("div", { className: "card-config" });
+        panel.hidden = true;
+        for (const f of t.configSchema) panel.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+        // パネル内のクリックで閉じないように（入力操作を妨げない）。
+        panel.addEventListener("click", event => event.stopPropagation());
+        card.addEventListener("click", () => {
+          const open = panel.hidden;
+          panel.hidden = !open;
+          card.classList.toggle("open", open);
+        });
+        list.append(panel);
+      }
     }
     skillSec.append(list);
   }
@@ -267,14 +284,7 @@ async function render() {
   }
   if (provSec.querySelector(".field")) panels.providers.append(provSec);
 
-  // --- エージェント機能コネクタごとの設定 ---
-  const toolSec = section("エージェント機能コネクタ");
-  for (const t of data.tools) {
-    if (!t.configSchema?.length) continue;
-    toolSec.append(el("div", { className: "subhead", textContent: t.label }));
-    for (const f of t.configSchema) toolSec.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
-  }
-  if (toolSec.querySelector(".field")) panels.tools.append(toolSec);
+  // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
 
   // プロバイダ変更でモデル候補を更新し、候補が取れたらモデル欄へ反映する。
   providerSelect.addEventListener("change", () => loadModels(providerSelect.value, true));

@@ -606,6 +606,7 @@ pub async fn settings_save(
     let has_tts_enabled = patch.contains_key("PICOAGENT_TTS_ENABLED");
     let has_tts_device = patch.contains_key("PICOAGENT_TTS_DEVICE");
     let local_engine_changed = patch.contains_key("PICOAGENT_LOCAL_MODEL_PRESET")
+        || patch.contains_key("PICOAGENT_MODEL")
         || patch.contains_key("PICOAGENT_MODEL_URL")
         || patch.contains_key("PICOAGENT_LOCAL_PORT")
         || patch.contains_key("PICOAGENT_LOCAL_CTX")

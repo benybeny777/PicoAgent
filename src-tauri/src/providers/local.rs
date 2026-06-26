@@ -65,10 +65,17 @@ pub fn preset_url(id: &str) -> Option<&'static str> {
 
 pub fn model_url(cfg: &Config) -> String {
     let preset_id = cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", "balanced");
-    if preset_id != "custom" {
-        if let Some(url) = preset_url(&preset_id) {
-            return url.to_string();
-        }
+    if preset_id == "custom" {
+        return cfg.get("PICOAGENT_MODEL_URL", LOCAL_MODEL_PRESETS[1].url);
+    }
+    // 設定画面「モデル」欄（PICOAGENT_MODEL）がプリセットIDなら、その選択を優先する。
+    // （モデル欄での切り替えをそのまま取得URLへ反映し、未取得なら自動DLされる）
+    let model = cfg.get("PICOAGENT_MODEL", "");
+    if let Some(url) = preset_url(&model) {
+        return url.to_string();
+    }
+    if let Some(url) = preset_url(&preset_id) {
+        return url.to_string();
     }
     cfg.get("PICOAGENT_MODEL_URL", LOCAL_MODEL_PRESETS[1].url)
 }
