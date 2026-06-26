@@ -43,7 +43,8 @@ impl Tool for WeatherTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_WEATHER_DEFAULT_LOCATION", "天気の既定地点", "text", "Tokyo"),
+            Field::new("PICOAGENT_WEATHER_DEFAULT_LOCATION", "天気の既定地点（自動取得に失敗した時に使用）", "text", "Tokyo"),
+            Field::new("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", "現在地の自動取得を無効にする（既定は自動取得ON）", "checkbox", ""),
             Field::new("PICOAGENT_WEATHER_TIMEOUT_SECS", "天気API待ち時間（秒、3〜60）", "text", "15"),
         ]
     }
@@ -69,22 +70,35 @@ impl Tool for WeatherTool {
             .filter(|value| (1..=7).contains(value))
             .unwrap_or(3)
             .to_string();
+        let explicit_location = args
+            .get("location")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
         let (lat, lon, name) = if let (Some(lat), Some(lon)) = (
             args.get("latitude").and_then(Value::as_f64),
             args.get("longitude").and_then(Value::as_f64),
         ) {
             (lat, lon, format!("{},{}", lat, lon))
-        } else {
-            let location = args
-                .get("location")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .unwrap_or_else(|| cfg.get("PICOAGENT_WEATHER_DEFAULT_LOCATION", "Tokyo"));
+        } else if let Some(location) = explicit_location {
+            // 地名が明示された場合はそれを優先。
             match geocode(&client, &location).await {
                 Ok(found) => found,
                 Err(error) => return format!("エラー: {}", error),
+            }
+        } else {
+            // 地名指定が無ければ、まず IP から現在地を推定（有効時）。失敗したら既定地点。
+            let auto = !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false);
+            match if auto { ip_geolocate(&client).await } else { None } {
+                Some(found) => found,
+                None => {
+                    let location = cfg.get("PICOAGENT_WEATHER_DEFAULT_LOCATION", "Tokyo");
+                    match geocode(&client, &location).await {
+                        Ok(found) => found,
+                        Err(error) => return format!("エラー: {}", error),
+                    }
+                }
             }
         };
         let response = match client
@@ -93,6 +107,7 @@ impl Tool for WeatherTool {
                 ("latitude", lat.to_string()),
                 ("longitude", lon.to_string()),
                 ("current", "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m".to_string()),
+                ("hourly", "temperature_2m".to_string()),
                 ("daily", "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max".to_string()),
                 ("forecast_days", days),
                 ("timezone", "auto".to_string()),
@@ -137,32 +152,121 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
     Ok((lat, lon, name))
 }
 
+// IP から現在地（緯度経度・市名）を推定する。失敗時は None（既定地点へフォールバック）。
+async fn ip_geolocate(client: &reqwest::Client) -> Option<(f64, f64, String)> {
+    let response = client
+        .get("http://ip-api.com/json/?fields=status,lat,lon,city,country")
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let data: Value = response.json().await.ok()?;
+    if data.get("status").and_then(Value::as_str) != Some("success") {
+        return None;
+    }
+    let lat = data.get("lat").and_then(Value::as_f64)?;
+    let lon = data.get("lon").and_then(Value::as_f64)?;
+    let name = data
+        .get("city")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("{:.2},{:.2}", lat, lon));
+    Some((lat, lon, name))
+}
+
+// WMO 天気コードを絵文字と日本語ラベルへ。
+fn weather_icon(code: i64) -> (&'static str, &'static str) {
+    match code {
+        0 => ("☀️", "快晴"),
+        1 => ("🌤️", "晴れ"),
+        2 => ("⛅", "薄曇り"),
+        3 => ("☁️", "曇り"),
+        45 | 48 => ("🌫️", "霧"),
+        51 | 53 | 55 | 56 | 57 => ("🌦️", "霧雨"),
+        61 | 63 | 65 | 66 | 67 => ("🌧️", "雨"),
+        71 | 73 | 75 | 77 => ("❄️", "雪"),
+        80 | 81 | 82 => ("🌦️", "にわか雨"),
+        85 | 86 => ("🌨️", "にわか雪"),
+        95 | 96 | 99 => ("⛈️", "雷雨"),
+        _ => ("🌡️", "—"),
+    }
+}
+
+// 数値列を Unicode ブロックのスパークラインにする。
+fn sparkline(values: &[f64]) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !(max > min) {
+        return BARS[3].to_string().repeat(values.len());
+    }
+    values
+        .iter()
+        .map(|&v| {
+            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
+            BARS[idx.min(7)]
+        })
+        .collect()
+}
+
 fn summarize_weather(name: &str, parsed: &Value) -> String {
     let current = parsed.get("current").unwrap_or(&Value::Null);
-    let mut out = format!("天気: {}\n", name);
+    let code = current.get("weather_code").and_then(Value::as_i64).unwrap_or(-1);
+    let (icon, label) = weather_icon(code);
+    let num = |v: Option<f64>| v.map(|x| format!("{x:.0}")).unwrap_or_else(|| "-".to_string());
+    let mut out = format!("天気: {name} {icon} {label}\n");
     out.push_str(&format!(
-        "現在: 気温 {}°C / 体感 {}°C / 湿度 {}% / 降水 {}mm / 風速 {}km/h / 天気コード {}\n",
-        current.get("temperature_2m").and_then(Value::as_f64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
-        current.get("apparent_temperature").and_then(Value::as_f64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+        "現在 {}°C（体感{}°C）湿度{}% 風{}km/h 降水{}mm\n",
+        num(current.get("temperature_2m").and_then(Value::as_f64)),
+        num(current.get("apparent_temperature").and_then(Value::as_f64)),
         current.get("relative_humidity_2m").and_then(Value::as_u64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
-        current.get("precipitation").and_then(Value::as_f64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
-        current.get("wind_speed_10m").and_then(Value::as_f64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
-        current.get("weather_code").and_then(Value::as_i64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())
+        num(current.get("wind_speed_10m").and_then(Value::as_f64)),
+        num(current.get("precipitation").and_then(Value::as_f64)),
     ));
+
+    // 今日の気温推移（時間別の先頭24時間）をスパークラインで。
+    if let Some(temps) = parsed
+        .get("hourly")
+        .and_then(|h| h.get("temperature_2m"))
+        .and_then(Value::as_array)
+    {
+        let today: Vec<f64> = temps.iter().take(24).filter_map(Value::as_f64).collect();
+        if today.len() >= 2 {
+            let lo = today.iter().cloned().fold(f64::INFINITY, f64::min);
+            let hi = today.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            out.push_str(&format!(
+                "今日の気温 {:.0}〜{:.0}°C  {}\n",
+                lo,
+                hi,
+                sparkline(&today)
+            ));
+        }
+    }
+
     if let Some(daily) = parsed.get("daily") {
         let times = daily.get("time").and_then(Value::as_array).cloned().unwrap_or_default();
+        let codes = daily.get("weather_code").and_then(Value::as_array).cloned().unwrap_or_default();
         let maxes = daily.get("temperature_2m_max").and_then(Value::as_array).cloned().unwrap_or_default();
         let mins = daily.get("temperature_2m_min").and_then(Value::as_array).cloned().unwrap_or_default();
         let pops = daily.get("precipitation_probability_max").and_then(Value::as_array).cloned().unwrap_or_default();
         out.push_str("予報:\n");
         for index in 0..times.len().min(7) {
+            let (day_icon, day_label) = weather_icon(codes.get(index).and_then(Value::as_i64).unwrap_or(-1));
             out.push_str(&format!(
-                "- {}: {}°C / {}°C / 降水確率 {}%\n",
+                "- {} {day_icon} {day_label} {}/{}°C ☔{}%\n",
                 times.get(index).and_then(Value::as_str).unwrap_or("-"),
-                maxes.get(index).and_then(Value::as_f64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
-                mins.get(index).and_then(Value::as_f64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+                num(maxes.get(index).and_then(Value::as_f64)),
+                num(mins.get(index).and_then(Value::as_f64)),
                 pops.get(index).and_then(Value::as_u64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())
             ));
+        }
+        // 日別の最高気温の推移をスパークラインで添える。
+        let highs: Vec<f64> = maxes.iter().take(7).filter_map(Value::as_f64).collect();
+        if highs.len() >= 2 {
+            out.push_str(&format!("最高気温の推移 {}\n", sparkline(&highs)));
         }
     }
     out

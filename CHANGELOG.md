@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### 為替チャート・天気のグラフィカル表示・現在地自動取得
+
+- 為替（`currency_rates`）に推移チャートを追加。`chart=true` または `days` 指定で Frankfurter の時系列を取得し、スパークライン（▁▂▃▅▇）＋始値/終値/最安/最高/変化率を返す。
+- 天気（`weather`）をグラフィカル化。天気アイコン（☀️🌧️❄️等）＋今日の気温の時間別スパークライン＋日別予報（アイコン/最高最低/降水確率）＋最高気温の推移スパークラインで表示。
+- 天気の地名未指定時、IP から現在地（緯度経度・市名）を自動推定するようにした（`ip-api.com`）。失敗時は既定地点へフォールバック。`PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION` で無効化可能。
+
 ### Gemini プロバイダを追加
 
 - 叩く AI に `gemini` プロバイダ（`providers/gemini.rs`）を追加。Google の OpenAI 互換エンドポイント（`/v1beta/openai`）を使い、`openai.rs` の `to_wire`/`from_wire` を再利用する（裏は OpenAI 互換と同じ）。設定キー `PICOAGENT_GEMINI_API_KEY` / `PICOAGENT_GEMINI_MODEL`（既定 `gemini-2.5-flash`）/ `PICOAGENT_GEMINI_BASE_URL` を追加。API キー設定時のみ接続する。

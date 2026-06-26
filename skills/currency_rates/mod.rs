@@ -13,6 +13,23 @@ const FRANKFURTER_BASE: &str = "https://api.frankfurter.app";
 
 pub struct CurrencyRatesTool;
 
+// 値の並びを Unicode ブロックのスパークライン（簡易チャート）にする。
+fn sparkline(values: &[f64]) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !(max > min) {
+        return BARS[0].to_string().repeat(values.len());
+    }
+    values
+        .iter()
+        .map(|&v| {
+            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
+            BARS[idx.min(7)]
+        })
+        .collect()
+}
+
 #[async_trait]
 impl Tool for CurrencyRatesTool {
     fn name(&self) -> &'static str {
@@ -24,7 +41,7 @@ impl Tool for CurrencyRatesTool {
     }
 
     fn description(&self) -> String {
-        "Frankfurter API で為替レート取得・通貨換算を行う。旅行、買い物、請求額確認に使う。APIキー不要。".to_string()
+        "Frankfurter API で為替レート取得・通貨換算・推移チャート表示を行う。旅行、買い物、請求額確認、相場の推移確認に使う。APIキー不要。チャート（推移・グラフ）を求められたら chart=true を指定する。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -32,8 +49,10 @@ impl Tool for CurrencyRatesTool {
             "type": "object",
             "properties": {
                 "base": { "type": "string", "description": "換算元通貨。例: USD, JPY, EUR。" },
-                "symbols": { "type": "string", "description": "換算先通貨。複数はカンマ区切り。例: JPY,EUR。" },
-                "amount": { "type": "number", "description": "換算金額。省略時1。" }
+                "symbols": { "type": "string", "description": "換算先通貨。複数はカンマ区切り。例: JPY,EUR。チャート時は先頭1通貨を使う。" },
+                "amount": { "type": "number", "description": "換算金額。省略時1。" },
+                "chart": { "type": "boolean", "description": "推移チャート（スパークライン）を出すなら true。" },
+                "days": { "type": "integer", "description": "チャートの対象日数（2〜365、既定30）。指定するとチャートになる。" }
             },
             "required": []
         })
@@ -77,6 +96,25 @@ impl Tool for CurrencyRatesTool {
             Ok(client) => client,
             Err(error) => return format!("エラー: 為替APIの準備に失敗しました: {}", error),
         };
+
+        // チャート（推移）要求なら時系列を取得してスパークラインで返す。
+        let want_chart = args.get("chart").and_then(Value::as_bool).unwrap_or(false)
+            || args.get("days").is_some();
+        if want_chart {
+            let days = args
+                .get("days")
+                .and_then(Value::as_i64)
+                .unwrap_or(30)
+                .clamp(2, 365);
+            let symbol = symbols
+                .split(',')
+                .map(str::trim)
+                .find(|s| !s.is_empty())
+                .unwrap_or("JPY")
+                .to_string();
+            return currency_chart(&client, &base, &symbol, days).await;
+        }
+
         let response = match client
             .get(format!("{}/latest", FRANKFURTER_BASE))
             .query(&[
@@ -98,6 +136,74 @@ impl Tool for CurrencyRatesTool {
             format!("エラー: 為替APIが HTTP {} を返しました。", status)
         }
     }
+}
+
+// Frankfurter の時系列を取得し、推移をスパークラインで返す。
+async fn currency_chart(
+    client: &reqwest::Client,
+    base: &str,
+    symbol: &str,
+    days: i64,
+) -> String {
+    use chrono::{Duration as ChronoDuration, Local};
+    let end = Local::now().date_naive();
+    let start = end - ChronoDuration::days(days);
+    let url = format!("{FRANKFURTER_BASE}/{start}..{end}");
+    let response = match client
+        .get(&url)
+        .query(&[("from", base), ("to", symbol)])
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
+    };
+    if !response.status().is_success() {
+        return format!("エラー: 為替APIが HTTP {} を返しました。", response.status());
+    }
+    let data: Value = match response.json().await {
+        Ok(data) => data,
+        Err(error) => return format!("エラー: 為替APIの応答を読めませんでした: {}", error),
+    };
+    let Some(rates) = data.get("rates").and_then(Value::as_object) else {
+        return "エラー: 為替の時系列を取得できませんでした。".to_string();
+    };
+    let mut series: Vec<(String, f64)> = rates
+        .iter()
+        .filter_map(|(date, value)| {
+            value
+                .get(symbol)
+                .and_then(Value::as_f64)
+                .map(|rate| (date.clone(), rate))
+        })
+        .collect();
+    series.sort_by(|a, b| a.0.cmp(&b.0));
+    if series.len() < 2 {
+        return format!("エラー: {base}→{symbol} の推移データが不足しています。");
+    }
+    let values: Vec<f64> = series.iter().map(|(_, v)| *v).collect();
+    let first = values.first().copied().unwrap_or(0.0);
+    let last = values.last().copied().unwrap_or(0.0);
+    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let change = if first != 0.0 {
+        (last - first) / first * 100.0
+    } else {
+        0.0
+    };
+    let sign = if change >= 0.0 { "+" } else { "" };
+    format!(
+        "{base}→{symbol} 直近{}日の推移（{}〜{}）\n{}\n始値 {:.3} / 終値 {:.3} / 最安 {:.3} / 最高 {:.3} / 変化 {sign}{:.2}%",
+        days,
+        series.first().map(|(d, _)| d.as_str()).unwrap_or(""),
+        series.last().map(|(d, _)| d.as_str()).unwrap_or(""),
+        sparkline(&values),
+        first,
+        last,
+        min,
+        max,
+        change,
+    )
 }
 
 inventory::submit! { ToolReg { make: || Box::new(CurrencyRatesTool) } }
