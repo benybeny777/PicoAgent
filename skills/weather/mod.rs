@@ -107,7 +107,7 @@ impl Tool for WeatherTool {
                 ("latitude", lat.to_string()),
                 ("longitude", lon.to_string()),
                 ("current", "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m".to_string()),
-                ("hourly", "temperature_2m".to_string()),
+                ("hourly", "temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m".to_string()),
                 ("daily", "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max".to_string()),
                 ("forecast_days", days),
                 ("timezone", "auto".to_string()),
@@ -227,12 +227,50 @@ fn summarize_weather(name: &str, parsed: &Value) -> String {
         num(current.get("precipitation").and_then(Value::as_f64)),
     ));
 
-    // 今日の気温推移（時間別の先頭24時間）をスパークラインで。
-    if let Some(temps) = parsed
-        .get("hourly")
-        .and_then(|h| h.get("temperature_2m"))
-        .and_then(Value::as_array)
-    {
+    if let Some(hourly) = parsed.get("hourly") {
+        let times = hourly.get("time").and_then(Value::as_array).cloned().unwrap_or_default();
+        let temps = hourly
+            .get("temperature_2m")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let codes = hourly.get("weather_code").and_then(Value::as_array).cloned().unwrap_or_default();
+        let pops = hourly
+            .get("precipitation_probability")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let precipitation = hourly.get("precipitation").and_then(Value::as_array).cloned().unwrap_or_default();
+        let winds = hourly.get("wind_speed_10m").and_then(Value::as_array).cloned().unwrap_or_default();
+
+        // 現在時刻以降の12時間を時間ごとの見通しとして出す。
+        let current_time = current.get("time").and_then(Value::as_str).unwrap_or("");
+        let start_index = times
+            .iter()
+            .position(|time| time.as_str().map(|value| value >= current_time).unwrap_or(false))
+            .unwrap_or(0);
+        if !times.is_empty() {
+            out.push_str("時間ごとの見通し:\n");
+            for index in start_index..times.len().min(start_index + 12) {
+                let (hour_icon, hour_label) = weather_icon(codes.get(index).and_then(Value::as_i64).unwrap_or(-1));
+                let hour = times
+                    .get(index)
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.split('T').nth(1))
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                out.push_str(&format!(
+                    "- {} {hour_icon} {hour_label} {}°C ☔{}% 降水{}mm 風{}km/h\n",
+                    hour,
+                    num(temps.get(index).and_then(Value::as_f64)),
+                    pops.get(index).and_then(Value::as_u64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+                    num(precipitation.get(index).and_then(Value::as_f64)),
+                    num(winds.get(index).and_then(Value::as_f64)),
+                ));
+            }
+        }
+
+        // 今日の気温推移（時間別の先頭24時間）をスパークラインで。
         let today: Vec<f64> = temps.iter().take(24).filter_map(Value::as_f64).collect();
         if today.len() >= 2 {
             let lo = today.iter().cloned().fold(f64::INFINITY, f64::min);
