@@ -6,14 +6,16 @@
 
 ## 2026-06-27
 
-### Aivis とログの保存先を PicoAgent ディレクトリへ移動
+### 同梱系ランタイム保存先を PicoAgent bundled ディレクトリへ移動
 
-- 実行時に自動取得する Aivis の保存先を旧 `app_data_dir/aivis/` からユーザーデータ配下の `PicoAgent/aivis/` へ変更した。旧保存先に取得済みの Aivis がある場合は初回に新保存先へ移行する。
+- 実行時に自動取得する Aivis の保存先を旧 `app_data_dir/aivis/` / 旧 `PicoAgent/aivis/` からユーザーデータ配下の `PicoAgent/bundled/aivis/` へ変更した。旧保存先に取得済みの Aivis がある場合は初回に新保存先へ移行する。
+- 同梱 local 用モデル GGUF の保存先も `PicoAgent/bundled/models/` へ変更した。旧 `app_data_dir/models/` / 旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。`llama-server` 本体は実行時配置の `PicoAgent/bundled/engine/` を最優先で探す。
+- 開発・配布用の同梱物も `src-tauri/resources/bundled/engine/` と `src-tauri/resources/bundled/aivis/` にまとめ、`tauri.conf.json` の同梱対象を `resources/bundled/**/*` に統一した。旧 `resources/engine/` / `resources/aivis/` は互換候補としてのみ探す。
 - 実行時ログも `app_data_dir/log/` ではなく `PicoAgent/log/` へ集約するようにした。旧 `app_log_dir` / `app_data_dir/log` の Aivis ログは新ログ未作成時にコピーする。
 
 ### Aivis の実行時自動取得を追加
 
-- 配布後に同梱 Aivis が見つからない場合、初回の読み上げ起動時に公式 GitHub Releases から既定 `1.2.0` を `PicoAgent/aivis/` へ自動取得して使うようにした。
+- 配布後に同梱 Aivis が見つからない場合、初回の読み上げ起動時に公式 GitHub Releases から既定 `1.2.0` を `PicoAgent/bundled/aivis/` へ自動取得して使うようにした。
 - 既に同梱または取得済みの Aivis がある場合は追加ダウンロードせず、それを優先して起動する。
 
 ### 実行時ログを log ディレクトリへ集約
@@ -189,7 +191,7 @@
 ### 命名を picoagent に統一
 
 - クレート名・バンドル識別子・設定キー接頭辞・内部 JS API・互換シム名を `picoagent` 系へ統一した（dev 実行ファイル `picoagent.exe`、識別子 `com.picoagent.app`、設定キー `PICOAGENT_*`、`window.picoagent`、`ui/picoagent.js`）。`OPENAI_*` / `OLLAMA_*` キーは変更なし。
-- 既存環境は `app_config_dir`/`app_data_dir` のフォルダ名と `config.json` のキー接頭辞を新名へ移行して設定・DL 済みモデルを引き継ぐ（再ダウンロード回避）。`README.md` / `SPEC.md` の設定キー一覧も更新。
+- 既存環境は `app_config_dir`/`app_data_dir` のフォルダ名と `config.json` のキー接頭辞を新名へ移行して設定を引き継ぐ。DL 済みモデルは現行では `PicoAgent/bundled/models/` へ移行して再ダウンロードを避ける。`README.md` / `SPEC.md` の設定キー一覧も更新。
 
 ### dev/build 前に残存プロセスを自動停止（DLL ロック対策）
 
@@ -214,10 +216,10 @@
 - AivisSpeech Engine 連携の読み上げ設定を追加した。`PICOAGENT_TTS_ENABLED` が有効な場合、回答を `/audio_query` → `/synthesis` で WAV 化して再生する。接続先と speaker ID は設定画面から変更できる。
 - Aivis 読み上げが有効な場合は、音声再生中も会話アニメーションを維持し、再生終了時に待機へ戻すようにした。
 - Aivis 未起動時に同梱配置から AivisSpeech Engine を裏起動できるようにした。アプリが起動した Aivis 子プロセスは終了時に停止する。
-- `src-tauri/resources/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
+- `src-tauri/resources/bundled/aivis/` を配布リソース対象に追加した。実体バイナリは巨大ファイルとライセンス確認のため Git 管理外にし、置き場だけを管理する。
 - 読み上げは同梱版 Aivis だけを使う方針にし、接続先・自動起動・実行ファイルパス・同梱ポートの設定項目を削除した。同梱版は内部固定の `127.0.0.1:10102` で起動する。
 - `PICOAGENT_TTS_CHARACTER_OVERRIDES` を追加し、設定画面の「キャラクター」タブでキャラごとの Aivis speaker ID を指定できるようにした。未指定時は共通の `PICOAGENT_TTS_SPEAKER` を使う。
-- `npm run setup:aivis` を追加し、AivisSpeech Engine 公式 GitHub Releases から同梱用実行ファイル一式を `src-tauri/resources/aivis/` へ取得できるようにした。`npm run dev` / `npm run build` では起動前に同梱 Aivis がなければ自動取得する。再配布ビルドの再現性のため既定取得版は `1.2.0` に固定し、更新時だけ `AIVIS_RELEASE` で差し替える。
+- `npm run setup:aivis` を追加し、AivisSpeech Engine 公式 GitHub Releases から同梱用実行ファイル一式を `src-tauri/resources/bundled/aivis/` へ取得できるようにした。`npm run dev` / `npm run build` では起動前に同梱 Aivis がなければ自動取得する。再配布ビルドの再現性のため既定取得版は `1.2.0` に固定し、更新時だけ `AIVIS_RELEASE` で差し替える。
 - Aivis 初回起動が数十秒かかる場合に備え、起動待ちを 180 秒へ延長した。
 - Aivis 初回合成で話者モデルロードが 30 秒を超える場合があるため、音声クエリ・合成の HTTP タイムアウトも 180 秒へ延長し、フロントに読み上げ準備中/読み上げ中の状態を表示するようにした。
 - `PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 Aivis を即 spawn し、設定画面で ON にした場合も保存後すぐ起動するようにした。
@@ -281,8 +283,8 @@
 ### Ollama 非依存化 — 同梱エンジンを既定化
 
 - 推論エンジン llama.cpp（`llama-server`）をアプリに同梱し、起動時に spawn して OpenAI 互換 API をローカルに立てる新プロバイダ **`local`** を追加し、これを既定（`PICOAGENT_PROVIDER=local`）にした。**Ollama なしで動作**する。
-- エンジン本体はリポジトリに含めず `scripts/fetch-engine.mjs`（`npm run setup:engine`）で取得し、`src-tauri/resources/engine/` に配置して `tauri.conf.json` の `bundle.resources` で同梱する。
-- モデル GGUF は配布物に含めず、**初回起動時に `app_data_dir/models/` へダウンロード**する（以後オフライン）。進捗・状態は `engine:status` イベントで UI に表示する（`engine.rs`）。
+- エンジン本体はリポジトリに含めず `scripts/fetch-engine.mjs`（`npm run setup:engine`）で取得し、`src-tauri/resources/bundled/engine/` に配置して `tauri.conf.json` の `bundle.resources` で同梱する。
+- モデル GGUF は配布物に含めず、**初回起動時にユーザーデータ配下の `PicoAgent/bundled/models/` へダウンロード**する（以後オフライン）。進捗・状態は `engine:status` イベントで UI に表示する（`engine.rs`）。
 - `local` プロバイダは OpenAI 互換変換（`openai.rs` の `to_wire`/`from_wire`）を再利用。tools 非対応テンプレートのモデルでも会話が成立するよう、tools 付きで失敗したら tools 無しで再試行する。
 - 設定キー追加: `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX`。Ollama プロバイダは任意利用として存続。
 

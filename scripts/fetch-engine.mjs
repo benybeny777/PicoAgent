@@ -1,5 +1,5 @@
 // fetch-engine.mjs - 推論エンジン llama.cpp（llama-server）を取得して
-// src-tauri/resources/engine/ へ展開する。リポジトリには含めず各環境で取得する。
+// src-tauri/resources/bundled/engine/ へ展開する。リポジトリには含めず各環境で取得する。
 //
 // 使い方: npm run setup:engine
 // 既定は Windows x64 の Vulkan(GPU) ビルド。別 OS/版・CPU ビルドは環境変数で上書き可能
@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ENGINE_DIR = join(HERE, "..", "src-tauri", "resources", "engine");
+const ENGINE_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "engine");
 const API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
 
 // プラットフォーム別の zip アセット名パターン（llama.cpp リリースの命名に合わせる）。

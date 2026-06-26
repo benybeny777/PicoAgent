@@ -49,13 +49,13 @@ for (const target of targets) {
 if (isWin) {
   const script = [
     "$procs = Get-CimInstance Win32_Process |",
-    "Where-Object { $_.Name -eq 'run.exe' -and $_.ExecutablePath -like '*resources\\\\aivis\\\\run.exe' };",
+    "Where-Object { $_.Name -eq 'run.exe' -and ($_.ExecutablePath -like '*resources\\\\bundled\\\\aivis\\\\run.exe' -or $_.ExecutablePath -like '*resources\\\\aivis\\\\run.exe') };",
     "foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force; Write-Output $p.ProcessId }",
   ].join(" ");
   const r = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8" });
   if (r.status === 0 && String(r.stdout || "").trim()) {
     killedAny = true;
-    console.log("[stop-stale] 停止: resources/aivis/run.exe");
+    console.log("[stop-stale] 停止: resources/bundled/aivis/run.exe");
   }
 }
 

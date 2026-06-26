@@ -67,12 +67,17 @@ fn existing(path: PathBuf) -> Option<PathBuf> {
 fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
     let mut candidates = Vec::new();
+    candidates.push(crate::log_paths::bundled_dir(app).join("aivis").join(exe));
     candidates.push(crate::log_paths::data_dir(app).join("aivis").join(exe));
     if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("resources/bundled/aivis").join(exe));
+        candidates.push(res.join("bundled/aivis").join(exe));
         candidates.push(res.join("resources/aivis").join(exe));
         candidates.push(res.join("aivis").join(exe));
     }
     if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("resources/bundled/aivis").join(exe));
+        candidates.push(cwd.join("src-tauri/resources/bundled/aivis").join(exe));
         candidates.push(cwd.join("resources/aivis").join(exe));
         candidates.push(cwd.join("src-tauri/resources/aivis").join(exe));
     }
@@ -182,14 +187,15 @@ fn log_tail(app: &tauri::AppHandle) -> String {
 }
 
 fn install_dir(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(crate::log_paths::data_dir(app).join("aivis"))
+    Ok(crate::log_paths::bundled_dir(app).join("aivis"))
 }
 
-fn legacy_install_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
-    app.path()
-        .app_data_dir()
-        .ok()
-        .map(|path| path.join("aivis"))
+fn legacy_install_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let mut dirs = vec![crate::log_paths::data_dir(app).join("aivis")];
+    if let Ok(path) = app.path().app_data_dir() {
+        dirs.push(path.join("aivis"));
+    }
+    dirs
 }
 
 fn release_asset_pattern() -> &'static str {
@@ -407,18 +413,21 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
 }
 
 fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
-    let Some(old_dir) = legacy_install_dir(app) else {
-        return Ok(());
-    };
     let new_dir = install_dir(app)?;
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    if !old_dir.join(exe).exists() || new_dir.join(exe).exists() {
+    if new_dir.join(exe).exists() {
         return Ok(());
     }
+    let Some(old_dir) = legacy_install_dirs(app)
+        .into_iter()
+        .find(|path| path.join(exe).exists())
+    else {
+        return Ok(());
+    };
     append_log(
         app,
         &format!(
-            "旧 Aivis 配置を PicoAgent ディレクトリへ移行します: {} -> {}",
+            "旧 Aivis 配置を PicoAgent bundled ディレクトリへ移行します: {} -> {}",
             old_dir.display(),
             new_dir.display()
         ),

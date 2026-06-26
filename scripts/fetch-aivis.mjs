@@ -1,5 +1,5 @@
 // fetch-aivis.mjs - AivisSpeech Engine を取得して
-// src-tauri/resources/aivis/ へ展開する。実体は巨大なので Git には含めない。
+// src-tauri/resources/bundled/aivis/ へ展開する。実体は巨大なので Git には含めない。
 //
 // 使い方: npm run setup:aivis
 //   AIVIS_RELEASE … リリースタグ（既定 1.2.0。latest を指定すると最新版）
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const AIVIS_DIR = join(HERE, "..", "src-tauri", "resources", "aivis");
+const AIVIS_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "aivis");
 const API_ROOT = "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases";
 const DEFAULT_RELEASE = "1.2.0";
 

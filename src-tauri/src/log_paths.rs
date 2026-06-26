@@ -16,6 +16,10 @@ pub fn log_dir(app: &AppHandle) -> PathBuf {
     data_dir(app).join("log")
 }
 
+pub fn bundled_dir(app: &AppHandle) -> PathBuf {
+    data_dir(app).join("bundled")
+}
+
 pub fn log_file(app: &AppHandle, name: &str) -> PathBuf {
     log_dir(app).join(name)
 }

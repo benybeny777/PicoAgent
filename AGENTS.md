@@ -108,7 +108,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │   ├── Cargo.toml / build.rs / tauri.conf.json
 │   ├── capabilities/default.json   ← 権限（ACL）
 │   ├── icons/                      ← 生成アイコン一式
-│   ├── resources/engine/           ← 同梱 llama-server（git 管理外、setup:engine で取得）
+│   ├── resources/bundled/          ← 同梱物（engine/aivis。git 管理外、setup:* で取得）
 │   └── src/
 │       ├── main.rs / lib.rs / commands.rs / menu.rs
 │       ├── config.rs / agent.rs / message.rs / engine.rs

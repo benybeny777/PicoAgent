@@ -50,12 +50,17 @@ fn server_path(app: &AppHandle) -> Option<PathBuf> {
         "llama-server"
     };
     let mut candidates: Vec<PathBuf> = Vec::new();
+    candidates.push(crate::log_paths::bundled_dir(app).join("engine").join(exe));
     if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("resources/bundled/engine").join(exe));
+        candidates.push(res.join("bundled/engine").join(exe));
         candidates.push(res.join("resources/engine").join(exe));
         candidates.push(res.join("engine").join(exe));
     }
     // dev（tauri dev / cargo run）のフォールバック: 作業ディレクトリ直下。
     if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("resources/bundled/engine").join(exe));
+        candidates.push(cwd.join("src-tauri/resources/bundled/engine").join(exe));
         candidates.push(cwd.join("resources/engine").join(exe));
         candidates.push(cwd.join("src-tauri/resources/engine").join(exe));
     }
@@ -74,12 +79,50 @@ fn model_path(app: &AppHandle) -> PathBuf {
         .next_back()
         .filter(|s| !s.is_empty())
         .unwrap_or("model.gguf");
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("models");
-    dir.join(name)
+    crate::log_paths::bundled_dir(app).join("models").join(name)
+}
+
+fn legacy_model_paths(app: &AppHandle) -> Vec<PathBuf> {
+    let url = model_url(app);
+    let name = url
+        .split('/')
+        .next_back()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("model.gguf");
+    let mut paths = vec![crate::log_paths::data_dir(app).join("models").join(name)];
+    if let Ok(dir) = app.path().app_data_dir() {
+        paths.push(dir.join("models").join(name));
+    }
+    paths
+}
+
+async fn migrate_legacy_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
+    if dest.exists() {
+        return Ok(());
+    }
+    let Some(old_path) = legacy_model_paths(app)
+        .into_iter()
+        .find(|path| path.exists())
+    else {
+        return Ok(());
+    };
+    if let Some(parent) = dest.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    match tokio::fs::rename(&old_path, dest).await {
+        Ok(()) => Ok(()),
+        Err(rename_error) => {
+            tokio::fs::copy(&old_path, dest)
+                .await
+                .map_err(|copy_error| {
+                    anyhow::anyhow!(
+                        "旧モデルの移行に失敗: rename={rename_error}; copy={copy_error}"
+                    )
+                })?;
+            let _ = tokio::fs::remove_file(&old_path).await;
+            Ok(())
+        }
+    }
 }
 
 // モデルをストリーミングダウンロード（進捗を emit）。
@@ -300,6 +343,10 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
 pub async fn ensure_and_start(app: AppHandle) {
     ensure_local_model_selection(&app);
     let model = model_path(&app);
+    if let Err(e) = migrate_legacy_model(&app, &model).await {
+        set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
+        return;
+    }
     if !model.exists() {
         if let Err(e) = download_model(&app, &model).await {
             set_status(&app, json!({ "phase": "error", "message": e.to_string() }));

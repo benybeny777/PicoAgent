@@ -5,7 +5,11 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 
-# 同梱推論エンジン（npm run setup:engine で取得）・モデル重み（巨大なので含めない）
+# 同梱物（npm run setup:* で取得）・モデル重み（巨大なので含めない）
+src-tauri/resources/bundled/engine/*
+!src-tauri/resources/bundled/engine/.gitkeep
+src-tauri/resources/bundled/aivis/*
+!src-tauri/resources/bundled/aivis/.gitkeep
 src-tauri/resources/engine/
 src-tauri/resources/aivis/*
 !src-tauri/resources/aivis/.gitkeep
