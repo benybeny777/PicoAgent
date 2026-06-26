@@ -13,7 +13,7 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 
-mod trends;
+pub mod trends;
 
 // 自発雑談で使う「独り言を1つ」生成させる指示文。
 // 重要: 挨拶・名乗り・自己紹介・特技説明（「むぎだよ」「観察しながら…」等の決まり文句）は禁止。
@@ -121,14 +121,18 @@ impl Tool for ChitchatTool {
         ]
     }
 
-    async fn run(&self, cfg: &Config, args: Value) -> String {
+    async fn run(&self, _cfg: &Config, args: Value) -> String {
         let mut prompt = format!(
             "{CHATTER_INSTRUCTION}\n今回の話題のヒント: {}（このヒントは出力に書かず、内容の参考にだけ使う）。",
             pick_topic_hint()
         );
-        if let Some(topic) = trends::topic_brief(cfg).await {
-            prompt.push_str("\nいまの話題メモ（このメモをそのまま読まず、短い独り言の素材にだけ使う）:\n");
-            prompt.push_str(&topic);
+        // 話題メモは呼び出し側（pet_idle_chatter）が取得して args.topic で渡す。
+        if let Some(topic) = args.get("topic").and_then(Value::as_str) {
+            let topic = topic.trim();
+            if !topic.is_empty() {
+                prompt.push_str("\nいまの話題メモ（このメモをそのまま読まず、短い独り言の素材にだけ使う）:\n");
+                prompt.push_str(topic);
+            }
         }
         // 直近に言った独り言があれば、それらと内容も言い回しも変えるよう明示する。
         let avoid: Vec<String> = args

@@ -11,7 +11,18 @@ const DEFAULT_TRENDS_RSS: &str = "https://trends.google.com/trending/rss?geo=JP"
 const X_SEARCH_URL: &str = "https://api.x.com/2/tweets/search/recent";
 const MAX_FEED_BYTES: usize = 1024 * 1024;
 
-pub async fn topic_brief(cfg: &Config) -> Option<String> {
+// 話題メモ1件。`memo` はモデルへ渡す素材文、`sources` は出典（記事タイトルとURL）。
+pub struct TopicBrief {
+    pub memo: String,
+    pub sources: Vec<TopicSource>,
+}
+
+pub struct TopicSource {
+    pub title: String,
+    pub url: String,
+}
+
+pub async fn topic_brief(cfg: &Config) -> Option<TopicBrief> {
     let mode = cfg
         .get("PICOAGENT_CHATTER_TOPIC_MODE", "auto")
         .trim()
@@ -65,7 +76,7 @@ fn timeout_secs(cfg: &Config) -> u64 {
         .unwrap_or(8)
 }
 
-async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<String> {
+async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<TopicBrief> {
     let token = cfg.get("PICOAGENT_X_BEARER_TOKEN", "");
     if token.is_empty() {
         return None;
@@ -110,10 +121,10 @@ async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<String> {
     if text.is_empty() {
         None
     } else {
-        Some(format!(
-            "Xで反応が多い話題候補: {}",
-            compact_line(text, 180)
-        ))
+        Some(TopicBrief {
+            memo: format!("Xで反応が多い話題候補: {}", compact_line(text, 180)),
+            sources: Vec::new(),
+        })
     }
 }
 
@@ -123,7 +134,7 @@ async fn rss_topics(
     key: &str,
     default_urls: &str,
     heading: &str,
-) -> Option<String> {
+) -> Option<TopicBrief> {
     let urls = cfg.get(key, default_urls);
     for url in urls.split(',').map(str::trim).filter(|url| !url.is_empty()) {
         let response = match client.get(url).send().await {
@@ -138,21 +149,35 @@ async fn rss_topics(
             Ok(feed) => feed,
             Err(_) => continue,
         };
-        let titles: Vec<String> = feed
-            .entries
-            .iter()
-            .filter_map(|entry| entry.title.as_ref().map(|title| title.content.trim()))
-            .filter(|title| !title.is_empty())
-            .take(5)
-            .map(|title| compact_line(title, 90))
-            .collect();
-        if !titles.is_empty() {
-            let mut out = format!("{heading}:");
-            for title in titles {
-                out.push_str("\n- ");
-                out.push_str(&title);
+        let mut sources: Vec<TopicSource> = Vec::new();
+        for entry in feed.entries.iter() {
+            let Some(title) = entry.title.as_ref().map(|title| title.content.trim()) else {
+                continue;
+            };
+            if title.is_empty() {
+                continue;
             }
-            return Some(out);
+            let link = entry
+                .links
+                .iter()
+                .find(|link| link.href.starts_with("http"))
+                .map(|link| link.href.clone())
+                .unwrap_or_default();
+            sources.push(TopicSource {
+                title: compact_line(title, 90),
+                url: link,
+            });
+            if sources.len() >= 5 {
+                break;
+            }
+        }
+        if !sources.is_empty() {
+            let mut memo = format!("{heading}:");
+            for source in &sources {
+                memo.push_str("\n- ");
+                memo.push_str(&source.title);
+            }
+            return Some(TopicBrief { memo, sources });
         }
     }
     None

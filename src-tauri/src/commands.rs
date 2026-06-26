@@ -315,6 +315,35 @@ fn current_time_context() -> String {
     )
 }
 
+// 返信と記事タイトルの「内容のある文字バイグラム」の重なりから、最も関連する出典URLを選ぶ。
+// ASCII・記号は除外し、地震→地震ニュースのように話題に触れたときだけURLを添えるための簡易一致。
+fn best_source_url(reply: &str, sources: &[crate::tools::chitchat::trends::TopicSource]) -> Option<String> {
+    fn content_bigrams(s: &str) -> std::collections::HashSet<(char, char)> {
+        let chars: Vec<char> = s
+            .chars()
+            .filter(|c| !c.is_ascii() && c.is_alphanumeric())
+            .collect();
+        chars.windows(2).map(|w| (w[0], w[1])).collect()
+    }
+    let reply_bg = content_bigrams(reply);
+    if reply_bg.is_empty() {
+        return None;
+    }
+    let mut best: Option<(usize, &str)> = None;
+    for source in sources {
+        if source.url.is_empty() {
+            continue;
+        }
+        let score = content_bigrams(&source.title)
+            .intersection(&reply_bg)
+            .count();
+        if score >= 1 && best.map(|(b, _)| score > b).unwrap_or(true) {
+            best = Some((score, &source.url));
+        }
+    }
+    best.map(|(_, url)| url.to_string())
+}
+
 #[tauri::command]
 pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
@@ -329,7 +358,15 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
 
     // 直近の独り言を「避ける文」として渡し、毎回ちがう内容にする。
     let avoid = state.recent_chatter.lock().unwrap().clone();
-    let instruction = tools::dispatch(&state.config, "chitchat", json!({ "avoid": avoid })).await;
+    // 話題メモ（ニュース等）を1件取得。雑談がこの話題に触れたら出典URLを末尾に添える。
+    let brief = crate::tools::chitchat::trends::topic_brief(&state.config).await;
+    let topic_memo = brief.as_ref().map(|b| b.memo.clone()).unwrap_or_default();
+    let instruction = tools::dispatch(
+        &state.config,
+        "chitchat",
+        json!({ "avoid": avoid, "topic": topic_memo }),
+    )
+    .await;
     // 雑談は「人格(system)＋現在時刻＋指示」だけで生成する。直近の会話（ユーザー発話）は
     // 文脈へ入れない（小型モデルが入力をオウム返しするのを防ぐため）。
     let system = state
@@ -370,7 +407,13 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
                 *state.messages.lock().unwrap() = compacted.clone();
                 crate::history::save(&app, &compacted);
             }
-            Ok(json!({ "enabled": true, "reply": reply }))
+            // 雑談が話題メモ（ニュース等）に触れていれば、一致する出典URLを末尾に添える。
+            // URL 行は読み上げ（speech_text）で除外されるため音声には乗らない。
+            let display = match brief.as_ref().and_then(|b| best_source_url(&reply, &b.sources)) {
+                Some(url) if !reply.is_empty() => format!("{reply}\n\n参考:\n{url}"),
+                _ => reply,
+            };
+            Ok(json!({ "enabled": true, "reply": display }))
         }
         Err(error) => Err(format!("自発雑談の生成に失敗しました: {error}")),
     }
