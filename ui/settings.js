@@ -92,6 +92,7 @@ function buildAlarmEditor(currentJson) {
   function addRow(a = {}) {
     const time = el("input", { type: "time", value: a.time || "07:00", className: "alarm-time" });
     const label = el("input", { type: "text", placeholder: "ラベル（任意）", value: a.label || "", className: "alarm-label" });
+    const snooze = el("input", { type: "number", min: "1", max: "60", step: "1", value: String(Math.min(60, Math.max(1, Number(a.snooze_minutes || 5)))), className: "alarm-snooze" });
     const repeat = el("input", { type: "checkbox", checked: a.repeat !== false });
     const enabled = el("input", { type: "checkbox", checked: a.enabled !== false });
     const dayBoxes = ALARM_WEEKDAYS.map(([code, jp]) => {
@@ -104,13 +105,14 @@ function buildAlarmEditor(currentJson) {
       el("div", { className: "alarm-row-bottom" }, [
         el("label", { className: "alarm-opt" }, [repeat, document.createTextNode("繰り返し")]),
         el("label", { className: "alarm-opt" }, [enabled, document.createTextNode("有効")]),
+        el("label", { className: "alarm-opt" }, [snooze, document.createTextNode("分後に再通知")]),
         label,
         del,
       ]),
     ]);
     const entry = {
       id: a.id || `al${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-      time, label, repeat, enabled, dayBoxes, row,
+      time, label, repeat, enabled, snooze, dayBoxes, row,
     };
     del.addEventListener("click", () => {
       listEl.removeChild(row);
@@ -137,6 +139,7 @@ function buildAlarmEditor(currentJson) {
         repeat: r.repeat.checked,
         label: r.label.value.trim(),
         enabled: r.enabled.checked,
+        snooze_minutes: Math.min(60, Math.max(1, Number(r.snooze.value || 5))),
       }));
       return JSON.stringify(out);
     },

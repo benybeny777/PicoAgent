@@ -46,17 +46,19 @@ fn days_arg(args: &Value) -> Vec<String> {
 fn format_alarm(a: &Alarm) -> String {
     let repeat = if a.repeat { "繰り返し" } else { "一度きり" };
     let state = if a.enabled { "" } else { "（無効）" };
+    let snooze = a.snooze_minutes.clamp(1, 60);
     let label = if a.label.is_empty() {
         String::new()
     } else {
         format!(" 〔{}〕", a.label)
     };
     format!(
-        "{} {}（{}・{}）{}{}",
+        "{} {}（{}・{}・スヌーズ{}分）{}{}",
         a.time,
         alarm::days_label(&a.days),
         repeat,
         "声で起こす",
+        snooze,
         label,
         state
     )
@@ -108,6 +110,7 @@ impl Tool for AlarmTool {
                     "description": "曜日 mon..sun。平日/週末/毎日も可。空なら毎日"
                 },
                 "repeat": { "type": "boolean", "description": "繰り返す(true)か一度きり(false)。既定 true" },
+                "snooze_minutes": { "type": "integer", "minimum": 1, "maximum": 60, "description": "起床確認がないときに再度鳴らすまでの分数。既定5分" },
                 "label": { "type": "string", "description": "ラベル（任意）" },
                 "id": { "type": "string", "description": "remove/enable/disable の対象ID（list で確認できる）" }
             },
@@ -118,7 +121,7 @@ impl Tool for AlarmTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![Field::new(
             alarm::CONFIG_KEY,
-            "目覚まし一覧（JSON。通常はチャットで設定。例:[{\"id\":\"a\",\"time\":\"07:00\",\"days\":[\"mon\"],\"repeat\":true,\"label\":\"朝\",\"enabled\":true}]）",
+            "目覚まし一覧（JSON。通常はチャットで設定。例:[{\"id\":\"a\",\"time\":\"07:00\",\"days\":[\"mon\"],\"repeat\":true,\"label\":\"朝\",\"enabled\":true,\"snooze_minutes\":5}]）",
             "textarea",
             "[]",
         )]
@@ -143,6 +146,11 @@ impl Tool for AlarmTool {
                 };
                 let days = alarm::normalize_days(&days_arg(&args));
                 let repeat = args.get("repeat").and_then(Value::as_bool).unwrap_or(true);
+                let snooze_minutes = args
+                    .get("snooze_minutes")
+                    .and_then(Value::as_u64)
+                    .map(|value| value.clamp(1, 60) as u32)
+                    .unwrap_or(5);
                 let label = str_arg(&args, "label");
                 let alarm = Alarm {
                     id: new_id(),
@@ -151,6 +159,7 @@ impl Tool for AlarmTool {
                     repeat,
                     label,
                     enabled: true,
+                    snooze_minutes,
                 };
                 let summary = format_alarm(&alarm);
                 alarms.push(alarm);

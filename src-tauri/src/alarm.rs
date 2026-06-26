@@ -15,6 +15,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_snooze_minutes() -> u32 {
+    5
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Alarm {
     pub id: String,
@@ -30,6 +34,9 @@ pub struct Alarm {
     pub label: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// 起床確認がないときに再度鳴らすまでの分数。
+    #[serde(default = "default_snooze_minutes")]
+    pub snooze_minutes: u32,
 }
 
 const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -133,7 +140,7 @@ pub fn days_label(days: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{days_label, normalize_days, normalize_time};
+    use super::{days_label, normalize_days, normalize_time, Alarm};
 
     #[test]
     fn 時刻を正規化する() {
@@ -153,5 +160,12 @@ mod tests {
         assert_eq!(normalize_days(&["日".to_string(), "土".to_string()]), vec!["sat", "sun"]);
         assert_eq!(days_label(&["mon".to_string(), "fri".to_string()]), "月・金");
         assert_eq!(days_label(&[]), "毎日");
+    }
+
+    #[test]
+    fn 古い目覚まし_json_はスヌーズ五分で読む() {
+        let raw = r#"[{"id":"a","time":"07:00","days":[],"repeat":true,"label":"朝","enabled":true}]"#;
+        let alarms: Vec<Alarm> = serde_json::from_str(raw).unwrap();
+        assert_eq!(alarms[0].snooze_minutes, 5);
     }
 }

@@ -19,6 +19,7 @@ let chatterTimer = null;
 const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
 const firedAlarms = new Set();
+let activeAlarmSnooze = null;
 
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 let characterRoot = "assets/characters/mugi";
@@ -164,6 +165,19 @@ function renderReply(text) {
   appendLinkedText(reply, text);
 }
 
+function renderAlarmReply(text) {
+  renderReply(text);
+  const actions = document.createElement("div");
+  actions.className = "alarm-actions";
+  const awake = document.createElement("button");
+  awake.type = "button";
+  awake.className = "alarm-awake";
+  awake.textContent = "おきたよ！";
+  awake.addEventListener("click", () => clearAlarmSnooze(true));
+  actions.append(awake);
+  reply.append(actions);
+}
+
 function addHistory(role, text) {
   const content = String(text ?? "").trim();
   if (!content) return;
@@ -222,8 +236,14 @@ function playPreparedSpeech(result) {
   const bytes = new Uint8Array(result.audio);
   const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
   currentVoice = new Audio(url);
-  currentVoice.addEventListener("ended", () => { finishVoice(true); status.textContent = ""; }, { once: true });
-  currentVoice.addEventListener("error", () => { finishVoice(true); status.textContent = "音声再生に失敗"; }, { once: true });
+  currentVoice.addEventListener("ended", () => {
+    finishVoice(true);
+    if (!activeAlarmSnooze) status.textContent = "";
+  }, { once: true });
+  currentVoice.addEventListener("error", () => {
+    finishVoice(true);
+    status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗";
+  }, { once: true });
   currentVoice.play().catch(() => { finishVoice(true); });
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
@@ -317,6 +337,7 @@ bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 
 composer.addEventListener("submit", async event => {
   event.preventDefault(); const text = input.value.trim(); if (!text || busy) return;
+  clearAlarmSnooze(false);
   busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text; addHistory("user", text);
   const result = await window.picoagent.send(text);
   status.textContent = result.error ? "接続を確認してね" : "";
@@ -455,13 +476,37 @@ async function fireChatter() {
 // 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
 function pad2(n) { return String(n).padStart(2, "0"); }
 function weekdayCode(date) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()]; }
+function alarmSnoozeMinutes(a) {
+  const value = Number(a?.snooze_minutes ?? a?.snoozeMinutes ?? 5);
+  if (!Number.isFinite(value)) return 5;
+  return Math.min(60, Math.max(1, Math.round(value)));
+}
+function clearAlarmSnooze(stopCurrentVoice) {
+  activeAlarmSnooze = null;
+  reply.querySelector(".alarm-actions")?.remove();
+  if (stopCurrentVoice) stopVoice();
+  status.textContent = "";
+}
+function armAlarmSnooze(a) {
+  const minutes = alarmSnoozeMinutes(a);
+  activeAlarmSnooze = {
+    alarm: { ...a, snooze_minutes: minutes },
+    dueAt: Date.now() + minutes * 60 * 1000,
+  };
+  status.textContent = `「おきたよ！」を押すまで${minutes}分おきに起こします`;
+}
 async function checkAlarms() {
+  const now = new Date();
+  if (activeAlarmSnooze && Date.now() >= activeAlarmSnooze.dueAt) {
+    const alarm = activeAlarmSnooze.alarm;
+    await fireAlarm(alarm);
+    return;
+  }
   let res;
   try { res = await window.picoagent.alarms(); }
   catch { return; }
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
-  const now = new Date();
   const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const today = weekdayCode(now);
   const minuteKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${hhmm}`;
@@ -486,10 +531,11 @@ async function fireAlarm(a) {
   if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
   // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
   const prepared = await prepareSpeech(line);
-  renderReply(line);
+  renderAlarmReply(line);
   addHistory("assistant", line);
   if (prepared) playPreparedSpeech(prepared);
   else setAnimation("talking", true);
+  armAlarmSnooze(a);
 }
 function startAlarmPolling() {
   if (alarmTimer) clearInterval(alarmTimer);
