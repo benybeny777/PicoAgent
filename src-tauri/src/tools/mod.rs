@@ -90,6 +90,26 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "何時に",
         ],
     ),
+    (
+        "reminder",
+        &["リマインダー", "思い出させて", "通知して", "あとで教えて", "reminder"],
+    ),
+    (
+        "focus_timer",
+        &["集中", "ポモドーロ", "タイマー", "見守り", "作業を見て", "focus", "pomodoro"],
+    ),
+    (
+        "praise_log",
+        &["できた", "やったこと", "がんばった", "褒め", "ほめ", "praise"],
+    ),
+    (
+        "daily_briefing",
+        &["おでかけ", "出かける", "外出", "持っていく", "出る前", "briefing"],
+    ),
+    (
+        "clipboard_text",
+        &["クリップボード", "コピーした", "clipboard"],
+    ),
     ("read_file", &["読んで", "読み取", "ファイル", "read_file"]),
     (
         "workspace_files",
@@ -290,5 +310,15 @@ mod tests {
     fn 発話に合うスキルを追加する() {
         let names = schema_names("Slack にこの内容を送って");
         assert!(names.contains(&"slack_send_message".to_string()));
+    }
+
+    #[test]
+    fn 日常補助スキルを候補に追加する() {
+        let reminder = schema_names("15分後にリマインダーして");
+        assert!(reminder.contains(&"reminder".to_string()));
+        let focus = schema_names("25分集中タイマーを始めて");
+        assert!(focus.contains(&"focus_timer".to_string()));
+        let clipboard = schema_names("クリップボードを要約して");
+        assert!(clipboard.contains(&"clipboard_text".to_string()));
     }
 }

@@ -15,6 +15,7 @@ const conversationHistory = [];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
+let dailyTimer = null;
 // 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
 const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
@@ -442,6 +443,14 @@ function applyChatterConfig(c) {
   chatterCfg.maxSecs = Math.max(chatterCfg.minSecs, clampSecs(c.chatterMaxSecs, 240));
   scheduleChatter();
 }
+async function showAssistantNotice(line) {
+  if (!line || busy || !composer.hidden || currentVoice || bubble.classList.contains("fullscreen")) return;
+  const prepared = await prepareSpeech(line);
+  if (busy || !composer.hidden || currentVoice) return;
+  renderReply(line);
+  addHistory("assistant", line);
+  if (prepared) playPreparedSpeech(prepared);
+}
 // 次の自発雑談を [min, max] 秒のランダム遅延で予約する。呼ぶたびにアイドル計測をやり直す。
 function scheduleChatter() {
   if (chatterTimer) { clearTimeout(chatterTimer); chatterTimer = null; }
@@ -461,16 +470,25 @@ async function fireChatter() {
     const res = await window.picoagent.idleChatter();
     if (res?.enabled === false) { chatterCfg.enabled = false; return; }
     const line = (res?.reply || "").trim();
-    if (line && !busy && composer.hidden && !currentVoice) {
-      // 先に音声を合成し、合成完了後に文字を表示して即時に読み上げる（表示と音声を同時に）。
-      const prepared = await prepareSpeech(line);
-      if (busy || !composer.hidden || currentVoice) return; // 合成中に状況が変わったら出さない。
-      renderReply(line);
-      addHistory("assistant", line);
-      if (prepared) playPreparedSpeech(prepared);
-    }
+    await showAssistantNotice(line);
   } catch { /* 失敗は無視して次回へ */ }
   finally { scheduleChatter(); }
+}
+
+async function checkDailyEvents() {
+  let res;
+  try { res = await window.picoagent.dailyEvents(); }
+  catch { return; }
+  const events = Array.isArray(res?.events) ? res.events : [];
+  if (!events.length) return;
+  const line = (events[0]?.text || "時間だよ。").trim();
+  await showAssistantNotice(line);
+}
+
+function startDailyPolling() {
+  if (dailyTimer) clearInterval(dailyTimer);
+  dailyTimer = setInterval(checkDailyEvents, ALARM_POLL_MS);
+  checkDailyEvents();
 }
 
 // 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
@@ -553,7 +571,15 @@ function startAlarmPolling() {
   try {
     // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
     await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}, { speakGreeting: false });
-    if (characterManifest?.greeting) preparedGreeting = await prepareSpeech(characterManifest.greeting);
+    let greeting = characterManifest?.greeting || "";
+    try {
+      const daily = await window.picoagent.dailyGreeting();
+      if (daily?.reply) greeting = `${greeting}\n${daily.reply}`.trim();
+    } catch { /* 動的あいさつに失敗しても通常挨拶で続行する */ }
+    if (greeting) {
+      characterManifest.greeting = greeting;
+      preparedGreeting = await prepareSpeech(greeting);
+    }
   } catch (error) {
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
@@ -566,5 +592,6 @@ function startAlarmPolling() {
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}
   applyChatterConfig(info); // アイドル雑談タイマーを開始。
+  startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
 })();

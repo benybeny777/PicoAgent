@@ -64,6 +64,21 @@ main {
 .tab-panel[hidden] {
   display: none;
 }
+.sub-tabs {
+  position: static;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 0 10px;
+  background: transparent;
+}
+.sub-tab {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.sub-tab-panels {
+  padding-top: 2px;
+}
 
 .section {
   margin-bottom: 18px;
@@ -120,7 +135,7 @@ main {
 .card-desc { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
 /* 設定を持つスキルはクリックで開閉できるアコーディオン。 */
 .card-accordion { cursor: pointer; }
-.card-accordion:hover { border-color: var(--accent); }
+.card-accordion:hover { border-color: var(--pink); }
 .card-accordion .card-name::after { content: " ▸"; color: var(--muted); font-weight: 400; }
 .card-accordion.open .card-name::after { content: " ▾"; }
 .card-config {

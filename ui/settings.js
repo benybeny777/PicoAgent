@@ -187,12 +187,12 @@ function createTabs(items) {
     panel.setAttribute("aria-labelledby", button.id);
     if (!selected) panel.hidden = true;
     button.addEventListener("click", () => {
-      for (const tab of tabs.querySelectorAll(".tab")) {
+      for (const tab of tabs.children) {
         const active = tab === button;
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", active ? "true" : "false");
       }
-      for (const current of panels.querySelectorAll(".tab-panel")) {
+      for (const current of panels.children) {
         const active = current === panel;
         current.classList.toggle("active", active);
         current.hidden = !active;
@@ -204,6 +204,117 @@ function createTabs(items) {
   });
   form.append(tabs, panels);
   return byId;
+}
+
+function skillCategory(tool) {
+  const name = tool.name || "";
+  if (["alarm", "reminder", "focus_timer", "praise_log", "daily_briefing", "clipboard_text", "chitchat"].includes(name)) {
+    return "daily";
+  }
+  if (["get_time", "weather", "currency_rates", "rss_feed", "web_search", "web_fetch"].includes(name)) {
+    return "info";
+  }
+  if (["read_file", "workspace_files", "run_command", "http_api"].includes(name)) {
+    return "workspace";
+  }
+  if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
+    return "connect";
+  }
+  if (["x_twitter", "mastodon", "bluesky", "reddit", "linkedin", "misskey"].includes(name)) {
+    return "social";
+  }
+  if (["ms_office", "document_convert", "pdf_tools"].includes(name)) {
+    return "docs";
+  }
+  return "other";
+}
+
+function renderSkillCard(tool, values) {
+  const hasConfig = !!tool.configSchema?.length;
+  const name = el("div", { className: "card-name", textContent: hasConfig ? `${tool.label || tool.name}　⚙` : (tool.label || tool.name) });
+  const card = el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
+    name,
+    el("div", { className: "card-desc", textContent: tool.description || "" }),
+  ]);
+  const nodes = [card];
+  if (hasConfig) {
+    const panel = el("div", { className: "card-config" });
+    panel.hidden = true;
+    if (tool.name === "alarm") {
+      // 目覚ましは JSON ではなく、時刻ピッカー＋曜日チェックの専用フォームで編集する。
+      panel.append(buildAlarmEditor(values.PICOAGENT_ALARMS));
+    } else {
+      for (const f of tool.configSchema) panel.append(field(f.key, f.label, f.type, values[f.key], f.placeholder));
+    }
+    panel.addEventListener("click", event => event.stopPropagation());
+    card.addEventListener("click", () => {
+      const open = panel.hidden;
+      panel.hidden = !open;
+      card.classList.toggle("open", open);
+    });
+    nodes.push(panel);
+  }
+  return nodes;
+}
+
+function buildSkillCategoryTabs(tools, values) {
+  const categories = [
+    { id: "daily", label: "日常" },
+    { id: "info", label: "検索・情報" },
+    { id: "workspace", label: "ファイル/実行" },
+    { id: "connect", label: "連携" },
+    { id: "social", label: "SNS/投稿" },
+    { id: "docs", label: "文書" },
+    { id: "other", label: "その他" },
+  ];
+  const grouped = new Map(categories.map(category => [category.id, []]));
+  for (const tool of tools) grouped.get(skillCategory(tool)).push(tool);
+
+  const wrap = el("div", { className: "skill-browser" });
+  const available = categories.filter(category => grouped.get(category.id).length > 0);
+  const tabs = el("div", { className: "tabs sub-tabs", role: "tablist" });
+  const panels = el("div", { className: "tab-panels sub-tab-panels" });
+  available.forEach((category, index) => {
+    const selected = index === 0;
+    const toolsInCategory = grouped.get(category.id);
+    const button = el("button", {
+      className: selected ? "tab sub-tab active" : "tab sub-tab",
+      id: `skill-tab-${category.id}`,
+      textContent: `${category.label} ${toolsInCategory.length}`,
+      type: "button",
+    });
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.setAttribute("aria-controls", `skill-panel-${category.id}`);
+    const panel = el("div", {
+      className: selected ? "tab-panel sub-tab-panel active" : "tab-panel sub-tab-panel",
+      id: `skill-panel-${category.id}`,
+    });
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", button.id);
+    if (!selected) panel.hidden = true;
+    const list = el("div", { className: "card-list" });
+    for (const tool of toolsInCategory) {
+      for (const node of renderSkillCard(tool, values)) list.append(node);
+    }
+    panel.append(list);
+    button.addEventListener("click", () => {
+      for (const tab of tabs.querySelectorAll(".sub-tab")) {
+        const active = tab === button;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      }
+      for (const current of panels.querySelectorAll(".sub-tab-panel")) {
+        const active = current === panel;
+        current.classList.toggle("active", active);
+        current.hidden = !active;
+      }
+    });
+    tabs.append(button);
+    panels.append(panel);
+  });
+  wrap.append(tabs, panels);
+  return wrap;
 }
 
 async function loadCharacterPersona(id) {
@@ -316,36 +427,8 @@ async function render() {
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillSec.append(el("p", { className: "hint", textContent: "⚙ のあるスキルをクリックすると、そのスキルの設定をその場で開けます。" }));
-    const list = el("div", { className: "card-list" });
-    for (const t of data.tools) {
-      const hasConfig = !!t.configSchema?.length;
-      const name = el("div", { className: "card-name", textContent: hasConfig ? `${t.label || t.name}　⚙` : (t.label || t.name) });
-      const card = el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
-        name,
-        el("div", { className: "card-desc", textContent: t.description || "" }),
-      ]);
-      list.append(card);
-      if (hasConfig) {
-        const panel = el("div", { className: "card-config" });
-        panel.hidden = true;
-        if (t.name === "alarm") {
-          // 目覚ましは JSON ではなく、時刻ピッカー＋曜日チェックの専用フォームで編集する。
-          panel.append(buildAlarmEditor(v.PICOAGENT_ALARMS));
-        } else {
-          for (const f of t.configSchema) panel.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
-        }
-        // パネル内のクリックで閉じないように（入力操作を妨げない）。
-        panel.addEventListener("click", event => event.stopPropagation());
-        card.addEventListener("click", () => {
-          const open = panel.hidden;
-          panel.hidden = !open;
-          card.classList.toggle("open", open);
-        });
-        list.append(panel);
-      }
-    }
-    skillSec.append(list);
+    skillSec.append(el("p", { className: "hint", textContent: "カテゴリを選び、⚙ のあるスキルをクリックすると設定を開けます。" }));
+    skillSec.append(buildSkillCategoryTabs(data.tools, v));
   }
   panels.tools.append(skillSec);
 

@@ -172,6 +172,37 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     }))
 }
 
+#[tauri::command]
+pub fn pet_daily_greeting(state: State<'_, AppState>) -> Result<Value, String> {
+    use chrono::{Datelike, Local, Timelike};
+    let now = Local::now();
+    let part = match now.hour() {
+        5..=10 => "おはよう",
+        11..=16 => "こんにちは",
+        17..=18 => "夕方だね",
+        _ => "こんばんは",
+    };
+    let events = crate::daily::load_events(&state.config)
+        .into_iter()
+        .filter(|event| event.enabled)
+        .count();
+    let praise = crate::daily::load_praise(&state.config);
+    let mut line = format!(
+        "{part}。今日は{}月{}日、今は{:02}:{:02}だよ。",
+        now.month(),
+        now.day(),
+        now.hour(),
+        now.minute()
+    );
+    if events > 0 {
+        line.push_str(&format!(" 予定してる通知は{events}件あるよ。"));
+    }
+    if let Some(last) = praise.last() {
+        line.push_str(&format!(" この前の「{}」もちゃんと覚えてる。", last.text));
+    }
+    Ok(json!({ "reply": line }))
+}
+
 // 同梱 Aivis の状態を返す。TTS 無効時は enabled=false（待たずにキャラ描画してよい合図）。
 #[tauri::command]
 pub async fn aivis_status(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
@@ -416,6 +447,14 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
             Ok(json!({ "enabled": true, "reply": display }))
         }
         Err(error) => Err(format!("自発雑談の生成に失敗しました: {error}")),
+    }
+}
+
+#[tauri::command]
+pub fn pet_daily_events(state: State<'_, AppState>) -> Result<Value, String> {
+    match crate::daily::due_events(&state.config) {
+        Ok(events) => Ok(json!({ "events": events })),
+        Err(error) => Err(format!("通知の確認に失敗しました: {error}")),
     }
 }
 

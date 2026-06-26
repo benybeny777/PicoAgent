@@ -6,6 +6,7 @@ mod aivis;
 mod alarm;
 mod commands;
 mod config;
+mod daily;
 mod engine;
 mod history;
 mod memory;
@@ -30,6 +31,8 @@ pub fn run() {
             commands::pet_init,
             commands::pet_send,
             commands::pet_idle_chatter,
+            commands::pet_daily_events,
+            commands::pet_daily_greeting,
             commands::pet_alarms,
             commands::pet_alarm_wake,
             commands::pet_speak,

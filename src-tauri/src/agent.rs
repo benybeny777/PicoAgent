@@ -193,6 +193,119 @@ fn is_simple_greeting(text: &str) -> bool {
     )
 }
 
+fn is_explicit_web_search_request(text: &str) -> bool {
+    WEB_SEARCH_REQUESTS.iter().any(|marker| text.contains(marker))
+}
+
+fn is_local_action_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    [
+        "リマインダー",
+        "思い出させて",
+        "通知して",
+        "あとで教えて",
+        "集中",
+        "ポモドーロ",
+        "タイマー",
+        "見守り",
+        "できた",
+        "できたこと",
+        "書けた",
+        "終わった",
+        "やったこと",
+        "がんばった",
+        "おでかけ",
+        "出かける",
+        "クリップボード",
+        "コピーした",
+        "reminder",
+        "focus",
+        "pomodoro",
+        "clipboard",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()))
+}
+
+fn is_clipboard_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    ["クリップボード", "コピーした", "clipboard"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+}
+
+fn is_daily_briefing_query(text: &str) -> bool {
+    ["おでかけ", "出かける", "外出", "出る前", "持っていく"]
+        .iter()
+        .any(|word| text.contains(word))
+}
+
+fn number_before(text: &str, marker: &str) -> Option<i64> {
+    let marker_index = text.find(marker)?;
+    let prefix = &text[..marker_index];
+    let digits: String = prefix
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    digits.parse::<i64>().ok()
+}
+
+fn relative_minutes(text: &str) -> Option<i64> {
+    if let Some(minutes) = number_before(text, "分後") {
+        return Some(minutes.clamp(1, 24 * 60));
+    }
+    if let Some(hours) = number_before(text, "時間後") {
+        return Some((hours * 60).clamp(1, 24 * 60));
+    }
+    None
+}
+
+fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Value)> {
+    let lower = text.to_lowercase();
+    if ["リマインダー", "思い出させて", "通知して", "あとで教えて"]
+        .iter()
+        .any(|word| text.contains(word))
+    {
+        if let Some(minutes) = relative_minutes(text) {
+            return Some((
+                "reminder",
+                serde_json::json!({ "action": "add", "minutes_from_now": minutes, "text": text }),
+            ));
+        }
+    }
+    if lower.contains("pomodoro") || text.contains("ポモドーロ") || text.contains("集中タイマー") {
+        let minutes = number_before(text, "分").unwrap_or(25).clamp(1, 240);
+        return Some((
+            "focus_timer",
+            serde_json::json!({ "action": "start", "minutes": minutes, "label": text }),
+        ));
+    }
+    if text.contains("見守") {
+        let minutes = number_before(text, "分").unwrap_or(60).clamp(5, 240);
+        return Some((
+            "focus_timer",
+            serde_json::json!({ "action": "watch", "minutes": minutes, "label": text }),
+        ));
+    }
+    if ["できた", "書けた", "終わった", "やったこと", "がんばった"]
+        .iter()
+        .any(|word| text.contains(word))
+    {
+        if ["一覧", "見せて", "まとめ", "リスト"]
+            .iter()
+            .any(|word| text.contains(word))
+        {
+            return Some(("praise_log", serde_json::json!({ "action": "list" })));
+        }
+        return Some(("praise_log", serde_json::json!({ "action": "add", "text": text })));
+    }
+    None
+}
+
 pub async fn run(
     cfg: &Config,
     provider: &dyn Provider,
@@ -224,6 +337,27 @@ pub async fn run(
         } else if let Some(args) = currency_query(&user_text) {
             // 為替もモデルに任せず currency_rates の整形済み出力（レート/推移チャート）を直接返す。
             return Ok(tools::dispatch(cfg, "currency_rates", args).await);
+        } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
+            return Ok(tools::dispatch(cfg, tool, args).await);
+        } else if is_daily_briefing_query(&user_text) {
+            return Ok(tools::dispatch(cfg, "daily_briefing", serde_json::json!({})).await);
+        } else if is_clipboard_query(&user_text) {
+            let mode = if user_text.contains("todo") || user_text.contains("TODO") || user_text.contains("タスク") {
+                "todo"
+            } else if user_text.contains("返信") || user_text.contains("返事") {
+                "reply"
+            } else {
+                "summary"
+            };
+            let clipboard =
+                tools::dispatch(cfg, "clipboard_text", serde_json::json!({ "mode": mode })).await;
+            messages[user_index].content = format!(
+                "{user_text}\n\n以下はローカルのクリップボード取得結果です。Web検索は不要です。本文をそのまま再掲しすぎず、ユーザーの依頼どおりに要約・返信文・TODO化してください。\n--- クリップボード取得結果開始 ---\n{clipboard}\n--- クリップボード取得結果終了 ---"
+            );
+        } else if is_local_action_query(&user_text) && !is_explicit_web_search_request(&user_text) {
+            messages[user_index].content = format!(
+                "{user_text}\n\nこれはローカル操作・日常補助の依頼です。Web検索ではなく、必要なら提示されたスキルを優先して使ってください。"
+            );
         } else {
             let query = web_search_query(&user_text);
             let search_result =
@@ -272,8 +406,8 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_sources, currency_query, extract_source_urls, is_simple_greeting, is_weather_query,
-        web_search_query,
+        append_sources, currency_query, direct_local_tool_query, extract_source_urls,
+        is_local_action_query, is_simple_greeting, is_weather_query, web_search_query,
     };
 
     #[test]
@@ -321,5 +455,28 @@ mod tests {
         assert!(is_simple_greeting("こんにちわ"));
         assert!(is_simple_greeting("こんにちは！"));
         assert!(!is_simple_greeting("こんにちはの語源を教えて"));
+    }
+
+    #[test]
+    fn 操作系依頼を判定する() {
+        assert!(is_local_action_query("15分後にリマインダーして"));
+        assert!(is_local_action_query("クリップボードを要約して"));
+        assert!(!is_local_action_query("今日のニュースを教えて"));
+    }
+
+    #[test]
+    fn 代表的な操作系依頼を直結スキルへ割り当てる() {
+        let (tool, args) = direct_local_tool_query("15分後に洗濯物をリマインダーして").unwrap();
+        assert_eq!(tool, "reminder");
+        assert_eq!(args["minutes_from_now"], 15);
+
+        let (tool, args) = direct_local_tool_query("25分集中タイマー").unwrap();
+        assert_eq!(tool, "focus_timer");
+        assert_eq!(args["action"], "start");
+        assert_eq!(args["minutes"], 25);
+
+        let (tool, args) = direct_local_tool_query("企画書を書けた").unwrap();
+        assert_eq!(tool, "praise_log");
+        assert_eq!(args["action"], "add");
     }
 }

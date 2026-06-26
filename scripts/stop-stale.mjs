@@ -12,6 +12,7 @@
 import { spawnSync } from "node:child_process";
 
 // dev のクレート名 picoagent.exe / 配布名 PicoAgent.exe / 同梱エンジン llama-server.exe を対象にする。
+// Aivis は実行ファイル名が run.exe で汎用的なので、下の専用処理でパス一致だけを止める。
 const winImages = ["llama-server.exe", "picoagent.exe", "PicoAgent.exe"];
 const unixNames = ["llama-server", "PicoAgent", "picoagent"];
 const isWin = process.platform === "win32";
@@ -42,6 +43,19 @@ for (const target of targets) {
   if (killImage(target)) {
     killedAny = true;
     console.log(`[stop-stale] 停止: ${target}`);
+  }
+}
+
+if (isWin) {
+  const script = [
+    "$procs = Get-CimInstance Win32_Process |",
+    "Where-Object { $_.Name -eq 'run.exe' -and $_.ExecutablePath -like '*resources\\\\aivis\\\\run.exe' };",
+    "foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force; Write-Output $p.ProcessId }",
+  ].join(" ");
+  const r = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8" });
+  if (r.status === 0 && String(r.stdout || "").trim()) {
+    killedAny = true;
+    console.log("[stop-stale] 停止: resources/aivis/run.exe");
   }
 }
 
