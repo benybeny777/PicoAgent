@@ -122,8 +122,10 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 | `local`（既定） | 同梱 llama-server `/v1/chat/completions`（OpenAI 互換） | エンジン同梱＋モデル取得済（`engine.rs` が管理）。Ollama 不要 |
 | `ollama` | ローカル Ollama `/api/chat` | `ollama serve` 起動 |
 | `openai` | OpenAI 互換 `/chat/completions` | `OPENAI_API_KEY` 設定（未設定なら `is_up()=false`） |
+| `gemini` | Gemini の OpenAI 互換 `/v1beta/openai/chat/completions` | `PICOAGENT_GEMINI_API_KEY` 設定（未設定なら `is_up()=false`） |
 
 `openai` は `OPENAI_BASE_URL` を変えれば OpenAI 本体に限らず OpenAI 形式の任意ゲートウェイに接続できる。
+`gemini` は Google の OpenAI 互換エンドポイントを使い、`openai.rs` の `to_wire`/`from_wire` をそのまま再利用する（裏は OpenAI 互換と同じ）。tools 付きで失敗したら tools 無しで一度だけ再試行する。
 `local` は `openai.rs` の `to_wire`/`from_wire` を再利用し、tools 非対応テンプレートのモデルでも会話が成立するよう tools 付きで失敗したら tools 無しで再試行する。
 Gemma 等のチャットテンプレートは user/assistant の厳密な交互（かつ user 始まり）を要求し、崩れると 400「Conversation roles must alternate」になる。自発雑談（assistant 発話の差し込み）や履歴復元で assistant が連続・先頭になり得るため、`normalize_for_local` で送信直前に正規化する（system は先頭へ集約、先頭の純 assistant は除去、連続する同 role の user/assistant は内容を連結して1つに畳む。tool 呼び出しを含むメッセージはそのまま通す）。
 
@@ -294,6 +296,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | openai | OpenAI 互換エンドポイント |
 | `OPENAI_API_KEY` | （なし） | openai | OpenAI 互換の API キー。未設定なら選択不可 |
 | `OPENAI_MODEL` | `gpt-4o-mini` | openai | OpenAI 互換の既定モデル |
+| `PICOAGENT_GEMINI_API_KEY` | （なし） | gemini | Gemini API キー。未設定なら選択不可 |
+| `PICOAGENT_GEMINI_MODEL` | `gemini-2.5-flash` | gemini | Gemini の既定モデル |
+| `PICOAGENT_GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | gemini | Gemini の OpenAI 互換エンドポイント |
 | `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` が読み取れるルート |
 | `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
 | `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |

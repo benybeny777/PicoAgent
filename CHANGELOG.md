@@ -6,6 +6,10 @@
 
 ## 2026-06-26
 
+### Gemini プロバイダを追加
+
+- 叩く AI に `gemini` プロバイダ（`providers/gemini.rs`）を追加。Google の OpenAI 互換エンドポイント（`/v1beta/openai`）を使い、`openai.rs` の `to_wire`/`from_wire` を再利用する（裏は OpenAI 互換と同じ）。設定キー `PICOAGENT_GEMINI_API_KEY` / `PICOAGENT_GEMINI_MODEL`（既定 `gemini-2.5-flash`）/ `PICOAGENT_GEMINI_BASE_URL` を追加。API キー設定時のみ接続する。
+
 ### 自発雑談に出典URLを添える
 
 - 雑談がニュース等の話題に触れたとき、出典の記事URLを末尾へ `参考:` として添えるようにした（例: 地震の独り言なら地震ニュースのURL）。`trends.rs` が記事タイトルとURLを返すようにし、`pet_idle_chatter` が話題メモを取得して skill へ `topic` 引数で渡し、返信と記事タイトルの内容バイグラム一致で最も関連するURLを選ぶ。URL 行は読み上げ対象外。

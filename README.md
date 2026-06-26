@@ -129,6 +129,9 @@ graph LR
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI | OpenAI 互換エンドポイント |
 | `OPENAI_API_KEY` | （なし） | OpenAI | OpenAI 互換の API キー |
 | `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI | OpenAI 互換の既定モデル |
+| `PICOAGENT_GEMINI_API_KEY` | （なし） | Gemini | Gemini API キー |
+| `PICOAGENT_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini | Gemini の既定モデル |
+| `PICOAGENT_GEMINI_BASE_URL` | `.../v1beta/openai` | Gemini | Gemini の OpenAI 互換エンドポイント |
 | `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` ツールが読めるルート |
 | `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
 | `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
