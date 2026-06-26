@@ -9,6 +9,7 @@ mod config;
 mod daily;
 mod engine;
 mod history;
+mod log_paths;
 mod memory;
 mod menu;
 mod message;
@@ -57,6 +58,10 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             let config_path = config_dir.join("config.json");
             state.config.load(config_path.clone());
+            // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
+            if let Err(error) = log_paths::ensure_log_dir(app.handle()) {
+                eprintln!("ログディレクトリの作成に失敗しました: {error}");
+            }
 
             let pid = state.config.get("PICOAGENT_PROVIDER", "local");
             *state.provider_id.lock().unwrap() = pid.clone();

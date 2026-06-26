@@ -3,8 +3,9 @@
 // 既定プロバイダ "local" のために、初回はモデルをダウンロードし、llama-server を spawn して
 // OpenAI 互換 API をローカルに立てる。進捗・状態は "engine:status" イベントで UI へ通知する。
 
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Child;
+use std::process::{Child, Stdio};
 use std::sync::Mutex;
 
 use serde_json::Map;
@@ -258,6 +259,31 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     if !gpu_device.trim().is_empty() {
         cmd.arg("--device").arg(gpu_device.trim());
     }
+    let log_path = crate::log_paths::log_file(app, "engine.log");
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    writeln!(
+        log,
+        "\n==== llama-server 起動: model={} port={} ctx={} ngl={} device={} ====",
+        model.display(),
+        port,
+        ctx,
+        ngl,
+        if gpu_device.trim().is_empty() {
+            "(default)"
+        } else {
+            gpu_device.trim()
+        }
+    )?;
+    let err_log = log.try_clone()?;
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(err_log));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -140,10 +140,8 @@ fn device_mode(state: &AppState) -> DeviceMode {
 }
 
 fn log_path(app: &tauri::AppHandle) -> PathBuf {
-    app.path()
-        .app_log_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("aivis.log")
+    crate::log_paths::migrate_legacy_app_log(app, "aivis.log");
+    crate::log_paths::log_file(app, "aivis.log")
 }
 
 fn append_log(app: &tauri::AppHandle, message: &str) -> anyhow::Result<()> {

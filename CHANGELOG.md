@@ -6,6 +6,11 @@
 
 ## 2026-06-27
 
+### 実行時ログを log ディレクトリへ集約
+
+- Aivis のログ保存先を旧 `app_log_dir/aivis.log` から `app_data_dir/log/aivis.log` へ移し、旧ログは新ログ未作成時にコピーするようにした。
+- 同梱 llama-server の stdout/stderr も `app_data_dir/log/engine.log` に保存し、Aivis と推論エンジンのログを同じ `log` ディレクトリで確認できるようにした。
+
 ### 天気・為替・市場指数のスキル直行を安定化
 
 - `weather` / `currency_rates` などのスキル直行応答も assistant 発話として会話履歴へ保存し、前回のユーザー発話だけが残って次の質問へ混ざる問題を修正した。
