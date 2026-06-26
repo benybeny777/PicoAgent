@@ -346,9 +346,14 @@ function applyEngineStatus(s) {
     setStatus("エンジンを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
-    setStatus("準備ができたよ。");
     online.dataset.up = true;
-    setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
+    if (petApp.classList.contains("is-booting")) {
+      status.textContent = "";
+      if (bootStatus) bootStatus.textContent = "むぎを起こしているよ…";
+    } else {
+      setStatus("準備ができたよ。");
+      setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
+    }
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
     online.dataset.up = false;
