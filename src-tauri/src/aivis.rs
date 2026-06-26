@@ -64,11 +64,19 @@ fn existing(path: PathBuf) -> Option<PathBuf> {
     }
 }
 
-fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
+fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "run.exe" } else { "run" };
+    [
+        crate::log_paths::bundled_dir(app).join("aivis").join(exe),
+        crate::log_paths::data_dir(app).join("aivis").join(exe),
+    ]
+    .into_iter()
+    .find_map(existing)
+}
+
+fn resource_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
     let mut candidates = Vec::new();
-    candidates.push(crate::log_paths::bundled_dir(app).join("aivis").join(exe));
-    candidates.push(crate::log_paths::data_dir(app).join("aivis").join(exe));
     if let Ok(res) = app.path().resource_dir() {
         candidates.push(res.join("resources/bundled/aivis").join(exe));
         candidates.push(res.join("bundled/aivis").join(exe));
@@ -82,10 +90,6 @@ fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
         candidates.push(cwd.join("src-tauri/resources/aivis").join(exe));
     }
     candidates
-}
-
-fn bundled_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    bundled_candidates(app).into_iter().find_map(existing)
 }
 
 fn path_hint() -> &'static str {
@@ -366,9 +370,39 @@ fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<PathBuf>> {
+    let Some(resource_run) = resource_candidates(app).into_iter().find_map(existing) else {
+        return Ok(None);
+    };
+    let resource_root = resource_run
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Aivis 同梱リソースの親ディレクトリを取得できません。"))?
+        .to_path_buf();
+    let install = install_dir(app)?;
+    if install.exists() {
+        std::fs::remove_dir_all(&install)?;
+    }
+    copy_dir_all(&resource_root, &install)?;
+    let Some(path) = runtime_engine_path(app) else {
+        anyhow::bail!("Aivis 同梱リソースをコピーしましたが、実行ファイルを見つけられません。");
+    };
+    append_log(
+        app,
+        &format!(
+            "Aivis 同梱リソースを実行時ディレクトリへコピーしました: {} -> {}",
+            resource_root.display(),
+            install.display()
+        ),
+    )?;
+    Ok(Some(path))
+}
+
 async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     migrate_legacy_install(app)?;
-    if let Some(path) = bundled_engine_path(app) {
+    if let Some(path) = runtime_engine_path(app) {
+        return Ok(path);
+    }
+    if let Some(path) = copy_resource_to_install(app)? {
         return Ok(path);
     }
     append_log(
@@ -405,7 +439,7 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     let install_for_copy = install.clone();
     tokio::task::spawn_blocking(move || copy_dir_all(&root_for_copy, &install_for_copy)).await??;
     let _ = tokio::fs::remove_dir_all(&work).await;
-    let installed = bundled_engine_path(app).ok_or_else(|| {
+    let installed = runtime_engine_path(app).ok_or_else(|| {
         anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
     })?;
     append_log(app, &format!("Aivis 自動取得完了: {}", installed.display()))?;
@@ -660,7 +694,7 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     migrate_legacy_install(app)?;
-    let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
+    let path = runtime_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
     let mode = app
         .try_state::<AppState>()
         .map(|state| device_mode(&state))

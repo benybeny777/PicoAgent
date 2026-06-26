@@ -6,6 +6,12 @@
 
 ## 2026-06-27
 
+### release 版の Aivis 読み上げ再生を修正
+
+- Tauri の CSP に `media-src 'self' blob: data:` を追加し、`pet_speak` が返した WAV を `Blob` / `Audio` で再生できるようにした。release / インストーラ版で Aivis 側の合成は成功しているのに音が出ない問題への対応。
+- フロントの音声再生失敗を握りつぶさず、ステータスへ理由を表示するようにした。
+- 同梱 Aivis は配布リソースから直接起動せず、ユーザー書き込み可能な `PicoAgent/bundled/aivis/` へコピーしてから起動するようにした。旧 `resources/aivis/` / `resources/engine/` に実体がある開発環境では、setup スクリプトが新しい `resources/bundled/` 配下へコピーする。
+
 ### 同梱系ランタイム保存先を PicoAgent bundled ディレクトリへ移動
 
 - 実行時に自動取得する Aivis の保存先を旧 `app_data_dir/aivis/` / 旧 `PicoAgent/aivis/` からユーザーデータ配下の `PicoAgent/bundled/aivis/` へ変更した。旧保存先に取得済みの Aivis がある場合は初回に新保存先へ移行する。

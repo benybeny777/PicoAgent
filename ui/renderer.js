@@ -243,9 +243,14 @@ function playPreparedSpeech(result) {
   }, { once: true });
   currentVoice.addEventListener("error", () => {
     finishVoice(true);
-    status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗";
+    status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗: 音声データを読み込めません";
   }, { once: true });
-  currentVoice.play().catch(() => { finishVoice(true); });
+  currentVoice.play().catch(error => {
+    finishVoice(true);
+    if (!activeAlarmSnooze) {
+      status.textContent = `音声再生に失敗: ${error?.message || error || "再生がブロックされました"}`;
+    }
+  });
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
 }

@@ -14,11 +14,16 @@ import { spawnSync } from "node:child_process";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AIVIS_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "aivis");
+const LEGACY_AIVIS_DIR = join(HERE, "..", "src-tauri", "resources", "aivis");
 const API_ROOT = "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases";
 const DEFAULT_RELEASE = "1.2.0";
 
 function bundledRunPath() {
   return join(AIVIS_DIR, platform() === "win32" ? "run.exe" : "run");
+}
+
+function legacyRunPath() {
+  return join(LEGACY_AIVIS_DIR, platform() === "win32" ? "run.exe" : "run");
 }
 
 function releaseUrl() {
@@ -114,6 +119,12 @@ async function main() {
   if (existsSync(bundledRunPath()) && process.env.AIVIS_FORCE !== "1") {
     console.log("aivis ready:", AIVIS_DIR);
     console.log("既に同梱 AivisSpeech Engine があります。再取得する場合は AIVIS_FORCE=1 を指定してください。");
+    return;
+  }
+  if (existsSync(legacyRunPath()) && process.env.AIVIS_FORCE !== "1") {
+    await copyEngineTree(legacyRunPath(), AIVIS_DIR);
+    console.log("aivis ready:", AIVIS_DIR);
+    console.log("旧 resources/aivis から resources/bundled/aivis へコピーしました。");
     return;
   }
 
