@@ -7,6 +7,8 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::config::Config;
 use crate::message::Field;
@@ -39,37 +41,58 @@ inventory::collect!(ToolReg);
 // build.rs が生成した `pub mod time; pub mod read_file; ...` を取り込む。
 include!(concat!(env!("OUT_DIR"), "/tool_mods.rs"));
 
-pub fn all() -> Vec<Box<dyn Tool>> {
-    inventory::iter::<ToolReg>
-        .into_iter()
-        .map(|r| (r.make)())
-        .collect()
+static TOOLS: OnceLock<Vec<Box<dyn Tool>>> = OnceLock::new();
+static TOOL_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
+static TOOL_SCHEMAS: OnceLock<Vec<Value>> = OnceLock::new();
+
+/// 登録済みスキルを返す。各スキルはプロセス内で1回だけ生成する。
+pub fn all() -> &'static [Box<dyn Tool>] {
+    TOOLS
+        .get_or_init(|| {
+            inventory::iter::<ToolReg>
+                .into_iter()
+                .map(|r| (r.make)())
+                .collect()
+        })
+        .as_slice()
+}
+
+fn index() -> &'static HashMap<&'static str, usize> {
+    TOOL_INDEX.get_or_init(|| {
+        all()
+            .iter()
+            .enumerate()
+            .map(|(idx, tool)| (tool.name(), idx))
+            .collect()
+    })
 }
 
 /// プロバイダに渡す function スキーマ配列（OpenAI/Ollama 共通形式）を生成。
-pub fn build_schemas() -> Vec<Value> {
-    all()
-        .iter()
-        .filter(|t| t.agent_callable())
-        .map(|t| {
-            json!({
-                "type": "function",
-                "function": {
-                    "name": t.name(),
-                    "description": t.description(),
-                    "parameters": t.parameters(),
-                }
-            })
+pub fn build_schemas() -> &'static [Value] {
+    TOOL_SCHEMAS
+        .get_or_init(|| {
+            all()
+                .iter()
+                .filter(|t| t.agent_callable())
+                .map(|t| {
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name(),
+                            "description": t.description(),
+                            "parameters": t.parameters(),
+                        }
+                    })
+                })
+                .collect()
         })
-        .collect()
+        .as_slice()
 }
 
 /// モデルが要求したツール呼び出しを実行する。失敗は例外にせず文字列で返す。
 pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
-    for t in all() {
-        if t.name() == name {
-            return t.run(cfg, args).await;
-        }
+    if let Some(idx) = index().get(name) {
+        return all()[*idx].run(cfg, args).await;
     }
     format!("エラー: 未登録のツール \"{}\" が呼び出されました。", name)
 }

@@ -243,7 +243,7 @@ pub async fn pet_send(
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", text));
 
-    let result = agent::run(&state.config, provider.as_ref(), &model, &mut convo, 5).await;
+    let result = agent::run(&state.config, provider, &model, &mut convo, 5).await;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();

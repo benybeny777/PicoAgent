@@ -6,6 +6,8 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::config::Config;
 use crate::message::{Field, Message};
@@ -38,21 +40,32 @@ inventory::collect!(ProviderReg);
 // build.rs が生成した `pub mod ollama; pub mod openai; ...` を取り込む。
 include!(concat!(env!("OUT_DIR"), "/provider_mods.rs"));
 
+static PROVIDERS: OnceLock<Vec<Box<dyn Provider>>> = OnceLock::new();
+static PROVIDER_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
+
 /// 登録済みプロバイダを全て生成して返す。
-pub fn all() -> Vec<Box<dyn Provider>> {
-    inventory::iter::<ProviderReg>
-        .into_iter()
-        .map(|r| (r.make)())
-        .collect()
+pub fn all() -> &'static [Box<dyn Provider>] {
+    PROVIDERS
+        .get_or_init(|| {
+            inventory::iter::<ProviderReg>
+                .into_iter()
+                .map(|r| (r.make)())
+                .collect()
+        })
+        .as_slice()
+}
+
+fn index() -> &'static HashMap<&'static str, usize> {
+    PROVIDER_INDEX.get_or_init(|| {
+        all()
+            .iter()
+            .enumerate()
+            .map(|(idx, provider)| (provider.id(), idx))
+            .collect()
+    })
 }
 
 /// id からプロバイダを取得。
-pub fn get(id: &str) -> Option<Box<dyn Provider>> {
-    for r in inventory::iter::<ProviderReg> {
-        let p = (r.make)();
-        if p.id() == id {
-            return Some(p);
-        }
-    }
-    None
+pub fn get(id: &str) -> Option<&'static dyn Provider> {
+    index().get(id).map(|idx| all()[*idx].as_ref())
 }
