@@ -235,7 +235,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     })?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
-    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "4096");
+    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "8192");
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
     let ngl = state.config.get("PICOAGENT_LOCAL_NGL", "999");

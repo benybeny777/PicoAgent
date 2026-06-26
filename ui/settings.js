@@ -252,8 +252,13 @@ async function render() {
   }
   inputs.set("PICOAGENT_PROVIDER", providerSelect);
   global.append(el("div", { className: "field" }, [el("label", { textContent: "叩く AI（プロバイダ）" }), providerSelect]));
-  global.append(field("PICOAGENT_MODEL", "モデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model));
+  const modelField = field("PICOAGENT_MODEL", "モデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
+  global.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
+  // local はモデルを「叩くAI」タブのプリセットで選ぶので、基本タブのモデル欄（候補に
+  // エンジン報告の生IDなど不要な項目が混ざる）は隠す。ollama/openai では表示する。
+  function updateModelFieldVisibility() { modelField.hidden = providerSelect.value === "local"; }
+  updateModelFieldVisibility();
   global.append(field("PICOAGENT_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
   global.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   global.append(field("PICOAGENT_BUBBLE_WIDTH_PX", "フキダシの幅(px)", "text", v.PICOAGENT_BUBBLE_WIDTH_PX ?? "", "ドラッグで設定"));
@@ -354,19 +359,39 @@ async function render() {
   charSec.append(charList);
   panels.character.append(charSec);
 
-  // --- 叩く AI コネクタごとの設定 ---
-  const provSec = section("叩く AI コネクタ");
+  // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
+  const provSec = section("叩く AI コネクタの設定");
+  const provBlocks = {};
   for (const p of data.providers) {
     if (!p.configSchema?.length) continue;
-    provSec.append(el("div", { className: "subhead", textContent: p.label }));
-    for (const f of p.configSchema) provSec.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+    const block = el("div", { className: "prov-block" });
+    block.append(el("div", { className: "subhead", textContent: p.label }));
+    for (const f of p.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+    block.hidden = p.id !== data.active.providerId;
+    provBlocks[p.id] = block;
+    provSec.append(block);
   }
-  if (provSec.querySelector(".field")) panels.providers.append(provSec);
+  const noProvConfig = el("p", { className: "hint", textContent: "このプロバイダに変更できる設定はありません。" });
+  provSec.append(noProvConfig);
+  function showProviderConfig(id) {
+    let shown = false;
+    for (const [pid, block] of Object.entries(provBlocks)) {
+      block.hidden = pid !== id;
+      if (pid === id) shown = true;
+    }
+    noProvConfig.hidden = shown;
+  }
+  showProviderConfig(data.active.providerId);
+  panels.providers.append(provSec);
 
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
 
-  // プロバイダ変更でモデル候補を更新し、候補が取れたらモデル欄へ反映する。
-  providerSelect.addEventListener("change", () => loadModels(providerSelect.value, true));
+  // プロバイダ変更でモデル候補を更新し、選択中プロバイダの設定だけ表示する。
+  providerSelect.addEventListener("change", () => {
+    loadModels(providerSelect.value, true);
+    showProviderConfig(providerSelect.value);
+    updateModelFieldVisibility();
+  });
   inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
     if (providerSelect.value !== "local" || !modelInput) return;
     const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;

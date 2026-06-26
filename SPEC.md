@@ -257,6 +257,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
 - 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
+- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。基本タブの「モデル」欄は local では非表示にし（モデルはプリセットで選ぶ）、ollama/openai でのみ表示する。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化し、実行中の状態（プロバイダ・モデル・システムプロンプト・長期メモリ・常に手前）へ即反映する。コネクタ固有設定は `cfg.get()` 都度読みのため自動反映。Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `PICOAGENT_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
 
@@ -284,7 +285,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: 推奨RAM 8GB/約0.8GB、`balanced`: 推奨VRAM 4GBまたはRAM 16GB/約3.0GB、`large`: 推奨VRAM 6GB/RAM 24GB/約4.5GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
-| `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
+| `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`） |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |

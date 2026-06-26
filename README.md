@@ -121,7 +121,7 @@ graph LR
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: 推奨RAM 8GB/約0.8GB、`balanced`: 推奨VRAM 4GBまたはRAM 16GB/約3.0GB、`large`: 推奨VRAM 6GB/RAM 24GB/約4.5GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
-| `PICOAGENT_LOCAL_CTX` | `4096` | local | コンテキスト長 |
+| `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定。複数 GPU 環境で discrete GPU を選ぶ場合に `Vulkan1` 等を指定 |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama | Ollama 接続先 |
