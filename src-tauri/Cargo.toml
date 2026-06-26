@@ -28,6 +28,7 @@ anyhow = "1"
 scraper = "0.20"
 url = "2"
 base64 = "0.22"
+feed-rs = "2"
 
 [profile.release]
 opt-level = "s"

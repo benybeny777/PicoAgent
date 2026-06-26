@@ -181,6 +181,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | name | 機能 | 安全策 |
 |---|---|---|
 | `get_time` | 現在の日付・時刻（任意で IANA タイムゾーン、`chrono-tz`） | 副作用なし |
+| `weather` | Open-Meteo による現在天気・日別予報取得 | APIキー不要、地名検索、timeout |
+| `currency_rates` | Frankfurter API による為替レート取得・換算 | APIキー不要、timeout |
+| `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
 | `read_file` | ローカルのテキストファイル読込 | 許可ルート `PICOAGENT_TOOLS_ROOT`（既定はホーム）配下に限定、`..` 等のルート外を拒否、64KB で打ち切り |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | 生成は人格込みで `provider.chat`（tools 無し＝Web検索なし）。会話履歴には積まない |
@@ -192,6 +195,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `google_docs` | Google Docs の文書作成・本文抽出・末尾追記・文字列置換 | Google Docs API `batchUpdate` を使用、OAuth access token は設定から都度取得、秘密値を出力しない、timeout |
 | `google_drive` | Google Drive のファイル検索・メタデータ取得・テキストファイル作成 | OAuth access token は設定から都度取得、秘密値を出力しない、作成サイズ上限、timeout |
 | `google_sheets` | Google Sheets の範囲読込・更新・追記 | OAuth access token は設定から都度取得、秘密値を出力しない、行数上限、timeout |
+| `google_tasks` | Google Tasks のタスクリスト取得・タスク一覧・作成・完了 | OAuth access token は設定から都度取得、秘密値を出力しない、timeout |
 | `github_issue` | GitHub Issue の一覧取得・作成 | token は設定から都度取得、秘密値を出力しない、作成は token 必須、件名/本文サイズ上限、timeout |
 | `notion` | Notion のページ検索・データベースページ作成 | integration token は設定から都度取得、秘密値を出力しない、タイトル/本文サイズ上限、timeout |
 | `discord_send_message` | Discord Webhook でメッセージ送信 | webhook は設定から都度取得、秘密値を出力しない、本文2000文字、timeout |
@@ -278,6 +282,13 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_CHATTER_ENABLED` | `false` | chitchat | アイドル時に自発的な雑談をする |
 | `PICOAGENT_CHATTER_MIN_SECS` | `90` | chitchat | 自発雑談の最短間隔（秒、30〜3600） |
 | `PICOAGENT_CHATTER_MAX_SECS` | `240` | chitchat | 自発雑談の最長間隔（秒、30〜3600） |
+| `PICOAGENT_WEATHER_DEFAULT_LOCATION` | `Tokyo` | weather | 天気の既定地点 |
+| `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |
+| `PICOAGENT_CURRENCY_DEFAULT_BASE` | `USD` | currency_rates | 為替の既定換算元 |
+| `PICOAGENT_CURRENCY_DEFAULT_SYMBOLS` | `JPY` | currency_rates | 為替の既定換算先 |
+| `PICOAGENT_CURRENCY_TIMEOUT_SECS` | `15` | currency_rates | 為替API待ち時間（秒、3〜60） |
+| `PICOAGENT_RSS_DEFAULT_URL` | （なし） | rss_feed | RSS既定URL |
+| `PICOAGENT_RSS_TIMEOUT_SECS` | `15` | rss_feed | RSS取得待ち時間（秒、3〜60） |
 | `PICOAGENT_WORKSPACE_ROOT` | ユーザーホーム | workspace_files | ファイル一覧・読込・書込・追記・フォルダ作成の許可ルート |
 | `PICOAGENT_COMMAND_ENABLED` | `false` | run_command | allowlist 制限付きコマンド実行を有効化 |
 | `PICOAGENT_COMMAND_ROOT` | ユーザーホーム | run_command | コマンド実行の許可ルート |
@@ -300,6 +311,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN` | （なし） | google_sheets | Google Sheets API の OAuth access token |
 | `PICOAGENT_GOOGLE_SHEETS_ID` | （なし） | google_sheets | 既定の spreadsheet ID |
 | `PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS` | `20` | google_sheets | Google Sheets API の待ち時間（秒、3〜60） |
+| `PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN` | （なし） | google_tasks | Google Tasks API の OAuth access token |
+| `PICOAGENT_GOOGLE_TASKS_LIST_ID` | `@default` | google_tasks | 既定の tasklist ID |
+| `PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS` | `15` | google_tasks | Google Tasks API の待ち時間（秒、3〜60） |
 | `PICOAGENT_GITHUB_TOKEN` | （なし） | github_issue | GitHub token（private repo や Issue 作成用） |
 | `PICOAGENT_GITHUB_OWNER` | （なし） | github_issue | 既定の GitHub owner |
 | `PICOAGENT_GITHUB_REPO` | （なし） | github_issue | 既定の GitHub repository |

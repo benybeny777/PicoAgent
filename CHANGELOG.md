@@ -11,6 +11,7 @@
 - OpenClaw 系の実用スキルに近い外部連携として、Slack 送信スキル `slack_send_message`、Gmail 送信/下書きスキル `gmail_message`、Google Calendar 予定操作 `google_calendar`、Google Docs 文書操作 `google_docs`、Google Drive ファイル操作 `google_drive`、Google Sheets 範囲操作 `google_sheets`、GitHub Issue 操作 `github_issue`、Notion 検索/ページ作成 `notion`、Discord 送信 `discord_send_message`、Microsoft Graph 連携 `microsoft_graph`、Jira `jira`、Linear `linear`、Trello `trello`、Todoist `todoist`、URL本文取得 `web_fetch`、汎用HTTP/API呼び出し `http_api` を追加。各サービスの token / Webhook URL / OAuth access token は設定から都度読み、秘密値をエラーやログへ出さない。
 - ワークスペース操作として `workspace_files`（許可ルート内の一覧・読込・書込・追記・フォルダ作成・情報取得）と `run_command`（既定無効、allowlist prefix 一致のみ、shell 不使用、timeout 付き）を追加。危険な削除操作や任意 shell 実行は入れず、設定画面から許可範囲を明示する構成にした。
 - Office/PDF 操作として `ms_office`（Microsoft Office COM による Word/Excel/PowerPoint の文字列置換・PDF出力）、`document_convert`（LibreOffice headless による高精度変換）、`pdf_tools`（qpdf によるページ抽出・結合・回転・線形化）を追加。低精度なOOXML直接編集は採用せず、専用API/専用エンジンを使うルートに寄せた。
+- 普段使い向けに `weather`（Open-Meteo 天気）、`currency_rates`（Frankfurter 為替換算）、`rss_feed`（RSS/Atom 更新取得）、`google_tasks`（Google Tasks の一覧・作成・完了）を追加。天気・為替・RSSはAPIキーなしで使える。
 
 ### 会話履歴の永続化と直近会話の文脈復元
 
