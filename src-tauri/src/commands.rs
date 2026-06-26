@@ -105,7 +105,11 @@ fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
     if turns.len() > MAX_CONTEXT_MESSAGES {
         turns.drain(0..turns.len() - MAX_CONTEXT_MESSAGES);
     }
-    let mut next: Vec<Message> = convo.iter().filter(|m| m.role == "system").cloned().collect();
+    let mut next: Vec<Message> = convo
+        .iter()
+        .filter(|m| m.role == "system")
+        .cloned()
+        .collect();
     next.extend(turns);
     next
 }

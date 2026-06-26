@@ -6,6 +6,11 @@
 
 ## 2026-06-26
 
+### 外部サービス連携とワークスペース操作スキル
+
+- OpenClaw 系の実用スキルに近い外部連携として、Slack 送信スキル `slack_send_message`、Gmail 送信/下書きスキル `gmail_message`、Google Calendar 予定操作 `google_calendar`、GitHub Issue 操作 `github_issue`、Notion 検索/ページ作成 `notion`、Discord 送信 `discord_send_message`、URL本文取得 `web_fetch` を追加。各サービスの token / Webhook URL / OAuth access token は設定から都度読み、秘密値をエラーやログへ出さない。
+- ワークスペース操作として `workspace_files`（許可ルート内の一覧・読込・書込・追記・フォルダ作成・情報取得）と `run_command`（既定無効、allowlist prefix 一致のみ、shell 不使用、timeout 付き）を追加。危険な削除操作や任意 shell 実行は入れず、設定画面から許可範囲を明示する構成にした。
+
 ### 会話履歴の永続化と直近会話の文脈復元
 
 - 会話履歴を `app_data_dir/history.json` に永続化する `history.rs` を追加。`pet_send` のたびに「system + クリーンな直近発話（最大24件）」へ圧縮して保存し、起動時に末尾20件を文脈へ復元する。再起動をまたいで直近の会話を踏まえて話せるようにした（対話データなので config.json とは分離）。
