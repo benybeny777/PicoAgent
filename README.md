@@ -99,7 +99,9 @@ graph LR
 
 目覚まし時計は、チャットで「**平日の7時に起こして**」「土日の朝8時、繰り返しで」のように頼むと設定できます（声でやさしく起こします）。一覧・削除も「アラーム一覧」「その目覚ましを消して」で操作でき、設定画面の「スキル」タブからも `PICOAGENT_ALARMS`（JSON）で直接編集できます。アプリ起動中のみ鳴ります。
 
-設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル」のタブで構成されます。各コネクタが申告した設定も自動で増えます。
+設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル」のタブで構成されます。各コネクタが申告した設定も自動で増えます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
+
+#### 基本（アプリ全体）
 
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
@@ -114,10 +116,20 @@ graph LR
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリの最大件数（10〜200） |
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中のキャラクターID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
+
+#### 音声（Aivis 読み上げ）
+
+| キー | 既定 | 区分 | 用途 |
+|---|---|---|---|
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` は GPU 優先 / `cpu` / `gpu`） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き |
+
+#### 叩く AI（プロバイダ）
+
+| キー | 既定 | 区分 | 用途 |
+|---|---|---|---|
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: 推奨RAM 8GB/約0.8GB、`balanced`: 推奨VRAM 4GBまたはRAM 16GB/約3.0GB、`large`: 推奨VRAM 6GB/RAM 24GB/約4.5GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
@@ -132,6 +144,11 @@ graph LR
 | `PICOAGENT_GEMINI_API_KEY` | （なし） | Gemini | Gemini API キー |
 | `PICOAGENT_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini | Gemini の既定モデル |
 | `PICOAGENT_GEMINI_BASE_URL` | `.../v1beta/openai` | Gemini | Gemini の OpenAI 互換エンドポイント |
+
+#### スキル：情報・日常（検索 / 雑談 / 目覚まし / 天気 / 為替 / RSS）
+
+| キー | 既定 | 区分 | 用途 |
+|---|---|---|---|
 | `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` ツールが読めるルート |
 | `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
 | `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
@@ -151,11 +168,21 @@ graph LR
 | `PICOAGENT_CURRENCY_TIMEOUT_SECS` | `15` | currency_rates | 為替API待ち時間（秒、3〜60） |
 | `PICOAGENT_RSS_DEFAULT_URL` | （なし） | rss_feed | RSS既定URL |
 | `PICOAGENT_RSS_TIMEOUT_SECS` | `15` | rss_feed | RSS取得待ち時間（秒、3〜60） |
+
+#### スキル：ファイル操作・コマンド実行
+
+| キー | 既定 | 区分 | 用途 |
+|---|---|---|---|
 | `PICOAGENT_WORKSPACE_ROOT` | ユーザーホーム | workspace_files | ファイル一覧・読込・書込・追記・フォルダ作成の許可ルート |
 | `PICOAGENT_COMMAND_ENABLED` | `false` | run_command | allowlist 制限付きコマンド実行を有効化 |
 | `PICOAGENT_COMMAND_ROOT` | ユーザーホーム | run_command | コマンド実行の許可ルート |
 | `PICOAGENT_COMMAND_ALLOWLIST` | `git status,git diff,npm test,cargo test` | run_command | 実行を許可するコマンド prefix（カンマ区切り） |
 | `PICOAGENT_COMMAND_TIMEOUT_SECS` | `30` | run_command | コマンド実行の既定タイムアウト秒（1〜120） |
+
+#### スキル：外部サービス・SNS 連携（使うサービスの欄だけ設定）
+
+| キー | 既定 | 区分 | 用途 |
+|---|---|---|---|
 | `PICOAGENT_SLACK_BOT_TOKEN` | （なし） | slack_send_message | Slack Bot token（Webhook 未使用時） |
 | `PICOAGENT_SLACK_CHANNEL` | （なし） | slack_send_message | Slack の既定送信先チャンネル |
 | `PICOAGENT_SLACK_WEBHOOK_URL` | （なし） | slack_send_message | Slack Incoming Webhook URL（Bot token の代替） |
@@ -231,6 +258,11 @@ graph LR
 | `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | http_api | 汎用HTTPの待ち時間（秒、3〜60） |
 | `PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS` | （空） | web_fetch | URL取得を許可するドメイン（カンマ区切り。空なら制限なし） |
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
+
+#### スキル：ドキュメント変換（Office / PDF）
+
+| キー | 既定 | 区分 | 用途 |
+|---|---|---|---|
 | `PICOAGENT_DOCUMENT_ROOT` | ユーザーホーム | ms_office / document_convert / pdf_tools | Office/PDF 操作の許可ルート |
 | `PICOAGENT_POWERSHELL_PATH` | `powershell` | ms_office | PowerShell 実行ファイルパス |
 | `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | ms_office | Microsoft Office 操作タイムアウト秒（5〜300） |
