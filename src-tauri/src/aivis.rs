@@ -7,10 +7,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::Manager;
+use tokio::io::AsyncWriteExt;
 
 use crate::commands::AppState;
 
 const BUNDLED_PORT: u16 = 10102;
+const AIVIS_RELEASE: &str = "1.2.0";
+const AIVIS_API_URL: &str =
+    "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/1.2.0";
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
 const GPU_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -63,6 +67,9 @@ fn existing(path: PathBuf) -> Option<PathBuf> {
 fn bundled_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
     let mut candidates = Vec::new();
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        candidates.push(data_dir.join("aivis").join(exe));
+    }
     if let Ok(res) = app.path().resource_dir() {
         candidates.push(res.join("resources/aivis").join(exe));
         candidates.push(res.join("aivis").join(exe));
@@ -79,7 +86,7 @@ fn bundled_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 }
 
 fn path_hint() -> &'static str {
-    "同梱 Aivis の実行ファイルが見つかりません。npm run setup:aivis を実行してください。"
+    "Aivis の実行ファイルが見つかりません。ネットワーク接続を確認するか、npm run setup:aivis を実行してください。"
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -174,6 +181,223 @@ fn log_tail(app: &tauri::AppHandle) -> String {
     } else {
         format!("ログ: {}\n{}", path.display(), tail)
     }
+}
+
+fn install_dir(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+    Ok(app.path().app_data_dir()?.join("aivis"))
+}
+
+fn release_asset_pattern() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", _) => "AivisSpeech-Engine-Windows-x64-",
+        ("macos", "aarch64") => "AivisSpeech-Engine-macOS-arm64-",
+        ("macos", _) => "AivisSpeech-Engine-macOS-x64-",
+        ("linux", "aarch64") => "AivisSpeech-Engine-Linux-arm64-",
+        ("linux", _) => "AivisSpeech-Engine-Linux-x64-",
+        _ => "",
+    }
+}
+
+async fn aivis_release_asset_url() -> anyhow::Result<(String, String)> {
+    let data: serde_json::Value = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
+        .build()?
+        .get(AIVIS_API_URL)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let prefix = release_asset_pattern();
+    if prefix.is_empty() {
+        anyhow::bail!("このOS/CPU向けの Aivis 配布物を自動選択できません。");
+    }
+    let Some(asset) = data
+        .get("assets")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|assets| {
+            assets.iter().find(|asset| {
+                asset
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|name| name.starts_with(prefix) && name.ends_with(".7z.001"))
+                    .unwrap_or(false)
+            })
+        })
+    else {
+        anyhow::bail!("Aivis {AIVIS_RELEASE} の自動取得対象アセットが見つかりません。");
+    };
+    let name = asset
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Aivis アセット名を読めません。"))?
+        .to_string();
+    let url = asset
+        .get("browser_download_url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Aivis ダウンロードURLを読めません。"))?
+        .to_string();
+    Ok((name, url))
+}
+
+async fn download_aivis_archive(url: &str, dest: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = dest.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
+        .build()?
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?;
+    let tmp = dest.with_extension("part");
+    let mut file = tokio::fs::File::create(&tmp).await?;
+    while let Some(chunk) = response.chunk().await? {
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
+    drop(file);
+    tokio::fs::rename(tmp, dest).await?;
+    Ok(())
+}
+
+fn command_exists(command: &str) -> bool {
+    let checker = if cfg!(windows) { "where.exe" } else { "sh" };
+    let mut cmd = std::process::Command::new(checker);
+    if cfg!(windows) {
+        cmd.arg(command);
+    } else {
+        cmd.args(["-lc", &format!("command -v {command}")]);
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(out_dir)?;
+    let mut command = if command_exists("7z") {
+        let mut cmd = std::process::Command::new("7z");
+        cmd.args([
+            "x",
+            archive.to_string_lossy().as_ref(),
+            &format!("-o{}", out_dir.display()),
+            "-y",
+        ]);
+        cmd
+    } else if command_exists("7za") {
+        let mut cmd = std::process::Command::new("7za");
+        cmd.args([
+            "x",
+            archive.to_string_lossy().as_ref(),
+            &format!("-o{}", out_dir.display()),
+            "-y",
+        ]);
+        cmd
+    } else {
+        let mut cmd = std::process::Command::new("tar");
+        cmd.args(["-xf", archive.to_string_lossy().as_ref(), "-C"]);
+        cmd.arg(out_dir);
+        cmd
+    };
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let status = command.status()?;
+    if !status.success() {
+        anyhow::bail!(
+            "Aivis アーカイブの展開に失敗しました。7-Zip または tar を利用できる環境が必要です。"
+        );
+    }
+    Ok(())
+}
+
+fn find_run_file(dir: &Path) -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "run.exe" } else { "run" };
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_run_file(&path) {
+                return Some(found);
+            }
+        } else if path.file_name().and_then(|name| name.to_str()) == Some(exe) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dest.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_all(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+    if let Some(path) = bundled_engine_path(app) {
+        return Ok(path);
+    }
+    append_log(
+        app,
+        "Aivis が見つからないため、公式リリースから自動取得します。",
+    )?;
+    let (asset_name, asset_url) = aivis_release_asset_url().await?;
+    let work = std::env::temp_dir().join("picoagent-aivis-runtime");
+    let _ = tokio::fs::remove_dir_all(&work).await;
+    tokio::fs::create_dir_all(&work).await?;
+    let archive = work.join(&asset_name);
+    append_log(app, &format!("Aivis ダウンロード開始: {asset_name}"))?;
+    download_aivis_archive(&asset_url, &archive).await?;
+    append_log(app, "Aivis ダウンロード完了。展開します。")?;
+
+    let extract_dir = work.join("extract");
+    let archive_for_extract = archive.clone();
+    let extract_for_extract = extract_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        extract_archive(&archive_for_extract, &extract_for_extract)
+    })
+    .await??;
+    let run_path = find_run_file(&extract_dir)
+        .ok_or_else(|| anyhow::anyhow!("展開した Aivis に run 実行ファイルが見つかりません。"))?;
+    let root = run_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Aivis 実行ファイルの親ディレクトリを取得できません。"))?
+        .to_path_buf();
+    let install = install_dir(app)?;
+    if install.exists() {
+        tokio::fs::remove_dir_all(&install).await?;
+    }
+    let root_for_copy = root.clone();
+    let install_for_copy = install.clone();
+    tokio::task::spawn_blocking(move || copy_dir_all(&root_for_copy, &install_for_copy)).await??;
+    let _ = tokio::fs::remove_dir_all(&work).await;
+    let installed = bundled_engine_path(app).ok_or_else(|| {
+        anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
+    })?;
+    append_log(app, &format!("Aivis 自動取得完了: {}", installed.display()))?;
+    Ok(installed)
 }
 
 fn child_exit_status(app: &tauri::AppHandle) -> Option<ExitStatus> {
@@ -425,7 +649,7 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     let mode = device_mode(&app_state);
-    let path = bundled_engine_path(app).ok_or_else(|| anyhow::anyhow!(path_hint()))?;
+    let path = ensure_installed(app).await?;
 
     if has_running_child(app) {
         match wait_until_ready(app, &endpoint).await {

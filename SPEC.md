@@ -155,7 +155,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。
 - 実行時ログは `app_data_dir/log/` にまとめる。Aivis の stdout/stderr は `aivis.log`、同梱 llama-server の stdout/stderr は `engine.log` に追記する。Aivis プロセスが起動直後に終了した場合や ready 待ちがタイムアウトした場合は、`aivis.log` の末尾をエラー文字列に含めてフロントへ返す。旧 `app_log_dir/aivis.log` がある場合は、新しい `log/aivis.log` が未作成のときだけ初回にコピーする。
 - 状態は `aivis_status` command（`{ enabled, up }`）で取得できる。TTS 有効時、フロントは Aivis が `up` になるまで**キャラ・フキダシを含む全 UI の描画を保留**する（`.pet-app.is-booting` で `visibility:hidden`）。待機中に挨拶を（非表示のまま）描画しつつ音声を事前合成（`prepareSpeech`）しておき、準備完了で `is-booting` を外して**描画した瞬間に挨拶を再生**する（`playPreparedSpeech`）。起動失敗で固まらないよう約120秒で諦めて描画する。TTS 無効時（`enabled=false`）は待たずに即描画する。
-- 実行ファイルは同梱配置 `src-tauri/resources/aivis/` だけを探す。同梱配置は `npm run dev` / `npm run build` の起動前に、未取得なら `scripts/fetch-aivis.mjs` が公式 GitHub Releases から既定 `1.2.0` を取得する（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。
+- 実行ファイルは `app_data_dir/aivis/`、同梱配置 `resources/aivis/`、開発時の `src-tauri/resources/aivis/` の順に探す。同梱配置は `npm run dev` / `npm run build` の起動前に、未取得なら `scripts/fetch-aivis.mjs` が公式 GitHub Releases から既定 `1.2.0` を取得する（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/aivis/*` を同梱対象にする。同梱 Aivis が見つからない場合、実行時にも同じ公式リリースを `app_data_dir/aivis/` へ自動取得して展開する（展開には `7z` / `7za` / `tar` のいずれかを使う）。
 - speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
