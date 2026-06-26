@@ -173,9 +173,9 @@ fn auto_model_preset() -> &'static str {
     let vram = gpu_vram_bytes().unwrap_or(0);
     let ram = total_memory_bytes().unwrap_or(0);
     let gib = 1024_u64.pow(3);
-    if vram >= 6 * gib && ram >= 24 * gib {
+    if vram >= 8 * gib && ram >= 24 * gib {
         "large"
-    } else if vram >= 3 * gib || ram >= 16 * gib {
+    } else if vram >= 4 * gib || ram >= 16 * gib {
         "balanced"
     } else {
         "small"

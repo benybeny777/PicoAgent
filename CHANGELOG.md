@@ -6,6 +6,11 @@
 
 ## 2026-06-27
 
+### ローカルモデルを Gemma 4 系へ更新
+
+- `local` プロバイダの `small` / `balanced` / `large` プリセットを Gemma 4 E2B / E4B / 12B の GGUF へ差し替えた。
+- 追加プリセット `qwen3` として Qwen3 4B Instruct Q4_K_M を選べるようにした。
+
 ### Aivis の推論デバイス判定を改善
 
 - `PICOAGENT_TTS_DEVICE=auto` で同梱 Aivis を起動する際、起動前に GPU 候補を確認し、GPU 候補がなければ最初から CPU 起動（`--no-use_gpu`）を選ぶようにした。Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを GPU 候補として扱い、AMD CPU だけの環境は GPU 候補にしない。`cpu` / `gpu` の明示指定は自動判定より優先する。
@@ -253,11 +258,11 @@
 
 - フキダシ右下のつまみをドラッグして幅と高さを変更できるようにした。確定したサイズは `config.json` に保存し、次回起動時にも復元する。
 
-### Ollama 非依存化 — gemma4(Gemma 3n E2B) を同梱エンジンで既定化
+### Ollama 非依存化 — 同梱エンジンを既定化
 
 - 推論エンジン llama.cpp（`llama-server`）をアプリに同梱し、起動時に spawn して OpenAI 互換 API をローカルに立てる新プロバイダ **`local`** を追加し、これを既定（`PICOAGENT_PROVIDER=local`）にした。**Ollama なしで動作**する。
 - エンジン本体はリポジトリに含めず `scripts/fetch-engine.mjs`（`npm run setup:engine`）で取得し、`src-tauri/resources/engine/` に配置して `tauri.conf.json` の `bundle.resources` で同梱する。
-- モデル GGUF（既定: Gemma 3n E2B の Q4_K_M、約3〜4GB）は配布物に含めず、**初回起動時に `app_data_dir/models/` へダウンロード**する（以後オフライン）。進捗・状態は `engine:status` イベントで UI に表示する（`engine.rs`）。
+- モデル GGUF は配布物に含めず、**初回起動時に `app_data_dir/models/` へダウンロード**する（以後オフライン）。進捗・状態は `engine:status` イベントで UI に表示する（`engine.rs`）。
 - `local` プロバイダは OpenAI 互換変換（`openai.rs` の `to_wire`/`from_wire`）を再利用。tools 非対応テンプレートのモデルでも会話が成立するよう、tools 付きで失敗したら tools 無しで再試行する。
 - 設定キー追加: `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX`。Ollama プロバイダは任意利用として存続。
 

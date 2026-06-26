@@ -39,7 +39,7 @@ npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vul
 npm run dev
 ```
 
-- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示されます。設定画面からローカルモデルを変更すると、必要なモデルを取得して同梱エンジンを再起動します。
+- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。追加プリセットとして `qwen3` も選べます。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示されます。設定画面からローカルモデルを変更すると、必要なモデルを取得して同梱エンジンを再起動します。
 - Ollama を使いたい場合は `ollama serve` 後に右クリック →「設定…」でプロバイダを切り替えます（任意）。Ollama 選択時はローカルのモデル一覧を読み込み、モデル欄から選べます。
 
 > [!NOTE]
@@ -132,8 +132,8 @@ graph LR
 
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
-| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: 推奨RAM 8GB/約0.8GB、`balanced`: 推奨VRAM 4GBまたはRAM 16GB/約3.0GB、`large`: 推奨VRAM 6GB/RAM 24GB/約4.5GB、`custom`） |
-| `PICOAGENT_MODEL_URL` | gemma-3n-E2B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
+| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B Instruct/約2.5GB、`custom`） |
+| `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M | local | 同梱エンジンが取得するモデル GGUF の URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
