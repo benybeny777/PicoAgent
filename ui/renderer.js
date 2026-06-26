@@ -6,7 +6,6 @@ const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const status = document.getElementById("status");
 const bootStatus = document.getElementById("bootStatus");
-const bootSprite = document.getElementById("bootSprite");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
@@ -117,9 +116,6 @@ function animate(now) {
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
     frame = (frame + 1) % animation.frames;
     petSprite.src = frameUrl(animationName, frame);
-    if (bootSprite && petApp.classList.contains("is-booting")) {
-      bootSprite.src = frameUrl("idle", frame % (animations.idle?.frames || 1));
-    }
     lastFrameAt = now;
   }
   requestAnimationFrame(animate);

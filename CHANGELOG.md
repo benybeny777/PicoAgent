@@ -10,7 +10,7 @@
 
 - `chitchat` スキルに `skills/chitchat/trends.rs` を同梱し、自発雑談の素材として X API（Bearer Token 設定時）→ Google Trends RSS → ニュースRSSの順に話題メモを取得するようにした。X API 未設定時も急上昇ワードやトップニュースから話題を拾い、低精度なSNSスクレイピングでX由来と断定しない。
 - 設定画面に `PICOAGENT_CHATTER_TOPIC_MODE` / `PICOAGENT_CHATTER_X_QUERY` / `PICOAGENT_CHATTER_TRENDS_RSS_URLS` / `PICOAGENT_CHATTER_NEWS_RSS_URLS` / `PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS` を追加し、話題ソース・RSS・待ち時間を変更できるようにした。
-- 初期起動や音声エンジン待ちの間、通常のフキダシとキャラクターを隠す代わりに、既存のむぎ素材を使った睡眠ループ風ローディング画面を表示するようにした。
+- 初期起動や音声エンジン待ちの間、通常のフキダシとキャラクターを隠す代わりに、新規生成した横向き寝姿アセット `characters/mugi/boot/sleeping.png` を使った睡眠ループ風ローディング画面を表示するようにした。
 
 ### コネクタレジストリの効率化
 
