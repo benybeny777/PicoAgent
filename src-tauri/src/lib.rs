@@ -3,6 +3,7 @@
 
 mod agent;
 mod aivis;
+mod alarm;
 mod commands;
 mod config;
 mod engine;
@@ -29,6 +30,8 @@ pub fn run() {
             commands::pet_init,
             commands::pet_send,
             commands::pet_idle_chatter,
+            commands::pet_alarms,
+            commands::pet_alarm_wake,
             commands::pet_speak,
             commands::aivis_status,
             commands::pet_set_bubble_size,

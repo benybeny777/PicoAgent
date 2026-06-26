@@ -335,6 +335,75 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
     }
 }
 
+// 登録中の目覚まし一覧を返す（フロントの時刻ポーリング用）。
+#[tauri::command]
+pub async fn pet_alarms(state: State<'_, AppState>) -> Result<Value, String> {
+    let alarms = crate::alarm::load(&state.config);
+    Ok(json!({ "alarms": serde_json::to_value(&alarms).unwrap_or_else(|_| json!([])) }))
+}
+
+// 既定の起こし文（生成に失敗・エンジン未起動でも必ず声がけできるよう用意）。
+fn default_wake_message(label: &str) -> String {
+    if label.is_empty() {
+        "おはよう…そろそろ起きる時間だよ。ゆっくりでいいから、少しずつ目を覚まそうね。".to_string()
+    } else {
+        format!("おはよう…「{label}」の時間だよ。あせらなくていいからね、ゆっくり起きよう。")
+    }
+}
+
+// 選択中キャラの口調で、やさしい起こし文を生成する（失敗時は None）。
+async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> {
+    let id = state.provider_id.lock().unwrap().clone();
+    let model = state.model.lock().unwrap().clone();
+    let provider = providers::get(&id)?;
+    let label_hint = if label.is_empty() {
+        String::new()
+    } else {
+        format!("これは「{label}」の目覚ましです。")
+    };
+    let instruction = format!(
+        "いまは設定した目覚ましの時刻です。{label_hint}眠っている相手を、選択中キャラクター本人の口調で、やさしく起こす短い声がけを1つだけ言ってください。急かさず温かく、35〜60文字程度の1〜2文。質問・指示・長い説明・URLは入れない。",
+    );
+    let mut convo = state.messages.lock().unwrap().clone();
+    convo.push(Message::new("user", instruction));
+    let message = provider.chat(&state.config, &model, &convo, &[]).await.ok()?;
+    let reply = message.content.trim().to_string();
+    if reply.is_empty() {
+        None
+    } else {
+        Some(reply)
+    }
+}
+
+// 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。
+#[tauri::command]
+pub async fn pet_alarm_wake(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let mut alarms = crate::alarm::load(&state.config);
+    let target = alarms.iter().find(|a| a.id == id).cloned();
+    let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();
+    // 一度きりの目覚ましは鳴ったら無効化する（曜日繰り返しはそのまま）。
+    if let Some(alarm) = target.as_ref() {
+        if !alarm.repeat {
+            for a in alarms.iter_mut() {
+                if a.id == id {
+                    a.enabled = false;
+                }
+            }
+            if let Err(error) = crate::alarm::save(&state.config, &alarms) {
+                eprintln!("目覚ましの無効化保存に失敗しました: {error}");
+            }
+        }
+    }
+    let reply = match generate_wake_message(&state, &label).await {
+        Some(text) => text,
+        None => default_wake_message(&label),
+    };
+    Ok(json!({ "reply": reply }))
+}
+
 fn speech_text(text: &str) -> String {
     let mut out = String::new();
     let mut chars = text.chars().peekable();

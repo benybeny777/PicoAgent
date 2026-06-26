@@ -6,6 +6,12 @@
 
 ## 2026-06-26
 
+### 目覚まし時計スキル（声でやさしく起こす）
+
+- 目覚まし時計を追加。中核 `src-tauri/src/alarm.rs`（config `PICOAGENT_ALARMS` に保存、曜日/時刻の正規化）＋チャット用スキル `skills/alarm/mod.rs`（add/list/remove/clear/enable/disable）で構成。「平日の7時に起こして」のようにチャットで設定でき、設定画面の「スキル」タブから JSON でも編集できる。
+- フロントは約20秒間隔で `pet_alarms` を照合し、現在のローカル時刻・曜日が一致したら `pet_alarm_wake` を呼んで、選択中キャラの口調の起こし文を音声合成→表示→即時再生で**声でやさしく起こす**（生成失敗時は固定の起こし文）。同じ分の二重発火を防ぎ、一度きり（`repeat=false`）は発火後に無効化する。
+- `schemas_for_text` に alarm のキーワードルート（アラーム/目覚まし/起こして/何時に 等）を追加。
+
 ### ローカルモデル選択と初回自動選定
 
 - `PICOAGENT_LOCAL_MODEL_PRESET` を追加し、設定画面から `auto` / `small` / `balanced` / `large` / `custom` のローカルモデルを選べるようにした。プリセット変更時は同梱エンジンを再起動し、未取得モデルは自動ダウンロードする。

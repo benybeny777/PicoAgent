@@ -77,6 +77,19 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         "rss_feed",
         &["rss", "atom", "フィード", "ニュース", "ブログ", "更新"],
     ),
+    (
+        "alarm",
+        &[
+            "アラーム",
+            "目覚まし",
+            "めざまし",
+            "起こして",
+            "起こし",
+            "alarm",
+            "wake",
+            "何時に",
+        ],
+    ),
     ("read_file", &["読んで", "読み取", "ファイル", "read_file"]),
     (
         "workspace_files",

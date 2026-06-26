@@ -15,6 +15,10 @@ const conversationHistory = [];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
+// 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
+const ALARM_POLL_MS = 20000;
+let alarmTimer = null;
+const firedAlarms = new Set();
 
 const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
 let characterRoot = "assets/characters/mugi";
@@ -447,6 +451,51 @@ async function fireChatter() {
   finally { scheduleChatter(); }
 }
 
+// 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
+function pad2(n) { return String(n).padStart(2, "0"); }
+function weekdayCode(date) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()]; }
+async function checkAlarms() {
+  let res;
+  try { res = await window.picoagent.alarms(); }
+  catch { return; }
+  const alarms = res?.alarms;
+  if (!Array.isArray(alarms) || !alarms.length) return;
+  const now = new Date();
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const today = weekdayCode(now);
+  const minuteKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${hhmm}`;
+  for (const a of alarms) {
+    if (!a || a.enabled === false || a.time !== hhmm) continue;
+    const days = Array.isArray(a.days) ? a.days : [];
+    if (days.length && !days.includes(today)) continue;
+    const key = `${a.id}@${minuteKey}`;
+    if (firedAlarms.has(key)) continue;
+    firedAlarms.add(key);
+    if (firedAlarms.size > 50) firedAlarms.clear();
+    await fireAlarm(a);
+    break; // 1ティックにつき1件だけ鳴らす。
+  }
+}
+async function fireAlarm(a) {
+  let line = "";
+  try {
+    const res = await window.picoagent.alarmWake(a.id);
+    line = (res?.reply || "").trim();
+  } catch { /* 生成失敗時は固定文で起こす */ }
+  if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
+  // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
+  const prepared = await prepareSpeech(line);
+  renderReply(line);
+  addHistory("assistant", line);
+  if (prepared) playPreparedSpeech(prepared);
+  else setAnimation("talking", true);
+}
+function startAlarmPolling() {
+  if (alarmTimer) clearInterval(alarmTimer);
+  alarmTimer = setInterval(checkAlarms, ALARM_POLL_MS);
+  checkAlarms();
+}
+
 (async () => {
   const info = await window.picoagent.init();
   online.dataset.up = info.up;
@@ -470,4 +519,5 @@ async function fireChatter() {
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); } catch {}
   applyChatterConfig(info); // アイドル雑談タイマーを開始。
+  startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
 })();
