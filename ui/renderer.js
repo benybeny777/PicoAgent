@@ -348,12 +348,28 @@ bubbleResize.addEventListener("pointerdown", event => {
 });
 bubbleResize.addEventListener("pointermove", event => {
   if (!resizeStart) return;
-  const maxWidth = document.documentElement.clientWidth - bubble.offsetLeft - 16;
-  const maxHeight = document.documentElement.clientHeight - bubble.offsetTop - 16;
-  const width = Math.min(maxWidth, Math.max(180, resizeStart.width + event.clientX - resizeStart.x));
-  const height = Math.min(maxHeight, Math.max(92, resizeStart.height + event.clientY - resizeStart.y));
-  bubble.style.width = `${Math.round(width)}px`;
-  bubble.style.height = `${Math.round(height)}px`;
+  const gap = 10;
+  const left = bubble.offsetLeft;
+  const top = bubble.offsetTop;
+  // キャラクターの矩形（petApp 基準）。拡大してもこの領域へ被らないようにする。
+  const charLeft = character.offsetLeft;
+  const charTop = character.offsetTop;
+  const desiredWidth = Math.max(180, resizeStart.width + event.clientX - resizeStart.x);
+  const desiredHeight = Math.max(92, resizeStart.height + event.clientY - resizeStart.y);
+  // 幅: フキダシがキャラの縦範囲に達する高さなら、キャラ左端より左に収める。
+  let maxWidth = document.documentElement.clientWidth - left - 16;
+  if (top + desiredHeight > charTop - gap) {
+    maxWidth = Math.min(maxWidth, charLeft - left - gap);
+  }
+  const width = Math.min(maxWidth, desiredWidth);
+  // 高さ: 幅確定後にキャラの横範囲へ達するなら、キャラ上端より上に収める。
+  let maxHeight = document.documentElement.clientHeight - top - 16;
+  if (left + width > charLeft - gap) {
+    maxHeight = Math.min(maxHeight, charTop - top - gap);
+  }
+  const height = Math.min(maxHeight, desiredHeight);
+  bubble.style.width = `${Math.round(Math.max(180, width))}px`;
+  bubble.style.height = `${Math.round(Math.max(92, height))}px`;
 });
 async function finishBubbleResize(event) {
   if (!resizeStart) return;

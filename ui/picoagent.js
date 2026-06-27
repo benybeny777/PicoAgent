@@ -6,31 +6,50 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 
+// すべての invoke 失敗を app.log へ記録してから再スローする（呼び出し側の try/catch で
+// 握られたエラーも確実にログへ残すため）。pet_log 自身は再帰を避けて素の invoke を使う。
+function logInvokeError(name, error) {
+  const detail = error && (error.stack || error.message) ? error.stack || error.message : String(error);
+  try { invoke("pet_log", { level: "error", message: `invoke ${name} 失敗`, detail: String(detail) }).catch(() => {}); }
+  catch {}
+}
+async function call(name, args) {
+  try {
+    return await invoke(name, args);
+  } catch (error) {
+    logInvokeError(name, error);
+    throw error;
+  }
+}
+
 window.picoagent = {
-  init: () => invoke("pet_init"),
-  send: (text) => invoke("pet_send", { text }),
-  idleChatter: () => invoke("pet_idle_chatter"),
-  dailyGreeting: () => invoke("pet_daily_greeting"),
-  dailyEvents: () => invoke("pet_daily_events"),
-  alarms: () => invoke("pet_alarms"),
-  alarmWake: (id) => invoke("pet_alarm_wake", { id }),
-  speak: (text) => invoke("pet_speak", { text }),
+  init: () => call("pet_init"),
+  send: (text) => call("pet_send", { text }),
+  idleChatter: () => call("pet_idle_chatter"),
+  dailyGreeting: () => call("pet_daily_greeting"),
+  dailyEvents: () => call("pet_daily_events"),
+  alarms: () => call("pet_alarms"),
+  alarmWake: (id) => call("pet_alarm_wake", { id }),
+  speak: (text) => call("pet_speak", { text }),
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
-  aivisStatus: () => invoke("aivis_status"),
+  aivisStatus: () => call("aivis_status"),
   // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。
-  setFullscreen: (on) => getCurrentWindow().setFullscreen(on),
-  setBubbleSize: (width, height) => invoke("pet_set_bubble_size", { width, height }),
-  setCharacterProfile: (characterId, profile) => invoke("pet_set_character_profile", { characterId, profile }),
-  menu: () => invoke("pet_menu"),
+  setFullscreen: async (on) => {
+    try { return await getCurrentWindow().setFullscreen(on); }
+    catch (error) { logInvokeError("setFullscreen", error); throw error; }
+  },
+  setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
+  setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
+  menu: () => call("pet_menu"),
   on: (channel, callback) => {
     if (!["pet:model", "pet:reset", "engine:status", "pet:ui"].includes(channel)) return;
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     listen(channel, (event) => callback(event.payload));
   },
-  engineStatus: () => invoke("engine_status"),
+  engineStatus: () => call("engine_status"),
   settings: {
-    load: () => invoke("settings_load"),
-    listModels: (id) => invoke("settings_list_models", { id }),
-    save: (patch) => invoke("settings_save", { patch }),
+    load: () => call("settings_load"),
+    listModels: (id) => call("settings_list_models", { id }),
+    save: (patch) => call("settings_save", { patch }),
   },
 };

@@ -6,6 +6,12 @@
 
 ## 2026-06-27
 
+### エラーの全捕捉ログと拡大フキダシのキャラ被り解消
+
+- バックエンドのパニックを `std::panic::set_hook` で捕捉し `PicoAgent/log/app.log` に記録するようにした（release では stderr が見えないため、異常終了も必ずログに残る）。
+- フロントの `window.picoagent` 経由の `invoke` をラップし、呼び出し側で握られたコマンドエラーも含めてすべて app.log へ記録してから再スローするようにした（`pet_log` 自身は再帰回避で除外）。フロントの大域 `error` / `unhandledrejection` ハンドラと合わせ、フロント・バックエンド双方のエラーを取りこぼさない。
+- フキダシを拡大（全画面/ドラッグ）したときにキャラクターへ被る問題を解消。全画面表示は右側にキャラ分の幅を空けた左ペインにし、ドラッグ拡大もキャラクター矩形へ侵入しないよう幅・高さを再計算してクランプするようにした（`renderer.js` / `styles.css`）。キャラは薄くせず右側にそのまま表示する。
+
 ### NSIS アンインストールと配布前チェックを強化
 
 - NSIS の `installerHooks` を追加し、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、旧識別子 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除するようにした。

@@ -66,6 +66,25 @@ pub fn run() {
                 log_paths::append_app_log(app.handle(), "PicoAgent を起動しました。");
             }
 
+            // バックエンドのパニックを app.log に記録する（release では stderr が見えないため、
+            // すべての異常終了をログに残す）。既定フックも引き続き呼ぶ。
+            let panic_handle = app.handle().clone();
+            let default_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                let location = info
+                    .location()
+                    .map(|loc| format!("{}:{}", loc.file(), loc.line()))
+                    .unwrap_or_else(|| "不明".to_string());
+                let payload = info
+                    .payload()
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "（詳細なし）".to_string());
+                log_paths::append_app_log(&panic_handle, &format!("panic at {location}: {payload}"));
+                default_hook(info);
+            }));
+
             let pid = state.config.get("PICOAGENT_PROVIDER", "local");
             *state.provider_id.lock().unwrap() = pid.clone();
             let model = {
