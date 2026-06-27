@@ -34,6 +34,9 @@ pub struct AppState {
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
     pub character_profile: Mutex<String>,
+    /// 会話文脈が属する選択中キャラクターID。これが変わったら会話を破棄して
+    /// 旧キャラの一人称・自己紹介が新キャラの応答へ混ざらないようにする。
+    pub character_id: Mutex<String>,
     /// 会話から暗黙的に抽出した長期メモリ。system 文脈へ差し込む。
     pub memory_context: Mutex<String>,
     /// 直近の自発雑談（独り言）。繰り返しを避けるため次回生成へ「避ける文」として渡す。
@@ -48,6 +51,7 @@ impl AppState {
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
             character_profile: Mutex::new(String::new()),
+            character_id: Mutex::new(String::new()),
             memory_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
         }
@@ -127,13 +131,24 @@ fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
     next
 }
 
+/// 履歴ファイルの分割キーになる、現在アクティブな選択中キャラクターID。
+/// state 側が未設定（起動直後など）なら設定の選択キャラへフォールバックする。
+pub fn active_character_id(state: &AppState) -> String {
+    let id = state.character_id.lock().unwrap().clone();
+    if id.is_empty() {
+        state.config.get("PICOAGENT_CHARACTER", "mugi")
+    } else {
+        id
+    }
+}
+
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
 pub fn clear_conversation_and_history(app: &AppHandle) {
     let state = app.state::<AppState>();
     state.clear_conversation();
     state.recent_chatter.lock().unwrap().clear();
     state.memory_context.lock().unwrap().clear();
-    crate::history::clear(app);
+    crate::history::clear(app, &active_character_id(&state));
     crate::memory::clear(app);
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit("pet:reset", ());
@@ -226,6 +241,7 @@ pub fn pet_set_character_profile(
     character_id: String,
     profile: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Value, String> {
     if character_id.is_empty()
         || character_id.len() > 64
@@ -239,7 +255,24 @@ pub fn pet_set_character_profile(
         return Err("キャラクター人格設定は4000文字以内にしてください。".to_string());
     }
     *state.character_profile.lock().unwrap() = profile;
-    state.reset_conversation();
+    let previous = {
+        let mut current = state.character_id.lock().unwrap();
+        let previous = current.clone();
+        *current = character_id.clone();
+        previous
+    };
+    if previous.is_empty() || previous == character_id {
+        // 起動直後の初回設定、または同一キャラの人格更新。直近の文脈は保持する。
+        state.reset_conversation();
+    } else {
+        // キャラクター変更: 旧キャラの会話文脈を捨て、切替先キャラの履歴を復元する。
+        // 旧キャラの履歴はファイルに残るため、戻れば続きから話せる。
+        state.clear_conversation();
+        let recent = crate::history::load_recent(&app, &character_id);
+        if !recent.is_empty() {
+            state.messages.lock().unwrap().extend(recent);
+        }
+    }
     Ok(json!({ "ok": true }))
 }
 
@@ -300,7 +333,8 @@ pub async fn pet_send(
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
-    crate::history::save(&app, &compacted);
+    let character_id = active_character_id(&state);
+    crate::history::save(&app, &character_id, &compacted);
     if result.is_ok() {
         if let Some(memory_context) =
             crate::memory::update_from_turn(&app, &state.config, &user_text)
@@ -308,7 +342,7 @@ pub async fn pet_send(
             *state.memory_context.lock().unwrap() = memory_context;
             state.reset_conversation();
             let refreshed = state.messages.lock().unwrap().clone();
-            crate::history::save(&app, &refreshed);
+            crate::history::save(&app, &character_id, &refreshed);
         }
     }
 
@@ -448,7 +482,7 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
                     compacted_conversation(&messages)
                 };
                 *state.messages.lock().unwrap() = compacted.clone();
-                crate::history::save(&app, &compacted);
+                crate::history::save(&app, &active_character_id(&state), &compacted);
             }
             // 雑談が話題メモ（ニュース等）に触れていれば、一致する出典URLを末尾に添える。
             // URL 行は読み上げ（speech_text）で除外されるため音声には乗らない。

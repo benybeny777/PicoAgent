@@ -109,9 +109,14 @@ pub fn run() {
             };
             *state.model.lock().unwrap() = model;
             *state.memory_context.lock().unwrap() = memory::context(app.handle(), &state.config);
+            // 履歴はキャラクター別。選択中キャラを文脈の持ち主として記録しておく。
+            let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+            *state.character_id.lock().unwrap() = character_id.clone();
             state.reset_conversation();
-            // 直近の会話履歴をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
-            let recent = history::load_recent(app.handle());
+            // 旧仕様の単一 history.json があれば選択中キャラのファイルへ一度だけ移行する。
+            history::migrate_legacy(app.handle(), &character_id);
+            // 選択中キャラの直近会話をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
+            let recent = history::load_recent(app.handle(), &character_id);
             if !recent.is_empty() {
                 state.messages.lock().unwrap().extend(recent);
             }
