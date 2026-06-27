@@ -107,6 +107,13 @@ impl Config {
         std::fs::write(&path, text)?;
         Ok(())
     }
+
+    /// 単一の設定を永続化する。
+    pub fn set_string(&self, key: &str, value: String) -> anyhow::Result<()> {
+        let mut patch = Map::new();
+        patch.insert(key.to_string(), Value::String(value));
+        self.set_all(patch)
+    }
 }
 
 impl Default for Config {

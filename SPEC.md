@@ -150,7 +150,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 `PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。起動時・キャラクター変更時に吹き出しへ出る挨拶（`character.json` の `greeting`）も同じ経路で読み上げる。
 
-- 読み上げには同梱 Aivis だけを使い、接続先は内部固定の `http://127.0.0.1:10102` とする。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 AivisSpeech Engine を即 spawn し、設定画面で ON にした場合も保存後すぐ起動する。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
+- 読み上げには同梱 Aivis だけを使い、接続先は `http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）とする。旧固定ポート `10102` が保存されている場合は起動時に旧既定扱いで `11436` へ移行する。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 AivisSpeech Engine を即 spawn し、設定画面で ON にした場合も保存後すぐ起動する。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
 - フロントは `pet_speak` が返す WAV バイト列を `Blob` / `Audio` で再生するため、Tauri の CSP は `media-src 'self' blob: data:` を許可する。再生失敗時はエラー内容をステータスへ表示する。
 - 推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選ぶ。`gpu` は `--use_gpu`、`cpu` は `--no-use_gpu` で起動する。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを候補として、GPU 候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動する。AMD CPU だけの環境は GPU 候補にしない。CPU/GPU の明示指定は自動判定より優先する。設定画面で ON/OFF やデバイスを変更した場合は、保存後に同梱 Aivis を停止/再起動して即時反映する。
 - 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。
@@ -158,7 +158,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - 状態は `aivis_status` command（`{ enabled, up }`）で取得できる。TTS 有効時、フロントは Aivis が `up` になるまで**キャラ・フキダシを含む全 UI の描画を保留**する（`.pet-app.is-booting` で `visibility:hidden`）。待機中に挨拶を（非表示のまま）描画しつつ音声を事前合成（`prepareSpeech`）しておき、準備完了で `is-booting` を外して**描画した瞬間に挨拶を再生**する（`playPreparedSpeech`）。起動失敗で固まらないよう約120秒で諦めて描画する。TTS 無効時（`enabled=false`）は待たずに即描画する。
 - 実行ファイルはユーザーデータ配下の `PicoAgent/bundled/aivis/` から起動する。同梱配置 `resources/bundled/aivis/` や旧同梱配置 `resources/aivis/` は起動元にせず、初回にユーザーデータ配下へコピーしてから使う。同梱配置の `run.exe` がユーザーデータ側より新しい場合は起動前に上書きコピーする。同梱配置は `npm run dev` / `npm run build` の起動前に、未取得なら `scripts/fetch-aivis.mjs` が公式 GitHub Releases から既定 `1.2.0` を取得する（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/bundled/**/*` を同梱対象にする。同梱 Aivis が見つからない場合、実行時にも同じ公式リリースを `PicoAgent/bundled/aivis/` へ自動取得して展開する（展開には `7z` / `7za` / `tar` のいずれかを使う）。旧 `app_data_dir/aivis/` または旧 `PicoAgent/aivis/` に取得済みの Aivis がある場合は、新しい `PicoAgent/bundled/aivis/` へ初回移行する。
 - PicoAgent が起動する Aivis 子プロセスには Windows で `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/` へ向ける環境変数を渡し、Aivis のモデル・辞書・キャッシュを PicoAgent のユーザーデータ配下に閉じ込める。
-- speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。
+- speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。例外として `rin` は既定声に AivisHub の「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、ローカル Style ID `0` から算出した style ID `-1801897920`）を使う。`pet_speak` は `/speakers` に style ID が無ければ `/aivm_models/install` へ AIVMX ダウンロード URL を渡してモデルを追加してから合成する。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
 ---
@@ -291,8 +291,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` は起動前に GPU 候補を判定 / `cpu` / `gpu` は明示指定） |
+| `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
-| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `sourceUrl` も保持） |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B Instruct/約2.5GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |

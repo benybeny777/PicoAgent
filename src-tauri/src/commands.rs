@@ -603,21 +603,55 @@ fn is_chart_or_emoji(c: char) -> bool {
     )
 }
 
-fn effective_tts_speaker(state: &AppState) -> String {
+struct TtsVoice {
+    speaker: String,
+    model_uuid: Option<String>,
+}
+
+const RIN_AIVIS_SPEAKER: &str = "-1801897920";
+const RIN_AIVIS_MODEL_UUID: &str = "4f281e78-eba6-495a-8e50-5c322d02b5b1";
+
+fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
+    match character_id {
+        "rin" => Some(TtsVoice {
+            speaker: RIN_AIVIS_SPEAKER.to_string(),
+            model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
+        }),
+        _ => None,
+    }
+}
+
+fn effective_tts_voice(state: &AppState) -> TtsVoice {
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-    if let Some(speaker) = state
+    let default = default_character_tts_voice(&character_id);
+    let override_voice = state
         .config
         .get_all()
         .get("PICOAGENT_TTS_CHARACTER_OVERRIDES")
         .and_then(|value| value.get(&character_id))
+        .cloned();
+    let override_speaker = override_voice
+        .as_ref()
         .and_then(|value| value.get("speaker"))
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return speaker.to_string();
+        .filter(|value| !value.is_empty());
+    let override_model_uuid = override_voice
+        .as_ref()
+        .and_then(|value| value.get("modelUuid"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(speaker) = override_speaker {
+        return TtsVoice {
+            speaker: speaker.to_string(),
+            model_uuid: override_model_uuid.map(str::to_string),
+        };
     }
-    state.config.get("PICOAGENT_TTS_SPEAKER", "888753760")
+    default.unwrap_or_else(|| TtsVoice {
+        speaker: state.config.get("PICOAGENT_TTS_SPEAKER", "888753760"),
+        model_uuid: None,
+    })
 }
 
 #[tauri::command]
@@ -637,7 +671,13 @@ pub async fn pet_speak(
         .await
         .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
     let endpoint = aivis::endpoint(&app, &state);
-    let speaker = effective_tts_speaker(&state);
+    let voice = effective_tts_voice(&state);
+    if let Some(model_uuid) = voice.model_uuid.as_deref() {
+        aivis::ensure_model_for_speaker(&app, &endpoint, &voice.speaker, model_uuid)
+            .await
+            .map_err(|error| log_command_error(&app, "Aivis モデルの導入に失敗しました", error))?;
+    }
+    let speaker = voice.speaker;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()
@@ -765,18 +805,35 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
+    let old_provider_id = state.config.get("PICOAGENT_PROVIDER", "local");
+    let changed_text = |key: &str, fallback: &str| {
+        patch
+            .get(key)
+            .and_then(Value::as_str)
+            .map(|next| state.config.get(key, fallback) != next)
+            .unwrap_or(false)
+    };
+    let changed_bool = |key: &str, fallback: bool| {
+        patch
+            .get(key)
+            .and_then(Value::as_bool)
+            .map(|next| state.config.get_bool(key, fallback) != next)
+            .unwrap_or(false)
+    };
     let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
     let has_memory_setting = patch.contains_key("PICOAGENT_MEMORY_ENABLED")
         || patch.contains_key("PICOAGENT_MEMORY_MAX_ITEMS");
-    let has_tts_enabled = patch.contains_key("PICOAGENT_TTS_ENABLED");
-    let has_tts_device = patch.contains_key("PICOAGENT_TTS_DEVICE");
-    let local_engine_changed = patch.contains_key("PICOAGENT_LOCAL_MODEL_PRESET")
-        || patch.contains_key("PICOAGENT_MODEL")
-        || patch.contains_key("PICOAGENT_MODEL_URL")
-        || patch.contains_key("PICOAGENT_LOCAL_PORT")
-        || patch.contains_key("PICOAGENT_LOCAL_CTX")
-        || patch.contains_key("PICOAGENT_LOCAL_NGL")
-        || patch.contains_key("PICOAGENT_LOCAL_GPU_DEVICE");
+    let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
+        || changed_text("PICOAGENT_TTS_DEVICE", "auto")
+        || changed_text("PICOAGENT_TTS_PORT", "11436");
+    let provider_changed = changed_text("PICOAGENT_PROVIDER", "local");
+    let local_engine_changed = changed_text("PICOAGENT_LOCAL_MODEL_PRESET", "auto")
+        || changed_text("PICOAGENT_MODEL", "")
+        || changed_text("PICOAGENT_MODEL_URL", "")
+        || changed_text("PICOAGENT_LOCAL_PORT", "11435")
+        || changed_text("PICOAGENT_LOCAL_CTX", "4096")
+        || changed_text("PICOAGENT_LOCAL_NGL", "999")
+        || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     state
         .config
         .set_all(patch)
@@ -800,7 +857,7 @@ pub async fn settings_save(
         *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
         state.reset_conversation();
     }
-    if has_tts_enabled || has_tts_device {
+    if tts_runtime_changed {
         aivis::stop(&app);
         if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
             let handle = app.clone();
@@ -820,7 +877,11 @@ pub async fn settings_save(
             });
         }
     }
-    if pid == "local" && local_engine_changed {
+    if old_provider_id == "local" && pid != "local" {
+        crate::engine::stop(&app);
+    }
+    if pid == "local" && (local_engine_changed || (provider_changed && old_provider_id != "local"))
+    {
         crate::engine::stop(&app);
         let handle = app.clone();
         tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));

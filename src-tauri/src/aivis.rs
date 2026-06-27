@@ -6,18 +6,21 @@ use std::process::{Child, ExitStatus, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use tauri::Manager;
 use tokio::io::AsyncWriteExt;
 
 use crate::commands::AppState;
 
-const BUNDLED_PORT: u16 = 10102;
+const DEFAULT_PORT: u16 = 11436;
+const LEGACY_DEFAULT_PORT: u16 = 10102;
 const AIVIS_RELEASE: &str = "1.2.0";
 const AIVIS_API_URL: &str =
     "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/1.2.0";
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
 const GPU_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub struct AivisState {
     child: Mutex<Option<Child>>,
@@ -37,8 +40,33 @@ impl Default for AivisState {
     }
 }
 
-pub fn endpoint(_app: &tauri::AppHandle, _state: &AppState) -> String {
-    format!("http://127.0.0.1:{BUNDLED_PORT}")
+pub fn port(app: &tauri::AppHandle, state: &AppState) -> u16 {
+    let raw = state
+        .config
+        .get("PICOAGENT_TTS_PORT", &DEFAULT_PORT.to_string());
+    let port = raw.parse::<u16>().unwrap_or(DEFAULT_PORT);
+    if port == LEGACY_DEFAULT_PORT {
+        let next = DEFAULT_PORT.to_string();
+        if let Err(error) = state.config.set_string("PICOAGENT_TTS_PORT", next.clone()) {
+            let _ = append_log(
+                app,
+                &format!("Aivis ポートの旧既定値移行に失敗しました: {error}"),
+            );
+        } else {
+            let _ = append_log(
+                app,
+                &format!(
+                    "Aivis ポートを旧既定値 {LEGACY_DEFAULT_PORT} から {next} へ移行しました。"
+                ),
+            );
+        }
+        return DEFAULT_PORT;
+    }
+    port
+}
+
+pub fn endpoint(app: &tauri::AppHandle, state: &AppState) -> String {
+    format!("http://127.0.0.1:{}", port(app, state))
 }
 
 async fn is_up(endpoint: &str) -> bool {
@@ -54,6 +82,86 @@ async fn is_up(endpoint: &str) -> bool {
             .unwrap_or(false),
         Err(_) => false,
     }
+}
+
+pub async fn ensure_model_for_speaker(
+    app: &tauri::AppHandle,
+    endpoint: &str,
+    speaker: &str,
+    model_uuid: &str,
+) -> anyhow::Result<()> {
+    if speaker_available(endpoint, speaker).await? {
+        return Ok(());
+    }
+    let download_url = format!(
+        "https://api.aivis-project.com/v1/aivm-models/{model_uuid}/download?model_type=AIVMX"
+    );
+    append_log(
+        app,
+        &format!("Aivis モデルを導入します: model_uuid={model_uuid} speaker={speaker}"),
+    )?;
+    let client = reqwest::Client::builder()
+        .timeout(MODEL_INSTALL_TIMEOUT)
+        .build()?;
+    let form = reqwest::multipart::Form::new().text("url", download_url);
+    let response = client
+        .post(format!("{endpoint}/aivm_models/install"))
+        .multipart(form)
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Aivis モデル導入に失敗しました: HTTP {status} {body}");
+    }
+    for _ in 0..60 {
+        if speaker_available(endpoint, speaker).await? {
+            append_log(
+                app,
+                &format!("Aivis モデル導入完了: model_uuid={model_uuid} speaker={speaker}"),
+            )?;
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    anyhow::bail!("Aivis モデル導入後に speaker={speaker} が /speakers に見つかりません。");
+}
+
+async fn speaker_available(endpoint: &str, speaker: &str) -> anyhow::Result<bool> {
+    let speaker_id = speaker.parse::<i64>().ok();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()?;
+    let response = client.get(format!("{endpoint}/speakers")).send().await?;
+    if !response.status().is_success() {
+        anyhow::bail!("Aivis /speakers failed: HTTP {}", response.status());
+    }
+    let speakers: Value = response.json().await?;
+    Ok(speakers
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|speaker| {
+            speaker
+                .get("styles")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .any(|style| {
+            let id_matches = style
+                .get("id")
+                .and_then(Value::as_i64)
+                .zip(speaker_id)
+                .map(|(id, expected)| id == expected)
+                .unwrap_or(false);
+            let text_matches = style
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| id == speaker)
+                .unwrap_or(false);
+            id_matches || text_matches
+        }))
 }
 
 fn existing(path: PathBuf) -> Option<PathBuf> {
@@ -674,8 +782,12 @@ fn spawn_engine(
     if let Some(dir) = work_dir {
         command.current_dir(dir);
     }
+    let Some(state) = app.try_state::<AppState>() else {
+        anyhow::bail!("AppState を取得できません。");
+    };
+    let port = port(app, &state);
     command.args(["--host", "127.0.0.1", "--port"]);
-    command.arg(BUNDLED_PORT.to_string());
+    command.arg(port.to_string());
     if device.use_gpu() {
         command.arg("--use_gpu");
     } else {
@@ -699,7 +811,8 @@ fn spawn_engine(
         .open(&log_path)?;
     writeln!(
         log,
-        "\n==== Aivis 起動: device={} ({}) ====",
+        "\n==== Aivis 起動: port={} device={} ({}) ====",
+        port,
         label,
         device.flag()
     )?;

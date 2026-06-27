@@ -11,6 +11,7 @@ let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
 let characterOverrides = {};
 let characterVoiceOverrides = {};
+let characterDefaultVoices = {};
 let characterSelect;
 let characterPersona;
 let characterSpeaker;
@@ -344,6 +345,7 @@ async function loadCharacterPersona(id) {
   const response = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`キャラクター定義: HTTP ${response.status}`);
   const manifest = await response.json();
+  characterDefaultVoices[id] = manifest.voice || {};
   const persona = manifest.persona || {};
   const defaultText = [
     `性格: ${persona.personality || ""}`,
@@ -358,14 +360,26 @@ async function loadCharacterPersona(id) {
 function saveCurrentCharacterVoice(id) {
   if (!characterSpeaker) return;
   const current = characterVoiceOverrides[id] || {};
+  const defaultVoice = characterDefaultVoices[id] || {};
   const speaker = characterSpeaker.value.trim();
-  characterVoiceOverrides[id] = { ...current, speaker };
+  const next = { ...current, speaker };
+  if (!speaker || speaker === String(defaultVoice.styleId || "")) {
+    if (defaultVoice.modelUuid && !next.modelUuid) next.modelUuid = defaultVoice.modelUuid;
+    if (defaultVoice.modelName && !next.modelName) next.modelName = defaultVoice.modelName;
+    if (defaultVoice.sourceUrl && !next.sourceUrl) next.sourceUrl = defaultVoice.sourceUrl;
+  } else {
+    delete next.modelUuid;
+    delete next.modelName;
+    delete next.sourceUrl;
+  }
+  characterVoiceOverrides[id] = next;
 }
 
 function loadCharacterVoice(id) {
   const current = characterVoiceOverrides[id] || {};
+  const defaultVoice = characterDefaultVoices[id] || {};
   characterSpeaker.value = current.speaker || "";
-  characterSpeaker.placeholder = inputs.get("PICOAGENT_TTS_SPEAKER")?.value || "888753760";
+  characterSpeaker.placeholder = defaultVoice.styleId || inputs.get("PICOAGENT_TTS_SPEAKER")?.value || "888753760";
 }
 
 async function render() {
@@ -408,6 +422,7 @@ async function render() {
     { value: "cpu", label: "CPU固定" },
     { value: "gpu", label: "GPU固定" },
   ]));
+  voiceSec.append(field("PICOAGENT_TTS_PORT", "Aivis ポート", "text", v.PICOAGENT_TTS_PORT ?? "11436", "11436"));
   voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "共通 Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
