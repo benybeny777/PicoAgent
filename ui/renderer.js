@@ -6,6 +6,7 @@ const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const status = document.getElementById("status");
 const bootStatus = document.getElementById("bootStatus");
+const bootLog = document.getElementById("bootLog");
 const bootPetImage = document.getElementById("bootPetImage");
 const sendButton = document.getElementById("sendButton");
 const character = document.getElementById("character");
@@ -18,6 +19,9 @@ const conversationHistory = [];
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
 let dailyTimer = null;
+let animationRequestId = null;
+let bootLogTimer = null;
+let lastBootStatus = "";
 // 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
 const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
@@ -48,6 +52,8 @@ window.addEventListener("beforeunload", () => {
   if (chatterTimer) clearTimeout(chatterTimer);
   if (dailyTimer) clearInterval(dailyTimer);
   if (alarmTimer) clearInterval(alarmTimer);
+  if (bootLogTimer) clearInterval(bootLogTimer);
+  if (animationRequestId) cancelAnimationFrame(animationRequestId);
   stopVoice(false);
 });
 
@@ -71,8 +77,49 @@ let lastFrameAt = 0;
 function setStatus(text) {
   status.textContent = text;
   if (bootStatus && petApp.classList.contains("is-booting")) {
-    bootStatus.textContent = text || "起動準備中…";
+    const next = text || "起動準備中…";
+    bootStatus.textContent = next;
+    if (next !== lastBootStatus) {
+      lastBootStatus = next;
+      appendBootLog(next, "status");
+    }
   }
+}
+
+function appendBootLog(text, kind = "info") {
+  if (!bootLog || !petApp.classList.contains("is-booting")) return;
+  const line = document.createElement("div");
+  line.className = `boot-log-line ${kind}`;
+  const stamp = new Date().toLocaleTimeString("ja-JP", { hour12: false });
+  line.textContent = `${stamp}  ${text}`;
+  bootLog.append(line);
+  while (bootLog.children.length > 28) bootLog.firstElementChild?.remove();
+  bootLog.scrollTop = bootLog.scrollHeight;
+}
+
+function startBootLogTicker() {
+  if (!bootLog || bootLogTimer) return;
+  const lines = [
+    "キャラクターの寝息を監視中...",
+    "会話メモリを読み込み中...",
+    "ローカルポートを確認中...",
+    "音声キューを初期化中...",
+    "スキル一覧を照合中...",
+    "透明ウィンドウを調整中...",
+    "モデル応答待機スレッドを準備中...",
+  ];
+  appendBootLog("PicoAgent boot sequence start", "system");
+  bootLogTimer = setInterval(() => {
+    if (!petApp.classList.contains("is-booting")) return;
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    appendBootLog(line, "trace");
+  }, 850);
+}
+
+function stopBootLogTicker() {
+  if (!bootLogTimer) return;
+  clearInterval(bootLogTimer);
+  bootLogTimer = null;
 }
 
 function frameUrl(name, index) {
@@ -174,9 +221,9 @@ function animate(now) {
     petSprite.src = frameUrl(animationName, frame);
     lastFrameAt = now;
   }
-  requestAnimationFrame(animate);
+  animationRequestId = requestAnimationFrame(animate);
 }
-requestAnimationFrame(animate);
+animationRequestId = requestAnimationFrame(animate);
 
 function autosizeInput() {
   input.style.height = "auto";
@@ -253,6 +300,23 @@ function addHistory(role, text) {
   if (!content) return;
   conversationHistory.push({ role, content });
   if (conversationHistory.length > 80) conversationHistory.shift();
+  renderHistory();
+}
+
+function hydrateHistory(items) {
+  conversationHistory.length = 0;
+  if (!Array.isArray(items)) {
+    renderHistory();
+    return;
+  }
+  for (const item of items) {
+    const role = item?.role === "user" ? "user" : item?.role === "assistant" ? "assistant" : "";
+    const content = String(item?.content ?? "").trim();
+    if (role && content) conversationHistory.push({ role, content });
+  }
+  if (conversationHistory.length > 80) {
+    conversationHistory.splice(0, conversationHistory.length - 80);
+  }
   renderHistory();
 }
 
@@ -377,6 +441,12 @@ bubble.addEventListener("click", event => {
   if (String(window.getSelection?.() ?? "").trim()) return;
   openComposer();
 });
+character.addEventListener("click", event => {
+  if (!currentVoice) return;
+  event.stopPropagation();
+  stopVoice();
+  status.textContent = "";
+});
 character.addEventListener("dblclick", toggleBubbleFullscreen);
 // フキダシ自体をダブルクリックしても、画面最大化のように大きく広げる／戻す。
 bubble.addEventListener("dblclick", event => {
@@ -495,6 +565,8 @@ composer.addEventListener("submit", async event => {
   if (!text || busy) return;
   clearAlarmSnooze(false);
   busy = true;
+  ++speakingToken;
+  stopVoice(false);
   updateComposerState();
   closeComposer();
   input.value = "";
@@ -537,10 +609,26 @@ composer.addEventListener("submit", async event => {
   }
 });
 input.addEventListener("input", () => { autosizeInput(); updateComposerState(); });
-input.addEventListener("keydown", event => { if (event.key === "Escape") closeComposer(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
-document.addEventListener("keydown", event => { if (event.key === "Escape") exitBubbleFullscreen(); });
+input.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    closeComposer();
+  }
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    composer.requestSubmit();
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  if (!composer.hidden) {
+    closeComposer();
+    return;
+  }
+  exitBubbleFullscreen();
+});
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
-window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); renderReply("新しい話をしよう。"); closeComposer(); scheduleChatter(); });
+window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); stopVoice(); renderReply("新しい話をしよう。"); closeComposer(); scheduleChatter(); });
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
@@ -559,6 +647,7 @@ function applyEngineStatus(s) {
     if (petApp.classList.contains("is-booting")) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
+      appendBootLog("engine ready", "system");
     } else {
       setStatus("準備ができたよ。");
       setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
@@ -629,6 +718,10 @@ async function waitForAivisReady() {
 
 // 選択中キャラの AivisHub 音声モデルを、初回読み上げ前にローディング画面で導入する。
 async function prepareSelectedVoiceModel() {
+  let statusInfo;
+  try { statusInfo = await window.picoagent.aivisStatus(); }
+  catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
+  if (!statusInfo?.enabled) return null;
   const startedAt = Date.now();
   let timer = null;
   try {
@@ -641,11 +734,13 @@ async function prepareSelectedVoiceModel() {
     if (timer) clearInterval(timer);
     timer = null;
     setStatus("");
+    return true;
   } catch (error) {
     if (timer) clearInterval(timer);
     logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
     setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
     await new Promise(resolve => setTimeout(resolve, 2500));
+    return false;
   }
 }
 
@@ -808,7 +903,10 @@ function startAlarmPolling() {
 }
 
 (async () => {
+  startBootLogTicker();
+  setStatus("起動準備中…");
   const info = await window.picoagent.init();
+  appendBootLog("settings loaded", "system");
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
@@ -828,6 +926,7 @@ function startAlarmPolling() {
   try {
     // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
     await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}, { speakGreeting: false });
+    hydrateHistory(info.history);
     let greeting = characterManifest?.greeting || "";
     try {
       const daily = await window.picoagent.dailyGreeting();
@@ -845,7 +944,9 @@ function startAlarmPolling() {
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
+    appendBootLog("switching to desktop pet view", "system");
     petApp.classList.remove("is-booting");
+    stopBootLogTicker();
     if (preparedGreeting) playPreparedSpeech(preparedGreeting);
   }
   if (!info.up && !status.textContent) status.textContent = "起動中…";
@@ -859,4 +960,5 @@ function startAlarmPolling() {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
   petApp.classList.remove("is-booting");
+  stopBootLogTicker();
 });

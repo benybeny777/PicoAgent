@@ -179,6 +179,14 @@ fn log_command_error(app: &AppHandle, context: &str, error: impl std::fmt::Displ
 #[tauri::command]
 pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     let model = state.model.lock().unwrap().clone();
+    let recent_history: Vec<Message> = clean_turns(&state.messages.lock().unwrap())
+        .into_iter()
+        .rev()
+        .take(20)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     Ok(json!({
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
@@ -190,6 +198,7 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
         "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
         "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "history": recent_history,
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
         "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),

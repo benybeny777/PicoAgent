@@ -9,7 +9,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .pet-app.is-booting .boot-screen { visibility:visible; opacity:1; pointer-events:auto; }
 .pet-app.is-booting .bubble,
 .pet-app.is-booting .character { visibility:hidden; }
-.boot-stage { position:relative; width:min(380px,calc(100vw - 36px)); min-height:300px; display:grid; place-items:center; align-content:center; padding:18px 18px 20px; border:1px solid rgba(71,52,76,.12); border-radius:20px; background:linear-gradient(180deg,rgba(255,253,248,.97),rgba(247,251,246,.94)); box-shadow:0 12px 28px rgba(42,31,46,.16); overflow:hidden; }
+.boot-stage { position:relative; width:min(410px,calc(100vw - 36px)); min-height:360px; display:grid; place-items:center; align-content:center; padding:18px 18px 18px; border:1px solid rgba(71,52,76,.12); border-radius:20px; background:linear-gradient(180deg,rgba(255,253,248,.97),rgba(247,251,246,.94)); box-shadow:0 12px 28px rgba(42,31,46,.16); overflow:hidden; }
 .boot-stage::before { content:""; position:absolute; left:42px; right:42px; bottom:86px; height:24px; border-radius:50%; background:rgba(92,65,98,.1); filter:blur(4px); animation:boot-shadow 4.2s ease-in-out infinite; }
 .boot-character { position:relative; width:min(330px,calc(100vw - 72px)); height:218px; display:grid; place-items:center; transform-origin:48% 70%; animation:boot-sleep 4.2s ease-in-out infinite; }
 .boot-character img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 7px 5px rgba(37,25,43,.12)); pointer-events:none; }
@@ -19,6 +19,13 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .boot-progress { position:relative; width:140px; height:4px; margin-top:4px; overflow:hidden; border-radius:999px; background:rgba(129,117,135,.16); }
 .boot-progress span { position:absolute; top:0; bottom:0; width:42%; border-radius:999px; background:linear-gradient(90deg,#f27e91,#64c99b); animation:boot-progress 1.55s ease-in-out infinite; }
 .boot-status { width:100%; min-height:18px; margin-top:11px; color:var(--muted); font-size:11px; line-height:1.55; text-align:center; word-break:keep-all; overflow-wrap:anywhere; }
+.boot-log { position:relative; width:100%; height:88px; margin-top:10px; padding:8px 10px; overflow:hidden; border:1px solid rgba(71,52,76,.1); border-radius:10px; background:rgba(43,35,50,.86); color:#eaf8eb; font:10px/1.55 Consolas,"Yu Gothic UI",monospace; text-align:left; box-shadow:inset 0 1px 9px rgba(0,0,0,.18); }
+.boot-log::before { content:"PICO/BOOT"; position:absolute; top:4px; right:8px; color:rgba(234,248,235,.28); font-size:9px; letter-spacing:.08em; }
+.boot-log-line { position:relative; white-space:nowrap; opacity:.86; animation:boot-line-in .22s ease-out both; }
+.boot-log-line::before { content:">>"; margin-right:5px; color:#64c99b; }
+.boot-log-line.status { color:#fff6bd; }
+.boot-log-line.system { color:#9ff0c1; }
+.boot-log-line.trace { color:#d5ded9; }
 .character::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)); pointer-events:none; will-change:transform; }
 .character[data-motion="breathe"] img { animation:pet-breathe 3.8s ease-in-out infinite; }
@@ -41,6 +48,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes boot-sleep { 0%,100%{transform:translateY(1px) scale(1)} 50%{transform:translateY(-4px) scale(1.006,.996)} }
 @keyframes boot-shadow { 0%,100%{transform:scaleX(.94); opacity:.72} 50%{transform:scaleX(1.08); opacity:.48} }
 @keyframes boot-progress { 0%{left:-45%} 55%{left:32%} 100%{left:105%} }
+@keyframes boot-line-in { from{transform:translateY(6px); opacity:0} to{transform:translateY(0); opacity:.86} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
 .bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 24px); max-height:calc(100% - 24px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }
@@ -77,4 +85,4 @@ button:disabled { opacity:.48; cursor:default; }
 .bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
 .bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .status { flex:0 0 auto; min-height:14px; margin-top:6px; color:var(--muted); font-size:9px; }
-@media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span { animation:none!important; } }
+@media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span,.boot-log-line { animation:none!important; } }
