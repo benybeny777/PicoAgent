@@ -638,18 +638,29 @@ fn is_chart_or_emoji(c: char) -> bool {
 }
 
 struct TtsVoice {
+    /// 合成に使う style ID（フォールバック）。speaker_uuid があれば実 ID は実行時に解決する。
     speaker: String,
     model_uuid: Option<String>,
+    /// AivisHub モデルの話者 UUID。あれば導入確認と実 style ID 解決に使う。
+    speaker_uuid: Option<String>,
+    /// 複数スタイルから選ぶときのスタイル名（例: ノーマル）。
+    style_name: Option<String>,
 }
 
-const RIN_AIVIS_SPEAKER: &str = "-1801897920";
+// るな（AivisHub）の話者情報。global style ID はエンジンが導入時に算出するため、
+// ハードコードはフォールバックに留め、実 ID は speaker_uuid から `/speakers` で解決する。
+const RIN_AIVIS_SPEAKER: &str = "345585728";
 const RIN_AIVIS_MODEL_UUID: &str = "4f281e78-eba6-495a-8e50-5c322d02b5b1";
+const RIN_AIVIS_SPEAKER_UUID: &str = "aa63d66e-92fe-499e-9e0d-15dad4a61d0d";
+const RIN_AIVIS_STYLE_NAME: &str = "ノーマル";
 
 fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
     match character_id {
         "rin" => Some(TtsVoice {
             speaker: RIN_AIVIS_SPEAKER.to_string(),
             model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
+            speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
+            style_name: Some(RIN_AIVIS_STYLE_NAME.to_string()),
         }),
         _ => None,
     }
@@ -677,14 +688,19 @@ fn effective_tts_voice(state: &AppState) -> TtsVoice {
         .map(str::trim)
         .filter(|value| !value.is_empty());
     if let Some(speaker) = override_speaker {
+        // ユーザーが明示指定した style ID はそのまま使う（実行時解決はしない）。
         return TtsVoice {
             speaker: speaker.to_string(),
             model_uuid: override_model_uuid.map(str::to_string),
+            speaker_uuid: None,
+            style_name: None,
         };
     }
     default.unwrap_or_else(|| TtsVoice {
         speaker: state.config.get("PICOAGENT_TTS_SPEAKER", "888753760"),
         model_uuid: None,
+        speaker_uuid: None,
+        style_name: None,
     })
 }
 
@@ -706,12 +722,24 @@ pub async fn pet_speak(
         .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
     let endpoint = aivis::endpoint(&app, &state);
     let voice = effective_tts_voice(&state);
-    if let Some(model_uuid) = voice.model_uuid.as_deref() {
-        aivis::ensure_model_for_speaker(&app, &endpoint, &voice.speaker, model_uuid)
+    // AivisHub モデル指定があり未導入なら導入する（導入確認は speaker_uuid で行う）。
+    if let (Some(model_uuid), Some(speaker_uuid)) =
+        (voice.model_uuid.as_deref(), voice.speaker_uuid.as_deref())
+    {
+        aivis::ensure_model_installed(&app, &endpoint, model_uuid, speaker_uuid)
             .await
             .map_err(|error| log_command_error(&app, "Aivis モデルの導入に失敗しました", error))?;
     }
-    let speaker = voice.speaker;
+    // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
+    // 解決できなければ設定値の style ID を使う。
+    let speaker = match voice.speaker_uuid.as_deref() {
+        Some(speaker_uuid) => {
+            aivis::resolve_style_id(&endpoint, speaker_uuid, voice.style_name.as_deref())
+                .await
+                .unwrap_or(voice.speaker)
+        }
+        None => voice.speaker,
+    };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()

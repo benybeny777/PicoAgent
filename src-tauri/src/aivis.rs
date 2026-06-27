@@ -84,13 +84,16 @@ async fn is_up(endpoint: &str) -> bool {
     }
 }
 
-pub async fn ensure_model_for_speaker(
+/// 指定 speaker_uuid のモデルが未導入なら AivisHub から AIVMX を導入する。
+/// 導入確認は style ID ではなく speaker_uuid の有無で行う（global style ID は
+/// エンジンが導入時に算出するため、事前にハードコードした値と一致しないことがある）。
+pub async fn ensure_model_installed(
     app: &tauri::AppHandle,
     endpoint: &str,
-    speaker: &str,
     model_uuid: &str,
+    speaker_uuid: &str,
 ) -> anyhow::Result<()> {
-    if speaker_available(endpoint, speaker).await? {
+    if speaker_uuid_available(endpoint, speaker_uuid).await? {
         return Ok(());
     }
     let download_url = format!(
@@ -98,7 +101,7 @@ pub async fn ensure_model_for_speaker(
     );
     append_log(
         app,
-        &format!("Aivis モデルを導入します: model_uuid={model_uuid} speaker={speaker}"),
+        &format!("Aivis モデルを導入します: model_uuid={model_uuid} speaker_uuid={speaker_uuid}"),
     )?;
     let client = reqwest::Client::builder()
         .timeout(MODEL_INSTALL_TIMEOUT)
@@ -115,20 +118,20 @@ pub async fn ensure_model_for_speaker(
         anyhow::bail!("Aivis モデル導入に失敗しました: HTTP {status} {body}");
     }
     for _ in 0..60 {
-        if speaker_available(endpoint, speaker).await? {
+        if speaker_uuid_available(endpoint, speaker_uuid).await? {
             append_log(
                 app,
-                &format!("Aivis モデル導入完了: model_uuid={model_uuid} speaker={speaker}"),
+                &format!("Aivis モデル導入完了: model_uuid={model_uuid} speaker_uuid={speaker_uuid}"),
             )?;
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    anyhow::bail!("Aivis モデル導入後に speaker={speaker} が /speakers に見つかりません。");
+    anyhow::bail!("Aivis モデル導入後に speaker_uuid={speaker_uuid} が /speakers に見つかりません。");
 }
 
-async fn speaker_available(endpoint: &str, speaker: &str) -> anyhow::Result<bool> {
-    let speaker_id = speaker.parse::<i64>().ok();
+/// `/speakers` を取得する。
+async fn fetch_speakers(endpoint: &str) -> anyhow::Result<Vec<Value>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()?;
@@ -137,31 +140,46 @@ async fn speaker_available(endpoint: &str, speaker: &str) -> anyhow::Result<bool
         anyhow::bail!("Aivis /speakers failed: HTTP {}", response.status());
     }
     let speakers: Value = response.json().await?;
-    Ok(speakers
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|speaker| {
-            speaker
-                .get("styles")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+    Ok(speakers.as_array().cloned().unwrap_or_default())
+}
+
+async fn speaker_uuid_available(endpoint: &str, speaker_uuid: &str) -> anyhow::Result<bool> {
+    Ok(fetch_speakers(endpoint).await?.iter().any(|speaker| {
+        speaker.get("speaker_uuid").and_then(Value::as_str) == Some(speaker_uuid)
+    }))
+}
+
+/// speaker_uuid（＋任意でスタイル名）から、合成に使う実 style ID を `/speakers` から解決する。
+/// スタイル名が一致しなければ先頭スタイルを使う。
+pub async fn resolve_style_id(
+    endpoint: &str,
+    speaker_uuid: &str,
+    style_name: Option<&str>,
+) -> anyhow::Result<String> {
+    let speakers = fetch_speakers(endpoint).await?;
+    let speaker = speakers
+        .iter()
+        .find(|speaker| speaker.get("speaker_uuid").and_then(Value::as_str) == Some(speaker_uuid))
+        .ok_or_else(|| {
+            anyhow::anyhow!("speaker_uuid={speaker_uuid} が /speakers に見つかりません。")
+        })?;
+    let styles = speaker
+        .get("styles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に styles がありません。"))?;
+    let style = style_name
+        .and_then(|name| {
+            styles
+                .iter()
+                .find(|style| style.get("name").and_then(Value::as_str) == Some(name))
         })
-        .any(|style| {
-            let id_matches = style
-                .get("id")
-                .and_then(Value::as_i64)
-                .zip(speaker_id)
-                .map(|(id, expected)| id == expected)
-                .unwrap_or(false);
-            let text_matches = style
-                .get("id")
-                .and_then(Value::as_str)
-                .map(|id| id == speaker)
-                .unwrap_or(false);
-            id_matches || text_matches
-        }))
+        .or_else(|| styles.first())
+        .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能な style がありません。"))?;
+    let id = style
+        .get("id")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| anyhow::anyhow!("style ID を取得できません。"))?;
+    Ok(id.to_string())
 }
 
 fn existing(path: PathBuf) -> Option<PathBuf> {
