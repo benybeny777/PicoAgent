@@ -116,8 +116,11 @@ pub fn run() {
             let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
             *state.character_id.lock().unwrap() = character_id.clone();
             state.reset_conversation();
-            // 旧仕様の単一 history.json があれば選択中キャラのファイルへ一度だけ移行する。
-            history::migrate_legacy(app.handle(), &character_id);
+            // 旧仕様の単一 history.json は、選択中キャラではなく既定キャラ mugi の
+            // ファイルへ一度だけ移行する。旧履歴はキャラ別管理が無かった時代のもので、
+            // 当時の唯一/既定キャラは mugi。選択中キャラ（後から追加した rin 等）へ
+            // 割り当てると、別キャラの自己紹介・口調が混ざってしまうため。
+            history::migrate_legacy(app.handle(), "mugi");
             // 選択中キャラの直近会話をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
             let recent = history::load_recent(app.handle(), &character_id);
             if !recent.is_empty() {

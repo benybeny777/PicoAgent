@@ -40,8 +40,9 @@ pub fn path(app: &AppHandle, character_id: &str) -> PathBuf {
     data_dir(app).join(format!("history-{}.json", sanitize(character_id)))
 }
 
-/// 旧仕様の単一ファイル history.json を、現在のキャラクター別ファイルへ一度だけ移行する。
-/// 旧履歴は最後に使っていたキャラクター（＝現在の選択キャラ）のものとして引き継ぐ。
+/// 旧仕様の単一ファイル history.json を、指定キャラクターのファイルへ一度だけ移行する。
+/// 呼び出し側は既定キャラ（mugi）を渡す。旧履歴はキャラ別管理が無かった時代のもので
+/// 当時の唯一/既定キャラのものだから。後から追加したキャラへ割り当てると人格が混ざる。
 pub fn migrate_legacy(app: &AppHandle, character_id: &str) {
     let legacy = data_dir(app).join("history.json");
     let target = path(app, character_id);
