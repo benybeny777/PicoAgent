@@ -81,7 +81,10 @@ pub fn run() {
                     .map(|s| s.to_string())
                     .or_else(|| info.payload().downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "（詳細なし）".to_string());
-                log_paths::append_app_log(&panic_handle, &format!("panic at {location}: {payload}"));
+                log_paths::append_app_log(
+                    &panic_handle,
+                    &format!("panic at {location}: {payload}"),
+                );
                 default_hook(info);
             }));
 
