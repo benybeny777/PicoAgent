@@ -582,6 +582,8 @@ fn speech_text(text: &str) -> String {
         }
         out.push(ch);
     }
+    // スパークライン（ブロック文字）や絵文字は読み上げに乗せない（天気・為替チャート対策）。
+    let out: String = out.chars().filter(|c| !is_chart_or_emoji(*c)).collect();
     out.lines()
         .map(str::trim)
         .take_while(|line| !line.starts_with("参考:") && !line.starts_with("参考："))
@@ -589,6 +591,16 @@ fn speech_text(text: &str) -> String {
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+// 読み上げ不要な装飾文字（罫線・ブロック＝スパークライン、各種記号・絵文字、異体字セレクタ）。
+fn is_chart_or_emoji(c: char) -> bool {
+    matches!(c as u32,
+        0x2580..=0x259F   // 罫線・ブロック要素（▁▂▃▅▇ など）
+        | 0x2600..=0x27BF // 記号・装飾・Dingbats（☀ ☔ ✓ など）
+        | 0xFE00..=0xFE0F // 異体字セレクタ
+        | 0x1F000..=0x1FAFF // 絵文字全般
+    )
 }
 
 fn effective_tts_speaker(state: &AppState) -> String {
@@ -893,5 +905,14 @@ mod tests {
     fn 読み上げでは本文内リンクをラベルだけ読む() {
         let text = "[公式サイト](https://example.com)を確認しました。";
         assert_eq!(speech_text(text), "公式サイトを確認しました。");
+    }
+
+    #[test]
+    fn 読み上げではチャート記号と絵文字を外す() {
+        let text = "天気 東京 ☀️ 快晴\n今日の気温 18〜27度 ▁▂▃▅▇";
+        let spoken = speech_text(text);
+        assert!(!spoken.contains('☀'));
+        assert!(!spoken.contains('▇'));
+        assert!(spoken.contains("快晴") && spoken.contains("18〜27度"));
     }
 }
