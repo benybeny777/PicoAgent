@@ -44,6 +44,7 @@ pub fn run() {
             commands::settings_load,
             commands::settings_list_models,
             commands::settings_save,
+            commands::restart_app,
             commands::engine_status,
             commands::pet_log,
             menu::pet_menu,

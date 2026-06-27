@@ -577,12 +577,46 @@ function collect() {
   return patch;
 }
 
+// 再起動の確認画面を出し、ユーザーの選択（true=今すぐ再起動）を返す。
+// Tauri webview では window.confirm が使えないことがあるため自前の画面を出す。
+function confirmRestart() {
+  return new Promise((resolve) => {
+    const overlay = el("div", { className: "restart-overlay" });
+    const card = el("div", { className: "restart-card" });
+    card.append(
+      el("h2", { textContent: "再起動して反映します" }),
+      el("p", { textContent: "選んだ設定（叩く AI・モデル・音声・キャラクターなど）は、PicoAgent を再起動して起動画面でまとめて反映します。今すぐ再起動しますか？" }),
+    );
+    const actions = el("div", { className: "restart-actions" });
+    const later = el("button", { className: "btn", textContent: "あとで", type: "button" });
+    const now = el("button", { className: "btn primary", textContent: "今すぐ再起動", type: "button" });
+    const close = (value) => { overlay.remove(); resolve(value); };
+    later.addEventListener("click", () => close(false));
+    now.addEventListener("click", () => close(true));
+    actions.append(later, now);
+    card.append(actions);
+    overlay.append(card);
+    document.body.append(overlay);
+    now.focus();
+  });
+}
+
 saveBtn.addEventListener("click", async () => {
   saveBtn.disabled = true;
   statusEl.textContent = "保存中…";
   try {
     const res = await window.picoagent.settings.save(collect());
-    statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
+    if (res.requiresRestart) {
+      const restartNow = await confirmRestart();
+      if (restartNow) {
+        statusEl.textContent = "再起動しています…";
+        await window.picoagent.restartApp();
+        return; // 再起動するので以降の処理は不要。
+      }
+      statusEl.textContent = "保存しました（次回の起動時に反映されます）";
+    } else {
+      statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
+    }
   } catch (error) {
     logApp("error", "設定保存に失敗しました", errorDetail(error));
     statusEl.textContent = `保存に失敗: ${error.message}`;

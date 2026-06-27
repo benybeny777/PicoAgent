@@ -194,3 +194,31 @@ button.tab.active {
 button.tab:active {
   transform: none;
 }
+
+/* 再起動確認の画面（自前ダイアログ） */
+.restart-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(58, 43, 51, 0.38);
+  z-index: 100;
+}
+.restart-card {
+  width: min(360px, calc(100vw - 48px));
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 22px;
+  box-shadow: 0 16px 40px rgba(42, 31, 46, 0.28);
+}
+.restart-card h2 { margin: 0 0 10px; font-size: 15px; color: var(--ink); }
+.restart-card p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.restart-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.restart-actions .btn { padding: 8px 18px; }
+.restart-actions .btn:not(.primary) {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.restart-actions .btn.primary { background: var(--pink); color: #fff; }

@@ -438,11 +438,14 @@ window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderH
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
   if (!s || !s.phase) return;
+  // モデル DL・起動中の表示は起動シーケンス（ローディング画面）の間だけ出し、
+  // 通常時はフキダシに「準備中…」を出さない（重い反映は再起動側で行う方針のため）。
+  const booting = petApp.classList.contains("is-booting");
   if (s.phase === "download") {
-    setStatus(`モデルを準備中… ${s.percent ?? 0}%`);
+    if (booting) setStatus(`モデルを準備中… ${s.percent ?? 0}%`);
     online.dataset.up = false;
   } else if (s.phase === "starting") {
-    setStatus("エンジンを起動中…");
+    if (booting) setStatus("エンジンを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
@@ -507,6 +510,23 @@ async function waitForAivisReady() {
     if (s && s.up) break;
   }
   if (status.textContent === "音声エンジンを起動中…") setStatus("");
+}
+
+// 同梱エンジン(local)のモデル DL・起動をローディング画面の間に終わらせる。
+// 通常時にフキダシへ「モデルを準備中…」を出さないため、ここで ready/error まで待つ。
+// DL は数 GB で時間がかかりうるので上限は長め（約30分）。error は即終了する。
+async function waitForEngineReady() {
+  for (let i = 0; i < 1800; i += 1) {
+    let s;
+    try { s = await window.picoagent.engineStatus(); }
+    catch (error) {
+      logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error));
+      return;
+    }
+    applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
+    if (s && (s.phase === "ready" || s.phase === "error")) return;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
 }
 
 // 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
@@ -661,6 +681,11 @@ function startAlarmPolling() {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
   await waitForAivisReady();
+  // local プロバイダはモデル DL・エンジン起動もローディング画面の間に終わらせる。
+  if ((info.providerId || "local") === "local") {
+    try { await waitForEngineReady(); }
+    catch (error) { logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error)); }
+  }
   let preparedGreeting = null;
   try {
     // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。

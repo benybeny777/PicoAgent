@@ -181,6 +181,7 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     let model = state.model.lock().unwrap().clone();
     Ok(json!({
         "model": model,
+        "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
         "up": current_up(&state).await,
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
         "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
@@ -867,7 +868,6 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
-    let old_provider_id = state.config.get("PICOAGENT_PROVIDER", "local");
     let changed_text = |key: &str, fallback: &str| {
         patch
             .get(key)
@@ -896,14 +896,25 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_CTX", "8192")
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
+    let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
     state
         .config
         .set_all(patch)
         .map_err(|e| log_command_error(&app, "設定保存に失敗しました", e))?;
 
-    // グローバル設定を実行中へ反映。
+    // モデル DL・エンジン/Aivis 起動・キャラ読込など重い反映は実行中に行わず、
+    // 再起動して起動シーケンス（ローディング画面）でまとめて反映する（フキダシに
+    // 「準備中…」を出さないため）。該当キーが実際に変わったら再起動を促す。
+    let requires_restart =
+        tts_runtime_changed || provider_changed || local_engine_changed || character_changed;
+
+    // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
+    if has_system_prompt || has_memory_setting {
+        *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
+        state.reset_conversation();
+    }
+
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
-    *state.provider_id.lock().unwrap() = pid.clone();
     let provider =
         providers::get(&pid).ok_or_else(|| format!("プロバイダ \"{}\" が見つかりません。", pid))?;
     let model = {
@@ -914,60 +925,46 @@ pub async fn settings_save(
             m
         }
     };
-    *state.model.lock().unwrap() = model.clone();
-    if has_system_prompt || has_memory_setting {
-        *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
-        state.reset_conversation();
-    }
-    if tts_runtime_changed {
-        aivis::stop(&app);
-        if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
-            let handle = app.clone();
-            if let Err(error) = aivis::start_background(&handle) {
-                crate::log_paths::append_app_log(
-                    &handle,
-                    &format!("設定保存後の同梱 Aivis バックグラウンド起動に失敗しました: {error}"),
-                );
-            }
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = aivis::ensure_started(&handle).await {
-                    crate::log_paths::append_app_log(
-                        &handle,
-                        &format!("設定保存後の同梱 Aivis 起動確認に失敗しました: {error}"),
-                    );
-                }
-            });
-        }
-    }
-    if old_provider_id == "local" && pid != "local" {
-        crate::engine::stop(&app);
-    }
-    if pid == "local" && (local_engine_changed || (provider_changed && old_provider_id != "local"))
-    {
-        crate::engine::stop(&app);
-        let handle = app.clone();
-        tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
-    }
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
-        let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));
-        // フキダシの見た目（文字サイズ）を実行中へ即反映。
-        let _ = win.emit(
-            "pet:ui",
-            json!({
-                "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
-                "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
-                "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
-                "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
-                "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
-                "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
-                "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
-                "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
-            }),
-        );
+    // 再起動する場合は、キャンセル時に旧エンジンと不整合にならないよう実行中状態を触らない。
+    if !requires_restart {
+        *state.provider_id.lock().unwrap() = pid.clone();
+        *state.model.lock().unwrap() = model.clone();
     }
 
-    Ok(json!({ "ok": true, "up": current_up(&state).await }))
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
+        // 軽い見た目・雑談設定は常に即反映。キャラ切替・プロバイダ/モデルは再起動側で
+        // 反映するため、再起動が必要なときは characterId / pet:model を送らない。
+        let mut ui = json!({
+            "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
+            "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
+            "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
+            "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
+            "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
+            "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
+        });
+        if !requires_restart {
+            let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));
+            ui["characterId"] = json!(state.config.get("PICOAGENT_CHARACTER", "mugi"));
+            ui["characterOverrides"] = state
+                .config
+                .get_all()
+                .get("PICOAGENT_CHARACTER_OVERRIDES")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+        }
+        let _ = win.emit("pet:ui", ui);
+    }
+
+    Ok(json!({ "ok": true, "requiresRestart": requires_restart, "up": current_up(&state).await }))
+}
+
+/// 設定反映のためにアプリを再起動する。重い反映（モデル DL・エンジン/Aivis 起動・
+/// キャラ読込）を起動シーケンス（ローディング画面）でまとめて行うための共通入口。
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    crate::log_paths::append_app_log(&app, "設定反映のため再起動します。");
+    app.restart();
 }
 
 /// 同梱エンジンの現在状態（download/starting/ready/error）を返す。
