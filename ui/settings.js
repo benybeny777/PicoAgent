@@ -62,7 +62,13 @@ function field(key, label, type, value, placeholder) {
     inputs.set(key, cb);
     return el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]);
   }
-  const input = el("input", { type: type === "password" ? "password" : "text", value: value ?? "", placeholder: placeholder || "" });
+  const inputType = type === "password" ? "password" : type === "number" ? "number" : "text";
+  const input = el("input", { type: inputType, value: value ?? "", placeholder: placeholder || "" });
+  if (key === "PICOAGENT_TTS_VOLUME") {
+    input.min = "0";
+    input.max = "100";
+    input.step = "1";
+  }
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   inputs.set(key, input);
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
@@ -426,6 +432,7 @@ async function render() {
   ]));
   voiceSec.append(field("PICOAGENT_TTS_PORT", "Aivis ポート", "text", v.PICOAGENT_TTS_PORT ?? "11436", "11436"));
   voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "共通 Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
+  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
 

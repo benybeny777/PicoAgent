@@ -61,14 +61,14 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 /* 拡大中もキャラはそのまま右側に表示（被らないので薄くしない）。 */
 .bubble.fullscreen ~ .character { z-index:7; }
 .history-log { display:none; }
-.bubble.fullscreen .history-log { display:block; flex:1 1 auto; min-height:0; margin:-4px 0 12px; padding-right:4px; overflow:auto; }
+.bubble.fullscreen .history-log { display:block; flex:1 1 auto; min-height:0; margin:-4px 0 12px; padding:28px 4px 0 0; overflow:auto; }
 .history-item { margin:0 0 11px; }
 .history-role { margin-bottom:3px; color:var(--muted); font-size:10px; font-weight:700; }
 .history-body { display:inline-block; max-width:100%; padding:8px 10px; border-radius:12px; background:#f6f1f4; font-size:12px; line-height:1.65; white-space:pre-wrap; word-break:break-word; user-select:text; }
 .history-item.user { text-align:right; }
 .history-item.user .history-body { background:#ffeef3; }
 .history-item.assistant .history-body { background:#f4fbf6; }
-.reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:text; overflow:auto; }
+.reply { min-height:0; padding-right:96px; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:text; overflow:auto; }
 .bubble.fullscreen .reply { flex:0 0 auto; max-height:30%; padding-top:8px; border-top:1px solid rgba(71,52,76,.1); }
 .reply a { color:#b94f68; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
 .reply a:hover { color:var(--accent); }
@@ -85,4 +85,9 @@ button:disabled { opacity:.48; cursor:default; }
 .bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
 .bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .status { flex:0 0 auto; min-height:14px; margin-top:6px; color:var(--muted); font-size:9px; }
+.reply-actions { position:absolute; z-index:5; right:9px; top:8px; display:flex; gap:4px; opacity:.25; transition:opacity .16s ease; }
+.bubble:hover .reply-actions,
+.reply-actions:focus-within { opacity:1; }
+.reply-actions button { position:static; width:24px; height:24px; padding:0; border-radius:7px; background:rgba(242,126,145,.92); font-size:10px; line-height:1; }
+.reply-actions button:hover { filter:brightness(1.04); }
 @media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span,.boot-log-line { animation:none!important; } }

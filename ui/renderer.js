@@ -9,6 +9,10 @@ const bootStatus = document.getElementById("bootStatus");
 const bootLog = document.getElementById("bootLog");
 const bootPetImage = document.getElementById("bootPetImage");
 const sendButton = document.getElementById("sendButton");
+const copyReplyButton = document.getElementById("copyReply");
+const replayReplyButton = document.getElementById("replayReply");
+const stopVoiceButton = document.getElementById("stopVoice");
+const toggleFullscreenButton = document.getElementById("toggleFullscreen");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
@@ -22,6 +26,9 @@ let dailyTimer = null;
 let animationRequestId = null;
 let bootLogTimer = null;
 let lastBootStatus = "";
+let lastAssistantText = "";
+let voiceVolume = 1;
+const pendingNotices = [];
 // 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
 const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
@@ -245,6 +252,7 @@ function closeComposer() {
   composer.hidden = true;
   reply.classList.remove("compact");
   updateComposerState();
+  setTimeout(flushPendingNotice, 0);
 }
 
 // ダブルクリックでウィンドウをフルスクリーン化し、その中でフキダシを大きく広げる／元に戻すトグル。
@@ -254,6 +262,7 @@ async function setBubbleFullscreen(on) {
   renderHistory();
   try { await window.picoagent.setFullscreen(on); }
   catch (error) { bubble.classList.toggle("fullscreen", !on); status.textContent = `全画面切替に失敗: ${error}`; }
+  if (!on) setTimeout(flushPendingNotice, 0);
 }
 function toggleBubbleFullscreen() { setBubbleFullscreen(!bubble.classList.contains("fullscreen")); }
 function exitBubbleFullscreen() { setBubbleFullscreen(false); }
@@ -282,8 +291,35 @@ function renderReply(text) {
   appendLinkedText(reply, text);
 }
 
+function setAssistantReply(text, options = {}) {
+  const source = String(text ?? "");
+  renderReply(source);
+  if (options.remember !== false && source.trim()) {
+    lastAssistantText = source;
+  }
+}
+
+async function copyText(text) {
+  const source = String(text ?? "");
+  if (!source.trim()) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(source);
+    return true;
+  }
+  const area = document.createElement("textarea");
+  area.value = source;
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.append(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); }
+  finally { area.remove(); }
+  return ok;
+}
+
 function renderAlarmReply(text) {
-  renderReply(text);
+  setAssistantReply(text);
   const actions = document.createElement("div");
   actions.className = "alarm-actions";
   const awake = document.createElement("button");
@@ -299,6 +335,7 @@ function addHistory(role, text) {
   const content = String(text ?? "").trim();
   if (!content) return;
   conversationHistory.push({ role, content });
+  if (role === "assistant") lastAssistantText = content;
   if (conversationHistory.length > 80) conversationHistory.shift();
   renderHistory();
 }
@@ -317,6 +354,7 @@ function hydrateHistory(items) {
   if (conversationHistory.length > 80) {
     conversationHistory.splice(0, conversationHistory.length - 80);
   }
+  lastAssistantText = [...conversationHistory].reverse().find(item => item.role === "assistant")?.content || "";
   renderHistory();
 }
 
@@ -350,6 +388,7 @@ function finishVoice(toIdle = true) {
   currentVoice = null;
   URL.revokeObjectURL(voice.src);
   if (toIdle && animationName === "talking") setAnimation("idle");
+  setTimeout(flushPendingNotice, 0);
 }
 function stopVoice(toIdle = true) {
   if (!currentVoice) return;
@@ -373,6 +412,7 @@ function playPreparedSpeech(result) {
   const bytes = new Uint8Array(result.audio);
   const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
   currentVoice = new Audio(url);
+  currentVoice.volume = voiceVolume;
   currentVoice.addEventListener("ended", () => {
     finishVoice(true);
     if (!activeAlarmSnooze) status.textContent = "";
@@ -431,12 +471,29 @@ async function renderReplySpeaking(text) {
     await new Promise(resolve => setTimeout(resolve, stepMs));
   }
   if (token !== speakingToken) return;
-  renderReply(source);
+  setAssistantReply(source);
   if (!currentVoice) setAnimation("idle");
 }
 
+function canShowNotice() {
+  return !busy && composer.hidden && !currentVoice && !bubble.classList.contains("fullscreen");
+}
+
+function queueNotice(line) {
+  const text = String(line ?? "").trim();
+  if (!text) return;
+  pendingNotices.push(text);
+  if (pendingNotices.length > 6) pendingNotices.shift();
+}
+
+async function flushPendingNotice() {
+  if (!pendingNotices.length || !canShowNotice()) return;
+  const line = pendingNotices.shift();
+  await showAssistantNotice(line, { enqueue: false });
+}
+
 bubble.addEventListener("click", event => {
-  if (event.target.closest("button,a,textarea")) return;
+  if (event.target.closest("button,a,textarea,.reply-actions")) return;
   // テキスト選択中（コピー操作）はフキダシを入力欄へ切り替えない。
   if (String(window.getSelection?.() ?? "").trim()) return;
   openComposer();
@@ -450,13 +507,47 @@ character.addEventListener("click", event => {
 character.addEventListener("dblclick", toggleBubbleFullscreen);
 // フキダシ自体をダブルクリックしても、画面最大化のように大きく広げる／戻す。
 bubble.addEventListener("dblclick", event => {
-  if (event.target.closest("button,a,textarea,.bubble-resize")) return;
+  if (event.target.closest("button,a,textarea,.reply-actions,.bubble-resize")) return;
   toggleBubbleFullscreen();
 });
 document.addEventListener("contextmenu", event => {
   if (event.target instanceof Element && event.target.closest("textarea,a,.reply,.history-log")) return;
   event.preventDefault();
   window.picoagent.menu();
+});
+
+copyReplyButton?.addEventListener("click", async event => {
+  event.preventDefault();
+  event.stopPropagation();
+  try {
+    const ok = await copyText(lastAssistantText || reply.textContent);
+    status.textContent = ok ? "コピーしました" : "コピーできませんでした";
+    setTimeout(() => { if (status.textContent === "コピーしました") status.textContent = ""; }, 1600);
+  } catch (error) {
+    logApp("warn", "回答コピーに失敗しました", errorDetail(error));
+    status.textContent = "コピーできませんでした";
+  }
+});
+
+replayReplyButton?.addEventListener("click", event => {
+  event.preventDefault();
+  event.stopPropagation();
+  const text = lastAssistantText || reply.textContent;
+  if (!text.trim() || busy) return;
+  speakReply(text);
+});
+
+stopVoiceButton?.addEventListener("click", event => {
+  event.preventDefault();
+  event.stopPropagation();
+  stopVoice();
+  if (!activeAlarmSnooze) status.textContent = "";
+});
+
+toggleFullscreenButton?.addEventListener("click", event => {
+  event.preventDefault();
+  event.stopPropagation();
+  toggleBubbleFullscreen();
 });
 
 // 右下のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
@@ -606,6 +697,7 @@ composer.addEventListener("submit", async event => {
     busy = false;
     updateComposerState();
     scheduleChatter(); // 会話後はアイドル計測をやり直す。
+    setTimeout(flushPendingNotice, 0);
   }
 });
 input.addEventListener("input", () => { autosizeInput(); updateComposerState(); });
@@ -670,6 +762,12 @@ function applyFontPx(px) {
   input.style.fontSize = `${n}px`;
   status.style.fontSize = `${Math.max(9, Math.round(n * 0.72))}px`;
 }
+function applyVoiceVolume(value) {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return;
+  voiceVolume = Math.min(1, Math.max(0, n / 100));
+  if (currentVoice) currentVoice.volume = voiceVolume;
+}
 function applyBubbleLayout(width, height, left, top) {
   const w = parseFloat(width);
   const h = parseFloat(height);
@@ -685,6 +783,7 @@ window.addEventListener("resize", repositionBubbleToAvoidCharacter);
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
+  if (ui.voiceVolume != null) applyVoiceVolume(ui.voiceVolume);
   applyBubbleLayout(ui.bubbleWidth, ui.bubbleHeight, ui.bubbleLeft, ui.bubbleTop);
   if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
     logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
@@ -774,11 +873,18 @@ function applyChatterConfig(c) {
   chatterCfg.maxSecs = Math.max(chatterCfg.minSecs, clampSecs(c.chatterMaxSecs, 240));
   scheduleChatter();
 }
-async function showAssistantNotice(line) {
-  if (!line || busy || !composer.hidden || currentVoice || bubble.classList.contains("fullscreen")) return;
+async function showAssistantNotice(line, options = {}) {
+  if (!line) return;
+  if (!canShowNotice()) {
+    if (options.enqueue !== false) queueNotice(line);
+    return;
+  }
   const prepared = await prepareSpeech(line);
-  if (busy || !composer.hidden || currentVoice) return;
-  renderReply(line);
+  if (!canShowNotice()) {
+    if (options.enqueue !== false) queueNotice(line);
+    return;
+  }
+  setAssistantReply(line);
   addHistory("assistant", line);
   if (prepared) playPreparedSpeech(prepared);
 }
@@ -909,6 +1015,7 @@ function startAlarmPolling() {
   appendBootLog("settings loaded", "system");
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
+  if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     await prepareBootCharacter(info.characterId || "mugi");

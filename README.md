@@ -83,6 +83,7 @@ graph LR
 ## 🖱 使い方
 
 - フキダシをクリック: 入力欄を開く
+- フキダシ右上の小ボタン: 回答コピー・再読み上げ・停止・拡大
 - フキダシ右下のつまみをドラッグ: フキダシの幅・高さを変更（位置も含めて自動保存）
 - キャラクターをダブルクリック: フキダシを全画面表示／元に戻す（`Esc` でも解除）
 - 読み上げ中にキャラクターをクリック: 読み上げを停止
@@ -126,6 +127,7 @@ graph LR
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` は起動前に GPU 候補を判定 / `cpu` / `gpu` は明示指定） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
+| `PICOAGENT_TTS_VOLUME` | `100` | 音声 | キャラボイス再生音量（0〜100、保存後すぐ反映） |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
 
 #### 叩く AI（プロバイダ）
@@ -307,6 +309,7 @@ npm run build
 - **起動**: `PICOAGENT_TTS_ENABLED` が有効ならアプリ起動時に `127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）で裏起動します。旧既定の `10102` が保存済みなら起動時に `11436` へ移行します。アプリが起動した子プロセスは終了時に停止します。
 - **推論デバイス**: `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選べます。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記の AMD APU・表示アダプタ / Intel 系の表示アダプタを候補とし、候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動します（AMD CPU だけの環境は GPU 候補にしません）。固定したい場合は設定画面で明示指定します。
 - **話者（speaker ID）**: キャラクターごとに設定画面の「キャラクター」タブで指定でき、未指定なら共通の `PICOAGENT_TTS_SPEAKER` を使います。ただし `りん` は既定で AivisHub の「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`まい` は AivisHub の「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を使います。未導入なら起動シーケンスのローディング画面で AIVMX を AivisSpeech Engine へ追加し、合成時は `/speakers` から実際の style ID を解決します。
+- **音量**: `PICOAGENT_TTS_VOLUME`（0〜100）でフロント再生時のキャラボイス音量を調整します。設定保存後すぐ反映し、再生中の音声にも効きます。
 
 > [!NOTE]
 > 同梱 Aivis の初回起動はモデル確認や BERT 読み込みで数十秒かかることがあります。キャラクター固有の AivisHub 音声モデルは起動シーケンス中に「声を準備中…」として導入するため、導入待ちは通常画面ではなくローディング画面に集約されます。

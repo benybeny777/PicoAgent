@@ -151,7 +151,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 `PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。起動時・キャラクター変更時に吹き出しへ出る挨拶（`character.json` の `greeting`）も同じ経路で読み上げる。
 
 - 読み上げには同梱 Aivis だけを使い、接続先は `http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）とする。旧固定ポート `10102` が保存されている場合は起動時に旧既定扱いで `11436` へ移行する。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 AivisSpeech Engine を即 spawn する。設定画面で ON/OFF・デバイス・ポートを変更した場合は再起動対象（保存後に確認画面→再起動）とし、起動シーケンスで spawn する。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
-- フロントは `pet_speak` が返す WAV バイト列を `Blob` / `Audio` で再生するため、Tauri の CSP は `media-src 'self' blob: data:` を許可する。再生失敗時はエラー内容をステータスへ表示する。
+- フロントは `pet_speak` が返す WAV バイト列を `Blob` / `Audio` で再生するため、Tauri の CSP は `media-src 'self' blob: data:` を許可する。再生時は `PICOAGENT_TTS_VOLUME`（0〜100）を `Audio.volume` に反映し、設定保存後の `pet:ui` で再生中の音量も即時変更する。再生失敗時はエラー内容をステータスへ表示する。
 - 推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選ぶ。`gpu` は `--use_gpu`、`cpu` は `--no-use_gpu` で起動する。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを候補として、GPU 候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動する。AMD CPU だけの環境は GPU 候補にしない。CPU/GPU の明示指定は自動判定より優先する。設定画面で ON/OFF やデバイスを変更した場合は再起動して起動シーケンスで反映する。
 - 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。キャラクター固有の AivisHub モデル導入は `pet_prepare_voice_model` で事前に行い、未導入時の長い AIVMX ダウンロード待ちはローディング画面の「声を準備中…」に集約する。
 - 実行時ログはユーザーデータ配下の `PicoAgent/log/` にまとめる（Windows 例: `%APPDATA%\PicoAgent\log\`）。バックエンドのパニックは `std::panic::set_hook` で、フロントは大域 `error`/`unhandledrejection` ハンドラと `window.picoagent` の `invoke` ラッパ（握られたコマンドエラーも含む）で捕捉し、いずれも `app` ログへ記録する。アプリ本体とフロントのエラーは `app`、Aivis の stdout/stderr は `aivis`、同梱 llama-server の stdout/stderr は `engine` のログに追記する。ログは 1 日ごとに日付付きファイル（`app.<YYYY-MM-DD>.log` など。`log_paths::dated_name` が当日日付を挟む）へローテートし、保持期間は 1 週間（`LOG_RETAIN_DAYS=7`）。起動時に `prune_old_logs` で古い `.log` を削除し、長時間連続起動でも 1 日ごとのタイマーで掃除する。**会話履歴（`history-<キャラID>.json`）はログではないためローテーション・削除の対象に含めない。** Aivis プロセスが起動直後に終了した場合や ready 待ちがタイムアウトした場合は、当日の `aivis` ログの末尾をエラー文字列に含めてフロントへ返す。旧 `app_log_dir/aivis.log` または旧 `app_data_dir/log/aivis.log` がある場合は、新しい当日ファイルが未作成のときだけ初回に移行（コピー後に旧ファイルを削除）する。
@@ -299,6 +299,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` は起動前に GPU 候補を判定 / `cpu` / `gpu` は明示指定） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
+| `PICOAGENT_TTS_VOLUME` | `100` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映 |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B Instruct/約2.5GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
@@ -449,7 +450,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
 - フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_layout` で幅・高さ・再配置後の座標を設定へ永続化する。旧互換のため `pet_set_bubble_size` も残す。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを大きく広げる（`.bubble.fullscreen`）。**拡大してもキャラと被らないよう**、全画面フキダシは右側にキャラ分の幅を空けた左ペイン（`right:291px`）にし、キャラは右側にそのまま表示する。ドラッグでの拡大は、サイズをなるべく維持したままフキダシ座標を左上へ再配置してキャラクター矩形を避ける。座標移動だけでは避けられない大きさの場合のみ、左ペインまたは上ペインのうち表示面積が大きいほうへ最小限サイズを調整する。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
-- 入力欄は `Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。
+- 入力欄は `Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。フキダシ右上の `reply-actions` は回答コピー・再読み上げ・停止・全画面切替を提供する。
 - 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。`pet:reset` では履歴もクリアする。
 - `pet_init` はバックエンド文脈に復元済みの直近会話を `history` として返し、フロントは全画面フキダシの履歴表示へ反映する。読み上げ中にキャラクターをクリックすると現在の音声を停止する。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。

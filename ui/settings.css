@@ -104,6 +104,7 @@ main {
   margin-bottom: 4px;
 }
 .field input[type="text"],
+.field input[type="number"],
 .field input[type="password"],
 .field select,
 .field textarea {
