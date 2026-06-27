@@ -831,7 +831,7 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_MODEL", "")
         || changed_text("PICOAGENT_MODEL_URL", "")
         || changed_text("PICOAGENT_LOCAL_PORT", "11435")
-        || changed_text("PICOAGENT_LOCAL_CTX", "4096")
+        || changed_text("PICOAGENT_LOCAL_CTX", "8192")
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     state
