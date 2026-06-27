@@ -70,6 +70,8 @@ pub fn run() {
             if let Err(error) = log_paths::ensure_log_dir(app.handle()) {
                 eprintln!("ログディレクトリの作成に失敗しました: {error}");
             } else {
+                // 1 週間より古い日付のログを削除してから当日分を書き始める。
+                log_paths::prune_old_logs(app.handle());
                 log_paths::append_app_log(app.handle(), "PicoAgent を起動しました。");
             }
 
@@ -152,6 +154,19 @@ pub fn run() {
                             &handle,
                             &format!("同梱 Aivis の起動確認に失敗しました: {error}"),
                         );
+                    }
+                });
+            }
+            // 長時間連続起動でも保持期間を守れるよう、1 日ごとに古いログを掃除する。
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut tick =
+                        tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+                    tick.tick().await; // 初回分は起動時の掃除と重複するので捨てる。
+                    loop {
+                        tick.tick().await;
+                        log_paths::prune_old_logs(&handle);
                     }
                 });
             }
