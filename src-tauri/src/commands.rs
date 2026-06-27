@@ -655,6 +655,13 @@ const RIN_AIVIS_MODEL_UUID: &str = "4f281e78-eba6-495a-8e50-5c322d02b5b1";
 const RIN_AIVIS_SPEAKER_UUID: &str = "aa63d66e-92fe-499e-9e0d-15dad4a61d0d";
 const RIN_AIVIS_STYLE_NAME: &str = "ノーマル";
 
+// まい（AivisHub「まい」）。実 style ID は speaker_uuid から `/speakers` で解決し、
+// 下記はフォールバック。
+const MAI_AIVIS_SPEAKER: &str = "1431611904";
+const MAI_AIVIS_MODEL_UUID: &str = "e9339137-2ae3-4d41-9394-fb757a7e61e6";
+const MAI_AIVIS_SPEAKER_UUID: &str = "41b7785f-35cc-4089-a360-dd8a63da5e75";
+const MAI_AIVIS_STYLE_NAME: &str = "ノーマル";
+
 fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
     match character_id {
         "rin" => Some(TtsVoice {
@@ -662,6 +669,12 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
             speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
             style_name: Some(RIN_AIVIS_STYLE_NAME.to_string()),
+        }),
+        "mai" => Some(TtsVoice {
+            speaker: MAI_AIVIS_SPEAKER.to_string(),
+            model_uuid: Some(MAI_AIVIS_MODEL_UUID.to_string()),
+            speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
+            style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
         }),
         _ => None,
     }
