@@ -17,7 +17,7 @@ let characterSpeaker;
 let characterCatalog;
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
-const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
+const characterManifestCacheKey = "2026-06-27-rin-tsundere-v1";
 
 function errorDetail(error) {
   if (!error) return "";

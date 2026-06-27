@@ -10,8 +10,8 @@
   <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
     <section id="bootScreen" class="boot-screen" aria-live="polite" data-tauri-drag-region>
       <div class="boot-stage">
-        <div class="boot-mugi">
-          <img src="assets/characters/mugi/boot/sleeping.png" alt="起動を待つむぎ" draggable="false" />
+        <div class="boot-character">
+          <img id="bootPetImage" src="assets/characters/mugi/boot/sleeping.png" alt="起動を待つキャラクター" draggable="false" />
           <span class="boot-shadow" aria-hidden="true"></span>
         </div>
         <div class="boot-progress" aria-hidden="true"><span></span></div>
@@ -22,7 +22,7 @@
       <div id="historyLog" class="history-log" aria-label="会話履歴"></div>
       <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>
       <form id="composer" class="composer" hidden>
-        <textarea id="input" rows="2" placeholder="むぎに話しかける…"></textarea>
+        <textarea id="input" rows="2" placeholder="話しかける…"></textarea>
         <button type="submit" aria-label="送信">送る</button>
       </form>
       <div id="status" class="status"></div>

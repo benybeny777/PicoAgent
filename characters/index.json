@@ -1,6 +1,7 @@
 {
   "default": "mugi",
   "characters": [
-    { "id": "mugi", "name": "むぎ", "manifest": "mugi/character.json" }
+    { "id": "mugi", "name": "むぎ", "manifest": "mugi/character.json", "description": "明るく観察上手な小さな作業相棒。" },
+    { "id": "rin", "name": "りん", "manifest": "rin/character.json", "description": "口は強いけれど面倒見がいいツンデレ作業相棒。" }
   ]
 }

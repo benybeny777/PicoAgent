@@ -11,8 +11,8 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .pet-app.is-booting .character { visibility:hidden; }
 .boot-stage { position:relative; width:min(380px,calc(100vw - 36px)); min-height:300px; display:grid; place-items:center; align-content:center; padding:18px 18px 20px; border:1px solid rgba(71,52,76,.12); border-radius:20px; background:linear-gradient(180deg,rgba(255,253,248,.97),rgba(247,251,246,.94)); box-shadow:0 12px 28px rgba(42,31,46,.16); overflow:hidden; }
 .boot-stage::before { content:""; position:absolute; left:42px; right:42px; bottom:86px; height:24px; border-radius:50%; background:rgba(92,65,98,.1); filter:blur(4px); animation:boot-shadow 4.2s ease-in-out infinite; }
-.boot-mugi { position:relative; width:min(330px,calc(100vw - 72px)); height:218px; display:grid; place-items:center; transform-origin:48% 70%; animation:boot-sleep 4.2s ease-in-out infinite; }
-.boot-mugi img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 7px 5px rgba(37,25,43,.12)); pointer-events:none; }
+.boot-character { position:relative; width:min(330px,calc(100vw - 72px)); height:218px; display:grid; place-items:center; transform-origin:48% 70%; animation:boot-sleep 4.2s ease-in-out infinite; }
+.boot-character img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; filter:drop-shadow(0 7px 5px rgba(37,25,43,.12)); pointer-events:none; }
 .boot-shadow { position:absolute; z-index:1; left:30px; right:30px; bottom:28px; height:18px; border-radius:50%; background:rgba(72,53,82,.16); filter:blur(5px); }
 .boot-progress { position:relative; width:140px; height:4px; margin-top:4px; overflow:hidden; border-radius:999px; background:rgba(129,117,135,.16); }
 .boot-progress span { position:absolute; top:0; bottom:0; width:42%; border-radius:999px; background:linear-gradient(90deg,#f27e91,#64c99b); animation:boot-progress 1.55s ease-in-out infinite; }
@@ -74,4 +74,4 @@ button { position:absolute; right:7px; bottom:7px; height:32px; padding:0 12px; 
 .bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
 .bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .status { flex:0 0 auto; min-height:14px; margin-top:6px; color:var(--muted); font-size:9px; }
-@media (prefers-reduced-motion:reduce) { .character img,.boot-mugi,.boot-stage::before,.boot-progress span { animation:none!important; } }
+@media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span { animation:none!important; } }

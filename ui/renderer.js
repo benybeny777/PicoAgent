@@ -6,6 +6,7 @@ const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const status = document.getElementById("status");
 const bootStatus = document.getElementById("bootStatus");
+const bootPetImage = document.getElementById("bootPetImage");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
@@ -43,10 +44,11 @@ window.addEventListener("unhandledrejection", event => {
   logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
 });
 
-const characterManifestCacheKey = "2026-06-25-mugi-expression-v11";
+const characterManifestCacheKey = "2026-06-27-rin-tsundere-v1";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
+let bootCharacterName = "キャラクター";
 let loadedCharacterSignature = "";
 let animations = {
   idle: { path: "animations/idle", frames: 6, fps: 3.6, motion: "breathe" },
@@ -72,6 +74,34 @@ function frameUrl(name, index) {
   return characterAssetVersion ? `${url}?v=${encodeURIComponent(characterAssetVersion)}` : url;
 }
 
+function versionedAssetUrl(url, version) {
+  return version ? `${url}?v=${encodeURIComponent(version)}` : url;
+}
+
+async function loadCharacterManifest(characterId) {
+  const catalogResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
+  if (!catalogResponse.ok) throw new Error(`キャラクター一覧: HTTP ${catalogResponse.status}`);
+  const catalog = await catalogResponse.json();
+  const entry = catalog.characters.find(character => character.id === characterId)
+    || catalog.characters.find(character => character.id === catalog.default);
+  if (!entry) throw new Error("利用できるキャラクターがありません");
+  const root = `assets/characters/${entry.manifest.replace(/\/character\.json$/, "")}`;
+  const manifestResponse = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
+  if (!manifestResponse.ok) throw new Error(`キャラクター定義: HTTP ${manifestResponse.status}`);
+  const manifest = await manifestResponse.json();
+  return { entry, manifest, root };
+}
+
+async function prepareBootCharacter(characterId) {
+  if (!bootPetImage) return;
+  const { manifest, root } = await loadCharacterManifest(characterId);
+  const version = String(manifest.assetVersion || "");
+  const bootPath = manifest.boot?.sleeping || `${manifest.animations?.idle?.path || "animations/idle"}/00.png`;
+  bootPetImage.src = versionedAssetUrl(`${root}/${bootPath}`, version);
+  bootPetImage.alt = `起動を待つ${manifest.name || "キャラクター"}`;
+  bootCharacterName = manifest.name || "キャラクター";
+}
+
 function preloadAnimations() {
  for (const [name, animation] of Object.entries(animations)) {
   for (let index = 0; index < animation.frames; index += 1) {
@@ -95,21 +125,13 @@ function personaText(manifest, override) {
 }
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
-  const catalogResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
-  if (!catalogResponse.ok) throw new Error(`キャラクター一覧: HTTP ${catalogResponse.status}`);
-  const catalog = await catalogResponse.json();
-  const entry = catalog.characters.find(character => character.id === characterId)
-    || catalog.characters.find(character => character.id === catalog.default);
-  if (!entry) throw new Error("利用できるキャラクターがありません");
-  const manifestResponse = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
-  if (!manifestResponse.ok) throw new Error(`キャラクター定義: HTTP ${manifestResponse.status}`);
-  const manifest = await manifestResponse.json();
+  const { manifest, root } = await loadCharacterManifest(characterId);
   if (!manifest.animations?.idle) throw new Error("idle アニメーションが定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const signature = `${manifest.id}\n${assetVersion}\n${profile}`;
   if (signature === loadedCharacterSignature) return;
-  characterRoot = `assets/characters/${entry.manifest.replace(/\/character\.json$/, "")}`;
+  characterRoot = root;
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
   animations = manifest.animations;
@@ -426,7 +448,7 @@ function applyEngineStatus(s) {
     online.dataset.up = true;
     if (petApp.classList.contains("is-booting")) {
       status.textContent = "";
-      if (bootStatus) bootStatus.textContent = "むぎを起こしているよ…";
+      if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
     } else {
       setStatus("準備ができたよ。");
       setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
@@ -633,6 +655,11 @@ function startAlarmPolling() {
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
   applyBubbleSize(info.bubbleWidth, info.bubbleHeight);
+  try {
+    await prepareBootCharacter(info.characterId || "mugi");
+  } catch (error) {
+    logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
+  }
   await waitForAivisReady();
   let preparedGreeting = null;
   try {
@@ -654,7 +681,7 @@ function startAlarmPolling() {
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
-    if (!status.textContent) setStatus("むぎを起こしているよ…");
+    if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
     petApp.classList.remove("is-booting");
     if (preparedGreeting) playPreparedSpeech(preparedGreeting);
   }
