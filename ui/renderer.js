@@ -7,6 +7,7 @@ const input = document.getElementById("input");
 const status = document.getElementById("status");
 const bootStatus = document.getElementById("bootStatus");
 const bootPetImage = document.getElementById("bootPetImage");
+const sendButton = document.getElementById("sendButton");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
@@ -42,6 +43,12 @@ window.addEventListener("error", event => {
 });
 window.addEventListener("unhandledrejection", event => {
   logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
+});
+window.addEventListener("beforeunload", () => {
+  if (chatterTimer) clearTimeout(chatterTimer);
+  if (dailyTimer) clearInterval(dailyTimer);
+  if (alarmTimer) clearInterval(alarmTimer);
+  stopVoice(false);
 });
 
 const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
@@ -171,8 +178,27 @@ function animate(now) {
 }
 requestAnimationFrame(animate);
 
-function openComposer() { if (busy) return; composer.hidden = false; reply.classList.add("compact"); input.focus(); scheduleChatter(); }
-function closeComposer() { composer.hidden = true; reply.classList.remove("compact"); }
+function autosizeInput() {
+  input.style.height = "auto";
+  input.style.height = `${Math.min(180, Math.max(62, input.scrollHeight))}px`;
+}
+function updateComposerState() {
+  if (sendButton) sendButton.disabled = busy || !input.value.trim();
+}
+function openComposer() {
+  if (busy) return;
+  composer.hidden = false;
+  reply.classList.add("compact");
+  autosizeInput();
+  updateComposerState();
+  input.focus();
+  scheduleChatter();
+}
+function closeComposer() {
+  composer.hidden = true;
+  reply.classList.remove("compact");
+  updateComposerState();
+}
 
 // ダブルクリックでウィンドウをフルスクリーン化し、その中でフキダシを大きく広げる／元に戻すトグル。
 async function setBubbleFullscreen(on) {
@@ -357,7 +383,11 @@ bubble.addEventListener("dblclick", event => {
   if (event.target.closest("button,a,textarea,.bubble-resize")) return;
   toggleBubbleFullscreen();
 });
-document.addEventListener("contextmenu", event => { event.preventDefault(); window.picoagent.menu(); });
+document.addEventListener("contextmenu", event => {
+  if (event.target instanceof Element && event.target.closest("textarea,a,.reply,.history-log")) return;
+  event.preventDefault();
+  window.picoagent.menu();
+});
 
 // 右下のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
 let resizeStart = null;
@@ -446,37 +476,67 @@ async function finishBubbleResize(event) {
   if (bubbleResize.hasPointerCapture(event.pointerId)) bubbleResize.releasePointerCapture(event.pointerId);
   const rect = bubble.getBoundingClientRect();
   try {
-    await window.picoagent.setBubbleSize(Math.round(rect.width), Math.round(rect.height));
+    await window.picoagent.setBubbleLayout(
+      Math.round(rect.width),
+      Math.round(rect.height),
+      Math.round(bubble.offsetLeft),
+      Math.round(bubble.offsetTop),
+    );
   } catch (error) {
-    status.textContent = `サイズを保存できませんでした: ${error}`;
+    status.textContent = `フキダシ位置を保存できませんでした: ${error}`;
   }
 }
 bubbleResize.addEventListener("pointerup", finishBubbleResize);
 bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 
 composer.addEventListener("submit", async event => {
-  event.preventDefault(); const text = input.value.trim(); if (!text || busy) return;
+  event.preventDefault();
+  const text = input.value.trim();
+  if (!text || busy) return;
   clearAlarmSnooze(false);
-  busy = true; closeComposer(); input.value = ""; status.textContent = "Web検索して考え中…"; setAnimation("thinking"); reply.textContent = text; addHistory("user", text);
-  const result = await window.picoagent.send(text);
-  status.textContent = result.error ? "接続を確認してね" : "";
-  if (result.error) {
-    logApp("error", "AI応答がエラーを返しました", result.reply || "");
+  busy = true;
+  updateComposerState();
+  closeComposer();
+  input.value = "";
+  autosizeInput();
+  status.textContent = "考え中…";
+  setAnimation("thinking");
+  reply.textContent = text;
+  addHistory("user", text);
+  try {
+    const result = await window.picoagent.send(text);
+    status.textContent = result.error ? "接続を確認してね" : "";
+    if (result.error) {
+      logApp("error", "AI応答がエラーを返しました", result.reply || "");
+      ++speakingToken;
+      stopVoice();
+      renderReply(result.reply);
+      addHistory("assistant", result.reply);
+      setAnimation("sad");
+      setTimeout(() => setAnimation("idle"), 2200);
+    } else {
+      // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
+      if (String(result.reply ?? "").trim() !== text) speakReply(result.reply);
+      await renderReplySpeaking(result.reply);
+      addHistory("assistant", result.reply);
+    }
+  } catch (error) {
+    logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
     ++speakingToken;
     stopVoice();
-    renderReply(result.reply);
-    addHistory("assistant", result.reply);
+    const message = `応答に失敗しました: ${error?.message || error}`;
+    renderReply(message);
+    addHistory("assistant", message);
+    status.textContent = "接続を確認してね";
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
-  } else {
-    // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
-    if (String(result.reply ?? "").trim() !== text) speakReply(result.reply);
-    await renderReplySpeaking(result.reply);
-    addHistory("assistant", result.reply);
+  } finally {
+    busy = false;
+    updateComposerState();
+    scheduleChatter(); // 会話後はアイドル計測をやり直す。
   }
-  busy = false;
-  scheduleChatter(); // 会話後はアイドル計測をやり直す。
 });
+input.addEventListener("input", () => { autosizeInput(); updateComposerState(); });
 input.addEventListener("keydown", event => { if (event.key === "Escape") closeComposer(); if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); composer.requestSubmit(); } });
 document.addEventListener("keydown", event => { if (event.key === "Escape") exitBubbleFullscreen(); });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
@@ -521,18 +581,22 @@ function applyFontPx(px) {
   input.style.fontSize = `${n}px`;
   status.style.fontSize = `${Math.max(9, Math.round(n * 0.72))}px`;
 }
-function applyBubbleSize(width, height) {
+function applyBubbleLayout(width, height, left, top) {
   const w = parseFloat(width);
   const h = parseFloat(height);
+  const x = parseFloat(left);
+  const y = parseFloat(top);
   if (Number.isFinite(w) && w >= 180) bubble.style.width = `${w}px`;
   if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
+  if (Number.isFinite(x) && x >= 0) bubble.style.left = `${x}px`;
+  if (Number.isFinite(y) && y >= 0) bubble.style.top = `${y}px`;
   repositionBubbleToAvoidCharacter();
 }
 window.addEventListener("resize", repositionBubbleToAvoidCharacter);
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
-  applyBubbleSize(ui.bubbleWidth, ui.bubbleHeight);
+  applyBubbleLayout(ui.bubbleWidth, ui.bubbleHeight, ui.bubbleLeft, ui.bubbleTop);
   if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
     logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
     status.textContent = `キャラクター変更に失敗: ${error.message}`;
@@ -747,7 +811,7 @@ function startAlarmPolling() {
   const info = await window.picoagent.init();
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
-  applyBubbleSize(info.bubbleWidth, info.bubbleHeight);
+  applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     await prepareBootCharacter(info.characterId || "mugi");
   } catch (error) {

@@ -288,6 +288,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 内部UI | フキダシ右下のドラッグで自動保存する幅(px)。設定画面には出さず `pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 内部UI | フキダシ右下のドラッグで自動保存する高さ(px)。設定画面には出さず `pet:ui` で即反映 |
+| `PICOAGENT_BUBBLE_LEFT_PX` | 自動 | 内部UI | フキダシ右下のドラッグ後、キャラクターを避けるため再配置した left(px)。設定画面には出さず `pet:ui` で即反映 |
+| `PICOAGENT_BUBBLE_TOP_PX` | 自動 | 内部UI | フキダシ右下のドラッグ後、キャラクターを避けるため再配置した top(px)。設定画面には出さず `pet:ui` で即反映 |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリに保持する最大件数（10〜200） |
@@ -445,8 +447,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - フロント（`ui/`）は Vite 等のバンドラを使わず、Tauri の静的 `frontendDist` で配信。`withGlobalTauri:true` で
   `window.__TAURI__` を有効化し、`ui/picoagent.js` が旧 `window.picoagent`（init/send/menu/on/settings.*）を再現する。
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
-- フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_size` で設定へ永続化する。
+- フキダシ右下のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_layout` で幅・高さ・再配置後の座標を設定へ永続化する。旧互換のため `pet_set_bubble_size` も残す。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを大きく広げる（`.bubble.fullscreen`）。**拡大してもキャラと被らないよう**、全画面フキダシは右側にキャラ分の幅を空けた左ペイン（`right:291px`）にし、キャラは右側にそのまま表示する。ドラッグでの拡大は、サイズをなるべく維持したままフキダシ座標を左上へ再配置してキャラクター矩形を避ける。座標移動だけでは避けられない大きさの場合のみ、左ペインまたは上ペインのうち表示面積が大きいほうへ最小限サイズを調整する。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
+- 入力欄は `Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。
 - 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。`pet:reset` では履歴もクリアする。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
 - アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。さらに `npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行し、前回の残存プロセスを停止して同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。起動・アプリ・フロント・音声・エンジンログは `PicoAgent/log/` に日付付き（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）で集約し、1 日ごとにローテート・1 週間保持する（履歴は対象外）。

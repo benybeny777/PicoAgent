@@ -40,6 +40,7 @@ window.picoagent = {
     catch (error) { logInvokeError("setFullscreen", error); throw error; }
   },
   setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
+  setBubbleLayout: (width, height, left, top) => call("pet_set_bubble_layout", { width, height, left, top }),
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {

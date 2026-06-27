@@ -186,6 +186,8 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
         "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
         "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
+        "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),
+        "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
         "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
@@ -313,6 +315,43 @@ pub fn pet_set_bubble_size(
     patch.insert(
         "PICOAGENT_BUBBLE_HEIGHT_PX".to_string(),
         json!(height.to_string()),
+    );
+    state
+        .config
+        .set_all(patch)
+        .map_err(|error| error.to_string())?;
+    Ok(json!({ "ok": true }))
+}
+
+/// ドラッグで確定したフキダシのサイズと座標を設定の正本へ保存する。
+#[tauri::command]
+pub fn pet_set_bubble_layout(
+    width: u32,
+    height: u32,
+    left: u32,
+    top: u32,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    if !(180..=2000).contains(&width) || !(92..=1400).contains(&height) || left > 2000 || top > 1400
+    {
+        return Err("フキダシの表示位置またはサイズが許可範囲外です。".to_string());
+    }
+    let mut patch = Map::new();
+    patch.insert(
+        "PICOAGENT_BUBBLE_WIDTH_PX".to_string(),
+        json!(width.to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_BUBBLE_HEIGHT_PX".to_string(),
+        json!(height.to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_BUBBLE_LEFT_PX".to_string(),
+        json!(left.to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_BUBBLE_TOP_PX".to_string(),
+        json!(top.to_string()),
     );
     state
         .config
@@ -989,6 +1028,8 @@ pub async fn settings_save(
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
             "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
             "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
+            "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),
+            "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
             "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
             "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
             "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),

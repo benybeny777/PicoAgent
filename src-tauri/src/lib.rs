@@ -41,6 +41,7 @@ pub fn run() {
             commands::aivis_status,
             commands::pet_prepare_voice_model,
             commands::pet_set_bubble_size,
+            commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
             commands::settings_load,
             commands::settings_list_models,
