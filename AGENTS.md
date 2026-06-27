@@ -84,9 +84,10 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
 | `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
 | `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
+| `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
-| `characters/` | キャラクター正本（一覧 `index.json`・人格定義・連番フレーム） |
+| `characters/` | キャラクター正本（一覧 `index.json`・人格定義・レイヤー・連番フレーム・ローディング画像）。画像準備手順は `characters/README.md` |
 | `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
 | `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
 | `ui/index.html` / `renderer.js` / `styles.css` | ペット UI |

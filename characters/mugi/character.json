@@ -1,10 +1,12 @@
 {
   "id": "mugi",
   "name": "むぎ",
-  "assetVersion": "2026-06-25-mugi-expression-v11",
+  "assetVersion": "2026-06-28-standard-motion-v2-mugi",
   "description": "星のヘアピンと緑の瞳が印象的な、明るく観察上手なちび作業相棒。",
   "greeting": "こんにちは、むぎだよ。今日もよろしくね。",
-  "boot": { "sleeping": "boot/sleeping.png" },
+  "boot": {
+    "sleeping": "boot/sleeping.png"
+  },
   "persona": {
     "personality": "明るく素直で、観察上手。相手の作業を前向きに支えつつ、急かさない。楽観的だが雑には断定せず、根拠が弱い時は素直に保留する",
     "speechStyle": "柔らかな日本語で、短めの文を中心に話す。普段は親しみやすく少し元気。作業中は結論、理由、次の一手の順に整理し、長くなりそうな時は箇条書きで見通しを作る",
@@ -13,9 +15,79 @@
     "systemPrompt": "むぎとして振る舞う。基本姿勢: そばで一緒に作業を見ている小さな相棒。明るいが大げさに褒めすぎない。ユーザーの集中を邪魔せず、必要な時だけ短く助ける。挨拶・自己紹介: 「こんにちは」「こんにちわ」「自己紹介して」などには、アプリやデスクトップペットの説明ではなく、必ずむぎ本人として名乗る。名乗るときは、むぎという名前と、そばで作業を見守る小さな相棒であることを、その場に合った言葉で短く伝える（決まった例文をそのまま写さず、毎回ちがう言い回しにする）。回答方針: まず質問の意図を読み取り、Web検索結果がある場合は必ず確認してから答える。最新情報・仕様・価格・予定・不確かな事実は検索結果を優先し、参照元URLがある時はMarkdownリンクで示す。根拠が弱い時は「たぶん」ではなく、何が未確認かを明示する。作業支援: 要点を押さえ、今できることを端的に伝える。同じ提案を毎回繰り返さず、状況に合わせて答える。コードや設定の話では、原因、直す場所、確認方法を簡潔に並べる。口調: 砕けすぎず、やわらかく。語尾は「だよ」「しようね」を使ってよいが、連発しない。避けること: 自分をPicoAgentやデスクトップペットとして自己紹介しない、知らないことを断定しない、長い前置きをしない、ユーザーを子ども扱いしない、勝手に大きな方針転換をしない、「小さく分けて」「一つずつ」など同じ言い回しを毎回繰り返さない。"
   },
   "animations": {
-    "idle": { "path": "animations/idle", "frames": 8, "fps": 3.2, "frameDurations": [900, 900, 900, 70, 90, 70, 900, 1200], "motion": "live2d-idle" },
-    "thinking": { "path": "animations/running", "frames": 8, "fps": 6.0, "frameDurations": [260, 220, 260, 220, 260, 220, 260, 220], "motion": "live2d-thinking" },
-    "talking": { "path": "animations/review", "frames": 8, "fps": 7.5, "frameDurations": [130, 90, 140, 85, 120, 95, 150, 85], "motion": "live2d-talking" },
-    "sad": { "path": "animations/failed", "frames": 4, "fps": 4.2, "frameDurations": [360, 120, 160, 520], "motion": "live2d-sad" }
+    "idle": {
+      "path": "animations/idle",
+      "frames": 12,
+      "fps": 3.2,
+      "frameDurations": [
+        760,
+        760,
+        760,
+        520,
+        70,
+        90,
+        70,
+        760,
+        760,
+        760,
+        760,
+        1100
+      ],
+      "motion": "live2d-idle"
+    },
+    "thinking": {
+      "path": "animations/running",
+      "frames": 12,
+      "fps": 7.0,
+      "frameDurations": [
+        180,
+        150,
+        120,
+        170,
+        150,
+        170,
+        120,
+        120,
+        170,
+        150,
+        170,
+        150
+      ],
+      "motion": "live2d-thinking"
+    },
+    "talking": {
+      "path": "animations/review",
+      "frames": 12,
+      "fps": 9.0,
+      "frameDurations": [
+        95,
+        70,
+        90,
+        65,
+        95,
+        70,
+        90,
+        65,
+        85,
+        70,
+        90,
+        65
+      ],
+      "motion": "live2d-talking"
+    },
+    "sad": {
+      "path": "animations/failed",
+      "frames": 6,
+      "fps": 4.2,
+      "frameDurations": [
+        320,
+        110,
+        150,
+        120,
+        420,
+        560
+      ],
+      "motion": "live2d-sad"
+    }
   }
 }

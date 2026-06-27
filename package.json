@@ -5,6 +5,7 @@
   "scripts": {
     "setup:engine": "node scripts/fetch-engine.mjs",
     "setup:aivis": "node scripts/fetch-aivis.mjs",
+    "build:character-animations": "python scripts/build-character-animations.py",
     "sync:characters": "node scripts/sync-characters.mjs",
     "stop": "node scripts/stop-stale.mjs",
     "dev": "node scripts/stop-stale.mjs && node scripts/sync-characters.mjs && node scripts/fetch-engine.mjs && node scripts/fetch-aivis.mjs && tauri dev",

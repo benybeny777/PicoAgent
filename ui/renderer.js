@@ -44,7 +44,7 @@ window.addEventListener("unhandledrejection", event => {
   logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
 });
 
-const characterManifestCacheKey = "2026-06-28-character-expression-v9";
+const characterManifestCacheKey = "2026-06-28-standard-motion-v2";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";

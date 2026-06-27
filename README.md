@@ -345,7 +345,7 @@ npm run build
 │       ├── config.rs / agent.rs / message.rs
 │       ├── providers/   ← 叩く AI コネクタ（.rs を足すと自動登録）
 │       └── tools/mod.rs ← スキルの Tool トレイト・レジストリ本体
-├── scripts/             ← fetch-engine.mjs / sync-characters.mjs
+├── scripts/             ← fetch-engine.mjs / sync-characters.mjs / build-character-animations.py
 ├── README.md / SPEC.md / CHANGELOG.md / AGENTS.md / CLAUDE.md
 ```
 

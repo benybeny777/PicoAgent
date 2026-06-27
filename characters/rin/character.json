@@ -1,7 +1,7 @@
 {
   "id": "rin",
   "name": "りん",
-  "assetVersion": "2026-06-28-rin-expression-v9",
+  "assetVersion": "2026-06-28-standard-motion-v2-rin",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
@@ -26,61 +26,75 @@
   "animations": {
     "idle": {
       "path": "animations/idle",
-      "frames": 8,
+      "frames": 12,
       "fps": 3.2,
       "frameDurations": [
-        900,
-        900,
-        900,
+        760,
+        760,
+        760,
+        520,
         70,
         90,
         70,
-        900,
-        1200
+        760,
+        760,
+        760,
+        760,
+        1100
       ],
       "motion": "live2d-idle"
     },
     "thinking": {
       "path": "animations/running",
-      "frames": 8,
-      "fps": 6.0,
+      "frames": 12,
+      "fps": 7.0,
       "frameDurations": [
-        260,
-        220,
-        260,
-        220,
-        260,
-        220,
-        260,
-        220
+        180,
+        150,
+        120,
+        170,
+        150,
+        170,
+        120,
+        120,
+        170,
+        150,
+        170,
+        150
       ],
       "motion": "live2d-thinking"
     },
     "talking": {
       "path": "animations/review",
-      "frames": 8,
-      "fps": 7.5,
+      "frames": 12,
+      "fps": 9.0,
       "frameDurations": [
-        130,
-        90,
-        140,
-        85,
-        120,
         95,
-        150,
-        85
+        70,
+        90,
+        65,
+        95,
+        70,
+        90,
+        65,
+        85,
+        70,
+        90,
+        65
       ],
       "motion": "live2d-talking"
     },
     "sad": {
       "path": "animations/failed",
-      "frames": 4,
+      "frames": 6,
       "fps": 4.2,
       "frameDurations": [
-        360,
+        320,
+        110,
+        150,
         120,
-        160,
-        520
+        420,
+        560
       ],
       "motion": "live2d-sad"
     }
