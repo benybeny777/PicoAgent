@@ -972,12 +972,72 @@ pub async fn settings_save(
     Ok(json!({ "ok": true, "requiresRestart": requires_restart, "up": current_up(&state).await }))
 }
 
-/// 設定反映のためにアプリを再起動する。重い反映（モデル DL・エンジン/Aivis 起動・
+/// 設定反映のための再起動相当処理。重い反映（モデル DL・エンジン/Aivis 起動・
 /// キャラ読込）を起動シーケンス（ローディング画面）でまとめて行うための共通入口。
+///
+/// プロセスの再起動（`app.restart()`）は `tauri dev` の開発配信サーバが落ちて
+/// `127.0.0.1` 接続拒否になるため使わない。代わりに「バックエンドを起動シーケンス
+/// 相当に再初期化」してから、メインウィンドウへ `pet:reload` を送り webview を
+/// 再読込させる。これで dev / 配布版どちらでも同じ挙動になる。
 #[tauri::command]
-pub fn restart_app(app: AppHandle) {
-    crate::log_paths::append_app_log(&app, "設定反映のため再起動します。");
-    app.restart();
+pub fn restart_app(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+    crate::log_paths::append_app_log(&app, "設定反映のため再初期化します。");
+    // エンジン/Aivis を止めて設定から作り直す。
+    crate::engine::stop(&app);
+    aivis::stop(&app);
+
+    let pid = state.config.get("PICOAGENT_PROVIDER", "local");
+    *state.provider_id.lock().unwrap() = pid.clone();
+    let model = {
+        let m = state.config.get("PICOAGENT_MODEL", "");
+        if m.is_empty() {
+            providers::get(&pid)
+                .map(|p| p.default_model(&state.config))
+                .unwrap_or_default()
+        } else {
+            m
+        }
+    };
+    *state.model.lock().unwrap() = model;
+    *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
+
+    // 選択中キャラの履歴を文脈へ読み込み直す（旧キャラの会話は持ち越さない）。
+    let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+    *state.character_id.lock().unwrap() = character_id.clone();
+    state.clear_conversation();
+    let recent = crate::history::load_recent(&app, &character_id);
+    if !recent.is_empty() {
+        state.messages.lock().unwrap().extend(recent);
+    }
+
+    // 同梱エンジン / Aivis を必要に応じて起動シーケンス相当で立ち上げ直す。
+    if pid == "local" {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
+    }
+    if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+        let handle = app.clone();
+        if let Err(error) = aivis::start_background(&handle) {
+            crate::log_paths::append_app_log(
+                &handle,
+                &format!("再初期化後の同梱 Aivis 起動に失敗しました: {error}"),
+            );
+        }
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = aivis::ensure_started(&handle).await {
+                crate::log_paths::append_app_log(
+                    &handle,
+                    &format!("再初期化後の同梱 Aivis 起動確認に失敗しました: {error}"),
+                );
+            }
+        });
+    }
+
+    // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit("pet:reload", ());
+    }
+    Ok(json!({ "ok": true }))
 }
 
 /// 同梱エンジンの現在状態（download/starting/ready/error）を返す。

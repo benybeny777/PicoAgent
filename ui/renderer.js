@@ -462,6 +462,8 @@ function applyEngineStatus(s) {
   }
 }
 window.picoagent.on("engine:status", applyEngineStatus);
+// 設定反映（再起動相当）の合図。webview を読み込み直して起動シーケンスを再実行する。
+window.picoagent.on("pet:reload", () => window.location.reload());
 
 // フキダシの文字サイズを適用する（小さくて見えない問題への対応。設定で変更可能）。
 function applyFontPx(px) {

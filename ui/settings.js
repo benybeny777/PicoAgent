@@ -609,11 +609,12 @@ saveBtn.addEventListener("click", async () => {
     if (res.requiresRestart) {
       const restartNow = await confirmRestart();
       if (restartNow) {
-        statusEl.textContent = "再起動しています…";
-        await window.picoagent.restartApp();
-        return; // 再起動するので以降の処理は不要。
+        statusEl.textContent = "反映のため再起動しています…";
+        await window.picoagent.restartApp(); // メイン側が起動シーケンスを再実行する。
+        statusEl.textContent = "反映しました（起動画面で再読み込み中）";
+      } else {
+        statusEl.textContent = "保存しました（次回の起動時に反映されます）";
       }
-      statusEl.textContent = "保存しました（次回の起動時に反映されます）";
     } else {
       statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
     }
