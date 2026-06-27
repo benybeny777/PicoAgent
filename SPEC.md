@@ -144,7 +144,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
      `/health` が 200 になったら `engine:status {phase:"ready"}`。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
 - 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（small/balanced/large/qwen3）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
-- 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。
+- 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。選択中キャラクターの AivisHub 音声モデル導入は `pet_prepare_voice_model` command で起動シーケンス中に明示実行する。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
 
@@ -153,12 +153,12 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - 読み上げには同梱 Aivis だけを使い、接続先は `http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）とする。旧固定ポート `10102` が保存されている場合は起動時に旧既定扱いで `11436` へ移行する。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 AivisSpeech Engine を即 spawn する。設定画面で ON/OFF・デバイス・ポートを変更した場合は再起動対象（保存後に確認画面→再起動）とし、起動シーケンスで spawn する。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
 - フロントは `pet_speak` が返す WAV バイト列を `Blob` / `Audio` で再生するため、Tauri の CSP は `media-src 'self' blob: data:` を許可する。再生失敗時はエラー内容をステータスへ表示する。
 - 推論デバイスは `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選ぶ。`gpu` は `--use_gpu`、`cpu` は `--no-use_gpu` で起動する。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを候補として、GPU 候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動する。AMD CPU だけの環境は GPU 候補にしない。CPU/GPU の明示指定は自動判定より優先する。設定画面で ON/OFF やデバイスを変更した場合は再起動して起動シーケンスで反映する。
-- 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。
+- 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。キャラクター固有の AivisHub モデル導入は `pet_prepare_voice_model` で事前に行い、未導入時の長い AIVMX ダウンロード待ちはローディング画面の「声を準備中…」に集約する。
 - 実行時ログはユーザーデータ配下の `PicoAgent/log/` にまとめる（Windows 例: `%APPDATA%\PicoAgent\log\`）。バックエンドのパニックは `std::panic::set_hook` で、フロントは大域 `error`/`unhandledrejection` ハンドラと `window.picoagent` の `invoke` ラッパ（握られたコマンドエラーも含む）で捕捉し、いずれも `app` ログへ記録する。アプリ本体とフロントのエラーは `app`、Aivis の stdout/stderr は `aivis`、同梱 llama-server の stdout/stderr は `engine` のログに追記する。ログは 1 日ごとに日付付きファイル（`app.<YYYY-MM-DD>.log` など。`log_paths::dated_name` が当日日付を挟む）へローテートし、保持期間は 1 週間（`LOG_RETAIN_DAYS=7`）。起動時に `prune_old_logs` で古い `.log` を削除し、長時間連続起動でも 1 日ごとのタイマーで掃除する。**会話履歴（`history-<キャラID>.json`）はログではないためローテーション・削除の対象に含めない。** Aivis プロセスが起動直後に終了した場合や ready 待ちがタイムアウトした場合は、当日の `aivis` ログの末尾をエラー文字列に含めてフロントへ返す。旧 `app_log_dir/aivis.log` または旧 `app_data_dir/log/aivis.log` がある場合は、新しい当日ファイルが未作成のときだけ初回に移行（コピー後に旧ファイルを削除）する。
-- 状態は `aivis_status` command（`{ enabled, up }`）で取得できる。TTS 有効時、フロントは Aivis が `up` になるまで**キャラ・フキダシを含む全 UI の描画を保留**する（`.pet-app.is-booting` で `visibility:hidden`）。待機中に挨拶を（非表示のまま）描画しつつ音声を事前合成（`prepareSpeech`）しておき、準備完了で `is-booting` を外して**描画した瞬間に挨拶を再生**する（`playPreparedSpeech`）。起動失敗で固まらないよう約120秒で諦めて描画する。TTS 無効時（`enabled=false`）は待たずに即描画する。
+- 状態は `aivis_status` command（`{ enabled, up }`）で取得できる。TTS 有効時、フロントは Aivis が `up` になるまで**キャラ・フキダシを含む全 UI の描画を保留**する（`.pet-app.is-booting` で `visibility:hidden`）。Aivis 応答後は `pet_prepare_voice_model` で選択中キャラクターの音声モデルを導入し、待機中に挨拶を（非表示のまま）描画しつつ音声を事前合成（`prepareSpeech`）しておき、準備完了で `is-booting` を外して**描画した瞬間に挨拶を再生**する（`playPreparedSpeech`）。起動失敗で固まらないよう約120秒で諦めて描画する。TTS 無効時（`enabled=false`）は待たずに即描画する。
 - 実行ファイルはユーザーデータ配下の `PicoAgent/bundled/aivis/` から起動する。同梱配置 `resources/bundled/aivis/` や旧同梱配置 `resources/aivis/` は起動元にせず、初回にユーザーデータ配下へコピーしてから使う。同梱配置の `run.exe` がユーザーデータ側より新しい場合は起動前に上書きコピーする。同梱配置は `npm run dev` / `npm run build` の起動前に、未取得なら `scripts/fetch-aivis.mjs` が公式 GitHub Releases から既定 `1.2.0` を取得する（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/bundled/**/*` を同梱対象にする。同梱 Aivis が見つからない場合、実行時にも同じ公式リリースを `PicoAgent/bundled/aivis/` へ自動取得して展開する（展開には `7z` / `7za` / `tar` のいずれかを使う）。旧 `app_data_dir/aivis/` または旧 `PicoAgent/aivis/` に取得済みの Aivis がある場合は、新しい `PicoAgent/bundled/aivis/` へ初回移行する。
 - PicoAgent が起動する Aivis 子プロセスには Windows で `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/` へ向ける環境変数を渡し、Aivis のモデル・辞書・キャッシュを PicoAgent のユーザーデータ配下に閉じ込める。
-- speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。例外として `rin` は AivisHub「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`mai` は AivisHub「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を既定声に使う（`default_character_tts_voice` で申告）。`pet_speak` は、話者 UUID が `/speakers` に無ければ `/aivm_models/install` へ AIVMX ダウンロード URL を渡してモデルを追加し、その後 `/speakers` から話者 UUID＋スタイル名で**実 style ID を実行時に解決**して合成する。global style ID はエンジンが導入時に算出するためハードコードせず（`character.json` の `styleId` と `RIN_AIVIS_SPEAKER` は解決失敗時のフォールバックに留める）。ユーザーが上書き設定で明示した speaker は実行時解決せずそのまま使う。
+- speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。例外として `rin` は AivisHub「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`mai` は AivisHub「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を既定声に使う（`default_character_tts_voice` で申告）。`pet_prepare_voice_model` と `pet_speak` は、話者 UUID が `/speakers` に無ければ `/aivm_models/install` へ AIVMX ダウンロード URL を渡してモデルを追加し、その後 `/speakers` から話者 UUID＋スタイル名で**実 style ID を実行時に解決**して合成する。global style ID はエンジンが導入時に算出するためハードコードせず（`character.json` の `styleId` と `RIN_AIVIS_SPEAKER` は解決失敗時のフォールバックに留める）。ユーザーが上書き設定で明示した speaker は実行時解決せずそのまま使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
 ---
@@ -297,7 +297,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（`auto` は起動前に GPU 候補を判定 / `cpu` / `gpu` は明示指定） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
-| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `sourceUrl` も保持） |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B Instruct/約2.5GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |

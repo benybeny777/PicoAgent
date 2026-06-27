@@ -39,6 +39,7 @@ pub fn run() {
             commands::pet_alarm_wake,
             commands::pet_speak,
             commands::aivis_status,
+            commands::pet_prepare_voice_model,
             commands::pet_set_bubble_size,
             commands::pet_set_character_profile,
             commands::settings_load,

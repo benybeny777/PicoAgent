@@ -44,7 +44,18 @@ pub fn port(app: &tauri::AppHandle, state: &AppState) -> u16 {
     let raw = state
         .config
         .get("PICOAGENT_TTS_PORT", &DEFAULT_PORT.to_string());
-    let port = raw.parse::<u16>().unwrap_or(DEFAULT_PORT);
+    let port = match raw.parse::<u16>() {
+        Ok(port) => port,
+        Err(error) => {
+            let _ = append_log(
+                app,
+                &format!(
+                    "Aivis ポート設定が不正なため既定値 {DEFAULT_PORT} を使います: {raw} ({error})"
+                ),
+            );
+            DEFAULT_PORT
+        }
+    };
     if port == LEGACY_DEFAULT_PORT {
         let next = DEFAULT_PORT.to_string();
         if let Err(error) = state.config.set_string("PICOAGENT_TTS_PORT", next.clone()) {
@@ -121,13 +132,17 @@ pub async fn ensure_model_installed(
         if speaker_uuid_available(endpoint, speaker_uuid).await? {
             append_log(
                 app,
-                &format!("Aivis モデル導入完了: model_uuid={model_uuid} speaker_uuid={speaker_uuid}"),
+                &format!(
+                    "Aivis モデル導入完了: model_uuid={model_uuid} speaker_uuid={speaker_uuid}"
+                ),
             )?;
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    anyhow::bail!("Aivis モデル導入後に speaker_uuid={speaker_uuid} が /speakers に見つかりません。");
+    anyhow::bail!(
+        "Aivis モデル導入後に speaker_uuid={speaker_uuid} が /speakers に見つかりません。"
+    );
 }
 
 /// `/speakers` を取得する。
@@ -140,13 +155,17 @@ async fn fetch_speakers(endpoint: &str) -> anyhow::Result<Vec<Value>> {
         anyhow::bail!("Aivis /speakers failed: HTTP {}", response.status());
     }
     let speakers: Value = response.json().await?;
-    Ok(speakers.as_array().cloned().unwrap_or_default())
+    speakers
+        .as_array()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("Aivis /speakers の応答形式が配列ではありません。"))
 }
 
 async fn speaker_uuid_available(endpoint: &str, speaker_uuid: &str) -> anyhow::Result<bool> {
-    Ok(fetch_speakers(endpoint).await?.iter().any(|speaker| {
-        speaker.get("speaker_uuid").and_then(Value::as_str) == Some(speaker_uuid)
-    }))
+    Ok(fetch_speakers(endpoint)
+        .await?
+        .iter()
+        .any(|speaker| speaker.get("speaker_uuid").and_then(Value::as_str) == Some(speaker_uuid)))
 }
 
 /// speaker_uuid（＋任意でスタイル名）から、合成に使う実 style ID を `/speakers` から解決する。
@@ -174,7 +193,9 @@ pub async fn resolve_style_id(
                 .find(|style| style.get("name").and_then(Value::as_str) == Some(name))
         })
         .or_else(|| styles.first())
-        .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能な style がありません。"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能な style がありません。")
+        })?;
     let id = style
         .get("id")
         .and_then(Value::as_i64)
@@ -860,6 +881,7 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
         Some(path) => {
             if let Some(resource) = resource_engine_path(app) {
                 if resource_is_newer(&resource, &path) {
+                    // フォールバック許可: 同梱リソース更新に失敗しても既存の実行時配置が使える場合は起動を優先する。
                     copy_resource_to_install(app)?.unwrap_or(path)
                 } else {
                     path

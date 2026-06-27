@@ -31,6 +31,7 @@ window.picoagent = {
   alarms: () => call("pet_alarms"),
   alarmWake: (id) => call("pet_alarm_wake", { id }),
   speak: (text) => call("pet_speak", { text }),
+  prepareVoiceModel: () => call("pet_prepare_voice_model"),
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
   aivisStatus: () => call("aivis_status"),
   // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。

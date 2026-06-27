@@ -44,7 +44,7 @@ window.addEventListener("unhandledrejection", event => {
   logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
 });
 
-const characterManifestCacheKey = "2026-06-27-rin-tsundere-v1";
+const characterManifestCacheKey = "2026-06-28-character-expression-v9";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
@@ -514,6 +514,28 @@ async function waitForAivisReady() {
   if (status.textContent === "音声エンジンを起動中…") setStatus("");
 }
 
+// 選択中キャラの AivisHub 音声モデルを、初回読み上げ前にローディング画面で導入する。
+async function prepareSelectedVoiceModel() {
+  const startedAt = Date.now();
+  let timer = null;
+  try {
+    setStatus(`${bootCharacterName}の声を準備中…`);
+    timer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      setStatus(`${bootCharacterName}の声を準備中… ${seconds}秒`);
+    }, 1000);
+    await window.picoagent.prepareVoiceModel();
+    if (timer) clearInterval(timer);
+    timer = null;
+    setStatus("");
+  } catch (error) {
+    if (timer) clearInterval(timer);
+    logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
+    setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
+    await new Promise(resolve => setTimeout(resolve, 2500));
+  }
+}
+
 // 同梱エンジン(local)のモデル DL・起動をローディング画面の間に終わらせる。
 // 通常時にフキダシへ「モデルを準備中…」を出さないため、ここで ready/error まで待つ。
 // DL は数 GB で時間がかかりうるので上限は長め（約30分）。error は即終了する。
@@ -683,6 +705,7 @@ function startAlarmPolling() {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
   await waitForAivisReady();
+  await prepareSelectedVoiceModel();
   // local プロバイダはモデル DL・エンジン起動もローディング画面の間に終わらせる。
   if ((info.providerId || "local") === "local") {
     try { await waitForEngineReady(); }

@@ -238,6 +238,24 @@ pub async fn aivis_status(app: AppHandle, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
+pub async fn pet_prepare_voice_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    if !state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+        return Ok(json!({ "enabled": false }));
+    }
+    aivis::ensure_started(&app)
+        .await
+        .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
+    let endpoint = aivis::endpoint(&app, &state);
+    let voice = effective_tts_voice(&state);
+    prepare_tts_voice_model(&app, &endpoint, &voice).await?;
+    let speaker = resolve_tts_speaker(&endpoint, voice).await;
+    Ok(json!({ "enabled": true, "ready": true, "speaker": speaker }))
+}
+
+#[tauri::command]
 pub fn pet_set_character_profile(
     character_id: String,
     profile: String,
@@ -718,6 +736,33 @@ fn effective_tts_voice(state: &AppState) -> TtsVoice {
     })
 }
 
+async fn prepare_tts_voice_model(
+    app: &AppHandle,
+    endpoint: &str,
+    voice: &TtsVoice,
+) -> Result<(), String> {
+    if let (Some(model_uuid), Some(speaker_uuid)) =
+        (voice.model_uuid.as_deref(), voice.speaker_uuid.as_deref())
+    {
+        aivis::ensure_model_installed(app, endpoint, model_uuid, speaker_uuid)
+            .await
+            .map_err(|error| log_command_error(app, "Aivis モデルの導入に失敗しました", error))?;
+    }
+    Ok(())
+}
+
+async fn resolve_tts_speaker(endpoint: &str, voice: TtsVoice) -> String {
+    match voice.speaker_uuid.as_deref() {
+        Some(speaker_uuid) => {
+            aivis::resolve_style_id(endpoint, speaker_uuid, voice.style_name.as_deref())
+                .await
+                // フォールバック許可: 既存環境の手動 style ID 指定を尊重し、解決失敗時も合成 API 側のエラーを返せるようにする。
+                .unwrap_or(voice.speaker)
+        }
+        None => voice.speaker,
+    }
+}
+
 #[tauri::command]
 pub async fn pet_speak(
     text: String,
@@ -736,24 +781,11 @@ pub async fn pet_speak(
         .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
     let endpoint = aivis::endpoint(&app, &state);
     let voice = effective_tts_voice(&state);
-    // AivisHub モデル指定があり未導入なら導入する（導入確認は speaker_uuid で行う）。
-    if let (Some(model_uuid), Some(speaker_uuid)) =
-        (voice.model_uuid.as_deref(), voice.speaker_uuid.as_deref())
-    {
-        aivis::ensure_model_installed(&app, &endpoint, model_uuid, speaker_uuid)
-            .await
-            .map_err(|error| log_command_error(&app, "Aivis モデルの導入に失敗しました", error))?;
-    }
+    // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
+    prepare_tts_voice_model(&app, &endpoint, &voice).await?;
     // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
     // 解決できなければ設定値の style ID を使う。
-    let speaker = match voice.speaker_uuid.as_deref() {
-        Some(speaker_uuid) => {
-            aivis::resolve_style_id(&endpoint, speaker_uuid, voice.style_name.as_deref())
-                .await
-                .unwrap_or(voice.speaker)
-        }
-        None => voice.speaker,
-    };
+    let speaker = resolve_tts_speaker(&endpoint, voice).await;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()
@@ -870,7 +902,10 @@ pub async fn settings_list_models(
 ) -> Result<Vec<String>, String> {
     let pid = id.unwrap_or_else(|| state.provider_id.lock().unwrap().clone());
     match providers::get(&pid) {
-        Some(p) => Ok(p.list_models(&state.config).await.unwrap_or_default()),
+        Some(p) => p
+            .list_models(&state.config)
+            .await
+            .map_err(|error| format!("モデル一覧を取得できませんでした: {error}")),
         None => Ok(Vec::new()),
     }
 }

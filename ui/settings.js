@@ -366,10 +366,14 @@ function saveCurrentCharacterVoice(id) {
   if (!speaker || speaker === String(defaultVoice.styleId || "")) {
     if (defaultVoice.modelUuid && !next.modelUuid) next.modelUuid = defaultVoice.modelUuid;
     if (defaultVoice.modelName && !next.modelName) next.modelName = defaultVoice.modelName;
+    if (defaultVoice.speakerUuid && !next.speakerUuid) next.speakerUuid = defaultVoice.speakerUuid;
+    if (defaultVoice.styleName && !next.styleName) next.styleName = defaultVoice.styleName;
     if (defaultVoice.sourceUrl && !next.sourceUrl) next.sourceUrl = defaultVoice.sourceUrl;
   } else {
     delete next.modelUuid;
     delete next.modelName;
+    delete next.speakerUuid;
+    delete next.styleName;
     delete next.sourceUrl;
   }
   characterVoiceOverrides[id] = next;
