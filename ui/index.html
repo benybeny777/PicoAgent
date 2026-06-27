@@ -10,13 +10,13 @@
   <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
     <section id="bootScreen" class="boot-screen" aria-live="polite" data-tauri-drag-region>
       <div class="boot-stage">
+        <div id="bootLog" class="boot-log" aria-label="起動ログ"></div>
         <div class="boot-character">
           <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" />
           <span class="boot-shadow" aria-hidden="true"></span>
         </div>
         <div class="boot-progress" aria-hidden="true"><span></span></div>
         <div id="bootStatus" class="boot-status">起動準備中…</div>
-        <div id="bootLog" class="boot-log" aria-label="起動ログ"></div>
       </div>
     </section>
     <section id="bubble" class="bubble" aria-live="polite">

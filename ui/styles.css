@@ -5,7 +5,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character { position:absolute; right:6px; bottom:2px; width:265px; height:315px; display:grid; place-items:end center; cursor:grab; }
 /* 起動直後（音声エンジン準備待ち）は通常のキャラ・フキダシを隠し、待機画面だけを見せる。
    準備完了で is-booting を外し、その瞬間に挨拶を再生する。 */
-.boot-screen { position:absolute; inset:0; z-index:20; display:grid; place-items:center; padding:18px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; }
+.boot-screen { position:absolute; inset:0; z-index:20; display:grid; place-items:center; padding:18px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; overflow:hidden; }
 .pet-app.is-booting .boot-screen { visibility:visible; opacity:1; pointer-events:auto; }
 .pet-app.is-booting .bubble,
 .pet-app.is-booting .character { visibility:hidden; }
@@ -19,13 +19,12 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .boot-progress { position:relative; width:140px; height:4px; margin-top:4px; overflow:hidden; border-radius:999px; background:rgba(129,117,135,.16); }
 .boot-progress span { position:absolute; top:0; bottom:0; width:42%; border-radius:999px; background:linear-gradient(90deg,#f27e91,#64c99b); animation:boot-progress 1.55s ease-in-out infinite; }
 .boot-status { width:100%; min-height:18px; margin-top:11px; color:var(--muted); font-size:11px; line-height:1.55; text-align:center; word-break:keep-all; overflow-wrap:anywhere; }
-.boot-log { position:relative; width:100%; height:88px; margin-top:10px; padding:8px 10px; overflow:hidden; border:1px solid rgba(71,52,76,.1); border-radius:10px; background:rgba(43,35,50,.86); color:#eaf8eb; font:10px/1.55 Consolas,"Yu Gothic UI",monospace; text-align:left; box-shadow:inset 0 1px 9px rgba(0,0,0,.18); }
-.boot-log::before { content:"PICO/BOOT"; position:absolute; top:4px; right:8px; color:rgba(234,248,235,.28); font-size:9px; letter-spacing:.08em; }
-.boot-log-line { position:relative; white-space:nowrap; opacity:.86; animation:boot-line-in .22s ease-out both; }
-.boot-log-line::before { content:">>"; margin-right:5px; color:#64c99b; }
-.boot-log-line.status { color:#fff6bd; }
-.boot-log-line.system { color:#9ff0c1; }
-.boot-log-line.trace { color:#d5ded9; }
+.boot-log { position:absolute; z-index:3; left:0; right:0; top:54px; height:176px; overflow:hidden; pointer-events:none; color:#2f2638; font:700 14px/1.55 Consolas,"Yu Gothic UI",monospace; text-align:left; }
+.boot-log-line { position:absolute; left:100%; padding:2px 10px 3px; border-radius:999px; white-space:nowrap; opacity:.9; background:rgba(255,253,248,.76); box-shadow:0 1px 8px rgba(42,31,46,.1); text-shadow:0 1px 0 rgba(255,255,255,.95); will-change:transform; animation:boot-line-flow 10s linear forwards; }
+.boot-log-line::before { content:">>"; margin-right:7px; color:#268a63; }
+.boot-log-line.boot-kind-status { color:#7a5260; }
+.boot-log-line.boot-kind-system { color:#246f52; }
+.boot-log-line.boot-kind-trace { color:#3a3141; }
 .character::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)); pointer-events:none; will-change:transform; }
 .character[data-motion="breathe"] img { animation:pet-breathe 3.8s ease-in-out infinite; }
@@ -48,14 +47,14 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes boot-sleep { 0%,100%{transform:translateY(1px) scale(1)} 50%{transform:translateY(-4px) scale(1.006,.996)} }
 @keyframes boot-shadow { 0%,100%{transform:scaleX(.94); opacity:.72} 50%{transform:scaleX(1.08); opacity:.48} }
 @keyframes boot-progress { 0%{left:-45%} 55%{left:32%} 100%{left:105%} }
-@keyframes boot-line-in { from{transform:translateY(6px); opacity:0} to{transform:translateY(0); opacity:.86} }
+@keyframes boot-line-flow { from{transform:translateX(0); opacity:0} 7%{opacity:.9} 88%{opacity:.9} to{transform:translateX(calc(-100vw - 100%)); opacity:0} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
 .bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 24px); max-height:calc(100% - 24px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }
 .bubble::after { content:""; position:absolute; right:-15px; bottom:auto; top:42%; width:26px; height:30px; background:var(--paper); clip-path:polygon(0 0,100% 50%,0 100%); filter:drop-shadow(1px 1px 0 rgba(71,52,76,.11)); }
 /* ダブルクリックでフキダシを大きく広げる。キャラと被らないよう右側にキャラ分の幅
    （キャラ幅265px + 余白）を空けて左ペインにし、キャラは右にそのまま表示する。 */
-.bubble.fullscreen { z-index:8; top:14px; left:14px; right:291px; bottom:14px; width:auto!important; height:auto!important; max-width:none; max-height:none; padding:22px 24px 18px; border-radius:18px; box-shadow:0 14px 40px rgba(42,31,46,.18); }
+.bubble.fullscreen { z-index:8; top:var(--fullscreen-bubble-top,14px); left:var(--fullscreen-bubble-left,14px); right:var(--fullscreen-bubble-right,291px); bottom:var(--fullscreen-bubble-bottom,14px); width:auto!important; height:auto!important; max-width:none; max-height:none; padding:22px 24px 18px; border-radius:18px; box-shadow:0 14px 40px rgba(42,31,46,.18); }
 .bubble.fullscreen::after { display:none; }
 .bubble.fullscreen .bubble-resize { display:none; }
 /* 拡大中もキャラはそのまま右側に表示（被らないので薄くしない）。 */

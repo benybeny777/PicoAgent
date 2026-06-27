@@ -25,6 +25,7 @@ let chatterTimer = null;
 let dailyTimer = null;
 let animationRequestId = null;
 let bootLogTimer = null;
+let bootLogLane = 0;
 let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 1;
@@ -96,12 +97,16 @@ function setStatus(text) {
 function appendBootLog(text, kind = "info") {
   if (!bootLog || !petApp.classList.contains("is-booting")) return;
   const line = document.createElement("div");
-  line.className = `boot-log-line ${kind}`;
-  const stamp = new Date().toLocaleTimeString("ja-JP", { hour12: false });
-  line.textContent = `${stamp}  ${text}`;
+  line.className = `boot-log-line boot-kind-${kind}`;
+  line.textContent = text;
+  const lanes = Math.max(1, Math.floor((bootLog.clientHeight - 24) / 24));
+  const lane = bootLogLane % lanes;
+  bootLogLane += 1;
+  line.style.top = `${12 + lane * 24}px`;
+  line.style.animationDuration = `${Math.min(26, Math.max(14, line.textContent.length * 0.34))}s`;
+  line.addEventListener("animationend", () => line.remove(), { once: true });
   bootLog.append(line);
-  while (bootLog.children.length > 28) bootLog.firstElementChild?.remove();
-  bootLog.scrollTop = bootLog.scrollHeight;
+  while (bootLog.children.length > 24) bootLog.firstElementChild?.remove();
 }
 
 function startBootLogTicker() {
@@ -259,9 +264,12 @@ function closeComposer() {
 async function setBubbleFullscreen(on) {
   if (bubble.classList.contains("fullscreen") === on) return;
   bubble.classList.toggle("fullscreen", on);
+  refreshBubblePlacement();
   renderHistory();
   try { await window.picoagent.setFullscreen(on); }
   catch (error) { bubble.classList.toggle("fullscreen", !on); status.textContent = `全画面切替に失敗: ${error}`; }
+  refreshBubblePlacement();
+  setTimeout(refreshBubblePlacement, 120);
   if (!on) setTimeout(flushPendingNotice, 0);
 }
 function toggleBubbleFullscreen() { setBubbleFullscreen(!bubble.classList.contains("fullscreen")); }
@@ -555,13 +563,61 @@ let resizeStart = null;
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
-function bubbleOverlapsCharacter(left, top, width, height, gap = 10) {
-  const charLeft = character.offsetLeft - gap;
-  const charTop = character.offsetTop - gap;
-  const charRight = character.offsetLeft + character.offsetWidth + gap;
-  const charBottom = character.offsetTop + character.offsetHeight + gap;
-  return left < charRight && left + width > charLeft && top < charBottom && top + height > charTop;
+function resetFullscreenBubbleLayoutVars() {
+  bubble.style.removeProperty("--fullscreen-bubble-top");
+  bubble.style.removeProperty("--fullscreen-bubble-left");
+  bubble.style.removeProperty("--fullscreen-bubble-right");
+  bubble.style.removeProperty("--fullscreen-bubble-bottom");
 }
+
+function applyFullscreenBubbleLayout() {
+  if (!bubble.classList.contains("fullscreen")) {
+    resetFullscreenBubbleLayoutVars();
+    return;
+  }
+  const margin = 14;
+  const gap = 18;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  const rect = character.getBoundingClientRect();
+  const leftPaneWidth = Math.max(0, rect.left - gap - margin);
+  const topPaneHeight = Math.max(0, rect.top - gap - margin);
+  const minFullscreenWidth = 360;
+  const minFullscreenHeight = 220;
+
+  if (leftPaneWidth >= minFullscreenWidth || leftPaneWidth >= viewportWidth * 0.45) {
+    bubble.style.setProperty("--fullscreen-bubble-top", `${margin}px`);
+    bubble.style.setProperty("--fullscreen-bubble-left", `${margin}px`);
+    bubble.style.setProperty("--fullscreen-bubble-right", `${Math.max(margin, viewportWidth - rect.left + gap)}px`);
+    bubble.style.setProperty("--fullscreen-bubble-bottom", `${margin}px`);
+    return;
+  }
+
+  if (topPaneHeight >= minFullscreenHeight) {
+    bubble.style.setProperty("--fullscreen-bubble-top", `${margin}px`);
+    bubble.style.setProperty("--fullscreen-bubble-left", `${margin}px`);
+    bubble.style.setProperty("--fullscreen-bubble-right", `${margin}px`);
+    bubble.style.setProperty("--fullscreen-bubble-bottom", `${Math.max(margin, viewportHeight - rect.top + gap)}px`);
+    return;
+  }
+
+  bubble.style.setProperty("--fullscreen-bubble-top", `${margin}px`);
+  bubble.style.setProperty("--fullscreen-bubble-left", `${margin}px`);
+  bubble.style.setProperty("--fullscreen-bubble-right", `${Math.max(margin, viewportWidth - rect.left + gap)}px`);
+  bubble.style.setProperty("--fullscreen-bubble-bottom", `${margin}px`);
+}
+
+function refreshBubblePlacement() {
+  requestAnimationFrame(() => {
+    if (bubble.classList.contains("fullscreen")) {
+      applyFullscreenBubbleLayout();
+      return;
+    }
+    resetFullscreenBubbleLayoutVars();
+    repositionBubbleToAvoidCharacter();
+  });
+}
+
 function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offsetLeft, preferredTop = bubble.offsetTop) {
   if (bubble.classList.contains("fullscreen")) return;
   const margin = 12;
@@ -570,39 +626,115 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   const viewportHeight = document.documentElement.clientHeight;
   const charLeftEdge = character.offsetLeft - gap;
   const charTopEdge = character.offsetTop - gap;
-  const leftPaneWidth = Math.max(180, charLeftEdge - margin);
-  const topPaneHeight = Math.max(92, charTopEdge - margin);
-  if (width > leftPaneWidth && height > topPaneHeight) {
-    const leftPaneArea = leftPaneWidth * height;
-    const topPaneArea = width * topPaneHeight;
-    if (leftPaneArea >= topPaneArea) {
-      width = leftPaneWidth;
-      bubble.style.width = `${Math.round(width)}px`;
-    } else {
-      height = topPaneHeight;
-      bubble.style.height = `${Math.round(height)}px`;
-    }
-  }
+  const charRightEdge = character.offsetLeft + character.offsetWidth + gap;
+  const charBottomEdge = character.offsetTop + character.offsetHeight + gap;
   const maxLeft = Math.max(margin, viewportWidth - width - margin);
   const maxTop = Math.max(margin, viewportHeight - height - margin);
-  let left = clampNumber(preferredLeft, margin, maxLeft);
-  let top = clampNumber(preferredTop, margin, maxTop);
-  if (bubbleOverlapsCharacter(left, top, width, height, gap)) {
-    const leftOfCharacter = charLeftEdge - width;
-    const aboveCharacter = charTopEdge - height;
-    if (leftOfCharacter >= margin) {
-      left = clampNumber(leftOfCharacter, margin, maxLeft);
-    } else if (aboveCharacter >= margin) {
-      top = clampNumber(aboveCharacter, margin, maxTop);
-    } else {
-      left = clampNumber(leftOfCharacter, margin, maxLeft);
-      top = clampNumber(aboveCharacter, margin, maxTop);
+  const baseLeft = clampNumber(preferredLeft, margin, maxLeft);
+  const baseTop = clampNumber(preferredTop, margin, maxTop);
+
+  const xCandidates = [
+    baseLeft,
+    charLeftEdge - width,
+    charRightEdge,
+    margin,
+    maxLeft,
+  ];
+  const yCandidates = [
+    baseTop,
+    charTopEdge - height,
+    charBottomEdge,
+    margin,
+    maxTop,
+  ];
+
+  const candidates = [];
+  for (const rawLeft of xCandidates) {
+    for (const rawTop of yCandidates) {
+      const left = clampNumber(rawLeft, margin, maxLeft);
+      const top = clampNumber(rawTop, margin, maxTop);
+      if (candidates.some(item => item.left === left && item.top === top)) continue;
+      const overlap = overlapAreaWithCharacter(left, top, width, height, gap);
+      const distance = Math.hypot(left - baseLeft, top - baseTop);
+      candidates.push({ left, top, overlap, distance });
     }
   }
+
+  candidates.sort((a, b) => a.overlap - b.overlap || a.distance - b.distance);
+  const best = candidates[0] || { left: baseLeft, top: baseTop, overlap: 0 };
+  if (best.overlap > 0) {
+    fitBubbleIntoFreePane(width, height, preferredLeft, preferredTop, {
+      margin,
+      gap,
+      viewportWidth,
+      viewportHeight,
+      charLeftEdge,
+      charTopEdge,
+    });
+    return;
+  }
+  const left = best.left;
+  const top = best.top;
   bubble.style.left = `${Math.round(left)}px`;
   bubble.style.top = `${Math.round(top)}px`;
 }
+
+function fitBubbleIntoFreePane(width, height, preferredLeft, preferredTop, bounds) {
+  const { margin, viewportWidth, viewportHeight, charLeftEdge, charTopEdge } = bounds;
+  const options = [];
+  const leftPaneWidth = Math.floor(charLeftEdge - margin);
+  if (leftPaneWidth >= 180) {
+    const nextWidth = Math.min(width, leftPaneWidth);
+    const nextHeight = Math.min(height, viewportHeight - margin * 2);
+    options.push({
+      width: nextWidth,
+      height: nextHeight,
+      left: clampNumber(preferredLeft, margin, charLeftEdge - nextWidth),
+      top: clampNumber(preferredTop, margin, Math.max(margin, viewportHeight - nextHeight - margin)),
+      area: nextWidth * nextHeight,
+      delta: Math.abs(width - nextWidth) + Math.abs(height - nextHeight),
+    });
+  }
+  const topPaneHeight = Math.floor(charTopEdge - margin);
+  if (topPaneHeight >= 92) {
+    const nextWidth = Math.min(width, viewportWidth - margin * 2);
+    const nextHeight = Math.min(height, topPaneHeight);
+    options.push({
+      width: nextWidth,
+      height: nextHeight,
+      left: clampNumber(preferredLeft, margin, Math.max(margin, viewportWidth - nextWidth - margin)),
+      top: clampNumber(preferredTop, margin, charTopEdge - nextHeight),
+      area: nextWidth * nextHeight,
+      delta: Math.abs(width - nextWidth) + Math.abs(height - nextHeight),
+    });
+  }
+  options.sort((a, b) => b.area - a.area || a.delta - b.delta);
+  const best = options[0] || {
+    width: Math.min(width, viewportWidth - margin * 2),
+    height: Math.min(height, viewportHeight - margin * 2),
+    left: margin,
+    top: margin,
+  };
+  bubble.style.width = `${Math.round(best.width)}px`;
+  bubble.style.height = `${Math.round(best.height)}px`;
+  bubble.style.left = `${Math.round(best.left)}px`;
+  bubble.style.top = `${Math.round(best.top)}px`;
+}
+
+function overlapAreaWithCharacter(left, top, width, height, gap = 10) {
+  const charLeft = character.offsetLeft - gap;
+  const charTop = character.offsetTop - gap;
+  const charRight = character.offsetLeft + character.offsetWidth + gap;
+  const charBottom = character.offsetTop + character.offsetHeight + gap;
+  const overlapWidth = Math.max(0, Math.min(left + width, charRight) - Math.max(left, charLeft));
+  const overlapHeight = Math.max(0, Math.min(top + height, charBottom) - Math.max(top, charTop));
+  return overlapWidth * overlapHeight;
+}
 function repositionBubbleToAvoidCharacter() {
+  if (bubble.classList.contains("fullscreen")) {
+    applyFullscreenBubbleLayout();
+    return;
+  }
   const rect = bubble.getBoundingClientRect();
   placeBubbleAwayFromCharacter(rect.width, rect.height);
 }
@@ -636,10 +768,12 @@ async function finishBubbleResize(event) {
   resizeStart = null;
   if (bubbleResize.hasPointerCapture(event.pointerId)) bubbleResize.releasePointerCapture(event.pointerId);
   const rect = bubble.getBoundingClientRect();
+  repositionBubbleToAvoidCharacter();
+  const placed = bubble.getBoundingClientRect();
   try {
     await window.picoagent.setBubbleLayout(
-      Math.round(rect.width),
-      Math.round(rect.height),
+      Math.round(placed.width || rect.width),
+      Math.round(placed.height || rect.height),
       Math.round(bubble.offsetLeft),
       Math.round(bubble.offsetTop),
     );
@@ -777,9 +911,10 @@ function applyBubbleLayout(width, height, left, top) {
   if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
   if (Number.isFinite(x) && x >= 0) bubble.style.left = `${x}px`;
   if (Number.isFinite(y) && y >= 0) bubble.style.top = `${y}px`;
-  repositionBubbleToAvoidCharacter();
+  refreshBubblePlacement();
 }
-window.addEventListener("resize", repositionBubbleToAvoidCharacter);
+window.addEventListener("resize", refreshBubblePlacement);
+petSprite.addEventListener("load", refreshBubblePlacement);
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
