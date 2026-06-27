@@ -1,7 +1,7 @@
 {
   "id": "mai",
   "name": "まい",
-  "assetVersion": "2026-06-28-standard-motion-v2-mai",
+  "assetVersion": "2026-06-28-standard-motion-v4-mai",
   "description": "落ち着いた紫のドレスがよく似合う、包容力のあるやさしいおねえさん。",
   "greeting": "おかえりなさい。よく来てくれたわね。今日もそばで見ているから、ゆっくり一緒に進めましょう。",
   "voice": {
@@ -64,20 +64,20 @@
     "talking": {
       "path": "animations/review",
       "frames": 12,
-      "fps": 9.0,
+      "fps": 8.0,
       "frameDurations": [
-        95,
-        70,
+        120,
         90,
-        65,
-        95,
-        70,
+        75,
+        120,
+        120,
+        120,
+        75,
+        120,
         90,
-        65,
-        85,
-        70,
-        90,
-        65
+        120,
+        75,
+        140
       ],
       "motion": "live2d-talking"
     },

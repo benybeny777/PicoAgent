@@ -1,7 +1,7 @@
 {
   "id": "rin",
   "name": "りん",
-  "assetVersion": "2026-06-28-standard-motion-v2-rin",
+  "assetVersion": "2026-06-28-standard-motion-v4-rin",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
@@ -67,20 +67,20 @@
     "talking": {
       "path": "animations/review",
       "frames": 12,
-      "fps": 9.0,
+      "fps": 8.0,
       "frameDurations": [
-        95,
-        70,
+        120,
         90,
-        65,
-        95,
-        70,
+        75,
+        120,
+        120,
+        120,
+        75,
+        120,
         90,
-        65,
-        85,
-        70,
-        90,
-        65
+        120,
+        75,
+        140
       ],
       "motion": "live2d-talking"
     },

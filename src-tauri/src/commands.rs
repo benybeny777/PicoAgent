@@ -302,7 +302,7 @@ pub fn pet_set_bubble_size(
     height: u32,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    if !(180..=528).contains(&width) || !(92..=378).contains(&height) {
+    if !(180..=2000).contains(&width) || !(92..=1400).contains(&height) {
         return Err("フキダシのサイズが許可範囲外です。".to_string());
     }
     let mut patch = Map::new();

@@ -1,7 +1,7 @@
 {
   "id": "mugi",
   "name": "むぎ",
-  "assetVersion": "2026-06-28-standard-motion-v2-mugi",
+  "assetVersion": "2026-06-28-standard-motion-v4-mugi",
   "description": "星のヘアピンと緑の瞳が印象的な、明るく観察上手なちび作業相棒。",
   "greeting": "こんにちは、むぎだよ。今日もよろしくね。",
   "boot": {
@@ -58,20 +58,20 @@
     "talking": {
       "path": "animations/review",
       "frames": 12,
-      "fps": 9.0,
+      "fps": 8.0,
       "frameDurations": [
-        95,
-        70,
+        120,
         90,
-        65,
-        95,
-        70,
+        75,
+        120,
+        120,
+        120,
+        75,
+        120,
         90,
-        65,
-        85,
-        70,
-        90,
-        65
+        120,
+        75,
+        140
       ],
       "motion": "live2d-talking"
     },

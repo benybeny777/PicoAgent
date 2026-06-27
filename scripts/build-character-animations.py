@@ -31,8 +31,8 @@ ANIMATIONS = {
     "talking": {
         "path": "animations/review",
         "frames": 12,
-        "fps": 9.0,
-        "frameDurations": [95, 70, 90, 65, 95, 70, 90, 65, 85, 70, 90, 65],
+        "fps": 8.0,
+        "frameDurations": [120, 90, 75, 120, 120, 120, 75, 120, 90, 120, 75, 140],
         "motion": "live2d-talking",
     },
     "sad": {
@@ -75,17 +75,17 @@ SEQUENCES = {
     ],
     "talking": [
         ("mouth_closed", 0),
+        ("mouth_closed", 1),
+        ("mouth_open", 1),
+        ("mouth_closed", 0),
+        ("mouth_closed", -1),
+        ("mouth_closed", -1),
         ("mouth_open", 1),
         ("mouth_closed", 1),
-        ("mouth_open", 0),
-        ("mouth_closed", -1),
-        ("mouth_open", -1),
-        ("mouth_closed", 0),
-        ("mouth_open", 1),
         ("blink_half", 1),
+        ("mouth_closed", 0),
         ("mouth_open", 0),
         ("mouth_closed", -1),
-        ("mouth_open", 0),
     ],
     "sad": [
         ("base", 0),
@@ -183,8 +183,10 @@ def remove_green_fringe(image: Image.Image) -> Image.Image:
             red, green, blue, alpha = pixels[x, y]
             if alpha == 0:
                 continue
-            if green > 80 and green > red * 1.08 and green > blue * 1.08:
-                if alpha < 210:
+            green_dominant = green > 60 and green > red * 1.04 and green > blue * 1.04
+            vivid_green = green > 110 and green - max(red, blue) > 18
+            if green_dominant or vivid_green:
+                if alpha < 245:
                     pixels[x, y] = (red, green, blue, 0)
                 else:
                     green = min(green, int(max(red, blue) * 1.02))
@@ -207,10 +209,18 @@ def build_frames(character_dir: Path, layer_paths: dict[str, Path], disable_sway
             image.save(animation_dir / f"{index:02}.png")
 
 
+def clean_expression_layers(layer_paths: dict[str, Path]) -> None:
+    for name in ("blink_half", "blink_closed", "mouth_open"):
+        path = layer_paths.get(name)
+        if path and path.exists():
+            remove_green_fringe(Image.open(path).convert("RGBA")).save(path)
+
+
 def build_character(character_dir: Path, version: str | None, disable_sway: bool) -> None:
     manifest = load_manifest(character_dir)
     warn_missing_boot(character_dir, manifest)
     layer_paths = ensure_layers(character_dir)
+    clean_expression_layers(layer_paths)
     build_frames(character_dir, layer_paths, disable_sway)
     manifest["animations"] = ANIMATIONS
     if version:

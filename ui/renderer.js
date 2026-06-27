@@ -44,7 +44,7 @@ window.addEventListener("unhandledrejection", event => {
   logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
 });
 
-const characterManifestCacheKey = "2026-06-28-standard-motion-v2";
+const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
@@ -361,37 +361,84 @@ document.addEventListener("contextmenu", event => { event.preventDefault(); wind
 
 // 右下のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
 let resizeStart = null;
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function bubbleOverlapsCharacter(left, top, width, height, gap = 10) {
+  const charLeft = character.offsetLeft - gap;
+  const charTop = character.offsetTop - gap;
+  const charRight = character.offsetLeft + character.offsetWidth + gap;
+  const charBottom = character.offsetTop + character.offsetHeight + gap;
+  return left < charRight && left + width > charLeft && top < charBottom && top + height > charTop;
+}
+function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offsetLeft, preferredTop = bubble.offsetTop) {
+  if (bubble.classList.contains("fullscreen")) return;
+  const margin = 12;
+  const gap = 10;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  const charLeftEdge = character.offsetLeft - gap;
+  const charTopEdge = character.offsetTop - gap;
+  const leftPaneWidth = Math.max(180, charLeftEdge - margin);
+  const topPaneHeight = Math.max(92, charTopEdge - margin);
+  if (width > leftPaneWidth && height > topPaneHeight) {
+    const leftPaneArea = leftPaneWidth * height;
+    const topPaneArea = width * topPaneHeight;
+    if (leftPaneArea >= topPaneArea) {
+      width = leftPaneWidth;
+      bubble.style.width = `${Math.round(width)}px`;
+    } else {
+      height = topPaneHeight;
+      bubble.style.height = `${Math.round(height)}px`;
+    }
+  }
+  const maxLeft = Math.max(margin, viewportWidth - width - margin);
+  const maxTop = Math.max(margin, viewportHeight - height - margin);
+  let left = clampNumber(preferredLeft, margin, maxLeft);
+  let top = clampNumber(preferredTop, margin, maxTop);
+  if (bubbleOverlapsCharacter(left, top, width, height, gap)) {
+    const leftOfCharacter = charLeftEdge - width;
+    const aboveCharacter = charTopEdge - height;
+    if (leftOfCharacter >= margin) {
+      left = clampNumber(leftOfCharacter, margin, maxLeft);
+    } else if (aboveCharacter >= margin) {
+      top = clampNumber(aboveCharacter, margin, maxTop);
+    } else {
+      left = clampNumber(leftOfCharacter, margin, maxLeft);
+      top = clampNumber(aboveCharacter, margin, maxTop);
+    }
+  }
+  bubble.style.left = `${Math.round(left)}px`;
+  bubble.style.top = `${Math.round(top)}px`;
+}
+function repositionBubbleToAvoidCharacter() {
+  const rect = bubble.getBoundingClientRect();
+  placeBubbleAwayFromCharacter(rect.width, rect.height);
+}
 bubbleResize.addEventListener("pointerdown", event => {
   event.preventDefault();
   event.stopPropagation();
   const rect = bubble.getBoundingClientRect();
-  resizeStart = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
+  resizeStart = {
+    x: event.clientX,
+    y: event.clientY,
+    width: rect.width,
+    height: rect.height,
+    left: bubble.offsetLeft,
+    top: bubble.offsetTop,
+  };
   bubbleResize.setPointerCapture(event.pointerId);
 });
 bubbleResize.addEventListener("pointermove", event => {
   if (!resizeStart) return;
-  const gap = 10;
-  const left = bubble.offsetLeft;
-  const top = bubble.offsetTop;
-  // キャラクターの矩形（petApp 基準）。拡大してもこの領域へ被らないようにする。
-  const charLeft = character.offsetLeft;
-  const charTop = character.offsetTop;
+  const margin = 12;
   const desiredWidth = Math.max(180, resizeStart.width + event.clientX - resizeStart.x);
   const desiredHeight = Math.max(92, resizeStart.height + event.clientY - resizeStart.y);
-  // 幅: フキダシがキャラの縦範囲に達する高さなら、キャラ左端より左に収める。
-  let maxWidth = document.documentElement.clientWidth - left - 16;
-  if (top + desiredHeight > charTop - gap) {
-    maxWidth = Math.min(maxWidth, charLeft - left - gap);
-  }
-  const width = Math.min(maxWidth, desiredWidth);
-  // 高さ: 幅確定後にキャラの横範囲へ達するなら、キャラ上端より上に収める。
-  let maxHeight = document.documentElement.clientHeight - top - 16;
-  if (left + width > charLeft - gap) {
-    maxHeight = Math.min(maxHeight, charTop - top - gap);
-  }
-  const height = Math.min(maxHeight, desiredHeight);
-  bubble.style.width = `${Math.round(Math.max(180, width))}px`;
-  bubble.style.height = `${Math.round(Math.max(92, height))}px`;
+  const width = Math.min(desiredWidth, document.documentElement.clientWidth - margin * 2);
+  const height = Math.min(desiredHeight, document.documentElement.clientHeight - margin * 2);
+  bubble.style.width = `${Math.round(width)}px`;
+  bubble.style.height = `${Math.round(height)}px`;
+  placeBubbleAwayFromCharacter(width, height, resizeStart.left, resizeStart.top);
 });
 async function finishBubbleResize(event) {
   if (!resizeStart) return;
@@ -479,7 +526,9 @@ function applyBubbleSize(width, height) {
   const h = parseFloat(height);
   if (Number.isFinite(w) && w >= 180) bubble.style.width = `${w}px`;
   if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
+  repositionBubbleToAvoidCharacter();
 }
+window.addEventListener("resize", repositionBubbleToAvoidCharacter);
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
