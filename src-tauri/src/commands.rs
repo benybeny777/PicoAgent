@@ -917,9 +917,11 @@ pub async fn settings_save(
 
     // モデル DL・エンジン/Aivis 起動・キャラ読込など重い反映は実行中に行わず、
     // 再起動して起動シーケンス（ローディング画面）でまとめて反映する（フキダシに
-    // 「準備中…」を出さないため）。該当キーが実際に変わったら再起動を促す。
-    let requires_restart =
-        tts_runtime_changed || provider_changed || local_engine_changed || character_changed;
+    // 「準備中…」を出さないため）。何が変わったかを再起動側へ伝え、必要な部分だけ
+    // 立ち上げ直す（例: キャラ変更だけなら LLM エンジンは再起動しない）。
+    let restart_engine = provider_changed || local_engine_changed;
+    let restart_aivis = tts_runtime_changed;
+    let requires_restart = restart_engine || restart_aivis || character_changed;
 
     // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
     if has_system_prompt || has_memory_setting {
@@ -969,7 +971,13 @@ pub async fn settings_save(
         let _ = win.emit("pet:ui", ui);
     }
 
-    Ok(json!({ "ok": true, "requiresRestart": requires_restart, "up": current_up(&state).await }))
+    Ok(json!({
+        "ok": true,
+        "requiresRestart": requires_restart,
+        "restartEngine": restart_engine,
+        "restartAivis": restart_aivis,
+        "up": current_up(&state).await
+    }))
 }
 
 /// 設定反映のための再起動相当処理。重い反映（モデル DL・エンジン/Aivis 起動・
@@ -980,11 +988,13 @@ pub async fn settings_save(
 /// 相当に再初期化」してから、メインウィンドウへ `pet:reload` を送り webview を
 /// 再読込させる。これで dev / 配布版どちらでも同じ挙動になる。
 #[tauri::command]
-pub fn restart_app(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+pub fn restart_app(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    restart_engine: bool,
+    restart_aivis: bool,
+) -> Result<Value, String> {
     crate::log_paths::append_app_log(&app, "設定反映のため再初期化します。");
-    // エンジン/Aivis を止めて設定から作り直す。
-    crate::engine::stop(&app);
-    aivis::stop(&app);
 
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
     *state.provider_id.lock().unwrap() = pid.clone();
@@ -1010,27 +1020,35 @@ pub fn restart_app(app: AppHandle, state: State<'_, AppState>) -> Result<Value, 
         state.messages.lock().unwrap().extend(recent);
     }
 
-    // 同梱エンジン / Aivis を必要に応じて起動シーケンス相当で立ち上げ直す。
-    if pid == "local" {
-        let handle = app.clone();
-        tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
-    }
-    if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
-        let handle = app.clone();
-        if let Err(error) = aivis::start_background(&handle) {
-            crate::log_paths::append_app_log(
-                &handle,
-                &format!("再初期化後の同梱 Aivis 起動に失敗しました: {error}"),
-            );
+    // 同梱エンジンは、プロバイダ/モデル関連が変わったときだけ立ち上げ直す。
+    // キャラ変更だけのときは LLM を再ロードせず動かしたままにする。
+    if restart_engine {
+        crate::engine::stop(&app);
+        if pid == "local" {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
         }
-        tauri::async_runtime::spawn(async move {
-            if let Err(error) = aivis::ensure_started(&handle).await {
+    }
+    // Aivis は TTS 設定（ON/OFF・デバイス・ポート）が変わったときだけ立ち上げ直す。
+    if restart_aivis {
+        aivis::stop(&app);
+        if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+            let handle = app.clone();
+            if let Err(error) = aivis::start_background(&handle) {
                 crate::log_paths::append_app_log(
                     &handle,
-                    &format!("再初期化後の同梱 Aivis 起動確認に失敗しました: {error}"),
+                    &format!("再初期化後の同梱 Aivis 起動に失敗しました: {error}"),
                 );
             }
-        });
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = aivis::ensure_started(&handle).await {
+                    crate::log_paths::append_app_log(
+                        &handle,
+                        &format!("再初期化後の同梱 Aivis 起動確認に失敗しました: {error}"),
+                    );
+                }
+            });
+        }
     }
 
     // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。

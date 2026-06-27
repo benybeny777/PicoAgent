@@ -610,7 +610,8 @@ saveBtn.addEventListener("click", async () => {
       const restartNow = await confirmRestart();
       if (restartNow) {
         statusEl.textContent = "反映のため再起動しています…";
-        await window.picoagent.restartApp(); // メイン側が起動シーケンスを再実行する。
+        // 変わった部分だけ立ち上げ直す（キャラ変更だけなら LLM は再起動しない）。
+        await window.picoagent.restartApp(res.restartEngine, res.restartAivis);
         statusEl.textContent = "反映しました（起動画面で再読み込み中）";
       } else {
         statusEl.textContent = "保存しました（次回の起動時に反映されます）";

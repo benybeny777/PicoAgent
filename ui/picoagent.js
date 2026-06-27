@@ -47,7 +47,7 @@ window.picoagent = {
     listen(channel, (event) => callback(event.payload));
   },
   engineStatus: () => call("engine_status"),
-  restartApp: () => call("restart_app"),
+  restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {
     load: () => call("settings_load"),
     listModels: (id) => call("settings_list_models", { id }),
