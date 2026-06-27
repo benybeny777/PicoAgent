@@ -305,11 +305,48 @@ fn should_web_search(text: &str) -> bool {
     }
     let lower = text.to_lowercase();
     const INFO_MARKERS: &[&str] = &[
-        "最新", "ニュース", "今日", "昨日", "今週", "今月", "今年", "現在", "価格", "値段",
-        "いくら", "相場", "株価", "ランキング", "発売", "リリース", "結果", "スコア", "順位",
-        "誰", "だれ", "いつ", "どこ", "なぜ", "方法", "やり方", "調べ", "検索", "スペック",
-        "比較", "おすすめ", "レビュー", "評判", "何年", "何月", "何時", "とは", "意味", "とは何",
-        "history", "news", "price",
+        "最新",
+        "ニュース",
+        "今日",
+        "昨日",
+        "今週",
+        "今月",
+        "今年",
+        "現在",
+        "価格",
+        "値段",
+        "いくら",
+        "相場",
+        "株価",
+        "ランキング",
+        "発売",
+        "リリース",
+        "結果",
+        "スコア",
+        "順位",
+        "誰",
+        "だれ",
+        "いつ",
+        "どこ",
+        "なぜ",
+        "方法",
+        "やり方",
+        "調べ",
+        "検索",
+        "スペック",
+        "比較",
+        "おすすめ",
+        "レビュー",
+        "評判",
+        "何年",
+        "何月",
+        "何時",
+        "とは",
+        "意味",
+        "とは何",
+        "history",
+        "news",
+        "price",
     ];
     INFO_MARKERS.iter().any(|marker| lower.contains(marker))
 }
@@ -544,8 +581,8 @@ pub async fn run(
 mod tests {
     use super::{
         append_sources, currency_query, direct_local_tool_query, extract_source_urls,
-        is_local_action_query, is_simple_greeting, is_weather_query, market_query, should_web_search,
-        web_search_query,
+        is_local_action_query, is_simple_greeting, is_weather_query, market_query,
+        should_web_search, web_search_query,
     };
 
     #[test]

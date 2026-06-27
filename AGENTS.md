@@ -58,14 +58,14 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 
 - Windows / macOS を想定。**Rust（cargo）と Node.js >= 20**、WebView2（Windows ランタイム）。**Ollama は不要**。
 - 開発起動: `npm run setup:engine`（同梱エンジン取得）→ `npm run dev`。製品ビルド: `npm run build`（`src-tauri/target/release/bundle/`）。
-- **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時にモデル GGUF（既定: Gemma 3n E2B Q4、約3〜4GB）を `app_data_dir/models/` へ DL し、以後オフライン。Ollama / OpenAI 互換は任意プロバイダとして存続。
+- **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM/RAM 目安から Gemma 4 系プリセットを選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL し、以後オフライン。Ollama / OpenAI 互換は任意プロバイダとして存続。
 - **OpenAI 互換プロバイダ（`OPENAI_API_KEY` 利用）は費用が発生するため、ユーザー指示または運用上の明確な必要がある場合だけ実行する。** local / Ollama はコストがかからない。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
 - 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`npm run setup:engine` で取得）。
 
 ## 製品化（配布）
 
-- `src-tauri/tauri.conf.json` の `productName` / `identifier` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。
+- `src-tauri/tauri.conf.json` の `productName` / `identifier=com.picoagent.desktop` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。
 - Windows バンドルは NSIS（`bundle.targets`）。署名（Authenticode）・自動更新（`tauri-plugin-updater`）は鍵・証明書が要るためリリース時に設定する（未設定）。
 
 ## 主要ファイル

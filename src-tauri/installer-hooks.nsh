@@ -10,6 +10,8 @@
   DetailPrint "PicoAgent の実行時データを削除しています..."
   RMDir /r "$APPDATA\PicoAgent"
   RMDir /r "$LOCALAPPDATA\PicoAgent"
+  RMDir /r "$APPDATA\com.picoagent.desktop"
+  RMDir /r "$LOCALAPPDATA\com.picoagent.desktop"
   RMDir /r "$APPDATA\com.picoagent.app"
   RMDir /r "$LOCALAPPDATA\com.picoagent.app"
   RMDir /r "$APPDATA\com.coda.app"

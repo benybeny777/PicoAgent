@@ -6,6 +6,12 @@
 
 ## 2026-06-27
 
+### 配布識別子と旧データ移行を整理
+
+- Tauri の macOS バンドル拡張子と衝突し得る `.app` 終端を避けるため、アプリ識別子を `com.picoagent.app` から `com.picoagent.desktop` へ変更した。
+- 初回起動時に旧 `com.picoagent.app` / `com.coda.app` 配下の `config.json` / `history.json` / `memory.json` を現行識別子へコピー移行し、識別子変更で設定・会話履歴・長期メモリを見失わないようにした。
+- NSIS アンインストール対象に現行識別子 `com.picoagent.desktop` の設定・キャッシュも追加した。
+
 ### 製品レベルの会話・読み上げ品質を改善
 
 - 雑談・感想・相談まで毎回 Web 検索していたのをやめ、`should_web_search` で事実確認・最新情報・定義などを要する質問のときだけ検索するようにした。雑談はキャラ本人として検索せず速く自然に返す（毎回の検索遅延・ノイズ・小型モデルの脱線を解消）。明示的な検索依頼や「最新/ニュース/価格/誰/いつ/とは」等のマーカーがある質問は従来どおり検索する。
@@ -19,7 +25,7 @@
 
 ### NSIS アンインストールと配布前チェックを強化
 
-- NSIS の `installerHooks` を追加し、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、旧識別子 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除するようにした。
+- NSIS の `installerHooks` を追加し、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、現行識別子 `com.picoagent.desktop` と旧識別子 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除するようにした。
 - PicoAgent が起動する Aivis 子プロセスの `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/` へ向け、Aivis のモデル・辞書・キャッシュも PicoAgent のアンインストール対象に含めた。外部の AivisSpeech インストールが使う通常の `%APPDATA%\AivisSpeech-Engine` は削除対象にしない。
 - `npm run dev` / `npm run build` で Aivis だけでなく同梱 `llama-server` も事前確認・取得するようにし、クリーン環境の配布ビルドで同梱 LLM が欠ける穴を塞いだ。
 - 同梱 Aivis 更新時は配布リソース側の `run.exe` がユーザーデータ側より新しければ `PicoAgent/bundled/aivis/` を上書き更新するようにした。

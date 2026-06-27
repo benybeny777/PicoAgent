@@ -13,6 +13,7 @@ mod log_paths;
 mod memory;
 mod menu;
 mod message;
+mod migration;
 mod providers;
 mod tools;
 
@@ -57,6 +58,12 @@ pub fn run() {
                 .path()
                 .app_config_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            if let Err(error) = migration::migrate_identity_dirs(app.handle(), &config_dir) {
+                log_paths::append_app_log(
+                    app.handle(),
+                    &format!("旧識別子からのデータ移行に失敗しました: {error}"),
+                );
+            }
             let config_path = config_dir.join("config.json");
             state.config.load(config_path.clone());
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
