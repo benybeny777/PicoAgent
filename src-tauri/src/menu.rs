@@ -94,11 +94,19 @@ fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
         "PICOAGENT_BUBBLE_TOP_PX",
         "PICOAGENT_WINDOW_WIDTH_PX",
         "PICOAGENT_WINDOW_HEIGHT_PX",
+        "PICOAGENT_WINDOW_RIGHT_PX",
+        "PICOAGENT_WINDOW_BOTTOM_PX",
+        // 旧版が保存していた絶対座標キーも掃除する。
         "PICOAGENT_WINDOW_LEFT_PX",
         "PICOAGENT_WINDOW_TOP_PX",
     ] {
         patch.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
+    // 覚えているレイアウト（サイズ・縦オフセット）も初期化する。
+    *app.state::<crate::WindowLayoutCache>()
+        .inner
+        .lock()
+        .unwrap() = None;
     if let Err(error) = state.config.set_all(patch) {
         crate::log_paths::append_app_log(
             app,

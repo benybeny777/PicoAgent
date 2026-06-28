@@ -30,6 +30,8 @@ pub fn run() {
         .manage(AppState::new())
         .manage(EngineState::new())
         .manage(AivisState::new())
+        .manage(WindowLayoutCache::default())
+        .on_window_event(|window, event| on_main_window_event(window, event))
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
             commands::pet_send,
@@ -155,7 +157,20 @@ pub fn run() {
                             win_h = (height * scale).round() as u32;
                         }
                     }
-                    let (x, y) = default_window_position(area.width, area.height, win_w, win_h);
+                    // 横位置は以前指定の固定値（既定の右オフセット）。縦位置だけ保存値から復元する（解像度非依存）。
+                    let bottom_offset = state
+                        .config
+                        .get("PICOAGENT_WINDOW_BOTTOM_PX", "")
+                        .parse::<i32>()
+                        .unwrap_or(DEFAULT_BOTTOM_OFFSET);
+                    let (x, y) = position_from_offsets(
+                        area.width,
+                        area.height,
+                        win_w,
+                        win_h,
+                        DEFAULT_RIGHT_OFFSET,
+                        bottom_offset,
+                    );
                     let _ = win.set_position(PhysicalPosition::new(x, y));
                 }
             }
@@ -211,44 +226,120 @@ pub fn run() {
     });
 }
 
-/// 画面右下を基準にしたウィンドウ位置（解像度非依存）。
-/// 右端をモニタ右端より RIGHT_OVERHANG px 外へ出し、下端からは BOTTOM_GAP px 空ける。
-pub(crate) fn default_window_position(area_w: u32, area_h: u32, win_w: u32, win_h: u32) -> (i32, i32) {
-    const RIGHT_OVERHANG: i32 = 69;
-    const BOTTOM_GAP: i32 = 51;
-    let x = area_w as i32 - win_w as i32 + RIGHT_OVERHANG;
-    let y = area_h as i32 - win_h as i32 - BOTTOM_GAP;
+// 既定の右下オフセット（px）。right はモニタ右端からウィンドウ右端までの距離（負＝外へオーバーハング）。
+const DEFAULT_RIGHT_OFFSET: i32 = -69;
+const DEFAULT_BOTTOM_OFFSET: i32 = 51;
+// 画面端スナップのしきい値（px）。
+const SNAP_THRESHOLD: i32 = 24;
+
+/// ウィンドウの移動／リサイズで確定したレイアウトを覚えておくキャッシュ。
+/// 終了時 (`RunEvent::Exit`) はウィンドウが破棄され座標を取得できないため、生存中のイベントで控えておく。
+/// 横位置（右端基準）は固定なので覚えない。縦位置（下端からのオフセット）とサイズだけを保持する。
+#[derive(Default)]
+pub(crate) struct WindowLayoutCache {
+    inner: std::sync::Mutex<Option<CachedLayout>>,
+}
+
+#[derive(Clone, Copy)]
+struct CachedLayout {
+    width: f64,  // 論理px
+    height: f64, // 論理px
+    bottom_offset: i32,
+}
+
+/// 右下からの相対オフセットでウィンドウ左上座標を求める（解像度非依存）。
+pub(crate) fn position_from_offsets(
+    area_w: u32,
+    area_h: u32,
+    win_w: u32,
+    win_h: u32,
+    right_offset: i32,
+    bottom_offset: i32,
+) -> (i32, i32) {
+    let x = area_w as i32 - win_w as i32 - right_offset;
+    let y = area_h as i32 - win_h as i32 - bottom_offset;
     (x.max(0), y.max(0))
 }
 
-/// 終了時に透明ウィンドウの現在サイズを設定へ保存し、次回起動で復元できるようにする。
-/// 位置は解像度非依存にするため保存せず、起動時は常に右下オフセットで配置する。
-fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
-    let Some(win) = app_handle.get_webview_window("main") else {
-        return;
-    };
-    // 全画面のまま終了した場合はモニタ全体サイズを保存しないよう除外する。
-    if matches!(win.is_fullscreen(), Ok(true)) {
+/// 既定の右下オフセットでのウィンドウ位置。
+pub(crate) fn default_window_position(area_w: u32, area_h: u32, win_w: u32, win_h: u32) -> (i32, i32) {
+    position_from_offsets(
+        area_w,
+        area_h,
+        win_w,
+        win_h,
+        DEFAULT_RIGHT_OFFSET,
+        DEFAULT_BOTTOM_OFFSET,
+    )
+}
+
+/// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。
+fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if window.label() != "main" {
         return;
     }
-    let (Ok(size), Ok(scale)) = (win.outer_size(), win.scale_factor()) else {
+    if !matches!(
+        event,
+        tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
+    ) {
+        return;
+    }
+    if matches!(window.is_fullscreen(), Ok(true)) {
+        return;
+    }
+    let (Ok(Some(monitor)), Ok(pos), Ok(size)) = (
+        window.current_monitor(),
+        window.outer_position(),
+        window.outer_size(),
+    ) else {
         return;
     };
-    let logical = size.to_logical::<f64>(scale);
+    let area = monitor.size();
+    let ah = area.height as i32;
+    let (w, h) = (size.width as i32, size.height as i32);
+
+    // 横位置（右端基準）は以前指定の固定値なので触らない。縦位置だけ上端スナップする。
+    if pos.y.abs() <= SNAP_THRESHOLD && pos.y != 0 {
+        // 再配置すると再度 Moved が飛ぶので、そこでキャッシュする。
+        let _ = window.set_position(PhysicalPosition::new(pos.x, 0));
+        return;
+    }
+
+    // サイズ（論理px）と下端からの縦オフセットをキャッシュ（終了時に保存）。横位置は覚えない。
+    let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+    let layout = CachedLayout {
+        width: w as f64 / scale,
+        height: h as f64 / scale,
+        bottom_offset: ah - (pos.y + h),
+    };
+    *window.state::<WindowLayoutCache>().inner.lock().unwrap() = Some(layout);
+}
+
+/// 終了時に、生存中のイベントで控えておいたサイズと縦オフセットを設定へ保存する。
+/// `RunEvent::Exit` ではウィンドウ座標を取得できないため、キャッシュ値のみを書き出す。
+/// 横位置は以前指定の固定値を使うため保存しない。
+fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
+    let Some(layout) = *app_handle.state::<WindowLayoutCache>().inner.lock().unwrap() else {
+        return;
+    };
     let state = app_handle.state::<AppState>();
     let mut patch = serde_json::Map::new();
     patch.insert(
         "PICOAGENT_WINDOW_WIDTH_PX".to_string(),
-        serde_json::json!(logical.width.round().to_string()),
+        serde_json::json!(layout.width.round().to_string()),
     );
     patch.insert(
         "PICOAGENT_WINDOW_HEIGHT_PX".to_string(),
-        serde_json::json!(logical.height.round().to_string()),
+        serde_json::json!(layout.height.round().to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_WINDOW_BOTTOM_PX".to_string(),
+        serde_json::json!(layout.bottom_offset.to_string()),
     );
     if let Err(error) = state.config.set_all(patch) {
         log_paths::append_app_log(
             app_handle,
-            &format!("終了時のウィンドウサイズ保存に失敗しました: {error}"),
+            &format!("終了時のウィンドウ位置・サイズ保存に失敗しました: {error}"),
         );
     }
 }
