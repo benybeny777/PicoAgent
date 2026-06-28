@@ -543,7 +543,7 @@ toggleFullscreenButton?.addEventListener("click", event => {
   toggleBubbleFullscreen();
 });
 
-// 右下のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
+// 左上のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
 let resizeStart = null;
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));

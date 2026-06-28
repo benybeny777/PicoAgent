@@ -78,7 +78,7 @@ textarea { display:block; width:100%; min-height:62px; max-height:180px; resize:
 textarea:focus { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.1); }
 button { position:absolute; right:7px; bottom:7px; height:32px; padding:0 12px; border:0; border-radius:9px; color:white; background:var(--accent); font-weight:700; font-size:11px; cursor:pointer; }
 button:disabled { opacity:.48; cursor:default; }
-.bubble-resize { position:absolute; z-index:4; right:3px; bottom:3px; width:16px; height:16px; padding:0; border:0; border-radius:0 0 5px 0; background:linear-gradient(135deg,transparent 0 42%,rgba(129,117,135,.55) 43% 51%,transparent 52% 62%,rgba(129,117,135,.55) 63% 71%,transparent 72%); cursor:nwse-resize; touch-action:none; }
+.bubble-resize { position:absolute; z-index:4; left:3px; top:3px; right:auto; bottom:auto; width:16px; height:16px; padding:0; border:0; border-radius:5px 0 0 0; background:linear-gradient(315deg,transparent 0 42%,rgba(129,117,135,.55) 43% 51%,transparent 52% 62%,rgba(129,117,135,.55) 63% 71%,transparent 72%); cursor:nwse-resize; touch-action:none; }
 .bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
 .bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .status { flex:0 0 auto; min-height:14px; margin-top:6px; color:var(--muted); font-size:9px; }
