@@ -714,19 +714,26 @@ bubbleResize.addEventListener("pointerdown", event => {
     height: rect.height,
     left: bubble.offsetLeft,
     top: bubble.offsetTop,
+    right: bubble.offsetLeft + rect.width,
+    bottom: bubble.offsetTop + rect.height,
   };
   bubbleResize.setPointerCapture(event.pointerId);
 });
 bubbleResize.addEventListener("pointermove", event => {
   if (!resizeStart) return;
   const margin = 12;
-  const desiredWidth = Math.max(180, resizeStart.width + event.clientX - resizeStart.x);
-  const desiredHeight = Math.max(92, resizeStart.height + event.clientY - resizeStart.y);
-  const width = Math.min(desiredWidth, document.documentElement.clientWidth - margin * 2);
-  const height = Math.min(desiredHeight, document.documentElement.clientHeight - margin * 2);
+  const maxLeft = resizeStart.right - 180;
+  const maxTop = resizeStart.bottom - 92;
+  const desiredLeft = resizeStart.left + event.clientX - resizeStart.x;
+  const desiredTop = resizeStart.top + event.clientY - resizeStart.y;
+  const left = clampNumber(desiredLeft, margin, Math.max(margin, maxLeft));
+  const top = clampNumber(desiredTop, margin, Math.max(margin, maxTop));
+  const width = Math.min(resizeStart.right - left, document.documentElement.clientWidth - margin * 2);
+  const height = Math.min(resizeStart.bottom - top, document.documentElement.clientHeight - margin * 2);
   bubble.style.width = `${Math.round(width)}px`;
   bubble.style.height = `${Math.round(height)}px`;
-  placeBubbleAwayFromCharacter(width, height, resizeStart.left, resizeStart.top);
+  bubble.style.left = `${Math.round(left)}px`;
+  bubble.style.top = `${Math.round(top)}px`;
 });
 async function finishBubbleResize(event) {
   if (!resizeStart) return;
