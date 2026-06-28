@@ -103,7 +103,6 @@ impl Tool for MsOfficeTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_DOCUMENT_ROOT", "Office/PDF 操作の許可ルート", "text", &home()),
-            Field::new("PICOAGENT_POWERSHELL_PATH", "PowerShell 実行ファイルパス", "text", "powershell"),
             Field::new("PICOAGENT_MS_OFFICE_TIMEOUT_SECS", "Microsoft Office 操作タイムアウト秒（5〜300）", "text", "120"),
         ]
     }
@@ -139,7 +138,7 @@ impl Tool for MsOfficeTool {
         if let Err(error) = std::fs::write(&script_path, OFFICE_SCRIPT) {
             return format!("エラー: PowerShell スクリプト作成に失敗しました: {}", error);
         }
-        let mut command = Command::new(cfg.get("PICOAGENT_POWERSHELL_PATH", "powershell"));
+        let mut command = Command::new("powershell");
         command
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(&script_path)
