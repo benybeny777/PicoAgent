@@ -47,10 +47,168 @@ function el(tag, props = {}, children = []) {
   return node;
 }
 
+const MODEL_GROUPS = {
+  OPENAI_MODEL: [
+    {
+      label: "GPT-5.5",
+      options: [
+        { value: "gpt-5.5", label: "標準（最高品質）", hint: "OpenAI の最上位候補。品質優先のときに使います。" },
+      ],
+    },
+    {
+      label: "GPT-5.4",
+      options: [
+        { value: "gpt-5.4", label: "標準", hint: "品質と速度のバランス候補です。" },
+        { value: "gpt-5.4-mini", label: "mini", hint: "低コスト・低遅延の既定候補です。" },
+        { value: "gpt-5.4-nano", label: "nano", hint: "最軽量候補です。" },
+      ],
+    },
+  ],
+  PICOAGENT_ANTHROPIC_MODEL: [
+    {
+      label: "Claude Opus",
+      options: [
+        { value: "claude-opus-4-8", label: "4.8", hint: "Claude の高品質候補です。" },
+      ],
+    },
+    {
+      label: "Claude Sonnet",
+      options: [
+        { value: "claude-sonnet-4-6", label: "4.6", hint: "Claude の標準候補です。" },
+      ],
+    },
+    {
+      label: "Claude Haiku",
+      options: [
+        { value: "claude-haiku-4-5", label: "4.5", hint: "Claude の軽量候補です。" },
+      ],
+    },
+  ],
+  PICOAGENT_DEEPSEEK_MODEL: [
+    {
+      label: "DeepSeek V4",
+      options: [
+        { value: "deepseek-v4-flash", label: "Flash", hint: "DeepSeek の標準・低コスト候補です。" },
+        { value: "deepseek-v4-pro", label: "Pro", hint: "DeepSeek の高品質候補です。" },
+      ],
+    },
+    {
+      label: "旧互換",
+      options: [
+        { value: "deepseek-chat", label: "chat（旧互換）", hint: "旧 API 互換名です。新規設定は V4 Flash 推奨です。" },
+        { value: "deepseek-reasoner", label: "reasoner（旧互換）", hint: "旧 API 互換名です。新規設定は V4 Flash + Thinking 推奨です。" },
+      ],
+    },
+  ],
+  PICOAGENT_GEMINI_MODEL: [
+    {
+      label: "Gemini 2.5",
+      options: [
+        { value: "gemini-2.5-flash", label: "Flash", hint: "速度と費用を抑える候補です。" },
+        { value: "gemini-2.5-pro", label: "Pro", hint: "品質優先の候補です。" },
+      ],
+    },
+  ],
+  PICOAGENT_XAI_MODEL: [
+    {
+      label: "Grok",
+      options: [
+        { value: "grok-4.3", label: "4.3", hint: "xAI の汎用主要候補です。" },
+        { value: "grok-build-0.1", label: "Build 0.1", hint: "コーディング用途向けの候補です。" },
+      ],
+    },
+  ],
+  PICOAGENT_MISTRAL_MODEL: [
+    {
+      label: "Mistral",
+      options: [
+        { value: "mistral-medium-latest", label: "Medium", hint: "Mistral の標準候補です。" },
+        { value: "mistral-small-latest", label: "Small", hint: "軽量候補です。" },
+        { value: "mistral-large-latest", label: "Large", hint: "高品質候補です。" },
+      ],
+    },
+    {
+      label: "Ministral",
+      options: [
+        { value: "ministral-14b-latest", label: "14B", hint: "小型モデルの高品質候補です。" },
+        { value: "ministral-8b-latest", label: "8B", hint: "小型モデルの標準候補です。" },
+        { value: "ministral-3b-latest", label: "3B", hint: "小型モデルの軽量候補です。" },
+      ],
+    },
+  ],
+};
+
+function groupedModelField(key, label, value, groups, options = {}) {
+  const hidden = el("input", { type: "hidden", value: value || "" });
+  inputs.set(key, hidden);
+
+  const family = el("select");
+  const size = el("select");
+  const custom = el("input", { type: "text", placeholder: "モデルIDを直接入力", value: value || "" });
+  const hint = el("div", { className: "hint" });
+  const wrapper = el("div", { className: "field model-picker" }, [
+    el("label", { textContent: label }),
+    family,
+    size,
+    custom,
+    hint,
+    hidden,
+  ]);
+  const customGroup = { label: "カスタム", options: [{ value: "__custom__", label: "直接入力", hint: "一覧にないモデルIDを入力します。" }] };
+  const allGroups = options.allowCustom === false ? groups : [...groups, customGroup];
+  let initialFamily = allGroups.findIndex(group => group.options.some(option => option.value === value));
+  if (initialFamily < 0) initialFamily = value ? allGroups.length - 1 : 0;
+
+  function rebuildSize() {
+    const group = allGroups[Number(family.value)] || allGroups[0];
+    size.innerHTML = "";
+    for (const option of group.options) {
+      size.append(el("option", {
+        value: option.value,
+        textContent: option.label,
+        selected: option.value === hidden.value,
+      }));
+    }
+    const customMode = group === customGroup;
+    size.hidden = customMode;
+    custom.hidden = !customMode;
+    if (customMode) {
+      hidden.value = custom.value.trim();
+      hint.textContent = customGroup.options[0].hint;
+      return;
+    }
+    if (!group.options.some(option => option.value === hidden.value)) {
+      hidden.value = group.options[0]?.value || "";
+    }
+    size.value = hidden.value;
+    hint.textContent = group.options.find(option => option.value === hidden.value)?.hint || "";
+  }
+
+  for (const [index, group] of allGroups.entries()) {
+    family.append(el("option", {
+      value: String(index),
+      textContent: group.label,
+      selected: index === initialFamily,
+    }));
+  }
+  family.addEventListener("change", rebuildSize);
+  size.addEventListener("change", () => {
+    hidden.value = size.value;
+    const group = allGroups[Number(family.value)] || allGroups[0];
+    hint.textContent = group.options.find(option => option.value === hidden.value)?.hint || "";
+  });
+  custom.addEventListener("input", () => { hidden.value = custom.value.trim(); });
+  rebuildSize();
+  return wrapper;
+}
+
 // 1つの設定項目を描画して inputs に登録する。
 function field(key, label, type, value, placeholder) {
   if (key === "PICOAGENT_LOCAL_MODEL_PRESET") {
     return localModelPresetField(key, label, value || "auto");
+  }
+  if (MODEL_GROUPS[key]) {
+    return groupedModelField(key, label, value || placeholder || "", MODEL_GROUPS[key]);
   }
   if (type === "textarea") {
     const ta = el("textarea", { value: value ?? "", placeholder: placeholder || "" });
@@ -75,20 +233,34 @@ function field(key, label, type, value, placeholder) {
 }
 
 function localModelPresetField(key, label, value) {
-  const options = [
-    { value: "auto", label: "自動（初回だけPC性能から選ぶ）" },
-    ...(data.localModelPresets || []).map(preset => ({
-      value: preset.id,
-      label: `${preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize}`,
-    })),
-    { value: "custom", label: "カスタムURLを使う" },
+  const presets = data.localModelPresets || [];
+  const groups = [
+    {
+      label: "自動",
+      options: [{ value: "auto", label: "PC性能から自動選択", hint: localModelPresetHint("auto") }],
+    },
+    {
+      label: "Gemma",
+      options: presets.filter(preset => ["small", "balanced", "large"].includes(preset.id)).map(preset => ({
+        value: preset.id,
+        label: preset.localSize || preset.label,
+        hint: localModelPresetHint(preset.id),
+      })),
+    },
+    {
+      label: "Qwen",
+      options: presets.filter(preset => preset.id.startsWith("qwen")).map(preset => ({
+        value: preset.id,
+        label: preset.localSize || preset.label,
+        hint: localModelPresetHint(preset.id),
+      })),
+    },
+    {
+      label: "カスタム",
+      options: [{ value: "custom", label: "URL指定", hint: localModelPresetHint("custom") }],
+    },
   ];
-  const wrapper = selectField(key, label, value, options);
-  const hint = el("div", { className: "hint", textContent: localModelPresetHint(value) });
-  const select = wrapper.querySelector("select");
-  select.addEventListener("change", () => { hint.textContent = localModelPresetHint(select.value); });
-  wrapper.append(hint);
-  return wrapper;
+  return groupedModelField(key, label, value, groups.filter(group => group.options.length > 0), { allowCustom: false });
 }
 
 function localModelPresetHint(value) {
@@ -414,9 +586,9 @@ async function render() {
   const modelField = field("PICOAGENT_MODEL", "モデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
   global.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
-  // local はモデルを「叩くAI」タブのプリセットで選ぶので、基本タブのモデル欄（候補に
-  // エンジン報告の生IDなど不要な項目が混ざる）は隠す。ollama/openai では表示する。
-  function updateModelFieldVisibility() { modelField.hidden = providerSelect.value === "local"; }
+  // Ollama だけは実行中のローカル一覧を基本タブのモデル欄に出す。
+  // 他プロバイダは「叩くAI」タブで種類とサイズを選ぶため、ここでは隠す。
+  function updateModelFieldVisibility() { modelField.hidden = providerSelect.value !== "ollama"; }
   updateModelFieldVisibility();
   global.append(field("PICOAGENT_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
   global.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
@@ -536,6 +708,11 @@ function providerDefaultModel(providerId) {
   if (!provider) return "";
   if (providerId === "ollama") return inputs.get("OLLAMA_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "openai") return inputs.get("OPENAI_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "anthropic") return inputs.get("PICOAGENT_ANTHROPIC_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "deepseek") return inputs.get("PICOAGENT_DEEPSEEK_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "gemini") return inputs.get("PICOAGENT_GEMINI_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "xai") return inputs.get("PICOAGENT_XAI_MODEL")?.value || provider.defaultModel || "";
+  if (providerId === "mistral") return inputs.get("PICOAGENT_MISTRAL_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "local") {
     const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || provider.defaultModel || "balanced";
     return preset === "auto" ? (provider.defaultModel || "balanced") : preset;
@@ -573,7 +750,12 @@ function collect() {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }
   if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
-  if (patch.PICOAGENT_PROVIDER === "openai" && patch.PICOAGENT_MODEL) patch.OPENAI_MODEL = patch.PICOAGENT_MODEL;
+  if (patch.PICOAGENT_PROVIDER === "openai") patch.PICOAGENT_MODEL = patch.OPENAI_MODEL || "";
+  if (patch.PICOAGENT_PROVIDER === "anthropic") patch.PICOAGENT_MODEL = patch.PICOAGENT_ANTHROPIC_MODEL || "";
+  if (patch.PICOAGENT_PROVIDER === "deepseek") patch.PICOAGENT_MODEL = patch.PICOAGENT_DEEPSEEK_MODEL || "";
+  if (patch.PICOAGENT_PROVIDER === "gemini") patch.PICOAGENT_MODEL = patch.PICOAGENT_GEMINI_MODEL || "";
+  if (patch.PICOAGENT_PROVIDER === "xai") patch.PICOAGENT_MODEL = patch.PICOAGENT_XAI_MODEL || "";
+  if (patch.PICOAGENT_PROVIDER === "mistral") patch.PICOAGENT_MODEL = patch.PICOAGENT_MISTRAL_MODEL || "";
   if (patch.PICOAGENT_PROVIDER === "local") {
     const preset = patch.PICOAGENT_LOCAL_MODEL_PRESET || "auto";
     patch.PICOAGENT_MODEL = preset === "auto" ? "" : preset;

@@ -209,6 +209,19 @@ fn bounded_cwd(base: &Path, cwd: &str) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(windows)]
+fn is_protected_edit_path(path: &Path) -> bool {
+    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    s.starts_with(r"c:\windows")
+        || s.starts_with(r"c:\program files\")
+        || s.starts_with(r"c:\program files (x86)\")
+}
+
+#[cfg(not(windows))]
+fn is_protected_edit_path(_path: &Path) -> bool {
+    false
+}
+
 fn command_tokens(program: &str, args: &[String]) -> Vec<String> {
     let mut tokens = Vec::with_capacity(args.len() + 1);
     tokens.push(program.to_string());
@@ -362,6 +375,12 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
         Ok(cwd) => cwd,
         Err(error) => return format!("エラー: {error}"),
     };
+    if is_protected_edit_path(&cwd) {
+        return format!(
+            "エラー: Windows / Program Files 配下は編集不可のため、コマンド実行先にできません: {}",
+            cwd.display()
+        );
+    }
     let default_timeout = cfg
         .get("PICOAGENT_COMMAND_TIMEOUT_SECS", "30")
         .parse::<u64>()

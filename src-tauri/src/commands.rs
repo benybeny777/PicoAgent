@@ -41,6 +41,8 @@ pub struct AppState {
     pub memory_context: Mutex<String>,
     /// 直近の自発雑談（独り言）。繰り返しを避けるため次回生成へ「避ける文」として渡す。
     pub recent_chatter: Mutex<Vec<String>>,
+    /// チャットで確認待ちの未許可コマンド。ユーザーが「許可」または「キャンセル」と返すまで保持する。
+    pub pending_command: Mutex<Option<crate::tools::run_command::PendingCommandApproval>>,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ impl AppState {
             character_id: Mutex::new(String::new()),
             memory_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
+            pending_command: Mutex::new(None),
         }
     }
 
@@ -174,6 +177,20 @@ fn log_command_error(app: &AppHandle, context: &str, error: impl std::fmt::Displ
     let message = format!("{context}: {error}");
     crate::log_paths::append_app_log(app, &message);
     message
+}
+
+fn is_approval_text(text: &str) -> bool {
+    matches!(
+        text.trim().to_lowercase().as_str(),
+        "許可" | "実行して" | "実行していい" | "ok" | "yes" | "y"
+    )
+}
+
+fn is_cancel_text(text: &str) -> bool {
+    matches!(
+        text.trim().to_lowercase().as_str(),
+        "キャンセル" | "やめて" | "中止" | "cancel" | "no" | "n"
+    )
 }
 
 #[tauri::command]
@@ -382,6 +399,32 @@ pub async fn pet_send(
     }
     let user_text = text.clone();
 
+    let pending = state.pending_command.lock().unwrap().clone();
+    if let Some(pending) = pending {
+        if is_approval_text(&text) {
+            *state.pending_command.lock().unwrap() = None;
+            let reply = crate::tools::run_command::execute_pending(&pending).await;
+            let mut convo = state.messages.lock().unwrap().clone();
+            convo.push(Message::new("user", user_text));
+            convo.push(Message::new("assistant", reply.clone()));
+            let compacted = compacted_conversation(&convo);
+            *state.messages.lock().unwrap() = compacted.clone();
+            crate::history::save(&app, &active_character_id(&state), &compacted);
+            return Ok(json!({ "reply": reply }));
+        }
+        if is_cancel_text(&text) {
+            *state.pending_command.lock().unwrap() = None;
+            let reply = "コマンド実行をキャンセルしました。".to_string();
+            let mut convo = state.messages.lock().unwrap().clone();
+            convo.push(Message::new("user", user_text));
+            convo.push(Message::new("assistant", reply.clone()));
+            let compacted = compacted_conversation(&convo);
+            *state.messages.lock().unwrap() = compacted.clone();
+            crate::history::save(&app, &active_character_id(&state), &compacted);
+            return Ok(json!({ "reply": reply }));
+        }
+    }
+
     let id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let provider = match providers::get(&id) {
@@ -416,6 +459,22 @@ pub async fn pet_send(
 
     match result {
         Ok(reply) => {
+            if let Some(pending) = crate::tools::run_command::parse_approval_marker(&reply) {
+                *state.pending_command.lock().unwrap() = Some(pending.clone());
+                let prompt = crate::tools::run_command::approval_prompt(&pending);
+                let mut refreshed = state.messages.lock().unwrap().clone();
+                if let Some(last) = refreshed
+                    .iter_mut()
+                    .rev()
+                    .find(|message| message.role == "assistant")
+                {
+                    last.content = prompt.clone();
+                }
+                let compacted = compacted_conversation(&refreshed);
+                *state.messages.lock().unwrap() = compacted.clone();
+                crate::history::save(&app, &active_character_id(&state), &compacted);
+                return Ok(json!({ "reply": prompt }));
+            }
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
         }
         Err(e) => {
@@ -933,6 +992,13 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "localModelPresets": crate::providers::local::LOCAL_MODEL_PRESETS.iter().map(|preset| json!({
             "id": preset.id,
             "label": preset.label,
+            "localSize": match preset.id {
+                "small" => "軽量 E2B",
+                "balanced" => "標準 E4B",
+                "large" => "高品質 12B",
+                "qwen3" => "4B Instruct",
+                _ => preset.label,
+            },
             "url": preset.url,
             "ctx": preset.ctx,
             "recommendedVramGb": preset.recommended_vram_gb,

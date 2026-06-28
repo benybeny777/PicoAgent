@@ -8,6 +8,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::process::Command;
 
@@ -19,8 +20,19 @@ const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 32 * 1024;
 const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
+const APPROVAL_MARKER: &str = "__PICOAGENT_COMMAND_APPROVAL__";
 
 pub struct RunCommandTool;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PendingCommandApproval {
+    pub token: String,
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: String,
+    pub timeout_secs: u64,
+    pub reason: String,
+}
 
 fn home() -> String {
     dirs::home_dir()
@@ -63,6 +75,19 @@ fn bounded_cwd(base: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
             target.display()
         ))
     }
+}
+
+#[cfg(windows)]
+fn is_protected_edit_path(path: &Path) -> bool {
+    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    s.starts_with(r"c:\windows")
+        || s.starts_with(r"c:\program files\")
+        || s.starts_with(r"c:\program files (x86)\")
+}
+
+#[cfg(not(windows))]
+fn is_protected_edit_path(_path: &Path) -> bool {
+    false
 }
 
 fn parse_args(args: &Value) -> Result<Vec<String>, String> {
@@ -122,6 +147,37 @@ fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
                 .zip(tokens.iter())
                 .all(|(allowed, actual)| allowed == actual)
     })
+}
+
+fn approval_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("cmd{nanos}")
+}
+
+fn approval_marker(pending: &PendingCommandApproval) -> String {
+    format!(
+        "{}{}",
+        APPROVAL_MARKER,
+        serde_json::to_string(pending).unwrap_or_else(|_| "{}".to_string())
+    )
+}
+
+pub fn parse_approval_marker(text: &str) -> Option<PendingCommandApproval> {
+    let raw = text.strip_prefix(APPROVAL_MARKER)?;
+    serde_json::from_str(raw).ok()
+}
+
+pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
+    format!(
+        "このコマンドはまだ許可されていません。\n\nコマンド: {} {}\n作業ディレクトリ: {}\n理由: {}\n\n実行してよければ「許可」、やめるなら「キャンセル」と送ってください。今回はこの1回だけ許可します。",
+        pending.program,
+        pending.args.join(" "),
+        pending.cwd,
+        pending.reason
+    )
 }
 
 fn trim_output(label: &str, bytes: &[u8]) -> String {
@@ -215,19 +271,15 @@ impl Tool for RunCommandTool {
             Ok(parsed_args) => parsed_args,
             Err(error) => return format!("エラー: {}", error),
         };
-        if !allowed(cfg, program, &parsed_args) {
+        let base = command_root(cfg);
+        let requested_cwd = args.get("cwd").and_then(Value::as_str).unwrap_or(".");
+        let cwd = normalize(&base, requested_cwd);
+        if is_protected_edit_path(&cwd) {
             return format!(
-                "エラー: 許可されていないコマンドです: {} {}",
-                program,
-                parsed_args.join(" ")
+                "エラー: Windows / Program Files 配下は編集不可のため、コマンド実行先にできません: {}",
+                cwd.display()
             );
         }
-
-        let base = command_root(cfg);
-        let cwd = match bounded_cwd(&base, args.get("cwd").and_then(Value::as_str)) {
-            Ok(cwd) => cwd,
-            Err(error) => return format!("エラー: {}", error),
-        };
         let default_timeout = cfg
             .get("PICOAGENT_COMMAND_TIMEOUT_SECS", "30")
             .parse::<u64>()
@@ -240,10 +292,48 @@ impl Tool for RunCommandTool {
             .filter(|value| (1..=120).contains(value))
             .unwrap_or(default_timeout);
 
+        let permission_error = if !allowed(cfg, program, &parsed_args) {
+            Some(format!(
+                "allowlist 未登録: {} {}",
+                program,
+                parsed_args.join(" ")
+            ))
+        } else if let Err(error) = bounded_cwd(&base, Some(requested_cwd)) {
+            Some(error)
+        } else {
+            None
+        };
+        if let Some(reason) = permission_error {
+            return approval_marker(&PendingCommandApproval {
+                token: approval_token(),
+                program: program.to_string(),
+                args: parsed_args,
+                cwd: cwd.to_string_lossy().to_string(),
+                timeout_secs,
+                reason,
+            });
+        }
+
+        execute_approved(program, &parsed_args, &cwd, timeout_secs).await
+    }
+}
+
+pub async fn execute_pending(pending: &PendingCommandApproval) -> String {
+    let cwd = PathBuf::from(&pending.cwd);
+    if is_protected_edit_path(&cwd) {
+        return format!(
+            "エラー: Windows / Program Files 配下は編集不可のため、コマンド実行先にできません: {}",
+            cwd.display()
+        );
+    }
+    execute_approved(&pending.program, &pending.args, &cwd, pending.timeout_secs).await
+}
+
+async fn execute_approved(program: &str, parsed_args: &[String], cwd: &Path, timeout_secs: u64) -> String {
         let mut command = Command::new(program);
         command
-            .args(&parsed_args)
-            .current_dir(&cwd)
+            .args(parsed_args)
+            .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -268,7 +358,6 @@ impl Tool for RunCommandTool {
         result.push('\n');
         result.push_str(&trim_output("stderr", &output.stderr));
         result
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(RunCommandTool) } }

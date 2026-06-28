@@ -555,6 +555,11 @@ pub async fn run(
             Some(cs) if !cs.is_empty() => {
                 for c in cs {
                     let content = tools::dispatch(cfg, &c.name, c.arguments.clone()).await;
+                    if c.name == "run_command"
+                        && crate::tools::run_command::parse_approval_marker(&content).is_some()
+                    {
+                        return direct_answer(messages, content);
+                    }
                     messages.push(Message {
                         role: "tool".to_string(),
                         content,

@@ -10,6 +10,9 @@ use crate::message::{Field, Message, ToolCall};
 
 pub struct OpenAI;
 
+const DEFAULT_MODEL: &str = "gpt-5.4-mini";
+const STATIC_MODELS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+
 fn base_url(cfg: &Config) -> String {
     cfg.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         .trim_end_matches('/')
@@ -105,25 +108,25 @@ impl Provider for OpenAI {
         vec![
             Field::new("OPENAI_BASE_URL", "エンドポイント", "text", "https://api.openai.com/v1"),
             Field::new("OPENAI_API_KEY", "API キー", "password", "sk-..."),
-            Field::new("OPENAI_MODEL", "既定モデル", "text", "gpt-4o-mini"),
+            Field::new("OPENAI_MODEL", "既定モデル", "text", DEFAULT_MODEL),
         ]
     }
     fn default_model(&self, cfg: &Config) -> String {
-        cfg.get("OPENAI_MODEL", "gpt-4o-mini")
+        cfg.get("OPENAI_MODEL", DEFAULT_MODEL)
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let key = api_key(cfg);
         if key.is_empty() {
-            return Ok(Vec::new());
+            return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let url = format!("{}/models", base_url(cfg));
         let res = reqwest::Client::new().get(&url).bearer_auth(&key).send().await?;
         if !res.status().is_success() {
-            anyhow::bail!("OpenAI /models failed: {}", res.status());
+            return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let data: Value = res.json().await?;
-        Ok(data
+        let mut models: Vec<String> = data
             .get("data")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -131,7 +134,13 @@ impl Provider for OpenAI {
                     .filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(String::from))
                     .collect()
             })
-            .unwrap_or_default())
+            .unwrap_or_default();
+        for model in STATIC_MODELS {
+            if !models.iter().any(|item| item == model) {
+                models.push((*model).to_string());
+            }
+        }
+        Ok(models)
     }
 
     async fn is_up(&self, cfg: &Config) -> bool {

@@ -6,6 +6,18 @@
 
 ## 2026-06-28
 
+### 主要LLMプロバイダとモデル選択を追加
+
+- 叩く AI に `anthropic`（Claude）/ `deepseek`（DeepSeek）/ `xai`（Grok）/ `mistral` プロバイダを追加した。Claude は Anthropic Messages API の `tool_use` / `tool_result` へ正規形ツール呼び出しを変換し、それ以外の追加プロバイダは OpenAI 互換 API を使う。
+- OpenAI の既定候補を `gpt-5.4-mini` に更新し、OpenAI / Claude / Gemini / DeepSeek / xAI / Mistral の主要モデルを設定画面で「種類 → サイズ」から選べるようにした。
+- ローカルモデルも `auto` / Gemma / Qwen / custom の種類からサイズを選ぶ UI に変更し、選択中プロバイダのモデルを保存時に `PICOAGENT_MODEL` へ同期するようにした。
+
+### コマンド実行のチャット確認と保護パスを追加
+
+- `run_command` で未登録コマンドまたは許可ルート外 cwd が必要になった場合、即エラーではなくチャット上で「許可」/「キャンセル」を求めるようにした。許可は保留中の1件だけに効き、allowlist へ自動追記しない。
+- `C:\Windows` と `C:\Program Files*` 配下は編集不可にし、コマンド実行先、スケジュール実行先、`workspace_files` の書き込み・追記・フォルダ作成で拒否するようにした。
+- まいの既定人格を「おっとりして優しいお姉さん」として明示した。
+
 ### cron風タスクスケジューラを追加
 
 - `task_scheduler` スキルを追加し、チャットから指定時刻・曜日・cron風5フィールドでタスクを追加・一覧・削除・有効/無効化できるようにした。

@@ -60,6 +60,19 @@ fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(windows)]
+fn is_protected_edit_path(path: &Path) -> bool {
+    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    s.starts_with(r"c:\windows")
+        || s.starts_with(r"c:\program files\")
+        || s.starts_with(r"c:\program files (x86)\")
+}
+
+#[cfg(not(windows))]
+fn is_protected_edit_path(_path: &Path) -> bool {
+    false
+}
+
 fn trim_to_bytes(content: &str, max_bytes: usize) -> String {
     if content.len() <= max_bytes {
         return content.to_string();
@@ -193,6 +206,12 @@ impl Tool for WorkspaceFilesTool {
                 Err(error) => format!("エラー: 読み取りに失敗しました（{}）: {}", error, target.display()),
             },
             "write" | "append" => {
+                if is_protected_edit_path(&target) {
+                    return format!(
+                        "エラー: Windows / Program Files 配下は編集不可です: {}",
+                        target.display()
+                    );
+                }
                 let content = match content_arg(&args) {
                     Ok(content) => content,
                     Err(error) => return format!("エラー: {}", error),
@@ -223,10 +242,18 @@ impl Tool for WorkspaceFilesTool {
                     Err(error) => format!("エラー: 書き込みに失敗しました（{}）: {}", error, target.display()),
                 }
             }
-            "mkdir" => match std::fs::create_dir_all(&target) {
-                Ok(()) => format!("OK: フォルダを作成しました: {}", target.display()),
-                Err(error) => format!("エラー: フォルダ作成に失敗しました（{}）: {}", error, target.display()),
-            },
+            "mkdir" => {
+                if is_protected_edit_path(&target) {
+                    return format!(
+                        "エラー: Windows / Program Files 配下は編集不可です: {}",
+                        target.display()
+                    );
+                }
+                match std::fs::create_dir_all(&target) {
+                    Ok(()) => format!("OK: フォルダを作成しました: {}", target.display()),
+                    Err(error) => format!("エラー: フォルダ作成に失敗しました（{}）: {}", error, target.display()),
+                }
+            }
             "stat" => match std::fs::metadata(&target) {
                 Ok(meta) => format!(
                     "種類: {}\nサイズ: {} バイト\n読み取り専用: {}",

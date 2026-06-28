@@ -39,20 +39,20 @@ npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vul
 npm run dev
 ```
 
-- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。追加プリセットとして `qwen3` も選べます。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示されます。設定画面からローカルモデルを変更すると、必要なモデルを取得して同梱エンジンを再起動します。
+- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。追加プリセットとして `qwen3` も選べます。設定画面ではローカルモデルを「種類 → サイズ」で選択できます。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示され、モデル変更時は必要なモデルを取得して同梱エンジンを再起動します。
 - Ollama を使いたい場合は `ollama serve` 後に右クリック →「設定…」でプロバイダを切り替えます（任意）。Ollama 選択時はローカルのモデル一覧を読み込み、モデル欄から選べます。
 
 > [!NOTE]
 > 初回の `npm run dev` / `npm run build` は Rust の crate 取得・コンパイルで時間がかかります（ネットワーク必須）。モデル DL も初回のみネットが必要です。
 
-OpenAI 互換の叩く AI を使う場合（費用が発生します）は、起動後に右クリック →「設定…」で API キーとプロバイダを設定します。
+OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral などのクラウド系の叩く AI を使う場合（費用が発生します）は、起動後に右クリック →「設定…」でプロバイダ、API キー、モデルを設定します。主要プロバイダは「叩くAI」タブ内でモデルを「種類 → サイズ」から選べます。
 
 ---
 
 ## ✨ 特徴
 
 - **Ollama 不要・ローカル完結** — 推論エンジン同梱、初回 DL の gemma4 でそのまま動く（既定 `local`）。
-- **叩く AI を差し替え可能** — local / Ollama / OpenAI 互換を同梱。コネクタを足せば他社 AI にも切替できる。
+- **叩く AI を差し替え可能** — local / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral を同梱。コネクタを足せば他社 AI にも切替できる。
 - **エージェント機能を追加可能** — ツールコネクタを足すと、モデルが function calling で呼び出せる。
 - **原則Web検索** — 通常の質問ではローカルモデルの判断に頼らずWeb検索してから参照元のハイパーリンク付きで回答する。短い挨拶は検索に引っ張られないよう例外扱いし、キャラクター本人として返す。
 - **設定画面ですべて設定** — 右クリック →「設定…」で叩く AI・モデル・接続先・API キー・ツール設定などを GUI 編集。軽い設定は保存で即反映、叩く AI・モデル・音声・キャラクターなど重い設定は確認のうえ再起動して起動画面でまとめて反映。
@@ -103,7 +103,7 @@ graph LR
 
 日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
 
-cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル」タブでも `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true`、許可ルート、allowlist に通ったものだけ実行します。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。
+cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル」タブでも `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」または「キャンセル」を求め、許可された1回だけ実行します。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。
 
 設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル」のタブで構成されます。スキル一覧は日常・検索/情報・連携などのカテゴリタブで整理され、各コネクタが申告した設定も自動で増えます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
 
@@ -116,7 +116,11 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | 叩くAI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` | 使用するプロバイダとモデル。既定は同梱ローカルエンジンの `local` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` | 同梱エンジンで使うモデルプリセットやカスタムGGUF URL |
 | OpenAI互換 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI互換プロバイダを使う場合だけ設定 |
+| Claude | `PICOAGENT_ANTHROPIC_API_KEY` / `PICOAGENT_ANTHROPIC_MODEL` | Claude プロバイダを使う場合だけ設定 |
+| DeepSeek | `PICOAGENT_DEEPSEEK_API_KEY` / `PICOAGENT_DEEPSEEK_MODEL` / `PICOAGENT_DEEPSEEK_THINKING` | DeepSeek プロバイダを使う場合だけ設定 |
 | Gemini | `PICOAGENT_GEMINI_API_KEY` / `PICOAGENT_GEMINI_MODEL` | Gemini プロバイダを使う場合だけ設定 |
+| xAI Grok | `PICOAGENT_XAI_API_KEY` / `PICOAGENT_XAI_MODEL` | xAI Grok プロバイダを使う場合だけ設定 |
+| Mistral | `PICOAGENT_MISTRAL_API_KEY` / `PICOAGENT_MISTRAL_MODEL` | Mistral プロバイダを使う場合だけ設定 |
 | Ollama | `OLLAMA_HOST` / `OLLAMA_MODEL` | 任意で外部 Ollama を使う場合だけ設定 |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` | 使用キャラとキャラ別の口調・人格上書き |
 | 表示 | `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` | フキダシ文字サイズ、常に手前表示 |

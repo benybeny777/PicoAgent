@@ -122,10 +122,17 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 | `local`（既定） | 同梱 llama-server `/v1/chat/completions`（OpenAI 互換） | エンジン同梱＋モデル取得済（`engine.rs` が管理）。Ollama 不要 |
 | `ollama` | ローカル Ollama `/api/chat` | `ollama serve` 起動 |
 | `openai` | OpenAI 互換 `/chat/completions` | `OPENAI_API_KEY` 設定（未設定なら `is_up()=false`） |
+| `anthropic` | Anthropic Messages API `/messages` | `PICOAGENT_ANTHROPIC_API_KEY` 設定（未設定なら `is_up()=false`） |
+| `deepseek` | DeepSeek OpenAI 互換 `/chat/completions` | `PICOAGENT_DEEPSEEK_API_KEY` 設定（未設定なら `is_up()=false`） |
 | `gemini` | Gemini の OpenAI 互換 `/v1beta/openai/chat/completions` | `PICOAGENT_GEMINI_API_KEY` 設定（未設定なら `is_up()=false`） |
+| `xai` | xAI OpenAI 互換 `/chat/completions` | `PICOAGENT_XAI_API_KEY` 設定（未設定なら `is_up()=false`） |
+| `mistral` | Mistral OpenAI 互換 `/chat/completions` | `PICOAGENT_MISTRAL_API_KEY` 設定（未設定なら `is_up()=false`） |
 
-`openai` は `OPENAI_BASE_URL` を変えれば OpenAI 本体に限らず OpenAI 形式の任意ゲートウェイに接続できる。
+`openai` は `OPENAI_BASE_URL` を変えれば OpenAI 本体に限らず OpenAI 形式の任意ゲートウェイに接続できる。既定候補は `gpt-5.4-mini` で、設定画面では `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-nano` を種類・サイズで選べる。
+`anthropic` は正規形メッセージとツール呼び出しを Anthropic の `tool_use` / `tool_result` content block に相互変換し、`claude-opus-4-8` / `claude-sonnet-4-6` / `claude-haiku-4-5` を主要候補として表示する。
+`deepseek` は `openai.rs` の `to_wire`/`from_wire` を再利用し、`deepseek-v4-flash` / `deepseek-v4-pro` を主要候補として表示する。`PICOAGENT_DEEPSEEK_THINKING` が有効な場合は V4 系リクエストに `thinking: {type:"enabled"}` を付ける。旧互換の `deepseek-chat` / `deepseek-reasoner` も設定画面から選べるが、新規設定は V4 系を推奨する。
 `gemini` は Google の OpenAI 互換エンドポイントを使い、`openai.rs` の `to_wire`/`from_wire` をそのまま再利用する（裏は OpenAI 互換と同じ）。tools 付きで失敗したら tools 無しで一度だけ再試行する。
+`xai` と `mistral` も OpenAI 互換変換を再利用する。設定画面では xAI は `grok-4.3` / `grok-build-0.1`、Mistral は Medium / Small / Large / Ministral 系の主要候補だけを表示する。
 `local` は `openai.rs` の `to_wire`/`from_wire` を再利用し、tools 非対応テンプレートのモデルでも会話が成立するよう tools 付きで失敗したら tools 無しで再試行する。
 Gemma 等のチャットテンプレートは user/assistant の厳密な交互（かつ user 始まり）を要求し、崩れると 400「Conversation roles must alternate」になる。自発雑談（assistant 発話の差し込み）や履歴復元で assistant が連続・先頭になり得るため、`normalize_for_local` で送信直前に正規化する（system は先頭へ集約、先頭の純 assistant は除去、連続する同 role の user/assistant は内容を連結して1つに畳む。tool 呼び出しを含むメッセージはそのまま通す）。
 
@@ -268,7 +275,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
 - 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
-- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は local では非表示にし（モデルはプリセットで選ぶ）、ollama/openai でのみ表示する。
+- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化する。反映は「軽い設定は実行中に即反映」「重い設定は再起動して起動シーケンスで反映」に分ける。
   - **即反映**: システムプロンプト・長期メモリ・常に手前・フキダシの見た目・自発雑談・キャラ人格の上書き（同一キャラ）・コネクタ固有設定（`cfg.get()` 都度読み）。`pet:ui` イベントで実行中へ反映する。
@@ -311,10 +318,23 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `OLLAMA_MODEL` | `qwen3:8b` | ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | openai | OpenAI 互換エンドポイント |
 | `OPENAI_API_KEY` | （なし） | openai | OpenAI 互換の API キー。未設定なら選択不可 |
-| `OPENAI_MODEL` | `gpt-4o-mini` | openai | OpenAI 互換の既定モデル |
+| `OPENAI_MODEL` | `gpt-5.4-mini` | openai | OpenAI 互換の既定モデル |
+| `PICOAGENT_ANTHROPIC_API_KEY` | （なし） | anthropic | Anthropic API キー。未設定なら選択不可 |
+| `PICOAGENT_ANTHROPIC_MODEL` | `claude-sonnet-4-6` | anthropic | Claude の既定モデル |
+| `PICOAGENT_ANTHROPIC_BASE_URL` | `https://api.anthropic.com/v1` | anthropic | Anthropic Messages API のエンドポイント |
+| `PICOAGENT_DEEPSEEK_API_KEY` | （なし） | deepseek | DeepSeek API キー。未設定なら選択不可 |
+| `PICOAGENT_DEEPSEEK_MODEL` | `deepseek-v4-flash` | deepseek | DeepSeek の既定モデル |
+| `PICOAGENT_DEEPSEEK_THINKING` | `true` | deepseek | DeepSeek V4 系で thinking mode を有効にする |
+| `PICOAGENT_DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | deepseek | DeepSeek OpenAI 互換エンドポイント |
 | `PICOAGENT_GEMINI_API_KEY` | （なし） | gemini | Gemini API キー。未設定なら選択不可 |
 | `PICOAGENT_GEMINI_MODEL` | `gemini-2.5-flash` | gemini | Gemini の既定モデル |
 | `PICOAGENT_GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | gemini | Gemini の OpenAI 互換エンドポイント |
+| `PICOAGENT_XAI_API_KEY` | （なし） | xai | xAI API キー。未設定なら選択不可 |
+| `PICOAGENT_XAI_MODEL` | `grok-4.3` | xai | xAI Grok の既定モデル |
+| `PICOAGENT_XAI_BASE_URL` | `https://api.x.ai/v1` | xai | xAI OpenAI 互換エンドポイント |
+| `PICOAGENT_MISTRAL_API_KEY` | （なし） | mistral | Mistral API キー。未設定なら選択不可 |
+| `PICOAGENT_MISTRAL_MODEL` | `mistral-medium-latest` | mistral | Mistral の既定モデル |
+| `PICOAGENT_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | mistral | Mistral OpenAI 互換エンドポイント |
 | `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` が読み取れるルート |
 | `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
 | `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
@@ -443,7 +463,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 自発雑談（雑談スキル `chitchat`）: `PICOAGENT_CHATTER_ENABLED` が ON のとき、フロントは `[min, max]` 秒のランダム間隔の待機タイマーで `pet_idle_chatter` を呼ぶ。生成した独り言は**先に音声を合成（`prepareSpeech`）してから文字を表示し、表示と同時に読み上げる**（`playPreparedSpeech`。挨拶と同じ同期再生）。入力中・応答中・読み上げ中・全画面中は割り込まず次回へ送る。ユーザー操作（送信・入力欄を開く・会話リセット）や設定変更（`pet:ui`）のたびにタイマーを張り直す。`skills/chitchat/trends.rs` は `PICOAGENT_CHATTER_TOPIC_MODE=auto` で X API（`PICOAGENT_X_BEARER_TOKEN` がある場合）→ Google Trends RSS → ニュースRSSの順に話題メモを取る。`x` / `trends` / `news` / `off` でソースを固定または無効化できる。X API 未設定時は公式X投稿とは断定せず、急上昇ワードやトップニュースの候補として扱う。生成はWeb検索ツールを使わず、生成後は「直前の自発雑談: ...」として会話文脈へ1件積み、通常会話と同じ圧縮・履歴保存に通す。これにより、ユーザーが直後または再起動後に「今の何の話？」と聞いた場合に直前の雑談を参照できる。挨拶・名乗り・自己紹介は出さず、毎回ちがう話題になるよう話題ヒントを擬似ランダムで与え、さらに直近の独り言（`AppState.recent_chatter`、末尾6件）を「避ける文」として渡して繰り返しを防ぐ。雑談の生成は**人格(system)＋現在時刻＋指示だけ**を文脈にし、ユーザー発話（会話履歴）は含めない（小型モデルが入力をオウム返しするのを防ぐため）。`current_time_context()` で現在のローカル日時・時間帯（朝/昼/夕方/夜）を渡し、夜に「日差し」など時間に合わない描写をしないようにする。なお通常会話の返信がユーザー入力のオウム返しになった場合、フロントはそれを読み上げない。話題メモ（ニュース等）は `pet_idle_chatter` が `trends::topic_brief` で1件取得して `topic` 引数で skill へ渡し、出典（記事タイトル＋URL）も受け取る。生成後、返信が話題に触れていれば（返信と記事タイトルの内容バイグラム一致）最も関連する記事URLを末尾へ `参考:` として添える（URL 行は読み上げ対象外。例: 地震の独り言なら地震ニュースのURL）。
 - 目覚まし時計（`alarm` スキル + `alarm.rs`）: フロントは約20秒間隔で `pet_alarms` を取得し、現在のローカル時刻（HH:MM）と曜日が一致する有効なアラームがあれば `pet_alarm_wake` を呼んで**声でやさしく起こす**（生成した起こし文を音声合成→表示→即時再生。生成失敗時は固定の起こし文）。同じ分での二重発火は済みキー集合で防ぐ。一度きり（`repeat=false`）は発火後に `enabled=false` へ。鳴った後はフキダシに `おきたよ！` ボタンを出し、押されるまでは `snooze_minutes`（既定5、1〜60分）おきに同じアラームを再通知する。アラームは時刻・曜日・繰り返し・スヌーズ分数を**チャット（`alarm` スキル）でも設定画面でも**設定できる。設定画面のスキル「目覚まし時計」を開くと、時刻ピッカー＋曜日チェック＋繰り返し/有効/スヌーズ分数/ラベル/削除/追加の専用フォーム（`settings.js` の `buildAlarmEditor`）で編集でき、保存時に `PICOAGENT_ALARMS`（JSON）へ組み立てる。保存先は config。
 - 日常通知（`reminder` / `focus_timer` / `daily.rs`）: フロントは約20秒間隔で `pet_daily_events` を呼び、期限到来したリマインダー・集中終了・作業見守りを吹き出し表示と読み上げで通知する。単発イベントは通知後に無効化し、見守りのような `repeat_minutes` 付きイベントは次回時刻へ進める。起動時の挨拶には `pet_daily_greeting` で時間帯・通知件数・直近のできたことメモを添える。
-- タスクスケジューラ（`task_scheduler` スキル + `scheduler.rs`）: バックエンドは起動時に30秒間隔の常駐タスクを開始し、`PICOAGENT_SCHEDULED_TASKS` を毎回読み直して現在分に一致するタスクを実行する。同じ分の二重実行は `last_run_minute` で防ぎ、`repeat=false` のタスクは初回実行時に無効化する。スケジュールは `time`（HH:MM）+ `days`（mon..sun / 平日 / 週末 / 毎日）または cron 風5フィールド（分 時 日 月 曜日、`*` / 数値 / カンマ区切り / `*/N`）で指定する。`kind=command` は `program` + `args` を shell なしで実行し、`PICOAGENT_COMMAND_ENABLED=true`、`PICOAGENT_COMMAND_ROOT` 配下、`PICOAGENT_COMMAND_ALLOWLIST` prefix 一致を必須にする。`kind=tool` は `tool_name` と `tool_args` を `tools::dispatch` に渡し、時間指定で天気・Web取得・外部連携などのスキル動作を実行できる。登録・一覧・削除・有効/無効化はチャットから `task_scheduler` スキルで行え、設定画面の「スキル」タブでも JSON を編集できる。実行結果は `app.<日付>.log` へ記録する。
+- タスクスケジューラ（`task_scheduler` スキル + `scheduler.rs`）: バックエンドは起動時に30秒間隔の常駐タスクを開始し、`PICOAGENT_SCHEDULED_TASKS` を毎回読み直して現在分に一致するタスクを実行する。同じ分の二重実行は `last_run_minute` で防ぎ、`repeat=false` のタスクは初回実行時に無効化する。スケジュールは `time`（HH:MM）+ `days`（mon..sun / 平日 / 週末 / 毎日）または cron 風5フィールド（分 時 日 月 曜日、`*` / 数値 / カンマ区切り / `*/N`）で指定する。`kind=command` は `program` + `args` を shell なしで実行し、`PICOAGENT_COMMAND_ENABLED=true`、`PICOAGENT_COMMAND_ROOT` 配下、`PICOAGENT_COMMAND_ALLOWLIST` prefix 一致を必須にする。スケジュール実行は無人実行のためチャット確認を挟まず、未許可ならログへエラーを残して実行しない。`kind=tool` は `tool_name` と `tool_args` を `tools::dispatch` に渡し、時間指定で天気・Web取得・外部連携などのスキル動作を実行できる。登録・一覧・削除・有効/無効化はチャットから `task_scheduler` スキルで行え、設定画面の「スキル」タブでも JSON を編集できる。実行結果は `app.<日付>.log` へ記録する。
+- コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が `PICOAGENT_COMMAND_ROOT` 外の場合、チャットへ確認文を返し、ユーザーが「許可」と送った場合だけ保留中の1件を実行する。「キャンセル」で破棄する。許可はその1回限りで、allowlist や許可ルートへ自動追記しない。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。
 - 起動待ち画面: `#petApp.is-booting` 中は通常のフキダシとキャラクターを隠し、`#bootScreen` に選択中キャラクターの `boot.sleeping`（未定義なら `idle` 先頭フレーム）を使った待機画面を表示する。`renderer.js` の `setStatus()` がモデルDL、同梱エンジン起動、Aivis 起動待ちの文言を `#bootStatus` に同期し、`#bootLog` は寝姿画像の領域へ時刻なしの起動メッセージを右から左へ流す。準備完了時に `is-booting` を外して通常表示へ切り替える。
 
 - フロント（`ui/`）は Vite 等のバンドラを使わず、Tauri の静的 `frontendDist` で配信。`withGlobalTauri:true` で
