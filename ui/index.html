@@ -20,6 +20,12 @@
       </div>
     </section>
     <section id="bubble" class="bubble" aria-live="polite">
+      <div id="replyActions" class="reply-actions" aria-label="回答操作">
+        <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">C</button>
+        <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">↻</button>
+        <button id="stopVoice" type="button" aria-label="読み上げを停止" title="読み上げを停止">■</button>
+        <button id="toggleFullscreen" type="button" aria-label="フキダシを拡大" title="フキダシを拡大">□</button>
+      </div>
       <div id="historyLog" class="history-log" aria-label="会話履歴"></div>
       <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>
       <form id="composer" class="composer" hidden>
@@ -27,12 +33,6 @@
         <button id="sendButton" type="submit" aria-label="送信" title="Enterで送信 / Shift+Enterで改行">送る</button>
       </form>
       <div id="status" class="status"></div>
-      <div id="replyActions" class="reply-actions" aria-label="回答操作">
-        <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">C</button>
-        <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">↻</button>
-        <button id="stopVoice" type="button" aria-label="読み上げを停止" title="読み上げを停止">■</button>
-        <button id="toggleFullscreen" type="button" aria-label="フキダシを拡大" title="フキダシを拡大">□</button>
-      </div>
       <button id="bubbleResize" class="bubble-resize" type="button" aria-label="フキダシのサイズを変更" title="ドラッグしてサイズ変更"></button>
     </section>
     <section id="character" class="character" title="右クリックで設定" data-tauri-drag-region>
