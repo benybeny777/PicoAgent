@@ -563,6 +563,28 @@ function expandWindowForBubble(left, top, width, height, leftDelta = 0, topDelta
     logApp("warn", "フキダシ拡大に合わせたウィンドウサイズ変更に失敗しました", errorDetail(error));
   });
 }
+// フキダシの右側にキャラクター分の幅（と下側の高さ）を確保するよう、必要ならウィンドウを左上へ拡大する。
+// 右下は固定したまま広げるので、右端固定のキャラクターと重ならない。
+async function ensureWindowFitsBubble(width, height, left, top) {
+  if (bubble.classList.contains("fullscreen")) return;
+  const gap = 10;
+  const margin = 12;
+  const charRight = 6; // .character の right:6px
+  const charW = character.offsetWidth || 265;
+  const charH = character.offsetHeight || 315;
+  const targetW = Math.ceil(left + width + gap + charW + charRight);
+  const targetH = Math.ceil(Math.max(top + height + margin, charH + 2));
+  const curW = Math.round(window.innerWidth);
+  const curH = Math.round(window.innerHeight);
+  const leftDelta = Math.max(0, targetW - curW);
+  const topDelta = Math.max(0, targetH - curH);
+  if (leftDelta === 0 && topDelta === 0) return;
+  try {
+    await window.picoagent.moveAndResizeWindow(leftDelta, topDelta, curW + leftDelta, curH + topDelta);
+  } catch (error) {
+    logApp("warn", "フキダシに合わせたウィンドウ拡大に失敗しました", errorDetail(error));
+  }
+}
 function resetFullscreenBubbleLayoutVars() {
   bubble.style.removeProperty("--fullscreen-bubble-top");
   bubble.style.removeProperty("--fullscreen-bubble-left");
@@ -711,14 +733,14 @@ async function finishBubbleResize(event) {
   resizeStart = null;
   if (bubbleResize.hasPointerCapture(event.pointerId)) bubbleResize.releasePointerCapture(event.pointerId);
   const rect = bubble.getBoundingClientRect();
-  // 拡大で広がったウィンドウサイズはアプリ終了時にまとめて保存する。
+  const w = Math.round(rect.width);
+  const h = Math.round(rect.height);
+  const left = Math.round(bubble.offsetLeft);
+  const top = Math.round(bubble.offsetTop);
   try {
-    await window.picoagent.setBubbleLayout(
-      Math.round(rect.width),
-      Math.round(rect.height),
-      Math.round(bubble.offsetLeft),
-      Math.round(bubble.offsetTop),
-    );
+    // 右側にキャラ分の幅を確保してウィンドウを拡大し、フキダシとキャラが重ならないようにする。
+    await ensureWindowFitsBubble(w, h, left, top);
+    await window.picoagent.setBubbleLayout(w, h, left, top);
   } catch (error) {
     status.textContent = `フキダシ位置を保存できませんでした: ${error}`;
   }
@@ -848,10 +870,17 @@ function applyBubbleLayout(width, height, left, top) {
   const h = parseFloat(height);
   const x = parseFloat(left);
   const y = parseFloat(top);
+  const hasSize = Number.isFinite(w) && w >= 180 && Number.isFinite(h) && h >= 92;
   if (Number.isFinite(w) && w >= 180) bubble.style.width = `${w}px`;
   if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
   if (Number.isFinite(x) && x >= 0) bubble.style.left = `${x}px`;
   if (Number.isFinite(y) && y >= 0) bubble.style.top = `${y}px`;
+  // 保存済みの大きいフキダシでも右のキャラと重ならないよう、必要ならウィンドウを拡大する。
+  if (hasSize) {
+    const bx = Number.isFinite(x) && x >= 0 ? x : bubble.offsetLeft;
+    const by = Number.isFinite(y) && y >= 0 ? y : bubble.offsetTop;
+    ensureWindowFitsBubble(w, h, bx, by);
+  }
   refreshBubblePlacement();
 }
 window.addEventListener("resize", refreshBubblePlacement);
