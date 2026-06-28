@@ -9,7 +9,6 @@ PicoAgent のキャラクター画像は、各キャラフォルダを同じ構�
 characters/<id>/
 ├── character.json
 ├── preview.png              # 通常立ち絵
-├── source.png               # 元画像または加工前画像
 ├── boot/
 │   └── sleeping.png         # ローディング画面用の横向き寝姿
 └── layers/
@@ -21,6 +20,7 @@ characters/<id>/
 ```
 
 `animations/` 配下は `scripts/build-character-animations.py` で生成する。手で直接直さない。
+`source.png` などの元画像は任意の制作素材。実行時に使わないPSD・確認用シート・生成途中画像は、必要がなくなったらリポジトリへ残さない。
 
 ## 画像作成ルール
 
