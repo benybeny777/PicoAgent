@@ -51,8 +51,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .online[data-up="true"] { background:var(--mint); }
 .bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(340px,calc(100% - 190px)); min-width:180px; min-height:92px; max-width:calc(100% - 24px); max-height:calc(100% - 24px); padding:17px 18px 15px; border:1px solid rgba(71,52,76,.14); border-radius:22px 22px 7px 22px; background:rgba(255,253,248,.98); color:var(--ink); box-shadow:0 8px 18px rgba(42,31,46,.11); cursor:text; display:flex; flex-direction:column; }
 .bubble::after { content:""; position:absolute; right:-15px; bottom:auto; top:42%; width:26px; height:30px; background:var(--paper); clip-path:polygon(0 0,100% 50%,0 100%); filter:drop-shadow(1px 1px 0 rgba(71,52,76,.11)); }
-/* ダブルクリックでフキダシを大きく広げる。キャラと被らないよう右側にキャラ分の幅
-   （キャラ幅265px + 余白）を空けて左ペインにし、キャラは右にそのまま表示する。 */
+/* ダブルクリックでフキダシを左上起点に大きく広げる。右側はキャラ分の幅を空ける。 */
 .bubble.fullscreen { z-index:8; top:var(--fullscreen-bubble-top,14px); left:var(--fullscreen-bubble-left,14px); right:var(--fullscreen-bubble-right,291px); bottom:var(--fullscreen-bubble-bottom,14px); width:auto!important; height:auto!important; max-width:none; max-height:none; padding:22px 24px 18px; border-radius:18px; box-shadow:0 14px 40px rgba(42,31,46,.18); }
 .bubble.fullscreen::after { display:none; }
 .bubble.fullscreen .bubble-resize { display:none; }

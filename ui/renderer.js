@@ -562,34 +562,14 @@ function applyFullscreenBubbleLayout() {
     return;
   }
   const margin = 14;
-  const gap = 18;
   const viewportWidth = document.documentElement.clientWidth;
-  const viewportHeight = document.documentElement.clientHeight;
   const rect = character.getBoundingClientRect();
-  const leftPaneWidth = Math.max(0, rect.left - gap - margin);
-  const topPaneHeight = Math.max(0, rect.top - gap - margin);
-  const minFullscreenWidth = 360;
-  const minFullscreenHeight = 220;
-
-  if (leftPaneWidth >= minFullscreenWidth || leftPaneWidth >= viewportWidth * 0.45) {
-    bubble.style.setProperty("--fullscreen-bubble-top", `${margin}px`);
-    bubble.style.setProperty("--fullscreen-bubble-left", `${margin}px`);
-    bubble.style.setProperty("--fullscreen-bubble-right", `${Math.max(margin, viewportWidth - rect.left + gap)}px`);
-    bubble.style.setProperty("--fullscreen-bubble-bottom", `${margin}px`);
-    return;
-  }
-
-  if (topPaneHeight >= minFullscreenHeight) {
-    bubble.style.setProperty("--fullscreen-bubble-top", `${margin}px`);
-    bubble.style.setProperty("--fullscreen-bubble-left", `${margin}px`);
-    bubble.style.setProperty("--fullscreen-bubble-right", `${margin}px`);
-    bubble.style.setProperty("--fullscreen-bubble-bottom", `${Math.max(margin, viewportHeight - rect.top + gap)}px`);
-    return;
-  }
-
+  const minBubbleWidth = 180;
+  const maxRight = Math.max(margin, viewportWidth - margin - minBubbleWidth);
+  const characterPane = Math.max(291, viewportWidth - rect.left + margin);
   bubble.style.setProperty("--fullscreen-bubble-top", `${margin}px`);
   bubble.style.setProperty("--fullscreen-bubble-left", `${margin}px`);
-  bubble.style.setProperty("--fullscreen-bubble-right", `${Math.max(margin, viewportWidth - rect.left + gap)}px`);
+  bubble.style.setProperty("--fullscreen-bubble-right", `${Math.min(maxRight, characterPane)}px`);
   bubble.style.setProperty("--fullscreen-bubble-bottom", `${margin}px`);
 }
 
