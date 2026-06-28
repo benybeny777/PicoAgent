@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::daily::{self, DailyEvent};
-use crate::message::Field;
 
 pub struct ReminderTool;
 
@@ -66,15 +65,6 @@ impl Tool for ReminderTool {
         })
     }
 
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            daily::EVENTS_KEY,
-            "リマインダー・集中タイマー・見守り通知（JSON。通常はチャットで設定）",
-            "textarea",
-            "[]",
-        )]
-    }
-
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
         let mut events = daily::load_events(cfg);
@@ -129,4 +119,3 @@ impl Tool for ReminderTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(ReminderTool) } }
-

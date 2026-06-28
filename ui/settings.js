@@ -236,7 +236,7 @@ function createTabs(items) {
 
 function skillCategory(tool) {
   const name = tool.name || "";
-  if (["alarm", "reminder", "focus_timer", "praise_log", "daily_briefing", "clipboard_text", "chitchat"].includes(name)) {
+  if (["alarm", "reminder", "focus_timer", "praise_log", "daily_briefing", "clipboard_text", "chitchat", "task_scheduler"].includes(name)) {
     return "daily";
   }
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch"].includes(name)) {

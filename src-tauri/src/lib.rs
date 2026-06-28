@@ -15,6 +15,7 @@ mod menu;
 mod message;
 mod migration;
 mod providers;
+mod scheduler;
 mod tools;
 
 use tauri::{Manager, PhysicalPosition, RunEvent};
@@ -176,6 +177,7 @@ pub fn run() {
                     }
                 });
             }
+            scheduler::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

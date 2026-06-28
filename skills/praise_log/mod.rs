@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::daily::{self, PraiseEntry};
-use crate::message::Field;
 
 pub struct PraiseLogTool;
 
@@ -50,15 +49,6 @@ impl Tool for PraiseLogTool {
         })
     }
 
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            daily::PRAISE_KEY,
-            "できたことメモ（JSON。通常はチャットで記録）",
-            "textarea",
-            "[]",
-        )]
-    }
-
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
         let mut entries = daily::load_praise(cfg);
@@ -95,4 +85,3 @@ impl Tool for PraiseLogTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(PraiseLogTool) } }
-

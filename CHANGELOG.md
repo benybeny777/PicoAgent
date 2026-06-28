@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-06-28
+
+### cron風タスクスケジューラを追加
+
+- `task_scheduler` スキルを追加し、チャットから指定時刻・曜日・cron風5フィールドでタスクを追加・一覧・削除・有効/無効化できるようにした。
+- `PICOAGENT_SCHEDULED_TASKS` を設定キーとして追加し、設定画面の「スキル」タブからもJSONで編集できるようにした。
+- バックエンドに常駐スケジューラを追加し、アプリ起動中に30秒間隔で現在分とタスクを照合して実行するようにした。同じ分の二重実行は `last_run_minute` で防ぎ、一度だけのタスクは実行後に無効化する。
+- `kind=command` は `run_command` と同じ `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWLIST` / timeout を使い、shell を使わず `program + args` だけを実行する。
+- `kind=tool` を追加し、指定時刻に `tool_name` / `tool_args` で既存スキルを実行できるようにした。実行結果はアプリログへ記録する。
+
+---
+
 ## 2026-06-27
 
 ### ツンデレキャラ「りん」を追加
