@@ -549,14 +549,17 @@ let resizeWindowSize = { width: 0, height: 0 };
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
-function expandWindowForBubble(left, top, width, height) {
+function expandWindowForBubble(left, top, width, height, leftDelta = 0, topDelta = 0) {
   const margin = 24;
-  const nextWidth = Math.ceil(Math.max(window.innerWidth, left + width + margin));
-  const nextHeight = Math.ceil(Math.max(window.innerHeight, top + height + margin));
-  if (nextWidth <= window.innerWidth && nextHeight <= window.innerHeight) return;
-  if (nextWidth <= resizeWindowSize.width && nextHeight <= resizeWindowSize.height) return;
+  const nextWidth = Math.ceil(Math.max(window.innerWidth + leftDelta, left + width + margin));
+  const nextHeight = Math.ceil(Math.max(window.innerHeight + topDelta, top + height + margin));
+  if (nextWidth <= window.innerWidth && nextHeight <= window.innerHeight && leftDelta <= 0 && topDelta <= 0) return;
+  if (leftDelta <= 0 && topDelta <= 0 && nextWidth <= resizeWindowSize.width && nextHeight <= resizeWindowSize.height) return;
   resizeWindowSize = { width: nextWidth, height: nextHeight };
-  window.picoagent.setWindowSize(nextWidth, nextHeight).catch(error => {
+  const resize = leftDelta > 0 || topDelta > 0
+    ? window.picoagent.moveAndResizeWindow(leftDelta, topDelta, nextWidth, nextHeight)
+    : window.picoagent.setWindowSize(nextWidth, nextHeight);
+  resize.catch(error => {
     logApp("warn", "フキダシ拡大に合わせたウィンドウサイズ変更に失敗しました", errorDetail(error));
   });
 }
@@ -727,25 +730,35 @@ bubbleResize.addEventListener("pointerdown", event => {
     height: rect.height,
     left: bubble.offsetLeft,
     top: bubble.offsetTop,
+    leftDelta: 0,
+    topDelta: 0,
   };
   bubbleResize.setPointerCapture(event.pointerId);
 });
 bubbleResize.addEventListener("pointermove", event => {
   if (!resizeStart) return;
   const margin = 12;
-  const dx = event.clientX - resizeStart.x;
-  const dy = event.clientY - resizeStart.y;
-  const desiredWidth = Math.max(180, resizeStart.width + dx);
-  const desiredHeight = Math.max(92, resizeStart.height + dy);
-  const left = clampNumber(resizeStart.left, margin, document.documentElement.clientWidth - 180 - margin);
-  const top = clampNumber(resizeStart.top, margin, document.documentElement.clientHeight - 92 - margin);
-  const width = desiredWidth;
-  const height = desiredHeight;
+  const originalPointerX = event.clientX - resizeStart.leftDelta;
+  const originalPointerY = event.clientY - resizeStart.topDelta;
+  const nextLeftDelta = Math.max(resizeStart.leftDelta, margin - originalPointerX, 0);
+  const nextTopDelta = Math.max(resizeStart.topDelta, margin - originalPointerY, 0);
+  const right = resizeStart.left + resizeStart.width + nextLeftDelta;
+  const bottom = resizeStart.top + resizeStart.height + nextTopDelta;
+  const pointerLeft = Math.min(originalPointerX + nextLeftDelta, right - 180);
+  const pointerTop = Math.min(originalPointerY + nextTopDelta, bottom - 92);
+  const left = Math.max(margin, pointerLeft);
+  const top = Math.max(margin, pointerTop);
+  const width = right - left;
+  const height = bottom - top;
+  const moveLeft = nextLeftDelta - resizeStart.leftDelta;
+  const moveTop = nextTopDelta - resizeStart.topDelta;
+  resizeStart.leftDelta = nextLeftDelta;
+  resizeStart.topDelta = nextTopDelta;
   bubble.style.width = `${Math.round(width)}px`;
   bubble.style.height = `${Math.round(height)}px`;
   bubble.style.left = `${Math.round(left)}px`;
   bubble.style.top = `${Math.round(top)}px`;
-  expandWindowForBubble(left, top, width, height);
+  expandWindowForBubble(left, top, width, height, moveLeft, moveTop);
 });
 async function finishBubbleResize(event) {
   if (!resizeStart) return;
