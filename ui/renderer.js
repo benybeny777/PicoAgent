@@ -111,21 +111,7 @@ function appendBootLog(text, kind = "info") {
 
 function startBootLogTicker() {
   if (!bootLog || bootLogTimer) return;
-  const lines = [
-    "キャラクターの寝息を監視中...",
-    "会話メモリを読み込み中...",
-    "ローカルポートを確認中...",
-    "音声キューを初期化中...",
-    "スキル一覧を照合中...",
-    "透明ウィンドウを調整中...",
-    "モデル応答待機スレッドを準備中...",
-  ];
-  appendBootLog("PicoAgent boot sequence start", "system");
-  bootLogTimer = setInterval(() => {
-    if (!petApp.classList.contains("is-booting")) return;
-    const line = lines[Math.floor(Math.random() * lines.length)];
-    appendBootLog(line, "trace");
-  }, 850);
+  appendBootLog("起動処理を開始中…", "system");
 }
 
 function stopBootLogTicker() {
@@ -863,17 +849,17 @@ function applyEngineStatus(s) {
   // 通常時はフキダシに「準備中…」を出さない（重い反映は再起動側で行う方針のため）。
   const booting = petApp.classList.contains("is-booting");
   if (s.phase === "download") {
-    if (booting) setStatus(`モデルを準備中… ${s.percent ?? 0}%`);
+    if (booting) setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%`);
     online.dataset.up = false;
   } else if (s.phase === "starting") {
-    if (booting) setStatus("エンジンを起動中…");
+    if (booting) setStatus("ローカル推論エンジンを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
     if (petApp.classList.contains("is-booting")) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
-      appendBootLog("engine ready", "system");
+      appendBootLog("ローカル推論エンジンの起動完了", "system");
     } else {
       setStatus("準備ができたよ。");
       setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
@@ -937,7 +923,8 @@ async function waitForAivisReady() {
     return;
   }
   if (!s || !s.enabled || s.up) return;
-  setStatus("音声エンジンを起動中…");
+  const startedAt = Date.now();
+  setStatus("音声エンジンの起動を確認中…");
   for (let i = 0; i < 240; i += 1) {
     await new Promise(resolve => setTimeout(resolve, 500));
     try { s = await window.picoagent.aivisStatus(); }
@@ -946,8 +933,12 @@ async function waitForAivisReady() {
       break;
     }
     if (s && s.up) break;
+    if (i % 2 === 1) {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      setStatus(`音声エンジンの起動を確認中… ${seconds}秒`);
+    }
   }
-  if (status.textContent === "音声エンジンを起動中…") setStatus("");
+  if (status.textContent.startsWith("音声エンジンの起動を確認中")) setStatus("");
 }
 
 // 選択中キャラの AivisHub 音声モデルを、初回読み上げ前にローディング画面で導入する。
@@ -990,6 +981,7 @@ async function waitForEngineReady() {
       return;
     }
     applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
+    if (!s || s.phase === "idle") setStatus("ローカルモデルと推論エンジンを確認中…");
     if (s && (s.phase === "ready" || s.phase === "error")) return;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
@@ -1145,18 +1137,20 @@ function startAlarmPolling() {
 
 (async () => {
   startBootLogTicker();
-  setStatus("起動準備中…");
+  setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
-  appendBootLog("settings loaded", "system");
+  appendBootLog("設定と履歴の読み込み完了", "system");
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
+    setStatus("起動画面のキャラクター画像を読み込み中…");
     await prepareBootCharacter(info.characterId || "mugi");
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
+  setStatus("音声設定を確認中…");
   await waitForAivisReady();
   await prepareSelectedVoiceModel();
   // local プロバイダはモデル DL・エンジン起動もローディング画面の間に終わらせる。
@@ -1167,10 +1161,13 @@ function startAlarmPolling() {
   let preparedGreeting = null;
   try {
     // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
+    setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
     await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}, { speakGreeting: false });
+    setStatus("会話履歴を画面へ復元中…");
     hydrateHistory(info.history);
     let greeting = characterManifest?.greeting || "";
     try {
+      setStatus("今日のあいさつを確認中…");
       const daily = await window.picoagent.dailyGreeting();
       if (daily?.reply) greeting = `${greeting}\n${daily.reply}`.trim();
     } catch (error) {
@@ -1178,6 +1175,7 @@ function startAlarmPolling() {
     }
     if (greeting) {
       characterManifest.greeting = greeting;
+      setStatus("起動時の読み上げ音声を準備中…");
       preparedGreeting = await prepareSpeech(greeting);
     }
   } catch (error) {
@@ -1186,7 +1184,7 @@ function startAlarmPolling() {
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    appendBootLog("switching to desktop pet view", "system");
+    appendBootLog("通常画面へ切り替え中…", "system");
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
     if (preparedGreeting) playPreparedSpeech(preparedGreeting);
