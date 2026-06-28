@@ -130,30 +130,32 @@ pub fn run() {
                 state.messages.lock().unwrap().extend(recent);
             }
 
-            // メインウィンドウを保存済み位置へ復元する。未保存時だけ作業領域の右下へ寄せる。
+            // 保存済みサイズを復元し、位置は解像度非依存の右下オフセットで配置する。
             if let Some(win) = app.get_webview_window("main") {
                 let _ =
                     win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
-                let saved_width = state.config.get("PICOAGENT_WINDOW_WIDTH_PX", "");
-                let saved_height = state.config.get("PICOAGENT_WINDOW_HEIGHT_PX", "");
-                if let (Ok(width), Ok(height)) =
-                    (saved_width.parse::<f64>(), saved_height.parse::<f64>())
+                if let (Ok(Some(monitor)), Ok(scale), Ok(current)) =
+                    (win.current_monitor(), win.scale_factor(), win.outer_size())
                 {
-                    // 全画面時の汚染などで作業領域を超える保存値が来ても、モニタ内へ収める。
-                    let (mut width, mut height) = (width, height);
-                    if let Ok(Some(monitor)) = win.current_monitor() {
-                        let scale = monitor.scale_factor().max(1.0);
-                        width = width.min(monitor.size().width as f64 / scale);
-                        height = height.min(monitor.size().height as f64 / scale);
-                    }
-                    if width >= 420.0 && height >= 340.0 {
-                        let _ = win.set_size(LogicalSize::new(width, height));
-                    }
-                }
-                // 位置は解像度に依存しないよう、常に画面右下からの相対オフセットで配置する。
-                if let (Ok(Some(monitor)), Ok(size)) = (win.current_monitor(), win.outer_size()) {
                     let area = monitor.size();
-                    let (x, y) = default_window_position(area.width, area.height, size.width, size.height);
+                    let scale = scale.max(1.0);
+                    // 位置計算は適用後の物理サイズを使う（set_size の反映前に outer_size を読むと古い値になるため）。
+                    let (mut win_w, mut win_h) = (current.width, current.height);
+                    let saved_width = state.config.get("PICOAGENT_WINDOW_WIDTH_PX", "");
+                    let saved_height = state.config.get("PICOAGENT_WINDOW_HEIGHT_PX", "");
+                    if let (Ok(width), Ok(height)) =
+                        (saved_width.parse::<f64>(), saved_height.parse::<f64>())
+                    {
+                        // 全画面時の汚染などでモニタを超える保存値が来ても、モニタ内へ収める。
+                        let width = width.min(area.width as f64 / scale);
+                        let height = height.min(area.height as f64 / scale);
+                        if width >= 420.0 && height >= 340.0 {
+                            let _ = win.set_size(LogicalSize::new(width, height));
+                            win_w = (width * scale).round() as u32;
+                            win_h = (height * scale).round() as u32;
+                        }
+                    }
+                    let (x, y) = default_window_position(area.width, area.height, win_w, win_h);
                     let _ = win.set_position(PhysicalPosition::new(x, y));
                 }
             }

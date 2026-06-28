@@ -108,10 +108,13 @@ fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_size(LogicalSize::new(560.0, 430.0));
         // 起動時のデフォルトと同じ右下オフセットで配置する（解像度非依存）。
-        if let (Ok(Some(monitor)), Ok(size)) = (win.current_monitor(), win.outer_size()) {
+        // 位置計算は適用後の物理サイズを使う（set_size 反映前の outer_size は古い値のため）。
+        if let (Ok(Some(monitor)), Ok(scale)) = (win.current_monitor(), win.scale_factor()) {
             let area = monitor.size();
-            let (x, y) =
-                crate::default_window_position(area.width, area.height, size.width, size.height);
+            let scale = scale.max(1.0);
+            let win_w = (560.0 * scale).round() as u32;
+            let win_h = (430.0 * scale).round() as u32;
+            let (x, y) = crate::default_window_position(area.width, area.height, win_w, win_h);
             let _ = win.set_position(PhysicalPosition::new(x, y));
         }
         let _ = win.emit("pet:layout-reset", ());
