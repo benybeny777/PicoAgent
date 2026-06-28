@@ -545,8 +545,20 @@ toggleFullscreenButton?.addEventListener("click", event => {
 
 // 左上のつまみをドラッグしてフキダシをリサイズし、確定値を設定へ保存する。
 let resizeStart = null;
+let resizeWindowSize = { width: 0, height: 0 };
 function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+function expandWindowForBubble(left, top, width, height) {
+  const margin = 24;
+  const nextWidth = Math.ceil(Math.max(window.innerWidth, left + width + margin));
+  const nextHeight = Math.ceil(Math.max(window.innerHeight, top + height + margin));
+  if (nextWidth <= window.innerWidth && nextHeight <= window.innerHeight) return;
+  if (nextWidth <= resizeWindowSize.width && nextHeight <= resizeWindowSize.height) return;
+  resizeWindowSize = { width: nextWidth, height: nextHeight };
+  window.picoagent.setWindowSize(nextWidth, nextHeight).catch(error => {
+    logApp("warn", "フキダシ拡大に合わせたウィンドウサイズ変更に失敗しました", errorDetail(error));
+  });
 }
 function resetFullscreenBubbleLayoutVars() {
   bubble.style.removeProperty("--fullscreen-bubble-top");
@@ -707,6 +719,7 @@ bubbleResize.addEventListener("pointerdown", event => {
   event.preventDefault();
   event.stopPropagation();
   const rect = bubble.getBoundingClientRect();
+  resizeWindowSize = { width: window.innerWidth, height: window.innerHeight };
   resizeStart = {
     x: event.clientX,
     y: event.clientY,
@@ -714,8 +727,6 @@ bubbleResize.addEventListener("pointerdown", event => {
     height: rect.height,
     left: bubble.offsetLeft,
     top: bubble.offsetTop,
-    right: bubble.offsetLeft + rect.width,
-    bottom: bubble.offsetTop + rect.height,
   };
   bubbleResize.setPointerCapture(event.pointerId);
 });
@@ -724,23 +735,23 @@ bubbleResize.addEventListener("pointermove", event => {
   const margin = 12;
   const dx = event.clientX - resizeStart.x;
   const dy = event.clientY - resizeStart.y;
-  const desiredWidth = Math.max(180, resizeStart.width - dx);
-  const desiredHeight = Math.max(92, resizeStart.height - dy);
-  const left = clampNumber(resizeStart.left + dx, margin, resizeStart.right - 180);
-  const top = clampNumber(resizeStart.top + dy, margin, resizeStart.bottom - 92);
-  const width = Math.min(desiredWidth, document.documentElement.clientWidth - left - margin);
-  const height = Math.min(desiredHeight, document.documentElement.clientHeight - top - margin);
+  const desiredWidth = Math.max(180, resizeStart.width + dx);
+  const desiredHeight = Math.max(92, resizeStart.height + dy);
+  const left = clampNumber(resizeStart.left, margin, document.documentElement.clientWidth - 180 - margin);
+  const top = clampNumber(resizeStart.top, margin, document.documentElement.clientHeight - 92 - margin);
+  const width = desiredWidth;
+  const height = desiredHeight;
   bubble.style.width = `${Math.round(width)}px`;
   bubble.style.height = `${Math.round(height)}px`;
   bubble.style.left = `${Math.round(left)}px`;
   bubble.style.top = `${Math.round(top)}px`;
+  expandWindowForBubble(left, top, width, height);
 });
 async function finishBubbleResize(event) {
   if (!resizeStart) return;
   resizeStart = null;
   if (bubbleResize.hasPointerCapture(event.pointerId)) bubbleResize.releasePointerCapture(event.pointerId);
   const rect = bubble.getBoundingClientRect();
-  repositionBubbleToAvoidCharacter();
   const placed = bubble.getBoundingClientRect();
   try {
     await window.picoagent.setBubbleLayout(

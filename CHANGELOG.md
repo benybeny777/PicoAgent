@@ -10,14 +10,16 @@
 
 - 叩く AI に `anthropic`（Claude）/ `deepseek`（DeepSeek）/ `xai`（Grok）/ `mistral` プロバイダを追加した。Claude は Anthropic Messages API の `tool_use` / `tool_result` へ正規形ツール呼び出しを変換し、それ以外の追加プロバイダは OpenAI 互換 API を使う。
 - OpenAI の既定候補を `gpt-5.4-mini` に更新し、OpenAI / Claude / Gemini / DeepSeek / xAI / Mistral の主要モデルを設定画面で「種類 → サイズ」から選べるようにした。
-- ローカルモデルも `auto` / Gemma / Qwen / custom の種類からサイズを選ぶ UI に変更し、選択中プロバイダのモデルを保存時に `PICOAGENT_MODEL` へ同期するようにした。
+- ローカルモデルも `auto` / Gemma / Qwen / Llama / Mistral / Phi / DeepSeek / custom の種類からサイズを選ぶ UI に変更し、選択中プロバイダのモデルを保存時に `PICOAGENT_MODEL` へ同期するようにした。
+- ローカルモデルプリセットに `qwen25_7b` / `llama32_3b` / `llama31_8b` / `mistral7b` / `phi35mini` / `deepseek_r1_qwen7b` を追加し、各候補に推奨VRAM・推奨RAM・ダウンロード目安を表示するようにした。
 
 ### コマンド実行のチャット確認と保護パスを追加
 
 - `run_command` で未登録コマンドまたは許可ルート外 cwd が必要になった場合、即エラーではなくチャット上で「許可」/「永続許可」/「キャンセル」を求めるようにした。「許可」は保留中の1件だけに効き、「永続許可」はコマンド prefix を allowlist、必要なら cwd を追加許可パスへ保存してから実行する。
 - `C:\Windows` と `C:\Program Files*` 配下は編集不可にし、コマンド実行先、スケジュール実行先、`workspace_files` の書き込み・追記・フォルダ作成で拒否するようにした。
 - ローディング画面の状態文は、実際に実行中の処理だけを表示するようにし、準備完了直前の「起こしているよ」は従来どおりプログレスバー下に表示する。
-- フキダシのリサイズつまみを左上へ移し、左上方向へドラッグすると画面端に近い位置からでも拡大し続けられるようにした。
+- フキダシのリサイズつまみを左上へ移し、拡大時の画面内上限とキャラクター回避による自動縮小を外した。さらに拡大に合わせて Tauri ウィンドウ自体も広げるようにした。
+- ローカルモデルのサイズ候補に、推奨VRAM・推奨RAM・ダウンロード目安を再表示した。
 - まいの既定人格を「おっとりして優しいお姉さん」として明示した。
 
 ### cron風タスクスケジューラを追加

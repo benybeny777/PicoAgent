@@ -234,27 +234,22 @@ function field(key, label, type, value, placeholder) {
 
 function localModelPresetField(key, label, value) {
   const presets = data.localModelPresets || [];
+  const localPresetLabel = (preset) => `${preset.localSize || preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize || "-"}`;
+  const modelFamilies = ["Gemma", "Qwen", "Llama", "Mistral", "Phi", "DeepSeek"];
+  const presetGroups = modelFamilies.map((family) => ({
+    label: family,
+    options: presets.filter(preset => preset.family === family).map(preset => ({
+      value: preset.id,
+      label: localPresetLabel(preset),
+      hint: localModelPresetHint(preset.id),
+    })),
+  }));
   const groups = [
     {
       label: "自動",
       options: [{ value: "auto", label: "PC性能から自動選択", hint: localModelPresetHint("auto") }],
     },
-    {
-      label: "Gemma",
-      options: presets.filter(preset => ["small", "balanced", "large"].includes(preset.id)).map(preset => ({
-        value: preset.id,
-        label: preset.localSize || preset.label,
-        hint: localModelPresetHint(preset.id),
-      })),
-    },
-    {
-      label: "Qwen",
-      options: presets.filter(preset => preset.id.startsWith("qwen")).map(preset => ({
-        value: preset.id,
-        label: preset.localSize || preset.label,
-        hint: localModelPresetHint(preset.id),
-      })),
-    },
+    ...presetGroups,
     {
       label: "カスタム",
       options: [{ value: "custom", label: "URL指定", hint: localModelPresetHint("custom") }],

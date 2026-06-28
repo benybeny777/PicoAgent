@@ -1013,14 +1013,9 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "providers": provider_list,
         "localModelPresets": crate::providers::local::LOCAL_MODEL_PRESETS.iter().map(|preset| json!({
             "id": preset.id,
+            "family": preset.family,
             "label": preset.label,
-            "localSize": match preset.id {
-                "small" => "軽量 E2B",
-                "balanced" => "標準 E4B",
-                "large" => "高品質 12B",
-                "qwen3" => "4B Instruct",
-                _ => preset.label,
-            },
+            "localSize": preset.size,
             "url": preset.url,
             "ctx": preset.ctx,
             "recommendedVramGb": preset.recommended_vram_gb,

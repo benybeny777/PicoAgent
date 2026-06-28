@@ -5,6 +5,7 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
+const { LogicalSize } = window.__TAURI__.dpi || {};
 
 // すべての invoke 失敗を app.log へ記録してから再スローする（呼び出し側の try/catch で
 // 握られたエラーも確実にログへ残すため）。pet_log 自身は再帰を避けて素の invoke を使う。
@@ -38,6 +39,13 @@ window.picoagent = {
   setFullscreen: async (on) => {
     try { return await getCurrentWindow().setFullscreen(on); }
     catch (error) { logInvokeError("setFullscreen", error); throw error; }
+  },
+  setWindowSize: async (width, height) => {
+    try {
+      const size = LogicalSize ? new LogicalSize(width, height) : { type: "Logical", width, height };
+      return await getCurrentWindow().setSize(size);
+    }
+    catch (error) { logInvokeError("setWindowSize", error); throw error; }
   },
   setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
   setBubbleLayout: (width, height, left, top) => call("pet_set_bubble_layout", { width, height, left, top }),
