@@ -18,7 +18,7 @@ mod providers;
 mod scheduler;
 mod tools;
 
-use tauri::{Manager, PhysicalPosition, RunEvent};
+use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
 
 use aivis::AivisState;
 use commands::AppState;
@@ -130,15 +130,31 @@ pub fn run() {
                 state.messages.lock().unwrap().extend(recent);
             }
 
-            // メインウィンドウを作業領域の右下へ寄せ、設定値で常に手前を反映。
+            // メインウィンドウを保存済み位置へ復元する。未保存時だけ作業領域の右下へ寄せる。
             if let Some(win) = app.get_webview_window("main") {
                 let _ =
                     win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
+                let saved_width = state.config.get("PICOAGENT_WINDOW_WIDTH_PX", "");
+                let saved_height = state.config.get("PICOAGENT_WINDOW_HEIGHT_PX", "");
+                if let (Ok(width), Ok(height)) =
+                    (saved_width.parse::<f64>(), saved_height.parse::<f64>())
+                {
+                    // 全画面時の汚染などで作業領域を超える保存値が来ても、モニタ内へ収める。
+                    let (mut width, mut height) = (width, height);
+                    if let Ok(Some(monitor)) = win.current_monitor() {
+                        let scale = monitor.scale_factor().max(1.0);
+                        width = width.min(monitor.size().width as f64 / scale);
+                        height = height.min(monitor.size().height as f64 / scale);
+                    }
+                    if width >= 420.0 && height >= 340.0 {
+                        let _ = win.set_size(LogicalSize::new(width, height));
+                    }
+                }
+                // 位置は解像度に依存しないよう、常に画面右下からの相対オフセットで配置する。
                 if let (Ok(Some(monitor)), Ok(size)) = (win.current_monitor(), win.outer_size()) {
                     let area = monitor.size();
-                    let x = area.width as i32 - size.width as i32 - 20;
-                    let y = area.height as i32 - size.height as i32 - 40;
-                    let _ = win.set_position(PhysicalPosition::new(x.max(0), y.max(0)));
+                    let (x, y) = default_window_position(area.width, area.height, size.width, size.height);
+                    let _ = win.set_position(PhysicalPosition::new(x, y));
                 }
             }
 
@@ -186,8 +202,51 @@ pub fn run() {
     // 終了時にアプリが裏起動した子プロセスを確実に止める。
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
+            save_window_layout_on_exit(app_handle);
             aivis::stop(app_handle);
             engine::stop(app_handle);
         }
     });
+}
+
+/// 画面右下を基準にしたウィンドウ位置（解像度非依存）。
+/// 右端をモニタ右端より RIGHT_OVERHANG px 外へ出し、下端からは BOTTOM_GAP px 空ける。
+pub(crate) fn default_window_position(area_w: u32, area_h: u32, win_w: u32, win_h: u32) -> (i32, i32) {
+    const RIGHT_OVERHANG: i32 = 69;
+    const BOTTOM_GAP: i32 = 51;
+    let x = area_w as i32 - win_w as i32 + RIGHT_OVERHANG;
+    let y = area_h as i32 - win_h as i32 - BOTTOM_GAP;
+    (x.max(0), y.max(0))
+}
+
+/// 終了時に透明ウィンドウの現在サイズを設定へ保存し、次回起動で復元できるようにする。
+/// 位置は解像度非依存にするため保存せず、起動時は常に右下オフセットで配置する。
+fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
+    let Some(win) = app_handle.get_webview_window("main") else {
+        return;
+    };
+    // 全画面のまま終了した場合はモニタ全体サイズを保存しないよう除外する。
+    if matches!(win.is_fullscreen(), Ok(true)) {
+        return;
+    }
+    let (Ok(size), Ok(scale)) = (win.outer_size(), win.scale_factor()) else {
+        return;
+    };
+    let logical = size.to_logical::<f64>(scale);
+    let state = app_handle.state::<AppState>();
+    let mut patch = serde_json::Map::new();
+    patch.insert(
+        "PICOAGENT_WINDOW_WIDTH_PX".to_string(),
+        serde_json::json!(logical.width.round().to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_WINDOW_HEIGHT_PX".to_string(),
+        serde_json::json!(logical.height.round().to_string()),
+    );
+    if let Err(error) = state.config.set_all(patch) {
+        log_paths::append_app_log(
+            app_handle,
+            &format!("終了時のウィンドウサイズ保存に失敗しました: {error}"),
+        );
+    }
 }

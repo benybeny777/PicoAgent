@@ -641,62 +641,8 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   }
 
   candidates.sort((a, b) => a.overlap - b.overlap || a.distance - b.distance);
-  const best = candidates[0] || { left: baseLeft, top: baseTop, overlap: 0 };
-  if (best.overlap > 0) {
-    fitBubbleIntoFreePane(width, height, preferredLeft, preferredTop, {
-      margin,
-      gap,
-      viewportWidth,
-      viewportHeight,
-      charLeftEdge,
-      charTopEdge,
-    });
-    return;
-  }
-  const left = best.left;
-  const top = best.top;
-  bubble.style.left = `${Math.round(left)}px`;
-  bubble.style.top = `${Math.round(top)}px`;
-}
-
-function fitBubbleIntoFreePane(width, height, preferredLeft, preferredTop, bounds) {
-  const { margin, viewportWidth, viewportHeight, charLeftEdge, charTopEdge } = bounds;
-  const options = [];
-  const leftPaneWidth = Math.floor(charLeftEdge - margin);
-  if (leftPaneWidth >= 180) {
-    const nextWidth = Math.min(width, leftPaneWidth);
-    const nextHeight = Math.min(height, viewportHeight - margin * 2);
-    options.push({
-      width: nextWidth,
-      height: nextHeight,
-      left: clampNumber(preferredLeft, margin, charLeftEdge - nextWidth),
-      top: clampNumber(preferredTop, margin, Math.max(margin, viewportHeight - nextHeight - margin)),
-      area: nextWidth * nextHeight,
-      delta: Math.abs(width - nextWidth) + Math.abs(height - nextHeight),
-    });
-  }
-  const topPaneHeight = Math.floor(charTopEdge - margin);
-  if (topPaneHeight >= 92) {
-    const nextWidth = Math.min(width, viewportWidth - margin * 2);
-    const nextHeight = Math.min(height, topPaneHeight);
-    options.push({
-      width: nextWidth,
-      height: nextHeight,
-      left: clampNumber(preferredLeft, margin, Math.max(margin, viewportWidth - nextWidth - margin)),
-      top: clampNumber(preferredTop, margin, charTopEdge - nextHeight),
-      area: nextWidth * nextHeight,
-      delta: Math.abs(width - nextWidth) + Math.abs(height - nextHeight),
-    });
-  }
-  options.sort((a, b) => b.area - a.area || a.delta - b.delta);
-  const best = options[0] || {
-    width: Math.min(width, viewportWidth - margin * 2),
-    height: Math.min(height, viewportHeight - margin * 2),
-    left: margin,
-    top: margin,
-  };
-  bubble.style.width = `${Math.round(best.width)}px`;
-  bubble.style.height = `${Math.round(best.height)}px`;
+  const best = candidates[0] || { left: baseLeft, top: baseTop };
+  // サイズは縮めず（自動縮小は行わない）、重なりが最小になる位置へ移動するだけにする。
   bubble.style.left = `${Math.round(best.left)}px`;
   bubble.style.top = `${Math.round(best.top)}px`;
 }
@@ -765,11 +711,11 @@ async function finishBubbleResize(event) {
   resizeStart = null;
   if (bubbleResize.hasPointerCapture(event.pointerId)) bubbleResize.releasePointerCapture(event.pointerId);
   const rect = bubble.getBoundingClientRect();
-  const placed = bubble.getBoundingClientRect();
+  // 拡大で広がったウィンドウサイズはアプリ終了時にまとめて保存する。
   try {
     await window.picoagent.setBubbleLayout(
-      Math.round(placed.width || rect.width),
-      Math.round(placed.height || rect.height),
+      Math.round(rect.width),
+      Math.round(rect.height),
       Math.round(bubble.offsetLeft),
       Math.round(bubble.offsetTop),
     );
@@ -1208,4 +1154,13 @@ function startAlarmPolling() {
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
   petApp.classList.remove("is-booting");
   stopBootLogTicker();
+});
+window.picoagent.on("pet:layout-reset", () => {
+  resizeWindowSize = { width: 0, height: 0 };
+  bubble.style.removeProperty("width");
+  bubble.style.removeProperty("height");
+  bubble.style.removeProperty("left");
+  bubble.style.removeProperty("top");
+  resetFullscreenBubbleLayoutVars();
+  setTimeout(refreshBubblePlacement, 0);
 });

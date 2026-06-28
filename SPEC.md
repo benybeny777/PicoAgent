@@ -293,10 +293,12 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MODEL` | プロバイダ既定 | 基本 | 選択中モデル |
 | `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | 基本 | system メッセージ |
 | `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |
-| `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 内部UI | フキダシ右下のドラッグで自動保存する幅(px)。設定画面には出さず `pet:ui` で即反映 |
-| `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 内部UI | フキダシ右下のドラッグで自動保存する高さ(px)。設定画面には出さず `pet:ui` で即反映 |
-| `PICOAGENT_BUBBLE_LEFT_PX` | 自動 | 内部UI | フキダシ右下のドラッグ後、キャラクターを避けるため再配置した left(px)。設定画面には出さず `pet:ui` で即反映 |
-| `PICOAGENT_BUBBLE_TOP_PX` | 自動 | 内部UI | フキダシ右下のドラッグ後、キャラクターを避けるため再配置した top(px)。設定画面には出さず `pet:ui` で即反映 |
+| `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する幅(px)。設定画面には出さない |
+| `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する高さ(px)。設定画面には出さない |
+| `PICOAGENT_BUBBLE_LEFT_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する left(px)。設定画面には出さない |
+| `PICOAGENT_BUBBLE_TOP_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する top(px)。設定画面には出さない |
+| `PICOAGENT_WINDOW_WIDTH_PX` | 自動 | 内部UI | 透明ウィンドウの幅(px)。アプリ終了時に保存し、起動時に復元する |
+| `PICOAGENT_WINDOW_HEIGHT_PX` | 自動 | 内部UI | 透明ウィンドウの高さ(px)。アプリ終了時に保存し、起動時に復元する |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリに保持する最大件数（10〜200） |
@@ -471,7 +473,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - フロント（`ui/`）は Vite 等のバンドラを使わず、Tauri の静的 `frontendDist` で配信。`withGlobalTauri:true` で
   `window.__TAURI__` を有効化し、`ui/picoagent.js` が旧 `window.picoagent`（init/send/menu/on/settings.*）を再現する。
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
-- フキダシ左上のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_layout` で幅・高さ・座標を設定へ永続化する。拡大時は最小サイズ以外の上限を設けず、画面端やキャラクター回避による自動縮小は行わない。フキダシが透明ウィンドウ外へ出る場合は、ドラッグ中に Tauri ウィンドウ自体も `setPosition` / `setSize` で左上方向へ追従させる。旧互換のため `pet_set_bubble_size` も残す。
+- フキダシ左上のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_layout` で幅・高さ・座標を設定へ永続化する。拡大時は最小サイズ以外の上限を設けない。保存済みのフキダシ幅・高さ・座標は起動時に復元し、座標はキャラクター回避の優先位置として扱う（重ならなければそのまま、重なる場合だけ位置を動かす。サイズの自動縮小は行わない）。既定（未保存時）のフキダシは CSS で「ウィンドウ下端付近まで縦に伸ばし、右側のキャラクターに被らない幅」にする。フキダシが透明ウィンドウ外へ出る場合は、ドラッグ中に Tauri ウィンドウ自体も `setPosition` / `setSize` で左上方向へ追従させる。
+- ウィンドウの**サイズ**はアプリ終了時に設定へ保存し、起動時に復元する（全画面のまま終了した場合はモニタ全体サイズで汚さないよう保存しない。復元値はモニタ内へ収める）。ウィンドウの**位置**は解像度に依存しないよう保存せず、起動時は常に画面右下からの相対オフセット（`default_window_position`：右端より外へ 69px、下端から 51px）で配置する。右クリックメニューの「フキダシ位置とサイズをリセット」でフキダシ保存値とウィンドウサイズを初期化し、ウィンドウを既定オフセットへ戻す。旧互換のため `pet_set_bubble_size` も残す。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを左上起点に大きく広げる（`.bubble.fullscreen`）。拡大時はキャラクターの実測矩形から右側の空け幅を再計算し、キャラ表示用の右ペインを残す。ドラッグでの拡大はまずサイズを維持したままフキダシ座標を再配置してキャラクター矩形を避ける。座標移動だけでは避けられない大きさの場合だけ、左ペインまたは上ペインのうち表示面積が大きい方へ最小限サイズを補正し、設定保存直前にも再配置後の座標とサイズを永続化する。再計算は全画面切替後、ウィンドウサイズ変更、キャラ画像ロード、設定反映、ドラッグ確定後に行う。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
 - 入力欄は `Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。フキダシ上部の `reply-actions` は回答コピー・再読み上げ・停止・全画面切替を提供する。
 - 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。`pet:reset` では履歴もクリアする。
