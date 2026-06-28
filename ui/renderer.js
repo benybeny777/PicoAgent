@@ -85,9 +85,9 @@ let lastFrameAt = 0;
 function setStatus(text) {
   status.textContent = text;
   if (bootStatus && petApp.classList.contains("is-booting")) {
-    const next = text || "起動準備中…";
+    const next = text || "";
     bootStatus.textContent = next;
-    if (next !== lastBootStatus) {
+    if (next && next !== lastBootStatus) {
       lastBootStatus = next;
       appendBootLog(next, "status");
     }
@@ -111,7 +111,6 @@ function appendBootLog(text, kind = "info") {
 
 function startBootLogTicker() {
   if (!bootLog || bootLogTimer) return;
-  appendBootLog("起動処理を開始中…", "system");
 }
 
 function stopBootLogTicker() {
@@ -839,7 +838,6 @@ function applyEngineStatus(s) {
     if (petApp.classList.contains("is-booting")) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
-      appendBootLog("ローカル推論エンジンの起動完了", "system");
     } else {
       setStatus("準備ができたよ。");
       setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
@@ -1119,7 +1117,6 @@ function startAlarmPolling() {
   startBootLogTicker();
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
-  appendBootLog("設定と履歴の読み込み完了", "system");
   online.dataset.up = info.up;
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
@@ -1164,7 +1161,6 @@ function startAlarmPolling() {
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    appendBootLog("通常画面へ切り替え中…", "system");
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
     if (preparedGreeting) playPreparedSpeech(preparedGreeting);

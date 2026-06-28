@@ -186,6 +186,13 @@ fn is_approval_text(text: &str) -> bool {
     )
 }
 
+fn is_persistent_approval_text(text: &str) -> bool {
+    matches!(
+        text.trim().to_lowercase().as_str(),
+        "永続許可" | "常に許可" | "今後も許可" | "永久許可" | "always" | "allow always"
+    )
+}
+
 fn is_cancel_text(text: &str) -> bool {
     matches!(
         text.trim().to_lowercase().as_str(),
@@ -401,6 +408,21 @@ pub async fn pet_send(
 
     let pending = state.pending_command.lock().unwrap().clone();
     if let Some(pending) = pending {
+        if is_persistent_approval_text(&text) {
+            *state.pending_command.lock().unwrap() = None;
+            let reply = crate::tools::run_command::execute_with_persistent_approval(
+                &state.config,
+                &pending,
+            )
+            .await;
+            let mut convo = state.messages.lock().unwrap().clone();
+            convo.push(Message::new("user", user_text));
+            convo.push(Message::new("assistant", reply.clone()));
+            let compacted = compacted_conversation(&convo);
+            *state.messages.lock().unwrap() = compacted.clone();
+            crate::history::save(&app, &active_character_id(&state), &compacted);
+            return Ok(json!({ "reply": reply }));
+        }
         if is_approval_text(&text) {
             *state.pending_command.lock().unwrap() = None;
             let reply = crate::tools::run_command::execute_pending(&pending).await;

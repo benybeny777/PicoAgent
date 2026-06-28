@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::process::Command;
 
 use super::{Tool, ToolReg};
@@ -44,6 +44,21 @@ fn command_root(cfg: &Config) -> PathBuf {
     PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()))
 }
 
+fn extra_command_roots(cfg: &Config) -> Vec<PathBuf> {
+    cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "")
+        .split(['\n', ';'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn command_roots(cfg: &Config) -> Vec<PathBuf> {
+    let mut roots = vec![command_root(cfg)];
+    roots.extend(extra_command_roots(cfg));
+    roots
+}
+
 fn normalize(base: &Path, input: &str) -> PathBuf {
     let joined = if Path::new(input).is_absolute() {
         PathBuf::from(input)
@@ -64,17 +79,27 @@ fn normalize(base: &Path, input: &str) -> PathBuf {
     out
 }
 
-fn bounded_cwd(base: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
+fn bounded_cwd_in_roots(
+    base: &Path,
+    roots: Vec<PathBuf>,
+    cwd: Option<&str>,
+) -> Result<PathBuf, String> {
     let target = normalize(base, cwd.unwrap_or("."));
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外では実行できません: {}",
-            base.display(),
-            target.display()
-        ))
+    for root in roots {
+        let root = normalize(&root, ".");
+        if target == root || target.starts_with(&root) {
+            return Ok(target);
+        }
     }
+    Err(format!(
+        "許可ルートの外では実行できません: {}",
+        target.display()
+    ))
+}
+
+fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
+    let base = command_root(cfg);
+    bounded_cwd_in_roots(&base, command_roots(cfg), cwd)
 }
 
 #[cfg(windows)]
@@ -118,6 +143,10 @@ fn command_tokens(program: &str, args: &[String]) -> Vec<String> {
     tokens.push(program.to_string());
     tokens.extend(args.iter().cloned());
     tokens
+}
+
+fn command_entry(program: &str, args: &[String]) -> String {
+    command_tokens(program, args).join(" ")
 }
 
 fn allowlist_entries(cfg: &Config) -> Vec<Vec<String>> {
@@ -172,7 +201,7 @@ pub fn parse_approval_marker(text: &str) -> Option<PendingCommandApproval> {
 
 pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
     format!(
-        "このコマンドはまだ許可されていません。\n\nコマンド: {} {}\n作業ディレクトリ: {}\n理由: {}\n\n実行してよければ「許可」、やめるなら「キャンセル」と送ってください。今回はこの1回だけ許可します。",
+        "このコマンドはまだ許可されていません。\n\nコマンド: {} {}\n作業ディレクトリ: {}\n理由: {}\n\n実行する場合は次のどれかを送ってください。\n- 「許可」: 今回だけ実行\n- 「永続許可」: 今後も同じコマンド prefix と作業ディレクトリを許可して実行\n- 「キャンセル」: 実行しない",
         pending.program,
         pending.args.join(" "),
         pending.cwd,
@@ -249,6 +278,12 @@ impl Tool for RunCommandTool {
             Field::new("PICOAGENT_COMMAND_ENABLED", "run_command を有効化（true/false）", "text", "false"),
             Field::new("PICOAGENT_COMMAND_ROOT", "run_command の実行許可ルート", "text", &home()),
             Field::new(
+                "PICOAGENT_COMMAND_ALLOWED_PATHS",
+                "run_command の追加許可パス（改行または ; 区切り）",
+                "textarea",
+                "",
+            ),
+            Field::new(
                 "PICOAGENT_COMMAND_ALLOWLIST",
                 "run_command の許可コマンド（カンマ区切り prefix）",
                 "textarea",
@@ -298,7 +333,7 @@ impl Tool for RunCommandTool {
                 program,
                 parsed_args.join(" ")
             ))
-        } else if let Err(error) = bounded_cwd(&base, Some(requested_cwd)) {
+        } else if let Err(error) = bounded_cwd(cfg, Some(requested_cwd)) {
             Some(error)
         } else {
             None
@@ -329,42 +364,110 @@ pub async fn execute_pending(pending: &PendingCommandApproval) -> String {
     execute_approved(&pending.program, &pending.args, &cwd, pending.timeout_secs).await
 }
 
-async fn execute_approved(program: &str, parsed_args: &[String], cwd: &Path, timeout_secs: u64) -> String {
-        let mut command = Command::new(program);
-        command
-            .args(parsed_args)
-            .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        hide_window(&mut command);
-
-        let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(error)) => return format!("エラー: コマンド起動に失敗しました（{}）", error),
-            Err(_) => return format!("エラー: コマンドが {} 秒でタイムアウトしました。", timeout_secs),
-        };
-        let mut result = format!(
-            "終了コード: {}\n作業ディレクトリ: {}\n",
-            output
-                .status
-                .code()
-                .map(|code| code.to_string())
-                .unwrap_or_else(|| "シグナル終了".to_string()),
+pub async fn execute_with_persistent_approval(
+    cfg: &Config,
+    pending: &PendingCommandApproval,
+) -> String {
+    let cwd = PathBuf::from(&pending.cwd);
+    if is_protected_edit_path(&cwd) {
+        return format!(
+            "エラー: Windows / Program Files 配下は編集不可のため、コマンド実行先にできません: {}",
             cwd.display()
         );
-        result.push_str(&trim_output("stdout", &output.stdout));
-        result.push('\n');
-        result.push_str(&trim_output("stderr", &output.stderr));
-        result
+    }
+
+    let mut patch = Map::new();
+    let mut saved = Vec::new();
+    if !allowed(cfg, &pending.program, &pending.args) {
+        let entry = command_entry(&pending.program, &pending.args);
+        let current = cfg.get("PICOAGENT_COMMAND_ALLOWLIST", DEFAULT_ALLOWLIST);
+        let next = if current.trim().is_empty() {
+            entry.clone()
+        } else {
+            format!("{},{}", current.trim(), entry)
+        };
+        patch.insert(
+            "PICOAGENT_COMMAND_ALLOWLIST".to_string(),
+            Value::String(next),
+        );
+        saved.push(format!("コマンド prefix `{entry}`"));
+    }
+    if bounded_cwd(cfg, Some(&pending.cwd)).is_err() {
+        let entry = cwd.to_string_lossy().to_string();
+        let current = cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "");
+        let exists = current
+            .split(['\n', ';'])
+            .map(str::trim)
+            .any(|item| item == entry);
+        if !exists {
+            let next = if current.trim().is_empty() {
+                entry.clone()
+            } else {
+                format!("{}\n{}", current.trim(), entry)
+            };
+            patch.insert(
+                "PICOAGENT_COMMAND_ALLOWED_PATHS".to_string(),
+                Value::String(next),
+            );
+            saved.push(format!("追加許可パス `{entry}`"));
+        }
+    }
+    if !patch.is_empty() {
+        if let Err(error) = cfg.set_all(patch) {
+            return format!("エラー: 永続許可の保存に失敗しました（{}）", error);
+        }
+    }
+
+    let mut result = if saved.is_empty() {
+        "永続許可は既に保存済みでした。\n".to_string()
+    } else {
+        format!("永続許可として保存しました: {}\n", saved.join("、"))
+    };
+    result.push_str(&execute_pending(pending).await);
+    result
+}
+
+async fn execute_approved(
+    program: &str,
+    parsed_args: &[String],
+    cwd: &Path,
+    timeout_secs: u64,
+) -> String {
+    let mut command = Command::new(program);
+    command
+        .args(parsed_args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    hide_window(&mut command);
+
+    let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => return format!("エラー: コマンド起動に失敗しました（{}）", error),
+        Err(_) => return format!("エラー: コマンドが {} 秒でタイムアウトしました。", timeout_secs),
+    };
+    let mut result = format!(
+        "終了コード: {}\n作業ディレクトリ: {}\n",
+        output
+            .status
+            .code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "シグナル終了".to_string()),
+        cwd.display()
+    );
+    result.push_str(&trim_output("stdout", &output.stdout));
+    result.push('\n');
+    result.push_str(&trim_output("stderr", &output.stderr));
+    result
 }
 
 inventory::submit! { ToolReg { make: || Box::new(RunCommandTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_cwd, command_tokens};
+    use super::{bounded_cwd_in_roots, command_tokens};
     use std::path::PathBuf;
 
     #[test]
@@ -378,6 +481,6 @@ mod tests {
     #[test]
     fn 実行cwdのルート外を拒否する() {
         let base = PathBuf::from(r"C:\work\root");
-        assert!(bounded_cwd(&base, Some(r"..\other")).is_err());
+        assert!(bounded_cwd_in_roots(&base, vec![base.clone()], Some(r"..\other")).is_err());
     }
 }

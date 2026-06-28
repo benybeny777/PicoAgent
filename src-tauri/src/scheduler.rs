@@ -74,6 +74,25 @@ fn home() -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
+fn command_root(cfg: &Config) -> PathBuf {
+    PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()))
+}
+
+fn extra_command_roots(cfg: &Config) -> Vec<PathBuf> {
+    cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "")
+        .split(['\n', ';'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn command_roots(cfg: &Config) -> Vec<PathBuf> {
+    let mut roots = vec![command_root(cfg)];
+    roots.extend(extra_command_roots(cfg));
+    roots
+}
+
 fn default_kind() -> String {
     "command".to_string()
 }
@@ -196,17 +215,18 @@ fn normalize(base: &Path, input: &str) -> PathBuf {
     out
 }
 
-fn bounded_cwd(base: &Path, cwd: &str) -> Result<PathBuf, String> {
+fn bounded_cwd(base: &Path, roots: Vec<PathBuf>, cwd: &str) -> Result<PathBuf, String> {
     let target = normalize(base, if cwd.trim().is_empty() { "." } else { cwd });
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外では実行できません: {}",
-            base.display(),
-            target.display()
-        ))
+    for root in roots {
+        let root = normalize(&root, ".");
+        if target == root || target.starts_with(&root) {
+            return Ok(target);
+        }
     }
+    Err(format!(
+        "許可ルートの外では実行できません: {}",
+        target.display()
+    ))
 }
 
 #[cfg(windows)]
@@ -370,8 +390,8 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
     if let Err(error) = validate_task(cfg, task) {
         return format!("エラー: {error}");
     }
-    let base = PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()));
-    let cwd = match bounded_cwd(&base, &task.cwd) {
+    let base = command_root(cfg);
+    let cwd = match bounded_cwd(&base, command_roots(cfg), &task.cwd) {
         Ok(cwd) => cwd,
         Err(error) => return format!("エラー: {error}"),
     };
