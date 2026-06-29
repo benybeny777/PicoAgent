@@ -1,5 +1,6 @@
 const petApp = document.getElementById("petApp");
 const bubble = document.getElementById("bubble");
+const historySearch = document.getElementById("historySearch");
 const historyLog = document.getElementById("historyLog");
 const reply = document.getElementById("reply");
 const composer = document.getElementById("composer");
@@ -28,6 +29,7 @@ let attachedFiles = [];
 let streamBuffer = "";
 let unlistenStream = null;
 const conversationHistory = [];
+let historyQuery = "";
 const promptHistory = [];
 let promptHistoryIndex = null;
 let promptDraft = "";
@@ -575,6 +577,32 @@ function hydrateHistory(items) {
   renderHistory();
 }
 
+function setTemporaryStatus(message, ms = 1400) {
+  status.textContent = message;
+  setTimeout(() => {
+    if (status.textContent === message) status.textContent = "";
+  }, ms);
+}
+
+async function copyHistoryItem(text) {
+  try {
+    const ok = await copyText(text);
+    setTemporaryStatus(ok ? "履歴をコピーしました" : "コピーできませんでした");
+  } catch (error) {
+    logApp("warn", "履歴コピーに失敗しました", errorDetail(error));
+    setTemporaryStatus("コピーできませんでした");
+  }
+}
+
+function reuseHistoryItem(text) {
+  if (busy) return;
+  if (composer.hidden) openComposer();
+  setInputValue(text);
+  resetPromptHistoryNavigation();
+  input.focus();
+  setTemporaryStatus("入力欄へ戻しました");
+}
+
 function renderHistory() {
   if (!historyLog) return;
   historyLog.replaceChildren();
@@ -582,16 +610,44 @@ function renderHistory() {
     historyLog.append(document.createElement("div"));
     return;
   }
-  for (const item of conversationHistory) {
+  const query = historyQuery.trim().toLowerCase();
+  const items = query
+    ? conversationHistory.filter(item => item.content.toLowerCase().includes(query))
+    : conversationHistory;
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "一致する履歴はありません。";
+    historyLog.append(empty);
+    return;
+  }
+  for (const item of items) {
     const row = document.createElement("div");
     row.className = `history-item ${item.role}`;
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
     const label = document.createElement("div");
     label.className = "history-role";
     label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.textContent = "コピー";
+    copy.addEventListener("click", () => copyHistoryItem(item.content));
+    actions.append(copy);
+    if (item.role === "user") {
+      const reuse = document.createElement("button");
+      reuse.type = "button";
+      reuse.textContent = "再利用";
+      reuse.addEventListener("click", () => reuseHistoryItem(item.content));
+      actions.append(reuse);
+    }
+    meta.append(label, actions);
     const body = document.createElement("div");
     body.className = "history-body";
     appendLinkedText(body, item.content);
-    row.append(label, body);
+    row.append(meta, body);
     historyLog.append(row);
   }
   historyLog.scrollTop = historyLog.scrollHeight;
@@ -1292,6 +1348,10 @@ input.addEventListener("keydown", event => {
     composer.requestSubmit();
   }
 });
+historySearch?.addEventListener("input", () => {
+  historyQuery = historySearch.value;
+  renderHistory();
+});
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
   if (!composer.hidden) {
@@ -1306,6 +1366,8 @@ window.picoagent.on("pet:reset", () => {
   promptHistory.length = 0;
   promptHistoryIndex = null;
   promptDraft = "";
+  historyQuery = "";
+  if (historySearch) historySearch.value = "";
   renderHistory();
   stopVoice();
   renderReply("新しい話をしよう。");

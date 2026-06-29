@@ -58,14 +58,26 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .bubble.fullscreen .bubble-resize { display:none; }
 /* 拡大中もキャラはそのまま右側に表示（被らないので薄くしない）。 */
 .bubble.fullscreen ~ .character { z-index:7; }
+.history-tools { display:none; }
+.bubble.fullscreen .history-tools { display:flex; flex:0 0 auto; margin:0 0 8px; }
+.history-tools input { width:100%; height:30px; padding:0 10px; border:1px solid #ded6df; border-radius:9px; outline:none; background:#faf7f9; color:var(--ink); font:12px/1.4 inherit; }
+.history-tools input:focus { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.1); }
 .history-log { display:none; }
 .bubble.fullscreen .history-log { display:block; flex:1 1 auto; min-height:0; margin:0 0 12px; padding:0 4px 0 0; overflow:auto; }
 .history-item { margin:0 0 11px; }
-.history-role { margin-bottom:3px; color:var(--muted); font-size:10px; font-weight:700; }
+.history-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:3px; }
+.history-role { color:var(--muted); font-size:10px; font-weight:700; }
+.history-actions { display:flex; gap:4px; opacity:.72; }
+.history-item:hover .history-actions,
+.history-actions:focus-within { opacity:1; }
+.history-actions button { position:static; height:20px; padding:0 7px; border-radius:7px; background:#f4edf1; border:1px solid #eadde5; color:var(--muted); font-size:10px; font-weight:700; }
+.history-actions button:hover { color:var(--ink); border-color:#d59cac; filter:none; }
 .history-body { display:inline-block; max-width:100%; padding:8px 10px; border-radius:12px; background:#f6f1f4; font-size:12px; line-height:1.65; white-space:pre-wrap; word-break:break-word; user-select:text; }
 .history-item.user { text-align:right; }
+.history-item.user .history-meta { flex-direction:row-reverse; }
 .history-item.user .history-body { background:#ffeef3; }
 .history-item.assistant .history-body { background:#f4fbf6; }
+.history-empty { padding:14px 8px; color:var(--muted); font-size:12px; text-align:center; }
 .reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:text; overflow:auto; }
 .bubble.fullscreen .reply { flex:0 0 auto; max-height:30%; padding-top:8px; border-top:1px solid rgba(71,52,76,.1); }
 .reply a { color:#b94f68; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
