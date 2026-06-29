@@ -4,6 +4,8 @@
 
 use std::sync::Arc;
 
+use tauri::Manager;
+
 use crate::config::Config;
 use crate::message::Message;
 use crate::providers::Provider;
