@@ -1108,6 +1108,7 @@ composer.addEventListener("submit", async event => {
   streamBuffer = "";
   try {
     if (window.picoagent.listen) {
+      if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 念のため前回の購読を解放（多重購読防止）
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         streamBuffer += chunk;
         renderReply(streamBuffer);
@@ -1115,7 +1116,10 @@ composer.addEventListener("submit", async event => {
         if (animationName === "thinking") setAnimation("talking");
       });
     }
-  } catch (_) {}
+  } catch (error) {
+    // ストリーミング購読の失敗は致命的でない（通常応答で結果は受け取れる）が、握りつぶさずログに残す。
+    logApp("warn", "ストリーミング購読の設定に失敗しました", errorDetail(error));
+  }
 
   try {
     // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────

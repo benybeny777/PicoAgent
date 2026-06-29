@@ -361,6 +361,15 @@ pub async fn ensure_and_start(app: AppHandle) {
     if app.try_state::<EngineState>().map(|e| e.stopping.load(Ordering::SeqCst)).unwrap_or(true) {
         return;
     }
+    // すでに同梱エンジンが応答していれば（前回クラッシュ等で取り残されたプロセス）、
+    // 二重起動やポート競合を避けて既存サーバーを再利用する。
+    if let Some(provider) = crate::providers::get("local") {
+        let state = app.state::<AppState>();
+        if provider.is_up(&state.config).await {
+            set_status(&app, json!({ "phase": "ready" }));
+            return;
+        }
+    }
     set_status(&app, json!({ "phase": "starting" }));
     if let Err(e) = spawn_server(&app, &model) {
         set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
