@@ -227,6 +227,10 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         &["変換", "pdf化", "libreoffice", "convert"],
     ),
     ("pdf_tools", &["pdf", "結合", "抽出", "回転"]),
+    (
+        "image_generate",
+        &["画像", "絵", "イラスト", "描いて", "生成して", "dall-e", "image", "写真"],
+    ),
     ("x_twitter", &["twitter", "xに", "ポスト", "ツイート"]),
     ("mastodon", &["mastodon", "マストドン"]),
     ("bluesky", &["bluesky", "bsky", "ブルースカイ"]),

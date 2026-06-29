@@ -266,17 +266,29 @@ function exitBubbleFullscreen() { setBubbleFullscreen(false); }
 
 function appendLinkedText(container, text) {
   const source = String(text ?? "");
-  const links = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g;
+  // ![alt](url) → インライン画像、[text](url) → リンク、裸のURL → リンク の順にマッチ。
+  const pattern = /!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g;
   let offset = 0;
-  for (const match of source.matchAll(links)) {
+  for (const match of source.matchAll(pattern)) {
     container.append(document.createTextNode(source.slice(offset, match.index)));
-    const href = match[2] || match[3];
-    const anchor = document.createElement("a");
-    anchor.href = href;
-    anchor.textContent = match[1] || href;
-    anchor.target = "_blank";
-    anchor.rel = "noopener noreferrer";
-    container.append(anchor);
+    if (match[0].startsWith("![")) {
+      // Markdown 画像記法 → <img> としてインライン表示
+      const img = document.createElement("img");
+      img.src = match[2];
+      img.alt = match[1] || "画像";
+      img.style.cssText = "max-width:100%;border-radius:6px;display:block;margin:4px 0;cursor:pointer";
+      img.title = "クリックして開く";
+      img.addEventListener("click", () => window.open(match[2], "_blank", "noopener,noreferrer"));
+      container.append(img);
+    } else {
+      const href = match[4] || match[5];
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.textContent = match[3] || href;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      container.append(anchor);
+    }
     offset = match.index + match[0].length;
   }
   container.append(document.createTextNode(source.slice(offset)));
@@ -752,6 +764,11 @@ async function finishBubbleResize(event) {
 bubbleResize.addEventListener("pointerup", finishBubbleResize);
 bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 
+// 画面を見てほしい系の発話を検出する（スクリーンショット自動添付に使用）。
+function isScreenshotQuery(text) {
+  return /画面を見て|スクリーンショット|screenshot|画面の状態|画面を確認|今の画面|デスクトップを見て|画面キャプチャ/.test(text.toLowerCase());
+}
+
 composer.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();
@@ -783,7 +800,20 @@ composer.addEventListener("submit", async event => {
   } catch (_) {}
 
   try {
-    const result = await window.picoagent.send(text);
+    // 画面を見てほしい発話はスクリーンショットを自動撮影して画像付き送信に切り替える。
+    let result;
+    if (isScreenshotQuery(text) && window.picoagent.captureScreen) {
+      try {
+        status.textContent = "画面を撮影中…";
+        const shot = await window.picoagent.captureScreen();
+        if (shot?.dataUrl) {
+          result = await window.picoagent.sendImage(text, [shot.dataUrl]);
+        }
+      } catch (shotErr) {
+        logApp("warn", "スクリーンショット取得に失敗しました。通常送信へ切り替えます。", String(shotErr));
+      }
+    }
+    if (!result) result = await window.picoagent.send(text);
     status.textContent = result.error ? "接続を確認してね" : "";
     if (result.error) {
       logApp("error", "AI応答がエラーを返しました", result.reply || "");

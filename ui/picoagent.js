@@ -80,6 +80,8 @@ window.picoagent = {
   traces: () => call("pet_traces"),
   // 画像付きメッセージを送信する（images は base64 data URL の配列）。
   sendImage: (text, images) => call("pet_send_image", { text, images }),
+  // デスクトップのスクリーンショットを PNG base64 data URL で返す。
+  captureScreen: () => call("pet_capture_screen"),
   engineStatus: () => call("engine_status"),
   restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {

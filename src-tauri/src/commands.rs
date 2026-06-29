@@ -1456,6 +1456,100 @@ pub async fn pet_send_image(
     }
 }
 
+/// デスクトップのスクリーンショットを撮影し PNG を base64 data URL で返す。
+/// プラットフォームごとに利用可能なツールを順に試みる。
+/// Windows: PowerShell + GDI、macOS: screencapture、Linux: grim → scrot → import の順。
+#[tauri::command]
+pub async fn pet_capture_screen() -> Result<Value, String> {
+    use base64::Engine;
+
+    let temp_path = std::env::temp_dir().join("picoagent-screenshot.png");
+
+    #[cfg(target_os = "windows")]
+    {
+        let path_esc = temp_path.to_string_lossy().replace('\\', "\\\\");
+        let script = format!(
+            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;\
+             $s=[System.Windows.Forms.Screen]::PrimaryScreen;\
+             $b=New-Object System.Drawing.Bitmap($s.Bounds.Width,$s.Bounds.Height);\
+             $g=[System.Drawing.Graphics]::FromImage($b);\
+             $g.CopyFromScreen($s.Bounds.Location,[System.Drawing.Point]::Empty,$s.Bounds.Size);\
+             $b.Save(\"{path_esc}\");\
+             $g.Dispose();$b.Dispose()"
+        );
+        let out = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .await
+            .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "スクリーンショット取得に失敗しました: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let out = tokio::process::Command::new("screencapture")
+            .args(["-t", "png", temp_path.to_str().unwrap_or("")])
+            .output()
+            .await
+            .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "スクリーンショット取得に失敗しました: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let path_str = temp_path.to_str().unwrap_or("");
+        // grim(Wayland) → scrot(X11) → import(ImageMagick) の順に試みる。
+        let ok = tokio::process::Command::new("grim")
+            .arg(path_str)
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            let ok2 = tokio::process::Command::new("scrot")
+                .arg(path_str)
+                .status()
+                .await
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !ok2 {
+                let out = tokio::process::Command::new("import")
+                    .args(["-window", "root", path_str])
+                    .output()
+                    .await
+                    .map_err(|_| {
+                        "スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string()
+                    })?;
+                if !out.status.success() {
+                    return Err("スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string());
+                }
+            }
+        }
+    }
+
+    // macOS/Windows/Linux 以外はスタブエラー
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    return Err("スクリーンショットはこのプラットフォームでは未対応です。".to_string());
+
+    let bytes = tokio::fs::read(&temp_path)
+        .await
+        .map_err(|e| format!("スクリーンショットファイルの読み込みに失敗しました: {e}"))?;
+    let _ = tokio::fs::remove_file(&temp_path).await;
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(json!({ "dataUrl": format!("data:image/png;base64,{b64}") }))
+}
+
 /// 設定ウィンドウを開く（既にあれば前面化）。
 pub fn open_settings(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("settings") {

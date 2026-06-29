@@ -78,6 +78,8 @@ graph TD
 - `arguments` は **`serde_json::Value`（オブジェクト）** で持つ（OpenAI の JSON 文字列はプロバイダ内で相互変換）。
 - Ollama は tool 結果を id で紐付けず位置・名前で扱うため `tool_call_id` は無視（正規形には残す）。
 - `images` は **マルチモーダル入力**用のフィールド（省略可）。base64 data URL 文字列の配列。プロバイダが OpenAI 互換の場合、user メッセージの `content` を `[{type:"text",...}, {type:"image_url",...}]` 配列形式へ変換して送信する。`usage` フィールドは ephemeral（`#[serde(skip)]`）で、プロバイダから返ったトークン数を一時的に保持する。
+- **スクリーンショット解析**: `pet_capture_screen` コマンドがデスクトップ画像を PNG base64 data URL で返す。フロントエンドは「画面を見て」「スクリーンショット」などの発話を検出し、自動で `pet_capture_screen` → `pet_send_image` へ切り替えてビジョン対応モデルへ送る。
+- **インライン画像表示**: `appendLinkedText()` が `![alt](url)` Markdown 画像記法を `<img>` 要素としてフキダシ内にインライン表示する。DALL-E 3 生成画像や外部 URL の画像をそのまま確認できる。
 
 ---
 
@@ -254,6 +256,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `todoist` | Todoist のタスク一覧・作成・完了 | API token は設定から都度取得、秘密値を出力しない、timeout |
 | `http_api` | 個別スキルがないSaaSやWebhookへの汎用HTTP API呼び出し | 許可ドメイン必須、任意Bearer/API key、本文/応答サイズ上限、timeout |
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
+| `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | Microsoft Office COM による Word/Excel/PowerPoint の文字列置換・PDF出力 | `PICOAGENT_DOCUMENT_ROOT` 配下のみ、Windows + Microsoft Office 必須、PowerShell 経由、timeout |
 | `document_convert` | LibreOffice headless による Office/PDF 変換 | `PICOAGENT_DOCUMENT_ROOT` 配下のみ、専用エンジン `PICOAGENT_LIBREOFFICE_PATH`、timeout |
 | `pdf_tools` | qpdf による PDF 情報取得・ページ抽出・結合・回転・線形化 | `PICOAGENT_DOCUMENT_ROOT` 配下のみ、専用エンジン `PICOAGENT_QPDF_PATH`、timeout |
