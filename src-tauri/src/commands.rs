@@ -1405,7 +1405,10 @@ pub async fn pet_send_image(
     if text.is_empty() && images.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
-    // 画像サイズ制限（1枚あたり最大 10MB base64）。
+    // 画像の枚数・サイズ制限（1枚あたり最大 10MB base64、最大 8 枚）。
+    if images.len() > 8 {
+        return Err("画像が多すぎます（最大 8 枚まで）。".to_string());
+    }
     for img in &images {
         if img.len() > 10 * 1024 * 1024 {
             return Err("画像サイズが大きすぎます（1枚 10MB まで）。".to_string());
@@ -1559,6 +1562,11 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
+    // 巨大ファイル/ZIP爆弾による OOM を避けるため入力サイズを制限する（base64 は ~4/3 倍）。
+    const MAX_FILE_BYTES: usize = 25 * 1024 * 1024;
+    if data_b64.len() > MAX_FILE_BYTES / 3 * 4 + 1024 {
+        return Err("ファイルが大きすぎます（25MB まで）。".to_string());
+    }
     // data URL プレフィックスを除去する。
     let b64 = if let Some(pos) = data_b64.find(";base64,") {
         &data_b64[pos + 8..]
@@ -1568,6 +1576,9 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     let bytes = B64
         .decode(b64.trim())
         .map_err(|e| format!("base64 デコード失敗: {e}"))?;
+    if bytes.len() > MAX_FILE_BYTES {
+        return Err("ファイルが大きすぎます（25MB まで）。".to_string());
+    }
 
     let ext = std::path::Path::new(&name)
         .extension()
@@ -1676,17 +1687,23 @@ fn strip_xml_tags(s: &str) -> String {
     out.trim().to_string()
 }
 
+/// ZIP エントリ 1 件の展開上限（ZIP爆弾対策）。
+const MAX_ZIP_ENTRY_BYTES: u64 = 20 * 1024 * 1024;
+
 fn read_zip_entry(data: &[u8], entry: &str) -> Result<String, String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(data);
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
-    let mut file = archive
+    let file = archive
         .by_name(entry)
         .map_err(|_| format!("'{entry}' が見つかりません"))?;
-    let mut content = String::new();
-    file.read_to_string(&mut content).map_err(|e| e.to_string())?;
-    Ok(content)
+    // 展開サイズを上限で打ち切る（巨大展開による OOM を防ぐ）。
+    let mut buf = Vec::new();
+    file.take(MAX_ZIP_ENTRY_BYTES)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
@@ -1696,11 +1713,12 @@ fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
         zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
     let mut slides: Vec<(String, String)> = Vec::new();
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
         let fname = file.name().to_string();
         if fname.starts_with("ppt/slides/slide") && fname.ends_with(".xml") {
-            let mut xml = String::new();
-            file.read_to_string(&mut xml).ok();
+            let mut buf = Vec::new();
+            let _ = file.take(MAX_ZIP_ENTRY_BYTES).read_to_end(&mut buf);
+            let xml = String::from_utf8_lossy(&buf).into_owned();
             slides.push((fname, strip_xml_tags(&xml)));
         }
     }
