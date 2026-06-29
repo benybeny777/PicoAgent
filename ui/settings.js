@@ -6,6 +6,7 @@ const form = document.getElementById("form");
 const statusEl = document.getElementById("status");
 const saveBtn = document.getElementById("save");
 const modelOptions = document.getElementById("modelOptions");
+const settingsSearch = document.getElementById("settingsSearch");
 
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
@@ -19,6 +20,7 @@ let characterCatalog;
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
+const noSearchResultMessage = "検索に一致する設定はありません";
 
 function errorDetail(error) {
   if (!error) return "";
@@ -51,6 +53,66 @@ function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);
   for (const c of children) node.append(c);
   return node;
+}
+
+function searchText(...parts) {
+  return parts
+    .filter(part => part != null)
+    .map(part => String(part).toLowerCase())
+    .join(" ");
+}
+
+function markSearchable(node, ...parts) {
+  node.classList.add("searchable");
+  node.dataset.search = searchText(...parts);
+  return node;
+}
+
+function nodeSearchText(node) {
+  return searchText(node.dataset.search || "", node.textContent || "");
+}
+
+function currentActivePanel(group) {
+  return group?.querySelector(":scope > .tab-panel.active") || group?.querySelector(":scope > .tab-panel");
+}
+
+function applySettingsSearch() {
+  if (!settingsSearch) return;
+  const query = settingsSearch.value.trim().toLowerCase();
+  document.body.classList.toggle("searching", Boolean(query));
+  const topPanels = form.querySelector(":scope > .tab-panels");
+  const topActive = currentActivePanel(topPanels);
+  for (const panel of form.querySelectorAll(".tab-panel")) {
+    if (!query) {
+      const parent = panel.parentElement;
+      const active = parent === topPanels ? panel === topActive : panel.classList.contains("active");
+      panel.hidden = !active;
+    } else {
+      panel.hidden = false;
+    }
+  }
+  for (const item of form.querySelectorAll(".searchable")) {
+    item.hidden = query ? !nodeSearchText(item).includes(query) : false;
+  }
+  for (const sectionNode of form.querySelectorAll(".section")) {
+    if (!query) {
+      sectionNode.hidden = false;
+      continue;
+    }
+    const ownMatch = nodeSearchText(sectionNode.querySelector("h2") || sectionNode).includes(query);
+    const childMatch = [...sectionNode.querySelectorAll(".searchable")].some(item => !item.hidden);
+    sectionNode.hidden = !(ownMatch || childMatch);
+  }
+  for (const panel of form.querySelectorAll(".tab-panel")) {
+    if (!query) continue;
+    const hasVisibleContent = [...panel.children].some(child => !child.hidden);
+    panel.hidden = !hasVisibleContent;
+  }
+  if (query && !form.querySelector(".tab-panel:not([hidden])")) {
+    statusEl.textContent = noSearchResultMessage;
+  } else if (statusEl.textContent === noSearchResultMessage) {
+    statusEl.textContent = "";
+  }
 }
 
 const MODEL_GROUPS = {
@@ -160,6 +222,7 @@ function groupedModelField(key, label, value, groups, options = {}) {
     hint,
     hidden,
   ]);
+  markSearchable(wrapper, key, label, groups.map(group => group.label).join(" "));
   const customGroup = { label: "カスタム", options: [{ value: "__custom__", label: "直接入力", hint: "一覧にないモデルIDを入力します。" }] };
   const allGroups = options.allowCustom === false ? groups : [...groups, customGroup];
   let initialFamily = allGroups.findIndex(group => group.options.some(option => option.value === value));
@@ -219,12 +282,12 @@ function field(key, label, type, value, placeholder) {
   if (type === "textarea") {
     const ta = el("textarea", { value: value ?? "", placeholder: placeholder || "" });
     inputs.set(key, ta);
-    return el("div", { className: "field" }, [el("label", { textContent: label }), ta]);
+    return markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), ta]), key, label, placeholder);
   }
   if (type === "checkbox") {
     const cb = el("input", { type: "checkbox", checked: Boolean(value) });
     inputs.set(key, cb);
-    return el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]);
+    return markSearchable(el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]), key, label);
   }
   const inputType = type === "password" ? "password" : type === "number" ? "number" : "text";
   const input = el("input", { type: inputType, value: value ?? "", placeholder: placeholder || "" });
@@ -235,7 +298,7 @@ function field(key, label, type, value, placeholder) {
   }
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   inputs.set(key, input);
-  return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
+  return markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder);
 }
 
 function localModelPresetField(key, label, value) {
@@ -358,7 +421,12 @@ function selectField(key, label, value, options) {
     }));
   }
   inputs.set(key, select);
-  return el("div", { className: "field" }, [el("label", { textContent: label }), select]);
+  return markSearchable(
+    el("div", { className: "field" }, [el("label", { textContent: label }), select]),
+    key,
+    label,
+    options.map(option => option.label).join(" ")
+  );
 }
 
 function section(title) {
@@ -398,6 +466,7 @@ function createTabs(items) {
         current.classList.toggle("active", active);
         current.hidden = !active;
       }
+      applySettingsSearch();
     });
     tabs.append(button);
     panels.append(panel);
@@ -433,13 +502,18 @@ function skillCategory(tool) {
 function renderSkillCard(tool, values) {
   const hasConfig = !!tool.configSchema?.length;
   const name = el("div", { className: "card-name", textContent: hasConfig ? `${tool.label || tool.name}　⚙` : (tool.label || tool.name) });
-  const card = el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
+  const card = markSearchable(el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
     name,
     el("div", { className: "card-desc", textContent: tool.description || "" }),
-  ]);
+  ]), tool.name, tool.label, tool.description);
   const nodes = [card];
   if (hasConfig) {
-    const panel = el("div", { className: "card-config" });
+    const panel = markSearchable(
+      el("div", { className: "card-config" }),
+      tool.name,
+      tool.label,
+      tool.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
+    );
     panel.hidden = true;
     if (tool.name === "alarm") {
       // 目覚ましは JSON ではなく、時刻ピッカー＋曜日チェックの専用フォームで編集する。
@@ -452,6 +526,7 @@ function renderSkillCard(tool, values) {
       const open = panel.hidden;
       panel.hidden = !open;
       card.classList.toggle("open", open);
+      applySettingsSearch();
     });
     nodes.push(panel);
   }
@@ -510,6 +585,7 @@ function buildSkillCategoryTabs(tools, values) {
         current.classList.toggle("active", active);
         current.hidden = !active;
       }
+      applySettingsSearch();
     });
     tabs.append(button);
     panels.append(panel);
@@ -655,10 +731,10 @@ async function render() {
   const charList = el("div", { className: "card-list" });
   for (const character of characterCatalog.characters) {
     const name = character.id === selectedCharacter ? `${character.name}（使用中）` : character.name;
-    charList.append(el("div", { className: "card-item" }, [
+    charList.append(markSearchable(el("div", { className: "card-item" }, [
       el("div", { className: "card-name", textContent: name }),
       el("div", { className: "card-desc", textContent: character.description || character.id }),
-    ]));
+    ]), character.id, character.name, character.description));
   }
   charSec.append(charList);
   panels.character.append(charSec);
@@ -668,7 +744,12 @@ async function render() {
   const provBlocks = {};
   for (const p of data.providers) {
     if (!p.configSchema?.length) continue;
-    const block = el("div", { className: "prov-block" });
+    const block = markSearchable(
+      el("div", { className: "prov-block" }),
+      p.id,
+      p.label,
+      p.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
+    );
     block.append(el("div", { className: "subhead", textContent: p.label }));
     for (const f of p.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
     block.hidden = p.id !== data.active.providerId;
@@ -702,6 +783,7 @@ async function render() {
     modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
   });
   loadModels(providerSelect.value);
+  applySettingsSearch();
 }
 
 function providerDefaultModel(providerId) {
@@ -818,6 +900,8 @@ saveBtn.addEventListener("click", async () => {
     saveBtn.disabled = false;
   }
 });
+
+settingsSearch?.addEventListener("input", applySettingsSearch);
 
 (async () => {
   data = await window.picoagent.settings.load();

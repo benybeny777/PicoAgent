@@ -26,6 +26,30 @@ header {
 
 h1 { font-size: 18px; margin: 0; }
 .hint { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13px;
+}
+.settings-search input:focus {
+  outline: 2px solid rgba(233, 138, 182, .22);
+  border-color: var(--pink);
+}
 
 main {
   flex: 1;
@@ -41,6 +65,15 @@ main {
   gap: 6px;
   padding: 0 0 10px;
   background: var(--bg);
+}
+body.searching .tabs {
+  position: static;
+}
+body.searching .tab {
+  opacity: .72;
+}
+body.searching .tab-panel {
+  padding-top: 4px;
 }
 .tab {
   height: 32px;
