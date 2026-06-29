@@ -9,6 +9,8 @@
 ### 出典付き調査レポート生成スキルを追加
 
 - **調査からMarkdownレポート化までを一括化** (`skills/research_report/`): 複数観点のWeb検索を実行し、要約・観点別メモ・比較表・次の深掘り・出典一覧を含む Markdown 調査レポートを生成するスキルを追加。`save=true` または `save_path` で `PICOAGENT_WORKSPACE_ROOT` 配下へ `.md` 保存できる。検索件数・待ち時間・保存先に境界を設け、危険な任意パス書き込みは拒否する。
+- **成果物セット化** (`skills/research_report/`): 保存時は既定で本文レポートに加え、1ページ要約 `.brief.md`、スライド下書き `.slides.md`、出典CSV `.sources.csv` も同時生成するようにした。`artifact_bundle=false` で単一レポート保存にも戻せる。
+- **調査依頼の直行ルート** (`agent.rs`): 「調査」「レポート」「出典」「競合比較」などを含む依頼は、小型ローカルモデルの tool_calls 判断を待たず `research_report` を直接実行するようにした。
 
 ### 設定画面の未保存変更を戻せるように修正
 

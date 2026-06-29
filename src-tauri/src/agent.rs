@@ -571,6 +571,45 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
     None
 }
 
+fn research_report_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let has_research_word = [
+        "調査",
+        "リサーチ",
+        "レポート",
+        "出典",
+        "競合比較",
+        "市場調査",
+        "まとめて調べ",
+        "research",
+        "report",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !has_research_word {
+        return None;
+    }
+    let wants_artifact = [
+        "レポート",
+        "資料",
+        "スライド",
+        "表",
+        "csv",
+        "markdown",
+        "md",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    let save = ["保存", "ファイル", "出力", "作成して", "作って", "まとめて"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    Some(serde_json::json!({
+        "topic": text.trim(),
+        "save": save || wants_artifact,
+        "artifact_bundle": true
+    }))
+}
+
 /// ツール引数 JSON の解析失敗（`_raw` フィールド）を検出してエラーを返す。
 /// 正常な引数はそのまま `tools::dispatch` へ渡す。
 /// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
@@ -678,6 +717,9 @@ pub async fn run(
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
             let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = research_report_query(&user_text) {
+            let answer = tools::dispatch(cfg, "research_report", args).await;
             return direct_answer(messages, answer);
         } else if is_daily_briefing_query(&user_text) {
             let answer = tools::dispatch(cfg, "daily_briefing", serde_json::json!({})).await;
@@ -836,7 +878,7 @@ mod tests {
     use super::{
         append_sources, currency_query, direct_local_tool_query, extract_source_urls,
         is_local_action_query, is_simple_greeting, is_weather_query, market_query,
-        should_web_search, web_search_query,
+        research_report_query, should_web_search, web_search_query,
     };
 
     #[test]
@@ -932,5 +974,21 @@ mod tests {
         let (tool, args) = direct_local_tool_query("企画書を書けた").unwrap();
         assert_eq!(tool, "praise_log");
         assert_eq!(args["action"], "add");
+    }
+
+    #[test]
+    fn 調査レポート依頼を直結スキルへ割り当てる() {
+        let args =
+            research_report_query("AIエージェント市場を出典付きで調査してレポートにして").unwrap();
+        assert_eq!(
+            args.get("save").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            args.get("artifact_bundle")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert!(research_report_query("ありがとう").is_none());
     }
 }
