@@ -25,8 +25,15 @@ fn effective_system_prompt(config: &Config) -> String {
     }
 }
 
-// 会話の文脈に保持する最大メッセージ数（system 除く）。小型モデルのコンテキスト超過を避ける。
-const MAX_CONTEXT_MESSAGES: usize = 24;
+// 日本語文字は約2トークン、ASCII は約0.25トークン（÷4）で粗く見積もる。
+fn estimate_tokens(msg: &Message) -> usize {
+    let japanese = msg.content.chars().filter(|c| *c as u32 > 0x7F).count();
+    let ascii = msg.content.chars().count() - japanese;
+    japanese * 2 + (ascii + 3) / 4
+}
+
+// 非 system メッセージに割り当てるトークン予算の上限。8k コンテキストの約 75% を目安にする。
+const MAX_CONTEXT_TOKENS: usize = 6_000;
 
 pub struct AppState {
     pub config: Config,
@@ -122,11 +129,15 @@ fn clean_turns(messages: &[Message]) -> Vec<Message> {
         .collect()
 }
 
-// 会話を「system + クリーンな直近発話（最大 MAX_CONTEXT_MESSAGES 件）」へ圧縮する。
+// 会話を「system + クリーンな直近発話（トークン予算内）」へ圧縮する。
+// メッセージ数ではなくトークン推定量で制限し、小型モデルのコンテキスト超過を防ぐ。
 fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
     let mut turns = clean_turns(convo);
-    if turns.len() > MAX_CONTEXT_MESSAGES {
-        turns.drain(0..turns.len() - MAX_CONTEXT_MESSAGES);
+    let mut total: usize = turns.iter().map(estimate_tokens).sum();
+    // 予算超過している間、最古の発話から削除する（最低2件は保持）。
+    while total > MAX_CONTEXT_TOKENS && turns.len() > 2 {
+        total -= estimate_tokens(&turns[0]);
+        turns.remove(0);
     }
     let mut next: Vec<Message> = convo
         .iter()
@@ -463,6 +474,22 @@ pub async fn pet_send(
 
     // std Mutex を await 跨ぎで保持しないよう、会話をクローンして処理し書き戻す。
     let mut convo = state.messages.lock().unwrap().clone();
+    // セマンティックメモリ: クエリに関連するメモリを今回のリクエスト向けに絞り込み、
+    // 今回の convo の system メッセージのみ更新する（state.memory_context は変えない）。
+    {
+        let semantic_ctx = crate::memory::context_for_query(&app, &state.config, &text);
+        let base_ctx = state.memory_context.lock().unwrap().clone();
+        if !semantic_ctx.is_empty() && semantic_ctx != base_ctx {
+            if let Some(sys) = convo.iter_mut().find(|m| m.role == "system") {
+                if base_ctx.is_empty() {
+                    sys.content.push_str("\n\n");
+                    sys.content.push_str(&semantic_ctx);
+                } else {
+                    sys.content = sys.content.replacen(base_ctx.as_str(), semantic_ctx.as_str(), 1);
+                }
+            }
+        }
+    }
     convo.push(Message::new("user", text));
 
     let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;

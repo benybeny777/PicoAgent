@@ -60,7 +60,7 @@ graph TD
 - `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ永続化する。`pet_usage` コマンドで今月のプロバイダ/モデル別集計と全期間累計を取得できる。90日より古いレコードは自動削除。
 - `memory.rs` の長期メモリ検索が意味的類似度（バイグラムジャカード係数）に対応した。`context_for_query(app, cfg, query)` がユーザー発話に近いメモリ項目を優先して提示し、閾値（0.05）以下なら全件フォールバック。
 - 設定の正本は `config.rs`（`app_config_dir/config.json`）。コネクタは `cfg.get()` で都度読むため、設定変更は再起動なしに反映。
-- 会話履歴は `history.rs` がキャラクター別に `app_data_dir/history-<キャラクターID>.json` へ永続化する（対話データなので config とは分離）。`pet_send` のたびに「system + クリーンな直近発話（最大 24 件）」へ圧縮して選択中キャラのファイルへ保存し、起動時に末尾 20 件を文脈へ復元する。これにより再起動をまたいで直近の会話を踏まえて話す。途中の tool 呼び出し/結果は順序破綻を避けるため文脈・履歴に残さない。`AppState.character_id` が文脈の持ち主キャラを保持し、`pet_set_character_profile` でキャラが変わったら現在の文脈を破棄して切替先キャラの履歴を復元する（旧キャラの一人称・自己紹介が混ざらない）。旧仕様の単一 `history.json` は起動時に既定キャラ `mugi` のファイルへ一度だけ移行する（旧履歴はキャラ別管理が無かった時代のもので当時の既定キャラが mugi のため。選択中キャラへ割り当てると人格が混ざる）。
+- 会話履歴は `history.rs` がキャラクター別に `app_data_dir/history-<キャラクターID>.json` へ永続化する（対話データなので config とは分離）。`pet_send` のたびに「system + クリーンな直近発話（トークン予算：約 6,000 トークン）」へ圧縮して選択中キャラのファイルへ保存し、起動時に末尾 20 件を文脈へ復元する。トークン数は日本語文字 ×2・ASCII 文字 ÷4 で概算し、予算超過時は古い発話から削除する。これにより再起動をまたいで直近の会話を踏まえて話す。途中の tool 呼び出し/結果は順序破綻を避けるため文脈・履歴に残さない。`AppState.character_id` が文脈の持ち主キャラを保持し、`pet_set_character_profile` でキャラが変わったら現在の文脈を破棄して切替先キャラの履歴を復元する（旧キャラの一人称・自己紹介が混ざらない）。旧仕様の単一 `history.json` は起動時に既定キャラ `mugi` のファイルへ一度だけ移行する（旧履歴はキャラ別管理が無かった時代のもので当時の既定キャラが mugi のため。選択中キャラへ割り当てると人格が混ざる）。
 - 暗黙的な長期メモリは `memory.rs` が `app_data_dir/memory.json` に保存する。ユーザーの自己情報・好み・継続指示らしい文だけを保守的に抽出し、起動時と設定変更時に system 文脈へ短く差し込む。人格やプロンプトの変更（`reset_conversation`）では会話の流れを保持し、右クリックメニュー「会話をリセット」（`clear_conversation_and_history`）で文脈・履歴ファイル・長期メモリ・直近雑談を消して `pet:reset` を通知する。
 
 ---
@@ -92,6 +92,9 @@ graph TD
 5. 各 chat 呼び出しは `chat_with_retry()` でラップし、失敗時に最大 3 回・指数バックオフ（1秒→2秒）でリトライする（4xx 認証エラーは即中断）。
 6. chat 完了後、返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に永続化する。
 7. ツール実行は `Tracer::start_span()` でレイテンシを計測し、`Tracer::record()` で直近 200 件を保持する。
+8. ツール出力は `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字で打ち切り、コンテキスト超過を防ぐ。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。
+9. `PICOAGENT_PLANNING_ENABLED` が有効かつ質問が複雑（120文字超・疑問符2個以上・手順/ステップ系語を含む）な場合、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、分解結果を system 追記として付与してから通常の chat ループへ進む。
+10. `PICOAGENT_SELF_EVAL_ENABLED` が有効な場合、最終応答が短すぎる（8文字未満）または明示的な拒否パターンを含む場合に `provider.chat()` で1回再生成する（`self_improve()`）。再生成に失敗した場合は元の応答をそのまま返す。
 
 通常の質問では、ローカルモデルの `tool_calls` 対応状況に依存させず、最初の `chat()` より前に
 必要なスキルを直接実行する。**Web検索は質問が事実確認・最新情報・定義などを要するとき（`should_web_search`：明示依頼、または「最新/ニュース/価格/誰/いつ/とは…」等のマーカー）だけ実行する**。雑談・感想・相談（「むぎかわいい」「ありがとう」「自己紹介して」等）では検索せず、キャラ本人として速く自然に返す（デスクトップペットとして毎回の検索遅延・ノイズを避ける）。天気の質問（`is_weather_query`）は `weather` スキルを、為替の質問（`currency_query` が通貨を読み取れたとき）は `currency_rates` スキルを、市場指数の質問（`market_query` が日経平均等を読み取れたとき）は `market_indices` スキルを**先に実行してその整形済み出力（天気アイコン・気温/為替・市場指数のスパークライン等）をそのまま返す**（小型モデルが tool_calls を出せず、かつチャートを再現できないため、モデルを介さず確実にグラフィカル表示する）。スキル直行応答も assistant 発話として履歴へ保存し、前回のユーザー発話だけが残って次の質問へ混ざらないようにする。代表的なリマインダー・集中タイマー・見守り・できたことメモ、クリップボード要約、おでかけ前チェックもスキルを先に実行する。その他のローカル操作系依頼では、明示的なWeb検索依頼がない限り事前Web検索を省き、モデルへスキル利用を優先する指示を追加する。為替は文中の通貨（ドル/円/ユーロ…）と「推移/チャート」「N日」を読み取って `base`/`symbols`/`chart`/`days` を組み立てる。短い挨拶は検索結果に引っ張られて表記解説へ逸れやすいため検索を省き、キャラクター本人として返す指示だけを追加する。検索結果は外部の信頼できない参考データとして区切ってユーザーメッセージへ
@@ -119,6 +122,9 @@ pub trait Provider: Send + Sync {
     // ストリーミング対応。デフォルト実装は chat() を呼んで完了後に on_chunk を1回だけ呼ぶ。
     // openai.rs はオーバーライドして SSE ストリームを受信し on_chunk を逐次呼ぶ。
     async fn chat_stream(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value], on_chunk: Arc<dyn Fn(String) + Send + Sync>) -> anyhow::Result<Message>;
+    // JSON モードなどオプション付き chat。デフォルト実装は chat() へ委譲（json_mode は無視）。
+    // openai.rs はオーバーライドして response_format: json_object を付与する。
+    async fn chat_with_options(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value], json_mode: bool) -> anyhow::Result<Message>;
 }
 inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 ```
@@ -200,7 +206,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 ```
 
 - `tools::build_schemas()` が `{ type:"function", function:{name,description,parameters} }` 形式の配列を生成しプロバイダへ渡す。
-- `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。
+- `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。出力が `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字を超える場合は末尾を切り捨て、コンテキスト超過を防ぐ。
 - スキル実体、名前インデックス、function schema は `OnceLock` でキャッシュする。多数のスキルを導入しても会話ごとの schema 構築や dispatch 時の全スキル再生成を避ける。
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/ms_office/scripts/office.ps1` のような補助ファイル変更もビルドに反映される。
@@ -313,6 +319,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_WINDOW_BOTTOM_PX` | 自動 | 内部UI | 画面下端からウィンドウ下端までの縦オフセット(px)。アプリ終了時に保存し、起動時に復元する（解像度非依存）。横位置は保存せず常に右端基準で固定 |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
+| `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
+| `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリに保持する最大件数（10〜200） |
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |

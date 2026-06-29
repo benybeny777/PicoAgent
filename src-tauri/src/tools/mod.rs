@@ -329,12 +329,46 @@ pub fn schemas_for_text(text: &str) -> Vec<Value> {
     selected
 }
 
+/// ツール出力の最大文字数（コンテキストウィンドウ超過防止）。
+const MAX_TOOL_OUTPUT_CHARS: usize = 8_000;
+
+/// ツール出力にプロンプトインジェクション試行パターンが含まれるか検査する。
+pub fn check_injection(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    [
+        "ignore previous instructions",
+        "ignore all previous",
+        "disregard previous",
+        "new instructions:",
+        "forget your instructions",
+        "you are now",
+        "前の指示を無視",
+        "指示を無視して",
+        "システムプロンプトを",
+        "あなたは今から",
+        "<system>",
+    ]
+    .iter()
+    .any(|p| lower.contains(p))
+}
+
 /// モデルが要求したツール呼び出しを実行する。失敗は例外にせず文字列で返す。
+/// 出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切ってコンテキスト超過を防ぐ。
 pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
-    if let Some(idx) = index().get(name) {
-        return all()[*idx].run(cfg, args).await;
+    let result = if let Some(idx) = index().get(name) {
+        all()[*idx].run(cfg, args).await
+    } else {
+        format!("エラー: 未登録のツール \"{}\" が呼び出されました。", name)
+    };
+    if result.chars().count() > MAX_TOOL_OUTPUT_CHARS {
+        let truncated: String = result.chars().take(MAX_TOOL_OUTPUT_CHARS).collect();
+        format!(
+            "{}\n\n[...出力が長いため{}文字で打ち切りました]",
+            truncated, MAX_TOOL_OUTPUT_CHARS
+        )
+    } else {
+        result
     }
-    format!("エラー: 未登録のツール \"{}\" が呼び出されました。", name)
 }
 
 #[cfg(test)]

@@ -50,6 +50,21 @@ pub trait Provider: Send + Sync {
         }
         Ok(msg)
     }
+
+    /// オプション付き chat（JSON モードなど）。
+    /// 非対応プロバイダはデフォルト実装（通常の `chat()` へ委譲、`json_mode` 無視）を使う。
+    /// OpenAI 互換プロバイダはオーバーライドして `response_format: json_object` を付与する。
+    async fn chat_with_options(
+        &self,
+        cfg: &Config,
+        model: &str,
+        messages: &[Message],
+        tools: &[Value],
+        json_mode: bool,
+    ) -> anyhow::Result<Message> {
+        let _ = json_mode;
+        self.chat(cfg, model, messages, tools).await
+    }
 }
 
 /// inventory に登録するためのファクトリ。

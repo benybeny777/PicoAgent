@@ -393,6 +393,52 @@ impl Provider for OpenAI {
         let url = format!("{}/chat/completions", base_url(cfg));
         stream_chat(&url, &api_key(cfg), body, on_chunk).await
     }
+
+    async fn chat_with_options(
+        &self,
+        cfg: &Config,
+        model: &str,
+        messages: &[Message],
+        tools: &[Value],
+        json_mode: bool,
+    ) -> anyhow::Result<Message> {
+        let mut body = json!({
+            "model": model,
+            "messages": to_wire(messages),
+            "temperature": 0.3,
+        });
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
+        }
+        if json_mode {
+            body["response_format"] = json!({"type": "json_object"});
+        }
+        let url = format!("{}/chat/completions", base_url(cfg));
+        let res = reqwest::Client::new()
+            .post(&url)
+            .bearer_auth(api_key(cfg))
+            .json(&body)
+            .send()
+            .await?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            anyhow::bail!("OpenAI /chat/completions 失敗: {} {}", status, text);
+        }
+        let data: Value = res.json().await?;
+        let message = data
+            .get("choices")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|c| c.get("message"))
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("OpenAI 応答に choices[0].message がありません")
+            })?;
+        let mut msg = from_wire(&message);
+        msg.usage = extract_usage(&data);
+        Ok(msg)
+    }
 }
 
 inventory::submit! { ProviderReg { make: || Box::new(OpenAI) } }
