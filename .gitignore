@@ -17,6 +17,7 @@ src-tauri/resources/aivis/*
 
 # 生成物・一時ファイル
 dist/
+ui-dist/
 .tmp/
 
 # キャラの配信コピー（正本は characters/。sync:characters / beforeDevCommand で生成）

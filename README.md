@@ -151,6 +151,8 @@ npm run build
 
 `src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジンと Aivis を確認し、未取得なら `src-tauri/resources/bundled/` へ取得してから Tauri を起動します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
 
+配布ビルドでは `scripts/build-ui-dist.mjs --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
+
 > [!NOTE]
 > 以下のパスはいずれも Windows 表記です。macOS / Linux では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
 

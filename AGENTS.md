@@ -84,6 +84,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
 | `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
 | `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
+| `scripts/build-ui-dist.mjs` | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
@@ -100,11 +101,12 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/                     ← エージェント機能（スキル）連結ディレクトリ（<スキル名>/mod.rs を足すと自動登録）
 │   └── {time,weather,currency_rates,...}/mod.rs
-├── ui/                         ← webview フロント（frontendDist）
+├── ui/                         ← webview フロント正本（編集対象）
 │   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
 │   ├── index.html / renderer.js / styles.css       ← ペット UI
 │   ├── settings.html / settings.js / settings.css  ← 設定ウィンドウ
 │   └── assets/characters/      ← characters/ の配信コピー（git 管理外、sync:characters で生成）
+├── ui-dist/                    ← Tauri frontendDist（git 管理外、build-ui-dist で生成）
 ├── src-tauri/
 │   ├── Cargo.toml / build.rs / tauri.conf.json
 │   ├── capabilities/default.json   ← 権限（ACL）
@@ -117,6 +119,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── scripts/fetch-engine.mjs    ← 同梱エンジン取得
 ├── scripts/sync-characters.mjs ← characters/ を ui/assets/characters/ へ同期
+├── scripts/build-ui-dist.mjs   ← ui/ を ui-dist/ へコピー（build は簡易 minify）
 ├── package.json                ← npm run setup:engine / sync:characters / dev / build / tauri
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md

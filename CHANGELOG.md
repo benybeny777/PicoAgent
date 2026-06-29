@@ -6,6 +6,11 @@
 
 ## 2026-06-29
 
+### 配布物の解析しやすさを下げるビルド経路を追加
+
+- **配布用フロントを `ui-dist/` へ分離** (`build-ui-dist.mjs` / `tauri.conf.json`): `ui/` は編集用正本として残し、Tauri の `frontendDist` は生成物 `ui-dist/` を参照するようにした。`npm run dev` は通常コピー、`npm run build` は HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削った release コピーを作ってからバンドルする。
+- **release バイナリの情報露出を削減** (`Cargo.toml`): 既存の LTO・strip・panic abort に加え、`debug=false` / `incremental=false` を明示し、配布バイナリにデバッグ情報が残りにくいようにした。
+
 ### 会話入力のクイック操作と入力履歴を追加
 
 - **会話操作の摩擦を削減** (`index.html` / `renderer.js` / `styles.css`): 入力欄上部に「画面を見る」「クリップボード要約」「今日の予定」「できること」のクイック操作を追加し、よく使う依頼をワンクリックで送信できるようにした。ユーザー発話の直近入力履歴を保持し、入力欄の `↑` / `↓` で過去入力と編集中ドラフトを行き来できる。`Ctrl+Enter` / `Cmd+Enter` 送信にも対応。
