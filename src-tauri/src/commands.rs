@@ -136,11 +136,19 @@ fn clean_turns(messages: &[Message]) -> Vec<Message> {
 // メッセージ数ではなくトークン推定量で制限し、小型モデルのコンテキスト超過を防ぐ。
 fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
     let mut turns = clean_turns(convo);
-    let mut total: usize = turns.iter().map(estimate_tokens).sum();
-    // 予算超過している間、最古の発話から削除する（最低2件は保持）。
-    while total > MAX_CONTEXT_TOKENS && turns.len() > 2 {
-        total -= estimate_tokens(&turns[0]);
-        turns.remove(0);
+    let total: usize = turns.iter().map(estimate_tokens).sum();
+    if total > MAX_CONTEXT_TOKENS {
+        // 先頭から削除する件数を先に計算し、drain で O(n) 一括除去する（remove(0) ループは O(n²)）。
+        let mut excess = total.saturating_sub(MAX_CONTEXT_TOKENS);
+        let mut remove_count = 0;
+        for t in turns.iter() {
+            if excess == 0 || turns.len().saturating_sub(remove_count) <= 2 { break; }
+            excess = excess.saturating_sub(estimate_tokens(t));
+            remove_count += 1;
+        }
+        if remove_count > 0 {
+            turns.drain(0..remove_count);
+        }
     }
     let mut next: Vec<Message> = convo
         .iter()
@@ -196,14 +204,19 @@ async fn maybe_summarize_context(
         return convo;
     }
 
-    // system メッセージへ要約を追記し、古いターンを差し替える。
+    // 最初の system メッセージだけに要約を追記し、古いターンを差し替える。
+    // 複数の system メッセージがある場合（要約の重ね掛け等）は先頭1件のみ更新する。
+    let mut appended = false;
     let mut result: Vec<Message> = convo
         .iter()
         .filter(|m| m.role == "system")
         .map(|m| {
             let mut m = m.clone();
-            m.content
-                .push_str(&format!("\n\n[以前の会話の要約（自動）: {}]", summary_text));
+            if !appended {
+                appended = true;
+                m.content
+                    .push_str(&format!("\n\n[以前の会話の要約（自動）: {}]", summary_text));
+            }
             m
         })
         .collect();
@@ -1431,6 +1444,9 @@ pub async fn pet_send_image(
     };
     convo.push(crate::message::Message::user_with_images(user_text.clone(), images));
 
+    let mut convo =
+        maybe_summarize_context(convo, provider, &state.config, &model).await;
+
     let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
@@ -1463,7 +1479,12 @@ pub async fn pet_send_image(
 pub async fn pet_capture_screen() -> Result<Value, String> {
     use base64::Engine;
 
-    let temp_path = std::env::temp_dir().join("picoagent-screenshot.png");
+    // 並行呼び出し時の競合を避けるため、ナノ秒タイムスタンプで一意な一時ファイル名を使う。
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    let temp_path = std::env::temp_dir().join(format!("picoagent-screenshot-{unique}.png"));
 
     #[cfg(target_os = "windows")]
     {
@@ -1700,8 +1721,12 @@ fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
         let fname = file.name().to_string();
         if fname.starts_with("ppt/slides/slide") && fname.ends_with(".xml") {
             let mut xml = String::new();
-            file.read_to_string(&mut xml).ok();
-            slides.push((fname, strip_xml_tags(&xml)));
+            let text = if file.read_to_string(&mut xml).is_ok() {
+                strip_xml_tags(&xml)
+            } else {
+                "[スライドの読み込みに失敗しました]".to_string()
+            };
+            slides.push((fname, text));
         }
     }
     slides.sort_by(|a, b| a.0.cmp(&b.0));

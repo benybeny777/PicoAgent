@@ -329,8 +329,9 @@ impl Tool for ComfyuiTool {
         };
 
         let mut view_url = format!(
-            "{base_url}/view?filename={}&type={file_type}",
-            urlenccode(&filename)
+            "{base_url}/view?filename={}&type={}",
+            urlenccode(&filename),
+            urlenccode(&file_type)
         );
         if !subfolder.is_empty() {
             view_url.push_str(&format!("&subfolder={}", urlenccode(&subfolder)));
@@ -356,10 +357,11 @@ impl Tool for ComfyuiTool {
 }
 
 fn rand_seed() -> i64 {
-    std::time::SystemTime::now()
+    let d = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as i64
+        .unwrap_or_default();
+    // 秒とナノ秒を混合して範囲を広げる（subsec_nanos のみだと 1e9 未満で衝突しやすい）。
+    (d.as_secs().wrapping_mul(1_000_000_007) ^ d.subsec_nanos() as u64) as i64
 }
 
 fn urlenccode(s: &str) -> String {
