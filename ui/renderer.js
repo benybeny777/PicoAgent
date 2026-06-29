@@ -17,7 +17,10 @@ const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
+const imagePreview = document.getElementById("imagePreview");
 let busy = false;
+// 添付中の画像（data URL の配列）。送信後にリセットする。
+let attachedImages = [];
 // ストリーミング受信中のテキストバッファとイベントリスナー解除関数。
 let streamBuffer = "";
 let unlistenStream = null;
@@ -231,7 +234,7 @@ function autosizeInput() {
   input.style.height = `${Math.min(180, Math.max(62, input.scrollHeight))}px`;
 }
 function updateComposerState() {
-  if (sendButton) sendButton.disabled = busy || !input.value.trim();
+  if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0);
 }
 function openComposer() {
   if (busy) return;
@@ -770,6 +773,74 @@ async function finishBubbleResize(event) {
 bubbleResize.addEventListener("pointerup", finishBubbleResize);
 bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 
+// ── 画像添付（ペースト・ドロップ）────────────────────────────────────────────
+
+const MAX_ATTACHED_IMAGES = 4;
+
+function renderImagePreview() {
+  imagePreview.hidden = attachedImages.length === 0;
+  imagePreview.replaceChildren();
+  attachedImages.forEach((dataUrl, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "image-thumb-wrap";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = `添付画像 ${idx + 1}`;
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "image-remove";
+    removeBtn.textContent = "×";
+    removeBtn.setAttribute("aria-label", `添付画像 ${idx + 1} を削除`);
+    removeBtn.addEventListener("click", () => {
+      attachedImages.splice(idx, 1);
+      renderImagePreview();
+      updateComposerState();
+    });
+    wrap.append(img, removeBtn);
+    imagePreview.append(wrap);
+  });
+}
+
+function addImageFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  if (attachedImages.length >= MAX_ATTACHED_IMAGES) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    attachedImages.push(e.target.result);
+    renderImagePreview();
+    updateComposerState();
+  };
+  reader.readAsDataURL(file);
+}
+
+// Ctrl+V で画像をペーストしたとき添付する。
+input.addEventListener("paste", (event) => {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (!item.type.startsWith("image/")) continue;
+    event.preventDefault();
+    addImageFile(item.getAsFile());
+  }
+});
+
+// テキストエリア・プレビューエリアへのドラッグ&ドロップ。
+composer.addEventListener("dragover", (e) => {
+  if ([...e.dataTransfer.items].some(i => i.kind === "file" && i.type.startsWith("image/"))) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    composer.classList.add("drag-over");
+  }
+});
+composer.addEventListener("dragleave", () => composer.classList.remove("drag-over"));
+composer.addEventListener("drop", (e) => {
+  composer.classList.remove("drag-over");
+  const hasImage = [...e.dataTransfer.items].some(i => i.kind === "file" && i.type.startsWith("image/"));
+  if (!hasImage) return;
+  e.preventDefault();
+  for (const file of e.dataTransfer.files) addImageFile(file);
+});
+
 // 画面を見てほしい系の発話を検出する（スクリーンショット自動添付に使用）。
 function isScreenshotQuery(text) {
   return /画面を見て|スクリーンショット|screenshot|画面の状態|画面を確認|今の画面|デスクトップを見て|画面キャプチャ/.test(text.toLowerCase());
@@ -778,7 +849,7 @@ function isScreenshotQuery(text) {
 composer.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();
-  if (!text || busy) return;
+  if ((!text && attachedImages.length === 0) || busy) return;
   clearAlarmSnooze(false);
   busy = true;
   ++speakingToken;
@@ -786,6 +857,9 @@ composer.addEventListener("submit", async event => {
   updateComposerState();
   closeComposer();
   input.value = "";
+  const pendingImages = [...attachedImages];
+  attachedImages = [];
+  renderImagePreview();
   autosizeInput();
   status.textContent = "考え中…";
   setAnimation("thinking");
@@ -806,18 +880,20 @@ composer.addEventListener("submit", async event => {
   } catch (_) {}
 
   try {
-    // 画面を見てほしい発話はスクリーンショットを自動撮影して画像付き送信に切り替える。
+    // 添付画像があれば sendImage、スクリーンショット発話なら自動撮影して追加する。
     let result;
+    const images = [...pendingImages];
     if (isScreenshotQuery(text) && window.picoagent.captureScreen) {
       try {
         status.textContent = "画面を撮影中…";
         const shot = await window.picoagent.captureScreen();
-        if (shot?.dataUrl) {
-          result = await window.picoagent.sendImage(text, [shot.dataUrl]);
-        }
+        if (shot?.dataUrl) images.push(shot.dataUrl);
       } catch (shotErr) {
-        logApp("warn", "スクリーンショット取得に失敗しました。通常送信へ切り替えます。", String(shotErr));
+        logApp("warn", "スクリーンショット取得に失敗しました。", String(shotErr));
       }
+    }
+    if (images.length > 0 && window.picoagent.sendImage) {
+      result = await window.picoagent.sendImage(text, images);
     }
     if (!result) result = await window.picoagent.send(text);
     status.textContent = result.error ? "接続を確認してね" : "";

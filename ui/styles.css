@@ -75,6 +75,12 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .alarm-awake { position:static; height:30px; padding:0 14px; border-radius:9px; background:var(--accent); color:white; font-size:12px; }
 .composer { position:relative; z-index:2; flex:0 0 auto; margin-top:auto; padding-top:10px; }
 .composer[hidden] { display:none; }
+.composer.drag-over textarea { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.18); }
+.image-preview { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 6px; }
+.image-preview[hidden] { display:none; }
+.image-thumb-wrap { position:relative; }
+.image-thumb-wrap img { display:block; width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid #ded6df; }
+.image-remove { position:absolute; top:-6px; right:-6px; width:16px; height:16px; padding:0; border-radius:50%; background:#c0627a; font-size:10px; line-height:16px; text-align:center; }
 textarea { display:block; width:100%; min-height:62px; max-height:180px; resize:none; padding:10px 58px 10px 11px; border:1px solid #ded6df; border-radius:13px; outline:none; background:#faf7f9; color:var(--ink); font:13px/1.5 inherit; user-select:text; overflow:auto; }
 textarea:focus { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.1); }
 button { position:absolute; right:7px; bottom:7px; height:32px; padding:0 12px; border:0; border-radius:9px; color:white; background:var(--accent); font-weight:700; font-size:11px; cursor:pointer; }
