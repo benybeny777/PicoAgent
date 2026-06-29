@@ -103,7 +103,7 @@ graph LR
 
 目覚まし時計は、チャットで「**平日の7時に起こして**」「土日の朝8時、繰り返しで」のように頼むと設定できます（声でやさしく起こします）。一覧・削除も「アラーム一覧」「その目覚ましを消して」で操作でき、設定画面の「スキル」タブからも編集できます。鳴った後は `おきたよ！` を押すまで既定5分おきに再通知します。アプリ起動中のみ鳴ります。
 
-日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
+日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。調査系では「**AIスライド生成サービスを出典付きで調査してレポートにして**」のように頼むと、複数観点のWeb検索を束ねて Markdown の調査レポートを作成し、必要なら許可ルート配下へ保存できます。操作系の依頼はWeb検索よりローカルスキルを優先します。
 
 cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル」タブでも `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。
 
@@ -133,7 +133,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` | `kind=command` / `kind=tool` の指定時刻タスク。通常はチャットで設定 |
 | ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行・スケジュール実行の安全境界 |
 | ファイル操作 | `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_TOOLS_ROOT` / `PICOAGENT_DOCUMENT_ROOT` | ファイル・Office/PDF 操作の許可ルート |
-| 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` | 天気・検索・RSS などの既定値 |
+| 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 天気・検索・RSS・調査レポートなどの既定値 |
 | 外部連携 | 各サービスの token / 既定ID / timeout | Slack、Gmail、Google、GitHub、Notion、SNS などは使うサービスだけ設定 |
 
 リマインダー、集中タイマー、できたことメモなどの実行状態は内部保存値として `config.json` に残りますが、通常ユーザーが直接編集するものではないため設定画面には出しません。チャット操作で追加・一覧・削除してください。
