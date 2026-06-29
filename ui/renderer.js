@@ -18,6 +18,7 @@ const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
+const quickActions = document.getElementById("quickActions");
 let busy = false;
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
@@ -27,6 +28,15 @@ let attachedFiles = [];
 let streamBuffer = "";
 let unlistenStream = null;
 const conversationHistory = [];
+const promptHistory = [];
+let promptHistoryIndex = null;
+let promptDraft = "";
+const QUICK_ACTIONS = [
+  { label: "画面を見る", text: "今の画面を見て、状況を短く教えて" },
+  { label: "クリップボード要約", text: "クリップボードの内容を要約して" },
+  { label: "今日の予定", text: "今日の予定と気をつけることを教えて" },
+  { label: "できること", text: "あなたが今できることを具体的に教えて" },
+];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
@@ -243,6 +253,41 @@ function autosizeInput() {
 }
 function updateComposerState() {
   if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
+  quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+}
+function setInputValue(value) {
+  input.value = String(value ?? "");
+  autosizeInput();
+  updateComposerState();
+}
+function rememberPrompt(text) {
+  const value = String(text ?? "").trim();
+  if (!value) return;
+  if (promptHistory[promptHistory.length - 1] === value) return;
+  promptHistory.push(value);
+  if (promptHistory.length > 40) promptHistory.shift();
+}
+function resetPromptHistoryNavigation() {
+  promptHistoryIndex = null;
+  promptDraft = input.value;
+}
+function recallPromptHistory(direction) {
+  if (!promptHistory.length) return false;
+  if (promptHistoryIndex == null) {
+    promptDraft = input.value;
+    promptHistoryIndex = promptHistory.length;
+  }
+  promptHistoryIndex = Math.min(promptHistory.length, Math.max(0, promptHistoryIndex + direction));
+  const next = promptHistoryIndex === promptHistory.length ? promptDraft : promptHistory[promptHistoryIndex];
+  setInputValue(next);
+  input.setSelectionRange(input.value.length, input.value.length);
+  status.textContent = promptHistoryIndex === promptHistory.length ? "編集中の入力に戻しました" : "過去の入力を呼び戻しました";
+  setTimeout(() => {
+    if (status.textContent === "過去の入力を呼び戻しました" || status.textContent === "編集中の入力に戻しました") {
+      status.textContent = "";
+    }
+  }, 1400);
+  return true;
 }
 function openComposer() {
   if (busy) return;
@@ -254,6 +299,7 @@ function openComposer() {
   scheduleChatter();
 }
 function closeComposer() {
+  promptDraft = input.value;
   composer.hidden = true;
   reply.classList.remove("compact");
   updateComposerState();
@@ -432,6 +478,26 @@ function appendLinkedText(container, text) {
   renderMarkdown(container, text);
 }
 
+function renderQuickActions() {
+  if (!quickActions) return;
+  quickActions.replaceChildren();
+  for (const action of QUICK_ACTIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.title = action.text;
+    button.addEventListener("click", () => {
+      if (busy) return;
+      if (composer.hidden) openComposer();
+      setInputValue(action.text);
+      resetPromptHistoryNavigation();
+      composer.requestSubmit();
+    });
+    quickActions.append(button);
+  }
+  updateComposerState();
+}
+
 function renderReply(text) {
   renderMarkdown(reply, text);
 }
@@ -480,6 +546,7 @@ function addHistory(role, text) {
   const content = String(text ?? "").trim();
   if (!content) return;
   conversationHistory.push({ role, content });
+  if (role === "user") rememberPrompt(content);
   if (role === "assistant") lastAssistantText = content;
   if (conversationHistory.length > 80) conversationHistory.shift();
   renderHistory();
@@ -487,6 +554,8 @@ function addHistory(role, text) {
 
 function hydrateHistory(items) {
   conversationHistory.length = 0;
+  promptHistory.length = 0;
+  promptHistoryIndex = null;
   if (!Array.isArray(items)) {
     renderHistory();
     return;
@@ -494,7 +563,10 @@ function hydrateHistory(items) {
   for (const item of items) {
     const role = item?.role === "user" ? "user" : item?.role === "assistant" ? "assistant" : "";
     const content = String(item?.content ?? "").trim();
-    if (role && content) conversationHistory.push({ role, content });
+    if (role && content) {
+      conversationHistory.push({ role, content });
+      if (role === "user") rememberPrompt(content);
+    }
   }
   if (conversationHistory.length > 80) {
     conversationHistory.splice(0, conversationHistory.length - 80);
@@ -1104,7 +1176,8 @@ composer.addEventListener("submit", async event => {
   attachedImages = [];
   attachedFiles = [];
   renderAttachmentPreview();
-  autosizeInput();
+  setInputValue("");
+  resetPromptHistoryNavigation();
   status.textContent = "考え中…";
   setAnimation("thinking");
   reply.textContent = text;
@@ -1197,13 +1270,24 @@ composer.addEventListener("submit", async event => {
     setTimeout(flushPendingNotice, 0);
   }
 });
-input.addEventListener("input", () => { autosizeInput(); updateComposerState(); });
+input.addEventListener("input", () => {
+  autosizeInput();
+  updateComposerState();
+  promptHistoryIndex = null;
+  promptDraft = input.value;
+});
 input.addEventListener("keydown", event => {
   if (event.key === "Escape") {
     event.stopPropagation();
     closeComposer();
   }
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
+    if (recallPromptHistory(-1)) event.preventDefault();
+  }
+  if (event.key === "ArrowDown" && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+    if (recallPromptHistory(1)) event.preventDefault();
+  }
+  if (event.key === "Enter" && (!event.shiftKey || event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     composer.requestSubmit();
   }
@@ -1217,13 +1301,25 @@ document.addEventListener("keydown", event => {
   exitBubbleFullscreen();
 });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
-window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); stopVoice(); renderReply("新しい話をしよう。"); closeComposer(); scheduleChatter(); });
+window.picoagent.on("pet:reset", () => {
+  conversationHistory.length = 0;
+  promptHistory.length = 0;
+  promptHistoryIndex = null;
+  promptDraft = "";
+  renderHistory();
+  stopVoice();
+  renderReply("新しい話をしよう。");
+  closeComposer();
+  scheduleChatter();
+});
 // 感情状態が更新されたらキャラクターのアニメーション・スタイルへ反映する。
 window.picoagent.on("pet:emotion", (emotion) => {
   if (!emotion || !emotion.mood) return;
   character.dataset.emotion = emotion.mood;
   character.dataset.energyLevel = emotion.energy > 0.6 ? "high" : emotion.energy < 0.4 ? "low" : "mid";
 });
+
+renderQuickActions();
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
