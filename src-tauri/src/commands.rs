@@ -222,6 +222,23 @@ pub fn active_character_id(state: &AppState) -> String {
     }
 }
 
+/// ユーザー発話とアシスタント返答を会話へ記録し、圧縮・履歴保存して返却 JSON を作る。
+/// 承認/キャンセルなど「AI を介さず即返答する」分岐の共通処理。
+fn record_turn(
+    state: &AppState,
+    app: &AppHandle,
+    user_text: &str,
+    reply: String,
+) -> Result<Value, String> {
+    let mut convo = state.messages.lock().unwrap().clone();
+    convo.push(Message::new("user", user_text));
+    convo.push(Message::new("assistant", reply.clone()));
+    let compacted = compacted_conversation(&convo);
+    *state.messages.lock().unwrap() = compacted.clone();
+    crate::history::save(app, &active_character_id(state), &compacted);
+    Ok(json!({ "reply": reply }))
+}
+
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
 pub fn clear_conversation_and_history(app: &AppHandle) {
     let state = app.state::<AppState>();
@@ -492,35 +509,21 @@ pub async fn pet_send(
                 &pending,
             )
             .await;
-            let mut convo = state.messages.lock().unwrap().clone();
-            convo.push(Message::new("user", user_text));
-            convo.push(Message::new("assistant", reply.clone()));
-            let compacted = compacted_conversation(&convo);
-            *state.messages.lock().unwrap() = compacted.clone();
-            crate::history::save(&app, &active_character_id(&state), &compacted);
-            return Ok(json!({ "reply": reply }));
+            return record_turn(&state, &app, &user_text, reply);
         }
         if is_approval_text(&text) {
             *state.pending_command.lock().unwrap() = None;
             let reply = crate::tools::run_command::execute_pending(&pending).await;
-            let mut convo = state.messages.lock().unwrap().clone();
-            convo.push(Message::new("user", user_text));
-            convo.push(Message::new("assistant", reply.clone()));
-            let compacted = compacted_conversation(&convo);
-            *state.messages.lock().unwrap() = compacted.clone();
-            crate::history::save(&app, &active_character_id(&state), &compacted);
-            return Ok(json!({ "reply": reply }));
+            return record_turn(&state, &app, &user_text, reply);
         }
         if is_cancel_text(&text) {
             *state.pending_command.lock().unwrap() = None;
-            let reply = "コマンド実行をキャンセルしました。".to_string();
-            let mut convo = state.messages.lock().unwrap().clone();
-            convo.push(Message::new("user", user_text));
-            convo.push(Message::new("assistant", reply.clone()));
-            let compacted = compacted_conversation(&convo);
-            *state.messages.lock().unwrap() = compacted.clone();
-            crate::history::save(&app, &active_character_id(&state), &compacted);
-            return Ok(json!({ "reply": reply }));
+            return record_turn(
+                &state,
+                &app,
+                &user_text,
+                "コマンド実行をキャンセルしました。".to_string(),
+            );
         }
     }
 
@@ -1599,26 +1602,13 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
         "csv" | "tsv" => {
             let sep = if ext == "tsv" { '\t' } else { ',' };
             let text = String::from_utf8_lossy(&bytes);
-            let mut out = String::new();
-            for (i, line) in text.lines().enumerate().take(300) {
-                let cells: Vec<&str> = line.split(sep).collect();
-                out.push_str(&cells.join(" | "));
-                out.push('\n');
-                if i == 0 {
-                    out.push_str(
-                        &cells
-                            .iter()
-                            .map(|_| "---")
-                            .collect::<Vec<_>>()
-                            .join(" | "),
-                    );
-                    out.push('\n');
-                }
-            }
-            if text.lines().count() > 300 {
-                out.push_str("[300行以降は省略]\n");
-            }
-            out
+            // 表示は最大 300 行なので 301 行だけ取り込む（巨大ファイルでも全行を抱えない）。
+            let rows: Vec<Vec<String>> = text
+                .lines()
+                .take(301)
+                .map(|line| line.split(sep).map(|c| c.to_string()).collect())
+                .collect();
+            rows_to_markdown_table(&rows)
         }
         // Excel → calamine でシート別 Markdown テーブル。
         "xlsx" | "xlsm" => extract_xlsx_content(&bytes)?,
@@ -1687,6 +1677,24 @@ fn strip_xml_tags(s: &str) -> String {
     out.trim().to_string()
 }
 
+/// セル行の並びを Markdown テーブルにする。先頭行を見出しとして区切り線を入れ、最大 300 行で打ち切る。
+/// CSV/TSV と Excel で共通利用する。
+fn rows_to_markdown_table(rows: &[Vec<String>]) -> String {
+    let mut out = String::new();
+    for (i, cells) in rows.iter().enumerate().take(300) {
+        out.push_str(&cells.join(" | "));
+        out.push('\n');
+        if i == 0 && rows.len() > 1 {
+            out.push_str(&cells.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+            out.push('\n');
+        }
+    }
+    if rows.len() > 300 {
+        out.push_str("[300行以降は省略]\n");
+    }
+    out
+}
+
 /// ZIP エントリ 1 件の展開上限（ZIP爆弾対策）。
 const MAX_ZIP_ENTRY_BYTES: u64 = 20 * 1024 * 1024;
 
@@ -1741,25 +1749,13 @@ fn extract_xlsx_content(data: &[u8]) -> Result<String, String> {
     for sheet_name in sheet_names {
         if let Ok(range) = wb.worksheet_range(&sheet_name) {
             output.push_str(&format!("## {sheet_name}\n"));
-            let rows: Vec<_> = range.rows().collect();
-            for (i, row) in rows.iter().enumerate().take(300) {
-                let cells: Vec<String> = row.iter().map(|c| c.to_string()).collect();
-                output.push_str(&cells.join(" | "));
-                output.push('\n');
-                if i == 0 && rows.len() > 1 {
-                    output.push_str(
-                        &cells
-                            .iter()
-                            .map(|_| "---")
-                            .collect::<Vec<_>>()
-                            .join(" | "),
-                    );
-                    output.push('\n');
-                }
-            }
-            if rows.len() > 300 {
-                output.push_str("[300行以降は省略]\n");
-            }
+            // 表示は最大 300 行なので 301 行だけ取り込む（巨大シートでも全行を抱えない）。
+            let rows: Vec<Vec<String>> = range
+                .rows()
+                .take(301)
+                .map(|row| row.iter().map(|c| c.to_string()).collect())
+                .collect();
+            output.push_str(&rows_to_markdown_table(&rows));
             output.push('\n');
         }
     }
