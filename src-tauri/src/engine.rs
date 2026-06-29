@@ -6,6 +6,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde_json::Map;
@@ -18,6 +19,8 @@ use crate::providers::local;
 pub struct EngineState {
     pub status: Mutex<Value>,
     pub child: Mutex<Option<Child>>,
+    /// `stop()` が呼ばれたら true に設定し、`ensure_and_start` がその後に spawn しないようにする。
+    pub stopping: AtomicBool,
 }
 
 impl EngineState {
@@ -25,6 +28,7 @@ impl EngineState {
         EngineState {
             status: Mutex::new(json!({ "phase": "idle" })),
             child: Mutex::new(None),
+            stopping: AtomicBool::new(false),
         }
     }
 }
@@ -353,6 +357,10 @@ pub async fn ensure_and_start(app: AppHandle) {
             return;
         }
     }
+    // 終了処理が始まっていたら spawn しない（ダウンロード完了後のレースコンディション対策）。
+    if app.try_state::<EngineState>().map(|e| e.stopping.load(Ordering::SeqCst)).unwrap_or(true) {
+        return;
+    }
     set_status(&app, json!({ "phase": "starting" }));
     if let Err(e) = spawn_server(&app, &model) {
         set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
@@ -378,9 +386,11 @@ pub async fn ensure_and_start(app: AppHandle) {
     );
 }
 
-// 子プロセスを停止する（アプリ終了時）。
+/// 子プロセスを停止する（アプリ終了時）。
+/// `stopping` フラグを先に立てて `ensure_and_start` の後続 spawn を防ぐ。
 pub fn stop(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
+        engine.stopping.store(true, Ordering::SeqCst);
         if let Some(mut child) = engine.child.lock().unwrap().take() {
             let _ = child.kill();
             let _ = child.wait(); // kill 後に wait してプロセスハンドルを回収する。

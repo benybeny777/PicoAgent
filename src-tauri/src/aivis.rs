@@ -3,7 +3,11 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+
+#[cfg(unix)]
+use libc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -24,12 +28,15 @@ const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub struct AivisState {
     child: Mutex<Option<Child>>,
+    /// `stop()` が呼ばれたら true に設定し、`ensure_started` がその後に spawn しないようにする。
+    stopping: AtomicBool,
 }
 
 impl AivisState {
     pub fn new() -> Self {
         AivisState {
             child: Mutex::new(None),
+            stopping: AtomicBool::new(false),
         }
     }
 }
@@ -865,6 +872,13 @@ fn spawn_engine(
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
+    // macOS/Linux: 子を独立したプロセスグループリーダーにする。
+    // stop() 時に pgid 全体へ SIGKILL を送り、子孫プロセスも確実に終了させるため。
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let child = command.spawn()?;
     if let Some(state) = app.try_state::<AivisState>() {
         *state.child.lock().unwrap() = Some(child);
@@ -920,6 +934,10 @@ pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> bool {
 }
 
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    // 終了処理が始まっていたら spawn しない（インストール完了後のレースコンディション対策）。
+    if app.try_state::<AivisState>().map(|s| s.stopping.load(Ordering::SeqCst)).unwrap_or(true) {
+        return Ok(());
+    }
     let app_state = app.state::<AppState>();
     let endpoint = endpoint(app, &app_state);
     if is_up(&endpoint).await {
@@ -998,8 +1016,13 @@ async fn wait_ready_or_bail(
     }
 }
 
+/// Aivis 子プロセスを停止する（アプリ終了時）。
+/// `stopping` フラグを先に立てて `ensure_started` の後続 spawn を防ぐ。
+/// Windows: `taskkill /T /F` でプロセスツリーごと終了させる。
+/// macOS/Linux: `process_group(0)` で生成したプロセスグループに SIGKILL を送る。
 pub fn stop(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<AivisState>() {
+        state.stopping.store(true, Ordering::SeqCst);
         if let Some(mut child) = state.child.lock().unwrap().take() {
             #[cfg(windows)]
             {
@@ -1010,9 +1033,12 @@ pub fn stop(app: &tauri::AppHandle) {
                     .stderr(Stdio::null())
                     .status();
             }
-            #[cfg(not(windows))]
+            #[cfg(unix)]
             {
-                let _ = child.kill();
+                // spawn_engine で process_group(0) を設定しているため、子の PID = PGID。
+                // プロセスグループ全体（子孫を含む）へ SIGKILL を送る。
+                let pgid = child.id() as libc::pid_t;
+                unsafe { libc::kill(-pgid, libc::SIGKILL); }
             }
             let _ = child.wait();
         }
