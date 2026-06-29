@@ -35,6 +35,9 @@ fn estimate_tokens(msg: &Message) -> usize {
 // 非 system メッセージに割り当てるトークン予算の上限。8k コンテキストの約 75% を目安にする。
 const MAX_CONTEXT_TOKENS: usize = 6_000;
 
+// 会話要約が発動するトークン閾値（予算の 70%: 予算に近づいた段階で余裕を作る）。
+const SUMMARIZE_THRESHOLD: usize = MAX_CONTEXT_TOKENS * 7 / 10; // ~4,200
+
 pub struct AppState {
     pub config: Config,
     pub provider_id: Mutex<String>,
@@ -146,6 +149,66 @@ fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
         .collect();
     next.extend(turns);
     next
+}
+
+/// 会話が SUMMARIZE_THRESHOLD を超えた場合、古いターンをLLMで要約してsystemへ付加する。
+/// 要約 API 呼び出しが失敗した場合は元の会話をそのまま返す（会話を止めない）。
+async fn maybe_summarize_context(
+    convo: Vec<Message>,
+    provider: &dyn providers::Provider,
+    cfg: &Config,
+    model: &str,
+) -> Vec<Message> {
+    let clean = clean_turns(&convo);
+    let total: usize = clean.iter().map(estimate_tokens).sum();
+    // 閾値以下またはターン数が少なすぎる場合はスキップ（最低 6 ターン必要）。
+    if total <= SUMMARIZE_THRESHOLD || clean.len() < 6 {
+        return convo;
+    }
+
+    // 古い 40% を要約対象にする（最低 2 ターン、残す側も最低 2 ターン確保）。
+    let split = ((clean.len() * 2) / 5).max(2).min(clean.len() - 2);
+    let to_summarize = &clean[..split];
+    let to_keep = &clean[split..];
+
+    let history_text: String = to_summarize
+        .iter()
+        .map(|m| {
+            let role = if m.role == "user" { "ユーザー" } else { "アシスタント" };
+            format!("{}: {}", role, m.content)
+        })
+        .collect::<Vec<_>>()
+        .join("\n---\n");
+
+    let summary_msgs = vec![
+        Message::new(
+            "system",
+            "以下の会話履歴を2〜3文で簡潔に日本語で要約してください。重要な事実・指示・約束だけを残し、挨拶や相槌は省いてください。要約文のみを返してください。",
+        ),
+        Message::new("user", &history_text),
+    ];
+
+    let Ok(summary_msg) = provider.chat(cfg, model, &summary_msgs, &[]).await else {
+        return convo;
+    };
+    let summary_text = summary_msg.content.trim().to_string();
+    if summary_text.is_empty() {
+        return convo;
+    }
+
+    // system メッセージへ要約を追記し、古いターンを差し替える。
+    let mut result: Vec<Message> = convo
+        .iter()
+        .filter(|m| m.role == "system")
+        .map(|m| {
+            let mut m = m.clone();
+            m.content
+                .push_str(&format!("\n\n[以前の会話の要約（自動）: {}]", summary_text));
+            m
+        })
+        .collect();
+    result.extend(to_keep.iter().cloned());
+    result
 }
 
 /// 履歴ファイルの分割キーになる、現在アクティブな選択中キャラクターID。
@@ -491,6 +554,10 @@ pub async fn pet_send(
         }
     }
     convo.push(Message::new("user", text));
+
+    // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
+    let mut convo =
+        maybe_summarize_context(convo, provider, &state.config, &model).await;
 
     let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。

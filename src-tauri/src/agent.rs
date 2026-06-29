@@ -565,6 +565,20 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
     None
 }
 
+/// ツール引数 JSON の解析失敗（`_raw` フィールド）を検出してエラーを返す。
+/// 正常な引数はそのまま `tools::dispatch` へ渡す。
+/// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
+async fn dispatch_or_error(cfg: &Config, name: &str, args: serde_json::Value) -> String {
+    if let Some(raw) = args.get("_raw").and_then(serde_json::Value::as_str) {
+        let preview = if raw.len() > 120 { &raw[..120] } else { raw };
+        format!(
+            "エラー: ツール「{name}」の引数JSONが不正でした。正しいJSON形式で再度呼び出してください。(raw: {preview})"
+        )
+    } else {
+        tools::dispatch(cfg, name, args).await
+    }
+}
+
 /// 指数バックオフ付きリトライでプロバイダを呼び出す。
 /// 429（レート制限）・500 系エラーは最大 3 回リトライする。認証エラーは即時失敗。
 async fn chat_with_retry(
@@ -739,9 +753,10 @@ pub async fn run(
         match calls {
             Some(cs) if !cs.is_empty() => {
                 // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
+                // 引数 JSON が壊れている（_raw フィールドあり）場合はエラーを返し再試行を促す。
                 let futs: Vec<_> = cs
                     .iter()
-                    .map(|c| tools::dispatch(cfg, c.name.as_str(), c.arguments.clone()))
+                    .map(|c| dispatch_or_error(cfg, c.name.as_str(), c.arguments.clone()))
                     .collect();
                 let results = futures::future::join_all(futs).await;
 
