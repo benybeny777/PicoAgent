@@ -6,6 +6,11 @@
 
 ## 2026-06-29
 
+### 資料ワークスペース生成を追加
+
+- **Genspark風の一括成果物生成** (`skills/spark_workspace/`): ひとつの依頼から `brief.md`、`deck.md`、`sheet.csv`、`page.html`、`agent-plan.md`、`prompts.md`、`checklist.md` を同じフォルダに生成するスキルを追加。保存は `PICOAGENT_WORKSPACE_ROOT` 配下に限定し、外部通信なしで使える。
+- **資料一式依頼の直行ルート** (`agent.rs` / `tools/mod.rs`): 「Genspark」「資料一式」「ワークスペース」「サイトとスライド」などの依頼で `spark_workspace` を候補提示し、小型ローカルモデルの tool_calls 判断を待たずに直接実行できるようにした。
+
 ### ローカル実用ツールを30機能追加
 
 - **設定不要の実用処理を拡充** (`skills/productivity_tools/`): 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用機能を追加。外部通信なしで即使える。

@@ -614,6 +614,30 @@ fn research_report_query(text: &str) -> Option<serde_json::Value> {
     }))
 }
 
+fn spark_workspace_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let has_workspace_word = [
+        "genspark",
+        "資料一式",
+        "ワークスペース",
+        "スライドとサイト",
+        "サイトとスライド",
+        "ページと資料",
+        "spark",
+        "deck",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !has_workspace_word {
+        return None;
+    }
+    Some(serde_json::json!({
+        "project": text.trim(),
+        "goal": "資料、スライド、表、共有ページ、実行計画をまとめて作る",
+        "source_text": text.trim()
+    }))
+}
+
 /// ツール引数 JSON の解析失敗（`_raw` フィールド）を検出してエラーを返す。
 /// 正常な引数はそのまま `tools::dispatch` へ渡す。
 /// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
@@ -721,6 +745,9 @@ pub async fn run(
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
             let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = spark_workspace_query(&user_text) {
+            let answer = tools::dispatch(cfg, "spark_workspace", args).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = research_report_query(&user_text) {
             let answer = tools::dispatch(cfg, "research_report", args).await;
@@ -882,7 +909,7 @@ mod tests {
     use super::{
         append_sources, currency_query, direct_local_tool_query, extract_source_urls,
         is_local_action_query, is_simple_greeting, is_weather_query, market_query,
-        research_report_query, should_web_search, web_search_query,
+        research_report_query, should_web_search, spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1009,5 +1036,15 @@ mod tests {
                 .and_then(serde_json::Value::as_bool),
             Some(true)
         );
+    }
+
+    #[test]
+    fn 資料ワークスペース依頼を直結スキルへ割り当てる() {
+        let args = spark_workspace_query("Gensparkみたいに資料一式を作って").unwrap();
+        assert_eq!(
+            args.get("project").and_then(serde_json::Value::as_str),
+            Some("Gensparkみたいに資料一式を作って")
+        );
+        assert!(spark_workspace_query("ありがとう").is_none());
     }
 }

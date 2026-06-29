@@ -109,6 +109,20 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "spark_workspace",
+        &[
+            "genspark",
+            "資料一式",
+            "ワークスペース",
+            "スライドとサイト",
+            "サイトとスライド",
+            "ページと資料",
+            "spark",
+            "deck",
+            "brief",
+        ],
+    ),
+    (
         "alarm",
         &[
             "アラーム",
@@ -482,5 +496,11 @@ mod tests {
         assert!(json.contains(&"productivity_tools".to_string()));
         let unit = schema_names("10kmをmileに単位換算して");
         assert!(unit.contains(&"productivity_tools".to_string()));
+    }
+
+    #[test]
+    fn 資料ワークスペースを候補に追加する() {
+        let names = schema_names("Gensparkみたいに資料一式を作って");
+        assert!(names.contains(&"spark_workspace".to_string()));
     }
 }
