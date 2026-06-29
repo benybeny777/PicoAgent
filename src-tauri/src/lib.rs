@@ -272,7 +272,12 @@ pub(crate) fn position_from_offsets(
 }
 
 /// 既定の右下オフセットでのウィンドウ位置。
-pub(crate) fn default_window_position(area_w: u32, area_h: u32, win_w: u32, win_h: u32) -> (i32, i32) {
+pub(crate) fn default_window_position(
+    area_w: u32,
+    area_h: u32,
+    win_w: u32,
+    win_h: u32,
+) -> (i32, i32) {
     position_from_offsets(
         area_w,
         area_h,
@@ -329,7 +334,12 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 /// `RunEvent::Exit` ではウィンドウ座標を取得できないため、キャッシュ値のみを書き出す。
 /// 横位置は以前指定の固定値を使うため保存しない。
 fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
-    let Some(layout) = *app_handle.state::<WindowLayoutCache>().inner.lock().unwrap() else {
+    let Some(layout) = *app_handle
+        .state::<WindowLayoutCache>()
+        .inner
+        .lock()
+        .unwrap()
+    else {
         return;
     };
     let state = app_handle.state::<AppState>();

@@ -62,7 +62,11 @@ impl Message {
             tool_calls: None,
             tool_call_id: None,
             name: None,
-            images: if images.is_empty() { None } else { Some(images) },
+            images: if images.is_empty() {
+                None
+            } else {
+                Some(images)
+            },
             usage: None,
         }
     }

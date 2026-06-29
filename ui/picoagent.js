@@ -11,8 +11,15 @@ const { LogicalSize, PhysicalPosition } = window.__TAURI__.dpi || {};
 // 握られたエラーも確実にログへ残すため）。pet_log 自身は再帰を避けて素の invoke を使う。
 function logInvokeError(name, error) {
   const detail = error && (error.stack || error.message) ? error.stack || error.message : String(error);
-  try { invoke("pet_log", { level: "error", message: `invoke ${name} 失敗`, detail: String(detail) }).catch(() => {}); }
-  catch {}
+  try {
+    invoke("pet_log", { level: "error", message: `invoke ${name} 失敗`, detail: String(detail) }).catch(logError => {
+      // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      console.warn("invoke エラーログ保存に失敗しました", logError);
+    });
+  } catch (logError) {
+    // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+    console.warn("invoke エラーログ保存に失敗しました", logError);
+  }
 }
 async function call(name, args) {
   try {

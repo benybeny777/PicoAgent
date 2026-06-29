@@ -86,6 +86,45 @@ fn model_path(app: &AppHandle) -> PathBuf {
     crate::log_paths::bundled_dir(app).join("models").join(name)
 }
 
+async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>> {
+    let state = app.state::<AppState>();
+    let port = local::port(&state.config);
+    let url = format!("http://127.0.0.1:{port}/v1/models");
+    let data: Value = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(data
+        .get("data")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("id").and_then(|id| id.as_str()))
+        .map(|id| id.replace('\\', "/"))
+        .collect())
+}
+
+async fn running_server_uses_model(app: &AppHandle, model: &PathBuf) -> bool {
+    let Some(file_name) = model.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let expected_path = model.to_string_lossy().replace('\\', "/");
+    match running_server_model_ids(app).await {
+        Ok(ids) => ids.iter().any(|id| {
+            id == file_name || id == &expected_path || id.ends_with(&format!("/{file_name}"))
+        }),
+        Err(error) => {
+            eprintln!("既存ローカルエンジンのモデル確認に失敗しました: {error}");
+            false
+        }
+    }
+}
+
 fn legacy_model_paths(app: &AppHandle) -> Vec<PathBuf> {
     let url = model_url(app);
     let name = url
@@ -358,15 +397,29 @@ pub async fn ensure_and_start(app: AppHandle) {
         }
     }
     // 終了処理が始まっていたら spawn しない（ダウンロード完了後のレースコンディション対策）。
-    if app.try_state::<EngineState>().map(|e| e.stopping.load(Ordering::SeqCst)).unwrap_or(true) {
+    if app
+        .try_state::<EngineState>()
+        .map(|e| e.stopping.load(Ordering::SeqCst))
+        .unwrap_or(true)
+    {
         return;
     }
     // すでに同梱エンジンが応答していれば（前回クラッシュ等で取り残されたプロセス）、
-    // 二重起動やポート競合を避けて既存サーバーを再利用する。
+    // 要求モデルまで一致する場合だけ再利用する。モデル変更後の古いプロセスを誤用しないため。
     if let Some(provider) = crate::providers::get("local") {
         let state = app.state::<AppState>();
         if provider.is_up(&state.config).await {
-            set_status(&app, json!({ "phase": "ready" }));
+            if running_server_uses_model(&app, &model).await {
+                set_status(&app, json!({ "phase": "ready" }));
+                return;
+            }
+            set_status(
+                &app,
+                json!({
+                    "phase": "error",
+                    "message": "別モデルのローカルエンジンが既に起動しています。PicoAgent を終了して残った llama-server を停止してから再起動してください"
+                }),
+            );
             return;
         }
     }

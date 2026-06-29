@@ -246,7 +246,11 @@ fn is_complex_query(text: &str) -> bool {
         return false;
     }
     let questions = text.matches('?').count() + text.matches('？').count();
-    count > 120 || questions >= 2 || text.contains("手順") || text.contains("ステップ") || text.contains("step")
+    count > 120
+        || questions >= 2
+        || text.contains("手順")
+        || text.contains("ステップ")
+        || text.contains("step")
 }
 
 /// 複雑なクエリを最大4サブタスクに分解して計画テキストを返す。
@@ -718,21 +722,13 @@ pub async fn run(
     // （PICOAGENT_PLANNING_ENABLED=true かつ複雑クエリのみ。設定OFF・単純質問はスキップ）。
     if let Some(plan) = planning_step(provider, cfg, model, &original_user_text).await {
         if let Some(user_idx) = messages.iter().rposition(|m| m.role == "user") {
-            messages[user_idx].content =
-                format!("{}\n\n{}", messages[user_idx].content, plan);
+            messages[user_idx].content = format!("{}\n\n{}", messages[user_idx].content, plan);
         }
     }
 
     for _ in 0..max_steps {
-        let msg = chat_with_retry(
-            provider,
-            cfg,
-            model,
-            messages,
-            &schemas,
-            emit_fn.clone(),
-        )
-        .await?;
+        let msg =
+            chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone()).await?;
         // トークン使用量を記録する（AppHandle がある場合のみ）。
         if let (Some(handle), Some(usage)) = (app, &msg.usage) {
             crate::usage::record(
@@ -825,7 +821,14 @@ pub async fn run(
     } else {
         last
     };
-    Ok(self_improve(provider, cfg, model, messages, append_sources(answer, &sources)).await)
+    Ok(self_improve(
+        provider,
+        cfg,
+        model,
+        messages,
+        append_sources(answer, &sources),
+    )
+    .await)
 }
 
 #[cfg(test)]

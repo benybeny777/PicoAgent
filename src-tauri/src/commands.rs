@@ -18,13 +18,13 @@ pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人とし
 
 fn effective_system_prompt(config: &Config) -> String {
     let configured = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-    let mut prompt =
-        if configured == LEGACY_DEFAULT_SYSTEM_PROMPT || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT
-        {
-            DEFAULT_SYSTEM_PROMPT.to_string()
-        } else {
-            configured
-        };
+    let mut prompt = if configured == LEGACY_DEFAULT_SYSTEM_PROMPT
+        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT
+    {
+        DEFAULT_SYSTEM_PROMPT.to_string()
+    } else {
+        configured
+    };
     // 使えるスキル一覧を添え、「何ができる？」に具体的に答えられるようにする。
     let capabilities = crate::tools::capability_summary();
     if !capabilities.is_empty() {
@@ -184,7 +184,11 @@ async fn maybe_summarize_context(
     let history_text: String = to_summarize
         .iter()
         .map(|m| {
-            let role = if m.role == "user" { "ユーザー" } else { "アシスタント" };
+            let role = if m.role == "user" {
+                "ユーザー"
+            } else {
+                "アシスタント"
+            };
             format!("{}: {}", role, m.content)
         })
         .collect::<Vec<_>>()
@@ -561,7 +565,9 @@ pub async fn pet_send(
                     sys.content.push_str("\n\n");
                     sys.content.push_str(&semantic_ctx);
                 } else {
-                    sys.content = sys.content.replacen(base_ctx.as_str(), semantic_ctx.as_str(), 1);
+                    sys.content = sys
+                        .content
+                        .replacen(base_ctx.as_str(), semantic_ctx.as_str(), 1);
                 }
             }
         }
@@ -569,8 +575,7 @@ pub async fn pet_send(
     convo.push(Message::new("user", text));
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
-    let mut convo =
-        maybe_summarize_context(convo, provider, &state.config, &model).await;
+    let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
 
     let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
@@ -613,7 +618,10 @@ pub async fn pet_send(
                 crate::emotion::update(&current, &user_text, &reply)
             };
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit("pet:emotion", serde_json::to_value(&new_emotion).unwrap_or_default());
+                let _ = win.emit(
+                    "pet:emotion",
+                    serde_json::to_value(&new_emotion).unwrap_or_default(),
+                );
             }
             *state.emotion.lock().unwrap() = new_emotion;
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
@@ -1445,7 +1453,10 @@ pub async fn pet_send_image(
     } else {
         text.clone()
     };
-    convo.push(crate::message::Message::user_with_images(user_text.clone(), images));
+    convo.push(crate::message::Message::user_with_images(
+        user_text.clone(),
+        images,
+    ));
 
     let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
     let compacted = compacted_conversation(&convo);
@@ -1460,7 +1471,10 @@ pub async fn pet_send_image(
                 crate::emotion::update(&current, &user_text, &reply)
             };
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit("pet:emotion", serde_json::to_value(&new_emotion).unwrap_or_default());
+                let _ = win.emit(
+                    "pet:emotion",
+                    serde_json::to_value(&new_emotion).unwrap_or_default(),
+                );
             }
             *state.emotion.lock().unwrap() = new_emotion;
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
@@ -1602,12 +1616,10 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     const MAX_CHARS: usize = 12_000;
     let content = match ext.as_str() {
         // テキスト系・コード系はそのまま UTF-8 で読む。
-        "txt" | "md" | "markdown" | "rst" | "log" | "json" | "toml" | "yaml" | "yml"
-        | "html" | "htm" | "xml" | "css" | "js" | "ts" | "jsx" | "tsx" | "py" | "rs"
-        | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "sh" | "bash" | "zsh" | "bat"
-        | "ps1" | "rb" | "php" | "kt" | "swift" => {
-            String::from_utf8_lossy(&bytes).into_owned()
-        }
+        "txt" | "md" | "markdown" | "rst" | "log" | "json" | "toml" | "yaml" | "yml" | "html"
+        | "htm" | "xml" | "css" | "js" | "ts" | "jsx" | "tsx" | "py" | "rs" | "go" | "java"
+        | "c" | "cpp" | "h" | "hpp" | "sh" | "bash" | "zsh" | "bat" | "ps1" | "rb" | "php"
+        | "kt" | "swift" => String::from_utf8_lossy(&bytes).into_owned(),
         // CSV/TSV → Markdown テーブル（最大 300 行）。
         "csv" | "tsv" => {
             let sep = if ext == "tsv" { '\t' } else { ',' };
@@ -1651,7 +1663,9 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     if content.chars().count() > MAX_CHARS {
         let truncated: String = content.chars().take(MAX_CHARS).collect();
         let omitted = content.chars().count() - MAX_CHARS;
-        Ok(format!("{truncated}\n\n[...{omitted} 文字以降は省略しました]"))
+        Ok(format!(
+            "{truncated}\n\n[...{omitted} 文字以降は省略しました]"
+        ))
     } else {
         Ok(content)
     }
@@ -1711,8 +1725,7 @@ const MAX_ZIP_ENTRY_BYTES: u64 = 20 * 1024 * 1024;
 fn read_zip_entry(data: &[u8], entry: &str) -> Result<String, String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(data);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
     let file = archive
         .by_name(entry)
         .map_err(|_| format!("'{entry}' が見つかりません"))?;
@@ -1727,8 +1740,7 @@ fn read_zip_entry(data: &[u8], entry: &str) -> Result<String, String> {
 fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(data);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
     let mut slides: Vec<(String, String)> = Vec::new();
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|e| e.to_string())?;
