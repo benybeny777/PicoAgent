@@ -641,6 +641,148 @@ function loadCharacterVoice(id) {
   characterSpeaker.placeholder = defaultVoice.styleId || inputs.get("PICOAGENT_TTS_SPEAKER")?.value || "888753760";
 }
 
+function formatNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toLocaleString("ja-JP") : "0";
+}
+
+function statusTone(ok, warn = false) {
+  if (ok) return "ok";
+  if (warn) return "warn";
+  return "error";
+}
+
+function diagnosticCard(title, value, detail = "", tone = "neutral", searchParts = []) {
+  return markSearchable(el("div", { className: `diagnostic-card ${tone}` }, [
+    el("div", { className: "diagnostic-label", textContent: title }),
+    el("div", { className: "diagnostic-value", textContent: value }),
+    el("div", { className: "diagnostic-detail", textContent: detail }),
+  ]), title, value, detail, ...searchParts);
+}
+
+function enginePhaseLabel(phase) {
+  const labels = {
+    idle: "待機中",
+    preparing: "準備中",
+    download: "取得中",
+    starting: "起動中",
+    ready: "利用可能",
+    error: "エラー",
+  };
+  return labels[phase] || phase || "不明";
+}
+
+function appendUsageSummary(grid, usage) {
+  const monthly = Array.isArray(usage.monthlySummary) ? usage.monthlySummary : [];
+  const top = monthly[0];
+  grid.append(diagnosticCard(
+    "今月の使用量",
+    `${formatNumber(monthly.reduce((sum, item) => sum + Number(item.totalTokens || 0), 0))} tokens`,
+    top ? `最多: ${top.key} / ${formatNumber(top.totalTokens)} tokens` : "今月の記録はまだありません",
+    monthly.length ? "ok" : "neutral",
+    ["usage", "token", "tokens", "使用量"]
+  ));
+  grid.append(diagnosticCard(
+    "累計使用量",
+    `${formatNumber(usage.totalTokens)} tokens`,
+    `${formatNumber(usage.recordCount)} 件の記録`,
+    Number(usage.totalTokens || 0) > 0 ? "ok" : "neutral",
+    ["usage", "token", "tokens", "累計"]
+  ));
+}
+
+function appendTraceSummary(grid, traces) {
+  const summary = Array.isArray(traces.summary) ? traces.summary : [];
+  const worst = summary[0];
+  grid.append(diagnosticCard(
+    "スキル実行",
+    `${formatNumber(Array.isArray(traces.entries) ? traces.entries.length : 0)} 件`,
+    worst ? `最長平均: ${worst.tool} ${formatNumber(worst.avgMs)}ms / エラー ${formatNumber(worst.errorCount)}` : "直近の実行記録はありません",
+    summary.some(item => Number(item.errorCount || 0) > 0) ? "warn" : "ok",
+    ["trace", "traces", "tool", "latency", "スキル"]
+  ));
+}
+
+function diagnosticsFailureCard(title, error) {
+  return diagnosticCard(
+    title,
+    "取得失敗",
+    error?.message || String(error || "不明なエラー"),
+    "error",
+    ["診断", "エラー"]
+  );
+}
+
+function buildDiagnosticsSection() {
+  const diagnosticsSec = section("診断");
+  const toolbar = el("div", { className: "diagnostics-toolbar" });
+  const refresh = el("button", { type: "button", textContent: "更新" });
+  const note = el("div", { className: "hint", textContent: "配布後の切り分けに使う実行状態です。設定値は変更しません。" });
+  toolbar.append(refresh, note);
+  const grid = el("div", { className: "diagnostic-grid" });
+  diagnosticsSec.append(toolbar, grid);
+
+  async function refreshDiagnostics() {
+    refresh.disabled = true;
+    grid.replaceChildren(diagnosticCard("診断", "取得中…", "状態を読み込んでいます", "neutral", ["診断"]));
+    try {
+      const [engineResult, aivisResult, usageResult, tracesResult] = await Promise.allSettled([
+        window.picoagent.engineStatus(),
+        window.picoagent.aivisStatus(),
+        window.picoagent.usage(),
+        window.picoagent.traces(),
+      ]);
+      grid.replaceChildren();
+      grid.append(diagnosticCard(
+        "叩くAI",
+        data.providers.find(p => p.id === data.active.providerId)?.label || data.active.providerId,
+        data.active.model || "モデル未選択",
+        data.active.providerId ? "ok" : "warn",
+        ["provider", "model", data.active.providerId, data.active.model]
+      ));
+      if (engineResult.status === "fulfilled") {
+        const engine = engineResult.value || {};
+        const phase = engine.phase || "";
+        const progress = engine.percent != null ? ` / ${Math.round(Number(engine.percent))}%` : "";
+        grid.append(diagnosticCard(
+          "同梱エンジン",
+          enginePhaseLabel(phase),
+          `${engine.message || "状態メッセージなし"}${progress}`,
+          phase === "ready" ? "ok" : statusTone(false, phase !== "error"),
+          ["engine", "local", phase, engine.message]
+        ));
+      } else {
+        grid.append(diagnosticsFailureCard("同梱エンジン", engineResult.reason));
+      }
+      if (aivisResult.status === "fulfilled") {
+        const aivis = aivisResult.value || {};
+        grid.append(diagnosticCard(
+          "Aivis",
+          aivis.enabled ? (aivis.up ? "利用可能" : "起動待ち") : "無効",
+          aivis.enabled ? "読み上げ設定は有効です" : "読み上げ設定は無効です",
+          aivis.enabled ? statusTone(aivis.up, !aivis.up) : "neutral",
+          ["aivis", "tts", "音声", "読み上げ"]
+        ));
+      } else {
+        grid.append(diagnosticsFailureCard("Aivis", aivisResult.reason));
+      }
+      if (usageResult.status === "fulfilled") appendUsageSummary(grid, usageResult.value || {});
+      else grid.append(diagnosticsFailureCard("使用量", usageResult.reason));
+      if (tracesResult.status === "fulfilled") appendTraceSummary(grid, tracesResult.value || {});
+      else grid.append(diagnosticsFailureCard("スキル実行", tracesResult.reason));
+    } catch (error) {
+      grid.replaceChildren(diagnosticsFailureCard("診断", error));
+    } finally {
+      refresh.disabled = false;
+      applySettingsSearch();
+    }
+  }
+
+  refresh.addEventListener("click", refreshDiagnostics);
+  refreshDiagnostics();
+  return diagnosticsSec;
+}
+
 async function render() {
   form.innerHTML = "";
   const v = data.values;
@@ -650,6 +792,7 @@ async function render() {
     { id: "voice", label: "音声" },
     { id: "providers", label: "叩くAI" },
     { id: "tools", label: "スキル" },
+    { id: "diagnostics", label: "診断" },
   ]);
 
   // --- グローバル設定 ---
@@ -770,6 +913,7 @@ async function render() {
   panels.providers.append(provSec);
 
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
+  panels.diagnostics.append(buildDiagnosticsSection());
 
   // プロバイダ変更でモデル候補を更新し、選択中プロバイダの設定だけ表示する。
   providerSelect.addEventListener("change", () => {
