@@ -521,6 +521,7 @@ function renderHistory() {
 
 let speakingToken = 0;
 let currentVoice = null;
+let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代。変わると進行中の読み上げを打ち切る。
 function finishVoice(toIdle = true) {
   if (!currentVoice) return;
   const voice = currentVoice;
@@ -530,6 +531,7 @@ function finishVoice(toIdle = true) {
   setTimeout(flushPendingNotice, 0);
 }
 function stopVoice(toIdle = true) {
+  voiceSession++; // 進行中のパイプライン読み上げ（合成待ち・連続再生）を打ち切る。
   if (!currentVoice) return;
   currentVoice.pause();
   finishVoice(toIdle);
@@ -572,26 +574,89 @@ function playPreparedSpeech(result) {
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
 }
+// 読み上げ用に本文を文単位のチャンクへ分割する。長文を小分けにして「先頭から順次再生」する
+// ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
+function splitSpeechChunks(text, maxLen = 90) {
+  const norm = String(text ?? "").replace(/\r\n/g, "\n").trim();
+  if (!norm) return [];
+  // 文末記号・改行の直後で区切る。短い断片は結合し、長すぎる文はそのまま1チャンクにする。
+  const parts = norm.split(/(?<=[。．.!?！？\n])/);
+  const chunks = [];
+  let buf = "";
+  for (const p of parts) {
+    if (buf && (buf + p).length > maxLen) { chunks.push(buf.trim()); buf = p; }
+    else buf += p;
+  }
+  if (buf.trim()) chunks.push(buf.trim());
+  return chunks.filter(c => c.length > 0);
+}
+// 合成済みチャンクを1つ再生し、再生終了（または失敗・打ち切り）で解決する。
+// チャンク間ではアニメ/ステータスを idle に戻さず、talking を維持する。
+function playChunkAndWait(result, session) {
+  return new Promise(resolve => {
+    if (session !== voiceSession) { resolve(); return; }
+    const bytes = new Uint8Array(result.audio);
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
+    const audio = new Audio(url);
+    currentVoice = audio;
+    audio.volume = voiceVolume;
+    let settled = false;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      if (currentVoice === audio) currentVoice = null;
+      resolve();
+    };
+    audio.addEventListener("ended", cleanup, { once: true });
+    audio.addEventListener("pause", cleanup, { once: true }); // stopVoice からの打ち切りで解決
+    audio.addEventListener("error", () => {
+      logApp("error", "音声データの読み込みに失敗しました", audio.error?.message || "");
+      cleanup();
+    }, { once: true });
+    audio.play().catch(error => {
+      logApp("error", "音声再生に失敗しました", errorDetail(error));
+      cleanup();
+    });
+    status.textContent = "読み上げ中…";
+    setAnimation("talking", true);
+  });
+}
 async function speakReply(text) {
+  const chunks = splitSpeechChunks(text);
+  stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
+  const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
+  if (chunks.length === 0) { status.textContent = ""; return; }
   let prepareTimer = null;
   try {
     const startedAt = Date.now();
     status.textContent = "読み上げ準備中…";
     prepareTimer = setInterval(() => {
       const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      status.textContent = `読み上げ準備中… ${seconds}秒`;
+      if (status.textContent.startsWith("読み上げ準備中")) {
+        status.textContent = `読み上げ準備中… ${seconds}秒`;
+      }
     }, 1000);
-    const result = await window.picoagent.speak(text);
-    clearInterval(prepareTimer);
-    prepareTimer = null;
-    if (!result?.enabled || result.skipped || !result.audio?.length) {
-      status.textContent = "";
-      return;
+    // パイプライン: 先頭チャンクを合成→再生しつつ、次チャンクを裏で先読み合成する。
+    let nextSynth = prepareSpeech(chunks[0]);
+    let played = false;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const result = await nextSynth;
+      if (session !== voiceSession) return;
+      nextSynth = i + 1 < chunks.length ? prepareSpeech(chunks[i + 1]) : null;
+      if (!result) continue;
+      if (!played) { clearInterval(prepareTimer); prepareTimer = null; played = true; }
+      await playChunkAndWait(result, session);
+      if (session !== voiceSession) return;
     }
-    playPreparedSpeech(result);
+    if (prepareTimer) clearInterval(prepareTimer);
+    if (animationName === "talking") setAnimation("idle");
+    if (status.textContent === "読み上げ中…" || status.textContent.startsWith("読み上げ準備中")) {
+      status.textContent = "";
+    }
   } catch (error) {
     if (prepareTimer) clearInterval(prepareTimer);
-    stopVoice();
+    if (session === voiceSession) stopVoice();
     logApp("error", "読み上げに失敗しました", errorDetail(error));
     status.textContent = `読み上げに失敗: ${error.message || error}`;
     setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 12000);

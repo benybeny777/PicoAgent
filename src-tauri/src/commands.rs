@@ -17,12 +17,22 @@ const PREVIOUS_DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人�
 pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
 
 fn effective_system_prompt(config: &Config) -> String {
-    let prompt = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-    if prompt == LEGACY_DEFAULT_SYSTEM_PROMPT || prompt == PREVIOUS_DEFAULT_SYSTEM_PROMPT {
-        DEFAULT_SYSTEM_PROMPT.to_string()
-    } else {
-        prompt
+    let configured = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+    let mut prompt =
+        if configured == LEGACY_DEFAULT_SYSTEM_PROMPT || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT
+        {
+            DEFAULT_SYSTEM_PROMPT.to_string()
+        } else {
+            configured
+        };
+    // 使えるスキル一覧を添え、「何ができる？」に具体的に答えられるようにする。
+    let capabilities = crate::tools::capability_summary();
+    if !capabilities.is_empty() {
+        prompt.push_str("\n\n使えるスキル（必要なときに自動で実行できます）: ");
+        prompt.push_str(&capabilities);
+        prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
     }
+    prompt
 }
 
 // 日本語文字は約2トークン、ASCII は約0.25トークン（÷4）で粗く見積もる。

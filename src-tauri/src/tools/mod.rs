@@ -255,6 +255,18 @@ pub fn all() -> &'static [Box<dyn Tool>] {
         .as_slice()
 }
 
+/// エージェントが会話中に使えるスキル（ツール）のラベル一覧を「、」区切りで返す。
+/// 「何ができる？」への回答をモデルが具体的に答えられるよう、system プロンプトに添える用途。
+pub fn capability_summary() -> String {
+    let mut labels: Vec<&str> = all()
+        .iter()
+        .filter(|t| t.agent_callable())
+        .map(|t| t.label())
+        .collect();
+    labels.dedup();
+    labels.join("、")
+}
+
 fn index() -> &'static HashMap<&'static str, usize> {
     TOOL_INDEX.get_or_init(|| {
         all()
