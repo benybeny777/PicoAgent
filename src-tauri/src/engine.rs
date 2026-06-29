@@ -392,6 +392,17 @@ pub fn stop(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
         engine.stopping.store(true, Ordering::SeqCst);
         if let Some(mut child) = engine.child.lock().unwrap().take() {
+            // Windows は taskkill /T で llama-server の子孫まで含めて確実に停止する（Aivis と同方針）。
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+            #[cfg(not(windows))]
             let _ = child.kill();
             let _ = child.wait(); // kill 後に wait してプロセスハンドルを回収する。
         }
