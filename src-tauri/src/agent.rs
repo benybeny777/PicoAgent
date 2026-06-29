@@ -756,14 +756,23 @@ pub async fn run(
             Some(cs) if !cs.is_empty() => {
                 // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
                 // 引数 JSON が壊れている（_raw フィールドあり）場合はエラーを返し再試行を促す。
+                // 各ツールを個別に計測しながら並列実行する（結果は (出力, 実行ms)）。
                 let futs: Vec<_> = cs
                     .iter()
-                    .map(|c| dispatch_or_error(cfg, c.name.as_str(), c.arguments.clone()))
+                    .map(|c| {
+                        let name = c.name.clone();
+                        let args = c.arguments.clone();
+                        async move {
+                            let span = crate::tracer::Tracer::start_span(name.as_str());
+                            let content = dispatch_or_error(cfg, name.as_str(), args).await;
+                            (content, span.finish().1)
+                        }
+                    })
                     .collect();
                 let results = futures::future::join_all(futs).await;
 
                 // run_command の承認マーカーを最初にチェックする。
-                for (c, content) in cs.iter().zip(results.iter()) {
+                for (c, (content, _)) in cs.iter().zip(results.iter()) {
                     if c.name == "run_command"
                         && crate::tools::run_command::parse_approval_marker(content).is_some()
                     {
@@ -772,7 +781,7 @@ pub async fn run(
                 }
 
                 // ツール実行結果をトレースに記録し会話へ積む。
-                for (c, content) in cs.iter().zip(results.into_iter()) {
+                for (c, (content, duration_ms)) in cs.iter().zip(results.into_iter()) {
                     // インジェクション検出: 不審なパターンがあれば警告プレフィックスを付けてモデルへ伝える。
                     let content = if tools::check_injection(&content) {
                         format!(
@@ -787,7 +796,7 @@ pub async fn run(
                     if let Some(handle) = app {
                         let entry = crate::tracer::TraceEntry {
                             tool: c.name.clone(),
-                            duration_ms: 0, // join_all では個別計測なし（合計は外で測れる）
+                            duration_ms,
                             success,
                         };
                         handle.state::<crate::tracer::Tracer>().record(entry);
