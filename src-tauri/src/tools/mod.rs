@@ -102,6 +102,8 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "競合比較",
             "市場調査",
             "まとめて調べ",
+            "ダッシュボード",
+            "html",
             "research",
             "report",
         ],
@@ -239,6 +241,27 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
     (
         "document_convert",
         &["変換", "pdf化", "libreoffice", "convert"],
+    ),
+    (
+        "productivity_tools",
+        &[
+            "文字数",
+            "行数",
+            "json",
+            "base64",
+            "urlエンコード",
+            "urlデコード",
+            "単位換算",
+            "日付計算",
+            "csv",
+            "markdown表",
+            "スラッグ",
+            "slug",
+            "チェックサム",
+            "bmi",
+            "rgb",
+            "hex",
+        ],
     ),
     ("pdf_tools", &["pdf", "結合", "抽出", "回転"]),
     (
@@ -451,5 +474,13 @@ mod tests {
         assert!(focus.contains(&"focus_timer".to_string()));
         let clipboard = schema_names("クリップボードを要約して");
         assert!(clipboard.contains(&"clipboard_text".to_string()));
+    }
+
+    #[test]
+    fn 実用ツール集を候補に追加する() {
+        let json = schema_names("このJSONを整形して");
+        assert!(json.contains(&"productivity_tools".to_string()));
+        let unit = schema_names("10kmをmileに単位換算して");
+        assert!(unit.contains(&"productivity_tools".to_string()));
     }
 }

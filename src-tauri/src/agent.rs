@@ -593,7 +593,11 @@ fn research_report_query(text: &str) -> Option<serde_json::Value> {
         "レポート",
         "資料",
         "スライド",
+        "ダッシュボード",
+        "html",
+        "ページ",
         "表",
+        "json",
         "csv",
         "markdown",
         "md",
@@ -990,5 +994,20 @@ mod tests {
             Some(true)
         );
         assert!(research_report_query("ありがとう").is_none());
+    }
+
+    #[test]
+    fn 調査ダッシュボード依頼は保存成果物にする() {
+        let args =
+            research_report_query("競合比較を調査してHTMLダッシュボードのページにして").unwrap();
+        assert_eq!(
+            args.get("save").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            args.get("artifact_bundle")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
     }
 }

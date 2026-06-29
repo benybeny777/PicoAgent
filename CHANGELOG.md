@@ -6,10 +6,15 @@
 
 ## 2026-06-29
 
+### ローカル実用ツールを30機能追加
+
+- **設定不要の実用処理を拡充** (`skills/productivity_tools/`): 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用機能を追加。外部通信なしで即使える。
+- **スキル候補の自動選択を拡張** (`tools/mod.rs`): 「文字数」「JSON」「Base64」「URLエンコード」「単位換算」「日付計算」「CSV」「RGB」などの依頼で `productivity_tools` をモデルに提示するようにした。
+
 ### 出典付き調査レポート生成スキルを追加
 
 - **調査からMarkdownレポート化までを一括化** (`skills/research_report/`): 複数観点のWeb検索を実行し、要約・観点別メモ・比較表・次の深掘り・出典一覧を含む Markdown 調査レポートを生成するスキルを追加。`save=true` または `save_path` で `PICOAGENT_WORKSPACE_ROOT` 配下へ `.md` 保存できる。検索件数・待ち時間・保存先に境界を設け、危険な任意パス書き込みは拒否する。
-- **成果物セット化** (`skills/research_report/`): 保存時は既定で本文レポートに加え、1ページ要約 `.brief.md`、スライド下書き `.slides.md`、出典CSV `.sources.csv` も同時生成するようにした。`artifact_bundle=false` で単一レポート保存にも戻せる。
+- **成果物セット化** (`skills/research_report/`): 保存時は既定で本文レポートに加え、1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も同時生成するようにした。`artifact_bundle=false` で単一レポート保存にも戻せる。
 - **調査依頼の直行ルート** (`agent.rs`): 「調査」「レポート」「出典」「競合比較」などを含む依頼は、小型ローカルモデルの tool_calls 判断を待たず `research_report` を直接実行するようにした。
 
 ### 設定画面の未保存変更を戻せるように修正
