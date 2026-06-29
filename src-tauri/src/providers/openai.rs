@@ -1,12 +1,14 @@
 // providers/openai.rs - OpenAI 互換プロバイダコネクタ。
 // OPENAI_BASE_URL（既定 https://api.openai.com/v1）/ OPENAI_API_KEY / OPENAI_MODEL を都度読む。
+// ストリーミング対応: `chat_stream` で SSE を受信し、テキストチャンクを on_chunk へ逐次渡す。
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use super::{Provider, ProviderReg};
 use crate::config::Config;
-use crate::message::{Field, Message, ToolCall};
+use crate::message::{Field, Message, TokenUsage, ToolCall};
 
 pub struct OpenAI;
 
@@ -51,6 +53,21 @@ pub(crate) fn to_wire(messages: &[Message]) -> Vec<Value> {
                     "content": m.content
                 });
             }
+            // マルチモーダル: user メッセージに画像がある場合はコンテンツ配列形式にする。
+            if m.role == "user" {
+                if let Some(images) = &m.images {
+                    if !images.is_empty() {
+                        let mut parts: Vec<Value> = vec![json!({"type": "text", "text": m.content})];
+                        for img in images {
+                            parts.push(json!({
+                                "type": "image_url",
+                                "image_url": { "url": img }
+                            }));
+                        }
+                        return json!({ "role": "user", "content": parts });
+                    }
+                }
+            }
             json!({ "role": m.role, "content": m.content })
         })
         .collect()
@@ -78,7 +95,8 @@ pub(crate) fn from_wire(message: &Value) -> Message {
                 .and_then(|v| v.as_str())
                 .unwrap_or("{}");
             // OpenAI は arguments を JSON 文字列で返す。壊れていれば _raw として残す。
-            let arguments = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "_raw": raw }));
+            let arguments = serde_json::from_str::<Value>(raw)
+                .unwrap_or_else(|_| json!({ "_raw": raw }));
             let id = c
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -90,10 +108,150 @@ pub(crate) fn from_wire(message: &Value) -> Message {
     Message {
         role: "assistant".to_string(),
         content,
-        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
         tool_call_id: None,
         name: None,
+        images: None,
+        usage: None,
     }
+}
+
+/// レスポンス JSON の `usage` フィールドから TokenUsage を抽出する。
+fn extract_usage(data: &Value) -> Option<TokenUsage> {
+    let u = data.get("usage")?;
+    Some(TokenUsage {
+        prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+        completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+        total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+    })
+}
+
+/// ストリーミング SSE を受信してチャンクを on_chunk に渡し、完全な Message を返す。
+async fn stream_chat(
+    url: &str,
+    api_key: &str,
+    body: Value,
+    on_chunk: Arc<dyn Fn(String) + Send + Sync>,
+) -> anyhow::Result<Message> {
+    use futures::StreamExt;
+
+    let res = reqwest::Client::new()
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .await?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        anyhow::bail!("OpenAI streaming /chat/completions 失敗: {} {}", status, text);
+    }
+
+    let mut full_content = String::new();
+    let mut partial_calls: Vec<PartialToolCall> = Vec::new();
+    let mut buf = String::new();
+
+    let mut stream = res.bytes_stream();
+    'outer: while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result?;
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+
+        loop {
+            let Some(line_end) = buf.find('\n') else {
+                break;
+            };
+            let line = buf[..line_end].trim_end_matches('\r').to_string();
+            buf.drain(..=line_end);
+
+            let Some(data) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            let data = data.trim();
+            if data == "[DONE]" {
+                break 'outer;
+            }
+            let Ok(json) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
+            let delta = &json["choices"][0]["delta"];
+
+            // テキストチャンク。
+            if let Some(content) = delta.get("content").and_then(Value::as_str) {
+                if !content.is_empty() {
+                    full_content.push_str(content);
+                    on_chunk(content.to_string());
+                }
+            }
+
+            // tool_calls チャンク（インデックスベースで結合）。
+            if let Some(tc_array) = delta.get("tool_calls").and_then(Value::as_array) {
+                for tc_delta in tc_array {
+                    let idx = tc_delta["index"].as_u64().unwrap_or(0) as usize;
+                    while partial_calls.len() <= idx {
+                        partial_calls.push(PartialToolCall::default());
+                    }
+                    let pt = &mut partial_calls[idx];
+                    if let Some(id) = tc_delta.get("id").and_then(Value::as_str) {
+                        pt.id = id.to_string();
+                    }
+                    if let Some(fn_delta) = tc_delta.get("function") {
+                        if let Some(name) = fn_delta.get("name").and_then(Value::as_str) {
+                            pt.name = name.to_string();
+                        }
+                        if let Some(args) = fn_delta.get("arguments").and_then(Value::as_str) {
+                            pt.args_buf.push_str(args);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let tool_calls: Vec<ToolCall> = partial_calls
+        .into_iter()
+        .enumerate()
+        .filter(|(_, pt)| !pt.name.is_empty())
+        .map(|(i, pt)| {
+            let arguments = serde_json::from_str::<Value>(&pt.args_buf)
+                .unwrap_or_else(|_| json!({ "_raw": pt.args_buf }));
+            ToolCall {
+                id: if pt.id.is_empty() {
+                    format!("call_{}", i)
+                } else {
+                    pt.id
+                },
+                name: pt.name,
+                arguments,
+            }
+        })
+        .collect();
+
+    Ok(Message {
+        role: "assistant".to_string(),
+        content: full_content,
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
+        tool_call_id: None,
+        name: None,
+        images: None,
+        usage: None, // ストリーミング時は usage フィールドが最終チャンクに含まれる場合があるが省略。
+    })
+}
+
+/// ストリーミングの部分ツールコール（SSE チャンクを結合するためのバッファ）。
+#[derive(Default)]
+struct PartialToolCall {
+    id: String,
+    name: String,
+    args_buf: String,
 }
 
 #[async_trait]
@@ -106,7 +264,12 @@ impl Provider for OpenAI {
     }
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("OPENAI_BASE_URL", "エンドポイント", "text", "https://api.openai.com/v1"),
+            Field::new(
+                "OPENAI_BASE_URL",
+                "エンドポイント",
+                "text",
+                "https://api.openai.com/v1",
+            ),
             Field::new("OPENAI_API_KEY", "API キー", "password", "sk-..."),
             Field::new("OPENAI_MODEL", "既定モデル", "text", DEFAULT_MODEL),
         ]
@@ -121,7 +284,11 @@ impl Provider for OpenAI {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = reqwest::Client::new().get(&url).bearer_auth(&key).send().await?;
+        let res = reqwest::Client::new()
+            .get(&url)
+            .bearer_auth(&key)
+            .send()
+            .await?;
         if !res.status().is_success() {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
@@ -177,7 +344,6 @@ impl Provider for OpenAI {
             "temperature": 0.6,
         });
         if !tools.is_empty() {
-            // tools は既に { type:"function", function:{...} } 形式。
             body["tools"] = json!(tools);
         }
         let url = format!("{}/chat/completions", base_url(cfg));
@@ -190,7 +356,7 @@ impl Provider for OpenAI {
         if !res.status().is_success() {
             let status = res.status();
             let text = res.text().await.unwrap_or_default();
-            anyhow::bail!("OpenAI /chat/completions failed: {} {}", status, text);
+            anyhow::bail!("OpenAI /chat/completions 失敗: {} {}", status, text);
         }
         let data: Value = res.json().await?;
         let message = data
@@ -199,8 +365,33 @@ impl Provider for OpenAI {
             .and_then(|arr| arr.first())
             .and_then(|c| c.get("message"))
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("OpenAI 応答に choices[0].message がありません"))?;
-        Ok(from_wire(&message))
+            .ok_or_else(|| {
+                anyhow::anyhow!("OpenAI 応答に choices[0].message がありません")
+            })?;
+        let mut msg = from_wire(&message);
+        msg.usage = extract_usage(&data);
+        Ok(msg)
+    }
+
+    async fn chat_stream(
+        &self,
+        cfg: &Config,
+        model: &str,
+        messages: &[Message],
+        tools: &[Value],
+        on_chunk: Arc<dyn Fn(String) + Send + Sync>,
+    ) -> anyhow::Result<Message> {
+        let mut body = json!({
+            "model": model,
+            "messages": to_wire(messages),
+            "temperature": 0.6,
+            "stream": true,
+        });
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
+        }
+        let url = format!("{}/chat/completions", base_url(cfg));
+        stream_chat(&url, &api_key(cfg), body, on_chunk).await
     }
 }
 

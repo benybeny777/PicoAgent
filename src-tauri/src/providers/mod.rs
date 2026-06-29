@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::config::Config;
 use crate::message::{Field, Message};
@@ -29,6 +29,27 @@ pub trait Provider: Send + Sync {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message>;
+
+    /// ストリーミング対応 chat。テキストチャンクを `on_chunk` コールバックで逐次返す。
+    ///
+    /// 非対応プロバイダはデフォルト実装（`chat()` を呼んで全文を一括返却）を使う。
+    /// ストリーミング対応プロバイダ（openai 等）はオーバーライドして SSE を処理する。
+    /// `on_chunk` は tool_calls のみの応答では呼ばれないことがある（ツール実行時は
+    /// ユーザーへ見せる文字がないため）。
+    async fn chat_stream(
+        &self,
+        cfg: &Config,
+        model: &str,
+        messages: &[Message],
+        tools: &[Value],
+        on_chunk: Arc<dyn Fn(String) + Send + Sync>,
+    ) -> anyhow::Result<Message> {
+        let msg = self.chat(cfg, model, messages, tools).await?;
+        if !msg.content.is_empty() {
+            on_chunk(msg.content.clone());
+        }
+        Ok(msg)
+    }
 }
 
 /// inventory に登録するためのファクトリ。

@@ -12,6 +12,15 @@ pub struct ToolCall {
     pub arguments: Value,
 }
 
+/// 1回の chat() 呼び出しで消費したトークン数。
+/// プロバイダがレスポンスの `usage` フィールドから埋める。シリアライズしない（一時データ）。
+#[derive(Clone, Debug, Default)]
+pub struct TokenUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
@@ -23,6 +32,13 @@ pub struct Message {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub name: Option<String>,
+    /// マルチモーダル: base64 エンコード済み画像（data URL 形式 "data:image/jpeg;base64,..."）。
+    /// user メッセージのみ有効。シリアライズするが、ほとんどのプロバイダは無視する。
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub images: Option<Vec<String>>,
+    /// トークン使用量。履歴保存には含めない（実行時のみ）。
+    #[serde(skip)]
+    pub usage: Option<TokenUsage>,
 }
 
 impl Message {
@@ -33,6 +49,21 @@ impl Message {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            images: None,
+            usage: None,
+        }
+    }
+
+    /// 画像付きユーザーメッセージを作る。
+    pub fn user_with_images(content: impl Into<String>, images: Vec<String>) -> Self {
+        Message {
+            role: "user".to_string(),
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            images: if images.is_empty() { None } else { Some(images) },
+            usage: None,
         }
     }
 }

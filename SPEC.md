@@ -55,7 +55,10 @@ graph TD
 - コネクタは **`inventory` でコンパイル時自動登録**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して
   `#[path] pub mod` を生成するため、**プロバイダは `.rs` を1枚、スキルは `<スキル名>/mod.rs` を1つ置くだけ**でコネクタ追加（中央 `mod.rs` 編集不要）。
 - 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。
-- `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談を保持。プロバイダとモデルは設定画面から切替。
+- `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
+- `Tracer`（`tracer.rs`）は Tauri managed state として登録され、`agent.rs` がツール実行ごとにレイテンシを計測して直近 200 件を保持する。`pet_traces` コマンドでスナップショットとツール別集計（平均レイテンシ・呼び出し回数・エラー数）を取得できる。
+- `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ永続化する。`pet_usage` コマンドで今月のプロバイダ/モデル別集計と全期間累計を取得できる。90日より古いレコードは自動削除。
+- `memory.rs` の長期メモリ検索が意味的類似度（バイグラムジャカード係数）に対応した。`context_for_query(app, cfg, query)` がユーザー発話に近いメモリ項目を優先して提示し、閾値（0.05）以下なら全件フォールバック。
 - 設定の正本は `config.rs`（`app_config_dir/config.json`）。コネクタは `cfg.get()` で都度読むため、設定変更は再起動なしに反映。
 - 会話履歴は `history.rs` がキャラクター別に `app_data_dir/history-<キャラクターID>.json` へ永続化する（対話データなので config とは分離）。`pet_send` のたびに「system + クリーンな直近発話（最大 24 件）」へ圧縮して選択中キャラのファイルへ保存し、起動時に末尾 20 件を文脈へ復元する。これにより再起動をまたいで直近の会話を踏まえて話す。途中の tool 呼び出し/結果は順序破綻を避けるため文脈・履歴に残さない。`AppState.character_id` が文脈の持ち主キャラを保持し、`pet_set_character_profile` でキャラが変わったら現在の文脈を破棄して切替先キャラの履歴を復元する（旧キャラの一人称・自己紹介が混ざらない）。旧仕様の単一 `history.json` は起動時に既定キャラ `mugi` のファイルへ一度だけ移行する（旧履歴はキャラ別管理が無かった時代のもので当時の既定キャラが mugi のため。選択中キャラへ割り当てると人格が混ざる）。
 - 暗黙的な長期メモリは `memory.rs` が `app_data_dir/memory.json` に保存する。ユーザーの自己情報・好み・継続指示らしい文だけを保守的に抽出し、起動時と設定変更時に system 文脈へ短く差し込む。人格やプロンプトの変更（`reset_conversation`）では会話の流れを保持し、右クリックメニュー「会話をリセット」（`clear_conversation_and_history`）で文脈・履歴ファイル・長期メモリ・直近雑談を消して `pet:reset` を通知する。
@@ -68,23 +71,27 @@ graph TD
 
 | role | 形（serde） |
 |---|---|
-| system / user | `{ role, content }` |
+| system / user | `{ role, content, images?: [base64 data URL, ...] }` |
 | assistant | `{ role:"assistant", content, tool_calls?: [{ id, name, arguments(Value) }] }` |
 | tool（結果） | `{ role:"tool", tool_call_id, name, content }` |
 
 - `arguments` は **`serde_json::Value`（オブジェクト）** で持つ（OpenAI の JSON 文字列はプロバイダ内で相互変換）。
 - Ollama は tool 結果を id で紐付けず位置・名前で扱うため `tool_call_id` は無視（正規形には残す）。
+- `images` は **マルチモーダル入力**用のフィールド（省略可）。base64 data URL 文字列の配列。プロバイダが OpenAI 互換の場合、user メッセージの `content` を `[{type:"text",...}, {type:"image_url",...}]` 配列形式へ変換して送信する。`usage` フィールドは ephemeral（`#[serde(skip)]`）で、プロバイダから返ったトークン数を一時的に保持する。
 
 ---
 
 ## エージェントループ（`agent.rs`）
 
-`run(cfg, provider, model, messages, max_steps = 5) -> Result<String>`
+`run(cfg, provider, model, messages, max_steps = 5, app = None) -> Result<String>`
 
-1. `provider.chat()` を呼び、返った assistant を `messages` に積む。
+1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で逐次フロントへ `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。
 2. `tool_calls` が無ければ、その `content` を最終応答として返す。
-3. `tool_calls` があれば、各呼び出しを `tools::dispatch(cfg, name, arguments)` で実行し、結果を `tool` メッセージとして積み 1 に戻る。
+3. `tool_calls` があれば、全呼び出しを `futures::future::join_all()` で**並列実行**し、結果を `tool` メッセージとして積み 1 に戻る。
 4. `max_steps` を超えたら打ち切り、最後の文面を返す（暴走防止）。
+5. 各 chat 呼び出しは `chat_with_retry()` でラップし、失敗時に最大 3 回・指数バックオフ（1秒→2秒）でリトライする（4xx 認証エラーは即中断）。
+6. chat 完了後、返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に永続化する。
+7. ツール実行は `Tracer::start_span()` でレイテンシを計測し、`Tracer::record()` で直近 200 件を保持する。
 
 通常の質問では、ローカルモデルの `tool_calls` 対応状況に依存させず、最初の `chat()` より前に
 必要なスキルを直接実行する。**Web検索は質問が事実確認・最新情報・定義などを要するとき（`should_web_search`：明示依頼、または「最新/ニュース/価格/誰/いつ/とは…」等のマーカー）だけ実行する**。雑談・感想・相談（「むぎかわいい」「ありがとう」「自己紹介して」等）では検索せず、キャラ本人として速く自然に返す（デスクトップペットとして毎回の検索遅延・ノイズを避ける）。天気の質問（`is_weather_query`）は `weather` スキルを、為替の質問（`currency_query` が通貨を読み取れたとき）は `currency_rates` スキルを、市場指数の質問（`market_query` が日経平均等を読み取れたとき）は `market_indices` スキルを**先に実行してその整形済み出力（天気アイコン・気温/為替・市場指数のスパークライン等）をそのまま返す**（小型モデルが tool_calls を出せず、かつチャートを再現できないため、モデルを介さず確実にグラフィカル表示する）。スキル直行応答も assistant 発話として履歴へ保存し、前回のユーザー発話だけが残って次の質問へ混ざらないようにする。代表的なリマインダー・集中タイマー・見守り・できたことメモ、クリップボード要約、おでかけ前チェックもスキルを先に実行する。その他のローカル操作系依頼では、明示的なWeb検索依頼がない限り事前Web検索を省き、モデルへスキル利用を優先する指示を追加する。為替は文中の通貨（ドル/円/ユーロ…）と「推移/チャート」「N日」を読み取って `base`/`symbols`/`chart`/`days` を組み立てる。短い挨拶は検索結果に引っ張られて表記解説へ逸れやすいため検索を省き、キャラクター本人として返す指示だけを追加する。検索結果は外部の信頼できない参考データとして区切ってユーザーメッセージへ
@@ -109,11 +116,15 @@ pub trait Provider: Send + Sync {
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>>;
     async fn is_up(&self, cfg: &Config) -> bool;  // 接続不可・キー無は false に正規化してよい
     async fn chat(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value]) -> anyhow::Result<Message>;
+    // ストリーミング対応。デフォルト実装は chat() を呼んで完了後に on_chunk を1回だけ呼ぶ。
+    // openai.rs はオーバーライドして SSE ストリームを受信し on_chunk を逐次呼ぶ。
+    async fn chat_stream(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value], on_chunk: Arc<dyn Fn(String) + Send + Sync>) -> anyhow::Result<Message>;
 }
 inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 ```
 
 > 接続先・APIキー・モデルは各メソッド内で `cfg.get()` から都度読む（フィールドに固定しない）。設定変更を再起動なしに反映するため。
+> `on_chunk` は `Arc<dyn Fn(String) + Send + Sync>` で渡す（async_trait の Send 境界との相性のため参照ではなく Arc で共有する）。
 
 ### 同梱プロバイダ
 

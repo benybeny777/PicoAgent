@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-06-29
+
+### AIエージェントとして不足していた8機能を整備
+
+- **並列ツール実行**: `agent.rs` で `futures::future::join_all()` を使い、複数の `tool_calls` を逐次ではなく並列実行するようにした。`Cargo.toml` に `futures = "0.3"` を追加。
+- **ストリーミングレスポンス**: `Provider` トレイトに `chat_stream()` メソッドを追加（デフォルト実装は従来の `chat()` に委譲）。`openai.rs` はオーバーライドして SSE ストリームを受信し、テキストチャンクを `on_chunk` コールバック経由で逐次フロントへ `pet:stream_chunk` イベント送信する。`renderer.js` はチャンクを受け取るたびにフキダシを即時更新し、最初のチャンク到着で「思考中」から「会話中」アニメーションへ切り替える。SSE の `tool_calls` は `PartialToolCall` バッファで `index` ごとに積み、`[DONE]` 到達時に組み立てる。
+- **トークン使用量追跡**: `usage.rs` を新規追加。chat 呼び出しのトークン数（prompt/completion/total）を `app_data_dir/usage.json` に記録し、90日を超えたレコードは自動削除する。`pet_usage` コマンドで今月のプロバイダ/モデル別集計と全期間累計を取得できる。`openai.rs` は `extract_usage()` でレスポンスの `usage` フィールドを取り出して `Message.usage` に格納する。
+- **感情状態管理**: `emotion.rs` を新規追加。ユーザー発話と返答から喜び・悲しみ・興奮・好奇心・怒りのキーワードを検出してキャラの感情（mood 種別 + energy 0〜1）を推定する。慣性係数 0.35 で急激な感情変化を防ぐ。`AppState` に `emotion: Mutex<EmotionState>` を追加し、`pet_send` / `pet_send_image` の応答後に更新して `pet:emotion` イベントでフロントへ通知する。`pet_emotion` コマンドで現在状態を取得できる。`renderer.js` はキャラの `dataset.emotion` と `dataset.energyLevel` を更新する。
+- **高度なリトライ戦略**: `chat_with_retry()` を新設。最大3回・指数バックオフ（失敗後1秒→2秒待機）でリトライする。4xx 認証エラー（401/403/400/404）は即中断してリトライしない。
+- **セマンティック記憶検索**: `memory.rs` に `context_for_query()` を追加。ユーザー発話と記憶項目のバイグラム（2文字連続ペア）ジャカード係数で関連度を算出し、閾値 0.05 以上の項目をヒット回数ボーナス付きで降順に最大 24 件提示する。関連項目がゼロのときはヒット数順の全件フォールバック。`agent.rs` から `context_for_query()` を呼ぶよう変更。
+- **マルチモーダル入力**: `Message` 構造体に `images: Option<Vec<String>>`（base64 data URL 配列）を追加。`openai.rs` は user メッセージに画像が含まれる場合、`content` を `[{type:"text",...},{type:"image_url",...}]` 配列形式へ変換して送信する。`pet_send_image(text, images)` コマンドを追加（1枚10MB制限、最大10枚）。`window.picoagent.sendImage(text, images)` から呼べる。
+- **分散トレーシング**: `tracer.rs` を新規追加。`Tracer`（`SpanGuard`）で各ツール実行のレイテンシを計測し、直近200件を Tauri managed state として保持する。`pet_traces` コマンドでスナップショットとツール別集計（`avgMs` / `callCount` / `errorCount`）を取得できる。
+
+---
+
 ## 2026-06-28
 
 ### 主要LLMプロバイダとモデル選択を追加

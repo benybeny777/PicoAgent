@@ -90,6 +90,71 @@ pub fn context_from_store(store: &MemoryStore) -> String {
     )
 }
 
+/// クエリテキストとのセマンティック類似度でメモリを絞り込んで返す。
+/// バイグラム（2文字の連続ペア）のジャカード係数でスコアリングし、
+/// 関連度が高い順に最大 MAX_CONTEXT_ITEMS 件を返す。
+/// 関連するメモリが 0 件の場合は通常の `context_from_store` へフォールバックする。
+pub fn context_for_query(app: &tauri::AppHandle, cfg: &Config, query: &str) -> String {
+    if !cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
+        return String::new();
+    }
+    let store = load(app);
+    context_from_store_for_query(&store, query)
+}
+
+pub fn context_from_store_for_query(store: &MemoryStore, query: &str) -> String {
+    if store.items.is_empty() {
+        return String::new();
+    }
+    let query_bg = char_bigrams(query);
+
+    let mut scored: Vec<(f32, &MemoryItem)> = store
+        .items
+        .iter()
+        .map(|item| {
+            let item_bg = char_bigrams(&item.text);
+            let intersection = query_bg.intersection(&item_bg).count();
+            let union = query_bg.union(&item_bg).count();
+            let jaccard = if union == 0 {
+                0.0f32
+            } else {
+                intersection as f32 / union as f32
+            };
+            // ヒット数ボーナス（よく言及される内容を優先）。
+            let bonus = (item.hits as f32 * 0.05).min(0.2);
+            (jaccard + bonus, item)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let relevant: Vec<String> = scored
+        .iter()
+        .filter(|(score, _)| *score > 0.05) // 類似度閾値（低すぎると全件返す）
+        .take(MAX_CONTEXT_ITEMS)
+        .map(|(_, item)| format!("- [{}] {}", item.category, item.text))
+        .collect();
+
+    if relevant.is_empty() {
+        // 関連メモリがなければ全件（ヒット順）へフォールバックする。
+        return context_from_store(store);
+    }
+
+    format!(
+        "ユーザーについて会話から暗黙的に覚えた長期メモリです（関連度順）。回答の参考にしてください。古い内容と今回の発話が矛盾する場合は今回の発話を優先してください。\n{}",
+        relevant.join("\n")
+    )
+}
+
+/// 文字列からバイグラム集合を生成する（ASCII 以外の意味のある文字のみ対象）。
+fn char_bigrams(text: &str) -> std::collections::HashSet<(char, char)> {
+    let chars: Vec<char> = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && (c.is_alphanumeric() || !c.is_ascii()))
+        .collect();
+    chars.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
 pub fn update_from_turn(app: &AppHandle, cfg: &Config, user_text: &str) -> Option<String> {
     if !cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
         return None;

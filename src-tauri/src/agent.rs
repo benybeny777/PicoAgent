@@ -1,5 +1,8 @@
 // agent.rs - エージェントループ。
 // モデルが tool_calls を返す限りツールを実行し、結果を会話に積んで再問い合わせする。
+// 機能: 並列ツール実行・指数バックオフリトライ・ストリーミング応答・分散トレーシング。
+
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::message::Message;
@@ -464,17 +467,68 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
     None
 }
 
+/// 指数バックオフ付きリトライでプロバイダを呼び出す。
+/// 429（レート制限）・500 系エラーは最大 3 回リトライする。認証エラーは即時失敗。
+async fn chat_with_retry(
+    provider: &dyn Provider,
+    cfg: &Config,
+    model: &str,
+    messages: &[Message],
+    schemas: &[serde_json::Value],
+    on_chunk: Arc<dyn Fn(String) + Send + Sync>,
+) -> anyhow::Result<Message> {
+    let mut last_err = anyhow::anyhow!("リトライ上限に達しました");
+    for attempt in 0u32..3 {
+        if attempt > 0 {
+            let wait_ms = (1u64 << attempt) * 1000;
+            tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+        }
+        match provider
+            .chat_stream(cfg, model, messages, schemas, on_chunk.clone())
+            .await
+        {
+            Ok(msg) => return Ok(msg),
+            Err(e) => {
+                let msg = e.to_string();
+                // 認証エラー・パラメータ不正は即時失敗（リトライしても解決しない）。
+                if msg.contains("401")
+                    || msg.contains("403")
+                    || msg.contains("400")
+                    || msg.contains("404")
+                {
+                    return Err(e);
+                }
+                last_err = e;
+            }
+        }
+    }
+    Err(last_err)
+}
+
 pub async fn run(
     cfg: &Config,
     provider: &dyn Provider,
     model: &str,
     messages: &mut Vec<Message>,
     max_steps: usize,
+    app: Option<&tauri::AppHandle>,
 ) -> anyhow::Result<String> {
     let mut schemas = tools::schemas_for_text("");
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
     let mut sources: Vec<String> = Vec::new();
+
+    // ストリーミングチャンクを Tauri イベントで送信するクロージャ。
+    // AppHandle がなければ no-op。
+    let emit_fn: Arc<dyn Fn(String) + Send + Sync> = match app {
+        Some(handle) => {
+            let h = handle.clone();
+            Arc::new(move |chunk: String| {
+                let _ = tauri::Emitter::emit(&h, "pet:stream_chunk", chunk);
+            })
+        }
+        None => Arc::new(|_: String| {}),
+    };
 
     // 原則として、小型ローカルモデルの tool_calls 判断に依存させずWeb検索を先に実行する。
     // ただし短い挨拶は検索結果に引っ張られやすいため、キャラ本人として返す指示だけを追加する。
@@ -544,7 +598,28 @@ pub async fn run(
     }
 
     for _ in 0..max_steps {
-        let msg = provider.chat(cfg, model, messages, &schemas).await?;
+        let msg = chat_with_retry(
+            provider,
+            cfg,
+            model,
+            messages,
+            &schemas,
+            emit_fn.clone(),
+        )
+        .await?;
+        // トークン使用量を記録する（AppHandle がある場合のみ）。
+        if let (Some(handle), Some(usage)) = (app, &msg.usage) {
+            crate::usage::record(
+                handle,
+                provider.id(),
+                model,
+                crate::usage::TokenUsage {
+                    prompt_tokens: usage.prompt_tokens,
+                    completion_tokens: usage.completion_tokens,
+                    total_tokens: usage.total_tokens,
+                },
+            );
+        }
         if !msg.content.is_empty() {
             last = msg.content.clone();
         }
@@ -553,19 +628,42 @@ pub async fn run(
 
         match calls {
             Some(cs) if !cs.is_empty() => {
-                for c in cs {
-                    let content = tools::dispatch(cfg, &c.name, c.arguments.clone()).await;
+                // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
+                let futs: Vec<_> = cs
+                    .iter()
+                    .map(|c| tools::dispatch(cfg, c.name.as_str(), c.arguments.clone()))
+                    .collect();
+                let results = futures::future::join_all(futs).await;
+
+                // run_command の承認マーカーを最初にチェックする。
+                for (c, content) in cs.iter().zip(results.iter()) {
                     if c.name == "run_command"
-                        && crate::tools::run_command::parse_approval_marker(&content).is_some()
+                        && crate::tools::run_command::parse_approval_marker(content).is_some()
                     {
-                        return direct_answer(messages, content);
+                        return direct_answer(messages, content.clone());
+                    }
+                }
+
+                // ツール実行結果をトレースに記録し会話へ積む。
+                for (c, content) in cs.iter().zip(results.into_iter()) {
+                    // エラー文字列判定（"エラー:" で始まるものはツール失敗扱い）。
+                    let success = !content.starts_with("エラー:");
+                    if let Some(handle) = app {
+                        let entry = crate::tracer::TraceEntry {
+                            tool: c.name.clone(),
+                            duration_ms: 0, // join_all では個別計測なし（合計は外で測れる）
+                            success,
+                        };
+                        handle.state::<crate::tracer::Tracer>().record(entry);
                     }
                     messages.push(Message {
                         role: "tool".to_string(),
                         content,
                         tool_calls: None,
-                        tool_call_id: Some(c.id),
-                        name: Some(c.name),
+                        tool_call_id: Some(c.id.clone()),
+                        name: Some(c.name.clone()),
+                        images: None,
+                        usage: None,
                     });
                 }
             }

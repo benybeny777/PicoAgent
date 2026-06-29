@@ -43,6 +43,8 @@ pub struct AppState {
     pub recent_chatter: Mutex<Vec<String>>,
     /// チャットで確認待ちの未許可コマンド。ユーザーが「許可」または「キャンセル」と返すまで保持する。
     pub pending_command: Mutex<Option<crate::tools::run_command::PendingCommandApproval>>,
+    /// キャラクターの現在感情状態（ルールベース推定）。
+    pub emotion: Mutex<crate::emotion::EmotionState>,
 }
 
 impl AppState {
@@ -57,6 +59,7 @@ impl AppState {
             memory_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
             pending_command: Mutex::new(None),
+            emotion: Mutex::new(crate::emotion::EmotionState::default()),
         }
     }
 
@@ -462,7 +465,7 @@ pub async fn pet_send(
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", text));
 
-    let result = agent::run(&state.config, provider, &model, &mut convo, 5).await;
+    let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
@@ -497,6 +500,15 @@ pub async fn pet_send(
                 crate::history::save(&app, &active_character_id(&state), &compacted);
                 return Ok(json!({ "reply": prompt }));
             }
+            // 感情状態を更新してフロントへ通知する。
+            let new_emotion = {
+                let current = state.emotion.lock().unwrap().clone();
+                crate::emotion::update(&current, &user_text, &reply)
+            };
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.emit("pet:emotion", serde_json::to_value(&new_emotion).unwrap_or_default());
+            }
+            *state.emotion.lock().unwrap() = new_emotion;
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
         }
         Err(e) => {
@@ -1256,6 +1268,98 @@ pub async fn pet_log(
         .unwrap_or_default();
     crate::log_paths::append_app_log(&app, &format!("[frontend:{level}] {message}{detail}"));
     Ok(())
+}
+
+/// 現在の感情状態を返す。
+#[tauri::command]
+pub fn pet_emotion(state: State<'_, AppState>) -> Result<Value, String> {
+    let emotion = state.emotion.lock().unwrap().clone();
+    Ok(serde_json::to_value(&emotion).map_err(|e| e.to_string())?)
+}
+
+/// 今月のトークン使用量（月次集計）と累計を返す。
+#[tauri::command]
+pub fn pet_usage(app: AppHandle) -> Result<Value, String> {
+    let store = crate::usage::load(&app);
+    Ok(json!({
+        "monthlySummary": store.monthly_summary(),
+        "totalTokens": store.total_tokens(),
+        "recordCount": store.records.len(),
+    }))
+}
+
+/// 直近ツール実行のトレース情報（個別エントリと集計）を返す。
+#[tauri::command]
+pub fn pet_traces(app: AppHandle) -> Result<Value, String> {
+    let tracer = app.state::<crate::tracer::Tracer>();
+    Ok(json!({
+        "entries": tracer.snapshot(),
+        "summary": tracer.summary(),
+    }))
+}
+
+/// 画像付きメッセージをエージェントへ送信する。
+/// `images` は base64 data URL のリスト（"data:image/jpeg;base64,..."）。
+#[tauri::command]
+pub async fn pet_send_image(
+    text: String,
+    images: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() && images.is_empty() {
+        return Ok(json!({ "reply": "" }));
+    }
+    // 画像サイズ制限（1枚あたり最大 10MB base64）。
+    for img in &images {
+        if img.len() > 10 * 1024 * 1024 {
+            return Err("画像サイズが大きすぎます（1枚 10MB まで）。".to_string());
+        }
+    }
+
+    let id = state.provider_id.lock().unwrap().clone();
+    let model = state.model.lock().unwrap().clone();
+    let provider = match providers::get(&id) {
+        Some(p) => p,
+        None => {
+            return Ok(
+                json!({ "error": true, "reply": format!("プロバイダ \"{}\" が見つかりません。", id) }),
+            )
+        }
+    };
+
+    let mut convo = state.messages.lock().unwrap().clone();
+    let user_text = if text.is_empty() {
+        "この画像について教えてください。".to_string()
+    } else {
+        text.clone()
+    };
+    convo.push(crate::message::Message::user_with_images(user_text.clone(), images));
+
+    let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
+    let compacted = compacted_conversation(&convo);
+    *state.messages.lock().unwrap() = compacted.clone();
+    let character_id = active_character_id(&state);
+    crate::history::save(&app, &character_id, &compacted);
+
+    match result {
+        Ok(reply) => {
+            let new_emotion = {
+                let current = state.emotion.lock().unwrap().clone();
+                crate::emotion::update(&current, &user_text, &reply)
+            };
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.emit("pet:emotion", serde_json::to_value(&new_emotion).unwrap_or_default());
+            }
+            *state.emotion.lock().unwrap() = new_emotion;
+            Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
+        }
+        Err(e) => {
+            let message = log_command_error(&app, "画像付き AI 応答に失敗しました", e);
+            Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))
+        }
+    }
 }
 
 /// 設定ウィンドウを開く（既にあれば前面化）。

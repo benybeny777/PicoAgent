@@ -7,6 +7,7 @@ mod alarm;
 mod commands;
 mod config;
 mod daily;
+mod emotion;
 mod engine;
 mod history;
 mod log_paths;
@@ -17,6 +18,8 @@ mod migration;
 mod providers;
 mod scheduler;
 mod tools;
+mod tracer;
+mod usage;
 
 use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
 
@@ -31,6 +34,7 @@ pub fn run() {
         .manage(EngineState::new())
         .manage(AivisState::new())
         .manage(WindowLayoutCache::default())
+        .manage(tracer::Tracer::new(200))
         .on_window_event(|window, event| on_main_window_event(window, event))
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
@@ -52,6 +56,10 @@ pub fn run() {
             commands::restart_app,
             commands::engine_status,
             commands::pet_log,
+            commands::pet_emotion,
+            commands::pet_usage,
+            commands::pet_traces,
+            commands::pet_send_image,
             menu::pet_menu,
         ])
         .on_menu_event(|app, event| {

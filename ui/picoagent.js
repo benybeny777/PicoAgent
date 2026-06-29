@@ -66,10 +66,20 @@ window.picoagent = {
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload"].includes(channel)) return;
+    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion"].includes(channel)) return;
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     listen(channel, (event) => callback(event.payload));
   },
+  // Tauri イベントをリッスンして unlisten 関数を返す（ストリーミング等に使用）。
+  listen: (channel, callback) => listen(channel, (event) => callback(event.payload)),
+  // 感情状態を取得する。
+  emotion: () => call("pet_emotion"),
+  // 今月のトークン使用量を取得する。
+  usage: () => call("pet_usage"),
+  // ツール実行トレース情報を取得する。
+  traces: () => call("pet_traces"),
+  // 画像付きメッセージを送信する（images は base64 data URL の配列）。
+  sendImage: (text, images) => call("pet_send_image", { text, images }),
   engineStatus: () => call("engine_status"),
   restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {

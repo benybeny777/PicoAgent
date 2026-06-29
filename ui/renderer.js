@@ -18,6 +18,9 @@ const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 let busy = false;
+// ストリーミング受信中のテキストバッファとイベントリスナー解除関数。
+let streamBuffer = "";
+let unlistenStream = null;
 const conversationHistory = [];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
@@ -62,6 +65,7 @@ window.addEventListener("beforeunload", () => {
   if (alarmTimer) clearInterval(alarmTimer);
   if (bootLogTimer) clearInterval(bootLogTimer);
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
+  if (unlistenStream) { unlistenStream(); unlistenStream = null; }
   stopVoice(false);
 });
 
@@ -764,6 +768,20 @@ composer.addEventListener("submit", async event => {
   setAnimation("thinking");
   reply.textContent = text;
   addHistory("user", text);
+
+  // ストリーミングチャンクを受信してリアルタイム表示する。
+  streamBuffer = "";
+  try {
+    if (window.picoagent.listen) {
+      unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
+        streamBuffer += chunk;
+        renderReply(streamBuffer);
+        // ストリーミング中は thinking アニメーションから talking へ切り替える。
+        if (animationName === "thinking") setAnimation("talking");
+      });
+    }
+  } catch (_) {}
+
   try {
     const result = await window.picoagent.send(text);
     status.textContent = result.error ? "接続を確認してね" : "";
@@ -792,6 +810,9 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    // ストリームリスナーを解除する。
+    if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+    streamBuffer = "";
     busy = false;
     updateComposerState();
     scheduleChatter(); // 会話後はアイドル計測をやり直す。
@@ -819,6 +840,12 @@ document.addEventListener("keydown", event => {
 });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
 window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); stopVoice(); renderReply("新しい話をしよう。"); closeComposer(); scheduleChatter(); });
+// 感情状態が更新されたらキャラクターのアニメーション・スタイルへ反映する。
+window.picoagent.on("pet:emotion", (emotion) => {
+  if (!emotion || !emotion.mood) return;
+  character.dataset.emotion = emotion.mood;
+  character.dataset.energyLevel = emotion.energy > 0.6 ? "high" : emotion.energy < 0.4 ? "low" : "mid";
+});
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
