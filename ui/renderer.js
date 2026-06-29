@@ -269,46 +269,165 @@ async function setBubbleFullscreen(on) {
 function toggleBubbleFullscreen() { setBubbleFullscreen(!bubble.classList.contains("fullscreen")); }
 function exitBubbleFullscreen() { setBubbleFullscreen(false); }
 
-function appendLinkedText(container, text) {
-  const source = String(text ?? "");
-  // ![alt](url) → インライン画像、[text](url) → リンク、裸のURL → リンク の順にマッチ。
-  const pattern = /!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g;
-  // ローカルサーバー（ComfyUI 等）の http:// 画像も表示する。外部 http:// は除く。
-  const isSafeImageUrl = (url) =>
-    url.startsWith("https://") ||
+// ローカルサーバー（ComfyUI 等）の http:// 画像 URL を安全と判定する。外部 http:// は除く。
+function isSafeImageUrl(url) {
+  return url.startsWith("https://") ||
     /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url);
-  let offset = 0;
-  for (const match of source.matchAll(pattern)) {
-    container.append(document.createTextNode(source.slice(offset, match.index)));
-    if (match[0].startsWith("![") && isSafeImageUrl(match[2])) {
-      // Markdown 画像記法 → <img> としてインライン表示
-      const img = document.createElement("img");
-      img.src = match[2];
-      img.alt = match[1] || "画像";
-      img.style.cssText = "max-width:100%;border-radius:6px;display:block;margin:4px 0;cursor:pointer";
-      img.title = "クリックして開く";
-      img.addEventListener("click", () => window.open(match[2], "_blank", "noopener,noreferrer"));
-      container.append(img);
-    } else {
-      // [text](url)、裸URL、または安全でない ![alt](url) → リンクとして表示。
-      const href = match[4] || match[5] || match[2];
-      const label = match[3] || match[1] || href;
-      const anchor = document.createElement("a");
-      anchor.href = href;
-      anchor.textContent = label;
-      anchor.target = "_blank";
-      anchor.rel = "noopener noreferrer";
-      container.append(anchor);
-    }
-    offset = match.index + match[0].length;
-  }
-  container.append(document.createTextNode(source.slice(offset)));
 }
 
-// Markdownリンクと通常のURLだけを安全なDOMリンクへ変換する。
+// インライン Markdown（**bold** / *italic* / `code` / リンク / 画像）を DOM へ追加する。
+function appendInline(parent, raw) {
+  // bold → italic → code → 画像 → リンク → 裸URL の優先順でマッチ。
+  const pat = /\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*|`([^`\n]+)`|!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>,)[\]]+)/g;
+  let off = 0;
+  for (const m of raw.matchAll(pat)) {
+    if (m.index > off) parent.append(document.createTextNode(raw.slice(off, m.index)));
+    if (m[1] !== undefined) {
+      const s = document.createElement("strong"); s.textContent = m[1]; parent.append(s);
+    } else if (m[2] !== undefined) {
+      const e = document.createElement("em"); e.textContent = m[2]; parent.append(e);
+    } else if (m[3] !== undefined) {
+      const c = document.createElement("code"); c.textContent = m[3]; parent.append(c);
+    } else if (m[4] !== undefined) {
+      // 画像 ![alt](url)
+      if (isSafeImageUrl(m[5])) {
+        const img = document.createElement("img");
+        img.src = m[5]; img.alt = m[4] || "画像";
+        img.style.cssText = "max-width:100%;border-radius:6px;display:block;margin:4px 0;cursor:pointer";
+        img.title = "クリックして開く";
+        img.addEventListener("click", () => window.open(m[5], "_blank", "noopener,noreferrer"));
+        parent.append(img);
+      } else {
+        const a = document.createElement("a"); a.href = m[5]; a.textContent = m[4] || m[5];
+        a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a);
+      }
+    } else if (m[6] !== undefined) {
+      const a = document.createElement("a"); a.href = m[7]; a.textContent = m[6];
+      a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a);
+    } else {
+      const a = document.createElement("a"); a.href = m[0]; a.textContent = m[0];
+      a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a);
+    }
+    off = m.index + m[0].length;
+  }
+  if (off < raw.length) parent.append(document.createTextNode(raw.slice(off)));
+}
+
+// Markdown をブロック単位でパースして container に DOM を構築する。
+// ストリーミング中に部分テキストで繰り返し呼ばれることを想定し、未完了の記法は無視する。
+function renderMarkdown(container, src) {
+  container.replaceChildren();
+  const wrap = document.createElement("div");
+  wrap.className = "md";
+  const lines = String(src ?? "").split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // コードフェンス（``` で始まる）
+    const fence = line.match(/^```(\w*)/);
+    if (fence) {
+      i++;
+      const codeLines = [];
+      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++; }
+      if (i < lines.length) i++; // 閉じ ``` をスキップ
+      const pre = document.createElement("pre");
+      if (fence[1]) pre.dataset.lang = fence[1];
+      const code = document.createElement("code");
+      code.textContent = codeLines.join('\n');
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button"; copyBtn.className = "copy-code"; copyBtn.textContent = "コピー";
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(code.textContent || "");
+        copyBtn.textContent = "✓";
+        setTimeout(() => copyBtn.textContent = "コピー", 1500);
+      });
+      pre.append(copyBtn, code);
+      wrap.append(pre);
+      continue;
+    }
+    // 見出し（# ## ###）
+    const h = line.match(/^(#{1,3})\s(.+)/);
+    if (h) {
+      const el = document.createElement(`h${h[1].length}`);
+      appendInline(el, h[2]); wrap.append(el); i++; continue;
+    }
+    // 水平線
+    if (/^(---+|\*\*\*+|___+)$/.test(line.trim())) {
+      wrap.append(document.createElement("hr")); i++; continue;
+    }
+    // 引用ブロック
+    if (/^>\s?/.test(line)) {
+      const bq = document.createElement("blockquote");
+      const qLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) { qLines.push(lines[i].replace(/^>\s?/, "")); i++; }
+      appendInline(bq, qLines.join('\n'));
+      wrap.append(bq); continue;
+    }
+    // 箇条書きリスト（- * +）
+    if (/^[-*+]\s/.test(line)) {
+      const ul = document.createElement("ul");
+      while (i < lines.length && /^[-*+]\s/.test(lines[i])) {
+        const li = document.createElement("li");
+        appendInline(li, lines[i].replace(/^[-*+]\s+/, ""));
+        ul.append(li); i++;
+      }
+      wrap.append(ul); continue;
+    }
+    // 番号付きリスト
+    if (/^\d+\.\s/.test(line)) {
+      const ol = document.createElement("ol");
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        const li = document.createElement("li");
+        appendInline(li, lines[i].replace(/^\d+\.\s+/, ""));
+        ol.append(li); i++;
+      }
+      wrap.append(ol); continue;
+    }
+    // 空行 → 改行
+    if (line.trim() === "") { wrap.append(document.createElement("br")); i++; continue; }
+    // 段落（連続する非ブロック行をまとめる）
+    const pLines = [];
+    while (i < lines.length && lines[i].trim() !== ""
+      && !/^#{1,3}\s/.test(lines[i]) && !/^[-*+]\s/.test(lines[i])
+      && !/^\d+\.\s/.test(lines[i]) && !/^```/.test(lines[i])
+      && !/^>\s?/.test(lines[i]) && !/^(---+|\*\*\*+|___+)$/.test(lines[i].trim())) {
+      pLines.push(lines[i]); i++;
+    }
+    if (pLines.length) {
+      const p = document.createElement("p");
+      pLines.forEach((pl, j) => { if (j) p.append(document.createElement("br")); appendInline(p, pl); });
+      wrap.append(p);
+    }
+  }
+  // run_command スキルが承認待ちのとき、クリックで送信できるボタンを表示する。
+  if (src.includes("このコマンドはまだ許可されていません")) {
+    const btns = document.createElement("div");
+    btns.className = "approval-buttons";
+    [["実行する（今回のみ）", "approval-ok", "許可"],
+     ["常に許可する", "approval-persist", "永続許可"],
+     ["キャンセル", "approval-cancel", "キャンセル"]].forEach(([label, cls, val]) => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = cls; btn.textContent = label;
+      btn.addEventListener("click", () => {
+        if (busy) return;
+        input.value = val;
+        if (composer.hidden) openComposer();
+        composer.requestSubmit();
+      });
+      btns.append(btn);
+    });
+    wrap.append(btns);
+  }
+  container.append(wrap);
+}
+
+// 後方互換用: appendLinkedText → renderMarkdown に委譲。
+function appendLinkedText(container, text) {
+  renderMarkdown(container, text);
+}
+
 function renderReply(text) {
-  reply.replaceChildren();
-  appendLinkedText(reply, text);
+  renderMarkdown(reply, text);
 }
 
 function setAssistantReply(text, options = {}) {
