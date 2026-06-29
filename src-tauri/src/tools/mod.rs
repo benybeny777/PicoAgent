@@ -228,8 +228,12 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
     ),
     ("pdf_tools", &["pdf", "結合", "抽出", "回転"]),
     (
+        "comfyui_generate",
+        &["画像", "絵", "イラスト", "描いて", "生成して", "comfyui", "image", "写真", "動画"],
+    ),
+    (
         "image_generate",
-        &["画像", "絵", "イラスト", "描いて", "生成して", "dall-e", "image", "写真"],
+        &["dall-e", "dall\u{00b7}e", "openai画像"],
     ),
     ("x_twitter", &["twitter", "xに", "ポスト", "ツイート"]),
     ("mastodon", &["mastodon", "マストドン"]),

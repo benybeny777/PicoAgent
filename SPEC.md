@@ -256,6 +256,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `todoist` | Todoist のタスク一覧・作成・完了 | API token は設定から都度取得、秘密値を出力しない、timeout |
 | `http_api` | 個別スキルがないSaaSやWebhookへの汎用HTTP API呼び出し | 許可ドメイン必須、任意Bearer/API key、本文/応答サイズ上限、timeout |
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
+| `comfyui_generate` | ComfyUI ローカルサーバーで画像・動画を生成（APIキー不要）。KSampler ワークフローを組み立て `/prompt` → `/history` ポーリング → `/view` URL を返す。AnimateDiff 等の動画出力にも対応 | `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）・`COMFYUI_CHECKPOINT`（モデルファイル名）のみ。120秒 timeout |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | Microsoft Office COM による Word/Excel/PowerPoint の文字列置換・PDF出力 | `PICOAGENT_DOCUMENT_ROOT` 配下のみ、Windows + Microsoft Office 必須、PowerShell 経由、timeout |
 | `document_convert` | LibreOffice headless による Office/PDF 変換 | `PICOAGENT_DOCUMENT_ROOT` 配下のみ、専用エンジン `PICOAGENT_LIBREOFFICE_PATH`、timeout |

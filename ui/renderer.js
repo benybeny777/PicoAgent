@@ -268,10 +268,14 @@ function appendLinkedText(container, text) {
   const source = String(text ?? "");
   // ![alt](url) → インライン画像、[text](url) → リンク、裸のURL → リンク の順にマッチ。
   const pattern = /!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g;
+  // ローカルサーバー（ComfyUI 等）の http:// 画像も表示する。外部 http:// は除く。
+  const isSafeImageUrl = (url) =>
+    url.startsWith("https://") ||
+    /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url);
   let offset = 0;
   for (const match of source.matchAll(pattern)) {
     container.append(document.createTextNode(source.slice(offset, match.index)));
-    if (match[0].startsWith("![")) {
+    if (match[0].startsWith("![") && isSafeImageUrl(match[2])) {
       // Markdown 画像記法 → <img> としてインライン表示
       const img = document.createElement("img");
       img.src = match[2];
@@ -281,10 +285,12 @@ function appendLinkedText(container, text) {
       img.addEventListener("click", () => window.open(match[2], "_blank", "noopener,noreferrer"));
       container.append(img);
     } else {
-      const href = match[4] || match[5];
+      // [text](url)、裸URL、または安全でない ![alt](url) → リンクとして表示。
+      const href = match[4] || match[5] || match[2];
+      const label = match[3] || match[1] || href;
       const anchor = document.createElement("a");
       anchor.href = href;
-      anchor.textContent = match[3] || href;
+      anchor.textContent = label;
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
       container.append(anchor);

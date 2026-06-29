@@ -6,6 +6,12 @@
 
 ## 2026-06-29
 
+### ComfyUI ローカル画像生成スキルを追加
+
+- **ComfyUI スキル** (`skills/comfyui/`): APIキー不要のローカル画像（および動画）生成スキルを追加。ComfyUI を起動しておくだけで「猫の絵を描いて」などの発話で `comfyui_generate` ツールが呼ばれる。設定キーは `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）と `COMFYUI_CHECKPOINT`（モデルファイル名）のみ。KSampler ワークフローをデフォルトで生成し、プロンプト・ネガティブプロンプト・サイズ・ステップ数・CFG・シードを引数で制御可能。AnimateDiff 等の動画出力（GIF/MP4/WebM）もリンクで返す。
+- **ローカルURL画像表示** (`renderer.js`): `appendLinkedText()` の画像レンダリングを拡張し、`http://localhost` および `http://127.0.0.1` のURLも `<img>` としてインライン表示できるようにした（外部 `http://` は除外）。ComfyUI の `/view` エンドポイントから返る画像をフキダシ内で直接確認できる。
+- **TOOL_ROUTES 更新** (`tools/mod.rs`): 「画像」「絵」「描いて」等のキーワードを `comfyui_generate` へルーティング。DALL-E 3 の `image_generate` は `dall-e` / `openai画像` キーワードのみ残す。
+
 ### 画像系機能を追加
 
 - **画像生成スキル** (`skills/image_generate/`): DALL-E 3 を利用してテキストプロンプトから画像を生成する新スキルを追加。OPENAI_API_KEY が設定されていれば「猫の絵を描いて」などの発話でモデルが `image_generate` ツールを呼び出して URL を返す。サイズ（1024×1024 / 1792×1024 / 1024×1792）と画質（standard / hd）を指定可能。
