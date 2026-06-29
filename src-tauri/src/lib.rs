@@ -61,6 +61,7 @@ pub fn run() {
             commands::pet_traces,
             commands::pet_send_image,
             commands::pet_capture_screen,
+            commands::pet_read_file_content,
             menu::pet_menu,
         ])
         .on_menu_event(|app, event| {

@@ -6,6 +6,13 @@
 
 ## 2026-06-29
 
+### ファイルドロップ・ペースト対応を追加
+
+- **Rust コマンド** (`pet_read_file_content`): ドロップ/ペーストされたファイルをテキストへ変換する新コマンドを追加。xlsx/xlsm は calamine でシート別 Markdown テーブル化、docx/docm は ZIP 展開 + XML ストリップ、pptx/pptm はスライドごとにテキスト抽出、csv/tsv は Markdown テーブル化、テキスト系・コードファイルはそのままテキスト、PDF は pdf_tools スキルへ誘導メッセージを返す（最大 12,000 文字）。
+- **フロントエンド** (`renderer.js`): `attachedFiles` 状態とファイルチップ UI を追加。composer エリアへのドラッグ&ドロップで画像・ドキュメントを選別して添付（最大各 4 件）。送信時にファイル内容を抽出してメッセージの前に付加し、テキストなしでもファイルのみで送信可能。
+- **UI** (`styles.css`, `index.html`): `.file-chip` スタイルを追加。ファイル種別ごとにアイコン（📊 Excel、📝 Word、📕 PDF 等）を表示。
+- **Cargo.toml**: `zip = "0.6"` と `calamine = "0.24"` を追加。
+
 ### ComfyUI ローカル画像生成スキルを追加
 
 - **ComfyUI スキル** (`skills/comfyui/`): APIキー不要のローカル画像（および動画）生成スキルを追加。ComfyUI を起動しておくだけで「猫の絵を描いて」などの発話で `comfyui_generate` ツールが呼ばれる。設定キーは `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）と `COMFYUI_CHECKPOINT`（モデルファイル名）のみ。KSampler ワークフローをデフォルトで生成し、プロンプト・ネガティブプロンプト・サイズ・ステップ数・CFG・シードを引数で制御可能。AnimateDiff 等の動画出力（GIF/MP4/WebM）もリンクで返す。

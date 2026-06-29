@@ -21,6 +21,8 @@ const imagePreview = document.getElementById("imagePreview");
 let busy = false;
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
+// 添付中のドキュメントファイル（{name, dataUrl} の配列）。送信後にリセットする。
+let attachedFiles = [];
 // ストリーミング受信中のテキストバッファとイベントリスナー解除関数。
 let streamBuffer = "";
 let unlistenStream = null;
@@ -234,7 +236,7 @@ function autosizeInput() {
   input.style.height = `${Math.min(180, Math.max(62, input.scrollHeight))}px`;
 }
 function updateComposerState() {
-  if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0);
+  if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
 }
 function openComposer() {
   if (busy) return;
@@ -776,10 +778,37 @@ bubbleResize.addEventListener("pointercancel", finishBubbleResize);
 // ── 画像添付（ペースト・ドロップ）────────────────────────────────────────────
 
 const MAX_ATTACHED_IMAGES = 4;
+const MAX_ATTACHED_FILES = 4;
 
-function renderImagePreview() {
-  imagePreview.hidden = attachedImages.length === 0;
+function renderAttachmentPreview() {
+  const hasAny = attachedImages.length > 0 || attachedFiles.length > 0;
+  imagePreview.hidden = !hasAny;
   imagePreview.replaceChildren();
+  // ファイルチップ（拡張子アイコン付き）
+  attachedFiles.forEach((file, idx) => {
+    const chip = document.createElement("div");
+    chip.className = "file-chip";
+    chip.title = file.name;
+    const icon = document.createElement("span");
+    icon.className = "file-chip-icon";
+    icon.textContent = fileIcon(file.name);
+    const label = document.createElement("span");
+    label.className = "file-chip-name";
+    label.textContent = file.name.length > 22 ? file.name.slice(0, 20) + "…" : file.name;
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "file-remove";
+    removeBtn.textContent = "×";
+    removeBtn.setAttribute("aria-label", `${file.name} を削除`);
+    removeBtn.addEventListener("click", () => {
+      attachedFiles.splice(idx, 1);
+      renderAttachmentPreview();
+      updateComposerState();
+    });
+    chip.append(icon, label, removeBtn);
+    imagePreview.append(chip);
+  });
+  // 画像サムネイル
   attachedImages.forEach((dataUrl, idx) => {
     const wrap = document.createElement("div");
     wrap.className = "image-thumb-wrap";
@@ -793,12 +822,21 @@ function renderImagePreview() {
     removeBtn.setAttribute("aria-label", `添付画像 ${idx + 1} を削除`);
     removeBtn.addEventListener("click", () => {
       attachedImages.splice(idx, 1);
-      renderImagePreview();
+      renderAttachmentPreview();
       updateComposerState();
     });
     wrap.append(img, removeBtn);
     imagePreview.append(wrap);
   });
+}
+
+function fileIcon(name) {
+  const ext = name.split(".").pop().toLowerCase();
+  const map = { xlsx: "📊", xls: "📊", xlsm: "📊", csv: "📋", tsv: "📋",
+    docx: "📝", doc: "📝", docm: "📝", pptx: "📄", pptx: "📄", ppt: "📄",
+    pdf: "📕", json: "📦", toml: "📦", yaml: "🗂", yml: "🗂",
+    txt: "📃", md: "📃", log: "📃" };
+  return map[ext] || "📎";
 }
 
 function addImageFile(file) {
@@ -807,7 +845,19 @@ function addImageFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     attachedImages.push(e.target.result);
-    renderImagePreview();
+    renderAttachmentPreview();
+    updateComposerState();
+  };
+  reader.readAsDataURL(file);
+}
+
+function addDocumentFile(file) {
+  if (!file) return;
+  if (attachedFiles.length >= MAX_ATTACHED_FILES) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    attachedFiles.push({ name: file.name, dataUrl: e.target.result });
+    renderAttachmentPreview();
     updateComposerState();
   };
   reader.readAsDataURL(file);
@@ -826,7 +876,7 @@ input.addEventListener("paste", (event) => {
 
 // テキストエリア・プレビューエリアへのドラッグ&ドロップ。
 composer.addEventListener("dragover", (e) => {
-  if ([...e.dataTransfer.items].some(i => i.kind === "file" && i.type.startsWith("image/"))) {
+  if ([...e.dataTransfer.items].some(i => i.kind === "file")) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     composer.classList.add("drag-over");
@@ -835,10 +885,12 @@ composer.addEventListener("dragover", (e) => {
 composer.addEventListener("dragleave", () => composer.classList.remove("drag-over"));
 composer.addEventListener("drop", (e) => {
   composer.classList.remove("drag-over");
-  const hasImage = [...e.dataTransfer.items].some(i => i.kind === "file" && i.type.startsWith("image/"));
-  if (!hasImage) return;
+  if (![...e.dataTransfer.items].some(i => i.kind === "file")) return;
   e.preventDefault();
-  for (const file of e.dataTransfer.files) addImageFile(file);
+  for (const file of e.dataTransfer.files) {
+    if (file.type.startsWith("image/")) addImageFile(file);
+    else addDocumentFile(file);
+  }
 });
 
 // 画面を見てほしい系の発話を検出する（スクリーンショット自動添付に使用）。
@@ -849,7 +901,7 @@ function isScreenshotQuery(text) {
 composer.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();
-  if ((!text && attachedImages.length === 0) || busy) return;
+  if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   clearAlarmSnooze(false);
   busy = true;
   ++speakingToken;
@@ -858,8 +910,10 @@ composer.addEventListener("submit", async event => {
   closeComposer();
   input.value = "";
   const pendingImages = [...attachedImages];
+  const pendingFiles = [...attachedFiles];
   attachedImages = [];
-  renderImagePreview();
+  attachedFiles = [];
+  renderAttachmentPreview();
   autosizeInput();
   status.textContent = "考え中…";
   setAnimation("thinking");
@@ -880,7 +934,25 @@ composer.addEventListener("submit", async event => {
   } catch (_) {}
 
   try {
-    // 添付画像があれば sendImage、スクリーンショット発話なら自動撮影して追加する。
+    // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────
+    let fileContext = "";
+    if (pendingFiles.length > 0 && window.picoagent.readFileContent) {
+      status.textContent = "ファイルを読み込み中…";
+      for (const f of pendingFiles) {
+        try {
+          const extracted = await window.picoagent.readFileContent(f.name, f.dataUrl);
+          fileContext += `[添付ファイル: ${f.name}]\n${extracted}\n\n`;
+        } catch (err) {
+          logApp("warn", `ファイル読み込み失敗: ${f.name}`, String(err));
+          fileContext += `[添付ファイル: ${f.name}] (読み込みに失敗しました)\n\n`;
+        }
+      }
+    }
+    const fullText = fileContext
+      ? `${fileContext}${text || "このファイルについて教えて"}`
+      : text;
+
+    // ── 画像送信（スクリーンショット自動添付 + 貼り付け画像）─────────────────
     let result;
     const images = [...pendingImages];
     if (isScreenshotQuery(text) && window.picoagent.captureScreen) {
@@ -893,9 +965,9 @@ composer.addEventListener("submit", async event => {
       }
     }
     if (images.length > 0 && window.picoagent.sendImage) {
-      result = await window.picoagent.sendImage(text, images);
+      result = await window.picoagent.sendImage(fullText, images);
     }
-    if (!result) result = await window.picoagent.send(text);
+    if (!result) result = await window.picoagent.send(fullText);
     status.textContent = result.error ? "接続を確認してね" : "";
     if (result.error) {
       logApp("error", "AI応答がエラーを返しました", result.reply || "");

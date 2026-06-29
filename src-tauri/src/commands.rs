@@ -1550,6 +1550,204 @@ pub async fn pet_capture_screen() -> Result<Value, String> {
     Ok(json!({ "dataUrl": format!("data:image/png;base64,{b64}") }))
 }
 
+/// ドロップ・ペーストされたファイルの内容をテキストとして抽出する。
+/// name は拡張子で種別を判定するために使う。data_b64 は data URL またはプレーン base64。
+/// 対応フォーマット: テキスト系・CSV・Excel（xlsx）・Word（docx）・PowerPoint（pptx）。
+/// PDF はパスを取得できないため pdf_tools スキルへ誘導するメッセージを返す。
+#[tauri::command]
+pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<String, String> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    // data URL プレフィックスを除去する。
+    let b64 = if let Some(pos) = data_b64.find(";base64,") {
+        &data_b64[pos + 8..]
+    } else {
+        data_b64.as_str()
+    };
+    let bytes = B64
+        .decode(b64.trim())
+        .map_err(|e| format!("base64 デコード失敗: {e}"))?;
+
+    let ext = std::path::Path::new(&name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    const MAX_CHARS: usize = 12_000;
+    let content = match ext.as_str() {
+        // テキスト系・コード系はそのまま UTF-8 で読む。
+        "txt" | "md" | "markdown" | "rst" | "log" | "json" | "toml" | "yaml" | "yml"
+        | "html" | "htm" | "xml" | "css" | "js" | "ts" | "jsx" | "tsx" | "py" | "rs"
+        | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "sh" | "bash" | "zsh" | "bat"
+        | "ps1" | "rb" | "php" | "kt" | "swift" => {
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+        // CSV/TSV → Markdown テーブル（最大 300 行）。
+        "csv" | "tsv" => {
+            let sep = if ext == "tsv" { '\t' } else { ',' };
+            let text = String::from_utf8_lossy(&bytes);
+            let mut out = String::new();
+            for (i, line) in text.lines().enumerate().take(300) {
+                let cells: Vec<&str> = line.split(sep).collect();
+                out.push_str(&cells.join(" | "));
+                out.push('\n');
+                if i == 0 {
+                    out.push_str(
+                        &cells
+                            .iter()
+                            .map(|_| "---")
+                            .collect::<Vec<_>>()
+                            .join(" | "),
+                    );
+                    out.push('\n');
+                }
+            }
+            if text.lines().count() > 300 {
+                out.push_str("[300行以降は省略]\n");
+            }
+            out
+        }
+        // Excel → calamine でシート別 Markdown テーブル。
+        "xlsx" | "xlsm" => extract_xlsx_content(&bytes)?,
+        // Word → ZIP 展開 + XML ストリップ。
+        "docx" | "docm" => {
+            let xml = read_zip_entry(&bytes, "word/document.xml")?;
+            strip_xml_tags(&xml)
+        }
+        // PowerPoint → スライドごとにテキスト抽出。
+        "pptx" | "pptm" => extract_pptx_content(&bytes)?,
+        // PDF → スキル誘導メッセージ。
+        "pdf" => {
+            format!(
+                "[添付ファイル: {name}]\n\
+                 ※ PDF の本文抽出には pdf_tools スキルが必要です。\
+                 ファイルパスを直接伝えてもらうか、「このPDFを要約して」と依頼してください。"
+            )
+        }
+        _ => match String::from_utf8(bytes.clone()) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(format!(
+                    "「{name}」は対応していないファイル形式です。\
+                     対応: txt/md/csv/tsv/json/toml/yaml/xlsx/docx/pptx とコードファイル。"
+                ));
+            }
+        },
+    };
+
+    if content.chars().count() > MAX_CHARS {
+        let truncated: String = content.chars().take(MAX_CHARS).collect();
+        let omitted = content.chars().count() - MAX_CHARS;
+        Ok(format!("{truncated}\n\n[...{omitted} 文字以降は省略しました]"))
+    } else {
+        Ok(content)
+    }
+}
+
+fn strip_xml_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() / 2);
+    let mut in_tag = false;
+    let mut last_space = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                if !last_space {
+                    out.push(' ');
+                    last_space = true;
+                }
+            }
+            _ if in_tag => {}
+            '\n' | '\r' | '\t' | ' ' => {
+                if !last_space {
+                    out.push(' ');
+                    last_space = true;
+                }
+            }
+            c => {
+                out.push(c);
+                last_space = false;
+            }
+        }
+    }
+    out.trim().to_string()
+}
+
+fn read_zip_entry(data: &[u8], entry: &str) -> Result<String, String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(data);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
+    let mut file = archive
+        .by_name(entry)
+        .map_err(|_| format!("'{entry}' が見つかりません"))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content).map_err(|e| e.to_string())?;
+    Ok(content)
+}
+
+fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(data);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
+    let mut slides: Vec<(String, String)> = Vec::new();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let fname = file.name().to_string();
+        if fname.starts_with("ppt/slides/slide") && fname.ends_with(".xml") {
+            let mut xml = String::new();
+            file.read_to_string(&mut xml).ok();
+            slides.push((fname, strip_xml_tags(&xml)));
+        }
+    }
+    slides.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(slides
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, text))| format!("--- スライド {} ---\n{}", i + 1, text))
+        .collect::<Vec<_>>()
+        .join("\n\n"))
+}
+
+fn extract_xlsx_content(data: &[u8]) -> Result<String, String> {
+    use calamine::{open_workbook_from_rs, Reader, Xlsx};
+    let cursor = std::io::Cursor::new(data.to_vec());
+    let mut wb: Xlsx<_> = open_workbook_from_rs(cursor)
+        .map_err(|e| format!("Excel ファイルの読み込みに失敗しました: {e}"))?;
+    let sheet_names: Vec<String> = wb.sheet_names().to_vec();
+    let mut output = String::new();
+    for sheet_name in sheet_names {
+        if let Ok(range) = wb.worksheet_range(&sheet_name) {
+            output.push_str(&format!("## {sheet_name}\n"));
+            let rows: Vec<_> = range.rows().collect();
+            for (i, row) in rows.iter().enumerate().take(300) {
+                let cells: Vec<String> = row.iter().map(|c| c.to_string()).collect();
+                output.push_str(&cells.join(" | "));
+                output.push('\n');
+                if i == 0 && rows.len() > 1 {
+                    output.push_str(
+                        &cells
+                            .iter()
+                            .map(|_| "---")
+                            .collect::<Vec<_>>()
+                            .join(" | "),
+                    );
+                    output.push('\n');
+                }
+            }
+            if rows.len() > 300 {
+                output.push_str("[300行以降は省略]\n");
+            }
+            output.push('\n');
+        }
+    }
+    Ok(output)
+}
+
 /// 設定ウィンドウを開く（既にあれば前面化）。
 pub fn open_settings(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("settings") {

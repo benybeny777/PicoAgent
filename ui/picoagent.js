@@ -82,6 +82,8 @@ window.picoagent = {
   sendImage: (text, images) => call("pet_send_image", { text, images }),
   // デスクトップのスクリーンショットを PNG base64 data URL で返す。
   captureScreen: () => call("pet_capture_screen"),
+  // ドロップされたファイルの内容を抽出してテキストを返す（xlsx/docx/pptx/csv/テキスト等）。
+  readFileContent: (name, dataUrl) => call("pet_read_file_content", { name, dataB64: dataUrl }),
   engineStatus: () => call("engine_status"),
   restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {
