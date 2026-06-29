@@ -131,6 +131,10 @@ body.searching .tab-panel {
 }
 
 .field { margin-bottom: 10px; }
+.field.changed {
+  padding-left: 8px;
+  border-left: 3px solid var(--pink);
+}
 .field label {
   display: block;
   font-size: 12px;
@@ -176,6 +180,9 @@ body.searching .tab-panel {
   margin: -2px 0 6px 10px;
   padding: 6px 0 2px 10px;
   border-left: 2px solid var(--line);
+}
+.card-config.changed {
+  border-left-color: var(--pink);
 }
 /* 目覚まし専用エディタ */
 .alarm-list { display: flex; flex-direction: column; gap: 8px; }
@@ -261,6 +268,19 @@ button {
 }
 button:hover { filter: brightness(1.05); }
 button:active { transform: translateY(1px); }
+button:disabled {
+  cursor: default;
+  opacity: .48;
+  filter: none;
+}
+button.secondary {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+}
+button.dirty {
+  box-shadow: 0 0 0 3px rgba(233, 138, 182, .18);
+}
 button.tab {
   padding: 0 12px;
   border: 1px solid var(--line);

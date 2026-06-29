@@ -5,11 +5,15 @@
 const form = document.getElementById("form");
 const statusEl = document.getElementById("status");
 const saveBtn = document.getElementById("save");
+const resetChangesBtn = document.getElementById("resetChanges");
 const modelOptions = document.getElementById("modelOptions");
 const settingsSearch = document.getElementById("settingsSearch");
 
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
+const inputWrappers = new Map(); // key -> field/card 要素
+let savedSnapshot = null; // 最後に読み込んだ、または保存できた設定値
+let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
 let characterDefaultVoices = {};
@@ -66,6 +70,49 @@ function markSearchable(node, ...parts) {
   node.classList.add("searchable");
   node.dataset.search = searchText(...parts);
   return node;
+}
+
+function registerInput(key, input, wrapper) {
+  inputs.set(key, input);
+  inputWrappers.set(key, wrapper);
+  return wrapper;
+}
+
+function cloneSettings(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function updateDirtyState() {
+  if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
+  const current = collect();
+  const dirty = stableStringify(current) !== stableStringify(savedSnapshot);
+  for (const [key, wrapper] of inputWrappers) {
+    const currentValue = current[key];
+    const savedValue = savedSnapshot[key];
+    wrapper.classList.toggle("changed", stableStringify(currentValue) !== stableStringify(savedValue));
+  }
+  characterPersona?.closest(".field")?.classList.toggle(
+    "changed",
+    stableStringify(current.PICOAGENT_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_CHARACTER_OVERRIDES)
+  );
+  characterSpeaker?.closest(".field")?.classList.toggle(
+    "changed",
+    stableStringify(current.PICOAGENT_TTS_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_TTS_CHARACTER_OVERRIDES)
+  );
+  form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
+    "changed",
+    stableStringify(current.PICOAGENT_ALARMS) !== stableStringify(savedSnapshot.PICOAGENT_ALARMS)
+  );
+  resetChangesBtn.disabled = !dirty;
+  saveBtn.classList.toggle("dirty", dirty);
 }
 
 function nodeSearchText(node) {
@@ -208,7 +255,6 @@ const MODEL_GROUPS = {
 
 function groupedModelField(key, label, value, groups, options = {}) {
   const hidden = el("input", { type: "hidden", value: value || "" });
-  inputs.set(key, hidden);
 
   const family = el("select");
   const size = el("select");
@@ -223,6 +269,7 @@ function groupedModelField(key, label, value, groups, options = {}) {
     hidden,
   ]);
   markSearchable(wrapper, key, label, groups.map(group => group.label).join(" "));
+  registerInput(key, hidden, wrapper);
   const customGroup = { label: "カスタム", options: [{ value: "__custom__", label: "直接入力", hint: "一覧にないモデルIDを入力します。" }] };
   const allGroups = options.allowCustom === false ? groups : [...groups, customGroup];
   let initialFamily = allGroups.findIndex(group => group.options.some(option => option.value === value));
@@ -281,13 +328,11 @@ function field(key, label, type, value, placeholder) {
   }
   if (type === "textarea") {
     const ta = el("textarea", { value: value ?? "", placeholder: placeholder || "" });
-    inputs.set(key, ta);
-    return markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), ta]), key, label, placeholder);
+    return registerInput(key, ta, markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), ta]), key, label, placeholder));
   }
   if (type === "checkbox") {
     const cb = el("input", { type: "checkbox", checked: Boolean(value) });
-    inputs.set(key, cb);
-    return markSearchable(el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]), key, label);
+    return registerInput(key, cb, markSearchable(el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]), key, label));
   }
   const inputType = type === "password" ? "password" : type === "number" ? "number" : "text";
   const input = el("input", { type: inputType, value: value ?? "", placeholder: placeholder || "" });
@@ -297,8 +342,7 @@ function field(key, label, type, value, placeholder) {
     input.step = "1";
   }
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
-  inputs.set(key, input);
-  return markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder);
+  return registerInput(key, input, markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder));
 }
 
 function localModelPresetField(key, label, value) {
@@ -420,13 +464,12 @@ function selectField(key, label, value, options) {
       selected: option.value === value,
     }));
   }
-  inputs.set(key, select);
-  return markSearchable(
+  return registerInput(key, select, markSearchable(
     el("div", { className: "field" }, [el("label", { textContent: label }), select]),
     key,
     label,
     options.map(option => option.label).join(" ")
-  );
+  ));
 }
 
 function section(title) {
@@ -784,7 +827,11 @@ function buildDiagnosticsSection() {
 }
 
 async function render() {
+  renderingSettings = true;
   form.innerHTML = "";
+  inputs.clear();
+  inputWrappers.clear();
+  alarmEditorState = null;
   const v = data.values;
   const panels = createTabs([
     { id: "basic", label: "基本" },
@@ -801,8 +848,11 @@ async function render() {
   for (const p of data.providers) {
     providerSelect.append(el("option", { value: p.id, textContent: p.label, selected: p.id === data.active.providerId }));
   }
-  inputs.set("PICOAGENT_PROVIDER", providerSelect);
-  global.append(el("div", { className: "field" }, [el("label", { textContent: "叩く AI（プロバイダ）" }), providerSelect]));
+  global.append(registerInput(
+    "PICOAGENT_PROVIDER",
+    providerSelect,
+    markSearchable(el("div", { className: "field" }, [el("label", { textContent: "叩く AI（プロバイダ）" }), providerSelect]), "PICOAGENT_PROVIDER", "叩く AI", "プロバイダ")
+  ));
   const modelField = field("PICOAGENT_MODEL", "モデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
   global.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
@@ -840,8 +890,11 @@ async function render() {
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", { value: character.id, textContent: character.name, selected: character.id === selectedCharacter }));
   }
-  inputs.set("PICOAGENT_CHARACTER", characterSelect);
-  characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]));
+  characterSec.append(registerInput(
+    "PICOAGENT_CHARACTER",
+    characterSelect,
+    markSearchable(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]), "PICOAGENT_CHARACTER", "キャラクター")
+  ));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   characterSpeaker = el("input", { type: "text", placeholder: "888753760" });
@@ -920,14 +973,18 @@ async function render() {
     loadModels(providerSelect.value, true);
     showProviderConfig(providerSelect.value);
     updateModelFieldVisibility();
+    updateDirtyState();
   });
   inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
     if (providerSelect.value !== "local" || !modelInput) return;
     const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
     modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
+    updateDirtyState();
   });
-  loadModels(providerSelect.value);
+  await loadModels(providerSelect.value);
   applySettingsSearch();
+  renderingSettings = false;
+  updateDirtyState();
 }
 
 function providerDefaultModel(providerId) {
@@ -969,6 +1026,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   statusEl.textContent = providerId === "ollama"
     ? (models.length ? `${models.length}件の Ollama モデルを読み込みました。` : "Ollama のモデルが見つかりません。")
     : "";
+  updateDirtyState();
 }
 
 function collect() {
@@ -1023,7 +1081,11 @@ saveBtn.addEventListener("click", async () => {
   saveBtn.disabled = true;
   statusEl.textContent = "保存中…";
   try {
-    const res = await window.picoagent.settings.save(collect());
+    const patch = collect();
+    const res = await window.picoagent.settings.save(patch);
+    savedSnapshot = cloneSettings(patch);
+    data.values = cloneSettings(patch);
+    updateDirtyState();
     if (res.requiresRestart) {
       const restartNow = await confirmRestart();
       if (restartNow) {
@@ -1045,16 +1107,48 @@ saveBtn.addEventListener("click", async () => {
   }
 });
 
+resetChangesBtn?.addEventListener("click", async () => {
+  if (!savedSnapshot || resetChangesBtn.disabled) return;
+  renderingSettings = true;
+  data.values = cloneSettings(savedSnapshot);
+  statusEl.textContent = "未保存の変更を戻しました";
+  try {
+    await render();
+    resetChangesBtn.disabled = true;
+    saveBtn.classList.remove("dirty");
+  } catch (error) {
+    logApp("error", "設定の復元表示に失敗しました", errorDetail(error));
+    statusEl.textContent = `設定の復元表示に失敗: ${error.message}`;
+  } finally {
+    renderingSettings = false;
+    updateDirtyState();
+  }
+});
+
+form.addEventListener("input", updateDirtyState);
+form.addEventListener("change", updateDirtyState);
+form.addEventListener("click", event => {
+  if (event.target instanceof Element && event.target.closest(".alarm-add,.alarm-del")) {
+    setTimeout(updateDirtyState, 0);
+  }
+});
+
 settingsSearch?.addEventListener("input", applySettingsSearch);
 
 (async () => {
   data = await window.picoagent.settings.load();
-  try { await render(); }
+  try {
+    await render();
+    savedSnapshot = cloneSettings(collect());
+    updateDirtyState();
+  }
   catch (error) {
+    renderingSettings = false;
     logApp("error", "設定画面の読み込みに失敗しました", errorDetail(error));
     statusEl.textContent = `設定画面の読み込みに失敗: ${error.message}`;
   }
 })().catch(error => {
+  renderingSettings = false;
   logApp("error", "設定初期化に失敗しました", errorDetail(error));
   statusEl.textContent = `設定初期化に失敗: ${error?.message || error}`;
 });
