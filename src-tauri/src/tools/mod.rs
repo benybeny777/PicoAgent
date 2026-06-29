@@ -123,6 +123,23 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "genspark_suite",
+        &[
+            "genspark全部",
+            "genspark風",
+            "deep research",
+            "ai slides",
+            "ai sheets",
+            "ai docs",
+            "sparkpage",
+            "autopilot",
+            "meeting notes",
+            "multi-agent",
+            "ai browser",
+            "全部やって",
+        ],
+    ),
+    (
         "alarm",
         &[
             "アラーム",

@@ -226,6 +226,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
 | `research_report` | 複数観点のWeb検索を束ね、出典付きMarkdown調査レポートを生成する。`save=true` または `save_path` 指定で保存し、既定で1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も生成する | 検索待ち時間3〜60秒、観点最大6件、各観点最大5件、レポート96KB上限、保存は `PICOAGENT_WORKSPACE_ROOT` 配下の `.md` のみ |
 | `spark_workspace` | brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを含む資料ワークスペースを一括生成する | 保存は `PICOAGENT_WORKSPACE_ROOT` 配下のみ、入力テキスト24,000文字上限、外部通信なし |
+| `genspark_suite` | Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統を同じフォルダに生成する | 保存は `PICOAGENT_WORKSPACE_ROOT` 配下のみ、入力テキスト32,000文字上限、外部通信なし |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | `skills/chitchat/trends.rs` で X API / 急上昇RSS / ニュースRSSの話題メモを取得し、生成は人格込みで `provider.chat`（tools 無し）。会話履歴には積まない |
 | `alarm` | 目覚まし時計。声でやさしく起こすアラームを add/list/remove/clear/enable/disable できる。時刻(HH:MM)・曜日・繰り返し・スヌーズ分数を指定 | 一覧は `crate::alarm` 経由で config `PICOAGENT_ALARMS` に保存。発火はフロントの時刻ポーリングが `pet_alarm_wake` を呼ぶ。一度きりは発火後に無効化し、`おきたよ！` が押されるまで指定分数おきに再通知 |
 | `reminder` | 日常リマインダー。指定時刻または数分後に声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。フロントの `pet_daily_events` ポーリングで期限到来分を通知 |

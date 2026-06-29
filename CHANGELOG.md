@@ -6,6 +6,11 @@
 
 ## 2026-06-29
 
+### Genspark風ワークフローを10系統追加
+
+- **分析カテゴリを統合スキル化** (`skills/genspark_suite/`): Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統を同じフォルダに生成するスキルを追加。保存は `PICOAGENT_WORKSPACE_ROOT` 配下に限定し、まずは外部通信なしのローカル成果物生成として使える。
+- **全部依頼の直行ルート** (`agent.rs` / `tools/mod.rs`): 「Genspark風」「Genspark全部」「AI Slides」「AI Sheets」「Sparkpage」「Autopilot」「Meeting Notes」などの依頼で `genspark_suite` を提示・直接実行できるようにした。
+
 ### 資料ワークスペース生成を追加
 
 - **Genspark風の一括成果物生成** (`skills/spark_workspace/`): ひとつの依頼から `brief.md`、`deck.md`、`sheet.csv`、`page.html`、`agent-plan.md`、`prompts.md`、`checklist.md` を同じフォルダに生成するスキルを追加。保存は `PICOAGENT_WORKSPACE_ROOT` 配下に限定し、外部通信なしで使える。

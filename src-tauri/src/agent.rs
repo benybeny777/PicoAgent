@@ -638,6 +638,34 @@ fn spark_workspace_query(text: &str) -> Option<serde_json::Value> {
     }))
 }
 
+fn genspark_suite_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let wants_suite = [
+        "genspark全部",
+        "genspark風",
+        "deep research",
+        "ai slides",
+        "ai sheets",
+        "ai docs",
+        "sparkpage",
+        "autopilot",
+        "meeting notes",
+        "multi-agent",
+        "ai browser",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()))
+        || (lower.contains("genspark") && text.contains("全部"));
+    if !wants_suite {
+        return None;
+    }
+    Some(serde_json::json!({
+        "topic": text.trim(),
+        "audience": "一般読者",
+        "source_text": text.trim()
+    }))
+}
+
 /// ツール引数 JSON の解析失敗（`_raw` フィールド）を検出してエラーを返す。
 /// 正常な引数はそのまま `tools::dispatch` へ渡す。
 /// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
@@ -745,6 +773,9 @@ pub async fn run(
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
             let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = genspark_suite_query(&user_text) {
+            let answer = tools::dispatch(cfg, "genspark_suite", args).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = spark_workspace_query(&user_text) {
             let answer = tools::dispatch(cfg, "spark_workspace", args).await;
@@ -908,8 +939,9 @@ pub async fn run(
 mod tests {
     use super::{
         append_sources, currency_query, direct_local_tool_query, extract_source_urls,
-        is_local_action_query, is_simple_greeting, is_weather_query, market_query,
-        research_report_query, should_web_search, spark_workspace_query, web_search_query,
+        genspark_suite_query, is_local_action_query, is_simple_greeting, is_weather_query,
+        market_query, research_report_query, should_web_search, spark_workspace_query,
+        web_search_query,
     };
 
     #[test]
@@ -1046,5 +1078,15 @@ mod tests {
             Some("Gensparkみたいに資料一式を作って")
         );
         assert!(spark_workspace_query("ありがとう").is_none());
+    }
+
+    #[test]
+    fn genspark全部依頼を統合スキルへ割り当てる() {
+        let args = genspark_suite_query("Genspark風の機能を全部やって").unwrap();
+        assert_eq!(
+            args.get("topic").and_then(serde_json::Value::as_str),
+            Some("Genspark風の機能を全部やって")
+        );
+        assert!(genspark_suite_query("資料だけ作って").is_none());
     }
 }
