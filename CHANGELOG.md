@@ -9,6 +9,7 @@
 ### ローカル録音・Whisper文字起こし議事録を追加
 
 - **録音から議事録までローカル完結** (`skills/meeting_recorder/`): マイク録音をWAV保存し、設定したローカルWhisper系コマンドで文字起こしし、議事録Markdownを生成するスキルを追加。録音・文字起こし・議事録ファイルは `PICOAGENT_MEETING_ROOT` 配下に限定する。
+- **保存先を共通ワークスペースへ統一** (`skills/meeting_recorder/`): `PICOAGENT_MEETING_ROOT` が空なら共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/` に `YYYYMMDD-HHMMSS-meeting.wav` 形式で保存し、文字起こし・議事録も同じ録音名に揃える。パス未指定時は最新の録音/文字起こしを自動選択する。
 - **話者分類オプション** (`skills/meeting_recorder/`): `diarize=true` のとき `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS`（既定 `-tdrz`）を追加し、whisper.cpp の tinydiarize 等に対応できるようにした。話者分類の精度とマーカー形式は利用するローカル実装・モデルに依存する。
 - **会議系依頼の直行ルート** (`agent.rs` / `tools/mod.rs`): 「録音」「文字起こし」「議事録」「話者」「Whisper」などの依頼で `meeting_recorder` を提示・直接実行できるようにした。
 

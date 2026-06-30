@@ -47,8 +47,17 @@ fn home() -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
+fn workspace_root(cfg: &Config) -> PathBuf {
+    PathBuf::from(cfg.get("PICOAGENT_WORKSPACE_ROOT", &home()))
+}
+
 fn meeting_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_MEETING_ROOT", &home()))
+    let meeting_root = cfg.get("PICOAGENT_MEETING_ROOT", "");
+    if meeting_root.trim().is_empty() {
+        workspace_root(cfg)
+    } else {
+        PathBuf::from(meeting_root)
+    }
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -86,9 +95,51 @@ fn bounded_path(base: &Path, input: &str) -> Result<PathBuf, String> {
 
 fn default_recording_path() -> String {
     format!(
-        "meetings/{}-meeting.wav",
+        "meetings/{}/{}-meeting.wav",
+        Local::now().format("%Y-%m-%d"),
         Local::now().format("%Y%m%d-%H%M%S")
     )
+}
+
+fn latest_file(base: &Path, matcher: fn(&Path) -> bool) -> Option<PathBuf> {
+    let root = base.join("meetings");
+    let mut stack = vec![root];
+    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                stack.push(path);
+            } else if metadata.is_file() && matcher(&path) {
+                let modified = metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                if best
+                    .as_ref()
+                    .is_none_or(|(_, best_modified)| modified > *best_modified)
+                {
+                    best = Some((path, modified));
+                }
+            }
+        }
+    }
+    best.map(|(path, _)| path)
+}
+
+fn is_wav(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("wav")
+}
+
+fn is_transcript(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".transcript.txt"))
 }
 
 fn output_stem(audio_path: &Path) -> PathBuf {
@@ -101,6 +152,15 @@ fn transcript_path(audio_path: &Path) -> PathBuf {
 
 fn minutes_path(audio_path: &Path) -> PathBuf {
     audio_path.with_extension("minutes.md")
+}
+
+fn minutes_path_from_transcript(transcript_path: &Path) -> PathBuf {
+    if let Some(name) = transcript_path.file_name().and_then(|name| name.to_str()) {
+        if let Some(stem) = name.strip_suffix(".transcript.txt") {
+            return transcript_path.with_file_name(format!("{stem}.minutes.md"));
+        }
+    }
+    transcript_path.with_extension("minutes.md")
 }
 
 fn wav_spec(config: &cpal::SupportedStreamConfig) -> WavSpec {
@@ -349,16 +409,27 @@ fn trim_output(bytes: &[u8]) -> String {
 
 async fn transcribe(cfg: &Config, args: &Value) -> String {
     let base = meeting_root(cfg);
-    let audio_text = args
+    let audio = if let Some(audio_text) = args
         .get("audio_path")
         .or_else(|| args.get("path"))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("meetings/latest.wav");
-    let audio = match bounded_path(&base, audio_text) {
-        Ok(path) => path,
-        Err(error) => return format!("エラー: {error}"),
+    {
+        match bounded_path(&base, audio_text) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        }
+    } else {
+        match latest_file(&base, is_wav) {
+            Some(path) => path,
+            None => {
+                return format!(
+                    "エラー: 文字起こし対象のWAVが見つかりません。先に録音するか、{} 配下の音声パスを指定してください。",
+                    base.display()
+                )
+            }
+        }
     };
     if !audio.exists() {
         return format!("エラー: 音声ファイルが見つかりません: {}", audio.display());
@@ -484,6 +555,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("会議");
+    let mut transcript_source: Option<PathBuf> = None;
     let transcript = if let Some(text) = args
         .get("transcript")
         .and_then(Value::as_str)
@@ -492,17 +564,29 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
     {
         text.to_string()
     } else {
-        let path_text = args
+        let path = if let Some(path_text) = args
             .get("transcript_path")
             .or_else(|| args.get("path"))
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or("meetings/latest.transcript.txt");
-        let path = match bounded_path(&base, path_text) {
-            Ok(path) => path,
-            Err(error) => return format!("エラー: {error}"),
+        {
+            match bounded_path(&base, path_text) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {error}"),
+            }
+        } else {
+            match latest_file(&base, is_transcript) {
+                Some(path) => path,
+                None => {
+                    return format!(
+                        "エラー: 議事録化する文字起こしファイルが見つかりません。先に文字起こしするか、{} 配下の transcript パスを指定してください。",
+                        base.display()
+                    )
+                }
+            }
         };
+        transcript_source = Some(path.clone());
         match std::fs::read_to_string(&path) {
             Ok(content) => content,
             Err(error) => return format!("エラー: 文字起こしファイルを読めません: {error}"),
@@ -528,11 +612,14 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
             Ok(path) => minutes_path(&path),
             Err(error) => return format!("エラー: {error}"),
         }
+    } else if let Some(path) = &transcript_source {
+        minutes_path_from_transcript(path)
     } else {
         normalize(
             &base,
             &format!(
-                "meetings/{}-minutes.md",
+                "meetings/{}/{}-minutes.md",
+                Local::now().format("%Y-%m-%d"),
                 Local::now().format("%Y%m%d-%H%M%S")
             ),
         )
@@ -584,9 +671,9 @@ impl Tool for MeetingRecorderTool {
         vec![
             Field::new(
                 "PICOAGENT_MEETING_ROOT",
-                "録音・議事録の保存許可ルート",
+                "録音・議事録の保存許可ルート（空なら共通ワークスペース）",
                 "text",
-                &home(),
+                "",
             ),
             Field::new(
                 "PICOAGENT_TRANSCRIBE_PROGRAM",
@@ -637,7 +724,10 @@ inventory::submit! { ToolReg { make: || Box::new(MeetingRecorderTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{append_diarize_args, minutes_from_text, split_args_template};
+    use super::{
+        append_diarize_args, default_recording_path, minutes_from_text,
+        minutes_path_from_transcript, split_args_template,
+    };
     use crate::config::Config;
     use std::path::Path;
 
@@ -675,5 +765,22 @@ mod tests {
     fn 話者交代マーカーを議事録に反映する() {
         let minutes = minutes_from_text("定例", "A\n[SPEAKER_TURN]\nB");
         assert!(minutes.contains("話者交代マーカー"));
+    }
+
+    #[test]
+    fn 既定録音パスは日付フォルダに置く() {
+        let path = default_recording_path();
+        assert!(path.starts_with("meetings/"));
+        assert!(path.ends_with("-meeting.wav"));
+        assert!(path.matches('/').count() >= 2);
+    }
+
+    #[test]
+    fn transcript名から議事録名を揃える() {
+        let path = minutes_path_from_transcript(Path::new("meetings/2026-06-30/a.transcript.txt"));
+        assert_eq!(
+            path,
+            Path::new("meetings/2026-06-30/a.minutes.md").to_path_buf()
+        );
     }
 }
