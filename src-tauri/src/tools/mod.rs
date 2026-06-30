@@ -197,6 +197,20 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "meeting_recorder",
+        &[
+            "録音",
+            "文字起こし",
+            "議事録",
+            "会議メモ",
+            "話者",
+            "speaker",
+            "whisper",
+            "transcribe",
+            "meeting notes",
+        ],
+    ),
+    (
         "clipboard_text",
         &["クリップボード", "コピーした", "clipboard"],
     ),
@@ -519,5 +533,11 @@ mod tests {
     fn 資料ワークスペースを候補に追加する() {
         let names = schema_names("Gensparkみたいに資料一式を作って");
         assert!(names.contains(&"spark_workspace".to_string()));
+    }
+
+    #[test]
+    fn 会議録音スキルを候補に追加する() {
+        let names = schema_names("Whisperで会議を文字起こしして議事録にして");
+        assert!(names.contains(&"meeting_recorder".to_string()));
     }
 }

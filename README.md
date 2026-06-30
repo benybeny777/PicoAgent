@@ -103,7 +103,7 @@ graph LR
 
 目覚まし時計は、チャットで「**平日の7時に起こして**」「土日の朝8時、繰り返しで」のように頼むと設定できます（声でやさしく起こします）。一覧・削除も「アラーム一覧」「その目覚ましを消して」で操作でき、設定画面の「スキル」タブからも編集できます。鳴った後は `おきたよ！` を押すまで既定5分おきに再通知します。アプリ起動中のみ鳴ります。
 
-日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。調査系では「**AIスライド生成サービスを出典付きで調査してレポートにして**」のように頼むと、複数観点のWeb検索を束ねて Markdown の調査レポートを作成し、保存時は1ページ要約、HTMLダッシュボード、スライド下書き、出典CSV/JSONも許可ルート配下へまとめて出力できます。「**Gensparkみたいに資料一式を作って**」のように頼むと、brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを同じフォルダへ生成できます。「**Genspark風の機能を全部やって**」では、Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統をまとめて生成します。さらに、文字数分析、JSON整形、Base64、URL変換、単位換算、日付計算、CSV表化、色変換など30種類のローカル実用ツールも設定なしで使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
+日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。会議系では「**会議の録音を開始して**」「**Whisperで文字起こしして**」「**話者分類つきで議事録にして**」のように頼むと、マイク録音をローカルWAVへ保存し、設定したローカルWhisper系コマンドで文字起こしし、議事録Markdownを作れます。調査系では「**AIスライド生成サービスを出典付きで調査してレポートにして**」のように頼むと、複数観点のWeb検索を束ねて Markdown の調査レポートを作成し、保存時は1ページ要約、HTMLダッシュボード、スライド下書き、出典CSV/JSONも許可ルート配下へまとめて出力できます。「**Gensparkみたいに資料一式を作って**」のように頼むと、brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを同じフォルダへ生成できます。「**Genspark風の機能を全部やって**」では、Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統をまとめて生成します。さらに、文字数分析、JSON整形、Base64、URL変換、単位換算、日付計算、CSV表化、色変換など30種類のローカル実用ツールも設定なしで使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
 
 cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル」タブでも `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。
 
@@ -117,6 +117,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 |---|---|---|
 | 叩くAI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` | 使用するプロバイダとモデル。既定は同梱ローカルエンジンの `local` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` | 同梱エンジンで使うモデルプリセットやカスタムGGUF URL |
+| ローカル文字起こし | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` / `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | Whisper系ローカルコマンド、モデル、話者分類オプション |
 | OpenAI互換 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI互換プロバイダを使う場合だけ設定 |
 | Claude | `PICOAGENT_ANTHROPIC_API_KEY` / `PICOAGENT_ANTHROPIC_MODEL` | Claude プロバイダを使う場合だけ設定 |
 | DeepSeek | `PICOAGENT_DEEPSEEK_API_KEY` / `PICOAGENT_DEEPSEEK_MODEL` / `PICOAGENT_DEEPSEEK_THINKING` | DeepSeek プロバイダを使う場合だけ設定 |

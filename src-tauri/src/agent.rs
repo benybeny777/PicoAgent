@@ -666,6 +666,60 @@ fn genspark_suite_query(text: &str) -> Option<serde_json::Value> {
     }))
 }
 
+fn meeting_recorder_query(text: &str) -> Option<(&'static str, serde_json::Value)> {
+    let lower = text.to_lowercase();
+    let has_meeting_word = [
+        "録音",
+        "文字起こし",
+        "議事録",
+        "会議メモ",
+        "話者",
+        "speaker",
+        "whisper",
+        "transcribe",
+        "meeting notes",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !has_meeting_word {
+        return None;
+    }
+    let action = if ["停止", "止め", "終了", "stop"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "stop"
+    } else if ["状態", "ステータス", "status", "録音中"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "status"
+    } else if ["文字起こし", "whisper", "transcribe"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "transcribe"
+    } else if ["議事録", "会議メモ", "meeting notes"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "minutes"
+    } else {
+        "start"
+    };
+    let diarize = ["話者", "speaker", "diarize"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    Some((
+        "meeting_recorder",
+        serde_json::json!({
+            "action": action,
+            "title": text.trim(),
+            "diarize": diarize
+        }),
+    ))
+}
+
 /// ツール引数 JSON の解析失敗（`_raw` フィールド）を検出してエラーを返す。
 /// 正常な引数はそのまま `tools::dispatch` へ渡す。
 /// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
@@ -772,6 +826,9 @@ pub async fn run(
             let answer = tools::dispatch(cfg, "market_indices", args).await;
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
+            let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
+        } else if let Some((tool, args)) = meeting_recorder_query(&user_text) {
             let answer = tools::dispatch(cfg, tool, args).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = genspark_suite_query(&user_text) {
@@ -940,8 +997,8 @@ mod tests {
     use super::{
         append_sources, currency_query, direct_local_tool_query, extract_source_urls,
         genspark_suite_query, is_local_action_query, is_simple_greeting, is_weather_query,
-        market_query, research_report_query, should_web_search, spark_workspace_query,
-        web_search_query,
+        market_query, meeting_recorder_query, research_report_query, should_web_search,
+        spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1088,5 +1145,27 @@ mod tests {
             Some("Genspark風の機能を全部やって")
         );
         assert!(genspark_suite_query("資料だけ作って").is_none());
+    }
+
+    #[test]
+    fn 録音と文字起こし依頼を直結スキルへ割り当てる() {
+        let (tool, start) = meeting_recorder_query("会議の録音を開始して").unwrap();
+        assert_eq!(tool, "meeting_recorder");
+        assert_eq!(
+            start.get("action").and_then(serde_json::Value::as_str),
+            Some("start")
+        );
+        let (_, transcribe) =
+            meeting_recorder_query("話者分類つきでWhisper文字起こしして").unwrap();
+        assert_eq!(
+            transcribe.get("action").and_then(serde_json::Value::as_str),
+            Some("transcribe")
+        );
+        assert_eq!(
+            transcribe
+                .get("diarize")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
     }
 }
