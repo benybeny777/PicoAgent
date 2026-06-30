@@ -6,6 +6,14 @@
 
 ## 2026-07-01
 
+### reasoning モデル対策・人格固定・通知アイコンの整列
+
+- **`<think>` 推論ブロックの除去** (`src-tauri/src/message.rs` / `src-tauri/src/agent.rs`): DeepSeek-R1 / Qwen3 系などの reasoning モデルが出力する `<think>...</think>`（多くは英語/中国語）を `message::strip_reasoning()` で除去し、最終回答・会話履歴・読み上げに混ざらないようにした。閉じタグの無い未完了の推論は以降を落とす。
+- **日本語固定・キャラ固定の指示を既定プロンプトへ追加** (`src-tauri/src/commands.rs`): 既定システムプロンプトに「返答は必ず日本語」「思考の途中経過は出さない」「いま選択中のキャラ本人になりきり、他キャラの名前・一人称・口調・性格を混ぜない」を追記した。旧既定プロンプトを保存していた場合も新既定へ移行する。
+- **通知アイコンの整列を修正** (`ui/styles.css`): フキダシ操作ボタンに中央寄せ（flex）が無く、`!`（通知）が他のグリフ（■/□/↻）と縦位置でずれていたのを、全ボタンを中央寄せして揃えた。件数バッジは `data-count` が未設定でも表示されないよう条件を堅牢化した。
+
+> 補足: ローカルモデルに DeepSeek-R1-Distill 系を使うと、上記対策後も最終回答自体が英語/中国語に寄りやすく、日本語キャラの人格追従も弱い。日本語キャラ用途では既定の Gemma 系プリセットを推奨する。
+
 ### 設定の再初期化後にローカルエンジンが再起動されない不具合を修正
 
 - **再初期化でエンジンが落ちたまま復帰しない問題を修正** (`src-tauri/src/engine.rs` / `src-tauri/src/commands.rs`): 叩くAI・モデルなどを変更したときの再初期化（`restart_app`）が `engine::stop()` で `stopping` フラグを立てたまま `ensure_and_start` を呼ぶため、`ensure_and_start` が冒頭で即 return してローカル同梱エンジンが再起動されず、以後 `AI応答に失敗しました: error sending request for url (http://127.0.0.1:11435/...)` になっていた。再起動経路で `stopping` を明示的に下ろす `engine::clear_stopping()` を追加し、`restart_app` の `stop()` 後に呼ぶようにした。

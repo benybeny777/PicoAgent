@@ -980,8 +980,11 @@ pub async fn run(
         if super_agent {
             emit_status(format!("ステップ {}/{} を実行中…", step + 1, max_steps));
         }
-        let msg =
+        let mut msg =
             chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone()).await?;
+        // reasoning モデルの <think> 推論ブロックを最終回答・履歴・読み上げから除外する
+        // （DeepSeek-R1 / Qwen3 系などで英語/中国語の推論が混ざるのを防ぐ）。
+        msg.content = crate::message::strip_reasoning(&msg.content);
         // トークン使用量を記録する（AppHandle がある場合のみ）。
         if let (Some(handle), Some(usage)) = (app, &msg.usage) {
             crate::usage::record(

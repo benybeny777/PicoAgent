@@ -92,3 +92,49 @@ impl Field {
         }
     }
 }
+
+/// reasoning モデル（DeepSeek-R1 / Qwen3 など）が出力する `<think>...</think>` の
+/// 推論ブロックを取り除く。閉じタグの無い未完了の `<think>` は、それ以降すべてを
+/// 推論とみなして落とす。最終回答・履歴・読み上げに推論（多くは英語/中国語）が
+/// 混ざらないようにするための正規化。
+pub fn strip_reasoning(content: &str) -> String {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+    let mut out = String::with_capacity(content.len());
+    let mut rest = content;
+    loop {
+        match rest.find(OPEN) {
+            Some(start) => {
+                out.push_str(&rest[..start]);
+                let after = &rest[start + OPEN.len()..];
+                match after.find(CLOSE) {
+                    Some(end) => rest = &after[end + CLOSE.len()..],
+                    // 閉じタグが無い（推論の途中で打ち切られた）場合は残り全部を推論とみなす。
+                    None => break,
+                }
+            }
+            None => {
+                out.push_str(rest);
+                break;
+            }
+        }
+    }
+    out.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_reasoning;
+
+    #[test]
+    fn 推論ブロックを取り除く() {
+        assert_eq!(
+            strip_reasoning("<think>Let me think in English.</think>\n\nこんにちは！"),
+            "こんにちは！"
+        );
+        // think を含まない通常応答はそのまま（trim のみ）。
+        assert_eq!(strip_reasoning("やあ、元気？"), "やあ、元気？");
+        // 閉じタグ無しは以降を落とす（回答が出る前に打ち切られたケース）。
+        assert_eq!(strip_reasoning("答えるね<think>reasoning..."), "答えるね");
+    }
+}
