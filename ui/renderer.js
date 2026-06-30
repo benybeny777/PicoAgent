@@ -32,6 +32,8 @@ let attachedFiles = [];
 // ストリーミング受信中のテキストバッファとイベントリスナー解除関数。
 let streamBuffer = "";
 let unlistenStream = null;
+// スーパーエージェントモードの進捗（計画→実行）を受信するリスナー解除関数。
+let unlistenStatus = null;
 const conversationHistory = [];
 let historyQuery = "";
 const promptHistory = [];
@@ -98,6 +100,7 @@ window.addEventListener("beforeunload", () => {
   if (bootLogTimer) clearInterval(bootLogTimer);
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
   if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+  if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   stopVoice(false);
 });
 
@@ -1415,6 +1418,21 @@ composer.addEventListener("submit", async event => {
     logApp("warn", "ストリーミング購読の設定に失敗しました", errorDetail(error));
   }
 
+  // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
+  try {
+    if (window.picoagent.listen) {
+      if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; } // 多重購読防止
+      unlistenStatus = await window.picoagent.listen("pet:agent_status", (progress) => {
+        if (busy && typeof progress === "string" && progress) {
+          // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
+          status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
+        }
+      });
+    }
+  } catch (error) {
+    logApp("warn", "進捗購読の設定に失敗しました", errorDetail(error));
+  }
+
   try {
     // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────
     let fileContext = "";
@@ -1476,8 +1494,9 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
-    // ストリームリスナーを解除する。
+    // ストリーム・進捗リスナーを解除する。
     if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+    if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     streamBuffer = "";
     busy = false;
     updateComposerState();

@@ -2,6 +2,7 @@
 // モデルが tool_calls を返す限りツールを実行し、結果を会話に積んで再問い合わせする。
 // 機能: 並列ツール実行・指数バックオフリトライ・ストリーミング応答・分散トレーシング。
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tauri::Manager;
@@ -10,6 +11,51 @@ use crate::config::Config;
 use crate::message::Message;
 use crate::providers::Provider;
 use crate::tools;
+
+/// 現在のエージェントループのネスト深さ。サブエージェントの無限再帰を防ぐためのプロセス全体カウンタ。
+/// `1` がトップレベル、`2` 以降はサブエージェントから呼ばれたネスト実行。
+pub static AGENT_DEPTH: AtomicUsize = AtomicUsize::new(0);
+
+/// エージェントループのネスト深さを RAII で増減するガード。
+/// 早期 return・エラー経路でも `Drop` で確実に減算する。
+struct DepthGuard;
+
+impl DepthGuard {
+    fn enter() -> Self {
+        AGENT_DEPTH.fetch_add(1, Ordering::SeqCst);
+        DepthGuard
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        AGENT_DEPTH.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// 現在の深さ（`enter` 後に呼ぶ。トップレベルは 1）。
+fn agent_depth() -> usize {
+    AGENT_DEPTH.load(Ordering::SeqCst)
+}
+
+/// スーパーエージェントモード。計画ステップ・自己評価・深い自律ループ・進捗可視化を一括で有効化する。
+pub fn super_agent_enabled(cfg: &Config) -> bool {
+    cfg.get_bool("PICOAGENT_SUPER_AGENT", false)
+}
+
+/// 進捗ステータスを `pet:agent_status` イベントでフロントへ送るクロージャを作る。
+/// AppHandle が無い（サブエージェント等）場合は no-op。
+fn make_status_emitter(app: Option<&tauri::AppHandle>) -> Arc<dyn Fn(String) + Send + Sync> {
+    match app {
+        Some(handle) => {
+            let h = handle.clone();
+            Arc::new(move |status: String| {
+                let _ = tauri::Emitter::emit(&h, "pet:agent_status", status);
+            })
+        }
+        None => Arc::new(|_: String| {}),
+    }
+}
 
 const WEB_SEARCH_REQUESTS: [&str; 8] = [
     "WEB検索して",
@@ -261,7 +307,12 @@ async fn planning_step(
     model: &str,
     user_text: &str,
 ) -> Option<String> {
-    if !cfg.get_bool("PICOAGENT_PLANNING_ENABLED", false) {
+    // 明示フラグ、またはスーパーエージェントモードのどちらかで有効化する。
+    if !cfg.get_bool("PICOAGENT_PLANNING_ENABLED", false) && !super_agent_enabled(cfg) {
+        return None;
+    }
+    // サブエージェント内ではネストした計画ステップを行わない（コストとループ防止）。
+    if agent_depth() > 1 {
         return None;
     }
     if !is_complex_query(user_text) {
@@ -300,7 +351,12 @@ async fn self_improve(
     messages: &[Message],
     answer: String,
 ) -> String {
-    if !cfg.get_bool("PICOAGENT_SELF_EVAL_ENABLED", false) {
+    // 明示フラグ、またはスーパーエージェントモードのどちらかで有効化する。
+    if !cfg.get_bool("PICOAGENT_SELF_EVAL_ENABLED", false) && !super_agent_enabled(cfg) {
+        return answer;
+    }
+    // サブエージェント内では自己評価を行わない（呼び出し側で総括する）。
+    if agent_depth() > 1 {
         return answer;
     }
     let too_short = answer.trim().chars().count() < 8;
@@ -787,6 +843,22 @@ pub async fn run(
     max_steps: usize,
     app: Option<&tauri::AppHandle>,
 ) -> anyhow::Result<String> {
+    // ネスト深さを増やし、関数を抜けるとき（成功・失敗・中断のいずれでも）減らす。
+    let _depth = DepthGuard::enter();
+    let super_agent = super_agent_enabled(cfg);
+    // スーパーエージェントモードのトップレベルでは自律ループの上限を引き上げる
+    // （多段のツール連鎖・自己反省を回し切れるようにする）。サブエージェントは元の上限のまま。
+    let max_steps = if super_agent && agent_depth() <= 1 {
+        cfg.get("PICOAGENT_SUPER_AGENT_MAX_STEPS", "12")
+            .parse::<usize>()
+            .unwrap_or(12)
+            .clamp(max_steps, 30)
+    } else {
+        max_steps
+    };
+    // 進捗ステータス（計画→実行の可視化）。スーパーエージェントモードのときだけ送る。
+    let emit_status = make_status_emitter(app);
+
     let mut schemas = tools::schemas_for_text("");
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
@@ -891,13 +963,23 @@ pub async fn run(
 
     // 計画ステップ: 複雑クエリをサブタスクに分解し、ユーザーメッセージへ計画を付加する
     // （PICOAGENT_PLANNING_ENABLED=true かつ複雑クエリのみ。設定OFF・単純質問はスキップ）。
+    if super_agent {
+        emit_status("計画を立てています…".to_string());
+    }
     if let Some(plan) = planning_step(provider, cfg, model, &original_user_text).await {
+        if super_agent {
+            // 計画本文をそのままフロントへ送り、実行前にステップ一覧を見せる。
+            emit_status(plan.clone());
+        }
         if let Some(user_idx) = messages.iter().rposition(|m| m.role == "user") {
             messages[user_idx].content = format!("{}\n\n{}", messages[user_idx].content, plan);
         }
     }
 
-    for _ in 0..max_steps {
+    for step in 0..max_steps {
+        if super_agent {
+            emit_status(format!("ステップ {}/{} を実行中…", step + 1, max_steps));
+        }
         let msg =
             chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone()).await?;
         // トークン使用量を記録する（AppHandle がある場合のみ）。
@@ -921,6 +1003,10 @@ pub async fn run(
 
         match calls {
             Some(cs) if !cs.is_empty() => {
+                if super_agent {
+                    let names: Vec<&str> = cs.iter().map(|c| c.name.as_str()).collect();
+                    emit_status(format!("ツールを実行中: {}", names.join("、")));
+                }
                 // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
                 // 引数 JSON が壊れている（_raw フィールドあり）場合はエラーを返し再試行を促す。
                 // 各ツールを個別に計測しながら並列実行する（結果は (出力, 実行ms)）。

@@ -6,6 +6,12 @@
 
 ## 2026-07-01
 
+### スーパーエージェントモードを追加
+
+- **スーパーエージェントモード** (`src-tauri/src/agent.rs` / `ui/settings.js`): `PICOAGENT_SUPER_AGENT=true` で計画ステップ（`planning_step`）と自己評価（`self_improve`）を一括有効化し、トップレベルの自律ループ上限を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定12、呼び出し値〜30）へ引き上げて多段のツール連鎖を回し切るようにした。設定画面の「基本」タブにトグルとループ上限欄を追加した。
+- **計画→実行の可視化** (`src-tauri/src/agent.rs` / `ui/renderer.js`): スーパーエージェントモード時に「計画を立てています…」「（実行計画本文）」「ステップ k/N を実行中…」「ツールを実行中: …」を `pet:agent_status` イベントで送り、フキダシ上部のステータス行へリアルタイム表示するようにした。
+- **サブエージェントスキル** (`skills/subagent/mod.rs`): 1つの集中サブタスクを別のエージェントループへ委譲し結果だけを返す `subagent` スキルを追加した。現在選択中のプロバイダ・モデルを再利用し、`AGENT_DEPTH`（RAII の `DepthGuard`）と `PICOAGENT_SUBAGENT_MAX_DEPTH`（既定2）で無限再帰を防ぐ。計画・自己評価はトップレベルのみで行い、ネスト内ではスキップする。
+
 ### スケジュール実行と連携スキルの使い勝手を改善
 
 - **タスクスケジュール専用フォーム** (`ui/settings.js` / `ui/settings.css`): `task_scheduler` の `PICOAGENT_SCHEDULED_TASKS` を JSON 直書きではなく、スキル/コマンド、時刻/cron、曜日、有効/繰り返し、ラベル、引数を編集できる専用フォームで扱えるようにした。
