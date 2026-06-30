@@ -38,6 +38,7 @@
 - 数値・閾値・パス・モデル名など「設定として変えうる値」はソースに散らさず `cfg.get(キー, 既定値)` で都度読む。コネクタは自分の設定項目を `config_schema()`（`Vec<Field>`）で申告し、設定画面に自動で並ぶようにする。新しい設定キーを足したら README と SPEC に必ず記載する。
 - 設定画面（右クリック →「設定…」）が唯一の GUI 設定入口。`ui/settings.{html,css,js}` と `commands.rs` の `settings_*` command で構成し、保存後は実行中に反映する（コネクタは `cfg.get()` で都度読むため再起動不要）。
 - API キー・トークン等のシークレットはコミットしない。ログ・エラーメッセージ・ドキュメントに値を出さない。OpenAI 互換プロバイダの `Authorization`（`bearer_auth`）など秘密値を含む箇所は、エラー文へ連結しない。`config.json` はローカル個人 PC 専用で、リポジトリにコミットしない（`app_config_dir` 配下に保存される）。
+- 設定スキーマで `type="password"` の値（API キー等）は平文で `config.json` に置かない。Windows では DPAPI（`src-tauri/src/secret.rs`）で暗号化して `enc:dpapi:v1:` 形式で保存し、`config.get()` が読み取り時に透過的に復号する（同一 Windows ユーザーのみ復号可能）。既存の平文値は起動時に自動で暗号化へ移行する。非 Windows は DPAPI が無いため平文保存（フォールバック許可）。新しいシークレット設定は必ず `type="password"` で申告し、この暗号化経路に乗せる。
 
 ## コネクタ開発ルール（このプロジェクトの中核）
 
@@ -80,7 +81,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |
 | `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState` |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
-| `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`） |
+| `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
+| `src-tauri/src/secret.rs` | シークレット（`password` 型設定）の DPAPI 暗号化／復号（Windows）。非 Windows は平文 |
 | `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |
 | `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |

@@ -1089,11 +1089,56 @@ pub async fn pet_speak(
     Ok(json!({ "enabled": true, "mime": "audio/wav", "audio": bytes.to_vec() }))
 }
 
+/// 設定スキーマ上で type="password" になっている＝シークレット扱いのキー集合。
+fn secret_keys() -> std::collections::HashSet<String> {
+    let mut keys = std::collections::HashSet::new();
+    for provider in providers::all() {
+        for field in provider.config_schema() {
+            if field.r#type == "password" {
+                keys.insert(field.key);
+            }
+        }
+    }
+    for tool in tools::all() {
+        for field in tool.config_schema() {
+            if field.r#type == "password" {
+                keys.insert(field.key);
+            }
+        }
+    }
+    keys
+}
+
+/// 既存の平文シークレットを起動時に DPAPI 暗号化へ移行する（次回保存を待たずに保護する）。
+pub(crate) fn encrypt_existing_secrets(config: &Config) {
+    let all = config.get_all();
+    let mut patch = Map::new();
+    for key in secret_keys() {
+        if let Some(text) = all.get(&key).and_then(Value::as_str) {
+            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                patch.insert(key, Value::String(crate::secret::encrypt(text)));
+            }
+        }
+    }
+    if !patch.is_empty() {
+        // フォールバック許可: 移行保存に失敗してもアプリ起動は止めない。
+        let _ = config.set_all(patch);
+    }
+}
+
 #[tauri::command]
 pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let mut values = state.config.get_all();
+    // 暗号化済みのシークレットは設定画面で編集できるよう復号して返す（非暗号の値は不変）。
+    for value in values.values_mut() {
+        if let Value::String(text) = value {
+            if crate::secret::is_encrypted(text) {
+                *value = Value::String(crate::secret::decrypt(text));
+            }
+        }
+    }
     if values
         .get("PICOAGENT_SYSTEM_PROMPT")
         .and_then(Value::as_str)
@@ -1172,7 +1217,7 @@ pub async fn settings_list_models(
 
 #[tauri::command]
 pub async fn settings_save(
-    patch: Map<String, Value>,
+    mut patch: Map<String, Value>,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
@@ -1205,6 +1250,20 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
+
+    // パスワード型のシークレットは平文保存せず、DPAPI で暗号化してから永続化する。
+    let mut encrypted: Vec<(String, String)> = Vec::new();
+    for key in secret_keys() {
+        if let Some(text) = patch.get(&key).and_then(Value::as_str) {
+            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                encrypted.push((key, crate::secret::encrypt(text)));
+            }
+        }
+    }
+    for (key, value) in encrypted {
+        patch.insert(key, Value::String(value));
+    }
+
     state
         .config
         .set_all(patch)

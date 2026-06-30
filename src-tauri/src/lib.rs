@@ -17,6 +17,7 @@ mod message;
 mod migration;
 mod providers;
 mod scheduler;
+mod secret;
 mod tools;
 mod tracer;
 mod usage;
@@ -82,6 +83,8 @@ pub fn run() {
             }
             let config_path = config_dir.join("config.json");
             state.config.load(config_path.clone());
+            // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
+            commands::encrypt_existing_secrets(&state.config);
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
             if let Err(error) = log_paths::ensure_log_dir(app.handle()) {
                 eprintln!("ログディレクトリの作成に失敗しました: {error}");

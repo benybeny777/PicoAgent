@@ -38,6 +38,10 @@ hound = "3.5"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+# シークレット（APIキー等）の DPAPI 暗号化に使用する。
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+
 [profile.release]
 opt-level = "s"
 lto = true
