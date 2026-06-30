@@ -114,6 +114,20 @@ button:disabled { opacity:.48; cursor:default; }
 .reply-actions:focus-within { opacity:1; }
 .reply-actions button { position:static; width:24px; height:24px; padding:0; border-radius:7px; background:rgba(242,126,145,.92); font-size:10px; line-height:1; }
 .reply-actions button:hover { filter:brightness(1.04); }
+.reply-actions #noticeToggle { position:relative; background:#64a98a; }
+.reply-actions #noticeToggle::after { content:attr(data-count); position:absolute; right:-5px; top:-6px; min-width:14px; height:14px; padding:0 3px; border-radius:999px; background:#c0627a; color:#fff; font-size:9px; line-height:14px; text-align:center; box-shadow:0 1px 4px rgba(42,31,46,.22); }
+.reply-actions #noticeToggle[data-count=""]::after { display:none; }
+.notice-panel { position:absolute; z-index:10; top:44px; right:12px; width:min(330px,calc(100% - 24px)); max-height:min(340px,calc(100% - 86px)); display:flex; flex-direction:column; padding:10px; border:1px solid rgba(71,52,76,.14); border-radius:12px; background:rgba(255,253,248,.99); box-shadow:0 12px 30px rgba(42,31,46,.18); }
+.notice-panel[hidden] { display:none; }
+.notice-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; color:var(--ink); font-size:12px; font-weight:700; }
+.notice-head button { position:static; height:24px; padding:0 8px; border-radius:7px; background:#8a8090; font-size:10px; }
+.notice-list { overflow:auto; display:flex; flex-direction:column; gap:8px; padding-right:2px; }
+.notice-item { padding:8px 9px; border:1px solid #eadde5; border-left:3px solid var(--mint); border-radius:9px; background:#f8fbf7; }
+.notice-item.error { border-left-color:#c0627a; background:#fff6f8; }
+.notice-title { font-size:12px; font-weight:700; color:var(--ink); }
+.notice-meta { margin-top:2px; color:var(--muted); font-size:10px; }
+.notice-body { max-height:120px; margin-top:5px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#4b4050; font-size:11px; line-height:1.5; user-select:text; }
+.notice-empty { padding:18px 4px; color:var(--muted); font-size:12px; text-align:center; }
 @media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span,.boot-log-line { animation:none!important; } }
 .reply { white-space:normal; }
 .md { font-size:13px; line-height:1.65; word-break:break-word; }

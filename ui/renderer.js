@@ -14,6 +14,10 @@ const copyReplyButton = document.getElementById("copyReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
 const toggleFullscreenButton = document.getElementById("toggleFullscreen");
+const noticeToggle = document.getElementById("noticeToggle");
+const noticePanel = document.getElementById("noticePanel");
+const noticeList = document.getElementById("noticeList");
+const noticeClear = document.getElementById("noticeClear");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
@@ -37,6 +41,7 @@ const QUICK_ACTIONS = [
   { label: "画面を見る", text: "今の画面を見て、状況を短く教えて" },
   { label: "クリップボード要約", text: "クリップボードの内容を要約して" },
   { label: "今日の予定", text: "今日の予定と気をつけることを教えて" },
+  { label: "さっきの続き", text: "さっきの続きとして、次にやることを整理して" },
   { label: "できること", text: "あなたが今できることを具体的に教えて" },
 ];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
@@ -50,6 +55,7 @@ let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 1;
 const pendingNotices = [];
+let unreadNoticeCount = 0;
 // 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
 const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
@@ -119,6 +125,56 @@ function setStatus(text) {
       appendBootLog(next, "status");
     }
   }
+}
+
+function updateNoticeBadge() {
+  if (!noticeToggle) return;
+  noticeToggle.dataset.count = unreadNoticeCount > 0 ? String(Math.min(99, unreadNoticeCount)) : "";
+  noticeToggle.classList.toggle("has-notices", pendingNotices.length > 0);
+}
+
+function renderNoticePanel() {
+  if (!noticeList) return;
+  noticeList.replaceChildren();
+  if (pendingNotices.length === 0) {
+    noticeList.append(document.createElement("div"));
+    noticeList.firstElementChild.className = "notice-empty";
+    noticeList.firstElementChild.textContent = "通知はありません";
+    return;
+  }
+  for (const notice of pendingNotices) {
+    const item = document.createElement("div");
+    item.className = `notice-item ${notice.ok === false ? "error" : "ok"}`;
+    const title = document.createElement("div");
+    title.className = "notice-title";
+    title.textContent = notice.title || "通知";
+    const meta = document.createElement("div");
+    meta.className = "notice-meta";
+    meta.textContent = notice.at ? new Date(notice.at).toLocaleString("ja-JP") : "";
+    const body = document.createElement("div");
+    body.className = "notice-body";
+    body.textContent = notice.body || "";
+    item.append(title, meta, body);
+    noticeList.append(item);
+  }
+}
+
+function pushNotice(notice) {
+  const entry = {
+    title: String(notice?.title || "通知"),
+    body: String(notice?.body || ""),
+    ok: notice?.ok !== false,
+    at: notice?.at || new Date().toISOString(),
+  };
+  pendingNotices.unshift(entry);
+  while (pendingNotices.length > 20) pendingNotices.pop();
+  unreadNoticeCount += 1;
+  updateNoticeBadge();
+  renderNoticePanel();
+  setStatus(entry.ok ? entry.title : `${entry.title}: エラー`);
+  setTimeout(() => {
+    if (status.textContent === entry.title || status.textContent === `${entry.title}: エラー`) status.textContent = "";
+  }, 6000);
 }
 
 function appendBootLog(text, kind = "info") {
@@ -1396,6 +1452,7 @@ document.addEventListener("keydown", event => {
   exitBubbleFullscreen();
 });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
+window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
   conversationHistory.length = 0;
   promptHistory.length = 0;
@@ -1493,6 +1550,32 @@ window.picoagent.on("pet:ui", (ui) => {
   });
   applyChatterConfig(ui); // 設定変更を即反映。
 });
+
+noticeToggle?.addEventListener("click", event => {
+  event.stopPropagation();
+  if (!noticePanel) return;
+  const open = noticePanel.hidden;
+  noticePanel.hidden = !open;
+  if (open) {
+    unreadNoticeCount = 0;
+    renderNoticePanel();
+    updateNoticeBadge();
+  }
+});
+noticeClear?.addEventListener("click", event => {
+  event.stopPropagation();
+  pendingNotices.length = 0;
+  unreadNoticeCount = 0;
+  renderNoticePanel();
+  updateNoticeBadge();
+});
+bubble?.addEventListener("click", event => {
+  if (!noticePanel || noticePanel.hidden) return;
+  if (event.target instanceof Element && event.target.closest("#noticePanel,#noticeToggle")) return;
+  noticePanel.hidden = true;
+});
+renderNoticePanel();
+updateNoticeBadge();
 
 // TTS 有効時は同梱 Aivis が応答するまで待ってからキャラを描画する（無効時は待たない）。
 // 起動失敗で永久に出ないことを避けるため、上限（約120秒）を超えたら諦めて描画する。

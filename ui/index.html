@@ -21,10 +21,18 @@
     </section>
     <section id="bubble" class="bubble" aria-live="polite">
       <div id="replyActions" class="reply-actions" aria-label="回答操作">
+        <button id="noticeToggle" type="button" aria-label="通知一覧" title="通知一覧">!</button>
         <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">C</button>
         <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">↻</button>
         <button id="stopVoice" type="button" aria-label="読み上げを停止" title="読み上げを停止">■</button>
         <button id="toggleFullscreen" type="button" aria-label="フキダシを拡大" title="フキダシを拡大">□</button>
+      </div>
+      <div id="noticePanel" class="notice-panel" hidden>
+        <div class="notice-head">
+          <span>通知</span>
+          <button id="noticeClear" type="button">消去</button>
+        </div>
+        <div id="noticeList" class="notice-list"></div>
       </div>
       <div id="historyTools" class="history-tools" aria-label="会話履歴操作">
         <input id="historySearch" type="search" autocomplete="off" placeholder="履歴を検索" />

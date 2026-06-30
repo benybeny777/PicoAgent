@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-07-01
+
+### スケジュール実行と連携スキルの使い勝手を改善
+
+- **タスクスケジュール専用フォーム** (`ui/settings.js` / `ui/settings.css`): `task_scheduler` の `PICOAGENT_SCHEDULED_TASKS` を JSON 直書きではなく、スキル/コマンド、時刻/cron、曜日、有効/繰り返し、ラベル、引数を編集できる専用フォームで扱えるようにした。
+- **スケジュール実行結果の通知一覧** (`src-tauri/src/scheduler.rs` / `ui/renderer.js` / `ui/index.html` / `ui/styles.css`): スケジュール実行結果をログへ残すだけでなく `pet:notice` としてメイン画面へ通知し、フキダシ内の通知ボタンから直近20件を確認できるようにした。
+- **スキル設定状態バッジ** (`ui/settings.js` / `ui/settings.css`): スキル設定カードに「設定不要」「未設定」「一部設定」「設定済み」のバッジを出し、Gmail / Slack / Calendar / Office / PDF などの連携スキルで何を設定すべきか見つけやすくした。
+- **会話継続クイック操作** (`ui/renderer.js`): 長期メモリと履歴を使った続き相談に入りやすいよう、クイック操作へ「さっきの続き」を追加した。
+
+---
+
 ## 2026-06-30
 
 ### APIキー等のシークレットを DPAPI で暗号化保存

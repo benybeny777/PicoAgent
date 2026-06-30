@@ -106,9 +106,9 @@ graph LR
 
 日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。会議系では「**会議の録音を開始して**」「**音声を文字起こしして**」「**話者分類つきで議事録にして**」のように頼むと、共通ワークスペース配下の `meetings/YYYY-MM-DD/` に日付つきWAVを保存し、設定したローカルWhisper系コマンドで文字起こしし、同じ録音名に対応する議事録Markdownを作れます。スキル一覧では既存音声の文字起こしは「音声文字起こし」、録音から議事録までのまとまった会議作業は「会議記録」として表示します。調査系では「**AIスライド生成サービスを出典付きで調査してレポートにして**」のように頼むと、複数観点のWeb検索を束ねて Markdown の調査レポートを作成し、保存時は1ページ要約、HTMLダッシュボード、スライド下書き、出典CSV/JSONも許可ルート配下へまとめて出力できます。「**Gensparkみたいに資料一式を作って**」のように頼むと、brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを同じフォルダへ生成できます。「**Genspark風の機能を全部やって**」では、Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統をまとめて生成します。さらに、文字数分析、JSON整形、Base64、URL変換、単位換算、日付計算、CSV表化、色変換など30種類のローカル実用ツールも設定なしで使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
 
-cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル」タブでも `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。スキル経由のファイル削除は物理削除せずゴミ箱移動を前提にし、`run_command` でも `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドは実行しません。
+cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル設定」タブでも専用フォームから `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。スキル経由のファイル削除は物理削除せずゴミ箱移動を前提にし、`run_command` でも `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドは実行しません。
 
-設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル」「診断」のタブで構成されます。キャラクター一覧には小さな顔アイコンを表示します。診断タブでは選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認できます。スキルタブには全体を見通せる「スキル活用ガイド」があり、区分・できること・頼み方例を一覧できます。スキル設定は日常・検索/情報・連携などのカテゴリタブで整理され、各コネクタが申告した設定も自動で増えます。叩くAIタブは現在選択中のプロバイダ設定だけを表示し、未使用プロバイダのAPIキー欄やモデル欄は畳み込みます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
+設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル設定」「スキル活用ガイド」「診断」のタブで構成されます。キャラクター一覧には小さな顔アイコンを表示します。診断タブでは選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認できます。スキル活用ガイドでは区分・できること・頼み方例を一覧できます。スキル設定は日常・検索/情報・連携などのカテゴリ見出しで整理され、各スキルカードには設定不要/未設定/一部設定/設定済みの状態バッジを表示します。目覚ましとタスクスケジュールは JSON 直書きではなく専用フォームで編集できます。叩くAIタブは現在選択中のプロバイダ設定だけを表示し、未使用プロバイダのAPIキー欄やモデル欄は畳み込みます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
 
 #### 主要設定
 
@@ -132,7 +132,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` | 会話から好みや継続指示を暗黙的に覚えるか |
 | 自発雑談 | `PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_TOPIC_MODE` | アイドル時の雑談と話題ソース |
 | 目覚まし | `PICOAGENT_ALARMS` | 設定画面では専用フォームで編集。通常はチャットで設定 |
-| タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` | `kind=command` / `kind=tool` の指定時刻タスク。通常はチャットで設定 |
+| タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` | `kind=command` / `kind=tool` の指定時刻タスク。設定画面では専用フォームで編集。通常はチャットで設定 |
 | ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行・スケジュール実行の安全境界 |
 | ファイル操作 | `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_TOOLS_ROOT` / `PICOAGENT_DOCUMENT_ROOT` | ファイル・Office/PDF 操作の許可ルート |
 | 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 天気・検索・RSS・調査レポートなどの既定値 |

@@ -24,6 +24,7 @@ let characterCatalog;
 const characterManifestCache = new Map();
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
+let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
 const noSearchResultMessage = "検索に一致する設定はありません";
 
@@ -122,6 +123,10 @@ function updateDirtyState() {
   form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
     "changed",
     stableStringify(current.PICOAGENT_ALARMS) !== stableStringify(savedSnapshot.PICOAGENT_ALARMS)
+  );
+  form.querySelector(".schedule-editor")?.closest(".card-config")?.classList.toggle(
+    "changed",
+    stableStringify(current.PICOAGENT_SCHEDULED_TASKS) !== stableStringify(savedSnapshot.PICOAGENT_SCHEDULED_TASKS)
   );
   resetChangesBtn.disabled = !dirty;
   saveBtn.classList.toggle("dirty", dirty);
@@ -467,6 +472,109 @@ function buildAlarmEditor(currentJson) {
   return wrap;
 }
 
+const SCHEDULE_WEEKDAYS = ALARM_WEEKDAYS;
+function buildScheduleEditor(currentJson) {
+  let tasks = [];
+  try {
+    const parsed = JSON.parse(currentJson || "[]");
+    if (Array.isArray(parsed)) tasks = parsed;
+  } catch { tasks = []; }
+
+  const wrap = el("div", { className: "schedule-editor" });
+  const listEl = el("div", { className: "schedule-list" });
+  const rows = [];
+  wrap.append(listEl);
+
+  function addRow(task = {}) {
+    const kind = el("select", { className: "schedule-kind" }, [
+      el("option", { value: "tool", textContent: "スキル", selected: (task.kind || "tool") === "tool" }),
+      el("option", { value: "command", textContent: "コマンド", selected: task.kind === "command" }),
+    ]);
+    const time = el("input", { type: "time", value: task.time || "09:00", className: "schedule-time" });
+    const cron = el("input", { type: "text", value: task.cron || "", placeholder: "cron 任意: 0 9 * * 1", className: "schedule-cron" });
+    const label = el("input", { type: "text", value: task.label || "", placeholder: "ラベル", className: "schedule-label" });
+    const toolName = el("input", { type: "text", value: task.tool_name || "weather", placeholder: "スキル名 例: weather", className: "schedule-tool" });
+    const toolArgs = el("textarea", { value: JSON.stringify(task.tool_args || {}, null, 2), placeholder: "{ }", className: "schedule-json" });
+    const program = el("input", { type: "text", value: task.program || "git", placeholder: "program", className: "schedule-program" });
+    const args = el("input", { type: "text", value: Array.isArray(task.args) ? task.args.join(" ") : "", placeholder: "引数（空白区切り）", className: "schedule-args" });
+    const cwd = el("input", { type: "text", value: task.cwd || "", placeholder: "作業ディレクトリ（任意）", className: "schedule-cwd" });
+    const timeout = el("input", { type: "number", min: "1", max: "120", step: "1", value: String(task.timeout_secs || ""), placeholder: "秒", className: "schedule-timeout" });
+    const repeat = el("input", { type: "checkbox", checked: task.repeat !== false });
+    const enabled = el("input", { type: "checkbox", checked: task.enabled !== false });
+    const dayBoxes = SCHEDULE_WEEKDAYS.map(([code, jp]) => {
+      const cb = el("input", { type: "checkbox", checked: Array.isArray(task.days) && task.days.includes(code) });
+      return { code, cb, label: el("label", { className: "alarm-day" }, [cb, document.createTextNode(jp)]) };
+    });
+    const target = el("div", { className: "schedule-target" });
+    const commandFields = el("div", { className: "schedule-command-fields" }, [program, args, cwd, timeout]);
+    const toolFields = el("div", { className: "schedule-tool-fields" }, [toolName, toolArgs]);
+    target.append(toolFields, commandFields);
+    const del = el("button", { type: "button", className: "alarm-del", textContent: "削除" });
+    const row = el("div", { className: "schedule-row" }, [
+      el("div", { className: "schedule-row-top" }, [kind, time, cron, label]),
+      el("div", { className: "alarm-days" }, dayBoxes.map(d => d.label)),
+      target,
+      el("div", { className: "schedule-row-bottom" }, [
+        el("label", { className: "alarm-opt" }, [repeat, document.createTextNode("繰り返し")]),
+        el("label", { className: "alarm-opt" }, [enabled, document.createTextNode("有効")]),
+        del,
+      ]),
+    ]);
+    const entry = { id: task.id || `st${Date.now()}${Math.random().toString(36).slice(2, 6)}`, row, kind, time, cron, label, toolName, toolArgs, program, args, cwd, timeout, repeat, enabled, dayBoxes, toolFields, commandFields };
+    function updateKind() {
+      const isTool = kind.value === "tool";
+      toolFields.hidden = !isTool;
+      commandFields.hidden = isTool;
+    }
+    kind.addEventListener("change", updateKind);
+    del.addEventListener("click", () => {
+      listEl.removeChild(row);
+      const idx = rows.indexOf(entry);
+      if (idx >= 0) rows.splice(idx, 1);
+    });
+    updateKind();
+    rows.push(entry);
+    listEl.append(row);
+  }
+
+  for (const task of tasks) addRow(task);
+  const addBtn = el("button", { type: "button", className: "alarm-add", textContent: "＋ スケジュールを追加" });
+  addBtn.addEventListener("click", () => addRow({ kind: "tool", tool_name: "weather", tool_args: {} }));
+  const hint = el("div", { className: "hint", textContent: "cron を空にすると時刻と曜日で実行します。スキル実行はコマンド許可なしで使えます。コマンド実行は許可ルートと allowlist の制限を受けます。" });
+  wrap.append(addBtn, hint);
+
+  scheduleEditorState = {
+    getJson() {
+      const out = rows.map(r => {
+        let parsedArgs = {};
+        try { parsedArgs = JSON.parse(r.toolArgs.value || "{}"); }
+        catch {
+          throw new Error(`スケジュール「${r.label.value.trim() || r.toolName.value.trim() || r.program.value.trim() || r.id}」の tool_args が JSON として読めません。`);
+        }
+        return {
+          id: r.id,
+          kind: r.kind.value,
+          time: r.cron.value.trim() ? "" : (r.time.value || "09:00"),
+          cron: r.cron.value.trim(),
+          days: r.dayBoxes.filter(d => d.cb.checked).map(d => d.code),
+          repeat: r.repeat.checked,
+          label: r.label.value.trim(),
+          enabled: r.enabled.checked,
+          program: r.program.value.trim(),
+          args: r.args.value.trim().split(/\s+/).filter(Boolean),
+          cwd: r.cwd.value.trim(),
+          timeout_secs: r.timeout.value ? Math.min(120, Math.max(1, Number(r.timeout.value))) : null,
+          tool_name: r.toolName.value.trim(),
+          tool_args: parsedArgs,
+          last_run_minute: "",
+        };
+      });
+      return JSON.stringify(out);
+    },
+  };
+  return wrap;
+}
+
 function selectField(key, label, value, options) {
   const select = el("select");
   for (const option of options) {
@@ -623,6 +731,21 @@ function skillExamples(tool) {
   return explicit.length ? explicit : (SKILL_EXAMPLE_FALLBACKS[tool.name] || [`${tool.label || tool.name}を使って`]);
 }
 
+function configStatus(tool, values) {
+  const schema = Array.isArray(tool.configSchema) ? tool.configSchema : [];
+  if (!schema.length) return { label: "設定不要", tone: "neutral" };
+  const important = schema.filter(field => field.type === "password" || /TOKEN|KEY|SECRET|WEBHOOK|ACCESS|URL|ROOT|PATH|ENABLED/.test(field.key));
+  const targets = important.length ? important : schema;
+  const filled = targets.filter(field => {
+    const value = values[field.key];
+    if (typeof value === "boolean") return value;
+    return String(value ?? "").trim() !== "";
+  }).length;
+  if (filled === 0) return { label: "未設定", tone: "warn" };
+  if (filled < targets.length) return { label: `一部設定 ${filled}/${targets.length}`, tone: "partial" };
+  return { label: "設定済み", tone: "ok" };
+}
+
 function buildSkillGuide(tools) {
   const guide = el("div", { className: "skill-guide" });
   const header = el("div", { className: "skill-guide-head" }, [
@@ -653,7 +776,11 @@ function buildSkillGuide(tools) {
 
 function renderSkillCard(tool, values) {
   const hasConfig = !!tool.configSchema?.length;
-  const name = el("div", { className: "card-name", textContent: hasConfig ? `${tool.label || tool.name}　⚙` : (tool.label || tool.name) });
+  const status = configStatus(tool, values);
+  const name = el("div", { className: "card-name" }, [
+    document.createTextNode(hasConfig ? `${tool.label || tool.name}　⚙` : (tool.label || tool.name)),
+    el("span", { className: `config-badge ${status.tone}`, textContent: status.label }),
+  ]);
   const card = markSearchable(el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
     name,
     el("div", { className: "card-desc", textContent: tool.description || "" }),
@@ -670,6 +797,8 @@ function renderSkillCard(tool, values) {
     if (tool.name === "alarm") {
       // 目覚ましは JSON ではなく、時刻ピッカー＋曜日チェックの専用フォームで編集する。
       panel.append(buildAlarmEditor(values.PICOAGENT_ALARMS));
+    } else if (tool.name === "task_scheduler") {
+      panel.append(buildScheduleEditor(values.PICOAGENT_SCHEDULED_TASKS));
     } else {
       for (const f of tool.configSchema) panel.append(field(f.key, f.label, f.type, values[f.key], f.placeholder));
     }
@@ -935,6 +1064,7 @@ async function render() {
   inputs.clear();
   inputWrappers.clear();
   alarmEditorState = null;
+  scheduleEditorState = null;
   const v = data.values;
   const panels = createTabs([
     { id: "basic", label: "基本" },
@@ -1178,6 +1308,7 @@ function collect() {
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
+  if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();
   return patch;
 }
 

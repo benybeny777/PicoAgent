@@ -10,7 +10,7 @@ use std::time::Duration;
 use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 
 use crate::config::Config;
@@ -566,6 +566,26 @@ pub async fn tick(app: &AppHandle, cfg: &Config) {
     for task in due {
         let result = execute_task(app, cfg, &task).await;
         crate::log_paths::append_app_log(app, &result);
+        let title = if task.label.trim().is_empty() {
+            if task.kind.trim().eq_ignore_ascii_case("tool") {
+                format!("スケジュール: {}", task.tool_name)
+            } else {
+                format!("スケジュール: {}", task.program)
+            }
+        } else {
+            task.label.clone()
+        };
+        let _ = app.emit(
+            "pet:notice",
+            serde_json::json!({
+                "kind": "schedule",
+                "title": title,
+                "body": result,
+                "ok": !result.starts_with("エラー:"),
+                "taskId": task.id,
+                "at": now.to_rfc3339(),
+            }),
+        );
     }
 }
 

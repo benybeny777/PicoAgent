@@ -166,6 +166,22 @@ body.searching .tab-panel {
   background: #fff;
 }
 .card-name { font-size: 13px; font-weight: 600; }
+.config-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f4eef2;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.config-badge.ok { background: #e9f7ef; color: #327353; }
+.config-badge.warn { background: #fff1f4; color: #b24b63; }
+.config-badge.partial { background: #fff8e5; color: #8a6b20; }
 .card-desc { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
 .character-card {
   display: flex;
@@ -210,6 +226,102 @@ body.searching .tab-panel {
 .card-config.changed {
   border-left-color: var(--pink);
 }
+.schedule-editor,
+.alarm-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.schedule-list,
+.alarm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.schedule-row,
+.alarm-row {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.schedule-row-top,
+.alarm-row-top,
+.schedule-row-bottom,
+.alarm-row-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+.schedule-row-top input,
+.schedule-row-top select,
+.schedule-command-fields input,
+.schedule-tool-fields input,
+.schedule-tool-fields textarea,
+.alarm-row input {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 12px;
+}
+.schedule-time,
+.alarm-time { flex: 0 0 100px; }
+.schedule-kind { flex: 0 0 92px; }
+.schedule-cron { flex: 1 1 150px; }
+.schedule-label,
+.alarm-label { flex: 1 1 180px; }
+.schedule-target {
+  margin-top: 8px;
+}
+.schedule-command-fields,
+.schedule-tool-fields {
+  display: grid;
+  grid-template-columns: minmax(80px, .7fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(70px, .45fr);
+  gap: 7px;
+}
+.schedule-tool-fields {
+  grid-template-columns: minmax(120px, .6fr) minmax(220px, 1.4fr);
+}
+.schedule-json {
+  min-height: 58px;
+  resize: vertical;
+  font-family: Consolas, "Yu Gothic UI", monospace;
+}
+.alarm-days {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.schedule-row > .alarm-days {
+  margin-top: 7px;
+}
+.alarm-day,
+.alarm-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.alarm-snooze,
+.schedule-timeout { width: 72px; }
+.alarm-add,
+.alarm-del {
+  position: static;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--pink);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.alarm-del { margin-left: auto; background: #8a7a82; }
 .skill-guide {
   display: grid;
   grid-template-columns: minmax(72px, .6fr) minmax(120px, .9fr) minmax(180px, 1.6fr) minmax(160px, 1.3fr);
@@ -281,20 +393,6 @@ body.searching .tab-panel {
   .skill-guide-desc::before { content: "できること: "; color: var(--muted); font-weight: 600; }
   .skill-guide-examples::before { content: "頼み方例: "; color: var(--muted); font-weight: 600; }
 }
-/* 目覚まし専用エディタ */
-.alarm-list { display: flex; flex-direction: column; gap: 8px; }
-.alarm-row { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.alarm-row-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.alarm-time { width: 110px; }
-.alarm-days { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.alarm-day { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
-.alarm-row-bottom { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
-.alarm-opt { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
-.alarm-label { flex: 1 1 120px; min-width: 100px; }
-.alarm-snooze { width: 58px; }
-.alarm-del { position: static; height: 26px; padding: 0 10px; background: #b85; }
-.alarm-add { position: static; margin-top: 8px; height: 30px; padding: 0 12px; }
-
 /* 診断タブ */
 .diagnostics-toolbar {
   display: flex;
