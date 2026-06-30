@@ -1251,7 +1251,10 @@ fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
         }
         .to_string();
     }
-    if result.contains("HTTP 401") || lower.contains("invalid_auth") || lower.contains("unauthorized") {
+    if result.contains("HTTP 401")
+        || lower.contains("invalid_auth")
+        || lower.contains("unauthorized")
+    {
         return "認証に失敗しています。token の期限切れ、コピー漏れ、別アカウントの token、暗号化前の古い値を確認してください。".to_string();
     }
     if result.contains("HTTP 403")
@@ -1261,7 +1264,10 @@ fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
     {
         return "権限不足の可能性が高いです。OAuth scope、Slack Bot の権限、対象ワークスペース/カレンダーへのアクセス権を確認してください。".to_string();
     }
-    if result.contains("HTTP 404") || lower.contains("channel_not_found") || lower.contains("not_found") {
+    if result.contains("HTTP 404")
+        || lower.contains("channel_not_found")
+        || lower.contains("not_found")
+    {
         return "対象が見つかりません。チャンネルID、カレンダーID、メッセージID、API base URL が正しいか確認してください。".to_string();
     }
     if lower.contains("timeout") || result.contains("タイムアウト") {

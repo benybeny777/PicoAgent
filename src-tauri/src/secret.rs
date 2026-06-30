@@ -22,7 +22,10 @@ pub fn encrypt(plain: &str) -> String {
     #[cfg(windows)]
     {
         if let Some(bytes) = win::protect(plain.as_bytes()) {
-            return format!("{PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+            return format!(
+                "{PREFIX}{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            );
         }
     }
     // フォールバック許可: DPAPI 非対応（非Windows）や失敗時は平文で保存する（保存自体は止めない）。

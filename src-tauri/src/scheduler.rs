@@ -683,7 +683,11 @@ pub async fn tick(app: &AppHandle, cfg: &Config) {
     }
 }
 
-pub async fn rerun_task(app: &AppHandle, cfg: &Config, task_id: &str) -> Result<ScheduledRunRecord, String> {
+pub async fn rerun_task(
+    app: &AppHandle,
+    cfg: &Config,
+    task_id: &str,
+) -> Result<ScheduledRunRecord, String> {
     let task = load(cfg)
         .into_iter()
         .find(|task| task.id == task_id)

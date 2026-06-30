@@ -251,9 +251,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし。将来削除相当の操作を足す場合も物理削除ではなくゴミ箱移動にする |
+| `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
 | `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
 | `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信。Bot token では認証テストとチャンネル履歴取得もできる | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、履歴20件上限、timeout |
-| `gmail_message` | Gmail API でメール一覧取得・本文取得・送信・下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、検索クエリ/本文/件名サイズ上限、timeout |
+| `gmail_message` | Gmail API でメール一覧取得・本文取得・ラベル一覧・ラベル付け/解除・アーカイブ・既読/未読化・ゴミ箱移動・送信・下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、検索条件ベースの cleanup は preview 後に `confirm=true` で実行、ゴミメール掃除は完全削除ではなく Gmail のゴミ箱移動、cleanup 件数上限は `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS`（0で無制限）、検索クエリ/本文/件名サイズ上限、timeout |
 | `google_calendar` | Google Calendar の予定一覧取得・予定作成 | OAuth access token は設定から都度取得、秘密値を出力しない、件名/説明サイズ上限、timeout |
 | `google_docs` | Google Docs の文書作成・本文抽出・末尾追記・文字列置換 | Google Docs API `batchUpdate` を使用、OAuth access token は設定から都度取得、秘密値を出力しない、timeout |
 | `google_drive` | Google Drive のファイル検索・メタデータ取得・テキストファイル作成 | OAuth access token は設定から都度取得、秘密値を出力しない、作成サイズ上限、timeout |
@@ -431,6 +432,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_GMAIL_ACCESS_TOKEN` | （なし） | gmail_message | Gmail API の OAuth access token |
 | `PICOAGENT_GMAIL_BASE_URL` | `https://gmail.googleapis.com/gmail/v1` | gmail_message | Gmail API の base URL |
 | `PICOAGENT_GMAIL_TIMEOUT_SECS` | `20` | gmail_message | Gmail API の待ち時間（秒、3〜60） |
+| `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS` | `50` | gmail_message | Gmail の検索条件ベース整理/掃除で一度に扱う既定上限。`0` で無制限 |
 | `PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN` | （なし） | google_calendar | Google Calendar API の OAuth access token |
 | `PICOAGENT_GOOGLE_CALENDAR_ID` | `primary` | google_calendar | 既定のカレンダーID |
 | `PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS` | `20` | google_calendar | Google Calendar API の待ち時間（秒、3〜60） |

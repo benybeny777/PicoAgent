@@ -224,6 +224,17 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "trash_file",
+        &[
+            "削除",
+            "消して",
+            "ゴミ箱",
+            "捨てて",
+            "ファイル削除",
+            "フォルダ削除",
+        ],
+    ),
+    (
         "run_command",
         &[
             "コマンド",
@@ -248,11 +259,29 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "毎週",
         ],
     ),
-    ("slack_send_message", &["slack", "スラック", "slack履歴", "slack history"]),
+    (
+        "slack_send_message",
+        &["slack", "スラック", "slack履歴", "slack history"],
+    ),
     ("discord_send_message", &["discord", "ディスコード"]),
     (
         "gmail_message",
-        &["gmail", "メール", "下書き", "送信", "未読", "受信", "メール一覧"],
+        &[
+            "gmail",
+            "メール",
+            "下書き",
+            "送信",
+            "未読",
+            "受信",
+            "メール一覧",
+            "振り分け",
+            "ラベル",
+            "ゴミメール",
+            "掃除",
+            "アーカイブ",
+            "既読",
+            "ゴミ箱",
+        ],
     ),
     (
         "google_calendar",
