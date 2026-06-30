@@ -1943,8 +1943,8 @@ pub fn open_settings(app: &tauri::AppHandle) {
     }
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("PicoAgent の設定")
-        .inner_size(560.0, 640.0)
-        .min_inner_size(420.0, 480.0)
+        .inner_size(640.0, 640.0)
+        .min_inner_size(480.0, 480.0)
         .build();
 }
 
