@@ -15,6 +15,8 @@ use crate::message::Field;
 
 const MAX_BODY_CHARS: usize = 20_000;
 const MAX_SUBJECT_CHARS: usize = 300;
+const MAX_QUERY_CHARS: usize = 500;
+const MAX_READ_BODY_CHARS: usize = 8_000;
 
 pub struct GmailTool;
 
@@ -75,6 +77,62 @@ fn message_id(response: &Value) -> &str {
         .unwrap_or("unknown")
 }
 
+fn header<'a>(message: &'a Value, name: &str) -> &'a str {
+    message
+        .get("payload")
+        .and_then(|payload| payload.get("headers"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|header| {
+            header
+                .get("name")
+                .and_then(Value::as_str)
+                .map(|value| value.eq_ignore_ascii_case(name))
+                .unwrap_or(false)
+        })
+        .and_then(|header| header.get("value"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
+
+fn decode_gmail_body(data: &str) -> String {
+    URL_SAFE_NO_PAD
+        .decode(data)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .unwrap_or_default()
+}
+
+fn extract_text_part(payload: &Value) -> String {
+    if payload
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .map(|mime| mime.starts_with("text/plain"))
+        .unwrap_or(false)
+    {
+        if let Some(data) = payload
+            .get("body")
+            .and_then(|body| body.get("data"))
+            .and_then(Value::as_str)
+        {
+            return decode_gmail_body(data);
+        }
+    }
+    for part in payload
+        .get("parts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = extract_text_part(part);
+        if !text.trim().is_empty() {
+            return text;
+        }
+    }
+    String::new()
+}
+
 fn build_raw_message(args: &Value) -> Result<String, String> {
     let to = string_arg(args, "to")?;
     let subject = string_arg(args, "subject")?;
@@ -130,11 +188,19 @@ impl Tool for GmailTool {
         json!({
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "get", "draft", "send"],
+                    "description": "list はメール一覧、get は本文取得、draft は下書き作成、send は即送信。省略時は mode または draft。"
+                },
                 "mode": {
                     "type": "string",
                     "enum": ["draft", "send"],
-                    "description": "draft は下書き作成、send は即送信。省略時は draft。"
+                    "description": "旧互換。draft は下書き作成、send は即送信。"
                 },
+                "q": { "type": "string", "description": "list の Gmail 検索クエリ。例: is:unread newer_than:7d" },
+                "max_results": { "type": "integer", "minimum": 1, "maximum": 10, "description": "list の最大件数。" },
+                "id": { "type": "string", "description": "get の Gmail message id。" },
                 "to": { "type": "string", "description": "宛先メールアドレス。複数の場合はカンマ区切り。" },
                 "cc": { "type": "array", "items": { "type": "string" }, "description": "Cc。" },
                 "bcc": { "type": "array", "items": { "type": "string" }, "description": "Bcc。" },
@@ -142,7 +208,7 @@ impl Tool for GmailTool {
                 "subject": { "type": "string", "description": "件名。" },
                 "body": { "type": "string", "description": "本文。プレーンテキスト。" }
             },
-            "required": ["to", "subject", "body"]
+            "required": []
         })
     }
 
@@ -163,16 +229,132 @@ impl Tool for GmailTool {
             Ok(timeout) => timeout,
             Err(error) => return format!("エラー: {}", error),
         };
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .or_else(|| args.get("mode").and_then(Value::as_str))
+            .unwrap_or("draft")
+            .trim();
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .user_agent("PicoAgent/1.0 (Gmail tool)")
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => return format!("エラー: Gmail API の準備に失敗しました: {}", error),
+        };
+        if action == "list" {
+            let q = args.get("q").and_then(Value::as_str).unwrap_or("is:unread newer_than:7d").trim();
+            if q.chars().count() > MAX_QUERY_CHARS {
+                return format!("エラー: q は {} 文字以内で指定してください。", MAX_QUERY_CHARS);
+            }
+            let max_results = args
+                .get("max_results")
+                .and_then(Value::as_u64)
+                .filter(|value| (1..=10).contains(value))
+                .unwrap_or(5);
+            let max_results_text = max_results.to_string();
+            let response = match client
+                .get(format!("{}/users/me/messages", gmail_base(cfg)))
+                .bearer_auth(&token)
+                .query(&[("q", q), ("maxResults", max_results_text.as_str())])
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
+            };
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if !status.is_success() {
+                return format!("エラー: Gmail API が HTTP {} を返しました。", status);
+            }
+            let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+            let messages: Vec<Value> = parsed
+                .get("messages")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if messages.is_empty() {
+                return "Gmail 一覧: 条件に一致するメールはありません。".to_string();
+            }
+            let mut out = format!("Gmail 一覧（q={}）:", q);
+            for item in messages {
+                let Some(id) = item.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let detail = match client
+                    .get(format!("{}/users/me/messages/{}", gmail_base(cfg), id))
+                    .bearer_auth(&token)
+                    .query(&[("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject"), ("metadataHeaders", "Date")])
+                    .send()
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
+                };
+                let status = detail.status();
+                let body = detail.text().await.unwrap_or_default();
+                if !status.is_success() {
+                    return format!("エラー: Gmail API が HTTP {} を返しました。", status);
+                }
+                let message: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                out.push_str(&format!(
+                    "\n- id={} / {} / {} / {} / {}",
+                    id,
+                    header(&message, "Date"),
+                    header(&message, "From"),
+                    header(&message, "Subject"),
+                    message.get("snippet").and_then(Value::as_str).unwrap_or("")
+                ));
+            }
+            return out;
+        }
+        if action == "get" {
+            let id = match args.get("id").and_then(Value::as_str).map(str::trim) {
+                Some(id) if !id.is_empty() => id,
+                _ => return "エラー: id が指定されていません。".to_string(),
+            };
+            let response = match client
+                .get(format!("{}/users/me/messages/{}", gmail_base(cfg), id))
+                .bearer_auth(&token)
+                .query(&[("format", "full")])
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
+            };
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if !status.is_success() {
+                return format!("エラー: Gmail API が HTTP {} を返しました。", status);
+            }
+            let message: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+            let mut text = message
+                .get("payload")
+                .map(extract_text_part)
+                .unwrap_or_default();
+            if text.trim().is_empty() {
+                text = message.get("snippet").and_then(Value::as_str).unwrap_or("").to_string();
+            }
+            if text.chars().count() > MAX_READ_BODY_CHARS {
+                text = text.chars().take(MAX_READ_BODY_CHARS).collect::<String>();
+                text.push_str("\n…（本文を打ち切り）");
+            }
+            return format!(
+                "Gmail 本文:\nFrom: {}\nDate: {}\nSubject: {}\n\n{}",
+                header(&message, "From"),
+                header(&message, "Date"),
+                header(&message, "Subject"),
+                text
+            );
+        }
         let raw = match build_raw_message(&args) {
             Ok(raw) => raw,
             Err(error) => return format!("エラー: {}", error),
         };
-        let mode = args
-            .get("mode")
-            .and_then(Value::as_str)
-            .unwrap_or("draft")
-            .trim();
-        let (url, payload, action_label) = match mode {
+        let (url, payload, action_label) = match action {
             "send" => (
                 format!("{}/users/me/messages/send", gmail_base(cfg)),
                 json!({ "raw": raw }),
@@ -183,16 +365,7 @@ impl Tool for GmailTool {
                 json!({ "message": { "raw": raw } }),
                 "下書き作成",
             ),
-            _ => return "エラー: mode は draft または send を指定してください。".to_string(),
-        };
-
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("PicoAgent/1.0 (Gmail tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Gmail API の準備に失敗しました: {}", error),
+            _ => return "エラー: action は list / get / draft / send を指定してください。".to_string(),
         };
         let response = match client.post(url).bearer_auth(token).json(&payload).send().await {
             Ok(response) => response,

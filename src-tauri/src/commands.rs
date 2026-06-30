@@ -1216,6 +1216,26 @@ pub async fn settings_list_models(
 }
 
 #[tauri::command]
+pub async fn settings_test_tool(name: String, state: State<'_, AppState>) -> Result<Value, String> {
+    let args = match name.as_str() {
+        "gmail_message" => json!({ "action": "list", "q": "newer_than:7d", "max_results": 1 }),
+        "slack_send_message" => json!({ "action": "test" }),
+        "google_calendar" => json!({ "action": "list", "max_results": 1 }),
+        _ => {
+            return Ok(json!({
+                "ok": false,
+                "message": "このスキルには接続テストがまだありません。設定済みバッジと実際の実行結果で確認してください。"
+            }))
+        }
+    };
+    let result = tools::dispatch(&state.config, &name, args).await;
+    Ok(json!({
+        "ok": !result.starts_with("エラー:"),
+        "message": result,
+    }))
+}
+
+#[tauri::command]
 pub async fn settings_save(
     mut patch: Map<String, Value>,
     state: State<'_, AppState>,
@@ -1337,6 +1357,28 @@ pub async fn settings_save(
     }))
 }
 
+#[tauri::command]
+pub fn pet_schedule_runs(app: AppHandle) -> Result<Value, String> {
+    Ok(json!(crate::scheduler::load_run_history(&app)))
+}
+
+#[tauri::command]
+pub async fn pet_rerun_schedule_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Value, String> {
+    crate::scheduler::rerun_task(&app, &state.config, &task_id)
+        .await
+        .map(|record| json!(record))
+}
+
+#[tauri::command]
+pub fn pet_open_settings(app: AppHandle) -> Result<(), String> {
+    open_settings(&app);
+    Ok(())
+}
+
 /// 設定反映のための再起動相当処理。重い反映（モデル DL・エンジン/Aivis 起動・
 /// キャラ読込）を起動シーケンス（ローディング画面）でまとめて行うための共通入口。
 ///
@@ -1406,6 +1448,11 @@ pub fn restart_app(
                 }
             });
         }
+    }
+
+    // 設定画面から再初期化した場合は、古い設定ウィンドウを残さない。
+    if let Some(settings) = app.get_webview_window("settings") {
+        let _ = settings.close();
     }
 
     // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。

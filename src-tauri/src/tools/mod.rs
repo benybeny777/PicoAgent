@@ -248,9 +248,12 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "毎週",
         ],
     ),
-    ("slack_send_message", &["slack", "スラック"]),
+    ("slack_send_message", &["slack", "スラック", "slack履歴", "slack history"]),
     ("discord_send_message", &["discord", "ディスコード"]),
-    ("gmail_message", &["gmail", "メール", "下書き", "送信"]),
+    (
+        "gmail_message",
+        &["gmail", "メール", "下書き", "送信", "未読", "受信", "メール一覧"],
+    ),
     (
         "google_calendar",
         &["calendar", "カレンダー", "予定", "スケジュール"],

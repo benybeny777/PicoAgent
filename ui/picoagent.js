@@ -36,6 +36,9 @@ window.picoagent = {
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
+  scheduleRuns: () => call("pet_schedule_runs"),
+  rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
+  openSettings: () => call("pet_open_settings"),
   alarms: () => call("pet_alarms"),
   alarmWake: (id) => call("pet_alarm_wake", { id }),
   speak: (text) => call("pet_speak", { text }),
@@ -96,6 +99,7 @@ window.picoagent = {
   settings: {
     load: () => call("settings_load"),
     listModels: (id) => call("settings_list_models", { id }),
+    testTool: (name) => call("settings_test_tool", { name }),
     save: (patch) => call("settings_save", { patch }),
   },
 };

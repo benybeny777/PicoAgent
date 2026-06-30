@@ -746,6 +746,35 @@ function configStatus(tool, values) {
   return { label: "設定済み", tone: "ok" };
 }
 
+function supportsConnectionTest(tool) {
+  return ["gmail_message", "slack_send_message", "google_calendar"].includes(tool.name);
+}
+
+function buildConnectionTest(tool) {
+  const wrap = el("div", { className: "connection-test" });
+  const button = el("button", { type: "button", textContent: "接続テスト" });
+  const result = el("div", { className: "connection-test-result", textContent: "保存済みの設定値で確認します。" });
+  button.addEventListener("click", async event => {
+    event.stopPropagation();
+    button.disabled = true;
+    result.className = "connection-test-result";
+    result.textContent = "確認中…";
+    try {
+      const response = await window.picoagent.settings.testTool(tool.name);
+      result.className = `connection-test-result ${response.ok ? "ok" : "error"}`;
+      result.textContent = response.message || (response.ok ? "OK" : "確認できませんでした");
+    } catch (error) {
+      logApp("warn", "スキル接続テストに失敗しました", `${tool.name}: ${errorDetail(error)}`);
+      result.className = "connection-test-result error";
+      result.textContent = `接続テストに失敗: ${error.message || error}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  wrap.append(button, result);
+  return wrap;
+}
+
 function buildSkillGuide(tools) {
   const guide = el("div", { className: "skill-guide" });
   const header = el("div", { className: "skill-guide-head" }, [
@@ -794,6 +823,9 @@ function renderSkillCard(tool, values) {
       tool.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
     );
     panel.hidden = true;
+    if (supportsConnectionTest(tool)) {
+      panel.append(buildConnectionTest(tool));
+    }
     if (tool.name === "alarm") {
       // 目覚ましは JSON ではなく、時刻ピッカー＋曜日チェックの専用フォームで編集する。
       panel.append(buildAlarmEditor(values.PICOAGENT_ALARMS));

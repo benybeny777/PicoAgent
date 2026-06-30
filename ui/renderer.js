@@ -155,15 +155,56 @@ function renderNoticePanel() {
     body.className = "notice-body";
     body.textContent = notice.body || "";
     item.append(title, meta, body);
+    if (notice.kind === "schedule" || notice.taskId) {
+      const actions = document.createElement("div");
+      actions.className = "notice-actions";
+      if (notice.taskId) {
+        const rerun = document.createElement("button");
+        rerun.type = "button";
+        rerun.textContent = "再実行";
+        rerun.addEventListener("click", async event => {
+          event.stopPropagation();
+          rerun.disabled = true;
+          try {
+            await window.picoagent.rerunScheduleTask(notice.taskId);
+            setStatus("スケジュールを再実行しました");
+          } catch (error) {
+            pushNotice({
+              kind: "schedule",
+              title: "スケジュール再実行失敗",
+              body: error?.message || String(error),
+              ok: false,
+              at: new Date().toISOString(),
+            });
+          } finally {
+            rerun.disabled = false;
+          }
+        });
+        actions.append(rerun);
+      }
+      const settings = document.createElement("button");
+      settings.type = "button";
+      settings.textContent = "設定";
+      settings.addEventListener("click", async event => {
+        event.stopPropagation();
+        try { await window.picoagent.openSettings(); }
+        catch (error) { setStatus(`設定を開けませんでした: ${error?.message || error}`); }
+      });
+      actions.append(settings);
+      item.append(actions);
+    }
     noticeList.append(item);
   }
 }
 
 function pushNotice(notice) {
   const entry = {
+    kind: String(notice?.kind || ""),
     title: String(notice?.title || "通知"),
     body: String(notice?.body || ""),
     ok: notice?.ok !== false,
+    taskId: notice?.taskId ? String(notice.taskId) : "",
+    runId: notice?.runId ? String(notice.runId) : "",
     at: notice?.at || new Date().toISOString(),
   };
   pendingNotices.unshift(entry);
@@ -175,6 +216,30 @@ function pushNotice(notice) {
   setTimeout(() => {
     if (status.textContent === entry.title || status.textContent === `${entry.title}: エラー`) status.textContent = "";
   }, 6000);
+}
+
+async function loadScheduleRunNotices() {
+  try {
+    const runs = await window.picoagent.scheduleRuns();
+    if (!Array.isArray(runs)) return;
+    pendingNotices.length = 0;
+    for (const run of runs.slice(0, 20)) {
+      pendingNotices.push({
+        kind: "schedule",
+        title: String(run.title || "スケジュール"),
+        body: String(run.body || ""),
+        ok: run.ok !== false,
+        taskId: run.task_id ? String(run.task_id) : "",
+        runId: run.id ? String(run.id) : "",
+        at: run.at || "",
+      });
+    }
+    unreadNoticeCount = 0;
+    renderNoticePanel();
+    updateNoticeBadge();
+  } catch (error) {
+    logApp("warn", "スケジュール実行履歴の読み込みに失敗しました", errorDetail(error));
+  }
 }
 
 function appendBootLog(text, kind = "info") {
@@ -1858,6 +1923,7 @@ function startAlarmPolling() {
   applyChatterConfig(info); // アイドル雑談タイマーを開始。
   startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
+  loadScheduleRunNotices(); // 前回までのスケジュール実行履歴を通知一覧へ復元。
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);

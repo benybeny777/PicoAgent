@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 
@@ -20,6 +20,7 @@ const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
 const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
+const MAX_RUN_HISTORY: usize = 100;
 
 fn default_true() -> bool {
     true
@@ -64,6 +65,18 @@ pub struct ScheduledTask {
     pub tool_args: Value,
     #[serde(default)]
     pub last_run_minute: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScheduledRunRecord {
+    pub id: String,
+    pub task_id: String,
+    pub title: String,
+    pub kind: String,
+    pub target: String,
+    pub ok: bool,
+    pub at: String,
+    pub body: String,
 }
 
 const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -193,6 +206,105 @@ pub fn save(cfg: &Config, tasks: &[ScheduledTask]) -> anyhow::Result<()> {
         Value::String(serde_json::to_string(tasks)?),
     );
     cfg.set_all(patch)
+}
+
+fn run_history_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("schedule-runs.json"))
+}
+
+pub fn load_run_history(app: &AppHandle) -> Vec<ScheduledRunRecord> {
+    let Some(path) = run_history_path(app) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn save_run_history(app: &AppHandle, records: &[ScheduledRunRecord]) -> anyhow::Result<()> {
+    let Some(path) = run_history_path(app) else {
+        anyhow::bail!("app_data_dir を取得できませんでした");
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(records)?)?;
+    Ok(())
+}
+
+fn task_title(task: &ScheduledTask) -> String {
+    if !task.label.trim().is_empty() {
+        return task.label.clone();
+    }
+    if task.kind.trim().eq_ignore_ascii_case("tool") {
+        format!("スケジュール: {}", task.tool_name)
+    } else {
+        format!("スケジュール: {}", task.program)
+    }
+}
+
+fn task_target(task: &ScheduledTask) -> String {
+    if task.kind.trim().eq_ignore_ascii_case("tool") {
+        format!("{} {}", task.tool_name, task.tool_args)
+    } else {
+        format!("{} {}", task.program, task.args.join(" "))
+    }
+}
+
+fn new_run_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("sr{nanos}")
+}
+
+fn append_run_history(
+    app: &AppHandle,
+    task: &ScheduledTask,
+    result: &str,
+    at: &str,
+) -> ScheduledRunRecord {
+    let record = ScheduledRunRecord {
+        id: new_run_id(),
+        task_id: task.id.clone(),
+        title: task_title(task),
+        kind: task.kind.clone(),
+        target: task_target(task),
+        ok: !result.starts_with("エラー:"),
+        at: at.to_string(),
+        body: result.to_string(),
+    };
+    let mut records = load_run_history(app);
+    records.insert(0, record.clone());
+    records.truncate(MAX_RUN_HISTORY);
+    if let Err(error) = save_run_history(app, &records) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("スケジュール実行履歴の保存に失敗しました: {error}"),
+        );
+    }
+    record
+}
+
+fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
+    let _ = app.emit(
+        "pet:notice",
+        json!({
+            "kind": "schedule",
+            "title": record.title,
+            "body": record.body,
+            "ok": record.ok,
+            "taskId": record.task_id,
+            "runId": record.id,
+            "at": record.at,
+        }),
+    );
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -566,27 +678,22 @@ pub async fn tick(app: &AppHandle, cfg: &Config) {
     for task in due {
         let result = execute_task(app, cfg, &task).await;
         crate::log_paths::append_app_log(app, &result);
-        let title = if task.label.trim().is_empty() {
-            if task.kind.trim().eq_ignore_ascii_case("tool") {
-                format!("スケジュール: {}", task.tool_name)
-            } else {
-                format!("スケジュール: {}", task.program)
-            }
-        } else {
-            task.label.clone()
-        };
-        let _ = app.emit(
-            "pet:notice",
-            serde_json::json!({
-                "kind": "schedule",
-                "title": title,
-                "body": result,
-                "ok": !result.starts_with("エラー:"),
-                "taskId": task.id,
-                "at": now.to_rfc3339(),
-            }),
-        );
+        let record = append_run_history(app, &task, &result, &now.to_rfc3339());
+        emit_run_notice(app, &record);
     }
+}
+
+pub async fn rerun_task(app: &AppHandle, cfg: &Config, task_id: &str) -> Result<ScheduledRunRecord, String> {
+    let task = load(cfg)
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| format!("指定されたスケジュールタスクは見つかりません: {task_id}"))?;
+    let now = Local::now().to_rfc3339();
+    let result = execute_task(app, cfg, &task).await;
+    crate::log_paths::append_app_log(app, &result);
+    let record = append_run_history(app, &task, &result, &now);
+    emit_run_notice(app, &record);
+    Ok(record)
 }
 
 pub fn start(app: AppHandle) {
