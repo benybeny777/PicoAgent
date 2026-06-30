@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -15,6 +15,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat};
 use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
 use serde_json::{json, Value};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use super::{Tool, ToolReg};
@@ -161,6 +162,69 @@ fn minutes_path_from_transcript(transcript_path: &Path) -> PathBuf {
         }
     }
     transcript_path.with_extension("minutes.md")
+}
+
+fn bundled_whisper_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        dirs.push(cwd.join("src-tauri/resources/bundled/whisper"));
+        dirs.push(cwd.join("resources/bundled/whisper"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.join("resources/bundled/whisper"));
+            dirs.push(parent.join("../Resources/resources/bundled/whisper"));
+            dirs.push(parent.join("../../resources/bundled/whisper"));
+        }
+    }
+    dirs
+}
+
+fn bundled_whisper_dir() -> Option<PathBuf> {
+    bundled_whisper_dirs()
+        .into_iter()
+        .find(|path| path.join(whisper_exe_name()).exists())
+}
+
+fn whisper_exe_name() -> &'static str {
+    if cfg!(windows) {
+        "whisper-cli.exe"
+    } else {
+        "whisper-cli"
+    }
+}
+
+fn first_bundled_model(dir: &Path) -> Option<PathBuf> {
+    let model_dir = dir.join("models");
+    let entries = std::fs::read_dir(model_dir).ok()?;
+    let mut models: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .collect();
+    models.sort();
+    models.into_iter().next()
+}
+
+fn transcribe_program(cfg: &Config) -> String {
+    let configured = cfg.get("PICOAGENT_TRANSCRIBE_PROGRAM", "");
+    if !configured.trim().is_empty() {
+        return configured;
+    }
+    bundled_whisper_dir()
+        .map(|dir| dir.join(whisper_exe_name()).to_string_lossy().to_string())
+        .unwrap_or_else(|| "whisper-cli".to_string())
+}
+
+fn transcribe_model(cfg: &Config) -> String {
+    let configured = cfg.get("PICOAGENT_TRANSCRIBE_MODEL", "");
+    if !configured.trim().is_empty() {
+        return configured;
+    }
+    bundled_whisper_dir()
+        .and_then(|dir| first_bundled_model(&dir))
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default()
 }
 
 fn wav_spec(config: &cpal::SupportedStreamConfig) -> WavSpec {
@@ -407,6 +471,62 @@ fn trim_output(bytes: &[u8]) -> String {
     )
 }
 
+async fn run_transcribe_command(
+    program: &str,
+    args_list: &[String],
+    timeout: u64,
+) -> Result<Output, String> {
+    let mut child = Command::new(program)
+        .args(args_list)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("エラー: ローカル文字起こしを起動できません: {error}"))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+
+    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => {
+            return Err(format!(
+                "エラー: ローカル文字起こしの終了待ちに失敗しました: {error}"
+            ))
+        }
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(format!(
+                "エラー: ローカル文字起こしが {timeout} 秒でタイムアウトしました。"
+            ));
+        }
+    };
+    let stdout = stdout_task.await.unwrap_or_default();
+    let stderr = stderr_task.await.unwrap_or_default();
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
 async fn transcribe(cfg: &Config, args: &Value) -> String {
     let base = meeting_root(cfg);
     let audio = if let Some(audio_text) = args
@@ -434,13 +554,13 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
     if !audio.exists() {
         return format!("エラー: 音声ファイルが見つかりません: {}", audio.display());
     }
-    let program = cfg.get("PICOAGENT_TRANSCRIBE_PROGRAM", "whisper-cli");
-    let model = cfg.get("PICOAGENT_TRANSCRIBE_MODEL", "");
+    let program = transcribe_program(cfg);
+    let model = transcribe_model(cfg);
     if model.trim().is_empty() {
         return super::config_guide(
             "ローカル文字起こし",
             &["PICOAGENT_TRANSCRIBE_MODEL"],
-            "whisper.cpp などのローカル音声認識モデル（例: ggml-large-v3-turbo.bin）を指定してください。外部APIは使いません。",
+            "npm run setup:whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
         );
     }
     let output_stem = output_stem(&audio);
@@ -462,22 +582,9 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
         .ok()
         .filter(|value| (10..=7200).contains(value))
         .unwrap_or(1800);
-    let output = match tokio::time::timeout(
-        Duration::from_secs(timeout),
-        Command::new(&program)
-            .args(&args_list)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output(),
-    )
-    .await
-    {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => return format!("エラー: ローカル文字起こしを起動できません: {error}"),
-        Err(_) => {
-            return format!("エラー: ローカル文字起こしが {timeout} 秒でタイムアウトしました。")
-        }
+    let output = match run_transcribe_command(&program, &args_list, timeout).await {
+        Ok(output) => output,
+        Err(error) => return error,
     };
     if !output.status.success() {
         return format!(
@@ -677,13 +784,13 @@ impl Tool for MeetingRecorderTool {
             ),
             Field::new(
                 "PICOAGENT_TRANSCRIBE_PROGRAM",
-                "ローカル文字起こしコマンド",
+                "ローカル文字起こしコマンド（手動設定が最優先、空なら同梱Whisper）",
                 "text",
-                "whisper-cli",
+                "",
             ),
             Field::new(
                 "PICOAGENT_TRANSCRIBE_MODEL",
-                "ローカル文字起こしモデル",
+                "ローカル文字起こしモデル（手動設定が最優先、空なら同梱モデル）",
                 "text",
                 "",
             ),

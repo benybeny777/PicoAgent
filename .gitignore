@@ -10,6 +10,8 @@ src-tauri/resources/bundled/engine/*
 !src-tauri/resources/bundled/engine/.gitkeep
 src-tauri/resources/bundled/aivis/*
 !src-tauri/resources/bundled/aivis/.gitkeep
+src-tauri/resources/bundled/whisper/*
+!src-tauri/resources/bundled/whisper/.gitkeep
 src-tauri/resources/engine/
 src-tauri/resources/aivis/*
 !src-tauri/resources/aivis/.gitkeep

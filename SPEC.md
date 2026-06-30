@@ -187,6 +187,16 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。例外として `rin` は AivisHub「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`mai` は AivisHub「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を既定声に使う（`default_character_tts_voice` で申告）。`pet_prepare_voice_model` と `pet_speak` は、話者 UUID が `/speakers` に無ければ `/aivm_models/install` へ AIVMX ダウンロード URL を渡してモデルを追加し、その後 `/speakers` から話者 UUID＋スタイル名で**実 style ID を実行時に解決**して合成する。global style ID はエンジンが導入時に算出するためハードコードせず（`character.json` の `styleId` と `RIN_AIVIS_SPEAKER` は解決失敗時のフォールバックに留める）。ユーザーが上書き設定で明示した speaker は実行時解決せずそのまま使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
+### 同梱Whisper CLI（`meeting_recorder`）
+
+録音文字起こしには whisper.cpp の `whisper-cli` をCLI実行で使う。常駐サーバは立てず、ポートも使わないため、ユーザーが手動で起動している別Whisperサーバや別ツールとはポート競合しない。
+
+- 実行ファイルとモデルはリポジトリに含めず、`scripts/fetch-whisper.mjs`（`npm run setup:whisper`）で PicoAgent 管理下の専用ディレクトリ `src-tauri/resources/bundled/whisper/` に取得する。既存の手動インストール先、グローバルPATH、常駐サーバ用ポートには既定で触れない。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
+- `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されている場合は、手動インストール済みの実行ファイル・モデルを最優先する。空の場合だけ同梱 `whisper-cli` と同梱モデルを使う。
+- 文字起こし時は `whisper-cli` を子プロセスとして1回だけ起動し、完了・失敗・タイムアウトで終了する。標準入力は使わず、`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` で上限時間を設ける。
+- Windows のアンインストールでは、PicoAgent 管理下の `resources/bundled/whisper/` と一時展開先 `%TEMP%\picoagent-whisper` だけを削除する。外部に手動導入した `whisper-cli` やモデルは削除しない。
+- `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` を追加する。既定は whisper.cpp の tinydiarize 用 `-tdrz` だが、話者分類の精度とマーカー形式は利用するローカル実装・モデルに依存する。
+
 ---
 
 ## スキル（ツール）コネクタ
@@ -233,7 +243,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `focus_timer` | 集中タイマーと作業見守り。終了時または指定間隔ごとに声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。見守りは repeat_minutes で次回へ繰り返す |
 | `praise_log` | できたこと・進捗・がんばったことを保存し、あとで振り返る | `PICOAGENT_PRAISE_LOG` に保存。最大100件 |
 | `daily_briefing` | おでかけ前チェック。天気・控えている通知をまとめる | `weather` を内部呼び出し。APIキー不要 |
-| `meeting_recorder` | マイク録音をローカルWAVへ保存し、ローカルWhisper系コマンドで文字起こしし、議事録Markdownを生成する。`diarize=true` で話者分類用の追加引数を渡す | 既定保存先は共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/`。`PICOAGENT_MEETING_ROOT` で任意上書き可。外部APIなし。話者分類は利用するローカルWhisper実装・モデルの対応範囲に依存 |
+| `meeting_recorder` | マイク録音をローカルWAVへ保存し、ローカルWhisper系コマンドで文字起こしし、議事録Markdownを生成する。`diarize=true` で話者分類用の追加引数を渡す | 既定保存先は共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/`。`PICOAGENT_MEETING_ROOT` で任意上書き可。`PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先で、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperは1回実行のCLIで、常駐サーバやポートを使わない。外部APIなし |
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし |
@@ -387,8 +397,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | 空 | meeting_recorder | 録音WAV・文字起こし・議事録保存の許可ルート。空なら共通 `PICOAGENT_WORKSPACE_ROOT` を使う |
-| `PICOAGENT_TRANSCRIBE_PROGRAM` | `whisper-cli` | meeting_recorder | ローカル文字起こし実行ファイル |
-| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder | ローカルWhisperモデルのパス |
+| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。同梱CLIはポートを開かない |
+| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder | ローカルWhisperモデルのパス。手動設定が最優先、空なら同梱モデル |
 | `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder | 文字起こし実行時の引数テンプレート |
 | `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder | `diarize=true` 時に追加するローカル話者分類引数 |
 | `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder | ローカル文字起こしタイムアウト秒（10〜7200） |

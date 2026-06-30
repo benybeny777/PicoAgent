@@ -30,6 +30,7 @@
   - 子プロセスは終了時に `kill` し、`wait` でハンドルまで回収する（ゾンビ・ハンドルリークを残さない）。
   - `reqwest` の `is_up` などプローブ系には `timeout` を付ける（接続が永久に滞留しないようにする）。長時間ストリーミング（モデル DL・生成）は全体 timeout を付けない代わりに接続自体の滞留に注意する。
   - フロントの `URL.createObjectURL` は再生終了・失敗・中断で必ず `revokeObjectURL` する。`setInterval` 等のタイマーは全経路で `clearInterval` する。
+- ユーザーから明示指示がない限り、同梱実行ファイル・同梱モデル・同梱ランタイムは PicoAgent 管理下の専用ディレクトリ（原則 `src-tauri/resources/bundled/<機能名>/`、実行時データは `app_data_dir` 配下）に設置し、既存の手動インストール先・グローバルPATH・共有ポートを既定で使わない。手動インストールを使う場合は設定で明示されたときだけ優先し、同梱物のアンインストール・一時ファイル削除は PicoAgent 管理下のパスだけを対象にする。
 
 ## 設定値・シークレット
 
@@ -86,6 +87,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
 | `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
+| `scripts/fetch-whisper.mjs` | 同梱Whisper CLIとモデル取得（`npm run setup:whisper`） |
 | `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
 | `scripts/build-ui-dist.mjs` | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
@@ -114,16 +116,17 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │   ├── Cargo.toml / build.rs / tauri.conf.json
 │   ├── capabilities/default.json   ← 権限（ACL）
 │   ├── icons/                      ← 生成アイコン一式
-│   ├── resources/bundled/          ← 同梱物（engine/aivis。git 管理外、setup:* で取得）
+│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper。git 管理外、setup:* で取得）
 │   └── src/
 │       ├── main.rs / lib.rs / commands.rs / menu.rs
 │       ├── config.rs / agent.rs / message.rs / engine.rs
 │       ├── providers/{mod,local,ollama,openai}.rs ← 叩く AI（.rs を足すと自動登録）
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── scripts/fetch-engine.mjs    ← 同梱エンジン取得
+├── scripts/fetch-whisper.mjs   ← 同梱Whisper CLIとモデル取得
 ├── scripts/sync-characters.mjs ← characters/ を ui/assets/characters/ へ同期
 ├── scripts/build-ui-dist.mjs   ← ui/ を ui-dist/ へコピー（build は簡易 minify）
-├── package.json                ← npm run setup:engine / sync:characters / dev / build / tauri
+├── package.json                ← npm run setup:engine / setup:whisper / sync:characters / dev / build / tauri
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ```

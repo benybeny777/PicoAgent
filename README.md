@@ -36,6 +36,7 @@
 ```powershell
 npm install
 npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
+npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合）
 npm run dev
 ```
 
@@ -117,7 +118,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 |---|---|---|
 | 叩くAI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` | 使用するプロバイダとモデル。既定は同梱ローカルエンジンの `local` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` | 同梱エンジンで使うモデルプリセットやカスタムGGUF URL |
-| ローカル文字起こし | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` / `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | Whisper系ローカルコマンド、モデル、話者分類オプション |
+| ローカル文字起こし | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` / `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | Whisper系ローカルコマンド、モデル、話者分類オプション。手動設定が最優先、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperはサーバを立てずポートを使わない |
 | OpenAI互換 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI互換プロバイダを使う場合だけ設定 |
 | Claude | `PICOAGENT_ANTHROPIC_API_KEY` / `PICOAGENT_ANTHROPIC_MODEL` | Claude プロバイダを使う場合だけ設定 |
 | DeepSeek | `PICOAGENT_DEEPSEEK_API_KEY` / `PICOAGENT_DEEPSEEK_MODEL` / `PICOAGENT_DEEPSEEK_THINKING` | DeepSeek プロバイダを使う場合だけ設定 |
@@ -148,10 +149,11 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 
 ```powershell
 npm run setup:engine   # 同梱エンジンを resources/bundled/engine へ取得（未取得の場合）
+npm run setup:whisper  # 同梱Whisperを resources/bundled/whisper へ取得（録音文字起こしを使う場合）
 npm run build
 ```
 
-`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジンと Aivis を確認し、未取得なら `src-tauri/resources/bundled/` へ取得してから Tauri を起動します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI を確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
 
 配布ビルドでは `scripts/build-ui-dist.mjs --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
 
