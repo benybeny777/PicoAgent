@@ -95,6 +95,10 @@ window.picoagent = {
   // ドロップされたファイルの内容を抽出してテキストを返す（xlsx/docx/pptx/csv/テキスト等）。
   readFileContent: (name, dataUrl) => call("pet_read_file_content", { name, dataB64: dataUrl }),
   engineStatus: () => call("engine_status"),
+  // ダウンロード済みローカルモデル(GGUF)の一覧を取得する。
+  listDownloadedModels: () => call("pet_list_downloaded_models"),
+  // ダウンロード済みモデルを1つ削除してディスクを解放する。
+  deleteDownloadedModel: (name) => call("pet_delete_downloaded_model", { name }),
   restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {
     load: () => call("settings_load"),

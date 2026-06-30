@@ -40,7 +40,7 @@ npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音�
 npm run dev
 ```
 
-- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。手動選択では Gemma / Qwen / Llama / Mistral / Phi / DeepSeek 系の主要 GGUF プリセットも選べます。設定画面ではローカルモデルを「種類 → サイズ」で選択でき、推奨VRAM・推奨RAM・ダウンロード目安を表示します。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示され、モデル変更時は必要なモデルを取得して同梱エンジンを再起動します。
+- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。手動選択では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットも選べます。設定画面ではローカルモデルを「種類 → サイズ」で選択でき、推奨VRAM・推奨RAM・ダウンロード目安を表示します。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示され、モデル変更時は必要なモデルを取得して同梱エンジンを再起動します。設定画面の「叩くAI」タブには「ダウンロード済みモデル」セクションがあり、取得済み GGUF を一覧・サイズ確認し、使わないモデルを削除してディスクを空けられます（使用中のモデルは削除できません）。
 - Ollama を使いたい場合は `ollama serve` 後に右クリック →「設定…」でプロバイダを切り替えます（任意）。Ollama 選択時はローカルのモデル一覧を読み込み、モデル欄から選べます。
 
 > [!NOTE]

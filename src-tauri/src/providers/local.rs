@@ -133,18 +133,6 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         download_size: "約2.4GB",
         note: "軽量で扱いやすい Phi 系。小さめのモデルを試したい場合向け。",
     },
-    LocalModelPreset {
-        id: "deepseek_r1_qwen7b",
-        family: "DeepSeek",
-        size: "R1 Distill Qwen 7B",
-        label: "選択: DeepSeek R1 Distill Qwen 7B Q4（推論向け）",
-        url: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
-        ctx: "8192",
-        recommended_vram_gb: 6,
-        recommended_ram_gb: 24,
-        download_size: "約4.5GB",
-        note: "推論寄りの DeepSeek 系。重めなのでメモリに余裕がある環境向け。",
-    },
 ];
 
 pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
@@ -153,6 +141,15 @@ pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
 
 pub fn preset_url(id: &str) -> Option<&'static str> {
     preset(id).map(|preset| preset.url)
+}
+
+/// GGUF ファイル名から、対応するプリセットのラベルを引く（ダウンロード済みモデル一覧の表示用）。
+/// URL 末尾のファイル名が一致するプリセットを返す。該当が無ければ None。
+pub fn label_for_filename(file_name: &str) -> Option<&'static str> {
+    LOCAL_MODEL_PRESETS
+        .iter()
+        .find(|preset| preset.url.rsplit('/').next() == Some(file_name))
+        .map(|preset| preset.label)
 }
 
 pub fn model_url(cfg: &Config) -> String {
@@ -246,7 +243,7 @@ impl Provider for Local {
         vec![
             Field::new(
                 "PICOAGENT_LOCAL_MODEL_PRESET",
-                "ローカルモデル（auto/Gemma/Qwen/Llama/Mistral/Phi/DeepSeek/custom）",
+                "ローカルモデル（auto/Gemma/Qwen/Llama/Mistral/Phi/custom）",
                 "text",
                 "auto",
             ),

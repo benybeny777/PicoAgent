@@ -1187,6 +1187,67 @@ function buildDiagnosticsSection() {
   return diagnosticsSec;
 }
 
+function buildDownloadedModelsSection() {
+  const sec = section("ダウンロード済みモデル");
+  sec.append(el("p", { className: "hint", textContent: "ローカルエンジンが取得した GGUF モデルです。使わないモデルを削除してディスクを空けられます（使用中のモデルは削除できません）。" }));
+  const toolbar = el("div", { className: "diagnostics-toolbar" });
+  const refresh = el("button", { type: "button", textContent: "更新" });
+  const total = el("div", { className: "hint", textContent: "" });
+  toolbar.append(refresh, total);
+  const list = el("div", { className: "model-list" });
+  sec.append(toolbar, list);
+
+  async function refreshModels() {
+    refresh.disabled = true;
+    list.replaceChildren(el("div", { className: "hint", textContent: "読み込み中…" }));
+    try {
+      const result = await window.picoagent.listDownloadedModels();
+      const models = Array.isArray(result?.models) ? result.models : [];
+      total.textContent = models.length ? `合計 ${result.totalLabel}（${models.length}件）` : "";
+      list.replaceChildren();
+      if (!models.length) {
+        list.append(el("div", { className: "hint", textContent: "ダウンロード済みのモデルはありません。" }));
+        return;
+      }
+      for (const model of models) {
+        const meta = [model.label || model.name, model.sizeLabel].filter(Boolean).join(" ・ ");
+        const info = el("div", { className: "model-info" }, [
+          el("div", { className: "model-name", textContent: model.name }),
+          el("div", { className: "model-meta", textContent: meta }),
+        ]);
+        const action = model.active
+          ? el("span", { className: "model-active", textContent: "使用中" })
+          : el("button", { type: "button", className: "model-delete", textContent: "削除" });
+        if (!model.active) {
+          action.addEventListener("click", async () => {
+            if (!confirm(`モデル「${model.name}」を削除します。よろしいですか？\n（再度使うときは再ダウンロードが必要です）`)) return;
+            action.disabled = true;
+            try {
+              await window.picoagent.deleteDownloadedModel(model.name);
+              await refreshModels();
+            } catch (error) {
+              logApp("warn", "モデル削除に失敗しました", `${model.name}: ${errorDetail(error)}`);
+              action.disabled = false;
+              alert(`削除に失敗しました: ${error?.message || error}`);
+            }
+          });
+        }
+        list.append(el("div", { className: "model-row" }, [info, action]));
+      }
+    } catch (error) {
+      logApp("warn", "モデル一覧の取得に失敗しました", errorDetail(error));
+      list.replaceChildren(el("div", { className: "hint", textContent: `一覧の取得に失敗しました: ${error?.message || error}` }));
+    } finally {
+      refresh.disabled = false;
+      applySettingsSearch();
+    }
+  }
+
+  refresh.addEventListener("click", refreshModels);
+  refreshModels();
+  return sec;
+}
+
 async function render() {
   renderingSettings = true;
   form.innerHTML = "";
@@ -1353,6 +1414,7 @@ async function render() {
   }
   renderProviderConfig(data.active.providerId);
   panels.providers.append(provSec);
+  panels.providers.append(buildDownloadedModelsSection());
 
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
   panels.diagnostics.append(buildDiagnosticsSection());

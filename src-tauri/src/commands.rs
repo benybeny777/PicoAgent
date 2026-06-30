@@ -1521,6 +1521,98 @@ pub async fn engine_status(app: tauri::AppHandle) -> Result<Value, String> {
     }
 }
 
+/// バイト数を人が読めるサイズ文字列にする（モデル一覧表示用）。
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[unit])
+    } else {
+        format!("{:.1} {}", value, UNITS[unit])
+    }
+}
+
+/// ダウンロード済みのローカルモデル（GGUF）一覧を返す。各要素にファイル名・サイズ・
+/// 対応プリセット名・使用中フラグを付ける。設定画面のモデル管理に使う。
+#[tauri::command]
+pub fn pet_list_downloaded_models(app: AppHandle) -> Result<Value, String> {
+    let dir = crate::engine::models_dir(&app);
+    let active = crate::engine::active_model_filename(&app);
+    let mut models: Vec<Value> = Vec::new();
+    let mut total: u64 = 0;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("gguf") {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let size = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+            total += size;
+            models.push(json!({
+                "name": name,
+                "sizeBytes": size,
+                "sizeLabel": human_size(size),
+                "label": crate::providers::local::label_for_filename(&name),
+                "active": active.as_deref() == Some(name.as_str()),
+            }));
+        }
+    }
+    models.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["name"].as_str().unwrap_or(""))
+    });
+    Ok(json!({
+        "models": models,
+        "dir": dir.to_string_lossy(),
+        "totalBytes": total,
+        "totalLabel": human_size(total),
+    }))
+}
+
+/// ダウンロード済みモデル（GGUF）を1つ物理削除する（PicoAgent 管理下の同梱物のため
+/// ゴミ箱ではなく削除でディスクを解放する）。モデルディレクトリ配下の `.gguf` のみ対象とし、
+/// パストラバーサルと使用中モデルの削除を拒否する。
+#[tauri::command]
+pub fn pet_delete_downloaded_model(app: AppHandle, name: String) -> Result<Value, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || !name.ends_with(".gguf")
+    {
+        return Err("不正なモデル名です。".to_string());
+    }
+    let dir = crate::engine::models_dir(&app);
+    let path = dir.join(&name);
+    // トラバーサル防止: 解決後の親がモデルディレクトリそのものであること。
+    if path.parent() != Some(dir.as_path()) {
+        return Err("モデルディレクトリ外は削除できません。".to_string());
+    }
+    if !path.is_file() {
+        return Err("対象のモデルが見つかりません。".to_string());
+    }
+    // 使用中モデルはエンジンがファイルをロックしており、削除すると不整合になるため拒否する。
+    if crate::engine::active_model_filename(&app).as_deref() == Some(name.as_str()) {
+        return Err(
+            "使用中のモデルは削除できません。先に別のモデルへ切り替えてから削除してください。"
+                .to_string(),
+        );
+    }
+    std::fs::remove_file(&path).map_err(|error| {
+        format!("削除に失敗しました（使用中の可能性があります）: {error}")
+    })?;
+    crate::log_paths::append_app_log(&app, &format!("ダウンロード済みモデルを削除しました: {name}"));
+    Ok(json!({ "ok": true }))
+}
+
 #[tauri::command]
 pub async fn pet_log(
     level: String,

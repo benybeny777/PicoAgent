@@ -86,6 +86,19 @@ fn model_path(app: &AppHandle) -> PathBuf {
     crate::log_paths::bundled_dir(app).join("models").join(name)
 }
 
+/// ダウンロード済みモデルの保存ディレクトリ（`app_data_dir/bundled/models`）。
+pub fn models_dir(app: &AppHandle) -> PathBuf {
+    crate::log_paths::bundled_dir(app).join("models")
+}
+
+/// 現在の設定で使用するモデルの GGUF ファイル名（一覧で「使用中」を判定する用途）。
+pub fn active_model_filename(app: &AppHandle) -> Option<String> {
+    model_path(app)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+}
+
 async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>> {
     let state = app.state::<AppState>();
     let port = local::port(&state.config);

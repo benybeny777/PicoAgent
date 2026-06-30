@@ -60,6 +60,8 @@ pub fn run() {
             commands::pet_open_settings,
             commands::restart_app,
             commands::engine_status,
+            commands::pet_list_downloaded_models,
+            commands::pet_delete_downloaded_model,
             commands::pet_log,
             commands::pet_emotion,
             commands::pet_usage,

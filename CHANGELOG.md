@@ -6,6 +6,11 @@
 
 ## 2026-07-01
 
+### ダウンロード済みモデルの削除機能と DeepSeek ローカルプリセットの削除
+
+- **ダウンロード済みモデルの管理** (`src-tauri/src/commands.rs` / `src-tauri/src/engine.rs` / `src-tauri/src/providers/local.rs` / `ui/settings.js` / `ui/picoagent.js` / `ui/settings.css`): 設定画面「叩くAI」タブに「ダウンロード済みモデル」セクションを追加し、`app_data_dir/bundled/models` 配下の GGUF をファイル名・サイズ・対応プリセット名・使用中フラグ付きで一覧し、不要なモデルを削除してディスクを空けられるようにした。`pet_list_downloaded_models` / `pet_delete_downloaded_model` コマンドを追加。削除はモデルディレクトリ配下の `.gguf` のみを対象とし、パストラバーサルと使用中モデルの削除を拒否する（同梱物のためゴミ箱ではなく物理削除でディスクを解放）。
+- **DeepSeek をローカルモデルプリセットから削除** (`src-tauri/src/providers/local.rs`): `deepseek_r1_qwen7b`（DeepSeek R1 Distill Qwen 7B）プリセットを削除した。R1 distill 系は英語/中国語に寄りやすく日本語キャラ用途に不向きなため。クラウドの DeepSeek プロバイダ（`PICOAGENT_DEEPSEEK_*`）は従来どおり利用できる。
+
 ### reasoning モデル対策・人格固定・通知アイコンの整列
 
 - **`<think>` 推論ブロックの除去** (`src-tauri/src/message.rs` / `src-tauri/src/agent.rs`): DeepSeek-R1 / Qwen3 系などの reasoning モデルが出力する `<think>...</think>`（多くは英語/中国語）を `message::strip_reasoning()` で除去し、最終回答・会話履歴・読み上げに混ざらないようにした。閉じタグの無い未完了の推論は以降を落とす。

@@ -164,14 +164,14 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`scripts/fetch-engine.mjs`（`npm run setup:engine`）で
   `src-tauri/resources/bundled/engine/` に取得。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
-  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Gemma / Qwen / Llama / Mistral / Phi / DeepSeek 系の主要 GGUF プリセットを選べる。`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
+  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットを選べる。`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
   3. `llama-server` は実行時配置の `PicoAgent/bundled/engine/`、同梱配置 `resources/bundled/engine/`、旧同梱配置 `resources/engine/`、開発時の `src-tauri/resources/bundled/engine/` / `src-tauri/resources/engine/` の順に探し、`npm run dev` / `npm run build` は事前に `scripts/fetch-engine.mjs` で同梱配置を確認・取得してから Tauri を起動する。起動時は `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja`
      を spawn（`PICOAGENT_LOCAL_GPU_DEVICE` 指定時は `--device <値>` を追加。Windows は CREATE_NO_WINDOW）。
      既定の同梱ビルドは Vulkan(GPU) 版で、`-ngl 999` により全レイヤを GPU へオフロードする（GPU 非対応環境では自動 CPU フォールバック）。
      `/health` が 200 になったら `engine:status {phase:"ready"}`。前回クラッシュなどで既存 `llama-server` が同じポートに残っている場合は、`/v1/models` のモデルIDが要求中の GGUF と一致する時だけ再利用する。別モデルなら誤用せずエラーにし、残存プロセス停止を促す。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
-- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / Llama / Mistral / Phi / DeepSeek / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
+- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / Llama / Mistral / Phi / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
 - 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。選択中キャラクターの AivisHub 音声モデル導入は `pet_prepare_voice_model` command で起動シーケンス中に明示実行する。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
@@ -323,7 +323,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - スキル設定タブには、`settings_load` が返す各ツールの `name` / `label` / `description` / `configSchema` を使い、カテゴリ見出し付きで全スキルを縦に並べる。各カードには `configSchema` と保存値から「設定不要」「未設定」「一部設定」「設定済み」の状態バッジを表示し、`settings.js` の `approvalPolicy()` が送信前確認・実行前確認・書込/変更・外部読取・低リスクの承認ポリシーを表示する。Gmail / Slack / Googleカレンダーは `settings_test_tool` で保存済み設定の接続テストを実行でき、`diagnose_tool_test()` の診断文で token 未設定、401、403、404、timeout、接続失敗を原因候補として示す。設定を持つカードはクリックで展開し、`alarm` は `buildAlarmEditor`、`task_scheduler` は `buildScheduleEditor` の専用フォームで JSON 保存値を組み立てる。
 - スキル活用ガイドタブには `settings_load` が返す各ツールの `name` / `label` / `description` / `examples` を使い、区分・できること・頼み方例を横断表示する。個別カードだけでは機能全体を把握しづらいため、まず一覧資料として全スキルを見通せるようにする。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。キャラクター一覧は `assets/characters/index.json` と各 `character.json` から表示し、使用中のキャラに「（使用中）」を付け、idle 先頭フレームを丸い小アイコンとして添える。
-- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。未使用プロバイダのAPIキー欄・モデル欄はDOMにも作らず、プロバイダ切替時にフォームを作り直す。保存時は既存設定を土台に表示中入力だけを上書きし、未表示プロバイダの保存済み設定を消さない。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。
+- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。未使用プロバイダのAPIキー欄・モデル欄はDOMにも作らず、プロバイダ切替時にフォームを作り直す。保存時は既存設定を土台に表示中入力だけを上書きし、未表示プロバイダの保存済み設定を消さない。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。「叩くAI」タブには「ダウンロード済みモデル」セクションがあり、`pet_list_downloaded_models`（`app_data_dir/bundled/models` 配下の `.gguf` をファイル名・サイズ・対応プリセット名・使用中フラグ付きで列挙）と `pet_delete_downloaded_model`（指定 GGUF を物理削除）でモデルを管理できる。削除はモデルディレクトリ配下の `.gguf` のみを対象とし、パストラバーサルと使用中モデルの削除を拒否する。同梱物（PicoAgent 管理下）のためゴミ箱ではなく削除でディスクを解放する。
 - 「診断」タブは `engine_status` / `aivis_status` / `pet_usage` / `pet_traces` を読み、選択中プロバイダ・同梱エンジン状態・Aivis状態・今月/累計トークン使用量・直近スキル実行の件数/平均遅延/エラー数をカードで表示する。設定値は変更せず、各取得に失敗した場合も診断カード単位でエラー表示に留める。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化する。反映は「軽い設定は実行中に即反映」「重い設定は再起動して起動シーケンスで反映」に分ける。
@@ -366,7 +366,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
 | `PICOAGENT_TTS_VOLUME` | `100` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映 |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
-| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B/約2.5GB、`qwen25_7b`: Qwen2.5 7B/約4.7GB、`llama32_3b`: Llama 3.2 3B/約2.0GB、`llama31_8b`: Llama 3.1 8B/約4.9GB、`mistral7b`: Mistral 7B/約4.4GB、`phi35mini`: Phi 3.5 mini/約2.4GB、`deepseek_r1_qwen7b`: DeepSeek R1 Distill Qwen 7B/約4.5GB、`custom`） |
+| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B/約2.5GB、`qwen25_7b`: Qwen2.5 7B/約4.7GB、`llama32_3b`: Llama 3.2 3B/約2.0GB、`llama31_8b`: Llama 3.1 8B/約4.9GB、`mistral7b`: Mistral 7B/約4.4GB、`phi35mini`: Phi 3.5 mini/約2.4GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |
