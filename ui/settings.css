@@ -97,20 +97,16 @@ body.searching .tab-panel {
 .tab-panel[hidden] {
   display: none;
 }
-.sub-tabs {
-  position: static;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 2px 0 10px;
-  background: transparent;
+.skill-cat-group {
+  margin-top: 12px;
 }
-.sub-tab {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 11px;
-}
-.sub-tab-panels {
-  padding-top: 2px;
+.skill-cat-head {
+  margin: 0 0 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  border-bottom: 1px solid rgba(129, 117, 135, 0.18);
 }
 
 .section {

@@ -685,7 +685,7 @@ function renderSkillCard(tool, values) {
   return nodes;
 }
 
-function buildSkillCategoryTabs(tools, values) {
+function buildSkillCategoryList(tools, values) {
   const categories = [
     { id: "daily", label: SKILL_CATEGORY_LABELS.daily },
     { id: "info", label: SKILL_CATEGORY_LABELS.info },
@@ -698,51 +698,24 @@ function buildSkillCategoryTabs(tools, values) {
   const grouped = new Map(categories.map(category => [category.id, []]));
   for (const tool of tools) grouped.get(skillCategory(tool)).push(tool);
 
+  // サブタブで隠さず、カテゴリ見出し付きで全スキルを縦に並べる（全件が見つかる）。
+  // 各スキルの設定(⚙)は renderSkillCard 側で既定折りたたみ（クリックで開く）。
   const wrap = el("div", { className: "skill-browser" });
-  const available = categories.filter(category => grouped.get(category.id).length > 0);
-  const tabs = el("div", { className: "tabs sub-tabs", role: "tablist" });
-  const panels = el("div", { className: "tab-panels sub-tab-panels" });
-  available.forEach((category, index) => {
-    const selected = index === 0;
+  for (const category of categories) {
     const toolsInCategory = grouped.get(category.id);
-    const button = el("button", {
-      className: selected ? "tab sub-tab active" : "tab sub-tab",
-      id: `skill-tab-${category.id}`,
-      textContent: `${category.label} ${toolsInCategory.length}`,
-      type: "button",
-    });
-    button.setAttribute("role", "tab");
-    button.setAttribute("aria-selected", selected ? "true" : "false");
-    button.setAttribute("aria-controls", `skill-panel-${category.id}`);
-    const panel = el("div", {
-      className: selected ? "tab-panel sub-tab-panel active" : "tab-panel sub-tab-panel",
-      id: `skill-panel-${category.id}`,
-    });
-    panel.setAttribute("role", "tabpanel");
-    panel.setAttribute("aria-labelledby", button.id);
-    if (!selected) panel.hidden = true;
+    if (!toolsInCategory.length) continue;
+    const group = el("div", { className: "skill-cat-group" });
+    group.append(el("h3", {
+      className: "skill-cat-head",
+      textContent: `${category.label}（${toolsInCategory.length}）`,
+    }));
     const list = el("div", { className: "card-list" });
     for (const tool of toolsInCategory) {
       for (const node of renderSkillCard(tool, values)) list.append(node);
     }
-    panel.append(list);
-    button.addEventListener("click", () => {
-      for (const tab of tabs.querySelectorAll(".sub-tab")) {
-        const active = tab === button;
-        tab.classList.toggle("active", active);
-        tab.setAttribute("aria-selected", active ? "true" : "false");
-      }
-      for (const current of panels.querySelectorAll(".sub-tab-panel")) {
-        const active = current === panel;
-        current.classList.toggle("active", active);
-        current.hidden = !active;
-      }
-      applySettingsSearch();
-    });
-    tabs.append(button);
-    panels.append(panel);
-  });
-  wrap.append(tabs, panels);
+    group.append(list);
+    wrap.append(group);
+  }
   return wrap;
 }
 
@@ -1047,9 +1020,9 @@ async function render() {
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillSec.append(el("p", { className: "hint", textContent: "上の活用ガイドで頼み方を俯瞰できます。下のカテゴリ一覧では、⚙ のあるスキルをクリックすると設定を開けます。" }));
+    skillSec.append(el("p", { className: "hint", textContent: "上の活用ガイドで頼み方を俯瞰できます。下のカテゴリ別一覧で、⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。" }));
     skillSec.append(buildSkillGuide(data.tools));
-    skillSec.append(buildSkillCategoryTabs(data.tools, v));
+    skillSec.append(buildSkillCategoryList(data.tools, v));
   }
   panels.tools.append(skillSec);
 
