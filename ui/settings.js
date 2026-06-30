@@ -941,7 +941,8 @@ async function render() {
     { id: "character", label: "キャラクター" },
     { id: "voice", label: "音声" },
     { id: "providers", label: "叩くAI" },
-    { id: "tools", label: "スキル" },
+    { id: "tools", label: "スキル設定" },
+    { id: "skillguide", label: "スキル活用ガイド" },
     { id: "diagnostics", label: "診断" },
   ]);
 
@@ -1015,16 +1016,25 @@ async function render() {
   });
   panels.character.append(characterSec);
 
-  // --- 導入済みスキル（エージェント機能）。設定があるスキルはクリックでその場に開く ---
-  const skillSec = section("導入済みスキル（エージェント機能）");
+  // --- スキル設定（⚙ のあるスキルはクリックでその場に開く）。活用ガイドとは別タブに分ける ---
+  const skillSec = section("スキル設定");
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillSec.append(el("p", { className: "hint", textContent: "上の活用ガイドで頼み方を俯瞰できます。下のカテゴリ別一覧で、⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。" }));
-    skillSec.append(buildSkillGuide(data.tools));
+    skillSec.append(el("p", { className: "hint", textContent: "カテゴリ別の一覧です。⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。頼み方の例は「スキル活用ガイド」タブを参照。" }));
     skillSec.append(buildSkillCategoryList(data.tools, v));
   }
   panels.tools.append(skillSec);
+
+  // --- スキル活用ガイド（読み取り専用の一覧）。設定とは分離して別タブに置く ---
+  const skillGuideSec = section("スキル活用ガイド");
+  if (!data.tools.length) {
+    skillGuideSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
+  } else {
+    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。設定（APIキー等）は「スキル設定」タブで行います。" }));
+    skillGuideSec.append(buildSkillGuide(data.tools));
+  }
+  panels.skillguide.append(skillGuideSec);
 
   // --- 導入済みキャラクターの一覧（読み取り専用） ---
   const charSec = section("導入済みキャラクター");
