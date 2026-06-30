@@ -21,6 +21,7 @@ let characterSelect;
 let characterPersona;
 let characterSpeaker;
 let characterCatalog;
+const characterManifestCache = new Map();
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
@@ -73,9 +74,20 @@ function markSearchable(node, ...parts) {
 }
 
 function registerInput(key, input, wrapper) {
+  wrapper.dataset.settingKey = key;
   inputs.set(key, input);
   inputWrappers.set(key, wrapper);
   return wrapper;
+}
+
+function unregisterInputsIn(node) {
+  if (!node) return;
+  for (const wrapper of node.querySelectorAll("[data-setting-key]")) {
+    const key = wrapper.dataset.settingKey;
+    if (!key) continue;
+    inputs.delete(key);
+    inputWrappers.delete(key);
+  }
 }
 
 function cloneSettings(value) {
@@ -521,7 +533,7 @@ function createTabs(items) {
 
 function skillCategory(tool) {
   const name = tool.name || "";
-  if (["alarm", "reminder", "focus_timer", "praise_log", "daily_briefing", "clipboard_text", "chitchat", "task_scheduler"].includes(name)) {
+  if (["alarm", "reminder", "focus_timer", "praise_log", "daily_briefing", "clipboard_text", "chitchat", "task_scheduler", "meeting_recorder", "whisper_transcribe"].includes(name)) {
     return "daily";
   }
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
@@ -540,6 +552,103 @@ function skillCategory(tool) {
     return "docs";
   }
   return "other";
+}
+
+const SKILL_CATEGORY_LABELS = {
+  daily: "日常",
+  info: "検索・情報",
+  workspace: "ファイル/実行",
+  connect: "連携",
+  social: "SNS/投稿",
+  docs: "文書",
+  other: "その他",
+};
+
+const SKILL_EXAMPLE_FALLBACKS = {
+  get_time: ["今何時？"],
+  weather: ["今日の東京の天気を教えて"],
+  currency_rates: ["100ドルは何円？"],
+  market_indices: ["今日の日経平均を見て"],
+  rss_feed: ["このRSSの新着を要約して"],
+  web_search: ["最新のAIニュースを調べて"],
+  web_fetch: ["このURLの本文を読んで"],
+  research_report: ["AIスライド生成サービスを出典付きで調査して"],
+  spark_workspace: ["Gensparkみたいに資料一式を作って"],
+  genspark_suite: ["Genspark風の機能を全部やって"],
+  alarm: ["平日の7時に起こして"],
+  reminder: ["15分後に洗濯物を取り込むって教えて"],
+  focus_timer: ["25分集中タイマーを開始して"],
+  praise_log: ["今日できたことを記録して"],
+  daily_briefing: ["出かける前にチェックして"],
+  clipboard_text: ["クリップボードを要約して"],
+  task_scheduler: ["毎朝9時に天気スキルを実行して"],
+  meeting_recorder: ["会議の録音を開始して", "話者分類つきで議事録にして"],
+  whisper_transcribe: ["最新の録音を文字起こしして"],
+  read_file: ["このファイルを読んで"],
+  workspace_files: ["作業フォルダにメモを書いて"],
+  run_command: ["git statusを実行して"],
+  http_api: ["このAPIにPOSTして"],
+  ms_office: ["Wordの文字を置換して"],
+  document_convert: ["このdocxをPDFにして"],
+  pdf_tools: ["このPDFを分割して"],
+  productivity_tools: ["このJSONを整形して", "10kmをmileに換算して"],
+  google_calendar: ["明日の予定を見て"],
+  google_docs: ["Google Docsに追記して"],
+  google_drive: ["Driveから企画書を探して"],
+  google_sheets: ["スプレッドシートに行を追加して"],
+  google_tasks: ["Google Tasksにタスクを追加して"],
+  gmail_message: ["Gmailの返信下書きを作って"],
+  microsoft_graph: ["Outlookで予定を作って"],
+  slack_send_message: ["Slackにメッセージを送って"],
+  discord_send_message: ["Discordに投稿して"],
+  notion: ["Notionにページを作って"],
+  jira: ["Jiraに課題を作って"],
+  linear: ["LinearにIssueを作って"],
+  trello: ["Trelloにカードを追加して"],
+  todoist: ["Todoistにタスクを追加して"],
+  github_issue: ["GitHub Issueを作って"],
+  x_twitter: ["Xに投稿して"],
+  mastodon: ["Mastodonに投稿して"],
+  bluesky: ["Blueskyに投稿して"],
+  reddit: ["Redditのhotを見て"],
+  linkedin: ["LinkedInに投稿して"],
+  misskey: ["Misskeyにノートして"],
+  comfyui_generate: ["ComfyUIで画像を生成して"],
+  image_generate: ["画像を生成して"],
+  chitchat: ["待機中に話題を出して"],
+};
+
+function skillExamples(tool) {
+  const explicit = Array.isArray(tool.examples) ? tool.examples.filter(Boolean) : [];
+  return explicit.length ? explicit : (SKILL_EXAMPLE_FALLBACKS[tool.name] || [`${tool.label || tool.name}を使って`]);
+}
+
+function buildSkillGuide(tools) {
+  const guide = el("div", { className: "skill-guide" });
+  const header = el("div", { className: "skill-guide-head" }, [
+    el("div", { textContent: "区分" }),
+    el("div", { textContent: "スキル" }),
+    el("div", { textContent: "できること" }),
+    el("div", { textContent: "頼み方例" }),
+  ]);
+  guide.append(header);
+  const sorted = [...tools].sort((a, b) => {
+    const ca = skillCategory(a);
+    const cb = skillCategory(b);
+    if (ca !== cb) return Object.keys(SKILL_CATEGORY_LABELS).indexOf(ca) - Object.keys(SKILL_CATEGORY_LABELS).indexOf(cb);
+    return String(a.label || a.name).localeCompare(String(b.label || b.name), "ja");
+  });
+  for (const tool of sorted) {
+    const examples = skillExamples(tool);
+    const row = markSearchable(el("div", { className: "skill-guide-row" }, [
+      el("div", { className: "skill-guide-cat", textContent: SKILL_CATEGORY_LABELS[skillCategory(tool)] || "その他" }),
+      el("div", { className: "skill-guide-name", textContent: tool.label || tool.name }),
+      el("div", { className: "skill-guide-desc", textContent: tool.description || "" }),
+      el("div", { className: "skill-guide-examples" }, examples.slice(0, 2).map(example => el("span", { textContent: example }))),
+    ]), tool.name, tool.label, tool.description, examples.join(" "));
+    guide.append(row);
+  }
+  return guide;
 }
 
 function renderSkillCard(tool, values) {
@@ -578,13 +687,13 @@ function renderSkillCard(tool, values) {
 
 function buildSkillCategoryTabs(tools, values) {
   const categories = [
-    { id: "daily", label: "日常" },
-    { id: "info", label: "検索・情報" },
-    { id: "workspace", label: "ファイル/実行" },
-    { id: "connect", label: "連携" },
-    { id: "social", label: "SNS/投稿" },
-    { id: "docs", label: "文書" },
-    { id: "other", label: "その他" },
+    { id: "daily", label: SKILL_CATEGORY_LABELS.daily },
+    { id: "info", label: SKILL_CATEGORY_LABELS.info },
+    { id: "workspace", label: SKILL_CATEGORY_LABELS.workspace },
+    { id: "connect", label: SKILL_CATEGORY_LABELS.connect },
+    { id: "social", label: SKILL_CATEGORY_LABELS.social },
+    { id: "docs", label: SKILL_CATEGORY_LABELS.docs },
+    { id: "other", label: SKILL_CATEGORY_LABELS.other },
   ];
   const grouped = new Map(categories.map(category => [category.id, []]));
   for (const tool of tools) grouped.get(skillCategory(tool)).push(tool);
@@ -640,9 +749,7 @@ function buildSkillCategoryTabs(tools, values) {
 async function loadCharacterPersona(id) {
   const entry = characterCatalog.characters.find(character => character.id === id);
   if (!entry) throw new Error(`キャラクター ${id} が一覧にありません`);
-  const response = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`キャラクター定義: HTTP ${response.status}`);
-  const manifest = await response.json();
+  const manifest = await loadCharacterManifestForSettings(entry);
   characterDefaultVoices[id] = manifest.voice || {};
   const persona = manifest.persona || {};
   const defaultText = [
@@ -653,6 +760,29 @@ async function loadCharacterPersona(id) {
     persona.systemPrompt || "",
   ].filter(Boolean).join("\n");
   characterPersona.value = characterOverrides[id] || defaultText;
+}
+
+async function loadCharacterManifestForSettings(character) {
+  if (characterManifestCache.has(character.id)) return characterManifestCache.get(character.id);
+  const response = await fetch(`assets/characters/${character.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`キャラクター定義: HTTP ${response.status}`);
+  const manifest = await response.json();
+  characterManifestCache.set(character.id, manifest);
+  return manifest;
+}
+
+async function characterIconUrl(character) {
+  try {
+    const manifest = await loadCharacterManifestForSettings(character);
+    const root = `assets/characters/${character.manifest.replace(/\/character\.json$/, "")}`;
+    const idle = manifest.animations?.idle;
+    const imagePath = idle?.path ? `${idle.path}/00.png` : (manifest.boot?.sleeping || "animations/idle/00.png");
+    const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
+    return `${root}/${imagePath}${version}`;
+  } catch (error) {
+    logApp("warn", "キャラクターアイコンの読込に失敗しました", `${character.id}: ${errorDetail(error)}`);
+    return "";
+  }
 }
 
 function saveCurrentCharacterVoice(id) {
@@ -917,7 +1047,8 @@ async function render() {
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillSec.append(el("p", { className: "hint", textContent: "カテゴリを選び、⚙ のあるスキルをクリックすると設定を開けます。" }));
+    skillSec.append(el("p", { className: "hint", textContent: "上の活用ガイドで頼み方を俯瞰できます。下のカテゴリ一覧では、⚙ のあるスキルをクリックすると設定を開けます。" }));
+    skillSec.append(buildSkillGuide(data.tools));
     skillSec.append(buildSkillCategoryTabs(data.tools, v));
   }
   panels.tools.append(skillSec);
@@ -927,42 +1058,54 @@ async function render() {
   const charList = el("div", { className: "card-list" });
   for (const character of characterCatalog.characters) {
     const name = character.id === selectedCharacter ? `${character.name}（使用中）` : character.name;
-    charList.append(markSearchable(el("div", { className: "card-item" }, [
-      el("div", { className: "card-name", textContent: name }),
-      el("div", { className: "card-desc", textContent: character.description || character.id }),
-    ]), character.id, character.name, character.description));
+    const fallback = el("div", { className: "character-icon-fallback", textContent: String(character.name || character.id || "?").slice(0, 1) });
+    const icon = el("img", { className: "character-icon", alt: `${character.name}のアイコン`, draggable: false });
+    icon.hidden = true;
+    characterIconUrl(character).then(url => {
+      if (!url) return;
+      icon.src = url;
+      icon.hidden = false;
+      fallback.hidden = true;
+    });
+    const card = markSearchable(el("div", { className: "card-item character-card" }, [
+      el("div", { className: "character-icon-wrap" }, [fallback, icon]),
+      el("div", { className: "character-card-text" }, [
+        el("div", { className: "card-name", textContent: name }),
+        el("div", { className: "card-desc", textContent: character.description || character.id }),
+      ]),
+    ]), character.id, character.name, character.description);
+    charList.append(card);
   }
   charSec.append(charList);
   panels.character.append(charSec);
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("叩く AI コネクタの設定");
-  const provBlocks = {};
-  for (const p of data.providers) {
-    if (!p.configSchema?.length) continue;
+  let activeProviderBlock = null;
+  function renderProviderConfig(id) {
+    if (activeProviderBlock) {
+      unregisterInputsIn(activeProviderBlock);
+      activeProviderBlock.remove();
+      activeProviderBlock = null;
+    }
+    const provider = data.providers.find(p => p.id === id);
+    if (!provider?.configSchema?.length) {
+      activeProviderBlock = el("p", { className: "hint", textContent: "このプロバイダに変更できる設定はありません。" });
+      provSec.append(activeProviderBlock);
+      return;
+    }
     const block = markSearchable(
       el("div", { className: "prov-block" }),
-      p.id,
-      p.label,
-      p.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
+      provider.id,
+      provider.label,
+      provider.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
     );
-    block.append(el("div", { className: "subhead", textContent: p.label }));
-    for (const f of p.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
-    block.hidden = p.id !== data.active.providerId;
-    provBlocks[p.id] = block;
+    block.append(el("div", { className: "subhead", textContent: provider.label }));
+    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+    activeProviderBlock = block;
     provSec.append(block);
   }
-  const noProvConfig = el("p", { className: "hint", textContent: "このプロバイダに変更できる設定はありません。" });
-  provSec.append(noProvConfig);
-  function showProviderConfig(id) {
-    let shown = false;
-    for (const [pid, block] of Object.entries(provBlocks)) {
-      block.hidden = pid !== id;
-      if (pid === id) shown = true;
-    }
-    noProvConfig.hidden = shown;
-  }
-  showProviderConfig(data.active.providerId);
+  renderProviderConfig(data.active.providerId);
   panels.providers.append(provSec);
 
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
@@ -970,10 +1113,12 @@ async function render() {
 
   // プロバイダ変更でモデル候補を更新し、選択中プロバイダの設定だけ表示する。
   providerSelect.addEventListener("change", () => {
+    v.PICOAGENT_PROVIDER = providerSelect.value;
     loadModels(providerSelect.value, true);
-    showProviderConfig(providerSelect.value);
+    renderProviderConfig(providerSelect.value);
     updateModelFieldVisibility();
     updateDirtyState();
+    applySettingsSearch();
   });
   inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
     if (providerSelect.value !== "local" || !modelInput) return;
@@ -1030,7 +1175,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
 }
 
 function collect() {
-  const patch = {};
+  const patch = cloneSettings(savedSnapshot || data.values || {});
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }

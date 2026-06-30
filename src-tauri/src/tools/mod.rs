@@ -21,6 +21,9 @@ pub trait Tool: Send + Sync {
     }
     fn description(&self) -> String;
     fn parameters(&self) -> Value;
+    fn examples(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
     fn config_schema(&self) -> Vec<Field> {
         Vec::new()
     }
@@ -197,18 +200,12 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "whisper_transcribe",
+        &["文字起こし", "whisper", "transcribe", "話者", "speaker"],
+    ),
+    (
         "meeting_recorder",
-        &[
-            "録音",
-            "文字起こし",
-            "議事録",
-            "会議メモ",
-            "話者",
-            "speaker",
-            "whisper",
-            "transcribe",
-            "meeting notes",
-        ],
+        &["録音", "議事録", "会議メモ", "meeting notes"],
     ),
     (
         "clipboard_text",
@@ -539,5 +536,6 @@ mod tests {
     fn 会議録音スキルを候補に追加する() {
         let names = schema_names("Whisperで会議を文字起こしして議事録にして");
         assert!(names.contains(&"meeting_recorder".to_string()));
+        assert!(names.contains(&"whisper_transcribe".to_string()));
     }
 }

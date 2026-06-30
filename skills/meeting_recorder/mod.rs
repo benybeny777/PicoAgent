@@ -750,11 +750,19 @@ impl Tool for MeetingRecorderTool {
     }
 
     fn label(&self) -> &'static str {
-        "ローカル録音・文字起こし議事録"
+        "会議記録"
     }
 
     fn description(&self) -> String {
-        "マイク録音をローカルWAVへ保存し、ローカル音声認識コマンドで文字起こしして議事録を作る。外部APIは使わない。".to_string()
+        "会議向けに、マイク録音、既存音声の文字起こし、文字起こしからの議事録Markdown作成までまとめて扱う。外部APIは使わない。".to_string()
+    }
+
+    fn examples(&self) -> Vec<&'static str> {
+        vec![
+            "会議の録音を開始して",
+            "録音を止めて",
+            "話者分類つきで議事録にして",
+        ]
     }
 
     fn parameters(&self) -> Value {

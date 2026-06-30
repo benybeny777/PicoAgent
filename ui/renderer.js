@@ -813,6 +813,15 @@ async function renderReplySpeaking(text) {
   if (!currentVoice) setAnimation("idle");
 }
 
+function showStartupReadyMessage(options = {}) {
+  if (busy || !composer.hidden) return;
+  const text = `${bootCharacterName}の準備ができたよ。`;
+  const current = String(reply.textContent || "").trim();
+  if (current && current !== "こんにちは。クリックして話しかけてね。") return;
+  renderReply(text);
+  if (options.speak !== false) speakReply(text);
+}
+
 function canShowNotice() {
   return !busy && composer.hidden && !currentVoice && !bubble.classList.contains("fullscreen");
 }
@@ -1401,8 +1410,7 @@ function applyEngineStatus(s) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
     } else {
-      setStatus("準備ができたよ。");
-      setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
+      showStartupReadyMessage();
     }
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);

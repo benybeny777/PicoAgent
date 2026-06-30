@@ -209,8 +209,10 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
+    fn label(&self) -> &'static str;
     fn description(&self) -> String;
     fn parameters(&self) -> Value;            // JSON Schema
+    fn examples(&self) -> Vec<&'static str> { Vec::new() }
     fn config_schema(&self) -> Vec<Field> { Vec::new() }
     async fn run(&self, cfg: &Config, args: Value) -> String;  // 失敗もエラー文字列で返す
 }
@@ -243,11 +245,12 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `focus_timer` | 集中タイマーと作業見守り。終了時または指定間隔ごとに声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。見守りは repeat_minutes で次回へ繰り返す |
 | `praise_log` | できたこと・進捗・がんばったことを保存し、あとで振り返る | `PICOAGENT_PRAISE_LOG` に保存。最大100件 |
 | `daily_briefing` | おでかけ前チェック。天気・控えている通知をまとめる | `weather` を内部呼び出し。APIキー不要 |
-| `meeting_recorder` | マイク録音をローカルWAVへ保存し、ローカルWhisper系コマンドで文字起こしし、議事録Markdownを生成する。`diarize=true` で話者分類用の追加引数を渡す | 既定保存先は共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/`。`PICOAGENT_MEETING_ROOT` で任意上書き可。`PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先で、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperは1回実行のCLIで、常駐サーバやポートを使わない。外部APIなし |
+| `meeting_recorder` | 会議向けの複合スキル。マイク録音、既存音声の文字起こし、文字起こしからの議事録Markdown生成を `action` で扱う。`diarize=true` で話者分類用の追加引数を渡す | 既定保存先は共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/`。`PICOAGENT_MEETING_ROOT` で任意上書き可。`PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先で、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperは1回実行のCLIで、常駐サーバやポートを使わない。外部APIなし |
+| `whisper_transcribe` | 既存音声をローカルで文字起こしする単体スキル。スキル一覧の表示タイトルは「音声文字起こし」 | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先。空なら PicoAgent 管理下の同梱Whisper CLIと同梱モデルを使う。常駐サーバやポートを使わない |
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
-| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし |
-| `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限 |
+| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし。将来削除相当の操作を足す場合も物理削除ではなくゴミ箱移動にする |
+| `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
 | `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信 | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、timeout |
 | `gmail_message` | Gmail API でメール送信または下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、本文/件名サイズ上限、timeout |
 | `google_calendar` | Google Calendar の予定一覧取得・予定作成 | OAuth access token は設定から都度取得、秘密値を出力しない、件名/説明サイズ上限、timeout |
@@ -312,14 +315,16 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** / **診断** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
 - ヘッダーの検索入力で、設定キー・ラベル・プロバイダ・スキル名・キャラクター名/説明をタブ横断で絞り込める。検索中は一致するタブ/セクション/カードだけを表示し、入力値や保存対象は変えない。
 - 未保存変更がある場合はフッターの「変更を戻す」を有効化し、変更済みの設定行を薄く強調する。「変更を戻す」は最後に読み込んだ、または保存に成功した設定スナップショットからフォームを再描画し、キャラ上書き・音声上書き・目覚ましJSONを含めて未保存状態だけを破棄する。
-- スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
-- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。
+- スキルタブ上部には `settings_load` が返す各ツールの `name` / `label` / `description` / `examples` を使い、区分・できること・頼み方例を横断表示する「スキル活用ガイド」を置く。個別カードだけでは機能全体を把握しづらいため、まず一覧資料として全スキルを見通せるようにする。
+- スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。キャラクター一覧は `assets/characters/index.json` と各 `character.json` から表示し、使用中のキャラに「（使用中）」を付け、idle 先頭フレームを丸い小アイコンとして添える。
+- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。未使用プロバイダのAPIキー欄・モデル欄はDOMにも作らず、プロバイダ切替時にフォームを作り直す。保存時は既存設定を土台に表示中入力だけを上書きし、未表示プロバイダの保存済み設定を消さない。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。
 - 「診断」タブは `engine_status` / `aivis_status` / `pet_usage` / `pet_traces` を読み、選択中プロバイダ・同梱エンジン状態・Aivis状態・今月/累計トークン使用量・直近スキル実行の件数/平均遅延/エラー数をカードで表示する。設定値は変更せず、各取得に失敗した場合も診断カード単位でエラー表示に留める。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化する。反映は「軽い設定は実行中に即反映」「重い設定は再起動して起動シーケンスで反映」に分ける。
   - **即反映**: システムプロンプト・長期メモリ・常に手前・フキダシの見た目・自発雑談・キャラ人格の上書き（同一キャラ）・コネクタ固有設定（`cfg.get()` 都度読み）。`pet:ui` イベントで実行中へ反映する。
   - **再起動して反映（共通機構）**: 以下のキーが実際に変わったら `settings_save` は `{ requiresRestart: true }` を返し、実行中のエンジン/Aivis/キャラ再読込は行わない。設定画面は確認画面を出し、ユーザーが承諾したら `restart_app` command を呼ぶ。`restart_app` は **プロセス再起動（`app.restart()`）はしない**（`tauri dev` の開発配信サーバが落ちて `127.0.0.1` 接続拒否になるため）。代わりにバックエンドを起動シーケンス相当に再初期化（選択中キャラの履歴を文脈へ読み直し、`settings_save` が返す `restartEngine` / `restartAivis` に応じて変わった部分だけ停止→再起動。例: キャラ変更だけなら LLM エンジンは再起動しない）し、メインウィンドウへ `pet:reload` を送って webview を再読込させる。再読込でフロントの起動シーケンス（ローディング画面）が再実行され、モデル DL・エンジン/Aivis 起動・キャラ読込・挨拶をまとめて行う。これによりフキダシに「モデルを準備中…」を出さず、dev / 配布版どちらでも同じ挙動になる。再起動対象キー: `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX` / `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` / `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_PORT` / `PICOAGENT_CHARACTER`。ユーザーが「あとで」を選んだ場合も設定は保存済みで、次回起動時に反映される（実行中状態は触らないので旧エンジンと不整合にならない）。
   - 起動シーケンスでは、TTS 有効時は Aivis ready を、`local` プロバイダ時はさらに同梱エンジンの ready/error までローディング画面で待ってから描画する（`waitForEngineReady`）。`applyEngineStatus` は `download`/`starting` の進捗を**ローディング画面の間だけ**表示し、通常時はフキダシに出さない。
+  - 起動完了後の「準備できた」系メッセージは小さいステータス専用表示にせず、必要な場合は通常のフキダシ本文として表示し、TTS 有効時は読み上げ対象にする。キャラクター挨拶が表示される場合は挨拶を優先し、完了メッセージを重ねない。
   - Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `PICOAGENT_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
 
 ---
@@ -397,11 +402,11 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | 空 | meeting_recorder | 録音WAV・文字起こし・議事録保存の許可ルート。空なら共通 `PICOAGENT_WORKSPACE_ROOT` を使う |
-| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。同梱CLIはポートを開かない |
-| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder | ローカルWhisperモデルのパス。手動設定が最優先、空なら同梱モデル |
-| `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder | 文字起こし実行時の引数テンプレート |
-| `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder | `diarize=true` 時に追加するローカル話者分類引数 |
-| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder | ローカル文字起こしタイムアウト秒（10〜7200） |
+| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder / whisper_transcribe | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。同梱CLIはポートを開かない |
+| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら同梱モデル |
+| `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder / whisper_transcribe | 文字起こし実行時の引数テンプレート |
+| `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder / whisper_transcribe | `diarize=true` 時に追加するローカル話者分類引数 |
+| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200） |
 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` | `Tokyo` | weather | 天気の既定地点（自動取得失敗時のフォールバック） |
 | `PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION` | `false` | weather | 地名未指定時の現在地IP自動取得を無効化 |
 | `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |

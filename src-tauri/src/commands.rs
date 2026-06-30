@@ -1128,6 +1128,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
                 "name": t.name(),
                 "label": t.label(),
                 "description": t.description(),
+                "examples": t.examples(),
                 "configSchema": t.config_schema(),
             })
         })

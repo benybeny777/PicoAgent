@@ -171,6 +171,36 @@ body.searching .tab-panel {
 }
 .card-name { font-size: 13px; font-weight: 600; }
 .card-desc { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
+.character-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.character-icon-wrap {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--pink-soft);
+}
+.character-icon {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  object-position: center 30%;
+}
+.character-icon-fallback {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--pink);
+}
+.character-card-text {
+  min-width: 0;
+}
 /* 設定を持つスキルはクリックで開閉できるアコーディオン。 */
 .card-accordion { cursor: pointer; }
 .card-accordion:hover { border-color: var(--pink); }
@@ -183,6 +213,77 @@ body.searching .tab-panel {
 }
 .card-config.changed {
   border-left-color: var(--pink);
+}
+.skill-guide {
+  display: grid;
+  grid-template-columns: minmax(72px, .6fr) minmax(120px, .9fr) minmax(180px, 1.6fr) minmax(160px, 1.3fr);
+  gap: 0;
+  margin: 10px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.skill-guide-head,
+.skill-guide-row {
+  display: contents;
+}
+.skill-guide-head > div {
+  padding: 7px 8px;
+  background: var(--pink-soft);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--line);
+}
+.skill-guide-row > div {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.skill-guide-row:last-child > div {
+  border-bottom: 0;
+}
+.skill-guide-cat {
+  color: var(--muted);
+  font-weight: 600;
+}
+.skill-guide-name {
+  font-weight: 700;
+}
+.skill-guide-desc {
+  color: var(--muted);
+}
+.skill-guide-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-guide-examples span {
+  display: block;
+}
+@media (max-width: 720px) {
+  .skill-guide {
+    display: block;
+  }
+  .skill-guide-head {
+    display: none;
+  }
+  .skill-guide-row {
+    display: block;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .skill-guide-row > div {
+    padding: 2px 0;
+    border-bottom: 0;
+  }
+  .skill-guide-cat::before { content: "区分: "; color: var(--muted); }
+  .skill-guide-desc::before { content: "できること: "; color: var(--muted); font-weight: 600; }
+  .skill-guide-examples::before { content: "頼み方例: "; color: var(--muted); font-weight: 600; }
 }
 /* 目覚まし専用エディタ */
 .alarm-list { display: flex; flex-direction: column; gap: 8px; }
