@@ -708,6 +708,32 @@ function playPreparedSpeech(result) {
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
 }
+// 起動時の挨拶を組み立てる。キャラ固定挨拶と日次の時刻挨拶で「挨拶語」が二重にならないようまとめる。
+// - 固定挨拶が時刻挨拶語（おはよう/こんにちは/こんばんは等）で始まる場合: 時刻に合った挨拶語を1回だけ使い、
+//   名前紹介＋日付時刻を続ける（例: 「こんにちは。むぎだよ。今日もよろしくね。今日は6月30日、今は14:23だよ。」）。
+// - 固定挨拶がキャラ独自の挨拶（おかえりなさい / ふ、ふん 等）の場合: 固定挨拶を活かし、日次からは挨拶語を外して日付時刻だけ足す。
+function combineStartupGreeting(manifestGreeting, dailyReply) {
+  const manifest = String(manifestGreeting ?? "").trim();
+  const daily = String(dailyReply ?? "").trim();
+  if (!manifest) return daily;
+  if (!daily) return manifest;
+  const TIME_GREETINGS = ["おはようございます", "おはよう", "こんにちは", "こんにちわ", "こんばんは", "夕方だね"];
+  const stripLead = (text) => {
+    for (const greeting of TIME_GREETINGS) {
+      if (text.startsWith(greeting)) {
+        return { word: greeting, rest: text.slice(greeting.length).replace(/^[、,。.\s]+/, "") };
+      }
+    }
+    return { word: "", rest: text };
+  };
+  const m = stripLead(manifest);
+  const d = stripLead(daily);
+  if (m.word) {
+    const lead = d.word || m.word;
+    return `${lead}。${m.rest}${d.rest}`;
+  }
+  return `${manifest}${d.rest}`;
+}
 // 読み上げ用に本文を文単位のチャンクへ分割する。長文を小分けにして「先頭から順次再生」する
 // ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
 function splitSpeechChunks(text, maxLen = 90) {
@@ -1723,7 +1749,7 @@ function startAlarmPolling() {
     try {
       setStatus("今日のあいさつを確認中…");
       const daily = await window.picoagent.dailyGreeting();
-      if (daily?.reply) greeting = `${greeting}\n${daily.reply}`.trim();
+      if (daily?.reply) greeting = combineStartupGreeting(greeting, daily.reply);
     } catch (error) {
       logApp("warn", "動的あいさつの取得に失敗しました", errorDetail(error));
     }
