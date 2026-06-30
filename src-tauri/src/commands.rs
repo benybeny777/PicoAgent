@@ -1229,10 +1229,48 @@ pub async fn settings_test_tool(name: String, state: State<'_, AppState>) -> Res
         }
     };
     let result = tools::dispatch(&state.config, &name, args).await;
+    let ok = !result.starts_with("エラー:");
     Ok(json!({
-        "ok": !result.starts_with("エラー:"),
+        "ok": ok,
         "message": result,
+        "diagnosis": diagnose_tool_test(&name, &result, ok),
     }))
+}
+
+fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
+    if ok {
+        return "接続は成功しました。必要な読み取り/送信権限は実際の操作範囲に合わせて確認してください。".to_string();
+    }
+    let lower = result.to_lowercase();
+    if result.contains("設定が必要") || result.contains("未設定") {
+        return match name {
+            "gmail_message" => "Gmail の OAuth access token が未設定です。Gmail API の読み取り/下書き/送信に必要なスコープを持つ token を設定してください。",
+            "slack_send_message" => "Slack の Bot token または Incoming Webhook URL が未設定です。履歴取得には Bot token と channel 設定が必要です。",
+            "google_calendar" => "Google Calendar の OAuth access token が未設定です。予定一覧/作成に必要なスコープを持つ token を設定してください。",
+            _ => "必要な設定値が未入力です。スキルカードの必須 token / URL / ID を確認してください。",
+        }
+        .to_string();
+    }
+    if result.contains("HTTP 401") || lower.contains("invalid_auth") || lower.contains("unauthorized") {
+        return "認証に失敗しています。token の期限切れ、コピー漏れ、別アカウントの token、暗号化前の古い値を確認してください。".to_string();
+    }
+    if result.contains("HTTP 403")
+        || lower.contains("missing_scope")
+        || lower.contains("insufficient")
+        || lower.contains("forbidden")
+    {
+        return "権限不足の可能性が高いです。OAuth scope、Slack Bot の権限、対象ワークスペース/カレンダーへのアクセス権を確認してください。".to_string();
+    }
+    if result.contains("HTTP 404") || lower.contains("channel_not_found") || lower.contains("not_found") {
+        return "対象が見つかりません。チャンネルID、カレンダーID、メッセージID、API base URL が正しいか確認してください。".to_string();
+    }
+    if lower.contains("timeout") || result.contains("タイムアウト") {
+        return "接続がタイムアウトしています。ネットワーク、プロキシ、API の一時障害、timeout 秒数を確認してください。".to_string();
+    }
+    if result.contains("接続に失敗") || lower.contains("dns") || lower.contains("connection") {
+        return "API へ接続できていません。ネットワーク、VPN/プロキシ、base URL、ローカルのセキュリティソフトを確認してください。".to_string();
+    }
+    "原因を分類できませんでした。表示された API エラー本文、token の権限、対象ID、ネットワーク状態を順に確認してください。".to_string()
 }
 
 #[tauri::command]

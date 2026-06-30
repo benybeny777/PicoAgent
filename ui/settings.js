@@ -750,28 +750,66 @@ function supportsConnectionTest(tool) {
   return ["gmail_message", "slack_send_message", "google_calendar"].includes(tool.name);
 }
 
+function approvalPolicy(tool) {
+  const name = tool.name || "";
+  const send = new Set([
+    "gmail_message", "slack_send_message", "discord_send_message", "microsoft_graph",
+    "x_twitter", "mastodon", "bluesky", "reddit", "linkedin", "misskey",
+  ]);
+  const write = new Set([
+    "workspace_files", "google_calendar", "google_docs", "google_drive", "google_sheets",
+    "google_tasks", "github_issue", "notion", "jira", "linear", "trello", "todoist",
+    "ms_office", "document_convert", "pdf_tools", "http_api", "task_scheduler",
+  ]);
+  if (name === "run_command") {
+    return { tone: "danger", label: "実行前確認", text: "未許可コマンドや許可ルート外 cwd はチャットで承認が必要です。物理削除コマンドは拒否します。" };
+  }
+  if (send.has(name)) {
+    return { tone: "danger", label: "送信前確認", text: "外部へ送信・投稿します。宛先と本文がユーザー意図に合う場合だけ実行します。" };
+  }
+  if (write.has(name)) {
+    return { tone: "warn", label: "書込/変更", text: "外部サービスや許可ルート内のデータを作成・更新できます。削除相当は物理削除ではなく安全な扱いを前提にします。" };
+  }
+  if (supportsConnectionTest(tool) || skillCategory(tool) === "connect" || skillCategory(tool) === "social" || ["web_search", "web_fetch", "weather", "rss_feed", "market_indices", "currency_rates"].includes(name)) {
+    return { tone: "read", label: "外部読取", text: "外部サービスやWebから情報を取得します。取得結果は信頼できない外部データとして扱います。" };
+  }
+  return { tone: "safe", label: "低リスク", text: "ローカル処理または副作用のない参照が中心です。" };
+}
+
+function approvalPolicyNode(tool) {
+  const policy = approvalPolicy(tool);
+  return el("div", { className: `approval-policy ${policy.tone}` }, [
+    el("span", { textContent: policy.label }),
+    el("p", { textContent: policy.text }),
+  ]);
+}
+
 function buildConnectionTest(tool) {
   const wrap = el("div", { className: "connection-test" });
   const button = el("button", { type: "button", textContent: "接続テスト" });
   const result = el("div", { className: "connection-test-result", textContent: "保存済みの設定値で確認します。" });
+  const diagnosis = el("div", { className: "connection-test-diagnosis" });
   button.addEventListener("click", async event => {
     event.stopPropagation();
     button.disabled = true;
     result.className = "connection-test-result";
     result.textContent = "確認中…";
+    diagnosis.textContent = "";
     try {
       const response = await window.picoagent.settings.testTool(tool.name);
       result.className = `connection-test-result ${response.ok ? "ok" : "error"}`;
       result.textContent = response.message || (response.ok ? "OK" : "確認できませんでした");
+      diagnosis.textContent = response.diagnosis || "";
     } catch (error) {
       logApp("warn", "スキル接続テストに失敗しました", `${tool.name}: ${errorDetail(error)}`);
       result.className = "connection-test-result error";
       result.textContent = `接続テストに失敗: ${error.message || error}`;
+      diagnosis.textContent = "PicoAgent 内部の接続テスト呼び出しに失敗しました。アプリログを確認してください。";
     } finally {
       button.disabled = false;
     }
   });
-  wrap.append(button, result);
+  wrap.append(button, el("div", { className: "connection-test-output" }, [result, diagnosis]));
   return wrap;
 }
 
@@ -813,6 +851,7 @@ function renderSkillCard(tool, values) {
   const card = markSearchable(el("div", { className: hasConfig ? "card-item card-accordion" : "card-item" }, [
     name,
     el("div", { className: "card-desc", textContent: tool.description || "" }),
+    approvalPolicyNode(tool),
   ]), tool.name, tool.label, tool.description);
   const nodes = [card];
   if (hasConfig) {
