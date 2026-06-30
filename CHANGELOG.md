@@ -6,6 +6,10 @@
 
 ## 2026-07-01
 
+### 設定の再初期化後にローカルエンジンが再起動されない不具合を修正
+
+- **再初期化でエンジンが落ちたまま復帰しない問題を修正** (`src-tauri/src/engine.rs` / `src-tauri/src/commands.rs`): 叩くAI・モデルなどを変更したときの再初期化（`restart_app`）が `engine::stop()` で `stopping` フラグを立てたまま `ensure_and_start` を呼ぶため、`ensure_and_start` が冒頭で即 return してローカル同梱エンジンが再起動されず、以後 `AI応答に失敗しました: error sending request for url (http://127.0.0.1:11435/...)` になっていた。再起動経路で `stopping` を明示的に下ろす `engine::clear_stopping()` を追加し、`restart_app` の `stop()` 後に呼ぶようにした。
+
 ### スキル設定のジャンルフィルタと折りたたみを修正
 
 - **⚙ パネルの折りたたみを修正** (`ui/settings.js`): 検索フィルタ（`applySettingsSearch`）が空クエリ時に全 `.searchable` を表示する処理で、スキル設定の `.card-config` パネルまで強制展開されていた不具合を修正した。`.card-config` はアコーディオンの開閉状態（`.open`）に従い、既定で折りたたむようにした（検索時はマッチしたものだけ開く）。

@@ -1468,6 +1468,9 @@ pub fn restart_app(
     if restart_engine {
         crate::engine::stop(&app);
         if pid == "local" {
+            // stop() が立てた stopping フラグを下ろさないと、ensure_and_start が冒頭で
+            // 即 return してエンジンが再起動されない（再初期化後に AI へ接続できなくなる）。
+            crate::engine::clear_stopping(&app);
             let handle = app.clone();
             tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
         }

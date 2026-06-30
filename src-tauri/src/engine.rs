@@ -470,3 +470,12 @@ pub fn stop(app: &AppHandle) {
         }
     }
 }
+
+/// 設定の再初期化でエンジンを停止→再起動するときに使う。
+/// `stop()` が立てた `stopping` フラグを下ろし、続く `ensure_and_start` が起動できるようにする。
+/// （`stop()` はアプリ終了用にフラグを立てっぱなしにするため、再起動経路では明示的に下ろす必要がある。）
+pub fn clear_stopping(app: &AppHandle) {
+    if let Some(engine) = app.try_state::<EngineState>() {
+        engine.stopping.store(false, Ordering::SeqCst);
+    }
+}
