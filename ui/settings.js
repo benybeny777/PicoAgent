@@ -140,6 +140,33 @@ function currentActivePanel(group) {
   return group?.querySelector(":scope > .tab-panel.active") || group?.querySelector(":scope > .tab-panel");
 }
 
+// ジャンル（カテゴリ）フィルタの選択状態。"all" は全表示。スキル設定と活用ガイドで独立に持つ。
+let skillGenreFilter = "all";
+let guideGenreFilter = "all";
+
+// ジャンル別フィルタのチップ列を作る。クリックで getValue/setValue 経由の状態を切り替え、再フィルタする。
+function buildGenreChips(getValue, setValue) {
+  const ids = ["all", ...Object.keys(SKILL_CATEGORY_LABELS)];
+  const bar = el("div", { className: "genre-filter" });
+  const buttons = new Map();
+  function refresh() {
+    for (const [id, button] of buttons) button.classList.toggle("active", id === getValue());
+  }
+  for (const id of ids) {
+    const label = id === "all" ? "すべて" : (SKILL_CATEGORY_LABELS[id] || id);
+    const button = el("button", { type: "button", className: "genre-chip", textContent: label });
+    button.addEventListener("click", () => {
+      setValue(id);
+      refresh();
+      applySettingsSearch();
+    });
+    buttons.set(id, button);
+    bar.append(button);
+  }
+  refresh();
+  return bar;
+}
+
 function applySettingsSearch() {
   if (!settingsSearch) return;
   const query = settingsSearch.value.trim().toLowerCase();
@@ -156,7 +183,36 @@ function applySettingsSearch() {
     }
   }
   for (const item of form.querySelectorAll(".searchable")) {
+    // スキル設定の ⚙ パネルはアコーディオンが開閉を管理するため、ここでは触らない（検索時のみ下で開く）。
+    if (item.classList.contains("card-config")) continue;
     item.hidden = query ? !nodeSearchText(item).includes(query) : false;
+  }
+  // ⚙ パネル: 検索中はマッチしたものだけ開き、非検索時はアコーディオンの開閉状態（.open）に従う。
+  for (const panel of form.querySelectorAll(".card-config")) {
+    const card = panel.previousElementSibling;
+    if (query) {
+      const open = nodeSearchText(panel).includes(query);
+      panel.hidden = !open;
+      if (card) {
+        card.classList.toggle("open", open);
+        if (open) card.hidden = false;
+      }
+    } else {
+      panel.hidden = !(card && card.classList.contains("open"));
+    }
+  }
+  // ジャンルフィルタ: スキル設定タブのカテゴリ群を絞る（検索と併用可能）。
+  // ジャンル不一致、または検索中にそのカテゴリの可視カードが無ければ見出しごと隠す。
+  for (const group of form.querySelectorAll(".skill-cat-group")) {
+    const genreHidden = skillGenreFilter !== "all" && group.dataset.genre !== skillGenreFilter;
+    const noMatch = Boolean(query) && ![...group.querySelectorAll(".card-item.searchable")].some(card => !card.hidden);
+    group.hidden = genreHidden || noMatch;
+  }
+  // ジャンルフィルタ: 活用ガイドの行を絞る（検索結果にさらにジャンル条件を重ねる）。
+  if (guideGenreFilter !== "all") {
+    for (const row of form.querySelectorAll(".skill-guide-row")) {
+      if (row.dataset.genre !== guideGenreFilter) row.hidden = true;
+    }
   }
   for (const sectionNode of form.querySelectorAll(".section")) {
     if (!query) {
@@ -836,6 +892,7 @@ function buildSkillGuide(tools) {
       el("div", { className: "skill-guide-desc", textContent: tool.description || "" }),
       el("div", { className: "skill-guide-examples" }, examples.slice(0, 2).map(example => el("span", { textContent: example }))),
     ]), tool.name, tool.label, tool.description, examples.join(" "));
+    row.dataset.genre = skillCategory(tool);
     guide.append(row);
   }
   return guide;
@@ -905,6 +962,7 @@ function buildSkillCategoryList(tools, values) {
     const toolsInCategory = grouped.get(category.id);
     if (!toolsInCategory.length) continue;
     const group = el("div", { className: "skill-cat-group" });
+    group.dataset.genre = category.id;
     group.append(el("h3", {
       className: "skill-cat-head",
       textContent: `${category.label}（${toolsInCategory.length}）`,
@@ -1224,7 +1282,8 @@ async function render() {
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillSec.append(el("p", { className: "hint", textContent: "カテゴリ別の一覧です。⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。頼み方の例は「スキル活用ガイド」タブを参照。" }));
+    skillSec.append(el("p", { className: "hint", textContent: "カテゴリ別の一覧です。ジャンルで絞り込めます。⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。頼み方の例は「スキル活用ガイド」タブを参照。" }));
+    skillSec.append(buildGenreChips(() => skillGenreFilter, value => { skillGenreFilter = value; }));
     skillSec.append(buildSkillCategoryList(data.tools, v));
   }
   panels.tools.append(skillSec);
@@ -1234,7 +1293,8 @@ async function render() {
   if (!data.tools.length) {
     skillGuideSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。設定（APIキー等）は「スキル設定」タブで行います。" }));
+    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。ジャンルで絞り込めます。設定（APIキー等）は「スキル設定」タブで行います。" }));
+    skillGuideSec.append(buildGenreChips(() => guideGenreFilter, value => { guideGenreFilter = value; }));
     skillGuideSec.append(buildSkillGuide(data.tools));
   }
   panels.skillguide.append(skillGuideSec);
