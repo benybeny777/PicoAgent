@@ -1209,6 +1209,48 @@ window.picoagent.on("pet:emotion", (emotion) => {
   character.dataset.emotion = emotion.mood;
   character.dataset.energyLevel = emotion.energy > 0.6 ? "high" : emotion.energy < 0.4 ? "low" : "mid";
 });
+// エージェントがツールを実行中・再考中のとき、固まって見えないよう進捗ラベルを表示する。
+window.picoagent.on("pet:agent_status", (payload) => {
+  if (!payload || !busy) return;
+  if (payload.phase === "thinking") {
+    status.textContent = "考え直し中…";
+  } else if (payload.phase === "tool") {
+    const toolLabel = (name) => {
+      const map = {
+        web_search: "Web検索中", web_fetch: "URL取得中",
+        weather: "天気取得中", get_time: "時刻取得中",
+        run_command: "コマンド実行中", http_api: "HTTP API呼び出し中",
+        image_generate: "画像生成中", comfyui_generate: "ComfyUI画像生成中",
+        clipboard_text: "クリップボード読み込み中",
+        currency_rates: "為替取得中", market_indices: "市場データ取得中",
+        memory_write: "メモ保存中", memory_read: "メモ読み込み中",
+        praise_log: "メモ保存中", read_file: "ファイル読み込み中",
+        workspace_files: "ファイル操作中", document_convert: "文書変換中",
+        pdf_tools: "PDF編集中", ms_office: "Office編集中",
+        google_calendar: "カレンダー操作中", google_tasks: "Google Tasks操作中",
+        google_drive: "Google Drive操作中", google_docs: "Google Docs操作中",
+        google_sheets: "Google Sheets操作中",
+        gmail_message: "Gmail送信中", slack_send_message: "Slack送信中",
+        discord_send_message: "Discord送信中",
+        notion: "Notion操作中", trello: "Trello操作中",
+        todoist: "Todoist操作中", linear: "Linear操作中",
+        jira: "Jira操作中", github_issue: "GitHub操作中",
+        reminder: "リマインダー設定中", alarm: "アラーム設定中",
+        focus_timer: "タイマー設定中", task_scheduler: "タスク登録中",
+        daily_briefing: "デイリーチェック中",
+        microsoft_graph: "Microsoft Graph操作中",
+        rss_feed: "RSS取得中", reddit: "Reddit取得中",
+        x_twitter: "X/Twitter投稿中", bluesky: "Bluesky投稿中",
+        mastodon: "Mastodon投稿中", misskey: "Misskey投稿中",
+        linkedin: "LinkedIn操作中",
+        chitchat: "雑談中",
+      };
+      return map[name] || name;
+    };
+    const labels = (payload.tools || []).map(toolLabel);
+    status.textContent = labels.join(" & ") + "…";
+  }
+});
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {

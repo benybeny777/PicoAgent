@@ -721,7 +721,17 @@ pub async fn run(
         }
     }
 
-    for _ in 0..max_steps {
+    for step in 0..max_steps {
+        // 2ターン目以降（ツール結果を受けて再考する場合）は "再考中" を通知する。
+        if step > 0 {
+            if let Some(handle) = app {
+                let _ = tauri::Emitter::emit(
+                    handle,
+                    "pet:agent_status",
+                    serde_json::json!({ "phase": "thinking", "step": step }),
+                );
+            }
+        }
         let msg = chat_with_retry(
             provider,
             cfg,
@@ -752,6 +762,15 @@ pub async fn run(
 
         match calls {
             Some(cs) if !cs.is_empty() => {
+                // ツール実行前にフロントへ「何を実行中か」を通知する（固まり防止）。
+                if let Some(handle) = app {
+                    let names: Vec<&str> = cs.iter().map(|c| c.name.as_str()).collect();
+                    let _ = tauri::Emitter::emit(
+                        handle,
+                        "pet:agent_status",
+                        serde_json::json!({ "phase": "tool", "tools": names }),
+                    );
+                }
                 // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
                 // 引数 JSON が壊れている（_raw フィールドあり）場合はエラーを返し再試行を促す。
                 let futs: Vec<_> = cs
