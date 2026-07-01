@@ -104,7 +104,7 @@ window.addEventListener("beforeunload", () => {
   stopVoice(false);
 });
 
-const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
+const characterManifestCacheKey = "2026-07-01-persona-v2";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
