@@ -18,7 +18,7 @@ use crate::message::Field;
 
 const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
-const MAX_OUTPUT_BYTES: usize = 32 * 1024;
+pub const MAX_OUTPUT_BYTES: usize = 32 * 1024;
 const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
 const APPROVAL_MARKER: &str = "__PICOAGENT_COMMAND_APPROVAL__";
 
@@ -34,29 +34,13 @@ pub struct PendingCommandApproval {
     pub reason: String,
 }
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
-fn command_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()))
-}
-
-fn extra_command_roots(cfg: &Config) -> Vec<PathBuf> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "")
-        .split(['\n', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(PathBuf::from)
-        .collect()
+// 実行の許可ルートは全スキル共通の permissions を参照する。
+pub fn command_root(cfg: &Config) -> PathBuf {
+    crate::permissions::primary_root(cfg)
 }
 
 fn command_roots(cfg: &Config) -> Vec<PathBuf> {
-    let mut roots = vec![command_root(cfg)];
-    roots.extend(extra_command_roots(cfg));
-    roots
+    crate::permissions::allowed_roots(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -97,22 +81,14 @@ fn bounded_cwd_in_roots(
     ))
 }
 
-fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
+pub fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
     let base = command_root(cfg);
     bounded_cwd_in_roots(&base, command_roots(cfg), cwd)
 }
 
-#[cfg(windows)]
-fn is_protected_edit_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.starts_with(r"c:\windows")
-        || s.starts_with(r"c:\program files\")
-        || s.starts_with(r"c:\program files (x86)\")
-}
-
-#[cfg(not(windows))]
-fn is_protected_edit_path(_path: &Path) -> bool {
-    false
+// Windows / Program Files などの保護領域は全スキル共通の permissions で判定する。
+pub fn is_protected_edit_path(path: &Path) -> bool {
+    crate::permissions::is_system_protected(path)
 }
 
 fn parse_args(args: &Value) -> Result<Vec<String>, String> {
@@ -255,7 +231,7 @@ pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
     )
 }
 
-fn trim_output(label: &str, bytes: &[u8]) -> String {
+pub fn trim_output(label: &str, bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     if text.len() <= MAX_OUTPUT_BYTES {
         return format!("{}:\n{}", label, text);
@@ -268,13 +244,13 @@ fn trim_output(label: &str, bytes: &[u8]) -> String {
 }
 
 #[cfg(windows)]
-fn hide_window(command: &mut Command) {
+pub fn hide_window(command: &mut Command) {
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
+pub fn hide_window(_command: &mut Command) {}
 
 #[async_trait]
 impl Tool for RunCommandTool {
@@ -322,13 +298,6 @@ impl Tool for RunCommandTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_COMMAND_ENABLED", "run_command を有効化（true/false）", "text", "false"),
-            Field::new("PICOAGENT_COMMAND_ROOT", "run_command の実行許可ルート", "text", &home()),
-            Field::new(
-                "PICOAGENT_COMMAND_ALLOWED_PATHS",
-                "run_command の追加許可パス（改行または ; 区切り）",
-                "textarea",
-                "",
-            ),
             Field::new(
                 "PICOAGENT_COMMAND_ALLOWLIST",
                 "run_command の許可コマンド（カンマ区切り prefix）",
@@ -449,7 +418,7 @@ pub async fn execute_with_persistent_approval(
     }
     if bounded_cwd(cfg, Some(&pending.cwd)).is_err() {
         let entry = cwd.to_string_lossy().to_string();
-        let current = cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "");
+        let current = cfg.get("PICOAGENT_ALLOWED_PATHS", "");
         let exists = current
             .split(['\n', ';'])
             .map(str::trim)
@@ -461,7 +430,7 @@ pub async fn execute_with_persistent_approval(
                 format!("{}\n{}", current.trim(), entry)
             };
             patch.insert(
-                "PICOAGENT_COMMAND_ALLOWED_PATHS".to_string(),
+                "PICOAGENT_ALLOWED_PATHS".to_string(),
                 Value::String(next),
             );
             saved.push(format!("追加許可パス `{entry}`"));

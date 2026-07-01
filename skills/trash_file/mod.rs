@@ -9,71 +9,34 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::message::Field;
+use crate::permissions;
 
 pub struct TrashFileTool;
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
-fn workspace_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_WORKSPACE_ROOT", &home()))
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_existing_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let base = base
-        .canonicalize()
-        .map_err(|error| format!("許可ルートを確認できません（{}）: {}", error, base.display()))?;
-    let target = normalize(&base, path)
+/// 対象（既存パス）を正規化・canonicalize し、共通の許可ルート内かつ保護パスでないことを検証する。
+/// 許可ルートそのもの・存在しない対象・保護パスは拒否する。
+fn bounded_existing_path(cfg: &Config, path: &str) -> Result<PathBuf, String> {
+    let primary = permissions::primary_root(cfg);
+    let target = permissions::normalize(&primary, path)
         .canonicalize()
         .map_err(|error| format!("対象が存在しないか確認できません（{}）: {}", error, path))?;
-    if target == base {
-        return Err("許可ルートそのものはゴミ箱へ移動できません。".to_string());
+    if permissions::is_protected(cfg, &target) {
+        return Err(format!("保護された場所は操作できません: {}", target.display()));
     }
-    if !target.starts_with(&base) {
-        return Err(format!(
-            "許可ルート（{}）の外は操作できません: {}",
-            base.display(),
-            target.display()
-        ));
+    for root in permissions::allowed_roots(cfg) {
+        if let Ok(root) = root.canonicalize() {
+            if target == root {
+                return Err("許可ルートそのものはゴミ箱へ移動できません。".to_string());
+            }
+            if target.starts_with(&root) {
+                return Ok(target);
+            }
+        }
     }
-    Ok(target)
-}
-
-#[cfg(windows)]
-fn is_protected_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.starts_with(r"c:\windows")
-        || s.starts_with(r"c:\program files\")
-        || s.starts_with(r"c:\program files (x86)\")
-}
-
-#[cfg(not(windows))]
-fn is_protected_path(_path: &Path) -> bool {
-    false
+    Err(format!(
+        "許可ルートの外は操作できません（設定の「許可」タブで許可ルートを追加してください）: {}",
+        target.display()
+    ))
 }
 
 #[cfg(windows)]
@@ -186,7 +149,7 @@ impl Tool for TrashFileTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "ゴミ箱へ移動するファイルまたはフォルダ。PICOAGENT_WORKSPACE_ROOT 配下の絶対パスまたは相対パス。"
+                    "description": "ゴミ箱へ移動するファイルまたはフォルダ。許可ルート配下の絶対パスまたは相対パス。"
                 },
                 "confirm": {
                     "type": "boolean",
@@ -197,28 +160,15 @@ impl Tool for TrashFileTool {
         })
     }
 
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_WORKSPACE_ROOT",
-            "trash_file の許可ルート",
-            "text",
-            &home(),
-        )]
-    }
-
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let path = match args.get("path").and_then(Value::as_str).map(str::trim) {
             Some(path) if !path.is_empty() => path,
             _ => return "エラー: path が指定されていません。".to_string(),
         };
-        let base = workspace_root(cfg);
-        let target = match bounded_existing_path(&base, path) {
+        let target = match bounded_existing_path(cfg, path) {
             Ok(target) => target,
             Err(error) => return format!("エラー: {}", error),
         };
-        if is_protected_path(&target) {
-            return format!("エラー: 保護された場所は操作できません: {}", target.display());
-        }
         let kind = match std::fs::metadata(&target) {
             Ok(meta) if meta.is_dir() => "フォルダ",
             Ok(meta) if meta.is_file() => "ファイル",
@@ -240,21 +190,3 @@ impl Tool for TrashFileTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(TrashFileTool) } }
-
-#[cfg(test)]
-mod tests {
-    use super::{bounded_existing_path, normalize};
-    use std::path::PathBuf;
-
-    #[test]
-    fn 相対パスの親参照を正規化する() {
-        let base = PathBuf::from(r"C:\work\root");
-        assert_eq!(normalize(&base, r"a\..\b"), PathBuf::from(r"C:\work\root\b"));
-    }
-
-    #[test]
-    fn 存在しない対象を拒否する() {
-        let base = PathBuf::from(r"C:\definitely_missing_root_for_picoagent_test");
-        assert!(bounded_existing_path(&base, r"missing.txt").is_err());
-    }
-}

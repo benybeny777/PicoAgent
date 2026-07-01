@@ -109,7 +109,7 @@ graph LR
 
 cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル設定」タブでも専用フォームから `PICOAGENT_SCHEDULED_TASKS` を編集できます。実行結果は `app_data_dir/schedule-runs.json` に直近100件保存し、メイン画面の通知一覧では直近20件を確認・再実行できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。スキル経由のファイル削除は `trash_file` でOSのゴミ箱へ移動するだけにし、許可ルート外、許可ルートそのもの、保護ディレクトリは拒否します。`run_command` でも `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドは実行しません。
 
-設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル設定」「スキル活用ガイド」「診断」のタブで構成されます。キャラクター一覧には小さな顔アイコンを表示します。診断タブでは選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認できます。スキル活用ガイドでは区分・できること・頼み方例を一覧でき、ジャンル（日常／検索・情報／ファイル・実行／連携／SNS・投稿／文書／その他）のチップで絞り込めます。スキル設定は日常・検索/情報・連携などのカテゴリ見出しで整理され、同じジャンルチップで絞り込めます。各スキルカードの設定（⚙）は既定で折りたたまれ、カードをクリックすると開きます。各スキルカードには設定不要/未設定/一部設定/設定済みの状態バッジと承認ポリシー（低リスク、外部読取、書込/変更、送信前確認、実行前確認）を表示します。Gmail / Slack / Googleカレンダーは保存済み設定で接続テストでき、失敗時は token 未設定・権限不足・対象ID不一致・接続問題などの原因候補も表示します。目覚ましとタスクスケジュールは JSON 直書きではなく専用フォームで編集できます。叩くAIタブは現在選択中のプロバイダ設定だけを表示し、未使用プロバイダのAPIキー欄やモデル欄は畳み込みます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
+設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル設定」「許可」「スキル活用ガイド」「診断」のタブで構成されます。「許可」タブでは、全スキル共通のファイル/ディレクトリ/実行の許可ルート（`PICOAGENT_ALLOWED_ROOT` ほか）と拒否パスをまとめて設定できます（`C:\Windows` と `Program Files` は常に拒否）。各スキルの個別許可ルート設定は廃止し、この共通設定を参照します。キャラクター一覧には小さな顔アイコンを表示します。診断タブでは選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認できます。スキル活用ガイドでは区分・できること・頼み方例を一覧でき、ジャンル（日常／検索・情報／ファイル・実行／連携／SNS・投稿／文書／その他）のチップで絞り込めます。スキル設定は日常・検索/情報・連携などのカテゴリ見出しで整理され、同じジャンルチップで絞り込めます。各スキルカードの設定（⚙）は既定で折りたたまれ、カードをクリックすると開きます。各スキルカードには設定不要/未設定/一部設定/設定済みの状態バッジと承認ポリシー（低リスク、外部読取、書込/変更、送信前確認、実行前確認）を表示します。Gmail / Slack / Googleカレンダーは保存済み設定で接続テストでき、失敗時は token 未設定・権限不足・対象ID不一致・接続問題などの原因候補も表示します。目覚ましとタスクスケジュールは JSON 直書きではなく専用フォームで編集できます。叩くAIタブは現在選択中のプロバイダ設定だけを表示し、未使用プロバイダのAPIキー欄やモデル欄は畳み込みます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
 
 #### 主要設定
 
@@ -135,8 +135,9 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | 自発雑談 | `PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_TOPIC_MODE` | アイドル時の雑談と話題ソース |
 | 目覚まし | `PICOAGENT_ALARMS` | 設定画面では専用フォームで編集。通常はチャットで設定 |
 | タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` | `kind=command` / `kind=tool` の指定時刻タスク。設定画面では専用フォームで編集。通常はチャットで設定 |
-| ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行・スケジュール実行の安全境界 |
-| ファイル操作 | `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_TOOLS_ROOT` / `PICOAGENT_DOCUMENT_ROOT` | ファイル・Office/PDF 操作の許可ルート |
+| 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` | 全スキル共通のファイル/ディレクトリ/実行の許可ルート・拒否パス。設定画面の「許可」タブで編集。`C:\Windows` と `Program Files` は常に拒否 |
+| ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行（run_command）の有効化と許可コマンド prefix。許可ルートは共通「許可」を参照 |
+| 自力実行 | `PICOAGENT_CODE_RUNNER_ENABLED` / `PICOAGENT_CODE_RUNNER_PYTHON` | 他スキルで満たせないときに PowerShell/Python のコードを書いて実行する code_runner の有効化と Python パス。既定は無効 |
 | 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 天気・検索・RSS・調査レポートなどの既定値 |
 | 外部連携 | 各サービスの token / 既定ID / timeout / Gmail整理上限 | Slack、Gmail、Google、GitHub、Notion、SNS などは使うサービスだけ設定。`PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS=0` で Gmail 整理/掃除の件数上限を無制限にできる |
 
@@ -226,12 +227,13 @@ npm run build
 - **オンライン表示が赤い / 応答しない（Ollama 利用時）** → `ollama serve` を起動。設定の `OLLAMA_HOST` も確認。
 - **AIプロバイダで OpenAI が「未接続」** → `OPENAI_API_KEY` 未設定。設定画面で入力して保存。
 - **ツールが呼ばれない** → モデルが function calling 非対応の可能性。`qwen3:8b` などツール対応モデルを使う。
-- **`read_file` が拒否される** → 許可ルート（既定はホーム）外。`PICOAGENT_TOOLS_ROOT` を設定するか、ルート配下のパスを指定。
+- **`read_file` などファイル操作が拒否される** → 許可ルート（既定はホーム）外、または保護パス（`C:\Windows` / `Program Files`）。設定画面の「許可」タブで `PICOAGENT_ALLOWED_ROOT` や追加許可ルートを設定するか、許可ルート配下のパスを指定。
 - **Web検索に失敗する** → インターネット接続を確認。短時間の連続検索で拒否された場合は、時間を置いて再試行。
 - **天気・為替・RSSに失敗する** → インターネット接続、地点名、通貨コード、RSS URL を確認。
 - **外部サービス連携に失敗する** → Slack / Gmail / Google Calendar / Google Docs / Google Drive / Google Sheets / GitHub / Notion / Discord / Microsoft Graph / Jira / Linear / Trello / Todoist の各 token、Webhook URL、OAuth scope、対象IDを確認。秘密値は設定画面に保存し、ログやドキュメントへ値を書かない。
 - **SNS連携に失敗する** → X / Mastodon / Bluesky / Reddit / LinkedIn / Misskey の token、app password、投稿権限、APIプラン、インスタンスURL、User-Agent を確認。
-- **Office/PDF 操作に失敗する** → `PICOAGENT_DOCUMENT_ROOT` の許可ルート、Microsoft Office + PowerShell、LibreOffice（`soffice`）、qpdf の実行ファイルパスを確認。Google Docs/Sheets はローカルファイルではなく専用APIスキルを使う。
+- **Office/PDF 操作に失敗する** → 共通「許可」タブの許可ルート（`PICOAGENT_ALLOWED_ROOT` ほか）、Microsoft Office + PowerShell、LibreOffice（`soffice`）、qpdf の実行ファイルパスを確認。Google Docs/Sheets はローカルファイルではなく専用APIスキルを使う。
+- **`code_runner`（自力実行）が動かない** → 既定で無効。設定画面の「スキル設定」タブの `code_runner` カードで `PICOAGENT_CODE_RUNNER_ENABLED` を true にする。Python を使う場合は `PICOAGENT_CODE_RUNNER_PYTHON` に実行パスを設定。作業先は共通「許可」タブの許可ルート配下のみ。物理削除コードは拒否される。
 - **`run_command` が拒否される** → 既定では無効。設定で有効化し、`PICOAGENT_COMMAND_ALLOWLIST` に実行したい `program args...` の prefix を追加する。shell は使わず `program` と `args` を分けて実行する。
 - **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
 - **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行して残存プロセスを停止する。手動で止めたいときは `npm run stop`。

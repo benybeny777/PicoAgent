@@ -6,6 +6,12 @@
 
 ## 2026-07-01
 
+### 共通許可システムと自力実行（code_runner）スキル
+
+- **全スキル共通の許可システム** (`src-tauri/src/permissions.rs` ほか各スキル): ファイル・ディレクトリ・コマンド実行の許可ルート／拒否パスを `permissions.rs` の1箇所へ集約した。正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート）／`PICOAGENT_ALLOWED_PATHS`（追加許可）／`PICOAGENT_DENIED_PATHS`（追加拒否）。`C:\Windows` / `Program Files` / `Program Files (x86)` は設定に関わらず常に拒否する。`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `scheduler` を共通ルール参照へ移行し、各スキルの個別ルート設定フィールド（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS`）をスキル設定から削除した。旧キーは設定済みなら許可ルートとして引き継ぐ（移行互換）。
+- **設定「許可」タブ** (`ui/settings.js`): 共通の許可ルート・追加許可ルート・拒否パスをまとめて編集できる「許可」タブを追加した。
+- **自力実行スキル code_runner** (`skills/code_runner/mod.rs`): 他スキルでは要望を満たせないときの最終手段として、PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成するスキルを追加した。任意コード実行のため既定は無効（`PICOAGENT_CODE_RUNNER_ENABLED`）で、有効化後は許可ルート内で承認なしに自律実行する。作業ディレクトリ・許可判定は共通 permissions を参照し、物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否する。スクリプトは一時ファイルへ書き出して実行後に削除し、timeout・出力32KBで制限する。
+
 ### ダウンロード済みモデルの削除機能と DeepSeek ローカルプリセットの削除
 
 - **ダウンロード済みモデルの管理** (`src-tauri/src/commands.rs` / `src-tauri/src/engine.rs` / `src-tauri/src/providers/local.rs` / `ui/settings.js` / `ui/picoagent.js` / `ui/settings.css`): 設定画面「叩くAI」タブに「ダウンロード済みモデル」セクションを追加し、`app_data_dir/bundled/models` 配下の GGUF をファイル名・サイズ・対応プリセット名・使用中フラグ付きで一覧し、不要なモデルを削除してディスクを空けられるようにした。`pet_list_downloaded_models` / `pet_delete_downloaded_model` コマンドを追加。削除はモデルディレクトリ配下の `.gguf` のみを対象とし、パストラバーサルと使用中モデルの削除を拒否する（同梱物のためゴミ箱ではなく物理削除でディスクを解放）。

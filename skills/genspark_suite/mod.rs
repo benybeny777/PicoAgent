@@ -8,20 +8,13 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::message::Field;
 
 const MAX_INPUT_CHARS: usize = 32_000;
 
 pub struct GensparkSuiteTool;
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
 fn workspace_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_WORKSPACE_ROOT", &home()))
+    crate::permissions::primary_root(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -278,14 +271,6 @@ impl Tool for GensparkSuiteTool {
         })
     }
 
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_WORKSPACE_ROOT",
-            "genspark_suite の保存許可ルート",
-            "text",
-            &home(),
-        )]
-    }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let topic = match args

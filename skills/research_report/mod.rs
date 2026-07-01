@@ -45,14 +45,8 @@ struct SavedArtifacts {
 
 pub struct ResearchReportTool;
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
 fn workspace_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_WORKSPACE_ROOT", &home()))
+    crate::permissions::primary_root(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -868,20 +862,12 @@ impl Tool for ResearchReportTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![
-            Field::new(
-                "PICOAGENT_RESEARCH_TIMEOUT_SECS",
-                "調査レポート検索待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
-            Field::new(
-                "PICOAGENT_WORKSPACE_ROOT",
-                "調査レポート保存の許可ルート",
-                "text",
-                &home(),
-            ),
-        ]
+        vec![Field::new(
+            "PICOAGENT_RESEARCH_TIMEOUT_SECS",
+            "調査レポート検索待ち時間（秒、3〜60）",
+            "text",
+            "15",
+        )]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {

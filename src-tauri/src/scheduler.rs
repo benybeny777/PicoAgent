@@ -81,29 +81,13 @@ pub struct ScheduledRunRecord {
 
 const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
+// 実行の許可ルートは全スキル共通の permissions を参照する。
 fn command_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()))
-}
-
-fn extra_command_roots(cfg: &Config) -> Vec<PathBuf> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "")
-        .split(['\n', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(PathBuf::from)
-        .collect()
+    crate::permissions::primary_root(cfg)
 }
 
 fn command_roots(cfg: &Config) -> Vec<PathBuf> {
-    let mut roots = vec![command_root(cfg)];
-    roots.extend(extra_command_roots(cfg));
-    roots
+    crate::permissions::allowed_roots(cfg)
 }
 
 fn default_kind() -> String {
@@ -341,17 +325,8 @@ fn bounded_cwd(base: &Path, roots: Vec<PathBuf>, cwd: &str) -> Result<PathBuf, S
     ))
 }
 
-#[cfg(windows)]
 fn is_protected_edit_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.starts_with(r"c:\windows")
-        || s.starts_with(r"c:\program files\")
-        || s.starts_with(r"c:\program files (x86)\")
-}
-
-#[cfg(not(windows))]
-fn is_protected_edit_path(_path: &Path) -> bool {
-    false
+    crate::permissions::is_system_protected(path)
 }
 
 fn command_tokens(program: &str, args: &[String]) -> Vec<String> {

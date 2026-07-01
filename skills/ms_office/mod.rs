@@ -18,14 +18,8 @@ pub struct MsOfficeTool;
 
 const OFFICE_SCRIPT: &str = include_str!("scripts/office.ps1");
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
 fn root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_DOCUMENT_ROOT", &home()))
+    crate::permissions::primary_root(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -102,7 +96,6 @@ impl Tool for MsOfficeTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_DOCUMENT_ROOT", "Office/PDF 操作の許可ルート", "text", &home()),
             Field::new("PICOAGENT_MS_OFFICE_TIMEOUT_SECS", "Microsoft Office 操作タイムアウト秒（5〜300）", "text", "120"),
         ]
     }

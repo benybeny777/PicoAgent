@@ -15,6 +15,7 @@ mod memory;
 mod menu;
 mod message;
 mod migration;
+mod permissions;
 mod providers;
 mod scheduler;
 mod secret;

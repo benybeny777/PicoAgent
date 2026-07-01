@@ -8,20 +8,13 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::message::Field;
 
 const MAX_TEXT_CHARS: usize = 24_000;
 
 pub struct SparkWorkspaceTool;
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
 fn workspace_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_WORKSPACE_ROOT", &home()))
+    crate::permissions::primary_root(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -256,15 +249,6 @@ impl Tool for SparkWorkspaceTool {
             },
             "required": ["project"]
         })
-    }
-
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_WORKSPACE_ROOT",
-            "spark_workspace の保存許可ルート",
-            "text",
-            &home(),
-        )]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
