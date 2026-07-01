@@ -173,7 +173,21 @@ body.searching .tab-panel {
   background: #fff;
   color: var(--ink);
 }
+.field input[type="text"]:focus,
+.field input[type="number"]:focus,
+.field input[type="password"]:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: 2px solid rgba(233, 138, 182, .22);
+  border-color: var(--pink);
+}
 .field textarea { min-height: 70px; resize: vertical; }
+.field-note {
+  margin: -6px 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .field.inline {
   display: flex;
   align-items: center;

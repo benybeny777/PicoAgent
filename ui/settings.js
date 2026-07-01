@@ -1420,9 +1420,10 @@ async function render() {
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
   // --- 許可（ファイル/実行）: 全スキル共通のファイル/ディレクトリ許可ルール ---
   const permSec = section("許可（ファイル/実行）");
-  permSec.append(el("p", { className: "hint", textContent: "すべてのスキルが参照する共通の許可ルールです。ここで許可したルート配下だけを読み書き・操作・実行できます。C:\\Windows と Program Files は設定に関わらず常に拒否します。" }));
-  permSec.append(field("PICOAGENT_ALLOWED_ROOT", "主な許可ルート（相対パスの基準。空ならホーム）", "text", v.PICOAGENT_ALLOWED_ROOT ?? "", "例: C:\\Users\\you\\work"));
-  permSec.append(field("PICOAGENT_ALLOWED_PATHS", "追加の許可ルート（改行または ; 区切り）", "textarea", v.PICOAGENT_ALLOWED_PATHS ?? "", ""));
+  permSec.append(el("p", { className: "hint", textContent: "ファイル操作やコマンド実行で触ってよい場所を決めます。許可したフォルダの中だけを読み書き・操作・実行できます。C:\\Windows と Program Files は設定に関わらず常に拒否します。" }));
+  permSec.append(field("PICOAGENT_ALLOWED_ROOT", "既定で許可するフォルダ", "text", v.PICOAGENT_ALLOWED_ROOT ?? "", "例: C:\\Users\\you\\work"));
+  permSec.append(el("p", { className: "field-note", textContent: "ここは相対パスの基準にもなります。空ならホームフォルダを使います。" }));
+  permSec.append(field("PICOAGENT_ALLOWED_PATHS", "ほかにも許可するフォルダ（改行または ; 区切り）", "textarea", v.PICOAGENT_ALLOWED_PATHS ?? "", ""));
   permSec.append(field("PICOAGENT_DENIED_PATHS", "拒否パス（改行または ; 区切り。この配下は常に拒否）", "textarea", v.PICOAGENT_DENIED_PATHS ?? "", ""));
   permSec.append(el("p", { className: "hint", textContent: "コマンド実行（run_command）と自力実行（code_runner）の有効化は「スキル設定」タブの各スキルカードで切り替えます。既定はどちらも無効です。" }));
   panels.permissions.append(permSec);
