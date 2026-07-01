@@ -840,6 +840,272 @@ function approvalPolicyNode(tool) {
   ]);
 }
 
+const SETUP_GUIDES = {
+  openai: {
+    title: "OpenAI API キー",
+    steps: [
+      "OpenAI Platform にログインし、API keys で新しい secret key を作ります。",
+      "作成直後に表示される sk-... を OPENAI_API_KEY に貼ります。後から同じ値は再表示できません。",
+      "必要なら Billing / Usage limits で上限も設定します。",
+    ],
+    links: [
+      ["API keys", "https://platform.openai.com/api-keys"],
+      ["公式ヘルプ", "https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key"],
+    ],
+  },
+  anthropic: {
+    title: "Anthropic / Claude API キー",
+    steps: [
+      "Claude Console にログインし、API keys でキーを作ります。",
+      "作成した sk-ant-... を PICOAGENT_ANTHROPIC_API_KEY に貼ります。",
+      "API利用は課金対象なので、Console 側の請求設定も確認します。",
+    ],
+    links: [["Claude Console", "https://platform.claude.com/"]],
+  },
+  gemini: {
+    title: "Gemini API キー",
+    steps: [
+      "Google AI Studio の API Keys ページを開き、Create API key でキーを作ります。",
+      "AIza... のキーを PICOAGENT_GEMINI_API_KEY に貼ります。",
+      "公開リポジトリやログには絶対に貼らず、必要なら Google 側で利用制限を設定します。",
+    ],
+    links: [
+      ["AI Studio API Keys", "https://aistudio.google.com/app/apikey"],
+      ["公式ドキュメント", "https://ai.google.dev/gemini-api/docs/api-key"],
+    ],
+  },
+  deepseek: {
+    title: "DeepSeek API キー",
+    steps: [
+      "DeepSeek Platform にログインし、API keys でキーを作ります。",
+      "sk-... を PICOAGENT_DEEPSEEK_API_KEY に貼ります。",
+      "Thinking モードは必要に応じて設定します。",
+    ],
+    links: [["DeepSeek Platform", "https://platform.deepseek.com/api_keys"]],
+  },
+  xai: {
+    title: "xAI API キー",
+    steps: [
+      "xAI Console にログインし、API key を作ります。",
+      "xai-... を PICOAGENT_XAI_API_KEY に貼ります。",
+      "モデル名は利用できるモデル一覧に合わせます。",
+    ],
+    links: [["xAI Console", "https://console.x.ai/"]],
+  },
+  mistral: {
+    title: "Mistral API キー",
+    steps: [
+      "Mistral Console にログインし、API key を作ります。",
+      "作成したキーを PICOAGENT_MISTRAL_API_KEY に貼ります。",
+      "必要なら Console 側で請求と利用上限を確認します。",
+    ],
+    links: [["Mistral Console", "https://console.mistral.ai/"]],
+  },
+  gmail_message: {
+    title: "Gmail OAuth access token",
+    steps: [
+      "Google Cloud Console で OAuth クライアントを用意します。個人利用なら OAuth Playground で access token を発行できます。",
+      "Gmail の読み取り/変更/送信に必要な scope を許可します。例: gmail.modify と gmail.send。",
+      "発行された ya29... の access token を PICOAGENT_GMAIL_ACCESS_TOKEN に貼ります。access token は期限切れになるため、切れたら取り直します。",
+    ],
+    links: [
+      ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+      ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ["Gmail API scopes", "https://developers.google.com/workspace/gmail/api/auth/scopes"],
+    ],
+  },
+  google_calendar: {
+    title: "Google Calendar OAuth access token",
+    steps: [
+      "Google Cloud Console で OAuth クライアントを用意し、Calendar API を有効にします。",
+      "OAuth Playground などで Calendar scope を許可して access token を発行します。",
+      "ya29... を PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN に貼ります。既定カレンダーは通常 primary で動きます。",
+    ],
+    links: [
+      ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+      ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ["Calendar API scopes", "https://developers.google.com/workspace/calendar/api/auth"],
+    ],
+  },
+  google_docs: {
+    title: "Google Docs OAuth access token",
+    steps: [
+      "Google Cloud Console で OAuth クライアントを用意し、Google Docs API を有効にします。",
+      "OAuth Playground などで docs scope を許可して access token を発行します。",
+      "ya29... を PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN に貼ります。",
+    ],
+    links: [
+      ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+      ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ["Docs API scopes", "https://developers.google.com/workspace/docs/api/auth"],
+    ],
+  },
+  google_drive: {
+    title: "Google Drive OAuth access token",
+    steps: [
+      "Google Cloud Console で OAuth クライアントを用意し、Google Drive API を有効にします。",
+      "OAuth Playground などで Drive scope を許可して access token を発行します。",
+      "ya29... を PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN に貼ります。",
+    ],
+    links: [
+      ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+      ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ["Drive API scopes", "https://developers.google.com/workspace/drive/api/guides/api-specific-auth"],
+    ],
+  },
+  google_sheets: {
+    title: "Google Sheets OAuth access token",
+    steps: [
+      "Google Cloud Console で OAuth クライアントを用意し、Google Sheets API を有効にします。",
+      "OAuth Playground などで spreadsheets scope を許可して access token を発行します。",
+      "ya29... を PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN に貼り、既定 spreadsheet ID も設定します。",
+    ],
+    links: [
+      ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+      ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ["Sheets API scopes", "https://developers.google.com/workspace/sheets/api/scopes"],
+    ],
+  },
+  google_tasks: {
+    title: "Google Tasks OAuth access token",
+    steps: [
+      "Google Cloud Console で OAuth クライアントを用意し、Google Tasks API を有効にします。",
+      "OAuth Playground などで tasks scope を許可して access token を発行します。",
+      "ya29... を PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN に貼ります。通常の tasklist ID は @default です。",
+    ],
+    links: [
+      ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+      ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ["Tasks API", "https://developers.google.com/tasks"],
+    ],
+  },
+  slack_send_message: {
+    title: "Slack Bot token / Webhook URL",
+    steps: [
+      "Slack API の Your Apps でアプリを作成します。",
+      "OAuth & Permissions で bot scopes を追加します。投稿は chat:write、履歴取得は channels:history などが必要です。",
+      "Install to Workspace 後、xoxb-... を PICOAGENT_SLACK_BOT_TOKEN に貼ります。Webhook を使う場合は Incoming Webhooks を有効化して URL を貼ります。",
+    ],
+    links: [
+      ["Slack Your Apps", "https://api.slack.com/apps"],
+      ["Slack tokens", "https://docs.slack.dev/authentication/tokens"],
+      ["Scopes", "https://api.slack.com/scopes"],
+    ],
+  },
+  github_issue: {
+    title: "GitHub token",
+    steps: [
+      "GitHub の Personal access tokens で fine-grained token を作ります。",
+      "対象 repository を選び、Issues の Read/Write 権限を付けます。",
+      "github_pat_... を PICOAGENT_GITHUB_TOKEN に貼り、owner / repo も設定します。",
+    ],
+    links: [
+      ["Fine-grained tokens", "https://github.com/settings/personal-access-tokens"],
+      ["公式ドキュメント", "https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"],
+    ],
+  },
+  notion: {
+    title: "Notion integration token",
+    steps: [
+      "Notion の My integrations で integration を作成します。",
+      "Internal Integration Secret を PICOAGENT_NOTION_TOKEN に貼ります。",
+      "使うページ/DBの Share から integration を招待し、database ID も設定します。",
+    ],
+    links: [
+      ["My integrations", "https://www.notion.so/my-integrations"],
+      ["Notion API docs", "https://developers.notion.com/docs/create-a-notion-integration"],
+    ],
+  },
+  discord_send_message: {
+    title: "Discord Webhook URL",
+    steps: [
+      "Discord のチャンネル設定で 連携サービス > ウェブフック を開きます。",
+      "新しい Webhook を作成し、URL をコピーします。",
+      "URL を PICOAGENT_DISCORD_WEBHOOK_URL に貼ります。",
+    ],
+    links: [["Discord Webhooks", "https://support.discord.com/hc/articles/228383668-Intro-to-Webhooks"]],
+  },
+  todoist: {
+    title: "Todoist API token",
+    steps: [
+      "Todoist の設定 > Integrations > Developer を開きます。",
+      "API token をコピーして PICOAGENT_TODOIST_TOKEN に貼ります。",
+      "必要なら既定 project ID も設定します。",
+    ],
+    links: [["Todoist Developer", "https://app.todoist.com/app/settings/integrations/developer"]],
+  },
+  trello: {
+    title: "Trello key / token",
+    steps: [
+      "Trello Developer API Keys で key を確認します。",
+      "同じページから token を生成します。",
+      "key / token / list ID をそれぞれ設定します。",
+    ],
+    links: [["Trello API Keys", "https://trello.com/app-key"]],
+  },
+  bluesky: {
+    title: "Bluesky app password",
+    steps: [
+      "Bluesky の Settings > Privacy and security > App passwords を開きます。",
+      "新しい App Password を作り、PICOAGENT_BLUESKY_APP_PASSWORD に貼ります。",
+      "identifier には user.bsky.social のようなハンドルを入れます。",
+    ],
+    links: [["Bluesky App passwords", "https://bsky.app/settings/app-passwords"]],
+  },
+};
+
+function setupGuideFor(id, schema = []) {
+  if (SETUP_GUIDES[id]) return SETUP_GUIDES[id];
+  const keys = schema.map(field => field.key).join(" ");
+  if (/GOOGLE_.*ACCESS_TOKEN|GMAIL_ACCESS_TOKEN/.test(keys)) {
+    return {
+      title: "Google OAuth access token",
+      steps: [
+        "Google Cloud Console で OAuth クライアントを用意します。",
+        "OAuth Playground などで対象APIの scope を許可し、access token を発行します。",
+        "ya29... の値を access token 欄に貼ります。access token は期限切れになるため、切れたら取り直します。",
+      ],
+      links: [
+        ["Google 認証情報", "https://console.cloud.google.com/apis/credentials"],
+        ["OAuth Playground", "https://developers.google.com/oauthplayground"],
+      ],
+    };
+  }
+  if (/TOKEN|API_KEY|SECRET|WEBHOOK|APP_PASSWORD|BEARER/.test(keys)) {
+    return {
+      title: "トークン/キー設定の基本",
+      steps: [
+        "対象サービスの開発者設定または連携アプリ設定で API key / token / webhook URL を作ります。",
+        "作成直後に表示される秘密値を、この設定欄へ貼ります。秘密値は後から再表示できないサービスがあります。",
+        "必要最小限の権限だけを付け、不要になったキーはサービス側で無効化してください。",
+      ],
+      links: [],
+    };
+  }
+  return null;
+}
+
+function setupGuideNode(id, schema = []) {
+  const guide = setupGuideFor(id, schema);
+  if (!guide) return null;
+  const details = el("details", { className: "setup-guide" }, [
+    el("summary", { textContent: `設定ガイド: ${guide.title}` }),
+    el("ol", {}, guide.steps.map(step => el("li", { textContent: step }))),
+  ]);
+  if (guide.links?.length) {
+    details.append(el("div", { className: "setup-guide-links" }, guide.links.map(([label, href]) => {
+      const link = el("a", { href, textContent: label });
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noreferrer");
+      link.addEventListener("click", event => event.stopPropagation());
+      return link;
+    })));
+  }
+  details.append(el("p", { className: "setup-guide-note", textContent: "キーやトークンは秘密情報です。チャット、ログ、Git、スクリーンショットには貼らないでください。" }));
+  details.addEventListener("click", event => event.stopPropagation());
+  return details;
+}
+
 function buildConnectionTest(tool) {
   const wrap = el("div", { className: "connection-test" });
   const button = el("button", { type: "button", textContent: "接続テスト" });
@@ -919,6 +1185,8 @@ function renderSkillCard(tool, values) {
       tool.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
     );
     panel.hidden = true;
+    const guide = setupGuideNode(tool.name, tool.configSchema);
+    if (guide) panel.append(guide);
     if (supportsConnectionTest(tool)) {
       panel.append(buildConnectionTest(tool));
     }
@@ -1409,6 +1677,8 @@ async function render() {
       provider.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
     );
     block.append(el("div", { className: "subhead", textContent: provider.label }));
+    const guide = setupGuideNode(provider.id, provider.configSchema);
+    if (guide) block.append(guide);
     for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
     activeProviderBlock = block;
     provSec.append(block);

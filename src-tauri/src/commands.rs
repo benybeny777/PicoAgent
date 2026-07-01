@@ -1606,10 +1606,12 @@ pub fn pet_delete_downloaded_model(app: AppHandle, name: String) -> Result<Value
                 .to_string(),
         );
     }
-    std::fs::remove_file(&path).map_err(|error| {
-        format!("削除に失敗しました（使用中の可能性があります）: {error}")
-    })?;
-    crate::log_paths::append_app_log(&app, &format!("ダウンロード済みモデルを削除しました: {name}"));
+    std::fs::remove_file(&path)
+        .map_err(|error| format!("削除に失敗しました（使用中の可能性があります）: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("ダウンロード済みモデルを削除しました: {name}"),
+    );
     Ok(json!({ "ok": true }))
 }
 

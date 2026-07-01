@@ -269,6 +269,227 @@ fn direct_answer(messages: &mut Vec<Message>, answer: String) -> anyhow::Result<
     Ok(answer)
 }
 
+struct SetupGuide {
+    title: &'static str,
+    fields: &'static [&'static str],
+    steps: &'static [&'static str],
+    links: &'static [(&'static str, &'static str)],
+}
+
+fn setup_guide_answer(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    let asks_setup = [
+        "設定",
+        "トークン",
+        "token",
+        "apiキー",
+        "api key",
+        "apikey",
+        "キー",
+        "oauth",
+        "webhook",
+        "ウェブフック",
+        "やり方",
+        "取り方",
+        "取得",
+        "どこ",
+        "貼る",
+        "入れる",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !asks_setup {
+        return None;
+    }
+    let guide = if lower.contains("gmail") || lower.contains("gメール") {
+        Some(SetupGuide {
+            title: "Gmail OAuth access token",
+            fields: &["PICOAGENT_GMAIL_ACCESS_TOKEN", "PICOAGENT_GMAIL_BASE_URL"],
+            steps: &[
+                "Google Cloud Console で OAuth クライアントを用意します。個人利用なら OAuth Playground でも access token を発行できます。",
+                "Gmail の読み取り/変更/送信に必要な scope を許可します。例: gmail.modify と gmail.send。",
+                "発行された ya29... の access token を PICOAGENT_GMAIL_ACCESS_TOKEN に貼ります。access token は期限切れになるため、切れたら取り直します。",
+            ],
+            links: &[
+                ("Google 認証情報", "https://console.cloud.google.com/apis/credentials"),
+                ("OAuth Playground", "https://developers.google.com/oauthplayground"),
+                ("Gmail API scopes", "https://developers.google.com/workspace/gmail/api/auth/scopes"),
+            ],
+        })
+    } else if lower.contains("slack") || lower.contains("スラック") {
+        Some(SetupGuide {
+            title: "Slack Bot token / Incoming Webhook",
+            fields: &[
+                "PICOAGENT_SLACK_BOT_TOKEN",
+                "PICOAGENT_SLACK_CHANNEL",
+                "PICOAGENT_SLACK_WEBHOOK_URL",
+            ],
+            steps: &[
+                "Slack API の Your Apps でアプリを作成します。",
+                "OAuth & Permissions で bot scopes を追加します。投稿は chat:write、履歴取得は channels:history などが必要です。",
+                "Install to Workspace 後、xoxb-... を PICOAGENT_SLACK_BOT_TOKEN に貼ります。Webhook を使う場合は Incoming Webhooks を有効化して URL を貼ります。",
+            ],
+            links: &[
+                ("Slack Your Apps", "https://api.slack.com/apps"),
+                ("Slack tokens", "https://docs.slack.dev/authentication/tokens"),
+                ("Slack scopes", "https://api.slack.com/scopes"),
+            ],
+        })
+    } else if lower.contains("google")
+        || lower.contains("カレンダー")
+        || lower.contains("calendar")
+        || lower.contains("docs")
+        || lower.contains("drive")
+        || lower.contains("sheets")
+        || lower.contains("tasks")
+    {
+        Some(SetupGuide {
+            title: "Google OAuth access token",
+            fields: &[
+                "PICOAGENT_GOOGLE_*_ACCESS_TOKEN",
+                "PICOAGENT_GOOGLE_CALENDAR_ID",
+                "PICOAGENT_GOOGLE_SHEETS_ID",
+            ],
+            steps: &[
+                "Google Cloud Console で OAuth クライアントを用意し、使う API（Calendar / Docs / Drive / Sheets / Tasks）を有効にします。",
+                "OAuth Playground などで対象APIの scope を許可し、access token を発行します。",
+                "ya29... の値を該当する PICOAGENT_GOOGLE_*_ACCESS_TOKEN に貼ります。access token は期限切れになるため、切れたら取り直します。",
+            ],
+            links: &[
+                ("Google 認証情報", "https://console.cloud.google.com/apis/credentials"),
+                ("OAuth Playground", "https://developers.google.com/oauthplayground"),
+                ("Google Workspace scopes", "https://developers.google.com/workspace/guides/configure-oauth-consent"),
+            ],
+        })
+    } else if lower.contains("openai") || lower.contains("chatgpt") {
+        Some(SetupGuide {
+            title: "OpenAI API key",
+            fields: &["OPENAI_API_KEY", "OPENAI_MODEL"],
+            steps: &[
+                "OpenAI Platform にログインし、API keys で新しい secret key を作ります。",
+                "作成直後に表示される sk-... を OPENAI_API_KEY に貼ります。後から同じ値は再表示できません。",
+                "必要なら Billing / Usage limits で上限も設定します。",
+            ],
+            links: &[
+                ("API keys", "https://platform.openai.com/api-keys"),
+                ("公式ヘルプ", "https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key"),
+            ],
+        })
+    } else if lower.contains("claude") || lower.contains("anthropic") {
+        Some(SetupGuide {
+            title: "Anthropic / Claude API key",
+            fields: &["PICOAGENT_ANTHROPIC_API_KEY", "PICOAGENT_ANTHROPIC_MODEL"],
+            steps: &[
+                "Claude Console にログインし、API keys でキーを作ります。",
+                "作成した sk-ant-... を PICOAGENT_ANTHROPIC_API_KEY に貼ります。",
+                "API利用は課金対象なので、Console 側の請求設定も確認します。",
+            ],
+            links: &[("Claude Console", "https://platform.claude.com/")],
+        })
+    } else if lower.contains("gemini") {
+        Some(SetupGuide {
+            title: "Gemini API key",
+            fields: &["PICOAGENT_GEMINI_API_KEY", "PICOAGENT_GEMINI_MODEL"],
+            steps: &[
+                "Google AI Studio の API Keys ページを開き、Create API key でキーを作ります。",
+                "AIza... のキーを PICOAGENT_GEMINI_API_KEY に貼ります。",
+                "公開リポジトリやログには絶対に貼らず、必要なら Google 側で利用制限を設定します。",
+            ],
+            links: &[
+                (
+                    "AI Studio API Keys",
+                    "https://aistudio.google.com/app/apikey",
+                ),
+                (
+                    "公式ドキュメント",
+                    "https://ai.google.dev/gemini-api/docs/api-key",
+                ),
+            ],
+        })
+    } else if lower.contains("github") || lower.contains("git hub") {
+        Some(SetupGuide {
+            title: "GitHub personal access token",
+            fields: &["PICOAGENT_GITHUB_TOKEN", "PICOAGENT_GITHUB_OWNER", "PICOAGENT_GITHUB_REPO"],
+            steps: &[
+                "GitHub の Personal access tokens で fine-grained token を作ります。",
+                "対象 repository を選び、Issues の Read/Write 権限を付けます。",
+                "github_pat_... を PICOAGENT_GITHUB_TOKEN に貼り、owner / repo も設定します。",
+            ],
+            links: &[
+                ("Fine-grained tokens", "https://github.com/settings/personal-access-tokens"),
+                ("公式ドキュメント", "https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"),
+            ],
+        })
+    } else if lower.contains("notion") {
+        Some(SetupGuide {
+            title: "Notion integration token",
+            fields: &["PICOAGENT_NOTION_TOKEN", "PICOAGENT_NOTION_DATABASE_ID"],
+            steps: &[
+                "Notion の My integrations で integration を作成します。",
+                "Internal Integration Secret を PICOAGENT_NOTION_TOKEN に貼ります。",
+                "使うページ/DBの Share から integration を招待し、database ID も設定します。",
+            ],
+            links: &[
+                ("My integrations", "https://www.notion.so/my-integrations"),
+                (
+                    "Notion API docs",
+                    "https://developers.notion.com/docs/create-a-notion-integration",
+                ),
+            ],
+        })
+    } else if lower.contains("discord") {
+        Some(SetupGuide {
+            title: "Discord Webhook URL",
+            fields: &["PICOAGENT_DISCORD_WEBHOOK_URL"],
+            steps: &[
+                "Discord のチャンネル設定で 連携サービス > ウェブフック を開きます。",
+                "新しい Webhook を作成し、URL をコピーします。",
+                "URL を PICOAGENT_DISCORD_WEBHOOK_URL に貼ります。",
+            ],
+            links: &[(
+                "Discord Webhooks",
+                "https://support.discord.com/hc/articles/228383668-Intro-to-Webhooks",
+            )],
+        })
+    } else if lower.contains("トークン")
+        || lower.contains("token")
+        || lower.contains("apiキー")
+        || lower.contains("api key")
+        || lower.contains("webhook")
+        || lower.contains("ウェブフック")
+    {
+        Some(SetupGuide {
+            title: "トークン/キー設定の基本",
+            fields: &["設定画面 → 叩くAI または スキル設定 の該当サービス"],
+            steps: &[
+                "まず、どのサービスを使うか決めます。例: OpenAI / Gmail / Slack / Google Calendar / GitHub / Notion。",
+                "設定画面でそのプロバイダまたはスキルカードを開くと、取得手順と公式リンクが表示されます。",
+                "取得した API key / OAuth token / Webhook URL を該当欄へ貼って保存します。サービス名を指定して聞けば、そのサービス用の手順を詳しく案内します。",
+            ],
+            links: &[],
+        })
+    } else {
+        None
+    }?;
+
+    let mut out = format!("{} の設定手順です。\n\n入力する欄:\n", guide.title);
+    for field in guide.fields {
+        out.push_str("- `");
+        out.push_str(field);
+        out.push_str("`\n");
+    }
+    out.push_str("\n手順:\n");
+    for (index, step) in guide.steps.iter().enumerate() {
+        out.push_str(&format!("{}. {}\n", index + 1, step));
+    }
+    out.push_str("\n公式リンク:\n");
+    for (label, url) in guide.links {
+        out.push_str(&format!("- [{}]({})\n", label, url));
+    }
+    out.push_str("\n注意: APIキーやトークンは秘密情報です。チャット、ログ、Git、スクリーンショットには貼らないでください。");
+    Some(out)
+}
+
 /// テキスト中に埋め込まれた JSON オブジェクトを抽出する（コードブロック・文中 JSON にも対応）。
 fn extract_json_object(content: &str) -> Option<serde_json::Value> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(content.trim()) {
@@ -888,6 +1109,8 @@ pub async fn run(
             messages[user_index].content = format!(
                 "{user_text}\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。"
             );
+        } else if let Some(answer) = setup_guide_answer(&user_text) {
+            return direct_answer(messages, answer);
         } else if is_weather_query(&user_text) {
             // 天気はモデルに任せず weather スキルの整形済み出力（アイコン・気温チャート）を直接返す。
             let args = match extract_weather_location(&user_text) {
@@ -1097,7 +1320,7 @@ mod tests {
         append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
         extract_source_urls, genspark_suite_query, is_local_action_query, is_simple_greeting,
         is_weather_query, market_query, meeting_recorder_query, research_report_query,
-        should_web_search, spark_workspace_query, web_search_query,
+        setup_guide_answer, should_web_search, spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1163,6 +1386,19 @@ mod tests {
             web_search_query("今日のニュースをWEB検索して"),
             "今日のニュースを"
         );
+    }
+
+    #[test]
+    fn 設定ガイド質問に固定手順を返す() {
+        let gmail = setup_guide_answer("Gmailのトークンの取り方を教えて").unwrap();
+        assert!(gmail.contains("PICOAGENT_GMAIL_ACCESS_TOKEN"));
+        assert!(gmail.contains("https://developers.google.com/oauthplayground"));
+
+        let openai = setup_guide_answer("OpenAI APIキーはどこに入れる？").unwrap();
+        assert!(openai.contains("OPENAI_API_KEY"));
+        assert!(openai.contains("https://platform.openai.com/api-keys"));
+
+        assert!(setup_guide_answer("今日の天気は？").is_none());
     }
 
     #[test]

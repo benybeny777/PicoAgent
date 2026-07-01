@@ -174,7 +174,9 @@ mod tests {
     fn windowsとprogram_filesは常に保護() {
         assert!(is_system_protected(&PathBuf::from(r"C:\Windows\System32")));
         assert!(is_system_protected(&PathBuf::from(r"C:\Program Files\App")));
-        assert!(is_system_protected(&PathBuf::from(r"C:\Program Files (x86)\App")));
+        assert!(is_system_protected(&PathBuf::from(
+            r"C:\Program Files (x86)\App"
+        )));
         assert!(!is_system_protected(&PathBuf::from(r"C:\Users\me\doc.txt")));
     }
 }
