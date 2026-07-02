@@ -648,6 +648,15 @@ function selectField(key, label, value, options) {
   ));
 }
 
+function applySettingsTheme(value) {
+  const theme = value === "light" || value === "dark" ? value : "system";
+  if (theme === "system") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
 function section(title) {
   return el("div", { className: "section" }, [el("h2", { textContent: title })]);
 }
@@ -1555,6 +1564,11 @@ async function render() {
   updateModelFieldVisibility();
   global.append(field("PICOAGENT_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
   global.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
+  global.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
+    { value: "system", label: "システム設定に追従" },
+    { value: "light", label: "通常" },
+    { value: "dark", label: "ダーク" },
+  ]));
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
   global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
@@ -1565,6 +1579,10 @@ async function render() {
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
+  applySettingsTheme(v.PICOAGENT_THEME || "system");
+  inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {
+    applySettingsTheme(event.target.value);
+  });
 
   // --- キャラクター ---
   const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });

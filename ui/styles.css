@@ -38,6 +38,44 @@
     --scrollbar-thumb:rgba(190,175,200,.35);
   }
 }
+html[data-theme="light"] {
+  color-scheme:light;
+  --ink:#342b3b; --muted:#817587; --paper:#fffdf8; --accent:#f27e91; --mint:#64c99b;
+  --ink-soft:#4b4050;
+  --panel-border:rgba(71,52,76,.14);
+  --bubble-bg:rgba(255,253,248,.98);
+  --panel-bg:rgba(255,253,248,.99);
+  --field-bg:#faf7f9; --field-border:#ded6df; --field-focus:#d59cac;
+  --chip-bg:#f4edf1; --chip-border:#eadde5;
+  --history-msg:#f6f1f4; --user-msg:#ffeef3; --assistant-msg:#f4fbf6;
+  --link:#b94f68;
+  --code-bg:rgba(0,0,0,.06); --code-btn-bg:rgba(0,0,0,.14); --code-btn-bg-hover:rgba(0,0,0,.22);
+  --notice-ok-bg:#f8fbf7; --notice-err-bg:#fff6f8;
+  --boot-stage-bg:linear-gradient(180deg,rgba(255,253,248,.97),rgba(247,251,246,.94));
+  --boot-stage-border:rgba(71,52,76,.12);
+  --log-ink:#2f2638; --log-line-bg:rgba(255,253,248,.76); --log-line-glow:rgba(255,255,255,.95);
+  --log-status:#7a5260; --log-system:#246f52; --log-trace:#3a3141;
+  --scrollbar-thumb:rgba(129,117,135,.4);
+}
+html[data-theme="dark"] {
+  color-scheme:dark;
+  --ink:#ece5f1; --muted:#a89bb1; --paper:#2e2735;
+  --ink-soft:#d6cbdd;
+  --panel-border:rgba(255,255,255,.13);
+  --bubble-bg:rgba(46,39,53,.97);
+  --panel-bg:rgba(46,39,53,.98);
+  --field-bg:#3a3244; --field-border:#4d4358; --field-focus:#b06d80;
+  --chip-bg:#3a3244; --chip-border:#4d4358;
+  --history-msg:#3a3244; --user-msg:#4d3341; --assistant-msg:#31423a;
+  --link:#f09cac;
+  --code-bg:rgba(255,255,255,.08); --code-btn-bg:rgba(255,255,255,.14); --code-btn-bg-hover:rgba(255,255,255,.24);
+  --notice-ok-bg:#31423a; --notice-err-bg:#46333a;
+  --boot-stage-bg:linear-gradient(180deg,rgba(46,39,53,.97),rgba(41,45,42,.94));
+  --boot-stage-border:rgba(255,255,255,.12);
+  --log-ink:#e8e0ee; --log-line-bg:rgba(46,39,53,.8); --log-line-glow:rgba(0,0,0,.55);
+  --log-status:#d9a3b1; --log-system:#7fd0a8; --log-trace:#cfc4d6;
+  --scrollbar-thumb:rgba(190,175,200,.35);
+}
 * { box-sizing:border-box; }
 html,body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; font-family:"Segoe UI","Yu Gothic UI",system-ui,sans-serif; }
 .pet-app { position:relative; width:100%; height:100%; user-select:none; }

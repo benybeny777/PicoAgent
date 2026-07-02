@@ -1887,6 +1887,14 @@ function applyVoiceVolume(value) {
   voiceVolume = Math.min(1, Math.max(0, n / 100));
   if (currentVoice) currentVoice.volume = voiceVolume;
 }
+function applyTheme(value) {
+  const theme = value === "light" || value === "dark" ? value : "system";
+  if (theme === "system") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+}
 function applyBubbleLayout(width, height, left, top) {
   const w = parseFloat(width);
   const h = parseFloat(height);
@@ -1909,6 +1917,7 @@ window.addEventListener("resize", refreshBubblePlacement);
 petSprite.addEventListener("load", refreshBubblePlacement);
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
+  if (ui.theme != null) applyTheme(ui.theme);
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
   if (ui.voiceVolume != null) applyVoiceVolume(ui.voiceVolume);
   applyBubbleLayout(ui.bubbleWidth, ui.bubbleHeight, ui.bubbleLeft, ui.bubbleTop);
@@ -2172,6 +2181,7 @@ function startAlarmPolling() {
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
   online.dataset.up = info.up;
+  if (info.theme != null) applyTheme(info.theme);
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);

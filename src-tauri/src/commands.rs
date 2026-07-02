@@ -406,6 +406,7 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
         "up": current_up(&state).await,
+        "theme": state.config.get("PICOAGENT_THEME", "system"),
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
         "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
         "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
@@ -1430,6 +1431,7 @@ pub async fn settings_save(
         // 反映するため、再起動が必要なときは characterId / pet:model を送らない。
         let mut ui = json!({
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
+            "theme": state.config.get("PICOAGENT_THEME", "system"),
             "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
             "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
             "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),

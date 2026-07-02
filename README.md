@@ -128,7 +128,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | Mistral | `PICOAGENT_MISTRAL_API_KEY` / `PICOAGENT_MISTRAL_MODEL` | Mistral プロバイダを使う場合だけ設定 |
 | Ollama | `OLLAMA_HOST` / `OLLAMA_MODEL` | 任意で外部 Ollama を使う場合だけ設定 |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` | 使用キャラとキャラ別の口調・人格上書き |
-| 表示 | `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` | フキダシ文字サイズ、常に手前表示 |
+| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` | 表示テーマ（既定はシステム設定に追従）、フキダシ文字サイズ、常に手前表示 |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` | Aivis 読み上げ、キャラボイス音量。デバイス・ポート・話者IDは内部既定値を使い、通常の設定画面には出しません |
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` | 会話から好みや継続指示を暗黙的に覚えるか |
 | スーパーエージェント | `PICOAGENT_SUPER_AGENT` / `PICOAGENT_SUPER_AGENT_MAX_STEPS` / `PICOAGENT_SUBAGENT_MAX_DEPTH` | 計画→実行・自己評価・サブエージェント分担を強化する自律モード。ON にするとループ上限が上がり、進捗（計画・実行ステップ・実行中ツール）をフキダシ上部のステータス行に表示する |
