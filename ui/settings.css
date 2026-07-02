@@ -757,3 +757,38 @@ button.tab:active {
   border: 1px solid var(--line);
 }
 .restart-actions .btn.primary { background: var(--pink); color: #fff; }
+
+/* ── 設定のチェックボックスをトグルスイッチ風にする ─────────────────── */
+.field.inline input[type="checkbox"] {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  position: relative;
+  border-radius: 999px;
+  background: var(--line);
+  cursor: pointer;
+  transition: background .18s ease;
+  vertical-align: middle;
+}
+.field.inline input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  transition: transform .18s ease;
+}
+.field.inline input[type="checkbox"]:checked { background: var(--pink); }
+.field.inline input[type="checkbox"]:checked::after { transform: translateX(14px); }
+.field.inline input[type="checkbox"]:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .field.inline input[type="checkbox"], .field.inline input[type="checkbox"]::after { transition: none; }
+}
+/* テキスト選択色をテーマに合わせる。 */
+::selection { background: rgba(233, 138, 182, .35); }
