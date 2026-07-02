@@ -134,6 +134,55 @@ fn append_sources(answer: String, sources: &[String]) -> String {
     out
 }
 
+fn strip_between_markers(mut text: String, start: &str, end: &str) -> String {
+    while let Some(start_pos) = text.find(start) {
+        if let Some(end_offset) = text[start_pos..].find(end) {
+            let end_pos = start_pos + end_offset + end.len();
+            text.replace_range(start_pos..end_pos, "");
+        } else {
+            text.truncate(start_pos);
+        }
+    }
+    text
+}
+
+fn looks_like_rss_dump_line(line: &str) -> bool {
+    let line = line.trim();
+    if line.starts_with("フィード:") || line.starts_with("フィード：") {
+        return true;
+    }
+    let Some(rest) = line.strip_prefix("- ") else {
+        return false;
+    };
+    rest.len() >= 10
+        && rest.as_bytes().get(4) == Some(&b'-')
+        && rest.as_bytes().get(7) == Some(&b'-')
+        && rest
+            .chars()
+            .take(10)
+            .all(|c| c.is_ascii_digit() || c == '-')
+        && (rest.contains("http://") || rest.contains("https://"))
+}
+
+fn remove_material_leaks(answer: String) -> String {
+    let answer =
+        strip_between_markers(answer, "--- ニュースRSS開始 ---", "--- ニュースRSS終了 ---");
+    let answer =
+        strip_between_markers(answer, "--- Web検索結果開始 ---", "--- Web検索結果終了 ---");
+    answer
+        .lines()
+        .filter(|line| {
+            let trim = line.trim();
+            !trim.contains("以下は今日のニュース要約用に取得したニュースRSS")
+                && !trim.starts_with("--- ニュースRSS")
+                && !looks_like_rss_dump_line(trim)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 // 天気の質問は、小型ローカルモデルの tool_calls 判断に頼らず weather スキルを先に実行する。
 const WEATHER_WORDS: [&str; 7] = ["天気", "気温", "降水", "予報", "天候", "気象", "weather"];
 
@@ -1153,7 +1202,7 @@ pub async fn run(
             .await;
             sources = extract_urls_anywhere(&news_result);
             messages[user_index].content = format!(
-                "{user_text}\n\n以下は今日のニュース要約用に取得したニュースRSSの最新見出しです。本文全文ではなく見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。各項目は短い要約と参照リンクを含めてください。「直接のまとめは提供できない」「自分で見て」といった回答は禁止です。RSS取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュースRSS開始 ---\n{news_result}\n--- ニュースRSS終了 ---"
+                "{user_text}\n\n以下は今日のニュース要約用に取得した内部資料です。本文全文ではなくRSS見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。回答には生のRSS形式（「フィード:」「- 日付 見出し URL」の行、区切り線、内部資料ブロック）を絶対に書かず、自然な日本語の要約だけを書いてください。参照元は必要な場合だけMarkdownリンクにしてください。「直接のまとめは提供できない」「自分で見て」といった回答は禁止です。RSS取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュースRSS開始 ---\n{news_result}\n--- ニュースRSS終了 ---"
             );
         } else if is_weather_query(&user_text) {
             // 天気はモデルに任せず weather スキルの整形済み出力（アイコン・気温チャート）を直接返す。
@@ -1361,7 +1410,7 @@ pub async fn run(
             }
             // tool_calls が無ければ最終応答（自己評価が有効なら品質チェックして返す）。
             _ => {
-                let answer = append_sources(last, &sources);
+                let answer = append_sources(remove_material_leaks(last), &sources);
                 return Ok(self_improve(provider, cfg, model, messages, answer).await);
             }
         }
@@ -1377,7 +1426,7 @@ pub async fn run(
         cfg,
         model,
         messages,
-        append_sources(answer, &sources),
+        append_sources(remove_material_leaks(answer), &sources),
     )
     .await)
 }
@@ -1386,10 +1435,10 @@ pub async fn run(
 mod tests {
     use super::{
         append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
-        extract_source_urls, genspark_suite_query, is_local_action_query, is_simple_greeting,
-        is_weather_query, market_query, meeting_recorder_query, research_report_query,
-        extract_urls_anywhere, is_news_summary_query, setup_guide_answer, should_web_search,
-        spark_workspace_query, web_search_query,
+        extract_source_urls, extract_urls_anywhere, genspark_suite_query, is_local_action_query,
+        is_news_summary_query, is_simple_greeting, is_weather_query, market_query,
+        meeting_recorder_query, remove_material_leaks, research_report_query, setup_guide_answer,
+        should_web_search, spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1469,6 +1518,13 @@ mod tests {
         let text = "フィード: news\n- 2026-07-03T00:00:00+00:00 見出し https://example.com/a\n- 別 https://example.com/b)";
         let urls = extract_urls_anywhere(text);
         assert_eq!(urls, vec!["https://example.com/a", "https://example.com/b"]);
+    }
+
+    #[test]
+    fn 最終回答からrss材料漏れを除外する() {
+        let answer = "まとめです。\n--- ニュースRSS開始 ---\nフィード: news\n- 2026-07-03T00:00:00+00:00 見出し https://example.com/a\n--- ニュースRSS終了 ---\n以上です。";
+        let cleaned = remove_material_leaks(answer.to_string());
+        assert_eq!(cleaned, "まとめです。\n以上です。");
     }
 
     #[test]

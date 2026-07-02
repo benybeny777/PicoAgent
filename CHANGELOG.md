@@ -19,6 +19,7 @@
 - **壊れた検索補助設定でも既定値で続行** (`skills/web_search/mod.rs`): `PICOAGENT_WEB_SEARCH_MAX_RESULTS` や `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` に不正値が入っていても、検索自体を止めず既定値へ戻して実行するようにした。これにより「検索の設定にエラー」と返してニュース確認などを諦める挙動を避ける。
 - **類似の補助設定エラーも既定値へ戻す** (`skills/gmail/mod.rs` / `skills/slack/mod.rs`): Gmail / Slack の timeout 設定や Gmail 整理上限が不正値でも、接続テスト・要約・整理などの主要操作を止めず既定値で続行するようにした。
 - **今日のニュース要約をRSS優先に変更** (`src-tauri/src/agent.rs`): 「今日のニュース」「最新ニュースをまとめて」などでは通常Web検索でニュースサイト入口だけを返すのではなく、Google News RSS の最新見出しを取得して要約材料にするようにした。「自分で見て」と返す挙動を避ける。
+- **URLとRSS材料を読み上げから除外** (`ui/renderer.js` / `src-tauri/src/commands.rs` / `src-tauri/src/agent.rs`): URLは回答内の位置に関係なく音声では読まないようにし、読み上げ分割前にも除外するようにした。ニュースRSSの「フィード:」「日付 見出し URL」形式が最終回答へ漏れた場合も表示・読み上げから落とす。
 
 ---
 

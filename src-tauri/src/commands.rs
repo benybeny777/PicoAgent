@@ -159,7 +159,9 @@ fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
         let mut excess = total.saturating_sub(MAX_CONTEXT_TOKENS);
         let mut remove_count = 0;
         for t in turns.iter() {
-            if excess == 0 || turns.len().saturating_sub(remove_count) <= 2 { break; }
+            if excess == 0 || turns.len().saturating_sub(remove_count) <= 2 {
+                break;
+            }
             excess = excess.saturating_sub(estimate_tokens(t));
             remove_count += 1;
         }
@@ -274,7 +276,9 @@ fn record_turn(
 }
 
 /// 選択中のプロバイダとモデル名を解決する。未登録ならフロント向けエラー JSON を Err で返す。
-fn selected_provider(state: &AppState) -> Result<(&'static dyn providers::Provider, String), Value> {
+fn selected_provider(
+    state: &AppState,
+) -> Result<(&'static dyn providers::Provider, String), Value> {
     let id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     match providers::get(&id) {
@@ -953,15 +957,72 @@ fn speech_text(text: &str) -> String {
         }
         out.push(ch);
     }
+    let out = remove_bare_urls(&out);
     // スパークライン（ブロック文字）や絵文字は読み上げに乗せない（天気・為替チャート対策）。
     let out: String = out.chars().filter(|c| !is_chart_or_emoji(*c)).collect();
-    out.lines()
+    let spoken = out
+        .lines()
         .map(str::trim)
         .take_while(|line| !line.starts_with("参考:") && !line.starts_with("参考："))
         .filter(|line| !line.is_empty())
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
+        .filter(|line| !looks_like_rss_speech_dump_line(line))
+        .filter(|line| {
+            !line
+                .trim_matches(|c: char| {
+                    c.is_whitespace() || matches!(c, '-' | '*' | '・' | ':' | '：')
+                })
+                .is_empty()
+        })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    spoken.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn remove_bare_urls(text: &str) -> String {
+    let mut out = String::new();
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        if rest.starts_with("http://") || rest.starts_with("https://") {
+            let mut end = text.len();
+            for (offset, ch) in rest.char_indices() {
+                if offset == 0 {
+                    continue;
+                }
+                if ch.is_whitespace() || matches!(ch, '、' | '。' | '）' | ')' | '」' | '』' | '】')
+                {
+                    end = index + offset;
+                    break;
+                }
+            }
+            index = end;
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else {
+            break;
+        };
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    out
+}
+
+fn looks_like_rss_speech_dump_line(line: &str) -> bool {
+    let line = line.trim();
+    if line.starts_with("フィード:") || line.starts_with("フィード：") {
+        return true;
+    }
+    let Some(rest) = line.strip_prefix("- ") else {
+        return false;
+    };
+    rest.len() >= 10
+        && rest.as_bytes().get(4) == Some(&b'-')
+        && rest.as_bytes().get(7) == Some(&b'-')
+        && rest
+            .chars()
+            .take(10)
+            .all(|c| c.is_ascii_digit() || c == '-')
 }
 
 // 読み上げ不要な装飾文字（罫線・ブロック＝スパークライン、各種記号・絵文字、異体字セレクタ）。
@@ -1771,8 +1832,7 @@ pub async fn pet_send_image(
         images,
     ));
 
-    let mut convo =
-        maybe_summarize_context(convo, provider, &state.config, &model).await;
+    let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
 
     let result = run_agent_and_persist(&app, &state, provider, &model, &mut convo).await;
 
@@ -2116,6 +2176,18 @@ mod tests {
     fn 読み上げでは本文内リンクをラベルだけ読む() {
         let text = "[公式サイト](https://example.com)を確認しました。";
         assert_eq!(speech_text(text), "公式サイトを確認しました。");
+    }
+
+    #[test]
+    fn 読み上げでは本文中の裸urlを除外する() {
+        let text = "詳しくは https://example.com/path?x=1 を見ました。\n- https://example.com/raw\n次です。";
+        assert_eq!(speech_text(text), "詳しくは を見ました。 次です。");
+    }
+
+    #[test]
+    fn 読み上げではrssダンプ行を除外する() {
+        let text = "フィード: Google ニュース\n- 2026-07-03T00:00:00+00:00 見出し https://example.com/a\n要約です。";
+        assert_eq!(speech_text(text), "要約です。");
     }
 
     #[test]

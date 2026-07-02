@@ -1100,8 +1100,23 @@ function combineStartupGreeting(manifestGreeting, dailyReply) {
 }
 // 読み上げ用に本文を文単位のチャンクへ分割する。長文を小分けにして「先頭から順次再生」する
 // ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
+function sanitizeSpeechText(text) {
+  let out = String(text ?? "").replace(/\r\n/g, "\n");
+  out = out.split(/\n\s*参考[:：]/)[0];
+  out = out.replace(/!?\[([^\]]*)\]\((?:https?:\/\/|mailto:)[^)]+\)/g, "$1");
+  out = out.replace(/https?:\/\/[^\s、。）」』】]+/g, "");
+  return out
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && line.replace(/^[-*・\s:：]+$/, ""))
+    .filter(line => !/^フィード[:：]/.test(line))
+    .filter(line => !/^-\s+\d{4}-\d{2}-\d{2}/.test(line))
+    .join("\n")
+    .trim();
+}
+
 function splitSpeechChunks(text, maxLen = 90) {
-  const norm = String(text ?? "").replace(/\r\n/g, "\n").trim();
+  const norm = sanitizeSpeechText(text);
   if (!norm) return [];
   // 文末記号・改行の直後で区切る。短い断片は結合し、長すぎる文はそのまま1チャンクにする。
   const parts = norm.split(/(?<=[。．.!?！？\n])/);

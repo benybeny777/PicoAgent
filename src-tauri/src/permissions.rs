@@ -158,9 +158,9 @@ pub fn resolve(cfg: &Config, input: &str) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize;
     #[cfg(windows)]
     use super::is_system_protected;
+    use super::normalize;
     #[cfg(windows)]
     use std::path::PathBuf;
 
