@@ -141,6 +141,8 @@ fn from_anthropic_message(data: &Value) -> Message {
         },
         tool_call_id: None,
         name: None,
+        images: None,
+        usage: None,
     }
 }
 

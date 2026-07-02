@@ -72,6 +72,8 @@ fn from_wire(message: &Value) -> Message {
         tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
         tool_call_id: None,
         name: None,
+        images: None,
+        usage: None,
     }
 }
 

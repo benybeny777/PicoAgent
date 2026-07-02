@@ -478,9 +478,19 @@ mod tests {
         );
     }
 
+    // Windows のパス区切り（\）とドライブレターを前提にしたテスト。Linux では \ が
+    // ファイル名の一部として扱われ意味が変わるため Windows 限定で実行する。
     #[test]
+    #[cfg(windows)]
     fn 実行cwdのルート外を拒否する() {
         let base = PathBuf::from(r"C:\work\root");
         assert!(bounded_cwd_in_roots(&base, vec![base.clone()], Some(r"..\other")).is_err());
+    }
+
+    // どの OS でも成り立つ境界チェック（/ 区切り）。
+    #[test]
+    fn 実行cwdのルート外を拒否する_スラッシュ区切り() {
+        let base = std::env::temp_dir().join("picoagent-cmd-test");
+        assert!(bounded_cwd_in_roots(&base, vec![base.clone()], Some("../other")).is_err());
     }
 }
