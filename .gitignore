@@ -31,3 +31,6 @@ characters/hiyori/live2d/
 
 # ローカル設定（個人 PC 専用。app_config_dir に保存されるが念のため）
 config.json
+
+# Python バイトコードキャッシュ
+__pycache__/
