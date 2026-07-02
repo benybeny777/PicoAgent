@@ -67,8 +67,6 @@ const WEB_SEARCH_REQUESTS: [&str; 8] = [
     "webで検索して",
     "ネットで調べて",
 ];
-const DEFAULT_NEWS_RSS_URL: &str = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja";
-
 fn web_search_query(text: &str) -> String {
     let mut query = text.to_string();
     for marker in WEB_SEARCH_REQUESTS {
@@ -95,21 +93,6 @@ fn extract_source_urls(search_result: &str) -> Vec<String> {
             {
                 urls.push(url.to_string());
             }
-        }
-    }
-    urls
-}
-
-fn extract_urls_anywhere(text: &str) -> Vec<String> {
-    let mut urls = Vec::new();
-    for token in text.split_whitespace() {
-        let url = token.trim_matches(|c: char| {
-            c.is_whitespace() || matches!(c, '、' | '。' | ',' | '.' | ')' | ']' | '）' | '】')
-        });
-        if (url.starts_with("http://") || url.starts_with("https://"))
-            && !urls.iter().any(|existing| existing == url)
-        {
-            urls.push(url.to_string());
         }
     }
     urls
@@ -165,6 +148,11 @@ fn looks_like_rss_dump_line(line: &str) -> bool {
 }
 
 fn remove_material_leaks(answer: String) -> String {
+    let answer = strip_between_markers(
+        answer,
+        "--- ニュース内部資料開始 ---",
+        "--- ニュース内部資料終了 ---",
+    );
     let answer =
         strip_between_markers(answer, "--- ニュースRSS開始 ---", "--- ニュースRSS終了 ---");
     let answer =
@@ -175,6 +163,9 @@ fn remove_material_leaks(answer: String) -> String {
             let trim = line.trim();
             !trim.contains("以下は今日のニュース要約用に取得したニュースRSS")
                 && !trim.starts_with("--- ニュースRSS")
+                && !trim.starts_with("--- ニュース内部資料")
+                && !trim.starts_with("ニュースHTML取得結果")
+                && !trim.starts_with("情報源:")
                 && !looks_like_rss_dump_line(trim)
         })
         .collect::<Vec<_>>()
@@ -1218,15 +1209,11 @@ pub async fn run(
         } else if let Some(answer) = setup_guide_answer(&user_text) {
             return direct_answer(messages, answer);
         } else if is_news_summary_query(&user_text) {
-            let news_result = tools::dispatch(
-                cfg,
-                "rss_feed",
-                serde_json::json!({ "url": DEFAULT_NEWS_RSS_URL, "max_items": 10 }),
-            )
-            .await;
-            sources = extract_urls_anywhere(&news_result);
+            let news_result =
+                tools::dispatch(cfg, "news_scrape", serde_json::json!({ "max_items": 8 })).await;
+            sources = extract_source_urls(&news_result);
             messages[user_index].content = format!(
-                "{user_text}\n\n以下は今日のニュース要約用に取得した内部資料です。本文全文ではなくRSS見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。回答には生のRSS形式（「フィード:」「- 日付 見出し URL」の行、区切り線、内部資料ブロック）を絶対に書かず、自然な日本語の要約だけを書いてください。参照元は必要な場合だけMarkdownリンクにしてください。「直接のまとめは提供できない」「自分で見て」「入口の情報だけ」「具体的な内容はわからない」「何についてのニュースか教えて」といった回答は禁止です。RSS取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュースRSS開始 ---\n{news_result}\n--- ニュースRSS終了 ---"
+                "{user_text}\n\n以下はGoogle News / Yahoo!ニュースから取得した内部資料です。本文全文ではなく見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。回答には内部資料の形式（「ニュースHTML取得結果」「情報源:」「URL:」の行、区切り線、内部資料ブロック）を絶対に書かず、自然な日本語の要約だけを書いてください。リンクを出す場合は生URLではなく、必ず [見出し](URL) のMarkdownリンクにしてください。「直接のまとめは提供できない」「自分で見て」「入口の情報だけ」「具体的な内容はわからない」「何についてのニュースか教えて」といった回答は禁止です。Google/Yahooの取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュース内部資料開始 ---\n{news_result}\n--- ニュース内部資料終了 ---"
             );
         } else if is_weather_query(&user_text) {
             // 天気はモデルに任せず weather スキルの整形済み出力（アイコン・気温チャート）を直接返す。
@@ -1459,10 +1446,10 @@ pub async fn run(
 mod tests {
     use super::{
         append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
-        extract_source_urls, extract_urls_anywhere, genspark_suite_query, is_local_action_query,
-        is_news_summary_query, is_simple_greeting, is_weather_query, market_query,
-        meeting_recorder_query, remove_material_leaks, research_report_query, setup_guide_answer,
-        should_web_search, spark_workspace_query, web_search_query,
+        extract_source_urls, genspark_suite_query, is_local_action_query, is_news_summary_query,
+        is_simple_greeting, is_weather_query, market_query, meeting_recorder_query,
+        remove_material_leaks, research_report_query, setup_guide_answer, should_web_search,
+        spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1538,13 +1525,6 @@ mod tests {
         assert!(is_news_summary_query("今日の出来事を教えて"));
         assert!(is_news_summary_query("最新ニュースを教えて"));
         assert!(!is_news_summary_query("Rustのニュースリリースとは"));
-    }
-
-    #[test]
-    fn rss見出しからurlを抽出する() {
-        let text = "フィード: news\n- 2026-07-03T00:00:00+00:00 見出し https://example.com/a\n- 別 https://example.com/b)";
-        let urls = extract_urls_anywhere(text);
-        assert_eq!(urls, vec!["https://example.com/a", "https://example.com/b"]);
     }
 
     #[test]

@@ -138,7 +138,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` | 全スキル共通のファイル/ディレクトリ/実行の許可ルート・拒否パス。設定画面の「許可」タブで編集。`C:\Windows` と `Program Files` は常に拒否 |
 | ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行（run_command）の有効化と許可コマンド prefix。許可ルートは共通「許可」を参照 |
 | 自力実行 | `PICOAGENT_CODE_RUNNER_ENABLED` / `PICOAGENT_CODE_RUNNER_PYTHON` | 他スキルで満たせないときに PowerShell/Python のコードを書いて実行する code_runner の有効化と Python パス。既定は無効 |
-| 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 天気・検索・RSS・調査レポートなどの既定値 |
+| 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_NEWS_SCRAPE_MAX_ITEMS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 天気・検索・ニュース取得・RSS・調査レポートなどの既定値 |
 | 外部連携 | 各サービスの token / 既定ID / timeout / Gmail整理上限 | Slack、Gmail、Google、GitHub、Notion、SNS などは使うサービスだけ設定。`PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS=0` で Gmail 整理/掃除の件数上限を無制限にできる |
 
 リマインダー、集中タイマー、できたことメモなどの実行状態は内部保存値として `config.json` に残りますが、通常ユーザーが直接編集するものではないため設定画面には出しません。チャット操作で追加・一覧・削除してください。
