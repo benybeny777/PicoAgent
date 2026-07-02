@@ -377,6 +377,8 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterAssetVersion = assetVersion;
   animations = manifest.animations;
   preloadAnimations();
+  stopLipSync();
+  await probeRigLayers(); // layers 素材があればリップシンク対応
   frame = 0;
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
@@ -392,7 +394,7 @@ function setAnimation(name, force = false) {
   if (!force && animationName === name) return;
   animationName = animations[name] ? name : "idle"; frame = 0; lastFrameAt = performance.now();
   character.dataset.motion = animations[animationName].motion || animationName;
-  petSprite.src = frameUrl(animationName, 0);
+  if (!rigActive) petSprite.src = frameUrl(animationName, 0);
 }
 function frameDuration(animation, index) {
   const duration = animation.frameDurations?.[index];
@@ -401,6 +403,8 @@ function frameDuration(animation, index) {
 }
 function animate(now) {
   if (reduceMotion) { petSprite.src = frameUrl("idle", 0); return; }
+  // リグ動作中はフレーム送りを止める（ベース＋オーバーレイ側が表情を担当する）。
+  if (rigActive) { animationRequestId = requestAnimationFrame(animate); return; }
   const animation = animations[animationName] || animations.idle;
   if (!lastFrameAt) lastFrameAt = now;
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
@@ -411,6 +415,159 @@ function animate(now) {
   animationRequestId = requestAnimationFrame(animate);
 }
 animationRequestId = requestAnimationFrame(animate);
+
+// ── 疑似Live2Dリグ ─────────────────────────────────────────────────
+// layers/（base・mouth_open/closed・blink_half/closed）は「同一ポーズの全身差分絵」。
+// 読み上げ中はフレームアニメの代わりに差分絵を切り替え（PNGTuber方式）、
+// WebAudio の振幅解析で実際の声量に合わせて口を動かし、ランダムにまばたきする。
+let rigAvailable = false; // 選択中キャラに layers 素材が揃っているか
+let rigActive = false;
+let rigFace = "";          // 表示中の差分名（無駄な src 再設定を避ける）
+let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマーが更新）
+let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
+let rigMouthTimer = 0;
+let rigBlinkTimer = 0;
+let rigVolFrame = 0;
+let audioCtx = null;
+let rigSource = null;
+let rigAnalyser = null;
+
+function layerUrl(name) {
+  const url = `${characterRoot}/layers/${name}.png`;
+  return characterAssetVersion ? `${url}?v=${encodeURIComponent(characterAssetVersion)}` : url;
+}
+
+// layers 一式が読み込めるかを一度だけ確認する（無いキャラは従来のフレームアニメのみ）。
+// 読み込み成功した Image はブラウザキャッシュに乗るためプリロードも兼ねる。
+async function probeRigLayers() {
+  rigAvailable = false;
+  const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
+  const results = await Promise.all(names.map(name => new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = layerUrl(name);
+  })));
+  rigAvailable = results.every(Boolean);
+}
+
+// まばたき > 口 の優先度で現在の差分絵を決めて反映する。
+function rigRefresh() {
+  if (!rigActive) return;
+  const name = rigBlinkPhase || (rigMouthOpen ? "mouth_open" : "mouth_closed");
+  if (rigFace === name) return;
+  rigFace = name;
+  petSprite.src = layerUrl(name);
+}
+
+// まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
+function scheduleBlink() {
+  clearTimeout(rigBlinkTimer);
+  if (!rigActive) return;
+  rigBlinkTimer = setTimeout(async () => {
+    if (!rigActive) return;
+    const step = (phase, ms) => new Promise(resolve => {
+      rigBlinkPhase = phase;
+      rigRefresh();
+      setTimeout(resolve, ms);
+    });
+    await step("blink_half", 60);
+    await step("blink_closed", 90);
+    await step("blink_half", 60);
+    rigBlinkPhase = null;
+    rigRefresh();
+    scheduleBlink();
+  }, 1400 + Math.random() * 2800);
+}
+
+// 現在のチャンク音声の解析だけを解除する（リグの見た目は維持）。
+function detachLipSyncAudio() {
+  if (rigMouthTimer) { clearInterval(rigMouthTimer); rigMouthTimer = 0; }
+  if (rigVolFrame) { cancelAnimationFrame(rigVolFrame); rigVolFrame = 0; }
+  try { rigSource?.disconnect(); rigAnalyser?.disconnect(); } catch {}
+  rigSource = null;
+  rigAnalyser = null;
+  rigMouthOpen = false;
+  rigRefresh();
+}
+
+// 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
+function attachLipSync(audio) {
+  if (!rigAvailable || reduceMotion) return;
+  if (!rigActive) {
+    rigActive = true;
+    rigFace = "";
+    rigMouthOpen = false;
+    rigBlinkPhase = null;
+    rigRefresh();
+    scheduleBlink();
+  }
+  detachLipSyncAudio();
+  // WebAudio の振幅解析を試み、使えない環境ではタイマー口パクへフォールバックする。
+  let useTimer = true;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    if (audioCtx.state === "running") {
+      rigSource = audioCtx.createMediaElementSource(audio);
+      rigAnalyser = audioCtx.createAnalyser();
+      rigAnalyser.fftSize = 512;
+      rigSource.connect(rigAnalyser);
+      rigAnalyser.connect(audioCtx.destination);
+      useTimer = false;
+    }
+  } catch (error) {
+    logApp("warn", "リップシンクの音声解析を初期化できませんでした（タイマー式で継続）", errorDetail(error));
+  }
+  if (useTimer) {
+    rigMouthTimer = setInterval(() => {
+      rigMouthOpen = !rigMouthOpen;
+      rigRefresh();
+    }, 120);
+    return;
+  }
+  const data = new Uint8Array(rigAnalyser.fftSize);
+  let peak = 0.04; // 音量差に追従する適応しきい値
+  const analyserLoop = () => {
+    if (!rigActive || !rigAnalyser) return;
+    rigAnalyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 1) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    peak = Math.max(peak * 0.995, rms, 0.02);
+    rigMouthOpen = rms > peak * 0.45;
+    rigRefresh();
+    rigVolFrame = requestAnimationFrame(analyserLoop);
+  };
+  rigVolFrame = requestAnimationFrame(analyserLoop);
+}
+
+// リグを完全に終了して通常のフレームアニメへ戻す。
+function stopLipSync() {
+  if (!rigActive) return;
+  rigActive = false;
+  detachLipSyncAudio();
+  clearTimeout(rigBlinkTimer);
+  rigBlinkPhase = null;
+  rigFace = "";
+  petSprite.src = frameUrl(animationName, frame);
+}
+
+// ── 疑似視線追従: マウスの方向へキャラクターがわずかに傾く ─────────────
+if (!reduceMotion) {
+  let lookResetTimer = 0;
+  document.addEventListener("mousemove", event => {
+    const rect = character.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const dx = Math.max(-1, Math.min(1, (event.clientX - centerX) / Math.max(240, window.innerWidth / 2)));
+    character.style.setProperty("--look-rot", `${(dx * 2.6).toFixed(2)}deg`);
+    clearTimeout(lookResetTimer);
+    lookResetTimer = setTimeout(() => character.style.setProperty("--look-rot", "0deg"), 2600);
+  });
+}
 
 function autosizeInput() {
   input.style.height = "auto";
@@ -861,6 +1018,7 @@ let speakingToken = 0;
 let currentVoice = null;
 let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代。変わると進行中の読み上げを打ち切る。
 function finishVoice(toIdle = true) {
+  stopLipSync();
   if (!currentVoice) return;
   const voice = currentVoice;
   currentVoice = null;
@@ -870,6 +1028,7 @@ function finishVoice(toIdle = true) {
 }
 function stopVoice(toIdle = true) {
   voiceSession++; // 進行中のパイプライン読み上げ（合成待ち・連続再生）を打ち切る。
+  stopLipSync();
   if (!currentVoice) return;
   currentVoice.pause();
   finishVoice(toIdle);
@@ -911,6 +1070,7 @@ function playPreparedSpeech(result) {
   });
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
+  attachLipSync(currentVoice);
 }
 // 起動時の挨拶を組み立てる。キャラ固定挨拶と日次の時刻挨拶で「挨拶語」が二重にならないようまとめる。
 // - 固定挨拶が時刻挨拶語（おはよう/こんにちは/こんばんは等）で始まる場合: 時刻に合った挨拶語を1回だけ使い、
@@ -984,6 +1144,7 @@ function playChunkAndWait(result, session) {
     });
     status.textContent = "読み上げ中…";
     setAnimation("talking", true);
+    attachLipSync(audio);
   });
 }
 async function speakReply(text) {
@@ -1014,6 +1175,7 @@ async function speakReply(text) {
       if (session !== voiceSession) return;
     }
     if (prepareTimer) clearInterval(prepareTimer);
+    stopLipSync();
     if (animationName === "talking") setAnimation("idle");
     if (status.textContent === "読み上げ中…" || status.textContent.startsWith("読み上げ準備中")) {
       status.textContent = "";
