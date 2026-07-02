@@ -161,12 +161,22 @@ mod tests {
     use super::{is_system_protected, normalize};
     use std::path::PathBuf;
 
+    // Windows のパス区切り（\）とドライブレターを前提にしたテスト。
+    // Linux では区切りが / のため期待値が一致しない。Windows 限定で実行する。
+    #[cfg(windows)]
     #[test]
     fn 相対パスをルート基準に正規化する() {
         let base = PathBuf::from(r"C:\work");
         assert_eq!(normalize(&base, "a/b"), PathBuf::from(r"C:\work\a\b"));
         // `..` はルート内で畳む。
         assert_eq!(normalize(&base, "a/../b"), PathBuf::from(r"C:\work\b"));
+    }
+
+    // どの OS でも成り立つ正規化チェック。
+    #[test]
+    fn 相対パスをルート基準に正規化する_共通() {
+        let base = std::env::temp_dir().join("picoagent-perm-test");
+        assert_eq!(normalize(&base, "a/../b"), base.join("b"));
     }
 
     #[cfg(windows)]

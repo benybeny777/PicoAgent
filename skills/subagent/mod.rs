@@ -127,7 +127,8 @@ impl Tool for SubagentTool {
         let mut messages = vec![Message::new("system", system), Message::new("user", task)];
 
         // ネストしたエージェントループ。AppHandle は渡さない（ストリーミング/使用量記録は上位のみ）。
-        match agent::run(cfg, provider, &model, &mut messages, steps, None).await {
+        // 中断フラグも渡さない（停止ボタンは上位ループのステップ境界で効く）。
+        match agent::run(cfg, provider, &model, &mut messages, steps, None, None).await {
             Ok(result) if !result.trim().is_empty() => {
                 format!("【サブエージェントの結果】\n{}", result.trim())
             }

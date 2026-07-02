@@ -10,6 +10,7 @@ const bootStatus = document.getElementById("bootStatus");
 const bootLog = document.getElementById("bootLog");
 const bootPetImage = document.getElementById("bootPetImage");
 const sendButton = document.getElementById("sendButton");
+const cancelSendButton = document.getElementById("cancelSend");
 const copyReplyButton = document.getElementById("copyReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
@@ -32,7 +33,11 @@ let attachedFiles = [];
 // ストリーミング受信中のテキストバッファとイベントリスナー解除関数。
 let streamBuffer = "";
 let unlistenStream = null;
-// スーパーエージェントモードの進捗（計画→実行）を受信するリスナー解除関数。
+// ストリーミング描画を rAF でスロットルする（毎チャンク再描画を防ぐ）。
+let streamRenderFrame = null;
+// エラーリトライ用に最後のユーザー入力テキストを保持する。
+let lastUserText = "";
+// エージェント進捗（pet:agent_status）を受信するリスナー解除関数。
 let unlistenStatus = null;
 const conversationHistory = [];
 let historyQuery = "";
@@ -66,6 +71,36 @@ const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
 const firedAlarms = new Set();
 let activeAlarmSnooze = null;
+
+// 画面下部に短いトースト通知を表示する（1.8秒後に自動消去）。
+function showToast(msg) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  document.body.append(el);
+  requestAnimationFrame(() => el.classList.add("toast-show"));
+  setTimeout(() => {
+    el.classList.remove("toast-show");
+    el.addEventListener("transitionend", () => el.remove(), { once: true });
+  }, 1800);
+}
+
+// エラー表示後にリトライボタンを返信エリアへ追加する。
+function addRetryButton() {
+  const md = reply.querySelector(".md");
+  if (!md || !lastUserText) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "retry-btn";
+  btn.textContent = "もう一度試す";
+  btn.addEventListener("click", () => {
+    if (busy) return;
+    input.value = lastUserText;
+    if (composer.hidden) openComposer();
+    else updateComposerState();
+  });
+  md.append(btn);
+}
 
 function errorDetail(error) {
   if (!error) return "";
@@ -581,7 +616,17 @@ function renderMarkdown(container, src) {
     }
   }
   // run_command スキルが承認待ちのとき、クリックで送信できるボタンを表示する。
-  if (src.includes("このコマンドはまだ許可されていません")) {
+  // コードブロック・引用内のマッチは除外する（フェンス外の行のみ走査）。
+  const approvalMarker = "このコマンドはまだ許可されていません";
+  const hasApproval = (() => {
+    let inFence = false;
+    for (const ln of String(src ?? "").split('\n')) {
+      if (ln.startsWith('```')) { inFence = !inFence; continue; }
+      if (!inFence && !ln.startsWith('>') && ln.includes(approvalMarker)) return true;
+    }
+    return false;
+  })();
+  if (hasApproval) {
     const btns = document.createElement("div");
     btns.className = "approval-buttons";
     [["実行する（今回のみ）", "approval-ok", "許可"],
@@ -590,7 +635,11 @@ function renderMarkdown(container, src) {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = cls; btn.textContent = label;
       btn.addEventListener("click", () => {
-        if (busy) return;
+        if (busy) {
+          status.textContent = "処理中です…少し待ってください";
+          setTimeout(() => { if (status.textContent.startsWith("処理中")) status.textContent = ""; }, 2000);
+          return;
+        }
         input.value = val;
         if (composer.hidden) openComposer();
         composer.requestSubmit();
@@ -600,11 +649,6 @@ function renderMarkdown(container, src) {
     wrap.append(btns);
   }
   container.append(wrap);
-}
-
-// 後方互換用: appendLinkedText → renderMarkdown に委譲。
-function appendLinkedText(container, text) {
-  renderMarkdown(container, text);
 }
 
 function renderQuickActions() {
@@ -773,7 +817,7 @@ function renderHistory() {
     meta.append(label, actions);
     const body = document.createElement("div");
     body.className = "history-body";
-    appendLinkedText(body, item.content);
+    renderMarkdown(body, item.content);
     row.append(meta, body);
     historyLog.append(row);
   }
@@ -1313,7 +1357,7 @@ function renderAttachmentPreview() {
 function fileIcon(name) {
   const ext = name.split(".").pop().toLowerCase();
   const map = { xlsx: "📊", xls: "📊", xlsm: "📊", csv: "📋", tsv: "📋",
-    docx: "📝", doc: "📝", docm: "📝", pptx: "📄", pptx: "📄", ppt: "📄",
+    docx: "📝", doc: "📝", docm: "📝", pptx: "📄", pptm: "📄", ppt: "📄",
     pdf: "📕", json: "📦", toml: "📦", yaml: "🗂", yml: "🗂",
     txt: "📃", md: "📃", log: "📃" };
   return map[ext] || "📎";
@@ -1321,24 +1365,26 @@ function fileIcon(name) {
 
 function addImageFile(file) {
   if (!file || !file.type.startsWith("image/")) return;
-  if (attachedImages.length >= MAX_ATTACHED_IMAGES) return;
+  if (attachedImages.length >= MAX_ATTACHED_IMAGES) { showToast(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚まで`); return; }
   const reader = new FileReader();
   reader.onload = (e) => {
     attachedImages.push(e.target.result);
     renderAttachmentPreview();
     updateComposerState();
+    showToast("画像を添付しました");
   };
   reader.readAsDataURL(file);
 }
 
 function addDocumentFile(file) {
   if (!file) return;
-  if (attachedFiles.length >= MAX_ATTACHED_FILES) return;
+  if (attachedFiles.length >= MAX_ATTACHED_FILES) { showToast(`ファイルは最大 ${MAX_ATTACHED_FILES} 件まで`); return; }
   const reader = new FileReader();
   reader.onload = (e) => {
     attachedFiles.push({ name: file.name, dataUrl: e.target.result });
     renderAttachmentPreview();
     updateComposerState();
+    showToast(`${file.name.length > 20 ? file.name.slice(0, 18) + "…" : file.name} を添付`);
   };
   reader.readAsDataURL(file);
 }
@@ -1383,12 +1429,13 @@ composer.addEventListener("submit", async event => {
   const text = input.value.trim();
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   clearAlarmSnooze(false);
+  lastUserText = text; // エラーリトライ用に保持
   busy = true;
   ++speakingToken;
   stopVoice(false);
   updateComposerState();
   closeComposer();
-  input.value = "";
+  status.textContent = "";
   const pendingImages = [...attachedImages];
   const pendingFiles = [...attachedFiles];
   attachedImages = [];
@@ -1398,19 +1445,26 @@ composer.addEventListener("submit", async event => {
   resetPromptHistoryNavigation();
   status.textContent = "考え中…";
   setAnimation("thinking");
+  // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
+  if (cancelSendButton) { cancelSendButton.hidden = false; cancelSendButton.disabled = false; }
   reply.textContent = text;
   addHistory("user", text);
 
   // ストリーミングチャンクを受信してリアルタイム表示する。
+  // rAF でスロットルし、毎チャンク DOM 再構築しないようにする。
   streamBuffer = "";
   try {
     if (window.picoagent.listen) {
       if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 念のため前回の購読を解放（多重購読防止）
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         streamBuffer += chunk;
-        renderReply(streamBuffer);
-        // ストリーミング中は thinking アニメーションから talking へ切り替える。
-        if (animationName === "thinking") setAnimation("talking");
+        if (!streamRenderFrame) {
+          streamRenderFrame = requestAnimationFrame(() => {
+            streamRenderFrame = null;
+            renderReply(streamBuffer);
+            if (animationName === "thinking") setAnimation("talking");
+          });
+        }
       });
     }
   } catch (error) {
@@ -1474,6 +1528,7 @@ composer.addEventListener("submit", async event => {
       ++speakingToken;
       stopVoice();
       renderReply(result.reply);
+      addRetryButton();
       addHistory("assistant", result.reply);
       setAnimation("sad");
       setTimeout(() => setAnimation("idle"), 2200);
@@ -1489,12 +1544,15 @@ composer.addEventListener("submit", async event => {
     stopVoice();
     const message = `応答に失敗しました: ${error?.message || error}`;
     renderReply(message);
+    addRetryButton();
     addHistory("assistant", message);
     status.textContent = "接続を確認してね";
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    if (cancelSendButton) cancelSendButton.hidden = true;
     // ストリーム・進捗リスナーを解除する。
+    if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
     if (unlistenStream) { unlistenStream(); unlistenStream = null; }
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     streamBuffer = "";
@@ -1504,11 +1562,21 @@ composer.addEventListener("submit", async event => {
     setTimeout(flushPendingNotice, 0);
   }
 });
+// 停止ボタン: バックエンドへ中断を要求する。エージェントは次のステップ境界で止まる。
+cancelSendButton?.addEventListener("click", async () => {
+  if (!busy) return;
+  cancelSendButton.disabled = true;
+  status.textContent = "止めるね…";
+  try { await window.picoagent.cancel(); }
+  catch (error) { logApp("warn", "中断要求の送信に失敗しました", errorDetail(error)); }
+});
 input.addEventListener("input", () => {
   autosizeInput();
   updateComposerState();
   promptHistoryIndex = null;
   promptDraft = input.value;
+  const len = input.value.length;
+  if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
 });
 input.addEventListener("keydown", event => {
   if (event.key === "Escape") {
@@ -1525,6 +1593,8 @@ input.addEventListener("keydown", event => {
     event.preventDefault();
     composer.requestSubmit();
   }
+  if (event.key === "ArrowUp" && recallInputHistory(-1)) event.preventDefault();
+  else if (event.key === "ArrowDown" && inputHistoryPos !== -1 && recallInputHistory(1)) event.preventDefault();
 });
 historySearch?.addEventListener("input", () => {
   historyQuery = historySearch.value;
@@ -1559,7 +1629,6 @@ window.picoagent.on("pet:emotion", (emotion) => {
   character.dataset.emotion = emotion.mood;
   character.dataset.energyLevel = emotion.energy > 0.6 ? "high" : emotion.energy < 0.4 ? "low" : "mid";
 });
-
 renderQuickActions();
 
 // 同梱エンジン（local）の準備状況を表示する。
