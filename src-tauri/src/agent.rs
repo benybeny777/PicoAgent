@@ -67,6 +67,7 @@ const WEB_SEARCH_REQUESTS: [&str; 8] = [
     "webで検索して",
     "ネットで調べて",
 ];
+const DEFAULT_NEWS_RSS_URL: &str = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja";
 
 fn web_search_query(text: &str) -> String {
     let mut query = text.to_string();
@@ -94,6 +95,21 @@ fn extract_source_urls(search_result: &str) -> Vec<String> {
             {
                 urls.push(url.to_string());
             }
+        }
+    }
+    urls
+}
+
+fn extract_urls_anywhere(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    for token in text.split_whitespace() {
+        let url = token.trim_matches(|c: char| {
+            c.is_whitespace() || matches!(c, '、' | '。' | ',' | '.' | ')' | ']' | '）' | '】')
+        });
+        if (url.starts_with("http://") || url.starts_with("https://"))
+            && !urls.iter().any(|existing| existing == url)
+        {
+            urls.push(url.to_string());
         }
     }
     urls
@@ -735,6 +751,17 @@ fn should_web_search(text: &str) -> bool {
     INFO_MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
+fn is_news_summary_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    (lower.contains("ニュース") || lower.contains("news"))
+        && (lower.contains("今日")
+            || lower.contains("最新")
+            || lower.contains("いま")
+            || lower.contains("今の")
+            || lower.contains("まとめ")
+            || lower.contains("要約"))
+}
+
 fn is_local_action_query(text: &str) -> bool {
     let lower = text.to_lowercase();
     [
@@ -1117,6 +1144,17 @@ pub async fn run(
             );
         } else if let Some(answer) = setup_guide_answer(&user_text) {
             return direct_answer(messages, answer);
+        } else if is_news_summary_query(&user_text) {
+            let news_result = tools::dispatch(
+                cfg,
+                "rss_feed",
+                serde_json::json!({ "url": DEFAULT_NEWS_RSS_URL, "max_items": 10 }),
+            )
+            .await;
+            sources = extract_urls_anywhere(&news_result);
+            messages[user_index].content = format!(
+                "{user_text}\n\n以下は今日のニュース要約用に取得したニュースRSSの最新見出しです。本文全文ではなく見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。各項目は短い要約と参照リンクを含めてください。「直接のまとめは提供できない」「自分で見て」といった回答は禁止です。RSS取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュースRSS開始 ---\n{news_result}\n--- ニュースRSS終了 ---"
+            );
         } else if is_weather_query(&user_text) {
             // 天気はモデルに任せず weather スキルの整形済み出力（アイコン・気温チャート）を直接返す。
             let args = match extract_weather_location(&user_text) {
@@ -1350,7 +1388,8 @@ mod tests {
         append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
         extract_source_urls, genspark_suite_query, is_local_action_query, is_simple_greeting,
         is_weather_query, market_query, meeting_recorder_query, research_report_query,
-        setup_guide_answer, should_web_search, spark_workspace_query, web_search_query,
+        extract_urls_anywhere, is_news_summary_query, setup_guide_answer, should_web_search,
+        spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1416,6 +1455,20 @@ mod tests {
             web_search_query("今日のニュースをWEB検索して"),
             "今日のニュースを"
         );
+    }
+
+    #[test]
+    fn 今日のニュースはrss要約経路にする() {
+        assert!(is_news_summary_query("今日のニュースをまとめて"));
+        assert!(is_news_summary_query("最新ニュースを教えて"));
+        assert!(!is_news_summary_query("Rustのニュースリリースとは"));
+    }
+
+    #[test]
+    fn rss見出しからurlを抽出する() {
+        let text = "フィード: news\n- 2026-07-03T00:00:00+00:00 見出し https://example.com/a\n- 別 https://example.com/b)";
+        let urls = extract_urls_anywhere(text);
+        assert_eq!(urls, vec!["https://example.com/a", "https://example.com/b"]);
     }
 
     #[test]
