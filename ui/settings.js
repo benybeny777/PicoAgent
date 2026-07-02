@@ -1562,13 +1562,6 @@ async function render() {
   global.append(field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "スーパーエージェントの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
-  voiceSec.append(selectField("PICOAGENT_TTS_DEVICE", "Aivis 推論デバイス", v.PICOAGENT_TTS_DEVICE || "auto", [
-    { value: "auto", label: "自動判定（GPU候補があればGPU）" },
-    { value: "cpu", label: "CPU固定" },
-    { value: "gpu", label: "GPU固定" },
-  ]));
-  voiceSec.append(field("PICOAGENT_TTS_PORT", "Aivis ポート", "text", v.PICOAGENT_TTS_PORT ?? "11436", "11436"));
-  voiceSec.append(field("PICOAGENT_TTS_SPEAKER", "共通 Aivis speaker ID", "text", v.PICOAGENT_TTS_SPEAKER ?? "", "888753760"));
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
   panels.voice.append(voiceSec);
@@ -1592,8 +1585,6 @@ async function render() {
   ));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
-  characterSpeaker = el("input", { type: "text", placeholder: "888753760" });
-  characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの Aivis speaker ID" }), characterSpeaker]));
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
   let previousCharacter = selectedCharacter;

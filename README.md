@@ -129,7 +129,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | Ollama | `OLLAMA_HOST` / `OLLAMA_MODEL` | 任意で外部 Ollama を使う場合だけ設定 |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` | 使用キャラとキャラ別の口調・人格上書き |
 | 表示 | `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` | フキダシ文字サイズ、常に手前表示 |
-| 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_SPEAKER` / `PICOAGENT_TTS_VOLUME` | Aivis 読み上げ、デバイス、話者、音量 |
+| 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` | Aivis 読み上げ、キャラボイス音量。デバイス・ポート・話者IDは内部既定値を使い、通常の設定画面には出しません |
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` | 会話から好みや継続指示を暗黙的に覚えるか |
 | スーパーエージェント | `PICOAGENT_SUPER_AGENT` / `PICOAGENT_SUPER_AGENT_MAX_STEPS` / `PICOAGENT_SUBAGENT_MAX_DEPTH` | 計画→実行・自己評価・サブエージェント分担を強化する自律モード。ON にするとループ上限が上がり、進捗（計画・実行ステップ・実行中ツール）をフキダシ上部のステータス行に表示する |
 | 自発雑談 | `PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_TOPIC_MODE` | アイドル時の雑談と話題ソース |
@@ -172,9 +172,9 @@ npm run build
 
 - **取得**: 公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/bundled/aivis/` へ展開します（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。
 - **配布**: このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物に含まれます（巨大ファイルやライセンス確認が必要な実体は Git には含めません）。配布後に見つからない場合は、初回の読み上げ起動時に同じリリースを `%APPDATA%\PicoAgent\bundled\aivis\` へ自動取得・展開します（展開には `7z` / `7za` / `tar` のいずれかを使用）。
-- **起動**: `PICOAGENT_TTS_ENABLED` が有効ならアプリ起動時に `127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）で裏起動します。旧既定の `10102` が保存済みなら起動時に `11436` へ移行します。アプリが起動した子プロセスは終了時に停止します。
-- **推論デバイス**: `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選べます。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記の AMD APU・表示アダプタ / Intel 系の表示アダプタを候補とし、候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動します（AMD CPU だけの環境は GPU 候補にしません）。固定したい場合は設定画面で明示指定します。
-- **話者（speaker ID）**: キャラクターごとに設定画面の「キャラクター」タブで指定でき、未指定なら共通の `PICOAGENT_TTS_SPEAKER` を使います。ただし `りん` は既定で AivisHub の「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`まい` は AivisHub の「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を使います。未導入なら起動シーケンスのローディング画面で AIVMX を AivisSpeech Engine へ追加し、合成時は `/speakers` から実際の style ID を解決します。
+- **起動**: `PICOAGENT_TTS_ENABLED` が有効ならアプリ起動時に内部ポート（既定 `11436`）で裏起動します。旧既定の `10102` が保存済みなら起動時に `11436` へ移行します。アプリが起動した子プロセスは終了時に停止します。
+- **推論デバイス**: 内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で起動前に GPU 候補を確認し、候補があれば GPU、なければ CPU で起動します。通常の設定画面には表示しません。
+- **話者（speaker ID）**: 通常の設定画面には表示せず、キャラクター既定声を使います。`りん` は既定で AivisHub の「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`まい` は AivisHub の「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を使います。未導入なら起動シーケンスのローディング画面で AIVMX を AivisSpeech Engine へ追加し、合成時は `/speakers` から実際の style ID を解決します。
 - **音量**: `PICOAGENT_TTS_VOLUME`（0〜100）でフロント再生時のキャラボイス音量を調整します。設定保存後すぐ反映し、再生中の音声にも効きます。
 
 > [!NOTE]
