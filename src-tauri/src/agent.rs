@@ -802,13 +802,37 @@ fn should_web_search(text: &str) -> bool {
 
 fn is_news_summary_query(text: &str) -> bool {
     let lower = text.to_lowercase();
-    (lower.contains("ニュース") || lower.contains("news"))
-        && (lower.contains("今日")
-            || lower.contains("最新")
-            || lower.contains("いま")
-            || lower.contains("今の")
-            || lower.contains("まとめ")
-            || lower.contains("要約"))
+    let normalized = lower
+        .replace("ニューす", "ニュース")
+        .replace("にゅーす", "ニュース")
+        .replace("ﾆｭｰｽ", "ニュース");
+    if lower.contains("ニュースリリース")
+        || lower.contains("リリースノート")
+        || lower.contains("release note")
+    {
+        return false;
+    }
+    let has_news_word = normalized.contains("ニュース")
+        || normalized.contains("news")
+        || normalized.contains("出来事")
+        || normalized.contains("時事")
+        || normalized.contains("ヘッドライン");
+    if !has_news_word {
+        return false;
+    }
+    let asks_current_or_summary = normalized.contains("今日")
+        || normalized.contains("本日")
+        || normalized.contains("最新")
+        || normalized.contains("いま")
+        || normalized.contains("今の")
+        || normalized.contains("最近")
+        || normalized.contains("主要")
+        || normalized.contains("トップ")
+        || normalized.contains("まとめ")
+        || normalized.contains("要約")
+        || normalized.contains("教えて")
+        || normalized.contains("知りたい");
+    asks_current_or_summary || text.chars().count() <= 16
 }
 
 fn is_local_action_query(text: &str) -> bool {
@@ -1202,7 +1226,7 @@ pub async fn run(
             .await;
             sources = extract_urls_anywhere(&news_result);
             messages[user_index].content = format!(
-                "{user_text}\n\n以下は今日のニュース要約用に取得した内部資料です。本文全文ではなくRSS見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。回答には生のRSS形式（「フィード:」「- 日付 見出し URL」の行、区切り線、内部資料ブロック）を絶対に書かず、自然な日本語の要約だけを書いてください。参照元は必要な場合だけMarkdownリンクにしてください。「直接のまとめは提供できない」「自分で見て」といった回答は禁止です。RSS取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュースRSS開始 ---\n{news_result}\n--- ニュースRSS終了 ---"
+                "{user_text}\n\n以下は今日のニュース要約用に取得した内部資料です。本文全文ではなくRSS見出しベースの材料として扱い、重要そうな話題を5件前後にまとめてください。回答には生のRSS形式（「フィード:」「- 日付 見出し URL」の行、区切り線、内部資料ブロック）を絶対に書かず、自然な日本語の要約だけを書いてください。参照元は必要な場合だけMarkdownリンクにしてください。「直接のまとめは提供できない」「自分で見て」「入口の情報だけ」「具体的な内容はわからない」「何についてのニュースか教えて」といった回答は禁止です。RSS取得が失敗している場合だけ、その事実と再試行案を短く伝えてください。\n--- ニュースRSS開始 ---\n{news_result}\n--- ニュースRSS終了 ---"
             );
         } else if is_weather_query(&user_text) {
             // 天気はモデルに任せず weather スキルの整形済み出力（アイコン・気温チャート）を直接返す。
@@ -1509,6 +1533,9 @@ mod tests {
     #[test]
     fn 今日のニュースはrss要約経路にする() {
         assert!(is_news_summary_query("今日のニュースをまとめて"));
+        assert!(is_news_summary_query("今日のニューすをまとめて"));
+        assert!(is_news_summary_query("ニュース教えて"));
+        assert!(is_news_summary_query("今日の出来事を教えて"));
         assert!(is_news_summary_query("最新ニュースを教えて"));
         assert!(!is_news_summary_query("Rustのニュースリリースとは"));
     }
