@@ -87,7 +87,7 @@ graph TD
 
 `run(cfg, provider, model, messages, max_steps = 5, app = None) -> Result<String>`
 
-1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で逐次フロントへ `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。assistant の本文は `message::strip_reasoning()` で `<think>...</think>` の推論ブロックを除去してから最終回答・履歴・読み上げへ渡す（DeepSeek-R1 / Qwen3 系などの reasoning モデルで英語/中国語の推論が混ざるのを防ぐ）。
+1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。通常UIは途中チャンクを本文表示せず、最終応答だけをフキダシ・履歴・読み上げへ渡す（内部資料や未確定の途中文が見えないようにする）。assistant の本文は `message::strip_reasoning()` で `<think>...</think>` の推論ブロックを除去してから最終回答・履歴・読み上げへ渡す（DeepSeek-R1 / Qwen3 系などの reasoning モデルで英語/中国語の推論が混ざるのを防ぐ）。
 2. `tool_calls` が無ければ、その `content` を最終応答として返す。
 3. `tool_calls` があれば、全呼び出しを `futures::future::join_all()` で**並列実行**し、結果を `tool` メッセージとして積み 1 に戻る。
 4. `max_steps` を超えたら打ち切り、最後の文面を返す（暴走防止）。

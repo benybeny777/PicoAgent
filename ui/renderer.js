@@ -30,11 +30,6 @@ let busy = false;
 let attachedImages = [];
 // 添付中のドキュメントファイル（{name, dataUrl} の配列）。送信後にリセットする。
 let attachedFiles = [];
-// ストリーミング受信中のテキストバッファとイベントリスナー解除関数。
-let streamBuffer = "";
-let unlistenStream = null;
-// ストリーミング描画を rAF でスロットルする（毎チャンク再描画を防ぐ）。
-let streamRenderFrame = null;
 // エラーリトライ用に最後のユーザー入力テキストを保持する。
 let lastUserText = "";
 // エージェント進捗（pet:agent_status）を受信するリスナー解除関数。
@@ -135,7 +130,6 @@ window.addEventListener("beforeunload", () => {
   if (alarmTimer) clearInterval(alarmTimer);
   if (bootLogTimer) clearInterval(bootLogTimer);
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
-  if (unlistenStream) { unlistenStream(); unlistenStream = null; }
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   stopVoice(false);
 });
@@ -1669,32 +1663,6 @@ composer.addEventListener("submit", async event => {
   reply.textContent = text;
   addHistory("user", text);
 
-  // ストリーミングチャンクを受信してリアルタイム表示する。
-  // rAF でスロットルし、毎チャンク DOM 再構築しないようにする。
-  streamBuffer = "";
-  try {
-    if (window.picoagent.listen) {
-      if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 念のため前回の購読を解放（多重購読防止）
-      unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
-        streamBuffer += chunk;
-        reply.classList.add("streaming"); // 文末の点滅カーソル表示
-        if (!streamRenderFrame) {
-          streamRenderFrame = requestAnimationFrame(() => {
-            streamRenderFrame = null;
-            // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
-            const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
-            renderReply(streamBuffer);
-            if (nearBottom) reply.scrollTop = reply.scrollHeight;
-            if (animationName === "thinking") setAnimation("talking");
-          });
-        }
-      });
-    }
-  } catch (error) {
-    // ストリーミング購読の失敗は致命的でない（通常応答で結果は受け取れる）が、握りつぶさずログに残す。
-    logApp("warn", "ストリーミング購読の設定に失敗しました", errorDetail(error));
-  }
-
   // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
   try {
     if (window.picoagent.listen) {
@@ -1775,14 +1743,10 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
-    reply.classList.remove("streaming");
     status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
-    // ストリーム・進捗リスナーを解除する。
-    if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
-    if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+    // 進捗リスナーを解除する。
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
-    streamBuffer = "";
     busy = false;
     updateComposerState();
     scheduleChatter(); // 会話後はアイドル計測をやり直す。
