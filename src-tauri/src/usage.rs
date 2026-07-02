@@ -106,10 +106,7 @@ pub fn save(app: &AppHandle, store: &UsageStore) {
     })();
     // フォールバック許可: 使用量保存失敗は会話を止めずログだけ残す。
     if let Err(e) = result {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("トークン使用量の保存に失敗しました: {e}"),
-        );
+        crate::log_paths::append_app_log(app, &format!("トークン使用量の保存に失敗しました: {e}"));
     }
 }
 

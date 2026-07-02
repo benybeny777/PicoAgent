@@ -935,7 +935,11 @@ pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> bool {
 
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     // 終了処理が始まっていたら spawn しない（インストール完了後のレースコンディション対策）。
-    if app.try_state::<AivisState>().map(|s| s.stopping.load(Ordering::SeqCst)).unwrap_or(true) {
+    if app
+        .try_state::<AivisState>()
+        .map(|s| s.stopping.load(Ordering::SeqCst))
+        .unwrap_or(true)
+    {
         return Ok(());
     }
     let app_state = app.state::<AppState>();
@@ -1038,7 +1042,9 @@ pub fn stop(app: &tauri::AppHandle) {
                 // spawn_engine で process_group(0) を設定しているため、子の PID = PGID。
                 // プロセスグループ全体（子孫を含む）へ SIGKILL を送る。
                 let pgid = child.id() as libc::pid_t;
-                unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                unsafe {
+                    libc::kill(-pgid, libc::SIGKILL);
+                }
             }
             let _ = child.wait();
         }

@@ -1,0 +1,443 @@
+// whisper_transcribe/mod.rs - 既存音声をローカルで文字起こしするスキル。
+
+use std::path::{Path, PathBuf};
+use std::process::{Output, Stdio};
+use std::time::{Duration, SystemTime};
+
+use async_trait::async_trait;
+use chrono::Local;
+use serde_json::{json, Value};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+
+use super::{config_guide, Tool, ToolReg};
+use crate::config::Config;
+use crate::message::Field;
+
+const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
+
+pub struct WhisperTranscribeTool;
+
+fn workspace_root(cfg: &Config) -> PathBuf {
+    crate::permissions::primary_root(cfg)
+}
+
+fn meeting_root(cfg: &Config) -> PathBuf {
+    let meeting_root = cfg.get("PICOAGENT_MEETING_ROOT", "");
+    if meeting_root.trim().is_empty() {
+        workspace_root(cfg)
+    } else {
+        PathBuf::from(meeting_root)
+    }
+}
+
+fn normalize(root: &Path, requested: &str) -> PathBuf {
+    let path = PathBuf::from(requested);
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }
+}
+
+fn bounded_path(root: &Path, requested: &str) -> Result<PathBuf, String> {
+    let candidate = normalize(root, requested);
+    let root_abs = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let parent = candidate.parent().unwrap_or(root);
+    let parent_abs = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
+    if !parent_abs.starts_with(&root_abs) {
+        return Err(format!(
+            "指定パスは許可ルート外です: {}",
+            candidate.display()
+        ));
+    }
+    Ok(candidate)
+}
+
+fn is_audio(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase()),
+        Some(ext) if matches!(ext.as_str(), "wav" | "mp3" | "m4a" | "flac" | "ogg")
+    )
+}
+
+fn latest_file(root: &Path) -> Option<PathBuf> {
+    let mut best: Option<(PathBuf, SystemTime)> = None;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !is_audio(&path) {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            if best
+                .as_ref()
+                .map(|(_, current)| modified > *current)
+                .unwrap_or(true)
+            {
+                best = Some((path, modified));
+            }
+        }
+    }
+    best.map(|(path, _)| path)
+}
+
+fn bundled_whisper_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        dirs.push(cwd.join("src-tauri/resources/bundled/whisper"));
+        dirs.push(cwd.join("resources/bundled/whisper"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.join("resources/bundled/whisper"));
+            dirs.push(parent.join("../Resources/resources/bundled/whisper"));
+            dirs.push(parent.join("../../resources/bundled/whisper"));
+        }
+    }
+    dirs
+}
+
+fn whisper_exe_name() -> &'static str {
+    if cfg!(windows) {
+        "whisper-cli.exe"
+    } else {
+        "whisper-cli"
+    }
+}
+
+fn bundled_whisper_dir() -> Option<PathBuf> {
+    bundled_whisper_dirs()
+        .into_iter()
+        .find(|path| path.join(whisper_exe_name()).exists())
+}
+
+fn first_bundled_model(dir: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir.join("models")).ok()?;
+    let mut models: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .collect();
+    models.sort();
+    models.into_iter().next()
+}
+
+fn transcribe_program(cfg: &Config) -> String {
+    let configured = cfg.get("PICOAGENT_TRANSCRIBE_PROGRAM", "");
+    if !configured.trim().is_empty() {
+        return configured;
+    }
+    bundled_whisper_dir()
+        .map(|dir| dir.join(whisper_exe_name()).to_string_lossy().to_string())
+        .unwrap_or_else(|| "whisper-cli".to_string())
+}
+
+fn transcribe_model(cfg: &Config) -> String {
+    let configured = cfg.get("PICOAGENT_TRANSCRIBE_MODEL", "");
+    if !configured.trim().is_empty() {
+        return configured;
+    }
+    bundled_whisper_dir()
+        .and_then(|dir| first_bundled_model(&dir))
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn output_stem(audio: &Path) -> PathBuf {
+    audio.with_extension("")
+}
+
+fn transcript_path(audio: &Path) -> PathBuf {
+    audio.with_extension("transcript.txt")
+}
+
+fn split_args_template(
+    template: &str,
+    audio: &Path,
+    model: &str,
+    output_stem: &Path,
+) -> Vec<String> {
+    template
+        .split_whitespace()
+        .map(|token| {
+            token
+                .replace("{audio}", &audio.to_string_lossy())
+                .replace("{model}", model)
+                .replace("{output_stem}", &output_stem.to_string_lossy())
+        })
+        .collect()
+}
+
+fn append_diarize_args(cfg: &Config, args_list: &mut Vec<String>, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    let extra = cfg.get("PICOAGENT_TRANSCRIBE_DIARIZE_ARGS", "-tdrz");
+    args_list.extend(
+        extra
+            .split_whitespace()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string),
+    );
+}
+
+fn trim_output(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    if text.len() <= MAX_COMMAND_OUTPUT_BYTES {
+        return text.to_string();
+    }
+    let mut end = MAX_COMMAND_OUTPUT_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n…（{}バイトで打ち切り）",
+        &text[..end],
+        MAX_COMMAND_OUTPUT_BYTES
+    )
+}
+
+async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Result<Output, String> {
+    let mut child = Command::new(program)
+        .args(args_list)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("エラー: Whisper文字起こしを起動できません: {error}"))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+
+    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => {
+            return Err(format!(
+                "エラー: Whisper文字起こしの終了待ちに失敗しました: {error}"
+            ))
+        }
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(format!(
+                "エラー: Whisper文字起こしが {timeout} 秒でタイムアウトしました。"
+            ));
+        }
+    };
+    let stdout = stdout_task.await.unwrap_or_default();
+    let stderr = stderr_task.await.unwrap_or_default();
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+#[async_trait]
+impl Tool for WhisperTranscribeTool {
+    fn name(&self) -> &'static str {
+        "whisper_transcribe"
+    }
+
+    fn label(&self) -> &'static str {
+        "音声文字起こし"
+    }
+
+    fn description(&self) -> String {
+        "PicoAgent管理下の同梱Whisper CLI、または明示設定したローカルWhisperで音声ファイルを文字起こしする。常駐サーバやポートは使わない。".to_string()
+    }
+
+    fn examples(&self) -> Vec<&'static str> {
+        vec![
+            "最新の録音を文字起こしして",
+            "この音声ファイルを文字起こしして",
+            "話者分類つきで文字起こしして",
+        ]
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "audio_path": { "type": "string", "description": "文字起こし対象の音声ファイル。省略時は録音・議事録ルート配下の最新音声。" },
+                "output_path": { "type": "string", "description": "文字起こしテキストの保存先。省略時は音声名に .transcript.txt を付ける。" },
+                "diarize": { "type": "boolean", "description": "話者分類用の追加引数を渡す。" }
+            },
+            "required": []
+        })
+    }
+
+    fn config_schema(&self) -> Vec<Field> {
+        vec![
+            Field::new(
+                "PICOAGENT_TRANSCRIBE_PROGRAM",
+                "Whisper実行ファイル（手動設定が最優先、空なら同梱）",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_TRANSCRIBE_MODEL",
+                "Whisperモデル（手動設定が最優先、空なら同梱）",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_TRANSCRIBE_ARGS",
+                "Whisper文字起こし引数",
+                "text",
+                "-m {model} -f {audio} -otxt -of {output_stem}",
+            ),
+            Field::new(
+                "PICOAGENT_TRANSCRIBE_DIARIZE_ARGS",
+                "話者分類時に追加するWhisper引数",
+                "text",
+                "-tdrz",
+            ),
+            Field::new(
+                "PICOAGENT_TRANSCRIBE_TIMEOUT_SECS",
+                "Whisper文字起こしタイムアウト秒",
+                "text",
+                "1800",
+            ),
+        ]
+    }
+
+    async fn run(&self, cfg: &Config, args: Value) -> String {
+        let base = meeting_root(cfg);
+        let audio = if let Some(path_text) = args
+            .get("audio_path")
+            .or_else(|| args.get("path"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            match bounded_path(&base, path_text) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {error}"),
+            }
+        } else {
+            match latest_file(&base) {
+                Some(path) => path,
+                None => {
+                    return format!(
+                        "エラー: 文字起こし対象の音声が見つかりません。先に録音するか、{} 配下の音声パスを指定してください。",
+                        base.display()
+                    )
+                }
+            }
+        };
+        if !audio.exists() {
+            return format!("エラー: 音声ファイルが見つかりません: {}", audio.display());
+        }
+        let model = transcribe_model(cfg);
+        if model.trim().is_empty() {
+            return config_guide(
+                "音声文字起こし",
+                &["PICOAGENT_TRANSCRIBE_MODEL"],
+                "npm run setup:whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
+            );
+        }
+        let program = transcribe_program(cfg);
+        let output_stem = output_stem(&audio);
+        let template = cfg.get(
+            "PICOAGENT_TRANSCRIBE_ARGS",
+            "-m {model} -f {audio} -otxt -of {output_stem}",
+        );
+        let mut args_list = split_args_template(&template, &audio, &model, &output_stem);
+        append_diarize_args(
+            cfg,
+            &mut args_list,
+            args.get("diarize")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        );
+        let timeout = cfg
+            .get("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "1800")
+            .parse::<u64>()
+            .ok()
+            .filter(|value| (10..=7200).contains(value))
+            .unwrap_or(1800);
+        let output = match run_command(&program, &args_list, timeout).await {
+            Ok(output) => output,
+            Err(error) => return error,
+        };
+        if !output.status.success() {
+            return format!(
+                "エラー: Whisper文字起こしが失敗しました。\nstdout:\n{}\nstderr:\n{}",
+                trim_output(&output.stdout),
+                trim_output(&output.stderr)
+            );
+        }
+        let generated = output_stem.with_extension("txt");
+        let content = if generated.exists() {
+            match std::fs::read_to_string(&generated) {
+                Ok(content) => content,
+                Err(error) => return format!("エラー: 文字起こし結果を読めません: {error}"),
+            }
+        } else {
+            trim_output(&output.stdout)
+        };
+        let target = if let Some(path_text) = args
+            .get("output_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            match bounded_path(&base, path_text) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {error}"),
+            }
+        } else {
+            transcript_path(&audio)
+        };
+        if let Some(parent) = target.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                return format!("エラー: 文字起こしフォルダを作成できません: {error}");
+            }
+        }
+        if let Err(error) = std::fs::write(&target, &content) {
+            return format!("エラー: 文字起こし結果を保存できません: {error}");
+        }
+        format!(
+            "音声文字起こしが完了しました:\n- 音声: {}\n- 文字起こし: {}\n- 作成日: {}",
+            audio.display(),
+            target.display(),
+            Local::now().format("%Y-%m-%d")
+        )
+    }
+}
+
+inventory::submit! { ToolReg { make: || Box::new(WhisperTranscribeTool) } }

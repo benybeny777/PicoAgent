@@ -11,8 +11,15 @@ const { LogicalSize, PhysicalPosition } = window.__TAURI__.dpi || {};
 // 握られたエラーも確実にログへ残すため）。pet_log 自身は再帰を避けて素の invoke を使う。
 function logInvokeError(name, error) {
   const detail = error && (error.stack || error.message) ? error.stack || error.message : String(error);
-  try { invoke("pet_log", { level: "error", message: `invoke ${name} 失敗`, detail: String(detail) }).catch(() => {}); }
-  catch {}
+  try {
+    invoke("pet_log", { level: "error", message: `invoke ${name} 失敗`, detail: String(detail) }).catch(logError => {
+      // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      console.warn("invoke エラーログ保存に失敗しました", logError);
+    });
+  } catch (logError) {
+    // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+    console.warn("invoke エラーログ保存に失敗しました", logError);
+  }
 }
 async function call(name, args) {
   try {
@@ -31,6 +38,9 @@ window.picoagent = {
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
+  scheduleRuns: () => call("pet_schedule_runs"),
+  rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
+  openSettings: () => call("pet_open_settings"),
   alarms: () => call("pet_alarms"),
   alarmWake: (id) => call("pet_alarm_wake", { id }),
   speak: (text) => call("pet_speak", { text }),
@@ -68,7 +78,7 @@ window.picoagent = {
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status"].includes(channel)) return;
+    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice"].includes(channel)) return;
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     listen(channel, (event) => callback(event.payload));
   },
@@ -87,10 +97,15 @@ window.picoagent = {
   // ドロップされたファイルの内容を抽出してテキストを返す（xlsx/docx/pptx/csv/テキスト等）。
   readFileContent: (name, dataUrl) => call("pet_read_file_content", { name, dataB64: dataUrl }),
   engineStatus: () => call("engine_status"),
+  // ダウンロード済みローカルモデル(GGUF)の一覧を取得する。
+  listDownloadedModels: () => call("pet_list_downloaded_models"),
+  // ダウンロード済みモデルを1つ削除してディスクを解放する。
+  deleteDownloadedModel: (name) => call("pet_delete_downloaded_model", { name }),
   restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {
     load: () => call("settings_load"),
     listModels: (id) => call("settings_list_models", { id }),
+    testTool: (name) => call("settings_test_tool", { name }),
     save: (patch) => call("settings_save", { patch }),
   },
 };

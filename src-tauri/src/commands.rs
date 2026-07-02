@@ -14,15 +14,29 @@ use crate::tools;
 
 const LEGACY_DEFAULT_SYSTEM_PROMPT: &str = "あなたは小さなデスクトップペットです。日本語で、親しみやすく簡潔に話します。選択中キャラクターの人格設定を守り、ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
 const PREVIOUS_DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+const PREVIOUS_DEFAULT_SYSTEM_PROMPT_2: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+const PREVIOUS_DEFAULT_SYSTEM_PROMPT_3: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。返答は必ず日本語で書いてください（ユーザーが他言語を明示的に求めたときだけ従ってください）。思考・推論の途中経過は出力せず、結論だけを話してください。いま選択されているキャラクター本人になりきり、他のキャラクターの名前・一人称・口調・性格を混ぜないでください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
+pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。返答は必ず日本語で書いてください（ユーザーが他言語を明示的に求めたときだけ従ってください）。思考・推論の途中経過は出力せず、結論だけを話してください。いま選択されている1キャラクター本人になりきり、他のキャラクターの名前・一人称・口調・性格を混ぜないでください。キャラ性は呼称で盛らず、反応の癖・言葉選び・得意な支え方で出してください。「お兄ちゃん」「お姉ちゃん」など、ユーザーを家族呼びして距離を詰める表現は禁止です。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
 
 fn effective_system_prompt(config: &Config) -> String {
-    let prompt = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-    if prompt == LEGACY_DEFAULT_SYSTEM_PROMPT || prompt == PREVIOUS_DEFAULT_SYSTEM_PROMPT {
+    let configured = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+    let mut prompt = if configured == LEGACY_DEFAULT_SYSTEM_PROMPT
+        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT
+        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT_2
+        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT_3
+    {
         DEFAULT_SYSTEM_PROMPT.to_string()
     } else {
-        prompt
+        configured
+    };
+    // 使えるスキル一覧を添え、「何ができる？」に具体的に答えられるようにする。
+    let capabilities = crate::tools::capability_summary();
+    if !capabilities.is_empty() {
+        prompt.push_str("\n\n使えるスキル（必要なときに自動で実行できます）: ");
+        prompt.push_str(&capabilities);
+        prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
     }
+    prompt
 }
 
 // 日本語文字は約2トークン、ASCII は約0.25トークン（÷4）で粗く見積もる。
@@ -185,7 +199,11 @@ async fn maybe_summarize_context(
     let history_text: String = to_summarize
         .iter()
         .map(|m| {
-            let role = if m.role == "user" { "ユーザー" } else { "アシスタント" };
+            let role = if m.role == "user" {
+                "ユーザー"
+            } else {
+                "アシスタント"
+            };
             format!("{}: {}", role, m.content)
         })
         .collect::<Vec<_>>()
@@ -236,6 +254,23 @@ pub fn active_character_id(state: &AppState) -> String {
     } else {
         id
     }
+}
+
+/// ユーザー発話とアシスタント返答を会話へ記録し、圧縮・履歴保存して返却 JSON を作る。
+/// 承認/キャンセルなど「AI を介さず即返答する」分岐の共通処理。
+fn record_turn(
+    state: &AppState,
+    app: &AppHandle,
+    user_text: &str,
+    reply: String,
+) -> Result<Value, String> {
+    let mut convo = state.messages.lock().unwrap().clone();
+    convo.push(Message::new("user", user_text));
+    convo.push(Message::new("assistant", reply.clone()));
+    let compacted = compacted_conversation(&convo);
+    *state.messages.lock().unwrap() = compacted.clone();
+    crate::history::save(app, &active_character_id(state), &compacted);
+    Ok(json!({ "reply": reply }))
 }
 
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
@@ -508,35 +543,21 @@ pub async fn pet_send(
                 &pending,
             )
             .await;
-            let mut convo = state.messages.lock().unwrap().clone();
-            convo.push(Message::new("user", user_text));
-            convo.push(Message::new("assistant", reply.clone()));
-            let compacted = compacted_conversation(&convo);
-            *state.messages.lock().unwrap() = compacted.clone();
-            crate::history::save(&app, &active_character_id(&state), &compacted);
-            return Ok(json!({ "reply": reply }));
+            return record_turn(&state, &app, &user_text, reply);
         }
         if is_approval_text(&text) {
             *state.pending_command.lock().unwrap() = None;
             let reply = crate::tools::run_command::execute_pending(&pending).await;
-            let mut convo = state.messages.lock().unwrap().clone();
-            convo.push(Message::new("user", user_text));
-            convo.push(Message::new("assistant", reply.clone()));
-            let compacted = compacted_conversation(&convo);
-            *state.messages.lock().unwrap() = compacted.clone();
-            crate::history::save(&app, &active_character_id(&state), &compacted);
-            return Ok(json!({ "reply": reply }));
+            return record_turn(&state, &app, &user_text, reply);
         }
         if is_cancel_text(&text) {
             *state.pending_command.lock().unwrap() = None;
-            let reply = "コマンド実行をキャンセルしました。".to_string();
-            let mut convo = state.messages.lock().unwrap().clone();
-            convo.push(Message::new("user", user_text));
-            convo.push(Message::new("assistant", reply.clone()));
-            let compacted = compacted_conversation(&convo);
-            *state.messages.lock().unwrap() = compacted.clone();
-            crate::history::save(&app, &active_character_id(&state), &compacted);
-            return Ok(json!({ "reply": reply }));
+            return record_turn(
+                &state,
+                &app,
+                &user_text,
+                "コマンド実行をキャンセルしました。".to_string(),
+            );
         }
     }
 
@@ -564,7 +585,9 @@ pub async fn pet_send(
                     sys.content.push_str("\n\n");
                     sys.content.push_str(&semantic_ctx);
                 } else {
-                    sys.content = sys.content.replacen(base_ctx.as_str(), semantic_ctx.as_str(), 1);
+                    sys.content = sys
+                        .content
+                        .replacen(base_ctx.as_str(), semantic_ctx.as_str(), 1);
                 }
             }
         }
@@ -572,8 +595,7 @@ pub async fn pet_send(
     convo.push(Message::new("user", text));
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
-    let mut convo =
-        maybe_summarize_context(convo, provider, &state.config, &model).await;
+    let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
 
     // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
     state
@@ -629,7 +651,10 @@ pub async fn pet_send(
                 crate::emotion::update(&current, &user_text, &reply)
             };
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit("pet:emotion", serde_json::to_value(&new_emotion).unwrap_or_default());
+                let _ = win.emit(
+                    "pet:emotion",
+                    serde_json::to_value(&new_emotion).unwrap_or_default(),
+                );
             }
             *state.emotion.lock().unwrap() = new_emotion;
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
@@ -1097,11 +1122,56 @@ pub async fn pet_speak(
     Ok(json!({ "enabled": true, "mime": "audio/wav", "audio": bytes.to_vec() }))
 }
 
+/// 設定スキーマ上で type="password" になっている＝シークレット扱いのキー集合。
+fn secret_keys() -> std::collections::HashSet<String> {
+    let mut keys = std::collections::HashSet::new();
+    for provider in providers::all() {
+        for field in provider.config_schema() {
+            if field.r#type == "password" {
+                keys.insert(field.key);
+            }
+        }
+    }
+    for tool in tools::all() {
+        for field in tool.config_schema() {
+            if field.r#type == "password" {
+                keys.insert(field.key);
+            }
+        }
+    }
+    keys
+}
+
+/// 既存の平文シークレットを起動時に DPAPI 暗号化へ移行する（次回保存を待たずに保護する）。
+pub(crate) fn encrypt_existing_secrets(config: &Config) {
+    let all = config.get_all();
+    let mut patch = Map::new();
+    for key in secret_keys() {
+        if let Some(text) = all.get(&key).and_then(Value::as_str) {
+            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                patch.insert(key, Value::String(crate::secret::encrypt(text)));
+            }
+        }
+    }
+    if !patch.is_empty() {
+        // フォールバック許可: 移行保存に失敗してもアプリ起動は止めない。
+        let _ = config.set_all(patch);
+    }
+}
+
 #[tauri::command]
 pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let mut values = state.config.get_all();
+    // 暗号化済みのシークレットは設定画面で編集できるよう復号して返す（非暗号の値は不変）。
+    for value in values.values_mut() {
+        if let Value::String(text) = value {
+            if crate::secret::is_encrypted(text) {
+                *value = Value::String(crate::secret::decrypt(text));
+            }
+        }
+    }
     if values
         .get("PICOAGENT_SYSTEM_PROMPT")
         .and_then(Value::as_str)
@@ -1136,6 +1206,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
                 "name": t.name(),
                 "label": t.label(),
                 "description": t.description(),
+                "examples": t.examples(),
                 "configSchema": t.config_schema(),
             })
         })
@@ -1178,8 +1249,72 @@ pub async fn settings_list_models(
 }
 
 #[tauri::command]
+pub async fn settings_test_tool(name: String, state: State<'_, AppState>) -> Result<Value, String> {
+    let args = match name.as_str() {
+        "gmail_message" => json!({ "action": "list", "q": "newer_than:7d", "max_results": 1 }),
+        "slack_send_message" => json!({ "action": "test" }),
+        "google_calendar" => json!({ "action": "list", "max_results": 1 }),
+        _ => {
+            return Ok(json!({
+                "ok": false,
+                "message": "このスキルには接続テストがまだありません。設定済みバッジと実際の実行結果で確認してください。"
+            }))
+        }
+    };
+    let result = tools::dispatch(&state.config, &name, args).await;
+    let ok = !result.starts_with("エラー:");
+    Ok(json!({
+        "ok": ok,
+        "message": result,
+        "diagnosis": diagnose_tool_test(&name, &result, ok),
+    }))
+}
+
+fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
+    if ok {
+        return "接続は成功しました。必要な読み取り/送信権限は実際の操作範囲に合わせて確認してください。".to_string();
+    }
+    let lower = result.to_lowercase();
+    if result.contains("設定が必要") || result.contains("未設定") {
+        return match name {
+            "gmail_message" => "Gmail の OAuth access token が未設定です。Gmail API の読み取り/下書き/送信に必要なスコープを持つ token を設定してください。",
+            "slack_send_message" => "Slack の Bot token または Incoming Webhook URL が未設定です。履歴取得には Bot token と channel 設定が必要です。",
+            "google_calendar" => "Google Calendar の OAuth access token が未設定です。予定一覧/作成に必要なスコープを持つ token を設定してください。",
+            _ => "必要な設定値が未入力です。スキルカードの必須 token / URL / ID を確認してください。",
+        }
+        .to_string();
+    }
+    if result.contains("HTTP 401")
+        || lower.contains("invalid_auth")
+        || lower.contains("unauthorized")
+    {
+        return "認証に失敗しています。token の期限切れ、コピー漏れ、別アカウントの token、暗号化前の古い値を確認してください。".to_string();
+    }
+    if result.contains("HTTP 403")
+        || lower.contains("missing_scope")
+        || lower.contains("insufficient")
+        || lower.contains("forbidden")
+    {
+        return "権限不足の可能性が高いです。OAuth scope、Slack Bot の権限、対象ワークスペース/カレンダーへのアクセス権を確認してください。".to_string();
+    }
+    if result.contains("HTTP 404")
+        || lower.contains("channel_not_found")
+        || lower.contains("not_found")
+    {
+        return "対象が見つかりません。チャンネルID、カレンダーID、メッセージID、API base URL が正しいか確認してください。".to_string();
+    }
+    if lower.contains("timeout") || result.contains("タイムアウト") {
+        return "接続がタイムアウトしています。ネットワーク、プロキシ、API の一時障害、timeout 秒数を確認してください。".to_string();
+    }
+    if result.contains("接続に失敗") || lower.contains("dns") || lower.contains("connection") {
+        return "API へ接続できていません。ネットワーク、VPN/プロキシ、base URL、ローカルのセキュリティソフトを確認してください。".to_string();
+    }
+    "原因を分類できませんでした。表示された API エラー本文、token の権限、対象ID、ネットワーク状態を順に確認してください。".to_string()
+}
+
+#[tauri::command]
 pub async fn settings_save(
-    patch: Map<String, Value>,
+    mut patch: Map<String, Value>,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
@@ -1212,6 +1347,20 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
+
+    // パスワード型のシークレットは平文保存せず、DPAPI で暗号化してから永続化する。
+    let mut encrypted: Vec<(String, String)> = Vec::new();
+    for key in secret_keys() {
+        if let Some(text) = patch.get(&key).and_then(Value::as_str) {
+            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                encrypted.push((key, crate::secret::encrypt(text)));
+            }
+        }
+    }
+    for (key, value) in encrypted {
+        patch.insert(key, Value::String(value));
+    }
+
     state
         .config
         .set_all(patch)
@@ -1285,6 +1434,28 @@ pub async fn settings_save(
     }))
 }
 
+#[tauri::command]
+pub fn pet_schedule_runs(app: AppHandle) -> Result<Value, String> {
+    Ok(json!(crate::scheduler::load_run_history(&app)))
+}
+
+#[tauri::command]
+pub async fn pet_rerun_schedule_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Value, String> {
+    crate::scheduler::rerun_task(&app, &state.config, &task_id)
+        .await
+        .map(|record| json!(record))
+}
+
+#[tauri::command]
+pub fn pet_open_settings(app: AppHandle) -> Result<(), String> {
+    open_settings(&app);
+    Ok(())
+}
+
 /// 設定反映のための再起動相当処理。重い反映（モデル DL・エンジン/Aivis 起動・
 /// キャラ読込）を起動シーケンス（ローディング画面）でまとめて行うための共通入口。
 ///
@@ -1330,6 +1501,9 @@ pub fn restart_app(
     if restart_engine {
         crate::engine::stop(&app);
         if pid == "local" {
+            // stop() が立てた stopping フラグを下ろさないと、ensure_and_start が冒頭で
+            // 即 return してエンジンが再起動されない（再初期化後に AI へ接続できなくなる）。
+            crate::engine::clear_stopping(&app);
             let handle = app.clone();
             tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
         }
@@ -1356,6 +1530,11 @@ pub fn restart_app(
         }
     }
 
+    // 設定画面から再初期化した場合は、古い設定ウィンドウを残さない。
+    if let Some(settings) = app.get_webview_window("settings") {
+        let _ = settings.close();
+    }
+
     // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit("pet:reload", ());
@@ -1371,6 +1550,100 @@ pub async fn engine_status(app: tauri::AppHandle) -> Result<Value, String> {
         Some(e) => Ok(e.status.lock().unwrap().clone()),
         None => Ok(json!({ "phase": "idle" })),
     }
+}
+
+/// バイト数を人が読めるサイズ文字列にする（モデル一覧表示用）。
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[unit])
+    } else {
+        format!("{:.1} {}", value, UNITS[unit])
+    }
+}
+
+/// ダウンロード済みのローカルモデル（GGUF）一覧を返す。各要素にファイル名・サイズ・
+/// 対応プリセット名・使用中フラグを付ける。設定画面のモデル管理に使う。
+#[tauri::command]
+pub fn pet_list_downloaded_models(app: AppHandle) -> Result<Value, String> {
+    let dir = crate::engine::models_dir(&app);
+    let active = crate::engine::active_model_filename(&app);
+    let mut models: Vec<Value> = Vec::new();
+    let mut total: u64 = 0;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("gguf") {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let size = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+            total += size;
+            models.push(json!({
+                "name": name,
+                "sizeBytes": size,
+                "sizeLabel": human_size(size),
+                "label": crate::providers::local::label_for_filename(&name),
+                "active": active.as_deref() == Some(name.as_str()),
+            }));
+        }
+    }
+    models.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["name"].as_str().unwrap_or(""))
+    });
+    Ok(json!({
+        "models": models,
+        "dir": dir.to_string_lossy(),
+        "totalBytes": total,
+        "totalLabel": human_size(total),
+    }))
+}
+
+/// ダウンロード済みモデル（GGUF）を1つ物理削除する（PicoAgent 管理下の同梱物のため
+/// ゴミ箱ではなく削除でディスクを解放する）。モデルディレクトリ配下の `.gguf` のみ対象とし、
+/// パストラバーサルと使用中モデルの削除を拒否する。
+#[tauri::command]
+pub fn pet_delete_downloaded_model(app: AppHandle, name: String) -> Result<Value, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || !name.ends_with(".gguf")
+    {
+        return Err("不正なモデル名です。".to_string());
+    }
+    let dir = crate::engine::models_dir(&app);
+    let path = dir.join(&name);
+    // トラバーサル防止: 解決後の親がモデルディレクトリそのものであること。
+    if path.parent() != Some(dir.as_path()) {
+        return Err("モデルディレクトリ外は削除できません。".to_string());
+    }
+    if !path.is_file() {
+        return Err("対象のモデルが見つかりません。".to_string());
+    }
+    // 使用中モデルはエンジンがファイルをロックしており、削除すると不整合になるため拒否する。
+    if crate::engine::active_model_filename(&app).as_deref() == Some(name.as_str()) {
+        return Err(
+            "使用中のモデルは削除できません。先に別のモデルへ切り替えてから削除してください。"
+                .to_string(),
+        );
+    }
+    std::fs::remove_file(&path)
+        .map_err(|error| format!("削除に失敗しました（使用中の可能性があります）: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("ダウンロード済みモデルを削除しました: {name}"),
+    );
+    Ok(json!({ "ok": true }))
 }
 
 #[tauri::command]
@@ -1443,7 +1716,10 @@ pub async fn pet_send_image(
     if text.is_empty() && images.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
-    // 画像サイズ制限（1枚あたり最大 10MB base64）。
+    // 画像の枚数・サイズ制限（1枚あたり最大 10MB base64、最大 8 枚）。
+    if images.len() > 8 {
+        return Err("画像が多すぎます（最大 8 枚まで）。".to_string());
+    }
     for img in &images {
         if img.len() > 10 * 1024 * 1024 {
             return Err("画像サイズが大きすぎます（1枚 10MB まで）。".to_string());
@@ -1467,7 +1743,10 @@ pub async fn pet_send_image(
     } else {
         text.clone()
     };
-    convo.push(crate::message::Message::user_with_images(user_text.clone(), images));
+    convo.push(crate::message::Message::user_with_images(
+        user_text.clone(),
+        images,
+    ));
 
     let mut convo =
         maybe_summarize_context(convo, provider, &state.config, &model).await;
@@ -1498,7 +1777,10 @@ pub async fn pet_send_image(
                 crate::emotion::update(&current, &user_text, &reply)
             };
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit("pet:emotion", serde_json::to_value(&new_emotion).unwrap_or_default());
+                let _ = win.emit(
+                    "pet:emotion",
+                    serde_json::to_value(&new_emotion).unwrap_or_default(),
+                );
             }
             *state.emotion.lock().unwrap() = new_emotion;
             Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
@@ -1618,6 +1900,11 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
+    // 巨大ファイル/ZIP爆弾による OOM を避けるため入力サイズを制限する（base64 は ~4/3 倍）。
+    const MAX_FILE_BYTES: usize = 25 * 1024 * 1024;
+    if data_b64.len() > MAX_FILE_BYTES / 3 * 4 + 1024 {
+        return Err("ファイルが大きすぎます（25MB まで）。".to_string());
+    }
     // data URL プレフィックスを除去する。
     let b64 = if let Some(pos) = data_b64.find(";base64,") {
         &data_b64[pos + 8..]
@@ -1627,6 +1914,9 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     let bytes = B64
         .decode(b64.trim())
         .map_err(|e| format!("base64 デコード失敗: {e}"))?;
+    if bytes.len() > MAX_FILE_BYTES {
+        return Err("ファイルが大きすぎます（25MB まで）。".to_string());
+    }
 
     let ext = std::path::Path::new(&name)
         .extension()
@@ -1637,36 +1927,21 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     const MAX_CHARS: usize = 12_000;
     let content = match ext.as_str() {
         // テキスト系・コード系はそのまま UTF-8 で読む。
-        "txt" | "md" | "markdown" | "rst" | "log" | "json" | "toml" | "yaml" | "yml"
-        | "html" | "htm" | "xml" | "css" | "js" | "ts" | "jsx" | "tsx" | "py" | "rs"
-        | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "sh" | "bash" | "zsh" | "bat"
-        | "ps1" | "rb" | "php" | "kt" | "swift" => {
-            String::from_utf8_lossy(&bytes).into_owned()
-        }
+        "txt" | "md" | "markdown" | "rst" | "log" | "json" | "toml" | "yaml" | "yml" | "html"
+        | "htm" | "xml" | "css" | "js" | "ts" | "jsx" | "tsx" | "py" | "rs" | "go" | "java"
+        | "c" | "cpp" | "h" | "hpp" | "sh" | "bash" | "zsh" | "bat" | "ps1" | "rb" | "php"
+        | "kt" | "swift" => String::from_utf8_lossy(&bytes).into_owned(),
         // CSV/TSV → Markdown テーブル（最大 300 行）。
         "csv" | "tsv" => {
             let sep = if ext == "tsv" { '\t' } else { ',' };
             let text = String::from_utf8_lossy(&bytes);
-            let mut out = String::new();
-            for (i, line) in text.lines().enumerate().take(300) {
-                let cells: Vec<&str> = line.split(sep).collect();
-                out.push_str(&cells.join(" | "));
-                out.push('\n');
-                if i == 0 {
-                    out.push_str(
-                        &cells
-                            .iter()
-                            .map(|_| "---")
-                            .collect::<Vec<_>>()
-                            .join(" | "),
-                    );
-                    out.push('\n');
-                }
-            }
-            if text.lines().count() > 300 {
-                out.push_str("[300行以降は省略]\n");
-            }
-            out
+            // 表示は最大 300 行なので 301 行だけ取り込む（巨大ファイルでも全行を抱えない）。
+            let rows: Vec<Vec<String>> = text
+                .lines()
+                .take(301)
+                .map(|line| line.split(sep).map(|c| c.to_string()).collect())
+                .collect();
+            rows_to_markdown_table(&rows)
         }
         // Excel → calamine でシート別 Markdown テーブル。
         "xlsx" | "xlsm" => extract_xlsx_content(&bytes)?,
@@ -1699,7 +1974,9 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     if content.chars().count() > MAX_CHARS {
         let truncated: String = content.chars().take(MAX_CHARS).collect();
         let omitted = content.chars().count() - MAX_CHARS;
-        Ok(format!("{truncated}\n\n[...{omitted} 文字以降は省略しました]"))
+        Ok(format!(
+            "{truncated}\n\n[...{omitted} 文字以降は省略しました]"
+        ))
     } else {
         Ok(content)
     }
@@ -1735,36 +2012,55 @@ fn strip_xml_tags(s: &str) -> String {
     out.trim().to_string()
 }
 
+/// セル行の並びを Markdown テーブルにする。先頭行を見出しとして区切り線を入れ、最大 300 行で打ち切る。
+/// CSV/TSV と Excel で共通利用する。
+fn rows_to_markdown_table(rows: &[Vec<String>]) -> String {
+    let mut out = String::new();
+    for (i, cells) in rows.iter().enumerate().take(300) {
+        out.push_str(&cells.join(" | "));
+        out.push('\n');
+        if i == 0 && rows.len() > 1 {
+            out.push_str(&cells.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+            out.push('\n');
+        }
+    }
+    if rows.len() > 300 {
+        out.push_str("[300行以降は省略]\n");
+    }
+    out
+}
+
+/// ZIP エントリ 1 件の展開上限（ZIP爆弾対策）。
+const MAX_ZIP_ENTRY_BYTES: u64 = 20 * 1024 * 1024;
+
 fn read_zip_entry(data: &[u8], entry: &str) -> Result<String, String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(data);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
-    let mut file = archive
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
+    let file = archive
         .by_name(entry)
         .map_err(|_| format!("'{entry}' が見つかりません"))?;
-    let mut content = String::new();
-    file.read_to_string(&mut content).map_err(|e| e.to_string())?;
-    Ok(content)
+    // 展開サイズを上限で打ち切る（巨大展開による OOM を防ぐ）。
+    let mut buf = Vec::new();
+    file.take(MAX_ZIP_ENTRY_BYTES)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(data);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP オープン失敗: {e}"))?;
     let mut slides: Vec<(String, String)> = Vec::new();
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
         let fname = file.name().to_string();
         if fname.starts_with("ppt/slides/slide") && fname.ends_with(".xml") {
-            let mut xml = String::new();
-            let text = if file.read_to_string(&mut xml).is_ok() {
-                strip_xml_tags(&xml)
-            } else {
-                "[スライドの読み込みに失敗しました]".to_string()
-            };
-            slides.push((fname, text));
+            let mut buf = Vec::new();
+            let _ = file.take(MAX_ZIP_ENTRY_BYTES).read_to_end(&mut buf);
+            let xml = String::from_utf8_lossy(&buf).into_owned();
+            slides.push((fname, strip_xml_tags(&xml)));
         }
     }
     slides.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1786,25 +2082,13 @@ fn extract_xlsx_content(data: &[u8]) -> Result<String, String> {
     for sheet_name in sheet_names {
         if let Ok(range) = wb.worksheet_range(&sheet_name) {
             output.push_str(&format!("## {sheet_name}\n"));
-            let rows: Vec<_> = range.rows().collect();
-            for (i, row) in rows.iter().enumerate().take(300) {
-                let cells: Vec<String> = row.iter().map(|c| c.to_string()).collect();
-                output.push_str(&cells.join(" | "));
-                output.push('\n');
-                if i == 0 && rows.len() > 1 {
-                    output.push_str(
-                        &cells
-                            .iter()
-                            .map(|_| "---")
-                            .collect::<Vec<_>>()
-                            .join(" | "),
-                    );
-                    output.push('\n');
-                }
-            }
-            if rows.len() > 300 {
-                output.push_str("[300行以降は省略]\n");
-            }
+            // 表示は最大 300 行なので 301 行だけ取り込む（巨大シートでも全行を抱えない）。
+            let rows: Vec<Vec<String>> = range
+                .rows()
+                .take(301)
+                .map(|row| row.iter().map(|c| c.to_string()).collect())
+                .collect();
+            output.push_str(&rows_to_markdown_table(&rows));
             output.push('\n');
         }
     }
@@ -1819,8 +2103,8 @@ pub fn open_settings(app: &tauri::AppHandle) {
     }
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("PicoAgent の設定")
-        .inner_size(560.0, 640.0)
-        .min_inner_size(420.0, 480.0)
+        .inner_size(640.0, 640.0)
+        .min_inner_size(480.0, 480.0)
         .build();
 }
 

@@ -58,14 +58,26 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .bubble.fullscreen .bubble-resize { display:none; }
 /* 拡大中もキャラはそのまま右側に表示（被らないので薄くしない）。 */
 .bubble.fullscreen ~ .character { z-index:7; }
+.history-tools { display:none; }
+.bubble.fullscreen .history-tools { display:flex; flex:0 0 auto; margin:0 0 8px; }
+.history-tools input { width:100%; height:30px; padding:0 10px; border:1px solid #ded6df; border-radius:9px; outline:none; background:#faf7f9; color:var(--ink); font:12px/1.4 inherit; }
+.history-tools input:focus { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.1); }
 .history-log { display:none; }
 .bubble.fullscreen .history-log { display:block; flex:1 1 auto; min-height:0; margin:0 0 12px; padding:0 4px 0 0; overflow:auto; }
 .history-item { margin:0 0 11px; }
-.history-role { margin-bottom:3px; color:var(--muted); font-size:10px; font-weight:700; }
+.history-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:3px; }
+.history-role { color:var(--muted); font-size:10px; font-weight:700; }
+.history-actions { display:flex; gap:4px; opacity:.72; }
+.history-item:hover .history-actions,
+.history-actions:focus-within { opacity:1; }
+.history-actions button { position:static; height:20px; padding:0 7px; border-radius:7px; background:#f4edf1; border:1px solid #eadde5; color:var(--muted); font-size:10px; font-weight:700; }
+.history-actions button:hover { color:var(--ink); border-color:#d59cac; filter:none; }
 .history-body { display:inline-block; max-width:100%; padding:8px 10px; border-radius:12px; background:#f6f1f4; font-size:12px; line-height:1.65; white-space:pre-wrap; word-break:break-word; user-select:text; }
 .history-item.user { text-align:right; }
+.history-item.user .history-meta { flex-direction:row-reverse; }
 .history-item.user .history-body { background:#ffeef3; }
 .history-item.assistant .history-body { background:#f4fbf6; }
+.history-empty { padding:14px 8px; color:var(--muted); font-size:12px; text-align:center; }
 .reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:text; overflow:auto; }
 .bubble.fullscreen .reply { flex:0 0 auto; max-height:30%; padding-top:8px; border-top:1px solid rgba(71,52,76,.1); }
 .reply a { color:#b94f68; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
@@ -76,6 +88,10 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .composer { position:relative; z-index:2; flex:0 0 auto; margin-top:auto; padding-top:10px; }
 .composer[hidden] { display:none; }
 .composer.drag-over textarea { border-color:#d59cac; box-shadow:0 0 0 3px rgba(242,126,145,.18); }
+.quick-actions { display:flex; flex-wrap:wrap; gap:5px; margin:0 0 7px; }
+.quick-actions button { position:static; height:24px; padding:0 8px; border-radius:8px; background:#f4edf1; color:var(--muted); border:1px solid #eadde5; font-size:10px; font-weight:700; }
+.quick-actions button:hover { color:var(--ink); border-color:#d59cac; filter:none; }
+.quick-actions button:disabled { opacity:.48; }
 .image-preview { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 6px; }
 .image-preview[hidden] { display:none; }
 .image-thumb-wrap { position:relative; }
@@ -96,8 +112,27 @@ button:disabled { opacity:.48; cursor:default; }
 .reply-actions { flex:0 0 auto; align-self:flex-end; display:flex; gap:4px; margin:-8px -8px 8px 0; opacity:.72; transition:opacity .16s ease; }
 .bubble:hover .reply-actions,
 .reply-actions:focus-within { opacity:1; }
-.reply-actions button { position:static; width:24px; height:24px; padding:0; border-radius:7px; background:rgba(242,126,145,.92); font-size:10px; line-height:1; }
+.reply-actions button { position:static; display:flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; border-radius:7px; background:rgba(242,126,145,.92); font-size:10px; line-height:1; }
 .reply-actions button:hover { filter:brightness(1.04); }
+.reply-actions #noticeToggle { position:relative; background:#64a98a; }
+.reply-actions #noticeToggle::after { content:attr(data-count); position:absolute; right:-5px; top:-6px; min-width:14px; height:14px; padding:0 3px; border-radius:999px; background:#c0627a; color:#fff; font-size:9px; line-height:14px; text-align:center; box-shadow:0 1px 4px rgba(42,31,46,.22); }
+.reply-actions #noticeToggle[data-count=""]::after,
+.reply-actions #noticeToggle:not([data-count])::after { display:none; }
+.notice-panel { position:absolute; z-index:10; top:44px; right:12px; width:min(330px,calc(100% - 24px)); max-height:min(340px,calc(100% - 86px)); display:flex; flex-direction:column; padding:10px; border:1px solid rgba(71,52,76,.14); border-radius:12px; background:rgba(255,253,248,.99); box-shadow:0 12px 30px rgba(42,31,46,.18); }
+.notice-panel[hidden] { display:none; }
+.notice-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; color:var(--ink); font-size:12px; font-weight:700; }
+.notice-head button { position:static; height:24px; padding:0 8px; border-radius:7px; background:#8a8090; font-size:10px; }
+.notice-list { overflow:auto; display:flex; flex-direction:column; gap:8px; padding-right:2px; }
+.notice-item { padding:8px 9px; border:1px solid #eadde5; border-left:3px solid var(--mint); border-radius:9px; background:#f8fbf7; }
+.notice-item.error { border-left-color:#c0627a; background:#fff6f8; }
+.notice-title { font-size:12px; font-weight:700; color:var(--ink); }
+.notice-meta { margin-top:2px; color:var(--muted); font-size:10px; }
+.notice-body { max-height:120px; margin-top:5px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#4b4050; font-size:11px; line-height:1.5; user-select:text; }
+.notice-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:7px; }
+.notice-actions button { position:static; height:24px; padding:0 8px; border-radius:7px; background:#8a8090; font-size:10px; }
+.notice-actions button:first-child { background:#64a98a; }
+.notice-actions button:disabled { opacity:.55; }
+.notice-empty { padding:18px 4px; color:var(--muted); font-size:12px; text-align:center; }
 @media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span,.boot-log-line { animation:none!important; } }
 .reply { white-space:normal; }
 .md { font-size:13px; line-height:1.65; word-break:break-word; }

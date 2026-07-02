@@ -36,10 +36,11 @@
 ```powershell
 npm install
 npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
+npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合）
 npm run dev
 ```
 
-- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。手動選択では Gemma / Qwen / Llama / Mistral / Phi / DeepSeek 系の主要 GGUF プリセットも選べます。設定画面ではローカルモデルを「種類 → サイズ」で選択でき、推奨VRAM・推奨RAM・ダウンロード目安を表示します。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示され、モデル変更時は必要なモデルを取得して同梱エンジンを再起動します。
+- 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。手動選択では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットも選べます。設定画面ではローカルモデルを「種類 → サイズ」で選択でき、推奨VRAM・推奨RAM・ダウンロード目安を表示します。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示され、モデル変更時は必要なモデルを取得して同梱エンジンを再起動します。設定画面の「叩くAI」タブには「ダウンロード済みモデル」セクションがあり、取得済み GGUF を一覧・サイズ確認し、使わないモデルを削除してディスクを空けられます（使用中のモデルは削除できません）。
 - Ollama を使いたい場合は `ollama serve` 後に右クリック →「設定…」でプロバイダを切り替えます（任意）。Ollama 選択時はローカルのモデル一覧を読み込み、モデル欄から選べます。
 
 > [!NOTE]
@@ -54,6 +55,7 @@ OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral などのクラウド�
 - **Ollama 不要・ローカル完結** — 推論エンジン同梱、初回 DL の gemma4 でそのまま動く（既定 `local`）。
 - **叩く AI を差し替え可能** — local / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral を同梱。コネクタを足せば他社 AI にも切替できる。
 - **エージェント機能を追加可能** — ツールコネクタを足すと、モデルが function calling で呼び出せる。
+- **スーパーエージェントモード** — 設定でONにすると、複雑な依頼を計画→多段ツール実行→自己評価まで自律的に回し、必要なら `subagent` スキルでサブタスクを分担する。計画と実行ステップ、実行中のツールはフキダシ上部のステータス行にリアルタイム表示する。
 - **原則Web検索** — 通常の質問ではローカルモデルの判断に頼らずWeb検索してから参照元のハイパーリンク付きで回答する。短い挨拶は検索に引っ張られないよう例外扱いし、キャラクター本人として返す。
 - **設定画面ですべて設定** — 右クリック →「設定…」で叩く AI・モデル・接続先・API キー・ツール設定などを GUI 編集。軽い設定は保存で即反映、叩く AI・モデル・音声・キャラクターなど重い設定は確認のうえ再起動して起動画面でまとめて反映。
 - **軽量な Tauri ネイティブ** — システム WebView を使い、Rust バックエンドで動作。
@@ -86,8 +88,10 @@ graph LR
 - フキダシ上部の小ボタン: 回答コピー・再読み上げ・停止・拡大
 - フキダシ右下のつまみをドラッグ: フキダシの幅・高さを変更（位置も含めて自動保存）
 - キャラクターをダブルクリック: フキダシを全画面表示／元に戻す（`Esc` でも解除）
+- 全画面フキダシ: 会話履歴を検索し、各履歴のコピーやユーザー発話の再利用が可能
 - 読み上げ中にキャラクターをクリック: 読み上げを停止
-- `Enter`: 送信 / `Shift + Enter`: 改行 / `Esc`: 入力欄を閉じる
+- `Enter` または `Ctrl + Enter`: 送信 / `Shift + Enter`: 改行 / `↑` `↓`: 過去の入力を呼び戻す / `Esc`: 入力欄を閉じる
+- 入力欄上部のクイック操作: 画面確認・クリップボード要約・今日の予定・できること確認をワンクリックで送信
 - キャラクターをドラッグ: 移動
 - 右クリック: **設定…**・**常に手前に表示**・**PicoAgent を終了**（フキダシ本文や入力欄の上ではコピーなど通常メニューを優先）
 
@@ -95,17 +99,17 @@ graph LR
 
 ## ⚙️ 設定
 
-右クリック →「**設定…**」で設定ウィンドウを開き、すべての設定を編集できます。設定は `app_config_dir/config.json`（個人 PC ローカル）に保存されます。文字サイズ・常に手前・人格・自発雑談などの軽い設定は保存すると即反映します。**叩く AI・モデル・音声（Aivis）・キャラクターの切り替えなど重い設定は、保存時に「再起動して反映します」の確認画面が出て、承諾すると再起動し、モデル取得やエンジン起動を起動画面（ローディング）でまとめて行います**（フキダシに「準備中…」を出さないため）。「あとで」を選んでも設定は保存され、次回起動時に反映されます。
+右クリック →「**設定…**」で設定ウィンドウを開き、すべての設定を編集できます。設定は `app_config_dir/config.json`（個人 PC ローカル）に保存されます。文字サイズ・常に手前・人格・自発雑談などの軽い設定は保存すると即反映します。**叩く AI・モデル・音声（Aivis）・キャラクターの切り替えなど重い設定は、保存時に「再起動して反映します」の確認画面が出て、承諾すると再起動し、モデル取得やエンジン起動を起動画面（ローディング）でまとめて行います**（フキダシに「準備中…」を出さないため）。この再起動相当の反映では設定ウィンドウを閉じ、古い設定画面を残しません。「あとで」を選んでも設定は保存され、次回起動時に反映されます。
 
 会話履歴は**キャラクターごと**に `app_data_dir/history-<キャラクターID>.json`（個人 PC ローカル）へ保存され、起動時とキャラクター切替時にそのキャラの直近の会話を文脈と全画面フキダシの履歴表示へ復元します（再起動やキャラ切替をまたいで直近の話を踏まえて話し、別キャラの口調・自己紹介が混ざりません）。さらに、好み・自己情報・継続指示らしい発話だけを暗黙的な長期メモリとして `app_data_dir/memory.json` に保存し、次回以降の会話で参照します。履歴（選択中キャラ分）とメモリを消したいときは右クリック →「**会話をリセット**」を選びます。
 
 目覚まし時計は、チャットで「**平日の7時に起こして**」「土日の朝8時、繰り返しで」のように頼むと設定できます（声でやさしく起こします）。一覧・削除も「アラーム一覧」「その目覚ましを消して」で操作でき、設定画面の「スキル」タブからも編集できます。鳴った後は `おきたよ！` を押すまで既定5分おきに再通知します。アプリ起動中のみ鳴ります。
 
-日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
+日常補助として、「**15分後に洗濯物を取り込むって教えて**」のようなリマインダー、「**25分集中タイマー**」「**1時間おきに作業を見守って**」、おでかけ前チェック、できたことメモ、クリップボード要約も使えます。クイック操作には未読メール要約、Slack最新要約、予定確認もあり、保存済みの Gmail / Slack / Googleカレンダー設定を使って読み取りから要約まで頼めます。Gmail はラベル一覧、ラベル付け/解除、アーカイブ、既読/未読化、検索条件に一致するゴミメールのゴミ箱移動にも対応し、検索条件ベースの整理/掃除は preview 後に `confirm=true` で実行します。整理/掃除の既定件数上限は `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS` で変更でき、`0` で無制限にできます。会議系では「**会議の録音を開始して**」「**音声を文字起こしして**」「**話者分類つきで議事録にして**」のように頼むと、共通ワークスペース配下の `meetings/YYYY-MM-DD/` に日付つきWAVを保存し、設定したローカルWhisper系コマンドで文字起こしし、同じ録音名に対応する議事録Markdownを作れます。スキル一覧では既存音声の文字起こしは「音声文字起こし」、録音から議事録までのまとまった会議作業は「会議記録」として表示します。調査系では「**AIスライド生成サービスを出典付きで調査してレポートにして**」のように頼むと、複数観点のWeb検索を束ねて Markdown の調査レポートを作成し、保存時は1ページ要約、HTMLダッシュボード、スライド下書き、出典CSV/JSONも許可ルート配下へまとめて出力できます。「**Gensparkみたいに資料一式を作って**」のように頼むと、brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを同じフォルダへ生成できます。「**Genspark風の機能を全部やって**」では、Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統をまとめて生成します。さらに、文字数分析、JSON整形、Base64、URL変換、単位換算、日付計算、CSV表化、色変換など30種類のローカル実用ツールも設定なしで使えます。操作系の依頼はWeb検索よりローカルスキルを優先します。
 
-cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル」タブでも `PICOAGENT_SCHEDULED_TASKS` を編集できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。
+cron 風のタスクスケジューラも使えます。「**毎朝9時に git status を実行して**」「**平日18時に天気スキルを実行して**」のようにチャットで登録でき、設定画面の「スキル設定」タブでも専用フォームから `PICOAGENT_SCHEDULED_TASKS` を編集できます。実行結果は `app_data_dir/schedule-runs.json` に直近100件保存し、メイン画面の通知一覧では直近20件を確認・再実行できます。コマンド実行は `run_command` と同じく `PICOAGENT_COMMAND_ENABLED=true` を前提に、許可ルートと allowlist で守ります。チャット中に未登録コマンドや許可ルート外 cwd が必要になった場合は、その場で「許可」（今回だけ）/「永続許可」（設定へ保存）/「キャンセル」を選べます。スキル実行は `kind=tool` として `tool_name` / `tool_args` を保存します。`C:\Windows` と `C:\Program Files*` 配下は編集不可です。スキル経由のファイル削除は `trash_file` でOSのゴミ箱へ移動するだけにし、許可ルート外、許可ルートそのもの、保護ディレクトリは拒否します。`run_command` でも `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドは実行しません。
 
-設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル」のタブで構成されます。スキル一覧は日常・検索/情報・連携などのカテゴリタブで整理され、各コネクタが申告した設定も自動で増えます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
+設定画面の項目は「基本」「キャラクター」「音声」「叩くAI」「スキル設定」「許可」「スキル活用ガイド」「診断」のタブで構成されます。「許可」タブでは、全スキル共通のファイル/ディレクトリ/実行の許可ルート（`PICOAGENT_ALLOWED_ROOT` ほか）と拒否パスをまとめて設定できます（`C:\Windows` と `Program Files` は常に拒否）。各スキルの個別許可ルート設定は廃止し、この共通設定を参照します。キャラクター一覧には小さな顔アイコンを表示します。診断タブでは選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認できます。スキル活用ガイドでは区分・できること・頼み方例を一覧でき、ジャンル（日常／検索・情報／ファイル・実行／連携／SNS・投稿／文書／その他）のチップで絞り込めます。スキル設定は日常・検索/情報・連携などのカテゴリ見出しで整理され、同じジャンルチップで絞り込めます。各スキルカードの設定（⚙）は既定で折りたたまれ、カードをクリックすると開きます。APIキー・OAuth token・Webhook URL が必要な項目には、取得手順と公式リンクをまとめた設定ガイドを表示します。チャットで「Gmail のトークンの取り方」「OpenAI APIキーはどこ」のように聞いた場合も同じ内容を案内します。各スキルカードには設定不要/未設定/一部設定/設定済みの状態バッジと承認ポリシー（低リスク、外部読取、書込/変更、送信前確認、実行前確認）を表示します。Gmail / Slack / Googleカレンダーは保存済み設定で接続テストでき、失敗時は token 未設定・権限不足・対象ID不一致・接続問題などの原因候補も表示します。目覚ましとタスクスケジュールは JSON 直書きではなく専用フォームで編集できます。叩くAIタブは現在選択中のプロバイダ設定だけを表示し、未使用プロバイダのAPIキー欄やモデル欄は畳み込みます。下表は区分（基本／音声／叩くAI／スキル名）ごとにまとめています。使うスキルの欄だけ見れば十分です。
 
 #### 主要設定
 
@@ -115,6 +119,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 |---|---|---|
 | 叩くAI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` | 使用するプロバイダとモデル。既定は同梱ローカルエンジンの `local` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` | 同梱エンジンで使うモデルプリセットやカスタムGGUF URL |
+| ローカル文字起こし | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` / `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | Whisper系ローカルコマンド、モデル、話者分類オプション。手動設定が最優先、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperはサーバを立てずポートを使わない |
 | OpenAI互換 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI互換プロバイダを使う場合だけ設定 |
 | Claude | `PICOAGENT_ANTHROPIC_API_KEY` / `PICOAGENT_ANTHROPIC_MODEL` | Claude プロバイダを使う場合だけ設定 |
 | DeepSeek | `PICOAGENT_DEEPSEEK_API_KEY` / `PICOAGENT_DEEPSEEK_MODEL` / `PICOAGENT_DEEPSEEK_THINKING` | DeepSeek プロバイダを使う場合だけ設定 |
@@ -126,13 +131,15 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | 表示 | `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` | フキダシ文字サイズ、常に手前表示 |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_SPEAKER` / `PICOAGENT_TTS_VOLUME` | Aivis 読み上げ、デバイス、話者、音量 |
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` | 会話から好みや継続指示を暗黙的に覚えるか |
+| スーパーエージェント | `PICOAGENT_SUPER_AGENT` / `PICOAGENT_SUPER_AGENT_MAX_STEPS` / `PICOAGENT_SUBAGENT_MAX_DEPTH` | 計画→実行・自己評価・サブエージェント分担を強化する自律モード。ON にするとループ上限が上がり、進捗（計画・実行ステップ・実行中ツール）をフキダシ上部のステータス行に表示する |
 | 自発雑談 | `PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_TOPIC_MODE` | アイドル時の雑談と話題ソース |
 | 目覚まし | `PICOAGENT_ALARMS` | 設定画面では専用フォームで編集。通常はチャットで設定 |
-| タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` | `kind=command` / `kind=tool` の指定時刻タスク。通常はチャットで設定 |
-| ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行・スケジュール実行の安全境界 |
-| ファイル操作 | `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_TOOLS_ROOT` / `PICOAGENT_DOCUMENT_ROOT` | ファイル・Office/PDF 操作の許可ルート |
-| 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` | 天気・検索・RSS などの既定値 |
-| 外部連携 | 各サービスの token / 既定ID / timeout | Slack、Gmail、Google、GitHub、Notion、SNS などは使うサービスだけ設定 |
+| タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` | `kind=command` / `kind=tool` の指定時刻タスク。設定画面では専用フォームで編集。通常はチャットで設定 |
+| 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` | 全スキル共通のファイル/ディレクトリ/実行の許可ルート・拒否パス。設定画面の「許可」タブで編集。`C:\Windows` と `Program Files` は常に拒否 |
+| ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行（run_command）の有効化と許可コマンド prefix。許可ルートは共通「許可」を参照 |
+| 自力実行 | `PICOAGENT_CODE_RUNNER_ENABLED` / `PICOAGENT_CODE_RUNNER_PYTHON` | 他スキルで満たせないときに PowerShell/Python のコードを書いて実行する code_runner の有効化と Python パス。既定は無効 |
+| 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 天気・検索・RSS・調査レポートなどの既定値 |
+| 外部連携 | 各サービスの token / 既定ID / timeout / Gmail整理上限 | Slack、Gmail、Google、GitHub、Notion、SNS などは使うサービスだけ設定。`PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS=0` で Gmail 整理/掃除の件数上限を無制限にできる |
 
 リマインダー、集中タイマー、できたことメモなどの実行状態は内部保存値として `config.json` に残りますが、通常ユーザーが直接編集するものではないため設定画面には出しません。チャット操作で追加・一覧・削除してください。
 
@@ -145,10 +152,13 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 
 ```powershell
 npm run setup:engine   # 同梱エンジンを resources/bundled/engine へ取得（未取得の場合）
+npm run setup:whisper  # 同梱Whisperを resources/bundled/whisper へ取得（録音文字起こしを使う場合）
 npm run build
 ```
 
-`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジンと Aivis を確認し、未取得なら `src-tauri/resources/bundled/` へ取得してから Tauri を起動します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI を確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+
+配布ビルドでは `scripts/build-ui-dist.mjs --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
 
 > [!NOTE]
 > 以下のパスはいずれも Windows 表記です。macOS / Linux では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
@@ -213,15 +223,17 @@ npm run build
 
 - **「モデルを準備中…」のまま** → 初回のモデル DL 中（数 GB）。ネット接続を確認。`PICOAGENT_MODEL_URL` を変えると別モデルを取得。
 - **「準備に失敗」と出る** → `npm run setup:engine` でエンジンが入っているか、DL 元 URL が有効か確認。
+- **原因を切り分けたい** → 右クリック →「設定…」→「診断」で同梱エンジン、Aivis、選択中プロバイダ、使用量、スキル実行状況を確認。
 - **オンライン表示が赤い / 応答しない（Ollama 利用時）** → `ollama serve` を起動。設定の `OLLAMA_HOST` も確認。
 - **AIプロバイダで OpenAI が「未接続」** → `OPENAI_API_KEY` 未設定。設定画面で入力して保存。
 - **ツールが呼ばれない** → モデルが function calling 非対応の可能性。`qwen3:8b` などツール対応モデルを使う。
-- **`read_file` が拒否される** → 許可ルート（既定はホーム）外。`PICOAGENT_TOOLS_ROOT` を設定するか、ルート配下のパスを指定。
+- **`read_file` などファイル操作が拒否される** → 許可ルート（既定はホーム）外、または保護パス（`C:\Windows` / `Program Files`）。設定画面の「許可」タブで `PICOAGENT_ALLOWED_ROOT` や追加許可ルートを設定するか、許可ルート配下のパスを指定。
 - **Web検索に失敗する** → インターネット接続を確認。短時間の連続検索で拒否された場合は、時間を置いて再試行。
 - **天気・為替・RSSに失敗する** → インターネット接続、地点名、通貨コード、RSS URL を確認。
 - **外部サービス連携に失敗する** → Slack / Gmail / Google Calendar / Google Docs / Google Drive / Google Sheets / GitHub / Notion / Discord / Microsoft Graph / Jira / Linear / Trello / Todoist の各 token、Webhook URL、OAuth scope、対象IDを確認。秘密値は設定画面に保存し、ログやドキュメントへ値を書かない。
 - **SNS連携に失敗する** → X / Mastodon / Bluesky / Reddit / LinkedIn / Misskey の token、app password、投稿権限、APIプラン、インスタンスURL、User-Agent を確認。
-- **Office/PDF 操作に失敗する** → `PICOAGENT_DOCUMENT_ROOT` の許可ルート、Microsoft Office + PowerShell、LibreOffice（`soffice`）、qpdf の実行ファイルパスを確認。Google Docs/Sheets はローカルファイルではなく専用APIスキルを使う。
+- **Office/PDF 操作に失敗する** → 共通「許可」タブの許可ルート（`PICOAGENT_ALLOWED_ROOT` ほか）、Microsoft Office + PowerShell、LibreOffice（`soffice`）、qpdf の実行ファイルパスを確認。Google Docs/Sheets はローカルファイルではなく専用APIスキルを使う。
+- **`code_runner`（自力実行）が動かない** → 既定で無効。設定画面の「スキル設定」タブの `code_runner` カードで `PICOAGENT_CODE_RUNNER_ENABLED` を true にする。Python を使う場合は `PICOAGENT_CODE_RUNNER_PYTHON` に実行パスを設定。作業先は共通「許可」タブの許可ルート配下のみ。物理削除コードは拒否される。
 - **`run_command` が拒否される** → 既定では無効。設定で有効化し、`PICOAGENT_COMMAND_ALLOWLIST` に実行したい `program args...` の prefix を追加する。shell は使わず `program` と `args` を分けて実行する。
 - **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
 - **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行して残存プロセスを停止する。手動で止めたいときは `npm run stop`。

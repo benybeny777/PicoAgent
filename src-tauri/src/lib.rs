@@ -15,8 +15,10 @@ mod memory;
 mod menu;
 mod message;
 mod migration;
+mod permissions;
 mod providers;
 mod scheduler;
+mod secret;
 mod tools;
 mod tracer;
 mod usage;
@@ -52,9 +54,15 @@ pub fn run() {
             commands::pet_set_character_profile,
             commands::settings_load,
             commands::settings_list_models,
+            commands::settings_test_tool,
             commands::settings_save,
+            commands::pet_schedule_runs,
+            commands::pet_rerun_schedule_task,
+            commands::pet_open_settings,
             commands::restart_app,
             commands::engine_status,
+            commands::pet_list_downloaded_models,
+            commands::pet_delete_downloaded_model,
             commands::pet_log,
             commands::pet_emotion,
             commands::pet_usage,
@@ -83,6 +91,8 @@ pub fn run() {
             }
             let config_path = config_dir.join("config.json");
             state.config.load(config_path.clone());
+            // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
+            commands::encrypt_existing_secrets(&state.config);
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
             if let Err(error) = log_paths::ensure_log_dir(app.handle()) {
                 eprintln!("ログディレクトリの作成に失敗しました: {error}");
@@ -273,7 +283,12 @@ pub(crate) fn position_from_offsets(
 }
 
 /// 既定の右下オフセットでのウィンドウ位置。
-pub(crate) fn default_window_position(area_w: u32, area_h: u32, win_w: u32, win_h: u32) -> (i32, i32) {
+pub(crate) fn default_window_position(
+    area_w: u32,
+    area_h: u32,
+    win_w: u32,
+    win_h: u32,
+) -> (i32, i32) {
     position_from_offsets(
         area_w,
         area_h,
@@ -330,7 +345,12 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 /// `RunEvent::Exit` ではウィンドウ座標を取得できないため、キャッシュ値のみを書き出す。
 /// 横位置は以前指定の固定値を使うため保存しない。
 fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
-    let Some(layout) = *app_handle.state::<WindowLayoutCache>().inner.lock().unwrap() else {
+    let Some(layout) = *app_handle
+        .state::<WindowLayoutCache>()
+        .inner
+        .lock()
+        .unwrap()
+    else {
         return;
     };
     let state = app_handle.state::<AppState>();

@@ -1,5 +1,6 @@
 const petApp = document.getElementById("petApp");
 const bubble = document.getElementById("bubble");
+const historySearch = document.getElementById("historySearch");
 const historyLog = document.getElementById("historyLog");
 const reply = document.getElementById("reply");
 const composer = document.getElementById("composer");
@@ -14,11 +15,16 @@ const copyReplyButton = document.getElementById("copyReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
 const toggleFullscreenButton = document.getElementById("toggleFullscreen");
+const noticeToggle = document.getElementById("noticeToggle");
+const noticePanel = document.getElementById("noticePanel");
+const noticeList = document.getElementById("noticeList");
+const noticeClear = document.getElementById("noticeClear");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
+const quickActions = document.getElementById("quickActions");
 let busy = false;
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
@@ -31,11 +37,23 @@ let unlistenStream = null;
 let streamRenderFrame = null;
 // エラーリトライ用に最後のユーザー入力テキストを保持する。
 let lastUserText = "";
-// ↑/↓キーで呼び出す入力履歴（最新が末尾）。ナビゲート中の位置と編集中の下書きも保持する。
-const inputHistory = [];
-let inputHistoryPos = -1; // -1 = 履歴を辿っていない
-let inputDraft = "";
+// エージェント進捗（pet:agent_status）を受信するリスナー解除関数。
+let unlistenStatus = null;
 const conversationHistory = [];
+let historyQuery = "";
+const promptHistory = [];
+let promptHistoryIndex = null;
+let promptDraft = "";
+const QUICK_ACTIONS = [
+  { label: "画面を見る", text: "今の画面を見て、状況を短く教えて" },
+  { label: "クリップボード要約", text: "クリップボードの内容を要約して" },
+  { label: "今日の予定", text: "今日の予定と気をつけることを教えて" },
+  { label: "未読メール要約", text: "Gmailの未読メールを一覧取得して、重要そうな順に短く要約して" },
+  { label: "Slack要約", text: "Slackの既定チャンネルの最新10件を読んで、話題と対応が必要なことを短く要約して" },
+  { label: "予定確認", text: "Googleカレンダーの今日の予定を確認して、次に気をつけることを教えて" },
+  { label: "さっきの続き", text: "さっきの続きとして、次にやることを整理して" },
+  { label: "できること", text: "あなたが今できることを具体的に教えて" },
+];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
@@ -47,6 +65,7 @@ let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 1;
 const pendingNotices = [];
+let unreadNoticeCount = 0;
 // 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
 const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
@@ -93,8 +112,14 @@ function errorDetail(error) {
 
 function logApp(level, message, detail) {
   try {
-    window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(() => {});
-  } catch {}
+    window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(error => {
+      // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      console.warn("アプリログ保存に失敗しました", error);
+    });
+  } catch (error) {
+    // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+    console.warn("アプリログ保存に失敗しました", error);
+  }
 }
 
 window.addEventListener("error", event => {
@@ -110,10 +135,11 @@ window.addEventListener("beforeunload", () => {
   if (bootLogTimer) clearInterval(bootLogTimer);
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
   if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+  if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   stopVoice(false);
 });
 
-const characterManifestCacheKey = "2026-06-28-standard-motion-v4";
+const characterManifestCacheKey = "2026-07-01-persona-v2";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";
@@ -139,6 +165,121 @@ function setStatus(text) {
       lastBootStatus = next;
       appendBootLog(next, "status");
     }
+  }
+}
+
+function updateNoticeBadge() {
+  if (!noticeToggle) return;
+  noticeToggle.dataset.count = unreadNoticeCount > 0 ? String(Math.min(99, unreadNoticeCount)) : "";
+  noticeToggle.classList.toggle("has-notices", pendingNotices.length > 0);
+}
+
+function renderNoticePanel() {
+  if (!noticeList) return;
+  noticeList.replaceChildren();
+  if (pendingNotices.length === 0) {
+    noticeList.append(document.createElement("div"));
+    noticeList.firstElementChild.className = "notice-empty";
+    noticeList.firstElementChild.textContent = "通知はありません";
+    return;
+  }
+  for (const notice of pendingNotices) {
+    const item = document.createElement("div");
+    item.className = `notice-item ${notice.ok === false ? "error" : "ok"}`;
+    const title = document.createElement("div");
+    title.className = "notice-title";
+    title.textContent = notice.title || "通知";
+    const meta = document.createElement("div");
+    meta.className = "notice-meta";
+    meta.textContent = notice.at ? new Date(notice.at).toLocaleString("ja-JP") : "";
+    const body = document.createElement("div");
+    body.className = "notice-body";
+    body.textContent = notice.body || "";
+    item.append(title, meta, body);
+    if (notice.kind === "schedule" || notice.taskId) {
+      const actions = document.createElement("div");
+      actions.className = "notice-actions";
+      if (notice.taskId) {
+        const rerun = document.createElement("button");
+        rerun.type = "button";
+        rerun.textContent = "再実行";
+        rerun.addEventListener("click", async event => {
+          event.stopPropagation();
+          rerun.disabled = true;
+          try {
+            await window.picoagent.rerunScheduleTask(notice.taskId);
+            setStatus("スケジュールを再実行しました");
+          } catch (error) {
+            pushNotice({
+              kind: "schedule",
+              title: "スケジュール再実行失敗",
+              body: error?.message || String(error),
+              ok: false,
+              at: new Date().toISOString(),
+            });
+          } finally {
+            rerun.disabled = false;
+          }
+        });
+        actions.append(rerun);
+      }
+      const settings = document.createElement("button");
+      settings.type = "button";
+      settings.textContent = "設定";
+      settings.addEventListener("click", async event => {
+        event.stopPropagation();
+        try { await window.picoagent.openSettings(); }
+        catch (error) { setStatus(`設定を開けませんでした: ${error?.message || error}`); }
+      });
+      actions.append(settings);
+      item.append(actions);
+    }
+    noticeList.append(item);
+  }
+}
+
+function pushNotice(notice) {
+  const entry = {
+    kind: String(notice?.kind || ""),
+    title: String(notice?.title || "通知"),
+    body: String(notice?.body || ""),
+    ok: notice?.ok !== false,
+    taskId: notice?.taskId ? String(notice.taskId) : "",
+    runId: notice?.runId ? String(notice.runId) : "",
+    at: notice?.at || new Date().toISOString(),
+  };
+  pendingNotices.unshift(entry);
+  while (pendingNotices.length > 20) pendingNotices.pop();
+  unreadNoticeCount += 1;
+  updateNoticeBadge();
+  renderNoticePanel();
+  setStatus(entry.ok ? entry.title : `${entry.title}: エラー`);
+  setTimeout(() => {
+    if (status.textContent === entry.title || status.textContent === `${entry.title}: エラー`) status.textContent = "";
+  }, 6000);
+}
+
+async function loadScheduleRunNotices() {
+  try {
+    const runs = await window.picoagent.scheduleRuns();
+    if (!Array.isArray(runs)) return;
+    pendingNotices.length = 0;
+    for (const run of runs.slice(0, 20)) {
+      pendingNotices.push({
+        kind: "schedule",
+        title: String(run.title || "スケジュール"),
+        body: String(run.body || ""),
+        ok: run.ok !== false,
+        taskId: run.task_id ? String(run.task_id) : "",
+        runId: run.id ? String(run.id) : "",
+        at: run.at || "",
+      });
+    }
+    unreadNoticeCount = 0;
+    renderNoticePanel();
+    updateNoticeBadge();
+  } catch (error) {
+    logApp("warn", "スケジュール実行履歴の読み込みに失敗しました", errorDetail(error));
   }
 }
 
@@ -276,6 +417,41 @@ function autosizeInput() {
 }
 function updateComposerState() {
   if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
+  quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+}
+function setInputValue(value) {
+  input.value = String(value ?? "");
+  autosizeInput();
+  updateComposerState();
+}
+function rememberPrompt(text) {
+  const value = String(text ?? "").trim();
+  if (!value) return;
+  if (promptHistory[promptHistory.length - 1] === value) return;
+  promptHistory.push(value);
+  if (promptHistory.length > 40) promptHistory.shift();
+}
+function resetPromptHistoryNavigation() {
+  promptHistoryIndex = null;
+  promptDraft = input.value;
+}
+function recallPromptHistory(direction) {
+  if (!promptHistory.length) return false;
+  if (promptHistoryIndex == null) {
+    promptDraft = input.value;
+    promptHistoryIndex = promptHistory.length;
+  }
+  promptHistoryIndex = Math.min(promptHistory.length, Math.max(0, promptHistoryIndex + direction));
+  const next = promptHistoryIndex === promptHistory.length ? promptDraft : promptHistory[promptHistoryIndex];
+  setInputValue(next);
+  input.setSelectionRange(input.value.length, input.value.length);
+  status.textContent = promptHistoryIndex === promptHistory.length ? "編集中の入力に戻しました" : "過去の入力を呼び戻しました";
+  setTimeout(() => {
+    if (status.textContent === "過去の入力を呼び戻しました" || status.textContent === "編集中の入力に戻しました") {
+      status.textContent = "";
+    }
+  }, 1400);
+  return true;
 }
 function openComposer() {
   if (busy) return;
@@ -287,6 +463,7 @@ function openComposer() {
   scheduleChatter();
 }
 function closeComposer() {
+  promptDraft = input.value;
   composer.hidden = true;
   reply.classList.remove("compact");
   updateComposerState();
@@ -474,6 +651,26 @@ function renderMarkdown(container, src) {
   container.append(wrap);
 }
 
+function renderQuickActions() {
+  if (!quickActions) return;
+  quickActions.replaceChildren();
+  for (const action of QUICK_ACTIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.title = action.text;
+    button.addEventListener("click", () => {
+      if (busy) return;
+      if (composer.hidden) openComposer();
+      setInputValue(action.text);
+      resetPromptHistoryNavigation();
+      composer.requestSubmit();
+    });
+    quickActions.append(button);
+  }
+  updateComposerState();
+}
+
 function renderReply(text) {
   renderMarkdown(reply, text);
 }
@@ -522,6 +719,7 @@ function addHistory(role, text) {
   const content = String(text ?? "").trim();
   if (!content) return;
   conversationHistory.push({ role, content });
+  if (role === "user") rememberPrompt(content);
   if (role === "assistant") lastAssistantText = content;
   if (conversationHistory.length > 80) conversationHistory.shift();
   renderHistory();
@@ -529,6 +727,8 @@ function addHistory(role, text) {
 
 function hydrateHistory(items) {
   conversationHistory.length = 0;
+  promptHistory.length = 0;
+  promptHistoryIndex = null;
   if (!Array.isArray(items)) {
     renderHistory();
     return;
@@ -536,13 +736,42 @@ function hydrateHistory(items) {
   for (const item of items) {
     const role = item?.role === "user" ? "user" : item?.role === "assistant" ? "assistant" : "";
     const content = String(item?.content ?? "").trim();
-    if (role && content) conversationHistory.push({ role, content });
+    if (role && content) {
+      conversationHistory.push({ role, content });
+      if (role === "user") rememberPrompt(content);
+    }
   }
   if (conversationHistory.length > 80) {
     conversationHistory.splice(0, conversationHistory.length - 80);
   }
   lastAssistantText = [...conversationHistory].reverse().find(item => item.role === "assistant")?.content || "";
   renderHistory();
+}
+
+function setTemporaryStatus(message, ms = 1400) {
+  status.textContent = message;
+  setTimeout(() => {
+    if (status.textContent === message) status.textContent = "";
+  }, ms);
+}
+
+async function copyHistoryItem(text) {
+  try {
+    const ok = await copyText(text);
+    setTemporaryStatus(ok ? "履歴をコピーしました" : "コピーできませんでした");
+  } catch (error) {
+    logApp("warn", "履歴コピーに失敗しました", errorDetail(error));
+    setTemporaryStatus("コピーできませんでした");
+  }
+}
+
+function reuseHistoryItem(text) {
+  if (busy) return;
+  if (composer.hidden) openComposer();
+  setInputValue(text);
+  resetPromptHistoryNavigation();
+  input.focus();
+  setTemporaryStatus("入力欄へ戻しました");
 }
 
 function renderHistory() {
@@ -552,16 +781,44 @@ function renderHistory() {
     historyLog.append(document.createElement("div"));
     return;
   }
-  for (const item of conversationHistory) {
+  const query = historyQuery.trim().toLowerCase();
+  const items = query
+    ? conversationHistory.filter(item => item.content.toLowerCase().includes(query))
+    : conversationHistory;
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "一致する履歴はありません。";
+    historyLog.append(empty);
+    return;
+  }
+  for (const item of items) {
     const row = document.createElement("div");
     row.className = `history-item ${item.role}`;
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
     const label = document.createElement("div");
     label.className = "history-role";
     label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.textContent = "コピー";
+    copy.addEventListener("click", () => copyHistoryItem(item.content));
+    actions.append(copy);
+    if (item.role === "user") {
+      const reuse = document.createElement("button");
+      reuse.type = "button";
+      reuse.textContent = "再利用";
+      reuse.addEventListener("click", () => reuseHistoryItem(item.content));
+      actions.append(reuse);
+    }
+    meta.append(label, actions);
     const body = document.createElement("div");
     body.className = "history-body";
     renderMarkdown(body, item.content);
-    row.append(label, body);
+    row.append(meta, body);
     historyLog.append(row);
   }
   historyLog.scrollTop = historyLog.scrollHeight;
@@ -569,6 +826,7 @@ function renderHistory() {
 
 let speakingToken = 0;
 let currentVoice = null;
+let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代。変わると進行中の読み上げを打ち切る。
 function finishVoice(toIdle = true) {
   if (!currentVoice) return;
   const voice = currentVoice;
@@ -578,6 +836,7 @@ function finishVoice(toIdle = true) {
   setTimeout(flushPendingNotice, 0);
 }
 function stopVoice(toIdle = true) {
+  voiceSession++; // 進行中のパイプライン読み上げ（合成待ち・連続再生）を打ち切る。
   if (!currentVoice) return;
   currentVoice.pause();
   finishVoice(toIdle);
@@ -620,26 +879,115 @@ function playPreparedSpeech(result) {
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
 }
+// 起動時の挨拶を組み立てる。キャラ固定挨拶と日次の時刻挨拶で「挨拶語」が二重にならないようまとめる。
+// - 固定挨拶が時刻挨拶語（おはよう/こんにちは/こんばんは等）で始まる場合: 時刻に合った挨拶語を1回だけ使い、
+//   名前紹介＋日付時刻を続ける（例: 「こんにちは。むぎだよ。今日もよろしくね。今日は6月30日、今は14:23だよ。」）。
+// - 固定挨拶がキャラ独自の挨拶（おかえりなさい / ふ、ふん 等）の場合: 固定挨拶を活かし、日次からは挨拶語を外して日付時刻だけ足す。
+function combineStartupGreeting(manifestGreeting, dailyReply) {
+  const manifest = String(manifestGreeting ?? "").trim();
+  const daily = String(dailyReply ?? "").trim();
+  if (!manifest) return daily;
+  if (!daily) return manifest;
+  const TIME_GREETINGS = ["おはようございます", "おはよう", "こんにちは", "こんにちわ", "こんばんは", "夕方だね"];
+  const stripLead = (text) => {
+    for (const greeting of TIME_GREETINGS) {
+      if (text.startsWith(greeting)) {
+        return { word: greeting, rest: text.slice(greeting.length).replace(/^[、,。.\s]+/, "") };
+      }
+    }
+    return { word: "", rest: text };
+  };
+  const m = stripLead(manifest);
+  const d = stripLead(daily);
+  if (m.word) {
+    const lead = d.word || m.word;
+    return `${lead}。${m.rest}${d.rest}`;
+  }
+  return `${manifest}${d.rest}`;
+}
+// 読み上げ用に本文を文単位のチャンクへ分割する。長文を小分けにして「先頭から順次再生」する
+// ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
+function splitSpeechChunks(text, maxLen = 90) {
+  const norm = String(text ?? "").replace(/\r\n/g, "\n").trim();
+  if (!norm) return [];
+  // 文末記号・改行の直後で区切る。短い断片は結合し、長すぎる文はそのまま1チャンクにする。
+  const parts = norm.split(/(?<=[。．.!?！？\n])/);
+  const chunks = [];
+  let buf = "";
+  for (const p of parts) {
+    if (buf && (buf + p).length > maxLen) { chunks.push(buf.trim()); buf = p; }
+    else buf += p;
+  }
+  if (buf.trim()) chunks.push(buf.trim());
+  return chunks.filter(c => c.length > 0);
+}
+// 合成済みチャンクを1つ再生し、再生終了（または失敗・打ち切り）で解決する。
+// チャンク間ではアニメ/ステータスを idle に戻さず、talking を維持する。
+function playChunkAndWait(result, session) {
+  return new Promise(resolve => {
+    if (session !== voiceSession) { resolve(); return; }
+    const bytes = new Uint8Array(result.audio);
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
+    const audio = new Audio(url);
+    currentVoice = audio;
+    audio.volume = voiceVolume;
+    let settled = false;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      if (currentVoice === audio) currentVoice = null;
+      resolve();
+    };
+    audio.addEventListener("ended", cleanup, { once: true });
+    audio.addEventListener("pause", cleanup, { once: true }); // stopVoice からの打ち切りで解決
+    audio.addEventListener("error", () => {
+      logApp("error", "音声データの読み込みに失敗しました", audio.error?.message || "");
+      cleanup();
+    }, { once: true });
+    audio.play().catch(error => {
+      logApp("error", "音声再生に失敗しました", errorDetail(error));
+      cleanup();
+    });
+    status.textContent = "読み上げ中…";
+    setAnimation("talking", true);
+  });
+}
 async function speakReply(text) {
+  const chunks = splitSpeechChunks(text);
+  stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
+  const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
+  if (chunks.length === 0) { status.textContent = ""; return; }
   let prepareTimer = null;
   try {
     const startedAt = Date.now();
     status.textContent = "読み上げ準備中…";
     prepareTimer = setInterval(() => {
       const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      status.textContent = `読み上げ準備中… ${seconds}秒`;
+      if (status.textContent.startsWith("読み上げ準備中")) {
+        status.textContent = `読み上げ準備中… ${seconds}秒`;
+      }
     }, 1000);
-    const result = await window.picoagent.speak(text);
-    clearInterval(prepareTimer);
-    prepareTimer = null;
-    if (!result?.enabled || result.skipped || !result.audio?.length) {
-      status.textContent = "";
-      return;
+    // パイプライン: 先頭チャンクを合成→再生しつつ、次チャンクを裏で先読み合成する。
+    let nextSynth = prepareSpeech(chunks[0]);
+    let played = false;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const result = await nextSynth;
+      if (session !== voiceSession) return;
+      nextSynth = i + 1 < chunks.length ? prepareSpeech(chunks[i + 1]) : null;
+      if (!result) continue;
+      if (!played) { clearInterval(prepareTimer); prepareTimer = null; played = true; }
+      await playChunkAndWait(result, session);
+      if (session !== voiceSession) return;
     }
-    playPreparedSpeech(result);
+    if (prepareTimer) clearInterval(prepareTimer);
+    if (animationName === "talking") setAnimation("idle");
+    if (status.textContent === "読み上げ中…" || status.textContent.startsWith("読み上げ準備中")) {
+      status.textContent = "";
+    }
   } catch (error) {
     if (prepareTimer) clearInterval(prepareTimer);
-    stopVoice();
+    if (session === voiceSession) stopVoice();
     logApp("error", "読み上げに失敗しました", errorDetail(error));
     status.textContent = `読み上げに失敗: ${error.message || error}`;
     setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 12000);
@@ -660,6 +1008,15 @@ async function renderReplySpeaking(text) {
   if (token !== speakingToken) return;
   setAssistantReply(source);
   if (!currentVoice) setAnimation("idle");
+}
+
+function showStartupReadyMessage(options = {}) {
+  if (busy || !composer.hidden) return;
+  const text = `${bootCharacterName}の準備ができたよ。`;
+  const current = String(reply.textContent || "").trim();
+  if (current && current !== "こんにちは。クリックして話しかけてね。") return;
+  renderReply(text);
+  if (options.speak !== false) speakReply(text);
 }
 
 function canShowNotice() {
@@ -1073,26 +1430,19 @@ composer.addEventListener("submit", async event => {
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   clearAlarmSnooze(false);
   lastUserText = text; // エラーリトライ用に保持
-  // ↑キー呼び出し用の入力履歴へ積む（直前と同じ内容は重複させない）。
-  if (text && inputHistory[inputHistory.length - 1] !== text) {
-    inputHistory.push(text);
-    if (inputHistory.length > 20) inputHistory.shift();
-  }
-  inputHistoryPos = -1;
-  inputDraft = "";
   busy = true;
   ++speakingToken;
   stopVoice(false);
   updateComposerState();
   closeComposer();
-  input.value = "";
   status.textContent = "";
   const pendingImages = [...attachedImages];
   const pendingFiles = [...attachedFiles];
   attachedImages = [];
   attachedFiles = [];
   renderAttachmentPreview();
-  autosizeInput();
+  setInputValue("");
+  resetPromptHistoryNavigation();
   status.textContent = "考え中…";
   setAnimation("thinking");
   // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
@@ -1105,6 +1455,7 @@ composer.addEventListener("submit", async event => {
   streamBuffer = "";
   try {
     if (window.picoagent.listen) {
+      if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 念のため前回の購読を解放（多重購読防止）
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         streamBuffer += chunk;
         if (!streamRenderFrame) {
@@ -1116,7 +1467,25 @@ composer.addEventListener("submit", async event => {
         }
       });
     }
-  } catch (_) {}
+  } catch (error) {
+    // ストリーミング購読の失敗は致命的でない（通常応答で結果は受け取れる）が、握りつぶさずログに残す。
+    logApp("warn", "ストリーミング購読の設定に失敗しました", errorDetail(error));
+  }
+
+  // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
+  try {
+    if (window.picoagent.listen) {
+      if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; } // 多重購読防止
+      unlistenStatus = await window.picoagent.listen("pet:agent_status", (progress) => {
+        if (busy && typeof progress === "string" && progress) {
+          // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
+          status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
+        }
+      });
+    }
+  } catch (error) {
+    logApp("warn", "進捗購読の設定に失敗しました", errorDetail(error));
+  }
 
   try {
     // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────
@@ -1182,9 +1551,10 @@ composer.addEventListener("submit", async event => {
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
     if (cancelSendButton) cancelSendButton.hidden = true;
-    // ストリームリスナーを解除する。
+    // ストリーム・進捗リスナーを解除する。
     if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
     if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+    if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     streamBuffer = "";
     busy = false;
     updateComposerState();
@@ -1203,49 +1573,32 @@ cancelSendButton?.addEventListener("click", async () => {
 input.addEventListener("input", () => {
   autosizeInput();
   updateComposerState();
-  // 手入力が始まったら履歴ナビゲートを解除する（↓で戻る先は最新の下書きになる）。
-  inputHistoryPos = -1;
+  promptHistoryIndex = null;
+  promptDraft = input.value;
   const len = input.value.length;
   if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
 });
-// ↑/↓キーで過去の入力を呼び出す（入力欄が空のとき、または履歴を辿っている間だけ反応する）。
-function recallInputHistory(direction) {
-  if (!inputHistory.length) return false;
-  if (inputHistoryPos === -1) {
-    if (direction > 0 || input.value.trim() !== "") return false;
-    inputDraft = input.value;
-    inputHistoryPos = inputHistory.length - 1;
-  } else if (direction < 0) {
-    if (inputHistoryPos === 0) return true; // 先頭で止める
-    inputHistoryPos--;
-  } else {
-    inputHistoryPos++;
-    if (inputHistoryPos >= inputHistory.length) {
-      // 最新側へ抜けたら下書きへ戻す。
-      inputHistoryPos = -1;
-      input.value = inputDraft;
-      autosizeInput();
-      updateComposerState();
-      return true;
-    }
-  }
-  input.value = inputHistory[inputHistoryPos];
-  input.setSelectionRange(input.value.length, input.value.length);
-  autosizeInput();
-  updateComposerState();
-  return true;
-}
 input.addEventListener("keydown", event => {
   if (event.key === "Escape") {
     event.stopPropagation();
     closeComposer();
   }
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
+    if (recallPromptHistory(-1)) event.preventDefault();
+  }
+  if (event.key === "ArrowDown" && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+    if (recallPromptHistory(1)) event.preventDefault();
+  }
+  if (event.key === "Enter" && (!event.shiftKey || event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     composer.requestSubmit();
   }
   if (event.key === "ArrowUp" && recallInputHistory(-1)) event.preventDefault();
   else if (event.key === "ArrowDown" && inputHistoryPos !== -1 && recallInputHistory(1)) event.preventDefault();
+});
+historySearch?.addEventListener("input", () => {
+  historyQuery = historySearch.value;
+  renderHistory();
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
@@ -1256,55 +1609,27 @@ document.addEventListener("keydown", event => {
   exitBubbleFullscreen();
 });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
-window.picoagent.on("pet:reset", () => { conversationHistory.length = 0; renderHistory(); stopVoice(); renderReply("新しい話をしよう。"); closeComposer(); scheduleChatter(); });
+window.picoagent.on("pet:notice", pushNotice);
+window.picoagent.on("pet:reset", () => {
+  conversationHistory.length = 0;
+  promptHistory.length = 0;
+  promptHistoryIndex = null;
+  promptDraft = "";
+  historyQuery = "";
+  if (historySearch) historySearch.value = "";
+  renderHistory();
+  stopVoice();
+  renderReply("新しい話をしよう。");
+  closeComposer();
+  scheduleChatter();
+});
 // 感情状態が更新されたらキャラクターのアニメーション・スタイルへ反映する。
 window.picoagent.on("pet:emotion", (emotion) => {
   if (!emotion || !emotion.mood) return;
   character.dataset.emotion = emotion.mood;
   character.dataset.energyLevel = emotion.energy > 0.6 ? "high" : emotion.energy < 0.4 ? "low" : "mid";
 });
-// エージェントがツールを実行中・再考中のとき、固まって見えないよう進捗ラベルを表示する。
-window.picoagent.on("pet:agent_status", (payload) => {
-  if (!payload || !busy) return;
-  if (payload.phase === "thinking") {
-    status.textContent = "考え直し中…";
-  } else if (payload.phase === "tool") {
-    const toolLabel = (name) => {
-      const map = {
-        web_search: "Web検索中", web_fetch: "URL取得中",
-        weather: "天気取得中", get_time: "時刻取得中",
-        run_command: "コマンド実行中", http_api: "HTTP API呼び出し中",
-        image_generate: "画像生成中", comfyui_generate: "ComfyUI画像生成中",
-        clipboard_text: "クリップボード読み込み中",
-        currency_rates: "為替取得中", market_indices: "市場データ取得中",
-        memory_write: "メモ保存中", memory_read: "メモ読み込み中",
-        praise_log: "メモ保存中", read_file: "ファイル読み込み中",
-        workspace_files: "ファイル操作中", document_convert: "文書変換中",
-        pdf_tools: "PDF編集中", ms_office: "Office編集中",
-        google_calendar: "カレンダー操作中", google_tasks: "Google Tasks操作中",
-        google_drive: "Google Drive操作中", google_docs: "Google Docs操作中",
-        google_sheets: "Google Sheets操作中",
-        gmail_message: "Gmail送信中", slack_send_message: "Slack送信中",
-        discord_send_message: "Discord送信中",
-        notion: "Notion操作中", trello: "Trello操作中",
-        todoist: "Todoist操作中", linear: "Linear操作中",
-        jira: "Jira操作中", github_issue: "GitHub操作中",
-        reminder: "リマインダー設定中", alarm: "アラーム設定中",
-        focus_timer: "タイマー設定中", task_scheduler: "タスク登録中",
-        daily_briefing: "デイリーチェック中",
-        microsoft_graph: "Microsoft Graph操作中",
-        rss_feed: "RSS取得中", reddit: "Reddit取得中",
-        x_twitter: "X/Twitter投稿中", bluesky: "Bluesky投稿中",
-        mastodon: "Mastodon投稿中", misskey: "Misskey投稿中",
-        linkedin: "LinkedIn操作中",
-        chitchat: "雑談中",
-      };
-      return map[name] || name;
-    };
-    const labels = (payload.tools || []).map(toolLabel);
-    status.textContent = labels.join(" & ") + "…";
-  }
-});
+renderQuickActions();
 
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
@@ -1324,8 +1649,7 @@ function applyEngineStatus(s) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
     } else {
-      setStatus("準備ができたよ。");
-      setTimeout(() => { if (status.textContent === "準備ができたよ。") status.textContent = ""; }, 2500);
+      showStartupReadyMessage();
     }
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
@@ -1382,6 +1706,32 @@ window.picoagent.on("pet:ui", (ui) => {
   });
   applyChatterConfig(ui); // 設定変更を即反映。
 });
+
+noticeToggle?.addEventListener("click", event => {
+  event.stopPropagation();
+  if (!noticePanel) return;
+  const open = noticePanel.hidden;
+  noticePanel.hidden = !open;
+  if (open) {
+    unreadNoticeCount = 0;
+    renderNoticePanel();
+    updateNoticeBadge();
+  }
+});
+noticeClear?.addEventListener("click", event => {
+  event.stopPropagation();
+  pendingNotices.length = 0;
+  unreadNoticeCount = 0;
+  renderNoticePanel();
+  updateNoticeBadge();
+});
+bubble?.addEventListener("click", event => {
+  if (!noticePanel || noticePanel.hidden) return;
+  if (event.target instanceof Element && event.target.closest("#noticePanel,#noticeToggle")) return;
+  noticePanel.hidden = true;
+});
+renderNoticePanel();
+updateNoticeBadge();
 
 // TTS 有効時は同梱 Aivis が応答するまで待ってからキャラを描画する（無効時は待たない）。
 // 起動失敗で永久に出ないことを避けるため、上限（約120秒）を超えたら諦めて描画する。
@@ -1638,7 +1988,7 @@ function startAlarmPolling() {
     try {
       setStatus("今日のあいさつを確認中…");
       const daily = await window.picoagent.dailyGreeting();
-      if (daily?.reply) greeting = `${greeting}\n${daily.reply}`.trim();
+      if (daily?.reply) greeting = combineStartupGreeting(greeting, daily.reply);
     } catch (error) {
       logApp("warn", "動的あいさつの取得に失敗しました", errorDetail(error));
     }
@@ -1664,6 +2014,7 @@ function startAlarmPolling() {
   applyChatterConfig(info); // アイドル雑談タイマーを開始。
   startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
+  loadScheduleRunNotices(); // 前回までのスケジュール実行履歴を通知一覧へ復元。
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);

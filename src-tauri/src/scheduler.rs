@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use tauri::{AppHandle, Manager};
+use serde_json::{json, Map, Value};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 
 use crate::config::Config;
@@ -20,6 +20,7 @@ const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
 const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
+const MAX_RUN_HISTORY: usize = 100;
 
 fn default_true() -> bool {
     true
@@ -66,31 +67,27 @@ pub struct ScheduledTask {
     pub last_run_minute: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScheduledRunRecord {
+    pub id: String,
+    pub task_id: String,
+    pub title: String,
+    pub kind: String,
+    pub target: String,
+    pub ok: bool,
+    pub at: String,
+    pub body: String,
+}
+
 const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
+// 実行の許可ルートは全スキル共通の permissions を参照する。
 fn command_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()))
-}
-
-fn extra_command_roots(cfg: &Config) -> Vec<PathBuf> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "")
-        .split(['\n', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(PathBuf::from)
-        .collect()
+    crate::permissions::primary_root(cfg)
 }
 
 fn command_roots(cfg: &Config) -> Vec<PathBuf> {
-    let mut roots = vec![command_root(cfg)];
-    roots.extend(extra_command_roots(cfg));
-    roots
+    crate::permissions::allowed_roots(cfg)
 }
 
 fn default_kind() -> String {
@@ -195,6 +192,105 @@ pub fn save(cfg: &Config, tasks: &[ScheduledTask]) -> anyhow::Result<()> {
     cfg.set_all(patch)
 }
 
+fn run_history_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("schedule-runs.json"))
+}
+
+pub fn load_run_history(app: &AppHandle) -> Vec<ScheduledRunRecord> {
+    let Some(path) = run_history_path(app) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn save_run_history(app: &AppHandle, records: &[ScheduledRunRecord]) -> anyhow::Result<()> {
+    let Some(path) = run_history_path(app) else {
+        anyhow::bail!("app_data_dir を取得できませんでした");
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(records)?)?;
+    Ok(())
+}
+
+fn task_title(task: &ScheduledTask) -> String {
+    if !task.label.trim().is_empty() {
+        return task.label.clone();
+    }
+    if task.kind.trim().eq_ignore_ascii_case("tool") {
+        format!("スケジュール: {}", task.tool_name)
+    } else {
+        format!("スケジュール: {}", task.program)
+    }
+}
+
+fn task_target(task: &ScheduledTask) -> String {
+    if task.kind.trim().eq_ignore_ascii_case("tool") {
+        format!("{} {}", task.tool_name, task.tool_args)
+    } else {
+        format!("{} {}", task.program, task.args.join(" "))
+    }
+}
+
+fn new_run_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("sr{nanos}")
+}
+
+fn append_run_history(
+    app: &AppHandle,
+    task: &ScheduledTask,
+    result: &str,
+    at: &str,
+) -> ScheduledRunRecord {
+    let record = ScheduledRunRecord {
+        id: new_run_id(),
+        task_id: task.id.clone(),
+        title: task_title(task),
+        kind: task.kind.clone(),
+        target: task_target(task),
+        ok: !result.starts_with("エラー:"),
+        at: at.to_string(),
+        body: result.to_string(),
+    };
+    let mut records = load_run_history(app);
+    records.insert(0, record.clone());
+    records.truncate(MAX_RUN_HISTORY);
+    if let Err(error) = save_run_history(app, &records) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("スケジュール実行履歴の保存に失敗しました: {error}"),
+        );
+    }
+    record
+}
+
+fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
+    let _ = app.emit(
+        "pet:notice",
+        json!({
+            "kind": "schedule",
+            "title": record.title,
+            "body": record.body,
+            "ok": record.ok,
+            "taskId": record.task_id,
+            "runId": record.id,
+            "at": record.at,
+        }),
+    );
+}
+
 fn normalize(base: &Path, input: &str) -> PathBuf {
     let joined = if Path::new(input).is_absolute() {
         PathBuf::from(input)
@@ -229,17 +325,8 @@ fn bounded_cwd(base: &Path, roots: Vec<PathBuf>, cwd: &str) -> Result<PathBuf, S
     ))
 }
 
-#[cfg(windows)]
 fn is_protected_edit_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.starts_with(r"c:\windows")
-        || s.starts_with(r"c:\program files\")
-        || s.starts_with(r"c:\program files (x86)\")
-}
-
-#[cfg(not(windows))]
-fn is_protected_edit_path(_path: &Path) -> bool {
-    false
+    crate::permissions::is_system_protected(path)
 }
 
 fn command_tokens(program: &str, args: &[String]) -> Vec<String> {
@@ -566,7 +653,26 @@ pub async fn tick(app: &AppHandle, cfg: &Config) {
     for task in due {
         let result = execute_task(app, cfg, &task).await;
         crate::log_paths::append_app_log(app, &result);
+        let record = append_run_history(app, &task, &result, &now.to_rfc3339());
+        emit_run_notice(app, &record);
     }
+}
+
+pub async fn rerun_task(
+    app: &AppHandle,
+    cfg: &Config,
+    task_id: &str,
+) -> Result<ScheduledRunRecord, String> {
+    let task = load(cfg)
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| format!("指定されたスケジュールタスクは見つかりません: {task_id}"))?;
+    let now = Local::now().to_rfc3339();
+    let result = execute_task(app, cfg, &task).await;
+    crate::log_paths::append_app_log(app, &result);
+    let record = append_run_history(app, &task, &result, &now);
+    emit_run_notice(app, &record);
+    Ok(record)
 }
 
 pub fn start(app: AppHandle) {

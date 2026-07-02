@@ -21,6 +21,9 @@ pub trait Tool: Send + Sync {
     }
     fn description(&self) -> String;
     fn parameters(&self) -> Value;
+    fn examples(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
     fn config_schema(&self) -> Vec<Field> {
         Vec::new()
     }
@@ -93,6 +96,65 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         &["rss", "atom", "フィード", "ニュース", "ブログ", "更新"],
     ),
     (
+        "research_report",
+        &[
+            "調査",
+            "リサーチ",
+            "レポート",
+            "出典",
+            "競合比較",
+            "市場調査",
+            "まとめて調べ",
+            "ダッシュボード",
+            "html",
+            "research",
+            "report",
+        ],
+    ),
+    (
+        "spark_workspace",
+        &[
+            "genspark",
+            "資料一式",
+            "ワークスペース",
+            "スライドとサイト",
+            "サイトとスライド",
+            "ページと資料",
+            "spark",
+            "deck",
+            "brief",
+        ],
+    ),
+    (
+        "genspark_suite",
+        &[
+            "genspark全部",
+            "genspark風",
+            "deep research",
+            "ai slides",
+            "ai sheets",
+            "ai docs",
+            "sparkpage",
+            "autopilot",
+            "meeting notes",
+            "multi-agent",
+            "ai browser",
+            "全部やって",
+        ],
+    ),
+    (
+        "subagent",
+        &[
+            "サブエージェント",
+            "分担",
+            "手分け",
+            "それぞれ調べ",
+            "並行で調べ",
+            "担当",
+            "subagent",
+        ],
+    ),
+    (
         "alarm",
         &[
             "アラーム",
@@ -150,6 +212,14 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "whisper_transcribe",
+        &["文字起こし", "whisper", "transcribe", "話者", "speaker"],
+    ),
+    (
+        "meeting_recorder",
+        &["録音", "議事録", "会議メモ", "meeting notes"],
+    ),
+    (
         "clipboard_text",
         &["クリップボード", "コピーした", "clipboard"],
     ),
@@ -166,6 +236,17 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "trash_file",
+        &[
+            "削除",
+            "消して",
+            "ゴミ箱",
+            "捨てて",
+            "ファイル削除",
+            "フォルダ削除",
+        ],
+    ),
+    (
         "run_command",
         &[
             "コマンド",
@@ -175,6 +256,19 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "cargo",
             "npm",
             "git",
+        ],
+    ),
+    (
+        "code_runner",
+        &[
+            "スクリプト",
+            "コードを書いて",
+            "コード実行",
+            "プログラムで",
+            "自力で",
+            "なんとかして",
+            "script",
+            "code",
         ],
     ),
     (
@@ -190,9 +284,30 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "毎週",
         ],
     ),
-    ("slack_send_message", &["slack", "スラック"]),
+    (
+        "slack_send_message",
+        &["slack", "スラック", "slack履歴", "slack history"],
+    ),
     ("discord_send_message", &["discord", "ディスコード"]),
-    ("gmail_message", &["gmail", "メール", "下書き", "送信"]),
+    (
+        "gmail_message",
+        &[
+            "gmail",
+            "メール",
+            "下書き",
+            "送信",
+            "未読",
+            "受信",
+            "メール一覧",
+            "振り分け",
+            "ラベル",
+            "ゴミメール",
+            "掃除",
+            "アーカイブ",
+            "既読",
+            "ゴミ箱",
+        ],
+    ),
     (
         "google_calendar",
         &["calendar", "カレンダー", "予定", "スケジュール"],
@@ -226,15 +341,43 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         "document_convert",
         &["変換", "pdf化", "libreoffice", "convert"],
     ),
+    (
+        "productivity_tools",
+        &[
+            "文字数",
+            "行数",
+            "json",
+            "base64",
+            "urlエンコード",
+            "urlデコード",
+            "単位換算",
+            "日付計算",
+            "csv",
+            "markdown表",
+            "スラッグ",
+            "slug",
+            "チェックサム",
+            "bmi",
+            "rgb",
+            "hex",
+        ],
+    ),
     ("pdf_tools", &["pdf", "結合", "抽出", "回転"]),
     (
         "comfyui_generate",
-        &["画像", "絵", "イラスト", "描いて", "生成して", "comfyui", "image", "写真", "動画"],
+        &[
+            "画像",
+            "絵",
+            "イラスト",
+            "描いて",
+            "生成して",
+            "comfyui",
+            "image",
+            "写真",
+            "動画",
+        ],
     ),
-    (
-        "image_generate",
-        &["dall-e", "dall\u{00b7}e", "openai画像"],
-    ),
+    ("image_generate", &["dall-e", "dall\u{00b7}e", "openai画像"]),
     ("x_twitter", &["twitter", "xに", "ポスト", "ツイート"]),
     ("mastodon", &["mastodon", "マストドン"]),
     ("bluesky", &["bluesky", "bsky", "ブルースカイ"]),
@@ -253,6 +396,18 @@ pub fn all() -> &'static [Box<dyn Tool>] {
                 .collect()
         })
         .as_slice()
+}
+
+/// エージェントが会話中に使えるスキル（ツール）のラベル一覧を「、」区切りで返す。
+/// 「何ができる？」への回答をモデルが具体的に答えられるよう、system プロンプトに添える用途。
+pub fn capability_summary() -> String {
+    let mut labels: Vec<&str> = all()
+        .iter()
+        .filter(|t| t.agent_callable())
+        .map(|t| t.label())
+        .collect();
+    labels.dedup();
+    labels.join("、")
 }
 
 fn index() -> &'static HashMap<&'static str, usize> {
@@ -418,5 +573,26 @@ mod tests {
         assert!(focus.contains(&"focus_timer".to_string()));
         let clipboard = schema_names("クリップボードを要約して");
         assert!(clipboard.contains(&"clipboard_text".to_string()));
+    }
+
+    #[test]
+    fn 実用ツール集を候補に追加する() {
+        let json = schema_names("このJSONを整形して");
+        assert!(json.contains(&"productivity_tools".to_string()));
+        let unit = schema_names("10kmをmileに単位換算して");
+        assert!(unit.contains(&"productivity_tools".to_string()));
+    }
+
+    #[test]
+    fn 資料ワークスペースを候補に追加する() {
+        let names = schema_names("Gensparkみたいに資料一式を作って");
+        assert!(names.contains(&"spark_workspace".to_string()));
+    }
+
+    #[test]
+    fn 会議録音スキルを候補に追加する() {
+        let names = schema_names("Whisperで会議を文字起こしして議事録にして");
+        assert!(names.contains(&"meeting_recorder".to_string()));
+        assert!(names.contains(&"whisper_transcribe".to_string()));
     }
 }

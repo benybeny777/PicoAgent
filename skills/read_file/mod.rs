@@ -1,51 +1,18 @@
 // skills/read_file/mod.rs - エージェント機能コネクタ（例）: ローカルのテキストファイルを読む。
 //
-// 安全策: 許可ルート PICOAGENT_TOOLS_ROOT（既定はホーム）配下に限定。正規化してルート外・
-// トラバーサル（..）を拒否。サイズ上限でトリム。
-
-use std::path::{Path, PathBuf};
+// 安全策: 全スキル共通の許可ルール（permissions）に限定。許可ルート外・保護パス
+// （C:\Windows / Program Files 等）・トラバーサル（..）を拒否。サイズ上限でトリム。
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::message::Field;
+use crate::permissions;
 
 const MAX_BYTES: usize = 64 * 1024;
 
 pub struct ReadFileTool;
-
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
-fn root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_TOOLS_ROOT", &home()))
-}
-
-// パスを正規化（存在しない要素も含め論理的に .. を解決）する。
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
 
 #[async_trait]
 impl Tool for ReadFileTool {
@@ -53,7 +20,7 @@ impl Tool for ReadFileTool {
         "read_file"
     }
     fn description(&self) -> String {
-        "ローカルのテキストファイルを読んで内容を返す。読み取れるのは設定で指定した許可ルート配下のみ。"
+        "ローカルのテキストファイルを読んで内容を返す。読み取れるのは設定「許可」タブの許可ルート配下のみ。"
             .to_string()
     }
     fn parameters(&self) -> Value {
@@ -68,24 +35,16 @@ impl Tool for ReadFileTool {
             "required": ["path"]
         })
     }
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new("PICOAGENT_TOOLS_ROOT", "read_file の許可ルート", "text", &home())]
-    }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let path = match args.get("path").and_then(|v| v.as_str()) {
             Some(p) if !p.is_empty() => p,
             _ => return "エラー: path が指定されていません。".to_string(),
         };
-        let base = root(cfg);
-        let target = normalize(&base, path);
-        if target != base && !target.starts_with(&base) {
-            return format!(
-                "エラー: 許可ルート（{}）の外は読み取れません: {}",
-                base.display(),
-                target.display()
-            );
-        }
+        let target = match permissions::resolve(cfg, path) {
+            Ok(target) => target,
+            Err(error) => return format!("エラー: {error}"),
+        };
         match std::fs::read_to_string(&target) {
             Ok(content) => {
                 if content.len() > MAX_BYTES {

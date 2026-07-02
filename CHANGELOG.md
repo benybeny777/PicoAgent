@@ -4,7 +4,149 @@
 
 ---
 
+## 2026-07-01
+
+### 共通許可システムと自力実行（code_runner）スキル
+
+- **全スキル共通の許可システム** (`src-tauri/src/permissions.rs` ほか各スキル): ファイル・ディレクトリ・コマンド実行の許可ルート／拒否パスを `permissions.rs` の1箇所へ集約した。正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート）／`PICOAGENT_ALLOWED_PATHS`（追加許可）／`PICOAGENT_DENIED_PATHS`（追加拒否）。`C:\Windows` / `Program Files` / `Program Files (x86)` は設定に関わらず常に拒否する。`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `scheduler` を共通ルール参照へ移行し、各スキルの個別ルート設定フィールド（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS`）をスキル設定から削除した。旧キーは設定済みなら許可ルートとして引き継ぐ（移行互換）。
+- **設定「許可」タブ** (`ui/settings.js`): 共通の許可ルート・追加許可ルート・拒否パスをまとめて編集できる「許可」タブを追加した。
+- **トークン取得ガイド** (`ui/settings.js` / `src-tauri/src/agent.rs`): APIキー・OAuth token・Webhook URL が必要なプロバイダ/連携スキルに、設定画面内の折りたたみ手順と公式リンクを追加した。チャットで「Gmail のトークンの取り方」「OpenAI APIキーはどこ」などと聞いた場合も、該当する設定欄・取得手順・公式リンクを固定ガイドとして返す。
+- **自力実行スキル code_runner** (`skills/code_runner/mod.rs`): 他スキルでは要望を満たせないときの最終手段として、PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成するスキルを追加した。任意コード実行のため既定は無効（`PICOAGENT_CODE_RUNNER_ENABLED`）で、有効化後は許可ルート内で承認なしに自律実行する。作業ディレクトリ・許可判定は共通 permissions を参照し、物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否する。スクリプトは一時ファイルへ書き出して実行後に削除し、timeout・出力32KBで制限する。
+
+### ダウンロード済みモデルの削除機能と DeepSeek ローカルプリセットの削除
+
+- **ダウンロード済みモデルの管理** (`src-tauri/src/commands.rs` / `src-tauri/src/engine.rs` / `src-tauri/src/providers/local.rs` / `ui/settings.js` / `ui/picoagent.js` / `ui/settings.css`): 設定画面「叩くAI」タブに「ダウンロード済みモデル」セクションを追加し、`app_data_dir/bundled/models` 配下の GGUF をファイル名・サイズ・対応プリセット名・使用中フラグ付きで一覧し、不要なモデルを削除してディスクを空けられるようにした。`pet_list_downloaded_models` / `pet_delete_downloaded_model` コマンドを追加。削除はモデルディレクトリ配下の `.gguf` のみを対象とし、パストラバーサルと使用中モデルの削除を拒否する（同梱物のためゴミ箱ではなく物理削除でディスクを解放）。
+- **DeepSeek をローカルモデルプリセットから削除** (`src-tauri/src/providers/local.rs`): `deepseek_r1_qwen7b`（DeepSeek R1 Distill Qwen 7B）プリセットを削除した。R1 distill 系は英語/中国語に寄りやすく日本語キャラ用途に不向きなため。クラウドの DeepSeek プロバイダ（`PICOAGENT_DEEPSEEK_*`）は従来どおり利用できる。
+
+### reasoning モデル対策・人格固定・通知アイコンの整列
+
+- **`<think>` 推論ブロックの除去** (`src-tauri/src/message.rs` / `src-tauri/src/agent.rs`): DeepSeek-R1 / Qwen3 系などの reasoning モデルが出力する `<think>...</think>`（多くは英語/中国語）を `message::strip_reasoning()` で除去し、最終回答・会話履歴・読み上げに混ざらないようにした。閉じタグの無い未完了の推論は以降を落とす。
+- **日本語固定・キャラ固定の指示を既定プロンプトへ追加** (`src-tauri/src/commands.rs`): 既定システムプロンプトに「返答は必ず日本語」「思考の途中経過は出さない」「いま選択中のキャラ本人になりきり、他キャラの名前・一人称・口調・性格を混ぜない」を追記した。旧既定プロンプトを保存していた場合も新既定へ移行する。
+- **キャラクター人格を強化** (`characters/mugi/` / `characters/rin/` / `characters/mai/` / `src-tauri/src/commands.rs`): むぎは家族呼びに寄せず年下っぽく明るい相棒、りんは短いツッコミと実務リスク指摘が強いツンデレ、まいは散らかった相談を落ち着いて整えるやさしいお姉さんとして、性格・口調・自己紹介・応答時の距離感をより明確にした。共通プロンプトでも「お兄ちゃん」「お姉ちゃん」などの家族呼びを禁止した。
+- **通知アイコンの整列を修正** (`ui/styles.css`): フキダシ操作ボタンに中央寄せ（flex）が無く、`!`（通知）が他のグリフ（■/□/↻）と縦位置でずれていたのを、全ボタンを中央寄せして揃えた。件数バッジは `data-count` が未設定でも表示されないよう条件を堅牢化した。
+
+> 補足: ローカルモデルに DeepSeek-R1-Distill 系を使うと、上記対策後も最終回答自体が英語/中国語に寄りやすく、日本語キャラの人格追従も弱い。日本語キャラ用途では既定の Gemma 系プリセットを推奨する。
+
+### 設定の再初期化後にローカルエンジンが再起動されない不具合を修正
+
+- **再初期化でエンジンが落ちたまま復帰しない問題を修正** (`src-tauri/src/engine.rs` / `src-tauri/src/commands.rs`): 叩くAI・モデルなどを変更したときの再初期化（`restart_app`）が `engine::stop()` で `stopping` フラグを立てたまま `ensure_and_start` を呼ぶため、`ensure_and_start` が冒頭で即 return してローカル同梱エンジンが再起動されず、以後 `AI応答に失敗しました: error sending request for url (http://127.0.0.1:11435/...)` になっていた。再起動経路で `stopping` を明示的に下ろす `engine::clear_stopping()` を追加し、`restart_app` の `stop()` 後に呼ぶようにした。
+
+### スキル設定のジャンルフィルタと折りたたみを修正
+
+- **⚙ パネルの折りたたみを修正** (`ui/settings.js`): 検索フィルタ（`applySettingsSearch`）が空クエリ時に全 `.searchable` を表示する処理で、スキル設定の `.card-config` パネルまで強制展開されていた不具合を修正した。`.card-config` はアコーディオンの開閉状態（`.open`）に従い、既定で折りたたむようにした（検索時はマッチしたものだけ開く）。
+- **ジャンル別フィルタを復活・追加** (`ui/settings.js` / `ui/settings.css`): 「スキル設定」「スキル活用ガイド」両タブに、日常／検索・情報／ファイル・実行／連携／SNS・投稿／文書／その他のジャンルチップを追加し、カテゴリで絞り込めるようにした。検索キーワードとも併用できる。
+- **タブとジャンルチップの幅崩れを修正** (`ui/settings.css`): 狭い設定ウィンドウで「スキル活用ガイド」などのタブ文字が縦に割れないよう、タブ列は折り返し可能にし、タブ／ジャンルチップ内の文字は折り返さないようにした。
+
+### スーパーエージェントモードを追加
+
+- **スーパーエージェントモード** (`src-tauri/src/agent.rs` / `ui/settings.js`): `PICOAGENT_SUPER_AGENT=true` で計画ステップ（`planning_step`）と自己評価（`self_improve`）を一括有効化し、トップレベルの自律ループ上限を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定12、呼び出し値〜30）へ引き上げて多段のツール連鎖を回し切るようにした。設定画面の「基本」タブにトグルとループ上限欄を追加した。
+- **計画→実行の可視化** (`src-tauri/src/agent.rs` / `ui/renderer.js`): スーパーエージェントモード時に「計画を立てています…」「（実行計画本文）」「ステップ k/N を実行中…」「ツールを実行中: …」を `pet:agent_status` イベントで送り、フキダシ上部のステータス行へリアルタイム表示するようにした。
+- **サブエージェントスキル** (`skills/subagent/mod.rs`): 1つの集中サブタスクを別のエージェントループへ委譲し結果だけを返す `subagent` スキルを追加した。現在選択中のプロバイダ・モデルを再利用し、`AGENT_DEPTH`（RAII の `DepthGuard`）と `PICOAGENT_SUBAGENT_MAX_DEPTH`（既定2）で無限再帰を防ぐ。計画・自己評価はトップレベルのみで行い、ネスト内ではスキップする。
+
+### スケジュール実行と連携スキルの使い勝手を改善
+
+- **タスクスケジュール専用フォーム** (`ui/settings.js` / `ui/settings.css`): `task_scheduler` の `PICOAGENT_SCHEDULED_TASKS` を JSON 直書きではなく、スキル/コマンド、時刻/cron、曜日、有効/繰り返し、ラベル、引数を編集できる専用フォームで扱えるようにした。
+- **スケジュール実行結果の通知一覧** (`src-tauri/src/scheduler.rs` / `ui/renderer.js` / `ui/index.html` / `ui/styles.css`): スケジュール実行結果をログへ残すだけでなく `pet:notice` としてメイン画面へ通知し、フキダシ内の通知ボタンから直近20件を確認できるようにした。実行履歴は `app_data_dir/schedule-runs.json` に直近100件保存し、通知一覧から再実行と設定画面オープンができる。
+- **スキル設定状態バッジ** (`ui/settings.js` / `ui/settings.css`): スキル設定カードに「設定不要」「未設定」「一部設定」「設定済み」のバッジを出し、Gmail / Slack / Calendar / Office / PDF などの連携スキルで何を設定すべきか見つけやすくした。
+- **接続テストボタン** (`commands.rs` / `ui/settings.js`): Gmail / Slack / Googleカレンダーのスキル設定カードから、保存済み設定値を使った接続テストを実行できるようにした。
+- **接続テスト失敗時の診断** (`commands.rs` / `ui/settings.js`): token 未設定、401/403、対象ID不一致、timeout、接続失敗を分類し、接続テスト結果の下に原因候補を表示するようにした。
+- **承認ポリシー表示** (`ui/settings.js` / `ui/settings.css`): スキルカードに低リスク、外部読取、書込/変更、送信前確認、実行前確認のポリシーを表示し、送信・書込・コマンド実行系の扱いを設定画面で確認できるようにした。
+- **Gmail / Slack 読み取りを強化** (`skills/gmail/` / `skills/slack/`): Gmail はメール一覧取得と本文取得、Slack は Bot token の認証テストとチャンネル履歴取得に対応した。
+- **Gmail の振り分け/掃除操作** (`skills/gmail/`): Gmail のラベル一覧、ラベル付け/解除、アーカイブ、既読/未読化、検索条件に一致するメールの cleanup に対応した。ゴミメール掃除は完全削除ではなく Gmail のゴミ箱移動に限定し、preview 後に `confirm=true` で実行する。cleanup の既定上限は `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS` で設定でき、`0` で無制限にできる。
+- **ファイルのゴミ箱移動スキル** (`skills/trash_file/`): 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動する専用スキルを追加した。物理削除は行わず、許可ルート外、許可ルートそのもの、Windows/Program Files 配下は拒否し、`confirm=true` がない場合は preview のみ返す。
+- **設定反映時に設定画面を閉じる** (`commands.rs`): 設定画面から再起動相当の反映を実行したとき、古い設定ウィンドウを閉じてからメイン画面を再読込するようにした。
+- **要約系クイック操作** (`ui/renderer.js`): 長期メモリと履歴を使う「さっきの続き」に加え、未読メール要約、Slack最新要約、予定確認のクイック操作を追加した。
+
+---
+
+## 2026-06-30
+
+### APIキー等のシークレットを DPAPI で暗号化保存
+
+- 設定スキーマで `type="password"` の値（各種 API キー・トークン）を、Windows では **DPAPI で暗号化**して `config.json` に保存するようにした（`enc:dpapi:v1:` 形式、同一 Windows ユーザーのみ復号可）。`config.get()` が読み取り時に透過復号するため、コネクタ側の変更は不要。起動時に既存の平文シークレットを自動で暗号化へ移行する。非 Windows は DPAPI が無いため平文保存（フォールバック）。`src-tauri/src/secret.rs` を追加。
+
+### 起動時あいさつの二重「こんにちは」を解消
+
+- キャラ固定あいさつと日次の時刻あいさつを連結する際、挨拶語が重複していた（例: むぎ「こんにちは、むぎだよ…」＋「こんにちは。今は…」）。固定あいさつが時刻挨拶語で始まる場合は時刻に合った挨拶語を1回だけにし、名前紹介＋日付時刻を1文にまとめるようにした（独自あいさつのキャラはあいさつを活かし日付時刻のみ追加）。
+
+### 設定画面のスキル一覧を見やすく修正
+
+- スキル設定をカテゴリのサブタブで切り替える方式は、非アクティブのタブに入ったスキルの設定(⚙)が見つけづらかったため、**カテゴリ見出し付きで全スキルを縦に並べて常時表示**する方式に変更した。各スキルの設定(⚙)は従来どおり既定で折りたたみ（クリックで開く）。未使用になった `.sub-tab*` の CSS を削除。
+
 ## 2026-06-29
+
+### 設定画面の見通しを改善
+
+- **スキル活用ガイド** (`ui/settings.js` / `ui/settings.css`): スキルタブ上部に、全スキルを区分・できること・頼み方例で横断表示する一覧を追加。個別カードを開かなくても、ユーザーが何を頼めるか把握できるようにした。
+- **叩くAI設定の表示を整理** (`ui/settings.js`): 叩くAIタブでは現在選択中のプロバイダ設定だけを描画するように変更。未使用プロバイダのAPIキー欄やモデル欄は表示せず、保存時も非表示プロバイダの既存設定は保持する。
+- **キャラクター一覧にアイコンを追加** (`ui/settings.js` / `ui/settings.css`): 導入済みキャラクター一覧に、各キャラの idle 先頭フレームを使った小さな丸アイコンを表示するようにした。
+- **起動完了メッセージを通常表示へ変更** (`ui/renderer.js`): 「準備できた」系の起動完了文を小さいステータス専用表示にせず、必要な場合は通常のフキダシ本文として表示し、読み上げ対象にできるようにした。
+- **スキル経由の物理削除を禁止** (`skills/run_command/` / `AGENTS.md`): ファイル操作スキルで削除相当の扱いをする場合はゴミ箱移動に統一するルールを追加。`run_command` では `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドを、allowlist や許可確認の有無に関わらず拒否する。
+
+### ローカル録音・Whisper文字起こし議事録を追加
+
+- **録音から議事録までローカル完結** (`skills/meeting_recorder/`): マイク録音をWAV保存し、設定したローカルWhisper系コマンドで文字起こしし、議事録Markdownを生成するスキルを追加。録音・文字起こし・議事録ファイルは `PICOAGENT_MEETING_ROOT` 配下に限定する。
+- **Whisper同梱セットアップ** (`scripts/fetch-whisper.mjs`): `npm run setup:whisper` で whisper.cpp の `whisper-cli` と ggmlモデルを PicoAgent 管理下の専用ディレクトリ `src-tauri/resources/bundled/whisper/` へ取得する経路を追加。`PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定済みなら手動インストールを最優先し、空の場合だけ同梱Whisperを使う。
+- **ポート競合しないWhisper運用** (`skills/meeting_recorder/` / `src-tauri/installer-hooks.nsh`): 同梱Whisperは常駐サーバではなく `whisper-cli` の1回実行だけに限定し、ポートを開かない。手動インストール済みWhisperを使う場合も、設定したコマンドを子プロセスとして実行し、完了・失敗・タイムアウトで終了する。アンインストール時は PicoAgent 管理下の同梱Whisperディレクトリと一時展開先だけを削除し、外部導入済みWhisperには触れない。
+- **音声文字起こしスキルを追加** (`skills/whisper_transcribe/`): 既存音声の文字起こしをスキル一覧で「音声文字起こし」として見えるようにした。会議記録のような複合スキルは無理に分割せず、カード説明で録音・文字起こし・議事録生成を扱えることを補足する。
+- **保存先を共通ワークスペースへ統一** (`skills/meeting_recorder/`): `PICOAGENT_MEETING_ROOT` が空なら共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/` に `YYYYMMDD-HHMMSS-meeting.wav` 形式で保存し、文字起こし・議事録も同じ録音名に揃える。パス未指定時は最新の録音/文字起こしを自動選択する。
+- **話者分類オプション** (`skills/meeting_recorder/`): `diarize=true` のとき `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS`（既定 `-tdrz`）を追加し、whisper.cpp の tinydiarize 等に対応できるようにした。話者分類の精度とマーカー形式は利用するローカル実装・モデルに依存する。
+- **会議系依頼の直行ルート** (`agent.rs` / `tools/mod.rs`): 「録音」「議事録」は `meeting_recorder`、「文字起こし」「話者分類」は `whisper_transcribe` を提示・直接実行できるようにした。
+
+### Genspark風ワークフローを10系統追加
+
+- **分析カテゴリを統合スキル化** (`skills/genspark_suite/`): Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統を同じフォルダに生成するスキルを追加。保存は `PICOAGENT_WORKSPACE_ROOT` 配下に限定し、まずは外部通信なしのローカル成果物生成として使える。
+- **全部依頼の直行ルート** (`agent.rs` / `tools/mod.rs`): 「Genspark風」「Genspark全部」「AI Slides」「AI Sheets」「Sparkpage」「Autopilot」「Meeting Notes」などの依頼で `genspark_suite` を提示・直接実行できるようにした。
+
+### 資料ワークスペース生成を追加
+
+- **Genspark風の一括成果物生成** (`skills/spark_workspace/`): ひとつの依頼から `brief.md`、`deck.md`、`sheet.csv`、`page.html`、`agent-plan.md`、`prompts.md`、`checklist.md` を同じフォルダに生成するスキルを追加。保存は `PICOAGENT_WORKSPACE_ROOT` 配下に限定し、外部通信なしで使える。
+- **資料一式依頼の直行ルート** (`agent.rs` / `tools/mod.rs`): 「Genspark」「資料一式」「ワークスペース」「サイトとスライド」などの依頼で `spark_workspace` を候補提示し、小型ローカルモデルの tool_calls 判断を待たずに直接実行できるようにした。
+
+### ローカル実用ツールを30機能追加
+
+- **設定不要の実用処理を拡充** (`skills/productivity_tools/`): 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用機能を追加。外部通信なしで即使える。
+- **スキル候補の自動選択を拡張** (`tools/mod.rs`): 「文字数」「JSON」「Base64」「URLエンコード」「単位換算」「日付計算」「CSV」「RGB」などの依頼で `productivity_tools` をモデルに提示するようにした。
+
+### 出典付き調査レポート生成スキルを追加
+
+- **調査からMarkdownレポート化までを一括化** (`skills/research_report/`): 複数観点のWeb検索を実行し、要約・観点別メモ・比較表・次の深掘り・出典一覧を含む Markdown 調査レポートを生成するスキルを追加。`save=true` または `save_path` で `PICOAGENT_WORKSPACE_ROOT` 配下へ `.md` 保存できる。検索件数・待ち時間・保存先に境界を設け、危険な任意パス書き込みは拒否する。
+- **成果物セット化** (`skills/research_report/`): 保存時は既定で本文レポートに加え、1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も同時生成するようにした。`artifact_bundle=false` で単一レポート保存にも戻せる。
+- **調査依頼の直行ルート** (`agent.rs`): 「調査」「レポート」「出典」「競合比較」などを含む依頼は、小型ローカルモデルの tool_calls 判断を待たず `research_report` を直接実行するようにした。
+
+### 設定画面の未保存変更を戻せるように修正
+
+- **変更途中の安心感を改善** (`settings.html` / `settings.js` / `settings.css`): 未保存変更がある時だけ「変更を戻す」を有効化し、変更済みの設定行を強調表示するようにした。ボタンは最後に読み込んだ、または保存に成功したスナップショットからフォームを再描画し、キャラ上書き・音声上書き・目覚まし設定も含めて未保存変更だけを破棄する。
+
+### 設定画面に診断タブを追加
+
+- **配布後の切り分けを容易化** (`settings.js` / `settings.css`): 設定画面に「診断」タブを追加し、選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を1画面で確認できるようにした。各状態取得が失敗しても設定画面全体は落とさず、該当カードだけエラー表示する。
+
+### 全画面フキダシの履歴検索と再利用を追加
+
+- **過去会話を使いやすく改善** (`index.html` / `renderer.js` / `styles.css`): 全画面フキダシに履歴検索を追加し、会話履歴を絞り込めるようにした。各履歴にはコピー操作を追加し、ユーザー発話は「再利用」で入力欄へ戻せるようにした。
+
+### 配布物の解析しやすさを下げるビルド経路を追加
+
+- **配布用フロントを `ui-dist/` へ分離** (`build-ui-dist.mjs` / `tauri.conf.json`): `ui/` は編集用正本として残し、Tauri の `frontendDist` は生成物 `ui-dist/` を参照するようにした。`npm run dev` は通常コピー、`npm run build` は HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削った release コピーを作ってからバンドルする。
+- **release バイナリの情報露出を削減** (`Cargo.toml`): 既存の LTO・strip・panic abort に加え、`debug=false` / `incremental=false` を明示し、配布バイナリにデバッグ情報が残りにくいようにした。
+
+### 会話入力のクイック操作と入力履歴を追加
+
+- **会話操作の摩擦を削減** (`index.html` / `renderer.js` / `styles.css`): 入力欄上部に「画面を見る」「クリップボード要約」「今日の予定」「できること」のクイック操作を追加し、よく使う依頼をワンクリックで送信できるようにした。ユーザー発話の直近入力履歴を保持し、入力欄の `↑` / `↓` で過去入力と編集中ドラフトを行き来できる。`Ctrl+Enter` / `Cmd+Enter` 送信にも対応。
+
+### 設定画面の横断検索を追加
+
+- **設定を探しやすく改善** (`settings.html` / `settings.js` / `settings.css`): 設定画面ヘッダーに検索入力を追加し、設定キー・ラベル・プロバイダ・スキル名・キャラクター名/説明でタブ横断フィルタできるようにした。検索中は一致するタブ/セクション/カードだけを表示し、入力値や保存対象は変えない。
+
+### ローカルエンジン再利用判定を安全化
+
+- **残存 `llama-server` の誤用を防止** (`engine.rs`): 前回クラッシュ等で同じポートのローカルエンジンが残っている場合、`/health` だけでなく `/v1/models` のモデルIDが現在要求中の GGUF と一致する時だけ再利用するようにした。モデル変更後に旧モデルのサーバーを黙って使う状態を避け、一致しない場合は残存プロセス停止を促すエラーにする。
+
+### 読み上げ(TTS)のパイプライン化と「できること」回答の改善
+
+- **読み上げの体感待ち時間を短縮** (`renderer.js`): 返答を文単位のチャンクに分割し、先頭チャンクを再生しながら次チャンクを裏で先読み合成するパイプライン方式にした。長い返答でも全文合成を待たずに早く話し始める。`stopVoice` は世代カウンタで進行中の連続再生を確実に打ち切る。
+- **「何ができる？」にスキルを踏まえて回答** (`tools::capability_summary` / `effective_system_prompt`): エージェントが使えるスキル一覧を system プロンプトへ添え、能力を聞かれたら具体的に挙げて答えるよう指示を追加。
 
 ### ファイルドロップ・ペースト対応を追加
 

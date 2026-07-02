@@ -9,6 +9,10 @@
   <header>
     <h1>PicoAgent の設定</h1>
     <p class="hint">叩く AI とエージェント機能をここで設定できます。保存するとすぐ反映されます。</p>
+    <label class="settings-search" for="settingsSearch">
+      <span>検索</span>
+      <input id="settingsSearch" type="search" autocomplete="off" placeholder="設定・スキル・キャラクターを探す" />
+    </label>
   </header>
 
   <main id="form">
@@ -18,6 +22,7 @@
 
   <footer>
     <span id="status" class="status" aria-live="polite"></span>
+    <button id="resetChanges" class="secondary" type="button" disabled>変更を戻す</button>
     <button id="save" type="button">保存</button>
   </footer>
 

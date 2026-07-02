@@ -86,6 +86,58 @@ fn model_path(app: &AppHandle) -> PathBuf {
     crate::log_paths::bundled_dir(app).join("models").join(name)
 }
 
+/// ダウンロード済みモデルの保存ディレクトリ（`app_data_dir/bundled/models`）。
+pub fn models_dir(app: &AppHandle) -> PathBuf {
+    crate::log_paths::bundled_dir(app).join("models")
+}
+
+/// 現在の設定で使用するモデルの GGUF ファイル名（一覧で「使用中」を判定する用途）。
+pub fn active_model_filename(app: &AppHandle) -> Option<String> {
+    model_path(app)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+}
+
+async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>> {
+    let state = app.state::<AppState>();
+    let port = local::port(&state.config);
+    let url = format!("http://127.0.0.1:{port}/v1/models");
+    let data: Value = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(data
+        .get("data")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("id").and_then(|id| id.as_str()))
+        .map(|id| id.replace('\\', "/"))
+        .collect())
+}
+
+async fn running_server_uses_model(app: &AppHandle, model: &PathBuf) -> bool {
+    let Some(file_name) = model.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let expected_path = model.to_string_lossy().replace('\\', "/");
+    match running_server_model_ids(app).await {
+        Ok(ids) => ids.iter().any(|id| {
+            id == file_name || id == &expected_path || id.ends_with(&format!("/{file_name}"))
+        }),
+        Err(error) => {
+            eprintln!("既存ローカルエンジンのモデル確認に失敗しました: {error}");
+            false
+        }
+    }
+}
+
 fn legacy_model_paths(app: &AppHandle) -> Vec<PathBuf> {
     let url = model_url(app);
     let name = url
@@ -358,8 +410,31 @@ pub async fn ensure_and_start(app: AppHandle) {
         }
     }
     // 終了処理が始まっていたら spawn しない（ダウンロード完了後のレースコンディション対策）。
-    if app.try_state::<EngineState>().map(|e| e.stopping.load(Ordering::SeqCst)).unwrap_or(true) {
+    if app
+        .try_state::<EngineState>()
+        .map(|e| e.stopping.load(Ordering::SeqCst))
+        .unwrap_or(true)
+    {
         return;
+    }
+    // すでに同梱エンジンが応答していれば（前回クラッシュ等で取り残されたプロセス）、
+    // 要求モデルまで一致する場合だけ再利用する。モデル変更後の古いプロセスを誤用しないため。
+    if let Some(provider) = crate::providers::get("local") {
+        let state = app.state::<AppState>();
+        if provider.is_up(&state.config).await {
+            if running_server_uses_model(&app, &model).await {
+                set_status(&app, json!({ "phase": "ready" }));
+                return;
+            }
+            set_status(
+                &app,
+                json!({
+                    "phase": "error",
+                    "message": "別モデルのローカルエンジンが既に起動しています。PicoAgent を終了して残った llama-server を停止してから再起動してください"
+                }),
+            );
+            return;
+        }
     }
     set_status(&app, json!({ "phase": "starting" }));
     if let Err(e) = spawn_server(&app, &model) {
@@ -392,8 +467,28 @@ pub fn stop(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
         engine.stopping.store(true, Ordering::SeqCst);
         if let Some(mut child) = engine.child.lock().unwrap().take() {
+            // Windows は taskkill /T で llama-server の子孫まで含めて確実に停止する（Aivis と同方針）。
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+            #[cfg(not(windows))]
             let _ = child.kill();
             let _ = child.wait(); // kill 後に wait してプロセスハンドルを回収する。
         }
+    }
+}
+
+/// 設定の再初期化でエンジンを停止→再起動するときに使う。
+/// `stop()` が立てた `stopping` フラグを下ろし、続く `ensure_and_start` が起動できるようにする。
+/// （`stop()` はアプリ終了用にフラグを立てっぱなしにするため、再起動経路では明示的に下ろす必要がある。）
+pub fn clear_stopping(app: &AppHandle) {
+    if let Some(engine) = app.try_state::<EngineState>() {
+        engine.stopping.store(false, Ordering::SeqCst);
     }
 }

@@ -1,77 +1,22 @@
 // skills/workspace_files/mod.rs - 許可ルート内のワークスペースファイル操作スキル。
 //
-// 読み書きは PICOAGENT_WORKSPACE_ROOT 配下に限定し、サイズ上限を設ける。
+// 読み書きは全スキル共通の許可ルール（permissions）に限定し、サイズ上限を設ける。
+// 許可ルート外・保護パス（C:\Windows / Program Files 等）は permissions が拒否する。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::message::Field;
+use crate::permissions;
 
 const MAX_READ_BYTES: usize = 128 * 1024;
 const MAX_WRITE_BYTES: usize = 128 * 1024;
 const MAX_LIST_ENTRIES: usize = 200;
 
 pub struct WorkspaceFilesTool;
-
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
-fn workspace_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_WORKSPACE_ROOT", &home()))
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外は操作できません: {}",
-            base.display(),
-            target.display()
-        ))
-    }
-}
-
-#[cfg(windows)]
-fn is_protected_edit_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.starts_with(r"c:\windows")
-        || s.starts_with(r"c:\program files\")
-        || s.starts_with(r"c:\program files (x86)\")
-}
-
-#[cfg(not(windows))]
-fn is_protected_edit_path(_path: &Path) -> bool {
-    false
-}
 
 fn trim_to_bytes(content: &str, max_bytes: usize) -> String {
     if content.len() <= max_bytes {
@@ -175,15 +120,6 @@ impl Tool for WorkspaceFilesTool {
         })
     }
 
-    fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_WORKSPACE_ROOT",
-            "workspace_files の許可ルート",
-            "text",
-            &home(),
-        )]
-    }
-
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = match args.get("action").and_then(Value::as_str) {
             Some(action) => action,
@@ -193,8 +129,8 @@ impl Tool for WorkspaceFilesTool {
             Some(path) if !path.trim().is_empty() => path.trim(),
             _ => return "エラー: path が指定されていません。".to_string(),
         };
-        let base = workspace_root(cfg);
-        let target = match bounded_path(&base, path) {
+        // 許可ルート内かつ保護パスでないことを共通ルールで検証する。
+        let target = match permissions::resolve(cfg, path) {
             Ok(target) => target,
             Err(error) => return format!("エラー: {}", error),
         };
@@ -206,12 +142,6 @@ impl Tool for WorkspaceFilesTool {
                 Err(error) => format!("エラー: 読み取りに失敗しました（{}）: {}", error, target.display()),
             },
             "write" | "append" => {
-                if is_protected_edit_path(&target) {
-                    return format!(
-                        "エラー: Windows / Program Files 配下は編集不可です: {}",
-                        target.display()
-                    );
-                }
                 let content = match content_arg(&args) {
                     Ok(content) => content,
                     Err(error) => return format!("エラー: {}", error),
@@ -243,12 +173,6 @@ impl Tool for WorkspaceFilesTool {
                 }
             }
             "mkdir" => {
-                if is_protected_edit_path(&target) {
-                    return format!(
-                        "エラー: Windows / Program Files 配下は編集不可です: {}",
-                        target.display()
-                    );
-                }
                 match std::fs::create_dir_all(&target) {
                     Ok(()) => format!("OK: フォルダを作成しました: {}", target.display()),
                     Err(error) => format!("エラー: フォルダ作成に失敗しました（{}）: {}", error, target.display()),
@@ -269,38 +193,3 @@ impl Tool for WorkspaceFilesTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(WorkspaceFilesTool) } }
-
-#[cfg(test)]
-mod tests {
-    use super::{bounded_path, normalize};
-    use std::path::PathBuf;
-
-    // Windows のパス区切り（\）とドライブレターを前提にしたテスト。
-    // Linux では \ がファイル名の一部として扱われ意味が変わるため Windows 限定で実行する。
-    #[test]
-    #[cfg(windows)]
-    fn 相対パスの親参照を正規化する() {
-        let base = PathBuf::from(r"C:\work\root");
-        assert_eq!(normalize(&base, r"a\..\b"), PathBuf::from(r"C:\work\root\b"));
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn 許可ルート外を拒否する() {
-        let base = PathBuf::from(r"C:\work\root");
-        assert!(bounded_path(&base, r"..\secret.txt").is_err());
-    }
-
-    // どの OS でも成り立つ境界チェック（/ 区切り）。
-    #[test]
-    fn 許可ルート外を拒否する_スラッシュ区切り() {
-        let base = std::env::temp_dir().join("picoagent-ws-test");
-        assert!(bounded_path(&base, "../secret.txt").is_err());
-    }
-
-    #[test]
-    fn 相対パスの親参照を正規化する_スラッシュ区切り() {
-        let base = std::env::temp_dir().join("picoagent-ws-test");
-        assert_eq!(normalize(&base, "a/../b"), base.join("b"));
-    }
-}

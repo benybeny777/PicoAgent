@@ -4,10 +4,14 @@
   nsExec::ExecToLog 'taskkill /F /T /IM picoagent.exe'
   nsExec::ExecToLog 'taskkill /F /T /IM llama-server.exe'
   nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq ''run.exe'' -and ($$_.ExecutablePath -like ''*PicoAgent*'' -or $$_.ExecutablePath -like ''*resources\\bundled\\aivis\\run.exe'' -or $$_.ExecutablePath -like ''*resources\\aivis\\run.exe'') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"'
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq ''whisper-cli.exe'' -and $$_.ExecutablePath -like ''*resources\\bundled\\whisper\\whisper-cli.exe'' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"'
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
   DetailPrint "PicoAgent の実行時データを削除しています..."
+  RMDir /r "$INSTDIR\resources\bundled\whisper"
+  RMDir /r "$INSTDIR\resources\bundled\aivis"
+  RMDir /r "$INSTDIR\resources\bundled\engine"
   RMDir /r "$APPDATA\PicoAgent"
   RMDir /r "$LOCALAPPDATA\PicoAgent"
   RMDir /r "$APPDATA\com.picoagent.desktop"
@@ -19,4 +23,5 @@
   RMDir /r "$TEMP\picoagent-aivis-runtime"
   RMDir /r "$TEMP\picoagent-aivis"
   RMDir /r "$TEMP\picoagent-engine"
+  RMDir /r "$TEMP\picoagent-whisper"
 !macroend

@@ -37,7 +37,8 @@ impl Config {
         if let Some(v) = self.values.lock().unwrap().get(key) {
             if let Some(s) = v.as_str() {
                 if !s.is_empty() {
-                    return s.to_string();
+                    // シークレットは暗号化保存されているため、読み取り時に復号する（非暗号値は素通り）。
+                    return crate::secret::decrypt(s);
                 }
             } else if !v.is_null() {
                 return v.to_string();

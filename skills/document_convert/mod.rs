@@ -14,14 +14,8 @@ use crate::message::Field;
 
 pub struct DocumentConvertTool;
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
 fn root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_DOCUMENT_ROOT", &home()))
+    crate::permissions::primary_root(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -84,7 +78,6 @@ impl Tool for DocumentConvertTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_DOCUMENT_ROOT", "Office/PDF 操作の許可ルート", "text", &home()),
             Field::new("PICOAGENT_LIBREOFFICE_PATH", "LibreOffice 実行ファイルパス", "text", "soffice"),
             Field::new("PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS", "文書変換タイムアウト秒（5〜300）", "text", "120"),
         ]

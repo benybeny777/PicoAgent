@@ -2,7 +2,7 @@
 // モデルが tool_calls を返す限りツールを実行し、結果を会話に積んで再問い合わせする。
 // 機能: 並列ツール実行・指数バックオフリトライ・ストリーミング応答・分散トレーシング。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tauri::Manager;
@@ -11,6 +11,51 @@ use crate::config::Config;
 use crate::message::Message;
 use crate::providers::Provider;
 use crate::tools;
+
+/// 現在のエージェントループのネスト深さ。サブエージェントの無限再帰を防ぐためのプロセス全体カウンタ。
+/// `1` がトップレベル、`2` 以降はサブエージェントから呼ばれたネスト実行。
+pub static AGENT_DEPTH: AtomicUsize = AtomicUsize::new(0);
+
+/// エージェントループのネスト深さを RAII で増減するガード。
+/// 早期 return・エラー経路でも `Drop` で確実に減算する。
+struct DepthGuard;
+
+impl DepthGuard {
+    fn enter() -> Self {
+        AGENT_DEPTH.fetch_add(1, Ordering::SeqCst);
+        DepthGuard
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        AGENT_DEPTH.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// 現在の深さ（`enter` 後に呼ぶ。トップレベルは 1）。
+fn agent_depth() -> usize {
+    AGENT_DEPTH.load(Ordering::SeqCst)
+}
+
+/// スーパーエージェントモード。計画ステップ・自己評価・深い自律ループ・進捗可視化を一括で有効化する。
+pub fn super_agent_enabled(cfg: &Config) -> bool {
+    cfg.get_bool("PICOAGENT_SUPER_AGENT", false)
+}
+
+/// 進捗ステータスを `pet:agent_status` イベントでフロントへ送るクロージャを作る。
+/// AppHandle が無い（サブエージェント等）場合は no-op。
+fn make_status_emitter(app: Option<&tauri::AppHandle>) -> Arc<dyn Fn(String) + Send + Sync> {
+    match app {
+        Some(handle) => {
+            let h = handle.clone();
+            Arc::new(move |status: String| {
+                let _ = tauri::Emitter::emit(&h, "pet:agent_status", status);
+            })
+        }
+        None => Arc::new(|_: String| {}),
+    }
+}
 
 const WEB_SEARCH_REQUESTS: [&str; 8] = [
     "WEB検索して",
@@ -224,6 +269,227 @@ fn direct_answer(messages: &mut Vec<Message>, answer: String) -> anyhow::Result<
     Ok(answer)
 }
 
+struct SetupGuide {
+    title: &'static str,
+    fields: &'static [&'static str],
+    steps: &'static [&'static str],
+    links: &'static [(&'static str, &'static str)],
+}
+
+fn setup_guide_answer(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    let asks_setup = [
+        "設定",
+        "トークン",
+        "token",
+        "apiキー",
+        "api key",
+        "apikey",
+        "キー",
+        "oauth",
+        "webhook",
+        "ウェブフック",
+        "やり方",
+        "取り方",
+        "取得",
+        "どこ",
+        "貼る",
+        "入れる",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !asks_setup {
+        return None;
+    }
+    let guide = if lower.contains("gmail") || lower.contains("gメール") {
+        Some(SetupGuide {
+            title: "Gmail OAuth access token",
+            fields: &["PICOAGENT_GMAIL_ACCESS_TOKEN", "PICOAGENT_GMAIL_BASE_URL"],
+            steps: &[
+                "Google Cloud Console で OAuth クライアントを用意します。個人利用なら OAuth Playground でも access token を発行できます。",
+                "Gmail の読み取り/変更/送信に必要な scope を許可します。例: gmail.modify と gmail.send。",
+                "発行された ya29... の access token を PICOAGENT_GMAIL_ACCESS_TOKEN に貼ります。access token は期限切れになるため、切れたら取り直します。",
+            ],
+            links: &[
+                ("Google 認証情報", "https://console.cloud.google.com/apis/credentials"),
+                ("OAuth Playground", "https://developers.google.com/oauthplayground"),
+                ("Gmail API scopes", "https://developers.google.com/workspace/gmail/api/auth/scopes"),
+            ],
+        })
+    } else if lower.contains("slack") || lower.contains("スラック") {
+        Some(SetupGuide {
+            title: "Slack Bot token / Incoming Webhook",
+            fields: &[
+                "PICOAGENT_SLACK_BOT_TOKEN",
+                "PICOAGENT_SLACK_CHANNEL",
+                "PICOAGENT_SLACK_WEBHOOK_URL",
+            ],
+            steps: &[
+                "Slack API の Your Apps でアプリを作成します。",
+                "OAuth & Permissions で bot scopes を追加します。投稿は chat:write、履歴取得は channels:history などが必要です。",
+                "Install to Workspace 後、xoxb-... を PICOAGENT_SLACK_BOT_TOKEN に貼ります。Webhook を使う場合は Incoming Webhooks を有効化して URL を貼ります。",
+            ],
+            links: &[
+                ("Slack Your Apps", "https://api.slack.com/apps"),
+                ("Slack tokens", "https://docs.slack.dev/authentication/tokens"),
+                ("Slack scopes", "https://api.slack.com/scopes"),
+            ],
+        })
+    } else if lower.contains("google")
+        || lower.contains("カレンダー")
+        || lower.contains("calendar")
+        || lower.contains("docs")
+        || lower.contains("drive")
+        || lower.contains("sheets")
+        || lower.contains("tasks")
+    {
+        Some(SetupGuide {
+            title: "Google OAuth access token",
+            fields: &[
+                "PICOAGENT_GOOGLE_*_ACCESS_TOKEN",
+                "PICOAGENT_GOOGLE_CALENDAR_ID",
+                "PICOAGENT_GOOGLE_SHEETS_ID",
+            ],
+            steps: &[
+                "Google Cloud Console で OAuth クライアントを用意し、使う API（Calendar / Docs / Drive / Sheets / Tasks）を有効にします。",
+                "OAuth Playground などで対象APIの scope を許可し、access token を発行します。",
+                "ya29... の値を該当する PICOAGENT_GOOGLE_*_ACCESS_TOKEN に貼ります。access token は期限切れになるため、切れたら取り直します。",
+            ],
+            links: &[
+                ("Google 認証情報", "https://console.cloud.google.com/apis/credentials"),
+                ("OAuth Playground", "https://developers.google.com/oauthplayground"),
+                ("Google Workspace scopes", "https://developers.google.com/workspace/guides/configure-oauth-consent"),
+            ],
+        })
+    } else if lower.contains("openai") || lower.contains("chatgpt") {
+        Some(SetupGuide {
+            title: "OpenAI API key",
+            fields: &["OPENAI_API_KEY", "OPENAI_MODEL"],
+            steps: &[
+                "OpenAI Platform にログインし、API keys で新しい secret key を作ります。",
+                "作成直後に表示される sk-... を OPENAI_API_KEY に貼ります。後から同じ値は再表示できません。",
+                "必要なら Billing / Usage limits で上限も設定します。",
+            ],
+            links: &[
+                ("API keys", "https://platform.openai.com/api-keys"),
+                ("公式ヘルプ", "https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key"),
+            ],
+        })
+    } else if lower.contains("claude") || lower.contains("anthropic") {
+        Some(SetupGuide {
+            title: "Anthropic / Claude API key",
+            fields: &["PICOAGENT_ANTHROPIC_API_KEY", "PICOAGENT_ANTHROPIC_MODEL"],
+            steps: &[
+                "Claude Console にログインし、API keys でキーを作ります。",
+                "作成した sk-ant-... を PICOAGENT_ANTHROPIC_API_KEY に貼ります。",
+                "API利用は課金対象なので、Console 側の請求設定も確認します。",
+            ],
+            links: &[("Claude Console", "https://platform.claude.com/")],
+        })
+    } else if lower.contains("gemini") {
+        Some(SetupGuide {
+            title: "Gemini API key",
+            fields: &["PICOAGENT_GEMINI_API_KEY", "PICOAGENT_GEMINI_MODEL"],
+            steps: &[
+                "Google AI Studio の API Keys ページを開き、Create API key でキーを作ります。",
+                "AIza... のキーを PICOAGENT_GEMINI_API_KEY に貼ります。",
+                "公開リポジトリやログには絶対に貼らず、必要なら Google 側で利用制限を設定します。",
+            ],
+            links: &[
+                (
+                    "AI Studio API Keys",
+                    "https://aistudio.google.com/app/apikey",
+                ),
+                (
+                    "公式ドキュメント",
+                    "https://ai.google.dev/gemini-api/docs/api-key",
+                ),
+            ],
+        })
+    } else if lower.contains("github") || lower.contains("git hub") {
+        Some(SetupGuide {
+            title: "GitHub personal access token",
+            fields: &["PICOAGENT_GITHUB_TOKEN", "PICOAGENT_GITHUB_OWNER", "PICOAGENT_GITHUB_REPO"],
+            steps: &[
+                "GitHub の Personal access tokens で fine-grained token を作ります。",
+                "対象 repository を選び、Issues の Read/Write 権限を付けます。",
+                "github_pat_... を PICOAGENT_GITHUB_TOKEN に貼り、owner / repo も設定します。",
+            ],
+            links: &[
+                ("Fine-grained tokens", "https://github.com/settings/personal-access-tokens"),
+                ("公式ドキュメント", "https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"),
+            ],
+        })
+    } else if lower.contains("notion") {
+        Some(SetupGuide {
+            title: "Notion integration token",
+            fields: &["PICOAGENT_NOTION_TOKEN", "PICOAGENT_NOTION_DATABASE_ID"],
+            steps: &[
+                "Notion の My integrations で integration を作成します。",
+                "Internal Integration Secret を PICOAGENT_NOTION_TOKEN に貼ります。",
+                "使うページ/DBの Share から integration を招待し、database ID も設定します。",
+            ],
+            links: &[
+                ("My integrations", "https://www.notion.so/my-integrations"),
+                (
+                    "Notion API docs",
+                    "https://developers.notion.com/docs/create-a-notion-integration",
+                ),
+            ],
+        })
+    } else if lower.contains("discord") {
+        Some(SetupGuide {
+            title: "Discord Webhook URL",
+            fields: &["PICOAGENT_DISCORD_WEBHOOK_URL"],
+            steps: &[
+                "Discord のチャンネル設定で 連携サービス > ウェブフック を開きます。",
+                "新しい Webhook を作成し、URL をコピーします。",
+                "URL を PICOAGENT_DISCORD_WEBHOOK_URL に貼ります。",
+            ],
+            links: &[(
+                "Discord Webhooks",
+                "https://support.discord.com/hc/articles/228383668-Intro-to-Webhooks",
+            )],
+        })
+    } else if lower.contains("トークン")
+        || lower.contains("token")
+        || lower.contains("apiキー")
+        || lower.contains("api key")
+        || lower.contains("webhook")
+        || lower.contains("ウェブフック")
+    {
+        Some(SetupGuide {
+            title: "トークン/キー設定の基本",
+            fields: &["設定画面 → 叩くAI または スキル設定 の該当サービス"],
+            steps: &[
+                "まず、どのサービスを使うか決めます。例: OpenAI / Gmail / Slack / Google Calendar / GitHub / Notion。",
+                "設定画面でそのプロバイダまたはスキルカードを開くと、取得手順と公式リンクが表示されます。",
+                "取得した API key / OAuth token / Webhook URL を該当欄へ貼って保存します。サービス名を指定して聞けば、そのサービス用の手順を詳しく案内します。",
+            ],
+            links: &[],
+        })
+    } else {
+        None
+    }?;
+
+    let mut out = format!("{} の設定手順です。\n\n入力する欄:\n", guide.title);
+    for field in guide.fields {
+        out.push_str("- `");
+        out.push_str(field);
+        out.push_str("`\n");
+    }
+    out.push_str("\n手順:\n");
+    for (index, step) in guide.steps.iter().enumerate() {
+        out.push_str(&format!("{}. {}\n", index + 1, step));
+    }
+    out.push_str("\n公式リンク:\n");
+    for (label, url) in guide.links {
+        out.push_str(&format!("- [{}]({})\n", label, url));
+    }
+    out.push_str("\n注意: APIキーやトークンは秘密情報です。チャット、ログ、Git、スクリーンショットには貼らないでください。");
+    Some(out)
+}
+
 /// テキスト中に埋め込まれた JSON オブジェクトを抽出する（コードブロック・文中 JSON にも対応）。
 fn extract_json_object(content: &str) -> Option<serde_json::Value> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(content.trim()) {
@@ -247,7 +513,11 @@ fn is_complex_query(text: &str) -> bool {
         return false;
     }
     let questions = text.matches('?').count() + text.matches('？').count();
-    count > 120 || questions >= 2 || text.contains("手順") || text.contains("ステップ") || text.contains("step")
+    count > 120
+        || questions >= 2
+        || text.contains("手順")
+        || text.contains("ステップ")
+        || text.contains("step")
 }
 
 /// 複雑なクエリを最大4サブタスクに分解して計画テキストを返す。
@@ -258,7 +528,12 @@ async fn planning_step(
     model: &str,
     user_text: &str,
 ) -> Option<String> {
-    if !cfg.get_bool("PICOAGENT_PLANNING_ENABLED", false) {
+    // 明示フラグ、またはスーパーエージェントモードのどちらかで有効化する。
+    if !cfg.get_bool("PICOAGENT_PLANNING_ENABLED", false) && !super_agent_enabled(cfg) {
+        return None;
+    }
+    // サブエージェント内ではネストした計画ステップを行わない（コストとループ防止）。
+    if agent_depth() > 1 {
         return None;
     }
     if !is_complex_query(user_text) {
@@ -297,7 +572,12 @@ async fn self_improve(
     messages: &[Message],
     answer: String,
 ) -> String {
-    if !cfg.get_bool("PICOAGENT_SELF_EVAL_ENABLED", false) {
+    // 明示フラグ、またはスーパーエージェントモードのどちらかで有効化する。
+    if !cfg.get_bool("PICOAGENT_SELF_EVAL_ENABLED", false) && !super_agent_enabled(cfg) {
+        return answer;
+    }
+    // サブエージェント内では自己評価を行わない（呼び出し側で総括する）。
+    if agent_depth() > 1 {
         return answer;
     }
     let too_short = answer.trim().chars().count() < 8;
@@ -568,6 +848,162 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
     None
 }
 
+fn research_report_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let has_research_word = [
+        "調査",
+        "リサーチ",
+        "レポート",
+        "出典",
+        "競合比較",
+        "市場調査",
+        "まとめて調べ",
+        "research",
+        "report",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !has_research_word {
+        return None;
+    }
+    let wants_artifact = [
+        "レポート",
+        "資料",
+        "スライド",
+        "ダッシュボード",
+        "html",
+        "ページ",
+        "表",
+        "json",
+        "csv",
+        "markdown",
+        "md",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    let save = ["保存", "ファイル", "出力", "作成して", "作って", "まとめて"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    Some(serde_json::json!({
+        "topic": text.trim(),
+        "save": save || wants_artifact,
+        "artifact_bundle": true
+    }))
+}
+
+fn spark_workspace_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let has_workspace_word = [
+        "genspark",
+        "資料一式",
+        "ワークスペース",
+        "スライドとサイト",
+        "サイトとスライド",
+        "ページと資料",
+        "spark",
+        "deck",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()));
+    if !has_workspace_word {
+        return None;
+    }
+    Some(serde_json::json!({
+        "project": text.trim(),
+        "goal": "資料、スライド、表、共有ページ、実行計画をまとめて作る",
+        "source_text": text.trim()
+    }))
+}
+
+fn genspark_suite_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let wants_suite = [
+        "genspark全部",
+        "genspark風",
+        "deep research",
+        "ai slides",
+        "ai sheets",
+        "ai docs",
+        "sparkpage",
+        "autopilot",
+        "meeting notes",
+        "multi-agent",
+        "ai browser",
+    ]
+    .iter()
+    .any(|word| lower.contains(&word.to_lowercase()))
+        || (lower.contains("genspark") && text.contains("全部"));
+    if !wants_suite {
+        return None;
+    }
+    Some(serde_json::json!({
+        "topic": text.trim(),
+        "audience": "一般読者",
+        "source_text": text.trim()
+    }))
+}
+
+fn meeting_recorder_query(text: &str) -> Option<(&'static str, serde_json::Value)> {
+    let lower = text.to_lowercase();
+    let has_meeting_word = ["録音", "議事録", "会議メモ", "meeting notes"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    if !has_meeting_word {
+        return None;
+    }
+    let action = if ["停止", "止め", "終了", "stop"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "stop"
+    } else if ["状態", "ステータス", "status", "録音中"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "status"
+    } else if ["文字起こし", "whisper", "transcribe"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "transcribe"
+    } else if ["議事録", "会議メモ", "meeting notes"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        "minutes"
+    } else {
+        "start"
+    };
+    let diarize = ["話者", "speaker", "diarize"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    Some((
+        "meeting_recorder",
+        serde_json::json!({
+            "action": action,
+            "title": text.trim(),
+            "diarize": diarize
+        }),
+    ))
+}
+
+fn audio_transcribe_query(text: &str) -> Option<serde_json::Value> {
+    let lower = text.to_lowercase();
+    let wants_transcribe = ["文字起こし", "whisper", "transcribe"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    let wants_recording_workflow = ["録音", "議事録", "会議メモ", "meeting notes"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    if !wants_transcribe || wants_recording_workflow {
+        return None;
+    }
+    let diarize = ["話者", "speaker", "diarize"]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+    Some(serde_json::json!({ "diarize": diarize }))
+}
+
 /// ツール引数 JSON の解析失敗（`_raw` フィールド）を検出してエラーを返す。
 /// 正常な引数はそのまま `tools::dispatch` へ渡す。
 /// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
@@ -634,6 +1070,22 @@ pub async fn run(
 ) -> anyhow::Result<String> {
     // 中断要求の確認。フラグ未指定（スケジューラ経由など）では常に false。
     let cancelled = || cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false);
+    // ネスト深さを増やし、関数を抜けるとき（成功・失敗・中断のいずれでも）減らす。
+    let _depth = DepthGuard::enter();
+    let super_agent = super_agent_enabled(cfg);
+    // スーパーエージェントモードのトップレベルでは自律ループの上限を引き上げる
+    // （多段のツール連鎖・自己反省を回し切れるようにする）。サブエージェントは元の上限のまま。
+    let max_steps = if super_agent && agent_depth() <= 1 {
+        cfg.get("PICOAGENT_SUPER_AGENT_MAX_STEPS", "12")
+            .parse::<usize>()
+            .unwrap_or(12)
+            .clamp(max_steps, 30)
+    } else {
+        max_steps
+    };
+    // 進捗ステータス（計画→実行・ツール実行の可視化）をフロントへ送る。
+    let emit_status = make_status_emitter(app);
+
     let mut schemas = tools::schemas_for_text("");
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
@@ -663,6 +1115,8 @@ pub async fn run(
             messages[user_index].content = format!(
                 "{user_text}\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。"
             );
+        } else if let Some(answer) = setup_guide_answer(&user_text) {
+            return direct_answer(messages, answer);
         } else if is_weather_query(&user_text) {
             // 天気はモデルに任せず weather スキルの整形済み出力（アイコン・気温チャート）を直接返す。
             let args = match extract_weather_location(&user_text) {
@@ -681,6 +1135,21 @@ pub async fn run(
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
             let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = audio_transcribe_query(&user_text) {
+            let answer = tools::dispatch(cfg, "whisper_transcribe", args).await;
+            return direct_answer(messages, answer);
+        } else if let Some((tool, args)) = meeting_recorder_query(&user_text) {
+            let answer = tools::dispatch(cfg, tool, args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = genspark_suite_query(&user_text) {
+            let answer = tools::dispatch(cfg, "genspark_suite", args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = spark_workspace_query(&user_text) {
+            let answer = tools::dispatch(cfg, "spark_workspace", args).await;
+            return direct_answer(messages, answer);
+        } else if let Some(args) = research_report_query(&user_text) {
+            let answer = tools::dispatch(cfg, "research_report", args).await;
             return direct_answer(messages, answer);
         } else if is_daily_briefing_query(&user_text) {
             let answer = tools::dispatch(cfg, "daily_briefing", serde_json::json!({})).await;
@@ -723,10 +1192,16 @@ pub async fn run(
 
     // 計画ステップ: 複雑クエリをサブタスクに分解し、ユーザーメッセージへ計画を付加する
     // （PICOAGENT_PLANNING_ENABLED=true かつ複雑クエリのみ。設定OFF・単純質問はスキップ）。
+    if super_agent {
+        emit_status("計画を立てています…".to_string());
+    }
     if let Some(plan) = planning_step(provider, cfg, model, &original_user_text).await {
+        if super_agent {
+            // 計画本文をそのままフロントへ送り、実行前にステップ一覧を見せる。
+            emit_status(plan.clone());
+        }
         if let Some(user_idx) = messages.iter().rposition(|m| m.role == "user") {
-            messages[user_idx].content =
-                format!("{}\n\n{}", messages[user_idx].content, plan);
+            messages[user_idx].content = format!("{}\n\n{}", messages[user_idx].content, plan);
         }
     }
 
@@ -735,25 +1210,17 @@ pub async fn run(
         if step > 0 && cancelled() {
             return direct_answer(messages, CANCEL_MESSAGE.to_string());
         }
-        // 2ターン目以降（ツール結果を受けて再考する場合）は "再考中" を通知する。
-        if step > 0 {
-            if let Some(handle) = app {
-                let _ = tauri::Emitter::emit(
-                    handle,
-                    "pet:agent_status",
-                    serde_json::json!({ "phase": "thinking", "step": step }),
-                );
-            }
+        if super_agent {
+            emit_status(format!("ステップ {}/{} を実行中…", step + 1, max_steps));
+        } else if step > 0 {
+            // 2ターン目以降（ツール結果を受けて再考する場合）は固まって見えないよう通知する。
+            emit_status("考え直しています…".to_string());
         }
-        let msg = chat_with_retry(
-            provider,
-            cfg,
-            model,
-            messages,
-            &schemas,
-            emit_fn.clone(),
-        )
-        .await?;
+        let mut msg =
+            chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone()).await?;
+        // reasoning モデルの <think> 推論ブロックを最終回答・履歴・読み上げから除外する
+        // （DeepSeek-R1 / Qwen3 系などで英語/中国語の推論が混ざるのを防ぐ）。
+        msg.content = crate::message::strip_reasoning(&msg.content);
         // トークン使用量を記録する（AppHandle がある場合のみ）。
         if let (Some(handle), Some(usage)) = (app, &msg.usage) {
             crate::usage::record(
@@ -792,24 +1259,29 @@ pub async fn run(
                     return direct_answer(messages, CANCEL_MESSAGE.to_string());
                 }
                 // ツール実行前にフロントへ「何を実行中か」を通知する（固まり防止）。
-                if let Some(handle) = app {
+                {
                     let names: Vec<&str> = cs.iter().map(|c| c.name.as_str()).collect();
-                    let _ = tauri::Emitter::emit(
-                        handle,
-                        "pet:agent_status",
-                        serde_json::json!({ "phase": "tool", "tools": names }),
-                    );
+                    emit_status(format!("ツールを実行中: {}", names.join("、")));
                 }
                 // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
                 // 引数 JSON が壊れている（_raw フィールドあり）場合はエラーを返し再試行を促す。
+                // 各ツールを個別に計測しながら並列実行する（結果は (出力, 実行ms)）。
                 let futs: Vec<_> = cs
                     .iter()
-                    .map(|c| dispatch_or_error(cfg, c.name.as_str(), c.arguments.clone()))
+                    .map(|c| {
+                        let name = c.name.clone();
+                        let args = c.arguments.clone();
+                        async move {
+                            let span = crate::tracer::Tracer::start_span(name.as_str());
+                            let content = dispatch_or_error(cfg, name.as_str(), args).await;
+                            (content, span.finish().1)
+                        }
+                    })
                     .collect();
                 let results = futures::future::join_all(futs).await;
 
                 // run_command の承認マーカーを最初にチェックする。
-                for (c, content) in cs.iter().zip(results.iter()) {
+                for (c, (content, _)) in cs.iter().zip(results.iter()) {
                     if c.name == "run_command"
                         && crate::tools::run_command::parse_approval_marker(content).is_some()
                     {
@@ -818,7 +1290,7 @@ pub async fn run(
                 }
 
                 // ツール実行結果をトレースに記録し会話へ積む。
-                for (c, content) in cs.iter().zip(results.into_iter()) {
+                for (c, (content, duration_ms)) in cs.iter().zip(results.into_iter()) {
                     // インジェクション検出: 不審なパターンがあれば警告プレフィックスを付けてモデルへ伝える。
                     let content = if tools::check_injection(&content) {
                         format!(
@@ -833,7 +1305,7 @@ pub async fn run(
                     if let Some(handle) = app {
                         let entry = crate::tracer::TraceEntry {
                             tool: c.name.clone(),
-                            duration_ms: 0, // join_all では個別計測なし（合計は外で測れる）
+                            duration_ms,
                             success,
                         };
                         handle.state::<crate::tracer::Tracer>().record(entry);
@@ -862,15 +1334,23 @@ pub async fn run(
     } else {
         last
     };
-    Ok(self_improve(provider, cfg, model, messages, append_sources(answer, &sources)).await)
+    Ok(self_improve(
+        provider,
+        cfg,
+        model,
+        messages,
+        append_sources(answer, &sources),
+    )
+    .await)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_sources, currency_query, direct_local_tool_query, extract_source_urls,
-        is_local_action_query, is_simple_greeting, is_weather_query, market_query,
-        should_web_search, web_search_query,
+        append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
+        extract_source_urls, genspark_suite_query, is_local_action_query, is_simple_greeting,
+        is_weather_query, market_query, meeting_recorder_query, research_report_query,
+        setup_guide_answer, should_web_search, spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -939,6 +1419,19 @@ mod tests {
     }
 
     #[test]
+    fn 設定ガイド質問に固定手順を返す() {
+        let gmail = setup_guide_answer("Gmailのトークンの取り方を教えて").unwrap();
+        assert!(gmail.contains("PICOAGENT_GMAIL_ACCESS_TOKEN"));
+        assert!(gmail.contains("https://developers.google.com/oauthplayground"));
+
+        let openai = setup_guide_answer("OpenAI APIキーはどこに入れる？").unwrap();
+        assert!(openai.contains("OPENAI_API_KEY"));
+        assert!(openai.contains("https://platform.openai.com/api-keys"));
+
+        assert!(setup_guide_answer("今日の天気は？").is_none());
+    }
+
+    #[test]
     fn 短い挨拶を判定する() {
         assert!(is_simple_greeting("こんにちわ"));
         assert!(is_simple_greeting("こんにちは！"));
@@ -966,5 +1459,78 @@ mod tests {
         let (tool, args) = direct_local_tool_query("企画書を書けた").unwrap();
         assert_eq!(tool, "praise_log");
         assert_eq!(args["action"], "add");
+    }
+
+    #[test]
+    fn 調査レポート依頼を直結スキルへ割り当てる() {
+        let args =
+            research_report_query("AIエージェント市場を出典付きで調査してレポートにして").unwrap();
+        assert_eq!(
+            args.get("save").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            args.get("artifact_bundle")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert!(research_report_query("ありがとう").is_none());
+    }
+
+    #[test]
+    fn 調査ダッシュボード依頼は保存成果物にする() {
+        let args =
+            research_report_query("競合比較を調査してHTMLダッシュボードのページにして").unwrap();
+        assert_eq!(
+            args.get("save").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            args.get("artifact_bundle")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn 資料ワークスペース依頼を直結スキルへ割り当てる() {
+        let args = spark_workspace_query("Gensparkみたいに資料一式を作って").unwrap();
+        assert_eq!(
+            args.get("project").and_then(serde_json::Value::as_str),
+            Some("Gensparkみたいに資料一式を作って")
+        );
+        assert!(spark_workspace_query("ありがとう").is_none());
+    }
+
+    #[test]
+    fn genspark全部依頼を統合スキルへ割り当てる() {
+        let args = genspark_suite_query("Genspark風の機能を全部やって").unwrap();
+        assert_eq!(
+            args.get("topic").and_then(serde_json::Value::as_str),
+            Some("Genspark風の機能を全部やって")
+        );
+        assert!(genspark_suite_query("資料だけ作って").is_none());
+    }
+
+    #[test]
+    fn 録音と文字起こし依頼を直結スキルへ割り当てる() {
+        let (tool, start) = meeting_recorder_query("会議の録音を開始して").unwrap();
+        assert_eq!(tool, "meeting_recorder");
+        assert_eq!(
+            start.get("action").and_then(serde_json::Value::as_str),
+            Some("start")
+        );
+        let transcribe = audio_transcribe_query("話者分類つきでWhisper文字起こしして").unwrap();
+        assert_eq!(
+            transcribe
+                .get("diarize")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        let (_, minutes) = meeting_recorder_query("会議の議事録を作って").unwrap();
+        assert_eq!(
+            minutes.get("action").and_then(serde_json::Value::as_str),
+            Some("minutes")
+        );
     }
 }

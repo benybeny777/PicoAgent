@@ -87,7 +87,7 @@ graph TD
 
 `run(cfg, provider, model, messages, max_steps = 5, app = None) -> Result<String>`
 
-1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で逐次フロントへ `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。
+1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で逐次フロントへ `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。assistant の本文は `message::strip_reasoning()` で `<think>...</think>` の推論ブロックを除去してから最終回答・履歴・読み上げへ渡す（DeepSeek-R1 / Qwen3 系などの reasoning モデルで英語/中国語の推論が混ざるのを防ぐ）。
 2. `tool_calls` が無ければ、その `content` を最終応答として返す。
 3. `tool_calls` があれば、全呼び出しを `futures::future::join_all()` で**並列実行**し、結果を `tool` メッセージとして積み 1 に戻る。
 4. `max_steps` を超えたら打ち切り、最後の文面を返す（暴走防止）。
@@ -95,11 +95,13 @@ graph TD
 6. chat 完了後、返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に永続化する。
 7. ツール実行は `Tracer::start_span()` でレイテンシを計測し、`Tracer::record()` で直近 200 件を保持する。
 8. ツール出力は `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字で打ち切り、コンテキスト超過を防ぐ。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。ツール引数 JSON の解析失敗（`_raw` フィールド）を検出した場合はツールを呼ばずエラー文字列を返してモデルへ再試行を促す（`dispatch_or_error()`）。
-9. `PICOAGENT_PLANNING_ENABLED` が有効かつ質問が複雑（120文字超・疑問符2個以上・手順/ステップ系語を含む）な場合、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、分解結果を system 追記として付与してから通常の chat ループへ進む。
-10. `PICOAGENT_SELF_EVAL_ENABLED` が有効な場合、最終応答が短すぎる（8文字未満）または明示的な拒否パターンを含む場合に `provider.chat()` で1回再生成する（`self_improve()`）。再生成に失敗した場合は元の応答をそのまま返す。
+9. `PICOAGENT_PLANNING_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効、かつ質問が複雑（120文字超・疑問符2個以上・手順/ステップ系語を含む）な場合、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、分解結果を system 追記として付与してから通常の chat ループへ進む。
+10. `PICOAGENT_SELF_EVAL_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効な場合、最終応答が短すぎる（8文字未満）または明示的な拒否パターンを含む場合に `provider.chat()` で1回再生成する（`self_improve()`）。再生成に失敗した場合は元の応答をそのまま返す。
+11. **スーパーエージェントモード（`PICOAGENT_SUPER_AGENT=true`）**: 上記の計画・自己評価をまとめて有効化し、トップレベルの `max_steps` を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定 12、呼び出し値〜30 にクランプ）へ引き上げて多段のツール連鎖を回し切る。計画開始・計画内容・「ステップ k/N を実行中…」・「ツールを実行中: …」を `pet:agent_status` イベントでフロントへ送り、計画→実行を可視化する（フロントはステータス行に表示）。
+12. **ネスト深さガード**: `run()` 冒頭で `AGENT_DEPTH`（プロセス全体の `AtomicUsize`）を RAII（`DepthGuard`）で増減する。`subagent` スキルはこの深さを見て `PICOAGENT_SUBAGENT_MAX_DEPTH`（既定 2）以上ならネストを拒否し、無限再帰を防ぐ。計画・自己評価はトップレベル（深さ 1）でのみ行い、サブエージェント内（深さ 2 以降）ではスキップする。
 
 通常の質問では、ローカルモデルの `tool_calls` 対応状況に依存させず、最初の `chat()` より前に
-必要なスキルを直接実行する。**Web検索は質問が事実確認・最新情報・定義などを要するとき（`should_web_search`：明示依頼、または「最新/ニュース/価格/誰/いつ/とは…」等のマーカー）だけ実行する**。雑談・感想・相談（「むぎかわいい」「ありがとう」「自己紹介して」等）では検索せず、キャラ本人として速く自然に返す（デスクトップペットとして毎回の検索遅延・ノイズを避ける）。天気の質問（`is_weather_query`）は `weather` スキルを、為替の質問（`currency_query` が通貨を読み取れたとき）は `currency_rates` スキルを、市場指数の質問（`market_query` が日経平均等を読み取れたとき）は `market_indices` スキルを**先に実行してその整形済み出力（天気アイコン・気温/為替・市場指数のスパークライン等）をそのまま返す**（小型モデルが tool_calls を出せず、かつチャートを再現できないため、モデルを介さず確実にグラフィカル表示する）。スキル直行応答も assistant 発話として履歴へ保存し、前回のユーザー発話だけが残って次の質問へ混ざらないようにする。代表的なリマインダー・集中タイマー・見守り・できたことメモ、クリップボード要約、おでかけ前チェックもスキルを先に実行する。その他のローカル操作系依頼では、明示的なWeb検索依頼がない限り事前Web検索を省き、モデルへスキル利用を優先する指示を追加する。為替は文中の通貨（ドル/円/ユーロ…）と「推移/チャート」「N日」を読み取って `base`/`symbols`/`chart`/`days` を組み立てる。短い挨拶は検索結果に引っ張られて表記解説へ逸れやすいため検索を省き、キャラクター本人として返す指示だけを追加する。検索結果は外部の信頼できない参考データとして区切ってユーザーメッセージへ
+必要なスキルを直接実行する。**Web検索は質問が事実確認・最新情報・定義などを要するとき（`should_web_search`：明示依頼、または「最新/ニュース/価格/誰/いつ/とは…」等のマーカー）だけ実行する**。雑談・感想・相談（「むぎかわいい」「ありがとう」「自己紹介して」等）では検索せず、キャラ本人として速く自然に返す（デスクトップペットとして毎回の検索遅延・ノイズを避ける）。天気の質問（`is_weather_query`）は `weather` スキルを、為替の質問（`currency_query` が通貨を読み取れたとき）は `currency_rates` スキルを、市場指数の質問（`market_query` が日経平均等を読み取れたとき）は `market_indices` スキルを**先に実行してその整形済み出力（天気アイコン・気温/為替・市場指数のスパークライン等）をそのまま返す**（小型モデルが tool_calls を出せず、かつチャートを再現できないため、モデルを介さず確実にグラフィカル表示する）。スキル直行応答も assistant 発話として履歴へ保存し、前回のユーザー発話だけが残って次の質問へ混ざらないようにする。代表的なリマインダー・集中タイマー・見守り・できたことメモ、クリップボード要約、おでかけ前チェック、出典付き調査レポート生成もスキルを先に実行する。その他のローカル操作系依頼では、明示的なWeb検索依頼がない限り事前Web検索を省き、モデルへスキル利用を優先する指示を追加する。為替は文中の通貨（ドル/円/ユーロ…）と「推移/チャート」「N日」を読み取って `base`/`symbols`/`chart`/`days` を組み立てる。短い挨拶は検索結果に引っ張られて表記解説へ逸れやすいため検索を省き、キャラクター本人として返す指示だけを追加する。検索結果は外部の信頼できない参考データとして区切ってユーザーメッセージへ
 付加し、結果内の指示には従わないよう明記する。検索失敗もモデルへ渡し、ユーザーへ明示させる。
 参照元はMarkdownハイパーリンクで回答させ、フキダシはMarkdownリンクと通常のURLを安全なDOMリンクへ変換する。さらに、事前検索で得た参照元URLのうち本文に未掲載のものを、最終応答の末尾へ `参考:` として確定的に添える（モデルがリンクを出し損ねても参照元が残る）。URL 行は読み上げ（`speech_text`）で除外されるため音声には乗らない。`speech_text` はさらに、スパークラインのブロック文字や絵文字（天気・為替チャート由来）も読み上げから除外する。
 
@@ -162,14 +164,14 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`scripts/fetch-engine.mjs`（`npm run setup:engine`）で
   `src-tauri/resources/bundled/engine/` に取得。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
-  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Gemma / Qwen / Llama / Mistral / Phi / DeepSeek 系の主要 GGUF プリセットを選べる。`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
+  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットを選べる。`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
   3. `llama-server` は実行時配置の `PicoAgent/bundled/engine/`、同梱配置 `resources/bundled/engine/`、旧同梱配置 `resources/engine/`、開発時の `src-tauri/resources/bundled/engine/` / `src-tauri/resources/engine/` の順に探し、`npm run dev` / `npm run build` は事前に `scripts/fetch-engine.mjs` で同梱配置を確認・取得してから Tauri を起動する。起動時は `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja`
      を spawn（`PICOAGENT_LOCAL_GPU_DEVICE` 指定時は `--device <値>` を追加。Windows は CREATE_NO_WINDOW）。
      既定の同梱ビルドは Vulkan(GPU) 版で、`-ngl 999` により全レイヤを GPU へオフロードする（GPU 非対応環境では自動 CPU フォールバック）。
-     `/health` が 200 になったら `engine:status {phase:"ready"}`。
+     `/health` が 200 になったら `engine:status {phase:"ready"}`。前回クラッシュなどで既存 `llama-server` が同じポートに残っている場合は、`/v1/models` のモデルIDが要求中の GGUF と一致する時だけ再利用する。別モデルなら誤用せずエラーにし、残存プロセス停止を促す。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
-- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / Llama / Mistral / Phi / DeepSeek / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
+- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / Llama / Mistral / Phi / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
 - 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。選択中キャラクターの AivisHub 音声モデル導入は `pet_prepare_voice_model` command で起動シーケンス中に明示実行する。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
@@ -187,6 +189,16 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - speaker ID は選択中キャラクターの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、未設定なら共通の `PICOAGENT_TTS_SPEAKER` を使う。例外として `rin` は AivisHub「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`mai` は AivisHub「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を既定声に使う（`default_character_tts_voice` で申告）。`pet_prepare_voice_model` と `pet_speak` は、話者 UUID が `/speakers` に無ければ `/aivm_models/install` へ AIVMX ダウンロード URL を渡してモデルを追加し、その後 `/speakers` から話者 UUID＋スタイル名で**実 style ID を実行時に解決**して合成する。global style ID はエンジンが導入時に算出するためハードコードせず（`character.json` の `styleId` と `RIN_AIVIS_SPEAKER` は解決失敗時のフォールバックに留める）。ユーザーが上書き設定で明示した speaker は実行時解決せずそのまま使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で停止する。既にユーザーが手動起動していた Aivis には触らない。
 
+### 同梱Whisper CLI（`meeting_recorder`）
+
+録音文字起こしには whisper.cpp の `whisper-cli` をCLI実行で使う。常駐サーバは立てず、ポートも使わないため、ユーザーが手動で起動している別Whisperサーバや別ツールとはポート競合しない。
+
+- 実行ファイルとモデルはリポジトリに含めず、`scripts/fetch-whisper.mjs`（`npm run setup:whisper`）で PicoAgent 管理下の専用ディレクトリ `src-tauri/resources/bundled/whisper/` に取得する。既存の手動インストール先、グローバルPATH、常駐サーバ用ポートには既定で触れない。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
+- `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されている場合は、手動インストール済みの実行ファイル・モデルを最優先する。空の場合だけ同梱 `whisper-cli` と同梱モデルを使う。
+- 文字起こし時は `whisper-cli` を子プロセスとして1回だけ起動し、完了・失敗・タイムアウトで終了する。標準入力は使わず、`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` で上限時間を設ける。
+- Windows のアンインストールでは、PicoAgent 管理下の `resources/bundled/whisper/` と一時展開先 `%TEMP%\picoagent-whisper` だけを削除する。外部に手動導入した `whisper-cli` やモデルは削除しない。
+- `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` を追加する。既定は whisper.cpp の tinydiarize 用 `-tdrz` だが、話者分類の精度とマーカー形式は利用するローカル実装・モデルに依存する。
+
 ---
 
 ## スキル（ツール）コネクタ
@@ -199,8 +211,10 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
+    fn label(&self) -> &'static str;
     fn description(&self) -> String;
     fn parameters(&self) -> Value;            // JSON Schema
+    fn examples(&self) -> Vec<&'static str> { Vec::new() }
     fn config_schema(&self) -> Vec<Field> { Vec::new() }
     async fn run(&self, cfg: &Config, args: Value) -> String;  // 失敗もエラー文字列で返す
 }
@@ -224,17 +238,27 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
 | `read_file` | ローカルのテキストファイル読込 | 許可ルート `PICOAGENT_TOOLS_ROOT`（既定はホーム）配下に限定、`..` 等のルート外を拒否、64KB で打ち切り |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
+| `research_report` | 複数観点のWeb検索を束ね、出典付きMarkdown調査レポートを生成する。`save=true` または `save_path` 指定で保存し、既定で1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も生成する | 検索待ち時間3〜60秒、観点最大6件、各観点最大5件、レポート96KB上限、保存は `PICOAGENT_WORKSPACE_ROOT` 配下の `.md` のみ |
+| `spark_workspace` | brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを含む資料ワークスペースを一括生成する | 保存は `PICOAGENT_WORKSPACE_ROOT` 配下のみ、入力テキスト24,000文字上限、外部通信なし |
+| `genspark_suite` | Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統を同じフォルダに生成する | 保存は `PICOAGENT_WORKSPACE_ROOT` 配下のみ、入力テキスト32,000文字上限、外部通信なし |
+| `subagent` | 1つの集中サブタスクを別のエージェントループへ委譲し、結果テキストだけを返す。複数観点の調査や独立した小タスクの分担に使う | 現在選択中のプロバイダ・モデルを再利用。AppHandle は渡さず（ストリーミング/使用量記録は上位のみ）、`AGENT_DEPTH` と `PICOAGENT_SUBAGENT_MAX_DEPTH`（既定2）で再帰を制限。ループ上限は `steps`（既定6、1〜12） |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | `skills/chitchat/trends.rs` で X API / 急上昇RSS / ニュースRSSの話題メモを取得し、生成は人格込みで `provider.chat`（tools 無し）。会話履歴には積まない |
 | `alarm` | 目覚まし時計。声でやさしく起こすアラームを add/list/remove/clear/enable/disable できる。時刻(HH:MM)・曜日・繰り返し・スヌーズ分数を指定 | 一覧は `crate::alarm` 経由で config `PICOAGENT_ALARMS` に保存。発火はフロントの時刻ポーリングが `pet_alarm_wake` を呼ぶ。一度きりは発火後に無効化し、`おきたよ！` が押されるまで指定分数おきに再通知 |
+| `task_scheduler` | 指定時刻または cron 風5フィールドで、許可済みコマンドまたは別スキルを定期実行する。add/list/remove/clear/enable/disable に対応 | 一覧は config `PICOAGENT_SCHEDULED_TASKS` に保存。バックエンド常駐タスクが30秒間隔で確認し、実行結果をログ、`app_data_dir/schedule-runs.json`、`pet:notice` へ送る |
 | `reminder` | 日常リマインダー。指定時刻または数分後に声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。フロントの `pet_daily_events` ポーリングで期限到来分を通知 |
 | `focus_timer` | 集中タイマーと作業見守り。終了時または指定間隔ごとに声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。見守りは repeat_minutes で次回へ繰り返す |
 | `praise_log` | できたこと・進捗・がんばったことを保存し、あとで振り返る | `PICOAGENT_PRAISE_LOG` に保存。最大100件 |
 | `daily_briefing` | おでかけ前チェック。天気・控えている通知をまとめる | `weather` を内部呼び出し。APIキー不要 |
+| `meeting_recorder` | 会議向けの複合スキル。マイク録音、既存音声の文字起こし、文字起こしからの議事録Markdown生成を `action` で扱う。`diarize=true` で話者分類用の追加引数を渡す | 既定保存先は共通 `PICOAGENT_WORKSPACE_ROOT` 配下の `meetings/YYYY-MM-DD/`。`PICOAGENT_MEETING_ROOT` で任意上書き可。`PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先で、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperは1回実行のCLIで、常駐サーバやポートを使わない。外部APIなし |
+| `whisper_transcribe` | 既存音声をローカルで文字起こしする単体スキル。スキル一覧の表示タイトルは「音声文字起こし」 | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先。空なら PicoAgent 管理下の同梱Whisper CLIと同梱モデルを使う。常駐サーバやポートを使わない |
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
-| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし |
-| `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限 |
-| `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信 | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、timeout |
-| `gmail_message` | Gmail API でメール送信または下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、本文/件名サイズ上限、timeout |
+| `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
+| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得 | 許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、読込/書込サイズ上限、削除操作なし。将来削除相当の操作を足す場合も物理削除ではなくゴミ箱移動にする |
+| `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、許可ルート `PICOAGENT_WORKSPACE_ROOT` 配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
+| `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
+| `code_runner` | 他スキルで要望を満たせないときの最終手段。PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成する | 既定無効（`PICOAGENT_CODE_RUNNER_ENABLED`）。作業ディレクトリ・許可ルート・保護パスは共通 permissions を参照。物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否。スクリプトは一時ファイルへ書き出して実行後に削除、timeout・出力32KBで制限 |
+| `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信。Bot token では認証テストとチャンネル履歴取得もできる | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、履歴20件上限、timeout |
+| `gmail_message` | Gmail API でメール一覧取得・本文取得・ラベル一覧・ラベル付け/解除・アーカイブ・既読/未読化・ゴミ箱移動・送信・下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、検索条件ベースの cleanup は preview 後に `confirm=true` で実行、ゴミメール掃除は完全削除ではなく Gmail のゴミ箱移動、cleanup 件数上限は `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS`（0で無制限）、検索クエリ/本文/件名サイズ上限、timeout |
 | `google_calendar` | Google Calendar の予定一覧取得・予定作成 | OAuth access token は設定から都度取得、秘密値を出力しない、件名/説明サイズ上限、timeout |
 | `google_docs` | Google Docs の文書作成・本文抽出・末尾追記・文字列置換 | Google Docs API `batchUpdate` を使用、OAuth access token は設定から都度取得、秘密値を出力しない、timeout |
 | `google_drive` | Google Drive のファイル検索・メタデータ取得・テキストファイル作成 | OAuth access token は設定から都度取得、秘密値を出力しない、作成サイズ上限、timeout |
@@ -294,14 +318,20 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 - `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/picoagent.js` の `window.picoagent.settings.*` →
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
-- 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
-- スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。キャラクター一覧は `assets/characters/index.json` から表示し、使用中のキャラに「（使用中）」を付ける。
-- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。
+- 画面は **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル** / **診断** のタブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。コネクタを足すと一覧も設定項目も自動で増える。
+- ヘッダーの検索入力で、設定キー・ラベル・プロバイダ・スキル名・キャラクター名/説明をタブ横断で絞り込める。検索中は一致するタブ/セクション/カードだけを表示し、入力値や保存対象は変えない。
+- 未保存変更がある場合はフッターの「変更を戻す」を有効化し、変更済みの設定行を薄く強調する。「変更を戻す」は最後に読み込んだ、または保存に成功した設定スナップショットからフォームを再描画し、キャラ上書き・音声上書き・目覚ましJSONを含めて未保存状態だけを破棄する。
+- スキル設定タブには、`settings_load` が返す各ツールの `name` / `label` / `description` / `configSchema` を使い、カテゴリ見出し付きで全スキルを縦に並べる。各カードには `configSchema` と保存値から「設定不要」「未設定」「一部設定」「設定済み」の状態バッジを表示し、`settings.js` の `approvalPolicy()` が送信前確認・実行前確認・書込/変更・外部読取・低リスクの承認ポリシーを表示する。Gmail / Slack / Googleカレンダーは `settings_test_tool` で保存済み設定の接続テストを実行でき、`diagnose_tool_test()` の診断文で token 未設定、401、403、404、timeout、接続失敗を原因候補として示す。設定を持つカードはクリックで展開し、`alarm` は `buildAlarmEditor`、`task_scheduler` は `buildScheduleEditor` の専用フォームで JSON 保存値を組み立てる。
+- スキル活用ガイドタブには `settings_load` が返す各ツールの `name` / `label` / `description` / `examples` を使い、区分・できること・頼み方例を横断表示する。個別カードだけでは機能全体を把握しづらいため、まず一覧資料として全スキルを見通せるようにする。
+- スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。APIキー・OAuth token・Webhook URL が必要なスキル/プロバイダには、設定画面内で取得手順・貼り付け先・公式リンクをまとめた折りたたみ式の設定ガイドを表示する。チャットで設定方法を尋ねた場合も `agent.rs` の固定ガイドで同等の手順とリンクを返す。キャラクター一覧は `assets/characters/index.json` と各 `character.json` から表示し、使用中のキャラに「（使用中）」を付け、idle 先頭フレームを丸い小アイコンとして添える。
+- 「叩くAI」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。未使用プロバイダのAPIキー欄・モデル欄はDOMにも作らず、プロバイダ切替時にフォームを作り直す。保存時は既存設定を土台に表示中入力だけを上書きし、未表示プロバイダの保存済み設定を消さない。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「叩くAI」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。「叩くAI」タブには「ダウンロード済みモデル」セクションがあり、`pet_list_downloaded_models`（`app_data_dir/bundled/models` 配下の `.gguf` をファイル名・サイズ・対応プリセット名・使用中フラグ付きで列挙）と `pet_delete_downloaded_model`（指定 GGUF を物理削除）でモデルを管理できる。削除はモデルディレクトリ配下の `.gguf` のみを対象とし、パストラバーサルと使用中モデルの削除を拒否する。同梱物（PicoAgent 管理下）のためゴミ箱ではなく削除でディスクを解放する。
+- 「診断」タブは `engine_status` / `aivis_status` / `pet_usage` / `pet_traces` を読み、選択中プロバイダ・同梱エンジン状態・Aivis状態・今月/累計トークン使用量・直近スキル実行の件数/平均遅延/エラー数をカードで表示する。設定値は変更せず、各取得に失敗した場合も診断カード単位でエラー表示に留める。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化する。反映は「軽い設定は実行中に即反映」「重い設定は再起動して起動シーケンスで反映」に分ける。
   - **即反映**: システムプロンプト・長期メモリ・常に手前・フキダシの見た目・自発雑談・キャラ人格の上書き（同一キャラ）・コネクタ固有設定（`cfg.get()` 都度読み）。`pet:ui` イベントで実行中へ反映する。
-  - **再起動して反映（共通機構）**: 以下のキーが実際に変わったら `settings_save` は `{ requiresRestart: true }` を返し、実行中のエンジン/Aivis/キャラ再読込は行わない。設定画面は確認画面を出し、ユーザーが承諾したら `restart_app` command を呼ぶ。`restart_app` は **プロセス再起動（`app.restart()`）はしない**（`tauri dev` の開発配信サーバが落ちて `127.0.0.1` 接続拒否になるため）。代わりにバックエンドを起動シーケンス相当に再初期化（選択中キャラの履歴を文脈へ読み直し、`settings_save` が返す `restartEngine` / `restartAivis` に応じて変わった部分だけ停止→再起動。例: キャラ変更だけなら LLM エンジンは再起動しない）し、メインウィンドウへ `pet:reload` を送って webview を再読込させる。再読込でフロントの起動シーケンス（ローディング画面）が再実行され、モデル DL・エンジン/Aivis 起動・キャラ読込・挨拶をまとめて行う。これによりフキダシに「モデルを準備中…」を出さず、dev / 配布版どちらでも同じ挙動になる。再起動対象キー: `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX` / `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` / `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_PORT` / `PICOAGENT_CHARACTER`。ユーザーが「あとで」を選んだ場合も設定は保存済みで、次回起動時に反映される（実行中状態は触らないので旧エンジンと不整合にならない）。
+  - **再起動して反映（共通機構）**: 以下のキーが実際に変わったら `settings_save` は `{ requiresRestart: true }` を返し、実行中のエンジン/Aivis/キャラ再読込は行わない。設定画面は確認画面を出し、ユーザーが承諾したら `restart_app` command を呼ぶ。`restart_app` は **プロセス再起動（`app.restart()`）はしない**（`tauri dev` の開発配信サーバが落ちて `127.0.0.1` 接続拒否になるため）。代わりにバックエンドを起動シーケンス相当に再初期化（選択中キャラの履歴を文脈へ読み直し、`settings_save` が返す `restartEngine` / `restartAivis` に応じて変わった部分だけ停止→再起動。例: キャラ変更だけなら LLM エンジンは再起動しない）し、設定ウィンドウを閉じてからメインウィンドウへ `pet:reload` を送って webview を再読込させる。再読込でフロントの起動シーケンス（ローディング画面）が再実行され、モデル DL・エンジン/Aivis 起動・キャラ読込・挨拶をまとめて行う。これによりフキダシに「モデルを準備中…」を出さず、dev / 配布版どちらでも同じ挙動になる。再起動対象キー: `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX` / `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` / `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_PORT` / `PICOAGENT_CHARACTER`。ユーザーが「あとで」を選んだ場合も設定は保存済みで、次回起動時に反映される（実行中状態は触らないので旧エンジンと不整合にならない）。
   - 起動シーケンスでは、TTS 有効時は Aivis ready を、`local` プロバイダ時はさらに同梱エンジンの ready/error までローディング画面で待ってから描画する（`waitForEngineReady`）。`applyEngineStatus` は `download`/`starting` の進捗を**ローディング画面の間だけ**表示し、通常時はフキダシに出さない。
+  - 起動完了後の「準備できた」系メッセージは小さいステータス専用表示にせず、必要な場合は通常のフキダシ本文として表示し、TTS 有効時は読み上げ対象にする。キャラクター挨拶が表示される場合は挨拶を優先し、完了メッセージを重ねない。
   - Ollama 選択時は `settings_list_models` で `/api/tags` の候補を読み込み、保存時に選択モデルを `PICOAGENT_MODEL` と `OLLAMA_MODEL` の両方へ反映する。
 
 ---
@@ -325,6 +355,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
+| `PICOAGENT_SUPER_AGENT` | `false` | 基本 | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
+| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | 基本 | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
+| `PICOAGENT_SUBAGENT_MAX_DEPTH` | `2` | スキル(subagent) | サブエージェントの最大ネスト深さ。これ以上は再帰委譲を拒否する |
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリに保持する最大件数（10〜200） |
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
@@ -334,7 +367,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID |
 | `PICOAGENT_TTS_VOLUME` | `100` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映 |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
-| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B/約2.5GB、`qwen25_7b`: Qwen2.5 7B/約4.7GB、`llama32_3b`: Llama 3.2 3B/約2.0GB、`llama31_8b`: Llama 3.1 8B/約4.9GB、`mistral7b`: Mistral 7B/約4.4GB、`phi35mini`: Phi 3.5 mini/約2.4GB、`deepseek_r1_qwen7b`: DeepSeek R1 Distill Qwen 7B/約4.5GB、`custom`） |
+| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B/約2.5GB、`qwen25_7b`: Qwen2.5 7B/約4.7GB、`llama32_3b`: Llama 3.2 3B/約2.0GB、`llama31_8b`: Llama 3.1 8B/約4.9GB、`mistral7b`: Mistral 7B/約4.4GB、`phi35mini`: Phi 3.5 mini/約2.4GB、`custom`） |
 | `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |
@@ -361,9 +394,16 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MISTRAL_API_KEY` | （なし） | mistral | Mistral API キー。未設定なら選択不可 |
 | `PICOAGENT_MISTRAL_MODEL` | `mistral-medium-latest` | mistral | Mistral の既定モデル |
 | `PICOAGENT_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | mistral | Mistral OpenAI 互換エンドポイント |
-| `PICOAGENT_TOOLS_ROOT` | ユーザーホーム | read_file | `read_file` が読み取れるルート |
+| `PICOAGENT_ALLOWED_ROOT` | ユーザーホーム | 許可（共通） | 全スキル共通の主たる許可ルート（相対パスの基準）。ファイル/ディレクトリ/コマンド実行はここを参照する |
+| `PICOAGENT_ALLOWED_PATHS` | （空） | 許可（共通） | 追加の許可ルート（改行または `;` 区切り）。run_command の「永続許可」でも追記される |
+| `PICOAGENT_DENIED_PATHS` | （空） | 許可（共通） | 追加の拒否パス（改行または `;` 区切り）。この配下は常に操作を拒否する。`C:\Windows` / `Program Files` は設定に関わらず常に拒否 |
+| `PICOAGENT_CODE_RUNNER_ENABLED` | `false` | code_runner | 自力実行（PowerShell/Python のコード実行）を有効化する。任意コード実行のため既定は無効 |
+| `PICOAGENT_CODE_RUNNER_PYTHON` | `python` | code_runner | code_runner が使う Python 実行ファイル |
+| `PICOAGENT_CODE_RUNNER_TIMEOUT_SECS` | `60` | code_runner | code_runner の既定タイムアウト秒（1〜300） |
+| `PICOAGENT_TOOLS_ROOT` | （旧キー） | read_file | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | web_search | Web検索で返す件数（1〜8） |
 | `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | web_search | Web検索の待ち時間（秒、3〜60） |
+| `PICOAGENT_RESEARCH_TIMEOUT_SECS` | `15` | research_report | 調査レポートの各Web検索待ち時間（秒、3〜60） |
 | `PICOAGENT_CHATTER_ENABLED` | `false` | chitchat | アイドル時に自発的な雑談をする |
 | `PICOAGENT_CHATTER_MIN_SECS` | `90` | chitchat | 自発雑談の最短間隔（秒、30〜3600） |
 | `PICOAGENT_CHATTER_MAX_SECS` | `240` | chitchat | 自発雑談の最長間隔（秒、30〜3600） |
@@ -375,8 +415,14 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_ALARMS` | `[]` | alarm | 目覚まし一覧（JSON文字列。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_DAILY_EVENTS` | `[]` | reminder / focus_timer | リマインダー・集中タイマー・見守り通知（JSON文字列） |
 | `PICOAGENT_PRAISE_LOG` | `[]` | praise_log | できたことメモ（JSON文字列） |
-| `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`） |
+| `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
+| `PICOAGENT_MEETING_ROOT` | 空 | meeting_recorder | 録音WAV・文字起こし・議事録保存の許可ルート。空なら共通 `PICOAGENT_WORKSPACE_ROOT` を使う |
+| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder / whisper_transcribe | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。同梱CLIはポートを開かない |
+| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら同梱モデル |
+| `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder / whisper_transcribe | 文字起こし実行時の引数テンプレート |
+| `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder / whisper_transcribe | `diarize=true` 時に追加するローカル話者分類引数 |
+| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200） |
 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` | `Tokyo` | weather | 天気の既定地点（自動取得失敗時のフォールバック） |
 | `PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION` | `false` | weather | 地名未指定時の現在地IP自動取得を無効化 |
 | `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |
@@ -386,10 +432,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MARKET_TIMEOUT_SECS` | `15` | market_indices | 市場指数API待ち時間（秒、3〜60） |
 | `PICOAGENT_RSS_DEFAULT_URL` | （なし） | rss_feed | RSS既定URL |
 | `PICOAGENT_RSS_TIMEOUT_SECS` | `15` | rss_feed | RSS取得待ち時間（秒、3〜60） |
-| `PICOAGENT_WORKSPACE_ROOT` | ユーザーホーム | workspace_files | ファイル一覧・読込・書込・追記・フォルダ作成の許可ルート |
+| `PICOAGENT_WORKSPACE_ROOT` | （旧キー） | workspace_files ほか | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_COMMAND_ENABLED` | `false` | run_command | allowlist 制限付きコマンド実行を有効化 |
-| `PICOAGENT_COMMAND_ROOT` | ユーザーホーム | run_command | コマンド実行の許可ルート |
-| `PICOAGENT_COMMAND_ALLOWED_PATHS` | （空） | run_command | コマンド実行の追加許可パス（改行または `;` 区切り）。チャットの「永続許可」でも追記される |
+| `PICOAGENT_COMMAND_ROOT` | （旧キー） | run_command / scheduler | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
+| `PICOAGENT_COMMAND_ALLOWED_PATHS` | （旧キー） | run_command / scheduler | 旧キー。`PICOAGENT_ALLOWED_PATHS` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_COMMAND_ALLOWLIST` | `git status,git diff,npm test,cargo test` | run_command | 実行を許可するコマンド prefix（カンマ区切り） |
 | `PICOAGENT_COMMAND_TIMEOUT_SECS` | `30` | run_command | コマンド実行の既定タイムアウト秒（1〜120） |
 | `PICOAGENT_SLACK_BOT_TOKEN` | （なし） | slack_send_message | Slack Bot token（Webhook 未使用時） |
@@ -399,6 +445,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_GMAIL_ACCESS_TOKEN` | （なし） | gmail_message | Gmail API の OAuth access token |
 | `PICOAGENT_GMAIL_BASE_URL` | `https://gmail.googleapis.com/gmail/v1` | gmail_message | Gmail API の base URL |
 | `PICOAGENT_GMAIL_TIMEOUT_SECS` | `20` | gmail_message | Gmail API の待ち時間（秒、3〜60） |
+| `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS` | `50` | gmail_message | Gmail の検索条件ベース整理/掃除で一度に扱う既定上限。`0` で無制限 |
 | `PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN` | （なし） | google_calendar | Google Calendar API の OAuth access token |
 | `PICOAGENT_GOOGLE_CALENDAR_ID` | `primary` | google_calendar | 既定のカレンダーID |
 | `PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS` | `20` | google_calendar | Google Calendar API の待ち時間（秒、3〜60） |
@@ -467,7 +514,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | http_api | 汎用HTTPの待ち時間（秒、3〜60） |
 | `PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS` | （空） | web_fetch | URL取得を許可するドメイン（カンマ区切り。空なら制限なし） |
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
-| `PICOAGENT_DOCUMENT_ROOT` | ユーザーホーム | ms_office / document_convert / pdf_tools | Office/PDF 操作の許可ルート |
+| `PICOAGENT_DOCUMENT_ROOT` | （旧キー） | ms_office / document_convert / pdf_tools | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | ms_office | Microsoft Office 操作タイムアウト秒（5〜300） |
 | `PICOAGENT_LIBREOFFICE_PATH` | `soffice` | document_convert | LibreOffice 実行ファイルパス |
 | `PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS` | `120` | document_convert | 文書変換タイムアウト秒（5〜300） |
@@ -490,23 +537,26 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 自発雑談（雑談スキル `chitchat`）: `PICOAGENT_CHATTER_ENABLED` が ON のとき、フロントは `[min, max]` 秒のランダム間隔の待機タイマーで `pet_idle_chatter` を呼ぶ。生成した独り言は**先に音声を合成（`prepareSpeech`）してから文字を表示し、表示と同時に読み上げる**（`playPreparedSpeech`。挨拶と同じ同期再生）。入力中・応答中・読み上げ中・全画面中は割り込まず次回へ送る。ユーザー操作（送信・入力欄を開く・会話リセット）や設定変更（`pet:ui`）のたびにタイマーを張り直す。`skills/chitchat/trends.rs` は `PICOAGENT_CHATTER_TOPIC_MODE=auto` で X API（`PICOAGENT_X_BEARER_TOKEN` がある場合）→ Google Trends RSS → ニュースRSSの順に話題メモを取る。`x` / `trends` / `news` / `off` でソースを固定または無効化できる。X API 未設定時は公式X投稿とは断定せず、急上昇ワードやトップニュースの候補として扱う。生成はWeb検索ツールを使わず、生成後は「直前の自発雑談: ...」として会話文脈へ1件積み、通常会話と同じ圧縮・履歴保存に通す。これにより、ユーザーが直後または再起動後に「今の何の話？」と聞いた場合に直前の雑談を参照できる。挨拶・名乗り・自己紹介は出さず、毎回ちがう話題になるよう話題ヒントを擬似ランダムで与え、さらに直近の独り言（`AppState.recent_chatter`、末尾6件）を「避ける文」として渡して繰り返しを防ぐ。雑談の生成は**人格(system)＋現在時刻＋指示だけ**を文脈にし、ユーザー発話（会話履歴）は含めない（小型モデルが入力をオウム返しするのを防ぐため）。`current_time_context()` で現在のローカル日時・時間帯（朝/昼/夕方/夜）を渡し、夜に「日差し」など時間に合わない描写をしないようにする。なお通常会話の返信がユーザー入力のオウム返しになった場合、フロントはそれを読み上げない。話題メモ（ニュース等）は `pet_idle_chatter` が `trends::topic_brief` で1件取得して `topic` 引数で skill へ渡し、出典（記事タイトル＋URL）も受け取る。生成後、返信が話題に触れていれば（返信と記事タイトルの内容バイグラム一致）最も関連する記事URLを末尾へ `参考:` として添える（URL 行は読み上げ対象外。例: 地震の独り言なら地震ニュースのURL）。
 - 目覚まし時計（`alarm` スキル + `alarm.rs`）: フロントは約20秒間隔で `pet_alarms` を取得し、現在のローカル時刻（HH:MM）と曜日が一致する有効なアラームがあれば `pet_alarm_wake` を呼んで**声でやさしく起こす**（生成した起こし文を音声合成→表示→即時再生。生成失敗時は固定の起こし文）。同じ分での二重発火は済みキー集合で防ぐ。一度きり（`repeat=false`）は発火後に `enabled=false` へ。鳴った後はフキダシに `おきたよ！` ボタンを出し、押されるまでは `snooze_minutes`（既定5、1〜60分）おきに同じアラームを再通知する。アラームは時刻・曜日・繰り返し・スヌーズ分数を**チャット（`alarm` スキル）でも設定画面でも**設定できる。設定画面のスキル「目覚まし時計」を開くと、時刻ピッカー＋曜日チェック＋繰り返し/有効/スヌーズ分数/ラベル/削除/追加の専用フォーム（`settings.js` の `buildAlarmEditor`）で編集でき、保存時に `PICOAGENT_ALARMS`（JSON）へ組み立てる。保存先は config。
 - 日常通知（`reminder` / `focus_timer` / `daily.rs`）: フロントは約20秒間隔で `pet_daily_events` を呼び、期限到来したリマインダー・集中終了・作業見守りを吹き出し表示と読み上げで通知する。単発イベントは通知後に無効化し、見守りのような `repeat_minutes` 付きイベントは次回時刻へ進める。起動時の挨拶には `pet_daily_greeting` で時間帯・通知件数・直近のできたことメモを添える。
-- タスクスケジューラ（`task_scheduler` スキル + `scheduler.rs`）: バックエンドは起動時に30秒間隔の常駐タスクを開始し、`PICOAGENT_SCHEDULED_TASKS` を毎回読み直して現在分に一致するタスクを実行する。同じ分の二重実行は `last_run_minute` で防ぎ、`repeat=false` のタスクは初回実行時に無効化する。スケジュールは `time`（HH:MM）+ `days`（mon..sun / 平日 / 週末 / 毎日）または cron 風5フィールド（分 時 日 月 曜日、`*` / 数値 / カンマ区切り / `*/N`）で指定する。`kind=command` は `program` + `args` を shell なしで実行し、`PICOAGENT_COMMAND_ENABLED=true`、`PICOAGENT_COMMAND_ROOT` または `PICOAGENT_COMMAND_ALLOWED_PATHS` 配下、`PICOAGENT_COMMAND_ALLOWLIST` prefix 一致を必須にする。スケジュール実行は無人実行のためチャット確認を挟まず、未許可ならログへエラーを残して実行しない。`kind=tool` は `tool_name` と `tool_args` を `tools::dispatch` に渡し、時間指定で天気・Web取得・外部連携などのスキル動作を実行できる。登録・一覧・削除・有効/無効化はチャットから `task_scheduler` スキルで行え、設定画面の「スキル」タブでも JSON を編集できる。実行結果は `app.<日付>.log` へ記録する。
-- コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` 外の場合、チャットへ確認文を返す。ユーザーが「許可」と送った場合は保留中の1件だけ実行する。「永続許可」と送った場合はコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_COMMAND_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。
+- タスクスケジューラ（`task_scheduler` スキル + `scheduler.rs`）: バックエンドは起動時に30秒間隔の常駐タスクを開始し、`PICOAGENT_SCHEDULED_TASKS` を毎回読み直して現在分に一致するタスクを実行する。同じ分の二重実行は `last_run_minute` で防ぎ、`repeat=false` のタスクは初回実行時に無効化する。スケジュールは `time`（HH:MM）+ `days`（mon..sun / 平日 / 週末 / 毎日）または cron 風5フィールド（分 時 日 月 曜日、`*` / 数値 / カンマ区切り / `*/N`）で指定する。`kind=command` は `program` + `args` を shell なしで実行し、`PICOAGENT_COMMAND_ENABLED=true`、`PICOAGENT_COMMAND_ROOT` または `PICOAGENT_COMMAND_ALLOWED_PATHS` 配下、`PICOAGENT_COMMAND_ALLOWLIST` prefix 一致を必須にする。スケジュール実行は無人実行のためチャット確認を挟まず、未許可ならログへエラーを残して実行しない。`kind=tool` は `tool_name` と `tool_args` を `tools::dispatch` に渡し、時間指定で天気・Web取得・外部連携などのスキル動作を実行できる。登録・一覧・削除・有効/無効化はチャットから `task_scheduler` スキルで行え、設定画面のスキル設定タブでも専用フォームで編集できる。実行結果は `app.<日付>.log` と `app_data_dir/schedule-runs.json`（直近100件）へ記録し、メイン画面へ `pet:notice` を emit して通知一覧に表示する。
+- 通知一覧（`renderer.js`）: メインフキダシの通知ボタンは `pet:notice` と `pet_schedule_runs` の結果を直近20件まで表示し、未読件数をバッジ表示する。スケジュール通知には「再実行」（`pet_rerun_schedule_task`）と「設定」（`pet_open_settings`）の操作を出す。失敗時はエラー色、成功時は通常色で表示する。
+- 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
+- 自力実行（`code_runner`）: `PICOAGENT_CODE_RUNNER_ENABLED=true` が必要（既定無効）。他スキルで要望を満たせないとき、モデルが PowerShell または Python のスクリプトを書いて実行し、出力を受け取って達成する。作業ディレクトリと許可判定は共通 permissions を参照し、保護パスと許可ルート外を拒否する。スクリプト本文に物理削除・破壊的操作（Remove-Item / rm / os.remove / shutil.rmtree 等）が含まれる場合は実行しない。スクリプトは一時ファイルへ書き出し、実行後に削除する。timeout・出力32KBで制限。
+- コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が共通の許可ルート外の場合、チャットへ確認文を返す。ユーザーが「許可」と送った場合は保留中の1件だけ実行する。「永続許可」と送った場合はコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を共通の `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。
 - 起動待ち画面: `#petApp.is-booting` 中は通常のフキダシとキャラクターを隠し、`#bootScreen` に選択中キャラクターの `boot.sleeping`（未定義なら `idle` 先頭フレーム）を使った待機画面を表示する。`renderer.js` の `setStatus()` がモデルDL、同梱エンジン起動、Aivis 起動待ちなど**実行中の処理だけ**を `#bootStatus` に同期する。準備完了時の「<キャラ名>を起こしているよ…」はプログレスバー下に出し、`is-booting` を外して通常表示へ切り替える。
 
-- フロント（`ui/`）は Vite 等のバンドラを使わず、Tauri の静的 `frontendDist` で配信。`withGlobalTauri:true` で
+- フロント正本は `ui/`。`scripts/build-ui-dist.mjs` が `ui/` を `ui-dist/` へコピーし、Tauri の静的 `frontendDist` は `ui-dist/` を配信する。`npm run dev` は読みやすいコピー、`npm run build` は HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削った release コピーを生成する。`withGlobalTauri:true` で
   `window.__TAURI__` を有効化し、`ui/picoagent.js` が旧 `window.picoagent`（init/send/menu/on/settings.*）を再現する。
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
 - フキダシ左上のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_layout` で幅・高さ・座標を設定へ永続化する。拡大時は最小サイズ以外の上限を設けない。保存済みのフキダシ幅・高さ・座標は起動時に復元し、座標はキャラクター回避の優先位置として扱う（重ならなければそのまま、重なる場合だけ位置を動かす。サイズの自動縮小は行わない）。既定（未保存時）のフキダシは CSS で「ウィンドウ下端付近まで縦に伸ばし、右側のキャラクターに被らない幅」にする。フキダシが透明ウィンドウ外へ出る場合は、ドラッグ中に Tauri ウィンドウ自体も `setPosition` / `setSize` で左上方向へ追従させる。さらにリサイズ確定時とサイズ復元時に `ensureWindowFitsBubble` で「フキダシ右側にキャラクター分の幅（と下側の高さ）」を確保するようウィンドウを左上方向へ拡大し（右下は固定）、大きくしたフキダシが右端固定のキャラクターと重ならないようにする。
 - ウィンドウのレイアウトは、`RunEvent::Exit` ではウィンドウ座標を取得できないため、生存中の `WindowEvent::Moved`/`Resized` で**サイズと縦オフセットを `WindowLayoutCache` に控え**、終了時にそのキャッシュ値だけを設定へ保存する。**横位置（右端基準）は以前指定した固定値**（`DEFAULT_RIGHT_OFFSET` = 右端より外へ 69px）で常に配置し、保存・変更しない。**縦位置**は画面下端からのオフセット（`PICOAGENT_WINDOW_BOTTOM_PX`、既定 51px）で保存・復元し、解像度が変わっても右下基準を保つ。**サイズ**も同様に保存・復元する（全画面中はキャッシュせず、復元値はモニタ内へ収める）。ドラッグで上端から `SNAP_THRESHOLD`(24px) 以内に来たら上端へスナップする（横はスナップしない）。右クリックメニューの「フキダシ位置とサイズをリセット」でフキダシ保存値・ウィンドウサイズ・縦オフセットを初期化し、ウィンドウを既定位置へ戻す。旧互換のため `pet_set_bubble_size` も残す。
 - フキダシの吹き出しの尻尾（`.bubble::after`）は、縦長フキダシでも右下のキャラクターを向くよう下寄り（`top:64%`）に置く。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを左上起点に大きく広げる（`.bubble.fullscreen`）。拡大時はキャラクターの実測矩形から右側の空け幅を再計算し、キャラ表示用の右ペインを残す。ドラッグでの拡大はまずサイズを維持したままフキダシ座標を再配置してキャラクター矩形を避ける。座標移動だけでは避けられない大きさの場合だけ、左ペインまたは上ペインのうち表示面積が大きい方へ最小限サイズを補正し、設定保存直前にも再配置後の座標とサイズを永続化する。再計算は全画面切替後、ウィンドウサイズ変更、キャラ画像ロード、設定反映、ドラッグ確定後に行う。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
-- 入力欄は `Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。フキダシ上部の `reply-actions` は回答コピー・再読み上げ・停止・全画面切替を提供する。
-- 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。`pet:reset` では履歴もクリアする。
+- 入力欄は `Enter` / `Ctrl+Enter` / `Cmd+Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。ユーザー発話は直近40件まで入力履歴として保持し、入力欄の先頭/末尾で `↑` / `↓` を押すと過去入力と編集中ドラフトを行き来できる。入力欄上部の `quick-actions` は、画面確認・クリップボード要約・今日の予定・できること確認を既存の通常送信経路へ流す。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。フキダシ上部の `reply-actions` は回答コピー・再読み上げ・停止・全画面切替を提供する。
+- 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。履歴上部の検索欄で会話履歴を絞り込み、各履歴の「コピー」と、ユーザー発話の「再利用」（入力欄へ戻す）を実行できる。`pet:reset` では履歴・履歴検索・入力履歴もクリアする。
 - `pet_init` はバックエンド文脈に復元済みの直近会話を `history` として返し、フロントは全画面フキダシの履歴表示へ反映する。読み上げ中にキャラクターをクリックすると現在の音声を停止する。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
 - アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。さらに `npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行し、前回の残存プロセスを停止して同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。手動停止は `npm run stop`。起動・アプリ・フロント・音声・エンジンログは `PicoAgent/log/` に日付付き（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）で集約し、1 日ごとにローテート・1 週間保持する（履歴は対象外）。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / set-position / set-size / event / webview 生成）。
-- 製品化: `productName=PicoAgent` / `identifier=com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app` から移行）。設定・履歴・メモリは `app_config_dir`/`app_data_dir` を使い、初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行識別子へコピー移行する。同梱系の実行時取得物はユーザーデータ配下の `PicoAgent/bundled/`、ログは `PicoAgent/log/` にまとめる。Windows バンドルは NSIS（`bundle.targets`）。Aivis 同梱で入力データが大きいため、NSIS 圧縮は `zlib` を使う。NSIS は `installer-hooks.nsh` を使い、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、現行識別子 `com.picoagent.desktop` と旧 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除する。
+- 製品化: `productName=PicoAgent` / `identifier=com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app` から移行）。設定・履歴・メモリは `app_config_dir`/`app_data_dir` を使い、初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行識別子へコピー移行する。同梱系の実行時取得物はユーザーデータ配下の `PicoAgent/bundled/`、ログは `PicoAgent/log/` にまとめる。Windows バンドルは NSIS（`bundle.targets`）。Aivis 同梱で入力データが大きいため、NSIS 圧縮は `zlib` を使う。Rust release profile は LTO・strip・panic abort・debug 情報無効化を有効にして、配布バイナリのシンボル情報を減らす。NSIS は `installer-hooks.nsh` を使い、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、現行識別子 `com.picoagent.desktop` と旧 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除する。
   アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
   署名（Authenticode）・自動更新（`tauri-plugin-updater`）はリリース時に鍵・証明書を用意して設定する（現状未設定）。

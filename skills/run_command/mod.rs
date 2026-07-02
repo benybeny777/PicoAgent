@@ -18,7 +18,7 @@ use crate::message::Field;
 
 const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
-const MAX_OUTPUT_BYTES: usize = 32 * 1024;
+pub const MAX_OUTPUT_BYTES: usize = 32 * 1024;
 const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
 const APPROVAL_MARKER: &str = "__PICOAGENT_COMMAND_APPROVAL__";
 
@@ -34,29 +34,13 @@ pub struct PendingCommandApproval {
     pub reason: String,
 }
 
-fn home() -> String {
-    dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
-fn command_root(cfg: &Config) -> PathBuf {
-    PathBuf::from(cfg.get("PICOAGENT_COMMAND_ROOT", &home()))
-}
-
-fn extra_command_roots(cfg: &Config) -> Vec<PathBuf> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "")
-        .split(['\n', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(PathBuf::from)
-        .collect()
+// 実行の許可ルートは全スキル共通の permissions を参照する。
+pub fn command_root(cfg: &Config) -> PathBuf {
+    crate::permissions::primary_root(cfg)
 }
 
 fn command_roots(cfg: &Config) -> Vec<PathBuf> {
-    let mut roots = vec![command_root(cfg)];
-    roots.extend(extra_command_roots(cfg));
-    roots
+    crate::permissions::allowed_roots(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -97,22 +81,14 @@ fn bounded_cwd_in_roots(
     ))
 }
 
-fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
+pub fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
     let base = command_root(cfg);
     bounded_cwd_in_roots(&base, command_roots(cfg), cwd)
 }
 
-#[cfg(windows)]
-fn is_protected_edit_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.starts_with(r"c:\windows")
-        || s.starts_with(r"c:\program files\")
-        || s.starts_with(r"c:\program files (x86)\")
-}
-
-#[cfg(not(windows))]
-fn is_protected_edit_path(_path: &Path) -> bool {
-    false
+// Windows / Program Files などの保護領域は全スキル共通の permissions で判定する。
+pub fn is_protected_edit_path(path: &Path) -> bool {
+    crate::permissions::is_system_protected(path)
 }
 
 fn parse_args(args: &Value) -> Result<Vec<String>, String> {
@@ -178,6 +154,52 @@ fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
     })
 }
 
+fn program_stem(program: &str) -> String {
+    let trimmed = program.trim_matches(['"', '\'']);
+    Path::new(trimmed)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase()
+}
+
+fn looks_like_token(text: &str, token: &str) -> bool {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .any(|part| part.eq_ignore_ascii_case(token))
+}
+
+fn is_physical_delete_command(program: &str, args: &[String]) -> bool {
+    let program = program_stem(program);
+    match program.as_str() {
+        "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" => true,
+        "git" => args
+            .first()
+            .is_some_and(|arg| arg.eq_ignore_ascii_case("clean")),
+        "powershell" | "pwsh" => args.iter().any(|arg| {
+            let lower = arg.to_ascii_lowercase();
+            looks_like_token(&lower, "remove-item")
+                || looks_like_token(&lower, "rm")
+                || looks_like_token(&lower, "del")
+                || looks_like_token(&lower, "erase")
+                || looks_like_token(&lower, "rmdir")
+                || looks_like_token(&lower, "rd")
+        }),
+        "cmd" => args.iter().any(|arg| {
+            let lower = arg.to_ascii_lowercase();
+            looks_like_token(&lower, "del")
+                || looks_like_token(&lower, "erase")
+                || looks_like_token(&lower, "rmdir")
+                || looks_like_token(&lower, "rd")
+        }),
+        _ => false,
+    }
+}
+
+fn physical_delete_error() -> String {
+    "エラー: スキル経由のファイル削除は物理削除ではなくゴミ箱へ移動する必要があります。rm / del / Remove-Item / git clean などの物理削除コマンドは実行できません。"
+        .to_string()
+}
+
 fn approval_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -209,7 +231,7 @@ pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
     )
 }
 
-fn trim_output(label: &str, bytes: &[u8]) -> String {
+pub fn trim_output(label: &str, bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     if text.len() <= MAX_OUTPUT_BYTES {
         return format!("{}:\n{}", label, text);
@@ -222,13 +244,13 @@ fn trim_output(label: &str, bytes: &[u8]) -> String {
 }
 
 #[cfg(windows)]
-fn hide_window(command: &mut Command) {
+pub fn hide_window(command: &mut Command) {
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
+pub fn hide_window(_command: &mut Command) {}
 
 #[async_trait]
 impl Tool for RunCommandTool {
@@ -276,13 +298,6 @@ impl Tool for RunCommandTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_COMMAND_ENABLED", "run_command を有効化（true/false）", "text", "false"),
-            Field::new("PICOAGENT_COMMAND_ROOT", "run_command の実行許可ルート", "text", &home()),
-            Field::new(
-                "PICOAGENT_COMMAND_ALLOWED_PATHS",
-                "run_command の追加許可パス（改行または ; 区切り）",
-                "textarea",
-                "",
-            ),
             Field::new(
                 "PICOAGENT_COMMAND_ALLOWLIST",
                 "run_command の許可コマンド（カンマ区切り prefix）",
@@ -306,6 +321,9 @@ impl Tool for RunCommandTool {
             Ok(parsed_args) => parsed_args,
             Err(error) => return format!("エラー: {}", error),
         };
+        if is_physical_delete_command(program, &parsed_args) {
+            return physical_delete_error();
+        }
         let base = command_root(cfg);
         let requested_cwd = args.get("cwd").and_then(Value::as_str).unwrap_or(".");
         let cwd = normalize(&base, requested_cwd);
@@ -355,6 +373,9 @@ impl Tool for RunCommandTool {
 
 pub async fn execute_pending(pending: &PendingCommandApproval) -> String {
     let cwd = PathBuf::from(&pending.cwd);
+    if is_physical_delete_command(&pending.program, &pending.args) {
+        return physical_delete_error();
+    }
     if is_protected_edit_path(&cwd) {
         return format!(
             "エラー: Windows / Program Files 配下は編集不可のため、コマンド実行先にできません: {}",
@@ -369,6 +390,9 @@ pub async fn execute_with_persistent_approval(
     pending: &PendingCommandApproval,
 ) -> String {
     let cwd = PathBuf::from(&pending.cwd);
+    if is_physical_delete_command(&pending.program, &pending.args) {
+        return physical_delete_error();
+    }
     if is_protected_edit_path(&cwd) {
         return format!(
             "エラー: Windows / Program Files 配下は編集不可のため、コマンド実行先にできません: {}",
@@ -394,7 +418,7 @@ pub async fn execute_with_persistent_approval(
     }
     if bounded_cwd(cfg, Some(&pending.cwd)).is_err() {
         let entry = cwd.to_string_lossy().to_string();
-        let current = cfg.get("PICOAGENT_COMMAND_ALLOWED_PATHS", "");
+        let current = cfg.get("PICOAGENT_ALLOWED_PATHS", "");
         let exists = current
             .split(['\n', ';'])
             .map(str::trim)
@@ -406,7 +430,7 @@ pub async fn execute_with_persistent_approval(
                 format!("{}\n{}", current.trim(), entry)
             };
             patch.insert(
-                "PICOAGENT_COMMAND_ALLOWED_PATHS".to_string(),
+                "PICOAGENT_ALLOWED_PATHS".to_string(),
                 Value::String(next),
             );
             saved.push(format!("追加許可パス `{entry}`"));
@@ -433,6 +457,9 @@ async fn execute_approved(
     cwd: &Path,
     timeout_secs: u64,
 ) -> String {
+    if is_physical_delete_command(program, parsed_args) {
+        return physical_delete_error();
+    }
     let mut command = Command::new(program);
     command
         .args(parsed_args)
@@ -467,7 +494,7 @@ inventory::submit! { ToolReg { make: || Box::new(RunCommandTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_cwd_in_roots, command_tokens};
+    use super::{bounded_cwd_in_roots, command_tokens, is_physical_delete_command};
     use std::path::PathBuf;
 
     #[test]
@@ -492,5 +519,20 @@ mod tests {
     fn 実行cwdのルート外を拒否する_スラッシュ区切り() {
         let base = std::env::temp_dir().join("picoagent-cmd-test");
         assert!(bounded_cwd_in_roots(&base, vec![base.clone()], Some("../other")).is_err());
+    }
+
+    #[test]
+    fn 物理削除コマンドを拒否判定する() {
+        assert!(is_physical_delete_command("rm", &["target.txt".to_string()]));
+        assert!(is_physical_delete_command(
+            "powershell",
+            &["-Command".to_string(), "Remove-Item target.txt".to_string()]
+        ));
+        assert!(is_physical_delete_command(
+            "cmd",
+            &["/C".to_string(), "del target.txt".to_string()]
+        ));
+        assert!(is_physical_delete_command("git", &["clean".to_string(), "-fd".to_string()]));
+        assert!(!is_physical_delete_command("git", &["status".to_string()]));
     }
 }
