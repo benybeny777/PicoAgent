@@ -126,7 +126,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .alarm-awake { position:static; height:30px; padding:0 14px; border-radius:9px; background:var(--accent); color:white; font-size:12px; }
 .composer { position:relative; z-index:2; flex:0 0 auto; margin-top:auto; padding-top:10px; }
 .composer[hidden] { display:none; }
-.composer.drag-over textarea { border-color:var(--field-focus); box-shadow:0 0 0 3px rgba(242,126,145,.18); }
+.composer.drag-over textarea { border:1px dashed var(--accent); background:rgba(242,126,145,.07); box-shadow:0 0 0 3px rgba(242,126,145,.18); }
 .quick-actions { display:flex; flex-wrap:wrap; gap:5px; margin:0 0 7px; }
 .quick-actions button { position:static; height:24px; padding:0 8px; border-radius:8px; background:var(--chip-bg); color:var(--muted); border:1px solid var(--chip-border); font-size:10px; font-weight:700; }
 .quick-actions button:hover { color:var(--ink); border-color:var(--field-focus); filter:none; }
@@ -194,11 +194,20 @@ button:disabled { opacity:.48; cursor:default; }
 .md img { max-width:100%; border-radius:6px; margin:3px 0; display:block; }
 .copy-code { position:absolute; top:5px; right:6px; height:auto; padding:2px 7px; border-radius:5px; background:var(--code-btn-bg); color:var(--ink); font-size:10px; font-weight:600; }
 .copy-code:hover { background:var(--code-btn-bg-hover); }
-.approval-buttons { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
-.approval-ok,.approval-persist,.approval-cancel { position:static; height:auto; padding:5px 13px; border-radius:8px; font-size:11px; font-weight:700; }
-.approval-ok { background:#c0627a; }
-.approval-persist { background:#9f6aad; }
-.approval-cancel { background:#8a8090; }
+/* コマンド実行の許可ダイアログ風カード。 */
+.approval-card { margin-top:4px; padding:12px 13px; border:1px solid var(--panel-border); border-radius:12px; background:var(--field-bg); box-shadow:0 3px 10px rgba(42,31,46,.07); }
+.approval-card-title { display:flex; align-items:center; gap:6px; color:var(--ink); font-size:12.5px; font-weight:700; }
+.approval-card-desc { margin:6px 0 8px; color:var(--muted); font-size:11.5px; }
+.approval-cmd { padding:8px 10px; border-radius:8px; background:var(--code-bg); color:var(--ink); font:12px/1.5 Consolas,"Yu Gothic UI",monospace; white-space:pre; overflow-x:auto; user-select:text; }
+.approval-meta { display:flex; flex-direction:column; gap:2px; margin-top:7px; color:var(--muted); font-size:11px; }
+.approval-meta > div { overflow-wrap:anywhere; }
+.approval-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; margin-top:11px; }
+.approval-ok,.approval-persist,.approval-cancel { position:static; height:30px; padding:0 13px; border-radius:8px; font-size:11.5px; font-weight:700; }
+.approval-ok { background:var(--accent); }
+.approval-persist { background:transparent; border:1px solid var(--field-focus); color:var(--link); }
+.approval-cancel { background:transparent; border:1px solid var(--field-border); color:var(--muted); }
+.approval-persist:hover { background:rgba(242,126,145,.08); }
+.approval-cancel:hover { color:var(--ink); border-color:var(--field-focus); }
 .cancel-send { position:static; align-self:flex-start; height:auto; margin-top:4px; padding:4px 12px; border-radius:8px; background:#8a8090; font-size:10px; font-weight:700; }
 .cancel-send:hover { filter:brightness(1.08); }
 .cancel-send[hidden] { display:none; }
@@ -243,3 +252,20 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .toast.toast-error { background:rgba(158,54,74,.9); }
 /* テキスト選択色をテーマに合わせる。 */
 ::selection { background:rgba(242,126,145,.35); }
+
+/* ── 会話表示のポリッシュ ─────────────────────────────────────── */
+/* ストリーミング受信中は文末に点滅カーソルを出す（生成中であることを示す）。 */
+.reply.streaming .md > :last-child::after { content:"▍"; margin-left:1px; color:var(--accent); animation:caret-blink 1s steps(2) infinite; }
+@keyframes caret-blink { 50% { opacity:0; } }
+/* エラー返信は左に赤いバーを付けて一目でわかるようにする。 */
+.reply.reply-error .md { border-left:3px solid #c0627a; padding-left:9px; }
+/* コードブロックの言語バッジ（renderMarkdown が pre[data-lang] を付与する）。 */
+.md pre[data-lang] { padding-top:24px; }
+.md pre[data-lang]::before { content:attr(data-lang); position:absolute; top:5px; left:8px; padding:1px 6px; border-radius:4px; background:var(--code-btn-bg); color:var(--muted); font-size:9px; font-weight:700; letter-spacing:.04em; text-transform:lowercase; }
+/* ── 感情に応じてキャラクターのオーラ色が変わる ─────────────────── */
+.character[data-emotion="happy"]::before { background:radial-gradient(circle,rgba(255,199,146,.4),rgba(255,225,170,.14) 48%,transparent 72%); }
+.character[data-emotion="excited"]::before { background:radial-gradient(circle,rgba(255,150,180,.46),rgba(255,190,215,.16) 48%,transparent 72%); }
+.character[data-emotion="curious"]::before { background:radial-gradient(circle,rgba(190,170,255,.42),rgba(215,205,255,.15) 48%,transparent 72%); }
+.character[data-emotion="surprised"]::before { background:radial-gradient(circle,rgba(255,226,130,.45),rgba(255,240,180,.16) 48%,transparent 72%); }
+.character[data-emotion="sad"]::before { background:radial-gradient(circle,rgba(140,175,230,.34),rgba(180,205,245,.12) 48%,transparent 72%); opacity:.6; }
+@media (prefers-reduced-motion:reduce) { .reply.streaming .md > :last-child::after { animation:none; } }

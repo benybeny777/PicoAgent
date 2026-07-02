@@ -628,26 +628,58 @@ function renderMarkdown(container, src) {
     return false;
   })();
   if (hasApproval) {
-    const btns = document.createElement("div");
-    btns.className = "approval-buttons";
-    [["実行する（今回のみ）", "approval-ok", "許可"],
-     ["常に許可する", "approval-persist", "永続許可"],
-     ["キャンセル", "approval-cancel", "キャンセル"]].forEach(([label, cls, val]) => {
-      const btn = document.createElement("button");
-      btn.type = "button"; btn.className = cls; btn.textContent = label;
-      btn.addEventListener("click", () => {
-        if (busy) {
-          status.textContent = "処理中です…少し待ってください";
-          setTimeout(() => { if (status.textContent.startsWith("処理中")) status.textContent = ""; }, 2000);
-          return;
-        }
-        input.value = val;
-        if (composer.hidden) openComposer();
-        composer.requestSubmit();
+    // 承認ボタン（キャンセル→常に許可→今回のみ実行の順。主ボタンは右端）。
+    const makeButtons = () => {
+      const btns = document.createElement("div");
+      btns.className = "approval-actions";
+      [["キャンセル", "approval-cancel", "キャンセル"],
+       ["常に許可", "approval-persist", "永続許可"],
+       ["今回のみ実行", "approval-ok", "許可"]].forEach(([label, cls, val]) => {
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.className = cls; btn.textContent = label;
+        btn.addEventListener("click", () => {
+          if (busy) {
+            status.textContent = "処理中です…少し待ってください";
+            setTimeout(() => { if (status.textContent.startsWith("処理中")) status.textContent = ""; }, 2000);
+            return;
+          }
+          input.value = val;
+          if (composer.hidden) openComposer();
+          composer.requestSubmit();
+        });
+        btns.append(btn);
       });
-      btns.append(btn);
-    });
-    wrap.append(btns);
+      return btns;
+    };
+    // 承認プロンプトから「コマンド/作業ディレクトリ/理由」を取り出せたら、
+    // 一般的な許可ダイアログ風のカードとして描画する（生テキストは出さない）。
+    const command = String(src ?? "").match(/^コマンド:\s?(.+)$/m)?.[1];
+    const cwd = String(src ?? "").match(/^作業ディレクトリ:\s?(.+)$/m)?.[1];
+    const reason = String(src ?? "").match(/^理由:\s?(.+)$/m)?.[1];
+    if (command) {
+      const card = document.createElement("div");
+      card.className = "approval-card";
+      const title = document.createElement("div");
+      title.className = "approval-card-title";
+      title.textContent = "🛡️ コマンドの実行許可";
+      const desc = document.createElement("p");
+      desc.className = "approval-card-desc";
+      desc.textContent = "次のコマンドを実行してもいい？";
+      const cmd = document.createElement("div");
+      cmd.className = "approval-cmd";
+      cmd.textContent = `$ ${command}`;
+      card.append(title, desc, cmd);
+      const meta = document.createElement("div");
+      meta.className = "approval-meta";
+      if (cwd) { const row = document.createElement("div"); row.textContent = `📁 ${cwd}`; meta.append(row); }
+      if (reason && reason !== "(理由未記載)") { const row = document.createElement("div"); row.textContent = `💬 ${reason}`; meta.append(row); }
+      if (meta.childElementCount) card.append(meta);
+      card.append(makeButtons());
+      wrap.replaceChildren(card);
+    } else {
+      // 形式が読み取れないときは従来どおり本文の下へボタンだけ付ける。
+      wrap.append(makeButtons());
+    }
   }
   container.append(wrap);
 }
@@ -1452,6 +1484,7 @@ composer.addEventListener("submit", async event => {
   setInputValue("");
   resetPromptHistoryNavigation();
   status.textContent = "考え中…";
+  reply.classList.remove("reply-error"); // 前回のエラー表示をリセット
   status.classList.add("busy"); // 処理中スピナーを表示する
   setAnimation("thinking");
   // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
@@ -1467,10 +1500,14 @@ composer.addEventListener("submit", async event => {
       if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 念のため前回の購読を解放（多重購読防止）
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         streamBuffer += chunk;
+        reply.classList.add("streaming"); // 文末の点滅カーソル表示
         if (!streamRenderFrame) {
           streamRenderFrame = requestAnimationFrame(() => {
             streamRenderFrame = null;
+            // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
+            const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
             renderReply(streamBuffer);
+            if (nearBottom) reply.scrollTop = reply.scrollHeight;
             if (animationName === "thinking") setAnimation("talking");
           });
         }
@@ -1537,6 +1574,7 @@ composer.addEventListener("submit", async event => {
       ++speakingToken;
       stopVoice();
       renderReply(result.reply);
+      reply.classList.add("reply-error");
       addRetryButton();
       addHistory("assistant", result.reply);
       setAnimation("sad");
@@ -1553,12 +1591,14 @@ composer.addEventListener("submit", async event => {
     stopVoice();
     const message = `応答に失敗しました: ${error?.message || error}`;
     renderReply(message);
+    reply.classList.add("reply-error");
     addRetryButton();
     addHistory("assistant", message);
     status.textContent = "接続を確認してね";
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    reply.classList.remove("streaming");
     status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
     // ストリーム・進捗リスナーを解除する。
