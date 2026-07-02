@@ -6,6 +6,12 @@
 
 ## 2026-07-03
 
+### Live2D キャラクター対応（本物の Cubism ランタイム描画）
+
+- **Live2D 描画パスを追加** (`ui/renderer.js` / `ui/styles.css` / `src-tauri/tauri.conf.json`): `character.json` に `live2d.model` を持つキャラは、従来のPNG連番＋CSS揺れ（疑似Live2D）ではなく Cubism ランタイム（Cubism Core + PIXI 6 + pixi-live2d-display）で WebGL 描画するようにした。まばたき・アイドルモーションはモデル定義が自動再生し、状態変化（考え中・返答・落胆）は `live2d.motions` の写像先モーションを再生、読み上げ中は既存の WebAudio 振幅解析で `ParamMouthOpenY` を直接動かして声量連動の口パクにする。視線追従はモデルの `focus()` でカーソルへ顔を向ける。CSP に Cubism Core の WASM 用 `'wasm-unsafe-eval'` を追加した。
+- **取得スクリプトとサンプルキャラ「ひより」を追加** (`scripts/fetch-live2d.mjs` / `characters/hiyori/` / `package.json` / `.gitignore`): `npm run setup:live2d`（dev / build 前に自動実行）がランタイム3点を `ui/vendor/live2d/` へ、Live2D 公式サンプルモデル「ひより」を `characters/hiyori/live2d/` へ取得する。再配布条件（Live2D Proprietary Software License / Free Material License）があるため取得物は Git 管理外にした。既存キャラ（むぎ・りん・まい）は Live2D リグ素材が無いため従来のPNG連番のまま。
+- **フレーム生成スクリプトは Live2D キャラをスキップ** (`scripts/build-character-animations.py`): `live2d` を持つキャラでは連番フレームを生成しない。
+
 ### 音声設定の表示項目を整理
 
 - **音声タブを簡素化** (`ui/settings.js`): 通常の音声設定では「Aivis で回答を読み上げる」と「キャラボイスの音量（0〜100）」だけを表示し、Aivis 推論デバイス・ポート・共通 speaker ID・キャラ別 speaker ID は内部既定値を使う非表示項目にした。

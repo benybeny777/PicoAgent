@@ -3,6 +3,7 @@
   "characters": [
     { "id": "mugi", "name": "むぎ", "manifest": "mugi/character.json", "description": "明るく観察上手な小さな作業相棒。" },
     { "id": "rin", "name": "りん", "manifest": "rin/character.json", "description": "口は強いけれど面倒見がいいツンデレ作業相棒。" },
-    { "id": "mai", "name": "まい", "manifest": "mai/character.json", "description": "おっとりして優しいお姉さん作業相棒。" }
+    { "id": "mai", "name": "まい", "manifest": "mai/character.json", "description": "おっとりして優しいお姉さん作業相棒。" },
+    { "id": "hiyori", "name": "ひより", "manifest": "hiyori/character.json", "description": "Live2Dで動く元気いっぱいの作業相棒。" }
   ]
 }

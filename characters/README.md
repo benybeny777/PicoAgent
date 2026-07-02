@@ -3,6 +3,9 @@
 PicoAgent のキャラクター画像は、各キャラフォルダを同じ構成にそろえて管理する。
 正本は `characters/<キャラクターID>/` で、`ui/assets/characters/` は同期生成物。
 
+Live2D キャラ（`character.json` に `live2d` を持つキャラ）は本ページの連番フレーム構成を使わない。
+末尾の「Live2D キャラクター」を参照。
+
 ## 必須ファイル
 
 ```text
@@ -67,3 +70,21 @@ npm run sync:characters
 
 `boot/sleeping.png` が無い場合、`build-character-animations.py` は警告を出す。
 警告が出たキャラは、ローディング画面で通常立ち絵に戻ってしまうため、配布前に必ず寝姿画像を追加する。
+
+## Live2D キャラクター
+
+`character.json` に `live2d` を定義すると、連番フレームの代わりに Cubism ランタイムでモデルを描画する。
+
+```text
+characters/<id>/
+├── character.json           # live2d.model / motions / lipSyncParam / scale / offsetY を定義
+├── preview.png              # 設定画面アイコン・ローディング画面用の静止画（boot.sleeping に指定）
+└── live2d/                  # モデル一式（.model3.json・.moc3・テクスチャ・モーション）
+```
+
+- `layers/` と `animations/` は不要。まばたき・口パク・モーションはモデル定義が担当する。
+- `build-character-animations.py` は Live2D キャラをスキップする。
+- サンプルの `hiyori`（Live2D 公式サンプルモデル）は `npm run setup:live2d` が `live2d/` へモデルを取得する。
+  再配布条件があるためモデル実体は Git 管理外（`preview.png` は差し替え可能なプレースホルダ）。
+- 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
+  `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。

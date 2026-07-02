@@ -218,6 +218,10 @@ def clean_expression_layers(layer_paths: dict[str, Path]) -> None:
 
 def build_character(character_dir: Path, version: str | None, disable_sway: bool) -> None:
     manifest = load_manifest(character_dir)
+    if manifest.get("live2d"):
+        # Live2D キャラはモデル自身が動くため連番フレームを生成しない。
+        print(f"[build-character-animations] {character_dir.name} は Live2D キャラのためスキップします")
+        return
     warn_missing_boot(character_dir, manifest)
     layer_paths = ensure_layers(character_dir)
     clean_expression_layers(layer_paths)

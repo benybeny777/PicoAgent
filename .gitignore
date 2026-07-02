@@ -25,5 +25,9 @@ ui-dist/
 # キャラの配信コピー（正本は characters/。sync:characters / beforeDevCommand で生成）
 ui/assets/characters/
 
+# Live2D ランタイムとサンプルモデル（npm run setup:live2d で取得。再配布条件があるため含めない）
+ui/vendor/live2d/
+characters/hiyori/live2d/
+
 # ローカル設定（個人 PC 専用。app_config_dir に保存されるが念のため）
 config.json

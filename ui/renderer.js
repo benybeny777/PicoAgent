@@ -133,6 +133,8 @@ window.addEventListener("beforeunload", () => {
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   stopVoice(false);
+  stopLive2D();
+  if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
 
 const characterManifestCacheKey = "2026-07-01-persona-v2";
@@ -362,7 +364,7 @@ function personaText(manifest, override) {
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   const { manifest, root } = await loadCharacterManifest(characterId);
-  if (!manifest.animations?.idle) throw new Error("idle アニメーションが定義されていません");
+  if (!manifest.live2d?.model && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const signature = `${manifest.id}\n${assetVersion}\n${profile}`;
@@ -370,10 +372,26 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterRoot = root;
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
-  animations = manifest.animations;
-  preloadAnimations();
+  animations = manifest.animations || {};
   stopLipSync();
-  await probeRigLayers(); // layers 素材があればリップシンク対応
+  if (manifest.live2d?.model) {
+    rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
+    try {
+      await startLive2D(manifest);
+    } catch (error) {
+      stopLive2D();
+      if (!manifest.animations?.idle) throw error;
+      // フォールバック許可: Live2D ランタイム未取得でも、フレームアニメを持つキャラは表示を継続する（通知済み）。
+      logApp("error", "Live2D の初期化に失敗しました（フレームアニメで継続）", errorDetail(error));
+      setStatus("Live2D を初期化できませんでした");
+      preloadAnimations();
+      await probeRigLayers();
+    }
+  } else {
+    stopLive2D();
+    preloadAnimations();
+    await probeRigLayers(); // layers 素材があればリップシンク対応
+  }
   frame = 0;
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
@@ -387,7 +405,9 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
 }
 function setAnimation(name, force = false) {
   if (!force && animationName === name) return;
-  animationName = animations[name] ? name : "idle"; frame = 0; lastFrameAt = performance.now();
+  animationName = (animations[name] || live2dActive) ? name : "idle"; frame = 0; lastFrameAt = performance.now();
+  if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
+  if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   character.dataset.motion = animations[animationName].motion || animationName;
   if (!rigActive) petSprite.src = frameUrl(animationName, 0);
 }
@@ -397,10 +417,13 @@ function frameDuration(animation, index) {
   return 1000 / animation.fps;
 }
 function animate(now) {
-  if (reduceMotion) { petSprite.src = frameUrl("idle", 0); return; }
+  // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
+  if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
+  if (reduceMotion) { if (animations.idle) petSprite.src = frameUrl("idle", 0); return; }
   // リグ動作中はフレーム送りを止める（ベース＋オーバーレイ側が表情を担当する）。
   if (rigActive) { animationRequestId = requestAnimationFrame(animate); return; }
   const animation = animations[animationName] || animations.idle;
+  if (!animation) { animationRequestId = requestAnimationFrame(animate); return; } // フレーム定義が無いキャラ（Live2D 初期化失敗時）はループだけ維持する
   if (!lastFrameAt) lastFrameAt = now;
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
     frame = (frame + 1) % animation.frames;
@@ -483,13 +506,15 @@ function detachLipSyncAudio() {
   rigSource = null;
   rigAnalyser = null;
   rigMouthOpen = false;
+  live2dMouth = -1;
   rigRefresh();
 }
 
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
+// Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
-  if (!rigAvailable || reduceMotion) return;
-  if (!rigActive) {
+  if ((!rigAvailable && !live2dActive) || reduceMotion) return;
+  if (!live2dActive && !rigActive) {
     rigActive = true;
     rigFace = "";
     rigMouthOpen = false;
@@ -517,14 +542,15 @@ function attachLipSync(audio) {
   if (useTimer) {
     rigMouthTimer = setInterval(() => {
       rigMouthOpen = !rigMouthOpen;
-      rigRefresh();
+      if (live2dActive) live2dMouth = rigMouthOpen ? 0.8 : 0;
+      else rigRefresh();
     }, 120);
     return;
   }
   const data = new Uint8Array(rigAnalyser.fftSize);
   let peak = 0.04; // 音量差に追従する適応しきい値
   const analyserLoop = () => {
-    if (!rigActive || !rigAnalyser) return;
+    if ((!rigActive && !live2dActive) || !rigAnalyser) return;
     rigAnalyser.getByteTimeDomainData(data);
     let sum = 0;
     for (let i = 0; i < data.length; i += 1) {
@@ -533,8 +559,13 @@ function attachLipSync(audio) {
     }
     const rms = Math.sqrt(sum / data.length);
     peak = Math.max(peak * 0.995, rms, 0.02);
-    rigMouthOpen = rms > peak * 0.45;
-    rigRefresh();
+    if (live2dActive) {
+      // 声量に比例して口を開く（0〜1）。小さな音は閉じたままにする。
+      live2dMouth = rms > peak * 0.3 ? Math.min(1, rms / (peak * 0.9)) : 0;
+    } else {
+      rigMouthOpen = rms > peak * 0.45;
+      rigRefresh();
+    }
     rigVolFrame = requestAnimationFrame(analyserLoop);
   };
   rigVolFrame = requestAnimationFrame(analyserLoop);
@@ -542,6 +573,7 @@ function attachLipSync(audio) {
 
 // リグを完全に終了して通常のフレームアニメへ戻す。
 function stopLipSync() {
+  if (live2dActive) { detachLipSyncAudio(); return; }
   if (!rigActive) return;
   rigActive = false;
   detachLipSyncAudio();
@@ -551,10 +583,129 @@ function stopLipSync() {
   petSprite.src = frameUrl(animationName, frame);
 }
 
+// ── Live2D 本体レンダリング ─────────────────────────────────────────
+// character.json に live2d.model がある場合、PNG フレームの代わりに Cubism ランタイム
+// （ui/vendor/live2d/、npm run setup:live2d で取得）でモデルを WebGL 描画する。
+// まばたきとアイドルモーションはモデル定義（EyeBlink・Idle グループ）が自動で担当し、
+// 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
+let live2dActive = false;
+let live2dModel = null;
+let live2dApp = null;
+let live2dCanvas = null;
+let live2dMouth = -1; // 読み上げ中の口の開き（0〜1）。-1 はモーション任せ。
+let live2dRuntimePromise = null;
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`スクリプトを読み込めませんでした: ${src}`));
+    document.head.append(script);
+  });
+}
+
+// ランタイム3点を一度だけ順に読み込む（Cubism Core → PIXI → pixi-live2d-display）。
+async function ensureLive2DRuntime() {
+  if (window.PIXI?.live2d?.Live2DModel) return;
+  if (!live2dRuntimePromise) {
+    live2dRuntimePromise = (async () => {
+      await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js");
+      await loadScriptOnce("vendor/live2d/pixi.min.js");
+      await loadScriptOnce("vendor/live2d/cubism4.min.js");
+    })().catch(error => {
+      live2dRuntimePromise = null; // 取得後の再選択で再試行できるようにする
+      throw new Error(`Live2D ランタイムを読み込めません（npm run setup:live2d を実行してください）: ${error.message}`);
+    });
+  }
+  await live2dRuntimePromise;
+}
+
+async function startLive2D(manifest) {
+  await ensureLive2DRuntime();
+  stopLive2D();
+  const cfg = manifest.live2d;
+  if (!live2dCanvas) {
+    live2dCanvas = document.createElement("canvas");
+    live2dCanvas.id = "live2dCanvas";
+    character.insertBefore(live2dCanvas, petSprite);
+  }
+  live2dCanvas.style.display = "";
+  const width = character.clientWidth || 265;
+  const height = character.clientHeight || 315;
+  if (!live2dApp) {
+    live2dApp = new PIXI.Application({
+      view: live2dCanvas,
+      width,
+      height,
+      backgroundAlpha: 0,
+      antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    });
+  }
+  const model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${cfg.model}`, { autoInteract: false });
+  // 表示枠へ等比率で収め、下端中央に立たせる。
+  const fit = Math.min(width / model.internalModel.originalWidth, height / model.internalModel.originalHeight);
+  model.scale.set(fit * (Number(cfg.scale) || 1));
+  model.anchor.set(0.5, 1);
+  model.position.set(width / 2, height + (Number(cfg.offsetY) || 0));
+  // モーション更新の直後にリップシンク値を上書きする（モーション側が口を閉じ戻すのを防ぐ）。
+  const coreModel = model.internalModel.coreModel;
+  const lipParam = String(cfg.lipSyncParam || "ParamMouthOpenY");
+  const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
+  model.internalModel.motionManager.update = (...args) => {
+    const updated = motionUpdate(...args);
+    if (live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
+    return updated;
+  };
+  if (reduceMotion) {
+    // モーション再生を止め、呼吸などの静かな自動更新だけにする。
+    model.internalModel.motionManager.groups.idle = "";
+  } else if (cfg.motions?.idle) {
+    model.internalModel.motionManager.groups.idle = cfg.motions.idle;
+  }
+  live2dApp.stage.addChild(model);
+  live2dModel = model;
+  live2dActive = true;
+  petSprite.style.display = "none";
+}
+
+// 状態名（idle/thinking/talking/sad）を character.json の live2d.motions でグループへ写像して再生する。
+function playLive2DMotion(name) {
+  if (!live2dModel || reduceMotion) return;
+  if (name === "idle") { live2dModel.internalModel.motionManager.stopAllMotions(); return; } // Idle グループの自動再生へ戻す
+  const motions = characterManifest?.live2d?.motions || {};
+  const group = motions[name] || motions.idle;
+  if (!group) return;
+  const priority = window.PIXI?.live2d?.MotionPriority?.FORCE ?? 3;
+  live2dModel.motion(group, undefined, priority);
+}
+
+// モデルを破棄して PNG フレーム表示へ戻す（PIXI アプリとキャンバスは再利用のため保持）。
+function stopLive2D() {
+  live2dMouth = -1;
+  if (live2dModel) {
+    live2dApp?.stage?.removeChild(live2dModel);
+    live2dModel.destroy();
+    live2dModel = null;
+  }
+  if (live2dCanvas) live2dCanvas.style.display = "none";
+  if (live2dActive) {
+    live2dActive = false;
+    petSprite.style.display = "";
+  }
+}
+
 // ── 疑似視線追従: マウスの方向へキャラクターがわずかに傾く ─────────────
 if (!reduceMotion) {
   let lookResetTimer = 0;
   document.addEventListener("mousemove", event => {
+    // Live2D はモデル自身の視線・顔向きをカーソルへ向ける。
+    if (live2dActive && live2dModel && live2dCanvas) {
+      const canvasRect = live2dCanvas.getBoundingClientRect();
+      live2dModel.focus(event.clientX - canvasRect.left, event.clientY - canvasRect.top);
+    }
     const rect = character.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const dx = Math.max(-1, Math.min(1, (event.clientX - centerX) / Math.max(240, window.innerWidth / 2)));
@@ -1269,6 +1420,8 @@ character.addEventListener("click", event => {
   character.classList.remove("boop");
   void character.offsetWidth;
   character.classList.add("boop");
+  // Live2D はタップモーションで反応する（boop の CSS は img にしか効かない）。
+  if (live2dActive && !currentVoice) playLive2DMotion("talking");
   if (!currentVoice) return;
   event.stopPropagation();
   stopVoice();

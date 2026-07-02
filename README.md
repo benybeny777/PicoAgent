@@ -37,6 +37,7 @@
 npm install
 npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
 npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合）
+npm run setup:live2d   # Live2D ランタイムとサンプルモデル「ひより」を取得（npm run dev でも自動実行）
 npm run dev
 ```
 
@@ -60,6 +61,7 @@ OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral などのクラウド�
 - **設定画面ですべて設定** — 右クリック →「設定…」で叩く AI・モデル・接続先・API キー・ツール設定などを GUI 編集。軽い設定は保存で即反映、叩く AI・モデル・音声・キャラクターなど重い設定は確認のうえ再起動して起動画面でまとめて反映。
 - **軽量な Tauri ネイティブ** — システム WebView を使い、Rust バックエンドで動作。
 - キャラクターパックごとの連続フレームと状態別の滑らかな補間動作（待機 / 考え中 / 返答 / エラー）。
+- **Live2D キャラクター対応** — `character.json` に `live2d.model`（`.model3.json`）を持つキャラは Cubism ランタイムで WebGL 描画し、まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。サンプルとして Live2D 公式モデルの「ひより」を同梱（`npm run setup:live2d` で取得）。
 - キャラクターごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面でキャラ選択と人格の上書きが可能。
 - 会話は選択中の叩く AI にのみ送られる。ローカル Ollama を使えば外部送信なし。
 
@@ -153,12 +155,18 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 ```powershell
 npm run setup:engine   # 同梱エンジンを resources/bundled/engine へ取得（未取得の場合）
 npm run setup:whisper  # 同梱Whisperを resources/bundled/whisper へ取得（録音文字起こしを使う場合）
+npm run setup:live2d   # Live2D ランタイムとサンプルモデルを取得（未取得の場合）
 npm run build
 ```
 
-`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI を確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
 
 配布ビルドでは `scripts/build-ui-dist.mjs --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
+
+#### Live2D ランタイムとサンプルモデル
+
+- **取得**: `npm run setup:live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、Live2D 公式サンプルモデル「ひより」を `characters/hiyori/live2d/` へダウンロードします（`LIVE2D_FORCE=1` で再取得）。
+- **ライセンス**: Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるため、これらのファイルはリポジトリへコミットしません（`.gitignore` 済）。
 
 > [!NOTE]
 > 以下のパスはいずれも Windows 表記です。macOS / Linux では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
@@ -202,10 +210,10 @@ npm run build
 
 ```text
 20_PicoAgent/
-├── characters/          ← キャラクター正本（index.json・人格定義・連番フレーム）
+├── characters/          ← キャラクター正本（index.json・人格定義・連番フレームまたは Live2D モデル）
 ├── skills/              ← エージェント機能（スキル）コネクタ（<スキル名>/mod.rs と補助ファイルを同梱）
 ├── ui/                  ← webview フロント（picoagent.js シム・ペット UI・設定画面）
-│                          ※ assets/characters/ は characters/ の配信コピー（自動生成）
+│                          ※ assets/characters/ は characters/ の配信コピー、vendor/live2d/ は Live2D ランタイム（いずれも自動取得・生成）
 ├── src-tauri/
 │   ├── Cargo.toml / build.rs / tauri.conf.json / capabilities / icons
 │   └── src/
