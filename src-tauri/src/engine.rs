@@ -4,7 +4,7 @@
 // OpenAI 互換 API をローカルに立てる。進捗・状態は "engine:status" イベントで UI へ通知する。
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -122,7 +122,7 @@ async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>
         .collect())
 }
 
-async fn running_server_uses_model(app: &AppHandle, model: &PathBuf) -> bool {
+async fn running_server_uses_model(app: &AppHandle, model: &Path) -> bool {
     let Some(file_name) = model.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -239,7 +239,7 @@ fn total_memory_bytes() -> Option<u64> {
                 .and_then(|rest| rest.split_whitespace().next())
                 .and_then(|value| value.parse::<u64>().ok())
         })?;
-        return Some(kb.saturating_mul(1024));
+        Some(kb.saturating_mul(1024))
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {

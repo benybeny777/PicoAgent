@@ -5,6 +5,7 @@
 // 設定保存時にパスワード型の項目だけを暗号化する。
 // 非 Windows では DPAPI が無いため平文で保存する（フォールバック許可: OS機能が無いため）。
 
+#[cfg(windows)]
 use base64::Engine;
 
 const PREFIX: &str = "enc:dpapi:v1:";

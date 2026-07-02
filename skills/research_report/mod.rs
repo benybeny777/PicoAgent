@@ -87,10 +87,8 @@ fn slug(value: &str) -> String {
     for ch in value.chars().take(48) {
         if ch.is_ascii_alphanumeric() {
             out.push(ch.to_ascii_lowercase());
-        } else if ch.is_whitespace() || "-_.".contains(ch) {
-            if !out.ends_with('-') {
-                out.push('-');
-            }
+        } else if (ch.is_whitespace() || "-_.".contains(ch)) && !out.ends_with('-') {
+            out.push('-');
         }
     }
     let trimmed = out.trim_matches('-');
@@ -238,10 +236,7 @@ fn markdown_link(title: &str, url: &str) -> String {
 fn csv_cell(value: &str) -> String {
     format!(
         "\"{}\"",
-        value
-            .replace('"', "\"\"")
-            .replace('\r', " ")
-            .replace('\n', " ")
+        value.replace('"', "\"\"").replace(['\r', '\n'], " ")
     )
 }
 

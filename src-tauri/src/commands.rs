@@ -43,7 +43,7 @@ fn effective_system_prompt(config: &Config) -> String {
 fn estimate_tokens(msg: &Message) -> usize {
     let japanese = msg.content.chars().filter(|c| *c as u32 > 0x7F).count();
     let ascii = msg.content.chars().count() - japanese;
-    japanese * 2 + (ascii + 3) / 4
+    japanese * 2 + ascii.div_ceil(4)
 }
 
 // 非 system メッセージに割り当てるトークン予算の上限。8k コンテキストの約 75% を目安にする。
@@ -271,6 +271,69 @@ fn record_turn(
     *state.messages.lock().unwrap() = compacted.clone();
     crate::history::save(app, &active_character_id(state), &compacted);
     Ok(json!({ "reply": reply }))
+}
+
+/// 選択中のプロバイダとモデル名を解決する。未登録ならフロント向けエラー JSON を Err で返す。
+fn selected_provider(state: &AppState) -> Result<(&'static dyn providers::Provider, String), Value> {
+    let id = state.provider_id.lock().unwrap().clone();
+    let model = state.model.lock().unwrap().clone();
+    match providers::get(&id) {
+        Some(p) => Ok((p, model)),
+        None => Err(
+            json!({ "error": true, "reply": format!("プロバイダ \"{}\" が見つかりません。", id) }),
+        ),
+    }
+}
+
+/// 中断フラグをリセットしてエージェントを実行し、圧縮した会話文脈を state と履歴ファイルへ保存する。
+/// `pet_send` / `pet_send_image` 共通の実行経路。
+async fn run_agent_and_persist(
+    app: &AppHandle,
+    state: &AppState,
+    provider: &'static dyn providers::Provider,
+    model: &str,
+    convo: &mut Vec<Message>,
+) -> anyhow::Result<String> {
+    // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
+    state
+        .cancel_requested
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let result = agent::run(
+        &state.config,
+        provider,
+        model,
+        convo,
+        5,
+        Some(app),
+        Some(&state.cancel_requested),
+    )
+    .await;
+    // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
+    let compacted = compacted_conversation(convo);
+    *state.messages.lock().unwrap() = compacted.clone();
+    crate::history::save(app, &active_character_id(state), &compacted);
+    result
+}
+
+/// 感情状態をルールベースで更新してフロントへ通知し、返信 JSON を組み立てる。
+fn apply_emotion_and_reply(
+    app: &AppHandle,
+    state: &AppState,
+    user_text: &str,
+    reply: String,
+) -> Value {
+    let new_emotion = {
+        let current = state.emotion.lock().unwrap().clone();
+        crate::emotion::update(&current, user_text, &reply)
+    };
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit(
+            "pet:emotion",
+            serde_json::to_value(&new_emotion).unwrap_or_default(),
+        );
+    }
+    *state.emotion.lock().unwrap() = new_emotion;
+    json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } })
 }
 
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
@@ -561,15 +624,9 @@ pub async fn pet_send(
         }
     }
 
-    let id = state.provider_id.lock().unwrap().clone();
-    let model = state.model.lock().unwrap().clone();
-    let provider = match providers::get(&id) {
-        Some(p) => p,
-        None => {
-            return Ok(
-                json!({ "error": true, "reply": format!("プロバイダ \"{}\" が見つかりません。", id) }),
-            )
-        }
+    let (provider, model) = match selected_provider(&state) {
+        Ok(pair) => pair,
+        Err(reply) => return Ok(reply),
     };
 
     // std Mutex を await 跨ぎで保持しないよう、会話をクローンして処理し書き戻す。
@@ -597,25 +654,7 @@ pub async fn pet_send(
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
     let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
 
-    // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
-    state
-        .cancel_requested
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-    let result = agent::run(
-        &state.config,
-        provider,
-        &model,
-        &mut convo,
-        5,
-        Some(&app),
-        Some(&state.cancel_requested),
-    )
-    .await;
-    // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
-    let compacted = compacted_conversation(&convo);
-    *state.messages.lock().unwrap() = compacted.clone();
-    let character_id = active_character_id(&state);
-    crate::history::save(&app, &character_id, &compacted);
+    let result = run_agent_and_persist(&app, &state, provider, &model, &mut convo).await;
     if result.is_ok() {
         if let Some(memory_context) =
             crate::memory::update_from_turn(&app, &state.config, &user_text)
@@ -623,7 +662,7 @@ pub async fn pet_send(
             *state.memory_context.lock().unwrap() = memory_context;
             state.reset_conversation();
             let refreshed = state.messages.lock().unwrap().clone();
-            crate::history::save(&app, &character_id, &refreshed);
+            crate::history::save(&app, &active_character_id(&state), &refreshed);
         }
     }
 
@@ -645,19 +684,7 @@ pub async fn pet_send(
                 crate::history::save(&app, &active_character_id(&state), &compacted);
                 return Ok(json!({ "reply": prompt }));
             }
-            // 感情状態を更新してフロントへ通知する。
-            let new_emotion = {
-                let current = state.emotion.lock().unwrap().clone();
-                crate::emotion::update(&current, &user_text, &reply)
-            };
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit(
-                    "pet:emotion",
-                    serde_json::to_value(&new_emotion).unwrap_or_default(),
-                );
-            }
-            *state.emotion.lock().unwrap() = new_emotion;
-            Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
+            Ok(apply_emotion_and_reply(&app, &state, &user_text, reply))
         }
         Err(e) => {
             let message = log_command_error(&app, "AI応答に失敗しました", e);
@@ -1670,7 +1697,7 @@ pub async fn pet_log(
 #[tauri::command]
 pub fn pet_emotion(state: State<'_, AppState>) -> Result<Value, String> {
     let emotion = state.emotion.lock().unwrap().clone();
-    Ok(serde_json::to_value(&emotion).map_err(|e| e.to_string())?)
+    serde_json::to_value(&emotion).map_err(|e| e.to_string())
 }
 
 /// 今月のトークン使用量（月次集計）と累計を返す。
@@ -1726,15 +1753,9 @@ pub async fn pet_send_image(
         }
     }
 
-    let id = state.provider_id.lock().unwrap().clone();
-    let model = state.model.lock().unwrap().clone();
-    let provider = match providers::get(&id) {
-        Some(p) => p,
-        None => {
-            return Ok(
-                json!({ "error": true, "reply": format!("プロバイダ \"{}\" が見つかりません。", id) }),
-            )
-        }
+    let (provider, model) = match selected_provider(&state) {
+        Ok(pair) => pair,
+        Err(reply) => return Ok(reply),
     };
 
     let mut convo = state.messages.lock().unwrap().clone();
@@ -1751,40 +1772,10 @@ pub async fn pet_send_image(
     let mut convo =
         maybe_summarize_context(convo, provider, &state.config, &model).await;
 
-    // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
-    state
-        .cancel_requested
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-    let result = agent::run(
-        &state.config,
-        provider,
-        &model,
-        &mut convo,
-        5,
-        Some(&app),
-        Some(&state.cancel_requested),
-    )
-    .await;
-    let compacted = compacted_conversation(&convo);
-    *state.messages.lock().unwrap() = compacted.clone();
-    let character_id = active_character_id(&state);
-    crate::history::save(&app, &character_id, &compacted);
+    let result = run_agent_and_persist(&app, &state, provider, &model, &mut convo).await;
 
     match result {
-        Ok(reply) => {
-            let new_emotion = {
-                let current = state.emotion.lock().unwrap().clone();
-                crate::emotion::update(&current, &user_text, &reply)
-            };
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit(
-                    "pet:emotion",
-                    serde_json::to_value(&new_emotion).unwrap_or_default(),
-                );
-            }
-            *state.emotion.lock().unwrap() = new_emotion;
-            Ok(json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } }))
-        }
+        Ok(reply) => Ok(apply_emotion_and_reply(&app, &state, &user_text, reply)),
         Err(e) => {
             let message = log_command_error(&app, "画像付き AI 応答に失敗しました", e);
             Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))

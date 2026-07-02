@@ -23,39 +23,42 @@ const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8188";
 const POLL_INTERVAL_MS: u64 = 2_000;
 const POLL_MAX_SECS: u64 = 120;
 
-fn build_txt2img_workflow(
-    prompt: &str,
-    negative: &str,
+/// txt2img ワークフローの生成パラメータ一式。
+struct Txt2ImgParams<'a> {
+    prompt: &'a str,
+    negative: &'a str,
     width: u32,
     height: u32,
     steps: u32,
-    cfg: f64,
+    cfg_scale: f64,
     seed: i64,
-    checkpoint: &str,
-) -> Value {
+    checkpoint: &'a str,
+}
+
+fn build_txt2img_workflow(p: &Txt2ImgParams) -> Value {
     json!({
         "4": {
             "class_type": "CheckpointLoaderSimple",
-            "inputs": { "ckpt_name": checkpoint }
+            "inputs": { "ckpt_name": p.checkpoint }
         },
         "5": {
             "class_type": "EmptyLatentImage",
-            "inputs": { "width": width, "height": height, "batch_size": 1 }
+            "inputs": { "width": p.width, "height": p.height, "batch_size": 1 }
         },
         "6": {
             "class_type": "CLIPTextEncode",
-            "inputs": { "text": prompt, "clip": ["4", 1] }
+            "inputs": { "text": p.prompt, "clip": ["4", 1] }
         },
         "7": {
             "class_type": "CLIPTextEncode",
-            "inputs": { "text": negative, "clip": ["4", 1] }
+            "inputs": { "text": p.negative, "clip": ["4", 1] }
         },
         "3": {
             "class_type": "KSampler",
             "inputs": {
-                "seed": seed,
-                "steps": steps,
-                "cfg": cfg,
+                "seed": p.seed,
+                "steps": p.steps,
+                "cfg": p.cfg_scale,
                 "sampler_name": "euler",
                 "scheduler": "normal",
                 "denoise": 1.0,
@@ -244,9 +247,16 @@ impl Tool for ComfyuiTool {
             seed_raw
         };
 
-        let workflow = build_txt2img_workflow(
-            &prompt, &negative, width, height, steps, cfg_scale, seed, &checkpoint,
-        );
+        let workflow = build_txt2img_workflow(&Txt2ImgParams {
+            prompt: &prompt,
+            negative: &negative,
+            width,
+            height,
+            steps,
+            cfg_scale,
+            seed,
+            checkpoint: &checkpoint,
+        });
 
         // client_id は ComfyUI がプロンプトの所有者を識別するために使う（UUID形式を推奨）。
         let client_id = format!(
