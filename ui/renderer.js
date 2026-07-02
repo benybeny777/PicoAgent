@@ -11,6 +11,7 @@ const bootLog = document.getElementById("bootLog");
 const bootPetImage = document.getElementById("bootPetImage");
 const sendButton = document.getElementById("sendButton");
 const cancelSendButton = document.getElementById("cancelSend");
+const cancelVoiceButton = document.getElementById("cancelVoice");
 const copyReplyButton = document.getElementById("copyReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
@@ -1011,8 +1012,12 @@ function renderHistory() {
 let speakingToken = 0;
 let currentVoice = null;
 let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代。変わると進行中の読み上げを打ち切る。
+function setVoiceCancelVisible(visible) {
+  if (cancelVoiceButton) cancelVoiceButton.hidden = !visible;
+}
 function finishVoice(toIdle = true) {
   stopLipSync();
+  setVoiceCancelVisible(false);
   if (!currentVoice) return;
   const voice = currentVoice;
   currentVoice = null;
@@ -1023,6 +1028,7 @@ function finishVoice(toIdle = true) {
 function stopVoice(toIdle = true) {
   voiceSession++; // 進行中のパイプライン読み上げ（合成待ち・連続再生）を打ち切る。
   stopLipSync();
+  setVoiceCancelVisible(false);
   if (!currentVoice) return;
   currentVoice.pause();
   finishVoice(toIdle);
@@ -1041,6 +1047,7 @@ async function prepareSpeech(text) {
 // 事前合成済みの音声を再生し、会話アニメを開始する。再生終了・失敗時に Object URL を解放する。
 function playPreparedSpeech(result) {
   stopVoice(false);
+  setVoiceCancelVisible(true);
   const bytes = new Uint8Array(result.audio);
   const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
   currentVoice = new Audio(url);
@@ -1161,6 +1168,7 @@ async function speakReply(text) {
   stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
   const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
   if (chunks.length === 0) { status.textContent = ""; return; }
+  setVoiceCancelVisible(true);
   let prepareTimer = null;
   try {
     const startedAt = Date.now();
@@ -1176,14 +1184,23 @@ async function speakReply(text) {
     let played = false;
     for (let i = 0; i < chunks.length; i += 1) {
       const result = await nextSynth;
-      if (session !== voiceSession) return;
+      if (session !== voiceSession) {
+        if (prepareTimer) clearInterval(prepareTimer);
+        setVoiceCancelVisible(false);
+        return;
+      }
       nextSynth = i + 1 < chunks.length ? prepareSpeech(chunks[i + 1]) : null;
       if (!result) continue;
       if (!played) { clearInterval(prepareTimer); prepareTimer = null; played = true; }
       await playChunkAndWait(result, session);
-      if (session !== voiceSession) return;
+      if (session !== voiceSession) {
+        if (prepareTimer) clearInterval(prepareTimer);
+        setVoiceCancelVisible(false);
+        return;
+      }
     }
     if (prepareTimer) clearInterval(prepareTimer);
+    setVoiceCancelVisible(false);
     stopLipSync();
     if (animationName === "talking") setAnimation("idle");
     if (status.textContent === "読み上げ中…" || status.textContent.startsWith("読み上げ準備中")) {
@@ -1191,6 +1208,7 @@ async function speakReply(text) {
     }
   } catch (error) {
     if (prepareTimer) clearInterval(prepareTimer);
+    setVoiceCancelVisible(false);
     if (session === voiceSession) stopVoice();
     logApp("error", "読み上げに失敗しました", errorDetail(error));
     status.textContent = `読み上げに失敗: ${error.message || error}`;
@@ -1293,6 +1311,13 @@ replayReplyButton?.addEventListener("click", event => {
 });
 
 stopVoiceButton?.addEventListener("click", event => {
+  event.preventDefault();
+  event.stopPropagation();
+  stopVoice();
+  if (!activeAlarmSnooze) status.textContent = "";
+});
+
+cancelVoiceButton?.addEventListener("click", event => {
   event.preventDefault();
   event.stopPropagation();
   stopVoice();
