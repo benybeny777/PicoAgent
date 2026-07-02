@@ -9,6 +9,7 @@ const bootStatus = document.getElementById("bootStatus");
 const bootLog = document.getElementById("bootLog");
 const bootPetImage = document.getElementById("bootPetImage");
 const sendButton = document.getElementById("sendButton");
+const cancelSendButton = document.getElementById("cancelSend");
 const copyReplyButton = document.getElementById("copyReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
@@ -30,6 +31,10 @@ let unlistenStream = null;
 let streamRenderFrame = null;
 // エラーリトライ用に最後のユーザー入力テキストを保持する。
 let lastUserText = "";
+// ↑/↓キーで呼び出す入力履歴（最新が末尾）。ナビゲート中の位置と編集中の下書きも保持する。
+const inputHistory = [];
+let inputHistoryPos = -1; // -1 = 履歴を辿っていない
+let inputDraft = "";
 const conversationHistory = [];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
@@ -1068,6 +1073,13 @@ composer.addEventListener("submit", async event => {
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   clearAlarmSnooze(false);
   lastUserText = text; // エラーリトライ用に保持
+  // ↑キー呼び出し用の入力履歴へ積む（直前と同じ内容は重複させない）。
+  if (text && inputHistory[inputHistory.length - 1] !== text) {
+    inputHistory.push(text);
+    if (inputHistory.length > 20) inputHistory.shift();
+  }
+  inputHistoryPos = -1;
+  inputDraft = "";
   busy = true;
   ++speakingToken;
   stopVoice(false);
@@ -1083,6 +1095,8 @@ composer.addEventListener("submit", async event => {
   autosizeInput();
   status.textContent = "考え中…";
   setAnimation("thinking");
+  // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
+  if (cancelSendButton) { cancelSendButton.hidden = false; cancelSendButton.disabled = false; }
   reply.textContent = text;
   addHistory("user", text);
 
@@ -1167,6 +1181,7 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    if (cancelSendButton) cancelSendButton.hidden = true;
     // ストリームリスナーを解除する。
     if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
     if (unlistenStream) { unlistenStream(); unlistenStream = null; }
@@ -1177,12 +1192,49 @@ composer.addEventListener("submit", async event => {
     setTimeout(flushPendingNotice, 0);
   }
 });
+// 停止ボタン: バックエンドへ中断を要求する。エージェントは次のステップ境界で止まる。
+cancelSendButton?.addEventListener("click", async () => {
+  if (!busy) return;
+  cancelSendButton.disabled = true;
+  status.textContent = "止めるね…";
+  try { await window.picoagent.cancel(); }
+  catch (error) { logApp("warn", "中断要求の送信に失敗しました", errorDetail(error)); }
+});
 input.addEventListener("input", () => {
   autosizeInput();
   updateComposerState();
+  // 手入力が始まったら履歴ナビゲートを解除する（↓で戻る先は最新の下書きになる）。
+  inputHistoryPos = -1;
   const len = input.value.length;
   if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
 });
+// ↑/↓キーで過去の入力を呼び出す（入力欄が空のとき、または履歴を辿っている間だけ反応する）。
+function recallInputHistory(direction) {
+  if (!inputHistory.length) return false;
+  if (inputHistoryPos === -1) {
+    if (direction > 0 || input.value.trim() !== "") return false;
+    inputDraft = input.value;
+    inputHistoryPos = inputHistory.length - 1;
+  } else if (direction < 0) {
+    if (inputHistoryPos === 0) return true; // 先頭で止める
+    inputHistoryPos--;
+  } else {
+    inputHistoryPos++;
+    if (inputHistoryPos >= inputHistory.length) {
+      // 最新側へ抜けたら下書きへ戻す。
+      inputHistoryPos = -1;
+      input.value = inputDraft;
+      autosizeInput();
+      updateComposerState();
+      return true;
+    }
+  }
+  input.value = inputHistory[inputHistoryPos];
+  input.setSelectionRange(input.value.length, input.value.length);
+  autosizeInput();
+  updateComposerState();
+  return true;
+}
 input.addEventListener("keydown", event => {
   if (event.key === "Escape") {
     event.stopPropagation();
@@ -1192,6 +1244,8 @@ input.addEventListener("keydown", event => {
     event.preventDefault();
     composer.requestSubmit();
   }
+  if (event.key === "ArrowUp" && recallInputHistory(-1)) event.preventDefault();
+  else if (event.key === "ArrowDown" && inputHistoryPos !== -1 && recallInputHistory(1)) event.preventDefault();
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;

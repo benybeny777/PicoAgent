@@ -55,6 +55,8 @@ pub struct AppState {
     pub pending_command: Mutex<Option<crate::tools::run_command::PendingCommandApproval>>,
     /// キャラクターの現在感情状態（ルールベース推定）。
     pub emotion: Mutex<crate::emotion::EmotionState>,
+    /// 停止ボタンによる中断要求。送信開始時に false へ戻し、エージェントがステップ境界で確認する。
+    pub cancel_requested: std::sync::atomic::AtomicBool,
 }
 
 impl AppState {
@@ -70,6 +72,7 @@ impl AppState {
             recent_chatter: Mutex::new(Vec::new()),
             pending_command: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
+            cancel_requested: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -572,7 +575,20 @@ pub async fn pet_send(
     let mut convo =
         maybe_summarize_context(convo, provider, &state.config, &model).await;
 
-    let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
+    // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
+    state
+        .cancel_requested
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let result = agent::run(
+        &state.config,
+        provider,
+        &model,
+        &mut convo,
+        5,
+        Some(&app),
+        Some(&state.cancel_requested),
+    )
+    .await;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
@@ -1405,6 +1421,15 @@ pub fn pet_traces(app: AppHandle) -> Result<Value, String> {
     }))
 }
 
+/// 実行中のエージェント処理へ中断を要求する。
+/// エージェントは次のステップ境界（再考前・ツール実行前）で停止する。
+#[tauri::command]
+pub fn pet_cancel(state: State<'_, AppState>) {
+    state
+        .cancel_requested
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// 画像付きメッセージをエージェントへ送信する。
 /// `images` は base64 data URL のリスト（"data:image/jpeg;base64,..."）。
 #[tauri::command]
@@ -1447,7 +1472,20 @@ pub async fn pet_send_image(
     let mut convo =
         maybe_summarize_context(convo, provider, &state.config, &model).await;
 
-    let result = agent::run(&state.config, provider, &model, &mut convo, 5, Some(&app)).await;
+    // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
+    state
+        .cancel_requested
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let result = agent::run(
+        &state.config,
+        provider,
+        &model,
+        &mut convo,
+        5,
+        Some(&app),
+        Some(&state.cancel_requested),
+    )
+    .await;
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
     let character_id = active_character_id(&state);

@@ -2,7 +2,10 @@
 // モデルが tool_calls を返す限りツールを実行し、結果を会話に積んで再問い合わせする。
 // 機能: 並列ツール実行・指数バックオフリトライ・ストリーミング応答・分散トレーシング。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use tauri::Manager;
 
 use crate::config::Config;
 use crate::message::Message;
@@ -617,6 +620,9 @@ async fn chat_with_retry(
     Err(last_err)
 }
 
+/// ユーザーが停止ボタンで中断を要求したときに返す一言。
+const CANCEL_MESSAGE: &str = "りょうかい、いまの処理は途中で止めたよ。";
+
 pub async fn run(
     cfg: &Config,
     provider: &dyn Provider,
@@ -624,7 +630,10 @@ pub async fn run(
     messages: &mut Vec<Message>,
     max_steps: usize,
     app: Option<&tauri::AppHandle>,
+    cancel: Option<&AtomicBool>,
 ) -> anyhow::Result<String> {
+    // 中断要求の確認。フラグ未指定（スケジューラ経由など）では常に false。
+    let cancelled = || cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false);
     let mut schemas = tools::schemas_for_text("");
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
@@ -722,6 +731,10 @@ pub async fn run(
     }
 
     for step in 0..max_steps {
+        // 停止ボタンによる中断要求はステップ境界で受け付ける（会話履歴の整合を保てる位置）。
+        if step > 0 && cancelled() {
+            return direct_answer(messages, CANCEL_MESSAGE.to_string());
+        }
         // 2ターン目以降（ツール結果を受けて再考する場合）は "再考中" を通知する。
         if step > 0 {
             if let Some(handle) = app {
@@ -762,6 +775,22 @@ pub async fn run(
 
         match calls {
             Some(cs) if !cs.is_empty() => {
+                // ツール実行前に中断要求を確認する。tool_calls には空応答を対で積み、
+                // プロバイダへ渡す会話履歴の整合（tool_calls とツール結果の対応）を保つ。
+                if cancelled() {
+                    for c in cs.iter() {
+                        messages.push(Message {
+                            role: "tool".to_string(),
+                            content: "（ユーザーが処理を中断したため未実行）".to_string(),
+                            tool_calls: None,
+                            tool_call_id: Some(c.id.clone()),
+                            name: Some(c.name.clone()),
+                            images: None,
+                            usage: None,
+                        });
+                    }
+                    return direct_answer(messages, CANCEL_MESSAGE.to_string());
+                }
                 // ツール実行前にフロントへ「何を実行中か」を通知する（固まり防止）。
                 if let Some(handle) = app {
                     let names: Vec<&str> = cs.iter().map(|c| c.name.as_str()).collect();

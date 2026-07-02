@@ -26,6 +26,8 @@ async function call(name, args) {
 window.picoagent = {
   init: () => call("pet_init"),
   send: (text) => call("pet_send", { text }),
+  // 実行中のエージェント処理へ中断を要求する（次のステップ境界で停止）。
+  cancel: () => call("pet_cancel"),
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
