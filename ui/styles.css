@@ -219,3 +219,27 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 ::-webkit-scrollbar-thumb { border-radius:999px; background:var(--scrollbar-thumb); }
 ::-webkit-scrollbar-thumb:hover { background:var(--accent); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background:transparent; }
+
+/* ── モーションの微調整（すべて reduced-motion で無効化） ───────────── */
+/* 起動完了時にフキダシがふわっと現れる。 */
+@keyframes bubble-in { from { opacity:0; transform:translateY(6px) scale(.98); } to { opacity:1; transform:none; } }
+.pet-app:not(.is-booting) .bubble { animation:bubble-in .32s cubic-bezier(.2,.8,.3,1.08); }
+/* 処理中はステータス行の先頭に小さなスピナーを出す（テキストは JS が随時更新）。 */
+.status.busy { display:flex; align-items:center; gap:5px; }
+.status.busy::before { content:""; flex:0 0 auto; width:9px; height:9px; border-radius:50%; border:2px solid var(--accent); border-top-color:transparent; animation:status-spin .8s linear infinite; }
+@keyframes status-spin { to { transform:rotate(360deg); } }
+/* 通知パネルはふわっと開く。 */
+.notice-panel:not([hidden]) { animation:panel-in .18s ease; }
+@keyframes panel-in { from { opacity:0; transform:translateY(-4px); } }
+/* キャラクターをクリックすると「ぽよん」と反応する。 */
+.character.boop img { animation:pet-boop .45s cubic-bezier(.3,1.6,.4,1)!important; }
+@keyframes pet-boop { 0%{transform:scale(1)} 30%{transform:scale(1.07,.93) translateY(2px)} 62%{transform:scale(.96,1.05) translateY(-5px)} 100%{transform:scale(1)} }
+@media (prefers-reduced-motion:reduce) {
+  .pet-app:not(.is-booting) .bubble, .status.busy::before, .notice-panel:not([hidden]), .character.boop img { animation:none!important; }
+}
+/* トーストの種類別アクセント。 */
+.toast.toast-success { background:rgba(38,110,78,.88); }
+.toast.toast-warn { background:rgba(150,84,40,.9); }
+.toast.toast-error { background:rgba(158,54,74,.9); }
+/* テキスト選択色をテーマに合わせる。 */
+::selection { background:rgba(242,126,145,.35); }

@@ -45,14 +45,14 @@ const promptHistory = [];
 let promptHistoryIndex = null;
 let promptDraft = "";
 const QUICK_ACTIONS = [
-  { label: "画面を見る", text: "今の画面を見て、状況を短く教えて" },
-  { label: "クリップボード要約", text: "クリップボードの内容を要約して" },
-  { label: "今日の予定", text: "今日の予定と気をつけることを教えて" },
-  { label: "未読メール要約", text: "Gmailの未読メールを一覧取得して、重要そうな順に短く要約して" },
-  { label: "Slack要約", text: "Slackの既定チャンネルの最新10件を読んで、話題と対応が必要なことを短く要約して" },
-  { label: "予定確認", text: "Googleカレンダーの今日の予定を確認して、次に気をつけることを教えて" },
-  { label: "さっきの続き", text: "さっきの続きとして、次にやることを整理して" },
-  { label: "できること", text: "あなたが今できることを具体的に教えて" },
+  { label: "👀 画面を見る", text: "今の画面を見て、状況を短く教えて" },
+  { label: "📋 クリップボード要約", text: "クリップボードの内容を要約して" },
+  { label: "🗓 今日の予定", text: "今日の予定と気をつけることを教えて" },
+  { label: "📧 未読メール要約", text: "Gmailの未読メールを一覧取得して、重要そうな順に短く要約して" },
+  { label: "💬 Slack要約", text: "Slackの既定チャンネルの最新10件を読んで、話題と対応が必要なことを短く要約して" },
+  { label: "📅 予定確認", text: "Googleカレンダーの今日の予定を確認して、次に気をつけることを教えて" },
+  { label: "⏩ さっきの続き", text: "さっきの続きとして、次にやることを整理して" },
+  { label: "✨ できること", text: "あなたが今できることを具体的に教えて" },
 ];
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
@@ -73,9 +73,10 @@ const firedAlarms = new Set();
 let activeAlarmSnooze = null;
 
 // 画面下部に短いトースト通知を表示する（1.8秒後に自動消去）。
-function showToast(msg) {
+// kind: "info"（既定）/ "success" / "warn" / "error" で配色が変わる。
+function showToast(msg, kind = "info") {
   const el = document.createElement("div");
-  el.className = "toast";
+  el.className = kind === "info" ? "toast" : `toast toast-${kind}`;
   el.textContent = msg;
   document.body.append(el);
   requestAnimationFrame(() => el.classList.add("toast-show"));
@@ -1043,10 +1044,17 @@ bubble.addEventListener("click", event => {
   openComposer();
 });
 character.addEventListener("click", event => {
+  // クリックのたびに小さくはねる（連打時はアニメーションを巻き戻して再生）。
+  character.classList.remove("boop");
+  void character.offsetWidth;
+  character.classList.add("boop");
   if (!currentVoice) return;
   event.stopPropagation();
   stopVoice();
   status.textContent = "";
+});
+character.addEventListener("animationend", event => {
+  if (event.animationName === "pet-boop") character.classList.remove("boop");
 });
 character.addEventListener("dblclick", toggleBubbleFullscreen);
 // フキダシ自体をダブルクリックしても、画面最大化のように大きく広げる／戻す。
@@ -1365,26 +1373,26 @@ function fileIcon(name) {
 
 function addImageFile(file) {
   if (!file || !file.type.startsWith("image/")) return;
-  if (attachedImages.length >= MAX_ATTACHED_IMAGES) { showToast(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚まで`); return; }
+  if (attachedImages.length >= MAX_ATTACHED_IMAGES) { showToast(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚まで`, "warn"); return; }
   const reader = new FileReader();
   reader.onload = (e) => {
     attachedImages.push(e.target.result);
     renderAttachmentPreview();
     updateComposerState();
-    showToast("画像を添付しました");
+    showToast("画像を添付しました", "success");
   };
   reader.readAsDataURL(file);
 }
 
 function addDocumentFile(file) {
   if (!file) return;
-  if (attachedFiles.length >= MAX_ATTACHED_FILES) { showToast(`ファイルは最大 ${MAX_ATTACHED_FILES} 件まで`); return; }
+  if (attachedFiles.length >= MAX_ATTACHED_FILES) { showToast(`ファイルは最大 ${MAX_ATTACHED_FILES} 件まで`, "warn"); return; }
   const reader = new FileReader();
   reader.onload = (e) => {
     attachedFiles.push({ name: file.name, dataUrl: e.target.result });
     renderAttachmentPreview();
     updateComposerState();
-    showToast(`${file.name.length > 20 ? file.name.slice(0, 18) + "…" : file.name} を添付`);
+    showToast(`${file.name.length > 20 ? file.name.slice(0, 18) + "…" : file.name} を添付`, "success");
   };
   reader.readAsDataURL(file);
 }
@@ -1444,6 +1452,7 @@ composer.addEventListener("submit", async event => {
   setInputValue("");
   resetPromptHistoryNavigation();
   status.textContent = "考え中…";
+  status.classList.add("busy"); // 処理中スピナーを表示する
   setAnimation("thinking");
   // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
   if (cancelSendButton) { cancelSendButton.hidden = false; cancelSendButton.disabled = false; }
@@ -1550,6 +1559,7 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
     // ストリーム・進捗リスナーを解除する。
     if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
