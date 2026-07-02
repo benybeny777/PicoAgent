@@ -158,7 +158,10 @@ pub fn resolve(cfg: &Config, input: &str) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_system_protected, normalize};
+    use super::normalize;
+    #[cfg(windows)]
+    use super::is_system_protected;
+    #[cfg(windows)]
     use std::path::PathBuf;
 
     // Windows のパス区切り（\）とドライブレターを前提にしたテスト。

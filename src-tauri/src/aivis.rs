@@ -1,14 +1,16 @@
 // aivis.rs - 同梱 AivisSpeech Engine の接続確認と裏起動を管理する。
 
-use std::io::{Read, Write};
+#[cfg(windows)]
+use std::io::Read;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-#[cfg(unix)]
-use libc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 
 use serde_json::Value;
 use tauri::Manager;
@@ -23,6 +25,7 @@ const AIVIS_API_URL: &str =
     "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/1.2.0";
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
+#[cfg(windows)]
 const GPU_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 
@@ -687,6 +690,7 @@ fn has_running_child(app: &tauri::AppHandle) -> bool {
     false
 }
 
+#[cfg(windows)]
 fn wait_child_with_timeout(
     child: &mut Child,
     timeout: Duration,

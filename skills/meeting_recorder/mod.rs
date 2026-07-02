@@ -117,7 +117,7 @@ fn latest_file(base: &Path, matcher: fn(&Path) -> bool) -> Option<PathBuf> {
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 if best
                     .as_ref()
-                    .is_none_or(|(_, best_modified)| modified > *best_modified)
+                    .map_or(true, |(_, best_modified)| modified > *best_modified)
                 {
                     best = Some((path, modified));
                 }

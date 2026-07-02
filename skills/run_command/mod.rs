@@ -351,10 +351,8 @@ impl Tool for RunCommandTool {
                 program,
                 parsed_args.join(" ")
             ))
-        } else if let Err(error) = bounded_cwd(cfg, Some(requested_cwd)) {
-            Some(error)
         } else {
-            None
+            bounded_cwd(cfg, Some(requested_cwd)).err()
         };
         if let Some(reason) = permission_error {
             return approval_marker(&PendingCommandApproval {
@@ -495,6 +493,7 @@ inventory::submit! { ToolReg { make: || Box::new(RunCommandTool) } }
 #[cfg(test)]
 mod tests {
     use super::{bounded_cwd_in_roots, command_tokens, is_physical_delete_command};
+    #[cfg(windows)]
     use std::path::PathBuf;
 
     #[test]

@@ -37,7 +37,7 @@ pub fn run() {
         .manage(AivisState::new())
         .manage(WindowLayoutCache::default())
         .manage(tracer::Tracer::new(200))
-        .on_window_event(|window, event| on_main_window_event(window, event))
+        .on_window_event(on_main_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
             commands::pet_send,
