@@ -14,6 +14,11 @@
 
 - **通常/ダーク/システム追従を切替** (`ui/styles.css` / `ui/settings.css` / `ui/settings.js` / `ui/renderer.js`): 設定画面の基本タブに「表示テーマ」を追加した。既定は `system`（システム設定に追従）で、必要に応じて通常テーマまたはダークテーマへ固定できる。保存後はメイン画面にも即反映する。
 
+### Web検索設定のエラー耐性を改善
+
+- **壊れた検索補助設定でも既定値で続行** (`skills/web_search/mod.rs`): `PICOAGENT_WEB_SEARCH_MAX_RESULTS` や `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` に不正値が入っていても、検索自体を止めず既定値へ戻して実行するようにした。これにより「検索の設定にエラー」と返してニュース確認などを諦める挙動を避ける。
+- **類似の補助設定エラーも既定値へ戻す** (`skills/gmail/mod.rs` / `skills/slack/mod.rs`): Gmail / Slack の timeout 設定や Gmail 整理上限が不正値でも、接続テスト・要約・整理などの主要操作を止めず既定値で続行するようにした。
+
 ---
 
 ## 2026-07-01

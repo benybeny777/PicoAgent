@@ -28,30 +28,29 @@ fn gmail_base(cfg: &Config) -> String {
         .to_string()
 }
 
-fn parse_timeout(cfg: &Config) -> Result<u64, String> {
-    let timeout = cfg
-        .get("PICOAGENT_GMAIL_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .map_err(|_| "PICOAGENT_GMAIL_TIMEOUT_SECS は 3〜60 の整数で指定してください。".to_string())?;
-    if (3..=60).contains(&timeout) {
-        Ok(timeout)
-    } else {
-        Err("PICOAGENT_GMAIL_TIMEOUT_SECS は 3〜60 の範囲で指定してください。".to_string())
-    }
+fn bounded_u64_setting(raw: &str, fallback: u64, min: u64, max: u64) -> u64 {
+    // フォールバック許可: 補助設定が壊れていても Gmail の主要操作は既定値で続行する。
+    raw.parse::<u64>()
+        .ok()
+        .filter(|value| (min..=max).contains(value))
+        .unwrap_or(fallback.clamp(min, max))
 }
 
-fn parse_cleanup_limit(cfg: &Config) -> Result<Option<u64>, String> {
+fn parse_timeout(cfg: &Config) -> u64 {
+    bounded_u64_setting(&cfg.get("PICOAGENT_GMAIL_TIMEOUT_SECS", "20"), 20, 3, 60)
+}
+
+fn parse_cleanup_limit(cfg: &Config) -> Option<u64> {
     let raw = cfg.get(
         "PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS",
         &DEFAULT_CLEANUP_LIMIT.to_string(),
     );
-    let value = raw.parse::<u64>().map_err(|_| {
-        "PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS は 0 以上の整数で指定してください。".to_string()
-    })?;
+    // フォールバック許可: cleanup 上限の補助設定が壊れていても既定上限で安全に続行する。
+    let value = raw.parse::<u64>().unwrap_or(DEFAULT_CLEANUP_LIMIT);
     if value == 0 {
-        Ok(None)
+        None
     } else {
-        Ok(Some(value))
+        Some(value)
     }
 }
 
@@ -415,14 +414,8 @@ impl Tool for GmailTool {
         if token.is_empty() {
             return super::config_guide("Gmail", &["PICOAGENT_GMAIL_ACCESS_TOKEN"], "Gmail API の読み取り・変更・送信に必要な OAuth access token が必要です。");
         }
-        let timeout_secs = match parse_timeout(cfg) {
-            Ok(timeout) => timeout,
-            Err(error) => return format!("エラー: {}", error),
-        };
-        let cleanup_limit = match parse_cleanup_limit(cfg) {
-            Ok(limit) => limit,
-            Err(error) => return format!("エラー: {}", error),
-        };
+        let timeout_secs = parse_timeout(cfg);
+        let cleanup_limit = parse_cleanup_limit(cfg);
         let action = args
             .get("action")
             .and_then(Value::as_str)

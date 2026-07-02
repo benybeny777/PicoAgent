@@ -20,15 +20,18 @@ const MAX_RESPONSE_BYTES: usize = 32 * 1024;
 
 pub struct WebSearchTool;
 
-fn parse_setting(cfg: &Config, key: &str, fallback: &str, min: usize, max: usize) -> Result<usize, String> {
+fn parse_setting(cfg: &Config, key: &str, fallback: &str, min: usize, max: usize) -> usize {
     let raw = cfg.get(key, fallback);
-    let value = raw
-        .parse::<usize>()
-        .map_err(|_| format!("設定 {} は {}〜{} の整数で指定してください。", key, min, max))?;
-    if !(min..=max).contains(&value) {
-        return Err(format!("設定 {} は {}〜{} の範囲で指定してください。", key, min, max));
-    }
-    Ok(value)
+    parse_setting_value(&raw, fallback, min, max)
+}
+
+fn parse_setting_value(raw: &str, fallback: &str, min: usize, max: usize) -> usize {
+    // フォールバック許可: Web検索の補助設定が壊れていても検索自体は既定値で続行する。
+    let fallback_value = fallback.parse::<usize>().unwrap_or(min).clamp(min, max);
+    raw.parse::<usize>()
+        .ok()
+        .filter(|value| (min..=max).contains(value))
+        .unwrap_or(fallback_value)
 }
 
 fn direct_url(href: &str) -> String {
@@ -150,10 +153,7 @@ impl Tool for WebSearchTool {
             return format!("エラー: query は {} 文字以内で指定してください。", MAX_QUERY_CHARS);
         }
 
-        let configured_results = match parse_setting(cfg, "PICOAGENT_WEB_SEARCH_MAX_RESULTS", "5", 1, MAX_RESULTS_LIMIT) {
-            Ok(value) => value,
-            Err(error) => return format!("エラー: {}", error),
-        };
+        let configured_results = parse_setting(cfg, "PICOAGENT_WEB_SEARCH_MAX_RESULTS", "5", 1, MAX_RESULTS_LIMIT);
         let max_results = match args.get("max_results") {
             None => configured_results,
             Some(value) => match value.as_u64().and_then(|number| usize::try_from(number).ok()) {
@@ -161,10 +161,7 @@ impl Tool for WebSearchTool {
                 _ => return format!("エラー: max_results は 1〜{} の整数で指定してください。", MAX_RESULTS_LIMIT),
             },
         };
-        let timeout_secs = match parse_setting(cfg, "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "15", 3, 60) {
-            Ok(value) => value,
-            Err(error) => return format!("エラー: {}", error),
-        };
+        let timeout_secs = parse_setting(cfg, "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "15", 3, 60);
 
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs as u64))
@@ -197,7 +194,7 @@ inventory::submit! { ToolReg { make: || Box::new(WebSearchTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{direct_url, extract_results};
+    use super::{direct_url, extract_results, parse_setting_value, MAX_RESULTS_LIMIT};
 
     #[test]
     fn duckduckgoの転送urlを直接urlへ戻す() {
@@ -217,5 +214,11 @@ mod tests {
         assert!(output.contains("1. 例のページ"));
         assert!(output.contains("URL: https://example.com/"));
         assert!(output.contains("検索結果の概要です。"));
+    }
+
+    #[test]
+    fn 壊れた検索設定は既定値へ戻す() {
+        assert_eq!(parse_setting_value("abc", "5", 1, MAX_RESULTS_LIMIT), 5);
+        assert_eq!(parse_setting_value("999", "15", 3, 60), 15);
     }
 }
