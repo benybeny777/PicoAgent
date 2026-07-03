@@ -278,8 +278,16 @@ fn is_executable_file(path: &Path) -> bool {
 fn ensure_executable(path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mut permissions = std::fs::metadata(path)?.permissions();
+    if permissions.mode() & 0o111 != 0 {
+        return Ok(());
+    }
     permissions.set_mode(permissions.mode() | 0o755);
-    std::fs::set_permissions(path, permissions)?;
+    if let Err(error) = std::fs::set_permissions(path, permissions) {
+        // フォールバック許可: .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
+        if error.kind() != std::io::ErrorKind::PermissionDenied {
+            return Err(error.into());
+        }
+    }
     Ok(())
 }
 
