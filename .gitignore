@@ -27,7 +27,7 @@ ui/assets/characters/
 
 # Live2D ランタイムとサンプルモデル（npm run setup:live2d で取得。再配布条件があるため含めない）
 ui/vendor/live2d/
-characters/hiyori/live2d/
+characters/*/live2d/
 
 # Live2D 制作用 PSD（npm run build:live2d-psd で layers/ から再生成できる）
 characters/*/live2d-src/

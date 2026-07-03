@@ -6,6 +6,10 @@
 
 ## 2026-07-03
 
+### Live2D サンプルキャラクターの追加
+
+- **Haru / Epsilon を追加** (`characters/haru/` / `characters/epsilon/` / `scripts/fetch-live2d.mjs`): Live2D 公式サンプルの Haru と Epsilon をキャラクター一覧に追加した。`npm run setup:live2d` はひよりに加えて Haru / Epsilon のモデル実体を取得し、各 `preview.jpg` をローディング画面と設定画面アイコンに使う。モデル実体は再配布条件があるため Git 管理外のまま。
+
 ### macOS 起動・配布対応
 
 - **バンドル対象をOS標準へ変更** (`src-tauri/tauri.conf.json`): `bundle.targets` を Windows NSIS 固定から `all` に変更し、Windows は NSIS、macOS は `.app` / `.dmg` など各 OS の標準バンドルを生成できるようにした。

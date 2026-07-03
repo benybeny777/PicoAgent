@@ -61,7 +61,7 @@ OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral などのクラウド�
 - **設定画面ですべて設定** — 右クリック →「設定…」で叩く AI・モデル・接続先・API キー・ツール設定などを GUI 編集。軽い設定は保存で即反映、叩く AI・モデル・音声・キャラクターなど重い設定は確認のうえ再起動して起動画面でまとめて反映。
 - **軽量な Tauri ネイティブ** — システム WebView を使い、Rust バックエンドで動作。
 - キャラクターパックごとの連続フレームと状態別の滑らかな補間動作（待機 / 考え中 / 返答 / エラー）。
-- **Live2D キャラクター対応** — `character.json` に `live2d.model`（`.model3.json`）を持つキャラは Cubism ランタイムで WebGL 描画し、まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。サンプルとして Live2D 公式モデルの「ひより」を同梱（`npm run setup:live2d` で取得）。
+- **Live2D キャラクター対応** — `character.json` に `live2d.model`（`.model3.json`）を持つキャラは Cubism ランタイムで WebGL 描画し、まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。サンプルとして Live2D 公式モデルの「ひより」「Haru」「Epsilon」を同梱（`npm run setup:live2d` で取得）。
 - キャラクターごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面でキャラ選択と人格の上書きが可能。
 - 会話は選択中の叩く AI にのみ送られる。ローカル Ollama を使えば外部送信なし。
 
@@ -167,7 +167,7 @@ macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` /
 
 #### Live2D ランタイムとサンプルモデル
 
-- **取得**: `npm run setup:live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、Live2D 公式サンプルモデル「ひより」を `characters/hiyori/live2d/` へダウンロードします（`LIVE2D_FORCE=1` で再取得）。
+- **取得**: `npm run setup:live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、Live2D 公式サンプルモデル「ひより」「Haru」「Epsilon」を `characters/<id>/live2d/` へダウンロードします（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。
 - **ライセンス**: Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるため、これらのファイルはリポジトリへコミットしません（`.gitignore` 済）。
 
 > [!NOTE]
