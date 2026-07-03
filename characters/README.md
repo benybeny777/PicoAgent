@@ -88,3 +88,27 @@ characters/<id>/
   再配布条件があるためモデル実体は Git 管理外（`preview.png` は差し替え可能なプレースホルダ）。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
   `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。
+
+### 既存キャラを Live2D 化するための PSD 生成
+
+`layers/` の差分絵から、Cubism Editor へ読み込める土台 PSD を生成できる。
+
+```powershell
+pip install Pillow psd-tools
+npm run build:live2d-psd            # layers/ を持つ全キャラ
+npm run build:live2d-psd -- mugi    # 指定キャラのみ
+```
+
+生成先は `characters/<id>/live2d-src/<id>-live2d.psd`（Git 管理外・再生成可能）。
+レイヤー構成は `base`（全身）＋ `variants/`（mouth_open・mouth_closed・blink_half・blink_closed。
+初期状態は非表示）。差分絵が目・口だけの局所差分として検出できた場合は
+`eye/` `mouth/` グループに切り抜きパーツとして収録される。
+
+PSD を Cubism Editor で開いたあとの作業（手作業が必要）:
+
+1. `base` から顔・前髪・後髪・眉・目・口・体・腕などのパーツを切り分ける
+   （`variants/` の差分絵は目・口の開閉形状の作画参考にする）。
+2. パーツの重なりで隠れる部分（まぶたの奥・口の中など）を描き足す。
+3. メッシュ・デフォーマ・パラメータ（`ParamEyeLOpen` / `ParamMouthOpenY` など）を設定する。
+4. 組み込みモデル（`.moc3` + `.model3.json`）を書き出し、`characters/<id>/live2d/` に置いて
+   `character.json` に `live2d` 定義を追加する（上記「Live2D キャラクター」参照）。

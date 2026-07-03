@@ -29,6 +29,9 @@ ui/assets/characters/
 ui/vendor/live2d/
 characters/hiyori/live2d/
 
+# Live2D 制作用 PSD（npm run build:live2d-psd で layers/ から再生成できる）
+characters/*/live2d-src/
+
 # ローカル設定（個人 PC 専用。app_config_dir に保存されるが念のため）
 config.json
 
