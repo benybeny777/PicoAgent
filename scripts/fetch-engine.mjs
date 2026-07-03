@@ -7,7 +7,7 @@
 //   LLAMACPP_RELEASE  … リリースタグ（既定 latest を解決）
 //   LLAMACPP_ASSET    … zip アセット名を直接指定（最優先）
 
-import { cp, mkdir, rm, readdir, rename, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, rm, readdir, rename, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir, platform, arch } from "node:os";
 import { join, dirname } from "node:path";
@@ -18,6 +18,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ENGINE_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "engine");
 const LEGACY_ENGINE_DIR = join(HERE, "..", "src-tauri", "resources", "engine");
 const API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+
+async function ensureExecutable(path) {
+  if (platform() !== "win32") {
+    await chmod(path, 0o755);
+  }
+}
 
 // プラットフォーム別の zip アセット名パターン（llama.cpp リリースの命名に合わせる）。
 function assetPattern() {
@@ -68,6 +74,9 @@ async function flatten(root, outDir) {
   for (const f of wanted) {
     const dest = join(outDir, f.split(/[\\/]/).pop());
     if (f !== dest) await rename(f, dest).catch(async () => { await writeFile(dest, await readFile(f)); });
+    if (/^llama-server$/.test(dest.split(/[\\/]/).pop())) {
+      await ensureExecutable(dest);
+    }
   }
   return wanted.some((f) => /llama-server(\.exe)?$/.test(f));
 }
@@ -78,6 +87,7 @@ async function main() {
   const bundledServer = join(ENGINE_DIR, serverName);
   const legacyServer = join(LEGACY_ENGINE_DIR, serverName);
   if (existsSync(bundledServer) && process.env.LLAMACPP_FORCE !== "1") {
+    await ensureExecutable(bundledServer);
     console.log("engine ready:", ENGINE_DIR);
     console.log("既に同梱 llama-server があります。再取得する場合は LLAMACPP_FORCE=1 を指定してください。");
     return;
@@ -89,6 +99,7 @@ async function main() {
       await cp(join(LEGACY_ENGINE_DIR, entry), join(ENGINE_DIR, entry), { recursive: true });
     }
     await writeFile(join(ENGINE_DIR, ".gitkeep"), "\n");
+    await ensureExecutable(bundledServer);
     console.log("engine ready:", ENGINE_DIR);
     console.log("旧 resources/engine から resources/bundled/engine へコピーしました。");
     return;

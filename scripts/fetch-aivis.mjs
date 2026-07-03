@@ -5,7 +5,7 @@
 //   AIVIS_RELEASE … リリースタグ（既定 1.2.0。latest を指定すると最新版）
 //   AIVIS_ASSET   … アセット名を直接指定（正規表現ではなく完全一致に近い文字列）
 
-import { mkdir, rm, readdir, cp, writeFile, stat } from "node:fs/promises";
+import { chmod, mkdir, rm, readdir, cp, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir, platform, arch } from "node:os";
 import { join, dirname, basename } from "node:path";
@@ -24,6 +24,12 @@ function bundledRunPath() {
 
 function legacyRunPath() {
   return join(LEGACY_AIVIS_DIR, platform() === "win32" ? "run.exe" : "run");
+}
+
+async function ensureExecutable(path) {
+  if (platform() !== "win32") {
+    await chmod(path, 0o755);
+  }
 }
 
 function releaseUrl() {
@@ -78,6 +84,10 @@ function extract(archivePath, outDir) {
     return;
   }
 
+  if (platform() !== "win32" && archivePath.endsWith(".7z.001")) {
+    throw new Error("Aivis の .7z.001 展開には 7z/7za が必要です。macOS は `brew install p7zip` を実行してください。");
+  }
+
   const r = spawnSync("tar", ["-xf", archivePath, "-C", outDir], { stdio: "inherit" });
   if (r.status !== 0) {
     throw new Error("展開に失敗しました。7-Zip をインストールするか、tar が 7z 展開に対応する環境で実行してください。");
@@ -113,10 +123,12 @@ async function copyEngineTree(runPath, destDir) {
   if (!existsSync(destRun) || !(await stat(destRun)).isFile()) {
     throw new Error("run 実行ファイルの配置に失敗しました");
   }
+  await ensureExecutable(destRun);
 }
 
 async function main() {
   if (existsSync(bundledRunPath()) && process.env.AIVIS_FORCE !== "1") {
+    await ensureExecutable(bundledRunPath());
     console.log("aivis ready:", AIVIS_DIR);
     console.log("既に同梱 AivisSpeech Engine があります。再取得する場合は AIVIS_FORCE=1 を指定してください。");
     return;
@@ -154,6 +166,15 @@ async function main() {
 }
 
 main().catch((e) => {
+  if (
+    platform() !== "win32" &&
+    process.env.AIVIS_REQUIRED !== "1" &&
+    /7z|7za|p7zip|\.7z\.001/.test(e.message)
+  ) {
+    console.warn("setup:aivis 警告:", e.message);
+    console.warn("音声を使わない起動は続行します。Aivis を必須にする場合は AIVIS_REQUIRED=1 を指定してください。");
+    process.exit(0);
+  }
   console.error("setup:aivis 失敗:", e.message);
   process.exit(1);
 });

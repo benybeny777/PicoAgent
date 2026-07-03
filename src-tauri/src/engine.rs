@@ -71,6 +71,20 @@ fn server_path(app: &AppHandle) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.exists())
 }
 
+#[cfg(unix)]
+fn ensure_executable(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(permissions.mode() | 0o755);
+    std::fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_executable(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
 fn model_url(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     local::model_url(&state.config)
@@ -333,6 +347,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
             "同梱エンジン llama-server が見つかりません（npm run setup:engine を実行してください）"
         )
     })?;
+    ensure_executable(&server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
     let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "8192");
