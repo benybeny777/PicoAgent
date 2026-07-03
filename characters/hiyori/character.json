@@ -1,7 +1,7 @@
 {
   "id": "hiyori",
   "name": "ひより",
-  "assetVersion": "2026-07-03-live2d-v2",
+  "assetVersion": "2026-07-03-live2d-v3",
   "description": "Live2Dで動く、元気いっぱいの看板娘（Live2D公式サンプルモデル）。",
   "greeting": "やっほー！ひよりだよ。今日はなにする？なんでも言ってね、いっしょにがんばろ！",
   "persona": {
@@ -20,8 +20,8 @@
       "sad": "Idle"
     },
     "lipSyncParam": "ParamMouthOpenY",
-    "scale": 2.4,
-    "offsetY": 390
+    "scale": 3.2,
+    "offsetY": 645
   },
   "boot": {
     "sleeping": "preview.png"
