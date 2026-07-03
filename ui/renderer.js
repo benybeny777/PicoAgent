@@ -373,7 +373,8 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
   animations = manifest.animations || {};
-  stopLipSync();
+  stopRig();
+  detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
   if (manifest.live2d?.model) {
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
@@ -409,7 +410,13 @@ function setAnimation(name, force = false) {
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   character.dataset.motion = animations[animationName].motion || animationName;
-  if (!rigActive) petSprite.src = frameUrl(animationName, 0);
+  // layers を持つキャラは待機・返答状態を常時リグ描画にする（Live2D 風の常時まばたき）。
+  if (rigAvailable && !reduceMotion && (animationName === "idle" || animationName === "talking")) {
+    startRig();
+    return;
+  }
+  stopRig();
+  petSprite.src = frameUrl(animationName, 0);
 }
 function frameDuration(animation, index) {
   const duration = animation.frameDurations?.[index];
@@ -514,14 +521,7 @@ function detachLipSyncAudio() {
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
   if ((!rigAvailable && !live2dActive) || reduceMotion) return;
-  if (!live2dActive && !rigActive) {
-    rigActive = true;
-    rigFace = "";
-    rigMouthOpen = false;
-    rigBlinkPhase = null;
-    rigRefresh();
-    scheduleBlink();
-  }
+  if (!live2dActive) startRig();
   detachLipSyncAudio();
   // WebAudio の振幅解析を試み、使えない環境ではタイマー口パクへフォールバックする。
   let useTimer = true;
@@ -571,16 +571,35 @@ function attachLipSync(audio) {
   rigVolFrame = requestAnimationFrame(analyserLoop);
 }
 
-// リグを完全に終了して通常のフレームアニメへ戻す。
-function stopLipSync() {
-  if (live2dActive) { detachLipSyncAudio(); return; }
+// リグ描画を開始する（既に動作中なら何もしない。口は閉じ・まばたき開始）。
+function startRig() {
+  if (rigActive) return;
+  rigActive = true;
+  rigFace = "";
+  rigMouthOpen = false;
+  rigBlinkPhase = null;
+  rigRefresh();
+  scheduleBlink();
+}
+
+// リグを完全に終了する（キャラ切替・thinking/sad などフレームアニメ状態への遷移用）。
+function stopRig() {
   if (!rigActive) return;
   rigActive = false;
   detachLipSyncAudio();
   clearTimeout(rigBlinkTimer);
   rigBlinkPhase = null;
   rigFace = "";
-  petSprite.src = frameUrl(animationName, frame);
+}
+
+// 読み上げ終了時の処理。layers を持つキャラは待機中も常時リグ（まばたき）を続けるため
+// 音声解析だけ解除し、リグ非対応キャラのみ完全に終了してフレーム表示へ戻す。
+function stopLipSync() {
+  if (live2dActive) { detachLipSyncAudio(); return; }
+  if (rigAvailable && !reduceMotion) { detachLipSyncAudio(); return; }
+  const wasActive = rigActive;
+  stopRig();
+  if (wasActive && animations[animationName]) petSprite.src = frameUrl(animationName, frame);
 }
 
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
