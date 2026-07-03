@@ -1316,6 +1316,8 @@ function saveCurrentCharacterVoice(id) {
 }
 
 function loadCharacterVoice(id) {
+  // 音声タブ簡素化でキャラ別 speaker 入力欄は非表示（未生成）になったため、無い場合は何もしない。
+  if (!characterSpeaker) return;
   const current = characterVoiceOverrides[id] || {};
   const defaultVoice = characterDefaultVoices[id] || {};
   characterSpeaker.value = current.speaker || "";
