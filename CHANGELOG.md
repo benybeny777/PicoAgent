@@ -6,6 +6,13 @@
 
 ## 2026-07-03
 
+### macOS 起動・配布対応
+
+- **バンドル対象をOS標準へ変更** (`src-tauri/tauri.conf.json`): `bundle.targets` を Windows NSIS 固定から `all` に変更し、Windows は NSIS、macOS は `.app` / `.dmg` など各 OS の標準バンドルを生成できるようにした。
+- **macOS/Linux の同梱実行ファイル権限を補正** (`scripts/fetch-engine.mjs` / `scripts/fetch-whisper.mjs` / `scripts/fetch-aivis.mjs` / `src-tauri/src/engine.rs` / `src-tauri/src/aivis.rs`): `llama-server`、`whisper-cli`、Aivis `run` は取得・コピー・起動直前に実行権限を補正し、zip 展開やコピーで実行ビットが落ちても起動できるようにした。
+- **macOS の Aivis 取得を任意化** (`scripts/fetch-aivis.mjs`): `.7z.001` 展開に `7z` / `7za` が無い場合、dev/build では音声同梱だけを警告扱いにして続行する。音声同梱を必須にしたい場合は `AIVIS_REQUIRED=1` を指定する。
+- **Unix 系の残存プロセス停止を安全化** (`scripts/stop-stale.mjs`): `pkill -f` をやめ、`llama-server` / `PicoAgent` / `picoagent` はプロセス名完全一致、Aivis は PicoAgent 管理下の `run` パス一致だけを停止するようにした。
+
 ### Live2D キャラクター対応（本物の Cubism ランタイム描画）
 
 - **Live2D 描画パスを追加** (`ui/renderer.js` / `ui/styles.css` / `src-tauri/tauri.conf.json`): `character.json` に `live2d.model` を持つキャラは、従来のPNG連番＋CSS揺れ（疑似Live2D）ではなく Cubism ランタイム（Cubism Core + PIXI 6 + pixi-live2d-display）で WebGL 描画するようにした。まばたき・アイドルモーションはモデル定義が自動再生し、状態変化（考え中・返答・落胆）は `live2d.motions` の写像先モーションを再生、読み上げ中は既存の WebAudio 振幅解析で `ParamMouthOpenY` を直接動かして声量連動の口パクにする。視線追従はモデルの `focus()` でカーソルへ顔を向ける。CSP に Cubism Core の WASM 用 `'wasm-unsafe-eval'` を追加した。

@@ -7,7 +7,7 @@
 //   WHISPER_MODEL   … tiny/base/small/medium/large-v3-turbo または ggml-*.bin URL（既定 small）
 //   WHISPER_FORCE=1 … 既存配置を再取得
 
-import { mkdir, rm, readdir, rename, readFile, writeFile, stat } from "node:fs/promises";
+import { chmod, mkdir, rm, readdir, rename, readFile, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir, platform, arch } from "node:os";
 import { join, dirname, basename, extname } from "node:path";
@@ -25,6 +25,12 @@ function exeName() {
 
 function exePath() {
   return join(WHISPER_DIR, exeName());
+}
+
+async function ensureExecutable(path) {
+  if (platform() !== "win32") {
+    await chmod(path, 0o755);
+  }
 }
 
 function modelChoice() {
@@ -122,12 +128,16 @@ async function flatten(root, outDir) {
         await writeFile(dest, await readFile(file));
       });
     }
+    if (basename(dest) === "whisper-cli") {
+      await ensureExecutable(dest);
+    }
   }
   return wanted.some((file) => /^whisper-cli(\.exe)?$/.test(basename(file)));
 }
 
 async function ensureBinary() {
   if (existsSync(exePath()) && process.env.WHISPER_FORCE !== "1") {
+    await ensureExecutable(exePath());
     console.log("whisper binary ready:", exePath());
     return;
   }

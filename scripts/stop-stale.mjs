@@ -26,7 +26,7 @@ function isRunning(target) {
     const r = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${target}`, "/NH"], { encoding: "utf8" });
     return typeof r.stdout === "string" && r.stdout.toLowerCase().includes(target.toLowerCase());
   }
-  return spawnSync("pgrep", ["-f", target], { encoding: "utf8" }).status === 0;
+  return spawnSync("pgrep", ["-x", target], { encoding: "utf8" }).status === 0;
 }
 
 // 強制終了を要求する（未起動は無視）。1 つでも実際に落とせたら true。
@@ -35,7 +35,24 @@ function killImage(target) {
     // /T で子プロセス（WebView2 / llama-server）ごと、/F で強制終了。未起動はコード 128。
     return spawnSync("taskkill", ["/F", "/T", "/IM", target], { encoding: "utf8" }).status === 0;
   }
-  return spawnSync("pkill", ["-9", "-f", target], { encoding: "utf8" }).status === 0;
+  return spawnSync("pkill", ["-9", "-x", target], { encoding: "utf8" }).status === 0;
+}
+
+function killUnixAivisRun() {
+  const r = spawnSync("pgrep", ["-af", "run"], { encoding: "utf8" });
+  if (r.status !== 0 || !String(r.stdout || "").trim()) return false;
+  const fragments = ["/resources/bundled/aivis/run", "/resources/aivis/run", "/PicoAgent/bundled/aivis/run"];
+  let killed = false;
+  for (const line of String(r.stdout || "").split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    if (!match) continue;
+    const [, pid, command] = match;
+    const normalized = command.replace(/\\/g, "/");
+    if (!fragments.some((fragment) => normalized.includes(fragment))) continue;
+    const kill = spawnSync("kill", ["-9", pid], { encoding: "utf8" });
+    killed = kill.status === 0 || killed;
+  }
+  return killed;
 }
 
 let killedAny = false;
@@ -57,6 +74,9 @@ if (isWin) {
     killedAny = true;
     console.log("[stop-stale] 停止: resources/bundled/aivis/run.exe");
   }
+} else if (killUnixAivisRun()) {
+  killedAny = true;
+  console.log("[stop-stale] 停止: resources/bundled/aivis/run");
 }
 
 // 何も残っていなければ待つ必要はない（通常起動にオーバーヘッドを足さない）。

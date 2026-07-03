@@ -274,6 +274,28 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
+#[cfg(unix)]
+fn ensure_executable(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    if permissions.mode() & 0o111 != 0 {
+        return Ok(());
+    }
+    permissions.set_mode(permissions.mode() | 0o755);
+    if let Err(error) = std::fs::set_permissions(path, permissions) {
+        // フォールバック許可: .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
+        if error.kind() != std::io::ErrorKind::PermissionDenied {
+            return Err(error.into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_executable(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeviceMode {
     Auto,
@@ -507,7 +529,7 @@ fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
     let status = command.status()?;
     if !status.success() {
         anyhow::bail!(
-            "Aivis アーカイブの展開に失敗しました。7-Zip または tar を利用できる環境が必要です。"
+            "Aivis アーカイブの展開に失敗しました。7-Zip/7za または tar を利用できる環境が必要です。macOS で .7z.001 を展開する場合は p7zip を導入してください。"
         );
     }
     Ok(())
@@ -560,6 +582,7 @@ fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<Pat
     let Some(path) = runtime_engine_path(app) else {
         anyhow::bail!("Aivis 同梱リソースをコピーしましたが、実行ファイルを見つけられません。");
     };
+    ensure_executable(&path)?;
     append_log(
         app,
         &format!(
@@ -581,9 +604,11 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
                 }
             }
         }
+        ensure_executable(&path)?;
         return Ok(path);
     }
     if let Some(path) = copy_resource_to_install(app)? {
+        ensure_executable(&path)?;
         return Ok(path);
     }
     append_log(
@@ -623,6 +648,7 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     let installed = runtime_engine_path(app).ok_or_else(|| {
         anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
     })?;
+    ensure_executable(&installed)?;
     append_log(app, &format!("Aivis 自動取得完了: {}", installed.display()))?;
     Ok(installed)
 }
@@ -827,6 +853,7 @@ fn spawn_engine(
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
     }
+    ensure_executable(&path)?;
     let work_dir = path.parent().map(Path::to_path_buf);
     let mut command = std::process::Command::new(path);
     if let Some(dir) = work_dir {

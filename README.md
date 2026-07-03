@@ -31,7 +31,7 @@
 
 ## 🚀 クイックスタート
 
-前提: **Rust（cargo）** と **Node.js ≥ 20**、Windows は WebView2 ランタイム。**Ollama は不要**です。
+前提: **Rust（cargo）** と **Node.js ≥ 20**。Windows は WebView2 ランタイム、macOS は Xcode Command Line Tools（`xcode-select --install`）が必要です。macOS で同梱 Aivis を事前取得する場合は `brew install p7zip`。**Ollama は不要**です。
 
 ```powershell
 npm install
@@ -159,7 +159,9 @@ npm run setup:live2d   # Live2D ランタイムとサンプルモデルを取得
 npm run build
 ```
 
-`src-tauri/target/release/bundle/` に Windows インストーラ（NSIS）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱によりインストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+`src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。macOS / Linux で Aivis の `.7z.001` 展開に `7z` / `7za` が無い場合、音声同梱の事前取得だけを警告扱いにして起動を続行します（音声を必須にする場合は `AIVIS_REQUIRED=1 npm run setup:aivis`）。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱により Windows インストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+
+macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など実行時に chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します。
 
 配布ビルドでは `scripts/build-ui-dist.mjs --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
 
@@ -179,7 +181,7 @@ npm run build
 #### 同梱 Aivis（読み上げ）
 
 - **取得**: 公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/bundled/aivis/` へ展開します（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。
-- **配布**: このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物に含まれます（巨大ファイルやライセンス確認が必要な実体は Git には含めません）。配布後に見つからない場合は、初回の読み上げ起動時に同じリリースを `%APPDATA%\PicoAgent\bundled\aivis\` へ自動取得・展開します（展開には `7z` / `7za` / `tar` のいずれかを使用）。
+- **配布**: このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物に含まれます（巨大ファイルやライセンス確認が必要な実体は Git には含めません）。配布後に見つからない場合は、初回の読み上げ起動時に同じリリースを `%APPDATA%\PicoAgent\bundled\aivis\` へ自動取得・展開します（展開には `7z` / `7za` / `tar` のいずれかを使用。macOS の `.7z.001` は `brew install p7zip` で `7z` を入れてください）。
 - **起動**: `PICOAGENT_TTS_ENABLED` が有効ならアプリ起動時に内部ポート（既定 `11436`）で裏起動します。旧既定の `10102` が保存済みなら起動時に `11436` へ移行します。アプリが起動した子プロセスは終了時に停止します。
 - **推論デバイス**: 内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で起動前に GPU 候補を確認し、候補があれば GPU、なければ CPU で起動します。通常の設定画面には表示しません。
 - **話者（speaker ID）**: 通常の設定画面には表示せず、キャラクター既定声を使います。`りん` は既定で AivisHub の「るな」（モデル UUID `4f281e78-eba6-495a-8e50-5c322d02b5b1`、話者 UUID `aa63d66e-92fe-499e-9e0d-15dad4a61d0d`、スタイル名「ノーマル」）、`まい` は AivisHub の「まい」（モデル UUID `e9339137-2ae3-4d41-9394-fb757a7e61e6`、話者 UUID `41b7785f-35cc-4089-a360-dd8a63da5e75`、スタイル名「ノーマル」）を使います。未導入なら起動シーケンスのローディング画面で AIVMX を AivisSpeech Engine へ追加し、合成時は `/speakers` から実際の style ID を解決します。
@@ -244,5 +246,6 @@ npm run build
 - **`code_runner`（自力実行）が動かない** → 既定で無効。設定画面の「スキル設定」タブの `code_runner` カードで `PICOAGENT_CODE_RUNNER_ENABLED` を true にする。Python を使う場合は `PICOAGENT_CODE_RUNNER_PYTHON` に実行パスを設定。作業先は共通「許可」タブの許可ルート配下のみ。物理削除コードは拒否される。
 - **`run_command` が拒否される** → 既定では無効。設定で有効化し、`PICOAGENT_COMMAND_ALLOWLIST` に実行したい `program args...` の prefix を追加する。shell は使わず `program` と `args` を分けて実行する。
 - **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
-- **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行して残存プロセスを停止する。手動で止めたいときは `npm run stop`。
+- **macOS で Aivis の取得だけ失敗する** → `.7z.001` 展開用の `7z` が無い状態です。音声なしの起動は続行できます。読み上げも使う場合は `brew install p7zip` 後に `AIVIS_FORCE=1 npm run setup:aivis` を実行してください。失敗を警告ではなくエラーにしたい場合は `AIVIS_REQUIRED=1` を付けます。
+- **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行して残存プロセスを停止する。macOS / Linux ではプロセス名完全一致と PicoAgent 管理下の Aivis `run` だけを対象にする。手動で止めたいときは `npm run stop`。
 - **`npm run dev` 起動直後に `picoagent.exe (exit code: 1)` で落ちる** → 前回起動の `picoagent.exe`（とその WebView2 子プロセス）が残ったまま新インスタンスが起動し、WebView の生成が一時的に競合した状態。`npm run dev` は残存プロセスを停止後、実際に消えるまで待ってから Tauri を起動する。手動停止は `npm run stop`。
