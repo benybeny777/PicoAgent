@@ -166,6 +166,7 @@ fn remove_material_leaks(answer: String) -> String {
                 && !trim.starts_with("--- ニュース内部資料")
                 && !trim.starts_with("ニュースHTML取得結果")
                 && !trim.starts_with("情報源:")
+                && !trim.contains("PICOAGENT_APP_QUIT_REQUESTED")
                 && !looks_like_rss_dump_line(trim)
         })
         .collect::<Vec<_>>()

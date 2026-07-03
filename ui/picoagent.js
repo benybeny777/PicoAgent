@@ -41,6 +41,7 @@ window.picoagent = {
   scheduleRuns: () => call("pet_schedule_runs"),
   rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
   openSettings: () => call("pet_open_settings"),
+  quit: () => call("pet_quit"),
   alarms: () => call("pet_alarms"),
   alarmWake: (id) => call("pet_alarm_wake", { id }),
   speak: (text) => call("pet_speak", { text }),

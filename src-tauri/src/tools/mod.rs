@@ -69,6 +69,20 @@ const CORE_AGENT_TOOLS: [&str; 3] = ["get_time", "web_search", "web_fetch"];
 const MAX_SELECTED_SCHEMAS: usize = 12;
 const TOOL_ROUTES: &[(&str, &[&str])] = &[
     (
+        "app_control",
+        &[
+            "アプリ終了",
+            "アプリを終了",
+            "アプリ閉じ",
+            "アプリを閉じ",
+            "このアプリ",
+            "このソフト",
+            "picoagent",
+            "ピコエージェント",
+            "pico agent",
+        ],
+    ),
+    (
         "weather",
         &["天気", "気温", "雨", "降水", "予報", "weather"],
     ),

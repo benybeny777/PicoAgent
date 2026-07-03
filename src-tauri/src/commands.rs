@@ -435,6 +435,20 @@ fn is_cancel_text(text: &str) -> bool {
 }
 
 #[tauri::command]
+pub fn pet_quit(app: AppHandle) {
+    crate::log_paths::append_app_log(&app, "チャット操作により PicoAgent を終了します。");
+    app.exit(0);
+}
+
+fn tool_requested_app_quit(messages: &[Message]) -> bool {
+    messages.iter().any(|message| {
+        message.role == "tool"
+            && message.name.as_deref() == Some("app_control")
+            && message.content.contains("PICOAGENT_APP_QUIT_REQUESTED")
+    })
+}
+
+#[tauri::command]
 pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
     let model = state.model.lock().unwrap().clone();
     let recent_history: Vec<Message> = clean_turns(&state.messages.lock().unwrap())
@@ -748,6 +762,7 @@ pub async fn pet_send(
     match result {
         Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
         Ok(PersistedReply::Current(reply)) => {
+            let quit_app = tool_requested_app_quit(&convo);
             if let Some(pending) = crate::tools::run_command::parse_approval_marker(&reply) {
                 *state.pending_command.lock().unwrap() = Some(pending.clone());
                 let prompt = crate::tools::run_command::approval_prompt(&pending);
@@ -766,7 +781,13 @@ pub async fn pet_send(
                 }
                 return Ok(json!({ "reply": prompt }));
             }
-            Ok(apply_emotion_and_reply(&app, &state, &user_text, reply))
+            let mut response = apply_emotion_and_reply(&app, &state, &user_text, reply);
+            if quit_app {
+                if let Some(map) = response.as_object_mut() {
+                    map.insert("quitApp".to_string(), json!(true));
+                }
+            }
+            Ok(response)
         }
         Err(e) => {
             let message = log_command_error(&app, "AI応答に失敗しました", e);
@@ -886,7 +907,10 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
         Ok(message) => {
             let reply = message.content.trim().to_string();
             if !conversation_is_current(&state, &request_character_id, request_epoch) {
-                crate::log_paths::append_app_log(&app, "古い自発雑談の会話履歴書き戻しを破棄しました。");
+                crate::log_paths::append_app_log(
+                    &app,
+                    "古い自発雑談の会話履歴書き戻しを破棄しました。",
+                );
                 return Ok(json!({ "enabled": true, "stale": true, "reply": "" }));
             }
             // 直近の独り言として記録（末尾 6 件まで保持）。次回の重複回避に使う。
@@ -1974,7 +1998,13 @@ pub async fn pet_send_image(
     match result {
         Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
         Ok(PersistedReply::Current(reply)) => {
-            Ok(apply_emotion_and_reply(&app, &state, &user_text, reply))
+            let mut response = apply_emotion_and_reply(&app, &state, &user_text, reply);
+            if tool_requested_app_quit(&convo) {
+                if let Some(map) = response.as_object_mut() {
+                    map.insert("quitApp".to_string(), json!(true));
+                }
+            }
+            Ok(response)
         }
         Err(e) => {
             let message = log_command_error(&app, "画像付き AI 応答に失敗しました", e);

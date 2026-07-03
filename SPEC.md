@@ -231,6 +231,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 | name | 機能 | 安全策 |
 |---|---|---|
+| `app_control` | PicoAgentアプリ自身を操作する。チャットで「アプリ終了して」「PicoAgent を閉じて」のように頼むと `quit` を実行する | スキル結果の `PICOAGENT_APP_QUIT_REQUESTED` をバックエンドが検出し、フロントが短く表示してから `pet_quit` で `app.exit(0)` を呼ぶ。単なる「終了」はタイマー等の終了と混ざるため、アプリ名またはアプリ文脈を含む依頼だけに使う |
 | `get_time` | 現在の日付・時刻（任意で IANA タイムゾーン、`chrono-tz`） | 副作用なし |
 | `weather` | Open-Meteo による現在天気・日別予報。天気アイコン＋気温スパークライン（時間別/日別）でグラフィカルに表示。地名未指定時は IP から現在地を自動推定 | APIキー不要、地名検索、timeout、自動位置は無効化可 |
 | `currency_rates` | Frankfurter API による為替レート取得・換算・推移チャート（スパークライン。`chart=true` / `days`） | APIキー不要、timeout |
@@ -560,7 +561,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 拡大時はセッション内の会話履歴をフキダシ内に表示し、最新応答と入力フォームは下部に残す。履歴上部の検索欄で会話履歴を絞り込み、各履歴の「コピー」と、ユーザー発話の「再利用」（入力欄へ戻す）を実行できる。`pet:reset` では履歴・履歴検索・入力履歴もクリアする。
 - `pet_init` はバックエンド文脈に復元済みの直近会話を `history` として返し、フロントは全画面フキダシの履歴表示へ反映する。読み上げ中にキャラクターをクリックすると現在の音声を停止する。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。
-- アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。さらに `npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行し、前回の残存プロセスを停止して同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。Unix 系では `pgrep` / `pkill` の完全一致で `llama-server` / `PicoAgent` / `picoagent` だけを止め、Aivis は PicoAgent 管理下の `resources/bundled/aivis/run` / `resources/aivis/run` / `PicoAgent/bundled/aivis/run` に一致する `run` だけを止める。手動停止は `npm run stop`。起動・アプリ・フロント・音声・エンジンログは `PicoAgent/log/` に日付付き（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）で集約し、1 日ごとにローテート・1 週間保持する（履歴は対象外）。
+- アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。右クリックメニューの「PicoAgent を終了」に加え、チャットでは `app_control` スキルの `quit` で終了できる。さらに `npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行し、前回の残存プロセスを停止して同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。Unix 系では `pgrep` / `pkill` の完全一致で `llama-server` / `PicoAgent` / `picoagent` だけを止め、Aivis は PicoAgent 管理下の `resources/bundled/aivis/run` / `resources/aivis/run` / `PicoAgent/bundled/aivis/run` に一致する `run` だけを止める。手動停止は `npm run stop`。起動・アプリ・フロント・音声・エンジンログは `PicoAgent/log/` に日付付き（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）で集約し、1 日ごとにローテート・1 週間保持する（履歴は対象外）。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / set-position / set-size / event / webview 生成）。
 - 製品化: `productName=PicoAgent` / `identifier=com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app` から移行）。設定・履歴・メモリは `app_config_dir`/`app_data_dir` を使い、初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行識別子へコピー移行する。同梱系の実行時取得物はユーザーデータ配下の `PicoAgent/bundled/`、ログは `PicoAgent/log/` にまとめる。`bundle.targets=all` で各 OS の標準バンドルを生成し、Windows は NSIS 設定を保持する。Aivis 同梱で入力データが大きいため、NSIS 圧縮は `zlib` を使う。Rust release profile は LTO・strip・panic abort・debug 情報無効化を有効にして、配布バイナリのシンボル情報を減らす。NSIS は `installer-hooks.nsh` を使い、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止し、アンインストール後に `%APPDATA%\PicoAgent`、`%LOCALAPPDATA%\PicoAgent`、現行識別子 `com.picoagent.desktop` と旧 `com.picoagent.app` / `com.coda.app`、PicoAgent 用一時ディレクトリを削除する。
   アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。

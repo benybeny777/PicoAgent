@@ -68,6 +68,7 @@ pub fn run() {
             commands::pet_usage,
             commands::pet_traces,
             commands::pet_cancel,
+            commands::pet_quit,
             commands::pet_send_image,
             commands::pet_capture_screen,
             commands::pet_read_file_content,

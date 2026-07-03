@@ -1185,6 +1185,14 @@ function renderHistory() {
   historyLog.scrollTop = historyLog.scrollHeight;
 }
 
+function scheduleAppQuit() {
+  setTimeout(() => {
+    window.picoagent.quit?.().catch(error => {
+      logApp("error", "アプリ終了に失敗しました", errorDetail(error));
+    });
+  }, 900);
+}
+
 let speakingToken = 0;
 let currentVoice = null;
 let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代。変わると進行中の読み上げを打ち切る。
@@ -1937,6 +1945,7 @@ composer.addEventListener("submit", async event => {
       if (String(result.reply ?? "").trim() !== text) speakReply(result.reply);
       await renderReplySpeaking(result.reply);
       addHistory("assistant", result.reply);
+      if (result.quitApp) scheduleAppQuit();
     }
   } catch (error) {
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));

@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-07-04
+
+### アプリ操作スキルで終了できるようにした
+
+- **`app_control` スキルを追加** (`skills/app_control/mod.rs` / `src-tauri/src/tools/mod.rs` / `src-tauri/src/commands.rs` / `ui/picoagent.js` / `ui/renderer.js`): 「アプリ終了して」「PicoAgent を閉じて」のような発話で `quit` を実行し、短い返答を表示してから `app.exit(0)` で終了できるようにした。単なる「終了」はタイマーやタスクの終了と混ざるため、アプリ名またはアプリ文脈を含む依頼だけに使う。
+
 ## 2026-07-03
 
 ### Live2D キャラの日本語名と既定声を設定
