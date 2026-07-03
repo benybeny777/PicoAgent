@@ -138,7 +138,7 @@ window.addEventListener("beforeunload", () => {
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
 
-const characterManifestCacheKey = "2026-07-01-persona-v2";
+const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterAssetVersion = "";

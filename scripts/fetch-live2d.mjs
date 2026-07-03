@@ -48,7 +48,7 @@ const SAMPLE_MODELS = [
   },
   {
     id: "haru",
-    label: "Haru",
+    label: "はる",
     kind: "zip",
     zipUrl: `${SAMPLE_BIN_BASE}haru/haru_ja.zip`,
     runtimeDir: "runtime",
@@ -57,7 +57,7 @@ const SAMPLE_MODELS = [
   },
   {
     id: "epsilon",
-    label: "Epsilon",
+    label: "イプシロン",
     kind: "zip",
     zipUrl: `${SAMPLE_BIN_BASE}epsilon/epsilon_ja.zip`,
     runtimeDir: "epsilon_free/runtime",

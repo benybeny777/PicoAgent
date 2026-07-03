@@ -1142,6 +1142,23 @@ const MAI_AIVIS_MODEL_UUID: &str = "e9339137-2ae3-4d41-9394-fb757a7e61e6";
 const MAI_AIVIS_SPEAKER_UUID: &str = "41b7785f-35cc-4089-a360-dd8a63da5e75";
 const MAI_AIVIS_STYLE_NAME: &str = "ノーマル";
 
+// Live2D キャラの既定声（いずれも AivisHub）。実 style ID は speaker_uuid から
+// `/speakers` で解決する。解決失敗時のフォールバックは実IDが事前に分からないため、
+// 同梱既定声（Anneli ノーマル = PICOAGENT_TTS_SPEAKER の既定値）にして無音を避ける。
+const LIVE2D_AIVIS_FALLBACK_SPEAKER: &str = "888753760";
+// ひより（AivisHub「まお」）
+const HIYORI_AIVIS_MODEL_UUID: &str = "a59cb814-0083-4369-8542-f51a29e72af7";
+const HIYORI_AIVIS_SPEAKER_UUID: &str = "e756b8e4-b606-4e15-99b1-3f9c6a1b2317";
+const HIYORI_AIVIS_STYLE_NAME: &str = "ノーマル";
+// はる（AivisHub「花音」）
+const HARU_AIVIS_MODEL_UUID: &str = "a670e6b8-0852-45b2-8704-1bc9862f2fe6";
+const HARU_AIVIS_SPEAKER_UUID: &str = "b1ca560f-f212-4e67-ab7d-0a4f5afb75a8";
+const HARU_AIVIS_STYLE_NAME: &str = "ノーマル";
+// イプシロン（AivisHub「コハク」）
+const EPSILON_AIVIS_MODEL_UUID: &str = "22e8ed77-94fe-4ef2-871f-a86f94e9a579";
+const EPSILON_AIVIS_SPEAKER_UUID: &str = "5680ac39-43c9-487a-bc3e-018c0d29cc38";
+const EPSILON_AIVIS_STYLE_NAME: &str = "ノーマル";
+
 fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
     match character_id {
         "rin" => Some(TtsVoice {
@@ -1155,6 +1172,24 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             model_uuid: Some(MAI_AIVIS_MODEL_UUID.to_string()),
             speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
             style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
+        }),
+        "hiyori" => Some(TtsVoice {
+            speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
+            model_uuid: Some(HIYORI_AIVIS_MODEL_UUID.to_string()),
+            speaker_uuid: Some(HIYORI_AIVIS_SPEAKER_UUID.to_string()),
+            style_name: Some(HIYORI_AIVIS_STYLE_NAME.to_string()),
+        }),
+        "haru" => Some(TtsVoice {
+            speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
+            model_uuid: Some(HARU_AIVIS_MODEL_UUID.to_string()),
+            speaker_uuid: Some(HARU_AIVIS_SPEAKER_UUID.to_string()),
+            style_name: Some(HARU_AIVIS_STYLE_NAME.to_string()),
+        }),
+        "epsilon" => Some(TtsVoice {
+            speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
+            model_uuid: Some(EPSILON_AIVIS_MODEL_UUID.to_string()),
+            speaker_uuid: Some(EPSILON_AIVIS_SPEAKER_UUID.to_string()),
+            style_name: Some(EPSILON_AIVIS_STYLE_NAME.to_string()),
         }),
         _ => None,
     }

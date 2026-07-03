@@ -6,6 +6,11 @@
 
 ## 2026-07-03
 
+### Live2D キャラの日本語名と既定声を設定
+
+- **表示名を日本語化** (`characters/{haru,epsilon}/character.json` / `characters/index.json`): Haru →「はる」、Epsilon →「イプシロン」。挨拶・人格プロンプトの名乗りも日本語名へ揃えた。
+- **キャラ既定声を割り当て** (`src-tauri/src/commands.rs` / 各 `character.json`): ひより → AivisHub「まお」、はる →「花音」、イプシロン →「コハク」（いずれもスタイル「ノーマル」）。実 style ID は従来どおり実行時に `/speakers` から解決し、解決失敗時は同梱既定声（`888753760`）へフォールバックして無音を避ける。
+
 ### Haru / Epsilon の表示サイズ・口パク・モーションを修正
 
 - **口パクIDをモデル定義から自動検出** (`ui/renderer.js`): Haru / Epsilon は旧命名 `PARAM_MOUTH_OPEN_Y` のため、固定既定値 `ParamMouthOpenY` では読み上げ中も口が動かなかった。モデルの `Groups: LipSync` の先頭IDを自動検出するようにし、両キャラの誤った `lipSyncParam` 指定を撤去した。
