@@ -5,8 +5,8 @@
 #
 # レイヤー構成は Live2D 公式サンプル「ひより」（Hiyori.cdi3.json）のパーツ構成に合わせ、
 # パーツごとのグループへ base の該当領域を切り抜いて収録する（上から前髪→…→後ろ髪の描画順）。
-# 各切り抜きは元位置に整列しているため、全レイヤーを合成すると base と同じ絵になる。
-# Cubism Editor ではこのグループがそのままパーツになり、各レイヤーを整形して使う。
+# 各切り抜きは元位置に整列している。領域は重なりを含むため、Cubism Editor 側で
+# 余分な部分を削り、隠れる部分を描き足して各レイヤーを整形して使う。
 #
 #   PartHairFront（前髪）/ PartHairSide（横髪）/ PartBrow（まゆ毛）/ PartEye（目）/
 #   PartEyeBall（目玉）/ PartCheek（頬）/ PartNose（鼻）/ PartMouth（口）/ PartFace（顔）/
@@ -103,11 +103,13 @@ def build_psd(character_id: str) -> Path | None:
 
     # ひよりのパーツ構成でグループを作る（追加順に上へ積まれる: 後ろ髪 → … → 前髪）。
     # 各グループの中身は base の該当領域の切り抜き（元位置に整列済み）。
+    # 半透明エッジを安全に残すため領域は重なりを持たせる。Cubism Editor 側で整形する。
     for part_id, _label, ratio in HIYORI_PARTS:
         bbox = part_bbox(content_bbox, ratio)
         group = Group.new(psd, part_id)
         crop = base.crop(bbox)
         group.append(PixelLayer.frompil(crop, psd, f"{part_id}_src", bbox[1], bbox[0]))
+        psd.append(group)
 
     # 口・目の開閉差分（作画参考）。最前面に非表示で置く。
     variants = Group.new(psd, "variants")
@@ -115,6 +117,7 @@ def build_psd(character_id: str) -> Path | None:
         layer = PixelLayer.frompil(images[name], psd, name, 0, 0)
         layer.visible = False
         variants.append(layer)
+    psd.append(variants)
 
     out_dir = CHARACTERS / character_id / "live2d-src"
     out_dir.mkdir(parents=True, exist_ok=True)
