@@ -20,5 +20,6 @@ if (!existsSync(src)) {
 
 rmSync(dest, { recursive: true, force: true });
 mkdirSync(dirname(dest), { recursive: true });
-cpSync(src, dest, { recursive: true });
+// live2d-src/（Cubism Editor 用の制作素材 PSD）は実行時に使わないため配信コピーへ含めない。
+cpSync(src, dest, { recursive: true, filter: (from) => !from.includes("live2d-src") });
 console.log(`[sync-characters] ${src} -> ${dest} を同期しました`);

@@ -8,6 +8,7 @@
     "setup:whisper": "node scripts/fetch-whisper.mjs",
     "setup:live2d": "node scripts/fetch-live2d.mjs",
     "build:character-animations": "python scripts/build-character-animations.py",
+    "build:live2d-psd": "python scripts/build-live2d-psd.py",
     "sync:characters": "node scripts/sync-characters.mjs",
     "build:ui:dev": "node scripts/build-ui-dist.mjs",
     "build:ui:release": "node scripts/build-ui-dist.mjs --release",
