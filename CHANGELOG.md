@@ -6,6 +6,12 @@
 
 ## 2026-07-03
 
+### Haru / Epsilon の表示サイズ・口パク・モーションを修正
+
+- **口パクIDをモデル定義から自動検出** (`ui/renderer.js`): Haru / Epsilon は旧命名 `PARAM_MOUTH_OPEN_Y` のため、固定既定値 `ParamMouthOpenY` では読み上げ中も口が動かなかった。モデルの `Groups: LipSync` の先頭IDを自動検出するようにし、両キャラの誤った `lipSyncParam` 指定を撤去した。
+- **モデル同梱のサンプルボイスを無効化** (`ui/renderer.js`): Haru のモーションに紐づく音声が TTS 読み上げと二重再生になるため `PIXI.live2d.config.sound = false` にした。
+- **表示枠とモーション割当を実描画で調整** (`characters/haru,epsilon/character.json`): ひよりからの流用値だった `scale` / `offsetY` を目視で追い込み、同じ胸から上の構図にした（Haru 2.1/315、Epsilon 2.0/280）。モーション割当も実在グループへ修正（thinking→Flick、talking→Tap、sad→Shake / FlickDown）。
+
 ### 会話履歴の競合対策
 
 - **古い応答の書き戻しを防止** (`src-tauri/src/commands.rs` / `ui/renderer.js`): 応答中に会話リセット・キャラ切替・設定反映をした場合、開始前の古い会話処理が後から完了しても、バックエンド履歴・長期メモリ文脈・フロント履歴へ書き戻さないようにした。リセット時は保留中コマンドと長期メモリ文脈も消してから system 文脈を作り直す。

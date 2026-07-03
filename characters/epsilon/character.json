@@ -1,7 +1,7 @@
 {
   "id": "epsilon",
   "name": "Epsilon",
-  "assetVersion": "2026-07-03-live2d-v1",
+  "assetVersion": "2026-07-03-live2d-v2",
   "description": "Live2D公式サンプルモデル。表情差分を含む標準的な検証用キャラクター。",
   "greeting": "Epsilonです。動作確認でも、作業の整理でも、必要なところから始めましょう。",
   "persona": {
@@ -15,13 +15,12 @@
     "model": "live2d/Epsilon_free.model3.json",
     "motions": {
       "idle": "Idle",
-      "thinking": "Tap",
+      "thinking": "Flick",
       "talking": "Tap",
-      "sad": "Idle"
+      "sad": "FlickDown"
     },
-    "lipSyncParam": "ParamMouthOpenY",
-    "scale": 2.45,
-    "offsetY": 555
+    "scale": 2.0,
+    "offsetY": 280
   },
   "boot": {
     "sleeping": "preview.jpg"

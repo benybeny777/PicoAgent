@@ -633,6 +633,8 @@ async function ensureLive2DRuntime() {
       await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js");
       await loadScriptOnce("vendor/live2d/pixi.min.js");
       await loadScriptOnce("vendor/live2d/cubism4.min.js");
+      // モデル同梱のモーション音声（サンプルボイス）は TTS 読み上げと二重再生になるため無効化する。
+      if (window.PIXI?.live2d?.config) PIXI.live2d.config.sound = false;
     })().catch(error => {
       live2dRuntimePromise = null; // 取得後の再選択で再試行できるようにする
       throw new Error(`Live2D ランタイムを読み込めません（npm run setup:live2d を実行してください）: ${error.message}`);
@@ -671,8 +673,11 @@ async function startLive2D(manifest) {
   model.anchor.set(0.5, 1);
   model.position.set(width / 2, height + (Number(cfg.offsetY) || 0));
   // モーション更新の直後にリップシンク値を上書きする（モーション側が口を閉じ戻すのを防ぐ）。
+  // 口パラメータIDはモデル定義（Groups: LipSync）から自動検出する。旧モデルは
+  // PARAM_MOUTH_OPEN_Y のような旧命名のため、固定既定値だと口が動かない。
   const coreModel = model.internalModel.coreModel;
-  const lipParam = String(cfg.lipSyncParam || "ParamMouthOpenY");
+  const lipSyncGroup = model.internalModel.settings?.groups?.find(group => group.Name === "LipSync");
+  const lipParam = String(cfg.lipSyncParam || lipSyncGroup?.Ids?.[0] || "ParamMouthOpenY");
   const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
   model.internalModel.motionManager.update = (...args) => {
     const updated = motionUpdate(...args);

@@ -1,7 +1,7 @@
 {
   "id": "haru",
   "name": "Haru",
-  "assetVersion": "2026-07-03-live2d-v1",
+  "assetVersion": "2026-07-03-live2d-v2",
   "description": "Live2D公式サンプルモデル。落ち着いた案内役として使う検証用キャラクター。",
   "greeting": "こんにちは、Haruです。今日の作業を落ち着いて進めましょう。",
   "persona": {
@@ -15,13 +15,12 @@
     "model": "live2d/haru.model3.json",
     "motions": {
       "idle": "Idle",
-      "thinking": "Tap",
+      "thinking": "Flick",
       "talking": "Tap",
-      "sad": "Idle"
+      "sad": "Shake"
     },
-    "lipSyncParam": "ParamMouthOpenY",
-    "scale": 2.6,
-    "offsetY": 570
+    "scale": 2.1,
+    "offsetY": 315
   },
   "boot": {
     "sleeping": "preview.jpg"
