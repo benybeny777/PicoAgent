@@ -37,6 +37,7 @@ let lastUserText = "";
 let unlistenStatus = null;
 const conversationHistory = [];
 let historyQuery = "";
+let conversationRevision = 0;
 const promptHistory = [];
 let promptHistoryIndex = null;
 let promptDraft = "";
@@ -1836,6 +1837,7 @@ composer.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
+  const requestRevision = conversationRevision;
   clearAlarmSnooze(false);
   lastUserText = text; // エラーリトライ用に保持
   busy = true;
@@ -1910,6 +1912,10 @@ composer.addEventListener("submit", async event => {
       result = await window.picoagent.sendImage(fullText, images);
     }
     if (!result) result = await window.picoagent.send(fullText);
+    if (result?.stale || requestRevision !== conversationRevision) {
+      status.textContent = "";
+      return;
+    }
     status.textContent = result.error ? "接続を確認してね" : "";
     if (result.error) {
       logApp("error", "AI応答がエラーを返しました", result.reply || "");
@@ -1999,6 +2005,7 @@ document.addEventListener("keydown", event => {
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
 window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
+  conversationRevision += 1;
   conversationHistory.length = 0;
   promptHistory.length = 0;
   promptHistoryIndex = null;
@@ -2219,11 +2226,13 @@ function applyChatterConfig(c) {
 }
 async function showAssistantNotice(line, options = {}) {
   if (!line) return;
+  const requestRevision = conversationRevision;
   if (!canShowNotice()) {
     if (options.enqueue !== false) queueNotice(line);
     return;
   }
   const prepared = await prepareSpeech(line);
+  if (requestRevision !== conversationRevision) return;
   if (!canShowNotice()) {
     if (options.enqueue !== false) queueNotice(line);
     return;

@@ -6,6 +6,10 @@
 
 ## 2026-07-03
 
+### 会話履歴の競合対策
+
+- **古い応答の書き戻しを防止** (`src-tauri/src/commands.rs` / `ui/renderer.js`): 応答中に会話リセット・キャラ切替・設定反映をした場合、開始前の古い会話処理が後から完了しても、バックエンド履歴・長期メモリ文脈・フロント履歴へ書き戻さないようにした。リセット時は保留中コマンドと長期メモリ文脈も消してから system 文脈を作り直す。
+
 ### Live2D サンプルキャラクターの追加
 
 - **Haru / Epsilon を追加** (`characters/haru/` / `characters/epsilon/` / `scripts/fetch-live2d.mjs`): Live2D 公式サンプルの Haru と Epsilon をキャラクター一覧に追加した。`npm run setup:live2d` はひよりに加えて Haru / Epsilon のモデル実体を取得し、各 `preview.jpg` をローディング画面と設定画面アイコンに使う。モデル実体は再配布条件があるため Git 管理外のまま。
@@ -481,7 +485,7 @@
 ### アイドル時の自発雑談スキル（chitchat）
 
 - アイドル（待機）中にキャラクターが自発的にひとこと雑談する機能を、スキルコネクタ `skills/chitchat/mod.rs` として追加。設定画面の「スキル」タブで ON/OFF と発話間隔（最短/最長秒）を変更でき、設定値はスキルの `config_schema` で自動表示される（`PICOAGENT_CHATTER_ENABLED` / `PICOAGENT_CHATTER_MIN_SECS` / `PICOAGENT_CHATTER_MAX_SECS`）。
-- 生成は `pet_idle_chatter` command が選択中キャラの人格込みで `provider.chat`（tools 無し＝Web検索なし）に依頼し、会話履歴には積まない。フロントは `[min,max]` 秒のランダム間隔で発火し、入力・応答・読み上げ・全画面中は割り込まず、ユーザー操作や設定変更でタイマーを張り直す。
+- 生成は `pet_idle_chatter` command が選択中キャラの人格込みで `provider.chat`（tools 無し＝Web検索なし）に依頼する。当初は会話履歴に積まなかったが、現在は「直前の自発雑談」として文脈へ短く残す。フロントは `[min,max]` 秒のランダム間隔で発火し、入力・応答・読み上げ・全画面中は割り込まず、ユーザー操作や設定変更でタイマーを張り直す。
 - `Tool` トレイトに `agent_callable`（既定 true）を追加し、`chitchat` のように会話中にモデルへ提示しない内部スキルを `build_schemas` から除外できるようにした。`Field` に `checkbox` 型を明記。
 
 ### 会話・フキダシ・起動描画の改善

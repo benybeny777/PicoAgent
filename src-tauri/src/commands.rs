@@ -1,6 +1,9 @@
 // commands.rs - Tauri command（フロントの window.picoagent が叩く入口）と共有状態。
 
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -71,6 +74,9 @@ pub struct AppState {
     pub emotion: Mutex<crate::emotion::EmotionState>,
     /// 停止ボタンによる中断要求。送信開始時に false へ戻し、エージェントがステップ境界で確認する。
     pub cancel_requested: std::sync::atomic::AtomicBool,
+    /// 会話状態の世代番号。リセット・キャラ切替・再初期化後に古い非同期処理が
+    /// 履歴や文脈を書き戻さないよう、送信開始時の値と完了時の値を照合する。
+    pub conversation_epoch: AtomicU64,
 }
 
 impl AppState {
@@ -87,7 +93,16 @@ impl AppState {
             pending_command: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
             cancel_requested: std::sync::atomic::AtomicBool::new(false),
+            conversation_epoch: AtomicU64::new(0),
         }
+    }
+
+    pub fn conversation_epoch(&self) -> u64 {
+        self.conversation_epoch.load(Ordering::Relaxed)
+    }
+
+    pub fn bump_conversation_epoch(&self) {
+        self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
@@ -258,20 +273,35 @@ pub fn active_character_id(state: &AppState) -> String {
     }
 }
 
+fn conversation_is_current(state: &AppState, character_id: &str, epoch: u64) -> bool {
+    active_character_id(state) == character_id && state.conversation_epoch() == epoch
+}
+
+enum PersistedReply {
+    Current(String),
+    Stale,
+}
+
 /// ユーザー発話とアシスタント返答を会話へ記録し、圧縮・履歴保存して返却 JSON を作る。
 /// 承認/キャンセルなど「AI を介さず即返答する」分岐の共通処理。
 fn record_turn(
     state: &AppState,
     app: &AppHandle,
+    character_id: &str,
+    epoch: u64,
     user_text: &str,
     reply: String,
 ) -> Result<Value, String> {
+    if !conversation_is_current(state, character_id, epoch) {
+        crate::log_paths::append_app_log(app, "古い会話ターンの記録を破棄しました。");
+        return Ok(json!({ "stale": true, "reply": "" }));
+    }
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", user_text));
     convo.push(Message::new("assistant", reply.clone()));
     let compacted = compacted_conversation(&convo);
     *state.messages.lock().unwrap() = compacted.clone();
-    crate::history::save(app, &active_character_id(state), &compacted);
+    crate::history::save(app, character_id, &compacted);
     Ok(json!({ "reply": reply }))
 }
 
@@ -297,12 +327,14 @@ async fn run_agent_and_persist(
     provider: &'static dyn providers::Provider,
     model: &str,
     convo: &mut Vec<Message>,
-) -> anyhow::Result<String> {
+    character_id: &str,
+    epoch: u64,
+) -> anyhow::Result<PersistedReply> {
     // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
     state
         .cancel_requested
         .store(false, std::sync::atomic::Ordering::Relaxed);
-    let result = agent::run(
+    let reply = agent::run(
         &state.config,
         provider,
         model,
@@ -311,12 +343,17 @@ async fn run_agent_and_persist(
         Some(app),
         Some(&state.cancel_requested),
     )
-    .await;
+    .await?;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(convo);
-    *state.messages.lock().unwrap() = compacted.clone();
-    crate::history::save(app, &active_character_id(state), &compacted);
-    result
+    if conversation_is_current(state, character_id, epoch) {
+        *state.messages.lock().unwrap() = compacted.clone();
+        crate::history::save(app, character_id, &compacted);
+        Ok(PersistedReply::Current(reply))
+    } else {
+        crate::log_paths::append_app_log(app, "古いAI応答の会話履歴書き戻しを破棄しました。");
+        Ok(PersistedReply::Stale)
+    }
 }
 
 /// 感情状態をルールベースで更新してフロントへ通知し、返信 JSON を組み立てる。
@@ -343,9 +380,11 @@ fn apply_emotion_and_reply(
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
 pub fn clear_conversation_and_history(app: &AppHandle) {
     let state = app.state::<AppState>();
-    state.clear_conversation();
+    state.bump_conversation_epoch();
+    state.pending_command.lock().unwrap().take();
     state.recent_chatter.lock().unwrap().clear();
     state.memory_context.lock().unwrap().clear();
+    state.clear_conversation();
     crate::history::clear(app, &active_character_id(&state));
     crate::memory::clear(app);
     if let Some(win) = app.get_webview_window("main") {
@@ -518,6 +557,8 @@ pub fn pet_set_character_profile(
     } else {
         // キャラクター変更: 旧キャラの会話文脈を捨て、切替先キャラの履歴を復元する。
         // 旧キャラの履歴はファイルに残るため、戻れば続きから話せる。
+        state.bump_conversation_epoch();
+        state.pending_command.lock().unwrap().take();
         state.clear_conversation();
         let recent = crate::history::load_recent(&app, &character_id);
         if !recent.is_empty() {
@@ -601,6 +642,8 @@ pub async fn pet_send(
         return Ok(json!({ "reply": "" }));
     }
     let user_text = text.clone();
+    let request_character_id = active_character_id(&state);
+    let request_epoch = state.conversation_epoch();
 
     let pending = state.pending_command.lock().unwrap().clone();
     if let Some(pending) = pending {
@@ -611,18 +654,34 @@ pub async fn pet_send(
                 &pending,
             )
             .await;
-            return record_turn(&state, &app, &user_text, reply);
+            return record_turn(
+                &state,
+                &app,
+                &request_character_id,
+                request_epoch,
+                &user_text,
+                reply,
+            );
         }
         if is_approval_text(&text) {
             *state.pending_command.lock().unwrap() = None;
             let reply = crate::tools::run_command::execute_pending(&pending).await;
-            return record_turn(&state, &app, &user_text, reply);
+            return record_turn(
+                &state,
+                &app,
+                &request_character_id,
+                request_epoch,
+                &user_text,
+                reply,
+            );
         }
         if is_cancel_text(&text) {
             *state.pending_command.lock().unwrap() = None;
             return record_turn(
                 &state,
                 &app,
+                &request_character_id,
+                request_epoch,
                 &user_text,
                 "コマンド実行をキャンセルしました。".to_string(),
             );
@@ -658,21 +717,37 @@ pub async fn pet_send(
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
     let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
+    if !conversation_is_current(&state, &request_character_id, request_epoch) {
+        crate::log_paths::append_app_log(&app, "古いAI応答の実行開始を破棄しました。");
+        return Ok(json!({ "stale": true, "reply": "" }));
+    }
 
-    let result = run_agent_and_persist(&app, &state, provider, &model, &mut convo).await;
-    if result.is_ok() {
+    let result = run_agent_and_persist(
+        &app,
+        &state,
+        provider,
+        &model,
+        &mut convo,
+        &request_character_id,
+        request_epoch,
+    )
+    .await;
+    if matches!(result, Ok(PersistedReply::Current(_))) {
         if let Some(memory_context) =
             crate::memory::update_from_turn(&app, &state.config, &user_text)
         {
             *state.memory_context.lock().unwrap() = memory_context;
             state.reset_conversation();
             let refreshed = state.messages.lock().unwrap().clone();
-            crate::history::save(&app, &active_character_id(&state), &refreshed);
+            if conversation_is_current(&state, &request_character_id, request_epoch) {
+                crate::history::save(&app, &request_character_id, &refreshed);
+            }
         }
     }
 
     match result {
-        Ok(reply) => {
+        Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
+        Ok(PersistedReply::Current(reply)) => {
             if let Some(pending) = crate::tools::run_command::parse_approval_marker(&reply) {
                 *state.pending_command.lock().unwrap() = Some(pending.clone());
                 let prompt = crate::tools::run_command::approval_prompt(&pending);
@@ -685,8 +760,10 @@ pub async fn pet_send(
                     last.content = prompt.clone();
                 }
                 let compacted = compacted_conversation(&refreshed);
-                *state.messages.lock().unwrap() = compacted.clone();
-                crate::history::save(&app, &active_character_id(&state), &compacted);
+                if conversation_is_current(&state, &request_character_id, request_epoch) {
+                    *state.messages.lock().unwrap() = compacted.clone();
+                    crate::history::save(&app, &request_character_id, &compacted);
+                }
                 return Ok(json!({ "reply": prompt }));
             }
             Ok(apply_emotion_and_reply(&app, &state, &user_text, reply))
@@ -767,6 +844,8 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
     if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
         return Ok(json!({ "enabled": false }));
     }
+    let request_character_id = active_character_id(&state);
+    let request_epoch = state.conversation_epoch();
     let id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let provider = match providers::get(&id) {
@@ -806,6 +885,10 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
     match provider.chat(&state.config, &model, &convo, &[]).await {
         Ok(message) => {
             let reply = message.content.trim().to_string();
+            if !conversation_is_current(&state, &request_character_id, request_epoch) {
+                crate::log_paths::append_app_log(&app, "古い自発雑談の会話履歴書き戻しを破棄しました。");
+                return Ok(json!({ "enabled": true, "stale": true, "reply": "" }));
+            }
             // 直近の独り言として記録（末尾 6 件まで保持）。次回の重複回避に使う。
             if !reply.is_empty() {
                 let mut recent = state.recent_chatter.lock().unwrap();
@@ -823,7 +906,7 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
                     compacted_conversation(&messages)
                 };
                 *state.messages.lock().unwrap() = compacted.clone();
-                crate::history::save(&app, &active_character_id(&state), &compacted);
+                crate::history::save(&app, &request_character_id, &compacted);
             }
             // 雑談が話題メモ（ニュース等）に触れていれば、一致する出典URLを末尾に添える。
             // URL 行は読み上げ（speech_text）で除外されるため音声には乗らない。
@@ -1576,6 +1659,8 @@ pub fn restart_app(
     };
     *state.model.lock().unwrap() = model;
     *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
+    state.bump_conversation_epoch();
+    state.pending_command.lock().unwrap().take();
 
     // 選択中キャラの履歴を文脈へ読み込み直す（旧キャラの会話は持ち越さない）。
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
@@ -1815,6 +1900,8 @@ pub async fn pet_send_image(
             return Err("画像サイズが大きすぎます（1枚 10MB まで）。".to_string());
         }
     }
+    let request_character_id = active_character_id(&state);
+    let request_epoch = state.conversation_epoch();
 
     let (provider, model) = match selected_provider(&state) {
         Ok(pair) => pair,
@@ -1833,11 +1920,27 @@ pub async fn pet_send_image(
     ));
 
     let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
+    if !conversation_is_current(&state, &request_character_id, request_epoch) {
+        crate::log_paths::append_app_log(&app, "古い画像付きAI応答の実行開始を破棄しました。");
+        return Ok(json!({ "stale": true, "reply": "" }));
+    }
 
-    let result = run_agent_and_persist(&app, &state, provider, &model, &mut convo).await;
+    let result = run_agent_and_persist(
+        &app,
+        &state,
+        provider,
+        &model,
+        &mut convo,
+        &request_character_id,
+        request_epoch,
+    )
+    .await;
 
     match result {
-        Ok(reply) => Ok(apply_emotion_and_reply(&app, &state, &user_text, reply)),
+        Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
+        Ok(PersistedReply::Current(reply)) => {
+            Ok(apply_emotion_and_reply(&app, &state, &user_text, reply))
+        }
         Err(e) => {
             let message = log_command_error(&app, "画像付き AI 応答に失敗しました", e);
             Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))
