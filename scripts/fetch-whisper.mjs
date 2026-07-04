@@ -196,6 +196,17 @@ async function main() {
 }
 
 main().catch((error) => {
+  // フォールバック許可: whisper.cpp の GitHub Releases は macOS/Linux 向け CLI 単体バイナリの配布を
+  // 打ち切っており（xcframework のみ）、この場合は文字起こし機能なしで起動を続行する。
+  if (
+    platform() !== "win32" &&
+    process.env.WHISPER_REQUIRED !== "1" &&
+    /一致するアセットが見つかりません/.test(error.message)
+  ) {
+    console.warn("setup:whisper 警告:", error.message);
+    console.warn("録音文字起こしなしでの起動を続行します。必須にする場合は WHISPER_REQUIRED=1、または WHISPER_ASSET / 手動ビルドした whisper-cli を resources/bundled/whisper/ へ配置してください。");
+    process.exit(0);
+  }
   console.error("setup:whisper 失敗:", error.message);
   process.exit(1);
 });

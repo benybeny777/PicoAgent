@@ -5,7 +5,7 @@
 // 既定は Windows x64 の Vulkan(GPU) ビルド。別 OS/版・CPU ビルドは環境変数で上書き可能
 //   （例: CPU 固定なら LLAMACPP_ASSET="llama-.*-bin-win-cpu-x64.zip"）。
 //   LLAMACPP_RELEASE  … リリースタグ（既定 latest を解決）
-//   LLAMACPP_ASSET    … zip アセット名を直接指定（最優先）
+//   LLAMACPP_ASSET    … アセット名を直接指定（最優先。Windows は zip、macOS/Linux は tar.gz）
 
 import { chmod, cp, mkdir, rm, readdir, rename, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -25,13 +25,14 @@ async function ensureExecutable(path) {
   }
 }
 
-// プラットフォーム別の zip アセット名パターン（llama.cpp リリースの命名に合わせる）。
+// プラットフォーム別のアセット名パターン（llama.cpp リリースの命名に合わせる）。
+// Windows は zip、macOS/Linux は tar.gz で配布される。
 function assetPattern() {
   if (process.env.LLAMACPP_ASSET) return new RegExp(process.env.LLAMACPP_ASSET.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const p = platform();
   if (p === "win32") return /llama-.*-bin-win-vulkan-x64\.zip$/; // Windows Vulkan x64（GPU 優先・NVIDIA/Intel 兼用）
-  if (p === "darwin") return arch() === "arm64" ? /llama-.*-bin-macos-arm64\.zip$/ : /llama-.*-bin-macos-x64\.zip$/;
-  return /llama-.*-bin-ubuntu-x64\.zip$/;
+  if (p === "darwin") return arch() === "arm64" ? /llama-.*-bin-macos-arm64\.tar\.gz$/ : /llama-.*-bin-macos-x64\.tar\.gz$/;
+  return /llama-.*-bin-ubuntu-x64\.tar\.gz$/;
 }
 
 async function ghJson(url) {
@@ -49,14 +50,14 @@ async function download(url, dest) {
   return buf.length;
 }
 
-// zip を展開（Windows は PowerShell Expand-Archive、他は unzip）。
-function unzip(zipPath, outDir) {
+// アーカイブを展開（Windows は zip を PowerShell Expand-Archive、他は tar.gz を tar で展開）。
+function unzip(archivePath, outDir) {
   if (platform() === "win32") {
-    const r = spawnSync("powershell", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${outDir}' -Force`], { stdio: "inherit" });
+    const r = spawnSync("powershell", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${outDir}' -Force`], { stdio: "inherit" });
     if (r.status !== 0) throw new Error("Expand-Archive 失敗");
   } else {
-    const r = spawnSync("unzip", ["-o", zipPath, "-d", outDir], { stdio: "inherit" });
-    if (r.status !== 0) throw new Error("unzip 失敗");
+    const r = spawnSync("tar", ["-xzf", archivePath, "-C", outDir], { stdio: "inherit" });
+    if (r.status !== 0) throw new Error("tar 展開失敗");
   }
 }
 

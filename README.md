@@ -36,7 +36,7 @@
 ```powershell
 npm install
 npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
-npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合）
+npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合。macOS/Linuxは公式バイナリ配布が無く警告のみで続行）
 npm run setup:live2d   # Live2D ランタイムとサンプルモデル「ひより」を取得（npm run dev でも自動実行）
 npm run dev
 ```
@@ -159,7 +159,7 @@ npm run setup:live2d   # Live2D ランタイムとサンプルモデルを取得
 npm run build
 ```
 
-`src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。macOS / Linux で Aivis の `.7z.001` 展開に `7z` / `7za` が無い場合、音声同梱の事前取得だけを警告扱いにして起動を続行します（音声を必須にする場合は `AIVIS_REQUIRED=1 npm run setup:aivis`）。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱により Windows インストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+`src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。macOS / Linux で Aivis の `.7z.001` 展開に `7z` / `7za` が無い場合、音声同梱の事前取得だけを警告扱いにして起動を続行します（音声を必須にする場合は `AIVIS_REQUIRED=1 npm run setup:aivis`）。whisper.cpp の GitHub Releases は macOS/Linux 向け CLI 単体バイナリを配布していないため、`setup:whisper` はこの環境では警告のみで文字起こしなしの起動を続行します（必須にする場合は `WHISPER_REQUIRED=1`、または `WHISPER_ASSET` で代替アセットを指定するか、手動ビルドした `whisper-cli` を `resources/bundled/whisper/` へ配置してください）。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱により Windows インストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
 
 macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など実行時に chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します。
 
