@@ -1524,8 +1524,12 @@ function clampNumber(value, min, max) {
 }
 function expandWindowForBubble(left, top, width, height, leftDelta = 0, topDelta = 0) {
   const margin = 24;
-  const nextWidth = Math.ceil(Math.max(window.innerWidth + leftDelta, left + width + margin));
-  const nextHeight = Math.ceil(Math.max(window.innerHeight + topDelta, top + height + margin));
+  // 非同期リサイズの反映待ちによる連鎖的な計算ずれで際限なく膨張しないよう、
+  // 画面サイズを最終的な上限にする（多重防御。実際の上限は pointermove 側の距離クランプ）。
+  const maxWidth = Math.max(window.innerWidth, screen.availWidth || Infinity);
+  const maxHeight = Math.max(window.innerHeight, screen.availHeight || Infinity);
+  const nextWidth = Math.min(maxWidth, Math.ceil(Math.max(window.innerWidth + leftDelta, left + width + margin)));
+  const nextHeight = Math.min(maxHeight, Math.ceil(Math.max(window.innerHeight + topDelta, top + height + margin)));
   if (nextWidth <= window.innerWidth && nextHeight <= window.innerHeight && leftDelta <= 0 && topDelta <= 0) return;
   if (leftDelta <= 0 && topDelta <= 0 && nextWidth <= resizeWindowSize.width && nextHeight <= resizeWindowSize.height) return;
   resizeWindowSize = { width: nextWidth, height: nextHeight };
@@ -1667,6 +1671,11 @@ bubbleResize.addEventListener("pointerdown", event => {
   resizeStart = {
     x: event.clientX,
     y: event.clientY,
+    // screenX/screenY はウィンドウ移動の影響を受けない絶対座標。
+    // moveAndResizeWindow の非同期反映待ちで clientX 系の計算がずれても、
+    // 実際にドラッグした distance 以上ウィンドウが膨張しないようにする安全弁に使う。
+    screenX: event.screenX,
+    screenY: event.screenY,
     width: rect.width,
     height: rect.height,
     left: bubble.offsetLeft,
@@ -1681,8 +1690,13 @@ bubbleResize.addEventListener("pointermove", event => {
   const margin = 12;
   const originalPointerX = event.clientX - resizeStart.leftDelta;
   const originalPointerY = event.clientY - resizeStart.topDelta;
-  const nextLeftDelta = Math.max(resizeStart.leftDelta, margin - originalPointerX, 0);
-  const nextTopDelta = Math.max(resizeStart.topDelta, margin - originalPointerY, 0);
+  // ウィンドウの非同期な移動/リサイズ完了前に次の pointermove が来ると、
+  // clientX/clientY ベースの計算だけでは補正がずれて際限なく膨張しうる。
+  // 実際にドラッグした画面座標の移動量を上限として必ずクランプする。
+  const maxLeftDelta = Math.max(0, resizeStart.screenX - event.screenX);
+  const maxTopDelta = Math.max(0, resizeStart.screenY - event.screenY);
+  const nextLeftDelta = Math.min(Math.max(resizeStart.leftDelta, margin - originalPointerX, 0), maxLeftDelta);
+  const nextTopDelta = Math.min(Math.max(resizeStart.topDelta, margin - originalPointerY, 0), maxTopDelta);
   const right = resizeStart.left + resizeStart.width + nextLeftDelta;
   const bottom = resizeStart.top + resizeStart.height + nextTopDelta;
   const pointerLeft = Math.min(originalPointerX + nextLeftDelta, right - 180);

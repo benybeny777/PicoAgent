@@ -246,6 +246,7 @@ macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` /
 - **`code_runner`（自力実行）が動かない** → 既定で無効。設定画面の「スキル設定」タブの `code_runner` カードで `PICOAGENT_CODE_RUNNER_ENABLED` を true にする。Python を使う場合は `PICOAGENT_CODE_RUNNER_PYTHON` に実行パスを設定。作業先は共通「許可」タブの許可ルート配下のみ。物理削除コードは拒否される。
 - **`run_command` が拒否される** → 既定では無効。設定で有効化し、`PICOAGENT_COMMAND_ALLOWLIST` に実行したい `program args...` の prefix を追加する。shell は使わず `program` と `args` を分けて実行する。
 - **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
+- **macOS でキャラクター/フキダシの背景が透過されない** → `src-tauri/tauri.conf.json` の `app.macOSPrivateApi` を `true` にする必要があります（Tauri v2 は macOS でこれが無いとウィンドウ透過が効かず起動時に警告が出ます）。設定済みの場合は再ビルド（`npm run dev` / `npm run build`）してください。
 - **macOS で Aivis の取得だけ失敗する** → `.7z.001` 展開用の `7z` が無い状態です。音声なしの起動は続行できます。読み上げも使う場合は `brew install p7zip` 後に `AIVIS_FORCE=1 npm run setup:aivis` を実行してください。失敗を警告ではなくエラーにしたい場合は `AIVIS_REQUIRED=1` を付けます。
 - **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行して残存プロセスを停止する。macOS / Linux ではプロセス名完全一致と PicoAgent 管理下の Aivis `run` だけを対象にする。手動で止めたいときは `npm run stop`。
 - **`npm run dev` 起動直後に `picoagent.exe (exit code: 1)` で落ちる** → 前回起動の `picoagent.exe`（とその WebView2 子プロセス）が残ったまま新インスタンスが起動し、WebView の生成が一時的に競合した状態。`npm run dev` は残存プロセスを停止後、実際に消えるまで待ってから Tauri を起動する。手動停止は `npm run stop`。
