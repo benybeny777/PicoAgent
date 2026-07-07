@@ -1174,6 +1174,9 @@ function reuseHistoryItem(text) {
 
 function renderHistory() {
   if (!historyLog) return;
+  // 履歴ログは全画面時のみ表示される。非表示中に毎メッセージ全件を Markdown 再構築
+  // するのは無駄なので描画しない（全画面切替時に setBubbleFullscreen が呼び直す）。
+  if (!bubble.classList.contains("fullscreen")) return;
   historyLog.replaceChildren();
   if (!conversationHistory.length) {
     historyLog.append(document.createElement("div"));
