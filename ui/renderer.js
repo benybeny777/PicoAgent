@@ -35,6 +35,10 @@ let attachedFiles = [];
 let lastUserText = "";
 // エージェント進捗（pet:agent_status）を受信するリスナー解除関数。
 let unlistenStatus = null;
+// ストリーミング受信中のテキストバッファ・リスナー解除関数・描画スロットル用 rAF ハンドル。
+let streamBuffer = "";
+let unlistenStream = null;
+let streamRenderFrame = null;
 const conversationHistory = [];
 let historyQuery = "";
 let conversationRevision = 0;
@@ -928,6 +932,38 @@ function renderMarkdown(container, src) {
       }
       wrap.append(ol); continue;
     }
+    // テーブル（| セル | セル | 形式。2行目が |---|---| の区切り行）
+    if (/^\s*\|.+\|\s*$/.test(line) && i + 1 < lines.length
+      && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("-")) {
+      const splitRow = (row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+      const header = splitRow(line);
+      i += 2; // ヘッダ行と区切り行を消費
+      const rows = [];
+      while (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
+        rows.push(splitRow(lines[i])); i++;
+      }
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const cell of header) {
+        const th = document.createElement("th"); appendInline(th, cell); headRow.append(th);
+      }
+      thead.append(headRow);
+      const tbody = document.createElement("tbody");
+      for (const cells of rows) {
+        const tr = document.createElement("tr");
+        for (let c = 0; c < header.length; c += 1) {
+          const td = document.createElement("td"); appendInline(td, cells[c] ?? ""); tr.append(td);
+        }
+        tbody.append(tr);
+      }
+      table.append(thead, tbody);
+      const scroller = document.createElement("div");
+      scroller.className = "md-table-wrap";
+      scroller.append(table);
+      wrap.append(scroller);
+      continue;
+    }
     // 空行 → 改行
     if (line.trim() === "") { wrap.append(document.createElement("br")); i++; continue; }
     // 段落（連続する非ブロック行をまとめる）
@@ -935,7 +971,8 @@ function renderMarkdown(container, src) {
     while (i < lines.length && lines[i].trim() !== ""
       && !/^#{1,3}\s/.test(lines[i]) && !/^[-*+]\s/.test(lines[i])
       && !/^\d+\.\s/.test(lines[i]) && !/^```/.test(lines[i])
-      && !/^>\s?/.test(lines[i]) && !/^(---+|\*\*\*+|___+)$/.test(lines[i].trim())) {
+      && !/^>\s?/.test(lines[i]) && !/^(---+|\*\*\*+|___+)$/.test(lines[i].trim())
+      && !/^\s*\|.+\|\s*$/.test(lines[i])) {
       pLines.push(lines[i]); i++;
     }
     if (pLines.length) {
@@ -1079,7 +1116,7 @@ function renderAlarmReply(text) {
 function addHistory(role, text) {
   const content = String(text ?? "").trim();
   if (!content) return;
-  conversationHistory.push({ role, content });
+  conversationHistory.push({ role, content, at: Date.now() });
   if (role === "user") rememberPrompt(content);
   if (role === "assistant") lastAssistantText = content;
   if (conversationHistory.length > 80) conversationHistory.shift();
@@ -1161,6 +1198,13 @@ function renderHistory() {
     const label = document.createElement("div");
     label.className = "history-role";
     label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+    if (item.at) {
+      // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
+      const time = document.createElement("span");
+      time.className = "history-time";
+      time.textContent = new Date(item.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+      label.append(time);
+    }
     const actions = document.createElement("div");
     actions.className = "history-actions";
     const copy = document.createElement("button");
@@ -1403,14 +1447,19 @@ async function renderReplySpeaking(text) {
   const token = ++speakingToken;
   const source = String(text ?? "");
   const chars = [...source];
-  reply.textContent = "";
   setAnimation("talking", true);
   const stepMs = chars.length > 180 ? 14 : 22;
-  for (let index = 0; index < chars.length; index += 1) {
-    if (token !== speakingToken) return;
-    reply.textContent += chars[index];
+  // 生の Markdown 記号を見せないよう、部分テキストを都度 Markdown 描画する
+  // （rAF スロットルで1フレーム1回に抑える）。
+  let shown = 0;
+  let frame = 0;
+  const paint = () => { frame = 0; renderMarkdown(reply, chars.slice(0, shown).join("")); };
+  for (; shown < chars.length; shown += 1) {
+    if (token !== speakingToken) { if (frame) cancelAnimationFrame(frame); return; }
+    if (!frame) frame = requestAnimationFrame(paint);
     await new Promise(resolve => setTimeout(resolve, stepMs));
   }
+  if (frame) cancelAnimationFrame(frame);
   if (token !== speakingToken) return;
   setAssistantReply(source);
   if (!currentVoice) setAnimation("idle");
@@ -1904,6 +1953,31 @@ composer.addEventListener("submit", async event => {
     logApp("warn", "進捗購読の設定に失敗しました", errorDetail(error));
   }
 
+  // ストリーミングチャンクをリアルタイム表示する（rAF スロットルで1フレーム1描画）。
+  streamBuffer = "";
+  try {
+    if (window.picoagent.listen) {
+      if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 多重購読防止
+      unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
+        if (!busy || requestRevision !== conversationRevision) return;
+        streamBuffer += chunk;
+        reply.classList.add("streaming"); // 文末の点滅カーソル表示
+        if (!streamRenderFrame) {
+          streamRenderFrame = requestAnimationFrame(() => {
+            streamRenderFrame = null;
+            // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
+            const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
+            renderMarkdown(reply, streamBuffer);
+            if (nearBottom) reply.scrollTop = reply.scrollHeight;
+            if (animationName === "thinking") setAnimation("talking");
+          });
+        }
+      });
+    }
+  } catch (error) {
+    logApp("warn", "ストリーミング購読の設定に失敗しました", errorDetail(error));
+  }
+
   try {
     // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────
     let fileContext = "";
@@ -1955,9 +2029,18 @@ composer.addEventListener("submit", async event => {
       setAnimation("sad");
       setTimeout(() => setAnimation("idle"), 2200);
     } else {
+      // バックエンド処理は完了しているので、処理中表示はここで消す（読み上げ・描画は続く）。
+      status.classList.remove("busy");
+      if (cancelSendButton) cancelSendButton.hidden = true;
       // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
       if (String(result.reply ?? "").trim() !== text) speakReply(result.reply);
-      await renderReplySpeaking(result.reply);
+      if (streamBuffer.trim()) {
+        // ストリーミングで本文は表示済み。消してタイプライターで打ち直さず、最終形を確定描画する。
+        setAssistantReply(result.reply);
+        if (!currentVoice) setAnimation("idle");
+      } else {
+        await renderReplySpeaking(result.reply);
+      }
       addHistory("assistant", result.reply);
       if (result.quitApp) scheduleAppQuit();
     }
@@ -1976,7 +2059,11 @@ composer.addEventListener("submit", async event => {
   } finally {
     status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
-    // 進捗リスナーを解除する。
+    reply.classList.remove("streaming");
+    // ストリーム・進捗リスナーを解除する。
+    if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+    if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+    streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     busy = false;
     updateComposerState();
