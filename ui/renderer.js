@@ -1070,6 +1070,8 @@ function renderQuickActions() {
 }
 
 function renderReply(text) {
+  // 直前のエラー表示を引き継がない（エラー分岐は描画後に reply-error を付け直す）。
+  reply.classList.remove("reply-error");
   renderMarkdown(reply, text);
 }
 
