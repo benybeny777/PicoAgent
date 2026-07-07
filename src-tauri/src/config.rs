@@ -22,14 +22,32 @@ impl Config {
     }
 
     /// 起動時にファイルパスを設定し、あれば読み込む。
-    pub fn load(&self, file: PathBuf) {
-        if let Ok(text) = std::fs::read_to_string(&file) {
-            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&text) {
-                *self.values.lock().unwrap() = map;
+    /// 設定ファイルを読み込む。破損などで読めなかった場合は警告文字列を返す
+    /// （呼び出し側が app.log へ記録する。ファイルが無いだけの初回起動は正常なので None）。
+    pub fn load(&self, file: PathBuf) -> Option<String> {
+        let mut warning = None;
+        match std::fs::read_to_string(&file) {
+            Ok(text) => match serde_json::from_str::<Value>(&text) {
+                Ok(Value::Object(map)) => *self.values.lock().unwrap() = map,
+                Ok(_) | Err(_) => {
+                    // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
+                    // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
+                    warning = Some(format!(
+                        "設定ファイルが JSON として読めないため空設定で起動します: {}",
+                        file.display()
+                    ));
+                }
+            },
+            Err(error) if file.exists() => {
+                warning = Some(format!(
+                    "設定ファイルを読み込めないため空設定で起動します: {} ({error})",
+                    file.display()
+                ));
             }
-            // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
+            Err(_) => {} // ファイルが無いのは初回起動の正常系
         }
         *self.path.lock().unwrap() = Some(file);
+        warning
     }
 
     /// 文字列設定を取得。空文字は未設定とみなし env → 既定値へフォールバック。
