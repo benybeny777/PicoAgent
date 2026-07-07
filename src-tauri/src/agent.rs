@@ -1123,6 +1123,7 @@ async fn chat_with_retry(
     messages: &[Message],
     schemas: &[serde_json::Value],
     on_chunk: Arc<dyn Fn(String) + Send + Sync>,
+    app: Option<&tauri::AppHandle>,
 ) -> anyhow::Result<Message> {
     let mut last_err = anyhow::anyhow!("リトライ上限に達しました");
     for attempt in 0u32..3 {
@@ -1143,7 +1144,27 @@ async fn chat_with_retry(
                     || msg.contains("400")
                     || msg.contains("404")
                 {
+                    if let Some(handle) = app {
+                        crate::log_paths::append_app_log(
+                            handle,
+                            &format!(
+                                "プロバイダ呼び出しが認証/引数エラーで失敗（リトライなし・provider={} model={model}）: {msg}",
+                                provider.id()
+                            ),
+                        );
+                    }
                     return Err(e);
+                }
+                // リトライは無音にせず毎回記録する（間欠障害の頻度を後から追えるように）。
+                if let Some(handle) = app {
+                    crate::log_paths::append_app_log(
+                        handle,
+                        &format!(
+                            "プロバイダ呼び出し失敗（attempt {}/3・provider={} model={model}）: {msg}",
+                            attempt + 1,
+                            provider.id()
+                        ),
+                    );
                 }
                 last_err = e;
             }
@@ -1320,7 +1341,7 @@ pub async fn run(
             emit_status("考え直しています…".to_string());
         }
         let mut msg =
-            chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone()).await?;
+            chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone(), app).await?;
         // reasoning モデルの <think> 推論ブロックを最終回答・履歴・読み上げから除外する
         // （DeepSeek-R1 / Qwen3 系などで英語/中国語の推論が混ざるのを防ぐ）。
         msg.content = crate::message::strip_reasoning(&msg.content);
@@ -1412,6 +1433,14 @@ pub async fn run(
                             success,
                         };
                         handle.state::<crate::tracer::Tracer>().record(entry);
+                        if !success {
+                            // 失敗内容の先頭だけを app.log に残す（原因調査用。全文はモデルへ返る）。
+                            let preview: String = content.chars().take(200).collect();
+                            crate::log_paths::append_app_log(
+                                handle,
+                                &format!("スキル {} が失敗（{duration_ms}ms）: {preview}", c.name),
+                            );
+                        }
                     }
                     messages.push(Message {
                         role: "tool".to_string(),

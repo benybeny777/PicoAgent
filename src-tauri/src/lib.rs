@@ -100,7 +100,15 @@ pub fn run() {
             } else {
                 // 1 週間より古い日付のログを削除してから当日分を書き始める。
                 log_paths::prune_old_logs(app.handle());
-                log_paths::append_app_log(app.handle(), "PicoAgent を起動しました。");
+                log_paths::append_app_log(
+                    app.handle(),
+                    &format!(
+                        "PicoAgent v{} を起動しました（{} {}）。",
+                        env!("CARGO_PKG_VERSION"),
+                        std::env::consts::OS,
+                        std::env::consts::ARCH
+                    ),
+                );
             }
 
             // バックエンドのパニックを app.log に記録する（release では stderr が見えないため、
