@@ -95,6 +95,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
 | `scripts/build-ui-dist.mjs` | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
+| `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`npm run build:live2d-psd`。生成物は Git 管理外） |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
 | `characters/` | キャラクター正本（一覧 `index.json`・人格定義・レイヤー・連番フレーム・ローディング画像。Live2D キャラは `live2d/` にモデル一式）。画像準備手順は `characters/README.md` |
