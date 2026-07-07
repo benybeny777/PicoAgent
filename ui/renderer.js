@@ -45,6 +45,23 @@ let conversationRevision = 0;
 const promptHistory = [];
 let promptHistoryIndex = null;
 let promptDraft = "";
+// 既定のクイックアクション。設定 PICOAGENT_QUICK_ACTIONS（1行1件「ラベル|本文」）で置き換え可能。
+let quickActionItems = null; // null = 既定を使用
+function parseQuickActions(text) {
+  const items = String(text ?? "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const sep = line.indexOf("|");
+      if (sep <= 0) return null;
+      const label = line.slice(0, sep).trim();
+      const body = line.slice(sep + 1).trim();
+      return label && body ? { label, text: body } : null;
+    })
+    .filter(Boolean);
+  return items.length ? items : null;
+}
 const QUICK_ACTIONS = [
   { label: "👀 画面を見る", text: "今の画面を見て、状況を短く教えて" },
   { label: "📋 クリップボード要約", text: "クリップボードの内容を要約して" },
@@ -432,8 +449,8 @@ function animate(now) {
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
   if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
   if (reduceMotion) { if (animations.idle) petSprite.src = frameUrl("idle", 0); return; }
-  // リグ動作中はフレーム送りを止める（ベース＋オーバーレイ側が表情を担当する）。
-  if (rigActive) { animationRequestId = requestAnimationFrame(animate); return; }
+  // リグ動作中・居眠り中はフレーム送りを止める（それぞれ差分絵・寝姿を表示している）。
+  if (rigActive || napping) { animationRequestId = requestAnimationFrame(animate); return; }
   const animation = animations[animationName] || animations.idle;
   if (!animation) { animationRequestId = requestAnimationFrame(animate); return; } // フレーム定義が無いキャラ（Live2D 初期化失敗時）はループだけ維持する
   if (!lastFrameAt) lastFrameAt = now;
@@ -494,6 +511,10 @@ function rigRefresh() {
 function scheduleBlink() {
   clearTimeout(rigBlinkTimer);
   if (!rigActive) return;
+  // 深夜〜早朝（23時〜5時）は眠そうに: まばたき間隔を詰め、半目を長めに保つ。
+  const hour = new Date().getHours();
+  const sleepy = hour >= 23 || hour < 5;
+  const interval = sleepy ? 900 + Math.random() * 1600 : 1400 + Math.random() * 2800;
   rigBlinkTimer = setTimeout(async () => {
     if (!rigActive) return;
     const step = (phase, ms) => new Promise(resolve => {
@@ -501,13 +522,13 @@ function scheduleBlink() {
       rigRefresh();
       setTimeout(resolve, ms);
     });
-    await step("blink_half", 60);
+    await step("blink_half", sleepy ? 140 : 60);
     await step("blink_closed", 90);
-    await step("blink_half", 60);
+    await step("blink_half", sleepy ? 260 : 60);
     rigBlinkPhase = null;
     rigRefresh();
     scheduleBlink();
-  }, 1400 + Math.random() * 2800);
+  }, interval);
 }
 
 // 現在のチャンク音声の解析だけを解除する（リグの見た目は維持）。
@@ -1052,7 +1073,7 @@ function renderMarkdown(container, src) {
 function renderQuickActions() {
   if (!quickActions) return;
   quickActions.replaceChildren();
-  for (const action of QUICK_ACTIONS) {
+  for (const action of (quickActionItems || QUICK_ACTIONS)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action.label;
@@ -1492,7 +1513,13 @@ function queueNotice(line) {
 
 async function flushPendingNotice() {
   if (!pendingNotices.length || !canShowNotice()) return;
-  const line = pendingNotices.shift();
+  const entry = pendingNotices.shift();
+  // pendingNotices にはオブジェクトが入る。そのまま渡すと "[object Object]" と
+  // 表示されるため、タイトル＋本文の文字列へ整形する。
+  const line = typeof entry === "string"
+    ? entry
+    : [entry?.title, entry?.body].filter(Boolean).join("\n");
+  if (!line.trim()) return;
   await showAssistantNotice(line, { enqueue: false });
 }
 
@@ -1928,6 +1955,7 @@ composer.addEventListener("submit", async event => {
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   const requestRevision = conversationRevision;
   clearAlarmSnooze(false);
+  markActivity();
   lastUserText = text; // エラーリトライ用に保持
   busy = true;
   ++speakingToken;
@@ -2084,6 +2112,211 @@ composer.addEventListener("submit", async event => {
     setTimeout(flushPendingNotice, 0);
   }
 });
+// ── 音声入力（マイク → WAV → ローカルWhisper文字起こし） ──────────────
+const micButton = document.getElementById("micButton");
+let micStream = null;
+let micCtx = null;
+let micNode = null;
+let micChunks = [];
+let micSampleRate = 16000;
+
+// Float32 の PCM を 16bit モノラル WAV に変換する（whisper-cli は wav 入力のため）。
+function encodeWav(chunks, sampleRate) {
+  const length = chunks.reduce((sum, c) => sum + c.length, 0);
+  const buffer = new ArrayBuffer(44 + length * 2);
+  const view = new DataView(buffer);
+  const writeStr = (offset, text) => { for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i)); };
+  writeStr(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); writeStr(8, "WAVE");
+  writeStr(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  writeStr(36, "data"); view.setUint32(40, length * 2, true);
+  let offset = 44;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i += 1) {
+      const v = Math.max(-1, Math.min(1, chunk[i]));
+      view.setInt16(offset, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return buffer;
+}
+
+function stopMicCapture() {
+  micNode?.disconnect();
+  micNode = null;
+  micStream?.getTracks().forEach(track => track.stop());
+  micStream = null;
+  const ctx = micCtx;
+  micCtx = null;
+  ctx?.close().catch(() => {});
+  micButton?.classList.remove("recording");
+}
+
+async function finishRecording() {
+  const chunks = micChunks;
+  micChunks = [];
+  const sampleRate = micSampleRate;
+  stopMicCapture();
+  const seconds = chunks.reduce((sum, c) => sum + c.length, 0) / sampleRate;
+  if (seconds < 0.4) { status.textContent = ""; showToast("録音が短すぎました", "warn"); return; }
+  status.textContent = "文字起こし中…";
+  status.classList.add("busy");
+  try {
+    const wav = encodeWav(chunks, sampleRate);
+    const b64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(new Blob([wav], { type: "audio/wav" }));
+    });
+    const result = await window.picoagent.transcribeAudio(b64);
+    const text = String(result?.text ?? "").trim();
+    if (text) {
+      setInputValue(input.value ? `${input.value} ${text}` : text);
+      input.focus();
+      showToast("文字起こししました", "success");
+    }
+  } catch (error) {
+    logApp("error", "音声入力に失敗しました", errorDetail(error));
+    showToast(String(error?.message || error || "文字起こしに失敗しました").slice(0, 60), "error");
+  } finally {
+    status.classList.remove("busy");
+    if (status.textContent === "文字起こし中…") status.textContent = "";
+  }
+}
+
+micButton?.addEventListener("click", async () => {
+  if (micStream) { await finishRecording(); return; } // 録音中 → 停止して文字起こし
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  } catch (error) {
+    logApp("warn", "マイクを利用できません", errorDetail(error));
+    showToast("マイクを利用できません（権限を確認してね）", "error");
+    micStream = null;
+    return;
+  }
+  try {
+    micCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    micSampleRate = micCtx.sampleRate; // 16kHz 非対応環境では実サンプルレートで記録する
+    const source = micCtx.createMediaStreamSource(micStream);
+    // ScriptProcessor は非推奨だが WebView 互換性が高い（AudioWorklet はファイル分離が必要）。
+    micNode = micCtx.createScriptProcessor(4096, 1, 1);
+    micChunks = [];
+    micNode.onaudioprocess = (event) => { micChunks.push(new Float32Array(event.inputBuffer.getChannelData(0))); };
+    source.connect(micNode);
+    micNode.connect(micCtx.destination);
+    micButton.classList.add("recording");
+    status.textContent = "🎙 録音中…（マイクをもう一度クリックで停止）";
+    markActivity();
+  } catch (error) {
+    logApp("error", "録音を開始できません", errorDetail(error));
+    showToast("録音を開始できませんでした", "error");
+    stopMicCapture();
+  }
+});
+
+// ── 再生成: 直前の質問をもう一度送って別の答えをもらう ──────────────────
+document.getElementById("regenReply")?.addEventListener("click", () => {
+  if (busy || !lastUserText) return;
+  setInputValue(lastUserText);
+  if (composer.hidden) openComposer();
+  composer.requestSubmit();
+});
+
+// ── 会話履歴の Markdown 書き出し ──────────────────────────────────────
+document.getElementById("exportHistory")?.addEventListener("click", async () => {
+  if (!conversationHistory.length) { showToast("書き出す会話がありません", "warn"); return; }
+  const name = characterManifest?.name || "キャラクター";
+  const lines = [`# PicoAgent 会話履歴（${name}） ${new Date().toLocaleString("ja-JP")}`, ""];
+  for (const item of conversationHistory) {
+    const who = item.role === "user" ? "あなた" : name;
+    const at = item.at ? ` (${new Date(item.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })})` : "";
+    lines.push(`## ${who}${at}`, "", item.content, "");
+  }
+  try {
+    const result = await window.picoagent.exportHistory(lines.join("\n"));
+    showToast("書き出しました", "success");
+    pushNotice({ kind: "export", ok: true, title: "会話履歴を書き出しました", body: String(result?.path || ""), at: new Date().toISOString() });
+  } catch (error) {
+    showToast(String(error?.message || error || "書き出しに失敗しました").slice(0, 60), "error");
+  }
+});
+
+// ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
+let petStrokes = [];
+let petCooldownUntil = 0;
+character.addEventListener("mousemove", event => {
+  if (reduceMotion || event.buttons) return; // ドラッグ（ウィンドウ移動）中は撫で判定しない
+  const now = performance.now();
+  petStrokes.push({ x: event.clientX, t: now });
+  petStrokes = petStrokes.filter(s => now - s.t < 1200);
+  if (now < petCooldownUntil || petStrokes.length < 6) return;
+  let flips = 0;
+  let travel = 0;
+  let prevDx = 0;
+  for (let i = 1; i < petStrokes.length; i += 1) {
+    const dx = petStrokes[i].x - petStrokes[i - 1].x;
+    travel += Math.abs(dx);
+    if (dx !== 0 && prevDx !== 0 && Math.sign(dx) !== Math.sign(prevDx)) flips += 1;
+    if (dx !== 0) prevDx = dx;
+  }
+  if (flips >= 4 && travel > 150) {
+    petCooldownUntil = now + 6000;
+    petStrokes = [];
+    character.classList.remove("boop");
+    void character.offsetWidth;
+    character.classList.add("boop");
+    for (let i = 0; i < 3; i += 1) {
+      const heart = document.createElement("span");
+      heart.className = "pet-heart";
+      heart.textContent = "♥";
+      heart.style.left = `${30 + Math.random() * 40}%`;
+      heart.style.animationDelay = `${i * 130}ms`;
+      character.append(heart);
+      heart.addEventListener("animationend", () => heart.remove());
+    }
+    status.textContent = "えへへ…";
+    setTimeout(() => { if (status.textContent === "えへへ…") status.textContent = ""; }, 2000);
+    markActivity();
+  }
+});
+
+// ── 居眠り: しばらく操作がないと寝て、操作すると起きる ────────────────────
+let napMinutes = 15; // pet_init の設定値で上書き（0 で無効）
+let lastActivityAt = Date.now();
+let napping = false;
+
+function markActivity() {
+  lastActivityAt = Date.now();
+  if (napping) wakeUp();
+}
+
+function fallAsleep() {
+  if (napping || busy || currentVoice || !composer.hidden || live2dActive) return;
+  const sleeping = characterManifest?.boot?.sleeping;
+  if (!sleeping) return;
+  napping = true;
+  stopRig();
+  character.dataset.motion = "none";
+  character.classList.add("napping");
+  petSprite.src = versionedAssetUrl(`${characterRoot}/${sleeping}`, characterAssetVersion);
+  status.textContent = "すやすや……";
+}
+
+function wakeUp() {
+  if (!napping) return;
+  napping = false;
+  character.classList.remove("napping");
+  if (status.textContent === "すやすや……") status.textContent = "";
+  setAnimation("idle", true);
+}
+
+setInterval(() => {
+  if (napMinutes > 0 && !napping && Date.now() - lastActivityAt > napMinutes * 60 * 1000) fallAsleep();
+}, 30 * 1000);
+["pointerdown", "keydown"].forEach(type => document.addEventListener(type, markActivity));
+
 // 停止ボタン: バックエンドへ中断を要求する。エージェントは次のステップ境界で止まる。
 cancelSendButton?.addEventListener("click", async () => {
   if (!busy) return;
@@ -2382,8 +2615,8 @@ function scheduleChatter() {
 }
 async function fireChatter() {
   chatterTimer = null;
-  // 入力中・応答中・読み上げ中・全画面表示中は割り込まず、次の機会に回す。
-  if (busy || !composer.hidden || currentVoice || bubble.classList.contains("fullscreen")) {
+  // 入力中・応答中・読み上げ中・全画面表示中・居眠り中は割り込まず、次の機会に回す。
+  if (busy || !composer.hidden || currentVoice || bubble.classList.contains("fullscreen") || napping) {
     scheduleChatter();
     return;
   }
@@ -2549,6 +2782,10 @@ function startAlarmPolling() {
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); }
   catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
+  quickActionItems = parseQuickActions(info.quickActions);
+  renderQuickActions();
+  napMinutes = Number(info.napMinutes) > 0 ? Number(info.napMinutes) : 0;
+  markActivity();
   applyChatterConfig(info); // アイドル雑談タイマーを開始。
   startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。

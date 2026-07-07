@@ -322,3 +322,22 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .reply.streaming .md > :last-child::after { content:"▍"; margin-left:1px; color:var(--accent); animation:caret-blink 1s steps(2) infinite; }
 @keyframes caret-blink { 50% { opacity:0; } }
 @media (prefers-reduced-motion:reduce) { .reply.streaming .md > :last-child::after { animation:none; } }
+
+/* ── 音声入力・なでなで・居眠り・履歴書き出し ───────────────────────── */
+/* マイクボタン（送信ボタンの左）。録音中は赤く脈動する。 */
+#micButton { right:56px; width:32px; padding:0; background:#8a8090; font-size:14px; }
+#micButton.recording { background:#c94f5f; animation:mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { box-shadow:0 0 0 6px rgba(201,79,95,.25); } }
+textarea { padding-right:96px; }
+/* なでなでで浮かぶハート。 */
+.pet-heart { position:absolute; z-index:5; bottom:55%; font-size:18px; color:#f27e91; pointer-events:none; opacity:0; animation:heart-float 1.2s ease-out forwards; text-shadow:0 1px 3px rgba(0,0,0,.15); }
+@keyframes heart-float { 0% { opacity:0; transform:translateY(0) scale(.6); } 25% { opacity:1; } 100% { opacity:0; transform:translateY(-46px) scale(1.15); } }
+/* 居眠り中はゆっくり揺れる。 */
+.character.napping img { animation:nap-breathe 4.6s ease-in-out infinite!important; }
+@keyframes nap-breathe { 0%,100% { transform:translateY(1px) scale(1); } 50% { transform:translateY(-2px) scale(1.005,.998); } }
+/* 履歴の書き出しボタン（検索欄の右）。 */
+.history-tools { gap:8px; }
+.history-tools #exportHistory { position:static; flex:0 0 auto; height:30px; padding:0 12px; border-radius:9px; background:var(--chip-bg); border:1px solid var(--chip-border); color:var(--muted); font-size:11px; font-weight:700; }
+.history-tools #exportHistory:hover { color:var(--ink); border-color:var(--field-focus); }
+@media (prefers-reduced-motion:reduce) { #micButton.recording, .pet-heart, .character.napping img { animation:none!important; } }
+.history-tools input { flex:1 1 auto; min-width:0; }

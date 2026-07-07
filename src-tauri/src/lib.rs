@@ -68,6 +68,8 @@ pub fn run() {
             commands::pet_usage,
             commands::pet_traces,
             commands::pet_cancel,
+            commands::pet_transcribe_audio,
+            commands::pet_export_history,
             commands::pet_quit,
             commands::pet_send_image,
             commands::pet_capture_screen,
@@ -243,6 +245,8 @@ pub fn run() {
                 });
             }
             scheduler::start(app.handle().clone());
+            // 起動時に一度だけ更新を確認する（オフラインや未リリースでは静かにスキップ）。
+            commands::spawn_update_check(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

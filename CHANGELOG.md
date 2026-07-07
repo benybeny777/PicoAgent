@@ -6,6 +6,19 @@
 
 ## 2026-07-07
 
+### 機能追加8点（音声入力・再生成・カスタムQA・なでなで・居眠り・書き出し・更新確認・文書検索）
+
+- **音声入力** (`ui/index.html` / `renderer.js` / `picoagent.js` / `src-tauri/src/commands.rs` / `skills/whisper_transcribe/mod.rs`): 入力欄のマイクボタンで録音し、同梱Whisperでローカル文字起こしして入力欄へ挿入する（`pet_transcribe_audio`。WebAudio で 16bit WAV を生成し外部送信なし）。
+- **回答の再生成** (`ui/index.html` / `renderer.js`): 回答操作の「↺」で直前の質問を再送し別の答えをもらえる。
+- **クイックアクションのカスタマイズ** (`ui/settings.js` / `renderer.js` / `commands.rs`): `PICOAGENT_QUICK_ACTIONS`（1行1件「ラベル|本文」）で定型ボタンを自由に置き換え可能。
+- **なでなで反応** (`ui/renderer.js` / `styles.css`): キャラの上でマウスを素早く左右に往復させると、はねてハートが浮かぶ（6秒クールダウン、ドラッグ中と reduced-motion では無効）。
+- **居眠りモード** (`ui/renderer.js` / `styles.css` / `commands.rs`): 無操作が `PICOAGENT_NAP_MINUTES`（既定15分、0で無効）続くと寝姿（boot/sleeping.png）になり、操作すると起きる。居眠り中は自発雑談も割り込まない。
+- **会話履歴の書き出し** (`ui/index.html` / `renderer.js` / `commands.rs`): 全画面履歴の「書き出し」でタイムスタンプ付き Markdown をダウンロードフォルダへ保存（`pet_export_history`）。
+- **起動時の更新確認** (`src-tauri/src/commands.rs` / `lib.rs`): GitHub Releases の最新タグを確認し、新しい版があれば通知パネルへ知らせる（`PICOAGENT_UPDATE_CHECK_ENABLED` で無効化可。オフラインでは静かにスキップ）。
+- **ローカル文書検索スキル** (`skills/doc_search/mod.rs`): 許可ルート配下のテキスト文書をキーワード検索し抜粋を返す軽量 RAG。外部送信なし・走査上限つき。
+- **夜は眠そうに** (`ui/renderer.js`): 23時〜5時はまばたきが増え、半目を長めに保つ。
+- **修正**: 通知をフキダシへ流すときにオブジェクトがそのまま "[object Object]" と表示される既存バグを修正（スケジューラ通知等も影響していた）。
+
 ### UI/UX の大幅改善（ダークモード・実行許可カード・会話表示）
 
 - **ダークモード対応** (`ui/styles.css` / `ui/settings.css`): 色をデザイントークン（CSS変数）へ集約し、OS の配色設定（`prefers-color-scheme`）でペット画面・設定画面が夜色テーマへ自動切替。ステータス系ティントも両テーマで可読な配色にした。

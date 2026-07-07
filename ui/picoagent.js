@@ -35,6 +35,10 @@ window.picoagent = {
   send: (text) => call("pet_send", { text }),
   // 実行中のエージェント処理へ中断を要求する（次のステップ境界で停止）。
   cancel: () => call("pet_cancel"),
+  // マイク録音（WAV base64）をローカル Whisper で文字起こしする。
+  transcribeAudio: (dataB64) => call("pet_transcribe_audio", { dataB64 }),
+  // 会話履歴 Markdown をダウンロードフォルダへ書き出す。
+  exportHistory: (markdown) => call("pet_export_history", { markdown }),
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
