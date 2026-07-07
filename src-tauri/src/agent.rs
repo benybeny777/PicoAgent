@@ -120,7 +120,11 @@ fn append_sources(answer: String, sources: &[String]) -> String {
 fn strip_between_markers(mut text: String, start: &str, end: &str) -> String {
     while let Some(start_pos) = text.find(start) {
         if let Some(end_offset) = text[start_pos..].find(end) {
-            let end_pos = start_pos + end_offset + end.len();
+            let mut end_pos = start_pos + end_offset + end.len();
+            // ブロック直後の改行も併せて除去し、除去跡に空行を残さない。
+            if text[end_pos..].starts_with('\n') {
+                end_pos += 1;
+            }
             text.replace_range(start_pos..end_pos, "");
         } else {
             text.truncate(start_pos);
