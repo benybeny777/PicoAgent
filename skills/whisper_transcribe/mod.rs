@@ -266,6 +266,41 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
     })
 }
 
+/// 音声ファイルを文字起こしして本文を返す（マイク入力コマンドなど内部利用向け）。
+/// スキル本体と同じ同梱 Whisper / 設定を使う。失敗はエラーメッセージ文字列で返す。
+pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, String> {
+    let model = transcribe_model(cfg);
+    if model.trim().is_empty() {
+        return Err(
+            "Whisper モデルが未設定です。npm run setup:whisper で同梱Whisperを取得するか、PICOAGENT_TRANSCRIBE_MODEL を設定してください。".to_string(),
+        );
+    }
+    let program = transcribe_program(cfg);
+    let output_stem = output_stem(audio);
+    let template = cfg.get(
+        "PICOAGENT_TRANSCRIBE_ARGS",
+        "-m {model} -f {audio} -otxt -of {output_stem}",
+    );
+    let args_list = split_args_template(&template, audio, &model, &output_stem);
+    let output = run_command(&program, &args_list, 120).await?;
+    if !output.status.success() {
+        return Err(format!(
+            "Whisper文字起こしが失敗しました: {}",
+            trim_output(&output.stderr)
+        ));
+    }
+    let generated = output_stem.with_extension("txt");
+    let text = if generated.exists() {
+        let content = std::fs::read_to_string(&generated)
+            .map_err(|error| format!("文字起こし結果を読めません: {error}"))?;
+        let _ = std::fs::remove_file(&generated);
+        content
+    } else {
+        trim_output(&output.stdout)
+    };
+    Ok(text.trim().to_string())
+}
+
 #[async_trait]
 impl Tool for WhisperTranscribeTool {
     fn name(&self) -> &'static str {

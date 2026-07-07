@@ -1576,6 +1576,10 @@ async function render() {
   global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
   global.append(field("PICOAGENT_SUPER_AGENT", "スーパーエージェント（計画→実行・自己評価・サブエージェント分担を強化）", "checkbox", v.PICOAGENT_SUPER_AGENT === true));
   global.append(field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "スーパーエージェントの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"));
+  const quickActionsField = field("PICOAGENT_QUICK_ACTIONS", "クイックアクション（1行1件「ラベル|送る文章」。空なら既定の8件）", "textarea", v.PICOAGENT_QUICK_ACTIONS ?? "", "👀 画面を見る|今の画面を見て、状況を短く教えて");
+  global.append(quickActionsField);
+  global.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
+  global.append(field("PICOAGENT_UPDATE_CHECK_ENABLED", "起動時に新しいバージョンを確認する", "checkbox", v.PICOAGENT_UPDATE_CHECK_ENABLED !== false));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));

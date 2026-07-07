@@ -473,6 +473,8 @@ pub async fn pet_init(state: State<'_, AppState>) -> Result<Value, String> {
         "characterId": state.config.get("PICOAGENT_CHARACTER", "mugi"),
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "history": recent_history,
+        "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
+        "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
         "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
@@ -1926,6 +1928,142 @@ pub fn pet_traces(app: AppHandle) -> Result<Value, String> {
         "entries": tracer.snapshot(),
         "summary": tracer.summary(),
     }))
+}
+
+/// マイク録音（WAV の base64）をローカル Whisper で文字起こしする。
+/// フロントの音声入力ボタンから呼ばれる。外部送信はしない。
+#[tauri::command]
+pub async fn pet_transcribe_audio(
+    data_b64: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    use base64::Engine;
+    // data URL 形式（data:audio/wav;base64,xxx）と素の base64 の両方を受け付ける。
+    let raw = data_b64.rsplit(',').next().unwrap_or(&data_b64);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .map_err(|error| format!("音声データを解読できません: {error}"))?;
+    if bytes.len() > 30 * 1024 * 1024 {
+        return Err("音声が大きすぎます（30MB まで）。".to_string());
+    }
+    if bytes.len() < 1024 {
+        return Err("音声が短すぎます。もう少し長く話してください。".to_string());
+    }
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    let path = std::env::temp_dir().join(format!("picoagent-mic-{unique}.wav"));
+    std::fs::write(&path, &bytes)
+        .map_err(|error| format!("一時ファイルを書き込めません: {error}"))?;
+    let result = crate::tools::whisper_transcribe::transcribe_file(&state.config, &path).await;
+    let _ = std::fs::remove_file(&path);
+    match result {
+        Ok(text) if !text.trim().is_empty() => Ok(json!({ "text": text })),
+        Ok(_) => Err("音声を聞き取れませんでした。もう一度話してみてください。".to_string()),
+        Err(error) => Err(log_command_error(&app, "マイク文字起こしに失敗しました", error)),
+    }
+}
+
+/// 会話履歴の Markdown をダウンロードフォルダへ書き出し、保存先パスを返す。
+#[tauri::command]
+pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, String> {
+    if markdown.trim().is_empty() {
+        return Err("書き出す会話がありません。".to_string());
+    }
+    let dir = dirs::download_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir);
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let path = dir.join(format!("picoagent-conversation-{stamp}.md"));
+    std::fs::write(&path, markdown)
+        .map_err(|error| log_command_error(&app, "会話の書き出しに失敗しました", error))?;
+    crate::log_paths::append_app_log(&app, &format!("会話履歴を書き出しました: {}", path.display()));
+    Ok(json!({ "path": path.to_string_lossy() }))
+}
+
+/// GitHub Releases の最新タグを確認し、新しい版があれば通知パネルへ知らせる（起動時に一度）。
+pub fn spawn_update_check(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let enabled = app
+            .state::<AppState>()
+            .config
+            .get_bool("PICOAGENT_UPDATE_CHECK_ENABLED", true);
+        if !enabled {
+            return;
+        }
+        let current = env!("CARGO_PKG_VERSION");
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .user_agent("PicoAgent-UpdateCheck")
+            .build()
+        else {
+            return;
+        };
+        let url = "https://api.github.com/repos/benybeny777/PicoAgent/releases/latest";
+        // フォールバック許可: 更新確認はベストエフォート（オフライン・未リリースでは静かに諦める）。
+        let Ok(response) = client.get(url).send().await else {
+            return;
+        };
+        if !response.status().is_success() {
+            return;
+        }
+        let Ok(body) = response.json::<Value>().await else {
+            return;
+        };
+        let Some(tag) = body.get("tag_name").and_then(Value::as_str) else {
+            return;
+        };
+        let latest = tag.trim_start_matches(['v', 'V']);
+        if !version_is_newer(latest, current) {
+            return;
+        }
+        crate::log_paths::append_app_log(
+            &app,
+            &format!("新しいバージョン v{latest} が公開されています（現在 v{current}）。"),
+        );
+        let link = body
+            .get("html_url")
+            .and_then(Value::as_str)
+            .unwrap_or("https://github.com/benybeny777/PicoAgent/releases");
+        let _ = app.emit(
+            "pet:notice",
+            json!({
+                "kind": "update",
+                "ok": true,
+                "title": format!("新しいバージョン v{latest} があるよ"),
+                "body": format!("現在は v{current}。ダウンロード: {link}"),
+                "at": chrono::Utc::now().to_rfc3339(),
+            }),
+        );
+    });
+}
+
+/// "1.2.3" 形式のバージョン比較（数値の桁ごと。読めない部分は 0 扱い）。
+fn version_is_newer(latest: &str, current: &str) -> bool {
+    let parse = |value: &str| -> Vec<u64> {
+        value
+            .split('.')
+            .map(|part| {
+                part.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .unwrap_or(0)
+            })
+            .collect()
+    };
+    let a = parse(latest);
+    let b = parse(current);
+    for i in 0..a.len().max(b.len()) {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
 }
 
 /// 実行中のエージェント処理へ中断を要求する。
