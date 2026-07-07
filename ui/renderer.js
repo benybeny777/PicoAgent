@@ -1861,6 +1861,10 @@ function addImageFile(file) {
     updateComposerState();
     showToast("画像を添付しました", "success");
   };
+  reader.onerror = () => {
+    logApp("error", "画像の読み込みに失敗しました", `${file.name}: ${reader.error?.message || ""}`);
+    showToast("画像を読み込めませんでした", "error");
+  };
   reader.readAsDataURL(file);
 }
 
@@ -1873,6 +1877,10 @@ function addDocumentFile(file) {
     renderAttachmentPreview();
     updateComposerState();
     showToast(`${file.name.length > 20 ? file.name.slice(0, 18) + "…" : file.name} を添付`, "success");
+  };
+  reader.onerror = () => {
+    logApp("error", "ファイルの読み込みに失敗しました", `${file.name}: ${reader.error?.message || ""}`);
+    showToast("ファイルを読み込めませんでした", "error");
   };
   reader.readAsDataURL(file);
 }
@@ -2108,9 +2116,12 @@ input.addEventListener("keydown", event => {
   if (event.key === "ArrowUp" && recallInputHistory(-1)) event.preventDefault();
   else if (event.key === "ArrowDown" && inputHistoryPos !== -1 && recallInputHistory(1)) event.preventDefault();
 });
+let historySearchTimer = 0;
 historySearch?.addEventListener("input", () => {
   historyQuery = historySearch.value;
-  renderHistory();
+  // 毎キーで全件を Markdown 再構築しないよう 120ms デバウンスする。
+  clearTimeout(historySearchTimer);
+  historySearchTimer = setTimeout(renderHistory, 120);
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;

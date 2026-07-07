@@ -91,7 +91,9 @@ pub fn run() {
                 );
             }
             let config_path = config_dir.join("config.json");
-            state.config.load(config_path.clone());
+            if let Some(warning) = state.config.load(config_path.clone()) {
+                log_paths::append_app_log(app.handle(), &warning);
+            }
             // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
             commands::encrypt_existing_secrets(&state.config);
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
