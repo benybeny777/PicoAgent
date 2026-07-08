@@ -105,6 +105,27 @@ fn hide_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_window(_command: &mut Command) {}
 
+// Pandoc の方が高精度に扱える形式（LibreOffice では崩れやすい・開けない）。
+const PANDOC_FORMATS: [&str; 7] = ["md", "markdown", "rst", "epub", "org", "tex", "latex"];
+
+/// Pandoc の実行パスを解決する。優先順: 明示設定 → 同梱（setup:tools）→ PATH。
+fn pandoc_path(cfg: &Config) -> String {
+    super::resolve_cli_path(cfg, "PICOAGENT_PANDOC_PATH", "pandoc", "pandoc")
+}
+
+/// この変換に Pandoc を使うべきか判定する。
+/// auto では Markdown/reST/EPUB 等が入出力に絡む場合だけ Pandoc（PDF 出力は LibreOffice が確実）。
+fn should_use_pandoc(engine: &str, input_ext: &str, format: &str) -> bool {
+    match engine {
+        "pandoc" => true,
+        "office" => false,
+        _ => {
+            format != "pdf"
+                && (PANDOC_FORMATS.contains(&input_ext) || PANDOC_FORMATS.contains(&format))
+        }
+    }
+}
+
 #[async_trait]
 impl Tool for DocumentConvertTool {
     fn name(&self) -> &'static str {
@@ -116,7 +137,7 @@ impl Tool for DocumentConvertTool {
     }
 
     fn description(&self) -> String {
-        "OfficeCLI（同梱 LibreOffice。npm run setup:office で取得）で docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。".to_string()
+        "OfficeCLI（同梱 LibreOffice。npm run setup:office で取得）で docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。Markdown/reST/EPUB が絡む変換は Pandoc（npm run setup:tools で同梱）を自動で使い高精度に変換する。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -125,7 +146,8 @@ impl Tool for DocumentConvertTool {
             "properties": {
                 "input_path": { "type": "string", "description": "変換元ファイル。" },
                 "output_dir": { "type": "string", "description": "出力フォルダ。省略時は入力ファイルと同じフォルダ。" },
-                "format": { "type": "string", "description": "変換形式。例: pdf, docx, xlsx, pptx, html。" }
+                "format": { "type": "string", "description": "変換形式。例: pdf, docx, xlsx, pptx, html, md。" },
+                "engine": { "type": "string", "enum": ["auto", "office", "pandoc"], "description": "変換エンジン。省略時 auto（Markdown 等は Pandoc、それ以外は OfficeCLI）。" }
             },
             "required": ["input_path", "format"]
         })
@@ -134,6 +156,7 @@ impl Tool for DocumentConvertTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_LIBREOFFICE_PATH", "OfficeCLI 実行ファイルパス（空なら同梱→PATHの soffice）", "text", ""),
+            Field::new("PICOAGENT_PANDOC_PATH", "Pandoc 実行ファイルパス（空なら同梱→PATH）", "text", "pandoc"),
             Field::new("PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS", "文書変換タイムアウト秒（5〜300）", "text", "120"),
         ]
     }
@@ -167,26 +190,100 @@ impl Tool for DocumentConvertTool {
             .ok()
             .filter(|value| (5..=300).contains(value))
             .unwrap_or(120);
-        let mut command = Command::new(office_cli_path(cfg));
+        let engine = args.get("engine").and_then(Value::as_str).map(str::trim).unwrap_or("auto");
+        let input_ext = input
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+        let format_lower = format.to_ascii_lowercase();
+        let use_pandoc = should_use_pandoc(engine, &input_ext, &format_lower);
+        let engine_label = if use_pandoc { "Pandoc" } else { "OfficeCLI" };
+        let pandoc_output = output_dir
+            .join(input.file_stem().unwrap_or_default())
+            .with_extension(&format_lower);
+        let mut command;
+        if use_pandoc {
+            command = Command::new(pandoc_path(cfg));
+            // --standalone で単体で開ける完結した文書（html のヘッダ等）を出力する。
+            command.arg(&input).arg("--standalone").arg("-o").arg(&pandoc_output);
+        } else {
+            command = Command::new(office_cli_path(cfg));
+            command
+                .args(["--headless", "--convert-to", format, "--outdir"])
+                .arg(&output_dir)
+                .arg(&input);
+        }
         command
-            .args(["--headless", "--convert-to", format, "--outdir"])
-            .arg(&output_dir)
-            .arg(&input)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         hide_window(&mut command);
         match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-            Ok(Ok(output)) => format!(
-                "終了コード: {}\nstdout:\n{}\nstderr:\n{}",
-                output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+            Ok(Ok(output)) => {
+                if use_pandoc && output.status.success() && pandoc_output.exists() {
+                    return format!("Pandoc で変換しました: {}", pandoc_output.display());
+                }
+                format!(
+                    "変換エンジン: {}\n終了コード: {}\nstdout:\n{}\nstderr:\n{}",
+                    engine_label,
+                    output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                )
+            }
+            Ok(Err(error)) => format!(
+                "エラー: {} の起動に失敗しました: {}。npm run setup:{} で同梱ツールを取得してください。",
+                engine_label,
+                error,
+                if use_pandoc { "tools" } else { "office" }
             ),
-            Ok(Err(error)) => format!("エラー: LibreOffice の起動に失敗しました: {}", error),
             Err(_) => format!("エラー: 文書変換が {} 秒でタイムアウトしました。", timeout),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_use_pandoc;
+
+    #[test]
+    fn エンジン自動判定が正しい() {
+        // Markdown が絡む変換は Pandoc、Office 形式や PDF 出力は OfficeCLI。
+        assert!(should_use_pandoc("auto", "md", "docx"));
+        assert!(should_use_pandoc("auto", "docx", "md"));
+        assert!(should_use_pandoc("auto", "epub", "html"));
+        assert!(!should_use_pandoc("auto", "md", "pdf")); // PDF は LaTeX 不要な OfficeCLI で
+        assert!(!should_use_pandoc("auto", "docx", "pdf"));
+        assert!(!should_use_pandoc("auto", "xlsx", "csv"));
+        // 明示指定はそのまま従う。
+        assert!(should_use_pandoc("pandoc", "docx", "pdf"));
+        assert!(!should_use_pandoc("office", "md", "docx"));
+    }
+
+    // pandoc がある環境だけで走る E2E（無ければ即成功で抜ける）。
+    #[test]
+    fn pandocでmarkdownをhtmlへ変換できる() {
+        if std::process::Command::new("pandoc").arg("--version").output().is_err() {
+            eprintln!("pandoc が無いためスキップ");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("picoagent-pandoc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("note.md"), "# 見出し\n\nPandoc変換テスト本文\n").unwrap();
+        let status = std::process::Command::new("pandoc")
+            .arg(dir.join("note.md"))
+            .arg("--standalone")
+            .arg("-o")
+            .arg(dir.join("note.html"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let html = std::fs::read_to_string(dir.join("note.html")).unwrap();
+        assert!(html.contains("Pandoc変換テスト本文"));
+        assert!(html.contains("<h1"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

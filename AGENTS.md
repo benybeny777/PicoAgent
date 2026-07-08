@@ -92,6 +92,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
 | `scripts/fetch-whisper.mjs` | 同梱Whisper CLIとモデル取得（`npm run setup:whisper`） |
 | `scripts/fetch-office.mjs` | OfficeCLI（LibreOffice）取得（`npm run setup:office`。`src-tauri/resources/bundled/office/`、Git 管理外。Linux は警告のみ） |
+| `scripts/fetch-tools.mjs` | 精度向上用 OSS CLI 取得（`npm run setup:tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
 | `scripts/fetch-live2d.mjs` | Live2D ランタイム（`ui/vendor/live2d/`）とサンプルモデル「ひより」（`characters/hiyori/live2d/`）の取得（`npm run setup:live2d`。いずれも git 管理外） |
 | `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
 | `scripts/build-ui-dist.mjs` | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
