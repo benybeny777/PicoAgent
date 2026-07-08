@@ -6,6 +6,13 @@
 
 ## 2026-07-07
 
+### オフィスファイル処理を OfficeCLI へ移行（Microsoft Office 不要に）
+
+- **`ms_office` スキルを OfficeCLI + OOXML 直接編集へ置き換え** (`skills/ms_office/mod.rs`): 旧実装は Windows + Microsoft Office COM（PowerShell）必須だった。`replace_text` は docx/xlsx/pptx を ZIP として開き内部 XML の文字列を直接置換（XML エスケープ整合・バイナリエントリ保持・一時ファイル経由の安全な書き込み）、`export_pdf` は OfficeCLI（soffice --headless）で PDF 出力する。OS・Office の有無に依存しない。`scripts/office.ps1` は削除。
+- **OfficeCLI をセットアップ時に同梱取得** (`scripts/fetch-office.mjs` / `package.json`): `npm run setup:office`（dev / build の前処理でも自動実行）が LibreOffice を `src-tauri/resources/bundled/office/` へ取得する。Windows は公式 MSI を `msiexec /a`（管理者権限不要）で展開、macOS は DMG から `.app` を配置、Linux は公式ポータブル配布が無いため警告のみで続行（`OFFICE_REQUIRED=1` で必須化、`OFFICE_FORCE=1` で再取得、`LIBREOFFICE_VERSION` で版指定）。
+- **`document_convert` は同梱 OfficeCLI を既定参照に** (`skills/document_convert/mod.rs`): 実行パスの解決順を「明示設定（PICOAGENT_LIBREOFFICE_PATH）→ 同梱 → PATH の soffice」にする `office_cli_path` を追加し、`ms_office` と共用。
+- 検証: 実 LibreOffice での docx→PDF 変換 E2E テストを追加（soffice が無い環境では自動スキップ）。OOXML 置換の単体テスト2件も追加し、cargo test 81件パス。
+
 ### 機能追加8点（音声入力・再生成・カスタムQA・なでなで・居眠り・書き出し・更新確認・文書検索）
 
 - **音声入力** (`ui/index.html` / `renderer.js` / `picoagent.js` / `src-tauri/src/commands.rs` / `skills/whisper_transcribe/mod.rs`): 入力欄のマイクボタンで録音し、同梱Whisperでローカル文字起こしして入力欄へ挿入する（`pet_transcribe_audio`。WebAudio で 16bit WAV を生成し外部送信なし）。
