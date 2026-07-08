@@ -41,6 +41,61 @@ fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// 同梱 OfficeCLI（LibreOffice）の探索先ディレクトリ候補。
+fn bundled_office_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        dirs.push(cwd.join("src-tauri/resources/bundled/office"));
+        dirs.push(cwd.join("resources/bundled/office"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.join("resources/bundled/office"));
+            dirs.push(parent.join("../Resources/resources/bundled/office"));
+            dirs.push(parent.join("../../resources/bundled/office"));
+        }
+    }
+    dirs
+}
+
+fn soffice_name() -> &'static str {
+    if cfg!(windows) { "soffice.exe" } else { "soffice" }
+}
+
+/// ディレクトリ配下から soffice を再帰探索する（MSI 展開・.app などレイアウト差異に強くする）。
+fn find_soffice(dir: &Path, depth: usize) -> Option<PathBuf> {
+    if depth > 7 {
+        return None;
+    }
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(soffice_name()) {
+            return Some(path);
+        }
+        if path.is_dir() {
+            subdirs.push(path);
+        }
+    }
+    subdirs.into_iter().find_map(|sub| find_soffice(&sub, depth + 1))
+}
+
+/// OfficeCLI の実行パスを解決する。
+/// 優先順: 明示設定（PICOAGENT_LIBREOFFICE_PATH）→ 同梱（setup:office）→ PATH の soffice。
+pub fn office_cli_path(cfg: &Config) -> String {
+    let configured = cfg.get("PICOAGENT_LIBREOFFICE_PATH", "");
+    if !configured.trim().is_empty() && configured != "soffice" {
+        return configured;
+    }
+    for dir in bundled_office_dirs() {
+        if let Some(found) = find_soffice(&dir, 0) {
+            return found.to_string_lossy().to_string();
+        }
+    }
+    "soffice".to_string()
+}
+
 #[cfg(windows)]
 fn hide_window(command: &mut Command) {
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -61,7 +116,7 @@ impl Tool for DocumentConvertTool {
     }
 
     fn description(&self) -> String {
-        "LibreOffice headless を使って docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。設定に LibreOffice 実行ファイルパスが必要。".to_string()
+        "OfficeCLI（同梱 LibreOffice。npm run setup:office で取得）で docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -78,7 +133,7 @@ impl Tool for DocumentConvertTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LIBREOFFICE_PATH", "LibreOffice 実行ファイルパス", "text", "soffice"),
+            Field::new("PICOAGENT_LIBREOFFICE_PATH", "OfficeCLI 実行ファイルパス（空なら同梱→PATHの soffice）", "text", ""),
             Field::new("PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS", "文書変換タイムアウト秒（5〜300）", "text", "120"),
         ]
     }
@@ -112,7 +167,7 @@ impl Tool for DocumentConvertTool {
             .ok()
             .filter(|value| (5..=300).contains(value))
             .unwrap_or(120);
-        let mut command = Command::new(cfg.get("PICOAGENT_LIBREOFFICE_PATH", "soffice"));
+        let mut command = Command::new(office_cli_path(cfg));
         command
             .args(["--headless", "--convert-to", format, "--outdir"])
             .arg(&output_dir)

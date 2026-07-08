@@ -7,14 +7,15 @@
     "setup:aivis": "node scripts/fetch-aivis.mjs",
     "setup:whisper": "node scripts/fetch-whisper.mjs",
     "setup:live2d": "node scripts/fetch-live2d.mjs",
+    "setup:office": "node scripts/fetch-office.mjs",
     "build:character-animations": "python scripts/build-character-animations.py",
     "build:live2d-psd": "python scripts/build-live2d-psd.py",
     "sync:characters": "node scripts/sync-characters.mjs",
     "build:ui:dev": "node scripts/build-ui-dist.mjs",
     "build:ui:release": "node scripts/build-ui-dist.mjs --release",
     "stop": "node scripts/stop-stale.mjs",
-    "dev": "node scripts/stop-stale.mjs && node scripts/fetch-live2d.mjs && node scripts/sync-characters.mjs && node scripts/build-ui-dist.mjs && node scripts/fetch-engine.mjs && node scripts/fetch-aivis.mjs && node scripts/fetch-whisper.mjs && tauri dev",
-    "build": "node scripts/stop-stale.mjs && node scripts/fetch-live2d.mjs && node scripts/sync-characters.mjs && node scripts/build-ui-dist.mjs --release && node scripts/fetch-engine.mjs && node scripts/fetch-aivis.mjs && node scripts/fetch-whisper.mjs && tauri build",
+    "dev": "node scripts/stop-stale.mjs && node scripts/fetch-live2d.mjs && node scripts/sync-characters.mjs && node scripts/build-ui-dist.mjs && node scripts/fetch-engine.mjs && node scripts/fetch-aivis.mjs && node scripts/fetch-whisper.mjs && node scripts/fetch-office.mjs && tauri dev",
+    "build": "node scripts/stop-stale.mjs && node scripts/fetch-live2d.mjs && node scripts/sync-characters.mjs && node scripts/build-ui-dist.mjs --release && node scripts/fetch-engine.mjs && node scripts/fetch-aivis.mjs && node scripts/fetch-whisper.mjs && node scripts/fetch-office.mjs && tauri build",
     "tauri": "tauri"
   },
   "engines": {
