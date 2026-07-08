@@ -1124,6 +1124,7 @@ async function copyText(text) {
 }
 
 function renderAlarmReply(text) {
+  markActivity(); // 居眠り中でも目覚ましでは起きる
   setAssistantReply(text);
   const actions = document.createElement("div");
   actions.className = "alarm-actions";
@@ -2293,7 +2294,9 @@ function markActivity() {
 }
 
 function fallAsleep() {
-  if (napping || busy || currentVoice || !composer.hidden || live2dActive) return;
+  // 全画面で履歴を読んでいる間（マウス操作なしでも閲覧中）は寝ない。
+  if (napping || busy || currentVoice || !composer.hidden || live2dActive
+    || bubble.classList.contains("fullscreen")) return;
   const sleeping = characterManifest?.boot?.sleeping;
   if (!sleeping) return;
   napping = true;
@@ -2590,6 +2593,7 @@ function applyChatterConfig(c) {
 }
 async function showAssistantNotice(line, options = {}) {
   if (!line) return;
+  if (napping) wakeUp(); // 寝たまま話さない（無操作タイマーは進めない: 雑談で永遠に寝られなくなるため）
   const requestRevision = conversationRevision;
   if (!canShowNotice()) {
     if (options.enqueue !== false) queueNotice(line);
