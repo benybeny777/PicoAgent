@@ -266,6 +266,57 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
     })
 }
 
+/// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup:tools）→ PATH。
+fn ffmpeg_path(cfg: &Config) -> String {
+    crate::tools::resolve_cli_path(cfg, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg")
+}
+
+/// 非 WAV 音声を ffmpeg で 16kHz モノラル WAV（whisper.cpp の推奨入力）へ前処理する。
+/// 変換した一時ファイルのパスを返す。WAV のままで良い場合や ffmpeg が使えない場合は
+/// None を返し、呼び出し側は元ファイルのまま続行する（グレースフルフォールバック）。
+async fn convert_to_wav(cfg: &Config, audio: &Path) -> Option<PathBuf> {
+    let is_wav = audio
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("wav"))
+        .unwrap_or(false);
+    if is_wav {
+        return None;
+    }
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let out = std::env::temp_dir().join(format!(
+        "picoagent-transcribe-{}-{}.wav",
+        std::process::id(),
+        unique
+    ));
+    let args_list: Vec<String> = [
+        "-y",
+        "-i",
+        &audio.to_string_lossy(),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        &out.to_string_lossy(),
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    match run_command(&ffmpeg_path(cfg), &args_list, 300).await {
+        Ok(output) if output.status.success() && out.exists() => Some(out),
+        _ => {
+            // フォールバック許可: 変換できなければ元ファイルを直接 Whisper へ渡す。
+            let _ = std::fs::remove_file(&out);
+            None
+        }
+    }
+}
+
 /// 音声ファイルを文字起こしして本文を返す（マイク入力コマンドなど内部利用向け）。
 /// スキル本体と同じ同梱 Whisper / 設定を使う。失敗はエラーメッセージ文字列で返す。
 pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, String> {
@@ -276,13 +327,19 @@ pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, Strin
         );
     }
     let program = transcribe_program(cfg);
+    let converted = convert_to_wav(cfg, audio).await;
+    let source: &Path = converted.as_deref().unwrap_or(audio);
     let output_stem = output_stem(audio);
     let template = cfg.get(
         "PICOAGENT_TRANSCRIBE_ARGS",
         "-m {model} -f {audio} -otxt -of {output_stem}",
     );
-    let args_list = split_args_template(&template, audio, &model, &output_stem);
-    let output = run_command(&program, &args_list, 120).await?;
+    let args_list = split_args_template(&template, source, &model, &output_stem);
+    let output = run_command(&program, &args_list, 120).await;
+    if let Some(temp) = &converted {
+        let _ = std::fs::remove_file(temp);
+    }
+    let output = output?;
     if !output.status.success() {
         return Err(format!(
             "Whisper文字起こしが失敗しました: {}",
@@ -312,7 +369,7 @@ impl Tool for WhisperTranscribeTool {
     }
 
     fn description(&self) -> String {
-        "PicoAgent管理下の同梱Whisper CLI、または明示設定したローカルWhisperで音声ファイルを文字起こしする。常駐サーバやポートは使わない。".to_string()
+        "PicoAgent管理下の同梱Whisper CLI、または明示設定したローカルWhisperで音声ファイルを文字起こしする。mp3/m4a 等は ffmpeg（同梱→PATH）で16kHz WAVへ自動前処理。常駐サーバやポートは使わない。".to_string()
     }
 
     fn examples(&self) -> Vec<&'static str> {
@@ -362,6 +419,12 @@ impl Tool for WhisperTranscribeTool {
                 "-tdrz",
             ),
             Field::new(
+                "PICOAGENT_FFMPEG_PATH",
+                "ffmpeg 実行ファイルパス（mp3/m4a等の前処理用。空なら同梱→PATH）",
+                "text",
+                "",
+            ),
+            Field::new(
                 "PICOAGENT_TRANSCRIBE_TIMEOUT_SECS",
                 "Whisper文字起こしタイムアウト秒",
                 "text",
@@ -406,12 +469,15 @@ impl Tool for WhisperTranscribeTool {
             );
         }
         let program = transcribe_program(cfg);
+        // mp3/m4a 等は ffmpeg で 16kHz WAV へ前処理してから渡す（精度・互換性の向上）。
+        let converted = convert_to_wav(cfg, &audio).await;
+        let source = converted.clone().unwrap_or_else(|| audio.clone());
         let output_stem = output_stem(&audio);
         let template = cfg.get(
             "PICOAGENT_TRANSCRIBE_ARGS",
             "-m {model} -f {audio} -otxt -of {output_stem}",
         );
-        let mut args_list = split_args_template(&template, &audio, &model, &output_stem);
+        let mut args_list = split_args_template(&template, &source, &model, &output_stem);
         append_diarize_args(
             cfg,
             &mut args_list,
@@ -425,7 +491,11 @@ impl Tool for WhisperTranscribeTool {
             .ok()
             .filter(|value| (10..=7200).contains(value))
             .unwrap_or(1800);
-        let output = match run_command(&program, &args_list, timeout).await {
+        let output = run_command(&program, &args_list, timeout).await;
+        if let Some(temp) = &converted {
+            let _ = std::fs::remove_file(temp);
+        }
+        let output = match output {
             Ok(output) => output,
             Err(error) => return error,
         };
@@ -472,6 +542,46 @@ impl Tool for WhisperTranscribeTool {
             target.display(),
             Local::now().format("%Y-%m-%d")
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert_to_wav;
+
+    // ffmpeg がある環境だけで走る E2E（無ければ即成功で抜ける）。
+    // sine 波の mp3 を生成し、16kHz WAV へ前処理できることを確認する。
+    #[test]
+    fn 非wav音声をffmpegでwavへ前処理する() {
+        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
+            eprintln!("ffmpeg が無いためスキップ");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("picoagent-ffmpeg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mp3 = dir.join("tone.mp3");
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1"])
+            .arg(&mp3)
+            .output()
+            .unwrap();
+        assert!(status.status.success());
+
+        let cfg = crate::config::Config::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let converted = runtime.block_on(convert_to_wav(&cfg, &mp3));
+        let wav = converted.expect("mp3 は WAV へ変換されるはず");
+        assert!(wav.exists());
+        // RIFF ヘッダを持つ本物の WAV になっている。
+        let head = std::fs::read(&wav).unwrap();
+        assert_eq!(&head[..4], b"RIFF");
+        let _ = std::fs::remove_file(&wav);
+
+        // WAV 入力は前処理せず None（元ファイルのまま使う）。
+        let plain = dir.join("plain.wav");
+        std::fs::write(&plain, b"dummy").unwrap();
+        assert!(runtime.block_on(convert_to_wav(&cfg, &plain)).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

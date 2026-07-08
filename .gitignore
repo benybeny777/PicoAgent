@@ -14,6 +14,8 @@ src-tauri/resources/bundled/whisper/*
 !src-tauri/resources/bundled/whisper/.gitkeep
 src-tauri/resources/bundled/office/*
 !src-tauri/resources/bundled/office/.gitkeep
+src-tauri/resources/bundled/tools/*
+!src-tauri/resources/bundled/tools/.gitkeep
 src-tauri/resources/engine/
 src-tauri/resources/aivis/*
 !src-tauri/resources/aivis/.gitkeep

@@ -8,6 +8,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::config::Config;
@@ -43,6 +44,63 @@ inventory::collect!(ToolReg);
 
 // build.rs が生成した `pub mod time; pub mod read_file; ...` を取り込む。
 include!(concat!(env!("OUT_DIR"), "/tool_mods.rs"));
+
+/// 同梱 CLI ツール（scripts/fetch-tools.mjs → resources/bundled/tools/<ツール名>/）の探索先候補。
+/// 開発時（cwd 基準）とパッケージ後（実行ファイル基準）の両レイアウトに対応する。
+fn bundled_tool_dirs(tool: &str) -> Vec<PathBuf> {
+    let rel = format!("resources/bundled/tools/{tool}");
+    let mut dirs = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        dirs.push(cwd.join("src-tauri").join(&rel));
+        dirs.push(cwd.join(&rel));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.join(&rel));
+            dirs.push(parent.join("../Resources").join(&rel));
+            dirs.push(parent.join("../..").join(&rel));
+        }
+    }
+    dirs
+}
+
+/// ディレクトリ配下から実行ファイルを再帰探索する（アーカイブの展開レイアウト差異に強くする）。
+fn find_bundled_exe(dir: &Path, exe_name: &str, depth: usize) -> Option<PathBuf> {
+    if depth > 7 {
+        return None;
+    }
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(exe_name) {
+            return Some(path);
+        }
+        if path.is_dir() {
+            subdirs.push(path);
+        }
+    }
+    subdirs
+        .into_iter()
+        .find_map(|sub| find_bundled_exe(&sub, exe_name, depth + 1))
+}
+
+/// CLI ツールの実行パスを解決する。優先順: 明示設定（config_key）→ 同梱（setup:tools）→ PATH。
+/// `exe` は拡張子なしの実行ファイル名（Windows では自動で .exe を付ける）。
+pub fn resolve_cli_path(cfg: &Config, config_key: &str, tool_dir: &str, exe: &str) -> String {
+    let configured = cfg.get(config_key, "");
+    let trimmed = configured.trim();
+    if !trimmed.is_empty() && trimmed != exe {
+        return trimmed.to_string();
+    }
+    let exe_name = if cfg!(windows) { format!("{exe}.exe") } else { exe.to_string() };
+    for dir in bundled_tool_dirs(tool_dir) {
+        if let Some(found) = find_bundled_exe(&dir, &exe_name, 0) {
+            return found.to_string_lossy().to_string();
+        }
+    }
+    exe.to_string()
+}
 
 pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
     let mut out = format!(

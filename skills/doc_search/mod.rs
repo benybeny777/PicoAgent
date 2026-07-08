@@ -3,9 +3,12 @@
 // 一致箇所の前後を抜粋して返す。「あのフォルダの資料から探して」に応える。
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -68,6 +71,62 @@ fn collect_files(root: &Path, files: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
+/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup:tools）→ PATH。
+fn ripgrep_path(cfg: &Config) -> String {
+    crate::tools::resolve_cli_path(cfg, "PICOAGENT_RIPGREP_PATH", "ripgrep", "rg")
+}
+
+/// ripgrep で語に一致する候補ファイルを高速収集する（内蔵走査と同じ拡張子・除外・上限）。
+/// rg が使えない、または実行に失敗した場合は None を返し、呼び出し側は内蔵走査へ
+/// フォールバックする（グレースフルフォールバック）。
+async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option<Vec<PathBuf>> {
+    let program = ripgrep_path(cfg);
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for term in terms {
+        let mut command = Command::new(&program);
+        command.args([
+            "--files-with-matches",
+            "--ignore-case",
+            "--fixed-strings",
+            "--no-messages",
+            "--max-filesize",
+            "512K",
+            "--max-depth",
+            "8",
+        ]);
+        for ext in TEXT_EXTS {
+            command.arg("--glob").arg(format!("*.{ext}"));
+        }
+        for dir in SKIP_DIRS {
+            command.arg("--glob").arg(format!("!{dir}/"));
+        }
+        command.arg("--").arg(term);
+        for root in roots {
+            command.arg(root);
+        }
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(20), command.output())
+            .await
+            .ok()?
+            .ok()?;
+        // rg の終了コード: 0=一致あり / 1=一致なし / 2=エラー（エラー時は内蔵走査へ）。
+        if output.status.code() == Some(2) {
+            return None;
+        }
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if found.len() >= MAX_FILES {
+                return Some(found);
+            }
+            let path = PathBuf::from(line);
+            if seen.insert(path.clone()) {
+                found.push(path);
+            }
+        }
+    }
+    Some(found)
+}
+
 /// クエリ語の一致数からスコアを計算し、最初の一致行の抜粋を返す。
 fn score_file(path: &Path, terms: &[String]) -> Option<(usize, String)> {
     let content = std::fs::read_to_string(path).ok()?;
@@ -124,7 +183,8 @@ impl Tool for DocSearchTool {
     }
     fn description(&self) -> String {
         "許可ルート配下のローカル文書（md/txt/csv/コード等）をキーワード検索し、\
-         一致したファイルと抜粋を返します。外部送信なし。パラメータ: query（必須）、max_results。"
+         一致したファイルと抜粋を返します。ripgrep（同梱→PATH）があれば高速検索、無ければ内蔵走査。\
+         外部送信なし。パラメータ: query（必須）、max_results。"
             .to_string()
     }
     fn examples(&self) -> Vec<&'static str> {
@@ -145,7 +205,12 @@ impl Tool for DocSearchTool {
         })
     }
     fn config_schema(&self) -> Vec<Field> {
-        vec![]
+        vec![Field::new(
+            "PICOAGENT_RIPGREP_PATH",
+            "ripgrep 実行ファイルパス（高速検索用。空なら同梱→PATH、無ければ内蔵走査）",
+            "text",
+            "",
+        )]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -168,9 +233,17 @@ impl Tool for DocSearchTool {
             .unwrap_or(5)
             .clamp(1, 10) as usize;
 
-        let mut files = Vec::new();
-        for root in crate::permissions::allowed_roots(cfg) {
-            collect_files(&root, &mut files, 0);
+        // まず ripgrep（同梱→PATH）で候補を高速収集し、使えなければ内蔵走査へフォールバック。
+        // rg は本文一致のみ拾うため、一致ゼロのときも内蔵走査でファイル名一致を補う。
+        let roots: Vec<PathBuf> = crate::permissions::allowed_roots(cfg);
+        let mut files = match rg_collect(cfg, &roots, &terms).await {
+            Some(found) if !found.is_empty() => found,
+            _ => Vec::new(),
+        };
+        if files.is_empty() {
+            for root in &roots {
+                collect_files(root, &mut files, 0);
+            }
         }
         if files.is_empty() {
             return "許可ルート配下に検索対象のテキストファイルが見つかりませんでした。".to_string();
@@ -194,6 +267,34 @@ impl Tool for DocSearchTool {
             out.push_str(&format!("\n### {} （一致度 {}）\n{}\n", path.display(), score, snippet));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rg_collect;
+
+    // rg がある環境だけで走る E2E（無ければ即成功で抜ける）。
+    #[test]
+    fn ripgrepで候補ファイルを収集できる() {
+        if std::process::Command::new("rg").arg("--version").output().is_err() {
+            eprintln!("rg が無いためスキップ");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("picoagent-rg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("memo.md"), "会議の予算メモです。").unwrap();
+        std::fs::write(dir.join("other.md"), "無関係の内容。").unwrap();
+        std::fs::write(dir.join("skip.bin"), "予算").unwrap(); // 対象外拡張子は拾わない
+
+        let cfg = crate::config::Config::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let roots = vec![dir.clone()];
+        let terms = vec!["予算".to_string()];
+        let found = runtime.block_on(rg_collect(&cfg, &roots, &terms)).expect("rg は実行できるはず");
+        assert_eq!(found.len(), 1, "found: {found:?}");
+        assert!(found[0].ends_with("memo.md"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

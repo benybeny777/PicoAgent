@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-08
+
+### OSS CLI ツール群の同梱統合（Pandoc / ripgrep / ffmpeg / qpdf / poppler）
+
+- **統合取得スクリプト** (`scripts/fetch-tools.mjs` / `package.json` / `.gitignore`): `npm run setup:tools`（dev / build の前処理でも自動実行）が精度向上用の OSS CLI を `src-tauri/resources/bundled/tools/<ツール名>/` へ取得する。Pandoc・ripgrep・ffmpeg は Windows/macOS/Linux の公式バイナリ、qpdf・poppler は Windows のみ配布（他 OS は警告のみで PATH へフォールバック）。`TOOLS_REQUIRED=1` で必須化、`TOOLS_FORCE=1` で再取得、`PICOAGENT_SETUP_TOOLS=pandoc,ripgrep` で対象を絞れる。
+- **共通パス解決ヘルパー** (`src-tauri/src/tools/mod.rs`): 「明示設定 → 同梱（setup:tools）→ PATH」の順で CLI 実行パスを解決する `resolve_cli_path` を追加し、whisper/office で重複していたパターンを一般化。
+- **`pdf_tools` にテキスト抽出を追加** (`skills/pdf_tools/mod.rs`): 新アクション `extract_text` が Poppler `pdftotext -layout` で PDF 本文を抽出（ページ範囲指定・ファイル保存・直接返却に対応）。qpdf の実行パスも同梱解決に対応。
+- **`document_convert` に Pandoc エンジン** (`skills/document_convert/mod.rs`): Markdown/reST/EPUB/org/LaTeX が絡む変換は Pandoc を自動選択して高精度化（`engine` パラメータ auto/office/pandoc で明示指定も可能）。PDF 出力と Office 形式間は従来どおり OfficeCLI。
+- **`whisper_transcribe` に ffmpeg 前処理** (`skills/whisper_transcribe/mod.rs`): mp3/m4a/flac/ogg 等の非 WAV 音声を ffmpeg で 16kHz モノラル WAV（whisper.cpp の推奨入力）へ自動変換してから文字起こしする。ffmpeg が無い場合は従来どおり元ファイルを直接渡す。
+- **`doc_search` に ripgrep バックエンド** (`skills/doc_search/mod.rs`): 候補ファイルの収集を ripgrep（同梱→PATH）で高速化（拡張子・除外ディレクトリ・サイズ/深さ上限は内蔵走査と同一）。rg が無い・失敗した場合は内蔵走査へ自動フォールバックし、本文一致ゼロのときもファイル名一致を内蔵走査で補う。
+- 検証: 実ツールでの E2E テスト4件を追加（PDF テキスト抽出、Pandoc md→html、ffmpeg mp3→WAV 前処理、ripgrep 候補収集。ツールが無い環境では自動スキップ）。cargo test 86件パス・clippy 警告ゼロ。Linux でも pandoc/ripgrep/ffmpeg の同梱取得を実機確認。
+
+---
+
 ## 2026-07-07
 
 ### オフィスファイル処理を OfficeCLI へ移行（Microsoft Office 不要に）
