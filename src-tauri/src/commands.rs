@@ -2349,6 +2349,54 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
     }
 }
 
+/// ネイティブ D&D（Tauri drag-drop イベント）で受け取ったファイルパスを読み、
+/// フロントの添付フローで使える形（kind + data URL + 実パス）へ変換する。
+/// ユーザーが明示的にドロップしたファイルだけが渡るため、許可ルート制限は課さない。
+#[tauri::command]
+pub async fn pet_read_dropped_path(path: String) -> Result<serde_json::Value, String> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
+    let file = std::path::PathBuf::from(&path);
+    let meta = std::fs::metadata(&file).map_err(|e| format!("ファイルを読めません: {e}"))?;
+    if meta.is_dir() {
+        return Err("フォルダは添付できません。中のファイルをドロップしてください。".to_string());
+    }
+    if meta.len() > MAX_FILE_BYTES {
+        return Err("ファイルが大きすぎます（25MB まで）。".to_string());
+    }
+    let bytes = std::fs::read(&file).map_err(|e| format!("ファイルを読めません: {e}"))?;
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("dropped")
+        .to_string();
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    // モデルへ画像としてそのまま送れる形式。それ以外は文書添付（内容抽出）フローへ。
+    let image_mime = match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    };
+    let (kind, mime) = match image_mime {
+        Some(mime) => ("image", mime),
+        None => ("file", "application/octet-stream"),
+    };
+    Ok(serde_json::json!({
+        "kind": kind,
+        "name": name,
+        "path": path,
+        "dataUrl": format!("data:{mime};base64,{}", B64.encode(&bytes)),
+    }))
+}
+
 fn strip_xml_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len() / 2);
     let mut in_tag = false;

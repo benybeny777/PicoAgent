@@ -6,6 +6,13 @@
 
 ## 2026-07-09
 
+### ドラッグ&ドロップの本対応（ウィンドウ全体・キャラの上でも添付できる）
+
+- **ネイティブ D&D 対応** (`ui/renderer.js` / `ui/index.html` / `ui/styles.css` / `src-tauri/src/commands.rs` / `lib.rs`): Tauri は既定でネイティブのファイルドラッグを横取りするため（dragDropEnabled）、従来の HTML5 drop（入力欄のみ）には実ファイルが届かなかった。`tauri://drag-*` イベントで受けて添付フローへ流すよう変更し、ウィンドウのどこへでも（キャラクターの上でも）ドロップで添付できるようにした。ドラッグ中は「ここにドロップして添付」のオーバーレイを表示し、ドロップするとキャラがはねて反応、入力欄が自動で開く。複数ファイル・画像/文書の自動振り分け・フォルダや25MB超の明確なエラー表示に対応。
+- **実パスの引き継ぎ** (`pet_read_dropped_path` / 送信時のファイルコンテキスト): ドロップされたファイルの実パスをモデルへ伝えるため、「このPDFの本文を抜いて」「このPSDをPNGにして」がドロップ→ひとことでそのまま動く（pdf_tools / image_tools 等がパスを直接使える）。
+- **テキスト/URL のドロップ** (`ui/renderer.js`): ブラウザ等から文字列やリンクをドロップすると入力欄へ挿入して開く。
+- 検証: Playwright ハーネスでオーバーレイ表示/消灯・画像/文書の振り分け・フォルダエラー・入力欄自動オープン・テキストドロップ挿入を確認。オーバーレイの `hidden` が CSS の `display:flex` に負ける表示バグをハーネスのスクリーンショットで発見し修正。cargo test 88件パス・clippy 警告ゼロ。
+
 ### PSD などの画像ファイル対応（image_tools スキル＋ImageMagick 同梱）
 
 - **`image_tools` スキルを新設** (`skills/image_tools/mod.rs`): ImageMagick で PSD/XCF/HEIC/HEIF/TIFF/WebP/AVIF 等を PNG/JPG などへ変換（`convert`。resize・quality 対応、PSD 等はレイヤー統合ビューを使用、jpg 出力時は透過を白背景へ）し、寸法・レイヤー数などの情報取得（`info`）も行う。実行ファイルは「明示設定（PICOAGENT_MAGICK_PATH）→ 同梱 → PATH」の順で解決し、PATH では v7 の `magick` が無ければ v6 の `convert` / `identify` へ自動フォールバック（apt の ImageMagick 6 でも動く）。
