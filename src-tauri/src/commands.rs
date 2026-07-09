@@ -2319,6 +2319,14 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
                  ファイルパスを直接伝えてもらうか、「このPDFを要約して」と依頼してください。"
             )
         }
+        // PSD 等の直接表示できない画像 → 画像変換スキルへの誘導メッセージ。
+        "psd" | "xcf" | "heic" | "heif" | "tif" | "tiff" | "avif" | "bmp" | "ico" => {
+            format!(
+                "[添付ファイル: {name}]\n\
+                 ※ {ext} 画像はそのまま表示できないため、image_tools スキルで扱います。\
+                 ファイルパスを伝えて「PNG に変換して」「画像情報を見せて」と依頼してください。"
+            )
+        }
         _ => match String::from_utf8(bytes.clone()) {
             Ok(s) => s,
             Err(_) => {

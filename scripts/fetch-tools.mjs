@@ -9,6 +9,7 @@
 //   ffmpeg  … 音声文字起こしスキルの mp3/m4a 等 → 16kHz WAV 前処理（win/mac/linux）
 //   qpdf    … PDF 編集スキルのページ抽出・結合・回転（win のみ配布。mac/linux は brew/apt）
 //   poppler … PDF 編集スキルのテキスト抽出 pdftotext（win のみ配布。mac/linux は brew/apt）
+//   imagemagick … 画像変換スキルの PSD/XCF/HEIC/TIFF/WebP 変換（win のみポータブル配布。mac/linux は brew/apt）
 //
 // 失敗は既定で警告のみ（各スキルは PATH のツールへフォールバックして続行）。
 // 必須にする場合は TOOLS_REQUIRED=1。再取得は TOOLS_FORCE=1。
@@ -28,6 +29,7 @@ const PANDOC_VERSION = process.env.PANDOC_VERSION || "3.6.3";
 const RIPGREP_VERSION = process.env.RIPGREP_VERSION || "14.1.1";
 const QPDF_VERSION = process.env.QPDF_VERSION || "12.2.0";
 const POPPLER_WIN_VERSION = process.env.POPPLER_WIN_VERSION || "24.08.0-0";
+const IMAGEMAGICK_VERSION = process.env.IMAGEMAGICK_VERSION || "7.1.1-47";
 
 const OS = platform();
 const IS_ARM = arch() === "arm64";
@@ -85,6 +87,17 @@ const TOOLS = [
       linux: null,
     },
     fallback: "apt install poppler-utils / brew install poppler で導入すると PATH から使われます。",
+  },
+  {
+    name: "imagemagick",
+    exe: "magick",
+    source: {
+      // archive/binaries は旧版も恒久配布されるため、latest 追従より安定する。
+      win32: `https://imagemagick.org/archive/binaries/ImageMagick-${IMAGEMAGICK_VERSION}-portable-Q16-x64.zip`,
+      darwin: null,
+      linux: null,
+    },
+    fallback: "apt install imagemagick / brew install imagemagick で導入すると PATH（magick / convert）から使われます。",
   },
 ];
 

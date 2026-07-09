@@ -1877,7 +1877,9 @@ function fileIcon(name) {
   const map = { xlsx: "📊", xls: "📊", xlsm: "📊", csv: "📋", tsv: "📋",
     docx: "📝", doc: "📝", docm: "📝", pptx: "📄", pptm: "📄", ppt: "📄",
     pdf: "📕", json: "📦", toml: "📦", yaml: "🗂", yml: "🗂",
-    txt: "📃", md: "📃", log: "📃" };
+    txt: "📃", md: "📃", log: "📃",
+    psd: "🎨", xcf: "🎨", heic: "🖼", heif: "🖼", tif: "🖼", tiff: "🖼",
+    webp: "🖼", avif: "🖼", bmp: "🖼", ico: "🖼" };
   return map[ext] || "📎";
 }
 

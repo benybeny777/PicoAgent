@@ -448,6 +448,27 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
     ),
     ("pdf_tools", &["pdf", "結合", "抽出", "回転"]),
     (
+        "image_tools",
+        &[
+            "psd",
+            "xcf",
+            "heic",
+            "heif",
+            "tiff",
+            "webp",
+            "avif",
+            "画像変換",
+            "pngに",
+            "png化",
+            "jpgに",
+            "jpegに",
+            "リサイズ",
+            "縮小して",
+            "画像情報",
+            "レイヤー",
+        ],
+    ),
+    (
         "comfyui_generate",
         &[
             "画像",
@@ -671,6 +692,14 @@ mod tests {
     fn 資料ワークスペースを候補に追加する() {
         let names = schema_names("Gensparkみたいに資料一式を作って");
         assert!(names.contains(&"spark_workspace".to_string()));
+    }
+
+    #[test]
+    fn 画像変換スキルを候補に追加する() {
+        let names = schema_names("このPSDをPNGに変換して");
+        assert!(names.contains(&"image_tools".to_string()));
+        let heic = schema_names("HEICの写真をJPGにして");
+        assert!(heic.contains(&"image_tools".to_string()));
     }
 
     #[test]

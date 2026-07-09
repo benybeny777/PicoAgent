@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-07-09
+
+### PSD などの画像ファイル対応（image_tools スキル＋ImageMagick 同梱）
+
+- **`image_tools` スキルを新設** (`skills/image_tools/mod.rs`): ImageMagick で PSD/XCF/HEIC/HEIF/TIFF/WebP/AVIF 等を PNG/JPG などへ変換（`convert`。resize・quality 対応、PSD 等はレイヤー統合ビューを使用、jpg 出力時は透過を白背景へ）し、寸法・レイヤー数などの情報取得（`info`）も行う。実行ファイルは「明示設定（PICOAGENT_MAGICK_PATH）→ 同梱 → PATH」の順で解決し、PATH では v7 の `magick` が無ければ v6 の `convert` / `identify` へ自動フォールバック（apt の ImageMagick 6 でも動く）。
+- **ImageMagick を setup:tools へ追加** (`scripts/fetch-tools.mjs`): Windows はポータブル zip を同梱取得（`IMAGEMAGICK_VERSION` で版指定）。macOS/Linux は公式ポータブル配布が無いため警告のみで `brew` / `apt` 導入の PATH へフォールバック。
+- **PSD 等のドロップ対応** (`src-tauri/src/commands.rs` / `ui/renderer.js`): チャットへ psd/xcf/heic/tiff/avif/bmp/ico をドロップすると、image_tools での変換依頼方法を案内する（従来は「対応していない形式」エラー）。添付チップに画像系アイコンを追加。
+- **スキルルーティング** (`src-tauri/src/tools/mod.rs`): 「PSD」「HEIC」「画像変換」「リサイズ」等の発話で `image_tools` をモデル候補へ追加。
+- 検証: ImageMagick 実機での E2E テスト（PSD 生成 → PNG 変換 → 情報取得）とルーティングのユニットテストを追加。cargo test 88件パス・clippy 警告ゼロ。
+
+---
+
 ## 2026-07-08
 
 ### OSS CLI ツール群の同梱統合（Pandoc / ripgrep / ffmpeg / qpdf / poppler）
