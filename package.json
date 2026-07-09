@@ -9,6 +9,7 @@
     "setup:live2d": "node scripts/fetch-live2d.mjs",
     "setup:office": "node scripts/fetch-office.mjs",
     "setup:tools": "node scripts/fetch-tools.mjs",
+    "cli": "node scripts/picoagent-cli.mjs",
     "build:character-animations": "python scripts/build-character-animations.py",
     "build:live2d-psd": "python scripts/build-live2d-psd.py",
     "sync:characters": "node scripts/sync-characters.mjs",

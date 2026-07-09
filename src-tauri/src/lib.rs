@@ -19,6 +19,7 @@ mod permissions;
 mod providers;
 mod scheduler;
 mod secret;
+mod api_server;
 mod tools;
 mod tracer;
 mod usage;
@@ -246,6 +247,8 @@ pub fn run() {
                 });
             }
             scheduler::start(app.handle().clone());
+            // ローカル API サーバ（既定無効。PICOAGENT_API_ENABLED=true で 127.0.0.1 に開く）。
+            api_server::start(app.handle().clone());
             // 起動時に一度だけ更新を確認する（オフラインや未リリースでは静かにスキップ）。
             commands::spawn_update_check(app.handle().clone());
             Ok(())

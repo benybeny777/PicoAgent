@@ -6,6 +6,13 @@
 
 ## 2026-07-09
 
+### ローカルAPI（Ollama風）と最小CLI
+
+- **ローカル HTTP API サーバを追加** (`src-tauri/src/api_server.rs` / `lib.rs`): 外部ツールから PicoAgent のエージェント（スキル込み）を Ollama のように呼べる。`GET /api/version`・`GET /api/tags`・`POST /api/chat`・`POST /api/generate`・`POST /v1/chat/completions`（OpenAI Chat Completions 互換。既存クライアントの base_url 差し替えで動く。stream 要求には全文単一チャンクの SSE で応答）。会話はリクエスト内で完結するステートレス設計で、デスクトップのキャラ会話履歴とは混ざらない。
+- **セキュリティ既定**: 既定で無効（`PICOAGENT_API_ENABLED`）、`127.0.0.1` のみバインド、`PICOAGENT_API_KEY` 設定時は `Authorization: Bearer` 必須、ボディ 1MB 上限・リクエストタイムアウトあり。設定画面「基本」タブに「ローカルAPI（Ollama風）」セクションを追加（変更は再起動後に反映）。
+- **最小 CLI** (`scripts/picoagent-cli.mjs` / `npm run cli`): `status` / `models` / `chat <文…>` / `ask <文…>` / `repl`（会話文脈を保持する対話モード）。接続先は `PICOAGENT_API_PORT`（既定 11500）と `PICOAGENT_API_KEY` で指定。
+- 検証: HTTP 解析・認証・OpenAI 互換応答のユニットテストに加え、実 TCP ソケットでの読み書き統合テストと、スタブ API サーバに対する CLI の E2E（status/models/chat/ask/認証失敗）を実施。cargo test 94件パス・clippy 警告ゼロ。
+
 ### ドラッグ&ドロップの本対応（ウィンドウ全体・キャラの上でも添付できる）
 
 - **ネイティブ D&D 対応** (`ui/renderer.js` / `ui/index.html` / `ui/styles.css` / `src-tauri/src/commands.rs` / `lib.rs`): Tauri は既定でネイティブのファイルドラッグを横取りするため（dragDropEnabled）、従来の HTML5 drop（入力欄のみ）には実ファイルが届かなかった。`tauri://drag-*` イベントで受けて添付フローへ流すよう変更し、ウィンドウのどこへでも（キャラクターの上でも）ドロップで添付できるようにした。ドラッグ中は「ここにドロップして添付」のオーバーレイを表示し、ドロップするとキャラがはねて反応、入力欄が自動で開く。複数ファイル・画像/文書の自動振り分け・フォルダや25MB超の明確なエラー表示に対応。
