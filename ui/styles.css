@@ -341,3 +341,8 @@ textarea { padding-right:96px; }
 .history-tools #exportHistory:hover { color:var(--ink); border-color:var(--field-focus); }
 @media (prefers-reduced-motion:reduce) { #micButton.recording, .pet-heart, .character.napping img { animation:none!important; } }
 .history-tools input { flex:1 1 auto; min-width:0; }
+
+/* ネイティブD&D: ウィンドウ全体のドロップ受け入れ表示 */
+.drop-overlay[hidden] { display:none; }
+.drop-overlay { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; background:rgba(242,126,145,.14); border:3px dashed var(--accent); border-radius:18px; pointer-events:none; }
+.drop-overlay-inner { padding:10px 18px; border-radius:12px; background:var(--bubble-bg); border:1px solid var(--panel-border); color:var(--ink); font-size:13px; font-weight:700; box-shadow:0 8px 18px rgba(42,31,46,.14); }

@@ -1947,6 +1947,73 @@ composer.addEventListener("drop", (e) => {
   }
 });
 
+// ── ネイティブ D&D: ウィンドウのどこへでも（キャラの上でも）ドロップして添付できる ──
+// Tauri は既定でネイティブのファイルドラッグを横取りするため（dragDropEnabled）、
+// HTML5 の drop にはファイルが届かない。tauri://drag-* イベントで受けて添付フローへ流す。
+const dropOverlay = document.getElementById("dropOverlay");
+
+function setDropOverlay(visible) {
+  if (dropOverlay) dropOverlay.hidden = !visible;
+}
+
+async function handleNativeDrop(paths) {
+  markActivity();
+  let added = 0;
+  for (const path of (paths || []).slice(0, MAX_ATTACHED_IMAGES + MAX_ATTACHED_FILES)) {
+    try {
+      const info = await window.picoagent.readDroppedPath(path);
+      if (info.kind === "image") {
+        if (attachedImages.length >= MAX_ATTACHED_IMAGES) { showToast(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚まで`, "warn"); continue; }
+        attachedImages.push(info.dataUrl);
+      } else {
+        if (attachedFiles.length >= MAX_ATTACHED_FILES) { showToast(`ファイルは最大 ${MAX_ATTACHED_FILES} 件まで`, "warn"); continue; }
+        attachedFiles.push({ name: info.name, dataUrl: info.dataUrl, path: info.path });
+      }
+      added += 1;
+    } catch (error) {
+      logApp("warn", "ドロップファイルの読み込みに失敗しました", `${path}: ${error}`);
+      showToast(String(error), "error");
+    }
+  }
+  if (added === 0) return;
+  renderAttachmentPreview();
+  updateComposerState();
+  if (composer.hidden) openComposer();
+  // キャラがファイルを受け取った反応（クリック時と同じはねる演出）。
+  character.classList.remove("boop");
+  void character.offsetWidth;
+  character.classList.add("boop");
+  showToast(`${added} 件を添付しました`, "success");
+}
+
+try {
+  window.picoagent.listen("tauri://drag-enter", () => setDropOverlay(true));
+  window.picoagent.listen("tauri://drag-leave", () => setDropOverlay(false));
+  window.picoagent.listen("tauri://drag-drop", (payload) => {
+    setDropOverlay(false);
+    handleNativeDrop(payload?.paths);
+  });
+} catch (error) {
+  logApp("warn", "ネイティブD&Dの購読に失敗しました", errorDetail(error));
+}
+
+// ── テキスト/URL のドロップ: ブラウザ等からの文字列は入力欄へ挿入する ─────────
+document.addEventListener("dragover", (e) => {
+  const types = e.dataTransfer ? [...e.dataTransfer.types] : [];
+  if (types.includes("text/plain") || types.includes("text/uri-list")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  if (!e.dataTransfer || e.dataTransfer.files.length > 0) return;
+  const text = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain")).trim();
+  if (!text) return;
+  e.preventDefault();
+  markActivity();
+  if (composer.hidden) openComposer();
+  setInputValue(input.value.trim() ? `${input.value.trimEnd()} ${text}` : text);
+  autosizeInput();
+  input.focus();
+});
+
 // 画面を見てほしい系の発話を検出する（スクリーンショット自動添付に使用）。
 function isScreenshotQuery(text) {
   return /画面を見て|スクリーンショット|screenshot|画面の状態|画面を確認|今の画面|デスクトップを見て|画面キャプチャ/.test(text.toLowerCase());
@@ -2028,12 +2095,14 @@ composer.addEventListener("submit", async event => {
     if (pendingFiles.length > 0 && window.picoagent.readFileContent) {
       status.textContent = "ファイルを読み込み中…";
       for (const f of pendingFiles) {
+        // ネイティブD&D由来の添付は実パスも伝え、PDF抽出や画像変換などのスキルが直接使えるようにする。
+        const label = f.path ? `${f.name}（パス: ${f.path}）` : f.name;
         try {
           const extracted = await window.picoagent.readFileContent(f.name, f.dataUrl);
-          fileContext += `[添付ファイル: ${f.name}]\n${extracted}\n\n`;
+          fileContext += `[添付ファイル: ${label}]\n${extracted}\n\n`;
         } catch (err) {
           logApp("warn", `ファイル読み込み失敗: ${f.name}`, String(err));
-          fileContext += `[添付ファイル: ${f.name}] (読み込みに失敗しました)\n\n`;
+          fileContext += `[添付ファイル: ${label}] (読み込みに失敗しました)\n\n`;
         }
       }
     }

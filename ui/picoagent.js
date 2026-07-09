@@ -101,6 +101,8 @@ window.picoagent = {
   captureScreen: () => call("pet_capture_screen"),
   // ドロップされたファイルの内容を抽出してテキストを返す（xlsx/docx/pptx/csv/テキスト等）。
   readFileContent: (name, dataUrl) => call("pet_read_file_content", { name, dataB64: dataUrl }),
+  // ネイティブ D&D のファイルパスを読み、添付用の kind/name/dataUrl/path を返す。
+  readDroppedPath: (path) => call("pet_read_dropped_path", { path }),
   engineStatus: () => call("engine_status"),
   // ダウンロード済みローカルモデル(GGUF)の一覧を取得する。
   listDownloadedModels: () => call("pet_list_downloaded_models"),
