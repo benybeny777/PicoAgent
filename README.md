@@ -20,6 +20,7 @@
 - [🧩 コネクタの仕組み](#-コネクタの仕組み)
 - [🖱 使い方](#-使い方)
 - [⚙️ 設定](#️-設定)
+- [🔌 ローカルAPI（Ollama風）](#-ローカルapiollama風)
 - [📦 製品ビルド（配布）](#-製品ビルド配布)
 - [📁 フォルダ構成](#-フォルダ構成)
 - [🛟 トラブルシューティング](#-トラブルシューティング)
@@ -150,6 +151,35 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 
 > [!TIP]
 > 各キーは環境変数としても渡せます（既定値としての参照のみ。保存先は常に `config.json`）。
+
+---
+
+## 🔌 ローカルAPI（Ollama風）
+
+外部ツールやスクリプトから、PicoAgent のエージェント（スキル込み）を Ollama のようにローカル HTTP で呼べます。
+
+**有効化**: 設定画面「基本」タブ →「ローカルAPI（Ollama風）」→ 有効化して再起動（既定は無効）。`127.0.0.1` にのみバインドし、LAN へは公開しません。`PICOAGENT_API_KEY` を設定すると `Authorization: Bearer <キー>` が必須になります。
+
+| エンドポイント | 内容 |
+|---|---|
+| `GET /api/version` | バージョン情報 |
+| `GET /api/tags` | 選択中モデルの一覧（Ollama の `/api/tags` 風） |
+| `POST /api/chat` | `{"messages":[{"role":"user","content":"…"}]}` → エージェント応答 |
+| `POST /api/generate` | `{"prompt":"…"}` → エージェント応答 |
+| `POST /v1/chat/completions` | OpenAI Chat Completions 互換（既存の OpenAI クライアントの `base_url` を差し替えるだけで使える。`stream` は全文単一チャンクの SSE） |
+
+```bash
+# curl で
+curl http://127.0.0.1:11500/api/chat -d '{"messages":[{"role":"user","content":"今日の天気は？"}]}'
+
+# 同梱の最小 CLI で（Ollama CLI 風）
+npm run cli -- status            # 死活とバージョン
+npm run cli -- models            # モデル一覧
+npm run cli -- chat 今日の予定は？  # 1問1答（スキルも使える）
+npm run cli -- repl              # 対話モード（会話文脈を保持。exit で終了）
+```
+
+API の会話はリクエスト内で完結するステートレス設計で、デスクトップのキャラ会話履歴とは混ざりません。ポートは `PICOAGENT_API_PORT`（既定 11500）で変更できます。CLI は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` 環境変数で接続先を指定します。
 
 ---
 
