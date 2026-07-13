@@ -1,0 +1,368 @@
+# PicoAgent 全体マニュアル
+
+デスクトップに住むキャラクターに話しかけるだけで、調べもの・ファイル操作・文書/画像/音声の変換・外部サービス連携までこなすローカルファーストの AI エージェント「PicoAgent」の総合マニュアルです。導入から日常の使いかた、スキル活用、ローカル API、セキュリティまでを一冊にまとめています。
+
+- 開発者向けの内部仕様は [SPEC.md](SPEC.md)、AI エージェント向け作業ルールは [AGENTS.md](AGENTS.md)、概要と最新情報は [README.md](README.md) / [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
+---
+
+## 📑 目次
+
+1. [PicoAgent とは](#1-picoagent-とは)
+2. [インストールとセットアップ](#2-インストールとセットアップ)
+3. [基本操作（画面の見かた）](#3-基本操作画面の見かた)
+4. [ファイルの渡しかた（ドラッグ&ドロップ）](#4-ファイルの渡しかたドラッグドロップ)
+5. [スキル活用ガイド（頼み方の例）](#5-スキル活用ガイド頼み方の例)
+6. [文書・PDF・画像・音声の変換（同梱 OSS ツール）](#6-文書pdf画像音声の変換同梱-oss-ツール)
+7. [叩く AI（プロバイダとモデル）](#7-叩く-aiプロバイダとモデル)
+8. [音声（読み上げとマイク入力）](#8-音声読み上げとマイク入力)
+9. [キャラクター（切替・Live2D・PSD）](#9-キャラクター切替live2dpsd)
+10. [ローカル API と CLI（Ollama 風）](#10-ローカル-api-と-cliollama-風)
+11. [スケジュールと自動化](#11-スケジュールと自動化)
+12. [セキュリティと許可の考えかた](#12-セキュリティと許可の考えかた)
+13. [データの保存場所](#13-データの保存場所)
+14. [主要設定リファレンス](#14-主要設定リファレンス)
+15. [トラブルシューティング](#15-トラブルシューティング)
+16. [付録: npm スクリプト一覧](#16-付録-npm-スクリプト一覧)
+
+---
+
+## 1. PicoAgent とは
+
+PicoAgent は Tauri 製のデスクトップペット型 AI エージェントです。
+
+- **ローカルファースト**: 既定の叩く AI は同梱のローカル推論エンジン（llama-server + GGUF）。初回のモデル取得後はオフラインで動きます。読み上げ（Aivis）や文字起こし（Whisper）もローカルです。
+- **スキル（コネクタ）駆動**: 天気・Web検索から Gmail・Slack・GitHub、Office 文書編集、PDF、画像変換、コマンド実行まで 50 以上のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
+- **キャラクターと暮らす**: クリックで話しかけ、なでると喜び、放っておくと居眠りします。Live2D にも対応。
+- **外から叩ける**: Ollama 風のローカル HTTP API と最小 CLI で、スクリプトや他ツールからもエージェントを呼べます。
+
+---
+
+## 2. インストールとセットアップ
+
+### 前提
+
+- **Rust（cargo）** と **Node.js ≥ 20**
+- Windows: WebView2 ランタイム / macOS: Xcode Command Line Tools（`xcode-select --install`）
+- Ollama は不要です
+
+### 手順
+
+```bash
+npm install
+npm run setup:engine   # 同梱推論エンジン（llama-server）を取得
+npm run setup:whisper  # ローカル Whisper CLI とモデル（音声入力・文字起こしを使う場合）
+npm run setup:live2d   # Live2D ランタイムとサンプルモデル「ひより」
+npm run setup:office   # OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力）
+npm run setup:tools    # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick）
+npm run dev            # 起動（上記の未取得分は起動前に自動取得）
+```
+
+- `setup:*` はすべて**ベストエフォート**です。取得できないもの（例: Linux の LibreOffice、macOS の qpdf など）は警告だけ出して起動を続行し、該当スキルは PATH 上のツールへフォールバックします。
+- 初回起動時はローカルモデル（Gemma 系）を PC の VRAM/RAM に合わせて自動選択・ダウンロードします。以後はオフラインで動作します。
+- 製品ビルド（配布物の作成）は `npm run build`。詳細は README の「製品ビルド」を参照してください。
+
+---
+
+## 3. 基本操作（画面の見かた）
+
+画面にはキャラクターとフキダシ（チャット欄）が表示されます。
+
+| 操作 | 動き |
+|---|---|
+| フキダシをクリック | 入力欄を開く |
+| キャラクターをクリック | ぴょんとはねる（読み上げ中なら停止） |
+| キャラクターをドラッグ | ウィンドウを移動 |
+| キャラクターをダブルクリック | フキダシを全画面表示／解除（`Esc` でも解除） |
+| フキダシ右下のつまみ | フキダシのサイズ変更（位置と共に自動保存） |
+| 右クリック | 設定…・常に手前に表示・PicoAgent を終了 |
+| `Enter` / `Ctrl+Enter` | 送信（`Shift+Enter` で改行） |
+| `↑` / `↓` | 過去の自分の入力を呼び戻す |
+| 入力欄の 🎙 | マイク録音 → ローカル Whisper で文字起こしして入力欄へ |
+| 回答上部の小ボタン | 通知一覧・回答コピー・別の答えを再生成（↺）・再読み上げ・停止・拡大 |
+| 全画面フキダシ | 会話履歴の検索、各発言のコピー、自分の発言の再利用、Markdown 書き出し |
+
+### キャラクターのふるまい
+
+- **なでなで**: キャラクターの上でマウスを素早く左右に往復させると、はねてハートが浮かびます。
+- **居眠り**: 無操作が一定時間（既定 15 分、`PICOAGENT_NAP_MINUTES` で変更、0 で無効）続くと寝ます。操作すると起きます。23〜5 時はまばたきが増えて眠そうになります。
+- **自発雑談**: 放っておくと時々ひとりごとを言います（設定で無効化可能）。
+- **クイック操作**: 入力欄の上に「画面を見る」「クリップボード要約」などの定型ボタンが並びます。`PICOAGENT_QUICK_ACTIONS`（1 行 1 件「ラベル|送る文章」）で自由に置き換えられます。
+
+---
+
+## 4. ファイルの渡しかた（ドラッグ&ドロップ）
+
+**ウィンドウのどこへでも**（キャラクターの上でも）ファイルをドロップできます。ドラッグ中は「📎 ここにドロップして添付」の表示が出ます。
+
+| ドロップしたもの | 動き |
+|---|---|
+| 画像（png/jpg/gif/webp） | 画像として添付（モデルが画像を見て答える） |
+| 文書（xlsx/docx/pptx/csv/md/コード等） | 内容をテキスト抽出して添付 |
+| PDF | 実パスをモデルへ伝え、「本文を抜いて」「要約して」で pdf_tools が動く |
+| PSD/XCF/HEIC/TIFF 等 | 実パスをモデルへ伝え、「PNG にして」で image_tools が動く |
+| フォルダ・25MB 超 | エラー表示（中のファイルを個別にドロップしてください） |
+| テキスト・URL（ブラウザから） | 入力欄へ挿入 |
+
+- 複数ファイルの同時ドロップに対応（画像は最大 4 枚、文書は最大 4 件）。
+- ドロップされたファイルの**実パスも AI に伝わる**ため、「この PDF の 2〜3 ページだけ抜いて」「この PSD を 800px の PNG に」のように、変換系スキルがそのまま使えます。
+- `Ctrl+V` で画像の貼り付けも可能です。「画面を見て」と言うとスクリーンショットを自動添付します。
+
+---
+
+## 5. スキル活用ガイド（頼み方の例）
+
+チャットで自然に頼むだけで、該当スキルが自動で選ばれます。設定が必要なスキルは、未設定のまま頼むと設定手順を案内します（設定画面「スキル設定」タブ。カードに設定状態バッジと承認ポリシーを表示）。
+
+### 情報・検索（設定不要）
+
+| スキル | 頼み方の例 |
+|---|---|
+| Web検索 / URL取得 | 「◯◯って何？調べて」「このURLの内容を要約して」 |
+| 天気 | 「明日の東京の天気は？」 |
+| ニュース / RSS | 「今日のニュース教えて」「このブログの更新確認して」 |
+| 為替 / 市場指数 | 「1ドル何円？」「日経平均は？」 |
+| 時刻 | 「ニューヨークは今何時？」 |
+
+### 日常補助（設定不要）
+
+| スキル | 頼み方の例 |
+|---|---|
+| 目覚まし時計 | 「平日の7時に起こして」「アラーム一覧」 |
+| リマインダー | 「15分後に洗濯物って教えて」 |
+| 集中タイマー | 「25分集中タイマー」「1時間おきに見守って」 |
+| おでかけ前チェック | 「出かける前のチェックして」 |
+| できたことメモ | 「今日できたことを記録して」 |
+| クリップボード要約 | 「コピーした文章を要約して」 |
+
+### ファイル・ローカル操作
+
+| スキル | 頼み方の例 |
+|---|---|
+| ファイル読み書き | 「メモを notes.md に保存して」「あのファイル読んで」 |
+| ローカル文書検索 | 「作業フォルダから会議メモを探して」（ripgrep があれば高速検索） |
+| ファイル削除 | 「その下書きを消して」（**OS のゴミ箱へ移動**。物理削除はしない） |
+| コマンド実行 | 「git status を実行して」（既定無効。許可リスト制、未許可はその場で承認カード） |
+| 自力実行 | 「このフォルダのファイル名を規則で一括変更して」（既定無効） |
+| 実用ツール集 | 「このJSONを整形して」「10kmをマイルに換算」「文字数数えて」など約30種 |
+
+### 文書・PDF・画像・音声（→ 詳細は[第6章](#6-文書pdf画像音声の変換同梱-oss-ツール)）
+
+| スキル | 頼み方の例 |
+|---|---|
+| Office編集 | 「report.docx の『令和6年』を『令和7年』に置換して」「見積書.xlsx を PDF にして」 |
+| 文書変換 | 「この docx を PDF にして」「この Markdown を docx にして」 |
+| PDF編集 | 「PDF を結合して」「2〜5ページだけ抜いて」「本文をテキスト抽出して」 |
+| 画像ファイル変換 | 「この PSD を PNG に変換して」「HEIC を JPG にして」「画像の情報を見せて」 |
+| 音声文字起こし | 「この音声を文字起こしして」（mp3/m4a も自動前処理）「話者分類つきで」 |
+| 会議記録 | 「会議の録音を開始して」→「録音を止めて議事録にして」 |
+| 画像生成 | 「猫のイラストを描いて」（ComfyUI / OpenAI 画像） |
+
+### 調査・資料生成
+
+| スキル | 頼み方の例 |
+|---|---|
+| 調査レポート | 「AIスライド生成サービスを出典付きで調査してレポートに」 |
+| 資料ワークスペース | 「Gensparkみたいに資料一式を作って」（brief/deck/sheet/共有HTML…） |
+| Genspark風全部 | 「Genspark風の機能を全部やって」（Deep Research 等 10 系統） |
+| サブエージェント | 「競合3社をそれぞれ調べて」（分担して並行調査） |
+
+### 外部サービス連携（各サービスの API キー / トークン設定が必要）
+
+Gmail（一覧・要約・ラベル・アーカイブ・掃除）、Google カレンダー / Docs / Drive / Sheets / Tasks、GitHub Issue、Notion、Microsoft Graph（Outlook/Teams）、Jira、Linear、Trello、Todoist、Slack、Discord、汎用 HTTP API。
+
+SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
+
+> 各カードの ⚙ に取得手順つきの設定ガイドがあります。チャットで「Gmail のトークンの取り方」と聞いても案内します。
+
+### アプリ操作・自動化
+
+| スキル | 頼み方の例 |
+|---|---|
+| アプリ操作 | 「PicoAgent を終了して」 |
+| タスクスケジューラ | 「毎朝9時に天気を教えて」「平日18時に git status」（→ [第11章](#11-スケジュールと自動化)） |
+
+---
+
+## 6. 文書・PDF・画像・音声の変換（同梱 OSS ツール）
+
+変換系スキルの精度を上げるため、実績ある OSS CLI をセットアップ時に同梱します（`npm run setup:office` / `setup:tools`。`dev` / `build` でも自動実行）。
+
+| ツール | 使うスキル | 役割 | 同梱対象 OS |
+|---|---|---|---|
+| **OfficeCLI**（LibreOffice） | 文書変換 / Office編集 | docx/xlsx/pptx ⇔ PDF 等の変換・PDF 出力 | Windows / macOS（Linux は apt 等） |
+| **Pandoc** | 文書変換 | Markdown/reST/EPUB/org/LaTeX が絡む変換を高精度に | Windows / macOS / Linux |
+| **Poppler**（pdftotext） | PDF編集 | PDF 本文のテキスト抽出（レイアウト保持） | Windows（他は apt/brew） |
+| **qpdf** | PDF編集 | ページ抽出・結合・回転・線形化 | Windows（他は apt/brew） |
+| **ImageMagick** | 画像ファイル変換 | PSD/XCF/HEIC/TIFF/WebP/AVIF → PNG/JPG、情報取得 | Windows（他は apt/brew） |
+| **ffmpeg** | 音声文字起こし | mp3/m4a/flac/ogg → 16kHz WAV の自動前処理 | Windows / macOS / Linux |
+| **ripgrep** | ローカル文書検索 | 検索の高速化（無ければ内蔵走査） | Windows / macOS / Linux |
+
+**実行ファイルの解決順はすべて共通**: ① 設定画面での明示パス指定 → ② 同梱（`src-tauri/resources/bundled/`）→ ③ PATH。同梱が無い OS でも `apt install` / `brew install` すればそのまま使われます。
+
+ポイント:
+
+- Office ファイルの文字列置換（`ms_office` の replace_text）は OOXML 直接編集のため、**LibreOffice すら不要**です。
+- `document_convert` は変換内容から Pandoc / OfficeCLI を自動で使い分けます（`engine` 指定で固定も可能）。PDF 出力は常に OfficeCLI です。
+- PSD は**レイヤー統合ビュー**を変換します。JPG 出力時は透過を白背景に敷きます。
+- 再取得は `TOOLS_FORCE=1 npm run setup:tools`、特定ツールだけなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+
+---
+
+## 7. 叩く AI（プロバイダとモデル）
+
+- **既定は `local`（同梱エンジン）**。初回起動時に PC の VRAM/RAM から Gemma 系の small / balanced / large を自動選択してダウンロードします。設定画面では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットを「種類 → サイズ」で選べ、推奨 VRAM・RAM・ダウンロード目安を表示します。
+- **クラウド**: OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral など。右クリック →「設定…」→「叩くAI」タブで API キーとモデルを設定します（費用が発生します）。
+- **Ollama**: `ollama serve` 起動後にプロバイダを切り替えると、ローカルのモデル一覧から選べます。
+- ダウンロード済み GGUF は「叩くAI」タブの「ダウンロード済みモデル」で一覧・削除できます（使用中のモデルは削除不可）。
+- 会話は**キャラクターごと**に保存・復元されます。トークン使用量は「診断」タブで確認できます。
+
+---
+
+## 8. 音声（読み上げとマイク入力）
+
+- **読み上げ（Aivis）**: 設定「音声」タブで有効化すると、回答をキャラボイスで読み上げます（ローカル動作）。読み上げ中はキャラクリックか「読み上げを停止」で止められます。キャラごとに声を変えられます。
+- **マイク入力（Whisper）**: 入力欄の 🎙 で録音 → もう一度押すと停止し、同梱 Whisper がローカルで文字起こしして入力欄に入れます。外部送信はありません。
+- **音声ファイルの文字起こし**: 「この音声を文字起こしして」で wav に加え mp3/m4a/flac/ogg も OK（ffmpeg で自動前処理）。「話者分類つきで」にも対応します。
+
+---
+
+## 9. キャラクター（切替・Live2D・PSD）
+
+- 設定「キャラクター」タブで切替と、性格・口調（人格プロンプト）のキャラ別編集ができます。
+- **Live2D**: `npm run setup:live2d` で Cubism ランタイムとサンプルモデル「ひより」を取得すると、対応キャラは Live2D で動きます（まばたき・リップシンク・タップモーション）。非対応キャラも差分絵ベースの疑似リグ（PNGTuber 式）で常時アニメーションします。
+- **自作キャラの Live2D 化**: `npm run build:live2d-psd` で `characters/<id>/layers/` からレイヤー分け PSD（ひより互換の 15 パーツ構成）を生成し、Live2D Cubism Editor で開いてモデル化できます。
+- キャラ画像・アニメーションの正本は `characters/` 配下です（`ui/assets/characters/` へ自動同期）。
+
+---
+
+## 10. ローカル API と CLI（Ollama 風）
+
+外部ツールやスクリプトから、PicoAgent のエージェント（**スキル込み**）をローカル HTTP で呼べます。
+
+### 有効化
+
+設定「基本」タブ →「ローカルAPI（Ollama風）」→ 有効化して再起動（**既定は無効**）。`127.0.0.1` にのみバインドし、LAN へは公開しません。`PICOAGENT_API_KEY` を設定すると `Authorization: Bearer <キー>` が必須になります。ポートは `PICOAGENT_API_PORT`（既定 11500）。
+
+### エンドポイント
+
+| エンドポイント | 内容 |
+|---|---|
+| `GET /api/version` | バージョン情報 |
+| `GET /api/tags` | 選択中モデル一覧（Ollama 風） |
+| `POST /api/chat` | `{"messages":[{"role":"user","content":"…"}]}` → エージェント応答 |
+| `POST /api/generate` | `{"prompt":"…"}` → エージェント応答 |
+| `POST /v1/chat/completions` | **OpenAI Chat Completions 互換**（base_url 差し替えで既存クライアントが動く。`stream` は全文単一チャンクの SSE） |
+
+```bash
+curl http://127.0.0.1:11500/api/chat \
+  -d '{"messages":[{"role":"user","content":"今日の天気は？"}]}'
+```
+
+API の会話はリクエスト内で完結する**ステートレス設計**で、デスクトップのキャラ会話履歴とは混ざりません。
+
+### 最小 CLI
+
+```bash
+npm run cli -- status            # 死活とバージョン・選択中モデル
+npm run cli -- models            # モデル一覧
+npm run cli -- chat 今日の予定は？  # 1問1答（スキルも使える）
+npm run cli -- ask 俳句を詠んで    # 生成（chat と同等）
+npm run cli -- repl              # 対話モード（会話文脈を保持。exit で終了）
+```
+
+接続先は環境変数 `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` で指定します。
+
+---
+
+## 11. スケジュールと自動化
+
+- **目覚まし時計**: 「平日の7時に起こして」で登録。声でやさしく起こし、`おきたよ！` を押すまで既定 5 分おきに再通知します（アプリ起動中のみ）。
+- **タスクスケジューラ（cron 風）**: 「毎朝9時に git status を実行して」「平日18時に天気スキルを実行して」で登録。設定画面の専用フォームでも編集できます。実行結果は直近 100 件保存され、通知一覧から確認・再実行できます。
+- **リマインダー / 集中タイマー / 見守り**: 単発の通知や 25 分ポモドーロ、定期的な声かけができます。
+- コマンド実行を伴うスケジュールは `run_command` と同じ許可（許可ルート + allowlist）で守られます。
+
+---
+
+## 12. セキュリティと許可の考えかた
+
+- **ファイル操作は許可ルート内のみ**: 全スキル共通の許可ルート（`PICOAGENT_ALLOWED_ROOT` ほか、設定「許可」タブ）配下だけを読み書きします。`C:\Windows` と `C:\Program Files*` は常に拒否です。
+- **削除はゴミ箱まで**: スキル経由のファイル削除は OS のゴミ箱への移動だけ。`rm` / `del` などの物理削除コマンドは実行を拒否します。
+- **コマンド実行は既定無効 + 許可リスト制**: 有効化しても allowlist にある prefix だけ実行できます。未登録コマンドが必要になったら、その場で「許可（今回だけ）/ 永続許可 / キャンセル」を選ぶ承認カードが出ます。
+- **ローカル API は既定無効・localhost 限定・Bearer 認証対応**（[第10章](#10-ローカル-api-と-cliollama-風)）。
+- **API キーの保護**: `password` 型の設定値は Windows では DPAPI で暗号化して保存します。
+- **外部送信の最小化**: 文字起こし・読み上げ・ローカル検索・履歴・メモリはすべてローカル処理です。ツール出力にプロンプトインジェクション的な文字列があれば検知して注意を促します。
+- 会話履歴・長期メモリを消すには右クリック →「会話をリセット」。
+
+---
+
+## 13. データの保存場所
+
+| データ | 場所 |
+|---|---|
+| 設定 | `app_config_dir/config.json` |
+| 会話履歴（キャラ別） | `app_data_dir/history-<キャラID>.json` |
+| 長期メモリ | `app_data_dir/memory.json` |
+| スケジュール実行結果 | `app_data_dir/schedule-runs.json` |
+| ログ（1 週間で自動削除） | `app_data_dir` 配下の logs（診断タブから場所を確認可能） |
+| 同梱ツール・モデル | `src-tauri/resources/bundled/`（Git 管理外） |
+| 会議録音・議事録 | 共通ワークスペース配下 `meetings/YYYY-MM-DD/` |
+| 履歴の書き出し | ダウンロードフォルダ（Markdown） |
+
+アンインストール時に消してよいのは上記の app データと同梱ディレクトリだけです。
+
+---
+
+## 14. 主要設定リファレンス
+
+よく使うキーの抜粋です（全キーは [SPEC.md](SPEC.md#設定キー一覧)）。設定画面から編集でき、環境変数としても渡せます（保存先は常に `config.json`）。
+
+| キー | 内容（既定値） |
+|---|---|
+| `PICOAGENT_PROVIDER` | 叩く AI（`local`） |
+| `PICOAGENT_ALLOWED_ROOT` | ファイル/実行の許可ルート |
+| `PICOAGENT_NAP_MINUTES` | 居眠りまでの分数（15、0 で無効） |
+| `PICOAGENT_QUICK_ACTIONS` | クイック操作のカスタマイズ |
+| `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` | 読み上げ（無効 / 100） |
+| `PICOAGENT_API_ENABLED` / `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` | ローカル API（無効 / 11500 / なし） |
+| `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行（無効 / 空） |
+| `PICOAGENT_LIBREOFFICE_PATH` | OfficeCLI の明示パス（空 = 同梱→PATH） |
+| `PICOAGENT_PANDOC_PATH` / `PICOAGENT_QPDF_PATH` / `PICOAGENT_PDFTOTEXT_PATH` / `PICOAGENT_MAGICK_PATH` / `PICOAGENT_FFMPEG_PATH` / `PICOAGENT_RIPGREP_PATH` | 各 OSS ツールの明示パス（空 = 同梱→PATH） |
+| `PICOAGENT_SUPER_AGENT` | 計画→実行・自己評価を強化するモード（無効） |
+| `PICOAGENT_UPDATE_CHECK_ENABLED` | 起動時の更新確認（有効） |
+
+---
+
+## 15. トラブルシューティング
+
+| 症状 | 対処 |
+|---|---|
+| Office 変換・PDF 出力ができない | `npm run setup:office`。Linux は `apt install libreoffice` + PATH の `soffice` |
+| Markdown 変換・PDF 抽出・PSD 変換・音声前処理の精度が低い / 動かない | `npm run setup:tools`。同梱が無い OS は `apt` / `brew` で該当ツールを導入 |
+| ローカル API に接続できない | 設定「基本」タブで有効化して再起動。ポート・キーは `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` |
+| `run_command` が拒否される | 既定無効。設定で有効化し allowlist に prefix を追加 |
+| 起動が遅い | 初回は Rust コンパイルとモデル取得に時間がかかります（以後は速い） |
+| ビルドが「別のプロセスが使用中」で失敗 | 残存プロセスが原因。`npm run stop` で停止（dev/build は自動で停止してから起動） |
+| macOS で背景が透過しない | `tauri.conf.json` の `app.macOSPrivateApi: true` を確認して再ビルド |
+| 文字起こしできない | `npm run setup:whisper`（macOS/Linux は公式バイナリ配布が無く手動導入が必要な場合あり） |
+
+その他は [README のトラブルシューティング](README.md#-トラブルシューティング) を参照してください。
+
+---
+
+## 16. 付録: npm スクリプト一覧
+
+| コマンド | 内容 |
+|---|---|
+| `npm run dev` | 開発起動（未取得の同梱物は自動取得） |
+| `npm run build` | 製品ビルド（各 OS の配布バンドルを生成） |
+| `npm run stop` | 残存プロセスの停止 |
+| `npm run cli -- <cmd>` | ローカル API を叩く CLI（status/models/chat/ask/repl） |
+| `npm run setup:engine` | 同梱推論エンジンの取得 |
+| `npm run setup:aivis` | 同梱 Aivis（読み上げ）の取得 |
+| `npm run setup:whisper` | 同梱 Whisper の取得 |
+| `npm run setup:live2d` | Live2D ランタイム + サンプルモデルの取得 |
+| `npm run setup:office` | OfficeCLI（LibreOffice）の取得 |
+| `npm run setup:tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
+| `npm run build:live2d-psd` | レイヤー画像から Live2D 用 PSD を生成 |
+| `npm run build:character-animations` | レイヤー画像から連番アニメーションを生成 |
