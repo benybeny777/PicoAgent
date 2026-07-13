@@ -6,6 +6,10 @@
 
 ## 2026-07-09
 
+### 全体マニュアル（MANUAL.md）を新設
+
+- 導入・基本操作・ドラッグ&ドロップ・スキル活用ガイド（頼み方の例）・同梱 OSS ツール・プロバイダ・音声・キャラクター/Live2D・ローカル API と CLI・スケジュール・セキュリティ・保存場所・設定リファレンス・トラブルシューティング・npm スクリプトまでを 1 冊にまとめたユーザー向け総合マニュアルを追加。README から誘導。
+
 ### ローカルAPI（Ollama風）と最小CLI
 
 - **ローカル HTTP API サーバを追加** (`src-tauri/src/api_server.rs` / `lib.rs`): 外部ツールから PicoAgent のエージェント（スキル込み）を Ollama のように呼べる。`GET /api/version`・`GET /api/tags`・`POST /api/chat`・`POST /api/generate`・`POST /v1/chat/completions`（OpenAI Chat Completions 互換。既存クライアントの base_url 差し替えで動く。stream 要求には全文単一チャンクの SSE で応答）。会話はリクエスト内で完結するステートレス設計で、デスクトップのキャラ会話履歴とは混ざらない。
