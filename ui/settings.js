@@ -27,6 +27,17 @@ let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGEN
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
+const SETTINGS_TAB_IDS = new Set(["basic", "character", "voice", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
+let activeSettingsTab = SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic";
+
+function activateSettingsTab(tabId) {
+  if (!SETTINGS_TAB_IDS.has(tabId)) return false;
+  activeSettingsTab = tabId;
+  const button = document.getElementById(`tab-${tabId}`);
+  if (button) button.click();
+  return true;
+}
 
 function errorDetail(error) {
   if (!error) return "";
@@ -53,6 +64,12 @@ window.addEventListener("error", event => {
 });
 window.addEventListener("unhandledrejection", event => {
   logApp("error", "設定画面の未処理 Promise rejection", errorDetail(event.reason));
+});
+
+window.picoagent.listen("settings:navigate", tabId => {
+  activateSettingsTab(String(tabId || ""));
+}).catch(error => {
+  logApp("warn", "設定タブ遷移イベントの購読に失敗しました", errorDetail(error));
 });
 
 function el(tag, props = {}, children = []) {
@@ -665,8 +682,8 @@ function createTabs(items) {
   const tabs = el("div", { className: "tabs", role: "tablist" });
   const panels = el("div", { className: "tab-panels" });
   const byId = {};
-  items.forEach((item, index) => {
-    const selected = index === 0;
+  items.forEach(item => {
+    const selected = item.id === activeSettingsTab;
     const button = el("button", {
       className: selected ? "tab active" : "tab",
       id: `tab-${item.id}`,
@@ -684,6 +701,7 @@ function createTabs(items) {
     panel.setAttribute("aria-labelledby", button.id);
     if (!selected) panel.hidden = true;
     button.addEventListener("click", () => {
+      activeSettingsTab = item.id;
       for (const tab of tabs.children) {
         const active = tab === button;
         tab.classList.toggle("active", active);

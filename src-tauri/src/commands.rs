@@ -1685,8 +1685,8 @@ pub async fn pet_rerun_schedule_task(
 }
 
 #[tauri::command]
-pub fn pet_open_settings(app: AppHandle) -> Result<(), String> {
-    open_settings(&app);
+pub fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    open_settings_tab(&app, tab.as_deref());
     Ok(())
 }
 
@@ -2522,20 +2522,55 @@ fn extract_xlsx_content(data: &[u8]) -> Result<String, String> {
 
 /// 設定ウィンドウを開く（既にあれば前面化）。
 pub fn open_settings(app: &tauri::AppHandle) {
+    open_settings_tab(app, None);
+}
+
+/// 設定ウィンドウを指定タブで開く。既存ウィンドウには遷移イベントを送る。
+fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
+    let tab = settings_tab(tab);
     if let Some(win) = app.get_webview_window("settings") {
         let _ = win.set_focus();
+        if let Some(tab) = tab {
+            let _ = win.emit("settings:navigate", tab);
+        }
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    let path = tab
+        .map(|tab| format!("settings.html?tab={tab}"))
+        .unwrap_or_else(|| "settings.html".to_string());
+    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
         .title("PicoAgent の設定")
         .inner_size(640.0, 640.0)
         .min_inner_size(480.0, 480.0)
         .build();
 }
 
+fn settings_tab(tab: Option<&str>) -> Option<&str> {
+    tab.filter(|value| {
+        matches!(
+            *value,
+            "basic"
+                | "character"
+                | "voice"
+                | "providers"
+                | "tools"
+                | "permissions"
+                | "skillguide"
+                | "diagnostics"
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::speech_text;
+    use super::{settings_tab, speech_text};
+
+    #[test]
+    fn 設定画面は既知のタブだけを受け付ける() {
+        assert_eq!(settings_tab(Some("permissions")), Some("permissions"));
+        assert_eq!(settings_tab(Some("../index")), None);
+        assert_eq!(settings_tab(None), None);
+    }
 
     #[test]
     fn 読み上げでは参考ブロックを除外する() {

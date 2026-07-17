@@ -90,18 +90,39 @@ let alarmTimer = null;
 const firedAlarms = new Set();
 let activeAlarmSnooze = null;
 
-// 画面下部に短いトースト通知を表示する（1.8秒後に自動消去）。
+// 画面下部にトースト通知を表示する。必要な場合は次の操作へ進むボタンも付けられる。
 // kind: "info"（既定）/ "success" / "warn" / "error" で配色が変わる。
-function showToast(msg, kind = "info") {
+function showToast(msg, kind = "info", options = {}) {
+  const duration = Math.max(1200, Number(options.duration) || 1800);
   const el = document.createElement("div");
   el.className = kind === "info" ? "toast" : `toast toast-${kind}`;
-  el.textContent = msg;
-  document.body.append(el);
-  requestAnimationFrame(() => el.classList.add("toast-show"));
-  setTimeout(() => {
+  const text = document.createElement("span");
+  text.textContent = msg;
+  el.append(text);
+  let timer = null;
+  const dismiss = () => {
+    if (timer) clearTimeout(timer);
     el.classList.remove("toast-show");
     el.addEventListener("transitionend", () => el.remove(), { once: true });
-  }, 1800);
+    setTimeout(() => el.remove(), 300);
+  };
+  if (options.actionLabel && typeof options.onAction === "function") {
+    el.classList.add("toast-actionable");
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "toast-action";
+    action.textContent = options.actionLabel;
+    action.addEventListener("click", async () => {
+      action.disabled = true;
+      try { await options.onAction(); }
+      catch (error) { logApp("error", "通知アクションに失敗しました", errorDetail(error)); }
+      dismiss();
+    });
+    el.append(action);
+  }
+  document.body.append(el);
+  requestAnimationFrame(() => el.classList.add("toast-show"));
+  timer = setTimeout(dismiss, duration);
 }
 
 // エラー表示後にリトライボタンを返信エリアへ追加する。
@@ -1959,31 +1980,54 @@ function setDropOverlay(visible) {
 async function handleNativeDrop(paths) {
   markActivity();
   let added = 0;
+  const failures = [];
   for (const path of (paths || []).slice(0, MAX_ATTACHED_IMAGES + MAX_ATTACHED_FILES)) {
     try {
       const info = await window.picoagent.readDroppedPath(path);
       if (info.kind === "image") {
-        if (attachedImages.length >= MAX_ATTACHED_IMAGES) { showToast(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚まで`, "warn"); continue; }
+        if (attachedImages.length >= MAX_ATTACHED_IMAGES) {
+          failures.push(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚までです`);
+          continue;
+        }
         attachedImages.push(info.dataUrl);
       } else {
-        if (attachedFiles.length >= MAX_ATTACHED_FILES) { showToast(`ファイルは最大 ${MAX_ATTACHED_FILES} 件まで`, "warn"); continue; }
+        if (attachedFiles.length >= MAX_ATTACHED_FILES) {
+          failures.push(`ファイルは最大 ${MAX_ATTACHED_FILES} 件までです`);
+          continue;
+        }
         attachedFiles.push({ name: info.name, dataUrl: info.dataUrl, path: info.path });
       }
       added += 1;
     } catch (error) {
       logApp("warn", "ドロップファイルの読み込みに失敗しました", `${path}: ${error}`);
-      showToast(String(error), "error");
+      failures.push(String(error));
     }
   }
-  if (added === 0) return;
-  renderAttachmentPreview();
-  updateComposerState();
-  if (composer.hidden) openComposer();
-  // キャラがファイルを受け取った反応（クリック時と同じはねる演出）。
-  character.classList.remove("boop");
-  void character.offsetWidth;
-  character.classList.add("boop");
-  showToast(`${added} 件を添付しました`, "success");
+  if (added > 0) {
+    renderAttachmentPreview();
+    updateComposerState();
+    if (composer.hidden) openComposer();
+    // キャラがファイルを受け取った反応（クリック時と同じはねる演出）。
+    character.classList.remove("boop");
+    void character.offsetWidth;
+    character.classList.add("boop");
+  }
+  if (failures.length === 0) {
+    if (added > 0) showToast(`${added} 件を添付しました`, "success");
+    return;
+  }
+  const permissionFailure = failures.some(message => message.includes("許可ルート") || message.includes("保護パス"));
+  const prefix = added > 0 ? `${added} 件を添付、` : "";
+  if (permissionFailure) {
+    showToast(`${prefix}許可されていない場所のファイルを読み込めませんでした`, "warn", {
+      duration: 7000,
+      actionLabel: "許可設定を開く",
+      onAction: () => window.picoagent.openSettings("permissions"),
+    });
+  } else {
+    const detail = failures.length === 1 ? failures[0] : `${failures.length} 件を読み込めませんでした`;
+    showToast(`${prefix}${detail}`, "error", { duration: 4500 });
+  }
 }
 
 try {
