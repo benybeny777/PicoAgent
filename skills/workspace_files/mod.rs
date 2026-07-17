@@ -4,6 +4,8 @@
 // 許可ルート外・保護パス（C:\Windows / Program Files 等）は permissions が拒否する。
 
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -15,6 +17,80 @@ use crate::permissions;
 const MAX_READ_BYTES: usize = 128 * 1024;
 const MAX_WRITE_BYTES: usize = 128 * 1024;
 const MAX_LIST_ENTRIES: usize = 200;
+const MAX_BACKUP_BYTES: u64 = 1024 * 1024;
+
+struct UndoEntry {
+    path: PathBuf,
+    original: Option<Vec<u8>>,
+}
+
+static UNDO_HISTORY: OnceLock<Mutex<Vec<UndoEntry>>> = OnceLock::new();
+
+fn undo_history() -> &'static Mutex<Vec<UndoEntry>> {
+    UNDO_HISTORY.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn snapshot_before_write(path: &Path) -> Result<UndoEntry, String> {
+    let original = if path.exists() {
+        let size = std::fs::metadata(path)
+            .map_err(|error| format!("変更前の情報を取得できません: {error}"))?
+            .len();
+        if size > MAX_BACKUP_BYTES {
+            return Err(format!(
+                "安全に取り消せる上限（{}バイト）を超えるため変更しません: {}",
+                MAX_BACKUP_BYTES,
+                path.display()
+            ));
+        }
+        Some(std::fs::read(path).map_err(|error| format!("変更前データを保存できません: {error}"))?)
+    } else {
+        None
+    };
+    Ok(UndoEntry {
+        path: path.to_path_buf(),
+        original,
+    })
+}
+
+fn remember_change(entry: UndoEntry) -> Result<(), String> {
+    let mut history = undo_history()
+        .lock()
+        .map_err(|_| "取り消し履歴を取得できません。".to_string())?;
+    history.push(entry);
+    if history.len() > 20 {
+        history.remove(0);
+    }
+    Ok(())
+}
+
+fn undo_last(confirm: bool) -> String {
+    let mut history = match undo_history().lock() {
+        Ok(history) => history,
+        Err(_) => return "エラー: 取り消し履歴を取得できません。".to_string(),
+    };
+    let Some(entry) = history.last() else {
+        return "取り消せるファイル変更はありません。".to_string();
+    };
+    if !confirm {
+        return format!(
+            "プレビュー: 直前の変更を取り消します: {}\n実行するには confirm=true を指定してください。",
+            entry.path.display()
+        );
+    }
+    let path_label = entry.path.display().to_string();
+    let result = match &entry.original {
+        Some(bytes) => std::fs::write(&entry.path, bytes).map_err(|error| error.to_string()),
+        None if entry.path.exists() => super::trash_file::move_to_trash(&entry.path),
+        None => Ok(()),
+    };
+    match result {
+        Ok(()) => {
+            history.pop();
+            format!("OK: 直前の変更を取り消しました: {path_label}")
+        }
+        Err(error) => format!("エラー: 変更を取り消せませんでした（{error}）: {path_label}"),
+    }
+}
 
 pub struct WorkspaceFilesTool;
 
@@ -100,7 +176,7 @@ impl Tool for WorkspaceFilesTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "read", "write", "append", "mkdir", "stat"],
+                    "enum": ["list", "read", "write", "append", "mkdir", "stat", "undo"],
                     "description": "実行する操作。write は既存ファイルを上書きする。"
                 },
                 "path": {
@@ -114,9 +190,11 @@ impl Tool for WorkspaceFilesTool {
                 "create_parent": {
                     "type": "boolean",
                     "description": "write / append 時に親フォルダが無ければ作成する。"
-                }
+                },
+                "preview": { "type": "boolean", "description": "write / append の変更内容だけを確認し、書き込まない。" },
+                "confirm": { "type": "boolean", "description": "undo の実行確認。省略時は取り消し対象のプレビューだけを返す。" }
             },
-            "required": ["action", "path"]
+            "required": ["action"]
         })
     }
 
@@ -125,6 +203,9 @@ impl Tool for WorkspaceFilesTool {
             Some(action) => action,
             None => return "エラー: action が指定されていません。".to_string(),
         };
+        if action == "undo" {
+            return undo_last(args.get("confirm").and_then(Value::as_bool).unwrap_or(false));
+        }
         let path = match args.get("path").and_then(Value::as_str) {
             Some(path) if !path.trim().is_empty() => path.trim(),
             _ => return "エラー: path が指定されていません。".to_string(),
@@ -146,6 +227,15 @@ impl Tool for WorkspaceFilesTool {
                     Ok(content) => content,
                     Err(error) => return format!("エラー: {}", error),
                 };
+                if args.get("preview").and_then(Value::as_bool).unwrap_or(false) {
+                    return format!(
+                        "プレビュー: {} へ {} バイトを{}します。\n先頭: {}",
+                        target.display(),
+                        content.len(),
+                        if action == "write" { "書き込み" } else { "追記" },
+                        content.chars().take(300).collect::<String>()
+                    );
+                }
                 if args
                     .get("create_parent")
                     .and_then(Value::as_bool)
@@ -157,6 +247,10 @@ impl Tool for WorkspaceFilesTool {
                         }
                     }
                 }
+                let snapshot = match snapshot_before_write(&target) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 let result = if action == "write" {
                     std::fs::write(&target, content)
                 } else {
@@ -168,7 +262,10 @@ impl Tool for WorkspaceFilesTool {
                         .and_then(|mut file| file.write_all(content.as_bytes()))
                 };
                 match result {
-                    Ok(()) => format!("OK: {} へ {} バイトを書き込みました。", target.display(), content.len()),
+                    Ok(()) => match remember_change(snapshot) {
+                        Ok(()) => format!("OK: {} へ {} バイトを書き込みました。直前の変更は undo で取り消せます。", target.display(), content.len()),
+                        Err(error) => format!("エラー: 書き込みは完了しましたが、取り消し履歴を保存できませんでした（{error}）: {}", target.display()),
+                    },
                     Err(error) => format!("エラー: 書き込みに失敗しました（{}）: {}", error, target.display()),
                 }
             }
@@ -187,7 +284,7 @@ impl Tool for WorkspaceFilesTool {
                 ),
                 Err(error) => format!("エラー: 情報取得に失敗しました（{}）: {}", error, target.display()),
             },
-            _ => "エラー: action は list/read/write/append/mkdir/stat のいずれかを指定してください。".to_string(),
+            _ => "エラー: action は list/read/write/append/mkdir/stat/undo のいずれかを指定してください。".to_string(),
         }
     }
 }

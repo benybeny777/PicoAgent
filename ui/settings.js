@@ -730,7 +730,7 @@ function skillCategory(tool) {
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
     return "info";
   }
-  if (["read_file", "workspace_files", "run_command", "http_api"].includes(name)) {
+  if (["read_file", "workspace_files", "project_workspace", "workflow", "run_command", "http_api"].includes(name)) {
     return "workspace";
   }
   if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
@@ -777,6 +777,8 @@ const SKILL_EXAMPLE_FALLBACKS = {
   whisper_transcribe: ["最新の録音を文字起こしして"],
   read_file: ["このファイルを読んで"],
   workspace_files: ["作業フォルダにメモを書いて"],
+  project_workspace: ["このフォルダを仕事用ワークスペースとして登録して"],
+  workflow: ["この手順を週報作成として覚えて"],
   run_command: ["git statusを実行して"],
   http_api: ["このAPIにPOSTして"],
   ms_office: ["Wordの文字を置換して"],
@@ -1414,11 +1416,26 @@ function diagnosticsFailureCard(title, error) {
   );
 }
 
+function diagnosticRepairButton(label, handler) {
+  const button = el("button", { type: "button", className: "diagnostic-repair", textContent: label });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    statusEl.textContent = `${label}を実行しています…`;
+    try { await handler(); }
+    catch (error) {
+      logApp("error", `${label}に失敗しました`, errorDetail(error));
+      statusEl.textContent = `${label}に失敗: ${error?.message || error}`;
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
 function buildDiagnosticsSection() {
   const diagnosticsSec = section("診断");
   const toolbar = el("div", { className: "diagnostics-toolbar" });
   const refresh = el("button", { type: "button", textContent: "更新" });
-  const note = el("div", { className: "hint", textContent: "配布後の切り分けに使う実行状態です。設定値は変更しません。" });
+  const note = el("div", { className: "hint", textContent: "実行状態を確認し、停止している同梱機能はここから再起動できます。" });
   toolbar.append(refresh, note);
   const grid = el("div", { className: "diagnostic-grid" });
   diagnosticsSec.append(toolbar, grid);
@@ -1445,25 +1462,29 @@ function buildDiagnosticsSection() {
         const engine = engineResult.value || {};
         const phase = engine.phase || "";
         const progress = engine.percent != null ? ` / ${Math.round(Number(engine.percent))}%` : "";
-        grid.append(diagnosticCard(
+        const engineCard = diagnosticCard(
           "同梱エンジン",
           enginePhaseLabel(phase),
           `${engine.message || "状態メッセージなし"}${progress}`,
           phase === "ready" ? "ok" : statusTone(false, phase !== "error"),
           ["engine", "local", phase, engine.message]
-        ));
+        );
+        if (phase === "error") engineCard.append(diagnosticRepairButton("同梱エンジンを再起動", () => window.picoagent.restartApp(true, false)));
+        grid.append(engineCard);
       } else {
         grid.append(diagnosticsFailureCard("同梱エンジン", engineResult.reason));
       }
       if (aivisResult.status === "fulfilled") {
         const aivis = aivisResult.value || {};
-        grid.append(diagnosticCard(
+        const aivisCard = diagnosticCard(
           "Aivis",
           aivis.enabled ? (aivis.up ? "利用可能" : "起動待ち") : "無効",
           aivis.enabled ? "読み上げ設定は有効です" : "読み上げ設定は無効です",
           aivis.enabled ? statusTone(aivis.up, !aivis.up) : "neutral",
           ["aivis", "tts", "音声", "読み上げ"]
-        ));
+        );
+        if (aivis.enabled && !aivis.up) aivisCard.append(diagnosticRepairButton("Aivisを再起動", () => window.picoagent.restartApp(false, true)));
+        grid.append(aivisCard);
       } else {
         grid.append(diagnosticsFailureCard("Aivis", aivisResult.reason));
       }
