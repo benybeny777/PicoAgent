@@ -161,10 +161,7 @@ async fn stream_chat(
         let chunk = chunk_result?;
         buf.push_str(&String::from_utf8_lossy(&chunk));
 
-        loop {
-            let Some(line_end) = buf.find('\n') else {
-                break;
-            };
+        while let Some(line_end) = buf.find('\n') {
             let line = buf[..line_end].trim_end_matches('\r').to_string();
             buf.drain(..=line_end);
 

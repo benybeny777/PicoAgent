@@ -4,6 +4,7 @@
 mod agent;
 mod aivis;
 mod alarm;
+mod api_server;
 mod commands;
 mod config;
 mod daily;
@@ -19,7 +20,6 @@ mod permissions;
 mod providers;
 mod scheduler;
 mod secret;
-mod api_server;
 mod tools;
 mod tracer;
 mod usage;

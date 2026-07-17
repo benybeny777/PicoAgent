@@ -36,12 +36,17 @@ pub fn start(app: tauri::AppHandle) {
     if !state.config.get_bool("PICOAGENT_API_ENABLED", false) {
         return;
     }
-    let port: u16 = state
-        .config
-        .get("PICOAGENT_API_PORT", "11500")
-        .trim()
-        .parse()
-        .unwrap_or(11500);
+    let port_text = state.config.get("PICOAGENT_API_PORT", "11500");
+    let port: u16 = match port_text.trim().parse() {
+        Ok(port) if port > 0 => port,
+        _ => {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("ローカルAPIを開始できません: ポート番号が不正です: {port_text}"),
+            );
+            return;
+        }
+    };
     tauri::async_runtime::spawn(async move {
         let listener = match TcpListener::bind(("127.0.0.1", port)).await {
             Ok(listener) => listener,
@@ -58,8 +63,16 @@ pub fn start(app: tauri::AppHandle) {
             &format!("ローカルAPIを開始しました: http://127.0.0.1:{port}（Ollama風 + OpenAI互換）"),
         );
         loop {
-            let Ok((stream, _addr)) = listener.accept().await else {
-                continue;
+            let (stream, _addr) = match listener.accept().await {
+                Ok(connection) => connection,
+                Err(error) => {
+                    crate::log_paths::append_app_log(
+                        &app,
+                        &format!("ローカルAPIの接続受付に失敗しました: {error}"),
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
             };
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -162,7 +175,12 @@ async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(content_length);
-    Ok(HttpRequest { method, path, headers, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn find_head_end(buf: &[u8]) -> Option<usize> {
@@ -229,7 +247,11 @@ fn parse_messages(body: &Value) -> Vec<Message> {
 }
 
 /// エージェント（スキル込み）を 1 リクエスト分だけステートレスに実行する。
-async fn run_agent(app: &tauri::AppHandle, mut messages: Vec<Message>, model_override: Option<&str>) -> Result<(String, String), String> {
+async fn run_agent(
+    app: &tauri::AppHandle,
+    mut messages: Vec<Message>,
+    model_override: Option<&str>,
+) -> Result<(String, String), String> {
     let state = app.state::<AppState>();
     let provider_id = state.provider_id.lock().unwrap().clone();
     let selected_model = state.model.lock().unwrap().clone();
@@ -243,9 +265,17 @@ async fn run_agent(app: &tauri::AppHandle, mut messages: Vec<Message>, model_ove
     if messages.is_empty() {
         return Err("messages または prompt が指定されていません。".to_string());
     }
-    let reply = crate::agent::run(&state.config, provider, &model, &mut messages, 5, None, None)
-        .await
-        .map_err(|error| format!("エージェント実行に失敗しました: {error}"))?;
+    let reply = crate::agent::run(
+        &state.config,
+        provider,
+        &model,
+        &mut messages,
+        5,
+        None,
+        None,
+    )
+    .await
+    .map_err(|error| format!("エージェント実行に失敗しました: {error}"))?;
     Ok((model, reply))
 }
 
@@ -276,8 +306,14 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
             })).await
         }
         ("POST", "/api/chat") => {
-            let body: Value = serde_json::from_slice(&request.body)
-                .map_err(|error| format!("JSON を解析できません: {error}"))?;
+            let body: Value = match serde_json::from_slice(&request.body) {
+                Ok(body) => body,
+                Err(error) => {
+                    return respond(&mut stream, 400, &json!({
+                        "error": format!("JSON を解析できません: {error}")
+                    })).await;
+                }
+            };
             let messages = parse_messages(&body);
             let model_override = body.get("model").and_then(Value::as_str);
             match run_agent(app, messages, model_override).await {
@@ -290,8 +326,14 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
             }
         }
         ("POST", "/api/generate") => {
-            let body: Value = serde_json::from_slice(&request.body)
-                .map_err(|error| format!("JSON を解析できません: {error}"))?;
+            let body: Value = match serde_json::from_slice(&request.body) {
+                Ok(body) => body,
+                Err(error) => {
+                    return respond(&mut stream, 400, &json!({
+                        "error": format!("JSON を解析できません: {error}")
+                    })).await;
+                }
+            };
             let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("").trim().to_string();
             let messages = if prompt.is_empty() { Vec::new() } else { vec![Message::new("user", &prompt)] };
             let model_override = body.get("model").and_then(Value::as_str);
@@ -305,8 +347,17 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
             }
         }
         ("POST", "/v1/chat/completions") => {
-            let body: Value = serde_json::from_slice(&request.body)
-                .map_err(|error| format!("JSON を解析できません: {error}"))?;
+            let body: Value = match serde_json::from_slice(&request.body) {
+                Ok(body) => body,
+                Err(error) => {
+                    return respond(&mut stream, 400, &json!({
+                        "error": {
+                            "message": format!("JSON を解析できません: {error}"),
+                            "type": "invalid_request_error"
+                        }
+                    })).await;
+                }
+            };
             let messages = parse_messages(&body);
             let model_override = body.get("model").and_then(Value::as_str);
             let wants_stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
@@ -348,7 +399,11 @@ async fn respond(stream: &mut TcpStream, status: u16, body: &Value) -> Result<()
 }
 
 /// OpenAI 互換ストリーミング（SSE）: 全文を 1 チャンク + [DONE] で返す最小実装。
-async fn write_sse_completion(stream: &mut TcpStream, model: &str, reply: &str) -> Result<(), String> {
+async fn write_sse_completion(
+    stream: &mut TcpStream,
+    model: &str,
+    reply: &str,
+) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
     let chunk = json!({
         "id": format!("chatcmpl-picoagent-{now}"),

@@ -18,42 +18,12 @@ const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
 
 pub struct WhisperTranscribeTool;
 
-fn workspace_root(cfg: &Config) -> PathBuf {
+fn meeting_root(cfg: &Config) -> PathBuf {
     crate::permissions::primary_root(cfg)
 }
 
-fn meeting_root(cfg: &Config) -> PathBuf {
-    let meeting_root = cfg.get("PICOAGENT_MEETING_ROOT", "");
-    if meeting_root.trim().is_empty() {
-        workspace_root(cfg)
-    } else {
-        PathBuf::from(meeting_root)
-    }
-}
-
-fn normalize(root: &Path, requested: &str) -> PathBuf {
-    let path = PathBuf::from(requested);
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    }
-}
-
-fn bounded_path(root: &Path, requested: &str) -> Result<PathBuf, String> {
-    let candidate = normalize(root, requested);
-    let root_abs = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let parent = candidate.parent().unwrap_or(root);
-    let parent_abs = parent
-        .canonicalize()
-        .unwrap_or_else(|_| parent.to_path_buf());
-    if !parent_abs.starts_with(&root_abs) {
-        return Err(format!(
-            "指定パスは許可ルート外です: {}",
-            candidate.display()
-        ));
-    }
-    Ok(candidate)
+fn bounded_path(cfg: &Config, requested: &str) -> Result<PathBuf, String> {
+    crate::permissions::resolve(cfg, requested)
 }
 
 fn is_audio(path: &Path) -> bool {
@@ -442,7 +412,7 @@ impl Tool for WhisperTranscribeTool {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            match bounded_path(&base, path_text) {
+            match bounded_path(cfg, path_text) {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: {error}"),
             }
@@ -521,7 +491,7 @@ impl Tool for WhisperTranscribeTool {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            match bounded_path(&base, path_text) {
+            match bounded_path(cfg, path_text) {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: {error}"),
             }

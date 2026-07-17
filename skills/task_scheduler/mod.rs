@@ -163,7 +163,7 @@ impl Tool for TaskSchedulerTool {
                     "items": { "type": "string" },
                     "description": "kind=command の引数配列"
                 },
-                "cwd": { "type": "string", "description": "kind=command の作業ディレクトリ。PICOAGENT_COMMAND_ROOT 配下のみ" },
+                "cwd": { "type": "string", "description": "kind=command の作業ディレクトリ。共通許可ルート配下のみ" },
                 "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 120 },
                 "tool_name": { "type": "string", "description": "kind=tool のスキル名。例: weather / web_fetch / gmail_message" },
                 "tool_args": { "type": "object", "description": "kind=tool に渡す JSON 引数" },

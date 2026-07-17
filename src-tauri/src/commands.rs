@@ -1962,7 +1962,11 @@ pub async fn pet_transcribe_audio(
     match result {
         Ok(text) if !text.trim().is_empty() => Ok(json!({ "text": text })),
         Ok(_) => Err("音声を聞き取れませんでした。もう一度話してみてください。".to_string()),
-        Err(error) => Err(log_command_error(&app, "マイク文字起こしに失敗しました", error)),
+        Err(error) => Err(log_command_error(
+            &app,
+            "マイク文字起こしに失敗しました",
+            error,
+        )),
     }
 }
 
@@ -1979,7 +1983,10 @@ pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, Str
     let path = dir.join(format!("picoagent-conversation-{stamp}.md"));
     std::fs::write(&path, markdown)
         .map_err(|error| log_command_error(&app, "会話の書き出しに失敗しました", error))?;
-    crate::log_paths::append_app_log(&app, &format!("会話履歴を書き出しました: {}", path.display()));
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("会話履歴を書き出しました: {}", path.display()),
+    );
     Ok(json!({ "path": path.to_string_lossy() }))
 }
 
@@ -2351,14 +2358,17 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
 
 /// ネイティブ D&D（Tauri drag-drop イベント）で受け取ったファイルパスを読み、
 /// フロントの添付フローで使える形（kind + data URL + 実パス）へ変換する。
-/// ユーザーが明示的にドロップしたファイルだけが渡るため、許可ルート制限は課さない。
+/// Tauri command 自体は任意パスで呼べるため、共通許可ルートと保護パスを必ず検査する。
 #[tauri::command]
-pub async fn pet_read_dropped_path(path: String) -> Result<serde_json::Value, String> {
+pub async fn pet_read_dropped_path(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
     const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
-    let file = std::path::PathBuf::from(&path);
+    let file = crate::permissions::resolve(&state.config, &path)?;
     let meta = std::fs::metadata(&file).map_err(|e| format!("ファイルを読めません: {e}"))?;
     if meta.is_dir() {
         return Err("フォルダは添付できません。中のファイルをドロップしてください。".to_string());

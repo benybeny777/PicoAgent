@@ -42,17 +42,8 @@ fn recording_state() -> &'static Mutex<Option<RecordingState>> {
     RECORDING.get_or_init(|| Mutex::new(None))
 }
 
-fn workspace_root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
 fn meeting_root(cfg: &Config) -> PathBuf {
-    let meeting_root = cfg.get("PICOAGENT_MEETING_ROOT", "");
-    if meeting_root.trim().is_empty() {
-        workspace_root(cfg)
-    } else {
-        PathBuf::from(meeting_root)
-    }
+    crate::permissions::primary_root(cfg)
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {
@@ -75,17 +66,8 @@ fn normalize(base: &Path, input: &str) -> PathBuf {
     out
 }
 
-fn bounded_path(base: &Path, input: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, input);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外は使えません: {}",
-            base.display(),
-            target.display()
-        ))
-    }
+fn bounded_path(cfg: &Config, input: &str) -> Result<PathBuf, String> {
+    crate::permissions::resolve(cfg, input)
 }
 
 fn default_recording_path() -> String {
@@ -273,7 +255,6 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
     if let Some(active) = state.as_ref() {
         return format!("エラー: すでに録音中です: {}", active.path.display());
     }
-    let base = meeting_root(cfg);
     let requested = args
         .get("path")
         .and_then(Value::as_str)
@@ -281,7 +262,7 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(default_recording_path);
-    let path = match bounded_path(&base, &requested) {
+    let path = match bounded_path(cfg, &requested) {
         Ok(path) => path,
         Err(error) => return format!("エラー: {error}"),
     };
@@ -530,7 +511,7 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        match bounded_path(&base, audio_text) {
+        match bounded_path(cfg, audio_text) {
             Ok(path) => path,
             Err(error) => return format!("エラー: {error}"),
         }
@@ -672,7 +653,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            match bounded_path(&base, path_text) {
+            match bounded_path(cfg, path_text) {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: {error}"),
             }
@@ -699,7 +680,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        match bounded_path(&base, path_text) {
+        match bounded_path(cfg, path_text) {
             Ok(path) => path,
             Err(error) => return format!("エラー: {error}"),
         }
@@ -709,7 +690,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        match bounded_path(&base, path_text) {
+        match bounded_path(cfg, path_text) {
             Ok(path) => minutes_path(&path),
             Err(error) => return format!("エラー: {error}"),
         }
@@ -778,12 +759,6 @@ impl Tool for MeetingRecorderTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new(
-                "PICOAGENT_MEETING_ROOT",
-                "録音・議事録の保存許可ルート（空なら共通ワークスペース）",
-                "text",
-                "",
-            ),
             Field::new(
                 "PICOAGENT_TRANSCRIBE_PROGRAM",
                 "ローカル文字起こしコマンド（手動設定が最優先、空なら同梱Whisper）",
