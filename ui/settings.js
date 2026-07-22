@@ -1585,11 +1585,21 @@ async function render() {
   apiSec.append(field("PICOAGENT_API_ENABLED", "ローカルAPIを有効にする（127.0.0.1 のみ。変更は再起動後に反映）", "checkbox", v.PICOAGENT_API_ENABLED === true));
   apiSec.append(field("PICOAGENT_API_PORT", "APIポート", "text", v.PICOAGENT_API_PORT ?? "", "11500"));
   apiSec.append(field("PICOAGENT_API_KEY", "APIキー（空なら認証なし。Authorization: Bearer で送る）", "password", v.PICOAGENT_API_KEY ?? ""));
+  // MCP: 外部 MCP サーバのツールをエージェントから使えるようにする（stdio）。
+  const mcpSec = section("MCP（外部ツール連携）");
+  mcpSec.append(field(
+    "PICOAGENT_MCP_SERVERS",
+    "外部 MCP サーバ（1行1件「名前|コマンド 引数…」。stdio 接続。# でコメント。変更は再起動後に反映）",
+    "textarea",
+    v.PICOAGENT_MCP_SERVERS ?? "",
+    "memory|npx -y @modelcontextprotocol/server-memory"
+  ));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
   panels.basic.append(apiSec);
+  panels.basic.append(mcpSec);
   panels.voice.append(voiceSec);
   applySettingsTheme(v.PICOAGENT_THEME || "system");
   inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {

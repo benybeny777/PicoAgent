@@ -253,6 +253,7 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 | `POST /api/chat` | `{"messages":[{"role":"user","content":"…"}]}` → エージェント応答 |
 | `POST /api/generate` | `{"prompt":"…"}` → エージェント応答 |
 | `POST /v1/chat/completions` | **OpenAI Chat Completions 互換**（base_url 差し替えで既存クライアントが動く。`stream` は全文単一チャンクの SSE） |
+| `POST /mcp` | **MCP サーバ**（PicoAgent の全スキルを MCP ツールとして公開。下記参照） |
 
 ```bash
 curl http://127.0.0.1:11500/api/chat \
@@ -260,6 +261,27 @@ curl http://127.0.0.1:11500/api/chat \
 ```
 
 API の会話はリクエスト内で完結する**ステートレス設計**で、デスクトップのキャラ会話履歴とは混ざりません。
+
+### MCP（Model Context Protocol）
+
+PicoAgent は **agent（ループ）/ skills（内蔵ツール）/ mcp（外部相互運用）** の3層構成で、MCP は双方向に使えます。
+
+**① MCP サーバ（スキルの公開）**: ローカル API の `/mcp` が、PicoAgent の全スキルを MCP ツールとして公開します。Claude Code からは次のように登録できます。
+
+```bash
+claude mcp add --transport http picoagent http://127.0.0.1:11500/mcp
+```
+
+これで Claude Code から天気・Gmail・PDF 編集など PicoAgent のスキルを直接呼べます（ローカル API の有効化が前提。`PICOAGENT_API_KEY` 設定時は Bearer 認証つき）。
+
+**② MCP クライアント（外部ツールの取り込み）**: 設定「基本」タブ →「MCP（外部ツール連携）」に外部 MCP サーバを登録すると（1行1件「名前|コマンド 引数…」、stdio 接続）、そのツールが `mcp__<サーバ名>__<ツール名>` としてエージェントの候補に加わり、チャットから自然に使われます。
+
+```
+memory|npx -y @modelcontextprotocol/server-memory
+fs|npx -y @modelcontextprotocol/server-filesystem /home/me/docs
+```
+
+変更は再起動後に反映されます。接続結果（ツール件数・失敗理由）は app.log に記録されます。
 
 ### 最小 CLI
 
@@ -325,6 +347,7 @@ npm run cli -- repl              # 対話モード（会話文脈を保持。exi
 | `PICOAGENT_QUICK_ACTIONS` | クイック操作のカスタマイズ |
 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` | 読み上げ（無効 / 100） |
 | `PICOAGENT_API_ENABLED` / `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` | ローカル API（無効 / 11500 / なし） |
+| `PICOAGENT_MCP_SERVERS` | 外部 MCP サーバ（1行1件「名前|コマンド 引数…」。空 = 無効） |
 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` | コマンド実行（無効 / 空） |
 | `PICOAGENT_LIBREOFFICE_PATH` | OfficeCLI の明示パス（空 = 同梱→PATH） |
 | `PICOAGENT_PANDOC_PATH` / `PICOAGENT_QPDF_PATH` / `PICOAGENT_PDFTOTEXT_PATH` / `PICOAGENT_MAGICK_PATH` / `PICOAGENT_FFMPEG_PATH` / `PICOAGENT_RIPGREP_PATH` | 各 OSS ツールの明示パス（空 = 同梱→PATH） |

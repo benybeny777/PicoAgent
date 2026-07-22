@@ -11,6 +11,7 @@ mod emotion;
 mod engine;
 mod history;
 mod log_paths;
+mod mcp;
 mod memory;
 mod menu;
 mod message;
@@ -249,6 +250,8 @@ pub fn run() {
             scheduler::start(app.handle().clone());
             // ローカル API サーバ（既定無効。PICOAGENT_API_ENABLED=true で 127.0.0.1 に開く）。
             api_server::start(app.handle().clone());
+            // 外部 MCP サーバ（設定 PICOAGENT_MCP_SERVERS があれば起動してツールを動的登録）。
+            mcp::client::start(app.handle().clone());
             // 起動時に一度だけ更新を確認する（オフラインや未リリースでは静かにスキップ）。
             commands::spawn_update_check(app.handle().clone());
             Ok(())
@@ -262,6 +265,7 @@ pub fn run() {
             save_window_layout_on_exit(app_handle);
             aivis::stop(app_handle);
             engine::stop(app_handle);
+            mcp::client::stop_all();
         }
     });
 }

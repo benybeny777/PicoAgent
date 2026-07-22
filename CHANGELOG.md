@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-07-10
+
+### MCP 対応（agent / skills / mcp の3層へ分離）
+
+- **MCP 層を新設** (`src-tauri/src/mcp/{mod,client,server}.rs`): アーキテクチャを「agent（エージェントループ）/ skills（内蔵ツール）/ mcp（外部相互運用）」の3層に分離し、MCP（Model Context Protocol、JSON-RPC 2.0）を双方向で実装。
+- **MCP クライアント（外部ツールの取り込み）**: 設定 `PICOAGENT_MCP_SERVERS`（1行1件「名前|コマンド 引数…」、# コメント可）の stdio MCP サーバを起動時に spawn して initialize / tools/list を行い、得られたツールを `mcp__<サーバ名>__<ツール名>` としてエージェントのツール候補へ動的登録する。実行は `tools::dispatch` からのフォールバックで tools/call へ中継。接続結果は app.log に記録し、終了時は子プロセスを確実に停止する。設定画面「基本」タブに「MCP（外部ツール連携）」セクションを追加。
+- **MCP サーバ（スキルの公開）**: ローカル API（既定無効・127.0.0.1 のみ・Bearer 認証対応）の `POST /mcp` で、PicoAgent の全スキルを MCP ツールとして公開（initialize / tools/list / tools/call / ping。通知は 202）。Claude Code からは `claude mcp add --transport http picoagent http://127.0.0.1:11500/mcp` で登録できる。
+- 検証: JSON-RPC 組み立て・名前正規化・設定行解析のユニットテスト、サーバハンドラの initialize→tools/list→tools/call テスト、**Node 製スタブ MCP サーバとの stdio 実接続 E2E**（接続→ツール登録→実行→未登録エラー）。設定画面ハーネスで MCP セクションの描画も確認。cargo test 99件パス・clippy 警告ゼロ。
+
 ## 2026-07-09
 
 ### 全体マニュアル（MANUAL.md）を新設
