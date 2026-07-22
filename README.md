@@ -171,6 +171,7 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 | `POST /api/chat` | `{"messages":[{"role":"user","content":"…"}]}` → エージェント応答 |
 | `POST /api/generate` | `{"prompt":"…"}` → エージェント応答 |
 | `POST /v1/chat/completions` | OpenAI Chat Completions 互換（既存の OpenAI クライアントの `base_url` を差し替えるだけで使える。`stream` は全文単一チャンクの SSE） |
+| `POST /mcp` | MCP サーバ（全スキルを MCP ツールとして公開。Claude Code からは `claude mcp add --transport http picoagent http://127.0.0.1:11500/mcp`） |
 
 ```bash
 # curl で

@@ -305,6 +305,22 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
                 }]
             })).await
         }
+        ("POST", "/mcp") => {
+            // MCP（Model Context Protocol）: スキルを MCP ツールとして公開する。
+            // Claude Code 等からは HTTP トランスポートで claude mcp add --transport http
+            // picoagent http://127.0.0.1:<port>/mcp のように登録できる。
+            let body: Value = serde_json::from_slice(&request.body)
+                .map_err(|error| format!("JSON を解析できません: {error}"))?;
+            match crate::mcp::server::handle_rpc(&state.config, &body).await {
+                Some(response) => respond(&mut stream, 200, &response).await,
+                // 通知（id なし）には本文なしの 202 を返す（Streamable HTTP の慣例）。
+                None => write_body(
+                    &mut stream,
+                    b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await,
+            }
+        }
         ("POST", "/api/chat") => {
             let body: Value = match serde_json::from_slice(&request.body) {
                 Ok(body) => body,
@@ -373,10 +389,10 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
                 Err(error) => respond(&mut stream, 400, &json!({ "error": { "message": error, "type": "invalid_request_error" } })).await,
             }
         }
-        (_, "/api/version") | (_, "/api/tags") | (_, "/api/chat") | (_, "/api/generate") | (_, "/v1/chat/completions") => {
+        (_, "/api/version") | (_, "/api/tags") | (_, "/api/chat") | (_, "/api/generate") | (_, "/v1/chat/completions") | (_, "/mcp") => {
             respond(&mut stream, 405, &json!({ "error": "このメソッドは使えません。" })).await
         }
-        _ => respond(&mut stream, 404, &json!({ "error": "エンドポイントが見つかりません。/api/version /api/tags /api/chat /api/generate /v1/chat/completions が使えます。" })).await,
+        _ => respond(&mut stream, 404, &json!({ "error": "エンドポイントが見つかりません。/api/version /api/tags /api/chat /api/generate /v1/chat/completions /mcp が使えます。" })).await,
     }
 }
 

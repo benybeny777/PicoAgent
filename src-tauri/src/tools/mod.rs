@@ -617,6 +617,13 @@ pub fn schemas_for_text(text: &str) -> Vec<Value> {
             push_schema_by_name(&mut selected, name);
         }
     }
+    // 外部 MCP サーバのツール（ユーザーが明示設定したもの）は常に候補へ加える。
+    for schema in crate::mcp::client::schemas() {
+        if selected.len() >= MAX_SELECTED_SCHEMAS + 8 {
+            break;
+        }
+        selected.push(schema);
+    }
     selected
 }
 
@@ -648,6 +655,9 @@ pub fn check_injection(content: &str) -> bool {
 pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
     let result = if let Some(idx) = index().get(name) {
         all()[*idx].run(cfg, args).await
+    } else if crate::mcp::client::is_mcp_tool(name) {
+        // 外部 MCP サーバのツール（mcp__<サーバ>__<ツール>）へフォールバックする。
+        crate::mcp::client::dispatch(name, args).await
     } else {
         format!("エラー: 未登録のツール \"{}\" が呼び出されました。", name)
     };
