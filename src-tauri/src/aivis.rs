@@ -20,6 +20,9 @@ use crate::commands::AppState;
 
 const DEFAULT_PORT: u16 = 11436;
 const LEGACY_DEFAULT_PORT: u16 = 10102;
+/// AivisSpeech デスクトップアプリ（Windows/mac）同梱エンジンの既定ポート。
+/// アプリが起動中ならそのエンジンを使い、同梱エンジンの二重起動を避ける。
+const APP_ENGINE_PORT: u16 = 10101;
 const AIVIS_RELEASE: &str = "1.2.0";
 const AIVIS_API_URL: &str =
     "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/1.2.0";
@@ -33,6 +36,9 @@ pub struct AivisState {
     child: Mutex<Option<Child>>,
     /// `stop()` が呼ばれたら true に設定し、`ensure_started` がその後に spawn しないようにする。
     stopping: AtomicBool,
+    /// 起動中の AivisSpeech デスクトップアプリ（Windows/mac）のエンジンを使う場合の
+    /// エンドポイント。None なら同梱エンジン（PICOAGENT_TTS_PORT）を使う。
+    external_endpoint: Mutex<Option<String>>,
 }
 
 impl AivisState {
@@ -40,6 +46,7 @@ impl AivisState {
         AivisState {
             child: Mutex::new(None),
             stopping: AtomicBool::new(false),
+            external_endpoint: Mutex::new(None),
         }
     }
 }
@@ -921,6 +928,16 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if has_running_child(app) {
         return Ok(());
     }
+    // AivisSpeech デスクトップアプリが起動していそうなら同梱エンジンの先行起動を控える。
+    // 実際にエンジンかどうかの確認（/version）は ensure_started が行い、違えば通常どおり起動する。
+    if let Some(state) = app.try_state::<AppState>() {
+        if app_engine_allowed(&state) {
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], APP_ENGINE_PORT));
+            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200)).is_ok() {
+                return Ok(());
+            }
+        }
+    }
     migrate_legacy_install(app)?;
     let path = match runtime_engine_path(app) {
         Some(path) => {
@@ -960,8 +977,41 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
 }
 
 // 同梱 Aivis が応答可能（/version が 200）かを返す。接続不可は false に正規化する。
+/// 指定ポートで AivisSpeech 系エンジンが応答するならエンドポイントを返す。
+pub(crate) async fn engine_endpoint_if_up(port: u16) -> Option<String> {
+    let endpoint = format!("http://127.0.0.1:{port}");
+    if is_up(&endpoint).await {
+        Some(endpoint)
+    } else {
+        None
+    }
+}
+
+/// 実際に合成へ使うエンドポイント。
+/// 起動中の AivisSpeech デスクトップアプリを使っている場合はそのエンドポイント、
+/// そうでなければ同梱エンジン（PICOAGENT_TTS_PORT）を返す。
+pub fn active_endpoint(app: &tauri::AppHandle, state: &AppState) -> String {
+    if let Some(aivis_state) = app.try_state::<AivisState>() {
+        if let Some(external) = aivis_state.external_endpoint.lock().unwrap().clone() {
+            return external;
+        }
+    }
+    endpoint(app, state)
+}
+
+fn set_external_endpoint(app: &tauri::AppHandle, value: Option<String>) {
+    if let Some(aivis_state) = app.try_state::<AivisState>() {
+        *aivis_state.external_endpoint.lock().unwrap() = value;
+    }
+}
+
+/// AivisSpeech デスクトップアプリ（Windows/mac）のエンジン利用を許可するか（既定 true）。
+fn app_engine_allowed(state: &AppState) -> bool {
+    state.config.get_bool("PICOAGENT_TTS_APP_ENGINE", true)
+}
+
 pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> bool {
-    is_up(&endpoint(app, state)).await
+    is_up(&active_endpoint(app, state)).await
 }
 
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
@@ -976,8 +1026,26 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     let app_state = app.state::<AppState>();
     let endpoint = endpoint(app, &app_state);
     if is_up(&endpoint).await {
+        // 同梱（設定ポート）のエンジンが生きていればそれを優先し、外部利用は解除する。
+        set_external_endpoint(app, None);
         return Ok(());
     }
+    // 起動中の AivisSpeech デスクトップアプリ（Windows/mac、ポート10101）があれば
+    // そのエンジンを使い、同梱エンジンの二重起動を避ける（メモリ節約・起動待ちゼロ）。
+    if app_engine_allowed(&app_state) {
+        if let Some(external) = engine_endpoint_if_up(APP_ENGINE_PORT).await {
+            let already = active_endpoint(app, &app_state) == external;
+            set_external_endpoint(app, Some(external.clone()));
+            if !already {
+                let _ = append_log(
+                    app,
+                    &format!("起動中の AivisSpeech アプリのエンジンを使います: {external}"),
+                );
+            }
+            return Ok(());
+        }
+    }
+    set_external_endpoint(app, None);
     let mode = device_mode(&app_state);
     let path = ensure_installed(app).await?;
 
@@ -1079,5 +1147,40 @@ pub fn stop(app: &tauri::AppHandle) {
             }
             let _ = child.wait();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::engine_endpoint_if_up;
+
+    // /version に応答するスタブに対してエンジン検出が働き、閉じたポートでは None になる。
+    #[test]
+    fn 起動中エンジンの検出ができる() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).await.unwrap();
+                let body = "\"1.2.0\"";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(head.as_bytes()).await.unwrap();
+                stream.write_all(body.as_bytes()).await.unwrap();
+            });
+            let found = engine_endpoint_if_up(port).await;
+            assert_eq!(found, Some(format!("http://127.0.0.1:{port}")));
+            server.await.unwrap();
+
+            // 誰も居ないポートでは検出しない（listener は解放済み）。
+            let missing = engine_endpoint_if_up(port).await;
+            assert_eq!(missing, None);
+        });
     }
 }
