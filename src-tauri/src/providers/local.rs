@@ -363,6 +363,51 @@ impl Provider for Local {
             .ok_or_else(|| anyhow::anyhow!("local 応答に choices[0].message がありません"))?;
         Ok(from_wire(&message))
     }
+
+    /// ストリーミング chat。同梱 llama-server は OpenAI 互換の SSE に対応しているため、
+    /// openai プロバイダと共通の stream_chat でトークンを逐次受信する（UI の逐次表示・
+    /// 先行読み上げが既定のローカルエンジンでも効く）。
+    async fn chat_stream(
+        &self,
+        cfg: &Config,
+        model: &str,
+        messages: &[Message],
+        tools: &[Value],
+        on_chunk: std::sync::Arc<dyn Fn(String) + Send + Sync>,
+    ) -> anyhow::Result<Message> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let url = format!("{}/chat/completions", base_url(cfg));
+        let normalized = normalize_for_local(messages);
+        let wire = to_wire(&normalized);
+        let make_body = |with_tools: bool| {
+            let mut body = json!({ "model": model, "messages": wire, "temperature": 0.6, "stream": true });
+            if with_tools && !tools.is_empty() {
+                body["tools"] = json!(tools);
+            }
+            body
+        };
+        // chat() と同じ方針: tools 付きで失敗したら tools 無しで一度だけ再試行する。
+        // ただしチャンクを1つでも流した後の失敗は再試行しない（二重表示を防ぐ）。
+        let emitted = std::sync::Arc::new(AtomicBool::new(false));
+        let probe: std::sync::Arc<dyn Fn(String) + Send + Sync> = {
+            let emitted = emitted.clone();
+            let inner = on_chunk.clone();
+            std::sync::Arc::new(move |chunk: String| {
+                emitted.store(true, Ordering::Relaxed);
+                inner(chunk);
+            })
+        };
+        match super::openai::stream_chat(&url, "", make_body(true), probe).await {
+            Ok(message) => Ok(message),
+            Err(error) => {
+                if tools.is_empty() || emitted.load(Ordering::Relaxed) {
+                    return Err(error);
+                }
+                super::openai::stream_chat(&url, "", make_body(false), on_chunk).await
+            }
+        }
+    }
 }
 
 inventory::submit! { ProviderReg { make: || Box::new(Local) } }
@@ -371,6 +416,51 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 mod tests {
     use super::normalize_for_local;
     use crate::message::Message;
+
+    // OpenAI 互換 SSE を返すスタブ llama-server に対して、既定のローカルプロバイダが
+    // チャンクを逐次受信できることを検証する（実 TCP 経由）。
+    #[test]
+    fn ローカルエンジンのsseストリーミングを逐次受信できる() {
+        use super::Provider;
+        use std::sync::{Arc, Mutex};
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 8192];
+                let _ = stream.read(&mut buf).await.unwrap(); // リクエストは読み捨て
+                let body = concat!(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"やあ\"}}]}\n\n",
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"、元気？\"}}]}\n\n",
+                    "data: [DONE]\n\n"
+                );
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(head.as_bytes()).await.unwrap();
+                stream.write_all(body.as_bytes()).await.unwrap();
+            });
+
+            let cfg = crate::config::Config::new();
+            cfg.set("PICOAGENT_LOCAL_PORT", &addr.port().to_string());
+            let chunks = Arc::new(Mutex::new(Vec::<String>::new()));
+            let sink = {
+                let chunks = chunks.clone();
+                Arc::new(move |chunk: String| chunks.lock().unwrap().push(chunk)) as Arc<dyn Fn(String) + Send + Sync>
+            };
+            let message = super::Local
+                .chat_stream(&cfg, "test", &[Message::new("user", "やあ")], &[], sink)
+                .await
+                .unwrap();
+            assert_eq!(message.content, "やあ、元気？");
+            assert_eq!(chunks.lock().unwrap().as_slice(), ["やあ", "、元気？"]);
+            server.await.unwrap();
+        });
+    }
 
     #[test]
     fn 連続assistantをまとめ先頭assistantを落とす() {
