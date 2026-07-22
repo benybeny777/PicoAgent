@@ -6,9 +6,9 @@
 
 ## 2026-07-22
 
-### AivisSpeech アプリのエンジン利用をオプトインへ変更（既定は同梱エンジン）
+### Aivis は同梱エンジン専用に統一（外部エンジン連携を削除）
 
-- **既定を同梱エンジン優先に変更** (`src-tauri/src/aivis.rs` / `ui/settings.js`): 基本運用は同梱エンジンのため、`PICOAGENT_TTS_APP_ENGINE` の既定を false にし、AivisSpeech デスクトップアプリのエンジン（ポート10101）は設定「音声」タブで明示的に有効化したときだけ使う。無効時の挙動は従来どおり（常に同梱エンジンを起動・使用）。
+- **AivisSpeech デスクトップアプリのエンジン連携を削除** (`src-tauri/src/aivis.rs` / `commands.rs` / `ui/settings.js`): 運用方針を「読み上げは常に同梱エンジン」に統一し、アプリのエンジン（ポート10101）検出・external_endpoint・`PICOAGENT_TTS_APP_ENGINE` 設定を撤去した。挙動は PR #28 以前と同じ（設定ポートの同梱エンジンを起動・使用）。文分割のリアルタイム読み上げはそのまま同梱エンジンで有効。
 
 ### AivisSpeech デスクトップアプリ（Windows/mac）のエンジンを自動利用
 
