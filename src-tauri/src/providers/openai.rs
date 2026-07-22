@@ -131,7 +131,8 @@ fn extract_usage(data: &Value) -> Option<TokenUsage> {
 }
 
 /// ストリーミング SSE を受信してチャンクを on_chunk に渡し、完全な Message を返す。
-async fn stream_chat(
+/// OpenAI 互換 API 共通の実装（同梱ローカルエンジン local からも利用する）。
+pub(crate) async fn stream_chat(
     url: &str,
     api_key: &str,
     body: Value,

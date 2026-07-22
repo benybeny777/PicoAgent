@@ -151,6 +151,124 @@ impl Provider for Ollama {
         let message = data.get("message").cloned().unwrap_or_else(|| json!({}));
         Ok(from_wire(&message))
     }
+
+    /// ストリーミング chat。Ollama /api/chat の NDJSON（1行1JSON）を逐次受信し、
+    /// テキストチャンクを on_chunk へ渡す（UI の逐次表示・先行読み上げが Ollama でも効く）。
+    async fn chat_stream(
+        &self,
+        cfg: &Config,
+        model: &str,
+        messages: &[Message],
+        tools: &[Value],
+        on_chunk: std::sync::Arc<dyn Fn(String) + Send + Sync>,
+    ) -> anyhow::Result<Message> {
+        use futures::StreamExt;
+
+        let mut body = json!({
+            "model": model,
+            "messages": to_wire(messages),
+            "stream": true,
+            "options": { "temperature": 0.6 },
+        });
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
+        }
+        let url = format!("{}/api/chat", host(cfg));
+        let res = reqwest::Client::new().post(&url).json(&body).send().await?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            anyhow::bail!("Ollama streaming /api/chat failed: {} {}", status, text);
+        }
+
+        let mut full_content = String::new();
+        let mut tool_calls: Vec<Value> = Vec::new();
+        let mut buf = String::new();
+        let mut stream = res.bytes_stream();
+        'outer: while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(line_end) = buf.find('\n') {
+                let line = buf[..line_end].trim().to_string();
+                buf.drain(..=line_end);
+                if line.is_empty() {
+                    continue;
+                }
+                let Ok(json) = serde_json::from_str::<Value>(&line) else {
+                    continue; // JSON でない行は読み飛ばす
+                };
+                if let Some(content) = json["message"]["content"].as_str() {
+                    if !content.is_empty() {
+                        full_content.push_str(content);
+                        on_chunk(content.to_string());
+                    }
+                }
+                // tool_calls は途中のメッセージにまとめて載る（OpenAI のような分割 delta ではない）。
+                if let Some(calls) = json["message"]["tool_calls"].as_array() {
+                    tool_calls.extend(calls.iter().cloned());
+                }
+                if json["done"].as_bool() == Some(true) {
+                    break 'outer;
+                }
+            }
+        }
+        let mut message = json!({ "role": "assistant", "content": full_content });
+        if !tool_calls.is_empty() {
+            message["tool_calls"] = json!(tool_calls);
+        }
+        Ok(from_wire(&message))
+    }
 }
 
 inventory::submit! { ProviderReg { make: || Box::new(Ollama) } }
+
+#[cfg(test)]
+mod tests {
+    use super::{Ollama, Provider};
+    use crate::message::Message;
+    use std::sync::{Arc, Mutex};
+
+    // NDJSON を返すスタブ Ollama サーバに対して、チャンクが逐次届き最終 Message が
+    // 組み上がることを検証する（実 TCP 経由）。
+    #[test]
+    fn ollamaのndjsonストリーミングを逐次受信できる() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await.unwrap(); // リクエストは読み捨て
+                let lines = [
+                    r#"{"message":{"role":"assistant","content":"こん"},"done":false}"#,
+                    r#"{"message":{"role":"assistant","content":"にちは。"},"done":false}"#,
+                    r#"{"message":{"role":"assistant","content":""},"done":true}"#,
+                ];
+                let body = lines.join("\n") + "\n";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(head.as_bytes()).await.unwrap();
+                stream.write_all(body.as_bytes()).await.unwrap();
+            });
+
+            let cfg = crate::config::Config::new();
+            cfg.set("OLLAMA_HOST", &format!("http://127.0.0.1:{}", addr.port()));
+            let chunks = Arc::new(Mutex::new(Vec::<String>::new()));
+            let sink = {
+                let chunks = chunks.clone();
+                Arc::new(move |chunk: String| chunks.lock().unwrap().push(chunk)) as Arc<dyn Fn(String) + Send + Sync>
+            };
+            let message = Ollama
+                .chat_stream(&cfg, "test", &[Message::new("user", "やあ")], &[], sink)
+                .await
+                .unwrap();
+            assert_eq!(message.content, "こんにちは。");
+            assert_eq!(chunks.lock().unwrap().as_slice(), ["こん", "にちは。"]);
+            server.await.unwrap();
+        });
+    }
+}
