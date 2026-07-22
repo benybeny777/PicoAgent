@@ -841,7 +841,7 @@ impl Tool for ResearchReportTool {
                 },
                 "save": {
                     "type": "boolean",
-                    "description": "true の場合、PICOAGENT_WORKSPACE_ROOT 配下へ Markdown を保存する。既定ではスライド下書きと出典CSVも同時保存する。"
+                    "description": "true の場合、共通許可ルート配下へ Markdown を保存する。既定ではスライド下書きと出典CSVも同時保存する。"
                 },
                 "artifact_bundle": {
                     "type": "boolean",

@@ -133,6 +133,16 @@ impl Config {
         patch.insert(key.to_string(), Value::String(value));
         self.set_all(patch)
     }
+
+    /// テスト専用: 永続化せずインメモリの設定値だけを書き換える
+    /// （環境変数と違いテスト間で競合しない）。
+    #[cfg(test)]
+    pub fn set(&self, key: &str, value: &str) {
+        self.values
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), Value::String(value.to_string()));
+    }
 }
 
 impl Default for Config {

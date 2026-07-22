@@ -25,6 +25,7 @@ const petSprite = document.getElementById("petSprite");
 const online = document.getElementById("online");
 const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
+const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 let busy = false;
 // 添付中の画像（data URL の配列）。送信後にリセットする。
@@ -82,7 +83,18 @@ let bootLogLane = 0;
 let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 1;
-const pendingNotices = [];
+const NOTICE_STORAGE_KEY = "picoagent.actionCenter.v1";
+function loadStoredNotices() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NOTICE_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, 50) : [];
+  } catch {
+    // フォールバック許可: 破損したUIキャッシュは空のアクションセンターとして再構築する。
+    return [];
+  }
+}
+const noticeEntries = loadStoredNotices();
+const speechNoticeQueue = [];
 let unreadNoticeCount = 0;
 // 目覚まし時計の発火管理（同じ分に二重で鳴らさないための済みキー集合）。
 const ALARM_POLL_MS = 20000;
@@ -90,18 +102,39 @@ let alarmTimer = null;
 const firedAlarms = new Set();
 let activeAlarmSnooze = null;
 
-// 画面下部に短いトースト通知を表示する（1.8秒後に自動消去）。
+// 画面下部にトースト通知を表示する。必要な場合は次の操作へ進むボタンも付けられる。
 // kind: "info"（既定）/ "success" / "warn" / "error" で配色が変わる。
-function showToast(msg, kind = "info") {
+function showToast(msg, kind = "info", options = {}) {
+  const duration = Math.max(1200, Number(options.duration) || 1800);
   const el = document.createElement("div");
   el.className = kind === "info" ? "toast" : `toast toast-${kind}`;
-  el.textContent = msg;
-  document.body.append(el);
-  requestAnimationFrame(() => el.classList.add("toast-show"));
-  setTimeout(() => {
+  const text = document.createElement("span");
+  text.textContent = msg;
+  el.append(text);
+  let timer = null;
+  const dismiss = () => {
+    if (timer) clearTimeout(timer);
     el.classList.remove("toast-show");
     el.addEventListener("transitionend", () => el.remove(), { once: true });
-  }, 1800);
+    setTimeout(() => el.remove(), 300);
+  };
+  if (options.actionLabel && typeof options.onAction === "function") {
+    el.classList.add("toast-actionable");
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "toast-action";
+    action.textContent = options.actionLabel;
+    action.addEventListener("click", async () => {
+      action.disabled = true;
+      try { await options.onAction(); }
+      catch (error) { logApp("error", "通知アクションに失敗しました", errorDetail(error)); }
+      dismiss();
+    });
+    el.append(action);
+  }
+  document.body.append(el);
+  requestAnimationFrame(() => el.classList.add("toast-show"));
+  timer = setTimeout(dismiss, duration);
 }
 
 // エラー表示後にリトライボタンを返信エリアへ追加する。
@@ -191,19 +224,24 @@ function setStatus(text) {
 function updateNoticeBadge() {
   if (!noticeToggle) return;
   noticeToggle.dataset.count = unreadNoticeCount > 0 ? String(Math.min(99, unreadNoticeCount)) : "";
-  noticeToggle.classList.toggle("has-notices", pendingNotices.length > 0);
+  noticeToggle.classList.toggle("has-notices", noticeEntries.length > 0);
+}
+
+function persistNotices() {
+  try { localStorage.setItem(NOTICE_STORAGE_KEY, JSON.stringify(noticeEntries.slice(0, 50))); }
+  catch (error) { logApp("warn", "アクションセンターの保存に失敗しました", errorDetail(error)); }
 }
 
 function renderNoticePanel() {
   if (!noticeList) return;
   noticeList.replaceChildren();
-  if (pendingNotices.length === 0) {
+  if (noticeEntries.length === 0) {
     noticeList.append(document.createElement("div"));
     noticeList.firstElementChild.className = "notice-empty";
     noticeList.firstElementChild.textContent = "通知はありません";
     return;
   }
-  for (const notice of pendingNotices) {
+  for (const notice of noticeEntries) {
     const item = document.createElement("div");
     item.className = `notice-item ${notice.ok === false ? "error" : "ok"}`;
     const title = document.createElement("div");
@@ -216,7 +254,13 @@ function renderNoticePanel() {
     body.className = "notice-body";
     body.textContent = notice.body || "";
     item.append(title, meta, body);
-    if (notice.kind === "schedule" || notice.taskId) {
+    if (notice.kind === "job") {
+      const state = document.createElement("span");
+      state.className = `notice-state notice-state-${notice.status || "completed"}`;
+      state.textContent = notice.status === "running" ? "実行中" : notice.status === "failed" ? "失敗" : "完了";
+      title.append(state);
+    }
+    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job") {
       const actions = document.createElement("div");
       actions.className = "notice-actions";
       if (notice.taskId) {
@@ -243,6 +287,25 @@ function renderNoticePanel() {
         });
         actions.append(rerun);
       }
+      if (notice.kind === "job" && notice.status === "running") {
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.textContent = "停止";
+        cancel.addEventListener("click", async event => { event.stopPropagation(); await window.picoagent.cancel(); });
+        actions.append(cancel);
+      } else if (notice.kind === "job" && notice.prompt) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.textContent = "もう一度";
+        retry.addEventListener("click", event => {
+          event.stopPropagation();
+          if (busy) return;
+          setInputValue(notice.prompt);
+          if (composer.hidden) openComposer();
+          input.focus();
+        });
+        actions.append(retry);
+      }
       const settings = document.createElement("button");
       settings.type = "button";
       settings.textContent = "設定";
@@ -266,10 +329,14 @@ function pushNotice(notice) {
     ok: notice?.ok !== false,
     taskId: notice?.taskId ? String(notice.taskId) : "",
     runId: notice?.runId ? String(notice.runId) : "",
+    jobId: notice?.jobId ? String(notice.jobId) : "",
+    status: notice?.status ? String(notice.status) : "",
+    prompt: notice?.prompt ? String(notice.prompt) : "",
     at: notice?.at || new Date().toISOString(),
   };
-  pendingNotices.unshift(entry);
-  while (pendingNotices.length > 20) pendingNotices.pop();
+  noticeEntries.unshift(entry);
+  while (noticeEntries.length > 50) noticeEntries.pop();
+  persistNotices();
   unreadNoticeCount += 1;
   updateNoticeBadge();
   renderNoticePanel();
@@ -279,13 +346,26 @@ function pushNotice(notice) {
   }, 6000);
 }
 
+function upsertJob(jobId, patch) {
+  let entry = noticeEntries.find(notice => notice.kind === "job" && notice.jobId === jobId);
+  if (!entry) {
+    entry = { kind: "job", jobId, title: "エージェント処理", body: "開始しました", ok: true, status: "running", prompt: "", at: new Date().toISOString() };
+    noticeEntries.unshift(entry);
+  }
+  Object.assign(entry, patch, { kind: "job", jobId });
+  persistNotices();
+  renderNoticePanel();
+  updateNoticeBadge();
+}
+
 async function loadScheduleRunNotices() {
   try {
     const runs = await window.picoagent.scheduleRuns();
     if (!Array.isArray(runs)) return;
-    pendingNotices.length = 0;
+    const otherEntries = noticeEntries.filter(entry => entry.kind !== "schedule");
+    const scheduleEntries = [];
     for (const run of runs.slice(0, 20)) {
-      pendingNotices.push({
+      scheduleEntries.push({
         kind: "schedule",
         title: String(run.title || "スケジュール"),
         body: String(run.body || ""),
@@ -295,6 +375,9 @@ async function loadScheduleRunNotices() {
         at: run.at || "",
       });
     }
+    noticeEntries.splice(0, noticeEntries.length, ...scheduleEntries, ...otherEntries);
+    while (noticeEntries.length > 50) noticeEntries.pop();
+    persistNotices();
     unreadNoticeCount = 0;
     renderNoticePanel();
     updateNoticeBadge();
@@ -1508,18 +1591,13 @@ function canShowNotice() {
 function queueNotice(line) {
   const text = String(line ?? "").trim();
   if (!text) return;
-  pendingNotices.push(text);
-  if (pendingNotices.length > 6) pendingNotices.shift();
+  speechNoticeQueue.push(text);
+  if (speechNoticeQueue.length > 6) speechNoticeQueue.shift();
 }
 
 async function flushPendingNotice() {
-  if (!pendingNotices.length || !canShowNotice()) return;
-  const entry = pendingNotices.shift();
-  // pendingNotices にはオブジェクトが入る。そのまま渡すと "[object Object]" と
-  // 表示されるため、タイトル＋本文の文字列へ整形する。
-  const line = typeof entry === "string"
-    ? entry
-    : [entry?.title, entry?.body].filter(Boolean).join("\n");
+  if (!speechNoticeQueue.length || !canShowNotice()) return;
+  const line = speechNoticeQueue.shift();
   if (!line.trim()) return;
   await showAssistantNotice(line, { enqueue: false });
 }
@@ -1870,6 +1948,33 @@ function renderAttachmentPreview() {
     wrap.append(img, removeBtn);
     imagePreview.append(wrap);
   });
+  renderAttachmentSuggestions();
+}
+
+function renderAttachmentSuggestions() {
+  if (!attachmentSuggestions) return;
+  const extensions = new Set(attachedFiles.map(file => String(file.name || "").split(".").pop().toLowerCase()));
+  const suggestions = [];
+  const add = (label, text) => { if (!suggestions.some(item => item.label === label)) suggestions.push({ label, text }); };
+  if (extensions.has("pdf")) { add("PDFを要約", "添付したPDFを要約して"); add("本文を抽出", "添付したPDFの本文を抽出して"); }
+  if (["wav", "mp3", "m4a", "flac", "ogg"].some(ext => extensions.has(ext))) { add("文字起こし", "添付した音声を文字起こしして"); add("議事録にする", "添付した音声から議事録を作って"); }
+  if (["psd", "xcf", "heic", "heif", "tif", "tiff", "avif"].some(ext => extensions.has(ext))) { add("PNGに変換", "添付した画像をPNGに変換して"); add("画像情報", "添付した画像のサイズとレイヤー情報を教えて"); }
+  if (["docx", "xlsx", "pptx", "odt", "ods", "odp"].some(ext => extensions.has(ext))) { add("内容を要約", "添付した文書を要約して"); add("PDFに変換", "添付した文書をPDFに変換して"); }
+  if (attachedFiles.length + attachedImages.length > 1) add("まとめて比較", "添付したファイルを比較して、違いと要点を整理して");
+  if (attachedImages.length > 0) add("画像を説明", "添付した画像の内容を詳しく説明して");
+  attachmentSuggestions.replaceChildren();
+  for (const suggestion of suggestions.slice(0, 5)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = suggestion.label;
+    button.addEventListener("click", () => {
+      setInputValue(suggestion.text);
+      autosizeInput();
+      input.focus();
+    });
+    attachmentSuggestions.append(button);
+  }
+  attachmentSuggestions.hidden = suggestions.length === 0;
 }
 
 function fileIcon(name) {
@@ -1959,31 +2064,54 @@ function setDropOverlay(visible) {
 async function handleNativeDrop(paths) {
   markActivity();
   let added = 0;
+  const failures = [];
   for (const path of (paths || []).slice(0, MAX_ATTACHED_IMAGES + MAX_ATTACHED_FILES)) {
     try {
       const info = await window.picoagent.readDroppedPath(path);
       if (info.kind === "image") {
-        if (attachedImages.length >= MAX_ATTACHED_IMAGES) { showToast(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚まで`, "warn"); continue; }
+        if (attachedImages.length >= MAX_ATTACHED_IMAGES) {
+          failures.push(`画像は最大 ${MAX_ATTACHED_IMAGES} 枚までです`);
+          continue;
+        }
         attachedImages.push(info.dataUrl);
       } else {
-        if (attachedFiles.length >= MAX_ATTACHED_FILES) { showToast(`ファイルは最大 ${MAX_ATTACHED_FILES} 件まで`, "warn"); continue; }
+        if (attachedFiles.length >= MAX_ATTACHED_FILES) {
+          failures.push(`ファイルは最大 ${MAX_ATTACHED_FILES} 件までです`);
+          continue;
+        }
         attachedFiles.push({ name: info.name, dataUrl: info.dataUrl, path: info.path });
       }
       added += 1;
     } catch (error) {
       logApp("warn", "ドロップファイルの読み込みに失敗しました", `${path}: ${error}`);
-      showToast(String(error), "error");
+      failures.push(String(error));
     }
   }
-  if (added === 0) return;
-  renderAttachmentPreview();
-  updateComposerState();
-  if (composer.hidden) openComposer();
-  // キャラがファイルを受け取った反応（クリック時と同じはねる演出）。
-  character.classList.remove("boop");
-  void character.offsetWidth;
-  character.classList.add("boop");
-  showToast(`${added} 件を添付しました`, "success");
+  if (added > 0) {
+    renderAttachmentPreview();
+    updateComposerState();
+    if (composer.hidden) openComposer();
+    // キャラがファイルを受け取った反応（クリック時と同じはねる演出）。
+    character.classList.remove("boop");
+    void character.offsetWidth;
+    character.classList.add("boop");
+  }
+  if (failures.length === 0) {
+    if (added > 0) showToast(`${added} 件を添付しました`, "success");
+    return;
+  }
+  const permissionFailure = failures.some(message => message.includes("許可ルート") || message.includes("保護パス"));
+  const prefix = added > 0 ? `${added} 件を添付、` : "";
+  if (permissionFailure) {
+    showToast(`${prefix}許可されていない場所のファイルを読み込めませんでした`, "warn", {
+      duration: 7000,
+      actionLabel: "許可設定を開く",
+      onAction: () => window.picoagent.openSettings("permissions"),
+    });
+  } else {
+    const detail = failures.length === 1 ? failures[0] : `${failures.length} 件を読み込めませんでした`;
+    showToast(`${prefix}${detail}`, "error", { duration: 4500 });
+  }
 }
 
 try {
@@ -2024,6 +2152,8 @@ composer.addEventListener("submit", async event => {
   const text = input.value.trim();
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   const requestRevision = conversationRevision;
+  const jobId = `chat-${Date.now()}-${requestRevision}`;
+  let jobState = "running";
   clearAlarmSnooze(false);
   markActivity();
   lastUserText = text; // エラーリトライ用に保持
@@ -2048,6 +2178,7 @@ composer.addEventListener("submit", async event => {
   if (cancelSendButton) { cancelSendButton.hidden = false; cancelSendButton.disabled = false; }
   reply.textContent = text;
   addHistory("user", text);
+  upsertJob(jobId, { title: text || "添付ファイルの処理", body: "考え中…", status: "running", prompt: text, at: new Date().toISOString() });
 
   // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
   try {
@@ -2057,6 +2188,7 @@ composer.addEventListener("submit", async event => {
         if (busy && typeof progress === "string" && progress) {
           // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
+          upsertJob(jobId, { body: status.textContent, status: "running" });
         }
       });
     }
@@ -2132,6 +2264,7 @@ composer.addEventListener("submit", async event => {
     }
     status.textContent = result.error ? "接続を確認してね" : "";
     if (result.error) {
+      jobState = "failed";
       logApp("error", "AI応答がエラーを返しました", result.reply || "");
       ++speakingToken;
       stopVoice();
@@ -2158,6 +2291,7 @@ composer.addEventListener("submit", async event => {
       if (result.quitApp) scheduleAppQuit();
     }
   } catch (error) {
+    jobState = "failed";
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
     ++speakingToken;
     stopVoice();
@@ -2179,6 +2313,11 @@ composer.addEventListener("submit", async event => {
     streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     busy = false;
+    upsertJob(jobId, {
+      body: jobState === "failed" ? "処理に失敗しました。詳細は会話を確認してください。" : "処理が完了しました。",
+      status: jobState === "failed" ? "failed" : "completed",
+      ok: jobState !== "failed",
+    });
     updateComposerState();
     scheduleChatter(); // 会話後はアイドル計測をやり直す。
     setTimeout(flushPendingNotice, 0);
@@ -2258,8 +2397,8 @@ async function finishRecording() {
   }
 }
 
-micButton?.addEventListener("click", async () => {
-  if (micStream) { await finishRecording(); return; } // 録音中 → 停止して文字起こし
+async function startRecording() {
+  if (micStream) return;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
   } catch (error) {
@@ -2286,6 +2425,35 @@ micButton?.addEventListener("click", async () => {
     showToast("録音を開始できませんでした", "error");
     stopMicCapture();
   }
+}
+
+let pushToTalkTimer = null;
+let pushToTalkActive = false;
+let suppressMicClick = false;
+micButton?.addEventListener("pointerdown", event => {
+  if (event.button !== 0 || micStream) return;
+  pushToTalkTimer = setTimeout(async () => {
+    pushToTalkTimer = null;
+    pushToTalkActive = true;
+    suppressMicClick = true;
+    await startRecording();
+    if (micStream) status.textContent = "🎙 押している間だけ録音中…";
+  }, 320);
+});
+micButton?.addEventListener("pointerup", async () => {
+  if (pushToTalkTimer) { clearTimeout(pushToTalkTimer); pushToTalkTimer = null; }
+  if (!pushToTalkActive) return;
+  pushToTalkActive = false;
+  if (micStream) await finishRecording();
+});
+micButton?.addEventListener("pointercancel", () => {
+  if (pushToTalkTimer) { clearTimeout(pushToTalkTimer); pushToTalkTimer = null; }
+  if (pushToTalkActive) { pushToTalkActive = false; stopMicCapture(); }
+});
+micButton?.addEventListener("click", async () => {
+  if (suppressMicClick) { suppressMicClick = false; return; }
+  if (micStream) { await finishRecording(); return; }
+  await startRecording();
 });
 
 // ── 再生成: 直前の質問をもう一度送って別の答えをもらう ──────────────────
@@ -2562,7 +2730,8 @@ noticeToggle?.addEventListener("click", event => {
 });
 noticeClear?.addEventListener("click", event => {
   event.stopPropagation();
-  pendingNotices.length = 0;
+  noticeEntries.length = 0;
+  persistNotices();
   unreadNoticeCount = 0;
   renderNoticePanel();
   updateNoticeBadge();

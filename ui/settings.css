@@ -709,6 +709,7 @@ body.searching .tab-panel {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+.diagnostic-repair { margin-top:8px; min-height:28px; padding:4px 10px; border-radius:8px; background:#b07943; color:#fff; font-size:11px; font-weight:700; }
 
 footer {
   display: flex;

@@ -245,7 +245,7 @@ impl Tool for SparkWorkspaceTool {
                 "goal": { "type": "string", "description": "成果物の目的。" },
                 "audience": { "type": "string", "description": "想定読者。省略時は一般読者。" },
                 "source_text": { "type": "string", "description": "素材メモ、調査メモ、箇条書き。" },
-                "output_dir": { "type": "string", "description": "保存先フォルダ。PICOAGENT_WORKSPACE_ROOT 配下。" }
+                "output_dir": { "type": "string", "description": "保存先フォルダ。共通許可ルート配下。" }
             },
             "required": ["project"]
         })

@@ -1685,8 +1685,8 @@ pub async fn pet_rerun_schedule_task(
 }
 
 #[tauri::command]
-pub fn pet_open_settings(app: AppHandle) -> Result<(), String> {
-    open_settings(&app);
+pub fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    open_settings_tab(&app, tab.as_deref());
     Ok(())
 }
 
@@ -1962,7 +1962,11 @@ pub async fn pet_transcribe_audio(
     match result {
         Ok(text) if !text.trim().is_empty() => Ok(json!({ "text": text })),
         Ok(_) => Err("音声を聞き取れませんでした。もう一度話してみてください。".to_string()),
-        Err(error) => Err(log_command_error(&app, "マイク文字起こしに失敗しました", error)),
+        Err(error) => Err(log_command_error(
+            &app,
+            "マイク文字起こしに失敗しました",
+            error,
+        )),
     }
 }
 
@@ -1979,7 +1983,10 @@ pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, Str
     let path = dir.join(format!("picoagent-conversation-{stamp}.md"));
     std::fs::write(&path, markdown)
         .map_err(|error| log_command_error(&app, "会話の書き出しに失敗しました", error))?;
-    crate::log_paths::append_app_log(&app, &format!("会話履歴を書き出しました: {}", path.display()));
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("会話履歴を書き出しました: {}", path.display()),
+    );
     Ok(json!({ "path": path.to_string_lossy() }))
 }
 
@@ -2351,14 +2358,17 @@ pub async fn pet_read_file_content(name: String, data_b64: String) -> Result<Str
 
 /// ネイティブ D&D（Tauri drag-drop イベント）で受け取ったファイルパスを読み、
 /// フロントの添付フローで使える形（kind + data URL + 実パス）へ変換する。
-/// ユーザーが明示的にドロップしたファイルだけが渡るため、許可ルート制限は課さない。
+/// Tauri command 自体は任意パスで呼べるため、共通許可ルートと保護パスを必ず検査する。
 #[tauri::command]
-pub async fn pet_read_dropped_path(path: String) -> Result<serde_json::Value, String> {
+pub async fn pet_read_dropped_path(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
     const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
-    let file = std::path::PathBuf::from(&path);
+    let file = crate::permissions::resolve(&state.config, &path)?;
     let meta = std::fs::metadata(&file).map_err(|e| format!("ファイルを読めません: {e}"))?;
     if meta.is_dir() {
         return Err("フォルダは添付できません。中のファイルをドロップしてください。".to_string());
@@ -2512,20 +2522,55 @@ fn extract_xlsx_content(data: &[u8]) -> Result<String, String> {
 
 /// 設定ウィンドウを開く（既にあれば前面化）。
 pub fn open_settings(app: &tauri::AppHandle) {
+    open_settings_tab(app, None);
+}
+
+/// 設定ウィンドウを指定タブで開く。既存ウィンドウには遷移イベントを送る。
+fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
+    let tab = settings_tab(tab);
     if let Some(win) = app.get_webview_window("settings") {
         let _ = win.set_focus();
+        if let Some(tab) = tab {
+            let _ = win.emit("settings:navigate", tab);
+        }
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    let path = tab
+        .map(|tab| format!("settings.html?tab={tab}"))
+        .unwrap_or_else(|| "settings.html".to_string());
+    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
         .title("PicoAgent の設定")
         .inner_size(640.0, 640.0)
         .min_inner_size(480.0, 480.0)
         .build();
 }
 
+fn settings_tab(tab: Option<&str>) -> Option<&str> {
+    tab.filter(|value| {
+        matches!(
+            *value,
+            "basic"
+                | "character"
+                | "voice"
+                | "providers"
+                | "tools"
+                | "permissions"
+                | "skillguide"
+                | "diagnostics"
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::speech_text;
+    use super::{settings_tab, speech_text};
+
+    #[test]
+    fn 設定画面は既知のタブだけを受け付ける() {
+        assert_eq!(settings_tab(Some("permissions")), Some("permissions"));
+        assert_eq!(settings_tab(Some("../index")), None);
+        assert_eq!(settings_tab(None), None);
+    }
 
     #[test]
     fn 読み上げでは参考ブロックを除外する() {

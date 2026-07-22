@@ -256,7 +256,7 @@ impl Tool for DocSearchTool {
                 score_file(path, &terms).map(|(score, snippet)| (score, path.clone(), snippet))
             })
             .collect();
-        hits.sort_by(|a, b| b.0.cmp(&a.0));
+        hits.sort_by_key(|item| std::cmp::Reverse(item.0));
         hits.truncate(max_results);
 
         if hits.is_empty() {

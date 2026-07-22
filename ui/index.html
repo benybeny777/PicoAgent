@@ -21,7 +21,7 @@
     </section>
     <section id="bubble" class="bubble" aria-live="polite">
       <div id="replyActions" class="reply-actions" aria-label="回答操作">
-        <button id="noticeToggle" type="button" aria-label="通知一覧" title="通知一覧">!</button>
+        <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">!</button>
         <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">C</button>
         <button id="regenReply" type="button" aria-label="別の答えを生成" title="同じ質問で別の答えを生成">↺</button>
         <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">↻</button>
@@ -30,7 +30,7 @@
       </div>
       <div id="noticePanel" class="notice-panel" hidden>
         <div class="notice-head">
-          <span>通知</span>
+          <span>アクションセンター</span>
           <button id="noticeClear" type="button">消去</button>
         </div>
         <div id="noticeList" class="notice-list"></div>
@@ -43,9 +43,10 @@
       <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>
       <form id="composer" class="composer" hidden>
         <div id="imagePreview" class="image-preview" hidden></div>
+        <div id="attachmentSuggestions" class="attachment-suggestions" hidden aria-label="添付ファイルのおすすめ操作"></div>
         <div id="quickActions" class="quick-actions" aria-label="クイック操作"></div>
         <textarea id="input" rows="2" placeholder="話しかける… / 画像をペーストまたはドロップ"></textarea>
-        <button id="micButton" type="button" aria-label="音声入力" title="クリックで録音開始、もう一度で停止して文字起こし">🎙</button>
+        <button id="micButton" type="button" aria-label="音声入力" title="クリックで録音開始・停止 / 長押し中だけ録音">🎙</button>
         <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
       </form>
       <div id="status" class="status"></div>

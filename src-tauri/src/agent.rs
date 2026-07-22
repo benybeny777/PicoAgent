@@ -1340,8 +1340,16 @@ pub async fn run(
             // 2ターン目以降（ツール結果を受けて再考する場合）は固まって見えないよう通知する。
             emit_status("考え直しています…".to_string());
         }
-        let mut msg =
-            chat_with_retry(provider, cfg, model, messages, &schemas, emit_fn.clone(), app).await?;
+        let mut msg = chat_with_retry(
+            provider,
+            cfg,
+            model,
+            messages,
+            &schemas,
+            emit_fn.clone(),
+            app,
+        )
+        .await?;
         // reasoning モデルの <think> 推論ブロックを最終回答・履歴・読み上げから除外する
         // （DeepSeek-R1 / Qwen3 系などで英語/中国語の推論が混ざるのを防ぐ）。
         msg.content = crate::message::strip_reasoning(&msg.content);
@@ -1414,7 +1422,7 @@ pub async fn run(
                 }
 
                 // ツール実行結果をトレースに記録し会話へ積む。
-                for (c, (content, duration_ms)) in cs.iter().zip(results.into_iter()) {
+                for (c, (content, duration_ms)) in cs.iter().zip(results) {
                     // インジェクション検出: 不審なパターンがあれば警告プレフィックスを付けてモデルへ伝える。
                     let content = if tools::check_injection(&content) {
                         format!(

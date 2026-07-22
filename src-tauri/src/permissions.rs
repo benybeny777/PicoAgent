@@ -25,6 +25,9 @@ const LEGACY_ROOT_KEYS: &[&str] = &[
     "PICOAGENT_COMMAND_ROOT",
 ];
 
+/// 廃止済みだが、既存設定が指す場所を追加許可ルートとしてだけ引き継ぐキー。
+const LEGACY_ADDITIONAL_ROOT_KEYS: &[&str] = &["PICOAGENT_MEETING_ROOT"];
+
 pub fn home() -> String {
     dirs::home_dir()
         .map(|path| path.to_string_lossy().to_string())
@@ -69,6 +72,12 @@ pub fn allowed_roots(cfg: &Config) -> Vec<PathBuf> {
             roots.push(PathBuf::from(value));
         }
     }
+    for key in LEGACY_ADDITIONAL_ROOT_KEYS {
+        let value = cfg.get(key, "");
+        if !value.trim().is_empty() {
+            roots.push(PathBuf::from(value));
+        }
+    }
     // 正規化して重複を除く。
     let mut normalized: Vec<PathBuf> = Vec::new();
     for root in roots {
@@ -101,6 +110,40 @@ pub fn normalize(base: &Path, input: &str) -> PathBuf {
     out
 }
 
+/// 既存の最深祖先だけを実体化し、残りの未作成部分を戻した検査用パスを返す。
+///
+/// 許可ルート内のシンボリックリンクや Windows のジャンクションを経由して、実体が
+/// ルート外へ出るのを防ぐ。既存パスの実体化に失敗した場合は、安全側に倒して拒否する。
+fn path_for_permission_check(path: &Path) -> Result<PathBuf, String> {
+    let mut cursor = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::canonicalize(&cursor) {
+            Ok(mut resolved) => {
+                for part in missing.iter().rev() {
+                    resolved.push(part);
+                }
+                return Ok(resolved);
+            }
+            Err(error) => {
+                if std::fs::symlink_metadata(&cursor).is_ok() {
+                    return Err(format!(
+                        "パスの実体を確認できないため操作できません: {} ({error})",
+                        cursor.display()
+                    ));
+                }
+                let Some(name) = cursor.file_name().map(|value| value.to_os_string()) else {
+                    return Ok(path.to_path_buf());
+                };
+                missing.push(name);
+                if !cursor.pop() {
+                    return Ok(path.to_path_buf());
+                }
+            }
+        }
+    }
+}
+
 /// 常に操作を拒否する保護パスか（C:\Windows・Program Files、および PICOAGENT_DENIED_PATHS 配下）。
 pub fn is_protected(cfg: &Config, path: &Path) -> bool {
     if is_system_protected(path) {
@@ -120,6 +163,7 @@ pub fn is_protected(cfg: &Config, path: &Path) -> bool {
 #[cfg(windows)]
 pub fn is_system_protected(path: &Path) -> bool {
     let lower = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    let lower = lower.strip_prefix(r"\\?\").unwrap_or(&lower);
     lower.starts_with(r"c:\windows")
         || lower.starts_with(r"c:\program files\")
         || lower.starts_with(r"c:\program files (x86)\")
@@ -142,10 +186,22 @@ pub fn resolve(cfg: &Config, input: &str) -> Result<PathBuf, String> {
             target.display()
         ));
     }
-    let within = allowed_roots(cfg).into_iter().any(|root| {
+    let checked_target = path_for_permission_check(&target)?;
+    if is_protected(cfg, &checked_target) {
+        return Err(format!(
+            "許可されていない保護パスです（リンク先を含め、C:\\Windows・Program Files や拒否設定の配下は操作できません）: {}",
+            target.display()
+        ));
+    }
+    let mut within = false;
+    for root in allowed_roots(cfg) {
         let root = normalize(&root, ".");
-        target == root || target.starts_with(&root)
-    });
+        let checked_root = path_for_permission_check(&root)?;
+        if checked_target == checked_root || checked_target.starts_with(&checked_root) {
+            within = true;
+            break;
+        }
+    }
     if within {
         Ok(target)
     } else {
@@ -191,5 +247,27 @@ mod tests {
             r"C:\Program Files (x86)\App"
         )));
         assert!(!is_system_protected(&PathBuf::from(r"C:\Users\me\doc.txt")));
+        assert!(is_system_protected(&PathBuf::from(
+            r"\\?\C:\Windows\System32"
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn シンボリックリンク経由の許可ルート外を拒否する() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("picoagent-perm-link-{}", std::process::id()));
+        let allowed = base.join("allowed");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, allowed.join("escape")).unwrap();
+
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", allowed.to_string_lossy().as_ref());
+        assert!(super::resolve(&cfg, "escape/secret.txt").is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -172,6 +172,10 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .quick-actions button:disabled { opacity:.48; }
 .image-preview { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 6px; }
 .image-preview[hidden] { display:none; }
+.attachment-suggestions { display:flex; flex-wrap:wrap; gap:5px; padding:0 0 7px; }
+.attachment-suggestions[hidden] { display:none; }
+.attachment-suggestions button { position:static; min-height:25px; padding:3px 9px; border-radius:999px; border:1px solid var(--chip-border); background:var(--chip-bg); color:var(--ink); font-size:10px; font-weight:700; }
+.attachment-suggestions button::before { content:"✨ "; }
 .image-thumb-wrap { position:relative; }
 .image-thumb-wrap img { display:block; width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid var(--field-border); }
 .image-remove { position:absolute; top:-6px; right:-6px; width:16px; height:16px; padding:0; border-radius:50%; background:#c0627a; font-size:10px; line-height:16px; text-align:center; }
@@ -204,6 +208,10 @@ button:disabled { opacity:.48; cursor:default; }
 .notice-item { padding:8px 9px; border:1px solid var(--chip-border); border-left:3px solid var(--mint); border-radius:9px; background:var(--notice-ok-bg); }
 .notice-item.error { border-left-color:#c0627a; background:var(--notice-err-bg); }
 .notice-title { font-size:12px; font-weight:700; color:var(--ink); }
+.notice-state { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:9px; vertical-align:1px; }
+.notice-state-running { background:rgba(64,126,210,.18); color:#3f75bd; }
+.notice-state-completed { background:rgba(38,140,88,.16); color:#2f8b5d; }
+.notice-state-failed { background:rgba(185,58,80,.16); color:#b43d55; }
 .notice-meta { margin-top:2px; color:var(--muted); font-size:10px; }
 .notice-body { max-height:120px; margin-top:5px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:var(--ink-soft); font-size:11px; line-height:1.5; user-select:text; }
 .notice-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:7px; }
@@ -253,8 +261,11 @@ button:disabled { opacity:.48; cursor:default; }
 .cancel-send[hidden],.cancel-voice[hidden] { display:none; }
 .retry-btn { position:static; height:auto; margin-top:8px; padding:5px 13px; border-radius:8px; background:#b07a40; font-size:11px; font-weight:700; }
 .retry-btn:hover { filter:brightness(1.08); }
-.toast { position:fixed; z-index:999; left:50%; bottom:18px; transform:translateX(-50%) translateY(12px); padding:7px 16px; border-radius:999px; background:rgba(52,43,59,.82); color:#fff; font-size:12px; line-height:1.4; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .18s ease, transform .18s ease; backdrop-filter:blur(4px); }
+.toast { position:fixed; z-index:999; left:50%; bottom:18px; transform:translateX(-50%) translateY(12px); display:flex; align-items:center; gap:10px; max-width:min(520px,calc(100vw - 28px)); padding:7px 16px; border-radius:999px; background:rgba(52,43,59,.82); color:#fff; font-size:12px; line-height:1.4; white-space:normal; pointer-events:none; opacity:0; transition:opacity .18s ease, transform .18s ease; backdrop-filter:blur(4px); }
 .toast.toast-show { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast.toast-actionable { pointer-events:auto; }
+.toast-action { flex:none; min-height:28px; padding:4px 10px; border:1px solid rgba(255,255,255,.55); border-radius:999px; background:rgba(255,255,255,.16); color:#fff; font-size:11px; font-weight:700; }
+.toast-action:hover { background:rgba(255,255,255,.27); }
 
 /* ── 手触りの微調整 ─────────────────────────────────────────── */
 /* ボタンは押した感を出す（transform はごく小さく、reduced-motion では無効化）。 */

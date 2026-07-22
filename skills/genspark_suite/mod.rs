@@ -265,7 +265,7 @@ impl Tool for GensparkSuiteTool {
                 "topic": { "type": "string", "description": "テーマ。" },
                 "audience": { "type": "string", "description": "想定読者。" },
                 "source_text": { "type": "string", "description": "素材メモ、議事録、調査メモ。" },
-                "output_dir": { "type": "string", "description": "保存先フォルダ。PICOAGENT_WORKSPACE_ROOT 配下。" }
+                "output_dir": { "type": "string", "description": "保存先フォルダ。共通許可ルート配下。" }
             },
             "required": ["topic"]
         })

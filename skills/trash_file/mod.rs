@@ -40,7 +40,7 @@ fn bounded_existing_path(cfg: &Config, path: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(windows)]
-fn move_to_trash(path: &Path) -> Result<(), String> {
+pub(super) fn move_to_trash(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{
         SHFileOperationW, FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
@@ -71,7 +71,7 @@ fn move_to_trash(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn move_to_trash(path: &Path) -> Result<(), String> {
+pub(super) fn move_to_trash(path: &Path) -> Result<(), String> {
     let trash_dir = dirs::home_dir()
         .ok_or_else(|| "ホームフォルダを確認できません。".to_string())?
         .join(".Trash");
@@ -82,7 +82,7 @@ fn move_to_trash(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn move_to_trash(path: &Path) -> Result<(), String> {
+pub(super) fn move_to_trash(path: &Path) -> Result<(), String> {
     let home = dirs::home_dir().ok_or_else(|| "ホームフォルダを確認できません。".to_string())?;
     let trash_files = home.join(".local/share/Trash/files");
     let trash_info = home.join(".local/share/Trash/info");
@@ -108,7 +108,7 @@ fn move_to_trash(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(any(windows, unix)))]
-fn move_to_trash(_path: &Path) -> Result<(), String> {
+pub(super) fn move_to_trash(_path: &Path) -> Result<(), String> {
     Err("このOSではゴミ箱移動に未対応です。".to_string())
 }
 

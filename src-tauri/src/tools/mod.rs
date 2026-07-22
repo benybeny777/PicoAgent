@@ -93,7 +93,11 @@ pub fn resolve_cli_path(cfg: &Config, config_key: &str, tool_dir: &str, exe: &st
     if !trimmed.is_empty() && trimmed != exe {
         return trimmed.to_string();
     }
-    let exe_name = if cfg!(windows) { format!("{exe}.exe") } else { exe.to_string() };
+    let exe_name = if cfg!(windows) {
+        format!("{exe}.exe")
+    } else {
+        exe.to_string()
+    };
     for dir in bundled_tool_dirs(tool_dir) {
         if let Some(found) = find_bundled_exe(&dir, &exe_name, 0) {
             return found.to_string_lossy().to_string();
@@ -317,6 +321,25 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
             "追記",
             "フォルダ",
             "workspace",
+        ],
+    ),
+    (
+        "project_workspace",
+        &[
+            "ワークスペース",
+            "プロジェクト切り替え",
+            "仕事用",
+            "作業場所",
+        ],
+    ),
+    (
+        "workflow",
+        &[
+            "ワークフロー",
+            "手順を覚えて",
+            "この操作を覚えて",
+            "自動化",
+            "再実行",
         ],
     ),
     (
