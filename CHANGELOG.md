@@ -6,6 +6,12 @@
 
 ## 2026-07-22
 
+### AivisSpeech デスクトップアプリ（Windows/mac）のエンジンを自動利用
+
+- **起動中の AivisSpeech アプリを検出して使う** (`src-tauri/src/aivis.rs` / `commands.rs`): 読み上げ開始時、同梱エンジン（PICOAGENT_TTS_PORT）が未起動で、AivisSpeech デスクトップアプリのエンジン（ポート10101）が応答する場合はそれを使い、同梱エンジンを二重起動しない（メモリ節約・起動待ちゼロ）。起動時の先行起動（start_background）も TCP 接続の軽量判定で控え、実際のエンジン確認（/version）は ensure_started が行う。合成・モデル準備・状態表示は `active_endpoint` で外部/同梱を透過的に切り替え。`PICOAGENT_TTS_APP_ENGINE=false` で無効化できる（設定「音声」タブ）。
+- 文分割のストリーミング読み上げ（先行読み上げ含む）は VOICEVOX 互換 API（/audio_query + /synthesis）ベースのため、アプリのエンジンでもそのまま有効。
+- 検証: /version スタブに対するエンジン検出テストを追加。cargo test 104件パス・clippy 警告ゼロ。
+
 ### ストリーミングを全プロバイダ対応（同梱ローカルエンジン・Ollama）
 
 - **local（同梱 llama-server）の chat_stream** (`src-tauri/src/providers/local.rs` / `openai.rs`): これまで本物のトークン逐次表示はクラウド系（OpenAI 互換）だけで、既定のローカルエンジンは全文一括受信だった。llama-server は OpenAI 互換の SSE に対応しているため、openai プロバイダと共通化した `stream_chat`（pub(crate) 化）で逐次受信する。tools 付きで失敗した場合の tools 無し再試行は chat() と同じ方針で、チャンクを1つでも流した後は再試行しない（二重表示防止）。
