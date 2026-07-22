@@ -535,7 +535,7 @@ pub async fn pet_prepare_voice_model(
     aivis::ensure_started(&app)
         .await
         .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
-    let endpoint = aivis::active_endpoint(&app, &state);
+    let endpoint = aivis::endpoint(&app, &state);
     let voice = effective_tts_voice(&state);
     prepare_tts_voice_model(&app, &endpoint, &voice).await?;
     let speaker = resolve_tts_speaker(&endpoint, voice).await;
@@ -1302,7 +1302,7 @@ pub async fn pet_speak(
     aivis::ensure_started(&app)
         .await
         .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
-    let endpoint = aivis::active_endpoint(&app, &state);
+    let endpoint = aivis::endpoint(&app, &state);
     let voice = effective_tts_voice(&state);
     // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
     prepare_tts_voice_model(&app, &endpoint, &voice).await?;
