@@ -1005,9 +1005,10 @@ fn set_external_endpoint(app: &tauri::AppHandle, value: Option<String>) {
     }
 }
 
-/// AivisSpeech デスクトップアプリ（Windows/mac）のエンジン利用を許可するか（既定 true）。
+/// AivisSpeech デスクトップアプリ（Windows/mac）のエンジン利用を許可するか。
+/// 既定は false（同梱エンジンを使う）。アプリのエンジンに乗りたい場合だけ設定で有効化する。
 fn app_engine_allowed(state: &AppState) -> bool {
-    state.config.get_bool("PICOAGENT_TTS_APP_ENGINE", true)
+    state.config.get_bool("PICOAGENT_TTS_APP_ENGINE", false)
 }
 
 pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> bool {

@@ -1635,7 +1635,7 @@ async function render() {
   ));
   const voiceSec = section("読み上げ");
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
-  voiceSec.append(field("PICOAGENT_TTS_APP_ENGINE", "起動中の AivisSpeech アプリ（Windows/mac）のエンジンがあれば使う（無ければ同梱エンジンを起動）", "checkbox", v.PICOAGENT_TTS_APP_ENGINE !== false));
+  voiceSec.append(field("PICOAGENT_TTS_APP_ENGINE", "起動中の AivisSpeech アプリ（Windows/mac）のエンジンを優先して使う（既定は同梱エンジン）", "checkbox", v.PICOAGENT_TTS_APP_ENGINE === true));
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
   panels.basic.append(apiSec);
