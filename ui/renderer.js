@@ -1371,10 +1371,15 @@ function stopVoice(toIdle = true) {
   currentVoice.pause();
   finishVoice(toIdle);
 }
+// 読み上げが有効かどうかの学習キャッシュ（pet_speak の結果から更新）。
+// false のときはストリーミング先行読み上げの合成要求を出さない（無駄な往復を省く）。
+let ttsEnabledCache = null;
 // 合成のみ行い、再生はしない（起動時に描画と同時再生するための事前合成）。失敗・無効・空は null。
 async function prepareSpeech(text) {
   try {
     const result = await window.picoagent.speak(text);
+    if (result?.enabled === false) ttsEnabledCache = false;
+    else if (result?.enabled) ttsEnabledCache = true;
     if (!result?.enabled || result.skipped || !result.audio?.length) return null;
     return result;
   } catch (error) {
@@ -1553,6 +1558,109 @@ async function speakReply(text) {
     setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 12000);
   }
 }
+// ── ストリーミング先行読み上げ: 応答の生成中に、確定した文から順に合成・再生する ──
+// 全文の生成完了を待たずに話し始めることで、読み上げ開始までの体感遅延を大きく縮める。
+// 最終本文が届いたら残り（未読分）をキューへ足して読み切る（finishStreamSpeech）。
+let streamSpeech = null; // { queue, consumed, spoken, done, disabled, running }
+
+function beginStreamSpeech() {
+  streamSpeech = {
+    queue: [],       // 合成待ちのチャンク（文単位）
+    consumed: "",    // ストリーム本文のうちキューへ載せ終えた先頭部分
+    spoken: false,   // 1つでも再生したか
+    done: false,     // 最終本文まで投入済みか
+    disabled: ttsEnabledCache === false,
+    running: false,
+  };
+}
+
+function cancelStreamSpeech() {
+  if (streamSpeech?.running) stopVoice(false);
+  streamSpeech = null;
+}
+
+// ストリーム本文から「文として確定した部分」を切り出して読み上げキューへ足す。
+function feedStreamSpeech(buffer) {
+  const ss = streamSpeech;
+  if (!ss || ss.disabled || ss.done) return;
+  const rest = String(buffer ?? "").slice(ss.consumed.length);
+  const settledMatch = rest.match(/^[\s\S]*[。．.!?！？\n]/); // 最後の文末までを確定分とみなす
+  if (!settledMatch) return;
+  const settled = settledMatch[0];
+  if (settled.trim().length < 8) return; // 極端に短い断片は次の文とまとめる
+  ss.consumed += settled;
+  for (const chunk of splitSpeechChunks(settled)) ss.queue.push(chunk);
+  runStreamSpeech();
+}
+
+// キューを順に合成→再生する（再生中に次チャンクを先読み合成するパイプライン）。
+async function runStreamSpeech() {
+  const ss = streamSpeech;
+  if (!ss || ss.running || ss.disabled || ss.queue.length === 0) return;
+  ss.running = true;
+  stopVoice(false);
+  const session = ++voiceSession;
+  setVoiceCancelVisible(true);
+  try {
+    let pending = ss.queue.shift();
+    let synth = prepareSpeech(pending);
+    while (pending !== undefined) {
+      const result = await synth;
+      if (session !== voiceSession || streamSpeech !== ss) return;
+      if (!result && !ss.spoken) {
+        // 最初のチャンクから合成できない（読み上げ無効など）: 先行読み上げを諦めて
+        // 完了時の通常読み上げ経路（speakReply）に任せる。
+        ss.disabled = true;
+        ss.queue.length = 0;
+        setVoiceCancelVisible(false);
+        return;
+      }
+      pending = ss.queue.shift();
+      synth = pending !== undefined ? prepareSpeech(pending) : null;
+      if (result) {
+        ss.spoken = true;
+        await playChunkAndWait(result, session);
+        if (session !== voiceSession || streamSpeech !== ss) return;
+      }
+      // キューが空でも生成が続いていれば、次の文が確定するまで待つ。
+      while (pending === undefined && !ss.done) {
+        await new Promise(resolve => setTimeout(resolve, 120));
+        if (session !== voiceSession || streamSpeech !== ss) return;
+        pending = ss.queue.shift();
+        if (pending !== undefined) synth = prepareSpeech(pending);
+      }
+    }
+    // 最終本文まで読み終えた。
+    setVoiceCancelVisible(false);
+    stopLipSync();
+    if (animationName === "talking") setAnimation("idle");
+    if (status.textContent === "読み上げ中…") status.textContent = "";
+    setTimeout(flushPendingNotice, 0);
+  } finally {
+    ss.running = false;
+  }
+}
+
+// 最終本文が届いたときの締め。残り（未読分）をキューへ足して読み切る。
+// 先行読み上げが無効・本文不一致のときは false を返し、呼び出し側の全文読み上げに任せる。
+function finishStreamSpeech(finalText) {
+  const ss = streamSpeech;
+  if (!ss || ss.disabled) {
+    streamSpeech = null;
+    return false;
+  }
+  const text = String(finalText ?? "");
+  if (!text.startsWith(ss.consumed)) {
+    // 後処理で本文が変わった（まれ）: 進行中の先行読み上げを止めて全文読み上げへ。
+    cancelStreamSpeech();
+    return false;
+  }
+  for (const chunk of splitSpeechChunks(text.slice(ss.consumed.length))) ss.queue.push(chunk);
+  ss.done = true;
+  runStreamSpeech(); // まだ話し始めていなければここで開始する
+  return true;
+}
+
 async function renderReplySpeaking(text) {
   const token = ++speakingToken;
   const source = String(text ?? "");
@@ -2198,12 +2306,14 @@ composer.addEventListener("submit", async event => {
 
   // ストリーミングチャンクをリアルタイム表示する（rAF スロットルで1フレーム1描画）。
   streamBuffer = "";
+  beginStreamSpeech(); // 生成中の先行読み上げを準備（読み上げ無効なら何もしない）
   try {
     if (window.picoagent.listen) {
       if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 多重購読防止
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         if (!busy || requestRevision !== conversationRevision) return;
         streamBuffer += chunk;
+        feedStreamSpeech(streamBuffer); // 確定した文から先に話し始める
         reply.classList.add("streaming"); // 文末の点滅カーソル表示
         if (!streamRenderFrame) {
           streamRenderFrame = requestAnimationFrame(() => {
@@ -2259,6 +2369,7 @@ composer.addEventListener("submit", async event => {
     }
     if (!result) result = await window.picoagent.send(fullText);
     if (result?.stale || requestRevision !== conversationRevision) {
+      cancelStreamSpeech();
       status.textContent = "";
       return;
     }
@@ -2267,6 +2378,7 @@ composer.addEventListener("submit", async event => {
       jobState = "failed";
       logApp("error", "AI応答がエラーを返しました", result.reply || "");
       ++speakingToken;
+      cancelStreamSpeech();
       stopVoice();
       renderReply(result.reply);
       reply.classList.add("reply-error");
@@ -2279,7 +2391,12 @@ composer.addEventListener("submit", async event => {
       status.classList.remove("busy");
       if (cancelSendButton) cancelSendButton.hidden = true;
       // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
-      if (String(result.reply ?? "").trim() !== text) speakReply(result.reply);
+      if (String(result.reply ?? "").trim() !== text) {
+        // ストリーミング中に先行読み上げが走っていれば残りを読み切り、無ければ全文読み上げ。
+        if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
+      } else {
+        cancelStreamSpeech();
+      }
       if (streamBuffer.trim()) {
         // ストリーミングで本文は表示済み。消してタイプライターで打ち直さず、最終形を確定描画する。
         setAssistantReply(result.reply);
@@ -2294,6 +2411,7 @@ composer.addEventListener("submit", async event => {
     jobState = "failed";
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
     ++speakingToken;
+    cancelStreamSpeech();
     stopVoice();
     const message = `応答に失敗しました: ${error?.message || error}`;
     renderReply(message);
@@ -2330,6 +2448,54 @@ let micCtx = null;
 let micNode = null;
 let micChunks = [];
 let micSampleRate = 16000;
+// 逐次文字起こし（リアルタイム風プレビュー）の状態。録音中に数秒ごとの区間を裏で
+// 文字起こしして入力欄へ出し、停止時に全体の文字起こしで置き換えて確定する。
+let micSession = 0;        // 録音の世代。停止後に届いた途中結果を捨てる
+let micInterimTimer = null;
+let micInterimBusy = false;
+let micInterimIndex = 0;   // 変換済みチャンク数（micChunks の先頭からの消費位置）
+let micInterimTexts = [];
+let micInterimBase = "";   // 録音開始時点の入力欄の内容
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// 録音中の未変換区間（約2秒以上たまったら）を逐次文字起こしして入力欄へ反映する。
+// 区間切りの境界では単語が欠けることがあるため、確定は停止時の全体文字起こしで行う。
+async function transcribeInterim(session) {
+  if (micInterimBusy || session !== micSession || !micStream) return;
+  const from = micInterimIndex;
+  const to = micChunks.length;
+  const seconds = micChunks.slice(from, to).reduce((sum, c) => sum + c.length, 0) / micSampleRate;
+  if (seconds < 2) return;
+  micInterimBusy = true;
+  micInterimIndex = to;
+  try {
+    const wav = encodeWav(micChunks.slice(from, to), micSampleRate);
+    const b64 = await blobToDataUrl(new Blob([wav], { type: "audio/wav" }));
+    const result = await window.picoagent.transcribeAudio(b64);
+    if (session !== micSession) return; // 停止・再録音後に届いた途中結果は捨てる
+    const text = String(result?.text ?? "").trim();
+    if (text) {
+      micInterimTexts.push(text);
+      const joined = micInterimTexts.join(" ");
+      setInputValue(micInterimBase ? `${micInterimBase} ${joined}` : joined);
+      status.textContent = "🎙 録音中…（認識中の文はあとで確定します）";
+    }
+  } catch (error) {
+    // Whisper 未設定などで失敗したら、この録音では逐次変換を止める（停止時の一括変換に任せる）。
+    logApp("warn", "途中の文字起こしに失敗しました", errorDetail(error));
+    if (micInterimTimer) { clearInterval(micInterimTimer); micInterimTimer = null; }
+  } finally {
+    micInterimBusy = false;
+  }
+}
 
 // Float32 の PCM を 16bit モノラル WAV に変換する（whisper-cli は wav 入力のため）。
 function encodeWav(chunks, sampleRate) {
@@ -2354,6 +2520,8 @@ function encodeWav(chunks, sampleRate) {
 }
 
 function stopMicCapture() {
+  micSession++; // 進行中の逐次文字起こし結果を無効化する
+  if (micInterimTimer) { clearInterval(micInterimTimer); micInterimTimer = null; }
   micNode?.disconnect();
   micNode = null;
   micStream?.getTracks().forEach(track => track.stop());
@@ -2368,32 +2536,32 @@ async function finishRecording() {
   const chunks = micChunks;
   micChunks = [];
   const sampleRate = micSampleRate;
+  const base = micInterimBase;      // 録音開始時点の入力欄（逐次プレビューを除いた確定部分）
+  const hadInterim = micInterimTexts.length > 0;
   stopMicCapture();
   const seconds = chunks.reduce((sum, c) => sum + c.length, 0) / sampleRate;
   if (seconds < 0.4) { status.textContent = ""; showToast("録音が短すぎました", "warn"); return; }
-  status.textContent = "文字起こし中…";
+  status.textContent = hadInterim ? "文字起こしを確定中…" : "文字起こし中…";
   status.classList.add("busy");
   try {
     const wav = encodeWav(chunks, sampleRate);
-    const b64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(new Blob([wav], { type: "audio/wav" }));
-    });
+    const b64 = await blobToDataUrl(new Blob([wav], { type: "audio/wav" }));
     const result = await window.picoagent.transcribeAudio(b64);
     const text = String(result?.text ?? "").trim();
     if (text) {
-      setInputValue(input.value ? `${input.value} ${text}` : text);
+      // 逐次プレビューは区間切りの境界で欠けることがあるため、全体の文字起こしで置き換えて確定する。
+      setInputValue(base ? `${base} ${text}` : text);
       input.focus();
       showToast("文字起こししました", "success");
     }
   } catch (error) {
     logApp("error", "音声入力に失敗しました", errorDetail(error));
-    showToast(String(error?.message || error || "文字起こしに失敗しました").slice(0, 60), "error");
+    // 逐次プレビューが入力欄に残っていれば、それを最終結果として使う。
+    if (!hadInterim) showToast(String(error?.message || error || "文字起こしに失敗しました").slice(0, 60), "error");
+    else showToast("確定に失敗したため途中結果を残しました", "warn");
   } finally {
     status.classList.remove("busy");
-    if (status.textContent === "文字起こし中…") status.textContent = "";
+    if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") status.textContent = "";
   }
 }
 
@@ -2419,6 +2587,12 @@ async function startRecording() {
     micNode.connect(micCtx.destination);
     micButton.classList.add("recording");
     status.textContent = "🎙 録音中…（マイクをもう一度クリックで停止）";
+    // 逐次文字起こし（リアルタイム風プレビュー）を開始する。
+    const session = ++micSession;
+    micInterimBase = input.value.trim();
+    micInterimTexts = [];
+    micInterimIndex = 0;
+    micInterimTimer = setInterval(() => transcribeInterim(session), 3000);
     markActivity();
   } catch (error) {
     logApp("error", "録音を開始できません", errorDetail(error));
