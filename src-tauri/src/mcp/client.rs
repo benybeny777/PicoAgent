@@ -287,6 +287,14 @@ pub async fn dispatch(full_name: &str, args: Value) -> String {
         guard.request("tools/call", json!({ "name": tool_raw, "arguments": args })),
     )
     .await;
+    // タイムアウトや I/O 失敗のあとは接続を再利用しない。tokio の read_line は
+    // キャンセル安全ではなく、途中で打ち切ると読みかけの行が失われてストリームが
+    // ずれるため、以降の応答が別リクエストの結果と混ざる恐れがある。
+    if !matches!(result, Ok(Ok(_))) {
+        let _ = guard.child.start_kill();
+        drop(guard);
+        connections().write().unwrap().remove(&server_key);
+    }
     match result {
         Ok(Ok(value)) => {
             let text: String = value
@@ -309,8 +317,10 @@ pub async fn dispatch(full_name: &str, args: Value) -> String {
                 text
             }
         }
-        Ok(Err(error)) => format!("エラー: {error}"),
-        Err(_) => format!("エラー: MCP ツール実行が {CALL_TIMEOUT_SECS} 秒でタイムアウトしました。"),
+        Ok(Err(error)) => format!("エラー: {error}（MCP サーバ「{server_key}」との接続を切断しました。再接続には再起動が必要です）"),
+        Err(_) => format!(
+            "エラー: MCP ツール実行が {CALL_TIMEOUT_SECS} 秒でタイムアウトしました（MCP サーバ「{server_key}」との接続を切断しました）。"
+        ),
     }
 }
 

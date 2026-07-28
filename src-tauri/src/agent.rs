@@ -1221,6 +1221,18 @@ pub async fn run(
         }
         None => Arc::new(|_: String| {}),
     };
+    // ステップ境界の通知。ツール実行を挟んで再度 chat する場合、前ステップで流した
+    // 途中テキスト（「検索しますね」等）は最終回答に含まれないため、フロント側の
+    // ストリーム表示・先行読み上げをその都度リセットさせる。
+    let emit_stream_reset: Arc<dyn Fn() + Send + Sync> = match app {
+        Some(handle) => {
+            let h = handle.clone();
+            Arc::new(move || {
+                let _ = tauri::Emitter::emit(&h, "pet:stream_reset", ());
+            })
+        }
+        None => Arc::new(|| {}),
+    };
 
     // 原則として、小型ローカルモデルの tool_calls 判断に依存させずWeb検索を先に実行する。
     // ただし短い挨拶は検索結果に引っ張られやすいため、キャラ本人として返す指示だけを追加する。
@@ -1340,6 +1352,8 @@ pub async fn run(
             // 2ターン目以降（ツール結果を受けて再考する場合）は固まって見えないよう通知する。
             emit_status("考え直しています…".to_string());
         }
+        // このステップの本文を最初から表示・読み上げさせる（前ステップの残りを捨てる）。
+        emit_stream_reset();
         let mut msg = chat_with_retry(
             provider,
             cfg,

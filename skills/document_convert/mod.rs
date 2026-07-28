@@ -14,33 +14,6 @@ use crate::message::Field;
 
 pub struct DocumentConvertTool;
 
-fn root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() { PathBuf::from(input) } else { base.join(input) };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => { out.pop(); }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!("許可ルート（{}）の外は操作できません: {}", base.display(), target.display()))
-    }
-}
-
 /// 同梱 OfficeCLI（LibreOffice）の探索先ディレクトリ候補。
 fn bundled_office_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
@@ -162,11 +135,10 @@ impl Tool for DocumentConvertTool {
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let base = root(cfg);
         let Some(input_raw) = args.get("input_path").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
             return "エラー: input_path が指定されていません。".to_string();
         };
-        let input = match bounded_path(&base, input_raw) {
+        let input = match crate::permissions::resolve(cfg, input_raw) {
             Ok(path) => path,
             Err(error) => return format!("エラー: {}", error),
         };
@@ -175,11 +147,14 @@ impl Tool for DocumentConvertTool {
             None => return "エラー: format が指定されていません。".to_string(),
         };
         let output_dir = match args.get("output_dir").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
-            Some(path) => match bounded_path(&base, path) {
+            Some(path) => match crate::permissions::resolve(cfg, path) {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: {}", error),
             },
-            None => input.parent().unwrap_or(&base).to_path_buf(),
+            None => input
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| crate::permissions::primary_root(cfg)),
         };
         if let Err(error) = std::fs::create_dir_all(&output_dir) {
             return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);

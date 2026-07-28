@@ -90,6 +90,8 @@ async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option
             "--ignore-case",
             "--fixed-strings",
             "--no-messages",
+            // .gitignore 等を無視して内蔵走査と同じ対象を見る（バックエンドで結果が変わらないように）。
+            "--no-ignore-vcs",
             "--max-filesize",
             "512K",
             "--max-depth",

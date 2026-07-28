@@ -309,8 +309,22 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
             // MCP（Model Context Protocol）: スキルを MCP ツールとして公開する。
             // Claude Code 等からは HTTP トランスポートで claude mcp add --transport http
             // picoagent http://127.0.0.1:<port>/mcp のように登録できる。
-            let body: Value = serde_json::from_slice(&request.body)
-                .map_err(|error| format!("JSON を解析できません: {error}"))?;
+            let body: Value = match serde_json::from_slice(&request.body) {
+                Ok(body) => body,
+                // JSON-RPC 2.0 の parse error（-32700）で返す。接続を無言で閉じない。
+                Err(error) => {
+                    return respond(
+                        &mut stream,
+                        400,
+                        &crate::mcp::rpc_error(
+                            &Value::Null,
+                            -32700,
+                            &format!("JSON を解析できません: {error}"),
+                        ),
+                    )
+                    .await;
+                }
+            };
             match crate::mcp::server::handle_rpc(&state.config, &body).await {
                 Some(response) => respond(&mut stream, 200, &response).await,
                 // 通知（id なし）には本文なしの 202 を返す（Streamable HTTP の慣例）。
