@@ -39,6 +39,7 @@ let unlistenStatus = null;
 // ストリーミング受信中のテキストバッファ・リスナー解除関数・描画スロットル用 rAF ハンドル。
 let streamBuffer = "";
 let unlistenStream = null;
+let unlistenStreamReset = null;
 let streamRenderFrame = null;
 const conversationHistory = [];
 let historyQuery = "";
@@ -1579,11 +1580,41 @@ function cancelStreamSpeech() {
   streamSpeech = null;
 }
 
+// エージェントのステップ境界（ツール実行を挟んだ再 chat）で読み上げを仕切り直す。
+// 前ステップの途中テキストは最終回答に含まれないため、キューを捨てて次の本文を待つ。
+function resetStreamSpeech() {
+  const disabled = streamSpeech?.disabled ?? (ttsEnabledCache === false);
+  cancelStreamSpeech();
+  beginStreamSpeech();
+  streamSpeech.disabled = disabled;
+}
+
+// 読み上げ対象のテキストから reasoning モデルの <think> 推論ブロックを取り除く。
+// バックエンドの strip_reasoning と同じ規則（閉じタグが無ければ以降すべて推論扱い）で、
+// 推論内容を声に出さないようにする。戻り値は常に元テキストの「読み上げ確定済み前方部分」。
+function stripThinkForSpeech(text) {
+  let rest = String(text ?? "");
+  let out = "";
+  for (;;) {
+    const start = rest.indexOf("<think>");
+    if (start === -1) return out + rest;
+    out += rest.slice(0, start);
+    const after = rest.slice(start + "<think>".length);
+    const end = after.indexOf("</think>");
+    if (end === -1) return out; // 推論の途中: ここから先は確定していない
+    rest = after.slice(end + "</think>".length);
+  }
+}
+
 // ストリーム本文から「文として確定した部分」を切り出して読み上げキューへ足す。
 function feedStreamSpeech(buffer) {
   const ss = streamSpeech;
   if (!ss || ss.disabled || ss.done) return;
-  const rest = String(buffer ?? "").slice(ss.consumed.length);
+  // consumed は <think> を除いた「読み上げ済みテキスト」の前方一致部分として管理する
+  // （最終本文も strip_reasoning 済みのため、finishStreamSpeech の前方一致判定と揃う）。
+  const cleaned = stripThinkForSpeech(buffer);
+  if (cleaned.length <= ss.consumed.length) return;
+  const rest = cleaned.slice(ss.consumed.length);
   const settledMatch = rest.match(/^[\s\S]*[。．.!?！？\n]/); // 最後の文末までを確定分とみなす
   if (!settledMatch) return;
   const settled = settledMatch[0];
@@ -2310,6 +2341,18 @@ composer.addEventListener("submit", async event => {
   try {
     if (window.picoagent.listen) {
       if (unlistenStream) { unlistenStream(); unlistenStream = null; } // 多重購読防止
+      // ステップ境界（ツール実行を挟んだ再 chat）では、前ステップの途中テキストを捨てて
+      // 最終回答だけを表示・読み上げする。
+      if (unlistenStreamReset) { unlistenStreamReset(); unlistenStreamReset = null; }
+      unlistenStreamReset = await window.picoagent.listen("pet:stream_reset", () => {
+        if (!busy || requestRevision !== conversationRevision) return;
+        if (!streamBuffer) return;
+        streamBuffer = "";
+        // 表示にも残さない（最終回答に含まれない途中テキストを見せ続けない）。
+        if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+        renderMarkdown(reply, "");
+        resetStreamSpeech();
+      });
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         if (!busy || requestRevision !== conversationRevision) return;
         streamBuffer += chunk;
@@ -2428,6 +2471,7 @@ composer.addEventListener("submit", async event => {
     // ストリーム・進捗リスナーを解除する。
     if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
     if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+    if (unlistenStreamReset) { unlistenStreamReset(); unlistenStreamReset = null; }
     streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     busy = false;

@@ -17,31 +17,15 @@ use crate::message::Field;
 
 pub struct ImageToolsTool;
 
-fn root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() { PathBuf::from(input) } else { base.join(input) };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => { out.pop(); }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!("許可ルート（{}）の外は操作できません: {}", base.display(), target.display()))
-    }
+/// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
+fn resolve_path(cfg: &Config, args: &Value, key: &str) -> Result<PathBuf, String> {
+    let raw = args
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("{} が指定されていません。", key))?;
+    crate::permissions::resolve(cfg, raw)
 }
 
 #[cfg(windows)]
@@ -92,15 +76,15 @@ fn ext_of(path: &Path) -> String {
 }
 
 /// 画像を別形式へ変換する（PSD/XCF 等は統合ビューを使用。resize / quality 対応）。
-async fn run_convert(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> String {
-    let input = match one_path(base, args, "input_path") {
+async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
+    let input = match resolve_path(cfg, args, "input_path") {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
     if !input.exists() {
         return format!("エラー: 入力画像が見つかりません: {}", input.display());
     }
-    let output = match one_path(base, args, "output_path") {
+    let output = match resolve_path(cfg, args, "output_path") {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
@@ -144,8 +128,8 @@ async fn run_convert(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> S
 }
 
 /// 画像の情報（形式・寸法・レイヤー数など）を identify で取得する。
-async fn run_info(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> String {
-    let input = match one_path(base, args, "input_path") {
+async fn run_info(cfg: &Config, args: &Value, timeout: u64) -> String {
+    let input = match resolve_path(cfg, args, "input_path") {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
@@ -154,8 +138,14 @@ async fn run_info(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> Stri
     }
     let program = magick_program(cfg, "identify").await;
     let mut command = Command::new(&program);
-    if program != "identify" {
-        // v7（magick）はサブコマンドで identify を呼ぶ。
+    // v7（magick）はサブコマンドで identify を呼ぶ。v6 の identify や、明示設定で
+    // identify 実行ファイルを直接指定した場合はサブコマンドを付けない。
+    let is_identify_exe = Path::new(&program)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.eq_ignore_ascii_case("identify"))
+        .unwrap_or(false);
+    if !is_identify_exe {
         command.arg("identify");
     }
     command.arg(&input);
@@ -177,16 +167,6 @@ async fn run_info(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> Stri
         lines.len().max(1),
         text.trim()
     )
-}
-
-fn one_path(base: &Path, args: &Value, key: &str) -> Result<PathBuf, String> {
-    let raw = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    bounded_path(base, raw)
 }
 
 #[async_trait]
@@ -233,7 +213,6 @@ impl Tool for ImageToolsTool {
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let base = root(cfg);
         let timeout = cfg
             .get("PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS", "120")
             .parse::<u64>()
@@ -241,8 +220,8 @@ impl Tool for ImageToolsTool {
             .filter(|value| (5..=300).contains(value))
             .unwrap_or(120);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
-            "convert" => run_convert(cfg, &base, &args, timeout).await,
-            "info" => run_info(cfg, &base, &args, timeout).await,
+            "convert" => run_convert(cfg, &args, timeout).await,
+            "info" => run_info(cfg, &args, timeout).await,
             _ => "エラー: action は convert/info のいずれかを指定してください。".to_string(),
         }
     }
@@ -268,6 +247,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("picoagent-image-tools-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
         // テスト用 PSD を ImageMagick 自身で生成する（v7 magick → v6 convert の順）。
@@ -282,13 +262,13 @@ mod tests {
         assert!(psd.exists());
 
         let args = json!({ "action": "convert", "input_path": "sample.psd", "output_path": "sample.png", "resize": "8x8" });
-        let result = runtime.block_on(super::run_convert(&cfg, &dir, &args, 120));
+        let result = runtime.block_on(super::run_convert(&cfg, &args, 120));
         assert!(result.contains("変換しました"), "変換結果: {result}");
         let png = std::fs::read(dir.join("sample.png")).unwrap();
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n"); // PNG シグネチャ
 
         let args = json!({ "action": "info", "input_path": "sample.psd" });
-        let result = runtime.block_on(super::run_info(&cfg, &dir, &args, 120));
+        let result = runtime.block_on(super::run_info(&cfg, &args, 120));
         assert!(result.contains("画像情報"), "情報結果: {result}");
         assert!(result.to_lowercase().contains("psd"), "情報結果: {result}");
         let _ = std::fs::remove_dir_all(&dir);

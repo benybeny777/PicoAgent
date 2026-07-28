@@ -83,6 +83,8 @@ async function cmdRepl() {
     if (!text) { rl.prompt(); return; }
     if (text === "exit" || text === "quit") { rl.close(); return; }
     messages.push({ role: "user", content: text });
+    // 応答待ちの間は入力を受け付けない（連投で会話が入れ違うのを防ぐ）。
+    rl.pause();
     try {
       const result = await api("POST", "/api/chat", { messages });
       const reply = result.message?.content ?? "";
@@ -91,6 +93,7 @@ async function cmdRepl() {
     } catch (error) {
       console.error(String(error));
     }
+    rl.resume();
     rl.prompt();
   });
   rl.on("close", () => process.exit(0));

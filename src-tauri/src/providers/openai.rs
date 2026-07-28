@@ -140,12 +140,15 @@ pub(crate) async fn stream_chat(
 ) -> anyhow::Result<Message> {
     use futures::StreamExt;
 
-    let res = reqwest::Client::new()
-        .post(url)
-        .bearer_auth(api_key)
-        .json(&body)
-        .send()
-        .await?;
+    // API キー不要のローカルエンジン（llama-server）からも呼ばれるため、
+    // 空キーのときは Authorization ヘッダ自体を付けない（空 Bearer で弾かれるのを防ぐ）。
+    let request = reqwest::Client::new().post(url).json(&body);
+    let request = if api_key.is_empty() {
+        request
+    } else {
+        request.bearer_auth(api_key)
+    };
+    let res = request.send().await?;
 
     if !res.status().is_success() {
         let status = res.status();

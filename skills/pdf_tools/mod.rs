@@ -1,6 +1,6 @@
 // skills/pdf_tools/mod.rs - qpdf による PDF 編集スキル。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -14,31 +14,15 @@ use crate::message::Field;
 
 pub struct PdfToolsTool;
 
-fn root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() { PathBuf::from(input) } else { base.join(input) };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => { out.pop(); }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!("許可ルート（{}）の外は操作できません: {}", base.display(), target.display()))
-    }
+/// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
+fn one_path(cfg: &Config, args: &Value, key: &str) -> Result<PathBuf, String> {
+    let raw = args
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("{} が指定されていません。", key))?;
+    crate::permissions::resolve(cfg, raw)
 }
 
 #[cfg(windows)]
@@ -90,7 +74,6 @@ impl Tool for PdfToolsTool {
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let base = root(cfg);
         let timeout = cfg
             .get("PICOAGENT_PDF_TIMEOUT_SECS", "120")
             .parse::<u64>()
@@ -99,23 +82,23 @@ impl Tool for PdfToolsTool {
             .unwrap_or(120);
         // extract_text だけは qpdf ではなく Poppler pdftotext を使う。
         if args.get("action").and_then(Value::as_str) == Some("extract_text") {
-            return extract_text(cfg, &base, &args, timeout).await;
+            return extract_text(cfg, &args, timeout).await;
         }
         let mut command = Command::new(super::resolve_cli_path(cfg, "PICOAGENT_QPDF_PATH", "qpdf", "qpdf"));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "info" => {
-                let input = match one_path(&base, &args, "input_path") {
+                let input = match one_path(cfg, &args, "input_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
                 command.arg("--show-npages").arg(input);
             }
             "split_pages" => {
-                let input = match one_path(&base, &args, "input_path") {
+                let input = match one_path(cfg, &args, "input_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                let output = match one_path(&base, &args, "output_path") {
+                let output = match one_path(cfg, &args, "output_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
@@ -123,7 +106,7 @@ impl Tool for PdfToolsTool {
                 command.arg(input).arg("--pages").arg(".").arg(pages).arg("--").arg(output);
             }
             "merge" => {
-                let output = match one_path(&base, &args, "output_path") {
+                let output = match one_path(cfg, &args, "output_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
@@ -135,7 +118,7 @@ impl Tool for PdfToolsTool {
                     let Some(raw) = value.as_str() else {
                         return "エラー: input_paths は文字列配列で指定してください。".to_string();
                     };
-                    let path = match bounded_path(&base, raw) {
+                    let path = match crate::permissions::resolve(cfg, raw) {
                         Ok(path) => path,
                         Err(error) => return format!("エラー: {}", error),
                     };
@@ -144,11 +127,11 @@ impl Tool for PdfToolsTool {
                 command.arg("--").arg(output);
             }
             "rotate" => {
-                let input = match one_path(&base, &args, "input_path") {
+                let input = match one_path(cfg, &args, "input_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                let output = match one_path(&base, &args, "output_path") {
+                let output = match one_path(cfg, &args, "output_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
@@ -156,11 +139,11 @@ impl Tool for PdfToolsTool {
                 command.arg("--rotate").arg(rotate).arg(input).arg(output);
             }
             "linearize" => {
-                let input = match one_path(&base, &args, "input_path") {
+                let input = match one_path(cfg, &args, "input_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                let output = match one_path(&base, &args, "output_path") {
+                let output = match one_path(cfg, &args, "output_path") {
                     Ok(path) => path,
                     Err(error) => return format!("エラー: {}", error),
                 };
@@ -184,8 +167,8 @@ impl Tool for PdfToolsTool {
 }
 
 /// Poppler pdftotext でPDF本文をテキスト抽出する。output_path 省略時は本文をそのまま返す。
-async fn extract_text(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> String {
-    let input = match one_path(base, args, "input_path") {
+async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
+    let input = match one_path(cfg, args, "input_path") {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
@@ -205,7 +188,7 @@ async fn extract_text(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> 
     }
     command.arg(&input);
     let output_path = match args.get("output_path").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
-        Some(raw) => match bounded_path(base, raw) {
+        Some(raw) => match crate::permissions::resolve(cfg, raw) {
             Ok(path) => Some(path),
             Err(error) => return format!("エラー: {}", error),
         },
@@ -247,22 +230,33 @@ async fn extract_text(cfg: &Config, base: &Path, args: &Value, timeout: u64) -> 
     }
 }
 
-fn one_path(base: &Path, args: &Value, key: &str) -> Result<PathBuf, String> {
-    let raw = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    bounded_path(base, raw)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     fn have(cmd: &str) -> bool {
         std::process::Command::new(cmd).arg("--version").output().is_ok()
+    }
+
+    // パス解決は共通の permissions::resolve に委ねる（許可ルート外・リンク実体の
+    // 逸脱を各スキルで独自判定しない）。統一が外れないよう固定する。
+    #[test]
+    fn 許可ルート外のパスを拒否する() {
+        let dir = std::env::temp_dir().join(format!("picoagent-pdf-perm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
+
+        // ルート配下の相対パスは解決できる。
+        let inside = super::one_path(&cfg, &json!({ "input_path": "a.pdf" }), "input_path").unwrap();
+        assert!(inside.starts_with(&dir), "inside: {}", inside.display());
+
+        // ルート外の絶対パスと親参照は拒否する。
+        assert!(super::one_path(&cfg, &json!({ "input_path": "/etc/passwd" }), "input_path").is_err());
+        assert!(super::one_path(&cfg, &json!({ "input_path": "../secret.pdf" }), "input_path").is_err());
+        // 未指定はエラー。
+        assert!(super::one_path(&cfg, &json!({}), "input_path").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // pdftotext / soffice がある環境だけで走る E2E（無ければ即成功で抜ける）。
@@ -293,14 +287,15 @@ mod tests {
         assert!(dir.join("hello.pdf").exists());
 
         let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let args = json!({ "action": "extract_text", "input_path": "hello.pdf" });
-        let result = runtime.block_on(super::extract_text(&cfg, &dir, &args, 120));
+        let result = runtime.block_on(super::extract_text(&cfg, &args, 120));
         assert!(result.contains("PicoAgent PDF extraction test"), "抽出結果: {result}");
 
         // output_path 指定時はファイルへ保存される。
         let args = json!({ "action": "extract_text", "input_path": "hello.pdf", "output_path": "hello.txt.out" });
-        let result = runtime.block_on(super::extract_text(&cfg, &dir, &args, 120));
+        let result = runtime.block_on(super::extract_text(&cfg, &args, 120));
         assert!(result.contains("抽出しました"), "保存結果: {result}");
         let saved = std::fs::read_to_string(dir.join("hello.txt.out")).unwrap();
         assert!(saved.contains("PicoAgent PDF extraction test"));
