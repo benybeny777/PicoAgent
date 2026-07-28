@@ -30,6 +30,54 @@ pub fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
     &text[..end]
 }
 
+/// ストリーミング受信バイトを UTF-8 として逐次デコードする。
+///
+/// HTTP のチャンク境界は文字の途中に落ちる。受け取ったバイト列をそのまま
+/// `String::from_utf8_lossy` に通すと、**まだ続きが来ていないだけの末尾バイトが
+/// `�` に置き換えられて確定してしまう**。日本語は 1 文字 3 バイトなので、
+/// 長い応答ほど文字化けが混ざる。ここでは末尾の不完全なバイト列を次のチャンクまで
+/// 持ち越し、完全な文字になった分だけを返す。
+#[derive(Default)]
+pub struct Utf8Stream {
+    tail: Vec<u8>,
+}
+
+impl Utf8Stream {
+    /// 受信したバイト列を渡し、確定した文字だけを取り出す。
+    pub fn push(&mut self, bytes: &[u8]) -> String {
+        self.tail.extend_from_slice(bytes);
+        let mut out = String::new();
+        loop {
+            match std::str::from_utf8(&self.tail) {
+                Ok(text) => {
+                    out.push_str(text);
+                    self.tail.clear();
+                    break;
+                }
+                Err(error) => {
+                    let valid = error.valid_up_to();
+                    if let Ok(text) = std::str::from_utf8(&self.tail[..valid]) {
+                        out.push_str(text);
+                    }
+                    match error.error_len() {
+                        // 本当に壊れたバイト列。置換文字にして先へ進む。
+                        Some(len) => {
+                            out.push('\u{FFFD}');
+                            self.tail.drain(..valid + len);
+                        }
+                        // 末尾が文字の途中なだけ。次のチャンクを待つ。
+                        None => {
+                            self.tail.drain(..valid);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]
 mod guard {
@@ -87,6 +135,31 @@ mod guard {
             "文字列は text::preview / text::truncate_bytes で切ってください（バイト添字は文字の途中で panic します）: {offenders:?}"
         );
     }
+
+    /// ストリーミング受信は `text::Utf8Stream` を通す。`from_utf8_lossy` を直接使うと、
+    /// チャンク境界で分断された文字が `�` になって確定してしまう。
+    #[test]
+    fn ストリーミング受信で直接lossy変換しない() {
+        let mut files = Vec::new();
+        rs_files(std::path::Path::new("src"), &mut files);
+        let mut offenders = Vec::new();
+        for file in files {
+            if file.file_name().is_some_and(|name| name == "text.rs") {
+                continue; // 定義元
+            }
+            // フォールバック許可: 読めないファイルは走査対象外（存在しない想定）。
+            let Ok(source) = std::fs::read_to_string(&file) else {
+                continue;
+            };
+            if source.contains("bytes_stream()") && source.contains("from_utf8_lossy") {
+                offenders.push(file.display().to_string());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "ストリーミング受信は text::Utf8Stream を使ってください（チャンク境界で日本語が化けます）: {offenders:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +180,44 @@ mod tests {
         assert_eq!(truncate_bytes("あああ", 9), "あああ");
         assert_eq!(truncate_bytes("あああ", 2), "");
         assert_eq!(truncate_bytes("abc", 2), "ab");
+    }
+
+    #[test]
+    fn チャンク境界で分断された日本語を化けさせない() {
+        use super::Utf8Stream;
+        let source = "こんにちは、今日はいい天気ですね。";
+        let bytes = source.as_bytes();
+        // 1 バイトずつ流す＝毎回どこかの文字の途中で切れる、最悪ケース。
+        let mut stream = Utf8Stream::default();
+        let mut out = String::new();
+        for byte in bytes {
+            out.push_str(&stream.push(&[*byte]));
+        }
+        assert_eq!(out, source);
+        assert!(!out.contains('\u{FFFD}'));
+
+        // 参考: 同じ切り方を from_utf8_lossy でやると壊れる（これが元の不具合）。
+        let broken: String = bytes
+            .iter()
+            .map(|byte| String::from_utf8_lossy(&[*byte]).into_owned())
+            .collect();
+        assert!(
+            broken.contains('\u{FFFD}'),
+            "旧実装なら化ける入力であること"
+        );
+    }
+
+    #[test]
+    fn 壊れたバイト列は置換文字にして先へ進む() {
+        use super::Utf8Stream;
+        let mut stream = Utf8Stream::default();
+        // 0xFF は UTF-8 として不正。ここで止まらず後続を返せること。
+        let out = stream.push(&[b'a', 0xFF, b'b']);
+        assert_eq!(out, "a\u{FFFD}b");
+        // 末尾が文字の途中で終わったストリームは、続きが来るまで何も返さない。
+        let mut partial = Utf8Stream::default();
+        assert_eq!(partial.push(&[0xE3, 0x81]), "");
+        assert_eq!(partial.push(&[0x82]), "あ");
     }
 
     #[test]
