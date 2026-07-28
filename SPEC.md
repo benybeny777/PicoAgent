@@ -543,7 +543,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_RIPGREP_PATH` | 空 | doc_search | ripgrep 実行ファイルパス（空なら同梱→PATH。無ければ内蔵走査） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
-| `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型） |
+| `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型。キー名に `API_KEY` を含むためシークレットとして扱われ、Windows では DPAPI 暗号化して保存される） |
 | `PICOAGENT_API_ALLOWED_ORIGINS` | 空 | ローカルAPI | ブラウザからの横断リクエストを許可する Origin（カンマ区切り。空＝Origin 付きは全て拒否） |
 | `PICOAGENT_MCP_SERVERS` | 空 | MCP | 外部 MCP サーバ（1行1件「名前\|コマンド 引数…」。stdio 接続。`#` でコメント。変更は再起動後に反映） |
 | `PICOAGENT_PDF_TIMEOUT_SECS` | `120` | pdf_tools | PDF操作タイムアウト秒（5〜300） |

@@ -1356,6 +1356,10 @@ pub async fn pet_speak(
 }
 
 /// 設定スキーマ上で type="password" になっている＝シークレット扱いのキー集合。
+/// スキーマで `password` 型として申告されたシークレットキー一覧。
+///
+/// これだけでは足りない。設定画面が直接組み立てる項目（`PICOAGENT_API_KEY` など）は
+/// どのスキーマにも載らないため、暗号化の要否は `is_secret_setting()` で判定する。
 fn secret_keys() -> std::collections::HashSet<String> {
     let mut keys = std::collections::HashSet::new();
     for provider in providers::all() {
@@ -1375,14 +1379,27 @@ fn secret_keys() -> std::collections::HashSet<String> {
     keys
 }
 
+/// この設定キーを暗号化して保存すべきか。
+///
+/// スキーマでの `password` 申告に加え、**キー名からも判定する**。スキーマに載らない
+/// 設定項目を後から足したときに平文保存へ戻ってしまうのを防ぐ（実際に、ローカル API の
+/// `PICOAGENT_API_KEY` は設定画面が直接組み立てる項目だったため平文で保存されていた）。
+fn is_secret_setting(schema_keys: &std::collections::HashSet<String>, key: &str) -> bool {
+    schema_keys.contains(key) || crate::secret::is_secret_key(key)
+}
+
 /// 既存の平文シークレットを起動時に DPAPI 暗号化へ移行する（次回保存を待たずに保護する）。
 pub(crate) fn encrypt_existing_secrets(config: &Config) {
     let all = config.get_all();
+    let schema_keys = secret_keys();
     let mut patch = Map::new();
-    for key in secret_keys() {
-        if let Some(text) = all.get(&key).and_then(Value::as_str) {
+    for (key, value) in &all {
+        if !is_secret_setting(&schema_keys, key) {
+            continue;
+        }
+        if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                patch.insert(key, Value::String(crate::secret::encrypt(text)));
+                patch.insert(key.clone(), Value::String(crate::secret::encrypt(text)));
             }
         }
     }
@@ -1581,12 +1598,16 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
 
-    // パスワード型のシークレットは平文保存せず、DPAPI で暗号化してから永続化する。
+    // シークレットは平文保存せず、DPAPI で暗号化してから永続化する。
+    let schema_keys = secret_keys();
     let mut encrypted: Vec<(String, String)> = Vec::new();
-    for key in secret_keys() {
-        if let Some(text) = patch.get(&key).and_then(Value::as_str) {
+    for (key, value) in patch.iter() {
+        if !is_secret_setting(&schema_keys, key) {
+            continue;
+        }
+        if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                encrypted.push((key, crate::secret::encrypt(text)));
+                encrypted.push((key.clone(), crate::secret::encrypt(text)));
             }
         }
     }

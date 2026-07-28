@@ -10,6 +10,30 @@ use base64::Engine;
 
 const PREFIX: &str = "enc:dpapi:v1:";
 
+/// 名前は秘密っぽいが実際は秘密でないキー（意図的な例外のみ。理由を添えること）。
+/// - `PICOAGENT_HTTP_API_KEY_HEADER`: APIキーを載せる「ヘッダー名」。値そのものは
+///   `PICOAGENT_HTTP_API_KEY_VALUE`（password 型）側で扱う
+const NOT_SECRET: [&str; 1] = ["PICOAGENT_HTTP_API_KEY_HEADER"];
+
+/// 秘密値を示す語（キー名に含まれたら秘密として扱う）。
+const SECRET_WORDS: [&str; 6] = [
+    "API_KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "WEBHOOK",
+    "CREDENTIAL",
+];
+
+/// 設定キー名から「秘密として扱うべき値か」を判定する。
+///
+/// コネクタの `config_schema()` に載らない設定キー（設定画面が直接組み立てる項目など）も
+/// あるため、**型の申告だけに頼らず名前でも判定する**。実際に `PICOAGENT_API_KEY`
+/// （ローカル API のキー）はどのスキーマにも載っておらず、平文で保存されていた。
+pub fn is_secret_key(key: &str) -> bool {
+    !NOT_SECRET.contains(&key) && SECRET_WORDS.iter().any(|word| key.contains(word))
+}
+
 /// 値が本モジュールで暗号化済みか。
 pub fn is_encrypted(value: &str) -> bool {
     value.starts_with(PREFIX)
@@ -143,6 +167,20 @@ mod tests {
     }
 
     #[test]
+    fn キー名から秘密かどうかを判定する() {
+        use super::is_secret_key;
+        // 実際に平文保存されていたキー（どのスキーマにも載っていなかった）。
+        assert!(is_secret_key("PICOAGENT_API_KEY"));
+        assert!(is_secret_key("PICOAGENT_OPENAI_API_KEY"));
+        assert!(is_secret_key("PICOAGENT_SLACK_WEBHOOK_URL"));
+        assert!(is_secret_key("PICOAGENT_GITHUB_TOKEN"));
+        // ヘッダー名は値そのものではないので除外する。
+        assert!(!is_secret_key("PICOAGENT_HTTP_API_KEY_HEADER"));
+        assert!(!is_secret_key("PICOAGENT_ALLOWED_ROOT"));
+        assert!(!is_secret_key("PICOAGENT_MODEL"));
+    }
+
+    #[test]
     fn 非暗号文字列はそのまま扱う() {
         assert!(!is_encrypted("plain-token"));
         assert_eq!(decrypt("plain-token"), "plain-token");
@@ -159,20 +197,7 @@ mod tests {
 mod guard {
     use std::path::Path;
 
-    /// 名前は秘密っぽいが実際は秘密でないキー（意図的な例外のみ。理由を添えること）。
-    /// - `PICOAGENT_HTTP_API_KEY_HEADER`: APIキーを載せる「ヘッダー名」。値そのものは
-    ///   `PICOAGENT_HTTP_API_KEY_VALUE`（password 型）側で扱う
-    const NOT_SECRET: [&str; 1] = ["PICOAGENT_HTTP_API_KEY_HEADER"];
-
-    /// 秘密値を示す語（キー名に含まれたら password 型であるべき）。
-    const SECRET_WORDS: [&str; 6] = [
-        "API_KEY",
-        "TOKEN",
-        "SECRET",
-        "PASSWORD",
-        "WEBHOOK",
-        "CREDENTIAL",
-    ];
+    use super::is_secret_key;
 
     fn sources() -> Vec<(String, String)> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -218,10 +243,10 @@ mod guard {
                 else {
                     continue;
                 };
-                if NOT_SECRET.contains(&key) || kind == "password" {
+                if kind == "password" {
                     continue;
                 }
-                if SECRET_WORDS.iter().any(|word| key.contains(word)) {
+                if is_secret_key(key) {
                     violations.push(format!("{key} (型: {kind}) in {file}"));
                 }
             }
@@ -230,6 +255,50 @@ mod guard {
             violations.is_empty(),
             "シークレット設定が password 型で申告されていません（平文で config.json へ保存されます）:\n{}",
             violations.join("\n")
+        );
+    }
+
+    /// 設定画面が直接組み立てる `field("KEY", …, "password")` も暗号化経路に乗ること。
+    ///
+    /// スキーマ（`Field::new`）に載らない項目はコネクタ走査では見つからない。実際に
+    /// ローカル API の `PICOAGENT_API_KEY` がこの経路で、平文のまま保存されていた。
+    /// 暗号化の要否はキー名で判定するようにしたので、**設定画面の password 項目は
+    /// すべて `is_secret_key()` が真になる名前でなければならない**。
+    #[test]
+    fn 設定画面のpassword項目も暗号化経路に乗る() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri の親");
+        let source =
+            std::fs::read_to_string(root.join("ui/settings.js")).expect("settings.js を読めない");
+
+        let mut found = 0;
+        let mut violations = Vec::new();
+        // field("PICOAGENT_XXX", "ラベル", "password", …) の 1・3 引数を取り出す。
+        for chunk in source.split("field(\"PICOAGENT_").skip(1) {
+            let mut parts = chunk.split('"');
+            let Some(rest_of_key) = parts.next() else {
+                continue;
+            };
+            let key = format!("PICOAGENT_{rest_of_key}");
+            let mut quoted = parts.skip(1).step_by(2);
+            let (Some(_label), Some(kind)) = (quoted.next(), quoted.next()) else {
+                continue;
+            };
+            if kind != "password" {
+                continue;
+            }
+            found += 1;
+            if !is_secret_key(&key) {
+                violations.push(key);
+            }
+        }
+        assert!(found > 0, "設定画面の password 項目を検出できていません");
+        assert!(
+            violations.is_empty(),
+            "設定画面の password 項目が暗号化経路に乗りません（平文で config.json へ保存されます）。\
+             キー名に API_KEY / TOKEN / SECRET / PASSWORD / WEBHOOK / CREDENTIAL を含めるか、\
+             secret::is_secret_key を拡張してください: {violations:?}"
         );
     }
 }
