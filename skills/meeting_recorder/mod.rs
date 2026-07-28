@@ -20,6 +20,7 @@ use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
+use crate::permissions::SafePath;
 use crate::message::Field;
 
 const MAX_TRANSCRIPT_CHARS: usize = 80_000;
@@ -28,7 +29,7 @@ const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
 type SharedWriter = Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>;
 
 struct RecordingState {
-    path: PathBuf,
+    path: SafePath,
     started: Instant,
     stop_tx: Sender<()>,
     join: JoinHandle<()>,
@@ -46,27 +47,7 @@ fn meeting_root(cfg: &Config) -> PathBuf {
     crate::permissions::primary_root(cfg)
 }
 
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(cfg: &Config, input: &str) -> Result<PathBuf, String> {
+fn bounded_path(cfg: &Config, input: &str) -> Result<SafePath, String> {
     crate::permissions::resolve(cfg, input)
 }
 
@@ -78,7 +59,7 @@ fn default_recording_path() -> String {
     )
 }
 
-fn latest_file(base: &Path, matcher: fn(&Path) -> bool) -> Option<PathBuf> {
+fn latest_file(cfg: &Config, base: &Path, matcher: fn(&Path) -> bool) -> Option<SafePath> {
     let root = base.join("meetings");
     let mut stack = vec![root];
     let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
@@ -106,7 +87,8 @@ fn latest_file(base: &Path, matcher: fn(&Path) -> bool) -> Option<PathBuf> {
             }
         }
     }
-    best.map(|(path, _)| path)
+    // 走査で得たパスも許可判定を通してから返す（型で「検証済み」を担保する）。
+    best.and_then(|(path, _)| crate::permissions::resolve(cfg, &path.to_string_lossy()).ok())
 }
 
 fn is_wav(path: &Path) -> bool {
@@ -119,25 +101,25 @@ fn is_transcript(path: &Path) -> bool {
         .is_some_and(|name| name.ends_with(".transcript.txt"))
 }
 
-fn output_stem(audio_path: &Path) -> PathBuf {
-    audio_path.with_extension("")
+fn output_stem(cfg: &Config, audio_path: &SafePath) -> Result<SafePath, String> {
+    audio_path.sibling(cfg, &audio_path.file_stem_lossy())
 }
 
-fn transcript_path(audio_path: &Path) -> PathBuf {
-    audio_path.with_extension("transcript.txt")
+fn transcript_path(cfg: &Config, audio_path: &SafePath) -> Result<SafePath, String> {
+    audio_path.sibling(cfg, &format!("{}.transcript.txt", audio_path.file_stem_lossy()))
 }
 
-fn minutes_path(audio_path: &Path) -> PathBuf {
-    audio_path.with_extension("minutes.md")
+fn minutes_path(cfg: &Config, audio_path: &SafePath) -> Result<SafePath, String> {
+    audio_path.sibling(cfg, &format!("{}.minutes.md", audio_path.file_stem_lossy()))
 }
 
-fn minutes_path_from_transcript(transcript_path: &Path) -> PathBuf {
-    if let Some(name) = transcript_path.file_name().and_then(|name| name.to_str()) {
-        if let Some(stem) = name.strip_suffix(".transcript.txt") {
-            return transcript_path.with_file_name(format!("{stem}.minutes.md"));
-        }
-    }
-    transcript_path.with_extension("minutes.md")
+fn minutes_path_from_transcript(cfg: &Config, transcript_path: &SafePath) -> Result<SafePath, String> {
+    let name = transcript_path.file_name_lossy();
+    let stem = name
+        .strip_suffix(".transcript.txt")
+        .map(ToString::to_string)
+        .unwrap_or_else(|| transcript_path.file_stem_lossy());
+    transcript_path.sibling(cfg, &format!("{stem}.minutes.md"))
 }
 
 fn bundled_whisper_dirs() -> Vec<PathBuf> {
@@ -266,11 +248,11 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
         Ok(path) => path,
         Err(error) => return format!("エラー: {error}"),
     };
-    if path.extension().and_then(|ext| ext.to_str()) != Some("wav") {
+    if path.extension_lossy() != "wav" {
         return "エラー: 録音ファイルは .wav で保存してください。".to_string();
     }
-    if let Some(parent) = path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
+    {
+        if let Err(error) = crate::permissions::fs::create_dir_all(&path.parent_or_root(cfg)) {
             return format!("エラー: 録音フォルダを作成できません: {error}");
         }
     }
@@ -401,17 +383,17 @@ fn status() -> String {
 
 fn split_args_template(
     template: &str,
-    audio: &Path,
+    audio: &SafePath,
     model: &str,
-    output_stem: &Path,
+    output_stem: &SafePath,
 ) -> Vec<String> {
     template
         .split_whitespace()
         .map(|token| {
             token
-                .replace("{audio}", &audio.to_string_lossy())
+                .replace("{audio}", &audio.as_path().to_string_lossy())
                 .replace("{model}", model)
-                .replace("{output_stem}", &output_stem.to_string_lossy())
+                .replace("{output_stem}", &output_stem.as_path().to_string_lossy())
         })
         .collect()
 }
@@ -516,7 +498,7 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             Err(error) => return format!("エラー: {error}"),
         }
     } else {
-        match latest_file(&base, is_wav) {
+        match latest_file(cfg, &base, is_wav) {
             Some(path) => path,
             None => {
                 return format!(
@@ -538,7 +520,10 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             "npm run setup:whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
         );
     }
-    let output_stem = output_stem(&audio);
+    let output_stem = match output_stem(cfg, &audio) {
+        Ok(path) => path,
+        Err(error) => return format!("エラー: {error}"),
+    };
     let template = cfg.get(
         "PICOAGENT_TRANSCRIBE_ARGS",
         "-m {model} -f {audio} -otxt -of {output_stem}",
@@ -568,7 +553,10 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             trim_output(&output.stderr)
         );
     }
-    let transcript = output_stem.with_extension("txt");
+    let transcript = match output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy())) {
+        Ok(path) => path,
+        Err(error) => return format!("エラー: {error}"),
+    };
     let content = if transcript.exists() {
         match std::fs::read_to_string(&transcript) {
             Ok(content) => content,
@@ -577,7 +565,10 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
     } else {
         trim_output(&output.stdout)
     };
-    let target = transcript_path(&audio);
+    let target = match transcript_path(cfg, &audio) {
+        Ok(path) => path,
+        Err(error) => return format!("エラー: {error}"),
+    };
     if let Err(error) = std::fs::write(&target, &content) {
         return format!("エラー: 文字起こし結果を保存できません: {error}");
     }
@@ -637,7 +628,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("会議");
-    let mut transcript_source: Option<PathBuf> = None;
+    let mut transcript_source: Option<SafePath> = None;
     let transcript = if let Some(text) = args
         .get("transcript")
         .and_then(Value::as_str)
@@ -658,7 +649,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
                 Err(error) => return format!("エラー: {error}"),
             }
         } else {
-            match latest_file(&base, is_transcript) {
+            match latest_file(cfg, &base, is_transcript) {
                 Some(path) => path,
                 None => {
                     return format!(
@@ -691,23 +682,33 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
         .filter(|value| !value.is_empty())
     {
         match bounded_path(cfg, path_text) {
-            Ok(path) => minutes_path(&path),
+            Ok(path) => match minutes_path(cfg, &path) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {error}"),
+            },
             Err(error) => return format!("エラー: {error}"),
         }
     } else if let Some(path) = &transcript_source {
-        minutes_path_from_transcript(path)
+        match minutes_path_from_transcript(cfg, path) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        }
     } else {
-        normalize(
-            &base,
+        // 既定の保存先も許可判定を通す（主ルート配下の相対パスとして再検証される）。
+        match crate::permissions::resolve(
+            cfg,
             &format!(
                 "meetings/{}/{}-minutes.md",
                 Local::now().format("%Y-%m-%d"),
                 Local::now().format("%Y%m%d-%H%M%S")
             ),
-        )
+        ) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        }
     };
-    if let Some(parent) = output.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
+    {
+        if let Err(error) = crate::permissions::fs::create_dir_all(&output.parent_or_root(cfg)) {
             return format!("エラー: 議事録フォルダを作成できません: {error}");
         }
     }
@@ -813,15 +814,16 @@ mod tests {
         minutes_path_from_transcript, split_args_template,
     };
     use crate::config::Config;
+    use crate::permissions::SafePath;
     use std::path::Path;
 
     #[test]
     fn 引数テンプレートを展開する() {
         let args = split_args_template(
             "-m {model} -f {audio} -otxt -of {output_stem}",
-            Path::new("a.wav"),
+            &SafePath::app_owned(Path::new("a.wav").to_path_buf()),
             "model.bin",
-            Path::new("out"),
+            &SafePath::app_owned(Path::new("out").to_path_buf()),
         );
         assert_eq!(
             args,
@@ -861,10 +863,14 @@ mod tests {
 
     #[test]
     fn transcript名から議事録名を揃える() {
-        let path = minutes_path_from_transcript(Path::new("meetings/2026-06-30/a.transcript.txt"));
-        assert_eq!(
-            path,
-            Path::new("meetings/2026-06-30/a.minutes.md").to_path_buf()
-        );
+        let dir = std::env::temp_dir().join(format!("picoagent-minutes-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("meetings/2026-06-30")).unwrap();
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
+        let transcript =
+            crate::permissions::resolve(&cfg, "meetings/2026-06-30/a.transcript.txt").unwrap();
+        let path = minutes_path_from_transcript(&cfg, &transcript).unwrap();
+        assert!(path.as_path().ends_with("meetings/2026-06-30/a.minutes.md"), "path: {}", path.display());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

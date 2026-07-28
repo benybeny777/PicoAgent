@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-07-25
+
+### ファイルセキュリティを「規約」から「構造」で守る設計へ作り替え
+
+同じ抜け（各スキルが独自の許可判定を持ち、リンク実体検査・追加許可ルート・拒否パス判定が漏れる）を7スキルで繰り返したため、人のレビューに依存しない設計へ改めた。
+
+- **`SafePath` 型を導入** (`src-tauri/src/permissions.rs`): 許可判定を通過したパスを表す専用型。内部 `PathBuf` は非公開で、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限定した。`resolve()` の戻り値を `PathBuf` から `SafePath` へ変えたことで、**未検証パスを渡している箇所はすべてコンパイルエラーになる**。派生パス（`join` / `sibling`）も `..` による脱出を防ぐため毎回再検証する。アプリ内部が決めたパス（一時ファイル等）だけ `SafePath::app_owned` で明示的に扱う。
+- **`permissions::fs` ファサードを追加**: `read_to_string` / `read` / `write` / `create_dir_all` が `&SafePath` しか受け取らないため、検証していないパスを書き込みへ渡せない。`write` は親フォルダ作成も含めて扱う。
+- **設計ガードのテストを追加** (`permissions::guard`): `skills/**/mod.rs` を走査し、(1) 許可判定の再実装（`fn bounded_path(base:` / `fn normalize(base:` / `target.starts_with(base)`）、(2) パス引数を宣言しているのに `permissions::resolve` を通していないスキル、を検出して失敗させる。例外は `run_command` / `code_runner` / `trash_file` の3件のみ（いずれも独自の追加制約を持つ実行・削除系）で、コード内に理由を明記した。**実際に違反を注入して両ルールが検出することを確認済み**。導入と同時に `meeting_recorder` に残っていた未使用の許可判定コピーを検出・除去した。
+- **全スキルを新 API へ移行**: パスを扱う12スキル（document_convert / genspark_suite / image_tools / meeting_recorder / ms_office / pdf_tools / read_file / research_report / spark_workspace / trash_file / whisper_transcribe / workspace_files）と `commands.rs` の添付読込を `SafePath` ベースへ統一。走査で得たパス（`latest_file`）や派生パス（`transcript_path` / `minutes_path` / `sibling_path`）も許可判定を通してから返すようにした。
+- **ルールをドキュメント化**: `AGENTS.md` のコネクタ開発ルールと `SPEC.md` の共通許可の節に、`SafePath` の使い方・`permissions::fs`・ガードテストの存在と例外リストを明記した。
+- 検証: cargo test 106件パス（ガード2件を含む）・clippy 警告ゼロ。
+
+---
+
 ## 2026-07-24
 
 ### 全体再チェック: 残る4スキルの許可境界を統一し、仕様書を実装へ同期

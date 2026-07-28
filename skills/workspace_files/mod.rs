@@ -3,7 +3,6 @@
 // 読み書きは全スキル共通の許可ルール（permissions）に限定し、サイズ上限を設ける。
 // 許可ルート外・保護パス（C:\Windows / Program Files 等）は permissions が拒否する。
 
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -12,6 +11,7 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
+use crate::permissions::SafePath;
 use crate::permissions;
 
 const MAX_READ_BYTES: usize = 128 * 1024;
@@ -30,7 +30,7 @@ fn undo_history() -> &'static Mutex<Vec<UndoEntry>> {
     UNDO_HISTORY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn snapshot_before_write(path: &Path) -> Result<UndoEntry, String> {
+fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
     let original = if path.exists() {
         let size = std::fs::metadata(path)
             .map_err(|error| format!("変更前の情報を取得できません: {error}"))?
@@ -47,7 +47,7 @@ fn snapshot_before_write(path: &Path) -> Result<UndoEntry, String> {
         None
     };
     Ok(UndoEntry {
-        path: path.to_path_buf(),
+        path: path.as_path().to_path_buf(),
         original,
     })
 }
@@ -105,7 +105,7 @@ fn trim_to_bytes(content: &str, max_bytes: usize) -> String {
     format!("{}\n…（{} バイトで打ち切り）", &content[..end], max_bytes)
 }
 
-fn list_dir(path: &Path) -> String {
+fn list_dir(path: &SafePath) -> String {
     let entries = match std::fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) => return format!("エラー: 一覧取得に失敗しました（{}）: {}", error, path.display()),
@@ -241,10 +241,9 @@ impl Tool for WorkspaceFilesTool {
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
                 {
-                    if let Some(parent) = target.parent() {
-                        if let Err(error) = std::fs::create_dir_all(parent) {
-                            return format!("エラー: 親フォルダ作成に失敗しました（{}）: {}", error, parent.display());
-                        }
+                    let parent = target.parent_or_root(cfg);
+                    if let Err(error) = crate::permissions::fs::create_dir_all(&parent) {
+                        return format!("エラー: 親フォルダ作成に失敗しました（{}）: {}", error, parent.display());
                     }
                 }
                 let snapshot = match snapshot_before_write(&target) {

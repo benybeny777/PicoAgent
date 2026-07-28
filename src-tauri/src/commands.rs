@@ -1957,7 +1957,9 @@ pub async fn pet_transcribe_audio(
     let path = std::env::temp_dir().join(format!("picoagent-mic-{unique}.wav"));
     std::fs::write(&path, &bytes)
         .map_err(|error| format!("一時ファイルを書き込めません: {error}"))?;
-    let result = crate::tools::whisper_transcribe::transcribe_file(&state.config, &path).await;
+    // アプリが作った一時 WAV（ユーザー入力パスではない）。
+    let audio = crate::permissions::SafePath::app_owned(path.clone());
+    let result = crate::tools::whisper_transcribe::transcribe_file(&state.config, &audio).await;
     let _ = std::fs::remove_file(&path);
     match result {
         Ok(text) if !text.trim().is_empty() => Ok(json!({ "text": text })),
@@ -2377,16 +2379,11 @@ pub async fn pet_read_dropped_path(
         return Err("ファイルが大きすぎます（25MB まで）。".to_string());
     }
     let bytes = std::fs::read(&file).map_err(|e| format!("ファイルを読めません: {e}"))?;
-    let name = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("dropped")
-        .to_string();
-    let ext = file
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
+    let name = match file.file_name_lossy() {
+        name if name.is_empty() => "dropped".to_string(),
+        name => name,
+    };
+    let ext = file.extension_lossy();
     // モデルへ画像としてそのまま送れる形式。それ以外は文書添付（内容抽出）フローへ。
     let image_mime = match ext.as_str() {
         "png" => Some("image/png"),

@@ -1,7 +1,6 @@
 // research_report/mod.rs - Web調査を束ね、出典付きMarkdownレポートを生成するスキル。
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -12,6 +11,7 @@ use url::Url;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
+use crate::permissions::SafePath;
 use crate::message::Field;
 
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
@@ -30,17 +30,17 @@ struct SearchResult {
 }
 
 struct SavedArtifacts {
-    report: PathBuf,
-    brief: Option<PathBuf>,
-    dashboard: Option<PathBuf>,
-    slides: Option<PathBuf>,
-    sources: Option<PathBuf>,
-    sources_json: Option<PathBuf>,
-    action_plan: Option<PathBuf>,
-    decision_matrix: Option<PathBuf>,
-    faq: Option<PathBuf>,
-    risk_register: Option<PathBuf>,
-    reading_list: Option<PathBuf>,
+    report: SafePath,
+    brief: Option<SafePath>,
+    dashboard: Option<SafePath>,
+    slides: Option<SafePath>,
+    sources: Option<SafePath>,
+    sources_json: Option<SafePath>,
+    action_plan: Option<SafePath>,
+    decision_matrix: Option<SafePath>,
+    faq: Option<SafePath>,
+    risk_register: Option<SafePath>,
+    reading_list: Option<SafePath>,
 }
 
 pub struct ResearchReportTool;
@@ -606,16 +606,17 @@ fn build_reading_list(topic: &str, results: &[SearchResult]) -> String {
     out
 }
 
-fn sibling_path(path: &Path, suffix: &str, extension: &str) -> Result<PathBuf, String> {
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "保存先ファイル名を解釈できません。".to_string())?;
-    Ok(path.with_file_name(format!("{stem}{suffix}.{extension}")))
+fn sibling_path(cfg: &Config, path: &SafePath, suffix: &str, extension: &str) -> Result<SafePath, String> {
+    let stem = path.file_stem_lossy();
+    if stem.is_empty() {
+        return Err("保存先ファイル名を解釈できません。".to_string());
+    }
+    path.sibling(cfg, &format!("{stem}{suffix}.{extension}"))
 }
 
-fn write_text(path: &Path, content: &str, what: &str) -> Result<(), String> {
-    std::fs::write(path, content).map_err(|error| format!("{what} の保存に失敗しました: {}", error))
+fn write_text(path: &SafePath, content: &str, what: &str) -> Result<(), String> {
+    crate::permissions::fs::write(path, content)
+        .map_err(|error| format!("{what} の保存に失敗しました: {}", error))
 }
 
 fn save_report(
@@ -638,13 +639,11 @@ fn save_report(
         .filter(|value| !value.is_empty())
         .unwrap_or(&default_path);
     let target = crate::permissions::resolve(cfg, path)?;
-    if target.extension().and_then(|ext| ext.to_str()) != Some("md") {
+    if target.extension_lossy() != "md" {
         return Err("save_path は .md ファイルにしてください。".to_string());
     }
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("保存先フォルダを作成できません: {}", error))?;
-    }
+    crate::permissions::fs::create_dir_all(&target.parent_or_root(cfg))
+        .map_err(|error| format!("保存先フォルダを作成できません: {}", error))?;
     write_text(&target, report, "レポート")?;
     let bundle = args
         .get("artifact_bundle")
@@ -665,16 +664,16 @@ fn save_report(
             reading_list: None,
         });
     }
-    let brief_path = sibling_path(&target, ".brief", "md")?;
-    let dashboard_path = sibling_path(&target, ".dashboard", "html")?;
-    let slides_path = sibling_path(&target, ".slides", "md")?;
-    let sources_path = sibling_path(&target, ".sources", "csv")?;
-    let sources_json_path = sibling_path(&target, ".sources", "json")?;
-    let action_plan_path = sibling_path(&target, ".action-plan", "md")?;
-    let decision_matrix_path = sibling_path(&target, ".decision-matrix", "csv")?;
-    let faq_path = sibling_path(&target, ".faq", "md")?;
-    let risk_register_path = sibling_path(&target, ".risk-register", "md")?;
-    let reading_list_path = sibling_path(&target, ".reading-list", "md")?;
+    let brief_path = sibling_path(cfg, &target, ".brief", "md")?;
+    let dashboard_path = sibling_path(cfg, &target, ".dashboard", "html")?;
+    let slides_path = sibling_path(cfg, &target, ".slides", "md")?;
+    let sources_path = sibling_path(cfg, &target, ".sources", "csv")?;
+    let sources_json_path = sibling_path(cfg, &target, ".sources", "json")?;
+    let action_plan_path = sibling_path(cfg, &target, ".action-plan", "md")?;
+    let decision_matrix_path = sibling_path(cfg, &target, ".decision-matrix", "csv")?;
+    let faq_path = sibling_path(cfg, &target, ".faq", "md")?;
+    let risk_register_path = sibling_path(cfg, &target, ".risk-register", "md")?;
+    let reading_list_path = sibling_path(cfg, &target, ".reading-list", "md")?;
     write_text(
         &brief_path,
         &build_brief(topic, questions, results),

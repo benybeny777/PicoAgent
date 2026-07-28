@@ -1,6 +1,5 @@
 // skills/pdf_tools/mod.rs - qpdf による PDF 編集スキル。
 
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -10,12 +9,13 @@ use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
+use crate::permissions::SafePath;
 use crate::message::Field;
 
 pub struct PdfToolsTool;
 
 /// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
-fn one_path(cfg: &Config, args: &Value, key: &str) -> Result<PathBuf, String> {
+fn one_path(cfg: &Config, args: &Value, key: &str) -> Result<SafePath, String> {
     let raw = args
         .get(key)
         .and_then(Value::as_str)
@@ -249,7 +249,7 @@ mod tests {
 
         // ルート配下の相対パスは解決できる。
         let inside = super::one_path(&cfg, &json!({ "input_path": "a.pdf" }), "input_path").unwrap();
-        assert!(inside.starts_with(&dir), "inside: {}", inside.display());
+        assert!(inside.as_path().starts_with(&dir), "inside: {}", inside.display());
 
         // ルート外の絶対パスと親参照は拒否する。
         assert!(super::one_path(&cfg, &json!({ "input_path": "/etc/passwd" }), "input_path").is_err());

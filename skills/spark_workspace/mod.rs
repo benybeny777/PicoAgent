@@ -1,6 +1,5 @@
 // spark_workspace/mod.rs - 資料・ページ・表・実行計画をまとめて作るワークスペース生成スキル。
 
-use std::path::Path;
 
 use async_trait::async_trait;
 use chrono::Local;
@@ -53,11 +52,6 @@ fn clean_text(value: &str) -> Result<String, String> {
         ));
     }
     Ok(trimmed.to_string())
-}
-
-fn write_file(path: &Path, content: &str) -> Result<(), String> {
-    std::fs::write(path, content)
-        .map_err(|error| format!("{} の保存に失敗しました: {}", path.display(), error))
 }
 
 fn bullets(text: &str) -> Vec<String> {
@@ -274,8 +268,11 @@ impl Tool for SparkWorkspaceTool {
         ];
         let mut saved = Vec::new();
         for (name, content) in files {
-            let path = dir.join(name);
-            if let Err(error) = write_file(&path, &content) {
+            let path = match dir.join(cfg, name) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {}", error),
+            };
+            if let Err(error) = crate::permissions::fs::write(&path, &content) {
                 return format!("エラー: {error}");
             }
             saved.push(path);

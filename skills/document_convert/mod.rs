@@ -151,10 +151,7 @@ impl Tool for DocumentConvertTool {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: {}", error),
             },
-            None => input
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| crate::permissions::primary_root(cfg)),
+            None => input.parent_or_root(cfg),
         };
         if let Err(error) = std::fs::create_dir_all(&output_dir) {
             return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);
@@ -166,17 +163,15 @@ impl Tool for DocumentConvertTool {
             .filter(|value| (5..=300).contains(value))
             .unwrap_or(120);
         let engine = args.get("engine").and_then(Value::as_str).map(str::trim).unwrap_or("auto");
-        let input_ext = input
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase())
-            .unwrap_or_default();
+        let input_ext = input.extension_lossy();
         let format_lower = format.to_ascii_lowercase();
         let use_pandoc = should_use_pandoc(engine, &input_ext, &format_lower);
         let engine_label = if use_pandoc { "Pandoc" } else { "OfficeCLI" };
-        let pandoc_output = output_dir
-            .join(input.file_stem().unwrap_or_default())
-            .with_extension(&format_lower);
+        // 出力先も許可判定を通す（output_dir 配下の相対名として再検証される）。
+        let pandoc_output = match output_dir.join(cfg, &format!("{}.{}", input.file_stem_lossy(), format_lower)) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {}", error),
+        };
         let mut command;
         if use_pandoc {
             command = Command::new(pandoc_path(cfg));
