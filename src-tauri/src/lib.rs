@@ -10,6 +10,8 @@ mod config;
 mod daily;
 mod emotion;
 mod engine;
+#[cfg(test)]
+mod guard_scan;
 mod history;
 mod log_paths;
 mod mcp;

@@ -414,45 +414,20 @@ mod tests {
 /// テストで検出して落とす。
 #[cfg(test)]
 mod guard {
-    use std::path::{Path, PathBuf};
 
     /// 自前の許可判定を持つことを許すスキル（意図的な例外のみ。追加には理由を添えること）。
     /// - `run_command` / `code_runner`: 実行系。cwd と allowlist を含む独自モデルを持つ
     /// - `trash_file`: 削除専用。実在必須＋許可ルート自体の削除拒否という追加制約がある
     const OWN_CHECK_ALLOWED: [&str; 3] = ["run_command", "code_runner", "trash_file"];
 
-    fn skills_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("src-tauri の親")
-            .join("skills")
-    }
-
-    fn skill_sources() -> Vec<(String, String)> {
-        let mut out = Vec::new();
-        for entry in std::fs::read_dir(skills_dir())
-            .expect("skills ディレクトリ")
-            .flatten()
-        {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let path = entry.path().join("mod.rs");
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                out.push((name, text));
-            }
-        }
-        assert!(
-            out.len() > 40,
-            "スキルの読み込みに失敗している可能性: {}",
-            out.len()
-        );
-        out
-    }
+    use crate::guard_scan;
 
     /// スキル内に許可判定の再実装（`starts_with(base)` 方式のコピー）が無いこと。
     #[test]
     fn スキルは許可判定を自前実装しない() {
         let mut violations = Vec::new();
-        for (name, text) in skill_sources() {
+        for source in guard_scan::skill_sources() {
+            let (name, text) = (&source.name, &source.text);
             if OWN_CHECK_ALLOWED.contains(&name.as_str()) {
                 continue;
             }
@@ -477,7 +452,8 @@ mod guard {
     #[test]
     fn パスを受け取るスキルは共通の許可判定を通す() {
         let mut violations = Vec::new();
-        for (name, text) in skill_sources() {
+        for source in guard_scan::skill_sources() {
+            let (name, text) = (&source.name, &source.text);
             if OWN_CHECK_ALLOWED.contains(&name.as_str()) {
                 continue;
             }
@@ -487,12 +463,56 @@ mod guard {
                 continue;
             }
             if !text.contains("permissions::resolve") {
-                violations.push(name);
+                violations.push(name.clone());
             }
         }
         assert!(
             violations.is_empty(),
             "パス引数を持つのに `permissions::resolve()` を通していないスキルがあります:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    /// 許可済みパスへの書き込みは `permissions::fs` のファサードを通すこと。
+    ///
+    /// `SafePath` は `AsRef<Path>` なので `std::fs::write(&safe_path, ..)` がそのまま
+    /// 書けてしまい、ファサードが持つ親フォルダ自動作成と統一エラーメッセージを
+    /// 素通りする。将来ファサードに監査ログやサイズ上限を足したときも漏れる。
+    #[test]
+    fn 許可済みパスへの書き込みはファサードを通す() {
+        /// 一時ファイル経由の書き込みなど、ファサードに載せられない箇所（理由必須）。
+        /// - `ms_office`: 出力を壊さないための一時ファイル＋rename（app_owned な中間パス）
+        /// - `trash_file`: ゴミ箱の .trashinfo（XDG 仕様のメタファイルで許可ルート外）
+        const FACADE_EXEMPT: [(&str, &str); 3] = [
+            ("ms_office", "一時ファイル経由の原子的な差し替え"),
+            ("trash_file", "ゴミ箱メタファイル（.trashinfo）"),
+            (
+                "code_runner",
+                "実行用スクリプトの内部一時ファイル（ユーザー指定パスではない）",
+            ),
+        ];
+
+        let mut violations = Vec::new();
+        for source in guard_scan::skill_sources() {
+            if FACADE_EXEMPT
+                .iter()
+                .any(|(name, _)| *name == source.name.as_str())
+            {
+                continue;
+            }
+            for (number, line) in source.body().lines().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if line.contains("std::fs::write(") {
+                    violations.push(format!("{}:{}", source.path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "許可済みパスへの書き込みは `permissions::fs::write()` を使ってください\n（親フォルダ自動作成とエラーメッセージが統一されます）:\n{}",
             violations.join("\n")
         );
     }

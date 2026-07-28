@@ -199,44 +199,16 @@ mod guard {
 
     use super::is_secret_key;
 
-    fn sources() -> Vec<(String, String)> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("src-tauri の親");
-        let mut out = Vec::new();
-        for dir in [root.join("skills"), root.join("src-tauri/src/providers")] {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let file = if path.is_dir() {
-                    path.join("mod.rs")
-                } else {
-                    path
-                };
-                if file.extension().and_then(|e| e.to_str()) != Some("rs") {
-                    continue;
-                }
-                if let Ok(text) = std::fs::read_to_string(&file) {
-                    out.push((file.to_string_lossy().to_string(), text));
-                }
-            }
-        }
-        assert!(
-            out.len() > 40,
-            "ソースの読み込みに失敗している可能性: {}",
-            out.len()
-        );
-        out
-    }
+    use crate::guard_scan;
 
     #[test]
     fn シークレット設定はpassword型で申告する() {
         let mut violations = Vec::new();
-        for (file, text) in sources() {
+        // スキルもプロバイダも、`Field::new` を書きうる場所はすべて走査する。
+        for source in guard_scan::all_sources() {
+            let file = source.path.display().to_string();
             // Field::new("KEY", "ラベル", "型", ...) の 1・3 引数を素朴に取り出す。
-            for chunk in text.split("Field::new(").skip(1) {
+            for chunk in source.body().split("Field::new(").skip(1) {
                 let mut parts = chunk.split('"').skip(1).step_by(2);
                 let (Some(key), Some(_label), Some(kind)) =
                     (parts.next(), parts.next(), parts.next())

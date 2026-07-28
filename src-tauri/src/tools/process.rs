@@ -207,89 +207,26 @@ mod tests {
 /// 中断時に子プロセスが残る）。人のレビューに頼らずテストで検出する。
 #[cfg(test)]
 mod guard {
-    use std::path::{Path, PathBuf};
 
     /// 直接 `Command::new` を許すスキル。現在は例外なし。
     /// 追加する場合は、なぜ共通層に載せられないのかを理由として書き添えること。
     const RAW_COMMAND_ALLOWED: [&str; 0] = [];
 
-    /// スキルとバックエンド本体の両方を走査対象にする。
-    ///
-    /// 以前は `skills/` しか見ておらず、**同じ allowlist でコマンドを実行する
-    /// `src/scheduler.rs` が丸ごと走査から漏れていた**（自前 `hide_window` と
-    /// 直接 `Command::new` が残っていた）。ガードの穴はガードが無いのと同じなので、
-    /// プロセスを起動しうる場所はすべて対象にする。
-    fn sources() -> Vec<(String, String)> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("src-tauri の親");
-        let mut out = Vec::new();
-        for entry in std::fs::read_dir(root.join("skills"))
-            .expect("skills ディレクトリ")
-            .flatten()
-        {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let path: PathBuf = entry.path().join("mod.rs");
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                out.push((name, text));
-            }
-        }
-        let skills = out.len();
-        assert!(
-            skills > 40,
-            "スキルの読み込みに失敗している可能性: {skills}"
-        );
-
-        collect_rs(&root.join("src-tauri/src"), &mut out);
-        assert!(
-            out.len() > skills + 20,
-            "バックエンドの読み込みに失敗している可能性: {}",
-            out.len() - skills
-        );
-        out
-    }
-
-    fn collect_rs(dir: &Path, out: &mut Vec<(String, String)>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_rs(&path, out);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                let name = path
-                    .strip_prefix(dir)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .to_string();
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    out.push((name, text));
-                }
-            }
-        }
-    }
-
-    /// テストコード部分（`#[cfg(test)]` 以降）を落とす。テストの外部コマンド有無判定は対象外。
-    fn without_tests(text: &str) -> &str {
-        match text.find("#[cfg(test)]") {
-            Some(pos) => &text[..pos],
-            None => text,
-        }
-    }
+    use crate::guard_scan;
 
     /// 外部プロセスの起動は `tools::process::command()` 経由に統一すること。
     #[test]
     fn プロセス起動作法を自前実装しない() {
         let mut violations = Vec::new();
-        for (name, text) in sources() {
+        for source in guard_scan::all_sources() {
+            let name = &source.name;
             if name == "process.rs" {
                 continue; // 共通層の実装そのもの
             }
             if RAW_COMMAND_ALLOWED.contains(&name.as_str()) {
                 continue;
             }
-            let body = without_tests(&text);
+            let body = source.body();
             if body.contains("fn hide_window") || body.contains("CREATE_NO_WINDOW") {
                 violations.push(format!("{name}: hide_window/CREATE_NO_WINDOW の自前実装"));
             }
@@ -323,14 +260,14 @@ mod guard {
     #[test]
     fn 許可コマンド実行経路は物理削除を拒否する() {
         let mut violations = Vec::new();
-        for (name, text) in sources() {
-            if name == "process.rs" {
+        for source in guard_scan::all_sources() {
+            if source.name == "process.rs" {
                 continue; // 判定の定義元
             }
-            let body = without_tests(&text);
+            let body = source.body();
             if body.contains("PICOAGENT_COMMAND_ALLOWLIST") && !body.contains("is_physical_delete")
             {
-                violations.push(name);
+                violations.push(source.path.display().to_string());
             }
         }
         assert!(

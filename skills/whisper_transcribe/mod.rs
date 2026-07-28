@@ -507,7 +507,7 @@ impl Tool for WhisperTranscribeTool {
         if let Err(error) = crate::permissions::fs::create_dir_all(&target.parent_or_root(cfg)) {
             return format!("エラー: 文字起こしフォルダを作成できません: {error}");
         }
-        if let Err(error) = std::fs::write(&target, &content) {
+        if let Err(error) = crate::permissions::fs::write(&target, &content) {
             return format!("エラー: 文字起こし結果を保存できません: {error}");
         }
         format!(

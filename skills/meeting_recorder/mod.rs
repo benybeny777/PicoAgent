@@ -568,7 +568,7 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
         Ok(path) => path,
         Err(error) => return format!("エラー: {error}"),
     };
-    if let Err(error) = std::fs::write(&target, &content) {
+    if let Err(error) = crate::permissions::fs::write(&target, &content) {
         return format!("エラー: 文字起こし結果を保存できません: {error}");
     }
     format!(
@@ -712,7 +712,7 @@ fn make_minutes(cfg: &Config, args: &Value) -> String {
         }
     }
     let minutes = minutes_from_text(title, &transcript);
-    match std::fs::write(&output, minutes) {
+    match crate::permissions::fs::write(&output, minutes) {
         Ok(()) => format!("議事録を作成しました: {}", output.display()),
         Err(error) => format!("エラー: 議事録を保存できません: {error}"),
     }
