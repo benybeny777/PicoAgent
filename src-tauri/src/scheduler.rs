@@ -432,14 +432,10 @@ fn trim_output(label: &str, bytes: &[u8]) -> String {
     if text.len() <= MAX_OUTPUT_BYTES {
         return format!("{}:\n{}", label, text);
     }
-    let mut end = MAX_OUTPUT_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
     format!(
         "{}:\n{}\n…（{} バイトで打ち切り）",
         label,
-        &text[..end],
+        crate::text::truncate_bytes(&text, MAX_OUTPUT_BYTES),
         MAX_OUTPUT_BYTES
     )
 }
