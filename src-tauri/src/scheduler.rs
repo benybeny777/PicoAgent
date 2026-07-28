@@ -621,7 +621,12 @@ fn should_run(task: &ScheduledTask, minute_stamp: &str, hhmm: &str) -> bool {
         }
 }
 
-pub async fn tick(app: &AppHandle, cfg: &Config) {
+/// 実行すべきタスクを取り出し、二重起動しないよう `last_run_minute` を先に保存する。
+///
+/// 実行そのものはここで待たない。文字起こしのように 30 分かかりうるタスクを
+/// 検出ループの中で `await` すると、その間の tick が進まず、当該時間帯に予定
+/// されていた他タスクが（次の分に繰り越されないため）恒久的にスキップされる。
+fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
     let now = Local::now();
     let minute_stamp = now.format("%Y-%m-%d %H:%M").to_string();
     let hhmm = now.format("%H:%M").to_string();
@@ -650,12 +655,16 @@ pub async fn tick(app: &AppHandle, cfg: &Config) {
             );
         }
     }
-    for task in due {
-        let result = execute_task(app, cfg, &task).await;
-        crate::log_paths::append_app_log(app, &result);
-        let record = append_run_history(app, &task, &result, &now.to_rfc3339());
-        emit_run_notice(app, &record);
-    }
+    due
+}
+
+/// 1タスクを実行し、ログ・実行履歴・通知へ反映する。
+async fn run_and_record(app: &AppHandle, cfg: &Config, task: ScheduledTask) {
+    let started = Local::now().to_rfc3339();
+    let result = execute_task(app, cfg, &task).await;
+    crate::log_paths::append_app_log(app, &result);
+    let record = append_run_history(app, &task, &result, &started);
+    emit_run_notice(app, &record);
 }
 
 pub async fn rerun_task(
@@ -676,6 +685,20 @@ pub async fn rerun_task(
 }
 
 pub fn start(app: AppHandle) {
+    // 検出（tick）と実行（ワーカー）を分ける。実行は 1 本のワーカーで直列に処理するので、
+    // 長時間タスクがあっても検出は止まらず、実行履歴の書き込みも競合しない。
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<ScheduledTask>(64);
+
+    let worker_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(task) = rx.recv().await {
+            let Some(state) = worker_app.try_state::<crate::commands::AppState>() else {
+                continue;
+            };
+            run_and_record(&worker_app, &state.config, task).await;
+        }
+    });
+
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
@@ -683,14 +706,82 @@ pub fn start(app: AppHandle) {
             let Some(state) = app.try_state::<crate::commands::AppState>() else {
                 continue;
             };
-            tick(&app, &state.config).await;
+            for task in take_due_tasks(&app, &state.config) {
+                // キューが詰まっている＝前のタスクが長引いている。取りこぼしを黙って
+                // 捨てず、ログに残してから次の機会に委ねる。
+                if let Err(error) = tx.try_send(task) {
+                    crate::log_paths::append_app_log(
+                        &app,
+                        &format!("スケジュール実行キューが埋まっているため見送りました: {error}"),
+                    );
+                }
+            }
         }
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_days, normalize_time, parse_cron_value};
+    use super::{normalize_days, normalize_time, parse_cron_value, should_run, ScheduledTask};
+
+    fn 固定時刻タスク(time: &str) -> ScheduledTask {
+        ScheduledTask {
+            id: "t1".to_string(),
+            kind: "command".to_string(),
+            time: time.to_string(),
+            cron: String::new(),
+            days: Vec::new(),
+            date: String::new(),
+            repeat: true,
+            label: String::new(),
+            enabled: true,
+            program: "git".to_string(),
+            args: vec!["status".to_string()],
+            cwd: String::new(),
+            timeout_secs: None,
+            tool_name: String::new(),
+            tool_args: serde_json::Value::Null,
+            last_run_minute: String::new(),
+        }
+    }
+
+    #[test]
+    fn 同じ分では二重に実行しない() {
+        let mut task = 固定時刻タスク("07:05");
+        assert!(should_run(&task, "2026-07-28 07:05", "07:05"));
+        // 検出時に last_run_minute を刻む＝同じ分の再検出では拾わない。
+        task.last_run_minute = "2026-07-28 07:05".to_string();
+        assert!(!should_run(&task, "2026-07-28 07:05", "07:05"));
+        // 分が変われば次の予定は通常どおり拾える。
+        assert!(!should_run(&task, "2026-07-28 08:05", "08:05"));
+        task.time = "08:05".to_string();
+        assert!(should_run(&task, "2026-07-28 08:05", "08:05"));
+    }
+
+    #[test]
+    fn 無効タスクは検出しない() {
+        let mut task = 固定時刻タスク("07:05");
+        task.enabled = false;
+        assert!(!should_run(&task, "2026-07-28 07:05", "07:05"));
+    }
+
+    /// 検出は同期関数に固定する。ここを async にすると、長時間タスクの実行を
+    /// 検出ループの中で `await` してしまう設計へ簡単に戻れてしまい、実行中は
+    /// 他タスクの検出が止まる（＝その分の予定が恒久的にスキップされる）。
+    #[test]
+    fn 検出は実行を待たない構造である() {
+        let source = include_str!("scheduler.rs");
+        // 探索語をリテラルで書くと、この判定自身がソースに現れて空振りする。
+        let async_marker = concat!("async ", "fn take_due_tasks(");
+        assert!(
+            source.contains("fn take_due_tasks(") && !source.contains(async_marker),
+            "take_due_tasks は同期関数のままにしてください（実行は別ワーカーへ渡す）"
+        );
+        assert!(
+            source.contains("tokio::sync::mpsc::channel::<ScheduledTask>"),
+            "実行は検出と切り離したキュー経由にしてください"
+        );
+    }
 
     #[test]
     fn 時刻と曜日を正規化する() {
