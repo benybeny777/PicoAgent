@@ -654,7 +654,27 @@ pub fn check_injection(content: &str) -> bool {
 
 /// モデルが要求したツール呼び出しを実行する。失敗は例外にせず文字列で返す。
 /// 出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切ってコンテキスト超過を防ぐ。
+/// ツールを実行する（**既定の安全な入口**）。
+///
+/// `run_command` が未許可コマンドに対して返す承認マーカーは、対話ループだけが解釈できる
+/// 内部プロトコル。ここでは人が読める案内文へ変換して返すため、workflow / subagent /
+/// スケジューラ / 接続テストなど対話できない経路から呼んでも内部トークンが露出しない。
+/// 承認フローを自分で扱えるのは `agent.rs` だけで、そこは `dispatch_interactive` を使う。
 pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
+    let result = dispatch_interactive(cfg, name, args).await;
+    match run_command::parse_approval_marker(&result) {
+        Some(pending) => format!(
+            "エラー: この操作には実行許可が必要です（この経路では承認を受け付けられません）。\n{}\n\nチャットで同じコマンドを直接依頼すると、その場で許可・永続許可・キャンセルを選べます。",
+            run_command::approval_prompt(&pending)
+        ),
+        None => result,
+    }
+}
+
+/// モデルが要求したツール呼び出しを実行する（対話ループ専用の生の入口）。
+/// 承認マーカーをそのまま返すため、**呼び出し側が承認フローを実装している場合のみ**使う。
+/// 失敗は例外にせず文字列で返す。出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切る。
+pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> String {
     let result = if let Some(idx) = index().get(name) {
         all()[*idx].run(cfg, args).await
     } else if crate::mcp::client::is_mcp_tool(name) {
@@ -678,6 +698,33 @@ pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
 mod tests {
     use super::schemas_for_text;
 
+    /// 承認マーカーは対話ループ専用の内部プロトコル。安全側の `dispatch` からは
+    /// 人が読める案内文へ変換され、内部トークン（token / cwd 等）が露出しないこと。
+    #[test]
+    fn 対話できない経路には承認マーカーを漏らさない() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_COMMAND_ENABLED", "true");
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        // 既定 allowlist に無いコマンド＝承認が必要な経路。
+        let args = serde_json::json!({ "program": "picoagent-unlisted", "args": ["x"] });
+
+        // 対話ループ専用の入口は承認フローのためマーカーをそのまま返す（前提の確認）。
+        let raw = runtime.block_on(super::dispatch_interactive(&cfg, "run_command", args.clone()));
+        assert!(
+            raw.contains("__PICOAGENT_COMMAND_APPROVAL__"),
+            "承認マーカーの前提が崩れています: {raw}"
+        );
+
+        // 安全側は内部トークンを出さず、人が読める案内文にする。
+        let safe = runtime.block_on(super::dispatch(&cfg, "run_command", args));
+        assert!(
+            !safe.contains("__PICOAGENT_COMMAND_APPROVAL__"),
+            "内部マーカーが漏れています: {safe}"
+        );
+        assert!(!safe.contains("\"token\""), "内部トークンが漏れています: {safe}");
+        assert!(safe.contains("実行許可が必要"), "案内文になっていません: {safe}");
+    }
+
     fn schema_names(text: &str) -> Vec<String> {
         schemas_for_text(text)
             .iter()
@@ -689,6 +736,47 @@ mod tests {
                     .map(ToString::to_string)
             })
             .collect()
+    }
+
+    /// 設計ガード: 対話ループ専用の生入口を、承認フローを持たない場所から使わないこと。
+    /// `dispatch_interactive` は承認マーカーをそのまま返すため、agent.rs 以外が使うと
+    /// 内部トークンがユーザーへ露出する。
+    #[test]
+    fn 生の実行入口はエージェントループだけが使う() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri の親");
+        let mut violations = Vec::new();
+        for dir in [root.join("skills"), root.join("src-tauri/src")] {
+            let mut stack = vec![dir];
+            while let Some(current) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&current) else { continue };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                        continue;
+                    }
+                    if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                        continue;
+                    }
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    // 定義元（tools/mod.rs）と承認フローの実装（agent.rs）だけが例外。
+                    if name == "agent.rs" || path.ends_with("tools/mod.rs") {
+                        continue;
+                    }
+                    let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                    if text.contains("dispatch_interactive") {
+                        violations.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "承認フローを持たない場所が `dispatch_interactive` を使っています。`tools::dispatch` を使ってください:\n{}",
+            violations.join("\n")
+        );
     }
 
     #[test]
