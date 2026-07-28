@@ -7,7 +7,7 @@
 // 7ファイルに同じ実装が散らばり、4スキル（clipboard_text / doc_search /
 // whisper_transcribe / meeting_recorder）では丸ごと抜けていた。
 // 抜けると Windows でコマンド実行のたびに黒いコンソール窓が明滅し、
-// 中断時には子プロセスが残る。`tools::guard` のテストが直接 `Command::new` を
+// 中断時には子プロセスが残る。`tools::process::guard` のテストが直接 `Command::new` を
 // 使っているスキルを検出して失敗させる。
 
 use std::ffi::OsStr;
@@ -135,8 +135,8 @@ mod tests {
 mod guard {
     use std::path::{Path, PathBuf};
 
-    /// 直接 `Command::new` を許すスキル（意図的な例外のみ。追加には理由を添えること）。
-    /// - `meeting_recorder`: 録音は自前スレッドで長時間動かすため、別途プロセス制御を持つ
+    /// 直接 `Command::new` を許すスキル。現在は例外なし。
+    /// 追加する場合は、なぜ共通層に載せられないのかを理由として書き添えること。
     const RAW_COMMAND_ALLOWED: [&str; 0] = [];
 
     fn skill_sources() -> Vec<(String, String)> {
