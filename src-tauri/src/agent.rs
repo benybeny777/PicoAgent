@@ -1105,7 +1105,8 @@ fn audio_transcribe_query(text: &str) -> Option<serde_json::Value> {
 /// モデルがエラーを受け取って正しい JSON で再試行できるよう、ツール自体は呼ばない。
 async fn dispatch_or_error(cfg: &Config, name: &str, args: serde_json::Value) -> String {
     if let Some(raw) = args.get("_raw").and_then(serde_json::Value::as_str) {
-        let preview = if raw.len() > 120 { &raw[..120] } else { raw };
+        // バイト添字で切ると日本語の途中で panic するため、文字数で切り詰める。
+        let preview = crate::text::preview(raw, 120);
         format!(
             "エラー: ツール「{name}」の引数JSONが不正でした。正しいJSON形式で再度呼び出してください。(raw: {preview})"
         )
