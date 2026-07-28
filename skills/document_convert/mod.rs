@@ -1,12 +1,10 @@
 // skills/document_convert/mod.rs - LibreOffice による Office/PDF 変換スキル。
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -68,15 +66,6 @@ pub fn office_cli_path(cfg: &Config) -> String {
     }
     "soffice".to_string()
 }
-
-#[cfg(windows)]
-fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
 
 // Pandoc の方が高精度に扱える形式（LibreOffice では崩れやすい・開けない）。
 const PANDOC_FORMATS: [&str; 7] = ["md", "markdown", "rst", "epub", "org", "tex", "latex"];
@@ -174,22 +163,16 @@ impl Tool for DocumentConvertTool {
         };
         let mut command;
         if use_pandoc {
-            command = Command::new(pandoc_path(cfg));
+            command = crate::tools::process::command(pandoc_path(cfg));
             // --standalone で単体で開ける完結した文書（html のヘッダ等）を出力する。
             command.arg(&input).arg("--standalone").arg("-o").arg(&pandoc_output);
         } else {
-            command = Command::new(office_cli_path(cfg));
+            command = crate::tools::process::command(office_cli_path(cfg));
             command
                 .args(["--headless", "--convert-to", format, "--outdir"])
                 .arg(&output_dir)
                 .arg(&input);
         }
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        hide_window(&mut command);
         match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
             Ok(Ok(output)) => {
                 if use_pandoc && output.status.success() && pandoc_output.exists() {

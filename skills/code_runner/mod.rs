@@ -6,18 +6,16 @@
 // 全スキル共通の permissions（許可ルート・保護パス）を参照する。物理削除系のコードは拒否する。
 
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 use crate::permissions;
-use crate::tools::run_command::{hide_window, trim_output};
+use crate::tools::run_command::trim_output;
 
 const MAX_CODE_CHARS: usize = 100_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
@@ -227,15 +225,11 @@ impl Tool for CodeRunnerTool {
         }
         interpreter_args.push(script_path.to_string_lossy().to_string());
 
-        let mut command = Command::new(&program);
+        let mut command = crate::tools::process::command(&program);
         command
             .args(&interpreter_args)
             .current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        hide_window(&mut command);
+            ;
 
         let result =
             match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {

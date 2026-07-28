@@ -1,11 +1,9 @@
 // skills/pdf_tools/mod.rs - qpdf による PDF 編集スキル。
 
-use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -24,15 +22,6 @@ fn one_path(cfg: &Config, args: &Value, key: &str) -> Result<SafePath, String> {
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
     crate::permissions::resolve(cfg, raw)
 }
-
-#[cfg(windows)]
-fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
 
 #[async_trait]
 impl Tool for PdfToolsTool {
@@ -84,7 +73,7 @@ impl Tool for PdfToolsTool {
         if args.get("action").and_then(Value::as_str) == Some("extract_text") {
             return extract_text(cfg, &args, timeout).await;
         }
-        let mut command = Command::new(super::resolve_cli_path(cfg, "PICOAGENT_QPDF_PATH", "qpdf", "qpdf"));
+        let mut command = crate::tools::process::command(super::resolve_cli_path(cfg, "PICOAGENT_QPDF_PATH", "qpdf", "qpdf"));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "info" => {
                 let input = match one_path(cfg, &args, "input_path") {
@@ -151,9 +140,7 @@ impl Tool for PdfToolsTool {
             }
             _ => return "エラー: action は info/split_pages/merge/rotate/linearize/extract_text のいずれかを指定してください。".to_string(),
         }
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-        hide_window(&mut command);
-        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
+                match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
             Ok(Ok(output)) => format!(
                 "終了コード: {}\nstdout:\n{}\nstderr:\n{}",
                 output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
@@ -172,7 +159,7 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
-    let mut command = Command::new(super::resolve_cli_path(
+    let mut command = crate::tools::process::command(super::resolve_cli_path(
         cfg,
         "PICOAGENT_PDFTOTEXT_PATH",
         "poppler",
@@ -198,9 +185,7 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
         Some(path) => { command.arg(path); }
         None => { command.arg("-"); }
     }
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    hide_window(&mut command);
-    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
+        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
         Ok(Ok(output)) => {
             if !output.status.success() {
                 return format!(

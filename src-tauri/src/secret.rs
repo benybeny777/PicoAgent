@@ -149,3 +149,67 @@ mod tests {
         assert_eq!(encrypt(""), "");
     }
 }
+
+/// 設計ガード: シークレット設定が `password` 型で申告されているかを検査する。
+///
+/// `type="password"` の値だけが DPAPI 暗号化の経路に乗る（`config.rs`）。
+/// 新しいスキルが API キーを `"text"` で申告すると、警告も出ないまま
+/// `config.json` へ平文で保存されてしまう。人のレビューに頼らずテストで検出する。
+#[cfg(test)]
+mod guard {
+    use std::path::Path;
+
+    /// 名前は秘密っぽいが実際は秘密でないキー（意図的な例外のみ。理由を添えること）。
+    /// - `PICOAGENT_HTTP_API_KEY_HEADER`: APIキーを載せる「ヘッダー名」。値そのものは
+    ///   `PICOAGENT_HTTP_API_KEY_VALUE`（password 型）側で扱う
+    const NOT_SECRET: [&str; 1] = ["PICOAGENT_HTTP_API_KEY_HEADER"];
+
+    /// 秘密値を示す語（キー名に含まれたら password 型であるべき）。
+    const SECRET_WORDS: [&str; 6] = ["API_KEY", "TOKEN", "SECRET", "PASSWORD", "WEBHOOK", "CREDENTIAL"];
+
+    fn sources() -> Vec<(String, String)> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("src-tauri の親");
+        let mut out = Vec::new();
+        for dir in [root.join("skills"), root.join("src-tauri/src/providers")] {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let file = if path.is_dir() { path.join("mod.rs") } else { path };
+                if file.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                if let Ok(text) = std::fs::read_to_string(&file) {
+                    out.push((file.to_string_lossy().to_string(), text));
+                }
+            }
+        }
+        assert!(out.len() > 40, "ソースの読み込みに失敗している可能性: {}", out.len());
+        out
+    }
+
+    #[test]
+    fn シークレット設定はpassword型で申告する() {
+        let mut violations = Vec::new();
+        for (file, text) in sources() {
+            // Field::new("KEY", "ラベル", "型", ...) の 1・3 引数を素朴に取り出す。
+            for chunk in text.split("Field::new(").skip(1) {
+                let mut parts = chunk.split('"').skip(1).step_by(2);
+                let (Some(key), Some(_label), Some(kind)) = (parts.next(), parts.next(), parts.next())
+                else {
+                    continue;
+                };
+                if NOT_SECRET.contains(&key) || kind == "password" {
+                    continue;
+                }
+                if SECRET_WORDS.iter().any(|word| key.contains(word)) {
+                    violations.push(format!("{key} (型: {kind}) in {file}"));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "シークレット設定が password 型で申告されていません（平文で config.json へ保存されます）:\n{}",
+            violations.join("\n")
+        );
+    }
+}

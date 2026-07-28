@@ -4,13 +4,11 @@
 // PICOAGENT_COMMAND_ALLOWLIST に一致する prefix だけを実行する。
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -243,15 +241,6 @@ pub fn trim_output(label: &str, bytes: &[u8]) -> String {
     format!("{}:\n{}\n…（{} バイトで打ち切り）", label, &text[..end], MAX_OUTPUT_BYTES)
 }
 
-#[cfg(windows)]
-pub fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-pub fn hide_window(_command: &mut Command) {}
-
 #[async_trait]
 impl Tool for RunCommandTool {
     fn name(&self) -> &'static str {
@@ -458,15 +447,11 @@ async fn execute_approved(
     if is_physical_delete_command(program, parsed_args) {
         return physical_delete_error();
     }
-    let mut command = Command::new(program);
+    let mut command = crate::tools::process::command(program);
     command
         .args(parsed_args)
         .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    hide_window(&mut command);
+        ;
 
     let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
         Ok(Ok(output)) => output,

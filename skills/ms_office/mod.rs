@@ -9,12 +9,10 @@
 //   export_pdf  … OfficeCLI（soffice --headless --convert-to pdf）で PDF 出力する
 
 use std::io::{Read, Write};
-use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -99,15 +97,6 @@ fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replaceme
     Ok(total)
 }
 
-#[cfg(windows)]
-fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
-
 /// OfficeCLI で PDF へ変換する。出力は入力と同名の .pdf（output_path 指定時はリネーム）。
 async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, timeout: u64) -> String {
     let program = crate::tools::document_convert::office_cli_path(cfg);
@@ -115,16 +104,12 @@ async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, t
     if let Err(error) = crate::permissions::fs::create_dir_all(&out_dir) {
         return format!("エラー: 出力フォルダ作成に失敗しました: {error}");
     }
-    let mut command = Command::new(&program);
+    let mut command = crate::tools::process::command(&program);
     command
         .args(["--headless", "--convert-to", "pdf", "--outdir"])
         .arg(&out_dir)
         .arg(input)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    hide_window(&mut command);
+        ;
     let result = match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {

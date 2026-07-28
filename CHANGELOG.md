@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-07-26
+
+### 同種の「規約頼み」不変条件を構造で守る設計へ（プロセス実行・シークレット）
+
+ファイル許可（PR #34）と同じ構図の問題が他にも無いか横断調査し、実バグを含む1件を設計から作り替え、もう1件へ予防のガードを追加した。
+
+- **外部プロセス実行の共通層を新設** (`src-tauri/src/tools/process.rs`): `hide_window`（Windows の `CREATE_NO_WINDOW`）が**7ファイルにコピーされ、4スキル（clipboard_text / doc_search / whisper_transcribe / meeting_recorder）では丸ごと抜けていた**。抜けているスキルは Windows でコマンド実行のたびに黒いコンソール窓が明滅し（クリップボード要約・ローカル文書検索はクイック操作から毎回走る）、`kill_on_drop` も無いため中断時に子プロセスが残っていた。`process::command()` が窓抑止・`kill_on_drop`・stdio 既定を適用した `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行する形へ統一。プロセスを起動する10スキル（+ `code_runner` が `run_command` から借用していた `hide_window`）をすべて移行した。
+- **プロセス起動のガードを追加** (`tools::process::guard`): スキルが `Command::new` を直接使う、または `hide_window` / `CREATE_NO_WINDOW` を自前実装するとテストが失敗する。導入時に `run_command` の残存コピーと `code_runner` の借用を検出し、両方を移行した。
+- **シークレット申告のガードを追加** (`secret::guard`): `type="password"` の値だけが DPAPI 暗号化の経路に乗るため、新しいスキルが API キーを `"text"` で申告すると警告なく平文保存される。キー名に `API_KEY` / `TOKEN` / `SECRET` / `PASSWORD` / `WEBHOOK` / `CREDENTIAL` を含むのに password 型でない申告を検出して失敗させる（現状の37件は全て適合。`PICOAGENT_HTTP_API_KEY_HEADER` はヘッダー名で秘密値ではないため理由付きで例外化）。
+- **調査したが問題なかった項目**: ユーザーファイルの物理削除（`remove_file` / `remove_dir_all` の使用は全てテストの一時ディレクトリ後始末とアプリ自身の一時ファイル）、HTTP クライアントのタイムアウト（スキル側は全てタイムアウト付き）。
+- 検証: 3種のガードすべてに違反コードを注入して検出を実証。cargo test 111件パス・clippy 警告ゼロ。
+
+---
+
 ## 2026-07-25
 
 ### ファイルセキュリティを「規約」から「構造」で守る設計へ作り替え
