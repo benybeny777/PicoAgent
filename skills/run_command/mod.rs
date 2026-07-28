@@ -152,51 +152,6 @@ fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
     })
 }
 
-fn program_stem(program: &str) -> String {
-    let trimmed = program.trim_matches(['"', '\'']);
-    Path::new(trimmed)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(trimmed)
-        .to_ascii_lowercase()
-}
-
-fn looks_like_token(text: &str, token: &str) -> bool {
-    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
-        .any(|part| part.eq_ignore_ascii_case(token))
-}
-
-fn is_physical_delete_command(program: &str, args: &[String]) -> bool {
-    let program = program_stem(program);
-    match program.as_str() {
-        "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" => true,
-        "git" => args
-            .first()
-            .is_some_and(|arg| arg.eq_ignore_ascii_case("clean")),
-        "powershell" | "pwsh" => args.iter().any(|arg| {
-            let lower = arg.to_ascii_lowercase();
-            looks_like_token(&lower, "remove-item")
-                || looks_like_token(&lower, "rm")
-                || looks_like_token(&lower, "del")
-                || looks_like_token(&lower, "erase")
-                || looks_like_token(&lower, "rmdir")
-                || looks_like_token(&lower, "rd")
-        }),
-        "cmd" => args.iter().any(|arg| {
-            let lower = arg.to_ascii_lowercase();
-            looks_like_token(&lower, "del")
-                || looks_like_token(&lower, "erase")
-                || looks_like_token(&lower, "rmdir")
-                || looks_like_token(&lower, "rd")
-        }),
-        _ => false,
-    }
-}
-
-fn physical_delete_error() -> String {
-    "エラー: スキル経由のファイル削除は物理削除ではなくゴミ箱へ移動する必要があります。rm / del / Remove-Item / git clean などの物理削除コマンドは実行できません。"
-        .to_string()
-}
 
 fn approval_token() -> String {
     let nanos = std::time::SystemTime::now()
@@ -310,8 +265,8 @@ impl Tool for RunCommandTool {
             Ok(parsed_args) => parsed_args,
             Err(error) => return format!("エラー: {}", error),
         };
-        if is_physical_delete_command(program, &parsed_args) {
-            return physical_delete_error();
+        if crate::tools::process::is_physical_delete(program, &parsed_args) {
+            return crate::tools::process::physical_delete_error();
         }
         let base = command_root(cfg);
         let requested_cwd = args.get("cwd").and_then(Value::as_str).unwrap_or(".");
@@ -360,8 +315,8 @@ impl Tool for RunCommandTool {
 
 pub async fn execute_pending(pending: &PendingCommandApproval) -> String {
     let cwd = PathBuf::from(&pending.cwd);
-    if is_physical_delete_command(&pending.program, &pending.args) {
-        return physical_delete_error();
+    if crate::tools::process::is_physical_delete(&pending.program, &pending.args) {
+        return crate::tools::process::physical_delete_error();
     }
     if is_protected_edit_path(&cwd) {
         return format!(
@@ -377,8 +332,8 @@ pub async fn execute_with_persistent_approval(
     pending: &PendingCommandApproval,
 ) -> String {
     let cwd = PathBuf::from(&pending.cwd);
-    if is_physical_delete_command(&pending.program, &pending.args) {
-        return physical_delete_error();
+    if crate::tools::process::is_physical_delete(&pending.program, &pending.args) {
+        return crate::tools::process::physical_delete_error();
     }
     if is_protected_edit_path(&cwd) {
         return format!(
@@ -444,8 +399,8 @@ async fn execute_approved(
     cwd: &Path,
     timeout_secs: u64,
 ) -> String {
-    if is_physical_delete_command(program, parsed_args) {
-        return physical_delete_error();
+    if crate::tools::process::is_physical_delete(program, parsed_args) {
+        return crate::tools::process::physical_delete_error();
     }
     let mut command = crate::tools::process::command(program);
     command
@@ -477,7 +432,8 @@ inventory::submit! { ToolReg { make: || Box::new(RunCommandTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_cwd_in_roots, command_tokens, is_physical_delete_command};
+    use super::{bounded_cwd_in_roots, command_tokens};
+    use crate::tools::process::is_physical_delete;
     #[cfg(windows)]
     use std::path::PathBuf;
 
@@ -507,16 +463,16 @@ mod tests {
 
     #[test]
     fn 物理削除コマンドを拒否判定する() {
-        assert!(is_physical_delete_command("rm", &["target.txt".to_string()]));
-        assert!(is_physical_delete_command(
+        assert!(is_physical_delete("rm", &["target.txt".to_string()]));
+        assert!(is_physical_delete(
             "powershell",
             &["-Command".to_string(), "Remove-Item target.txt".to_string()]
         ));
-        assert!(is_physical_delete_command(
+        assert!(is_physical_delete(
             "cmd",
             &["/C".to_string(), "del target.txt".to_string()]
         ));
-        assert!(is_physical_delete_command("git", &["clean".to_string(), "-fd".to_string()]));
-        assert!(!is_physical_delete_command("git", &["status".to_string()]));
+        assert!(is_physical_delete("git", &["clean".to_string(), "-fd".to_string()]));
+        assert!(!is_physical_delete("git", &["status".to_string()]));
     }
 }

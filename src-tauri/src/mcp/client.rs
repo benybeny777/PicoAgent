@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 
 use super::{sanitize_name, PROTOCOL_VERSION};
@@ -117,28 +117,17 @@ pub fn parse_server_lines(raw: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-#[cfg(windows)]
-fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
-
 /// 1つの MCP サーバを起動して初期化し、ツールを登録する。登録できたツール数を返す。
 pub async fn connect(name: &str, command_line: &str) -> Result<usize, String> {
     let mut parts = command_line.split_whitespace();
     let program = parts.next().ok_or("コマンドが空です")?;
     let args: Vec<&str> = parts.collect();
-    let mut command = Command::new(program);
+    // stdio は JSON-RPC のため個別に指定する（stdin も開く）。窓抑止・kill_on_drop は共通層。
+    let mut command = crate::tools::process::command(program);
     command
         .args(&args)
         .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    hide_window(&mut command);
+        .stderr(std::process::Stdio::null());
     let mut child = command
         .spawn()
         .map_err(|error| format!("MCP サーバを起動できません（{program}）: {error}"))?;

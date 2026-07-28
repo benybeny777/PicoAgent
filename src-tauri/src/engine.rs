@@ -243,7 +243,7 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
 fn total_memory_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("powershell")
+        let output = crate::tools::process::command_sync("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
@@ -272,7 +272,7 @@ fn total_memory_bytes() -> Option<u64> {
 fn gpu_vram_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("powershell")
+        let output = crate::tools::process::command_sync("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
@@ -366,7 +366,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     // 例: Vulkan ビルドで discrete GPU を使う場合は "Vulkan1" のように指定する。
     let gpu_device = state.config.get("PICOAGENT_LOCAL_GPU_DEVICE", "");
 
-    let mut cmd = std::process::Command::new(&server);
+    let mut cmd = crate::tools::process::command_sync(&server);
     cmd.arg("-m")
         .arg(model)
         .arg("--host")
@@ -406,11 +406,6 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log));
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
     let child = cmd.spawn()?;
     if let Some(engine) = app.try_state::<EngineState>() {
         *engine.child.lock().unwrap() = Some(child);
@@ -493,7 +488,7 @@ pub fn stop(app: &AppHandle) {
             // Windows は taskkill /T で llama-server の子孫まで含めて確実に停止する（Aivis と同方針）。
             #[cfg(windows)]
             {
-                let _ = std::process::Command::new("taskkill")
+                let _ = crate::tools::process::command_sync("taskkill")
                     .args(["/PID", &child.id().to_string(), "/T", "/F"])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())

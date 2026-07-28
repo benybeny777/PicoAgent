@@ -19,6 +19,54 @@ use tokio::process::Command;
 /// タイムアウトの上限（どんな設定値でもこれを超えて待たない）。
 const MAX_TIMEOUT_SECS: u64 = 7200;
 
+/// 物理削除コマンドかどうか。
+///
+/// スキル経由のファイル削除は必ず OS のゴミ箱へ移す決まりで、`rm` / `del` /
+/// `Remove-Item` / `git clean` などの物理削除は実行させない（[AGENTS.md] のルール）。
+/// この判定は**ユーザー / AI が指定したプログラムを実行するすべての経路**で使う。
+/// 以前は run_command だけが持っていて、同じ allowlist で動くスケジューラには無く、
+/// 許可コマンドに `powershell` があれば予約実行から `Remove-Item` を通せてしまった。
+pub fn is_physical_delete(program: &str, args: &[String]) -> bool {
+    let program = program_stem(program);
+    match program.as_str() {
+        "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" => true,
+        "git" => args
+            .first()
+            .is_some_and(|arg| arg.eq_ignore_ascii_case("clean")),
+        "powershell" | "pwsh" => args.iter().any(|arg| contains_delete_token(arg, true)),
+        "cmd" => args.iter().any(|arg| contains_delete_token(arg, false)),
+        _ => false,
+    }
+}
+
+/// 物理削除を断るときの共通メッセージ。
+pub fn physical_delete_error() -> String {
+    "エラー: スキル経由のファイル削除は物理削除ではなくゴミ箱へ移動する必要があります。rm / del / Remove-Item / git clean などの物理削除コマンドは実行できません。"
+        .to_string()
+}
+
+/// パス・拡張子を落としたプログラム名（`C:\\Windows\\System32\\cmd.exe` → `cmd`）。
+fn program_stem(program: &str) -> String {
+    let trimmed = program.trim().trim_matches('"');
+    let file = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed).trim();
+    file.rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file)
+        .to_ascii_lowercase()
+}
+
+/// 単語境界で削除コマンドを含むか（`-Recurse` などの中に埋もれた一致は拾わない）。
+fn contains_delete_token(arg: &str, powershell: bool) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    let mut tokens = vec!["del", "erase", "rmdir", "rd"];
+    if powershell {
+        tokens.extend_from_slice(&["remove-item", "rm"]);
+    }
+    lower
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .any(|part| tokens.iter().any(|token| part.eq_ignore_ascii_case(token)))
+}
+
 /// 安全な既定を適用した `Command` を作る。
 ///
 /// - Windows: `CREATE_NO_WINDOW`（コンソール窓を出さない）
@@ -46,6 +94,28 @@ fn apply_no_window(command: &mut Command) {
 
 #[cfg(not(windows))]
 fn apply_no_window(_command: &mut Command) {}
+
+/// 同期版（`std::process::Command`）に安全な既定を適用して作る。
+///
+/// 常駐プロセス（同梱エンジン・AivisSpeech）のように「future の終了後も動き続けてほしい」
+/// ものや、`spawn()` して子ハンドルを保持するものはこちらを使う。stdio と待ち方は
+/// 用途ごとに異なるので触らず、**Windows のコンソール窓抑止だけ**を共通化する
+/// （ここが各所へコピーされていた `hide_window` の中身）。
+pub fn command_sync(program: impl AsRef<OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    apply_no_window_sync(&mut command);
+    command
+}
+
+#[cfg(windows)]
+fn apply_no_window_sync(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn apply_no_window_sync(_command: &mut std::process::Command) {}
 
 /// `command()` で作ったコマンドをタイムアウト付きで実行する。
 /// `label` は失敗時のメッセージに使う日本語の処理名（例: 「画像変換」）。
@@ -143,13 +213,18 @@ mod guard {
     /// 追加する場合は、なぜ共通層に載せられないのかを理由として書き添えること。
     const RAW_COMMAND_ALLOWED: [&str; 0] = [];
 
-    fn skill_sources() -> Vec<(String, String)> {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+    /// スキルとバックエンド本体の両方を走査対象にする。
+    ///
+    /// 以前は `skills/` しか見ておらず、**同じ allowlist でコマンドを実行する
+    /// `src/scheduler.rs` が丸ごと走査から漏れていた**（自前 `hide_window` と
+    /// 直接 `Command::new` が残っていた）。ガードの穴はガードが無いのと同じなので、
+    /// プロセスを起動しうる場所はすべて対象にする。
+    fn sources() -> Vec<(String, String)> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("src-tauri の親")
-            .join("skills");
+            .expect("src-tauri の親");
         let mut out = Vec::new();
-        for entry in std::fs::read_dir(dir)
+        for entry in std::fs::read_dir(root.join("skills"))
             .expect("skills ディレクトリ")
             .flatten()
         {
@@ -159,12 +234,40 @@ mod guard {
                 out.push((name, text));
             }
         }
+        let skills = out.len();
         assert!(
-            out.len() > 40,
-            "スキルの読み込みに失敗している可能性: {}",
-            out.len()
+            skills > 40,
+            "スキルの読み込みに失敗している可能性: {skills}"
+        );
+
+        collect_rs(&root.join("src-tauri/src"), &mut out);
+        assert!(
+            out.len() > skills + 20,
+            "バックエンドの読み込みに失敗している可能性: {}",
+            out.len() - skills
         );
         out
+    }
+
+    fn collect_rs(dir: &Path, out: &mut Vec<(String, String)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let name = path
+                    .strip_prefix(dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    out.push((name, text));
+                }
+            }
+        }
     }
 
     /// テストコード部分（`#[cfg(test)]` 以降）を落とす。テストの外部コマンド有無判定は対象外。
@@ -175,11 +278,14 @@ mod guard {
         }
     }
 
-    /// スキルは `tools::process::command()` 経由でプロセスを起動すること。
+    /// 外部プロセスの起動は `tools::process::command()` 経由に統一すること。
     #[test]
-    fn スキルはプロセス起動作法を自前実装しない() {
+    fn プロセス起動作法を自前実装しない() {
         let mut violations = Vec::new();
-        for (name, text) in skill_sources() {
+        for (name, text) in sources() {
+            if name == "process.rs" {
+                continue; // 共通層の実装そのもの
+            }
             if RAW_COMMAND_ALLOWED.contains(&name.as_str()) {
                 continue;
             }
@@ -193,15 +299,43 @@ mod guard {
                 if trimmed.starts_with("//") {
                     continue;
                 }
-                if line.contains("Command::new(") && !line.contains("process::command(") {
+                if line.contains("Command::new(")
+                    && !line.contains("process::command(")
+                    && !line.contains("process::command_sync(")
+                {
                     violations.push(format!("{name}: `{}`", trimmed.trim()));
                 }
             }
         }
         assert!(
             violations.is_empty(),
-            "スキルが外部プロセスを直接起動しています。`tools::process::command()` を使ってください\n（Windows のコンソール窓抑止・中断時の子プロセス回収が漏れます）:\n{}",
+            "外部プロセスを直接起動しています。`tools::process::command()` を使ってください\n（Windows のコンソール窓抑止・中断時の子プロセス回収が漏れます）:\n{}",
             violations.join("\n")
+        );
+    }
+
+    /// `PICOAGENT_COMMAND_ALLOWLIST` でユーザー / AI 指定のコマンドを実行する経路は、
+    /// 物理削除の拒否（`process::is_physical_delete`）も必ず通すこと。
+    ///
+    /// run_command だけがこの判定を持っていて、同じ allowlist で動くスケジューラには
+    /// 無かった。許可コマンドに `powershell` があれば、予約実行から `Remove-Item` を
+    /// 通せてしまう状態だった。
+    #[test]
+    fn 許可コマンド実行経路は物理削除を拒否する() {
+        let mut violations = Vec::new();
+        for (name, text) in sources() {
+            if name == "process.rs" {
+                continue; // 判定の定義元
+            }
+            let body = without_tests(&text);
+            if body.contains("PICOAGENT_COMMAND_ALLOWLIST") && !body.contains("is_physical_delete")
+            {
+                violations.push(name);
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "許可コマンドを実行する経路が物理削除を拒否していません。`process::is_physical_delete()` を通してください: {violations:?}"
         );
     }
 }
