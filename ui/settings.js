@@ -469,6 +469,28 @@ function localModelPresetHint(value) {
   return `${preset.note} 推奨VRAM: ${preset.recommendedVramGb}GB以上、推奨RAM: ${preset.recommendedRamGb}GB以上、ダウンロード目安: ${preset.downloadSize}`;
 }
 
+// 保存済み JSON を配列として読む。壊れていた場合は空扱いにせず、その事実を返す。
+//
+// 空一覧で開始してそのまま保存すると、**登録済みの目覚まし・スケジュールが黙って全部消える**
+// （設定ファイル破損時に「空で継続」してしまう典型の失敗）。読めなかったときは元の値を
+// 温存し、ユーザーに知らせる。
+function parseStoredList(currentJson) {
+  const raw = currentJson || "[]";
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { items: parsed, broken: false, raw };
+  } catch { /* 下の broken 扱いへ */ }
+  return { items: [], broken: true, raw };
+}
+
+// 壊れていたことを知らせる警告表示。
+function brokenListNotice(label) {
+  return el("div", {
+    className: "hint",
+    textContent: `⚠ 保存済みの${label}を読み取れませんでした。上書きで失わないよう、ここで編集して保存するまで元の内容はそのまま残します。`,
+  });
+}
+
 // 目覚ましの専用エディタ（時刻ピッカー＋曜日チェック＋繰り返し/有効/ラベル/削除/追加）。
 // 保存時は alarmEditorState.getJson() で PICOAGENT_ALARMS（JSON文字列）を組み立てる。
 const ALARM_WEEKDAYS = [
@@ -476,13 +498,12 @@ const ALARM_WEEKDAYS = [
   ["fri", "金"], ["sat", "土"], ["sun", "日"],
 ];
 function buildAlarmEditor(currentJson) {
-  let alarms = [];
-  try {
-    const parsed = JSON.parse(currentJson || "[]");
-    if (Array.isArray(parsed)) alarms = parsed;
-  } catch { alarms = []; }
+  const stored = parseStoredList(currentJson);
+  const alarms = stored.items;
+  let touched = false;
 
   const wrap = el("div", { className: "alarm-editor" });
+  if (stored.broken) wrap.append(brokenListNotice("目覚まし"));
   const listEl = el("div", { className: "alarm-list" });
   wrap.append(listEl);
   const rows = [];
@@ -524,12 +545,14 @@ function buildAlarmEditor(currentJson) {
   for (const a of alarms) addRow(a);
 
   const addBtn = el("button", { type: "button", className: "alarm-add", textContent: "＋ 目覚ましを追加" });
-  addBtn.addEventListener("click", () => addRow({}));
+  addBtn.addEventListener("click", () => { touched = true; addRow({}); });
   const hint = el("div", { className: "hint", textContent: "曜日を選ばないと毎日鳴ります。「繰り返し」OFFは一度だけ鳴って自動で無効になります。アプリ起動中のみ鳴ります。" });
   wrap.append(addBtn, hint);
 
   alarmEditorState = {
     getJson() {
+      // 読めなかった内容を、ユーザーが何も編集していないのに空で上書きしない。
+      if (stored.broken && !touched) return stored.raw;
       const out = rows.map(r => ({
         id: r.id,
         time: r.time.value || "07:00",
@@ -547,13 +570,12 @@ function buildAlarmEditor(currentJson) {
 
 const SCHEDULE_WEEKDAYS = ALARM_WEEKDAYS;
 function buildScheduleEditor(currentJson) {
-  let tasks = [];
-  try {
-    const parsed = JSON.parse(currentJson || "[]");
-    if (Array.isArray(parsed)) tasks = parsed;
-  } catch { tasks = []; }
+  const stored = parseStoredList(currentJson);
+  const tasks = stored.items;
+  let touched = false;
 
   const wrap = el("div", { className: "schedule-editor" });
+  if (stored.broken) wrap.append(brokenListNotice("スケジュール"));
   const listEl = el("div", { className: "schedule-list" });
   const rows = [];
   wrap.append(listEl);
@@ -612,12 +634,14 @@ function buildScheduleEditor(currentJson) {
 
   for (const task of tasks) addRow(task);
   const addBtn = el("button", { type: "button", className: "alarm-add", textContent: "＋ スケジュールを追加" });
-  addBtn.addEventListener("click", () => addRow({ kind: "tool", tool_name: "weather", tool_args: {} }));
+  addBtn.addEventListener("click", () => { touched = true; addRow({ kind: "tool", tool_name: "weather", tool_args: {} }); });
   const hint = el("div", { className: "hint", textContent: "cron を空にすると時刻と曜日で実行します。スキル実行はコマンド許可なしで使えます。コマンド実行は許可ルートと allowlist の制限を受けます。" });
   wrap.append(addBtn, hint);
 
   scheduleEditorState = {
     getJson() {
+      // 読めなかった内容を、ユーザーが何も編集していないのに空で上書きしない。
+      if (stored.broken && !touched) return stored.raw;
       const out = rows.map(r => {
         let parsedArgs = {};
         try { parsedArgs = JSON.parse(r.toolArgs.value || "{}"); }
