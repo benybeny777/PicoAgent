@@ -709,7 +709,11 @@ mod tests {
         let args = serde_json::json!({ "program": "picoagent-unlisted", "args": ["x"] });
 
         // 対話ループ専用の入口は承認フローのためマーカーをそのまま返す（前提の確認）。
-        let raw = runtime.block_on(super::dispatch_interactive(&cfg, "run_command", args.clone()));
+        let raw = runtime.block_on(super::dispatch_interactive(
+            &cfg,
+            "run_command",
+            args.clone(),
+        ));
         assert!(
             raw.contains("__PICOAGENT_COMMAND_APPROVAL__"),
             "承認マーカーの前提が崩れています: {raw}"
@@ -721,8 +725,14 @@ mod tests {
             !safe.contains("__PICOAGENT_COMMAND_APPROVAL__"),
             "内部マーカーが漏れています: {safe}"
         );
-        assert!(!safe.contains("\"token\""), "内部トークンが漏れています: {safe}");
-        assert!(safe.contains("実行許可が必要"), "案内文になっていません: {safe}");
+        assert!(
+            !safe.contains("\"token\""),
+            "内部トークンが漏れています: {safe}"
+        );
+        assert!(
+            safe.contains("実行許可が必要"),
+            "案内文になっていません: {safe}"
+        );
     }
 
     fn schema_names(text: &str) -> Vec<String> {
@@ -750,7 +760,9 @@ mod tests {
         for dir in [root.join("skills"), root.join("src-tauri/src")] {
             let mut stack = vec![dir];
             while let Some(current) = stack.pop() {
-                let Ok(entries) = std::fs::read_dir(&current) else { continue };
+                let Ok(entries) = std::fs::read_dir(&current) else {
+                    continue;
+                };
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
@@ -765,7 +777,9 @@ mod tests {
                     if name == "agent.rs" || path.ends_with("tools/mod.rs") {
                         continue;
                     }
-                    let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
                     if text.contains("dispatch_interactive") {
                         violations.push(path.to_string_lossy().to_string());
                     }

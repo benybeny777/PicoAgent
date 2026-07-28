@@ -32,9 +32,19 @@ pub fn rpc_error(id: &serde_json::Value, code: i64, message: &str) -> serde_json
 pub fn sanitize_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    if cleaned.is_empty() { "tool".to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        "tool".to_string()
+    } else {
+        cleaned
+    }
 }
 
 #[cfg(test)]

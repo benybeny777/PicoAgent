@@ -47,7 +47,10 @@ pub async fn handle_rpc(cfg: &Config, message: &Value) -> Option<Value> {
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return Some(rpc_error(&id, -32602, "params.name が必要です"));
             };
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let result = crate::tools::dispatch(cfg, name, args).await;
             // スキルは失敗も文字列で返す設計のため、「エラー:」始まりを isError に写像する。
             let is_error = result.starts_with("エラー");
@@ -60,7 +63,11 @@ pub async fn handle_rpc(cfg: &Config, message: &Value) -> Option<Value> {
             ))
         }
         _ if is_notification => None,
-        other => Some(rpc_error(&id, -32601, &format!("未対応のメソッドです: {other}"))),
+        other => Some(rpc_error(
+            &id,
+            -32601,
+            &format!("未対応のメソッドです: {other}"),
+        )),
     }
 }
 
@@ -75,30 +82,60 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             // initialize
-            let response = handle_rpc(&cfg, &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }))
-                .await
-                .unwrap();
+            let response = handle_rpc(
+                &cfg,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            )
+            .await
+            .unwrap();
             assert_eq!(response["result"]["serverInfo"]["name"], "PicoAgent");
-            assert_eq!(response["result"]["protocolVersion"], super::PROTOCOL_VERSION);
+            assert_eq!(
+                response["result"]["protocolVersion"],
+                super::PROTOCOL_VERSION
+            );
 
             // 通知には応答しない
-            assert!(handle_rpc(&cfg, &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await.is_none());
+            assert!(handle_rpc(
+                &cfg,
+                &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })
+            )
+            .await
+            .is_none());
 
             // tools/list にスキルが載る
-            let response = handle_rpc(&cfg, &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await.unwrap();
+            let response = handle_rpc(
+                &cfg,
+                &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+            )
+            .await
+            .unwrap();
             let tools = response["result"]["tools"].as_array().unwrap();
-            assert!(tools.iter().any(|tool| tool["name"] == "get_time"), "tools: {}", tools.len());
+            assert!(
+                tools.iter().any(|tool| tool["name"] == "get_time"),
+                "tools: {}",
+                tools.len()
+            );
             assert!(tools.iter().all(|tool| tool["inputSchema"].is_object()));
 
             // tools/call で設定不要スキル（時刻）を実行できる
-            let response = handle_rpc(&cfg, &json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                "params": { "name": "get_time", "arguments": {} } })).await.unwrap();
+            let response = handle_rpc(
+                &cfg,
+                &json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": { "name": "get_time", "arguments": {} } }),
+            )
+            .await
+            .unwrap();
             let text = response["result"]["content"][0]["text"].as_str().unwrap();
             assert!(!text.is_empty());
             assert_eq!(response["result"]["isError"], false);
 
             // 未知メソッドはエラー応答
-            let response = handle_rpc(&cfg, &json!({ "jsonrpc": "2.0", "id": 4, "method": "nope" })).await.unwrap();
+            let response = handle_rpc(
+                &cfg,
+                &json!({ "jsonrpc": "2.0", "id": 4, "method": "nope" }),
+            )
+            .await
+            .unwrap();
             assert_eq!(response["error"]["code"], -32601);
         });
     }

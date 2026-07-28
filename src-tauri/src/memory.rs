@@ -49,7 +49,7 @@ pub fn save(app: &AppHandle, store: &MemoryStore) {
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(&target, serde_json::to_string_pretty(store)?)?;
+        crate::store::write_json_atomic(&target, store)?;
         Ok(())
     })();
     // フォールバック許可: メモリ保存失敗は会話を止めず、ログのみに留める。

@@ -74,7 +74,10 @@ impl Connection {
                 continue; // サーバ発の通知・他応答は読み飛ばす
             }
             if let Some(error) = value.get("error") {
-                let message = error.get("message").and_then(Value::as_str).unwrap_or("不明なエラー");
+                let message = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("不明なエラー");
                 return Err(format!("MCP エラー: {message}"));
             }
             return Ok(value.get("result").cloned().unwrap_or(Value::Null));
@@ -177,7 +180,12 @@ pub async fn connect(name: &str, command_line: &str) -> Result<usize, String> {
         let mut registry = tools_registry().write().unwrap();
         // 同名サーバの再接続時は旧登録を除去する。
         registry.retain(|info| info.server_key != server_key);
-        for tool in listed.get("tools").and_then(Value::as_array).cloned().unwrap_or_default() {
+        for tool in listed
+            .get("tools")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
             let Some(tool_raw) = tool.get("name").and_then(Value::as_str) else {
                 continue;
             };
@@ -271,7 +279,9 @@ pub async fn dispatch(full_name: &str, args: Value) -> String {
         let registry = tools_registry().read().unwrap();
         match registry.iter().find(|info| info.full_name == full_name) {
             Some(info) => (info.server_key.clone(), info.tool_raw.clone()),
-            None => return format!("エラー: 未登録の MCP ツール \"{full_name}\" が呼び出されました。"),
+            None => {
+                return format!("エラー: 未登録の MCP ツール \"{full_name}\" が呼び出されました。")
+            }
         }
     };
     let connection = {
@@ -334,7 +344,13 @@ mod tests {
         let raw = "memory|npx -y @modelcontextprotocol/server-memory\n# コメント\n\nfs | node server.js --root .\n壊れた行";
         let servers = parse_server_lines(raw);
         assert_eq!(servers.len(), 2);
-        assert_eq!(servers[0], ("memory".to_string(), "npx -y @modelcontextprotocol/server-memory".to_string()));
+        assert_eq!(
+            servers[0],
+            (
+                "memory".to_string(),
+                "npx -y @modelcontextprotocol/server-memory".to_string()
+            )
+        );
         assert_eq!(servers[1].0, "fs");
         assert!(is_mcp_tool("mcp__memory__store"));
         assert!(!is_mcp_tool("web_search"));
@@ -345,7 +361,11 @@ mod tests {
     // initialize → tools/list → tools/call の一連の流れを検証する。
     #[test]
     fn スタブmcpサーバと接続してツールを実行できる() {
-        if std::process::Command::new("node").arg("--version").output().is_err() {
+        if std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             eprintln!("node が無いためスキップ");
             return;
         }
@@ -366,10 +386,17 @@ rl.on('line', (line) => {
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let count = connect("stub", &format!("node {}", stub.display())).await.expect("接続できるはず");
+            let count = connect("stub", &format!("node {}", stub.display()))
+                .await
+                .expect("接続できるはず");
             assert_eq!(count, 1);
             let schemas = schemas();
-            assert!(schemas.iter().any(|schema| schema["function"]["name"] == "mcp__stub__echo"), "schemas: {schemas:?}");
+            assert!(
+                schemas
+                    .iter()
+                    .any(|schema| schema["function"]["name"] == "mcp__stub__echo"),
+                "schemas: {schemas:?}"
+            );
             let result = dispatch("mcp__stub__echo", json!({ "text": "やあ" })).await;
             assert_eq!(result, "echo: やあ");
             let missing = dispatch("mcp__stub__nothing", json!({})).await;

@@ -32,10 +32,19 @@ impl Config {
                 Ok(_) | Err(_) => {
                     // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
                     // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
-                    warning = Some(format!(
-                        "設定ファイルが JSON として読めないため空設定で起動します: {}",
-                        file.display()
-                    ));
+                    // 破損ファイルはその場に残すと次の保存（＝空設定の書き戻し）で消えてしまうので退避する。
+                    let saved = crate::store::quarantine_corrupt(&file);
+                    warning = Some(match saved {
+                        Some(saved) => format!(
+                            "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
+                            file.display(),
+                            saved.display()
+                        ),
+                        None => format!(
+                            "設定ファイルが JSON として読めないため空設定で起動します: {}",
+                            file.display()
+                        ),
+                    });
                 }
             },
             Err(error) if file.exists() => {
@@ -118,13 +127,9 @@ impl Config {
             .unwrap()
             .clone()
             .ok_or_else(|| anyhow::anyhow!("config.load() が未実行です"))?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let text =
-            serde_json::to_string_pretty(&Value::Object(self.values.lock().unwrap().clone()))?;
-        std::fs::write(&path, text)?;
-        Ok(())
+        let snapshot = Value::Object(self.values.lock().unwrap().clone());
+        // 書き込み中に落ちても設定が全損しないよう、共通層の原子的な書き込みを使う。
+        crate::store::write_json_atomic(&path, &snapshot)
     }
 
     /// 単一の設定を永続化する。
@@ -148,5 +153,70 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("picoagent-config-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn 保存した設定を読み直せる() {
+        let dir = temp_dir("roundtrip");
+        let path = dir.join("config.json");
+
+        let cfg = Config::new();
+        assert!(cfg.load(path.clone()).is_none(), "初回起動は警告なし");
+        cfg.set_string("PICOAGENT_TEST_KEY", "値".to_string())
+            .unwrap();
+
+        let reloaded = Config::new();
+        assert!(reloaded.load(path.clone()).is_none());
+        assert_eq!(reloaded.get("PICOAGENT_TEST_KEY", ""), "値");
+
+        // 原子的な書き込みなので、保存後に一時ファイルが残らない。
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(left, vec!["config.json".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 破損した設定は退避されて上書きで失われない() {
+        let dir = temp_dir("corrupt");
+        let path = dir.join("config.json");
+        // 書き込み途中で落ちた状態を模す（末尾が切れた JSON）。
+        crate::store::write_atomic(&path, "{\n  \"PICOAGENT_TEST_KEY\": \"値\"".as_bytes())
+            .unwrap();
+
+        let cfg = Config::new();
+        let warning = cfg.load(path.clone()).expect("破損は警告する");
+        assert!(warning.contains("退避"), "退避先を案内する: {warning}");
+
+        // 空設定で起動したあと保存しても、破損ファイルの中身は隣に残っている。
+        cfg.set_string("PICOAGENT_OTHER", "x".to_string()).unwrap();
+        let saved: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| name.contains(".corrupt-"))
+            .collect();
+        assert_eq!(saved.len(), 1, "破損ファイルが退避されていない");
+        let text = std::fs::read_to_string(dir.join(&saved[0])).unwrap();
+        assert!(text.contains("PICOAGENT_TEST_KEY"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

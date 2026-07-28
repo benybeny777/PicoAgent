@@ -121,7 +121,11 @@ mod tests {
             let error = output(cmd, 1, "長い処理").await.unwrap_err();
             assert!(error.contains("タイムアウト"), "error: {error}");
             // 30秒待たずに戻る＝待ち続けていない。
-            assert!(started.elapsed().as_secs() < 5, "経過: {:?}", started.elapsed());
+            assert!(
+                started.elapsed().as_secs() < 5,
+                "経過: {:?}",
+                started.elapsed()
+            );
         });
     }
 }
@@ -145,14 +149,21 @@ mod guard {
             .expect("src-tauri の親")
             .join("skills");
         let mut out = Vec::new();
-        for entry in std::fs::read_dir(dir).expect("skills ディレクトリ").flatten() {
+        for entry in std::fs::read_dir(dir)
+            .expect("skills ディレクトリ")
+            .flatten()
+        {
             let name = entry.file_name().to_string_lossy().to_string();
             let path: PathBuf = entry.path().join("mod.rs");
             if let Ok(text) = std::fs::read_to_string(&path) {
                 out.push((name, text));
             }
         }
-        assert!(out.len() > 40, "スキルの読み込みに失敗している可能性: {}", out.len());
+        assert!(
+            out.len() > 40,
+            "スキルの読み込みに失敗している可能性: {}",
+            out.len()
+        );
         out
     }
 
