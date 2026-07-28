@@ -98,44 +98,25 @@ mod guard {
         ("client.rs", "テスト用スタブスクリプトの生成"),
     ];
 
-    fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                rs_files(&path, out);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                out.push(path);
-            }
-        }
-    }
+    use crate::guard_scan;
 
     #[test]
     fn 状態ファイルの書き込みは共通層を通す() {
-        let mut files = Vec::new();
-        rs_files(std::path::Path::new("src"), &mut files);
-        assert!(files.len() > 20, "ソース走査に失敗しています");
-
         let mut offenders = Vec::new();
-        for file in files {
-            let name = file
-                .file_name()
-                .map(|v| v.to_string_lossy().to_string())
-                .unwrap_or_default();
+        for source in guard_scan::all_sources() {
             if RAW_WRITE_ALLOWED
                 .iter()
-                .any(|(allowed, _)| *allowed == name)
+                .any(|(allowed, _)| *allowed == source.name)
             {
                 continue;
             }
-            // フォールバック許可: 読めないファイルは走査対象外（存在しない想定）。
-            let Ok(source) = std::fs::read_to_string(&file) else {
+            // スキルが扱うのはユーザー指定ファイル。状態ストアの規則ではなく
+            // permissions::fs のファサード規則（permissions::guard）の管轄。
+            if source.is_skill() {
                 continue;
-            };
-            if source.contains("fs::write(") {
-                offenders.push(file.display().to_string());
+            }
+            if source.body().contains("fs::write(") {
+                offenders.push(source.path.display().to_string());
             }
         }
         assert!(

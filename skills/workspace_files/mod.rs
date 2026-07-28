@@ -63,7 +63,7 @@ fn remember_change(entry: UndoEntry) -> Result<(), String> {
     Ok(())
 }
 
-fn undo_last(confirm: bool) -> String {
+fn undo_last(cfg: &Config, confirm: bool) -> String {
     let mut history = match undo_history().lock() {
         Ok(history) => history,
         Err(_) => return "エラー: 取り消し履歴を取得できません。".to_string(),
@@ -78,9 +78,20 @@ fn undo_last(confirm: bool) -> String {
         );
     }
     let path_label = entry.path.display().to_string();
+    // 記憶した許可を再利用しない。取り消しの実行時点の設定で判定し直す
+    // （履歴を取ったあとに許可ルートが狭められた・拒否パスが増えた場合に、
+    // 古い許可のまま書き戻してしまわないようにする）。
+    let target = match crate::permissions::resolve(cfg, &path_label) {
+        Ok(target) => target,
+        Err(error) => {
+            return format!(
+                "エラー: 現在の設定ではこのパスを操作できないため取り消せません（{error}）: {path_label}"
+            )
+        }
+    };
     let result = match &entry.original {
-        Some(bytes) => std::fs::write(&entry.path, bytes).map_err(|error| error.to_string()),
-        None if entry.path.exists() => super::trash_file::move_to_trash(&entry.path),
+        Some(bytes) => crate::permissions::fs::write(&target, bytes),
+        None if target.exists() => super::trash_file::move_to_trash(target.as_path()),
         None => Ok(()),
     };
     match result {
@@ -204,7 +215,7 @@ impl Tool for WorkspaceFilesTool {
             None => return "エラー: action が指定されていません。".to_string(),
         };
         if action == "undo" {
-            return undo_last(args.get("confirm").and_then(Value::as_bool).unwrap_or(false));
+            return undo_last(cfg, args.get("confirm").and_then(Value::as_bool).unwrap_or(false));
         }
         let path = match args.get("path").and_then(Value::as_str) {
             Some(path) if !path.trim().is_empty() => path.trim(),
@@ -250,8 +261,9 @@ impl Tool for WorkspaceFilesTool {
                     Ok(snapshot) => snapshot,
                     Err(error) => return format!("エラー: {error}"),
                 };
+                // append は追記ハンドルが要るためファサードに載せられない（write は載せる）。
                 let result = if action == "write" {
-                    std::fs::write(&target, content)
+                    crate::permissions::fs::write(&target, content)
                 } else {
                     use std::io::Write;
                     std::fs::OpenOptions::new()
@@ -259,6 +271,7 @@ impl Tool for WorkspaceFilesTool {
                         .append(true)
                         .open(&target)
                         .and_then(|mut file| file.write_all(content.as_bytes()))
+                        .map_err(|error| error.to_string())
                 };
                 match result {
                     Ok(()) => match remember_change(snapshot) {
@@ -289,3 +302,44 @@ impl Tool for WorkspaceFilesTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(WorkspaceFilesTool) } }
+
+#[cfg(test)]
+mod tests {
+    use super::{undo_history, undo_last, UndoEntry};
+    use crate::config::Config;
+
+    /// 取り消しは「履歴を取った時点の許可」ではなく「実行時点の設定」で判定する。
+    ///
+    /// 履歴に生パスを持たせて再検証しないと、許可ルートを狭めたあとでも
+    /// 古い許可のまま書き戻せてしまう。
+    #[test]
+    fn 許可ルート外になったパスは取り消せない() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let allowed = std::env::temp_dir().join(format!("picoagent-undo-ok-{nanos}"));
+        let outside = std::env::temp_dir().join(format!("picoagent-undo-ng-{nanos}"));
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let target = outside.join("secret.txt");
+        std::fs::write(&target, b"original").unwrap();
+
+        // 許可ルートを allowed だけに絞る（target はルート外）。
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &allowed.to_string_lossy());
+        cfg.set("PICOAGENT_ALLOWED_PATHS", "");
+
+        undo_history().lock().unwrap().push(UndoEntry {
+            path: target.clone(),
+            original: Some(b"rolled back".to_vec()),
+        });
+        let result = undo_last(&cfg, true);
+        assert!(result.starts_with("エラー:"), "result: {result}");
+        assert_eq!(std::fs::read(&target).unwrap(), b"original", "書き戻されている");
+
+        undo_history().lock().unwrap().clear();
+        std::fs::remove_dir_all(&allowed).ok();
+        std::fs::remove_dir_all(&outside).ok();
+    }
+}

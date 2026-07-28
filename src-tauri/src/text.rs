@@ -81,19 +81,7 @@ impl Utf8Stream {
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]
 mod guard {
-    fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                rs_files(&path, out);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                out.push(path);
-            }
-        }
-    }
+    use crate::guard_scan;
 
     /// `[..120]` のように**数値リテラル**で切り出している箇所を探す。
     /// 変数添字（`&chunk[..n]` など、バイト列の読み込み量で切る用途）は対象外。
@@ -111,22 +99,14 @@ mod guard {
 
     #[test]
     fn 固定長のバイト添字で文字列を切らない() {
-        let mut files = Vec::new();
-        rs_files(std::path::Path::new("src"), &mut files);
-        assert!(files.len() > 20, "ソース走査に失敗しています");
-
         let mut offenders = Vec::new();
-        for file in files {
-            if file.file_name().is_some_and(|name| name == "text.rs") {
+        for source in guard_scan::all_sources() {
+            if source.name == "text.rs" {
                 continue; // 定義元（このガード自身の説明文を含む）
             }
-            // フォールバック許可: 読めないファイルは走査対象外（存在しない想定）。
-            let Ok(source) = std::fs::read_to_string(&file) else {
-                continue;
-            };
-            for (number, line) in source.lines().enumerate() {
+            for (number, line) in source.body().lines().enumerate() {
                 if fixed_byte_slice(line) {
-                    offenders.push(format!("{}:{}", file.display(), number + 1));
+                    offenders.push(format!("{}:{}", source.path.display(), number + 1));
                 }
             }
         }
@@ -140,19 +120,14 @@ mod guard {
     /// チャンク境界で分断された文字が `�` になって確定してしまう。
     #[test]
     fn ストリーミング受信で直接lossy変換しない() {
-        let mut files = Vec::new();
-        rs_files(std::path::Path::new("src"), &mut files);
         let mut offenders = Vec::new();
-        for file in files {
-            if file.file_name().is_some_and(|name| name == "text.rs") {
+        for source in guard_scan::all_sources() {
+            if source.name == "text.rs" {
                 continue; // 定義元
             }
-            // フォールバック許可: 読めないファイルは走査対象外（存在しない想定）。
-            let Ok(source) = std::fs::read_to_string(&file) else {
-                continue;
-            };
-            if source.contains("bytes_stream()") && source.contains("from_utf8_lossy") {
-                offenders.push(file.display().to_string());
+            let body = source.body();
+            if body.contains("bytes_stream()") && body.contains("from_utf8_lossy") {
+                offenders.push(source.path.display().to_string());
             }
         }
         assert!(
