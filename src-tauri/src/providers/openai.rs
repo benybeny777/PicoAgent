@@ -159,11 +159,13 @@ pub(crate) async fn stream_chat(
     let mut full_content = String::new();
     let mut partial_calls: Vec<PartialToolCall> = Vec::new();
     let mut buf = String::new();
+    // チャンク境界で日本語が分断されても化けないよう、逐次デコーダを通す。
+    let mut decoder = crate::text::Utf8Stream::default();
 
     let mut stream = res.bytes_stream();
     'outer: while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
-        buf.push_str(&String::from_utf8_lossy(&chunk));
+        buf.push_str(&decoder.push(&chunk));
 
         while let Some(line_end) = buf.find('\n') {
             let line = buf[..line_end].trim_end_matches('\r').to_string();
