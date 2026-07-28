@@ -176,9 +176,140 @@ pub fn is_system_protected(_path: &Path) -> bool {
     false
 }
 
+/// 許可判定を通過したパス。
+///
+/// **スキルがユーザー由来のパスを扱うときは、必ずこの型を経由する。**
+/// 生成経路は `resolve()` / `SafePath::join()` / `SafePath::sibling()` だけに限定してあり、
+/// 内部の `PathBuf` は非公開なので「検証を通さずに組み立てたパス」を
+/// 誤って渡せない。スキル側で許可判定を自前実装するのは禁止
+/// （`permissions::guard` のテストが検出して失敗させる）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SafePath(PathBuf);
+
+impl SafePath {
+    /// 検証済みの実パス。プロセス起動やファイル操作へ渡す用。
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    /// エラーメッセージ表示用。
+    pub fn display(&self) -> std::path::Display<'_> {
+        self.0.display()
+    }
+
+    pub fn exists(&self) -> bool {
+        self.0.exists()
+    }
+
+    /// 拡張子（小文字）。形式判定用。
+    pub fn extension_lossy(&self) -> String {
+        self.0
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_default()
+    }
+
+    pub fn file_stem_lossy(&self) -> String {
+        self.0
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_default()
+    }
+
+    /// 配下の相対パスを足す。`..` で外へ出る指定を防ぐため必ず再検証する。
+    pub fn join(&self, cfg: &Config, relative: &str) -> Result<SafePath, String> {
+        resolve(cfg, &self.0.join(relative).to_string_lossy())
+    }
+
+    /// 同じ親ディレクトリ内の別ファイル（拡張子違いなど）。こちらも再検証する。
+    pub fn sibling(&self, cfg: &Config, file_name: &str) -> Result<SafePath, String> {
+        let parent = self.0.parent().unwrap_or(Path::new("."));
+        resolve(cfg, &parent.join(file_name).to_string_lossy())
+    }
+
+    /// 親ディレクトリ。ルート直下などで親が無い場合は主ルートを返す。
+    /// 親は検証済みパスの祖先なので、許可ルート内であることは保証される。
+    pub fn parent_or_root(&self, cfg: &Config) -> SafePath {
+        match self.0.parent() {
+            Some(parent) if parent.as_os_str().is_empty() => SafePath(primary_root(cfg)),
+            Some(parent) => SafePath(parent.to_path_buf()),
+            None => SafePath(primary_root(cfg)),
+        }
+    }
+
+    pub fn file_name_lossy(&self) -> String {
+        self.0
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default()
+    }
+
+    /// アプリが自分で決めた内部パス（app_data_dir 配下・一時ファイルなど、
+    /// ユーザー入力を含まないもの）を許可済みとして扱う。
+    /// **ユーザー由来の文字列には使わないこと**（使うと許可判定を素通りする）。
+    pub fn app_owned(path: PathBuf) -> SafePath {
+        SafePath(path)
+    }
+}
+
+// 検証済みパスは、そのままファイル操作やプロセス引数へ渡せるようにする。
+// 安全性の要は「生成経路が resolve / join / sibling に限られること」なので、
+// 参照変換を許してもユーザー入力が検証を迂回することはない。
+impl AsRef<Path> for SafePath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for SafePath {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+/// 許可済みパスに対するファイル操作。`SafePath` しか受け取らないため、
+/// 検証を通していないパスを書き込み・読み取りへ渡せない。
+// 現時点で呼び出しが無い関数も、スキル追加時の正規の入口として提供しておく。
+#[allow(dead_code)]
+pub mod fs {
+    use super::SafePath;
+
+    pub fn read_to_string(path: &SafePath) -> Result<String, String> {
+        std::fs::read_to_string(path.as_path())
+            .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))
+    }
+
+    pub fn read(path: &SafePath) -> Result<Vec<u8>, String> {
+        std::fs::read(path.as_path())
+            .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))
+    }
+
+    pub fn write(path: &SafePath, contents: impl AsRef<[u8]>) -> Result<(), String> {
+        if let Some(parent) = path.as_path().parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("フォルダを作成できません（{}）: {}", parent.display(), error)
+            })?;
+        }
+        std::fs::write(path.as_path(), contents)
+            .map_err(|error| format!("ファイルを書き込めません（{}）: {}", path.display(), error))
+    }
+
+    pub fn create_dir_all(path: &SafePath) -> Result<(), String> {
+        std::fs::create_dir_all(path.as_path())
+            .map_err(|error| format!("フォルダを作成できません（{}）: {}", path.display(), error))
+    }
+}
+
 /// 入力パスを主ルート基準で正規化し、許可ルート内かつ保護パスでないことを検証して返す。
 /// 違反時はモデルへ返す日本語エラー文字列を Err で返す。
-pub fn resolve(cfg: &Config, input: &str) -> Result<PathBuf, String> {
+///
+/// スキルからユーザー由来のパスを扱う入口はこの関数だけにする（自前の許可判定は禁止）。
+pub fn resolve(cfg: &Config, input: &str) -> Result<SafePath, String> {
+    resolve_raw(cfg, input).map(SafePath)
+}
+
+fn resolve_raw(cfg: &Config, input: &str) -> Result<PathBuf, String> {
     let target = normalize(&primary_root(cfg), input);
     if is_protected(cfg, &target) {
         return Err(format!(
@@ -269,5 +400,85 @@ mod tests {
         assert!(super::resolve(&cfg, "escape/secret.txt").is_err());
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+/// 設計ガード: スキルがファイル許可の実装を自前で持ち込んでいないかを機械的に検査する。
+///
+/// 過去に「各スキルが独自の許可判定をコピーして持ち、リンク実体検査・追加許可ルート・
+/// 拒否パス判定が抜ける」という同じ不具合を繰り返した。人のレビューに頼らず、
+/// テストで検出して落とす。
+#[cfg(test)]
+mod guard {
+    use std::path::{Path, PathBuf};
+
+    /// 自前の許可判定を持つことを許すスキル（意図的な例外のみ。追加には理由を添えること）。
+    /// - `run_command` / `code_runner`: 実行系。cwd と allowlist を含む独自モデルを持つ
+    /// - `trash_file`: 削除専用。実在必須＋許可ルート自体の削除拒否という追加制約がある
+    const OWN_CHECK_ALLOWED: [&str; 3] = ["run_command", "code_runner", "trash_file"];
+
+    fn skills_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri の親")
+            .join("skills")
+    }
+
+    fn skill_sources() -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(skills_dir()).expect("skills ディレクトリ").flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path = entry.path().join("mod.rs");
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push((name, text));
+            }
+        }
+        assert!(out.len() > 40, "スキルの読み込みに失敗している可能性: {}", out.len());
+        out
+    }
+
+    /// スキル内に許可判定の再実装（`starts_with(base)` 方式のコピー）が無いこと。
+    #[test]
+    fn スキルは許可判定を自前実装しない() {
+        let mut violations = Vec::new();
+        for (name, text) in skill_sources() {
+            if OWN_CHECK_ALLOWED.contains(&name.as_str()) {
+                continue;
+            }
+            for marker in ["fn bounded_path(base:", "fn normalize(base:", "target.starts_with(base)"] {
+                if text.contains(marker) {
+                    violations.push(format!("{name}: `{marker}`"));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "スキルが許可判定を自前実装しています。`permissions::resolve()` を使ってください\n（リンク実体検査・追加許可ルート・拒否パス判定が漏れます）:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    /// パス引数を受け取るスキルは、必ず共通の許可判定を通していること。
+    #[test]
+    fn パスを受け取るスキルは共通の許可判定を通す() {
+        let mut violations = Vec::new();
+        for (name, text) in skill_sources() {
+            if OWN_CHECK_ALLOWED.contains(&name.as_str()) {
+                continue;
+            }
+            // parameters() に *_path / *_dir を宣言している＝ユーザー由来のパスを受け取る。
+            let takes_path = text.contains("_path\": {") || text.contains("_dir\": {");
+            if !takes_path {
+                continue;
+            }
+            if !text.contains("permissions::resolve") {
+                violations.push(name);
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "パス引数を持つのに `permissions::resolve()` を通していないスキルがあります:\n{}",
+            violations.join("\n")
+        );
     }
 }

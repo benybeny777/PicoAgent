@@ -12,6 +12,7 @@ use tokio::process::Command;
 
 use super::{config_guide, Tool, ToolReg};
 use crate::config::Config;
+use crate::permissions::SafePath;
 use crate::message::Field;
 
 const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
@@ -22,7 +23,7 @@ fn meeting_root(cfg: &Config) -> PathBuf {
     crate::permissions::primary_root(cfg)
 }
 
-fn bounded_path(cfg: &Config, requested: &str) -> Result<PathBuf, String> {
+fn bounded_path(cfg: &Config, requested: &str) -> Result<SafePath, String> {
     crate::permissions::resolve(cfg, requested)
 }
 
@@ -35,7 +36,7 @@ fn is_audio(path: &Path) -> bool {
     )
 }
 
-fn latest_file(root: &Path) -> Option<PathBuf> {
+fn latest_file(cfg: &Config, root: &Path) -> Option<SafePath> {
     let mut best: Option<(PathBuf, SystemTime)> = None;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -64,7 +65,8 @@ fn latest_file(root: &Path) -> Option<PathBuf> {
             }
         }
     }
-    best.map(|(path, _)| path)
+    // 走査で得たパスも許可判定を通してから返す。
+    best.and_then(|(path, _)| crate::permissions::resolve(cfg, &path.to_string_lossy()).ok())
 }
 
 fn bundled_whisper_dirs() -> Vec<PathBuf> {
@@ -129,27 +131,27 @@ fn transcribe_model(cfg: &Config) -> String {
         .unwrap_or_default()
 }
 
-fn output_stem(audio: &Path) -> PathBuf {
-    audio.with_extension("")
+fn output_stem(cfg: &Config, audio: &SafePath) -> Result<SafePath, String> {
+    audio.sibling(cfg, &audio.file_stem_lossy())
 }
 
-fn transcript_path(audio: &Path) -> PathBuf {
-    audio.with_extension("transcript.txt")
+fn transcript_path(cfg: &Config, audio: &SafePath) -> Result<SafePath, String> {
+    audio.sibling(cfg, &format!("{}.transcript.txt", audio.file_stem_lossy()))
 }
 
 fn split_args_template(
     template: &str,
-    audio: &Path,
+    audio: &SafePath,
     model: &str,
-    output_stem: &Path,
+    output_stem: &SafePath,
 ) -> Vec<String> {
     template
         .split_whitespace()
         .map(|token| {
             token
-                .replace("{audio}", &audio.to_string_lossy())
+                .replace("{audio}", &audio.as_path().to_string_lossy())
                 .replace("{model}", model)
-                .replace("{output_stem}", &output_stem.to_string_lossy())
+                .replace("{output_stem}", &output_stem.as_path().to_string_lossy())
         })
         .collect()
 }
@@ -244,12 +246,8 @@ fn ffmpeg_path(cfg: &Config) -> String {
 /// 非 WAV 音声を ffmpeg で 16kHz モノラル WAV（whisper.cpp の推奨入力）へ前処理する。
 /// 変換した一時ファイルのパスを返す。WAV のままで良い場合や ffmpeg が使えない場合は
 /// None を返し、呼び出し側は元ファイルのまま続行する（グレースフルフォールバック）。
-async fn convert_to_wav(cfg: &Config, audio: &Path) -> Option<PathBuf> {
-    let is_wav = audio
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("wav"))
-        .unwrap_or(false);
+async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Option<SafePath> {
+    let is_wav = audio.extension_lossy() == "wav";
     if is_wav {
         return None;
     }
@@ -265,7 +263,7 @@ async fn convert_to_wav(cfg: &Config, audio: &Path) -> Option<PathBuf> {
     let args_list: Vec<String> = [
         "-y",
         "-i",
-        &audio.to_string_lossy(),
+        &audio.as_path().to_string_lossy(),
         "-ar",
         "16000",
         "-ac",
@@ -278,7 +276,7 @@ async fn convert_to_wav(cfg: &Config, audio: &Path) -> Option<PathBuf> {
     .map(ToString::to_string)
     .collect();
     match run_command(&ffmpeg_path(cfg), &args_list, 300).await {
-        Ok(output) if output.status.success() && out.exists() => Some(out),
+        Ok(output) if output.status.success() && out.exists() => Some(SafePath::app_owned(out)),
         _ => {
             // フォールバック許可: 変換できなければ元ファイルを直接 Whisper へ渡す。
             let _ = std::fs::remove_file(&out);
@@ -289,7 +287,7 @@ async fn convert_to_wav(cfg: &Config, audio: &Path) -> Option<PathBuf> {
 
 /// 音声ファイルを文字起こしして本文を返す（マイク入力コマンドなど内部利用向け）。
 /// スキル本体と同じ同梱 Whisper / 設定を使う。失敗はエラーメッセージ文字列で返す。
-pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, String> {
+pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, String> {
     let model = transcribe_model(cfg);
     if model.trim().is_empty() {
         return Err(
@@ -298,8 +296,8 @@ pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, Strin
     }
     let program = transcribe_program(cfg);
     let converted = convert_to_wav(cfg, audio).await;
-    let source: &Path = converted.as_deref().unwrap_or(audio);
-    let output_stem = output_stem(audio);
+    let source: &SafePath = converted.as_ref().unwrap_or(audio);
+    let output_stem = output_stem(cfg, audio)?;
     let template = cfg.get(
         "PICOAGENT_TRANSCRIBE_ARGS",
         "-m {model} -f {audio} -otxt -of {output_stem}",
@@ -307,7 +305,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, Strin
     let args_list = split_args_template(&template, source, &model, &output_stem);
     let output = run_command(&program, &args_list, 120).await;
     if let Some(temp) = &converted {
-        let _ = std::fs::remove_file(temp);
+        let _ = std::fs::remove_file(temp.as_path());
     }
     let output = output?;
     if !output.status.success() {
@@ -316,7 +314,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &Path) -> Result<String, Strin
             trim_output(&output.stderr)
         ));
     }
-    let generated = output_stem.with_extension("txt");
+    let generated = output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy()))?;
     let text = if generated.exists() {
         let content = std::fs::read_to_string(&generated)
             .map_err(|error| format!("文字起こし結果を読めません: {error}"))?;
@@ -417,7 +415,7 @@ impl Tool for WhisperTranscribeTool {
                 Err(error) => return format!("エラー: {error}"),
             }
         } else {
-            match latest_file(&base) {
+            match latest_file(cfg, &base) {
                 Some(path) => path,
                 None => {
                     return format!(
@@ -442,7 +440,10 @@ impl Tool for WhisperTranscribeTool {
         // mp3/m4a 等は ffmpeg で 16kHz WAV へ前処理してから渡す（精度・互換性の向上）。
         let converted = convert_to_wav(cfg, &audio).await;
         let source = converted.clone().unwrap_or_else(|| audio.clone());
-        let output_stem = output_stem(&audio);
+        let output_stem = match output_stem(cfg, &audio) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        };
         let template = cfg.get(
             "PICOAGENT_TRANSCRIBE_ARGS",
             "-m {model} -f {audio} -otxt -of {output_stem}",
@@ -476,7 +477,10 @@ impl Tool for WhisperTranscribeTool {
                 trim_output(&output.stderr)
             );
         }
-        let generated = output_stem.with_extension("txt");
+        let generated = match output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy())) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        };
         let content = if generated.exists() {
             match std::fs::read_to_string(&generated) {
                 Ok(content) => content,
@@ -496,12 +500,13 @@ impl Tool for WhisperTranscribeTool {
                 Err(error) => return format!("エラー: {error}"),
             }
         } else {
-            transcript_path(&audio)
-        };
-        if let Some(parent) = target.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                return format!("エラー: 文字起こしフォルダを作成できません: {error}");
+            match transcript_path(cfg, &audio) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {error}"),
             }
+        };
+        if let Err(error) = crate::permissions::fs::create_dir_all(&target.parent_or_root(cfg)) {
+            return format!("エラー: 文字起こしフォルダを作成できません: {error}");
         }
         if let Err(error) = std::fs::write(&target, &content) {
             return format!("エラー: 文字起こし結果を保存できません: {error}");
@@ -518,6 +523,7 @@ impl Tool for WhisperTranscribeTool {
 #[cfg(test)]
 mod tests {
     use super::convert_to_wav;
+    use crate::permissions::SafePath;
 
     // ffmpeg がある環境だけで走る E2E（無ければ即成功で抜ける）。
     // sine 波の mp3 を生成し、16kHz WAV へ前処理できることを確認する。
@@ -539,7 +545,7 @@ mod tests {
 
         let cfg = crate::config::Config::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let converted = runtime.block_on(convert_to_wav(&cfg, &mp3));
+        let converted = runtime.block_on(convert_to_wav(&cfg, &SafePath::app_owned(mp3.clone())));
         let wav = converted.expect("mp3 は WAV へ変換されるはず");
         assert!(wav.exists());
         // RIFF ヘッダを持つ本物の WAV になっている。
@@ -550,7 +556,7 @@ mod tests {
         // WAV 入力は前処理せず None（元ファイルのまま使う）。
         let plain = dir.join("plain.wav");
         std::fs::write(&plain, b"dummy").unwrap();
-        assert!(runtime.block_on(convert_to_wav(&cfg, &plain)).is_none());
+        assert!(runtime.block_on(convert_to_wav(&cfg, &SafePath::app_owned(plain.clone()))).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

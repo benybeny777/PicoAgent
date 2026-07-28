@@ -1,6 +1,5 @@
 // genspark_suite/mod.rs - Genspark風の調査・資料・表・ページ・計画を一括生成する統合スキル。
 
-use std::path::Path;
 
 use async_trait::async_trait;
 use chrono::Local;
@@ -74,11 +73,6 @@ fn points(text: &str) -> Vec<String> {
 
 fn csv_cell(text: &str) -> String {
     format!("\"{}\"", text.replace('"', "\"\"").replace('\n', " "))
-}
-
-fn write(path: &Path, content: &str) -> Result<(), String> {
-    std::fs::write(path, content)
-        .map_err(|error| format!("{} の保存に失敗しました: {}", path.display(), error))
 }
 
 fn deep_research_md(topic: &str, source: &str) -> String {
@@ -288,8 +282,11 @@ impl Tool for GensparkSuiteTool {
         ];
         let mut saved = Vec::new();
         for (name, content) in files {
-            let path = dir.join(name);
-            if let Err(error) = write(&path, &content) {
+            let path = match dir.join(cfg, name) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {}", error),
+            };
+            if let Err(error) = crate::permissions::fs::write(&path, &content) {
                 return format!("エラー: {error}");
             }
             saved.push(path);

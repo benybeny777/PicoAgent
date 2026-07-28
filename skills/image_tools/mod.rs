@@ -3,7 +3,7 @@
 // 変換する。実行ファイルは「明示設定 → 同梱（setup:tools）→ PATH」の順で解決し、
 // PATH では v7（magick）→ v6（convert / identify）の順にフォールバックする。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -13,12 +13,13 @@ use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
+use crate::permissions::SafePath;
 use crate::message::Field;
 
 pub struct ImageToolsTool;
 
 /// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
-fn resolve_path(cfg: &Config, args: &Value, key: &str) -> Result<PathBuf, String> {
+fn resolve_path(cfg: &Config, args: &Value, key: &str) -> Result<SafePath, String> {
     let raw = args
         .get(key)
         .and_then(Value::as_str)
@@ -68,13 +69,6 @@ async fn run_magick(mut command: Command, timeout: u64, label: &str) -> Result<s
     }
 }
 
-fn ext_of(path: &Path) -> String {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
 /// 画像を別形式へ変換する（PSD/XCF 等は統合ビューを使用。resize / quality 対応）。
 async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
     let input = match resolve_path(cfg, args, "input_path") {
@@ -88,18 +82,17 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
-    if let Some(parent) = output.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);
-        }
+    if let Err(error) = crate::permissions::fs::create_dir_all(&output.parent_or_root(cfg)) {
+        return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);
     }
     let program = magick_program(cfg, "convert").await;
     let mut command = Command::new(&program);
     // レイヤーを持つ形式は [0]（統合ビュー）だけを読み、複数ファイル出力を避ける。
-    let input_arg = if MULTI_LAYER_EXTS.contains(&ext_of(&input).as_str()) {
-        format!("{}[0]", input.to_string_lossy())
+    let input_display = input.as_path().to_string_lossy().to_string();
+    let input_arg = if MULTI_LAYER_EXTS.contains(&input.extension_lossy().as_str()) {
+        format!("{}[0]", input_display)
     } else {
-        input.to_string_lossy().to_string()
+        input_display
     };
     command.arg(&input_arg);
     if let Some(resize) = args.get("resize").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
@@ -109,7 +102,7 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
         command.arg("-quality").arg(quality.to_string());
     }
     // 透過を持てない形式（jpg 等）へ変換する際に背景が黒くならないよう白で敷く。
-    if matches!(ext_of(&output).as_str(), "jpg" | "jpeg" | "bmp") {
+    if matches!(output.extension_lossy().as_str(), "jpg" | "jpeg" | "bmp") {
         command.arg("-background").arg("white").arg("-alpha").arg("remove");
     }
     command.arg(&output);
