@@ -77,7 +77,7 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(&target, serde_json::to_string_pretty(recent)?)?;
+        crate::store::write_json_atomic(&target, &recent)?;
         Ok(())
     })();
     // フォールバック許可: 履歴保存の失敗は会話継続を優先し、ログのみに留める。

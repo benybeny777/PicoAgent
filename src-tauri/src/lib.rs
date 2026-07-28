@@ -21,6 +21,7 @@ mod permissions;
 mod providers;
 mod scheduler;
 mod secret;
+mod store;
 mod tools;
 mod tracer;
 mod usage;

@@ -217,7 +217,7 @@ fn save_run_history(app: &AppHandle, records: &[ScheduledRunRecord]) -> anyhow::
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(records)?)?;
+    crate::store::write_json_atomic(&path, &records)?;
     Ok(())
 }
 

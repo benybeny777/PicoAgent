@@ -283,7 +283,6 @@ async fn run_agent(
     Ok((model, reply))
 }
 
-
 /// ブラウザ由来のリクエストを拒否する（DNS リバインディング／CSRF 対策）。
 ///
 /// ローカル API は 127.0.0.1 に閉じているが、それだけでは
@@ -330,9 +329,14 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
     }
     // ボディ付きは JSON 限定（text/plain 等の単純リクエストでの迂回を防ぐ）。
     if request.method == "POST" && !json_content_type(request.header("content-type")) {
-        return respond(&mut stream, 415, &json!({
-            "error": "Content-Type: application/json を指定してください。"
-        })).await;
+        return respond(
+            &mut stream,
+            415,
+            &json!({
+                "error": "Content-Type: application/json を指定してください。"
+            }),
+        )
+        .await;
     }
 
     match (request.method.as_str(), request.path.as_str()) {
@@ -539,20 +543,30 @@ mod tests {
         assert!(!super::origin_allowed("", Some("http://localhost:3000")));
         // 明示的に許可した Origin だけ通す（大文字小文字は無視）。
         let allowed = "http://localhost:3000, https://app.example";
-        assert!(super::origin_allowed(allowed, Some("http://localhost:3000")));
+        assert!(super::origin_allowed(
+            allowed,
+            Some("http://localhost:3000")
+        ));
         assert!(super::origin_allowed(allowed, Some("HTTPS://APP.EXAMPLE")));
-        assert!(!super::origin_allowed(allowed, Some("https://evil.example")));
+        assert!(!super::origin_allowed(
+            allowed,
+            Some("https://evil.example")
+        ));
     }
 
     /// CORS 単純リクエスト（text/plain）での迂回を防ぐこと。
     #[test]
     fn ボディ付きはjsonだけ受け付ける() {
         assert!(super::json_content_type(Some("application/json")));
-        assert!(super::json_content_type(Some("application/json; charset=utf-8")));
+        assert!(super::json_content_type(Some(
+            "application/json; charset=utf-8"
+        )));
         assert!(super::json_content_type(Some("APPLICATION/JSON")));
         // プリフライトを回避できる単純リクエストの Content-Type は拒否。
         assert!(!super::json_content_type(Some("text/plain")));
-        assert!(!super::json_content_type(Some("application/x-www-form-urlencoded")));
+        assert!(!super::json_content_type(Some(
+            "application/x-www-form-urlencoded"
+        )));
         assert!(!super::json_content_type(Some("multipart/form-data")));
         assert!(!super::json_content_type(None));
     }

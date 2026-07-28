@@ -165,16 +165,31 @@ mod guard {
     const NOT_SECRET: [&str; 1] = ["PICOAGENT_HTTP_API_KEY_HEADER"];
 
     /// 秘密値を示す語（キー名に含まれたら password 型であるべき）。
-    const SECRET_WORDS: [&str; 6] = ["API_KEY", "TOKEN", "SECRET", "PASSWORD", "WEBHOOK", "CREDENTIAL"];
+    const SECRET_WORDS: [&str; 6] = [
+        "API_KEY",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "WEBHOOK",
+        "CREDENTIAL",
+    ];
 
     fn sources() -> Vec<(String, String)> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("src-tauri の親");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri の親");
         let mut out = Vec::new();
         for dir in [root.join("skills"), root.join("src-tauri/src/providers")] {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
-                let file = if path.is_dir() { path.join("mod.rs") } else { path };
+                let file = if path.is_dir() {
+                    path.join("mod.rs")
+                } else {
+                    path
+                };
                 if file.extension().and_then(|e| e.to_str()) != Some("rs") {
                     continue;
                 }
@@ -183,7 +198,11 @@ mod guard {
                 }
             }
         }
-        assert!(out.len() > 40, "ソースの読み込みに失敗している可能性: {}", out.len());
+        assert!(
+            out.len() > 40,
+            "ソースの読み込みに失敗している可能性: {}",
+            out.len()
+        );
         out
     }
 
@@ -194,7 +213,8 @@ mod guard {
             // Field::new("KEY", "ラベル", "型", ...) の 1・3 引数を素朴に取り出す。
             for chunk in text.split("Field::new(").skip(1) {
                 let mut parts = chunk.split('"').skip(1).step_by(2);
-                let (Some(key), Some(_label), Some(kind)) = (parts.next(), parts.next(), parts.next())
+                let (Some(key), Some(_label), Some(kind)) =
+                    (parts.next(), parts.next(), parts.next())
                 else {
                     continue;
                 };

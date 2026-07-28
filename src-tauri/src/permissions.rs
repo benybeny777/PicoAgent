@@ -288,7 +288,11 @@ pub mod fs {
     pub fn write(path: &SafePath, contents: impl AsRef<[u8]>) -> Result<(), String> {
         if let Some(parent) = path.as_path().parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
-                format!("フォルダを作成できません（{}）: {}", parent.display(), error)
+                format!(
+                    "フォルダを作成できません（{}）: {}",
+                    parent.display(),
+                    error
+                )
             })?;
         }
         std::fs::write(path.as_path(), contents)
@@ -426,14 +430,21 @@ mod guard {
 
     fn skill_sources() -> Vec<(String, String)> {
         let mut out = Vec::new();
-        for entry in std::fs::read_dir(skills_dir()).expect("skills ディレクトリ").flatten() {
+        for entry in std::fs::read_dir(skills_dir())
+            .expect("skills ディレクトリ")
+            .flatten()
+        {
             let name = entry.file_name().to_string_lossy().to_string();
             let path = entry.path().join("mod.rs");
             if let Ok(text) = std::fs::read_to_string(&path) {
                 out.push((name, text));
             }
         }
-        assert!(out.len() > 40, "スキルの読み込みに失敗している可能性: {}", out.len());
+        assert!(
+            out.len() > 40,
+            "スキルの読み込みに失敗している可能性: {}",
+            out.len()
+        );
         out
     }
 
@@ -445,7 +456,11 @@ mod guard {
             if OWN_CHECK_ALLOWED.contains(&name.as_str()) {
                 continue;
             }
-            for marker in ["fn bounded_path(base:", "fn normalize(base:", "target.starts_with(base)"] {
+            for marker in [
+                "fn bounded_path(base:",
+                "fn normalize(base:",
+                "target.starts_with(base)",
+            ] {
                 if text.contains(marker) {
                     violations.push(format!("{name}: `{marker}`"));
                 }
