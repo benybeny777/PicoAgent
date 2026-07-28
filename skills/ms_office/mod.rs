@@ -26,51 +26,15 @@ pub struct MsOfficeTool;
 // ZIP 1エントリの上限（zip 爆弾対策）。
 const MAX_ZIP_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 
-fn root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外は操作できません: {}",
-            base.display(),
-            target.display()
-        ))
-    }
-}
-
-fn one_path(base: &Path, args: &Value, key: &str) -> Result<PathBuf, String> {
+/// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
+fn one_path(cfg: &Config, args: &Value, key: &str) -> Result<PathBuf, String> {
     let raw = args
         .get(key)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    bounded_path(base, raw)
+    crate::permissions::resolve(cfg, raw)
 }
 
 /// OOXML 内のテキストは XML エスケープされて格納されるため、検索・置換文字列も同じ形へ揃える。
@@ -247,9 +211,8 @@ impl Tool for MsOfficeTool {
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let base = root(cfg);
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
-        let input = match one_path(&base, &args, "input_path") {
+        let input = match one_path(cfg, &args, "input_path") {
             Ok(path) => path,
             Err(error) => return format!("エラー: {}", error),
         };
@@ -262,7 +225,7 @@ impl Tool for MsOfficeTool {
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            Some(path) => match bounded_path(&base, path) {
+            Some(path) => match crate::permissions::resolve(cfg, path) {
                 Ok(path) => Some(path),
                 Err(error) => return format!("エラー: {}", error),
             },

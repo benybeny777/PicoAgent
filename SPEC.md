@@ -31,6 +31,7 @@ PicoAgent は透明な **Tauri** ウィンドウに常駐する、キャラク�
 - [新しいコネクタの作り方](#新しいコネクタの作り方)
 - [設定（config と設定画面）](#設定config-と設定画面)
 - [設定キー一覧](#設定キー一覧)
+- [外部インターフェース（ローカルAPI / MCP）](#外部インターフェースローカルapi--mcp)
 - [フロント連携と製品化](#フロント連携と製品化)
 
 ---
@@ -87,7 +88,7 @@ graph TD
 
 `run(cfg, provider, model, messages, max_steps = 5, app = None) -> Result<String>`
 
-1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。通常UIは途中チャンクを本文表示せず、最終応答だけをフキダシ・履歴・読み上げへ渡す（内部資料や未確定の途中文が見えないようにする）。assistant の本文は `message::strip_reasoning()` で `<think>...</think>` の推論ブロックを除去してから最終回答・履歴・読み上げへ渡す（DeepSeek-R1 / Qwen3 系などの reasoning モデルで英語/中国語の推論が混ざるのを防ぐ）。
+1. `provider.chat_stream()` を呼び、テキストチャンクを `on_chunk` コールバック経由で `pet:stream_chunk` イベント送信しつつ、完全な assistant を `messages` に積む。フロントは受信チャンクをフキダシへ逐次表示し、文末（句点・改行）まで確定した分から順に読み上げ合成を先行させる（生成完了を待たずに話し始める）。**ステップごとに `pet:stream_reset` を先に送る**ため、ツール実行を挟んだ再 chat では前ステップの途中テキスト（「検索しますね」等）が最終回答へ連結表示されず、読み上げも仕切り直される。履歴へ積むのは最終応答だけ。assistant の本文は `message::strip_reasoning()` で `<think>...</think>` の推論ブロックを除去してから最終回答・履歴へ渡す（ストリーミング中は除去前の生テキストが流れるため、フロント側の読み上げも同じ規則で推論ブロックを除いてから合成する）（DeepSeek-R1 / Qwen3 系などの reasoning モデルで英語/中国語の推論が混ざるのを防ぐ）。
 2. `tool_calls` が無ければ、その `content` を最終応答として返す。
 3. `tool_calls` があれば、全呼び出しを `futures::future::join_all()` で**並列実行**し、結果を `tool` メッセージとして積み 1 に戻る。
 4. `max_steps` を超えたら打ち切り、最後の文面を返す（暴走防止）。
@@ -124,7 +125,8 @@ pub trait Provider: Send + Sync {
     async fn is_up(&self, cfg: &Config) -> bool;  // 接続不可・キー無は false に正規化してよい
     async fn chat(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value]) -> anyhow::Result<Message>;
     // ストリーミング対応。デフォルト実装は chat() を呼んで完了後に on_chunk を1回だけ呼ぶ。
-    // openai.rs はオーバーライドして SSE ストリームを受信し on_chunk を逐次呼ぶ。
+    // openai.rs / local.rs は OpenAI 互換 SSE（stream_chat を共用）、ollama.rs は
+    // /api/chat の NDJSON をオーバーライドで受信し、on_chunk を逐次呼ぶ。
     async fn chat_stream(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value], on_chunk: Arc<dyn Fn(String) + Send + Sync>) -> anyhow::Result<Message>;
     // JSON モードなどオプション付き chat。デフォルト実装は chat() へ委譲（json_mode は無視）。
     // openai.rs はオーバーライドして response_format: json_object を付与する。
@@ -529,9 +531,40 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_LIBREOFFICE_PATH` | `soffice` | document_convert | LibreOffice 実行ファイルパス |
 | `PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS` | `120` | document_convert | 文書変換タイムアウト秒（5〜300） |
 | `PICOAGENT_QPDF_PATH` | `qpdf` | pdf_tools | qpdf 実行ファイルパス |
+| `PICOAGENT_PDFTOTEXT_PATH` | `pdftotext` | pdf_tools | Poppler pdftotext 実行ファイルパス（空なら同梱→PATH） |
+| `PICOAGENT_PANDOC_PATH` | `pandoc` | document_convert | Pandoc 実行ファイルパス（空なら同梱→PATH） |
+| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick 実行ファイルパス（空なら同梱→PATH。v7 `magick` が無ければ v6 `convert`/`identify`） |
+| `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | image_tools | 画像操作タイムアウト秒（5〜300） |
+| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg 実行ファイルパス（非wav音声の16kHz WAV前処理用。空なら同梱→PATH） |
+| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search | ripgrep 実行ファイルパス（空なら同梱→PATH。無ければ内蔵走査） |
+| `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
+| `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
+| `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型） |
+| `PICOAGENT_MCP_SERVERS` | 空 | MCP | 外部 MCP サーバ（1行1件「名前\|コマンド 引数…」。stdio 接続。`#` でコメント。変更は再起動後に反映） |
 | `PICOAGENT_PDF_TIMEOUT_SECS` | `120` | pdf_tools | PDF操作タイムアウト秒（5〜300） |
 
 各キーは環境変数としても渡せる（既定値としての参照のみ。保存先は常に `config.json`）。
+
+---
+
+## 外部インターフェース（ローカルAPI / MCP）
+
+アーキテクチャは **agent（ループ）/ skills（内蔵ツール）/ mcp（外部相互運用）** の3層。`mcp` は外部との境界だけを担い、エージェントループとスキル実装からは独立している。
+
+### ローカル HTTP API（`api_server.rs`）
+
+- 既定で無効（`PICOAGENT_API_ENABLED`）。有効時のみ `127.0.0.1:<PICOAGENT_API_PORT>` にバインドし、LAN へは公開しない。`PICOAGENT_API_KEY` を設定すると全エンドポイントで `Authorization: Bearer` を必須にする。
+- 依存追加なしの最小 HTTP/1.1 実装（tokio `TcpListener`）。ボディ 1MB 上限・リクエストタイムアウト 300 秒・ヘッダ 16KB 上限。不正 JSON は接続を閉じずに HTTP 400（`/mcp` は JSON-RPC parse error `-32700`）を返す。
+- エンドポイント: `GET /api/version`・`GET /api/tags`（Ollama 風）、`POST /api/chat`・`POST /api/generate`、`POST /v1/chat/completions`（OpenAI Chat Completions 互換。`stream` 要求には全文単一チャンクの SSE）、`POST /mcp`（下記）。
+- 会話はリクエスト内で完結する**ステートレス**設計で、デスクトップの会話履歴・キャラ文脈とは混ざらない。スキルは通常どおり使える。
+- 付属 CLI: `scripts/picoagent-cli.mjs`（`npm run cli -- status/models/chat/ask/repl`）。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` 環境変数。
+
+### MCP（`mcp/{mod,client,server}.rs`）
+
+JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
+
+- **サーバ側（スキルの公開）**: `POST /mcp` が `initialize` / `tools/list` / `tools/call` / `ping` に応答し、`agent_callable` なスキルを MCP ツールとして公開する。スキルは失敗も文字列で返す設計のため、「エラー」始まりの結果を `isError: true` へ写像する。通知（id なし）には本文なしの 202 を返す。Claude Code からは `claude mcp add --transport http picoagent http://127.0.0.1:11500/mcp` で登録できる。
+- **クライアント側（外部ツールの取り込み）**: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動時に spawn し、`initialize` → `tools/list` の結果を `mcp__<サーバ名>__<ツール名>` として動的登録する。`tools::schemas_for_text` が候補へ加え、`tools::dispatch` が `mcp__` 接頭辞をクライアントへフォールバックして `tools/call` へ中継する。tokio の `read_line` はキャンセル安全でないため、タイムアウト・I/O 失敗後はその接続を切断して再利用しない。終了時（`RunEvent::Exit`）に全子プロセスを停止する。
 
 ---
 
@@ -550,7 +583,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 日常通知（`reminder` / `focus_timer` / `daily.rs`）: フロントは約20秒間隔で `pet_daily_events` を呼び、期限到来したリマインダー・集中終了・作業見守りを吹き出し表示と読み上げで通知する。単発イベントは通知後に無効化し、見守りのような `repeat_minutes` 付きイベントは次回時刻へ進める。起動時の挨拶には `pet_daily_greeting` で時間帯・通知件数・直近のできたことメモを添える。
 - タスクスケジューラ（`task_scheduler` スキル + `scheduler.rs`）: バックエンドは起動時に30秒間隔の常駐タスクを開始し、`PICOAGENT_SCHEDULED_TASKS` を毎回読み直して現在分に一致するタスクを実行する。同じ分の二重実行は `last_run_minute` で防ぎ、`repeat=false` のタスクは初回実行時に無効化する。スケジュールは `time`（HH:MM）+ `days`（mon..sun / 平日 / 週末 / 毎日）または cron 風5フィールド（分 時 日 月 曜日、`*` / 数値 / カンマ区切り / `*/N`）で指定する。`kind=command` は `program` + `args` を shell なしで実行し、`PICOAGENT_COMMAND_ENABLED=true`、共通許可ルート配下、`PICOAGENT_COMMAND_ALLOWLIST` prefix 一致を必須にする。スケジュール実行は無人実行のためチャット確認を挟まず、未許可ならログへエラーを残して実行しない。`kind=tool` は `tool_name` と `tool_args` を `tools::dispatch` に渡し、時間指定で天気・Web取得・外部連携などのスキル動作を実行できる。登録・一覧・削除・有効/無効化はチャットから `task_scheduler` スキルで行え、設定画面のスキル設定タブでも専用フォームで編集できる。実行結果は `app.<日付>.log` と `app_data_dir/schedule-runs.json`（直近100件）へ記録し、メイン画面へ `pet:notice` を emit して通知一覧に表示する。
 - アクションセンター（`renderer.js`）: メインフキダシの通知ボタンは `pet:notice`、`pet_schedule_runs`、会話タスクの状態を同じ一覧へ表示し、未読件数をバッジ表示する。直近50件は `localStorage` に保持する。実行中会話には停止、完了会話には再入力、スケジュール通知には再実行と設定の操作を出す。失敗時はエラー色、成功時は通常色で表示する。
-- 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。許可判定では既存の最深祖先を実体化し、シンボリックリンクやWindowsジャンクション経由のルート外到達も拒否する。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）とドロップファイル読込はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_MEETING_ROOT`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
+- 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。許可判定では既存の最深祖先を実体化し、シンボリックリンクやWindowsジャンクション経由のルート外到達も拒否する。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）とドロップファイル読込はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_MEETING_ROOT`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
 - 自力実行（`code_runner`）: `PICOAGENT_CODE_RUNNER_ENABLED=true` が必要（既定無効）。他スキルで要望を満たせないとき、モデルが PowerShell または Python のスクリプトを書いて実行し、出力を受け取って達成する。作業ディレクトリと許可判定は共通 permissions を参照し、保護パスと許可ルート外を拒否する。スクリプト本文に物理削除・破壊的操作（Remove-Item / rm / os.remove / shutil.rmtree 等）が含まれる場合は実行しない。スクリプトは一時ファイルへ書き出し、実行後に削除する。timeout・出力32KBで制限。
 - コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が共通の許可ルート外の場合、チャットへ確認文を返す。ユーザーが「許可」と送った場合は保留中の1件だけ実行する。「永続許可」と送った場合はコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を共通の `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。
 - 起動待ち画面: `#petApp.is-booting` 中は通常のフキダシとキャラクターを隠し、`#bootScreen` に選択中キャラクターの `boot.sleeping`（未定義なら `idle` 先頭フレーム）を使った待機画面を表示する。`renderer.js` の `setStatus()` がモデルDL、同梱エンジン起動、Aivis 起動待ちなど**実行中の処理だけ**を `#bootStatus` に同期する。準備完了時の「<キャラ名>を起こしているよ…」はプログレスバー下に出し、`is-booting` を外して通常表示へ切り替える。
