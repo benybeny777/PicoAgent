@@ -2492,6 +2492,14 @@ let micCtx = null;
 let micNode = null;
 let micChunks = [];
 let micSampleRate = 16000;
+// 録音の上限バイト数（16bit モノラル WAV 換算）。バックエンド pet_transcribe_audio の
+// 上限は 30MB で、超えると「音声が大きすぎます」で確定に失敗する。上限に当たってから
+// 弾くと録音した内容がまるごと無駄になるうえ、それまでの PCM を WebView 上に抱え続けて
+// メモリも食う。そこで録音側で先に打ち切り、そこまでの内容を確定させる。
+// 16kHz なら約 14 分、WebView が 16kHz 非対応で 48kHz になる環境でも約 4.7 分で止まる。
+const MAX_RECORD_BYTES = 27 * 1024 * 1024;
+let micSamples = 0;        // 録音した総サンプル数（上限判定用）
+let micAutoStopping = false;
 // 逐次文字起こし（リアルタイム風プレビュー）の状態。録音中に数秒ごとの区間を裏で
 // 文字起こしして入力欄へ出し、停止時に全体の文字起こしで置き換えて確定する。
 let micSession = 0;        // 録音の世代。停止後に届いた途中結果を捨てる
@@ -2577,8 +2585,11 @@ function stopMicCapture() {
 }
 
 async function finishRecording() {
+  // 上限による自動確定と、その直後のボタン操作が二重に走らないようにする。
+  if (!micStream) return;
   const chunks = micChunks;
   micChunks = [];
+  micSamples = 0;
   const sampleRate = micSampleRate;
   const base = micInterimBase;      // 録音開始時点の入力欄（逐次プレビューを除いた確定部分）
   const hadInterim = micInterimTexts.length > 0;
@@ -2626,7 +2637,27 @@ async function startRecording() {
     // ScriptProcessor は非推奨だが WebView 互換性が高い（AudioWorklet はファイル分離が必要）。
     micNode = micCtx.createScriptProcessor(4096, 1, 1);
     micChunks = [];
-    micNode.onaudioprocess = (event) => { micChunks.push(new Float32Array(event.inputBuffer.getChannelData(0))); };
+    micSamples = 0;
+    micAutoStopping = false;
+    const maxSamples = Math.floor((MAX_RECORD_BYTES - 44) / 2);
+    micNode.onaudioprocess = (event) => {
+      if (micAutoStopping) return;
+      const raw = event.inputBuffer.getChannelData(0);
+      // 上限をまたぐフレームは入る分だけ取り込む。フレーム丸ごと足してから判定すると、
+      // フレーム長しだいで上限を超えた WAV ができてしまう（バックエンドが弾く）。
+      const room = maxSamples - micSamples;
+      const frame = new Float32Array(raw.length <= room ? raw : raw.subarray(0, room));
+      if (frame.length > 0) {
+        micChunks.push(frame);
+        micSamples += frame.length;
+      }
+      // 上限に達したら、そこまでの録音を捨てずに自動で確定する。
+      if (micSamples >= maxSamples) {
+        micAutoStopping = true;
+        showToast("録音が上限に達したので自動で確定しました", "warn");
+        finishRecording();
+      }
+    };
     source.connect(micNode);
     micNode.connect(micCtx.destination);
     micButton.classList.add("recording");

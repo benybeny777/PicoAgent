@@ -1944,6 +1944,8 @@ pub async fn pet_transcribe_audio(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(raw)
         .map_err(|error| format!("音声データを解読できません: {error}"))?;
+    // 最後の砦。通常はフロント側（renderer.js の MAX_RECORD_BYTES = 27MB）が先に
+    // 録音を打ち切って確定するため、ここに到達するのは想定外の入力だけ。
     if bytes.len() > 30 * 1024 * 1024 {
         return Err("音声が大きすぎます（30MB まで）。".to_string());
     }
