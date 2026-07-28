@@ -36,11 +36,28 @@ pub fn path(app: &AppHandle) -> PathBuf {
 }
 
 pub fn load(app: &AppHandle) -> MemoryStore {
-    let Ok(text) = std::fs::read_to_string(path(app)) else {
+    let target = path(app);
+    let Ok(text) = std::fs::read_to_string(&target) else {
         return MemoryStore::default();
     };
-    // フォールバック許可: メモリファイル破損時も会話継続を優先し、空メモリで起動する。
-    serde_json::from_str(&text).unwrap_or_default()
+    match serde_json::from_str(&text) {
+        Ok(store) => store,
+        // フォールバック許可: 破損時も会話継続を優先し、空メモリで起動する。ただし
+        // そのまま次の保存で上書きすると記憶が恒久的に消えるので、退避してから続ける。
+        Err(error) => {
+            let saved = crate::store::quarantine_corrupt(&target);
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "長期メモリを読めないため空で起動します（{error}）{}",
+                    saved
+                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
+                        .unwrap_or_default()
+                ),
+            );
+            MemoryStore::default()
+        }
+    }
 }
 
 pub fn save(app: &AppHandle, store: &MemoryStore) {

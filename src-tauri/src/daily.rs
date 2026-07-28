@@ -62,13 +62,10 @@ pub fn parse_local_minute(input: &str) -> Option<NaiveDateTime> {
         .ok()
 }
 
-pub fn load_events(cfg: &Config) -> Vec<DailyEvent> {
-    let raw = cfg.get(EVENTS_KEY, "");
-    if raw.trim().is_empty() {
-        return Vec::new();
-    }
-    // フォールバック許可: JSON が壊れていてもアプリ継続を優先し、空一覧で扱う。
-    serde_json::from_str(&raw).unwrap_or_default()
+/// 保存済みの通知一覧を読む。壊れていた場合は空一覧にせずエラーを返す
+/// （空から始めて書き戻すと、登録済みのリマインダーがすべて消えるため）。
+pub fn load_events(cfg: &Config) -> Result<Vec<DailyEvent>, String> {
+    crate::store::load_list(cfg, EVENTS_KEY)
 }
 
 pub fn save_events(cfg: &Config, events: &[DailyEvent]) -> anyhow::Result<()> {
@@ -81,13 +78,9 @@ pub fn save_events(cfg: &Config, events: &[DailyEvent]) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn load_praise(cfg: &Config) -> Vec<PraiseEntry> {
-    let raw = cfg.get(PRAISE_KEY, "");
-    if raw.trim().is_empty() {
-        return Vec::new();
-    }
-    // フォールバック許可: JSON が壊れていてもアプリ継続を優先し、空一覧で扱う。
-    serde_json::from_str(&raw).unwrap_or_default()
+/// 保存済みの「できたこと」を読む。壊れていた場合は空一覧にせずエラーを返す。
+pub fn load_praise(cfg: &Config) -> Result<Vec<PraiseEntry>, String> {
+    crate::store::load_list(cfg, PRAISE_KEY)
 }
 
 pub fn save_praise(cfg: &Config, entries: &[PraiseEntry]) -> anyhow::Result<()> {
@@ -102,7 +95,8 @@ pub fn save_praise(cfg: &Config, entries: &[PraiseEntry]) -> anyhow::Result<()> 
 
 pub fn due_events(cfg: &Config) -> anyhow::Result<Vec<DailyEvent>> {
     let now = Local::now().naive_local();
-    let mut events = load_events(cfg);
+    // 読めなかった場合は空一覧で続けず、そのままエラーにする（空で書き戻さないため）。
+    let mut events = load_events(cfg).map_err(|error| anyhow::anyhow!(error))?;
     let mut due = Vec::new();
     for event in events.iter_mut() {
         if !event.enabled {

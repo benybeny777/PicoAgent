@@ -184,7 +184,10 @@ impl Tool for TaskSchedulerTool {
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
-        let mut tasks = scheduler::load(cfg);
+        let mut tasks = match scheduler::load(cfg) {
+            Ok(tasks) => tasks,
+            Err(error) => return format!("エラー: {error}"),
+        };
         match action.as_str() {
             "list" => list_text(&tasks),
             "clear" => {

@@ -67,7 +67,10 @@ impl Tool for ReminderTool {
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
-        let mut events = daily::load_events(cfg);
+        let mut events = match daily::load_events(cfg) {
+            Ok(events) => events,
+            Err(error) => return format!("エラー: {error}"),
+        };
         match action.as_str() {
             "list" => list_text(&events),
             "clear" => {

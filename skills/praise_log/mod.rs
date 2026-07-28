@@ -51,7 +51,10 @@ impl Tool for PraiseLogTool {
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
-        let mut entries = daily::load_praise(cfg);
+        let mut entries = match daily::load_praise(cfg) {
+            Ok(entries) => entries,
+            Err(error) => return format!("エラー: {error}"),
+        };
         match action.as_str() {
             "list" => list_text(&entries),
             "clear" => {

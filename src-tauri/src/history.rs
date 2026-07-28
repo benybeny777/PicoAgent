@@ -58,11 +58,28 @@ pub fn migrate_legacy(app: &AppHandle, character_id: &str) {
 
 /// 指定キャラクターの直近の会話（system 以外）を末尾 MAX_CONTEXT_LOAD 件まで読み込む。
 pub fn load_recent(app: &AppHandle, character_id: &str) -> Vec<Message> {
-    let Ok(text) = std::fs::read_to_string(path(app, character_id)) else {
+    let target = path(app, character_id);
+    let Ok(text) = std::fs::read_to_string(&target) else {
         return Vec::new();
     };
     // フォールバック許可: 履歴ファイルが壊れていても会話継続を優先し、空履歴で起動する。
-    let all: Vec<Message> = serde_json::from_str(&text).unwrap_or_default();
+    // ただし次の保存で上書きして会話を失わないよう、破損ファイルは退避してから続ける。
+    let all: Vec<Message> = match serde_json::from_str(&text) {
+        Ok(all) => all,
+        Err(error) => {
+            let saved = crate::store::quarantine_corrupt(&target);
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "会話履歴を読めないため空で起動します（{error}）{}",
+                    saved
+                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
+                        .unwrap_or_default()
+                ),
+            );
+            Vec::new()
+        }
+    };
     let start = all.len().saturating_sub(MAX_CONTEXT_LOAD);
     all[start..].to_vec()
 }

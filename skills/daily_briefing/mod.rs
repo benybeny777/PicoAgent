@@ -45,7 +45,9 @@ impl Tool for DailyBriefingTool {
             json!({ "location": location })
         };
         let weather = crate::tools::dispatch(cfg, "weather", weather_args).await;
+        // 読み取り専用の要約なので、読めなければ通知欄だけ空にして続ける（保存はしない）。
         let events: Vec<String> = daily::load_events(cfg)
+            .unwrap_or_default()
             .into_iter()
             .filter(|event| event.enabled)
             .take(5)

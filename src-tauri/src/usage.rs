@@ -88,11 +88,28 @@ fn path(app: &AppHandle) -> PathBuf {
 }
 
 pub fn load(app: &AppHandle) -> UsageStore {
-    let Ok(text) = std::fs::read_to_string(path(app)) else {
+    let target = path(app);
+    let Ok(text) = std::fs::read_to_string(&target) else {
         return UsageStore::default();
     };
-    // フォールバック許可: 使用量ファイル破損時は空ストアで継続する。
-    serde_json::from_str(&text).unwrap_or_default()
+    match serde_json::from_str(&text) {
+        Ok(store) => store,
+        // フォールバック許可: 破損時は空ストアで継続する。次の保存で上書きして
+        // 集計を失わないよう、破損ファイルは退避してから続ける。
+        Err(error) => {
+            let saved = crate::store::quarantine_corrupt(&target);
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "トークン使用量を読めないため空で起動します（{error}）{}",
+                    saved
+                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
+                        .unwrap_or_default()
+                ),
+            );
+            UsageStore::default()
+        }
+    }
 }
 
 pub fn save(app: &AppHandle, store: &UsageStore) {

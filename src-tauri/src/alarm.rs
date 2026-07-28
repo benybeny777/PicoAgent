@@ -41,14 +41,10 @@ pub struct Alarm {
 
 const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-/// 保存済みのアラーム一覧を読む。壊れていれば空一覧。
-pub fn load(cfg: &Config) -> Vec<Alarm> {
-    let raw = cfg.get(CONFIG_KEY, "");
-    if raw.trim().is_empty() {
-        return Vec::new();
-    }
-    // フォールバック許可: JSON が壊れていてもアプリ継続を優先し、空一覧で扱う。
-    serde_json::from_str(&raw).unwrap_or_default()
+/// 保存済みのアラーム一覧を読む。壊れていた場合は空一覧にせずエラーを返す
+/// （空から始めて書き戻すと、登録済みのアラームがすべて消えるため）。
+pub fn load(cfg: &Config) -> Result<Vec<Alarm>, String> {
+    crate::store::load_list(cfg, CONFIG_KEY)
 }
 
 /// アラーム一覧を保存する（config に JSON 文字列で書く）。
@@ -140,7 +136,8 @@ pub fn days_label(days: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{days_label, normalize_days, normalize_time, Alarm};
+    use super::{days_label, load, normalize_days, normalize_time, Alarm, CONFIG_KEY};
+    use crate::config::Config;
 
     #[test]
     fn 時刻を正規化する() {
@@ -174,5 +171,23 @@ mod tests {
             r#"[{"id":"a","time":"07:00","days":[],"repeat":true,"label":"朝","enabled":true}]"#;
         let alarms: Vec<Alarm> = serde_json::from_str(raw).unwrap();
         assert_eq!(alarms[0].snooze_minutes, 5);
+    }
+
+    /// 壊れた JSON を空一覧として返すと、呼び出し側がそのまま書き戻して
+    /// 登録済みの目覚ましを全部消してしまう。読めなければエラーにする。
+    #[test]
+    fn 壊れた保存内容は空一覧にせずエラーにする() {
+        let cfg = Config::new();
+        // 末尾が切れた JSON（書き込み中断や手編集で起こりうる形）。
+        cfg.set(CONFIG_KEY, r#"[{"id":"a1","time":"07:00""#);
+        let error = load(&cfg).unwrap_err();
+        assert!(error.contains("読み取れません"), "error: {error}");
+        assert!(error.contains("中止"), "何をしたかを伝えること: {error}");
+
+        // 未設定・空文字は「登録なし」として正常に空一覧。
+        cfg.set(CONFIG_KEY, "");
+        assert!(load(&cfg).unwrap().is_empty());
+        cfg.set(CONFIG_KEY, "[]");
+        assert!(load(&cfg).unwrap().is_empty());
     }
 }

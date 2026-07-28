@@ -129,7 +129,11 @@ impl Tool for AlarmTool {
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
-        let mut alarms = alarm::load(cfg);
+        let mut alarms = match alarm::load(cfg) {
+            Ok(alarms) => alarms,
+            // 空一覧から書き戻すと登録済みの目覚ましが消えるため、ここで止める。
+            Err(error) => return format!("エラー: {error}"),
+        };
 
         match action.as_str() {
             "list" => list_text(&alarms),
