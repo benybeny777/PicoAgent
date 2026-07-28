@@ -2209,9 +2209,9 @@ pub async fn pet_capture_screen() -> Result<Value, String> {
              $b.Save(\"{path_esc}\");\
              $g.Dispose();$b.Dispose()"
         );
-        let out = tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .output()
+        let mut cmd = crate::tools::process::command("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        let out = crate::tools::process::output(cmd, 60, "スクリーンショット取得")
             .await
             .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
         if !out.status.success() {
@@ -2224,9 +2224,9 @@ pub async fn pet_capture_screen() -> Result<Value, String> {
 
     #[cfg(target_os = "macos")]
     {
-        let out = tokio::process::Command::new("screencapture")
-            .args(["-t", "png", temp_path.to_str().unwrap_or("")])
-            .output()
+        let mut cmd = crate::tools::process::command("screencapture");
+        cmd.args(["-t", "png", temp_path.to_str().unwrap_or("")]);
+        let out = crate::tools::process::output(cmd, 60, "スクリーンショット取得")
             .await
             .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
         if !out.status.success() {
@@ -2241,23 +2241,23 @@ pub async fn pet_capture_screen() -> Result<Value, String> {
     {
         let path_str = temp_path.to_str().unwrap_or("");
         // grim(Wayland) → scrot(X11) → import(ImageMagick) の順に試みる。
-        let ok = tokio::process::Command::new("grim")
-            .arg(path_str)
-            .status()
+        let mut grim = crate::tools::process::command("grim");
+        grim.arg(path_str);
+        let ok = crate::tools::process::output(grim, 60, "スクリーンショット取得")
             .await
-            .map(|s| s.success())
+            .map(|out| out.status.success())
             .unwrap_or(false);
         if !ok {
-            let ok2 = tokio::process::Command::new("scrot")
-                .arg(path_str)
-                .status()
+            let mut scrot = crate::tools::process::command("scrot");
+            scrot.arg(path_str);
+            let ok2 = crate::tools::process::output(scrot, 60, "スクリーンショット取得")
                 .await
-                .map(|s| s.success())
+                .map(|out| out.status.success())
                 .unwrap_or(false);
             if !ok2 {
-                let out = tokio::process::Command::new("import")
-                    .args(["-window", "root", path_str])
-                    .output()
+                let mut import = crate::tools::process::command("import");
+                import.args(["-window", "root", path_str]);
+                let out = crate::tools::process::output(import, 60, "スクリーンショット取得")
                     .await
                     .map_err(|_| {
                         "スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string()

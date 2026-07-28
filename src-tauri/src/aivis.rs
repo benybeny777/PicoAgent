@@ -477,7 +477,7 @@ async fn download_aivis_archive(url: &str, dest: &Path) -> anyhow::Result<()> {
 
 fn command_exists(command: &str) -> bool {
     let checker = if cfg!(windows) { "where.exe" } else { "sh" };
-    let mut cmd = std::process::Command::new(checker);
+    let mut cmd = crate::tools::process::command_sync(checker);
     if cfg!(windows) {
         cmd.arg(command);
     } else {
@@ -494,7 +494,7 @@ fn command_exists(command: &str) -> bool {
 fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(out_dir)?;
     let mut command = if command_exists("7z") {
-        let mut cmd = std::process::Command::new("7z");
+        let mut cmd = crate::tools::process::command_sync("7z");
         cmd.args([
             "x",
             archive.to_string_lossy().as_ref(),
@@ -503,7 +503,7 @@ fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
         ]);
         cmd
     } else if command_exists("7za") {
-        let mut cmd = std::process::Command::new("7za");
+        let mut cmd = crate::tools::process::command_sync("7za");
         cmd.args([
             "x",
             archive.to_string_lossy().as_ref(),
@@ -512,7 +512,7 @@ fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
         ]);
         cmd
     } else {
-        let mut cmd = std::process::Command::new("tar");
+        let mut cmd = crate::tools::process::command_sync("tar");
         cmd.args(["-xf", archive.to_string_lossy().as_ref(), "-C"]);
         cmd.arg(out_dir);
         cmd
@@ -521,11 +521,6 @@ fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
     let status = command.status()?;
     if !status.success() {
         anyhow::bail!(
@@ -736,7 +731,7 @@ fn wait_child_with_timeout(
 #[cfg(windows)]
 fn gpu_probe_output() -> std::io::Result<String> {
     let script = "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }";
-    let mut command = std::process::Command::new("powershell");
+    let mut command = crate::tools::process::command_sync("powershell");
     command.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -745,11 +740,6 @@ fn gpu_probe_output() -> std::io::Result<String> {
         script,
     ]);
     command.stdin(Stdio::null()).stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
     let mut child = command.stdout(Stdio::piped()).spawn()?;
     match wait_child_with_timeout(&mut child, GPU_PROBE_TIMEOUT)? {
         Some(status) if status.success() => {
@@ -855,7 +845,7 @@ fn spawn_engine(
     }
     ensure_executable(&path)?;
     let work_dir = path.parent().map(Path::to_path_buf);
-    let mut command = std::process::Command::new(path);
+    let mut command = crate::tools::process::command_sync(path);
     if let Some(dir) = work_dir {
         command.current_dir(dir);
     }
@@ -898,11 +888,6 @@ fn spawn_engine(
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log));
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
     // macOS/Linux: 子を独立したプロセスグループリーダーにする。
     // stop() 時に pgid 全体へ SIGKILL を送り、子孫プロセスも確実に終了させるため。
     #[cfg(unix)]
@@ -1061,7 +1046,7 @@ pub fn stop(app: &tauri::AppHandle) {
         if let Some(mut child) = state.child.lock().unwrap().take() {
             #[cfg(windows)]
             {
-                let _ = std::process::Command::new("taskkill")
+                let _ = crate::tools::process::command_sync("taskkill")
                     .args(["/PID", &child.id().to_string(), "/T", "/F"])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())

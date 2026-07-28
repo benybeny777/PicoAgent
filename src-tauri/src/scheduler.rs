@@ -4,14 +4,12 @@
 // run_command と同じ許可ルート・allowlist・有効化フラグを使い、shell は使わない。
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 
 use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::process::Command;
 
 use crate::config::Config;
 
@@ -397,6 +395,10 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
                 return Err("program が指定されていません。".to_string());
             }
             validate_args(&task.args)?;
+            // 物理削除は run_command と同じ規則で拒否する（allowlist を通っても実行しない）。
+            if crate::tools::process::is_physical_delete(&task.program, &task.args) {
+                return Err(crate::tools::process::physical_delete_error());
+            }
             if !allowed(cfg, &task.program, &task.args) {
                 return Err(format!(
                     "許可されていないコマンドです: {} {}",
@@ -439,15 +441,6 @@ fn trim_output(label: &str, bytes: &[u8]) -> String {
         MAX_OUTPUT_BYTES
     )
 }
-
-#[cfg(windows)]
-fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
 
 async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> String {
     if task.kind.trim().eq_ignore_ascii_case("tool") {
@@ -495,15 +488,8 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
         .filter(|value| (1..=120).contains(value))
         .unwrap_or(default_timeout);
 
-    let mut command = Command::new(&task.program);
-    command
-        .args(&task.args)
-        .current_dir(&cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    hide_window(&mut command);
+    let mut command = crate::tools::process::command(&task.program);
+    command.args(&task.args).current_dir(&cwd);
 
     crate::log_paths::append_app_log(
         app,
@@ -515,17 +501,12 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
             cwd.display()
         ),
     );
-    let output =
-        match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(error)) => return format!("エラー: コマンド起動に失敗しました（{}）", error),
-            Err(_) => {
-                return format!(
-                    "エラー: コマンドが {} 秒でタイムアウトしました。",
-                    timeout_secs
-                )
-            }
-        };
+    let output = match crate::tools::process::output(command, timeout_secs, "スケジュールコマンド")
+        .await
+    {
+        Ok(output) => output,
+        Err(error) => return format!("エラー: {error}"),
+    };
     let mut result = format!(
         "スケジュールタスク完了: id={} 終了コード: {}\n作業ディレクトリ: {}\n",
         task.id,
@@ -718,7 +699,9 @@ pub fn start(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_days, normalize_time, parse_cron_value, should_run, ScheduledTask};
+    use super::{
+        normalize_days, normalize_time, parse_cron_value, should_run, validate_task, ScheduledTask,
+    };
 
     fn 固定時刻タスク(time: &str) -> ScheduledTask {
         ScheduledTask {
@@ -759,6 +742,37 @@ mod tests {
         let mut task = 固定時刻タスク("07:05");
         task.enabled = false;
         assert!(!should_run(&task, "2026-07-28 07:05", "07:05"));
+    }
+
+    /// 物理削除は allowlist を通っても実行させない（run_command と同じ規則）。
+    ///
+    /// 以前この判定は run_command だけが持っていて、同じ allowlist で動くこちらには
+    /// 無かった。許可コマンドに powershell があれば予約実行から Remove-Item を通せた。
+    #[test]
+    fn 許可済みでも物理削除コマンドは拒否する() {
+        let cfg = crate::config::Config::new();
+        // わざと「許可されている」状態にしてから、それでも拒否されることを確かめる。
+        cfg.set("PICOAGENT_COMMAND_ALLOWLIST", "rm,powershell,git clean");
+
+        let mut task = 固定時刻タスク("07:05");
+        task.program = "rm".to_string();
+        task.args = vec!["-rf".to_string(), "important".to_string()];
+        let error = validate_task(&cfg, &task).unwrap_err();
+        assert!(error.contains("ゴミ箱"), "error: {error}");
+
+        task.program = "powershell".to_string();
+        task.args = vec!["-Command".to_string(), "Remove-Item important".to_string()];
+        assert!(validate_task(&cfg, &task).unwrap_err().contains("ゴミ箱"));
+
+        task.program = "git".to_string();
+        task.args = vec!["clean".to_string(), "-fd".to_string()];
+        assert!(validate_task(&cfg, &task).unwrap_err().contains("ゴミ箱"));
+
+        // 通常のコマンドはこれまでどおり通る。
+        task.program = "git".to_string();
+        task.args = vec!["status".to_string()];
+        cfg.set("PICOAGENT_COMMAND_ALLOWLIST", "git status");
+        assert!(validate_task(&cfg, &task).is_ok());
     }
 
     /// 検出は同期関数に固定する。ここを async にすると、長時間タスクの実行を

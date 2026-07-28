@@ -6,6 +6,14 @@
 
 ## 2026-07-28
 
+### スケジューラの物理削除拒否漏れと、ガードの走査漏れを修正（再帰レビュー 第11巡）
+
+- **予約実行から物理削除コマンドを通せた穴を塞いだ** (`src-tauri/src/scheduler.rs`): 「スキル経由の削除は必ずゴミ箱へ」というルールの実装（`rm` / `del` / `Remove-Item` / `git clean` の拒否）は `run_command` だけが持っており、**同じ `PICOAGENT_COMMAND_ALLOWLIST` で動くスケジューラには無かった**。許可コマンドに `powershell` を入れていれば、予約実行から `Remove-Item` を通せる状態だった。判定を共通層 `process::is_physical_delete()` へ移し、両方の経路が同じ実装を通るようにした。
+- **ガードが `skills/` しか見ていなかったのを是正** (`src-tauri/src/tools/process.rs`): プロセス起動作法のガードは `skills/` だけを走査しており、**バックエンド本体は対象外**だった。走査を `src-tauri/src/` へ広げたところ、`scheduler.rs` / `engine.rs` / `aivis.rs` / `mcp/client.rs` に自前 `hide_window` が残り、`commands.rs` のスクリーンショット取得（Windows の `powershell`・Linux の `grim`/`scrot`/`import`）は**窓抑止もタイムアウトも無い**まま起動していたことが判明した。合計 15 箇所を共通層へ移行し、`hide_window` のコピー3件を削除した。
+- **常駐プロセス用の同期版を追加**: 同梱エンジンや AivisSpeech のように「future の終了後も動き続けてほしい」ものは `kill_on_drop` を付けられないため、窓抑止だけを共通化する `process::command_sync()` を用意した。
+- **ガードを2本追加**: (1) 許可コマンドを実行する経路（`PICOAGENT_COMMAND_ALLOWLIST` を読むファイル）が物理削除の拒否を通しているか、(2) 走査範囲をスキル＋バックエンドの両方に。どちらも実際に違反を注入して**落ちることを確認済み**。
+- 検証: allowlist に載せてもなお `rm` / `Remove-Item` / `git clean` が拒否され、通常コマンドは通ることの回帰テストを追加。cargo test 140件パス・clippy 警告ゼロ・`cargo fmt --check` クリーン。
+
 ### 20秒ごとに設定ファイルを書き直していたのを修正（再帰レビュー 第10巡）
 
 - **無意味なディスク書き込みが延々と続いていたのを修正** (`src-tauri/src/daily.rs`): リマインダー・集中タイマーの期限チェック `due_events()` は、フロントから **20 秒ごと**に呼ばれるにもかかわらず、期限到来が 1 件も無くても毎回 `save_events()` を呼んでいた。設定は「全体を書き戻す」更新なので、**通知を1つも登録していなくても config.json 全体の書き直しが 1 日 4,320 回**走る。第5巡で書き込みを原子的（一時ファイル→`sync_all`→`rename`）にしたぶん、毎回 fsync まで発生していた。期限到来があったときだけ保存するようにした。
