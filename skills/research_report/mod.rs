@@ -45,43 +45,6 @@ struct SavedArtifacts {
 
 pub struct ResearchReportTool;
 
-fn workspace_root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外には保存できません: {}",
-            base.display(),
-            target.display()
-        ))
-    }
-}
-
 fn slug(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars().take(48) {
@@ -663,7 +626,6 @@ fn save_report(
     questions: &[String],
     results: &[SearchResult],
 ) -> Result<SavedArtifacts, String> {
-    let base = workspace_root(cfg);
     let default_path = format!(
         "reports/{}-{}.md",
         Local::now().format("%Y%m%d-%H%M%S"),
@@ -675,7 +637,7 @@ fn save_report(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(&default_path);
-    let target = bounded_path(&base, path)?;
+    let target = crate::permissions::resolve(cfg, path)?;
     if target.extension().and_then(|ext| ext.to_str()) != Some("md") {
         return Err("save_path は .md ファイルにしてください。".to_string());
     }

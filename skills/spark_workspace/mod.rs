@@ -1,6 +1,6 @@
 // spark_workspace/mod.rs - 資料・ページ・表・実行計画をまとめて作るワークスペース生成スキル。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use async_trait::async_trait;
 use chrono::Local;
@@ -12,43 +12,6 @@ use crate::config::Config;
 const MAX_TEXT_CHARS: usize = 24_000;
 
 pub struct SparkWorkspaceTool;
-
-fn workspace_root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_path(base: &Path, path: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, path);
-    if target == base || target.starts_with(base) {
-        Ok(target)
-    } else {
-        Err(format!(
-            "許可ルート（{}）の外には保存できません: {}",
-            base.display(),
-            target.display()
-        ))
-    }
-}
 
 fn slug(text: &str) -> String {
     let mut out = String::new();
@@ -281,7 +244,6 @@ impl Tool for SparkWorkspaceTool {
             Ok(source) => source,
             Err(error) => return format!("エラー: {error}"),
         };
-        let base = workspace_root(cfg);
         let default_dir = format!(
             "spark-workspaces/{}-{}",
             Local::now().format("%Y%m%d-%H%M%S"),
@@ -293,7 +255,7 @@ impl Tool for SparkWorkspaceTool {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or(&default_dir);
-        let dir = match bounded_path(&base, dir_text) {
+        let dir = match crate::permissions::resolve(cfg, dir_text) {
             Ok(dir) => dir,
             Err(error) => return format!("エラー: {error}"),
         };
