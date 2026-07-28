@@ -8,6 +8,8 @@ mod api_server;
 mod commands;
 mod config;
 mod daily;
+#[cfg(test)]
+mod doc_sync;
 mod emotion;
 mod engine;
 #[cfg(test)]

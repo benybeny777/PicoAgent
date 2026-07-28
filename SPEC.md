@@ -231,6 +231,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 ### 同梱ツール
 
+同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、`scripts/fetch-tools.mjs`（`npm run setup:tools`、`npm run dev` / `npm run build` の前に自動実行）が PicoAgent 管理下の `src-tauri/resources/bundled/tools/` へ取得する。再取得は `TOOLS_FORCE=1`、対象を絞る場合は `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep` のようにカンマ区切りで指定する。各スキルは `PICOAGENT_*_PATH` の明示設定 → 同梱 → PATH の順に実行ファイルを解決する。
+
+
 | name | 機能 | 安全策 |
 |---|---|---|
 | `app_control` | PicoAgentアプリ自身を操作する。チャットで「アプリ終了して」「PicoAgent を閉じて」のように頼むと `quit` を実行する | スキル結果の `PICOAGENT_APP_QUIT_REQUESTED` をバックエンドが検出し、フロントが短く表示してから `pet_quit` で `app.exit(0)` を呼ぶ。単なる「終了」はタイマー等の終了と混ざるため、アプリ名またはアプリ文脈を含む依頼だけに使う |
