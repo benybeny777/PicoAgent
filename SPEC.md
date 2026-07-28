@@ -95,7 +95,7 @@ graph TD
 5. 各 chat 呼び出しは `chat_with_retry()` でラップし、失敗時に最大 3 回・指数バックオフ（1秒→2秒）でリトライする（4xx 認証エラーは即中断）。
 6. chat 完了後、返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に永続化する。
 7. ツール実行は `Tracer::start_span()` でレイテンシを計測し、`Tracer::record()` で直近 200 件を保持する。
-8. ツール出力は `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字で打ち切り、コンテキスト超過を防ぐ。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。ツール引数 JSON の解析失敗（`_raw` フィールド）を検出した場合はツールを呼ばずエラー文字列を返してモデルへ再試行を促す（`dispatch_or_error()`）。
+8. ツール出力は `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字で打ち切り、コンテキスト超過を防ぐ。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。**同じ検査を添付ファイルの抽出本文にも適用する**（`commands.rs` の `mark_untrusted_if_injection`）。添付本文はツール結果ではなくユーザー発話の一部として渡るため、ここで検査しないと「受け取った文書に指示を仕込む」経路だけが素通りしてしまう。ツール引数 JSON の解析失敗（`_raw` フィールド）を検出した場合はツールを呼ばずエラー文字列を返してモデルへ再試行を促す（`dispatch_or_error()`）。
 9. `PICOAGENT_PLANNING_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効、かつ質問が複雑（120文字超・疑問符2個以上・手順/ステップ系語を含む）な場合、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、分解結果を system 追記として付与してから通常の chat ループへ進む。
 10. `PICOAGENT_SELF_EVAL_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効な場合、最終応答が短すぎる（8文字未満）または明示的な拒否パターンを含む場合に `provider.chat()` で1回再生成する（`self_improve()`）。再生成に失敗した場合は元の応答をそのまま返す。
 11. **スーパーエージェントモード（`PICOAGENT_SUPER_AGENT=true`）**: 上記の計画・自己評価をまとめて有効化し、トップレベルの `max_steps` を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定 12、呼び出し値〜30 にクランプ）へ引き上げて多段のツール連鎖を回し切る。計画開始・計画内容・「ステップ k/N を実行中…」・「ツールを実行中: …」を `pet:agent_status` イベントでフロントへ送り、計画→実行を可視化する（フロントはステータス行に表示）。
