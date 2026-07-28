@@ -6,6 +6,12 @@
 
 ## 2026-07-28
 
+### ローカルAPIの CSRF / DNS リバインディング対策（再帰レビュー 第2巡）
+
+- **ブラウザ経由でエージェントを実行させられる経路を塞いだ** (`src-tauri/src/api_server.rs`): ローカル API は 127.0.0.1 に閉じているが、それだけでは「ユーザーが開いた悪意あるウェブページが `fetch` でこの API を叩く」経路を防げない。`Content-Type: text/plain` を使えば CORS のプリフライトも回避できるため、**応答は読めなくても『エージェントを実行させる』副作用だけを起こせる**状態だった（API キー未設定が既定のため、有効化しただけのユーザーは無防備）。
+- **対策**: (1) `Origin` ヘッダ付きのリクエストは既定で 403（ブラウザは横断 fetch に必ず Origin を付けるが、CLI / MCP クライアントは付けない。MCP 仕様も Origin 検証をサーバ要件としている）。(2) ボディ付きは `Content-Type: application/json` 限定で、それ以外は 415（単純リクエストによる迂回を防ぐ）。例外が要る場合だけ新設の `PICOAGENT_API_ALLOWED_ORIGINS` に Origin を列挙する。
+- 検証: Origin 判定・Content-Type 判定の単体テストに加え、**実 HTTP で攻撃シナリオを再現**（`Origin: https://evil.example` + `Content-Type: text/plain` の POST）して 403 になることを確認。同梱 CLI は `application/json` を送るため影響なし（E2E で回帰確認）。cargo test 116件パス・clippy 警告ゼロ。
+
 ### 承認マーカーの露出を修正し、実行入口の既定を安全側へ反転（再帰レビュー 第1巡）
 
 - **内部の承認マーカーがユーザーへ漏れる不具合を修正** (`src-tauri/src/tools/mod.rs` / `agent.rs`): `run_command` は未許可コマンドに対して `__PICOAGENT_COMMAND_APPROVAL__{token,cwd,…}` という内部マーカーを返し、エージェントループがそれを解釈して承認カードを出す。しかし `workflow` / `subagent` / タスクスケジューラ / 接続テストなど**対話できない経路**は `tools::dispatch` の結果をそのまま本文へ埋め込むため、マーカーと内部トークン（token / cwd / timeout）が生のままユーザーの目に触れ、しかも承認カードは出ないという状態だった（未許可コマンドが実行されることはない）。

@@ -5,6 +5,10 @@
 //   - 既定で無効（PICOAGENT_API_ENABLED=true で有効化。変更は再起動後に反映）
 //   - 127.0.0.1 のみバインド（LAN へは公開しない）
 //   - PICOAGENT_API_KEY を設定すると Authorization: Bearer <key> を必須にする
+//   - Origin ヘッダ付き（＝ブラウザからの横断リクエスト）は既定で拒否（CSRF / DNS
+//     リバインディング対策）。必要なら PICOAGENT_API_ALLOWED_ORIGINS で許可する
+//   - ボディ付きは Content-Type: application/json 限定（text/plain 等の CORS 単純
+//     リクエストによるプリフライト回避を防ぐ）
 //
 // エンドポイント（Ollama 互換風 + OpenAI 互換）:
 //   GET  /api/version          … バージョン情報
@@ -279,12 +283,56 @@ async fn run_agent(
     Ok((model, reply))
 }
 
+
+/// ブラウザ由来のリクエストを拒否する（DNS リバインディング／CSRF 対策）。
+///
+/// ローカル API は 127.0.0.1 に閉じているが、それだけでは
+/// 「ユーザーが開いた悪意あるウェブページが fetch でこの API を叩く」経路は塞げない。
+/// `Content-Type: text/plain` を使えば CORS のプリフライトも回避できるため、
+/// レスポンスは読めなくても**エージェントの実行という副作用だけ**を起こせてしまう。
+///
+/// ブラウザはクロスオリジンの fetch/XHR に必ず `Origin` を付けるが、CLI・MCP クライアント
+/// などのネイティブ実装は付けない。よって Origin 付きは既定で拒否する
+/// （MCP 仕様も Origin 検証をサーバの必須要件としている）。
+/// どうしても必要な場合だけ `PICOAGENT_API_ALLOWED_ORIGINS` に列挙する。
+fn origin_allowed(allowed: &str, origin: Option<&str>) -> bool {
+    let Some(origin) = origin.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true; // Origin 無し＝ブラウザ以外（CLI / MCP クライアント）
+    };
+    allowed
+        .split([',', '\n', ';'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .any(|entry| entry.eq_ignore_ascii_case(origin))
+}
+
+/// ボディ付きリクエストは JSON であることを要求する。
+/// `text/plain` などの CORS 単純リクエストでの迂回を防ぐ。
+fn json_content_type(content_type: Option<&str>) -> bool {
+    content_type
+        .map(|value| value.to_ascii_lowercase().starts_with("application/json"))
+        .unwrap_or(false)
+}
+
 async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Result<(), String> {
     let request = read_request(&mut stream).await?;
     let state = app.state::<AppState>();
     let api_key = state.config.get("PICOAGENT_API_KEY", "");
     if !authorized(&api_key, request.header("authorization")) {
         return respond(&mut stream, 401, &json!({ "error": "認証に失敗しました。Authorization: Bearer <PICOAGENT_API_KEY> を付けてください。" })).await;
+    }
+    // ブラウザからの横断リクエスト（CSRF / DNS リバインディング）を拒否する。
+    let allowed_origins = state.config.get("PICOAGENT_API_ALLOWED_ORIGINS", "");
+    if !origin_allowed(&allowed_origins, request.header("origin")) {
+        return respond(&mut stream, 403, &json!({
+            "error": "ブラウザからの横断リクエストは受け付けません（CSRF 対策）。CLI や MCP クライアントから呼び出すか、PICOAGENT_API_ALLOWED_ORIGINS に許可する Origin を設定してください。"
+        })).await;
+    }
+    // ボディ付きは JSON 限定（text/plain 等の単純リクエストでの迂回を防ぐ）。
+    if request.method == "POST" && !json_content_type(request.header("content-type")) {
+        return respond(&mut stream, 415, &json!({
+            "error": "Content-Type: application/json を指定してください。"
+        })).await;
     }
 
     match (request.method.as_str(), request.path.as_str()) {
@@ -480,6 +528,35 @@ mod tests {
         assert_eq!(find_head_end(b"GET / HTTP/1.1\r\n"), None);
     }
 
+    /// ブラウザからの横断リクエスト（CSRF / DNS リバインディング）を拒否すること。
+    #[test]
+    fn ブラウザ由来のリクエストを拒否する() {
+        // CLI / MCP クライアントは Origin を付けない → 通す。
+        assert!(super::origin_allowed("", None));
+        assert!(super::origin_allowed("", Some("")));
+        // ブラウザの横断リクエストは既定で拒否。
+        assert!(!super::origin_allowed("", Some("https://evil.example")));
+        assert!(!super::origin_allowed("", Some("http://localhost:3000")));
+        // 明示的に許可した Origin だけ通す（大文字小文字は無視）。
+        let allowed = "http://localhost:3000, https://app.example";
+        assert!(super::origin_allowed(allowed, Some("http://localhost:3000")));
+        assert!(super::origin_allowed(allowed, Some("HTTPS://APP.EXAMPLE")));
+        assert!(!super::origin_allowed(allowed, Some("https://evil.example")));
+    }
+
+    /// CORS 単純リクエスト（text/plain）での迂回を防ぐこと。
+    #[test]
+    fn ボディ付きはjsonだけ受け付ける() {
+        assert!(super::json_content_type(Some("application/json")));
+        assert!(super::json_content_type(Some("application/json; charset=utf-8")));
+        assert!(super::json_content_type(Some("APPLICATION/JSON")));
+        // プリフライトを回避できる単純リクエストの Content-Type は拒否。
+        assert!(!super::json_content_type(Some("text/plain")));
+        assert!(!super::json_content_type(Some("application/x-www-form-urlencoded")));
+        assert!(!super::json_content_type(Some("multipart/form-data")));
+        assert!(!super::json_content_type(None));
+    }
+
     #[test]
     fn 認証はキー設定時のみ必須になる() {
         assert!(authorized("", None)); // キー未設定なら常に許可
@@ -527,6 +604,41 @@ mod tests {
             client.read_to_string(&mut response).await.unwrap();
             assert!(response.starts_with("HTTP/1.1 200 OK"), "response: {response}");
             assert!(response.contains(r#"{"ok":true}"#), "response: {response}");
+            server.await.unwrap();
+        });
+    }
+
+    /// 実 HTTP で CSRF シナリオを再現し、拒否されることを確認する。
+    /// （悪意あるページ: Content-Type: text/plain でプリフライトを回避し、Origin 付きで送る）
+    #[test]
+    fn csrf想定のリクエストは実httpでも拒否される() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            // handle_connection は AppHandle を要るため、検査関数の合成をここで再現する。
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = super::read_request(&mut stream).await.unwrap();
+                let blocked = !super::origin_allowed("", request.header("origin"))
+                    || (request.method == "POST"
+                        && !super::json_content_type(request.header("content-type")));
+                super::respond(&mut stream, if blocked { 403 } else { 200 }, &json!({ "blocked": blocked }))
+                    .await
+                    .unwrap();
+            });
+            let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let body = r#"{"messages":[{"role":"user","content":"rm -rf"}]}"#;
+            let attack = format!(
+                "POST /api/chat HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://evil.example\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            client.write_all(attack.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            assert!(response.starts_with("HTTP/1.1 403"), "拒否されていません: {response}");
             server.await.unwrap();
         });
     }
