@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-07-27
+
+### ドキュメントを実装へ再同期（設定キー・ファイル表・コード内コメント）
+
+- **設定キーの網羅を機械的に検査して補完** (`SPEC.md`): 全ソース（Rust / JS / スクリプト）の `PICOAGENT_*` 文字列と SPEC の記載を突き合わせたところ、`PICOAGENT_NAP_MINUTES`（居眠りまでの分数）・`PICOAGENT_QUICK_ACTIONS`（クイック操作の上書き）・`PICOAGENT_UPDATE_CHECK_ENABLED`（起動時の更新確認）の3件が未記載だった。あわせて、現在は書き込まれず「レイアウトを初期化」で掃除するだけの旧座標キー（`PICOAGENT_WINDOW_RIGHT_PX` / `LEFT_PX` / `TOP_PX`）を旧キーとして明記。双方向の突き合わせで**198件すべてが記載済み**になった。
+- **主要ファイル表の欠落を補完** (`AGENTS.md`): セキュリティの正本である `permissions.rs` と、新設の共通実行層 `tools/process.rs` が表に載っていなかった。あわせて `scheduler.rs` / `memory.rs` / `emotion.rs` / `usage.rs` / `tracer.rs` / `aivis.rs` / `log_paths.rs` / `migration.rs` を追加し、それぞれガードテストの存在にも触れた。
+- **npm スクリプト一覧を完全化** (`MANUAL.md`): `sync:characters` / `build:ui:dev` / `build:ui:release` が抜けていたため追加し、いずれも `dev` / `build` が自動実行するので通常は個別実行不要である旨を注記した。
+- **コード内コメントの誤りを修正** (`src-tauri/src/tools/process.rs`): ガードのモジュール名を `tools::guard` と誤記していたのを `tools::process::guard` へ修正。例外リスト `RAW_COMMAND_ALLOWED` は空なのに doc コメントが `meeting_recorder` を例外として挙げたままだったので、実態（例外なし）に合わせた。
+- 検証: cargo test 111件パス・clippy 警告ゼロ。設定キーの双方向突き合わせと npm スクリプトの記載チェックをスクリプトで実施。
+
+---
+
 ## 2026-07-26
 
 ### 同種の「規約頼み」不変条件を構造で守る設計へ（プロセス実行・シークレット）

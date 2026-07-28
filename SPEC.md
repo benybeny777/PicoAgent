@@ -358,7 +358,11 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_WINDOW_WIDTH_PX` | 自動 | 内部UI | 透明ウィンドウの幅(px)。アプリ終了時に保存し、起動時に復元する |
 | `PICOAGENT_WINDOW_HEIGHT_PX` | 自動 | 内部UI | 透明ウィンドウの高さ(px)。アプリ終了時に保存し、起動時に復元する |
 | `PICOAGENT_WINDOW_BOTTOM_PX` | 自動 | 内部UI | 画面下端からウィンドウ下端までの縦オフセット(px)。アプリ終了時に保存し、起動時に復元する（解像度非依存）。横位置は保存せず常に右端基準で固定 |
+| `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | （旧キー） | 内部UI | 旧版が保存していたウィンドウ絶対座標。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_NAP_MINUTES` | `15` | 基本 | 無操作でキャラが居眠りするまでの分数（`0` で居眠りしない） |
+| `PICOAGENT_QUICK_ACTIONS` | 空 | 基本 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |
+| `PICOAGENT_UPDATE_CHECK_ENABLED` | `true` | 基本 | 起動時に GitHub Releases の最新版を確認し、新しければ通知する |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |

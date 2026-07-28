@@ -393,3 +393,7 @@ npm run cli -- repl              # 対話モード（会話文脈を保持。exi
 | `npm run setup:tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
 | `npm run build:live2d-psd` | レイヤー画像から Live2D 用 PSD を生成 |
 | `npm run build:character-animations` | レイヤー画像から連番アニメーションを生成 |
+| `npm run sync:characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
+| `npm run build:ui:dev` / `npm run build:ui:release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
+
+> `sync:characters` と `build:ui:*` は `npm run dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
