@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::config::Config;
+
 /// 状態ファイルを原子的に書き換える。
 ///
 /// 途中で落ちても更新前の内容が壊れない。書き込みに失敗した場合は一時ファイルを
@@ -50,6 +52,29 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
     let text = serde_json::to_string_pretty(value)?;
     write_atomic(path, text.as_bytes())
+}
+
+/// 設定に JSON 文字列で保存された一覧を読む。**壊れていても空一覧にしない。**
+///
+/// 目覚まし・リマインダー・スケジュールなどは「読み込む → 要素を足す → 全体を書き戻す」
+/// 形で更新する。読めなかったときに空一覧から始めると、**次の保存で登録済みの内容が
+/// すべて消える**。空一覧と「読めなかった」を型で区別し、書き戻す側がエラーを
+/// そのままユーザーへ返せるようにする。
+pub fn load_list<T: serde::de::DeserializeOwned>(
+    cfg: &Config,
+    key: &str,
+) -> Result<Vec<T>, String> {
+    let raw = cfg.get(key, "");
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(&raw).map_err(|error| {
+        format!(
+            "保存済みの設定「{key}」を読み取れません（{error}）。\
+             上書きで失わないよう操作を中止しました。設定画面から内容を直すか、\
+             作り直す場合は設定画面で該当項目を空にしてください。"
+        )
+    })
 }
 
 /// 読み込めなかった状態ファイルを退避し、退避先を返す。
@@ -122,6 +147,38 @@ mod guard {
         assert!(
             offenders.is_empty(),
             "状態ファイルは crate::store::write_atomic / write_json_atomic を使ってください: {offenders:?}"
+        );
+    }
+
+    /// 「壊れていたら空で続ける」フォールバックは、そのまま書き戻すとデータが全損する。
+    ///
+    /// 破損を空一覧・空ストアへ落とす箇所は、必ず (1) 破損ファイルを
+    /// `store::quarantine_corrupt()` で退避するか、(2) `store::load_list()` で
+    /// エラーとして返して書き戻しを止めるか、のどちらかを通すこと。実際に、目覚まし・
+    /// リマインダー・スケジュールは空一覧から始めてそのまま保存し、登録済みの内容を
+    /// すべて消す作りだった。
+    #[test]
+    fn 破損を空で置き換える箇所は退避かエラー返却を伴う() {
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "store.rs" {
+                continue; // 退避・読み取りの定義元
+            }
+            let body = source.body();
+            let silently_empty = body.contains("from_str(&text).unwrap_or_default()")
+                || body.contains("from_str(&raw).unwrap_or_default()");
+            if !silently_empty {
+                continue;
+            }
+            if body.contains("quarantine_corrupt") || body.contains("store::load_list") {
+                continue;
+            }
+            offenders.push(source.path.display().to_string());
+        }
+        assert!(
+            offenders.is_empty(),
+            "破損時に空で続ける箇所は store::quarantine_corrupt での退避か store::load_list でのエラー返却を伴わせてください\
+             （そのまま書き戻すとユーザーのデータが恒久的に消えます）: {offenders:?}"
         );
     }
 }

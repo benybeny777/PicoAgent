@@ -491,11 +491,13 @@ pub fn pet_daily_greeting(state: State<'_, AppState>) -> Result<Value, String> {
         17..=18 => "夕方だね",
         _ => "こんばんは",
     };
+    // 挨拶なので、読めなかった場合は件数に含めないだけにする（保存はしない経路）。
     let events = crate::daily::load_events(&state.config)
+        .unwrap_or_default()
         .into_iter()
         .filter(|event| event.enabled)
         .count();
-    let praise = crate::daily::load_praise(&state.config);
+    let praise = crate::daily::load_praise(&state.config).unwrap_or_default();
     let mut line = format!(
         "{part}。今日は{}月{}日、今は{:02}:{:02}だよ。",
         now.month(),
@@ -964,7 +966,7 @@ pub fn pet_daily_events(app: AppHandle, state: State<'_, AppState>) -> Result<Va
 // 登録中の目覚まし一覧を返す（フロントの時刻ポーリング用）。
 #[tauri::command]
 pub async fn pet_alarms(state: State<'_, AppState>) -> Result<Value, String> {
-    let alarms = crate::alarm::load(&state.config);
+    let alarms = crate::alarm::load(&state.config)?;
     Ok(json!({ "alarms": serde_json::to_value(&alarms).unwrap_or_else(|_| json!([])) }))
 }
 
@@ -1011,7 +1013,9 @@ pub async fn pet_alarm_wake(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let mut alarms = crate::alarm::load(&state.config);
+    // 読めなかった場合は空一覧で書き戻さない（登録済みの目覚ましが全部消えるため）。
+    let mut alarms = crate::alarm::load(&state.config)
+        .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;
     let target = alarms.iter().find(|a| a.id == id).cloned();
     let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();
     // 一度きりの目覚ましは鳴ったら無効化する（曜日繰り返しはそのまま）。

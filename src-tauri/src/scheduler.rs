@@ -172,13 +172,10 @@ pub fn days_label(days: &[String]) -> String {
         .join("・")
 }
 
-pub fn load(cfg: &Config) -> Vec<ScheduledTask> {
-    let raw = cfg.get(CONFIG_KEY, "");
-    if raw.trim().is_empty() {
-        return Vec::new();
-    }
-    // フォールバック許可: 設定 JSON が壊れていてもアプリ起動を優先し、空一覧で扱う。
-    serde_json::from_str(&raw).unwrap_or_default()
+/// 保存済みのスケジュール一覧を読む。壊れていた場合は空一覧にせずエラーを返す
+/// （空から始めて書き戻すと、登録済みのタスクがすべて消えるため）。
+pub fn load(cfg: &Config) -> Result<Vec<ScheduledTask>, String> {
+    crate::store::load_list(cfg, CONFIG_KEY)
 }
 
 pub fn save(cfg: &Config, tasks: &[ScheduledTask]) -> anyhow::Result<()> {
@@ -201,11 +198,27 @@ pub fn load_run_history(app: &AppHandle) -> Vec<ScheduledRunRecord> {
     let Some(path) = run_history_path(app) else {
         return Vec::new();
     };
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
-    serde_json::from_str(&text).unwrap_or_default()
+    match serde_json::from_str(&text) {
+        Ok(records) => records,
+        // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
+        // 次の保存で上書きして履歴を失わないよう、破損ファイルは退避してから続ける。
+        Err(error) => {
+            let saved = crate::store::quarantine_corrupt(&path);
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "スケジュール実行履歴を読めないため空で起動します（{error}）{}",
+                    saved
+                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
+                        .unwrap_or_default()
+                ),
+            );
+            Vec::new()
+        }
+    }
 }
 
 fn save_run_history(app: &AppHandle, records: &[ScheduledRunRecord]) -> anyhow::Result<()> {
@@ -607,7 +620,14 @@ fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
     let now = Local::now();
     let minute_stamp = now.format("%Y-%m-%d %H:%M").to_string();
     let hhmm = now.format("%H:%M").to_string();
-    let mut tasks = load(cfg);
+    // 読めなかった場合は空一覧で続けない（そのまま書き戻すと予約が全部消える）。
+    let mut tasks = match load(cfg) {
+        Ok(tasks) => tasks,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &format!("エラー: {error}"));
+            return Vec::new();
+        }
+    };
     let mut changed = false;
     let due: Vec<ScheduledTask> = tasks
         .iter_mut()
@@ -649,7 +669,7 @@ pub async fn rerun_task(
     cfg: &Config,
     task_id: &str,
 ) -> Result<ScheduledRunRecord, String> {
-    let task = load(cfg)
+    let task = load(cfg)?
         .into_iter()
         .find(|task| task.id == task_id)
         .ok_or_else(|| format!("指定されたスケジュールタスクは見つかりません: {task_id}"))?;
