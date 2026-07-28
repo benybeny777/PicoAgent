@@ -114,11 +114,22 @@ impl Config {
     }
 
     /// 設定を部分更新して永続化する。
+    ///
+    /// 内容が1つも変わらない場合はファイルへ書かない。設定は「読み込み → 全体を書き戻す」
+    /// 更新なので、ポーリング経路（通知の期限チェックなど）から同じ値で呼ばれるたびに
+    /// config.json 全体を書き直してしまい、無意味なディスク書き込みが延々と続く。
     pub fn set_all(&self, patch: Map<String, Value>) -> anyhow::Result<()> {
         {
             let mut values = self.values.lock().unwrap();
+            let mut changed = false;
             for (k, v) in patch {
-                values.insert(k, v);
+                if values.get(&k) != Some(&v) {
+                    values.insert(k, v);
+                    changed = true;
+                }
+            }
+            if !changed {
+                return Ok(());
             }
         }
         let path = self
@@ -191,6 +202,32 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert_eq!(left, vec!["config.json".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 設定は毎回「全体を書き戻す」ので、同じ値での保存を弾かないと
+    /// ポーリング経路から呼ばれるたびに無意味なディスク書き込みが続く。
+    #[test]
+    fn 内容が変わらない保存はファイルへ書かない() {
+        let dir = temp_dir("nochange");
+        let path = dir.join("config.json");
+
+        let cfg = Config::new();
+        cfg.load(path.clone());
+        cfg.set_string("PICOAGENT_TEST_KEY", "値".to_string())
+            .unwrap();
+        assert!(path.exists());
+
+        // ファイルを消してから同じ値で保存する。書き込みが起きれば再生成される。
+        std::fs::remove_file(&path).unwrap();
+        cfg.set_string("PICOAGENT_TEST_KEY", "値".to_string())
+            .unwrap();
+        assert!(!path.exists(), "同じ値なのに書き込んでいる");
+
+        // 値が変われば当然書く。
+        cfg.set_string("PICOAGENT_TEST_KEY", "別の値".to_string())
+            .unwrap();
+        assert!(path.exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
