@@ -37,6 +37,8 @@ pub trait Tool: Send + Sync {
     async fn run(&self, cfg: &Config, args: Value) -> String;
 }
 
+pub mod process;
+
 pub struct ToolReg {
     pub make: fn() -> Box<dyn Tool>,
 }

@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -84,7 +83,7 @@ async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option
     let mut found: Vec<PathBuf> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for term in terms {
-        let mut command = Command::new(&program);
+        let mut command = crate::tools::process::command(&program);
         command.args([
             "--files-with-matches",
             "--ignore-case",

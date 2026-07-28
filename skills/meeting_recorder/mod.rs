@@ -16,7 +16,6 @@ use cpal::{Sample, SampleFormat};
 use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -433,7 +432,7 @@ async fn run_transcribe_command(
     args_list: &[String],
     timeout: u64,
 ) -> Result<Output, String> {
-    let mut child = Command::new(program)
+    let mut child = crate::tools::process::command(program)
         .args(args_list)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -29,15 +29,6 @@ fn resolve_path(cfg: &Config, args: &Value, key: &str) -> Result<SafePath, Strin
     crate::permissions::resolve(cfg, raw)
 }
 
-#[cfg(windows)]
-fn hide_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn hide_window(_command: &mut Command) {}
-
 // レイヤー・複数フレームを持ちうる形式（変換時は [0]＝統合ビューだけを使う）。
 const MULTI_LAYER_EXTS: [&str; 5] = ["psd", "xcf", "tif", "tiff", "gif"];
 
@@ -49,7 +40,7 @@ async fn magick_program(cfg: &Config, legacy: &str) -> String {
     if resolved != "magick" {
         return resolved;
     }
-    match Command::new("magick").arg("-version").stdin(Stdio::null()).output().await {
+    match crate::tools::process::command("magick").arg("-version").stdin(Stdio::null()).output().await {
         Ok(output) if output.status.success() => "magick".to_string(),
         // フォールバック許可: apt の ImageMagick v6 はコマンド名が convert / identify。
         _ => legacy.to_string(),
@@ -57,9 +48,7 @@ async fn magick_program(cfg: &Config, legacy: &str) -> String {
 }
 
 async fn run_magick(mut command: Command, timeout: u64, label: &str) -> Result<std::process::Output, String> {
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    hide_window(&mut command);
-    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
+        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
         Ok(Ok(output)) => Ok(output),
         Ok(Err(error)) => Err(format!(
             "エラー: ImageMagick の起動に失敗しました: {}。npm run setup:tools か apt/brew で ImageMagick を導入してください。",
@@ -86,7 +75,7 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
         return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);
     }
     let program = magick_program(cfg, "convert").await;
-    let mut command = Command::new(&program);
+    let mut command = crate::tools::process::command(&program);
     // レイヤーを持つ形式は [0]（統合ビュー）だけを読み、複数ファイル出力を避ける。
     let input_display = input.as_path().to_string_lossy().to_string();
     let input_arg = if MULTI_LAYER_EXTS.contains(&input.extension_lossy().as_str()) {
@@ -130,7 +119,7 @@ async fn run_info(cfg: &Config, args: &Value, timeout: u64) -> String {
         return format!("エラー: 入力画像が見つかりません: {}", input.display());
     }
     let program = magick_program(cfg, "identify").await;
-    let mut command = Command::new(&program);
+    let mut command = crate::tools::process::command(&program);
     // v7（magick）はサブコマンドで identify を呼ぶ。v6 の identify や、明示設定で
     // identify 実行ファイルを直接指定した場合はサブコマンドを付けない。
     let is_identify_exe = Path::new(&program)

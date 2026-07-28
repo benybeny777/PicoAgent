@@ -3,12 +3,9 @@
 // 配布時の追加権限を増やさないため、OS 標準コマンドを短時間だけ実行する。
 // 取得した本文はサイズ上限で切り、モデルに要約・整形させるための素材として返す。
 
-use std::process::Command;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::time::timeout;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -17,33 +14,23 @@ use crate::message::Field;
 pub struct ClipboardTextTool;
 
 async fn read_clipboard() -> Result<String, String> {
-    let task = tokio::task::spawn_blocking(|| {
-        #[cfg(target_os = "windows")]
-        {
-            Command::new("powershell")
-                .args(["-NoProfile", "-Command", "Get-Clipboard -Raw"])
-                .output()
-        }
-        #[cfg(target_os = "macos")]
-        {
-            Command::new("pbpaste").output()
-        }
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            Command::new("sh")
-                .args(["-c", "command -v wl-paste >/dev/null 2>&1 && wl-paste || xclip -selection clipboard -out"])
-                .output()
-        }
+    // 共通の実行層を使う（Windows でコンソール窓を出さない・中断で子プロセスを残さない）。
+    let mut command = crate::tools::process::command(if cfg!(target_os = "windows") {
+        "powershell"
+    } else if cfg!(target_os = "macos") {
+        "pbpaste"
+    } else {
+        "sh"
     });
-    let output = timeout(Duration::from_secs(3), task)
-        .await
-        .map_err(|_| "クリップボード取得がタイムアウトしました。".to_string())?
-        .map_err(|error| format!("クリップボード取得タスクに失敗しました: {error}"))?
-        .map_err(|error| format!("クリップボード取得コマンドに失敗しました: {error}"))?;
-    if !output.status.success() {
-        return Err("クリップボードのテキストを取得できませんでした。".to_string());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    #[cfg(target_os = "windows")]
+    command.args(["-NoProfile", "-Command", "Get-Clipboard -Raw"]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    command.args([
+        "-c",
+        "command -v wl-paste >/dev/null 2>&1 && wl-paste || xclip -selection clipboard -out",
+    ]);
+    let text = crate::tools::process::output_text(command, 3, "クリップボード取得").await?;
+    Ok(text.trim().to_string())
 }
 
 #[async_trait]
