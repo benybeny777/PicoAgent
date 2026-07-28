@@ -1110,7 +1110,8 @@ async fn dispatch_or_error(cfg: &Config, name: &str, args: serde_json::Value) ->
             "エラー: ツール「{name}」の引数JSONが不正でした。正しいJSON形式で再度呼び出してください。(raw: {preview})"
         )
     } else {
-        tools::dispatch(cfg, name, args).await
+        // 承認フローはこのループが処理するため、生の承認マーカーを受け取る入口を使う。
+        tools::dispatch_interactive(cfg, name, args).await
     }
 }
 
