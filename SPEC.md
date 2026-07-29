@@ -229,6 +229,40 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/ms_office/scripts/office.ps1` のような補助ファイル変更もビルドに反映される。
 
+### スキルの分類（エージェント設計としての位置づけ）
+
+スキルの正体は **function calling のツール定義**（`name` / `description` / `parameters` の JSON Schema / `run()`）であり、MCP のツール定義と同じ層にある。README のスキル一覧はユーザー向けの**用途別**分類なので、設計上の位置づけはこちらで見る。
+
+分類は2軸で捉える。**役割**（何をする道具か）と**副作用の強さ**（読むだけか、外部状態を変えるか）で、後者は MCP の `readOnlyHint` / `destructiveHint` に対応する概念である。副作用は「そのスキルが持つ最も強い操作」で判定する。
+
+| 役割 | 副作用 | 本数 | スキル |
+|---|---|---|---|
+| **Retrieval**（外部知識の検索・取得） | read-only | 9 | `web_search` `web_fetch` `doc_search` `rss_feed` `news_scrape` `weather` `currency_rates` `market_indices` `time` |
+| **Read**（手元の状態の読み取り） | read-only | 2 | `read_file` `clipboard_text` |
+| **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
+| **Action**（SaaS の読み書き） | write | 12 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` |
+| **Action**（ファイル生成・変換） | write | 8 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` |
+| **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
+| **Action**（汎用の出入り口） | write | 2 | `http_api` `workspace_files` |
+| **Destructive / 高リスク** | destructive | 4 | `trash_file` `run_command` `code_runner` `app_control` |
+| **State**（アプリ内の永続状態） | write | 6 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` |
+| **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
+| **Orchestration**（多段実行・組み立て） | 呼び先に従う | 5 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` |
+
+補足:
+
+- **Destructive** の4本は安全のしくみ側で別扱いになる。`run_command` は allowlist 一致のみ、`code_runner` は最終手段、`trash_file` はゴミ箱への移動（完全削除はしない）、`app_control` はアプリ自身の終了。
+- **Orchestration** は他スキルを呼ぶため、副作用は呼び先で決まる。`workflow` は手順を保存する点で State も兼ね、`research_report` は検索（Retrieval）と Markdown 書き出し（write）を兼ねる。`chitchat` は `agent_callable=false` の内部スキルで、モデルには提示せずアプリ側が直接 `dispatch` する。
+- **Action（SaaS の読み書き）** は一覧取得と作成の両方を持つものが大半で、`gmail` のアーカイブ・既読化のように既存状態を変える操作も含む。
+
+### RAG との関係
+
+**スキルの仕組み自体は RAG ではなく tool use** である。RAG が「検索した文書をプロンプトへ足して生成する」読み取り専用の手法であるのに対し、スキルはモデルが呼ぶ関数であり、送信・変換・削除といった副作用を持つ。
+
+そのうえで、上表の **Retrieval 群（9本）は RAG のリトリーバに相当する**。特にエージェントループの「原則 Web 検索」（通常の質問はローカルモデルの知識に頼らず `web_search` してから出典付きで答える）は、運用としては RAG である。既定が小型のローカルモデルであるため、知識不足を検索で補う狙いも RAG と同じ。
+
+長期メモリ（`memory.rs`）も構造は RAG に近い。クエリとの関連度でメモリを絞り、system 文脈へ差し込む。ただし**埋め込みベクトルは使わず、文字バイグラムの Jaccard 係数＋言及回数のボーナス**でスコアリングする。埋め込みモデルを同梱せずに済ませる割り切りであり、日本語の短文には効くが言い換えには弱い。
+
 ### 同梱ツール
 
 同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、`xtask`（`tools::fetch_all`）（`cargo xtask setup tools`、`cargo xtask dev` / `cargo xtask build` の前に自動実行）が PicoAgent 管理下の `src-tauri/resources/bundled/tools/` へ取得する。再取得は `TOOLS_FORCE=1`、対象を絞る場合は `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep` のようにカンマ区切りで指定する。各スキルは `PICOAGENT_*_PATH` の明示設定 → 同梱 → PATH の順に実行ファイルを解決する。

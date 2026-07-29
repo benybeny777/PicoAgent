@@ -126,4 +126,46 @@ mod guard {
             "実装から参照されない設定キーが SPEC.md に残っています（削除・改名の反映漏れ。旧キーとして残すなら行に「旧キー」と明記してください）: {orphaned:?}"
         );
     }
+
+    /// `SPEC.md` のスキル分類表と `skills/` が双方向で一致すること。
+    ///
+    /// 分類表は「そのスキルが読むだけか、送信・削除まで行うか」を示す設計上の一覧なので、
+    /// スキルを足したのに載せ忘れると、副作用の分からないスキルが黙って増える。
+    #[test]
+    fn スキルはspecの分類表に載せる() {
+        let spec = read_repo_file("SPEC.md").expect("SPEC.md を読めない");
+        let section = spec
+            .split("### スキルの分類")
+            .nth(1)
+            .and_then(|rest| rest.split("### RAG との関係").next())
+            .expect("SPEC.md にスキルの分類表が見つかりません");
+
+        // 表の「スキル」列（各行の5番目のセル）から `名前` を拾う。
+        let mut listed = std::collections::BTreeSet::new();
+        for line in section.lines().filter(|line| line.starts_with("| **")) {
+            let Some(cell) = line.split('|').nth(4) else {
+                continue;
+            };
+            for token in cell.split('`').skip(1).step_by(2) {
+                listed.insert(token.to_string());
+            }
+        }
+
+        let actual: std::collections::BTreeSet<String> = crate::guard_scan::skill_sources()
+            .into_iter()
+            .map(|source| source.name)
+            .collect();
+
+        let missing: Vec<&String> = actual.difference(&listed).collect();
+        assert!(
+            missing.is_empty(),
+            "SPEC.md のスキル分類表に載っていないスキルがあります（役割と副作用を決めて追記してください）: {missing:?}"
+        );
+
+        let orphaned: Vec<&String> = listed.difference(&actual).collect();
+        assert!(
+            orphaned.is_empty(),
+            "存在しないスキルが SPEC.md の分類表に残っています（削除・改名の反映漏れ）: {orphaned:?}"
+        );
+    }
 }
