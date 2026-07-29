@@ -433,6 +433,8 @@ PicoAgent/
 ├── ui/               ← webview フロント（ペット UI・設定画面）
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
+├── tools/            ← 開発用の作業ツール（README 用スクリーンショットの撮影など）
+├── docs/images/      ← README 掲載画像（tools/screenshots で生成）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
     └── src/
