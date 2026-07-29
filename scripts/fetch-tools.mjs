@@ -15,12 +15,13 @@
 // 必須にする場合は TOOLS_REQUIRED=1。再取得は TOOLS_FORCE=1。
 // 対象を絞る場合は PICOAGENT_SETUP_TOOLS=pandoc,ripgrep のようにカンマ区切りで指定。
 
-import { mkdir, rm, writeFile, readdir } from "node:fs/promises";
+import { mkdir, rm, readdir, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform, arch } from "node:os";
 import { spawnSync } from "node:child_process";
+import { downloadTo } from "./lib/fetch-util.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = resolve(HERE, "..", "src-tauri", "resources", "bundled", "tools");
@@ -121,15 +122,6 @@ async function findExe(dir, exe, depth = 0) {
   return null;
 }
 
-async function download(url, dest) {
-  console.log(`download: ${url}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(dest, buf);
-  return buf.length;
-}
-
 // zip は Windows なら bsdtar（標準の tar.exe）、mac/linux なら unzip。tar 系は tar -xf。
 function extract(archive, dir) {
   const isZip = archive.endsWith(".zip");
@@ -161,13 +153,30 @@ async function fetchTool(tool) {
     return true; // 配布なしは失敗扱いにしない（PATH フォールバック前提）
   }
 
-  const archive = join(dir, url.split("/").pop().split("?")[0]);
-  await download(url, archive);
-  extract(archive, dir);
-  await rm(archive, { force: true });
+  // 取得と展開は隣の作業ディレクトリで行い、実行ファイルを確認できてから本設置する。
+  // 直接 dir へ展開すると、中断時に**半端に展開されたツリー**が残り、次回の
+  // 「実行ファイルがあるか」判定を通ってしまう（DLL 欠けのまま「取得済み」になる）。
+  const work = `${dir}.incoming`;
+  await rm(work, { recursive: true, force: true });
+  await mkdir(work, { recursive: true });
+  try {
+    const archive = join(work, url.split("/").pop().split("?")[0]);
+    await downloadTo(url, archive);
+    extract(archive, work);
+    await rm(archive, { force: true });
+
+    const staged = await findExe(work, tool.exe);
+    if (!staged) throw new Error(`展開後に ${exeName(tool.exe)} が見つかりません。`);
+
+    await rm(dir, { recursive: true, force: true });
+    await rename(work, dir);
+  } catch (error) {
+    await rm(work, { recursive: true, force: true });
+    throw error;
+  }
 
   const found = await findExe(dir, tool.exe);
-  if (!found) throw new Error(`展開後に ${exeName(tool.exe)} が見つかりません。`);
+  if (!found) throw new Error(`設置後に ${exeName(tool.exe)} が見つかりません。`);
   console.log(`${tool.name} fetched: ${found}`);
   return true;
 }
