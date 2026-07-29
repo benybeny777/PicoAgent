@@ -32,23 +32,23 @@
 
 ## 🚀 クイックスタート
 
-前提: **Rust（cargo）** と **Node.js ≥ 20**。Windows は WebView2 ランタイム、macOS は Xcode Command Line Tools（`xcode-select --install`）が必要です。macOS で同梱 Aivis を事前取得する場合は `brew install p7zip`。**Ollama は不要**です。
+前提: **Rust（cargo）** と **Tauri CLI**（`cargo install tauri-cli --version '^2'`）。Windows は WebView2 ランタイム、macOS は Xcode Command Line Tools（`xcode-select --install`）が必要です。macOS で同梱 Aivis を事前取得する場合は `brew install p7zip`。**Node.js も Ollama も不要**です。
 
 ```powershell
-npm install
-npm run setup:engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
-npm run setup:whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合。macOS/Linuxは公式バイナリ配布が無く警告のみで続行）
-npm run setup:live2d   # Live2D ランタイムとサンプルモデル「ひより」を取得（npm run dev でも自動実行）
-npm run setup:office   # OfficeCLI（LibreOffice）を取得（Office ファイルの変換・PDF出力に使用。Windows/macOS）
-npm run setup:tools    # 精度向上用の OSS CLI（Pandoc/ripgrep/ffmpeg/ImageMagick 等）を取得（npm run dev でも自動実行）
-npm run dev
+cargo xtask dev
+cargo xtask setup engine   # 同梱推論エンジン(llama-server、Windows は Vulkan/GPU 版)を取得
+cargo xtask setup whisper  # ローカルWhisper CLI とモデルを取得（録音文字起こしを使う場合。macOS/Linuxは公式バイナリ配布が無く警告のみで続行）
+cargo xtask setup live2d   # Live2D ランタイムとサンプルモデル「ひより」を取得（cargo xtask dev でも自動実行）
+cargo xtask setup office   # OfficeCLI（LibreOffice）を取得（Office ファイルの変換・PDF出力に使用。Windows/macOS）
+cargo xtask setup tools    # 精度向上用の OSS CLI（Pandoc/ripgrep/ffmpeg/ImageMagick 等）を取得（cargo xtask dev でも自動実行）
+cargo xtask dev
 ```
 
 - 既定の叩く AI は **`local`（同梱エンジン）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC のVRAM/RAM目安から Gemma 4 系の `small` / `balanced` / `large` を選び、対応する GGUF を自動ダウンロードします。以後はオフラインで動作します。手動選択では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットも選べます。設定画面ではローカルモデルを「種類 → サイズ」で選択でき、推奨VRAM・推奨RAM・ダウンロード目安を表示します。ダウンロード中はキャラクターの吹き出し下に「モデルを準備中… NN%」と表示され、モデル変更時は必要なモデルを取得して同梱エンジンを再起動します。設定画面の「叩くAI」タブには「ダウンロード済みモデル」セクションがあり、取得済み GGUF を一覧・サイズ確認し、使わないモデルを削除してディスクを空けられます（使用中のモデルは削除できません）。
 - Ollama を使いたい場合は `ollama serve` 後に右クリック →「設定…」でプロバイダを切り替えます（任意）。Ollama 選択時はローカルのモデル一覧を読み込み、モデル欄から選べます。
 
 > [!NOTE]
-> 初回の `npm run dev` / `npm run build` は Rust の crate 取得・コンパイルで時間がかかります（ネットワーク必須）。モデル DL も初回のみネットが必要です。
+> 初回の `cargo xtask dev` / `cargo xtask build` は Rust の crate 取得・コンパイルで時間がかかります（ネットワーク必須）。モデル DL も初回のみネットが必要です。
 
 OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral などのクラウド系の叩く AI を使う場合（費用が発生します）は、起動後に右クリック →「設定…」でプロバイダ、API キー、モデルを設定します。主要プロバイダは「叩くAI」タブ内でモデルを「種類 → サイズ」から選べます。
 
@@ -64,7 +64,7 @@ OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral などのクラウド�
 - **設定画面ですべて設定** — 右クリック →「設定…」で叩く AI・モデル・接続先・API キー・ツール設定などを GUI 編集。軽い設定は保存で即反映、叩く AI・モデル・音声・キャラクターなど重い設定は確認のうえ再起動して起動画面でまとめて反映。
 - **軽量な Tauri ネイティブ** — システム WebView を使い、Rust バックエンドで動作。
 - キャラクターパックごとの連続フレームと状態別の滑らかな補間動作（待機 / 考え中 / 返答 / エラー）。
-- **Live2D キャラクター対応** — `character.json` に `live2d.model`（`.model3.json`）を持つキャラは Cubism ランタイムで WebGL 描画し、まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。サンプルとして Live2D 公式モデルの「ひより」「Haru」「Epsilon」を同梱（`npm run setup:live2d` で取得）。
+- **Live2D キャラクター対応** — `character.json` に `live2d.model`（`.model3.json`）を持つキャラは Cubism ランタイムで WebGL 描画し、まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。サンプルとして Live2D 公式モデルの「ひより」「Haru」「Epsilon」を同梱（`cargo xtask setup live2d` で取得）。
 - キャラクターごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面でキャラ選択と人格の上書きが可能。
 - 会話は選択中の叩く AI にのみ送られる。ローカル Ollama を使えば外部送信なし。
 
@@ -178,10 +178,10 @@ README では、ユーザーが直接触ることが多い設定だけを用途�
 curl http://127.0.0.1:11500/api/chat -d '{"messages":[{"role":"user","content":"今日の天気は？"}]}'
 
 # 同梱の最小 CLI で（Ollama CLI 風）
-npm run cli -- status            # 死活とバージョン
-npm run cli -- models            # モデル一覧
-npm run cli -- chat 今日の予定は？  # 1問1答（スキルも使える）
-npm run cli -- repl              # 対話モード（会話文脈を保持。exit で終了）
+cargo xtask cli status            # 死活とバージョン
+cargo xtask cli models            # モデル一覧
+cargo xtask cli chat 今日の予定は？  # 1問1答（スキルも使える）
+cargo xtask cli repl              # 対話モード（会話文脈を保持。exit で終了）
 ```
 
 API の会話はリクエスト内で完結するステートレス設計で、デスクトップのキャラ会話履歴とは混ざりません。ポートは `PICOAGENT_API_PORT`（既定 11500）で変更できます。CLI は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` 環境変数で接続先を指定します。
@@ -191,23 +191,23 @@ API の会話はリクエスト内で完結するステートレス設計で、�
 ## 📦 製品ビルド（配布）
 
 ```powershell
-npm run setup:engine   # 同梱エンジンを resources/bundled/engine へ取得（未取得の場合）
-npm run setup:whisper  # 同梱Whisperを resources/bundled/whisper へ取得（録音文字起こしを使う場合）
-npm run setup:live2d   # Live2D ランタイムとサンプルモデルを取得（未取得の場合）
-npm run setup:office   # OfficeCLI（LibreOffice）を取得（未取得の場合）
-npm run setup:tools    # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg 等）を取得（未取得の場合）
-npm run build
+cargo xtask setup engine   # 同梱エンジンを resources/bundled/engine へ取得（未取得の場合）
+cargo xtask setup whisper  # 同梱Whisperを resources/bundled/whisper へ取得（録音文字起こしを使う場合）
+cargo xtask setup live2d   # Live2D ランタイムとサンプルモデルを取得（未取得の場合）
+cargo xtask setup office   # OfficeCLI（LibreOffice）を取得（未取得の場合）
+cargo xtask setup tools    # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg 等）を取得（未取得の場合）
+cargo xtask build
 ```
 
-`src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`npm run dev` / `npm run build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。macOS / Linux で Aivis の `.7z.001` 展開に `7z` / `7za` が無い場合、音声同梱の事前取得だけを警告扱いにして起動を続行します（音声を必須にする場合は `AIVIS_REQUIRED=1 npm run setup:aivis`）。whisper.cpp の GitHub Releases は macOS/Linux 向け CLI 単体バイナリを配布していないため、`setup:whisper` はこの環境では警告のみで文字起こしなしの起動を続行します（必須にする場合は `WHISPER_REQUIRED=1`、または `WHISPER_ASSET` で代替アセットを指定するか、手動ビルドした `whisper-cli` を `resources/bundled/whisper/` へ配置してください）。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱により Windows インストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
+`src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`cargo xtask dev` / `cargo xtask build` は起動前に同梱エンジン、Aivis、Whisper CLI、Live2D ランタイム＋サンプルモデルを確認し、未取得なら `src-tauri/resources/bundled/` 配下の各専用ディレクトリへ取得してから Tauri を起動します。macOS / Linux で Aivis の `.7z.001` 展開に `7z` / `7za` が無い場合、音声同梱の事前取得だけを警告扱いにして起動を続行します（音声を必須にする場合は `AIVIS_REQUIRED=1 cargo xtask setup aivis`）。whisper.cpp の GitHub Releases は macOS/Linux 向け CLI 単体バイナリを配布していないため、`setup whisper` はこの環境では警告のみで文字起こしなしの起動を続行します（必須にする場合は `WHISPER_REQUIRED=1`、または `WHISPER_ASSET` で代替アセットを指定するか、手動ビルドした `whisper-cli` を `resources/bundled/whisper/` へ配置してください）。同梱Whisperは `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下の同梱ディレクトリと一時ディレクトリだけを削除します。Aivis 同梱により Windows インストーラの入力データが大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています。
 
 macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など実行時に chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します。
 
-配布ビルドでは `scripts/build-ui-dist.mjs --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
+配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へコピーし、HTML/CSS のコメントと余分な空白、JS の空行・行頭行末空白を削ったものを `frontendDist` として同梱します。Rust 側の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています。これは解析を不可能にするものではありませんが、配布物から読みやすいソースやシンボル情報を減らすための基本対策です。
 
 #### Live2D ランタイムとサンプルモデル
 
-- **取得**: `npm run setup:live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、Live2D 公式サンプルモデル「ひより」「Haru」「Epsilon」を `characters/<id>/live2d/` へダウンロードします（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。
+- **取得**: `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、Live2D 公式サンプルモデル「ひより」「Haru」「Epsilon」を `characters/<id>/live2d/` へダウンロードします（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。
 - **ライセンス**: Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるため、これらのファイルはリポジトリへコミットしません（`.gitignore` 済）。
 
 > [!NOTE]
@@ -220,7 +220,7 @@ macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` /
 
 #### 同梱 Aivis（読み上げ）
 
-- **取得**: 公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/bundled/aivis/` へ展開します（手動実行は `npm run setup:aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。
+- **取得**: 公式 GitHub Releases から既定 `1.2.0` の実行ファイル一式を `src-tauri/resources/bundled/aivis/` へ展開します（手動実行は `cargo xtask setup aivis`、更新時は `AIVIS_RELEASE=latest` またはタグを指定）。
 - **配布**: このフォルダは `tauri.conf.json` の `bundle.resources` 対象なので配布物に含まれます（巨大ファイルやライセンス確認が必要な実体は Git には含めません）。配布後に見つからない場合は、初回の読み上げ起動時に同じリリースを `%APPDATA%\PicoAgent\bundled\aivis\` へ自動取得・展開します（展開には `7z` / `7za` / `tar` のいずれかを使用。macOS の `.7z.001` は `brew install p7zip` で `7z` を入れてください）。
 - **起動**: `PICOAGENT_TTS_ENABLED` が有効ならアプリ起動時に内部ポート（既定 `11436`）で裏起動します。旧既定の `10102` が保存済みなら起動時に `11436` へ移行します。アプリが起動した子プロセスは終了時に停止します。
 - **推論デバイス**: 内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で起動前に GPU 候補を確認し、候補があれば GPU、なければ CPU で起動します。通常の設定画面には表示しません。
@@ -263,7 +263,7 @@ macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` /
 │       ├── config.rs / agent.rs / message.rs
 │       ├── providers/   ← 叩く AI コネクタ（.rs を足すと自動登録）
 │       └── tools/mod.rs ← スキルの Tool トレイト・レジストリ本体
-├── scripts/             ← fetch-engine.mjs / sync-characters.mjs / build-character-animations.py
+├── scripts/             ← キャラクター画像の生成スクリプト（Python）
 ├── README.md / SPEC.md / CHANGELOG.md / AGENTS.md / CLAUDE.md
 ```
 
@@ -272,7 +272,7 @@ macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` /
 ## 🛟 トラブルシューティング
 
 - **「モデルを準備中…」のまま** → 初回のモデル DL 中（数 GB）。ネット接続を確認。`PICOAGENT_MODEL_URL` を変えると別モデルを取得。
-- **「準備に失敗」と出る** → `npm run setup:engine` でエンジンが入っているか、DL 元 URL が有効か確認。
+- **「準備に失敗」と出る** → `cargo xtask setup engine` でエンジンが入っているか、DL 元 URL が有効か確認。
 - **原因を切り分けたい** → 右クリック →「設定…」→「診断」で同梱エンジン、Aivis、選択中プロバイダ、使用量、スキル実行状況を確認。
 - **オンライン表示が赤い / 応答しない（Ollama 利用時）** → `ollama serve` を起動。設定の `OLLAMA_HOST` も確認。
 - **AIプロバイダで OpenAI が「未接続」** → `OPENAI_API_KEY` 未設定。設定画面で入力して保存。
@@ -285,11 +285,11 @@ macOS / Linux では、取得・コピーした `llama-server` / `whisper-cli` /
 - **Office/PDF 操作に失敗する** → 共通「許可」タブの許可ルート（`PICOAGENT_ALLOWED_ROOT` ほか）、Microsoft Office + PowerShell、LibreOffice（`soffice`）、qpdf の実行ファイルパスを確認。Google Docs/Sheets はローカルファイルではなく専用APIスキルを使う。
 - **`code_runner`（自力実行）が動かない** → 既定で無効。設定画面の「スキル設定」タブの `code_runner` カードで `PICOAGENT_CODE_RUNNER_ENABLED` を true にする。Python を使う場合は `PICOAGENT_CODE_RUNNER_PYTHON` に実行パスを設定。作業先は共通「許可」タブの許可ルート配下のみ。物理削除コードは拒否される。
 - **`run_command` が拒否される** → 既定では無効。設定で有効化し、`PICOAGENT_COMMAND_ALLOWLIST` に実行したい `program args...` の prefix を追加する。shell は使わず `program` と `args` を分けて実行する。
-- **`npm run dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
-- **macOS でキャラクター/フキダシの背景が透過されない** → `src-tauri/tauri.conf.json` の `app.macOSPrivateApi` を `true` にする必要があります（Tauri v2 は macOS でこれが無いとウィンドウ透過が効かず起動時に警告が出ます）。設定済みの場合は再ビルド（`npm run dev` / `npm run build`）してください。
-- **Office ファイルの変換・PDF出力ができない** → `npm run setup:office` で OfficeCLI（LibreOffice）を取得する（Windows は MSI の管理者権限不要展開、macOS は DMG から配置）。Linux は公式ポータブル配布が無いため `apt install libreoffice` 等で導入し、PATH の `soffice` か設定 `PICOAGENT_LIBREOFFICE_PATH` を使う。docx/xlsx/pptx の文字列置換（`ms_office` の replace_text）は OOXML 直接編集のため OfficeCLI 不要。
-- **Markdown 変換・PDF テキスト抽出・音声前処理・文書検索の精度を上げたい** → `npm run setup:tools` で Pandoc / ripgrep / ffmpeg / qpdf / poppler（pdftotext）/ ImageMagick を同梱取得する（`npm run dev` / `build` でも自動実行）。OS 向け配布が無いツール（Linux/macOS の qpdf・poppler・ImageMagick 等）は警告のみで、`apt` / `brew` で導入した PATH のツールへ自動フォールバックする。各スキルの解決順は「明示設定 → 同梱 → PATH」。
+- **`cargo xtask dev` が遅い / 失敗する** → 初回は Rust のコンパイルに時間がかかります。Rust（cargo）と WebView2 が入っているか確認。
+- **macOS でキャラクター/フキダシの背景が透過されない** → `src-tauri/tauri.conf.json` の `app.macOSPrivateApi` を `true` にする必要があります（Tauri v2 は macOS でこれが無いとウィンドウ透過が効かず起動時に警告が出ます）。設定済みの場合は再ビルド（`cargo xtask dev` / `cargo xtask build`）してください。
+- **Office ファイルの変換・PDF出力ができない** → `cargo xtask setup office` で OfficeCLI（LibreOffice）を取得する（Windows は MSI の管理者権限不要展開、macOS は DMG から配置）。Linux は公式ポータブル配布が無いため `apt install libreoffice` 等で導入し、PATH の `soffice` か設定 `PICOAGENT_LIBREOFFICE_PATH` を使う。docx/xlsx/pptx の文字列置換（`ms_office` の replace_text）は OOXML 直接編集のため OfficeCLI 不要。
+- **Markdown 変換・PDF テキスト抽出・音声前処理・文書検索の精度を上げたい** → `cargo xtask setup tools` で Pandoc / ripgrep / ffmpeg / qpdf / poppler（pdftotext）/ ImageMagick を同梱取得する（`cargo xtask dev` / `build` でも自動実行）。OS 向け配布が無いツール（Linux/macOS の qpdf・poppler・ImageMagick 等）は警告のみで、`apt` / `brew` で導入した PATH のツールへ自動フォールバックする。各スキルの解決順は「明示設定 → 同梱 → PATH」。
 - **PSD / XCF / HEIC / TIFF / WebP などの画像を扱いたい** → `image_tools` スキルが ImageMagick（同梱→PATH。v7 の `magick` が無ければ v6 の `convert` / `identify` へ自動フォールバック）で PNG/JPG 等へ変換・情報取得する。PSD はレイヤー統合ビューを変換。チャットへ PSD 等をドロップすると変換の依頼方法を案内する。
-- **macOS で Aivis の取得だけ失敗する** → `.7z.001` 展開用の `7z` が無い状態です。音声なしの起動は続行できます。読み上げも使う場合は `brew install p7zip` 後に `AIVIS_FORCE=1 npm run setup:aivis` を実行してください。失敗を警告ではなくエラーにしたい場合は `AIVIS_REQUIRED=1` を付けます。
-- **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`npm run dev` / `npm run build` は Tauri 起動前に `scripts/stop-stale.mjs` を同期実行して残存プロセスを停止する。macOS / Linux ではプロセス名完全一致と PicoAgent 管理下の Aivis `run` だけを対象にする。手動で止めたいときは `npm run stop`。
-- **`npm run dev` 起動直後に `picoagent.exe (exit code: 1)` で落ちる** → 前回起動の `picoagent.exe`（とその WebView2 子プロセス）が残ったまま新インスタンスが起動し、WebView の生成が一時的に競合した状態。`npm run dev` は残存プロセスを停止後、実際に消えるまで待ってから Tauri を起動する。手動停止は `npm run stop`。
+- **macOS で Aivis の取得だけ失敗する** → `.7z.001` 展開用の `7z` が無い状態です。音声なしの起動は続行できます。読み上げも使う場合は `brew install p7zip` 後に `AIVIS_FORCE=1 cargo xtask setup aivis` を実行してください。失敗を警告ではなくエラーにしたい場合は `AIVIS_REQUIRED=1` を付けます。
+- **ビルドが `os error 32`（別のプロセスが使用中）で失敗する** → 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいる状態。`cargo xtask dev` / `cargo xtask build` は Tauri 起動前に `xtask`（`assets::stop_stale`） を同期実行して残存プロセスを停止する。macOS / Linux ではプロセス名完全一致と PicoAgent 管理下の Aivis `run` だけを対象にする。手動で止めたいときは `cargo xtask stop`。
+- **`cargo xtask dev` 起動直後に `picoagent.exe (exit code: 1)` で落ちる** → 前回起動の `picoagent.exe`（とその WebView2 子プロセス）が残ったまま新インスタンスが起動し、WebView の生成が一時的に競合した状態。`cargo xtask dev` は残存プロセスを停止後、実際に消えるまで待ってから Tauri を起動する。手動停止は `cargo xtask stop`。

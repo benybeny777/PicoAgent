@@ -23,7 +23,7 @@
 13. [データの保存場所](#13-データの保存場所)
 14. [主要設定リファレンス](#14-主要設定リファレンス)
 15. [トラブルシューティング](#15-トラブルシューティング)
-16. [付録: npm スクリプト一覧](#16-付録-npm-スクリプト一覧)
+16. [付録: cargo xtask コマンド一覧](#16-付録-cargo-xtask-コマンド一覧)
 
 ---
 
@@ -42,25 +42,31 @@ PicoAgent は Tauri 製のデスクトップペット型 AI エージェント�
 
 ### 前提
 
-- **Rust（cargo）** と **Node.js ≥ 20**
+- **Rust（cargo）** と **Tauri CLI**（`cargo install tauri-cli --version '^2'`）
 - Windows: WebView2 ランタイム / macOS: Xcode Command Line Tools（`xcode-select --install`）
 - Ollama は不要です
 
 ### 手順
 
 ```bash
-npm install
-npm run setup:engine   # 同梱推論エンジン（llama-server）を取得
-npm run setup:whisper  # ローカル Whisper CLI とモデル（音声入力・文字起こしを使う場合）
-npm run setup:live2d   # Live2D ランタイムとサンプルモデル「ひより」
-npm run setup:office   # OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力）
-npm run setup:tools    # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick）
-npm run dev            # 起動（上記の未取得分は起動前に自動取得）
+cargo install tauri-cli --version '^2'   # 初回だけ
+cargo xtask dev
 ```
 
-- `setup:*` はすべて**ベストエフォート**です。取得できないもの（例: Linux の LibreOffice、macOS の qpdf など）は警告だけ出して起動を続行し、該当スキルは PATH 上のツールへフォールバックします。
+`cargo xtask dev` が同梱物（推論エンジン・Aivis・Whisper・Live2D・OSS ツール）の**未取得分を自動で取得**してから起動します。個別に取り直したいときだけ次を使います。
+
+```bash
+cargo xtask setup engine    # 同梱推論エンジン（llama-server）
+cargo xtask setup aivis     # 同梱 Aivis（読み上げ）
+cargo xtask setup whisper   # ローカル Whisper CLI とモデル（音声入力・文字起こし）
+cargo xtask setup live2d    # Live2D ランタイムとサンプルモデル
+cargo xtask setup office    # OfficeCLI（LibreOffice。Office 変換・PDF 出力）
+cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick）
+```
+
+- `cargo xtask setup *` はすべて**ベストエフォート**です。取得できないもの（例: Linux の LibreOffice、macOS の qpdf など）は警告だけ出して起動を続行し、該当スキルは PATH 上のツールへフォールバックします。
 - 初回起動時はローカルモデル（Gemma 系）を PC の VRAM/RAM に合わせて自動選択・ダウンロードします。以後はオフラインで動作します。
-- 製品ビルド（配布物の作成）は `npm run build`。詳細は README の「製品ビルド」を参照してください。
+- 製品ビルド（配布物の作成）は `cargo xtask build`。詳細は README の「製品ビルド」を参照してください。
 
 ---
 
@@ -188,7 +194,7 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 
 ## 6. 文書・PDF・画像・音声の変換（同梱 OSS ツール）
 
-変換系スキルの精度を上げるため、実績ある OSS CLI をセットアップ時に同梱します（`npm run setup:office` / `setup:tools`。`dev` / `build` でも自動実行）。
+変換系スキルの精度を上げるため、実績ある OSS CLI をセットアップ時に同梱します（`cargo xtask setup office` / `setup tools`。`dev` / `build` でも自動実行）。
 
 | ツール | 使うスキル | 役割 | 同梱対象 OS |
 |---|---|---|---|
@@ -207,7 +213,7 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 - Office ファイルの文字列置換（`ms_office` の replace_text）は OOXML 直接編集のため、**LibreOffice すら不要**です。
 - `document_convert` は変換内容から Pandoc / OfficeCLI を自動で使い分けます（`engine` 指定で固定も可能）。PDF 出力は常に OfficeCLI です。
 - PSD は**レイヤー統合ビュー**を変換します。JPG 出力時は透過を白背景に敷きます。
-- 再取得は `TOOLS_FORCE=1 npm run setup:tools`、特定ツールだけなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+- 再取得は `TOOLS_FORCE=1 cargo xtask setup tools`、特定ツールだけなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
 ---
 
@@ -235,8 +241,8 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 ## 9. キャラクター（切替・Live2D・PSD）
 
 - 設定「キャラクター」タブで切替と、性格・口調（人格プロンプト）のキャラ別編集ができます。
-- **Live2D**: `npm run setup:live2d` で Cubism ランタイムとサンプルモデル「ひより」を取得すると、対応キャラは Live2D で動きます（まばたき・リップシンク・タップモーション）。非対応キャラも差分絵ベースの疑似リグ（PNGTuber 式）で常時アニメーションします。
-- **自作キャラの Live2D 化**: `npm run build:live2d-psd` で `characters/<id>/layers/` からレイヤー分け PSD（ひより互換の 15 パーツ構成）を生成し、Live2D Cubism Editor で開いてモデル化できます。
+- **Live2D**: `cargo xtask setup live2d` で Cubism ランタイムとサンプルモデル「ひより」を取得すると、対応キャラは Live2D で動きます（まばたき・リップシンク・タップモーション）。非対応キャラも差分絵ベースの疑似リグ（PNGTuber 式）で常時アニメーションします。
+- **自作キャラの Live2D 化**: `python scripts/build-live2d-psd.py` で `characters/<id>/layers/` からレイヤー分け PSD（ひより互換の 15 パーツ構成）を生成し、Live2D Cubism Editor で開いてモデル化できます。
 - キャラ画像・アニメーションの正本は `characters/` 配下です（`ui/assets/characters/` へ自動同期）。
 
 ---
@@ -291,11 +297,11 @@ fs|npx -y @modelcontextprotocol/server-filesystem /home/me/docs
 ### 最小 CLI
 
 ```bash
-npm run cli -- status            # 死活とバージョン・選択中モデル
-npm run cli -- models            # モデル一覧
-npm run cli -- chat 今日の予定は？  # 1問1答（スキルも使える）
-npm run cli -- ask 俳句を詠んで    # 生成（chat と同等）
-npm run cli -- repl              # 対話モード（会話文脈を保持。exit で終了）
+cargo xtask cli status            # 死活とバージョン・選択中モデル
+cargo xtask cli models            # モデル一覧
+cargo xtask cli chat 今日の予定は？  # 1問1答（スキルも使える）
+cargo xtask cli ask 俳句を詠んで    # 生成（chat と同等）
+cargo xtask cli repl              # 対話モード（会話文脈を保持。exit で終了）
 ```
 
 接続先は環境変数 `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` で指定します。
@@ -365,36 +371,37 @@ npm run cli -- repl              # 対話モード（会話文脈を保持。exi
 
 | 症状 | 対処 |
 |---|---|
-| Office 変換・PDF 出力ができない | `npm run setup:office`。Linux は `apt install libreoffice` + PATH の `soffice` |
-| Markdown 変換・PDF 抽出・PSD 変換・音声前処理の精度が低い / 動かない | `npm run setup:tools`。同梱が無い OS は `apt` / `brew` で該当ツールを導入 |
+| Office 変換・PDF 出力ができない | `cargo xtask setup office`。Linux は `apt install libreoffice` + PATH の `soffice` |
+| Markdown 変換・PDF 抽出・PSD 変換・音声前処理の精度が低い / 動かない | `cargo xtask setup tools`。同梱が無い OS は `apt` / `brew` で該当ツールを導入 |
 | ローカル API に接続できない | 設定「基本」タブで有効化して再起動。ポート・キーは `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` |
 | `run_command` が拒否される | 既定無効。設定で有効化し allowlist に prefix を追加 |
 | 起動が遅い | 初回は Rust コンパイルとモデル取得に時間がかかります（以後は速い） |
-| ビルドが「別のプロセスが使用中」で失敗 | 残存プロセスが原因。`npm run stop` で停止（dev/build は自動で停止してから起動） |
+| ビルドが「別のプロセスが使用中」で失敗 | 残存プロセスが原因。`cargo xtask stop` で停止（dev/build は自動で停止してから起動） |
 | macOS で背景が透過しない | `tauri.conf.json` の `app.macOSPrivateApi: true` を確認して再ビルド |
-| 文字起こしできない | `npm run setup:whisper`（macOS/Linux は公式バイナリ配布が無く手動導入が必要な場合あり） |
+| 文字起こしできない | `cargo xtask setup whisper`（macOS/Linux は公式バイナリ配布が無く手動導入が必要な場合あり） |
 
 その他は [README のトラブルシューティング](README.md#-トラブルシューティング) を参照してください。
 
 ---
 
-## 16. 付録: npm スクリプト一覧
+## 16. 付録: cargo xtask コマンド一覧
 
 | コマンド | 内容 |
 |---|---|
-| `npm run dev` | 開発起動（未取得の同梱物は自動取得） |
-| `npm run build` | 製品ビルド（各 OS の配布バンドルを生成） |
-| `npm run stop` | 残存プロセスの停止 |
-| `npm run cli -- <cmd>` | ローカル API を叩く CLI（status/models/chat/ask/repl） |
-| `npm run setup:engine` | 同梱推論エンジンの取得 |
-| `npm run setup:aivis` | 同梱 Aivis（読み上げ）の取得 |
-| `npm run setup:whisper` | 同梱 Whisper の取得 |
-| `npm run setup:live2d` | Live2D ランタイム + サンプルモデルの取得 |
-| `npm run setup:office` | OfficeCLI（LibreOffice）の取得 |
-| `npm run setup:tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
-| `npm run build:live2d-psd` | レイヤー画像から Live2D 用 PSD を生成 |
-| `npm run build:character-animations` | レイヤー画像から連番アニメーションを生成 |
-| `npm run sync:characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
-| `npm run build:ui:dev` / `npm run build:ui:release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
+| `cargo xtask dev` | 開発起動（未取得の同梱物は自動取得） |
+| `cargo xtask build` | 製品ビルド（各 OS の配布バンドルを生成） |
+| `cargo xtask stop` | 残存プロセスの停止 |
+| `cargo xtask cli <cmd>` | ローカル API を叩く CLI（status/models/chat/ask/repl） |
+| `cargo xtask setup engine` | 同梱推論エンジンの取得 |
+| `cargo xtask setup aivis` | 同梱 Aivis（読み上げ）の取得 |
+| `cargo xtask setup whisper` | 同梱 Whisper の取得 |
+| `cargo xtask setup live2d` | Live2D ランタイム + サンプルモデルの取得 |
+| `cargo xtask setup office` | OfficeCLI（LibreOffice）の取得 |
+| `cargo xtask setup tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
+| `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
+| `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
+| `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
+| `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
 
-> `sync:characters` と `build:ui:*` は `npm run dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
+> `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
+> `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。

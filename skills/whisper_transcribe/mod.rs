@@ -237,7 +237,7 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
     })
 }
 
-/// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup:tools）→ PATH。
+/// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
 fn ffmpeg_path(cfg: &Config) -> String {
     crate::tools::resolve_cli_path(cfg, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg")
 }
@@ -290,7 +290,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
     let model = transcribe_model(cfg);
     if model.trim().is_empty() {
         return Err(
-            "Whisper モデルが未設定です。npm run setup:whisper で同梱Whisperを取得するか、PICOAGENT_TRANSCRIBE_MODEL を設定してください。".to_string(),
+            "Whisper モデルが未設定です。cargo xtask setup whisper で同梱Whisperを取得するか、PICOAGENT_TRANSCRIBE_MODEL を設定してください。".to_string(),
         );
     }
     let program = transcribe_program(cfg);
@@ -432,7 +432,7 @@ impl Tool for WhisperTranscribeTool {
             return config_guide(
                 "音声文字起こし",
                 &["PICOAGENT_TRANSCRIBE_MODEL"],
-                "npm run setup:whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
+                "cargo xtask setup whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
             );
         }
         let program = transcribe_program(cfg);

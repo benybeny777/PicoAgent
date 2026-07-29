@@ -352,7 +352,7 @@ fn ensure_local_model_selection(app: &AppHandle) {
 fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     let server = server_path(app).ok_or_else(|| {
         anyhow::anyhow!(
-            "同梱エンジン llama-server が見つかりません（npm run setup:engine を実行してください）"
+            "同梱エンジン llama-server が見つかりません（cargo xtask setup engine を実行してください）"
         )
     })?;
     ensure_executable(&server)?;

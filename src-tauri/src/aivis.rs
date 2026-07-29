@@ -267,7 +267,7 @@ fn resource_is_newer(resource: &Path, installed: &Path) -> bool {
 }
 
 fn path_hint() -> &'static str {
-    "Aivis の実行ファイルが見つかりません。ネットワーク接続を確認するか、npm run setup:aivis を実行してください。"
+    "Aivis の実行ファイルが見つかりません。ネットワーク接続を確認するか、cargo xtask setup aivis を実行してください。"
 }
 
 fn is_executable_file(path: &Path) -> bool {

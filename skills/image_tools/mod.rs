@@ -1,6 +1,6 @@
 // skills/image_tools/mod.rs - ImageMagick による画像ファイル変換・情報取得スキル。
 // PSD/XCF/HEIC/TIFF/WebP など WebView やモデルが直接扱えない画像形式を PNG/JPG 等へ
-// 変換する。実行ファイルは「明示設定 → 同梱（setup:tools）→ PATH」の順で解決し、
+// 変換する。実行ファイルは「明示設定 → 同梱（setup tools）→ PATH」の順で解決し、
 // PATH では v7（magick）→ v6（convert / identify）の順にフォールバックする。
 
 use std::path::Path;
@@ -51,7 +51,7 @@ async fn run_magick(mut command: Command, timeout: u64, label: &str) -> Result<s
         match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
         Ok(Ok(output)) => Ok(output),
         Ok(Err(error)) => Err(format!(
-            "エラー: ImageMagick の起動に失敗しました: {}。npm run setup:tools か apt/brew で ImageMagick を導入してください。",
+            "エラー: ImageMagick の起動に失敗しました: {}。cargo xtask setup tools か apt/brew で ImageMagick を導入してください。",
             error
         )),
         Err(_) => Err(format!("エラー: {} が {} 秒でタイムアウトしました。", label, timeout)),
@@ -162,7 +162,7 @@ impl Tool for ImageToolsTool {
     }
 
     fn description(&self) -> String {
-        "ImageMagick（同梱→PATH。npm run setup:tools）で PSD/XCF/HEIC/TIFF/WebP/AVIF 等の画像を PNG/JPG などへ変換し、寸法・レイヤー等の情報も取得する。PSD はレイヤー統合ビューを変換。".to_string()
+        "ImageMagick（同梱→PATH。cargo xtask setup tools）で PSD/XCF/HEIC/TIFF/WebP/AVIF 等の画像を PNG/JPG などへ変換し、寸法・レイヤー等の情報も取得する。PSD はレイヤー統合ビューを変換。".to_string()
     }
 
     fn examples(&self) -> Vec<&'static str> {

@@ -34,7 +34,7 @@ impl Tool for PdfToolsTool {
     }
 
     fn description(&self) -> String {
-        "qpdf でPDF情報取得、ページ抽出、結合、回転、線形化を行い、Poppler pdftotext でPDF本文のテキスト抽出（extract_text）も行う。ツールは同梱（npm run setup:tools）→PATH の順で解決。".to_string()
+        "qpdf でPDF情報取得、ページ抽出、結合、回転、線形化を行い、Poppler pdftotext でPDF本文のテキスト抽出（extract_text）も行う。ツールは同梱（cargo xtask setup tools）→PATH の順で解決。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -208,7 +208,7 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
             }
         }
         Ok(Err(error)) => format!(
-            "エラー: pdftotext の起動に失敗しました: {}。npm run setup:tools か apt/brew で poppler を導入してください。",
+            "エラー: pdftotext の起動に失敗しました: {}。cargo xtask setup tools か apt/brew で poppler を導入してください。",
             error
         ),
         Err(_) => format!("エラー: テキスト抽出が {} 秒でタイムアウトしました。", timeout),

@@ -714,7 +714,7 @@ function stopLipSync() {
 
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
 // character.json に live2d.model がある場合、PNG フレームの代わりに Cubism ランタイム
-// （ui/vendor/live2d/、npm run setup:live2d で取得）でモデルを WebGL 描画する。
+// （ui/vendor/live2d/、cargo xtask setup live2d で取得）でモデルを WebGL 描画する。
 // まばたきとアイドルモーションはモデル定義（EyeBlink・Idle グループ）が自動で担当し、
 // 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
 let live2dActive = false;
@@ -746,7 +746,7 @@ async function ensureLive2DRuntime() {
       if (window.PIXI?.live2d?.config) PIXI.live2d.config.sound = false;
     })().catch(error => {
       live2dRuntimePromise = null; // 取得後の再選択で再試行できるようにする
-      throw new Error(`Live2D ランタイムを読み込めません（npm run setup:live2d を実行してください）: ${error.message}`);
+      throw new Error(`Live2D ランタイムを読み込めません（cargo xtask setup live2d を実行してください）: ${error.message}`);
     });
   }
   await live2dRuntimePromise;
