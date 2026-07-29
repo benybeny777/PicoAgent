@@ -1,8 +1,11 @@
-// README 用スクリーンショットの撮影ツール。
+// README 用スクリーンショット（動く絵）の撮影ツール。
 //
 // 実物の ui/ をローカル HTTP で配信し、バックエンド（window.__TAURI__）だけを
 // モックしてヘッドレス Chromium で描画する。フロントの JS・CSS・キャラクター画像は
 // 本物をそのまま使うため、出てくる絵はモックアップではなく実際の描画結果。
+//
+// 出力は透過つきアニメーション WebP。ページ内の時計を止めて 1 コマずつ進めて撮るので、
+// キャプチャ 1 枚に 200ms かかっても狙ったフレームレートで滑らかになる。書き出しに ffmpeg が要る。
 //
 // 使い方:
 //   PLAYWRIGHT_MODULE=<playwright の index.mjs> node tools/screenshots/shoot.mjs [名前...]
@@ -157,32 +160,16 @@ function unionBounds(boxes) {
   return { x: left, y: top, width: (right - left) & ~1, height: (bottom - top) & ~1 };
 }
 
-async function trim(file) {
-  const png = await readFile(file);
-  const box = await bounds(png);
-  if (!box) throw new Error(`不透明な領域がありません: ${file}`);
-  const page = await trimmer.newPage();
-  const out = await page.evaluate(async ({ url, box }) => {
-    const img = new Image();
-    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-    const o = document.createElement("canvas");
-    o.width = box.width; o.height = box.height;
-    o.getContext("2d").drawImage(img, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
-    return o.toDataURL("image/png");
-  }, { url: "data:image/png;base64," + png.toString("base64"), box });
-  await page.close();
-  await writeFile(file, Buffer.from(out.split(",")[1], "base64"));
-}
-
 // 既定のウィンドウサイズは tauri.conf.json の値。実物と同じ比率で撮る。
 async function openScene({
   width = 560, height = 430, theme = "light", history = HISTORY,
-  reply = REPLY, characterId = "mugi", scale = 2, clock = false,
+  reply = REPLY, characterId = "mugi",
 } = {}) {
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
-  // 動く絵は「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  // 「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
   // 準備の間は resume() で実時間どおりに流す。
-  if (clock) { await page.clock.install(); await page.clock.resume(); }
+  await page.clock.install();
+  await page.clock.resume();
   await page.addInitScript(mock({ theme, history, reply, characterId }));
   page.on("pageerror", error => console.error(`  [pageerror] ${error.message}`));
   await page.goto(`http://127.0.0.1:${PORT}/index.html`);
@@ -204,24 +191,13 @@ const waitForReply = (page, reply) => page.waitForFunction((full) => {
   return el && strip(el.textContent) === strip(full);
 }, reply, { timeout: 20000 });
 
-async function shoot(name, { ask = ASK, prepare, ...scene } = {}) {
-  const page = await openScene(scene);
-  await submit(page, ask);
-  await waitForReply(page, scene.reply ?? REPLY);
-  await page.waitForTimeout(400);
-  // 一時的なステータス表示（読み上げ準備中など）は消してから撮る。
-  await page.evaluate(() => { const s = document.getElementById("status"); if (s) s.textContent = ""; });
+// 一時的なステータス表示（読み上げ準備中など）は消してから撮る。
+const clearStatus = (page) => page.evaluate(() => {
+  const status = document.getElementById("status");
+  if (status) status.textContent = "";
+});
 
-  if (prepare) await prepare(page);
-  await page.waitForTimeout(600);
-  const file = join(OUT, name);
-  await page.screenshot({ path: file, omitBackground: true });
-  await trim(file);
-  await page.close();
-  console.log(`撮影: ${name}`);
-}
-
-// ---------------------------------------------------------------- 動く絵（APNG）
+// ---------------------------------------------------------------- 録画と書き出し
 
 const FFMPEG = process.env.SHOOT_FFMPEG || "ffmpeg";
 
@@ -233,14 +209,16 @@ const ffmpegAvailable = await run(FFMPEG, ["-version"]).then(() => true, () => f
 // ただし 1 枚あたり 200ms 以上かかるので、実時間で連写すると 5fps も出ずカクつく。
 // そこでページの時計を止め、「1/fps だけ時間を進める → 1 枚撮る」を繰り返す。
 // 撮影にどれだけ時間がかかってもページ内の経過時間は一定なので、狙った fps で滑らかになる。
-async function record(page, { seconds, fps }) {
+async function record(page, { seconds, fps, step }) {
   const frames = [];
-  const step = 1000 / fps;
+  const gap = 1000 / fps;
   // pauseAt は過去を指せないので、読み取りから呼び出しまでに進む実時間ぶんを足しておく。
   const now = await page.evaluate(() => Date.now());
   await page.clock.pauseAt(new Date(now + 1000));
-  for (let elapsed = 0; elapsed < seconds * 1000; elapsed += step) {
-    await page.clock.runFor(Math.round(step));
+  const total = Math.round((seconds * 1000) / gap);
+  for (let index = 0; index < total; index++) {
+    if (step) await step(page, index);
+    await page.clock.runFor(Math.round(gap));
     frames.push(await page.screenshot({ omitBackground: true }));
   }
   return frames;
@@ -268,14 +246,15 @@ async function encodeAnimation(frames, box, { fps, width, file }) {
   }
 }
 
-async function shootMotion(name, {
-  ask = ASK, seconds = 4, fps = 12, width, prepare, ...scene
+// prepare は「録画開始時点の状態」を作る。文字送りを丸ごと録るため、応答を投げるのも
+// prepare の役目にしてある（完了を待ってから録り始めると動きが写らない）。
+// `outputWidth` は書き出し時の横幅（未指定なら等倍）。`width` はウィンドウ幅なので別物。
+async function shoot(name, {
+  seconds = 4, fps = 12, outputWidth, prepare, step, ...scene
 } = {}) {
-  const page = await openScene({ ...scene, clock: true });
+  const page = await openScene(scene);
   if (prepare) await prepare(page);
-  // 文字送りとキャラの動きを丸ごと録るので、応答の完了は待たずに録画を始める。
-  await submit(page, ask);
-  const frames = await record(page, { seconds, fps });
+  const frames = await record(page, { seconds, fps, step });
   await page.close();
 
   // キャラが動く分だけ 1 コマ目より外へはみ出すので、間引いた複数コマの外接矩形を合成する。
@@ -283,12 +262,25 @@ async function shootMotion(name, {
   const box = unionBounds(await Promise.all(sampled.map(png => bounds(png, 16))));
   if (!box) throw new Error(`不透明な領域がありません: ${name}`);
 
-  await encodeAnimation(frames, box, { fps, width, file: join(OUT, name) });
+  await encodeAnimation(frames, box, { fps, width: outputWidth, file: join(OUT, name) });
   console.log(`撮影: ${name}（${frames.length} コマ / ${fps} fps）`);
 }
 
+// ---------------------------------------------------------------- 絵ごとの準備と動き
+
+// 応答を投げるだけ。録画中に文字送りとキャラのモーション（考え中 → 返答）が写る。
+const startReply = (ask = ASK) => (page) => submit(page, ask);
+
 // 入力欄を開くとフキダシ本文が compact 表示になるので、短い応答で撮る（途中で切れた行が写らないように）。
+// 1往復させてから入力欄を開き、録画中は「次の依頼を打ち込んでいる」ところを見せる。
+const COMPOSER_ASK = "この PDF、2〜3ページだけ抜き出せる？";
+const COMPOSER_REPLY = "できたよ。`資料_p2-3.pdf` として同じフォルダに保存したよ。";
+const COMPOSER_TYPING = "この PSD を 800px の PNG にして";
+
 async function prepareComposer(page) {
+  await submit(page, COMPOSER_ASK);
+  await waitForReply(page, COMPOSER_REPLY);
+  await clearStatus(page);
   // フロントの openComposer() は応答中だと何もしないので、busy が下りるのを待ってから開く。
   await page.waitForFunction(() => typeof busy === "undefined" || busy === false, { timeout: 10000 });
   await page.evaluate(() => {
@@ -298,14 +290,28 @@ async function prepareComposer(page) {
       composer.hidden = false;
       document.getElementById("reply")?.classList.add("compact");
     }
+    document.getElementById("input")?.focus();
   });
-  await page.evaluate(() => {
+}
+
+// 入力欄へ 1 コマ 1 文字ずつ打ち込む。`from` コマ目までは空のまま置いて、打ち始めを見せる。
+const typeIntoInput = (text, from = 4) => (page, index) => {
+  const shown = [...text].slice(0, Math.max(0, index - from)).join("");
+  return page.evaluate((value) => {
     const input = document.getElementById("input");
-    if (!input) return;
-    input.value = "この PSD を 800px の PNG にして";
+    if (!input || input.value === value) return;
+    input.value = value;
     input.dispatchEvent(new Event("input"));
-    input.focus();
-  });
+  }, shown);
+};
+
+// 全画面フキダシは bubble に .fullscreen が付いた状態（Tauri の setFullscreen はモック）。
+// 履歴は最新のやり取りが見えている状態にしてから応答を投げる（renderer が末尾へ自動スクロールする）。
+async function prepareFullscreen(page) {
+  await page.evaluate(() => { if (typeof toggleBubbleFullscreen === "function") toggleBubbleFullscreen(); });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => { const l = document.getElementById("historyLog"); if (l) l.scrollTop = l.scrollHeight; });
+  await submit(page, ASK);
 }
 
 // Live2D は WebGL 描画。ランタイムとモデルは cargo xtask setup live2d で取得する。
@@ -317,38 +323,29 @@ const LIVE2D_REQUIRED = [
   `ui/assets/characters/${LIVE2D_CHARACTER}/live2d`,
 ];
 
-async function waitForLive2D(page) {
+async function prepareLive2D(page) {
   await page.waitForFunction(() => {
     const canvas = document.getElementById("live2dCanvas");
     return canvas && canvas.style.display !== "none" && canvas.width > 0 && typeof live2dActive !== "undefined" && live2dActive;
   }, { timeout: 40000 });
   // 初回モーションが動き出してポーズが決まるまで少し待つ。
   await page.waitForTimeout(1500);
+  await submit(page, ASK);
 }
 
 // ---------------------------------------------------------------- 撮る絵の一覧
 
 const SHOTS = {
-  "main-light.png": {},
-  "main-dark.png": { theme: "dark" },
-  "composer-light.png": {
-    ask: "この PDF、2〜3ページだけ抜き出せる？",
-    reply: "できたよ。`資料_p2-3.pdf` として同じフォルダに保存したよ。",
+  "main-light.webp": { prepare: startReply() },
+  "main-dark.webp": { theme: "dark", prepare: startReply() },
+  "composer-light.webp": {
+    reply: COMPOSER_REPLY,
     prepare: prepareComposer,
+    step: typeIntoInput(COMPOSER_TYPING),
   },
-  "fullscreen-light.png": {
-    width: 900, height: 600,
-    prepare: async (page) => {
-      // 全画面フキダシは bubble に .fullscreen が付いた状態（Tauri の setFullscreen はモック）。
-      await page.evaluate(() => { if (typeof toggleBubbleFullscreen === "function") toggleBubbleFullscreen(); });
-      // 履歴は最新のやり取りが見えている状態で撮る。
-      await page.waitForTimeout(300);
-      await page.evaluate(() => { const l = document.getElementById("historyLog"); if (l) l.scrollTop = l.scrollHeight; });
-    },
-  },
-  "live2d-dark.png": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: waitForLive2D },
-  // 動く絵。ffmpeg が要る。1 コマずつ時計を進めて撮るため、他より時間がかかる（48 コマで 20 秒ほど）。
-  "live2d-motion.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, motion: true, scale: 1, prepare: waitForLive2D },
+  "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
+  "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
+  "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
 };
 
 // ---------------------------------------------------------------- 実行
@@ -358,16 +355,22 @@ const only = process.argv.slice(2);
 const skipped = [];
 let failed = 0;
 
-for (const [name, { requires = [], motion = false, ...options }] of Object.entries(SHOTS)) {
+if (!ffmpegAvailable) {
+  throw new Error(
+    `${FFMPEG} を実行できません。動く絵の書き出しに使います。` +
+      "PATH に通すか、SHOOT_FFMPEG に実行ファイルの絶対パスを指定してください。",
+  );
+}
+
+for (const [name, { requires = [], ...options }] of Object.entries(SHOTS)) {
   if (only.length && !only.includes(name)) continue;
   const missing = requires.filter(path => !existsSync(join(ROOT, path)));
-  if (motion && !ffmpegAvailable) missing.push(`${FFMPEG}（動く絵の書き出しに必要）`);
   if (missing.length) {
     skipped.push([name, missing]);
     continue;
   }
   try {
-    await (motion ? shootMotion : shoot)(name, options);
+    await shoot(name, options);
   } catch (error) {
     failed += 1;
     console.error(`失敗: ${name}: ${error.message}`);

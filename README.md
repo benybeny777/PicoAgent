@@ -14,10 +14,10 @@
 **Ollama も Node.js も要りません。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安からローカルモデルを自動で選んで取得します。以後はオフラインで動きます。
 
 <div align="center">
-  <img src="docs/images/main-light.png" alt="ライトテーマのメイン画面" width="400" />
-  <img src="docs/images/main-dark.png" alt="ダークテーマのメイン画面" width="400" />
+  <img src="docs/images/main-light.webp" alt="ライトテーマのメイン画面" width="400" />
+  <img src="docs/images/main-dark.webp" alt="ダークテーマのメイン画面" width="400" />
   <br />
-  <sub>ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（左：ライト／右：ダーク）。</sub>
+  <sub>ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（左：ライト／右：ダーク）。実際の動きです。</sub>
 </div>
 
 ---
@@ -117,10 +117,10 @@ cargo xtask dev
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 
 <div align="center">
-  <img src="docs/images/live2d-motion.webp" alt="Live2D キャラクターが返答するようす（ライトテーマ）" width="400" />
-  <img src="docs/images/live2d-dark.png" alt="Live2D キャラクター（ダークテーマ）" width="400" />
+  <img src="docs/images/live2d-light.webp" alt="Live2D キャラクターが返答するようす（ライトテーマ）" width="400" />
+  <img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターが返答するようす（ダークテーマ）" width="400" />
   <br />
-  <sub>Live2D キャラ「ひより」。左は実際の動き（返答時のモーションと文字送り）、右はダークテーマ。連番フレームと同じ透明ウィンドウ上で動きます。</sub>
+  <sub>Live2D キャラ「ひより」。まばたき・モーション・口パクをモデル自身が行います（左：ライト／右：ダーク）。</sub>
 </div>
 
 ### スキル（一部）
@@ -160,7 +160,7 @@ cargo xtask dev
 チャットで「アプリ終了して」「PicoAgent を閉じて」と頼んでも、アプリ操作スキル経由で終了できます。
 
 <div align="center">
-  <img src="docs/images/fullscreen-light.png" alt="全画面フキダシの会話履歴" width="760" />
+  <img src="docs/images/fullscreen-light.webp" alt="全画面フキダシの会話履歴" width="760" />
   <br />
   <sub>全画面フキダシ。履歴の検索・コピー・再利用・Markdown 書き出しができます。</sub>
 </div>
@@ -189,7 +189,7 @@ cargo xtask dev
 入力欄の上部から、画面確認・クリップボード要約・今日の予定・できること確認・未読メール要約・Slack 最新要約をワンクリックで送れます。
 
 <div align="center">
-  <img src="docs/images/composer-light.png" alt="入力欄とクイック操作" width="400" />
+  <img src="docs/images/composer-light.webp" alt="入力欄とクイック操作" width="400" />
   <br />
   <sub>フキダシをクリックすると入力欄が開き、上にクイック操作が並びます。左下のボタンは音声入力。</sub>
 </div>
