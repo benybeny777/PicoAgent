@@ -5,6 +5,8 @@ mod agent;
 mod aivis;
 mod alarm;
 mod api_server;
+#[cfg(test)]
+mod bundle_scope;
 mod commands;
 mod config;
 mod daily;
