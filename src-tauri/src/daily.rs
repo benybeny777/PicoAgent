@@ -95,6 +95,8 @@ pub fn save_praise(cfg: &Config, entries: &[PraiseEntry]) -> anyhow::Result<()> 
 
 pub fn due_events(cfg: &Config) -> anyhow::Result<Vec<DailyEvent>> {
     let now = Local::now().naive_local();
+    // 読む→直す→書き戻すの間、reminder / focus_timer の更新と競合しないようにする。
+    let _guard = crate::store::lock_list(EVENTS_KEY);
     // 読めなかった場合は空一覧で続けず、そのままエラーにする（空で書き戻さないため）。
     let mut events = load_events(cfg).map_err(|error| anyhow::anyhow!(error))?;
     let mut due = Vec::new();
