@@ -14,8 +14,10 @@
 // 新しい状態ファイルを足すときも必ずここを通すこと。直接 `fs::write` していないかは
 // `store::guard` のテストが走査して検出する。
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 
@@ -75,6 +77,32 @@ pub fn load_list<T: serde::de::DeserializeOwned>(
              作り直す場合は設定画面で該当項目を空にしてください。"
         )
     })
+}
+
+/// 設定に JSON 文字列で持つ一覧の「読む → 直す → 書き戻す」を直列化するロック。
+///
+/// エージェントは 1 ターンの複数ツール呼び出しを**並列実行**する（`agent.rs` の
+/// `join_all`）。`reminder` と `focus_timer` は同じ `PICOAGENT_DAILY_EVENTS` を
+/// 更新するため、ロックが無いと両方が同じ内容を読み、あとから書いた側の内容だけが
+/// 残って**もう片方の追加が消える**（lost update）。読み込みの直前に取得し、
+/// 書き戻しが終わるまで保持すること。
+///
+/// 返り値を保持したまま `.await` しないこと（この一覧更新は同期処理で完結する）。
+pub fn lock_list(key: &str) -> std::sync::MutexGuard<'static, ()> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, &'static Mutex<()>>>> = OnceLock::new();
+    let registry = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mutex: &'static Mutex<()> = {
+        // フォールバック許可: ロックが毒された場合も更新自体は続ける（中身は () で不変）。
+        let mut map = registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // キーは有限（設定キーの数だけ）なので、1つずつ leak して 'static にする。
+        map.entry(key.to_string())
+            .or_insert_with(|| Box::leak(Box::new(Mutex::new(()))))
+    };
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 読み込めなかった状態ファイルを退避し、退避先を返す。
@@ -181,6 +209,45 @@ mod guard {
              （そのまま書き戻すとユーザーのデータが恒久的に消えます）: {offenders:?}"
         );
     }
+
+    /// 設定一覧の書き戻しは `store::lock_list()` の中で行うこと。
+    ///
+    /// エージェントは 1 ターンの複数ツール呼び出しを並列実行するため、ロックが無いと
+    /// 同じ一覧を更新する2つのスキル（`reminder` と `focus_timer` は同じキー）が
+    /// 互いの追加を上書きして消す。
+    #[test]
+    fn 設定一覧の書き戻しはロックの中で行う() {
+        const LIST_SAVES: [&str; 4] = [
+            "save_events(",
+            "save_praise(",
+            "alarm::save(",
+            "scheduler::save(",
+        ];
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources() {
+            let body = source.body();
+            // 定義元（save 関数そのもの）は対象外。
+            if body.contains("pub fn save_events(")
+                || body.contains("pub fn save_praise(")
+                || (source.name == "alarm.rs" || source.name == "scheduler.rs")
+                    && body.contains("pub fn save(")
+            {
+                continue;
+            }
+            if !LIST_SAVES.iter().any(|marker| body.contains(marker)) {
+                continue;
+            }
+            if body.contains("lock_list(") {
+                continue;
+            }
+            offenders.push(source.path.display().to_string());
+        }
+        assert!(
+            offenders.is_empty(),
+            "設定一覧の書き戻しは store::lock_list() を取ってから行ってください\
+             （並列実行されたツール同士で更新が消えます）: {offenders:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +292,42 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"a\""));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// ロックが無いと、同じ一覧を並列に更新した片方の追加が消える（lost update）。
+    /// エージェントは 1 ターンのツール呼び出しを並列実行するので現実に起こる。
+    #[test]
+    fn 並列更新でも追加が消えない() {
+        use super::lock_list;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        // 設定ストアの代わりに「読む→少し待つ→書き戻す」共有状態で再現する。
+        let store = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let seq = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let store = Arc::clone(&store);
+            let seq = Arc::clone(&seq);
+            handles.push(std::thread::spawn(move || {
+                let _guard = lock_list("PICOAGENT_TEST_LIST");
+                // 読む
+                let mut items = store.lock().unwrap().clone();
+                // 直す（ロックが無ければここで他スレッドと交差する）
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                items.push(seq.fetch_add(1, Ordering::SeqCst));
+                // 書き戻す
+                *store.lock().unwrap() = items;
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(
+            store.lock().unwrap().len(),
+            8,
+            "並列更新で追加が失われている"
+        );
     }
 
     #[test]

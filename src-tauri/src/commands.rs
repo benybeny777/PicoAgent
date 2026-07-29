@@ -1013,27 +1013,32 @@ pub async fn pet_alarm_wake(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    // 読めなかった場合は空一覧で書き戻さない（登録済みの目覚ましが全部消えるため）。
-    let mut alarms = crate::alarm::load(&state.config)
-        .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;
-    let target = alarms.iter().find(|a| a.id == id).cloned();
-    let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();
-    // 一度きりの目覚ましは鳴ったら無効化する（曜日繰り返しはそのまま）。
-    if let Some(alarm) = target.as_ref() {
-        if !alarm.repeat {
-            for a in alarms.iter_mut() {
-                if a.id == id {
-                    a.enabled = false;
+    // 読む→直す→書き戻すはロックの中で完結させ、以降の待ち合わせ（生成）へは持ち込まない。
+    let label = {
+        let _guard = crate::store::lock_list(crate::alarm::CONFIG_KEY);
+        // 読めなかった場合は空一覧で書き戻さない（登録済みの目覚ましが全部消えるため）。
+        let mut alarms = crate::alarm::load(&state.config)
+            .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;
+        let target = alarms.iter().find(|a| a.id == id).cloned();
+        let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();
+        // 一度きりの目覚ましは鳴ったら無効化する（曜日繰り返しはそのまま）。
+        if let Some(alarm) = target.as_ref() {
+            if !alarm.repeat {
+                for a in alarms.iter_mut() {
+                    if a.id == id {
+                        a.enabled = false;
+                    }
+                }
+                if let Err(error) = crate::alarm::save(&state.config, &alarms) {
+                    crate::log_paths::append_app_log(
+                        &app,
+                        &format!("目覚ましの無効化保存に失敗しました: {error}"),
+                    );
                 }
             }
-            if let Err(error) = crate::alarm::save(&state.config, &alarms) {
-                crate::log_paths::append_app_log(
-                    &app,
-                    &format!("目覚ましの無効化保存に失敗しました: {error}"),
-                );
-            }
         }
-    }
+        label
+    };
     let reply = match generate_wake_message(&state, &label).await {
         Some(text) => text,
         None => default_wake_message(&label),
