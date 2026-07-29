@@ -1015,7 +1015,7 @@ pub async fn pet_alarm_wake(
 ) -> Result<Value, String> {
     // 読む→直す→書き戻すはロックの中で完結させ、以降の待ち合わせ（生成）へは持ち込まない。
     let label = {
-        let _guard = crate::store::lock_list(crate::alarm::CONFIG_KEY);
+        let _guard = crate::store::lock_state(crate::alarm::CONFIG_KEY);
         // 読めなかった場合は空一覧で書き戻さない（登録済みの目覚ましが全部消えるため）。
         let mut alarms = crate::alarm::load(&state.config)
             .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;

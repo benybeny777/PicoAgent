@@ -130,7 +130,7 @@ impl Tool for AlarmTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = str_arg(&args, "action").to_lowercase();
         // 読む→直す→書き戻すの間、同じ一覧を触る並列ツール実行と競合しないようにする。
-        let _guard = crate::store::lock_list(alarm::CONFIG_KEY);
+        let _guard = crate::store::lock_state(alarm::CONFIG_KEY);
         let mut alarms = match alarm::load(cfg) {
             Ok(alarms) => alarms,
             // 空一覧から書き戻すと登録済みの目覚ましが消えるため、ここで止める。

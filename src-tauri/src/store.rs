@@ -79,16 +79,18 @@ pub fn load_list<T: serde::de::DeserializeOwned>(
     })
 }
 
-/// 設定に JSON 文字列で持つ一覧の「読む → 直す → 書き戻す」を直列化するロック。
+/// 状態の「読む → 直す → 書き戻す」を直列化する、名前付きロック。
 ///
 /// エージェントは 1 ターンの複数ツール呼び出しを**並列実行**する（`agent.rs` の
-/// `join_all`）。`reminder` と `focus_timer` は同じ `PICOAGENT_DAILY_EVENTS` を
-/// 更新するため、ロックが無いと両方が同じ内容を読み、あとから書いた側の内容だけが
-/// 残って**もう片方の追加が消える**（lost update）。読み込みの直前に取得し、
-/// 書き戻しが終わるまで保持すること。
+/// `join_all`）し、サブエージェントやワークフローからは会話自体が同時に走る。
+/// ロックが無いと、同じ状態を更新する2つの処理が同じ内容を読み、あとから書いた側の
+/// 内容だけが残って**もう片方の変更が消える**（lost update）。`reminder` と
+/// `focus_timer` は同じ `PICOAGENT_DAILY_EVENTS` を、トークン使用量や長期メモリは
+/// 同じファイルを更新する。読み込みの直前に取得し、書き戻しが終わるまで保持すること。
 ///
-/// 返り値を保持したまま `.await` しないこと（この一覧更新は同期処理で完結する）。
-pub fn lock_list(key: &str) -> std::sync::MutexGuard<'static, ()> {
+/// 引数は対象を表す任意の名前（設定キーやファイル種別）。
+/// 返り値を保持したまま `.await` しないこと（状態更新は同期処理で完結させる）。
+pub fn lock_state(key: &str) -> std::sync::MutexGuard<'static, ()> {
     static LOCKS: OnceLock<Mutex<HashMap<String, &'static Mutex<()>>>> = OnceLock::new();
     let registry = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
     let mutex: &'static Mutex<()> = {
@@ -210,7 +212,7 @@ mod guard {
         );
     }
 
-    /// 設定一覧の書き戻しは `store::lock_list()` の中で行うこと。
+    /// 設定一覧の書き戻しは `store::lock_state()` の中で行うこと。
     ///
     /// エージェントは 1 ターンの複数ツール呼び出しを並列実行するため、ロックが無いと
     /// 同じ一覧を更新する2つのスキル（`reminder` と `focus_timer` は同じキー）が
@@ -237,14 +239,14 @@ mod guard {
             if !LIST_SAVES.iter().any(|marker| body.contains(marker)) {
                 continue;
             }
-            if body.contains("lock_list(") {
+            if body.contains("lock_state(") {
                 continue;
             }
             offenders.push(source.path.display().to_string());
         }
         assert!(
             offenders.is_empty(),
-            "設定一覧の書き戻しは store::lock_list() を取ってから行ってください\
+            "設定一覧の書き戻しは store::lock_state() を取ってから行ってください\
              （並列実行されたツール同士で更新が消えます）: {offenders:?}"
         );
     }
@@ -298,7 +300,7 @@ mod tests {
     /// エージェントは 1 ターンのツール呼び出しを並列実行するので現実に起こる。
     #[test]
     fn 並列更新でも追加が消えない() {
-        use super::lock_list;
+        use super::lock_state;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::{Arc, Mutex};
 
@@ -310,7 +312,7 @@ mod tests {
             let store = Arc::clone(&store);
             let seq = Arc::clone(&seq);
             handles.push(std::thread::spawn(move || {
-                let _guard = lock_list("PICOAGENT_TEST_LIST");
+                let _guard = lock_state("PICOAGENT_TEST_LIST");
                 // 読む
                 let mut items = store.lock().unwrap().clone();
                 // 直す（ロックが無ければここで他スレッドと交差する）
