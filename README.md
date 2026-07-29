@@ -13,6 +13,13 @@
 
 **Ollama も Node.js も要りません。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安からローカルモデルを自動で選んで取得します。以後はオフラインで動きます。
 
+<div align="center">
+  <img src="docs/images/main-light.png" alt="ライトテーマのメイン画面" width="400" />
+  <img src="docs/images/main-dark.png" alt="ダークテーマのメイン画面" width="400" />
+  <br />
+  <sub>ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（左：ライト／右：ダーク）。</sub>
+</div>
+
 ---
 
 ## 📑 目次
@@ -143,6 +150,12 @@ cargo xtask dev
 フキダシ本文や入力欄の上で右クリックした場合は、コピーなど通常のメニューを優先します。
 チャットで「アプリ終了して」「PicoAgent を閉じて」と頼んでも、アプリ操作スキル経由で終了できます。
 
+<div align="center">
+  <img src="docs/images/fullscreen-light.png" alt="全画面フキダシの会話履歴" width="760" />
+  <br />
+  <sub>全画面フキダシ。履歴の検索・コピー・再利用・Markdown 書き出しができます。</sub>
+</div>
+
 ### キーボード
 
 | キー | 動き |
@@ -165,6 +178,12 @@ cargo xtask dev
 ### クイック操作
 
 入力欄の上部から、画面確認・クリップボード要約・今日の予定・できること確認・未読メール要約・Slack 最新要約をワンクリックで送れます。
+
+<div align="center">
+  <img src="docs/images/composer-light.png" alt="入力欄とクイック操作" width="400" />
+  <br />
+  <sub>フキダシをクリックすると入力欄が開き、上にクイック操作が並びます。左下のボタンは音声入力。</sub>
+</div>
 
 ### アクションセンター
 

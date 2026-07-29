@@ -1,11 +1,11 @@
-# Node
+# xtask（開発タスクランナー）のビルド成果物
 xtask/target/
 
 # Rust / Tauri ビルド成果物
 src-tauri/target/
 src-tauri/gen/
 
-# 同梱物（npm run setup:* で取得）・モデル重み（巨大なので含めない）
+# 同梱物（cargo xtask setup で取得）・モデル重み（巨大なので含めない）
 src-tauri/resources/bundled/engine/*
 !src-tauri/resources/bundled/engine/.gitkeep
 src-tauri/resources/bundled/aivis/*
@@ -26,14 +26,14 @@ dist/
 ui-dist/
 .tmp/
 
-# キャラの配信コピー（正本は characters/。sync:characters / beforeDevCommand で生成）
+# キャラの配信コピー（正本は characters/。cargo xtask sync-characters で生成）
 ui/assets/characters/
 
-# Live2D ランタイムとサンプルモデル（npm run setup:live2d で取得。再配布条件があるため含めない）
+# Live2D ランタイムとサンプルモデル（cargo xtask setup live2d で取得。再配布条件があるため含めない）
 ui/vendor/live2d/
 characters/*/live2d/
 
-# Live2D 制作用 PSD（npm run build:live2d-psd で layers/ から再生成できる）
+# Live2D 制作用 PSD（python scripts/build-live2d-psd.py で layers/ から再生成できる）
 characters/*/live2d-src/
 
 # ローカル設定（個人 PC 専用。app_config_dir に保存されるが念のため）
