@@ -6,6 +6,12 @@
 
 ## 2026-07-29
 
+### スキル 60 本を設計上の分類で整理（SPEC.md）
+
+- **役割 × 副作用の2軸で分類** (`SPEC.md`): README のスキル一覧は用途別（情報・検索 / 日常補助 / 外部連携…）でユーザー向けには適切だが、「読むだけか、送信・削除まで行うか」という設計上の位置づけがどこにも無かった。Retrieval / Read / Action（送信・SaaS・ファイル生成・資料生成・汎用）/ Destructive / State / Computation / Orchestration の役割と、read-only / write / destructive の副作用で 60 本すべてを整理した。副作用は MCP の `readOnlyHint` / `destructiveHint` に対応する概念で、判定は「そのスキルが持つ最も強い操作」で行う。
+- **RAG との関係を明記**: スキルの仕組み自体は RAG ではなく tool use である一方、Retrieval 群 9 本は RAG のリトリーバに相当し、「原則 Web 検索」の運用は実質 RAG であることを書いた。長期メモリ（`memory.rs`）も構造は RAG に近いが、埋め込みベクトルではなく文字バイグラムの Jaccard 係数でスコアリングしている点を明示した。
+- **分類表が腐らないようガードを追加** (`src-tauri/src/doc_sync.rs`): 分類表は放置すればスキルの増減とずれる。`skills/` と SPEC の表を双方向で照合し、載せ忘れ・消し忘れを検出するテストを足した。新スキル追加時の載せ忘れと、実在しない名前が表に残るケースの両方を実際に注入して検出を確認済み。
+
 ### 配布物に開発用ファイルが混ざらないことを設計ガードで固定
 
 - **`src-tauri/src/bundle_scope.rs`（新規）**: 製品に入るのは `ui/` を写した `ui-dist/` と `tauri.conf.json` の `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・README 用の画像（`tools/` `docs/` `scripts/` `xtask/`）は元々含まれていないが、設定を1行足すだけで黙って同梱されるうえ目視では気づけないため、テストで固定した。
