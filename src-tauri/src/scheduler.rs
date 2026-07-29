@@ -621,7 +621,7 @@ fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
     let minute_stamp = now.format("%Y-%m-%d %H:%M").to_string();
     let hhmm = now.format("%H:%M").to_string();
     // 読む→直す→書き戻すの間、task_scheduler スキルの更新と競合しないようにする。
-    let _guard = crate::store::lock_list(CONFIG_KEY);
+    let _guard = crate::store::lock_state(CONFIG_KEY);
     // 読めなかった場合は空一覧で続けない（そのまま書き戻すと予約が全部消える）。
     let mut tasks = match load(cfg) {
         Ok(tasks) => tasks,

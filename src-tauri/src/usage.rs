@@ -132,6 +132,9 @@ pub fn record(app: &AppHandle, provider_id: &str, model: &str, usage: TokenUsage
     if usage.total_tokens == 0 && usage.prompt_tokens == 0 {
         return;
     }
+    // 読む→直す→書き戻すの間に別の会話（サブエージェント・ワークフロー）と競合すると、
+    // 片方の記録が消える。同じファイルを触る処理を直列化する。
+    let _guard = crate::store::lock_state("usage.json");
     let mut store = load(app);
     store.records.push(UsageRecord {
         provider_id: provider_id.to_string(),

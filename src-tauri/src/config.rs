@@ -11,6 +11,11 @@ use serde_json::{Map, Value};
 pub struct Config {
     path: Mutex<Option<PathBuf>>,
     values: Mutex<Map<String, Value>>,
+    /// 「スナップショットを取る → ファイルへ書く」を直列化するためのロック。
+    /// これが無いと、2つの保存が同時に走ったとき **あとから取ったスナップショットが
+    /// 先に書かれ、古い方が後から上書きする**ことがあり、メモリ上には残っているのに
+    /// ファイルからは片方の変更が消える（再起動で設定が戻る）。
+    write: Mutex<()>,
 }
 
 impl Config {
@@ -18,6 +23,7 @@ impl Config {
         Config {
             path: Mutex::new(None),
             values: Mutex::new(Map::new()),
+            write: Mutex::new(()),
         }
     }
 
@@ -132,6 +138,12 @@ impl Config {
                 return Ok(());
             }
         }
+        // スナップショットの採取から書き込みまでを直列化する（並び替わりを防ぐ）。
+        // フォールバック許可: 毒された場合も保存自体は続ける（中身は () で不変）。
+        let _write = self
+            .write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = self
             .path
             .lock()
@@ -228,6 +240,43 @@ mod tests {
         cfg.set_string("PICOAGENT_TEST_KEY", "別の値".to_string())
             .unwrap();
         assert!(path.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 保存が同時に走っても、ファイルには全部の変更が入った状態が残ること。
+    ///
+    /// スナップショットの採取と書き込みが直列化されていないと、あとから取った
+    /// スナップショットが先に書かれ、古い方が後から上書きしてしまう。
+    #[test]
+    fn 同時保存でも変更が消えない() {
+        use std::sync::Arc;
+        let dir = temp_dir("concurrent");
+        let path = dir.join("config.json");
+        let cfg = Arc::new(Config::new());
+        cfg.load(path.clone());
+
+        let mut handles = Vec::new();
+        for index in 0..8 {
+            let cfg = Arc::clone(&cfg);
+            handles.push(std::thread::spawn(move || {
+                cfg.set_string(&format!("PICOAGENT_TEST_KEY_{index}"), index.to_string())
+                    .unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // ファイルから読み直して、8件すべてが残っていること。
+        let reloaded = Config::new();
+        reloaded.load(path.clone());
+        for index in 0..8 {
+            assert_eq!(
+                reloaded.get(&format!("PICOAGENT_TEST_KEY_{index}"), ""),
+                index.to_string(),
+                "同時保存で {index} 番目の変更がファイルから消えている"
+            );
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 

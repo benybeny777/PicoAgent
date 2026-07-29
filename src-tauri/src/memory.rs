@@ -180,6 +180,8 @@ pub fn update_from_turn(app: &AppHandle, cfg: &Config, user_text: &str) -> Optio
     if candidates.is_empty() {
         return None;
     }
+    // 読む→直す→書き戻すの間に別の会話と競合すると、片方が覚えた内容が消える。
+    let _guard = crate::store::lock_state("memory.json");
     let mut store = load(app);
     let before = serde_json::to_string(&store).unwrap_or_default();
     merge_candidates(&mut store, candidates, max_items(cfg));
