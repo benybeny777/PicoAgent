@@ -47,6 +47,18 @@ pub async fn handle_rpc(cfg: &Config, message: &Value) -> Option<Value> {
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return Some(rpc_error(&id, -32602, "params.name が必要です"));
             };
+            // 一覧に出していないツール（アプリが内部で使うもの）は外から呼ばせない。
+            // 公開している面と実行できる面をずらさないため、`tools/list` と同じ条件で絞る。
+            if crate::tools::all()
+                .iter()
+                .any(|tool| tool.name() == name && !tool.agent_callable())
+            {
+                return Some(rpc_error(
+                    &id,
+                    -32601,
+                    &format!("公開していないツールです: {name}"),
+                ));
+            }
             let args = params
                 .get("arguments")
                 .cloned()
@@ -75,6 +87,52 @@ pub async fn handle_rpc(cfg: &Config, message: &Value) -> Option<Value> {
 mod tests {
     use super::handle_rpc;
     use serde_json::json;
+
+    /// `tools/list` に出していないツールは `tools/call` でも実行できないこと。
+    ///
+    /// 公開している面と実行できる面がずれると、外部の MCP クライアントから
+    /// 「無いはずのツール」を動かせてしまう。
+    #[test]
+    fn 一覧に無いツールは実行できない() {
+        let cfg = crate::config::Config::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            // chitchat はアプリが内部で使うスキルで、agent_callable=false。
+            let hidden = crate::tools::all()
+                .iter()
+                .find(|tool| !tool.agent_callable())
+                .map(|tool| tool.name().to_string())
+                .expect("非公開スキルが1つは存在する前提");
+
+            let listed = handle_rpc(
+                &cfg,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            )
+            .await
+            .unwrap();
+            let names: Vec<String> = listed["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap_or("").to_string())
+                .collect();
+            assert!(!names.contains(&hidden), "一覧に出ていない前提が崩れている");
+
+            let called = handle_rpc(
+                &cfg,
+                &json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": { "name": hidden, "arguments": {} }
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                called["error"]["code"], -32601,
+                "実行を拒否していない: {called}"
+            );
+        });
+    }
 
     #[test]
     fn 初期化とツール一覧と実行ができる() {

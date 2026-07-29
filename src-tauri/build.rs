@@ -11,6 +11,13 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+/// Rust の識別子として使える名前か（コネクタ名はそのまま `mod` 名になる）。
+fn is_valid_module_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_lowercase() || first == '_')
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 fn relative_path(from_dir: &Path, to_file: &Path) -> PathBuf {
     let from_components: Vec<Component<'_>> = from_dir.components().collect();
     let to_components: Vec<Component<'_>> = to_file.components().collect();
@@ -93,6 +100,14 @@ fn generate_skill_mods(dir: &str, out_name: &str) {
             .collect();
         modules.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, path) in &modules {
+            // フォルダ名はそのまま `pub mod <名前>;` になる。ハイフン等が入っていると
+            // 生成コードが構文エラーになり、原因の分からないビルド失敗になるため、
+            // ここで何が悪いのかを明示して止める。
+            assert!(
+                is_valid_module_name(name),
+                "スキルのフォルダ名 \"{name}\" は Rust のモジュール名にできません。\
+                 英小文字・数字・アンダースコアだけを使ってください（例: my_skill）。"
+            );
             let source_path = Path::new(&manifest_dir).join(path);
             let rel = relative_path(Path::new(&out_dir), &source_path)
                 .to_string_lossy()
