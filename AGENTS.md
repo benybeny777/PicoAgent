@@ -114,6 +114,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
+| `scripts/lib/fetch-util.mjs` | **同梱物ダウンロードの共通処理**。`downloadTo()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない） |
 | `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
 | `scripts/fetch-whisper.mjs` | 同梱Whisper CLIとモデル取得（`npm run setup:whisper`） |
 | `scripts/fetch-office.mjs` | OfficeCLI（LibreOffice）取得（`npm run setup:office`。`src-tauri/resources/bundled/office/`、Git 管理外。Linux は警告のみ） |

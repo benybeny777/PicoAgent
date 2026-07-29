@@ -15,12 +15,13 @@
 //                          https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html
 //   pixi.js / pixi-live2d-display … MIT License
 
-import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir, platform } from "node:os";
 import { spawnSync } from "node:child_process";
+import { downloadTo } from "./lib/fetch-util.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VENDOR_DIR = join(HERE, "..", "ui", "vendor", "live2d");
@@ -66,19 +67,9 @@ const SAMPLE_MODELS = [
   },
 ];
 
-async function download(url, dest) {
-  console.log("download:", url);
-  const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup" }, redirect: "follow" });
-  if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await mkdir(dirname(dest), { recursive: true });
-  await writeFile(dest, buf);
-  return buf.length;
-}
-
 async function ensureFile(url, dest) {
   if (existsSync(dest) && !FORCE) return 0;
-  return download(url, dest);
+  return downloadTo(url, dest);
 }
 
 // model3.json の FileReferences から参照ファイルを列挙する（moc3・テクスチャ・物理・モーション等）。
@@ -135,7 +126,7 @@ async function ensureRawModel(sample) {
   const modelDir = join(CHARACTERS_DIR, sample.id, "live2d");
   const manifestPath = join(modelDir, sample.modelJson);
   if (!existsSync(manifestPath) || FORCE) {
-    await download(sample.base + sample.modelJson, manifestPath);
+    await downloadTo(sample.base + sample.modelJson, manifestPath);
   }
   const model3 = JSON.parse(await readFile(manifestPath, "utf8"));
   let fetched = 0;
@@ -158,7 +149,7 @@ async function ensureZipModel(sample) {
   await rm(work, { recursive: true, force: true });
   await mkdir(work, { recursive: true });
   const zipPath = join(work, basename(new URL(sample.zipUrl).pathname));
-  const bytes = await download(sample.zipUrl, zipPath);
+  const bytes = await downloadTo(sample.zipUrl, zipPath);
   const extracted = join(work, "x");
   await mkdir(extracted, { recursive: true });
   extractZip(zipPath, extracted);

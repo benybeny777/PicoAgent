@@ -11,6 +11,7 @@ import { tmpdir, platform, arch } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { downloadTo } from "./lib/fetch-util.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AIVIS_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "aivis");
@@ -60,15 +61,6 @@ async function ghJson(url) {
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}: ${url}`);
   return res.json();
-}
-
-async function download(url, dest) {
-  console.log("download:", url);
-  const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup" }, redirect: "follow" });
-  if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(dest, buf);
-  return buf.length;
 }
 
 function commandExists(cmd) {
@@ -151,7 +143,7 @@ async function main() {
   await rm(work, { recursive: true, force: true });
   await mkdir(work, { recursive: true });
   const archive = join(work, asset.name);
-  const bytes = await download(asset.browser_download_url, archive);
+  const bytes = await downloadTo(asset.browser_download_url, archive);
   console.log(`fetched ${asset.name} (${(bytes / 1e6).toFixed(1)} MB), tag ${rel.tag_name}`);
 
   const extracted = join(work, "x");

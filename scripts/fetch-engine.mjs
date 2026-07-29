@@ -13,6 +13,7 @@ import { tmpdir, platform, arch } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { downloadTo } from "./lib/fetch-util.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENGINE_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "engine");
@@ -39,15 +40,6 @@ async function ghJson(url) {
   const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup", Accept: "application/vnd.github+json" } });
   if (!res.ok) throw new Error(`GitHub API ${res.status}: ${url}`);
   return res.json();
-}
-
-async function download(url, dest) {
-  console.log("download:", url);
-  const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup" }, redirect: "follow" });
-  if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(dest, buf);
-  return buf.length;
 }
 
 // アーカイブを展開（Windows は zip を PowerShell Expand-Archive、他は tar.gz を tar で展開）。
@@ -115,7 +107,7 @@ async function main() {
   await rm(work, { recursive: true, force: true });
   await mkdir(work, { recursive: true });
   const zip = join(work, asset.name);
-  const bytes = await download(asset.browser_download_url, zip);
+  const bytes = await downloadTo(asset.browser_download_url, zip);
   console.log(`fetched ${asset.name} (${(bytes / 1e6).toFixed(1)} MB), tag ${rel.tag_name}`);
 
   const ex = join(work, "x");

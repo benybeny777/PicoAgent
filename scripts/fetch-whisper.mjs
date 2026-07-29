@@ -13,6 +13,7 @@ import { tmpdir, platform, arch } from "node:os";
 import { join, dirname, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { downloadTo } from "./lib/fetch-util.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WHISPER_DIR = join(HERE, "..", "src-tauri", "resources", "bundled", "whisper");
@@ -74,15 +75,6 @@ async function ghJson(url) {
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}: ${url}`);
   return res.json();
-}
-
-async function download(url, dest) {
-  console.log("download:", url);
-  const res = await fetch(url, { headers: { "User-Agent": "picoagent-setup" }, redirect: "follow" });
-  if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(dest, buf);
-  return buf.length;
 }
 
 function psLiteral(value) {
@@ -152,7 +144,7 @@ async function ensureBinary() {
   await rm(work, { recursive: true, force: true });
   await mkdir(work, { recursive: true });
   const zip = join(work, asset.name);
-  const bytes = await download(asset.browser_download_url, zip);
+  const bytes = await downloadTo(asset.browser_download_url, zip);
   console.log(`fetched ${asset.name} (${(bytes / 1e6).toFixed(1)} MB), tag ${rel.tag_name}`);
   const extracted = join(work, "x");
   await mkdir(extracted, { recursive: true });
@@ -170,7 +162,7 @@ async function ensureModel() {
     return;
   }
   await mkdir(dirname(dest), { recursive: true });
-  const bytes = await download(modelUrl(modelChoice()), dest);
+  const bytes = await downloadTo(modelUrl(modelChoice()), dest);
   console.log(`fetched ${basename(dest)} (${(bytes / 1e6).toFixed(1)} MB)`);
 }
 

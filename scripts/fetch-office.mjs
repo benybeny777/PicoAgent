@@ -12,12 +12,13 @@
 // 失敗は既定で警告のみ（Office 変換なしで起動を続行）。必須にする場合は OFFICE_REQUIRED=1。
 // 再取得は OFFICE_FORCE=1。バージョンは LIBREOFFICE_VERSION で上書き可能。
 
-import { mkdir, rm, writeFile, readdir, stat } from "node:fs/promises";
+import { mkdir, rm, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform, arch } from "node:os";
 import { spawnSync } from "node:child_process";
+import { downloadTo } from "./lib/fetch-util.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OFFICE_DIR = resolve(HERE, "..", "src-tauri", "resources", "bundled", "office");
@@ -47,18 +48,9 @@ async function findSoffice(dir, depth = 0) {
   return null;
 }
 
-async function download(url, dest) {
-  console.log(`download: ${url}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`download failed ${res.status}: ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(dest, buf);
-  return buf.length;
-}
-
 async function fetchWindows() {
   const msi = join(OFFICE_DIR, `LibreOffice_${VERSION}.msi`);
-  await download(`${BASE}/win/x86_64/LibreOffice_${VERSION}_Win_x86-64.msi`, msi);
+  await downloadTo(`${BASE}/win/x86_64/LibreOffice_${VERSION}_Win_x86-64.msi`, msi);
   // administrative install はファイル展開のみで管理者権限やレジストリ変更を伴わない。
   const target = join(OFFICE_DIR, "extract");
   const result = spawnSync("msiexec", ["/a", msi, "/qn", `TARGETDIR=${target}`], { stdio: "inherit" });
@@ -70,7 +62,7 @@ async function fetchMac() {
   const suffix = arch() === "arm64" ? "aarch64/LibreOffice_" + VERSION + "_MacOS_aarch64.dmg"
     : "x86_64/LibreOffice_" + VERSION + "_MacOS_x86-64.dmg";
   const dmg = join(OFFICE_DIR, "LibreOffice.dmg");
-  await download(`${BASE}/mac/${suffix}`, dmg);
+  await downloadTo(`${BASE}/mac/${suffix}`, dmg);
   const mount = join(OFFICE_DIR, "mnt");
   const attach = spawnSync("hdiutil", ["attach", dmg, "-nobrowse", "-mountpoint", mount], { stdio: "inherit" });
   if (attach.status !== 0) throw new Error("hdiutil attach 失敗");
