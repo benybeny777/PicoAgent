@@ -1,7 +1,7 @@
 // skills/ms_office/mod.rs - OfficeCLI によるオフィスファイル編集スキル。
 //
 // 旧実装は Windows + Microsoft Office COM（PowerShell）が必要だったが、
-// OfficeCLI（同梱 LibreOffice。npm run setup:office で取得）と OOXML の直接編集へ置き換え、
+// OfficeCLI（同梱 LibreOffice。cargo xtask setup office で取得）と OOXML の直接編集へ置き換え、
 // OS や Microsoft Office の有無に依存しないようにした。
 //
 //   replace_text … docx/xlsx/pptx を ZIP として開き、内部 XML の文字列を直接置換する
@@ -114,7 +114,7 @@ async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, t
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
             return format!(
-                "エラー: OfficeCLI（{program}）を起動できません: {error}\nnpm run setup:office で同梱 LibreOffice を取得するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。"
+                "エラー: OfficeCLI（{program}）を起動できません: {error}\ncargo xtask setup office で同梱 LibreOffice を取得するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。"
             );
         }
         Err(_) => return format!("エラー: PDF 変換が {timeout} 秒でタイムアウトしました。"),

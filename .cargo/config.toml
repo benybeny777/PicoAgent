@@ -1,0 +1,4 @@
+# `cargo xtask <サブコマンド>` で開発タスクを実行するためのエイリアス。
+# 旧 `npm run <script>` の置き換え（Node 不要）。
+[alias]
+xtask = "run --quiet --manifest-path xtask/Cargo.toml --"

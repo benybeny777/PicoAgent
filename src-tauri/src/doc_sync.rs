@@ -35,13 +35,13 @@ fn referenced_keys() -> std::collections::BTreeSet<String> {
     for source in crate::guard_scan::all_sources() {
         collect_keys(&source.text, &mut keys);
     }
-    // フロント（JS）とセットアップスクリプトも設定キーを参照する。
+    // フロント（JS）とタスクランナー（xtask）も設定キーを参照する。
     for relative in [
         "ui/renderer.js",
         "ui/settings.js",
         "ui/picoagent.js",
-        "scripts/fetch-tools.mjs",
-        "scripts/picoagent-cli.mjs",
+        "xtask/src/tools.rs",
+        "xtask/src/cli.rs",
     ] {
         if let Some(text) = read_repo_file(relative) {
             collect_keys(&text, &mut keys);

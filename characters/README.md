@@ -38,15 +38,15 @@ characters/<id>/
 全キャラを生成する:
 
 ```powershell
-npm run build:character-animations -- --version 2026-06-28-motion-v1
-npm run sync:characters
+python scripts/build-character-animations.py -- --version 2026-06-28-motion-v1
+cargo xtask sync-characters
 ```
 
 一部キャラだけ生成する:
 
 ```powershell
-npm run build:character-animations -- rin mai --version 2026-06-28-rin-mai-v1
-npm run sync:characters
+python scripts/build-character-animations.py -- rin mai --version 2026-06-28-rin-mai-v1
+cargo xtask sync-characters
 ```
 
 このスクリプトは以下を生成する。
@@ -84,7 +84,7 @@ characters/<id>/
 
 - `layers/` と `animations/` は不要。まばたき・口パク・モーションはモデル定義が担当する。
 - `build-character-animations.py` は Live2D キャラをスキップする。
-- サンプルの `hiyori` / `haru` / `epsilon`（Live2D 公式サンプルモデル）は `npm run setup:live2d` が
+- サンプルの `hiyori` / `haru` / `epsilon`（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が
   `live2d/` へモデルを取得する。再配布条件があるためモデル実体は Git 管理外。
   `preview.jpg` はローディング画面と設定画面アイコンに使う。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
@@ -96,8 +96,8 @@ characters/<id>/
 
 ```powershell
 pip install Pillow psd-tools
-npm run build:live2d-psd            # layers/ を持つ全キャラ
-npm run build:live2d-psd -- mugi    # 指定キャラのみ
+python scripts/build-live2d-psd.py            # layers/ を持つ全キャラ
+python scripts/build-live2d-psd.py -- mugi    # 指定キャラのみ
 ```
 
 生成先は `characters/<id>/live2d-src/<id>-live2d.psd`（Git 管理外・再生成可能）。

@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-07-29
+
+### README を読みやすく再構成
+
+- **長すぎる段落を分解** (`README.md`): 1段落 1,113 字（設定セクション）のような塊が6箇所あり、必要な情報を探しにくかった。表・箇条書き・折りたたみ（`<details>`）へ分解し、**最長段落 1,113 字 → 275 字、300 字超の段落 6件 → 0件**にした。表は 7個 → 37個、折りたたみは 0個 → 9個。
+- **情報は削っていない**: 旧 README の設定キー・パス・バージョン・ログファイル名などの固有トークンが新 README にすべて残っていることを機械照合で確認した（欠落ゼロ）。詳細な同梱物の扱い・ログ・識別子・アンインストールは折りたたみへ、頼み方の具体例は MANUAL.md への導線に置き換えた。
+- **トラブルシューティングをカテゴリ分け**: フラットな22項目を「起動・モデル / AI・ツール / ファイル・コマンド / 文書・画像・音声 / 外部サービス連携」の5つへ分け、各カテゴリを表にした（最初のカテゴリだけ開いた状態）。
+- **手順を実態に合わせた**: 旧 README は setup コマンドを5つ並べていたが、`dev` / `build` が未取得分を自動取得するため実際には不要だった。`cargo install tauri-cli` と `cargo xtask dev` の2コマンドに整理し、個別取得は折りたたみへ移した。
+
+### Node.js 依存を撤廃し、開発タスクを Rust の `cargo xtask` へ統一
+
+- **Node.js が不要になった**: npm の依存は `@tauri-apps/cli` の1つだけで、`tauri.conf.json` にも `beforeDevCommand` は無かったため、Tauri CLI を `cargo install tauri-cli` に置き換え、`scripts/*.mjs`（11本・約1,400行）を Rust の `xtask` クレートへ移植した。`package.json` / `package-lock.json` / `node_modules` / `scripts/*.mjs` は削除。前提は **Rust（cargo）と Tauri CLI** だけになった。
+- **コマンド体系**: `npm run <script>` → `cargo xtask <サブコマンド>`（`dev` / `build` / `setup [対象]` / `sync-characters` / `build-ui` / `stop` / `cli`）。`.cargo/config.toml` のエイリアスで動く。取得対象は `engine` / `aivis` / `whisper` / `live2d` / `office` / `tools` を個別指定できる。
+- **移植で挙動は変えていない**: 取得済み判定・`*_FORCE` 系の環境変数・ベストエフォート方針（配布が無い OS は警告のみ）・一時ファイル経由の原子的な取得・作業ディレクトリ経由の展開まで、旧スクリプトの仕様をそのまま保った。キャラ同期と UI 配信ビルドは**旧 JS 版の出力とバイト単位で一致**することを実ファイルで確認済み（dev / release 両方）。
+- **社内プロキシ環境で動くようにした**: xtask の HTTP は rustls の**システム信頼ストア**を使う（`rustls-tls-native-roots`）。独自 CA を挟むプロキシ配下でも `SSL_CERT_FILE` や OS の設定がそのまま効く（webpki 同梱ルートだけだと必ず取得に失敗する）。
+- 検証: 実ネットワークで ripgrep の取得・展開・設置と `rg --version` を確認。GitHub リリースのアセット選択（llama.cpp / whisper.cpp / Aivis）と Live2D の `model3.json` 参照ファイル列挙はユニットテスト6件で検証。CLI はモック API に対して status / models / chat / ask / repl（文脈保持）・APIキー付与・接続不可時の案内まで確認。cargo test 151件（本体）+ 6件（xtask）パス・clippy 警告ゼロ。
+
+---
+
 ## 2026-07-28
 
 ### 公開面と実行面のズレを解消し、コネクタ名の誤りを分かるエラーに（再帰レビュー 第19巡）

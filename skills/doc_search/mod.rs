@@ -70,7 +70,7 @@ fn collect_files(root: &Path, files: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
-/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup:tools）→ PATH。
+/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
 fn ripgrep_path(cfg: &Config) -> String {
     crate::tools::resolve_cli_path(cfg, "PICOAGENT_RIPGREP_PATH", "ripgrep", "rg")
 }

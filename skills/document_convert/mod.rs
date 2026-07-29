@@ -53,7 +53,7 @@ fn find_soffice(dir: &Path, depth: usize) -> Option<PathBuf> {
 }
 
 /// OfficeCLI の実行パスを解決する。
-/// 優先順: 明示設定（PICOAGENT_LIBREOFFICE_PATH）→ 同梱（setup:office）→ PATH の soffice。
+/// 優先順: 明示設定（PICOAGENT_LIBREOFFICE_PATH）→ 同梱（setup office）→ PATH の soffice。
 pub fn office_cli_path(cfg: &Config) -> String {
     let configured = cfg.get("PICOAGENT_LIBREOFFICE_PATH", "");
     if !configured.trim().is_empty() && configured != "soffice" {
@@ -70,7 +70,7 @@ pub fn office_cli_path(cfg: &Config) -> String {
 // Pandoc の方が高精度に扱える形式（LibreOffice では崩れやすい・開けない）。
 const PANDOC_FORMATS: [&str; 7] = ["md", "markdown", "rst", "epub", "org", "tex", "latex"];
 
-/// Pandoc の実行パスを解決する。優先順: 明示設定 → 同梱（setup:tools）→ PATH。
+/// Pandoc の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
 fn pandoc_path(cfg: &Config) -> String {
     super::resolve_cli_path(cfg, "PICOAGENT_PANDOC_PATH", "pandoc", "pandoc")
 }
@@ -99,7 +99,7 @@ impl Tool for DocumentConvertTool {
     }
 
     fn description(&self) -> String {
-        "OfficeCLI（同梱 LibreOffice。npm run setup:office で取得）で docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。Markdown/reST/EPUB が絡む変換は Pandoc（npm run setup:tools で同梱）を自動で使い高精度に変換する。".to_string()
+        "OfficeCLI（同梱 LibreOffice。cargo xtask setup office で取得）で docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。Markdown/reST/EPUB が絡む変換は Pandoc（cargo xtask setup tools で同梱）を自動で使い高精度に変換する。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -187,7 +187,7 @@ impl Tool for DocumentConvertTool {
                 )
             }
             Ok(Err(error)) => format!(
-                "エラー: {} の起動に失敗しました: {}。npm run setup:{} で同梱ツールを取得してください。",
+                "エラー: {} の起動に失敗しました: {}。cargo xtask setup {} で同梱ツールを取得してください。",
                 engine_label,
                 error,
                 if use_pandoc { "tools" } else { "office" }

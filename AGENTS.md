@@ -14,7 +14,7 @@
 - コミットメッセージ・ソースコードのコメント（Rust / JS とも）は基本的に日本語で書く（コミットは英語だけの件名にしない）。`feat` / `fix` / `docs` / `chore` などの短い英語プレフィックスや、API / JSON / trait / 識別子・関数名など技術用語の英語はそのまま使ってよい（無理に和訳しない）。
 - 運用や品質に影響する大きめの変更は `CHANGELOG.md` に残す。
 - **常に Codex / Claude（作業エージェント自身）の利用クレジット消費を最小化して作業する。** 不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
-  - 検証コストの優先順位: まず `cargo check`（コンパイル）→ 必要なら `cargo test --lib`（ロジック）で済ませる。**GUI 起動（`npm run dev`）・スクリーンショット・フルビルドは高コストなので最後の手段**とし、目視確認が本当に必要なときだけ、複数の確認をまとめて 1 回で行う。
+  - 検証コストの優先順位: まず `cargo check`（コンパイル）→ 必要なら `cargo test --lib`（ロジック）で済ませる。**GUI 起動（`cargo xtask dev`）・スクリーンショット・フルビルドは高コストなので最後の手段**とし、目視確認が本当に必要なときだけ、複数の確認をまとめて 1 回で行う。
   - 編集はまとめて行い、**ビルド/テスト/起動は変更が出揃ってから最小回数**だけ実行する。同じ内容のビルド・テスト・起動・読み取りを繰り返さない。
   - 起動して確認したら使い終わったプロセスは止め、ロックや再ビルドの無駄を避ける。確認が自動化しづらい（GUI・音声など）場合は、コードの正しさで判断し、最終目視はユーザーに委ねてよい。
 - PowerShell で日本語ファイルを確認するときは、文字化けを避けるため UTF-8 を明示する。表示が文字化けしても、すぐにソース破損と判断せず UTF-8 で読み直してから判断する。
@@ -74,12 +74,12 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 
 ## 実行環境
 
-- Windows / macOS を想定。**Rust（cargo）と Node.js >= 20**、WebView2（Windows ランタイム）。**Ollama は不要**。
-- 開発起動: `npm run setup:engine`（同梱エンジン取得）→ `npm run dev`。製品ビルド: `npm run build`（`src-tauri/target/release/bundle/`）。
+- Windows / macOS を想定。**Rust（cargo）と Tauri CLI**（`cargo install tauri-cli --version '^2'`）、WebView2（Windows ランタイム）。**Node.js も Ollama も不要**（開発タスクは `cargo xtask`）。
+- 開発起動: `cargo xtask setup engine`（同梱エンジン取得）→ `cargo xtask dev`。製品ビルド: `cargo xtask build`（`src-tauri/target/release/bundle/`）。
 - **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM/RAM 目安から Gemma 4 系プリセットを選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL し、以後オフライン。Ollama / OpenAI 互換は任意プロバイダとして存続。
 - **OpenAI 互換プロバイダ（`OPENAI_API_KEY` 利用）は費用が発生するため、ユーザー指示または運用上の明確な必要がある場合だけ実行する。** local / Ollama はコストがかからない。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
-- 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`npm run setup:engine` で取得）。
+- 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`cargo xtask setup engine` で取得）。
 
 ## 製品化（配布）
 
@@ -114,17 +114,19 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
-| `scripts/lib/fetch-util.mjs` | **同梱物ダウンロードの共通処理**。`downloadTo()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない） |
-| `scripts/fetch-engine.mjs` | 同梱エンジン取得（`npm run setup:engine`） |
-| `scripts/fetch-whisper.mjs` | 同梱Whisper CLIとモデル取得（`npm run setup:whisper`） |
-| `scripts/fetch-office.mjs` | OfficeCLI（LibreOffice）取得（`npm run setup:office`。`src-tauri/resources/bundled/office/`、Git 管理外。Linux は警告のみ） |
-| `scripts/fetch-tools.mjs` | 精度向上用 OSS CLI 取得（`npm run setup:tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
-| `scripts/picoagent-cli.mjs` | ローカル API を叩く最小 CLI（`npm run cli -- status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
-| `scripts/fetch-live2d.mjs` | Live2D ランタイム（`ui/vendor/live2d/`）とサンプルモデル「ひより」（`characters/hiyori/live2d/`）の取得（`npm run setup:live2d`。いずれも git 管理外） |
-| `scripts/sync-characters.mjs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期（dev/build 前に自動実行） |
-| `scripts/build-ui-dist.mjs` | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
+| `xtask/src/util.rs` | **同梱物取得の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
+| `xtask`（`bundled::fetch_engine`） | 同梱エンジン取得（`cargo xtask setup engine`） |
+| `xtask`（`bundled::fetch_whisper`） | 同梱Whisper CLIとモデル取得（`cargo xtask setup whisper`） |
+| `xtask/src/office.rs` | OfficeCLI（LibreOffice）と AivisSpeech Engine の取得（`cargo xtask setup office` / `setup aivis`。`src-tauri/resources/bundled/` 配下、Git 管理外。どちらもベストエフォート） |
+| `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
+| `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
+| `xtask`（`bundled::fetch_live2d`） | Live2D ランタイム（`ui/vendor/live2d/`）とサンプルモデル「ひより」（`characters/hiyori/live2d/`）の取得（`cargo xtask setup live2d`。いずれも git 管理外） |
+| `xtask/src/assets.rs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期、`ui/` を `ui-dist/` へ配信ビルド、残存プロセス停止（いずれも dev/build 前に自動実行） |
+| `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
+| `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
+| `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
-| `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`npm run build:live2d-psd`。生成物は Git 管理外） |
+| `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
 | `characters/` | キャラクター正本（一覧 `index.json`・人格定義・レイヤー・連番フレーム・ローディング画像。Live2D キャラは `live2d/` にモデル一式）。画像準備手順は `characters/README.md` |
@@ -144,25 +146,22 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
 │   ├── index.html / renderer.js / styles.css       ← ペット UI
 │   ├── settings.html / settings.js / settings.css  ← 設定ウィンドウ
-│   ├── vendor/live2d/          ← Live2D ランタイム（git 管理外、setup:live2d で取得）
+│   ├── vendor/live2d/          ← Live2D ランタイム（git 管理外、setup live2d で取得）
 │   └── assets/characters/      ← characters/ の配信コピー（git 管理外、sync:characters で生成）
 ├── ui-dist/                    ← Tauri frontendDist（git 管理外、build-ui-dist で生成）
 ├── src-tauri/
 │   ├── Cargo.toml / build.rs / tauri.conf.json
 │   ├── capabilities/default.json   ← 権限（ACL）
 │   ├── icons/                      ← 生成アイコン一式
-│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper。git 管理外、setup:* で取得）
+│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper。git 管理外、cargo xtask setup で取得）
 │   └── src/
 │       ├── main.rs / lib.rs / commands.rs / menu.rs
 │       ├── config.rs / agent.rs / message.rs / engine.rs
 │       ├── providers/{mod,local,ollama,openai}.rs ← 叩く AI（.rs を足すと自動登録）
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
-├── scripts/fetch-engine.mjs    ← 同梱エンジン取得
-├── scripts/fetch-whisper.mjs   ← 同梱Whisper CLIとモデル取得
-├── scripts/fetch-live2d.mjs    ← Live2D ランタイムとサンプルモデル取得
-├── scripts/sync-characters.mjs ← characters/ を ui/assets/characters/ へ同期
-├── scripts/build-ui-dist.mjs   ← ui/ を ui-dist/ へコピー（build は簡易 minify）
-├── package.json                ← npm run setup:engine / setup:whisper / setup:live2d / sync:characters / dev / build / tauri
+├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
+├── scripts/*.py                ← キャラクター画像の生成（連番アニメ・Live2D 用 PSD）
+├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ```

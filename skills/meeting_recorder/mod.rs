@@ -516,7 +516,7 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
         return super::config_guide(
             "ローカル文字起こし",
             &["PICOAGENT_TRANSCRIBE_MODEL"],
-            "npm run setup:whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
+            "cargo xtask setup whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
         );
     }
     let output_stem = match output_stem(cfg, &audio) {

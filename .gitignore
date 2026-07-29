@@ -1,5 +1,5 @@
 # Node
-node_modules/
+xtask/target/
 
 # Rust / Tauri ビルド成果物
 src-tauri/target/

@@ -87,7 +87,7 @@ fn find_bundled_exe(dir: &Path, exe_name: &str, depth: usize) -> Option<PathBuf>
         .find_map(|sub| find_bundled_exe(&sub, exe_name, depth + 1))
 }
 
-/// CLI ツールの実行パスを解決する。優先順: 明示設定（config_key）→ 同梱（setup:tools）→ PATH。
+/// CLI ツールの実行パスを解決する。優先順: 明示設定（config_key）→ 同梱（setup tools）→ PATH。
 /// `exe` は拡張子なしの実行ファイル名（Windows では自動で .exe を付ける）。
 pub fn resolve_cli_path(cfg: &Config, config_key: &str, tool_dir: &str, exe: &str) -> String {
     let configured = cfg.get(config_key, "");
