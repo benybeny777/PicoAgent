@@ -33,6 +33,7 @@ node tools/screenshots/shoot.mjs
 |---|---|
 | `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
+| `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`。動く絵の書き出しにだけ使う） |
 
 引数に画像名を並べると、その絵だけを撮り直します。
 
@@ -47,11 +48,25 @@ node tools/screenshots/shoot.mjs composer-light.png
 | `main-light.png` / `main-dark.png` | メイン画面（ライト / ダーク） |
 | `composer-light.png` | 入力欄とクイック操作 |
 | `fullscreen-light.png` | 全画面フキダシ（履歴の検索・コピー・再利用・書き出し） |
-| `live2d-light.png` / `live2d-dark.png` | Live2D 描画（ひより） |
+| `live2d-dark.png` | Live2D 描画（ひより、ダーク） |
+| `live2d-motion.webp` | Live2D の**動く絵**（ひより、ライト。返答時のモーションと文字送り 4 秒ループ） |
+
+## 動く絵について
+
+`live2d-motion.webp` はアニメーション WebP（透過つき・無限ループ）です。GIF と違って透過が
+1bit に落ちないので、GitHub のライトテーマでもダークテーマでも背景なしのまま表示できます。
+同じ絵を APNG で書き出すと 4.8MB、WebP なら 0.9MB です。
+
+- **書き出しに `ffmpeg` が要ります**（PATH のもの。`SHOOT_FFMPEG` で実行ファイルを指定可）。無ければこの絵だけスキップされます
+- 1 枚のキャプチャに 200ms 以上かかるため、実時間で連写すると 5fps も出ません。そこで
+  **ページ内の時計を止め、「1/fps だけ時間を進める → 1 枚撮る」を繰り返します**。撮影に何秒かかっても
+  ページ内の経過時間は一定なので、狙ったフレームレートで滑らかになります（その代わり撮影自体は 20 秒ほどかかります）
+- 透過を保ったまま動画キャプチャする方法がヘッドレス Chromium には無いため（compositor 出力には背景が焼き込まれる）、
+  透過 PNG の連写を `ffmpeg` で束ねています
 
 ## Live2D の絵について
 
-Live2D の 2 枚は、ランタイムとモデルが未取得だと**スキップされます**（他の絵は撮れます）。
+Live2D の絵は、ランタイムとモデルが未取得だと**スキップされます**（他の絵は撮れます）。
 
 ```bash
 cargo xtask setup live2d   # 先にこれを実行する

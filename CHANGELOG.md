@@ -37,6 +37,13 @@
 - **撮影ツールが Windows で動かなかったのを修正** (`tools/screenshots/shoot.mjs`): `PLAYWRIGHT_MODULE` に Windows の絶対パス（`C:\...`）を渡すと動的 `import()` がパッケージ名扱いで解決に失敗し、「playwright を読み込めません」で必ず止まっていた。絶対パスなら `pathToFileURL` で `file://` URL へ直してから読み込むようにし、PowerShell での指定例を `tools/screenshots/README.md` に足した。
 - **`.gitignore` に `node_modules/` を追加**: 作業用ツール（playwright・`npx tauri icon`）を叩くと生成されるが、Node はアプリの依存ではないためコミット対象にしない。
 
+### README の Live2D を動く絵に差し替え
+
+- **アニメーション WebP を掲載** (`README.md` / `docs/images/live2d-motion.webp`): 静止画では「モデルが動く」という Live2D の要点が伝わらないため、返答時のモーションと文字送りを 4 秒ループで録った。透過つき無限ループなので、GitHub のライト / ダークどちらでも背景なしのまま出る。静止画の `live2d-light.png` は役目が重なるので削除（ダークは静止画のまま残す）。
+- **GIF ではなく WebP** (`tools/screenshots/shoot.mjs`): GIF は透過が 1bit に落ちてキャラの輪郭がギザつく。APNG は透過を保てるが同じ絵で 4.8MB、WebP なら 0.9MB だったため WebP を採用した。
+- **時計を止めて 1 コマずつ進める撮り方**: キャプチャ 1 枚に 200ms 以上かかるので、実時間で連写すると 4〜5fps しか出ず動きがカクついた。Playwright の `page.clock` でページ内の時計を止め、「1/fps だけ時間を進める → 1 枚撮る」を繰り返すことで、撮影にかかった実時間と無関係に狙った 12fps で滑らかになる。透過を保ったまま動画キャプチャする方法がヘッドレス Chromium には無い（compositor 出力に背景が焼き込まれる）ための遠回りで、理由はツールの README に残した。
+- **`-compression_level 6` は使わない**: libwebp の探索が跳ね上がり、48 コマの書き出しが数分たっても終わらなかった。既定の 4 なら数秒で、サイズもほぼ変わらない。
+
 ### README を読みやすく再構成
 
 - **長すぎる段落を分解** (`README.md`): 1段落 1,113 字（設定セクション）のような塊が6箇所あり、必要な情報を探しにくかった。表・箇条書き・折りたたみ（`<details>`）へ分解し、**最長段落 1,113 字 → 275 字、300 字超の段落 6件 → 0件**にした。表は 7個 → 37個、折りたたみは 0個 → 9個。
