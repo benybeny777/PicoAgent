@@ -356,6 +356,8 @@ cargo xtask build
 
 `src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`cargo xtask dev` と同じく、同梱物の未取得分は自動で取得してからビルドします。
 
+配布物に入るのは **`ui/` を写した `ui-dist/`** と **`src-tauri/resources/bundled/`** の2つだけです。開発用のツール・ドキュメント・README 用の画像（`tools/` `docs/` `scripts/` `xtask/`）は含まれません。この範囲は設計ガード（`src-tauri/src/bundle_scope.rs`）がテストで固定しているので、うっかり広がることはありません。
+
 <details>
 <summary>同梱物の扱い（エンジン / Aivis / Whisper / Live2D）</summary>
 
