@@ -116,6 +116,13 @@ cargo xtask dev
 - **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルの「ひより」「Haru」「Epsilon」を同梱
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 
+<div align="center">
+  <img src="docs/images/live2d-light.png" alt="Live2D キャラクター（ライトテーマ）" width="400" />
+  <img src="docs/images/live2d-dark.png" alt="Live2D キャラクター（ダークテーマ）" width="400" />
+  <br />
+  <sub>Live2D キャラ「ひより」。連番フレームと同じ透明ウィンドウ上で、まばたきやモーションが動き続けます（左：ライト／右：ダーク）。</sub>
+</div>
+
 ### スキル（一部）
 
 | 分野 | できること |

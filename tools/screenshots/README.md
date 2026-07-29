@@ -22,9 +22,16 @@ PLAYWRIGHT_MODULE=$(npm root -g)/playwright/index.mjs \
   node tools/screenshots/shoot.mjs
 ```
 
+Windows（PowerShell）ではグローバル導入先が `%APPDATA%\npm\node_modules` になります。
+
+```powershell
+$env:PLAYWRIGHT_MODULE = "$(npm root -g)\playwright\index.mjs"
+node tools/screenshots/shoot.mjs
+```
+
 | 環境変数 | 用途 |
 |---|---|
-| `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決） |
+| `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 
 引数に画像名を並べると、その絵だけを撮り直します。

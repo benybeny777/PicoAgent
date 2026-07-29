@@ -31,6 +31,12 @@
 - **実物の `ui/` をそのまま描画して撮影**: バックエンド（`window.__TAURI__`）だけをモックし、フロントのコード・CSS・キャラ画像は本物を使用。ウィンドウサイズも `tauri.conf.json` の既定値（560×430）に合わせ、透明背景のまま撮って余白を切り落としている。合成やモックアップではない。
 - **ついでの整合性修正** (`.gitignore` / `AGENTS.md`): `.gitignore` のコメントに残っていた `npm run setup:*` などの旧コマンド名を `cargo xtask …` へ更新。AGENTS.md の squash merge ルールは根拠が誤っていた（squash でも API 経由のマージは committer が `noreply@github.com` になり Unverified 表示は変わらない）ため、「1 PR = 1 コミットで履歴が読みやすい」という実際の理由に書き直した。
 
+### README に Live2D の画面写真を追加
+
+- **Live2D 描画 2 枚を掲載** (`README.md` / `docs/images/live2d-{light,dark}.png`): 「できること > キャラクター」の Live2D 対応は文章だけで、連番フレームのキャラと何が違うのか伝わらなかった。サンプルモデル「ひより」を実際に WebGL 描画して撮影した 2 枚（ライト / ダーク）を置いた。撮影定義は既にあり、ランタイムとモデルが未取得でスキップされていただけ。
+- **撮影ツールが Windows で動かなかったのを修正** (`tools/screenshots/shoot.mjs`): `PLAYWRIGHT_MODULE` に Windows の絶対パス（`C:\...`）を渡すと動的 `import()` がパッケージ名扱いで解決に失敗し、「playwright を読み込めません」で必ず止まっていた。絶対パスなら `pathToFileURL` で `file://` URL へ直してから読み込むようにし、PowerShell での指定例を `tools/screenshots/README.md` に足した。
+- **`.gitignore` に `node_modules/` を追加**: 作業用ツール（playwright・`npx tauri icon`）を叩くと生成されるが、Node はアプリの依存ではないためコミット対象にしない。
+
 ### README を読みやすく再構成
 
 - **長すぎる段落を分解** (`README.md`): 1段落 1,113 字（設定セクション）のような塊が6箇所あり、必要な情報を探しにくかった。表・箇条書き・折りたたみ（`<details>`）へ分解し、**最長段落 1,113 字 → 275 字、300 字超の段落 6件 → 0件**にした。表は 7個 → 37個、折りたたみは 0個 → 9個。

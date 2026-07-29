@@ -10,15 +10,19 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
-import { extname, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { extname, isAbsolute, join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const UI_ROOT = join(ROOT, "ui");
 const OUT = join(ROOT, "docs", "images");
 
 // Node をアプリの依存に戻さないため、playwright はグローバル導入を前提に動的解決する。
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright").catch(() => {
+// Windows の絶対パス（C:\...）はそのままだとパッケージ名扱いで解決に失敗するため file:// URL へ直す。
+const PLAYWRIGHT = process.env.PLAYWRIGHT_MODULE
+  ? (isAbsolute(process.env.PLAYWRIGHT_MODULE) ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : process.env.PLAYWRIGHT_MODULE)
+  : "playwright";
+const { chromium } = await import(PLAYWRIGHT).catch(() => {
   throw new Error(
     "playwright を読み込めません。`npm i -g playwright && npx playwright install chromium` の後、" +
       "PLAYWRIGHT_MODULE にグローバルの index.mjs の絶対パスを指定してください。",
