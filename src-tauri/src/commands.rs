@@ -113,6 +113,12 @@ impl AppState {
         if !character_profile.is_empty() {
             prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
             prompt.push_str(&character_profile);
+            // 関係性は人格の後ろへ重ねる（人格の芯は保ったまま距離感だけを変える）。
+            let character_id = self.character_id.lock().unwrap().clone();
+            prompt.push_str(&crate::relationship::profile_suffix(
+                &self.config,
+                &character_id,
+            ));
         }
         let memory_context = self.memory_context.lock().unwrap().clone();
         if !memory_context.is_empty() {
@@ -1488,6 +1494,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             "downloadSize": preset.download_size,
             "note": preset.note,
         })).collect::<Vec<Value>>(),
+        "relationships": crate::relationship::catalog(),
         "tools": tool_list,
     }))
 }
@@ -1591,7 +1598,11 @@ pub async fn settings_save(
             .map(|next| state.config.get_bool(key, fallback) != next)
             .unwrap_or(false)
     };
-    let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
+    let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT")
+        // 関係性は人格の一部として system へ入るため、変更時は同じ経路で作り直す。
+        || patch.contains_key("PICOAGENT_RELATIONSHIP")
+        || patch.contains_key("PICOAGENT_RELATIONSHIP_OVERRIDES")
+        || patch.contains_key("PICOAGENT_RELATIONSHIP_CUSTOM");
     let has_memory_setting = patch.contains_key("PICOAGENT_MEMORY_ENABLED")
         || patch.contains_key("PICOAGENT_MEMORY_MAX_ITEMS");
     let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)

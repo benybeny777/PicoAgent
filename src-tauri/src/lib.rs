@@ -25,6 +25,7 @@ mod message;
 mod migration;
 mod permissions;
 mod providers;
+mod relationship;
 mod scheduler;
 mod secret;
 mod store;

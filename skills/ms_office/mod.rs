@@ -131,6 +131,16 @@ async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, t
         Ok(path) => path,
         Err(error) => return format!("エラー: {error}"),
     };
+    // LibreOffice は読み込みに失敗しても終了コード 0 で「Error: source file could not be loaded」
+    // とだけ出すことがある。終了コードだけを信じると、PDF が無いのに成功と報告してしまう。
+    if !converted.exists() {
+        return format!(
+            "エラー: PDF 変換は終了コード 0 でしたが、出力ファイルが作られませんでした（{}）。入力ファイルの形式か、LibreOffice の導入状態を確認してください。\nstdout:\n{}\nstderr:\n{}",
+            converted.display(),
+            String::from_utf8_lossy(&result.stdout).trim(),
+            String::from_utf8_lossy(&result.stderr).trim()
+        );
+    }
     // output_path 指定時は変換結果をその名前へ移す。
     if let Some(target) = output {
         if target != &converted {
@@ -285,11 +295,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ローカルに soffice がある環境だけで走る E2E（無ければ即成功で抜ける）。
+    /// LibreOffice が「実際に変換できる」環境かを確かめる。
+    ///
+    /// `soffice --version` が動くことと、変換が成立することは別物で、フィルタや依存が
+    /// 欠けた導入では終了コード 0 のまま何も出力しない。存在確認だけをスキップ条件に
+    /// すると、そういう環境で毎回落ちるテストになってしまう。
+    fn soffice_can_convert() -> bool {
+        let dir = std::env::temp_dir().join(format!("picoagent-office-probe-{}", std::process::id()));
+        if std::fs::create_dir_all(&dir).is_err() {
+            return false;
+        }
+        let source = dir.join("probe.txt");
+        if std::fs::write(&source, "probe").is_err() {
+            return false;
+        }
+        let converted = std::process::Command::new("soffice")
+            .args(["--headless", "--convert-to", "pdf", "--outdir"])
+            .arg(&dir)
+            .arg(&source)
+            .output()
+            .is_ok()
+            && dir.join("probe.pdf").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        converted
+    }
+
+    // ローカルの LibreOffice で実際に変換できる環境だけで走る E2E。
     #[test]
     fn officecliでpdf出力できる() {
-        if std::process::Command::new("soffice").arg("--version").output().is_err() {
-            eprintln!("soffice が無いためスキップ");
+        if !soffice_can_convert() {
+            eprintln!("LibreOffice で変換できない環境のためスキップ");
             return;
         }
         let dir = std::env::temp_dir().join(format!("picoagent-office-pdf-{}", std::process::id()));

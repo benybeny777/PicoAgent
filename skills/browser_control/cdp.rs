@@ -23,8 +23,9 @@ fn child_slot() -> &'static Mutex<Option<Child>> {
     CHILD.get_or_init(|| Mutex::new(None))
 }
 
-/// 既定のデバッグポート（同梱エンジン 11435 / ローカル API 11500 と重ならない値）。
-pub const DEFAULT_PORT: u16 = 11436;
+/// 既定のデバッグポート。同梱エンジン 11435 / 同梱 Aivis 11436 / ローカル API 11500 と
+/// 重ならない値にする（重なると起動順によってどちらかが黙って使えなくなる）。
+pub const DEFAULT_PORT: u16 = 11437;
 
 /// `--user-data-dir` に使う隔離プロファイルの置き場所。
 fn isolated_profile_dir() -> PathBuf {
@@ -176,15 +177,39 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         if debug_port_alive(options.port).await {
             return Ok(());
         }
+        // 既に同じブラウザが通常起動していると、起動要求は既存インスタンスへ引き継がれ、
+        // こちらのプロセスはデバッグポートを開かないまますぐ終了する。待ち続けても
+        // タイムアウトするだけなので、子プロセスの終了を見て原因を名指しで返す。
+        if child_exited() {
+            return Err(format!(
+                "エラー: ブラウザは既に通常起動しているため、デバッグポート（{}）付きの起動要求が既存のウィンドウへ引き継がれました。ブラウザをすべて閉じてからやり直すか、PICOAGENT_BROWSER_PROFILE=isolated（既定）で専用プロファイルを使ってください。",
+                options.port
+            ));
+        }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     Err(format!(
-        "エラー: ブラウザのデバッグポート（{}）が応答しません。既に同じブラウザが通常起動していると、デバッグポート付きでの起動要求は無視されます。ブラウザをすべて閉じてからやり直すか、PICOAGENT_BROWSER_PROFILE=isolated（既定）で使ってください。",
+        "エラー: ブラウザのデバッグポート（{}）が応答しません。ブラウザの実行パス（PICOAGENT_BROWSER_PATH）と、ポートを塞いでいるプロセスが無いかを確認してください。",
         options.port
     ))
 }
 
+/// 起動した子プロセスが既に終了しているか。
+fn child_exited() -> bool {
+    let Ok(mut slot) = child_slot().lock() else {
+        return false;
+    };
+    match slot.as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+        None => false,
+    }
+}
+
 /// 起動したブラウザを停止する（アプリ終了時と `close` から呼ぶ）。
+///
+/// **PicoAgent が起動したブラウザだけ**を止める。デバッグポートが既に開いていて
+/// そこへ相乗りした場合（前回のクラッシュで残ったものや、ユーザーが自分で
+/// デバッグポート付き起動したもの）は、こちらの都合で閉じない。
 pub fn stop() {
     if let Ok(mut slot) = child_slot().lock() {
         if let Some(child) = slot.as_mut() {
@@ -399,6 +424,15 @@ impl PageConn {
 #[cfg(test)]
 mod tests {
     use super::{ensure_running, new_page, resolve_browser, stop, LaunchOptions, PageConn};
+
+    /// 既定ポートが他の常駐プロセスとぶつかっていないこと。
+    /// 重なると起動順によってどちらかが黙って使えなくなり、原因が非常に分かりにくい。
+    #[test]
+    fn 既定ポートは他の同梱プロセスと重ならない() {
+        for (port, owner) in [(11435, "同梱エンジン"), (11436, "同梱 Aivis"), (11500, "ローカル API")] {
+            assert_ne!(super::DEFAULT_PORT, port, "{owner} と同じポートを既定にしない");
+        }
+    }
 
     /// 実ブラウザを起動して CDP 経由でページを読めることを通しで確かめる。
     /// Chrome / Edge / Chromium が無い環境ではスキップする（CI で落とさないため）。

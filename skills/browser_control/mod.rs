@@ -214,7 +214,7 @@ impl Tool for BrowserControlTool {
             Field::new("PICOAGENT_BROWSER_ALLOWED_DOMAINS", "開いてよいドメイン（空なら制限なし）", "textarea", "example.com,docs.example.com"),
             Field::new("PICOAGENT_BROWSER_PROFILE", "プロファイル（isolated=専用 / default=ブラウザの既定プロファイル）", "text", "isolated"),
             Field::new("PICOAGENT_BROWSER_HEADLESS", "画面を出さずに操作する", "checkbox", "false"),
-            Field::new("PICOAGENT_BROWSER_PORT", "CDP のデバッグポート", "text", "11436"),
+            Field::new("PICOAGENT_BROWSER_PORT", "CDP のデバッグポート", "text", "11437"),
             Field::new("PICOAGENT_BROWSER_TIMEOUT_SECS", "1操作の待ち時間（秒、5〜180）", "text", "30"),
             Field::new("PICOAGENT_BROWSER_MAX_CHARS", "1回に読む本文の最大文字数（auto=モデルのコンテキスト長に合わせる）", "text", "auto"),
         ]

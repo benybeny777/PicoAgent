@@ -116,6 +116,8 @@ cargo xtask dev
 - キャラクターパックごとの連続フレームと、状態別（待機 / 考え中 / 返答 / エラー）の滑らかな補間動作
 - **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルの「ひより」「Haru」「Epsilon」を同梱
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
+- **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
+- **会話の内容で表情が変わる** — 話の流れから推定した感情（喜び・落ち込み・高揚・落ち着き・興味・驚き）が、キャラのオーラの色・顔色・動きの速さに出ます
 
 <div align="center">
   <img src="docs/images/live2d-light.webp" alt="Live2D キャラクターが返答するようす（ライトテーマ）" width="400" />
@@ -244,6 +246,7 @@ cargo xtask dev
 | 叩く AI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` |
+| 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
 | 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
