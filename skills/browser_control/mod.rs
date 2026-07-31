@@ -292,8 +292,8 @@ impl Tool for BrowserControlTool {
                 }
             }
             "read" => {
-                if !cdp::ensure_running(&options).await.is_ok() {
-                    return "エラー: ブラウザが起動していません。先に action=\"open\" でページを開いてください。".to_string();
+                if let Err(error) = cdp::ensure_running(&options).await {
+                    return error;
                 }
                 let offset = args
                     .get("offset")
@@ -314,8 +314,8 @@ impl Tool for BrowserControlTool {
                 }
             }
             "pages" => {
-                if !cdp::ensure_running(&options).await.is_ok() {
-                    return "エラー: ブラウザが起動していません。先に action=\"open\" でページを開いてください。".to_string();
+                if let Err(error) = cdp::ensure_running(&options).await {
+                    return error;
                 }
                 match cdp::pages(port).await {
                     Ok(pages) if pages.is_empty() => "開いているタブはありません。".to_string(),
