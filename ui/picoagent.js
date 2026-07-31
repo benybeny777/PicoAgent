@@ -81,6 +81,9 @@ window.picoagent = {
   setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
   setBubbleLayout: (width, height, left, top) => call("pet_set_bubble_layout", { width, height, left, top }),
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
+  relationshipState: () => call("pet_relationship_state"),
+  relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
+  completeOnboarding: (mode) => call("pet_complete_onboarding", { mode }),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
     if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice"].includes(channel)) return;

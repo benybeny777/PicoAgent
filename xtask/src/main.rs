@@ -7,6 +7,7 @@
 
 mod assets;
 mod bundled;
+mod character_pack;
 mod cli;
 mod office;
 mod tools;
@@ -26,6 +27,7 @@ const USAGE: &str = "\
   setup [対象…]        同梱物の取得。対象は engine / aivis / whisper / live2d / office / tools
                       （省略時はすべて）
   sync-characters     characters/ を ui/assets/characters/ へ同期
+  character-pack      2Dキャラクターパックを検証・導入
   build-ui [--release] ui/ を ui-dist/ へ配信ビルド（--release で最小化）
   stop                残存プロセスの停止
   cli <コマンド…>      ローカル API を叩く CLI（status / models / chat / ask / repl）
@@ -53,6 +55,7 @@ fn run(args: &[String]) -> Result<()> {
         "build" => tauri("build", rest),
         "setup" => setup(rest),
         "sync-characters" => assets::sync_characters(),
+        "character-pack" => character_pack::run(rest),
         "build-ui" => assets::build_ui_dist(rest.iter().any(|a| a == "--release")),
         "stop" => assets::stop_stale(),
         "cli" => cli::run(rest),

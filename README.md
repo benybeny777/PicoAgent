@@ -113,9 +113,13 @@ cargo xtask dev
 
 ### キャラクター
 
-- キャラクターパックごとの連続フレームと、状態別（待機 / 考え中 / 返答 / エラー）の滑らかな補間動作
+- キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
 - **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルの「ひより」「Haru」「Epsilon」を同梱
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
+- **関係性と共有記録** — キャラごとに会話・完了した作業・ふれあいを端末内へ保存。「出会ったばかり」から自然に距離感が変わり、最近いっしょにしたことを返答へ反映
+- **2Dのふれあい** — 頭・頬・手へのタップとなでなでで、キャラ固有の台詞と照れ・喜びモーションを返す。数値ゲージではなく反応で親しさを表現
+- **衣装バリアント** — `character.json` の `variants` で同一キャラの別衣装・季節差分を切替可能。標準キャラには軽量な集中オーラを用意
+- **2Dキャラパック** — `cargo xtask character-pack validate <フォルダ>` で検証し、`install` で正本と一覧へ安全に追加できる（VRMは使用しない）
 
 <div align="center">
   <img src="docs/images/live2d-light.webp" alt="Live2D キャラクターが返答するようす（ライトテーマ）" width="400" />
@@ -154,6 +158,8 @@ cargo xtask dev
 | キャラクターをダブルクリック | フキダシを全画面表示 ⇄ 元に戻す |
 | キャラクターをドラッグ | 移動 |
 | 読み上げ中にキャラクターをクリック | 読み上げを停止 |
+| キャラクターをクリック / なでる | 触った場所に応じて反応し、ふれあいを記録 |
+| キャラクター横の `♡` | 関係性と最近いっしょにしたことを表示 |
 | 右クリック | 設定… / 常に手前に表示 / 会話をリセット / 終了 |
 
 全画面フキダシでは会話履歴を検索でき、各履歴のコピーやユーザー発話の再利用ができます。
@@ -188,6 +194,8 @@ cargo xtask dev
 ### クイック操作
 
 入力欄の上部から、画面確認・クリップボード要約・今日の予定・できること確認・未読メール要約・Slack 最新要約をワンクリックで送れます。
+
+音声入力の「連続」を有効にすると、話し終わりの無音を検出して自動送信し、返答の読み上げ後に再び聞き始めます。マイクを押せば読み上げへ割り込んで話せます。
 
 <div align="center">
   <img src="docs/images/composer-light.webp" alt="入力欄とクイック操作" width="400" />
@@ -242,7 +250,7 @@ cargo xtask dev
 |---|---|
 | 叩く AI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` |
-| キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` |
+| キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_COMPANION_MODE` / `PICOAGENT_ONBOARDING_DONE` |
 | 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |

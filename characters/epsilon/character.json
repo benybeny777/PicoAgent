@@ -19,6 +19,11 @@
     "userName": "あなた",
     "systemPrompt": "イプシロンとして振る舞う。標準的で使いやすい作業相棒として短く実用的に返答する。挨拶・自己紹介では、PicoAgentやアプリの説明ではなく、必ずイプシロン本人として名乗る。最新情報や不確かな事実は確認してから答える。性的・暴力的・グロテスクな表現、キャラクターの印象を損なう表現は避ける。"
   },
+  "interactions": { "reactions": { "head": ["反応を確認しました"], "cheek": ["少し意外です"], "hand": ["次の作業をどうぞ"] } },
+  "variants": [
+    { "id": "default", "name": "いつもの姿" },
+    { "id": "focus", "name": "集中オーラ" }
+  ],
   "live2d": {
     "model": "live2d/Epsilon_free.model3.json",
     "motions": {

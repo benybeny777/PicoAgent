@@ -46,6 +46,7 @@
         <div id="attachmentSuggestions" class="attachment-suggestions" hidden aria-label="添付ファイルのおすすめ操作"></div>
         <div id="quickActions" class="quick-actions" aria-label="クイック操作"></div>
         <textarea id="input" rows="2" placeholder="話しかける… / 画像をペーストまたはドロップ"></textarea>
+        <button id="voiceLoopButton" class="voice-loop-button" type="button" aria-pressed="false" title="返答後も自動で聞き続ける">連続</button>
         <button id="micButton" type="button" aria-label="音声入力" title="クリックで録音開始・停止 / 長押し中だけ録音">🎙</button>
         <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
       </form>
@@ -57,6 +58,28 @@
     <section id="character" class="character" title="右クリックで設定" data-tauri-drag-region>
       <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" />
       <span id="online" class="online"></span>
+      <button id="relationshipButton" class="relationship-button" type="button" title="いっしょの記録を見る">♡</button>
+    </section>
+    <aside id="relationshipCard" class="relationship-card" hidden>
+      <button id="relationshipClose" class="relationship-close" type="button" aria-label="閉じる">×</button>
+      <div class="relationship-kicker">いっしょの記録</div>
+      <strong id="relationshipLabel">出会ったばかり</strong>
+      <div id="relationshipStats" class="relationship-stats"></div>
+      <div id="relationshipMoments" class="relationship-moments"></div>
+      <label id="variantRow" class="variant-row" hidden>衣装<select id="variantSelect"></select></label>
+    </aside>
+    <section id="onboarding" class="onboarding" hidden aria-modal="true" role="dialog" aria-labelledby="onboardingTitle">
+      <div class="onboarding-card">
+        <div class="onboarding-mark">PicoAgent</div>
+        <h1 id="onboardingTitle">どんな相棒にする？</h1>
+        <p>あとから設定で変えられます。まずは一番近いものを選んでね。</p>
+        <div class="onboarding-choices">
+          <button type="button" data-mode="life"><b>いっしょに暮らす</b><span>雑談や日々の出来事を大切に</span></button>
+          <button type="button" data-mode="work"><b>いっしょに働く</b><span>調査や作業の完了をしっかり支援</span></button>
+          <button type="button" data-mode="both"><b>どちらも</b><span>暮らしと仕事を自然に行き来</span></button>
+        </div>
+        <small>3D/VRMは使わず、軽い2D表現で動きます。</small>
+      </div>
     </section>
     <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
       <div class="drop-overlay-inner">📎 ここにドロップして添付</div>
