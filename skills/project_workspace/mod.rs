@@ -13,8 +13,7 @@ const ACTIVE_KEY: &str = "PICOAGENT_ACTIVE_WORKSPACE";
 pub struct ProjectWorkspaceTool;
 
 fn load(cfg: &Config) -> Result<Vec<Value>, String> {
-    serde_json::from_str(&cfg.get(WORKSPACES_KEY, "[]"))
-        .map_err(|error| format!("保存済みワークスペースを読み込めません: {error}"))
+    crate::store::load_list(cfg, WORKSPACES_KEY)
 }
 
 fn save(cfg: &Config, items: &[Value]) -> Result<(), String> {
@@ -68,11 +67,11 @@ impl Tool for ProjectWorkspaceTool {
     }
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
-        let mut items = match load(cfg) {
-            Ok(items) => items,
-            Err(error) => return format!("エラー: {error}"),
-        };
         if action == "list" {
+            let items = match load(cfg) {
+                Ok(items) => items,
+                Err(error) => return format!("エラー: {error}"),
+            };
             let active = cfg.get(ACTIVE_KEY, "");
             return if items.is_empty() { "登録済みワークスペースはありません。".to_string() }
             else { match serde_json::to_string_pretty(&items) {
@@ -86,6 +85,11 @@ impl Tool for ProjectWorkspaceTool {
         if id.is_empty() { return "エラー: id または name を指定してください。".to_string(); }
         match action {
             "add" => {
+                let _guard = crate::store::lock_state(WORKSPACES_KEY);
+                let mut items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 if items.iter().any(|item| item.get("id").and_then(Value::as_str) == Some(&id)) {
                     return format!("エラー: 同じIDのワークスペースがあります: {id}");
                 }
@@ -100,6 +104,11 @@ impl Tool for ProjectWorkspaceTool {
                 match save(cfg, &items) { Ok(()) => format!("ワークスペースを登録しました: {id}"), Err(error) => format!("エラー: {error}") }
             }
             "switch" => {
+                let _guard = crate::store::lock_state(WORKSPACES_KEY);
+                let items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 let Some(item) = items.iter().find(|item| item.get("id").and_then(Value::as_str) == Some(&id)) else {
                     return format!("エラー: ワークスペースが見つかりません: {id}");
                 };
@@ -116,10 +125,26 @@ impl Tool for ProjectWorkspaceTool {
                 if !args.get("confirm").and_then(Value::as_bool).unwrap_or(false) {
                     return format!("プレビュー: ワークスペース {id} を登録解除します。ファイルは削除しません。実行には confirm=true が必要です。");
                 }
+                let _guard = crate::store::lock_state(WORKSPACES_KEY);
+                let mut items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 let before = items.len();
                 items.retain(|item| item.get("id").and_then(Value::as_str) != Some(&id));
                 if items.len() == before { return format!("エラー: ワークスペースが見つかりません: {id}"); }
-                match save(cfg, &items) { Ok(()) => format!("ワークスペースの登録を解除しました: {id}"), Err(error) => format!("エラー: {error}") }
+                if cfg.get(ACTIVE_KEY, "") == id {
+                    let mut patch = Map::new();
+                    let encoded = match serde_json::to_string(&items) {
+                        Ok(encoded) => encoded,
+                        Err(error) => return format!("エラー: ワークスペースを保存できません: {error}"),
+                    };
+                    patch.insert(WORKSPACES_KEY.to_string(), Value::String(encoded));
+                    patch.insert(ACTIVE_KEY.to_string(), Value::String(String::new()));
+                    match cfg.set_all(patch) { Ok(()) => format!("使用中のワークスペース登録を解除しました: {id}"), Err(error) => format!("エラー: ワークスペースを保存できません: {error}") }
+                } else {
+                    match save(cfg, &items) { Ok(()) => format!("ワークスペースの登録を解除しました: {id}"), Err(error) => format!("エラー: {error}") }
+                }
             }
             _ => "エラー: action は list/add/switch/remove のいずれかを指定してください。".to_string()
         }

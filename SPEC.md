@@ -294,9 +294,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `whisper_transcribe` | 既存音声をローカルで文字起こしする単体スキル。スキル一覧の表示タイトルは「音声文字起こし」 | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先。空なら PicoAgent 管理下の同梱Whisper CLIと同梱モデルを使う。常駐サーバやポートを使わない |
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
-| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルート配下に限定、読込/書込サイズ上限。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は確認後に復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
-| `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。登録解除は `confirm=true` が必要でファイルは削除しない。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
-| `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存。自身の再帰登録は禁止し、エラー結果で後続を停止。各スキルの許可・確認・上限はそのまま適用する |
+| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルートと `permissions::fs` に限定、読込/書込サイズ上限。同一プロセス内の変更は直列化する。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は実行時点の許可を再検証してから復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
+| `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。一覧更新は名前付きロックで直列化する。登録解除は `confirm=true` が必要でファイルは削除せず、使用中IDなら選択状態も消す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
+| `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
 | `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
 | `code_runner` | 他スキルで要望を満たせないときの最終手段。PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成する | 既定無効（`PICOAGENT_CODE_RUNNER_ENABLED`）。作業ディレクトリ・許可ルート・保護パスは共通 permissions を参照。物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否。スクリプトは一時ファイルへ書き出して実行後に削除、timeout・出力32KBで制限 |

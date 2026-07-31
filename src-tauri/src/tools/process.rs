@@ -87,7 +87,6 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 
 #[cfg(windows)]
 fn apply_no_window(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     command.creation_flags(CREATE_NO_WINDOW);
 }

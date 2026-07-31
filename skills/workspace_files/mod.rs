@@ -25,14 +25,19 @@ struct UndoEntry {
 }
 
 static UNDO_HISTORY: OnceLock<Mutex<Vec<UndoEntry>>> = OnceLock::new();
+static FILE_MUTATION: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn undo_history() -> &'static Mutex<Vec<UndoEntry>> {
     UNDO_HISTORY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+fn file_mutation() -> &'static Mutex<()> {
+    FILE_MUTATION.get_or_init(|| Mutex::new(()))
+}
+
 fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
     let original = if path.exists() {
-        let size = std::fs::metadata(path)
+        let size = permissions::fs::metadata(path)
             .map_err(|error| format!("変更前の情報を取得できません: {error}"))?
             .len();
         if size > MAX_BACKUP_BYTES {
@@ -42,7 +47,7 @@ fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
                 path.display()
             ));
         }
-        Some(std::fs::read(path).map_err(|error| format!("変更前データを保存できません: {error}"))?)
+        Some(permissions::fs::read(path).map_err(|error| format!("変更前データを保存できません: {error}"))?)
     } else {
         None
     };
@@ -64,6 +69,10 @@ fn remember_change(entry: UndoEntry) -> Result<(), String> {
 }
 
 fn undo_last(cfg: &Config, confirm: bool) -> String {
+    let _mutation = match file_mutation().lock() {
+        Ok(guard) => guard,
+        Err(_) => return "エラー: ファイル変更の実行権を取得できません。".to_string(),
+    };
     let mut history = match undo_history().lock() {
         Ok(history) => history,
         Err(_) => return "エラー: 取り消し履歴を取得できません。".to_string(),
@@ -117,7 +126,7 @@ fn trim_to_bytes(content: &str, max_bytes: usize) -> String {
 }
 
 fn list_dir(path: &SafePath) -> String {
-    let entries = match std::fs::read_dir(path) {
+    let entries = match permissions::fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) => return format!("エラー: 一覧取得に失敗しました（{}）: {}", error, path.display()),
     };
@@ -229,7 +238,7 @@ impl Tool for WorkspaceFilesTool {
 
         match action {
             "list" => list_dir(&target),
-            "read" => match std::fs::read_to_string(&target) {
+            "read" => match permissions::fs::read_to_string(&target) {
                 Ok(content) => trim_to_bytes(&content, MAX_READ_BYTES),
                 Err(error) => format!("エラー: 読み取りに失敗しました（{}）: {}", error, target.display()),
             },
@@ -247,31 +256,33 @@ impl Tool for WorkspaceFilesTool {
                         content.chars().take(300).collect::<String>()
                     );
                 }
-                if args
+                let _mutation = match file_mutation().lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return "エラー: ファイル変更の実行権を取得できません。".to_string(),
+                };
+                let create_parent = args
                     .get("create_parent")
                     .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    let parent = target.parent_or_root(cfg);
+                    .unwrap_or(false);
+                let parent = target.parent_or_root(cfg);
+                if create_parent {
                     if let Err(error) = crate::permissions::fs::create_dir_all(&parent) {
                         return format!("エラー: 親フォルダ作成に失敗しました（{}）: {}", error, parent.display());
                     }
+                } else if !parent.exists() {
+                    return format!(
+                        "エラー: 親フォルダがありません。作成する場合は create_parent=true を指定してください: {}",
+                        parent.display()
+                    );
                 }
                 let snapshot = match snapshot_before_write(&target) {
                     Ok(snapshot) => snapshot,
                     Err(error) => return format!("エラー: {error}"),
                 };
-                // append は追記ハンドルが要るためファサードに載せられない（write は載せる）。
                 let result = if action == "write" {
-                    crate::permissions::fs::write(&target, content)
+                    permissions::fs::write(&target, content)
                 } else {
-                    use std::io::Write;
-                    std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&target)
-                        .and_then(|mut file| file.write_all(content.as_bytes()))
-                        .map_err(|error| error.to_string())
+                    permissions::fs::append(&target, content)
                 };
                 match result {
                     Ok(()) => match remember_change(snapshot) {
@@ -282,12 +293,12 @@ impl Tool for WorkspaceFilesTool {
                 }
             }
             "mkdir" => {
-                match std::fs::create_dir_all(&target) {
+                match permissions::fs::create_dir_all(&target) {
                     Ok(()) => format!("OK: フォルダを作成しました: {}", target.display()),
                     Err(error) => format!("エラー: フォルダ作成に失敗しました（{}）: {}", error, target.display()),
                 }
             }
-            "stat" => match std::fs::metadata(&target) {
+            "stat" => match permissions::fs::metadata(&target) {
                 Ok(meta) => format!(
                     "種類: {}\nサイズ: {} バイト\n読み取り専用: {}",
                     if meta.is_dir() { "dir" } else if meta.is_file() { "file" } else { "other" },

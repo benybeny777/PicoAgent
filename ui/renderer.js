@@ -88,7 +88,11 @@ const NOTICE_STORAGE_KEY = "picoagent.actionCenter.v1";
 function loadStoredNotices() {
   try {
     const parsed = JSON.parse(localStorage.getItem(NOTICE_STORAGE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.slice(0, 50) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, 50).map(entry => {
+      if (entry?.kind !== "job" || entry.status !== "running") return entry;
+      return { ...entry, status: "failed", ok: false, body: "アプリ終了により処理結果を確認できませんでした。" };
+    });
   } catch {
     // フォールバック許可: 破損したUIキャッシュは空のアクションセンターとして再構築する。
     return [];
@@ -232,6 +236,7 @@ function persistNotices() {
   try { localStorage.setItem(NOTICE_STORAGE_KEY, JSON.stringify(noticeEntries.slice(0, 50))); }
   catch (error) { logApp("warn", "アクションセンターの保存に失敗しました", errorDetail(error)); }
 }
+persistNotices();
 
 function renderNoticePanel() {
   if (!noticeList) return;
@@ -258,7 +263,7 @@ function renderNoticePanel() {
     if (notice.kind === "job") {
       const state = document.createElement("span");
       state.className = `notice-state notice-state-${notice.status || "completed"}`;
-      state.textContent = notice.status === "running" ? "実行中" : notice.status === "failed" ? "失敗" : "完了";
+      state.textContent = notice.status === "running" ? "実行中" : notice.status === "failed" ? "失敗" : notice.status === "cancelled" ? "中断" : "完了";
       title.append(state);
     }
     if (notice.kind === "schedule" || notice.taskId || notice.kind === "job") {
@@ -2412,10 +2417,12 @@ composer.addEventListener("submit", async event => {
     }
     if (!result) result = await window.picoagent.send(fullText);
     if (result?.stale || requestRevision !== conversationRevision) {
+      jobState = "cancelled";
       cancelStreamSpeech();
       status.textContent = "";
       return;
     }
+    if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
     status.textContent = result.error ? "接続を確認してね" : "";
     if (result.error) {
       jobState = "failed";
@@ -2475,10 +2482,12 @@ composer.addEventListener("submit", async event => {
     streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     busy = false;
+    const jobFailed = jobState === "failed";
+    const jobCancelled = jobState === "cancelled";
     upsertJob(jobId, {
-      body: jobState === "failed" ? "処理に失敗しました。詳細は会話を確認してください。" : "処理が完了しました。",
-      status: jobState === "failed" ? "failed" : "completed",
-      ok: jobState !== "failed",
+      body: jobFailed ? "処理に失敗しました。詳細は会話を確認してください。" : jobCancelled ? "処理を中断しました。" : "処理が完了しました。",
+      status: jobFailed ? "failed" : jobCancelled ? "cancelled" : "completed",
+      ok: !jobFailed,
     });
     updateComposerState();
     scheduleChatter(); // 会話後はアイドル計測をやり直す。

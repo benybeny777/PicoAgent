@@ -212,6 +212,7 @@ button:disabled { opacity:.48; cursor:default; }
 .notice-state-running { background:rgba(64,126,210,.18); color:#3f75bd; }
 .notice-state-completed { background:rgba(38,140,88,.16); color:#2f8b5d; }
 .notice-state-failed { background:rgba(185,58,80,.16); color:#b43d55; }
+.notice-state-cancelled { background:rgba(100,108,120,.16); color:#68717e; }
 .notice-meta { margin-top:2px; color:var(--muted); font-size:10px; }
 .notice-body { max-height:120px; margin-top:5px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:var(--ink-soft); font-size:11px; line-height:1.5; user-select:text; }
 .notice-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:7px; }
