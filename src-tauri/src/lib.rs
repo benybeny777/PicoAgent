@@ -274,6 +274,8 @@ pub fn run() {
             aivis::stop(app_handle);
             engine::stop(app_handle);
             mcp::client::stop_all();
+            // browser_control が起動したブラウザも一緒に閉じる（残すとデバッグポートが開いたままになる）。
+            tools::browser_control::stop();
         }
     });
 }

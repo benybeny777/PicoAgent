@@ -237,7 +237,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 
 | 役割 | 副作用 | 本数 | スキル |
 |---|---|---|---|
-| **Retrieval**（外部知識の検索・取得） | read-only | 9 | `web_search` `web_fetch` `doc_search` `rss_feed` `news_scrape` `weather` `currency_rates` `market_indices` `time` |
+| **Retrieval**（外部知識の検索・取得） | read-only | 10 | `web_search` `web_fetch` `browser_control` `doc_search` `rss_feed` `news_scrape` `weather` `currency_rates` `market_indices` `time` |
 | **Read**（手元の状態の読み取り） | read-only | 2 | `read_file` `clipboard_text` |
 | **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
 | **Action**（SaaS の読み書き） | write | 12 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` |
@@ -323,6 +323,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `todoist` | Todoist のタスク一覧・作成・完了 | API token は設定から都度取得、秘密値を出力しない、timeout |
 | `http_api` | 個別スキルがないSaaSやWebhookへの汎用HTTP API呼び出し | 許可ドメイン必須、任意Bearer/API key、本文/応答サイズ上限、timeout |
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
+| `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、http/https のみ、許可ドメイン設定、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
 | `comfyui_generate` | ComfyUI ローカルサーバーで画像・動画を生成（APIキー不要）。KSampler ワークフローを組み立て `/prompt` → `/history` ポーリング → `/view` URL を返す。AnimateDiff 等の動画出力にも対応 | `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）・`COMFYUI_CHECKPOINT`（モデルファイル名）のみ。120秒 timeout |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | OfficeCLI と OOXML 直接編集による Word/Excel/PowerPoint の文字列置換・PDF出力 | 共通許可ルート配下のみ、同梱または明示設定した OfficeCLI、timeout |
@@ -567,6 +568,15 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | http_api | 汎用HTTPの待ち時間（秒、3〜60） |
 | `PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS` | （空） | web_fetch | URL取得を許可するドメイン（カンマ区切り。空なら制限なし） |
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
+| `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |
+| `PICOAGENT_BROWSER_PATH` | （空=自動検出） | browser_control | Chrome / Edge の実行ファイルパス |
+| `PICOAGENT_BROWSER_ALLOWED_DOMAINS` | （空） | browser_control | 開いてよいドメイン（カンマ区切り。空なら制限なし） |
+| `PICOAGENT_BROWSER_PROFILE` | `isolated` | browser_control | `isolated`=専用プロファイル / `default`=ブラウザの既定プロファイル（ログイン済みセッションを使う） |
+| `PICOAGENT_BROWSER_HEADLESS` | `false` | browser_control | 画面を出さずに操作する |
+| `PICOAGENT_BROWSER_PORT` | `11436` | browser_control | CDP のデバッグポート |
+| `PICOAGENT_BROWSER_TIMEOUT_SECS` | `30` | browser_control | 1操作の待ち時間（秒、5〜180） |
+| `PICOAGENT_BROWSER_MAX_CHARS` | `auto` | browser_control | 1回に読む本文の最大文字数（`auto`=`PICOAGENT_TOOL_OUTPUT_MAX_CHARS` に従う） |
+| `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | 基本 | ツール出力の最大文字数。`auto` は使用中モデルのコンテキスト長から算出（local は `PICOAGENT_LOCAL_CTX` の 45%、下限 8,000／上限 60,000。クラウドは 24,000） |
 | `PICOAGENT_DOCUMENT_ROOT` | （旧キー） | ms_office / document_convert / pdf_tools | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | ms_office | Microsoft Office 操作タイムアウト秒（5〜300） |
 | `PICOAGENT_LIBREOFFICE_PATH` | `soffice` | document_convert | LibreOffice 実行ファイルパス |
