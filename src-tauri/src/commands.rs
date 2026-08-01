@@ -115,7 +115,7 @@ impl AppState {
             prompt.push_str(&character_profile);
             // 関係性は人格の後ろへ重ねる（人格の芯は保ったまま距離感だけを変える）。
             let character_id = self.character_id.lock().unwrap().clone();
-            prompt.push_str(&crate::relationship::profile_suffix(
+            prompt.push_str(&crate::relationship_preset::profile_suffix(
                 &self.config,
                 &character_id,
             ));
@@ -1494,7 +1494,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             "downloadSize": preset.download_size,
             "note": preset.note,
         })).collect::<Vec<Value>>(),
-        "relationships": crate::relationship::catalog(),
+        "relationships": crate::relationship_preset::catalog(),
         "tools": tool_list,
     }))
 }
