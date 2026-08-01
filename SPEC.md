@@ -14,6 +14,7 @@ PicoAgent は透明な **Tauri** ウィンドウに常駐する、キャラク�
 - **叩く AI** → プロバイダコネクタ（`src-tauri/src/providers/`）。**既定は `local`（同梱 llama-server、Ollama 不要）**、Ollama / OpenAI 互換も同梱。
 - **エージェント機能** → スキル（ツール）コネクタ（連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、トレイトは `src-tauri/src/tools/mod.rs`）。モデルが function calling で呼び出す。
 - **キャラクター** → 正本はプロジェクト直下の `characters/index.json` と各 `character.json`。`cargo xtask sync-characters` が `ui/assets/characters/` へ同期し webview が配信。見た目・アニメーション・人格を一体で切り替える。
+- **関係性** → `relationship.rs` がキャラクター別の `app_data_dir/relationship-<キャラクターID>.json` に、会話・完了作業・ふれあい・共有した出来事を原子的に保存する。数値は内部更新だけに使い、UIとシステム文脈では段階名と最近の出来事だけを扱う。
 - **両者をつなぐ中核** → エージェントループ（`src-tauri/src/agent.rs`）。
 
 > [!NOTE]
@@ -294,9 +295,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `whisper_transcribe` | 既存音声をローカルで文字起こしする単体スキル。スキル一覧の表示タイトルは「音声文字起こし」 | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先。空なら PicoAgent 管理下の同梱Whisper CLIと同梱モデルを使う。常駐サーバやポートを使わない |
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
-| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルート配下に限定、読込/書込サイズ上限。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は確認後に復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
-| `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。登録解除は `confirm=true` が必要でファイルは削除しない。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
-| `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存。自身の再帰登録は禁止し、エラー結果で後続を停止。各スキルの許可・確認・上限はそのまま適用する |
+| `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルートと `permissions::fs` に限定、読込/書込サイズ上限。同一プロセス内の変更は直列化する。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は実行時点の許可を再検証してから復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
+| `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。一覧更新は名前付きロックで直列化する。登録解除は `confirm=true` が必要でファイルは削除せず、使用中IDなら選択状態も消す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
+| `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
 | `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
 | `code_runner` | 他スキルで要望を満たせないときの最終手段。PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成する | 既定無効（`PICOAGENT_CODE_RUNNER_ENABLED`）。作業ディレクトリ・許可ルート・保護パスは共通 permissions を参照。物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否。スクリプトは一時ファイルへ書き出して実行後に削除、timeout・出力32KBで制限 |
@@ -413,6 +414,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_RELATIONSHIP_CUSTOM` | （空） | 基本 | `PICOAGENT_RELATIONSHIP=custom` のときに人格へ足す自由記述 |
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
+| `PICOAGENT_COMPANION_MODE` | `both` | 基本 | 初回案内で選ぶ相棒の用途（`life` / `work` / `both`） |
+| `PICOAGENT_ONBOARDING_DONE` | `false` | 基本 | 初回3択案内の完了状態 |
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（内部設定。通常UIでは非表示。旧既定 `10102` は起動時に `11436` へ移行） |
@@ -635,6 +638,9 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - **関係性（`relationship.rs`）**: ユーザーとの関係（相棒 / 友達 / 恋人 / 妹 / 姉 / 先輩 / 自由設定）を、キャラ人格の**上に重ねる短い差分**として持つ。関係ごとに `character.json` を書き下ろすとキャラ数 × 関係数の掛け算になるため、差分は数文に抑え、呼び方は文章ではなく `user_name` の置き換えで表現する（同梱の既定モデルは system が長いほど指示追従が落ちる）。`reset_conversation` / `clear_conversation` が人格の直後へ `profile_suffix()` を足すので、設定変更は次のメッセージから効く（`settings_save` は関係キーの変更を人格変更と同じ「即反映」経路で扱う）。既定 `assistant` では差分が空になり、従来と同一の system になる。関係にかかわらず外さない安全の線（性的・年齢を想起させる表現をしない／作業の正確さを落とさない）はプリセット文面ではなく `SAFETY_NOTE` として一括で付与する。キャラ別の上書きは `PICOAGENT_RELATIONSHIP_OVERRIDES`、一覧は `settings_load` の `relationships` で設定画面へ渡す。
 - **感情の見せかた**: `emotion.rs` が推定した mood / energy を、フロントは `data-emotion` / `data-energy-level` として `.character` に付ける。CSS 側はオーラ色に加えて、`--pet-tone`（顔色）と `--pet-motion-scale`（動きの速さ）を切り替える。新しい素材を足さずにフレームアニメと Live2D の両方へ効かせるための作りで、`prefers-reduced-motion` では速さの変更を無効化する。
 - 選択中キャラの人格は `pet_set_character_profile` でシステムプロンプトへ追加する。既定プロンプトは挨拶・自己紹介でアプリ説明ではなくキャラクター本人として名乗ることを優先する。設定画面のキャラ別上書きは `PICOAGENT_CHARACTER_OVERRIDES` に保存する。
+- `character.json` は任意の `interactions.reactions`（`head` / `cheek` / `hand` の反応台詞）と `variants`（`id` / `name` / 任意の `root` / `animations`）を持てる。フロントは意味状態（傾聴・検索・作業・成功・照れ・心配）を、専用素材が無ければ既存の待機・思考・返答・落胆素材へフォールバックして2D演出する。
+- `cargo xtask character-pack validate <フォルダ>` は `character.json` のID・必須表示定義・パック内相対アセットを検証する。`install` は同名IDを上書きせず `characters/<id>/` と `characters/index.json` へ追加し、配信用コピーを同期する。
+- 関係性コマンドは `pet_relationship_state` / `pet_relationship_event` / `pet_complete_onboarding`。状態更新は `store::lock_state` で直列化し、`store::write_json_atomic` で保存する。破損ファイルは退避後に新規状態から再開する。
 - 自発雑談（雑談スキル `chitchat`）: `PICOAGENT_CHATTER_ENABLED` が ON のとき、フロントは `[min, max]` 秒のランダム間隔の待機タイマーで `pet_idle_chatter` を呼ぶ。生成した独り言は**先に音声を合成（`prepareSpeech`）してから文字を表示し、表示と同時に読み上げる**（`playPreparedSpeech`。挨拶と同じ同期再生）。入力中・応答中・読み上げ中・全画面中は割り込まず次回へ送る。ユーザー操作（送信・入力欄を開く・会話リセット）や設定変更（`pet:ui`）のたびにタイマーを張り直す。`skills/chitchat/trends.rs` は `PICOAGENT_CHATTER_TOPIC_MODE=auto` で X API（`PICOAGENT_X_BEARER_TOKEN` がある場合）→ Google Trends RSS → ニュースRSSの順に話題メモを取る。`x` / `trends` / `news` / `off` でソースを固定または無効化できる。X API 未設定時は公式X投稿とは断定せず、急上昇ワードやトップニュースの候補として扱う。生成はWeb検索ツールを使わず、生成後は「直前の自発雑談: ...」として会話文脈へ1件積み、通常会話と同じ圧縮・履歴保存に通す。これにより、ユーザーが直後または再起動後に「今の何の話？」と聞いた場合に直前の雑談を参照できる。挨拶・名乗り・自己紹介は出さず、毎回ちがう話題になるよう話題ヒントを擬似ランダムで与え、さらに直近の独り言（`AppState.recent_chatter`、末尾6件）を「避ける文」として渡して繰り返しを防ぐ。雑談の生成は**人格(system)＋現在時刻＋指示だけ**を文脈にし、ユーザー発話（会話履歴）は含めない（小型モデルが入力をオウム返しするのを防ぐため）。`current_time_context()` で現在のローカル日時・時間帯（朝/昼/夕方/夜）を渡し、夜に「日差し」など時間に合わない描写をしないようにする。なお通常会話の返信がユーザー入力のオウム返しになった場合、フロントはそれを読み上げない。話題メモ（ニュース等）は `pet_idle_chatter` が `trends::topic_brief` で1件取得して `topic` 引数で skill へ渡し、出典（記事タイトル＋URL）も受け取る。生成後、返信が話題に触れていれば（返信と記事タイトルの内容バイグラム一致）最も関連する記事URLを末尾へ `参考:` として添える（URL 行は読み上げ対象外。例: 地震の独り言なら地震ニュースのURL）。
 - 目覚まし時計（`alarm` スキル + `alarm.rs`）: フロントは約20秒間隔で `pet_alarms` を取得し、現在のローカル時刻（HH:MM）と曜日が一致する有効なアラームがあれば `pet_alarm_wake` を呼んで**声でやさしく起こす**（生成した起こし文を音声合成→表示→即時再生。生成失敗時は固定の起こし文）。同じ分での二重発火は済みキー集合で防ぐ。一度きり（`repeat=false`）は発火後に `enabled=false` へ。鳴った後はフキダシに `おきたよ！` ボタンを出し、押されるまでは `snooze_minutes`（既定5、1〜60分）おきに同じアラームを再通知する。アラームは時刻・曜日・繰り返し・スヌーズ分数を**チャット（`alarm` スキル）でも設定画面でも**設定できる。設定画面のスキル「目覚まし時計」を開くと、時刻ピッカー＋曜日チェック＋繰り返し/有効/スヌーズ分数/ラベル/削除/追加の専用フォーム（`settings.js` の `buildAlarmEditor`）で編集でき、保存時に `PICOAGENT_ALARMS`（JSON）へ組み立てる。保存先は config。
 - 日常通知（`reminder` / `focus_timer` / `daily.rs`）: フロントは約20秒間隔で `pet_daily_events` を呼び、期限到来したリマインダー・集中終了・作業見守りを吹き出し表示と読み上げで通知する。単発イベントは通知後に無効化し、見守りのような `repeat_minutes` 付きイベントは次回時刻へ進める。起動時の挨拶には `pet_daily_greeting` で時間帯・通知件数・直近のできたことメモを添える。

@@ -250,6 +250,27 @@ mod guard {
              （並列実行されたツール同士で更新が消えます）: {offenders:?}"
         );
     }
+
+    /// スキル自身が設定キーへ JSON 一覧を保存する場合も、共通の一覧更新と同じく
+    /// 読み込みから書き戻しまでを名前付きロックで囲む。
+    #[test]
+    fn スキル固有の設定一覧もロックの中で更新する() {
+        let mut offenders = Vec::new();
+        for source in crate::guard_scan::skill_sources() {
+            let path = source.path.to_string_lossy().replace('\\', "/");
+            if !path.contains("/project_workspace/") && !path.contains("/workflow/") {
+                continue;
+            }
+            let body = source.body();
+            if body.contains("set_string(") && !body.contains("lock_state(") {
+                offenders.push(source.path.display().to_string());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "JSON一覧を保存するスキルは store::lock_state() を取ってから更新してください: {offenders:?}"
+        );
+    }
 }
 
 #[cfg(test)]

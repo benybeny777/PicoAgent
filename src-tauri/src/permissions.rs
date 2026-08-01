@@ -275,6 +275,26 @@ impl AsRef<std::ffi::OsStr> for SafePath {
 pub mod fs {
     use super::SafePath;
 
+    pub fn metadata(path: &SafePath) -> Result<std::fs::Metadata, String> {
+        std::fs::metadata(path.as_path()).map_err(|error| {
+            format!(
+                "ファイル情報を取得できません（{}）: {}",
+                path.display(),
+                error
+            )
+        })
+    }
+
+    pub fn read_dir(path: &SafePath) -> Result<std::fs::ReadDir, String> {
+        std::fs::read_dir(path.as_path()).map_err(|error| {
+            format!(
+                "フォルダ一覧を取得できません（{}）: {}",
+                path.display(),
+                error
+            )
+        })
+    }
+
     pub fn read_to_string(path: &SafePath) -> Result<String, String> {
         std::fs::read_to_string(path.as_path())
             .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))
@@ -297,6 +317,26 @@ pub mod fs {
         }
         std::fs::write(path.as_path(), contents)
             .map_err(|error| format!("ファイルを書き込めません（{}）: {}", path.display(), error))
+    }
+
+    pub fn append(path: &SafePath, contents: impl AsRef<[u8]>) -> Result<(), String> {
+        use std::io::Write;
+
+        if let Some(parent) = path.as_path().parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "フォルダを作成できません（{}）: {}",
+                    parent.display(),
+                    error
+                )
+            })?;
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path.as_path())
+            .and_then(|mut file| file.write_all(contents.as_ref()))
+            .map_err(|error| format!("ファイルへ追記できません（{}）: {}", path.display(), error))
     }
 
     pub fn create_dir_all(path: &SafePath) -> Result<(), String> {

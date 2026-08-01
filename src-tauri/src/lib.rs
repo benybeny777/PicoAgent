@@ -25,6 +25,7 @@ mod message;
 mod migration;
 mod permissions;
 mod providers;
+mod relationship;
 mod relationship_preset;
 mod scheduler;
 mod secret;
@@ -63,6 +64,9 @@ pub fn run() {
             commands::pet_set_bubble_size,
             commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
+            commands::pet_relationship_state,
+            commands::pet_relationship_event,
+            commands::pet_complete_onboarding,
             commands::settings_load,
             commands::settings_list_models,
             commands::settings_test_tool,
@@ -166,6 +170,17 @@ pub fn run() {
             // 履歴はキャラクター別。選択中キャラを文脈の持ち主として記録しておく。
             let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
             *state.character_id.lock().unwrap() = character_id.clone();
+            let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+            match relationship::load(app.handle(), &character_id, &relationship_mode) {
+                Ok(relationship) => {
+                    *state.relationship_context.lock().unwrap() =
+                        relationship::context(&relationship);
+                }
+                Err(error) => log_paths::append_app_log(
+                    app.handle(),
+                    &format!("関係性データの読み込みに失敗しました: {error}"),
+                ),
+            }
             state.reset_conversation();
             // 旧仕様の単一 history.json は、選択中キャラではなく既定キャラ mugi の
             // ファイルへ一度だけ移行する。旧履歴はキャラ別管理が無かった時代のもので、

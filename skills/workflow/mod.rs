@@ -11,8 +11,7 @@ const KEY: &str = "PICOAGENT_WORKFLOWS";
 pub struct WorkflowTool;
 
 fn load(cfg: &Config) -> Result<Vec<Value>, String> {
-    serde_json::from_str(&cfg.get(KEY, "[]"))
-        .map_err(|error| format!("保存済みワークフローを読み込めません: {error}"))
+    crate::store::load_list(cfg, KEY)
 }
 fn save(cfg: &Config, items: &[Value]) -> Result<(), String> {
     cfg.set_string(KEY, serde_json::to_string(items).map_err(|e| e.to_string())?)
@@ -37,24 +36,43 @@ impl Tool for WorkflowTool {
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
         let name = args.get("name").and_then(Value::as_str).unwrap_or("").trim();
-        let mut items = match load(cfg) {
-            Ok(items) => items,
-            Err(error) => return format!("エラー: {error}"),
-        };
         match action {
-            "list" => if items.is_empty() { "保存済みワークフローはありません。".to_string() } else { match serde_json::to_string_pretty(&items) {
+            "list" => {
+                let items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
+                if items.is_empty() { "保存済みワークフローはありません。".to_string() } else { match serde_json::to_string_pretty(&items) {
                 Ok(json) => json,
                 Err(error) => format!("エラー: 一覧を整形できません: {error}"),
-            } },
+                } }
+            },
             "add" => {
                 let Some(steps) = args.get("steps").and_then(Value::as_array) else { return "エラー: steps を指定してください。".to_string(); };
                 if name.is_empty() || steps.is_empty() || steps.len() > 8 { return "エラー: name と1〜8件の steps を指定してください。".to_string(); }
-                if steps.iter().any(|step| step.get("tool").and_then(Value::as_str) == Some("workflow")) { return "エラー: workflow 自身は手順へ登録できません。".to_string(); }
+                for (index, step) in steps.iter().enumerate() {
+                    let tool = step.get("tool").and_then(Value::as_str).unwrap_or("");
+                    if tool.is_empty() || tool == "workflow" || !super::index().contains_key(tool) {
+                        return format!("エラー: {}番目のツール指定が不正です: {tool}", index + 1);
+                    }
+                    if !step.get("args").is_some_and(Value::is_object) {
+                        return format!("エラー: {}番目の args はオブジェクトで指定してください。", index + 1);
+                    }
+                }
+                let _guard = crate::store::lock_state(KEY);
+                let mut items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 items.retain(|item| item.get("name").and_then(Value::as_str) != Some(name));
                 items.push(json!({"name":name,"steps":steps}));
                 match save(cfg, &items) { Ok(()) => format!("ワークフローを保存しました: {name}"), Err(e) => format!("エラー: {e}") }
             }
             "run" => {
+                let items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 let Some(item) = items.iter().find(|item| item.get("name").and_then(Value::as_str) == Some(name)) else { return format!("エラー: ワークフローが見つかりません: {name}"); };
                 let Some(steps) = item.get("steps").and_then(Value::as_array) else { return "エラー: 保存済み手順が壊れています。".to_string(); };
                 let mut results = Vec::new();
@@ -70,6 +88,11 @@ impl Tool for WorkflowTool {
             }
             "remove" => {
                 if !args.get("confirm").and_then(Value::as_bool).unwrap_or(false) { return format!("プレビュー: ワークフロー「{name}」を解除します。実行には confirm=true が必要です。"); }
+                let _guard = crate::store::lock_state(KEY);
+                let mut items = match load(cfg) {
+                    Ok(items) => items,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 let before = items.len(); items.retain(|item| item.get("name").and_then(Value::as_str) != Some(name));
                 if items.len() == before { return format!("エラー: ワークフローが見つかりません: {name}"); }
                 match save(cfg, &items) { Ok(()) => format!("ワークフローを解除しました: {name}"), Err(e) => format!("エラー: {e}") }

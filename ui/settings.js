@@ -1686,6 +1686,11 @@ async function render() {
     characterSelect,
     markSearchable(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]), "PICOAGENT_CHARACTER", "キャラクター")
   ));
+  characterSec.append(selectField("PICOAGENT_COMPANION_MODE", "相棒の役割", v.PICOAGENT_COMPANION_MODE || "both", [
+    { value: "life", label: "いっしょに暮らす" },
+    { value: "work", label: "いっしょに働く" },
+    { value: "both", label: "暮らしと仕事の両方" },
+  ]));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
