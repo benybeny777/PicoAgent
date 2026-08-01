@@ -1691,6 +1691,7 @@ async function render() {
     { value: "work", label: "いっしょに働く" },
     { value: "both", label: "暮らしと仕事の両方" },
   ]));
+  characterSec.append(field("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", "いっしょの記録を保存する", "checkbox", v.PICOAGENT_RELATIONSHIP_MEMORY_ENABLED !== false));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);

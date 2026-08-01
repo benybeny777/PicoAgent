@@ -286,6 +286,17 @@ pub fn active_character_id(state: &AppState) -> String {
     }
 }
 
+fn relationship_prompt_context(
+    config: &Config,
+    relationship: &crate::relationship::RelationshipState,
+) -> String {
+    if config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true) {
+        crate::relationship::context(relationship)
+    } else {
+        String::new()
+    }
+}
+
 fn conversation_is_current(state: &AppState, character_id: &str, epoch: u64) -> bool {
     active_character_id(state) == character_id && state.conversation_epoch() == epoch
 }
@@ -497,6 +508,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
         "onboardingDone": state.config.get_bool("PICOAGENT_ONBOARDING_DONE", false),
         "companionMode": relationship_mode,
+        "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
         "relationship": relationship,
         "bondLabel": bond_label,
     }))
@@ -523,14 +535,72 @@ pub fn pet_relationship_event(
 ) -> Result<Value, String> {
     let character_id = active_character_id(&state);
     let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+    if !state
+        .config
+        .get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true)
+    {
+        let relationship = crate::relationship::load(&app, &character_id, &mode)?;
+        return Ok(json!({
+            "relationship": relationship,
+            "bondLabel": relationship.bond_label(),
+            "memoryEnabled": false,
+        }));
+    }
     let relationship = crate::relationship::record(&app, &character_id, &mode, &kind, &detail)?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
     state.reset_conversation();
     Ok(json!({
         "relationship": relationship,
         "bondLabel": bond_label,
     }))
+}
+
+#[tauri::command]
+pub fn pet_relationship_pin_moment(
+    moment_id: String,
+    pinned: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let character_id = active_character_id(&state);
+    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+    let relationship =
+        crate::relationship::set_moment_pinned(&app, &character_id, &mode, &moment_id, pinned)?;
+    let bond_label = relationship.bond_label();
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
+    state.reset_conversation();
+    Ok(json!({ "relationship": relationship, "bondLabel": bond_label }))
+}
+
+#[tauri::command]
+pub fn pet_relationship_delete_moment(
+    moment_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let character_id = active_character_id(&state);
+    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+    let relationship = crate::relationship::delete_moment(&app, &character_id, &mode, &moment_id)?;
+    let bond_label = relationship.bond_label();
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
+    state.reset_conversation();
+    Ok(json!({ "relationship": relationship, "bondLabel": bond_label }))
+}
+
+#[tauri::command]
+pub fn pet_relationship_clear(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+    let character_id = active_character_id(&state);
+    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+    let relationship = crate::relationship::clear(&app, &character_id, &mode)?;
+    let bond_label = relationship.bond_label();
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
+    state.reset_conversation();
+    Ok(json!({ "relationship": relationship, "bondLabel": bond_label }))
 }
 
 #[tauri::command]
@@ -553,7 +623,8 @@ pub fn pet_complete_onboarding(
     let character_id = active_character_id(&state);
     let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
     state.reset_conversation();
     Ok(json!({ "ok": true, "relationship": relationship, "bondLabel": bond_label }))
 }
@@ -642,7 +713,8 @@ pub fn pet_set_character_profile(
     *state.character_profile.lock().unwrap() = profile;
     let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &mode)?;
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
     let previous = {
         let mut current = state.character_id.lock().unwrap();
         let previous = current.clone();
@@ -831,22 +903,27 @@ pub async fn pet_send(
     )
     .await;
     if matches!(result, Ok(PersistedReply::Current(_))) {
-        match crate::relationship::record(
-            &app,
-            &request_character_id,
-            &state.config.get("PICOAGENT_COMPANION_MODE", "both"),
-            "conversation",
-            &user_text,
-        ) {
-            Ok(relationship) => {
-                *state.relationship_context.lock().unwrap() =
-                    crate::relationship::context(&relationship);
-                state.reset_conversation();
-            }
-            Err(error) => crate::log_paths::append_app_log(
+        if state
+            .config
+            .get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true)
+        {
+            match crate::relationship::record(
                 &app,
-                &format!("会話後の関係性データ更新に失敗しました: {error}"),
-            ),
+                &request_character_id,
+                &state.config.get("PICOAGENT_COMPANION_MODE", "both"),
+                "conversation",
+                &user_text,
+            ) {
+                Ok(relationship) => {
+                    *state.relationship_context.lock().unwrap() =
+                        relationship_prompt_context(&state.config, &relationship);
+                    state.reset_conversation();
+                }
+                Err(error) => crate::log_paths::append_app_log(
+                    &app,
+                    &format!("会話後の関係性データ更新に失敗しました: {error}"),
+                ),
+            }
         }
         if let Some(memory_context) =
             crate::memory::update_from_turn(&app, &state.config, &user_text)
@@ -1704,6 +1781,7 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
     let companion_mode_changed = changed_text("PICOAGENT_COMPANION_MODE", "both");
+    let relationship_memory_changed = changed_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
 
     // シークレットは平文保存せず、DPAPI で暗号化してから永続化する。
     let schema_keys = secret_keys();
@@ -1740,11 +1818,12 @@ pub async fn settings_save(
         *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
         state.reset_conversation();
     }
-    if companion_mode_changed {
+    if companion_mode_changed || relationship_memory_changed {
         let character_id = active_character_id(&state);
         let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
         let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
-        *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+        *state.relationship_context.lock().unwrap() =
+            relationship_prompt_context(&state.config, &relationship);
         state.reset_conversation();
     }
 
@@ -1780,6 +1859,7 @@ pub async fn settings_save(
             "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
             "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
             "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
+            "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
         });
         if !requires_restart {
             let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));
@@ -1863,7 +1943,8 @@ pub fn restart_app(
     *state.character_id.lock().unwrap() = character_id.clone();
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+    *state.relationship_context.lock().unwrap() =
+        relationship_prompt_context(&state.config, &relationship);
     state.clear_conversation();
     let recent = crate::history::load_recent(&app, &character_id);
     if !recent.is_empty() {

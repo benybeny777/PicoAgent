@@ -83,6 +83,9 @@ window.picoagent = {
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
+  pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),
+  deleteRelationshipMoment: (momentId) => call("pet_relationship_delete_moment", { momentId }),
+  clearRelationship: () => call("pet_relationship_clear"),
   completeOnboarding: (mode) => call("pet_complete_onboarding", { mode }),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
