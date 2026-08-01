@@ -559,8 +559,8 @@ variantSelect?.addEventListener("change", async () => {
     setAnimation("pleased", true);
     setTimeout(() => setAnimation("idle"), 900);
   } catch (error) {
-    logApp("error", "衣装の切替に失敗しました", errorDetail(error));
-    showToast("衣装を切り替えられませんでした", "error");
+    logApp("error", "雰囲気の切替に失敗しました", errorDetail(error));
+    showToast("雰囲気を切り替えられませんでした", "error");
   }
 });
 function setAnimation(name, force = false) {
@@ -1822,6 +1822,29 @@ async function recordRelationship(kind, detail = "") {
   }
 }
 
+// ふれあいは連打される導線なので、記録はまとめて間引く。1回ごとに送ると
+// そのたびにバックエンドが関係性ファイルを読み書きすることになる。
+const TOUCH_RECORD_INTERVAL_MS = 5000;
+let lastTouchRecordAt = 0;
+let pendingTouchZone = "";
+let pendingTouchTimer = null;
+function recordTouch(zone) {
+  const now = Date.now();
+  if (now - lastTouchRecordAt >= TOUCH_RECORD_INTERVAL_MS) {
+    lastTouchRecordAt = now;
+    recordTouch(zone);
+    return;
+  }
+  // 間引いた分は最後の1回だけ、間隔が空いてから送る（反応そのものは毎回返している）。
+  pendingTouchZone = zone;
+  if (pendingTouchTimer) return;
+  pendingTouchTimer = setTimeout(() => {
+    pendingTouchTimer = null;
+    lastTouchRecordAt = Date.now();
+    recordRelationship(`touch_${pendingTouchZone}`);
+  }, TOUCH_RECORD_INTERVAL_MS - (now - lastTouchRecordAt));
+}
+
 relationshipButton?.addEventListener("click", async event => {
   event.stopPropagation();
   relationshipCard.hidden = !relationshipCard.hidden;
@@ -2845,19 +2868,23 @@ function updateContinuousVoiceButton() {
   voiceLoopButton.title = continuousVoice ? "連続会話を止める" : "返答後も自動で聞き続ける";
 }
 
-function scheduleContinuousListening() {
+// 待てないときは間隔を伸ばして待ち直す。長い応答のあいだ 450ms で回り続けると、
+// 何もしていない時間にタイマーだけが動く（常駐アプリでは避けたい）。
+const CONTINUOUS_VOICE_MIN_MS = 450;
+const CONTINUOUS_VOICE_MAX_MS = 5000;
+function scheduleContinuousListening(delay = CONTINUOUS_VOICE_MIN_MS) {
   if (continuousVoiceTimer) { clearTimeout(continuousVoiceTimer); continuousVoiceTimer = null; }
   if (!continuousVoice) return;
   continuousVoiceTimer = setTimeout(async () => {
     continuousVoiceTimer = null;
     if (!continuousVoice) return;
     if (busy || currentVoice || micStream || !onboarding?.hidden) {
-      scheduleContinuousListening();
+      scheduleContinuousListening(Math.min(delay * 2, CONTINUOUS_VOICE_MAX_MS));
       return;
     }
     if (composer.hidden) openComposer();
     await startRecording();
-  }, 450);
+  }, delay);
 }
 
 voiceLoopButton?.addEventListener("click", async () => {

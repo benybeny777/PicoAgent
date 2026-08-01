@@ -108,6 +108,20 @@ impl AppState {
         self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// 関係性の文脈を更新する。**中身が変わったときだけ true を返す。**
+    ///
+    /// system プロンプトの作り直しは、それ自体が同梱エンジンのプロンプトキャッシュを
+    /// 捨てる操作になる。会話やふれあいのたびに無条件で作り直すと毎ターン全文の
+    /// 再評価が走るため、実際に文面が変わったときだけ呼び出し側が作り直す。
+    pub fn set_relationship_context(&self, next: String) -> bool {
+        let mut current = self.relationship_context.lock().unwrap();
+        if *current == next {
+            return false;
+        }
+        *current = next;
+        true
+    }
+
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
     /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
@@ -480,7 +494,19 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         .collect();
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
+    // フォールバック許可: 関係性データが読めないだけで起動シーケンス全体を止めない
+    // （`pet_init` が失敗するとフロントはローディングから先へ進めない）。
+    // 読めなかった理由はログへ残し、まっさらな関係性として続行する。
+    let relationship = match crate::relationship::load(&app, &character_id, &relationship_mode) {
+        Ok(relationship) => relationship,
+        Err(error) => {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("関係性データを読めないため初期状態で続行します: {error}"),
+            );
+            crate::relationship::RelationshipState::empty(&character_id, &relationship_mode)
+        }
+    };
     let bond_label = relationship.bond_label();
     Ok(json!({
         "model": model,
@@ -531,8 +557,9 @@ pub fn pet_relationship_event(
     let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::record(&app, &character_id, &mode, &kind, &detail)?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
-    state.reset_conversation();
+    if state.set_relationship_context(crate::relationship::context(&relationship)) {
+        state.reset_conversation();
+    }
     Ok(json!({
         "relationship": relationship,
         "bondLabel": bond_label,
@@ -559,8 +586,9 @@ pub fn pet_complete_onboarding(
     let character_id = active_character_id(&state);
     let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
-    state.reset_conversation();
+    if state.set_relationship_context(crate::relationship::context(&relationship)) {
+        state.reset_conversation();
+    }
     Ok(json!({ "ok": true, "relationship": relationship, "bondLabel": bond_label }))
 }
 
@@ -648,7 +676,7 @@ pub fn pet_set_character_profile(
     *state.character_profile.lock().unwrap() = profile;
     let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &mode)?;
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+    state.set_relationship_context(crate::relationship::context(&relationship));
     let previous = {
         let mut current = state.character_id.lock().unwrap();
         let previous = current.clone();
@@ -845,9 +873,10 @@ pub async fn pet_send(
             &user_text,
         ) {
             Ok(relationship) => {
-                *state.relationship_context.lock().unwrap() =
-                    crate::relationship::context(&relationship);
-                state.reset_conversation();
+                // 段階が上がったときだけ system を作り直す（毎ターンだとキャッシュが無効化される）。
+                if state.set_relationship_context(crate::relationship::context(&relationship)) {
+                    state.reset_conversation();
+                }
             }
             Err(error) => crate::log_paths::append_app_log(
                 &app,
@@ -1755,8 +1784,9 @@ pub async fn settings_save(
         let character_id = active_character_id(&state);
         let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
         let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
-        *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
-        state.reset_conversation();
+        if state.set_relationship_context(crate::relationship::context(&relationship)) {
+            state.reset_conversation();
+        }
     }
 
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
@@ -1874,7 +1904,7 @@ pub fn restart_app(
     *state.character_id.lock().unwrap() = character_id.clone();
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
-    *state.relationship_context.lock().unwrap() = crate::relationship::context(&relationship);
+    state.set_relationship_context(crate::relationship::context(&relationship));
     state.clear_conversation();
     let recent = crate::history::load_recent(&app, &character_id);
     if !recent.is_empty() {

@@ -48,6 +48,11 @@ impl RelationshipState {
         }
     }
 
+    /// 保存データを読めなかったときに使う初期状態（永続化はしない）。
+    pub fn empty(character_id: &str, mode: &str) -> Self {
+        Self::new(character_id, mode)
+    }
+
     pub fn bond_label(&self) -> &'static str {
         match self.familiarity.saturating_add(self.trust) {
             0..=14 => "出会ったばかり",
@@ -173,24 +178,26 @@ pub fn record(
     Ok(state)
 }
 
+/// system プロンプトへ差し込む関係性の文脈。
+///
+/// **会話のたびに変わる情報（最近の出来事）はここへ入れない。** system はプロンプトの
+/// 先頭にあたるため、1文字でも変わると同梱エンジン（llama-server）のプロンプトキャッシュが
+/// 丸ごと無効化され、毎ターン全文を再評価することになる。CPU 寄りの構成でも動かす前提の
+/// アプリなので、ここは**段階名と相棒モードだけ**の、めったに変わらない内容に保つ。
+///
+/// 共有した出来事は `pet_relationship_state` から記録カードへ出しており、会話へ効かせる
+/// 内容の選別は `memory.rs`（長期メモリ）の役目とすみ分ける。
 pub fn context(state: &RelationshipState) -> String {
     let mode = match state.mode.as_str() {
         "life" => "暮らしを一緒に楽しむ",
         "work" => "作業を一緒に進める",
         _ => "暮らしと作業の両方を支える",
     };
-    let mut text = format!(
-        "このユーザーとの関係: {}。距離感は「{}」。{}相棒として接してください。数値や内部ランクは口にせず、共有した経験を自然な反応にだけ反映してください。",
-        state.bond_label(), state.bond_label(), mode
-    );
-    if !state.recent_moments.is_empty() {
-        text.push_str("\n最近いっしょにしたこと:");
-        for moment in state.recent_moments.iter().rev().take(4) {
-            text.push_str("\n- ");
-            text.push_str(&moment.text);
-        }
-    }
-    text
+    format!(
+        "このユーザーとの関係の段階: {}。{}相棒として接してください。数値や内部ランクは口にせず、積み重ねた距離感を自然な反応にだけ反映してください。",
+        state.bond_label(),
+        mode
+    )
 }
 
 #[cfg(test)]
@@ -204,6 +211,34 @@ mod tests {
         state.familiarity = 50;
         state.trust = 50;
         assert_eq!(state.bond_label(), "頼れる相棒");
+    }
+
+    /// system プロンプトは会話のたびに変わってはいけない。
+    /// 変わると同梱エンジンのプロンプトキャッシュが毎ターン捨てられ、全文を再評価することになる。
+    #[test]
+    fn 出来事が増えてもsystem文脈は変わらない() {
+        let mut state = RelationshipState::new("mugi", "both");
+        let before = context(&state);
+        state.conversations += 1;
+        state.recent_moments.push(SharedMoment {
+            at: "2026-08-01T00:00:00+09:00".to_string(),
+            kind: "conversation".to_string(),
+            text: "今日は資料をまとめた".to_string(),
+        });
+        assert_eq!(
+            context(&state),
+            before,
+            "出来事や会話回数が増えただけで system を作り直させない"
+        );
+    }
+
+    #[test]
+    fn 段階が上がるとsystem文脈が変わる() {
+        let mut state = RelationshipState::new("mugi", "both");
+        let before = context(&state);
+        state.familiarity = 60;
+        state.trust = 60;
+        assert_ne!(context(&state), before, "段階が変わったときは反映する");
     }
 
     #[test]
