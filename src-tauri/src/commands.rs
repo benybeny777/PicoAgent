@@ -167,6 +167,35 @@ impl AppState {
     }
 }
 
+/// プロジェクト文脈のブロックを system メッセージへ入れ直す。
+///
+/// 差し込み位置に依存せず「前回のブロックを消してから新しいものを足す」形にする
+/// （追記だけだと、課題を1件足すたびに古いまとめが積み重なって文脈を食い潰す）。
+const PROJECT_CONTEXT_BEGIN: &str = "[プロジェクト文脈]\n";
+const PROJECT_CONTEXT_END: &str = "\n[/プロジェクト文脈]";
+
+fn apply_project_context(convo: &mut [Message], block: &str) {
+    let Some(system) = convo.iter_mut().find(|message| message.role == "system") else {
+        return;
+    };
+    if let Some(start) = system.content.find(PROJECT_CONTEXT_BEGIN) {
+        // 終端が見つからない（手で編集された等）ときは触らない。消し過ぎるより残すほうが安全。
+        if let Some(offset) = system.content[start..].find(PROJECT_CONTEXT_END) {
+            let end = start + offset + PROJECT_CONTEXT_END.len();
+            system.content.replace_range(start..end, "");
+            let trimmed = system.content.trim_end().to_string();
+            system.content = trimmed;
+        }
+    }
+    if block.trim().is_empty() {
+        return;
+    }
+    system.content.push_str("\n\n");
+    system.content.push_str(PROJECT_CONTEXT_BEGIN);
+    system.content.push_str(block);
+    system.content.push_str(PROJECT_CONTEXT_END);
+}
+
 // 完了したターンから、文脈・履歴に残す「発話」だけを取り出す（user と、本文のある
 // assistant のみ）。途中の tool 呼び出し/結果は残すとメッセージ順序が壊れるため落とす。
 fn clean_turns(messages: &[Message]) -> Vec<Message> {
@@ -896,6 +925,9 @@ pub async fn pet_send(
             }
         }
     }
+    // 選択中プロジェクトの課題・記録を system 文脈へ差し込む。台帳は会話中にも変わるので、
+    // 起動時ではなく毎回作り直して古い内容が残らないようにする。
+    apply_project_context(&mut convo, &crate::tools::project_tasks::project_context(&state.config));
     convo.push(Message::new("user", text));
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
@@ -2908,5 +2940,45 @@ mod tests {
         assert!(!spoken.contains('☀'));
         assert!(!spoken.contains('▇'));
         assert!(spoken.contains("快晴") && spoken.contains("18〜27度"));
+    }
+}
+
+#[cfg(test)]
+mod project_context_tests {
+    use super::apply_project_context;
+    use crate::message::Message;
+
+    fn convo(system: &str) -> Vec<Message> {
+        vec![Message::new("system", system), Message::new("user", "やあ")]
+    }
+
+    /// 何度差し込んでも1ブロックだけになること（積み重なると文脈を食い潰す）。
+    #[test]
+    fn プロジェクト文脈は入れ替わり積み重ならない() {
+        let mut messages = convo("人格設定");
+        apply_project_context(&mut messages, "課題A");
+        apply_project_context(&mut messages, "課題B");
+        let system = &messages[0].content;
+        assert_eq!(system.matches("[プロジェクト文脈]").count(), 1, "system: {system}");
+        assert!(system.contains("課題B"), "system: {system}");
+        assert!(!system.contains("課題A"), "system: {system}");
+        assert!(system.starts_with("人格設定"), "system: {system}");
+    }
+
+    /// 空ブロックなら前回の内容を消して何も足さない（プロジェクトを空にしたとき残らない）。
+    #[test]
+    fn 空のときは差し込まず前回分も消す() {
+        let mut messages = convo("人格設定");
+        apply_project_context(&mut messages, "課題A");
+        apply_project_context(&mut messages, "");
+        assert_eq!(messages[0].content, "人格設定");
+        assert_eq!(messages[1].content, "やあ", "user メッセージを触っている");
+    }
+
+    #[test]
+    fn system_が無ければ何もしない() {
+        let mut messages = vec![Message::new("user", "やあ")];
+        apply_project_context(&mut messages, "課題A");
+        assert_eq!(messages[0].content, "やあ");
     }
 }

@@ -754,7 +754,7 @@ function skillCategory(tool) {
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
     return "info";
   }
-  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "notebook_edit", "view_image", "ask_user", "project_workspace", "workflow", "run_command", "command_job", "http_api"].includes(name)) {
+  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "notebook_edit", "view_image", "ask_user", "project_tasks", "project_notes", "project_workspace", "workflow", "run_command", "command_job", "http_api"].includes(name)) {
     return "workspace";
   }
   if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
@@ -806,6 +806,8 @@ const SKILL_EXAMPLE_FALLBACKS = {
   grep_search: ["この関数を使っている箇所を探して"],
   todo_plan: ["やることを整理して進めて", "いまどこまで終わってる？"],
   project_workspace: ["このフォルダを仕事用ワークスペースとして登録して"],
+  project_tasks: ["このプロジェクトの残りの課題を教えて", "サムネ差し替えを来週までの課題に追加して"],
+  project_notes: ["この方針を決定事項として残して", "前に決めたことを教えて"],
   workflow: ["この手順を週報作成として覚えて"],
   run_command: ["git statusを実行して", "開発サーバをバックグラウンドで起動して"],
   command_job: ["さっきのビルドの様子を見せて", "動かしっぱなしのサーバを止めて"],
@@ -874,7 +876,7 @@ function approvalPolicy(tool) {
     "x_twitter", "mastodon", "bluesky", "reddit", "linkedin", "misskey",
   ]);
   const write = new Set([
-    "workspace_files", "edit_file", "notebook_edit", "command_job", "todo_plan", "google_calendar", "google_docs", "google_drive", "google_sheets",
+    "workspace_files", "edit_file", "notebook_edit", "command_job", "todo_plan", "project_tasks", "project_notes", "google_calendar", "google_docs", "google_drive", "google_sheets",
     "google_tasks", "github_issue", "notion", "jira", "linear", "trello", "todoist",
     "ms_office", "document_convert", "pdf_tools", "http_api", "task_scheduler",
   ]);

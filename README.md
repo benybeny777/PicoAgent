@@ -138,6 +138,7 @@ cargo xtask dev
 | 調査・資料 | 出典付き調査レポート、スライド下書き、HTML ダッシュボード、資料一式の生成 |
 | 外部連携 | Gmail、Slack、Google カレンダー / Docs / Sheets / Drive、GitHub、Notion、各種 SNS |
 | ローカル操作 | ファイル読み書き、コマンド実行、自力コード実行、cron 風スケジュール |
+| プロジェクト管理 | プロジェクト単位の課題台帳（期限・優先度・タグ）、決定事項と進捗の記録、切替時の文脈復元 |
 | コーディング支援 | 行番号つき部分読み、ファイル名検索（glob）、内容検索（正規表現）、既存ファイルの部分編集、ノートブック編集、バックグラウンド実行の様子見、多段タスクの作業計画、画像を見る、選択肢つきの確認 |
 | 実用ツール | 文字数分析、JSON 整形、Base64、URL 変換、単位換算、日付計算、CSV 表化、色変換 ほか約 30 種 |
 
@@ -259,6 +260,7 @@ cargo xtask dev
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` |
 | スーパーエージェント | `PICOAGENT_SUPER_AGENT` / `PICOAGENT_SUPER_AGENT_MAX_STEPS` |
 | コーディング支援 | `PICOAGENT_RIPGREP_PATH` / `PICOAGENT_TODO_PLAN` |
+| プロジェクト管理 | `PICOAGENT_ACTIVE_WORKSPACE` / `PICOAGENT_PROJECT_TASKS` / `PICOAGENT_PROJECT_NOTES` |
 
 <details>
 <summary>クラウド AI・その他の設定キー</summary>
