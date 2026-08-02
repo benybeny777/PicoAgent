@@ -239,14 +239,14 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | 役割 | 副作用 | 本数 | スキル |
 |---|---|---|---|
 | **Retrieval**（外部知識の検索・取得） | read-only | 9 | `web_search` `web_fetch` `doc_search` `rss_feed` `news_scrape` `weather` `currency_rates` `market_indices` `time` |
-| **Read**（手元の状態の読み取り） | read-only | 2 | `read_file` `clipboard_text` |
+| **Read**（手元の状態の読み取り） | read-only | 4 | `read_file` `clipboard_text` `glob_files` `grep_search` |
 | **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
 | **Action**（SaaS の読み書き） | write | 12 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` |
 | **Action**（ファイル生成・変換） | write | 8 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` |
 | **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
-| **Action**（汎用の出入り口） | write | 2 | `http_api` `workspace_files` |
+| **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
 | **Destructive / 高リスク** | destructive | 4 | `trash_file` `run_command` `code_runner` `app_control` |
-| **State**（アプリ内の永続状態） | write | 6 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` |
+| **State**（アプリ内の永続状態） | write | 7 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` `todo_plan` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
 | **Orchestration**（多段実行・組み立て） | 呼び先に従う | 5 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` |
 
@@ -255,6 +255,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - **Destructive** の4本は安全のしくみ側で別扱いになる。`run_command` は allowlist 一致のみ、`code_runner` は最終手段、`trash_file` はゴミ箱への移動（完全削除はしない）、`app_control` はアプリ自身の終了。
 - **Orchestration** は他スキルを呼ぶため、副作用は呼び先で決まる。`workflow` は手順を保存する点で State も兼ね、`research_report` は検索（Retrieval）と Markdown 書き出し（write）を兼ねる。`chitchat` は `agent_callable=false` の内部スキルで、モデルには提示せずアプリ側が直接 `dispatch` する。
 - **Action（SaaS の読み書き）** は一覧取得と作成の両方を持つものが大半で、`gmail` のアーカイブ・既読化のように既存状態を変える操作も含む。
+- **コーディングエージェント系の4本**（`glob_files` `grep_search` `edit_file` `todo_plan`）は、Claude Code / Codex が持つ Glob / Grep / Edit（apply_patch）/ TodoWrite（update_plan）に相当する。探す（名前・内容）→ 部分的に直す → 進捗を進める、という作業の流れを分担するため、単体ではなく組で使う。`edit_file` は `workspace_files` と同じロック・取り消し履歴を共有するので、編集は `workspace_files` の `undo` で戻せる。
 
 ### RAG との関係
 
@@ -279,6 +280,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新ニュース見出し候補を取得。今日のニュース要約ではこのスキルを先に使う | 対象ドメインを Google News / Yahoo!ニュースに限定、HTML 1MB上限、件数上限、timeout、User-Agent 指定 |
 | `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
 | `read_file` | ローカルのテキストファイル読込 | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否、64KB で打ち切り |
+| `glob_files` | 許可ルート配下のファイルを glob パターン（`**/*.rs` など）で探し、パス一覧を返す。既定は更新の新しい順 | 共通許可ルート配下に限定、シンボリックリンク／ジャンクションは辿らない、深さ12・走査20,000件・表示既定100件（最大500）で打ち切り、`node_modules` / `target` / `.git` など生成物と隠しフォルダは除外 |
+| `grep_search` | 許可ルート配下のファイル内容を正規表現で検索し、行番号付きの一致行・一致ファイル・件数を返す（`output_mode`） | 共通許可ルート配下に限定、検索本体は同梱 ripgrep → PATH の順に解決。ripgrep が無い場合は内蔵走査（固定文字列一致）へ落ち、その旨を結果の先頭に明記する。1ファイル2MB・深さ12・走査5,000件・1行400文字・表示既定60行（最大300）で打ち切り、timeout 30秒 |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
 | `research_report` | 複数観点のWeb検索を束ね、出典付きMarkdown調査レポートを生成する。`save=true` または `save_path` 指定で保存し、既定で1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も生成する | 検索待ち時間3〜60秒、観点最大6件、各観点最大5件、レポート96KB上限、保存は共通許可ルート配下の `.md` のみ |
 | `spark_workspace` | brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを含む資料ワークスペースを一括生成する | 保存は共通許可ルート配下のみ、入力テキスト24,000文字上限、外部通信なし |
@@ -296,6 +299,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルートと `permissions::fs` に限定、読込/書込サイズ上限。同一プロセス内の変更は直列化する。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は実行時点の許可を再検証してから復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
+| `edit_file` | 既存ファイルの一部を、元の文字列と新しい文字列の厳密一致で置換する。`edits` 配列で複数箇所をまとめて編集できる | 共通許可ルートと `permissions::fs` に限定、既存ファイルのみ（新規作成は不可）、512KB 上限、1回20件まで。一致0件と（`replace_all` なしの）複数一致はエラーにして書き込まない。途中の1件でも失敗したら全件書き込まない。`preview=true` で無変更確認。書き込みロックと取り消し履歴は `workspace_files` と共有し、`workspace_files` の `undo` で戻せる |
+| `todo_plan` | 多段タスクの作業計画を登録し、1手ずつ進捗を進める（set / list / complete / add / clear）。完了すると次の手順が自動で着手中になる | `PICOAGENT_TODO_PLAN` に保存し、一覧更新は名前付きロックで直列化する。手順は20件・1件200文字まで。読み取りに失敗したときは空一覧で上書きせずエラーを返す |
 | `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。一覧更新は名前付きロックで直列化する。登録解除は `confirm=true` が必要でファイルは削除せず、使用中IDなら選択状態も消す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
 | `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
@@ -470,6 +475,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_ALARMS` | `[]` | alarm | 目覚まし一覧（JSON文字列。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_DAILY_EVENTS` | `[]` | reminder / focus_timer | リマインダー・集中タイマー・見守り通知（JSON文字列） |
 | `PICOAGENT_PRAISE_LOG` | `[]` | praise_log | できたことメモ（JSON文字列） |
+| `PICOAGENT_TODO_PLAN` | `[]` | todo_plan | 多段タスクの作業計画（JSON文字列、最大20手順） |
 | `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | （旧キー） | meeting_recorder | 旧キー。設定画面からは廃止。設定済みなら既存利用者向けに追加許可ルートとしてだけ引き継ぐ |
@@ -581,7 +587,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick 実行ファイルパス（空なら同梱→PATH。v7 `magick` が無ければ v6 `convert`/`identify`） |
 | `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | image_tools | 画像操作タイムアウト秒（5〜300） |
 | `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg 実行ファイルパス（非wav音声の16kHz WAV前処理用。空なら同梱→PATH） |
-| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search | ripgrep 実行ファイルパス（空なら同梱→PATH。無ければ内蔵走査） |
+| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep 実行ファイルパス（空なら同梱→PATH。無ければ内蔵走査） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
 | `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型。キー名に `API_KEY` を含むためシークレットとして扱われ、Windows では DPAPI 暗号化して保存される） |

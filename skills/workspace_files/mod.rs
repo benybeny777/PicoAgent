@@ -19,7 +19,8 @@ const MAX_WRITE_BYTES: usize = 128 * 1024;
 const MAX_LIST_ENTRIES: usize = 200;
 const MAX_BACKUP_BYTES: u64 = 1024 * 1024;
 
-struct UndoEntry {
+/// 変更前の内容（新規作成なら None）。`edit_file` からも同じ履歴へ積む。
+pub struct UndoEntry {
     path: PathBuf,
     original: Option<Vec<u8>>,
 }
@@ -31,11 +32,14 @@ fn undo_history() -> &'static Mutex<Vec<UndoEntry>> {
     UNDO_HISTORY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn file_mutation() -> &'static Mutex<()> {
+/// ファイル変更を直列化するロック。`edit_file` も同じファイルを触るため共有する
+/// （別々のロックだと、同一ターンの並列ツール実行で書き込みと取り消しが交差する）。
+pub fn file_mutation() -> &'static Mutex<()> {
     FILE_MUTATION.get_or_init(|| Mutex::new(()))
 }
 
-fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
+/// 変更前の内容を控える（取り消し用）。上限を超えるファイルは変更自体を止める。
+pub fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
     let original = if path.exists() {
         let size = permissions::fs::metadata(path)
             .map_err(|error| format!("変更前の情報を取得できません: {error}"))?
@@ -57,7 +61,8 @@ fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
     })
 }
 
-fn remember_change(entry: UndoEntry) -> Result<(), String> {
+/// 取り消し履歴へ積む（最新20件だけ保持する）。
+pub fn remember_change(entry: UndoEntry) -> Result<(), String> {
     let mut history = undo_history()
         .lock()
         .map_err(|_| "取り消し履歴を取得できません。".to_string())?;
@@ -212,7 +217,7 @@ impl Tool for WorkspaceFilesTool {
                     "description": "write / append 時に親フォルダが無ければ作成する。"
                 },
                 "preview": { "type": "boolean", "description": "write / append の変更内容だけを確認し、書き込まない。" },
-                "confirm": { "type": "boolean", "description": "undo の実行確認。省略時は取り消し対象のプレビューだけを返す。" }
+                "confirm": { "type": "boolean", "description": "undo の実行確認。省略時は取り消し対象のプレビューだけを返す。undo は edit_file による変更も同じ履歴から取り消せる。" }
             },
             "required": ["action"]
         })

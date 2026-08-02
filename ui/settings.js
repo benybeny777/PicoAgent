@@ -754,7 +754,7 @@ function skillCategory(tool) {
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
     return "info";
   }
-  if (["read_file", "workspace_files", "project_workspace", "workflow", "run_command", "http_api"].includes(name)) {
+  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "project_workspace", "workflow", "run_command", "http_api"].includes(name)) {
     return "workspace";
   }
   if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
@@ -801,6 +801,10 @@ const SKILL_EXAMPLE_FALLBACKS = {
   whisper_transcribe: ["最新の録音を文字起こしして"],
   read_file: ["このファイルを読んで"],
   workspace_files: ["作業フォルダにメモを書いて"],
+  edit_file: ["このファイルのこの行だけ直して"],
+  glob_files: ["プロジェクトの .rs ファイルを一覧して"],
+  grep_search: ["この関数を使っている箇所を探して"],
+  todo_plan: ["やることを整理して進めて", "いまどこまで終わってる？"],
   project_workspace: ["このフォルダを仕事用ワークスペースとして登録して"],
   workflow: ["この手順を週報作成として覚えて"],
   run_command: ["git statusを実行して"],
@@ -866,7 +870,7 @@ function approvalPolicy(tool) {
     "x_twitter", "mastodon", "bluesky", "reddit", "linkedin", "misskey",
   ]);
   const write = new Set([
-    "workspace_files", "google_calendar", "google_docs", "google_drive", "google_sheets",
+    "workspace_files", "edit_file", "todo_plan", "google_calendar", "google_docs", "google_drive", "google_sheets",
     "google_tasks", "github_issue", "notion", "jira", "linear", "trello", "todoist",
     "ms_office", "document_convert", "pdf_tools", "http_api", "task_scheduler",
   ]);
