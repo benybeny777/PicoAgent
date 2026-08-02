@@ -242,20 +242,21 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | **Read**（手元の状態の読み取り） | read-only | 4 | `read_file` `clipboard_text` `glob_files` `grep_search` |
 | **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
 | **Action**（SaaS の読み書き） | write | 12 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` |
-| **Action**（ファイル生成・変換） | write | 8 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` |
+| **Action**（ファイル生成・変換） | write | 9 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` `notebook_edit` |
 | **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
 | **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
-| **Destructive / 高リスク** | destructive | 4 | `trash_file` `run_command` `code_runner` `app_control` |
+| **Destructive / 高リスク** | destructive | 5 | `trash_file` `run_command` `command_job` `code_runner` `app_control` |
 | **State**（アプリ内の永続状態） | write | 7 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` `todo_plan` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
 | **Orchestration**（多段実行・組み立て） | 呼び先に従う | 5 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` |
 
 補足:
 
-- **Destructive** の4本は安全のしくみ側で別扱いになる。`run_command` は allowlist 一致のみ、`code_runner` は最終手段、`trash_file` はゴミ箱への移動（完全削除はしない）、`app_control` はアプリ自身の終了。
+- **Destructive** の5本は安全のしくみ側で別扱いになる。`run_command` は allowlist 一致のみ、`command_job` は `run_command` が起動したジョブの様子見と停止のみ（起動はできない）、`code_runner` は最終手段、`trash_file` はゴミ箱への移動（完全削除はしない）、`app_control` はアプリ自身の終了。
 - **Orchestration** は他スキルを呼ぶため、副作用は呼び先で決まる。`workflow` は手順を保存する点で State も兼ね、`research_report` は検索（Retrieval）と Markdown 書き出し（write）を兼ねる。`chitchat` は `agent_callable=false` の内部スキルで、モデルには提示せずアプリ側が直接 `dispatch` する。
 - **Action（SaaS の読み書き）** は一覧取得と作成の両方を持つものが大半で、`gmail` のアーカイブ・既読化のように既存状態を変える操作も含む。
-- **コーディングエージェント系の4本**（`glob_files` `grep_search` `edit_file` `todo_plan`）は、Claude Code / Codex が持つ Glob / Grep / Edit（apply_patch）/ TodoWrite（update_plan）に相当する。探す（名前・内容）→ 部分的に直す → 進捗を進める、という作業の流れを分担するため、単体ではなく組で使う。`edit_file` は `workspace_files` と同じロック・取り消し履歴を共有するので、編集は `workspace_files` の `undo` で戻せる。
+- **コーディングエージェント系**（`read_file` `glob_files` `grep_search` `edit_file` `notebook_edit` `todo_plan` `run_command` の `background` と `command_job`）は、Claude Code / Codex が持つ Read / Glob / Grep / Edit（apply_patch）/ NotebookEdit / TodoWrite（update_plan）/ Bash のバックグラウンド実行（BashOutput・KillShell）に相当する。読む → 探す（名前・内容）→ 部分的に直す → 走らせて様子を見る → 進捗を進める、という作業の流れを分担するため、単体ではなく組で使う。`edit_file` / `notebook_edit` は `workspace_files` と同じロック・取り消し履歴を共有するので、編集は `workspace_files` の `undo` で戻せる。
+- 一方、Claude Code / Codex にあって**意図的に持たないもの**もある。ツール結果が文字列のみのため画像を返す `view_image` 相当は無く（画像は正規形メッセージの `images` でユーザー入力としてのみ渡る）、選択肢つきで人に尋ねる `AskUserQuestion` 相当も無い（PicoAgent は会話そのものが入口で、危険な操作は `run_command` の承認カードが受け持つ）。
 
 ### RAG との関係
 
@@ -279,7 +280,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `market_indices` | Yahoo Finance chart API による日経平均・TOPIX・NYダウ・NASDAQ・S&P500 の取得と推移チャート（スパークライン） | APIキー不要、timeout、User-Agent 指定 |
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新ニュース見出し候補を取得。今日のニュース要約ではこのスキルを先に使う | 対象ドメインを Google News / Yahoo!ニュースに限定、HTML 1MB上限、件数上限、timeout、User-Agent 指定 |
 | `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
-| `read_file` | ローカルのテキストファイル読込 | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否、64KB で打ち切り |
+| `read_file` | ローカルのテキストファイルを行番号つきで読込。`offset` / `limit` で範囲指定できる | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否。ファイル4MB・既定800行（最大2000）・1行800文字・出力128KB で打ち切り、続きの `offset` を案内する |
 | `glob_files` | 許可ルート配下のファイルを glob パターン（`**/*.rs` など）で探し、パス一覧を返す。既定は更新の新しい順 | 共通許可ルート配下に限定、シンボリックリンク／ジャンクションは辿らない、深さ12・走査20,000件・表示既定100件（最大500）で打ち切り、`node_modules` / `target` / `.git` など生成物と隠しフォルダは除外 |
 | `grep_search` | 許可ルート配下のファイル内容を正規表現で検索し、行番号付きの一致行・一致ファイル・件数を返す（`output_mode`） | 共通許可ルート配下に限定、検索本体は同梱 ripgrep → PATH の順に解決。ripgrep が無い場合は内蔵走査（固定文字列一致）へ落ち、その旨を結果の先頭に明記する。1ファイル2MB・深さ12・走査5,000件・1行400文字・表示既定60行（最大300）で打ち切り、timeout 30秒 |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
@@ -300,11 +301,13 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルートと `permissions::fs` に限定、読込/書込サイズ上限。同一プロセス内の変更は直列化する。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は実行時点の許可を再検証してから復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
 | `edit_file` | 既存ファイルの一部を、元の文字列と新しい文字列の厳密一致で置換する。`edits` 配列で複数箇所をまとめて編集できる | 共通許可ルートと `permissions::fs` に限定、既存ファイルのみ（新規作成は不可）、512KB 上限、1回20件まで。一致0件と（`replace_all` なしの）複数一致はエラーにして書き込まない。途中の1件でも失敗したら全件書き込まない。`preview=true` で無変更確認。書き込みロックと取り消し履歴は `workspace_files` と共有し、`workspace_files` の `undo` で戻せる |
+| `notebook_edit` | Jupyter ノートブック（.ipynb）をセル単位で読み・差し替え・挿入・削除する | 共通許可ルートと `permissions::fs` に限定、拡張子は `.ipynb` のみ、ファイル8MB・1セル128KB・500セル上限。書き換えたコードセルの `outputs` / `execution_count` は消す。`delete` は `confirm=true` が必要。ノートブックの実行はしない。取り消し履歴は `workspace_files` と共有する |
 | `todo_plan` | 多段タスクの作業計画を登録し、1手ずつ進捗を進める（set / list / complete / add / clear）。完了すると次の手順が自動で着手中になる | `PICOAGENT_TODO_PLAN` に保存し、一覧更新は名前付きロックで直列化する。手順は20件・1件200文字まで。読み取りに失敗したときは空一覧で上書きせずエラーを返す |
 | `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。一覧更新は名前付きロックで直列化する。登録解除は `confirm=true` が必要でファイルは削除せず、使用中IDなら選択状態も消す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
 | `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
-| `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
+| `run_command` | 許可ルート内でローカルコマンドを実行。`background=true` で完了を待たずに起動し job_id を返す | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する。`background` も同じ許可判定を通ってから起動し、承認カード経由の実行は同期実行のみ |
+| `command_job` | `run_command` が `background=true` で起動したジョブの一覧・途中出力取得・停止 | 起動はできない（様子見と停止のみ）。`PICOAGENT_COMMAND_ENABLED` が必要。同時実行4件、1ジョブの保持出力64KB（超過分は古い側から破棄）、終了済み履歴20件。`output` は前回の続きだけを返す。停止は `kill` 後に `wait` でハンドルまで回収し、アプリ終了時（`RunEvent::Exit`）に全ジョブを停止する |
 | `code_runner` | 他スキルで要望を満たせないときの最終手段。PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成する | 既定無効（`PICOAGENT_CODE_RUNNER_ENABLED`）。作業ディレクトリ・許可ルート・保護パスは共通 permissions を参照。物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否。スクリプトは一時ファイルへ書き出して実行後に削除、timeout・出力32KBで制限 |
 | `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信。Bot token では認証テストとチャンネル履歴取得もできる | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、履歴20件上限、timeout |
 | `gmail_message` | Gmail API でメール一覧取得・本文取得・ラベル一覧・ラベル付け/解除・アーカイブ・既読/未読化・ゴミ箱移動・送信・下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、検索条件ベースの cleanup は preview 後に `confirm=true` で実行、ゴミメール掃除は完全削除ではなく Gmail のゴミ箱移動、cleanup 件数上限は `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS`（0で無制限）、検索クエリ/本文/件名サイズ上限、timeout |

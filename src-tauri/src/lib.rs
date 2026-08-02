@@ -292,6 +292,7 @@ pub fn run() {
             aivis::stop(app_handle);
             engine::stop(app_handle);
             mcp::client::stop_all();
+            tools::run_command::jobs::stop_all();
         }
     });
 }

@@ -373,6 +373,22 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "notebook_edit",
+        &["ノートブック", "notebook", "ipynb", "jupyter", "セル"],
+    ),
+    (
+        "command_job",
+        &[
+            "バックグラウンド",
+            "ジョブ",
+            "job",
+            "実行中の",
+            "起動したまま",
+            "ログを見せ",
+            "様子を見",
+        ],
+    ),
+    (
         "project_workspace",
         &[
             "ワークスペース",
