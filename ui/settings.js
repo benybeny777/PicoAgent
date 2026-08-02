@@ -754,7 +754,7 @@ function skillCategory(tool) {
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
     return "info";
   }
-  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "notebook_edit", "project_workspace", "workflow", "run_command", "command_job", "http_api"].includes(name)) {
+  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "notebook_edit", "view_image", "ask_user", "project_workspace", "workflow", "run_command", "command_job", "http_api"].includes(name)) {
     return "workspace";
   }
   if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
@@ -810,6 +810,8 @@ const SKILL_EXAMPLE_FALLBACKS = {
   run_command: ["git statusを実行して", "開発サーバをバックグラウンドで起動して"],
   command_job: ["さっきのビルドの様子を見せて", "動かしっぱなしのサーバを止めて"],
   notebook_edit: ["ノートブックのセルを一覧して", "3番目のセルを差し替えて"],
+  view_image: ["このスクリーンショットに何が写っているか教えて"],
+  ask_user: ["どっちがいいか聞いて決めて"],
   http_api: ["このAPIにPOSTして"],
   ms_office: ["Wordの文字を置換して"],
   document_convert: ["このdocxをPDFにして"],

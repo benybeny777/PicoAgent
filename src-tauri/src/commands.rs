@@ -72,6 +72,8 @@ pub struct AppState {
     pub recent_chatter: Mutex<Vec<String>>,
     /// チャットで確認待ちの未許可コマンド。ユーザーが「許可」または「キャンセル」と返すまで保持する。
     pub pending_command: Mutex<Option<crate::tools::run_command::PendingCommandApproval>>,
+    /// ask_user で提示中の質問。次のユーザー発話を選択肢へ寄せるために保持する。
+    pub pending_question: Mutex<Option<crate::tools::ask_user::PendingQuestion>>,
     /// キャラクターの現在感情状態（ルールベース推定）。
     pub emotion: Mutex<crate::emotion::EmotionState>,
     /// 停止ボタンによる中断要求。送信開始時に false へ戻し、エージェントがステップ境界で確認する。
@@ -94,6 +96,7 @@ impl AppState {
             relationship_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
             pending_command: Mutex::new(None),
+            pending_question: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
             cancel_requested: std::sync::atomic::AtomicBool::new(false),
             conversation_epoch: AtomicU64::new(0),
@@ -811,6 +814,16 @@ pub async fn pet_send(
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
+    // ask_user で提示した質問への返答なら、番号やラベルを選択肢名へ寄せてから会話へ入れる
+    // （モデルが「2」だけを見て何の2か分からなくなるのを防ぐ）。答え方が自由記述なら素通しする。
+    let pending_question = state.pending_question.lock().unwrap().take();
+    let text = match pending_question {
+        Some(question) => match crate::tools::ask_user::resolve_answer(&question, &text) {
+            Some(label) => label,
+            None => text,
+        },
+        None => text,
+    };
     let user_text = text.clone();
     let request_character_id = active_character_id(&state);
     let request_epoch = state.conversation_epoch();
@@ -941,6 +954,30 @@ pub async fn pet_send(
         Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
         Ok(PersistedReply::Current(reply)) => {
             let quit_app = tool_requested_app_quit(&convo);
+            if let Some(question) = crate::tools::ask_user::parse_marker(&reply) {
+                let prompt = crate::tools::ask_user::prompt(&question);
+                let choices: Vec<Value> = question
+                    .options
+                    .iter()
+                    .map(|option| json!({ "label": option.label, "description": option.description }))
+                    .collect();
+                *state.pending_question.lock().unwrap() = Some(question);
+                // 会話へ残すのはマーカーではなく、人が読める質問文にする。
+                let mut refreshed = state.messages.lock().unwrap().clone();
+                if let Some(last) = refreshed
+                    .iter_mut()
+                    .rev()
+                    .find(|message| message.role == "assistant")
+                {
+                    last.content = prompt.clone();
+                }
+                let compacted = compacted_conversation(&refreshed);
+                if conversation_is_current(&state, &request_character_id, request_epoch) {
+                    *state.messages.lock().unwrap() = compacted.clone();
+                    crate::history::save(&app, &request_character_id, &compacted);
+                }
+                return Ok(json!({ "reply": prompt, "choices": choices }));
+            }
             if let Some(pending) = crate::tools::run_command::parse_approval_marker(&reply) {
                 *state.pending_command.lock().unwrap() = Some(pending.clone());
                 let prompt = crate::tools::run_command::approval_prompt(&pending);

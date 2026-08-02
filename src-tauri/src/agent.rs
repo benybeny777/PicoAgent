@@ -1484,15 +1484,53 @@ pub async fn run(
                     .collect();
                 let results = futures::future::join_all(futs).await;
 
-                // run_command の承認マーカーを最初にチェックする。
+                // ユーザーの応答待ちになるマーカーを最初にチェックする。
+                // どちらもループを止めて、返答を次のユーザー発話として受け取る。
                 for (c, (content, _)) in cs.iter().zip(results.iter()) {
-                    if c.name == "run_command"
-                        && crate::tools::run_command::parse_approval_marker(content).is_some()
-                    {
+                    let waiting = match c.name.as_str() {
+                        "run_command" => {
+                            crate::tools::run_command::parse_approval_marker(content).is_some()
+                        }
+                        "ask_user" => crate::tools::ask_user::parse_marker(content).is_some(),
+                        _ => false,
+                    };
+                    if waiting {
                         emit_activity(app, "waiting", std::slice::from_ref(&c.name), &[]);
                         return direct_answer(messages, content.clone());
                     }
                 }
+
+                // view_image のマーカーを、会話へ差し込む画像付き user メッセージへ変換する。
+                // ツール結果は文字列しか返せないため、画像本体はこの経路でしか渡せない。
+                let mut attachments: Vec<Message> = Vec::new();
+                let results: Vec<(String, u64)> = cs
+                    .iter()
+                    .zip(results)
+                    .map(|(call, (content, duration_ms))| {
+                        if call.name != "view_image" {
+                            return (content, duration_ms);
+                        }
+                        match crate::tools::view_image::parse_marker(&content) {
+                            Some(pending) => {
+                                let labels: Vec<String> = pending
+                                    .images
+                                    .iter()
+                                    .map(|image| image.label.clone())
+                                    .collect();
+                                attachments.push(Message::user_with_images(
+                                    format!("（添付画像: {}）", labels.join(", ")),
+                                    pending
+                                        .images
+                                        .into_iter()
+                                        .map(|image| image.data_url)
+                                        .collect(),
+                                ));
+                                (pending.note, duration_ms)
+                            }
+                            None => (content, duration_ms),
+                        }
+                    })
+                    .collect();
 
                 let names: Vec<String> = cs.iter().map(|call| call.name.clone()).collect();
                 let failed_tools: Vec<String> = cs
@@ -1542,6 +1580,9 @@ pub async fn run(
                         usage: None,
                     });
                 }
+                // 画像は tool 結果をすべて積んだあとに置く（tool_calls と tool 結果の
+                // 対応関係を崩さないため）。次の chat 呼び出しでモデルへ渡る。
+                messages.extend(attachments);
             }
             // tool_calls が無ければ最終応答（自己評価が有効なら品質チェックして返す）。
             _ => {

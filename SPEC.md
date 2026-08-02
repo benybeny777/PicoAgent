@@ -239,7 +239,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | 役割 | 副作用 | 本数 | スキル |
 |---|---|---|---|
 | **Retrieval**（外部知識の検索・取得） | read-only | 9 | `web_search` `web_fetch` `doc_search` `rss_feed` `news_scrape` `weather` `currency_rates` `market_indices` `time` |
-| **Read**（手元の状態の読み取り） | read-only | 4 | `read_file` `clipboard_text` `glob_files` `grep_search` |
+| **Read**（手元の状態の読み取り） | read-only | 5 | `read_file` `clipboard_text` `glob_files` `grep_search` `view_image` |
 | **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
 | **Action**（SaaS の読み書き） | write | 12 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` |
 | **Action**（ファイル生成・変換） | write | 9 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` `notebook_edit` |
@@ -248,7 +248,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | **Destructive / 高リスク** | destructive | 5 | `trash_file` `run_command` `command_job` `code_runner` `app_control` |
 | **State**（アプリ内の永続状態） | write | 7 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` `todo_plan` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
-| **Orchestration**（多段実行・組み立て） | 呼び先に従う | 5 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` |
+| **Orchestration**（多段実行・組み立て） | 呼び先に従う | 6 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` `ask_user` |
 
 補足:
 
@@ -256,7 +256,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - **Orchestration** は他スキルを呼ぶため、副作用は呼び先で決まる。`workflow` は手順を保存する点で State も兼ね、`research_report` は検索（Retrieval）と Markdown 書き出し（write）を兼ねる。`chitchat` は `agent_callable=false` の内部スキルで、モデルには提示せずアプリ側が直接 `dispatch` する。
 - **Action（SaaS の読み書き）** は一覧取得と作成の両方を持つものが大半で、`gmail` のアーカイブ・既読化のように既存状態を変える操作も含む。
 - **コーディングエージェント系**（`read_file` `glob_files` `grep_search` `edit_file` `notebook_edit` `todo_plan` `run_command` の `background` と `command_job`）は、Claude Code / Codex が持つ Read / Glob / Grep / Edit（apply_patch）/ NotebookEdit / TodoWrite（update_plan）/ Bash のバックグラウンド実行（BashOutput・KillShell）に相当する。読む → 探す（名前・内容）→ 部分的に直す → 走らせて様子を見る → 進捗を進める、という作業の流れを分担するため、単体ではなく組で使う。`edit_file` / `notebook_edit` は `workspace_files` と同じロック・取り消し履歴を共有するので、編集は `workspace_files` の `undo` で戻せる。
-- 一方、Claude Code / Codex にあって**意図的に持たないもの**もある。ツール結果が文字列のみのため画像を返す `view_image` 相当は無く（画像は正規形メッセージの `images` でユーザー入力としてのみ渡る）、選択肢つきで人に尋ねる `AskUserQuestion` 相当も無い（PicoAgent は会話そのものが入口で、危険な操作は `run_command` の承認カードが受け持つ）。
+- **`view_image` と `ask_user` はツール結果（文字列）だけでは成立しないため、マーカー方式でエージェントループと連携する。** ツールは内部プロトコルのマーカー文字列を返し、`agent.rs` がそれを解釈する。`view_image` は画像付き user メッセージを会話へ差し込んでループを続け、`ask_user` は `run_command` の承認カードと同じくループを止めてユーザーへ質問を返す。マーカーは設定キーではないので `doc_sync` の `NOT_CONFIG_KEYS` に理由付きで登録してある。
+- `ask_user` は「聞かないとやり直しになる」場面専用で、既定値で進める・調べれば分かることには使わない。候補ツールの圧縮（最大12件）に載るのはキーワードルーティング経由なので、曖昧な依頼で必ず提示されるとは限らない。
 
 ### RAG との関係
 
@@ -281,6 +282,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新ニュース見出し候補を取得。今日のニュース要約ではこのスキルを先に使う | 対象ドメインを Google News / Yahoo!ニュースに限定、HTML 1MB上限、件数上限、timeout、User-Agent 指定 |
 | `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
 | `read_file` | ローカルのテキストファイルを行番号つきで読込。`offset` / `limit` で範囲指定できる | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否。ファイル4MB・既定800行（最大2000）・1行800文字・出力128KB で打ち切り、続きの `offset` を案内する |
+| `view_image` | 許可ルート配下の画像をモデルへ見せる（png / jpg / gif / webp / bmp、最大3枚） | 共通許可ルート配下に限定、1枚4MB上限。ツール結果には画像を載せず、`agent.rs` が画像付き user メッセージを会話へ差し込む。実際に読めるかはモデルがマルチモーダルかどうかに依るため、「非対応モデルでは無視される」旨をツール結果へ明記する。画像を運べる形式へは各プロバイダが変換する（OpenAI 互換は `image_url`、Ollama は `images` 配列、Anthropic は image ブロック） |
+| `ask_user` | 判断が分かれる点を2〜4個の選択肢つきでユーザーへ確認する | 外部送信なし。マーカーを返してエージェントループを止め、質問文と選択肢をチャットへ返す（フロントはクイック操作欄へ選択肢ボタンを出す）。次のユーザー発話は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま渡す。質問300文字・ラベル40文字・説明120文字で切り詰める |
 | `glob_files` | 許可ルート配下のファイルを glob パターン（`**/*.rs` など）で探し、パス一覧を返す。既定は更新の新しい順 | 共通許可ルート配下に限定、シンボリックリンク／ジャンクションは辿らない、深さ12・走査20,000件・表示既定100件（最大500）で打ち切り、`node_modules` / `target` / `.git` など生成物と隠しフォルダは除外 |
 | `grep_search` | 許可ルート配下のファイル内容を正規表現で検索し、行番号付きの一致行・一致ファイル・件数を返す（`output_mode`） | 共通許可ルート配下に限定、検索本体は同梱 ripgrep → PATH の順に解決。ripgrep が無い場合は内蔵走査（固定文字列一致）へ落ち、その旨を結果の先頭に明記する。1ファイル2MB・深さ12・走査5,000件・1行400文字・表示既定60行（最大300）で打ち切り、timeout 30秒 |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
@@ -644,6 +647,7 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - アクションセンター（`renderer.js`）: メインフキダシの通知ボタンは `pet:notice`、`pet_schedule_runs`、会話タスクの状態を同じ一覧へ表示し、未読件数をバッジ表示する。直近50件は `localStorage` に保持する。実行中会話には停止、完了会話には再入力、スケジュール通知には再実行と設定の操作を出す。失敗時はエラー色、成功時は通常色で表示する。
 - 共通プロセス実行（`tools/process.rs`）: スキルからの外部コマンド起動を1箇所へ集約する。`process::command()` がWindows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`（中断時の子プロセス回収）・stdio の既定を適用した `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行する。**スキルが `Command::new` を直接使うことは禁止**で、`tools::process::guard` のテストが直接起動と自前 `hide_window` / `CREATE_NO_WINDOW` を検出して失敗させる。
 - 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。許可判定を通過したパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限定する（内部 `PathBuf` は非公開。派生パスも再検証するので `..` で脱出できない）。ファイル操作は `SafePath` だけを受け取る `permissions::fs` を使う。アプリ内部が決めたパス（一時ファイル等）のみ `SafePath::app_owned` で扱う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` のテストが `skills/**/mod.rs` を走査し、自前判定（`fn bounded_path(base:` 等）とパス引数を持つのに `resolve` を通していないスキルを検出して失敗させる（例外は `run_command` / `code_runner` / `trash_file` のみ。いずれも独自の追加制約を持つ実行・削除系）。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。許可判定では既存の最深祖先を実体化し、シンボリックリンクやWindowsジャンクション経由のルート外到達も拒否する。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）とドロップファイル読込はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_MEETING_ROOT`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
+- ユーザーへの確認（`ask_user`）: モデルが判断に迷う点を2〜4個の選択肢つきで尋ねる。`run_command` の承認カードと同じマーカー方式で、`agent.rs` がエージェントループを止め、`commands.rs` が質問文と `choices` をフロントへ返す（クイック操作欄が選択肢ボタンに切り替わる）。保留中の質問は `AppState.pending_question` が1件だけ保持し、次のユーザー発話で必ず解除する。返答は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま会話へ入る。外部送信も設定変更もしない。
 - 自力実行（`code_runner`）: `PICOAGENT_CODE_RUNNER_ENABLED=true` が必要（既定無効）。他スキルで要望を満たせないとき、モデルが PowerShell または Python のスクリプトを書いて実行し、出力を受け取って達成する。作業ディレクトリと許可判定は共通 permissions を参照し、保護パスと許可ルート外を拒否する。スクリプト本文に物理削除・破壊的操作（Remove-Item / rm / os.remove / shutil.rmtree 等）が含まれる場合は実行しない。スクリプトは一時ファイルへ書き出し、実行後に削除する。timeout・出力32KBで制限。
 - コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が共通の許可ルート外の場合、チャットへ確認文を返す。ユーザーが「許可」と送った場合は保留中の1件だけ実行する。「永続許可」と送った場合はコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を共通の `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。
 - 起動待ち画面: `#petApp.is-booting` 中は通常のフキダシとキャラクターを隠し、`#bootScreen` に選択中キャラクターの `boot.sleeping`（未定義なら `idle` 先頭フレーム）を使った待機画面を表示する。`renderer.js` の `setStatus()` がモデルDL、同梱エンジン起動、Aivis 起動待ちなど**実行中の処理だけ**を `#bootStatus` に同期する。準備完了時の「<キャラ名>を起こしているよ…」はプログレスバー下に出し、`is-booting` を外して通常表示へ切り替える。
