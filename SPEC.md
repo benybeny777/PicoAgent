@@ -246,7 +246,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
 | **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
 | **Destructive / 高リスク** | destructive | 5 | `trash_file` `run_command` `command_job` `code_runner` `app_control` |
-| **State**（アプリ内の永続状態） | write | 9 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` `todo_plan` `project_tasks` `project_notes` |
+| **State**（アプリ内の永続状態） | write | 7 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `todo_plan` `project` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
 | **Orchestration**（多段実行・組み立て） | 呼び先に従う | 6 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` `ask_user` |
 
@@ -257,7 +257,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - **Action（SaaS の読み書き）** は一覧取得と作成の両方を持つものが大半で、`gmail` のアーカイブ・既読化のように既存状態を変える操作も含む。
 - **コーディングエージェント系**（`read_file` `glob_files` `grep_search` `edit_file` `notebook_edit` `todo_plan` `run_command` の `background` と `command_job`）は、Claude Code / Codex が持つ Read / Glob / Grep / Edit（apply_patch）/ NotebookEdit / TodoWrite（update_plan）/ Bash のバックグラウンド実行（BashOutput・KillShell）に相当する。読む → 探す（名前・内容）→ 部分的に直す → 走らせて様子を見る → 進捗を進める、という作業の流れを分担するため、単体ではなく組で使う。`edit_file` / `notebook_edit` は `workspace_files` と同じロック・取り消し履歴を共有するので、編集は `workspace_files` の `undo` で戻せる。
 - **`view_image` と `ask_user` はツール結果（文字列）だけでは成立しないため、マーカー方式でエージェントループと連携する。** ツールは内部プロトコルのマーカー文字列を返し、`agent.rs` がそれを解釈する。`view_image` は画像付き user メッセージを会話へ差し込んでループを続け、`ask_user` は `run_command` の承認カードと同じくループを止めてユーザーへ質問を返す。マーカーは設定キーではないので `doc_sync` の `NOT_CONFIG_KEYS` に理由付きで登録してある。
-- **プロジェクト管理は3本で役割を分ける。** `project_workspace` が環境（許可ルート・AI・モデル・キャラクター）の切り替え、`project_tasks` が長く残る課題台帳、`project_notes` が決定事項・進捗の記録。3本ともプロジェクトIDとして `PICOAGENT_ACTIVE_WORKSPACE` を既定で参照するので、ワークスペースを切り替えると課題も記録も一緒に切り替わる。`todo_plan`（1本の作業計画）とは別物で、あちらは「いま取りかかっている手順」、`project_tasks` は「残っている課題」を持つ。
+- **プロジェクト管理は `project` 1本に統合してある。** 以前は「ワークスペース（環境の名前付きセット）」と「課題・記録」が別スキルだったが、ユーザーから見ればどちらも同じ「いま取り組んでいる案件」で、名前も概念も二重だった。1つの `Project` レコードが環境（許可ルート・追加許可パス・AI・モデル・キャラクター）と課題・記録を持ち、`switch` すれば全部が一緒に切り替わる。`todo_plan`（1本の作業計画）とは別物で、あちらは「いま取りかかっている手順」、`project` の課題は「残っている案件のやること」を持つ。
 - `ask_user` は「聞かないとやり直しになる」場面専用で、既定値で進める・調べれば分かることには使わない。候補ツールの圧縮（最大12件）に載るのはキーワードルーティング経由なので、曖昧な依頼で必ず提示されるとは限らない。
 
 ### RAG との関係
@@ -307,9 +307,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `edit_file` | 既存ファイルの一部を、元の文字列と新しい文字列の厳密一致で置換する。`edits` 配列で複数箇所をまとめて編集できる | 共通許可ルートと `permissions::fs` に限定、既存ファイルのみ（新規作成は不可）、512KB 上限、1回20件まで。一致0件と（`replace_all` なしの）複数一致はエラーにして書き込まない。途中の1件でも失敗したら全件書き込まない。`preview=true` で無変更確認。書き込みロックと取り消し履歴は `workspace_files` と共有し、`workspace_files` の `undo` で戻せる |
 | `notebook_edit` | Jupyter ノートブック（.ipynb）をセル単位で読み・差し替え・挿入・削除する | 共通許可ルートと `permissions::fs` に限定、拡張子は `.ipynb` のみ、ファイル8MB・1セル128KB・500セル上限。書き換えたコードセルの `outputs` / `execution_count` は消す。`delete` は `confirm=true` が必要。ノートブックの実行はしない。取り消し履歴は `workspace_files` と共有する |
 | `todo_plan` | 多段タスクの作業計画を登録し、1手ずつ進捗を進める（set / list / complete / add / clear）。完了すると次の手順が自動で着手中になる | `PICOAGENT_TODO_PLAN` に保存し、一覧更新は名前付きロックで直列化する。手順は20件・1件200文字まで。読み取りに失敗したときは空一覧で上書きせずエラーを返す |
-| `project_tasks` | プロジェクト単位の課題台帳。登録・一覧・更新・完了・削除と、プロジェクト別の集計（`summary`）。期限・優先度・タグで絞り込む | `PICOAGENT_PROJECT_TASKS` に保存し、一覧更新は名前付きロックで直列化する。課題200件、タイトル120文字、メモ400文字、タグ5個まで。`due` は `YYYY-MM-DD`（または `due_in_days` の相対指定）以外を拒否する。`remove` は `confirm=true` が必要。読み取りに失敗したときは空一覧で上書きせずエラーを返す |
-| `project_notes` | プロジェクトごとのメモ・決定事項・進捗の記録と読み返し | `PICOAGENT_PROJECT_NOTES` に保存し、一覧更新は名前付きロックで直列化する。記録200件・1件300文字まで。上限に達しても古い記録を自動削除せず、整理をユーザーへ促す（決定事項が黙って消えないように）。`remove` は `confirm=true` が必要 |
-| `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。一覧更新は名前付きロックで直列化する。登録解除は `confirm=true` が必要でファイルは削除せず、使用中IDなら選択状態も消す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
+| `project` | 案件ごとの作業環境（許可ルート・追加許可パス・AI・モデル・キャラクター）の登録・切替・登録解除に加え、課題台帳（登録・一覧・更新・完了・削除）と記録（メモ・決定事項・進捗）を同じレコードで扱う | `PICOAGENT_PROJECTS` に保存し、選択IDは `PICOAGENT_ACTIVE_PROJECT`。一覧更新は名前付きロックで直列化する。プロジェクト50件、1プロジェクトあたり課題200件・記録200件、タイトル120文字・記録300文字・タグ5個まで。`due` は `YYYY-MM-DD`（または `due_in_days` の相対指定）以外を拒否する。`forget` / `task_remove` / `note_remove` は `confirm=true` が必要で、`forget` のプレビューには一緒に消える課題・記録の件数を出す。記録は上限に達しても古いものを自動削除せず整理を促す（決定事項が黙って消えないように）。登録解除でファイルは削除しない。使用中IDを消したら選択状態も外す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する。旧キー `PICOAGENT_WORKSPACES` / `PICOAGENT_ACTIVE_WORKSPACE` は新キーが空のときだけ読んで移行し、移行後も消さない（元へ戻せるようにするため） |
 | `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
 | `run_command` | 許可ルート内でローカルコマンドを実行。`background=true` で完了を待たずに起動し job_id を返す | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する。`background` も同じ許可判定を通ってから起動し、承認カード経由の実行は同期実行のみ |
@@ -461,8 +459,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MISTRAL_MODEL` | `mistral-medium-latest` | mistral | Mistral の既定モデル |
 | `PICOAGENT_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | mistral | Mistral OpenAI 互換エンドポイント |
 | `PICOAGENT_ALLOWED_ROOT` | ユーザーホーム | 許可（共通） | 全スキル共通の主たる許可ルート（相対パスの基準）。ファイル/ディレクトリ/コマンド実行はここを参照する |
-| `PICOAGENT_WORKSPACES` | `[]` | project_workspace | 名前付きプロジェクトワークスペース一覧（JSON文字列） |
-| `PICOAGENT_ACTIVE_WORKSPACE` | （空） | project_workspace | 現在選択中のプロジェクトワークスペースID |
+| `PICOAGENT_WORKSPACES` | （旧キー） | project | 旧キー。`PICOAGENT_PROJECTS` へ統合。新キーが空のときだけ読んで移行し、移行後も消さない |
+| `PICOAGENT_ACTIVE_WORKSPACE` | （旧キー） | project | 旧キー。`PICOAGENT_ACTIVE_PROJECT` へ統合。新キーが空のときだけ読む |
 | `PICOAGENT_WORKFLOWS` | `[]` | workflow | 名前付き保存ワークフロー一覧（JSON文字列、1件最大8手順） |
 | `PICOAGENT_ALLOWED_PATHS` | （空） | 許可（共通） | 追加の許可ルート（改行または `;` 区切り）。run_command の「永続許可」でも追記される |
 | `PICOAGENT_DENIED_PATHS` | （空） | 許可（共通） | 追加の拒否パス（改行または `;` 区切り）。この配下は常に操作を拒否する。`C:\Windows` / `Program Files` は設定に関わらず常に拒否 |
@@ -485,8 +483,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_DAILY_EVENTS` | `[]` | reminder / focus_timer | リマインダー・集中タイマー・見守り通知（JSON文字列） |
 | `PICOAGENT_PRAISE_LOG` | `[]` | praise_log | できたことメモ（JSON文字列） |
 | `PICOAGENT_TODO_PLAN` | `[]` | todo_plan | 多段タスクの作業計画（JSON文字列、最大20手順） |
-| `PICOAGENT_PROJECT_TASKS` | `[]` | project_tasks | プロジェクト課題台帳（JSON文字列、最大200件） |
-| `PICOAGENT_PROJECT_NOTES` | `[]` | project_notes | プロジェクトの記録（JSON文字列、最大200件） |
+| `PICOAGENT_PROJECTS` | `[]` | project | プロジェクト一覧（環境・課題・記録を含む JSON 文字列、最大50件） |
+| `PICOAGENT_ACTIVE_PROJECT` | （空） | project | 現在選択中のプロジェクトID |
 | `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | （旧キー） | meeting_recorder | 旧キー。設定画面からは廃止。設定済みなら既存利用者向けに追加許可ルートとしてだけ引き継ぐ |
@@ -652,7 +650,7 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - アクションセンター（`renderer.js`）: メインフキダシの通知ボタンは `pet:notice`、`pet_schedule_runs`、会話タスクの状態を同じ一覧へ表示し、未読件数をバッジ表示する。直近50件は `localStorage` に保持する。実行中会話には停止、完了会話には再入力、スケジュール通知には再実行と設定の操作を出す。失敗時はエラー色、成功時は通常色で表示する。
 - 共通プロセス実行（`tools/process.rs`）: スキルからの外部コマンド起動を1箇所へ集約する。`process::command()` がWindows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`（中断時の子プロセス回収）・stdio の既定を適用した `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行する。**スキルが `Command::new` を直接使うことは禁止**で、`tools::process::guard` のテストが直接起動と自前 `hide_window` / `CREATE_NO_WINDOW` を検出して失敗させる。
 - 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。許可判定を通過したパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限定する（内部 `PathBuf` は非公開。派生パスも再検証するので `..` で脱出できない）。ファイル操作は `SafePath` だけを受け取る `permissions::fs` を使う。アプリ内部が決めたパス（一時ファイル等）のみ `SafePath::app_owned` で扱う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` のテストが `skills/**/mod.rs` を走査し、自前判定（`fn bounded_path(base:` 等）とパス引数を持つのに `resolve` を通していないスキルを検出して失敗させる（例外は `run_command` / `code_runner` / `trash_file` のみ。いずれも独自の追加制約を持つ実行・削除系）。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。許可判定では既存の最深祖先を実体化し、シンボリックリンクやWindowsジャンクション経由のルート外到達も拒否する。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）とドロップファイル読込はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_MEETING_ROOT`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
-- プロジェクト文脈の差し込み: `pet_send` のたびに `project_tasks::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system メッセージの `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**（追記だと課題を足すたびに古いまとめが積み重なる）。台帳が読めないときは差し込まずに会話を続ける（読み取り専用の付加情報で、保存はしないためデータは失われない）。
+- プロジェクト文脈の差し込み: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system メッセージの `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**（追記だと課題を足すたびに古いまとめが積み重なる）。台帳が読めないときは差し込まずに会話を続ける（読み取り専用の付加情報で、保存はしないためデータは失われない）。
 - ユーザーへの確認（`ask_user`）: モデルが判断に迷う点を2〜4個の選択肢つきで尋ねる。`run_command` の承認カードと同じマーカー方式で、`agent.rs` がエージェントループを止め、`commands.rs` が質問文と `choices` をフロントへ返す（クイック操作欄が選択肢ボタンに切り替わる）。保留中の質問は `AppState.pending_question` が1件だけ保持し、次のユーザー発話で必ず解除する。返答は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま会話へ入る。外部送信も設定変更もしない。
 - 自力実行（`code_runner`）: `PICOAGENT_CODE_RUNNER_ENABLED=true` が必要（既定無効）。他スキルで要望を満たせないとき、モデルが PowerShell または Python のスクリプトを書いて実行し、出力を受け取って達成する。作業ディレクトリと許可判定は共通 permissions を参照し、保護パスと許可ルート外を拒否する。スクリプト本文に物理削除・破壊的操作（Remove-Item / rm / os.remove / shutil.rmtree 等）が含まれる場合は実行しない。スクリプトは一時ファイルへ書き出し、実行後に削除する。timeout・出力32KBで制限。
 - コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が共通の許可ルート外の場合、チャットへ確認文を返す。ユーザーが「許可」と送った場合は保留中の1件だけ実行する。「永続許可」と送った場合はコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を共通の `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。

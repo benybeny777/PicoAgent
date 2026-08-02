@@ -927,7 +927,7 @@ pub async fn pet_send(
     }
     // 選択中プロジェクトの課題・記録を system 文脈へ差し込む。台帳は会話中にも変わるので、
     // 起動時ではなく毎回作り直して古い内容が残らないようにする。
-    apply_project_context(&mut convo, &crate::tools::project_tasks::project_context(&state.config));
+    apply_project_context(&mut convo, &crate::tools::project::project_context(&state.config));
     convo.push(Message::new("user", text));
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。

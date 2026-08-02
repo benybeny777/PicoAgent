@@ -257,10 +257,9 @@ mod guard {
     fn スキル固有の設定一覧もロックの中で更新する() {
         let mut offenders = Vec::new();
         for source in crate::guard_scan::skill_sources() {
-            let path = source.path.to_string_lossy().replace('\\', "/");
-            if !path.contains("/project_workspace/") && !path.contains("/workflow/") {
-                continue;
-            }
+            // 対象スキルを列挙していると、同じ書き方の新しいスキルを取りこぼす
+            // （実際に project / todo_plan は列挙に入っていなかった）。
+            // `set_string` を呼ぶスキルすべてを対象にする。
             let body = source.body();
             if body.contains("set_string(") && !body.contains("lock_state(") {
                 offenders.push(source.path.display().to_string());
