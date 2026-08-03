@@ -494,7 +494,7 @@ function personaText(manifest, override) {
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterOverridesCache = overrides;
   const { manifest, root } = await loadCharacterManifest(characterId);
-  if (!manifest.live2d?.model && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
+  if (!manifest.live2d?.model && !manifest.live2d?.models?.length && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
@@ -511,7 +511,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
-  if (manifest.live2d?.model) {
+  if (manifest.live2d?.model || manifest.live2d?.models?.length) {
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
       await startLive2D(manifest);
@@ -670,9 +670,9 @@ function scheduleBlink() {
       rigRefresh();
       setTimeout(resolve, ms);
     });
-    await step("blink_half", sleepy ? 140 : 60);
-    await step("blink_closed", 90);
-    await step("blink_half", sleepy ? 260 : 60);
+    await step("blink_half", sleepy ? 160 : 100);
+    await step("blink_closed", 140);
+    await step("blink_half", sleepy ? 280 : 100);
     rigBlinkPhase = null;
     rigRefresh();
     scheduleBlink();
@@ -803,7 +803,7 @@ async function ensureLive2DRuntime() {
   if (window.PIXI?.live2d?.Live2DModel) return;
   if (!live2dRuntimePromise) {
     live2dRuntimePromise = (async () => {
-      await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js");
+      await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js?v=5-r5");
       await loadScriptOnce("vendor/live2d/pixi.min.js");
       await loadScriptOnce("vendor/live2d/cubism4.min.js");
       // モデル同梱のモーション音声（サンプルボイス）は TTS 読み上げと二重再生になるため無効化する。
@@ -820,6 +820,7 @@ async function startLive2D(manifest) {
   await ensureLive2DRuntime();
   stopLive2D();
   const cfg = manifest.live2d;
+  const motionEnabled = !reduceMotion || cfg.alwaysAnimate === true;
   if (!live2dCanvas) {
     live2dCanvas = document.createElement("canvas");
     live2dCanvas.id = "live2dCanvas";
@@ -829,17 +830,54 @@ async function startLive2D(manifest) {
   const width = character.clientWidth || 265;
   const height = character.clientHeight || 315;
   if (!live2dApp) {
+    const transparentContextOptions = {
+      alpha: true,
+      premultipliedAlpha: true,
+      antialias: true,
+    };
+    const transparentContext = live2dCanvas.getContext("webgl2", transparentContextOptions)
+      || live2dCanvas.getContext("webgl", transparentContextOptions);
     live2dApp = new PIXI.Application({
       view: live2dCanvas,
+      context: transparentContext,
       width,
       height,
+      transparent: true,
+      useContextAlpha: true,
       backgroundAlpha: 0,
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
     });
+    live2dCanvas.style.background = "transparent";
+    if (live2dApp.renderer.background) live2dApp.renderer.background.alpha = 0;
+    live2dApp.renderer.backgroundAlpha = 0;
+    live2dApp.renderer.transparent = true;
+    if (live2dApp.renderer._backgroundColorRgba) {
+      live2dApp.renderer._backgroundColorRgba[3] = 0;
+    }
   }
-  const model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${cfg.model}`, { autoInteract: false });
+  const modelCandidates = Array.isArray(cfg.models) && cfg.models.length ? cfg.models : [cfg.model];
+  let model = null;
+  let modelError = null;
+  for (const candidate of modelCandidates) {
+    if (!candidate) continue;
+    try {
+      model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${candidate}`, { autoInteract: false });
+      break;
+    } catch (error) {
+      modelError = error;
+      logApp("warn", `Live2Dモデル ${candidate} は現在のCubism Coreで読めません。次の互換モデルを試します`, errorDetail(error));
+    }
+  }
+  if (!model) throw modelError || new Error("利用可能なLive2D互換モデルがありません");
+  logApp("info", "Live2D表示寸法", JSON.stringify({
+    canvas: [width, height],
+    original: [model.internalModel.originalWidth, model.internalModel.originalHeight],
+    bounds: [model.width, model.height],
+    scale: Number(cfg.scale) || 1,
+    motionEnabled,
+  }));
   // 表示枠へ等比率で収め、下端中央に立たせる。
   const fit = Math.min(width / model.internalModel.originalWidth, height / model.internalModel.originalHeight);
   model.scale.set(fit * (Number(cfg.scale) || 1));
@@ -854,10 +892,25 @@ async function startLive2D(manifest) {
   const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
   model.internalModel.motionManager.update = (...args) => {
     const updated = motionUpdate(...args);
+    if (motionEnabled) {
+      const seconds = performance.now() / 1000;
+      coreModel.setParameterValueById("ParamBodyAngleX", Math.sin(seconds * 1.35) * 4.5);
+      coreModel.setParameterValueById("ParamBodyAngleZ", Math.sin(seconds * 1.05 + 0.8) * 2.4);
+      coreModel.setParameterValueById("ParamBreath", (Math.sin(seconds * 1.8) + 1) * 0.5);
+      coreModel.setParameterValueById("ParamHairFront", Math.sin(seconds * 1.2 + 0.4) * 0.35);
+      coreModel.setParameterValueById("ParamHairSide", Math.sin(seconds * 1.1 + 1.1) * 0.42);
+      coreModel.setParameterValueById("ParamHairBack", Math.sin(seconds * 0.95 + 1.8) * 0.34);
+      coreModel.setParameterValueById("PARAM_BODY_ANGLE_X", Math.sin(seconds * 1.35) * 4.5);
+      coreModel.setParameterValueById("PARAM_BODY_ANGLE_Z", Math.sin(seconds * 1.05 + 0.8) * 2.4);
+      coreModel.setParameterValueById("PARAM_BREATH", (Math.sin(seconds * 1.8) + 1) * 0.5);
+      coreModel.setParameterValueById("PARAM_HAIR_FRONT", Math.sin(seconds * 1.2 + 0.4) * 0.35);
+      coreModel.setParameterValueById("PARAM_HAIR_BACK", Math.sin(seconds * 0.95 + 1.8) * 0.34);
+      coreModel.setParameterValueById("PARAM_HAIR_FLUFFY", Math.sin(seconds * 1.1 + 1.1) * 0.42);
+    }
     if (live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
     return updated;
   };
-  if (reduceMotion) {
+  if (!motionEnabled) {
     // モーション再生を止め、呼吸などの静かな自動更新だけにする。
     model.internalModel.motionManager.groups.idle = "";
   } else if (cfg.motions?.idle) {
@@ -867,16 +920,22 @@ async function startLive2D(manifest) {
   live2dModel = model;
   live2dActive = true;
   petSprite.style.display = "none";
+  if (motionEnabled && cfg.motions?.idle) {
+    const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
+    model.motion(cfg.motions.idle, 0, idlePriority);
+  }
 }
 
 // 状態名（idle/thinking/talking/sad）を character.json の live2d.motions でグループへ写像して再生する。
 function playLive2DMotion(name) {
-  if (!live2dModel || reduceMotion) return;
-  if (name === "idle") { live2dModel.internalModel.motionManager.stopAllMotions(); return; } // Idle グループの自動再生へ戻す
+  const alwaysAnimate = characterManifest?.live2d?.alwaysAnimate === true;
+  if (!live2dModel || (reduceMotion && !alwaysAnimate)) return;
   const motions = characterManifest?.live2d?.motions || {};
   const group = motions[name] || motions.idle;
   if (!group) return;
-  const priority = window.PIXI?.live2d?.MotionPriority?.FORCE ?? 3;
+  const priority = name === "idle"
+    ? (window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1)
+    : (window.PIXI?.live2d?.MotionPriority?.FORCE ?? 3);
   live2dModel.motion(group, undefined, priority);
 }
 

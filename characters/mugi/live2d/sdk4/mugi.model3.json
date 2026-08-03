@@ -1,0 +1,46 @@
+{
+    "Version":  3,
+    "FileReferences":  {
+                           "Moc":  "mugi.moc3",
+                           "Textures":  [
+                                            "mugi.4096/texture_00.png",
+                                            "mugi.4096/texture_01.png",
+                                            "mugi.4096/texture_02.png"
+                                        ],
+                           "Physics":  "mugi.physics3.json",
+                           "DisplayInfo":  "mugi.cdi3.json",
+                           "Motions":  {
+                                           "Idle":  [
+                                                        {
+                                                            "File":  "motions/mugi_idle.motion3.json",
+                                                            "FadeInTime":  0.5,
+                                                            "FadeOutTime":  0.5
+                                                        }
+                                                    ],
+                                           "TapBody":  [
+                                                           {
+                                                               "File":  "motions/mugi_idle.motion3.json",
+                                                               "FadeInTime":  0.25,
+                                                               "FadeOutTime":  0.5
+                                                           }
+                                                       ]
+                                       }
+                       },
+    "Groups":  [
+                   {
+                       "Target":  "Parameter",
+                       "Name":  "EyeBlink",
+                       "Ids":  [
+                                   "ParamEyeLOpen",
+                                   "ParamEyeROpen"
+                               ]
+                   },
+                   {
+                       "Target":  "Parameter",
+                       "Name":  "LipSync",
+                       "Ids":  [
+                                   "ParamMouthOpenY"
+                               ]
+                   }
+               ]
+}
