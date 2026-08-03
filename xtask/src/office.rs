@@ -59,7 +59,9 @@ fn fetch_office_inner() -> Result<()> {
     }
 
     // downloadarchive は旧版も恒久的に配布されるため、latest 追従より安定する。
-    let version = env_or("LIBREOFFICE_VERSION", "24.8.4");
+    // **バージョンは4桁**（`24.8.7.2`）。`old/` 配下は4桁のディレクトリしか無く、
+    // 3桁（`24.8.4`）を指定すると 404 になる（実際にこれで取得できていなかった）。
+    let version = env_or("LIBREOFFICE_VERSION", "24.8.7.2");
     let base = format!("https://downloadarchive.documentfoundation.org/libreoffice/old/{version}");
 
     if cfg!(windows) {
@@ -80,6 +82,21 @@ fn fetch_office_inner() -> Result<()> {
     Ok(())
 }
 
+/// `msiexec` へ渡すパスを Windows の区切り文字へ正規化する。
+///
+/// `repo_root().join("src-tauri/resources/bundled/office")` は区切りが混在した
+/// `C:\...\src-tauri/resources/bundled/office` を作る。tar や PowerShell はこれを許容するが、
+/// **`msiexec` は混在パスのパッケージを開けず 1619（ERROR_INSTALL_PACKAGE_OPEN_FAILED）で
+/// 失敗する**（実際にこれで LibreOffice の同梱取得がずっと失敗していた。ダウンロード自体は
+/// 成功しているうえ警告止まりなので気づきにくい）。
+fn msiexec_path(path: &Path) -> String {
+    if cfg!(windows) {
+        path.to_string_lossy().replace('/', "\\")
+    } else {
+        path.to_string_lossy().into_owned()
+    }
+}
+
 fn fetch_office_windows(dir: &Path, base: &str, version: &str) -> Result<()> {
     let msi = dir.join(format!("LibreOffice_{version}.msi"));
     download_to(
@@ -90,9 +107,9 @@ fn fetch_office_windows(dir: &Path, base: &str, version: &str) -> Result<()> {
     let target = dir.join("extract");
     let status = Command::new("msiexec")
         .arg("/a")
-        .arg(&msi)
+        .arg(msiexec_path(&msi))
         .arg("/qn")
-        .arg(format!("TARGETDIR={}", target.display()))
+        .arg(format!("TARGETDIR={}", msiexec_path(&target)))
         .status()
         .context("msiexec を起動できません")?;
     fs::remove_file(&msi).ok();
@@ -330,5 +347,19 @@ mod tests {
             { "name": "SOURCE.tar.gz", "browser_download_url": "u" }
         ]});
         assert!(pick_aivis_asset(&release).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn msiexecへ渡すパスに区切りを混在させない() {
+        // `repo_root().join("src-tauri/resources/...")` が作る混在パスを msiexec に渡すと
+        // 1619 で失敗する。正規化を外すとここで気づけるようにしておく。
+        let mixed = std::path::PathBuf::from(r"C:\repo\src-tauri/resources/bundled/office\x.msi");
+        let normalized = super::msiexec_path(&mixed);
+        assert!(
+            !normalized.contains('/'),
+            "msiexec へ渡すパスに / が残っています: {normalized}"
+        );
+        assert_eq!(normalized, r"C:\repo\src-tauri\resources\bundled\office\x.msi");
     }
 }

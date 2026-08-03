@@ -235,31 +235,36 @@ impl Tool for ImageToolsTool {
 mod tests {
     use serde_json::json;
 
-    /// ImageMagick が本当に入っているか。**起動できたかどうかでは判定しない**
-    /// （Windows の `System32\convert.exe` は常に起動に成功するため、
-    /// 名前だけで見ると ImageMagick 未導入の環境で誤検出する）。
-    fn have_imagemagick() -> bool {
+    /// 実行に使う ImageMagick を、**スキル本体とまったく同じ解決順**（設定 → 同梱 → PATH）で決める。
+    ///
+    /// 以前は素の `magick` / `convert` を PATH から探していたため、このプロジェクトの
+    /// 既定構成（`cargo xtask setup tools` で `resources/bundled/tools/imagemagick/` へ同梱）
+    /// では**常にスキップされ、E2E が一度も走っていなかった**。
+    /// 名乗りの確認は `is_imagemagick` に任せる（Windows の `System32\convert.exe` 対策）。
+    fn resolve_imagemagick(cfg: &crate::config::Config) -> Option<String> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async { super::is_imagemagick("magick").await || super::is_imagemagick("convert").await })
+        runtime.block_on(async {
+            let program = super::magick_program(cfg, "convert").await;
+            super::is_imagemagick(&program).await.then_some(program)
+        })
     }
 
     // ImageMagick がある環境だけで走る E2E（無ければ即成功で抜ける）。
     // PSD を生成 → PNG へ変換 → 情報取得まで一連の流れを確認する。
     #[test]
     fn psdをpngへ変換して情報取得できる() {
-        if !have_imagemagick() {
-            eprintln!("ImageMagick が無いためスキップ");
-            return;
-        }
         let dir = std::env::temp_dir().join(format!("picoagent-image-tools-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = crate::config::Config::new();
         cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
+        let Some(program) = resolve_imagemagick(&cfg) else {
+            eprintln!("ImageMagick が無いためスキップ");
+            return;
+        };
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
         // テスト用 PSD を ImageMagick 自身で生成する（v7 magick → v6 convert の順）。
         let psd = dir.join("sample.psd");
-        let program = runtime.block_on(super::magick_program(&cfg, "convert"));
         let status = std::process::Command::new(&program)
             .args(["-size", "16x16", "xc:red"])
             .arg(&psd)

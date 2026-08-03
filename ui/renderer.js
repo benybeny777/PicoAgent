@@ -783,7 +783,9 @@ function stopLipSync() {
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
 // character.json に live2d.model がある場合、PNG フレームの代わりに Cubism ランタイム
 // （ui/vendor/live2d/、cargo xtask setup live2d で取得）でモデルを WebGL 描画する。
-// まばたきとアイドルモーションはモデル定義（EyeBlink・Idle グループ）が自動で担当し、
+// まばたき（EyeBlink グループ）・髪の揺れ（physics3）・呼吸と自然な揺らぎはランタイムの
+// 自動処理に任せる。手で書いた固定波形はこれらを毎フレーム上書きして不自然になるため使わない。
+// ただしランタイムはモーション再生中に自動まばたきを回さないので、startLive2D で自前に回す。
 // 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
 let live2dActive = false;
 let live2dModel = null;
@@ -893,27 +895,31 @@ async function startLive2D(manifest) {
   const coreModel = model.internalModel.coreModel;
   const lipSyncGroup = model.internalModel.settings?.groups?.find(group => group.Name === "LipSync");
   const lipParam = String(cfg.lipSyncParam || lipSyncGroup?.Ids?.[0] || "ParamMouthOpenY");
+  // 呼吸・体の揺らぎ（updateNaturalMovements）・髪の揺れ（physics3）・まばたき（EyeBlink）は
+  // すべてランタイムの自動処理が担当する。ここで固定 sin 波を上書きすると、
+  // 物理演算の出力（例: ParamHairBack）や自動の自然な揺らぎを毎フレーム潰してしまい、
+  // 機械的で不自然な動きになる。手で書くのはリップシンクだけにとどめる。
   const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
   model.internalModel.motionManager.update = (...args) => {
     const updated = motionUpdate(...args);
-    if (motionEnabled) {
-      const seconds = performance.now() / 1000;
-      coreModel.setParameterValueById("ParamBodyAngleX", Math.sin(seconds * 1.35) * 4.5);
-      coreModel.setParameterValueById("ParamBodyAngleZ", Math.sin(seconds * 1.05 + 0.8) * 2.4);
-      coreModel.setParameterValueById("ParamBreath", (Math.sin(seconds * 1.8) + 1) * 0.5);
-      coreModel.setParameterValueById("ParamHairFront", Math.sin(seconds * 1.2 + 0.4) * 0.35);
-      coreModel.setParameterValueById("ParamHairSide", Math.sin(seconds * 1.1 + 1.1) * 0.42);
-      coreModel.setParameterValueById("ParamHairBack", Math.sin(seconds * 0.95 + 1.8) * 0.34);
-      coreModel.setParameterValueById("PARAM_BODY_ANGLE_X", Math.sin(seconds * 1.35) * 4.5);
-      coreModel.setParameterValueById("PARAM_BODY_ANGLE_Z", Math.sin(seconds * 1.05 + 0.8) * 2.4);
-      coreModel.setParameterValueById("PARAM_BREATH", (Math.sin(seconds * 1.8) + 1) * 0.5);
-      coreModel.setParameterValueById("PARAM_HAIR_FRONT", Math.sin(seconds * 1.2 + 0.4) * 0.35);
-      coreModel.setParameterValueById("PARAM_HAIR_BACK", Math.sin(seconds * 0.95 + 1.8) * 0.34);
-      coreModel.setParameterValueById("PARAM_HAIR_FLUFFY", Math.sin(seconds * 1.1 + 1.1) * 0.42);
-    }
+    // 口はモーションが閉じ戻すため、モーション適用直後に読み上げ振幅で上書きする。
     if (live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
     return updated;
   };
+  // ランタイムは「モーション再生中は自動まばたきを回さない」（Cubism4InternalModel.update の
+  // `if (!motionUpdated) eyeBlink.updateParameters(...)`）。PicoAgent はアイドルモーションを
+  // ループさせ続けるため、放置すると自動まばたきが一度も動かない。
+  // モーション適用後に自前で回して、ランダム間隔のまばたきを取り戻す。
+  const internalModel = model.internalModel;
+  if (internalModel.eyeBlink) {
+    let lastBlinkAt = performance.now();
+    internalModel.on("afterMotionUpdate", () => {
+      const now = performance.now();
+      const deltaSeconds = Math.min((now - lastBlinkAt) / 1000, 0.5); // タブ復帰時の巨大な差分で一気に進めない
+      lastBlinkAt = now;
+      internalModel.eyeBlink.updateParameters(coreModel, deltaSeconds);
+    });
+  }
   if (!motionEnabled) {
     // モーション再生を止め、呼吸などの静かな自動更新だけにする。
     model.internalModel.motionManager.groups.idle = "";

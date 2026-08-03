@@ -22,6 +22,25 @@
 - アプリ本体は tauri-build がマニフェストを埋めるため動くが、**`cargo test` のテストバイナリには埋まらない**。そのため Windows ではテストが1件も走らないまま落ちており、`doc_sync` / `permissions` / `store` / `tools::process` などの設計ガードが**丸ごと無効化されていた**（ガードの穴はガードが無いのと同じ）。
 - `.cargo/config.toml` の `rustflags` でリンカへ `/MANIFESTDEPENDENCY` を渡し、テストバイナリを含む全ターゲットへマニフェストを行き渡らせた。
 
+### むぎの Live2D: 髪の揺れとまばたきをランタイムの自動処理へ戻す
+
+手書きの固定波形とモーション曲線が、ランタイムの物理演算・自動まばたきを毎フレーム潰していた。どちらも自動処理に任せる形へ戻した。
+
+- **髪の揺れ**: むぎの `physics3.json` は Hiyori の「後ろ髪」1本だけを写した状態で、`ParamHairFront` / `ParamHairSide` / `ParamHairAhoge` は物理演算の対象外だった。そのため `renderer.js` が固定 `sin` 波でこれらを直接動かしており、**物理演算が出力した `ParamHairBack` まで毎フレーム上書き**して機械的な動きになっていた。Hiyori の同名設定を基準に前髪・横髪・アホ毛の物理設定を追加し、レンダラの固定波形は削除した。
+- **まばたき**: ランタイムは `if (!motionUpdated) eyeBlink.updateParameters(...)` と、**モーション再生中は自動まばたきを回さない**。PicoAgent はアイドルモーションをループさせ続けるため自動まばたきが一度も動かず、まばたきはアイドルモーション内の曲線（4.7 秒ループ中 t=1.80 / 3.60 の完全な等間隔）だけが担っていた。モーションから目とアホ毛の曲線を外し、`afterMotionUpdate` で `eyeBlink` を自前に回してランダム間隔のまばたきへ戻した。
+- モーションの `Meta`（曲線数・セグメント数・点数）は実データから数え直す。数え方は編集前の値と一致することを確認してから適用した。
+
+**未解決（Cubism Editor での再書き出しが必要）**: テクスチャアトラスの不透明率が `texture_00` 0.11% / `texture_01` 0.79% / `texture_02` 0.00%（完全に空）しかない。元 PSD は 2976x4175 と正常だが、書き出し時にパーツが極端に縮小されており、顔の肌ベースは **91x105px** しかない。描画時に数倍へ引き伸ばされるため輪郭が甘くなる。UV は `moc3` に焼かれているため PNG 差し替えでは直せない。原本リポジトリ側でアトラスを作り直して再書き出しする必要がある。
+
+### 同梱 OSS ツール3種の取得 URL が 404 になっていたのを修正
+
+`cargo xtask setup` が LibreOffice・qpdf・ImageMagick を取得できず、`document_convert` の Office 変換、`ms_office` の PDF 出力、`pdf_tools` の qpdf 操作、`image_tools` 全体が PATH 頼みになっていた（いずれもベストエフォート同梱のため警告のみで気づきにくい）。
+
+- **LibreOffice**: `downloadarchive` の `old/` 配下は**4桁バージョン**のディレクトリしか無いのに、3桁（`24.8.4`）を組み立てていた。既定を `24.8.7.2` へ。
+- **qpdf**: アセット名に `-bin-` は入らない（`qpdf-12.3.2-mingw64.zip`）。名前を修正し既定を `12.3.2` へ。
+- **ImageMagick**: 配布元 `imagemagick.org/archive/binaries/` が消滅。GitHub Releases へ移し既定を `7.1.2-29` へ。**配布は `.7z` のみで zip 版が無い**が、`extract()` は非 zip を `tar` へ回すため Windows 同梱の bsdtar がそのまま展開できる。
+- あわせて `image_tools` の E2E テストが、素の `magick` / `convert` を PATH から探していて**同梱構成では一度も走っていなかった**のを修正。スキル本体と同じ解決順（設定 → 同梱 → PATH）を通す。
+
 ### `image_tools` が Windows の `convert.exe` を ImageMagick と誤認するのを修正
 
 - ImageMagick の有無を「コマンドを起動できたか」だけで判定していた。Windows には `C:\Windows\System32\convert.exe`（FAT→NTFS 変換ユーティリティ）が標準で存在するため、**ImageMagick 未導入の環境でも `convert` は必ず起動に成功する**。結果として、名前が同じだけの無関係なシステムユーティリティへ画像変換の引数を渡していた。
