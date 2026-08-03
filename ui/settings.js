@@ -754,7 +754,7 @@ function skillCategory(tool) {
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
     return "info";
   }
-  if (["read_file", "workspace_files", "project_workspace", "workflow", "run_command", "http_api"].includes(name)) {
+  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "notebook_edit", "view_image", "ask_user", "project", "workflow", "run_command", "command_job", "http_api"].includes(name)) {
     return "workspace";
   }
   if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
@@ -801,9 +801,17 @@ const SKILL_EXAMPLE_FALLBACKS = {
   whisper_transcribe: ["最新の録音を文字起こしして"],
   read_file: ["このファイルを読んで"],
   workspace_files: ["作業フォルダにメモを書いて"],
-  project_workspace: ["このフォルダを仕事用ワークスペースとして登録して"],
+  edit_file: ["このファイルのこの行だけ直して"],
+  glob_files: ["プロジェクトの .rs ファイルを一覧して"],
+  grep_search: ["この関数を使っている箇所を探して"],
+  todo_plan: ["やることを整理して進めて", "いまどこまで終わってる？"],
+  project: ["動画制作プロジェクトへ切り替えて", "このプロジェクトの残りの課題を教えて", "この方針を決定事項として残して"],
   workflow: ["この手順を週報作成として覚えて"],
-  run_command: ["git statusを実行して"],
+  run_command: ["git statusを実行して", "開発サーバをバックグラウンドで起動して"],
+  command_job: ["さっきのビルドの様子を見せて", "動かしっぱなしのサーバを止めて"],
+  notebook_edit: ["ノートブックのセルを一覧して", "3番目のセルを差し替えて"],
+  view_image: ["このスクリーンショットに何が写っているか教えて"],
+  ask_user: ["どっちがいいか聞いて決めて"],
   http_api: ["このAPIにPOSTして"],
   ms_office: ["Wordの文字を置換して"],
   document_convert: ["このdocxをPDFにして"],
@@ -866,7 +874,7 @@ function approvalPolicy(tool) {
     "x_twitter", "mastodon", "bluesky", "reddit", "linkedin", "misskey",
   ]);
   const write = new Set([
-    "workspace_files", "google_calendar", "google_docs", "google_drive", "google_sheets",
+    "workspace_files", "edit_file", "notebook_edit", "command_job", "todo_plan", "project", "google_calendar", "google_docs", "google_drive", "google_sheets",
     "google_tasks", "github_issue", "notion", "jira", "linear", "trello", "todoist",
     "ms_office", "document_convert", "pdf_tools", "http_api", "task_scheduler",
   ]);

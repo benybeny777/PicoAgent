@@ -59,6 +59,7 @@ let promptHistoryIndex = null;
 let promptDraft = "";
 // 既定のクイックアクション。設定 PICOAGENT_QUICK_ACTIONS（1行1件「ラベル|本文」）で置き換え可能。
 let quickActionItems = null; // null = 既定を使用
+let pendingChoices = null; // ask_user の選択肢（null = 通常のクイック操作を表示）
 function parseQuickActions(text) {
   const items = String(text ?? "")
     .split("\n")
@@ -1217,14 +1218,27 @@ function renderMarkdown(container, src) {
   container.append(wrap);
 }
 
+// ask_user の選択肢を受け取る。null / 空なら通常のクイック操作へ戻す。
+function setPendingChoices(choices) {
+  const items = Array.isArray(choices)
+    ? choices
+        .map(choice => ({ label: String(choice?.label || "").trim(), text: String(choice?.label || "").trim(), title: String(choice?.description || "").trim() }))
+        .filter(item => item.label)
+    : [];
+  const next = items.length > 0 ? items : null;
+  if (next === null && pendingChoices === null) return;
+  pendingChoices = next;
+  renderQuickActions();
+}
+
 function renderQuickActions() {
   if (!quickActions) return;
   quickActions.replaceChildren();
-  for (const action of (quickActionItems || QUICK_ACTIONS)) {
+  for (const action of (pendingChoices || quickActionItems || QUICK_ACTIONS)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action.label;
-    button.title = action.text;
+    button.title = action.title || action.text;
     button.addEventListener("click", () => {
       if (busy) return;
       if (composer.hidden) openComposer();
@@ -2642,6 +2656,8 @@ composer.addEventListener("submit", async event => {
     }
     if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
     status.textContent = result.error ? "接続を確認してね" : "";
+    // 質問カードの選択肢を反映する（choices が無い応答で通常のクイック操作へ戻る）。
+    setPendingChoices(result.error ? null : result.choices);
     if (result.error) {
       jobState = "failed";
       logApp("error", "AI応答がエラーを返しました", result.reply || "");

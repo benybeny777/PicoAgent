@@ -72,6 +72,8 @@ pub struct AppState {
     pub recent_chatter: Mutex<Vec<String>>,
     /// チャットで確認待ちの未許可コマンド。ユーザーが「許可」または「キャンセル」と返すまで保持する。
     pub pending_command: Mutex<Option<crate::tools::run_command::PendingCommandApproval>>,
+    /// ask_user で提示中の質問。次のユーザー発話を選択肢へ寄せるために保持する。
+    pub pending_question: Mutex<Option<crate::tools::ask_user::PendingQuestion>>,
     /// キャラクターの現在感情状態（ルールベース推定）。
     pub emotion: Mutex<crate::emotion::EmotionState>,
     /// 停止ボタンによる中断要求。送信開始時に false へ戻し、エージェントがステップ境界で確認する。
@@ -94,6 +96,7 @@ impl AppState {
             relationship_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
             pending_command: Mutex::new(None),
+            pending_question: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
             cancel_requested: std::sync::atomic::AtomicBool::new(false),
             conversation_epoch: AtomicU64::new(0),
@@ -162,6 +165,35 @@ impl AppState {
         };
         *self.messages.lock().unwrap() = vec![Message::new("system", prompt)];
     }
+}
+
+/// プロジェクト文脈のブロックを system メッセージへ入れ直す。
+///
+/// 差し込み位置に依存せず「前回のブロックを消してから新しいものを足す」形にする
+/// （追記だけだと、課題を1件足すたびに古いまとめが積み重なって文脈を食い潰す）。
+const PROJECT_CONTEXT_BEGIN: &str = "[プロジェクト文脈]\n";
+const PROJECT_CONTEXT_END: &str = "\n[/プロジェクト文脈]";
+
+fn apply_project_context(convo: &mut [Message], block: &str) {
+    let Some(system) = convo.iter_mut().find(|message| message.role == "system") else {
+        return;
+    };
+    if let Some(start) = system.content.find(PROJECT_CONTEXT_BEGIN) {
+        // 終端が見つからない（手で編集された等）ときは触らない。消し過ぎるより残すほうが安全。
+        if let Some(offset) = system.content[start..].find(PROJECT_CONTEXT_END) {
+            let end = start + offset + PROJECT_CONTEXT_END.len();
+            system.content.replace_range(start..end, "");
+            let trimmed = system.content.trim_end().to_string();
+            system.content = trimmed;
+        }
+    }
+    if block.trim().is_empty() {
+        return;
+    }
+    system.content.push_str("\n\n");
+    system.content.push_str(PROJECT_CONTEXT_BEGIN);
+    system.content.push_str(block);
+    system.content.push_str(PROJECT_CONTEXT_END);
 }
 
 // 完了したターンから、文脈・履歴に残す「発話」だけを取り出す（user と、本文のある
@@ -811,6 +843,16 @@ pub async fn pet_send(
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
+    // ask_user で提示した質問への返答なら、番号やラベルを選択肢名へ寄せてから会話へ入れる
+    // （モデルが「2」だけを見て何の2か分からなくなるのを防ぐ）。答え方が自由記述なら素通しする。
+    let pending_question = state.pending_question.lock().unwrap().take();
+    let text = match pending_question {
+        Some(question) => match crate::tools::ask_user::resolve_answer(&question, &text) {
+            Some(label) => label,
+            None => text,
+        },
+        None => text,
+    };
     let user_text = text.clone();
     let request_character_id = active_character_id(&state);
     let request_epoch = state.conversation_epoch();
@@ -883,6 +925,9 @@ pub async fn pet_send(
             }
         }
     }
+    // 選択中プロジェクトの課題・記録を system 文脈へ差し込む。台帳は会話中にも変わるので、
+    // 起動時ではなく毎回作り直して古い内容が残らないようにする。
+    apply_project_context(&mut convo, &crate::tools::project::project_context(&state.config));
     convo.push(Message::new("user", text));
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
@@ -941,6 +986,30 @@ pub async fn pet_send(
         Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
         Ok(PersistedReply::Current(reply)) => {
             let quit_app = tool_requested_app_quit(&convo);
+            if let Some(question) = crate::tools::ask_user::parse_marker(&reply) {
+                let prompt = crate::tools::ask_user::prompt(&question);
+                let choices: Vec<Value> = question
+                    .options
+                    .iter()
+                    .map(|option| json!({ "label": option.label, "description": option.description }))
+                    .collect();
+                *state.pending_question.lock().unwrap() = Some(question);
+                // 会話へ残すのはマーカーではなく、人が読める質問文にする。
+                let mut refreshed = state.messages.lock().unwrap().clone();
+                if let Some(last) = refreshed
+                    .iter_mut()
+                    .rev()
+                    .find(|message| message.role == "assistant")
+                {
+                    last.content = prompt.clone();
+                }
+                let compacted = compacted_conversation(&refreshed);
+                if conversation_is_current(&state, &request_character_id, request_epoch) {
+                    *state.messages.lock().unwrap() = compacted.clone();
+                    crate::history::save(&app, &request_character_id, &compacted);
+                }
+                return Ok(json!({ "reply": prompt, "choices": choices }));
+            }
             if let Some(pending) = crate::tools::run_command::parse_approval_marker(&reply) {
                 *state.pending_command.lock().unwrap() = Some(pending.clone());
                 let prompt = crate::tools::run_command::approval_prompt(&pending);
@@ -2871,5 +2940,45 @@ mod tests {
         assert!(!spoken.contains('☀'));
         assert!(!spoken.contains('▇'));
         assert!(spoken.contains("快晴") && spoken.contains("18〜27度"));
+    }
+}
+
+#[cfg(test)]
+mod project_context_tests {
+    use super::apply_project_context;
+    use crate::message::Message;
+
+    fn convo(system: &str) -> Vec<Message> {
+        vec![Message::new("system", system), Message::new("user", "やあ")]
+    }
+
+    /// 何度差し込んでも1ブロックだけになること（積み重なると文脈を食い潰す）。
+    #[test]
+    fn プロジェクト文脈は入れ替わり積み重ならない() {
+        let mut messages = convo("人格設定");
+        apply_project_context(&mut messages, "課題A");
+        apply_project_context(&mut messages, "課題B");
+        let system = &messages[0].content;
+        assert_eq!(system.matches("[プロジェクト文脈]").count(), 1, "system: {system}");
+        assert!(system.contains("課題B"), "system: {system}");
+        assert!(!system.contains("課題A"), "system: {system}");
+        assert!(system.starts_with("人格設定"), "system: {system}");
+    }
+
+    /// 空ブロックなら前回の内容を消して何も足さない（プロジェクトを空にしたとき残らない）。
+    #[test]
+    fn 空のときは差し込まず前回分も消す() {
+        let mut messages = convo("人格設定");
+        apply_project_context(&mut messages, "課題A");
+        apply_project_context(&mut messages, "");
+        assert_eq!(messages[0].content, "人格設定");
+        assert_eq!(messages[1].content, "やあ", "user メッセージを触っている");
+    }
+
+    #[test]
+    fn system_が無ければ何もしない() {
+        let mut messages = vec![Message::new("user", "やあ")];
+        apply_project_context(&mut messages, "課題A");
+        assert_eq!(messages[0].content, "やあ");
     }
 }
