@@ -1448,6 +1448,34 @@ function diagnosticsFailureCard(title, error) {
   );
 }
 
+// ウィンドウとフキダシの位置・サイズを既定へ戻すボタン。
+// ディスプレイ構成を変えてウィンドウを画面外で見失うと右クリックメニューにも辿り着けないため、
+// 右クリックメニューの「フキダシ位置とサイズをリセット」とは別に、設定画面にも復帰口を置く。
+function layoutResetField() {
+  const label = "画面位置を初期化";
+  const button = el("button", { type: "button", className: "secondary", textContent: label });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    statusEl.textContent = `${label}を実行しています…`;
+    try {
+      await window.picoagent.resetLayout();
+      statusEl.textContent = "ウィンドウとフキダシの位置・サイズを既定へ戻しました。";
+    } catch (error) {
+      logApp("error", `${label}に失敗しました`, errorDetail(error));
+      statusEl.textContent = `${label}に失敗: ${error?.message || error}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  const hint = el("p", { className: "hint", textContent: "ウィンドウが画面外や別のディスプレイへ行って見つからないときに使ってください。" });
+  return markSearchable(
+    el("div", { className: "field" }, [el("label", { textContent: "画面位置" }), button, hint]),
+    "PICOAGENT_WINDOW_LEFT_PX",
+    label,
+    "ウィンドウ 位置 リセット 初期化 ディスプレイ 画面外"
+  );
+}
+
 function diagnosticRepairButton(label, handler) {
   const button = el("button", { type: "button", className: "diagnostic-repair", textContent: label });
   button.addEventListener("click", async () => {
@@ -1643,6 +1671,7 @@ async function render() {
     { value: "dark", label: "ダーク" },
   ]));
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
+  global.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
   global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
   global.append(field("PICOAGENT_SUPER_AGENT", "スーパーエージェント（計画→実行・自己評価・サブエージェント分担を強化）", "checkbox", v.PICOAGENT_SUPER_AGENT === true));

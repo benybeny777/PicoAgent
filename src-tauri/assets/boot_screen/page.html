@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>PicoAgent</title>
+<style>
+  /* CSP が script-src 'self' のため、この画面は JavaScript を使わずに組み立てる。
+     再読み込みはリンク遷移だけで行う。 */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    padding: 12px;
+    background: transparent;
+    font-family: "Segoe UI", "Yu Gothic UI", "Hiragino Sans", sans-serif;
+    color: #efe8f4;
+    -webkit-user-select: none; user-select: none;
+  }
+  .card {
+    width: 100%; max-width: 460px;
+    padding: 18px 20px 16px;
+    border-radius: 18px;
+    background: rgba(38, 30, 48, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  }
+  .head { display: flex; align-items: center; gap: 14px; }
+  .head img { width: 110px; height: auto; flex: none; }
+  .lead { font-size: 15px; font-weight: 600; line-height: 1.5; }
+  .sub { margin-top: 4px; font-size: 12px; line-height: 1.5; color: #b9adc6; }
+  .detail {
+    margin-top: 14px; padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.30);
+    font-size: 11px; line-height: 1.6; color: #cfc4da;
+    white-space: pre-wrap; word-break: break-all;
+    -webkit-user-select: text; user-select: text;
+  }
+  .detail b { color: #efe8f4; font-weight: 600; }
+  .actions { margin-top: 14px; display: flex; align-items: center; gap: 10px; }
+  .btn {
+    display: inline-block; padding: 8px 18px;
+    border-radius: 999px;
+    background: #d98bb0; color: #2b1f33;
+    font-size: 13px; font-weight: 700; text-decoration: none;
+  }
+  .btn:hover { background: #e6a1c1; }
+  .hint { font-size: 11px; color: #9c90a9; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <img src="__CHARACTER__" alt="">
+      <div>
+        <p class="lead">__HEADLINE__</p>
+        <p class="sub">__MESSAGE__</p>
+      </div>
+    </div>
+    <div class="detail">__DETAIL__</div>
+    <div class="actions">__ACTIONS__</div>
+  </div>
+</body>
+</html>

@@ -35,16 +35,38 @@ const MULTI_LAYER_EXTS: [&str; 5] = ["psd", "xcf", "tif", "tiff", "gif"];
 /// ImageMagick の実行プログラムを解決する。
 /// 明示設定・同梱があればそれ（v7 の magick）を、PATH フォールバック時は
 /// `magick -version` が通れば v7、通らなければ v6 の `legacy`（convert / identify）を使う。
+/// `<program> -version` が **ImageMagick 自身**だと名乗るか確かめる。
+///
+/// 起動できたかどうか（`is_ok()` / 終了コード）だけで判定してはならない。Windows には
+/// `C:\Windows\System32\convert.exe`（FAT→NTFS 変換ユーティリティ）が標準で存在するため、
+/// コマンド名 `convert` は ImageMagick が無い環境でも必ず起動に成功してしまう。
+/// 名前が同じだけの無関係なシステムユーティリティへ画像変換の引数を渡さないよう、
+/// 出力に `ImageMagick` が含まれることまで確認する。
+async fn is_imagemagick(program: &str) -> bool {
+    match crate::tools::process::command(program).arg("-version").stdin(Stdio::null()).output().await {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).contains("ImageMagick")
+        }
+        _ => false,
+    }
+}
+
 async fn magick_program(cfg: &Config, legacy: &str) -> String {
     let resolved = crate::tools::resolve_cli_path(cfg, "PICOAGENT_MAGICK_PATH", "imagemagick", "magick");
     if resolved != "magick" {
         return resolved;
     }
-    match crate::tools::process::command("magick").arg("-version").stdin(Stdio::null()).output().await {
-        Ok(output) if output.status.success() => "magick".to_string(),
-        // フォールバック許可: apt の ImageMagick v6 はコマンド名が convert / identify。
-        _ => legacy.to_string(),
+    if is_imagemagick("magick").await {
+        return "magick".to_string();
     }
+    // フォールバック許可: apt の ImageMagick v6 はコマンド名が convert / identify。
+    // ただし名乗りを確認できたときだけ使う（同名の別物を掴まないため）。
+    if is_imagemagick(legacy).await {
+        return legacy.to_string();
+    }
+    // どちらも ImageMagick ではない＝未導入。正式名で返し、`run_magick` のエラーメッセージが
+    // 「ImageMagick が入っていない」という本当の原因を指すようにする。
+    "magick".to_string()
 }
 
 async fn run_magick(mut command: Command, timeout: u64, label: &str) -> Result<std::process::Output, String> {
@@ -213,9 +235,12 @@ impl Tool for ImageToolsTool {
 mod tests {
     use serde_json::json;
 
+    /// ImageMagick が本当に入っているか。**起動できたかどうかでは判定しない**
+    /// （Windows の `System32\convert.exe` は常に起動に成功するため、
+    /// 名前だけで見ると ImageMagick 未導入の環境で誤検出する）。
     fn have_imagemagick() -> bool {
-        std::process::Command::new("magick").arg("-version").output().is_ok()
-            || std::process::Command::new("convert").arg("-version").output().is_ok()
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async { super::is_imagemagick("magick").await || super::is_imagemagick("convert").await })
     }
 
     // ImageMagick がある環境だけで走る E2E（無ければ即成功で抜ける）。

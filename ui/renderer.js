@@ -1,3 +1,7 @@
+// バックエンドへ「フロントを読み込めた」ことを最初に伝える。これが届かないと
+// boot_screen が読み込み失敗と判断し、キャラクター付きの案内画面へ切り替える。
+window.picoagent?.frontendReady?.();
+
 const petApp = document.getElementById("petApp");
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
