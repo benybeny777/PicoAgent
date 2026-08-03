@@ -18,6 +18,7 @@ let characterOverrides = {};
 let characterVoiceOverrides = {};
 let characterDefaultVoices = {};
 let characterSelect;
+let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
 let characterPersona;
 let characterSpeaker;
 let characterCatalog;
@@ -1306,6 +1307,31 @@ function buildSkillCategoryList(tools, values) {
   return wrap;
 }
 
+// 自分で追加したキャラクター（app_data_dir/characters 配下）を一覧の形へそろえる。
+// 同梱と同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
+async function loadUserCharacters(bundled) {
+  const known = new Set(bundled.map(character => character.id));
+  try {
+    const result = await window.picoagent.settings.userCharacters();
+    userCharacterRoot = result?.root || "";
+    return (result?.characters || [])
+      .filter(character => !known.has(character.id))
+      .map(character => ({
+        id: character.id,
+        name: character.name,
+        description: character.description || "",
+        manifest: `${character.id}/character.json`,
+        root: window.picoagent.assetUrl(character.path),
+        user: true,
+        live2d: !!character.live2d,
+      }));
+  } catch (error) {
+    // フォールバック許可: 追加キャラを取れなくても同梱キャラの設定は開けるようにする。
+    statusEl.textContent = `追加キャラクターを読み込めませんでした: ${error?.message || error}`;
+    return [];
+  }
+}
+
 async function loadCharacterPersona(id) {
   const entry = characterCatalog.characters.find(character => character.id === id);
   if (!entry) throw new Error(`キャラクター ${id} が一覧にありません`);
@@ -1324,7 +1350,7 @@ async function loadCharacterPersona(id) {
 
 async function loadCharacterManifestForSettings(character) {
   if (characterManifestCache.has(character.id)) return characterManifestCache.get(character.id);
-  const response = await fetch(`assets/characters/${character.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
+  const response = await fetch(`${character.root}/character.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`キャラクター定義: HTTP ${response.status}`);
   const manifest = await response.json();
   characterManifestCache.set(character.id, manifest);
@@ -1334,7 +1360,7 @@ async function loadCharacterManifestForSettings(character) {
 async function characterIconUrl(character) {
   try {
     const manifest = await loadCharacterManifestForSettings(character);
-    const root = `assets/characters/${character.manifest.replace(/\/character\.json$/, "")}`;
+    const root = character.root;
     const idle = manifest.animations?.idle;
     const imagePath = idle?.path ? `${idle.path}/00.png` : (manifest.boot?.sleeping || "animations/idle/00.png");
     const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
@@ -1681,6 +1707,12 @@ async function render() {
   const characterResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!characterResponse.ok) throw new Error(`キャラクター一覧: HTTP ${characterResponse.status}`);
   characterCatalog = await characterResponse.json();
+  // 同梱キャラは配信物からの相対パス、追加キャラは実ファイルの配信 URL を root にする。
+  // 以降のマニフェスト読込・アイコン表示は root だけを見る（置き場の違いを1箇所に閉じ込める）。
+  for (const character of characterCatalog.characters) {
+    character.root = `assets/characters/${character.manifest.replace(/\/character\.json$/, "")}`;
+  }
+  characterCatalog.characters = characterCatalog.characters.concat(await loadUserCharacters(characterCatalog.characters));
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   const characterSec = section("キャラクター設定");
@@ -1751,16 +1783,79 @@ async function render() {
       icon.hidden = false;
       fallback.hidden = true;
     });
+    const texts = [
+      el("div", { className: "card-name", textContent: character.user ? `${name}（追加）` : name }),
+      el("div", { className: "card-desc", textContent: character.description || character.id }),
+    ];
+    // 削除できるのは自分で追加したものだけ（同梱キャラは実行ファイル側にあるため消せない）。
+    if (character.user) {
+      const removeStatus = el("div", { className: "card-desc" });
+      const removeButton = el("button", { className: "secondary", type: "button", textContent: "削除" });
+      removeButton.addEventListener("click", async () => {
+        if (removeButton.dataset.confirm !== "1") {
+          removeButton.dataset.confirm = "1";
+          removeButton.textContent = "もう一度押すと削除";
+          removeStatus.textContent = "OS のゴミ箱へ移動します。";
+          return;
+        }
+        removeButton.disabled = true;
+        try {
+          await window.picoagent.settings.removeCharacter(character.id);
+          removeStatus.textContent = "ゴミ箱へ移動しました。「設定」を開き直すと一覧から消えます。";
+        } catch (error) {
+          removeButton.disabled = false;
+          removeStatus.textContent = `削除できませんでした: ${error?.message || error}`;
+        }
+      });
+      texts.push(removeStatus, removeButton);
+    }
     const card = markSearchable(el("div", { className: "card-item character-card" }, [
       el("div", { className: "character-icon-wrap" }, [fallback, icon]),
-      el("div", { className: "character-card-text" }, [
-        el("div", { className: "card-name", textContent: name }),
-        el("div", { className: "card-desc", textContent: character.description || character.id }),
-      ]),
+      el("div", { className: "character-card-text" }, texts),
     ]), character.id, character.name, character.description);
     charList.append(card);
   }
   charSec.append(charList);
+
+  // --- キャラクターを自分で追加する ---
+  // 同梱キャラは実行ファイルへ焼き込まれているため増減できない。追加分はユーザー領域
+  // （app_data_dir/characters）へ入れる。導入は検証を通ってから確定するので、
+  // 壊れたパックが一覧へ出ることはない。
+  const addSec = section("キャラクターを追加");
+  const addHint = el("p", {
+    className: "hint",
+    textContent: "Live2D モデルなどのキャラクターパック（character.json を含むフォルダ、またはその zip）を追加できます。追加分は下の一覧に出ます。",
+  });
+  const addStatus = el("p", { className: "hint" });
+  async function installCharacterPack(folder) {
+    addStatus.textContent = "選択中…";
+    try {
+      const picked = await window.picoagent.settings.pickCharacterPack(folder);
+      if (!picked?.path) {
+        addStatus.textContent = "選択をキャンセルしました。";
+        return;
+      }
+      addStatus.textContent = "確認しています…";
+      const result = await window.picoagent.settings.installCharacter(picked.path);
+      addStatus.textContent = `${result.name}（${result.id}）を追加しました。「設定」を開き直すと一覧に出ます。`;
+    } catch (error) {
+      // 検証で弾いた理由をそのまま見せる（何を直せばよいか分かるようにする）。
+      addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
+    }
+  }
+  const addButtons = el("div", { className: "character-add-actions" }, [
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "zip を選ぶ" }), {
+      onclick: () => installCharacterPack(false),
+    }),
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "フォルダを選ぶ" }), {
+      onclick: () => installCharacterPack(true),
+    }),
+  ]);
+  addSec.append(addHint, addButtons, addStatus);
+  if (userCharacterRoot) {
+    addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
+  }
+  panels.character.append(addSec);
   panels.character.append(charSec);
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---

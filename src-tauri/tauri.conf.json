@@ -28,7 +28,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data:; media-src 'self' blob: data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self' asset: http://asset.localhost; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/characters/**"]
+      }
     }
   },
   "bundle": {

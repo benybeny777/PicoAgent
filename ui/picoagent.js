@@ -2,7 +2,7 @@
 // tauri.conf.json の app.withGlobalTauri=true により window.__TAURI__ が使える前提。
 // これにより renderer.js / settings.js は Electron 版とほぼ同じコードで動く。
 
-const { invoke } = window.__TAURI__.core;
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { LogicalSize, PhysicalPosition } = window.__TAURI__.dpi || {};
@@ -52,6 +52,10 @@ window.picoagent = {
   prepareVoiceModel: () => call("pet_prepare_voice_model"),
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
   aivisStatus: () => call("aivis_status"),
+  // 自分で追加したキャラクター（app_data_dir/characters 配下）。
+  userCharacters: () => call("pet_user_characters"),
+  // 追加キャラクターの実ファイルを webview から読める URL へ変換する。
+  assetUrl: (path) => convertFileSrc(path),
   // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。
   setFullscreen: async (on) => {
     try { return await getCurrentWindow().setFullscreen(on); }
@@ -120,5 +124,10 @@ window.picoagent = {
     listModels: (id) => call("settings_list_models", { id }),
     testTool: (name) => call("settings_test_tool", { name }),
     save: (patch) => call("settings_save", { patch }),
+    // キャラクターパック（フォルダ / zip）の選択・導入・削除。
+    userCharacters: () => call("pet_user_characters"),
+    pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
+    installCharacter: (path) => call("settings_character_install", { path }),
+    removeCharacter: (id) => call("settings_character_remove", { id }),
   },
 };

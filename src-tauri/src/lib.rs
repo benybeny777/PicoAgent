@@ -7,6 +7,7 @@ mod alarm;
 mod api_server;
 #[cfg(test)]
 mod bundle_scope;
+mod character_pack;
 mod commands;
 mod config;
 mod daily;
@@ -33,6 +34,7 @@ mod text;
 mod tools;
 mod tracer;
 mod usage;
+mod user_characters;
 
 use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
 
@@ -43,6 +45,8 @@ use engine::EngineState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // キャラクターパックを選ぶネイティブダイアログ（Rust 側だけで使う）。
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .manage(EngineState::new())
         .manage(AivisState::new())
@@ -70,6 +74,10 @@ pub fn run() {
             commands::pet_relationship_clear,
             commands::pet_complete_onboarding,
             commands::settings_load,
+            commands::settings_character_pick,
+            commands::settings_character_install,
+            commands::settings_character_remove,
+            commands::pet_user_characters,
             commands::settings_list_models,
             commands::settings_test_tool,
             commands::settings_save,

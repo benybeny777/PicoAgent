@@ -833,6 +833,74 @@ pub fn pet_set_bubble_layout(
     Ok(json!({ "ok": true }))
 }
 
+/// 追加キャラクター（自分で入れた Live2D モデル等）の一覧。
+///
+/// 同梱キャラは配信物の `assets/characters/index.json` にあり、フロントがそちらと
+/// この一覧を突き合わせて1つのキャラクター一覧にする（同梱分は実行時に増減しない）。
+#[tauri::command]
+pub fn pet_user_characters(app: AppHandle) -> Value {
+    json!({
+        "root": crate::user_characters::root(&app).to_string_lossy(),
+        "characters": crate::user_characters::list(&app),
+    })
+}
+
+/// キャラクターパック（フォルダまたは zip）をネイティブダイアログで選ばせる。
+///
+/// プラグインの JS バインディングを配信物へ足さずに済むよう、選択は Rust 側で行い、
+/// フロントには選ばれたパスだけを返す。
+#[tauri::command]
+pub async fn settings_character_pick(app: AppHandle, folder: bool) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let dialog = app.dialog().clone().file();
+    if folder {
+        dialog.pick_folder(move |picked| {
+            let _ = sender.send(picked.map(|path| path.to_string()));
+        });
+    } else {
+        dialog
+            .add_filter("キャラクターパック", &["zip"])
+            .pick_file(move |picked| {
+                let _ = sender.send(picked.map(|path| path.to_string()));
+            });
+    }
+    let picked = receiver
+        .await
+        .map_err(|_| "ファイル選択の結果を受け取れませんでした。".to_string())?;
+    Ok(json!({ "path": picked }))
+}
+
+/// キャラクターパックを導入する。導入後は一覧へすぐ反映される（再起動は不要）。
+#[tauri::command]
+pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value, String> {
+    let source = std::path::PathBuf::from(path.trim());
+    match crate::user_characters::install(&app, &source) {
+        Ok((id, name)) => {
+            crate::log_paths::append_app_log(&app, &format!("キャラクター {name} ({id}) を追加しました。"));
+            Ok(json!({ "ok": true, "id": id, "name": name }))
+        }
+        Err(error) => Err(format!("{error:#}")),
+    }
+}
+
+/// 追加キャラクターを削除する（OS のゴミ箱へ移動。同梱キャラは対象外）。
+#[tauri::command]
+pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, String> {
+    let id = id.trim().to_string();
+    crate::user_characters::remove(&app, &id).map_err(|error| format!("{error:#}"))?;
+    // 削除したキャラを選んだままだと起動時に読み込めないので、選択を既定へ戻す。
+    let state = app.state::<AppState>();
+    if state.config.get("PICOAGENT_CHARACTER", "mugi") == id {
+        state
+            .config
+            .set_string("PICOAGENT_CHARACTER", "mugi".to_string())
+            .map_err(|error| format!("選択中キャラクターを戻せません: {error}"))?;
+    }
+    crate::log_paths::append_app_log(&app, &format!("キャラクター {id} をゴミ箱へ移動しました。"));
+    Ok(json!({ "ok": true }))
+}
+
 #[tauri::command]
 pub async fn pet_send(
     text: String,
