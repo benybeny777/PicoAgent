@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-08-03
+
+### PC 操作スキル（`desktop_control`）を追加 — シェルを介さない固定操作
+
+- **`skills/desktop_control/`（新規）**: マウス・キーボードを直接操作する。従来この用途は `code_runner` に PowerShell / Python を書かせる形しか無く、危険かどうかを**生成された文字列の検査**（`is_physical_delete`）で判定していた。文字列検査は原理的に後手で、クオートやエンコードで回避できる。**操作を固定の action に限定して「その操作が存在しない」状態を作る**方針へ変えた（検査ではなく設計で防ぐ）。Windows 専用でもなくなる。
+  - action: `screen_size` / `cursor`（読み取り）、`move` / `click` / `double_click` / `drag` / `scroll` / `type_text` / `key`。
+  - 入力の実体は `enigo`（Windows / macOS / Linux）。OS 分岐はクレート側に閉じる。Linux は X11 前提（Wayland は合成入力が制限される）。
+  - キーは名前で受ける（`Enter` / `F5` / `Ctrl+C` / `Ctrl+Shift+T`）。生のキーコードはモデルに書かせない。修飾キーの位置に修飾キー以外を置いた指定は拒否する。
+  - **安全側の既定**: 既定無効（`PICOAGENT_DESKTOP_ENABLED`）、座標の画面内チェック、入力 2,000 文字上限、**1分あたりの操作回数上限**（`PICOAGENT_DESKTOP_MAX_OPS_PER_MIN`、既定 60）。読み取り系は回数を消費しない。
+  - ドラッグとキー組み合わせは、途中で失敗してもボタン・修飾キーを必ず離す（押しっぱなしを残さない）。
+  - 実行した操作は結果文字列として会話とトレース（`pet_traces`）に残る。
+- スクリーンショットの Windows 実装（PowerShell + GDI）はこの変更では触っていない。置き換えは PNG エンコーダの追加が要るため別作業とする。
+
+---
+
 ## 2026-08-02
 
 ### Live2D 公式サンプルモデルを再配布条件が明示されているものすべてに拡張

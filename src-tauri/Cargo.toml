@@ -36,6 +36,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 calamine = { version = "0.24", default-features = false, features = ["dates"] }
 cpal = "0.15"
 hound = "3.5"
+enigo = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

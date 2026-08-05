@@ -245,7 +245,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | **Action**（ファイル生成・変換） | write | 8 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` |
 | **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
 | **Action**（汎用の出入り口） | write | 2 | `http_api` `workspace_files` |
-| **Destructive / 高リスク** | destructive | 4 | `trash_file` `run_command` `code_runner` `app_control` |
+| **Destructive / 高リスク** | destructive | 5 | `trash_file` `run_command` `code_runner` `app_control` `desktop_control` |
 | **State**（アプリ内の永続状態） | write | 6 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
 | **Orchestration**（多段実行・組み立て） | 呼び先に従う | 5 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` |
@@ -324,6 +324,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `todoist` | Todoist のタスク一覧・作成・完了 | API token は設定から都度取得、秘密値を出力しない、timeout |
 | `http_api` | 個別スキルがないSaaSやWebhookへの汎用HTTP API呼び出し | 許可ドメイン必須、任意Bearer/API key、本文/応答サイズ上限、timeout |
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
+| `desktop_control` | デスクトップのマウス・キーボード操作（クリック・ドラッグ・文字入力・キー送出・スクロール） | 既定無効、**シェルを介さない固定 action のみ**、座標の画面内チェック、入力文字数 2,000 上限、1分あたりの操作回数上限、Linux は X11 前提 |
 | `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、http/https のみ、許可ドメイン設定、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
 | `comfyui_generate` | ComfyUI ローカルサーバーで画像・動画を生成（APIキー不要）。KSampler ワークフローを組み立て `/prompt` → `/history` ポーリング → `/view` URL を返す。AnimateDiff 等の動画出力にも対応 | `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）・`COMFYUI_CHECKPOINT`（モデルファイル名）のみ。120秒 timeout |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
@@ -574,6 +575,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | http_api | 汎用HTTPの待ち時間（秒、3〜60） |
 | `PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS` | （空） | web_fetch | URL取得を許可するドメイン（カンマ区切り。空なら制限なし） |
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
+| `PICOAGENT_DESKTOP_ENABLED` | `false` | desktop_control | デスクトップ操作（マウス・キーボード）の有効化（既定は無効） |
+| `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | desktop_control | 1分あたりの操作回数の上限（1〜600）。暴走時の歯止め |
 | `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |
 | `PICOAGENT_BROWSER_PATH` | （空=自動検出） | browser_control | Chrome / Edge の実行ファイルパス |
 | `PICOAGENT_BROWSER_ALLOWED_DOMAINS` | （空） | browser_control | 開いてよいドメイン（カンマ区切り。空なら制限なし） |
