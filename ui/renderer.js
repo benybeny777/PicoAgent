@@ -488,10 +488,20 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
+// variant は見た目の切替なので、フレームアニメと Live2D の切替もここで解決する。
+// variant.live2d があればそれを使い、`false` なら（キャラ本体が Live2D でも）フレーム表示に戻す。
+// これで「同じキャラの絵版と Live2D 版」を1つの character.json で持てる。
+function resolveLive2dConfig(manifest, variant) {
+  if (variant?.live2d === false) return null;
+  return variant?.live2d || manifest.live2d || null;
+}
+
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterOverridesCache = overrides;
   const { manifest, root } = await loadCharacterManifest(characterId);
-  if (!manifest.live2d?.model && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
+  const hasAnyLive2d = Boolean(manifest.live2d?.model)
+    || (Array.isArray(manifest.variants) && manifest.variants.some(item => item?.live2d?.model));
+  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
@@ -505,16 +515,18 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
+  activeLive2dConfig = resolveLive2dConfig(manifest, variant);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
-  if (manifest.live2d?.model) {
+  if (activeLive2dConfig?.model) {
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
-      await startLive2D(manifest);
+      await startLive2D(activeLive2dConfig);
     } catch (error) {
       stopLive2D();
-      if (!manifest.animations?.idle) throw error;
+      activeLive2dConfig = null;
+      if (!animations.idle) throw error;
       // フォールバック許可: Live2D ランタイム未取得でも、フレームアニメを持つキャラは表示を継続する（通知済み）。
       logApp("error", "Live2D の初期化に失敗しました（フレームアニメで継続）", errorDetail(error));
       setStatus("Live2D を初期化できませんでした");
@@ -779,6 +791,7 @@ function stopLipSync() {
 // まばたきとアイドルモーションはモデル定義（EyeBlink・Idle グループ）が自動で担当し、
 // 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
 let live2dActive = false;
+let activeLive2dConfig = null; // いま表示している variant の live2d 定義（無ければ null）
 let live2dModel = null;
 let live2dApp = null;
 let live2dCanvas = null;
@@ -813,10 +826,9 @@ async function ensureLive2DRuntime() {
   await live2dRuntimePromise;
 }
 
-async function startLive2D(manifest) {
+async function startLive2D(cfg) {
   await ensureLive2DRuntime();
   stopLive2D();
-  const cfg = manifest.live2d;
   if (!live2dCanvas) {
     live2dCanvas = document.createElement("canvas");
     live2dCanvas.id = "live2dCanvas";
@@ -873,7 +885,7 @@ async function startLive2D(manifest) {
 function playLive2DMotion(name) {
   if (!live2dModel || reduceMotion) return;
   if (name === "idle") { live2dModel.internalModel.motionManager.stopAllMotions(); return; } // Idle グループの自動再生へ戻す
-  const motions = characterManifest?.live2d?.motions || {};
+  const motions = activeLive2dConfig?.motions || {};
   const group = motions[name] || motions.idle;
   if (!group) return;
   const priority = window.PIXI?.live2d?.MotionPriority?.FORCE ?? 3;

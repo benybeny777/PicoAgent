@@ -14,6 +14,11 @@
 - **`live2d.lipSync: false` を追加** (`ui/renderer.js` / `SPEC.md`): 口のパラメータが無いモデル（Rice）向け。既定値を当てても存在しない ID を毎フレーム書き込むだけになるため、明示的に切れるようにした。
 - **1 体の取得失敗で setup 全体を止めない** (`xtask/src/bundled.rs`): 配布元へ到達できないネットワークでも、取れたモデルだけで起動できる方が実用的。失敗したモデルは警告に留め、そのキャラだけ選べない状態にする。プレビュー画像も同様に警告のみとし、`characters/_preview-placeholder.png` で代替する（プレビューはモデルの動作に関わらない）。起動待ち画面にも `onerror` の退避先を用意した。
 
+### 同じキャラで「絵版」と「Live2D 版」を切り替えられるようにした
+
+- **`variants[].live2d` に対応** (`ui/renderer.js` / `SPEC.md` / `characters/README.md`): これまで Live2D かフレームアニメかは `character.json` の直下 `live2d` だけで決まっていたため、同じキャラの絵版と Live2D 版を持つにはキャラ自体を2つに分けて人格・挨拶・声を二重管理する必要があった。variant 側に `live2d` を書けるようにし、`resolveLive2dConfig()` が variant → キャラ本体の順で解決する。`"live2d": false` を書けば、キャラ本体が Live2D でもその variant だけフレーム表示に戻せる。切替は既存の「雰囲気」セレクタをそのまま使う。
+- むぎのフレーム版（`animations` / `layers/` / `boot/`）はそのまま残っている。Live2D 版はモデルを書き出してから variant を追記する（手順は `characters/README.md`）。
+
 ### むぎの Live2D 制作用 PSD を生成
 
 - `python scripts/build-live2d-psd.py mugi` を実行し、`characters/mugi/live2d-src/mugi-live2d.psd`（ひよりの 15 パーツ構成 + variants + base_full、360x640）を生成した。以降の作業は Cubism Editor 上の手作業になる。生成物は Git 管理外。

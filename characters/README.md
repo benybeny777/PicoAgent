@@ -101,6 +101,30 @@ characters/<id>/
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
   `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。
 
+### 同じキャラで「絵版」と「Live2D 版」を持つ
+
+`variants` の項目に `live2d` を書くと、キャラを増やさずに見た目だけ切り替えられる
+（切替は ♡ の記録カード内の「雰囲気」セレクタ。選択は端末ごとに記憶する）。
+人格・挨拶・声はキャラ本体の定義を共有するので、二重管理にならない。
+
+```jsonc
+"variants": [
+  { "id": "default", "name": "いつもの姿" },              // 既存の連番フレーム表示
+  { "id": "live2d",  "name": "Live2D 版",                 // Cubism ランタイムで描画
+    "live2d": {
+      "model": "live2d/Mugi.model3.json",
+      "motions": { "idle": "Idle", "thinking": "TapBody", "talking": "TapBody", "sad": "Idle" },
+      "lipSyncParam": "ParamMouthOpenY",
+      "scale": 3.2, "offsetY": 645
+    } }
+]
+```
+
+- キャラ本体が Live2D の場合に、ある variant だけ絵に戻したいときは `"live2d": false` を書く。
+- **モデルを書き出してから追記すること。** モデルが無い状態で variant を足すと、
+  選んだときに初期化に失敗してフレーム表示へ戻る（通知は出るが無駄な失敗になる）。
+- `scale` / `offsetY` はモデルごとに実機で合わせる。
+
 ### 既存キャラを Live2D 化するための PSD 生成
 
 `layers/` の差分絵から、Cubism Editor へ読み込める土台 PSD を生成できる。
