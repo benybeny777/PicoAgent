@@ -17,7 +17,7 @@
 ### 同じキャラで「絵版」と「Live2D 版」を切り替えられるようにした
 
 - **`variants[].live2d` に対応** (`ui/renderer.js` / `SPEC.md` / `characters/README.md`): これまで Live2D かフレームアニメかは `character.json` の直下 `live2d` だけで決まっていたため、同じキャラの絵版と Live2D 版を持つにはキャラ自体を2つに分けて人格・挨拶・声を二重管理する必要があった。variant 側に `live2d` を書けるようにし、`resolveLive2dConfig()` が variant → キャラ本体の順で解決する。`"live2d": false` を書けば、キャラ本体が Live2D でもその variant だけフレーム表示に戻せる。切替は既存の「雰囲気」セレクタをそのまま使う。
-- むぎのフレーム版（`animations` / `layers/` / `boot/`）はそのまま残っている。**むぎに制作中の Live2D 版 variant を登録した**（`live2d/Mugi.model3.json`。モデル未書き出しの間は選ぶと PNG 表示へ退避する）。variant 名を「いつもの姿（PNG）」「集中オーラ（PNG）」「Live2D 版（制作中）」にして、どれが PNG 表示でどれが Live2D かを分かるようにした。`scale` / `offsetY` は PSD と同じ 360x640 で書き出す前提の暫定値（1.0 / 0）で、実機での調整が要る。
+- むぎのフレーム版（`animations` / `layers/` / `boot/`）はそのまま残っている。**Live2D 版は別キャラ `mugi-live2d` として分離した**（会話履歴・関係の記録をキャラ ID ごとに分けたいため。variant では同じ ID を共有してしまう）。画像は複製せず `../mugi/…` の相対パスで参照し、モデル未書き出しの間は PNG 表示へ退避する。旧: **むぎに制作中の Live2D 版 variant を登録した**（`live2d/Mugi.model3.json`。モデル未書き出しの間は選ぶと PNG 表示へ退避する）。variant 名を「いつもの姿（PNG）」「集中オーラ（PNG）」「Live2D 版（制作中）」にして、どれが PNG 表示でどれが Live2D かを分かるようにした。`scale` / `offsetY` は PSD と同じ 360x640 で書き出す前提の暫定値（1.0 / 0）で、実機での調整が要る。
 - Live2D の初期化に失敗したときのメッセージを「失敗」から「PNG 表示で続行」へ変えた。制作途中のモデルを variant へ登録しておける運用にしたため、これは異常ではなく想定内の分岐になる。
 
 ### むぎの Live2D 制作用 PSD を生成

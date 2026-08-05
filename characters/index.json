@@ -8,6 +8,12 @@
       "description": "明るく観察上手な小さな作業相棒。"
     },
     {
+      "id": "mugi-live2d",
+      "name": "むぎ（Live2D）",
+      "manifest": "mugi-live2d/character.json",
+      "description": "むぎの Live2D 版（制作中）。会話と記録は PNG 版と別。"
+    },
+    {
       "id": "rin",
       "name": "りん",
       "manifest": "rin/character.json",

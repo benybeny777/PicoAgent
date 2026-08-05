@@ -31,27 +31,11 @@
   "variants": [
     {
       "id": "default",
-      "name": "いつもの姿（PNG）"
+      "name": "いつもの姿"
     },
     {
       "id": "focus",
-      "name": "集中オーラ（PNG）"
-    },
-    {
-      "id": "live2d",
-      "name": "Live2D 版（制作中）",
-      "live2d": {
-        "model": "live2d/Mugi.model3.json",
-        "motions": {
-          "idle": "Idle",
-          "thinking": "TapBody",
-          "talking": "TapBody",
-          "sad": "Idle"
-        },
-        "lipSyncParam": "ParamMouthOpenY",
-        "scale": 1.0,
-        "offsetY": 0
-      }
+      "name": "集中オーラ"
     }
   ],
   "animations": {
