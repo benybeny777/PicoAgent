@@ -527,9 +527,11 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
       stopLive2D();
       activeLive2dConfig = null;
       if (!animations.idle) throw error;
-      // フォールバック許可: Live2D ランタイム未取得でも、フレームアニメを持つキャラは表示を継続する（通知済み）。
-      logApp("error", "Live2D の初期化に失敗しました（フレームアニメで継続）", errorDetail(error));
-      setStatus("Live2D を初期化できませんでした");
+      // フォールバック許可: Live2D ランタイム未取得やモデル未書き出しでも、フレームアニメを
+      // 持つキャラは表示を継続する。制作途中のモデルを variant に登録しておけるようにするため、
+      // ここは「失敗」ではなく「PNG 表示で続行」として伝える。
+      logApp("error", "Live2D の初期化に失敗しました（PNG 表示で継続）", errorDetail(error));
+      setStatus("Live2D を読み込めないので PNG 表示で続けるね");
       preloadAnimations();
       await probeRigLayers();
     }
