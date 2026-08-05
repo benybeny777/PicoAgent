@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-08-02
+
+### Live2D 公式サンプルモデルを再配布条件が明示されているものすべてに拡張
+
+- **6 体を追加** (`xtask/src/bundled.rs` / `characters/{mao,mark,natori,ren,rice,wanko}/`): 公式リポジトリ CubismWebSamples の `LICENSE.md` が **Free Material License で提供すると明記している 8 体**（Haru / Hiyori / Mao / Mark / Natori / Ren / Rice / Wanko）を基準にした。既存はひより・Haru・Epsilon だったので、不足していた **まお・マーク・なとり・レン・ライス・わんこ**を追加し、それぞれに人格・挨拶・ふれあい反応を書いた。**Epsilon はこのリストには載っていない別配布**（`cubism.live2d.com` の epsilon_free）なので、ドキュメント上で区別した。
+  - モデル実体は従来どおり配布物へ同梱せず、`cargo xtask setup live2d` が実行時に取得する（Git 管理外）。追加した 6 体は公式リポジトリからファイル単位で取得する経路に載せ、**6 体 77 ファイルすべてが実際に取得できることを確認済み**。
+  - `motions` / `lipSyncParam` は各 `model3.json` の実データを見て個別に割り当てた。**Mark は `Idle` しか持たない**ので全状態を Idle へ写し、**Mao の口は `ParamA`**、**Wanko は旧命名 `PARAM_MOUTH_OPEN_Y`**、**Rice は口のパラメータ自体を持たない**。
+- **`live2d.lipSync: false` を追加** (`ui/renderer.js` / `SPEC.md`): 口のパラメータが無いモデル（Rice）向け。既定値を当てても存在しない ID を毎フレーム書き込むだけになるため、明示的に切れるようにした。
+- **1 体の取得失敗で setup 全体を止めない** (`xtask/src/bundled.rs`): 配布元へ到達できないネットワークでも、取れたモデルだけで起動できる方が実用的。失敗したモデルは警告に留め、そのキャラだけ選べない状態にする。プレビュー画像も同様に警告のみとし、`characters/_preview-placeholder.png` で代替する（プレビューはモデルの動作に関わらない）。起動待ち画面にも `onerror` の退避先を用意した。
+
+### むぎの Live2D 制作用 PSD を生成
+
+- `python scripts/build-live2d-psd.py mugi` を実行し、`characters/mugi/live2d-src/mugi-live2d.psd`（ひよりの 15 パーツ構成 + variants + base_full、360x640）を生成した。以降の作業は Cubism Editor 上の手作業になる。生成物は Git 管理外。
+
+---
+
 ## 2026-08-01（レビュー反映）
 
 ### 相棒体験のレビューで見つかった問題を直した

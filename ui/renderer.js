@@ -456,6 +456,11 @@ async function prepareBootCharacter(characterId) {
   const { manifest, root } = await loadCharacterManifest(characterId);
   const version = String(manifest.assetVersion || "");
   const bootPath = manifest.boot?.sleeping || `${manifest.animations?.idle?.path || "animations/idle"}/00.png`;
+  bootPetImage.onerror = () => {
+    // プレビュー画像を取得できていないキャラ（setup が警告を出した場合）でも起動画面を壊さない。
+    bootPetImage.onerror = null;
+    bootPetImage.src = "assets/characters/_preview-placeholder.png";
+  };
   bootPetImage.src = versionedAssetUrl(`${root}/${bootPath}`, version);
   bootPetImage.alt = `起動を待つ${manifest.name || "キャラクター"}`;
   bootCharacterName = manifest.name || "キャラクター";
@@ -842,11 +847,14 @@ async function startLive2D(manifest) {
   // PARAM_MOUTH_OPEN_Y のような旧命名のため、固定既定値だと口が動かない。
   const coreModel = model.internalModel.coreModel;
   const lipSyncGroup = model.internalModel.settings?.groups?.find(group => group.Name === "LipSync");
+  // 口のパラメータを持たないモデル（公式サンプルの Rice など）は lipSync:false で明示的に切る。
+  // 既定値を当てても存在しない ID を毎フレーム書き込むだけになるため。
+  const lipSyncEnabled = cfg.lipSync !== false;
   const lipParam = String(cfg.lipSyncParam || lipSyncGroup?.Ids?.[0] || "ParamMouthOpenY");
   const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
   model.internalModel.motionManager.update = (...args) => {
     const updated = motionUpdate(...args);
-    if (live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
+    if (lipSyncEnabled && live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
     return updated;
   };
   if (reduceMotion) {

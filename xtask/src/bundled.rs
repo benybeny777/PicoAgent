@@ -392,6 +392,57 @@ pub fn fetch_live2d() -> Result<()> {
             model_json: "Epsilon_free.model3.json",
             preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-epsillon.jpg",
         },
+        // ここから下は Live2D 公式リポジトリ（CubismWebSamples）の LICENSE.md が
+        // 「Free Material License」で提供すると明記しているモデル。モデル実体は配布物へ
+        // 同梱せず、この setup が実行時に取得する（Git 管理外）。
+        Sample {
+            id: "mao",
+            label: "まお",
+            zip: None,
+            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Mao/",
+            model_json: "Mao.model3.json",
+            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-mao.jpg",
+        },
+        Sample {
+            id: "mark",
+            label: "マーク",
+            zip: None,
+            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Mark/",
+            model_json: "Mark.model3.json",
+            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-mark.jpg",
+        },
+        Sample {
+            id: "natori",
+            label: "なとり",
+            zip: None,
+            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Natori/",
+            model_json: "Natori.model3.json",
+            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-natori.jpg",
+        },
+        Sample {
+            id: "ren",
+            label: "レン",
+            zip: None,
+            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Ren/",
+            model_json: "Ren.model3.json",
+            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-ren.jpg",
+        },
+        Sample {
+            id: "rice",
+            label: "ライス",
+            zip: None,
+            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Rice/",
+            model_json: "Rice.model3.json",
+            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-rice.jpg",
+        },
+        Sample {
+            id: "wanko",
+            label: "わんこ",
+            zip: None,
+            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Wanko/",
+            model_json: "Wanko.model3.json",
+            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-wanko.jpg",
+        },
     ];
 
     for sample in samples {
@@ -401,13 +452,34 @@ pub fn fetch_live2d() -> Result<()> {
             .next()
             .filter(|e| e.len() <= 4)
             .unwrap_or("jpg");
-        ensure_file(
-            sample.preview_url,
-            &characters.join(sample.id).join(format!("preview.{ext}")),
-        )?;
-        match sample.zip {
-            None => fetch_live2d_raw(&sample, &characters)?,
-            Some((url, runtime_dir)) => fetch_live2d_zip(&sample, url, runtime_dir, &characters)?,
+        // プレビュー画像は設定画面のアイコンと起動待ち画面に使うだけで、モデルの動作には
+        // 関わらない。配布ページの URL は将来変わりうるので、取れなくても警告に留めて
+        // 共通のプレースホルダーで代替する（ここで失敗すると setup 全体が止まってしまう）。
+        let preview = characters.join(sample.id).join(format!("preview.{ext}"));
+        if let Err(error) = ensure_file(sample.preview_url, &preview) {
+            log(
+                "setup:live2d",
+                format!(
+                    "警告: {} のプレビュー画像を取得できませんでした（表示は代替画像で続行します）: {error}",
+                    sample.label
+                ),
+            );
+        }
+        // 1体取得できなくても他のモデルの取得は続ける。配布元が落ちている・その host へ
+        // 到達できないネットワークでも、取れたモデルだけで起動できる方が実用的で、
+        // アプリ側もモデルが無いキャラは選択時にエラーを出すだけで済む。
+        let result = match sample.zip {
+            None => fetch_live2d_raw(&sample, &characters),
+            Some((url, runtime_dir)) => fetch_live2d_zip(&sample, url, runtime_dir, &characters),
+        };
+        if let Err(error) = result {
+            log(
+                "setup:live2d",
+                format!(
+                    "警告: {} のモデルを取得できませんでした（このキャラは選べません）: {error}",
+                    sample.label
+                ),
+            );
         }
     }
 

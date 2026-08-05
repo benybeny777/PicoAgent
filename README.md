@@ -114,7 +114,7 @@ cargo xtask dev
 ### キャラクター
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
-- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルの「ひより」「Haru」「Epsilon」を同梱
+- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルモデルを 9 体同梱（再配布条件が明示されている Free Material License の 8 体＋Epsilon。モデル実体は初回セットアップ時に取得）
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 - **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
 - **いっしょの記録** — キャラごとに会話・完了した作業・ふれあいを端末内へ保存。「出会ったばかり」から自然に距離感が変わります。数値ゲージは見せず、♡ ボタンの記録カードで振り返れます
@@ -477,7 +477,7 @@ cargo xtask build
 
 **Live2D ランタイムとサンプルモデル**
 
-- `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル「ひより」「Haru」「Epsilon」を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います
+- `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル 9 体（ひより / Haru / まお / マーク / なとり / レン / ライス / わんこ / Epsilon）を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。**1 体取得できなくても他の取得は続き**、プレビューが取れなかった場合は代替画像で表示します
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるためリポジトリにはコミットしません（`.gitignore` 済）
 
 **その他**

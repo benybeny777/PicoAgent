@@ -84,9 +84,20 @@ characters/<id>/
 
 - `layers/` と `animations/` は不要。まばたき・口パク・モーションはモデル定義が担当する。
 - `build-character-animations.py` は Live2D キャラをスキップする。
-- サンプルの `hiyori` / `haru` / `epsilon`（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が
-  `live2d/` へモデルを取得する。再配布条件があるためモデル実体は Git 管理外。
-  `preview.jpg` はローディング画面と設定画面アイコンに使う。
+- サンプルキャラ（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が `live2d/` へ
+  モデルを取得する。再配布条件があるためモデル実体は Git 管理外。
+  `preview.jpg` はローディング画面と設定画面アイコンに使い、取得できなかった場合は
+  `_preview-placeholder.png` で代替する。
+  - **Free Material License**（公式リポジトリ CubismWebSamples の `LICENSE.md` に明記）:
+    `hiyori` / `haru` / `mao` / `mark` / `natori` / `ren` / `rice` / `wanko`
+  - **上記リストに無い別配布**: `epsilon`（`cubism.live2d.com` の epsilon_free）
+  - いずれもモデルごとに Live2D のサンプルモデル利用条件への同意が必要。売上高が一定規模を
+    超える事業者は Cubism SDK リリースライセンスも必要になる。判断は利用者側で行うこと。
+- モデルごとに `motions` / `lipSyncParam` は個体差がある。実際の `model3.json` の
+  `FileReferences.Motions` と `Groups: LipSync` を見て割り当てる
+  （例: `Mark` は `Idle` しか持たない、`Mao` の口は `ParamA`、`Wanko` は旧命名、
+  `Rice` は口のパラメータ自体が無いので `"lipSync": false` にする）。
+  `scale` / `offsetY` はモデルごとに実機で合わせる（同じ値では収まらない）。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
   `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。
 
