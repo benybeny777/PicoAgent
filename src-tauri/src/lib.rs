@@ -5,6 +5,7 @@ mod agent;
 mod aivis;
 mod alarm;
 mod api_server;
+mod boot_screen;
 #[cfg(test)]
 mod bundle_scope;
 mod commands;
@@ -37,6 +38,7 @@ mod usage;
 use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
 
 use aivis::AivisState;
+use boot_screen::BootScreenState;
 use commands::AppState;
 use engine::EngineState;
 
@@ -46,8 +48,13 @@ pub fn run() {
         .manage(AppState::new())
         .manage(EngineState::new())
         .manage(AivisState::new())
+        .manage(BootScreenState::new())
         .manage(WindowLayoutCache::default())
         .manage(tracer::Tracer::new(200))
+        // フロントを読み込めなかったときの案内画面（配信経路に依存しないよう埋め込みを返す）。
+        .register_uri_scheme_protocol(boot_screen::SCHEME, |ctx, _request| {
+            boot_screen::serve(ctx.app_handle())
+        })
         .on_window_event(on_main_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
@@ -92,6 +99,8 @@ pub fn run() {
             commands::pet_capture_screen,
             commands::pet_read_file_content,
             commands::pet_read_dropped_path,
+            commands::pet_frontend_ready,
+            commands::pet_reset_layout,
             menu::pet_menu,
         ])
         .on_menu_event(|app, event| {
@@ -195,47 +204,11 @@ pub fn run() {
                 state.messages.lock().unwrap().extend(recent);
             }
 
-            // 保存済みサイズを復元し、位置は解像度非依存の右下オフセットで配置する。
+            // 保存済みのサイズと「どのディスプレイのどこに居たか」を復元する。
             if let Some(win) = app.get_webview_window("main") {
                 let _ =
                     win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
-                if let (Ok(Some(monitor)), Ok(scale), Ok(current)) =
-                    (win.current_monitor(), win.scale_factor(), win.outer_size())
-                {
-                    let area = monitor.size();
-                    let scale = scale.max(1.0);
-                    // 位置計算は適用後の物理サイズを使う（set_size の反映前に outer_size を読むと古い値になるため）。
-                    let (mut win_w, mut win_h) = (current.width, current.height);
-                    let saved_width = state.config.get("PICOAGENT_WINDOW_WIDTH_PX", "");
-                    let saved_height = state.config.get("PICOAGENT_WINDOW_HEIGHT_PX", "");
-                    if let (Ok(width), Ok(height)) =
-                        (saved_width.parse::<f64>(), saved_height.parse::<f64>())
-                    {
-                        // 全画面時の汚染などでモニタを超える保存値が来ても、モニタ内へ収める。
-                        let width = width.min(area.width as f64 / scale);
-                        let height = height.min(area.height as f64 / scale);
-                        if width >= 420.0 && height >= 340.0 {
-                            let _ = win.set_size(LogicalSize::new(width, height));
-                            win_w = (width * scale).round() as u32;
-                            win_h = (height * scale).round() as u32;
-                        }
-                    }
-                    // 横位置は以前指定の固定値（既定の右オフセット）。縦位置だけ保存値から復元する（解像度非依存）。
-                    let bottom_offset = state
-                        .config
-                        .get("PICOAGENT_WINDOW_BOTTOM_PX", "")
-                        .parse::<i32>()
-                        .unwrap_or(DEFAULT_BOTTOM_OFFSET);
-                    let (x, y) = position_from_offsets(
-                        area.width,
-                        area.height,
-                        win_w,
-                        win_h,
-                        DEFAULT_RIGHT_OFFSET,
-                        bottom_offset,
-                    );
-                    let _ = win.set_position(PhysicalPosition::new(x, y));
-                }
+                restore_window_layout(&win, &state.config);
             }
 
             // 既定が local（同梱エンジン）なら、モデル取得とエンジン起動を非同期で開始する。
@@ -273,6 +246,8 @@ pub fn run() {
                     }
                 });
             }
+            // フロントの準備完了を見張り、時間内に来なければキャラクター付きの案内画面へ切り替える。
+            boot_screen::watch(app.handle().clone());
             scheduler::start(app.handle().clone());
             // ローカル API サーバ（既定無効。PICOAGENT_API_ENABLED=true で 127.0.0.1 に開く）。
             api_server::start(app.handle().clone());
@@ -305,7 +280,9 @@ const SNAP_THRESHOLD: i32 = 24;
 
 /// ウィンドウの移動／リサイズで確定したレイアウトを覚えておくキャッシュ。
 /// 終了時 (`RunEvent::Exit`) はウィンドウが破棄され座標を取得できないため、生存中のイベントで控えておく。
-/// 横位置（右端基準）は固定なので覚えない。縦位置（下端からのオフセット）とサイズだけを保持する。
+/// 位置は**仮想デスクトップ全体の物理座標**で持つ。マルチモニタでは各モニタが
+/// 原点の異なる矩形として並ぶため、モニタ内の相対オフセットだけでは
+/// 「どのディスプレイに居たか」を復元できない。
 #[derive(Default)]
 pub(crate) struct WindowLayoutCache {
     inner: std::sync::Mutex<Option<CachedLayout>>,
@@ -315,38 +292,91 @@ pub(crate) struct WindowLayoutCache {
 struct CachedLayout {
     width: f64,  // 論理px
     height: f64, // 論理px
-    bottom_offset: i32,
+    x: i32,      // 仮想デスクトップ上の物理px
+    y: i32,      // 仮想デスクトップ上の物理px
 }
 
-/// 右下からの相対オフセットでウィンドウ左上座標を求める（解像度非依存）。
+/// モニタ矩形（仮想デスクトップ上の物理座標）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MonitorRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// 指定モニタの右下オフセットからウィンドウ左上座標を求める。
+/// **モニタ原点を必ず加える**（原点を無視すると、左側に並ぶモニタ＝負の X を持つ
+/// 環境で常に主モニタ側へ吸い寄せられ、意図しない画面に出る）。
 pub(crate) fn position_from_offsets(
-    area_w: u32,
-    area_h: u32,
+    monitor: MonitorRect,
     win_w: u32,
     win_h: u32,
     right_offset: i32,
     bottom_offset: i32,
 ) -> (i32, i32) {
-    let x = area_w as i32 - win_w as i32 - right_offset;
-    let y = area_h as i32 - win_h as i32 - bottom_offset;
-    (x.max(0), y.max(0))
+    let x = monitor.x + monitor.width as i32 - win_w as i32 - right_offset;
+    let y = monitor.y + monitor.height as i32 - win_h as i32 - bottom_offset;
+    // 右下方向のはみ出しは丸めない（既定位置は右端より外へ 69px オーバーハングさせる意匠）。
+    // モニタの左上より外へ出ることだけを防ぐ。
+    (x.max(monitor.x), y.max(monitor.y))
 }
 
 /// 既定の右下オフセットでのウィンドウ位置。
 pub(crate) fn default_window_position(
-    area_w: u32,
-    area_h: u32,
+    monitor: MonitorRect,
     win_w: u32,
     win_h: u32,
 ) -> (i32, i32) {
     position_from_offsets(
-        area_w,
-        area_h,
+        monitor,
         win_w,
         win_h,
         DEFAULT_RIGHT_OFFSET,
         DEFAULT_BOTTOM_OFFSET,
     )
+}
+
+/// ウィンドウ矩形とモニタ矩形の重なり（幅, 高さ）。重なりが無ければ 0。
+fn overlap(monitor: MonitorRect, x: i32, y: i32, win_w: u32, win_h: u32) -> (i32, i32) {
+    let overlap_w =
+        ((x + win_w as i32).min(monitor.x + monitor.width as i32) - x.max(monitor.x)).max(0);
+    let overlap_h =
+        ((y + win_h as i32).min(monitor.y + monitor.height as i32) - y.max(monitor.y)).max(0);
+    (overlap_w, overlap_h)
+}
+
+/// 保存座標のウィンドウが、どれかのモニタに**掴める大きさ**で載っているか。
+/// ディスプレイを外した・主副を入れ替えた・解像度を変えた後に、画面外の座標へ復元して
+/// 「起動したのに何も見えない」状態になるのを防ぐ。
+pub(crate) fn is_visible_on_any_monitor(
+    monitors: &[MonitorRect],
+    x: i32,
+    y: i32,
+    win_w: u32,
+    win_h: u32,
+) -> bool {
+    // 端にオーバーハングさせる使い方（既定位置も右へはみ出す）を許すため、
+    // 完全内包ではなく「掴める大きさの重なりがあるか」で判定する。
+    const MIN_VISIBLE_PX: i32 = 80;
+    monitors.iter().any(|monitor| {
+        let (overlap_w, overlap_h) = overlap(*monitor, x, y, win_w, win_h);
+        overlap_w >= MIN_VISIBLE_PX.min(win_w as i32)
+            && overlap_h >= MIN_VISIBLE_PX.min(win_h as i32)
+    })
+}
+
+/// ウィンドウが 1px でも見えているか。
+///
+/// 実行中のディスプレイ構成変更（モニタの抜き差し・主副の入れ替え・解像度変更）で
+/// ウィンドウが完全に画面外へ取り残されたことの検出に使う。
+/// **保存位置の採否より緩い判定にしてある**（`is_visible_on_any_monitor` の 80px 基準で
+/// 実行中に引き戻すと、端へ寄せる通常のドラッグ操作まで勝手に戻されてしまうため）。
+pub(crate) fn is_on_screen(monitors: &[MonitorRect], x: i32, y: i32, win_w: u32, win_h: u32) -> bool {
+    monitors.iter().any(|monitor| {
+        let (overlap_w, overlap_h) = overlap(*monitor, x, y, win_w, win_h);
+        overlap_w > 0 && overlap_h > 0
+    })
 }
 
 /// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。
@@ -370,30 +400,148 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     ) else {
         return;
     };
-    let area = monitor.size();
-    let ah = area.height as i32;
     let (w, h) = (size.width as i32, size.height as i32);
 
-    // 横位置（右端基準）は以前指定の固定値なので触らない。縦位置だけ上端スナップする。
-    if pos.y.abs() <= SNAP_THRESHOLD && pos.y != 0 {
-        // 再配置すると再度 Moved が飛ぶので、そこでキャッシュする。
-        let _ = window.set_position(PhysicalPosition::new(pos.x, 0));
+    // ディスプレイ構成の変更（モニタの抜き差し・主副の入れ替え・解像度変更）で
+    // ウィンドウが完全に画面外へ取り残されることがある。Windows がウィンドウを
+    // 動かし直すとここへ `Moved` が飛ぶので、その場で見える位置へ引き戻す。
+    // **画面外の座標をキャッシュ＝保存させない**ことも兼ねる（次回起動で復元を
+    // 諦めて既定位置へ飛ぶより、その場で直したほうが体験が良い）。
+    let monitors: Vec<MonitorRect> = window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(to_rect)
+        .collect();
+    if !monitors.is_empty() && !is_on_screen(&monitors, pos.x, pos.y, size.width, size.height) {
+        let rect = to_rect(&monitor);
+        let (x, y) = default_window_position(rect, size.width, size.height);
+        if (x, y) != (pos.x, pos.y) {
+            log_paths::append_app_log(
+                &window.app_handle().clone(),
+                &format!(
+                    "ディスプレイ構成の変更でウィンドウが画面外 ({}, {}) になったため、既定位置へ戻します。",
+                    pos.x, pos.y
+                ),
+            );
+            // 再配置すると再度 Moved が飛ぶので、そこでキャッシュする。
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+        }
         return;
     }
 
-    // サイズ（論理px）と下端からの縦オフセットをキャッシュ（終了時に保存）。横位置は覚えない。
+    // 上端スナップは**そのモニタの上端**を基準にする（仮想デスクトップの y=0 ではない。
+    // 上下に並ぶ配置では y=0 が別の画面を指してしまう）。
+    let monitor_top = monitor.position().y;
+    if (pos.y - monitor_top).abs() <= SNAP_THRESHOLD && pos.y != monitor_top {
+        // 再配置すると再度 Moved が飛ぶので、そこでキャッシュする。
+        let _ = window.set_position(PhysicalPosition::new(pos.x, monitor_top));
+        return;
+    }
+
+    // サイズ（論理px）と仮想デスクトップ上の絶対座標をキャッシュ（終了時に保存）。
     let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
     let layout = CachedLayout {
         width: w as f64 / scale,
         height: h as f64 / scale,
-        bottom_offset: ah - (pos.y + h),
+        x: pos.x,
+        y: pos.y,
     };
     *window.state::<WindowLayoutCache>().inner.lock().unwrap() = Some(layout);
 }
 
-/// 終了時に、生存中のイベントで控えておいたサイズと縦オフセットを設定へ保存する。
+fn to_rect(monitor: &tauri::window::Monitor) -> MonitorRect {
+    MonitorRect {
+        x: monitor.position().x,
+        y: monitor.position().y,
+        width: monitor.size().width,
+        height: monitor.size().height,
+    }
+}
+
+/// 接続中モニタの矩形一覧（仮想デスクトップ上の物理座標）。
+/// モニタ列挙とウィンドウ座標（`outer_position` / `set_position`）は同じ座標系で、
+/// どちらも主モニタ左上が原点。そのまま重なり判定に使える。
+fn monitor_rects(window: &tauri::WebviewWindow) -> Vec<MonitorRect> {
+    window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(to_rect)
+        .collect()
+}
+
+/// 現在のモニタ矩形（取得できなければ主モニタ、それも無ければ None）。
+fn current_monitor_rect(window: &tauri::WebviewWindow) -> Option<MonitorRect> {
+    let monitor = match window.current_monitor() {
+        Ok(Some(monitor)) => Some(monitor),
+        _ => window.primary_monitor().ok().flatten(),
+    }?;
+    Some(to_rect(&monitor))
+}
+
+/// 保存済みのサイズと絶対座標からウィンドウを復元する。
+/// 座標が現在のモニタ構成のどこにも載らない（ディスプレイを外した等）場合は、
+/// 既定の右下位置へ置き直す。
+pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &config::Config) {
+    let Some(monitor) = current_monitor_rect(window) else {
+        return;
+    };
+    let Ok(scale) = window.scale_factor() else {
+        return;
+    };
+    let scale = scale.max(1.0);
+    let Ok(current) = window.outer_size() else {
+        return;
+    };
+
+    // サイズ: 全画面時の汚染などでモニタを超える保存値が来てもモニタ内へ収める。
+    let (mut win_w, mut win_h) = (current.width, current.height);
+    if let (Ok(width), Ok(height)) = (
+        config.get("PICOAGENT_WINDOW_WIDTH_PX", "").parse::<f64>(),
+        config.get("PICOAGENT_WINDOW_HEIGHT_PX", "").parse::<f64>(),
+    ) {
+        let width = width.min(monitor.width as f64 / scale);
+        let height = height.min(monitor.height as f64 / scale);
+        if width >= 420.0 && height >= 340.0 {
+            let _ = window.set_size(LogicalSize::new(width, height));
+            // 位置計算は適用後の物理サイズを使う（set_size の反映前に outer_size を読むと古い値になる）。
+            win_w = (width * scale).round() as u32;
+            win_h = (height * scale).round() as u32;
+        }
+    }
+
+    // 位置: 保存された絶対座標をそのまま使う（＝同じディスプレイの同じ場所へ戻る）。
+    let saved = (
+        config.get("PICOAGENT_WINDOW_LEFT_PX", "").parse::<i32>(),
+        config.get("PICOAGENT_WINDOW_TOP_PX", "").parse::<i32>(),
+    );
+    let monitors = monitor_rects(window);
+    let (x, y) = match saved {
+        (Ok(x), Ok(y)) if is_visible_on_any_monitor(&monitors, x, y, win_w, win_h) => (x, y),
+        (Ok(x), Ok(y)) => {
+            // 認識しているモニタ構成も残す。ディスプレイの増減・配置変更・DPI 設定で
+            // 座標系がずれたときに、ログだけで原因を追えるようにするため。
+            let layout = monitors
+                .iter()
+                .map(|m| format!("({}, {}) {}x{}", m.x, m.y, m.width, m.height))
+                .collect::<Vec<_>>()
+                .join(" / ");
+            log_paths::append_app_log(
+                &window.app_handle().clone(),
+                &format!(
+                    "保存されたウィンドウ位置 ({x}, {y}) {win_w}x{win_h} が現在のディスプレイ構成に載らないため、既定位置へ戻します。認識中のモニタ: {layout}"
+                ),
+            );
+            default_window_position(monitor, win_w, win_h)
+        }
+        _ => default_window_position(monitor, win_w, win_h),
+    };
+    let _ = window.set_position(PhysicalPosition::new(x, y));
+}
+
+/// 終了時に、生存中のイベントで控えておいたサイズと絶対座標を設定へ保存する。
 /// `RunEvent::Exit` ではウィンドウ座標を取得できないため、キャッシュ値のみを書き出す。
-/// 横位置は以前指定の固定値を使うため保存しない。
 fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
     let Some(layout) = *app_handle
         .state::<WindowLayoutCache>()
@@ -414,13 +562,114 @@ fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
         serde_json::json!(layout.height.round().to_string()),
     );
     patch.insert(
-        "PICOAGENT_WINDOW_BOTTOM_PX".to_string(),
-        serde_json::json!(layout.bottom_offset.to_string()),
+        "PICOAGENT_WINDOW_LEFT_PX".to_string(),
+        serde_json::json!(layout.x.to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_WINDOW_TOP_PX".to_string(),
+        serde_json::json!(layout.y.to_string()),
     );
     if let Err(error) = state.config.set_all(patch) {
         log_paths::append_app_log(
             app_handle,
             &format!("終了時のウィンドウ位置・サイズ保存に失敗しました: {error}"),
         );
+    }
+}
+
+#[cfg(test)]
+mod window_layout_tests {
+    use super::*;
+
+    /// 主モニタ（必ず原点 (0,0)）と、その左隣に置かれたサブモニタ（原点が負）。
+    /// Windows の仮想デスクトップは主モニタ左上が原点なので、左側のモニタは負の X を持つ。
+    fn two_monitors() -> Vec<MonitorRect> {
+        vec![
+            MonitorRect { x: -1920, y: 0, width: 1920, height: 1200 },
+            MonitorRect { x: 0, y: 0, width: 2560, height: 1440 },
+        ]
+    }
+
+    /// 主モニタを右側の 2560x1440 から左側の 1920x1200 へ入れ替えた構成。
+    /// 主モニタが原点になるため、**同じ物理配置でも全モニタの座標が変わる**。
+    fn primary_swapped() -> Vec<MonitorRect> {
+        vec![
+            MonitorRect { x: 0, y: 0, width: 1920, height: 1200 },
+            MonitorRect { x: 1920, y: 0, width: 2560, height: 1440 },
+        ]
+    }
+
+    #[test]
+    fn 既定位置はモニタ原点を加えて求める() {
+        // 原点が負のモニタで、モニタ原点を無視すると主モニタ側の座標になってしまう。
+        let left = MonitorRect { x: -1920, y: 0, width: 1920, height: 1200 };
+        let (x, y) = default_window_position(left, 560, 430);
+        assert!(
+            x < 0,
+            "左側モニタの既定位置が主モニタ側へ吸い寄せられています: x={x}"
+        );
+        assert!(x >= left.x && y >= left.y, "モニタ矩形の外に出ています: ({x}, {y})");
+    }
+
+    #[test]
+    fn 保存座標がモニタ上にあれば有効と判定する() {
+        let monitors = two_monitors();
+        // サブモニタ上の座標。
+        assert!(is_visible_on_any_monitor(&monitors, -1155, 487, 560, 430));
+        // 主モニタ上の座標。
+        assert!(is_visible_on_any_monitor(&monitors, 2069, 959, 560, 430));
+    }
+
+    #[test]
+    fn モニタを外した後の座標は無効と判定する() {
+        // サブモニタを外した構成では、そこに保存されていた座標は画面外になる。
+        let only_main = vec![MonitorRect { x: 0, y: 0, width: 2560, height: 1440 }];
+        assert!(!is_visible_on_any_monitor(&only_main, -1155, 487, 560, 430));
+    }
+
+    #[test]
+    fn 主モニタを入れ替えると保存座標が無効になりうる() {
+        // 主副の入れ替えで仮想デスクトップの原点が動くため、同じ物理位置でも座標が変わる。
+        // 旧構成のサブモニタ上（負のX）だった座標は、新構成では画面外になる。
+        assert!(is_visible_on_any_monitor(&two_monitors(), -1000, 300, 560, 430));
+        assert!(!is_visible_on_any_monitor(&primary_swapped(), -1000, 300, 560, 430));
+    }
+
+    #[test]
+    fn 解像度を下げると画面外になった座標を検出する() {
+        let before = vec![MonitorRect { x: 0, y: 0, width: 2560, height: 1440 }];
+        let after = vec![MonitorRect { x: 0, y: 0, width: 1920, height: 1080 }];
+        // 旧解像度の右下寄りにあった位置は、解像度を下げると載らなくなる。
+        assert!(is_visible_on_any_monitor(&before, 2200, 1300, 560, 430));
+        assert!(!is_visible_on_any_monitor(&after, 2200, 1300, 560, 430));
+    }
+
+    #[test]
+    fn モニタ本数が増えた構成でも保存座標は有効なまま() {
+        // モニタを足すだけなら既存の座標は載り続ける（無駄に既定位置へ戻さない）。
+        let mut more = primary_swapped();
+        more.push(MonitorRect { x: 4480, y: 0, width: 1920, height: 1080 });
+        assert!(is_visible_on_any_monitor(&more, 2500, 500, 560, 430));
+        assert!(is_visible_on_any_monitor(&more, 4600, 200, 560, 430));
+    }
+
+    #[test]
+    fn 実行中の引き戻しはドラッグでの端寄せを邪魔しない() {
+        let monitors = primary_swapped();
+        // 掴める大きさは残っていない（保存には不適）が、まだ見えている位置。
+        // 実行中の引き戻しはこれを動かしてはいけない。
+        assert!(is_on_screen(&monitors, -540, 300, 560, 430));
+        assert!(!is_visible_on_any_monitor(&monitors, -540, 300, 560, 430));
+        // 完全に画面外なら引き戻す。
+        assert!(!is_on_screen(&monitors, -560, 300, 560, 430));
+    }
+
+    #[test]
+    fn 端から少しはみ出すだけなら有効と判定する() {
+        // 既定位置自体が右端より外へ 69px はみ出す運用なので、完全内包を要求してはいけない。
+        let monitors = two_monitors();
+        let main = monitors[1];
+        let (x, y) = default_window_position(main, 560, 430);
+        assert!(is_visible_on_any_monitor(&monitors, x, y, 560, 430));
     }
 }

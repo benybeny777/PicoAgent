@@ -2170,6 +2170,20 @@ pub fn pet_delete_downloaded_model(app: AppHandle, name: String) -> Result<Value
     Ok(json!({ "ok": true }))
 }
 
+/// ウィンドウとフキダシの位置・サイズを初期化する（設定画面の「画面位置を初期化」）。
+/// 右クリックメニューの「フキダシ位置とサイズをリセット」と同じ処理を共有する。
+#[tauri::command]
+pub fn pet_reset_layout(app: AppHandle) {
+    crate::menu::reset_bubble_and_window_layout(&app);
+}
+
+/// フロントの初期化が始まったことをバックエンドへ伝える。
+/// これが届かないと `boot_screen` が読み込み失敗と判断し、案内画面へ切り替える。
+#[tauri::command]
+pub fn pet_frontend_ready(app: AppHandle) {
+    crate::boot_screen::mark_ready(&app);
+}
+
 #[tauri::command]
 pub async fn pet_log(
     level: String,

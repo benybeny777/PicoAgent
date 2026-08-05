@@ -19,6 +19,7 @@
   - 起動して確認したら使い終わったプロセスは止め、ロックや再ビルドの無駄を避ける。確認が自動化しづらい（GUI・音声など）場合は、コードの正しさで判断し、最終目視はユーザーに委ねてよい。
 - PowerShell で日本語ファイルを確認するときは、文字化けを避けるため UTF-8 を明示する。表示が文字化けしても、すぐにソース破損と判断せず UTF-8 で読み直してから判断する。
 - 既に未コミット変更がある場合は、ユーザーまたは別エージェントの作業として扱い、勝手に巻き戻さない。
+- 作業中のスクリーンショット・連番フレーム・変換途中のファイルなど、一時的な作成物はリポジトリ直下の `temp/` 内だけに置く。ルートやソースディレクトリへ `tmp-*` 等を作らない。`temp/` は `.gitignore` で除外し、一時作成物をコミットへ含めない。
 - 修正・作業が完了したら、ユーザーからの個別指示がなくても、作業ツリーの未コミット変更を `git add -A` で全てステージしてコミットし、`origin` へプッシュまで行う。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含めてプッシュする（コミットメッセージは日本語。本ファイルの他ルールに従う）。破壊的な履歴操作（force push・reset --hard など）はしない。
 - **PR のマージは squash merge を使う。** 1 PR = 1 コミットになり `main` の履歴が読みやすい、というだけの理由。なお API 経由のマージは、squash / 通常マージのいずれでも GitHub 側が committer を `noreply@github.com` にして署名するため、`git log` 上は Unverified に見える（GitHub の画面上は Verified）。これは避けられないので気にしない。すでに `origin` に載ったコミットを後から書き換えるのは共有履歴の破壊操作になるので行わない（上のルールのとおり）。
 
@@ -115,6 +116,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
 | `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
+| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。`PICOAGENT_BOOT_TIMEOUT_MS` 以内に `pet_frontend_ready` が届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP が `script-src 'self'` のため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
 | `xtask/src/util.rs` | **同梱物取得の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。展開は OS 標準の tar / unzip / PowerShell へ委譲 |

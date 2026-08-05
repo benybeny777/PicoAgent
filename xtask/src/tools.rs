@@ -33,9 +33,9 @@ struct Tool {
 fn tools() -> Vec<Tool> {
     let pandoc = env_or("PANDOC_VERSION", "3.6.3");
     let ripgrep = env_or("RIPGREP_VERSION", "14.1.1");
-    let qpdf = env_or("QPDF_VERSION", "12.2.0");
+    let qpdf = env_or("QPDF_VERSION", "12.3.2");
     let poppler = env_or("POPPLER_WIN_VERSION", "24.08.0-0");
-    let imagemagick = env_or("IMAGEMAGICK_VERSION", "7.1.1-47");
+    let imagemagick = env_or("IMAGEMAGICK_VERSION", "7.1.2-29");
 
     let arm = cfg!(target_arch = "aarch64");
     let win = cfg!(windows);
@@ -100,7 +100,8 @@ fn tools() -> Vec<Tool> {
         Tool {
             name: "qpdf",
             exe: "qpdf",
-            url: win.then(|| format!("https://github.com/qpdf/qpdf/releases/download/v{qpdf}/qpdf-{qpdf}-bin-mingw64.zip")),
+            // アセット名に `-bin-` は入らない（`qpdf-12.3.2-mingw64.zip`）。以前は入れていて 404 だった。
+            url: win.then(|| format!("https://github.com/qpdf/qpdf/releases/download/v{qpdf}/qpdf-{qpdf}-mingw64.zip")),
             fallback: "apt install qpdf / brew install qpdf で導入すると PATH から使われます。",
         },
         Tool {
@@ -112,8 +113,9 @@ fn tools() -> Vec<Tool> {
         Tool {
             name: "imagemagick",
             exe: "magick",
-            // archive/binaries は旧版も恒久配布されるため、latest 追従より安定する。
-            url: win.then(|| format!("https://imagemagick.org/archive/binaries/ImageMagick-{imagemagick}-portable-Q16-x64.zip")),
+            // 配布は GitHub Releases の **`.7z` のみ**（旧 `imagemagick.org/archive/binaries/` は消滅し、
+            // zip 版も無い）。`extract()` は非 zip を `tar` へ回し、Windows 同梱の bsdtar が 7z を展開できる。
+            url: win.then(|| format!("https://github.com/ImageMagick/ImageMagick/releases/download/{imagemagick}/ImageMagick-{imagemagick}-portable-Q16-x64.7z")),
             fallback: "apt install imagemagick / brew install imagemagick で導入すると PATH（magick / convert）から使われます。",
         },
     ]
