@@ -787,22 +787,6 @@ pub fn fetch_live2d() -> Result<()> {
             preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-mao.jpg",
         },
         Sample {
-            id: "mark",
-            label: "マーク",
-            zip: None,
-            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Mark/",
-            model_json: "Mark.model3.json",
-            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-mark.jpg",
-        },
-        Sample {
-            id: "natori",
-            label: "なとり",
-            zip: None,
-            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Natori/",
-            model_json: "Natori.model3.json",
-            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-natori.jpg",
-        },
-        Sample {
             id: "ren",
             label: "レン",
             zip: None,

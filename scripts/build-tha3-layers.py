@@ -18,6 +18,8 @@ CHARACTERS_DIR = ROOT / "characters"
 INDEX_PATH = CHARACTERS_DIR / "index.json"
 THA3_DIR = ROOT / "src-tauri" / "resources" / "bundled" / "tha3"
 TEMP_DIR = ROOT / "temp"
+OUTPUT_SIZE = (445, 900)
+OUTPUT_MARGIN = (24, 38)
 MODEL_FILES = (
     "editor.pt",
     "eyebrow_decomposer.pt",
@@ -25,6 +27,7 @@ MODEL_FILES = (
     "face_morpher.pt",
     "two_algo_face_body_rotator.pt",
 )
+MOUTH_CANDIDATES = ("mouth_aaa", "mouth_iii", "mouth_uuu", "mouth_eee", "mouth_ooo", "mouth_delta")
 
 # 上流の pose_parameters.py にある名前だけで指定する。配列位置を固定値で持たない。
 # 必須5枚に加え、ひよりのような自然な待機・思考・会話・落胆へ近づけるため、
@@ -33,7 +36,8 @@ POSES: dict[str, dict[str, float]] = {
     "base": {},
     "blink_half": {"eye_relaxed_left": 0.55, "eye_relaxed_right": 0.55},
     "blink_closed": {"eye_wink_left": 1.0, "eye_wink_right": 1.0},
-    "mouth_open": {"mouth_aaa": 0.85},
+    # mouth_openは入力絵との相性差が大きいため、描画時に全口形候補から差が最大のものを自動選択する。
+    "mouth_open": {},
     "idle_left": {"head_y": -0.08, "neck_z": -0.025, "body_y": -0.03, "breathing": 0.30},
     "idle_right": {"head_y": 0.08, "neck_z": 0.025, "body_y": 0.03, "breathing": 0.65},
     "idle_breathe": {"head_x": -0.025, "breathing": 0.90},
@@ -224,7 +228,7 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
     try:
         import numpy
         import torch
-        from PIL import Image
+        from PIL import Image, ImageDraw
     except ImportError as error:
         raise RuntimeError("同梱THA3ランタイム（PyTorch・NumPy・Pillow）が不足しています。`cargo xtask setup tha3` を実行してください。") from error
     if sys.platform == "win32":
@@ -256,16 +260,90 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
         dtype = poser.get_dtype()
         source = extract_pytorch_image_from_PIL_image(image.copy()).to(device).to(dtype)
         parameters = get_pose_parameters()
+        base_rgba = None
+        base_box = None
+
+        def render(values: dict[str, float]):
+            nonlocal pose, output
+            pose = torch.zeros(poser.get_num_parameters(), device=device, dtype=dtype)
+            for parameter_name, value in values.items():
+                pose[parameters.get_parameter_index(parameter_name)] = value
+            output = poser.pose(source, pose)[0].detach().cpu()
+            return rgba_to_numpy_image(output)
+
+        def alpha_box(rgba):
+            points = numpy.argwhere(rgba[:, :, 3] > 0.02)
+            if not len(points):
+                return (0, 0, rgba.shape[1], rgba.shape[0])
+            return (
+                int(points[:, 1].min()),
+                int(points[:, 0].min()),
+                int(points[:, 1].max()) + 1,
+                int(points[:, 0].max()) + 1,
+            )
+
+        def enhance_small_mouth(rendered, difference):
+            # THA3が小さなデフォルメ口をほぼ動かせない場合も、差分位置を手掛かりに自動補正する。
+            intensity = difference[:, :, :3].sum(axis=2)
+            strong_pixels = int((intensity > 0.10).sum())
+            if strong_pixels >= 80:
+                return rendered, False
+            # 入力配置要件（頭部が上半分中央）に合わせた口位置。弱い差分は髪や目にも散るため
+            # 重心には使わず、規定位置へ小さな口だけを足して全身を作り直さない。
+            center_x = int(rendered.width * 0.47)
+            center_y = int(rendered.height * 0.31)
+            # デフォルメ絵で肌や髪を誤って拾わないよう、口内と舌は小さな共通色に限定する。
+            dark = (84, 38, 52)
+            tongue = (226, 120, 138)
+            scale = 4
+            patch = Image.new("RGBA", (8 * scale, 8 * scale), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(patch)
+            draw.ellipse((1 * scale, 1 * scale, 7 * scale, 7 * scale), fill=(*dark, 255))
+            draw.ellipse((2.5 * scale, 4.5 * scale, 5.5 * scale, 6.5 * scale), fill=(*tongue, 255))
+            patch = patch.resize((8, 8), Image.Resampling.LANCZOS)
+            rendered.alpha_composite(patch, (center_x - 4, center_y - 4))
+            return rendered, True
+
         with torch.inference_mode():
             for name in names:
-                values = POSES[name]
-                pose = torch.zeros(poser.get_num_parameters(), device=device, dtype=dtype)
-                for parameter_name, value in values.items():
-                    pose[parameters.get_parameter_index(parameter_name)] = value
-                output = poser.pose(source, pose)[0].detach().cpu()
-                rgba = rgba_to_numpy_image(output)
+                if name == "mouth_open":
+                    if base_rgba is None:
+                        base_rgba = render(POSES["base"])
+                        base_box = alpha_box(base_rgba)
+                    height, width = base_rgba.shape[:2]
+                    # 入力要件どおり頭部がある上半分中央だけを比較し、身体揺れ等を選択基準へ混ぜない。
+                    y1, y2 = int(height * 0.30), int(height * 0.42)
+                    x1, x2 = int(width * 0.38), int(width * 0.62)
+                    best = None
+                    for parameter_name in MOUTH_CANDIDATES:
+                        candidate = render({parameter_name: 1.0})
+                        score = float(numpy.abs(candidate[y1:y2, x1:x2, :3] - base_rgba[y1:y2, x1:x2, :3]).sum())
+                        if best is None or score > best[0]:
+                            best = (score, parameter_name, candidate)
+                    assert best is not None
+                    _, selected_mouth, rgba = best
+                    print(f"[build-tha3-layers] 口パク候補から{selected_mouth}を自動選択しました。")
+                else:
+                    rgba = render(POSES[name])
+                    if name == "base":
+                        base_rgba = rgba.copy()
+                        base_box = alpha_box(base_rgba)
                 with Image.fromarray(numpy.uint8(numpy.rint(rgba * 255.0))) as rendered:
-                    rendered.save(temp_paths[name])
+                    if name == "mouth_open":
+                        difference = numpy.abs(rgba[y1:y2, x1:x2] - base_rgba[y1:y2, x1:x2])
+                        rendered, enhanced = enhance_small_mouth(rendered, difference)
+                        if enhanced:
+                            print("[build-tha3-layers] 小さい口の差分を自動検出し、見える口パクへ補正しました。")
+                    # 基準ポーズの被写体範囲を全レイヤーへ共通適用し、位置ずれなく既存キャラと
+                    # 同じ縦長キャンバスへ収める。余白を含む512角の単純拡大による縮小表示を防ぐ。
+                    assert base_box is not None
+                    margin_x, margin_y = OUTPUT_MARGIN
+                    inner_size = (OUTPUT_SIZE[0] - margin_x * 2, OUTPUT_SIZE[1] - margin_y * 2)
+                    with rendered.crop(base_box).resize(inner_size, Image.Resampling.LANCZOS) as fitted:
+                        normalized = Image.new("RGBA", OUTPUT_SIZE, (0, 0, 0, 0))
+                        normalized.alpha_composite(fitted, (margin_x, margin_y))
+                        normalized.save(temp_paths[name])
+                        normalized.close()
                 print(f"[build-tha3-layers] 生成: {name}.png")
     finally:
         try:

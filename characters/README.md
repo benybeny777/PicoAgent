@@ -46,6 +46,8 @@ GUIでは右クリック →「設定…」→「キャラクター」→「1枚
 
 - 入力は512x512のRGBA PNG。背景はalpha=0、1人の人型キャラを正面直立で全身配置し、頭は上半分中央の128x128付近、手は頭から離す。機械検査できない正面向き・人数・手の位置は実行前に目視確認する。
 - Python・PyTorch・モデルはPicoAgent専用領域へ準備され、グローバルPythonや既存環境へ干渉しない。WindowsはCUDA対応NVIDIA GPU（VRAM 4GB以上）を使い、VRAM量に合わせて3モデルから自動選択する。Apple Silicon MacはMPS、Intel Macは対象外。これらを読み込むのは制作時だけで、通常動作と生成済みキャラ表示には使わない。
+- 口は `aaa` / `iii` / `uuu` / `eee` / `ooo` / `delta` の候補から閉じ口との差が最大のものを自動選択する。差が見えない小さなデフォルメ口だけ自動補正し、基準ポーズの被写体範囲を使って全レイヤーを445×900へ統一するため、素材ごとの手作業は不要。
+- 生成済みの左右思考レイヤーは、待機中のランダム視線とカーソル追従にも使う。読み上げ中は音量連動の口パク、待機中はまばたきと視線を優先する。
 - `--force`なしでは既存の `layers/*.png` を上書きしない。生成途中はリポジトリ直下の `temp/` だけを使う。
 - 新規IDでは `source.png`、`preview.png`、`character.json`、連番、一覧登録まで作る。通常は表示名に「（自作）」、マニフェストには `generator.type=tha3` を記録する。同じ表示名でもIDが異なれば履歴・関係性を含めて別キャラクターになり、説明と生成元情報で識別できる。人格・挨拶・声は生成後に `character.json` で調整する。
 - THA3自作キャラを消す場合は `python scripts/build-tha3-layers.py my-character --remove`。組み込み・手動管理キャラは拒否し、対象フォルダは物理削除せずOSのゴミ箱へ移す。
@@ -110,13 +112,13 @@ characters/<id>/
   `preview.jpg` はローディング画面と設定画面アイコンに使い、取得できなかった場合は
   `_preview-placeholder.png` で代替する。
   - **Free Material License**（公式リポジトリ CubismWebSamples の `LICENSE.md` に明記）:
-    `hiyori` / `haru` / `mao` / `mark` / `natori` / `ren` / `rice` / `wanko`
+    `hiyori` / `haru` / `mao` / `ren` / `rice` / `wanko`
   - **上記リストに無い別配布**: `epsilon`（`cubism.live2d.com` の epsilon_free）
   - いずれもモデルごとに Live2D のサンプルモデル利用条件への同意が必要。売上高が一定規模を
     超える事業者は Cubism SDK リリースライセンスも必要になる。判断は利用者側で行うこと。
 - モデルごとに `motions` / `lipSyncParam` は個体差がある。実際の `model3.json` の
   `FileReferences.Motions` と `Groups: LipSync` を見て割り当てる
-  （例: `Mark` は `Idle` しか持たない、`Mao` の口は `ParamA`、`Wanko` は旧命名、
+  （例: `Mao` の口は `ParamA`、`Wanko` は旧命名、
   `Rice` は口のパラメータ自体が無いので `"lipSync": false` にする）。
   `scale` / `offsetY` はモデルごとに実機で合わせる（同じ値では収まらない）。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、

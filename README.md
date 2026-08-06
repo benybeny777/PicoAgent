@@ -111,6 +111,8 @@ cargo xtask setup tha3
 
 配布版ではWindowsインストール中に専用Python／CUDA版PyTorchをPicoAgentのTHA3領域だけへ取得するため、グローバルPythonや既存のPyTorchへ干渉しません。右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」で、元画像・ID・表示名を指定して「キャラクターを作成」を押します。生成ログとキャンセル操作を画面内に表示し、完成したパックだけを検証後に追加キャラクター領域へ導入します。
 
+キャラクター選択は同じ画面の画像カードから行えます。各カードに内部IDと `PNGアニメ` / `Live2D` / `自作THA3` / `追加PNG` を表示するため、同じ表示名のキャラも区別できます。カードの「このキャラを選ぶ」を押したあと「保存」で反映します。
+
 コマンドで作る経路も残しています。
 
 ```powershell
@@ -124,7 +126,7 @@ python scripts/build-tha3-layers.py my-character --input C:\images\source.png --
 python scripts/build-tha3-layers.py my-character --remove
 ```
 
-THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3・Python・GPUを使いません。WindowsはCUDA対応NVIDIA GPUのVRAMを生成前に測り、4～6GB未満は `separable_half`、6～10GB未満は `standard_half`、10GB以上は `standard_float` を自動選択します（4GB未満は生成前に停止）。Apple Silicon MacはMPS＋`standard_float`、Intel Macは対象外です。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありませんが、既存の5枚構成より頭・身体・呼吸まで動く構成です。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
+THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3・Python・GPUを使いません。WindowsはCUDA対応NVIDIA GPUのVRAMを生成前に測り、4～6GB未満は `separable_half`、6～10GB未満は `standard_half`、10GB以上は `standard_float` を自動選択します（4GB未満は生成前に停止）。Apple Silicon MacはMPS＋`standard_float`、Intel Macは対象外です。生成時は6種類の口形から見えるものを自動選択し、差が小さすぎるデフォルメ口だけを自動補正します。全レイヤーは445×900へ位置を揃え、待機中は左右視線とまばたき、読み上げ中は口パクへ切り替わります。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありません。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
 
 既存のPNGキャラを試す場合は、元IDを上書きせず `rin-tha3` / `mai-tha3` のような別IDで作って見比べてください。ひよりなどのLive2DキャラはLive2Dの方が滑らかなため、THA3での作り直しは推奨しません。既知のむぎ素材もこの生成機能では自動変更しません。
 
@@ -551,7 +553,7 @@ cargo xtask build
 
 **Live2D ランタイムとサンプルモデル**
 
-- `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル 9 体（ひより / Haru / まお / マーク / なとり / レン / ライス / わんこ / Epsilon）を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。**1 体取得できなくても他の取得は続き**、プレビューが取れなかった場合は代替画像で表示します
+- `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル 7 体（ひより / Haru / まお / レン / ライス / わんこ / Epsilon）を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。**1 体取得できなくても他の取得は続き**、プレビューが取れなかった場合は代替画像で表示します
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるためリポジトリにはコミットしません（`.gitignore` 済）
 
 **THA3 キャラクター制作ツール**

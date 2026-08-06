@@ -267,6 +267,19 @@ body.searching .tab-panel {
   border-radius: 8px;
   background: var(--surface);
 }
+.character-card.selected {
+  border-color: var(--field-focus);
+  box-shadow: 0 0 0 2px rgba(242,126,145,.12);
+}
+.character-card .character-select-button {
+  position: static;
+  width: auto;
+  height: 28px;
+  margin-top: 7px;
+  padding: 0 10px;
+}
+.character-card .character-select-button:disabled { opacity: .72; cursor: default; }
+.character-id { font-family: Consolas,"Yu Gothic UI",monospace; }
 .card-name { font-size: 13px; font-weight: 600; }
 .config-badge {
   display: inline-flex;

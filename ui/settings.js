@@ -1370,13 +1370,23 @@ async function characterIconUrl(character) {
     const manifest = await loadCharacterManifestForSettings(character);
     const root = character.root;
     const idle = manifest.animations?.idle;
-    const imagePath = idle?.path ? `${idle.path}/00.png` : (manifest.boot?.sleeping || "animations/idle/00.png");
+    const imagePath = idle?.path ? `${idle.path}/00.png` : manifest.boot?.sleeping;
+    if (!imagePath) return "assets/characters/_preview-placeholder.png";
     const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
     return `${root}/${imagePath}${version}`;
   } catch (error) {
     logApp("warn", "キャラクターアイコンの読込に失敗しました", `${character.id}: ${errorDetail(error)}`);
     return "";
   }
+}
+
+function characterRenderType(character, manifest) {
+  const hasLive2d = !!manifest.live2d
+    || (Array.isArray(manifest.variants) && manifest.variants.some(variant => variant?.live2d));
+  if (hasLive2d) return "Live2D";
+  if (manifest.generator?.type === "tha3") return "自作THA3";
+  if (character.user) return "追加PNG";
+  return "PNGアニメ";
 }
 
 function saveCurrentCharacterVoice(id) {
@@ -1750,13 +1760,29 @@ async function render() {
     character.root = `assets/characters/${character.manifest.replace(/\/character\.json$/, "")}`;
   }
   characterCatalog.characters = characterCatalog.characters.concat(await loadUserCharacters(characterCatalog.characters));
+  await Promise.all(characterCatalog.characters.map(async character => {
+    try {
+      const manifest = await loadCharacterManifestForSettings(character);
+      character.renderType = characterRenderType(character, manifest);
+    } catch (error) {
+      character.renderType = character.user ? "追加パック" : "形式不明";
+      logApp("warn", "キャラクター形式を判定できませんでした", `${character.id}: ${errorDetail(error)}`);
+    }
+  }));
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
-  const selectedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
+  const requestedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
+  const selectedCharacter = characterCatalog.characters.some(character => character.id === requestedCharacter)
+    ? requestedCharacter
+    : characterCatalog.default;
   for (const character of characterCatalog.characters) {
-    characterSelect.append(el("option", { value: character.id, textContent: character.name, selected: character.id === selectedCharacter }));
+    characterSelect.append(el("option", {
+      value: character.id,
+      textContent: `${character.name} — ${character.renderType} [${character.id}]`,
+      selected: character.id === selectedCharacter,
+    }));
   }
   characterSec.append(registerInput(
     "PICOAGENT_CHARACTER",
@@ -1844,8 +1870,18 @@ async function render() {
   // --- 導入済みキャラクターの一覧（読み取り専用） ---
   const charSec = section("導入済みキャラクター");
   const charList = el("div", { className: "card-list" });
+  const refreshCharacterCards = () => {
+    charList.querySelectorAll(".character-card").forEach(card => {
+      const active = card.dataset.characterId === characterSelect.value;
+      card.classList.toggle("selected", active);
+      const button = card.querySelector(".character-select-button");
+      if (button) {
+        button.disabled = active;
+        button.textContent = active ? "選択中" : "このキャラを選ぶ";
+      }
+    });
+  };
   for (const character of characterCatalog.characters) {
-    const name = character.id === selectedCharacter ? `${character.name}（使用中）` : character.name;
     const fallback = el("div", { className: "character-icon-fallback", textContent: String(character.name || character.id || "?").slice(0, 1) });
     const icon = el("img", { className: "character-icon", alt: `${character.name}のアイコン`, draggable: false });
     icon.hidden = true;
@@ -1855,9 +1891,21 @@ async function render() {
       icon.hidden = false;
       fallback.hidden = true;
     });
+    const selectButton = el("button", { className: "secondary character-select-button", type: "button" });
+    selectButton.addEventListener("click", () => {
+      characterSelect.value = character.id;
+      characterSelect.dispatchEvent(new Event("change"));
+      refreshCharacterCards();
+      statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
+    });
     const texts = [
-      el("div", { className: "card-name", textContent: character.user ? `${name}（追加）` : name }),
+      el("div", { className: "card-name" }, [
+        document.createTextNode(character.name),
+        el("span", { className: "config-badge ok", textContent: character.renderType }),
+      ]),
+      el("div", { className: "card-desc character-id", textContent: `ID: ${character.id}` }),
       el("div", { className: "card-desc", textContent: character.description || character.id }),
+      selectButton,
     ];
     // 削除できるのは自分で追加したものだけ（同梱キャラは実行ファイル側にあるため消せない）。
     if (character.user) {
@@ -1885,8 +1933,10 @@ async function render() {
       el("div", { className: "character-icon-wrap" }, [fallback, icon]),
       el("div", { className: "character-card-text" }, texts),
     ]), character.id, character.name, character.description);
+    card.dataset.characterId = character.id;
     charList.append(card);
   }
+  refreshCharacterCards();
   charSec.append(charList);
 
   // --- 1枚絵からTHA3自作キャラクターを生成する ---

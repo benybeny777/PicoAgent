@@ -676,13 +676,16 @@ animationRequestId = requestAnimationFrame(animate);
 // 読み上げ中はフレームアニメの代わりに差分絵を切り替え（PNGTuber方式）、
 // WebAudio の振幅解析で実際の声量に合わせて口を動かし、ランダムにまばたきする。
 let rigAvailable = false; // 選択中キャラに layers 素材が揃っているか
+let rigGazeAvailable = false; // 左右視線レイヤーも使えるか
 let rigActive = false;
 let rigFace = "";          // 表示中の差分名（無駄な src 再設定を避ける）
 let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマーが更新）
 let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
+let rigLookDirection = 0;  // -1=左、0=正面、1=右
 let rigMouthTimer = 0;
 let rigBlinkTimer = 0;
 let rigBlinkStepTimer = 0;
+let rigGazeTimer = 0;
 let rigVolFrame = 0;
 let audioCtx = null;
 let rigSource = null;
@@ -697,23 +700,48 @@ function layerUrl(name) {
 // 読み込み成功した Image はブラウザキャッシュに乗るためプリロードも兼ねる。
 async function probeRigLayers() {
   rigAvailable = false;
-  const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
-  const results = await Promise.all(names.map(name => new Promise(resolve => {
+  rigGazeAvailable = false;
+  const probe = name => new Promise(resolve => {
     const img = new Image();
     img.onload = () => resolve(true);
     img.onerror = () => resolve(false);
     img.src = layerUrl(name);
-  })));
+  });
+  const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
+  const results = await Promise.all(names.map(probe));
   rigAvailable = results.every(Boolean);
+  if (rigAvailable) {
+    const gazeResults = await Promise.all(["thinking_left", "thinking_right"].map(probe));
+    rigGazeAvailable = gazeResults.every(Boolean);
+  }
 }
 
 // まばたき > 口 の優先度で現在の差分絵を決めて反映する。
 function rigRefresh() {
   if (!rigActive) return;
-  const name = rigBlinkPhase || (rigMouthOpen ? "mouth_open" : "mouth_closed");
+  const gaze = rigGazeAvailable && !currentVoice && animationName === "idle"
+    ? (rigLookDirection < 0 ? "thinking_left" : rigLookDirection > 0 ? "thinking_right" : "mouth_closed")
+    : "mouth_closed";
+  const name = rigBlinkPhase || (rigMouthOpen ? "mouth_open" : gaze);
   if (rigFace === name) return;
   rigFace = name;
   petSprite.src = layerUrl(name);
+}
+
+// 待機中はときどき左右を見て正面へ戻る。カーソル移動時は後段のmousemoveが方向を上書きする。
+function scheduleGaze() {
+  clearTimeout(rigGazeTimer);
+  if (!rigActive || !rigGazeAvailable) return;
+  rigGazeTimer = setTimeout(() => {
+    if (!rigActive || currentVoice) { scheduleGaze(); return; }
+    rigLookDirection = Math.random() < 0.5 ? -1 : 1;
+    rigRefresh();
+    rigGazeTimer = setTimeout(() => {
+      rigLookDirection = 0;
+      rigRefresh();
+      scheduleGaze();
+    }, 650 + Math.random() * 850);
+  }, 1800 + Math.random() * 3000);
 }
 
 // まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
@@ -819,8 +847,10 @@ function startRig() {
   rigFace = "";
   rigMouthOpen = false;
   rigBlinkPhase = null;
+  rigLookDirection = 0;
   rigRefresh();
   scheduleBlink();
+  scheduleGaze();
 }
 
 // リグを完全に終了する（キャラ切替・thinking/sad などフレームアニメ状態への遷移用）。
@@ -830,9 +860,12 @@ function stopRig() {
   detachLipSyncAudio();
   clearTimeout(rigBlinkTimer);
   clearTimeout(rigBlinkStepTimer);
+  clearTimeout(rigGazeTimer);
   rigBlinkTimer = 0;
   rigBlinkStepTimer = 0;
+  rigGazeTimer = 0;
   rigBlinkPhase = null;
+  rigLookDirection = 0;
   rigFace = "";
 }
 
@@ -956,7 +989,7 @@ async function startLive2D(cfg) {
   model.scale.set(fit * (Number(cfg.scale) || 1));
   model.anchor.set(0.5, 1);
   model.position.set(width / 2, height + (Number(cfg.offsetY) || 0));
-  // モーション更新の直後にリップシンク値を上書きする（モーション側が口を閉じ戻すのを防ぐ）。
+  // 表情・視線・物理・ポーズ更新の後、モデル描画の直前にリップシンク値を上書きする。
   // 口パラメータIDはモデル定義（Groups: LipSync）から自動検出する。旧モデルは
   // PARAM_MOUTH_OPEN_Y のような旧命名のため、固定既定値だと口が動かない。
   const coreModel = model.internalModel.coreModel;
@@ -969,13 +1002,10 @@ async function startLive2D(cfg) {
   // すべてランタイムの自動処理が担当する。ここで固定 sin 波を上書きすると、
   // 物理演算の出力（例: ParamHairBack）や自動の自然な揺らぎを毎フレーム潰してしまい、
   // 機械的で不自然な動きになる。手で書くのはリップシンクだけにとどめる。
-  const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
-  model.internalModel.motionManager.update = (...args) => {
-    const updated = motionUpdate(...args);
-    // 口はモーションが閉じ戻すため、モーション適用直後に読み上げ振幅で上書きする。
+  model.internalModel.on("beforeModelUpdate", () => {
+    // 口はモーションや表情が閉じ戻すため、全更新の後に読み上げ振幅で上書きする。
     if (lipSyncEnabled && live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
-    return updated;
-  };
+  });
   // ランタイムは「モーション再生中は自動まばたきを回さない」（Cubism4InternalModel.update の
   // `if (!motionUpdated) eyeBlink.updateParameters(...)`）。PicoAgent はアイドルモーションを
   // ループさせ続けるため、放置すると自動まばたきが一度も動かない。
@@ -1047,8 +1077,18 @@ if (!reduceMotion) {
     const centerX = rect.left + rect.width / 2;
     const dx = Math.max(-1, Math.min(1, (event.clientX - centerX) / Math.max(240, window.innerWidth / 2)));
     character.style.setProperty("--look-rot", `${(dx * 2.6).toFixed(2)}deg`);
+    if (rigActive && rigGazeAvailable && !currentVoice) {
+      rigLookDirection = dx < -0.16 ? -1 : dx > 0.16 ? 1 : 0;
+      rigRefresh();
+      scheduleGaze();
+    }
     clearTimeout(lookResetTimer);
-    lookResetTimer = setTimeout(() => character.style.setProperty("--look-rot", "0deg"), 2600);
+    lookResetTimer = setTimeout(() => {
+      character.style.setProperty("--look-rot", "0deg");
+      rigLookDirection = 0;
+      rigRefresh();
+      scheduleGaze();
+    }, 2600);
   });
 }
 
