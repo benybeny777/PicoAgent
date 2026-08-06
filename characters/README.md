@@ -42,12 +42,15 @@ cargo xtask setup tha3
 python scripts/build-tha3-layers.py my-character --input C:\images\source.png --name "マイキャラ"
 ```
 
+GUIでは右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」を使う。画像選択、ID・表示名、進捗、キャンセルを画面内で扱い、生成後は共通のキャラクターパック検証を通ったものだけが追加一覧へ入る。コマンド版はリポジトリ正本へ追加する制作経路として引き続き利用できる。
+
 - 入力は512x512のRGBA PNG。背景はalpha=0、1人の人型キャラを正面直立で全身配置し、頭は上半分中央の128x128付近、手は頭から離す。機械検査できない正面向き・人数・手の位置は実行前に目視確認する。
 - 上流のCUDA対応Python環境と高性能NVIDIA GPUが必要なのは制作時だけ。PicoAgent実行時にはTHA3・PyTorch・学習済みモデルを使わない。
 - `--force`なしでは既存の `layers/*.png` を上書きしない。生成途中はリポジトリ直下の `temp/` だけを使う。
 - 新規IDでは `source.png`、`preview.png`、`character.json`、連番、一覧登録まで作る。表示名には「（自作）」、マニフェストには `generator.type=tha3` を記録する。人格・挨拶・声は生成後に `character.json` で調整する。
 - THA3自作キャラを消す場合は `python scripts/build-tha3-layers.py my-character --remove`。組み込み・手動管理キャラは拒否し、対象フォルダは物理削除せずOSのゴミ箱へ移す。
 - ひよりのLive2Dは毎フレーム連続変形するため、PNG連番で完全に同じにはならない。この経路は既存5枚構成より頭・身体・呼吸の動きを増やす経路で、本物のLive2D化は後半の手順を使う。
+- 既存PNGキャラの比較試作は元IDを上書きせず別IDで作る。りん・まいは動きが増える可能性がある一方、再生成で顔や輪郭が変わる場合がある。Live2Dキャラと既知のむぎ素材は自動変換しない。
 
 THA3コードはMIT License、学習済みモデルはCC BY 4.0。作者Pramook Khungurn（pkhungurn）とTHA3プロジェクトへの帰属表示が必要。取得物は `tools/tha3/` に置かれ、Gitにも製品にも含まれない。
 

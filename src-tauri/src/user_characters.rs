@@ -164,6 +164,7 @@ fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
 
 /// フォルダまたは zip を導入する。導入したキャラクターの id と名前を返す。
 pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
+    let _state_lock = crate::store::lock_state("user-characters");
     if !source.exists() {
         bail!("指定先が見つかりません: {}", source.display());
     }
@@ -174,7 +175,11 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
     // 一時フォルダで組み立て、検証を通ってから rename で確定する
     // （途中で失敗した中途半端なフォルダを導入先へ残さない）。
     let staging = root.join(format!(".installing-{}", std::process::id()));
-    std::fs::remove_dir_all(&staging).ok();
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).with_context(|| {
+            format!("古い導入途中データを掃除できません: {}", staging.display())
+        })?;
+    }
     std::fs::create_dir_all(&staging)?;
 
     let result = (|| -> Result<(String, String)> {
@@ -204,12 +209,23 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
         Ok((id, name))
     })();
 
-    std::fs::remove_dir_all(&staging).ok();
+    if staging.exists() {
+        if let Err(error) = std::fs::remove_dir_all(&staging) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "キャラクター導入の一時フォルダを掃除できません: {} ({error})",
+                    staging.display()
+                ),
+            );
+        }
+    }
     result
 }
 
 /// 追加キャラクターを削除する。ユーザーが持ち込んだデータなので OS のゴミ箱へ移す。
 pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
+    let _state_lock = crate::store::lock_state("user-characters");
     if id.is_empty()
         || !id
             .chars()

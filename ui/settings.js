@@ -19,6 +19,8 @@ let characterVoiceOverrides = {};
 let characterDefaultVoices = {};
 let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
+let tha3ProgressUnlisten = null;
+let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
 let characterCatalog;
@@ -71,6 +73,12 @@ window.picoagent.listen("settings:navigate", tabId => {
   activateSettingsTab(String(tabId || ""));
 }).catch(error => {
   logApp("warn", "設定タブ遷移イベントの購読に失敗しました", errorDetail(error));
+});
+
+window.addEventListener("beforeunload", () => {
+  if (tha3ProgressUnlisten) tha3ProgressUnlisten();
+  // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
+  if (tha3GenerationRunning) window.picoagent.settings.cancelTha3Generation().catch(() => {});
 });
 
 function el(tag, props = {}, children = []) {
@@ -1881,6 +1889,172 @@ async function render() {
   }
   charSec.append(charList);
 
+  // --- 1枚絵からTHA3自作キャラクターを生成する ---
+  // 生成物は一時パックとして検証してから app_data_dir/characters へ導入する。
+  // Pythonプロセスはバックエンドで管理し、設定画面を閉じた場合もキャンセルして回収する。
+  const tha3Sec = section("1枚絵からキャラクターを作成（THA3）");
+  const tha3Hint = el("p", {
+    className: "hint",
+    textContent: "512×512の透過PNGから、待機・呼吸・左右揺れ・まばたき・口パクなど17キーポーズ／42フレームを生成します。制作時だけCUDA対応NVIDIA GPUが必要です。",
+  });
+  const tha3ToolStatus = el("div", { className: "tha3-tool-status", textContent: "制作ツールを確認中…" });
+  const pickTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "THA3フォルダを選ぶ" });
+  const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "透過PNGを選んでください" });
+  const sourcePreview = el("img", { className: "tha3-source-preview", alt: "選択した立ち絵のプレビュー" });
+  sourcePreview.hidden = true;
+  const pickSourceButton = el("button", { className: "secondary", type: "button", textContent: "画像を選ぶ" });
+  const sourceActions = el("div", { className: "character-add-actions" }, [pickSourceButton]);
+  const idInput = el("input", {
+    type: "text",
+    value: `custom-${Date.now().toString(36)}`,
+    placeholder: "例: my-character",
+    maxLength: 64,
+  });
+  const nameInput = el("input", { type: "text", value: "マイキャラ", maxLength: 80 });
+  const createButton = el("button", { className: "primary", type: "button", textContent: "キャラクターを作成" });
+  const cancelButton = el("button", { className: "secondary", type: "button", textContent: "生成をキャンセル" });
+  cancelButton.hidden = true;
+  const progress = el("pre", { className: "tha3-progress", textContent: "" });
+  progress.hidden = true;
+  const createStatus = el("p", { className: "hint" });
+  let selectedSource = "";
+  let selectedTha3Root = "";
+  let toolReady = false;
+
+  function updateCreateEnabled() {
+    createButton.disabled = tha3GenerationRunning || !toolReady || !selectedSource || !idInput.value.trim() || !nameInput.value.trim();
+    pickSourceButton.disabled = tha3GenerationRunning;
+    pickTha3RootButton.disabled = tha3GenerationRunning;
+    idInput.disabled = tha3GenerationRunning;
+    nameInput.disabled = tha3GenerationRunning;
+    cancelButton.hidden = !tha3GenerationRunning;
+  }
+
+  pickSourceButton.addEventListener("click", async () => {
+    createStatus.textContent = "画像を選択中…";
+    try {
+      const picked = await window.picoagent.settings.pickTha3Source();
+      if (!picked?.path) {
+        createStatus.textContent = "画像選択をキャンセルしました。";
+        return;
+      }
+      selectedSource = picked.path;
+      sourceInput.value = picked.path;
+      sourcePreview.src = picked.dataUrl;
+      sourcePreview.onerror = () => { sourcePreview.hidden = true; };
+      sourcePreview.hidden = false;
+      createStatus.textContent = "画像を選びました。512×512・背景透過・正面向きか確認してください。";
+    } catch (error) {
+      createStatus.textContent = `画像を選べませんでした: ${error?.message || error}`;
+    } finally {
+      updateCreateEnabled();
+    }
+  });
+  idInput.addEventListener("input", updateCreateEnabled);
+  nameInput.addEventListener("input", updateCreateEnabled);
+
+  async function refreshTha3Status(rootPath = null) {
+    const tha3Status = await window.picoagent.settings.tha3Status(rootPath);
+    toolReady = Boolean(tha3Status.ready);
+    // 自動検出パスはバックエンド内部で再検出する。ユーザーが選んだ場合だけ明示パスを渡す。
+    selectedTha3Root = toolReady && rootPath ? tha3Status.root : "";
+    tha3ToolStatus.textContent = toolReady
+      ? `制作ツール準備済み: ${tha3Status.root}`
+      : `${tha3Status.installHint} 確認先: ${tha3Status.root}`;
+    tha3ToolStatus.classList.toggle("ready", toolReady);
+    updateCreateEnabled();
+  }
+
+  pickTha3RootButton.addEventListener("click", async () => {
+    createStatus.textContent = "THA3フォルダを選択中…";
+    try {
+      const picked = await window.picoagent.settings.pickTha3Root();
+      if (!picked?.path) {
+        createStatus.textContent = "フォルダ選択をキャンセルしました。";
+        return;
+      }
+      await refreshTha3Status(picked.path);
+      createStatus.textContent = toolReady ? "THA3制作ツールを確認しました。" : "必要な本体またはモデルが不足しています。";
+    } catch (error) {
+      toolReady = false;
+      selectedTha3Root = "";
+      tha3ToolStatus.classList.remove("ready");
+      tha3ToolStatus.textContent = `選択したフォルダを使えません: ${error?.message || error}`;
+      createStatus.textContent = "THA3フォルダを確認できませんでした。";
+      updateCreateEnabled();
+    }
+  });
+
+  if (tha3ProgressUnlisten) {
+    tha3ProgressUnlisten();
+    tha3ProgressUnlisten = null;
+  }
+  tha3ProgressUnlisten = await window.picoagent.listen("tha3:progress", event => {
+    const line = String(event?.message || "").trim();
+    if (!line) return;
+    progress.hidden = false;
+    progress.textContent = `${progress.textContent}${progress.textContent ? "\n" : ""}${line}`.slice(-6000);
+    progress.scrollTop = progress.scrollHeight;
+  });
+
+  cancelButton.addEventListener("click", async () => {
+    cancelButton.disabled = true;
+    createStatus.textContent = "生成を停止し、GPUと一時ファイルを解放しています…";
+    try {
+      await window.picoagent.settings.cancelTha3Generation();
+    } catch (error) {
+      createStatus.textContent = `キャンセル要求に失敗しました: ${error?.message || error}`;
+    }
+  });
+
+  createButton.addEventListener("click", async () => {
+    tha3GenerationRunning = true;
+    progress.textContent = "";
+    progress.hidden = false;
+    createStatus.textContent = "生成中です。初回はモデル読込を含め数分かかることがあります…";
+    updateCreateEnabled();
+    try {
+      const result = await window.picoagent.settings.generateTha3Character(
+        selectedSource,
+        selectedTha3Root,
+        idInput.value.trim(),
+        nameInput.value.trim(),
+      );
+      createStatus.textContent = `${result.name}（${result.id}）を作成しました。`;
+      statusEl.textContent = `${result.name}を追加しました。キャラクター一覧を更新します。`;
+      data.values = collect();
+      tha3GenerationRunning = false;
+      await render();
+      activateSettingsTab("character");
+    } catch (error) {
+      createStatus.textContent = `作成できませんでした: ${error?.message || error}`;
+      logApp("error", "THA3キャラクター生成に失敗しました", errorDetail(error));
+    } finally {
+      tha3GenerationRunning = false;
+      cancelButton.disabled = false;
+      updateCreateEnabled();
+    }
+  });
+
+  try {
+    await refreshTha3Status();
+  } catch (error) {
+    tha3ToolStatus.textContent = `制作ツールを確認できませんでした: ${error?.message || error}`;
+  }
+  updateCreateEnabled();
+  tha3Sec.append(
+    tha3Hint,
+    tha3ToolStatus,
+    el("div", { className: "character-add-actions" }, [pickTha3RootButton]),
+    el("div", { className: "field" }, [el("label", { textContent: "元画像" }), sourceInput, sourceActions]),
+    sourcePreview,
+    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), idInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), nameInput]),
+    el("div", { className: "character-add-actions" }, [createButton, cancelButton]),
+    progress,
+    createStatus,
+  );
+
   // --- キャラクターを自分で追加する ---
   // 同梱キャラは実行ファイルへ焼き込まれているため増減できない。追加分はユーザー領域
   // （app_data_dir/characters）へ入れる。導入は検証を通ってから確定するので、
@@ -1919,6 +2093,7 @@ async function render() {
   if (userCharacterRoot) {
     addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
   }
+  panels.character.append(tha3Sec);
   panels.character.append(addSec);
   panels.character.append(charSec);
 

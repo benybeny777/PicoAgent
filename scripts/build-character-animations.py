@@ -335,11 +335,13 @@ def main() -> None:
         description="characters/<id>/layers から連番アニメーションを生成します。"
     )
     parser.add_argument("characters", nargs="*", help="対象キャラクターID。省略時は全キャラ。")
+    parser.add_argument("--character-dir", type=Path, help="GUI連携用。指定した1パックだけを生成する。")
     parser.add_argument("--version", help="assetVersion の先頭値（例: 2026-06-28-motion-v1）。")
     parser.add_argument("--disable-sway", action="store_true", help="髪・上半身の微小揺れを無効化する。")
     args = parser.parse_args()
 
-    for character_dir in character_dirs(args.characters):
+    targets = [args.character_dir.resolve()] if args.character_dir else character_dirs(args.characters)
+    for character_dir in targets:
         build_character(character_dir, args.version, args.disable_sway)
 
 

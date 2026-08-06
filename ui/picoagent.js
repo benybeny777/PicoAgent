@@ -133,5 +133,10 @@ window.picoagent = {
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
     installCharacter: (path) => call("settings_character_install", { path }),
     removeCharacter: (id) => call("settings_character_remove", { id }),
+    tha3Status: (rootPath = null) => call("settings_tha3_status", { rootPath }),
+    pickTha3Source: () => call("settings_tha3_pick_source"),
+    pickTha3Root: () => call("settings_tha3_pick_root"),
+    generateTha3Character: (sourcePath, tha3RootPath, id, name) => call("settings_tha3_generate", { sourcePath, tha3RootPath, id, name }),
+    cancelTha3Generation: () => call("settings_tha3_cancel"),
   },
 };

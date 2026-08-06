@@ -115,6 +115,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="既存のTHA3生成レイヤーを上書きする。")
     parser.add_argument("--layers-only", action="store_true", help="レイヤーだけ生成し、登録・連番生成・同期は行わない。")
     parser.add_argument("--no-sync", action="store_true", help="生成後の cargo xtask sync-characters を省略する。")
+    parser.add_argument("--pack-dir", type=Path, help="GUI連携用。登録せず、このフォルダへ完成パックを生成する。")
+    parser.add_argument("--tha3-dir", type=Path, help="THA3本体とdata/modelsを置いたフォルダ。")
+    parser.add_argument("--temp-dir", type=Path, help="生成途中の一時フォルダ親。省略時はリポジトリ直下temp。")
+    parser.add_argument("--animation-script", type=Path, help="連番生成スクリプトの明示パス。")
     parser.add_argument(
         "--remove",
         action="store_true",
@@ -123,6 +127,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if not args.character_id:
         parser.error("キャラクターIDが必要です。")
+    if args.remove and args.pack_dir:
+        parser.error("--remove と --pack-dir は同時に指定できません。")
     return args
 
 
@@ -309,11 +315,14 @@ def register_character(character_id: str, manifest: dict) -> None:
     print(f"[build-tha3-layers] characters/index.json に {character_id} を登録しました")
 
 
-def ensure_target_allowed(character_id: str, layers_only: bool) -> None:
-    character_dir = CHARACTERS_DIR / character_id
-    expected = CHARACTERS_DIR.resolve() / character_id
+def ensure_target_allowed(character_id: str, layers_only: bool, character_dir: Path, managed_repo: bool) -> None:
+    expected = (
+        CHARACTERS_DIR.resolve() / character_id
+        if managed_repo
+        else character_dir.parent.resolve() / character_dir.name
+    )
     if character_dir.exists() and character_dir.resolve() != expected:
-        raise ValueError("キャラクターフォルダのリンク実体がcharacters外を指しているため拒否しました。")
+        raise ValueError("キャラクターフォルダのリンク実体が生成先外を指しているため拒否しました。")
     manifest_path = character_dir / "character.json"
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -322,6 +331,8 @@ def ensure_target_allowed(character_id: str, layers_only: bool) -> None:
                 "既存の組み込み・手動管理キャラは自作キャラとして上書き登録できません。"
                 "レイヤーだけ試す場合は --layers-only を指定してください。"
             )
+        return
+    if not managed_repo:
         return
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     if any(
@@ -395,15 +406,23 @@ def remove_character(character_id: str) -> None:
 
 
 def build(args: argparse.Namespace) -> None:
+    global TEMP_DIR, THA3_DIR
     validate_character_id(args.character_id)
+    if args.tha3_dir:
+        THA3_DIR = args.tha3_dir.resolve()
+    if args.temp_dir:
+        TEMP_DIR = args.temp_dir.resolve()
     if args.remove:
         remove_character(args.character_id)
         if not args.no_sync:
             run_checked(["cargo", "xtask", "sync-characters"], "キャラクター同期")
         return
 
-    ensure_target_allowed(args.character_id, args.layers_only)
-    character_dir = CHARACTERS_DIR / args.character_id
+    managed_repo = args.pack_dir is None
+    character_dir = (
+        CHARACTERS_DIR / args.character_id if managed_repo else args.pack_dir.resolve()
+    )
+    ensure_target_allowed(args.character_id, args.layers_only, character_dir, managed_repo)
     input_path = (args.input or (character_dir / "source.png")).resolve()
     image = load_input(input_path)
     layers_dir = character_dir / "layers"
@@ -453,20 +472,28 @@ def build(args: argparse.Namespace) -> None:
     else:
         manifest = custom_manifest(args.character_id, args.name or args.character_id, args.model)
         write_json_atomic(manifest_path, manifest)
-        print(f"[build-tha3-layers] 自作キャラ定義を作成しました: {manifest_path.relative_to(ROOT)}")
+        print(f"[build-tha3-layers] 自作キャラ定義を作成しました: {manifest_path}")
 
     if generated or not (character_dir / "animations" / "idle" / "00.png").exists():
+        animation_script = (
+            args.animation_script.resolve()
+            if args.animation_script
+            else ROOT / "scripts" / "build-character-animations.py"
+        )
         run_checked(
-            [sys.executable, str(ROOT / "scripts" / "build-character-animations.py"), args.character_id],
+            [sys.executable, str(animation_script), "--character-dir", str(character_dir)],
             "連番アニメーション生成",
         )
-    register_character(args.character_id, manifest)
-    if not args.no_sync:
+    if managed_repo:
+        register_character(args.character_id, manifest)
+    if managed_repo and not args.no_sync:
         run_checked(["cargo", "xtask", "sync-characters"], "キャラクター同期")
-    print(
-        f"[build-tha3-layers] 完了: {manifest['name']}。"
-        f"人格と挨拶は characters/{args.character_id}/character.json で調整できます。"
+    location = (
+        f"characters/{args.character_id}/character.json"
+        if managed_repo
+        else str(character_dir / "character.json")
     )
+    print(f"[build-tha3-layers] 完了: {manifest['name']}。人格と挨拶は {location} で調整できます。")
 
 
 def main() -> None:

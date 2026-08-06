@@ -107,7 +107,14 @@ cargo xtask dev
 
 ```powershell
 cargo xtask setup tha3
-# 上流environment.ymlに沿ったCUDA対応Python環境を有効にしてから実行
+# 上流environment.ymlに沿ったCUDA対応Python環境を有効にしてPicoAgentを起動
+```
+
+右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」で、元画像・ID・表示名を指定して「キャラクターを作成」を押します。制作ツールを自動検出できない場合は「THA3フォルダを選ぶ」で `tools/tha3/` を指定できます。生成ログとキャンセル操作を画面内に表示し、完成したパックだけを検証後に追加キャラクター領域へ導入します。
+
+コマンドで作る経路も残しています。
+
+```powershell
 python scripts/build-tha3-layers.py my-character --input C:\images\source.png --name "マイキャラ"
 ```
 
@@ -118,7 +125,9 @@ python scripts/build-tha3-layers.py my-character --input C:\images\source.png --
 python scripts/build-tha3-layers.py my-character --remove
 ```
 
-THA3が必要なのは制作時だけで、PicoAgentの実行時要件・配布物は変わりません。生成は上流要件上、CUDA対応の高性能NVIDIA GPUが必要です。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありませんが、既存の5枚構成より頭・身体・呼吸まで動く構成です。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
+THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3・Python・GPUを使いません。生成は上流要件上、CUDA対応の高性能NVIDIA GPUが必要です。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありませんが、既存の5枚構成より頭・身体・呼吸まで動く構成です。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
+
+既存のPNGキャラを試す場合は、元IDを上書きせず `rin-tha3` / `mai-tha3` のような別IDで作って見比べてください。ひよりなどのLive2DキャラはLive2Dの方が滑らかなため、THA3での作り直しは推奨しません。既知のむぎ素材もこの生成機能では自動変更しません。
 
 ### 叩く AI を選ぶ
 
@@ -536,6 +545,7 @@ cargo xtask build
 **THA3 キャラクター制作ツール**
 
 - `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、上流READMEが案内する学習済みモデルを `tools/tha3/` へ取得します。Dropboxから自動取得できない場合は処理を止めず、`tools/tha3/data/models/` への手動配置手順を警告します。Python・CUDA依存物はリポジトリにも製品にも導入しません
+- GUI生成に必要な2本の軽量な制御スクリプトだけはアプリへ文字列として埋め込み、実行時に `app_cache_dir/tha3-creator/` へ一時展開します。THA3本体・重み・Python・PyTorchは引き続き外部の制作環境だけに置きます
 - **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、重みを利用・再配布する場合は作者とTHA3プロジェクトへの適切な帰属表示が必要です。コード・重み・Python環境はGit管理外かつ製品バンドル外です
 
 **その他**

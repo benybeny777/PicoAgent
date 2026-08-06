@@ -266,7 +266,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 同梱キャラクターは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれるため、実行時には増減できない。**自分で追加した Live2D モデル等は `app_data_dir/characters/<id>/` に置く**（`user_characters.rs`）。webview へは asset プロトコル（`convertFileSrc`）で読ませるので、`tauri.conf.json` の `app.security.assetProtocol.scope` を `$APPDATA/characters/**` に限定し、CSP へ `asset:` / `http://asset.localhost` を足してある（`tauri` の `protocol-asset` フィーチャが必要）。
 
 - 導入経路は設定画面の「キャラクター」タブ（zip またはフォルダを選ぶ）。選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、フロントへはパスだけを返す（プラグインの JS バインディングを配信物へ足さずに済ませるため）。
+- THA3生成経路は同じタブの「1枚絵からキャラクターを作成」。`settings_tha3_status` / `settings_tha3_pick_source` / `settings_tha3_pick_root` / `settings_tha3_generate` / `settings_tha3_cancel` を使い、512x512透過PNGから17キーポーズ・42フレームの一時パックを生成する。入力画像と手動選択したTHA3フォルダは共通permissionsで検証する。画像プレビューはasset protocolの許可範囲を広げず、20MB以下の選択済みPNGだけをdata URLとして返す。生成パックは通常の `character_pack::validate` と `user_characters::install` を通った場合だけ確定する。
+- THA3のPython子プロセスは `tha3_creator.rs` が `tools::process::command()` で起動し、標準出力・標準エラーを `tha3:progress` で設定画面へ送る。長時間生成なので全体timeoutは設けないが、GUIキャンセルではkill後にwaitして回収する。設定画面を閉じる際はキャンセルを要求し、アプリ終了時はバックエンドもキャンセル後の回収完了を待つ。生成途中のスクリプト・画像・パックは `app_cache_dir/tha3-creator/` に限定し、成功・失敗・中断の全経路で掃除する。
 - 導入は「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順。検証を通らなかったものが導入先へ残らない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
+- GUI生成・zip/フォルダ導入・削除は同じ `user-characters` 状態ロックで直列化し、一時導入フォルダや同じIDの確定先を同時に更新しない。
 - 「zip を開くとモデル名のフォルダが1つ」という一般的な配布形は、1階層だけ潜って `character.json` を探して吸収する。複数見つかった場合は1体に決められないので拒否する。
 - 削除は OS のゴミ箱へ移動する（ユーザーが持ち込んだデータのため物理削除しない）。選択中キャラを削除したときは `PICOAGENT_CHARACTER` を既定へ戻す。
 - 一覧はフロントが「同梱の `index.json`」と「`pet_user_characters` が返す追加分」を突き合わせて作る。同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
