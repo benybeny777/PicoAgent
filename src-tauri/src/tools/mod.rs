@@ -744,8 +744,8 @@ pub fn schemas_for_text(text: &str) -> Vec<Value> {
     selected
 }
 
-/// ツール出力の下限（ここより狭くはしない。従来の固定値と同じ）。
-const BASE_TOOL_OUTPUT_CHARS: usize = 8_000;
+/// 自動計算時の下限。小さいコンテキストでも system・履歴・生成枠を残す。
+const MIN_TOOL_OUTPUT_CHARS: usize = 1_000;
 /// ツール出力の上限（設定でこれ以上は広げない。1回の出力で文脈を食い潰さないための天井）。
 const MAX_TOOL_OUTPUT_CHARS: usize = 60_000;
 /// クラウドプロバイダ利用時の既定（コンテキストが十分広いので固定値でよい）。
@@ -774,7 +774,9 @@ pub fn tool_output_limit(cfg: &Config) -> usize {
         .parse::<usize>()
         .unwrap_or(8_192);
     // 人格 system・長期メモリ・会話履歴・ツール定義・生成分を残し、ツール出力へ 45% を配分する。
-    (ctx * 45 / 100).clamp(BASE_TOOL_OUTPUT_CHARS, MAX_TOOL_OUTPUT_CHARS)
+    // 旧実装は下限を8,000にしたため、既定 ctx=8,192 でも計算結果3,686を8,000へ
+    // 戻してしまい、自動計算が実質機能していなかった。
+    (ctx * 45 / 100).clamp(MIN_TOOL_OUTPUT_CHARS, MAX_TOOL_OUTPUT_CHARS)
 }
 
 /// ツール出力にプロンプトインジェクション試行パターンが含まれるか検査する。
@@ -966,14 +968,14 @@ mod tests {
         narrow.set("PICOAGENT_LOCAL_CTX", "8192");
         assert_eq!(
             super::tool_output_limit(&narrow),
-            super::BASE_TOOL_OUTPUT_CHARS,
-            "既定のコンテキスト長では従来と同じ幅を保つ"
+            3_686,
+            "既定のコンテキストでも system・履歴・生成用に過半を残す"
         );
 
         let wide = Config::new();
         wide.set("PICOAGENT_LOCAL_CTX", "32768");
         assert!(
-            super::tool_output_limit(&wide) > super::BASE_TOOL_OUTPUT_CHARS,
+            super::tool_output_limit(&wide) > super::tool_output_limit(&narrow),
             "コンテキストを広げた分だけ多く読める"
         );
 

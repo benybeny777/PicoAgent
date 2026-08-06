@@ -300,6 +300,7 @@ enum DeviceMode {
 enum StartupWait {
     Ready,
     Exited(ExitStatus),
+    Failed(String),
     Timeout,
 }
 
@@ -397,8 +398,6 @@ fn release_asset_pattern() -> &'static str {
         ("windows", _) => "AivisSpeech-Engine-Windows-x64-",
         ("macos", "aarch64") => "AivisSpeech-Engine-macOS-arm64-",
         ("macos", _) => "AivisSpeech-Engine-macOS-x64-",
-        ("linux", "aarch64") => "AivisSpeech-Engine-Linux-arm64-",
-        ("linux", _) => "AivisSpeech-Engine-Linux-x64-",
         _ => "",
     }
 }
@@ -675,19 +674,30 @@ fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
     }
 }
 
-fn child_exit_status(app: &tauri::AppHandle) -> Option<ExitStatus> {
-    let state = app.try_state::<AivisState>()?;
-    let mut child = state.child.lock().unwrap();
-    match child
-        .as_mut()
-        .and_then(|child| child.try_wait().ok())
-        .flatten()
-    {
-        Some(status) => {
-            *child = None;
-            Some(status)
+fn child_exit_status(app: &tauri::AppHandle) -> Result<Option<ExitStatus>, String> {
+    let Some(state) = app.try_state::<AivisState>() else {
+        return Err("AivisState を取得できません".to_string());
+    };
+    let mut slot = match state.child.lock() {
+        Ok(slot) => slot,
+        // 終了確認と解放を優先し、poison 後も保持中のハンドルを回収する。
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let Some(child) = slot.as_mut() else {
+        return Ok(None);
+    };
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            *slot = None;
+            Ok(Some(status))
         }
-        None => None,
+        Ok(None) => Ok(None),
+        Err(error) => {
+            if let Some(mut child) = slot.take() {
+                terminate_child(&mut child);
+            }
+            Err(format!("Aivis の終了状態を確認できません: {error}"))
+        }
     }
 }
 
@@ -695,12 +705,18 @@ fn has_running_child(app: &tauri::AppHandle) -> bool {
     let Some(state) = app.try_state::<AivisState>() else {
         return false;
     };
-    let mut child = state.child.lock().unwrap();
-    if let Some(process) = child.as_mut() {
+    let mut slot = match state.child.lock() {
+        Ok(slot) => slot,
+        // 実プロセスの解放を優先し、poison 後も保持中のハンドルを確認する。
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(process) = slot.as_mut() {
         if matches!(process.try_wait(), Ok(None)) {
             return true;
         }
-        *child = None;
+        if let Some(mut child) = slot.take() {
+            terminate_child(&mut child);
+        }
     }
     false
 }
@@ -775,7 +791,7 @@ fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
     has_gpu
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
     // macOS は Metal が常に使えるため、事前判定を行わず GPU 起動を選ぶ。
     let _ = append_log(
@@ -783,6 +799,15 @@ fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
         "GPU候補確認: このOSでは事前判定を行わず auto は GPU 起動を選びます。",
     );
     true
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
+    let _ = append_log(
+        app,
+        "GPU候補確認: このOSは対応対象外のため CPU 起動を選びます。",
+    );
+    false
 }
 
 fn auto_launch_device(app: &tauri::AppHandle) -> LaunchDevice {
@@ -847,17 +872,28 @@ fn spawn_engine(
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log));
-    // macOS/Linux: 子を独立したプロセスグループリーダーにする。
+    // macOS: 子を独立したプロセスグループリーダーにする。
     // stop() 時に pgid 全体へ SIGKILL を送り、子孫プロセスも確実に終了させるため。
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let child = command.spawn()?;
-    if let Some(state) = app.try_state::<AivisState>() {
-        *state.child.lock().unwrap() = Some(child);
+    let mut child = command.spawn()?;
+    let Some(state) = app.try_state::<AivisState>() else {
+        terminate_child(&mut child);
+        anyhow::bail!("AivisState を取得できないため、起動した Aivis を停止しました");
+    };
+    let mut slot = match state.child.lock() {
+        Ok(slot) => slot,
+        // ハンドルを失わないよう、poison 後も格納済み状態を引き継ぐ。
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if slot.is_some() {
+        terminate_child(&mut child);
+        anyhow::bail!("Aivis は既に起動中です");
     }
+    *slot = Some(child);
     Ok(())
 }
 
@@ -938,6 +974,10 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
             StartupWait::Exited(_) | StartupWait::Timeout => {
                 stop(app);
             }
+            StartupWait::Failed(error) => {
+                stop(app);
+                anyhow::bail!("{error}\n{}", log_tail(app));
+            }
         }
     }
 
@@ -968,8 +1008,10 @@ async fn wait_until_ready(app: &tauri::AppHandle, endpoint: &str) -> StartupWait
         if is_up(endpoint).await {
             return StartupWait::Ready;
         }
-        if let Some(status) = child_exit_status(app) {
-            return StartupWait::Exited(status);
+        match child_exit_status(app) {
+            Ok(Some(status)) => return StartupWait::Exited(status),
+            Ok(None) => {}
+            Err(error) => return StartupWait::Failed(error),
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
@@ -988,6 +1030,10 @@ async fn wait_ready_or_bail(
             status,
             log_tail(app)
         ),
+        StartupWait::Failed(error) => {
+            stop(app);
+            anyhow::bail!("{label}の監視に失敗しました: {error}\n{}", log_tail(app))
+        }
         StartupWait::Timeout => {
             stop(app);
             anyhow::bail!("{label}がタイムアウトしました\n{}", log_tail(app))
@@ -998,30 +1044,47 @@ async fn wait_ready_or_bail(
 /// Aivis 子プロセスを停止する（アプリ終了時）。
 /// `stopping` フラグを先に立てて `ensure_started` の後続 spawn を防ぐ。
 /// Windows: `taskkill /T /F` でプロセスツリーごと終了させる。
-/// macOS/Linux: `process_group(0)` で生成したプロセスグループに SIGKILL を送る。
+/// macOS: `process_group(0)` で生成したプロセスグループに SIGKILL を送る。
 pub fn stop(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<AivisState>() {
         state.stopping.store(true, Ordering::SeqCst);
-        if let Some(mut child) = state.child.lock().unwrap().take() {
-            #[cfg(windows)]
-            {
-                let _ = crate::tools::process::command_sync("taskkill")
-                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-            }
-            #[cfg(unix)]
-            {
-                // spawn_engine で process_group(0) を設定しているため、子の PID = PGID。
-                // プロセスグループ全体（子孫を含む）へ SIGKILL を送る。
-                let pgid = child.id() as libc::pid_t;
-                unsafe {
-                    libc::kill(-pgid, libc::SIGKILL);
-                }
-            }
-            let _ = child.wait();
+        terminate_managed_child(app);
+    }
+}
+
+fn terminate_child(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let _ = crate::tools::process::command_sync("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        // spawn_engine で process_group(0) を設定しているため、子の PID = PGID。
+        let pgid = child.id() as libc::pid_t;
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
         }
+    }
+    // プロセスグループの停止に失敗しても、直接の子プロセスは必ず停止を試みる。
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn terminate_managed_child(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<AivisState>() else {
+        return;
+    };
+    let child = match state.child.lock() {
+        Ok(mut slot) => slot.take(),
+        // 停止処理は Mutex の poison 後も中のハンドルを回収する。
+        Err(poisoned) => poisoned.into_inner().take(),
+    };
+    if let Some(mut child) = child {
+        terminate_child(&mut child);
     }
 }

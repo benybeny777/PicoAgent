@@ -209,11 +209,18 @@ window.addEventListener("beforeunload", () => {
   if (bootLogTimer) clearInterval(bootLogTimer);
   if (continuousVoiceTimer) clearTimeout(continuousVoiceTimer);
   if (pendingVoiceSubmitTimer) clearTimeout(pendingVoiceSubmitTimer);
+  if (pendingTouchTimer) clearTimeout(pendingTouchTimer);
+  if (pushToTalkTimer) clearTimeout(pushToTalkTimer);
+  if (historySearchTimer) clearTimeout(historySearchTimer);
+  if (napTimer) clearInterval(napTimer);
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
   stopVoice(false);
   if (micStream) stopMicCapture();
+  const closingAudioCtx = audioCtx;
+  audioCtx = null;
+  closingAudioCtx?.close().catch(() => {});
   stopLive2D();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
@@ -675,6 +682,7 @@ let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマー�
 let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
 let rigMouthTimer = 0;
 let rigBlinkTimer = 0;
+let rigBlinkStepTimer = 0;
 let rigVolFrame = 0;
 let audioCtx = null;
 let rigSource = null;
@@ -721,11 +729,17 @@ function scheduleBlink() {
     const step = (phase, ms) => new Promise(resolve => {
       rigBlinkPhase = phase;
       rigRefresh();
-      setTimeout(resolve, ms);
+      rigBlinkStepTimer = setTimeout(() => {
+        rigBlinkStepTimer = 0;
+        resolve();
+      }, ms);
     });
     await step("blink_half", sleepy ? 160 : 100);
+    if (!rigActive) return;
     await step("blink_closed", 140);
+    if (!rigActive) return;
     await step("blink_half", sleepy ? 280 : 100);
+    if (!rigActive) return;
     rigBlinkPhase = null;
     rigRefresh();
     scheduleBlink();
@@ -815,6 +829,9 @@ function stopRig() {
   rigActive = false;
   detachLipSyncAudio();
   clearTimeout(rigBlinkTimer);
+  clearTimeout(rigBlinkStepTimer);
+  rigBlinkTimer = 0;
+  rigBlinkStepTimer = 0;
   rigBlinkPhase = null;
   rigFace = "";
 }
@@ -1553,11 +1570,17 @@ let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代�
 function setVoiceCancelVisible(visible) {
   if (cancelVoiceButton) cancelVoiceButton.hidden = !visible;
 }
-function finishVoice(toIdle = true) {
+function finishVoice(toIdle = true, expectedVoice = currentVoice) {
+  if (!expectedVoice) return;
+  // 古い Audio の play() rejection / error が遅れて届いても、新しく再生中の音声を
+  // 終了させない。古い URL の解放だけ行う。
+  if (currentVoice !== expectedVoice) {
+    URL.revokeObjectURL(expectedVoice.src);
+    return;
+  }
   stopLipSync();
   setVoiceCancelVisible(false);
-  if (!currentVoice) return;
-  const voice = currentVoice;
+  const voice = expectedVoice;
   currentVoice = null;
   URL.revokeObjectURL(voice.src);
   if (toIdle && animationName === "talking") setAnimation("idle");
@@ -1569,8 +1592,9 @@ function stopVoice(toIdle = true) {
   stopLipSync();
   setVoiceCancelVisible(false);
   if (!currentVoice) return;
-  currentVoice.pause();
-  finishVoice(toIdle);
+  const voice = currentVoice;
+  voice.pause();
+  finishVoice(toIdle, voice);
 }
 // 読み上げが有効かどうかの学習キャッシュ（pet_speak の結果から更新）。
 // false のときはストリーミング先行読み上げの合成要求を出さない（無駄な往復を省く）。
@@ -1594,20 +1618,21 @@ function playPreparedSpeech(result) {
   setVoiceCancelVisible(true);
   const bytes = new Uint8Array(result.audio);
   const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
-  currentVoice = new Audio(url);
-  currentVoice.volume = voiceVolume;
-  currentVoice.addEventListener("ended", () => {
-    finishVoice(true);
+  const audio = new Audio(url);
+  currentVoice = audio;
+  audio.volume = voiceVolume;
+  audio.addEventListener("ended", () => {
+    finishVoice(true, audio);
     if (!activeAlarmSnooze) status.textContent = "";
   }, { once: true });
-  currentVoice.addEventListener("error", () => {
-    const audioError = currentVoice?.error?.message || "";
-    finishVoice(true);
+  audio.addEventListener("error", () => {
+    const audioError = audio.error?.message || "";
+    finishVoice(true, audio);
     logApp("error", "音声データの読み込みに失敗しました", audioError);
     status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗: 音声データを読み込めません";
   }, { once: true });
-  currentVoice.play().catch(error => {
-    finishVoice(true);
+  audio.play().catch(error => {
+    finishVoice(true, audio);
     logApp("error", "音声再生に失敗しました", errorDetail(error));
     if (!activeAlarmSnooze) {
       status.textContent = `音声再生に失敗: ${error?.message || error || "再生がブロックされました"}`;
@@ -1615,7 +1640,7 @@ function playPreparedSpeech(result) {
   });
   status.textContent = "読み上げ中…";
   setAnimation("talking", true);
-  attachLipSync(currentVoice);
+  attachLipSync(audio);
 }
 // 起動時の挨拶を組み立てる。キャラ固定挨拶と日次の時刻挨拶で「挨拶語」が二重にならないようまとめる。
 // - 固定挨拶が時刻挨拶語（おはよう/こんにちは/こんばんは等）で始まる場合: 時刻に合った挨拶語を1回だけ使い、
@@ -2003,7 +2028,7 @@ function recordTouch(zone) {
   const now = Date.now();
   if (now - lastTouchRecordAt >= TOUCH_RECORD_INTERVAL_MS) {
     lastTouchRecordAt = now;
-    recordTouch(zone);
+    recordRelationship(`touch_${zone}`);
     return;
   }
   // 間引いた分は最後の1回だけ、間隔が空いてから送る（反応そのものは毎回返している）。
@@ -2108,7 +2133,7 @@ character.addEventListener("click", event => {
   }
   setAnimation(zone === "cheek" ? "shy" : "pleased", true);
   setTimeout(() => { if (!currentVoice) setAnimation("idle"); }, 850);
-  recordRelationship(`touch_${zone}`);
+  recordTouch(zone);
   if (!currentVoice) return;
   event.stopPropagation();
   stopVoice();
@@ -3322,7 +3347,7 @@ function wakeUp() {
   setAnimation("idle", true);
 }
 
-setInterval(() => {
+const napTimer = setInterval(() => {
   if (napMinutes > 0 && !napping && Date.now() - lastActivityAt > napMinutes * 60 * 1000) fallAsleep();
 }, 30 * 1000);
 ["pointerdown", "keydown"].forEach(type => document.addEventListener(type, markActivity));

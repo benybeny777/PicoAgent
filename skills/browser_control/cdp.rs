@@ -23,9 +23,41 @@ fn child_slot() -> &'static Mutex<Option<Child>> {
     CHILD.get_or_init(|| Mutex::new(None))
 }
 
+fn lock_child_slot() -> std::sync::MutexGuard<'static, Option<Child>> {
+    match child_slot().lock() {
+        Ok(slot) => slot,
+        // ブラウザのハンドルを失わないよう、poison 後も停止・回収できる状態を保つ。
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 /// 既定のデバッグポート。同梱エンジン 11435 / 同梱 Aivis 11436 / ローカル API 11500 と
 /// 重ならない値にする（重なると起動順によってどちらかが黙って使えなくなる）。
 pub const DEFAULT_PORT: u16 = 11437;
+
+fn probe_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_millis(1200))
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
+
+fn devtools_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
 
 /// `--user-data-dir` に使う隔離プロファイルの置き場所。
 fn isolated_profile_dir() -> PathBuf {
@@ -89,18 +121,30 @@ pub fn resolve_browser(configured: &str) -> Result<String, String> {
 
 /// デバッグポートが応答するか（既に起動済みか）を調べる。
 async fn debug_port_alive(port: u16) -> bool {
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_millis(1200))
-        .build()
-    else {
+    let Some(client) = probe_client() else {
         return false;
     };
-    client
+    let Ok(response) = client
         .get(format!("http://127.0.0.1:{port}/json/version"))
         .send()
         .await
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
+    else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    response
+        .json::<Value>()
+        .await
+        .ok()
+        .is_some_and(|value| {
+            value.get("Browser").and_then(Value::as_str).is_some()
+                && value
+                    .get("webSocketDebuggerUrl")
+                    .and_then(Value::as_str)
+                    .is_some()
+        })
 }
 
 pub struct LaunchOptions {
@@ -112,13 +156,40 @@ pub struct LaunchOptions {
     pub startup_timeout_secs: u64,
 }
 
+fn managed_child_running() -> bool {
+    let mut slot = lock_child_slot();
+    match slot.as_mut() {
+        Some(child) => match child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(_)) => {
+                *slot = None;
+                false
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                *slot = None;
+                false
+            }
+        },
+        None => false,
+    }
+}
+
 /// ブラウザを起動する（既に応答していれば何もしない）。
 pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     if debug_port_alive(options.port).await {
-        return Ok(());
+        if managed_child_running() {
+            return Ok(());
+        }
+        return Err(format!(
+            "エラー: デバッグポート {} は PicoAgent が管理していないブラウザに使われています。既存ブラウザのタブへ無断で接続しないため停止しました。ブラウザを閉じるか PICOAGENT_BROWSER_PORT を変更してください。",
+            options.port
+        ));
     }
     // 死んだ子プロセスが残っていれば片付けてから起動し直す。
-    if let Ok(mut slot) = child_slot().lock() {
+    {
+        let mut slot = lock_child_slot();
         if let Some(child) = slot.as_mut() {
             let _ = child.kill();
             let _ = child.wait();
@@ -129,6 +200,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     let mut command = crate::tools::process::command_sync(&options.browser_path);
     command
         .arg(format!("--remote-debugging-port={}", options.port))
+        .arg("--remote-debugging-address=127.0.0.1")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg("--disable-background-networking")
@@ -152,10 +224,16 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|error| format!("エラー: ブラウザを起動できません: {error}"))?;
-    if let Ok(mut slot) = child_slot().lock() {
+    {
+        let mut slot = lock_child_slot();
+        if slot.is_some() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("エラー: PicoAgent 管理のブラウザは既に起動中です。".to_string());
+        }
         *slot = Some(child);
     }
 
@@ -187,9 +265,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
 
 /// 起動した子プロセスが既に終了しているか。
 fn child_exited() -> bool {
-    let Ok(mut slot) = child_slot().lock() else {
-        return false;
-    };
+    let mut slot = lock_child_slot();
     match slot.as_mut() {
         Some(child) => matches!(child.try_wait(), Ok(Some(_))),
         None => false,
@@ -198,17 +274,14 @@ fn child_exited() -> bool {
 
 /// 起動したブラウザを停止する（アプリ終了時と `close` から呼ぶ）。
 ///
-/// **PicoAgent が起動したブラウザだけ**を止める。デバッグポートが既に開いていて
-/// そこへ相乗りした場合（前回のクラッシュで残ったものや、ユーザーが自分で
-/// デバッグポート付き起動したもの）は、こちらの都合で閉じない。
+/// **PicoAgent が起動してハンドルを保持しているブラウザだけ**を止める。
 pub fn stop() {
-    if let Ok(mut slot) = child_slot().lock() {
-        if let Some(child) = slot.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        *slot = None;
+    let mut slot = lock_child_slot();
+    if let Some(child) = slot.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
     }
+    *slot = None;
 }
 
 #[derive(Clone)]
@@ -219,10 +292,8 @@ pub struct Target {
 }
 
 async fn devtools_get(port: u16, path: &str) -> Result<Value, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("エラー: DevTools への接続準備に失敗しました: {error}"))?;
+    let client = devtools_client()
+        .ok_or_else(|| "エラー: DevTools への接続準備に失敗しました。".to_string())?;
     let response = client
         .get(format!("http://127.0.0.1:{port}{path}"))
         .send()
@@ -235,10 +306,8 @@ async fn devtools_get(port: u16, path: &str) -> Result<Value, String> {
 }
 
 async fn devtools_put(port: u16, path: &str) -> Result<Value, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("エラー: DevTools への接続準備に失敗しました: {error}"))?;
+    let client = devtools_client()
+        .ok_or_else(|| "エラー: DevTools への接続準備に失敗しました。".to_string())?;
     let response = client
         .put(format!("http://127.0.0.1:{port}{path}"))
         .send()
@@ -429,6 +498,12 @@ mod tests {
     /// Chrome / Edge / Chromium が無い環境ではスキップする（CI で落とさないため）。
     #[test]
     fn ブラウザを起動してページ内容を読める() {
+        struct BrowserGuard;
+        impl Drop for BrowserGuard {
+            fn drop(&mut self) {
+                stop();
+            }
+        }
         let Ok(browser_path) = resolve_browser("") else {
             eprintln!("ブラウザが無いためスキップ");
             return;
@@ -444,6 +519,7 @@ mod tests {
                 startup_timeout_secs: 60,
             };
             ensure_running(&options).await.expect("ブラウザを起動できる");
+            let _guard = BrowserGuard;
             let target = new_page(options.port).await.expect("タブを開ける");
             let mut conn = PageConn::connect(&target.ws_url, 30)
                 .await
@@ -465,7 +541,6 @@ mod tests {
                 page.elements.iter().any(|element| element.label == "次へ"),
                 "リンクが要素一覧に出る"
             );
-            stop();
         });
     }
 }

@@ -1935,7 +1935,22 @@ pub async fn settings_save(
         patch
             .get(key)
             .and_then(Value::as_str)
-            .map(|next| state.config.get(key, fallback) != next)
+            .map(|next| {
+                // 数値・ポート等の空欄は UI 上「既定値を使う」の意味。空文字と
+                // 未保存を別変更とみなすと、初回の設定保存だけで不要な再起動が走る。
+                let current = state.config.get(key, fallback);
+                let current = if current.trim().is_empty() && !fallback.is_empty() {
+                    fallback
+                } else {
+                    current.as_str()
+                };
+                let next = if next.trim().is_empty() && !fallback.is_empty() {
+                    fallback
+                } else {
+                    next
+                };
+                current != next
+            })
             .unwrap_or(false)
     };
     let changed_bool = |key: &str, fallback: bool| {
@@ -1945,13 +1960,20 @@ pub async fn settings_save(
             .map(|next| state.config.get_bool(key, fallback) != next)
             .unwrap_or(false)
     };
-    let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT")
-        // 関係性は人格の一部として system へ入るため、変更時は同じ経路で作り直す。
-        || patch.contains_key("PICOAGENT_RELATIONSHIP")
-        || patch.contains_key("PICOAGENT_RELATIONSHIP_OVERRIDES")
-        || patch.contains_key("PICOAGENT_RELATIONSHIP_CUSTOM");
-    let has_memory_setting = patch.contains_key("PICOAGENT_MEMORY_ENABLED")
-        || patch.contains_key("PICOAGENT_MEMORY_MAX_ITEMS");
+    let changed_value = |key: &str| {
+        patch
+            .get(key)
+            .map(|next| state.config.get_all().get(key) != Some(next))
+            .unwrap_or(false)
+    };
+    // 設定画面は全項目を送るため、contains_key では毎回「変更あり」になってしまう。
+    // 実値が変わったときだけ system 文脈を作り直し、会話とプロンプトキャッシュを保つ。
+    let system_context_changed = changed_text("PICOAGENT_SYSTEM_PROMPT", "")
+        || changed_text("PICOAGENT_RELATIONSHIP", "assistant")
+        || changed_value("PICOAGENT_RELATIONSHIP_OVERRIDES")
+        || changed_text("PICOAGENT_RELATIONSHIP_CUSTOM", "");
+    let memory_setting_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
+        || changed_text("PICOAGENT_MEMORY_MAX_ITEMS", "80");
     let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
         || changed_text("PICOAGENT_TTS_DEVICE", "auto")
         || changed_text("PICOAGENT_TTS_PORT", "11436");
@@ -1998,7 +2020,7 @@ pub async fn settings_save(
     let requires_restart = restart_engine || restart_aivis || character_changed;
 
     // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
-    if has_system_prompt || has_memory_setting {
+    if system_context_changed || memory_setting_changed {
         *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
         state.reset_conversation();
     }

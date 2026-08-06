@@ -143,11 +143,12 @@ fn parse_combo(spec: &str) -> Result<(Vec<Key>, Key), String> {
     Ok((mods, main))
 }
 
-fn button_of(name: &str) -> Button {
+fn button_of(name: &str) -> Result<Button, String> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "right" => Button::Right,
-        "middle" => Button::Middle,
-        _ => Button::Left,
+        "left" | "" => Ok(Button::Left),
+        "right" => Ok(Button::Right),
+        "middle" => Ok(Button::Middle),
+        other => Err(format!("エラー: 不明なマウスボタンです: {other}")),
     }
 }
 
@@ -164,10 +165,20 @@ fn check_point(enigo: &Enigo, x: i32, y: i32) -> Result<(), String> {
     Ok(())
 }
 
-fn coord(args: &Value, key: &str) -> Option<i32> {
-    args.get(key)
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
+fn coord(args: &Value, key: &str) -> Result<Option<i32>, String> {
+    let Some(value) = args.get(key) else {
+        return Ok(None);
+    };
+    let integer = value
+        .as_i64()
+        .ok_or_else(|| format!("エラー: {key} は整数で指定してください。"))?;
+    let converted = i32::try_from(integer)
+        .map_err(|_| format!("エラー: {key} が扱える範囲を超えています: {integer}"))?;
+    Ok(Some(converted))
+}
+
+fn required_coord(args: &Value, key: &str) -> Result<i32, String> {
+    coord(args, key)?.ok_or_else(|| format!("エラー: {key} が指定されていません。"))
 }
 
 #[async_trait]
@@ -298,7 +309,18 @@ impl Tool for DesktopControlTool {
             }
             "move" | "click" | "double_click" => {
                 // 座標があれば移動してから押す。省略時は現在位置で押す。
-                if let (Some(x), Some(y)) = (coord(&args, "x"), coord(&args, "y")) {
+                let x = match coord(&args, "x") {
+                    Ok(value) => value,
+                    Err(error) => return error,
+                };
+                let y = match coord(&args, "y") {
+                    Ok(value) => value,
+                    Err(error) => return error,
+                };
+                if x.is_some() != y.is_some() {
+                    return "エラー: 座標を指定する場合は x と y の両方が必要です。".to_string();
+                }
+                if let (Some(x), Some(y)) = (x, y) {
                     if let Err(error) = check_point(&enigo, x, y) {
                         return error;
                     }
@@ -311,14 +333,19 @@ impl Tool for DesktopControlTool {
                 if action == "move" {
                     return "マウスを移動しました。".to_string();
                 }
-                let button = button_of(args.get("button").and_then(Value::as_str).unwrap_or("left"));
+                let button = match button_of(
+                    args.get("button").and_then(Value::as_str).unwrap_or("left"),
+                ) {
+                    Ok(button) => button,
+                    Err(error) => return error,
+                };
                 let times = if action == "double_click" { 2 } else { 1 };
                 for _ in 0..times {
                     if let Err(error) = enigo.button(button, Direction::Click) {
                         return format!("エラー: クリックできません: {error}");
                     }
                 }
-                let where_ = match (coord(&args, "x"), coord(&args, "y")) {
+                let where_ = match (x, y) {
                     (Some(x), Some(y)) => format!("{x},{y}"),
                     _ => "現在位置".to_string(),
                 };
@@ -328,40 +355,58 @@ impl Tool for DesktopControlTool {
                 )
             }
             "drag" => {
-                let (Some(x), Some(y), Some(tx), Some(ty)) = (
-                    coord(&args, "x"),
-                    coord(&args, "y"),
-                    coord(&args, "to_x"),
-                    coord(&args, "to_y"),
-                ) else {
-                    return "エラー: drag には x, y, to_x, to_y が必要です。".to_string();
+                let coords = (
+                    required_coord(&args, "x"),
+                    required_coord(&args, "y"),
+                    required_coord(&args, "to_x"),
+                    required_coord(&args, "to_y"),
+                );
+                let (x, y, tx, ty) = match coords {
+                    (Ok(x), Ok(y), Ok(tx), Ok(ty)) => (x, y, tx, ty),
+                    (Err(error), _, _, _)
+                    | (_, Err(error), _, _)
+                    | (_, _, Err(error), _)
+                    | (_, _, _, Err(error)) => return error,
                 };
                 for (px, py) in [(x, y), (tx, ty)] {
                     if let Err(error) = check_point(&enigo, px, py) {
                         return error;
                     }
                 }
-                let button = button_of(args.get("button").and_then(Value::as_str).unwrap_or("left"));
-                let steps = [
-                    enigo.move_mouse(x, y, Coordinate::Abs),
-                    enigo.button(button, Direction::Press),
-                    enigo.move_mouse(tx, ty, Coordinate::Abs),
-                    enigo.button(button, Direction::Release),
-                ];
-                for step in steps {
-                    if let Err(error) = step {
-                        // 途中で失敗してもボタンは離しておく（押しっぱなしを残さない）。
-                        let _ = enigo.button(button, Direction::Release);
-                        return format!("エラー: ドラッグに失敗しました: {error}");
-                    }
+                let button = match button_of(
+                    args.get("button").and_then(Value::as_str).unwrap_or("left"),
+                ) {
+                    Ok(button) => button,
+                    Err(error) => return error,
+                };
+                // 1操作ずつ成功を確認してから次へ進む。配列へ式を並べると、Rust は
+                // 配列生成時に全操作を実行するため、先頭が失敗しても後続が動いてしまう。
+                if let Err(error) = enigo.move_mouse(x, y, Coordinate::Abs) {
+                    return format!("エラー: ドラッグ開始位置へ移動できません: {error}");
+                }
+                if let Err(error) = enigo.button(button, Direction::Press) {
+                    return format!("エラー: ドラッグ開始時にボタンを押せません: {error}");
+                }
+                if let Err(error) = enigo.move_mouse(tx, ty, Coordinate::Abs) {
+                    let _ = enigo.button(button, Direction::Release);
+                    return format!("エラー: ドラッグ中に移動できません: {error}");
+                }
+                if let Err(error) = enigo.button(button, Direction::Release) {
+                    let _ = enigo.button(button, Direction::Release);
+                    return format!("エラー: ドラッグ終了時にボタンを離せません: {error}");
                 }
                 format!("ドラッグしました（{x},{y} → {tx},{ty}）。")
             }
             "scroll" => {
-                let amount = coord(&args, "amount").unwrap_or(3);
+                let amount = match coord(&args, "amount") {
+                    Ok(Some(value)) => value,
+                    Ok(None) => 3,
+                    Err(error) => return error,
+                };
                 let axis = match args.get("axis").and_then(Value::as_str).unwrap_or("vertical") {
                     "horizontal" => Axis::Horizontal,
-                    _ => Axis::Vertical,
+                    "vertical" => Axis::Vertical,
+                    other => return format!("エラー: 不明なスクロール方向です: {other}"),
                 };
                 match enigo.scroll(amount, axis) {
                     Ok(()) => format!("スクロールしました（{amount}）。"),
@@ -465,15 +510,21 @@ mod tests {
 
     #[test]
     fn ボタン名を写像する() {
-        assert!(matches!(button_of("right"), Button::Right));
-        assert!(matches!(button_of("middle"), Button::Middle));
-        assert!(matches!(button_of("なにか"), Button::Left), "不明な指定は左ボタン");
+        assert!(matches!(button_of("right"), Ok(Button::Right)));
+        assert!(matches!(button_of("middle"), Ok(Button::Middle)));
+        assert!(button_of("なにか").is_err(), "不明な指定は拒否する");
     }
 
     #[test]
     fn 座標はi32の範囲外を拒否する() {
         let args = serde_json::json!({ "x": i64::MAX });
-        assert_eq!(coord(&args, "x"), None);
+        assert!(coord(&args, "x").is_err());
+    }
+
+    #[test]
+    fn 座標は未指定と不正値を区別する() {
+        assert_eq!(coord(&serde_json::json!({}), "x").unwrap(), None);
+        assert!(coord(&serde_json::json!({ "x": "10" }), "x").is_err());
     }
 
     #[test]

@@ -97,7 +97,7 @@ graph TD
 5. 各 chat 呼び出しは `chat_with_retry()` でラップし、失敗時に最大 3 回・指数バックオフ（1秒→2秒）でリトライする（4xx 認証エラーは即中断）。
 6. chat 完了後、返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に永続化する。
 7. ツール実行は `Tracer::start_span()` でレイテンシを計測し、`Tracer::record()` で直近 200 件を保持する。
-8. ツール出力は `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字で打ち切り、コンテキスト超過を防ぐ。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。**同じ検査を添付ファイルの抽出本文にも適用する**（`commands.rs` の `mark_untrusted_if_injection`）。添付本文はツール結果ではなくユーザー発話の一部として渡るため、ここで検査しないと「受け取った文書に指示を仕込む」経路だけが素通りしてしまう。ツール引数 JSON の解析失敗（`_raw` フィールド）を検出した場合はツールを呼ばずエラー文字列を返してモデルへ再試行を促す（`dispatch_or_error()`）。
+8. ツール出力は `PICOAGENT_TOOL_OUTPUT_MAX_CHARS`（既定 `auto`）で打ち切り、コンテキスト超過を防ぐ。`auto` は local ならコンテキスト長の45%（1,000〜60,000文字）、クラウドなら24,000文字。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。**同じ検査を添付ファイルの抽出本文にも適用する**（`commands.rs` の `mark_untrusted_if_injection`）。添付本文はツール結果ではなくユーザー発話の一部として渡るため、ここで検査しないと「受け取った文書に指示を仕込む」経路だけが素通りしてしまう。ツール引数 JSON の解析失敗（`_raw` フィールド）を検出した場合はツールを呼ばずエラー文字列を返してモデルへ再試行を促す（`dispatch_or_error()`）。
 9. `PICOAGENT_PLANNING_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効、かつ質問が複雑（120文字超・疑問符2個以上・手順/ステップ系語を含む）な場合、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、分解結果を system 追記として付与してから通常の chat ループへ進む。
 10. `PICOAGENT_SELF_EVAL_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効な場合、最終応答が短すぎる（8文字未満）または明示的な拒否パターンを含む場合に `provider.chat()` で1回再生成する（`self_improve()`）。再生成に失敗した場合は元の応答をそのまま返す。
 11. **スーパーエージェントモード（`PICOAGENT_SUPER_AGENT=true`）**: 上記の計画・自己評価をまとめて有効化し、トップレベルの `max_steps` を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定 12、呼び出し値〜30 にクランプ）へ引き上げて多段のツール連鎖を回し切る。計画開始・計画内容・「ステップ k/N を実行中…」・「ツールを実行中: …」を `pet:agent_status` イベントでフロントへ送り、計画→実行を可視化する（フロントはステータス行に表示）。ツールの実行有無・対象・成否は表示文言から推測せず、`pet:agent_activity` の `started` / `completed` / `waiting` と `tools` / `failedTools` で構造化して通知する。
@@ -226,7 +226,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 ```
 
 - `tools::build_schemas()` が `{ type:"function", function:{name,description,parameters} }` 形式の配列を生成しプロバイダへ渡す。
-- `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。出力が `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字を超える場合は末尾を切り捨て、コンテキスト超過を防ぐ。
+- `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。出力が `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` の上限を超える場合は末尾を切り捨て、コンテキスト超過を防ぐ。
 - スキル実体、名前インデックス、function schema は `OnceLock` でキャッシュする。多数のスキルを導入しても会話ごとの schema 構築や dispatch 時の全スキル再生成を避ける。
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/ms_office/scripts/office.ps1` のような補助ファイル変更もビルドに反映される。
@@ -350,7 +350,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `http_api` | 個別スキルがないSaaSやWebhookへの汎用HTTP API呼び出し | 許可ドメイン必須、任意Bearer/API key、本文/応答サイズ上限、timeout |
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
 | `desktop_control` | デスクトップのマウス・キーボード操作（クリック・ドラッグ・文字入力・キー送出・スクロール）とウィンドウ一覧・前面化 | 既定無効、**シェルを介さない固定 action のみ**、座標の画面内チェック、入力文字数 2,000 上限、1分あたりの操作回数上限。ウィンドウ操作は番号で指定させ OS ハンドルはモデルへ見せない（現在 Windows のみ） |
-| `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
+| `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、CDP は127.0.0.1限定かつ自分が起動した子だけを操作、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
 | `comfyui_generate` | ComfyUI ローカルサーバーで画像・動画を生成（APIキー不要）。KSampler ワークフローを組み立て `/prompt` → `/history` ポーリング → `/view` URL を返す。AnimateDiff 等の動画出力にも対応 | `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）・`COMFYUI_CHECKPOINT`（モデルファイル名）のみ。120秒 timeout |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | OfficeCLI と OOXML 直接編集による Word/Excel/PowerPoint の文字列置換・PDF出力 | 共通許可ルート配下のみ、同梱または明示設定した OfficeCLI、timeout |
@@ -617,7 +617,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_BROWSER_PORT` | `11437` | browser_control | CDP のデバッグポート |
 | `PICOAGENT_BROWSER_TIMEOUT_SECS` | `30` | browser_control | 1操作の待ち時間（秒、5〜180） |
 | `PICOAGENT_BROWSER_MAX_CHARS` | `auto` | browser_control | 1回に読む本文の最大文字数（`auto`=`PICOAGENT_TOOL_OUTPUT_MAX_CHARS` に従う） |
-| `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | 基本 | ツール出力の最大文字数。`auto` は使用中モデルのコンテキスト長から算出（local は `PICOAGENT_LOCAL_CTX` の 45%、下限 8,000／上限 60,000。クラウドは 24,000） |
+| `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | 基本 | ツール出力の最大文字数。`auto` は使用中モデルのコンテキスト長から算出（local は `PICOAGENT_LOCAL_CTX` の45%、下限1,000／上限60,000。クラウドは24,000） |
 | `PICOAGENT_DOCUMENT_ROOT` | （旧キー） | ms_office / document_convert / pdf_tools | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | ms_office | Microsoft Office 操作タイムアウト秒（5〜300） |
 | `PICOAGENT_LIBREOFFICE_PATH` | `soffice` | document_convert | LibreOffice 実行ファイルパス |

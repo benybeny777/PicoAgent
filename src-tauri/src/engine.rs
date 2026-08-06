@@ -283,23 +283,23 @@ fn total_memory_bytes() -> Option<u64> {
 
 /// GPU の VRAM 量（バイト）。ローカルモデルのプリセット自動選定にだけ使う。
 ///
-/// ここだけ PowerShell + WMI が残っている。正確な値を取るには DXGI の
-/// `IDXGIAdapter1::GetDesc1`（`DedicatedVideoMemory`）を読むのが本筋だが、
-/// COM の呼び出しが必要で `windows-sys` では素の vtable を叩くことになり、
-/// 高レベルな `windows` クレートを足すと依存が大きく増える。初回起動時に一度だけ
-/// 動く経路なので、費用対効果を見て据え置いている（総メモリ量と GPU 名の取得は
-/// ネイティブ API へ置き換え済み）。
-fn gpu_vram_bytes() -> Option<u64> {
+/// Windows では WMI を短時間だけ呼ぶ。共通の非同期プロセス層を通すことで、
+/// 起動停止中や WMI 不調時にも10秒で打ち切り、子プロセスを残さない。
+async fn gpu_vram_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
-        let output = crate::tools::process::command_sync("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty AdapterRAM",
-            ])
-            .output()
+        let mut command = crate::tools::process::command("powershell");
+        command.args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty AdapterRAM",
+        ]);
+        let output = crate::tools::process::output(command, 10, "GPUメモリ量の確認")
+            .await
             .ok()?;
+        if !output.status.success() {
+            return None;
+        }
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|line| line.trim().parse::<u64>().ok())
@@ -311,8 +311,8 @@ fn gpu_vram_bytes() -> Option<u64> {
     }
 }
 
-fn auto_model_preset() -> &'static str {
-    let vram = gpu_vram_bytes().unwrap_or(0);
+async fn auto_model_preset() -> &'static str {
+    let vram = gpu_vram_bytes().await.unwrap_or(0);
     let ram = total_memory_bytes().unwrap_or(0);
     let gib = 1024_u64.pow(3);
     if vram >= 8 * gib && ram >= 24 * gib {
@@ -324,14 +324,14 @@ fn auto_model_preset() -> &'static str {
     }
 }
 
-fn ensure_local_model_selection(app: &AppHandle) {
+async fn ensure_local_model_selection(app: &AppHandle) {
     let state = app.state::<AppState>();
     let requested = state.config.get("PICOAGENT_LOCAL_MODEL_PRESET", "auto");
     let should_auto = requested == "auto"
         || (!state.config.has_value("PICOAGENT_LOCAL_MODEL_PRESET")
             && !state.config.has_value("PICOAGENT_MODEL_URL"));
     let selected = if should_auto {
-        auto_model_preset()
+        auto_model_preset().await
     } else if local::preset(&requested).is_some() || requested == "custom" {
         requested.as_str()
     } else {
@@ -426,16 +426,27 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(err_log));
-    let child = cmd.spawn()?;
-    if let Some(engine) = app.try_state::<EngineState>() {
-        *engine.child.lock().unwrap() = Some(child);
+    let mut child = cmd.spawn()?;
+    let Some(engine) = app.try_state::<EngineState>() else {
+        terminate_child(&mut child);
+        anyhow::bail!("EngineState を取得できないため、起動したエンジンを停止しました");
+    };
+    let mut slot = match engine.child.lock() {
+        Ok(slot) => slot,
+        // ハンドルを失わないよう、poison 後も格納済み状態を引き継ぐ。
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if slot.is_some() {
+        terminate_child(&mut child);
+        anyhow::bail!("ローカルエンジンは既に起動中です");
     }
+    *slot = Some(child);
     Ok(())
 }
 
 // モデル取得→エンジン起動→ready 検知までを通しで行う（async タスクから呼ぶ）。
 pub async fn ensure_and_start(app: AppHandle) {
-    ensure_local_model_selection(&app);
+    ensure_local_model_selection(&app).await;
     let model = model_path(&app);
     if let Err(e) = migrate_legacy_model(&app, &model).await {
         set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
@@ -484,19 +495,96 @@ pub async fn ensure_and_start(app: AppHandle) {
     let state = app.state::<AppState>();
     let provider = match crate::providers::get("local") {
         Some(p) => p,
-        None => return,
+        None => {
+            terminate_managed_child(&app);
+            set_status(
+                &app,
+                json!({ "phase": "error", "message": "local プロバイダが登録されていません" }),
+            );
+            return;
+        }
     };
     for _ in 0..300 {
         if provider.is_up(&state.config).await {
             set_status(&app, json!({ "phase": "ready" }));
             return;
         }
+        match managed_child_exit_status(&app) {
+            Ok(Some(status)) => {
+                set_status(
+                    &app,
+                    json!({
+                        "phase": "error",
+                        "message": format!("エンジンが起動直後に終了しました: {status}（engine.log を確認してください）")
+                    }),
+                );
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                terminate_managed_child(&app);
+                set_status(&app, json!({ "phase": "error", "message": error }));
+                return;
+            }
+        }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
+    terminate_managed_child(&app);
     set_status(
         &app,
         json!({ "phase": "error", "message": "エンジンの起動がタイムアウトしました" }),
     );
+}
+
+fn managed_child_exit_status(app: &AppHandle) -> Result<Option<std::process::ExitStatus>, String> {
+    let Some(engine) = app.try_state::<EngineState>() else {
+        return Err("EngineState を取得できません".to_string());
+    };
+    let mut slot = match engine.child.lock() {
+        Ok(slot) => slot,
+        // 終了確認と解放を優先し、poison 後も保持中のハンドルを回収する。
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let Some(child) = slot.as_mut() else {
+        return Ok(None);
+    };
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            *slot = None;
+            Ok(Some(status))
+        }
+        Ok(None) => Ok(None),
+        Err(error) => Err(format!("エンジンの終了状態を確認できません: {error}")),
+    }
+}
+
+fn terminate_child(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let _ = crate::tools::process::command_sync("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    // taskkill 自体が失敗した場合も、直接の子プロセスだけは必ず停止を試みる。
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn terminate_managed_child(app: &AppHandle) {
+    let Some(engine) = app.try_state::<EngineState>() else {
+        return;
+    };
+    let child = match engine.child.lock() {
+        Ok(mut slot) => slot.take(),
+        // 停止処理は Mutex の poison 後も中のハンドルを回収する。
+        Err(poisoned) => poisoned.into_inner().take(),
+    };
+    if let Some(mut child) = child {
+        terminate_child(&mut child);
+    }
 }
 
 /// 子プロセスを停止する（アプリ終了時）。
@@ -504,21 +592,7 @@ pub async fn ensure_and_start(app: AppHandle) {
 pub fn stop(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
         engine.stopping.store(true, Ordering::SeqCst);
-        if let Some(mut child) = engine.child.lock().unwrap().take() {
-            // Windows は taskkill /T で llama-server の子孫まで含めて確実に停止する（Aivis と同方針）。
-            #[cfg(windows)]
-            {
-                let _ = crate::tools::process::command_sync("taskkill")
-                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-            }
-            #[cfg(not(windows))]
-            let _ = child.kill();
-            let _ = child.wait(); // kill 後に wait してプロセスハンドルを回収する。
-        }
+        terminate_managed_child(app);
     }
 }
 

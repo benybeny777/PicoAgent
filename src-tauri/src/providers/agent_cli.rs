@@ -31,6 +31,10 @@ pub struct AgentCli;
 
 /// CLI へ渡すプロンプトの上限。これを超える分は古い履歴から落とす。
 const MAX_PROMPT_CHARS: usize = 24_000;
+/// 長い会話でも人格・安全指示を残すため system に確保する最大枠。
+const MAX_SYSTEM_CHARS: usize = 12_000;
+/// ツール一覧だけで Windows のコマンドライン上限を使い切らないための天井。
+const MAX_TOOL_INSTRUCTION_CHARS: usize = 10_000;
 
 /// 対応している CLI の種類。
 #[derive(Clone, Copy, PartialEq)]
@@ -116,8 +120,29 @@ fn timeout_secs(cfg: &Config) -> u64 {
 
 /// 会話を1つのプロンプト文字列へ畳む。CLI は1往復しか受け取れないため、
 /// 役割が分かるように明示のラベルを付ける。長すぎる場合は**古い方から**落とす。
-fn flatten(messages: &[Message]) -> String {
-    let mut blocks: Vec<String> = Vec::new();
+fn truncate_keep_edges(text: &str, limit: usize) -> String {
+    let count = text.chars().count();
+    if count <= limit {
+        return text.to_string();
+    }
+    const MARKER: &str = "\n［...中略...］\n";
+    let marker_len = MARKER.chars().count();
+    if limit <= marker_len + 2 {
+        return text.chars().take(limit).collect();
+    }
+    let content_limit = limit - marker_len;
+    let head_len = content_limit * 2 / 3;
+    let tail_len = content_limit - head_len;
+    let head: String = text.chars().take(head_len).collect();
+    let tail: String = text
+        .chars()
+        .skip(count.saturating_sub(tail_len))
+        .collect();
+    format!("{head}{MARKER}{tail}")
+}
+
+fn flatten(messages: &[Message], limit: usize) -> String {
+    let mut blocks: Vec<(bool, String)> = Vec::new();
     for message in messages {
         if message.content.trim().is_empty() {
             continue;
@@ -128,15 +153,52 @@ fn flatten(messages: &[Message]) -> String {
             "tool" => "［ツールの結果］",
             _ => "［ユーザー］",
         };
-        blocks.push(format!("{label}\n{}", message.content.trim()));
+        blocks.push((
+            message.role == "system",
+            format!("{label}\n{}", message.content.trim()),
+        ));
     }
-    let mut text = blocks.join("\n\n");
-    if text.chars().count() > MAX_PROMPT_CHARS {
-        // 先頭（＝古い履歴）から削る。直近のやり取りと最後の指示を残すため。
-        let skip = text.chars().count() - MAX_PROMPT_CHARS;
-        text = text.chars().skip(skip).collect();
+    let full = blocks
+        .iter()
+        .map(|(_, block)| block.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if full.chars().count() <= limit {
+        return full;
     }
-    text
+
+    // 古い履歴を落とす場合も system は先頭へ残す。旧実装は文字列全体の先頭を
+    // 切っていたため、会話が長くなると人格・安全指示から先に消えていた。
+    let system = blocks
+        .iter()
+        .filter(|(is_system, _)| *is_system)
+        .map(|(_, block)| block.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let system_limit = system.chars().count().min(MAX_SYSTEM_CHARS).min(limit);
+    let system = truncate_keep_edges(&system, system_limit);
+    let separator = if system.is_empty() { 0 } else { 2 };
+    let recent_limit = limit.saturating_sub(system.chars().count() + separator);
+    let recent = blocks
+        .iter()
+        .filter(|(is_system, _)| !*is_system)
+        .map(|(_, block)| block.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let recent_count = recent.chars().count();
+    let recent = if recent_count > recent_limit {
+        recent
+            .chars()
+            .skip(recent_count - recent_limit)
+            .collect::<String>()
+    } else {
+        recent
+    };
+    match (system.is_empty(), recent.is_empty()) {
+        (false, false) => format!("{system}\n\n{recent}"),
+        (false, true) => system,
+        _ => recent,
+    }
 }
 
 /// 使えるスキルの一覧と、ツールを使うときの返し方を伝える指示文を作る。
@@ -174,10 +236,11 @@ fn tool_instructions(tools: &[Value]) -> String {
     if lines.is_empty() {
         return String::new();
     }
-    format!(
+    let instructions = format!(
         "［使えるツール］\n{}\n\n         ［ツールを使うときの返し方］\n         上のツールが必要なときは、前置きも説明も書かず、次の形の JSON だけを返してください。\n         {{\"tool\": \"ツール名\", \"args\": {{ 引数 }}}}\n         ツールが不要なら、いつもどおり日本語の文章で答えてください。",
         lines.join("\n")
-    )
+    );
+    truncate_keep_edges(&instructions, MAX_TOOL_INSTRUCTION_CHARS)
 }
 
 /// CLI の出力からツール呼び出しを取り出す。JSON でなければ `None`（＝通常の返答）。
@@ -288,8 +351,12 @@ impl Provider for AgentCli {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
-        let mut prompt = flatten(messages);
         let instructions = tool_instructions(tools);
+        let instruction_chars = instructions.chars().count();
+        let conversation_limit = MAX_PROMPT_CHARS
+            .saturating_sub(instruction_chars.saturating_add(2))
+            .max(1_000);
+        let mut prompt = flatten(messages, conversation_limit);
         if !instructions.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(&instructions);
@@ -375,7 +442,7 @@ mod tests {
             Message::new("system", "あなたはむぎ"),
             Message::new("user", "こんにちは"),
             Message::new("assistant", "やあ"),
-        ]);
+        ], MAX_PROMPT_CHARS);
         assert!(text.contains("［前提］\nあなたはむぎ"), "text: {text}");
         assert!(text.contains("［ユーザー］\nこんにちは"), "text: {text}");
         assert!(text.contains("［これまでのあなたの返答］\nやあ"), "text: {text}");
@@ -383,16 +450,38 @@ mod tests {
 
     #[test]
     fn 空の内容は畳み込みから省く() {
-        let text = flatten(&[Message::new("user", "  "), Message::new("user", "本題")]);
+        let text = flatten(
+            &[Message::new("user", "  "), Message::new("user", "本題")],
+            MAX_PROMPT_CHARS,
+        );
         assert_eq!(text, "［ユーザー］\n本題");
     }
 
     #[test]
     fn 長すぎる会話は古い方から落とす() {
         let long = "あ".repeat(MAX_PROMPT_CHARS);
-        let text = flatten(&[Message::new("user", long), Message::new("user", "最後の指示")]);
+        let text = flatten(
+            &[Message::new("user", long), Message::new("user", "最後の指示")],
+            MAX_PROMPT_CHARS,
+        );
         assert_eq!(text.chars().count(), MAX_PROMPT_CHARS);
         assert!(text.ends_with("最後の指示"), "直近の指示は必ず残す");
+    }
+
+    #[test]
+    fn 長い会話でもsystemの先頭と末尾を残す() {
+        let system = format!("人格の先頭{}安全指示の末尾", "前提".repeat(MAX_PROMPT_CHARS));
+        let text = flatten(
+            &[
+                Message::new("system", system),
+                Message::new("user", "直近の依頼".repeat(3_000)),
+            ],
+            MAX_PROMPT_CHARS,
+        );
+        assert!(text.starts_with("［前提］\n人格の先頭"), "text: {text}");
+        assert!(text.contains("安全指示の末尾"), "system 末尾も残す");
+        assert!(text.ends_with("直近の依頼"), "直近の依頼も残す");
+        assert!(text.chars().count() <= MAX_PROMPT_CHARS);
     }
 
     fn sample_tools() -> Vec<serde_json::Value> {
