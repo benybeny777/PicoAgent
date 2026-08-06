@@ -268,7 +268,7 @@ body.searching .tab-panel {
   background: var(--surface);
 }
 .character-card.selected {
-  border-color: var(--field-focus);
+  border-color: var(--pink);
   box-shadow: 0 0 0 2px rgba(242,126,145,.12);
 }
 .character-card .character-select-button {
@@ -430,6 +430,7 @@ body.searching .tab-panel {
   align-items: center;
   gap: 10px;
 }
+.character-card[hidden] { display: none; }
 .character-icon-wrap {
   flex: 0 0 44px;
   width: 44px;
@@ -453,8 +454,37 @@ body.searching .tab-panel {
   color: var(--pink);
 }
 .character-card-text {
+  flex: 1;
   min-width: 0;
 }
+.character-browser-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 10px 0;
+}
+.character-browser-search {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.character-browser-search:focus {
+  outline: 2px solid rgba(233, 138, 182, .22);
+  border-color: var(--pink);
+}
+.character-type-filter { grid-column: 1 / -1; margin: 0; }
+.character-browser-count {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.character-browser-empty { margin: 12px 0; text-align: center; }
 /* 設定を持つスキルはクリックで開閉できるアコーディオン。 */
 .card-accordion { cursor: pointer; }
 .card-accordion:hover { border-color: var(--pink); }

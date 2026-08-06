@@ -169,6 +169,8 @@ function currentActivePanel(group) {
 // ジャンル（カテゴリ）フィルタの選択状態。"all" は全表示。スキル設定と活用ガイドで独立に持つ。
 let skillGenreFilter = "all";
 let guideGenreFilter = "all";
+let characterTypeFilter = "all";
+let characterSearchQuery = "";
 
 // ジャンル別フィルタのチップ列を作る。クリックで getValue/setValue 経由の状態を切り替え、再フィルタする。
 function buildGenreChips(getValue, setValue) {
@@ -213,6 +215,7 @@ function applySettingsSearch() {
     if (item.classList.contains("card-config")) continue;
     item.hidden = query ? !nodeSearchText(item).includes(query) : false;
   }
+  applyCharacterFilters(query);
   // ⚙ パネル: 検索中はマッチしたものだけ開き、非検索時はアコーディオンの開閉状態（.open）に従う。
   for (const panel of form.querySelectorAll(".card-config")) {
     const card = panel.previousElementSibling;
@@ -1381,12 +1384,39 @@ async function characterIconUrl(character) {
 }
 
 function characterRenderType(character, manifest) {
-  const hasLive2d = !!manifest.live2d
-    || (Array.isArray(manifest.variants) && manifest.variants.some(variant => variant?.live2d));
-  if (hasLive2d) return "Live2D";
-  if (manifest.generator?.type === "tha3") return "自作THA3";
+  const kind = characterRenderKind(manifest);
+  if (kind === "live2d") return "Live2D";
+  if (kind === "tha3") return "自作THA3";
   if (character.user) return "追加PNG";
   return "PNGアニメ";
+}
+
+function characterRenderKind(manifest) {
+  const hasLive2d = !!manifest.live2d
+    || (Array.isArray(manifest.variants) && manifest.variants.some(variant => variant?.live2d));
+  if (hasLive2d) return "live2d";
+  if (manifest.generator?.type === "tha3") return "tha3";
+  return "png";
+}
+
+function applyCharacterFilters(globalQuery = settingsSearch?.value.trim().toLowerCase() || "") {
+  const list = form.querySelector(".character-browser-list");
+  if (!list) return;
+  const cards = [...list.querySelectorAll(".character-card")];
+  let visible = 0;
+  for (const card of cards) {
+    const matchesGlobal = !globalQuery || nodeSearchText(card).includes(globalQuery);
+    const matchesLocal = !characterSearchQuery || nodeSearchText(card).includes(characterSearchQuery);
+    const matchesType = characterTypeFilter === "all"
+      || card.dataset.characterRender === characterTypeFilter
+      || (characterTypeFilter === "user" && card.dataset.characterOrigin === "user");
+    card.hidden = !(matchesGlobal && matchesLocal && matchesType);
+    if (!card.hidden) visible += 1;
+  }
+  const count = form.querySelector(".character-browser-count");
+  if (count) count.textContent = `${visible} / ${cards.length}体を表示`;
+  const empty = form.querySelector(".character-browser-empty");
+  if (empty) empty.hidden = visible !== 0;
 }
 
 function saveCurrentCharacterVoice(id) {
@@ -1764,8 +1794,10 @@ async function render() {
     try {
       const manifest = await loadCharacterManifestForSettings(character);
       character.renderType = characterRenderType(character, manifest);
+      character.renderKind = characterRenderKind(manifest);
     } catch (error) {
       character.renderType = character.user ? "追加パック" : "形式不明";
+      character.renderKind = "unknown";
       logApp("warn", "キャラクター形式を判定できませんでした", `${character.id}: ${errorDetail(error)}`);
     }
   }));
@@ -1800,13 +1832,17 @@ async function render() {
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
   let previousCharacter = selectedCharacter;
-  characterSelect.addEventListener("change", async () => {
+  characterSelect.addEventListener("change", async event => {
+    // 人格の読込は非同期なので、form の委譲 change が先に collect() すると、切替前の
+    // 人格を新しいキャラの上書き値として保存してしまう。切替完了後に未保存判定する。
+    event.stopPropagation();
     characterOverrides[previousCharacter] = characterPersona.value;
     saveCurrentCharacterVoice(previousCharacter);
     previousCharacter = characterSelect.value;
     try { await loadCharacterPersona(previousCharacter); }
     catch (error) { statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`; }
     loadCharacterVoice(previousCharacter);
+    updateDirtyState();
   });
   // 関係性は人格そのものではなく「人格の上に重ねる差分」なので、キャラ選択とは別の欄にする。
   const relationshipSelect = el("select");
@@ -1867,9 +1903,53 @@ async function render() {
   }
   panels.skillguide.append(skillGuideSec);
 
-  // --- 導入済みキャラクターの一覧（読み取り専用） ---
-  const charSec = section("導入済みキャラクター");
-  const charList = el("div", { className: "card-list" });
+  // --- 導入済みキャラクターの検索・形式フィルター・選択 ---
+  const charSec = section("キャラクターを探して選ぶ");
+  charSec.append(el("p", {
+    className: "hint",
+    textContent: "名前・ID・説明で検索し、描画形式で絞り込めます。選択後は上の性格・口調などを調整して「保存」してください。",
+  }));
+  const characterSearch = el("input", {
+    className: "character-browser-search",
+    type: "search",
+    autocomplete: "off",
+    placeholder: "キャラクター名・ID・説明を検索",
+    value: characterSearchQuery,
+  });
+  characterSearch.addEventListener("input", () => {
+    characterSearchQuery = characterSearch.value.trim().toLowerCase();
+    applySettingsSearch();
+  });
+  const filterDefinitions = [
+    { id: "all", label: "すべて" },
+    { id: "live2d", label: "Live2D" },
+    { id: "png", label: "PNGアニメ" },
+    { id: "tha3", label: "自作THA3" },
+    { id: "user", label: "追加キャラ" },
+  ];
+  const filterBar = el("div", { className: "genre-filter character-type-filter" });
+  const filterButtons = new Map();
+  const refreshFilterButtons = () => {
+    for (const [id, button] of filterButtons) {
+      const active = id === characterTypeFilter;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  };
+  for (const filter of filterDefinitions) {
+    const button = el("button", { type: "button", className: "genre-chip", textContent: filter.label });
+    button.addEventListener("click", () => {
+      characterTypeFilter = filter.id;
+      refreshFilterButtons();
+      applySettingsSearch();
+    });
+    filterButtons.set(filter.id, button);
+    filterBar.append(button);
+  }
+  refreshFilterButtons();
+  const count = el("span", { className: "character-browser-count", ariaLive: "polite" });
+  charSec.append(el("div", { className: "character-browser-controls" }, [characterSearch, filterBar, count]));
+  const charList = el("div", { className: "card-list character-browser-list" });
   const refreshCharacterCards = () => {
     charList.querySelectorAll(".character-card").forEach(card => {
       const active = card.dataset.characterId === characterSelect.value;
@@ -1881,6 +1961,7 @@ async function render() {
       }
     });
   };
+  characterSelect.addEventListener("change", refreshCharacterCards);
   for (const character of characterCatalog.characters) {
     const fallback = el("div", { className: "character-icon-fallback", textContent: String(character.name || character.id || "?").slice(0, 1) });
     const icon = el("img", { className: "character-icon", alt: `${character.name}のアイコン`, draggable: false });
@@ -1894,10 +1975,7 @@ async function render() {
     const selectButton = el("button", { className: "secondary character-select-button", type: "button" });
     selectButton.addEventListener("click", () => {
       characterSelect.value = character.id;
-      // 未保存判定は form 上の change を拾う委譲リスナなので、bubbles を付けないと
-      // 「保存」ボタンの強調と「変更を戻す」の有効化が更新されないまま残る。
-      characterSelect.dispatchEvent(new Event("change", { bubbles: true }));
-      refreshCharacterCards();
+      characterSelect.dispatchEvent(new Event("change"));
       statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
     });
     const texts = [
@@ -1934,12 +2012,16 @@ async function render() {
     const card = markSearchable(el("div", { className: "card-item character-card" }, [
       el("div", { className: "character-icon-wrap" }, [fallback, icon]),
       el("div", { className: "character-card-text" }, texts),
-    ]), character.id, character.name, character.description);
+    ]), character.id, character.name, character.description, character.renderType, character.user ? "追加キャラ" : "同梱キャラ");
     card.dataset.characterId = character.id;
+    card.dataset.characterRender = character.renderKind;
+    card.dataset.characterOrigin = character.user ? "user" : "bundled";
     charList.append(card);
   }
   refreshCharacterCards();
-  charSec.append(charList);
+  const empty = el("p", { className: "hint character-browser-empty", textContent: "条件に合うキャラクターが見つかりません。" });
+  charSec.append(charList, empty);
+  applyCharacterFilters();
 
   // --- 1枚絵からTHA3自作キャラクターを生成する ---
   // 生成物は一時パックとして検証してから app_data_dir/characters へ導入する。
