@@ -38,6 +38,11 @@ cpal = "0.15"
 hound = "3.5"
 enigo = "0.6"
 
+# 画面取得。Linux では PipeWire の開発ヘッダを要求してビルド前提が増えるため、
+# Windows / macOS だけで使い、Linux は従来の外部コマンド経路を残す。
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+xcap = "0.9.8"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

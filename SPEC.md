@@ -80,7 +80,7 @@ graph TD
 - `arguments` は **`serde_json::Value`（オブジェクト）** で持つ（OpenAI の JSON 文字列はプロバイダ内で相互変換）。
 - Ollama は tool 結果を id で紐付けず位置・名前で扱うため `tool_call_id` は無視（正規形には残す）。
 - `images` は **マルチモーダル入力**用のフィールド（省略可）。base64 data URL 文字列の配列。プロバイダが OpenAI 互換の場合、user メッセージの `content` を `[{type:"text",...}, {type:"image_url",...}]` 配列形式へ変換して送信する。`usage` フィールドは ephemeral（`#[serde(skip)]`）で、プロバイダから返ったトークン数を一時的に保持する。
-- **スクリーンショット解析**: `pet_capture_screen` コマンドがデスクトップ画像を PNG base64 data URL で返す。フロントエンドは「画面を見て」「スクリーンショット」などの発話を検出し、自動で `pet_capture_screen` → `pet_send_image` へ切り替えてビジョン対応モデルへ送る。
+- **スクリーンショット解析**: `pet_capture_screen` コマンドがデスクトップ画像を PNG base64 data URL で返す。取得は**外部コマンドを介さず** `xcap` で主モニタを直接キャプチャし、PNG へエンコードして返す（以前は Windows で PowerShell + GDI、macOS で `screencapture` を起動していた。起動が重く、実行ポリシーやプロファイルの影響を受け、失敗の切り分けもしづらかった）。**Linux だけは従来の外部コマンド経路（grim → scrot → import）を残す**——`xcap` が Linux で PipeWire の開発ヘッダを要求し、ビルド環境の前提が増えるため。取得と PNG 変換は同期処理なので `spawn_blocking` で UI スレッドから逃がす。フロントエンドは「画面を見て」「スクリーンショット」などの発話を検出し、自動で `pet_capture_screen` → `pet_send_image` へ切り替えてビジョン対応モデルへ送る。
 - **インライン画像表示**: `appendLinkedText()` が `![alt](url)` Markdown 画像記法を `<img>` 要素としてフキダシ内にインライン表示する。DALL-E 3 生成画像や外部 URL の画像をそのまま確認できる。
 
 ---

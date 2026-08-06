@@ -15,7 +15,9 @@
   - **安全側の既定**: 既定無効（`PICOAGENT_DESKTOP_ENABLED`）、座標の画面内チェック、入力 2,000 文字上限、**1分あたりの操作回数上限**（`PICOAGENT_DESKTOP_MAX_OPS_PER_MIN`、既定 60）。読み取り系は回数を消費しない。
   - ドラッグとキー組み合わせは、途中で失敗してもボタン・修飾キーを必ず離す（押しっぱなしを残さない）。
   - 実行した操作は結果文字列として会話とトレース（`pet_traces`）に残る。
-- スクリーンショットの Windows 実装（PowerShell + GDI）はこの変更では触っていない。置き換えは PNG エンコーダの追加が要るため別作業とする。
+- **スクリーンショットからも PowerShell を外した** (`src-tauri/src/commands.rs`): `pet_capture_screen` は Windows で PowerShell + GDI、macOS で `screencapture` を起動していた。起動が重く、実行ポリシーやプロファイルの影響を受け、失敗の切り分けもしづらい。`xcap` で主モニタを直接キャプチャして PNG へエンコードする形へ置き換え、一時ファイルの書き出しと読み戻しも無くした。取得と変換は同期処理なので `spawn_blocking` で UI スレッドから逃がす。
+  - **Linux だけは従来の外部コマンド経路（grim → scrot → import）を残した**。`xcap` は Linux で PipeWire の開発ヘッダ（`libpipewire-0.3-dev`）を要求し、**ビルドできる環境の前提が増えてしまう**ため。PowerShell とは無関係の経路なので、今回の目的（シェル依存の除去）とは矛盾しない。
+  - 「PNG を返すか、理由の分かるエラーを返すか」をテストで固定した（ヘッドレスやツール未導入の環境でパニックしないこと）。
 
 ---
 

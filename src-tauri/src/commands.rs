@@ -2342,102 +2342,97 @@ pub async fn pet_send_image(
 }
 
 /// デスクトップのスクリーンショットを撮影し PNG を base64 data URL で返す。
-/// プラットフォームごとに利用可能なツールを順に試みる。
-/// Windows: PowerShell + GDI、macOS: screencapture、Linux: grim → scrot → import の順。
+///
+/// **外部コマンドを一切使わない。** 以前は Windows で PowerShell + GDI、macOS で
+/// `screencapture`、Linux で grim / scrot / import を呼んでいたが、
+/// (1) PowerShell の起動は重く、実行ポリシーやプロファイルの影響を受ける、
+/// (2) OS ごとに失敗の出かたが違い原因を切り分けにくい、
+/// (3) そもそも画面取得のためにシェルを持ち出す必要がない、という理由で
+/// `xcap` によるネイティブ取得へ置き換えた（`desktop_control` と同じ方針）。
+///
+/// Linux だけは `xcap` が PipeWire の開発ヘッダを要求し、ビルド環境の前提が増えるため
+/// 従来の外部コマンド経路を残している（PowerShell とは無関係で、追加の導入負担も無い）。
 #[tauri::command]
 pub async fn pet_capture_screen() -> Result<Value, String> {
     use base64::Engine;
 
-    // 並行呼び出し時の競合を避けるため、ナノ秒タイムスタンプで一意な一時ファイル名を使う。
+    // 取得と PNG 変換は CPU を使う同期処理なので、UI を止めないようブロッキングスレッドへ逃がす。
+    let png = tokio::task::spawn_blocking(capture_primary_png)
+        .await
+        .map_err(|error| format!("スクリーンショット取得に失敗しました: {error}"))??;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    Ok(json!({ "dataUrl": format!("data:image/png;base64,{b64}") }))
+}
+
+/// 主モニタを取得して PNG バイト列へエンコードする。
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn capture_primary_png() -> Result<Vec<u8>, String> {
+    use std::io::Cursor;
+    use xcap::Monitor;
+
+    let monitors =
+        Monitor::all().map_err(|error| format!("モニタを列挙できません: {error}"))?;
+    // 主モニタが分からない場合は先頭を使う（単一モニタ環境では同じものになる）。
+    let monitor = monitors
+        .iter()
+        .find(|monitor| monitor.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
+        .ok_or_else(|| "スクリーンショット取得に失敗しました: モニタが見つかりません。".to_string())?;
+    let image = monitor
+        .capture_image()
+        .map_err(|error| format!("スクリーンショット取得に失敗しました: {error}"))?;
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, xcap::image::ImageFormat::Png)
+        .map_err(|error| format!("スクリーンショットを PNG へ変換できません: {error}"))?;
+    Ok(png.into_inner())
+}
+
+/// Linux は従来どおり外部の画面取得コマンドを使う（grim → scrot → import の順）。
+/// `xcap` は Linux で PipeWire の開発ヘッダを要求するため、ビルドの前提を増やさない選択。
+#[cfg(target_os = "linux")]
+fn capture_primary_png() -> Result<Vec<u8>, String> {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64;
     let temp_path = std::env::temp_dir().join(format!("picoagent-screenshot-{unique}.png"));
+    let path_str = temp_path.to_string_lossy().to_string();
 
-    #[cfg(target_os = "windows")]
-    {
-        let path_esc = temp_path.to_string_lossy().replace('\\', "\\\\");
-        let script = format!(
-            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;\
-             $s=[System.Windows.Forms.Screen]::PrimaryScreen;\
-             $b=New-Object System.Drawing.Bitmap($s.Bounds.Width,$s.Bounds.Height);\
-             $g=[System.Drawing.Graphics]::FromImage($b);\
-             $g.CopyFromScreen($s.Bounds.Location,[System.Drawing.Point]::Empty,$s.Bounds.Size);\
-             $b.Save(\"{path_esc}\");\
-             $g.Dispose();$b.Dispose()"
-        );
-        let mut cmd = crate::tools::process::command("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-        let out = crate::tools::process::output(cmd, 60, "スクリーンショット取得")
-            .await
-            .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "スクリーンショット取得に失敗しました: {}",
-                String::from_utf8_lossy(&out.stderr)
-            ));
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let mut cmd = crate::tools::process::command("screencapture");
-        cmd.args(["-t", "png", temp_path.to_str().unwrap_or("")]);
-        let out = crate::tools::process::output(cmd, 60, "スクリーンショット取得")
-            .await
-            .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "スクリーンショット取得に失敗しました: {}",
-                String::from_utf8_lossy(&out.stderr)
-            ));
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let path_str = temp_path.to_str().unwrap_or("");
-        // grim(Wayland) → scrot(X11) → import(ImageMagick) の順に試みる。
-        let mut grim = crate::tools::process::command("grim");
-        grim.arg(path_str);
-        let ok = crate::tools::process::output(grim, 60, "スクリーンショット取得")
-            .await
+    let attempts: [(&str, Vec<&str>); 3] = [
+        ("grim", vec![path_str.as_str()]),
+        ("scrot", vec![path_str.as_str()]),
+        ("import", vec!["-window", "root", path_str.as_str()]),
+    ];
+    let mut captured = false;
+    for (program, args) in attempts {
+        let mut command = crate::tools::process::command_sync(program);
+        command.args(args);
+        if command
+            .output()
             .map(|out| out.status.success())
-            .unwrap_or(false);
-        if !ok {
-            let mut scrot = crate::tools::process::command("scrot");
-            scrot.arg(path_str);
-            let ok2 = crate::tools::process::output(scrot, 60, "スクリーンショット取得")
-                .await
-                .map(|out| out.status.success())
-                .unwrap_or(false);
-            if !ok2 {
-                let mut import = crate::tools::process::command("import");
-                import.args(["-window", "root", path_str]);
-                let out = crate::tools::process::output(import, 60, "スクリーンショット取得")
-                    .await
-                    .map_err(|_| {
-                        "スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string()
-                    })?;
-                if !out.status.success() {
-                    return Err("スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string());
-                }
-            }
+            .unwrap_or(false)
+            && temp_path.exists()
+        {
+            captured = true;
+            break;
         }
     }
+    if !captured {
+        return Err(
+            "スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。"
+                .to_string(),
+        );
+    }
+    let bytes = std::fs::read(&temp_path)
+        .map_err(|error| format!("スクリーンショットファイルの読み込みに失敗しました: {error}"))?;
+    let _ = std::fs::remove_file(&temp_path);
+    Ok(bytes)
+}
 
-    // macOS/Windows/Linux 以外はスタブエラー
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    return Err("スクリーンショットはこのプラットフォームでは未対応です。".to_string());
-
-    let bytes = tokio::fs::read(&temp_path)
-        .await
-        .map_err(|e| format!("スクリーンショットファイルの読み込みに失敗しました: {e}"))?;
-    let _ = tokio::fs::remove_file(&temp_path).await;
-
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(json!({ "dataUrl": format!("data:image/png;base64,{b64}") }))
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn capture_primary_png() -> Result<Vec<u8>, String> {
+    Err("スクリーンショットはこのプラットフォームでは未対応です。".to_string())
 }
 
 /// ドロップ・ペーストされたファイルの内容をテキストとして抽出する。
@@ -2597,6 +2592,30 @@ pub async fn pet_read_dropped_path(
         "path": path,
         "dataUrl": format!("data:{mime};base64,{}", B64.encode(&bytes)),
     }))
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::capture_primary_png;
+
+    /// 画面取得は、成功すれば PNG を返し、取れない環境では**理由の分かるエラー**を返す。
+    /// ヘッドレスやツール未導入の環境でパニックしたり、中身の無いデータを返したりしないこと。
+    #[test]
+    fn 画面取得はpngかエラーのどちらかを返す() {
+        match capture_primary_png() {
+            Ok(png) => {
+                assert!(png.len() > 8, "PNG が短すぎます: {} バイト", png.len());
+                assert_eq!(
+                    &png[..8],
+                    b"\x89PNG\r\n\x1a\n",
+                    "PNG シグネチャで始まっていません"
+                );
+            }
+            Err(error) => {
+                assert!(error.contains("スクリーンショット"), "error: {error}");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
