@@ -22,6 +22,7 @@ const MODEL_FILES: [&str; 5] = [
     "face_morpher.pt",
     "two_algo_face_body_rotator.pt",
 ];
+const BUNDLED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
 
 pub struct Tha3CreatorState {
     control: Mutex<GenerationControl>,
@@ -59,11 +60,103 @@ pub struct Tha3Status {
     pub ready: bool,
     pub source_ready: bool,
     pub model_ready: bool,
+    pub runtime_ready: bool,
     pub root: String,
     pub install_hint: String,
 }
 
-fn development_tha3_root() -> Option<PathBuf> {
+fn development_tha3_roots() -> Vec<PathBuf> {
+    let mut starts = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            starts.push(parent.to_path_buf());
+        }
+    }
+    if let Ok(current) = std::env::current_dir() {
+        starts.push(current);
+    }
+    let mut roots = Vec::new();
+    for start in starts {
+        for ancestor in start.ancestors() {
+            for relative in [
+                "src-tauri/resources/bundled/tha3",
+                "resources/bundled/tha3",
+                "tools/tha3",
+            ] {
+                let candidate = ancestor.join(relative);
+                if source_ready(&candidate) && !roots.contains(&candidate) {
+                    roots.push(candidate);
+                }
+            }
+        }
+    }
+    roots
+}
+
+fn candidate_roots(app: &AppHandle) -> Result<Vec<PathBuf>> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .context("アプリデータフォルダを取得できません")?;
+    let mut roots = Vec::new();
+    if let Ok(resources) = app.path().resource_dir() {
+        roots.push(resources.join("resources/bundled/tha3"));
+    }
+    roots.extend(development_tha3_roots());
+    // フォールバック許可: 旧版で手動配置した利用者データを移行期間中だけ探索する。
+    roots.push(app_data.join("tools/tha3"));
+    roots.dedup();
+    Ok(roots)
+}
+
+fn source_ready(root: &Path) -> bool {
+    root.join("tha3/poser/modes/load_poser.py").is_file()
+}
+
+fn model_ready(root: &Path) -> bool {
+    BUNDLED_MODELS.iter().all(|model| {
+        MODEL_FILES
+            .iter()
+            .all(|name| root.join("data/models").join(model).join(name).is_file())
+    })
+}
+
+fn find_python(dir: &Path, depth: usize) -> Option<PathBuf> {
+    if depth > 6 {
+        return None;
+    }
+    let names: &[&str] = if cfg!(windows) {
+        &["python.exe"]
+    } else {
+        &["python3", "python3.11"]
+    };
+    let mut directories = Vec::new();
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.file_name().and_then(|name| name.to_str()) == Some(".temp") {
+            continue;
+        }
+        if path.file_name().and_then(|name| name.to_str()) == Some("venv") {
+            continue;
+        }
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| names.contains(&name))
+        {
+            return Some(path);
+        }
+        if path.is_dir() {
+            directories.push(path);
+        }
+    }
+    directories
+        .into_iter()
+        .find_map(|directory| find_python(&directory, depth + 1))
+}
+
+fn development_runtime_root() -> Option<PathBuf> {
     let mut starts = Vec::new();
     if let Ok(executable) = std::env::current_exe() {
         if let Some(parent) = executable.parent() {
@@ -75,33 +168,108 @@ fn development_tha3_root() -> Option<PathBuf> {
     }
     starts.into_iter().find_map(|start| {
         start.ancestors().find_map(|ancestor| {
-            let candidate = ancestor.join("tools/tha3");
-            source_ready(&candidate).then_some(candidate)
+            let candidate = ancestor.join("tools/tha3-runtime");
+            local_runtime_ready(&candidate).then_some(candidate)
         })
     })
 }
 
-fn candidate_roots(app: &AppHandle) -> Result<Vec<PathBuf>> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .context("アプリデータフォルダを取得できません")?;
-    let mut roots = Vec::new();
-    if let Some(development) = development_tha3_root() {
-        roots.push(development);
+fn local_python(root: &Path) -> Option<PathBuf> {
+    let installed_venv = if cfg!(windows) {
+        root.join("runtime/venv/Scripts/python.exe")
+    } else {
+        root.join("runtime/venv/bin/python")
+    };
+    if installed_venv.is_file() {
+        return Some(installed_venv);
     }
-    roots.push(app_data.join("tools/tha3"));
-    Ok(roots)
+    if let Some(python) = find_python(&root.join("runtime/python"), 0) {
+        return Some(python);
+    }
+    let candidates = if cfg!(windows) {
+        vec![
+            root.join(".venv/Scripts/python.exe"),
+            root.join("venv/Scripts/python.exe"),
+        ]
+    } else {
+        vec![root.join(".venv/bin/python"), root.join("venv/bin/python")]
+    };
+    candidates.into_iter().find(|path| path.is_file())
 }
 
-fn source_ready(root: &Path) -> bool {
-    root.join("tha3/poser/modes/load_poser.py").is_file()
+fn python_packages_ready(packages: &Path) -> bool {
+    [
+        "torch/__init__.py",
+        "numpy/__init__.py",
+        "PIL/__init__.py",
+        "matplotlib/__init__.py",
+    ]
+    .iter()
+    .all(|name| packages.join(name).is_file())
 }
 
-fn model_ready(root: &Path) -> bool {
-    MODEL_FILES
-        .iter()
-        .all(|name| root.join("data/models/standard_float").join(name).is_file())
+fn local_runtime_ready(root: &Path) -> bool {
+    let packages = root.join("runtime/packages");
+    let bundled_ready =
+        find_python(&root.join("runtime/python"), 0).is_some() && python_packages_ready(&packages);
+    let installed_venv_packages = if cfg!(windows) {
+        root.join("runtime/venv/Lib/site-packages")
+    } else {
+        root.join("runtime/venv/lib/python3.11/site-packages")
+    };
+    let installed_venv_python = if cfg!(windows) {
+        root.join("runtime/venv/Scripts/python.exe")
+    } else {
+        root.join("runtime/venv/bin/python")
+    };
+    let installed_venv_ready = installed_venv_python.is_file()
+        && root.join("runtime/picoagent-runtime-version.txt").is_file()
+        && python_packages_ready(&installed_venv_packages);
+    let manual_venv_roots = [root.join(".venv"), root.join("venv")];
+    let manual_venv_ready = manual_venv_roots.iter().any(|venv| {
+        let python = if cfg!(windows) {
+            venv.join("Scripts/python.exe")
+        } else {
+            venv.join("bin/python")
+        };
+        let packages = if cfg!(windows) {
+            venv.join("Lib/site-packages")
+        } else {
+            venv.join("lib/python3.11/site-packages")
+        };
+        python.is_file() && python_packages_ready(&packages)
+    });
+    bundled_ready || installed_venv_ready || manual_venv_ready
+}
+
+fn runtime_ready(root: &Path) -> bool {
+    local_runtime_ready(root) || development_runtime_root().is_some()
+}
+
+fn python_command(tha3_root: &Path) -> Option<PathBuf> {
+    local_python(tha3_root)
+        .or_else(|| development_runtime_root().and_then(|root| local_python(&root)))
+}
+
+fn runtime_packages(tha3_root: &Path) -> Option<PathBuf> {
+    for root in [Some(tha3_root.to_path_buf()), development_runtime_root()]
+        .into_iter()
+        .flatten()
+    {
+        let packages = root.join("runtime/packages");
+        if packages.join("torch/__init__.py").is_file() {
+            return Some(packages);
+        }
+        let venv_packages = if cfg!(windows) {
+            root.join("runtime/venv/Lib/site-packages")
+        } else {
+            root.join("runtime/venv/lib/python3.11/site-packages")
+        };
+        if venv_packages.join("torch/__init__.py").is_file() {
+            return Some(venv_packages);
+        }
+    }
+    None
 }
 
 fn validate_tha3_root(root: PathBuf) -> Result<PathBuf> {
@@ -109,8 +277,11 @@ fn validate_tha3_root(root: PathBuf) -> Result<PathBuf> {
         bail!("THA3本体がありません: {}", root.display());
     }
     if !model_ready(&root) {
+        bail!("VRAM自動調整用モデルが不足しています: {}", root.display());
+    }
+    if !runtime_ready(&root) {
         bail!(
-            "standard_floatモデル5点が不足しています: {}",
+            "同梱THA3 Pythonランタイムが不足しています: {}",
             root.display()
         );
     }
@@ -124,7 +295,7 @@ fn locate_tha3(app: &AppHandle, selected: Option<PathBuf>) -> Result<PathBuf> {
     let roots = candidate_roots(app)?;
     if let Some(root) = roots
         .iter()
-        .find(|root| source_ready(root) && model_ready(root))
+        .find(|root| source_ready(root) && model_ready(root) && runtime_ready(root))
     {
         return Ok(root.clone());
     }
@@ -133,7 +304,7 @@ fn locate_tha3(app: &AppHandle, selected: Option<PathBuf>) -> Result<PathBuf> {
         .cloned()
         .context("THA3の確認先を決められません")?;
     bail!(
-        "THA3本体またはstandard_floatモデルがありません。先に `cargo xtask setup tha3` を実行してください（確認先: {}）。",
+        "同梱THA3本体・モデル・Pythonランタイムがありません。`cargo xtask setup tha3` を実行してください（確認先: {}）。",
         expected.display()
     )
 }
@@ -152,42 +323,26 @@ pub fn status(
         let roots = candidate_roots(app)?;
         roots
             .iter()
-            .find(|root| source_ready(root) && model_ready(root))
+            .find(|root| source_ready(root) && model_ready(root) && runtime_ready(root))
             .or_else(|| {
                 roots
                     .iter()
-                    .find(|root| source_ready(root) || model_ready(root))
+                    .find(|root| source_ready(root) || model_ready(root) || runtime_ready(root))
             })
             .cloned()
             .unwrap_or_else(|| roots[0].clone())
     };
     let source = source_ready(&root);
     let model = model_ready(&root);
+    let runtime = runtime_ready(&root);
     Ok(Tha3Status {
-        ready: source && model,
+        ready: source && model && runtime,
         source_ready: source,
         model_ready: model,
+        runtime_ready: runtime,
         root: root.to_string_lossy().to_string(),
-        install_hint: "リポジトリで cargo xtask setup tha3 を1回実行するか、取得済みのtools/tha3フォルダを選んでください。".to_string(),
+        install_hint: "Windows配布版はインストール中に専用ランタイムを取得します。不足時はネット接続を確認して再インストールしてください。開発環境は cargo xtask setup tha3 で準備できます。".to_string(),
     })
-}
-
-fn python_command(tha3_root: &Path) -> PathBuf {
-    let candidates = if cfg!(windows) {
-        vec![
-            tha3_root.join(".venv/Scripts/python.exe"),
-            tha3_root.join("venv/Scripts/python.exe"),
-        ]
-    } else {
-        vec![
-            tha3_root.join(".venv/bin/python"),
-            tha3_root.join("venv/bin/python"),
-        ]
-    };
-    if let Some(path) = candidates.into_iter().find(|path| path.is_file()) {
-        return path;
-    }
-    PathBuf::from("python")
 }
 
 fn validate_identity(id: &str, name: &str) -> Result<()> {
@@ -283,7 +438,11 @@ async fn run_generator(
         .arg("--animation-script")
         .arg(animation)
         .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8");
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONNOUSERSITE", "1");
+    if let Some(bundled_packages) = runtime_packages(tha3_root) {
+        command.env("PYTHONPATH", bundled_packages);
+    }
     let mut child = command.spawn().context("THA3用Pythonを起動できません")?;
     let Some(stdout) = child.stdout.take() else {
         let release = stop_and_reap(&mut child).await.unwrap_or_default();
@@ -361,7 +520,8 @@ pub async fn generate(
         .transpose()?
         .map(|path| path.as_path().to_path_buf());
     let tha3_root = locate_tha3(&app, selected_root)?;
-    let python = python_command(&tha3_root);
+    let python =
+        python_command(&tha3_root).context("THA3用の同梱Python実行ファイルがありません")?;
 
     let cache = app
         .path()

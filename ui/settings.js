@@ -1895,7 +1895,11 @@ async function render() {
   const tha3Sec = section("1枚絵からキャラクターを作成（THA3）");
   const tha3Hint = el("p", {
     className: "hint",
-    textContent: "512×512の透過PNGから、待機・呼吸・左右揺れ・まばたき・口パクなど17キーポーズ／42フレームを生成します。制作時だけCUDA対応NVIDIA GPUが必要です。",
+    textContent: "512×512の透過PNGから、待機・呼吸・左右揺れ・まばたき・口パクなど17キーポーズ／42フレームを生成します。WindowsはVRAMに合わせてモデルを自動調整し、Apple Silicon MacはMPSを使います。",
+  });
+  const tha3Credit = el("p", {
+    className: "hint",
+    textContent: "THA3: © Pramook Khungurn (pkhungurn)。コード MIT License、学習済みモデル CC BY 4.0。",
   });
   const tha3ToolStatus = el("div", { className: "tha3-tool-status", textContent: "制作ツールを確認中…" });
   const pickTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "THA3フォルダを選ぶ" });
@@ -1959,8 +1963,8 @@ async function render() {
     // 自動検出パスはバックエンド内部で再検出する。ユーザーが選んだ場合だけ明示パスを渡す。
     selectedTha3Root = toolReady && rootPath ? tha3Status.root : "";
     tha3ToolStatus.textContent = toolReady
-      ? `制作ツール準備済み: ${tha3Status.root}`
-      : `${tha3Status.installHint} 確認先: ${tha3Status.root}`;
+      ? `同梱制作ツール準備済み: ${tha3Status.root}`
+      : `${tha3Status.installHint} 本体=${tha3Status.sourceReady ? "OK" : "不足"}、モデル=${tha3Status.modelReady ? "OK" : "不足"}、Python=${tha3Status.runtimeReady ? "OK" : "不足"}。確認先: ${tha3Status.root}`;
     tha3ToolStatus.classList.toggle("ready", toolReady);
     updateCreateEnabled();
   }
@@ -2044,6 +2048,7 @@ async function render() {
   updateCreateEnabled();
   tha3Sec.append(
     tha3Hint,
+    tha3Credit,
     tha3ToolStatus,
     el("div", { className: "character-add-actions" }, [pickTha3RootButton]),
     el("div", { className: "field" }, [el("label", { textContent: "元画像" }), sourceInput, sourceActions]),

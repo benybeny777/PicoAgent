@@ -12,6 +12,13 @@ src-tauri/resources/bundled/aivis/*
 !src-tauri/resources/bundled/aivis/.gitkeep
 src-tauri/resources/bundled/whisper/*
 !src-tauri/resources/bundled/whisper/.gitkeep
+# THA3本体・学習済みモデル・OS別Pythonランタイム（setup tha3で同梱領域へ取得）
+src-tauri/resources/bundled/tha3/*
+!src-tauri/resources/bundled/tha3/.gitkeep
+# Windowsインストール時にTHA3ランタイムを専用領域へ取得するuv（スクリプトだけGit管理）
+src-tauri/resources/bundled/tha3-bootstrap/*
+!src-tauri/resources/bundled/tha3-bootstrap/.gitkeep
+!src-tauri/resources/bundled/tha3-bootstrap/install-runtime.ps1
 src-tauri/resources/bundled/office/*
 !src-tauri/resources/bundled/office/.gitkeep
 src-tauri/resources/bundled/tools/*
@@ -38,8 +45,10 @@ characters/*/live2d/
 !characters/mugi/live2d/
 !characters/mugi/live2d/**
 
-# THA3 制作ツール・学習済みモデル・Python依存物（cargo xtask setup tha3 で取得。巨大かつ実行時不要のため含めない）
+# 旧THA3開発用配置（setup tha3が同梱領域へ移行する。取得物はGit管理しない）
 tools/tha3/
+# Windows開発用THA3 Python／CUDAランタイム（製品には含めない）
+tools/tha3-runtime/
 
 # Live2D 制作用 PSD（python scripts/build-live2d-psd.py で layers/ から再生成できる）
 characters/*/live2d-src/

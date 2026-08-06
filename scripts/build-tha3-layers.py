@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CHARACTERS_DIR = ROOT / "characters"
 INDEX_PATH = CHARACTERS_DIR / "index.json"
-THA3_DIR = ROOT / "tools" / "tha3"
+THA3_DIR = ROOT / "src-tauri" / "resources" / "bundled" / "tha3"
 TEMP_DIR = ROOT / "temp"
 MODEL_FILES = (
     "editor.pt",
@@ -108,9 +109,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--name", help="キャラクター名。新規作成時はIDを使用。表示には「（自作）」が付きます。")
     parser.add_argument(
         "--model",
-        choices=("standard_float", "standard_half", "separable_float", "separable_half"),
-        default="standard_float",
-        help="THA3モデル。既定は画質優先のstandard_float。",
+        choices=("auto", "standard_float", "standard_half", "separable_float", "separable_half"),
+        default="auto",
+        help="THA3モデル。autoはWindowsのVRAM量で3モデルから選び、Apple Silicon Macではstandard_float。",
     )
     parser.add_argument("--force", action="store_true", help="既存のTHA3生成レイヤーを上書きする。")
     parser.add_argument("--layers-only", action="store_true", help="レイヤーだけ生成し、登録・連番生成・同期は行わない。")
@@ -179,6 +180,34 @@ def model_dir(model: str) -> Path:
     return THA3_DIR / "data" / "models" / model
 
 
+def platform_model(model: str) -> str:
+    if model != "auto":
+        return model
+    if sys.platform == "win32":
+        try:
+            import torch
+        except ImportError as error:
+            raise RuntimeError("同梱THA3ランタイムが不足しています。`cargo xtask setup tha3` を実行してください。") from error
+        if not torch.cuda.is_available():
+            raise RuntimeError("WindowsでのTHA3生成にはCUDA対応NVIDIA GPUが必要です。")
+        vram_gib = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        if vram_gib < 4.0:
+            raise RuntimeError(f"THA3生成には4GB以上のVRAMが必要です（検出: {vram_gib:.1f}GB）。")
+        if vram_gib >= 10.0:
+            selected = "standard_float"
+        elif vram_gib >= 6.0:
+            selected = "standard_half"
+        else:
+            selected = "separable_half"
+        print(f"[build-tha3-layers] VRAM {vram_gib:.1f}GBに合わせて{selected}モデルを選択しました。")
+        return selected
+    if sys.platform == "darwin" and platform.machine().lower() in ("arm64", "aarch64"):
+        return "standard_float"
+    if sys.platform == "darwin":
+        raise RuntimeError("Intel MacでのTHA3生成は対象外です。Apple Silicon Macを使用してください。")
+    raise RuntimeError("THA3生成の対応OSはWindows x64とApple Silicon Macです。")
+
+
 def ensure_tha3(model: str) -> None:
     if not (THA3_DIR / "tha3" / "poser" / "modes" / "load_poser.py").is_file():
         raise RuntimeError("THA3本体がありません。先に `cargo xtask setup tha3` を実行してください。")
@@ -197,9 +226,19 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
         import torch
         from PIL import Image
     except ImportError as error:
-        raise RuntimeError("CUDA対応PyTorch・NumPy・Pillowが必要です。上流environment.ymlの環境で実行してください。") from error
-    if not torch.cuda.is_available():
-        raise RuntimeError("THA3の生成にはCUDA対応の高性能NVIDIA GPUが必要です。")
+        raise RuntimeError("同梱THA3ランタイム（PyTorch・NumPy・Pillow）が不足しています。`cargo xtask setup tha3` を実行してください。") from error
+    if sys.platform == "win32":
+        if not torch.cuda.is_available():
+            raise RuntimeError("WindowsでのTHA3生成にはCUDA対応NVIDIA GPUが必要です。")
+        device = torch.device("cuda")
+    elif sys.platform == "darwin":
+        if platform.machine().lower() not in ("arm64", "aarch64"):
+            raise RuntimeError("Intel MacでのTHA3生成は対象外です。Apple Silicon Macを使用してください。")
+        if not torch.backends.mps.is_available():
+            raise RuntimeError("Apple Silicon MacでMPSを利用できません。macOSとPyTorchランタイムを確認してください。")
+        device = torch.device("mps")
+    else:
+        raise RuntimeError("THA3生成の対応OSはWindows x64とApple Silicon Macです。")
 
     sys.path.insert(0, str(THA3_DIR))
     previous_cwd = Path.cwd()
@@ -213,7 +252,6 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
         from tha3.poser.modes.pose_parameters import get_pose_parameters
         from tha3.util import extract_pytorch_image_from_PIL_image, rgba_to_numpy_image
 
-        device = torch.device("cuda")
         poser = load_poser(model, device)
         dtype = poser.get_dtype()
         source = extract_pytorch_image_from_PIL_image(image.copy()).to(device).to(dtype)
@@ -226,9 +264,7 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
                     pose[parameters.get_parameter_index(parameter_name)] = value
                 output = poser.pose(source, pose)[0].detach().cpu()
                 rgba = rgba_to_numpy_image(output)
-                with Image.fromarray(
-                    numpy.uint8(numpy.rint(rgba * 255.0)), mode="RGBA"
-                ) as rendered:
+                with Image.fromarray(numpy.uint8(numpy.rint(rgba * 255.0))) as rendered:
                     rendered.save(temp_paths[name])
                 print(f"[build-tha3-layers] 生成: {name}.png")
     finally:
@@ -244,8 +280,11 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
             finally:
                 if str(THA3_DIR) in sys.path:
                     sys.path.remove(str(THA3_DIR))
-                if "torch" in locals() and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                if "torch" in locals():
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    if hasattr(torch, "mps") and torch.backends.mps.is_available():
+                        torch.mps.empty_cache()
 
 
 def write_json_atomic(path: Path, value: dict) -> None:
@@ -418,6 +457,8 @@ def build(args: argparse.Namespace) -> None:
             run_checked(["cargo", "xtask", "sync-characters"], "キャラクター同期")
         return
 
+    selected_model = platform_model(args.model)
+
     managed_repo = args.pack_dir is None
     character_dir = (
         CHARACTERS_DIR / args.character_id if managed_repo else args.pack_dir.resolve()
@@ -437,7 +478,7 @@ def build(args: argparse.Namespace) -> None:
     try:
         temp_paths = {name: pose_temp_dir / f"{name}.png" for name in wanted}
         if wanted:
-            render_poses(image, args.model, wanted, temp_paths)
+            render_poses(image, selected_model, wanted, temp_paths)
         layers_dir.mkdir(parents=True, exist_ok=True)
         for name, temporary in temp_paths.items():
             temporary.replace(layers_dir / f"{name}.png")
@@ -470,7 +511,7 @@ def build(args: argparse.Namespace) -> None:
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     else:
-        manifest = custom_manifest(args.character_id, args.name or args.character_id, args.model)
+        manifest = custom_manifest(args.character_id, args.name or args.character_id, selected_model)
         write_json_atomic(manifest_path, manifest)
         print(f"[build-tha3-layers] 自作キャラ定義を作成しました: {manifest_path}")
 

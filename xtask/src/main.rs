@@ -25,7 +25,7 @@ const USAGE: &str = "\
   dev                 開発起動（同梱物の未取得分を取得してから tauri dev）
   build               製品ビルド（同上 + tauri build）
   setup [対象…]        取得対象は engine / aivis / whisper / live2d / tha3 / office / tools
-                      （省略時は通常開発に必要なものだけ。tha3 は明示指定のみ）
+                      （省略時は製品へ同梱する全対象）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
   build-ui [--release] ui/ を ui-dist/ へ配信ビルド（--release で最小化）
@@ -75,9 +75,11 @@ fn run(args: &[String]) -> Result<()> {
 ///
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
-    // THA3 は約800MBの重みに加えて専用Python環境とNVIDIA GPUを要し、通常の
-    // 開発・起動には使わない制作専用ツールなので、引数なしの一括取得には含めない。
-    let all = ["live2d", "engine", "aivis", "whisper", "office", "tools"];
+    // THA3も利用者が設定画面からすぐ制作できる製品同梱物なので一括取得へ含める。
+    // 通常動作中は読み込まず、生成開始時だけPythonとモデルを起動する。
+    let all = [
+        "live2d", "engine", "aivis", "whisper", "tha3", "office", "tools",
+    ];
     let wanted: Vec<&str> = if targets.is_empty() {
         all.to_vec()
     } else {
@@ -125,6 +127,7 @@ fn tauri(mode: &str, extra: &[String]) -> Result<()> {
             bail!("同梱 Whisper を取得できませんでした");
         }
     }
+    bundled::fetch_tha3()?;
     office::fetch_office()?;
     tools::fetch_all()?;
 

@@ -76,7 +76,7 @@ cargo install tauri-cli --version '^2'   # 初回だけ
 cargo xtask dev
 ```
 
-これだけです。`cargo xtask dev` が推論エンジン・読み上げ・Whisper・Live2D・OSS ツールの**未取得分を自動で取得**してから起動します。
+これだけです。`cargo xtask dev` が推論エンジン・読み上げ・Whisper・Live2D・THA3・OSS ツールの**未取得分を自動で取得**してから起動します。
 
 > [!NOTE]
 > 初回はネットワークが必要です。Rust の crate 取得・コンパイルとモデル DL（数 GB）で時間がかかりますが、2 回目以降は速くなり、オフラインで動きます。
@@ -90,12 +90,12 @@ cargo xtask dev
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ） |
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Live2D ランタイムとサンプルモデル |
-| `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体と学習済みモデル（制作時のみ・約800MB） |
+| `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（Windowsの製品ランタイムはインストール時取得） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止 |
 
-引数なしの `cargo xtask setup` で通常開発に必要なものを取得します。**THA3はアプリの実行に不要で大きいため一括取得に含めず、`setup tha3` の明示指定時だけ取得します。** 再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+引数なしの `cargo xtask setup` で製品へ同梱する全対象を取得します。THA3も設定画面からすぐ制作できる機能なので対象に含みますが、通常動作中はPythonもモデルも読み込みません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
 一部の OS では公式のポータブル配布が無いツールがあります。その場合は警告のみで起動を続け、`apt` / `brew` で入れた PATH 上のツールへ自動で切り替わります。
 
@@ -103,14 +103,13 @@ cargo xtask dev
 
 ### 1枚絵から動く自作キャラクターを追加する（THA3）
 
-[Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使うと、透過した全身立ち絵から、待機・呼吸・左右の頭／身体揺れ・まばたき・口パク・考え中・落胆を含む**17枚のキーポーズ**を生成し、PicoAgentが使う**42枚の連番アニメ**へ変換できます。自作キャラは名前に「（自作）」、説明に「自作（THA3）」が付き、組み込みキャラと見分けられます。
+[Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使うと、透過した全身立ち絵から、待機・呼吸・左右の頭／身体揺れ・まばたき・口パク・考え中・落胆を含む**17枚のキーポーズ**を生成し、PicoAgentが使う**42枚の連番アニメ**へ変換できます。通常の自作キャラは名前に「（自作）」、全自作キャラは説明と生成元情報に「自作（THA3）」が付き、組み込みキャラと見分けられます。同じ表示名を使う場合も内部IDを別にすれば別キャラクターとして扱われます。
 
 ```powershell
 cargo xtask setup tha3
-# 上流environment.ymlに沿ったCUDA対応Python環境を有効にしてPicoAgentを起動
 ```
 
-右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」で、元画像・ID・表示名を指定して「キャラクターを作成」を押します。制作ツールを自動検出できない場合は「THA3フォルダを選ぶ」で `tools/tha3/` を指定できます。生成ログとキャンセル操作を画面内に表示し、完成したパックだけを検証後に追加キャラクター領域へ導入します。
+配布版ではWindowsインストール中に専用Python／CUDA版PyTorchをPicoAgentのTHA3領域だけへ取得するため、グローバルPythonや既存のPyTorchへ干渉しません。右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」で、元画像・ID・表示名を指定して「キャラクターを作成」を押します。生成ログとキャンセル操作を画面内に表示し、完成したパックだけを検証後に追加キャラクター領域へ導入します。
 
 コマンドで作る経路も残しています。
 
@@ -125,7 +124,7 @@ python scripts/build-tha3-layers.py my-character --input C:\images\source.png --
 python scripts/build-tha3-layers.py my-character --remove
 ```
 
-THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3・Python・GPUを使いません。生成は上流要件上、CUDA対応の高性能NVIDIA GPUが必要です。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありませんが、既存の5枚構成より頭・身体・呼吸まで動く構成です。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
+THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3・Python・GPUを使いません。WindowsはCUDA対応NVIDIA GPUのVRAMを生成前に測り、4～6GB未満は `separable_half`、6～10GB未満は `standard_half`、10GB以上は `standard_float` を自動選択します（4GB未満は生成前に停止）。Apple Silicon MacはMPS＋`standard_float`、Intel Macは対象外です。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありませんが、既存の5枚構成より頭・身体・呼吸まで動く構成です。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
 
 既存のPNGキャラを試す場合は、元IDを上書きせず `rin-tha3` / `mai-tha3` のような別IDで作って見比べてください。ひよりなどのLive2DキャラはLive2Dの方が滑らかなため、THA3での作り直しは推奨しません。既知のむぎ素材もこの生成機能では自動変更しません。
 
@@ -404,9 +403,22 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | `balanced`（通常利用の推奨） | Gemma 4 E4B Q4 | 4 GB | 16 GB | 約 5.0 GB |
 | `large` | Gemma 4 12B Q4 | 8 GB | 24 GB | 約 7.1 GB |
 
-- ディスクは上表のモデル本体に加えて、同梱物（推論エンジン・Aivis・Whisper・Live2D・OSS ツール）の取得分が必要です。取得済み GGUF は「叩くAI」タブから一覧・削除できます
+- ディスクは上表のモデル本体に加えて、同梱物（推論エンジン・Aivis・Whisper・Live2D・THA3・OSS ツール）の取得分が必要です。取得済み GGUF は「叩くAI」タブから一覧・削除できます
 - コンテキスト長は `PICOAGENT_LOCAL_CTX`（既定 `8192`）、GPU オフロードは `PICOAGENT_LOCAL_NGL`（既定 `999`=全レイヤ優先 / `0`=CPU 固定）で調整します
 - クラウド AI を選んだ場合、ローカルモデルは取得も起動もしません
+
+### THA3キャラクター制作の最低要件
+
+| 環境 | 最低要件 | 推奨 | モデル選択 |
+|---|---|---|---|
+| Windows | Windows 10/11 x64、CUDA対応NVIDIA GPU、VRAM 4GB、CUDA 12.8対応ドライバー | VRAM 8GB以上、RAM 16GB以上 | VRAM 4～6GB未満=`separable_half`、6～10GB未満=`standard_half`、10GB以上=`standard_float` |
+| Apple Silicon Mac | Apple Silicon、MPS対応macOS、ユニファイドメモリ16GB | 24GB以上 | 互換性優先の`standard_float` |
+
+Intel MacとLinuxでのTHA3生成は対象外です。通常のPicoAgent利用や生成済みキャラクターの表示には、このGPU要件は適用されません。
+
+- Windowsインストーラへ入るTHA3本体・3モデル・取得ブートストラップは実測約0.85GBです。インストール中にCUDA版PyTorch約2.7GBを追加取得し、展開後のTHA3全体は実測約5.2GBです
+- 新規インストール時は一時キャッシュを含め10GB以上、更新で旧ランタイムを保持しながら入れ替える場合は15GB以上の空き容量を確保してください。成功・失敗のどちらでも取得キャッシュを片付けます
+- Apple Silicon MacはOS別PyTorchをアプリへ同梱します。最終容量はPyTorch配布物の版で変わるため、ビルド時に `src-tauri/resources/bundled/tha3/` の実測値を確認してください
 
 ### 応答性・描画
 
@@ -544,14 +556,15 @@ cargo xtask build
 
 **THA3 キャラクター制作ツール**
 
-- `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、上流READMEが案内する学習済みモデルを `tools/tha3/` へ取得します。Dropboxから自動取得できない場合は処理を止めず、`tools/tha3/data/models/` への手動配置手順を警告します。Python・CUDA依存物はリポジトリにも製品にも導入しません
-- GUI生成に必要な2本の軽量な制御スクリプトだけはアプリへ文字列として埋め込み、実行時に `app_cache_dir/tha3-creator/` へ一時展開します。THA3本体・重み・Python・PyTorchは引き続き外部の制作環境だけに置きます
-- **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、重みを利用・再配布する場合は作者とTHA3プロジェクトへの適切な帰属表示が必要です。コード・重み・Python環境はGit管理外かつ製品バンドル外です
+- `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、VRAM自動調整に使う `standard_float` / `standard_half` / `separable_half` を `src-tauri/resources/bundled/tha3/` へ取得します。実体はGit管理外ですが製品配布対象です
+- WindowsはNSISの約2GB上限を避けるため、製品ランタイムをインストーラへ埋め込みません。インストール後フックが同梱uvを使い、Python 3.11とCUDA版PyTorchを `$INSTDIR/resources/bundled/tha3/runtime/` だけへ原子的に取得します。グローバルPython・PATH・既存CUDA/PyTorch・共有ポートは変更しません。取得失敗時もPicoAgent本体の導入は完了し、THA3作成欄だけがランタイム不足になります
+- 開発用Windowsランタイムは製品へ混ざらない `tools/tha3-runtime/` に置きます。Apple Silicon MacはMPS版PyTorchを `resources/bundled/tha3/runtime/` へ同梱します。GUI用制御スクリプトはアプリへ文字列として埋め込み、生成時だけ `app_cache_dir/tha3-creator/` へ一時展開します
+- **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、重みの再配布に伴う帰属をREADME、同梱上流LICENSE／README、設定画面に表示します。同梱Python・PyTorchは各配布物に含まれるライセンスに従います
 
 **その他**
 
 - macOS では `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します
-- Aivis 同梱により Windows インストーラの入力が大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています
+- Aivisなど既存の同梱物もPicoAgent専用ディレクトリ・専用ポートだけを使い、グローバルインストールや既存プロセスへ干渉しません。THA3の大容量CUDAランタイムはインストール時取得へ分離し、NSIS圧縮は生成安定性を優先して `zlib` にしています
 - 配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へコピーし、コメントと余分な空白を削ったものを同梱します。Rust の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています（解析を不可能にするものではなく、読みやすいソースやシンボル情報を減らすための基本対策です）
 
 </details>
@@ -594,10 +607,11 @@ PicoAgent/
 ├── ui/               ← webview フロント（ペット UI・設定画面）
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
-├── tools/            ← 開発用の作業ツール（tha3/ はsetup tha3で取得・Git管理外）
+├── tools/            ← 開発用の作業ツール（tha3-runtime/ はWindows開発用・Git管理外）
 ├── docs/images/      ← README 掲載画像（tools/screenshots で生成）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
+    ├── resources/bundled/tha3/ ← 配布するTHA3本体・モデル（Windowsランタイムはインストール時取得）
     └── src/
         ├── agent.rs        ← エージェントループ
         ├── providers/      ← 叩く AI コネクタ（.rs を足すと自動登録）

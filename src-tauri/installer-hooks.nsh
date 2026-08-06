@@ -1,3 +1,12 @@
+!macro NSIS_HOOK_POSTINSTALL
+  DetailPrint "THA3キャラクター制作ランタイムを専用領域へ準備しています（初回は数GB取得します）..."
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\bundled\tha3-bootstrap\install-runtime.ps1" -Tha3Root "$INSTDIR\resources\bundled\tha3" -UvPath "$INSTDIR\resources\bundled\tha3-bootstrap\uv.exe"'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "警告: THA3ランタイムを準備できませんでした。PicoAgent本体は使用できます。"
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
   DetailPrint "PicoAgent の関連プロセスを停止しています..."
   nsExec::ExecToLog 'taskkill /F /T /IM PicoAgent.exe'
@@ -12,6 +21,7 @@
   RMDir /r "$INSTDIR\resources\bundled\whisper"
   RMDir /r "$INSTDIR\resources\bundled\aivis"
   RMDir /r "$INSTDIR\resources\bundled\engine"
+  RMDir /r "$INSTDIR\resources\bundled\tha3"
   RMDir /r "$APPDATA\PicoAgent"
   RMDir /r "$LOCALAPPDATA\PicoAgent"
   RMDir /r "$APPDATA\com.picoagent.desktop"
@@ -24,4 +34,5 @@
   RMDir /r "$TEMP\picoagent-aivis"
   RMDir /r "$TEMP\picoagent-engine"
   RMDir /r "$TEMP\picoagent-whisper"
+  RMDir /r "$TEMP\picoagent-tha3-uv-cache"
 !macroend

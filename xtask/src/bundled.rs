@@ -5,13 +5,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
 use crate::util::{
-    copy_dir, download_to, env_or, exe_name, extract, flag, get_json, list_files, log,
-    make_executable, mb, repo_root, warn,
+    command_exists, copy_dir, download_to, env_or, exe_name, extract, flag, get_json, list_files,
+    log, make_executable, mb, repo_root, warn,
 };
 
 // ── 共通 ────────────────────────────────────────────────────────────────
@@ -82,13 +83,17 @@ fn work_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("picoagent-{label}"))
 }
 
-// ── THA3（キャラクター制作専用。製品には同梱しない） ──────────────────
+// ── THA3（キャラクター制作専用。同梱するが通常実行時は読み込まない） ────
 
 const THA3_REVISION: &str = "8946939ec7b417f443d7b0e3fcd97384313fcdb8";
 const THA3_SOURCE_URL: &str = "https://github.com/pkhungurn/talking-head-anime-3-demo/archive/8946939ec7b417f443d7b0e3fcd97384313fcdb8.zip";
 // 上流 README の「Download the Models」が案内する Dropbox 配布物。`dl=1` は直接取得用。
 const THA3_MODELS_URL: &str =
     "https://www.dropbox.com/s/y7b8jl4n2euv8xe/talking-head-anime-3-models.zip?dl=1";
+const THA3_PYTHON_VERSION: &str = "3.11";
+const THA3_TORCH_VERSION: &str = "2.10.0";
+const THA3_BUNDLED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
+const UV_VERSION: &str = "0.11.6";
 
 fn tha3_source_root(extracted: &Path) -> Option<PathBuf> {
     list_files(extracted)
@@ -126,28 +131,245 @@ fn tha3_models_root(extracted: &Path) -> Option<PathBuf> {
 }
 
 fn tha3_model_ready(dir: &Path) -> bool {
-    [
-        "editor.pt",
-        "eyebrow_decomposer.pt",
-        "eyebrow_morphing_combiner.pt",
-        "face_morpher.pt",
-        "two_algo_face_body_rotator.pt",
-    ]
-    .iter()
-    .all(|name| dir.join("data/models/standard_float").join(name).is_file())
+    THA3_BUNDLED_MODELS.iter().all(|model| {
+        [
+            "editor.pt",
+            "eyebrow_decomposer.pt",
+            "eyebrow_morphing_combiner.pt",
+            "face_morpher.pt",
+            "two_algo_face_body_rotator.pt",
+        ]
+        .iter()
+        .all(|name| dir.join("data/models").join(model).join(name).is_file())
+    })
 }
 
-/// Talking Head Anime 3 のコードと学習済みモデルを `tools/tha3/` へ配置する。
+fn tha3_runtime_python(dir: &Path) -> Option<PathBuf> {
+    let names: &[&str] = if cfg!(windows) {
+        &["python.exe"]
+    } else {
+        &["python3", "python3.11"]
+    };
+    list_files(&dir.join("runtime/python"))
+        .into_iter()
+        .find(|path| {
+            let unfinished = path
+                .components()
+                .any(|component| component.as_os_str() == ".temp");
+            let template = path
+                .components()
+                .any(|component| component.as_os_str() == "venv");
+            !unfinished
+                && !template
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| names.contains(&name))
+        })
+}
+
+fn tha3_runtime_ready(dir: &Path) -> bool {
+    tha3_runtime_python(dir).is_some()
+        && [
+            "torch/__init__.py",
+            "numpy/__init__.py",
+            "PIL/__init__.py",
+            "matplotlib/__init__.py",
+        ]
+        .iter()
+        .all(|name| dir.join("runtime/packages").join(name).is_file())
+}
+
+fn cleanup_tha3_uv_cache(root: &Path) {
+    let cache = root.join("temp/tha3-uv-cache");
+    if cache.exists() {
+        if let Err(error) = fs::remove_dir_all(&cache) {
+            warn(
+                "setup:tha3",
+                format!(
+                    "完了済みuvキャッシュを掃除できません: {} ({error})",
+                    cache.display()
+                ),
+            );
+        }
+    }
+}
+
+fn tha3_bootstrap_ready(root: &Path) -> bool {
+    !cfg!(windows)
+        || root
+            .join("src-tauri/resources/bundled/tha3-bootstrap/uv.exe")
+            .is_file()
+}
+
+fn fetch_tha3_bootstrap(root: &Path, work: &Path) -> Result<()> {
+    if !cfg!(windows) || tha3_bootstrap_ready(root) {
+        return Ok(());
+    }
+    let archive = work.join("uv.zip");
+    let url = format!(
+        "https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-pc-windows-msvc.zip"
+    );
+    download_to(&url, &archive)?;
+    let extracted = work.join("uv");
+    extract(&archive, &extracted)?;
+    let uv = list_files(&extracted)
+        .into_iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some("uv.exe"))
+        .context("uv.exeを配布アーカイブから見つけられません")?;
+    let destination = root.join("src-tauri/resources/bundled/tha3-bootstrap/uv.exe");
+    fs::create_dir_all(destination.parent().context("uv配置先の親がありません")?)?;
+    fs::copy(&uv, &destination)
+        .with_context(|| format!("THA3取得用uvを配置できません: {}", destination.display()))?;
+    log(
+        "setup:tha3",
+        format!("installer bootstrap ready: {}", destination.display()),
+    );
+    Ok(())
+}
+
+fn run_uv(args: &[String], cache: &Path) -> Result<()> {
+    let status = Command::new("uv")
+        .args(args)
+        .env("UV_CACHE_DIR", cache)
+        .status()
+        .context("THA3同梱Pythonを用意するuvを起動できません")?;
+    if !status.success() {
+        bail!(
+            "uvによるTHA3同梱Pythonの準備に失敗しました（終了コード {:?}）",
+            status.code()
+        );
+    }
+    Ok(())
+}
+
+fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
+    if cfg!(target_os = "linux") {
+        bail!("LinuxはTHA3生成の対応対象外です");
+    }
+    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        bail!("Intel MacはTHA3生成の対応対象外です");
+    }
+    if tha3_runtime_ready(dir) && !flag("THA3_FORCE") {
+        return Ok(());
+    }
+    if !command_exists("uv") {
+        bail!("THA3同梱Pythonの作成にuvが必要です。https://docs.astral.sh/uv/ からuvを導入してください");
+    }
+
+    let runtime = dir.join("runtime");
+    let python_root = runtime.join("python");
+    let packages = runtime.join("packages");
+    // 大容量PyTorchの取得が中断されても再実行で続きを使えるよう、PID別作業領域の外へ置く。
+    // 完成後にだけ削除し、未完成時は次回setupのため保持する。
+    let cache = work
+        .parent()
+        .context("THA3一時フォルダの親を取得できません")?
+        .join("tha3-uv-cache");
+    fs::create_dir_all(&runtime)?;
+    if tha3_runtime_python(dir).is_none() {
+        let unfinished = python_root.join(".temp");
+        if unfinished.exists() {
+            fs::remove_dir_all(&unfinished).with_context(|| {
+                format!(
+                    "中断された同梱Pythonを掃除できません: {}",
+                    unfinished.display()
+                )
+            })?;
+        }
+        run_uv(
+            &[
+                "python".into(),
+                "install".into(),
+                THA3_PYTHON_VERSION.into(),
+                "--install-dir".into(),
+                python_root.to_string_lossy().into_owned(),
+                "--no-bin".into(),
+                "--no-registry".into(),
+            ],
+            &cache,
+        )?;
+    }
+    let python = tha3_runtime_python(dir).context("同梱Pythonの実行ファイルを見つけられません")?;
+    if flag("THA3_FORCE") && packages.exists() {
+        fs::remove_dir_all(&packages).with_context(|| {
+            format!(
+                "古いTHA3 Python依存物を掃除できません: {}",
+                packages.display()
+            )
+        })?;
+    }
+    if !tha3_runtime_ready(dir) {
+        let backend = if cfg!(windows) { "cu128" } else { "auto" };
+        run_uv(
+            &[
+                "pip".into(),
+                "install".into(),
+                "--python".into(),
+                python.to_string_lossy().into_owned(),
+                "--target".into(),
+                packages.to_string_lossy().into_owned(),
+                "--torch-backend".into(),
+                backend.into(),
+                format!("torch=={THA3_TORCH_VERSION}"),
+                "numpy==2.2.6".into(),
+                "pillow==11.3.0".into(),
+                "matplotlib==3.10.5".into(),
+            ],
+            &cache,
+        )?;
+    }
+    if !tha3_runtime_ready(dir) {
+        bail!("THA3同梱Pythonの必要ファイルが揃いませんでした");
+    }
+    log(
+        "setup:tha3",
+        format!("THA3 runtime ready: {}", runtime.display()),
+    );
+    Ok(())
+}
+
+/// Talking Head Anime 3 のコード・学習済みモデル・Pythonを同梱領域へ配置する。
 ///
-/// THA3 はキャラクター制作時だけ使い、製品バンドル・実行時依存には含めない。
-/// `THA3_FORCE=1` で再取得できる。モデル配布元が取得不能でもコードの配置は確定し、
-/// 上流 README に沿った手動配置手順を警告して正常終了する。
+/// THA3 は製品へ同梱するが、キャラクター制作を開始した時だけ読み込む。
+/// `THA3_FORCE=1` で再取得できる。
 pub fn fetch_tha3() -> Result<()> {
     let root = repo_root();
-    let dir = root.join("tools/tha3");
+    let dir = root.join("src-tauri/resources/bundled/tha3");
+    // WindowsのCUDA版PyTorchは約4.4GB展開されNSISの約2GB上限を超えるため、
+    // 開発用だけtools配下へ置く。配布先ではインストーラが専用領域へ取得する。
+    let runtime_owner = if cfg!(windows) {
+        root.join("tools/tha3-runtime")
+    } else {
+        dir.clone()
+    };
+    let legacy = root.join("tools/tha3");
+    fs::create_dir_all(&dir)?;
+
+    if !dir.join("tha3/poser/modes/load_poser.py").is_file()
+        && legacy.join("tha3/poser/modes/load_poser.py").is_file()
+    {
+        copy_dir(&legacy, &dir, &|path| {
+            matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some(".venv" | "venv" | "runtime")
+            )
+        })?;
+        log(
+            "setup:tha3",
+            format!("旧tools/tha3から同梱領域へ移行しました: {}", dir.display()),
+        );
+    }
+
     let source_ready = dir.join("tha3/poser/modes/load_poser.py").is_file();
     let model_ready = tha3_model_ready(&dir);
-    if source_ready && model_ready && !flag("THA3_FORCE") {
+    if source_ready
+        && model_ready
+        && tha3_runtime_ready(&runtime_owner)
+        && tha3_bootstrap_ready(&root)
+        && !flag("THA3_FORCE")
+    {
+        cleanup_tha3_uv_cache(&root);
         log("setup:tha3", format!("THA3 ready: {}", dir.display()));
         return Ok(());
     }
@@ -163,6 +385,7 @@ pub fn fetch_tha3() -> Result<()> {
     fs::create_dir_all(&work)?;
 
     let result = (|| -> Result<()> {
+        fetch_tha3_bootstrap(&root, &work)?;
         if !source_ready || flag("THA3_FORCE") {
             let archive = work.join("tha3-source.zip");
             let bytes = download_to(THA3_SOURCE_URL, &archive)?;
@@ -181,6 +404,7 @@ pub fn fetch_tha3() -> Result<()> {
         }
 
         if tha3_model_ready(&dir) && !flag("THA3_FORCE") {
+            install_tha3_runtime(&runtime_owner, &work)?;
             return Ok(());
         }
 
@@ -191,9 +415,15 @@ pub fn fetch_tha3() -> Result<()> {
             extract(&archive, &extracted)?;
             let models = tha3_models_root(&extracted)
                 .ok_or_else(|| anyhow!("THA3 の data/models を展開物から見つけられません"))?;
-            copy_dir(&models, &dir.join("data/models"), &|_| false)?;
+            for model in THA3_BUNDLED_MODELS {
+                copy_dir(
+                    &models.join(model),
+                    &dir.join("data/models").join(model),
+                    &|_| false,
+                )?;
+            }
             if !tha3_model_ready(&dir) {
-                bail!("standard_float の学習済みモデル5点が揃いませんでした");
+                bail!("VRAM自動調整に必要なTHA3学習済みモデルが揃いませんでした");
             }
             log("setup:tha3", format!("THA3 models fetched ({})", mb(bytes)));
             Ok(())
@@ -201,7 +431,7 @@ pub fn fetch_tha3() -> Result<()> {
 
         if let Err(error) = model_result {
             // フォールバック許可: Dropbox は認証・配布形態の変更で自動取得できない場合がある。
-            // コードまで破棄せず、上流指定の手動配置へ切り替えられるよう正常終了する。
+            // コードを残し、上流指定の手動配置先を示してから不足として終了する。
             warn(
                 "setup:tha3",
                 format!("学習済みモデルを自動取得できません: {error:#}"),
@@ -209,11 +439,15 @@ pub fn fetch_tha3() -> Result<()> {
             warn(
                 "setup:tha3",
                 format!(
-                    "上流 README の Download the Models からZIPを取得し、展開した4モデルを {} へ置いてください。少なくとも standard_float/*.pt の5点が必要です。",
+                    "上流 README の Download the Models からZIPを取得し、standard_float / standard_half / separable_halfを {} へ置いてください。",
                     dir.join("data/models").display()
                 ),
             );
         }
+        if !tha3_model_ready(&dir) {
+            bail!("同梱に必要なTHA3モデルが不足しています");
+        }
+        install_tha3_runtime(&runtime_owner, &work)?;
         Ok(())
     })();
     if let Err(error) = fs::remove_dir_all(&work) {
@@ -223,9 +457,10 @@ pub fn fetch_tha3() -> Result<()> {
         );
     }
     result?;
+    cleanup_tha3_uv_cache(&root);
     log(
         "setup:tha3",
-        format!("THA3 source ready: {}", dir.display()),
+        format!("THA3 bundle ready: {}", dir.display()),
     );
     Ok(())
 }

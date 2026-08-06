@@ -1,83 +1,89 @@
 {
-  "default": "mugi",
   "characters": [
     {
+      "description": "明るく観察上手な小さな作業相棒。",
       "id": "mugi",
-      "name": "むぎ",
       "manifest": "mugi/character.json",
-      "description": "明るく観察上手な小さな作業相棒。"
+      "name": "むぎ"
     },
     {
+      "description": "むぎの Live2D 版（制作中）。会話と記録は PNG 版と別。",
       "id": "mugi-live2d",
-      "name": "むぎ（Live2D）",
       "manifest": "mugi-live2d/character.json",
-      "description": "むぎの Live2D 版（制作中）。会話と記録は PNG 版と別。"
+      "name": "むぎ（Live2D）"
     },
     {
+      "description": "口は強いけれど面倒見がいいツンデレ作業相棒。",
       "id": "rin",
-      "name": "りん",
       "manifest": "rin/character.json",
-      "description": "口は強いけれど面倒見がいいツンデレ作業相棒。"
+      "name": "りん"
     },
     {
+      "description": "おっとりして優しいお姉さん作業相棒。",
       "id": "mai",
-      "name": "まい",
       "manifest": "mai/character.json",
-      "description": "おっとりして優しいお姉さん作業相棒。"
+      "name": "まい"
     },
     {
+      "description": "Live2Dで動く元気いっぱいの作業相棒。",
       "id": "hiyori",
-      "name": "ひより",
       "manifest": "hiyori/character.json",
-      "description": "Live2Dで動く元気いっぱいの作業相棒。"
+      "name": "ひより"
     },
     {
+      "description": "Live2D公式サンプルの落ち着いた案内役。",
       "id": "haru",
-      "name": "はる",
       "manifest": "haru/character.json",
-      "description": "Live2D公式サンプルの落ち着いた案内役。"
+      "name": "はる"
     },
     {
+      "description": "Live2D公式サンプルの標準モデル。",
       "id": "epsilon",
-      "name": "イプシロン",
       "manifest": "epsilon/character.json",
-      "description": "Live2D公式サンプルの標準モデル。"
+      "name": "イプシロン"
     },
     {
+      "description": "Live2Dで動く、落ち着いて世話好きな作業相棒。",
       "id": "mao",
-      "name": "まお",
       "manifest": "mao/character.json",
-      "description": "Live2Dで動く、落ち着いて世話好きな作業相棒。"
+      "name": "まお"
     },
     {
+      "description": "Live2Dで動く、寡黙で正確な作業相棒。",
       "id": "mark",
-      "name": "マーク",
       "manifest": "mark/character.json",
-      "description": "Live2Dで動く、寡黙で正確な作業相棒。"
+      "name": "マーク"
     },
     {
+      "description": "Live2Dで動く、飄々とした和装の作業相棒。",
       "id": "natori",
-      "name": "なとり",
       "manifest": "natori/character.json",
-      "description": "Live2Dで動く、飄々とした和装の作業相棒。"
+      "name": "なとり"
     },
     {
+      "description": "Live2Dで動く、涼しげで芯のある作業相棒。",
       "id": "ren",
-      "name": "レン",
       "manifest": "ren/character.json",
-      "description": "Live2Dで動く、涼しげで芯のある作業相棒。"
+      "name": "レン"
     },
     {
+      "description": "Live2Dで動く、魔法使いのような佇まいの作業相棒。",
       "id": "rice",
-      "name": "ライス",
       "manifest": "rice/character.json",
-      "description": "Live2Dで動く、魔法使いのような佇まいの作業相棒。"
+      "name": "ライス"
     },
     {
+      "description": "Live2Dで動く、言葉少なでよく懐く相棒犬。",
       "id": "wanko",
-      "name": "わんこ",
       "manifest": "wanko/character.json",
-      "description": "Live2Dで動く、言葉少なでよく懐く相棒犬。"
+      "name": "わんこ"
+    },
+    {
+      "description": "自作（THA3）版。既存のりんとは別キャラクターとして扱われる、17キーポーズ／42フレームの試作モデル。人格・声・挨拶は既存のりんと同じ。",
+      "id": "rin-tha3",
+      "manifest": "rin-tha3/character.json",
+      "name": "りん"
     }
-  ]
+  ],
+  "default": "mugi"
 }

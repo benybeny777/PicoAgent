@@ -110,7 +110,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `SPEC.md` に載っているか、逆に SPEC だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
 | `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる |
 | `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないかを検出する |
-| `src-tauri/src/tha3_creator.rs` | 設定画面の1枚絵THA3生成。Python子プロセス・進捗・キャンセル・一時パックを管理し、共通検証後に追加キャラクター領域へ導入する |
+| `src-tauri/src/tha3_creator.rs` | 設定画面の1枚絵THA3生成。同梱／開発用の専用Python子プロセス・進捗・キャンセル・一時パックを管理し、共通検証後に追加キャラクター領域へ導入する |
 | `src-tauri/src/bundle_scope.rs` | **配布物の範囲を固定する設計ガード**（テスト専用）。製品に入るのは `ui/` を写した `ui-dist/` と `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・撮影用画像（`tools/` `docs/` `scripts/` `xtask/`）が混ざらないよう、リソース指定・配信元・`ui/` に置ける拡張子を allowlist で固定する |
 | `src-tauri/src/guard_scan.rs` | **設計ガードの走査範囲の正本**（テスト専用）。`all_sources()` がスキルとバックエンド `src-tauri/src/` の全ソースを返す。スキル側は `mod.rs` だけでなく `skills/<スキル名>/*.rs` の補助モジュール（`run_command/jobs.rs` など）も含める（`mod.rs` だけ見ると、補助モジュールへ書いた違反を見逃す）。各ガードが自前でディレクトリを歩くと範囲がずれて違反を見逃すため、`guard_scan::guard` のメタガードが自前走査を検出 |
 | `src-tauri/src/store.rs` | **アプリ状態ファイル永続化の共通層**。`write_atomic()` / `write_json_atomic()` が「一時ファイル → `sync_all` → `rename`」で原子的に書き換え、途中で落ちても既存データを壊さない。`quarantine_corrupt()` は読めなかったファイルを `.corrupt-<日時>` へ退避する。`store::guard` のテストが `fs::write` の直接使用を検出 |
@@ -130,7 +130,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d`） | Live2D ランタイム（`ui/vendor/live2d/`）とサンプルモデル「ひより」（`characters/hiyori/live2d/`）の取得（`cargo xtask setup live2d`。いずれも git 管理外） |
-| `xtask`（`bundled::fetch_tha3`） | THA3コードと学習済みモデルを制作専用の `tools/tha3/` へ取得する（`cargo xtask setup tha3`。Git管理外・製品バンドル外・引数なしsetupの対象外） |
+| `xtask`（`bundled::fetch_tha3`） | THA3コード・VRAM別モデル・OS別Pythonを準備する（`cargo xtask setup tha3`）。コードとモデルは `resources/bundled/tha3/` へ、Windows開発用Pythonは製品外の `tools/tha3-runtime/` へ置き、製品PythonはNSISインストール時に専用領域へ取得する |
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期、`ui/` を `ui-dist/` へ配信ビルド、残存プロセス停止（いずれも dev/build 前に自動実行） |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
@@ -165,7 +165,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │   ├── Cargo.toml / build.rs / tauri.conf.json
 │   ├── capabilities/default.json   ← 権限（ACL）
 │   ├── icons/                      ← 生成アイコン一式
-│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper。git 管理外、cargo xtask setup で取得）
+│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper/tha3。git 管理外、cargo xtask setup で取得）
 │   └── src/
 │       ├── main.rs / lib.rs / commands.rs / menu.rs
 │       ├── config.rs / agent.rs / message.rs / engine.rs
@@ -173,7 +173,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/*.py                ← キャラクター画像の生成（連番アニメ・Live2D 用 PSD）
-├── tools/tha3/                 ← THA3制作ツール・重み・Python環境（git管理外、setup tha3で取得）
+├── tools/tha3-runtime/         ← Windows開発用THA3 Python環境（git管理外、製品には含めない）
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ```
