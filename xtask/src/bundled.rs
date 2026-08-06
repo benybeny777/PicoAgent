@@ -1,4 +1,4 @@
-// xtask/src/bundled.rs - 同梱物（推論エンジン / Whisper / Live2D）の取得。
+// xtask/src/bundled.rs - 同梱物と制作ツール（推論エンジン / Whisper / Live2D / THA3）の取得。
 //
 // 旧 `scripts/fetch-engine.mjs` / `fetch-whisper.mjs` / `fetch-live2d.mjs` の置き換え。
 // 実体は巨大なのでリポジトリには含めず、各環境で取得する。
@@ -10,8 +10,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
 use crate::util::{
-    download_to, env_or, exe_name, extract, flag, get_json, list_files, log, make_executable, mb,
-    repo_root,
+    copy_dir, download_to, env_or, exe_name, extract, flag, get_json, list_files, log,
+    make_executable, mb, repo_root, warn,
 };
 
 // ── 共通 ────────────────────────────────────────────────────────────────
@@ -80,6 +80,154 @@ fn pick_asset(release: &Value, matches: impl Fn(&str) -> bool) -> Result<(String
 
 fn work_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("picoagent-{label}"))
+}
+
+// ── THA3（キャラクター制作専用。製品には同梱しない） ──────────────────
+
+const THA3_REVISION: &str = "8946939ec7b417f443d7b0e3fcd97384313fcdb8";
+const THA3_SOURCE_URL: &str = "https://github.com/pkhungurn/talking-head-anime-3-demo/archive/8946939ec7b417f443d7b0e3fcd97384313fcdb8.zip";
+// 上流 README の「Download the Models」が案内する Dropbox 配布物。`dl=1` は直接取得用。
+const THA3_MODELS_URL: &str =
+    "https://www.dropbox.com/s/y7b8jl4n2euv8xe/talking-head-anime-3-models.zip?dl=1";
+
+fn tha3_source_root(extracted: &Path) -> Option<PathBuf> {
+    list_files(extracted)
+        .into_iter()
+        .find(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("load_poser.py")
+                && path
+                    .parent()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .is_some_and(|root| root.join("README.md").is_file())
+        })
+        .and_then(|path| {
+            path.parent()?
+                .parent()?
+                .parent()?
+                .parent()
+                .map(Path::to_path_buf)
+        })
+}
+
+fn tha3_models_root(extracted: &Path) -> Option<PathBuf> {
+    list_files(extracted)
+        .into_iter()
+        .find(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("editor.pt")
+                && path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    == Some("standard_float")
+        })
+        .and_then(|path| path.parent()?.parent().map(Path::to_path_buf))
+}
+
+fn tha3_model_ready(dir: &Path) -> bool {
+    [
+        "editor.pt",
+        "eyebrow_decomposer.pt",
+        "eyebrow_morphing_combiner.pt",
+        "face_morpher.pt",
+        "two_algo_face_body_rotator.pt",
+    ]
+    .iter()
+    .all(|name| dir.join("data/models/standard_float").join(name).is_file())
+}
+
+/// Talking Head Anime 3 のコードと学習済みモデルを `tools/tha3/` へ配置する。
+///
+/// THA3 はキャラクター制作時だけ使い、製品バンドル・実行時依存には含めない。
+/// `THA3_FORCE=1` で再取得できる。モデル配布元が取得不能でもコードの配置は確定し、
+/// 上流 README に沿った手動配置手順を警告して正常終了する。
+pub fn fetch_tha3() -> Result<()> {
+    let root = repo_root();
+    let dir = root.join("tools/tha3");
+    let source_ready = dir.join("tha3/poser/modes/load_poser.py").is_file();
+    let model_ready = tha3_model_ready(&dir);
+    if source_ready && model_ready && !flag("THA3_FORCE") {
+        log("setup:tha3", format!("THA3 ready: {}", dir.display()));
+        return Ok(());
+    }
+
+    // AGENTS.md の一時生成物ルールに従い、システムtempではなくリポジトリ直下を使う。
+    let work = root
+        .join("temp")
+        .join(format!("xtask-tha3-{}", std::process::id()));
+    if work.exists() {
+        fs::remove_dir_all(&work)
+            .with_context(|| format!("古いTHA3一時フォルダを掃除できません: {}", work.display()))?;
+    }
+    fs::create_dir_all(&work)?;
+
+    let result = (|| -> Result<()> {
+        if !source_ready || flag("THA3_FORCE") {
+            let archive = work.join("tha3-source.zip");
+            let bytes = download_to(THA3_SOURCE_URL, &archive)?;
+            let extracted = work.join("source");
+            extract(&archive, &extracted)?;
+            let source = tha3_source_root(&extracted)
+                .ok_or_else(|| anyhow!("THA3 のソースルートを展開物から見つけられません"))?;
+            copy_dir(&source, &dir, &|path| {
+                path.file_name().and_then(|name| name.to_str()) == Some(".git")
+            })?;
+            fs::write(
+                dir.join(".picoagent-tha3-revision"),
+                format!("{THA3_REVISION}\n"),
+            )?;
+            log("setup:tha3", format!("THA3 source fetched ({})", mb(bytes)));
+        }
+
+        if tha3_model_ready(&dir) && !flag("THA3_FORCE") {
+            return Ok(());
+        }
+
+        let archive = work.join("tha3-models.zip");
+        let model_result = (|| -> Result<()> {
+            let bytes = download_to(THA3_MODELS_URL, &archive)?;
+            let extracted = work.join("models");
+            extract(&archive, &extracted)?;
+            let models = tha3_models_root(&extracted)
+                .ok_or_else(|| anyhow!("THA3 の data/models を展開物から見つけられません"))?;
+            copy_dir(&models, &dir.join("data/models"), &|_| false)?;
+            if !tha3_model_ready(&dir) {
+                bail!("standard_float の学習済みモデル5点が揃いませんでした");
+            }
+            log("setup:tha3", format!("THA3 models fetched ({})", mb(bytes)));
+            Ok(())
+        })();
+
+        if let Err(error) = model_result {
+            // フォールバック許可: Dropbox は認証・配布形態の変更で自動取得できない場合がある。
+            // コードまで破棄せず、上流指定の手動配置へ切り替えられるよう正常終了する。
+            warn(
+                "setup:tha3",
+                format!("学習済みモデルを自動取得できません: {error:#}"),
+            );
+            warn(
+                "setup:tha3",
+                format!(
+                    "上流 README の Download the Models からZIPを取得し、展開した4モデルを {} へ置いてください。少なくとも standard_float/*.pt の5点が必要です。",
+                    dir.join("data/models").display()
+                ),
+            );
+        }
+        Ok(())
+    })();
+    if let Err(error) = fs::remove_dir_all(&work) {
+        warn(
+            "setup:tha3",
+            format!("一時フォルダを掃除できません: {} ({error})", work.display()),
+        );
+    }
+    result?;
+    log(
+        "setup:tha3",
+        format!("THA3 source ready: {}", dir.display()),
+    );
+    Ok(())
 }
 
 // ── 推論エンジン（llama-server） ────────────────────────────────────────

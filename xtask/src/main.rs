@@ -24,8 +24,8 @@ const USAGE: &str = "\
 
   dev                 開発起動（同梱物の未取得分を取得してから tauri dev）
   build               製品ビルド（同上 + tauri build）
-  setup [対象…]        同梱物の取得。対象は engine / aivis / whisper / live2d / office / tools
-                      （省略時はすべて）
+  setup [対象…]        取得対象は engine / aivis / whisper / live2d / tha3 / office / tools
+                      （省略時は通常開発に必要なものだけ。tha3 は明示指定のみ）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
   build-ui [--release] ui/ を ui-dist/ へ配信ビルド（--release で最小化）
@@ -35,6 +35,7 @@ const USAGE: &str = "\
 例:
   cargo xtask dev
   cargo xtask setup tools
+  cargo xtask setup tha3
   TOOLS_FORCE=1 cargo xtask setup tools
   cargo xtask cli chat 今日の天気は？";
 
@@ -74,6 +75,8 @@ fn run(args: &[String]) -> Result<()> {
 ///
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
+    // THA3 は約800MBの重みに加えて専用Python環境とNVIDIA GPUを要し、通常の
+    // 開発・起動には使わない制作専用ツールなので、引数なしの一括取得には含めない。
     let all = ["live2d", "engine", "aivis", "whisper", "office", "tools"];
     let wanted: Vec<&str> = if targets.is_empty() {
         all.to_vec()
@@ -86,11 +89,12 @@ fn setup(targets: &[String]) -> Result<()> {
             "engine" => bundled::fetch_engine()?,
             "whisper" => bundled::fetch_whisper()?,
             "live2d" => bundled::fetch_live2d()?,
+            "tha3" => bundled::fetch_tha3()?,
             "aivis" => office::fetch_aivis()?,
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / office / tools）"
+                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / tha3 / office / tools）"
             ),
         }
     }

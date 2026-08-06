@@ -90,15 +90,35 @@ cargo xtask dev
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ） |
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Live2D ランタイムとサンプルモデル |
+| `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体と学習済みモデル（制作時のみ・約800MB） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止 |
 
-引数なしの `cargo xtask setup` で全部取得します。再取得は `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+引数なしの `cargo xtask setup` で通常開発に必要なものを取得します。**THA3はアプリの実行に不要で大きいため一括取得に含めず、`setup tha3` の明示指定時だけ取得します。** 再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
 一部の OS では公式のポータブル配布が無いツールがあります。その場合は警告のみで起動を続け、`apt` / `brew` で入れた PATH 上のツールへ自動で切り替わります。
 
 </details>
+
+### 1枚絵から動く自作キャラクターを追加する（THA3）
+
+[Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使うと、透過した全身立ち絵から、待機・呼吸・左右の頭／身体揺れ・まばたき・口パク・考え中・落胆を含む**17枚のキーポーズ**を生成し、PicoAgentが使う**42枚の連番アニメ**へ変換できます。自作キャラは名前に「（自作）」、説明に「自作（THA3）」が付き、組み込みキャラと見分けられます。
+
+```powershell
+cargo xtask setup tha3
+# 上流environment.ymlに沿ったCUDA対応Python環境を有効にしてから実行
+python scripts/build-tha3-layers.py my-character --input C:\images\source.png --name "マイキャラ"
+```
+
+入力はTHA3上流仕様どおり、`512x512`・RGBA・背景完全透過・正面向きで直立した1人の全身絵にします。頭は上半分中央の128x128付近、手は頭から離してください。スクリプトは測定可能なサイズ・透過・余白・頭部領域を生成前に検査し、既存レイヤーは `--force` がない限り上書きしません。生成後は `character.json` と `characters/index.json` の登録、連番生成、配信コピーの同期まで行います。人格・挨拶は生成後の `characters/<id>/character.json` で調整できます。
+
+```powershell
+# THA3で作った自作キャラだけをOSのゴミ箱へ移し、一覧から外す
+python scripts/build-tha3-layers.py my-character --remove
+```
+
+THA3が必要なのは制作時だけで、PicoAgentの実行時要件・配布物は変わりません。生成は上流要件上、CUDA対応の高性能NVIDIA GPUが必要です。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありませんが、既存の5枚構成より頭・身体・呼吸まで動く構成です。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
 
 ### 叩く AI を選ぶ
 
@@ -483,7 +503,7 @@ cargo xtask build
 配布物に入るのは **`ui/` を写した `ui-dist/`** と **`src-tauri/resources/bundled/`** の2つだけです。開発用のツール・ドキュメント・README 用の画像（`tools/` `docs/` `scripts/` `xtask/`）は含まれません。この範囲は設計ガード（`src-tauri/src/bundle_scope.rs`）がテストで固定しているので、うっかり広がることはありません。
 
 <details>
-<summary>同梱物の扱い（エンジン / Aivis / Whisper / Live2D）</summary>
+<summary>同梱物・制作ツールの扱い（エンジン / Aivis / Whisper / Live2D / THA3）</summary>
 
 以下のパスは Windows 表記です。macOS では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
 
@@ -512,6 +532,11 @@ cargo xtask build
 
 - `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル 9 体（ひより / Haru / まお / マーク / なとり / レン / ライス / わんこ / Epsilon）を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。**1 体取得できなくても他の取得は続き**、プレビューが取れなかった場合は代替画像で表示します
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるためリポジトリにはコミットしません（`.gitignore` 済）
+
+**THA3 キャラクター制作ツール**
+
+- `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、上流READMEが案内する学習済みモデルを `tools/tha3/` へ取得します。Dropboxから自動取得できない場合は処理を止めず、`tools/tha3/data/models/` への手動配置手順を警告します。Python・CUDA依存物はリポジトリにも製品にも導入しません
+- **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、重みを利用・再配布する場合は作者とTHA3プロジェクトへの適切な帰属表示が必要です。コード・重み・Python環境はGit管理外かつ製品バンドル外です
 
 **その他**
 
@@ -559,7 +584,7 @@ PicoAgent/
 ├── ui/               ← webview フロント（ペット UI・設定画面）
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
-├── tools/            ← 開発用の作業ツール（README 用スクリーンショットの撮影など）
+├── tools/            ← 開発用の作業ツール（tha3/ はsetup tha3で取得・Git管理外）
 ├── docs/images/      ← README 掲載画像（tools/screenshots で生成）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成

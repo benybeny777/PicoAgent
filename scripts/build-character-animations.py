@@ -97,6 +97,68 @@ SEQUENCES = {
     ],
 }
 
+# THA3で追加キーポーズが揃っているキャラだけが使う42フレーム構成。
+# 通常キャラは従来のSEQUENCESをそのまま使うため、既存素材の見た目は変わらない。
+THA3_SEQUENCES = {
+    "idle": [
+        ("base", 0),
+        ("idle_left", 0),
+        ("idle_breathe", 0),
+        ("idle_right", 0),
+        ("blink_half", 0),
+        ("blink_closed", 0),
+        ("blink_half", 0),
+        ("idle_left", 0),
+        ("base", 0),
+        ("idle_right", 0),
+        ("idle_breathe", 0),
+        ("base", 0),
+    ],
+    "thinking": [
+        ("thinking_left", 0),
+        ("thinking_right", 0),
+        ("thinking_left", 0),
+        ("thinking_blink", 0),
+        ("thinking_right", 0),
+        ("thinking_left", 0),
+        ("blink_closed", 0),
+        ("thinking_blink", 0),
+        ("thinking_right", 0),
+        ("thinking_left", 0),
+        ("thinking_right", 0),
+        ("thinking_left", 0),
+    ],
+    "talking": [
+        ("talking_left_closed", 0),
+        ("talking_left_open", 0),
+        ("talking_right_open", 0),
+        ("talking_right_closed", 0),
+        ("talking_left_open", 0),
+        ("talking_left_closed", 0),
+        ("talking_right_open", 0),
+        ("talking_right_closed", 0),
+        ("blink_half", 0),
+        ("talking_left_open", 0),
+        ("talking_right_open", 0),
+        ("talking_left_closed", 0),
+    ],
+    "sad": [
+        ("sad", 0),
+        ("sad_blink", 0),
+        ("blink_closed", 0),
+        ("sad_blink", 0),
+        ("sad", 0),
+        ("sad", 0),
+    ],
+}
+
+THA3_LAYER_NAMES = {
+    layer_name
+    for frames in THA3_SEQUENCES.values()
+    for layer_name, _sway in frames
+    if layer_name not in {"base", "blink_half", "blink_closed", "mouth_closed", "mouth_open"}
+}
+
 ANIMATION_NAMES = {
     "idle": "idle",
     "thinking": "running",
@@ -140,13 +202,23 @@ def ensure_layers(character_dir: Path) -> dict[str, Path]:
         if not preview.exists():
             raise FileNotFoundError(f"base.png / preview.png が見つかりません: {character_dir}")
         layers_dir.mkdir(exist_ok=True)
-        Image.open(preview).convert("RGBA").save(base)
+        with Image.open(preview) as opened:
+            converted = opened.convert("RGBA")
+        try:
+            converted.save(base)
+        finally:
+            converted.close()
 
     layer_paths = {"base": base}
     for layer, fallback in FALLBACK_LAYERS.items():
         path = layers_dir / f"{layer}.png"
         if not path.exists():
-            Image.open(layers_dir / f"{fallback}.png").convert("RGBA").save(path)
+            with Image.open(layers_dir / f"{fallback}.png") as opened:
+                converted = opened.convert("RGBA")
+            try:
+                converted.save(path)
+            finally:
+                converted.close()
         layer_paths[layer] = path
     return layer_paths
 
@@ -195,25 +267,50 @@ def remove_green_fringe(image: Image.Image) -> Image.Image:
 
 
 def build_frames(character_dir: Path, layer_paths: dict[str, Path], disable_sway: bool) -> None:
-    for manifest_name, frames in SEQUENCES.items():
+    layers_dir = character_dir / "layers"
+    use_tha3_motion = all((layers_dir / f"{name}.png").is_file() for name in THA3_LAYER_NAMES)
+    sequences = THA3_SEQUENCES if use_tha3_motion else SEQUENCES
+    if use_tha3_motion:
+        for name in THA3_LAYER_NAMES:
+            layer_paths[name] = layers_dir / f"{name}.png"
+        print(f"[build-character-animations] {character_dir.name} はTHA3の42フレーム構成を使います")
+    for manifest_name, frames in sequences.items():
         animation_dir = character_dir / "animations" / ANIMATION_NAMES[manifest_name]
         animation_dir.mkdir(parents=True, exist_ok=True)
         for old in animation_dir.glob("*.png"):
             old.unlink()
         for index, (layer_name, sway) in enumerate(frames):
             layer_path = layer_paths.get(layer_name, layer_paths["base"])
-            image = Image.open(layer_path).convert("RGBA")
-            if not disable_sway:
-                image = sway_image(image, sway)
-            image = remove_green_fringe(image)
-            image.save(animation_dir / f"{index:02}.png")
+            with Image.open(layer_path) as opened:
+                image = opened.convert("RGBA")
+            try:
+                if not disable_sway:
+                    swayed = sway_image(image, sway)
+                    image.close()
+                    image = swayed
+                cleaned = remove_green_fringe(image)
+                try:
+                    cleaned.save(animation_dir / f"{index:02}.png")
+                finally:
+                    cleaned.close()
+            finally:
+                image.close()
 
 
 def clean_expression_layers(layer_paths: dict[str, Path]) -> None:
     for name in ("blink_half", "blink_closed", "mouth_open"):
         path = layer_paths.get(name)
         if path and path.exists():
-            remove_green_fringe(Image.open(path).convert("RGBA")).save(path)
+            with Image.open(path) as opened:
+                converted = opened.convert("RGBA")
+            try:
+                cleaned = remove_green_fringe(converted)
+                try:
+                    cleaned.save(path)
+                finally:
+                    cleaned.close()
+            finally:
+                converted.close()
 
 
 def build_character(character_dir: Path, version: str | None, disable_sway: bool) -> None:

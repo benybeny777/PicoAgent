@@ -33,6 +33,24 @@ characters/<id>/
 - `boot/sleeping.png` は横向きに寝ている構図にし、むぎ・りん・まいで同じローディング画面に見える比率にする。
 - 背景は透過 PNG にする。AI 生成で緑背景を使った場合は chroma key 除去後の PNG だけを `boot/` や `layers/` に置く。
 
+## THA3で1枚絵から自作キャラを追加する
+
+[Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使う経路では、1枚の立ち絵から必須5差分だけでなく、待機・呼吸・左右揺れ・思考・会話・落胆を含む**17キーポーズ**を作る。続けて既存の `build-character-animations.py` が42枚の実行用連番へ変換し、キャラ一覧と配信コピーにも登録する。
+
+```powershell
+cargo xtask setup tha3
+python scripts/build-tha3-layers.py my-character --input C:\images\source.png --name "マイキャラ"
+```
+
+- 入力は512x512のRGBA PNG。背景はalpha=0、1人の人型キャラを正面直立で全身配置し、頭は上半分中央の128x128付近、手は頭から離す。機械検査できない正面向き・人数・手の位置は実行前に目視確認する。
+- 上流のCUDA対応Python環境と高性能NVIDIA GPUが必要なのは制作時だけ。PicoAgent実行時にはTHA3・PyTorch・学習済みモデルを使わない。
+- `--force`なしでは既存の `layers/*.png` を上書きしない。生成途中はリポジトリ直下の `temp/` だけを使う。
+- 新規IDでは `source.png`、`preview.png`、`character.json`、連番、一覧登録まで作る。表示名には「（自作）」、マニフェストには `generator.type=tha3` を記録する。人格・挨拶・声は生成後に `character.json` で調整する。
+- THA3自作キャラを消す場合は `python scripts/build-tha3-layers.py my-character --remove`。組み込み・手動管理キャラは拒否し、対象フォルダは物理削除せずOSのゴミ箱へ移す。
+- ひよりのLive2Dは毎フレーム連続変形するため、PNG連番で完全に同じにはならない。この経路は既存5枚構成より頭・身体・呼吸の動きを増やす経路で、本物のLive2D化は後半の手順を使う。
+
+THA3コードはMIT License、学習済みモデルはCC BY 4.0。作者Pramook Khungurn（pkhungurn）とTHA3プロジェクトへの帰属表示が必要。取得物は `tools/tha3/` に置かれ、Gitにも製品にも含まれない。
+
 ## アニメーション生成
 
 全キャラを生成する:

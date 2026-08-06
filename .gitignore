@@ -38,6 +38,9 @@ characters/*/live2d/
 !characters/mugi/live2d/
 !characters/mugi/live2d/**
 
+# THA3 制作ツール・学習済みモデル・Python依存物（cargo xtask setup tha3 で取得。巨大かつ実行時不要のため含めない）
+tools/tha3/
+
 # Live2D 制作用 PSD（python scripts/build-live2d-psd.py で layers/ から再生成できる）
 characters/*/live2d-src/
 

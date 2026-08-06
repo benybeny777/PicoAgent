@@ -129,11 +129,13 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d`） | Live2D ランタイム（`ui/vendor/live2d/`）とサンプルモデル「ひより」（`characters/hiyori/live2d/`）の取得（`cargo xtask setup live2d`。いずれも git 管理外） |
+| `xtask`（`bundled::fetch_tha3`） | THA3コードと学習済みモデルを制作専用の `tools/tha3/` へ取得する（`cargo xtask setup tha3`。Git管理外・製品バンドル外・引数なしsetupの対象外） |
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期、`ui/` を `ui-dist/` へ配信ビルド、残存プロセス停止（いずれも dev/build 前に自動実行） |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
+| `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成し、「自作」表示付きキャラとして登録する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
@@ -170,7 +172,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/*.py                ← キャラクター画像の生成（連番アニメ・Live2D 用 PSD）
-├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
+├── tools/tha3/                 ← THA3制作ツール・重み・Python環境（git管理外、setup tha3で取得）
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ```
