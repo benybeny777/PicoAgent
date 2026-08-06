@@ -390,7 +390,9 @@ mod tests {
     fn ピン留めした記録はsystem文脈へ載る() {
         let mut state = RelationshipState::new("mugi", "both");
         let before = context(&state);
-        state.recent_moments.push(moment("請求書の集計を完了", true));
+        state
+            .recent_moments
+            .push(moment("請求書の集計を完了", true));
         let after = context(&state);
         assert_ne!(after, before);
         assert!(after.contains("請求書の集計を完了"), "after: {after}");

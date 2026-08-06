@@ -908,7 +908,10 @@ pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value,
     let source = std::path::PathBuf::from(path.trim());
     match crate::user_characters::install(&app, &source) {
         Ok((id, name)) => {
-            crate::log_paths::append_app_log(&app, &format!("キャラクター {name} ({id}) を追加しました。"));
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("キャラクター {name} ({id}) を追加しました。"),
+            );
             Ok(json!({ "ok": true, "id": id, "name": name }))
         }
         Err(error) => Err(format!("{error:#}")),
@@ -1026,7 +1029,10 @@ pub async fn pet_send(
     }
     // 選択中プロジェクトの課題・記録を system 文脈へ差し込む。台帳は会話中にも変わるので、
     // 起動時ではなく毎回作り直して古い内容が残らないようにする。
-    apply_project_context(&mut convo, &crate::tools::project::project_context(&state.config));
+    apply_project_context(
+        &mut convo,
+        &crate::tools::project::project_context(&state.config),
+    );
     convo.push(Message::new("user", text));
 
     // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
@@ -2000,7 +2006,8 @@ pub async fn settings_save(
         let character_id = active_character_id(&state);
         let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
         let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
-        if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
+        if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship))
+        {
             state.reset_conversation();
         }
     }
@@ -3058,7 +3065,11 @@ mod project_context_tests {
         apply_project_context(&mut messages, "課題A");
         apply_project_context(&mut messages, "課題B");
         let system = &messages[0].content;
-        assert_eq!(system.matches("[プロジェクト文脈]").count(), 1, "system: {system}");
+        assert_eq!(
+            system.matches("[プロジェクト文脈]").count(),
+            1,
+            "system: {system}"
+        );
         assert!(system.contains("課題B"), "system: {system}");
         assert!(!system.contains("課題A"), "system: {system}");
         assert!(system.starts_with("人格設定"), "system: {system}");

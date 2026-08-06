@@ -165,7 +165,9 @@ fn check_point(enigo: &Enigo, x: i32, y: i32) -> Result<(), String> {
 }
 
 fn coord(args: &Value, key: &str) -> Option<i32> {
-    args.get(key).and_then(Value::as_i64).map(|value| value as i32)
+    args.get(key)
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
 }
 
 #[async_trait]
@@ -391,14 +393,19 @@ impl Tool for DesktopControlTool {
                     Ok(parsed) => parsed,
                     Err(error) => return error,
                 };
+                let mut pressed = Vec::new();
                 for key in &modifiers {
                     if let Err(error) = enigo.key(*key, Direction::Press) {
+                        for pressed_key in pressed.iter().rev() {
+                            let _ = enigo.key(*pressed_key, Direction::Release);
+                        }
                         return format!("エラー: 修飾キーを押せません: {error}");
                     }
+                    pressed.push(*key);
                 }
                 let result = enigo.key(main, Direction::Click);
                 // 押した修飾キーは、本体が失敗しても必ず離す。
-                for key in modifiers.iter().rev() {
+                for key in pressed.iter().rev() {
                     let _ = enigo.key(*key, Direction::Release);
                 }
                 match result {
@@ -417,7 +424,7 @@ inventory::submit! { ToolReg { make: || Box::new(DesktopControlTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{button_of, check_rate, enabled, max_ops_per_min, parse_combo, parse_key, recent_ops};
+    use super::{button_of, check_rate, coord, enabled, max_ops_per_min, parse_combo, parse_key, recent_ops};
     use crate::config::Config;
     use enigo::{Button, Key};
 
@@ -461,6 +468,12 @@ mod tests {
         assert!(matches!(button_of("right"), Button::Right));
         assert!(matches!(button_of("middle"), Button::Middle));
         assert!(matches!(button_of("なにか"), Button::Left), "不明な指定は左ボタン");
+    }
+
+    #[test]
+    fn 座標はi32の範囲外を拒否する() {
+        let args = serde_json::json!({ "x": i64::MAX });
+        assert_eq!(coord(&args, "x"), None);
     }
 
     #[test]

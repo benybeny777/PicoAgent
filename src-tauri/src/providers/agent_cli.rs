@@ -16,6 +16,8 @@
 //   「Ollama も要らない」という前提と逆行する。**販売する構成での既定にはしない。**
 //
 // プロンプトは引数として渡す（シェルを経由しない）ので、文字列の解釈による事故は起きない。
+// Claude / Codex 自身のツールは既定で封じ、PicoAgent が提示したスキルだけを JSON 経由で
+// 呼ばせる。ここを開けると PicoAgent の権限境界・監査・物理削除拒否を迂回できてしまう。
 
 
 use async_trait::async_trait;
@@ -67,13 +69,40 @@ fn program(cfg: &Config) -> String {
 fn lead_args(cfg: &Config) -> Vec<String> {
     let configured = cfg.get("PICOAGENT_AGENT_CLI_ARGS", "");
     let trimmed = configured.trim();
-    if !trimmed.is_empty() {
-        return trimmed.split_whitespace().map(str::to_string).collect();
-    }
+    let configured: Vec<String> = if trimmed.is_empty() {
+        Vec::new()
+    } else {
+        trimmed.split_whitespace().map(str::to_string).collect()
+    };
     match kind(cfg) {
-        Kind::Codex => vec!["exec".to_string()],
-        Kind::Claude => vec!["-p".to_string()],
-        Kind::Custom => Vec::new(),
+        Kind::Codex => {
+            let mut args = vec!["exec".to_string()];
+            args.extend(configured);
+            // 安全指定は追加引数より後ろへ置き、同名オプションで上書きされないようにする。
+            args.extend([
+                "--ignore-user-config".to_string(),
+                "--sandbox".to_string(),
+                "read-only".to_string(),
+                "--ephemeral".to_string(),
+                "--skip-git-repo-check".to_string(),
+            ]);
+            args
+        }
+        Kind::Claude => {
+            let mut args = vec!["-p".to_string()];
+            args.extend(configured);
+            args.extend([
+                "--safe-mode".to_string(),
+                "--tools".to_string(),
+                String::new(),
+                "--permission-mode".to_string(),
+                "plan".to_string(),
+                "--no-session-persistence".to_string(),
+            ]);
+            args
+        }
+        // custom はどの CLI か判断できないため、明示された引数をそのまま使う。
+        Kind::Custom => configured,
     }
 }
 
@@ -216,7 +245,7 @@ impl Provider for AgentCli {
             ),
             Field::new(
                 "PICOAGENT_AGENT_CLI_ARGS",
-                "非対話実行の引数（空なら種類ごとの既定。claude は -p、codex は exec）",
+                "追加の実行引数（Claude / Codex には安全な非対話引数を常に付加）",
                 "text",
                 "",
             ),
@@ -314,22 +343,30 @@ mod tests {
     fn 種類ごとに既定の実行ファイルと引数が変わる() {
         let cfg = Config::new();
         assert_eq!(program(&cfg), "claude");
-        assert_eq!(lead_args(&cfg), vec!["-p".to_string()]);
+        let claude_args = lead_args(&cfg);
+        assert_eq!(claude_args.first().map(String::as_str), Some("-p"));
+        assert!(claude_args.windows(2).any(|pair| pair == ["--tools", ""]));
+        assert!(claude_args.iter().any(|arg| arg == "--safe-mode"));
 
         let codex = Config::new();
         codex.set("PICOAGENT_AGENT_CLI_KIND", "codex");
         assert!(matches!(kind(&codex), Kind::Codex));
         assert_eq!(program(&codex), "codex");
-        assert_eq!(lead_args(&codex), vec!["exec".to_string()]);
+        let codex_args = lead_args(&codex);
+        assert_eq!(codex_args.first().map(String::as_str), Some("exec"));
+        assert!(codex_args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(codex_args.iter().any(|arg| arg == "--ignore-user-config"));
     }
 
     #[test]
-    fn 明示指定は種類より優先する() {
+    fn 実行パスと追加引数を明示指定できる() {
         let cfg = Config::new();
         cfg.set("PICOAGENT_AGENT_CLI_PATH", "/opt/bin/my-cli");
         cfg.set("PICOAGENT_AGENT_CLI_ARGS", "run --quiet");
         assert_eq!(program(&cfg), "/opt/bin/my-cli");
-        assert_eq!(lead_args(&cfg), vec!["run".to_string(), "--quiet".to_string()]);
+        let args = lead_args(&cfg);
+        assert_eq!(&args[..3], ["-p", "run", "--quiet"]);
+        assert!(args.iter().any(|arg| arg == "--safe-mode"));
     }
 
     #[test]

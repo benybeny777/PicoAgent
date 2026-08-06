@@ -360,6 +360,9 @@ mod tests {
             !normalized.contains('/'),
             "msiexec へ渡すパスに / が残っています: {normalized}"
         );
-        assert_eq!(normalized, r"C:\repo\src-tauri\resources\bundled\office\x.msi");
+        assert_eq!(
+            normalized,
+            r"C:\repo\src-tauri\resources\bundled\office\x.msi"
+        );
     }
 }

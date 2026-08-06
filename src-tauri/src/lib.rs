@@ -334,11 +334,7 @@ pub(crate) fn position_from_offsets(
 }
 
 /// 既定の右下オフセットでのウィンドウ位置。
-pub(crate) fn default_window_position(
-    monitor: MonitorRect,
-    win_w: u32,
-    win_h: u32,
-) -> (i32, i32) {
+pub(crate) fn default_window_position(monitor: MonitorRect, win_w: u32, win_h: u32) -> (i32, i32) {
     position_from_offsets(
         monitor,
         win_w,
@@ -383,7 +379,13 @@ pub(crate) fn is_visible_on_any_monitor(
 /// ウィンドウが完全に画面外へ取り残されたことの検出に使う。
 /// **保存位置の採否より緩い判定にしてある**（`is_visible_on_any_monitor` の 80px 基準で
 /// 実行中に引き戻すと、端へ寄せる通常のドラッグ操作まで勝手に戻されてしまうため）。
-pub(crate) fn is_on_screen(monitors: &[MonitorRect], x: i32, y: i32, win_w: u32, win_h: u32) -> bool {
+pub(crate) fn is_on_screen(
+    monitors: &[MonitorRect],
+    x: i32,
+    y: i32,
+    win_w: u32,
+    win_h: u32,
+) -> bool {
     monitors.iter().any(|monitor| {
         let (overlap_w, overlap_h) = overlap(*monitor, x, y, win_w, win_h);
         overlap_w > 0 && overlap_h > 0
@@ -596,8 +598,18 @@ mod window_layout_tests {
     /// Windows の仮想デスクトップは主モニタ左上が原点なので、左側のモニタは負の X を持つ。
     fn two_monitors() -> Vec<MonitorRect> {
         vec![
-            MonitorRect { x: -1920, y: 0, width: 1920, height: 1200 },
-            MonitorRect { x: 0, y: 0, width: 2560, height: 1440 },
+            MonitorRect {
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1200,
+            },
+            MonitorRect {
+                x: 0,
+                y: 0,
+                width: 2560,
+                height: 1440,
+            },
         ]
     }
 
@@ -605,21 +617,39 @@ mod window_layout_tests {
     /// 主モニタが原点になるため、**同じ物理配置でも全モニタの座標が変わる**。
     fn primary_swapped() -> Vec<MonitorRect> {
         vec![
-            MonitorRect { x: 0, y: 0, width: 1920, height: 1200 },
-            MonitorRect { x: 1920, y: 0, width: 2560, height: 1440 },
+            MonitorRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1200,
+            },
+            MonitorRect {
+                x: 1920,
+                y: 0,
+                width: 2560,
+                height: 1440,
+            },
         ]
     }
 
     #[test]
     fn 既定位置はモニタ原点を加えて求める() {
         // 原点が負のモニタで、モニタ原点を無視すると主モニタ側の座標になってしまう。
-        let left = MonitorRect { x: -1920, y: 0, width: 1920, height: 1200 };
+        let left = MonitorRect {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        };
         let (x, y) = default_window_position(left, 560, 430);
         assert!(
             x < 0,
             "左側モニタの既定位置が主モニタ側へ吸い寄せられています: x={x}"
         );
-        assert!(x >= left.x && y >= left.y, "モニタ矩形の外に出ています: ({x}, {y})");
+        assert!(
+            x >= left.x && y >= left.y,
+            "モニタ矩形の外に出ています: ({x}, {y})"
+        );
     }
 
     #[test]
@@ -634,7 +664,12 @@ mod window_layout_tests {
     #[test]
     fn モニタを外した後の座標は無効と判定する() {
         // サブモニタを外した構成では、そこに保存されていた座標は画面外になる。
-        let only_main = vec![MonitorRect { x: 0, y: 0, width: 2560, height: 1440 }];
+        let only_main = vec![MonitorRect {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+        }];
         assert!(!is_visible_on_any_monitor(&only_main, -1155, 487, 560, 430));
     }
 
@@ -642,14 +677,36 @@ mod window_layout_tests {
     fn 主モニタを入れ替えると保存座標が無効になりうる() {
         // 主副の入れ替えで仮想デスクトップの原点が動くため、同じ物理位置でも座標が変わる。
         // 旧構成のサブモニタ上（負のX）だった座標は、新構成では画面外になる。
-        assert!(is_visible_on_any_monitor(&two_monitors(), -1000, 300, 560, 430));
-        assert!(!is_visible_on_any_monitor(&primary_swapped(), -1000, 300, 560, 430));
+        assert!(is_visible_on_any_monitor(
+            &two_monitors(),
+            -1000,
+            300,
+            560,
+            430
+        ));
+        assert!(!is_visible_on_any_monitor(
+            &primary_swapped(),
+            -1000,
+            300,
+            560,
+            430
+        ));
     }
 
     #[test]
     fn 解像度を下げると画面外になった座標を検出する() {
-        let before = vec![MonitorRect { x: 0, y: 0, width: 2560, height: 1440 }];
-        let after = vec![MonitorRect { x: 0, y: 0, width: 1920, height: 1080 }];
+        let before = vec![MonitorRect {
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+        }];
+        let after = vec![MonitorRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        }];
         // 旧解像度の右下寄りにあった位置は、解像度を下げると載らなくなる。
         assert!(is_visible_on_any_monitor(&before, 2200, 1300, 560, 430));
         assert!(!is_visible_on_any_monitor(&after, 2200, 1300, 560, 430));
@@ -659,7 +716,12 @@ mod window_layout_tests {
     fn モニタ本数が増えた構成でも保存座標は有効なまま() {
         // モニタを足すだけなら既存の座標は載り続ける（無駄に既定位置へ戻さない）。
         let mut more = primary_swapped();
-        more.push(MonitorRect { x: 4480, y: 0, width: 1920, height: 1080 });
+        more.push(MonitorRect {
+            x: 4480,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        });
         assert!(is_visible_on_any_monitor(&more, 2500, 500, 560, 430));
         assert!(is_visible_on_any_monitor(&more, 4600, 200, 560, 430));
     }

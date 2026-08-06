@@ -129,12 +129,21 @@ fn remember_target(id: &str) {
 
 /// ページを読んで、見出し・本文（予算内）・操作できる要素一覧に整形する。
 async fn render_page(
+    cfg: &Config,
     conn: &mut cdp::PageConn,
     offset: usize,
     budget: usize,
 ) -> Result<String, String> {
     let raw = conn.eval(extract::EXTRACT_JS).await?;
     let page = extract::parse(&raw)?;
+    let actual_url = Url::parse(&page.url)
+        .map_err(|error| format!("エラー: 表示中 URL の解析に失敗しました: {error}"))?;
+    if !allowed_domain(cfg, &actual_url) {
+        return Err(format!(
+            "エラー: リダイレクト先または現在のタブが許可ドメイン外です: {}。ページ内容は返しません。",
+            actual_url.host_str().unwrap_or("")
+        ));
+    }
     let (body, next) = extract::slice_text(&page.text, offset, budget);
     let mut out = format!("ページ: {}\nURL: {}\n", page.title, page.url);
     if page.text.is_empty() {
@@ -211,7 +220,12 @@ impl Tool for BrowserControlTool {
         vec![
             Field::new("PICOAGENT_BROWSER_ENABLED", "ブラウザ操作を有効にする（既定は無効）", "checkbox", "false"),
             Field::new("PICOAGENT_BROWSER_PATH", "Chrome / Edge の実行パス（空なら自動検出）", "text", ""),
-            Field::new("PICOAGENT_BROWSER_ALLOWED_DOMAINS", "開いてよいドメイン（空なら制限なし）", "textarea", "example.com,docs.example.com"),
+            Field::new(
+                "PICOAGENT_BROWSER_ALLOWED_DOMAINS",
+                "開いてよいドメイン（空なら制限なし。例: example.com,docs.example.com）",
+                "textarea",
+                "",
+            ),
             Field::new("PICOAGENT_BROWSER_PROFILE", "プロファイル（isolated=専用 / default=ブラウザの既定プロファイル）", "text", "isolated"),
             Field::new("PICOAGENT_BROWSER_HEADLESS", "画面を出さずに操作する", "checkbox", "false"),
             Field::new("PICOAGENT_BROWSER_PORT", "CDP のデバッグポート", "text", "11437"),
@@ -286,7 +300,7 @@ impl Tool for BrowserControlTool {
                 if let Err(error) = conn.wait_ready(timeout).await {
                     return error;
                 }
-                match render_page(&mut conn, 0, text_budget(cfg)).await {
+                match render_page(cfg, &mut conn, 0, text_budget(cfg)).await {
                     Ok(rendered) => wrap_untrusted(rendered),
                     Err(error) => error,
                 }
@@ -308,7 +322,7 @@ impl Tool for BrowserControlTool {
                     Ok(conn) => conn,
                     Err(error) => return error,
                 };
-                match render_page(&mut conn, offset, text_budget(cfg)).await {
+                match render_page(cfg, &mut conn, offset, text_budget(cfg)).await {
                     Ok(rendered) => wrap_untrusted(rendered),
                     Err(error) => error,
                 }
@@ -322,7 +336,14 @@ impl Tool for BrowserControlTool {
                     Ok(pages) => {
                         let mut out = String::from("開いているタブ:\n");
                         for (index, page) in pages.iter().enumerate() {
-                            out.push_str(&format!("  {} {}\n", index + 1, page.url));
+                            let visible = Url::parse(&page.url)
+                                .ok()
+                                .is_some_and(|url| allowed_domain(cfg, &url));
+                            if visible {
+                                out.push_str(&format!("  {} {}\n", index + 1, page.url));
+                            } else {
+                                out.push_str(&format!("  {} （許可ドメイン外）\n", index + 1));
+                            }
                         }
                         out
                     }

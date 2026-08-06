@@ -147,7 +147,10 @@ fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
         let from = entry.path();
         // シンボリックリンクは辿らない（実体がパック外を指す可能性がある）。
         if std::fs::symlink_metadata(&from)?.file_type().is_symlink() {
-            bail!("パック内にシンボリックリンクは置けません: {}", from.display());
+            bail!(
+                "パック内にシンボリックリンクは置けません: {}",
+                from.display()
+            );
         }
         let to = destination.join(entry.file_name());
         if from.is_dir() {
@@ -239,7 +242,11 @@ mod guard {
             text.contains("src-tauri/src/character_pack.rs"),
             "xtask は検証規則の正本（src-tauri/src/character_pack.rs）を取り込んでください"
         );
-        for marker in ["fn validate_tree(", "ALLOWED_EXTENSIONS", "fn safe_relative("] {
+        for marker in [
+            "fn validate_tree(",
+            "ALLOWED_EXTENSIONS",
+            "fn safe_relative(",
+        ] {
             assert!(
                 !text.contains(marker),
                 "xtask に検証規則のコピーが残っています（`{marker}`）。正本だけを使ってください"
@@ -306,7 +313,10 @@ mod tests {
         let out = dir.join("out");
         let error = extract_zip(&archive, &out).unwrap_err().to_string();
         assert!(error.contains("安全でないパス"), "error: {error}");
-        assert!(!dir.join("escaped.txt").exists(), "展開先の外へ書き出している");
+        assert!(
+            !dir.join("escaped.txt").exists(),
+            "展開先の外へ書き出している"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

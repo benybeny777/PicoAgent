@@ -19,8 +19,22 @@ use serde_json::Value;
 
 /// パックに置ける拡張子。実行可能なものは入れない。
 pub const ALLOWED_EXTENSIONS: &[&str] = &[
-    "json", "png", "webp", "jpg", "jpeg", "moc3", "wav", "psd", "md", "txt", "exp3", "motion3",
-    "physics3", "cdi3", "userdata3", "pose3",
+    "json",
+    "png",
+    "webp",
+    "jpg",
+    "jpeg",
+    "moc3",
+    "wav",
+    "psd",
+    "md",
+    "txt",
+    "exp3",
+    "motion3",
+    "physics3",
+    "cdi3",
+    "userdata3",
+    "pose3",
 ];
 
 pub const MAX_FILES: usize = 4000;
@@ -166,7 +180,10 @@ pub fn validate_tree(directory: &Path, canonical_root: &Path, stats: &mut PackSt
         let path = entry.path();
         let metadata = std::fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
-            bail!("パック内にシンボリックリンクは置けません: {}", path.display());
+            bail!(
+                "パック内にシンボリックリンクは置けません: {}",
+                path.display()
+            );
         }
         let canonical = path.canonicalize()?;
         if !canonical.starts_with(canonical_root) {
@@ -373,7 +390,10 @@ mod tests {
         assert!(safe_relative("../secret", "テスト").is_err());
         assert!(safe_relative("/etc/passwd", "テスト").is_err());
         assert!(safe_relative("", "テスト").is_err());
-        assert_eq!(safe_relative("live2d/a.moc3", "テスト").unwrap(), Path::new("live2d/a.moc3"));
+        assert_eq!(
+            safe_relative("live2d/a.moc3", "テスト").unwrap(),
+            Path::new("live2d/a.moc3")
+        );
     }
 
     #[test]

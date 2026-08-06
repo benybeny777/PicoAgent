@@ -100,7 +100,10 @@ pub fn catalog() -> Value {
 /// キャラ別上書きを取り出す。設定画面はオブジェクトで保存するが、環境変数で渡された
 /// 場合は JSON 文字列として届くため、どちらの形でも読めるようにする。
 fn overrides_object(cfg: &Config) -> Option<Value> {
-    let raw = cfg.get_all().get("PICOAGENT_RELATIONSHIP_OVERRIDES")?.clone();
+    let raw = cfg
+        .get_all()
+        .get("PICOAGENT_RELATIONSHIP_OVERRIDES")?
+        .clone();
     match raw {
         Value::Object(_) => Some(raw),
         Value::String(text) => serde_json::from_str::<Value>(&text)
@@ -138,7 +141,9 @@ pub fn profile_suffix(cfg: &Config, character_id: &str) -> String {
         return String::new();
     };
     let body = if relationship.id == "custom" {
-        cfg.get("PICOAGENT_RELATIONSHIP_CUSTOM", "").trim().to_string()
+        cfg.get("PICOAGENT_RELATIONSHIP_CUSTOM", "")
+            .trim()
+            .to_string()
     } else {
         relationship.prompt.to_string()
     };
@@ -197,7 +202,11 @@ mod tests {
             &json!({ "mai": "sister_older" }).to_string(),
         );
         assert_eq!(selected_id(&cfg, "mai"), "sister_older");
-        assert_eq!(selected_id(&cfg, "mugi"), "friend", "上書きの無いキャラは全体設定");
+        assert_eq!(
+            selected_id(&cfg, "mugi"),
+            "friend",
+            "上書きの無いキャラは全体設定"
+        );
     }
 
     #[test]
@@ -211,7 +220,10 @@ mod tests {
     fn 自由設定は入力文をそのまま使い空なら足さない() {
         let cfg = Config::new();
         cfg.set("PICOAGENT_RELATIONSHIP", "custom");
-        assert!(profile_suffix(&cfg, "mugi").is_empty(), "未入力なら差分なし");
+        assert!(
+            profile_suffix(&cfg, "mugi").is_empty(),
+            "未入力なら差分なし"
+        );
         cfg.set("PICOAGENT_RELATIONSHIP_CUSTOM", "ご近所さんとして接する。");
         let suffix = profile_suffix(&cfg, "mugi");
         assert!(suffix.contains("ご近所さん"), "差分: {suffix}");

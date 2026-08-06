@@ -62,15 +62,9 @@ fn browser_candidates() -> Vec<String> {
     ]
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn browser_candidates() -> Vec<String> {
-    vec![
-        "/usr/bin/google-chrome".to_string(),
-        "/usr/bin/chromium".to_string(),
-        "/usr/bin/chromium-browser".to_string(),
-        "/usr/bin/microsoft-edge".to_string(),
-        "/opt/pw-browsers/chromium".to_string(),
-    ]
+    Vec::new()
 }
 
 /// 使うブラウザの実行パスを決める。優先順: 明示設定 → OS ごとの既定候補。
@@ -135,7 +129,6 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     let mut command = crate::tools::process::command_sync(&options.browser_path);
     command
         .arg(format!("--remote-debugging-port={}", options.port))
-        .arg("--remote-allow-origins=*")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg("--disable-background-networking")
@@ -152,12 +145,6 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     }
     if options.headless {
         command.arg("--headless=new");
-    }
-    // Chrome は root では sandbox を初期化できずに即終了する（Linux でコンテナや
-    // root ログインの環境が該当）。root のときだけ無効化する。
-    #[cfg(unix)]
-    if unsafe { libc::geteuid() } == 0 {
-        command.arg("--no-sandbox");
     }
     command.arg("about:blank");
     command
@@ -181,17 +168,21 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         // こちらのプロセスはデバッグポートを開かないまますぐ終了する。待ち続けても
         // タイムアウトするだけなので、子プロセスの終了を見て原因を名指しで返す。
         if child_exited() {
-            return Err(format!(
+            let error = format!(
                 "エラー: ブラウザは既に通常起動しているため、デバッグポート（{}）付きの起動要求が既存のウィンドウへ引き継がれました。ブラウザをすべて閉じてからやり直すか、PICOAGENT_BROWSER_PROFILE=isolated（既定）で専用プロファイルを使ってください。",
                 options.port
-            ));
+            );
+            stop();
+            return Err(error);
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    Err(format!(
+    let error = format!(
         "エラー: ブラウザのデバッグポート（{}）が応答しません。ブラウザの実行パス（PICOAGENT_BROWSER_PATH）と、ポートを塞いでいるプロセスが無いかを確認してください。",
         options.port
-    ))
+    );
+    stop();
+    Err(error)
 }
 
 /// 起動した子プロセスが既に終了しているか。

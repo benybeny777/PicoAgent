@@ -80,7 +80,7 @@ graph TD
 - `arguments` は **`serde_json::Value`（オブジェクト）** で持つ（OpenAI の JSON 文字列はプロバイダ内で相互変換）。
 - Ollama は tool 結果を id で紐付けず位置・名前で扱うため `tool_call_id` は無視（正規形には残す）。
 - `images` は **マルチモーダル入力**用のフィールド（省略可）。base64 data URL 文字列の配列。プロバイダが OpenAI 互換の場合、user メッセージの `content` を `[{type:"text",...}, {type:"image_url",...}]` 配列形式へ変換して送信する。`usage` フィールドは ephemeral（`#[serde(skip)]`）で、プロバイダから返ったトークン数を一時的に保持する。
-- **手元の CLI エージェントを叩く AI にする（`providers/agent_cli.rs`）**: Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で1往復だけ呼び、テキスト応答を受け取る。ツール呼び出しは OpenAI 形式を受け付けないため、**プロンプト側の約束事**で代替する——使えるスキルの一覧（名前・説明・引数キーだけに削ったもの）を渡し、「ツールを使うときは `{"tool":..,"args":..}` だけを返す」と指示して、その JSON を `tool_calls` へ変換する。コードフェンスや前後の文章は剥がして最初の JSON オブジェクトだけを見る。**JSON でない出力は通常の返答として扱い**、**一覧に無いツール名も採用しない**（幻覚をそのまま実行へ回さない）。約束が守られなくても壊れず、単にツールなしの応答になる。プロンプトは引数として渡し、シェルは経由しない。会話は役割ラベル付きで1本に畳み、長すぎる場合は**古い方から**落として直近の指示を残す。位置づけは**開発・個人利用**。CLI の導入とログインを利用者へ要求するため「Ollama も要らない」という前提と逆行し、配布構成の既定にはしない。
+- **手元の CLI エージェントを叩く AI にする（`providers/agent_cli.rs`）**: Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で1往復だけ呼び、テキスト応答を受け取る。Claude は safe mode かつ組み込みツールなし、Codex はユーザー設定なし・read-only sandbox・一時セッションで起動し、**CLI 自身のツールから PicoAgent の権限境界を迂回させない**。ツール呼び出しは OpenAI 形式を受け付けないため、**プロンプト側の約束事**で代替する——使えるスキルの一覧（名前・説明・引数キーだけに削ったもの）を渡し、「ツールを使うときは `{"tool":..,"args":..}` だけを返す」と指示して、その JSON を `tool_calls` へ変換する。コードフェンスや前後の文章は剥がして最初の JSON オブジェクトだけを見る。**JSON でない出力は通常の返答として扱い**、**一覧に無いツール名も採用しない**（幻覚をそのまま実行へ回さない）。約束が守られなくても壊れず、単にツールなしの応答になる。プロンプトは引数として渡し、シェルは経由しない。会話は役割ラベル付きで1本に畳み、長すぎる場合は**古い方から**落として直近の指示を残す。位置づけは**開発・個人利用**。CLI の導入とログインを利用者へ要求するため「Ollama も要らない」という前提と逆行し、配布構成の既定にはしない。
 - **スクリーンショット解析**: `pet_capture_screen` コマンドがデスクトップ画像を PNG base64 data URL で返す。取得は**外部コマンドを介さず** `xcap` で主モニタを直接キャプチャし、PNG へエンコードして返す（以前は Windows で PowerShell + GDI、macOS で `screencapture` を起動していた。起動が重く、実行ポリシーやプロファイルの影響を受け、失敗の切り分けもしづらかった）。**対応 OS は Windows / macOS**。`xcap` は対応 OS だけの依存にしており、対応対象外の OS ではビルドは通るが未対応エラーを返すスタブになる（Linux へ入れると Wayland / PipeWire の開発ヘッダが開発環境にも要るため含めない）。取得と PNG 変換は同期処理なので `spawn_blocking` で UI スレッドから逃がす。フロントエンドは「画面を見て」「スクリーンショット」などの発話を検出し、自動で `pet_capture_screen` → `pet_send_image` へ切り替えてビジョン対応モデルへ送る。
 - **インライン画像表示**: `appendLinkedText()` が `![alt](url)` Markdown 画像記法を `<img>` 要素としてフキダシ内にインライン表示する。DALL-E 3 生成画像や外部 URL の画像をそのまま確認できる。
 
@@ -314,7 +314,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `daily_briefing` | おでかけ前チェック。天気・控えている通知をまとめる | `weather` を内部呼び出し。APIキー不要 |
 | `meeting_recorder` | 会議向けの複合スキル。マイク録音、既存音声の文字起こし、文字起こしからの議事録Markdown生成を `action` で扱う。`diarize=true` で話者分類用の追加引数を渡す | 既定保存先は共通許可ルート配下の `meetings/YYYY-MM-DD/`。別の場所は `PICOAGENT_ALLOWED_PATHS` へ追加して絶対パスで指定する。`PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先で、空なら PicoAgent 管理下の `resources/bundled/whisper/` に置いた同梱Whisper CLIを使う。同梱Whisperは1回実行のCLIで、常駐サーバやポートを使わない。外部APIなし |
 | `whisper_transcribe` | 既存音声をローカルで文字起こしする単体スキル。スキル一覧の表示タイトルは「音声文字起こし」 | `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` の手動設定が最優先。空なら PicoAgent 管理下の同梱Whisper CLIと同梱モデルを使う。常駐サーバやポートを使わない |
-| `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
+| `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | `arboard` で OS API を直接利用。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルートと `permissions::fs` に限定、読込/書込サイズ上限。同一プロセス内の変更は直列化する。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は実行時点の許可を再検証してから復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
 | `edit_file` | 既存ファイルの一部を、元の文字列と新しい文字列の厳密一致で置換する。`edits` 配列で複数箇所をまとめて編集できる | 共通許可ルートと `permissions::fs` に限定、既存ファイルのみ（新規作成は不可）、512KB 上限、1回20件まで。一致0件と（`replace_all` なしの）複数一致はエラーにして書き込まない。途中の1件でも失敗したら全件書き込まない。`preview=true` で無変更確認。書き込みロックと取り消し履歴は `workspace_files` と共有し、`workspace_files` の `undo` で戻せる |
@@ -350,7 +350,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `http_api` | 個別スキルがないSaaSやWebhookへの汎用HTTP API呼び出し | 許可ドメイン必須、任意Bearer/API key、本文/応答サイズ上限、timeout |
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
 | `desktop_control` | デスクトップのマウス・キーボード操作（クリック・ドラッグ・文字入力・キー送出・スクロール）とウィンドウ一覧・前面化 | 既定無効、**シェルを介さない固定 action のみ**、座標の画面内チェック、入力文字数 2,000 上限、1分あたりの操作回数上限。ウィンドウ操作は番号で指定させ OS ハンドルはモデルへ見せない（現在 Windows のみ） |
-| `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、http/https のみ、許可ドメイン設定、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
+| `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
 | `comfyui_generate` | ComfyUI ローカルサーバーで画像・動画を生成（APIキー不要）。KSampler ワークフローを組み立て `/prompt` → `/history` ポーリング → `/view` URL を返す。AnimateDiff 等の動画出力にも対応 | `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）・`COMFYUI_CHECKPOINT`（モデルファイル名）のみ。120秒 timeout |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | OfficeCLI と OOXML 直接編集による Word/Excel/PowerPoint の文字列置換・PDF出力 | 共通許可ルート配下のみ、同梱または明示設定した OfficeCLI、timeout |
@@ -605,7 +605,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
 | `PICOAGENT_AGENT_CLI_KIND` | `claude` | agent_cli | 手元の CLI エージェントの種類（`claude` / `codex` / `custom`） |
 | `PICOAGENT_AGENT_CLI_PATH` | （空=種類から自動） | agent_cli | CLI の実行パス |
-| `PICOAGENT_AGENT_CLI_ARGS` | （空=種類ごとの既定） | agent_cli | 非対話実行の引数（claude は `-p`、codex は `exec`） |
+| `PICOAGENT_AGENT_CLI_ARGS` | （空） | agent_cli | CLI へ追加する引数。Claude / Codex の安全な非対話引数は常に別途付加 |
 | `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | agent_cli | 1回の応答を待つ秒数（10〜600） |
 | `PICOAGENT_DESKTOP_ENABLED` | `false` | desktop_control | デスクトップ操作（マウス・キーボード）の有効化（既定は無効） |
 | `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | desktop_control | 1分あたりの操作回数の上限（1〜600）。暴走時の歯止め |

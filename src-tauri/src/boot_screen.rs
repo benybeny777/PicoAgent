@@ -103,7 +103,10 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
 
     tauri::http::Response::builder()
         .status(tauri::http::StatusCode::OK)
-        .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(
+            tauri::http::header::CONTENT_TYPE,
+            "text/html; charset=utf-8",
+        )
         .header(tauri::http::header::CACHE_CONTROL, "no-store")
         .body(body.into_bytes())
         .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
@@ -155,9 +158,8 @@ pub fn watch(app: AppHandle) {
         if state.shown.swap(true, Ordering::SeqCst) {
             return;
         }
-        *state.detail.lock().unwrap() = format!(
-            "{timeout_ms} ミリ秒以内にフロントエンドの準備完了が届きませんでした"
-        );
+        *state.detail.lock().unwrap() =
+            format!("{timeout_ms} ミリ秒以内にフロントエンドの準備完了が届きませんでした");
 
         let Some(window) = app.get_webview_window("main") else {
             crate::log_paths::append_app_log(

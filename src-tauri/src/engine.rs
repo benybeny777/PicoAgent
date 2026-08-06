@@ -245,9 +245,7 @@ fn total_memory_bytes() -> Option<u64> {
     {
         // WMI を PowerShell 経由で叩くのをやめ、OS の API を直接呼ぶ。
         // 起動が要らないぶん速く、実行ポリシーやプロファイルの影響も受けない。
-        use windows_sys::Win32::System::SystemInformation::{
-            GlobalMemoryStatusEx, MEMORYSTATUSEX,
-        };
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
         let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
         status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
         // 安全性: dwLength を正しく埋めた自前のバッファだけを渡す。
