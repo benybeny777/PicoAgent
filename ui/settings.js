@@ -1742,6 +1742,41 @@ async function render() {
     catch (error) { statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`; }
     loadCharacterVoice(previousCharacter);
   });
+  // 関係性は人格そのものではなく「人格の上に重ねる差分」なので、キャラ選択とは別の欄にする。
+  const relationshipSelect = el("select");
+  const relationships = Array.isArray(data.relationships) ? data.relationships : [];
+  const selectedRelationship = v.PICOAGENT_RELATIONSHIP || "assistant";
+  for (const relationship of relationships) {
+    relationshipSelect.append(el("option", {
+      value: relationship.id,
+      textContent: relationship.name,
+      selected: relationship.id === selectedRelationship,
+    }));
+  }
+  const relationshipHint = el("p", { className: "hint" });
+  const describeRelationship = () => {
+    const found = relationships.find(entry => entry.id === relationshipSelect.value);
+    relationshipHint.textContent = found ? found.description : "";
+    relationshipCustomField.style.display = relationshipSelect.value === "custom" ? "" : "none";
+  };
+  const relationshipCustom = el("textarea", { placeholder: "例: ご近所さんとして接する。世間話を挟みつつ、頼まれごとは丁寧にこなす。" });
+  relationshipCustom.value = v.PICOAGENT_RELATIONSHIP_CUSTOM || "";
+  const relationshipCustomField = el("div", { className: "field" }, [
+    el("label", { textContent: "関係の自由設定" }),
+    relationshipCustom,
+  ]);
+  relationshipSelect.addEventListener("change", describeRelationship);
+  characterSec.append(registerInput(
+    "PICOAGENT_RELATIONSHIP",
+    relationshipSelect,
+    markSearchable(el("div", { className: "field" }, [
+      el("label", { textContent: "ユーザーとの関係" }),
+      relationshipSelect,
+      relationshipHint,
+    ]), "PICOAGENT_RELATIONSHIP", "ユーザーとの関係 関係性 恋人 友達 妹 姉 先輩")
+  ));
+  characterSec.append(registerInput("PICOAGENT_RELATIONSHIP_CUSTOM", relationshipCustom, relationshipCustomField));
+  describeRelationship();
   panels.character.append(characterSec);
 
   // --- スキル設定（⚙ のあるスキルはクリックでその場に開く）。活用ガイドとは別タブに分ける ---

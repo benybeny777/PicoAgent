@@ -111,6 +111,20 @@ impl AppState {
         self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// 関係性の文脈を更新する。**中身が変わったときだけ true を返す。**
+    ///
+    /// system プロンプトの作り直しは、それ自体が同梱エンジンのプロンプトキャッシュを
+    /// 捨てる操作になる。会話やふれあいのたびに無条件で作り直すと毎ターン全文の
+    /// 再評価が走るため、実際に文面が変わったときだけ呼び出し側が作り直す。
+    pub fn set_relationship_context(&self, next: String) -> bool {
+        let mut current = self.relationship_context.lock().unwrap();
+        if *current == next {
+            return false;
+        }
+        *current = next;
+        true
+    }
+
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
     /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
@@ -119,6 +133,12 @@ impl AppState {
         if !character_profile.is_empty() {
             prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
             prompt.push_str(&character_profile);
+            // 関係性は人格の後ろへ重ねる（人格の芯は保ったまま距離感だけを変える）。
+            let character_id = self.character_id.lock().unwrap().clone();
+            prompt.push_str(&crate::relationship_preset::profile_suffix(
+                &self.config,
+                &character_id,
+            ));
         }
         let memory_context = self.memory_context.lock().unwrap().clone();
         if !memory_context.is_empty() {
@@ -517,7 +537,19 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         .collect();
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
+    // フォールバック許可: 関係性データが読めないだけで起動シーケンス全体を止めない
+    // （`pet_init` が失敗するとフロントはローディングから先へ進めない）。
+    // 読めなかった理由はログへ残し、まっさらな関係性として続行する。
+    let relationship = match crate::relationship::load(&app, &character_id, &relationship_mode) {
+        Ok(relationship) => relationship,
+        Err(error) => {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("関係性データを読めないため初期状態で続行します: {error}"),
+            );
+            crate::relationship::RelationshipState::empty(&character_id, &relationship_mode)
+        }
+    };
     let bond_label = relationship.bond_label();
     Ok(json!({
         "model": model,
@@ -580,9 +612,9 @@ pub fn pet_relationship_event(
     }
     let relationship = crate::relationship::record(&app, &character_id, &mode, &kind, &detail)?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
-    state.reset_conversation();
+    if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
+        state.reset_conversation();
+    }
     Ok(json!({
         "relationship": relationship,
         "bondLabel": bond_label,
@@ -655,9 +687,9 @@ pub fn pet_complete_onboarding(
     let character_id = active_character_id(&state);
     let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
-    state.reset_conversation();
+    if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
+        state.reset_conversation();
+    }
     Ok(json!({ "ok": true, "relationship": relationship, "bondLabel": bond_label }))
 }
 
@@ -745,8 +777,7 @@ pub fn pet_set_character_profile(
     *state.character_profile.lock().unwrap() = profile;
     let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &mode)?;
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
+    state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
     let previous = {
         let mut current = state.character_id.lock().unwrap();
         let previous = current.clone();
@@ -960,9 +991,14 @@ pub async fn pet_send(
                 &user_text,
             ) {
                 Ok(relationship) => {
-                    *state.relationship_context.lock().unwrap() =
-                        relationship_prompt_context(&state.config, &relationship);
-                    state.reset_conversation();
+                    // 文面が変わったときだけ system を作り直す（毎ターンだとプロンプト
+                    // キャッシュが無効化され、全文の再評価が走る）。
+                    if state.set_relationship_context(relationship_prompt_context(
+                        &state.config,
+                        &relationship,
+                    )) {
+                        state.reset_conversation();
+                    }
                 }
                 Err(error) => crate::log_paths::append_app_log(
                     &app,
@@ -1731,6 +1767,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             "downloadSize": preset.download_size,
             "note": preset.note,
         })).collect::<Vec<Value>>(),
+        "relationships": crate::relationship_preset::catalog(),
         "tools": tool_list,
     }))
 }
@@ -1834,7 +1871,11 @@ pub async fn settings_save(
             .map(|next| state.config.get_bool(key, fallback) != next)
             .unwrap_or(false)
     };
-    let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT");
+    let has_system_prompt = patch.contains_key("PICOAGENT_SYSTEM_PROMPT")
+        // 関係性は人格の一部として system へ入るため、変更時は同じ経路で作り直す。
+        || patch.contains_key("PICOAGENT_RELATIONSHIP")
+        || patch.contains_key("PICOAGENT_RELATIONSHIP_OVERRIDES")
+        || patch.contains_key("PICOAGENT_RELATIONSHIP_CUSTOM");
     let has_memory_setting = patch.contains_key("PICOAGENT_MEMORY_ENABLED")
         || patch.contains_key("PICOAGENT_MEMORY_MAX_ITEMS");
     let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
@@ -1891,9 +1932,9 @@ pub async fn settings_save(
         let character_id = active_character_id(&state);
         let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
         let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
-        *state.relationship_context.lock().unwrap() =
-            relationship_prompt_context(&state.config, &relationship);
-        state.reset_conversation();
+        if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
+            state.reset_conversation();
+        }
     }
 
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
@@ -2012,8 +2053,7 @@ pub fn restart_app(
     *state.character_id.lock().unwrap() = character_id.clone();
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
+    state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
     state.clear_conversation();
     let recent = crate::history::load_recent(&app, &character_id);
     if !recent.is_empty() {
@@ -2465,102 +2505,49 @@ pub async fn pet_send_image(
 }
 
 /// デスクトップのスクリーンショットを撮影し PNG を base64 data URL で返す。
-/// プラットフォームごとに利用可能なツールを順に試みる。
-/// Windows: PowerShell + GDI、macOS: screencapture、Linux: grim → scrot → import の順。
+///
+/// **外部コマンドを一切使わない。** 以前は Windows で PowerShell + GDI、macOS で
+/// `screencapture`、Linux で grim / scrot / import を呼んでいたが、
+/// (1) PowerShell の起動は重く、実行ポリシーやプロファイルの影響を受ける、
+/// (2) OS ごとに失敗の出かたが違い原因を切り分けにくい、
+/// (3) そもそも画面取得のためにシェルを持ち出す必要がない、という理由で
+/// `xcap` によるネイティブ取得へ置き換えた（`desktop_control` と同じ方針）。
+///
 #[tauri::command]
 pub async fn pet_capture_screen() -> Result<Value, String> {
     use base64::Engine;
 
-    // 並行呼び出し時の競合を避けるため、ナノ秒タイムスタンプで一意な一時ファイル名を使う。
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-    let temp_path = std::env::temp_dir().join(format!("picoagent-screenshot-{unique}.png"));
-
-    #[cfg(target_os = "windows")]
-    {
-        let path_esc = temp_path.to_string_lossy().replace('\\', "\\\\");
-        let script = format!(
-            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;\
-             $s=[System.Windows.Forms.Screen]::PrimaryScreen;\
-             $b=New-Object System.Drawing.Bitmap($s.Bounds.Width,$s.Bounds.Height);\
-             $g=[System.Drawing.Graphics]::FromImage($b);\
-             $g.CopyFromScreen($s.Bounds.Location,[System.Drawing.Point]::Empty,$s.Bounds.Size);\
-             $b.Save(\"{path_esc}\");\
-             $g.Dispose();$b.Dispose()"
-        );
-        let mut cmd = crate::tools::process::command("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-        let out = crate::tools::process::output(cmd, 60, "スクリーンショット取得")
-            .await
-            .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "スクリーンショット取得に失敗しました: {}",
-                String::from_utf8_lossy(&out.stderr)
-            ));
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let mut cmd = crate::tools::process::command("screencapture");
-        cmd.args(["-t", "png", temp_path.to_str().unwrap_or("")]);
-        let out = crate::tools::process::output(cmd, 60, "スクリーンショット取得")
-            .await
-            .map_err(|e| format!("スクリーンショット取得に失敗しました: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "スクリーンショット取得に失敗しました: {}",
-                String::from_utf8_lossy(&out.stderr)
-            ));
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let path_str = temp_path.to_str().unwrap_or("");
-        // grim(Wayland) → scrot(X11) → import(ImageMagick) の順に試みる。
-        let mut grim = crate::tools::process::command("grim");
-        grim.arg(path_str);
-        let ok = crate::tools::process::output(grim, 60, "スクリーンショット取得")
-            .await
-            .map(|out| out.status.success())
-            .unwrap_or(false);
-        if !ok {
-            let mut scrot = crate::tools::process::command("scrot");
-            scrot.arg(path_str);
-            let ok2 = crate::tools::process::output(scrot, 60, "スクリーンショット取得")
-                .await
-                .map(|out| out.status.success())
-                .unwrap_or(false);
-            if !ok2 {
-                let mut import = crate::tools::process::command("import");
-                import.args(["-window", "root", path_str]);
-                let out = crate::tools::process::output(import, 60, "スクリーンショット取得")
-                    .await
-                    .map_err(|_| {
-                        "スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string()
-                    })?;
-                if !out.status.success() {
-                    return Err("スクリーンショット取得に失敗しました。grim / scrot / ImageMagick のいずれかをインストールしてください。".to_string());
-                }
-            }
-        }
-    }
-
-    // macOS/Windows/Linux 以外はスタブエラー
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    return Err("スクリーンショットはこのプラットフォームでは未対応です。".to_string());
-
-    let bytes = tokio::fs::read(&temp_path)
+    // 取得と PNG 変換は CPU を使う同期処理なので、UI を止めないようブロッキングスレッドへ逃がす。
+    let png = tokio::task::spawn_blocking(capture_primary_png)
         .await
-        .map_err(|e| format!("スクリーンショットファイルの読み込みに失敗しました: {e}"))?;
-    let _ = tokio::fs::remove_file(&temp_path).await;
-
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        .map_err(|error| format!("スクリーンショット取得に失敗しました: {error}"))??;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
     Ok(json!({ "dataUrl": format!("data:image/png;base64,{b64}") }))
+}
+
+/// 主モニタを取得して PNG バイト列へエンコードする。
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn capture_primary_png() -> Result<Vec<u8>, String> {
+    use std::io::Cursor;
+    use xcap::Monitor;
+
+    let monitors = Monitor::all().map_err(|error| format!("モニタを列挙できません: {error}"))?;
+    // 主モニタが分からない場合は先頭を使う（単一モニタ環境では同じものになる）。
+    let monitor = monitors
+        .iter()
+        .find(|monitor| monitor.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
+        .ok_or_else(|| {
+            "スクリーンショット取得に失敗しました: モニタが見つかりません。".to_string()
+        })?;
+    let image = monitor
+        .capture_image()
+        .map_err(|error| format!("スクリーンショット取得に失敗しました: {error}"))?;
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, xcap::image::ImageFormat::Png)
+        .map_err(|error| format!("スクリーンショットを PNG へ変換できません: {error}"))?;
+    Ok(png.into_inner())
 }
 
 /// ドロップ・ペーストされたファイルの内容をテキストとして抽出する。
@@ -2720,6 +2707,36 @@ pub async fn pet_read_dropped_path(
         "path": path,
         "dataUrl": format!("data:{mime};base64,{}", B64.encode(&bytes)),
     }))
+}
+
+/// 対応対象外の OS（Linux など）向けのスタブ。開発を Linux で行ってもビルドは通る。
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn capture_primary_png() -> Result<Vec<u8>, String> {
+    Err("スクリーンショットは Windows と macOS でのみ利用できます。".to_string())
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::capture_primary_png;
+
+    /// 画面取得は、成功すれば PNG を返し、取れない環境では**理由の分かるエラー**を返す。
+    /// ヘッドレスやツール未導入の環境でパニックしたり、中身の無いデータを返したりしないこと。
+    #[test]
+    fn 画面取得はpngかエラーのどちらかを返す() {
+        match capture_primary_png() {
+            Ok(png) => {
+                assert!(png.len() > 8, "PNG が短すぎます: {} バイト", png.len());
+                assert_eq!(
+                    &png[..8],
+                    b"\x89PNG\r\n\x1a\n",
+                    "PNG シグネチャで始まっていません"
+                );
+            }
+            Err(error) => {
+                assert!(error.contains("スクリーンショット"), "error: {error}");
+            }
+        }
+    }
 }
 
 #[cfg(test)]

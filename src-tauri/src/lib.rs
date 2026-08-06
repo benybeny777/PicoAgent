@@ -27,6 +27,7 @@ mod migration;
 mod permissions;
 mod providers;
 mod relationship;
+mod relationship_preset;
 mod scheduler;
 mod secret;
 mod store;
@@ -268,6 +269,8 @@ pub fn run() {
             engine::stop(app_handle);
             mcp::client::stop_all();
             tools::run_command::jobs::stop_all();
+            // browser_control が起動したブラウザも一緒に閉じる（残すとデバッグポートが開いたままになる）。
+            tools::browser_control::stop();
         }
     });
 }

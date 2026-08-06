@@ -315,6 +315,34 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
     ),
     ("read_file", &["読んで", "読み取", "ファイル", "read_file"]),
     (
+        "desktop_control",
+        &[
+            "クリックして",
+            "クリックし",
+            "マウス",
+            "キーボード",
+            "キーを押",
+            "入力して",
+            "画面を操作",
+            "pc操作",
+            "デスクトップ操作",
+            "ドラッグ",
+        ],
+    ),
+    (
+        "browser_control",
+        &[
+            "ブラウザ",
+            "browser",
+            "chrome",
+            "edge",
+            "ログインが必要",
+            "ログインして",
+            "開いて読",
+            "画面を開いて",
+        ],
+    ),
+    (
         "workspace_files",
         &[
             "ファイル",
@@ -716,8 +744,38 @@ pub fn schemas_for_text(text: &str) -> Vec<Value> {
     selected
 }
 
+/// ツール出力の下限（ここより狭くはしない。従来の固定値と同じ）。
+const BASE_TOOL_OUTPUT_CHARS: usize = 8_000;
+/// ツール出力の上限（設定でこれ以上は広げない。1回の出力で文脈を食い潰さないための天井）。
+const MAX_TOOL_OUTPUT_CHARS: usize = 60_000;
+/// クラウドプロバイダ利用時の既定（コンテキストが十分広いので固定値でよい）。
+const CLOUD_TOOL_OUTPUT_CHARS: usize = 24_000;
+
 /// ツール出力の最大文字数（コンテキストウィンドウ超過防止）。
-const MAX_TOOL_OUTPUT_CHARS: usize = 8_000;
+///
+/// 既定（`auto`）は**実際に使うモデルのコンテキスト長に合わせて**決める。同梱の
+/// 既定モデル（Gemma 4 E2B / E4B）は `PICOAGENT_LOCAL_CTX=8192` なので、日本語では
+/// 1 トークン ≒ 1 文字として使える幅そのものが狭く、ツール出力へ割けるのは全体の一部だけ。
+/// 一方で `PICOAGENT_LOCAL_CTX` を広げた環境ではその分だけ多く読めた方がよいので、
+/// 固定値ではなく ctx から算出して従来値を下回らないようにする。
+pub fn tool_output_limit(cfg: &Config) -> usize {
+    let configured = cfg.get("PICOAGENT_TOOL_OUTPUT_MAX_CHARS", "auto");
+    let trimmed = configured.trim();
+    if !trimmed.eq_ignore_ascii_case("auto") {
+        if let Ok(value) = trimmed.parse::<usize>() {
+            return value.clamp(1_000, MAX_TOOL_OUTPUT_CHARS);
+        }
+    }
+    if cfg.get("PICOAGENT_PROVIDER", "local") != "local" {
+        return CLOUD_TOOL_OUTPUT_CHARS;
+    }
+    let ctx = cfg
+        .get("PICOAGENT_LOCAL_CTX", "8192")
+        .parse::<usize>()
+        .unwrap_or(8_192);
+    // 人格 system・長期メモリ・会話履歴・ツール定義・生成分を残し、ツール出力へ 45% を配分する。
+    (ctx * 45 / 100).clamp(BASE_TOOL_OUTPUT_CHARS, MAX_TOOL_OUTPUT_CHARS)
+}
 
 /// ツール出力にプロンプトインジェクション試行パターンが含まれるか検査する。
 pub fn check_injection(content: &str) -> bool {
@@ -770,11 +828,12 @@ pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> Stri
     } else {
         format!("エラー: 未登録のツール \"{}\" が呼び出されました。", name)
     };
-    if result.chars().count() > MAX_TOOL_OUTPUT_CHARS {
-        let truncated: String = result.chars().take(MAX_TOOL_OUTPUT_CHARS).collect();
+    let limit = tool_output_limit(cfg);
+    if result.chars().count() > limit {
+        let truncated: String = result.chars().take(limit).collect();
         format!(
             "{}\n\n[...出力が長いため{}文字で打ち切りました]",
-            truncated, MAX_TOOL_OUTPUT_CHARS
+            truncated, limit
         )
     } else {
         result
@@ -892,6 +951,43 @@ mod tests {
     fn 発話に合うスキルを追加する() {
         let names = schema_names("Slack にこの内容を送って");
         assert!(names.contains(&"slack_send_message".to_string()));
+    }
+
+    #[test]
+    fn ブラウザ操作スキルを候補に追加する() {
+        let names = schema_names("このページをブラウザで開いて読んで");
+        assert!(names.contains(&"browser_control".to_string()));
+    }
+
+    #[test]
+    fn ツール出力の上限はコンテキスト長に追随する() {
+        use crate::config::Config;
+        let narrow = Config::new();
+        narrow.set("PICOAGENT_LOCAL_CTX", "8192");
+        assert_eq!(
+            super::tool_output_limit(&narrow),
+            super::BASE_TOOL_OUTPUT_CHARS,
+            "既定のコンテキスト長では従来と同じ幅を保つ"
+        );
+
+        let wide = Config::new();
+        wide.set("PICOAGENT_LOCAL_CTX", "32768");
+        assert!(
+            super::tool_output_limit(&wide) > super::BASE_TOOL_OUTPUT_CHARS,
+            "コンテキストを広げた分だけ多く読める"
+        );
+
+        let huge = Config::new();
+        huge.set("PICOAGENT_LOCAL_CTX", "1000000");
+        assert_eq!(
+            super::tool_output_limit(&huge),
+            super::MAX_TOOL_OUTPUT_CHARS,
+            "天井は超えない"
+        );
+
+        let explicit = Config::new();
+        explicit.set("PICOAGENT_TOOL_OUTPUT_MAX_CHARS", "12000");
+        assert_eq!(super::tool_output_limit(&explicit), 12_000);
     }
 
     #[test]

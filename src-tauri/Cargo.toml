@@ -18,7 +18,9 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net", "io-util"] }
+# ブラウザ操作（browser_control）の CDP は WebSocket。接続先は 127.0.0.1 の ws:// 固定なので TLS 機能は入れない。
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake"] }
 futures = "0.3"
 async-trait = "0.1"
 inventory = "0.3"
@@ -34,13 +36,29 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 calamine = { version = "0.24", default-features = false, features = ["dates"] }
 cpal = "0.15"
 hound = "3.5"
+enigo = "0.6"
+arboard = { version = "3.6.1", default-features = false }
+
+# 画面取得。対応 OS（Windows / macOS）だけに入れる。Linux は対応対象外で、
+# 入れると Wayland / PipeWire の開発ヘッダが開発環境にも必要になるため含めない。
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+xcap = "0.9.8"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # シークレット（APIキー等）の DPAPI 暗号化に使用する。
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_Shell"] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_UI_Shell",
+    # 総メモリ量・GPU 名の取得（PowerShell 経由の WMI 問い合わせを置き換える）。
+    "Win32_System_SystemInformation",
+    "Win32_Graphics_Gdi",
+    # ウィンドウ一覧・前面化（desktop_control）。
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [profile.release]
 opt-level = "s"

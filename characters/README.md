@@ -84,11 +84,58 @@ characters/<id>/
 
 - `layers/` と `animations/` は不要。まばたき・口パク・モーションはモデル定義が担当する。
 - `build-character-animations.py` は Live2D キャラをスキップする。
-- サンプルの `hiyori` / `haru` / `epsilon`（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が
-  `live2d/` へモデルを取得する。再配布条件があるためモデル実体は Git 管理外。
-  `preview.jpg` はローディング画面と設定画面アイコンに使う。
+- サンプルキャラ（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が `live2d/` へ
+  モデルを取得する。再配布条件があるためモデル実体は Git 管理外。
+  `preview.jpg` はローディング画面と設定画面アイコンに使い、取得できなかった場合は
+  `_preview-placeholder.png` で代替する。
+  - **Free Material License**（公式リポジトリ CubismWebSamples の `LICENSE.md` に明記）:
+    `hiyori` / `haru` / `mao` / `mark` / `natori` / `ren` / `rice` / `wanko`
+  - **上記リストに無い別配布**: `epsilon`（`cubism.live2d.com` の epsilon_free）
+  - いずれもモデルごとに Live2D のサンプルモデル利用条件への同意が必要。売上高が一定規模を
+    超える事業者は Cubism SDK リリースライセンスも必要になる。判断は利用者側で行うこと。
+- モデルごとに `motions` / `lipSyncParam` は個体差がある。実際の `model3.json` の
+  `FileReferences.Motions` と `Groups: LipSync` を見て割り当てる
+  （例: `Mark` は `Idle` しか持たない、`Mao` の口は `ParamA`、`Wanko` は旧命名、
+  `Rice` は口のパラメータ自体が無いので `"lipSync": false` にする）。
+  `scale` / `offsetY` はモデルごとに実機で合わせる（同じ値では収まらない）。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
   `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。
+
+### 同じ絵で PNG 版と Live2D 版を分ける（別キャラ運用）
+
+**会話履歴と関係の記録はキャラ ID ごと**（`history-<id>.json` / `relationship-<id>.json`）なので、
+「PNG 版と Live2D 版で会話も分けたい」場合は variant ではなく**別キャラとして登録する**。
+同梱の `mugi`（PNG）と `mugi-live2d`（Live2D、制作中）がその形。
+
+- 画像は複製せず、`../<元キャラ>/…` の相対パスで参照する（むぎのフレームだけで 9.4MB あるため）。
+  `animations[].path` と `boot.sleeping` はどちらも URL として解決されるので相対で書ける。
+- Live2D 側にも `animations` を残しておくと、**モデルが未書き出し・壊れている間は PNG 表示へ退避**できる。
+  `animations` を持たせないと、モデルが読めない時点でそのキャラ自体を読み込めなくなる。
+- `persona` は別ファイルへ複製する形になる。**片方だけ直すと食い違う**ので、人格を変えるときは両方直す。
+
+### 同じキャラのまま「絵版」と「Live2D 版」を持つ（variant 運用）
+
+`variants` の項目に `live2d` を書くと、キャラを増やさずに見た目だけ切り替えられる
+（切替は ♡ の記録カード内の「雰囲気」セレクタ。選択は端末ごとに記憶する）。
+人格・挨拶・声はキャラ本体の定義を共有するので、二重管理にならない。
+
+```jsonc
+"variants": [
+  { "id": "default", "name": "いつもの姿" },              // 既存の連番フレーム表示
+  { "id": "live2d",  "name": "Live2D 版",                 // Cubism ランタイムで描画
+    "live2d": {
+      "model": "live2d/Mugi.model3.json",
+      "motions": { "idle": "Idle", "thinking": "TapBody", "talking": "TapBody", "sad": "Idle" },
+      "lipSyncParam": "ParamMouthOpenY",
+      "scale": 3.2, "offsetY": 645
+    } }
+]
+```
+
+- キャラ本体が Live2D の場合に、ある variant だけ絵に戻したいときは `"live2d": false` を書く。
+- **モデルを書き出してから追記すること。** モデルが無い状態で variant を足すと、
+  選んだときに初期化に失敗してフレーム表示へ戻る（通知は出るが無駄な失敗になる）。
+- `scale` / `offsetY` はモデルごとに実機で合わせる。
 
 ### 既存キャラを Live2D 化するための PSD 生成
 

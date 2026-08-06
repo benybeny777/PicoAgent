@@ -53,6 +53,66 @@
 - **案内画面は配信元（dev サーバ / `ui-dist`）が死んでいるときにこそ出るため、配信経路に依存させない。** HTML とキャラクター画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す。画像は data URI で HTML に内包する。
 - CSP が `script-src 'self'` なので案内ページはインライン JavaScript を持てない。再読み込みはリンク遷移だけで完結させ、この前提が崩れないようテストで固定する。
 
+## 2026-08-04（続き）
+
+### 手元の CLI エージェントを「叩く AI」に追加
+
+- **`src-tauri/src/providers/agent_cli.rs`（新規）**: Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で1往復だけ呼ぶプロバイダ。同梱の小型ローカルモデルでは判断が怪しい場面で、手元の高性能な CLI をそのまま応答生成へ回せると挙動の切り分けが速い。
+  - **ツール呼び出しはプロンプトの約束事で実現する**。CLI は OpenAI 形式の function calling を受け付けないため、使えるスキルの一覧（名前・説明・引数キーだけに削ったもの）を渡し、「ツールを使うときは `{"tool":..,"args":..}` だけを返す」と指示して、その JSON を `tool_calls` へ変換する。相手が高性能な CLI なので指示追従は堅い。解釈は保守的にしてあり、コードフェンスや前後の文章は剥がし、**JSON でない出力は通常の返答**として扱い、**一覧に無いツール名は採用しない**（幻覚をそのまま実行へ回さない）。約束が守られなくても壊れず、単にツールなしの応答になる。
+  - プロンプトは**引数として渡し、シェルは経由しない**（`desktop_control` と同じ方針）。会話は役割ラベル付きで1本に畳み、長すぎる場合は古い方から落として直近の指示を残す。
+  - **README に警告ブロックで制約を明記した**（スキルが使えない／導入とログインが要る／応答が重い／配布構成の既定にしない）。トラブルシューティングにも「スキルが動かないのは仕様」の行を足した。選ぶ前と、詰まった後の両方で気づけるようにしている。
+  - **位置づけは開発・個人利用**。CLI の導入とログインを利用者へ要求するため「Ollama も要らない」という前提と逆行し、配布構成の既定にはしない。この判断理由をコード冒頭にも書いた。
+
+### PC 操作にウィンドウ一覧・前面化を追加
+
+- **`skills/desktop_control/window.rs`（新規）**: `window_list` で表示中のウィンドウをタイトル・位置・サイズ付きの**番号つき一覧**にし、`window_focus` で番号指定して前面へ出す。座標だけで操作させるとモデルは「どのウィンドウを触っているか」を見失いやすく、誤爆の主因になる。先に対象を選ばせてから座標を扱う流れにした（`browser_control` で要素へ番号を振ったのと同じ考え方）。
+  - **OS ハンドルはモデルへ見せない**。番号 → ハンドルの対応はスキル内に閉じる。
+  - タイトルの無いウィンドウ・実体の無いウィンドウ（最小化など）は一覧から省く。
+  - `window_list` は読み取りなので操作回数の上限を消費しない。
+  - Windows は `EnumWindows` 系で COM 不要。**macOS は Accessibility の許可と AX API が必要なため未実装**で、黙って成功させず「Windows でのみ利用できます」と返す。
+
+---
+
+## 2026-08-04
+
+### 対応 OS を Windows / macOS の 2 つに絞る
+
+- **Linux を対応対象から外した**。3 OS を薄く見るより 2 OS を確実に動かす方が、配布物としての品質が上がる。Linux 専用の分岐・取得経路をこれ以上増やさない方針を `AGENTS.md` にも明記した。
+- **スクリーンショット**: Linux 専用だった外部コマンド経路（grim → scrot → import）を削除し、`xcap` に一本化した。`xcap` は対応 OS だけの依存にしてあり、対応対象外の OS ではビルドは通るが未対応エラーを返すスタブになる（開発を Linux で行ってもテストは回せる。Wayland / PipeWire の開発ヘッダを開発環境へ強要しない）。
+- **総メモリ量の取得**: Linux の `/proc/meminfo` 経路を削除し、**代わりに macOS 実装（`sysctlbyname("hw.memsize")`）を追加した**。これまで macOS は `None` を返しており、ローカルモデルのプリセット自動選定が効いていなかった。対応 OS へ格上げした以上ここは埋めるべき穴だった。
+- **GPU 判定**: Linux 専用の `/proc/driver/nvidia` / `/dev/dri` 判定を削除。macOS は Metal が常に使えるため事前判定なしで GPU 起動を選ぶ（従来どおり）。
+- ドキュメント（`README.md` / `SPEC.md` / `MANUAL.md`）から Linux 向けの記述を削除し、README の前提に対応 OS を明記した。
+
+---
+
+## 2026-08-03（続き）
+
+### 残っていた PowerShell 依存を外す
+
+- **クリップボード取得** (`skills/clipboard_text/mod.rs`): Windows で `Get-Clipboard`、macOS で `pbpaste`、Linux で `sh -c "wl-paste || xclip"` を起動していた。`arboard` で OS の API を直接叩く形へ置き換え。**Linux で xclip / wl-paste を別途入れる必要も無くなった**。同期 API なので `spawn_blocking` で UI スレッドから逃がす。
+- **総メモリ量の取得** (`src-tauri/src/engine.rs`): `Get-CimInstance Win32_ComputerSystem` を `GlobalMemoryStatusEx` へ置き換え（`windows-sys` は既存の依存なので追加ゼロ）。
+- **GPU 名の列挙** (`src-tauri/src/aivis.rs`): `Get-CimInstance Win32_VideoController` を `EnumDisplayDevicesW` へ置き換え。COM も WMI も要らず、GPU の有無を見る用途には十分。あわせて不要になった `wait_child_with_timeout` / `GPU_PROBE_TIMEOUT` を削除した。
+- **`process::output_text` を削除**: クリップボード取得が唯一の利用者だったため dead code になった。テストは `output` を使う形へ寄せた。
+- **据え置いた 1 箇所**: `engine.rs` の VRAM 量取得。正確に取るには DXGI の COM 呼び出しが必要で、`windows-sys` では素の vtable を叩くことになり、`windows` クレートを足すと依存が大きく増える。初回起動時に一度だけ動く経路なので費用対効果で据え置き、理由をコードコメントに残した。
+- **Windows 向けのコンパイル検証を可能にした**: コンテナへ mingw を入れ、`cargo check --target x86_64-pc-windows-gnu` が通るようにした。今回の Windows 専用コード（`GlobalMemoryStatusEx` / `EnumDisplayDevicesW` / `xcap`）は**すべて Windows ターゲットで型検査済み**。clippy も両ターゲットで警告ゼロ。
+
+---
+
+## 2026-08-03
+
+### PC 操作スキル（`desktop_control`）を追加 — シェルを介さない固定操作
+
+- **`skills/desktop_control/`（新規）**: マウス・キーボードを直接操作する。従来この用途は `code_runner` に PowerShell / Python を書かせる形しか無く、危険かどうかを**生成された文字列の検査**（`is_physical_delete`）で判定していた。文字列検査は原理的に後手で、クオートやエンコードで回避できる。**操作を固定の action に限定して「その操作が存在しない」状態を作る**方針へ変えた（検査ではなく設計で防ぐ）。Windows 専用でもなくなる。
+  - action: `screen_size` / `cursor`（読み取り）、`move` / `click` / `double_click` / `drag` / `scroll` / `type_text` / `key`。
+  - 入力の実体は `enigo`（Windows / macOS / Linux）。OS 分岐はクレート側に閉じる。Linux は X11 前提（Wayland は合成入力が制限される）。
+  - キーは名前で受ける（`Enter` / `F5` / `Ctrl+C` / `Ctrl+Shift+T`）。生のキーコードはモデルに書かせない。修飾キーの位置に修飾キー以外を置いた指定は拒否する。
+  - **安全側の既定**: 既定無効（`PICOAGENT_DESKTOP_ENABLED`）、座標の画面内チェック、入力 2,000 文字上限、**1分あたりの操作回数上限**（`PICOAGENT_DESKTOP_MAX_OPS_PER_MIN`、既定 60）。読み取り系は回数を消費しない。
+  - ドラッグとキー組み合わせは、途中で失敗してもボタン・修飾キーを必ず離す（押しっぱなしを残さない）。
+  - 実行した操作は結果文字列として会話とトレース（`pet_traces`）に残る。
+- **スクリーンショットからも PowerShell を外した** (`src-tauri/src/commands.rs`): `pet_capture_screen` は Windows で PowerShell + GDI、macOS で `screencapture` を起動していた。起動が重く、実行ポリシーやプロファイルの影響を受け、失敗の切り分けもしづらい。`xcap` で主モニタを直接キャプチャして PNG へエンコードする形へ置き換え、一時ファイルの書き出しと読み戻しも無くした。取得と変換は同期処理なので `spawn_blocking` で UI スレッドから逃がす。
+  - **Linux だけは従来の外部コマンド経路（grim → scrot → import）を残した**。`xcap` は Linux で PipeWire の開発ヘッダ（`libpipewire-0.3-dev`）を要求し、**ビルドできる環境の前提が増えてしまう**ため。PowerShell とは無関係の経路なので、今回の目的（シェル依存の除去）とは矛盾しない。
+  - 「PNG を返すか、理由の分かるエラーを返すか」をテストで固定した（ヘッドレスやツール未導入の環境でパニックしないこと）。
+
 ---
 
 ## 2026-08-02
@@ -92,6 +152,41 @@
 - 自動リグで目・口のキー形状を生成できないモデル向けに、Live2Dの体・髪モーションを維持したまま既存の表情差分でまばたきと口パクを補完する設定を追加した。
 - PIXI Live2Dランタイムの初期化に必要なローカルスクリプト実行をCSPで許可し、PNGへの意図しないフォールバックを解消した。
 
+### Live2D 公式サンプルモデルを再配布条件が明示されているものすべてに拡張
+
+- **6 体を追加** (`xtask/src/bundled.rs` / `characters/{mao,mark,natori,ren,rice,wanko}/`): 公式リポジトリ CubismWebSamples の `LICENSE.md` が **Free Material License で提供すると明記している 8 体**（Haru / Hiyori / Mao / Mark / Natori / Ren / Rice / Wanko）を基準にした。既存はひより・Haru・Epsilon だったので、不足していた **まお・マーク・なとり・レン・ライス・わんこ**を追加し、それぞれに人格・挨拶・ふれあい反応を書いた。**Epsilon はこのリストには載っていない別配布**（`cubism.live2d.com` の epsilon_free）なので、ドキュメント上で区別した。
+  - モデル実体は従来どおり配布物へ同梱せず、`cargo xtask setup live2d` が実行時に取得する（Git 管理外）。追加した 6 体は公式リポジトリからファイル単位で取得する経路に載せ、**6 体 77 ファイルすべてが実際に取得できることを確認済み**。
+  - `motions` / `lipSyncParam` は各 `model3.json` の実データを見て個別に割り当てた。**Mark は `Idle` しか持たない**ので全状態を Idle へ写し、**Mao の口は `ParamA`**、**Wanko は旧命名 `PARAM_MOUTH_OPEN_Y`**、**Rice は口のパラメータ自体を持たない**。
+- **`live2d.lipSync: false` を追加** (`ui/renderer.js` / `SPEC.md`): 口のパラメータが無いモデル（Rice）向け。既定値を当てても存在しない ID を毎フレーム書き込むだけになるため、明示的に切れるようにした。
+- **1 体の取得失敗で setup 全体を止めない** (`xtask/src/bundled.rs`): 配布元へ到達できないネットワークでも、取れたモデルだけで起動できる方が実用的。失敗したモデルは警告に留め、そのキャラだけ選べない状態にする。プレビュー画像も同様に警告のみとし、`characters/_preview-placeholder.png` で代替する（プレビューはモデルの動作に関わらない）。起動待ち画面にも `onerror` の退避先を用意した。
+
+### 同じキャラで「絵版」と「Live2D 版」を切り替えられるようにした
+
+- **`variants[].live2d` に対応** (`ui/renderer.js` / `SPEC.md` / `characters/README.md`): これまで Live2D かフレームアニメかは `character.json` の直下 `live2d` だけで決まっていたため、同じキャラの絵版と Live2D 版を持つにはキャラ自体を2つに分けて人格・挨拶・声を二重管理する必要があった。variant 側に `live2d` を書けるようにし、`resolveLive2dConfig()` が variant → キャラ本体の順で解決する。`"live2d": false` を書けば、キャラ本体が Live2D でもその variant だけフレーム表示に戻せる。切替は既存の「雰囲気」セレクタをそのまま使う。
+- むぎのフレーム版（`animations` / `layers/` / `boot/`）はそのまま残っている。**Live2D 版は別キャラ `mugi-live2d` として分離した**（会話履歴・関係の記録をキャラ ID ごとに分けたいため。variant では同じ ID を共有してしまう）。画像は複製せず `../mugi/…` の相対パスで参照し、モデル未書き出しの間は PNG 表示へ退避する。旧: **むぎに制作中の Live2D 版 variant を登録した**（`live2d/Mugi.model3.json`。モデル未書き出しの間は選ぶと PNG 表示へ退避する）。variant 名を「いつもの姿（PNG）」「集中オーラ（PNG）」「Live2D 版（制作中）」にして、どれが PNG 表示でどれが Live2D かを分かるようにした。`scale` / `offsetY` は PSD と同じ 360x640 で書き出す前提の暫定値（1.0 / 0）で、実機での調整が要る。
+- Live2D の初期化に失敗したときのメッセージを「失敗」から「PNG 表示で続行」へ変えた。制作途中のモデルを variant へ登録しておける運用にしたため、これは異常ではなく想定内の分岐になる。
+
+### むぎの Live2D 制作用 PSD を生成
+
+- `python scripts/build-live2d-psd.py mugi` を実行し、`characters/mugi/live2d-src/mugi-live2d.psd`（ひよりの 15 パーツ構成 + variants + base_full、360x640）を生成した。以降の作業は Cubism Editor 上の手作業になる。生成物は Git 管理外。
+
+---
+
+## 2026-08-01（レビュー反映）
+
+### 相棒体験のレビューで見つかった問題を直した
+
+- **毎ターン system プロンプトが変わっていた** (`src-tauri/src/relationship.rs` / `commands.rs`): 会話のたびに `recent_moments` が system へ書き出されていたため、**同梱エンジンのプロンプトキャッシュが毎ターン丸ごと無効化**され、全文の再評価が走っていた（CPU 寄りの構成ほど響く）。system へ入れるのは段階名と相棒モードだけにし、出来事は記録カード側で見せる。あわせて `AppState::set_relationship_context()` を追加し、**文脈が実際に変わったときだけ** `reset_conversation()` を呼ぶようにした。「出来事が増えても system は変わらない」「段階が上がったら変わる」の両方をテストで固定した。
+- **キャラをタップするたびにディスクへ書いていた** (`ui/renderer.js`): ふれあいは連打される導線なのに、1 タップごとに関係性ファイルの読み書きが走っていた。記録は 5 秒に 1 回へ間引く（台詞とモーションは毎回返すので手触りは変わらない）。
+- **関係性データが読めないと起動できなくなっていた** (`src-tauri/src/commands.rs`): `pet_init` がエラーを伝播していたため、ファイルが読めないだけでフロントの起動シーケンスが止まっていた。設定破損時と同じく**ログへ残して初期状態で続行**する。
+- **`context()` が同じラベルを 2 回言っていた** (`src-tauri/src/relationship.rs`): 「関係: 顔なじみ。距離感は「顔なじみ」。」となっていた文面を整理した。
+- **連続会話の待機が 450ms で回り続けていた** (`ui/renderer.js`): 応答中は指数バックオフ（最大 5 秒）で待ち直す。
+- **「衣装」の表示を実態に合わせた** (`ui/index.html` / `renderer.js`): 標準キャラの `variants` は差分素材を持たずオーラ色だけが変わるため、表示を「雰囲気」にした。
+
+### 関係プリセットを `relationship_preset.rs` へ改名
+
+- main 側の `relationship.rs`（親密度の永続化）と同名衝突するため、プリセット（相棒 / 友達 / 恋人 / 妹 / 姉 / 先輩 / 自由設定）側を改名した。両機能は補完関係で、system では「人格 → 関係プリセット差分 → 長期メモリ → 関係の段階」の順に並ぶ。
+
 ---
 
 ## 2026-08-01
@@ -110,6 +205,47 @@
 - 連続音声を起動ごとにOFFへ戻し、周囲音に合わせた発話検出、15秒無音停止、画面非表示停止、録音インジケーター、送信前1.5秒のEscape取消を追加した。
 - キャラクター本体のキーボード操作、関係性カードのフォーカス復帰、初回画面のフォーカストラップ、タッチ対応の撫で判定を追加した。「衣装」を実態に合う「スタイル」へ改称し、初回画面は技術制約ではなく利用価値を案内する文面へ変更した。
 - キャラクターパックへ容量・形式・画像寸法・variants・ふれあい定義の検証とテストを追加し、導入と配信用同期を失敗時に元へ戻すトランザクションにした。
+
+---
+
+## 2026-07-31（続き）
+
+### ユーザーとの関係性を選べるようにした
+
+- **`src-tauri/src/relationship_preset.rs`（新規）**: 相棒（既定）/ 友達 / 恋人 / 妹 / 姉 / 先輩 / 自由設定を、キャラ人格の**上に重ねる短い差分**として持つ。関係ごとに `character.json` を書き下ろすとキャラ 6 体 × 関係 7 種の掛け算になって破綻するため、差分は数文に抑え、呼び方は文章ではなく `user_name` の置き換えで表現した（同梱の既定モデルは system が長いほど指示追従が落ちる）。
+  - `reset_conversation` / `clear_conversation` が人格の直後へ差分を足すので、設定変更は次のメッセージから効く。`settings_save` は関係キーの変更を人格変更と同じ「即反映」経路で扱う。
+  - **既定（相棒）では差分が空**になり、従来とまったく同じ system になる。テストで固定した。
+  - 関係にかかわらず外さない線（性的・年齢を想起させる表現をしない／作業の正確さを落とさない）は、プリセットの文面ではなく `SAFETY_NOTE` として一括で付与する。プリセットを足しても外れない。
+  - キャラ別の上書き（`PICOAGENT_RELATIONSHIP_OVERRIDES`）は設定画面のオブジェクト形式と環境変数の JSON 文字列形式の両方を受け付ける。
+- **設定画面**（`ui/settings.js`）: 「キャラクター設定」に関係セレクタと自由記述欄を追加した。選択に応じた説明文を出し、自由記述欄は `custom` のときだけ表示する。
+
+### 感情を色だけでなく表情と動きにも出す
+
+- **`ui/styles.css`**: `emotion.rs` が推定していた mood / energy は、これまでオーラの色にしか出ていなかった。`--pet-tone`（顔色）と `--pet-motion-scale`（動きの速さ）を足し、フレームアニメ（`img`）と Live2D（`canvas`）の両方へ同じ調整をかける。新しい絵は増やしていない。`prefers-reduced-motion` では速さの変更を無効化する。顔色は hover の `filter` と潰し合わないよう変数で持たせた。
+
+### 直したもの
+
+- **PDF 変換が失敗しても「出力しました」と返していた** (`skills/ms_office/mod.rs`): LibreOffice は読み込みに失敗しても終了コード 0 で `Error: source file could not be loaded` とだけ出すことがある。終了コードだけを信じていたため、PDF が無いのに成功と報告していた。出力ファイルの存在を確認し、無ければ stdout / stderr を添えてエラーにする。テスト側のスキップ条件も `soffice --version` が動くかではなく**実際に変換できるか**に変えた（フィルタ欠けの環境で毎回落ちるテストになっていた）。
+- **ブラウザ操作の既定ポートが同梱 Aivis と衝突していた** (`skills/browser_control/cdp.rs`): `PICOAGENT_BROWSER_PORT` の既定 11436 は `PICOAGENT_TTS_PORT` と同じで、起動順によってどちらかが黙って使えなくなる。11437 へ変更し、他の常駐プロセスと重ならないことをテストで固定した。
+- **既に通常起動しているブラウザを検出できなかった** (`skills/browser_control/cdp.rs`): 起動要求が既存ウィンドウへ引き継がれるとデバッグポートは開かず、タイムアウトまで待つだけだった。子プロセスの即時終了を見て原因を名指しで返す。相乗りしたブラウザ（前回のクラッシュで残ったもの等）は終了時に閉じないことも明示した。
+
+---
+
+## 2026-07-31
+
+### ブラウザ操作スキル（`browser_control`）を追加 — 読み取り専用
+
+- **実ブラウザを CDP で操作する** (`skills/browser_control/`): `web_fetch` は HTTP GET の本文しか見えないため、JS で描画されるページとログインが要るページが読めなかった。インストール済みの Chrome / Edge を `--remote-debugging-port` で起動し、Chrome DevTools Protocol を直接叩いて読む。Playwright / Puppeteer は Node.js がアプリの依存になるため採用せず、Rust だけで完結させた（`tokio-tungstenite` の WebSocket ＋ `Page.navigate` / `Runtime.evaluate` の2コマンドのみ。CDP の面を最小に保つほどブラウザ更新で壊れにくい）。
+  - **今回は読み取り専用**（`open` / `read` / `pages` / `close`）。クリック・入力は破壊的操作の確認フローを入れてから足す。要素の番号付けは今から返しており、そのまま流用できる。
+  - **DOM は渡さず簡約する**: 生 DOM はコンテキストを即座に溢れさせるため、ページ内で「本文テキスト」と「操作できる要素の番号付き一覧」まで削ってから受け取る。モデルには CSS セレクタを書かせず番号だけを扱わせるので、小型ローカルモデルでも成立する。
+  - **長いページは打ち切らず続きを読む**: `offset` 指定で分割して読み切れる。コンテキストの狭いモデルほど効く。
+  - **安全側の既定**: 既定無効（`code_runner` / `run_command` と同じ）、http/https のみ、ドメイン allowlist（`web_fetch` と同じ規則）、既定は専用プロファイル（ログイン済みセッションを巻き込まない）、1操作ごとのタイムアウト。ページ本文は最も注入されやすい経路なので `tools::check_injection` を必ず通し、検知時は警告付きでラップする。
+  - **実ブラウザでの通し確認をテスト化** (`cdp.rs`): 起動 → タブ作成 → WebSocket 接続 → ページ遷移 → 抽出スクリプト実行 → 解析までを実際に走らせる。Chrome / Edge / Chromium が無い環境ではスキップするので CI を落とさない。root では Chrome の sandbox が初期化できないため、root のときだけ `--no-sandbox` を付ける。
+  - アプリ終了時（`RunEvent::Exit`）に起動したブラウザも停止する。
+
+### ツール出力の上限をモデルのコンテキスト長に追随させる
+
+- **`PICOAGENT_TOOL_OUTPUT_MAX_CHARS`（既定 `auto`）を追加** (`src-tauri/src/tools/mod.rs`): 従来はツール出力を 8,000 文字の固定値で打ち切っていた。同梱の既定モデル（Gemma 4 E2B / E4B）は `PICOAGENT_LOCAL_CTX=8192` で、日本語では 1 トークン ≒ 1 文字なので固定値では窓に対して過大になる一方、ctx を広げた環境ではその分を活かせていなかった。`auto` は使用中モデルから算出する（local は ctx の 45%、下限 8,000・上限 60,000。クラウドは 24,000）。**下限を従来値に置いたので既定構成の挙動は変わらず、ctx を広げたときだけ多く読めるようになる。**
 
 ---
 

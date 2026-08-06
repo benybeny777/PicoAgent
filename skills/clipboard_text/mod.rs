@@ -1,6 +1,10 @@
 // clipboard_text/mod.rs - クリップボードのテキストを短く取り出すスキル。
 //
-// 配布時の追加権限を増やさないため、OS 標準コマンドを短時間だけ実行する。
+// 取得は OS の API を直接叩く（`arboard`）。以前は Windows で PowerShell の
+// `Get-Clipboard`、macOS で `pbpaste`、Linux で `sh -c "wl-paste || xclip"` を
+// 起動していたが、(1) PowerShell の起動は重く実行ポリシーの影響を受ける、
+// (2) Linux は xclip / wl-paste を別途入れないと動かない、(3) たかがクリップボード
+// 取得のためにシェルを持ち出す必要がない、という理由でネイティブへ置き換えた。
 // 取得した本文はサイズ上限で切り、モデルに要約・整形させるための素材として返す。
 
 
@@ -14,23 +18,17 @@ use crate::message::Field;
 pub struct ClipboardTextTool;
 
 async fn read_clipboard() -> Result<String, String> {
-    // 共通の実行層を使う（Windows でコンソール窓を出さない・中断で子プロセスを残さない）。
-    let mut command = crate::tools::process::command(if cfg!(target_os = "windows") {
-        "powershell"
-    } else if cfg!(target_os = "macos") {
-        "pbpaste"
-    } else {
-        "sh"
-    });
-    #[cfg(target_os = "windows")]
-    command.args(["-NoProfile", "-Command", "Get-Clipboard -Raw"]);
-    #[cfg(all(unix, not(target_os = "macos")))]
-    command.args([
-        "-c",
-        "command -v wl-paste >/dev/null 2>&1 && wl-paste || xclip -selection clipboard -out",
-    ]);
-    let text = crate::tools::process::output_text(command, 3, "クリップボード取得").await?;
-    Ok(text.trim().to_string())
+    // arboard は同期 API なので、UI を止めないようブロッキングスレッドへ逃がす。
+    tokio::task::spawn_blocking(|| {
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|error| format!("クリップボードを開けません: {error}"))?;
+        clipboard
+            .get_text()
+            .map(|text| text.trim().to_string())
+            .map_err(|error| format!("クリップボードのテキストを取得できません: {error}"))
+    })
+    .await
+    .map_err(|error| format!("クリップボード取得に失敗しました: {error}"))?
 }
 
 #[async_trait]

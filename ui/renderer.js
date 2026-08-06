@@ -468,6 +468,11 @@ async function prepareBootCharacter(characterId) {
   const { manifest, root } = await loadCharacterManifest(characterId);
   const version = String(manifest.assetVersion || "");
   const bootPath = manifest.boot?.sleeping || `${manifest.animations?.idle?.path || "animations/idle"}/00.png`;
+  bootPetImage.onerror = () => {
+    // プレビュー画像を取得できていないキャラ（setup が警告を出した場合）でも起動画面を壊さない。
+    bootPetImage.onerror = null;
+    bootPetImage.src = "assets/characters/_preview-placeholder.png";
+  };
   bootPetImage.src = versionedAssetUrl(`${root}/${bootPath}`, version);
   bootPetImage.alt = `起動を待つ${manifest.name || "キャラクター"}`;
   bootCharacterName = manifest.name || "キャラクター";
@@ -495,10 +500,21 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
+// variant は見た目の切替なので、フレームアニメと Live2D の切替もここで解決する。
+// variant.live2d があればそれを使い、`false` なら（キャラ本体が Live2D でも）フレーム表示に戻す。
+// これで「同じキャラの絵版と Live2D 版」を1つの character.json で持てる。
+function resolveLive2dConfig(manifest, variant) {
+  if (variant?.live2d === false) return null;
+  return variant?.live2d || manifest.live2d || null;
+}
+
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterOverridesCache = overrides;
   const { manifest, root } = await loadCharacterManifest(characterId);
-  if (!manifest.live2d?.model && !manifest.live2d?.models?.length && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
+  const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
+  const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
+    || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
+  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
@@ -512,19 +528,23 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
+  activeLive2dConfig = resolveLive2dConfig(manifest, variant);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
-  if (manifest.live2d?.model || manifest.live2d?.models?.length) {
+  if (hasLive2dDefinition(activeLive2dConfig)) {
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
-      await startLive2D(manifest);
+      await startLive2D(activeLive2dConfig);
     } catch (error) {
       stopLive2D();
-      if (!manifest.animations?.idle) throw error;
-      // フォールバック許可: Live2D ランタイム未取得でも、フレームアニメを持つキャラは表示を継続する（通知済み）。
-      logApp("error", "Live2D の初期化に失敗しました（フレームアニメで継続）", errorDetail(error));
-      setStatus("Live2D を初期化できませんでした");
+      activeLive2dConfig = null;
+      if (!animations.idle) throw error;
+      // フォールバック許可: Live2D ランタイム未取得やモデル未書き出しでも、フレームアニメを
+      // 持つキャラは表示を継続する。制作途中のモデルを variant に登録しておけるようにするため、
+      // ここは「失敗」ではなく「PNG 表示で続行」として伝える。
+      logApp("error", "Live2D の初期化に失敗しました（PNG 表示で継続）", errorDetail(error));
+      setStatus("Live2D を読み込めないので PNG 表示で続けるね");
       preloadAnimations();
       await probeRigLayers();
     }
@@ -571,8 +591,8 @@ variantSelect?.addEventListener("change", async () => {
     setAnimation("pleased", true);
     setTimeout(() => setAnimation("idle"), 900);
   } catch (error) {
-    logApp("error", "衣装の切替に失敗しました", errorDetail(error));
-    showToast("衣装を切り替えられませんでした", "error");
+    logApp("error", "雰囲気の切替に失敗しました", errorDetail(error));
+    showToast("雰囲気を切り替えられませんでした", "error");
   }
 });
 function setAnimation(name, force = false) {
@@ -788,6 +808,7 @@ function stopLipSync() {
 // ただしランタイムはモーション再生中に自動まばたきを回さないので、startLive2D で自前に回す。
 // 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
 let live2dActive = false;
+let activeLive2dConfig = null; // いま表示している variant の live2d 定義（無ければ null）
 let live2dModel = null;
 let live2dApp = null;
 let live2dCanvas = null;
@@ -822,10 +843,10 @@ async function ensureLive2DRuntime() {
   await live2dRuntimePromise;
 }
 
-async function startLive2D(manifest) {
+async function startLive2D(cfg) {
   await ensureLive2DRuntime();
   stopLive2D();
-  const cfg = manifest.live2d;
+  // cfg は variant で解決済みの live2d 定義（キャラ本体か variant 側のどちらか）。
   const motionEnabled = !reduceMotion || cfg.alwaysAnimate === true;
   if (!live2dCanvas) {
     live2dCanvas = document.createElement("canvas");
@@ -894,6 +915,9 @@ async function startLive2D(manifest) {
   // PARAM_MOUTH_OPEN_Y のような旧命名のため、固定既定値だと口が動かない。
   const coreModel = model.internalModel.coreModel;
   const lipSyncGroup = model.internalModel.settings?.groups?.find(group => group.Name === "LipSync");
+  // 口のパラメータを持たないモデル（公式サンプルの Rice など）は lipSync:false で明示的に切る。
+  // 既定値を当てても存在しない ID を毎フレーム書き込むだけになるため。
+  const lipSyncEnabled = cfg.lipSync !== false;
   const lipParam = String(cfg.lipSyncParam || lipSyncGroup?.Ids?.[0] || "ParamMouthOpenY");
   // 呼吸・体の揺らぎ（updateNaturalMovements）・髪の揺れ（physics3）・まばたき（EyeBlink）は
   // すべてランタイムの自動処理が担当する。ここで固定 sin 波を上書きすると、
@@ -903,7 +927,7 @@ async function startLive2D(manifest) {
   model.internalModel.motionManager.update = (...args) => {
     const updated = motionUpdate(...args);
     // 口はモーションが閉じ戻すため、モーション適用直後に読み上げ振幅で上書きする。
-    if (live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
+    if (lipSyncEnabled && live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
     return updated;
   };
   // ランタイムは「モーション再生中は自動まばたきを回さない」（Cubism4InternalModel.update の
@@ -938,9 +962,9 @@ async function startLive2D(manifest) {
 
 // 状態名（idle/thinking/talking/sad）を character.json の live2d.motions でグループへ写像して再生する。
 function playLive2DMotion(name) {
-  const alwaysAnimate = characterManifest?.live2d?.alwaysAnimate === true;
+  const alwaysAnimate = activeLive2dConfig?.alwaysAnimate === true;
   if (!live2dModel || (reduceMotion && !alwaysAnimate)) return;
-  const motions = characterManifest?.live2d?.motions || {};
+  const motions = activeLive2dConfig?.motions || {};
   const group = motions[name] || motions.idle;
   if (!group) return;
   const priority = name === "idle"
@@ -1938,6 +1962,29 @@ async function recordRelationship(kind, detail = "") {
   } catch (error) {
     logApp("warn", "いっしょの記録を更新できませんでした", errorDetail(error));
   }
+}
+
+// ふれあいは連打される導線なので、記録はまとめて間引く。1回ごとに送ると
+// そのたびにバックエンドが関係性ファイルを読み書きすることになる。
+const TOUCH_RECORD_INTERVAL_MS = 5000;
+let lastTouchRecordAt = 0;
+let pendingTouchZone = "";
+let pendingTouchTimer = null;
+function recordTouch(zone) {
+  const now = Date.now();
+  if (now - lastTouchRecordAt >= TOUCH_RECORD_INTERVAL_MS) {
+    lastTouchRecordAt = now;
+    recordTouch(zone);
+    return;
+  }
+  // 間引いた分は最後の1回だけ、間隔が空いてから送る（反応そのものは毎回返している）。
+  pendingTouchZone = zone;
+  if (pendingTouchTimer) return;
+  pendingTouchTimer = setTimeout(() => {
+    pendingTouchTimer = null;
+    lastTouchRecordAt = Date.now();
+    recordRelationship(`touch_${pendingTouchZone}`);
+  }, TOUCH_RECORD_INTERVAL_MS - (now - lastTouchRecordAt));
 }
 
 relationshipButton?.addEventListener("click", async event => {
@@ -3074,19 +3121,23 @@ function updateContinuousVoiceButton() {
   voiceLoopButton.title = continuousVoice ? "連続会話を止める" : "返答後も自動で聞き続ける";
 }
 
-function scheduleContinuousListening() {
+// 待てないときは間隔を伸ばして待ち直す。長い応答のあいだ 450ms で回り続けると、
+// 何もしていない時間にタイマーだけが動く（常駐アプリでは避けたい）。
+const CONTINUOUS_VOICE_MIN_MS = 450;
+const CONTINUOUS_VOICE_MAX_MS = 5000;
+function scheduleContinuousListening(delay = CONTINUOUS_VOICE_MIN_MS) {
   if (continuousVoiceTimer) { clearTimeout(continuousVoiceTimer); continuousVoiceTimer = null; }
   if (!continuousVoice) return;
   continuousVoiceTimer = setTimeout(async () => {
     continuousVoiceTimer = null;
     if (!continuousVoice) return;
     if (busy || currentVoice || micStream || !onboarding?.hidden) {
-      scheduleContinuousListening();
+      scheduleContinuousListening(Math.min(delay * 2, CONTINUOUS_VOICE_MAX_MS));
       return;
     }
     if (composer.hidden) openComposer();
     await startRecording();
-  }, 450);
+  }, delay);
 }
 
 voiceLoopButton?.addEventListener("click", async () => {
