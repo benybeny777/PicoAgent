@@ -47,6 +47,8 @@
 
 ### 前提
 
+**対応 OS は Windows と macOS です。**
+
 | | 必要なもの |
 |---|---|
 | 共通 | **Rust（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） |
@@ -454,7 +456,7 @@ cargo xtask build
 <details>
 <summary>同梱物の扱い（エンジン / Aivis / Whisper / Live2D）</summary>
 
-以下のパスは Windows 表記です。macOS / Linux では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
+以下のパスは Windows 表記です。macOS では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
 
 **同梱推論エンジン（llama-server）**
 
@@ -475,7 +477,7 @@ cargo xtask build
 **同梱 Whisper（文字起こし）**
 
 - `resources/bundled/whisper/` だけに配置し、アンインストール時も PicoAgent 管理下のディレクトリだけを削除します
-- whisper.cpp の GitHub Releases は macOS / Linux 向けの CLI 単体バイナリを配布していないため、この環境では警告のみで文字起こしなしの起動を続行します（必須にするなら `WHISPER_REQUIRED=1`、`WHISPER_ASSET` で代替アセット指定、または手動ビルドした `whisper-cli` を配置）
+- whisper.cpp の GitHub Releases は macOS 向けの CLI 単体バイナリを配布していないため、この環境では警告のみで文字起こしなしの起動を続行します（必須にするなら `WHISPER_REQUIRED=1`、`WHISPER_ASSET` で代替アセット指定、または手動ビルドした `whisper-cli` を配置）
 
 **Live2D ランタイムとサンプルモデル**
 
@@ -484,7 +486,7 @@ cargo xtask build
 
 **その他**
 
-- macOS / Linux では `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します
+- macOS では `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します
 - Aivis 同梱により Windows インストーラの入力が大きいため、NSIS 圧縮は生成安定性を優先して `zlib` にしています
 - 配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へコピーし、コメントと余分な空白を削ったものを同梱します。Rust の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています（解析を不可能にするものではなく、読みやすいソースやシンボル情報を減らすための基本対策です）
 
@@ -596,7 +598,7 @@ PicoAgent/
 
 | 症状 | 対処 |
 |---|---|
-| Office ファイルの変換・PDF 出力ができない | `cargo xtask setup office` で OfficeCLI を取得（Windows は MSI の管理者権限不要展開、macOS は DMG から配置）。Linux は公式ポータブル配布が無いので `apt install libreoffice` 等で導入し、PATH の `soffice` か `PICOAGENT_LIBREOFFICE_PATH` を使います。docx/xlsx/pptx の文字列置換は OOXML 直接編集なので OfficeCLI 不要です |
+| Office ファイルの変換・PDF 出力ができない | `cargo xtask setup office` で OfficeCLI を取得（Windows は MSI の管理者権限不要展開、macOS は DMG から配置）。docx/xlsx/pptx の文字列置換は OOXML 直接編集なので OfficeCLI 不要です |
 | Markdown 変換・PDF 抽出・音声前処理・文書検索の精度を上げたい | `cargo xtask setup tools` で Pandoc / ripgrep / ffmpeg / qpdf / poppler / ImageMagick を取得。OS 向け配布が無いツールは警告のみで、`apt` / `brew` で入れた PATH のツールへ自動で切り替わります（解決順は「明示設定 → 同梱 → PATH」） |
 | PSD / XCF / HEIC / TIFF / WebP を扱いたい | `image_tools` スキルが ImageMagick で PNG / JPG 等へ変換します（v7 の `magick` が無ければ v6 の `convert` / `identify` へ自動切替）。PSD はレイヤー統合ビューを変換します |
 | Office / PDF 操作に失敗する | 「許可」タブの許可ルートと、Microsoft Office + PowerShell / LibreOffice（`soffice`）/ qpdf の実行パスを確認。Google Docs / Sheets はローカルファイルではなく専用 API スキルを使ってください |

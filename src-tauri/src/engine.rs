@@ -256,17 +256,28 @@ fn total_memory_bytes() -> Option<u64> {
         }
         Some(status.ullTotalPhys)
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(target_os = "macos")]
     {
-        let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-        let kb = text.lines().find_map(|line| {
-            line.strip_prefix("MemTotal:")
-                .and_then(|rest| rest.split_whitespace().next())
-                .and_then(|value| value.parse::<u64>().ok())
-        })?;
-        Some(kb.saturating_mul(1024))
+        // sysctl の hw.memsize が搭載メモリ量（バイト）を返す。
+        let mut size: u64 = 0;
+        let mut len = std::mem::size_of::<u64>();
+        let name = c"hw.memsize";
+        // 安全性: 出力先は自前の u64、長さもその size を渡す。失敗時は非ゼロが返る。
+        let ok = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                &mut size as *mut u64 as *mut libc::c_void,
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if ok != 0 || size == 0 {
+            return None;
+        }
+        Some(size)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         None
     }

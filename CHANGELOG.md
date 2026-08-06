@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-08-04
+
+### 対応 OS を Windows / macOS の 2 つに絞る
+
+- **Linux を対応対象から外した**。3 OS を薄く見るより 2 OS を確実に動かす方が、配布物としての品質が上がる。Linux 専用の分岐・取得経路をこれ以上増やさない方針を `AGENTS.md` にも明記した。
+- **スクリーンショット**: Linux 専用だった外部コマンド経路（grim → scrot → import）を削除し、`xcap` に一本化した。`xcap` は対応 OS だけの依存にしてあり、対応対象外の OS ではビルドは通るが未対応エラーを返すスタブになる（開発を Linux で行ってもテストは回せる。Wayland / PipeWire の開発ヘッダを開発環境へ強要しない）。
+- **総メモリ量の取得**: Linux の `/proc/meminfo` 経路を削除し、**代わりに macOS 実装（`sysctlbyname("hw.memsize")`）を追加した**。これまで macOS は `None` を返しており、ローカルモデルのプリセット自動選定が効いていなかった。対応 OS へ格上げした以上ここは埋めるべき穴だった。
+- **GPU 判定**: Linux 専用の `/proc/driver/nvidia` / `/dev/dri` 判定を削除。macOS は Metal が常に使えるため事前判定なしで GPU 起動を選ぶ（従来どおり）。
+- ドキュメント（`README.md` / `SPEC.md` / `MANUAL.md`）から Linux 向けの記述を削除し、README の前提に対応 OS を明記した。
+
+---
+
 ## 2026-08-03（続き）
 
 ### 残っていた PowerShell 依存を外す

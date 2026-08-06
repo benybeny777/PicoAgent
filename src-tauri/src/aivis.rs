@@ -775,29 +775,9 @@ fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
     has_gpu
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(windows))]
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
-    let has_gpu = std::path::Path::new("/proc/driver/nvidia/version").exists()
-        || std::fs::read_dir("/dev/dri")
-            .map(|entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
-            })
-            .unwrap_or(false);
-    let _ = append_log(
-        app,
-        if has_gpu {
-            "GPU候補確認: GPU候補が見つかったため auto は GPU 起動を選びます。"
-        } else {
-            "GPU候補確認: GPU候補が見つからないため auto は CPU 起動を選びます。"
-        },
-    );
-    has_gpu
-}
-
-#[cfg(all(not(windows), not(target_os = "linux")))]
-fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
+    // macOS は Metal が常に使えるため、事前判定を行わず GPU 起動を選ぶ。
     let _ = append_log(
         app,
         "GPU候補確認: このOSでは事前判定を行わず auto は GPU 起動を選びます。",

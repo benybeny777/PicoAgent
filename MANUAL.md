@@ -64,7 +64,7 @@ cargo xtask setup office    # OfficeCLI（LibreOffice。Office 変換・PDF 出�
 cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick）
 ```
 
-- `cargo xtask setup *` はすべて**ベストエフォート**です。取得できないもの（例: Linux の LibreOffice、macOS の qpdf など）は警告だけ出して起動を続行し、該当スキルは PATH 上のツールへフォールバックします。
+- `cargo xtask setup *` はすべて**ベストエフォート**です。取得できないもの（例: macOS の qpdf など）は警告だけ出して起動を続行し、該当スキルは PATH 上のツールへフォールバックします。
 - 初回起動時はローカルモデル（Gemma 系）を PC の VRAM/RAM に合わせて自動選択・ダウンロードします。以後はオフラインで動作します。
 - 製品ビルド（配布物の作成）は `cargo xtask build`。詳細は README の「製品ビルド」を参照してください。
 
@@ -198,13 +198,13 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 
 | ツール | 使うスキル | 役割 | 同梱対象 OS |
 |---|---|---|---|
-| **OfficeCLI**（LibreOffice） | 文書変換 / Office編集 | docx/xlsx/pptx ⇔ PDF 等の変換・PDF 出力 | Windows / macOS（Linux は apt 等） |
-| **Pandoc** | 文書変換 | Markdown/reST/EPUB/org/LaTeX が絡む変換を高精度に | Windows / macOS / Linux |
+| **OfficeCLI**（LibreOffice） | 文書変換 / Office編集 | docx/xlsx/pptx ⇔ PDF 等の変換・PDF 出力 | Windows / macOS |
+| **Pandoc** | 文書変換 | Markdown/reST/EPUB/org/LaTeX が絡む変換を高精度に | Windows / macOS |
 | **Poppler**（pdftotext） | PDF編集 | PDF 本文のテキスト抽出（レイアウト保持） | Windows（他は apt/brew） |
 | **qpdf** | PDF編集 | ページ抽出・結合・回転・線形化 | Windows（他は apt/brew） |
 | **ImageMagick** | 画像ファイル変換 | PSD/XCF/HEIC/TIFF/WebP/AVIF → PNG/JPG、情報取得 | Windows（他は apt/brew） |
-| **ffmpeg** | 音声文字起こし | mp3/m4a/flac/ogg → 16kHz WAV の自動前処理 | Windows / macOS / Linux |
-| **ripgrep** | ローカル文書検索 | 検索の高速化（無ければ内蔵走査） | Windows / macOS / Linux |
+| **ffmpeg** | 音声文字起こし | mp3/m4a/flac/ogg → 16kHz WAV の自動前処理 | Windows / macOS |
+| **ripgrep** | ローカル文書検索 | 検索の高速化（無ければ内蔵走査） | Windows / macOS |
 
 **実行ファイルの解決順はすべて共通**: ① 設定画面での明示パス指定 → ② 同梱（`src-tauri/resources/bundled/`）→ ③ PATH。同梱が無い OS でも `apt install` / `brew install` すればそのまま使われます。
 
@@ -371,14 +371,14 @@ cargo xtask cli repl              # 対話モード（会話文脈を保持。ex
 
 | 症状 | 対処 |
 |---|---|
-| Office 変換・PDF 出力ができない | `cargo xtask setup office`。Linux は `apt install libreoffice` + PATH の `soffice` |
+| Office 変換・PDF 出力ができない | `cargo xtask setup office`。入らない場合は PATH の `soffice` か `PICOAGENT_LIBREOFFICE_PATH` を使います |
 | Markdown 変換・PDF 抽出・PSD 変換・音声前処理の精度が低い / 動かない | `cargo xtask setup tools`。同梱が無い OS は `apt` / `brew` で該当ツールを導入 |
 | ローカル API に接続できない | 設定「基本」タブで有効化して再起動。ポート・キーは `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` |
 | `run_command` が拒否される | 既定無効。設定で有効化し allowlist に prefix を追加 |
 | 起動が遅い | 初回は Rust コンパイルとモデル取得に時間がかかります（以後は速い） |
 | ビルドが「別のプロセスが使用中」で失敗 | 残存プロセスが原因。`cargo xtask stop` で停止（dev/build は自動で停止してから起動） |
 | macOS で背景が透過しない | `tauri.conf.json` の `app.macOSPrivateApi: true` を確認して再ビルド |
-| 文字起こしできない | `cargo xtask setup whisper`（macOS/Linux は公式バイナリ配布が無く手動導入が必要な場合あり） |
+| 文字起こしできない | `cargo xtask setup whisper`（macOS は公式バイナリ配布が無く手動導入が必要な場合あり） |
 
 その他は [README のトラブルシューティング](README.md#-トラブルシューティング) を参照してください。
 
