@@ -80,6 +80,7 @@ graph TD
 - `arguments` は **`serde_json::Value`（オブジェクト）** で持つ（OpenAI の JSON 文字列はプロバイダ内で相互変換）。
 - Ollama は tool 結果を id で紐付けず位置・名前で扱うため `tool_call_id` は無視（正規形には残す）。
 - `images` は **マルチモーダル入力**用のフィールド（省略可）。base64 data URL 文字列の配列。プロバイダが OpenAI 互換の場合、user メッセージの `content` を `[{type:"text",...}, {type:"image_url",...}]` 配列形式へ変換して送信する。`usage` フィールドは ephemeral（`#[serde(skip)]`）で、プロバイダから返ったトークン数を一時的に保持する。
+- **手元の CLI エージェントを叩く AI にする（`providers/agent_cli.rs`）**: Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で1往復だけ呼び、テキスト応答を受け取る。**ツール呼び出しは行わない**——CLI 自身がエージェントループを持っており、こちらのスキル群と役割が衝突するため、`tool_calls` は常に空で返す（スキルを使うなら local などを選ぶ）。プロンプトは引数として渡し、シェルは経由しない。会話は役割ラベル付きで1本に畳み、長すぎる場合は**古い方から**落として直近の指示を残す。位置づけは**開発・個人利用**。CLI の導入とログインを利用者へ要求するため「Ollama も要らない」という前提と逆行し、配布構成の既定にはしない。
 - **スクリーンショット解析**: `pet_capture_screen` コマンドがデスクトップ画像を PNG base64 data URL で返す。取得は**外部コマンドを介さず** `xcap` で主モニタを直接キャプチャし、PNG へエンコードして返す（以前は Windows で PowerShell + GDI、macOS で `screencapture` を起動していた。起動が重く、実行ポリシーやプロファイルの影響を受け、失敗の切り分けもしづらかった）。**対応 OS は Windows / macOS**。`xcap` は対応 OS だけの依存にしており、対応対象外の OS ではビルドは通るが未対応エラーを返すスタブになる（Linux へ入れると Wayland / PipeWire の開発ヘッダが開発環境にも要るため含めない）。取得と PNG 変換は同期処理なので `spawn_blocking` で UI スレッドから逃がす。フロントエンドは「画面を見て」「スクリーンショット」などの発話を検出し、自動で `pet_capture_screen` → `pet_send_image` へ切り替えてビジョン対応モデルへ送る。
 - **インライン画像表示**: `appendLinkedText()` が `![alt](url)` Markdown 画像記法を `<img>` 要素としてフキダシ内にインライン表示する。DALL-E 3 生成画像や外部 URL の画像をそのまま確認できる。
 
@@ -575,6 +576,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | http_api | 汎用HTTPの待ち時間（秒、3〜60） |
 | `PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS` | （空） | web_fetch | URL取得を許可するドメイン（カンマ区切り。空なら制限なし） |
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
+| `PICOAGENT_AGENT_CLI_KIND` | `claude` | agent_cli | 手元の CLI エージェントの種類（`claude` / `codex` / `custom`） |
+| `PICOAGENT_AGENT_CLI_PATH` | （空=種類から自動） | agent_cli | CLI の実行パス |
+| `PICOAGENT_AGENT_CLI_ARGS` | （空=種類ごとの既定） | agent_cli | 非対話実行の引数（claude は `-p`、codex は `exec`） |
+| `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | agent_cli | 1回の応答を待つ秒数（10〜600） |
 | `PICOAGENT_DESKTOP_ENABLED` | `false` | desktop_control | デスクトップ操作（マウス・キーボード）の有効化（既定は無効） |
 | `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | desktop_control | 1分あたりの操作回数の上限（1〜600）。暴走時の歯止め |
 | `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |
