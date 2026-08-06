@@ -1,7 +1,5 @@
 // aivis.rs - 同梱 AivisSpeech Engine の接続確認と裏起動を管理する。
 
-#[cfg(windows)]
-use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus, Stdio};
@@ -9,8 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use std::time::Duration;
-#[cfg(windows)]
-use std::time::Instant;
 
 use serde_json::Value;
 use tauri::Manager;
@@ -25,8 +21,6 @@ const AIVIS_API_URL: &str =
     "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/1.2.0";
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
-#[cfg(windows)]
-const GPU_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub struct AivisState {
@@ -711,65 +705,50 @@ fn has_running_child(app: &tauri::AppHandle) -> bool {
     false
 }
 
+/// 接続されているディスプレイアダプタ名を列挙する。
+///
+/// 以前は PowerShell から `Get-CimInstance Win32_VideoController` を叩いていたが、
+/// GPU の有無を見るだけのためにシェルと WMI を起動するのは重すぎる。
+/// `EnumDisplayDevicesW` は COM も要らず、同じ用途に十分な情報（アダプタ名）を返す。
 #[cfg(windows)]
-fn wait_child_with_timeout(
-    child: &mut Child,
-    timeout: Duration,
-) -> std::io::Result<Option<ExitStatus>> {
-    let started = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(Some(status));
-        }
-        if started.elapsed() >= timeout {
-            return Ok(None);
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
+fn gpu_adapter_names() -> Vec<String> {
+    use windows_sys::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
 
-#[cfg(windows)]
-fn gpu_probe_output() -> std::io::Result<String> {
-    let script = "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }";
-    let mut command = crate::tools::process::command_sync("powershell");
-    command.args([
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-    ]);
-    command.stdin(Stdio::null()).stderr(Stdio::null());
-    let mut child = command.stdout(Stdio::piped()).spawn()?;
-    match wait_child_with_timeout(&mut child, GPU_PROBE_TIMEOUT)? {
-        Some(status) if status.success() => {
-            let mut output = Vec::new();
-            if let Some(mut stdout) = child.stdout.take() {
-                stdout.read_to_end(&mut output)?;
-            }
-            let _ = child.wait();
-            Ok(String::from_utf8_lossy(&output).to_string())
+    let mut names = Vec::new();
+    for index in 0..16u32 {
+        let mut device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
+        device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
+        // 安全性: cb を正しく埋めた自前のバッファだけを渡し、戻り値が 0 なら打ち切る。
+        let ok = unsafe { EnumDisplayDevicesW(std::ptr::null(), index, &mut device, 0) };
+        if ok == 0 {
+            break;
         }
-        Some(_) => Ok(String::new()),
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            Ok(String::new())
+        let end = device
+            .DeviceString
+            .iter()
+            .position(|&ch| ch == 0)
+            .unwrap_or(device.DeviceString.len());
+        let name = String::from_utf16_lossy(&device.DeviceString[..end]);
+        let name = name.trim().to_string();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
         }
     }
+    names
 }
 
 #[cfg(windows)]
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
-    let Ok(output) = gpu_probe_output() else {
+    let adapters = gpu_adapter_names();
+    if adapters.is_empty() {
         let _ = append_log(
             app,
             "GPU候補確認に失敗したため、auto は CPU 起動を選びます。",
         );
         return false;
-    };
-    let has_gpu = output.lines().any(|line| {
-        let name = line.trim().to_lowercase();
+    }
+    let has_gpu = adapters.iter().any(|adapter| {
+        let name = adapter.trim().to_lowercase();
         !name.is_empty()
             && !name.contains("microsoft basic")
             && !name.contains("basic render")

@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-08-03（続き）
+
+### 残っていた PowerShell 依存を外す
+
+- **クリップボード取得** (`skills/clipboard_text/mod.rs`): Windows で `Get-Clipboard`、macOS で `pbpaste`、Linux で `sh -c "wl-paste || xclip"` を起動していた。`arboard` で OS の API を直接叩く形へ置き換え。**Linux で xclip / wl-paste を別途入れる必要も無くなった**。同期 API なので `spawn_blocking` で UI スレッドから逃がす。
+- **総メモリ量の取得** (`src-tauri/src/engine.rs`): `Get-CimInstance Win32_ComputerSystem` を `GlobalMemoryStatusEx` へ置き換え（`windows-sys` は既存の依存なので追加ゼロ）。
+- **GPU 名の列挙** (`src-tauri/src/aivis.rs`): `Get-CimInstance Win32_VideoController` を `EnumDisplayDevicesW` へ置き換え。COM も WMI も要らず、GPU の有無を見る用途には十分。あわせて不要になった `wait_child_with_timeout` / `GPU_PROBE_TIMEOUT` を削除した。
+- **`process::output_text` を削除**: クリップボード取得が唯一の利用者だったため dead code になった。テストは `output` を使う形へ寄せた。
+- **据え置いた 1 箇所**: `engine.rs` の VRAM 量取得。正確に取るには DXGI の COM 呼び出しが必要で、`windows-sys` では素の vtable を叩くことになり、`windows` クレートを足すと依存が大きく増える。初回起動時に一度だけ動く経路なので費用対効果で据え置き、理由をコードコメントに残した。
+- **Windows 向けのコンパイル検証を可能にした**: コンテナへ mingw を入れ、`cargo check --target x86_64-pc-windows-gnu` が通るようにした。今回の Windows 専用コード（`GlobalMemoryStatusEx` / `EnumDisplayDevicesW` / `xcap`）は**すべて Windows ターゲットで型検査済み**。clippy も両ターゲットで警告ゼロ。
+
+---
+
 ## 2026-08-03
 
 ### PC 操作スキル（`desktop_control`）を追加 — シェルを介さない固定操作

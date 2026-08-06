@@ -37,6 +37,7 @@ calamine = { version = "0.24", default-features = false, features = ["dates"] }
 cpal = "0.15"
 hound = "3.5"
 enigo = "0.6"
+arboard = { version = "3.6.1", default-features = false }
 
 # 画面取得。Linux では PipeWire の開発ヘッダを要求してビルド前提が増えるため、
 # Windows / macOS だけで使い、Linux は従来の外部コマンド経路を残す。
@@ -48,7 +49,14 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # シークレット（APIキー等）の DPAPI 暗号化に使用する。
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_Shell"] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_UI_Shell",
+    # 総メモリ量・GPU 名の取得（PowerShell 経由の WMI 問い合わせを置き換える）。
+    "Win32_System_SystemInformation",
+    "Win32_Graphics_Gdi",
+] }
 
 [profile.release]
 opt-level = "s"

@@ -243,15 +243,18 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
 fn total_memory_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
-        let output = crate::tools::process::command_sync("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
-            ])
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+        // WMI を PowerShell 経由で叩くのをやめ、OS の API を直接呼ぶ。
+        // 起動が要らないぶん速く、実行ポリシーやプロファイルの影響も受けない。
+        use windows_sys::Win32::System::SystemInformation::{
+            GlobalMemoryStatusEx, MEMORYSTATUSEX,
+        };
+        let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        // 安全性: dwLength を正しく埋めた自前のバッファだけを渡す。
+        if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 {
+            return None;
+        }
+        Some(status.ullTotalPhys)
     }
     #[cfg(target_os = "linux")]
     {
@@ -269,6 +272,14 @@ fn total_memory_bytes() -> Option<u64> {
     }
 }
 
+/// GPU の VRAM 量（バイト）。ローカルモデルのプリセット自動選定にだけ使う。
+///
+/// ここだけ PowerShell + WMI が残っている。正確な値を取るには DXGI の
+/// `IDXGIAdapter1::GetDesc1`（`DedicatedVideoMemory`）を読むのが本筋だが、
+/// COM の呼び出しが必要で `windows-sys` では素の vtable を叩くことになり、
+/// 高レベルな `windows` クレートを足すと依存が大きく増える。初回起動時に一度だけ
+/// 動く経路なので、費用対効果を見て据え置いている（総メモリ量と GPU 名の取得は
+/// ネイティブ API へ置き換え済み）。
 fn gpu_vram_bytes() -> Option<u64> {
     #[cfg(windows)]
     {

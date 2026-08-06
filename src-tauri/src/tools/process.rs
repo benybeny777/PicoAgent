@@ -132,26 +132,9 @@ pub async fn output(
     }
 }
 
-/// 実行して標準出力を文字列で返す（失敗時は stderr を含むエラー文字列）。
-/// 出力の中身より成否が主な用途（クリップボード取得など）向け。
-pub async fn output_text(
-    command: Command,
-    timeout_secs: u64,
-    label: &str,
-) -> Result<String, String> {
-    let result = output(command, timeout_secs, label).await?;
-    if !result.status.success() {
-        return Err(format!(
-            "{label}が失敗しました: {}",
-            String::from_utf8_lossy(&result.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&result.stdout).to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{command, output, output_text};
+    use super::{command, output};
 
     #[test]
     fn 既定設定で実行し出力を取れる() {
@@ -163,7 +146,8 @@ mod tests {
             } else {
                 cmd.arg("picoagent");
             }
-            let text = output_text(cmd, 30, "テスト実行").await.unwrap();
+            let result = output(cmd, 30, "テスト実行").await.unwrap();
+            let text = String::from_utf8_lossy(&result.stdout).to_string();
             assert!(text.contains("picoagent"), "text: {text}");
         });
     }
