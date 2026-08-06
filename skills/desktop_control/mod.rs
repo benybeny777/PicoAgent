@@ -6,11 +6,14 @@
 // クオートやエンコードで回避できる。ここでは**操作を固定の型付き action に限定**し、
 // 「その操作がそもそも存在しない」状態を作る（検査ではなく設計で防ぐ）。
 //
-// 入力の実体は enigo（Windows / macOS / Linux）で、OS ごとの分岐はクレート側に閉じる。
-// Linux は X11 前提（Wayland は合成入力が制限される）。
+// 入力の実体は enigo（Windows / macOS）で、OS ごとの分岐はクレート側に閉じる。
+// ウィンドウ一覧・前面化は `window.rs`（現在は Windows のみ。macOS は Accessibility の
+// 許可と AX API が必要で未実装）。
 //
 // 既定は無効。有効化しても、操作回数の上限・入力文字数の上限・座標の画面内チェックを
 // 常に通す。実行した操作は結果文字列として会話とトレース（`pet_traces`）に残る。
+
+pub mod window;
 
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -69,7 +72,7 @@ fn check_rate(limit: usize) -> Result<(), String> {
 
 fn make_enigo() -> Result<Enigo, String> {
     Enigo::new(&Settings::default()).map_err(|error| {
-        format!("エラー: デスクトップ操作を初期化できません（Linux は X11 が必要です）: {error}")
+        format!("エラー: デスクトップ操作を初期化できません: {error}")
     })
 }
 
@@ -185,8 +188,8 @@ impl Tool for DesktopControlTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["screen_size", "cursor", "move", "click", "double_click", "drag", "scroll", "type_text", "key"],
-                    "description": "screen_size: 画面サイズ / cursor: 現在のカーソル位置 / move: 移動 / click: クリック / double_click: ダブルクリック / drag: ドラッグ / scroll: スクロール / type_text: 文字入力 / key: キー送出。"
+                    "enum": ["screen_size", "cursor", "window_list", "window_focus", "move", "click", "double_click", "drag", "scroll", "type_text", "key"],
+                    "description": "screen_size: 画面サイズ / cursor: 現在のカーソル位置 / window_list: ウィンドウ一覧（番号つき）/ window_focus: 番号のウィンドウを前面へ / move: 移動 / click: クリック / double_click: ダブルクリック / drag: ドラッグ / scroll: スクロール / type_text: 文字入力 / key: キー送出。"
                 },
                 "x": { "type": "integer", "description": "対象の X 座標（画面左上が 0,0）。" },
                 "y": { "type": "integer", "description": "対象の Y 座標。" },
@@ -196,6 +199,7 @@ impl Tool for DesktopControlTool {
                 "text": { "type": "string", "description": "type_text で入力する文字列。" },
                 "keys": { "type": "string", "description": "key で送るキー。単体（Enter / Tab / F5 / a）か組み合わせ（Ctrl+C / Alt+Tab / Ctrl+Shift+T）。" },
                 "amount": { "type": "integer", "description": "scroll の量。正が下/右、負が上/左。" },
+                "window": { "type": "integer", "description": "window_focus で前面にするウィンドウの番号（window_list が返した番号）。" },
                 "axis": { "type": "string", "enum": ["vertical", "horizontal"], "description": "scroll の方向（既定 vertical）。" }
             },
             "required": ["action"]
@@ -204,6 +208,8 @@ impl Tool for DesktopControlTool {
 
     fn examples(&self) -> Vec<&'static str> {
         vec![
+            "開いているウィンドウを一覧して",
+            "メモ帳を前面にして",
             "画面を見て、右上の閉じるボタンを押して",
             "この文章を今開いているウィンドウへ入力して",
             "Ctrl+S で保存して",
@@ -251,6 +257,12 @@ impl Tool for DesktopControlTool {
                     Err(error) => format!("エラー: カーソル位置を取得できません: {error}"),
                 }
             }
+            "window_list" => {
+                return match window::list() {
+                    Ok(windows) => window::format(&windows),
+                    Err(error) => error,
+                }
+            }
             _ => {}
         }
 
@@ -259,6 +271,29 @@ impl Tool for DesktopControlTool {
         }
 
         match action.as_str() {
+            "window_focus" => {
+                // 番号は window_list の並びに対応する。ハンドルはモデルへ見せない。
+                let Some(number) = args.get("window").and_then(Value::as_u64) else {
+                    return "エラー: window_focus には window（window_list の番号）が必要です。".to_string();
+                };
+                let windows = match window::list() {
+                    Ok(windows) => windows,
+                    Err(error) => return error,
+                };
+                let Some(target) = number
+                    .checked_sub(1)
+                    .and_then(|index| windows.get(index as usize))
+                else {
+                    return format!(
+                        "エラー: ウィンドウ番号 {number} は範囲外です（1〜{}）。window_list で取り直してください。",
+                        windows.len()
+                    );
+                };
+                match window::focus(target.handle) {
+                    Ok(()) => format!("ウィンドウを前面にしました: {}", target.title),
+                    Err(error) => error,
+                }
+            }
             "move" | "click" | "double_click" => {
                 // 座標があれば移動してから押す。省略時は現在位置で押す。
                 if let (Some(x), Some(y)) = (coord(&args, "x"), coord(&args, "y")) {
@@ -372,7 +407,7 @@ impl Tool for DesktopControlTool {
                 }
             }
             other => format!(
-                "エラー: 未知の action \"{other}\" です。screen_size / cursor / move / click / double_click / drag / scroll / type_text / key のいずれかを指定してください。"
+                "エラー: 未知の action \"{other}\" です。screen_size / cursor / window_list / window_focus / move / click / double_click / drag / scroll / type_text / key のいずれかを指定してください。"
             ),
         }
     }

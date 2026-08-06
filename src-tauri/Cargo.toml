@@ -56,6 +56,8 @@ windows-sys = { version = "0.59", features = [
     # 総メモリ量・GPU 名の取得（PowerShell 経由の WMI 問い合わせを置き換える）。
     "Win32_System_SystemInformation",
     "Win32_Graphics_Gdi",
+    # ウィンドウ一覧・前面化（desktop_control）。
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [profile.release]
