@@ -14,10 +14,24 @@
 **Ollama も Node.js も要りません。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安からローカルモデルを自動で選んで取得します。以後はオフラインで動きます。
 
 <div align="center">
-  <img src="docs/images/main-light.webp" alt="ライトテーマのメイン画面" width="400" />
-  <img src="docs/images/main-dark.webp" alt="ダークテーマのメイン画面" width="400" />
-  <br />
-  <sub>ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（左：ライト／右：ダーク）。実際の動きです。</sub>
+  <table>
+    <tr>
+      <th width="50%">2D（連番フレーム）</th>
+      <th width="50%">Live2D</th>
+    </tr>
+    <tr>
+      <td><img src="docs/images/main-light.webp" alt="2D キャラクターのメイン画面（ライトテーマ）" width="380" /></td>
+      <td><img src="docs/images/live2d-light.webp" alt="Live2D キャラクターのメイン画面（ライトテーマ）" width="380" /></td>
+    </tr>
+    <tr>
+      <td><img src="docs/images/main-dark.webp" alt="2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
+      <td><img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
+    </tr>
+  </table>
+  <sub>
+    ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（上：ライト／下：ダーク）。実際の動きです。<br />
+    左は 2D キャラ「むぎ」、右は Live2D キャラ「ひより」。Live2D はまばたき・モーション・口パクをモデル自身が行います。
+  </sub>
 </div>
 
 ---
@@ -130,7 +144,7 @@ cargo xtask dev
 ### キャラクター
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
-- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルモデルを 9 体同梱（再配布条件が明示されている Free Material License の 8 体＋Epsilon。モデル実体は初回セットアップ時に取得）
+- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルモデルを 9 体同梱（再配布条件が明示されている Free Material License の 8 体＋Epsilon。モデル実体は初回セットアップ時に取得）。**2D と Live2D の見た目は[冒頭のプレビュー](#-picoagent)で見比べられます**
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 - **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
 - **関係性と共有記録** — キャラごとに会話・完了した作業・ふれあいを端末内へ保存。「出会ったばかり」から自然に距離感が変わる。作業記録は固定・個別削除・全消去でき、「続きをやる」で依頼を入力欄へ戻せる。保存自体も設定で停止可能
@@ -138,13 +152,6 @@ cargo xtask dev
 - **会話の内容で表情が変わる** — 話の流れから推定した感情（喜び・落ち込み・高揚・落ち着き・興味・驚き）が、キャラのオーラの色・顔色・動きの速さに出ます
 - **スタイルバリアント** — `character.json` の `variants` で同一キャラの別衣装・季節差分・演出を切替可能。**`variants[].live2d` を書けば、同じキャラの「絵版」と「Live2D 版」も切り替えられます**
 - **2Dキャラパック** — `cargo xtask character-pack validate <フォルダ>` で形式・容量・画像寸法・パスを検証し、`install` で途中状態を残さず正本と一覧へ追加できる
-
-<div align="center">
-  <img src="docs/images/live2d-light.webp" alt="Live2D キャラクターが返答するようす（ライトテーマ）" width="400" />
-  <img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターが返答するようす（ダークテーマ）" width="400" />
-  <br />
-  <sub>Live2D キャラ「ひより」。まばたき・モーション・口パクをモデル自身が行います（左：ライト／右：ダーク）。</sub>
-</div>
 
 ### スキル（一部）
 
