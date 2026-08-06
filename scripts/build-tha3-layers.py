@@ -260,6 +260,18 @@ def mouth_window(width: int, height: int):
     return (int(width * left), int(height * top), int(width * right), int(height * bottom))
 
 
+def sharpen_upscaled(image, image_filter):
+    """拡大でにじんだ輪郭を軽く戻す。
+
+    THA3 の出力は 512x512 で、入力要件（頭部が上半分中央の128x128付近）に従うと全身キャラの
+    被写体は 150x330 程度にしかならない。これを出力枠へ 2 倍以上に拡大するため、そのままでは
+    手描き素材より眠い絵になる。アルファは対象外にする（縁に輪郭が出るため）。
+    """
+    sharpened = image.convert("RGB").filter(image_filter.UnsharpMask(radius=1.2, percent=55, threshold=3))
+    sharpened.putalpha(image.getchannel("A"))
+    return sharpened
+
+
 def canvas_placement(box):
     """基準ポーズの箱を出力キャンバスへ収める倍率後サイズと貼り付け位置を返す。
 
@@ -290,7 +302,7 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
     try:
         import numpy
         import torch
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFilter
     except ImportError as error:
         raise RuntimeError("同梱THA3ランタイム（PyTorch・NumPy・Pillow）が不足しています。`cargo xtask setup tha3` を実行してください。") from error
     if sys.platform == "win32":
@@ -412,7 +424,7 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
                     size, position = canvas_placement(base_box)
                     with Image.new("RGBA", OUTPUT_SIZE, (0, 0, 0, 0)) as normalized:
                         with rendered.crop(base_box).resize(size, Image.Resampling.LANCZOS) as fitted:
-                            normalized.alpha_composite(fitted, position)
+                            normalized.alpha_composite(sharpen_upscaled(fitted, ImageFilter), position)
                         normalized.save(temp_paths[name])
                 print(f"[build-tha3-layers] 生成: {name}.png")
     finally:

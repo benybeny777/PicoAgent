@@ -715,6 +715,7 @@ async function probeRigLayers() {
     const gazeResults = await Promise.all(["thinking_left", "thinking_right"].map(probe));
     rigGazeAvailable = gazeResults.every(Boolean);
   }
+  retryPendingLipSync(); // 素材の判定待ちで保留していた読み上げへ口パクを付ける
 }
 
 // まばたき > 口 の優先度で現在の差分絵を決めて反映する。
@@ -779,6 +780,7 @@ function scheduleBlink() {
 
 // 現在のチャンク音声の解析だけを解除する（リグの見た目は維持）。
 function detachLipSyncAudio() {
+  pendingLipSyncAudio = null;
   if (rigMouthTimer) { clearInterval(rigMouthTimer); rigMouthTimer = 0; }
   if (rigVolFrame) { cancelAnimationFrame(rigVolFrame); rigVolFrame = 0; }
   try { rigSource?.disconnect(); rigAnalyser?.disconnect(); } catch {}
@@ -789,10 +791,33 @@ function detachLipSyncAudio() {
   rigRefresh();
 }
 
+// リグ（差分絵）も Live2D もまだ準備できていない間に始まった読み上げは、準備完了後に
+// 張り直せるよう覚えておく。Live2D はモデルとテクスチャの読み込みに数秒かかるため、
+// 起動直後の挨拶や読み込み中に届いた返答が、口の動かないまま読み上げられていた。
+let pendingLipSyncAudio = null;
+
+function retryPendingLipSync() {
+  const audio = pendingLipSyncAudio;
+  if (!audio) return;
+  pendingLipSyncAudio = null;
+  if (audio !== currentVoice || audio.paused || audio.ended) return;
+  attachLipSync(audio);
+}
+
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
-  if ((!rigAvailable && !live2dActive) || reduceMotion) return;
+  // 口が動かない原因を後から追えるようにする（OS の「アニメーションを減らす」が入っていると
+  // Live2D は口だけでなく視線・モーションもすべて止まる）。
+  if (reduceMotion) {
+    logApp("info", "リップシンクを行いません", "OSの「アニメーションを減らす」設定が有効です");
+    return;
+  }
+  if (!rigAvailable && !live2dActive) {
+    logApp("info", "リップシンクを保留しました", "キャラクターの表示準備が終わってから接続します");
+    pendingLipSyncAudio = audio;
+    return;
+  }
   if (!live2dActive) startRig();
   detachLipSyncAudio();
   // WebAudio の振幅解析を試み、使えない環境ではタイマー口パクへフォールバックする。
@@ -829,7 +854,11 @@ function attachLipSync(audio) {
       const v = (data[i] - 128) / 128;
       sum += v * v;
     }
-    const rms = Math.sqrt(sum / data.length);
+    // 解析点は音量調整（audio.volume）より後ろなので、そのままだと読み上げ音量を
+    // 下げただけでしきい値（peak の下限 0.02）に届かなくなり、口が閉じたままになる。
+    // 要素の音量で割り戻し、聞こえる大きさに依存しない振幅で判定する。
+    const gain = Math.max(0.05, audio.volume || 1);
+    const rms = Math.sqrt(sum / data.length) / gain;
     peak = Math.max(peak * 0.995, rms, 0.02);
     if (live2dActive) {
       // 声量に比例して口を開く（0〜1）。小さな音は閉じたままにする。
@@ -1037,6 +1066,7 @@ async function startLive2D(cfg) {
     const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
     model.motion(cfg.motions.idle, 0, idlePriority);
   }
+  retryPendingLipSync(); // 読み込み中に始まった読み上げへ、いまから口パクを付ける
 }
 
 // 状態名（idle/thinking/talking/sad）を character.json の live2d.motions でグループへ写像して再生する。
