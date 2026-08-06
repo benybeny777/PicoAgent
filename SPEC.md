@@ -261,6 +261,18 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - **プロジェクト管理は `project` 1本に統合してある。** 以前は「ワークスペース（環境の名前付きセット）」と「課題・記録」が別スキルだったが、ユーザーから見ればどちらも同じ「いま取り組んでいる案件」で、名前も概念も二重だった。1つの `Project` レコードが環境（許可ルート・追加許可パス・AI・モデル・キャラクター）と課題・記録を持ち、`switch` すれば全部が一緒に切り替わる。`todo_plan`（1本の作業計画）とは別物で、あちらは「いま取りかかっている手順」、`project` の課題は「残っている案件のやること」を持つ。
 - `ask_user` は「聞かないとやり直しになる」場面専用で、既定値で進める・調べれば分かることには使わない。候補ツールの圧縮（最大12件）に載るのはキーワードルーティング経由なので、曖昧な依頼で必ず提示されるとは限らない。
 
+### キャラクターの追加（ユーザー導入）
+
+同梱キャラクターは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれるため、実行時には増減できない。**自分で追加した Live2D モデル等は `app_data_dir/characters/<id>/` に置く**（`user_characters.rs`）。webview へは asset プロトコル（`convertFileSrc`）で読ませるので、`tauri.conf.json` の `app.security.assetProtocol.scope` を `$APPDATA/characters/**` に限定し、CSP へ `asset:` / `http://asset.localhost` を足してある（`tauri` の `protocol-asset` フィーチャが必要）。
+
+- 導入経路は設定画面の「キャラクター」タブ（zip またはフォルダを選ぶ）。選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、フロントへはパスだけを返す（プラグインの JS バインディングを配信物へ足さずに済ませるため）。
+- 導入は「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順。検証を通らなかったものが導入先へ残らない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
+- 「zip を開くとモデル名のフォルダが1つ」という一般的な配布形は、1階層だけ潜って `character.json` を探して吸収する。複数見つかった場合は1体に決められないので拒否する。
+- 削除は OS のゴミ箱へ移動する（ユーザーが持ち込んだデータのため物理削除しない）。選択中キャラを削除したときは `PICOAGENT_CHARACTER` を既定へ戻す。
+- 一覧はフロントが「同梱の `index.json`」と「`pet_user_characters` が返す追加分」を突き合わせて作る。同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
+
+**検証規則の正本は `src-tauri/src/character_pack.rs` 1本**。`cargo xtask character-pack` は同じファイルを `#[path]` で取り込む（規則が分かれると「CLI では通るのにアプリが弾く」ズレが生まれる）。`user_characters::guard` のテストが、CLI 側に規則のコピーが復活していないかを検出する。Live2D は `model3.json` の `FileReferences` が参照するファイルの実在まで確かめる（テクスチャ欠けのまま導入すると、そのキャラを選んだ瞬間に描画が崩れるため）。参照は「拡張子を持つ文字列」で拾うので、`Moc` / `Textures` / `Motions` / `Expressions` のような形の違いに影響されない。
+
 ### RAG との関係
 
 **スキルの仕組み自体は RAG ではなく tool use** である。RAG が「検索した文書をプロンプトへ足して生成する」読み取り専用の手法であるのに対し、スキルはモデルが呼ぶ関数であり、送信・変換・削除といった副作用を持つ。
@@ -308,7 +320,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `edit_file` | 既存ファイルの一部を、元の文字列と新しい文字列の厳密一致で置換する。`edits` 配列で複数箇所をまとめて編集できる | 共通許可ルートと `permissions::fs` に限定、既存ファイルのみ（新規作成は不可）、512KB 上限、1回20件まで。一致0件と（`replace_all` なしの）複数一致はエラーにして書き込まない。途中の1件でも失敗したら全件書き込まない。`preview=true` で無変更確認。書き込みロックと取り消し履歴は `workspace_files` と共有し、`workspace_files` の `undo` で戻せる |
 | `notebook_edit` | Jupyter ノートブック（.ipynb）をセル単位で読み・差し替え・挿入・削除する | 共通許可ルートと `permissions::fs` に限定、拡張子は `.ipynb` のみ、ファイル8MB・1セル128KB・500セル上限。書き換えたコードセルの `outputs` / `execution_count` は消す。`delete` は `confirm=true` が必要。ノートブックの実行はしない。取り消し履歴は `workspace_files` と共有する |
 | `todo_plan` | 多段タスクの作業計画を登録し、1手ずつ進捗を進める（set / list / complete / add / clear）。完了すると次の手順が自動で着手中になる | `PICOAGENT_TODO_PLAN` に保存し、一覧更新は名前付きロックで直列化する。手順は20件・1件200文字まで。読み取りに失敗したときは空一覧で上書きせずエラーを返す |
-| `project` | 案件ごとの作業環境（許可ルート・追加許可パス・AI・モデル・キャラクター）の登録・切替・登録解除に加え、課題台帳（登録・一覧・更新・完了・削除）と記録（メモ・決定事項・進捗）を同じレコードで扱う | `PICOAGENT_PROJECTS` に保存し、選択IDは `PICOAGENT_ACTIVE_PROJECT`。一覧更新は名前付きロックで直列化する。プロジェクト50件、1プロジェクトあたり課題200件・記録200件、タイトル120文字・記録300文字・タグ5個まで。`due` は `YYYY-MM-DD`（または `due_in_days` の相対指定）以外を拒否する。`forget` / `task_remove` / `note_remove` は `confirm=true` が必要で、`forget` のプレビューには一緒に消える課題・記録の件数を出す。記録は上限に達しても古いものを自動削除せず整理を促す（決定事項が黙って消えないように）。登録解除でファイルは削除しない。使用中IDを消したら選択状態も外す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する。旧キー `PICOAGENT_WORKSPACES` / `PICOAGENT_ACTIVE_WORKSPACE` は新キーが空のときだけ読んで移行し、移行後も消さない（元へ戻せるようにするため） |
+| `project` | 案件ごとの作業環境（許可ルート・追加許可パス・AI・モデル・キャラクター）の登録・切替・登録解除に加え、課題台帳（登録・一覧・更新・完了・削除）と記録（メモ・決定事項・進捗）を同じレコードで扱う | `PICOAGENT_PROJECTS` に保存し、選択IDは `PICOAGENT_ACTIVE_PROJECT`。一覧更新は名前付きロックで直列化する。プロジェクト50件、1プロジェクトあたり課題200件・記録200件、タイトル120文字・記録300文字・タグ5個まで。`due` は `YYYY-MM-DD`（または `due_in_days` の相対指定）以外を拒否する。`forget` / `task_remove` / `note_remove` は `confirm=true` が必要で、`forget` のプレビューには一緒に消える課題・記録の件数を出す。記録は上限に達しても古いものを自動削除せず整理を促す（決定事項が黙って消えないように）。登録解除でファイルは削除しない。使用中IDを消したら選択状態も外す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する。統合前の `PICOAGENT_WORKSPACES` / `PICOAGENT_ACTIVE_WORKSPACE` は引き継がず、読まない（統合前の環境設定だけのレコードが課題ゼロのプロジェクトとして復活しないように）。保存データは `id` 以外を `#[serde(default)]` にして、項目を足しても既存の一覧が読めなくならないようにする |
 | `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
 | `run_command` | 許可ルート内でローカルコマンドを実行。`background=true` で完了を待たずに起動し job_id を返す | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する。`background` も同じ許可判定を通ってから起動し、承認カード経由の実行は同期実行のみ |
@@ -466,8 +478,6 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MISTRAL_MODEL` | `mistral-medium-latest` | mistral | Mistral の既定モデル |
 | `PICOAGENT_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | mistral | Mistral OpenAI 互換エンドポイント |
 | `PICOAGENT_ALLOWED_ROOT` | ユーザーホーム | 許可（共通） | 全スキル共通の主たる許可ルート（相対パスの基準）。ファイル/ディレクトリ/コマンド実行はここを参照する |
-| `PICOAGENT_WORKSPACES` | （旧キー） | project | 旧キー。`PICOAGENT_PROJECTS` へ統合。新キーが空のときだけ読んで移行し、移行後も消さない |
-| `PICOAGENT_ACTIVE_WORKSPACE` | （旧キー） | project | 旧キー。`PICOAGENT_ACTIVE_PROJECT` へ統合。新キーが空のときだけ読む |
 | `PICOAGENT_WORKFLOWS` | `[]` | workflow | 名前付き保存ワークフロー一覧（JSON文字列、1件最大8手順） |
 | `PICOAGENT_ALLOWED_PATHS` | （空） | 許可（共通） | 追加の許可ルート（改行または `;` 区切り）。run_command の「永続許可」でも追記される |
 | `PICOAGENT_DENIED_PATHS` | （空） | 許可（共通） | 追加の拒否パス（改行または `;` 区切り）。この配下は常に操作を拒否する。`C:\Windows` / `Program Files` は設定に関わらず常に拒否 |

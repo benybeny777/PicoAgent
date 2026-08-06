@@ -4,6 +4,7 @@
 // 「プロジェクトの課題・記録」が別スキルだったが、ユーザーから見ればどちらも同じ
 // 「いま取り組んでいる案件」であり、名前も概念も二重だった。1つの `Project` に
 // 環境・課題・記録をまとめ、切り替えれば全部が一緒に切り替わるようにする。
+// 旧ワークスペースのデータは引き継がない（`PICOAGENT_WORKSPACES` は読まない）。
 //
 // - 環境: `switch` が許可ルート・AI・モデル・キャラクターを設定へ書き戻す
 // - 課題: 長く残る「やること」。いま取りかかっている一連の手順は `todo_plan` の役割
@@ -24,10 +25,6 @@ use crate::text;
 
 pub const KEY: &str = "PICOAGENT_PROJECTS";
 pub const ACTIVE_KEY: &str = "PICOAGENT_ACTIVE_PROJECT";
-/// 旧キー（ワークスペース時代）。新キーが空のときだけ読み、移行後も消さない
-/// （消すと元へ戻せなくなるため、バックアップとして残す）。
-const LEGACY_KEY: &str = "PICOAGENT_WORKSPACES";
-const LEGACY_ACTIVE_KEY: &str = "PICOAGENT_ACTIVE_WORKSPACE";
 
 const DEFAULT_PROJECT: &str = "default";
 const MAX_PROJECTS: usize = 50;
@@ -89,8 +86,8 @@ pub struct Note {
 
 /// 案件ひとつ。環境設定と課題・記録を同じレコードに持つ。
 ///
-/// すべて `#[serde(default)]` なので、旧ワークスペース（環境の項目だけを持つ JSON）も
-/// そのまま読める（課題・記録は空で始まる）。
+/// 追加した項目を欠く古い保存データでも読めるよう、`id` 以外は `#[serde(default)]` にする
+/// （項目を1つ足すたびに保存済みの一覧が丸ごと読めなくなるのを防ぐ）。
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Project {
     pub id: String,
@@ -133,25 +130,19 @@ fn slug(value: &str) -> String {
         .join("-")
 }
 
-/// 選択中のプロジェクトID。未設定なら旧キー、それも無ければ `default`。
+/// 選択中のプロジェクトID。未設定なら `default`。
 pub fn active_project(cfg: &Config) -> String {
-    for key in [ACTIVE_KEY, LEGACY_ACTIVE_KEY] {
-        let value = cfg.get(key, "");
-        let value = value.trim();
-        if !value.is_empty() {
-            return value.to_string();
-        }
+    let active = cfg.get(ACTIVE_KEY, "");
+    let active = active.trim();
+    if active.is_empty() {
+        DEFAULT_PROJECT.to_string()
+    } else {
+        active.to_string()
     }
-    DEFAULT_PROJECT.to_string()
 }
 
-/// 一覧を読む。新キーが空なら旧ワークスペースを読み込んで移行する（保存は次の更新時）。
 pub fn load(cfg: &Config) -> Result<Vec<Project>, String> {
-    let projects: Vec<Project> = crate::store::load_list(cfg, KEY)?;
-    if !projects.is_empty() {
-        return Ok(projects);
-    }
-    crate::store::load_list(cfg, LEGACY_KEY)
+    crate::store::load_list(cfg, KEY)
 }
 
 fn save(cfg: &Config, projects: &[Project]) -> Result<(), String> {
@@ -1015,33 +1006,34 @@ mod tests {
         assert_eq!(next_note_id(&[]), "n1");
     }
 
-    /// 旧ワークスペース（環境の項目だけを持つ JSON）をそのまま読めること。
-    /// 読めないと、移行時にユーザーの登録済みプロジェクトが消える。
+    /// 旧ワークスペースのデータは引き継がない。
+    ///
+    /// 読んでしまうと、統合前の環境設定だけのレコードが課題ゼロのプロジェクトとして
+    /// 復活し、消したはずのものが戻ってくる。
     #[test]
-    fn 旧ワークスペースを移行して読める() {
+    fn 旧ワークスペースのデータは読まない() {
         let cfg = Config::new();
         cfg.set("PICOAGENT_PROJECTS", "");
         cfg.set(
             "PICOAGENT_WORKSPACES",
-            r#"[{"id":"video","name":"動画制作","allowed_root":"C:/work","allowed_paths":"","provider":"local","model":"","character":"mugi"}]"#,
+            r#"[{"id":"video","name":"動画制作","allowed_root":"C:/work"}]"#,
         );
-        let projects = super::load(&cfg).expect("旧データを読めない");
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].id, "video");
-        assert_eq!(projects[0].allowed_root, "C:/work");
-        assert!(projects[0].tasks.is_empty(), "課題は空で始まる");
+        assert!(super::load(&cfg).unwrap().is_empty(), "旧キーを読んでいる");
 
-        // 選択中IDも旧キーから引き継ぐ。
         cfg.set("PICOAGENT_ACTIVE_PROJECT", "");
         cfg.set("PICOAGENT_ACTIVE_WORKSPACE", "video");
-        assert_eq!(super::active_project(&cfg), "video");
+        assert_eq!(super::active_project(&cfg), "default", "旧キーを読んでいる");
+    }
 
-        // 新キーがあればそちらを優先する（移行後に旧データへ戻らない）。
-        cfg.set("PICOAGENT_PROJECTS", r#"[{"id":"new"}]"#);
-        let projects = super::load(&cfg).unwrap();
-        assert_eq!(projects[0].id, "new");
-        cfg.set("PICOAGENT_ACTIVE_PROJECT", "new");
-        assert_eq!(super::active_project(&cfg), "new");
+    /// 項目を欠く保存データでも読めること（項目追加のたびに一覧が消えないように）。
+    #[test]
+    fn 項目が欠けたデータも読める() {
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_PROJECTS", r#"[{"id":"video"}]"#);
+        let projects = super::load(&cfg).expect("読めない");
+        assert_eq!(projects[0].id, "video");
+        assert!(projects[0].tasks.is_empty());
+        assert_eq!(projects[0].display_name(), "video", "名前が空なら id を出す");
     }
 
     #[test]

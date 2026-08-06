@@ -449,15 +449,44 @@ function versionedAssetUrl(url, version) {
   return version ? `${url}?v=${encodeURIComponent(version)}` : url;
 }
 
+// 自分で追加したキャラクター（app_data_dir 配下）を同梱一覧と同じ形へそろえる。
+// 同梱分は配信物に焼き込まれていて実行時に増減しないため、追加分だけをバックエンドから取る。
+async function userCharacterEntries() {
+  try {
+    const result = await window.picoagent?.userCharacters?.();
+    return (result?.characters || []).map(character => ({
+      id: character.id,
+      name: character.name,
+      description: character.description || "",
+      // 追加キャラはファイルパスから配信 URL を作る（同梱分は配信物からの相対パス）。
+      root: window.picoagent.assetUrl(character.path),
+    }));
+  } catch (error) {
+    // フォールバック許可: 追加キャラを取れなくても同梱キャラだけで動かす（記録は残す）。
+    logApp("error", "追加キャラクターの一覧を取得できませんでした", errorDetail(error));
+    return [];
+  }
+}
+
 async function loadCharacterManifest(characterId) {
   const catalogResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!catalogResponse.ok) throw new Error(`キャラクター一覧: HTTP ${catalogResponse.status}`);
   const catalog = await catalogResponse.json();
-  const entry = catalog.characters.find(character => character.id === characterId)
-    || catalog.characters.find(character => character.id === catalog.default);
+  const bundled = catalog.characters.map(character => ({
+    id: character.id,
+    name: character.name,
+    description: character.description || "",
+    root: `assets/characters/${character.manifest.replace(/\/character\.json$/, "")}`,
+  }));
+  // 同じ id なら同梱側を優先する（追加分が同梱キャラを乗っ取らないようにする）。
+  const known = new Set(bundled.map(character => character.id));
+  const entries = bundled.concat((await userCharacterEntries()).filter(character => !known.has(character.id)));
+  const entry = entries.find(character => character.id === characterId)
+    || entries.find(character => character.id === catalog.default)
+    || entries[0];
   if (!entry) throw new Error("利用できるキャラクターがありません");
-  const root = `assets/characters/${entry.manifest.replace(/\/character\.json$/, "")}`;
-  const manifestResponse = await fetch(`assets/characters/${entry.manifest}?v=${characterManifestCacheKey}`, { cache: "no-store" });
+  const root = entry.root;
+  const manifestResponse = await fetch(`${root}/character.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!manifestResponse.ok) throw new Error(`キャラクター定義: HTTP ${manifestResponse.status}`);
   const manifest = await manifestResponse.json();
   return { entry, manifest, root };
