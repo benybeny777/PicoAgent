@@ -824,3 +824,6 @@ button.tab:active {
 }
 /* テキスト選択色をテーマに合わせる。 */
 ::selection { background: rgba(233, 138, 182, .35); }
+
+/* キャラクター追加の操作ボタン列（zip / フォルダを選ぶ）。 */
+.character-add-actions { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }

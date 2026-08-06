@@ -1,0 +1,330 @@
+// user_characters.rs - ユーザーが自分で追加したキャラクター（Live2D モデル等）の管理。
+//
+// 同梱キャラクターは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれる。
+// 実行時には書き換えられないため、**追加したキャラは `app_data_dir/characters/<id>/` に置く**。
+// webview へは asset プロトコル（`convertFileSrc`）で読ませる。
+//
+// 導入はフォルダでも zip でも受け付ける。zip は「一時フォルダへ展開 → 検証 → rename で確定」
+// の順にして、検証を通らなかったものが導入先に残らないようにする。
+// 検証規則は `character_pack` が正本（CLI と同じ規則を使う）。
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use serde::Serialize;
+use serde_json::Value;
+use tauri::{AppHandle, Manager};
+
+use crate::character_pack;
+
+/// zip の展開上限（ZIP 爆弾で保存領域を埋めないための安全弁）。
+const MAX_ENTRIES: usize = character_pack::MAX_FILES;
+const MAX_TOTAL_BYTES: u64 = character_pack::MAX_TOTAL_BYTES;
+
+#[derive(Serialize)]
+pub struct UserCharacter {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// webview から読ませるための実パス（フロントで `convertFileSrc` に通す）。
+    pub path: String,
+    /// Live2D モデルを持つか（一覧の表示用）。
+    pub live2d: bool,
+}
+
+/// 追加キャラクターの置き場（`app_data_dir/characters`）。
+pub fn root(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("characters")
+}
+
+/// 導入済みの追加キャラクター一覧。壊れているものは飛ばして続ける。
+pub fn list(app: &AppHandle) -> Vec<UserCharacter> {
+    let root = root(app);
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        // フォールバック許可: 置き場が無い（1つも追加していない）状態は正常なので空で返す。
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(path.join("character.json")) else {
+            continue;
+        };
+        let Ok(manifest) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let Some(id) = manifest.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        // フォルダ名と id がずれていると読み込み先を特定できないので出さない。
+        if path.file_name().and_then(|name| name.to_str()) != Some(id) {
+            continue;
+        }
+        out.push(UserCharacter {
+            id: id.to_string(),
+            name: manifest
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(id)
+                .to_string(),
+            description: manifest
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            path: path.to_string_lossy().to_string(),
+            live2d: manifest.pointer("/live2d/model").is_some(),
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
+/// `character.json` が直下に無い zip（1階層余分に包まれている）を吸収する。
+///
+/// 配布されている Live2D パックは「zip を開くとモデル名のフォルダが1つある」形が多く、
+/// そのたびにユーザーへ包み直しを強いるのは不親切なので、1階層だけ潜って探す。
+fn pack_root(extracted: &Path) -> Result<PathBuf> {
+    if extracted.join("character.json").is_file() {
+        return Ok(extracted.to_path_buf());
+    }
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(extracted)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("character.json").is_file())
+        .collect();
+    match candidates.len() {
+        1 => Ok(candidates.remove(0)),
+        0 => bail!("character.json が見つかりません。キャラクターパックの形式を確認してください。"),
+        _ => bail!("character.json を持つフォルダが複数あります。1体分だけを選んでください。"),
+    }
+}
+
+/// zip を展開先へ取り出す。パス脱出・件数・総量を展開しながら検査する。
+fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
+    let file = std::fs::File::open(archive)
+        .with_context(|| format!("zip を開けません: {}", archive.display()))?;
+    let mut zip = zip::ZipArchive::new(file).context("zip を読めません")?;
+    if zip.len() > MAX_ENTRIES {
+        bail!("zip の項目が多すぎます（{MAX_ENTRIES} 件まで）");
+    }
+    let mut total = 0u64;
+    for index in 0..zip.len() {
+        let mut entry = zip.by_index(index)?;
+        // `enclosed_name` は `..` や絶対パスを含むエントリに None を返す（zip slip 対策）。
+        let Some(relative) = entry.enclosed_name().map(Path::to_path_buf) else {
+            bail!("zip に安全でないパスが含まれています: {}", entry.name());
+        };
+        let target = destination.join(&relative);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            continue;
+        }
+        total = total.saturating_add(entry.size());
+        if total > MAX_TOTAL_BYTES || entry.size() > character_pack::MAX_FILE_BYTES {
+            bail!("zip の中身が大きすぎます（合計250MB・1ファイル40MBまで）");
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut out = std::fs::File::create(&target)
+            .with_context(|| format!("展開できません: {}", target.display()))?;
+        std::io::copy(&mut entry, &mut out)?;
+    }
+    Ok(())
+}
+
+fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let from = entry.path();
+        // シンボリックリンクは辿らない（実体がパック外を指す可能性がある）。
+        if std::fs::symlink_metadata(&from)?.file_type().is_symlink() {
+            bail!("パック内にシンボリックリンクは置けません: {}", from.display());
+        }
+        let to = destination.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// フォルダまたは zip を導入する。導入したキャラクターの id と名前を返す。
+pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
+    if !source.exists() {
+        bail!("指定先が見つかりません: {}", source.display());
+    }
+    let root = root(app);
+    std::fs::create_dir_all(&root)
+        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
+
+    // 一時フォルダで組み立て、検証を通ってから rename で確定する
+    // （途中で失敗した中途半端なフォルダを導入先へ残さない）。
+    let staging = root.join(format!(".installing-{}", std::process::id()));
+    std::fs::remove_dir_all(&staging).ok();
+    std::fs::create_dir_all(&staging)?;
+
+    let result = (|| -> Result<(String, String)> {
+        if source.is_dir() {
+            copy_dir(source, &staging.join("pack"))?;
+        } else {
+            let extension = source
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if extension != "zip" {
+                bail!("フォルダか .zip を指定してください: {}", source.display());
+            }
+            extract_zip(source, &staging.join("pack"))?;
+        }
+        let pack = pack_root(&staging.join("pack"))?;
+        let manifest = character_pack::validate(&pack)?;
+        let id = character_pack::required_text(&manifest, "id")?.to_string();
+        let name = character_pack::required_text(&manifest, "name")?.to_string();
+        let destination = root.join(&id);
+        if destination.exists() {
+            bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
+        }
+        std::fs::rename(&pack, &destination)
+            .with_context(|| format!("導入先へ移動できません: {}", destination.display()))?;
+        Ok((id, name))
+    })();
+
+    std::fs::remove_dir_all(&staging).ok();
+    result
+}
+
+/// 追加キャラクターを削除する。ユーザーが持ち込んだデータなので OS のゴミ箱へ移す。
+pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        bail!("不正なidです: {id}");
+    }
+    let target = root(app).join(id);
+    if !target.is_dir() {
+        bail!("追加キャラクターが見つかりません: {id}");
+    }
+    crate::tools::trash_file::move_to_trash(&target)
+        .map_err(|error| anyhow::anyhow!("ゴミ箱へ移動できません: {error}"))
+}
+
+/// 検証規則が CLI 側へ再実装されていないことを固定する設計ガード。
+///
+/// 以前は `xtask/src/character_pack.rs` が同じ規則のコピーを持っていた。片方だけを直すと
+/// 「CLI では通るのにアプリが弾く」ズレが生まれるため、**規則の正本は
+/// `src-tauri/src/character_pack.rs` 1本**にして、CLI はそれを `#[path]` で取り込む。
+/// この判定は共通モジュール側に置けない（`crate::` を参照できないため）ので、
+/// 取り込む側でない**アプリ側**のこのファイルに置く。
+#[cfg(test)]
+mod guard {
+    #[test]
+    fn xtaskは検証規則を自前実装しない() {
+        let path = crate::guard_scan::repo_root().join("xtask/src/character_pack.rs");
+        let text = std::fs::read_to_string(&path).expect("xtask の character_pack.rs を読めない");
+        assert!(
+            text.contains("src-tauri/src/character_pack.rs"),
+            "xtask は検証規則の正本（src-tauri/src/character_pack.rs）を取り込んでください"
+        );
+        for marker in ["fn validate_tree(", "ALLOWED_EXTENSIONS", "fn safe_relative("] {
+            assert!(
+                !text.contains(marker),
+                "xtask に検証規則のコピーが残っています（`{marker}`）。正本だけを使ってください"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_zip, pack_root};
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("picoagent-uc-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 「zip を開くとフォルダが1つ」という一般的な配布形を吸収できること。
+    #[test]
+    fn 一階層包まれたパックも根を見つける() {
+        let dir = temp_dir("root");
+        std::fs::create_dir_all(dir.join("MyModel")).unwrap();
+        std::fs::write(dir.join("MyModel/character.json"), b"{}").unwrap();
+        assert_eq!(pack_root(&dir).unwrap(), dir.join("MyModel"));
+
+        // 直下にある場合はそのまま。
+        let flat = temp_dir("flat");
+        std::fs::write(flat.join("character.json"), b"{}").unwrap();
+        assert_eq!(pack_root(&flat).unwrap(), flat);
+
+        // 複数あると 1 体に決められないので拒否する。
+        let many = temp_dir("many");
+        for name in ["a", "b"] {
+            std::fs::create_dir_all(many.join(name)).unwrap();
+            std::fs::write(many.join(name).join("character.json"), b"{}").unwrap();
+        }
+        assert!(pack_root(&many).unwrap_err().to_string().contains("複数"));
+
+        for path in [dir, flat, many] {
+            std::fs::remove_dir_all(path).ok();
+        }
+    }
+
+    /// zip slip（`../` で展開先の外へ書き出す攻撃）を拒否すること。
+    #[test]
+    fn zipの危険なパスを展開しない() {
+        let dir = temp_dir("zipslip");
+        let archive = dir.join("evil.zip");
+        {
+            let file = std::fs::File::create(&archive).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::FileOptions::default();
+            zip.start_file("../escaped.txt", options).unwrap();
+            zip.write_all(b"x").unwrap();
+            zip.finish().unwrap();
+        }
+        let out = dir.join("out");
+        let error = extract_zip(&archive, &out).unwrap_err().to_string();
+        assert!(error.contains("安全でないパス"), "error: {error}");
+        assert!(!dir.join("escaped.txt").exists(), "展開先の外へ書き出している");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 通常のzipは展開できる() {
+        let dir = temp_dir("zipok");
+        let archive = dir.join("pack.zip");
+        {
+            let file = std::fs::File::create(&archive).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::FileOptions::default();
+            zip.start_file("MyModel/character.json", options).unwrap();
+            zip.write_all(b"{}").unwrap();
+            zip.finish().unwrap();
+        }
+        let out = dir.join("out");
+        extract_zip(&archive, &out).unwrap();
+        assert!(out.join("MyModel/character.json").is_file());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
