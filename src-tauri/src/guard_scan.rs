@@ -53,7 +53,12 @@ pub fn all_sources() -> Vec<Source> {
     out
 }
 
-/// `skills/<名前>/mod.rs` 一式。
+/// `skills/<名前>/**.rs` 一式（`mod.rs` とスキル専用の補助モジュール）。
+///
+/// 補助モジュール（`run_command/jobs.rs`・`chitchat/trends.rs` など）も同じ規則で
+/// 書かれるので、`mod.rs` だけを見ると外部プロセス起動や `fs::write` の違反を
+/// そこへ書いた瞬間に見逃す。`name` はどちらもスキル名（ディレクトリ名）にして、
+/// スキル単位で例外を指定するガード（`OWN_CHECK_ALLOWED` など）がそのまま効くようにする。
 pub fn skill_sources() -> Vec<Source> {
     let root = repo_root();
     let mut out = Vec::new();
@@ -62,13 +67,29 @@ pub fn skill_sources() -> Vec<Source> {
         .flatten()
     {
         let name = entry.file_name().to_string_lossy().to_string();
-        let path = entry.path().join("mod.rs");
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            out.push(Source {
-                name,
-                path: path.strip_prefix(&root).unwrap_or(&path).to_path_buf(),
-                text,
-            });
+        let Ok(files) = std::fs::read_dir(entry.path()) else {
+            continue;
+        };
+        let mut paths: Vec<PathBuf> = files
+            .flatten()
+            .map(|file| file.path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
+            .collect();
+        // mod.rs を先頭にして、既存の表示順（スキル本体が先）を保つ。
+        paths.sort_by_key(|path| {
+            (
+                path.file_name().and_then(|file| file.to_str()) != Some("mod.rs"),
+                path.clone(),
+            )
+        });
+        for path in paths {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push(Source {
+                    name: name.clone(),
+                    path: path.strip_prefix(&root).unwrap_or(&path).to_path_buf(),
+                    text,
+                });
+            }
         }
     }
     assert!(

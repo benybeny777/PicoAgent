@@ -2,6 +2,12 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../40_mugi_live2d"
+		},
+		{
+			"path": "../30_live"
 		}
 	],
 	"settings": {}

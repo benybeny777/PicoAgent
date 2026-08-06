@@ -43,6 +43,32 @@ fn to_anthropic_tools(tools: &[Value]) -> Vec<Value> {
         .collect()
 }
 
+/// data URL 形式の画像を Anthropic の image ブロックへ変換する。
+///
+/// `data:<media type>;base64,<データ>` 以外（外部URLなど）は base64 ソースに載せられない
+/// ため、その画像だけを飛ばす。1枚も載せられなければ None を返し、本文だけを送る。
+fn image_blocks(message: &Message) -> Option<Vec<Value>> {
+    let images = message.images.as_ref()?;
+    let mut blocks = Vec::new();
+    for image in images {
+        let Some(rest) = image.strip_prefix("data:") else {
+            continue;
+        };
+        let Some((media_type, data)) = rest.split_once(";base64,") else {
+            continue;
+        };
+        blocks.push(json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": media_type, "data": data },
+        }));
+    }
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks)
+    }
+}
+
 fn to_anthropic_messages(messages: &[Message]) -> (Option<String>, Vec<Value>) {
     let mut system_parts = Vec::new();
     let mut out = Vec::new();
@@ -84,7 +110,14 @@ fn to_anthropic_messages(messages: &[Message]) -> (Option<String>, Vec<Value>) {
                 }));
             }
             _ => {
-                out.push(json!({ "role": "user", "content": message.content }));
+                // 画像付き user メッセージ（view_image スキル経由）は content ブロックで渡す。
+                match image_blocks(message) {
+                    Some(mut blocks) => {
+                        blocks.push(json!({ "type": "text", "text": message.content }));
+                        out.push(json!({ "role": "user", "content": blocks }));
+                    }
+                    None => out.push(json!({ "role": "user", "content": message.content })),
+                }
             }
         }
     }

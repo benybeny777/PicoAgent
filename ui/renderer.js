@@ -1,3 +1,7 @@
+// バックエンドへ「フロントを読み込めた」ことを最初に伝える。これが届かないと
+// boot_screen が読み込み失敗と判断し、キャラクター付きの案内画面へ切り替える。
+window.picoagent?.frontendReady?.();
+
 const petApp = document.getElementById("petApp");
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
@@ -28,6 +32,7 @@ const relationshipCard = document.getElementById("relationshipCard");
 const relationshipLabel = document.getElementById("relationshipLabel");
 const relationshipStats = document.getElementById("relationshipStats");
 const relationshipMoments = document.getElementById("relationshipMoments");
+const relationshipClear = document.getElementById("relationshipClear");
 const variantRow = document.getElementById("variantRow");
 const variantSelect = document.getElementById("variantSelect");
 const onboarding = document.getElementById("onboarding");
@@ -44,6 +49,7 @@ let attachedFiles = [];
 let lastUserText = "";
 // エージェント進捗（pet:agent_status）を受信するリスナー解除関数。
 let unlistenStatus = null;
+let unlistenActivity = null;
 // ストリーミング受信中のテキストバッファ・リスナー解除関数・描画スロットル用 rAF ハンドル。
 let streamBuffer = "";
 let unlistenStream = null;
@@ -57,6 +63,7 @@ let promptHistoryIndex = null;
 let promptDraft = "";
 // 既定のクイックアクション。設定 PICOAGENT_QUICK_ACTIONS（1行1件「ラベル|本文」）で置き換え可能。
 let quickActionItems = null; // null = 既定を使用
+let pendingChoices = null; // ask_user の選択肢（null = 通常のクイック操作を表示）
 function parseQuickActions(text) {
   const items = String(text ?? "")
     .split("\n")
@@ -93,6 +100,7 @@ let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 1;
 let relationshipState = null;
+let relationshipMemoryEnabled = true;
 const NOTICE_STORAGE_KEY = "picoagent.actionCenter.v1";
 function loadStoredNotices() {
   try {
@@ -199,9 +207,13 @@ window.addEventListener("beforeunload", () => {
   if (dailyTimer) clearInterval(dailyTimer);
   if (alarmTimer) clearInterval(alarmTimer);
   if (bootLogTimer) clearInterval(bootLogTimer);
+  if (continuousVoiceTimer) clearTimeout(continuousVoiceTimer);
+  if (pendingVoiceSubmitTimer) clearTimeout(pendingVoiceSubmitTimer);
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
+  if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
   stopVoice(false);
+  if (micStream) stopMicCapture();
   stopLive2D();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
@@ -499,8 +511,9 @@ function resolveLive2dConfig(manifest, variant) {
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterOverridesCache = overrides;
   const { manifest, root } = await loadCharacterManifest(characterId);
-  const hasAnyLive2d = Boolean(manifest.live2d?.model)
-    || (Array.isArray(manifest.variants) && manifest.variants.some(item => item?.live2d?.model));
+  const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
+  const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
+    || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
   if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
@@ -519,7 +532,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
-  if (activeLive2dConfig?.model) {
+  if (hasLive2dDefinition(activeLive2dConfig)) {
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
       await startLive2D(activeLive2dConfig);
@@ -681,9 +694,9 @@ function scheduleBlink() {
       rigRefresh();
       setTimeout(resolve, ms);
     });
-    await step("blink_half", sleepy ? 140 : 60);
-    await step("blink_closed", 90);
-    await step("blink_half", sleepy ? 260 : 60);
+    await step("blink_half", sleepy ? 160 : 100);
+    await step("blink_closed", 140);
+    await step("blink_half", sleepy ? 280 : 100);
     rigBlinkPhase = null;
     rigRefresh();
     scheduleBlink();
@@ -790,7 +803,9 @@ function stopLipSync() {
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
 // character.json に live2d.model がある場合、PNG フレームの代わりに Cubism ランタイム
 // （ui/vendor/live2d/、cargo xtask setup live2d で取得）でモデルを WebGL 描画する。
-// まばたきとアイドルモーションはモデル定義（EyeBlink・Idle グループ）が自動で担当し、
+// まばたき（EyeBlink グループ）・髪の揺れ（physics3）・呼吸と自然な揺らぎはランタイムの
+// 自動処理に任せる。手で書いた固定波形はこれらを毎フレーム上書きして不自然になるため使わない。
+// ただしランタイムはモーション再生中に自動まばたきを回さないので、startLive2D で自前に回す。
 // 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
 let live2dActive = false;
 let activeLive2dConfig = null; // いま表示している variant の live2d 定義（無ければ null）
@@ -815,7 +830,7 @@ async function ensureLive2DRuntime() {
   if (window.PIXI?.live2d?.Live2DModel) return;
   if (!live2dRuntimePromise) {
     live2dRuntimePromise = (async () => {
-      await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js");
+      await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js?v=5-r5");
       await loadScriptOnce("vendor/live2d/pixi.min.js");
       await loadScriptOnce("vendor/live2d/cubism4.min.js");
       // モデル同梱のモーション音声（サンプルボイス）は TTS 読み上げと二重再生になるため無効化する。
@@ -831,6 +846,8 @@ async function ensureLive2DRuntime() {
 async function startLive2D(cfg) {
   await ensureLive2DRuntime();
   stopLive2D();
+  // cfg は variant で解決済みの live2d 定義（キャラ本体か variant 側のどちらか）。
+  const motionEnabled = !reduceMotion || cfg.alwaysAnimate === true;
   if (!live2dCanvas) {
     live2dCanvas = document.createElement("canvas");
     live2dCanvas.id = "live2dCanvas";
@@ -840,17 +857,54 @@ async function startLive2D(cfg) {
   const width = character.clientWidth || 265;
   const height = character.clientHeight || 315;
   if (!live2dApp) {
+    const transparentContextOptions = {
+      alpha: true,
+      premultipliedAlpha: true,
+      antialias: true,
+    };
+    const transparentContext = live2dCanvas.getContext("webgl2", transparentContextOptions)
+      || live2dCanvas.getContext("webgl", transparentContextOptions);
     live2dApp = new PIXI.Application({
       view: live2dCanvas,
+      context: transparentContext,
       width,
       height,
+      transparent: true,
+      useContextAlpha: true,
       backgroundAlpha: 0,
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
     });
+    live2dCanvas.style.background = "transparent";
+    if (live2dApp.renderer.background) live2dApp.renderer.background.alpha = 0;
+    live2dApp.renderer.backgroundAlpha = 0;
+    live2dApp.renderer.transparent = true;
+    if (live2dApp.renderer._backgroundColorRgba) {
+      live2dApp.renderer._backgroundColorRgba[3] = 0;
+    }
   }
-  const model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${cfg.model}`, { autoInteract: false });
+  const modelCandidates = Array.isArray(cfg.models) && cfg.models.length ? cfg.models : [cfg.model];
+  let model = null;
+  let modelError = null;
+  for (const candidate of modelCandidates) {
+    if (!candidate) continue;
+    try {
+      model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${candidate}`, { autoInteract: false });
+      break;
+    } catch (error) {
+      modelError = error;
+      logApp("warn", `Live2Dモデル ${candidate} は現在のCubism Coreで読めません。次の互換モデルを試します`, errorDetail(error));
+    }
+  }
+  if (!model) throw modelError || new Error("利用可能なLive2D互換モデルがありません");
+  logApp("info", "Live2D表示寸法", JSON.stringify({
+    canvas: [width, height],
+    original: [model.internalModel.originalWidth, model.internalModel.originalHeight],
+    bounds: [model.width, model.height],
+    scale: Number(cfg.scale) || 1,
+    motionEnabled,
+  }));
   // 表示枠へ等比率で収め、下端中央に立たせる。
   const fit = Math.min(width / model.internalModel.originalWidth, height / model.internalModel.originalHeight);
   model.scale.set(fit * (Number(cfg.scale) || 1));
@@ -865,13 +919,32 @@ async function startLive2D(cfg) {
   // 既定値を当てても存在しない ID を毎フレーム書き込むだけになるため。
   const lipSyncEnabled = cfg.lipSync !== false;
   const lipParam = String(cfg.lipSyncParam || lipSyncGroup?.Ids?.[0] || "ParamMouthOpenY");
+  // 呼吸・体の揺らぎ（updateNaturalMovements）・髪の揺れ（physics3）・まばたき（EyeBlink）は
+  // すべてランタイムの自動処理が担当する。ここで固定 sin 波を上書きすると、
+  // 物理演算の出力（例: ParamHairBack）や自動の自然な揺らぎを毎フレーム潰してしまい、
+  // 機械的で不自然な動きになる。手で書くのはリップシンクだけにとどめる。
   const motionUpdate = model.internalModel.motionManager.update.bind(model.internalModel.motionManager);
   model.internalModel.motionManager.update = (...args) => {
     const updated = motionUpdate(...args);
+    // 口はモーションが閉じ戻すため、モーション適用直後に読み上げ振幅で上書きする。
     if (lipSyncEnabled && live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
     return updated;
   };
-  if (reduceMotion) {
+  // ランタイムは「モーション再生中は自動まばたきを回さない」（Cubism4InternalModel.update の
+  // `if (!motionUpdated) eyeBlink.updateParameters(...)`）。PicoAgent はアイドルモーションを
+  // ループさせ続けるため、放置すると自動まばたきが一度も動かない。
+  // モーション適用後に自前で回して、ランダム間隔のまばたきを取り戻す。
+  const internalModel = model.internalModel;
+  if (internalModel.eyeBlink) {
+    let lastBlinkAt = performance.now();
+    internalModel.on("afterMotionUpdate", () => {
+      const now = performance.now();
+      const deltaSeconds = Math.min((now - lastBlinkAt) / 1000, 0.5); // タブ復帰時の巨大な差分で一気に進めない
+      lastBlinkAt = now;
+      internalModel.eyeBlink.updateParameters(coreModel, deltaSeconds);
+    });
+  }
+  if (!motionEnabled) {
     // モーション再生を止め、呼吸などの静かな自動更新だけにする。
     model.internalModel.motionManager.groups.idle = "";
   } else if (cfg.motions?.idle) {
@@ -881,16 +954,22 @@ async function startLive2D(cfg) {
   live2dModel = model;
   live2dActive = true;
   petSprite.style.display = "none";
+  if (motionEnabled && cfg.motions?.idle) {
+    const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
+    model.motion(cfg.motions.idle, 0, idlePriority);
+  }
 }
 
 // 状態名（idle/thinking/talking/sad）を character.json の live2d.motions でグループへ写像して再生する。
 function playLive2DMotion(name) {
-  if (!live2dModel || reduceMotion) return;
-  if (name === "idle") { live2dModel.internalModel.motionManager.stopAllMotions(); return; } // Idle グループの自動再生へ戻す
+  const alwaysAnimate = activeLive2dConfig?.alwaysAnimate === true;
+  if (!live2dModel || (reduceMotion && !alwaysAnimate)) return;
   const motions = activeLive2dConfig?.motions || {};
   const group = motions[name] || motions.idle;
   if (!group) return;
-  const priority = window.PIXI?.live2d?.MotionPriority?.FORCE ?? 3;
+  const priority = name === "idle"
+    ? (window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1)
+    : (window.PIXI?.live2d?.MotionPriority?.FORCE ?? 3);
   live2dModel.motion(group, undefined, priority);
 }
 
@@ -1232,14 +1311,27 @@ function renderMarkdown(container, src) {
   container.append(wrap);
 }
 
+// ask_user の選択肢を受け取る。null / 空なら通常のクイック操作へ戻す。
+function setPendingChoices(choices) {
+  const items = Array.isArray(choices)
+    ? choices
+        .map(choice => ({ label: String(choice?.label || "").trim(), text: String(choice?.label || "").trim(), title: String(choice?.description || "").trim() }))
+        .filter(item => item.label)
+    : [];
+  const next = items.length > 0 ? items : null;
+  if (next === null && pendingChoices === null) return;
+  pendingChoices = next;
+  renderQuickActions();
+}
+
 function renderQuickActions() {
   if (!quickActions) return;
   quickActions.replaceChildren();
-  for (const action of (quickActionItems || QUICK_ACTIONS)) {
+  for (const action of (pendingChoices || quickActionItems || QUICK_ACTIONS)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action.label;
-    button.title = action.text;
+    button.title = action.title || action.text;
     button.addEventListener("click", () => {
       if (busy) return;
       if (composer.hidden) openComposer();
@@ -1828,14 +1920,42 @@ function renderRelationship(data) {
       for (const moment of moments) {
         const row = document.createElement("div");
         row.className = "relationship-moment";
-        row.textContent = moment.text;
+        row.dataset.pinned = String(moment.pinned === true);
+        const text = document.createElement("div");
+        text.textContent = moment.text;
+        row.append(text);
+        const actions = document.createElement("div");
+        actions.className = "relationship-moment-actions";
+        if (moment.resumePrompt) {
+          const resume = document.createElement("button");
+          resume.type = "button";
+          resume.dataset.action = "resume";
+          resume.dataset.prompt = moment.resumePrompt;
+          resume.textContent = "続きをやる";
+          actions.append(resume);
+        }
+        const pin = document.createElement("button");
+        pin.type = "button";
+        pin.dataset.action = "pin";
+        pin.dataset.id = moment.id;
+        pin.dataset.pinned = String(moment.pinned === true);
+        pin.textContent = moment.pinned ? "固定解除" : "固定";
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.dataset.action = "delete";
+        remove.dataset.id = moment.id;
+        remove.textContent = "削除";
+        actions.append(pin, remove);
+        row.append(actions);
         relationshipMoments.append(row);
       }
     }
   }
+  if (relationshipClear) relationshipClear.hidden = !relationshipState.recentMoments?.length;
 }
 
 async function recordRelationship(kind, detail = "") {
+  if (!relationshipMemoryEnabled) return;
   try {
     const result = await window.picoagent.relationshipEvent(kind, detail);
     renderRelationship(result);
@@ -1870,12 +1990,54 @@ function recordTouch(zone) {
 relationshipButton?.addEventListener("click", async event => {
   event.stopPropagation();
   relationshipCard.hidden = !relationshipCard.hidden;
+  relationshipButton.setAttribute("aria-expanded", String(!relationshipCard.hidden));
   if (!relationshipCard.hidden) {
     try { renderRelationship(await window.picoagent.relationshipState()); }
     catch (error) { logApp("warn", "いっしょの記録を読めませんでした", errorDetail(error)); }
+    document.getElementById("relationshipClose")?.focus();
   }
 });
-document.getElementById("relationshipClose")?.addEventListener("click", () => { relationshipCard.hidden = true; });
+document.getElementById("relationshipClose")?.addEventListener("click", () => {
+  relationshipCard.hidden = true;
+  relationshipButton?.setAttribute("aria-expanded", "false");
+  relationshipButton?.focus();
+});
+
+relationshipMoments?.addEventListener("click", async event => {
+  const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
+  if (!button) return;
+  try {
+    if (button.dataset.action === "resume") {
+      relationshipCard.hidden = true;
+      relationshipButton?.setAttribute("aria-expanded", "false");
+      openComposer();
+      setInputValue(button.dataset.prompt || "");
+      input.focus();
+      return;
+    }
+    button.disabled = true;
+    const result = button.dataset.action === "pin"
+      ? await window.picoagent.pinRelationshipMoment(button.dataset.id, button.dataset.pinned !== "true")
+      : await window.picoagent.deleteRelationshipMoment(button.dataset.id);
+    renderRelationship(result);
+  } catch (error) {
+    logApp("warn", "いっしょの記録を更新できませんでした", errorDetail(error));
+    showToast("記録を更新できませんでした", "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+relationshipClear?.addEventListener("click", async () => {
+  if (!window.confirm("このキャラクターとの記録をすべて消しますか？")) return;
+  try {
+    renderRelationship(await window.picoagent.clearRelationship());
+    showToast("いっしょの記録を消しました", "success");
+  } catch (error) {
+    logApp("warn", "いっしょの記録を消せませんでした", errorDetail(error));
+    showToast("記録を消せませんでした", "error");
+  }
+});
 
 function queueNotice(line) {
   const text = String(line ?? "").trim();
@@ -1898,6 +2060,7 @@ bubble.addEventListener("click", event => {
   openComposer();
 });
 character.addEventListener("click", event => {
+  if (event.target instanceof Element && event.target.closest("button")) return;
   // クリックのたびに小さくはねる（連打時はアニメーションを巻き戻して再生）。
   character.classList.remove("boop");
   void character.offsetWidth;
@@ -1921,6 +2084,11 @@ character.addEventListener("click", event => {
   event.stopPropagation();
   stopVoice();
   status.textContent = "";
+});
+character.addEventListener("keydown", event => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  character.click();
 });
 character.addEventListener("animationend", event => {
   if (event.animationName === "pet-boop") character.classList.remove("boop");
@@ -2457,6 +2625,8 @@ composer.addEventListener("submit", async event => {
   const jobId = `chat-${Date.now()}-${requestRevision}`;
   let jobState = "running";
   let jobDidWork = false;
+  let jobToolFailed = false;
+  const jobTools = new Set();
   clearAlarmSnooze(false);
   markActivity();
   lastUserText = text; // エラーリトライ用に保持
@@ -2492,7 +2662,6 @@ composer.addEventListener("submit", async event => {
           // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
           upsertJob(jobId, { body: status.textContent, status: "running" });
-          if (progress.includes("ツールを実行中")) jobDidWork = true;
           if (/検索|search|web|ブラウザ/i.test(progress)) setAnimation("searching", true);
           else if (/ツールを実行中|ステップ/.test(progress)) setAnimation("working", true);
           else if (/計画|考え/.test(progress)) setAnimation("thinking", true);
@@ -2501,6 +2670,22 @@ composer.addEventListener("submit", async event => {
     }
   } catch (error) {
     logApp("warn", "進捗購読の設定に失敗しました", errorDetail(error));
+  }
+
+  // 表示文言ではなく構造化イベントで、実際に動いたツールと成否を追跡する。
+  try {
+    if (window.picoagent.listen) {
+      if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
+      unlistenActivity = await window.picoagent.listen("pet:agent_activity", activity => {
+        if (!busy || !activity || typeof activity !== "object") return;
+        const tools = Array.isArray(activity.tools) ? activity.tools.filter(name => typeof name === "string") : [];
+        for (const name of tools) jobTools.add(name);
+        if (activity.phase === "started") jobDidWork = tools.length > 0;
+        if (activity.phase === "completed" && activity.success === false) jobToolFailed = true;
+      });
+    }
+  } catch (error) {
+    logApp("warn", "作業結果購読の設定に失敗しました", errorDetail(error));
   }
 
   // ストリーミングチャンクをリアルタイム表示する（rAF スロットルで1フレーム1描画）。
@@ -2587,6 +2772,8 @@ composer.addEventListener("submit", async event => {
     }
     if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
     status.textContent = result.error ? "接続を確認してね" : "";
+    // 質問カードの選択肢を反映する（choices が無い応答で通常のクイック操作へ戻る）。
+    setPendingChoices(result.error ? null : result.choices);
     if (result.error) {
       jobState = "failed";
       logApp("error", "AI応答がエラーを返しました", result.reply || "");
@@ -2644,6 +2831,7 @@ composer.addEventListener("submit", async event => {
     if (unlistenStreamReset) { unlistenStreamReset(); unlistenStreamReset = null; }
     streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
+    if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
     busy = false;
     const jobFailed = jobState === "failed";
     const jobCancelled = jobState === "cancelled";
@@ -2654,12 +2842,13 @@ composer.addEventListener("submit", async event => {
     });
     updateComposerState();
     if (!jobCancelled) {
-      if (jobFailed) {
+      const relationshipDetail = JSON.stringify({ tools: [...jobTools], resumePrompt: lastUserText });
+      if (jobFailed || jobToolFailed) {
         setAnimation("concern", true);
-        if (jobDidWork) recordRelationship("task_failure", lastUserText);
+        if (jobDidWork) recordRelationship("task_failure", relationshipDetail);
       } else {
         setAnimation("success", true);
-        if (jobDidWork) recordRelationship("task_success", lastUserText);
+        if (jobDidWork) recordRelationship("task_success", relationshipDetail);
       }
       setTimeout(() => { if (!currentVoice && !micStream) setAnimation("idle"); }, 1100);
     }
@@ -2686,8 +2875,13 @@ let micSamples = 0;        // 録音した総サンプル数（上限判定用�
 let micAutoStopping = false;
 let micSpeechDetected = false;
 let micLastVoiceAt = 0;
-let continuousVoice = localStorage.getItem("picoagent.continuousVoice") === "true";
+// 連続会話はマイクの意図しない再開を避けるため、起動ごとにOFFから始める。
+let continuousVoice = false;
 let continuousVoiceTimer = null;
+let pendingVoiceSubmitTimer = null;
+let micNoiseFloor = 0;
+let micNoiseFrames = 0;
+let micStartedAt = 0;
 // 逐次文字起こし（リアルタイム風プレビュー）の状態。録音中に数秒ごとの区間を裏で
 // 文字起こしして入力欄へ出し、停止時に全体の文字起こしで置き換えて確定する。
 let micSession = 0;        // 録音の世代。停止後に届いた途中結果を捨てる
@@ -2770,7 +2964,29 @@ function stopMicCapture() {
   micCtx = null;
   ctx?.close().catch(() => {});
   micButton?.classList.remove("recording");
+  petApp.classList.remove("is-listening");
   if (!busy && !currentVoice) setAnimation("idle");
+}
+
+function cancelPendingVoiceSubmit(message = "音声の送信を取り消しました") {
+  if (!pendingVoiceSubmitTimer) return false;
+  clearTimeout(pendingVoiceSubmitTimer);
+  pendingVoiceSubmitTimer = null;
+  status.textContent = "";
+  showToast(message, "warn");
+  input.focus();
+  return true;
+}
+
+function scheduleVoiceSubmit() {
+  if (!continuousVoice || !input.value.trim() || busy) return;
+  if (pendingVoiceSubmitTimer) clearTimeout(pendingVoiceSubmitTimer);
+  status.textContent = "1.5秒後に送信（Escで取消）";
+  pendingVoiceSubmitTimer = setTimeout(() => {
+    pendingVoiceSubmitTimer = null;
+    status.textContent = "";
+    if (continuousVoice && input.value.trim() && !busy) composer.requestSubmit();
+  }, 1500);
 }
 
 async function finishRecording() {
@@ -2806,9 +3022,7 @@ async function finishRecording() {
   } finally {
     status.classList.remove("busy");
     if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") status.textContent = "";
-    if (continuousVoice && input.value.trim() && !busy) {
-      setTimeout(() => composer.requestSubmit(), 80);
-    }
+    scheduleVoiceSubmit();
   }
 }
 
@@ -2833,7 +3047,10 @@ async function startRecording() {
     micSamples = 0;
     micAutoStopping = false;
     micSpeechDetected = false;
-    micLastVoiceAt = performance.now();
+    micStartedAt = performance.now();
+    micLastVoiceAt = micStartedAt;
+    micNoiseFloor = 0;
+    micNoiseFrames = 0;
     const maxSamples = Math.floor((MAX_RECORD_BYTES - 44) / 2);
     micNode.onaudioprocess = (event) => {
       if (micAutoStopping) return;
@@ -2849,12 +3066,25 @@ async function startRecording() {
         for (let i = 0; i < frame.length; i += 1) energy += frame[i] * frame[i];
         const rms = Math.sqrt(energy / frame.length);
         const now = performance.now();
-        if (rms > .018) {
+        if (now - micStartedAt < 700) {
+          micNoiseFrames += 1;
+          micNoiseFloor += (rms - micNoiseFloor) / micNoiseFrames;
+          return;
+        }
+        const voiceThreshold = Math.max(.012, micNoiseFloor * 2.8);
+        if (rms > voiceThreshold) {
           micSpeechDetected = true;
           micLastVoiceAt = now;
         } else if (continuousVoice && micSpeechDetected && now - micLastVoiceAt > 1300 && micSamples / micSampleRate > 1.2) {
           micAutoStopping = true;
           finishRecording();
+          return;
+        } else if (continuousVoice && !micSpeechDetected && now - micStartedAt > 15000) {
+          micAutoStopping = true;
+          continuousVoice = false;
+          updateContinuousVoiceButton();
+          stopMicCapture();
+          showToast("無音が続いたため連続会話を停止しました", "warn");
           return;
         }
       }
@@ -2868,6 +3098,7 @@ async function startRecording() {
     source.connect(micNode);
     micNode.connect(micCtx.destination);
     micButton.classList.add("recording");
+    petApp.classList.add("is-listening");
     setAnimation("listening", true);
     status.textContent = "🎙 録音中…（マイクをもう一度クリックで停止）";
     // 逐次文字起こし（リアルタイム風プレビュー）を開始する。
@@ -2911,7 +3142,6 @@ function scheduleContinuousListening(delay = CONTINUOUS_VOICE_MIN_MS) {
 
 voiceLoopButton?.addEventListener("click", async () => {
   continuousVoice = !continuousVoice;
-  localStorage.setItem("picoagent.continuousVoice", String(continuousVoice));
   updateContinuousVoiceButton();
   if (!continuousVoice) {
     if (continuousVoiceTimer) { clearTimeout(continuousVoiceTimer); continuousVoiceTimer = null; }
@@ -2920,10 +3150,19 @@ voiceLoopButton?.addEventListener("click", async () => {
     showToast("連続会話を終了しました", "success");
     return;
   }
-  showToast("話し終わると自動で送信します", "success");
+  showToast("この起動中だけ、話し終わると自動送信します", "success");
   scheduleContinuousListening();
 });
 updateContinuousVoiceButton();
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden || !continuousVoice) return;
+  continuousVoice = false;
+  updateContinuousVoiceButton();
+  if (continuousVoiceTimer) { clearTimeout(continuousVoiceTimer); continuousVoiceTimer = null; }
+  if (micStream) stopMicCapture();
+  cancelPendingVoiceSubmit("画面が非表示になったため音声送信を取り消しました");
+});
 
 let pushToTalkTimer = null;
 let pushToTalkActive = false;
@@ -2984,8 +3223,8 @@ document.getElementById("exportHistory")?.addEventListener("click", async () => 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];
 let petCooldownUntil = 0;
-character.addEventListener("mousemove", event => {
-  if (reduceMotion || event.buttons) return; // ドラッグ（ウィンドウ移動）中は撫で判定しない
+character.addEventListener("pointermove", event => {
+  if (reduceMotion || (event.pointerType === "mouse" && event.buttons)) return; // マウスのウィンドウ移動中だけ撫で判定しない
   const now = performance.now();
   petStrokes.push({ x: event.clientX, t: now });
   petStrokes = petStrokes.filter(s => now - s.t < 1200);
@@ -3077,6 +3316,11 @@ input.addEventListener("input", () => {
 });
 input.addEventListener("keydown", event => {
   if (event.key === "Escape") {
+    if (cancelPendingVoiceSubmit()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     event.stopPropagation();
     closeComposer();
   }
@@ -3102,6 +3346,13 @@ historySearch?.addEventListener("input", () => {
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
+  if (cancelPendingVoiceSubmit()) return;
+  if (relationshipCard && !relationshipCard.hidden) {
+    relationshipCard.hidden = true;
+    relationshipButton?.setAttribute("aria-expanded", "false");
+    relationshipButton?.focus();
+    return;
+  }
   if (!composer.hidden) {
     closeComposer();
     return;
@@ -3209,6 +3460,12 @@ window.picoagent.on("pet:ui", (ui) => {
   if (ui.theme != null) applyTheme(ui.theme);
   if (ui.fontPx != null) applyFontPx(ui.fontPx);
   if (ui.voiceVolume != null) applyVoiceVolume(ui.voiceVolume);
+  if (ui.relationshipMemoryEnabled != null) {
+    relationshipMemoryEnabled = ui.relationshipMemoryEnabled !== false;
+    if (relationshipButton) relationshipButton.title = relationshipMemoryEnabled
+      ? "いっしょの記録を見る"
+      : "いっしょの記録は設定で停止中";
+  }
   applyBubbleLayout(ui.bubbleWidth, ui.bubbleHeight, ui.bubbleLeft, ui.bubbleTop);
   if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
     logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
@@ -3473,7 +3730,11 @@ function startAlarmPolling() {
   startBootLogTicker();
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
+  relationshipMemoryEnabled = info.relationshipMemoryEnabled !== false;
   renderRelationship({ relationship: info.relationship, bondLabel: info.bondLabel });
+  if (relationshipButton) relationshipButton.title = relationshipMemoryEnabled
+    ? "いっしょの記録を見る"
+    : "いっしょの記録は設定で停止中";
   online.dataset.up = info.up;
   if (info.theme != null) applyTheme(info.theme);
   if (info.fontPx != null) applyFontPx(info.fontPx);
@@ -3538,6 +3799,7 @@ function startAlarmPolling() {
   if (!info.onboardingDone && onboarding) {
     onboarding.hidden = false;
     stopVoice();
+    onboarding.querySelector("button[data-mode]")?.focus();
   } else {
     scheduleContinuousListening();
   }
@@ -3564,6 +3826,20 @@ onboarding?.addEventListener("click", async event => {
     logApp("error", "初回設定を保存できませんでした", errorDetail(error));
     showToast("初回設定を保存できませんでした", "error");
     onboarding.querySelectorAll("button").forEach(item => { item.disabled = false; });
+  }
+});
+onboarding?.addEventListener("keydown", event => {
+  if (event.key !== "Tab") return;
+  const buttons = [...onboarding.querySelectorAll("button:not([disabled])")];
+  if (!buttons.length) return;
+  const first = buttons[0];
+  const last = buttons[buttons.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 });
 window.picoagent.on("pet:layout-reset", () => {

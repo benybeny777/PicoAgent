@@ -2,3 +2,20 @@
 # 旧 `npm run <script>` の置き換え（Node 不要）。
 [alias]
 xtask = "run --quiet --manifest-path xtask/Cargo.toml --"
+
+# Windows: すべてのバイナリに comctl32 v6 への依存をマニフェストとして埋め込む。
+#
+# 依存クレート（tray-icon / muda / rfd など）は comctl32 **v6 でしか公開されていない**
+# `TaskDialogIndirect` / `SetWindowSubclass` を静的にインポートする。マニフェストで v6 を
+# 要求しないと Windows は System32 の v5 を読み、エントリポイントが見つからず
+# STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139) で即異常終了する。
+#
+# アプリ本体は tauri-build がマニフェストを埋めるため動くが、**`cargo test` のテスト
+# バイナリには埋まらない**。そのため `cargo test` が1件も実行されないまま落ち、
+# `doc_sync` / `permissions` / `store` などの設計ガードが Windows で丸ごと無効化されていた。
+# ここでリンカ引数として指定し、テストバイナリを含む全ターゲットへ行き渡らせる。
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+  "-C",
+  "link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'",
+]

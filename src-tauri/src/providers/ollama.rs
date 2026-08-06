@@ -33,6 +33,22 @@ fn to_wire(messages: &[Message]) -> Vec<Value> {
                 // Ollama は tool 結果を位置・名前で扱う。
                 return json!({ "role": "tool", "content": m.content });
             }
+            // Ollama は画像を data URL ではなく素の base64 配列で受け取る（view_image 経由）。
+            if let Some(images) = &m.images {
+                let encoded: Vec<Value> = images
+                    .iter()
+                    .map(|image| {
+                        let data = image
+                            .split_once(";base64,")
+                            .map(|(_, data)| data)
+                            .unwrap_or(image.as_str());
+                        Value::String(data.to_string())
+                    })
+                    .collect();
+                if !encoded.is_empty() {
+                    return json!({ "role": m.role, "content": m.content, "images": encoded });
+                }
+            }
             json!({ "role": m.role, "content": m.content })
         })
         .collect()

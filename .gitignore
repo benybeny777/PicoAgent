@@ -25,13 +25,18 @@ src-tauri/resources/aivis/*
 dist/
 ui-dist/
 .tmp/
+/tmp-*
+/temp/
 
 # キャラの配信コピー（正本は characters/。cargo xtask sync-characters で生成）
 ui/assets/characters/
 
-# Live2D ランタイムとサンプルモデル（cargo xtask setup live2d で取得。再配布条件があるため含めない）
+# Live2D ランタイムと公式サンプルモデル（cargo xtask setup live2d で取得。再配布条件があるため含めない）
 ui/vendor/live2d/
 characters/*/live2d/
+# 自作のむぎモデルはPicoAgentの配布物として追跡する。
+!characters/mugi/live2d/
+!characters/mugi/live2d/**
 
 # Live2D 制作用 PSD（python scripts/build-live2d-psd.py で layers/ から再生成できる）
 characters/*/live2d-src/

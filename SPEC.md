@@ -100,7 +100,7 @@ graph TD
 8. ツール出力は `MAX_TOOL_OUTPUT_CHARS = 8,000` 文字で打ち切り、コンテキスト超過を防ぐ。また `tools::check_injection()` でプロンプトインジェクション試行パターンを検査し、検知時は結果を警告付きでラップしてからメッセージへ積む。**同じ検査を添付ファイルの抽出本文にも適用する**（`commands.rs` の `mark_untrusted_if_injection`）。添付本文はツール結果ではなくユーザー発話の一部として渡るため、ここで検査しないと「受け取った文書に指示を仕込む」経路だけが素通りしてしまう。ツール引数 JSON の解析失敗（`_raw` フィールド）を検出した場合はツールを呼ばずエラー文字列を返してモデルへ再試行を促す（`dispatch_or_error()`）。
 9. `PICOAGENT_PLANNING_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効、かつ質問が複雑（120文字超・疑問符2個以上・手順/ステップ系語を含む）な場合、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、分解結果を system 追記として付与してから通常の chat ループへ進む。
 10. `PICOAGENT_SELF_EVAL_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効な場合、最終応答が短すぎる（8文字未満）または明示的な拒否パターンを含む場合に `provider.chat()` で1回再生成する（`self_improve()`）。再生成に失敗した場合は元の応答をそのまま返す。
-11. **スーパーエージェントモード（`PICOAGENT_SUPER_AGENT=true`）**: 上記の計画・自己評価をまとめて有効化し、トップレベルの `max_steps` を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定 12、呼び出し値〜30 にクランプ）へ引き上げて多段のツール連鎖を回し切る。計画開始・計画内容・「ステップ k/N を実行中…」・「ツールを実行中: …」を `pet:agent_status` イベントでフロントへ送り、計画→実行を可視化する（フロントはステータス行に表示）。
+11. **スーパーエージェントモード（`PICOAGENT_SUPER_AGENT=true`）**: 上記の計画・自己評価をまとめて有効化し、トップレベルの `max_steps` を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定 12、呼び出し値〜30 にクランプ）へ引き上げて多段のツール連鎖を回し切る。計画開始・計画内容・「ステップ k/N を実行中…」・「ツールを実行中: …」を `pet:agent_status` イベントでフロントへ送り、計画→実行を可視化する（フロントはステータス行に表示）。ツールの実行有無・対象・成否は表示文言から推測せず、`pet:agent_activity` の `started` / `completed` / `waiting` と `tools` / `failedTools` で構造化して通知する。
 12. **ネスト深さガード**: `run()` 冒頭で `AGENT_DEPTH`（プロセス全体の `AtomicUsize`）を RAII（`DepthGuard`）で増減する。`subagent` スキルはこの深さを見て `PICOAGENT_SUBAGENT_MAX_DEPTH`（既定 2）以上ならネストを拒否し、無限再帰を防ぐ。計画・自己評価はトップレベル（深さ 1）でのみ行い、サブエージェント内（深さ 2 以降）ではスキップする。
 
 通常の質問では、ローカルモデルの `tool_calls` 対応状況に依存させず、最初の `chat()` より前に
@@ -240,22 +240,26 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | 役割 | 副作用 | 本数 | スキル |
 |---|---|---|---|
 | **Retrieval**（外部知識の検索・取得） | read-only | 10 | `web_search` `web_fetch` `browser_control` `doc_search` `rss_feed` `news_scrape` `weather` `currency_rates` `market_indices` `time` |
-| **Read**（手元の状態の読み取り） | read-only | 2 | `read_file` `clipboard_text` |
+| **Read**（手元の状態の読み取り） | read-only | 5 | `read_file` `clipboard_text` `glob_files` `grep_search` `view_image` |
 | **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
 | **Action**（SaaS の読み書き） | write | 12 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` |
-| **Action**（ファイル生成・変換） | write | 8 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` |
+| **Action**（ファイル生成・変換） | write | 9 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` `notebook_edit` |
 | **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
-| **Action**（汎用の出入り口） | write | 2 | `http_api` `workspace_files` |
-| **Destructive / 高リスク** | destructive | 5 | `trash_file` `run_command` `code_runner` `app_control` `desktop_control` |
-| **State**（アプリ内の永続状態） | write | 6 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `project_workspace` |
+| **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
+| **Destructive / 高リスク** | destructive | 6 | `trash_file` `run_command` `command_job` `code_runner` `app_control` `desktop_control` |
+| **State**（アプリ内の永続状態） | write | 7 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `todo_plan` `project` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
-| **Orchestration**（多段実行・組み立て） | 呼び先に従う | 5 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` |
+| **Orchestration**（多段実行・組み立て） | 呼び先に従う | 6 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` `ask_user` |
 
 補足:
 
-- **Destructive** の4本は安全のしくみ側で別扱いになる。`run_command` は allowlist 一致のみ、`code_runner` は最終手段、`trash_file` はゴミ箱への移動（完全削除はしない）、`app_control` はアプリ自身の終了。
+- **Destructive** の5本は安全のしくみ側で別扱いになる。`run_command` は allowlist 一致のみ、`command_job` は `run_command` が起動したジョブの様子見と停止のみ（起動はできない）、`code_runner` は最終手段、`trash_file` はゴミ箱への移動（完全削除はしない）、`app_control` はアプリ自身の終了。
 - **Orchestration** は他スキルを呼ぶため、副作用は呼び先で決まる。`workflow` は手順を保存する点で State も兼ね、`research_report` は検索（Retrieval）と Markdown 書き出し（write）を兼ねる。`chitchat` は `agent_callable=false` の内部スキルで、モデルには提示せずアプリ側が直接 `dispatch` する。
 - **Action（SaaS の読み書き）** は一覧取得と作成の両方を持つものが大半で、`gmail` のアーカイブ・既読化のように既存状態を変える操作も含む。
+- **コーディングエージェント系**（`read_file` `glob_files` `grep_search` `edit_file` `notebook_edit` `todo_plan` `run_command` の `background` と `command_job`）は、Claude Code / Codex が持つ Read / Glob / Grep / Edit（apply_patch）/ NotebookEdit / TodoWrite（update_plan）/ Bash のバックグラウンド実行（BashOutput・KillShell）に相当する。読む → 探す（名前・内容）→ 部分的に直す → 走らせて様子を見る → 進捗を進める、という作業の流れを分担するため、単体ではなく組で使う。`edit_file` / `notebook_edit` は `workspace_files` と同じロック・取り消し履歴を共有するので、編集は `workspace_files` の `undo` で戻せる。
+- **`view_image` と `ask_user` はツール結果（文字列）だけでは成立しないため、マーカー方式でエージェントループと連携する。** ツールは内部プロトコルのマーカー文字列を返し、`agent.rs` がそれを解釈する。`view_image` は画像付き user メッセージを会話へ差し込んでループを続け、`ask_user` は `run_command` の承認カードと同じくループを止めてユーザーへ質問を返す。マーカーは設定キーではないので `doc_sync` の `NOT_CONFIG_KEYS` に理由付きで登録してある。
+- **プロジェクト管理は `project` 1本に統合してある。** 以前は「ワークスペース（環境の名前付きセット）」と「課題・記録」が別スキルだったが、ユーザーから見ればどちらも同じ「いま取り組んでいる案件」で、名前も概念も二重だった。1つの `Project` レコードが環境（許可ルート・追加許可パス・AI・モデル・キャラクター）と課題・記録を持ち、`switch` すれば全部が一緒に切り替わる。`todo_plan`（1本の作業計画）とは別物で、あちらは「いま取りかかっている手順」、`project` の課題は「残っている案件のやること」を持つ。
+- `ask_user` は「聞かないとやり直しになる」場面専用で、既定値で進める・調べれば分かることには使わない。候補ツールの圧縮（最大12件）に載るのはキーワードルーティング経由なので、曖昧な依頼で必ず提示されるとは限らない。
 
 ### RAG との関係
 
@@ -279,7 +283,11 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `market_indices` | Yahoo Finance chart API による日経平均・TOPIX・NYダウ・NASDAQ・S&P500 の取得と推移チャート（スパークライン） | APIキー不要、timeout、User-Agent 指定 |
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新ニュース見出し候補を取得。今日のニュース要約ではこのスキルを先に使う | 対象ドメインを Google News / Yahoo!ニュースに限定、HTML 1MB上限、件数上限、timeout、User-Agent 指定 |
 | `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
-| `read_file` | ローカルのテキストファイル読込 | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否、64KB で打ち切り |
+| `read_file` | ローカルのテキストファイルを行番号つきで読込。`offset` / `limit` で範囲指定できる | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否。ファイル4MB・既定800行（最大2000）・1行800文字・出力128KB で打ち切り、続きの `offset` を案内する |
+| `view_image` | 許可ルート配下の画像をモデルへ見せる（png / jpg / gif / webp / bmp、最大3枚） | 共通許可ルート配下に限定、1枚4MB上限。ツール結果には画像を載せず、`agent.rs` が画像付き user メッセージを会話へ差し込む。実際に読めるかはモデルがマルチモーダルかどうかに依るため、「非対応モデルでは無視される」旨をツール結果へ明記する。画像を運べる形式へは各プロバイダが変換する（OpenAI 互換は `image_url`、Ollama は `images` 配列、Anthropic は image ブロック） |
+| `ask_user` | 判断が分かれる点を2〜4個の選択肢つきでユーザーへ確認する | 外部送信なし。マーカーを返してエージェントループを止め、質問文と選択肢をチャットへ返す（フロントはクイック操作欄へ選択肢ボタンを出す）。次のユーザー発話は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま渡す。質問300文字・ラベル40文字・説明120文字で切り詰める |
+| `glob_files` | 許可ルート配下のファイルを glob パターン（`**/*.rs` など）で探し、パス一覧を返す。既定は更新の新しい順 | 共通許可ルート配下に限定、シンボリックリンク／ジャンクションは辿らない、深さ12・走査20,000件・表示既定100件（最大500）で打ち切り、`node_modules` / `target` / `.git` など生成物と隠しフォルダは除外 |
+| `grep_search` | 許可ルート配下のファイル内容を正規表現で検索し、行番号付きの一致行・一致ファイル・件数を返す（`output_mode`） | 共通許可ルート配下に限定、検索本体は同梱 ripgrep → PATH の順に解決。ripgrep が無い場合は内蔵走査（固定文字列一致）へ落ち、その旨を結果の先頭に明記する。1ファイル2MB・深さ12・走査5,000件・1行400文字・表示既定60行（最大300）で打ち切り、timeout 30秒 |
 | `web_search` | Web検索結果のタイトル・URL・概要を返す。すべての回答前に必ず実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KBで制限 |
 | `research_report` | 複数観点のWeb検索を束ね、出典付きMarkdown調査レポートを生成する。`save=true` または `save_path` 指定で保存し、既定で1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も生成する | 検索待ち時間3〜60秒、観点最大6件、各観点最大5件、レポート96KB上限、保存は共通許可ルート配下の `.md` のみ |
 | `spark_workspace` | brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを含む資料ワークスペースを一括生成する | 保存は共通許可ルート配下のみ、入力テキスト24,000文字上限、外部通信なし |
@@ -297,10 +305,14 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `clipboard_text` | クリップボードのテキストを取得し、要約・返信文・TODO化の素材として返す | OS標準コマンドを3秒上限で実行。取得文字数は `PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
 | `productivity_tools` | 文字数分析、大小文字変換、JSON整形/圧縮、Base64、URL変換、単位換算、日付計算、日付差分、週番号、timestamp、行分析、反転、行ソート、重複行除去、行trim、折り返し、URL抽出、メール抽出、キーワード数、チェックサム、CSV→Markdown表、割合、BMI、HEX/RGB変換、スラッグ化など30種類のローカル実用処理 | 設定不要、外部通信なし、入力テキスト20,000文字上限 |
 | `workspace_files` | 許可ルート内のファイル一覧、テキスト読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 共通許可ルートと `permissions::fs` に限定、読込/書込サイズ上限。同一プロセス内の変更は直列化する。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリ内保持する。`undo` は実行時点の許可を再検証してから復元し、新規ファイルはOSのゴミ箱へ移動する。アプリ再起動後は取り消せない |
-| `project_workspace` | 許可ルート・追加許可パス・プロバイダ・モデル・キャラクターを名前付きセットとして登録・切替・登録解除 | `PICOAGENT_WORKSPACES` に保存し、選択IDは `PICOAGENT_ACTIVE_WORKSPACE`。一覧更新は名前付きロックで直列化する。登録解除は `confirm=true` が必要でファイルは削除せず、使用中IDなら選択状態も消す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する |
+| `edit_file` | 既存ファイルの一部を、元の文字列と新しい文字列の厳密一致で置換する。`edits` 配列で複数箇所をまとめて編集できる | 共通許可ルートと `permissions::fs` に限定、既存ファイルのみ（新規作成は不可）、512KB 上限、1回20件まで。一致0件と（`replace_all` なしの）複数一致はエラーにして書き込まない。途中の1件でも失敗したら全件書き込まない。`preview=true` で無変更確認。書き込みロックと取り消し履歴は `workspace_files` と共有し、`workspace_files` の `undo` で戻せる |
+| `notebook_edit` | Jupyter ノートブック（.ipynb）をセル単位で読み・差し替え・挿入・削除する | 共通許可ルートと `permissions::fs` に限定、拡張子は `.ipynb` のみ、ファイル8MB・1セル128KB・500セル上限。書き換えたコードセルの `outputs` / `execution_count` は消す。`delete` は `confirm=true` が必要。ノートブックの実行はしない。取り消し履歴は `workspace_files` と共有する |
+| `todo_plan` | 多段タスクの作業計画を登録し、1手ずつ進捗を進める（set / list / complete / add / clear）。完了すると次の手順が自動で着手中になる | `PICOAGENT_TODO_PLAN` に保存し、一覧更新は名前付きロックで直列化する。手順は20件・1件200文字まで。読み取りに失敗したときは空一覧で上書きせずエラーを返す |
+| `project` | 案件ごとの作業環境（許可ルート・追加許可パス・AI・モデル・キャラクター）の登録・切替・登録解除に加え、課題台帳（登録・一覧・更新・完了・削除）と記録（メモ・決定事項・進捗）を同じレコードで扱う | `PICOAGENT_PROJECTS` に保存し、選択IDは `PICOAGENT_ACTIVE_PROJECT`。一覧更新は名前付きロックで直列化する。プロジェクト50件、1プロジェクトあたり課題200件・記録200件、タイトル120文字・記録300文字・タグ5個まで。`due` は `YYYY-MM-DD`（または `due_in_days` の相対指定）以外を拒否する。`forget` / `task_remove` / `note_remove` は `confirm=true` が必要で、`forget` のプレビューには一緒に消える課題・記録の件数を出す。記録は上限に達しても古いものを自動削除せず整理を促す（決定事項が黙って消えないように）。登録解除でファイルは削除しない。使用中IDを消したら選択状態も外す。許可ルートは次のスキル実行から、AI・モデル・キャラクターは再起動後に反映する。旧キー `PICOAGENT_WORKSPACES` / `PICOAGENT_ACTIVE_WORKSPACE` は新キーが空のときだけ読んで移行し、移行後も消さない（元へ戻せるようにするため） |
 | `workflow` | 最大8件のスキル手順を名前付きで保存し、順番に再実行 | `PICOAGENT_WORKFLOWS` に保存し、一覧更新は名前付きロックで直列化する。登録時にツールの存在と引数形式を検証し、自身の再帰登録は禁止する。エラー結果で後続を停止し、各スキルの許可・確認・上限はそのまま適用する |
 | `trash_file` | 許可ルート内の既存ファイル/フォルダをOSのゴミ箱へ移動 | 物理削除なし、共通許可ルート配下に限定、許可ルートそのもの・ルート外・Windows/Program Files 配下は拒否、`confirm=true` がない場合は preview のみ |
-| `run_command` | 許可ルート内でローカルコマンドを実行 | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する |
+| `run_command` | 許可ルート内でローカルコマンドを実行。`background=true` で完了を待たずに起動し job_id を返す | 既定無効、`PICOAGENT_COMMAND_ALLOWLIST` の prefix 一致のみ、shell 不使用、stdin 無効、timeout、出力32KBで制限。許可ルート・保護パスは共通 permissions を参照。`rm` / `del` / `Remove-Item` / `git clean` などスキル経由の物理削除コマンドは拒否する。`background` も同じ許可判定を通ってから起動し、承認カード経由の実行は同期実行のみ |
+| `command_job` | `run_command` が `background=true` で起動したジョブの一覧・途中出力取得・停止 | 起動はできない（様子見と停止のみ）。`PICOAGENT_COMMAND_ENABLED` が必要。同時実行4件、1ジョブの保持出力64KB（超過分は古い側から破棄）、終了済み履歴20件。`output` は前回の続きだけを返す。停止は `kill` 後に `wait` でハンドルまで回収し、アプリ終了時（`RunEvent::Exit`）に全ジョブを停止する |
 | `code_runner` | 他スキルで要望を満たせないときの最終手段。PowerShell または Python のスクリプトを書いて実行し、出力を受け取って自力で達成する | 既定無効（`PICOAGENT_CODE_RUNNER_ENABLED`）。作業ディレクトリ・許可ルート・保護パスは共通 permissions を参照。物理削除・破壊的操作らしきコード（Remove-Item / rm / os.remove / shutil.rmtree 等）は拒否。スクリプトは一時ファイルへ書き出して実行後に削除、timeout・出力32KBで制限 |
 | `slack_send_message` | Slack Bot token または Incoming Webhook URL でメッセージ送信。Bot token では認証テストとチャンネル履歴取得もできる | token/webhook は設定から都度取得、秘密値を出力しない、本文4000文字、履歴20件上限、timeout |
 | `gmail_message` | Gmail API でメール一覧取得・本文取得・ラベル一覧・ラベル付け/解除・アーカイブ・既読/未読化・ゴミ箱移動・送信・下書き作成 | OAuth access token は設定から都度取得、秘密値を出力しない、既定は下書き、検索条件ベースの cleanup は preview 後に `confirm=true` で実行、ゴミメール掃除は完全削除ではなく Gmail のゴミ箱移動、cleanup 件数上限は `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS`（0で無制限）、検索クエリ/本文/件名サイズ上限、timeout |
@@ -398,9 +410,10 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_BUBBLE_TOP_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する top(px)。設定画面には出さない |
 | `PICOAGENT_WINDOW_WIDTH_PX` | 自動 | 内部UI | 透明ウィンドウの幅(px)。アプリ終了時に保存し、起動時に復元する |
 | `PICOAGENT_WINDOW_HEIGHT_PX` | 自動 | 内部UI | 透明ウィンドウの高さ(px)。アプリ終了時に保存し、起動時に復元する |
-| `PICOAGENT_WINDOW_BOTTOM_PX` | 自動 | 内部UI | 画面下端からウィンドウ下端までの縦オフセット(px)。アプリ終了時に保存し、起動時に復元する（解像度非依存）。横位置は保存せず常に右端基準で固定 |
-| `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | （旧キー） | 内部UI | 旧版が保存していたウィンドウ絶対座標。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
+| `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
+| `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_BOOT_TIMEOUT_MS` | `12000` | 内部UI | フロントの準備完了（`pet_frontend_ready`）をこのミリ秒だけ待ち、届かなければキャラクター付きの案内画面へ切り替える。設定画面には出さない（`3000`〜`120000` に丸める） |
 | `PICOAGENT_NAP_MINUTES` | `15` | 基本 | 無操作でキャラが居眠りするまでの分数（`0` で居眠りしない） |
 | `PICOAGENT_QUICK_ACTIONS` | 空 | 基本 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |
 | `PICOAGENT_UPDATE_CHECK_ENABLED` | `true` | 基本 | 起動時に GitHub Releases の最新版を確認し、新しければ通知する |
@@ -417,6 +430,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
 | `PICOAGENT_COMPANION_MODE` | `both` | 基本 | 初回案内で選ぶ相棒の用途（`life` / `work` / `both`） |
+| `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` | `true` | 基本 | キャラクター別の関係性と共有作業記録を保存する。OFFでは既存データを消さず、更新とAI文脈への差し込みを止める |
 | `PICOAGENT_ONBOARDING_DONE` | `false` | 基本 | 初回3択案内の完了状態 |
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（内部設定。通常UIでは非表示） |
@@ -452,8 +466,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MISTRAL_MODEL` | `mistral-medium-latest` | mistral | Mistral の既定モデル |
 | `PICOAGENT_MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | mistral | Mistral OpenAI 互換エンドポイント |
 | `PICOAGENT_ALLOWED_ROOT` | ユーザーホーム | 許可（共通） | 全スキル共通の主たる許可ルート（相対パスの基準）。ファイル/ディレクトリ/コマンド実行はここを参照する |
-| `PICOAGENT_WORKSPACES` | `[]` | project_workspace | 名前付きプロジェクトワークスペース一覧（JSON文字列） |
-| `PICOAGENT_ACTIVE_WORKSPACE` | （空） | project_workspace | 現在選択中のプロジェクトワークスペースID |
+| `PICOAGENT_WORKSPACES` | （旧キー） | project | 旧キー。`PICOAGENT_PROJECTS` へ統合。新キーが空のときだけ読んで移行し、移行後も消さない |
+| `PICOAGENT_ACTIVE_WORKSPACE` | （旧キー） | project | 旧キー。`PICOAGENT_ACTIVE_PROJECT` へ統合。新キーが空のときだけ読む |
 | `PICOAGENT_WORKFLOWS` | `[]` | workflow | 名前付き保存ワークフロー一覧（JSON文字列、1件最大8手順） |
 | `PICOAGENT_ALLOWED_PATHS` | （空） | 許可（共通） | 追加の許可ルート（改行または `;` 区切り）。run_command の「永続許可」でも追記される |
 | `PICOAGENT_DENIED_PATHS` | （空） | 許可（共通） | 追加の拒否パス（改行または `;` 区切り）。この配下は常に操作を拒否する。`C:\Windows` / `Program Files` は設定に関わらず常に拒否 |
@@ -475,6 +489,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_ALARMS` | `[]` | alarm | 目覚まし一覧（JSON文字列。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_DAILY_EVENTS` | `[]` | reminder / focus_timer | リマインダー・集中タイマー・見守り通知（JSON文字列） |
 | `PICOAGENT_PRAISE_LOG` | `[]` | praise_log | できたことメモ（JSON文字列） |
+| `PICOAGENT_TODO_PLAN` | `[]` | todo_plan | 多段タスクの作業計画（JSON文字列、最大20手順） |
+| `PICOAGENT_PROJECTS` | `[]` | project | プロジェクト一覧（環境・課題・記録を含む JSON 文字列、最大50件） |
+| `PICOAGENT_ACTIVE_PROJECT` | （空） | project | 現在選択中のプロジェクトID |
 | `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`。通常はチャットで設定。設定画面では専用フォームで編集） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | （旧キー） | meeting_recorder | 旧キー。設定画面からは廃止。設定済みなら既存利用者向けに追加許可ルートとしてだけ引き継ぐ |
@@ -601,7 +618,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick 実行ファイルパス（空なら同梱→PATH。v7 `magick` が無ければ v6 `convert`/`identify`） |
 | `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | image_tools | 画像操作タイムアウト秒（5〜300） |
 | `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg 実行ファイルパス（非wav音声の16kHz WAV前処理用。空なら同梱→PATH） |
-| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search | ripgrep 実行ファイルパス（空なら同梱→PATH。無ければ内蔵走査） |
+| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep 実行ファイルパス（空なら同梱→PATH。無ければ内蔵走査） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
 | `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型。キー名に `API_KEY` を含むためシークレットとして扱われ、Windows では DPAPI 暗号化して保存される） |
@@ -646,11 +663,11 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - **関係性（`relationship.rs`）**: ユーザーとの関係（相棒 / 友達 / 恋人 / 妹 / 姉 / 先輩 / 自由設定）を、キャラ人格の**上に重ねる短い差分**として持つ。関係ごとに `character.json` を書き下ろすとキャラ数 × 関係数の掛け算になるため、差分は数文に抑え、呼び方は文章ではなく `user_name` の置き換えで表現する（同梱の既定モデルは system が長いほど指示追従が落ちる）。`reset_conversation` / `clear_conversation` が人格の直後へ `profile_suffix()` を足すので、設定変更は次のメッセージから効く（`settings_save` は関係キーの変更を人格変更と同じ「即反映」経路で扱う）。既定 `assistant` では差分が空になり、従来と同一の system になる。関係にかかわらず外さない安全の線（性的・年齢を想起させる表現をしない／作業の正確さを落とさない）はプリセット文面ではなく `SAFETY_NOTE` として一括で付与する。キャラ別の上書きは `PICOAGENT_RELATIONSHIP_OVERRIDES`、一覧は `settings_load` の `relationships` で設定画面へ渡す。
 - **感情の見せかた**: `emotion.rs` が推定した mood / energy を、フロントは `data-emotion` / `data-energy-level` として `.character` に付ける。CSS 側はオーラ色に加えて、`--pet-tone`（顔色）と `--pet-motion-scale`（動きの速さ）を切り替える。新しい素材を足さずにフレームアニメと Live2D の両方へ効かせるための作りで、`prefers-reduced-motion` では速さの変更を無効化する。
 - 選択中キャラの人格は `pet_set_character_profile` でシステムプロンプトへ追加する。既定プロンプトは挨拶・自己紹介でアプリ説明ではなくキャラクター本人として名乗ることを優先する。設定画面のキャラ別上書きは `PICOAGENT_CHARACTER_OVERRIDES` に保存する。
-- **関係性の system 文脈は「段階名と相棒モードだけ」に保つ**（`relationship::context`）。system はプロンプトの先頭にあたるため、1文字でも変わると同梱エンジンのプロンプトキャッシュが丸ごと無効化され、毎ターン全文の再評価になる。会話ごとに増える出来事（`recent_moments`）はここへ入れず、記録カード（`pet_relationship_state`）で見せる。会話へ効かせる内容の選別は `memory.rs`（長期メモリ）の役目とすみ分ける。文脈の差し替えは `AppState::set_relationship_context()` が担当し、**中身が変わったときだけ** `reset_conversation()` を呼ぶ。
+- **関係性の system 文脈は「めったに変わらない内容」に保つ**（`relationship::context`）。system はプロンプトの先頭にあたるため、1文字でも変わると同梱エンジンのプロンプトキャッシュが丸ごと無効化され、毎ターン全文の再評価になる。載せるのは段階名・相棒モードと、**ユーザーが自分でピン留めした記録だけ**（ピン留めは明示操作なので通常の作業では文面が変わらない）。ピン留めしていない記録は記録カード（`pet_relationship_state`）で見せ、会話へ効かせる内容の選別は `memory.rs`（長期メモリ）の役目とすみ分ける。文脈の差し替えは `AppState::set_relationship_context()` が担当し、**中身が変わったときだけ** `reset_conversation()` を呼ぶ。記録の保存自体は `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` で止められる。
 - ふれあい（`touch_*`）はフロント側で 5 秒に 1 回へ間引いてから記録する（連打のたびに関係性ファイルを読み書きしないため）。反応の台詞とモーションは間引かず毎回返す。
-- `character.json` は任意の `interactions.reactions`（`head` / `cheek` / `hand` の反応台詞）と `variants`（`id` / `name` / 任意の `root` / `animations` / `live2d`。`root` も `animations` も `live2d` も無い項目はオーラ色だけが変わる「雰囲気」の切替になる）。**`variants[].live2d` を持たせると、同じキャラの「絵版」と「Live2D 版」を1つの `character.json` で切り替えられる**（`live2d: false` を指定すると、キャラ本体が Live2D でもその variant だけフレーム表示に戻す）。表示中の定義は `resolveLive2dConfig()` が variant → キャラ本体の順で解決し、モーション写像もその定義から引くを持てる。フロントは意味状態（傾聴・検索・作業・成功・照れ・心配）を、専用素材が無ければ既存の待機・思考・返答・落胆素材へフォールバックして2D演出する。
-- `cargo xtask character-pack validate <フォルダ>` は `character.json` のID・必須表示定義・パック内相対アセットを検証する。`install` は同名IDを上書きせず `characters/<id>/` と `characters/index.json` へ追加し、配信用コピーを同期する。
-- 関係性コマンドは `pet_relationship_state` / `pet_relationship_event` / `pet_complete_onboarding`。状態更新は `store::lock_state` で直列化し、`store::write_json_atomic` で保存する。破損ファイルは退避後に新規状態から再開する。
+- `character.json` は任意の `interactions.reactions`（`head` / `cheek` / `hand` の反応台詞）と `variants`（`id` / `name` / 任意の `root` / `animations` / `live2d`）を持てる。`root` も `animations` も `live2d` も無い項目は、オーラ色だけが変わる「スタイル」の切替になる。**`variants[].live2d` を持たせると、同じキャラの「絵版」と「Live2D 版」を1つの `character.json` で切り替えられる**（`live2d: false` を指定すると、キャラ本体が Live2D でもその variant だけフレーム表示に戻す）。表示中の定義は `resolveLive2dConfig()` が variant → キャラ本体の順で解決し、モーション写像・口パク設定・`alwaysAnimate` もその定義から引く。フロントは意味状態（傾聴・検索・作業・成功・照れ・心配）を、専用素材が無ければ既存の待機・思考・返答・落胆素材へフォールバックして2D演出する。
+- `cargo xtask character-pack validate <フォルダ>` は `character.json` のID・必須表示定義・variants・ふれあい台詞・パック内相対アセットに加え、シンボリックリンク、許可拡張子、ファイル数、総容量、単体容量、画像寸法を検証する。`install` は仮フォルダでコピー後検証し、同名IDを上書きせず `characters/<id>/` と `characters/index.json` へ原子的に追加する。配信用同期までのどこかで失敗した場合は一覧・正本・配信用コピーを導入前へ戻す。
+- 関係性コマンドは `pet_relationship_state` / `pet_relationship_event` / `pet_relationship_pin_moment` / `pet_relationship_delete_moment` / `pet_relationship_clear` / `pet_complete_onboarding`。状態更新は `store::lock_state` で直列化し、`store::write_json_atomic` で保存する。破損ファイルは退避後に新規状態から再開する。会話本文は共有記録へ保存せず、作業記録の本文は構造化されたツール名からバックエンドで生成する。「続きをやる」用の元依頼は別フィールドに最大240文字で保存し、AIのsystem文脈には差し込まない。AI文脈へ渡すのはバックエンド生成の作業要約とユーザーが固定した記録だけで、記録内の命令に従わないよう明示する。
 - 自発雑談（雑談スキル `chitchat`）: `PICOAGENT_CHATTER_ENABLED` が ON のとき、フロントは `[min, max]` 秒のランダム間隔の待機タイマーで `pet_idle_chatter` を呼ぶ。生成した独り言は**先に音声を合成（`prepareSpeech`）してから文字を表示し、表示と同時に読み上げる**（`playPreparedSpeech`。挨拶と同じ同期再生）。入力中・応答中・読み上げ中・全画面中は割り込まず次回へ送る。ユーザー操作（送信・入力欄を開く・会話リセット）や設定変更（`pet:ui`）のたびにタイマーを張り直す。`skills/chitchat/trends.rs` は `PICOAGENT_CHATTER_TOPIC_MODE=auto` で X API（`PICOAGENT_X_BEARER_TOKEN` がある場合）→ Google Trends RSS → ニュースRSSの順に話題メモを取る。`x` / `trends` / `news` / `off` でソースを固定または無効化できる。X API 未設定時は公式X投稿とは断定せず、急上昇ワードやトップニュースの候補として扱う。生成はWeb検索ツールを使わず、生成後は「直前の自発雑談: ...」として会話文脈へ1件積み、通常会話と同じ圧縮・履歴保存に通す。これにより、ユーザーが直後または再起動後に「今の何の話？」と聞いた場合に直前の雑談を参照できる。挨拶・名乗り・自己紹介は出さず、毎回ちがう話題になるよう話題ヒントを擬似ランダムで与え、さらに直近の独り言（`AppState.recent_chatter`、末尾6件）を「避ける文」として渡して繰り返しを防ぐ。雑談の生成は**人格(system)＋現在時刻＋指示だけ**を文脈にし、ユーザー発話（会話履歴）は含めない（小型モデルが入力をオウム返しするのを防ぐため）。`current_time_context()` で現在のローカル日時・時間帯（朝/昼/夕方/夜）を渡し、夜に「日差し」など時間に合わない描写をしないようにする。なお通常会話の返信がユーザー入力のオウム返しになった場合、フロントはそれを読み上げない。話題メモ（ニュース等）は `pet_idle_chatter` が `trends::topic_brief` で1件取得して `topic` 引数で skill へ渡し、出典（記事タイトル＋URL）も受け取る。生成後、返信が話題に触れていれば（返信と記事タイトルの内容バイグラム一致）最も関連する記事URLを末尾へ `参考:` として添える（URL 行は読み上げ対象外。例: 地震の独り言なら地震ニュースのURL）。
 - 目覚まし時計（`alarm` スキル + `alarm.rs`）: フロントは約20秒間隔で `pet_alarms` を取得し、現在のローカル時刻（HH:MM）と曜日が一致する有効なアラームがあれば `pet_alarm_wake` を呼んで**声でやさしく起こす**（生成した起こし文を音声合成→表示→即時再生。生成失敗時は固定の起こし文）。同じ分での二重発火は済みキー集合で防ぐ。一度きり（`repeat=false`）は発火後に `enabled=false` へ。鳴った後はフキダシに `おきたよ！` ボタンを出し、押されるまでは `snooze_minutes`（既定5、1〜60分）おきに同じアラームを再通知する。アラームは時刻・曜日・繰り返し・スヌーズ分数を**チャット（`alarm` スキル）でも設定画面でも**設定できる。設定画面のスキル「目覚まし時計」を開くと、時刻ピッカー＋曜日チェック＋繰り返し/有効/スヌーズ分数/ラベル/削除/追加の専用フォーム（`settings.js` の `buildAlarmEditor`）で編集でき、保存時に `PICOAGENT_ALARMS`（JSON）へ組み立てる。保存先は config。
 - 日常通知（`reminder` / `focus_timer` / `daily.rs`）: フロントは約20秒間隔で `pet_daily_events` を呼び、期限到来したリマインダー・集中終了・作業見守りを吹き出し表示と読み上げで通知する。単発イベントは通知後に無効化し、見守りのような `repeat_minutes` 付きイベントは次回時刻へ進める。起動時の挨拶には `pet_daily_greeting` で時間帯・通知件数・直近のできたことメモを添える。
@@ -658,6 +675,8 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - アクションセンター（`renderer.js`）: メインフキダシの通知ボタンは `pet:notice`、`pet_schedule_runs`、会話タスクの状態を同じ一覧へ表示し、未読件数をバッジ表示する。直近50件は `localStorage` に保持する。実行中会話には停止、完了会話には再入力、スケジュール通知には再実行と設定の操作を出す。失敗時はエラー色、成功時は通常色で表示する。
 - 共通プロセス実行（`tools/process.rs`）: スキルからの外部コマンド起動を1箇所へ集約する。`process::command()` がWindows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`（中断時の子プロセス回収）・stdio の既定を適用した `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行する。**スキルが `Command::new` を直接使うことは禁止**で、`tools::process::guard` のテストが直接起動と自前 `hide_window` / `CREATE_NO_WINDOW` を検出して失敗させる。
 - 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。許可判定を通過したパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限定する（内部 `PathBuf` は非公開。派生パスも再検証するので `..` で脱出できない）。ファイル操作は `SafePath` だけを受け取る `permissions::fs` を使う。アプリ内部が決めたパス（一時ファイル等）のみ `SafePath::app_owned` で扱う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` のテストが `skills/**/mod.rs` を走査し、自前判定（`fn bounded_path(base:` 等）とパス引数を持つのに `resolve` を通していないスキルを検出して失敗させる（例外は `run_command` / `code_runner` / `trash_file` のみ。いずれも独自の追加制約を持つ実行・削除系）。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。許可判定では既存の最深祖先を実体化し、シンボリックリンクやWindowsジャンクション経由のルート外到達も拒否する。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）とドロップファイル読込はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_MEETING_ROOT`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
+- プロジェクト文脈の差し込み: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system メッセージの `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**（追記だと課題を足すたびに古いまとめが積み重なる）。台帳が読めないときは差し込まずに会話を続ける（読み取り専用の付加情報で、保存はしないためデータは失われない）。
+- ユーザーへの確認（`ask_user`）: モデルが判断に迷う点を2〜4個の選択肢つきで尋ねる。`run_command` の承認カードと同じマーカー方式で、`agent.rs` がエージェントループを止め、`commands.rs` が質問文と `choices` をフロントへ返す（クイック操作欄が選択肢ボタンに切り替わる）。保留中の質問は `AppState.pending_question` が1件だけ保持し、次のユーザー発話で必ず解除する。返答は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま会話へ入る。外部送信も設定変更もしない。
 - 自力実行（`code_runner`）: `PICOAGENT_CODE_RUNNER_ENABLED=true` が必要（既定無効）。他スキルで要望を満たせないとき、モデルが PowerShell または Python のスクリプトを書いて実行し、出力を受け取って達成する。作業ディレクトリと許可判定は共通 permissions を参照し、保護パスと許可ルート外を拒否する。スクリプト本文に物理削除・破壊的操作（Remove-Item / rm / os.remove / shutil.rmtree 等）が含まれる場合は実行しない。スクリプトは一時ファイルへ書き出し、実行後に削除する。timeout・出力32KBで制限。
 - コマンド実行（`run_command`）: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に未登録、または `cwd` が共通の許可ルート外の場合、チャットへ確認文を返す。ユーザーが「許可」と送った場合は保留中の1件だけ実行する。「永続許可」と送った場合はコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を共通の `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下は編集不可で、チャット許可があってもコマンド実行先やファイル編集先にしない。`workspace_files` の `write` / `append` / `mkdir` も同じ保護パスを拒否する。
 - 起動待ち画面: `#petApp.is-booting` 中は通常のフキダシとキャラクターを隠し、`#bootScreen` に選択中キャラクターの `boot.sleeping`（未定義なら `idle` 先頭フレーム）を使った待機画面を表示する。`renderer.js` の `setStatus()` がモデルDL、同梱エンジン起動、Aivis 起動待ちなど**実行中の処理だけ**を `#bootStatus` に同期する。準備完了時の「<キャラ名>を起こしているよ…」はプログレスバー下に出し、`is-booting` を外して通常表示へ切り替える。
@@ -666,7 +685,13 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
   `window.__TAURI__` を有効化し、`ui/picoagent.js` が旧 `window.picoagent`（init/send/menu/on/settings.*）を再現する。
   これにより `renderer.js` / `settings.js` は Electron 版とほぼ同じコードのまま動く。
 - フキダシ左上のリサイズつまみは Pointer Events で幅・高さを変更し、確定時に `pet_set_bubble_layout` で幅・高さ・座標を設定へ永続化する。拡大時は最小サイズ以外の上限を設けない。保存済みのフキダシ幅・高さ・座標は起動時に復元し、座標はキャラクター回避の優先位置として扱う（重ならなければそのまま、重なる場合だけ位置を動かす。サイズの自動縮小は行わない）。既定（未保存時）のフキダシは CSS で「ウィンドウ下端付近まで縦に伸ばし、右側のキャラクターに被らない幅」にする。フキダシが透明ウィンドウ外へ出る場合は、ドラッグ中に Tauri ウィンドウ自体も `setPosition` / `setSize` で左上方向へ追従させる。さらにリサイズ確定時とサイズ復元時に `ensureWindowFitsBubble` で「フキダシ右側にキャラクター分の幅（と下側の高さ）」を確保するようウィンドウを左上方向へ拡大し（右下は固定）、大きくしたフキダシが右端固定のキャラクターと重ならないようにする。
-- ウィンドウのレイアウトは、`RunEvent::Exit` ではウィンドウ座標を取得できないため、生存中の `WindowEvent::Moved`/`Resized` で**サイズと縦オフセットを `WindowLayoutCache` に控え**、終了時にそのキャッシュ値だけを設定へ保存する。**横位置（右端基準）は以前指定した固定値**（`DEFAULT_RIGHT_OFFSET` = 右端より外へ 69px）で常に配置し、保存・変更しない。**縦位置**は画面下端からのオフセット（`PICOAGENT_WINDOW_BOTTOM_PX`、既定 51px）で保存・復元し、解像度が変わっても右下基準を保つ。**サイズ**も同様に保存・復元する（全画面中はキャッシュせず、復元値はモニタ内へ収める）。ドラッグで上端から `SNAP_THRESHOLD`(24px) 以内に来たら上端へスナップする（横はスナップしない）。右クリックメニューの「フキダシ位置とサイズをリセット」でフキダシ保存値・ウィンドウサイズ・縦オフセットを初期化し、ウィンドウを既定位置へ戻す。旧互換のため `pet_set_bubble_size` も残す。
+- ウィンドウのレイアウトは、`RunEvent::Exit` ではウィンドウ座標を取得できないため、生存中の `WindowEvent::Moved`/`Resized` で**サイズと絶対座標を `WindowLayoutCache` に控え**、終了時にそのキャッシュ値だけを設定へ保存する。**位置は仮想デスクトップ上の物理座標**（`PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX`）で保存・復元するため、マルチモニタでも**同じディスプレイの同じ位置**へ戻る。**サイズ**も保存・復元する（全画面中はキャッシュせず、復元値はモニタ内へ収める）。
+  - **モニタ内の相対オフセットでは「どのディスプレイに居たか」を復元できない。** 旧実装は画面右端・下端からのオフセットだけを保存し、配置計算でも `monitor.position()`（モニタ原点）を加えていなかったため、左側に並ぶモニタ（負の X を持つ）環境では常に主モニタ側の座標が算出されていた。位置計算は必ずモニタ原点を加える（`position_from_offsets`）。
+  - **ユーザーはモニタの主/副・解像度・本数をいつでも変える。** Windows の仮想デスクトップは**主モニタ左上が原点**なので、主副を入れ替えるだけで同じ物理配置でも全モニタの座標が変わり、保存済みの絶対座標が別の場所（あるいは画面外）を指す。起動時と実行中の両方で検証する。
+  - 復元時は `is_visible_on_any_monitor()` で、保存座標のウィンドウが接続中のどれかのモニタに実用的な大きさ（80px 以上）重なるかを確認する。ディスプレイを外した・主副を入れ替えた・解像度を下げた後に画面外へ復元して**起動したのに何も見えない**状態になるのを防ぐ。載らない場合は認識中のモニタ一覧と一緒にログへ残し、既定位置へ戻す。判定は完全内包ではなく重なりで見る（既定位置自体が右端より外へ 69px はみ出すため）。
+  - 実行中にディスプレイ構成が変わると Windows がウィンドウを動かし直して `Moved` が飛ぶ。このとき `is_on_screen()`（1px でも見えているか）で完全に画面外へ取り残されていないか確認し、取り残されていればその場で既定位置へ引き戻す。**実行中の判定は保存時より緩くする**（80px 基準で引き戻すと、端へ寄せる通常のドラッグ操作まで勝手に戻されるため）。画面外の座標をキャッシュ＝保存させない役目も兼ねる。
+  - ドラッグで**そのモニタの上端**から `SNAP_THRESHOLD`(24px) 以内に来たら上端へスナップする（横はスナップしない）。仮想デスクトップの `y=0` ではなくモニタ原点を基準にする（上下に並ぶ配置では `y=0` が別の画面を指すため）。
+  - 右クリックメニューの「フキダシ位置とサイズをリセット」と、設定画面（基本タブ）の「画面位置を初期化」ボタン（`pet_reset_layout`）が同じ `menu::reset_bubble_and_window_layout()` を呼び、フキダシ保存値・ウィンドウサイズ・絶対座標を初期化して既定位置へ戻す。**ウィンドウを画面外で見失うと右クリックメニュー自体に辿り着けない**ため、設定画面にも復帰口を置いている。旧互換のため `pet_set_bubble_size` も残す。
 - フキダシの吹き出しの尻尾（`.bubble::after`）は、縦長フキダシでも右下のキャラクターを向くよう下寄り（`top:64%`）に置く。
 - キャラクターまたはフキダシのダブルクリックはウィンドウをフルスクリーン化（`getCurrentWindow().setFullscreen`）し、その中でフキダシを左上起点に大きく広げる（`.bubble.fullscreen`）。拡大時はキャラクターの実測矩形から右側の空け幅を再計算し、キャラ表示用の右ペインを残す。ドラッグでの拡大はまずサイズを維持したままフキダシ座標を再配置してキャラクター矩形を避ける。座標移動だけでは避けられない大きさの場合だけ、左ペインまたは上ペインのうち表示面積が大きい方へ最小限サイズを補正し、設定保存直前にも再配置後の座標とサイズを永続化する。再計算は全画面切替後、ウィンドウサイズ変更、キャラ画像ロード、設定反映、ドラッグ確定後に行う。解除は再度ダブルクリックまたは `Esc`。ドラッグ領域のダブルクリックによるネイティブのウィンドウ最大化は `maximizable:false` で無効化している。
 - 入力欄は `Enter` / `Ctrl+Enter` / `Cmd+Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中や空入力では送信ボタンを無効化し、入力欄は内容に合わせて最大 180px まで自動伸縮する。ユーザー発話は直近40件まで入力履歴として保持し、入力欄の先頭/末尾で `↑` / `↓` を押すと過去入力と編集中ドラフトを行き来できる。入力欄上部の `quick-actions` は、画面確認・クリップボード要約・今日の予定・できること確認を既存の通常送信経路へ流す。通常の右クリックメニューはフキダシ本文・履歴・入力欄・リンク上では妨げず、コピーやリンク操作を優先する。フキダシ上部の `reply-actions` は回答コピー・再読み上げ・停止・全画面切替を提供する。読み上げ準備中・読み上げ中はフキダシ下部に `読み上げを中止` ボタンを表示し、押すと進行中の音声合成待ち・連続再生を打ち切る。

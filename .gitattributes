@@ -10,6 +10,7 @@
 *.ico  binary
 *.icns binary
 *.gguf binary
+*.moc3 binary
 *.dll  binary
 *.exe  binary
 *.woff  binary

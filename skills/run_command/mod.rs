@@ -2,6 +2,11 @@
 //
 // shell は使わず program + args で起動する。既定は無効で、設定で有効化し、
 // PICOAGENT_COMMAND_ALLOWLIST に一致する prefix だけを実行する。
+//
+// `background=true` のときは待たずに起動して job_id を返す（開発サーバ・長いビルド用）。
+// 起動後の様子見と停止は `command_job` スキルが担う。実体は `jobs.rs`。
+
+pub mod jobs;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -207,7 +212,7 @@ impl Tool for RunCommandTool {
     }
 
     fn description(&self) -> String {
-        "許可ルート内で、設定の allowlist に一致するローカルコマンドだけを実行する。ビルド、テスト、git 状態確認などに使う。既定では無効。"
+        "許可ルート内で、設定の allowlist に一致するローカルコマンドだけを実行する。ビルド、テスト、git 状態確認などに使う。完了を待てない長い処理は background=true で起動し、command_job で様子を見る。既定では無効。"
             .to_string()
     }
 
@@ -232,7 +237,11 @@ impl Tool for RunCommandTool {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 120,
-                    "description": "実行待ち上限秒。省略時は設定値。"
+                    "description": "実行待ち上限秒。省略時は設定値。background=true のときは無視する。"
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "true なら完了を待たずに起動し、job_id を返す。開発サーバや長いビルドに使う。途中出力の取得と停止は command_job で行う。"
                 }
             },
             "required": ["program"]
@@ -307,6 +316,23 @@ impl Tool for RunCommandTool {
                 timeout_secs,
                 reason,
             });
+        }
+
+        // バックグラウンド起動も、ここまでの許可判定（allowlist・cwd・物理削除拒否）を
+        // 通ったものだけが到達する。
+        if args
+            .get("background")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return match jobs::spawn(program, &parsed_args, &cwd) {
+                Ok(id) => format!(
+                    "OK: バックグラウンドで起動しました（{id}）: {} {}\n途中経過は command_job の output、停止は stop を使ってください。",
+                    program,
+                    parsed_args.join(" ")
+                ),
+                Err(error) => format!("エラー: {error}"),
+            };
         }
 
         execute_approved(program, &parsed_args, &cwd, timeout_secs).await

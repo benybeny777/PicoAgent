@@ -51,6 +51,10 @@ window.picoagent = {
   speak: (text) => call("pet_speak", { text }),
   prepareVoiceModel: () => call("pet_prepare_voice_model"),
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
+  // フロントを読み込めたことの通知（届かないと案内画面へ切り替わる）。
+  frontendReady: () => call("pet_frontend_ready"),
+  // ウィンドウとフキダシの位置・サイズを既定へ戻す。
+  resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
   // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。
   setFullscreen: async (on) => {
@@ -83,6 +87,9 @@ window.picoagent = {
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
+  pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),
+  deleteRelationshipMoment: (momentId) => call("pet_relationship_delete_moment", { momentId }),
+  clearRelationship: () => call("pet_relationship_clear"),
   completeOnboarding: (mode) => call("pet_complete_onboarding", { mode }),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {

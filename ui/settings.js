@@ -754,7 +754,7 @@ function skillCategory(tool) {
   if (["get_time", "weather", "currency_rates", "market_indices", "rss_feed", "web_search", "web_fetch", "research_report"].includes(name)) {
     return "info";
   }
-  if (["read_file", "workspace_files", "project_workspace", "workflow", "run_command", "http_api"].includes(name)) {
+  if (["read_file", "workspace_files", "edit_file", "glob_files", "grep_search", "todo_plan", "notebook_edit", "view_image", "ask_user", "project", "workflow", "run_command", "command_job", "http_api"].includes(name)) {
     return "workspace";
   }
   if (["google_calendar", "google_docs", "google_drive", "google_sheets", "google_tasks", "gmail_message", "microsoft_graph", "slack_send_message", "discord_send_message", "notion", "jira", "linear", "trello", "todoist", "github_issue"].includes(name)) {
@@ -801,9 +801,17 @@ const SKILL_EXAMPLE_FALLBACKS = {
   whisper_transcribe: ["最新の録音を文字起こしして"],
   read_file: ["このファイルを読んで"],
   workspace_files: ["作業フォルダにメモを書いて"],
-  project_workspace: ["このフォルダを仕事用ワークスペースとして登録して"],
+  edit_file: ["このファイルのこの行だけ直して"],
+  glob_files: ["プロジェクトの .rs ファイルを一覧して"],
+  grep_search: ["この関数を使っている箇所を探して"],
+  todo_plan: ["やることを整理して進めて", "いまどこまで終わってる？"],
+  project: ["動画制作プロジェクトへ切り替えて", "このプロジェクトの残りの課題を教えて", "この方針を決定事項として残して"],
   workflow: ["この手順を週報作成として覚えて"],
-  run_command: ["git statusを実行して"],
+  run_command: ["git statusを実行して", "開発サーバをバックグラウンドで起動して"],
+  command_job: ["さっきのビルドの様子を見せて", "動かしっぱなしのサーバを止めて"],
+  notebook_edit: ["ノートブックのセルを一覧して", "3番目のセルを差し替えて"],
+  view_image: ["このスクリーンショットに何が写っているか教えて"],
+  ask_user: ["どっちがいいか聞いて決めて"],
   http_api: ["このAPIにPOSTして"],
   ms_office: ["Wordの文字を置換して"],
   document_convert: ["このdocxをPDFにして"],
@@ -866,7 +874,7 @@ function approvalPolicy(tool) {
     "x_twitter", "mastodon", "bluesky", "reddit", "linkedin", "misskey",
   ]);
   const write = new Set([
-    "workspace_files", "google_calendar", "google_docs", "google_drive", "google_sheets",
+    "workspace_files", "edit_file", "notebook_edit", "command_job", "todo_plan", "project", "google_calendar", "google_docs", "google_drive", "google_sheets",
     "google_tasks", "github_issue", "notion", "jira", "linear", "trello", "todoist",
     "ms_office", "document_convert", "pdf_tools", "http_api", "task_scheduler",
   ]);
@@ -1440,6 +1448,34 @@ function diagnosticsFailureCard(title, error) {
   );
 }
 
+// ウィンドウとフキダシの位置・サイズを既定へ戻すボタン。
+// ディスプレイ構成を変えてウィンドウを画面外で見失うと右クリックメニューにも辿り着けないため、
+// 右クリックメニューの「フキダシ位置とサイズをリセット」とは別に、設定画面にも復帰口を置く。
+function layoutResetField() {
+  const label = "画面位置を初期化";
+  const button = el("button", { type: "button", className: "secondary", textContent: label });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    statusEl.textContent = `${label}を実行しています…`;
+    try {
+      await window.picoagent.resetLayout();
+      statusEl.textContent = "ウィンドウとフキダシの位置・サイズを既定へ戻しました。";
+    } catch (error) {
+      logApp("error", `${label}に失敗しました`, errorDetail(error));
+      statusEl.textContent = `${label}に失敗: ${error?.message || error}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  const hint = el("p", { className: "hint", textContent: "ウィンドウが画面外や別のディスプレイへ行って見つからないときに使ってください。" });
+  return markSearchable(
+    el("div", { className: "field" }, [el("label", { textContent: "画面位置" }), button, hint]),
+    "PICOAGENT_WINDOW_LEFT_PX",
+    label,
+    "ウィンドウ 位置 リセット 初期化 ディスプレイ 画面外"
+  );
+}
+
 function diagnosticRepairButton(label, handler) {
   const button = el("button", { type: "button", className: "diagnostic-repair", textContent: label });
   button.addEventListener("click", async () => {
@@ -1635,6 +1671,7 @@ async function render() {
     { value: "dark", label: "ダーク" },
   ]));
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
+  global.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
   global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
   global.append(field("PICOAGENT_SUPER_AGENT", "スーパーエージェント（計画→実行・自己評価・サブエージェント分担を強化）", "checkbox", v.PICOAGENT_SUPER_AGENT === true));
@@ -1691,6 +1728,7 @@ async function render() {
     { value: "work", label: "いっしょに働く" },
     { value: "both", label: "暮らしと仕事の両方" },
   ]));
+  characterSec.append(field("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", "いっしょの記録を保存する", "checkbox", v.PICOAGENT_RELATIONSHIP_MEMORY_ENABLED !== false));
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
