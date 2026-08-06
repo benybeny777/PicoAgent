@@ -1894,7 +1894,9 @@ async function render() {
     const selectButton = el("button", { className: "secondary character-select-button", type: "button" });
     selectButton.addEventListener("click", () => {
       characterSelect.value = character.id;
-      characterSelect.dispatchEvent(new Event("change"));
+      // 未保存判定は form 上の change を拾う委譲リスナなので、bubbles を付けないと
+      // 「保存」ボタンの強調と「変更を戻す」の有効化が更新されないまま残る。
+      characterSelect.dispatchEvent(new Event("change", { bubbles: true }));
       refreshCharacterCards();
       statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
     });

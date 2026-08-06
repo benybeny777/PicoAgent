@@ -682,6 +682,7 @@ let rigFace = "";          // 表示中の差分名（無駄な src 再設定を
 let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマーが更新）
 let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
 let rigLookDirection = 0;  // -1=左、0=正面、1=右
+let rigGazeSyncAt = 0;     // カーソル追従を反映した時刻（mousemove の間引き用）
 let rigMouthTimer = 0;
 let rigBlinkTimer = 0;
 let rigBlinkStepTimer = 0;
@@ -717,12 +718,14 @@ async function probeRigLayers() {
 }
 
 // まばたき > 口 の優先度で現在の差分絵を決めて反映する。
+// ただしよそ見中だけは視線を優先する（まばたき差分は正面顔しか無いため、割り込ませると
+// 横を向いている数百msの途中で一瞬だけ顔が正面へ戻って見える）。
 function rigRefresh() {
   if (!rigActive) return;
-  const gaze = rigGazeAvailable && !currentVoice && animationName === "idle"
-    ? (rigLookDirection < 0 ? "thinking_left" : rigLookDirection > 0 ? "thinking_right" : "mouth_closed")
-    : "mouth_closed";
-  const name = rigBlinkPhase || (rigMouthOpen ? "mouth_open" : gaze);
+  const gazing = rigGazeAvailable && !currentVoice && animationName === "idle" && rigLookDirection !== 0;
+  const gaze = gazing ? (rigLookDirection < 0 ? "thinking_left" : "thinking_right") : "mouth_closed";
+  const blink = gazing ? null : rigBlinkPhase;
+  const name = blink || (rigMouthOpen ? "mouth_open" : gaze);
   if (rigFace === name) return;
   rigFace = name;
   petSprite.src = layerUrl(name);
@@ -1077,10 +1080,17 @@ if (!reduceMotion) {
     const centerX = rect.left + rect.width / 2;
     const dx = Math.max(-1, Math.min(1, (event.clientX - centerX) / Math.max(240, window.innerWidth / 2)));
     character.style.setProperty("--look-rot", `${(dx * 2.6).toFixed(2)}deg`);
+    // mousemove は毎ピクセル届くので、向きが変わったときと一定間隔でだけ反映する
+    // （毎イベントで自動視線タイマーを張り直すとタイマーの作り直しだけが積み上がる）。
     if (rigActive && rigGazeAvailable && !currentVoice) {
-      rigLookDirection = dx < -0.16 ? -1 : dx > 0.16 ? 1 : 0;
-      rigRefresh();
-      scheduleGaze();
+      const direction = dx < -0.16 ? -1 : dx > 0.16 ? 1 : 0;
+      const now = performance.now();
+      if (direction !== rigLookDirection || now - rigGazeSyncAt > 400) {
+        rigGazeSyncAt = now;
+        rigLookDirection = direction;
+        rigRefresh();
+        scheduleGaze(); // カーソル追従中は自動よそ見を先送りする
+      }
     }
     clearTimeout(lookResetTimer);
     lookResetTimer = setTimeout(() => {
