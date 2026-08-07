@@ -1133,6 +1133,7 @@ async function startLive2D(cfg) {
   live2dApp.stage.addChild(model);
   live2dModel = model;
   live2dActive = true;
+  character.dataset.renderKind = "live2d";
   applyCharacterZoom(characterZoom);
   petSprite.style.display = "none";
   if (motionEnabled && cfg.motions?.idle) {
@@ -1166,6 +1167,7 @@ function stopLive2D() {
   if (live2dCanvas) live2dCanvas.style.display = "none";
   if (live2dActive) {
     live2dActive = false;
+    character.dataset.renderKind = "2d";
     applyCharacterZoom(characterZoom);
     petSprite.style.display = "";
   }

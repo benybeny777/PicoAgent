@@ -64,7 +64,7 @@ window.__TAURI__ = {
 
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined });
 try {
-  const page = await browser.newPage({ viewport: { width: 720, height: 800 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 960, height: 760 }, deviceScaleFactor: 1 });
   await page.addInitScript(mock);
   page.on("pageerror", error => { throw error; });
   await page.goto(`http://127.0.0.1:${port}/settings.html?tab=display`);

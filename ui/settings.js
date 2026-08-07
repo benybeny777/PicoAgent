@@ -34,21 +34,24 @@ let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGEN
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "voice", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const LAYOUT_CHOICES = [
-  { id: "pet", label: "ペット", size: "680×430", description: "キャラ＋フキダシ。普段使い向け" },
-  { id: "mascot", label: "マスコット", size: "240×380", description: "キャラ中心。話す時だけフキダシ" },
-  { id: "chat", label: "チャット", size: "380×640", description: "履歴と入力欄を常に表示" },
-  { id: "talk", label: "トーク", size: "380×640", description: "メッセージアプリ風の会話表示" },
-  { id: "bar", label: "バー", size: "640×300", description: "1行入力。呼び出してすぐ使う" },
-  { id: "workspace", label: "ワークスペース", size: "1100×700", description: "履歴・回答・実行状況の3ペイン" },
-  { id: "stream", label: "配信", size: "1560×920", description: "キャラを大きく、字幕を見やすく表示" },
-  { id: "widget", label: "ウィジェット", size: "320×440", description: "時計・通知・入力をコンパクトに表示" },
+  { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
+  { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
+  { id: "chat", label: "チャット", size: "520×760", description: "履歴を読みながら入力する" },
+  { id: "talk", label: "トーク", size: "520×760", description: "メッセージアプリ風に会話する" },
+  { id: "bar", label: "バー", size: "900×320", description: "呼び出してすばやく質問する" },
+  { id: "workspace", label: "作業", size: "1400×850", description: "履歴・回答・実行状況を並べて見る" },
+  { id: "stream", label: "配信", size: "1560×920", description: "キャラを大きく、字幕を見やすく映す" },
+  { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
-let activeSettingsTab = SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic";
+let activeSettingsTab = requestedSettingsTab === "voice"
+  ? "character"
+  : (SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic");
 
 function activateSettingsTab(tabId) {
+  if (tabId === "voice") tabId = "character";
   if (!SETTINGS_TAB_IDS.has(tabId)) return false;
   activeSettingsTab = tabId;
   const button = document.getElementById(`tab-${tabId}`);
@@ -783,6 +786,14 @@ function applySettingsTheme(value) {
 
 function section(title) {
   return el("div", { className: "section" }, [el("h2", { textContent: title })]);
+}
+
+function advancedGroup(title, note, children) {
+  return el("details", { className: "advanced-group" }, [
+    el("summary", { textContent: title }),
+    note ? el("p", { className: "advanced-group-note", textContent: note }) : null,
+    ...children,
+  ].filter(Boolean));
 }
 
 function createTabs(items) {
@@ -1830,19 +1841,22 @@ async function render() {
   scheduleEditorState = null;
   const v = data.values;
   const panels = createTabs([
-    { id: "basic", label: "基本" },
-    { id: "display", label: "画面" },
-    { id: "character", label: "キャラクター" },
-    { id: "voice", label: "音声" },
-    { id: "providers", label: "叩くAI" },
-    { id: "tools", label: "スキル設定" },
-    { id: "permissions", label: "許可" },
-    { id: "skillguide", label: "スキル活用ガイド" },
-    { id: "diagnostics", label: "診断" },
+    { id: "basic", label: "基本設定" },
+    { id: "display", label: "画面・操作" },
+    { id: "character", label: "キャラ・音声" },
+    { id: "providers", label: "AIモデル・連携" },
+    { id: "tools", label: "スキル" },
+    { id: "permissions", label: "安全・許可" },
+    { id: "skillguide", label: "使い方" },
+    { id: "diagnostics", label: "診断・修復" },
   ]);
 
   // --- グローバル設定 ---
   const global = section("基本");
+  global.append(el("p", {
+    className: "settings-intro",
+    textContent: "普段変更するのは、使うAI・記憶・居眠り・更新確認です。プロンプトやホットキーなどは下の「詳細設定」にまとめています。",
+  }));
   const providerSelect = el("select");
   for (const p of data.providers) {
     providerSelect.append(el("option", { value: p.id, textContent: p.label, selected: p.id === data.active.providerId }));
@@ -1859,31 +1873,36 @@ async function render() {
   // 他プロバイダは「叩くAI」タブで種類とサイズを選ぶため、ここでは隠す。
   function updateModelFieldVisibility() { modelField.hidden = providerSelect.value !== "ollama"; }
   updateModelFieldVisibility();
-  global.append(field("PICOAGENT_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
   const displaySec = section("画面レイアウト");
+  displaySec.append(el("p", {
+    className: "settings-intro",
+    textContent: "用途に合う表示スタイルをプレビューから選べます。キャラは全形式で上半身を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
+  }));
   displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT || "pet"));
   displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
     { value: "system", label: "システム設定に追従" },
     { value: "light", label: "通常" },
     { value: "dark", label: "ダーク" },
   ]));
-  displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
+  displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "会話文字の大きさ（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   // 立ち絵の大きさ。位置はキャラを直接ドラッグして決めるので、ここには出さない。
-  displaySec.append(field("PICOAGENT_CHARACTER_ZOOM", "立ち絵の大きさ（1.0 で全身 / 既定 1.55 は上半身）", "text", v.PICOAGENT_CHARACTER_ZOOM || "1.55"));
+  displaySec.append(field("PICOAGENT_CHARACTER_ZOOM", "キャラの大きさ（既定 1.55＝上半身）", "text", v.PICOAGENT_CHARACTER_ZOOM || "1.55"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   displaySec.append(layoutResetField());
-  // グローバルホットキー: 他のアプリを使っている最中でも呼び出せるようにする。保存すると即反映。
-  global.append(field("PICOAGENT_HOTKEY_ENABLED", "グローバルホットキーを使う（他のアプリの裏に居ても呼び出す）", "checkbox", v.PICOAGENT_HOTKEY_ENABLED !== false));
-  global.append(field("PICOAGENT_HOTKEY_SUMMON", "呼び出すキー（表示して入力欄を開く。空欄で既定値、off でこのキーだけ無効）", "text", v.PICOAGENT_HOTKEY_SUMMON ?? "", "CommandOrControl+Alt+P"));
-  global.append(field("PICOAGENT_HOTKEY_HIDE", "隠す／戻すキー（空欄で既定値、off でこのキーだけ無効）", "text", v.PICOAGENT_HOTKEY_HIDE ?? "", "CommandOrControl+Alt+H"));
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
-  global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
-  global.append(field("PICOAGENT_SUPER_AGENT", "スーパーエージェント（計画→実行・自己評価・サブエージェント分担を強化）", "checkbox", v.PICOAGENT_SUPER_AGENT === true));
-  global.append(field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "スーパーエージェントの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"));
-  const quickActionsField = field("PICOAGENT_QUICK_ACTIONS", "クイックアクション（1行1件「ラベル|送る文章」。空なら既定の8件）", "textarea", v.PICOAGENT_QUICK_ACTIONS ?? "", "👀 画面を見る|今の画面を見て、状況を短く教えて");
-  global.append(quickActionsField);
   global.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
   global.append(field("PICOAGENT_UPDATE_CHECK_ENABLED", "起動時に新しいバージョンを確認する", "checkbox", v.PICOAGENT_UPDATE_CHECK_ENABLED !== false));
+  // 変更頻度の低い項目は閉じておき、基本画面を短く保つ。
+  global.append(advancedGroup("詳細設定", "困っていなければ変更する必要はありません。", [
+    field("PICOAGENT_SYSTEM_PROMPT", "全キャラ共通の追加指示", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt),
+    field("PICOAGENT_HOTKEY_ENABLED", "グローバルホットキーを使う", "checkbox", v.PICOAGENT_HOTKEY_ENABLED !== false),
+    field("PICOAGENT_HOTKEY_SUMMON", "呼び出すキー", "text", v.PICOAGENT_HOTKEY_SUMMON ?? "", "CommandOrControl+Alt+P"),
+    field("PICOAGENT_HOTKEY_HIDE", "隠す／戻すキー", "text", v.PICOAGENT_HOTKEY_HIDE ?? "", "CommandOrControl+Alt+H"),
+    field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"),
+    field("PICOAGENT_SUPER_AGENT", "計画・自己評価・分担を強化する", "checkbox", v.PICOAGENT_SUPER_AGENT === true),
+    field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "強化モードの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"),
+    field("PICOAGENT_QUICK_ACTIONS", "クイックアクション（1行1件「ラベル|送る文章」）", "textarea", v.PICOAGENT_QUICK_ACTIONS ?? "", "👀 画面を見る|今の画面を見て、状況を短く教えて"),
+  ]));
   // ローカルAPI（Ollama風）: 外部ツールから 127.0.0.1 の HTTP でエージェントを呼べる。
   const apiSec = section("ローカルAPI（Ollama風）");
   apiSec.append(field("PICOAGENT_API_ENABLED", "ローカルAPIを有効にする（127.0.0.1 のみ。変更は再起動後に反映）", "checkbox", v.PICOAGENT_API_ENABLED === true));
@@ -1899,13 +1918,14 @@ async function render() {
     "memory|npx -y @modelcontextprotocol/server-memory"
   ));
   const voiceSec = section("読み上げ");
+  voiceSec.append(el("p", {
+    className: "hint",
+    textContent: "読み上げは必要な時だけ有効にできます。キャラごとの声は上のキャラクター選択に連動します。",
+  }));
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
-  panels.basic.append(apiSec);
-  panels.basic.append(mcpSec);
   panels.display.append(displaySec);
-  panels.voice.append(voiceSec);
   applySettingsTheme(v.PICOAGENT_THEME || "system");
   inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {
     applySettingsTheme(event.target.value);
@@ -2041,6 +2061,7 @@ async function render() {
   characterSec.append(registerInput("PICOAGENT_RELATIONSHIP_CUSTOM", relationshipCustom, relationshipCustomField));
   describeRelationship();
   panels.character.append(characterSec);
+  panels.character.append(voiceSec);
 
   // --- スキル設定（⚙ のあるスキルはクリックでその場に開く）。活用ガイドとは別タブに分ける ---
   const skillSec = section("スキル設定");
@@ -2393,9 +2414,12 @@ async function render() {
   if (userCharacterRoot) {
     addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
   }
-  panels.character.append(tha3Sec);
-  panels.character.append(addSec);
   panels.character.append(charSec);
+  panels.character.append(advancedGroup(
+    "キャラクターを追加・作成",
+    "新しいキャラクターパックを導入したい時だけ開いてください。",
+    [addSec, tha3Sec],
+  ));
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("叩く AI コネクタの設定");
@@ -2426,8 +2450,14 @@ async function render() {
     provSec.append(block);
   }
   renderProviderConfig(data.active.providerId);
+  panels.providers.append(el("p", {
+    className: "settings-intro",
+    textContent: "AIの種類と外部連携をまとめています。普段は選択中のAIだけ確認すれば十分です。",
+  }));
   panels.providers.append(provSec);
   panels.providers.append(buildDownloadedModelsSection());
+  panels.providers.append(apiSec);
+  panels.providers.append(mcpSec);
 
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
   // --- 許可（ファイル/実行）: 全スキル共通のファイル/ディレクトリ許可ルール ---

@@ -238,9 +238,9 @@ function unionBounds(boxes) {
   return { x: left, y: top, width: (right - left) & ~1, height: (bottom - top) & ~1 };
 }
 
-// 既定のウィンドウサイズは tauri.conf.json の値。実物と同じ比率で撮る。
+// ペット形式の既定寸法。各レイアウト画像はそれぞれの実寸で撮る。
 async function openScene({
-  width = 680, height = 430, theme = "light", history = HISTORY,
+  width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0,
   bootHoldMs = 0, waitForReady = true,
 } = {}) {
@@ -295,7 +295,8 @@ async function record(page, { seconds, fps, step }) {
   const gap = 1000 / fps;
   // pauseAt は過去を指せないので、読み取りから呼び出しまでに進む実時間ぶんを足しておく。
   const now = await page.evaluate(() => Date.now());
-  await page.clock.pauseAt(new Date(now + 1000));
+  // Live2Dや大きな画像の初回描画で呼び出し間が1秒を超えることがあるため、十分先へ進める。
+  await page.clock.pauseAt(new Date(now + 10000));
   const total = Math.round((seconds * 1000) / gap);
   for (let index = 0; index < total; index++) {
     if (step) await step(page, index);
@@ -490,6 +491,16 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
+  // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
+  // 1フレームだけなのでアニメーションではないが、同じ透過 WebP 経路を使える。
+  "layout-shot-mascot.webp": { width: 360, height: 560, layout: "mascot", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-pet.webp": { width: 900, height: 600, layout: "pet", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-chat.webp": { width: 520, height: 760, layout: "chat", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-talk.webp": { width: 520, height: 760, layout: "talk", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-bar.webp": { width: 900, height: 320, layout: "bar", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-workspace.webp": { width: 1400, height: 850, layout: "workspace", seconds: 1, fps: 1, outputWidth: 640 },
+  "layout-shot-stream.webp": { width: 1560, height: 920, layout: "stream", seconds: 1, fps: 1, outputWidth: 640 },
+  "layout-shot-widget.webp": { width: 440, height: 600, layout: "widget", seconds: 1, fps: 1, outputWidth: 480 },
 };
 
 // ---------------------------------------------------------------- 実行

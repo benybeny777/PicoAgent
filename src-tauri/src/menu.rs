@@ -4,7 +4,8 @@ use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBui
 use tauri::{Emitter, Manager, PhysicalPosition};
 
 use crate::commands::{
-    clear_conversation_and_history, open_display_settings, open_settings, AppState,
+    clear_conversation_and_history, open_character_settings, open_display_settings, open_settings,
+    AppState,
 };
 
 /// 表示形式メニュー項目の ID 接頭辞。`layout:chat` のように形式 ID を続ける。
@@ -12,29 +13,36 @@ const LAYOUT_ID_PREFIX: &str = "layout:";
 
 #[tauri::command]
 pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
-    let settings = MenuItemBuilder::with_id("settings", "設定…")
+    let summon = MenuItemBuilder::with_id("summon", "話しかける…")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト設定…")
+    let settings = MenuItemBuilder::with_id("settings", "すべての設定…")
         .build(&app)
         .map_err(|e| e.to_string())?;
+    let display_settings = MenuItemBuilder::with_id("display_settings", "画面・操作の設定…")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
+    let character_settings =
+        MenuItemBuilder::with_id("character_settings", "キャラクター・音声の設定…")
+            .build(&app)
+            .map_err(|e| e.to_string())?;
     let is_always_on_top = window.is_always_on_top().map_err(|e| e.to_string())?;
     let ontop = CheckMenuItemBuilder::with_id("ontop", "常に手前に表示")
         .checked(is_always_on_top)
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let reset = MenuItemBuilder::with_id("reset", "会話をリセット")
+    let reset = MenuItemBuilder::with_id("reset", "会話履歴を消してリセット")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let reset_layout = MenuItemBuilder::with_id("reset_layout", "表示位置とサイズをリセット")
+    let reset_layout = MenuItemBuilder::with_id("reset_layout", "今の画面位置・サイズを戻す")
         .build(&app)
         .map_err(|e| e.to_string())?;
     // 立ち絵をドラッグでずらしすぎたときの戻し先。位置とサイズのリセットにも含まれるが、
     // 「キャラを動かしたら戻せなくなった」が一番起きやすい操作ミスなので単独で出す。
-    let reset_character = MenuItemBuilder::with_id("reset_character", "立ち絵の位置を戻す")
+    let reset_character = MenuItemBuilder::with_id("reset_character", "キャラ位置を中央へ戻す")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let quit = MenuItemBuilder::with_id("quit", "PicoAgent を終了")
+    let quit = MenuItemBuilder::with_id("quit", "終了")
         .build(&app)
         .map_err(|e| e.to_string())?;
 
@@ -44,7 +52,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    let mut layout_menu = SubmenuBuilder::new(&app, "表示形式");
+    let mut layout_menu = SubmenuBuilder::new(&app, "表示スタイル");
     let mut layout_items = Vec::new();
     for (id, label, _, _) in crate::layout::LAYOUTS {
         layout_items.push(
@@ -59,16 +67,27 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     }
     let layout_menu = layout_menu.build().map_err(|e| e.to_string())?;
 
+    // 取り消しにくい会話消去を通常操作から離し、表示を整える操作と同じサブメニューへまとめる。
+    let reset_menu = SubmenuBuilder::new(&app, "表示と会話をリセット")
+        .item(&reset_character)
+        .item(&reset_layout)
+        .separator()
+        .item(&reset)
+        .build()
+        .map_err(|e| e.to_string())?;
+
     let menu = MenuBuilder::new(&app)
-        .item(&settings)
-        .item(&display_settings)
+        .item(&summon)
         .separator()
         .item(&layout_menu)
         .item(&ontop)
         .separator()
-        .item(&reset)
-        .item(&reset_character)
-        .item(&reset_layout)
+        .item(&display_settings)
+        .item(&character_settings)
+        .item(&settings)
+        .separator()
+        .item(&reset_menu)
+        .separator()
         .item(&quit)
         .build()
         .map_err(|e| e.to_string())?;
@@ -86,8 +105,16 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
         return;
     }
     match id {
+        "summon" => {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+                let _ = win.emit("pet:hotkey", "summon");
+            }
+        }
         "settings" => open_settings(app),
         "display_settings" => open_display_settings(app),
+        "character_settings" => open_character_settings(app),
         "ontop" => {
             if let Some(win) = app.get_webview_window("main") {
                 let now = match win.is_always_on_top() {

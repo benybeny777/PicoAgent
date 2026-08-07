@@ -22,14 +22,26 @@ pub const DEFAULT: &str = "pet";
 /// 寸法は「その形式が成立する最小限」を既定にする。ユーザーが手で変えた寸法は
 /// 形式ごとに覚えるので（`PICOAGENT_WINDOW_LAYOUTS`）、ここは初回の見え方を決める値。
 pub const LAYOUTS: [(&str, &str, f64, f64); 8] = [
-    ("mascot", "マスコット（キャラだけ）", 240.0, 380.0),
-    ("pet", "ペット（キャラ＋フキダシ）", 680.0, 430.0),
-    ("chat", "チャット（履歴つきパネル）", 380.0, 640.0),
-    ("talk", "トーク（メッセージアプリ風）", 380.0, 640.0),
-    ("bar", "バー（1行入力）", 640.0, 300.0),
-    ("workspace", "ワークスペース（3ペイン）", 1100.0, 700.0),
+    ("mascot", "ミニ（キャラ中心）", 360.0, 560.0),
+    ("pet", "ペット（キャラ＋会話）", 900.0, 600.0),
+    ("chat", "チャット（履歴を読む）", 520.0, 760.0),
+    ("talk", "トーク（会話に集中）", 520.0, 760.0),
+    ("bar", "バー（すばやく質問）", 900.0, 320.0),
+    ("workspace", "作業（情報を並べる）", 1400.0, 850.0),
     ("stream", "配信（キャラを大きく）", 1560.0, 920.0),
-    ("widget", "ウィジェット（今日の情報）", 320.0, 440.0),
+    ("widget", "ウィジェット（予定と通知）", 440.0, 600.0),
+];
+
+/// 2026-08-07以前の既定寸法。保存値がこの組み合わせと完全一致する環境だけ新しい
+/// 読みやすい既定へ移し、ユーザーが手で調整した寸法はそのまま残す。
+const LEGACY_DEFAULT_SIZES: [(&str, f64, f64); 7] = [
+    ("mascot", 240.0, 380.0),
+    ("pet", 680.0, 430.0),
+    ("chat", 380.0, 640.0),
+    ("talk", 380.0, 640.0),
+    ("bar", 640.0, 300.0),
+    ("workspace", 1100.0, 700.0),
+    ("widget", 320.0, 440.0),
 ];
 
 /// ウィンドウの最小寸法。`tauri.conf.json` の `minWidth` / `minHeight` と揃える必要がある
@@ -41,7 +53,7 @@ pub const BOOT_WIDTH: f64 = 680.0;
 pub const BOOT_HEIGHT: f64 = 430.0;
 
 /// 形式ごとのウィンドウ寸法を覚えておく設定キー。
-/// `{"chat":{"w":380,"h":640},…}` の形。位置は形式をまたいで共有する
+/// `{"chat":{"w":520,"h":760},…}` の形。位置は形式をまたいで共有する
 /// （置き場所はユーザーの習慣で、形式ごとに変えたいものではないため）。
 pub(crate) const SIZES_KEY: &str = "PICOAGENT_WINDOW_LAYOUTS";
 
@@ -65,8 +77,9 @@ fn default_size(id: &str) -> (f64, f64) {
     LAYOUTS
         .iter()
         .find(|(layout, _, _, _)| *layout == id)
+        .or_else(|| LAYOUTS.iter().find(|(layout, _, _, _)| *layout == DEFAULT))
         .map(|(_, _, width, height)| (*width, *height))
-        .unwrap_or((680.0, 430.0))
+        .expect("既定の表示形式はLAYOUTSに定義済み")
 }
 
 /// 形式ごとに覚えている寸法。無ければ既定寸法。
@@ -87,10 +100,15 @@ pub fn size_for(config: &crate::config::Config, id: &str) -> (f64, f64) {
         .get("h")
         .and_then(Value::as_f64)
         .unwrap_or(default_height);
-    // 560×430 は旧既定、600×430 は口パク実機確認中に一度だけ使った暫定既定。
-    // ユーザーが明示的に広げた寸法は残しつつ、既定のまま使っていた環境だけ新しい
-    // 680×430へ移す。これが無いと形式切替時に記録された旧既定が永久に優先される。
-    if id == "pet" && height == 430.0 && matches!(width as u32, 560 | 600) {
+    let legacy_default =
+        LEGACY_DEFAULT_SIZES
+            .iter()
+            .any(|(legacy_id, legacy_width, legacy_height)| {
+                *legacy_id == id && *legacy_width == width && *legacy_height == height
+            });
+    // ペット形式にはさらに古い暫定既定がある。完全一致だけを移行対象にする。
+    let legacy_pet = id == "pet" && height == 430.0 && matches!(width as u32, 560 | 600);
+    if legacy_default || legacy_pet {
         return (default_width, default_height);
     }
     (width.max(MIN_WIDTH), height.max(MIN_HEIGHT))
@@ -249,13 +267,12 @@ mod tests {
     }
 
     #[test]
-    fn 起動画面は小型形式より広い共通寸法を使う() {
-        let (chat_width, _) = default_size("chat");
-        let (bar_width, _) = default_size("bar");
+    fn 起動画面は選択形式に依存しない共通寸法を使う() {
         assert_eq!((BOOT_WIDTH, BOOT_HEIGHT), (680.0, 430.0));
-        assert!(BOOT_WIDTH > chat_width);
-        assert!(BOOT_HEIGHT > default_size("bar").1);
-        assert!(BOOT_WIDTH >= bar_width);
+        assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("chat"));
+        assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("bar"));
+        assert!(BOOT_WIDTH >= MIN_WIDTH);
+        assert!(BOOT_HEIGHT >= MIN_HEIGHT);
     }
 
     /// ID が重複していないこと（重複するとメニューの選択状態が二重に立つ）。

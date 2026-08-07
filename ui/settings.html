@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <title>PicoAgent の設定</title>
-  <link rel="stylesheet" href="settings.css" />
+  <link rel="stylesheet" href="settings.css?v=20260808-friendly-settings" />
 </head>
 <body>
   <header>
     <h1>PicoAgent の設定</h1>
-    <p class="hint">叩く AI とエージェント機能をここで設定できます。保存するとすぐ反映されます。</p>
+    <p class="hint">左から目的を選び、必要な項目だけ変更してください。変更内容は下の「保存」で反映します。</p>
     <label class="settings-search" for="settingsSearch">
-      <span>検索</span>
-      <input id="settingsSearch" type="search" autocomplete="off" placeholder="設定・スキル・キャラクターを探す" />
+      <span>設定を検索</span>
+      <input id="settingsSearch" type="search" autocomplete="off" placeholder="例: 音声、画面、APIキー、キャラクター" />
     </label>
   </header>
 
@@ -22,12 +22,12 @@
 
   <footer>
     <span id="status" class="status" aria-live="polite"></span>
-    <button id="resetChanges" class="secondary" type="button" disabled>変更を戻す</button>
-    <button id="save" type="button">保存</button>
+    <button id="resetChanges" class="secondary" type="button" disabled>保存前の変更を取り消す</button>
+    <button id="save" type="button">変更を保存</button>
   </footer>
 
   <datalist id="modelOptions"></datalist>
   <script src="picoagent.js"></script>
-  <script src="settings.js"></script>
+  <script src="settings.js?v=20260808-friendly-settings-2"></script>
 </body>
 </html>
