@@ -2096,6 +2096,13 @@ pub async fn settings_save(
     let companion_mode_changed = changed_text("PICOAGENT_COMPANION_MODE", "both");
     let relationship_memory_changed = changed_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
 
+    // 設定本体を書き換える前に、現在の形式と寸法を保存する。書き換え後では
+    // 新しい形式へ切り替わったものとして、古い寸法を誤った形式へ記録してしまう。
+    if layout_changed {
+        crate::layout::remember_current_size(&app)
+            .map_err(|e| log_command_error(&app, "切替前の表示サイズ保存に失敗しました", e))?;
+    }
+
     // シークレットは平文保存せず、DPAPI で暗号化してから永続化する。
     let schema_keys = secret_keys();
     let mut encrypted: Vec<(String, String)> = Vec::new();
@@ -2113,10 +2120,30 @@ pub async fn settings_save(
         patch.insert(key, Value::String(value));
     }
 
-    state
-        .config
-        .set_all(patch)
-        .map_err(|e| log_command_error(&app, "設定保存に失敗しました", e))?;
+    // 設定画面は読み込み時点の全設定を送り返すため、直前に remember_current_size() が
+    // 更新した内部値を古いスナップショットで戻さない。最新値の採取から set_all まで
+    // 同じ名前付きロックを保持し、右クリック切替との並行更新も直列化する。
+    {
+        let _layout_sizes_guard = if layout_changed {
+            Some(crate::store::lock_state(crate::layout::SIZES_KEY))
+        } else {
+            None
+        };
+        if layout_changed {
+            let sizes = state
+                .config
+                .get_all()
+                .get(crate::layout::SIZES_KEY)
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Map::new()));
+            patch.insert(crate::layout::SIZES_KEY.to_string(), sizes);
+        }
+
+        state
+            .config
+            .set_all(patch)
+            .map_err(|e| log_command_error(&app, "設定保存に失敗しました", e))?;
+    }
 
     // モデル DL・エンジン/Aivis 起動・キャラ読込など重い反映は実行中に行わず、
     // 再起動して起動シーケンス（ローディング画面）でまとめて反映する（フキダシに

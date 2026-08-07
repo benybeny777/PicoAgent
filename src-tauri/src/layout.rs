@@ -40,7 +40,7 @@ pub const MIN_HEIGHT: f64 = 240.0;
 /// 形式ごとのウィンドウ寸法を覚えておく設定キー。
 /// `{"chat":{"w":380,"h":640},…}` の形。位置は形式をまたいで共有する
 /// （置き場所はユーザーの習慣で、形式ごとに変えたいものではないため）。
-const SIZES_KEY: &str = "PICOAGENT_WINDOW_LAYOUTS";
+pub(crate) const SIZES_KEY: &str = "PICOAGENT_WINDOW_LAYOUTS";
 
 /// 指定 ID が定義済みかどうか。
 pub fn is_known(id: &str) -> bool {
@@ -92,6 +92,8 @@ pub fn remember_size(app: &AppHandle, id: &str, width: f64, height: f64) -> Resu
     if !is_known(id) {
         return Ok(());
     }
+    // 設定画面保存と右クリック切替が重なっても、別形式の寸法を消し合わない。
+    let _guard = crate::store::lock_state(SIZES_KEY);
     let state = app.state::<AppState>();
     let mut sizes = match state.config.get_all().get(SIZES_KEY) {
         Some(Value::Object(map)) => map.clone(),
@@ -109,8 +111,32 @@ pub fn remember_size(app: &AppHandle, id: &str, width: f64, height: f64) -> Resu
         .map_err(|error| format!("表示形式ごとのウィンドウ寸法の保存に失敗しました: {error}"))
 }
 
+/// 現在の表示形式とウィンドウ寸法を、切り替え前の値として覚える。
+/// 右クリックメニューと設定画面のどちらもこの共通経路を使う。
+pub fn remember_current_size(app: &AppHandle) -> Result<(), String> {
+    let previous = {
+        let state = app.state::<AppState>();
+        current(&state.config)
+    };
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let (Ok(size), Ok(scale)) = (window.outer_size(), window.scale_factor()) else {
+        return Ok(());
+    };
+    let scale = scale.max(1.0);
+    remember_size(
+        app,
+        &previous,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    )
+}
+
 /// 覚えている寸法を捨てて既定へ戻す。`id` が `None` なら全形式。
 pub fn forget_sizes(app: &AppHandle, id: Option<&str>) -> Result<(), String> {
+    // リサイズ記憶の保存とリセットが並列になっても、古い一覧を戻さない。
+    let _guard = crate::store::lock_state(SIZES_KEY);
     let state = app.state::<AppState>();
     let sizes = match (id, state.config.get_all().get(SIZES_KEY)) {
         // 特定の形式だけ忘れる場合は、他の形式の記憶を残す。
@@ -165,27 +191,15 @@ pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 表示形式を切り替えて保存する（右クリックメニュー・設定画面の共通入口）。
+/// 表示形式を切り替えて保存する（右クリックメニューの入口）。
 pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
     if !is_known(id) {
         return Err(format!("未知の表示形式です: {id}"));
     }
+    // 切り替え前の寸法を、その形式のものとして覚えておく
+    // （手で広げたチャットへ戻ったとき、広げたままにするため）。
+    remember_current_size(app)?;
     {
-        let state = app.state::<AppState>();
-        // 切り替え前の寸法を、その形式のものとして覚えておく
-        // （手で広げたチャットへ戻ったとき、広げたままにするため）。
-        let previous = current(&state.config);
-        if let Some(window) = app.get_webview_window("main") {
-            if let (Ok(size), Ok(scale)) = (window.outer_size(), window.scale_factor()) {
-                let scale = scale.max(1.0);
-                let _ = remember_size(
-                    app,
-                    &previous,
-                    size.width as f64 / scale,
-                    size.height as f64 / scale,
-                );
-            }
-        }
         let mut patch = Map::new();
         patch.insert("PICOAGENT_LAYOUT".to_string(), json!(id));
         let state = app.state::<AppState>();
