@@ -75,22 +75,52 @@ const HISTORY = [
   { role: "assistant", content: "できたよ。`資料_p2-3.pdf` として同じフォルダに保存したよ。" },
 ];
 
-// バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 560x430 +
+// バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId }) => `
+const mock = ({ theme, history, reply, characterId, live2dSdkOverrides, initDelayMs, bootHoldMs }) => `
+// README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
+// 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
+// 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
+window.__previewVoice = (() => {
+  const rate = 8000, seconds = 4, samples = rate * seconds;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  const write = (offset, text) => [...text].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
+  write(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); write(8, "WAVE");
+  write(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, "data");
+  view.setUint32(40, samples * 2, true);
+  for (let i = 0; i < samples; i += 1) {
+    const t = i / rate;
+    const syllable = Math.sin(Math.PI * ((t * 3.2) % 1));
+    const pause = (Math.floor(t * 3.2) % 5) === 4 ? 0 : 1;
+    const envelope = Math.max(0, syllable) * pause * 0.36;
+    view.setInt16(44 + i * 2, Math.sin(2 * Math.PI * 190 * t) * envelope * 32767, true);
+  }
+  return [...new Uint8Array(buffer)];
+})();
 window.__listeners = {};
+window.__bootReadyAt = Date.now() + ${JSON.stringify(bootHoldMs)};
 window.__TAURI__ = {
   core: { invoke: (name) => {
-    if (name === "pet_init") return Promise.resolve({
+    if (name === "pet_init") return new Promise(resolve => setTimeout(() => resolve({
       up: true, providerId: "local", model: "gemma-3-4b-it-Q4_K_M",
-      theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "0",
+      theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "100",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {},
+      live2dSdkOverrides: ${JSON.stringify(live2dSdkOverrides)},
       history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0",
+      onboardingDone: true, relationshipMemoryEnabled: false,
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
-    });
+    }), ${JSON.stringify(initDelayMs)}));
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
-    if (name === "pet_speak") return Promise.resolve({ enabled: false });
+    if (name === "aivis_status") return Promise.resolve({ enabled: true, up: Date.now() >= window.__bootReadyAt });
+    if (name === "pet_speak") return Promise.resolve(
+      ${JSON.stringify(characterId)} === "hiyori"
+        ? { enabled: true, mime: "audio/wav", audio: window.__previewVoice }
+        : { enabled: false },
+    );
     if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), 80));
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
@@ -148,6 +178,53 @@ async function bounds(png, pad = 8) {
   }
 }
 
+// 2枚のPNGをデコードし、RGBが目に見える程度（各成分合計24超）変わった画素数を返す。
+// Live2D の口パラメータが存在していても、実際の描画へ反映されなければ0付近になる。
+async function changedPixels(before, after, crop = null) {
+  const page = await trimmer.newPage();
+  try {
+    return await page.evaluate(async ({ beforeUrl, afterUrl, crop }) => {
+      const load = url => new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = url;
+      });
+      const [beforeImage, afterImage] = await Promise.all([load(beforeUrl), load(afterUrl)]);
+      const width = Math.min(beforeImage.width, afterImage.width);
+      const height = Math.min(beforeImage.height, afterImage.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      context.drawImage(beforeImage, 0, 0);
+      const a = context.getImageData(0, 0, width, height).data;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(afterImage, 0, 0);
+      const b = context.getImageData(0, 0, width, height).data;
+      const left = Math.max(0, crop?.x || 0);
+      const top = Math.max(0, crop?.y || 0);
+      const right = Math.min(width, crop ? left + crop.width : width);
+      const bottom = Math.min(height, crop ? top + crop.height : height);
+      let changed = 0;
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) {
+          const index = (y * width + x) * 4;
+          if (Math.abs(a[index] - b[index]) + Math.abs(a[index + 1] - b[index + 1])
+            + Math.abs(a[index + 2] - b[index + 2]) > 24) changed += 1;
+        }
+      }
+      return changed;
+    }, {
+      beforeUrl: `data:image/png;base64,${before.toString("base64")}`,
+      afterUrl: `data:image/png;base64,${after.toString("base64")}`,
+      crop,
+    });
+  } finally {
+    await page.close();
+  }
+}
+
 // 複数フレームの外接矩形を合成する（動く絵は 1 枚目だけだと動いた分がはみ出す）。
 function unionBounds(boxes) {
   const found = boxes.filter(Boolean);
@@ -162,18 +239,21 @@ function unionBounds(boxes) {
 
 // 既定のウィンドウサイズは tauri.conf.json の値。実物と同じ比率で撮る。
 async function openScene({
-  width = 560, height = 430, theme = "light", history = HISTORY,
-  reply = REPLY, characterId = "mugi",
+  width = 680, height = 430, theme = "light", history = HISTORY,
+  reply = REPLY, characterId = "mugi", live2dSdkOverrides = {}, initDelayMs = 0,
+  bootHoldMs = 0, waitForReady = true,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   // 「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, live2dSdkOverrides, initDelayMs, bootHoldMs }));
   page.on("pageerror", error => console.error(`  [pageerror] ${error.message}`));
   await page.goto(`http://127.0.0.1:${PORT}/index.html`);
-  await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), { timeout: 20000 });
+  if (waitForReady) {
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), { timeout: 20000 });
+  }
   return page;
 }
 
@@ -256,6 +336,12 @@ async function shoot(name, {
   if (prepare) await prepare(page);
   const frames = await record(page, { seconds, fps, step });
   await page.close();
+  if (process.env.SHOOT_DEBUG_FRAMES) {
+    const debugDir = join(ROOT, "temp", "recording-frames");
+    mkdirSync(debugDir, { recursive: true });
+    await Promise.all(frames.filter((_, index) => index % 6 === 0).map((frame, index) =>
+      writeFile(join(debugDir, `${name}-${String(index).padStart(2, "0")}.png`), frame)));
+  }
 
   // キャラが動く分だけ 1 コマ目より外へはみ出すので、間引いた複数コマの外接矩形を合成する。
   const sampled = frames.filter((_, index) => index % 5 === 0 || index === frames.length - 1);
@@ -317,7 +403,8 @@ async function prepareFullscreen(page) {
 // Live2D は WebGL 描画。ランタイムとモデルは cargo xtask setup live2d で取得する。
 const LIVE2D_CHARACTER = "hiyori";
 const LIVE2D_REQUIRED = [
-  "ui/vendor/live2d/live2dcubismcore.min.js",
+  "ui/vendor/live2d/live2dcubismcore-5.3.min.js",
+  "ui/vendor/live2d/live2dcubismcore-compat.min.js",
   "ui/vendor/live2d/pixi.min.js",
   "ui/vendor/live2d/cubism4.min.js",
   `ui/assets/characters/${LIVE2D_CHARACTER}/live2d`,
@@ -330,7 +417,63 @@ async function prepareLive2D(page) {
   }, { timeout: 40000 });
   // 初回モーションが動き出してポーズが決まるまで少し待つ。
   await page.waitForTimeout(1500);
+  // パラメータ名が合っているだけでなく、閉口と開口で口元の描画が実際に変わることを確認する。
+  // tickerを止めて同じポーズのまま比較し、身体やまばたきの変化を口パクと誤認しない。
+  await page.evaluate(() => {
+    live2dModel?.internalModel?.motionManager?.stopAllMotions?.();
+    live2dApp.ticker.stop();
+    const core = live2dModel.internalModel.coreModel;
+    core.setParameterValueById("ParamMouthOpenY", 0);
+    core.update();
+    live2dApp.renderer.render(live2dApp.stage);
+  });
+  const closed = await page.locator("#live2dCanvas").screenshot({ omitBackground: true });
+  await page.evaluate(() => {
+    const core = live2dModel.internalModel.coreModel;
+    core.setParameterValueById("ParamMouthOpenY", 0.75);
+    core.update();
+    live2dApp.renderer.render(live2dApp.stage);
+  });
+  const opened = await page.locator("#live2dCanvas").screenshot({ omitBackground: true });
+  if (process.env.SHOOT_DEBUG_LIP) {
+    const debugDir = join(ROOT, "temp", "lipcheck");
+    mkdirSync(debugDir, { recursive: true });
+    await Promise.all([
+      writeFile(join(debugDir, "closed.png"), closed),
+      writeFile(join(debugDir, "opened.png"), opened),
+    ]);
+  }
+  const mouthPixels = await changedPixels(closed, opened, { x: 105, y: 105, width: 75, height: 80 });
+  if (mouthPixels < 20) throw new Error(`Live2D の口が描画へ反映されていません（変化 ${mouthPixels}px）`);
+  console.log(`  口元の開閉描画差: ${mouthPixels}px`);
+  await page.evaluate(() => {
+    live2dMouth = -1;
+    live2dApp.ticker.start();
+    playLive2DMotion("idle");
+  });
   await submit(page, ASK);
+  await page.waitForFunction(() => typeof live2dMouth !== "undefined" && live2dMouth > 0.05, { timeout: 5000 });
+}
+
+async function validateLive2dSdkModels() {
+  for (const sdk of ["5", "4"]) {
+    const page = await openScene({ characterId: "mugi", live2dSdkOverrides: { mugi: sdk } });
+    try {
+      await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+      const loaded = await page.evaluate(() => ({
+        sdk: activeLive2dSdkPreference,
+        core: live2dRuntimeSdk,
+        width: live2dModel?.internalModel?.originalWidth || 0,
+        height: live2dModel?.internalModel?.originalHeight || 0,
+      }));
+      if (loaded.sdk !== sdk || loaded.core !== sdk || loaded.width <= 0 || loaded.height <= 0) {
+        throw new Error(`Cubism ${sdk} の固定読込結果が不正です: ${JSON.stringify(loaded)}`);
+      }
+      console.log(`  Cubism ${sdk}固定読込: ${loaded.width}x${loaded.height}`);
+    } finally {
+      await page.close();
+    }
+  }
 }
 
 // ---------------------------------------------------------------- 撮る絵の一覧
@@ -361,6 +504,23 @@ if (!ffmpegAvailable) {
       "PATH に通すか、SHOOT_FFMPEG に実行ファイルの絶対パスを指定してください。",
   );
 }
+
+if (process.env.SHOOT_DEBUG_BOOT) {
+  const characterId = process.env.SHOOT_BOOT_CHARACTER || "mugi";
+  const page = await openScene({ characterId, bootHoldMs: 5000, waitForReady: false });
+  await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("is-booting"));
+  await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("boot-character-ready"), { timeout: 40000 });
+  await page.waitForTimeout(500);
+  const debugDir = join(ROOT, "temp", "boot-check");
+  mkdirSync(debugDir, { recursive: true });
+  await page.screenshot({ path: join(debugDir, `boot-${characterId}.png`), omitBackground: true });
+  await page.close();
+  console.log(`  起動画面確認: ${join(debugDir, `boot-${characterId}.png`)}`);
+}
+
+const wantsLive2d = (!only.length || only.some(name => name.startsWith("live2d-")))
+  && LIVE2D_REQUIRED.every(path => existsSync(join(ROOT, path)));
+if (wantsLive2d) await validateLive2dSdkModels();
 
 for (const [name, { requires = [], ...options }] of Object.entries(SHOTS)) {
   if (only.length && !only.includes(name)) continue;

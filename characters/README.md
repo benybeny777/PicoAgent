@@ -3,6 +3,9 @@
 PicoAgent のキャラクター画像は、各キャラフォルダを同じ構成にそろえて管理する。
 正本は `characters/<キャラクターID>/` で、`ui/assets/characters/` は同期生成物。
 
+組み込みキャラの既定声は `character.json` の `voice` とバックエンドの
+`default_character_tts_voice` を同じモデルUUID・話者UUID・スタイル名にそろえる。
+
 Live2D キャラ（`character.json` に `live2d` を持つキャラ）は本ページの連番フレーム構成を使わない。
 末尾の「Live2D キャラクター」を参照。
 
@@ -109,6 +112,7 @@ characters/<id>/
 
 - `layers/` と `animations/` は不要。まばたき・口パク・モーションはモデル定義が担当する。
 - `build-character-animations.py` は Live2D キャラをスキップする。
+- ランタイムは公式Coreを世代別に使い、SDK 5モデルはCore 6（Cubism 5.3形式）、SDK 4モデルはCore 5（互換用）で読み込む。`cargo xtask setup live2d` が両方のSHA-256まで照合する。
 - サンプルキャラ（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が `live2d/` へ
   モデルを取得する。再配布条件があるためモデル実体は Git 管理外。
   `preview.jpg` はローディング画面と設定画面アイコンに使い、取得できなかった場合は
@@ -125,6 +129,9 @@ characters/<id>/
   `scale` / `offsetY` はモデルごとに実機で合わせる（同じ値では収まらない）。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
   `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。
+- Cubism 4／5の両方を書き出して選べるようにする場合は、`live2d.models` を
+  `[{ "sdk":"5", "path":"live2d/sdk5/model.model3.json" }, { "sdk":"4", "path":"live2d/sdk4/model.model3.json" }]`
+  の形で定義する。設定画面で自動／4固定／5固定を選べる。単一モデルだけのパックでは `live2d.model` のままでよい。
 
 ### 同じ絵で PNG 版と Live2D 版を分ける（別キャラ運用）
 

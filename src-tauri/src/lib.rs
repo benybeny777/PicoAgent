@@ -313,8 +313,8 @@ pub fn run() {
     });
 }
 
-// 既定の右下オフセット（px）。right はモニタ右端からウィンドウ右端までの距離（負＝外へオーバーハング）。
-const DEFAULT_RIGHT_OFFSET: i32 = -69;
+// 既定の右下オフセット（px）。ウィンドウ全体が選択中モニタへ収まる余白を取る。
+const DEFAULT_RIGHT_OFFSET: i32 = 12;
 const DEFAULT_BOTTOM_OFFSET: i32 = 51;
 // 画面端スナップのしきい値（px）。
 const SNAP_THRESHOLD: i32 = 24;
@@ -358,9 +358,9 @@ pub(crate) fn position_from_offsets(
 ) -> (i32, i32) {
     let x = monitor.x + monitor.width as i32 - win_w as i32 - right_offset;
     let y = monitor.y + monitor.height as i32 - win_h as i32 - bottom_offset;
-    // 右下方向のはみ出しは丸めない（既定位置は右端より外へ 69px オーバーハングさせる意匠）。
-    // モニタの左上より外へ出ることだけを防ぐ。
-    (x.max(monitor.x), y.max(monitor.y))
+    let max_x = monitor.x + monitor.width.saturating_sub(win_w) as i32;
+    let max_y = monitor.y + monitor.height.saturating_sub(win_h) as i32;
+    (x.clamp(monitor.x, max_x), y.clamp(monitor.y, max_y))
 }
 
 /// 既定の右下オフセットでのウィンドウ位置。
@@ -431,15 +431,16 @@ pub(crate) fn pull_back_on_screen(window: &tauri::WebviewWindow, win_w: u32, win
     let Ok(pos) = window.outer_position() else {
         return;
     };
-    let monitors = monitor_rects(window);
-    if monitors.is_empty() || is_visible_on_any_monitor(&monitors, pos.x, pos.y, win_w, win_h) {
-        return;
-    }
     let Some(monitor) = current_monitor_rect(window) else {
         return;
     };
-    let (x, y) = default_window_position(monitor, win_w, win_h);
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+    let max_x = monitor.x + monitor.width.saturating_sub(win_w) as i32;
+    let max_y = monitor.y + monitor.height.saturating_sub(win_h) as i32;
+    let x = pos.x.clamp(monitor.x, max_x);
+    let y = pos.y.clamp(monitor.y, max_y);
+    if (x, y) != (pos.x, pos.y) {
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+    }
 }
 
 /// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。
@@ -788,11 +789,13 @@ mod window_layout_tests {
     }
 
     #[test]
-    fn 端から少しはみ出すだけなら有効と判定する() {
-        // 既定位置自体が右端より外へ 69px はみ出す運用なので、完全内包を要求してはいけない。
+    fn 既定位置はモニタ内へ収まる() {
         let monitors = two_monitors();
         let main = monitors[1];
         let (x, y) = default_window_position(main, 560, 430);
         assert!(is_visible_on_any_monitor(&monitors, x, y, 560, 430));
+        assert!(x >= main.x && y >= main.y);
+        assert!(x + 560 <= main.x + main.width as i32);
+        assert!(y + 430 <= main.y + main.height as i32);
     }
 }

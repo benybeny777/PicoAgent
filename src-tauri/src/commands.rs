@@ -564,6 +564,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "100"),
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "history": recent_history,
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
         "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
@@ -1670,7 +1671,7 @@ const LIVE2D_AIVIS_FALLBACK_SPEAKER: &str = "888753760";
 // ひより（AivisHub「まお」）
 const HIYORI_AIVIS_MODEL_UUID: &str = "a59cb814-0083-4369-8542-f51a29e72af7";
 const HIYORI_AIVIS_SPEAKER_UUID: &str = "e756b8e4-b606-4e15-99b1-3f9c6a1b2317";
-const HIYORI_AIVIS_STYLE_NAME: &str = "ノーマル";
+const HIYORI_AIVIS_STYLE_NAME: &str = "ふつー";
 // はる（AivisHub「花音」）
 const HARU_AIVIS_MODEL_UUID: &str = "a670e6b8-0852-45b2-8704-1bc9862f2fe6";
 const HARU_AIVIS_SPEAKER_UUID: &str = "b1ca560f-f212-4e67-ab7d-0a4f5afb75a8";
@@ -1678,11 +1679,29 @@ const HARU_AIVIS_STYLE_NAME: &str = "ノーマル";
 // イプシロン（AivisHub「コハク」）
 const EPSILON_AIVIS_MODEL_UUID: &str = "22e8ed77-94fe-4ef2-871f-a86f94e9a579";
 const EPSILON_AIVIS_SPEAKER_UUID: &str = "5680ac39-43c9-487a-bc3e-018c0d29cc38";
-const EPSILON_AIVIS_STYLE_NAME: &str = "ノーマル";
+const EPSILON_AIVIS_STYLE_NAME: &str = "せつなめ";
+// レン（AivisHub「天深シノ」）
+const REN_AIVIS_MODEL_UUID: &str = "0f6821f4-9f86-4da1-a41a-fbe6fff9ca88";
+const REN_AIVIS_SPEAKER_UUID: &str = "c175ee3c-5a1d-4901-a7fe-62d813370845";
+// ライス（AivisHub「阿井田 茂」）
+const RICE_AIVIS_MODEL_UUID: &str = "47e53151-a378-46f3-abee-ce13aa07feb1";
+const RICE_AIVIS_SPEAKER_UUID: &str = "561e4e59-3bc9-4726-9028-44a3c12a6f1d";
+// わんこ（AivisHub「TANAKA」）
+const WANKO_AIVIS_MODEL_UUID: &str = "470a41e2-863f-4bf2-8a20-bf7cde0d8f7b";
+const WANKO_AIVIS_SPEAKER_UUID: &str = "e7b467ab-3947-4876-892f-fea9a75fd9e4";
+
+fn aivis_voice(model_uuid: &str, speaker_uuid: &str, style_name: &str) -> TtsVoice {
+    TtsVoice {
+        speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
+        model_uuid: Some(model_uuid.to_string()),
+        speaker_uuid: Some(speaker_uuid.to_string()),
+        style_name: Some(style_name.to_string()),
+    }
+}
 
 fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
     match character_id {
-        "rin" => Some(TtsVoice {
+        "rin" | "rin-tha3" => Some(TtsVoice {
             speaker: RIN_AIVIS_SPEAKER.to_string(),
             model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
             speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
@@ -1694,24 +1713,46 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
             style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
         }),
-        "hiyori" => Some(TtsVoice {
-            speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
-            model_uuid: Some(HIYORI_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(HIYORI_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(HIYORI_AIVIS_STYLE_NAME.to_string()),
-        }),
-        "haru" => Some(TtsVoice {
-            speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
-            model_uuid: Some(HARU_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(HARU_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(HARU_AIVIS_STYLE_NAME.to_string()),
-        }),
-        "epsilon" => Some(TtsVoice {
-            speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
-            model_uuid: Some(EPSILON_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(EPSILON_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(EPSILON_AIVIS_STYLE_NAME.to_string()),
-        }),
+        "mugi" | "mugi-live2d" => Some(aivis_voice(
+            HIYORI_AIVIS_MODEL_UUID,
+            HIYORI_AIVIS_SPEAKER_UUID,
+            "あまあま",
+        )),
+        "hiyori" => Some(aivis_voice(
+            HIYORI_AIVIS_MODEL_UUID,
+            HIYORI_AIVIS_SPEAKER_UUID,
+            HIYORI_AIVIS_STYLE_NAME,
+        )),
+        "haru" => Some(aivis_voice(
+            HARU_AIVIS_MODEL_UUID,
+            HARU_AIVIS_SPEAKER_UUID,
+            HARU_AIVIS_STYLE_NAME,
+        )),
+        "epsilon" => Some(aivis_voice(
+            EPSILON_AIVIS_MODEL_UUID,
+            EPSILON_AIVIS_SPEAKER_UUID,
+            EPSILON_AIVIS_STYLE_NAME,
+        )),
+        "mao" => Some(aivis_voice(
+            HIYORI_AIVIS_MODEL_UUID,
+            HIYORI_AIVIS_SPEAKER_UUID,
+            "おちつき",
+        )),
+        "ren" => Some(aivis_voice(
+            REN_AIVIS_MODEL_UUID,
+            REN_AIVIS_SPEAKER_UUID,
+            "ささやき",
+        )),
+        "rice" => Some(aivis_voice(
+            RICE_AIVIS_MODEL_UUID,
+            RICE_AIVIS_SPEAKER_UUID,
+            "Calm",
+        )),
+        "wanko" => Some(aivis_voice(
+            WANKO_AIVIS_MODEL_UUID,
+            WANKO_AIVIS_SPEAKER_UUID,
+            "Happy",
+        )),
         _ => None,
     }
 }
@@ -2119,6 +2160,7 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
+    let live2d_sdk_changed = changed_value("PICOAGENT_LIVE2D_SDK_OVERRIDES");
     let layout_changed = changed_text("PICOAGENT_LAYOUT", crate::layout::DEFAULT);
     let companion_mode_changed = changed_text("PICOAGENT_COMPANION_MODE", "both");
     let relationship_memory_changed = changed_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
@@ -2178,7 +2220,8 @@ pub async fn settings_save(
     // 立ち上げ直す（例: キャラ変更だけなら LLM エンジンは再起動しない）。
     let restart_engine = provider_changed || local_engine_changed;
     let restart_aivis = tts_runtime_changed;
-    let requires_restart = restart_engine || restart_aivis || character_changed;
+    let requires_restart =
+        restart_engine || restart_aivis || character_changed || live2d_sdk_changed;
 
     // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
     if system_context_changed || memory_setting_changed {
@@ -2258,6 +2301,12 @@ pub async fn settings_save(
                 .config
                 .get_all()
                 .get("PICOAGENT_CHARACTER_OVERRIDES")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            ui["live2dSdkOverrides"] = state
+                .config
+                .get_all()
+                .get("PICOAGENT_LIVE2D_SDK_OVERRIDES")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
         }
@@ -3211,7 +3260,36 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{settings_tab, speech_text};
+    use super::{default_character_tts_voice, settings_tab, speech_text};
+
+    #[test]
+    fn 組み込みキャラはそれぞれ既定声を持つ() {
+        let expected = [
+            ("mugi", "あまあま"),
+            ("mugi-live2d", "あまあま"),
+            ("rin", "ノーマル"),
+            ("rin-tha3", "ノーマル"),
+            ("mai", "ノーマル"),
+            ("hiyori", "ふつー"),
+            ("haru", "ノーマル"),
+            ("epsilon", "せつなめ"),
+            ("mao", "おちつき"),
+            ("ren", "ささやき"),
+            ("rice", "Calm"),
+            ("wanko", "Happy"),
+        ];
+        for (character_id, style_name) in expected {
+            let voice = default_character_tts_voice(character_id)
+                .unwrap_or_else(|| panic!("{character_id} の既定声がありません"));
+            assert_eq!(
+                voice.style_name.as_deref(),
+                Some(style_name),
+                "{character_id}"
+            );
+            assert!(voice.model_uuid.is_some(), "{character_id}");
+            assert!(voice.speaker_uuid.is_some(), "{character_id}");
+        }
+    }
 
     #[test]
     fn 設定画面は既知のタブだけを受け付ける() {

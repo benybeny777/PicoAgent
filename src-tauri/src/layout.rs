@@ -23,7 +23,7 @@ pub const DEFAULT: &str = "pet";
 /// 形式ごとに覚えるので（`PICOAGENT_WINDOW_LAYOUTS`）、ここは初回の見え方を決める値。
 pub const LAYOUTS: [(&str, &str, f64, f64); 8] = [
     ("mascot", "マスコット（キャラだけ）", 240.0, 380.0),
-    ("pet", "ペット（キャラ＋フキダシ）", 560.0, 430.0),
+    ("pet", "ペット（キャラ＋フキダシ）", 680.0, 430.0),
     ("chat", "チャット（履歴つきパネル）", 380.0, 640.0),
     ("talk", "トーク（メッセージアプリ風）", 380.0, 640.0),
     ("bar", "バー（1行入力）", 640.0, 300.0),
@@ -63,7 +63,7 @@ fn default_size(id: &str) -> (f64, f64) {
         .iter()
         .find(|(layout, _, _, _)| *layout == id)
         .map(|(_, _, width, height)| (*width, *height))
-        .unwrap_or((560.0, 430.0))
+        .unwrap_or((680.0, 430.0))
 }
 
 /// 形式ごとに覚えている寸法。無ければ既定寸法。
@@ -84,6 +84,12 @@ pub fn size_for(config: &crate::config::Config, id: &str) -> (f64, f64) {
         .get("h")
         .and_then(Value::as_f64)
         .unwrap_or(default_height);
+    // 560×430 は旧既定、600×430 は口パク実機確認中に一度だけ使った暫定既定。
+    // ユーザーが明示的に広げた寸法は残しつつ、既定のまま使っていた環境だけ新しい
+    // 680×430へ移す。これが無いと形式切替時に記録された旧既定が永久に優先される。
+    if id == "pet" && height == 430.0 && matches!(width as u32, 560 | 600) {
+        return (default_width, default_height);
+    }
     (width.max(MIN_WIDTH), height.max(MIN_HEIGHT))
 }
 

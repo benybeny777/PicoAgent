@@ -7,7 +7,7 @@
 ヘッドレス Chromium で描画します。フロントの JS・CSS・キャラクター画像は本物をそのまま使うため、
 出てくる絵はモックアップではなく実際の描画結果です。
 
-- ウィンドウサイズは `src-tauri/tauri.conf.json` の既定値（560×430）に合わせています
+- ウィンドウサイズは `src-tauri/tauri.conf.json` の既定値（680×430）に合わせています
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
 - 1本あたり 4 秒・12fps・48 コマ。文字送りとキャラクターのモーションがそのまま入ります
 
@@ -73,12 +73,16 @@ Live2D の絵は、ランタイムとモデルが未取得だと**スキップ�
 cargo xtask setup live2d   # 先にこれを実行する
 ```
 
-必要なのは `ui/vendor/live2d/{live2dcubismcore.min.js,pixi.min.js,cubism4.min.js}` と
+必要なのは `ui/vendor/live2d/{live2dcubismcore-5.3.min.js,live2dcubismcore-compat.min.js,pixi.min.js,cubism4.min.js}` と
 `ui/assets/characters/hiyori/live2d/` です。いずれも再配布条件があるためリポジトリには含めていません
 （`.gitignore` 済み）。
 
+Live2D撮影は、麦のCubism 5／4モデルを個別に読み込んだあと、ひよりのtickerを止めて同一ポーズの
+口元だけを閉口・開口比較します。その後、実際のテストWAVをWebAudio解析へ通して録画するため、
+身体モーションだけを口パク成功と誤認しません。
+
 > [!NOTE]
-> **Cubism Core（`live2dcubismcore.min.js`）は Live2D 公式サイトからのみ配布されています。**
+> **Cubism Core（5.3用／互換用）は Live2D 公式サイトからのみ配布されています。**
 > npm にも GitHub にも正規版はありません（公式の `Live2D/CubismWebSamples` も Core は含まず、
 > README で公式サイトからのコピーを指示しています）。ネットワークが `cubism.live2d.com` へ
 > 到達できない環境では取得できず、Live2D の絵は撮れません。

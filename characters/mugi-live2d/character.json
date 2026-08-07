@@ -4,6 +4,14 @@
   "assetVersion": "2026-08-02-mugi-live2d-wip",
   "description": "むぎの Live2D 版（制作中）。会話と関係の記録は PNG 版とは別に持つ。",
   "greeting": "こんにちは、むぎだよ。えへへ、今日もそばで見てるね。いっしょにがんばろ？",
+  "voice": {
+    "provider": "aivis",
+    "modelName": "まお",
+    "modelUuid": "a59cb814-0083-4369-8542-f51a29e72af7",
+    "speakerUuid": "e756b8e4-b606-4e15-99b1-3f9c6a1b2317",
+    "styleName": "あまあま",
+    "sourceUrl": "https://hub.aivis-project.com/aivm-models/a59cb814-0083-4369-8542-f51a29e72af7"
+  },
   "boot": {
     "sleeping": "../mugi/boot/sleeping.png"
   },

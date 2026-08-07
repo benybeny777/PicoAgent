@@ -89,7 +89,7 @@ cargo xtask dev
 | `cargo xtask setup engine` | 同梱推論エンジン（llama-server。Windows は Vulkan / GPU 版） |
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ） |
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
-| `cargo xtask setup live2d` | Live2D ランタイムとサンプルモデル |
+| `cargo xtask setup live2d` | Cubism Editor 5.3互換のLive2Dランタイムとサンプルモデル（Cubism 4／5モデル対応） |
 | `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（Windowsの製品ランタイムはインストール時取得） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
@@ -111,7 +111,7 @@ cargo xtask setup tha3
 
 配布版ではWindowsインストール中に専用Python／CUDA版PyTorchをPicoAgentのTHA3領域だけへ取得するため、グローバルPythonや既存のPyTorchへ干渉しません。右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」で、元画像・ID・表示名を指定して「キャラクターを作成」を押します。生成ログとキャンセル操作を画面内に表示し、完成したパックだけを検証後に追加キャラクター領域へ導入します。
 
-キャラクター選択は同じ画面の画像カードから行えます。名前・内部ID・説明の検索と、`Live2D` / `PNGアニメ` / `自作THA3` / `追加キャラ` の絞り込みに対応し、各カードにも描画形式と内部IDを表示するため、同じ表示名のキャラも区別できます。カードの「このキャラを選ぶ」を押すと上の性格・口調設定もそのキャラへ切り替わり、「保存」で反映します。
+キャラクター選択は同じ画面の画像カードから行えます。名前・内部ID・説明の検索と、`Live2D` / `PNGアニメ` / `自作THA3` / `追加キャラ` の絞り込みに対応し、各カードにも描画形式と内部IDを表示するため、同じ表示名のキャラも区別できます。カードの「このキャラを選ぶ」を押すと上の性格・口調設定もそのキャラへ切り替わり、「保存」で反映します。Cubism 4／5の両モデルを持つLive2Dパックでは「Live2D の SDK 世代」を自動・4固定・5固定から選べるため、自動判定で表示が崩れる場合も切り替えて確認できます。
 
 コマンドで作る経路も残しています。
 
@@ -198,7 +198,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 ### キャラクター
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
-- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。まばたき・モーション・視線追従・声量連動の口パクをモデル自身が行う。公式サンプルモデルを 9 体同梱（再配布条件が明示されている Free Material License の 8 体＋Epsilon。モデル実体は初回セットアップ時に取得）。**2D と Live2D の見た目は[冒頭のプレビュー](#-picoagent)で見比べられます**
+- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。Cubism Editor 5.3互換の公式CoreでCubism 4／5モデルを読み込み、まばたき・モーション・視線追従・声量連動の口パクを行う。公式サンプルモデルを 9 体同梱（再配布条件が明示されている Free Material License の 8 体＋Epsilon。モデル実体は初回セットアップ時に取得）。**2D と Live2D の見た目は[冒頭のプレビュー](#-picoagent)で見比べられます**
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 - **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
 - **関係性と共有記録** — キャラごとに会話・完了した作業・ふれあいを端末内へ保存。「出会ったばかり」から自然に距離感が変わる。作業記録は固定・個別削除・全消去でき、「続きをやる」で依頼を入力欄へ戻せる。保存自体も設定で停止可能
@@ -323,7 +323,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 **基本** / **キャラクター** / **音声** / **叩くAI** / **スキル設定** / **許可** / **スキル活用ガイド** / **診断** の 8 タブです。
 
 - **許可** — 全スキル共通のファイル・ディレクトリ・実行の許可ルートと拒否パスをまとめて設定（`C:\Windows` と `Program Files` は常に拒否）。各スキルの個別許可ルート設定は廃止し、この共通設定を参照します
-- **キャラクター** — 選択・人格・声のほか、**自分で用意した Live2D モデル等を追加できます**（zip かフォルダを選ぶだけ。追加分はアプリのデータフォルダへ入り、再ビルドは不要）
+- **キャラクター** — 選択・人格・声・Live2DのSDK世代（自動／Cubism 4／Cubism 5）のほか、**自分で用意した Live2D モデル等を追加できます**（zip かフォルダを選ぶだけ。追加分はアプリのデータフォルダへ入り、再ビルドは不要）
 - **スキル設定** — カテゴリ見出しとジャンルチップで整理。各カードの ⚙ は既定で折りたたみ。設定不要 / 未設定 / 一部設定 / 設定済みのバッジと、承認ポリシー（低リスク / 外部読取 / 書込・変更 / 送信前確認 / 実行前確認）を表示
 - **叩くAI** — 選択中のプロバイダ設定だけを表示し、未使用プロバイダの API キー欄やモデル欄は畳み込みます
 - **診断** — 選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認
@@ -347,7 +347,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 |---|---|
 | 叩く AI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` |
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` |
-| キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_COMPANION_MODE` / `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` / `PICOAGENT_ONBOARDING_DONE` |
+| キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_LIVE2D_SDK_OVERRIDES` / `PICOAGENT_COMPANION_MODE` / `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` / `PICOAGENT_ONBOARDING_DONE` |
 | 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
 | 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` / `PICOAGENT_CHARACTER_ZOOM` |
 | ホットキー | `PICOAGENT_HOTKEY_ENABLED` / `PICOAGENT_HOTKEY_SUMMON` / `PICOAGENT_HOTKEY_HIDE` |

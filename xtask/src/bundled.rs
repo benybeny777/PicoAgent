@@ -715,12 +715,31 @@ pub fn fetch_live2d() -> Result<()> {
     let vendor = root.join("ui/vendor/live2d");
     let characters = root.join("characters");
 
-    // 読み込み順もこの順（core → pixi → display）。
-    let runtime = [
+    // 公式ホスティング版Coreをモデル世代別に固定する。Cubism 5.3用Core（URLの06）は
+    // 5.3 MOCを読める一方、従来のpixi-live2d-displayでは旧モデルの一部（ひより）の
+    // 口ArtMeshが消える。Cubism 4と5.0以前は互換Core（URLの05）で描き分ける。
+    // どちらもSHA-256まで照合し、Latestの無言更新を受けない。
+    let cores = [
         (
-            "live2dcubismcore.min.js",
-            "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js",
+            "live2dcubismcore-5.3.min.js",
+            "https://cubism.live2d.com/sdk-web/core/06/live2dcubismcore.min.js",
+            "8741f739779b5d5210872bd3d7d99f0f1e56e6c87409e7d26d6bb4b80aa1ef47",
         ),
+        (
+            "live2dcubismcore-compat.min.js",
+            "https://cubism.live2d.com/sdk-web/core/05/live2dcubismcore.min.js",
+            "25ae938cb4fe282ce189b357bcc97e603d1e1f7ec78bf04150d401c23cdc792f",
+        ),
+    ];
+    let mut fetched = 0;
+    for (name, url, sha256) in cores {
+        fetched += ensure_compatible_live2d_core(url, &vendor.join(name), sha256)?;
+    }
+    // 旧単一Coreは描画経路から外れた生成物。配布へ混ざらないようsetup時に掃除する。
+    fs::remove_file(vendor.join("live2dcubismcore.min.js")).ok();
+
+    // 残りも読み込み順どおり（core → pixi → display）に固定版を置く。
+    let runtime = [
         (
             "pixi.min.js",
             "https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js",
@@ -730,7 +749,6 @@ pub fn fetch_live2d() -> Result<()> {
             "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js",
         ),
     ];
-    let mut fetched = 0u64;
     for (name, url) in runtime {
         fetched += ensure_file(url, &vendor.join(name))?;
     }
@@ -870,6 +888,28 @@ fn ensure_file(url: &str, dest: &Path) -> Result<u64> {
         return Ok(0);
     }
     download_to(url, dest)
+}
+
+fn ensure_compatible_live2d_core(url: &str, dest: &Path, sha256: &str) -> Result<u64> {
+    let compatible = dest.exists()
+        && fs::read(dest)
+            .map(|bytes| is_compatible_live2d_core(&bytes, sha256))
+            .unwrap_or(false);
+    if compatible && !flag("LIVE2D_FORCE") {
+        return Ok(0);
+    }
+    let bytes = download_to(url, dest)?;
+    let downloaded = fs::read(dest)?;
+    if !is_compatible_live2d_core(&downloaded, sha256) {
+        bail!("取得した Cubism Core が検証済みの公式版と一致しません");
+    }
+    Ok(bytes)
+}
+
+fn is_compatible_live2d_core(bytes: &[u8], sha256: &str) -> bool {
+    use sha2::{Digest, Sha256};
+
+    format!("{:x}", Sha256::digest(bytes)) == sha256
 }
 
 fn fetch_live2d_raw(sample: &Sample, characters: &Path) -> Result<()> {

@@ -96,7 +96,6 @@ let chatterTimer = null;
 let dailyTimer = null;
 let animationRequestId = null;
 let bootLogTimer = null;
-let bootLogLane = 0;
 let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 1;
@@ -230,6 +229,8 @@ const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 let characterRoot = "assets/characters/mugi";
 let characterManifest = null;
 let characterOverridesCache = {};
+let live2dSdkOverridesCache = {};
+let activeLive2dSdkPreference = "auto";
 let characterAssetVersion = "";
 let bootCharacterName = "キャラクター";
 let loadedCharacterSignature = "";
@@ -427,14 +428,8 @@ function appendBootLog(text, kind = "info") {
   const line = document.createElement("div");
   line.className = `boot-log-line boot-kind-${kind}`;
   line.textContent = text;
-  const lanes = Math.max(1, Math.floor((bootLog.clientHeight - 24) / 24));
-  const lane = bootLogLane % lanes;
-  bootLogLane += 1;
-  line.style.top = `${12 + lane * 24}px`;
-  line.style.animationDuration = `${Math.min(26, Math.max(14, line.textContent.length * 0.34))}s`;
-  line.addEventListener("animationend", () => line.remove(), { once: true });
   bootLog.append(line);
-  while (bootLog.children.length > 24) bootLog.firstElementChild?.remove();
+  while (bootLog.children.length > 6) bootLog.firstElementChild?.remove();
 }
 
 function startBootLogTicker() {
@@ -547,6 +542,7 @@ function resolveLive2dConfig(manifest, variant) {
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterOverridesCache = overrides;
+  if (options.live2dSdkOverrides) live2dSdkOverridesCache = options.live2dSdkOverrides;
   const { manifest, root } = await loadCharacterManifest(characterId);
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
@@ -555,9 +551,11 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
-  const signature = `${manifest.id}\n${assetVersion}\n${savedVariant}\n${profile}`;
+  const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
+  const signature = `${manifest.id}\n${assetVersion}\n${savedVariant}\n${sdkPreference}\n${profile}`;
   if (signature === loadedCharacterSignature) return;
   characterRoot = root;
+  activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
@@ -692,6 +690,7 @@ let rigVolFrame = 0;
 let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
+let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
 
 function layerUrl(name) {
   const url = `${characterRoot}/layers/${name}.png`;
@@ -787,6 +786,7 @@ function detachLipSyncAudio() {
   try { rigSource?.disconnect(); rigAnalyser?.disconnect(); } catch {}
   rigSource = null;
   rigAnalyser = null;
+  rigMouthLevel = 0;
   rigMouthOpen = false;
   live2dMouth = -1;
   rigRefresh();
@@ -840,9 +840,11 @@ function attachLipSync(audio) {
   if (useTimer) {
     rigMouthTimer = setInterval(() => {
       rigMouthOpen = !rigMouthOpen;
-      if (live2dActive) live2dMouth = rigMouthOpen ? 0.8 : 0;
+      // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
+      // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
+      if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
       else rigRefresh();
-    }, 120);
+    }, 150);
     return;
   }
   const data = new Uint8Array(rigAnalyser.fftSize);
@@ -861,11 +863,21 @@ function attachLipSync(audio) {
     const gain = Math.max(0.05, audio.volume || 1);
     const rms = Math.sqrt(sum / data.length) / gain;
     peak = Math.max(peak * 0.995, rms, 0.02);
+    // 無音域を除いた声量を 0〜1 へ正規化する。従来は瞬間値を直接入れていたため、
+    // ひよりではほぼ「完全閉口↔最大開口」を毎フレーム往復し、README の滑らかな
+    // モーションと違って口だけが痙攣するように見えていた。開く側は素早く、閉じる側は
+    // 少し遅い包絡線にして、音節へ追従しつつフレーム間の細かな揺れを吸収する。
+    const floor = peak * 0.22;
+    const span = Math.max(peak * 0.72, 0.001);
+    const target = Math.max(0, Math.min(1, (rms - floor) / span));
+    const desired = Math.min(0.78, target * 0.78);
+    const smoothing = desired > rigMouthLevel ? 0.34 : 0.16;
+    rigMouthLevel += (desired - rigMouthLevel) * smoothing;
+    if (rigMouthLevel < 0.015) rigMouthLevel = 0;
     if (live2dActive) {
-      // 声量に比例して口を開く（0〜1）。小さな音は閉じたままにする。
-      live2dMouth = rms > peak * 0.3 ? Math.min(1, rms / (peak * 0.9)) : 0;
+      live2dMouth = rigMouthLevel;
     } else {
-      rigMouthOpen = rms > peak * 0.45;
+      rigMouthOpen = rigMouthLevel > 0.3;
       rigRefresh();
     }
     rigVolFrame = requestAnimationFrame(analyserLoop);
@@ -926,6 +938,12 @@ let live2dApp = null;
 let live2dCanvas = null;
 let live2dMouth = -1; // 読み上げ中の口の開き（0〜1）。-1 はモーション任せ。
 let live2dRuntimePromise = null;
+let live2dRuntimeSdk = "";
+// 表示形式が chat / talk / bar の状態で起動すると character は32px前後しかない。
+// その寸法でモデルの scale / offsetY を計算すると描画が全てキャンバス外へ出るため、
+// Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
+const LIVE2D_RENDER_WIDTH = 285;
+const LIVE2D_RENDER_HEIGHT = 315;
 
 function loadScriptOnce(src) {
   return new Promise((resolve, reject) => {
@@ -938,17 +956,28 @@ function loadScriptOnce(src) {
 }
 
 // ランタイム3点を一度だけ順に読み込む（Cubism Core → PIXI → pixi-live2d-display）。
-async function ensureLive2DRuntime() {
-  if (window.PIXI?.live2d?.Live2DModel) return;
+async function ensureLive2DRuntime(sdk) {
+  const requestedSdk = sdk === "5" ? "5" : "4";
+  if (window.PIXI?.live2d?.Live2DModel) {
+    if (live2dRuntimeSdk && live2dRuntimeSdk !== requestedSdk) {
+      throw new Error("Cubism Coreの世代を切り替えるにはPicoAgentの再起動が必要です");
+    }
+    return;
+  }
   if (!live2dRuntimePromise) {
+    live2dRuntimeSdk = requestedSdk;
     live2dRuntimePromise = (async () => {
-      await loadScriptOnce("vendor/live2d/live2dcubismcore.min.js?v=5-r5");
+      const core = live2dRuntimeSdk === "5"
+        ? "vendor/live2d/live2dcubismcore-5.3.min.js?v=5.3-pinned"
+        : "vendor/live2d/live2dcubismcore-compat.min.js?v=compat-pinned";
+      await loadScriptOnce(core);
       await loadScriptOnce("vendor/live2d/pixi.min.js");
       await loadScriptOnce("vendor/live2d/cubism4.min.js");
       // モデル同梱のモーション音声（サンプルボイス）は TTS 読み上げと二重再生になるため無効化する。
       if (window.PIXI?.live2d?.config) PIXI.live2d.config.sound = false;
     })().catch(error => {
       live2dRuntimePromise = null; // 取得後の再選択で再試行できるようにする
+      live2dRuntimeSdk = "";
       throw new Error(`Live2D ランタイムを読み込めません（cargo xtask setup live2d を実行してください）: ${error.message}`);
     });
   }
@@ -956,7 +985,27 @@ async function ensureLive2DRuntime() {
 }
 
 async function startLive2D(cfg) {
-  await ensureLive2DRuntime();
+  const rawCandidates = Array.isArray(cfg.models) && cfg.models.length ? cfg.models : [cfg.model];
+  const normalizedCandidates = rawCandidates.flatMap(candidate => {
+    if (typeof candidate === "string") {
+      const match = candidate.match(/(?:^|\/)sdk([45])(?:\/|$)/i);
+      return candidate ? [{ path: candidate, sdk: match?.[1] || "" }] : [];
+    }
+    const path = String(candidate?.path || candidate?.model || "");
+    return path ? [{ path, sdk: String(candidate?.sdk || "") }] : [];
+  });
+  const selectedSdk = activeLive2dSdkPreference === "auto"
+    ? (normalizedCandidates[0]?.sdk === "5" ? "5" : "4")
+    : activeLive2dSdkPreference;
+  // 1ページ内でCubism Coreは交換できないため、異なる世代へは無言フォールバックしない。
+  // 同じ世代で複数の互換モデルがある場合だけ、定義順に次の候補を試す。
+  const modelCandidates = normalizedCandidates.filter(candidate =>
+    (candidate.sdk === "5" ? "5" : "4") === selectedSdk);
+  if (!modelCandidates.length) {
+    throw new Error(`Cubism ${activeLive2dSdkPreference} のモデルがこのキャラクターパックにありません`);
+  }
+  // 5.3 MOCは専用Core、SDK世代不明／Cubism 4は旧モデルで口メッシュが消えない互換Coreを使う。
+  await ensureLive2DRuntime(selectedSdk);
   stopLive2D();
   // cfg は variant で解決済みの live2d 定義（キャラ本体か variant 側のどちらか）。
   const motionEnabled = !reduceMotion || cfg.alwaysAnimate === true;
@@ -966,8 +1015,8 @@ async function startLive2D(cfg) {
     characterView.insertBefore(live2dCanvas, petSprite);
   }
   live2dCanvas.style.display = "";
-  const width = character.clientWidth || 265;
-  const height = character.clientHeight || 315;
+  const width = LIVE2D_RENDER_WIDTH;
+  const height = LIVE2D_RENDER_HEIGHT;
   if (!live2dApp) {
     const transparentContextOptions = {
       alpha: true,
@@ -996,17 +1045,15 @@ async function startLive2D(cfg) {
       live2dApp.renderer._backgroundColorRgba[3] = 0;
     }
   }
-  const modelCandidates = Array.isArray(cfg.models) && cfg.models.length ? cfg.models : [cfg.model];
   let model = null;
   let modelError = null;
   for (const candidate of modelCandidates) {
-    if (!candidate) continue;
     try {
-      model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${candidate}`, { autoInteract: false });
+      model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${candidate.path}`, { autoInteract: false });
       break;
     } catch (error) {
       modelError = error;
-      logApp("warn", `Live2Dモデル ${candidate} は現在のCubism Coreで読めません。次の互換モデルを試します`, errorDetail(error));
+      logApp("warn", `Live2Dモデル ${candidate.path} は現在のCubism Coreで読めません。次の互換モデルを試します`, errorDetail(error));
     }
   }
   if (!model) throw modelError || new Error("利用可能なLive2D互換モデルがありません");
@@ -1037,7 +1084,9 @@ async function startLive2D(cfg) {
   // 機械的で不自然な動きになる。手で書くのはリップシンクだけにとどめる。
   model.internalModel.on("beforeModelUpdate", () => {
     // 口はモーションや表情が閉じ戻すため、全更新の後に読み上げ振幅で上書きする。
-    if (lipSyncEnabled && live2dMouth >= 0) coreModel.setParameterValueById(lipParam, live2dMouth);
+    if (lipSyncEnabled && live2dMouth >= 0) {
+      coreModel.setParameterValueById(lipParam, live2dMouth);
+    }
   });
   // ランタイムは「モーション再生中は自動まばたきを回さない」（Cubism4InternalModel.update の
   // `if (!motionUpdated) eyeBlink.updateParameters(...)`）。PicoAgent はアイドルモーションを
@@ -1062,6 +1111,7 @@ async function startLive2D(cfg) {
   live2dApp.stage.addChild(model);
   live2dModel = model;
   live2dActive = true;
+  applyCharacterZoom(characterZoom);
   petSprite.style.display = "none";
   if (motionEnabled && cfg.motions?.idle) {
     const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
@@ -1094,6 +1144,7 @@ function stopLive2D() {
   if (live2dCanvas) live2dCanvas.style.display = "none";
   if (live2dActive) {
     live2dActive = false;
+    applyCharacterZoom(characterZoom);
     petSprite.style.display = "";
   }
 }
@@ -3365,6 +3416,7 @@ document.getElementById("exportHistory")?.addEventListener("click", async () => 
 // ウィンドウを動かしたいときは透明な余白（#petApp の drag region）か、
 // キャラの上で Ctrl（macOS は ⌘）を押しながらドラッグする。
 let characterOffset = { x: 0, y: 0 };
+let characterZoom = 1.55;
 // 保存済みの値。同じ位置での重複保存を避けるために持つ。
 let savedCharacterOffset = { x: 0, y: 0 };
 let characterDragging = null;
@@ -3407,7 +3459,12 @@ function applyCharacterOffset(x, y, { clamp = true } = {}) {
 function applyCharacterZoom(zoom) {
   const value = Number(zoom);
   // 1 未満は枠より小さくなって余白だけが増えるので、下限を 1 にする。
-  character.style.setProperty("--char-zoom", String(Number.isFinite(value) && value >= 1 ? Math.min(value, 4) : 1.55));
+  characterZoom = Number.isFinite(value) && value >= 1 ? Math.min(value, 4) : 1.55;
+  // Live2D は character.json の scale / offsetY がすでにモデルごとの上半身表示へ調整済み。
+  // PNG向けの既定 1.55 倍をさらに重ねると、ひよりは顔だけに切り取られてしまう。
+  // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
+  const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
+  character.style.setProperty("--char-zoom", String(viewZoom));
 }
 
 /** ドラッグを取りやめて、掴む前の位置へ戻す（保存もしない）。 */
@@ -3828,7 +3885,9 @@ window.picoagent.on("pet:ui", (ui) => {
   if (ui.layout != null) applyLayout(ui.layout);
   savedBubbleLayout = { width: ui.bubbleWidth, height: ui.bubbleHeight, left: ui.bubbleLeft, top: ui.bubbleTop };
   applyBubbleLayout(ui.bubbleWidth, ui.bubbleHeight, ui.bubbleLeft, ui.bubbleTop);
-  if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
+  if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}, {
+    live2dSdkOverrides: ui.live2dSdkOverrides || {},
+  }).catch(error => {
     logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
     status.textContent = `キャラクター変更に失敗: ${error.message}`;
   });
@@ -4112,6 +4171,21 @@ function startAlarmPolling() {
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
+  // 推論・音声エンジンを待つ間に通常キャラクターも並行して読み込む。完了したら
+  // 起動画面のプレビュー画像から実キャラへ切り替え、配信画面と同じ大きな立ち絵で見せる。
+  // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
+  setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
+  const characterLoadPromise = loadCharacter(
+    info.characterId || "mugi",
+    info.characterOverrides || {},
+    { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} },
+  ).then(
+    () => {
+      petApp.classList.add("boot-character-ready");
+      return { ok: true };
+    },
+    error => ({ ok: false, error }),
+  );
   setStatus("音声設定を確認中…");
   await waitForAivisReady();
   await prepareSelectedVoiceModel();
@@ -4123,8 +4197,8 @@ function startAlarmPolling() {
   let preparedGreeting = null;
   try {
     // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
-    setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
-    await loadCharacter(info.characterId || "mugi", info.characterOverrides || {}, { speakGreeting: false });
+    const characterLoad = await characterLoadPromise;
+    if (!characterLoad.ok) throw characterLoad.error;
     setStatus("会話履歴を画面へ復元中…");
     hydrateHistory(info.history);
     let greeting = characterManifest?.greeting || "";

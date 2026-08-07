@@ -16,6 +16,7 @@ let savedSnapshot = null; // 最後に読み込んだ、または保存できた
 let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
+let characterLive2dSdkOverrides = {};
 let characterDefaultVoices = {};
 let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
@@ -23,6 +24,9 @@ let tha3ProgressUnlisten = null;
 let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
+let characterLive2dSdkSelect;
+let characterLive2dSdkField;
+let characterLive2dSdkHint;
 let characterCatalog;
 const characterManifestCache = new Map();
 let modelInput;
@@ -145,6 +149,10 @@ function updateDirtyState() {
   characterSpeaker?.closest(".field")?.classList.toggle(
     "changed",
     stableStringify(current.PICOAGENT_TTS_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_TTS_CHARACTER_OVERRIDES)
+  );
+  characterLive2dSdkField?.classList.toggle(
+    "changed",
+    stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
   );
   form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
     "changed",
@@ -1359,6 +1367,56 @@ async function loadCharacterPersona(id) {
   characterPersona.value = characterOverrides[id] || defaultText;
 }
 
+function live2dModelEntries(config) {
+  if (!config) return [];
+  const values = Array.isArray(config.models) && config.models.length ? config.models : [config.model];
+  return values.flatMap(value => {
+    if (typeof value === "string") {
+      const match = value.match(/(?:^|\/)sdk([45])(?:\/|$)/i);
+      return value ? [{ path: value, sdk: match?.[1] || "" }] : [];
+    }
+    const path = String(value?.path || value?.model || "");
+    return path ? [{ path, sdk: String(value?.sdk || "") }] : [];
+  });
+}
+
+function live2dSdkVersions(manifest) {
+  const configs = [manifest?.live2d];
+  for (const variant of manifest?.variants || []) {
+    if (variant?.live2d && variant.live2d !== false) configs.push(variant.live2d);
+  }
+  return new Set(configs.flatMap(live2dModelEntries).map(entry => entry.sdk).filter(Boolean));
+}
+
+async function loadCharacterLive2dSdk(id) {
+  if (!characterLive2dSdkSelect || !characterLive2dSdkField) return;
+  const entry = characterCatalog.characters.find(character => character.id === id);
+  if (!entry) throw new Error(`キャラクター ${id} が一覧にありません`);
+  const manifest = await loadCharacterManifestForSettings(entry);
+  const versions = live2dSdkVersions(manifest);
+  const isLive2d = characterRenderKind(manifest) === "live2d";
+  characterLive2dSdkField.hidden = !isLive2d;
+  for (const option of characterLive2dSdkSelect.options) {
+    option.disabled = option.value !== "auto" && !versions.has(option.value);
+  }
+  const saved = String(characterLive2dSdkOverrides[id] || "auto");
+  characterLive2dSdkSelect.value = saved === "4" || saved === "5" ? saved : "auto";
+  if (characterLive2dSdkSelect.selectedOptions[0]?.disabled) characterLive2dSdkSelect.value = "auto";
+  const available = ["4", "5"].filter(version => versions.has(version));
+  characterLive2dSdkHint.textContent = available.length > 1
+    ? "自動はパック先頭の推奨世代を使います。表示が崩れるときは Cubism 4／5 の片方に固定できます。"
+    : available.length === 1
+      ? `このパックに選択可能なモデルは Cubism ${available[0]} だけです。`
+      : "このパックは SDK 世代を明示していないため、自動選択で読み込みます。";
+}
+
+function saveCurrentCharacterLive2dSdk(id) {
+  if (!characterLive2dSdkSelect || characterLive2dSdkField?.hidden) return;
+  const value = characterLive2dSdkSelect.value;
+  if (value === "4" || value === "5") characterLive2dSdkOverrides[id] = value;
+  else delete characterLive2dSdkOverrides[id];
+}
+
 async function loadCharacterManifestForSettings(character) {
   if (characterManifestCache.has(character.id)) return characterManifestCache.get(character.id);
   const response = await fetch(`${character.root}/character.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
@@ -1820,6 +1878,7 @@ async function render() {
   }));
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
+  characterLive2dSdkOverrides = v.PICOAGENT_LIVE2D_SDK_OVERRIDES || {};
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const requestedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
@@ -1844,10 +1903,25 @@ async function render() {
     { value: "both", label: "暮らしと仕事の両方" },
   ]));
   characterSec.append(field("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", "いっしょの記録を保存する", "checkbox", v.PICOAGENT_RELATIONSHIP_MEMORY_ENABLED !== false));
+  characterLive2dSdkSelect = el("select");
+  for (const option of [
+    { value: "auto", label: "自動（推奨）" },
+    { value: "5", label: "Cubism 5（5.3形式）に固定" },
+    { value: "4", label: "Cubism 4 に固定" },
+  ]) characterLive2dSdkSelect.append(el("option", { value: option.value, textContent: option.label }));
+  characterLive2dSdkHint = el("p", { className: "hint" });
+  characterLive2dSdkField = markSearchable(el("div", { className: "field" }, [
+    el("label", { textContent: "Live2D の SDK 世代" }),
+    characterLive2dSdkSelect,
+    characterLive2dSdkHint,
+  ]), "Live2D Cubism SDK 4 5 自動 互換");
+  characterLive2dSdkSelect.addEventListener("change", updateDirtyState);
+  characterSec.append(characterLive2dSdkField);
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
+  await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
   characterSelect.addEventListener("change", event => {
@@ -1860,9 +1934,11 @@ async function render() {
     characterSwitchQueue = characterSwitchQueue.then(async () => {
       characterOverrides[previousCharacter] = characterPersona.value;
       saveCurrentCharacterVoice(previousCharacter);
+      saveCurrentCharacterLive2dSdk(previousCharacter);
       try {
         await loadCharacterPersona(requestedCharacter);
         loadCharacterVoice(requestedCharacter);
+        await loadCharacterLive2dSdk(requestedCharacter);
         previousCharacter = requestedCharacter;
         characterSelect.value = requestedCharacter;
       } catch (error) {
@@ -2391,8 +2467,10 @@ function collect() {
   }
   if (characterSelect && characterPersona) characterOverrides[characterSelect.value] = characterPersona.value;
   if (characterSelect && characterSpeaker) saveCurrentCharacterVoice(characterSelect.value);
+  if (characterSelect && characterLive2dSdkSelect) saveCurrentCharacterLive2dSdk(characterSelect.value);
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
+  patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();
   return patch;
