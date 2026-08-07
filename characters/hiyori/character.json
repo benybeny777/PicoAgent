@@ -33,8 +33,8 @@
       "sad": "Idle"
     },
     "lipSyncParam": "ParamMouthOpenY",
-    "scale": 3.2,
-    "offsetY": 645
+    "scale": 2.7,
+    "offsetY": 520
   },
   "boot": {
     "sleeping": "preview.jpg"

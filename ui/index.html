@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PicoAgent</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260807-stream-layout2" />
 </head>
 <body>
   <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
@@ -21,12 +21,12 @@
     </section>
     <section id="bubble" class="bubble" aria-live="polite">
       <div id="replyActions" class="reply-actions" aria-label="回答操作">
-        <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">!</button>
-        <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">C</button>
-        <button id="regenReply" type="button" aria-label="別の答えを生成" title="同じ質問で別の答えを生成">↺</button>
-        <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">↻</button>
-        <button id="stopVoice" type="button" aria-label="読み上げを停止" title="読み上げを停止">■</button>
-        <button id="toggleFullscreen" type="button" aria-label="フキダシを拡大" title="フキダシを拡大">□</button>
+        <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">通知</button>
+        <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">コピー</button>
+        <button id="regenReply" type="button" aria-label="別の答えを生成" title="同じ質問で別の答えを生成">再生成</button>
+        <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">読上</button>
+        <button id="stopVoice" type="button" aria-label="読み上げを停止" title="読み上げを停止">停止</button>
+        <button id="toggleFullscreen" type="button" aria-label="フキダシを拡大" title="フキダシを拡大">拡大</button>
       </div>
       <div id="noticePanel" class="notice-panel" hidden>
         <div class="notice-head">
@@ -48,9 +48,11 @@
         <div id="attachmentSuggestions" class="attachment-suggestions" hidden aria-label="添付ファイルのおすすめ操作"></div>
         <div id="quickActions" class="quick-actions" aria-label="クイック操作"></div>
         <textarea id="input" rows="2" placeholder="話しかける… / 画像をペーストまたはドロップ"></textarea>
-        <button id="voiceLoopButton" class="voice-loop-button" type="button" aria-pressed="false" title="返答後も自動で聞き続ける">連続</button>
-        <button id="micButton" type="button" aria-label="音声入力" title="クリックで録音開始・停止 / 長押し中だけ録音">🎙</button>
-        <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
+        <div class="composer-actions">
+          <button id="voiceLoopButton" class="voice-loop-button" type="button" aria-pressed="false" title="返答後も自動で聞き続ける">連続</button>
+          <button id="micButton" type="button" aria-label="音声入力" title="クリックで録音開始・停止 / 長押し中だけ録音">音声</button>
+          <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
+        </div>
       </form>
       <div id="status" class="status"></div>
       <button id="cancelVoice" class="cancel-voice" type="button" hidden>読み上げを中止</button>
@@ -103,6 +105,6 @@
     </div>
   </main>
   <script src="picoagent.js"></script>
-  <script src="renderer.js"></script>
+  <script src="renderer.js?v=20260807-stream-layout"></script>
 </body>
 </html>
