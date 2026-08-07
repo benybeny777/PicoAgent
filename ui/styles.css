@@ -79,6 +79,24 @@ html[data-theme="dark"] {
 * { box-sizing:border-box; }
 html,body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; font-family:"Segoe UI","Yu Gothic UI",system-ui,sans-serif; }
 .pet-app { position:relative; width:100%; height:100%; user-select:none; }
+.window-resize-handles span { position:fixed; z-index:2000; display:block; }
+.window-resize-handles [data-resize-direction="North"],
+.window-resize-handles [data-resize-direction="South"] { left:14px; right:14px; height:7px; cursor:ns-resize; }
+.window-resize-handles [data-resize-direction="North"] { top:0; }
+.window-resize-handles [data-resize-direction="South"] { bottom:0; }
+.window-resize-handles [data-resize-direction="East"],
+.window-resize-handles [data-resize-direction="West"] { top:14px; bottom:14px; width:7px; cursor:ew-resize; }
+.window-resize-handles [data-resize-direction="East"] { right:0; }
+.window-resize-handles [data-resize-direction="West"] { left:0; }
+.window-resize-handles [data-resize-direction="NorthEast"],
+.window-resize-handles [data-resize-direction="SouthEast"],
+.window-resize-handles [data-resize-direction="SouthWest"],
+.window-resize-handles [data-resize-direction="NorthWest"] { width:16px; height:16px; }
+.window-resize-handles [data-resize-direction="NorthEast"] { top:0; right:0; cursor:nesw-resize; }
+.window-resize-handles [data-resize-direction="SouthEast"] { right:0; bottom:0; cursor:nwse-resize; background:linear-gradient(315deg,rgba(255,255,255,.62) 0 8%,transparent 9% 28%,rgba(255,255,255,.42) 29% 36%,transparent 37% 56%,rgba(255,255,255,.28) 57% 64%,transparent 65%); filter:drop-shadow(0 0 1px rgba(30,20,35,.55)); }
+.window-resize-handles [data-resize-direction="SouthWest"] { left:0; bottom:0; cursor:nesw-resize; }
+.window-resize-handles [data-resize-direction="NorthWest"] { top:0; left:0; cursor:nwse-resize; }
+.pet-app.is-booting .window-resize-handles { display:none; }
 .character { position:absolute; right:10px; bottom:2px; width:285px; height:315px; display:grid; place-items:end center; cursor:grab; }
 .character.is-dragging { cursor:grabbing; }
 .character { touch-action:none; user-select:none; -webkit-user-select:none; }

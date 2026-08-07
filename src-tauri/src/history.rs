@@ -17,6 +17,10 @@ const MAX_PERSIST: usize = 60;
 // 起動時に文脈へ戻す最大メッセージ数（小型モデルのコンテキスト超過を避ける）。
 const MAX_CONTEXT_LOAD: usize = 20;
 
+// 2026-08-07以前は短い挨拶の末尾へこの内部ガイドを追記して保存していた。
+// 小型モデルがガイド自体を発話したため、読み込み時に原文へ戻す。
+const LEGACY_GREETING_GUIDANCE: &str = "\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。";
+
 fn data_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
@@ -51,6 +55,76 @@ pub fn migrate_legacy(app: &AppHandle, character_id: &str) {
             crate::log_paths::append_app_log(
                 app,
                 &format!("旧会話履歴のキャラクター別移行に失敗しました: {error}"),
+            );
+        }
+    }
+}
+
+fn clean_legacy_greeting_guidance(messages: &mut [Message]) -> usize {
+    let mut cleaned = 0;
+    for message in messages {
+        if message.role != "user" {
+            continue;
+        }
+        let Some(original) = message.content.strip_suffix(LEGACY_GREETING_GUIDANCE) else {
+            continue;
+        };
+        message.content = original.to_string();
+        cleaned += 1;
+    }
+    cleaned
+}
+
+fn clean_history_file(target: &std::path::Path) -> anyhow::Result<usize> {
+    let lock_name = format!("history:{}", target.display());
+    let _guard = crate::store::lock_state(&lock_name);
+    let text = std::fs::read_to_string(target)?;
+    let mut messages: Vec<Message> = serde_json::from_str(&text)?;
+    let cleaned = clean_legacy_greeting_guidance(&mut messages);
+    if cleaned > 0 {
+        crate::store::write_json_atomic(target, &messages)?;
+    }
+    Ok(cleaned)
+}
+
+/// 全キャラクターの保存済み履歴から、旧版がユーザー発話へ混ぜた内部ガイドを除去する。
+/// 選択中キャラだけでなく、後から切り替えるキャラの文脈も起動時にまとめて直す。
+pub fn migrate_saved_greeting_guidance(app: &AppHandle) {
+    let dir = data_dir(app);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("会話履歴の内部ガイド移行を開始できませんでした: {error}"),
+            );
+            return;
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("会話履歴の列挙中に項目を読めませんでした: {error}"),
+                );
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("history-") || !name.ends_with(".json") {
+            continue;
+        }
+        if let Err(error) = clean_history_file(&entry.path()) {
+            // 破損履歴の退避は、実際に選択して load_recent() したときの既存経路へ任せる。
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "{} の内部ガイド移行に失敗しました: {error}",
+                    entry.path().display()
+                ),
             );
         }
     }
@@ -106,4 +180,25 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
 /// 指定キャラクターの履歴ファイルを削除する（会話の完全リセット用）。
 pub fn clear(app: &AppHandle, character_id: &str) {
     let _ = std::fs::remove_file(path(app, character_id));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clean_legacy_greeting_guidance, LEGACY_GREETING_GUIDANCE};
+    use crate::message::Message;
+
+    #[test]
+    fn 全キャラ共通の旧挨拶ガイドをユーザー原文へ戻す() {
+        let mut messages = vec![
+            Message::new("user", format!("hi{LEGACY_GREETING_GUIDANCE}")),
+            Message::new("assistant", "こんにちは！"),
+            Message::new("user", "通常の質問"),
+        ];
+
+        assert_eq!(clean_legacy_greeting_guidance(&mut messages), 1);
+        assert_eq!(messages[0].content, "hi");
+        assert_eq!(messages[1].content, "こんにちは！");
+        assert_eq!(messages[2].content, "通常の質問");
+        assert_eq!(clean_legacy_greeting_guidance(&mut messages), 0);
+    }
 }

@@ -95,6 +95,11 @@ window.picoagent = {
     try { return await getCurrentWindow().startDragging(); }
     catch (error) { logInvokeError("startDragging", error); }
   },
+  // 枠なしウィンドウの各辺・四隅から、OS標準の縦横リサイズを開始する。
+  startWindowResize: async (direction) => {
+    try { return await getCurrentWindow().startResizeDragging(direction); }
+    catch (error) { logInvokeError("startResizeDragging", error); throw error; }
+  },
   setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
   setBubbleLayout: (width, height, left, top) => call("pet_set_bubble_layout", { width, height, left, top }),
   setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),

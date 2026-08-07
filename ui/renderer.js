@@ -41,7 +41,21 @@ const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
+const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
 let busy = false;
+
+// decorations:false の透明ウィンドウにはOSの枠が無いため、各辺と四隅を明示的な
+// リサイズ領域にする。幅だけ・高さだけ・縦横同時のいずれもOS標準操作で変更できる。
+windowResizeHandles.forEach(handle => {
+  handle.addEventListener("pointerdown", event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.picoagent.startWindowResize(handle.dataset.resizeDirection).catch(error => {
+      logApp("warn", "ウィンドウのサイズ変更を開始できませんでした", errorDetail(error));
+    });
+  });
+});
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
 // 添付中のドキュメントファイル（{name, dataUrl} の配列）。送信後にリセットする。
@@ -499,15 +513,23 @@ async function prepareBootCharacter(characterId) {
   if (!bootPetImage) return;
   const { manifest, root } = await loadCharacterManifest(characterId);
   const version = String(manifest.assetVersion || "");
-  const bootPath = manifest.boot?.sleeping || `${manifest.animations?.idle?.path || "animations/idle"}/00.png`;
+  bootCharacterName = manifest.name || "キャラクター";
+  bootPetImage.alt = `起動を待つ${bootCharacterName}`;
+  // Live2D の preview.jpg は配布元の紹介画像や全身コラージュの場合があり、実モデルへ
+  // 切り替わる一瞬だけ別の絵に見える。Live2D は仮画像を出さず、読み込み完了した
+  // 実モデルをそのまま起動画面へ出す。2Dキャラは通常表示と同じ idle 先頭フレームを使う。
+  if (manifest.live2d) {
+    bootPetImage.onerror = null;
+    bootPetImage.removeAttribute("src");
+    return;
+  }
+  const bootPath = `${manifest.animations?.idle?.path || "animations/idle"}/00.png`;
   bootPetImage.onerror = () => {
     // プレビュー画像を取得できていないキャラ（setup が警告を出した場合）でも起動画面を壊さない。
     bootPetImage.onerror = null;
     bootPetImage.src = "assets/characters/_preview-placeholder.png";
   };
   bootPetImage.src = versionedAssetUrl(`${root}/${bootPath}`, version);
-  bootPetImage.alt = `起動を待つ${manifest.name || "キャラクター"}`;
-  bootCharacterName = manifest.name || "キャラクター";
 }
 
 function preloadAnimations() {

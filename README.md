@@ -192,7 +192,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
       <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
     </tr>
   </table>
-  <sub>ウィンドウの寸法は形式ごとに覚えます。<b>立ち絵はドラッグで好きな位置へ動かせます</b>（ウィンドウは動きません）。右クリック →「表示位置とサイズをリセット」で、いま選んでいる形式の既定と立ち絵の位置へ戻せます。</sub>
+  <sub>ウィンドウの寸法は形式ごとに覚えます。枠なしウィンドウの<b>辺をドラッグすると幅または高さ、四隅をドラッグすると縦横を同時に変更</b>できます。立ち絵はドラッグで好きな位置へ動かせます（ウィンドウは動きません）。右クリック →「表示位置とサイズをリセット」で、いま選んでいる形式の既定と立ち絵の位置へ戻せます。</sub>
 </div>
 
 ### キャラクター
@@ -237,7 +237,8 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 |---|---|
 | フキダシをクリック | 入力欄を開く |
 | フキダシ上部の小ボタン | 回答コピー / 再読み上げ / 停止 / 拡大 |
-| フキダシ右下のつまみをドラッグ | 幅・高さを変更（位置も含めて自動保存） |
+| ウィンドウの辺／四隅をドラッグ | 画面の幅／高さ／縦横をOS標準操作で変更（終了時に自動保存） |
+| フキダシ左上のつまみをドラッグ | フキダシの幅・高さを変更（位置も含めて自動保存） |
 | キャラクターをダブルクリック | フキダシを全画面表示 ⇄ 元に戻す |
 | キャラクターをドラッグ | 移動 |
 | 読み上げ中にキャラクターをクリック | 読み上げを停止 |
@@ -602,7 +603,7 @@ cargo xtask build
 
 **Live2D ランタイムとサンプルモデル**
 
-- `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル 7 体（ひより / Haru / まお / レン / ライス / わんこ / Epsilon）を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` はローディング画面と設定画面アイコンに使います。**1 体取得できなくても他の取得は続き**、プレビューが取れなかった場合は代替画像で表示します
+- `cargo xtask setup live2d` が Cubism Core / PIXI / pixi-live2d-display を `ui/vendor/live2d/` へ、公式サンプルモデル 7 体（ひより / Haru / まお / レン / ライス / わんこ / Epsilon）を `characters/<id>/live2d/` へ取得します（`LIVE2D_FORCE=1` で再取得）。各サンプルの `preview.jpg` は設定画面アイコンに使います。起動画面は紹介用プレビューを出さず、読み込めた実モデルへ直接切り替えます。**1 体取得できなくても他の取得は続き**、プレビューが取れなかった場合は代替画像で表示します
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)、サンプルモデルは [Live2D Free Material License](https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html) の条件で利用してください。再配布条件があるためリポジトリにはコミットしません（`.gitignore` 済）
 
 **THA3 キャラクター制作ツール**

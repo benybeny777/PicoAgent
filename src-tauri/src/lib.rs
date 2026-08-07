@@ -221,6 +221,8 @@ pub fn run() {
             // 当時の唯一/既定キャラは mugi。選択中キャラ（後から追加した rin 等）へ
             // 割り当てると、別キャラの自己紹介・口調が混ざってしまうため。
             history::migrate_legacy(app.handle(), "mugi");
+            // 旧版が短い挨拶へ追記して保存した内部ガイドは、選択中以外もまとめて原文へ戻す。
+            history::migrate_saved_greeting_guidance(app.handle());
             // 選択中キャラの直近会話をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
             let recent = history::load_recent(app.handle(), &character_id);
             if !recent.is_empty() {
