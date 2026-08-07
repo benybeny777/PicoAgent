@@ -383,9 +383,31 @@ fn overlap(monitor: MonitorRect, x: i32, y: i32, win_w: u32, win_h: u32) -> (i32
     (overlap_w, overlap_h)
 }
 
+/// 保存位置と最も重なるモニタを選び、ウィンドウ全体がその内側へ収まる座標に直す。
+fn clamp_to_best_monitor(
+    monitors: &[MonitorRect],
+    x: i32,
+    y: i32,
+    win_w: u32,
+    win_h: u32,
+) -> Option<(i32, i32)> {
+    let monitor = monitors.iter().copied().max_by_key(|monitor| {
+        let (width, height) = overlap(*monitor, x, y, win_w, win_h);
+        width as i64 * height as i64
+    })?;
+    let (overlap_w, overlap_h) = overlap(monitor, x, y, win_w, win_h);
+    if overlap_w == 0 || overlap_h == 0 {
+        return None;
+    }
+    let max_x = (monitor.x + monitor.width.saturating_sub(win_w) as i32).max(monitor.x);
+    let max_y = (monitor.y + monitor.height.saturating_sub(win_h) as i32).max(monitor.y);
+    Some((x.clamp(monitor.x, max_x), y.clamp(monitor.y, max_y)))
+}
+
 /// 保存座標のウィンドウが、どれかのモニタに**掴める大きさ**で載っているか。
 /// ディスプレイを外した・主副を入れ替えた・解像度を変えた後に、画面外の座標へ復元して
 /// 「起動したのに何も見えない」状態になるのを防ぐ。
+#[cfg(test)]
 pub(crate) fn is_visible_on_any_monitor(
     monitors: &[MonitorRect],
     x: i32,
@@ -582,23 +604,25 @@ pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &conf
     );
     let monitors = monitor_rects(window);
     let (x, y) = match saved {
-        (Ok(x), Ok(y)) if is_visible_on_any_monitor(&monitors, x, y, win_w, win_h) => (x, y),
-        (Ok(x), Ok(y)) => {
-            // 認識しているモニタ構成も残す。ディスプレイの増減・配置変更・DPI 設定で
-            // 座標系がずれたときに、ログだけで原因を追えるようにするため。
-            let layout = monitors
-                .iter()
-                .map(|m| format!("({}, {}) {}x{}", m.x, m.y, m.width, m.height))
-                .collect::<Vec<_>>()
-                .join(" / ");
-            log_paths::append_app_log(
+        (Ok(x), Ok(y)) => match clamp_to_best_monitor(&monitors, x, y, win_w, win_h) {
+            Some(position) => position,
+            None => {
+                // 認識しているモニタ構成も残す。ディスプレイの増減・配置変更・DPI 設定で
+                // 座標系がずれたときに、ログだけで原因を追えるようにするため。
+                let layout = monitors
+                    .iter()
+                    .map(|m| format!("({}, {}) {}x{}", m.x, m.y, m.width, m.height))
+                    .collect::<Vec<_>>()
+                    .join(" / ");
+                log_paths::append_app_log(
                 &window.app_handle().clone(),
                 &format!(
                     "保存されたウィンドウ位置 ({x}, {y}) {win_w}x{win_h} が現在のディスプレイ構成に載らないため、既定位置へ戻します。認識中のモニタ: {layout}"
                 ),
             );
-            default_window_position(monitor, win_w, win_h)
-        }
+                default_window_position(monitor, win_w, win_h)
+            }
+        },
         _ => default_window_position(monitor, win_w, win_h),
     };
     let _ = window.set_position(PhysicalPosition::new(x, y));
@@ -710,6 +734,27 @@ mod window_layout_tests {
         assert!(is_visible_on_any_monitor(&monitors, -1155, 487, 560, 430));
         // 主モニタ上の座標。
         assert!(is_visible_on_any_monitor(&monitors, 2069, 959, 560, 430));
+    }
+
+    #[test]
+    fn 保存位置が一部はみ出していても起動時はモニタ内へ収める() {
+        let monitors = two_monitors();
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, 2500, 1200, 680, 430),
+            Some((1880, 1010))
+        );
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, -2100, -80, 680, 430),
+            Some((-1920, 0))
+        );
+    }
+
+    #[test]
+    fn 保存位置が全モニタから外れていれば復元しない() {
+        assert_eq!(
+            clamp_to_best_monitor(&two_monitors(), 6000, 3000, 680, 430),
+            None
+        );
     }
 
     #[test]
