@@ -75,9 +75,15 @@ fn clean_legacy_greeting_guidance(messages: &mut [Message]) -> usize {
     cleaned
 }
 
+/// 履歴ファイルごとのロック名。移行・保存・削除が同じ名前を取ることで、
+/// 「読む → 直す → 書き戻す」の途中へ別経路の書き込みが割り込んでも取りこぼさない
+/// （名前がずれているとロックを取っていないのと同じになる）。
+fn lock_name(target: &std::path::Path) -> String {
+    format!("history:{}", target.display())
+}
+
 fn clean_history_file(target: &std::path::Path) -> anyhow::Result<usize> {
-    let lock_name = format!("history:{}", target.display());
-    let _guard = crate::store::lock_state(&lock_name);
+    let _guard = crate::store::lock_state(&lock_name(target));
     let text = std::fs::read_to_string(target)?;
     let mut messages: Vec<Message> = serde_json::from_str(&text)?;
     let cleaned = clean_legacy_greeting_guidance(&mut messages);
@@ -164,6 +170,7 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
     let start = convo.len().saturating_sub(MAX_PERSIST);
     let recent = &convo[start..];
     let target = path(app, character_id);
+    let _guard = crate::store::lock_state(&lock_name(&target));
     let result = (|| -> anyhow::Result<()> {
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir)?;
@@ -179,7 +186,9 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
 
 /// 指定キャラクターの履歴ファイルを削除する（会話の完全リセット用）。
 pub fn clear(app: &AppHandle, character_id: &str) {
-    let _ = std::fs::remove_file(path(app, character_id));
+    let target = path(app, character_id);
+    let _guard = crate::store::lock_state(&lock_name(&target));
+    let _ = std::fs::remove_file(target);
 }
 
 #[cfg(test)]

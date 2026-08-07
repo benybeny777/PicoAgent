@@ -412,33 +412,12 @@ fn clamp_to_best_monitor(
     Some((x.clamp(monitor.x, max_x), y.clamp(monitor.y, max_y)))
 }
 
-/// 保存座標のウィンドウが、どれかのモニタに**掴める大きさ**で載っているか。
-/// ディスプレイを外した・主副を入れ替えた・解像度を変えた後に、画面外の座標へ復元して
-/// 「起動したのに何も見えない」状態になるのを防ぐ。
-#[cfg(test)]
-pub(crate) fn is_visible_on_any_monitor(
-    monitors: &[MonitorRect],
-    x: i32,
-    y: i32,
-    win_w: u32,
-    win_h: u32,
-) -> bool {
-    // 端にオーバーハングさせる使い方（既定位置も右へはみ出す）を許すため、
-    // 完全内包ではなく「掴める大きさの重なりがあるか」で判定する。
-    const MIN_VISIBLE_PX: i32 = 80;
-    monitors.iter().any(|monitor| {
-        let (overlap_w, overlap_h) = overlap(*monitor, x, y, win_w, win_h);
-        overlap_w >= MIN_VISIBLE_PX.min(win_w as i32)
-            && overlap_h >= MIN_VISIBLE_PX.min(win_h as i32)
-    })
-}
-
 /// ウィンドウが 1px でも見えているか。
 ///
 /// 実行中のディスプレイ構成変更（モニタの抜き差し・主副の入れ替え・解像度変更）で
 /// ウィンドウが完全に画面外へ取り残されたことの検出に使う。
-/// **保存位置の採否より緩い判定にしてある**（`is_visible_on_any_monitor` の 80px 基準で
-/// 実行中に引き戻すと、端へ寄せる通常のドラッグ操作まで勝手に戻されてしまうため）。
+/// **起動時の `clamp_to_best_monitor()` より緩い判定にしてある**（実行中も画面内へ
+/// 収め直すと、端へ寄せる通常のドラッグ操作まで勝手に戻されてしまうため）。
 pub(crate) fn is_on_screen(
     monitors: &[MonitorRect],
     x: i32,
@@ -597,7 +576,9 @@ pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &conf
     ) {
         let width = width.min(monitor.width as f64 / scale);
         let height = height.min(monitor.height as f64 / scale);
-        if width >= 420.0 && height >= 340.0 {
+        // 下限はウィンドウの最小寸法と同じ。ここに別の数値を書くと、8方向リサイズで
+        // 小さくした寸法（最小寸法までは正当な操作）が復元時に丸ごと捨てられる。
+        if width >= layout::MIN_WIDTH && height >= layout::MIN_HEIGHT {
             let _ = window.set_size(LogicalSize::new(width, height));
             // 位置計算は適用後の物理サイズを使う（set_size の反映前に outer_size を読むと古い値になる）。
             win_w = (width * scale).round() as u32;
@@ -736,12 +717,19 @@ mod window_layout_tests {
     }
 
     #[test]
-    fn 保存座標がモニタ上にあれば有効と判定する() {
+    fn モニタ内に収まった保存座標はそのまま復元する() {
         let monitors = two_monitors();
         // サブモニタ上の座標。
-        assert!(is_visible_on_any_monitor(&monitors, -1155, 487, 560, 430));
-        // 主モニタ上の座標。
-        assert!(is_visible_on_any_monitor(&monitors, 2069, 959, 560, 430));
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, -1155, 487, 560, 430),
+            Some((-1155, 487))
+        );
+        // 主モニタ上の座標。右へ 69px はみ出す分は画面内へ寄せる
+        // （実行中の端寄せドラッグは `is_on_screen` の緩い判定で保つ）。
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, 2069, 959, 560, 430),
+            Some((2000, 959))
+        );
     }
 
     #[test]
@@ -774,27 +762,24 @@ mod window_layout_tests {
             width: 2560,
             height: 1440,
         }];
-        assert!(!is_visible_on_any_monitor(&only_main, -1155, 487, 560, 430));
+        assert_eq!(
+            clamp_to_best_monitor(&only_main, -1155, 487, 560, 430),
+            None
+        );
     }
 
     #[test]
     fn 主モニタを入れ替えると保存座標が無効になりうる() {
         // 主副の入れ替えで仮想デスクトップの原点が動くため、同じ物理位置でも座標が変わる。
         // 旧構成のサブモニタ上（負のX）だった座標は、新構成では画面外になる。
-        assert!(is_visible_on_any_monitor(
-            &two_monitors(),
-            -1000,
-            300,
-            560,
-            430
-        ));
-        assert!(!is_visible_on_any_monitor(
-            &primary_swapped(),
-            -1000,
-            300,
-            560,
-            430
-        ));
+        assert_eq!(
+            clamp_to_best_monitor(&two_monitors(), -1000, 300, 560, 430),
+            Some((-1000, 300))
+        );
+        assert_eq!(
+            clamp_to_best_monitor(&primary_swapped(), -1000, 300, 560, 430),
+            None
+        );
     }
 
     #[test]
@@ -811,9 +796,13 @@ mod window_layout_tests {
             width: 1920,
             height: 1080,
         }];
-        // 旧解像度の右下寄りにあった位置は、解像度を下げると載らなくなる。
-        assert!(is_visible_on_any_monitor(&before, 2200, 1300, 560, 430));
-        assert!(!is_visible_on_any_monitor(&after, 2200, 1300, 560, 430));
+        // 旧解像度なら載っているが、右下へはみ出す分はモニタ内へ収める。
+        assert_eq!(
+            clamp_to_best_monitor(&before, 2200, 1300, 560, 430),
+            Some((2000, 1010))
+        );
+        // 解像度を下げると重なりが無くなり、既定位置へ戻すしかなくなる。
+        assert_eq!(clamp_to_best_monitor(&after, 2200, 1300, 560, 430), None);
     }
 
     #[test]
@@ -826,17 +815,26 @@ mod window_layout_tests {
             width: 1920,
             height: 1080,
         });
-        assert!(is_visible_on_any_monitor(&more, 2500, 500, 560, 430));
-        assert!(is_visible_on_any_monitor(&more, 4600, 200, 560, 430));
+        assert_eq!(
+            clamp_to_best_monitor(&more, 2500, 500, 560, 430),
+            Some((2500, 500))
+        );
+        assert_eq!(
+            clamp_to_best_monitor(&more, 4600, 200, 560, 430),
+            Some((4600, 200))
+        );
     }
 
     #[test]
     fn 実行中の引き戻しはドラッグでの端寄せを邪魔しない() {
         let monitors = primary_swapped();
-        // 掴める大きさは残っていない（保存には不適）が、まだ見えている位置。
-        // 実行中の引き戻しはこれを動かしてはいけない。
+        // 20px しか見えていない位置。起動時は画面内へ収め直す対象だが、
+        // 実行中の引き戻しはこれを動かしてはいけない（端寄せドラッグの途中）。
         assert!(is_on_screen(&monitors, -540, 300, 560, 430));
-        assert!(!is_visible_on_any_monitor(&monitors, -540, 300, 560, 430));
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, -540, 300, 560, 430),
+            Some((0, 300))
+        );
         // 完全に画面外なら引き戻す。
         assert!(!is_on_screen(&monitors, -560, 300, 560, 430));
     }
@@ -846,7 +844,11 @@ mod window_layout_tests {
         let monitors = two_monitors();
         let main = monitors[1];
         let (x, y) = default_window_position(main, 560, 430);
-        assert!(is_visible_on_any_monitor(&monitors, x, y, 560, 430));
+        // 既定位置は収め直しの対象にならない（そのまま復元される）。
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, x, y, 560, 430),
+            Some((x, y))
+        );
         assert!(x >= main.x && y >= main.y);
         assert!(x + 560 <= main.x + main.width as i32);
         assert!(y + 430 <= main.y + main.height as i32);

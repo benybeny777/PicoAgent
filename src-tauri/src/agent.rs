@@ -740,26 +740,8 @@ fn normalized_short_text(text: &str) -> String {
         .to_lowercase()
 }
 
-#[cfg(test)]
-fn is_simple_greeting(text: &str) -> bool {
-    matches!(
-        normalized_short_text(text).as_str(),
-        "こんにちは"
-            | "こんにちわ"
-            | "こんばんは"
-            | "こんばんわ"
-            | "おはよう"
-            | "おはようございます"
-            | "やっほー"
-            | "やっほ"
-            | "やほ"
-            | "hello"
-            | "hi"
-    )
-}
-
 /// 小型モデルへ内部ガイドを渡すと、その禁止事項自体を説明してしまうことがある。
-/// 挨拶だけはモデルを呼ばず、入力の時間帯に合う自然な一言を直接返す。
+/// 挨拶だけはモデルを呼ばず、挨拶が指す時間帯に合う自然な一言を直接返す。
 fn simple_greeting_answer(text: &str) -> Option<String> {
     let normalized = normalized_short_text(text);
     let answer = match normalized.as_str() {
@@ -1626,9 +1608,9 @@ mod tests {
     use super::{
         append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
         extract_source_urls, genspark_suite_query, is_local_action_query, is_news_summary_query,
-        is_simple_greeting, is_weather_query, market_query, meeting_recorder_query,
-        remove_material_leaks, research_report_query, setup_guide_answer, should_web_search,
-        simple_greeting_answer, spark_workspace_query, web_search_query,
+        is_weather_query, market_query, meeting_recorder_query, remove_material_leaks,
+        research_report_query, setup_guide_answer, should_web_search, simple_greeting_answer,
+        spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1727,22 +1709,25 @@ mod tests {
     }
 
     #[test]
-    fn 短い挨拶を判定する() {
-        assert!(is_simple_greeting("こんにちわ"));
-        assert!(is_simple_greeting("こんにちは！"));
-        assert!(!is_simple_greeting("こんにちはの語源を教えて"));
-    }
-
-    #[test]
     fn 短い挨拶は内部指示をモデルへ渡さず直接返す() {
         assert_eq!(
             simple_greeting_answer("hi").as_deref(),
             Some("こんにちは！今日はなにする？")
         );
         assert_eq!(
+            simple_greeting_answer("こんにちわ").as_deref(),
+            Some("こんにちは！今日はなにする？")
+        );
+        assert_eq!(
             simple_greeting_answer("こんばんは！").as_deref(),
             Some("こんばんは！今日もおつかれさま。")
         );
+        assert_eq!(
+            simple_greeting_answer("おはようございます").as_deref(),
+            Some("おはよう！今日もよろしくね。")
+        );
+        // 挨拶の語を含むだけの質問は、通常どおりモデルへ渡す。
+        assert_eq!(simple_greeting_answer("こんにちはの語源を教えて"), None);
         assert_eq!(simple_greeting_answer("こんにちはの語源"), None);
     }
 

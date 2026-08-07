@@ -8,6 +8,8 @@
 // フロントは `<main id="petApp" data-layout="…">` を見て CSS で配置を変えるだけ。
 // バックエンド側の仕事は「どれが選ばれているか」と「ウィンドウの寸法」の2つに絞る。
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager};
 
@@ -51,6 +53,25 @@ pub const MIN_HEIGHT: f64 = 240.0;
 /// 起動準備中だけ使う共通VTuber画面の寸法。保存中の表示形式には影響させない。
 pub const BOOT_WIDTH: f64 = 680.0;
 pub const BOOT_HEIGHT: f64 = 430.0;
+
+/// 起動準備中の共通寸法を当てている間だけ立つ。
+/// この間のウィンドウ実寸はユーザーが選んだものではないので、`remember_current_size()`
+/// が覚えてしまうと、モデル取得の待ち時間中に表示形式を切り替えたり設定を保存した
+/// だけで、chat / widget など小さい形式の記憶が 680×430 に置き換わる。
+static BOOT_SIZE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+fn begin_boot_size() {
+    BOOT_SIZE_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+fn end_boot_size() {
+    BOOT_SIZE_ACTIVE.store(false, Ordering::Relaxed);
+}
+
+/// 現在のウィンドウ実寸を、その表示形式の寸法として覚えてよいか。
+fn should_remember_size() -> bool {
+    !BOOT_SIZE_ACTIVE.load(Ordering::Relaxed)
+}
 
 /// 形式ごとのウィンドウ寸法を覚えておく設定キー。
 /// `{"chat":{"w":520,"h":760},…}` の形。位置は形式をまたいで共有する
@@ -141,6 +162,10 @@ pub fn remember_size(app: &AppHandle, id: &str, width: f64, height: f64) -> Resu
 /// 現在の表示形式とウィンドウ寸法を、切り替え前の値として覚える。
 /// 右クリックメニューと設定画面のどちらもこの共通経路を使う。
 pub fn remember_current_size(app: &AppHandle) -> Result<(), String> {
+    // 起動準備中の共通寸法は利用者の選択ではないため、形式の記憶を上書きしない。
+    if !should_remember_size() {
+        return Ok(());
+    }
     let previous = {
         let state = app.state::<AppState>();
         current(&state.config)
@@ -191,11 +216,14 @@ pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
         size_for(&state.config, id)
     };
 
+    // 保存中の形式の寸法へ戻した時点で、起動準備中の共通寸法は終わる。
+    end_boot_size();
     apply_window_size(app, width, height, Some(id))
 }
 
 /// 保存中の表示形式にかかわらず、起動準備中は共通のVTuber画面へ広げる。
 pub fn apply_boot(app: &AppHandle) -> Result<(), String> {
+    begin_boot_size();
     apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)
 }
 
@@ -257,7 +285,8 @@ pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_size, is_known, BOOT_HEIGHT, BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
+        begin_boot_size, default_size, end_boot_size, is_known, should_remember_size, BOOT_HEIGHT,
+        BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
     };
 
     /// 既定の表示形式が定義一覧に含まれていること（未知の値のフォールバック先が実在する）。
@@ -273,6 +302,31 @@ mod tests {
         assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("bar"));
         assert!(BOOT_WIDTH >= MIN_WIDTH);
         assert!(BOOT_HEIGHT >= MIN_HEIGHT);
+    }
+
+    /// 起動準備中の共通寸法を、その表示形式の寸法として覚えないこと
+    /// （覚えると、待ち時間中の形式切替・設定保存だけで小型形式の記憶が 680×430 になる）。
+    #[test]
+    fn 起動準備中の寸法は表示形式の記憶へ残さない() {
+        end_boot_size();
+        assert!(should_remember_size());
+        begin_boot_size();
+        assert!(!should_remember_size());
+        end_boot_size();
+        assert!(should_remember_size());
+    }
+
+    /// 最小寸法が `tauri.conf.json` と一致すること。
+    /// ずれるとウィンドウ側で丸められ、復元時の下限判定とも食い違う。
+    #[test]
+    fn 最小寸法はtauri設定と一致する() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
+            .expect("tauri.conf.json を読めません");
+        let conf: serde_json::Value =
+            serde_json::from_str(&text).expect("tauri.conf.json を解析できません");
+        let window = &conf["app"]["windows"][0];
+        assert_eq!(window["minWidth"].as_f64(), Some(MIN_WIDTH));
+        assert_eq!(window["minHeight"].as_f64(), Some(MIN_HEIGHT));
     }
 
     /// ID が重複していないこと（重複するとメニューの選択状態が二重に立つ）。
