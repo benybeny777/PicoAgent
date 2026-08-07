@@ -640,7 +640,7 @@ PicoAgent/
 
 **ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール）
 
-**検討中**: [docs/layout-proposal.md](docs/layout-proposal.md) — 画面構成を見直し、用途ごとに切り替えられる表示形式を 6 つ提案しています（モックアップ付き・未着手）。
+**検討中**: [docs/layout-proposal.md](docs/layout-proposal.md) — 画面構成を見直し、用途ごとに切り替えられる表示形式を 8 つ提案しています（モックアップ付き・未着手）。
 
 ---
 
