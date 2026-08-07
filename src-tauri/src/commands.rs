@@ -49,11 +49,50 @@ fn estimate_tokens(msg: &Message) -> usize {
     japanese * 2 + ascii.div_ceil(4)
 }
 
-// 非 system メッセージに割り当てるトークン予算の上限。8k コンテキストの約 75% を目安にする。
+// クラウドなどコンテキスト長を取得できないプロバイダの既定予算。
 const MAX_CONTEXT_TOKENS: usize = 6_000;
 
-// 会話要約が発動するトークン閾値（予算の 70%: 予算に近づいた段階で余裕を作る）。
-const SUMMARIZE_THRESHOLD: usize = MAX_CONTEXT_TOKENS * 7 / 10; // ~4,200
+const AUTO_SUMMARY_BEGIN: &str = "[以前の会話の要約（自動）]";
+const AUTO_SUMMARY_END: &str = "[/以前の会話の要約（自動）]";
+const LEGACY_AUTO_SUMMARY_BEGIN: &str = "[以前の会話の要約（自動）: ";
+
+/// 人格・スキル定義・回答生成の余白を残した会話予算。
+/// local は実際の llama-server コンテキスト長へ追従し、それ以外は安全側の既定値にする。
+fn conversation_token_budget(cfg: &Config) -> usize {
+    if cfg.get("PICOAGENT_PROVIDER", "local") == "local" {
+        let context = cfg
+            .get("PICOAGENT_LOCAL_CTX", "8192")
+            .parse::<usize>()
+            .unwrap_or(8192);
+        return (context * 3 / 4).clamp(1_500, 24_000);
+    }
+    MAX_CONTEXT_TOKENS
+}
+
+/// 以前の自動要約を除去して、最新の要約1ブロックだけへ置き換える。
+fn replace_auto_summary(content: &str, summary: &str) -> String {
+    let mut base = content.to_string();
+    while let Some(start) = base.find(AUTO_SUMMARY_BEGIN) {
+        let Some(relative_end) = base[start..].find(AUTO_SUMMARY_END) else {
+            base.truncate(start);
+            break;
+        };
+        let end = start + relative_end + AUTO_SUMMARY_END.len();
+        base.replace_range(start..end, "");
+    }
+    // 旧形式は常に system 末尾へ追記されていたため、最初の出現位置以降を除けば移行できる。
+    if let Some(start) = base.find(LEGACY_AUTO_SUMMARY_BEGIN) {
+        base.truncate(start);
+    }
+    let base = base.trim_end();
+    if summary.trim().is_empty() {
+        return base.to_string();
+    }
+    format!(
+        "{base}\n\n{AUTO_SUMMARY_BEGIN}\n{}\n{AUTO_SUMMARY_END}",
+        summary.trim()
+    )
+}
 
 pub struct AppState {
     pub config: Config,
@@ -235,12 +274,18 @@ fn clean_turns(messages: &[Message]) -> Vec<Message> {
 
 // 会話を「system + クリーンな直近発話（トークン予算内）」へ圧縮する。
 // メッセージ数ではなくトークン推定量で制限し、小型モデルのコンテキスト超過を防ぐ。
-fn compacted_conversation(convo: &[Message]) -> Vec<Message> {
+fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     let mut turns = clean_turns(convo);
     let total: usize = turns.iter().map(estimate_tokens).sum();
-    if total > MAX_CONTEXT_TOKENS {
+    let system_tokens: usize = convo
+        .iter()
+        .filter(|message| message.role == "system")
+        .map(estimate_tokens)
+        .sum();
+    let turn_budget = budget.saturating_sub(system_tokens);
+    if total > turn_budget {
         // 先頭から削除する件数を先に計算し、drain で O(n) 一括除去する（remove(0) ループは O(n²)）。
-        let mut excess = total.saturating_sub(MAX_CONTEXT_TOKENS);
+        let mut excess = total.saturating_sub(turn_budget);
         let mut remove_count = 0;
         for t in turns.iter() {
             if excess == 0 || turns.len().saturating_sub(remove_count) <= 2 {
@@ -271,9 +316,10 @@ async fn maybe_summarize_context(
     model: &str,
 ) -> Vec<Message> {
     let clean = clean_turns(&convo);
-    let total: usize = clean.iter().map(estimate_tokens).sum();
+    let total: usize = convo.iter().map(estimate_tokens).sum();
+    let summarize_threshold = conversation_token_budget(cfg) * 7 / 10;
     // 閾値以下またはターン数が少なすぎる場合はスキップ（最低 6 ターン必要）。
-    if total <= SUMMARIZE_THRESHOLD || clean.len() < 6 {
+    if total <= summarize_threshold || clean.len() < 6 {
         return convo;
     }
 
@@ -311,8 +357,7 @@ async fn maybe_summarize_context(
         return convo;
     }
 
-    // 最初の system メッセージだけに要約を追記し、古いターンを差し替える。
-    // 複数の system メッセージがある場合（要約の重ね掛け等）は先頭1件のみ更新する。
+    // 最初の system メッセージだけを最新の要約1ブロックへ置換し、古いターンを差し替える。
     let mut appended = false;
     let mut result: Vec<Message> = convo
         .iter()
@@ -321,8 +366,7 @@ async fn maybe_summarize_context(
             let mut m = m.clone();
             if !appended {
                 appended = true;
-                m.content
-                    .push_str(&format!("\n\n[以前の会話の要約（自動）: {}]", summary_text));
+                m.content = replace_auto_summary(&m.content, &summary_text);
             }
             m
         })
@@ -379,7 +423,7 @@ fn record_turn(
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", user_text));
     convo.push(Message::new("assistant", reply.clone()));
-    let compacted = compacted_conversation(&convo);
+    let compacted = compacted_conversation(&convo, conversation_token_budget(&state.config));
     *state.messages.lock().unwrap() = compacted.clone();
     crate::history::save(app, character_id, &compacted);
     Ok(json!({ "reply": reply }))
@@ -425,7 +469,7 @@ async fn run_agent_and_persist(
     )
     .await?;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
-    let compacted = compacted_conversation(convo);
+    let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
     if conversation_is_current(state, character_id, epoch) {
         *state.messages.lock().unwrap() = compacted.clone();
         crate::history::save(app, character_id, &compacted);
@@ -1401,7 +1445,8 @@ pub async fn pet_send(
                 {
                     last.content = prompt.clone();
                 }
-                let compacted = compacted_conversation(&refreshed);
+                let compacted =
+                    compacted_conversation(&refreshed, conversation_token_budget(&state.config));
                 if conversation_is_current(&state, &request_character_id, request_epoch) {
                     *state.messages.lock().unwrap() = compacted.clone();
                     crate::history::save(&app, &request_character_id, &compacted);
@@ -1419,7 +1464,8 @@ pub async fn pet_send(
                 {
                     last.content = prompt.clone();
                 }
-                let compacted = compacted_conversation(&refreshed);
+                let compacted =
+                    compacted_conversation(&refreshed, conversation_token_budget(&state.config));
                 if conversation_is_current(&state, &request_character_id, request_epoch) {
                     *state.messages.lock().unwrap() = compacted.clone();
                     crate::history::save(&app, &request_character_id, &compacted);
@@ -1572,7 +1618,7 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
                         "assistant",
                         format!("直前の自発雑談: {reply}"),
                     ));
-                    compacted_conversation(&messages)
+                    compacted_conversation(&messages, conversation_token_budget(&state.config))
                 };
                 *state.messages.lock().unwrap() = compacted.clone();
                 crate::history::save(&app, &request_character_id, &compacted);
@@ -3437,7 +3483,39 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_character_tts_voice, settings_tab, speech_text};
+    use super::{
+        compacted_conversation, default_character_tts_voice, replace_auto_summary, settings_tab,
+        speech_text, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+    };
+    use crate::message::Message;
+
+    #[test]
+    fn 自動要約は積み重ならず最新一件へ置き換わる() {
+        let first = replace_auto_summary("人格設定", "最初の要約");
+        let second = replace_auto_summary(&first, "新しい要約");
+        assert_eq!(second.matches(AUTO_SUMMARY_BEGIN).count(), 1);
+        assert_eq!(second.matches(AUTO_SUMMARY_END).count(), 1);
+        assert!(second.contains("新しい要約"));
+        assert!(!second.contains("最初の要約"));
+
+        let legacy = "人格設定\n\n[以前の会話の要約（自動）: 古い形式]";
+        let migrated = replace_auto_summary(legacy, "移行後");
+        assert_eq!(migrated.matches(AUTO_SUMMARY_BEGIN).count(), 1);
+        assert!(!migrated.contains("古い形式"));
+    }
+
+    #[test]
+    fn 会話圧縮はsystemも予算へ含めて直近二件を残す() {
+        let mut messages = vec![Message::new("system", &"人格".repeat(80))];
+        for index in 0..6 {
+            messages.push(Message::new("user", &format!("発話{index}")));
+        }
+        let compacted = compacted_conversation(&messages, 100);
+        assert_eq!(compacted.len(), 3);
+        assert_eq!(compacted[0].role, "system");
+        assert_eq!(compacted[1].content, "発話4");
+        assert_eq!(compacted[2].content, "発話5");
+    }
 
     #[test]
     fn 組み込みキャラはそれぞれ既定声を持つ() {
