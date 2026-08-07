@@ -1832,17 +1832,29 @@ async function render() {
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
   let previousCharacter = selectedCharacter;
-  characterSelect.addEventListener("change", async event => {
+  let characterSwitchQueue = Promise.resolve();
+  characterSelect.addEventListener("change", event => {
     // 人格の読込は非同期なので、form の委譲 change が先に collect() すると、切替前の
     // 人格を新しいキャラの上書き値として保存してしまう。切替完了後に未保存判定する。
     event.stopPropagation();
-    characterOverrides[previousCharacter] = characterPersona.value;
-    saveCurrentCharacterVoice(previousCharacter);
-    previousCharacter = characterSelect.value;
-    try { await loadCharacterPersona(previousCharacter); }
-    catch (error) { statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`; }
-    loadCharacterVoice(previousCharacter);
-    updateDirtyState();
+    const requestedCharacter = characterSelect.value;
+    // 素早い連続選択でも、表示中の人格を読み終えてから次へ進む。並列に読むと、
+    // 遅く完了した古い読込が新しいキャラの編集欄を上書きしてしまう。
+    characterSwitchQueue = characterSwitchQueue.then(async () => {
+      characterOverrides[previousCharacter] = characterPersona.value;
+      saveCurrentCharacterVoice(previousCharacter);
+      try {
+        await loadCharacterPersona(requestedCharacter);
+        loadCharacterVoice(requestedCharacter);
+        previousCharacter = requestedCharacter;
+        characterSelect.value = requestedCharacter;
+      } catch (error) {
+        characterSelect.value = previousCharacter;
+        statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`;
+      }
+      refreshCharacterCards();
+      updateDirtyState();
+    });
   });
   // 関係性は人格そのものではなく「人格の上に重ねる差分」なので、キャラ選択とは別の欄にする。
   const relationshipSelect = el("select");
