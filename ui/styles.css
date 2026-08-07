@@ -787,6 +787,9 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
    読める密度へ揃える。小型形式でも操作名を隠さず、ボタンは折り返して収める。 */
 [data-layout]:not([data-layout="stream"]) .reply .md { font-size:inherit; line-height:inherit; }
 [data-layout]:not([data-layout="stream"]) .composer textarea { font-size:14px; line-height:1.55; }
+/* 文字付きボタンは幅を持つので、狭い形式（ミニ・ウィジェット）や手で縮めたウィンドウでは
+   1行に並びきらない。折り返さないと送信ボタンが枠外へ出て押せなくなる。 */
+[data-layout]:not([data-layout="stream"]) .composer-actions { flex-wrap:wrap; }
 [data-layout]:not([data-layout="stream"]) .composer-actions button { min-width:64px; height:40px; font-size:13px; }
 
 /* ミニ: キャラを主役にしつつ、会話があるときだけ上部カードで読める。 */
@@ -836,6 +839,12 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   width:100%!important; height:100%!important;
   transform:translateX(-50%) scale(2.55); transform-origin:50% 9%;
 }
+/* 顔アイコンを 48px から 62px へ広げたぶん、接続ランプと♡ボタンも外側へずらす。
+   元の座標のままだと、ランプがアイコンの内側へ埋もれ、♡がアイコンの右端に重なる。 */
+[data-layout="chat"] .online,
+[data-layout="talk"] .online { left:70px; top:68px; }
+[data-layout="chat"] .relationship-button,
+[data-layout="talk"] .relationship-button { left:88px; top:35px; }
 [data-layout="chat"] .history-body,
 [data-layout="talk"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
 [data-layout="chat"] .reply,

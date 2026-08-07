@@ -71,7 +71,7 @@ impl Tool for ReadFileTool {
         "ファイル読込"
     }
     fn description(&self) -> String {
-        "ローカルのテキストファイルを行番号つきで読む。offset / limit で長いファイルの一部だけを読める。読み取れるのは設定「許可」タブの許可ルート配下のみ。edit_file で直す前に必ずこれで現在の内容を確認する。"
+        "ローカルのテキストファイルを行番号つきで読む。offset / limit で長いファイルの一部だけを読める。読み取れるのは設定「安全・許可」タブの許可ルート配下のみ。edit_file で直す前に必ずこれで現在の内容を確認する。"
             .to_string()
     }
     fn parameters(&self) -> Value {

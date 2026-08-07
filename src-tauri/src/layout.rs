@@ -301,4 +301,58 @@ mod tests {
         assert!(!is_known("unknown"));
         assert_eq!(default_size("unknown"), default_size(DEFAULT));
     }
+
+    fn read_repo_file(relative: &str) -> String {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("リポジトリルートを取得できない");
+        std::fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("{relative} を読めません: {error}"))
+    }
+
+    /// 表示形式の一覧は、ここの `LAYOUTS` のほかに設定画面のカード定義
+    /// （`ui/settings.js` の `LAYOUT_CHOICES`。既定寸法を文字列で持つ）と、
+    /// プレビュー画像をコピーする `xtask` の一覧にも複製されている。
+    /// 片方だけ直すと「カードに古い寸法が出る」「新形式のカードが出ない」が黙って起きるので、
+    /// ID と既定寸法の一致をここで検出する。
+    #[test]
+    fn 表示形式の一覧はフロントとxtaskに揃っている() {
+        let settings_js = read_repo_file("ui/settings.js");
+        let choices = settings_js
+            .split("const LAYOUT_CHOICES = [")
+            .nth(1)
+            .and_then(|rest| rest.split("];").next())
+            .expect("ui/settings.js に LAYOUT_CHOICES が見つかりません");
+        let assets_rs = read_repo_file("xtask/src/assets.rs");
+
+        let mut listed: Vec<&str> = choices
+            .split("id: \"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .collect();
+        let mut expected: Vec<&str> = LAYOUTS.iter().map(|(id, _, _, _)| *id).collect();
+        listed.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(
+            listed, expected,
+            "ui/settings.js の LAYOUT_CHOICES と表示形式の定義がずれています"
+        );
+
+        for (id, _, width, height) in LAYOUTS {
+            let entry = choices
+                .split(&format!("id: \"{id}\""))
+                .nth(1)
+                .and_then(|rest| rest.split('}').next())
+                .unwrap_or_else(|| panic!("{id} のカード定義を読み取れません"));
+            let size = format!("size: \"{}×{}\"", width as u32, height as u32);
+            assert!(
+                entry.contains(&size),
+                "{id} のカードに出す既定寸法が定義とずれています（期待: {size}）"
+            );
+            assert!(
+                assets_rs.contains(&format!("\"{id}\"")),
+                "{id} のプレビュー画像が xtask のコピー対象に入っていません"
+            );
+        }
+    }
 }

@@ -343,6 +343,17 @@ body.searching .tab-panel {
 }
 .advanced-group[open] { padding-bottom: 10px; }
 .advanced-group-note { margin: -5px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+/* 畳んだままだと中の .changed が見えないので、見出しへ未保存の印を出す。 */
+.advanced-group.has-changed > summary::after {
+  content: "未保存の変更あり";
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--pink);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
 
 /* 導入済みスキル・キャラクターの一覧（読み取り専用カード） */
 .card-list { display: flex; flex-direction: column; gap: 8px; }

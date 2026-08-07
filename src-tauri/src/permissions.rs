@@ -381,7 +381,7 @@ fn resolve_raw(cfg: &Config, input: &str) -> Result<PathBuf, String> {
         Ok(target)
     } else {
         Err(format!(
-            "許可ルートの外は操作できません（設定の「許可」タブで許可ルートを追加してください）: {}",
+            "許可ルートの外は操作できません（設定の「安全・許可」タブで許可ルートを追加してください）: {}",
             target.display()
         ))
     }

@@ -175,6 +175,11 @@ function updateDirtyState() {
     "changed",
     stableStringify(current.PICOAGENT_SCHEDULED_TASKS) !== stableStringify(savedSnapshot.PICOAGENT_SCHEDULED_TASKS)
   );
+  // 折りたたんだ「詳細設定」の中を変更しても、閉じている間は .changed の色が見えない。
+  // どこを触ったか分からないまま保存することになるので、見出し側にも印を出す。
+  for (const group of form.querySelectorAll(".advanced-group")) {
+    group.classList.toggle("has-changed", Boolean(group.querySelector(".changed")));
+  }
   resetChangesBtn.disabled = !dirty;
   saveBtn.classList.toggle("dirty", dirty);
 }
@@ -272,6 +277,24 @@ function applySettingsSearch() {
     const ownMatch = nodeSearchText(sectionNode.querySelector("h2") || sectionNode).includes(query);
     const childMatch = [...sectionNode.querySelectorAll(".searchable")].some(item => !item.hidden);
     sectionNode.hidden = !(ownMatch || childMatch);
+  }
+  // 「詳細設定」などの折りたたみ: 中身が一致したら開いて見せ、一致しなければ畳んで隠す。
+  // 開かないと検索でヒットした項目が summary の裏に残り、見つからないのと同じになる。
+  // 隠さないと、中身が全部消えたタブが「まだ何かある」ように見えて空判定も効かなくなる。
+  for (const group of form.querySelectorAll(".advanced-group")) {
+    if (query) {
+      // 手で開閉した状態は検索終了時に戻す。
+      if (group.dataset.userOpen == null) group.dataset.userOpen = group.open ? "1" : "0";
+      const matched = [...group.querySelectorAll(".searchable, .section")].some(item => !item.hidden);
+      group.hidden = !matched;
+      group.open = matched;
+    } else {
+      group.hidden = false;
+      if (group.dataset.userOpen != null) {
+        group.open = group.dataset.userOpen === "1";
+        delete group.dataset.userOpen;
+      }
+    }
   }
   for (const panel of form.querySelectorAll(".tab-panel")) {
     if (!query) continue;
@@ -1870,7 +1893,7 @@ async function render() {
   global.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
   // Ollama だけは実行中のローカル一覧を基本タブのモデル欄に出す。
-  // 他プロバイダは「叩くAI」タブで種類とサイズを選ぶため、ここでは隠す。
+  // 他プロバイダは「AIモデル・連携」タブで種類とサイズを選ぶため、ここでは隠す。
   function updateModelFieldVisibility() { modelField.hidden = providerSelect.value !== "ollama"; }
   updateModelFieldVisibility();
   const displaySec = section("画面レイアウト");
@@ -2068,7 +2091,7 @@ async function render() {
   if (!data.tools.length) {
     skillSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillSec.append(el("p", { className: "hint", textContent: "カテゴリ別の一覧です。ジャンルで絞り込めます。⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。頼み方の例は「スキル活用ガイド」タブを参照。" }));
+    skillSec.append(el("p", { className: "hint", textContent: "カテゴリ別の一覧です。ジャンルで絞り込めます。⚙ のあるスキルをクリックすると設定を開けます（既定は折りたたみ）。頼み方の例は「使い方」タブを参照。" }));
     skillSec.append(buildGenreChips(() => skillGenreFilter, value => { skillGenreFilter = value; }));
     skillSec.append(buildSkillCategoryList(data.tools, v));
   }
@@ -2079,7 +2102,7 @@ async function render() {
   if (!data.tools.length) {
     skillGuideSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。ジャンルで絞り込めます。設定（APIキー等）は「スキル設定」タブで行います。" }));
+    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。ジャンルで絞り込めます。設定（APIキー等）は「スキル」タブで行います。" }));
     skillGuideSec.append(buildGenreChips(() => guideGenreFilter, value => { guideGenreFilter = value; }));
     skillGuideSec.append(buildSkillGuide(data.tools));
   }
@@ -2467,7 +2490,7 @@ async function render() {
   permSec.append(el("p", { className: "field-note", textContent: "ここは相対パスの基準にもなります。空ならホームフォルダを使います。" }));
   permSec.append(field("PICOAGENT_ALLOWED_PATHS", "ほかにも許可するフォルダ（改行または ; 区切り）", "textarea", v.PICOAGENT_ALLOWED_PATHS ?? "", ""));
   permSec.append(field("PICOAGENT_DENIED_PATHS", "拒否パス（改行または ; 区切り。この配下は常に拒否）", "textarea", v.PICOAGENT_DENIED_PATHS ?? "", ""));
-  permSec.append(el("p", { className: "hint", textContent: "コマンド実行（run_command）と自力実行（code_runner）の有効化は「スキル設定」タブの各スキルカードで切り替えます。既定はどちらも無効です。" }));
+  permSec.append(el("p", { className: "hint", textContent: "コマンド実行（run_command）と自力実行（code_runner）の有効化は「スキル」タブの各スキルカードで切り替えます。既定はどちらも無効です。" }));
   panels.permissions.append(permSec);
 
   panels.diagnostics.append(buildDiagnosticsSection());
