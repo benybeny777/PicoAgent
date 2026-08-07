@@ -172,6 +172,29 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 - **スーパーエージェントモード** — 複雑な依頼を「計画 → 多段ツール実行 → 自己評価」まで自律的に回し、必要なら `subagent` スキルでサブタスクを分担。進捗はフキダシ上部のステータス行にリアルタイム表示
 - **原則 Web 検索** — 通常の質問はローカルモデルの判断に頼らず検索してから、参照元リンク付きで回答（短い挨拶は例外扱いでキャラクター本人として返答）
 
+
+### 表示形式（画面構成を選べる）
+
+**右クリック →「表示形式」** で、同じ機能のまま見た目だけを 8 種類から選べます。設定 →「基本」タブからも変更でき、どちらも再起動なしで反映します。キャラクター・会話履歴・通知・読み上げ・許可設定はどの形式でも共通です。
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-mascot.webp" alt="マスコット表示" width="230" /><br /><b>マスコット</b><br /><sub>キャラだけ。話したときだけ吹き出し</sub></td>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-pet.webp" alt="ペット表示" width="230" /><br /><b>ペット</b>（既定）<br /><sub>キャラ＋フキダシ。ふだん使い</sub></td>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-chat.webp" alt="チャット表示" width="230" /><br /><b>チャット</b><br /><sub>履歴つき縦長パネル</sub></td>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-talk.webp" alt="トーク表示" width="230" /><br /><b>トーク</b><br /><sub>メッセージアプリ風</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="docs/images/layout-shot-bar.webp" alt="バー表示" width="230" /><br /><b>バー</b><br /><sub>1 行入力。呼んで消す</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-workspace.webp" alt="ワークスペース表示" width="230" /><br /><b>ワークスペース</b><br /><sub>履歴・回答・実行状況の 3 ペイン</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>キャラを大きく＋字幕テロップ</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
+    </tr>
+  </table>
+  <sub>ウィンドウの寸法は形式ごとに覚えます。右クリック →「表示位置とサイズをリセット」で、いま選んでいる形式の既定へ戻せます。</sub>
+</div>
+
 ### キャラクター
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
@@ -220,7 +243,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | 読み上げ中にキャラクターをクリック | 読み上げを停止 |
 | キャラクターをクリック / なでる | 触った場所に応じて反応し、ふれあいを記録 |
 | キャラクター横の `♡` | 関係性と最近いっしょにしたことを表示 |
-| 右クリック | 設定… / 常に手前に表示 / 会話をリセット / 終了 |
+| 右クリック | 設定… / **表示形式** / 常に手前に表示 / 会話をリセット / 表示位置とサイズをリセット / 終了 |
 
 全画面フキダシでは会話履歴を検索でき、各履歴のコピーやユーザー発話の再利用ができます。
 フキダシ本文や入力欄の上で右クリックした場合は、コピーなど通常のメニューを優先します。
@@ -240,6 +263,17 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | `Shift + Enter` | 改行 |
 | `↑` `↓` | 過去の入力を呼び戻す |
 | `Esc` | 入力欄を閉じる / 全画面を解除 |
+
+**グローバルホットキー**（他のアプリを使っている最中でも効きます）
+
+| キー | 動き |
+|---|---|
+| `Ctrl + Alt + P`（macOS は `⌘ + Alt + P`） | どこからでも呼び出す（前面へ出して入力欄を開く） |
+| `Ctrl + Alt + H`（macOS は `⌘ + Alt + H`） | 隠す / 戻す（画面共有や作業に集中したいとき） |
+
+設定 →「基本」で割り当てを変更でき、保存すると再起動なしで反映されます。欄を空にすると既定値、`off` と書くとそのキーだけ無効、
+「グローバルホットキーを使う」を外すと両方とも無効になります。他のアプリが同じキーを使っていて登録できなかった場合は、
+保存時にその旨を表示します。隠したまま呼び出しキーが無効になると操作できなくなるため、その状態になったときは自動で表示へ戻します。
 
 ### ファイルを渡す
 
@@ -313,7 +347,8 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_COMPANION_MODE` / `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` / `PICOAGENT_ONBOARDING_DONE` |
 | 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
-| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` |
+| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` |
+| ホットキー | `PICOAGENT_HOTKEY_ENABLED` / `PICOAGENT_HOTKEY_SUMMON` / `PICOAGENT_HOTKEY_HIDE` |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
 | ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` |
@@ -610,7 +645,7 @@ PicoAgent/
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
 ├── tools/            ← 開発用の作業ツール（tha3-runtime/ はWindows開発用・Git管理外）
-├── docs/images/      ← README 掲載画像（tools/screenshots で生成）
+├── docs/            ← 検討資料（layout-proposal.md など）と README 掲載画像（images/）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
     ├── resources/bundled/tha3/ ← 配布するTHA3本体・モデル（Windowsランタイムはインストール時取得）
@@ -626,7 +661,9 @@ PicoAgent/
 
 `ui/assets/characters/` は `characters/` の配信コピー、`ui/vendor/live2d/` は Live2D ランタイムで、いずれも自動生成・自動取得です。
 
-**ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール）
+**ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール） / [HANDOFF.md](HANDOFF.md)（引き継ぎメモ）
+
+**設計資料**: [docs/layout-proposal.md](docs/layout-proposal.md) — 表示形式 8 つの設計意図とモックアップ（実装済み）。
 
 ---
 
