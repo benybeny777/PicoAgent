@@ -68,9 +68,10 @@ fn end_boot_size() {
     BOOT_SIZE_ACTIVE.store(false, Ordering::Relaxed);
 }
 
-/// 現在のウィンドウ実寸を、その表示形式の寸法として覚えてよいか。
-fn should_remember_size() -> bool {
-    !BOOT_SIZE_ACTIVE.load(Ordering::Relaxed)
+/// 起動準備中の共通寸法を当てている最中か。
+/// この間は実寸を形式の記憶へ残さず、形式の切り替えも当てずに保留する。
+fn boot_size_active() -> bool {
+    BOOT_SIZE_ACTIVE.load(Ordering::Relaxed)
 }
 
 /// 形式ごとのウィンドウ寸法を覚えておく設定キー。
@@ -163,7 +164,7 @@ pub fn remember_size(app: &AppHandle, id: &str, width: f64, height: f64) -> Resu
 /// 右クリックメニューと設定画面のどちらもこの共通経路を使う。
 pub fn remember_current_size(app: &AppHandle) -> Result<(), String> {
     // 起動準備中の共通寸法は利用者の選択ではないため、形式の記憶を上書きしない。
-    if !should_remember_size() {
+    if boot_size_active() {
         return Ok(());
     }
     let previous = {
@@ -227,6 +228,15 @@ pub fn apply_boot(app: &AppHandle) -> Result<(), String> {
     apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)
 }
 
+/// 形式の変更を当てる。ただし起動準備中は当てずに共通の起動画面を保つ。
+/// 準備完了時の `pet_finish_boot` が保存中の形式（＝ここで保存した新しい形式）を当てる。
+pub fn apply_unless_booting(app: &AppHandle, id: &str) -> Result<(), String> {
+    if boot_size_active() {
+        return Ok(());
+    }
+    apply(app, id)
+}
+
 fn apply_window_size(
     app: &AppHandle,
     width: f64,
@@ -279,13 +289,13 @@ pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
             .set_all(patch)
             .map_err(|error| format!("表示形式の保存に失敗しました: {error}"))?;
     }
-    apply(app, id)
+    apply_unless_booting(app, id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_boot_size, default_size, end_boot_size, is_known, should_remember_size, BOOT_HEIGHT,
+        begin_boot_size, boot_size_active, default_size, end_boot_size, is_known, BOOT_HEIGHT,
         BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
     };
 
@@ -309,11 +319,11 @@ mod tests {
     #[test]
     fn 起動準備中の寸法は表示形式の記憶へ残さない() {
         end_boot_size();
-        assert!(should_remember_size());
+        assert!(!boot_size_active());
         begin_boot_size();
-        assert!(!should_remember_size());
+        assert!(boot_size_active());
         end_boot_size();
-        assert!(should_remember_size());
+        assert!(!boot_size_active());
     }
 
     /// 最小寸法が `tauri.conf.json` と一致すること。

@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use chrono::Timelike;
 use tauri::Manager;
 
 use crate::config::Config;
@@ -740,19 +741,116 @@ fn normalized_short_text(text: &str) -> String {
         .to_lowercase()
 }
 
-/// 小型モデルへ内部ガイドを渡すと、その禁止事項自体を説明してしまうことがある。
-/// 挨拶だけはモデルを呼ばず、挨拶が指す時間帯に合う自然な一言を直接返す。
-fn simple_greeting_answer(text: &str) -> Option<String> {
-    let normalized = normalized_short_text(text);
-    let answer = match normalized.as_str() {
-        "おはよう" | "おはようございます" => "おはよう！今日もよろしくね。",
-        "こんばんは" | "こんばんわ" => "こんばんは！今日もおつかれさま。",
-        "こんにちは" | "こんにちわ" | "やっほー" | "やっほ" | "やほ" | "hello" | "hi" => {
-            "こんにちは！今日はなにする？"
+/// 挨拶が指す時間帯。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GreetingKind {
+    Morning,
+    Day,
+    Evening,
+}
+
+impl GreetingKind {
+    /// キャラクター固有の挨拶が無いときの既定文。
+    fn fallback_line(self) -> &'static str {
+        match self {
+            GreetingKind::Morning => "おはよう！今日もよろしくね。",
+            GreetingKind::Day => "こんにちは！今日はなにする？",
+            GreetingKind::Evening => "こんばんは！今日もおつかれさま。",
         }
-        _ => return None,
+    }
+
+    /// キャラクター固有の挨拶へ前置きする時間帯の一言。
+    /// 昼はキャラクターの挨拶をそのまま使うため、前置きは不要。
+    fn prefix(self) -> Option<&'static str> {
+        match self {
+            GreetingKind::Morning => Some("おはよう！"),
+            GreetingKind::Day => None,
+            GreetingKind::Evening => Some("こんばんは！"),
+        }
+    }
+}
+
+/// 時刻から時間帯を決める（`pet_daily_greeting` と同じ区切り）。
+fn greeting_kind_for_hour(hour: u32) -> GreetingKind {
+    match hour {
+        5..=10 => GreetingKind::Morning,
+        11..=16 => GreetingKind::Day,
+        _ => GreetingKind::Evening,
+    }
+}
+
+/// 短い挨拶なら、その挨拶が指す時間帯を返す。
+/// 「hi」「やっほー」のように時間帯を含まない挨拶は、実際の時刻から決める
+/// （夜に `hi` と言われて「こんにちは」と返さない）。
+fn greeting_kind(text: &str, hour: u32) -> Option<GreetingKind> {
+    match normalized_short_text(text).as_str() {
+        "おはよう" | "おはようございます" => Some(GreetingKind::Morning),
+        "こんばんは" | "こんばんわ" => Some(GreetingKind::Evening),
+        "こんにちは" | "こんにちわ" => Some(GreetingKind::Day),
+        "やっほー" | "やっほ" | "やほ" | "hello" | "hi" => {
+            Some(greeting_kind_for_hour(hour))
+        }
+        _ => None,
+    }
+}
+
+/// キャラクター固有の挨拶から、先頭の挨拶語だけを落とす。
+/// 「こんにちは、むぎだよ。…」へ「おはよう！」を前置きすると挨拶が二重になるため。
+/// 知っている語で始まるときだけ落とし、それ以外は原文をそのまま活かす。
+fn strip_leading_salutation(greeting: &str) -> &str {
+    const SALUTATIONS: &[&str] = &[
+        "こんにちは",
+        "こんにちわ",
+        "こんばんは",
+        "こんばんわ",
+        "おはようございます",
+        "おはよう",
+        "やっほー",
+        "やっほ",
+        "hello",
+        "hi",
+    ];
+    let trimmed = greeting.trim();
+    for salutation in SALUTATIONS {
+        let Some(rest) = trimmed.strip_prefix(salutation) else {
+            continue;
+        };
+        return rest
+            .trim_start_matches(|c: char| c.is_whitespace() || "、。,.！？!?〜~".contains(c));
+    }
+    trimmed
+}
+
+/// 選択中キャラクターの `greeting`。アプリ外（スケジューラの単体呼び出し等）では空。
+fn selected_character_greeting(app: Option<&tauri::AppHandle>) -> String {
+    let Some(app) = app else {
+        return String::new();
     };
-    Some(answer.to_string())
+    app.state::<crate::commands::AppState>()
+        .character_greeting
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+/// 小型モデルへ内部ガイドを渡すと、その禁止事項自体を説明してしまうことがある。
+/// 挨拶だけはモデルを呼ばず、時間帯に合う一言を選択中キャラクター本人の口調で直接返す。
+/// `character_greeting` は `character.json` の `greeting`（人格そのままの挨拶）。
+fn simple_greeting_answer(text: &str, hour: u32, character_greeting: &str) -> Option<String> {
+    let kind = greeting_kind(text, hour)?;
+    let greeting = character_greeting.trim();
+    if greeting.is_empty() {
+        return Some(kind.fallback_line().to_string());
+    }
+    // 昼はキャラクターの挨拶がそのまま噛み合うので、原文を丸ごと使う。
+    let Some(prefix) = kind.prefix() else {
+        return Some(greeting.to_string());
+    };
+    let body = strip_leading_salutation(greeting);
+    if body.is_empty() {
+        return Some(kind.fallback_line().to_string());
+    }
+    Some(format!("{prefix}{body}"))
 }
 
 fn is_explicit_web_search_request(text: &str) -> bool {
@@ -1274,12 +1372,14 @@ pub async fn run(
     };
 
     // 原則として、小型ローカルモデルの tool_calls 判断に依存させずWeb検索を先に実行する。
-    // 短い挨拶はモデルへ内部ガイドを渡さず、安全な一言を直接返す。
+    // 短い挨拶はモデルへ内部ガイドを渡さず、選択中キャラクターの挨拶を直接返す。
     if let Some(user_index) = messages.iter().rposition(|message| message.role == "user") {
         let user_text = messages[user_index].content.clone();
         original_user_text = user_text.clone();
         schemas = tools::schemas_for_text(&user_text);
-        if let Some(answer) = simple_greeting_answer(&user_text) {
+        let hour = chrono::Local::now().hour();
+        let character_greeting = selected_character_greeting(app);
+        if let Some(answer) = simple_greeting_answer(&user_text, hour, &character_greeting) {
             return direct_answer(messages, answer);
         } else if let Some(answer) = setup_guide_answer(&user_text) {
             return direct_answer(messages, answer);
@@ -1710,25 +1810,70 @@ mod tests {
 
     #[test]
     fn 短い挨拶は内部指示をモデルへ渡さず直接返す() {
+        // キャラクター固有の挨拶が無い場合は時間帯の既定文。
         assert_eq!(
-            simple_greeting_answer("hi").as_deref(),
+            simple_greeting_answer("hi", 13, "").as_deref(),
             Some("こんにちは！今日はなにする？")
         );
         assert_eq!(
-            simple_greeting_answer("こんにちわ").as_deref(),
+            simple_greeting_answer("こんにちわ", 13, "").as_deref(),
             Some("こんにちは！今日はなにする？")
         );
         assert_eq!(
-            simple_greeting_answer("こんばんは！").as_deref(),
+            simple_greeting_answer("こんばんは！", 13, "").as_deref(),
             Some("こんばんは！今日もおつかれさま。")
         );
         assert_eq!(
-            simple_greeting_answer("おはようございます").as_deref(),
+            simple_greeting_answer("おはようございます", 22, "").as_deref(),
             Some("おはよう！今日もよろしくね。")
         );
         // 挨拶の語を含むだけの質問は、通常どおりモデルへ渡す。
-        assert_eq!(simple_greeting_answer("こんにちはの語源を教えて"), None);
-        assert_eq!(simple_greeting_answer("こんにちはの語源"), None);
+        assert_eq!(
+            simple_greeting_answer("こんにちはの語源を教えて", 13, ""),
+            None
+        );
+        assert_eq!(simple_greeting_answer("こんにちはの語源", 13, ""), None);
+    }
+
+    #[test]
+    fn 時間帯を含まない挨拶は実時刻で選ぶ() {
+        assert_eq!(
+            simple_greeting_answer("hi", 23, "").as_deref(),
+            Some("こんばんは！今日もおつかれさま。")
+        );
+        assert_eq!(
+            simple_greeting_answer("やっほー", 7, "").as_deref(),
+            Some("おはよう！今日もよろしくね。")
+        );
+        // 挨拶自体が時間帯を持つ場合は、利用者の言葉に合わせる（夜更かしでも噛み合わせる）。
+        assert_eq!(
+            simple_greeting_answer("おはよう", 23, "").as_deref(),
+            Some("おはよう！今日もよろしくね。")
+        );
+    }
+
+    #[test]
+    fn 挨拶はキャラクター本人の口調で返す() {
+        let mugi = "こんにちは、むぎだよ。えへへ、今日もそばで見てるね。";
+        // 昼はキャラクターの挨拶がそのまま噛み合う。
+        assert_eq!(
+            simple_greeting_answer("こんにちは", 13, mugi).as_deref(),
+            Some(mugi)
+        );
+        // 朝・夜は時間帯の一言へ差し替え、挨拶語の二重を避ける。
+        assert_eq!(
+            simple_greeting_answer("おはよう", 8, mugi).as_deref(),
+            Some("おはよう！むぎだよ。えへへ、今日もそばで見てるね。")
+        );
+        assert_eq!(
+            simple_greeting_answer("こんばんは", 21, "やっほー！ひよりだよ。").as_deref(),
+            Some("こんばんは！ひよりだよ。")
+        );
+        // 挨拶語で始まらないキャラクターは原文を残す。
+        assert_eq!(
+            simple_greeting_answer("おはよう", 8, "ふ、ふん。来たのね。").as_deref(),
+            Some("おはよう！ふ、ふん。来たのね。")
+        );
     }
 
     #[test]

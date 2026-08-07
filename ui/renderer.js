@@ -613,7 +613,8 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   frame = 0;
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
-  await window.picoagent.setCharacterProfile(manifest.id, profile);
+  // 挨拶も渡す。短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため。
+  await window.picoagent.setCharacterProfile(manifest.id, profile, manifest.greeting || "");
   loadedCharacterSignature = signature;
   if (manifest.greeting) {
     renderReply(manifest.greeting);
@@ -966,6 +967,10 @@ let live2dRuntimeSdk = "";
 // Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
 const LIVE2D_RENDER_WIDTH = 285;
 const LIVE2D_RENDER_HEIGHT = 315;
+// CSS の立ち絵枠と配信形式のキャンバス拡大は、この基準寸法から計算する。
+// styles.css の :root にも同じ既定値を書いてあるが、正本はここ1箇所にする。
+document.documentElement.style.setProperty("--char-frame-width", `${LIVE2D_RENDER_WIDTH}px`);
+document.documentElement.style.setProperty("--char-frame-height", `${LIVE2D_RENDER_HEIGHT}px`);
 
 function loadScriptOnce(src) {
   return new Promise((resolve, reject) => {

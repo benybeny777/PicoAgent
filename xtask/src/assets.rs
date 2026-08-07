@@ -93,6 +93,9 @@ pub fn build_ui_dist(release: bool) -> Result<()> {
         }
     }
 
+    // 配信する中身が確定してから版を打つ（release の最小化後の内容でハッシュを取る）。
+    stamp_asset_versions(&dest)?;
+
     log(
         "build-ui-dist",
         format!(
@@ -101,6 +104,84 @@ pub fn build_ui_dist(release: bool) -> Result<()> {
         ),
     );
     Ok(())
+}
+
+/// HTML が読み込むローカルの CSS / JS へ、内容から決まる `?v=…` を付ける。
+///
+/// 手書きの版番号は付け忘れ・書き間違いが起きる（実際に `styles.css` と `renderer.js` で
+/// 版が食い違っていた）。内容ハッシュにしておけば、変更したファイルだけが確実に読み直され、
+/// webview のキャッシュに古い CSS が残らない。
+fn stamp_asset_versions(dest: &std::path::Path) -> Result<()> {
+    for file in list_files(dest) {
+        if file.extension().map(|e| e != "html").unwrap_or(true) {
+            continue;
+        }
+        let Some(dir) = file.parent().map(|dir| dir.to_path_buf()) else {
+            continue;
+        };
+        let text = fs::read_to_string(&file)?;
+        let stamped = rewrite_asset_refs(&text, &|relative| {
+            let target = dir.join(relative);
+            fs::read(&target).ok().map(|bytes| content_version(&bytes))
+        });
+        if stamped != text {
+            fs::write(&file, stamped)?;
+        }
+    }
+    Ok(())
+}
+
+/// 内容から決まる短い版文字列（FNV-1a。外部クレートを増やさない）。
+fn content_version(bytes: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:08x}", (hash >> 32) as u32)
+}
+
+/// HTML 内の `href="…"` / `src="…"` のうち、同梱の CSS / JS を指すものへ版を付け直す。
+fn rewrite_asset_refs(html: &str, version_of: &dyn Fn(&str) -> Option<String>) -> String {
+    const ATTRIBUTES: [&str; 2] = ["href=\"", "src=\""];
+    let mut out = String::with_capacity(html.len() + 64);
+    let mut rest = html;
+    loop {
+        let Some((index, attribute)) = ATTRIBUTES
+            .iter()
+            .filter_map(|attribute| rest.find(attribute).map(|index| (index, *attribute)))
+            .min_by_key(|(index, _)| *index)
+        else {
+            out.push_str(rest);
+            return out;
+        };
+        let value_start = index + attribute.len();
+        out.push_str(&rest[..value_start]);
+        let after = &rest[value_start..];
+        let Some(end) = after.find('"') else {
+            out.push_str(after);
+            return out;
+        };
+        out.push_str(&stamped_reference(&after[..end], version_of));
+        out.push('"');
+        rest = &after[end + 1..];
+    }
+}
+
+/// 参照1つ分の書き換え。外部 URL・絶対パス・CSS/JS 以外はそのまま返す。
+fn stamped_reference(value: &str, version_of: &dyn Fn(&str) -> Option<String>) -> String {
+    let path = value.split(['?', '#']).next().unwrap_or(value);
+    let lower = path.to_lowercase();
+    if !(lower.ends_with(".css") || lower.ends_with(".js")) {
+        return value.to_string();
+    }
+    if path.starts_with('/') || path.contains("://") || lower.starts_with("data:") {
+        return value.to_string();
+    }
+    match version_of(path) {
+        Some(version) => format!("{path}?v={version}"),
+        None => value.to_string(),
+    }
 }
 
 fn minify_html(text: &str) -> String {
@@ -261,5 +342,51 @@ fn stop_managed_aivis(stopped: &mut Vec<&'static str>) {
         .unwrap_or(false);
     if ok {
         stopped.push("aivis");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{content_version, rewrite_asset_refs};
+
+    #[test]
+    fn 同梱のcssとjsへ内容版を付ける() {
+        let html =
+            r#"<link rel="stylesheet" href="styles.css" /><script src="renderer.js"></script>"#;
+        let stamped = rewrite_asset_refs(&html.to_string(), &|relative| match relative {
+            "styles.css" => Some("aaaaaaaa".to_string()),
+            "renderer.js" => Some("bbbbbbbb".to_string()),
+            _ => None,
+        });
+        assert_eq!(
+            stamped,
+            r#"<link rel="stylesheet" href="styles.css?v=aaaaaaaa" /><script src="renderer.js?v=bbbbbbbb"></script>"#
+        );
+    }
+
+    #[test]
+    fn 手書きの版と外部参照は壊さない() {
+        // 手書きの `?v=…` は内容版へ置き換える（付け忘れ・食い違いを残さない）。
+        let stamped =
+            rewrite_asset_refs(r#"<script src="renderer.js?v=20260807"></script>"#, &|_| {
+                Some("cccccccc".to_string())
+            });
+        assert_eq!(stamped, r#"<script src="renderer.js?v=cccccccc"></script>"#);
+
+        // 外部 URL・存在しないファイル・CSS/JS 以外は素通し。
+        let untouched =
+            r#"<a href="https://example.com/app.js"><img src="icon.png"><link href="missing.css">"#;
+        assert_eq!(
+            rewrite_asset_refs(untouched, &|relative| (relative == "styles.css")
+                .then(|| "dddddddd".to_string())),
+            untouched
+        );
+    }
+
+    #[test]
+    fn 内容が変われば版も変わる() {
+        assert_eq!(content_version(b"body{}"), content_version(b"body{}"));
+        assert_ne!(content_version(b"body{}"), content_version(b"body{ }"));
+        assert_eq!(content_version(b"body{}").len(), 8);
     }
 }

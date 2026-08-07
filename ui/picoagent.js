@@ -102,7 +102,7 @@ window.picoagent = {
   },
   setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
   setBubbleLayout: (width, height, left, top) => call("pet_set_bubble_layout", { width, height, left, top }),
-  setCharacterProfile: (characterId, profile) => call("pet_set_character_profile", { characterId, profile }),
+  setCharacterProfile: (characterId, profile, greeting) => call("pet_set_character_profile", { characterId, profile, greeting }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
   pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),

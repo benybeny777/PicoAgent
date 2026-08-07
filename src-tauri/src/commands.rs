@@ -61,6 +61,9 @@ pub struct AppState {
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
     pub character_profile: Mutex<String>,
+    /// 選択中キャラクターの `character.json` の `greeting`（人格そのままの挨拶）。
+    /// 短い挨拶にモデルを呼ばず返すとき、全キャラ共通の定型文にならないよう使う。
+    pub character_greeting: Mutex<String>,
     /// 会話文脈が属する選択中キャラクターID。これが変わったら会話を破棄して
     /// 旧キャラの一人称・自己紹介が新キャラの応答へ混ざらないようにする。
     pub character_id: Mutex<String>,
@@ -91,6 +94,7 @@ impl AppState {
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
             character_profile: Mutex::new(String::new()),
+            character_greeting: Mutex::new(String::new()),
             character_id: Mutex::new(String::new()),
             memory_context: Mutex::new(String::new()),
             relationship_context: Mutex::new(String::new()),
@@ -765,6 +769,7 @@ pub async fn pet_prepare_voice_model(
 pub fn pet_set_character_profile(
     character_id: String,
     profile: String,
+    greeting: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Value, String> {
@@ -779,7 +784,12 @@ pub fn pet_set_character_profile(
     if profile.chars().count() > 4000 {
         return Err("キャラクター人格設定は4000文字以内にしてください。".to_string());
     }
+    let greeting = greeting.unwrap_or_default();
+    if greeting.chars().count() > 500 {
+        return Err("キャラクターの挨拶は500文字以内にしてください。".to_string());
+    }
     *state.character_profile.lock().unwrap() = profile;
+    *state.character_greeting.lock().unwrap() = greeting;
     let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &mode)?;
     state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
@@ -2239,9 +2249,10 @@ pub async fn settings_save(
     }
 
     // 表示形式は再起動なしで当てる（ウィンドウ寸法とフロントの data-layout）。
+    // 起動準備中だけは当てず、準備完了時に新しい形式が当たるよう保留する。
     if layout_changed {
         let id = crate::layout::current(&state.config);
-        if let Err(error) = crate::layout::apply(&app, &id) {
+        if let Err(error) = crate::layout::apply_unless_booting(&app, &id) {
             crate::log_paths::append_app_log(&app, &error);
         }
     }

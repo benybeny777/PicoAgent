@@ -97,7 +97,10 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .window-resize-handles [data-resize-direction="SouthWest"] { left:0; bottom:0; cursor:nesw-resize; }
 .window-resize-handles [data-resize-direction="NorthWest"] { top:0; left:0; cursor:nwse-resize; }
 .pet-app.is-booting .window-resize-handles { display:none; }
-.character { position:absolute; right:10px; bottom:2px; width:285px; height:315px; display:grid; place-items:end center; cursor:grab; }
+/* 立ち絵枠の基準寸法。Live2D の内部描画寸法もこれに合わせるので、配信形式の
+   キャンバス拡大はこの変数からの倍率で書く（数値を二重管理しない）。 */
+:root { --char-frame-width:285px; --char-frame-height:315px; }
+.character { position:absolute; right:10px; bottom:2px; width:var(--char-frame-width); height:var(--char-frame-height); display:grid; place-items:end center; cursor:grab; }
 .character.is-dragging { cursor:grabbing; }
 .character { touch-action:none; user-select:none; -webkit-user-select:none; }
 /* 立ち絵の拡大と移動。既定の --char-zoom は「上半身が枠いっぱいに出る」倍率で、
@@ -663,7 +666,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="workspace"] .character { z-index:5; right:24px; bottom:14px; width:135px; height:165px; }
 
 /* ── 7. 配信: キャラを大きく、回答は字幕テロップ ─────────────────────────── */
-.pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); }
+.pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); --stream-canvas-scale:2.1; }
 [data-layout="stream"] .bubble {
   left:8px; right:8px; top:8px; bottom:8px; width:auto; height:auto; max-width:none;
   background:transparent; border:none; box-shadow:none; padding:0;
@@ -692,15 +695,17 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   z-index:1; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px;
   bottom:8px; width:auto; height:auto; transform:none;
 }
-/* WebGLの内部描画寸法は維持し、通常配信時だけキャンバスの表示寸法を2.1倍にする。
-   視線追従のtransformを持つ315px枠を配置基準にすると上端で切れるため、描画レイヤーは左ステージへ直接固定する。 */
+/* WebGLの内部描画寸法は維持し、通常配信時だけキャンバスの表示寸法を --stream-canvas-scale 倍にする。
+   視線追従のtransformを持つ立ち絵枠（--char-frame-*）を配置基準にすると上端で切れるため、
+   描画レイヤーは左ステージへ直接固定する。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view {
   position:fixed; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px; bottom:8px;
   transform:translate(var(--char-x,0px),var(--char-y,0px));
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0;
-  width:599px!important; height:662px!important;
+  width:calc(var(--char-frame-width) * var(--stream-canvas-scale))!important;
+  height:calc(var(--char-frame-height) * var(--stream-canvas-scale))!important;
   transform:translateX(-50%); transform-origin:50% 100%;
 }
 [data-layout="stream"] .reply {

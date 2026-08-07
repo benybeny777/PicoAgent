@@ -391,7 +391,13 @@ fn overlap(monitor: MonitorRect, x: i32, y: i32, win_w: u32, win_h: u32) -> (i32
     (overlap_w, overlap_h)
 }
 
-/// 保存位置と最も重なるモニタを選び、ウィンドウ全体がその内側へ収まる座標に直す。
+/// 収め直さずに尊重する重なりの下限。これだけ見えていれば掴んで動かせる。
+const MIN_GRABBABLE_PX: i32 = 80;
+
+/// 保存位置と最も重なるモニタを選び、掴める大きさが残っていなければ内側へ収め直す。
+///
+/// 端へわざと少しはみ出して置く使い方（デスクトップペットの定位置）は保存値のまま戻す。
+/// どのモニタにも重なっていなければ `None`（＝既定位置へ戻すしかない）。
 fn clamp_to_best_monitor(
     monitors: &[MonitorRect],
     x: i32,
@@ -406,6 +412,11 @@ fn clamp_to_best_monitor(
     let (overlap_w, overlap_h) = overlap(monitor, x, y, win_w, win_h);
     if overlap_w == 0 || overlap_h == 0 {
         return None;
+    }
+    if overlap_w >= MIN_GRABBABLE_PX.min(win_w as i32)
+        && overlap_h >= MIN_GRABBABLE_PX.min(win_h as i32)
+    {
+        return Some((x, y));
     }
     let max_x = (monitor.x + monitor.width.saturating_sub(win_w) as i32).max(monitor.x);
     let max_y = (monitor.y + monitor.height.saturating_sub(win_h) as i32).max(monitor.y);
@@ -724,24 +735,31 @@ mod window_layout_tests {
             clamp_to_best_monitor(&monitors, -1155, 487, 560, 430),
             Some((-1155, 487))
         );
-        // 主モニタ上の座標。右へ 69px はみ出す分は画面内へ寄せる
-        // （実行中の端寄せドラッグは `is_on_screen` の緩い判定で保つ）。
+        // 主モニタ上の座標。右へ 69px はみ出していても、掴める大きさが残っていれば
+        // 利用者が決めた定位置として尊重する。
         assert_eq!(
             clamp_to_best_monitor(&monitors, 2069, 959, 560, 430),
-            Some((2000, 959))
+            Some((2069, 959))
         );
     }
 
     #[test]
-    fn 保存位置が一部はみ出していても起動時はモニタ内へ収める() {
+    fn 掴めないほどはみ出した保存位置は起動時にモニタ内へ収める() {
         let monitors = two_monitors();
+        // 右下に 60x240 しか残っていない位置（掴める幅 80px 未満）。
         assert_eq!(
             clamp_to_best_monitor(&monitors, 2500, 1200, 680, 430),
             Some((1880, 1010))
         );
+        // 左モニタの上へ 30px しか残っていない位置。
+        assert_eq!(
+            clamp_to_best_monitor(&monitors, -2100, -400, 680, 430),
+            Some((-1920, 0))
+        );
+        // 端へ寄せただけ（左に 500px 見えている）なら動かさない。
         assert_eq!(
             clamp_to_best_monitor(&monitors, -2100, -80, 680, 430),
-            Some((-1920, 0))
+            Some((-2100, -80))
         );
     }
 
@@ -796,10 +814,10 @@ mod window_layout_tests {
             width: 1920,
             height: 1080,
         }];
-        // 旧解像度なら載っているが、右下へはみ出す分はモニタ内へ収める。
+        // 旧解像度では右下に 360x140 が見えており、そのまま復元してよい。
         assert_eq!(
             clamp_to_best_monitor(&before, 2200, 1300, 560, 430),
-            Some((2000, 1010))
+            Some((2200, 1300))
         );
         // 解像度を下げると重なりが無くなり、既定位置へ戻すしかなくなる。
         assert_eq!(clamp_to_best_monitor(&after, 2200, 1300, 560, 430), None);
