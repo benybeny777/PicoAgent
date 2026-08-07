@@ -80,6 +80,7 @@ pub fn run() {
             commands::aivis_status,
             commands::pet_prepare_voice_model,
             commands::pet_set_bubble_size,
+            commands::pet_set_character_offset,
             commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
             commands::pet_relationship_state,

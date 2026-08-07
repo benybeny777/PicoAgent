@@ -1744,6 +1744,8 @@ async function render() {
     { value: "light", label: "通常" },
     { value: "dark", label: "ダーク" },
   ]));
+  // 立ち絵の大きさ。位置はキャラを直接ドラッグして決めるので、ここには出さない。
+  global.append(field("PICOAGENT_CHARACTER_ZOOM", "立ち絵の大きさ（1.0 で全身 / 既定 1.55 は上半身）", "text", v.PICOAGENT_CHARACTER_ZOOM || "1.55"));
   // 表示形式。右クリックメニューの「表示形式」からも同じ設定を変えられる。
   global.append(selectField("PICOAGENT_LAYOUT", "表示形式（画面構成）", v.PICOAGENT_LAYOUT || "pet", [
     { value: "pet", label: "ペット（キャラ＋フキダシ）" },

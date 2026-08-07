@@ -24,6 +24,11 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     let reset_layout = MenuItemBuilder::with_id("reset_layout", "表示位置とサイズをリセット")
         .build(&app)
         .map_err(|e| e.to_string())?;
+    // 立ち絵をドラッグでずらしすぎたときの戻し先。位置とサイズのリセットにも含まれるが、
+    // 「キャラを動かしたら戻せなくなった」が一番起きやすい操作ミスなので単独で出す。
+    let reset_character = MenuItemBuilder::with_id("reset_character", "立ち絵の位置を戻す")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
     let quit = MenuItemBuilder::with_id("quit", "PicoAgent を終了")
         .build(&app)
         .map_err(|e| e.to_string())?;
@@ -56,6 +61,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .item(&ontop)
         .separator()
         .item(&reset)
+        .item(&reset_character)
         .item(&reset_layout)
         .item(&quit)
         .build()
@@ -111,8 +117,32 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
         }
         "reset" => clear_conversation_and_history(app),
         "reset_layout" => reset_bubble_and_window_layout(app),
+        "reset_character" => reset_character_offset(app),
         "quit" => app.exit(0),
         _ => {}
+    }
+}
+
+/// 立ち絵の移動量だけを既定（上半身が出る位置）へ戻す。
+/// ウィンドウの位置・サイズ・表示形式には触らない。
+pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let mut patch = serde_json::Map::new();
+    for key in [
+        "PICOAGENT_CHARACTER_OFFSET_X",
+        "PICOAGENT_CHARACTER_OFFSET_Y",
+    ] {
+        patch.insert(key.to_string(), serde_json::Value::String(String::new()));
+    }
+    if let Err(error) = state.config.set_all(patch) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("立ち絵の位置のリセット保存に失敗しました: {error}"),
+        );
+        return;
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit("pet:character-reset", ());
     }
 }
 
@@ -138,6 +168,9 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
         // 旧版が保存していた相対オフセットのキーも掃除する。
         "PICOAGENT_WINDOW_RIGHT_PX",
         "PICOAGENT_WINDOW_BOTTOM_PX",
+        // ドラッグでずらした立ち絵の位置も既定（上半身が出る位置）へ戻す。
+        "PICOAGENT_CHARACTER_OFFSET_X",
+        "PICOAGENT_CHARACTER_OFFSET_Y",
     ] {
         patch.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
