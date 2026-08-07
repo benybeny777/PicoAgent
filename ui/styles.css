@@ -80,6 +80,18 @@ html[data-theme="dark"] {
 html,body { width:100%; height:100%; margin:0; overflow:hidden; background:transparent; font-family:"Segoe UI","Yu Gothic UI",system-ui,sans-serif; }
 .pet-app { position:relative; width:100%; height:100%; user-select:none; }
 .character { position:absolute; right:6px; bottom:2px; width:265px; height:315px; display:grid; place-items:end center; cursor:grab; }
+.character.is-dragging { cursor:grabbing; }
+.character { touch-action:none; user-select:none; -webkit-user-select:none; }
+/* 立ち絵の拡大と移動。既定の --char-zoom は「上半身が枠いっぱいに出る」倍率で、
+   原点を上端に置くことで顔を残したまま脚が枠の下へ抜ける。移動量はドラッグで決まり
+   `PICOAGENT_CHARACTER_OFFSET_X/Y` に保存する。 */
+.character-view {
+  position:absolute; inset:0; display:block;
+  transform:translate(var(--char-x,0px), var(--char-y,0px)) scale(var(--char-zoom,1.55));
+  transform-origin:50% 0%; will-change:transform;
+}
+.character-view > img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%; }
+.character-view > canvas { position:absolute; left:50%; bottom:0; transform:translateX(-50%); }
 /* 起動直後（音声エンジン準備待ち）は通常のキャラ・フキダシを隠し、待機画面だけを見せる。
    準備完了で is-booting を外し、その瞬間に挨拶を再生する。 */
 .boot-screen { position:absolute; inset:0; z-index:20; display:grid; place-items:center; padding:18px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; overflow:hidden; }
@@ -101,7 +113,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .boot-log-line.boot-kind-status { color:var(--log-status); }
 .boot-log-line.boot-kind-system { color:var(--log-system); }
 .boot-log-line.boot-kind-trace { color:var(--log-trace); }
-.character::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
+.character-view::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; will-change:transform; }
 .character canvas { position:relative; display:block; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; }
 #live2dCanvas { background:transparent !important; filter:none; }
@@ -491,8 +503,8 @@ textarea { padding-right:96px; }
   z-index:5; left:18px; top:16px; right:auto; bottom:auto; width:32px; height:32px;
   border-radius:50%; overflow:hidden; background:var(--chip-bg); transform:none;
 }
-[data-layout="chat"] .character::before,
-[data-layout="talk"] .character::before { display:none; }
+[data-layout="chat"] .character-view::before,
+[data-layout="talk"] .character-view::before { display:none; }
 /* 全身の立ち絵から顔だけを切り出してアイコンにする。 */
 [data-layout="chat"] .character img,
 [data-layout="talk"] .character img { filter:none; }
@@ -566,7 +578,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   z-index:5; left:16px; top:16px; right:auto; bottom:auto; width:30px; height:30px;
   border-radius:50%; overflow:hidden; background:var(--chip-bg); transform:none;
 }
-[data-layout="bar"] .character::before { display:none; }
+[data-layout="bar"] .character-view::before { display:none; }
 [data-layout="bar"] .character img { filter:none; }
 [data-layout="bar"] .online,
 [data-layout="bar"] .relationship-button,
@@ -682,3 +694,9 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
    潜り込む。行数ぶんの高さを確保して重なりを避ける。 */
 [data-layout="stream"] .composer textarea,
 [data-layout="widget"] .composer textarea { min-height:74px; }
+
+/* アイコンとして顔だけ出す形式は、枠側の拡大・移動を効かせない
+   （32px のアイコンを動かしても意味がなく、顔の切り出しと二重に変形してしまう）。 */
+[data-layout="chat"] .character-view,
+[data-layout="talk"] .character-view,
+[data-layout="bar"] .character-view { transform:none; }

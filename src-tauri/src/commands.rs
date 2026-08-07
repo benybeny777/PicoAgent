@@ -568,6 +568,9 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
         "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
         "layout": crate::layout::current(&state.config),
+        "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
+        "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
+        "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
         "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
@@ -800,6 +803,30 @@ pub fn pet_set_character_profile(
         }
     }
     Ok(json!({ "ok": true }))
+}
+
+/// 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
+/// ドラッグを離した時点で1回だけ呼ばれる（移動中は書き込まない）。
+#[tauri::command]
+pub fn pet_set_character_offset(x: f64, y: f64, state: State<'_, AppState>) -> Result<(), String> {
+    // 画面外へ飛ばす値を保存させない。実際の丸めはフロントが枠の位置を見て行うが、
+    // 設定ファイルを直接編集された場合の歯止めとしてここでも範囲を見る。
+    if !(-4000.0..=4000.0).contains(&x) || !(-4000.0..=4000.0).contains(&y) {
+        return Err("立ち絵の位置が許可範囲外です。".to_string());
+    }
+    let mut patch = Map::new();
+    patch.insert(
+        "PICOAGENT_CHARACTER_OFFSET_X".to_string(),
+        json!(x.round().to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_CHARACTER_OFFSET_Y".to_string(),
+        json!(y.round().to_string()),
+    );
+    state
+        .config
+        .set_all(patch)
+        .map_err(|error| format!("立ち絵の位置の保存に失敗しました: {error}"))
 }
 
 /// ドラッグで確定したフキダシサイズを設定の正本へ保存する。
@@ -2220,6 +2247,9 @@ pub async fn settings_save(
             "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
             "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
             "layout": crate::layout::current(&state.config),
+            "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
+            "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
+            "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         });
         if !requires_restart {
             let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));

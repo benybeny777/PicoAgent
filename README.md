@@ -192,7 +192,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
       <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
     </tr>
   </table>
-  <sub>ウィンドウの寸法は形式ごとに覚えます。右クリック →「表示位置とサイズをリセット」で、いま選んでいる形式の既定へ戻せます。</sub>
+  <sub>ウィンドウの寸法は形式ごとに覚えます。<b>立ち絵はドラッグで好きな位置へ動かせます</b>（ウィンドウは動きません）。右クリック →「表示位置とサイズをリセット」で、いま選んでいる形式の既定と立ち絵の位置へ戻せます。</sub>
 </div>
 
 ### キャラクター
@@ -243,7 +243,9 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | 読み上げ中にキャラクターをクリック | 読み上げを停止 |
 | キャラクターをクリック / なでる | 触った場所に応じて反応し、ふれあいを記録 |
 | キャラクター横の `♡` | 関係性と最近いっしょにしたことを表示 |
-| 右クリック | 設定… / **表示形式** / 常に手前に表示 / 会話をリセット / 表示位置とサイズをリセット / 終了 |
+| キャラクターをドラッグ | **立ち絵だけを動かす**（ウィンドウは動かない） |
+| `Ctrl`（macOS は `⌘`）+ キャラをドラッグ | ウィンドウを動かす |
+| 右クリック | 設定… / **表示形式** / 常に手前に表示 / 会話をリセット / **立ち絵の位置を戻す** / 表示位置とサイズをリセット / 終了 |
 
 全画面フキダシでは会話履歴を検索でき、各履歴のコピーやユーザー発話の再利用ができます。
 フキダシ本文や入力欄の上で右クリックした場合は、コピーなど通常のメニューを優先します。
@@ -347,7 +349,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_COMPANION_MODE` / `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` / `PICOAGENT_ONBOARDING_DONE` |
 | 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
-| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` |
+| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` / `PICOAGENT_CHARACTER_ZOOM` |
 | ホットキー | `PICOAGENT_HOTKEY_ENABLED` / `PICOAGENT_HOTKEY_SUMMON` / `PICOAGENT_HOTKEY_HIDE` |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
