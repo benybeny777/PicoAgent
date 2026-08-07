@@ -22,8 +22,8 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 290件成功
-cargo test --manifest-path xtask/Cargo.toml             # 17件成功
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 292件成功
+cargo test --manifest-path xtask/Cargo.toml             # 18件成功
 cargo run --manifest-path xtask/Cargo.toml -- build-ui  # ?v= の自動付与を確認
 git diff --check
 ```
