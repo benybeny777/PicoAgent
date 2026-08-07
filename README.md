@@ -639,6 +639,7 @@ NSIS アンインストーラは関連プロセスを停止後、`%APPDATA%\Pico
 
 ```text
 PicoAgent/
+├── crates/picoagent-core/ ← OSS化準備中の再利用コア（内部crate、publish=false）
 ├── characters/       ← キャラクター正本（人格定義・連番フレームまたは Live2D モデル）
 ├── skills/           ← エージェント機能コネクタ（<スキル名>/mod.rs と補助ファイル）
 ├── ui/               ← webview フロント（ペット UI・設定画面）
@@ -663,7 +664,7 @@ PicoAgent/
 
 **ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール） / [HANDOFF.md](HANDOFF.md)（引き継ぎメモ）
 
-**設計資料**: [docs/layout-proposal.md](docs/layout-proposal.md) — 表示形式 8 つの設計意図とモックアップ（実装済み）。
+**設計資料**: [docs/layout-proposal.md](docs/layout-proposal.md) — 表示形式 8 つの設計意図とモックアップ（実装済み） / [docs/oss-core-plan.md](docs/oss-core-plan.md) — エージェント中核のOSS化準備と公開条件。
 
 ---
 

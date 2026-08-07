@@ -58,6 +58,7 @@ graph TD
   `#[path] pub mod` を生成するため、**プロバイダは `.rs` を1枚、スキルは `<スキル名>/mod.rs` を1つ置くだけ**でコネクタ追加（中央 `mod.rs` 編集不要）。
 - 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。
 - `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
+- `crates/picoagent-core` は将来のOSS化に備えた内部crateで、Tauri・OS・製品設定に依存しない正規形メッセージとUTF-8安全処理を持つ。`src-tauri/src/{message,text}.rs` は既存のアプリ内参照を保つ互換層で、実装はコアを再公開する。誤公開を防ぐため現在は `publish = false` とし、ライセンスと公開APIが決まるまで外部配布しない。設計ガードは `guard_scan::all_sources()` を通してコアのRustソースも走査する。
 - 表示形式（画面構成）は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget` を切り替え、フロントは `<main id="petApp" data-layout="…">` を見て `styles.css` が配置を変える。**HTML の要素はどの形式でも同じ**で、キャラクター描画・会話履歴・アクションセンター・読み上げ・音声入力・添付・許可判定はすべて共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。切替は設定画面と右クリックメニュー「表示形式」の両方から行え、右クリックメニューは `layout::select()`、設定保存は `remember_current_size()` → 設定保存 → `apply()` の順に処理する。どちらも切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから、次の形式の寸法を当てる。大きい形式へ切り替えてウィンドウが画面外へ出た場合は `pull_back_on_screen()` が見える位置へ戻す。
 - グローバルホットキーは `hotkey.rs` が担当する（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が既存登録を全解除してから設定どおりに張り直す。呼び出しキーはウィンドウを表示・最小化解除・前面化してから `pet:hotkey`（payload `"summon"`）を送り、`renderer.js` が居眠りを解除して入力欄を開く。隠すキーは表示中なら `hide()`、隠れているときは呼び出しと同じ動作をする。**呼び出しキーが登録できていない状態で隠れたままにはしない**（右クリックメニューにも手が届かず操作不能になるため、`apply()` が非表示のウィンドウを表示へ戻す）。終了時は `release()` が登録を全解除して OS へ返す。空欄は他の設定欄と同じく既定値の意味なので、片方だけ止めるときは `off` を指定する。
 - `Tracer`（`tracer.rs`）は Tauri managed state として登録され、`agent.rs` がツール実行ごとにレイテンシを計測して直近 200 件を保持する。`pet_traces` コマンドでスナップショットとツール別集計（平均レイテンシ・呼び出し回数・エラー数）を取得できる。
@@ -71,7 +72,7 @@ graph TD
 
 ## メッセージ正規形（コネクタ間の共通言語）
 
-`agent.rs` はプロバイダ固有のワイヤ形式を一切知らない。各プロバイダが自分の API 形式へ相互変換する（`message.rs`）。
+`agent.rs` はプロバイダ固有のワイヤ形式を一切知らない。正規形は `crates/picoagent-core/src/message.rs` が持ち、アプリ内では互換層 `src-tauri/src/message.rs` を通して参照する。各プロバイダが自分の API 形式へ相互変換する。
 
 | role | 形（serde） |
 |---|---|
@@ -209,7 +210,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 ## スキル（ツール）コネクタ
 
-連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、`Tool` トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。スキル専用の補助モジュール、実行スクリプト、テンプレート、少量の静的アセットは同じ `skills/<スキル名>/` 配下へ同梱する。Rust の外部依存クレートは `src-tauri/Cargo.toml` に集約し、スキル配下には依存クレートそのものではなく、そのスキル専用のラッパーやスクリプトを置く。
+連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、`Tool` トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。スキル専用の補助モジュール、実行スクリプト、テンプレート、少量の静的アセットは同じ `skills/<スキル名>/` 配下へ同梱する。アプリとスキルの外部依存クレートは `src-tauri/Cargo.toml` に集約し、スキル配下には依存クレートそのものではなく、そのスキル専用のラッパーやスクリプトを置く。独立した `crates/picoagent-core` だけは自身の最小依存を持つ。
 
 `Tool` トレイトを実装し、`inventory::submit!` で登録する。
 

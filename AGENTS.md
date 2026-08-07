@@ -56,7 +56,7 @@ PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント
 - **プロバイダコネクタ** は `src-tauri/src/providers/` に置き、`Provider` トレイトを実装して `inventory::submit! { ProviderReg { make: || Box::new(<型>) } }` で登録する。`chat()` は正規形メッセージ（`message.rs`）を受け取り正規形 assistant を返す。プロバイダ固有のワイヤ形式変換は各コネクタ内に閉じ込め、`agent.rs` に漏らさない。
 - **スキル（ツール）コネクタ** はプロジェクト直下の `skills/<スキル名>/mod.rs` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
 - スキル固有の Rust 補助モジュールは `skills/<スキル名>/*.rs` に置いて `mod xxx;` で読み込む。PowerShell / Python / テンプレート等は `skills/<スキル名>/scripts/` や `skills/<スキル名>/templates/` に置き、必要なら `include_str!` でバイナリへ同梱する。複数スキルで本当に共有するトレイト・型だけを `src-tauri/src/tools/mod.rs` 等の共通層に置く。
-- Cargo の外部依存クレートはプロジェクト全体の `src-tauri/Cargo.toml` に集約する。Rust はスキルごとの独立 `Cargo.toml` をこの構成では持たないため、依存クレート自体を各スキルフォルダに複製しない。代わりに、依存クレートを使うためのスキル専用ラッパーや実行スクリプトをスキルフォルダへ同梱する。
+- アプリとスキルが使う外部依存クレートは `src-tauri/Cargo.toml` に集約する。Rust はスキルごとの独立 `Cargo.toml` を持たないため、依存クレート自体を各スキルフォルダに複製しない。例外は、Tauriや製品設定から独立してOSS化を準備する `crates/picoagent-core/` だけで、このcrate自身が必要最小限の依存を申告する。
 - **外部プロセスの起動は `tools::process::command()` を使う**（`Command::new` を直接使わない）。Windows のコンソール窓抑止（CREATE_NO_WINDOW）・中断時の子プロセス回収（kill_on_drop）・stdio の既定を1箇所に集約している。実行は `process::output()` / `output_text()` でタイムアウト付きにする。常駐プロセス（同梱エンジン・AivisSpeech）のように future の終了後も動かし続けるものは同期版の `process::command_sync()` を使う（窓抑止だけを共通化し、stdio と待ち方は用途ごとに指定する）。以前は `hide_window` を各所へコピーする運用で散らばり、抜けたファイルでは Windows で窓が明滅し子プロセスが残った。`tools::process::guard` のテストが**スキルとバックエンド `src-tauri/src/` の両方を走査して**直接起動と自前 `hide_window` を検出する。
 - **`PICOAGENT_COMMAND_ALLOWLIST` でユーザー / AI 指定のコマンドを実行する経路は、`process::is_physical_delete()` による物理削除の拒否も必ず通す。** この判定は以前 `run_command` だけが持っており、同じ allowlist で動くスケジューラには無かった（許可コマンドに `powershell` があれば予約実行から `Remove-Item` を通せた）。`tools::process::guard` のテストが、この設定キーを読むのに判定を通していないファイルを検出して失敗させる。
 - **ストリーミング受信のバイト列は `text::Utf8Stream` を通してデコードする**（チャンクごとに `String::from_utf8_lossy` しない）。HTTP のチャンク境界は文字の途中に落ちるため、直接 lossy 変換すると「まだ続きが来ていないだけ」の末尾バイトが `\u{FFFD}` に置き換わって確定し、日本語の応答に文字化けが混ざる。`text::guard` のテストが `bytes_stream()` を使うファイルでの `from_utf8_lossy` を検出して失敗させる。
@@ -101,6 +101,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState` |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
+| `crates/picoagent-core/` | **OSS化準備中の再利用コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。公開準備が整うまでは `publish = false` を保つ |
 | `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで8形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
 | `src-tauri/src/secret.rs` | シークレット（`password` 型設定）の DPAPI 暗号化／復号（Windows）。非 Windows は平文 |
@@ -157,6 +158,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 
 ```text
 20_PicoAgent/
+├── crates/picoagent-core/       ← OSS化準備中の再利用コア（内部crate、publish=false）
 ├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/                     ← エージェント機能（スキル）連結ディレクトリ（<スキル名>/mod.rs を足すと自動登録）
 │   └── {time,weather,currency_rates,...}/mod.rs

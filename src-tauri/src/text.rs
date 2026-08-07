@@ -5,78 +5,8 @@
 // 切ると高い確率で境界を外す。ログ・プレビュー・出力の打ち切りは全体を通して
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
-/// 表示用に先頭 `max_chars` 文字までへ切り詰める。切り詰めたときだけ `…` を付ける。
-///
-/// 文字数で数えるので、日本語でも見た目の長さが予想どおりになる。
-pub fn preview(text: &str, max_chars: usize) -> String {
-    let mut out: String = text.chars().take(max_chars).collect();
-    if out.chars().count() < text.chars().count() {
-        out.push('…');
-    }
-    out
-}
-
-/// バイト数の上限で切り詰める（文字の途中では切らない）。
-///
-/// 保存サイズやプロトコル上の上限のように「バイト数」で制限したい場合に使う。
-pub fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
-
-/// ストリーミング受信バイトを UTF-8 として逐次デコードする。
-///
-/// HTTP のチャンク境界は文字の途中に落ちる。受け取ったバイト列をそのまま
-/// `String::from_utf8_lossy` に通すと、**まだ続きが来ていないだけの末尾バイトが
-/// `�` に置き換えられて確定してしまう**。日本語は 1 文字 3 バイトなので、
-/// 長い応答ほど文字化けが混ざる。ここでは末尾の不完全なバイト列を次のチャンクまで
-/// 持ち越し、完全な文字になった分だけを返す。
-#[derive(Default)]
-pub struct Utf8Stream {
-    tail: Vec<u8>,
-}
-
-impl Utf8Stream {
-    /// 受信したバイト列を渡し、確定した文字だけを取り出す。
-    pub fn push(&mut self, bytes: &[u8]) -> String {
-        self.tail.extend_from_slice(bytes);
-        let mut out = String::new();
-        loop {
-            match std::str::from_utf8(&self.tail) {
-                Ok(text) => {
-                    out.push_str(text);
-                    self.tail.clear();
-                    break;
-                }
-                Err(error) => {
-                    let valid = error.valid_up_to();
-                    if let Ok(text) = std::str::from_utf8(&self.tail[..valid]) {
-                        out.push_str(text);
-                    }
-                    match error.error_len() {
-                        // 本当に壊れたバイト列。置換文字にして先へ進む。
-                        Some(len) => {
-                            out.push('\u{FFFD}');
-                            self.tail.drain(..valid + len);
-                        }
-                        // 末尾が文字の途中なだけ。次のチャンクを待つ。
-                        None => {
-                            self.tail.drain(..valid);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        out
-    }
-}
+// 実装はOSS切り出し準備中のpicoagent-coreへ置き、既存のアプリ内パスを保つ。
+pub use picoagent_core::text::{preview, truncate_bytes, Utf8Stream};
 
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]

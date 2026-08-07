@@ -3540,6 +3540,7 @@ dependencies = [
  "hound",
  "inventory",
  "libc",
+ "picoagent-core",
  "reqwest 0.12.28",
  "scraper",
  "serde",
@@ -3554,6 +3555,14 @@ dependencies = [
  "windows-sys 0.59.0",
  "xcap",
  "zip",
+]
+
+[[package]]
+name = "picoagent-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

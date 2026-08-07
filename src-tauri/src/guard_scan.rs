@@ -45,11 +45,25 @@ pub fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// スキルとバックエンドのソース全部。ガードはこれを使うこと。
+/// スキル、バックエンド、再利用コアのソース全部。ガードはこれを使うこと。
 pub fn all_sources() -> Vec<Source> {
     let mut out = skill_sources();
-    let backend = backend_sources();
-    out.extend(backend);
+    out.extend(backend_sources());
+    out.extend(core_sources());
+    out
+}
+
+/// `crates/picoagent-core/src/**/*.rs` 一式。
+/// コアへ切り出したコードも、アプリ内コードと同じ設計ガードから外さない。
+pub fn core_sources() -> Vec<Source> {
+    let root = repo_root();
+    let mut out = Vec::new();
+    collect_rs(&root, &root.join("crates/picoagent-core/src"), &mut out);
+    assert!(
+        out.len() >= 3,
+        "再利用コアの読み込みに失敗している可能性: {}",
+        out.len()
+    );
     out
 }
 
@@ -139,6 +153,23 @@ fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<Source>) {
 
 /// メタガード: 各ガードが走査範囲を自前で決めていないこと。
 mod guard {
+    #[test]
+    fn 再利用コアへ製品依存を持ち込まない() {
+        const FORBIDDEN: &[&str] = &["tauri", "PICOAGENT_", "crate::config"];
+        let mut violations = Vec::new();
+        for source in super::core_sources() {
+            for dependency in FORBIDDEN {
+                if source.body().contains(dependency) {
+                    violations.push(format!("{}: {dependency}", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "再利用コアへPicoAgent製品固有の依存を持ち込まないでください: {violations:?}"
+        );
+    }
+
     #[test]
     fn ガードは走査範囲を自前で決めない() {
         let mut violations = Vec::new();

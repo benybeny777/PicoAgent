@@ -4,6 +4,9 @@ xtask/target/
 # Rust / Tauri ビルド成果物
 src-tauri/target/
 src-tauri/gen/
+# OSS化準備中のライブラリcrateは単体検証時の生成物とlockを追跡しない。
+crates/*/target/
+crates/*/Cargo.lock
 
 # 同梱物（cargo xtask setup で取得）・モデル重み（巨大なので含めない）
 src-tauri/resources/bundled/engine/*
