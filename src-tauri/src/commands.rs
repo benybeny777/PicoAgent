@@ -3232,6 +3232,11 @@ pub fn open_settings(app: &tauri::AppHandle) {
     open_settings_tab(app, None);
 }
 
+/// プレビュー付きの画面タブを直接開く。
+pub fn open_display_settings(app: &tauri::AppHandle) {
+    open_settings_tab(app, Some("display"));
+}
+
 /// 設定ウィンドウを指定タブで開く。既存ウィンドウには遷移イベントを送る。
 fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let tab = settings_tab(tab);
@@ -3257,6 +3262,7 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
         matches!(
             *value,
             "basic"
+                | "display"
                 | "character"
                 | "voice"
                 | "providers"
@@ -3304,6 +3310,7 @@ mod tests {
     #[test]
     fn 設定画面は既知のタブだけを受け付ける() {
         assert_eq!(settings_tab(Some("permissions")), Some("permissions"));
+        assert_eq!(settings_tab(Some("display")), Some("display"));
         assert_eq!(settings_tab(Some("../index")), None);
         assert_eq!(settings_tab(None), None);
     }

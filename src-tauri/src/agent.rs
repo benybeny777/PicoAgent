@@ -740,6 +740,7 @@ fn normalized_short_text(text: &str) -> String {
         .to_lowercase()
 }
 
+#[cfg(test)]
 fn is_simple_greeting(text: &str) -> bool {
     matches!(
         normalized_short_text(text).as_str(),
@@ -755,6 +756,21 @@ fn is_simple_greeting(text: &str) -> bool {
             | "hello"
             | "hi"
     )
+}
+
+/// 小型モデルへ内部ガイドを渡すと、その禁止事項自体を説明してしまうことがある。
+/// 挨拶だけはモデルを呼ばず、入力の時間帯に合う自然な一言を直接返す。
+fn simple_greeting_answer(text: &str) -> Option<String> {
+    let normalized = normalized_short_text(text);
+    let answer = match normalized.as_str() {
+        "おはよう" | "おはようございます" => "おはよう！今日もよろしくね。",
+        "こんばんは" | "こんばんわ" => "こんばんは！今日もおつかれさま。",
+        "こんにちは" | "こんにちわ" | "やっほー" | "やっほ" | "やほ" | "hello" | "hi" => {
+            "こんにちは！今日はなにする？"
+        }
+        _ => return None,
+    };
+    Some(answer.to_string())
 }
 
 fn is_explicit_web_search_request(text: &str) -> bool {
@@ -1276,15 +1292,13 @@ pub async fn run(
     };
 
     // 原則として、小型ローカルモデルの tool_calls 判断に依存させずWeb検索を先に実行する。
-    // ただし短い挨拶は検索結果に引っ張られやすいため、キャラ本人として返す指示だけを追加する。
+    // 短い挨拶はモデルへ内部ガイドを渡さず、安全な一言を直接返す。
     if let Some(user_index) = messages.iter().rposition(|message| message.role == "user") {
         let user_text = messages[user_index].content.clone();
         original_user_text = user_text.clone();
         schemas = tools::schemas_for_text(&user_text);
-        if is_simple_greeting(&user_text) {
-            messages[user_index].content = format!(
-                "{user_text}\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。"
-            );
+        if let Some(answer) = simple_greeting_answer(&user_text) {
+            return direct_answer(messages, answer);
         } else if let Some(answer) = setup_guide_answer(&user_text) {
             return direct_answer(messages, answer);
         } else if is_news_summary_query(&user_text) {
@@ -1614,7 +1628,7 @@ mod tests {
         extract_source_urls, genspark_suite_query, is_local_action_query, is_news_summary_query,
         is_simple_greeting, is_weather_query, market_query, meeting_recorder_query,
         remove_material_leaks, research_report_query, setup_guide_answer, should_web_search,
-        spark_workspace_query, web_search_query,
+        simple_greeting_answer, spark_workspace_query, web_search_query,
     };
 
     #[test]
@@ -1717,6 +1731,19 @@ mod tests {
         assert!(is_simple_greeting("こんにちわ"));
         assert!(is_simple_greeting("こんにちは！"));
         assert!(!is_simple_greeting("こんにちはの語源を教えて"));
+    }
+
+    #[test]
+    fn 短い挨拶は内部指示をモデルへ渡さず直接返す() {
+        assert_eq!(
+            simple_greeting_answer("hi").as_deref(),
+            Some("こんにちは！今日はなにする？")
+        );
+        assert_eq!(
+            simple_greeting_answer("こんばんは！").as_deref(),
+            Some("こんばんは！今日もおつかれさま。")
+        );
+        assert_eq!(simple_greeting_answer("こんにちはの語源"), None);
     }
 
     #[test]

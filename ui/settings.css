@@ -215,6 +215,49 @@ body.searching .tab-panel {
 }
 
 .field { margin-bottom: 10px; }
+.layout-picker { margin-bottom: 16px; }
+.layout-picker-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.layout-native-select {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.layout-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.layout-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+  flex-direction: column;
+  align-items: stretch;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(35, 27, 42, .07);
+}
+.layout-card:hover { border-color: rgba(233, 138, 182, .7); transform: translateY(-1px); }
+.layout-card:focus-visible { outline: 3px solid rgba(233, 138, 182, .3); outline-offset: 2px; }
+.layout-card.selected { border-color: var(--pink); background: var(--pink-soft); box-shadow: 0 0 0 2px rgba(233, 138, 182, .16), 0 5px 16px rgba(35, 27, 42, .1); }
+.layout-card img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #30334d; border-bottom: 1px solid var(--line); }
+.layout-card-copy { display: flex; flex-direction: column; gap: 4px; padding: 9px 10px 10px; }
+.layout-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.layout-card-heading strong { font-size: 13px; }
+.layout-card-heading small { flex: none; color: var(--muted); font-size: 10px; font-weight: 600; }
+.layout-card-description { min-height: 32px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.layout-selected-badge { position: absolute; top: 7px; right: 7px; display: none; padding: 3px 8px; border-radius: 999px; background: var(--pink); color: #fff; font-size: 10px; font-weight: 800; box-shadow: 0 2px 8px rgba(37, 23, 44, .24); }
+.layout-card.selected .layout-selected-badge { display: block; }
+@media (max-width: 560px) { .layout-card-grid { grid-template-columns: 1fr; } }
 .field.changed {
   padding-left: 8px;
   border-left: 3px solid var(--pink);

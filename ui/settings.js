@@ -34,7 +34,17 @@ let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGEN
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "character", "voice", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "voice", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const LAYOUT_CHOICES = [
+  { id: "pet", label: "ペット", size: "680×430", description: "キャラ＋フキダシ。普段使い向け" },
+  { id: "mascot", label: "マスコット", size: "240×380", description: "キャラ中心。話す時だけフキダシ" },
+  { id: "chat", label: "チャット", size: "380×640", description: "履歴と入力欄を常に表示" },
+  { id: "talk", label: "トーク", size: "380×640", description: "メッセージアプリ風の会話表示" },
+  { id: "bar", label: "バー", size: "640×300", description: "1行入力。呼び出してすぐ使う" },
+  { id: "workspace", label: "ワークスペース", size: "1100×700", description: "履歴・回答・実行状況の3ペイン" },
+  { id: "stream", label: "配信", size: "780×460", description: "キャラを大きく、字幕を見やすく表示" },
+  { id: "widget", label: "ウィジェット", size: "320×440", description: "時計・通知・入力をコンパクトに表示" },
+];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
 let activeSettingsTab = SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic";
 
@@ -707,6 +717,59 @@ function selectField(key, label, value, options) {
     label,
     options.map(option => option.label).join(" ")
   ));
+}
+
+function layoutPickerField(value) {
+  const select = el("select", { className: "layout-native-select", ariaLabel: "画面レイアウト" });
+  const cards = el("div", { className: "layout-card-grid" });
+  const buttons = new Map();
+  for (const layout of LAYOUT_CHOICES) {
+    select.append(el("option", { value: layout.id, textContent: layout.label, selected: layout.id === value }));
+    const badge = el("span", { className: "layout-selected-badge", textContent: "選択中" });
+    const button = el("button", {
+      className: "layout-card",
+      type: "button",
+      title: `${layout.label}へ変更`,
+    }, [
+      el("img", {
+        src: `assets/layout-previews/${layout.id}.webp`,
+        alt: `${layout.label}表示のプレビュー`,
+        loading: "lazy",
+      }),
+      el("span", { className: "layout-card-copy" }, [
+        el("span", { className: "layout-card-heading" }, [
+          el("strong", { textContent: layout.label }),
+          el("small", { textContent: layout.size }),
+        ]),
+        el("span", { className: "layout-card-description", textContent: layout.description }),
+      ]),
+      badge,
+    ]);
+    button.addEventListener("click", () => {
+      select.value = layout.id;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    cards.append(button);
+    buttons.set(layout.id, button);
+  }
+  const sync = () => {
+    for (const [id, button] of buttons) {
+      const selected = id === select.value;
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    }
+  };
+  select.addEventListener("change", sync);
+  sync();
+  const wrapper = markSearchable(el("div", { className: "layout-picker" }, [
+    el("p", {
+      className: "layout-picker-hint",
+      textContent: "使い方に近い画面を選んでください。保存すると現在のウィンドウへすぐ反映します。",
+    }),
+    select,
+    cards,
+  ]), "PICOAGENT_LAYOUT", "画面 レイアウト 表示形式", ...LAYOUT_CHOICES.map(layout => `${layout.label} ${layout.description}`));
+  return registerInput("PICOAGENT_LAYOUT", select, wrapper);
 }
 
 function applySettingsTheme(value) {
@@ -1768,6 +1831,7 @@ async function render() {
   const v = data.values;
   const panels = createTabs([
     { id: "basic", label: "基本" },
+    { id: "display", label: "画面" },
     { id: "character", label: "キャラクター" },
     { id: "voice", label: "音声" },
     { id: "providers", label: "叩くAI" },
@@ -1796,27 +1860,18 @@ async function render() {
   function updateModelFieldVisibility() { modelField.hidden = providerSelect.value !== "ollama"; }
   updateModelFieldVisibility();
   global.append(field("PICOAGENT_SYSTEM_PROMPT", "システムプロンプト", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt));
-  global.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
-  global.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
+  const displaySec = section("画面レイアウト");
+  displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT || "pet"));
+  displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
     { value: "system", label: "システム設定に追従" },
     { value: "light", label: "通常" },
     { value: "dark", label: "ダーク" },
   ]));
+  displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "フキダシの文字サイズ(px)", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   // 立ち絵の大きさ。位置はキャラを直接ドラッグして決めるので、ここには出さない。
-  global.append(field("PICOAGENT_CHARACTER_ZOOM", "立ち絵の大きさ（1.0 で全身 / 既定 1.55 は上半身）", "text", v.PICOAGENT_CHARACTER_ZOOM || "1.55"));
-  // 表示形式。右クリックメニューの「表示形式」からも同じ設定を変えられる。
-  global.append(selectField("PICOAGENT_LAYOUT", "表示形式（画面構成）", v.PICOAGENT_LAYOUT || "pet", [
-    { value: "pet", label: "ペット（キャラ＋フキダシ）" },
-    { value: "mascot", label: "マスコット（キャラだけ）" },
-    { value: "chat", label: "チャット（履歴つきパネル）" },
-    { value: "talk", label: "トーク（メッセージアプリ風）" },
-    { value: "bar", label: "バー（1行入力）" },
-    { value: "workspace", label: "ワークスペース（3ペイン）" },
-    { value: "stream", label: "配信（キャラを大きく）" },
-    { value: "widget", label: "ウィジェット（今日の情報）" },
-  ]));
-  global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
-  global.append(layoutResetField());
+  displaySec.append(field("PICOAGENT_CHARACTER_ZOOM", "立ち絵の大きさ（1.0 で全身 / 既定 1.55 は上半身）", "text", v.PICOAGENT_CHARACTER_ZOOM || "1.55"));
+  displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
+  displaySec.append(layoutResetField());
   // グローバルホットキー: 他のアプリを使っている最中でも呼び出せるようにする。保存すると即反映。
   global.append(field("PICOAGENT_HOTKEY_ENABLED", "グローバルホットキーを使う（他のアプリの裏に居ても呼び出す）", "checkbox", v.PICOAGENT_HOTKEY_ENABLED !== false));
   global.append(field("PICOAGENT_HOTKEY_SUMMON", "呼び出すキー（表示して入力欄を開く。空欄で既定値、off でこのキーだけ無効）", "text", v.PICOAGENT_HOTKEY_SUMMON ?? "", "CommandOrControl+Alt+P"));
@@ -1849,6 +1904,7 @@ async function render() {
   panels.basic.append(global);
   panels.basic.append(apiSec);
   panels.basic.append(mcpSec);
+  panels.display.append(displaySec);
   panels.voice.append(voiceSec);
   applySettingsTheme(v.PICOAGENT_THEME || "system");
   inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {

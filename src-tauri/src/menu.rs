@@ -3,7 +3,9 @@
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Emitter, Manager, PhysicalPosition};
 
-use crate::commands::{clear_conversation_and_history, open_settings, AppState};
+use crate::commands::{
+    clear_conversation_and_history, open_display_settings, open_settings, AppState,
+};
 
 /// 表示形式メニュー項目の ID 接頭辞。`layout:chat` のように形式 ID を続ける。
 const LAYOUT_ID_PREFIX: &str = "layout:";
@@ -11,6 +13,9 @@ const LAYOUT_ID_PREFIX: &str = "layout:";
 #[tauri::command]
 pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
     let settings = MenuItemBuilder::with_id("settings", "設定…")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
+    let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト設定…")
         .build(&app)
         .map_err(|e| e.to_string())?;
     let is_always_on_top = window.is_always_on_top().map_err(|e| e.to_string())?;
@@ -56,6 +61,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
 
     let menu = MenuBuilder::new(&app)
         .item(&settings)
+        .item(&display_settings)
         .separator()
         .item(&layout_menu)
         .item(&ontop)
@@ -81,6 +87,7 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
     }
     match id {
         "settings" => open_settings(app),
+        "display_settings" => open_display_settings(app),
         "ontop" => {
             if let Some(win) = app.get_webview_window("main") {
                 let now = match win.is_always_on_top() {

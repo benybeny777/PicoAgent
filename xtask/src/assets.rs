@@ -49,6 +49,30 @@ pub fn build_ui_dist(release: bool) -> Result<()> {
     }
     fs::remove_dir_all(&dest).ok();
     copy_dir(&src, &dest, &|_| false)?;
+    // READMEで実表示を検証した8形式の画像を、設定画面の選択カードにも使う。
+    // 正本を二重管理せず、配信用生成物へだけまとめてコピーする。
+    let preview_src = root.join("docs/images");
+    let preview_dest = dest.join("assets/layout-previews");
+    fs::create_dir_all(&preview_dest)?;
+    for id in [
+        "pet",
+        "mascot",
+        "chat",
+        "talk",
+        "bar",
+        "workspace",
+        "stream",
+        "widget",
+    ] {
+        let source = preview_src.join(format!("layout-shot-{id}.webp"));
+        if !source.exists() {
+            bail!(
+                "表示形式のプレビュー画像が見つかりません: {}",
+                source.display()
+            );
+        }
+        fs::copy(source, preview_dest.join(format!("{id}.webp")))?;
+    }
 
     if release {
         for file in list_files(&dest) {
