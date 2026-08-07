@@ -622,7 +622,7 @@ PicoAgent/
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
 ├── tools/            ← 開発用の作業ツール（tha3-runtime/ はWindows開発用・Git管理外）
-├── docs/images/      ← README 掲載画像（tools/screenshots で生成）
+├── docs/            ← 検討資料（layout-proposal.md など）と README 掲載画像（images/）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
     ├── resources/bundled/tha3/ ← 配布するTHA3本体・モデル（Windowsランタイムはインストール時取得）
@@ -639,6 +639,8 @@ PicoAgent/
 `ui/assets/characters/` は `characters/` の配信コピー、`ui/vendor/live2d/` は Live2D ランタイムで、いずれも自動生成・自動取得です。
 
 **ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール）
+
+**検討中**: [docs/layout-proposal.md](docs/layout-proposal.md) — 画面構成を見直し、用途ごとに切り替えられる表示形式を 6 つ提案しています（モックアップ付き・未着手）。
 
 ---
 
