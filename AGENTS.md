@@ -13,6 +13,7 @@
 - 設定キーの `SPEC.md` への記載漏れ・削除漏れは `doc_sync::guard` のテストが双方向で検出する（手作業の突き合わせは不要。設定キーでない `PICOAGENT_*` 文字列は理由付きで `NOT_CONFIG_KEYS` へ）。
 - 対象ドキュメントの目安: アーキテクチャ・コネクタ仕様・メッセージ正規形・設定値 → `SPEC.md`、大きな変更 → `CHANGELOG.md`、起動手順・セットアップ・設定キー・依存関係 → `README.md`。
 - ドキュメント更新が本当に不要な軽微修正の場合のみ、不要と判断した理由を作業完了時に明記する。
+- **レビューや修正提案を行ったら、その結果を [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md) へ必ず残す。対応したものだけでなく、見送ったもの・保留したものも理由付きで書く。** チャットの返答とコミットメッセージだけでは、次に作業する人（別のエージェント含む）が判断の理由も残件も追えない。実機での目視確認のように後回しにした確認も、ここへ「保留」として書き、確認できたら消す。恒久ルールになったものは `AGENTS.md`、仕様になったものは `SPEC.md` へ移し、レビュー記録には判定だけ残す。
 - コミットメッセージ・ソースコードのコメント（Rust / JS とも）は基本的に日本語で書く（コミットは英語だけの件名にしない）。`feat` / `fix` / `docs` / `chore` などの短い英語プレフィックスや、API / JSON / trait / 識別子・関数名など技術用語の英語はそのまま使ってよい（無理に和訳しない）。
 - 運用や品質に影響する大きめの変更は `CHANGELOG.md` に残す。
 - **常に Codex / Claude（作業エージェント自身）の利用クレジット消費を最小化して作業する。** 不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
@@ -145,6 +146,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `docs/REVIEW-LOG.md` | **レビューと修正提案の記録**。対応・見送り・保留を理由付きで残す台帳（判定の履歴。進行状況は `HANDOFF.md`、恒久ルールは `AGENTS.md`、仕様は `SPEC.md`） |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
@@ -185,4 +187,6 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── .claude/                    ← Claude Code の設定（permissions）とセッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
+├── HANDOFF.md                  ← 進行中の作業・未確認項目
+├── docs/REVIEW-LOG.md          ← レビューと修正提案の記録（対応・見送り・保留）
 ```
