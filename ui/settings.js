@@ -42,7 +42,7 @@ const LAYOUT_CHOICES = [
   { id: "talk", label: "トーク", size: "380×640", description: "メッセージアプリ風の会話表示" },
   { id: "bar", label: "バー", size: "640×300", description: "1行入力。呼び出してすぐ使う" },
   { id: "workspace", label: "ワークスペース", size: "1100×700", description: "履歴・回答・実行状況の3ペイン" },
-  { id: "stream", label: "配信", size: "780×460", description: "キャラを大きく、字幕を見やすく表示" },
+  { id: "stream", label: "配信", size: "1560×920", description: "キャラを大きく、字幕を見やすく表示" },
   { id: "widget", label: "ウィジェット", size: "320×440", description: "時計・通知・入力をコンパクトに表示" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
