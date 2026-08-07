@@ -47,7 +47,7 @@ inventory::collect!(ToolReg);
 // build.rs が生成した `pub mod time; pub mod read_file; ...` を取り込む。
 include!(concat!(env!("OUT_DIR"), "/tool_mods.rs"));
 
-/// 同梱 CLI ツール（scripts/fetch-tools.mjs → resources/bundled/tools/<ツール名>/）の探索先候補。
+/// 同梱 CLI ツール（`cargo xtask setup tools` → resources/bundled/tools/<ツール名>/）の探索先候補。
 /// 開発時（cwd 基準）とパッケージ後（実行ファイル基準）の両レイアウトに対応する。
 fn bundled_tool_dirs(tool: &str) -> Vec<PathBuf> {
     let rel = format!("resources/bundled/tools/{tool}");
