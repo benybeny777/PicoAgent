@@ -3427,6 +3427,16 @@ function wakeUp() {
   setAnimation("idle", true);
 }
 
+// グローバルホットキーで呼び出されたとき。ウィンドウの表示・前面化はバックエンドが済ませて
+// いるので、ここでは居眠りを解除して入力欄を開き、すぐ打てる状態にする。
+window.picoagent.on("pet:hotkey", (action) => {
+  if (action !== "summon") return;
+  markActivity();
+  if (composer.hidden) openComposer();
+  // 処理中は openComposer が開かないので、開いているときだけ入力欄へ移す。
+  if (!composer.hidden) input.focus();
+});
+
 const napTimer = setInterval(() => {
   if (napMinutes > 0 && !napping && Date.now() - lastActivityAt > napMinutes * 60 * 1000) fallAsleep();
 }, 30 * 1000);

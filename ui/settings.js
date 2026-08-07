@@ -1746,6 +1746,10 @@ async function render() {
   ]));
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   global.append(layoutResetField());
+  // グローバルホットキー: 他のアプリを使っている最中でも呼び出せるようにする。保存すると即反映。
+  global.append(field("PICOAGENT_HOTKEY_ENABLED", "グローバルホットキーを使う（他のアプリの裏に居ても呼び出す）", "checkbox", v.PICOAGENT_HOTKEY_ENABLED !== false));
+  global.append(field("PICOAGENT_HOTKEY_SUMMON", "呼び出すキー（表示して入力欄を開く。空欄で既定値、off でこのキーだけ無効）", "text", v.PICOAGENT_HOTKEY_SUMMON ?? "", "CommandOrControl+Alt+P"));
+  global.append(field("PICOAGENT_HOTKEY_HIDE", "隠す／戻すキー（空欄で既定値、off でこのキーだけ無効）", "text", v.PICOAGENT_HOTKEY_HIDE ?? "", "CommandOrControl+Alt+H"));
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
   global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
   global.append(field("PICOAGENT_SUPER_AGENT", "スーパーエージェント（計画→実行・自己評価・サブエージェント分担を強化）", "checkbox", v.PICOAGENT_SUPER_AGENT === true));
@@ -2414,6 +2418,11 @@ saveBtn.addEventListener("click", async () => {
       }
     } else {
       statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
+    }
+    // ホットキーは保存と同時に張り直す。登録できなかった場合は黙って無効にせず伝える。
+    if (res.hotkeyWarning) {
+      logApp("error", "ホットキーの登録に失敗しました", res.hotkeyWarning);
+      statusEl.textContent = `${statusEl.textContent} / ${res.hotkeyWarning}`;
     }
   } catch (error) {
     logApp("error", "設定保存に失敗しました", errorDetail(error));

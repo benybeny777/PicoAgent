@@ -19,6 +19,7 @@ mod engine;
 #[cfg(test)]
 mod guard_scan;
 mod history;
+mod hotkey;
 mod log_paths;
 mod mcp;
 mod memory;
@@ -51,6 +52,9 @@ pub fn run() {
     let app = tauri::Builder::default()
         // キャラクターパックを選ぶネイティブダイアログ（Rust 側だけで使う）。
         .plugin(tauri_plugin_dialog::init())
+        // グローバルホットキー（他のアプリの裏に居ても呼び出せるようにする）。
+        // 個々のキー登録は設定を読んでから hotkey::apply が行う。
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState::new())
         .manage(EngineState::new())
         .manage(AivisState::new())
@@ -220,6 +224,11 @@ pub fn run() {
                 state.messages.lock().unwrap().extend(recent);
             }
 
+            // グローバルホットキーを設定どおりに登録する（失敗しても本体は使えるので記録に留める）。
+            if let Err(error) = hotkey::apply(app.handle()) {
+                log_paths::append_app_log(app.handle(), &error);
+            }
+
             // 保存済みのサイズと「どのディスプレイのどこに居たか」を復元する。
             if let Some(win) = app.get_webview_window("main") {
                 let _ =
@@ -280,6 +289,8 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
             save_window_layout_on_exit(app_handle);
+            // OS へ確保したグローバルホットキーを明示的に返す。
+            hotkey::release(app_handle);
             tha3_creator::shutdown(app_handle);
             aivis::stop(app_handle);
             engine::stop(app_handle);

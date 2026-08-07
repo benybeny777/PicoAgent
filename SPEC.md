@@ -58,6 +58,7 @@ graph TD
   `#[path] pub mod` を生成するため、**プロバイダは `.rs` を1枚、スキルは `<スキル名>/mod.rs` を1つ置くだけ**でコネクタ追加（中央 `mod.rs` 編集不要）。
 - 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。
 - `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
+- グローバルホットキーは `hotkey.rs` が担当する（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が既存登録を全解除してから設定どおりに張り直す。呼び出しキーはウィンドウを表示・最小化解除・前面化してから `pet:hotkey`（payload `"summon"`）を送り、`renderer.js` が居眠りを解除して入力欄を開く。隠すキーは表示中なら `hide()`、隠れているときは呼び出しと同じ動作をする。**呼び出しキーが登録できていない状態で隠れたままにはしない**（右クリックメニューにも手が届かず操作不能になるため、`apply()` が非表示のウィンドウを表示へ戻す）。終了時は `release()` が登録を全解除して OS へ返す。空欄は他の設定欄と同じく既定値の意味なので、片方だけ止めるときは `off` を指定する。
 - `Tracer`（`tracer.rs`）は Tauri managed state として登録され、`agent.rs` がツール実行ごとにレイテンシを計測して直近 200 件を保持する。`pet_traces` コマンドでスナップショットとツール別集計（平均レイテンシ・呼び出し回数・エラー数）を取得できる。
 - `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ永続化する。`pet_usage` コマンドで今月のプロバイダ/モデル別集計と全期間累計を取得できる。90日より古いレコードは自動削除。
 - `memory.rs` の長期メモリ検索が意味的類似度（バイグラムジャカード係数）に対応した。`context_for_query(app, cfg, query)` がユーザー発話に近いメモリ項目を優先して提示し、閾値（0.05）以下なら全件フォールバック。
@@ -402,7 +403,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 「診断」タブは `engine_status` / `aivis_status` / `pet_usage` / `pet_traces` を読み、選択中プロバイダ・同梱エンジン状態・Aivis状態・今月/累計トークン使用量・直近スキル実行の件数/平均遅延/エラー数をカードで表示する。設定値は変更せず、各取得に失敗した場合も診断カード単位でエラー表示に留める。
 - `Field` の項目: `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 - 保存は `config.set_all()` で永続化する。反映は「軽い設定は実行中に即反映」「重い設定は再起動して起動シーケンスで反映」に分ける。
-  - **即反映**: システムプロンプト・長期メモリ・表示テーマ・常に手前・フキダシの見た目・自発雑談・キャラ人格の上書き（同一キャラ）・コネクタ固有設定（`cfg.get()` 都度読み）。`pet:ui` イベントで実行中へ反映する。
+  - **即反映**: システムプロンプト・長期メモリ・表示テーマ・常に手前・フキダシの見た目・自発雑談・キャラ人格の上書き（同一キャラ）・グローバルホットキー・コネクタ固有設定（`cfg.get()` 都度読み）。`pet:ui` イベントで実行中へ反映する。ホットキーは `hotkey::apply()` が張り直し、登録できなかったキーがあれば `settings_save` が `hotkeyWarning` を返して設定画面のステータスへ出す（保存できたのに効かない状態を黙って残さない）。
   - **再起動して反映（共通機構）**: 以下のキーが実際に変わったら `settings_save` は `{ requiresRestart: true }` を返し、実行中のエンジン/Aivis/キャラ再読込は行わない。設定画面は確認画面を出し、ユーザーが承諾したら `restart_app` command を呼ぶ。`restart_app` は **プロセス再起動（`app.restart()`）はしない**（`tauri dev` の開発配信サーバが落ちて `127.0.0.1` 接続拒否になるため）。代わりにバックエンドを起動シーケンス相当に再初期化（選択中キャラの履歴を文脈へ読み直し、`settings_save` が返す `restartEngine` / `restartAivis` に応じて変わった部分だけ停止→再起動。例: キャラ変更だけなら LLM エンジンは再起動しない）し、設定ウィンドウを閉じてからメインウィンドウへ `pet:reload` を送って webview を再読込させる。再読込でフロントの起動シーケンス（ローディング画面）が再実行され、モデル DL・エンジン/Aivis 起動・キャラ読込・挨拶をまとめて行う。これによりフキダシに「モデルを準備中…」を出さず、dev / 配布版どちらでも同じ挙動になる。再起動対象キー: `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX` / `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` / `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_PORT` / `PICOAGENT_CHARACTER`。ユーザーが「あとで」を選んだ場合も設定は保存済みで、次回起動時に反映される（実行中状態は触らないので旧エンジンと不整合にならない）。
   - 起動シーケンスでは、TTS 有効時は Aivis ready を、`local` プロバイダ時はさらに同梱エンジンの ready/error までローディング画面で待ってから描画する（`waitForEngineReady`）。`applyEngineStatus` は `download`/`starting` の進捗を**ローディング画面の間だけ**表示し、通常時はフキダシに出さない。
   - 起動完了後の「準備できた」系メッセージは小さいステータス専用表示にせず、必要な場合は通常のフキダシ本文として表示し、TTS 有効時は読み上げ対象にする。キャラクター挨拶が表示される場合は挨拶を優先し、完了メッセージを重ねない。
@@ -428,6 +429,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_HOTKEY_ENABLED` | `true` | 基本 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
+| `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 基本 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
+| `PICOAGENT_HOTKEY_HIDE` | `CommandOrControl+Alt+H` | 基本 | 隠す／戻すキー。表示中は `hide()`、隠れているときは呼び出しと同じ動作。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
 | `PICOAGENT_BOOT_TIMEOUT_MS` | `12000` | 内部UI | フロントの準備完了（`pet_frontend_ready`）をこのミリ秒だけ待ち、届かなければキャラクター付きの案内画面へ切り替える。設定画面には出さない（`3000`〜`120000` に丸める） |
 | `PICOAGENT_NAP_MINUTES` | `15` | 基本 | 無操作でキャラが居眠りするまでの分数（`0` で居眠りしない） |
 | `PICOAGENT_QUICK_ACTIONS` | 空 | 基本 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |

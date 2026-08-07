@@ -18,6 +18,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "protocol-asset"] }
 # 設定画面から「キャラクターパックを選ぶ」ためのネイティブダイアログ（Rust API のみ利用）。
 tauri-plugin-dialog = "2"
+# 他のアプリの裏に居ても呼び出すためのグローバルホットキー（Rust API のみ利用。hotkey.rs）。
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }

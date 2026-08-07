@@ -2139,6 +2139,16 @@ pub async fn settings_save(
         }
     }
 
+    // グローバルホットキーは再起動なしで張り直す。登録できなかったキーは
+    // 「保存できたのに効かない」を黙って残さないよう、記録して設定画面へも返す。
+    let hotkey_warning = match crate::hotkey::apply(&app) {
+        Ok(()) => None,
+        Err(error) => {
+            crate::log_paths::append_app_log(&app, &error);
+            Some(error)
+        }
+    };
+
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
     let provider =
         providers::get(&pid).ok_or_else(|| format!("プロバイダ \"{}\" が見つかりません。", pid))?;
@@ -2191,6 +2201,7 @@ pub async fn settings_save(
         "requiresRestart": requires_restart,
         "restartEngine": restart_engine,
         "restartAivis": restart_aivis,
+        "hotkeyWarning": hotkey_warning,
         "up": current_up(&state).await
     }))
 }
