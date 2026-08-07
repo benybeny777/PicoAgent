@@ -442,6 +442,18 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | `balanced`（通常利用の推奨） | Gemma 4 E4B Q4 | 4 GB | 16 GB | 約 5.0 GB |
 | `large` | Gemma 4 12B Q4 | 8 GB | 24 GB | 約 7.1 GB |
 
+#### AMD APU（Radeon内蔵GPU）を使う場合
+
+Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のAMD Ryzen APUでもローカルモデルを実行できます。ただしAPUは独立したVRAMではなくシステムRAMをGPUと共有するため、上表の「推奨VRAM」と「推奨RAM」を別々に足せる構成ではありません。
+
+| 環境 | 最低目安 | 推奨 | モデルの目安 |
+|---|---|---|---|
+| Windows 10/11 x64＋Vulkan対応Radeon内蔵AMD APU | RAM 16 GB | RAM 32 GB以上（可能ならデュアルチャネル） | `small` / `balanced`。`large`は共有メモリ量・帯域・機種差の影響が大きいため標準推奨外 |
+
+- `auto` はWindowsが報告する `AdapterRAM` と総RAMを見ます。APUの共有メモリは専用VRAMとして正確に報告されない場合があるため、RAM 16 GB以上なら総RAM側の判定で通常は `balanced` を選びます
+- RAM 16 GBではOS・GPU・モデルが同じメモリを使うため、他アプリとの併用時に余裕が少なくなります。応答が極端に遅い、またはメモリ不足になる場合は `small` を選ぶか、`PICOAGENT_LOCAL_NGL=0` でCPU固定にしてください
+- BIOS/UEFIのUMA Frame Buffer設定は機種ごとに異なるため必須値にはしません。変更する場合はPCメーカーの仕様を優先してください
+
 - ディスクは上表のモデル本体に加えて、同梱物（推論エンジン・Aivis・Whisper・Live2D・THA3・OSS ツール）の取得分が必要です。取得済み GGUF は「叩くAI」タブから一覧・削除できます
 - コンテキスト長は `PICOAGENT_LOCAL_CTX`（既定 `8192`）、GPU オフロードは `PICOAGENT_LOCAL_NGL`（既定 `999`=全レイヤ優先 / `0`=CPU 固定）で調整します
 - クラウド AI を選んだ場合、ローカルモデルは取得も起動もしません
@@ -453,7 +465,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | Windows | Windows 10/11 x64、CUDA対応NVIDIA GPU、VRAM 4GB、CUDA 12.8対応ドライバー | VRAM 8GB以上、RAM 16GB以上 | VRAM 4～6GB未満=`separable_half`、6～10GB未満=`standard_half`、10GB以上=`standard_float` |
 | Apple Silicon Mac | Apple Silicon、MPS対応macOS、ユニファイドメモリ16GB | 24GB以上 | 互換性優先の`standard_float` |
 
-Intel MacとLinuxでのTHA3生成は対象外です。通常のPicoAgent利用や生成済みキャラクターの表示には、このGPU要件は適用されません。
+AMD APU／AMD GPU、Intel Mac、LinuxでのTHA3生成は対象外です（Windows版THA3はCUDA対応NVIDIA GPUが必須）。通常のPicoAgent利用、ローカルモデルのVulkan推論、生成済みキャラクターの表示には、このTHA3用GPU要件は適用されません。
 
 - Windowsインストーラへ入るTHA3本体・3モデル・取得ブートストラップは実測約0.85GBです。インストール中にCUDA版PyTorch約2.7GBを追加取得し、展開後のTHA3全体は実測約5.2GBです
 - 新規インストール時は一時キャッシュを含め10GB以上、更新で旧ランタイムを保持しながら入れ替える場合は15GB以上の空き容量を確保してください。成功・失敗のどちらでも取得キャッシュを片付けます

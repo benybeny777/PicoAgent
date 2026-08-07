@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-08-07 — AMD APU利用時の必要スペックを明記
+
+- **ローカル推論はAMD APUに対応**: Windows版のVulkan推論をRadeon内蔵AMD Ryzen APUでも使えることと、独立VRAMではなくシステムRAMを共有するためRAM 16 GBを最低目安、32 GB以上を推奨とすることをREADMEへ追記した。
+- **THA3の対象外を明確化**: AMD APU／AMD GPUは通常のローカル推論には使える一方、Windows版THA3キャラクター制作はCUDA対応NVIDIA GPUが必須であることを明記した。
+
+---
+
 ## 2026-08-07 — エージェント中核のOSS化準備を開始
 
 - **内部コアcrateを追加**: `crates/picoagent-core` を `publish = false` で作り、Tauri・OS・製品設定に依存しない正規形メッセージ、ツール呼び出し型、reasoning除去、UTF-8安全処理を移した。PicoAgent本体が互換モジュール経由で実際にこのcrateを使うため、公開用コピーとの二重管理はしない。
