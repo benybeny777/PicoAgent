@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-08-07 — Web セッションのビルド環境をセッション開始フックで自動化
+
+Claude Code on the web（Linux コンテナ）は clone 直後に `cargo check` すら通らず、作業のたび手で環境を作り直していた。原因は毎回同じ2つなので、`.claude/hooks/session-start.sh` に固定した。
+
+- **システムライブラリの不足**: Tauri v2 の Linux 前提パッケージに加え、`cpal` が使う `libasound2-dev`、`enigo` が使う `libxdo-dev` が要る。未導入のものだけを apt で入れる。
+- **`ui-dist/` が存在しない**: `tauri.conf.json` の `frontendDist` が指すこのディレクトリは Git 管理外で、`tauri::generate_context!` がコンパイル時に実在を確かめるため、無いとマクロの段階でビルドが止まる。`sync-characters` → `build-ui` で作る。
+- **事前ビルド**: フック完了時点のコンテナ状態がキャッシュされるため、依存取得とテストバイナリのビルドまで済ませる。以降のセッションは初回の `cargo test` から待たされない。`SKIP_PREBUILD=1` で省略できる。
+- **ローカル環境には触らない**: `CLAUDE_CODE_REMOTE` が `true` でなければ即 exit するので、Windows / macOS の開発環境には影響しない。冪等で、再実行しても導入済みのものは飛ばす。
+
+---
+
 ## 2026-08-07 — 他のアプリの裏からでも呼び出せるグローバルホットキーを追加
 
 デスクトップペットは常に手前に居るが、全画面のエディタやブラウザの裏へ回るとクリックで呼び出せず、

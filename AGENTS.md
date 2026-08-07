@@ -84,6 +84,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 - **OpenAI 互換プロバイダ（`OPENAI_API_KEY` 利用）は費用が発生するため、ユーザー指示または運用上の明確な必要がある場合だけ実行する。** local / Ollama はコストがかからない。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
 - 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`cargo xtask setup engine` で取得）。
+- **Claude Code on the web（Linux コンテナ）で作業する場合は `.claude/hooks/session-start.sh` が環境を用意する。** clone 直後は (1) Tauri / cpal / enigo が要求するシステムライブラリが無い、(2) `frontendDist` が指す `ui-dist/` が Git 管理外で存在せず `tauri::generate_context!` がコンパイル時に落ちる、の2点で `cargo check` すら通らない。フックが apt 導入と `sync-characters` → `build-ui` を済ませ、テストバイナリまで事前ビルドする。手で毎回入れ直さないこと。Windows / macOS のローカル環境では `CLAUDE_CODE_REMOTE` を見て何もしない。
 
 ## 製品化（配布）
 
@@ -139,6 +140,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
+| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
@@ -175,6 +177,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/*.py                ← キャラクター画像の生成（連番アニメ・Live2D 用 PSD）
 ├── tools/tha3-runtime/         ← Windows開発用THA3 Python環境（git管理外、製品には含めない）
+├── .claude/                    ← Claude Code の設定（permissions）とセッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ```
