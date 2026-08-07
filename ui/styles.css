@@ -100,7 +100,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .pet-app.is-booting .character { visibility:hidden; }
 .boot-stage { position:relative; box-sizing:border-box; width:100%; height:100%; min-height:0; border:1px solid var(--boot-stage-border); border-radius:18px; background:linear-gradient(155deg,#302944 0%,#51405f 58%,#76576e 100%); box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),0 12px 28px rgba(42,31,46,.18); overflow:hidden; }
 .boot-stage::before { content:""; position:absolute; left:2%; top:3%; width:62%; height:82%; border-radius:50%; background:radial-gradient(circle,rgba(255,220,232,.24),rgba(198,174,226,.1) 48%,transparent 72%); filter:blur(5px); animation:boot-shadow 4.2s ease-in-out infinite; }
-.boot-stage::after { content:"● 起動中"; position:absolute; z-index:4; left:14px; top:14px; padding:4px 9px; border-radius:999px; background:rgba(198,58,80,.94); color:#fff; font-size:10px; font-weight:800; letter-spacing:.04em; }
+.boot-stage::after { content:"● 起動中…"; position:absolute; z-index:4; left:16px; top:14px; padding:8px 16px; border:2px solid rgba(255,255,255,.88); border-radius:999px; background:linear-gradient(135deg,#e64f6a,#c42f55); color:#fff; box-shadow:0 0 0 4px rgba(242,126,145,.2),0 7px 20px rgba(24,10,30,.36); font-size:15px; font-weight:900; letter-spacing:.08em; text-shadow:0 1px 2px rgba(64,10,28,.5); animation:boot-badge-pulse 1.35s ease-in-out infinite; }
 .boot-character { position:absolute; z-index:2; left:1%; right:35%; top:3%; bottom:42px; display:grid; place-items:end center; transform-origin:48% 70%; animation:boot-sleep 4.2s ease-in-out infinite; }
 .boot-character img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; object-position:50% 100%; transform:translateY(2%) scale(1.5); transform-origin:50% 0; filter:drop-shadow(0 7px 5px rgba(20,12,28,.3)); pointer-events:none; }
 /* 選択中キャラクターの画像が決まるまでは出さない（既定キャラが一瞬映るのを防ぐ）。 */
@@ -162,6 +162,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes boot-shadow { 0%,100%{transform:scaleX(.94); opacity:.72} 50%{transform:scaleX(1.08); opacity:.48} }
 @keyframes boot-progress { 0%{left:-45%} 55%{left:32%} 100%{left:105%} }
 @keyframes boot-log-in { from{transform:translateY(5px); opacity:0} to{transform:translateY(0); opacity:.92} }
+@keyframes boot-badge-pulse { 0%,100%{transform:scale(1); filter:brightness(1)} 50%{transform:scale(1.06); filter:brightness(1.16)} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
 .relationship-button { position:absolute; z-index:8; right:67px; bottom:39px; width:28px; height:28px; padding:0; border:2px solid rgba(255,255,255,.9); border-radius:50%; background:var(--accent); box-shadow:0 2px 8px rgba(42,31,46,.2); font-size:14px; }
@@ -276,7 +277,7 @@ button:disabled { opacity:.48; cursor:default; }
 .notice-actions button:first-child { background:#64a98a; }
 .notice-actions button:disabled { opacity:.55; }
 .notice-empty { padding:18px 4px; color:var(--muted); font-size:12px; text-align:center; }
-@media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-progress span,.boot-log-line { animation:none!important; } }
+@media (prefers-reduced-motion:reduce) { .character img,.boot-character,.boot-stage::before,.boot-stage::after,.boot-progress span,.boot-log-line { animation:none!important; } }
 .reply { white-space:normal; }
 .md { font-size:13px; line-height:1.65; word-break:break-word; }
 .md h1,.md h2,.md h3 { font-weight:700; margin:8px 0 3px; line-height:1.35; }
