@@ -172,6 +172,29 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 - **スーパーエージェントモード** — 複雑な依頼を「計画 → 多段ツール実行 → 自己評価」まで自律的に回し、必要なら `subagent` スキルでサブタスクを分担。進捗はフキダシ上部のステータス行にリアルタイム表示
 - **原則 Web 検索** — 通常の質問はローカルモデルの判断に頼らず検索してから、参照元リンク付きで回答（短い挨拶は例外扱いでキャラクター本人として返答）
 
+
+### 表示形式（画面構成を選べる）
+
+**右クリック →「表示形式」** で、同じ機能のまま見た目だけを 8 種類から選べます。設定 →「基本」タブからも変更でき、どちらも再起動なしで反映します。キャラクター・会話履歴・通知・読み上げ・許可設定はどの形式でも共通です。
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-mascot.webp" alt="マスコット表示" width="230" /><br /><b>マスコット</b><br /><sub>キャラだけ。話したときだけ吹き出し</sub></td>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-pet.webp" alt="ペット表示" width="230" /><br /><b>ペット</b>（既定）<br /><sub>キャラ＋フキダシ。ふだん使い</sub></td>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-chat.webp" alt="チャット表示" width="230" /><br /><b>チャット</b><br /><sub>履歴つき縦長パネル</sub></td>
+      <td width="25%" align="center"><img src="docs/images/layout-shot-talk.webp" alt="トーク表示" width="230" /><br /><b>トーク</b><br /><sub>メッセージアプリ風</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="docs/images/layout-shot-bar.webp" alt="バー表示" width="230" /><br /><b>バー</b><br /><sub>1 行入力。呼んで消す</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-workspace.webp" alt="ワークスペース表示" width="230" /><br /><b>ワークスペース</b><br /><sub>履歴・回答・実行状況の 3 ペイン</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>キャラを大きく＋字幕テロップ</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
+    </tr>
+  </table>
+  <sub>ウィンドウの寸法は形式ごとに覚えます。右クリック →「表示位置とサイズをリセット」で、いま選んでいる形式の既定へ戻せます。</sub>
+</div>
+
 ### キャラクター
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
@@ -638,7 +661,7 @@ PicoAgent/
 
 `ui/assets/characters/` は `characters/` の配信コピー、`ui/vendor/live2d/` は Live2D ランタイムで、いずれも自動生成・自動取得です。
 
-**ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール）
+**ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール） / [HANDOFF.md](HANDOFF.md)（引き継ぎメモ）
 
 **設計資料**: [docs/layout-proposal.md](docs/layout-proposal.md) — 表示形式 8 つの設計意図とモックアップ（実装済み）。
 
