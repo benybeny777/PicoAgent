@@ -78,11 +78,19 @@ try {
   const selectedValue = await page.locator("select.layout-native-select").inputValue();
   if (selectedValue !== "chat") throw new Error(`カード選択が設定値へ反映されません: ${selectedValue}`);
   await page.getByTitle("配信へ変更").click();
+  const placementCount = await page.locator(".placement-actions button").count();
+  if (placementCount !== 4) throw new Error(`画面配置ボタンが4件ではありません: ${placementCount}`);
+  if (await page.locator(".layout-live-preview img").count() !== 1) throw new Error("選択中レイアウトの大型プレビューがありません");
+  if (await page.locator('[data-setting-key="PICOAGENT_STREAM_BACKGROUND"]').count() !== 1) throw new Error("配信背景の選択欄がありません");
   await page.locator("main").evaluate(node => { node.scrollTop = 0; });
   await page.waitForTimeout(100);
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
-  console.log(`画面タブ確認: 8件 / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  await page.getByRole("tab", { name: "キャラ・音声" }).click();
+  await page.waitForSelector(".framing-editor");
+  const muteStatus = await page.locator(".tts-master-status").textContent();
+  if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
+  console.log(`画面タブ確認: 8件 / 配置=${placementCount}件 / 構図・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

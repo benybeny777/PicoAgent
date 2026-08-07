@@ -610,6 +610,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     preloadAnimations();
     await probeRigLayers(); // layers 素材があればリップシンク対応
   }
+  applyCharacterFraming();
   frame = 0;
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
@@ -3446,6 +3447,7 @@ document.getElementById("exportHistory")?.addEventListener("click", async () => 
 // キャラの上で Ctrl（macOS は ⌘）を押しながらドラッグする。
 let characterOffset = { x: 0, y: 0 };
 let characterZoom = 1.55;
+let characterFraming = {};
 // 保存済みの値。同じ位置での重複保存を避けるために持つ。
 let savedCharacterOffset = { x: 0, y: 0 };
 let characterDragging = null;
@@ -3494,6 +3496,32 @@ function applyCharacterZoom(zoom) {
   // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
   const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
+}
+
+const FRAMING_PRESETS = {
+  bust: { zoom: 2.05, x: 0, y: 38 },
+  upper: { zoom: 1.55, x: 0, y: 18 },
+  full: { zoom: 1, x: 0, y: 0 },
+};
+
+function applyCharacterFraming() {
+  const characterId = characterManifest?.id;
+  const saved = characterId && characterFraming?.[characterId]?.[currentLayout];
+  if (!saved) return;
+  const preset = FRAMING_PRESETS[saved.preset] || null;
+  const frame = preset || saved;
+  applyCharacterZoom(saved.zoom ?? frame.zoom ?? 1.55);
+  applyCharacterOffset(saved.x ?? frame.x ?? 0, saved.y ?? frame.y ?? 0, { clamp: false });
+  savedCharacterOffset = { ...characterOffset };
+}
+
+function applyStreamAppearance(background, imagePath, display, displayImagePath) {
+  petApp.dataset.streamBackground = ["pastel", "gaming", "simple", "custom"].includes(background) ? background : "pastel";
+  petApp.dataset.streamDisplay = ["dashboard", "game", "clock", "image", "none"].includes(display) ? display : "dashboard";
+  const image = imagePath ? `url("${window.picoagent.assetUrl(imagePath)}")` : "none";
+  petApp.style.setProperty("--stream-custom-background", image);
+  const displayImage = displayImagePath ? `url("${window.picoagent.assetUrl(displayImagePath)}")` : "none";
+  document.getElementById("streamDisplay")?.style.setProperty("--stream-display-image", displayImage);
 }
 
 /** ドラッグを取りやめて、掴む前の位置へ戻す（保存もしない）。 */
@@ -3559,7 +3587,7 @@ function endCharacterDrag(event) {
   if (characterOffset.x === savedCharacterOffset.x && characterOffset.y === savedCharacterOffset.y) return;
   savedCharacterOffset = { ...characterOffset };
   markActivity();
-  window.picoagent.setCharacterOffset(characterOffset.x, characterOffset.y).catch(error => {
+  window.picoagent.setCharacterOffset(characterOffset.x, characterOffset.y, characterManifest?.id, currentLayout, characterZoom).catch(error => {
     showToast(String(error?.message || error || "立ち絵の位置を保存できませんでした").slice(0, 60), "error");
   });
 }
@@ -3833,18 +3861,24 @@ function layoutShowsHistory() {
 let savedBubbleLayout = { width: "", height: "", left: "", top: "" };
 
 const widgetClock = document.getElementById("widgetClock");
+const streamInfo = document.getElementById("streamInfo");
 let widgetClockTimer = null;
 function renderWidgetClock() {
-  if (!widgetClock) return;
   const now = new Date();
   const hh = String(now.getHours()).padStart(2, "0");
   const mm = String(now.getMinutes()).padStart(2, "0");
-  widgetClock.querySelector("strong").textContent = `${hh}:${mm}`;
-  widgetClock.querySelector("span").textContent =
-    `${now.getMonth() + 1}月${now.getDate()}日（${"日月火水木金土"[now.getDay()]}）`;
+  const weekday = "日月火水木金土"[now.getDay()];
+  if (widgetClock) {
+    widgetClock.querySelector("strong").textContent = `${hh}:${mm}`;
+    widgetClock.querySelector("span").textContent = `${now.getMonth() + 1}月${now.getDate()}日（${weekday}）`;
+  }
+  if (streamInfo) {
+    streamInfo.querySelector("strong").textContent = `${hh}:${mm}`;
+    streamInfo.querySelector(":scope > span:last-child").textContent = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")} ${weekday}`;
+  }
 }
 function syncWidgetClock() {
-  const on = currentLayout === "widget";
+  const on = currentLayout === "widget" || currentLayout === "stream";
   if (on && !widgetClockTimer) {
     renderWidgetClock();
     // 分単位の表示なので 15 秒ごとで足りる（常駐アプリなので秒間更新はしない）。
@@ -3870,6 +3904,7 @@ function applyLayout(id) {
   }
   syncWidgetClock();
   applyCharacterOffset(characterOffset.x, characterOffset.y);
+  applyCharacterFraming();
   // 履歴を常設する形式では、切り替えた時点の履歴をその場で描き直す。
   renderHistory();
   refreshBubblePlacement();
@@ -3910,6 +3945,12 @@ window.picoagent.on("pet:ui", (ui) => {
       : "いっしょの記録は設定で停止中";
   }
   if (ui.characterZoom != null) applyCharacterZoom(ui.characterZoom);
+  if (ui.characterFraming != null) characterFraming = ui.characterFraming || {};
+  if (ui.streamBackground != null) applyStreamAppearance(ui.streamBackground, ui.streamBackgroundImage, ui.streamDisplay, ui.streamDisplayImage);
+  if (ui.ttsEnabled != null) {
+    ttsEnabledCache = ui.ttsEnabled !== false;
+    if (!ttsEnabledCache) stopVoice(false);
+  }
   if (ui.characterOffsetX != null) applyCharacterOffset(ui.characterOffsetX, ui.characterOffsetY);
   if (ui.layout != null) applyLayout(ui.layout);
   savedBubbleLayout = { width: ui.bubbleWidth, height: ui.bubbleHeight, left: ui.bubbleLeft, top: ui.bubbleTop };
@@ -4189,6 +4230,9 @@ function startAlarmPolling() {
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   applyCharacterZoom(info.characterZoom);
+  characterFraming = info.characterFraming || {};
+  applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage);
+  ttsEnabledCache = info.ttsEnabled !== false;
   applyCharacterOffset(info.characterOffsetX, info.characterOffsetY, { clamp: false });
   savedCharacterOffset = { ...characterOffset };
   savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };

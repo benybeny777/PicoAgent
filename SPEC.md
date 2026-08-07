@@ -433,10 +433,15 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
-| `PICOAGENT_CHARACTER_ZOOM` | `1.55` | 基本 | 立ち絵の拡大率。`1.0` で全身、既定の `1.55` は上半身が枠いっぱいに出る。原点は枠の上端なので、拡大しても顔が残り脚が下へ抜ける |
+| `PICOAGENT_CHARACTER_ZOOM` | `1.55` | 内部UI | 構図未設定時に使う互換用の共通拡大率。新しい調整は `PICOAGENT_CHARACTER_FRAMING` を使う |
+| `PICOAGENT_CHARACTER_FRAMING` | `{}` | 画面 | キャラクターID×表示形式ごとの構図。`preset`（`bust` / `upper` / `full` / `custom`）、`zoom`、`x`、`y`を保持する。未設定時は旧共通の拡大率・位置を使う |
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 立ち絵の横移動量（px）。キャラを直接ドラッグして決める。**ウィンドウではなくキャラだけが動く**。設定画面には出さない |
 | `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 立ち絵の縦移動量（px）。同上 |
 | `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget`。未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「表示スタイル」の両方から変更でき、再起動なしで反映する |
+| `PICOAGENT_STREAM_BACKGROUND` | `pastel` | 画面 | 配信形式の背景。`pastel` / `gaming` / `simple` / `custom` |
+| `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
+| `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |
+| `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"chat":{"w":520,"h":760}}`）。既定はミニ360×560／ペット900×600／チャット・トーク520×760／バー900×320／作業1400×850／配信1560×920／ウィジェット440×600。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 基本 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
 | `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 基本 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |

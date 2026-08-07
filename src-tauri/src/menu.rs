@@ -10,6 +10,7 @@ use crate::commands::{
 
 /// 表示形式メニュー項目の ID 接頭辞。`layout:chat` のように形式 ID を続ける。
 const LAYOUT_ID_PREFIX: &str = "layout:";
+const PLACE_ID_PREFIX: &str = "place:";
 
 #[tauri::command]
 pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
@@ -31,6 +32,21 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .checked(is_always_on_top)
         .build(&app)
         .map_err(|e| e.to_string())?;
+    let tts_enabled = {
+        let state = app.state::<AppState>();
+        state.config.get_bool("PICOAGENT_TTS_ENABLED", false)
+    };
+    let tts = CheckMenuItemBuilder::with_id(
+        "tts_toggle",
+        if tts_enabled {
+            "読み上げ：有効"
+        } else {
+            "読み上げ：ミュート中"
+        },
+    )
+    .checked(tts_enabled)
+    .build(&app)
+    .map_err(|e| e.to_string())?;
     let reset = MenuItemBuilder::with_id("reset", "会話履歴を消してリセット")
         .build(&app)
         .map_err(|e| e.to_string())?;
@@ -66,6 +82,29 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         layout_menu = layout_menu.item(item);
     }
     let layout_menu = layout_menu.build().map_err(|e| e.to_string())?;
+    let placement_menu = SubmenuBuilder::new(&app, "ウィンドウを置く画面")
+        .item(
+            &MenuItemBuilder::with_id("place:left", "左画面の中央")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("place:right", "右画面の中央")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("place:current", "現在の画面の中央")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("place:primary", "主画面の中央")
+                .build(&app)
+                .map_err(|e| e.to_string())?,
+        )
+        .build()
+        .map_err(|e| e.to_string())?;
 
     // 取り消しにくい会話消去を通常操作から離し、表示を整える操作と同じサブメニューへまとめる。
     let reset_menu = SubmenuBuilder::new(&app, "表示と会話をリセット")
@@ -80,7 +119,9 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .item(&summon)
         .separator()
         .item(&layout_menu)
+        .item(&placement_menu)
         .item(&ontop)
+        .item(&tts)
         .separator()
         .item(&display_settings)
         .item(&character_settings)
@@ -100,6 +141,12 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
 pub fn handle_event(app: &tauri::AppHandle, id: &str) {
     if let Some(layout_id) = id.strip_prefix(LAYOUT_ID_PREFIX) {
         if let Err(error) = crate::layout::select(app, layout_id) {
+            crate::log_paths::append_app_log(app, &error);
+        }
+        return;
+    }
+    if let Some(position) = id.strip_prefix(PLACE_ID_PREFIX) {
+        if let Err(error) = crate::commands::pet_place_window(position.to_string(), app.clone()) {
             crate::log_paths::append_app_log(app, &error);
         }
         return;
@@ -147,6 +194,25 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                         &format!("常に手前の設定保存に失敗しました: {error}"),
                     );
                 }
+            }
+        }
+        "tts_toggle" => {
+            let state = app.state::<AppState>();
+            let next = !state.config.get_bool("PICOAGENT_TTS_ENABLED", false);
+            let mut patch = serde_json::Map::new();
+            patch.insert(
+                "PICOAGENT_TTS_ENABLED".to_string(),
+                serde_json::Value::Bool(next),
+            );
+            if let Err(error) = state.config.set_all(patch) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("読み上げ設定の保存に失敗しました: {error}"),
+                );
+                return;
+            }
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.emit("pet:ui", serde_json::json!({ "ttsEnabled": next }));
             }
         }
         "reset" => clear_conversation_and_history(app),

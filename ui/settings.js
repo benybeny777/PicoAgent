@@ -17,6 +17,8 @@ let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
 let characterLive2dSdkOverrides = {};
+let characterFraming = {};
+let characterFramingEditor = null;
 let characterDefaultVoices = {};
 let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
@@ -166,6 +168,10 @@ function updateDirtyState() {
   characterLive2dSdkField?.classList.toggle(
     "changed",
     stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
+  );
+  characterFramingEditor?.node?.classList.toggle(
+    "changed",
+    stableStringify(current.PICOAGENT_CHARACTER_FRAMING) !== stableStringify(savedSnapshot.PICOAGENT_CHARACTER_FRAMING)
   );
   form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
     "changed",
@@ -748,6 +754,10 @@ function selectField(key, label, value, options) {
 function layoutPickerField(value) {
   const select = el("select", { className: "layout-native-select", ariaLabel: "画面レイアウト" });
   const cards = el("div", { className: "layout-card-grid" });
+  const livePreview = el("div", { className: "layout-live-preview" }, [
+    el("span", { textContent: "選択中レイアウトの実画面プレビュー" }),
+    el("img", { alt: "選択中レイアウトの実画面プレビュー" }),
+  ]);
   const buttons = new Map();
   for (const layout of LAYOUT_CHOICES) {
     select.append(el("option", { value: layout.id, textContent: layout.label, selected: layout.id === value }));
@@ -784,6 +794,7 @@ function layoutPickerField(value) {
       button.classList.toggle("selected", selected);
       button.setAttribute("aria-pressed", selected ? "true" : "false");
     }
+    livePreview.querySelector("img").src = `assets/layout-previews/${select.value}.webp`;
   };
   select.addEventListener("change", sync);
   sync();
@@ -793,6 +804,7 @@ function layoutPickerField(value) {
       textContent: "使い方に近い画面を選んでください。保存すると現在のウィンドウへすぐ反映します。",
     }),
     select,
+    livePreview,
     cards,
   ]), "PICOAGENT_LAYOUT", "画面 レイアウト 表示形式", ...LAYOUT_CHOICES.map(layout => `${layout.label} ${layout.description}`));
   return registerInput("PICOAGENT_LAYOUT", select, wrapper);
@@ -1705,6 +1717,113 @@ function layoutResetField() {
   );
 }
 
+function windowPlacementField() {
+  const actions = el("div", { className: "placement-actions" });
+  for (const [id, label] of [["left", "左画面"], ["right", "右画面"], ["current", "現在の画面"], ["primary", "主画面"]]) {
+    const button = el("button", { type: "button", className: "secondary", textContent: label });
+    button.addEventListener("click", async () => {
+      try {
+        await window.picoagent.placeWindow(id);
+        statusEl.textContent = `${label}の中央へ移動しました。`;
+      } catch (error) {
+        statusEl.textContent = `移動できませんでした: ${error?.message || error}`;
+      }
+    });
+    actions.append(button);
+  }
+  return markSearchable(el("div", { className: "field" }, [
+    el("label", { textContent: "ウィンドウを置く画面" }), actions,
+    el("p", { className: "hint", textContent: "動画を見ながら使う場合は「左画面」などを選ぶと、接続中ディスプレイの中央へ移動します。" }),
+  ]), "ウィンドウ 配置 左画面 右画面 主画面 ディスプレイ");
+}
+
+function streamSettingsField(values) {
+  const wrapper = markSearchable(el("div", { className: "stream-settings" }), "配信 背景 ディスプレイ 画像 日付 時刻 LIVE");
+  wrapper.append(selectField("PICOAGENT_STREAM_BACKGROUND", "配信背景", values.PICOAGENT_STREAM_BACKGROUND || "pastel", [
+    { value: "pastel", label: "パステルスタジオ" },
+    { value: "gaming", label: "落ち着いたゲーム部屋" },
+    { value: "simple", label: "シンプルグラデーション" },
+    { value: "custom", label: "自分の画像" },
+  ]));
+  const backgroundPath = el("input", { type: "text", readOnly: true, value: values.PICOAGENT_STREAM_BACKGROUND_IMAGE || "", placeholder: "画像未選択" });
+  const backgroundButton = el("button", { type: "button", className: "secondary", textContent: "背景画像を選ぶ" });
+  backgroundButton.addEventListener("click", async () => {
+    try {
+      const result = await window.picoagent.settings.pickStreamImage("background");
+      if (result?.path) { backgroundPath.value = result.path; inputs.get("PICOAGENT_STREAM_BACKGROUND").value = "custom"; updateDirtyState(); }
+    } catch (error) { statusEl.textContent = `背景画像を取り込めませんでした: ${error?.message || error}`; }
+  });
+  wrapper.append(registerInput("PICOAGENT_STREAM_BACKGROUND_IMAGE", backgroundPath, el("div", { className: "field" }, [el("label", { textContent: "自分の背景画像" }), backgroundPath, backgroundButton])));
+  wrapper.append(selectField("PICOAGENT_STREAM_DISPLAY", "背景内ディスプレイ", values.PICOAGENT_STREAM_DISPLAY || "dashboard", [
+    { value: "dashboard", label: "配信ダッシュボード" },
+    { value: "game", label: "ゲーム画面風" },
+    { value: "clock", label: "時計・ON AIR" },
+    { value: "image", label: "自分の画像" },
+    { value: "none", label: "表示しない" },
+  ]));
+  const displayPath = el("input", { type: "text", readOnly: true, value: values.PICOAGENT_STREAM_DISPLAY_IMAGE || "", placeholder: "画像未選択" });
+  const displayButton = el("button", { type: "button", className: "secondary", textContent: "ディスプレイ画像を選ぶ" });
+  displayButton.addEventListener("click", async () => {
+    try {
+      const result = await window.picoagent.settings.pickStreamImage("display");
+      if (result?.path) { displayPath.value = result.path; inputs.get("PICOAGENT_STREAM_DISPLAY").value = "image"; updateDirtyState(); }
+    } catch (error) { statusEl.textContent = `ディスプレイ画像を取り込めませんでした: ${error?.message || error}`; }
+  });
+  wrapper.append(registerInput("PICOAGENT_STREAM_DISPLAY_IMAGE", displayPath, el("div", { className: "field" }, [el("label", { textContent: "ディスプレイに映す画像" }), displayPath, displayButton])));
+  wrapper.append(el("p", { className: "hint", textContent: "配信表示では、左上に LIVE・日付・時刻を常時表示します。" }));
+  return wrapper;
+}
+
+function buildCharacterFramingEditor() {
+  const layoutSelect = el("select", {}, LAYOUT_CHOICES.map(layout => el("option", { value: layout.id, textContent: layout.label })));
+  const presetSelect = el("select", {}, [
+    el("option", { value: "bust", textContent: "胸上（配信向け）" }),
+    el("option", { value: "upper", textContent: "上半身（基本）" }),
+    el("option", { value: "full", textContent: "全身" }),
+    el("option", { value: "custom", textContent: "細かく調整" }),
+  ]);
+  const zoom = el("input", { type: "range", min: "1", max: "4", step: ".05" });
+  const x = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
+  const y = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
+  const preview = el("div", { className: "framing-preview" }, [el("img", { alt: "選択キャラの構図プレビュー" }), el("span", { textContent: "字幕テロップ" })]);
+  const defaults = { bust: { zoom: 2.05, x: 0, y: 38 }, upper: { zoom: 1.55, x: 0, y: 18 }, full: { zoom: 1, x: 0, y: 0 } };
+  const current = () => characterFraming?.[characterSelect.value]?.[layoutSelect.value];
+  const updatePreview = () => {
+    const image = preview.querySelector("img");
+    image.style.transform = `translate(${Number(x.value) / 8}px,${Number(y.value) / 8}px) scale(${Number(zoom.value) / 1.55})`;
+  };
+  const load = async () => {
+    const saved = current() || { preset: "upper", ...defaults.upper };
+    const fallback = defaults[saved.preset] || saved;
+    presetSelect.value = saved.preset || "custom";
+    zoom.value = String(saved.zoom ?? fallback.zoom ?? 1.55);
+    x.value = String(saved.x ?? fallback.x ?? 0);
+    y.value = String(saved.y ?? fallback.y ?? 0);
+    updatePreview();
+    const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
+    const url = character ? await characterIconUrl(character) : "";
+    if (url) preview.querySelector("img").src = url;
+  };
+  const save = () => {
+    characterFraming[characterSelect.value] ||= {};
+    characterFraming[characterSelect.value][layoutSelect.value] = { preset: presetSelect.value, zoom: Number(zoom.value), x: Number(x.value), y: Number(y.value) };
+    updatePreview(); updateDirtyState();
+  };
+  presetSelect.addEventListener("change", () => {
+    const next = defaults[presetSelect.value];
+    if (next) { zoom.value = next.zoom; x.value = next.x; y.value = next.y; }
+    save();
+  });
+  for (const input of [zoom, x, y]) input.addEventListener("input", () => { presetSelect.value = "custom"; save(); });
+  layoutSelect.addEventListener("change", load);
+  const node = markSearchable(el("div", { className: "field framing-editor" }, [
+    el("label", { textContent: "キャラごとの構図（表示形式別）" }),
+    el("div", { className: "framing-controls" }, [layoutSelect, presetSelect, zoom, x, y]), preview,
+    el("p", { className: "hint", textContent: "胸上・上半身・全身を選び、必要なら拡大率と位置を微調整できます。キャラと表示形式ごとに保存します。" }),
+  ]), "キャラ 構図 胸上 上半身 全身 拡大 位置 プレビュー");
+  return { node, load };
+}
+
 function diagnosticRepairButton(label, handler) {
   const button = el("button", { type: "button", className: "diagnostic-repair", textContent: label });
   button.addEventListener("click", async () => {
@@ -1908,9 +2027,9 @@ async function render() {
     { value: "dark", label: "ダーク" },
   ]));
   displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "会話文字の大きさ（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
-  // 立ち絵の大きさ。位置はキャラを直接ドラッグして決めるので、ここには出さない。
-  displaySec.append(field("PICOAGENT_CHARACTER_ZOOM", "キャラの大きさ（既定 1.55＝上半身）", "text", v.PICOAGENT_CHARACTER_ZOOM || "1.55"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
+  displaySec.append(windowPlacementField());
+  displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
   global.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
@@ -1941,11 +2060,21 @@ async function render() {
     "memory|npx -y @modelcontextprotocol/server-memory"
   ));
   const voiceSec = section("読み上げ");
+  const ttsMasterStatus = el("div", {
+    className: v.PICOAGENT_TTS_ENABLED === true ? "tts-master-status enabled" : "tts-master-status muted",
+    textContent: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）",
+  });
+  voiceSec.append(ttsMasterStatus);
   voiceSec.append(el("p", {
     className: "hint",
     textContent: "読み上げは必要な時だけ有効にできます。キャラごとの声は上のキャラクター選択に連動します。",
   }));
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
+  inputs.get("PICOAGENT_TTS_ENABLED")?.addEventListener("change", event => {
+    const enabled = event.target.checked;
+    ttsMasterStatus.className = `tts-master-status ${enabled ? "enabled" : "muted"}`;
+    ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
+  });
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
   panels.basic.append(global);
   panels.display.append(displaySec);
@@ -1978,6 +2107,7 @@ async function render() {
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   characterLive2dSdkOverrides = v.PICOAGENT_LIVE2D_SDK_OVERRIDES || {};
+  characterFraming = cloneSettings(v.PICOAGENT_CHARACTER_FRAMING || {});
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const requestedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
@@ -2002,6 +2132,9 @@ async function render() {
     { value: "both", label: "暮らしと仕事の両方" },
   ]));
   characterSec.append(field("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", "いっしょの記録を保存する", "checkbox", v.PICOAGENT_RELATIONSHIP_MEMORY_ENABLED !== false));
+  characterFramingEditor = buildCharacterFramingEditor();
+  characterSec.append(characterFramingEditor.node);
+  await characterFramingEditor.load();
   characterLive2dSdkSelect = el("select");
   for (const option of [
     { value: "auto", label: "自動（推奨）" },
@@ -2038,6 +2171,7 @@ async function render() {
         await loadCharacterPersona(requestedCharacter);
         loadCharacterVoice(requestedCharacter);
         await loadCharacterLive2dSdk(requestedCharacter);
+        await characterFramingEditor?.load();
         previousCharacter = requestedCharacter;
         characterSelect.value = requestedCharacter;
       } catch (error) {
@@ -2580,6 +2714,7 @@ function collect() {
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
+  patch.PICOAGENT_CHARACTER_FRAMING = characterFraming;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();
   return patch;

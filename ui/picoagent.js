@@ -89,7 +89,8 @@ window.picoagent = {
     catch (error) { logInvokeError("moveAndResizeWindow", error); throw error; }
   },
   // 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
-  setCharacterOffset: (x, y) => call("pet_set_character_offset", { x, y }),
+  setCharacterOffset: (x, y, characterId, layout, zoom) => call("pet_set_character_offset", { x, y, characterId, layout, zoom }),
+  placeWindow: (position) => call("pet_place_window", { position }),
   // キャラの上から Ctrl+ドラッグしたときなど、明示的にウィンドウを掴んで動かす。
   startWindowDrag: async () => {
     try { return await getCurrentWindow().startDragging(); }
@@ -147,6 +148,7 @@ window.picoagent = {
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
     installCharacter: (path) => call("settings_character_install", { path }),
     removeCharacter: (id) => call("settings_character_remove", { id }),
+    pickStreamImage: (kind) => call("settings_pick_stream_image", { kind }),
     tha3Status: (rootPath = null) => call("settings_tha3_status", { rootPath }),
     pickTha3Source: () => call("settings_tha3_pick_source"),
     pickTha3Root: () => call("settings_tha3_pick_root"),

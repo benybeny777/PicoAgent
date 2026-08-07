@@ -576,6 +576,12 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
         "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
+        "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
+        "streamBackground": state.config.get("PICOAGENT_STREAM_BACKGROUND", "pastel"),
+        "streamBackgroundImage": state.config.get("PICOAGENT_STREAM_BACKGROUND_IMAGE", ""),
+        "streamDisplay": state.config.get("PICOAGENT_STREAM_DISPLAY", "dashboard"),
+        "streamDisplayImage": state.config.get("PICOAGENT_STREAM_DISPLAY_IMAGE", ""),
+        "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
         "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
@@ -819,7 +825,14 @@ pub fn pet_set_character_profile(
 /// 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
 /// ドラッグを離した時点で1回だけ呼ばれる（移動中は書き込まない）。
 #[tauri::command]
-pub fn pet_set_character_offset(x: f64, y: f64, state: State<'_, AppState>) -> Result<(), String> {
+pub fn pet_set_character_offset(
+    x: f64,
+    y: f64,
+    character_id: Option<String>,
+    layout: Option<String>,
+    zoom: Option<f64>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     // 画面外へ飛ばす値を保存させない。実際の丸めはフロントが枠の位置を見て行うが、
     // 設定ファイルを直接編集された場合の歯止めとしてここでも範囲を見る。
     if !(-4000.0..=4000.0).contains(&x) || !(-4000.0..=4000.0).contains(&y) {
@@ -834,10 +847,141 @@ pub fn pet_set_character_offset(x: f64, y: f64, state: State<'_, AppState>) -> R
         "PICOAGENT_CHARACTER_OFFSET_Y".to_string(),
         json!(y.round().to_string()),
     );
+    if let (Some(character_id), Some(layout)) = (character_id, layout) {
+        if !character_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            || !crate::layout::LAYOUTS
+                .iter()
+                .any(|(id, _, _, _)| *id == layout)
+        {
+            return Err("キャラクターまたは表示形式が不正です。".to_string());
+        }
+        let _guard = crate::store::lock_state("PICOAGENT_CHARACTER_FRAMING");
+        let mut all = state
+            .config
+            .get_all()
+            .get("PICOAGENT_CHARACTER_FRAMING")
+            .cloned()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        let characters = all
+            .entry(character_id)
+            .or_insert_with(|| Value::Object(Map::new()));
+        let layouts = characters
+            .as_object_mut()
+            .ok_or_else(|| "保存済みのキャラ構図設定が不正です。".to_string())?;
+        layouts.insert(
+            layout,
+            json!({
+                "preset": "custom",
+                "zoom": zoom.unwrap_or(1.55).clamp(1.0, 4.0),
+                "x": x.round(),
+                "y": y.round(),
+            }),
+        );
+        patch.insert(
+            "PICOAGENT_CHARACTER_FRAMING".to_string(),
+            Value::Object(all),
+        );
+    }
     state
         .config
         .set_all(patch)
         .map_err(|error| format!("立ち絵の位置の保存に失敗しました: {error}"))
+}
+
+/// 配信背景または配信内ディスプレイへ使う画像を、アプリ管理領域へ取り込む。
+#[tauri::command]
+pub async fn settings_pick_stream_image(
+    kind: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    use tauri::path::BaseDirectory;
+    use tauri_plugin_dialog::DialogExt;
+    if kind != "background" && kind != "display" {
+        return Err("画像の用途が不正です。".to_string());
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .clone()
+        .file()
+        .add_filter("配信レイアウト画像", &["png", "jpg", "jpeg", "webp"])
+        .pick_file(move |picked| {
+            let _ = sender.send(picked.map(|path| path.to_string()));
+        });
+    let picked = receiver
+        .await
+        .map_err(|_| "画像選択の結果を受け取れませんでした。".to_string())?;
+    let Some(path) = picked else {
+        return Ok(json!({ "path": Value::Null }));
+    };
+    let source = crate::permissions::resolve(&state.config, &path)?;
+    let extension = source.extension_lossy();
+    if !matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+        return Err("PNG・JPEG・WEBP画像を選んでください。".to_string());
+    }
+    let metadata = crate::permissions::fs::metadata(&source)?;
+    if metadata.len() > 20 * 1024 * 1024 {
+        return Err("画像は20MB以内にしてください。".to_string());
+    }
+    let bytes = crate::permissions::fs::read(&source)?;
+    let base = app
+        .path()
+        .resolve("display", BaseDirectory::AppData)
+        .map_err(|error| format!("配信画像の保存先を作れません: {error}"))?;
+    let destination = base.join(format!("{kind}.{extension}"));
+    crate::store::write_atomic(&destination, &bytes)
+        .map_err(|error| format!("配信画像を保存できません: {error}"))?;
+    Ok(json!({ "path": destination.to_string_lossy() }))
+}
+
+/// メインウィンドウを、左画面・右画面・現在画面・主画面の中央へ配置する。
+#[tauri::command]
+pub fn pet_place_window(position: String, app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "メインウィンドウがありません。".to_string())?;
+    let monitors = window
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    if monitors.is_empty() {
+        return Err("ディスプレイが見つかりません。".to_string());
+    }
+    let selected = match position.as_str() {
+        "left" => monitors.iter().min_by_key(|monitor| monitor.position().x),
+        "right" => monitors.iter().max_by_key(|monitor| monitor.position().x),
+        "current" => window
+            .current_monitor()
+            .ok()
+            .flatten()
+            .as_ref()
+            .and_then(|current| {
+                monitors
+                    .iter()
+                    .find(|monitor| monitor.position() == current.position())
+            }),
+        "primary" => window
+            .primary_monitor()
+            .ok()
+            .flatten()
+            .as_ref()
+            .and_then(|primary| {
+                monitors
+                    .iter()
+                    .find(|monitor| monitor.position() == primary.position())
+            }),
+        _ => return Err("ウィンドウ配置が不正です。".to_string()),
+    }
+    .or_else(|| monitors.first())
+    .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    let x = selected.position().x + (selected.size().width.saturating_sub(size.width) / 2) as i32;
+    let y = selected.position().y + (selected.size().height.saturating_sub(size.height) / 2) as i32;
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())
 }
 
 /// ドラッグで確定したフキダシサイズを設定の正本へ保存する。
@@ -2304,6 +2448,12 @@ pub async fn settings_save(
             "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
             "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
             "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
+            "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
+            "streamBackground": state.config.get("PICOAGENT_STREAM_BACKGROUND", "pastel"),
+            "streamBackgroundImage": state.config.get("PICOAGENT_STREAM_BACKGROUND_IMAGE", ""),
+            "streamDisplay": state.config.get("PICOAGENT_STREAM_DISPLAY", "dashboard"),
+            "streamDisplayImage": state.config.get("PICOAGENT_STREAM_DISPLAY_IMAGE", ""),
+            "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         });
         if !requires_restart {
             let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));

@@ -684,13 +684,49 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.1),inset 0 -70px 120px rgba(17,12,30,.18);
   pointer-events:none;
 }
+.pet-app[data-layout="stream"][data-stream-background="gaming"]::before {
+  background:
+    radial-gradient(circle at 22% 20%,rgba(126,213,255,.24),transparent 32%),
+    radial-gradient(circle at 76% 30%,rgba(236,158,213,.22),transparent 34%),
+    linear-gradient(145deg,#17253a,#332846 58%,#201d31);
+}
+.pet-app[data-layout="stream"][data-stream-background="simple"]::before {
+  background:linear-gradient(145deg,#fff8f4,#f8e9f2 48%,#e6f1f4);
+}
+.pet-app[data-layout="stream"][data-stream-background="custom"]::before {
+  background:linear-gradient(180deg,rgba(24,16,35,.06),rgba(24,16,35,.2)),var(--stream-custom-background) center/cover no-repeat;
+}
 /* 尻尾の擬似要素を LIVE バッジとして使い回す。 */
 [data-layout="stream"] .bubble::after {
-  display:block; content:"● LIVE"; left:14px; top:14px; right:auto; bottom:auto;
+  display:none;
   width:auto; height:auto; padding:3px 9px; border-radius:999px;
   background:rgba(198,58,80,.94); color:#fff; font-size:9px; font-weight:800; letter-spacing:.07em;
   clip-path:none; filter:none; z-index:3;
 }
+[data-layout="stream"] .stream-info {
+  display:flex; position:absolute; z-index:4; left:14px; top:14px; align-items:center; gap:9px;
+  padding:7px 11px; border:1px solid rgba(255,255,255,.58); border-radius:12px;
+  background:rgba(43,35,54,.68); color:#fff; box-shadow:0 5px 18px rgba(31,23,42,.18);
+  backdrop-filter:blur(10px); pointer-events:none;
+}
+[data-layout="stream"] .stream-info .stream-live { padding:3px 8px; border-radius:999px; background:#d95870; font-size:10px; font-weight:900; letter-spacing:.08em; }
+[data-layout="stream"] .stream-info strong { font:700 18px/1 Consolas,"Yu Gothic UI",monospace; }
+[data-layout="stream"] .stream-info > span:last-child { font-size:11px; font-weight:700; opacity:.9; }
+.stream-info,.stream-display { display:none; }
+[data-layout="stream"] .stream-display {
+  display:flex; position:absolute; z-index:1; left:5.5%; top:13%; width:25%; aspect-ratio:16/9;
+  flex-direction:column; align-items:center; justify-content:center; gap:5px; overflow:hidden;
+  border:7px solid rgba(39,31,49,.78); border-radius:7px; color:#f9edf5;
+  background:linear-gradient(145deg,rgba(59,51,79,.92),rgba(81,55,78,.92));
+  box-shadow:0 10px 24px rgba(27,19,36,.24); pointer-events:none;
+}
+[data-layout="stream"] .stream-display strong { font-size:clamp(11px,1.3vw,20px); letter-spacing:.12em; }
+[data-layout="stream"] .stream-display span { font-size:clamp(7px,.7vw,11px); opacity:.76; }
+[data-layout="stream"][data-stream-display="game"] .stream-display { background:radial-gradient(circle at 50% 32%,#8ee6ff 0 5%,transparent 6%),linear-gradient(145deg,#273a62,#60436b); }
+[data-layout="stream"][data-stream-display="clock"] .stream-display strong::after { content:"  ON AIR"; color:#f4a6bc; }
+[data-layout="stream"][data-stream-display="image"] .stream-display { background:var(--stream-display-image) center/cover no-repeat; }
+[data-layout="stream"][data-stream-display="image"] .stream-display > * { display:none; }
+[data-layout="stream"][data-stream-display="none"] .stream-display { display:none; }
 [data-layout="stream"] .character {
   z-index:1; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px;
   bottom:8px; width:auto; height:auto; transform:none;
