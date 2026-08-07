@@ -20,6 +20,7 @@ mod engine;
 mod guard_scan;
 mod history;
 mod hotkey;
+mod layout;
 mod log_paths;
 mod mcp;
 mod memory;
@@ -224,6 +225,15 @@ pub fn run() {
                 state.messages.lock().unwrap().extend(recent);
             }
 
+            // 選択中の表示形式をウィンドウ寸法へ反映する。保存済みレイアウトの復元より先に
+            // 行い、ユーザーが手で決めた寸法があればそちらで上書きされるようにする。
+            {
+                let id = layout::current(&state.config);
+                if let Err(error) = layout::apply(app.handle(), &id) {
+                    log_paths::append_app_log(app.handle(), &error);
+                }
+            }
+
             // グローバルホットキーを設定どおりに登録する（失敗しても本体は使えるので記録に留める）。
             if let Err(error) = hotkey::apply(app.handle()) {
                 log_paths::append_app_log(app.handle(), &error);
@@ -409,6 +419,26 @@ pub(crate) fn is_on_screen(
         let (overlap_w, overlap_h) = overlap(*monitor, x, y, win_w, win_h);
         overlap_w > 0 && overlap_h > 0
     })
+}
+
+/// 指定寸法にしたウィンドウが画面外へはみ出していたら、見える位置へ引き戻す。
+///
+/// 表示形式の切り替えでウィンドウが大きくなると、右下寄りに置いていた場合に
+/// つまみごと画面外へ出てしまう。`set_size` 直後の `outer_size` は反映前の古い値を
+/// 返しうるので、当てた寸法（物理px）を引数で受け取る。
+pub(crate) fn pull_back_on_screen(window: &tauri::WebviewWindow, win_w: u32, win_h: u32) {
+    let Ok(pos) = window.outer_position() else {
+        return;
+    };
+    let monitors = monitor_rects(window);
+    if monitors.is_empty() || is_visible_on_any_monitor(&monitors, pos.x, pos.y, win_w, win_h) {
+        return;
+    }
+    let Some(monitor) = current_monitor_rect(window) else {
+        return;
+    };
+    let (x, y) = default_window_position(monitor, win_w, win_h);
+    let _ = window.set_position(PhysicalPosition::new(x, y));
 }
 
 /// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。

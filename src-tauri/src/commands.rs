@@ -567,6 +567,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "history": recent_history,
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
         "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
+        "layout": crate::layout::current(&state.config),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
         "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
@@ -2091,6 +2092,7 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
+    let layout_changed = changed_text("PICOAGENT_LAYOUT", crate::layout::DEFAULT);
     let companion_mode_changed = changed_text("PICOAGENT_COMPANION_MODE", "both");
     let relationship_memory_changed = changed_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
 
@@ -2139,6 +2141,14 @@ pub async fn settings_save(
         }
     }
 
+    // 表示形式は再起動なしで当てる（ウィンドウ寸法とフロントの data-layout）。
+    if layout_changed {
+        let id = crate::layout::current(&state.config);
+        if let Err(error) = crate::layout::apply(&app, &id) {
+            crate::log_paths::append_app_log(&app, &error);
+        }
+    }
+
     // グローバルホットキーは再起動なしで張り直す。登録できなかったキーは
     // 「保存できたのに効かない」を黙って残さないよう、記録して設定画面へも返す。
     let hotkey_warning = match crate::hotkey::apply(&app) {
@@ -2182,6 +2192,7 @@ pub async fn settings_save(
             "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
             "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
             "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
+            "layout": crate::layout::current(&state.config),
         });
         if !requires_restart {
             let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));

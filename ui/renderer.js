@@ -1578,9 +1578,9 @@ function reuseHistoryItem(text) {
 
 function renderHistory() {
   if (!historyLog) return;
-  // 履歴ログは全画面時のみ表示される。非表示中に毎メッセージ全件を Markdown 再構築
-  // するのは無駄なので描画しない（全画面切替時に setBubbleFullscreen が呼び直す）。
-  if (!bubble.classList.contains("fullscreen")) return;
+  // 履歴ログが見えていないときに毎メッセージ全件を Markdown 再構築するのは無駄なので
+  // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
+  if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) return;
   historyLog.replaceChildren();
   if (!conversationHistory.length) {
     historyLog.append(document.createElement("div"));
@@ -2351,6 +2351,8 @@ function applyFullscreenBubbleLayout() {
 }
 
 function refreshBubblePlacement() {
+  // キャラを避ける自動配置はペット表示の仕組み。他の形式では CSS の配置を壊さない。
+  if (!layoutUsesFreeBubble() && !bubble.classList.contains("fullscreen")) return;
   requestAnimationFrame(() => {
     if (bubble.classList.contains("fullscreen")) {
       applyFullscreenBubbleLayout();
@@ -3503,6 +3505,9 @@ document.addEventListener("keydown", event => {
   }
   exitBubbleFullscreen();
 });
+// 右クリックメニュー「表示形式」からの切り替え。ウィンドウ寸法はバックエンドが当て、
+// 中の配置はここで data-layout を書き替えて CSS に任せる。
+window.picoagent.on("pet:layout", applyLayout);
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
 window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
@@ -3579,7 +3584,67 @@ function applyTheme(value) {
     document.documentElement.dataset.theme = theme;
   }
 }
+// ── 表示形式（画面構成） ──────────────────────────────────────────
+// 配置そのものは CSS（#petApp[data-layout=…]）が決める。JS の仕事は
+// 「どれが選ばれているか」を DOM へ書くことと、ペット表示専用の処理を止めること。
+let currentLayout = "pet";
+// ペット表示だけ、フキダシの位置とサイズをユーザーが自由に決められる（つまみでドラッグ）。
+// 他の形式はフキダシの置き場所が形式の一部なので、JS からは動かさない。
+function layoutUsesFreeBubble() { return currentLayout === "pet"; }
+// 会話履歴を常に出しておく形式。全画面にしなくても過去の発言が読める。
+function layoutShowsHistory() {
+  return currentLayout === "chat" || currentLayout === "talk"
+    || currentLayout === "workspace" || currentLayout === "stream";
+}
+// ペット表示へ戻ったときに復元するため、保存済みのフキダシ寸法・位置を控えておく。
+let savedBubbleLayout = { width: "", height: "", left: "", top: "" };
+
+const widgetClock = document.getElementById("widgetClock");
+let widgetClockTimer = null;
+function renderWidgetClock() {
+  if (!widgetClock) return;
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  widgetClock.querySelector("strong").textContent = `${hh}:${mm}`;
+  widgetClock.querySelector("span").textContent =
+    `${now.getMonth() + 1}月${now.getDate()}日（${"日月火水木金土"[now.getDay()]}）`;
+}
+function syncWidgetClock() {
+  const on = currentLayout === "widget";
+  if (on && !widgetClockTimer) {
+    renderWidgetClock();
+    // 分単位の表示なので 15 秒ごとで足りる（常駐アプリなので秒間更新はしない）。
+    widgetClockTimer = setInterval(renderWidgetClock, 15000);
+  } else if (!on && widgetClockTimer) {
+    clearInterval(widgetClockTimer);
+    widgetClockTimer = null;
+  }
+}
+
+function applyLayout(id) {
+  const next = typeof id === "string" && id ? id : "pet";
+  currentLayout = next;
+  petApp.dataset.layout = next;
+  if (layoutUsesFreeBubble()) {
+    applyBubbleLayout(savedBubbleLayout.width, savedBubbleLayout.height, savedBubbleLayout.left, savedBubbleLayout.top);
+  } else {
+    // CSS に任せるので、ペット表示で当てたインライン指定を残さない。
+    for (const prop of ["width", "height", "left", "top"]) bubble.style.removeProperty(prop);
+    resetFullscreenBubbleLayoutVars();
+    // 形式ごとの配置と全画面フキダシは両立しないので、切り替え時に全画面は解除する。
+    if (bubble.classList.contains("fullscreen")) exitBubbleFullscreen();
+  }
+  syncWidgetClock();
+  // 履歴を常設する形式では、切り替えた時点の履歴をその場で描き直す。
+  renderHistory();
+  refreshBubblePlacement();
+}
+
 function applyBubbleLayout(width, height, left, top) {
+  // ペット表示以外はフキダシを CSS が置くので、保存値を当てない
+  // （当てるとチャットの縦長パネルがペット時代の寸法に化ける）。
+  if (!layoutUsesFreeBubble()) return;
   const w = parseFloat(width);
   const h = parseFloat(height);
   const x = parseFloat(left);
@@ -3610,6 +3675,8 @@ window.picoagent.on("pet:ui", (ui) => {
       ? "いっしょの記録を見る"
       : "いっしょの記録は設定で停止中";
   }
+  if (ui.layout != null) applyLayout(ui.layout);
+  savedBubbleLayout = { width: ui.bubbleWidth, height: ui.bubbleHeight, left: ui.bubbleLeft, top: ui.bubbleTop };
   applyBubbleLayout(ui.bubbleWidth, ui.bubbleHeight, ui.bubbleLeft, ui.bubbleTop);
   if (ui.characterId) loadCharacter(ui.characterId, ui.characterOverrides || {}).catch(error => {
     logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
@@ -3883,6 +3950,8 @@ function startAlarmPolling() {
   if (info.theme != null) applyTheme(info.theme);
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
+  savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };
+  applyLayout(info.layout);
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");

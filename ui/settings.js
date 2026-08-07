@@ -1744,6 +1744,17 @@ async function render() {
     { value: "light", label: "通常" },
     { value: "dark", label: "ダーク" },
   ]));
+  // 表示形式。右クリックメニューの「表示形式」からも同じ設定を変えられる。
+  global.append(selectField("PICOAGENT_LAYOUT", "表示形式（画面構成）", v.PICOAGENT_LAYOUT || "pet", [
+    { value: "pet", label: "ペット（キャラ＋フキダシ）" },
+    { value: "mascot", label: "マスコット（キャラだけ）" },
+    { value: "chat", label: "チャット（履歴つきパネル）" },
+    { value: "talk", label: "トーク（メッセージアプリ風）" },
+    { value: "bar", label: "バー（1行入力）" },
+    { value: "workspace", label: "ワークスペース（3ペイン）" },
+    { value: "stream", label: "配信（キャラを大きく）" },
+    { value: "widget", label: "ウィジェット（今日の情報）" },
+  ]));
   global.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   global.append(layoutResetField());
   // グローバルホットキー: 他のアプリを使っている最中でも呼び出せるようにする。保存すると即反映。

@@ -58,6 +58,7 @@ graph TD
   `#[path] pub mod` を生成するため、**プロバイダは `.rs` を1枚、スキルは `<スキル名>/mod.rs` を1つ置くだけ**でコネクタ追加（中央 `mod.rs` 編集不要）。
 - 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。
 - `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
+- 表示形式（画面構成）は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget` を切り替え、フロントは `<main id="petApp" data-layout="…">` を見て `styles.css` が配置を変える。**HTML の要素はどの形式でも同じ**で、キャラクター描画・会話履歴・アクションセンター・読み上げ・音声入力・添付・許可判定はすべて共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。切替は設定画面と右クリックメニュー「表示形式」の両方から行え、どちらも `layout::select()` を通る（切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから、次の形式の寸法を当てる）。大きい形式へ切り替えてウィンドウが画面外へ出た場合は `pull_back_on_screen()` が見える位置へ戻す。
 - グローバルホットキーは `hotkey.rs` が担当する（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が既存登録を全解除してから設定どおりに張り直す。呼び出しキーはウィンドウを表示・最小化解除・前面化してから `pet:hotkey`（payload `"summon"`）を送り、`renderer.js` が居眠りを解除して入力欄を開く。隠すキーは表示中なら `hide()`、隠れているときは呼び出しと同じ動作をする。**呼び出しキーが登録できていない状態で隠れたままにはしない**（右クリックメニューにも手が届かず操作不能になるため、`apply()` が非表示のウィンドウを表示へ戻す）。終了時は `release()` が登録を全解除して OS へ返す。空欄は他の設定欄と同じく既定値の意味なので、片方だけ止めるときは `off` を指定する。
 - `Tracer`（`tracer.rs`）は Tauri managed state として登録され、`agent.rs` がツール実行ごとにレイテンシを計測して直近 200 件を保持する。`pet_traces` コマンドでスナップショットとツール別集計（平均レイテンシ・呼び出し回数・エラー数）を取得できる。
 - `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ永続化する。`pet_usage` コマンドで今月のプロバイダ/モデル別集計と全期間累計を取得できる。90日より古いレコードは自動削除。
@@ -429,6 +430,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_LAYOUT` | `pet` | 基本 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget`。未知の値は `pet` へ丸める。設定画面と右クリックメニュー「表示形式」の両方から変更でき、再起動なしで反映する |
+| `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"chat":{"w":380,"h":640}}`）。形式で適した大きさが違うため、1組の `PICOAGENT_WINDOW_WIDTH_PX` / `PICOAGENT_WINDOW_HEIGHT_PX` だけでは切り替えるたび配置が壊れる。位置は形式をまたいで共有する。設定画面には出さない |
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 基本 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
 | `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 基本 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
 | `PICOAGENT_HOTKEY_HIDE` | `CommandOrControl+Alt+H` | 基本 | 隠す／戻すキー。表示中は `hide()`、隠れているときは呼び出しと同じ動作。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |

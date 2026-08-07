@@ -220,7 +220,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | 読み上げ中にキャラクターをクリック | 読み上げを停止 |
 | キャラクターをクリック / なでる | 触った場所に応じて反応し、ふれあいを記録 |
 | キャラクター横の `♡` | 関係性と最近いっしょにしたことを表示 |
-| 右クリック | 設定… / 常に手前に表示 / 会話をリセット / 終了 |
+| 右クリック | 設定… / **表示形式** / 常に手前に表示 / 会話をリセット / 表示位置とサイズをリセット / 終了 |
 
 全画面フキダシでは会話履歴を検索でき、各履歴のコピーやユーザー発話の再利用ができます。
 フキダシ本文や入力欄の上で右クリックした場合は、コピーなど通常のメニューを優先します。
@@ -324,7 +324,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | ローカルモデル | `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_COMPANION_MODE` / `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` / `PICOAGENT_ONBOARDING_DONE` |
 | 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
-| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` |
+| 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` |
 | ホットキー | `PICOAGENT_HOTKEY_ENABLED` / `PICOAGENT_HOTKEY_SUMMON` / `PICOAGENT_HOTKEY_HIDE` |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
@@ -640,7 +640,7 @@ PicoAgent/
 
 **ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール）
 
-**検討中**: [docs/layout-proposal.md](docs/layout-proposal.md) — 画面構成を見直し、用途ごとに切り替えられる表示形式を 8 つ提案しています（モックアップ付き・未着手）。
+**設計資料**: [docs/layout-proposal.md](docs/layout-proposal.md) — 表示形式 8 つの設計意図とモックアップ（実装済み）。
 
 ---
 
