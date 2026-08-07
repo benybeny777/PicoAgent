@@ -77,7 +77,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, live2dSdkOverrides, initDelayMs, bootHoldMs }) => `
+const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -108,6 +108,7 @@ window.__TAURI__ = {
       up: true, providerId: "local", model: "gemma-3-4b-it-Q4_K_M",
       theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "100",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {},
+      layout: ${JSON.stringify(layout)},
       live2dSdkOverrides: ${JSON.stringify(live2dSdkOverrides)},
       history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0",
@@ -240,7 +241,7 @@ function unionBounds(boxes) {
 // 既定のウィンドウサイズは tauri.conf.json の値。実物と同じ比率で撮る。
 async function openScene({
   width = 680, height = 430, theme = "light", history = HISTORY,
-  reply = REPLY, characterId = "mugi", live2dSdkOverrides = {}, initDelayMs = 0,
+  reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0,
   bootHoldMs = 0, waitForReady = true,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
@@ -248,7 +249,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, live2dSdkOverrides, initDelayMs, bootHoldMs }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs }));
   page.on("pageerror", error => console.error(`  [pageerror] ${error.message}`));
   await page.goto(`http://127.0.0.1:${PORT}/index.html`);
   if (waitForReady) {
@@ -507,15 +508,16 @@ if (!ffmpegAvailable) {
 
 if (process.env.SHOOT_DEBUG_BOOT) {
   const characterId = process.env.SHOOT_BOOT_CHARACTER || "mugi";
-  const page = await openScene({ characterId, bootHoldMs: 5000, waitForReady: false });
+  const layout = process.env.SHOOT_BOOT_LAYOUT || "pet";
+  const page = await openScene({ characterId, layout, bootHoldMs: 5000, waitForReady: false });
   await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("is-booting"));
   await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("boot-character-ready"), { timeout: 40000 });
   await page.waitForTimeout(500);
   const debugDir = join(ROOT, "temp", "boot-check");
   mkdirSync(debugDir, { recursive: true });
-  await page.screenshot({ path: join(debugDir, `boot-${characterId}.png`), omitBackground: true });
+  await page.screenshot({ path: join(debugDir, `boot-${characterId}-${layout}.png`), omitBackground: true });
   await page.close();
-  console.log(`  起動画面確認: ${join(debugDir, `boot-${characterId}.png`)}`);
+  console.log(`  起動画面確認: ${join(debugDir, `boot-${characterId}-${layout}.png`)}`);
 }
 
 const wantsLive2d = (!only.length || only.some(name => name.startsWith("live2d-")))

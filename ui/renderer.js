@@ -4220,6 +4220,8 @@ function startAlarmPolling() {
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
+    try { await window.picoagent.finishBoot(); }
+    catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
     if (preparedGreeting) playPreparedSpeech(preparedGreeting);
@@ -4246,8 +4248,12 @@ function startAlarmPolling() {
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
-  petApp.classList.remove("is-booting");
-  stopBootLogTicker();
+  window.picoagent.finishBoot().catch(layoutError => {
+    logApp("warn", "起動失敗後に保存中の表示形式へ戻せませんでした", errorDetail(layoutError));
+  }).finally(() => {
+    petApp.classList.remove("is-booting");
+    stopBootLogTicker();
+  });
 });
 
 onboarding?.addEventListener("click", async event => {

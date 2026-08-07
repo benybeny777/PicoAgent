@@ -2554,6 +2554,16 @@ pub fn pet_frontend_ready(app: AppHandle) {
     crate::boot_screen::mark_ready(&app);
 }
 
+/// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
+#[tauri::command]
+pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
+    let id = {
+        let state = app.state::<AppState>();
+        crate::layout::current(&state.config)
+    };
+    crate::layout::apply(&app, &id)
+}
+
 #[tauri::command]
 pub async fn pet_log(
     level: String,

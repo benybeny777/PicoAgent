@@ -36,6 +36,9 @@ pub const LAYOUTS: [(&str, &str, f64, f64); 8] = [
 /// （小さい形式ほどここで頭打ちになるため、設定値より小さい既定は持たせない）。
 pub const MIN_WIDTH: f64 = 200.0;
 pub const MIN_HEIGHT: f64 = 240.0;
+/// 起動準備中だけ使う共通VTuber画面の寸法。保存中の表示形式には影響させない。
+pub const BOOT_WIDTH: f64 = 680.0;
+pub const BOOT_HEIGHT: f64 = 430.0;
 
 /// 形式ごとのウィンドウ寸法を覚えておく設定キー。
 /// `{"chat":{"w":380,"h":640},…}` の形。位置は形式をまたいで共有する
@@ -170,6 +173,20 @@ pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
         size_for(&state.config, id)
     };
 
+    apply_window_size(app, width, height, Some(id))
+}
+
+/// 保存中の表示形式にかかわらず、起動準備中は共通のVTuber画面へ広げる。
+pub fn apply_boot(app: &AppHandle) -> Result<(), String> {
+    apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)
+}
+
+fn apply_window_size(
+    app: &AppHandle,
+    width: f64,
+    height: f64,
+    emit_layout: Option<&str>,
+) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         // 画面より大きな寸法は要求しない（ワークスペースのように大きい形式で、
         // 小さいディスプレイでもつまみに手が届かなくならないように）。
@@ -192,7 +209,9 @@ pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
             (width * scale).round() as u32,
             (height * scale).round() as u32,
         );
-        let _ = window.emit("pet:layout", id);
+        if let Some(id) = emit_layout {
+            let _ = window.emit("pet:layout", id);
+        }
     }
     Ok(())
 }
@@ -219,12 +238,24 @@ pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_size, is_known, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH};
+    use super::{
+        default_size, is_known, BOOT_HEIGHT, BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
+    };
 
     /// 既定の表示形式が定義一覧に含まれていること（未知の値のフォールバック先が実在する）。
     #[test]
     fn 既定の表示形式は定義済み() {
         assert!(is_known(DEFAULT));
+    }
+
+    #[test]
+    fn 起動画面は小型形式より広い共通寸法を使う() {
+        let (chat_width, _) = default_size("chat");
+        let (bar_width, _) = default_size("bar");
+        assert_eq!((BOOT_WIDTH, BOOT_HEIGHT), (680.0, 430.0));
+        assert!(BOOT_WIDTH > chat_width);
+        assert!(BOOT_HEIGHT > default_size("bar").1);
+        assert!(BOOT_WIDTH >= bar_width);
     }
 
     /// ID が重複していないこと（重複するとメニューの選択状態が二重に立つ）。

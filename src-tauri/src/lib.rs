@@ -122,6 +122,7 @@ pub fn run() {
             commands::pet_read_file_content,
             commands::pet_read_dropped_path,
             commands::pet_frontend_ready,
+            commands::pet_finish_boot,
             commands::pet_reset_layout,
             menu::pet_menu,
         ])
@@ -245,6 +246,11 @@ pub fn run() {
                 let _ =
                     win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
                 restore_window_layout(&win, &state.config);
+            }
+            // 保存中の形式が chat / talk / bar でも、起動準備中だけは共通の
+            // VTuber画面を見せる。準備完了時にフロントから保存形式へ戻す。
+            if let Err(error) = layout::apply_boot(app.handle()) {
+                log_paths::append_app_log(app.handle(), &error);
             }
 
             // 既定が local（同梱エンジン）なら、モデル取得とエンジン起動を非同期で開始する。

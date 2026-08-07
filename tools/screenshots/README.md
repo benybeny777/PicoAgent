@@ -81,6 +81,10 @@ Live2D撮影は、麦のCubism 5／4モデルを個別に読み込んだあと�
 口元だけを閉口・開口比較します。その後、実際のテストWAVをWebAudio解析へ通して録画するため、
 身体モーションだけを口パク成功と誤認しません。
 
+起動画面だけを確認する場合は `SHOOT_DEBUG_BOOT=1` を指定する。保存形式が小型でも共通画面に
+なることは `SHOOT_BOOT_LAYOUT=chat`（または `talk` / `bar`）、キャラは
+`SHOOT_BOOT_CHARACTER=hiyori` のように指定し、生成された `temp/boot-check/` を確認する。
+
 > [!NOTE]
 > **Cubism Core（5.3用／互換用）は Live2D 公式サイトからのみ配布されています。**
 > npm にも GitHub にも正規版はありません（公式の `Live2D/CubismWebSamples` も Core は含まず、

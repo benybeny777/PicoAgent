@@ -94,7 +94,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character-view > canvas { position:absolute; left:50%; bottom:0; transform:translateX(-50%); }
 /* 起動直後（音声エンジン準備待ち）は通常のキャラ・フキダシを隠し、待機画面だけを見せる。
    準備完了で is-booting を外し、その瞬間に挨拶を再生する。 */
-.boot-screen { position:absolute; inset:0; z-index:20; padding:10px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; overflow:hidden; }
+.boot-screen { position:absolute; inset:0; z-index:1000; padding:10px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; overflow:hidden; }
 .pet-app.is-booting .boot-screen { visibility:visible; opacity:1; pointer-events:auto; }
 .pet-app.is-booting .bubble,
 .pet-app.is-booting .character { visibility:hidden; }
@@ -116,10 +116,16 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .boot-log-line.boot-kind-trace { color:var(--log-trace); }
 .pet-app.is-booting.boot-character-ready .boot-character { display:none; }
 .pet-app.is-booting.boot-character-ready .character {
-  visibility:visible; z-index:22; left:1%; right:35%; top:12px; bottom:48px;
-  width:auto; height:auto; overflow:hidden; transform:none;
+  visibility:visible; z-index:1002; left:1%; right:35%; top:12px; bottom:48px;
+  width:auto; height:auto; overflow:hidden; border-radius:0; background:transparent; transform:none;
 }
 .pet-app.is-booting.boot-character-ready .character-view { transform:translateY(2%) scale(1.5); transform-origin:50% 0; }
+.pet-app.is-booting.boot-character-ready .character img {
+  object-fit:contain; object-position:50% 100%; transform:none!important;
+}
+.pet-app.is-booting.boot-character-ready .character canvas {
+  width:auto!important; height:auto!important; transform:translateX(-50%)!important;
+}
 .pet-app.is-booting .relationship-button,
 .pet-app.is-booting .online { display:none; }
 @media (max-width:460px) {
@@ -516,10 +522,10 @@ textarea { padding-right:96px; }
 }
 /* パネル上部はキャラのアイコンぶん空ける（キャラは絶対配置で重ねる）。 */
 [data-layout="chat"] .bubble,
-[data-layout="talk"] .bubble { padding-top:46px; }
+[data-layout="talk"] .bubble { padding-top:62px; }
 [data-layout="chat"] .character,
 [data-layout="talk"] .character {
-  z-index:5; left:18px; top:16px; right:auto; bottom:auto; width:32px; height:32px;
+  z-index:5; left:16px; top:14px; right:auto; bottom:auto; width:48px; height:48px;
   border-radius:50%; overflow:hidden; background:var(--chip-bg); transform:none;
 }
 [data-layout="chat"] .character-view::before,
@@ -534,9 +540,9 @@ textarea { padding-right:96px; }
   transform:translateX(-50%) scale(2.15); transform-origin:50% 8%;
 }
 [data-layout="chat"] .online,
-[data-layout="talk"] .online { right:auto; bottom:auto; left:40px; top:38px; width:8px; height:8px; border-width:2px; }
+[data-layout="talk"] .online { right:auto; bottom:auto; left:54px; top:52px; width:9px; height:9px; border-width:2px; }
 [data-layout="chat"] .relationship-button,
-[data-layout="talk"] .relationship-button { right:auto; bottom:auto; left:56px; top:18px; width:22px; height:22px; font-size:11px; }
+[data-layout="talk"] .relationship-button { right:auto; bottom:auto; left:72px; top:27px; width:24px; height:24px; font-size:12px; }
 /* 履歴と入力欄を常設する。全画面にしなくても会話の流れが読める。 */
 [data-layout="chat"] .history-log,
 [data-layout="talk"] .history-log,
@@ -598,7 +604,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   display:flex; flex-direction:column;
 }
 [data-layout="bar"] .character {
-  z-index:5; left:16px; top:16px; right:auto; bottom:auto; width:30px; height:30px;
+  z-index:5; left:14px; top:14px; right:auto; bottom:auto; width:42px; height:42px;
   border-radius:50%; overflow:hidden; background:var(--chip-bg); transform:none;
 }
 [data-layout="bar"] .character-view::before { display:none; }
@@ -609,7 +615,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="bar"] .history-log { display:none; }
 /* 入力欄を先頭へ出し、答えはその下に開く。 */
 [data-layout="bar"] .composer { order:-1; margin-top:0; padding-top:0; }
-[data-layout="bar"] .composer textarea { min-height:38px; max-height:76px; padding-left:44px; border-radius:11px; }
+[data-layout="bar"] .composer textarea { min-height:46px; max-height:76px; padding-left:56px; border-radius:11px; }
 [data-layout="bar"] .quick-actions { display:none; }
 [data-layout="bar"] .reply { order:1; flex:1 1 auto; min-height:0; margin-top:9px; overflow:auto; }
 [data-layout="bar"] .reply:empty { display:none; }
