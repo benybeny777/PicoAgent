@@ -92,6 +92,7 @@ pub fn run() {
             commands::pet_relationship_delete_moment,
             commands::pet_relationship_clear,
             commands::pet_complete_onboarding,
+            commands::pet_show_onboarding,
             commands::settings_load,
             commands::settings_character_pick,
             commands::settings_character_install,

@@ -465,10 +465,12 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .onboarding-card h1 { margin:5px 0 4px; font-size:22px; }
 .onboarding-card p { margin:0 0 15px; color:var(--muted); font-size:12px; }
 .onboarding-choices { display:grid; gap:8px; }
-.onboarding-choices button { position:static; height:auto; padding:11px 13px; border:1px solid var(--field-border); border-radius:12px; background:var(--field-bg); color:var(--ink); text-align:left; }
-.onboarding-choices button:hover { border-color:var(--accent); background:var(--chip-bg); }
+.onboarding-choices button,.onboarding-link { position:static; display:block; height:auto; padding:11px 13px; border:1px solid var(--field-border); border-radius:12px; background:var(--field-bg); color:var(--ink); text-align:left; text-decoration:none; }
+.onboarding-choices button:hover,.onboarding-link:hover { border-color:var(--accent); background:var(--chip-bg); }
 .onboarding-choices b,.onboarding-choices span { display:block; }
 .onboarding-choices span { margin-top:2px; color:var(--muted); font-size:10.5px; font-weight:500; }
+.onboarding-back { position:static; margin-top:10px; padding:5px 0; border:0; background:transparent; color:var(--muted); font-size:10.5px; }
+.onboarding-back:hover { color:var(--accent); }
 .onboarding-privacy { margin-top:12px; padding:10px 12px; border:1px solid var(--panel-border); border-radius:11px; background:var(--chip-bg); }
 .onboarding-privacy b,.onboarding-privacy span { display:block; }
 .onboarding-privacy b { margin-bottom:3px; color:var(--ink); font-size:11px; }

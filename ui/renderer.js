@@ -38,6 +38,8 @@ const relationshipClear = document.getElementById("relationshipClear");
 const variantRow = document.getElementById("variantRow");
 const variantSelect = document.getElementById("variantSelect");
 const onboarding = document.getElementById("onboarding");
+const onboardingPurposeStep = document.getElementById("onboardingPurposeStep");
+const onboardingCharacterStep = document.getElementById("onboardingCharacterStep");
 const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
@@ -4425,12 +4427,23 @@ function startAlarmPolling() {
   });
 });
 
-onboarding?.addEventListener("click", async event => {
-  const button = event.target instanceof Element ? event.target.closest("button[data-mode]") : null;
-  if (!button) return;
+let selectedOnboardingMode = "";
+
+function showOnboardingStep(step) {
+  const character = step === "character";
+  if (onboardingPurposeStep) onboardingPurposeStep.hidden = character;
+  if (onboardingCharacterStep) onboardingCharacterStep.hidden = !character;
+  onboarding?.setAttribute("aria-labelledby", character ? "onboardingCharacterTitle" : "onboardingTitle");
+  const focusTarget = character
+    ? onboardingCharacterStep?.querySelector("button[data-onboarding-action]")
+    : onboardingPurposeStep?.querySelector("button[data-mode]");
+  focusTarget?.focus();
+}
+
+async function completeSelectedOnboarding(openCharacterSettings) {
   onboarding.querySelectorAll("button").forEach(item => { item.disabled = true; });
   try {
-    const result = await window.picoagent.completeOnboarding(button.dataset.mode);
+    const result = await window.picoagent.completeOnboarding(selectedOnboardingMode || "both");
     renderRelationship(result);
     onboarding.hidden = true;
     setAnimation("success", true);
@@ -4441,14 +4454,43 @@ onboarding?.addEventListener("click", async event => {
     logApp("error", "初回設定を保存できませんでした", errorDetail(error));
     showToast("初回設定を保存できませんでした", "error");
     onboarding.querySelectorAll("button").forEach(item => { item.disabled = false; });
+    return;
+  }
+  if (openCharacterSettings) {
+    try {
+      await window.picoagent.openSettings("character-add");
+    } catch (error) {
+      logApp("error", "キャラクター追加画面を開けませんでした", errorDetail(error));
+      showToast("キャラクター追加画面を開けませんでした", "error");
+    }
+  }
+}
+
+onboarding?.addEventListener("click", async event => {
+  const target = event.target instanceof Element ? event.target : null;
+  const modeButton = target?.closest("button[data-mode]");
+  if (modeButton) {
+    selectedOnboardingMode = modeButton.dataset.mode || "both";
+    showOnboardingStep("character");
+    return;
+  }
+  const actionButton = target?.closest("button[data-onboarding-action]");
+  const action = actionButton?.dataset.onboardingAction;
+  if (action === "back") {
+    showOnboardingStep("purpose");
+  } else if (action === "add-character") {
+    await completeSelectedOnboarding(true);
+  } else if (action === "skip-character") {
+    await completeSelectedOnboarding(false);
   }
 });
 onboarding?.addEventListener("keydown", event => {
   if (event.key !== "Tab") return;
-  const buttons = [...onboarding.querySelectorAll("button:not([disabled])")];
-  if (!buttons.length) return;
-  const first = buttons[0];
-  const last = buttons[buttons.length - 1];
+  const controls = [...onboarding.querySelectorAll("button:not([disabled]),a[href]")]
+    .filter(item => item.getClientRects().length > 0);
+  if (!controls.length) return;
+  const first = controls[0];
+  const last = controls[controls.length - 1];
   if (event.shiftKey && document.activeElement === first) {
     event.preventDefault();
     last.focus();
@@ -4456,6 +4498,15 @@ onboarding?.addEventListener("keydown", event => {
     event.preventDefault();
     first.focus();
   }
+});
+window.picoagent.listen("pet:show-onboarding", () => {
+  selectedOnboardingMode = "";
+  onboarding?.querySelectorAll("button").forEach(item => { item.disabled = false; });
+  showOnboardingStep("purpose");
+  if (onboarding) onboarding.hidden = false;
+  stopVoice();
+}).catch(error => {
+  logApp("warn", "初回セットアップ再表示イベントを受け取れませんでした", errorDetail(error));
 });
 window.picoagent.on("pet:layout-reset", () => {
   resizeWindowSize = { width: 0, height: 0 };

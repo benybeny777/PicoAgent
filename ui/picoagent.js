@@ -110,6 +110,7 @@ window.picoagent = {
   deleteRelationshipMoment: (momentId) => call("pet_relationship_delete_moment", { momentId }),
   clearRelationship: () => call("pet_relationship_clear"),
   completeOnboarding: (mode) => call("pet_complete_onboarding", { mode }),
+  showOnboarding: () => call("pet_show_onboarding"),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
     if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return;

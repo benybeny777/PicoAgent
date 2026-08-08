@@ -754,6 +754,22 @@ pub fn pet_complete_onboarding(
     Ok(json!({ "ok": true, "relationship": relationship, "bondLabel": bond_label }))
 }
 
+/// 設定画面から初回セットアップを再表示する。保存済みデータは消さず、選び直した
+/// 相棒モードだけを完了時に上書きする。
+#[tauri::command]
+pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "メイン画面が見つかりません。".to_string())?;
+    main.show().map_err(|error| error.to_string())?;
+    main.emit("pet:show-onboarding", ())
+        .map_err(|error| error.to_string())?;
+    if let Some(settings) = app.get_webview_window("settings") {
+        settings.hide().map_err(|error| error.to_string())?;
+    }
+    main.set_focus().map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn pet_daily_greeting(state: State<'_, AppState>) -> Result<Value, String> {
     use chrono::{Datelike, Local, Timelike};
@@ -3496,6 +3512,7 @@ pub fn open_character_settings(app: &tauri::AppHandle) {
 fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let tab = settings_tab(tab);
     if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.show();
         let _ = win.set_focus();
         if let Some(tab) = tab {
             let _ = win.emit("settings:navigate", tab);
@@ -3517,8 +3534,8 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
         // 旧「音声」入口は統合後のキャラクター・音声タブへ送る。
         Some("voice") => Some("character"),
         Some(
-            value @ ("basic" | "display" | "character" | "providers" | "tools" | "permissions"
-            | "skillguide" | "diagnostics"),
+            value @ ("basic" | "display" | "character" | "character-add" | "providers" | "tools"
+            | "permissions" | "skillguide" | "diagnostics"),
         ) => Some(value),
         _ => None,
     }
@@ -3594,6 +3611,7 @@ mod tests {
         assert_eq!(settings_tab(Some("permissions")), Some("permissions"));
         assert_eq!(settings_tab(Some("display")), Some("display"));
         assert_eq!(settings_tab(Some("voice")), Some("character"));
+        assert_eq!(settings_tab(Some("character-add")), Some("character-add"));
         assert_eq!(settings_tab(Some("../index")), None);
         assert_eq!(settings_tab(None), None);
     }

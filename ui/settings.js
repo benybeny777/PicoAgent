@@ -35,6 +35,7 @@ let characterLive2dSdkSelect;
 let characterLive2dSdkField;
 let characterLive2dSdkHint;
 let characterCatalog;
+let characterAddGroup;
 const characterManifestCache = new Map();
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
@@ -53,11 +54,13 @@ const LAYOUT_CHOICES = [
   { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
-let activeSettingsTab = requestedSettingsTab === "voice"
+let activeSettingsTab = requestedSettingsTab === "voice" || requestedSettingsTab === "character-add"
   ? "character"
   : (SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic");
 
 function activateSettingsTab(tabId) {
+  const focusCharacterAdd = tabId === "character-add";
+  if (focusCharacterAdd) tabId = "character";
   if (tabId === "voice") tabId = "character";
   if (!SETTINGS_TAB_IDS.has(tabId)) return false;
   activeSettingsTab = tabId;
@@ -65,6 +68,13 @@ function activateSettingsTab(tabId) {
   if (button) {
     button.click();
     form.scrollTop = 0;
+    if (focusCharacterAdd) {
+      requestAnimationFrame(() => {
+        if (!characterAddGroup) return;
+        characterAddGroup.open = true;
+        characterAddGroup.scrollIntoView({ block: "start" });
+      });
+    }
   }
   return true;
 }
@@ -2415,7 +2425,31 @@ async function render() {
     skillGuideSec.append(buildGenreChips(() => guideGenreFilter, value => { guideGenreFilter = value; }));
     skillGuideSec.append(buildSkillGuide(data.tools));
   }
-  panels.skillguide.append(skillGuideSec);
+  const onboardingGuideSec = section("初回セットアップ");
+  const reopenOnboardingStatus = el("p", { className: "hint" });
+  const reopenOnboardingButton = el("button", {
+    className: "primary",
+    type: "button",
+    textContent: "初回セットアップをもう一度開く",
+  });
+  reopenOnboardingButton.addEventListener("click", async () => {
+    reopenOnboardingButton.disabled = true;
+    reopenOnboardingStatus.textContent = "メイン画面へ切り替えています…";
+    try {
+      await window.picoagent.showOnboarding();
+      reopenOnboardingStatus.textContent = "";
+    } catch (error) {
+      reopenOnboardingStatus.textContent = `開けませんでした: ${error?.message || error}`;
+    } finally {
+      reopenOnboardingButton.disabled = false;
+    }
+  });
+  onboardingGuideSec.append(
+    el("p", { className: "hint", textContent: "用途の選択とLive2D追加案内をいつでもやり直せます。会話履歴、設定、追加済みキャラクターは削除しません。" }),
+    reopenOnboardingButton,
+    reopenOnboardingStatus,
+  );
+  panels.skillguide.append(onboardingGuideSec, skillGuideSec);
 
   // --- 導入済みキャラクターの検索・形式フィルター・選択 ---
   const charSec = section("キャラクターを探して選ぶ");
@@ -2810,11 +2844,14 @@ async function render() {
     addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
   }
   panels.character.append(charSec);
-  panels.character.append(advancedGroup(
+  characterAddGroup = advancedGroup(
     "キャラクターを追加・作成",
     "新しいキャラクターパックを導入したい時だけ開いてください。",
     [addSec, tha3Sec],
-  ));
+  );
+  characterAddGroup.id = "character-add-group";
+  if (requestedSettingsTab === "character-add") characterAddGroup.open = true;
+  panels.character.append(characterAddGroup);
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("AIサービスごとの設定");
@@ -2886,6 +2923,7 @@ async function render() {
   applySettingsSearch();
   renderingSettings = false;
   updateDirtyState();
+  if (requestedSettingsTab === "character-add") activateSettingsTab("character-add");
 }
 
 function providerDefaultModel(providerId) {
