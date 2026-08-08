@@ -11,6 +11,8 @@
 | Live2D | Cubism Core、PIXI、pixi-live2d-display、利用者モデル | 拡張性アプリ審査・契約、指定ロゴ・文言、SDKとモデルの条件 |
 | 文書・メディア | LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep | 同梱か初回取得かを確定し、GPL等の再配布義務とソース提供方法を確認 |
 
-販売用キャラは `distribution/release.json` の明示リストだけを同期します。開発用のLive2D公式サンプルは販売成果物の既定対象にしません。
+販売用キャラは `distribution/release.json` の明示リストだけを同期します。開発用のLive2D公式サンプルは通常ビルドを含む販売成果物へ同期せず、アプリからも自動取得しません。利用者が配布元から取得したモデルは利用者領域へ入り、PicoAgentの配布物にはなりません。
+
+特に確認未完了の再配布リスクは、AivisSpeech Engineと各AIVMX音声モデル、THA3学習済み重みとPython／PyTorch、LibreOffice、GPL版FFmpeg、Poppler、ImageMagick、qpdf、Pandoc、llama.cpp／whisper.cpp、およびCubism Coreです。単にOSS名を表示するだけでは足りず、実際に同梱する版ごとにライセンス文、著作権表示、変更有無、ソース提供要否、モデル固有条件を確認します。`thirdPartyInventoryReviewed` が真になるまで販売ビルドは停止します。
 
 販売前には、バイナリ・ライブラリ・モデル・画像・音声・フォント・アイコンの全ファイルを一覧化し、名称、版、配布元、ライセンス、変更有無、表示文、ソース提供要否、取得方式を記録します。

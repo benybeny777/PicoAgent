@@ -121,7 +121,8 @@ characters/<id>/
 - `layers/` と `animations/` は不要。まばたき・口パク・モーションはモデル定義が担当する。
 - `build-character-animations.py` は Live2D キャラをスキップする。
 - ランタイムは公式Coreを世代別に使い、SDK 5モデルはCore 6（Cubism 5.3形式）、SDK 4モデルはCore 5（互換用）で読み込む。`cargo xtask setup live2d` が両方のSHA-256まで照合する。
-- サンプルキャラ（Live2D 公式サンプルモデル）は `cargo xtask setup live2d` が `live2d/` へ
+- サンプルキャラ（Live2D 公式サンプルモデル）は自動取得・製品同梱しない。開発者が
+  利用条件を確認して描画回帰に使う場合だけ `cargo xtask setup live2d-samples` が `live2d/` へ
   モデルを取得する。再配布条件があるためモデル実体は Git 管理外。
   `preview.jpg` はローディング画面と設定画面アイコンに使い、取得できなかった場合は
   `_preview-placeholder.png` で代替する。
@@ -137,6 +138,8 @@ characters/<id>/
   `scale` / `offsetY` はモデルごとに実機で合わせる（同じ値では収まらない）。
 - 自作・購入した Live2D モデルを使う場合も同じ構成で `live2d/` に `.model3.json` 一式を置き、
   `motions` にそのモデルのモーショングループ名（例: `Idle` / `TapBody`）を割り当てる。
+  利用者向けには設定画面へ1体分のzip／フォルダを入れるだけで、この構成と
+  `character.json` を自動作成する。
 - Cubism 4／5の両方を書き出して選べるようにする場合は、`live2d.models` を
   `[{ "sdk":"5", "path":"live2d/sdk5/model.model3.json" }, { "sdk":"4", "path":"live2d/sdk4/model.model3.json" }]`
   の形で定義する。設定画面で自動／4固定／5固定を選べる。単一モデルだけのパックでは `live2d.model` のままでよい。

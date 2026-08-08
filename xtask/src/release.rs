@@ -82,6 +82,15 @@ pub fn check(strict: bool) -> Result<Value> {
         blockers.push("プライバシー表示の専門家確認が未完了です".to_string());
     }
     if legal
+        .and_then(|item| item.get("thirdPartyInventoryReviewed"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        blockers.push(
+            "同梱バイナリ・モデル・素材の再配布条件とライセンス台帳の確認が未完了です".to_string(),
+        );
+    }
+    if legal
         .and_then(|item| item.get("live2dApprovalReference"))
         .and_then(Value::as_str)
         .unwrap_or("")

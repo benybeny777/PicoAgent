@@ -147,6 +147,7 @@ window.picoagent = {
     userCharacters: () => call("pet_user_characters"),
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
     installCharacter: (path) => call("settings_character_install", { path }),
+    installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
     removeCharacter: (id) => call("settings_character_remove", { id }),
     pickStreamImage: (kind) => call("settings_pick_stream_image", { kind }),
     tha3Status: (rootPath = null) => call("settings_tha3_status", { rootPath }),

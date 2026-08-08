@@ -5,6 +5,7 @@
   "legal": {
     "eulaReviewed": false,
     "privacyReviewed": false,
+    "thirdPartyInventoryReviewed": false,
     "live2dApprovalReference": ""
   },
   "support": {

@@ -697,7 +697,7 @@ fn fetch_whisper_model(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-// ── Live2D（ランタイム + 公式サンプルモデル） ──────────────────────────
+// ── Live2D（通常はランタイムだけ、公式サンプルは明示取得） ──────────────
 
 struct Sample {
     id: &'static str,
@@ -709,11 +709,11 @@ struct Sample {
     preview_url: &'static str,
 }
 
-/// ランタイム3点とサンプルモデルを取得する（`LIVE2D_FORCE=1` で再取得）。
-pub fn fetch_live2d() -> Result<()> {
+/// Live2D描画ランタイムだけを取得する（`LIVE2D_FORCE=1` で再取得）。
+/// サンプルモデルは利用者・開発者が配布元の条件を確認して自分で取得する。
+pub fn fetch_live2d_runtime() -> Result<()> {
     let root = repo_root();
     let vendor = root.join("ui/vendor/live2d");
-    let characters = root.join("characters");
 
     // 公式ホスティング版Coreをモデル世代別に固定する。Cubism 5.3用Core（URLの06）は
     // 5.3 MOCを読める一方、従来のpixi-live2d-displayでは旧モデルの一部（ひより）の
@@ -764,6 +764,22 @@ pub fn fetch_live2d() -> Result<()> {
             format!("live2d runtime ready: {}", vendor.display())
         },
     );
+    log(
+        "setup:live2d",
+        "注意: Cubism Core は Live2D社のライセンス条件で利用してください。",
+    );
+    log(
+        "setup:live2d",
+        "  https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html",
+    );
+    Ok(())
+}
+
+/// 開発時の動作確認用に公式サンプルを明示取得する。
+/// 通常のsetup・dev・build・販売ビルドからは呼ばない。
+pub fn fetch_live2d_samples() -> Result<()> {
+    fetch_live2d_runtime()?;
+    let characters = repo_root().join("characters");
 
     let samples = [
         Sample {
@@ -870,11 +886,7 @@ pub fn fetch_live2d() -> Result<()> {
 
     log(
         "setup:live2d",
-        "注意: Cubism Core とサンプルモデルは Live2D 社のライセンス条件で利用してください。",
-    );
-    log(
-        "setup:live2d",
-        "  https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html",
+        "注意: サンプルモデルはLive2D社の配布条件を確認した開発者自身の環境だけで利用してください。",
     );
     log(
         "setup:live2d",

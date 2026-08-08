@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::character_pack;
@@ -162,6 +162,108 @@ fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+/// 配布zip／フォルダから、組み込み用の `.model3.json` を再帰的に探す。
+///
+/// Cubismの配布物は編集用データと `runtime/` が一緒に包まれていることが多い。
+/// そのためパック直下だけでなく中を探すが、複数モデルを曖昧に選ぶことはしない。
+fn find_live2d_model(root: &Path) -> Result<PathBuf> {
+    fn collect(current: &Path, found: &mut Vec<PathBuf>) -> Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                bail!(
+                    "Live2Dデータ内にシンボリックリンクは置けません: {}",
+                    path.display()
+                );
+            }
+            if path.is_dir() {
+                collect(&path, found)?;
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.to_ascii_lowercase().ends_with(".model3.json"))
+            {
+                found.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    let mut found = Vec::new();
+    collect(root, &mut found)?;
+    match found.len() {
+        1 => Ok(found.remove(0)),
+        0 => bail!(".model3.json が見つかりません。組み込み用ファイルを含むzip／フォルダを選んでください。"),
+        count => bail!(
+            ".model3.json が{count}個見つかりました。1体分のruntimeフォルダ、または1体だけを含むzipを選んでください。"
+        ),
+    }
+}
+
+fn prepare_source(source: &Path, destination: &Path) -> Result<()> {
+    if source.is_dir() {
+        copy_dir(source, destination)
+    } else {
+        let extension = source
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if extension != "zip" {
+            bail!("フォルダか .zip を指定してください: {}", source.display());
+        }
+        extract_zip(source, destination)
+    }
+}
+
+fn cleanup_staging(app: &AppHandle, staging: &Path) {
+    if staging.exists() {
+        if let Err(error) = std::fs::remove_dir_all(staging) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "キャラクター導入の一時フォルダを掃除できません: {} ({error})",
+                    staging.display()
+                ),
+            );
+        }
+    }
+}
+
+fn build_live2d_pack(extracted: &Path, pack: &Path, id: &str, name: &str) -> Result<()> {
+    let model = find_live2d_model(extracted)?;
+    let model_root = model
+        .parent()
+        .context("Live2Dモデルのフォルダを特定できません")?;
+    let model_name = model
+        .file_name()
+        .and_then(|value| value.to_str())
+        .context("Live2Dのmodel3.jsonファイル名を読み取れません")?;
+
+    copy_dir(model_root, &pack.join("live2d"))?;
+    let manifest = json!({
+        "id": id,
+        "name": name,
+        "description": "自分で追加したLive2Dモデル。",
+        "greeting": format!("こんにちは、{name}です。よろしくね。"),
+        "persona": {
+            "personality": "親しみやすく、利用者の依頼を丁寧に手伝う。",
+            "speechStyle": "自然で簡潔な日本語で話す。",
+            "firstPerson": name,
+            "userName": "あなた",
+            "systemPrompt": format!("{name}として振る舞い、利用者の依頼を丁寧に手伝う。")
+        },
+        "live2d": {
+            "model": format!("live2d/{model_name}"),
+            "scale": 1.8
+        }
+    });
+    crate::store::write_json_atomic(&pack.join("character.json"), &manifest)?;
+    character_pack::validate(pack)?;
+    Ok(())
+}
+
 /// フォルダまたは zip を導入する。導入したキャラクターの id と名前を返す。
 pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
     let _state_lock = crate::store::lock_state("user-characters");
@@ -183,19 +285,7 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
     std::fs::create_dir_all(&staging)?;
 
     let result = (|| -> Result<(String, String)> {
-        if source.is_dir() {
-            copy_dir(source, &staging.join("pack"))?;
-        } else {
-            let extension = source
-                .extension()
-                .and_then(|value| value.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if extension != "zip" {
-                bail!("フォルダか .zip を指定してください: {}", source.display());
-            }
-            extract_zip(source, &staging.join("pack"))?;
-        }
+        prepare_source(source, &staging.join("pack"))?;
         let pack = pack_root(&staging.join("pack"))?;
         let manifest = character_pack::validate(&pack)?;
         let id = character_pack::required_text(&manifest, "id")?.to_string();
@@ -209,17 +299,71 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
         Ok((id, name))
     })();
 
-    if staging.exists() {
-        if let Err(error) = std::fs::remove_dir_all(&staging) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!(
-                    "キャラクター導入の一時フォルダを掃除できません: {} ({error})",
-                    staging.display()
-                ),
-            );
-        }
+    cleanup_staging(app, &staging);
+    result
+}
+
+/// 利用者が自分で取得したLive2Dのzip／フォルダをPicoAgentパックへ変換して導入する。
+///
+/// 元データをPicoAgentが代理取得・再配布せず、利用者が使用条件を確認して入手した
+/// 手元のデータだけを扱う。編集用ファイルは含めず、`.model3.json` と同じフォルダに
+/// ある組み込み用データだけをユーザー領域へコピーする。
+pub fn install_live2d(
+    app: &AppHandle,
+    source: &Path,
+    id: &str,
+    name: &str,
+) -> Result<(String, String)> {
+    let _state_lock = crate::store::lock_state("user-characters");
+    if !source.exists() {
+        bail!("指定先が見つかりません: {}", source.display());
     }
+    let id = id.trim();
+    let name = name.trim();
+    if id.is_empty()
+        || id.len() > character_pack::MAX_ID_CHARS
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        bail!(
+            "id は{}文字以内の英数字・ハイフン・アンダースコアだけにしてください",
+            character_pack::MAX_ID_CHARS
+        );
+    }
+    if name.is_empty() {
+        bail!("表示名を入力してください");
+    }
+    let root = root(app);
+    std::fs::create_dir_all(&root)
+        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
+    let destination = root.join(id);
+    if destination.exists() {
+        bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
+    }
+
+    let staging = root.join(format!(".installing-live2d-{}", std::process::id()));
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).with_context(|| {
+            format!("古い導入途中データを掃除できません: {}", staging.display())
+        })?;
+    }
+    std::fs::create_dir_all(&staging)?;
+
+    let result = (|| -> Result<(String, String)> {
+        let extracted = staging.join("source");
+        prepare_source(source, &extracted)?;
+        let pack = staging.join("generated");
+        build_live2d_pack(&extracted, &pack, id, name)?;
+        let validated = character_pack::validate(&pack)?;
+        let validated_id = character_pack::required_text(&validated, "id")?.to_string();
+        let validated_name = character_pack::required_text(&validated, "name")?.to_string();
+        std::fs::rename(&pack, &destination)
+            .with_context(|| format!("導入先へ移動できません: {}", destination.display()))?;
+        Ok((validated_id, validated_name))
+    })();
+
+    cleanup_staging(app, &staging);
     result
 }
 
@@ -273,7 +417,7 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_zip, pack_root};
+    use super::{build_live2d_pack, extract_zip, find_live2d_model, pack_root};
     use std::io::Write;
     use std::path::PathBuf;
 
@@ -352,5 +496,59 @@ mod tests {
         extract_zip(&archive, &out).unwrap();
         assert!(out.join("MyModel/character.json").is_file());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 一体分のlive2dモデルを入れ子から見つける() {
+        let dir = temp_dir("live2d-one");
+        let runtime = dir.join("download/Character/runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("Model.model3.json"), b"{}").unwrap();
+        assert_eq!(
+            find_live2d_model(&dir).unwrap(),
+            runtime.join("Model.model3.json")
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 複数live2dモデルは曖昧に選ばない() {
+        let dir = temp_dir("live2d-many");
+        for name in ["a", "b"] {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+            std::fs::write(dir.join(name).join(format!("{name}.model3.json")), b"{}").unwrap();
+        }
+        assert!(find_live2d_model(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("2個"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 生のlive2dから検証済みパックを作る() {
+        let dir = temp_dir("live2d-pack");
+        let source = dir.join("download/runtime");
+        std::fs::create_dir_all(source.join("textures")).unwrap();
+        std::fs::write(source.join("Model.moc3"), [0u8; 8]).unwrap();
+        std::fs::write(source.join("textures/texture_00.png"), [0u8; 8]).unwrap();
+        std::fs::write(
+            source.join("Model.model3.json"),
+            br#"{
+              "Version": 3,
+              "FileReferences": {
+                "Moc": "Model.moc3",
+                "Textures": ["textures/texture_00.png"]
+              }
+            }"#,
+        )
+        .unwrap();
+        let pack = dir.join("pack");
+        build_live2d_pack(&dir.join("download"), &pack, "my-live2d", "マイキャラ").unwrap();
+        let manifest = crate::character_pack::validate(&pack).unwrap();
+        assert_eq!(manifest["id"], "my-live2d");
+        assert_eq!(manifest["live2d"]["model"], "live2d/Model.model3.json");
+        assert_eq!(manifest["live2d"]["scale"], 1.8);
+        std::fs::remove_dir_all(dir).ok();
     }
 }

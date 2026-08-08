@@ -28,7 +28,7 @@ const USAGE: &str = "\
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
-  setup [対象…]        取得対象は engine / aivis / whisper / live2d / tha3 / office / tools
+  setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
                       （省略時は製品へ同梱する全対象）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
@@ -40,6 +40,7 @@ const USAGE: &str = "\
   cargo xtask dev
   cargo xtask setup tools
   cargo xtask setup tha3
+  cargo xtask setup live2d-samples
   TOOLS_FORCE=1 cargo xtask setup tools
   cargo xtask cli chat 今日の天気は？";
 
@@ -106,13 +107,14 @@ fn setup(targets: &[String]) -> Result<()> {
         match target {
             "engine" => bundled::fetch_engine()?,
             "whisper" => bundled::fetch_whisper()?,
-            "live2d" => bundled::fetch_live2d()?,
+            "live2d" => bundled::fetch_live2d_runtime()?,
+            "live2d-samples" => bundled::fetch_live2d_samples()?,
             "tha3" => bundled::fetch_tha3()?,
             "aivis" => office::fetch_aivis()?,
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / tha3 / office / tools）"
+                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools）"
             ),
         }
     }
@@ -122,19 +124,19 @@ fn setup(targets: &[String]) -> Result<()> {
 /// `tauri dev` / `tauri build` を前処理つきで実行する。
 ///
 /// 前処理は旧 `npm run dev` / `npm run build` と同じ順序:
-/// 残存プロセス停止 → Live2D 取得 → キャラ同期 → UI 配信ビルド → 同梱物取得。
+/// 残存プロセス停止 → Live2Dランタイム取得 → キャラ同期 → UI 配信ビルド → 同梱物取得。
 fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
     let release = mode == "build";
-    let distribution_characters = if distribution {
+    if distribution {
         let _ = release::check(true)?;
-        Some(release::included_characters(&release::manifest()?)?)
-    } else {
-        None
-    };
+    }
+    // 製品ビルドは通常版も販売版も配布許可リストだけを使う。開発サンプルを含む
+    // 全キャラ同期は `tauri dev` に限定し、手元に取得済みのモデルが偶然混ざるのを防ぐ。
+    let product_characters = product_characters_for_build(release)?;
 
     assets::stop_stale()?;
-    bundled::fetch_live2d()?;
-    if let Some(characters) = distribution_characters.as_ref() {
+    bundled::fetch_live2d_runtime()?;
+    if let Some(characters) = product_characters.as_ref() {
         assets::sync_distribution_characters(characters)?;
     } else {
         assets::sync_characters()?;
@@ -176,8 +178,27 @@ fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
     Ok(())
 }
 
+fn product_characters_for_build(release_build: bool) -> Result<Option<Vec<String>>> {
+    if release_build {
+        Ok(Some(release::included_characters(&release::manifest()?)?))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 製品ビルドだけ配布許可キャラへ限定する() {
+        assert!(super::product_characters_for_build(false)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            super::product_characters_for_build(true).unwrap().unwrap(),
+            ["mugi", "rin", "mai"]
+        );
+    }
+
     #[test]
     fn 変更履歴の年別リンクが存在する() {
         let root = super::repo_root();

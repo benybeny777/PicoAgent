@@ -2715,9 +2715,57 @@ async function render() {
   const addSec = section("キャラクターを追加");
   const addHint = el("p", {
     className: "hint",
-    textContent: "Live2D モデルなどのキャラクターパック（character.json を含むフォルダ、またはその zip）を追加できます。追加分は下の一覧に出ます。",
+    textContent: "Live2Dは配布元から自分で取得したzip／フォルダを、そのまま追加できます。PicoAgentがサンプルモデルを代理取得・再配布することはありません。",
   });
   const addStatus = el("p", { className: "hint" });
+  const live2dIdInput = el("input", {
+    type: "text",
+    value: `live2d-${Date.now().toString(36)}`,
+    placeholder: "例: my-live2d",
+    maxLength: 64,
+  });
+  const live2dNameInput = el("input", { type: "text", value: "マイLive2D", maxLength: 80 });
+  const termsInput = el("input", { type: "checkbox" });
+
+  const officialLinks = el("div", { className: "setup-guide-links" }, [
+    ["Live2D公式サンプル", "https://www.live2d.com/learn/sample/"],
+    ["サンプル利用条件", "https://www.live2d.com/learn/sample/model-terms/"],
+  ].map(([label, href]) => {
+    const link = el("a", { href, textContent: label });
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noreferrer");
+    return link;
+  }));
+
+  async function installRawLive2d(folder) {
+    addStatus.textContent = "選択中…";
+    try {
+      if (!termsInput.checked) throw new Error("配布元の利用条件とモデルの利用権を確認してください。");
+      const id = live2dIdInput.value.trim();
+      const name = live2dNameInput.value.trim();
+      if (!id || !name) throw new Error("キャラクターIDと表示名を入力してください。");
+      const picked = await window.picoagent.settings.pickCharacterPack(folder);
+      if (!picked?.path) {
+        addStatus.textContent = "選択をキャンセルしました。";
+        return;
+      }
+      addStatus.textContent = "Live2Dモデルを確認し、キャラクターパックを作成しています…";
+      const result = await window.picoagent.settings.installLive2dCharacter(picked.path, id, name);
+      addStatus.textContent = `${result.name}（${result.id}）を追加しました。「設定」を開き直すと一覧に出ます。`;
+    } catch (error) {
+      addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
+    }
+  }
+
+  const rawLive2dButtons = el("div", { className: "character-add-actions" }, [
+    Object.assign(el("button", { className: "primary", type: "button", textContent: "Live2Dのzipを追加" }), {
+      onclick: () => installRawLive2d(false),
+    }),
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "Live2Dフォルダを追加" }), {
+      onclick: () => installRawLive2d(true),
+    }),
+  ]);
+
   async function installCharacterPack(folder) {
     addStatus.textContent = "選択中…";
     try {
@@ -2735,14 +2783,29 @@ async function render() {
     }
   }
   const addButtons = el("div", { className: "character-add-actions" }, [
-    Object.assign(el("button", { className: "secondary", type: "button", textContent: "zip を選ぶ" }), {
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "完成済みパックのzip" }), {
       onclick: () => installCharacterPack(false),
     }),
-    Object.assign(el("button", { className: "secondary", type: "button", textContent: "フォルダを選ぶ" }), {
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "完成済みパックのフォルダ" }), {
       onclick: () => installCharacterPack(true),
     }),
   ]);
-  addSec.append(addHint, addButtons, addStatus);
+  addSec.append(
+    addHint,
+    officialLinks,
+    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), live2dIdInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), live2dNameInput]),
+    el("label", { className: "check-row" }, [
+      termsInput,
+      el("span", { textContent: "配布元の利用条件を確認し、このモデルを使う権利があります" }),
+    ]),
+    rawLive2dButtons,
+    el("p", { className: "hint", textContent: ".model3.jsonが1個だけ含まれるデータを選んでください。編集用ファイルは取り込まず、同じフォルダの組み込み用データだけを保存します。" }),
+    el("div", { className: "subhead", textContent: "PicoAgentキャラクターパックを追加" }),
+    el("p", { className: "hint", textContent: "character.jsonを含む完成済みパックを持っている場合はこちらを使います。" }),
+    addButtons,
+    addStatus,
+  );
   if (userCharacterRoot) {
     addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
   }

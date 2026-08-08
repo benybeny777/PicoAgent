@@ -10,7 +10,7 @@
 
 Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430の誤記録、履歴ロック不一致、起動中の形式適用、キャラ別挨拶、配信キャンバス寸法とアセット版の二重管理も修正した。2026-08-08にはClaudeの追加提案を現行mainで再検証してCodex案と統合し、既存の会話コンテキスト圧縮を要約1ブロック置換・system込み予算・localの実コンテキスト長追従へ直した。PNG系4キャラは制作正本を分離し、Photoshop「ディテールを保持 2.0」による高精細化、元アルファ再適用、4背景QA、全件成功後だけ反映する工程へ更新した。42コマは `framePaths` で共有し、待機即時＋120ms後に残りを読む速度優先プリロードにした。制作正本208配置も71個の内容ハッシュblobへ共有化し、Photoshop工程が自動展開する。
 
-販売用ビルドは `cargo xtask build-distribution` へ分離した。`distribution/release.json` のEULA／プライバシー確認、Live2D審査参照、公開URL、更新署名、OS署名が未完了の間は出荷を停止する。販売版の既定キャラは自作PNGの `mugi` / `rin` / `mai` のみで、開発用Live2Dサンプルは同期しない。詳細は [docs/SALE-READINESS.md](docs/SALE-READINESS.md)。
+販売用ビルドは `cargo xtask build-distribution` へ分離した。`distribution/release.json` のEULA／プライバシー確認、第三者同梱物台帳、Live2D審査参照、公開URL、更新署名、OS署名が未完了の間は出荷を停止する。通常の`build`を含む製品ビルドの既定キャラは自作PNGの `mugi` / `rin` / `mai` のみで、開発用Live2Dサンプルは同期しない。Live2Dサンプルは自動取得をやめ、利用者が公式配布元等から取得したzip／フォルダを設定画面へ入れる。アプリが `.model3.json` を検査し、組み込み用データと `character.json` をユーザー領域へ作成する。開発回帰用だけ `cargo xtask setup live2d-samples` で明示取得する。詳細は [docs/SALE-READINESS.md](docs/SALE-READINESS.md)。
 
 統合ロードマップ13項目は実装済み。構図保存の検証・個別初期化、キャラ別配信表示、全Live2Dと操作回帰、冷間計測、Windows/macOS中心CI、スキル意図メタデータ、全Tool schemaガード、HTTP・フロントログ共通層、clippy警告ゼロ、CHANGELOG年別化を追加した。指摘と保留境界は [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md) に記録している。
 
@@ -26,8 +26,8 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 303件
-cargo test --manifest-path xtask/Cargo.toml             # 21件成功
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 306件
+cargo test --manifest-path xtask/Cargo.toml             # 26件成功
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui  # ?v= の自動付与を確認
 git diff --check

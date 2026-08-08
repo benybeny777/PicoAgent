@@ -1147,6 +1147,27 @@ pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value,
     }
 }
 
+/// 利用者が自分で取得したLive2Dのzip／フォルダを、パック作成と検証まで行って導入する。
+#[tauri::command]
+pub fn settings_character_install_live2d(
+    app: AppHandle,
+    path: String,
+    id: String,
+    name: String,
+) -> Result<Value, String> {
+    let source = std::path::PathBuf::from(path.trim());
+    match crate::user_characters::install_live2d(&app, &source, &id, &name) {
+        Ok((id, name)) => {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("手元のLive2Dモデルからキャラクター {name} ({id}) を追加しました。"),
+            );
+            Ok(json!({ "ok": true, "id": id, "name": name }))
+        }
+        Err(error) => Err(format!("{error:#}")),
+    }
+}
+
 /// 追加キャラクターを削除する（OS のゴミ箱へ移動。同梱キャラは対象外）。
 #[tauri::command]
 pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, String> {

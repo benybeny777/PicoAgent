@@ -10,14 +10,15 @@ cargo xtask preview-distribution
 cargo xtask build-distribution
 ```
 
-`release-check` は現在地を一覧表示します。`preview-distribution` は法務・署名の完了前でも販売対象キャラだけのUIを生成し、内容を確認できます。`build-distribution` は未完了項目が1件でもあれば、同梱物取得やビルドを始める前に停止します。開発確認用の `cargo xtask build` は従来どおり全開発キャラを扱います。
+`release-check` は現在地を一覧表示します。`preview-distribution` は法務・署名の完了前でも販売対象キャラだけのUIを生成し、内容を確認できます。`build-distribution` は未完了項目が1件でもあれば、同梱物取得やビルドを始める前に停止します。`cargo xtask dev` は全開発キャラを扱いますが、製品成果物を作る通常の `cargo xtask build` も配布許可リストだけを使います。
 
-販売設定の正本は `distribution/release.json` です。販売対象OSとキャラ、利用条件とプライバシー表示の確認、Live2D審査参照、公開URL、更新署名、OSコード署名の準備状態をここへ記録します。Windows先行販売なら `platforms` をWindowsだけにできます。秘密鍵や証明書は記録しません。
+販売設定の正本は `distribution/release.json` です。販売対象OSとキャラ、利用条件・プライバシー表示・第三者同梱物台帳の確認、Live2D審査参照、公開URL、更新署名、OSコード署名の準備状態をここへ記録します。Windows先行販売なら `platforms` をWindowsだけにできます。秘密鍵や証明書は記録しません。
 
 ## 必須ゲート
 
 - [ ] EULAを事業者情報・販売条件・返金条件に合わせ、専門家確認後に `eulaReviewed=true`
 - [ ] プライバシー表示を実際の販売サイト・外部連携一覧に合わせ、専門家確認後に `privacyReviewed=true`
+- [ ] `src-tauri/resources/bundled/` と `ui/vendor/` の実ファイルを台帳へ落とし、再配布・帰属・ソース提供条件を確認後に `thirdPartyInventoryReviewed=true`
 - [ ] Live2D拡張性アプリケーションの審査と契約を完了し、追跡可能な社内参照番号を登録
 - [ ] サポート、プライバシー表示、利用条件の公開URLを登録
 - [ ] Tauri updaterの公開鍵と更新先を登録し、秘密鍵を別媒体へバックアップ
@@ -33,6 +34,8 @@ Tauri updaterは更新ファイルの署名検証を必須としており、秘�
 ## 販売用キャラ境界
 
 初期設定は自作PNGキャラの `mugi` / `rin` / `mai` だけです。開発用Live2Dサンプル、制作途中の `mugi-live2d`、外部モデル由来の試作は販売版へ自動では入りません。追加するときは権利根拠、素材の再配布条件、音声、人格文面、全表示形式のQAを確認してから `includedCharacters` へ明示します。
+
+Live2D公式サンプルはアプリから自動取得しません。利用者が公式配布ページ等で条件を確認して自分で取得し、設定画面へzip／フォルダを入れます。これはモデル素材の再配布を避けるための境界であり、Cubism Coreの出版条件と拡張性アプリ審査は別途必要です。
 
 ## 公式参照
 
