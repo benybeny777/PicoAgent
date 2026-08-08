@@ -61,7 +61,7 @@ graph TD
 - `hi` / `こんにちは` などの短い挨拶は `agent::simple_greeting_answer()` がプロバイダを呼ばず直接返す。小型モデルへ「AIとして説明しない」等の内部ガイドをユーザー本文に追記すると、禁止事項そのものを返答として説明・読み上げることがあるため、挨拶経路へ内部指示を混ぜない。履歴へはユーザーが入力した原文と自然な短文だけを残す。返す一言は全キャラ共通の定型文にせず、`pet_set_character_profile` が受け取った `character.json` の `greeting`（人格そのままの挨拶）を使う。時間帯は「おはよう」「こんばんは」のように挨拶自体が指していればそれに合わせ、`hi` / `やっほー` のように時間帯を含まない挨拶は実時刻（5〜10時=朝 / 11〜16時=昼 / それ以外=夜）で決める。朝・夜は先頭の挨拶語だけを差し替えて二重挨拶を避け、キャラクターの挨拶が無い場合だけ既定文へ落とす。
 - 立ち絵の位置は**ウィンドウとは独立**して動かせる。`#character`（枠）の中に `#characterView` を挟み、この枠に `translate(--char-x, --char-y) scale(--char-zoom)` を当てる。待機モーションは中の `img` の `transform` を動かすため、同じ要素に重ねると打ち消し合う。`transform-origin` は上端（`50% 0%`）で、拡大しても顔が枠に残り脚が下へ抜ける。ドラッグはフロントが受け、離した時点で `pet_set_character_offset` が1回だけ保存する。枠がウィンドウから完全に出ないよう、見えしろ 48px を残す位置へ丸める。アイコンとして顔だけ出す形式（`chat` / `talk` / `bar`）では枠の変形を無効にし、ドラッグはウィンドウ移動として扱う。
 - `crates/picoagent-core` は将来のOSS化に備えた内部crateで、Tauri・OS・製品設定に依存しない正規形メッセージとUTF-8安全処理を持つ。`src-tauri/src/{message,text}.rs` は既存のアプリ内参照を保つ互換層で、実装はコアを再公開する。誤公開を防ぐため現在は `publish = false` とし、ライセンスと公開APIが決まるまで外部配布しない。設計ガードは `guard_scan::all_sources()` を通してコアのRustソースも走査する。
-- 表示形式（画面構成）は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget` を切り替え、フロントは `<main id="petApp" data-layout="…">` を見て `styles.css` が配置を変える。**HTML の要素はどの形式でも同じ**で、キャラクター描画・会話履歴・アクションセンター・読み上げ・音声入力・添付・許可判定はすべて共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。切替は設定画面の「画面・操作」にある実表示プレビューカードと、右クリックメニュー「表示スタイル」の両方から行える。右クリックの「画面・操作の設定…」は同ページを直接開く。右クリックメニューは `layout::select()`、設定保存は `remember_current_size()` → 設定保存 → `apply()` の順に処理する。どちらも切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから、次の形式の寸法を当てる。大きい形式へ切り替えてウィンドウが画面外へ出た場合は `pull_back_on_screen()` が見える位置へ戻す。
+- 表示形式（画面構成）は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget` を切り替え、フロントは `<main id="petApp" data-layout="…">` を見て `styles.css` が配置を変える。**HTML の要素はどの形式でも同じ**で、キャラクター描画・会話履歴・アクションセンター・読み上げ・音声入力・添付・許可判定はすべて共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。切替は設定画面の「画面・操作」にある実表示プレビューカードと、右クリックメニュー「画面レイアウト」の両方から行える。右クリックの「画面レイアウト・位置…」は同ページを直接開く。右クリックメニューは `layout::select()`、設定保存は `remember_current_size()` → 設定保存 → `apply()` の順に処理する。どちらも切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから、次の形式の寸法を当てる。大きい形式へ切り替えてウィンドウが画面外へ出た場合は `pull_back_on_screen()` が見える位置へ戻す。
 - グローバルホットキーは `hotkey.rs` が担当する（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が既存登録を全解除してから設定どおりに張り直す。呼び出しキーはウィンドウを表示・最小化解除・前面化してから `pet:hotkey`（payload `"summon"`）を送り、`renderer.js` が居眠りを解除して入力欄を開く。隠すキーは表示中なら `hide()`、隠れているときは呼び出しと同じ動作をする。**呼び出しキーが登録できていない状態で隠れたままにはしない**（右クリックメニューにも手が届かず操作不能になるため、`apply()` が非表示のウィンドウを表示へ戻す）。終了時は `release()` が登録を全解除して OS へ返す。空欄は他の設定欄と同じく既定値の意味なので、片方だけ止めるときは `off` を指定する。
 - `Tracer`（`tracer.rs`）は Tauri managed state として登録され、`agent.rs` がツール実行ごとにレイテンシを計測して直近 200 件を保持する。`pet_traces` コマンドでスナップショットとツール別集計（平均レイテンシ・呼び出し回数・エラー数）を取得できる。
 - `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ永続化する。`pet_usage` コマンドで今月のプロバイダ/モデル別集計と全期間累計を取得できる。90日より古いレコードは自動削除。
@@ -395,7 +395,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - API: `load(path)` / `get(key, fallback)` / `get_bool(key, fallback)` / `get_all()` / `set_all(patch)`。
 - 空文字は「未設定」とみなし env → 既定値へフォールバックする。
 
-### 設定画面（右クリック →「すべての設定…」）
+### 設定画面（右クリック →「設定を開く…」）
 
 - `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/picoagent.js` の `window.picoagent.settings.*` →
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
@@ -439,7 +439,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_CHARACTER_FRAMING` | `{}` | 画面 | キャラクターID×表示形式ごとの構図。`preset`（`bust` / `upper` / `full` / `custom`）、`zoom`、`x`、`y`を保持する。未設定時は旧共通の拡大率・位置を使う |
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 立ち絵の横移動量（px）。キャラを直接ドラッグして決める。**ウィンドウではなくキャラだけが動く**。設定画面には出さない |
 | `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 立ち絵の縦移動量（px）。同上 |
-| `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget`。未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「表示スタイル」の両方から変更でき、再起動なしで反映する |
+| `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `talk` / `bar` / `workspace` / `stream` / `widget`。未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
 | `PICOAGENT_STREAM_BACKGROUND` | `pastel` | 画面 | 配信形式の背景。`pastel` / `gaming` / `simple` / `custom` |
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |

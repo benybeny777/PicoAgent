@@ -12,7 +12,16 @@
     <label class="settings-search" for="settingsSearch">
       <span>設定を検索</span>
       <input id="settingsSearch" type="search" autocomplete="off" placeholder="例: 音声、画面、APIキー、キャラクター" />
+      <button id="clearSettingsSearch" class="search-clear" type="button" hidden>解除</button>
     </label>
+    <div class="search-shortcuts" aria-label="よく使う設定の検索">
+      <span>すぐ探す</span>
+      <button type="button" data-settings-query="画面">画面</button>
+      <button type="button" data-settings-query="キャラクター">キャラ</button>
+      <button type="button" data-settings-query="読み上げ">音声</button>
+      <button type="button" data-settings-query="AI">AI</button>
+      <button type="button" data-settings-query="APIキー">APIキー</button>
+    </div>
   </header>
 
   <main id="form">
@@ -22,6 +31,7 @@
 
   <footer>
     <span id="status" class="status" aria-live="polite"></span>
+    <span id="dirtySummary" class="dirty-summary" aria-live="polite"></span>
     <button id="resetChanges" class="secondary" type="button" disabled>保存前の変更を取り消す</button>
     <button id="save" type="button">変更を保存</button>
   </footer>

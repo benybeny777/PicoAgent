@@ -8,6 +8,8 @@ const saveBtn = document.getElementById("save");
 const resetChangesBtn = document.getElementById("resetChanges");
 const modelOptions = document.getElementById("modelOptions");
 const settingsSearch = document.getElementById("settingsSearch");
+const clearSettingsSearch = document.getElementById("clearSettingsSearch");
+const dirtySummary = document.getElementById("dirtySummary");
 const { errorDetail, logApp } = window.PicoUI;
 
 let data; // settings:load の結果
@@ -60,7 +62,10 @@ function activateSettingsTab(tabId) {
   if (!SETTINGS_TAB_IDS.has(tabId)) return false;
   activeSettingsTab = tabId;
   const button = document.getElementById(`tab-${tabId}`);
-  if (button) button.click();
+  if (button) {
+    button.click();
+    form.scrollTop = 0;
+  }
   return true;
 }
 
@@ -134,7 +139,11 @@ function stableStringify(value) {
 function updateDirtyState() {
   if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
   const current = collect();
-  const dirty = stableStringify(current) !== stableStringify(savedSnapshot);
+  const changedKeys = new Set(
+    [...Object.keys(savedSnapshot), ...Object.keys(current)]
+      .filter(key => stableStringify(current[key]) !== stableStringify(savedSnapshot[key]))
+  );
+  const dirty = changedKeys.size > 0;
   for (const [key, wrapper] of inputWrappers) {
     const currentValue = current[key];
     const savedValue = savedSnapshot[key];
@@ -171,6 +180,11 @@ function updateDirtyState() {
   }
   resetChangesBtn.disabled = !dirty;
   saveBtn.classList.toggle("dirty", dirty);
+  saveBtn.textContent = dirty ? `変更を保存（${changedKeys.size}件）` : "変更を保存";
+  if (dirtySummary) {
+    dirtySummary.textContent = dirty ? `未保存 ${changedKeys.size}件` : "保存済み";
+    dirtySummary.classList.toggle("dirty", dirty);
+  }
 }
 
 function nodeSearchText(node) {
@@ -228,7 +242,8 @@ function applySettingsSearch() {
   for (const item of form.querySelectorAll(".searchable")) {
     // スキル設定の ⚙ パネルはアコーディオンが開閉を管理するため、ここでは触らない（検索時のみ下で開く）。
     if (item.classList.contains("card-config")) continue;
-    item.hidden = query ? !nodeSearchText(item).includes(query) : false;
+    const conditionHidden = item.dataset.conditionHidden === "true";
+    item.hidden = conditionHidden || (query ? !nodeSearchText(item).includes(query) : false);
   }
   applyCharacterFilters(query);
   // ⚙ パネル: 検索中はマッチしたものだけ開き、非検索時はアコーディオンの開閉状態（.open）に従う。
@@ -791,6 +806,40 @@ function layoutPickerField(value) {
     cards,
   ]), "PICOAGENT_LAYOUT", "画面 レイアウト 表示形式", ...LAYOUT_CHOICES.map(layout => `${layout.label} ${layout.description}`));
   return registerInput("PICOAGENT_LAYOUT", select, wrapper);
+}
+
+function quickSettingsGuide(v) {
+  const layout = LAYOUT_CHOICES.find(choice => choice.id === (v.PICOAGENT_LAYOUT || "pet"));
+  const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
+  const cards = [
+    { tab: "character", title: "キャラと声", summary: `${v.PICOAGENT_CHARACTER || "既定キャラ"}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}` },
+    { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
+    { tab: "providers", title: "使うAI", summary: provider?.label || v.PICOAGENT_PROVIDER || "ローカル" },
+    { tab: "diagnostics", title: "困ったとき", summary: "接続確認と修復" },
+  ];
+  const grid = el("div", { className: "quick-settings-grid" });
+  for (const item of cards) {
+    const button = el("button", { type: "button", className: "quick-settings-card" }, [
+      el("strong", { textContent: item.title }),
+      el("span", { textContent: item.summary }),
+      el("small", { textContent: "開く" }),
+    ]);
+    button.dataset.tab = item.tab;
+    button.addEventListener("click", () => activateSettingsTab(item.tab));
+    grid.append(button);
+  }
+  return markSearchable(el("section", { className: "quick-settings" }, [
+    el("div", { className: "quick-settings-heading" }, [
+      el("h2", { textContent: "まずはここから" }),
+      el("p", { textContent: "普段はこの4つだけ見れば大丈夫です。" }),
+    ]),
+    grid,
+  ]), "よく使う 設定 キャラクター 音声 画面 レイアウト AI モデル 診断 修復");
+}
+
+function setQuickSettingsSummary(tabId, summary) {
+  const node = form.querySelector(`.quick-settings-card[data-tab="${tabId}"] span`);
+  if (node) node.textContent = summary;
 }
 
 function applySettingsTheme(value) {
@@ -1715,7 +1764,7 @@ function windowPlacementField() {
     actions.append(button);
   }
   return markSearchable(el("div", { className: "field" }, [
-    el("label", { textContent: "ウィンドウを置く画面" }), actions,
+    el("label", { textContent: "表示するモニター" }), actions,
     el("p", { className: "hint", textContent: "動画を見ながら使う場合は「左画面」などを選ぶと、接続中ディスプレイの中央へ移動します。" }),
   ]), "ウィンドウ 配置 左画面 右画面 主画面 ディスプレイ");
 }
@@ -2077,19 +2126,23 @@ async function render() {
   global.append(registerInput(
     "PICOAGENT_PROVIDER",
     providerSelect,
-    markSearchable(el("div", { className: "field" }, [el("label", { textContent: "叩く AI（プロバイダ）" }), providerSelect]), "PICOAGENT_PROVIDER", "叩く AI", "プロバイダ")
+    markSearchable(el("div", { className: "field" }, [el("label", { textContent: "使うAI" }), providerSelect]), "PICOAGENT_PROVIDER", "叩く AI", "使うAI", "プロバイダ")
   ));
-  const modelField = field("PICOAGENT_MODEL", "モデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
+  const modelField = field("PICOAGENT_MODEL", "AIモデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
   global.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
   // Ollama だけは実行中のローカル一覧を基本タブのモデル欄に出す。
   // 他プロバイダは「AIモデル・連携」タブで種類とサイズを選ぶため、ここでは隠す。
-  function updateModelFieldVisibility() { modelField.hidden = providerSelect.value !== "ollama"; }
+  function updateModelFieldVisibility() {
+    const hidden = providerSelect.value !== "ollama";
+    modelField.dataset.conditionHidden = hidden ? "true" : "false";
+    modelField.hidden = hidden;
+  }
   updateModelFieldVisibility();
   const displaySec = section("画面レイアウト");
   displaySec.append(el("p", {
     className: "settings-intro",
-    textContent: "用途に合う表示スタイルをプレビューから選べます。キャラは全形式で上半身を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
+    textContent: "用途に合う画面レイアウトをプレビューから選べます。キャラは全形式で上半身を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
   }));
   displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT || "pet"));
   displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
@@ -2145,10 +2198,20 @@ async function render() {
     const enabled = event.target.checked;
     ttsMasterStatus.className = `tts-master-status ${enabled ? "enabled" : "muted"}`;
     ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
+    const selectedEntry = characterCatalog?.characters?.find(character => character.id === characterSelect?.value);
+    setQuickSettingsSummary("character", `${selectedEntry?.name || characterSelect?.value || v.PICOAGENT_CHARACTER || "既定キャラ"}・${enabled ? "読み上げ有効" : "ミュート中"}`);
   });
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
-  panels.basic.append(global);
+  panels.basic.append(quickSettingsGuide(v), global);
   panels.display.append(displaySec);
+  providerSelect.addEventListener("change", () => {
+    const selected = data.providers.find(item => item.id === providerSelect.value);
+    setQuickSettingsSummary("providers", selected?.label || providerSelect.value);
+  });
+  inputs.get("PICOAGENT_LAYOUT")?.addEventListener("change", event => {
+    const selected = LAYOUT_CHOICES.find(item => item.id === event.target.value);
+    setQuickSettingsSummary("display", selected?.label || event.target.value);
+  });
   applySettingsTheme(v.PICOAGENT_THEME || "system");
   inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {
     applySettingsTheme(event.target.value);
@@ -2186,6 +2249,8 @@ async function render() {
   const selectedCharacter = characterCatalog.characters.some(character => character.id === requestedCharacter)
     ? requestedCharacter
     : characterCatalog.default;
+  const selectedCharacterEntry = characterCatalog.characters.find(character => character.id === selectedCharacter);
+  setQuickSettingsSummary("character", `${selectedCharacterEntry?.name || selectedCharacter}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}`);
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", {
       value: character.id,
@@ -2250,6 +2315,8 @@ async function render() {
         characterStreamProfileEditor?.load();
         previousCharacter = requestedCharacter;
         characterSelect.value = requestedCharacter;
+        const selectedEntry = characterCatalog.characters.find(character => character.id === requestedCharacter);
+        setQuickSettingsSummary("character", `${selectedEntry?.name || requestedCharacter}・${inputs.get("PICOAGENT_TTS_ENABLED")?.checked ? "読み上げ有効" : "ミュート中"}`);
       } catch (error) {
         characterSelect.value = previousCharacter;
         statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`;
@@ -2655,7 +2722,7 @@ async function render() {
   ));
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
-  const provSec = section("叩く AI コネクタの設定");
+  const provSec = section("AIサービスごとの設定");
   let activeProviderBlock = null;
   function renderProviderConfig(id) {
     if (activeProviderBlock) {
@@ -2805,7 +2872,7 @@ function confirmRestart() {
     const card = el("div", { className: "restart-card" });
     card.append(
       el("h2", { textContent: "再起動して反映します" }),
-      el("p", { textContent: "選んだ設定（叩く AI・モデル・音声・キャラクターなど）は、PicoAgent を再起動して起動画面でまとめて反映します。今すぐ再起動しますか？" }),
+      el("p", { textContent: "選んだ設定（使うAI・モデル・音声・キャラクターなど）は、PicoAgent を再起動して起動画面でまとめて反映します。今すぐ再起動しますか？" }),
     );
     const actions = el("div", { className: "restart-actions" });
     const later = el("button", { className: "btn", textContent: "あとで", type: "button" });
@@ -2841,7 +2908,7 @@ saveBtn.addEventListener("click", async () => {
         statusEl.textContent = "保存しました（次回の起動時に反映されます）";
       }
     } else {
-      statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（叩く AI に未接続）";
+      statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（AIに未接続）";
     }
     // ホットキーは保存と同時に張り直す。登録できなかった場合は黙って無効にせず伝える。
     if (res.hotkeyWarning) {
@@ -2883,6 +2950,34 @@ form.addEventListener("click", event => {
 });
 
 settingsSearch?.addEventListener("input", applySettingsSearch);
+clearSettingsSearch?.addEventListener("click", () => {
+  settingsSearch.value = "";
+  clearSettingsSearch.hidden = true;
+  applySettingsSearch();
+  settingsSearch.focus();
+});
+for (const shortcut of document.querySelectorAll("[data-settings-query]")) {
+  shortcut.addEventListener("click", () => {
+    settingsSearch.value = shortcut.dataset.settingsQuery || "";
+    if (clearSettingsSearch) clearSettingsSearch.hidden = false;
+    applySettingsSearch();
+    settingsSearch.focus();
+  });
+}
+settingsSearch?.addEventListener("input", () => {
+  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
+});
+document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    if (!saveBtn.disabled && !resetChangesBtn.disabled) saveBtn.click();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    settingsSearch?.focus();
+    settingsSearch?.select();
+  }
+});
 
 (async () => {
   data = await window.picoagent.settings.load();

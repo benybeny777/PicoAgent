@@ -17,10 +17,10 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     let summon = MenuItemBuilder::with_id("summon", "話しかける…")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let settings = MenuItemBuilder::with_id("settings", "すべての設定…")
+    let settings = MenuItemBuilder::with_id("settings", "設定を開く…")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let display_settings = MenuItemBuilder::with_id("display_settings", "画面・操作の設定…")
+    let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト・位置…")
         .build(&app)
         .map_err(|e| e.to_string())?;
     let character_settings =
@@ -68,7 +68,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    let mut layout_menu = SubmenuBuilder::new(&app, "表示スタイル");
+    let mut layout_menu = SubmenuBuilder::new(&app, "画面レイアウト");
     let mut layout_items = Vec::new();
     for (id, label, _, _) in crate::layout::LAYOUTS {
         layout_items.push(
@@ -82,7 +82,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         layout_menu = layout_menu.item(item);
     }
     let layout_menu = layout_menu.build().map_err(|e| e.to_string())?;
-    let placement_menu = SubmenuBuilder::new(&app, "ウィンドウを置く画面")
+    let placement_menu = SubmenuBuilder::new(&app, "表示するモニター")
         .item(
             &MenuItemBuilder::with_id("place:left", "左画面の中央")
                 .build(&app)

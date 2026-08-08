@@ -83,10 +83,26 @@ try {
   if (placementCount !== 4) throw new Error(`画面配置ボタンが4件ではありません: ${placementCount}`);
   if (await page.locator(".layout-live-preview img").count() !== 1) throw new Error("選択中レイアウトの大型プレビューがありません");
   if (await page.locator('[data-setting-key="PICOAGENT_STREAM_BACKGROUND"]').count() !== 1) throw new Error("配信背景の選択欄がありません");
+  const previewHeight = await page.locator(".layout-live-preview img").evaluate(node => node.getBoundingClientRect().height);
+  if (previewHeight > 241) throw new Error(`選択中レイアウトのプレビューが大きすぎます: ${previewHeight}px`);
   await page.locator("main").evaluate(node => { node.scrollTop = 0; });
   await page.waitForTimeout(100);
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
+  await page.getByRole("tab", { name: "基本設定" }).click();
+  if (await page.locator(".quick-settings-card").count() !== 4) throw new Error("よく使う設定への入口が4件ではありません");
+  if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
+  await page.screenshot({ path: join(OUT, "basic-tab.png") });
+  await page.locator('[data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
+  const dirtyText = await page.locator("#dirtySummary").textContent();
+  if (!dirtyText?.includes("未保存")) throw new Error(`未保存件数が表示されません: ${dirtyText}`);
+  if (!(await page.locator("#save").textContent())?.includes("1件")) throw new Error("保存ボタンに変更件数が表示されません");
+  await page.locator("#resetChanges").click();
+  await page.locator('[data-settings-query="読み上げ"]').click();
+  if (await page.locator("#clearSettingsSearch").isHidden()) throw new Error("検索解除ボタンが表示されません");
+  if (await page.locator('.searchable:not([hidden])').count() < 1) throw new Error("音声の検索候補が表示されません");
+  await page.locator("#clearSettingsSearch").click();
+  if (await page.locator("#settingsSearch").inputValue() !== "") throw new Error("検索を解除できません");
   await page.getByRole("tab", { name: "キャラ・音声" }).click();
   await page.waitForSelector(".framing-editor");
   await page.waitForSelector(".stream-profile-editor");
@@ -95,7 +111,7 @@ try {
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
   const muteStatus = await page.locator(".tts-master-status").textContent();
   if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
-  console.log(`画面タブ確認: 8件 / 配置=${placementCount}件 / 構図・キャラ別配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口4件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・構図・配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));
