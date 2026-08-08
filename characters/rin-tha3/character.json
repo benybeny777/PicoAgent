@@ -1,7 +1,7 @@
 {
   "id": "rin-tha3",
   "name": "りん",
-  "assetVersion": "2026-08-08-photoshop-2x-v1-rin-tha3",
+  "assetVersion": "2026-08-08-preserve-details-v2-rin-tha3",
   "description": "自作（THA3）版。既存のりんとは別キャラクターとして扱われる、17キーポーズ／42フレームの試作モデル。人格・声・挨拶は既存のりんと同じ。",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
@@ -48,7 +48,6 @@
   ],
   "animations": {
     "idle": {
-      "path": "animations/idle",
       "frames": 12,
       "fps": 3.2,
       "frameDurations": [
@@ -65,10 +64,23 @@
         760,
         1100
       ],
-      "motion": "live2d-idle"
+      "motion": "live2d-idle",
+      "framePaths": [
+        "frames/a8bbb23d05153878d1e4.png",
+        "frames/4a8fc80e12e2b3d3ab81.png",
+        "frames/263e384029699a3e4025.png",
+        "frames/86495d6b4768c5ae5f48.png",
+        "layers/blink_half.png",
+        "layers/blink_closed.png",
+        "layers/blink_half.png",
+        "frames/4a8fc80e12e2b3d3ab81.png",
+        "frames/a8bbb23d05153878d1e4.png",
+        "frames/86495d6b4768c5ae5f48.png",
+        "frames/263e384029699a3e4025.png",
+        "frames/a8bbb23d05153878d1e4.png"
+      ]
     },
     "thinking": {
-      "path": "animations/running",
       "frames": 12,
       "fps": 7.0,
       "frameDurations": [
@@ -85,10 +97,23 @@
         170,
         150
       ],
-      "motion": "live2d-thinking"
+      "motion": "live2d-thinking",
+      "framePaths": [
+        "frames/440fda09e4cf68adbc70.png",
+        "frames/a04203958abd13d5039d.png",
+        "frames/440fda09e4cf68adbc70.png",
+        "frames/dd67a2c0867f6fc85a69.png",
+        "frames/a04203958abd13d5039d.png",
+        "frames/440fda09e4cf68adbc70.png",
+        "layers/blink_closed.png",
+        "frames/dd67a2c0867f6fc85a69.png",
+        "frames/a04203958abd13d5039d.png",
+        "frames/440fda09e4cf68adbc70.png",
+        "frames/a04203958abd13d5039d.png",
+        "frames/440fda09e4cf68adbc70.png"
+      ]
     },
     "talking": {
-      "path": "animations/review",
       "frames": 12,
       "fps": 8.0,
       "frameDurations": [
@@ -105,10 +130,23 @@
         75,
         140
       ],
-      "motion": "live2d-talking"
+      "motion": "live2d-talking",
+      "framePaths": [
+        "frames/205973fff29c90920330.png",
+        "frames/7a68102ccbcf031e2bd2.png",
+        "frames/4f2610891066ca82bd01.png",
+        "frames/a173694ce75c36e9bfb9.png",
+        "frames/7a68102ccbcf031e2bd2.png",
+        "frames/205973fff29c90920330.png",
+        "frames/4f2610891066ca82bd01.png",
+        "frames/a173694ce75c36e9bfb9.png",
+        "layers/blink_half.png",
+        "frames/7a68102ccbcf031e2bd2.png",
+        "frames/4f2610891066ca82bd01.png",
+        "frames/205973fff29c90920330.png"
+      ]
     },
     "sad": {
-      "path": "animations/failed",
       "frames": 6,
       "fps": 4.2,
       "frameDurations": [
@@ -119,7 +157,15 @@
         420,
         560
       ],
-      "motion": "live2d-sad"
+      "motion": "live2d-sad",
+      "framePaths": [
+        "frames/999c188ae15a62fa1d09.png",
+        "frames/37f3251b59df802af26f.png",
+        "layers/blink_closed.png",
+        "frames/37f3251b59df802af26f.png",
+        "frames/999c188ae15a62fa1d09.png",
+        "frames/999c188ae15a62fa1d09.png"
+      ]
     }
   },
   "generator": {

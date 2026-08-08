@@ -35,6 +35,7 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
+| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系4キャラ×8表示形式を `temp/character-layout-matrix/` へ撮影し、表示時間・描画範囲のJSONと一覧画像を作る。ffmpeg不要 |
 
 引数に画像名を並べると、その絵だけを撮り直します。全部で 3 分ほどかかるので、普段はこちらを使います。
 

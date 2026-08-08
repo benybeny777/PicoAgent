@@ -242,7 +242,7 @@ function unionBounds(boxes) {
 async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0,
-  bootHoldMs = 0, waitForReady = true,
+  bootHoldMs = 0, waitForReady = true, forcePng = false,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   // 「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
@@ -250,12 +250,85 @@ async function openScene({
   await page.clock.install();
   await page.clock.resume();
   await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs }));
+  if (forcePng) {
+    await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
+      const response = await route.fetch();
+      const manifest = await response.json();
+      delete manifest.live2d;
+      for (const variant of Object.values(manifest.variants || {})) delete variant.live2d;
+      await route.fulfill({ response, json: manifest });
+    });
+  }
   page.on("pageerror", error => console.error(`  [pageerror] ${error.message}`));
   await page.goto(`http://127.0.0.1:${PORT}/index.html`);
   if (waitForReady) {
     await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), { timeout: 20000 });
   }
   return page;
+}
+
+const MATRIX_LAYOUTS = {
+  mascot: [360, 560], pet: [900, 600], chat: [520, 760], talk: [520, 760],
+  bar: [900, 320], workspace: [1400, 850], stream: [1560, 920], widget: [440, 600],
+};
+
+// 4体のPNGキャラを全8形式で描画し、表示欠けと初期表示時間を一括検査する。
+async function shootCharacterMatrix() {
+  const output = join(ROOT, "temp", "character-layout-matrix");
+  mkdirSync(output, { recursive: true });
+  const results = [];
+  for (const characterId of ["mugi", "rin", "mai", "rin-tha3"]) {
+    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      const started = performance.now();
+      const page = await openScene({ characterId, layout, width, height, forcePng: true });
+      try {
+        await page.waitForFunction(() => {
+          const image = document.getElementById("petSprite");
+          return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== "none";
+        }, { timeout: 20000 });
+        await page.waitForTimeout(250);
+        const visual = await page.evaluate(() => {
+          const image = document.getElementById("petSprite");
+          const character = document.getElementById("character");
+          const rect = image.getBoundingClientRect();
+          const characterRect = character.getBoundingClientRect();
+          return {
+            naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+            imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            characterRect: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
+            resources: performance.getEntriesByType("resource").length,
+          };
+        });
+        if (visual.imageRect.width <= 0 || visual.imageRect.height <= 0
+          || visual.imageRect.x >= width || visual.imageRect.y >= height
+          || visual.imageRect.x + visual.imageRect.width <= 0 || visual.imageRect.y + visual.imageRect.height <= 0) {
+          throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません`);
+        }
+        const file = `${characterId}-${layout}.png`;
+        const png = await page.screenshot({ path: join(output, file), omitBackground: true });
+        const opaqueBounds = await bounds(png, 0);
+        if (!opaqueBounds) throw new Error(`${characterId}/${layout}: 不透明な描画がありません`);
+        results.push({ characterId, layout, viewport: { width, height }, readyMs: Math.round(performance.now() - started), opaqueBounds, ...visual, file });
+        console.log(`  表示検査: ${characterId}/${layout} ${results.at(-1).readyMs}ms`);
+      } finally {
+        await page.close();
+      }
+    }
+  }
+  await writeFile(join(output, "metrics.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
+
+  const contact = await browser.newPage({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1 });
+  try {
+    const cards = await Promise.all(results.map(async result => {
+      const png = await readFile(join(output, result.file));
+      return `<figure><img src="data:image/png;base64,${png.toString("base64")}"><figcaption>${result.characterId} / ${result.layout} / ${result.readyMs}ms</figcaption></figure>`;
+    }));
+    await contact.setContent(`<style>body{margin:24px;background:#dce6f5;font:16px sans-serif;color:#17233d}main{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}figure{margin:0;padding:10px;background:#fff;border-radius:14px;box-shadow:0 3px 12px #38527b33}img{display:block;width:100%;height:230px;object-fit:contain;background:repeating-conic-gradient(#e7edf5 0 25%,#f8fafc 0 50%) 50%/24px 24px}figcaption{padding-top:8px;font-weight:700}</style><main>${cards.join("")}</main>`);
+    await contact.screenshot({ path: join(output, "contact-sheet.png"), fullPage: true });
+  } finally {
+    await contact.close();
+  }
+  return { output, results };
 }
 
 // 起動時の挨拶ではなく、直近のやり取りが写るように1往復させる。
@@ -509,6 +582,16 @@ mkdirSync(OUT, { recursive: true });
 const only = process.argv.slice(2);
 const skipped = [];
 let failed = 0;
+
+if (process.env.SHOOT_CHARACTER_MATRIX) {
+  const matrix = await shootCharacterMatrix();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  const average = Math.round(matrix.results.reduce((sum, item) => sum + item.readyMs, 0) / matrix.results.length);
+  console.log(`32形式の表示検査完了: ${matrix.output}（平均 ${average}ms）`);
+  process.exit(0);
+}
 
 if (!ffmpegAvailable) {
   throw new Error(

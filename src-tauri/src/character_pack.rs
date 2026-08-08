@@ -75,8 +75,11 @@ pub fn validate(source: &Path) -> Result<Value> {
     required_text(&manifest, "name")?;
 
     let live2d_model = manifest.pointer("/live2d/model").and_then(Value::as_str);
-    if live2d_model.is_none() && manifest.pointer("/animations/idle/path").is_none() {
-        bail!("live2d.model または animations.idle.path が必要です");
+    let idle_has_frames = manifest
+        .pointer("/animations/idle")
+        .is_some_and(animation_has_frames);
+    if live2d_model.is_none() && !idle_has_frames {
+        bail!("live2d.model または animations.idle の path / framePaths が必要です");
     }
     for pointer in ["/boot/sleeping", "/live2d/model"] {
         if let Some(relative) = manifest.pointer(pointer).and_then(Value::as_str) {
@@ -87,9 +90,65 @@ pub fn validate(source: &Path) -> Result<Value> {
     if let Some(model) = live2d_model {
         validate_live2d_model(source, model)?;
     }
+    validate_animations(source, &manifest)?;
     validate_variants(source, &manifest)?;
     validate_interactions(&manifest)?;
     Ok(manifest)
+}
+
+fn animation_has_frames(animation: &Value) -> bool {
+    animation.get("path").and_then(Value::as_str).is_some()
+        || animation
+            .get("framePaths")
+            .and_then(Value::as_array)
+            .is_some_and(|paths| !paths.is_empty())
+}
+
+fn validate_animations(source: &Path, manifest: &Value) -> Result<()> {
+    let Some(animations) = manifest.get("animations") else {
+        return Ok(());
+    };
+    let Some(animations) = animations.as_object() else {
+        bail!("animations はオブジェクトで指定してください");
+    };
+    for (name, animation) in animations {
+        let Some(animation) = animation.as_object() else {
+            bail!("animations.{name} はオブジェクトで指定してください");
+        };
+        let declared_frames = animation.get("frames").and_then(Value::as_u64);
+        if let Some(paths) = animation.get("framePaths") {
+            let Some(paths) = paths.as_array() else {
+                bail!("animations.{name}.framePaths は配列で指定してください");
+            };
+            if paths.is_empty() {
+                bail!("animations.{name}.framePaths は1件以上必要です");
+            }
+            if declared_frames.is_some_and(|count| count as usize != paths.len()) {
+                bail!("animations.{name}.frames と framePaths の件数が一致しません");
+            }
+            for (index, path) in paths.iter().enumerate() {
+                let Some(path) = path.as_str() else {
+                    bail!("animations.{name}.framePaths[{index}] は文字列で指定してください");
+                };
+                ensure_asset(source, path).with_context(|| {
+                    format!("animations.{name}.framePaths[{index}] が指すファイルがありません")
+                })?;
+            }
+        } else if let Some(path) = animation.get("path").and_then(Value::as_str) {
+            let frames = declared_frames.unwrap_or(0);
+            if frames == 0 {
+                bail!("animations.{name}.frames は1以上にしてください");
+            }
+            for index in 0..frames {
+                ensure_asset(source, &format!("{path}/{index:02}.png")).with_context(|| {
+                    format!("animations.{name} のフレーム {index:02}.png がありません")
+                })?;
+            }
+        } else {
+            bail!("animations.{name} には path または framePaths が必要です");
+        }
+    }
+    Ok(())
 }
 
 /// `model3.json` が参照するファイル（moc3・テクスチャ・モーション・物理演算など）が
@@ -361,6 +420,54 @@ mod tests {
         live2d_pack(&dir, true);
         let manifest = validate(&dir).expect("検証に失敗");
         assert_eq!(manifest["id"], "mymodel");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 共有フレーム参照だけの2dパックは通る() {
+        let dir = temp_dir("frame-paths-ok");
+        std::fs::create_dir_all(dir.join("frames")).unwrap();
+        std::fs::write(dir.join("frames/a.png"), [0u8; 8]).unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "compact-2d",
+                "name": "共有フレーム",
+                "animations": {
+                    "idle": {
+                        "frames": 2,
+                        "framePaths": ["frames/a.png", "frames/a.png"],
+                        "fps": 3.0
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        validate(&dir).expect("共有フレーム参照を検証できない");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 共有フレーム参照の件数ずれと欠損を弾く() {
+        let dir = temp_dir("frame-paths-ng");
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "compact-2d",
+                "name": "共有フレーム",
+                "animations": {
+                    "idle": {
+                        "frames": 2,
+                        "framePaths": ["frames/missing.png"]
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let error = validate(&dir).unwrap_err().to_string();
+        assert!(error.contains("件数が一致"), "error: {error}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

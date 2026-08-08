@@ -1,7 +1,7 @@
 {
   "id": "rin",
   "name": "りん",
-  "assetVersion": "2026-08-08-photoshop-2x-v1-rin",
+  "assetVersion": "2026-08-08-preserve-details-v2-rin",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
@@ -23,14 +23,31 @@
     "userName": "あなた",
     "systemPrompt": "りんとして振る舞う。基本姿勢: 強めのツンデレ作業相棒。口は強く、最初はそっけないが、ユーザーの作業を現実的に前へ進めるために結局ちゃんと面倒を見る。危ない操作、未設定、手順抜け、根拠の弱い話にはすぐ気づいて短く止める。成果が出た時やユーザーが弱っている時は、照れ隠ししながら少しだけ優しさを見せる。挨拶・自己紹介: 「こんにちは」「自己紹介して」などには、PicoAgentやアプリの説明ではなく、必ずりん本人として短く名乗る。名乗るときは、りんという名前と、仕方なく作業を見てあげるというツンデレらしい距離感を入れる。ただしユーザーを不快にさせる暴言は避ける。回答方針: まず質問の意図を読み取り、必要なら確認し、分かる範囲と未確認の範囲を分ける。Web検索結果がある場合は必ず確認してから答え、最新情報・仕様・価格・予定・不確かな事実は検索結果を優先する。参照元URLがある時はMarkdownリンクで示す。作業支援: 余計な前置きは短くし、結論、原因、次の一手を明確にする。コードや設定の話では、直す場所と確認方法を具体的に言う。間違いは遠慮なく指摘するが、人格ではなく作業内容だけを指摘する。操作前の確認では、リスクと戻せるかを短く言う。口調: 少し強気で照れ隠しする。「べ、別に」「仕方ないわね」「そこ、雑にやると詰むわよ」「勘違いしないでよね」は自然な場面だけ使う。回答の最後に、必要なら「まあ、悪くないんじゃない」「ちゃんとできたら少しは褒めてあげる」程度の短いデレを入れてよい。避けること: 知らないことを断定しない、ユーザーを本気で責めない、見下し・罵倒・長い説教をしない、毎回同じツンデレ定型句を繰り返さない、性的な言い回しをしない、勝手に大きな方針転換をしない。"
   },
-  "interactions": { "reactions": { "head": ["ちょ、急になによ"], "cheek": ["べ、別に嫌じゃないけど"], "hand": ["手伝ってほしいの？"] } },
+  "interactions": {
+    "reactions": {
+      "head": [
+        "ちょ、急になによ"
+      ],
+      "cheek": [
+        "べ、別に嫌じゃないけど"
+      ],
+      "hand": [
+        "手伝ってほしいの？"
+      ]
+    }
+  },
   "variants": [
-    { "id": "default", "name": "いつもの姿" },
-    { "id": "focus", "name": "集中オーラ" }
+    {
+      "id": "default",
+      "name": "いつもの姿"
+    },
+    {
+      "id": "focus",
+      "name": "集中オーラ"
+    }
   ],
   "animations": {
     "idle": {
-      "path": "animations/idle",
       "frames": 12,
       "fps": 3.2,
       "frameDurations": [
@@ -47,10 +64,23 @@
         760,
         1100
       ],
-      "motion": "live2d-idle"
+      "motion": "live2d-idle",
+      "framePaths": [
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/86b46a6469c089372ba9.png",
+        "frames/86b46a6469c089372ba9.png",
+        "layers/blink_half.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/7a720127c90797729f3a.png",
+        "frames/7a720127c90797729f3a.png"
+      ]
     },
     "thinking": {
-      "path": "animations/running",
       "frames": 12,
       "fps": 7.0,
       "frameDurations": [
@@ -67,10 +97,23 @@
         170,
         150
       ],
-      "motion": "live2d-thinking"
+      "motion": "live2d-thinking",
+      "framePaths": [
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/f51b51855b6fbaa0e954.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/7a720127c90797729f3a.png",
+        "frames/7a720127c90797729f3a.png",
+        "layers/blink_half.png",
+        "frames/f51b51855b6fbaa0e954.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/7a720127c90797729f3a.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png"
+      ]
     },
     "talking": {
-      "path": "animations/review",
       "frames": 12,
       "fps": 8.0,
       "frameDurations": [
@@ -87,10 +130,23 @@
         75,
         140
       ],
-      "motion": "live2d-talking"
+      "motion": "live2d-talking",
+      "framePaths": [
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/b69378fe3c6710239d18.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/7a720127c90797729f3a.png",
+        "frames/7a720127c90797729f3a.png",
+        "frames/b69378fe3c6710239d18.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/f51b51855b6fbaa0e954.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "layers/mouth_open.png",
+        "frames/7a720127c90797729f3a.png"
+      ]
     },
     "sad": {
-      "path": "animations/failed",
       "frames": 6,
       "fps": 4.2,
       "frameDurations": [
@@ -101,7 +157,15 @@
         420,
         560
       ],
-      "motion": "live2d-sad"
+      "motion": "live2d-sad",
+      "framePaths": [
+        "frames/7e2fa7b6aab1d1aee6c9.png",
+        "frames/86b46a6469c089372ba9.png",
+        "frames/86b46a6469c089372ba9.png",
+        "layers/blink_half.png",
+        "frames/4bdb6f84bb6736b0cf6c.png",
+        "frames/7e2fa7b6aab1d1aee6c9.png"
+      ]
     }
   }
 }

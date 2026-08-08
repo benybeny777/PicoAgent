@@ -66,25 +66,33 @@ THA3コードはMIT License、学習済みモデルはCC BY 4.0。作者Pramook 
 全キャラを生成する:
 
 ```powershell
-python scripts/build-character-animations.py -- --version 2026-06-28-motion-v1
+uv run --with pillow python scripts/build-character-animations.py --version 2026-06-28-motion-v1
 cargo xtask sync-characters
 ```
 
 一部キャラだけ生成する:
 
 ```powershell
-python scripts/build-character-animations.py -- rin mai --version 2026-06-28-rin-mai-v1
+uv run --with pillow python scripts/build-character-animations.py -- rin mai --version 2026-06-28-rin-mai-v1
 cargo xtask sync-characters
 ```
 
-このスクリプトは以下を生成する。
+このスクリプトは内部で次の42枚を生成したあと、同一内容をハッシュでまとめる。
 
 - `animations/idle/00.png` 〜 `11.png`
 - `animations/running/00.png` 〜 `11.png`
 - `animations/review/00.png` 〜 `11.png`
 - `animations/failed/00.png` 〜 `05.png`
-- `character.json` の `animations`
+- 固有画像だけを置く `frames/`（既存 `layers/` / `preview.png` と同じ画像はそれらを直接共有）
+- `character.json` の `animations.*.framePaths`
 - `--version` 指定時は `assetVersion`
+
+最終パックには重複した `animations/` 連番を残さない。実行時のコマ数と順序は `framePaths` が保持する。
+既存の連番だけを共有化する場合は `--compact-only` を使う。
+
+```powershell
+uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only
+```
 
 ## ローディング画像の確認
 

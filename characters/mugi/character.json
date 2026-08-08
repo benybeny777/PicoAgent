@@ -1,7 +1,7 @@
 {
   "id": "mugi",
   "name": "むぎ",
-  "assetVersion": "2026-08-08-photoshop-2x-v1",
+  "assetVersion": "2026-08-08-preserve-details-v2",
   "description": "星のヘアピンと緑の瞳が印象的な、年下っぽく明るく寄り添う作業相棒。",
   "greeting": "こんにちは、むぎだよ。えへへ、今日もそばで見てるね。いっしょにがんばろ？",
   "voice": {
@@ -49,8 +49,14 @@
   "live2d": {
     "model": "live2d/sdk4/mugi.model3.json",
     "models": [
-      { "sdk": "5", "path": "live2d/sdk5/mugi.model3.json" },
-      { "sdk": "4", "path": "live2d/sdk4/mugi.model3.json" }
+      {
+        "sdk": "5",
+        "path": "live2d/sdk5/mugi.model3.json"
+      },
+      {
+        "sdk": "4",
+        "path": "live2d/sdk4/mugi.model3.json"
+      }
     ],
     "motions": {
       "idle": "Idle",
@@ -66,7 +72,6 @@
   },
   "animations": {
     "idle": {
-      "path": "animations/idle",
       "frames": 12,
       "fps": 3.2,
       "frameDurations": [
@@ -83,10 +88,23 @@
         760,
         1100
       ],
-      "motion": "live2d-idle"
+      "motion": "live2d-idle",
+      "framePaths": [
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/fd108714be99fb96c250.png",
+        "frames/170e3b00c9f644e076e8.png",
+        "layers/blink_half.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/a998648eeb30ae8e9aaf.png",
+        "frames/a998648eeb30ae8e9aaf.png"
+      ]
     },
     "thinking": {
-      "path": "animations/running",
       "frames": 12,
       "fps": 7.0,
       "frameDurations": [
@@ -103,10 +121,23 @@
         170,
         150
       ],
-      "motion": "live2d-thinking"
+      "motion": "live2d-thinking",
+      "framePaths": [
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/206ab438cd98ad08c894.png",
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/a998648eeb30ae8e9aaf.png",
+        "frames/a998648eeb30ae8e9aaf.png",
+        "layers/blink_closed.png",
+        "frames/206ab438cd98ad08c894.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/a998648eeb30ae8e9aaf.png",
+        "frames/faed952b7ece14a99cd2.png"
+      ]
     },
     "talking": {
-      "path": "animations/review",
       "frames": 12,
       "fps": 8.0,
       "frameDurations": [
@@ -123,10 +154,23 @@
         75,
         140
       ],
-      "motion": "live2d-talking"
+      "motion": "live2d-talking",
+      "framePaths": [
+        "frames/3f74275694a112d89ab5.png",
+        "frames/3a2f9277c46e6685123c.png",
+        "frames/e78abc8a8d81c534baae.png",
+        "frames/3f74275694a112d89ab5.png",
+        "frames/5daefb09f1be578b9502.png",
+        "frames/5daefb09f1be578b9502.png",
+        "frames/e78abc8a8d81c534baae.png",
+        "frames/3a2f9277c46e6685123c.png",
+        "frames/206ab438cd98ad08c894.png",
+        "frames/3f74275694a112d89ab5.png",
+        "layers/mouth_open.png",
+        "frames/5daefb09f1be578b9502.png"
+      ]
     },
     "sad": {
-      "path": "animations/failed",
       "frames": 6,
       "fps": 4.2,
       "frameDurations": [
@@ -137,7 +181,15 @@
         420,
         560
       ],
-      "motion": "live2d-sad"
+      "motion": "live2d-sad",
+      "framePaths": [
+        "frames/faed952b7ece14a99cd2.png",
+        "frames/fd108714be99fb96c250.png",
+        "frames/170e3b00c9f644e076e8.png",
+        "layers/blink_half.png",
+        "frames/672550ee9d970d35228a.png",
+        "frames/faed952b7ece14a99cd2.png"
+      ]
     }
   }
 }

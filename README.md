@@ -130,7 +130,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 既存のPNGキャラを試す場合は、元IDを上書きせず `rin-tha3` / `mai-tha3` のような別IDで作って見比べてください。ひよりなどのLive2DキャラはLive2Dの方が滑らかなため、THA3での作り直しは推奨しません。既知のむぎ素材もこの生成機能では自動変更しません。
 
-同梱PNGキャラの公開用画像を仕上げ直す場合は、Windows版Photoshopを閉じた状態で `powershell -ExecutionPolicy Bypass -File scripts/finish-2d-character-assets.ps1` を実行します。`preview` / `animations` / `layers` / `boot` を内容ハッシュで重複除外し、Photoshopのフリンジ除去、低アルファ画素の整理、通常立ち絵の2倍化、ピンク／ミント背景の透過QA一覧作成までを行います。処理前画像とQA一覧はGit管理外の `temp/character-asset-finish/<日時>/` へ保存します。制作元の `source.png` とLive2Dテクスチャは変更しません。処理用に起動したPhotoshopは完了・失敗のどちらでもスクリプトが終了します。既に開いているPhotoshopへ割り込んで未保存作業を閉じないよう、起動中なら処理前に停止します。
+同梱PNGキャラの公開用画像を仕上げ直す場合は、Windows版Photoshopを閉じた状態で `powershell -ExecutionPolicy Bypass -File scripts/finish-2d-character-assets.ps1` を実行します。`character-sources/` の処理前1倍PNGを正本に、内容ハッシュで重複を除いてPhotoshopの「ディテールを保持 2.0」で通常立ち絵を2倍化します。起動用大判画像は元解像度を保ち、白マット除去と元アルファの再適用で輪郭を仕上げます。208点すべての寸法・四隅アルファ・被写体範囲を検査し、白／濃紺／マゼンタ／市松のQA一覧が成功してから `characters/` へ一括反映します。失敗時は製品画像を処理前へ戻します。処理記録はGit管理外の `temp/character-asset-finish/<日時>/` に残り、処理用に起動したPhotoshopは成功・失敗のどちらでも終了します。既に開いているPhotoshopには割り込みません。続けて `uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only` を実行すると、42フレームの見た目を維持したまま同一PNGを共有参照へまとめられます。制作元 `source.png` とLive2Dテクスチャは変更しません。
 
 ### 叩く AI を選ぶ
 

@@ -842,14 +842,15 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="pet"] .character-view > img,
 [data-layout="workspace"] .character-view > img,
 [data-layout="widget"] .character-view > img {
-  object-fit:cover; object-position:50% 0%;
+  object-fit:contain; object-position:50% 0%;
 }
-/* 2D立ち絵は透明余白を含むため、同じ枠ではLive2Dより小さく見える。上半身基準に補正する。 */
+/* 2D立ち絵は共通の --char-zoom だけで上半身基準に補正する。
+   cover と追加 scale を重ねると、高解像度画像が顔だけになるため二重拡大しない。 */
 [data-layout="mascot"] .character[data-render-kind="2d"] .character-view,
 [data-layout="pet"] .character[data-render-kind="2d"] .character-view,
 [data-layout="workspace"] .character[data-render-kind="2d"] .character-view,
 [data-layout="widget"] .character[data-render-kind="2d"] .character-view {
-  scale:1.25; transform-origin:50% 0%;
+  scale:1; transform-origin:50% 0%;
 }
 [data-layout="mascot"] .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0; width:360px!important; height:398px!important;

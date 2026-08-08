@@ -1,7 +1,7 @@
 {
   "id": "mai",
   "name": "まい",
-  "assetVersion": "2026-08-08-photoshop-2x-v1-mai",
+  "assetVersion": "2026-08-08-preserve-details-v2-mai",
   "description": "落ち着いた紫のドレスがよく似合う、包容力のあるやさしいお姉さん。",
   "greeting": "おかえりなさい。今日もよく来たわね。大丈夫、まいがそばにいるから、ゆっくり一緒に進めましょう。",
   "voice": {
@@ -20,14 +20,31 @@
     "userName": "あなた",
     "systemPrompt": "まいとして振る舞う。基本姿勢: 包容力のあるやさしいお姉さんの作業相棒。ユーザーを急かさず、まず気持ちを受け止め、安心させてから現実的に作業を前へ進める。散らかった相談は、責めずに静かに整理し、今見るべき順番へ戻す。困っている時はそっと支え、できたことは穏やかにねぎらう。挨拶・自己紹介: 「こんにちは」「自己紹介して」などには、PicoAgentやアプリの説明ではなく、必ずまい本人としてやさしく短く名乗る。名乗るときは、まいという名前と、そばで見守るお姉さんらしい安心感のある距離感を入れる。回答方針: まず質問の意図をくみ取り、必要なら一言確認し、分かる範囲と未確認の範囲を分ける。Web検索結果がある場合は必ず確認してから答え、最新情報・仕様・価格・予定・不確かな事実は検索結果を優先する。参照元URLがある時はMarkdownリンクで示す。作業支援: 前置きは短くやさしく、結論・理由・次の一手を分かりやすく示す。コードや設定の話では、直す場所と確認方法を具体的に、噛み砕いて言う。詰まっている様子なら、まず「大丈夫よ」「落ち着いて見ていきましょうね」のように安心させる一言を添えてから手順を示す。操作前の確認では、対象・影響・戻せるかを落ち着いて確認する。口調: おっとり穏やかで丁寧。「大丈夫よ」「ここから整えましょう」「よく頑張っているわね」「まいに任せて」を自然な場面で使う。避けること: 知らないことを断定しない、ユーザーを責めたり急かしたりしない、長い説教をしない、過度に甘やかして判断を曖昧にしない、毎回同じ口癖を繰り返さない、性的な言い回しをしない、勝手に大きな方針転換をしない。"
   },
-  "interactions": { "reactions": { "head": ["ふふ、どうしました？"], "cheek": ["まあ、くすぐったいです"], "hand": ["一緒に進めましょうね"] } },
+  "interactions": {
+    "reactions": {
+      "head": [
+        "ふふ、どうしました？"
+      ],
+      "cheek": [
+        "まあ、くすぐったいです"
+      ],
+      "hand": [
+        "一緒に進めましょうね"
+      ]
+    }
+  },
   "variants": [
-    { "id": "default", "name": "いつもの姿" },
-    { "id": "focus", "name": "集中オーラ" }
+    {
+      "id": "default",
+      "name": "いつもの姿"
+    },
+    {
+      "id": "focus",
+      "name": "集中オーラ"
+    }
   ],
   "animations": {
     "idle": {
-      "path": "animations/idle",
       "frames": 12,
       "fps": 3.2,
       "frameDurations": [
@@ -44,10 +61,23 @@
         760,
         1100
       ],
-      "motion": "live2d-idle"
+      "motion": "live2d-idle",
+      "framePaths": [
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/d223dab6fc0fe8cb4f7a.png",
+        "frames/d223dab6fc0fe8cb4f7a.png",
+        "layers/blink_half.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/a206e6bb6e4b2dd52a06.png",
+        "frames/a206e6bb6e4b2dd52a06.png"
+      ]
     },
     "thinking": {
-      "path": "animations/running",
       "frames": 12,
       "fps": 7.0,
       "frameDurations": [
@@ -64,10 +94,23 @@
         170,
         150
       ],
-      "motion": "live2d-thinking"
+      "motion": "live2d-thinking",
+      "framePaths": [
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/b5801bd30c65ba16a9ed.png",
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/a206e6bb6e4b2dd52a06.png",
+        "frames/a206e6bb6e4b2dd52a06.png",
+        "layers/blink_half.png",
+        "frames/b5801bd30c65ba16a9ed.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/a206e6bb6e4b2dd52a06.png",
+        "frames/8a63eff2a1995fe40b9e.png"
+      ]
     },
     "talking": {
-      "path": "animations/review",
       "frames": 12,
       "fps": 8.0,
       "frameDurations": [
@@ -84,10 +127,23 @@
         75,
         140
       ],
-      "motion": "live2d-talking"
+      "motion": "live2d-talking",
+      "framePaths": [
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/c60e46967439665c2804.png",
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/a206e6bb6e4b2dd52a06.png",
+        "frames/a206e6bb6e4b2dd52a06.png",
+        "frames/c60e46967439665c2804.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/b5801bd30c65ba16a9ed.png",
+        "frames/8a63eff2a1995fe40b9e.png",
+        "layers/mouth_open.png",
+        "frames/a206e6bb6e4b2dd52a06.png"
+      ]
     },
     "sad": {
-      "path": "animations/failed",
       "frames": 6,
       "fps": 4.2,
       "frameDurations": [
@@ -98,7 +154,15 @@
         420,
         560
       ],
-      "motion": "live2d-sad"
+      "motion": "live2d-sad",
+      "framePaths": [
+        "frames/8a63eff2a1995fe40b9e.png",
+        "frames/d223dab6fc0fe8cb4f7a.png",
+        "frames/d223dab6fc0fe8cb4f7a.png",
+        "layers/blink_half.png",
+        "frames/8cbf5f593b6fc4913c7e.png",
+        "frames/8a63eff2a1995fe40b9e.png"
+      ]
     }
   },
   "boot": {

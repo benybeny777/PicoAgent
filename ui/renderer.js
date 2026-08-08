@@ -458,8 +458,27 @@ function stopBootLogTicker() {
 
 function frameUrl(name, index) {
   const animation = animations[name] || animations.idle;
-  const url = `${characterRoot}/${animation.path}/${String(index).padStart(2, "0")}.png`;
+  const relative = animationFramePath(animation, index);
+  const url = `${characterRoot}/${relative}`;
   return characterAssetVersion ? `${url}?v=${encodeURIComponent(characterAssetVersion)}` : url;
+}
+
+function animationFramePaths(animation) {
+  if (Array.isArray(animation?.framePaths) && animation.framePaths.length) return animation.framePaths;
+  const count = Number.isInteger(animation?.frames) && animation.frames > 0 ? animation.frames : 0;
+  if (!animation?.path || count === 0) return [];
+  return Array.from({ length: count }, (_unused, index) =>
+    `${animation.path}/${String(index).padStart(2, "0")}.png`);
+}
+
+function animationFramePath(animation, index) {
+  const paths = animationFramePaths(animation);
+  if (!paths.length) return "preview.png";
+  return paths[index % paths.length];
+}
+
+function animationFrameCount(animation) {
+  return animationFramePaths(animation).length;
 }
 
 function versionedAssetUrl(url, version) {
@@ -523,7 +542,7 @@ async function prepareBootCharacter(characterId) {
     bootPetImage.removeAttribute("src");
     return;
   }
-  const bootPath = `${manifest.animations?.idle?.path || "animations/idle"}/00.png`;
+  const bootPath = animationFramePath(manifest.animations?.idle, 0);
   bootPetImage.onerror = () => {
     // プレビュー画像を取得できていないキャラ（setup が警告を出した場合）でも起動画面を壊さない。
     bootPetImage.onerror = null;
@@ -532,14 +551,52 @@ async function prepareBootCharacter(characterId) {
   bootPetImage.src = versionedAssetUrl(`${root}/${bootPath}`, version);
 }
 
-function preloadAnimations() {
- for (const [name, animation] of Object.entries(animations)) {
-  for (let index = 0; index < animation.frames; index += 1) {
-    const image = new Image(); image.src = frameUrl(name, index);
+const animationPreloadCache = new Map();
+let deferredAnimationPreload = null;
+
+function cancelDeferredAnimationPreload() {
+  if (!deferredAnimationPreload) return;
+  if (deferredAnimationPreload.kind === "idle" && typeof cancelIdleCallback === "function") {
+    cancelIdleCallback(deferredAnimationPreload.id);
   }
- }
+  else clearTimeout(deferredAnimationPreload.id);
+  deferredAnimationPreload = null;
 }
-preloadAnimations();
+
+function clearAnimationPreloads() {
+  cancelDeferredAnimationPreload();
+  animationPreloadCache.clear();
+}
+
+function preloadAnimation(name) {
+  const animation = animations[name] || animations.idle;
+  if (!animation) return;
+  for (let index = 0; index < animationFrameCount(animation); index += 1) {
+    const url = frameUrl(name, index);
+    if (animationPreloadCache.has(url)) continue;
+    const image = new Image();
+    image.src = url;
+    animationPreloadCache.set(url, image);
+  }
+}
+
+// 速度優先: 最初に待機モーションを全枚読み、描画が落ち着いた直後に残りも一括で温める。
+// 状態切替が先に来た場合は setAnimation() がそのモーションを即時先読みする。
+function preloadAnimations() {
+  clearAnimationPreloads();
+  preloadAnimation("idle");
+  const warmRest = () => {
+    deferredAnimationPreload = null;
+    for (const name of Object.keys(animations)) {
+      if (name !== "idle") preloadAnimation(name);
+    }
+  };
+  if (typeof requestIdleCallback === "function") {
+    deferredAnimationPreload = { kind: "idle", id: requestIdleCallback(warmRest, { timeout: 800 }) };
+  } else {
+    deferredAnimationPreload = { kind: "timer", id: setTimeout(warmRest, 120) };
+  }
+}
 
 function personaText(manifest, override) {
   if (override?.trim()) return override.trim();
@@ -576,6 +633,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
   const signature = `${manifest.id}\n${assetVersion}\n${savedVariant}\n${sdkPreference}\n${profile}`;
   if (signature === loadedCharacterSignature) return;
+  clearAnimationPreloads();
   characterRoot = root;
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
@@ -662,6 +720,7 @@ function setAnimation(name, force = false) {
   animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
+  preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
   // layers を持つキャラは待機・返答状態を常時リグ描画にする（Live2D 風の常時まばたき）。
   if (rigAvailable && !reduceMotion && (animationName === "idle" || animationName === "talking")) {
@@ -686,7 +745,7 @@ function animate(now) {
   if (!animation) { animationRequestId = requestAnimationFrame(animate); return; } // フレーム定義が無いキャラ（Live2D 初期化失敗時）はループだけ維持する
   if (!lastFrameAt) lastFrameAt = now;
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
-    frame = (frame + 1) % animation.frames;
+    frame = (frame + 1) % animationFrameCount(animation);
     petSprite.src = frameUrl(animationName, frame);
     lastFrameAt = now;
   }
