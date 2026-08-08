@@ -25,6 +25,10 @@ pub trait Tool: Send + Sync {
     fn examples(&self) -> Vec<&'static str> {
         Vec::new()
     }
+    /// ユーザー発話からこのスキルを候補へ出す、副作用のない意図判定語彙。
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        route_keywords(self.name())
+    }
     fn config_schema(&self) -> Vec<Field> {
         Vec::new()
     }
@@ -37,6 +41,7 @@ pub trait Tool: Send + Sync {
     async fn run(&self, cfg: &Config, args: Value) -> String;
 }
 
+pub mod http;
 pub mod process;
 
 pub struct ToolReg {
@@ -148,7 +153,9 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
     ),
     (
         "weather",
-        &["天気", "気温", "雨", "降水", "予報", "weather"],
+        &[
+            "天気", "天候", "気象", "気温", "雨", "降水", "予報", "weather",
+        ],
     ),
     (
         "currency_rates",
@@ -283,6 +290,8 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
         "praise_log",
         &[
             "できた",
+            "書けた",
+            "終わった",
             "やったこと",
             "がんばった",
             "褒め",
@@ -631,6 +640,26 @@ const TOOL_ROUTES: &[(&str, &[&str])] = &[
     ("misskey", &["misskey", "ミスキー", "ノート"]),
 ];
 
+fn route_keywords(name: &str) -> &'static [&'static str] {
+    TOOL_ROUTES
+        .iter()
+        .find_map(|(route_name, keywords)| (*route_name == name).then_some(*keywords))
+        .unwrap_or(&[])
+}
+
+/// 登録済みスキルの意図メタデータだけで発話との一致を判定する。
+pub fn intent_matches(name: &str, text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    index()
+        .get(name)
+        .and_then(|position| all().get(*position))
+        .is_some_and(|tool| {
+            tool.intent_keywords()
+                .iter()
+                .any(|keyword| normalized.contains(&keyword.to_lowercase()))
+        })
+}
+
 /// 登録済みスキルを返す。各スキルはプロセス内で1回だけ生成する。
 pub fn all() -> &'static [Box<dyn Tool>] {
     TOOLS
@@ -723,15 +752,16 @@ pub fn schemas_for_text(text: &str) -> Vec<Value> {
     for name in CORE_AGENT_TOOLS {
         push_schema_by_name(&mut selected, name);
     }
-    for (name, keywords) in TOOL_ROUTES {
+    for tool in all().iter().filter(|tool| tool.agent_callable()) {
         if selected.len() >= MAX_SELECTED_SCHEMAS {
             break;
         }
-        if keywords
+        if tool
+            .intent_keywords()
             .iter()
             .any(|keyword| normalized.contains(&keyword.to_lowercase()))
         {
-            push_schema_by_name(&mut selected, name);
+            push_schema_by_name(&mut selected, tool.name());
         }
     }
     // 外部 MCP サーバのツール（ユーザーが明示設定したもの）は常に候補へ加える。
@@ -845,6 +875,127 @@ pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> Stri
 #[cfg(test)]
 mod tests {
     use super::schemas_for_text;
+
+    fn validate_schema(value: &serde_json::Value, location: &str) {
+        let object = value
+            .as_object()
+            .unwrap_or_else(|| panic!("{location} はJSON objectである必要があります"));
+        if let Some(kind) = object.get("type") {
+            assert!(
+                kind.is_string() || kind.is_array(),
+                "{location}.type は文字列または配列にしてください"
+            );
+        }
+        if let Some(properties) = object.get("properties") {
+            for (name, property) in properties
+                .as_object()
+                .unwrap_or_else(|| panic!("{location}.properties はobjectにしてください"))
+            {
+                validate_schema(property, &format!("{location}.properties.{name}"));
+            }
+        }
+        if let Some(required) = object.get("required") {
+            let properties = object
+                .get("properties")
+                .and_then(serde_json::Value::as_object);
+            for name in required
+                .as_array()
+                .unwrap_or_else(|| panic!("{location}.required は配列にしてください"))
+            {
+                let name = name
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{location}.required の要素は文字列にしてください"));
+                assert!(
+                    properties.is_some_and(|values| values.contains_key(name)),
+                    "{location}.required の {name} がpropertiesにありません"
+                );
+            }
+        }
+        if let Some(items) = object.get("items") {
+            validate_schema(items, &format!("{location}.items"));
+        }
+    }
+
+    #[test]
+    fn 全スキルのメタデータとschemaは一意で妥当() {
+        let mut names = std::collections::HashSet::new();
+        let allowed_field_types = [
+            "text", "password", "textarea", "checkbox", "number", "select",
+        ];
+        for tool in super::all() {
+            assert!(!tool.name().trim().is_empty(), "スキル名が空です");
+            assert!(
+                names.insert(tool.name()),
+                "スキル名が重複しています: {}",
+                tool.name()
+            );
+            assert!(
+                !tool.label().trim().is_empty(),
+                "{} の表示名が空です",
+                tool.name()
+            );
+            assert!(
+                !tool.description().trim().is_empty(),
+                "{} の説明が空です",
+                tool.name()
+            );
+            validate_schema(&tool.parameters(), tool.name());
+            let mut config_keys = std::collections::HashSet::new();
+            for field in tool.config_schema() {
+                assert!(
+                    !field.key.trim().is_empty(),
+                    "{} の設定キーが空です",
+                    tool.name()
+                );
+                assert!(
+                    config_keys.insert(field.key.clone()),
+                    "{} の設定キーが重複しています: {}",
+                    tool.name(),
+                    field.key
+                );
+                assert!(
+                    allowed_field_types.contains(&field.r#type.as_str()),
+                    "{} の設定型が不明です: {}",
+                    tool.name(),
+                    field.r#type
+                );
+                assert!(
+                    !field.label.trim().is_empty(),
+                    "{} / {} のラベルが空です",
+                    tool.name(),
+                    field.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn 意図ルートは登録済みスキルだけを参照する() {
+        let registered: std::collections::HashSet<&str> =
+            super::all().iter().map(|tool| tool.name()).collect();
+        for (name, keywords) in super::TOOL_ROUTES {
+            assert!(
+                registered.contains(name),
+                "未登録スキルの意図ルートです: {name}"
+            );
+            assert!(!keywords.is_empty(), "意図語彙が空です: {name}");
+        }
+        for (text, name) in [
+            ("今日の気象を教えて", "weather"),
+            ("15分後にリマインダーして", "reminder"),
+            ("Whisperで文字起こし", "whisper_transcribe"),
+            ("競合比較を調査", "research_report"),
+        ] {
+            assert!(
+                super::intent_matches(name, text),
+                "{text} -> {name} が一致しません"
+            );
+            assert!(
+                schema_names(text).contains(&name.to_string()),
+                "{text} のschema候補に{name}がありません"
+            );
+        }
+    }
 
     /// 承認マーカーは対話ループ専用の内部プロトコル。安全側の `dispatch` からは
     /// 人が読める案内文へ変換され、内部トークン（token / cwd 等）が露出しないこと。

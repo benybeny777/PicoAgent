@@ -214,11 +214,8 @@ fn looks_like_path(value: &str) -> bool {
 
 fn collect_files(value: &Value, out: &mut Vec<String>) {
     match value {
-        Value::String(path) => {
-            if looks_like_path(path) {
-                out.push(path.trim().to_string());
-            }
-        }
+        Value::String(path) if looks_like_path(path) => out.push(path.trim().to_string()),
+        Value::String(_) => {}
         Value::Array(items) => {
             for item in items {
                 collect_files(item, out);

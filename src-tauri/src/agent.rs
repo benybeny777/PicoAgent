@@ -1016,11 +1016,7 @@ fn relative_minutes(text: &str) -> Option<i64> {
 }
 
 fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Value)> {
-    let lower = text.to_lowercase();
-    if ["リマインダー", "思い出させて", "通知して", "あとで教えて"]
-        .iter()
-        .any(|word| text.contains(word))
-    {
+    if tools::intent_matches("reminder", text) {
         if let Some(minutes) = relative_minutes(text) {
             return Some((
                 "reminder",
@@ -1028,8 +1024,7 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
             ));
         }
     }
-    if lower.contains("pomodoro") || text.contains("ポモドーロ") || text.contains("集中タイマー")
-    {
+    if tools::intent_matches("focus_timer", text) && !text.contains("見守") {
         let minutes = number_before(text, "分").unwrap_or(25).clamp(1, 240);
         return Some((
             "focus_timer",
@@ -1043,10 +1038,7 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
             serde_json::json!({ "action": "watch", "minutes": minutes, "label": text }),
         ));
     }
-    if ["できた", "書けた", "終わった", "やったこと", "がんばった"]
-        .iter()
-        .any(|word| text.contains(word))
-    {
+    if tools::intent_matches("praise_log", text) {
         if ["一覧", "見せて", "まとめ", "リスト"]
             .iter()
             .any(|word| text.contains(word))
@@ -1063,19 +1055,7 @@ fn direct_local_tool_query(text: &str) -> Option<(&'static str, serde_json::Valu
 
 fn research_report_query(text: &str) -> Option<serde_json::Value> {
     let lower = text.to_lowercase();
-    let has_research_word = [
-        "調査",
-        "リサーチ",
-        "レポート",
-        "出典",
-        "競合比較",
-        "市場調査",
-        "まとめて調べ",
-        "research",
-        "report",
-    ]
-    .iter()
-    .any(|word| lower.contains(&word.to_lowercase()));
+    let has_research_word = tools::intent_matches("research_report", text);
     if !has_research_word {
         return None;
     }
@@ -1105,19 +1085,7 @@ fn research_report_query(text: &str) -> Option<serde_json::Value> {
 }
 
 fn spark_workspace_query(text: &str) -> Option<serde_json::Value> {
-    let lower = text.to_lowercase();
-    let has_workspace_word = [
-        "genspark",
-        "資料一式",
-        "ワークスペース",
-        "スライドとサイト",
-        "サイトとスライド",
-        "ページと資料",
-        "spark",
-        "deck",
-    ]
-    .iter()
-    .any(|word| lower.contains(&word.to_lowercase()));
+    let has_workspace_word = tools::intent_matches("spark_workspace", text);
     if !has_workspace_word {
         return None;
     }
@@ -1158,9 +1126,7 @@ fn genspark_suite_query(text: &str) -> Option<serde_json::Value> {
 
 fn meeting_recorder_query(text: &str) -> Option<(&'static str, serde_json::Value)> {
     let lower = text.to_lowercase();
-    let has_meeting_word = ["録音", "議事録", "会議メモ", "meeting notes"]
-        .iter()
-        .any(|word| lower.contains(&word.to_lowercase()));
+    let has_meeting_word = tools::intent_matches("meeting_recorder", text);
     if !has_meeting_word {
         return None;
     }
@@ -1202,9 +1168,7 @@ fn meeting_recorder_query(text: &str) -> Option<(&'static str, serde_json::Value
 
 fn audio_transcribe_query(text: &str) -> Option<serde_json::Value> {
     let lower = text.to_lowercase();
-    let wants_transcribe = ["文字起こし", "whisper", "transcribe"]
-        .iter()
-        .any(|word| lower.contains(&word.to_lowercase()));
+    let wants_transcribe = tools::intent_matches("whisper_transcribe", text);
     let wants_recording_workflow = ["録音", "議事録", "会議メモ", "meeting notes"]
         .iter()
         .any(|word| lower.contains(&word.to_lowercase()));

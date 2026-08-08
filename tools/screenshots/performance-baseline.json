@@ -1,0 +1,6 @@
+{
+  "sceneReadyMs": 4000,
+  "manifestReadyMs": 2000,
+  "idlePreloadReadyMs": 6000,
+  "allPreloadReadyMs": 15000
+}

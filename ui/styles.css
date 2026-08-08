@@ -666,7 +666,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="workspace"] .character { z-index:5; right:24px; bottom:14px; width:135px; height:165px; }
 
 /* ── 7. 配信: キャラを大きく、回答は字幕テロップ ─────────────────────────── */
-.pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); --stream-canvas-scale:2.1; }
+.pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); --stream-canvas-scale:2.1; --stream-caption-color:#5a3b4b; }
 [data-layout="stream"] .bubble {
   left:8px; right:8px; top:8px; bottom:8px; width:auto; height:auto; max-width:none;
   background:transparent; border:none; box-shadow:none; padding:0;
@@ -750,7 +750,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   display:flex; align-items:center; justify-content:flex-start; text-align:left;
   font-size:clamp(24px,1.8vw,30px); line-height:1.5;
   border:1px solid rgba(213,156,172,.56); border-left:6px solid var(--accent); border-radius:15px;
-  background:linear-gradient(135deg,rgba(255,253,248,.97),rgba(255,238,244,.96)); color:#5a3b4b;
+  background:linear-gradient(135deg,rgba(255,253,248,.97),rgba(255,238,244,.96)); color:var(--stream-caption-color);
   box-shadow:0 7px 20px rgba(112,72,91,.2),inset 0 0 0 1px rgba(255,255,255,.72); overflow:auto;
 }
 [data-layout="stream"] .reply::before { content:"字幕"; position:absolute; left:14px; top:6px; color:#c65f78; font-size:10px; font-weight:900; letter-spacing:.14em; }

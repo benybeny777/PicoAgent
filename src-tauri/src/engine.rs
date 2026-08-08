@@ -213,7 +213,7 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     let url = model_url(app);
     set_status(app, json!({ "phase": "download", "percent": 0 }));
 
-    let mut res = reqwest::Client::new().get(&url).send().await?;
+    let mut res = crate::tools::http::client().get(&url).send().await?;
     if !res.status().is_success() {
         anyhow::bail!("モデル取得に失敗: {} {}", res.status(), url);
     }

@@ -1,7 +1,7 @@
 {
   "id": "ren",
   "name": "レン",
-  "assetVersion": "2026-08-02-live2d-free-samples-v1",
+  "assetVersion": "2026-08-08-live2d-sdk5-v2",
   "description": "Live2Dで動く、涼しげで芯のある作業相棒（Live2D公式サンプルモデル）。",
   "greeting": "レンです。準備はできています。どこから手をつけますか。",
   "voice": {
@@ -45,6 +45,12 @@
   ],
   "live2d": {
     "model": "live2d/Ren.model3.json",
+    "models": [
+      {
+        "sdk": "5",
+        "path": "live2d/Ren.model3.json"
+      }
+    ],
     "motions": {
       "idle": "Idle",
       "thinking": "TapBody",

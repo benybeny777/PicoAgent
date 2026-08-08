@@ -599,6 +599,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         }
     };
     let bond_label = relationship.bond_label();
+    let stream = crate::stream_profile::resolve(&state.config, &character_id);
     Ok(json!({
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
@@ -621,10 +622,11 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
-        "streamBackground": state.config.get("PICOAGENT_STREAM_BACKGROUND", "pastel"),
-        "streamBackgroundImage": state.config.get("PICOAGENT_STREAM_BACKGROUND_IMAGE", ""),
-        "streamDisplay": state.config.get("PICOAGENT_STREAM_DISPLAY", "dashboard"),
-        "streamDisplayImage": state.config.get("PICOAGENT_STREAM_DISPLAY_IMAGE", ""),
+        "streamBackground": stream.background,
+        "streamBackgroundImage": stream.background_image,
+        "streamDisplay": stream.display,
+        "streamDisplayImage": stream.display_image,
+        "streamCaptionColor": stream.caption_color,
         "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
@@ -2305,6 +2307,18 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
+    if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
+        patch.insert(
+            "PICOAGENT_CHARACTER_FRAMING".to_string(),
+            crate::character_framing::normalize(&value),
+        );
+    }
+    if let Some(value) = patch.get("PICOAGENT_STREAM_PROFILES").cloned() {
+        patch.insert(
+            "PICOAGENT_STREAM_PROFILES".to_string(),
+            crate::stream_profile::normalize(&value),
+        );
+    }
     let changed_text = |key: &str, fallback: &str| {
         patch
             .get(key)
@@ -2478,6 +2492,8 @@ pub async fn settings_save(
         let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
         // 軽い見た目・雑談設定は常に即反映。キャラ切替・プロバイダ/モデルは再起動側で
         // 反映するため、再起動が必要なときは characterId / pet:model を送らない。
+        let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
+        let stream = crate::stream_profile::resolve(&state.config, &active_character);
         let mut ui = json!({
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
             "theme": state.config.get("PICOAGENT_THEME", "system"),
@@ -2495,10 +2511,11 @@ pub async fn settings_save(
             "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
             "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
             "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
-            "streamBackground": state.config.get("PICOAGENT_STREAM_BACKGROUND", "pastel"),
-            "streamBackgroundImage": state.config.get("PICOAGENT_STREAM_BACKGROUND_IMAGE", ""),
-            "streamDisplay": state.config.get("PICOAGENT_STREAM_DISPLAY", "dashboard"),
-            "streamDisplayImage": state.config.get("PICOAGENT_STREAM_DISPLAY_IMAGE", ""),
+            "streamBackground": stream.background,
+            "streamBackgroundImage": stream.background_image,
+            "streamDisplay": stream.display,
+            "streamDisplayImage": stream.display_image,
+            "streamCaptionColor": stream.caption_color,
             "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         });
         if !requires_restart {
@@ -3506,9 +3523,9 @@ mod tests {
 
     #[test]
     fn 会話圧縮はsystemも予算へ含めて直近二件を残す() {
-        let mut messages = vec![Message::new("system", &"人格".repeat(80))];
+        let mut messages = vec![Message::new("system", "人格".repeat(80))];
         for index in 0..6 {
-            messages.push(Message::new("user", &format!("発話{index}")));
+            messages.push(Message::new("user", format!("発話{index}")));
         }
         let compacted = compacted_conversation(&messages, 100);
         assert_eq!(compacted.len(), 3);

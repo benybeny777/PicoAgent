@@ -207,7 +207,7 @@ impl Provider for Anthropic {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = reqwest::Client::new()
+        let res = crate::tools::http::client()
             .get(&url)
             .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)
@@ -282,7 +282,7 @@ impl Provider for Anthropic {
             body["tools"] = json!(anthropic_tools);
         }
         let url = format!("{}/messages", base_url(cfg));
-        let res = reqwest::Client::new()
+        let res = crate::tools::http::client()
             .post(&url)
             .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)

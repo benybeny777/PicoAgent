@@ -276,7 +276,9 @@ const MATRIX_LAYOUTS = {
 async function shootCharacterMatrix() {
   const output = join(ROOT, "temp", "character-layout-matrix");
   mkdirSync(output, { recursive: true });
+  const baseline = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "performance-baseline.json"), "utf8"));
   const results = [];
+  const warnings = [];
   for (const characterId of ["mugi", "rin", "mai", "rin-tha3"]) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
       const started = performance.now();
@@ -286,6 +288,19 @@ async function shootCharacterMatrix() {
           const image = document.getElementById("petSprite");
           return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== "none";
         }, { timeout: 20000 });
+        try {
+          await page.waitForFunction(() => Number.isFinite(window.__picoagentPerformance?.idlePreloadReady), null, { timeout: baseline.idlePreloadReadyMs * 2 });
+        } catch (error) {
+          const diagnostic = await page.evaluate(() => ({
+            marks: performance.getEntriesByType("mark").map(mark => mark.name),
+            animations: Object.keys(typeof animations === "object" ? animations : {}),
+            preloadImages: typeof animationPreloadCache?.size === "number" ? animationPreloadCache.size : -1,
+            preloadPromises: typeof animationPreloadPromises?.size === "number" ? animationPreloadPromises.size : -1,
+            deferred: typeof deferredAnimationPreload === "object" ? deferredAnimationPreload : null,
+          }));
+          throw new Error(`${characterId}/${layout}: 待機プリロードが完了しません: ${JSON.stringify(diagnostic)} (${error.message})`);
+        }
+        await page.waitForFunction(() => Number.isFinite(window.__picoagentPerformance?.allPreloadReady), null, { timeout: baseline.allPreloadReadyMs * 2 });
         await page.waitForTimeout(250);
         const visual = await page.evaluate(() => {
           const image = document.getElementById("petSprite");
@@ -297,6 +312,11 @@ async function shootCharacterMatrix() {
             imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             characterRect: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
             resources: performance.getEntriesByType("resource").length,
+            timings: {
+              "picoagent-character-manifest-ready": Math.round(window.__picoagentPerformance?.manifestReady || 0),
+              "picoagent-idle-preload-ready": Math.round(window.__picoagentPerformance?.idlePreloadReady || 0),
+              "picoagent-all-preload-ready": Math.round(window.__picoagentPerformance?.allPreloadReady || 0),
+            },
           };
         });
         if (visual.imageRect.width <= 0 || visual.imageRect.height <= 0
@@ -308,14 +328,26 @@ async function shootCharacterMatrix() {
         const png = await page.screenshot({ path: join(output, file), omitBackground: true });
         const opaqueBounds = await bounds(png, 0);
         if (!opaqueBounds) throw new Error(`${characterId}/${layout}: 不透明な描画がありません`);
-        results.push({ characterId, layout, viewport: { width, height }, readyMs: Math.round(performance.now() - started), opaqueBounds, ...visual, file });
+        const result = { characterId, layout, viewport: { width, height }, readyMs: Math.round(performance.now() - started), opaqueBounds, ...visual, file };
+        const checks = {
+          sceneReadyMs: result.readyMs,
+          manifestReadyMs: result.timings["picoagent-character-manifest-ready"],
+          idlePreloadReadyMs: result.timings["picoagent-idle-preload-ready"],
+          allPreloadReadyMs: result.timings["picoagent-all-preload-ready"],
+        };
+        for (const [metric, value] of Object.entries(checks)) {
+          if (value > baseline[metric]) warnings.push({ characterId, layout, metric, value, threshold: baseline[metric] });
+        }
+        results.push(result);
         console.log(`  表示検査: ${characterId}/${layout} ${results.at(-1).readyMs}ms`);
       } finally {
         await page.close();
       }
     }
   }
-  await writeFile(join(output, "metrics.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
+  await writeFile(join(output, "metrics.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), baseline, warnings, results }, null, 2)}\n`);
+  for (const warning of warnings) console.warn(`  速度警告: ${warning.characterId}/${warning.layout} ${warning.metric}=${warning.value}ms（基準${warning.threshold}ms）`);
+  if (process.env.SHOOT_PERF_STRICT && warnings.length) throw new Error(`速度基準を超えた表示が${warnings.length}件あります`);
 
   const contact = await browser.newPage({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1 });
   try {
@@ -328,7 +360,158 @@ async function shootCharacterMatrix() {
   } finally {
     await contact.close();
   }
+  return { output, results, warnings };
+}
+
+async function validateInteractionMatrix() {
+  const output = join(ROOT, "temp", "layout-interaction-matrix");
+  mkdirSync(output, { recursive: true });
+  const characters = [{ id: "mugi", forcePng: true }];
+  if (LIVE2D_REQUIRED.every(path => existsSync(join(ROOT, path)))) {
+    characters.push({ id: LIVE2D_CHARACTER, forcePng: false });
+  }
+  const results = [];
+  for (const target of characters) {
+    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      const page = await openScene({
+        characterId: target.id, layout, width, height, forcePng: target.forcePng,
+        initDelayMs: 350, waitForReady: false,
+      });
+      try {
+        const bootVisible = await page.evaluate(() => document.getElementById("petApp")?.classList.contains("is-booting"));
+        if (!bootVisible) throw new Error(`${target.id}/${layout}: 起動画面が表示されません`);
+        await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), { timeout: 40000 });
+        if (!target.forcePng) {
+          await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+        }
+        await page.evaluate(() => {
+          if (typeof openComposer === "function") openComposer();
+          const composer = document.getElementById("composer");
+          if (composer) composer.hidden = false;
+        });
+        await page.waitForTimeout(150);
+
+        const resized = { width: Math.max(320, Math.round(width * 0.78)), height: Math.max(240, Math.round(height * 0.78)) };
+        await page.setViewportSize(resized);
+        await page.waitForTimeout(100);
+        const state = await page.evaluate(() => {
+          const visibleRect = element => {
+            if (!element || element.hidden || getComputedStyle(element).display === "none") return null;
+            const rect = element.getBoundingClientRect();
+            return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+          };
+          return {
+            bubble: visibleRect(document.getElementById("bubble")),
+            character: visibleRect(document.getElementById("character")),
+            composer: visibleRect(document.getElementById("composer")),
+            input: visibleRect(document.getElementById("input")),
+            buttons: [...document.querySelectorAll("#composer button")]
+              .map(visibleRect).filter(rect => rect && rect.width > 0 && rect.height > 0),
+          };
+        });
+        const viewportRect = { width: resized.width, height: resized.height };
+        const intersects = rect => rect && rect.width > 0 && rect.height > 0
+          && rect.x < viewportRect.width && rect.y < viewportRect.height
+          && rect.x + rect.width > 0 && rect.y + rect.height > 0;
+        if (!intersects(state.bubble) || !intersects(state.character) || !intersects(state.composer) || !intersects(state.input)) {
+          throw new Error(`${target.id}/${layout}: 縮小後に主要UIが画面から消えました ${JSON.stringify(state)}`);
+        }
+        if (!state.buttons.length || state.buttons.some(button => !intersects(button))) {
+          throw new Error(`${target.id}/${layout}: 入力操作ボタンが画面外です ${JSON.stringify(state.buttons)}`);
+        }
+        const file = `${target.id}-${layout}.png`;
+        await page.screenshot({ path: join(output, file), omitBackground: true });
+        results.push({ characterId: target.id, layout, bootVisible, resized, state, file });
+        console.log(`  操作検査: ${target.id}/${layout}`);
+      } finally {
+        await page.close();
+      }
+    }
+  }
+  await writeFile(join(output, "results.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
   return { output, results };
+}
+
+async function validateLive2dMatrix() {
+  const output = join(ROOT, "temp", "live2d-layout-matrix");
+  mkdirSync(output, { recursive: true });
+  const index = JSON.parse(await readFile(join(ROOT, "characters", "index.json"), "utf8"));
+  const targets = [];
+  const skipped = [];
+  for (const entry of index.characters || []) {
+    const manifestPath = join(ROOT, "characters", entry.manifest);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (!manifest.live2d) continue;
+    const relativeRoot = dirname(entry.manifest);
+    const candidates = manifest.live2d.models?.length
+      ? manifest.live2d.models.map(model => model.path)
+      : [manifest.live2d.model];
+    const available = candidates.filter(path => path && existsSync(join(UI_ROOT, "assets", "characters", relativeRoot, path)));
+    if (!available.length) {
+      skipped.push({ characterId: manifest.id, reason: "モデル実体が未取得" });
+      continue;
+    }
+    targets.push({ id: manifest.id, manifest });
+  }
+  const results = [];
+  for (const target of targets) {
+    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      const page = await openScene({ characterId: target.id, layout, width, height });
+      try {
+        await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+        await page.waitForTimeout(250);
+        const info = await page.evaluate(() => {
+          const canvas = document.getElementById("live2dCanvas");
+          const rect = canvas.getBoundingClientRect();
+          const cfg = characterManifest.live2d || {};
+          const groups = live2dModel?.internalModel?.settings?.json?.Groups || [];
+          const lipGroup = groups.find(group => String(group?.Name || "").toLowerCase() === "lipsync");
+          const lipParam = String(cfg.lipSyncParam || lipGroup?.Ids?.[0] || "ParamMouthOpenY");
+          const core = live2dModel?.internalModel?.coreModel;
+          let lipIndex = -1;
+          try { lipIndex = core?.getParameterIndex?.(lipParam) ?? -1; } catch { lipIndex = -1; }
+          return {
+            sdk: activeLive2dSdkPreference, runtimeSdk: live2dRuntimeSdk,
+            sourceWidth: live2dModel?.internalModel?.originalWidth || 0,
+            sourceHeight: live2dModel?.internalModel?.originalHeight || 0,
+            lipSync: cfg.lipSync !== false, lipParam, lipIndex,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          };
+        });
+        const intersects = info.rect.width > 0 && info.rect.height > 0
+          && info.rect.x < width && info.rect.y < height
+          && info.rect.x + info.rect.width > 0 && info.rect.y + info.rect.height > 0;
+        if (!intersects || info.sourceWidth <= 0 || info.sourceHeight <= 0) {
+          throw new Error(`${target.id}/${layout}: Live2D描画が画面内にありません ${JSON.stringify(info)}`);
+        }
+        if (info.lipSync && info.lipIndex < 0) {
+          throw new Error(`${target.id}/${layout}: 口パラメータ ${info.lipParam} がモデルにありません`);
+        }
+        const file = `${target.id}-${layout}.png`;
+        await page.screenshot({ path: join(output, file), omitBackground: true });
+        results.push({ characterId: target.id, layout, ...info, file });
+        console.log(`  Live2D検査: ${target.id}/${layout} SDK${info.runtimeSdk} ${info.lipSync ? info.lipParam : "口パクなし"}`);
+      } finally {
+        await page.close();
+      }
+    }
+    if (target.manifest.live2d.models?.length) {
+      for (const model of target.manifest.live2d.models) {
+        const page = await openScene({ characterId: target.id, live2dSdkOverrides: { [target.id]: String(model.sdk) } });
+        try {
+          await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+          const loaded = await page.evaluate(() => ({ preference: activeLive2dSdkPreference, runtime: live2dRuntimeSdk }));
+          if (loaded.preference !== String(model.sdk) || loaded.runtime !== String(model.sdk)) {
+            throw new Error(`${target.id}: SDK${model.sdk}固定読込に失敗 ${JSON.stringify(loaded)}`);
+          }
+        } finally {
+          await page.close();
+        }
+      }
+    }
+  }
+  await writeFile(join(output, "results.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results, skipped }, null, 2)}\n`);
+  return { output, results, skipped };
 }
 
 // 起動時の挨拶ではなく、直近のやり取りが写るように1往復させる。
@@ -590,6 +773,24 @@ if (process.env.SHOOT_CHARACTER_MATRIX) {
   server.close();
   const average = Math.round(matrix.results.reduce((sum, item) => sum + item.readyMs, 0) / matrix.results.length);
   console.log(`32形式の表示検査完了: ${matrix.output}（平均 ${average}ms）`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_INTERACTION_MATRIX) {
+  const matrix = await validateInteractionMatrix();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`表示操作検査完了: ${matrix.output}（${matrix.results.length}件）`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_LIVE2D_MATRIX) {
+  const matrix = await validateLive2dMatrix();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`Live2D表示検査完了: ${matrix.output}（${matrix.results.length}件、未取得${matrix.skipped.length}件）`);
   process.exit(0);
 }
 

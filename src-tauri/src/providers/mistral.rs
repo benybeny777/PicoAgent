@@ -60,7 +60,7 @@ impl Provider for Mistral {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = reqwest::Client::new().get(&url).bearer_auth(&key).send().await?;
+        let res = crate::tools::http::client().get(&url).bearer_auth(&key).send().await?;
         if !res.status().is_success() {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
@@ -119,7 +119,7 @@ impl Provider for Mistral {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = reqwest::Client::new()
+        let res = crate::tools::http::client()
             .post(&url)
             .bearer_auth(key)
             .json(&body)

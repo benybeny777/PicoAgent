@@ -223,7 +223,7 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
     }
 }
 
-/// 立ち絵の移動量だけを既定（上半身が出る位置）へ戻す。
+/// 現在のキャラ・表示形式の構図と互換用移動量を既定へ戻す。
 /// ウィンドウの位置・サイズ・表示形式には触らない。
 pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
@@ -234,6 +234,19 @@ pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
     ] {
         patch.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
+    let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+    let layout = crate::layout::current(&state.config);
+    let _framing_guard = crate::store::lock_state("PICOAGENT_CHARACTER_FRAMING");
+    let framing = state
+        .config
+        .get_all()
+        .get("PICOAGENT_CHARACTER_FRAMING")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    patch.insert(
+        "PICOAGENT_CHARACTER_FRAMING".to_string(),
+        crate::character_framing::remove(&framing, &character_id, &layout),
+    );
     if let Err(error) = state.config.set_all(patch) {
         crate::log_paths::append_app_log(
             app,
@@ -242,7 +255,10 @@ pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
         return;
     }
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit("pet:character-reset", ());
+        let _ = win.emit(
+            "pet:character-reset",
+            serde_json::json!({ "characterId": character_id, "layout": layout }),
+        );
     }
 }
 

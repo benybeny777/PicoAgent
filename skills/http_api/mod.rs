@@ -2,8 +2,6 @@
 //
 // 未個別対応のSaaS連携用。許可ドメインと任意のBearer/API keyを設定で制限する。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use url::Url;
@@ -94,14 +92,15 @@ impl Tool for HttpApiTool {
         if !allowed_domain(cfg, &url) {
             return "エラー: PICOAGENT_HTTP_ALLOWED_DOMAINS で許可されていないドメインです。".to_string();
         }
-        let timeout = cfg
-            .get("PICOAGENT_HTTP_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tools::http::timeout(
+            cfg,
+            "PICOAGENT_HTTP_TIMEOUT_SECS",
+            20,
+            3,
+            60,
+        );
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
+            .timeout(timeout)
             .user_agent("PicoAgent/1.0 (HTTP API tool)")
             .build()
         {

@@ -254,7 +254,7 @@ impl Tool for GlobFilesTool {
         if sort_by_path {
             hits.sort_by(|a, b| a.relative.cmp(&b.relative));
         } else {
-            hits.sort_by(|a, b| b.modified.cmp(&a.modified));
+            hits.sort_by_key(|hit| std::cmp::Reverse(hit.modified));
         }
         let total = hits.len();
         let mut out = format!("{} 配下の一致: {} 件", root.display(), total);

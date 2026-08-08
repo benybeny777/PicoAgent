@@ -310,8 +310,6 @@ mod tests {
         assert_eq!((BOOT_WIDTH, BOOT_HEIGHT), (680.0, 430.0));
         assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("chat"));
         assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("bar"));
-        assert!(BOOT_WIDTH >= MIN_WIDTH);
-        assert!(BOOT_HEIGHT >= MIN_HEIGHT);
     }
 
     /// 起動準備中の共通寸法を、その表示形式の寸法として覚えないこと

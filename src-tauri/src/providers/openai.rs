@@ -142,7 +142,7 @@ pub(crate) async fn stream_chat(
 
     // API キー不要のローカルエンジン（llama-server）からも呼ばれるため、
     // 空キーのときは Authorization ヘッダ自体を付けない（空 Bearer で弾かれるのを防ぐ）。
-    let request = reqwest::Client::new().post(url).json(&body);
+    let request = crate::tools::http::client().post(url).json(&body);
     let request = if api_key.is_empty() {
         request
     } else {
@@ -287,7 +287,7 @@ impl Provider for OpenAI {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = reqwest::Client::new()
+        let res = crate::tools::http::client()
             .get(&url)
             .bearer_auth(&key)
             .send()
@@ -350,7 +350,7 @@ impl Provider for OpenAI {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = reqwest::Client::new()
+        let res = crate::tools::http::client()
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)
@@ -417,7 +417,7 @@ impl Provider for OpenAI {
             body["response_format"] = json!({"type": "json_object"});
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = reqwest::Client::new()
+        let res = crate::tools::http::client()
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)

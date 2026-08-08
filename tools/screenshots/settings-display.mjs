@@ -33,6 +33,7 @@ const settingsData = {
     PICOAGENT_LAYOUT: "stream",
     PICOAGENT_THEME: "dark",
     PICOAGENT_CHARACTER_ZOOM: "1.55",
+    PICOAGENT_STREAM_PROFILES: { hiyori: { background: "simple", backgroundImage: "", display: "clock", displayImage: "", captionColor: "#a04070" } },
     PICOAGENT_ALWAYS_ON_TOP: true,
   },
   active: { providerId: "local", model: "gemma" },
@@ -88,9 +89,13 @@ try {
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   await page.getByRole("tab", { name: "キャラ・音声" }).click();
   await page.waitForSelector(".framing-editor");
+  await page.waitForSelector(".stream-profile-editor");
+  const streamEnabled = await page.locator('.stream-profile-editor input[type="checkbox"]').isChecked();
+  if (!streamEnabled) throw new Error("ひよりのキャラ別配信設定が読み込まれていません");
+  if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
   const muteStatus = await page.locator(".tts-master-status").textContent();
   if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
-  console.log(`画面タブ確認: 8件 / 配置=${placementCount}件 / 構図・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`画面タブ確認: 8件 / 配置=${placementCount}件 / 構図・キャラ別配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

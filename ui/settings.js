@@ -8,6 +8,7 @@ const saveBtn = document.getElementById("save");
 const resetChangesBtn = document.getElementById("resetChanges");
 const modelOptions = document.getElementById("modelOptions");
 const settingsSearch = document.getElementById("settingsSearch");
+const { errorDetail, logApp } = window.PicoUI;
 
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
@@ -19,6 +20,8 @@ let characterVoiceOverrides = {};
 let characterLive2dSdkOverrides = {};
 let characterFraming = {};
 let characterFramingEditor = null;
+let characterStreamProfiles = {};
+let characterStreamProfileEditor = null;
 let characterDefaultVoices = {};
 let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
@@ -59,26 +62,6 @@ function activateSettingsTab(tabId) {
   const button = document.getElementById(`tab-${tabId}`);
   if (button) button.click();
   return true;
-}
-
-function errorDetail(error) {
-  if (!error) return "";
-  if (error instanceof Error) return error.stack || error.message;
-  if (typeof error === "string") return error;
-  try { return JSON.stringify(error); }
-  catch { return String(error); }
-}
-
-function logApp(level, message, detail) {
-  try {
-    window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(error => {
-      // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
-      console.warn("設定画面ログ保存に失敗しました", error);
-    });
-  } catch (error) {
-    // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
-    console.warn("設定画面ログ保存に失敗しました", error);
-  }
 }
 
 window.addEventListener("error", event => {
@@ -1774,6 +1757,82 @@ function streamSettingsField(values) {
   return wrapper;
 }
 
+function buildCharacterStreamProfileEditor(values) {
+  const enabled = el("input", { type: "checkbox" });
+  const background = el("select", {}, [
+    ["pastel", "パステルスタジオ"], ["gaming", "落ち着いたゲーム部屋"],
+    ["simple", "シンプルグラデーション"], ["custom", "自分の画像"],
+  ].map(([value, label]) => el("option", { value, textContent: label })));
+  const display = el("select", {}, [
+    ["dashboard", "配信ダッシュボード"], ["game", "ゲーム画面風"], ["clock", "時計・ON AIR"],
+    ["image", "自分の画像"], ["none", "表示しない"],
+  ].map(([value, label]) => el("option", { value, textContent: label })));
+  const captionColor = el("input", { type: "color", value: "#5a3b4b" });
+  const backgroundPath = el("input", { type: "text", readOnly: true, placeholder: "キャラ専用画像なし" });
+  const displayPath = el("input", { type: "text", readOnly: true, placeholder: "キャラ専用画像なし" });
+  const backgroundButton = el("button", { type: "button", className: "secondary", textContent: "キャラ用背景画像" });
+  const displayButton = el("button", { type: "button", className: "secondary", textContent: "キャラ用画面画像" });
+  const preview = el("div", { className: "stream-profile-preview" }, [
+    el("span", { textContent: "● LIVE　12:34" }), el("strong", { textContent: "キャラクター別の字幕プレビュー" }),
+  ]);
+  const controls = [background, display, captionColor, backgroundPath, displayPath, backgroundButton, displayButton];
+  const globalDefaults = () => ({
+    background: inputs.get("PICOAGENT_STREAM_BACKGROUND")?.value || values.PICOAGENT_STREAM_BACKGROUND || "pastel",
+    backgroundImage: inputs.get("PICOAGENT_STREAM_BACKGROUND_IMAGE")?.value || values.PICOAGENT_STREAM_BACKGROUND_IMAGE || "",
+    display: inputs.get("PICOAGENT_STREAM_DISPLAY")?.value || values.PICOAGENT_STREAM_DISPLAY || "dashboard",
+    displayImage: inputs.get("PICOAGENT_STREAM_DISPLAY_IMAGE")?.value || values.PICOAGENT_STREAM_DISPLAY_IMAGE || "",
+    captionColor: "#5a3b4b",
+  });
+  const updatePreview = () => {
+    preview.dataset.background = background.value;
+    preview.dataset.display = display.value;
+    preview.querySelector("strong").style.color = captionColor.value;
+  };
+  const save = () => {
+    const characterId = characterSelect.value;
+    if (!enabled.checked) delete characterStreamProfiles[characterId];
+    else characterStreamProfiles[characterId] = {
+      background: background.value, backgroundImage: backgroundPath.value,
+      display: display.value, displayImage: displayPath.value, captionColor: captionColor.value,
+    };
+    for (const control of controls) control.disabled = !enabled.checked;
+    updatePreview();
+    updateDirtyState();
+  };
+  const load = () => {
+    const profile = characterStreamProfiles?.[characterSelect.value];
+    const current = profile || globalDefaults();
+    enabled.checked = Boolean(profile);
+    background.value = current.background || "pastel";
+    backgroundPath.value = current.backgroundImage || "";
+    display.value = current.display || "dashboard";
+    displayPath.value = current.displayImage || "";
+    captionColor.value = /^#[0-9a-f]{6}$/i.test(current.captionColor || "") ? current.captionColor : "#5a3b4b";
+    for (const control of controls) control.disabled = !enabled.checked;
+    updatePreview();
+  };
+  enabled.addEventListener("change", save);
+  for (const control of [background, display, captionColor]) control.addEventListener("change", save);
+  backgroundButton.addEventListener("click", async () => {
+    const result = await window.picoagent.settings.pickStreamImage("background");
+    if (result?.path) { backgroundPath.value = result.path; background.value = "custom"; save(); }
+  });
+  displayButton.addEventListener("click", async () => {
+    const result = await window.picoagent.settings.pickStreamImage("display");
+    if (result?.path) { displayPath.value = result.path; display.value = "image"; save(); }
+  });
+  const reset = el("button", { type: "button", className: "secondary", textContent: "共通の配信設定へ戻す" });
+  reset.addEventListener("click", () => { enabled.checked = false; save(); load(); });
+  const node = markSearchable(el("div", { className: "field stream-profile-editor" }, [
+    el("label", {}, [enabled, document.createTextNode(" このキャラ専用の配信設定を使う")]),
+    el("div", { className: "stream-profile-controls" }, [background, display, captionColor]),
+    el("div", { className: "stream-profile-image-controls" }, [backgroundPath, backgroundButton, displayPath, displayButton]),
+    preview, reset,
+    el("p", { className: "hint", textContent: "OFFでは画面・操作タブの共通背景を使います。背景、画面内ディスプレイ、字幕文字色をキャラごとに保存できます。" }),
+  ]), "キャラ 配信 背景 ディスプレイ 字幕 色 プレビュー");
+  return { node, load };
+}
+
 function buildCharacterFramingEditor() {
   const layoutSelect = el("select", {}, LAYOUT_CHOICES.map(layout => el("option", { value: layout.id, textContent: layout.label })));
   const presetSelect = el("select", {}, [
@@ -1816,9 +1875,21 @@ function buildCharacterFramingEditor() {
   });
   for (const input of [zoom, x, y]) input.addEventListener("input", () => { presetSelect.value = "custom"; save(); });
   layoutSelect.addEventListener("change", load);
+  const reset = el("button", { type: "button", className: "secondary", textContent: "この構図を初期値へ戻す" });
+  reset.addEventListener("click", async () => {
+    const characterId = characterSelect.value;
+    const layout = layoutSelect.value;
+    if (characterFraming?.[characterId]) {
+      delete characterFraming[characterId][layout];
+      if (!Object.keys(characterFraming[characterId]).length) delete characterFraming[characterId];
+    }
+    await load();
+    updateDirtyState();
+  });
   const node = markSearchable(el("div", { className: "field framing-editor" }, [
     el("label", { textContent: "キャラごとの構図（表示形式別）" }),
     el("div", { className: "framing-controls" }, [layoutSelect, presetSelect, zoom, x, y]), preview,
+    reset,
     el("p", { className: "hint", textContent: "胸上・上半身・全身を選び、必要なら拡大率と位置を微調整できます。キャラと表示形式ごとに保存します。" }),
   ]), "キャラ 構図 胸上 上半身 全身 拡大 位置 プレビュー");
   return { node, load };
@@ -2108,6 +2179,7 @@ async function render() {
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   characterLive2dSdkOverrides = v.PICOAGENT_LIVE2D_SDK_OVERRIDES || {};
   characterFraming = cloneSettings(v.PICOAGENT_CHARACTER_FRAMING || {});
+  characterStreamProfiles = cloneSettings(v.PICOAGENT_STREAM_PROFILES || {});
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const requestedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
@@ -2135,6 +2207,9 @@ async function render() {
   characterFramingEditor = buildCharacterFramingEditor();
   characterSec.append(characterFramingEditor.node);
   await characterFramingEditor.load();
+  characterStreamProfileEditor = buildCharacterStreamProfileEditor(v);
+  characterSec.append(characterStreamProfileEditor.node);
+  characterStreamProfileEditor.load();
   characterLive2dSdkSelect = el("select");
   for (const option of [
     { value: "auto", label: "自動（推奨）" },
@@ -2172,6 +2247,7 @@ async function render() {
         loadCharacterVoice(requestedCharacter);
         await loadCharacterLive2dSdk(requestedCharacter);
         await characterFramingEditor?.load();
+        characterStreamProfileEditor?.load();
         previousCharacter = requestedCharacter;
         characterSelect.value = requestedCharacter;
       } catch (error) {
@@ -2715,6 +2791,7 @@ function collect() {
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
   patch.PICOAGENT_CHARACTER_FRAMING = characterFraming;
+  patch.PICOAGENT_STREAM_PROFILES = characterStreamProfiles;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();
   return patch;

@@ -408,39 +408,43 @@ async fn stop_and_reap(child: &mut tokio::process::Child) -> Option<String> {
     }
 }
 
+struct GeneratorRequest<'a> {
+    python: &'a Path,
+    generator: &'a Path,
+    animation: &'a Path,
+    source: &'a permissions::SafePath,
+    pack: &'a Path,
+    temp: &'a Path,
+    tha3_root: &'a Path,
+    id: &'a str,
+    name: &'a str,
+}
+
 async fn run_generator(
     app: &AppHandle,
     receiver: oneshot::Receiver<()>,
-    python: &Path,
-    generator: &Path,
-    animation: &Path,
-    source: &permissions::SafePath,
-    pack: &Path,
-    temp: &Path,
-    tha3_root: &Path,
-    id: &str,
-    name: &str,
+    request: GeneratorRequest<'_>,
 ) -> Result<()> {
-    let mut command = tools::process::command(python);
+    let mut command = tools::process::command(request.python);
     command
-        .arg(generator)
-        .arg(id)
+        .arg(request.generator)
+        .arg(request.id)
         .arg("--input")
-        .arg(source)
+        .arg(request.source)
         .arg("--name")
-        .arg(name)
+        .arg(request.name)
         .arg("--pack-dir")
-        .arg(pack)
+        .arg(request.pack)
         .arg("--tha3-dir")
-        .arg(tha3_root)
+        .arg(request.tha3_root)
         .arg("--temp-dir")
-        .arg(temp)
+        .arg(request.temp)
         .arg("--animation-script")
-        .arg(animation)
+        .arg(request.animation)
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONNOUSERSITE", "1");
-    if let Some(bundled_packages) = runtime_packages(tha3_root) {
+    if let Some(bundled_packages) = runtime_packages(request.tha3_root) {
         command.env("PYTHONPATH", bundled_packages);
     }
     let mut child = command.spawn().context("THA3用Pythonを起動できません")?;
@@ -552,8 +556,19 @@ pub async fn generate(
         let pack = cache.join("pack");
         let temp = cache.join("temp");
         run_generator(
-            &app, receiver, &python, &generator, &animation, &source, &pack, &temp, &tha3_root, id,
-            name,
+            &app,
+            receiver,
+            GeneratorRequest {
+                python: &python,
+                generator: &generator,
+                animation: &animation,
+                source: &source,
+                pack: &pack,
+                temp: &temp,
+                tha3_root: &tha3_root,
+                id,
+                name,
+            },
         )
         .await?;
         character_pack::validate(&pack)

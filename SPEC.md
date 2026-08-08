@@ -234,6 +234,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。出力が `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` の上限を超える場合は末尾を切り捨て、コンテキスト超過を防ぐ。
 - スキル実体、名前インデックス、function schema は `OnceLock` でキャッシュする。多数のスキルを導入しても会話ごとの schema 構築や dispatch 時の全スキル再生成を避ける。
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
+- 候補判定語彙は `Tool::intent_keywords()` が返す登録メタデータを正本とし、schema候補選定と副作用のない直接実行判定は `tools::intent_matches()` を共有する。全ルートが登録済みToolを指すことと代表発話を共通テストで検査する。
+- 標準的な外向きHTTPは `tools::http::client()` の接続プールを共有し、待ち時間設定は `tools::http::timeout()` で範囲を統一する。User-Agent、Cookie、プロキシ等の専用構築が必要なコネクタだけ個別builderを使う。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/ms_office/scripts/office.ps1` のような補助ファイル変更もビルドに反映される。
 
 ### スキルの分類（エージェント設計としての位置づけ）
@@ -442,6 +444,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |
 | `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |
+| `PICOAGENT_STREAM_PROFILES` | `{}` | キャラクター | キャラクターID別の配信表示上書き。背景、背景画像、画面内ディスプレイ、表示画像、字幕色を保持し、未設定キャラは共通の配信設定を使う。不正なID・選択肢・色は保存時に除去または安全な既定値へ正規化する |
 | `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"chat":{"w":520,"h":760}}`）。既定はミニ360×560／ペット900×600／チャット・トーク520×760／バー900×320／作業1400×850／配信1560×920／ウィジェット440×600。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 基本 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
 | `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 基本 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |

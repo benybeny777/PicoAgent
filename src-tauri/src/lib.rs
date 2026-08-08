@@ -8,6 +8,7 @@ mod api_server;
 mod boot_screen;
 #[cfg(test)]
 mod bundle_scope;
+mod character_framing;
 mod character_pack;
 mod commands;
 mod config;
@@ -34,6 +35,7 @@ mod relationship_preset;
 mod scheduler;
 mod secret;
 mod store;
+mod stream_profile;
 mod text;
 mod tha3_creator;
 mod tools;

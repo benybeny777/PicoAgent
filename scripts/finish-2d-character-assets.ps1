@@ -23,6 +23,37 @@ $stagedRoot = Join-Path $workRoot 'staged'
 $qaRoot = Join-Path $workRoot 'qa'
 New-Item -ItemType Directory -Force -Path $backupRoot, $processedRoot, $stagedRoot, $qaRoot | Out-Null
 
+$sourceIndex = Join-Path $SourceRoot 'index.json'
+if (Test-Path -LiteralPath $sourceIndex) {
+    $expandedRoot = Join-Path $workRoot 'source-expanded'
+    $index = Get-Content -LiteralPath $sourceIndex -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($index.version -ne 1 -or $null -eq $index.characters) {
+        throw "Character source index is invalid: $sourceIndex"
+    }
+    foreach ($characterId in $CharacterIds) {
+        $mappings = $index.characters.PSObject.Properties[$characterId].Value
+        if ($null -eq $mappings) {
+            throw "Character source index entry not found: $characterId"
+        }
+        foreach ($mapping in $mappings.PSObject.Properties) {
+            $relative = [string]$mapping.Name
+            $blob = [string]$mapping.Value
+            if ([IO.Path]::IsPathRooted($relative) -or $relative.Split('/\') -contains '..' -or
+                [IO.Path]::IsPathRooted($blob) -or $blob.Split('/\') -contains '..') {
+                throw "Unsafe character source path: $relative -> $blob"
+            }
+            $source = Join-Path $SourceRoot $blob
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                throw "Character source blob not found: $blob"
+            }
+            $destination = Join-Path (Join-Path $expandedRoot $characterId) $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+            Copy-Item -LiteralPath $source -Destination $destination
+        }
+    }
+    $SourceRoot = $expandedRoot
+}
+
 Add-Type -Path (Join-Path $PSScriptRoot 'CharacterAssetImageProcessor.cs') -ReferencedAssemblies 'System.Drawing'
 
 function Convert-ToJsPath([string]$Path) {

@@ -280,7 +280,7 @@ impl Provider for Local {
             .map(|preset| preset.id.to_string())
             .chain(std::iter::once("custom".to_string()))
             .collect();
-        let res = match reqwest::Client::new()
+        let res = match crate::tools::http::client()
             .get(&url)
             .timeout(std::time::Duration::from_secs(2))
             .send()
@@ -341,7 +341,7 @@ impl Provider for Local {
             if with_tools && !tools.is_empty() {
                 body["tools"] = json!(tools);
             }
-            reqwest::Client::new().post(&url).json(&body).send()
+            crate::tools::http::client().post(&url).json(&body).send()
         };
 
         let mut res = send(!tools.is_empty()).await?;

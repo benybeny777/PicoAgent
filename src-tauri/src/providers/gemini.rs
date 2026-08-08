@@ -55,7 +55,7 @@ impl Provider for Gemini {
             return Ok(Vec::new());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = reqwest::Client::new().get(&url).bearer_auth(&key).send().await?;
+        let res = crate::tools::http::client().get(&url).bearer_auth(&key).send().await?;
         if !res.status().is_success() {
             anyhow::bail!("Gemini /models failed: {}", res.status());
         }
@@ -111,7 +111,7 @@ impl Provider for Gemini {
             if with_tools && !tools.is_empty() {
                 body["tools"] = json!(tools);
             }
-            reqwest::Client::new()
+            crate::tools::http::client()
                 .post(&url)
                 .bearer_auth(&key)
                 .json(&body)

@@ -3,6 +3,7 @@
 window.picoagent?.frontendReady?.();
 
 const petApp = document.getElementById("petApp");
+window.__picoagentPerformance = { startedAt: performance.now() };
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
 const historyLog = document.getElementById("historyLog");
@@ -43,6 +44,7 @@ const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
 let busy = false;
+const { errorDetail, logApp } = window.PicoUI;
 
 // decorations:false の透明ウィンドウにはOSの枠が無いため、各辺と四隅を明示的な
 // リサイズ領域にする。幅だけ・高さだけ・縦横同時のいずれもOS標準操作で変更できる。
@@ -188,26 +190,6 @@ function addRetryButton() {
     else updateComposerState();
   });
   md.append(btn);
-}
-
-function errorDetail(error) {
-  if (!error) return "";
-  if (error instanceof Error) return error.stack || error.message;
-  if (typeof error === "string") return error;
-  try { return JSON.stringify(error); }
-  catch { return String(error); }
-}
-
-function logApp(level, message, detail) {
-  try {
-    window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(error => {
-      // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
-      console.warn("アプリログ保存に失敗しました", error);
-    });
-  } catch (error) {
-    // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
-    console.warn("アプリログ保存に失敗しました", error);
-  }
 }
 
 window.addEventListener("error", event => {
@@ -525,6 +507,8 @@ async function loadCharacterManifest(characterId) {
   const manifestResponse = await fetch(`${root}/character.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
   if (!manifestResponse.ok) throw new Error(`キャラクター定義: HTTP ${manifestResponse.status}`);
   const manifest = await manifestResponse.json();
+  window.__picoagentPerformance.manifestReady = performance.now();
+  performance.mark("picoagent-character-manifest-ready");
   return { entry, manifest, root };
 }
 
@@ -552,6 +536,7 @@ async function prepareBootCharacter(characterId) {
 }
 
 const animationPreloadCache = new Map();
+const animationPreloadPromises = new Map();
 let deferredAnimationPreload = null;
 
 function cancelDeferredAnimationPreload() {
@@ -566,36 +551,79 @@ function cancelDeferredAnimationPreload() {
 function clearAnimationPreloads() {
   cancelDeferredAnimationPreload();
   animationPreloadCache.clear();
+  animationPreloadPromises.clear();
 }
 
 function preloadAnimation(name) {
   const animation = animations[name] || animations.idle;
-  if (!animation) return;
+  if (!animation) return Promise.resolve();
+  const pending = [];
   for (let index = 0; index < animationFrameCount(animation); index += 1) {
     const url = frameUrl(name, index);
-    if (animationPreloadCache.has(url)) continue;
+    if (animationPreloadPromises.has(url)) {
+      pending.push(animationPreloadPromises.get(url));
+      continue;
+    }
     const image = new Image();
+    let settle;
+    const loaded = new Promise(resolve => {
+      let finished = false;
+      let timeoutId = null;
+      settle = () => {
+        if (finished) return;
+        finished = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        image.onload = null;
+        image.onerror = null;
+        resolve();
+      };
+      image.onload = settle;
+      image.onerror = settle;
+      // 壊れたキャッシュやWebView側のイベント欠落が1枚だけあっても、全体の準備完了を塞がない。
+      timeoutId = setTimeout(settle, 5000);
+    });
     image.src = url;
+    // メモリ／ディスクキャッシュから同期完了した画像はloadイベントを待たず完了扱いにする。
+    if (image.complete) queueMicrotask(settle);
     animationPreloadCache.set(url, image);
+    animationPreloadPromises.set(url, loaded);
+    pending.push(loaded);
   }
+  return Promise.all(pending);
 }
 
-// 速度優先: 最初に待機モーションを全枚読み、描画が落ち着いた直後に残りも一括で温める。
+function boundedPreload(promise, timeoutMs = 5000) {
+  return new Promise(resolve => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    const timeoutId = setTimeout(finish, timeoutMs);
+    Promise.resolve(promise).then(finish, finish);
+  });
+}
+
+// 速度優先: 最初に待機モーションを全枚読み、120ms後に残りも一括で温める。
 // 状態切替が先に来た場合は setAnimation() がそのモーションを即時先読みする。
 function preloadAnimations() {
   clearAnimationPreloads();
-  preloadAnimation("idle");
+  boundedPreload(preloadAnimation("idle")).then(() => {
+    window.__picoagentPerformance.idlePreloadReady = performance.now();
+    performance.mark("picoagent-idle-preload-ready");
+  });
   const warmRest = () => {
     deferredAnimationPreload = null;
-    for (const name of Object.keys(animations)) {
-      if (name !== "idle") preloadAnimation(name);
-    }
+    boundedPreload(Promise.all(Object.keys(animations).map(preloadAnimation))).then(() => {
+      window.__picoagentPerformance.allPreloadReady = performance.now();
+      performance.mark("picoagent-all-preload-ready");
+    });
   };
-  if (typeof requestIdleCallback === "function") {
-    deferredAnimationPreload = { kind: "idle", id: requestIdleCallback(warmRest, { timeout: 800 }) };
-  } else {
-    deferredAnimationPreload = { kind: "timer", id: setTimeout(warmRest, 120) };
-  }
+  // requestIdleCallbackはWebViewの継続描画中に呼ばれない環境があり、全件準備が永久に
+  // 保留されるため、短いタイマーで開始時刻を確定させる。
+  deferredAnimationPreload = { kind: "timer", id: setTimeout(warmRest, 120) };
 }
 
 function personaText(manifest, override) {
@@ -3574,13 +3602,15 @@ function applyCharacterFraming() {
   savedCharacterOffset = { ...characterOffset };
 }
 
-function applyStreamAppearance(background, imagePath, display, displayImagePath) {
+function applyStreamAppearance(background, imagePath, display, displayImagePath, captionColor = "#5a3b4b") {
   petApp.dataset.streamBackground = ["pastel", "gaming", "simple", "custom"].includes(background) ? background : "pastel";
   petApp.dataset.streamDisplay = ["dashboard", "game", "clock", "image", "none"].includes(display) ? display : "dashboard";
   const image = imagePath ? `url("${window.picoagent.assetUrl(imagePath)}")` : "none";
   petApp.style.setProperty("--stream-custom-background", image);
   const displayImage = displayImagePath ? `url("${window.picoagent.assetUrl(displayImagePath)}")` : "none";
   document.getElementById("streamDisplay")?.style.setProperty("--stream-display-image", displayImage);
+  const safeCaptionColor = /^#[0-9a-f]{6}$/i.test(String(captionColor)) ? String(captionColor) : "#5a3b4b";
+  petApp.style.setProperty("--stream-caption-color", safeCaptionColor);
 }
 
 /** ドラッグを取りやめて、掴む前の位置へ戻す（保存もしない）。 */
@@ -3824,9 +3854,16 @@ document.addEventListener("keydown", event => {
 // 中の配置はここで data-layout を書き替えて CSS に任せる。
 window.picoagent.on("pet:layout", applyLayout);
 // 右クリックメニュー「立ち絵の位置を戻す」。動かしすぎたときの戻し先。
-window.picoagent.on("pet:character-reset", () => {
+window.picoagent.on("pet:character-reset", (reset) => {
+  const characterId = reset?.characterId || characterManifest?.id;
+  const layout = reset?.layout || currentLayout;
+  if (characterId && characterFraming?.[characterId]) {
+    delete characterFraming[characterId][layout];
+    if (!Object.keys(characterFraming[characterId]).length) delete characterFraming[characterId];
+  }
   applyCharacterOffset(0, 0, { clamp: false });
   savedCharacterOffset = { x: 0, y: 0 };
+  applyCharacterFraming();
 });
 window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
 window.picoagent.on("pet:notice", pushNotice);
@@ -4005,7 +4042,7 @@ window.picoagent.on("pet:ui", (ui) => {
   }
   if (ui.characterZoom != null) applyCharacterZoom(ui.characterZoom);
   if (ui.characterFraming != null) characterFraming = ui.characterFraming || {};
-  if (ui.streamBackground != null) applyStreamAppearance(ui.streamBackground, ui.streamBackgroundImage, ui.streamDisplay, ui.streamDisplayImage);
+  if (ui.streamBackground != null) applyStreamAppearance(ui.streamBackground, ui.streamBackgroundImage, ui.streamDisplay, ui.streamDisplayImage, ui.streamCaptionColor);
   if (ui.ttsEnabled != null) {
     ttsEnabledCache = ui.ttsEnabled !== false;
     if (!ttsEnabledCache) stopVoice(false);
@@ -4290,7 +4327,7 @@ function startAlarmPolling() {
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   applyCharacterZoom(info.characterZoom);
   characterFraming = info.characterFraming || {};
-  applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage);
+  applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;
   applyCharacterOffset(info.characterOffsetX, info.characterOffsetY, { clamp: false });
   savedCharacterOffset = { ...characterOffset };

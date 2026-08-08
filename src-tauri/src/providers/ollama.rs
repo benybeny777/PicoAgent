@@ -157,7 +157,7 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = reqwest::Client::new().post(&url).json(&body).send().await?;
+        let res = crate::tools::http::client().post(&url).json(&body).send().await?;
         if !res.status().is_success() {
             let status = res.status();
             let text = res.text().await.unwrap_or_default();
@@ -190,7 +190,7 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = reqwest::Client::new().post(&url).json(&body).send().await?;
+        let res = crate::tools::http::client().post(&url).json(&body).send().await?;
         if !res.status().is_success() {
             let status = res.status();
             let text = res.text().await.unwrap_or_default();

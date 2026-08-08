@@ -8,7 +8,9 @@
 
 ひよりの口ArtMesh消失を、SDK 5用Core 6（Cubism 5.3形式）とSDK 4互換Core 5の使い分けで修正した。キャラクター設定には自動／Cubism 4／Cubism 5の世代選択を追加した。通常表示とVTuber形式の起動画面は上半身表示へ揃え、フキダシ拡大、画面内クランプ、キャラ別の既定声も反映済み。2026-08-08に全8形式を実用寸法・文字付き操作・独立入力欄へ揃え、設定画面を8カテゴリへ整理し、右クリックの危険なリセット操作をサブメニューへ移した。さらにキャラ×表示形式の構図、配信背景と画面内ディスプレイ、LIVE・日付・時刻、左右画面配置、状態付き読み上げスイッチを追加した。読み上げはユーザー指示があるまでローカル設定で無効のまま扱う。
 
-Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430の誤記録、履歴ロック不一致、起動中の形式適用、キャラ別挨拶、配信キャンバス寸法とアセット版の二重管理も修正した。2026-08-08にはClaudeの追加提案を現行mainで再検証してCodex案と統合し、既存の会話コンテキスト圧縮を要約1ブロック置換・system込み予算・localの実コンテキスト長追従へ直した。PNG系4キャラは制作正本を分離し、Photoshop「ディテールを保持 2.0」による高精細化、元アルファ再適用、4背景QA、全件成功後だけ反映する工程へ更新した。42コマは `framePaths` で共有し、待機即時＋残りアイドル時の速度優先プリロードにした。指摘と保留項目は [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md) に記録している。
+Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430の誤記録、履歴ロック不一致、起動中の形式適用、キャラ別挨拶、配信キャンバス寸法とアセット版の二重管理も修正した。2026-08-08にはClaudeの追加提案を現行mainで再検証してCodex案と統合し、既存の会話コンテキスト圧縮を要約1ブロック置換・system込み予算・localの実コンテキスト長追従へ直した。PNG系4キャラは制作正本を分離し、Photoshop「ディテールを保持 2.0」による高精細化、元アルファ再適用、4背景QA、全件成功後だけ反映する工程へ更新した。42コマは `framePaths` で共有し、待機即時＋120ms後に残りを読む速度優先プリロードにした。制作正本208配置も71個の内容ハッシュblobへ共有化し、Photoshop工程が自動展開する。
+
+統合ロードマップ13項目は実装済み。構図保存の検証・個別初期化、キャラ別配信表示、全Live2Dと操作回帰、冷間計測、Windows/macOS中心CI、スキル意図メタデータ、全Tool schemaガード、HTTP・フロントログ共通層、clippy警告ゼロ、CHANGELOG年別化を追加した。指摘と保留境界は [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md) に記録している。
 
 ## 残る確認境界
 
@@ -22,8 +24,9 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 296件成功
-cargo test --manifest-path xtask/Cargo.toml             # 20件成功
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 303件
+cargo test --manifest-path xtask/Cargo.toml             # 21件成功
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui  # ?v= の自動付与を確認
 git diff --check
 ```
@@ -39,5 +42,8 @@ git diff --check
 - 8形式の実フロント描画を `tools/screenshots/shoot.mjs layout-shot-*.webp` で再生成し、設定カード8件の選択回帰も `settings-display.mjs` で確認する
 - PNG系4キャラの計208枚を72画像へ重複除外し、Photoshop「ディテールを保持 2.0」で通常立ち絵を2倍化。起動画像は元解像度を維持。白／濃紺／マゼンタ／市松の一覧と自動境界検査は警告0件
 - `SHOOT_CHARACTER_MATRIX=1` でPNG系4キャラ×8形式を撮影。平均1,214ms、全32画面で描画を確認し、一覧で見つけたマスコット／ペットの顔だけ表示も修正済み。成果物は `temp/character-layout-matrix/`
+- 同じ32画面でmanifest・待機・全件プリロード時刻を記録し、今回平均1,077ms・基準超過警告0件
+- `SHOOT_INTERACTION_MATRIX=1` で麦／ひより×8形式の起動遷移・入力欄・縮小後の収まりを16件確認
+- `SHOOT_LIVE2D_MATRIX=1` で導入済み8モデル×8形式=64件のSDK・口パラメータ・描画を確認
 
 ルールの正本は [AGENTS.md](AGENTS.md)、レビューの判断履歴は [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md)。この文書には進行状況だけを記録する。
