@@ -261,10 +261,27 @@ $jsx += @(
 )
 Set-Content -LiteralPath $jsxPath -Value ($jsx -join "`r`n") -Encoding UTF8
 
+if (Get-Process -Name 'Photoshop' -ErrorAction SilentlyContinue) {
+    throw 'Photoshop is already running. Close it before starting this isolated batch.'
+}
+
 Write-Host "Finishing $($allJobs.Count) deduplicated images in Photoshop."
-$photoshop = New-Object -ComObject Photoshop.Application
-$photoshop.DisplayDialogs = 3
-$photoshop.DoJavaScriptFile($jsxPath) | Out-Null
+$photoshop = $null
+try {
+    $photoshop = New-Object -ComObject Photoshop.Application
+    $photoshop.DisplayDialogs = 3
+    $photoshop.DoJavaScriptFile($jsxPath) | Out-Null
+}
+finally {
+    if ($null -ne $photoshop) {
+        try {
+            $photoshop.Quit()
+        }
+        finally {
+            [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($photoshop)
+        }
+    }
+}
 
 foreach ($job in $allJobs) {
     Convert-AlphaAwareImage `
