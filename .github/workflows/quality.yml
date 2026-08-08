@@ -33,6 +33,7 @@ jobs:
         run: |
           cargo xtask sync-characters
           cargo xtask build-ui
+          cargo xtask release-check
       - name: フォーマット確認
         run: |
           cargo fmt --manifest-path src-tauri/Cargo.toml --check
@@ -40,7 +41,9 @@ jobs:
       - name: コンパイル確認
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: clippy警告ゼロ確認
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: |
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
       - name: Windows全テスト
         if: runner.os == 'Windows'
         run: |

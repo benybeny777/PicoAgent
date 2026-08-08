@@ -904,6 +904,11 @@ body.searching .tab-panel {
   background: var(--surface);
 }
 .diagnostic-card.ok { border-color: var(--ok-border); background: var(--ok-bg); }
+.product-info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.product-info-card { display:flex; flex-direction:column; gap:5px; min-width:0; padding:13px; border:1px solid var(--line); border-radius:11px; background:var(--surface-soft); }
+.product-info-card span { color:var(--muted); font-size:11px; font-weight:800; }
+.product-info-card strong { font-size:14px; overflow-wrap:anywhere; }
+.product-info-card small { color:var(--muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
 .diagnostic-card.warn { border-color: var(--warn-border); background: var(--warn-bg); }
 .diagnostic-card.error { border-color: var(--err-border); background: var(--err-bg); }
 .diagnostic-label {
@@ -999,6 +1004,7 @@ button.tab:active {
   .quick-settings-heading { display:block; }
   .quick-settings-heading p { margin-top:4px; }
   .search-shortcuts span { width:100%; }
+  .product-info-grid { grid-template-columns:1fr; }
 }
 
 /* 再起動確認の画面（自前ダイアログ） */

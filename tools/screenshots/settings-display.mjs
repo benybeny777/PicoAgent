@@ -27,6 +27,7 @@ await new Promise(resolveListen => server.listen(0, "127.0.0.1", resolveListen))
 const port = server.address().port;
 
 const settingsData = {
+  product: { name: "PicoAgent", version: "1.0.0", identifier: "com.picoagent.desktop" },
   values: {
     PICOAGENT_PROVIDER: "local",
     PICOAGENT_CHARACTER: "hiyori",
@@ -111,7 +112,11 @@ try {
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
   const muteStatus = await page.locator(".tts-master-status").textContent();
   if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
-  console.log(`設定画面確認: 入口4件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・構図・配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  await page.getByRole("tab", { name: "診断・修復" }).click();
+  if (await page.locator(".product-info-card").count() !== 4) throw new Error("製品情報カードが4件ではありません");
+  if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
+  await page.screenshot({ path: join(OUT, "diagnostics-tab.png") });
+  console.log(`設定画面確認: 入口4件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図・配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

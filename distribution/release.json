@@ -1,0 +1,23 @@
+{
+  "channel": "direct",
+  "platforms": ["windows", "macos"],
+  "includedCharacters": ["mugi", "rin", "mai"],
+  "legal": {
+    "eulaReviewed": false,
+    "privacyReviewed": false,
+    "live2dApprovalReference": ""
+  },
+  "support": {
+    "supportUrl": "",
+    "privacyUrl": "",
+    "termsUrl": ""
+  },
+  "updates": {
+    "endpoint": "",
+    "publicKey": ""
+  },
+  "signing": {
+    "windowsReady": false,
+    "macosReady": false
+  }
+}

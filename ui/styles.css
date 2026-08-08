@@ -469,6 +469,10 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .onboarding-choices button:hover { border-color:var(--accent); background:var(--chip-bg); }
 .onboarding-choices b,.onboarding-choices span { display:block; }
 .onboarding-choices span { margin-top:2px; color:var(--muted); font-size:10.5px; font-weight:500; }
+.onboarding-privacy { margin-top:12px; padding:10px 12px; border:1px solid var(--panel-border); border-radius:11px; background:var(--chip-bg); }
+.onboarding-privacy b,.onboarding-privacy span { display:block; }
+.onboarding-privacy b { margin-bottom:3px; color:var(--ink); font-size:11px; }
+.onboarding-privacy span { color:var(--muted); font-size:10px; line-height:1.5; }
 .onboarding-card small { display:block; margin-top:13px; color:var(--muted); font-size:10px; }
 
 /* ══════════════════════════════════════════════════════════════════════════

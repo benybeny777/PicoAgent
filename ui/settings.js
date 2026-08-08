@@ -2033,6 +2033,38 @@ function buildDiagnosticsSection() {
   return diagnosticsSec;
 }
 
+function buildProductInfoSection() {
+  const product = data.product || {};
+  const productSec = section("製品情報・データの扱い");
+  productSec.append(el("div", { className: "product-info-grid" }, [
+    el("div", { className: "product-info-card" }, [
+      el("span", { textContent: "製品" }),
+      el("strong", { textContent: `${product.name || "PicoAgent"} ${product.version || ""}`.trim() }),
+      el("small", { textContent: product.identifier || "com.picoagent.desktop" }),
+    ]),
+    el("div", { className: "product-info-card" }, [
+      el("span", { textContent: "ローカルAI" }),
+      el("strong", { textContent: "会話を外部AIへ送信しません" }),
+      el("small", { textContent: "クラウドAIや外部連携を選んだ場合だけ、実行に必要な情報をその接続先へ送ります。" }),
+    ]),
+    el("div", { className: "product-info-card" }, [
+      el("span", { textContent: "保存データ" }),
+      el("strong", { textContent: "設定・会話・追加キャラはPC内" }),
+      el("small", { textContent: "Windows版のアンインストール時は削除するか確認し、既定では残します。" }),
+    ]),
+    el("div", { className: "product-info-card" }, [
+      el("span", { textContent: "第三者ソフトウェア" }),
+      el("strong", { textContent: "各提供元の条件に従います" }),
+      el("small", { textContent: "Live2D、Aivis、ローカルモデルなどの表示と配布条件は販売前監査の対象です。" }),
+    ]),
+  ]));
+  productSec.append(el("p", {
+    className: "hint",
+    textContent: "販売版では、利用条件・プライバシー表示・サポート窓口・更新署名を出荷前監査で確認します。",
+  }));
+  return markSearchable(productSec, "製品 バージョン データ プライバシー ライセンス サポート 更新");
+}
+
 function buildDownloadedModelsSection() {
   const sec = section("ダウンロード済みモデル");
   sec.append(el("p", { className: "hint", textContent: "ローカルエンジンが取得した GGUF モデルです。使わないモデルを削除してディスクを空けられます（使用中のモデルは削除できません）。" }));
@@ -2770,7 +2802,7 @@ async function render() {
   permSec.append(el("p", { className: "hint", textContent: "コマンド実行（run_command）と自力実行（code_runner）の有効化は「スキル」タブの各スキルカードで切り替えます。既定はどちらも無効です。" }));
   panels.permissions.append(permSec);
 
-  panels.diagnostics.append(buildDiagnosticsSection());
+  panels.diagnostics.append(buildProductInfoSection(), buildDiagnosticsSection());
 
   // プロバイダ変更でモデル候補を更新し、選択中プロバイダの設定だけ表示する。
   providerSelect.addEventListener("change", () => {

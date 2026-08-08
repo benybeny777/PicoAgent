@@ -10,6 +10,7 @@ mod bundled;
 mod character_pack;
 mod cli;
 mod office;
+mod release;
 mod tools;
 mod util;
 
@@ -23,7 +24,10 @@ const USAGE: &str = "\
 使い方: cargo xtask <サブコマンド>
 
   dev                 開発起動（同梱物の未取得分を取得してから tauri dev）
-  build               製品ビルド（同上 + tauri build）
+  build               開発用の製品ビルド（同上 + tauri build）
+  build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
+  preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
+  release-check       販売前の未完了項目を一覧表示
   setup [対象…]        取得対象は engine / aivis / whisper / live2d / tha3 / office / tools
                       （省略時は製品へ同梱する全対象）
   sync-characters     characters/ を ui/assets/characters/ へ同期
@@ -52,8 +56,14 @@ fn run(args: &[String]) -> Result<()> {
     let rest = &args[args.len().min(1)..];
 
     match command {
-        "dev" => tauri("dev", rest),
-        "build" => tauri("build", rest),
+        "dev" => tauri("dev", rest, false),
+        "build" => tauri("build", rest, false),
+        "build-distribution" => tauri("build", rest, true),
+        "preview-distribution" => preview_distribution(),
+        "release-check" => {
+            let _ = release::check(false)?;
+            Ok(())
+        }
         "setup" => setup(rest),
         "sync-characters" => assets::sync_characters(),
         "character-pack" => character_pack::run(rest),
@@ -69,6 +79,12 @@ fn run(args: &[String]) -> Result<()> {
             bail!("未知のサブコマンドです: {other}")
         }
     }
+}
+
+fn preview_distribution() -> Result<()> {
+    let characters = release::included_characters(&release::manifest()?)?;
+    assets::sync_distribution_characters(&characters)?;
+    assets::build_ui_dist(false)
 }
 
 /// 同梱物を取得する。対象を省略するとすべて。
@@ -107,12 +123,22 @@ fn setup(targets: &[String]) -> Result<()> {
 ///
 /// 前処理は旧 `npm run dev` / `npm run build` と同じ順序:
 /// 残存プロセス停止 → Live2D 取得 → キャラ同期 → UI 配信ビルド → 同梱物取得。
-fn tauri(mode: &str, extra: &[String]) -> Result<()> {
+fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
     let release = mode == "build";
+    let distribution_characters = if distribution {
+        let _ = release::check(true)?;
+        Some(release::included_characters(&release::manifest()?)?)
+    } else {
+        None
+    };
 
     assets::stop_stale()?;
     bundled::fetch_live2d()?;
-    assets::sync_characters()?;
+    if let Some(characters) = distribution_characters.as_ref() {
+        assets::sync_distribution_characters(characters)?;
+    } else {
+        assets::sync_characters()?;
+    }
     assets::build_ui_dist(release)?;
     bundled::fetch_engine()?;
     office::fetch_aivis()?;

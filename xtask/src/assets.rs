@@ -36,6 +36,68 @@ pub fn sync_characters() -> Result<()> {
     Ok(())
 }
 
+/// 販売設定で明示したキャラだけを配信先へ同期する。
+///
+/// 開発用の公式サンプルや制作途中モデルを誤って販売物へ含めないため、通常同期とは
+/// 別入口にする。元のcharacters/は変更せず、生成先のindex.jsonだけを絞り込む。
+pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
+    let root = repo_root();
+    let src = root.join("characters");
+    let dest = root.join("ui/assets/characters");
+    fs::remove_dir_all(&dest).ok();
+    fs::create_dir_all(&dest)?;
+
+    let index_path = src.join("index.json");
+    let mut index: serde_json::Value = serde_json::from_str(&fs::read_to_string(&index_path)?)?;
+    let characters = index
+        .get_mut("characters")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| anyhow::anyhow!("characters/index.json にcharacters配列がありません"))?;
+    characters.retain(|character| {
+        character
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|id| included.iter().any(|allowed| allowed == id))
+    });
+    if characters.len() != included.len() {
+        bail!(
+            "販売設定のキャラ件数とindex.jsonの一致件数が異なります: 設定{}件 / 一致{}件",
+            included.len(),
+            characters.len()
+        );
+    }
+    let default = index
+        .get("default")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if !included.iter().any(|id| id == default) {
+        index["default"] = serde_json::Value::String(included[0].clone());
+    }
+    fs::write(
+        dest.join("index.json"),
+        format!("{}\n", serde_json::to_string_pretty(&index)?),
+    )?;
+
+    for id in included {
+        copy_dir(&src.join(id), &dest.join(id), &|path| {
+            path.to_string_lossy().contains("live2d-src")
+        })?;
+    }
+    let placeholder = src.join("_preview-placeholder.png");
+    if placeholder.is_file() {
+        fs::copy(placeholder, dest.join("_preview-placeholder.png"))?;
+    }
+    log(
+        "sync-characters",
+        format!(
+            "販売対象{}体だけを同期しました: {}",
+            included.len(),
+            included.join(", ")
+        ),
+    );
+    Ok(())
+}
+
 /// `ui/` を Tauri 配信用 `ui-dist/` へコピーする。
 ///
 /// release では依存追加なしで HTML/CSS/JS の余分な空白とコメントを落とし、
@@ -353,7 +415,7 @@ mod tests {
     fn 同梱のcssとjsへ内容版を付ける() {
         let html =
             r#"<link rel="stylesheet" href="styles.css" /><script src="renderer.js"></script>"#;
-        let stamped = rewrite_asset_refs(&html.to_string(), &|relative| match relative {
+        let stamped = rewrite_asset_refs(html, &|relative| match relative {
             "styles.css" => Some("aaaaaaaa".to_string()),
             "renderer.js" => Some("bbbbbbbb".to_string()),
             _ => None,

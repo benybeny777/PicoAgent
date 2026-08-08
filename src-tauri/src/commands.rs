@@ -2201,6 +2201,11 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         .collect();
 
     Ok(json!({
+        "product": {
+            "name": "PicoAgent",
+            "version": env!("CARGO_PKG_VERSION"),
+            "identifier": "com.picoagent.desktop",
+        },
         "values": values,
         "active": { "providerId": provider_id, "model": model },
         "defaults": { "systemPrompt": DEFAULT_SYSTEM_PROMPT },

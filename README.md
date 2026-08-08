@@ -329,7 +329,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 - **キャラ・音声** — 選択・人格・声・読み上げの ON/OFF と音量・Live2DのSDK世代（自動／Cubism 4／Cubism 5）のほか、**自分で用意した Live2D モデル等を追加できます**（zip かフォルダを選ぶだけ。追加分はアプリのデータフォルダへ入り、再ビルドは不要）
 - **スキル** — カテゴリ見出しとジャンルチップで整理。各カードの ⚙ は既定で折りたたみ。設定不要 / 未設定 / 一部設定 / 設定済みのバッジと、承認ポリシー（低リスク / 外部読取 / 書込・変更 / 送信前確認 / 実行前確認）を表示
 - **AIモデル・連携** — 選択中のプロバイダ設定だけを表示し、未使用プロバイダの API キー欄やモデル欄は畳み込みます。ローカル API と MCP（外部ツール連携）もこのタブにあります
-- **診断・修復** — 選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認
+- **診断・修復** — 選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認。製品名・バージョン、ローカル／外部通信の違い、保存データ、第三者ソフトウェアの扱いも表示します
 - API キーや OAuth token が要る項目には、取得手順と公式リンクの設定ガイドを表示（チャットで「Gmail のトークンの取り方」と聞いても同じ案内が出ます）
 - Gmail / Slack / Google カレンダーは保存済み設定で**接続テスト**でき、失敗時は token 未設定・権限不足・対象 ID 不一致などの原因候補も出します
 - 目覚ましとタスクスケジュールは JSON 直書きではなく**専用フォーム**で編集できます
@@ -569,11 +569,23 @@ API の会話は**ステートレス**（リクエスト内で完結）で、デ
 
 ## 📦 配布ビルド
 
-```bash
+```powershell
+# 開発確認用（開発キャラを含むため販売不可）
 cargo xtask build
+
+# 販売準備の現在地を確認
+cargo xtask release-check
+
+# 販売対象キャラだけの画面を確認（インストーラは作らない）
+cargo xtask preview-distribution
+
+# 全ゲート通過後だけ作れる販売用ビルド
+cargo xtask build-distribution
 ```
 
-`src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。`cargo xtask dev` と同じく、同梱物の未取得分は自動で取得してからビルドします。
+`build-distribution` はEULA・プライバシー表示・Live2D審査参照・サポートURL・更新署名・OSコード署名を検査し、未完了が1件でもあれば同梱物取得前に停止します。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。販売版は明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを自動では含めません。
+
+ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
 配布物に入るのは **`ui/` を写した `ui-dist/`** と **`src-tauri/resources/bundled/`** の2つだけです。開発用のツール・ドキュメント・README 用の画像（`tools/` `docs/` `scripts/` `xtask/`）は含まれません。この範囲は設計ガード（`src-tauri/src/bundle_scope.rs`）がテストで固定しているので、うっかり広がることはありません。
 
@@ -642,11 +654,11 @@ cargo xtask build
 
 **アンインストール**
 
-NSIS アンインストーラは関連プロセスを停止後、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\`、現行・旧識別子の設定・キャッシュ、専用一時ディレクトリを削除します。Aivis 子プロセスの `APPDATA` / `LOCALAPPDATA` は `%APPDATA%\PicoAgent\aivis-userdata\` へ向けているため、Aivis のモデル・辞書・キャッシュも対象に含まれます。
+NSIS アンインストーラは関連プロセスとPicoAgent専用の一時ファイルを止めて削除します。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。
 
 **署名・自動更新**
 
-コード署名（Authenticode）と自動更新（`tauri-plugin-updater`）は、リリース時に鍵・証明書を用意して有効化します（現状は未設定）。
+コード署名（Authenticode）、macOS署名・公証、自動更新（`tauri-plugin-updater`）は現状未設定です。`build-distribution` は、公開URL・更新公開鍵・実装・手動確認フラグが揃うまで販売用成果物を生成しません。秘密鍵と証明書は `distribution/release.json` やリポジトリへ保存しません。
 
 </details>
 

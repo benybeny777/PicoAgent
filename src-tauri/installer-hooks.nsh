@@ -17,11 +17,22 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  DetailPrint "PicoAgent の実行時データを削除しています..."
+  DetailPrint "PicoAgent が管理する同梱ランタイムを削除しています..."
   RMDir /r "$INSTDIR\resources\bundled\whisper"
   RMDir /r "$INSTDIR\resources\bundled\aivis"
   RMDir /r "$INSTDIR\resources\bundled\engine"
   RMDir /r "$INSTDIR\resources\bundled\tha3"
+  RMDir /r "$TEMP\picoagent-aivis-runtime"
+  RMDir /r "$TEMP\picoagent-aivis"
+  RMDir /r "$TEMP\picoagent-engine"
+  RMDir /r "$TEMP\picoagent-whisper"
+  RMDir /r "$TEMP\picoagent-tha3-uv-cache"
+
+  ; サイレントアンインストールと「いいえ」はユーザーデータを残す。
+  ; 設定・会話履歴・追加キャラを無確認で失うことがないよう、対話時だけ明示確認する。
+  IfSilent picoagent_keep_user_data 0
+  MessageBox MB_YESNO|MB_ICONQUESTION "設定、会話履歴、追加キャラクター、ダウンロード済みモデルも削除しますか？ 再インストールする場合やバックアップしていない場合は「いいえ」を選んでください。" IDNO picoagent_keep_user_data
+  DetailPrint "利用者が削除を選んだため、PicoAgent のユーザーデータを削除しています..."
   RMDir /r "$APPDATA\PicoAgent"
   RMDir /r "$LOCALAPPDATA\PicoAgent"
   RMDir /r "$APPDATA\com.picoagent.desktop"
@@ -30,9 +41,8 @@
   RMDir /r "$LOCALAPPDATA\com.picoagent.app"
   RMDir /r "$APPDATA\com.coda.app"
   RMDir /r "$LOCALAPPDATA\com.coda.app"
-  RMDir /r "$TEMP\picoagent-aivis-runtime"
-  RMDir /r "$TEMP\picoagent-aivis"
-  RMDir /r "$TEMP\picoagent-engine"
-  RMDir /r "$TEMP\picoagent-whisper"
-  RMDir /r "$TEMP\picoagent-tha3-uv-cache"
+  Goto picoagent_user_data_done
+picoagent_keep_user_data:
+  DetailPrint "設定、会話履歴、追加キャラクター、ダウンロード済みモデルを残しました。"
+picoagent_user_data_done:
 !macroend
