@@ -28,41 +28,51 @@ pub struct MemoryStore {
     pub items: Vec<MemoryItem>,
 }
 
-pub fn path(app: &AppHandle) -> PathBuf {
-    app.path()
+pub fn path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    Ok(app
+        .path()
         .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("memory.json")
+        .map_err(|error| anyhow::anyhow!("長期メモリの保存先を取得できません: {error}"))?
+        .join("memory.json"))
 }
 
-pub fn load(app: &AppHandle) -> MemoryStore {
-    let target = path(app);
-    let Ok(text) = std::fs::read_to_string(&target) else {
-        return MemoryStore::default();
+pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {
+    let target = path(app)?;
+    let text = match std::fs::read_to_string(&target) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(MemoryStore::default())
+        }
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "長期メモリを読み込めません: {} ({error})",
+                target.display()
+            ));
+        }
     };
     match serde_json::from_str(&text) {
-        Ok(store) => store,
+        Ok(store) => Ok(store),
         // フォールバック許可: 破損時も会話継続を優先し、空メモリで起動する。ただし
         // そのまま次の保存で上書きすると記憶が恒久的に消えるので、退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&target);
+            let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+                anyhow::anyhow!("壊れた長期メモリを退避できません。上書きを中止しました: {error}")
+            })?;
             crate::log_paths::append_app_log(
                 app,
                 &format!(
-                    "長期メモリを読めないため空で起動します（{error}）{}",
-                    saved
-                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
-                        .unwrap_or_default()
+                    "長期メモリを読めないため空で起動します（{error}）。破損ファイルは {} へ退避しました",
+                    saved.display()
                 ),
             );
-            MemoryStore::default()
+            Ok(MemoryStore::default())
         }
     }
 }
 
 pub fn save(app: &AppHandle, store: &MemoryStore) {
-    let target = path(app);
     let result = (|| -> anyhow::Result<()> {
+        let target = path(app)?;
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -75,15 +85,27 @@ pub fn save(app: &AppHandle, store: &MemoryStore) {
     }
 }
 
-pub fn clear(app: &AppHandle) {
-    let _ = std::fs::remove_file(path(app));
+pub fn clear(app: &AppHandle) -> anyhow::Result<()> {
+    let _guard = crate::store::lock_state("memory.json");
+    let target = path(app)?;
+    match std::fs::remove_file(&target) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub fn context(app: &AppHandle, cfg: &Config) -> String {
     if !cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
         return String::new();
     }
-    context_from_store(&load(app))
+    match load(app) {
+        Ok(store) => context_from_store(&store),
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            String::new()
+        }
+    }
 }
 
 pub fn context_from_store(store: &MemoryStore) -> String {
@@ -115,7 +137,13 @@ pub fn context_for_query(app: &tauri::AppHandle, cfg: &Config, query: &str) -> S
     if !cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
         return String::new();
     }
-    let store = load(app);
+    let store = match load(app) {
+        Ok(store) => store,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            return String::new();
+        }
+    };
     context_from_store_for_query(&store, query)
 }
 
@@ -182,7 +210,13 @@ pub fn update_from_turn(app: &AppHandle, cfg: &Config, user_text: &str) -> Optio
     }
     // 読む→直す→書き戻すの間に別の会話と競合すると、片方が覚えた内容が消える。
     let _guard = crate::store::lock_state("memory.json");
-    let mut store = load(app);
+    let mut store = match load(app) {
+        Ok(store) => store,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            return None;
+        }
+    };
     let before = serde_json::to_string(&store).unwrap_or_default();
     merge_candidates(&mut store, candidates, max_items(cfg));
     let after = serde_json::to_string(&store).unwrap_or_default();

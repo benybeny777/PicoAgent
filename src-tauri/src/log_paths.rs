@@ -10,11 +10,17 @@ use tauri::{AppHandle, Manager};
 const LOG_RETAIN_DAYS: i64 = 7;
 
 pub fn data_dir(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
-        .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join("PicoAgent")))
-        .unwrap_or_else(|| std::env::temp_dir().join("PicoAgent"))
+    match app.path().app_data_dir() {
+        Ok(path) => path
+            .parent()
+            .map(|parent| parent.join("PicoAgent"))
+            .unwrap_or(path),
+        // フォールバック許可: 保存先取得自体の失敗を記録するため、ログだけは一時領域へ退避する。
+        Err(error) => {
+            eprintln!("ログ保存先を取得できないため一時領域を使います: {error}");
+            std::env::temp_dir().join("PicoAgent")
+        }
+    }
 }
 
 pub fn log_dir(app: &AppHandle) -> PathBuf {
@@ -69,7 +75,9 @@ pub fn prune_old_logs(app: &AppHandle) {
         };
         if date < cutoff {
             // フォールバック許可: 使用中ファイル等で削除に失敗しても起動を止めない。
-            let _ = std::fs::remove_file(entry.path());
+            if let Err(error) = std::fs::remove_file(entry.path()) {
+                append_app_log(app, &format!("古いログを削除できません: {error}"));
+            }
         }
     }
 }
@@ -118,11 +126,43 @@ pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
         }
         std::fs::copy(&old_path, &new_path)?;
         // 旧ファイルは移行後に消す。残すと日付別ファイルへ毎日コピーし直してしまう。
-        let _ = std::fs::remove_file(&old_path);
+        std::fs::remove_file(&old_path)?;
         Ok(())
     })();
     // フォールバック許可: 旧ログ移行に失敗しても起動とログ出力は継続する。
     if let Err(error) = result {
         append_app_log(app, &format!("旧ログの移行に失敗しました: {error}"));
+    }
+}
+
+#[cfg(test)]
+mod guard {
+    use crate::guard_scan;
+
+    /// 画面操作・通知の失敗を捨てると、設定や内部状態だけ変わって表示が追従しない。
+    #[test]
+    fn 画面操作と通知の失敗を無視しない() {
+        let operations = [".emit(", ".show(", ".set_focus(", ".unminimize(", ".close("];
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "log_paths.rs" {
+                continue;
+            }
+            for line in source.body().lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("let _ =")
+                    && operations
+                        .iter()
+                        .any(|operation| trimmed.contains(operation))
+                {
+                    violations.push(format!("{}: {trimmed}", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "画面操作と通知の失敗は診断ログへ残してください:\n{}",
+            violations.join("\n")
+        );
     }
 }

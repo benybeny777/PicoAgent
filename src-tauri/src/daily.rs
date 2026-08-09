@@ -151,7 +151,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
         let cfg = Config::new();
-        cfg.load(path.clone());
+        cfg.load(path.clone()).unwrap();
         (cfg, path)
     }
 

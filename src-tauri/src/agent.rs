@@ -51,7 +51,12 @@ fn make_status_emitter(app: Option<&tauri::AppHandle>) -> Arc<dyn Fn(String) + S
         Some(handle) => {
             let h = handle.clone();
             Arc::new(move |status: String| {
-                let _ = tauri::Emitter::emit(&h, "pet:agent_status", status);
+                if let Err(error) = tauri::Emitter::emit(&h, "pet:agent_status", status) {
+                    crate::log_paths::append_app_log(
+                        &h,
+                        &format!("エージェント状態を画面へ通知できません: {error}"),
+                    );
+                }
             })
         }
         None => Arc::new(|_: String| {}),
@@ -67,7 +72,7 @@ fn emit_activity(
     let Some(handle) = app else {
         return;
     };
-    let _ = tauri::Emitter::emit(
+    if let Err(error) = tauri::Emitter::emit(
         handle,
         "pet:agent_activity",
         serde_json::json!({
@@ -76,7 +81,12 @@ fn emit_activity(
             "failedTools": failed_tools,
             "success": phase == "completed" && failed_tools.is_empty(),
         }),
-    );
+    ) {
+        crate::log_paths::append_app_log(
+            handle,
+            &format!("エージェント動作を画面へ通知できません: {error}"),
+        );
+    }
 }
 
 const WEB_SEARCH_REQUESTS: [&str; 8] = [
@@ -1317,7 +1327,12 @@ pub async fn run(
         Some(handle) => {
             let h = handle.clone();
             Arc::new(move |chunk: String| {
-                let _ = tauri::Emitter::emit(&h, "pet:stream_chunk", chunk);
+                if let Err(error) = tauri::Emitter::emit(&h, "pet:stream_chunk", chunk) {
+                    crate::log_paths::append_app_log(
+                        &h,
+                        &format!("応答ストリームを画面へ通知できません: {error}"),
+                    );
+                }
             })
         }
         None => Arc::new(|_: String| {}),
@@ -1329,7 +1344,12 @@ pub async fn run(
         Some(handle) => {
             let h = handle.clone();
             Arc::new(move || {
-                let _ = tauri::Emitter::emit(&h, "pet:stream_reset", ());
+                if let Err(error) = tauri::Emitter::emit(&h, "pet:stream_reset", ()) {
+                    crate::log_paths::append_app_log(
+                        &h,
+                        &format!("応答ストリームの再試行を画面へ通知できません: {error}"),
+                    );
+                }
             })
         }
         None => Arc::new(|| {}),

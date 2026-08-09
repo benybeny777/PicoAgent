@@ -231,7 +231,7 @@ impl Tool for CodeRunnerTool {
             .current_dir(&cwd)
             ;
 
-        let result =
+        let mut result =
             match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
                 Ok(Ok(output)) => {
                     let mut out = format!(
@@ -256,7 +256,13 @@ impl Tool for CodeRunnerTool {
             };
 
         // 一時スクリプトを後片付けする（内部一時ファイルの掃除）。
-        let _ = std::fs::remove_file(&script_path);
+        if let Err(error) = std::fs::remove_file(&script_path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                result.push_str(&format!(
+                    "\n警告: 一時スクリプトを削除できませんでした: {error}"
+                ));
+            }
+        }
         result
     }
 }

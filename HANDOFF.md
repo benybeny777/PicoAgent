@@ -10,13 +10,15 @@
 
 Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430の誤記録、履歴ロック不一致、起動中の形式適用、キャラ別挨拶、配信キャンバス寸法とアセット版の二重管理も修正した。2026-08-08にはClaudeの追加提案を現行mainで再検証してCodex案と統合し、既存の会話コンテキスト圧縮を要約1ブロック置換・system込み予算・localの実コンテキスト長追従へ直した。PNG系4キャラは制作正本を分離し、Photoshop「ディテールを保持 2.0」による高精細化、元アルファ再適用、4背景QA、全件成功後だけ反映する工程へ更新した。42コマは `framePaths` で共有し、待機即時＋120ms後に残りを読む速度優先プリロードにした。制作正本208配置も71個の内容ハッシュblobへ共有化し、Photoshop工程が自動展開する。
 
-販売用ビルドは `cargo xtask build-distribution` へ分離した。軽量配布設定は本体・ローカルAIエンジン・Live2D表示と公式取得元マニフェストだけを入れる。2026-08-09に第三者ソフトの自前再配布を撤回し、Aivis／Whisperは各公式配布元からサイズ・SHA-256検証付きでPicoAgent専用領域へ直接取得、THA3／LibreOffice／文書ツールは公式ページと手動設定を案内する方式へ変更した。旧追加機能Release・公開アセット・パッケージ生成コマンドは削除済み。公開 `PicoAgent-Distribution/latest.json` を最新版情報の正本とし、設定から更新確認、Windowsインストーラの取得・検証・起動まで行う。オフライン時は起動時通知やエラー画面を出さず見送る。初期販売はコード署名・macOS公証・完全自動更新なしで、`signing.required=false` / `updates.required=false` を正本とする。通常の`build`を含む製品ビルドの既定キャラは自作PNGの `mugi` / `rin` / `mai` のみで、開発用Live2Dサンプルは同期しない。Live2Dサンプルは利用者が公式配布元等から取得したzip／フォルダを設定画面へ入れ、アプリが `.model3.json` と参照を検査して `character.json` をユーザー領域へ作成する。初回セットアップは用途→追加機能→Live2D案内の三段階で、「使い方」から保存済みデータを消さず再表示できる。詳細は [docs/SALE-READINESS.md](docs/SALE-READINESS.md)。
+販売用ビルドは `cargo xtask build-distribution` へ分離した。軽量配布設定は本体・ローカルAIエンジン・Live2D表示と公式取得元マニフェストだけを入れる。2026-08-09に第三者ソフトの自前再配布を撤回し、Aivis／Whisperは各公式配布元からサイズ・SHA-256検証付きでPicoAgent専用領域へ直接取得、THA3／LibreOffice／文書ツールは公式ページと手動設定を案内する方式へ変更した。旧追加機能Release・公開アセット・パッケージ生成コマンドは削除済み。公開 `PicoAgent-Distribution/latest.json` を最新版情報の正本とし、設定から更新確認、Windowsインストーラの取得・検証・起動まで行う。オフライン時は起動時通知やエラー画面を出さず見送る。初期販売対象はWindowsだけで、コード署名・完全自動更新なし、`signing.required=false` / `updates.required=false` を正本とする。macOSは販売対象へ追加する前に署名・公証と実機QAを行う。通常の`build`を含む製品ビルドの既定キャラは自作PNGの `mugi` / `rin` / `mai` のみで、開発用Live2Dサンプルは同期しない。Live2Dサンプルは利用者が公式配布元等から取得したzip／フォルダを設定画面へ入れ、アプリが `.model3.json` と参照を検査して `character.json` をユーザー領域へ作成する。初回セットアップは用途→追加機能→Live2D案内の三段階で、「使い方」から保存済みデータを消さず再表示できる。詳細は [docs/SALE-READINESS.md](docs/SALE-READINESS.md)。
 
 統合ロードマップ13項目は実装済み。構図保存の検証・個別初期化、キャラ別配信表示、全Live2Dと操作回帰、冷間計測、Windows/macOS中心CI、スキル意図メタデータ、全Tool schemaガード、HTTP・フロントログ共通層、clippy警告ゼロ、CHANGELOG年別化を追加した。指摘と保留境界は [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md) に記録している。
 
 2026-08-09にClaude #69を再検証し、モデル一覧の待ち時間を設定画面へ追加した。Aivisの大容量取得を全体30秒制限から接続・無通信制限へ改め、再導入を旧版復元可能なステージング入替へ変更し、設定保存・再導入後の再起動フラグも修正した。古いClaudeブランチ3本は固有差分を確認し、有効なTHA3販売説明だけを現行仕様として統合したうえで削除した。オープンPRは0件、リモートブランチは `main` だけで、GitHubのマージ後ブランチ自動削除も有効である。
 
 同日に重要度順の反復全体再点検を行い、販売版THA3の誤った同梱案内と保存漏れ、Windowsだけの販売時にmacOS警告まで出す問題、販売資料の古いRepo・鍵・Free／Pro・販路・第三者ライセンス説明を修正した。THA3フォルダは設定へ保存・再利用・解除できる。全フロントinvoke失敗が`app.log`へ残る経路を設計ガードで固定し、THA3操作には文脈付きログも追加した。販売前ブロッカーは外部確認が必要な4件のままである。
+
+続く再帰監査では、過去の破損状態の空書き戻し、保存先の無言降格、会話リセットの見かけ上の成功、子プロセス未回収、Promise空catchと同型の経路を全体から洗い直した。正規保存先を得られない場合と破損退避に失敗した場合は更新を止め、リセット・更新確認・リソース解放・ウィンドウ復元の失敗を利用者通知または診断ログへ残す。二巡目では録音スレッド・WAV確定、Whisper出力回収、MCP停止の残件も修正した。再発ガードを追加し、正式キャラ11体とLive2D口パク設定も再確認した。
 
 ## 残る確認境界
 
@@ -30,7 +32,7 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 320件
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 327件
 cargo test --manifest-path xtask/Cargo.toml             # 31件成功
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings

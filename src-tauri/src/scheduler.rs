@@ -187,44 +187,50 @@ pub fn save(cfg: &Config, tasks: &[ScheduledTask]) -> anyhow::Result<()> {
     cfg.set_all(patch)
 }
 
-fn run_history_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
+fn run_history_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    Ok(app
+        .path()
         .app_data_dir()
-        .ok()
-        .map(|dir| dir.join("schedule-runs.json"))
+        .map_err(|error| anyhow::anyhow!("スケジュール実行履歴の保存先を取得できません: {error}"))?
+        .join("schedule-runs.json"))
 }
 
-pub fn load_run_history(app: &AppHandle) -> Vec<ScheduledRunRecord> {
-    let Some(path) = run_history_path(app) else {
-        return Vec::new();
-    };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+pub fn load_run_history(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRunRecord>> {
+    let path = run_history_path(app)?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "スケジュール実行履歴を読み込めません: {} ({error})",
+                path.display()
+            ));
+        }
     };
     match serde_json::from_str(&text) {
-        Ok(records) => records,
+        Ok(records) => Ok(records),
         // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
         // 次の保存で上書きして履歴を失わないよう、破損ファイルは退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&path);
+            let saved = crate::store::quarantine_corrupt(&path).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "壊れたスケジュール実行履歴を退避できません。上書きを中止しました: {error}"
+                )
+            })?;
             crate::log_paths::append_app_log(
                 app,
                 &format!(
-                    "スケジュール実行履歴を読めないため空で起動します（{error}）{}",
-                    saved
-                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
-                        .unwrap_or_default()
+                    "スケジュール実行履歴を読めないため空で起動します（{error}）。破損ファイルは {} へ退避しました",
+                    saved.display()
                 ),
             );
-            Vec::new()
+            Ok(Vec::new())
         }
     }
 }
 
 fn save_run_history(app: &AppHandle, records: &[ScheduledRunRecord]) -> anyhow::Result<()> {
-    let Some(path) = run_history_path(app) else {
-        anyhow::bail!("app_data_dir を取得できませんでした");
-    };
+    let path = run_history_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -275,7 +281,16 @@ fn append_run_history(
         at: at.to_string(),
         body: result.to_string(),
     };
-    let mut records = load_run_history(app);
+    let mut records = match load_run_history(app) {
+        Ok(records) => records,
+        Err(error) => {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("スケジュール実行履歴を更新できません: {error}"),
+            );
+            return record;
+        }
+    };
     records.insert(0, record.clone());
     records.truncate(MAX_RUN_HISTORY);
     if let Err(error) = save_run_history(app, &records) {
@@ -288,7 +303,7 @@ fn append_run_history(
 }
 
 fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
-    let _ = app.emit(
+    if let Err(error) = app.emit(
         "pet:notice",
         json!({
             "kind": "schedule",
@@ -299,7 +314,12 @@ fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
             "runId": record.id,
             "at": record.at,
         }),
-    );
+    ) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("スケジュール実行結果を画面へ通知できません: {error}"),
+        );
+    }
 }
 
 fn normalize(base: &Path, input: &str) -> PathBuf {

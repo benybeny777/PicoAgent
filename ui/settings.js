@@ -99,7 +99,11 @@ window.addEventListener("beforeunload", () => {
   if (componentProgressUnlisten) componentProgressUnlisten();
   if (updateProgressUnlisten) updateProgressUnlisten();
   // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
-  if (tha3GenerationRunning) window.picoagent.settings.cancelTha3Generation().catch(() => {});
+  if (tha3GenerationRunning) {
+    window.picoagent.settings.cancelTha3Generation().catch(error => {
+      window.PicoUI?.logApp?.("warn", "終了時にキャラ生成を中断できませんでした", window.PicoUI?.errorDetail?.(error) || String(error));
+    });
+  }
 });
 
 function el(tag, props = {}, children = []) {

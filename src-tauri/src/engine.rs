@@ -43,7 +43,12 @@ fn set_status(app: &AppHandle, value: Value) {
     if let Some(engine) = app.try_state::<EngineState>() {
         *engine.status.lock().unwrap() = value.clone();
     }
-    let _ = app.emit("engine:status", value);
+    if let Err(error) = app.emit("engine:status", value) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("ローカルAIの状態を画面へ通知できません: {error}"),
+        );
+    }
 }
 
 // 同梱した llama-server 実行ファイルを解決する（バンドル時と dev で場所が異なるため候補を探す）。
@@ -197,7 +202,15 @@ async fn migrate_legacy_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result
                         "旧モデルの移行に失敗: rename={rename_error}; copy={copy_error}"
                     )
                 })?;
-            let _ = tokio::fs::remove_file(&old_path).await;
+            if let Err(error) = tokio::fs::remove_file(&old_path).await {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "移行済みの旧モデルを削除できません: {} ({error})",
+                        old_path.display()
+                    ),
+                );
+            }
             Ok(())
         }
     }
@@ -363,7 +376,13 @@ async fn ensure_local_model_selection(app: &AppHandle) {
         );
     }
     if !patch.is_empty() {
-        let _ = state.config.set_all(patch);
+        if let Err(error) = state.config.set_all(patch) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("ローカルモデルの自動選択を保存できません: {error}"),
+            );
+            return;
+        }
         *state.model.lock().unwrap() = preset.id.to_string();
     }
 }
@@ -428,7 +447,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
         .stderr(Stdio::from(err_log));
     let mut child = cmd.spawn()?;
     let Some(engine) = app.try_state::<EngineState>() else {
-        terminate_child(&mut child);
+        terminate_child(app, &mut child);
         anyhow::bail!("EngineState を取得できないため、起動したエンジンを停止しました");
     };
     let mut slot = match engine.child.lock() {
@@ -437,7 +456,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
         Err(poisoned) => poisoned.into_inner(),
     };
     if slot.is_some() {
-        terminate_child(&mut child);
+        terminate_child(app, &mut child);
         anyhow::bail!("ローカルエンジンは既に起動中です");
     }
     *slot = Some(child);
@@ -558,19 +577,37 @@ fn managed_child_exit_status(app: &AppHandle) -> Result<Option<std::process::Exi
     }
 }
 
-fn terminate_child(child: &mut std::process::Child) {
+fn terminate_child(app: &AppHandle, child: &mut std::process::Child) {
     #[cfg(windows)]
     {
-        let _ = crate::tools::process::command_sync("taskkill")
+        let taskkill = crate::tools::process::command_sync("taskkill")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+        if let Err(error) = taskkill {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("ローカルエンジンのプロセスツリー停止に失敗しました: {error}"),
+            );
+        }
     }
     // taskkill 自体が失敗した場合も、直接の子プロセスだけは必ず停止を試みる。
-    let _ = child.kill();
-    let _ = child.wait();
+    if let Err(error) = child.kill() {
+        if error.kind() != std::io::ErrorKind::InvalidInput {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("ローカルエンジンを停止できませんでした: {error}"),
+            );
+        }
+    }
+    if let Err(error) = child.wait() {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("ローカルエンジンの終了ハンドルを回収できませんでした: {error}"),
+        );
+    }
 }
 
 fn terminate_managed_child(app: &AppHandle) {
@@ -583,7 +620,7 @@ fn terminate_managed_child(app: &AppHandle) {
         Err(poisoned) => poisoned.into_inner().take(),
     };
     if let Some(mut child) = child {
-        terminate_child(&mut child);
+        terminate_child(app, &mut child);
     }
 }
 

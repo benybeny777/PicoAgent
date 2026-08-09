@@ -383,10 +383,15 @@ where
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                let _ = app.emit(
+                if let Err(error) = app.emit(
                     "tha3:progress",
                     json!({ "stream": stream, "message": line }),
-                );
+                ) {
+                    crate::log_paths::append_app_log(
+                        &app,
+                        &format!("THA3の進捗を画面へ通知できません: {error}"),
+                    );
+                }
                 captured.push(line);
                 if captured.len() > 200 {
                     captured.remove(0);
@@ -460,11 +465,17 @@ async fn run_generator(
     }
     let mut child = command.spawn().context("THA3用Pythonを起動できません")?;
     let Some(stdout) = child.stdout.take() else {
-        let release = stop_and_reap(&mut child).await.unwrap_or_default();
+        let release = stop_and_reap(&mut child)
+            .await
+            .map(|error| format!("停止・回収にも失敗しました: {error}"))
+            .unwrap_or_default();
         bail!("THA3の標準出力を取得できません。{release}");
     };
     let Some(stderr) = child.stderr.take() else {
-        let release = stop_and_reap(&mut child).await.unwrap_or_default();
+        let release = stop_and_reap(&mut child)
+            .await
+            .map(|error| format!("停止・回収にも失敗しました: {error}"))
+            .unwrap_or_default();
         bail!("THA3の標準エラーを取得できません。{release}");
     };
     let stdout_task = tokio::spawn(collect_lines(stdout, app.clone(), "stdout"));
@@ -526,7 +537,7 @@ pub async fn generate(
     if !source.as_path().is_file() {
         bail!("入力画像が見つかりません: {}", source.display());
     }
-    if user_characters::root(&app).join(id).exists() {
+    if user_characters::root(&app)?.join(id).exists() {
         bail!("同じIDの追加キャラクターが既にあります: {id}");
     }
     let tha3_root = locate_tha3(&app, selected_root(config, tha3_root_path)?)?;

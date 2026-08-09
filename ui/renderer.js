@@ -220,7 +220,9 @@ window.addEventListener("beforeunload", () => {
   if (micStream) stopMicCapture();
   const closingAudioCtx = audioCtx;
   audioCtx = null;
-  closingAudioCtx?.close().catch(() => {});
+  closingAudioCtx?.close().catch(error => {
+    logApp("warn", "終了時に音声解析を解放できませんでした", errorDetail(error));
+  });
   stopLive2D();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
@@ -900,7 +902,8 @@ function detachLipSyncAudio() {
   if (rigVolFrame) { cancelAnimationFrame(rigVolFrame); rigVolFrame = 0; }
   // フォールバック許可: 解放処理なので、既に切断済み・AudioContext 破棄済みで
   // 例外になっても続けて残りの参照を捨てる（ここで止まると解放漏れになる）。
-  try { rigSource?.disconnect(); rigAnalyser?.disconnect(); } catch {}
+  try { rigSource?.disconnect(); rigAnalyser?.disconnect(); }
+  catch (error) { logApp("warn", "リップシンクの音声解析を切断できませんでした", errorDetail(error)); }
   rigSource = null;
   rigAnalyser = null;
   rigMouthLevel = 0;
@@ -942,7 +945,11 @@ function attachLipSync(audio) {
   let useTimer = true;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(error => {
+        logApp("warn", "リップシンク用の音声解析を再開できませんでした", errorDetail(error));
+      });
+    }
     if (audioCtx.state === "running") {
       rigSource = audioCtx.createMediaElementSource(audio);
       rigAnalyser = audioCtx.createAnalyser();
@@ -3275,7 +3282,9 @@ function stopMicCapture() {
   micStream = null;
   const ctx = micCtx;
   micCtx = null;
-  ctx?.close().catch(() => {});
+  ctx?.close().catch(error => {
+    logApp("warn", "マイク用の音声処理を解放できませんでした", errorDetail(error));
+  });
   micButton?.classList.remove("recording");
   petApp.classList.remove("is-listening");
   if (!busy && !currentVoice) setAnimation("idle");

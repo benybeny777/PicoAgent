@@ -33,37 +33,79 @@ pub struct UserCharacter {
 }
 
 /// 追加キャラクターの置き場（`app_data_dir/characters`）。
-pub fn root(app: &AppHandle) -> PathBuf {
-    app.path()
+pub fn root(app: &AppHandle) -> Result<PathBuf> {
+    Ok(app
+        .path()
         .app_data_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("characters")
+        .context("追加キャラクターの保存先を取得できません")?
+        .join("characters"))
 }
 
 /// 導入済みの追加キャラクター一覧。壊れているものは飛ばして続ける。
-pub fn list(app: &AppHandle) -> Vec<UserCharacter> {
-    let root = root(app);
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        // フォールバック許可: 置き場が無い（1つも追加していない）状態は正常なので空で返す。
-        return Vec::new();
+pub fn list(app: &AppHandle) -> Result<Vec<UserCharacter>> {
+    let _state_lock = crate::store::lock_state("user-characters");
+    let root = root(app)?;
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("追加キャラクターを列挙できません: {}", root.display()))
+        }
     };
     let mut out = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.context("追加キャラクターの項目を読み取れません")?;
         let path = entry.path();
         if !path.is_dir() {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(path.join("character.json")) else {
-            continue;
+        let manifest_path = path.join("character.json");
+        let text = match std::fs::read_to_string(&manifest_path) {
+            Ok(text) => text,
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "追加キャラクターの設定を読めないため一覧から除外します: {} ({error})",
+                        manifest_path.display()
+                    ),
+                );
+                continue;
+            }
         };
-        let Ok(manifest) = serde_json::from_str::<Value>(&text) else {
-            continue;
+        let manifest = match serde_json::from_str::<Value>(&text) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "追加キャラクターの設定が壊れているため一覧から除外します: {} ({error})",
+                        manifest_path.display()
+                    ),
+                );
+                continue;
+            }
         };
         let Some(id) = manifest.get("id").and_then(Value::as_str) else {
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "追加キャラクターのidが無いため一覧から除外します: {}",
+                    manifest_path.display()
+                ),
+            );
             continue;
         };
         // フォルダ名と id がずれていると読み込み先を特定できないので出さない。
         if path.file_name().and_then(|name| name.to_str()) != Some(id) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "追加キャラクターのフォルダ名とidが一致しないため一覧から除外します: {} (id={id})",
+                    path.display()
+                ),
+            );
             continue;
         }
         out.push(UserCharacter {
@@ -83,7 +125,7 @@ pub fn list(app: &AppHandle) -> Vec<UserCharacter> {
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
-    out
+    Ok(out)
 }
 
 /// `character.json` が直下に無い zip（1階層余分に包まれている）を吸収する。
@@ -270,7 +312,7 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
     if !source.exists() {
         bail!("指定先が見つかりません: {}", source.display());
     }
-    let root = root(app);
+    let root = root(app)?;
     std::fs::create_dir_all(&root)
         .with_context(|| format!("置き場を作れません: {}", root.display()))?;
 
@@ -334,7 +376,7 @@ pub fn install_live2d(
     if name.is_empty() {
         bail!("表示名を入力してください");
     }
-    let root = root(app);
+    let root = root(app)?;
     std::fs::create_dir_all(&root)
         .with_context(|| format!("置き場を作れません: {}", root.display()))?;
     let destination = root.join(id);
@@ -377,7 +419,7 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
     {
         bail!("不正なidです: {id}");
     }
-    let target = root(app).join(id);
+    let target = root(app)?.join(id);
     if !target.is_dir() {
         bail!("追加キャラクターが見つかりません: {id}");
     }

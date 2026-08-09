@@ -258,4 +258,38 @@ mod guard {
             "許可コマンドを実行する経路が物理削除を拒否していません。`process::is_physical_delete()` を通してください: {violations:?}"
         );
     }
+
+    /// 停止・回収・出力確定の失敗を捨てると、プロセスやファイルが残ったまま成功扱いになる。
+    #[test]
+    fn リソース解放の失敗を無視しない() {
+        let operations = [
+            ".start_kill(",
+            ".kill(",
+            ".wait(",
+            ".join(",
+            ".finalize(",
+            ".write_sample(",
+        ];
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "process.rs" {
+                continue;
+            }
+            for line in source.body().lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("let _ =")
+                    && operations
+                        .iter()
+                        .any(|operation| trimmed.contains(operation))
+                {
+                    violations.push(format!("{}: {trimmed}", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "リソース解放の失敗は伝播または診断出力してください:\n{}",
+            violations.join("\n")
+        );
+    }
 }

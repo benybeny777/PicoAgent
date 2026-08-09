@@ -44,10 +44,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         std::fs::rename(&temp, path)?;
         Ok(())
     })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => match std::fs::remove_file(&temp) {
+            Ok(()) => Err(error),
+            Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => Err(error),
+            Err(cleanup) => Err(anyhow::anyhow!(
+                "{error:#}; 原子的書き込みの一時ファイルも削除できません: {} ({cleanup})",
+                temp.display()
+            )),
+        },
     }
-    result
 }
 
 /// 状態を JSON（整形済み）として原子的に書き出す。
@@ -209,6 +216,99 @@ mod guard {
             offenders.is_empty(),
             "破損時に空で続ける箇所は store::quarantine_corrupt での退避か store::load_list でのエラー返却を伴わせてください\
              （そのまま書き戻すとユーザーのデータが恒久的に消えます）: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn 破損ファイルの退避失敗時は空状態で続けない() {
+        let offenders: Vec<String> = guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| source.name != "store.rs")
+            .filter(|source| source.body().contains("quarantine_corrupt("))
+            .filter(|source| !source.body().contains("ok_or_else("))
+            .map(|source| source.path.display().to_string())
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "破損ファイルを退避できなければ空状態の保存へ進ませないでください: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn 読み書きする状態ストアは読み込み失敗をresultで返す() {
+        let requirements = [
+            ("config.rs", "pub fn load(", "-> Result"),
+            ("memory.rs", "pub fn load(", "-> anyhow::Result"),
+            ("usage.rs", "pub fn load(", "-> anyhow::Result"),
+            ("history.rs", "pub fn load_recent(", "-> anyhow::Result"),
+            (
+                "scheduler.rs",
+                "pub fn load_run_history(",
+                "-> anyhow::Result",
+            ),
+        ];
+        let sources = guard_scan::all_sources();
+        let mut offenders = Vec::new();
+        for (name, marker, result_marker) in requirements {
+            let valid = sources
+                .iter()
+                .find(|source| source.name == name)
+                .is_some_and(|source| {
+                    source
+                        .body()
+                        .split_once(marker)
+                        .and_then(|(_, rest)| rest.split_once('{'))
+                        .is_some_and(|(signature, _)| signature.contains(result_marker))
+                });
+            if !valid {
+                offenders.push(name);
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "読み取り失敗を空状態へ変換すると次の保存でデータを消します: {offenders:?}"
+        );
+    }
+
+    /// 状態保存先の取得失敗をカレントディレクトリや一時領域へ落とすと、保存成功に見えて
+    /// 次回起動でデータが消える。ログだけは失敗自体を記録するため一時領域を許可する。
+    #[test]
+    fn 状態保存先を別フォルダへ黙って降格しない() {
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "log_paths.rs" {
+                continue;
+            }
+            let body = source.body();
+            if body.contains("app_data_dir()")
+                && (body.contains("PathBuf::from(\".\")")
+                    || body.contains("unwrap_or_else(|_| std::env::temp_dir())"))
+            {
+                offenders.push(source.path.display().to_string());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "状態保存先を作業フォルダや一時領域へ黙って降格しないでください: {offenders:?}"
+        );
+    }
+
+    /// 設定保存の失敗を無視すると、画面上の状態と次回起動時の状態が食い違う。
+    #[test]
+    fn 設定保存の結果を無視しない() {
+        let offenders: Vec<String> = guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| {
+                source.body().lines().any(|line| {
+                    let line = line.trim();
+                    line.starts_with("let _ =") && line.contains("set_all(")
+                })
+            })
+            .map(|source| source.path.display().to_string())
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "Config::set_all の失敗は伝播またはログ記録してください: {offenders:?}"
         );
     }
 

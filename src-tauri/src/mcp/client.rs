@@ -230,11 +230,29 @@ pub fn start(app: tauri::AppHandle) {
 /// アプリ終了時に全 MCP サーバの子プロセスを停止する。
 pub fn stop_all() {
     let mut map = connections().write().unwrap();
-    for (_, connection) in map.drain() {
-        if let Ok(mut guard) = connection.try_lock() {
-            let _ = guard.child.start_kill();
+    let drained = map.drain().collect::<Vec<_>>();
+    drop(map);
+    tauri::async_runtime::block_on(async move {
+        for (name, connection) in drained {
+            let Ok(lock) = tokio::time::timeout(Duration::from_secs(2), connection.lock()).await
+            else {
+                eprintln!("MCP サーバ「{name}」は処理中のため終了待ちがタイムアウトしました");
+                continue;
+            };
+            let mut guard = lock;
+            match guard.child.try_wait() {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    if let Err(error) = guard.child.kill().await {
+                        eprintln!("MCP サーバ「{name}」の停止と回収に失敗しました: {error}");
+                    }
+                }
+                Err(error) => {
+                    eprintln!("MCP サーバ「{name}」の終了状態を確認できません: {error}");
+                }
+            }
         }
-    }
+    });
     tools_registry().write().unwrap().clear();
 }
 
@@ -289,12 +307,24 @@ pub async fn dispatch(full_name: &str, args: Value) -> String {
     // タイムアウトや I/O 失敗のあとは接続を再利用しない。tokio の read_line は
     // キャンセル安全ではなく、途中で打ち切ると読みかけの行が失われてストリームが
     // ずれるため、以降の応答が別リクエストの結果と混ざる恐れがある。
-    if !matches!(result, Ok(Ok(_))) {
-        let _ = guard.child.start_kill();
+    let cleanup_error = if !matches!(result, Ok(Ok(_))) {
+        let cleanup_error = match guard.child.try_wait() {
+            Ok(Some(_)) => None,
+            Ok(None) => guard
+                .child
+                .kill()
+                .await
+                .err()
+                .map(|error| format!("MCP サーバの停止と回収にも失敗しました: {error}")),
+            Err(error) => Some(format!("MCP サーバの終了状態を確認できません: {error}")),
+        };
         drop(guard);
         connections().write().unwrap().remove(&server_key);
-    }
-    match result {
+        cleanup_error
+    } else {
+        None
+    };
+    let mut output = match result {
         Ok(Ok(value)) => {
             let text: String = value
                 .get("content")
@@ -320,7 +350,11 @@ pub async fn dispatch(full_name: &str, args: Value) -> String {
         Err(_) => format!(
             "エラー: MCP ツール実行が {CALL_TIMEOUT_SECS} 秒でタイムアウトしました（MCP サーバ「{server_key}」との接続を切断しました）。"
         ),
+    };
+    if let Some(cleanup_error) = cleanup_error {
+        output.push_str(&format!("\n{cleanup_error}"));
     }
+    output
 }
 
 #[cfg(test)]

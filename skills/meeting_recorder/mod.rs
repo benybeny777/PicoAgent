@@ -25,13 +25,18 @@ use crate::message::Field;
 const MAX_TRANSCRIPT_CHARS: usize = 80_000;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
 
-type SharedWriter = Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>;
+struct RecordingSink {
+    writer: Option<WavWriter<BufWriter<File>>>,
+    error: Option<String>,
+}
+
+type SharedWriter = Arc<Mutex<RecordingSink>>;
 
 struct RecordingState {
     path: SafePath,
     started: Instant,
     stop_tx: Sender<()>,
-    join: JoinHandle<()>,
+    join: JoinHandle<Result<(), String>>,
 }
 
 static RECORDING: OnceLock<Mutex<Option<RecordingState>>> = OnceLock::new();
@@ -207,27 +212,43 @@ where
     T: cpal::Sample,
     i16: cpal::FromSample<T>,
 {
-    let Ok(mut guard) = writer.lock() else {
+    let mut guard = match writer.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            guard.error = Some("録音データのロックが破損しました。".to_string());
+            return;
+        }
+    };
+    let Some(wav) = guard.writer.as_mut() else {
         return;
     };
-    let Some(wav) = guard.as_mut() else {
-        return;
-    };
-    for sample in data {
+    let write_error = data.iter().find_map(|sample| {
         let value: i16 = i16::from_sample(*sample);
-        let _ = wav.write_sample(value);
+        wav.write_sample(value).err()
+    });
+    if let Some(error) = write_error {
+        guard.error = Some(format!("録音データを書き込めません: {error}"));
+        guard.writer = None;
     }
 }
 
 fn write_input_f32(data: &[f32], writer: &SharedWriter) {
-    let Ok(mut guard) = writer.lock() else {
+    let mut guard = match writer.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            guard.error = Some("録音データのロックが破損しました。".to_string());
+            return;
+        }
+    };
+    let Some(wav) = guard.writer.as_mut() else {
         return;
     };
-    let Some(wav) = guard.as_mut() else {
-        return;
-    };
-    for sample in data {
-        let _ = wav.write_sample(*sample);
+    let write_error = data.iter().find_map(|sample| wav.write_sample(*sample).err());
+    if let Some(error) = write_error {
+        guard.error = Some(format!("録音データを書き込めません: {error}"));
+        guard.writer = None;
     }
 }
 
@@ -265,21 +286,24 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
         let host = cpal::default_host();
         let Some(device) = host.default_input_device() else {
             let _ = ready_tx.send(Err("既定のマイク入力デバイスが見つかりません。".to_string()));
-            return;
+            return Ok(());
         };
         let config = match device.default_input_config() {
             Ok(config) => config,
             Err(error) => {
                 let _ = ready_tx.send(Err(format!("マイク設定を取得できません: {error}")));
-                return;
+                return Ok(());
             }
         };
         let spec = wav_spec(&config);
         let writer = match WavWriter::create(&thread_path, spec) {
-            Ok(writer) => Arc::new(Mutex::new(Some(writer))),
+            Ok(writer) => Arc::new(Mutex::new(RecordingSink {
+                writer: Some(writer),
+                error: None,
+            })),
             Err(error) => {
                 let _ = ready_tx.send(Err(format!("WAVファイルを作成できません: {error}")));
-                return;
+                return Ok(());
             }
         };
         let writer_for_stream = writer.clone();
@@ -306,36 +330,77 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
             ),
             other => {
                 let _ = ready_tx.send(Err(format!("未対応の録音サンプル形式です: {other:?}")));
-                return;
+                return Ok(());
             }
         };
         let stream = match stream {
             Ok(stream) => stream,
             Err(error) => {
                 let _ = ready_tx.send(Err(format!("録音ストリームを開始できません: {error}")));
-                return;
+                return Ok(());
             }
         };
         if let Err(error) = stream.play() {
             let _ = ready_tx.send(Err(format!("録音を開始できません: {error}")));
-            return;
+            return Ok(());
         }
         let _ = ready_tx.send(Ok(()));
-        let _ = stop_rx.recv();
-        drop(stream);
-        let mut writer_guard = match writer.lock() {
-            Ok(writer_guard) => writer_guard,
-            Err(_) => return,
-        };
-        if let Some(writer) = writer_guard.take() {
-            let _ = writer.finalize();
+        if stop_rx.recv().is_err() {
+            return Err("録音停止シグナルの受信に失敗しました。".to_string());
         }
-        drop(writer_guard);
+        drop(stream);
+        let mut sink = writer
+            .lock()
+            .map_err(|_| "録音データの状態を取得できません。".to_string())?;
+        if let Some(error) = sink.error.take() {
+            return Err(error);
+        }
+        if let Some(writer) = sink.writer.take() {
+            writer
+                .finalize()
+                .map_err(|error| format!("WAVファイルを確定できません: {error}"))?;
+        }
+        Ok(())
     });
     match ready_rx.recv_timeout(Duration::from_secs(10)) {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => return format!("エラー: {error}"),
-        Err(_) => return "エラー: 録音開始の準備がタイムアウトしました。".to_string(),
+        Ok(Err(error)) => {
+            let thread_error = join
+                .join()
+                .map_err(|_| "録音スレッドが異常終了しました。".to_string())
+                .and_then(|result| result)
+                .err();
+            return format!(
+                "エラー: {error}{}",
+                thread_error
+                    .map(|detail| format!("\n録音スレッドの終了にも失敗しました: {detail}"))
+                    .unwrap_or_default()
+            );
+        }
+        Err(_) => {
+            let signal_error = stop_tx.send(()).err();
+            // OSの音声ドライバ内で準備が止まっている可能性があるため、ここでjoinして
+            // UI側まで固めない。停止通知は先に送り、専用の回収スレッドへ所有権を渡す。
+            let reaper_error = thread::Builder::new()
+                .name("picoagent-recording-reaper".to_string())
+                .spawn(move || match join.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => eprintln!("録音スレッドの終了に失敗しました: {error}"),
+                    Err(_) => eprintln!("録音スレッドが異常終了しました"),
+                })
+                .err();
+            let cleanup = signal_error
+                .map(|error| format!("停止通知失敗: {error}"))
+                .into_iter()
+                .chain(reaper_error.map(|error| format!("回収スレッド起動失敗: {error}")))
+                .collect::<Vec<_>>()
+                .join("、");
+            return if cleanup.is_empty() {
+                "エラー: 録音開始の準備がタイムアウトしました。".to_string()
+            } else {
+                format!("エラー: 録音開始の準備がタイムアウトしました。{cleanup}")
+            };
+        }
     }
     *state = Some(RecordingState {
         path: path.clone(),
@@ -358,8 +423,14 @@ fn stop_recording() -> String {
         return "エラー: 録音中ではありません。".to_string();
     };
     let elapsed = active.started.elapsed();
-    let _ = active.stop_tx.send(());
-    let _ = active.join.join();
+    if let Err(error) = active.stop_tx.send(()) {
+        return format!("エラー: 録音停止を通知できません: {error}");
+    }
+    match active.join.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return format!("エラー: {error}"),
+        Err(_) => return "エラー: 録音スレッドが異常終了しました。".to_string(),
+    }
     format!(
         "録音を停止しました: {}\n録音時間: {} 秒",
         active.path.display(),
@@ -448,16 +519,20 @@ async fn run_transcribe_command(
     let stdout_task = tokio::spawn(async move {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stdout {
-            let _ = pipe.read_to_end(&mut buf).await;
+            pipe.read_to_end(&mut buf)
+                .await
+                .map_err(|error| format!("標準出力を読み取れません: {error}"))?;
         }
-        buf
+        Ok::<_, String>(buf)
     });
     let stderr_task = tokio::spawn(async move {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr {
-            let _ = pipe.read_to_end(&mut buf).await;
+            pipe.read_to_end(&mut buf)
+                .await
+                .map_err(|error| format!("標準エラー出力を読み取れません: {error}"))?;
         }
-        buf
+        Ok::<_, String>(buf)
     });
 
     let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
@@ -468,17 +543,42 @@ async fn run_transcribe_command(
             ))
         }
         Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+            let kill_error = child.kill().await.err();
+            let wait_error = child.wait().await.err();
+            let stdout_error = stdout_task
+                .await
+                .map_err(|error| format!("標準出力の回収タスクが失敗しました: {error}"))
+                .and_then(|result| result)
+                .err();
+            let stderr_error = stderr_task
+                .await
+                .map_err(|error| format!("標準エラー出力の回収タスクが失敗しました: {error}"))
+                .and_then(|result| result)
+                .err();
+            let cleanup = kill_error
+                .or(wait_error)
+                .map(|error| error.to_string())
+                .into_iter()
+                .chain(stdout_error)
+                .chain(stderr_error)
+                .collect::<Vec<_>>()
+                .join("、");
+            if !cleanup.is_empty() {
+                return Err(format!(
+                    "エラー: ローカル文字起こしが {timeout} 秒でタイムアウトし、子プロセスの解放にも失敗しました: {cleanup}"
+                ));
+            }
             return Err(format!(
                 "エラー: ローカル文字起こしが {timeout} 秒でタイムアウトしました。"
             ));
         }
     };
-    let stdout = stdout_task.await.unwrap_or_default();
-    let stderr = stderr_task.await.unwrap_or_default();
+    let stdout = stdout_task
+        .await
+        .map_err(|error| format!("エラー: 標準出力の回収タスクが失敗しました: {error}"))??;
+    let stderr = stderr_task
+        .await
+        .map_err(|error| format!("エラー: 標準エラー出力の回収タスクが失敗しました: {error}"))??;
     Ok(Output {
         status,
         stdout,

@@ -154,9 +154,24 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
     match id {
         "summon" => {
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
-                let _ = win.emit("pet:hotkey", "summon");
+                if let Err(error) = win.show() {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("メニューから再表示できません: {error}"),
+                    );
+                }
+                if let Err(error) = win.set_focus() {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("メニューから前面化できません: {error}"),
+                    );
+                }
+                if let Err(error) = win.emit("pet:hotkey", "summon") {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("メニューから入力欄を開けません: {error}"),
+                    );
+                }
             }
         }
         "settings" => open_settings(app),
@@ -212,10 +227,37 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                 return;
             }
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.emit("pet:ui", serde_json::json!({ "ttsEnabled": next }));
+                if let Err(error) = win.emit("pet:ui", serde_json::json!({ "ttsEnabled": next })) {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("読み上げ表示を更新できません: {error}"),
+                    );
+                }
             }
         }
-        "reset" => clear_conversation_and_history(app),
+        "reset" => {
+            if let Err(error) = clear_conversation_and_history(app) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("会話のリセットに失敗しました: {error}"),
+                );
+                if let Some(win) = app.get_webview_window("main") {
+                    if let Err(notice_error) = win.emit(
+                        "pet:notice",
+                        serde_json::json!({
+                            "kind": "error",
+                            "title": "会話をリセットできませんでした",
+                            "message": error,
+                        }),
+                    ) {
+                        crate::log_paths::append_app_log(
+                            app,
+                            &format!("会話リセット失敗の画面通知も送れません: {notice_error}"),
+                        );
+                    }
+                }
+            }
+        }
         "reset_layout" => reset_bubble_and_window_layout(app),
         "reset_character" => reset_character_offset(app),
         "quit" => app.exit(0),
@@ -255,10 +297,15 @@ pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
         return;
     }
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit(
+        if let Err(error) = win.emit(
             "pet:character-reset",
             serde_json::json!({ "characterId": character_id, "layout": layout }),
-        );
+        ) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("立ち絵リセットを画面へ反映できません: {error}"),
+            );
+        }
     }
 }
 
@@ -313,7 +360,12 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
             let state = app.state::<AppState>();
             crate::layout::size_for(&state.config, &active)
         };
-        let _ = win.set_size(tauri::LogicalSize::new(width, height));
+        if let Err(error) = win.set_size(tauri::LogicalSize::new(width, height)) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("表示リセットでウィンドウサイズを戻せませんでした: {error}"),
+            );
+        }
         // 起動時のデフォルトと同じ、いま居るモニタの右下へ配置する。
         // 位置計算は適用後の物理サイズを使う（set_size 反映前の outer_size は古い値のため）。
         if let (Ok(Some(monitor)), Ok(scale)) = (win.current_monitor(), win.scale_factor()) {
@@ -327,8 +379,18 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
             let win_w = (width * scale).round() as u32;
             let win_h = (height * scale).round() as u32;
             let (x, y) = crate::default_window_position(rect, win_w, win_h);
-            let _ = win.set_position(PhysicalPosition::new(x, y));
+            if let Err(error) = win.set_position(PhysicalPosition::new(x, y)) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("表示リセットでウィンドウ位置を戻せませんでした: {error}"),
+                );
+            }
         }
-        let _ = win.emit("pet:layout-reset", ());
+        if let Err(error) = win.emit("pet:layout-reset", ()) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("表示リセットを画面へ反映できません: {error}"),
+            );
+        }
     }
 }

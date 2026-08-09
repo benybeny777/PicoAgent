@@ -146,10 +146,7 @@ pub fn run() {
             components::init(app.handle());
             // 設定の正本を読み込み、選択中プロバイダ・モデル・会話を初期化する。
             let state = app.state::<AppState>();
-            let config_dir = app
-                .path()
-                .app_config_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let config_dir = app.path().app_config_dir()?;
             if let Err(error) = migration::migrate_identity_dirs(app.handle(), &config_dir) {
                 log_paths::append_app_log(
                     app.handle(),
@@ -157,11 +154,15 @@ pub fn run() {
                 );
             }
             let config_path = config_dir.join("config.json");
-            if let Some(warning) = state.config.load(config_path.clone()) {
+            if let Some(warning) = state
+                .config
+                .load(config_path.clone())
+                .map_err(anyhow::Error::msg)?
+            {
                 log_paths::append_app_log(app.handle(), &warning);
             }
             // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
-            commands::encrypt_existing_secrets(&state.config);
+            commands::encrypt_existing_secrets(app.handle(), &state.config);
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
             if let Err(error) = log_paths::ensure_log_dir(app.handle()) {
                 eprintln!("ログディレクトリの作成に失敗しました: {error}");
@@ -238,7 +239,7 @@ pub fn run() {
             // 旧版が短い挨拶へ追記して保存した内部ガイドは、選択中以外もまとめて原文へ戻す。
             history::migrate_saved_greeting_guidance(app.handle());
             // 選択中キャラの直近会話をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
-            let recent = history::load_recent(app.handle(), &character_id);
+            let recent = history::load_recent(app.handle(), &character_id)?;
             if !recent.is_empty() {
                 state.messages.lock().unwrap().extend(recent);
             }
@@ -473,7 +474,12 @@ pub(crate) fn pull_back_on_screen(window: &tauri::WebviewWindow, win_w: u32, win
     let x = pos.x.clamp(monitor.x, max_x);
     let y = pos.y.clamp(monitor.y, max_y);
     if (x, y) != (pos.x, pos.y) {
-        let _ = window.set_position(PhysicalPosition::new(x, y));
+        if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+            log_paths::append_app_log(
+                &window.app_handle().clone(),
+                &format!("画面内へウィンドウを戻せませんでした: {error}"),
+            );
+        }
     }
 }
 
@@ -523,7 +529,12 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 ),
             );
             // 再配置すると再度 Moved が飛ぶので、そこでキャッシュする。
-            let _ = window.set_position(PhysicalPosition::new(x, y));
+            if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+                log_paths::append_app_log(
+                    &window.app_handle().clone(),
+                    &format!("画面外のウィンドウを既定位置へ戻せませんでした: {error}"),
+                );
+            }
         }
         return;
     }
@@ -533,7 +544,12 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     let monitor_top = monitor.position().y;
     if (pos.y - monitor_top).abs() <= SNAP_THRESHOLD && pos.y != monitor_top {
         // 再配置すると再度 Moved が飛ぶので、そこでキャッシュする。
-        let _ = window.set_position(PhysicalPosition::new(pos.x, monitor_top));
+        if let Err(error) = window.set_position(PhysicalPosition::new(pos.x, monitor_top)) {
+            log_paths::append_app_log(
+                &window.app_handle().clone(),
+                &format!("ウィンドウを画面上端へ寄せられませんでした: {error}"),
+            );
+        }
         return;
     }
 
@@ -604,7 +620,12 @@ pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &conf
         // 下限はウィンドウの最小寸法と同じ。ここに別の数値を書くと、8方向リサイズで
         // 小さくした寸法（最小寸法までは正当な操作）が復元時に丸ごと捨てられる。
         if width >= layout::MIN_WIDTH && height >= layout::MIN_HEIGHT {
-            let _ = window.set_size(LogicalSize::new(width, height));
+            if let Err(error) = window.set_size(LogicalSize::new(width, height)) {
+                log_paths::append_app_log(
+                    &window.app_handle().clone(),
+                    &format!("保存済みウィンドウサイズを復元できませんでした: {error}"),
+                );
+            }
             // 位置計算は適用後の物理サイズを使う（set_size の反映前に outer_size を読むと古い値になる）。
             win_w = (width * scale).round() as u32;
             win_h = (height * scale).round() as u32;
@@ -639,7 +660,12 @@ pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &conf
         },
         _ => default_window_position(monitor, win_w, win_h),
     };
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+    if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+        log_paths::append_app_log(
+            &window.app_handle().clone(),
+            &format!("保存済みウィンドウ位置を復元できませんでした: {error}"),
+        );
+    }
 }
 
 /// 終了時に、生存中のイベントで控えておいたサイズと絶対座標を設定へ保存する。

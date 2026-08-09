@@ -494,28 +494,38 @@ fn apply_emotion_and_reply(
         crate::emotion::update(&current, user_text, &reply)
     };
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit(
+        if let Err(error) = win.emit(
             "pet:emotion",
             serde_json::to_value(&new_emotion).unwrap_or_default(),
-        );
+        ) {
+            crate::log_paths::append_app_log(app, &format!("感情表示を更新できません: {error}"));
+        }
     }
     *state.emotion.lock().unwrap() = new_emotion;
     json!({ "reply": if reply.is_empty() { "……".to_string() } else { reply } })
 }
 
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
-pub fn clear_conversation_and_history(app: &AppHandle) {
+pub fn clear_conversation_and_history(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+    let character_id = active_character_id(&state);
+    crate::history::clear(app, &character_id)
+        .map_err(|error| format!("会話履歴を削除できません: {error}"))?;
+    crate::memory::clear(app).map_err(|error| format!("長期メモリを削除できません: {error}"))?;
     state.bump_conversation_epoch();
     state.pending_command.lock().unwrap().take();
     state.recent_chatter.lock().unwrap().clear();
     state.memory_context.lock().unwrap().clear();
     state.clear_conversation();
-    crate::history::clear(app, &active_character_id(&state));
-    crate::memory::clear(app);
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit("pet:reset", ());
+        if let Err(error) = win.emit("pet:reset", ()) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("会話リセット後の画面更新に失敗しました: {error}"),
+            );
+        }
     }
+    Ok(())
 }
 
 impl Default for AppState {
@@ -808,7 +818,7 @@ pub async fn settings_components_remove(app: AppHandle, id: String) -> Result<Va
 }
 
 #[tauri::command]
-pub fn pet_daily_greeting(state: State<'_, AppState>) -> Result<Value, String> {
+pub fn pet_daily_greeting(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     use chrono::{Datelike, Local, Timelike};
     let now = Local::now();
     let part = match now.hour() {
@@ -817,13 +827,20 @@ pub fn pet_daily_greeting(state: State<'_, AppState>) -> Result<Value, String> {
         17..=18 => "夕方だね",
         _ => "こんばんは",
     };
-    // 挨拶なので、読めなかった場合は件数に含めないだけにする（保存はしない経路）。
     let events = crate::daily::load_events(&state.config)
-        .unwrap_or_default()
+        .map_err(|error| {
+            let message = format!("日次予定を読み込めません: {error}");
+            crate::log_paths::append_app_log(&app, &message);
+            message
+        })?
         .into_iter()
         .filter(|event| event.enabled)
         .count();
-    let praise = crate::daily::load_praise(&state.config).unwrap_or_default();
+    let praise = crate::daily::load_praise(&state.config).map_err(|error| {
+        let message = format!("褒め記録を読み込めません: {error}");
+        crate::log_paths::append_app_log(&app, &message);
+        message
+    })?;
     let mut line = format!(
         "{part}。今日は{}月{}日、今は{:02}:{:02}だよ。",
         now.month(),
@@ -913,7 +930,8 @@ pub fn pet_set_character_profile(
         state.bump_conversation_epoch();
         state.pending_command.lock().unwrap().take();
         state.clear_conversation();
-        let recent = crate::history::load_recent(&app, &character_id);
+        let recent =
+            crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
         if !recent.is_empty() {
             state.messages.lock().unwrap().extend(recent);
         }
@@ -1151,11 +1169,13 @@ pub fn pet_set_bubble_layout(
 /// 同梱キャラは配信物の `assets/characters/index.json` にあり、フロントがそちらと
 /// この一覧を突き合わせて1つのキャラクター一覧にする（同梱分は実行時に増減しない）。
 #[tauri::command]
-pub fn pet_user_characters(app: AppHandle) -> Value {
-    json!({
-        "root": crate::user_characters::root(&app).to_string_lossy(),
-        "characters": crate::user_characters::list(&app),
-    })
+pub fn pet_user_characters(app: AppHandle) -> Result<Value, String> {
+    let root = crate::user_characters::root(&app).map_err(|error| error.to_string())?;
+    let characters = crate::user_characters::list(&app).map_err(|error| error.to_string())?;
+    Ok(json!({
+        "root": root.to_string_lossy(),
+        "characters": characters,
+    }))
 }
 
 /// キャラクターパック（フォルダまたは zip）をネイティブダイアログで選ばせる。
@@ -2213,7 +2233,7 @@ fn is_secret_setting(schema_keys: &std::collections::HashSet<String>, key: &str)
 }
 
 /// 既存の平文シークレットを起動時に DPAPI 暗号化へ移行する（次回保存を待たずに保護する）。
-pub(crate) fn encrypt_existing_secrets(config: &Config) {
+pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
     let all = config.get_all();
     let schema_keys = secret_keys();
     let mut patch = Map::new();
@@ -2229,7 +2249,12 @@ pub(crate) fn encrypt_existing_secrets(config: &Config) {
     }
     if !patch.is_empty() {
         // フォールバック許可: 移行保存に失敗してもアプリ起動は止めない。
-        let _ = config.set_all(patch);
+        if let Err(error) = config.set_all(patch) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("既存シークレットの暗号化保存に失敗しました: {error}"),
+            );
+        }
     }
 }
 
@@ -2581,7 +2606,14 @@ pub async fn settings_save(
     }
 
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true));
+        if let Err(error) =
+            win.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true))
+        {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("最前面表示の設定を反映できませんでした: {error}"),
+            );
+        }
         // 軽い見た目・雑談設定は常に即反映。キャラ切替・プロバイダ/モデルは再起動側で
         // 反映するため、再起動が必要なときは characterId / pet:model を送らない。
         let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
@@ -2611,7 +2643,12 @@ pub async fn settings_save(
             "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         });
         if !requires_restart {
-            let _ = win.emit("pet:model", format!("{} / {}", provider.label(), model));
+            if let Err(error) = win.emit("pet:model", format!("{} / {}", provider.label(), model)) {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("AIモデル表示を更新できません: {error}"),
+                );
+            }
             ui["characterId"] = json!(state.config.get("PICOAGENT_CHARACTER", "mugi"));
             ui["characterOverrides"] = state
                 .config
@@ -2626,7 +2663,12 @@ pub async fn settings_save(
                 .cloned()
                 .unwrap_or_else(|| json!({}));
         }
-        let _ = win.emit("pet:ui", ui);
+        if let Err(error) = win.emit("pet:ui", ui) {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("保存した設定をメイン画面へ反映できません: {error}"),
+            );
+        }
     }
 
     Ok(json!({
@@ -2641,7 +2683,9 @@ pub async fn settings_save(
 
 #[tauri::command]
 pub fn pet_schedule_runs(app: AppHandle) -> Result<Value, String> {
-    Ok(json!(crate::scheduler::load_run_history(&app)))
+    crate::scheduler::load_run_history(&app)
+        .map(|records| json!(records))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2701,7 +2745,8 @@ pub fn restart_app(
     let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
     state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
     state.clear_conversation();
-    let recent = crate::history::load_recent(&app, &character_id);
+    let recent =
+        crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
     if !recent.is_empty() {
         state.messages.lock().unwrap().extend(recent);
     }
@@ -2743,12 +2788,22 @@ pub fn restart_app(
 
     // 設定画面から再初期化した場合は、古い設定ウィンドウを残さない。
     if let Some(settings) = app.get_webview_window("settings") {
-        let _ = settings.close();
+        if let Err(error) = settings.close() {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("再初期化時に設定画面を閉じられませんでした: {error}"),
+            );
+        }
     }
 
     // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit("pet:reload", ());
+        if let Err(error) = win.emit("pet:reload", ()) {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("再初期化後にメイン画面を再読み込みできません: {error}"),
+            );
+        }
     }
     Ok(json!({ "ok": true }))
 }
@@ -2911,7 +2966,7 @@ pub fn pet_emotion(state: State<'_, AppState>) -> Result<Value, String> {
 /// 今月のトークン使用量（月次集計）と累計を返す。
 #[tauri::command]
 pub fn pet_usage(app: AppHandle) -> Result<Value, String> {
-    let store = crate::usage::load(&app);
+    let store = crate::usage::load(&app).map_err(|error| error.to_string())?;
     Ok(json!({
         "monthlySummary": store.monthly_summary(),
         "totalTokens": store.total_tokens(),
@@ -2961,7 +3016,14 @@ pub async fn pet_transcribe_audio(
     // アプリが作った一時 WAV（ユーザー入力パスではない）。
     let audio = crate::permissions::SafePath::app_owned(path.clone());
     let result = crate::tools::whisper_transcribe::transcribe_file(&state.config, &audio).await;
-    let _ = std::fs::remove_file(&path);
+    if let Err(error) = std::fs::remove_file(&path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("マイク録音の一時ファイルを削除できません: {error}"),
+            );
+        }
+    }
     match result {
         Ok(text) if !text.trim().is_empty() => Ok(json!({ "text": text })),
         Ok(_) => Err("音声を聞き取れませんでした。もう一度話してみてください。".to_string()),
@@ -2981,7 +3043,7 @@ pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, Str
     }
     let dir = dirs::download_dir()
         .or_else(dirs::home_dir)
-        .unwrap_or_else(std::env::temp_dir);
+        .ok_or_else(|| "会話履歴の保存先を取得できません".to_string())?;
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let path = dir.join(format!("picoagent-conversation-{stamp}.md"));
     std::fs::write(&path, markdown)
@@ -3002,6 +3064,7 @@ const MAX_UPDATE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_UPDATE_FEED_BYTES: usize = 256 * 1024;
 
 struct UpdateDownloadCleanup {
+    app: AppHandle,
     partial: std::path::PathBuf,
     armed: bool,
 }
@@ -3010,7 +3073,14 @@ impl Drop for UpdateDownloadCleanup {
     fn drop(&mut self) {
         if self.armed {
             // フォールバック許可: 失敗・中断時のPicoAgent管理下更新一時ファイルだけを掃除する。
-            let _ = std::fs::remove_file(&self.partial);
+            if let Err(error) = std::fs::remove_file(&self.partial) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    crate::log_paths::append_app_log(
+                        &self.app,
+                        &format!("更新一時ファイルを削除できません: {error}"),
+                    );
+                }
+            }
         }
     }
 }
@@ -3190,6 +3260,7 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
     ));
     let partial = installer.with_extension("exe.part");
     let mut cleanup = UpdateDownloadCleanup {
+        app: app.clone(),
         partial: partial.clone(),
         armed: true,
     };
@@ -3229,10 +3300,15 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
         file.write_all(&chunk)
             .await
             .map_err(|error| error.to_string())?;
-        let _ = app.emit(
+        if let Err(error) = app.emit(
             "update:progress",
             json!({ "downloaded": downloaded, "total": size }),
-        );
+        ) {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("更新の取得進捗を画面へ通知できません: {error}"),
+            );
+        }
     }
     file.flush().await.map_err(|error| error.to_string())?;
     drop(file);
@@ -3261,7 +3337,11 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
     }
     verify_windows_installer(&partial)
         .map_err(|error| format!("更新インストーラが不正です: {error}"))?;
-    let _ = tokio::fs::remove_file(&installer).await;
+    if let Err(error) = tokio::fs::remove_file(&installer).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("古い更新インストーラを削除できません: {error}"));
+        }
+    }
     tokio::fs::rename(&partial, &installer)
         .await
         .map_err(|error| error.to_string())?;
@@ -3319,12 +3399,27 @@ pub fn spawn_update_check(app: AppHandle) {
         if !enabled {
             return;
         }
-        // フォールバック許可: 起動時確認はベストエフォート。オフライン・未公開では何も表示しない。
-        let Ok(Some(body)) = fetch_update_feed().await else {
-            return;
+        // フォールバック許可: オフラインは通常状態として何も表示しない。通信・解析エラーはログへ残す。
+        let body = match fetch_update_feed().await {
+            Ok(Some(body)) => body,
+            Ok(None) => return,
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("起動時の更新確認に失敗しました: {error}"),
+                );
+                return;
+            }
         };
-        let Ok(status) = update_status(Some(&body)) else {
-            return;
+        let status = match update_status(Some(&body)) {
+            Ok(status) => status,
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("更新情報を解析できません: {error}"),
+                );
+                return;
+            }
         };
         if status.get("status").and_then(Value::as_str) != Some("available") {
             return;
@@ -3345,7 +3440,7 @@ pub fn spawn_update_check(app: AppHandle) {
             .get("releasePage")
             .and_then(Value::as_str)
             .unwrap_or("https://github.com/benybeny777/PicoAgent-Distribution/releases");
-        let _ = app.emit(
+        if let Err(error) = app.emit(
             "pet:notice",
             json!({
                 "kind": "update",
@@ -3354,7 +3449,12 @@ pub fn spawn_update_check(app: AppHandle) {
                 "body": format!("現在は v{current}。設定の「製品情報・ライセンス」からアップデートできます。詳細: {link}"),
                 "at": chrono::Utc::now().to_rfc3339(),
             }),
-        );
+        ) {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("更新案内を画面へ通知できません: {error}"),
+            );
+        }
     });
 }
 
@@ -3806,6 +3906,11 @@ fn read_zip_entry(data: &[u8], entry: &str) -> Result<String, String> {
     let file = archive
         .by_name(entry)
         .map_err(|_| format!("'{entry}' が見つかりません"))?;
+    if file.size() > MAX_ZIP_ENTRY_BYTES {
+        return Err(format!(
+            "'{entry}' の展開サイズが上限（{MAX_ZIP_ENTRY_BYTES}バイト）を超えています"
+        ));
+    }
     // 展開サイズを上限で打ち切る（巨大展開による OOM を防ぐ）。
     let mut buf = Vec::new();
     file.take(MAX_ZIP_ENTRY_BYTES)
@@ -3823,8 +3928,15 @@ fn extract_pptx_content(data: &[u8]) -> Result<String, String> {
         let file = archive.by_index(i).map_err(|e| e.to_string())?;
         let fname = file.name().to_string();
         if fname.starts_with("ppt/slides/slide") && fname.ends_with(".xml") {
+            if file.size() > MAX_ZIP_ENTRY_BYTES {
+                return Err(format!(
+                    "'{fname}' の展開サイズが上限（{MAX_ZIP_ENTRY_BYTES}バイト）を超えています"
+                ));
+            }
             let mut buf = Vec::new();
-            let _ = file.take(MAX_ZIP_ENTRY_BYTES).read_to_end(&mut buf);
+            file.take(MAX_ZIP_ENTRY_BYTES)
+                .read_to_end(&mut buf)
+                .map_err(|error| format!("'{fname}' を展開できません: {error}"))?;
             let xml = String::from_utf8_lossy(&buf).into_owned();
             slides.push((fname, strip_xml_tags(&xml)));
         }
@@ -3880,21 +3992,36 @@ pub fn open_character_settings(app: &tauri::AppHandle) {
 fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let tab = settings_tab(tab);
     if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
+        if let Err(error) = win.show() {
+            crate::log_paths::append_app_log(app, &format!("設定画面を表示できません: {error}"));
+        }
+        if let Err(error) = win.set_focus() {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("設定画面へフォーカスできません: {error}"),
+            );
+        }
         if let Some(tab) = tab {
-            let _ = win.emit("settings:navigate", tab);
+            if let Err(error) = win.emit("settings:navigate", tab) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面のタブを切り替えられません: {error}"),
+                );
+            }
         }
         return;
     }
     let path = tab
         .map(|tab| format!("settings.html?tab={tab}"))
         .unwrap_or_else(|| "settings.html".to_string());
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
+    if let Err(error) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
         .title("PicoAgent の設定")
         .inner_size(960.0, 760.0)
         .min_inner_size(720.0, 560.0)
-        .build();
+        .build()
+    {
+        crate::log_paths::append_app_log(app, &format!("設定画面を開けません: {error}"));
+    }
 }
 
 fn settings_tab(tab: Option<&str>) -> Option<&str> {

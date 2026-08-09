@@ -91,8 +91,12 @@ fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replaceme
     let temp = SafePath::app_owned(output.as_path().with_extension("picoagent-tmp"));
     std::fs::write(&temp, &buffer).map_err(|e| format!("出力を書き込めません: {e}"))?;
     std::fs::rename(&temp, output).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("出力の確定に失敗しました: {e}")
+        let cleanup = std::fs::remove_file(&temp)
+            .err()
+            .filter(|error| error.kind() != std::io::ErrorKind::NotFound)
+            .map(|error| format!("。一時ファイルの削除にも失敗しました: {error}"))
+            .unwrap_or_default();
+        format!("出力の確定に失敗しました: {e}{cleanup}")
     })?;
     Ok(total)
 }

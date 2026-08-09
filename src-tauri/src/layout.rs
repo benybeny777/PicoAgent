@@ -266,7 +266,12 @@ fn apply_window_size(
             (height * scale).round() as u32,
         );
         if let Some(id) = emit_layout {
-            let _ = window.emit("pet:layout", id);
+            if let Err(error) = window.emit("pet:layout", id) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("表示形式を画面へ反映できません: {error}"),
+                );
+            }
         }
     }
     Ok(())

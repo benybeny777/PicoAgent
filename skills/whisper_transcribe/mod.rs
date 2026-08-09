@@ -202,16 +202,20 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
     let stdout_task = tokio::spawn(async move {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stdout {
-            let _ = pipe.read_to_end(&mut buf).await;
+            pipe.read_to_end(&mut buf)
+                .await
+                .map_err(|error| format!("標準出力を読み取れません: {error}"))?;
         }
-        buf
+        Ok::<_, String>(buf)
     });
     let stderr_task = tokio::spawn(async move {
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr {
-            let _ = pipe.read_to_end(&mut buf).await;
+            pipe.read_to_end(&mut buf)
+                .await
+                .map_err(|error| format!("標準エラー出力を読み取れません: {error}"))?;
         }
-        buf
+        Ok::<_, String>(buf)
     });
 
     let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
@@ -222,17 +226,42 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
             ))
         }
         Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+            let kill_error = child.kill().await.err();
+            let wait_error = child.wait().await.err();
+            let stdout_error = stdout_task
+                .await
+                .map_err(|error| format!("標準出力の回収タスクが失敗しました: {error}"))
+                .and_then(|result| result)
+                .err();
+            let stderr_error = stderr_task
+                .await
+                .map_err(|error| format!("標準エラー出力の回収タスクが失敗しました: {error}"))
+                .and_then(|result| result)
+                .err();
+            let cleanup = kill_error
+                .or(wait_error)
+                .map(|error| error.to_string())
+                .into_iter()
+                .chain(stdout_error)
+                .chain(stderr_error)
+                .collect::<Vec<_>>()
+                .join("、");
+            if !cleanup.is_empty() {
+                return Err(format!(
+                    "エラー: Whisper文字起こしが {timeout} 秒でタイムアウトし、子プロセスの解放にも失敗しました: {cleanup}"
+                ));
+            }
             return Err(format!(
                 "エラー: Whisper文字起こしが {timeout} 秒でタイムアウトしました。"
             ));
         }
     };
-    let stdout = stdout_task.await.unwrap_or_default();
-    let stderr = stderr_task.await.unwrap_or_default();
+    let stdout = stdout_task
+        .await
+        .map_err(|error| format!("エラー: 標準出力の回収タスクが失敗しました: {error}"))??;
+    let stderr = stderr_task
+        .await
+        .map_err(|error| format!("エラー: 標準エラー出力の回収タスクが失敗しました: {error}"))??;
     Ok(Output {
         status,
         stdout,
@@ -248,10 +277,10 @@ fn ffmpeg_path(cfg: &Config) -> String {
 /// 非 WAV 音声を ffmpeg で 16kHz モノラル WAV（whisper.cpp の推奨入力）へ前処理する。
 /// 変換した一時ファイルのパスを返す。WAV のままで良い場合や ffmpeg が使えない場合は
 /// None を返し、呼び出し側は元ファイルのまま続行する（グレースフルフォールバック）。
-async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Option<SafePath> {
+async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePath>, String> {
     let is_wav = audio.extension_lossy() == "wav";
     if is_wav {
-        return None;
+        return Ok(None);
     }
     let unique = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -278,12 +307,25 @@ async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Option<SafePath> {
     .map(ToString::to_string)
     .collect();
     match run_command(&ffmpeg_path(cfg), &args_list, 300).await {
-        Ok(output) if output.status.success() && out.exists() => Some(SafePath::app_owned(out)),
+        Ok(output) if output.status.success() && out.exists() => {
+            Ok(Some(SafePath::app_owned(out)))
+        }
         _ => {
             // フォールバック許可: 変換できなければ元ファイルを直接 Whisper へ渡す。
-            let _ = std::fs::remove_file(&out);
-            None
+            remove_internal_file(&out)?;
+            Ok(None)
         }
+    }
+}
+
+fn remove_internal_file(path: &std::path::Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "内部一時ファイルを削除できません: {} ({error})",
+            path.display()
+        )),
     }
 }
 
@@ -297,7 +339,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
         );
     }
     let program = transcribe_program(cfg);
-    let converted = convert_to_wav(cfg, audio).await;
+    let converted = convert_to_wav(cfg, audio).await?;
     let source: &SafePath = converted.as_ref().unwrap_or(audio);
     let output_stem = output_stem(cfg, audio)?;
     let template = cfg.get(
@@ -307,7 +349,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
     let args_list = split_args_template(&template, source, &model, &output_stem);
     let output = run_command(&program, &args_list, 120).await;
     if let Some(temp) = &converted {
-        let _ = std::fs::remove_file(temp.as_path());
+        remove_internal_file(temp.as_path())?;
     }
     let output = output?;
     if !output.status.success() {
@@ -320,7 +362,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
     let text = if generated.exists() {
         let content = std::fs::read_to_string(&generated)
             .map_err(|error| format!("文字起こし結果を読めません: {error}"))?;
-        let _ = std::fs::remove_file(&generated);
+        remove_internal_file(generated.as_path())?;
         content
     } else {
         trim_output(&output.stdout)
@@ -440,7 +482,10 @@ impl Tool for WhisperTranscribeTool {
         }
         let program = transcribe_program(cfg);
         // mp3/m4a 等は ffmpeg で 16kHz WAV へ前処理してから渡す（精度・互換性の向上）。
-        let converted = convert_to_wav(cfg, &audio).await;
+        let converted = match convert_to_wav(cfg, &audio).await {
+            Ok(converted) => converted,
+            Err(error) => return format!("エラー: {error}"),
+        };
         let source = converted.clone().unwrap_or_else(|| audio.clone());
         let output_stem = match output_stem(cfg, &audio) {
             Ok(path) => path,
@@ -466,7 +511,9 @@ impl Tool for WhisperTranscribeTool {
             .unwrap_or(1800);
         let output = run_command(&program, &args_list, timeout).await;
         if let Some(temp) = &converted {
-            let _ = std::fs::remove_file(temp);
+            if let Err(error) = remove_internal_file(temp.as_path()) {
+                return format!("エラー: {error}");
+            }
         }
         let output = match output {
             Ok(output) => output,
@@ -548,7 +595,9 @@ mod tests {
         let cfg = crate::config::Config::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let converted = runtime.block_on(convert_to_wav(&cfg, &SafePath::app_owned(mp3.clone())));
-        let wav = converted.expect("mp3 は WAV へ変換されるはず");
+        let wav = converted
+            .expect("変換処理は成功する")
+            .expect("mp3 は WAV へ変換されるはず");
         assert!(wav.exists());
         // RIFF ヘッダを持つ本物の WAV になっている。
         let head = std::fs::read(&wav).unwrap();
@@ -558,7 +607,10 @@ mod tests {
         // WAV 入力は前処理せず None（元ファイルのまま使う）。
         let plain = dir.join("plain.wav");
         std::fs::write(&plain, b"dummy").unwrap();
-        assert!(runtime.block_on(convert_to_wav(&cfg, &SafePath::app_owned(plain.clone()))).is_none());
+        assert!(runtime
+            .block_on(convert_to_wav(&cfg, &SafePath::app_owned(plain.clone())))
+            .unwrap()
+            .is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

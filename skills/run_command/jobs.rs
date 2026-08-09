@@ -295,11 +295,14 @@ pub fn stop(id: &str) -> String {
         Some(mut child) => {
             let killed = child.kill();
             // kill したら wait でハンドルまで回収する（ゾンビを残さない）。
-            let _ = child.wait();
+            let waited = child.wait();
             job.status = Status::Stopped;
-            match killed {
-                Ok(()) => format!("OK: {id} を停止しました。"),
-                Err(error) => format!("{id} は既に終了していました（{error}）。"),
+            match (killed, waited) {
+                (_, Err(error)) => {
+                    format!("エラー: {id} の終了ハンドルを回収できませんでした: {error}")
+                }
+                (Ok(()), Ok(_)) => format!("OK: {id} を停止しました。"),
+                (Err(error), Ok(_)) => format!("{id} は既に終了していました（{error}）。"),
             }
         }
         None => format!("{id} は既に{}です。", job.status.label()),
@@ -327,8 +330,14 @@ pub fn stop_all() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     for job in jobs.iter_mut() {
         if let Some(mut child) = job.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            if let Err(error) = child.kill() {
+                if error.kind() != std::io::ErrorKind::InvalidInput {
+                    eprintln!("バックグラウンドジョブを停止できません: {error}");
+                }
+            }
+            if let Err(error) = child.wait() {
+                eprintln!("バックグラウンドジョブの終了ハンドルを回収できません: {error}");
+            }
             job.status = Status::Stopped;
         }
     }

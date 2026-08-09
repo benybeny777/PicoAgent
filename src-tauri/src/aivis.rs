@@ -26,12 +26,25 @@ const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 static AIVIS_INSTALL_FS_LOCK: Mutex<()> = Mutex::new(());
 static AIVIS_INSTALL_NONCE: AtomicU64 = AtomicU64::new(1);
 
-struct AivisInstallCleanup(PathBuf);
+struct AivisInstallCleanup {
+    app: tauri::AppHandle,
+    path: PathBuf,
+}
 
 impl Drop for AivisInstallCleanup {
     fn drop(&mut self) {
         // フォールバック許可: 正常・失敗・中断時のPicoAgent管理下一時物だけを掃除する。
-        let _ = std::fs::remove_dir_all(&self.0);
+        if let Err(error) = std::fs::remove_dir_all(&self.path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                crate::log_paths::append_app_log(
+                    &self.app,
+                    &format!(
+                        "Aivis導入の一時フォルダを削除できません: {} ({error})",
+                        self.path.display()
+                    ),
+                );
+            }
+        }
     }
 }
 
@@ -63,7 +76,7 @@ pub fn port(app: &tauri::AppHandle, state: &AppState) -> u16 {
     let port = match raw.parse::<u16>() {
         Ok(port) => port,
         Err(error) => {
-            let _ = append_log(
+            append_log_best_effort(
                 app,
                 &format!(
                     "Aivis ポート設定が不正なため既定値 {DEFAULT_PORT} を使います: {raw} ({error})"
@@ -75,12 +88,12 @@ pub fn port(app: &tauri::AppHandle, state: &AppState) -> u16 {
     if port == LEGACY_DEFAULT_PORT {
         let next = DEFAULT_PORT.to_string();
         if let Err(error) = state.config.set_string("PICOAGENT_TTS_PORT", next.clone()) {
-            let _ = append_log(
+            append_log_best_effort(
                 app,
                 &format!("Aivis ポートの旧既定値移行に失敗しました: {error}"),
             );
         } else {
-            let _ = append_log(
+            append_log_best_effort(
                 app,
                 &format!(
                     "Aivis ポートを旧既定値 {LEGACY_DEFAULT_PORT} から {next} へ移行しました。"
@@ -374,9 +387,24 @@ fn append_log(app: &tauri::AppHandle, message: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn append_log_best_effort(app: &tauri::AppHandle, message: &str) {
+    if let Err(error) = append_log(app, message) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("aivis.logへの書き込みに失敗しました: {error}; 元メッセージ: {message}"),
+        );
+    }
+}
+
 fn log_tail(app: &tauri::AppHandle) -> String {
     let path = log_path(app);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return format!("ログ: {}（読み取り失敗: {error}）", path.display());
+        }
+    };
     let tail = text
         .lines()
         .rev()
@@ -643,12 +671,15 @@ fn replace_install_tree(stage: &Path, install: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn stage_and_replace(source: &Path, install: &Path) -> anyhow::Result<()> {
+fn stage_and_replace(app: &tauri::AppHandle, source: &Path, install: &Path) -> anyhow::Result<()> {
     let stage = install_stage_path(install);
     if stage.exists() {
         std::fs::remove_dir_all(&stage)?;
     }
-    let _cleanup = AivisInstallCleanup(stage.clone());
+    let _cleanup = AivisInstallCleanup {
+        app: app.clone(),
+        path: stage.clone(),
+    };
     copy_dir_all(source, &stage)?;
     let run = find_run_file(&stage)
         .ok_or_else(|| anyhow::anyhow!("準備した Aivis に run 実行ファイルが見つかりません。"))?;
@@ -665,7 +696,7 @@ fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<Pat
         .ok_or_else(|| anyhow::anyhow!("Aivis 同梱リソースの親ディレクトリを取得できません。"))?
         .to_path_buf();
     let install = install_dir(app)?;
-    stage_and_replace(&resource_root, &install)?;
+    stage_and_replace(app, &resource_root, &install)?;
     let Some(path) = runtime_engine_path(app) else {
         anyhow::bail!("Aivis 同梱リソースをコピーしましたが、実行ファイルを見つけられません。");
     };
@@ -713,9 +744,19 @@ async fn ensure_installed_inner(
         "picoagent-aivis-runtime-{}-{nonce}",
         std::process::id()
     ));
-    let _ = tokio::fs::remove_dir_all(&work).await;
+    if let Err(error) = tokio::fs::remove_dir_all(&work).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("古いAivis導入一時フォルダを削除できません: {error}"),
+            );
+        }
+    }
     tokio::fs::create_dir_all(&work).await?;
-    let _cleanup = AivisInstallCleanup(work.clone());
+    let _cleanup = AivisInstallCleanup {
+        app: app.clone(),
+        path: work.clone(),
+    };
     let archive = work.join(&asset_name);
     append_log(app, &format!("Aivis ダウンロード開始: {asset_name}"))?;
     download_aivis_archive(&asset_url, &archive, asset_size).await?;
@@ -740,8 +781,11 @@ async fn ensure_installed_inner(
     let install = install_dir(app)?;
     let root_for_copy = root.clone();
     let install_for_copy = install.clone();
-    tokio::task::spawn_blocking(move || stage_and_replace(&root_for_copy, &install_for_copy))
-        .await??;
+    let app_for_copy = app.clone();
+    tokio::task::spawn_blocking(move || {
+        stage_and_replace(&app_for_copy, &root_for_copy, &install_for_copy)
+    })
+    .await??;
     let installed = runtime_engine_path(app).ok_or_else(|| {
         anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
     })?;
@@ -770,7 +814,7 @@ pub async fn install_component(app: &tauri::AppHandle) -> anyhow::Result<PathBuf
     if should_restart {
         clear_stopping(app);
         if let Err(error) = ensure_started(app).await {
-            let _ = append_log(app, &format!("Aivis修復後の再起動に失敗しました: {error}"));
+            append_log_best_effort(app, &format!("Aivis修復後の再起動に失敗しました: {error}"));
         }
     }
     result
@@ -803,7 +847,15 @@ fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
         Ok(()) => Ok(()),
         Err(_) => {
             copy_dir_all(&old_dir, &new_dir)?;
-            let _ = std::fs::remove_dir_all(old_dir);
+            if let Err(error) = std::fs::remove_dir_all(&old_dir) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "移行済みの旧Aivisフォルダを削除できません: {} ({error})",
+                        old_dir.display()
+                    ),
+                );
+            }
             Ok(())
         }
     }
@@ -829,7 +881,7 @@ fn child_exit_status(app: &tauri::AppHandle) -> Result<Option<ExitStatus>, Strin
         Ok(None) => Ok(None),
         Err(error) => {
             if let Some(mut child) = slot.take() {
-                terminate_child(&mut child);
+                terminate_child(app, &mut child);
             }
             Err(format!("Aivis の終了状態を確認できません: {error}"))
         }
@@ -850,7 +902,7 @@ fn has_running_child(app: &tauri::AppHandle) -> bool {
             return true;
         }
         if let Some(mut child) = slot.take() {
-            terminate_child(&mut child);
+            terminate_child(app, &mut child);
         }
     }
     false
@@ -892,7 +944,7 @@ fn gpu_adapter_names() -> Vec<String> {
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
     let adapters = gpu_adapter_names();
     if adapters.is_empty() {
-        let _ = append_log(
+        append_log_best_effort(
             app,
             "GPU候補確認に失敗したため、auto は CPU 起動を選びます。",
         );
@@ -915,7 +967,7 @@ fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
                 || name.contains("intel")
                 || name.contains("arc"))
     });
-    let _ = append_log(
+    append_log_best_effort(
         app,
         if has_gpu {
             "GPU候補確認: GPU候補が見つかったため auto は GPU 起動を選びます。"
@@ -929,7 +981,7 @@ fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
 #[cfg(target_os = "macos")]
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
     // macOS は Metal が常に使えるため、事前判定を行わず GPU 起動を選ぶ。
-    let _ = append_log(
+    append_log_best_effort(
         app,
         "GPU候補確認: このOSでは事前判定を行わず auto は GPU 起動を選びます。",
     );
@@ -938,7 +990,7 @@ fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
 
 #[cfg(not(any(windows, target_os = "macos")))]
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
-    let _ = append_log(
+    append_log_best_effort(
         app,
         "GPU候補確認: このOSは対応対象外のため CPU 起動を選びます。",
     );
@@ -1016,7 +1068,7 @@ fn spawn_engine(
     }
     let mut child = command.spawn()?;
     let Some(state) = app.try_state::<AivisState>() else {
-        terminate_child(&mut child);
+        terminate_child(app, &mut child);
         anyhow::bail!("AivisState を取得できないため、起動した Aivis を停止しました");
     };
     let mut slot = match state.child.lock() {
@@ -1025,7 +1077,7 @@ fn spawn_engine(
         Err(poisoned) => poisoned.into_inner(),
     };
     if slot.is_some() {
-        terminate_child(&mut child);
+        terminate_child(app, &mut child);
         anyhow::bail!("Aivis は既に起動中です");
     }
     *slot = Some(child);
@@ -1194,15 +1246,21 @@ pub fn clear_stopping(app: &tauri::AppHandle) {
     }
 }
 
-fn terminate_child(child: &mut std::process::Child) {
+fn terminate_child(app: &tauri::AppHandle, child: &mut std::process::Child) {
     #[cfg(windows)]
     {
-        let _ = crate::tools::process::command_sync("taskkill")
+        let taskkill = crate::tools::process::command_sync("taskkill")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        if let Err(error) = taskkill {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("Aivisのプロセスツリー停止に失敗しました: {error}"),
+            );
+        }
     }
     #[cfg(unix)]
     {
@@ -1213,8 +1271,17 @@ fn terminate_child(child: &mut std::process::Child) {
         }
     }
     // プロセスグループの停止に失敗しても、直接の子プロセスは必ず停止を試みる。
-    let _ = child.kill();
-    let _ = child.wait();
+    if let Err(error) = child.kill() {
+        if error.kind() != std::io::ErrorKind::InvalidInput {
+            crate::log_paths::append_app_log(app, &format!("Aivisを停止できませんでした: {error}"));
+        }
+    }
+    if let Err(error) = child.wait() {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("Aivisの終了ハンドルを回収できませんでした: {error}"),
+        );
+    }
 }
 
 fn terminate_managed_child(app: &tauri::AppHandle) {
@@ -1227,7 +1294,7 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
         Err(poisoned) => poisoned.into_inner().take(),
     };
     if let Some(mut child) = child {
-        terminate_child(&mut child);
+        terminate_child(app, &mut child);
     }
 }
 

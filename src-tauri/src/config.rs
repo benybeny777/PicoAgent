@@ -30,7 +30,7 @@ impl Config {
     /// 起動時にファイルパスを設定し、あれば読み込む。
     /// 設定ファイルを読み込む。破損などで読めなかった場合は警告文字列を返す
     /// （呼び出し側が app.log へ記録する。ファイルが無いだけの初回起動は正常なので None）。
-    pub fn load(&self, file: PathBuf) -> Option<String> {
+    pub fn load(&self, file: PathBuf) -> Result<Option<String>, String> {
         let mut warning = None;
         match std::fs::read_to_string(&file) {
             Ok(text) => match serde_json::from_str::<Value>(&text) {
@@ -39,30 +39,29 @@ impl Config {
                     // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
                     // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
                     // 破損ファイルはその場に残すと次の保存（＝空設定の書き戻し）で消えてしまうので退避する。
-                    let saved = crate::store::quarantine_corrupt(&file);
-                    warning = Some(match saved {
-                        Some(saved) => format!(
-                            "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
-                            file.display(),
-                            saved.display()
-                        ),
-                        None => format!(
-                            "設定ファイルが JSON として読めないため空設定で起動します: {}",
+                    let saved = crate::store::quarantine_corrupt(&file).ok_or_else(|| {
+                        format!(
+                            "壊れた設定ファイルを退避できません。上書きを中止しました: {}",
                             file.display()
-                        ),
-                    });
+                        )
+                    })?;
+                    warning = Some(format!(
+                        "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
+                        file.display(),
+                        saved.display()
+                    ));
                 }
             },
             Err(error) if file.exists() => {
-                warning = Some(format!(
-                    "設定ファイルを読み込めないため空設定で起動します: {} ({error})",
+                return Err(format!(
+                    "設定ファイルを読み込めません。上書きを中止しました: {} ({error})",
                     file.display()
                 ));
             }
             Err(_) => {} // ファイルが無いのは初回起動の正常系
         }
         *self.path.lock().unwrap() = Some(file);
-        warning
+        Ok(warning)
     }
 
     /// 文字列設定を取得。空文字は未設定とみなし env → 既定値へフォールバック。
@@ -199,12 +198,15 @@ mod tests {
         let path = dir.join("config.json");
 
         let cfg = Config::new();
-        assert!(cfg.load(path.clone()).is_none(), "初回起動は警告なし");
+        assert!(
+            cfg.load(path.clone()).unwrap().is_none(),
+            "初回起動は警告なし"
+        );
         cfg.set_string("PICOAGENT_TEST_KEY", "値".to_string())
             .unwrap();
 
         let reloaded = Config::new();
-        assert!(reloaded.load(path.clone()).is_none());
+        assert!(reloaded.load(path.clone()).unwrap().is_none());
         assert_eq!(reloaded.get("PICOAGENT_TEST_KEY", ""), "値");
 
         // 原子的な書き込みなので、保存後に一時ファイルが残らない。
@@ -225,7 +227,7 @@ mod tests {
         let path = dir.join("config.json");
 
         let cfg = Config::new();
-        cfg.load(path.clone());
+        cfg.load(path.clone()).unwrap();
         cfg.set_string("PICOAGENT_TEST_KEY", "値".to_string())
             .unwrap();
         assert!(path.exists());
@@ -253,7 +255,7 @@ mod tests {
         let dir = temp_dir("concurrent");
         let path = dir.join("config.json");
         let cfg = Arc::new(Config::new());
-        cfg.load(path.clone());
+        cfg.load(path.clone()).unwrap();
 
         let mut handles = Vec::new();
         for index in 0..8 {
@@ -269,7 +271,7 @@ mod tests {
 
         // ファイルから読み直して、8件すべてが残っていること。
         let reloaded = Config::new();
-        reloaded.load(path.clone());
+        reloaded.load(path.clone()).unwrap();
         for index in 0..8 {
             assert_eq!(
                 reloaded.get(&format!("PICOAGENT_TEST_KEY_{index}"), ""),
@@ -289,7 +291,10 @@ mod tests {
             .unwrap();
 
         let cfg = Config::new();
-        let warning = cfg.load(path.clone()).expect("破損は警告する");
+        let warning = cfg
+            .load(path.clone())
+            .expect("破損時も退避できる")
+            .expect("破損は警告する");
         assert!(warning.contains("退避"), "退避先を案内する: {warning}");
 
         // 空設定で起動したあと保存しても、破損ファイルの中身は隣に残っている。

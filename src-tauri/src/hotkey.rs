@@ -84,7 +84,9 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
                 window
                     .show()
                     .map_err(|error| format!("ウィンドウの再表示に失敗しました: {error}"))?;
-                let _ = window.set_focus();
+                window
+                    .set_focus()
+                    .map_err(|error| format!("ウィンドウの前面化に失敗しました: {error}"))?;
             }
         }
     }
@@ -137,7 +139,12 @@ fn run(app: &AppHandle, action: Action) {
         }
     }
     // 最小化されている場合もあるので、前面化の前に戻す。
-    let _ = window.unminimize();
+    if let Err(error) = window.unminimize() {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("ホットキーで最小化を解除できません: {error}"),
+        );
+    }
     if let Err(error) = window.set_focus() {
         crate::log_paths::append_app_log(
             app,
@@ -145,7 +152,9 @@ fn run(app: &AppHandle, action: Action) {
         );
     }
     // 居眠りを解除して入力欄を開くのはフロント側の担当。
-    let _ = window.emit("pet:hotkey", "summon");
+    if let Err(error) = window.emit("pet:hotkey", "summon") {
+        crate::log_paths::append_app_log(app, &format!("ホットキーで入力欄を開けません: {error}"));
+    }
 }
 
 #[cfg(test)]

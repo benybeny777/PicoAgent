@@ -82,6 +82,28 @@ pub fn runtime_root() -> Option<&'static Path> {
     RUNTIME_ROOT.get().map(PathBuf::as_path)
 }
 
+async fn cleanup_file(app: &AppHandle, label: &str, path: &Path) {
+    if let Err(error) = tokio::fs::remove_file(path).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("{label}を削除できません: {} ({error})", path.display()),
+            );
+        }
+    }
+}
+
+async fn cleanup_dir(app: &AppHandle, label: &str, path: &Path) {
+    if let Err(error) = tokio::fs::remove_dir_all(path).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("{label}を削除できません: {} ({error})", path.display()),
+            );
+        }
+    }
+}
+
 fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
     match id {
         "aivis" => Some((
@@ -279,7 +301,7 @@ fn emit_progress(
     downloaded: u64,
     total: u64,
 ) {
-    let _ = app.emit(
+    if let Err(error) = app.emit(
         "component:progress",
         Progress {
             id: id.to_string(),
@@ -288,7 +310,12 @@ fn emit_progress(
             downloaded,
             total,
         },
-    );
+    ) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("追加機能の進捗を画面へ通知できません: {error}"),
+        );
+    }
 }
 
 pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentStatus>> {
@@ -344,9 +371,9 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
     let unpacked = cache.join(format!("whisper-unpacked-{}", std::process::id()));
     let stage = installed_dir(app, "whisper")
         .with_file_name(format!(".installing-whisper-{}", std::process::id()));
-    let _ = tokio::fs::remove_file(&archive).await;
-    let _ = tokio::fs::remove_dir_all(&unpacked).await;
-    let _ = tokio::fs::remove_dir_all(&stage).await;
+    cleanup_file(app, "古いWhisper取得途中ファイル", &archive).await;
+    cleanup_dir(app, "古いWhisper展開途中フォルダ", &unpacked).await;
+    cleanup_dir(app, "古いWhisper導入途中フォルダ", &stage).await;
 
     let result = async {
         download_to(
@@ -420,10 +447,10 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
     .await;
 
     // フォールバック許可: 成否にかかわらずPicoAgent管理下の作業用ファイルだけを掃除する。
-    let _ = tokio::fs::remove_file(&archive).await;
-    let _ = tokio::fs::remove_dir_all(&unpacked).await;
+    cleanup_file(app, "Whisper取得途中ファイル", &archive).await;
+    cleanup_dir(app, "Whisper展開途中フォルダ", &unpacked).await;
     if result.is_err() {
-        let _ = tokio::fs::remove_dir_all(&stage).await;
+        cleanup_dir(app, "Whisper導入途中フォルダ", &stage).await;
     }
     result
 }

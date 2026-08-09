@@ -80,41 +80,53 @@ impl UsageStore {
     }
 }
 
-fn path(app: &AppHandle) -> PathBuf {
-    app.path()
+fn path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    Ok(app
+        .path()
         .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("usage.json")
+        .map_err(|error| anyhow::anyhow!("トークン使用量の保存先を取得できません: {error}"))?
+        .join("usage.json"))
 }
 
-pub fn load(app: &AppHandle) -> UsageStore {
-    let target = path(app);
-    let Ok(text) = std::fs::read_to_string(&target) else {
-        return UsageStore::default();
+pub fn load(app: &AppHandle) -> anyhow::Result<UsageStore> {
+    let target = path(app)?;
+    let text = match std::fs::read_to_string(&target) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(UsageStore::default())
+        }
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "トークン使用量を読み込めません: {} ({error})",
+                target.display()
+            ));
+        }
     };
     match serde_json::from_str(&text) {
-        Ok(store) => store,
+        Ok(store) => Ok(store),
         // フォールバック許可: 破損時は空ストアで継続する。次の保存で上書きして
         // 集計を失わないよう、破損ファイルは退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&target);
+            let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "壊れたトークン使用量を退避できません。上書きを中止しました: {error}"
+                )
+            })?;
             crate::log_paths::append_app_log(
                 app,
                 &format!(
-                    "トークン使用量を読めないため空で起動します（{error}）{}",
-                    saved
-                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
-                        .unwrap_or_default()
+                    "トークン使用量を読めないため空で起動します（{error}）。破損ファイルは {} へ退避しました",
+                    saved.display()
                 ),
             );
-            UsageStore::default()
+            Ok(UsageStore::default())
         }
     }
 }
 
 pub fn save(app: &AppHandle, store: &UsageStore) {
-    let target = path(app);
     let result = (|| -> anyhow::Result<()> {
+        let target = path(app)?;
         if let Some(dir) = target.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -135,7 +147,13 @@ pub fn record(app: &AppHandle, provider_id: &str, model: &str, usage: TokenUsage
     // 読む→直す→書き戻すの間に別の会話（サブエージェント・ワークフロー）と競合すると、
     // 片方の記録が消える。同じファイルを触る処理を直列化する。
     let _guard = crate::store::lock_state("usage.json");
-    let mut store = load(app);
+    let mut store = match load(app) {
+        Ok(store) => store,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            return;
+        }
+    };
     store.records.push(UsageRecord {
         provider_id: provider_id.to_string(),
         model: model.to_string(),

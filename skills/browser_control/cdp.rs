@@ -60,11 +60,11 @@ fn devtools_client() -> Option<&'static reqwest::Client> {
 }
 
 /// `--user-data-dir` に使う隔離プロファイルの置き場所。
-fn isolated_profile_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
+fn isolated_profile_dir() -> Result<PathBuf, String> {
+    Ok(dirs::data_dir()
+        .ok_or_else(|| "エラー: ブラウザ用プロファイルの保存先を取得できません".to_string())?
         .join("PicoAgent")
-        .join("browser-profile")
+        .join("browser-profile"))
 }
 
 /// 実行ファイルの候補（設定が空のときに順に探す）。
@@ -156,30 +156,42 @@ pub struct LaunchOptions {
     pub startup_timeout_secs: u64,
 }
 
-fn managed_child_running() -> bool {
+fn stop_child(child: &mut std::process::Child) -> Result<(), String> {
+    if let Err(error) = child.kill() {
+        if error.kind() != std::io::ErrorKind::InvalidInput {
+            return Err(format!("ブラウザを停止できません: {error}"));
+        }
+    }
+    child
+        .wait()
+        .map(|_| ())
+        .map_err(|error| format!("ブラウザの終了ハンドルを回収できません: {error}"))
+}
+
+fn managed_child_running() -> Result<bool, String> {
     let mut slot = lock_child_slot();
     match slot.as_mut() {
         Some(child) => match child.try_wait() {
-            Ok(None) => true,
+            Ok(None) => Ok(true),
             Ok(Some(_)) => {
                 *slot = None;
-                false
+                Ok(false)
             }
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+            Err(error) => {
+                let cleanup = stop_child(child);
                 *slot = None;
-                false
+                cleanup?;
+                Err(format!("ブラウザの終了状態を確認できません: {error}"))
             }
         },
-        None => false,
+        None => Ok(false),
     }
 }
 
 /// ブラウザを起動する（既に応答していれば何もしない）。
 pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     if debug_port_alive(options.port).await {
-        if managed_child_running() {
+        if managed_child_running()? {
             return Ok(());
         }
         return Err(format!(
@@ -191,8 +203,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     {
         let mut slot = lock_child_slot();
         if let Some(child) = slot.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_child(child)?;
         }
         *slot = None;
     }
@@ -206,7 +217,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         .arg("--disable-background-networking")
         .arg("--disable-popup-blocking");
     if !options.use_default_profile {
-        let profile = isolated_profile_dir();
+        let profile = isolated_profile_dir()?;
         if let Err(error) = std::fs::create_dir_all(&profile) {
             return Err(format!(
                 "エラー: ブラウザ用プロファイルを作成できません（{}）: {error}",
@@ -230,8 +241,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
     {
         let mut slot = lock_child_slot();
         if slot.is_some() {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_child(&mut child)?;
             return Err("エラー: PicoAgent 管理のブラウザは既に起動中です。".to_string());
         }
         *slot = Some(child);
@@ -246,20 +256,24 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         // こちらのプロセスはデバッグポートを開かないまますぐ終了する。待ち続けても
         // タイムアウトするだけなので、子プロセスの終了を見て原因を名指しで返す。
         if child_exited() {
-            let error = format!(
+            let mut error = format!(
                 "エラー: ブラウザは既に通常起動しているため、デバッグポート（{}）付きの起動要求が既存のウィンドウへ引き継がれました。ブラウザをすべて閉じてからやり直すか、PICOAGENT_BROWSER_PROFILE=isolated（既定）で専用プロファイルを使ってください。",
                 options.port
             );
-            stop();
+            if let Err(cleanup) = stop() {
+                error.push_str(&format!("\n{cleanup}"));
+            }
             return Err(error);
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    let error = format!(
+    let mut error = format!(
         "エラー: ブラウザのデバッグポート（{}）が応答しません。ブラウザの実行パス（PICOAGENT_BROWSER_PATH）と、ポートを塞いでいるプロセスが無いかを確認してください。",
         options.port
     );
-    stop();
+    if let Err(cleanup) = stop() {
+        error.push_str(&format!("\n{cleanup}"));
+    }
     Err(error)
 }
 
@@ -275,13 +289,13 @@ fn child_exited() -> bool {
 /// 起動したブラウザを停止する（アプリ終了時と `close` から呼ぶ）。
 ///
 /// **PicoAgent が起動してハンドルを保持しているブラウザだけ**を止める。
-pub fn stop() {
+pub fn stop() -> Result<(), String> {
     let mut slot = lock_child_slot();
     if let Some(child) = slot.as_mut() {
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_child(child)?;
     }
     *slot = None;
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -501,7 +515,7 @@ mod tests {
         struct BrowserGuard;
         impl Drop for BrowserGuard {
             fn drop(&mut self) {
-                stop();
+                let _ = stop();
             }
         }
         let Ok(browser_path) = resolve_browser("") else {

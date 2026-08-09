@@ -21,10 +21,10 @@ const MAX_CONTEXT_LOAD: usize = 20;
 // 小型モデルがガイド自体を発話したため、読み込み時に原文へ戻す。
 const LEGACY_GREETING_GUIDANCE: &str = "\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。";
 
-fn data_dir(app: &AppHandle) -> PathBuf {
+fn data_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
     app.path()
         .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
+        .map_err(|error| anyhow::anyhow!("会話履歴の保存先を取得できません: {error}"))
 }
 
 /// キャラクターIDをファイル名に使える形へ正規化する（想定外の文字は落とす）。
@@ -40,16 +40,21 @@ fn sanitize(character_id: &str) -> String {
     }
 }
 
-pub fn path(app: &AppHandle, character_id: &str) -> PathBuf {
-    data_dir(app).join(format!("history-{}.json", sanitize(character_id)))
+pub fn path(app: &AppHandle, character_id: &str) -> anyhow::Result<PathBuf> {
+    Ok(data_dir(app)?.join(format!("history-{}.json", sanitize(character_id))))
 }
 
 /// 旧仕様の単一ファイル history.json を、指定キャラクターのファイルへ一度だけ移行する。
 /// 呼び出し側は既定キャラ（mugi）を渡す。旧履歴はキャラ別管理が無かった時代のもので
 /// 当時の唯一/既定キャラのものだから。後から追加したキャラへ割り当てると人格が混ざる。
 pub fn migrate_legacy(app: &AppHandle, character_id: &str) {
-    let legacy = data_dir(app).join("history.json");
-    let target = path(app, character_id);
+    let (legacy, target) = match (data_dir(app), path(app, character_id)) {
+        (Ok(dir), Ok(target)) => (dir.join("history.json"), target),
+        (Err(error), _) | (_, Err(error)) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            return;
+        }
+    };
     if legacy.exists() && !target.exists() {
         if let Err(error) = std::fs::rename(&legacy, &target) {
             crate::log_paths::append_app_log(
@@ -96,7 +101,13 @@ fn clean_history_file(target: &std::path::Path) -> anyhow::Result<usize> {
 /// 全キャラクターの保存済み履歴から、旧版がユーザー発話へ混ぜた内部ガイドを除去する。
 /// 選択中キャラだけでなく、後から切り替えるキャラの文脈も起動時にまとめて直す。
 pub fn migrate_saved_greeting_guidance(app: &AppHandle) {
-    let dir = data_dir(app);
+    let dir = match data_dir(app) {
+        Ok(dir) => dir,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            return;
+        }
+    };
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) => {
@@ -137,31 +148,38 @@ pub fn migrate_saved_greeting_guidance(app: &AppHandle) {
 }
 
 /// 指定キャラクターの直近の会話（system 以外）を末尾 MAX_CONTEXT_LOAD 件まで読み込む。
-pub fn load_recent(app: &AppHandle, character_id: &str) -> Vec<Message> {
-    let target = path(app, character_id);
-    let Ok(text) = std::fs::read_to_string(&target) else {
-        return Vec::new();
+pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Message>> {
+    let target = path(app, character_id)?;
+    let text = match std::fs::read_to_string(&target) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "会話履歴を読み込めません: {} ({error})",
+                target.display()
+            ));
+        }
     };
     // フォールバック許可: 履歴ファイルが壊れていても会話継続を優先し、空履歴で起動する。
     // ただし次の保存で上書きして会話を失わないよう、破損ファイルは退避してから続ける。
     let all: Vec<Message> = match serde_json::from_str(&text) {
         Ok(all) => all,
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&target);
+            let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+                anyhow::anyhow!("壊れた会話履歴を退避できません。上書きを中止しました: {error}")
+            })?;
             crate::log_paths::append_app_log(
                 app,
                 &format!(
-                    "会話履歴を読めないため空で起動します（{error}）{}",
-                    saved
-                        .map(|path| format!("。破損ファイルは {} へ退避しました", path.display()))
-                        .unwrap_or_default()
+                    "会話履歴を読めないため空で起動します（{error}）。破損ファイルは {} へ退避しました",
+                    saved.display()
                 ),
             );
             Vec::new()
         }
     };
     let start = all.len().saturating_sub(MAX_CONTEXT_LOAD);
-    all[start..].to_vec()
+    Ok(all[start..].to_vec())
 }
 
 /// 指定キャラクターの会話（system 以外）を末尾 MAX_PERSIST 件だけ保存する。
@@ -169,7 +187,13 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
     let convo: Vec<&Message> = messages.iter().filter(|m| m.role != "system").collect();
     let start = convo.len().saturating_sub(MAX_PERSIST);
     let recent = &convo[start..];
-    let target = path(app, character_id);
+    let target = match path(app, character_id) {
+        Ok(target) => target,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error.to_string());
+            return;
+        }
+    };
     let _guard = crate::store::lock_state(&lock_name(&target));
     let result = (|| -> anyhow::Result<()> {
         if let Some(dir) = target.parent() {
@@ -185,10 +209,14 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
 }
 
 /// 指定キャラクターの履歴ファイルを削除する（会話の完全リセット用）。
-pub fn clear(app: &AppHandle, character_id: &str) {
-    let target = path(app, character_id);
+pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
+    let target = path(app, character_id)?;
     let _guard = crate::store::lock_state(&lock_name(&target));
-    let _ = std::fs::remove_file(target);
+    match std::fs::remove_file(target) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 #[cfg(test)]

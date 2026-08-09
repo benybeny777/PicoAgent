@@ -169,4 +169,21 @@ mod guard {
             "invokeを直接追加せず、失敗ログを保証するcall()を使ってください"
         );
     }
+
+    #[test]
+    fn フロントのpromise失敗を空のcatchで捨てない() {
+        let root = guard_scan::repo_root();
+        let mut offenders = Vec::new();
+        for name in ["renderer.js", "settings.js", "common.js", "picoagent.js"] {
+            let path = root.join("ui").join(name);
+            let source = std::fs::read_to_string(&path).expect("UIソースを読めない");
+            if source.contains(".catch(() => {})") {
+                offenders.push(path.display().to_string());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "Promise失敗は診断ログへ残してください: {offenders:?}"
+        );
+    }
 }

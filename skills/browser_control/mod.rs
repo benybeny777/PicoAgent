@@ -38,7 +38,9 @@ pub struct BrowserControlTool;
 
 /// アプリ終了時にブラウザを閉じる（`lib.rs` の `RunEvent::Exit` から呼ぶ）。
 pub fn stop() {
-    cdp::stop();
+    if let Err(error) = cdp::stop() {
+        eprintln!("{error}");
+    }
 }
 
 fn enabled(cfg: &Config) -> bool {
@@ -243,7 +245,9 @@ impl Tool for BrowserControlTool {
             .to_string();
 
         if action == "close" {
-            cdp::stop();
+            if let Err(error) = cdp::stop() {
+                return format!("エラー: {error}");
+            }
             if let Ok(mut slot) = current_target().lock() {
                 *slot = None;
             }
