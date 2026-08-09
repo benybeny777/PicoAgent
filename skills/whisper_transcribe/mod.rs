@@ -390,7 +390,7 @@ impl Tool for WhisperTranscribeTool {
             ),
             Field::new(
                 "PICOAGENT_FFMPEG_PATH",
-                "ffmpeg 実行ファイルパス（mp3/m4a等の前処理用。空なら同梱→PATH）",
+                "ffmpeg 実行ファイルパス（mp3/m4a等の前処理用。空ならPicoAgent内→PATH）",
                 "text",
                 "",
             ),

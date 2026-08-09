@@ -15,12 +15,9 @@
   },
   "updates": {
     "required": false,
+    "feed": "https://benybeny777.github.io/PicoAgent-Distribution/latest.json",
     "endpoint": "",
     "publicKey": ""
-  },
-  "components": {
-    "packagesPublished": false,
-    "baseUrl": "https://github.com/benybeny777/PicoAgent-Distribution/releases/download/components-v1"
   },
   "signing": {
     "required": false,

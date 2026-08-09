@@ -19,7 +19,7 @@ const ALLOWED_RESOURCES: [(&str, &str); 2] = [
     ),
     (
         "resources/component-manifest.json",
-        "軽量配布版が追加機能の取得先・サイズ・SHA-256を検証するためのマニフェスト",
+        "軽量配布版が第三者追加機能の公式取得元と導入方式を表示・検証するためのマニフェスト",
     ),
 ];
 

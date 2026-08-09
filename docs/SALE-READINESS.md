@@ -19,7 +19,8 @@ cargo xtask build-distribution
 - [ ] EULAを事業者情報・販売条件・返金条件に合わせ、専門家確認後に `eulaReviewed=true`
 - [ ] プライバシー表示を実際の販売サイト・外部連携一覧に合わせ、専門家確認後に `privacyReviewed=true`
 - [ ] `src-tauri/resources/bundled/` と `ui/vendor/` の実ファイルを台帳へ落とし、再配布・帰属・ソース提供条件を確認後に `thirdPartyInventoryReviewed=true`
-- [ ] `cargo xtask package-components` でWindows／macOSの追加機能パッケージを作成・公開し、`component-manifest.json` のURL／サイズ／SHA-256を確定後に `components.packagesPublished=true`
+- [ ] `component-manifest.json` の全取得元が公式または作者配布であることを確認し、Aivis／Whisperの実取得と外部導入リンクをクリーンWindowsで確認
+- [ ] 公開配布Gitの `latest.json` とWindowsインストーラReleaseを同じ版へ更新し、URL・サイズ・SHA-256を実成果物と照合
 - [ ] Live2D拡張性アプリケーションの審査と契約を完了し、追跡可能な社内参照番号を登録
 - [ ] サポート、プライバシー表示、利用条件の公開URLを登録
 - [ ] `THIRD-PARTY-NOTICES.md` を実際の同梱物と突合
@@ -29,7 +30,9 @@ cargo xtask build-distribution
 
 Live2D公式は、不特定多数のモデルを追加・組み合わせられる作品を拡張性アプリケーションに含め、一般ユーザー・小規模事業者を含めてリリース前の審査と特別契約を求めています。PicoAgentはキャラ追加を提供するため、契約確認を出荷ゲートから外しません。
 
-将来自動更新を導入する場合、Tauri updaterは更新ファイルの署名検証を必須とします。`updates.required=true` に変え、公開鍵・更新先・更新成果物生成が揃ってから有効化します。秘密鍵はリポジトリ・ログ・配布物へ含めません。コード署名を導入する場合も `signing.required=true` に変えてWindows署名とmacOS署名／公証を販売ゲートへ戻します。
+Windows版を公開するときは、NSISを作成後に `cargo xtask update-feed <インストーラ.exe> "更新内容"` を実行します。生成された `distribution/site/latest.json` と同じインストーラを `PicoAgent-Distribution` の `v<version>` Releaseへ置き、Pages反映後に設定画面から更新確認・ダウンロード・SHA-256検証・インストーラ起動を実機確認します。
+
+初期版のアプリ内更新は利用者が設定から明示実行し、公開配布GitのURL・サイズ・SHA-256を検証してNSISを起動します。オフライン時は見送ります。将来、完全自動更新へ進める場合はTauri updaterの更新署名を必須にし、`updates.required=true`、公開鍵、更新成果物生成を揃えます。秘密鍵はリポジトリ・ログ・配布物へ含めません。コード署名を導入する場合も `signing.required=true` に変えてWindows署名とmacOS署名／公証を販売ゲートへ戻します。
 
 ## 販売用キャラ境界
 

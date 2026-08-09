@@ -211,7 +211,7 @@ impl Tool for ImageToolsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MAGICK_PATH", "ImageMagick 実行ファイルパス（空なら同梱→PATH の magick/convert）", "text", ""),
+            Field::new("PICOAGENT_MAGICK_PATH", "ImageMagick 実行ファイルパス（空ならPicoAgent内→PATH の magick/convert）", "text", ""),
             Field::new("PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS", "画像操作タイムアウト秒（5〜300）", "text", "120"),
         ]
     }

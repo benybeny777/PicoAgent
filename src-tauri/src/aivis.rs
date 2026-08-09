@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tauri::Manager;
 use tokio::io::AsyncWriteExt;
 
@@ -22,6 +23,15 @@ const AIVIS_API_URL: &str =
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
 const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
+
+struct AivisInstallCleanup(PathBuf);
+
+impl Drop for AivisInstallCleanup {
+    fn drop(&mut self) {
+        // フォールバック許可: 正常・失敗・中断時のPicoAgent管理下一時物だけを掃除する。
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 pub struct AivisState {
     child: Mutex<Option<Child>>,
@@ -402,7 +412,7 @@ fn release_asset_pattern() -> &'static str {
     }
 }
 
-async fn aivis_release_asset_url() -> anyhow::Result<(String, String)> {
+async fn aivis_release_asset_url() -> anyhow::Result<(String, String, u64, String)> {
     let data: serde_json::Value = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
@@ -442,10 +452,22 @@ async fn aivis_release_asset_url() -> anyhow::Result<(String, String)> {
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("Aivis ダウンロードURLを読めません。"))?
         .to_string();
-    Ok((name, url))
+    let size = asset
+        .get("size")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|size| *size > 0 && *size <= 2 * 1024 * 1024 * 1024)
+        .ok_or_else(|| anyhow::anyhow!("Aivis アセットサイズが不正です。"))?;
+    let digest = asset
+        .get("digest")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.strip_prefix("sha256:"))
+        .filter(|value| value.len() == 64)
+        .ok_or_else(|| anyhow::anyhow!("Aivis 公式ReleaseにSHA-256 digestがありません。"))?
+        .to_ascii_lowercase();
+    Ok((name, url, size, digest))
 }
 
-async fn download_aivis_archive(url: &str, dest: &Path) -> anyhow::Result<()> {
+async fn download_aivis_archive(url: &str, dest: &Path, expected_size: u64) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -459,12 +481,40 @@ async fn download_aivis_archive(url: &str, dest: &Path) -> anyhow::Result<()> {
         .error_for_status()?;
     let tmp = dest.with_extension("part");
     let mut file = tokio::fs::File::create(&tmp).await?;
+    let mut downloaded = 0_u64;
     while let Some(chunk) = response.chunk().await? {
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        anyhow::ensure!(
+            downloaded <= expected_size,
+            "Aivis の取得サイズが予定を超えています。"
+        );
         file.write_all(&chunk).await?;
     }
     file.flush().await?;
     drop(file);
+    anyhow::ensure!(
+        downloaded == expected_size,
+        "Aivis の取得サイズが予定と一致しません。"
+    );
     tokio::fs::rename(tmp, dest).await?;
+    Ok(())
+}
+
+fn verify_archive_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {
+    let mut file = std::fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = std::io::Read::read(&mut file, &mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    anyhow::ensure!(
+        format!("{:x}", digest.finalize()) == expected,
+        "Aivis 公式配布のSHA-256が一致しません。"
+    );
     Ok(())
 }
 
@@ -603,13 +653,17 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
         app,
         "Aivis が見つからないため、公式リリースから自動取得します。",
     )?;
-    let (asset_name, asset_url) = aivis_release_asset_url().await?;
+    let (asset_name, asset_url, asset_size, asset_sha256) = aivis_release_asset_url().await?;
     let work = std::env::temp_dir().join("picoagent-aivis-runtime");
     let _ = tokio::fs::remove_dir_all(&work).await;
     tokio::fs::create_dir_all(&work).await?;
+    let _cleanup = AivisInstallCleanup(work.clone());
     let archive = work.join(&asset_name);
     append_log(app, &format!("Aivis ダウンロード開始: {asset_name}"))?;
-    download_aivis_archive(&asset_url, &archive).await?;
+    download_aivis_archive(&asset_url, &archive, asset_size).await?;
+    let archive_for_verify = archive.clone();
+    tokio::task::spawn_blocking(move || verify_archive_sha256(&archive_for_verify, &asset_sha256))
+        .await??;
     append_log(app, "Aivis ダウンロード完了。展開します。")?;
 
     let extract_dir = work.join("extract");
@@ -632,13 +686,18 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     let root_for_copy = root.clone();
     let install_for_copy = install.clone();
     tokio::task::spawn_blocking(move || copy_dir_all(&root_for_copy, &install_for_copy)).await??;
-    let _ = tokio::fs::remove_dir_all(&work).await;
     let installed = runtime_engine_path(app).ok_or_else(|| {
         anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
     })?;
     ensure_executable(&installed)?;
     append_log(app, &format!("Aivis 自動取得完了: {}", installed.display()))?;
     Ok(installed)
+}
+
+/// 追加機能画面からAivis本体だけを公式Releaseから導入する。
+/// エンジンの起動や読み上げ設定の変更は行わない。
+pub async fn install_component(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+    ensure_installed(app).await
 }
 
 fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {

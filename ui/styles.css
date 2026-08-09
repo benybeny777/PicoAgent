@@ -482,6 +482,8 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .onboarding-components em { color:var(--muted); font-size:9px; font-style:normal; white-space:nowrap; }
 .onboarding-components label.is-ready em { color:var(--accent); }
 .onboarding-components label.is-unavailable { opacity:.62; }
+.onboarding-components label.is-external { cursor:default; }
+.onboarding-component-source { color:var(--accent); font-size:9px; white-space:nowrap; }
 .onboarding-component-status { min-height:13px; margin:5px 0 0!important; }
 .onboarding-component-actions { display:grid; grid-template-columns:1fr auto; gap:8px; margin-top:5px; }
 .onboarding-component-actions button { position:static; height:auto; padding:9px 12px; }

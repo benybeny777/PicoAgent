@@ -102,17 +102,17 @@
         </div>
         <div id="onboardingComponentStep" hidden>
           <h1 id="onboardingComponentTitle">追加機能を準備する？</h1>
-          <p>必要なものだけ選べます。あとから設定の「追加機能」で変更できます。本体、ローカルAIエンジン、Live2D表示は基本機能です。</p>
+          <p>必要なものだけ選べます。AivisとWhisperは公式配布元から直接取得します。その他は提供元のページと導入手順を案内します。</p>
           <div class="onboarding-components">
-            <label data-component-id="aivis"><input type="checkbox" value="aivis"><span><b>音声読み上げ</b><small>Aivis・約0.8GB＋音声モデル（導入後もミュート）</small></span><em>確認中</em></label>
-            <label data-component-id="whisper"><input type="checkbox" value="whisper"><span><b>音声入力・文字起こし</b><small>Whisper・約0.5GB</small></span><em>確認中</em></label>
-            <label data-component-id="tha3"><input type="checkbox" value="tha3"><span><b>1枚絵からキャラ作成</b><small>THA3・Windowsは約5.2GB</small></span><em>確認中</em></label>
-            <label data-component-id="office"><input type="checkbox" value="office"><span><b>Office変換</b><small>OfficeCLI・約1.5GB</small></span><em>確認中</em></label>
-            <label data-component-id="tools"><input type="checkbox" value="tools"><span><b>PDF・画像・文書ツール</b><small>FFmpeg等・約1.0GB</small></span><em>確認中</em></label>
+            <label data-component-id="aivis"><input type="checkbox" value="aivis"><span><b>音声読み上げ</b><small>Aivis公式配布・約0.8GB＋音声モデル（導入後もミュート）</small></span><em>確認中</em></label>
+            <label data-component-id="whisper"><input type="checkbox" value="whisper"><span><b>音声入力・文字起こし</b><small>whisper.cpp公式配布・約0.5GB</small></span><em>確認中</em></label>
+            <label data-component-id="tha3"><input type="checkbox" value="tha3"><span><b>1枚絵からキャラ作成</b><small>THA3作者配布・NVIDIA GPU必須</small></span><em>確認中</em></label>
+            <label data-component-id="office"><input type="checkbox" value="office"><span><b>Office変換</b><small>LibreOffice公式インストーラ</small></span><em>確認中</em></label>
+            <label data-component-id="tools"><input type="checkbox" value="tools"><span><b>PDF・画像・文書ツール</b><small>各ツールの公式配布</small></span><em>確認中</em></label>
           </div>
           <p id="onboardingComponentStatus" class="onboarding-component-status" aria-live="polite"></p>
           <div class="onboarding-component-actions">
-            <button type="button" data-onboarding-action="install-components">選んだ機能を準備</button>
+            <button type="button" data-onboarding-action="install-components">選んだ機能を公式から取得</button>
             <button type="button" data-onboarding-action="skip-components">今はしない</button>
           </div>
           <button class="onboarding-back" type="button" data-onboarding-action="back-purpose">← 用途選択へ戻る</button>

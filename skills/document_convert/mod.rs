@@ -102,7 +102,7 @@ impl Tool for DocumentConvertTool {
     }
 
     fn description(&self) -> String {
-        "OfficeCLI（同梱 LibreOffice。cargo xtask setup office で取得）で docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。Markdown/reST/EPUB が絡む変換は Pandoc（cargo xtask setup tools で同梱）を自動で使い高精度に変換する。".to_string()
+        "利用者が導入したLibreOfficeで docx/xlsx/pptx/odt 等を PDF や別形式へ変換する。Markdown/reST/EPUB が絡む変換は利用可能なPandocを自動で使い高精度に変換する。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -120,8 +120,8 @@ impl Tool for DocumentConvertTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LIBREOFFICE_PATH", "OfficeCLI 実行ファイルパス（空なら同梱→PATHの soffice）", "text", ""),
-            Field::new("PICOAGENT_PANDOC_PATH", "Pandoc 実行ファイルパス（空なら同梱→PATH）", "text", "pandoc"),
+            Field::new("PICOAGENT_LIBREOFFICE_PATH", "OfficeCLI 実行ファイルパス（空ならPicoAgent内→PATHの soffice）", "text", ""),
+            Field::new("PICOAGENT_PANDOC_PATH", "Pandoc 実行ファイルパス（空ならPicoAgent内→PATH）", "text", "pandoc"),
             Field::new("PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS", "文書変換タイムアウト秒（5〜300）", "text", "120"),
         ]
     }

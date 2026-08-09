@@ -114,7 +114,7 @@ async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, t
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
             return format!(
-                "エラー: OfficeCLI（{program}）を起動できません: {error}\ncargo xtask setup office で同梱 LibreOffice を取得するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。"
+                "エラー: OfficeCLI（{program}）を起動できません: {error}\n設定の「追加機能」からLibreOffice公式ページを開いて導入するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。"
             );
         }
         Err(_) => return format!("エラー: PDF 変換が {timeout} 秒でタイムアウトしました。"),
@@ -164,7 +164,7 @@ impl Tool for MsOfficeTool {
     }
 
     fn description(&self) -> String {
-        "OfficeCLI（同梱 LibreOffice）と OOXML 直接編集で Word/Excel/PowerPoint を扱う。\
+        "OfficeCLI（利用者が導入したLibreOffice）と OOXML 直接編集で Word/Excel/PowerPoint を扱う。\
          replace_text は docx/xlsx/pptx 内の文字列を書式を保ったまま置換、export_pdf は PDF 出力。\
          Microsoft Office のインストールは不要。"
             .to_string()

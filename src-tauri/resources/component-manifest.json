@@ -1,52 +1,79 @@
 {
-  "baseUrl": "https://github.com/benybeny777/PicoAgent-Distribution/releases/download/components-v1",
-  "packages": {
-    "aivis-windows-x64": {
-      "file": "aivis-windows-x64.zip",
-      "parts": [],
-      "sha256": "7c5ef1cccfdb7d9bc167faf954a7fcd5b4784006eb660704f5ceaa2259667d9c",
-      "size": 845455888
-    },
-    "office-windows-x64": {
-      "file": "office-windows-x64.zip",
-      "parts": [],
-      "sha256": "99fd2748309fe8bdba10db75d78cc23d5a558d6ec7f32644ce23b6072ebab671",
-      "size": 1539280473
-    },
-    "tha3-windows-x64": {
-      "file": "",
-      "parts": [
+  "version": 2,
+  "policy": "direct-upstream",
+  "components": {
+    "aivis": {
+      "installMode": "managed",
+      "sources": [
         {
-          "file": "tha3-windows-x64.zip.001",
-          "sha256": "f7f1eab0b826c6891300f1a08b3a83bad39881ff0857ee20bc69df840e0f0e8d",
-          "size": 1900000000
-        },
-        {
-          "file": "tha3-windows-x64.zip.002",
-          "sha256": "c09f76ee4c562d4a202ca77c43284ae9fdd52f37ab2958a41c14af6bbaa5858e",
-          "size": 1900000000
-        },
-        {
-          "file": "tha3-windows-x64.zip.003",
-          "sha256": "ae4cdb8333fb67f355c2d87e097dc816efdcccdb6c4f6ada14e2274648378dea",
-          "size": 1803118600
+          "name": "Aivis Project 公式GitHub Releases",
+          "url": "https://github.com/Aivis-Project/AivisSpeech-Engine/releases/tag/1.2.0"
         }
-      ],
-      "sha256": "0fe55c5921b64ff3dee60c7f2a16c6b6fab8d1fd0ce7dcf13c27f3c031c74503",
-      "size": 5603118600
+      ]
     },
-    "tools-windows-x64": {
-      "file": "tools-windows-x64.zip",
-      "parts": [],
-      "sha256": "e6da7f522a7ac26d1e7a396a57c2990cc33e5ee203f8fea1f6b99ac90fba8b3e",
-      "size": 1024117723
+    "whisper": {
+      "installMode": "managed",
+      "sources": [
+        {
+          "name": "ggml-org 公式 whisper.cpp Releases",
+          "url": "https://github.com/ggml-org/whisper.cpp/releases"
+        },
+        {
+          "name": "whisper.cpp 公式モデル配布",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp"
+        }
+      ]
     },
-    "whisper-windows-x64": {
-      "file": "whisper-windows-x64.zip",
-      "parts": [],
-      "sha256": "723d08483624e6bf71ac290e07cc5d82cefdd0df47d0fba24a4c6e15be21cdc0",
-      "size": 500452746
+    "tha3": {
+      "installMode": "external",
+      "sources": [
+        {
+          "name": "THA3 公式GitHub",
+          "url": "https://github.com/pkhungurn/talking-head-anime-3-demo"
+        },
+        {
+          "name": "作者配布モデル（Dropbox）",
+          "url": "https://www.dropbox.com/s/y7b8jl4n2euv8xe/talking-head-anime-3-models.zip?dl=0"
+        }
+      ]
+    },
+    "office": {
+      "installMode": "external",
+      "sources": [
+        {
+          "name": "The Document Foundation 公式LibreOffice",
+          "url": "https://www.libreoffice.org/download/download-libreoffice/"
+        }
+      ]
+    },
+    "tools": {
+      "installMode": "external",
+      "sources": [
+        {
+          "name": "Pandoc 公式Releases",
+          "url": "https://github.com/jgm/pandoc/releases"
+        },
+        {
+          "name": "ripgrep 公式Releases",
+          "url": "https://github.com/BurntSushi/ripgrep/releases"
+        },
+        {
+          "name": "FFmpeg 公式ダウンロード案内",
+          "url": "https://ffmpeg.org/download.html"
+        },
+        {
+          "name": "qpdf 公式Releases",
+          "url": "https://github.com/qpdf/qpdf/releases"
+        },
+        {
+          "name": "Poppler 公式サイト",
+          "url": "https://poppler.freedesktop.org/"
+        },
+        {
+          "name": "ImageMagick 公式ダウンロード",
+          "url": "https://imagemagick.org/script/download.php"
+        }
+      ]
     }
-  },
-  "version": 1
+  }
 }

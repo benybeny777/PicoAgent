@@ -1,11 +1,13 @@
 // commands.rs - Tauri command（フロントの window.picoagent が叩く入口）と共有状態。
 
+use std::io::Read;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Mutex,
 };
 
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use crate::agent;
@@ -2978,7 +2980,261 @@ pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, Str
     Ok(json!({ "path": path.to_string_lossy() }))
 }
 
-/// GitHub Releases の最新タグを確認し、新しい版があれば通知パネルへ知らせる（起動時に一度）。
+const UPDATE_FEED_URL: &str = "https://benybeny777.github.io/PicoAgent-Distribution/latest.json";
+const UPDATE_ASSET_PREFIX: &str =
+    "https://github.com/benybeny777/PicoAgent-Distribution/releases/download/";
+const MAX_UPDATE_BYTES: u64 = 512 * 1024 * 1024;
+
+struct UpdateDownloadCleanup {
+    partial: std::path::PathBuf,
+    armed: bool,
+}
+
+impl Drop for UpdateDownloadCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            // フォールバック許可: 失敗・中断時のPicoAgent管理下更新一時ファイルだけを掃除する。
+            let _ = std::fs::remove_file(&self.partial);
+        }
+    }
+}
+
+async fn fetch_update_feed() -> Result<Option<Value>, String> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .read_timeout(std::time::Duration::from_secs(10))
+        .user_agent("PicoAgent-UpdateCheck")
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = match client.get(UPDATE_FEED_URL).send().await {
+        Ok(response) => response,
+        Err(error) if error.is_connect() || error.is_timeout() => return Ok(None),
+        Err(error) => return Err(format!("更新情報を取得できません: {error}")),
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let body = response
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("更新情報が壊れています: {error}"))?;
+    if body.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
+        return Err("未対応の更新情報形式です".to_string());
+    }
+    Ok(Some(body))
+}
+
+fn update_status(feed: Option<&Value>) -> Result<Value, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let Some(feed) = feed else {
+        return Ok(json!({
+            "status": "offline",
+            "currentVersion": current,
+            "message": "オフラインのため更新確認を見送りました。"
+        }));
+    };
+    let latest = feed
+        .get("version")
+        .and_then(Value::as_str)
+        .map(|version| version.trim_start_matches(['v', 'V']))
+        .filter(|version| valid_update_version(version))
+        .ok_or_else(|| "更新情報のバージョンが不正です".to_string())?;
+    let release_page = feed
+        .get("releasePage")
+        .and_then(Value::as_str)
+        .filter(|url| url.starts_with("https://"))
+        .unwrap_or("https://github.com/benybeny777/PicoAgent-Distribution/releases");
+    let asset_key = if cfg!(windows) && cfg!(target_arch = "x86_64") {
+        "windows-x64"
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "macos-arm64"
+    } else if cfg!(target_os = "macos") {
+        "macos-x64"
+    } else {
+        "unsupported"
+    };
+    let asset = feed.pointer(&format!("/platforms/{asset_key}"));
+    let download_ready = asset.is_some_and(|asset| {
+        asset
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.starts_with(UPDATE_ASSET_PREFIX))
+            && asset
+                .get("size")
+                .and_then(Value::as_u64)
+                .is_some_and(|size| size > 0 && size <= MAX_UPDATE_BYTES)
+            && asset
+                .get("sha256")
+                .and_then(Value::as_str)
+                .is_some_and(|sha| {
+                    sha.len() == 64 && sha.chars().all(|character| character.is_ascii_hexdigit())
+                })
+    });
+    let available = version_is_newer(latest, current);
+    Ok(json!({
+        "status": if available { "available" } else { "current" },
+        "currentVersion": current,
+        "latestVersion": latest,
+        "notes": feed.get("notes").and_then(Value::as_str).unwrap_or(""),
+        "releasePage": release_page,
+        "downloadReady": available && download_ready,
+        "message": if available {
+            if download_ready { "新しいバージョンをインストールできます。" }
+            else { "新しいバージョンがありますが、このPC向けインストーラは準備中です。" }
+        } else {
+            "最新バージョンです。"
+        }
+    }))
+}
+
+/// 設定画面から最新版を明示確認する。オフラインは正常な見送りとして返す。
+#[tauri::command]
+pub async fn settings_check_update() -> Result<Value, String> {
+    let feed = fetch_update_feed().await?;
+    update_status(feed.as_ref())
+}
+
+/// 署名・サイズ・SHA-256を更新情報と照合し、Windowsインストーラを起動して終了する。
+#[tauri::command]
+pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
+    let feed = fetch_update_feed().await?;
+    let status = update_status(feed.as_ref())?;
+    if status.get("status").and_then(Value::as_str) == Some("offline") {
+        return Ok(status);
+    }
+    if status.get("status").and_then(Value::as_str) != Some("available") {
+        return Ok(status);
+    }
+    if !cfg!(windows) || !cfg!(target_arch = "x86_64") {
+        return Err("このOS向けのアプリ内アップデートにはまだ対応していません".to_string());
+    }
+    let feed = feed.ok_or_else(|| "更新情報を取得できません".to_string())?;
+    let asset = feed
+        .pointer("/platforms/windows-x64")
+        .ok_or_else(|| "Windows向け更新情報がありません".to_string())?;
+    let url = asset
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|url| url.starts_with(UPDATE_ASSET_PREFIX))
+        .ok_or_else(|| "Windows向けインストーラがまだ公開されていません".to_string())?;
+    let size = asset
+        .get("size")
+        .and_then(Value::as_u64)
+        .filter(|size| *size > 0 && *size <= MAX_UPDATE_BYTES)
+        .ok_or_else(|| "更新インストーラのサイズが不正です".to_string())?;
+    let expected_sha = asset
+        .get("sha256")
+        .and_then(Value::as_str)
+        .filter(|sha| sha.len() == 64 && sha.chars().all(|c| c.is_ascii_hexdigit()))
+        .ok_or_else(|| "更新インストーラのSHA-256がありません".to_string())?
+        .to_ascii_lowercase();
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?
+        .join("updates");
+    tokio::fs::create_dir_all(&cache)
+        .await
+        .map_err(|error| error.to_string())?;
+    let installer = cache.join(format!(
+        "PicoAgent-{}-setup.exe",
+        status
+            .get("latestVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("update")
+    ));
+    let partial = installer.with_extension("exe.part");
+    let mut cleanup = UpdateDownloadCleanup {
+        partial: partial.clone(),
+        armed: true,
+    };
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .user_agent("PicoAgent-Updater")
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut response = match client.get(url).send().await {
+        Ok(response) => response
+            .error_for_status()
+            .map_err(|error| format!("更新の取得を開始できません: {error}"))?,
+        Err(error) if error.is_connect() || error.is_timeout() => {
+            return Ok(json!({
+                "status": "offline",
+                "message": "オフラインのためアップデートを見送りました。"
+            }));
+        }
+        Err(error) => return Err(format!("更新の取得を開始できません: {error}")),
+    };
+    if let Some(length) = response.content_length() {
+        if length != size {
+            return Err("更新インストーラのサイズが更新情報と一致しません".to_string());
+        }
+    }
+    let mut file = tokio::fs::File::create(&partial)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut downloaded = 0_u64;
+    use tokio::io::AsyncWriteExt;
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        if downloaded > size || downloaded > MAX_UPDATE_BYTES {
+            return Err("更新インストーラのサイズが上限を超えています".to_string());
+        }
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| error.to_string())?;
+        let _ = app.emit(
+            "update:progress",
+            json!({ "downloaded": downloaded, "total": size }),
+        );
+    }
+    file.flush().await.map_err(|error| error.to_string())?;
+    drop(file);
+    if downloaded != size {
+        return Err("更新インストーラの取得が途中で終了しました".to_string());
+    }
+    let partial_for_hash = partial.clone();
+    let actual_sha = tokio::task::spawn_blocking(move || -> Result<String, std::io::Error> {
+        let mut file = std::fs::File::open(partial_for_hash)?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            digest.update(&buffer[..count]);
+        }
+        Ok(format!("{:x}", digest.finalize()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
+    if actual_sha != expected_sha {
+        return Err("更新インストーラのSHA-256が一致しません".to_string());
+    }
+    let _ = tokio::fs::remove_file(&installer).await;
+    tokio::fs::rename(&partial, &installer)
+        .await
+        .map_err(|error| error.to_string())?;
+    cleanup.armed = false;
+    crate::tools::process::command_sync(&installer)
+        .spawn()
+        .map_err(|error| format!("更新インストーラを起動できません: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("更新インストーラを起動しました: {}", installer.display()),
+    );
+    let exit_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        exit_app.exit(0);
+    });
+    Ok(json!({ "status": "installing", "message": "更新インストーラを起動しました。" }))
+}
+
+/// 公開配布Gitの最新版情報を確認し、新しい版があれば通知パネルへ知らせる（起動時に一度）。
 pub fn spawn_update_check(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let enabled = app
@@ -2988,54 +3244,55 @@ pub fn spawn_update_check(app: AppHandle) {
         if !enabled {
             return;
         }
-        let current = env!("CARGO_PKG_VERSION");
-        let Ok(client) = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .user_agent("PicoAgent-UpdateCheck")
-            .build()
-        else {
+        // フォールバック許可: 起動時確認はベストエフォート。オフライン・未公開では何も表示しない。
+        let Ok(Some(body)) = fetch_update_feed().await else {
             return;
         };
-        let url = "https://api.github.com/repos/benybeny777/PicoAgent/releases/latest";
-        // フォールバック許可: 更新確認はベストエフォート（オフライン・未リリースでは静かに諦める）。
-        let Ok(response) = client.get(url).send().await else {
+        let Ok(status) = update_status(Some(&body)) else {
             return;
         };
-        if !response.status().is_success() {
+        if status.get("status").and_then(Value::as_str) != Some("available") {
             return;
         }
-        let Ok(body) = response.json::<Value>().await else {
-            return;
-        };
-        let Some(tag) = body.get("tag_name").and_then(Value::as_str) else {
-            return;
-        };
-        let latest = tag.trim_start_matches(['v', 'V']);
-        if !version_is_newer(latest, current) {
-            return;
-        }
+        let current = status
+            .get("currentVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let latest = status
+            .get("latestVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         crate::log_paths::append_app_log(
             &app,
             &format!("新しいバージョン v{latest} が公開されています（現在 v{current}）。"),
         );
-        let link = body
-            .get("html_url")
+        let link = status
+            .get("releasePage")
             .and_then(Value::as_str)
-            .unwrap_or("https://github.com/benybeny777/PicoAgent/releases");
+            .unwrap_or("https://github.com/benybeny777/PicoAgent-Distribution/releases");
         let _ = app.emit(
             "pet:notice",
             json!({
                 "kind": "update",
                 "ok": true,
                 "title": format!("新しいバージョン v{latest} があるよ"),
-                "body": format!("現在は v{current}。ダウンロード: {link}"),
+                "body": format!("現在は v{current}。設定の「製品情報・ライセンス」からアップデートできます。詳細: {link}"),
                 "at": chrono::Utc::now().to_rfc3339(),
             }),
         );
     });
 }
 
-/// "1.2.3" 形式のバージョン比較（数値の桁ごと。読めない部分は 0 扱い）。
+fn valid_update_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value.split('.').count() >= 2
+        && value
+            .split('.')
+            .all(|part| !part.is_empty() && part.parse::<u64>().is_ok())
+}
+
+/// "1.2.3" 形式のバージョン比較（数値の桁ごと）。
 fn version_is_newer(latest: &str, current: &str) -> bool {
     let parse = |value: &str| -> Vec<u64> {
         value
@@ -3581,7 +3838,7 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         compacted_conversation, default_character_tts_voice, replace_auto_summary, settings_tab,
-        speech_text, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        speech_text, update_status, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
     };
     use crate::message::Message;
 
@@ -3651,6 +3908,40 @@ mod tests {
         assert_eq!(settings_tab(Some("components")), Some("components"));
         assert_eq!(settings_tab(Some("../index")), None);
         assert_eq!(settings_tab(None), None);
+    }
+
+    #[test]
+    fn 更新版の数値比較は桁ごとに行う() {
+        assert!(version_is_newer("1.10.0", "1.9.9"));
+        assert!(!version_is_newer("1.0.0", "1.0.0"));
+        assert!(!version_is_newer("0.9.9", "1.0.0"));
+    }
+
+    #[test]
+    fn オフラインはエラーではなく見送りになる() {
+        let status = update_status(None).unwrap();
+        assert_eq!(status["status"], "offline");
+    }
+
+    #[test]
+    fn 新版でも正規配布urlが無ければインストールを出さない() {
+        let feed = serde_json::json!({
+            "version": "99.0.0",
+            "releasePage": "https://github.com/benybeny777/PicoAgent-Distribution/releases",
+            "platforms": { "windows-x64": { "url": "https://example.com/setup.exe" } }
+        });
+        let status = update_status(Some(&feed)).unwrap();
+        assert_eq!(status["status"], "available");
+        assert_eq!(status["downloadReady"], false);
+    }
+
+    #[test]
+    fn 更新版のパス区切りを拒否する() {
+        let feed = serde_json::json!({
+            "version": "99.0/../../outside",
+            "platforms": {}
+        });
+        assert!(update_status(Some(&feed)).is_err());
     }
 
     #[test]

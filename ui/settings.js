@@ -29,6 +29,7 @@ let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
 let tha3ProgressUnlisten = null;
 let componentProgressUnlisten = null;
+let updateProgressUnlisten = null;
 let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
@@ -96,6 +97,7 @@ window.picoagent.listen("settings:navigate", tabId => {
 window.addEventListener("beforeunload", () => {
   if (tha3ProgressUnlisten) tha3ProgressUnlisten();
   if (componentProgressUnlisten) componentProgressUnlisten();
+  if (updateProgressUnlisten) updateProgressUnlisten();
   // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
   if (tha3GenerationRunning) window.picoagent.settings.cancelTha3Generation().catch(() => {});
 });
@@ -877,11 +879,11 @@ function advancedGroup(title, note, children) {
 }
 
 function buildComponentManager() {
-  const sec = section("追加機能を導入・修復");
+  const sec = section("追加機能と公式取得元");
   sec.classList.add("component-manager");
   sec.append(el("p", {
     className: "settings-intro",
-    textContent: "必要な機能だけをPicoAgent専用領域へ導入します。グローバル環境やPATHは変更しません。読み上げ機能を導入してもミュート設定は変わりません。",
+    textContent: "第三者ソフトをPicoAgentから再配布しません。AivisとWhisperは各公式配布元からPicoAgent専用領域へ直接取得し、それ以外は公式ページと設定手順を案内します。読み上げのミュート設定は変わりません。",
   }));
   const core = el("div", { className: "component-card is-ready" }, [
     el("div", { className: "component-card-copy" }, [
@@ -899,21 +901,30 @@ function buildComponentManager() {
     const items = await window.picoagent.settings.componentStatus();
     list.innerHTML = "";
     for (const item of items) {
+      const managed = item.installMode === "managed";
       const button = el("button", {
         className: item.ready ? "secondary" : "primary",
         type: "button",
-        textContent: item.ready ? "確認・修復" : "導入する",
+        textContent: managed ? (item.ready ? "公式配布から修復" : "公式配布から導入") : "公式ページを開く",
         disabled: !item.available,
       });
       button.addEventListener("click", async () => {
+        if (!managed) {
+          const url = item.sources?.[0]?.url;
+          if (url) window.open(url, "_blank", "noopener,noreferrer");
+          status.textContent = `${item.label}は提供元の手順で導入し、必要なら「スキル」で実行ファイルを指定してください。`;
+          return;
+        }
         button.disabled = true;
-        status.textContent = `${item.label}を準備しています…`;
+        status.textContent = `${item.label}を公式配布元から取得しています…`;
         try {
           await window.picoagent.settings.installComponents([item.id]);
-          status.textContent = `${item.label}を準備しました。`;
+          status.textContent = `${item.label}を公式配布元から導入しました。`;
           await refresh();
         } catch (error) {
-          status.textContent = `準備できませんでした: ${error?.message || error}`;
+          status.textContent = navigator.onLine
+            ? `導入できませんでした: ${error?.message || error}`
+            : "オフラインのため導入を見送りました。接続後にもう一度押してください。";
           button.disabled = false;
         }
       });
@@ -943,13 +954,23 @@ function buildComponentManager() {
         });
         actions.append(remove);
       }
+      const sourceLinks = el("div", { className: "component-source-links" });
+      for (const source of item.sources || []) {
+        sourceLinks.append(el("a", {
+          href: source.url,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          textContent: source.name,
+        }));
+      }
       list.append(markSearchable(el("div", { className: `component-card${item.ready ? " is-ready" : ""}` }, [
         el("div", { className: "component-card-copy" }, [
           el("strong", { textContent: item.label }),
           el("span", { textContent: item.description }),
           el("small", { textContent: item.sizeLabel }),
+          sourceLinks,
         ]),
-        el("span", { className: "component-badge", textContent: item.ready ? "準備済み" : (item.available ? "未導入" : "公開準備中") }),
+        el("span", { className: "component-badge", textContent: item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入") }),
         actions,
       ]), item.id, item.label, item.description));
     }
@@ -2171,6 +2192,60 @@ function buildProductInfoSection() {
       el("small", { textContent: "Live2D、Aivis、ローカルモデルなどの表示と配布条件は販売前監査の対象です。" }),
     ]),
   ]));
+  const updateStatus = el("p", {
+    className: "hint product-update-status",
+    textContent: "「更新を確認」を押すまで通信しません。起動時確認がオフラインの場合は何も表示しません。",
+  });
+  const checkUpdate = el("button", { type: "button", className: "secondary", textContent: "更新を確認" });
+  const installUpdate = el("button", { type: "button", className: "primary", textContent: "アップデート", hidden: true });
+  checkUpdate.addEventListener("click", async () => {
+    checkUpdate.disabled = true;
+    installUpdate.hidden = true;
+    updateStatus.textContent = "最新版を確認しています…";
+    try {
+      const result = await window.picoagent.settings.checkUpdate();
+      updateStatus.textContent = result.message || "更新情報を確認しました。";
+      installUpdate.hidden = !(result.status === "available" && result.downloadReady);
+    } catch (error) {
+      updateStatus.textContent = navigator.onLine
+        ? `更新情報を確認できませんでした: ${error?.message || error}`
+        : "オフラインのため更新確認を見送りました。";
+    } finally {
+      checkUpdate.disabled = false;
+    }
+  });
+  installUpdate.addEventListener("click", async () => {
+    installUpdate.disabled = true;
+    checkUpdate.disabled = true;
+    updateStatus.textContent = "アップデートをダウンロードしています…";
+    try {
+      const result = await window.picoagent.settings.installUpdate();
+      updateStatus.textContent = result.message || "更新インストーラを起動します。";
+      if (result.status === "offline") {
+        installUpdate.disabled = false;
+        checkUpdate.disabled = false;
+      }
+    } catch (error) {
+      updateStatus.textContent = navigator.onLine
+        ? `アップデートできませんでした: ${error?.message || error}`
+        : "オフラインのためアップデートを見送りました。";
+      installUpdate.disabled = false;
+      checkUpdate.disabled = false;
+    }
+  });
+  const updateActions = el("div", { className: "product-update-actions" }, [checkUpdate, installUpdate]);
+  productSec.append(el("div", { className: "product-update-card" }, [
+    el("strong", { textContent: "アプリのアップデート" }),
+    updateStatus,
+    updateActions,
+  ]));
+  if (updateProgressUnlisten) updateProgressUnlisten();
+  window.picoagent.listen("update:progress", progress => {
+    const percent = progress.total > 0 ? Math.min(100, Math.round(progress.downloaded / progress.total * 100)) : 0;
+    updateStatus.textContent = `アップデートをダウンロードしています… ${percent}%`;
+  }).then(unlisten => { updateProgressUnlisten = unlisten; }).catch(error => {
+    logApp("warn", "アップデート進捗を受け取れませんでした", errorDetail(error));
+  });
   productSec.append(field(
     "PICOAGENT_LICENSE_TOKEN",
     "BOOTHなどで購入したライセンスキー",

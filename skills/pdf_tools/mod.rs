@@ -56,7 +56,7 @@ impl Tool for PdfToolsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_QPDF_PATH", "qpdf 実行ファイルパス（空なら同梱→PATH）", "text", "qpdf"),
+            Field::new("PICOAGENT_QPDF_PATH", "qpdf 実行ファイルパス（空ならPicoAgent内→PATH）", "text", "qpdf"),
             Field::new("PICOAGENT_PDFTOTEXT_PATH", "pdftotext 実行ファイルパス（空なら同梱→PATH）", "text", "pdftotext"),
             Field::new("PICOAGENT_PDF_TIMEOUT_SECS", "PDF操作タイムアウト秒（5〜300）", "text", "120"),
         ]
@@ -208,7 +208,7 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
             }
         }
         Ok(Err(error)) => format!(
-            "エラー: pdftotext の起動に失敗しました: {}。cargo xtask setup tools か apt/brew で poppler を導入してください。",
+            "エラー: pdftotext の起動に失敗しました: {}。設定の「追加機能」で公式取得元を確認し、Popplerを導入してください。",
             error
         ),
         Err(_) => format!("エラー: テキスト抽出が {} 秒でタイムアウトしました。", timeout),

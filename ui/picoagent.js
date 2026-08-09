@@ -152,6 +152,8 @@ window.picoagent = {
     componentStatus: () => call("settings_components_status"),
     installComponents: (ids) => call("settings_components_install", { ids }),
     removeComponent: (id) => call("settings_components_remove", { id }),
+    checkUpdate: () => call("settings_check_update"),
+    installUpdate: () => call("settings_install_update"),
     removeCharacter: (id) => call("settings_character_remove", { id }),
     pickStreamImage: (kind) => call("settings_pick_stream_image", { kind }),
     tha3Status: (rootPath = null) => call("settings_tha3_status", { rootPath }),

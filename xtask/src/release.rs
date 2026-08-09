@@ -1,9 +1,11 @@
 // release.rs - 販売用ビルドを作る前の出荷条件と同梱キャラを検査する。
 
 use std::fs;
+use std::io::Read;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::util::{log, repo_root};
 
@@ -20,6 +22,77 @@ pub fn manifest() -> Result<Value> {
     let text = fs::read_to_string(&path)
         .with_context(|| format!("販売設定を読めません: {}", path.display()))?;
     serde_json::from_str(&text).context("distribution/release.json が正しいJSONではありません")
+}
+
+/// 公開配布Gitへ置く最新版情報へ、実際のWindows NSISのサイズとSHA-256を書き込む。
+pub fn write_update_feed(args: &[String]) -> Result<()> {
+    let installer = args
+        .first()
+        .map(std::path::PathBuf::from)
+        .context("使い方: cargo xtask update-feed <NSISインストーラ> [更新内容]")?;
+    anyhow::ensure!(
+        installer.is_file(),
+        "インストーラが見つかりません: {}",
+        installer.display()
+    );
+    anyhow::ensure!(
+        installer.extension().and_then(|ext| ext.to_str()) == Some("exe"),
+        "Windows NSISの.exeを指定してください"
+    );
+    let name = installer
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.contains(['/', '\\']))
+        .context("インストーラ名が不正です")?;
+    let version = package_version(&repo_root().join("src-tauri/Cargo.toml"))?;
+    let size = fs::metadata(&installer)?.len();
+    let mut file = fs::File::open(&installer)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let sha256 = format!("{:x}", digest.finalize());
+    let notes = if args.len() > 1 {
+        args[1..].join(" ")
+    } else {
+        format!("PicoAgent v{version}")
+    };
+    let file_url = name.replace(' ', "%20");
+    let feed = serde_json::json!({
+        "schemaVersion": 1,
+        "version": version,
+        "notes": notes,
+        "releasePage": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v{version}"),
+        "platforms": {
+            "windows-x64": {
+                "url": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/download/v{version}/{file_url}"),
+                "size": size,
+                "sha256": sha256
+            },
+            "macos-arm64": { "url": "", "size": 0, "sha256": "" },
+            "macos-x64": { "url": "", "size": 0, "sha256": "" }
+        }
+    });
+    let destination = repo_root().join("distribution/site/latest.json");
+    let temporary = destination.with_extension("json.tmp");
+    fs::write(
+        &temporary,
+        format!("{}\n", serde_json::to_string_pretty(&feed)?),
+    )?;
+    if destination.exists() {
+        fs::remove_file(&destination)?;
+    }
+    fs::rename(&temporary, &destination)?;
+    log(
+        "update-feed",
+        format!("{} bytes / SHA-256 {}", size, sha256),
+    );
+    Ok(())
 }
 
 pub fn included_characters(value: &Value) -> Result<Vec<String>> {
@@ -100,23 +173,6 @@ pub fn check(strict: bool) -> Result<Value> {
     {
         blockers.push("Live2D拡張性アプリケーションの審査・契約参照が未登録です".to_string());
     }
-    if value
-        .pointer("/components/packagesPublished")
-        .and_then(Value::as_bool)
-        != Some(true)
-    {
-        blockers.push("初回ウィザード用の追加機能パッケージが未公開です".to_string());
-    }
-    if value
-        .pointer("/components/baseUrl")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .is_empty()
-    {
-        blockers.push("追加機能パッケージの配信URLが未設定です".to_string());
-    }
-
     for (group, key, label) in [
         ("support", "supportUrl", "サポート窓口URL"),
         ("support", "privacyUrl", "プライバシー表示URL"),
@@ -137,6 +193,14 @@ pub fn check(strict: bool) -> Result<Value> {
         .pointer("/updates/required")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    if value
+        .pointer("/updates/feed")
+        .and_then(Value::as_str)
+        .filter(|url| url.starts_with("https://"))
+        .is_none()
+    {
+        blockers.push("最新版情報フィードのHTTPS URLが未設定です".to_string());
+    }
     if updates_required {
         for (key, label) in [
             ("endpoint", "更新配信エンドポイント"),
@@ -154,8 +218,10 @@ pub fn check(strict: bool) -> Result<Value> {
             }
         }
     } else {
-        warnings
-            .push("初期販売は自動更新なしです。更新版は利用者へ手動で案内してください".to_string());
+        warnings.push(
+            "初期販売は更新署名付きの完全自動更新なしです。Windows版は設定から利用者が明示実行します"
+                .to_string(),
+        );
     }
     let platforms = value
         .get("platforms")

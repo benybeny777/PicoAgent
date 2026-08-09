@@ -9,7 +9,6 @@ mod assets;
 mod bundled;
 mod character_pack;
 mod cli;
-mod component_packages;
 mod license;
 mod office;
 mod release;
@@ -30,8 +29,7 @@ const USAGE: &str = "\
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
-  package-components  現在のOS向け追加機能パッケージと取得マニフェストを生成
-  verify-components   生成済み追加機能のサイズとSHA-256をマニフェスト照合
+  update-feed <NSIS> [説明] 公開Git用latest.jsonへWindows更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
   setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
@@ -71,8 +69,7 @@ fn run(args: &[String]) -> Result<()> {
             let _ = release::check(false)?;
             Ok(())
         }
-        "package-components" => component_packages::package_current_platform(),
-        "verify-components" => component_packages::verify_current_platform(),
+        "update-feed" => release::write_update_feed(rest),
         "license" => license::run(rest),
         "setup" => setup(rest),
         "sync-characters" => assets::sync_characters(),

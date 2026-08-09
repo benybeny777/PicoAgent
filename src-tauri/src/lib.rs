@@ -98,6 +98,8 @@ pub fn run() {
             commands::settings_components_status,
             commands::settings_components_install,
             commands::settings_components_remove,
+            commands::settings_check_update,
+            commands::settings_install_update,
             commands::settings_load,
             commands::settings_character_pick,
             commands::settings_character_install,

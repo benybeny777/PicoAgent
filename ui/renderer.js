@@ -4455,12 +4455,31 @@ async function refreshOnboardingComponents() {
       if (!row) continue;
       row.classList.toggle("is-ready", item.ready);
       row.classList.toggle("is-unavailable", !item.available);
+      row.classList.toggle("is-external", item.installMode === "external");
       const input = row.querySelector("input");
-      if (input) input.disabled = item.ready || !item.available;
+      if (input) input.disabled = item.ready || !item.available || item.installMode === "external";
       const badge = row.querySelector("em");
-      if (badge) badge.textContent = item.ready ? "準備済み" : (item.available ? "未導入" : "公開準備中");
+      if (badge) badge.textContent = item.ready ? "準備済み" : (item.installMode === "managed" ? "公式から取得" : "設定で案内");
+      let source = row.querySelector("a.onboarding-component-source");
+      if (item.installMode === "external" && item.sources?.[0]?.url) {
+        if (!source) {
+          source = document.createElement("a");
+          source.className = "onboarding-component-source";
+          source.target = "_blank";
+          source.rel = "noopener noreferrer";
+          source.textContent = "公式ページ";
+          row.append(source);
+        }
+        source.href = item.sources[0].url;
+      } else {
+        source?.remove();
+      }
     }
   } catch (error) {
+    if (!navigator.onLine) {
+      if (onboardingComponentStatus) onboardingComponentStatus.textContent = "オフラインのため取得確認を見送りました。基本機能はそのまま使えます。";
+      return;
+    }
     logApp("warn", "追加機能の状態を確認できませんでした", errorDetail(error));
     if (onboardingComponentStatus) onboardingComponentStatus.textContent = `状態を確認できません: ${error?.message || error}`;
   }
@@ -4480,7 +4499,9 @@ async function installSelectedOnboardingComponents() {
     showOnboardingStep("character");
   } catch (error) {
     logApp("error", "追加機能を準備できませんでした", errorDetail(error));
-    if (onboardingComponentStatus) onboardingComponentStatus.textContent = `準備できませんでした: ${error?.message || error}`;
+    if (onboardingComponentStatus) onboardingComponentStatus.textContent = navigator.onLine
+      ? `準備できませんでした: ${error?.message || error}`
+      : "オフラインのため取得を見送りました。基本機能はそのまま使えます。";
     onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = false; });
     await refreshOnboardingComponents();
   }

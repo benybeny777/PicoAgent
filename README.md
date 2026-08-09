@@ -110,7 +110,7 @@ cargo xtask dev
 cargo xtask setup tha3
 ```
 
-軽量配布版では初回起動の「追加機能」でTHA3を選んだ場合だけ、コード・モデル・専用Python／PyTorchをPicoAgent管理領域へ取得します。グローバルPythonや既存のPyTorchへ干渉しません。右クリック →「キャラクター・音声の設定…」→「キャラクターを追加・作成」→「1枚絵からキャラクターを作成（THA3）」で、元画像・ID・表示名を指定して「キャラクターを作成」を押します。生成ログとキャンセル操作を画面内に表示し、完成したパックだけを検証後に追加キャラクター領域へ導入します。
+販売版はTHA3を再配布しません。初回起動と設定の「追加機能」から作者のGitHubとモデル配布を開き、利用者が条件を確認して取得します。取得後は右クリック →「キャラクター・音声の設定…」→「キャラクターを追加・作成」でTHA3フォルダを指定します。開発者向けの `cargo xtask setup tha3` も同じ上流から開発領域へ取得します。グローバルPythonや既存のPyTorchへ黙って干渉しません。
 
 キャラクター選択は同じ画面の画像カードから行えます。名前・内部ID・説明の検索と、`Live2D` / `PNGアニメ` / `自作THA3` / `追加キャラ` の絞り込みに対応し、各カードにも描画形式と内部IDを表示するため、同じ表示名のキャラも区別できます。カードの「このキャラを選ぶ」を押すと上の性格・口調設定もそのキャラへ切り替わり、「保存」で反映します。Cubism 4／5の両モデルを持つLive2Dパックでは「Live2D の SDK 世代」を自動・4固定・5固定から選べるため、自動判定で表示が崩れる場合も切り替えて確認できます。
 
@@ -328,7 +328,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 - **安全・許可** — 全スキル共通のファイル・ディレクトリ・実行の許可ルートと拒否パスをまとめて設定（`C:\Windows` と `Program Files` は常に拒否）。各スキルの個別許可ルート設定は廃止し、この共通設定を参照します
 - **キャラ・音声** — 選択・人格・声・読み上げの ON/OFF と音量・Live2DのSDK世代（自動／Cubism 4／Cubism 5）のほか、**自分で用意した Live2D モデル等を追加できます**。配布元で利用条件を確認して取得したzip／フォルダと表示名・内部IDを指定すれば、`character.json` はアプリが作成します。初回起動では用途選択の次に追加するか案内し、「使い方」→「初回セットアップをもう一度開く」からいつでも再表示できます。追加分はアプリのデータフォルダへ入り、再ビルドは不要です
-- **追加機能** — Aivis、Whisper、THA3、OfficeCLI、PDF・画像・文書ツールの準備状態、容量目安、導入・修復・削除をまとめます。初回起動でも同じ一覧から必要なものだけ選べ、後回しにしてもいつでも戻れます。導入先はPicoAgent専用領域で、グローバルPATHは変更しません
+- **追加機能** — AivisとWhisperは各公式配布元から直接PicoAgent専用領域へ取得し、サイズとSHA-256を検証します。THA3、LibreOffice、PDF・画像・文書ツールは公式ページと設定手順を表示し、PicoAgentが第三者バイナリを再配布しません。オフライン時は取得を見送り、エラー画面を出さず基本機能を継続します
 - **スキル** — カテゴリ見出しとジャンルチップで整理。各カードの ⚙ は既定で折りたたみ。設定不要 / 未設定 / 一部設定 / 設定済みのバッジと、承認ポリシー（低リスク / 外部読取 / 書込・変更 / 送信前確認 / 実行前確認）を表示
 - **AIモデル・連携** — 選択中のプロバイダ設定だけを表示し、未使用プロバイダの API キー欄やモデル欄は畳み込みます。ローカル API と MCP（外部ツール連携）もこのタブにあります
 - **診断・修復** — 選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認。製品名・バージョン、ローカル／外部通信の違い、保存データ、第三者ソフトウェアの扱いも表示します
@@ -472,7 +472,7 @@ Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のA
 
 AMD APU／AMD GPU、Intel Mac、LinuxでのTHA3生成は対象外です（Windows版THA3はCUDA対応NVIDIA GPUが必須）。通常のPicoAgent利用、ローカルモデルのVulkan推論、生成済みキャラクターの表示には、このTHA3用GPU要件は適用されません。
 
-- 軽量WindowsインストーラにはTHA3を入れません。初回起動または設定の「追加機能」で選んだ場合だけ完全なOS別パッケージを取得し、展開後のTHA3全体は実測約5.2GBです
+- 軽量WindowsインストーラにはTHA3を入れません。作者配布のコードとモデルを利用者が取得し、専用環境を準備した場合の全体容量は実測約5.2GBです
 - 新規インストール時は一時キャッシュを含め10GB以上、更新で旧ランタイムを保持しながら入れ替える場合は15GB以上の空き容量を確保してください。成功・失敗のどちらでも取得キャッシュを片付けます
 - Apple Silicon MacはOS別PyTorchをアプリへ同梱します。最終容量はPyTorch配布物の版で変わるため、ビルド時に `src-tauri/resources/bundled/tha3/` の実測値を確認してください
 
@@ -583,11 +583,16 @@ cargo xtask preview-distribution
 
 # 全ゲート通過後だけ作れる販売用ビルド
 cargo xtask build-distribution
+
+# 作成したWindows NSISからlatest.jsonのサイズ・SHA-256を生成
+cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_1.0.0_x64-setup.exe "更新内容"
 ```
 
 `build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売はコード署名・macOS公証・自動更新を必須にしません。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
 
-初期販売はBOOTHとSteamを想定します。公開GitHubにはソースではなく、Windows無料版・初回追加機能パッケージ・サポート／プライバシー／利用条件だけを置きます。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
+初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件だけを置きます。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
+
+設定の「製品情報・ライセンス」には「更新を確認」と「アップデート」があります。公開Gitの `latest.json` で新しい版を確認し、WindowsインストーラのURL・サイズ・SHA-256が揃っている場合だけダウンロードして検証後に起動します。オフライン時は起動時確認を黙って見送り、手動確認では見送ったことだけを同じ欄へ表示します。
 
 ```powershell
 # 初回だけ販売者署名鍵を作る（既存鍵は上書きしない）
@@ -599,7 +604,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
-通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと追加機能マニフェストだけを入れ、Aivis・Whisper・THA3・Office/PDF/画像ツールは初回起動後に取得します。開発用のツール・ドキュメント・README用画像は含まれません。
+通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと公式取得元マニフェストだけを入れます。Aivis・Whisperは初回起動後に公式配布から直接取得し、THA3・LibreOffice・PDF/画像ツールは利用者による公式導入を案内します。開発用のツール・ドキュメント・README用画像は含まれません。
 
 <details>
 <summary>同梱物・制作ツールの扱い（エンジン / Aivis / Whisper / Live2D / THA3）</summary>
@@ -614,9 +619,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 **同梱 Aivis（読み上げ）**
 
 - 通常の開発ビルドは、公式 GitHub Releases の既定 `1.2.0` を `src-tauri/resources/bundled/aivis/` へ準備します（更新時は `AIVIS_RELEASE=latest` またはタグを指定）
-- 軽量販売版はAivisをインストーラへ含めず、初回起動または設定の「追加機能」で選んだ場合だけ、検証済みOS別パッケージを `%APPDATA%\PicoAgent\bundled\aivis\` へ取得します
-- Windows追加機能は `cargo xtask package-components` で速度優先のZIPへまとめます。GitHub Releaseの1ファイル上限を避けるため1.9GBで自動分割し、各分割と連結後全体のSHA-256をアプリが検証します。公開先は [PicoAgent-Distribution](https://github.com/benybeny777/PicoAgent-Distribution) です
-- 公開前は `cargo xtask verify-components` で生成済み全ファイルの存在・サイズ・各分割SHA-256・連結後SHA-256をマニフェストと照合します
+- 軽量販売版はAivisをインストーラへ含めず、初回起動または設定の「追加機能」で選んだ場合だけ、Aivis Project公式GitHub Releaseから `%APPDATA%\PicoAgent\bundled\aivis\` へ直接取得します。GitHub APIのサイズとSHA-256 digestを検証し、PicoAgentのReleaseからは再配布しません
 - `PICOAGENT_TTS_ENABLED` が有効なら起動時に内部ポート（既定 `11436`）で裏起動し、アプリ終了時に停止します。旧既定の `10102` が保存済みなら起動時に移行します
 - 推論デバイスは内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で GPU 候補を確認し、あれば GPU、なければ CPU（通常の設定画面には出しません）
 - 話者は設定画面に出さずキャラクター既定声を使います。未導入なら起動時のローディング画面で AIVMX を追加し、合成時に `/speakers` から実際の style ID を解決します
@@ -626,8 +629,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **同梱 Whisper（文字起こし）**
 
-- 通常の開発ビルドは `resources/bundled/whisper/`、軽量販売版は選択時に `%APPDATA%\PicoAgent\bundled\whisper\` へ配置します。削除対象は利用者データ側のPicoAgent管理ディレクトリだけです
-- whisper.cpp の GitHub Releases は macOS 向けの CLI 単体バイナリを配布していないため、この環境では警告のみで文字起こしなしの起動を続行します（必須にするなら `WHISPER_REQUIRED=1`、`WHISPER_ASSET` で代替アセット指定、または手動ビルドした `whisper-cli` を配置）
+- 通常の開発ビルドは `resources/bundled/whisper/`、軽量販売版は選択時にggml-org公式GitHub ReleaseのCLIと公式whisper.cppモデル配布のsmallモデルを `%APPDATA%\PicoAgent\bundled\whisper\` へ直接取得します。Release digestと固定モデルSHA-256を検証し、削除対象は利用者データ側のPicoAgent管理ディレクトリだけです
 
 **Live2D ランタイムと利用者モデル**
 
@@ -639,14 +641,13 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 **THA3 キャラクター制作ツール**
 
 - `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、VRAM自動調整に使う `standard_float` / `standard_half` / `separable_half` を開発用の `src-tauri/resources/bundled/tha3/` へ取得します。実体はGit管理外です
-- 軽量販売版はコード・モデル・専用Python／PyTorchをまとめたOS別パッケージを、利用者が選んだ場合だけ `%APPDATA%\PicoAgent\bundled\tha3\` へ原子的に導入します。グローバルPython・PATH・既存CUDA/PyTorch・共有ポートは変更しません
-- パッケージ作成時は `tha3/runtime/` まで揃っていなければ拒否します。開発用Windowsランタイムは製品へ混ざらない `tools/tha3-runtime/` に置きます。GUI用制御スクリプトはアプリへ文字列として埋め込み、生成時だけ `app_cache_dir/tha3-creator/` へ一時展開します
+- 軽量販売版はTHA3コード・モデル・Python／PyTorchを再配布しません。設定画面に作者GitHubと作者案内のモデル配布を表示し、利用者が条件を確認して導入したフォルダを指定します。GUI用制御スクリプトはアプリへ文字列として埋め込み、生成時だけ `app_cache_dir/tha3-creator/` へ一時展開します
 - **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、重みの再配布に伴う帰属をREADME、同梱上流LICENSE／README、設定画面に表示します。同梱Python・PyTorchは各配布物に含まれるライセンスに従います
 
 **その他**
 
 - macOS では `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します
-- 追加機能はPicoAgent専用ディレクトリ・専用ポートだけを使い、グローバルインストールや既存プロセスへ干渉しません。販売用インストーラは大容量機能を含めず、選択導入・修復・削除を設定画面から行えます
+- AivisとWhisperはPicoAgent専用ディレクトリ・専用ポートだけを使い、グローバルインストールや既存プロセスへ干渉しません。外部導入のTHA3・LibreOffice・各種ツールはPicoAgentから削除せず、提供元の手順に従います
 - 配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へコピーし、コメントと余分な空白を削ったものを同梱します。Rust の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています（解析を不可能にするものではなく、読みやすいソースやシンボル情報を減らすための基本対策です）
 
 </details>
@@ -674,7 +675,7 @@ NSIS アンインストーラは関連プロセスとPicoAgent専用の一時フ
 
 **署名・自動更新**
 
-初期販売はコード署名（Authenticode）・macOS署名／公証・自動更新を使いません。`distribution/release.json` の `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenやmacOS Gatekeeperの警告が表示されるため、販売ページで事前に明記し、更新版は手動ダウンロードで案内します。将来有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
+初期販売はコード署名（Authenticode）・macOS署名／公証・バックグラウンドでの完全自動更新を使いません。`distribution/release.json` の `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenやmacOS Gatekeeperの警告が表示されるため、販売ページで事前に明記します。Windows版は利用者が設定画面で明示した場合だけ、公開Gitのサイズ・SHA-256を照合して更新インストーラを実行します。将来、更新署名付きの完全自動更新を有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
 
 </details>
 
