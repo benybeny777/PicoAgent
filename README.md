@@ -592,7 +592,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_1.0.0_x64
 
 初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件だけを置きます。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
 
-設定の「製品情報・ライセンス」には「更新を確認」と「アップデート」があります。公開Gitの `latest.json` で新しい版を確認し、WindowsインストーラのURL・サイズ・SHA-256が揃っている場合だけダウンロードして検証後に起動します。オフライン時は起動時確認を黙って見送り、手動確認では見送ったことだけを同じ欄へ表示します。
+設定の「製品情報・ライセンス」には「更新を確認」と「アップデート」があります。公開Gitの `latest.json` で新しい版を確認し、Windows x64インストーラの配布Repo内URL・サイズ・SHA-256が揃い、取得物がPE形式の場合だけ起動します。更新情報自体も256KBを上限とし、HTTP異常や破損は設定欄へ表示します。オフライン時は起動時確認を黙って見送り、手動確認では見送ったことだけを同じ欄へ表示します。
 
 ```powershell
 # 初回だけ販売者署名鍵を作る（既存鍵は上書きしない）

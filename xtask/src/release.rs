@@ -1,7 +1,8 @@
 // release.rs - 販売用ビルドを作る前の出荷条件と同梱キャラを検査する。
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
@@ -16,6 +17,8 @@ const REQUIRED_DOCUMENTS: [&str; 5] = [
     "docs/THIRD-PARTY-NOTICES.md",
     "docs/SALE-READINESS.md",
 ];
+const MAX_UPDATE_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_UPDATE_NOTES_BYTES: usize = 8 * 1024;
 
 pub fn manifest() -> Result<Value> {
     let path = repo_root().join("distribution/release.json");
@@ -42,10 +45,18 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
     let name = installer
         .file_name()
         .and_then(|name| name.to_str())
-        .filter(|name| !name.contains(['/', '\\']))
+        .filter(|name| {
+            name.chars()
+                .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+        })
         .context("インストーラ名が不正です")?;
     let version = package_version(&repo_root().join("src-tauri/Cargo.toml"))?;
     let size = fs::metadata(&installer)?.len();
+    anyhow::ensure!(
+        size > 0 && size <= MAX_UPDATE_INSTALLER_BYTES,
+        "インストーラのサイズが更新上限を超えています"
+    );
+    verify_windows_pe(&installer)?;
     let mut file = fs::File::open(&installer)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
@@ -62,7 +73,10 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
     } else {
         format!("PicoAgent v{version}")
     };
-    let file_url = name.replace(' ', "%20");
+    anyhow::ensure!(
+        notes.len() <= MAX_UPDATE_NOTES_BYTES,
+        "更新内容が長すぎます"
+    );
     let feed = serde_json::json!({
         "schemaVersion": 1,
         "version": version,
@@ -70,7 +84,7 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
         "releasePage": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v{version}"),
         "platforms": {
             "windows-x64": {
-                "url": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/download/v{version}/{file_url}"),
+                "url": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/download/v{version}/{name}"),
                 "size": size,
                 "sha256": sha256
             },
@@ -79,20 +93,80 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
         }
     });
     let destination = repo_root().join("distribution/site/latest.json");
-    let temporary = destination.with_extension("json.tmp");
-    fs::write(
-        &temporary,
-        format!("{}\n", serde_json::to_string_pretty(&feed)?),
+    write_atomic(
+        &destination,
+        format!("{}\n", serde_json::to_string_pretty(&feed)?).as_bytes(),
     )?;
-    if destination.exists() {
-        fs::remove_file(&destination)?;
-    }
-    fs::rename(&temporary, &destination)?;
     log(
         "update-feed",
         format!("{} bytes / SHA-256 {}", size, sha256),
     );
     Ok(())
+}
+
+fn verify_windows_pe(path: &Path) -> Result<()> {
+    let mut file = fs::File::open(path)?;
+    let mut dos_header = [0_u8; 64];
+    file.read_exact(&mut dos_header)?;
+    anyhow::ensure!(
+        dos_header[0] == b'M' && dos_header[1] == b'Z',
+        "Windows実行ファイルではありません"
+    );
+    let pe_offset = u32::from_le_bytes([
+        dos_header[0x3c],
+        dos_header[0x3d],
+        dos_header[0x3e],
+        dos_header[0x3f],
+    ]) as u64;
+    anyhow::ensure!(
+        (64..=1024 * 1024).contains(&pe_offset),
+        "Windows PEヘッダー位置が不正です"
+    );
+    file.seek(SeekFrom::Start(pe_offset))?;
+    let mut signature = [0_u8; 4];
+    file.read_exact(&mut signature)?;
+    anyhow::ensure!(signature == *b"PE\0\0", "Windows PE署名がありません");
+    Ok(())
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().context("保存先の親フォルダがありません")?;
+    fs::create_dir_all(parent)?;
+    let nonce = std::process::id();
+    let temporary = parent.join(format!(".update-feed-{nonce}.tmp"));
+    let backup = parent.join(format!(".update-feed-{nonce}.backup"));
+    let result = (|| -> Result<()> {
+        if temporary.exists() {
+            fs::remove_file(&temporary)?;
+        }
+        if backup.exists() {
+            fs::remove_file(&backup)?;
+        }
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        if path.exists() {
+            fs::rename(path, &backup)?;
+        }
+        if let Err(error) = fs::rename(&temporary, path) {
+            if backup.exists() {
+                let _ = fs::rename(&backup, path);
+            }
+            return Err(error.into());
+        }
+        if backup.exists() {
+            fs::remove_file(&backup)?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+        if backup.exists() && !path.exists() {
+            let _ = fs::rename(&backup, path);
+        }
+    }
+    result
 }
 
 pub fn included_characters(value: &Value) -> Result<Vec<String>> {
@@ -333,7 +407,7 @@ fn package_version(path: &std::path::Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{check, included_characters, package_version};
+    use super::{check, included_characters, package_version, verify_windows_pe, write_atomic};
 
     #[test]
     fn 販売設定はキャラを重複なく列挙する() {
@@ -415,5 +489,45 @@ mod tests {
                 "{optional} を軽量配布へ入れない"
             );
         }
+    }
+
+    #[test]
+    fn 最新版情報は原子的に置き換える() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-update-feed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("latest.json");
+        std::fs::write(&path, b"old").unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 最新版情報へ登録する実行ファイルはpe署名を持つ() {
+        let path = std::env::temp_dir().join(format!(
+            "picoagent-update-pe-{}-{}.exe",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"MZ only").unwrap();
+        assert!(verify_windows_pe(&path).is_err());
+        let mut pe = vec![0_u8; 0x84];
+        pe[..2].copy_from_slice(b"MZ");
+        pe[0x3c..0x40].copy_from_slice(&0x80_u32.to_le_bytes());
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        std::fs::write(&path, pe).unwrap();
+        assert!(verify_windows_pe(&path).is_ok());
+        std::fs::remove_file(path).unwrap();
     }
 }

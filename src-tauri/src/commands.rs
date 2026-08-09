@@ -1,6 +1,6 @@
 // commands.rs - Tauri command（フロントの window.picoagent が叩く入口）と共有状態。
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Mutex,
@@ -2983,7 +2983,10 @@ pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, Str
 const UPDATE_FEED_URL: &str = "https://benybeny777.github.io/PicoAgent-Distribution/latest.json";
 const UPDATE_ASSET_PREFIX: &str =
     "https://github.com/benybeny777/PicoAgent-Distribution/releases/download/";
+const UPDATE_RELEASE_PREFIX: &str =
+    "https://github.com/benybeny777/PicoAgent-Distribution/releases";
 const MAX_UPDATE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_UPDATE_FEED_BYTES: usize = 256 * 1024;
 
 struct UpdateDownloadCleanup {
     partial: std::path::PathBuf,
@@ -3006,22 +3009,48 @@ async fn fetch_update_feed() -> Result<Option<Value>, String> {
         .user_agent("PicoAgent-UpdateCheck")
         .build()
         .map_err(|error| error.to_string())?;
-    let response = match client.get(UPDATE_FEED_URL).send().await {
+    let mut response = match client.get(UPDATE_FEED_URL).send().await {
         Ok(response) => response,
         Err(error) if error.is_connect() || error.is_timeout() => return Ok(None),
         Err(error) => return Err(format!("更新情報を取得できません: {error}")),
     };
     if !response.status().is_success() {
-        return Ok(None);
+        return Err(format!(
+            "更新情報の配信元がHTTP {}を返しました",
+            response.status()
+        ));
     }
-    let body = response
-        .json::<Value>()
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_UPDATE_FEED_BYTES as u64)
+    {
+        return Err("更新情報のサイズが上限を超えています".to_string());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
+        .map_err(|error| format!("更新情報を受信できません: {error}"))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_UPDATE_FEED_BYTES {
+            return Err("更新情報のサイズが上限を超えています".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let body = parse_update_feed(&bytes)?;
+    Ok(Some(body))
+}
+
+fn parse_update_feed(bytes: &[u8]) -> Result<Value, String> {
+    if bytes.len() > MAX_UPDATE_FEED_BYTES {
+        return Err("更新情報のサイズが上限を超えています".to_string());
+    }
+    let body = serde_json::from_slice::<Value>(bytes)
         .map_err(|error| format!("更新情報が壊れています: {error}"))?;
     if body.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
         return Err("未対応の更新情報形式です".to_string());
     }
-    Ok(Some(body))
+    Ok(body)
 }
 
 fn update_status(feed: Option<&Value>) -> Result<Value, String> {
@@ -3042,8 +3071,9 @@ fn update_status(feed: Option<&Value>) -> Result<Value, String> {
     let release_page = feed
         .get("releasePage")
         .and_then(Value::as_str)
-        .filter(|url| url.starts_with("https://"))
-        .unwrap_or("https://github.com/benybeny777/PicoAgent-Distribution/releases");
+        .filter(|url| url.starts_with(UPDATE_RELEASE_PREFIX))
+        .unwrap_or(UPDATE_RELEASE_PREFIX);
+    let install_supported = cfg!(windows) && cfg!(target_arch = "x86_64");
     let asset_key = if cfg!(windows) && cfg!(target_arch = "x86_64") {
         "windows-x64"
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
@@ -3054,22 +3084,24 @@ fn update_status(feed: Option<&Value>) -> Result<Value, String> {
         "unsupported"
     };
     let asset = feed.pointer(&format!("/platforms/{asset_key}"));
-    let download_ready = asset.is_some_and(|asset| {
-        asset
-            .get("url")
-            .and_then(Value::as_str)
-            .is_some_and(|url| url.starts_with(UPDATE_ASSET_PREFIX))
-            && asset
-                .get("size")
-                .and_then(Value::as_u64)
-                .is_some_and(|size| size > 0 && size <= MAX_UPDATE_BYTES)
-            && asset
-                .get("sha256")
+    let download_ready = install_supported
+        && asset.is_some_and(|asset| {
+            asset
+                .get("url")
                 .and_then(Value::as_str)
-                .is_some_and(|sha| {
-                    sha.len() == 64 && sha.chars().all(|character| character.is_ascii_hexdigit())
-                })
-    });
+                .is_some_and(|url| url.starts_with(UPDATE_ASSET_PREFIX))
+                && asset
+                    .get("size")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|size| size > 0 && size <= MAX_UPDATE_BYTES)
+                && asset
+                    .get("sha256")
+                    .and_then(Value::as_str)
+                    .is_some_and(|sha| {
+                        sha.len() == 64
+                            && sha.chars().all(|character| character.is_ascii_hexdigit())
+                    })
+        });
     let available = version_is_newer(latest, current);
     Ok(json!({
         "status": if available { "available" } else { "current" },
@@ -3214,6 +3246,8 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
     if actual_sha != expected_sha {
         return Err("更新インストーラのSHA-256が一致しません".to_string());
     }
+    verify_windows_installer(&partial)
+        .map_err(|error| format!("更新インストーラが不正です: {error}"))?;
     let _ = tokio::fs::remove_file(&installer).await;
     tokio::fs::rename(&partial, &installer)
         .await
@@ -3232,6 +3266,34 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
         exit_app.exit(0);
     });
     Ok(json!({ "status": "installing", "message": "更新インストーラを起動しました。" }))
+}
+
+fn verify_windows_installer(path: &std::path::Path) -> Result<(), String> {
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut dos_header = [0_u8; 64];
+    file.read_exact(&mut dos_header)
+        .map_err(|error| error.to_string())?;
+    if dos_header[0] != b'M' || dos_header[1] != b'Z' {
+        return Err("Windows実行ファイルではありません".to_string());
+    }
+    let pe_offset = u32::from_le_bytes([
+        dos_header[0x3c],
+        dos_header[0x3d],
+        dos_header[0x3e],
+        dos_header[0x3f],
+    ]) as u64;
+    if !(64..=1024 * 1024).contains(&pe_offset) {
+        return Err("Windows PEヘッダー位置が不正です".to_string());
+    }
+    file.seek(SeekFrom::Start(pe_offset))
+        .map_err(|error| error.to_string())?;
+    let mut signature = [0_u8; 4];
+    file.read_exact(&mut signature)
+        .map_err(|error| error.to_string())?;
+    if signature != *b"PE\0\0" {
+        return Err("Windows PE署名がありません".to_string());
+    }
+    Ok(())
 }
 
 /// 公開配布Gitの最新版情報を確認し、新しい版があれば通知パネルへ知らせる（起動時に一度）。
@@ -3837,8 +3899,9 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compacted_conversation, default_character_tts_voice, replace_auto_summary, settings_tab,
-        speech_text, update_status, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        compacted_conversation, default_character_tts_voice, parse_update_feed,
+        replace_auto_summary, settings_tab, speech_text, update_status, verify_windows_installer,
+        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
 
@@ -3942,6 +4005,34 @@ mod tests {
             "platforms": {}
         });
         assert!(update_status(Some(&feed)).is_err());
+    }
+
+    #[test]
+    fn 更新情報の形式と受信上限を検証する() {
+        assert!(parse_update_feed(br#"{"schemaVersion":1,"version":"1.0.0"}"#).is_ok());
+        assert!(parse_update_feed(br#"{"schemaVersion":2}"#).is_err());
+        assert!(parse_update_feed(&vec![b' '; MAX_UPDATE_FEED_BYTES + 1]).is_err());
+    }
+
+    #[test]
+    fn windows更新はpe形式だけを受け付ける() {
+        let path = std::env::temp_dir().join(format!(
+            "picoagent-update-installer-{}-{}.exe",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"not an installer").unwrap();
+        assert!(verify_windows_installer(&path).is_err());
+        let mut pe = vec![0_u8; 0x84];
+        pe[..2].copy_from_slice(b"MZ");
+        pe[0x3c..0x40].copy_from_slice(&0x80_u32.to_le_bytes());
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        std::fs::write(&path, pe).unwrap();
+        assert!(verify_windows_installer(&path).is_ok());
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

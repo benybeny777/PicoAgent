@@ -2194,7 +2194,7 @@ function buildProductInfoSection() {
   ]));
   const updateStatus = el("p", {
     className: "hint product-update-status",
-    textContent: "「更新を確認」を押すまで通信しません。起動時確認がオフラインの場合は何も表示しません。",
+    textContent: "起動時の確認が有効なら公開Gitへ一度だけ問い合わせます。オフラインの場合は何も表示しません。ここからも手動で確認できます。",
   });
   const checkUpdate = el("button", { type: "button", className: "secondary", textContent: "更新を確認" });
   const installUpdate = el("button", { type: "button", className: "primary", textContent: "アップデート", hidden: true });

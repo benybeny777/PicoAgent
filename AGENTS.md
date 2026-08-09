@@ -92,7 +92,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ## 製品化（配布）
 
 - `src-tauri/tauri.conf.json` の `productName` / `identifier=com.picoagent.desktop` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。
-- Windows バンドルは NSIS（`bundle.targets`）。初期販売はコード署名・macOS公証・自動更新なしで行い、`distribution/release.json` の `signing.required=false` / `updates.required=false` を正本とする。Windows SmartScreen／macOS Gatekeeperの警告と手動更新手順は販売ページで事前案内する。将来有効化するときだけ各 `required` を `true` にして、証明書・更新鍵・配信先を販売ゲートで必須化する。
+- Windows バンドルは NSIS（`bundle.targets`）。初期販売はコード署名・macOS公証・更新署名付きの完全自動更新なしで行い、`distribution/release.json` の `signing.required=false` / `updates.required=false` を正本とする。Windows版は利用者が設定から明示した場合だけ、公開Gitのサイズ・SHA-256を検証してNSISを実行する。Windows SmartScreen／macOS Gatekeeperの警告と更新手順は販売ページで事前案内する。将来、完全自動更新を有効化するときだけ各 `required` を `true` にして、証明書・更新鍵・配信先を販売ゲートで必須化する。
 
 ## 主要ファイル
 
