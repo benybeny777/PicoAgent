@@ -26,7 +26,7 @@
         <a href="#plans">プラン</a>
         <a href="#guide">導入</a>
       </nav>
-      <a class="button small" href="https://github.com/benybeny777/PicoAgent-Distribution/releases">無料版を入手</a>
+      <span class="button small disabled" aria-disabled="true">無料版を準備中</span>
     </header>
   </div>
 
@@ -37,7 +37,7 @@
         <h1>好きなキャラと、<br><em>PCで暮らす。</em></h1>
         <p class="hero-lead">話しかければ応えてくれる。必要なときは、PC作業も手伝ってくれる。PicoAgentは、自分らしいキャラと過ごせるWindows向けAIデスクトップペットです。</p>
         <div class="actions hero-actions">
-          <a class="button primary" href="https://github.com/benybeny777/PicoAgent-Distribution/releases">Windows無料版を取得 <span aria-hidden="true">→</span></a>
+          <span class="button primary disabled" aria-disabled="true">Windows無料版を準備中</span>
           <a class="button secondary" href="#features">できることを見る</a>
         </div>
         <ul class="trust-list" aria-label="主な特徴">
@@ -51,7 +51,10 @@
         <div class="visual-glow" aria-hidden="true"></div>
         <div class="screen-card main-screen">
           <div class="screen-top"><span></span><span></span><span></span><b>会話</b></div>
-          <img src="assets/main-light.webp" alt="吹き出しと2Dキャラクターを表示したPicoAgentのメイン画面" width="540" height="410">
+          <picture>
+            <source media="(prefers-reduced-motion: reduce)" srcset="assets/main-static.png">
+            <img src="assets/main-light.webp" alt="吹き出しと2Dキャラクターを表示したPicoAgentのメイン画面" width="540" height="410" decoding="async" fetchpriority="high">
+          </picture>
         </div>
         <div class="floating-card local-card"><span class="status-dot"></span><span><b>ローカルAI</b><small>PCの中で会話</small></span></div>
         <div class="floating-card voice-card"><span class="motion-mark" aria-hidden="true">↝</span><span><b>むぎ · 2Dアニメーション</b><small>表情と仕草で動く</small></span></div>
@@ -99,11 +102,15 @@
         </ul>
         <p class="fine-print">モデルや素材は、利用条件を確認し、追加・利用する権利のあるものをお使いください。</p>
       </div>
-      <div class="live2d-frame">
+      <figure class="live2d-frame">
         <div class="frame-label"><span class="status-dot"></span> HIYORI · LIVE2D MOTION</div>
-        <img src="assets/live2d-motion.webp" alt="ひよりがまばたき、口パク、返答モーションで動くPicoAgentのLive2D画面" width="550" height="410">
+        <picture>
+          <source media="(prefers-reduced-motion: reduce)" srcset="assets/live2d-static.png">
+          <img src="assets/live2d-motion.webp" alt="ひよりがまばたき、口パク、返答モーションで動くPicoAgentのLive2D画面" width="550" height="410" loading="lazy" decoding="async">
+        </picture>
         <div class="motion-chips" aria-label="動作内容"><span>まばたき</span><span>口パク</span><span>返答モーション</span></div>
-      </div>
+        <figcaption class="license-note">本作品のキャラクターには株式会社Live2Dの著作物が用いられています。<a href="https://www.live2d.com/learn/sample/model-terms/">サンプルデータ利用条件</a></figcaption>
+      </figure>
     </section>
 
     <section class="section layouts" id="layouts">
@@ -114,15 +121,15 @@
       </div>
       <div class="layout-gallery">
         <article class="layout-card wide">
-          <img src="assets/layout-stream.webp" alt="配信スタジオ風の配信レイアウト" width="640" height="377">
+          <img src="assets/layout-stream.webp" alt="配信スタジオ風の配信レイアウト" width="640" height="377" loading="lazy" decoding="async">
           <div><span>STREAM</span><h3>配信レイアウト</h3><p>背景、ディスプレイ、日時、テロップをまとめたVTuber風画面。</p></div>
         </article>
         <article class="layout-card">
-          <img src="assets/layout-workspace.webp" alt="会話、入力、キャラクターを並べた作業レイアウト" width="640" height="389">
+          <img src="assets/layout-workspace.webp" alt="会話、入力、キャラクターを並べた作業レイアウト" width="640" height="389" loading="lazy" decoding="async">
           <div><span>WORKSPACE</span><h3>作業レイアウト</h3><p>履歴と入力欄を広く使い、キャラも見えるデスク型。</p></div>
         </article>
         <article class="layout-card">
-          <img src="assets/layout-chat.webp" alt="縦長のチャットレイアウト" width="480" height="702">
+          <img src="assets/layout-chat.webp" alt="縦長のチャットレイアウト" width="480" height="702" loading="lazy" decoding="async">
           <div><span>CHAT</span><h3>チャットレイアウト</h3><p>会話に集中できる、読みやすい縦型画面。</p></div>
         </article>
       </div>
@@ -160,7 +167,7 @@
             <li>音声読み上げ・口パク</li>
             <li>基本的な便利機能</li>
           </ul>
-          <a class="button primary full" href="https://github.com/benybeny777/PicoAgent-Distribution/releases">GitHubから取得</a>
+          <span class="button disabled full" aria-disabled="true">無料版を公開準備中</span>
         </article>
         <article class="plan-card pro">
           <div class="plan-ribbon">準備中</div>
@@ -185,7 +192,7 @@
         <h2>3ステップで、すぐそばに。</h2>
       </div>
       <ol class="steps">
-        <li><span>01</span><div><h3>ダウンロード</h3><p>GitHub ReleasesからWindows無料版を取得します。</p></div></li>
+        <li><span>01</span><div><h3>ダウンロード</h3><p>公開後、正規のGitHub ReleasesからWindows無料版を取得します。</p></div></li>
         <li><span>02</span><div><h3>初回セットアップ</h3><p>使い方と追加機能を選び、ローカルAIモデルを取得します。</p></div></li>
         <li><span>03</span><div><h3>キャラと話す</h3><p>入力または音声で話しかけます。設定はあとからいつでも変更できます。</p></div></li>
       </ol>
@@ -209,9 +216,9 @@
       <div>
         <p class="eyebrow">READY WHEN YOU ARE</p>
         <h2>今日から、好きなキャラと<br>PCで暮らそう。</h2>
-        <p>無料版から始められます。</p>
+        <p>公開後は無料版から始められます。</p>
       </div>
-      <a class="button primary light" href="https://github.com/benybeny777/PicoAgent-Distribution/releases">Windows無料版を取得 <span aria-hidden="true">→</span></a>
+      <span class="button light disabled" aria-disabled="true">Windows無料版を準備中</span>
     </section>
   </main>
 
