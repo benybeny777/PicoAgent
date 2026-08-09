@@ -52,7 +52,7 @@
 
 ## コネクタ開発ルール（このプロジェクトの中核）
 
-PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント機能（スキル/ツール）」をコネクタとして拡張する。**どちらも決まった場所へファイルを置けば自動登録される**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して `#[path] pub mod` を生成し、各ファイルの `inventory::submit!` で登録されるため、中央の `mod.rs` 編集は不要。スキルは扱いやすいようプロジェクト直下の `skills/<スキル名>/mod.rs` に置く（トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`）。スキル専用の補助モジュール、スクリプト、テンプレート、少量の静的アセットは同じ `skills/<スキル名>/` 配下へ同梱する（例: `skills/chitchat/trends.rs`、`skills/ms_office/scripts/office.ps1`）。
+PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント機能（スキル/ツール）」をコネクタとして拡張する。**どちらも決まった場所へファイルを置けば自動登録される**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して `#[path] pub mod` を生成し、各ファイルの `inventory::submit!` で登録されるため、中央の `mod.rs` 編集は不要。スキルは扱いやすいようプロジェクト直下の `skills/<スキル名>/mod.rs` に置く（トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`）。スキル専用の補助モジュール、スクリプト、テンプレート、少量の静的アセットは同じ `skills/<スキル名>/` 配下へ同梱する（例: `skills/chitchat/trends.rs`、`skills/run_command/jobs.rs`、`skills/browser_control/cdp.rs`）。
 
 - **プロバイダコネクタ** は `src-tauri/src/providers/` に置き、`Provider` トレイトを実装して `inventory::submit! { ProviderReg { make: || Box::new(<型>) } }` で登録する。`chat()` は正規形メッセージ（`message.rs`）を受け取り正規形 assistant を返す。プロバイダ固有のワイヤ形式変換は各コネクタ内に閉じ込め、`agent.rs` に漏らさない。
 - **スキル（ツール）コネクタ** はプロジェクト直下の `skills/<スキル名>/mod.rs` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
@@ -91,7 +91,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 
 ## 製品化（配布）
 
-- `src-tauri/tauri.conf.json` の `productName` / `identifier=com.picoagent.desktop` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。
+- `src-tauri/tauri.conf.json` の `productName` / `identifier=com.picoagent.desktop` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。同じコマンドが作る `icons/ios/` `icons/android/` は対応OSが Windows / macOS だけで参照されないため、`.gitignore` で追跡しない。
 - Windows バンドルは NSIS（`bundle.targets`）。初期販売はWindows先行で、コード署名と更新署名付きの完全自動更新なしで行い、`distribution/release.json` の `platforms=["windows"]` / `signing.required=false` / `updates.required=false` を正本とする。Windows版は利用者が設定から明示した場合だけ、公開Gitのサイズ・SHA-256を検証してNSISを実行する。Windows SmartScreenの警告と更新手順は販売ページで事前案内する。将来macOSを販売対象へ追加する場合は署名・公証と実機QAを先に行い、完全自動更新を有効化するときは各 `required` を `true` にして、証明書・更新鍵・配信先を販売ゲートで必須化する。
 
 ## 主要ファイル
@@ -128,7 +128,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
 | `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
-| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。`PICOAGENT_BOOT_TIMEOUT_MS` 以内に `pet_frontend_ready` が届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP が `script-src 'self'` のため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
+| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。`PICOAGENT_BOOT_TIMEOUT_MS` 以内に `pet_frontend_ready` が届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |
 | `xtask/src/util.rs` | **同梱物取得の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
@@ -146,6 +146,9 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
+| `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
+| `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
+| `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
 | `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
 | `docs/REVIEW-LOG.md` | **レビューと修正提案の記録**。対応・見送り・保留を理由付きで残す台帳（判定の履歴。進行状況は `HANDOFF.md`、恒久ルールは `AGENTS.md`、仕様は `SPEC.md`） |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
@@ -183,7 +186,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │       ├── providers/*.rs      ← 叩く AI（local/ollama/openai/anthropic/gemini/deepseek/xai/mistral/agent_cli。.rs を足すと自動登録）
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
-├── scripts/*.py                ← キャラクター画像の生成（連番アニメ・Live2D 用 PSD）
+├── scripts/                    ← キャラクター画像の生成・高精細化（*.py と Windows 専用の *.ps1 / *.cs）
 ├── tools/tha3-runtime/         ← Windows開発用THA3 Python環境（git管理外、製品には含めない）
 ├── .claude/                    ← Claude Code の設定（permissions）とセッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト

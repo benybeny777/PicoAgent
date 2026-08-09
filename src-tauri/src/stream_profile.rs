@@ -32,9 +32,9 @@ fn path(value: Option<&Value>) -> String {
 
 fn color(value: Option<&Value>) -> String {
     let value = value.and_then(Value::as_str).unwrap_or("#5a3b4b");
-    if value.len() == 7
-        && value.starts_with('#')
-        && value[1..]
+    let digits = value.strip_prefix('#').unwrap_or_default();
+    if digits.len() == 6
+        && digits
             .chars()
             .all(|character| character.is_ascii_hexdigit())
     {

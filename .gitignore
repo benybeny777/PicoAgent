@@ -31,6 +31,11 @@ src-tauri/resources/aivis/*
 !src-tauri/resources/aivis/.gitkeep
 *.gguf
 
+# モバイル用アイコン（`npx tauri icon` が生成するが、対応OSはWindows/macOSだけで
+# NSIS・macOSバンドルのどちらも参照しない。再生成しても追跡しない）
+src-tauri/icons/ios/
+src-tauri/icons/android/
+
 # 生成物・一時ファイル
 dist/
 ui-dist/
