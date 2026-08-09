@@ -285,7 +285,8 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 導入経路は設定画面の「キャラ・音声」タブ（zip またはフォルダを選ぶ）。選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、フロントへはパスだけを返す（プラグインの JS バインディングを配信物へ足さずに済ませるため）。完成済みPicoAgentパックは `settings_character_install`、利用者が配布元から自分で取得した生のLive2Dデータは `settings_character_install_live2d` を使う。
 - 生のLive2D導入は `.model3.json` を再帰的に探し、1個だけならその親フォルダを組み込み用データとしてコピーして `character.json` を自動生成する。0個または複数なら曖昧に選ばず拒否する。公式サンプルを含むモデル実体をアプリが代理取得・再配布しない。通常の `cargo xtask setup live2d` / `dev` / `build` はランタイムだけを取得し、開発者向けサンプル取得は `cargo xtask setup live2d-samples` の明示操作に限定する。製品ビルドは `distribution/release.json` の配布許可リストだけを同期する。初回案内は用途選択と追加機能選択の次にLive2D追加／公式配布ページ／後回しを選ばせ、追加時は `character-add` 経路でキャラタブの導入欄を開く。`pet_show_onboarding` は設定ウィンドウを隠してメインへ `pet:show-onboarding` を送り、保存済みデータを消さず同じ案内を再表示する。
 - THA3生成経路は同じタブの「1枚絵からキャラクターを作成」。`settings_tha3_status` / `settings_tha3_pick_source` / `settings_tha3_pick_root` / `settings_tha3_generate` / `settings_tha3_cancel` を使い、512x512透過PNGから17キーポーズ・42フレームの一時パックを生成する。入力画像と手動選択したTHA3フォルダは共通permissionsで検証する。画像プレビューはasset protocolの許可範囲を広げず、20MB以下の選択済みPNGだけをdata URLとして返す。生成パックは通常の `character_pack::validate` と `user_characters::install` を通った場合だけ確定する。
-- THA3のPython子プロセスは `tha3_creator.rs` が `tools::process::command()` で起動し、標準出力・標準エラーを `tha3:progress` で設定画面へ送る。長時間生成なので全体timeoutは設けないが、GUIキャンセルではkill後にwaitして回収する。設定画面を閉じる際はキャンセルを要求し、アプリ終了時はバックエンドもキャンセル後の回収完了を待つ。生成途中のスクリプト・画像・パックは `app_cache_dir/tha3-creator/` に限定し、成功・失敗・中断の全経路で掃除する。
+- 選択したTHA3フォルダは `PICOAGENT_THA3_ROOT` に保存し、次回設定画面と生成時に再利用する。「選択解除」は空文字を保存し、開発用の自動検出へ戻す。販売用軽量版はTHA3本体・モデル・Python／PyTorchを同梱せず、利用者が作者配布元から用意したフォルダだけを使う。通常の開発環境では `cargo xtask setup tha3` がGit管理外の開発用領域へ準備する。
+- THA3のPython子プロセスは `tha3_creator.rs` が `tools::process::command()` で起動し、標準出力・標準エラーを `tha3:progress` で設定画面へ送る。選択・状態確認・生成・中断の失敗は操作名付きで `app.log` に残す。長時間生成なので全体timeoutは設けないが、GUIキャンセルではkill後にwaitして回収する。設定画面を閉じる際はキャンセルを要求し、アプリ終了時はバックエンドもキャンセル後の回収完了を待つ。生成途中のスクリプト・画像・パックは `app_cache_dir/tha3-creator/` に限定し、成功・失敗・中断の全経路で掃除する。
 - 導入は「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順。検証を通らなかったものが導入先へ残らない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
 - GUI生成・zip/フォルダ導入・削除は同じ `user-characters` 状態ロックで直列化し、一時導入フォルダや同じIDの確定先を同時に更新しない。
 - 「zip を開くとモデル名のフォルダが1つ」という一般的な配布形は、1階層だけ潜って `character.json` を探して吸収する。複数見つかった場合は1体に決められないので拒否する。
@@ -644,6 +645,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_AGENT_CLI_PATH` | （空=種類から自動） | agent_cli | CLI の実行パス |
 | `PICOAGENT_AGENT_CLI_ARGS` | （空） | agent_cli | CLI へ追加する引数。Claude / Codex の安全な非対話引数は常に別途付加 |
 | `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | agent_cli | 1回の応答を待つ秒数（10〜600） |
+| `PICOAGENT_THA3_ROOT` | 空 | THA3キャラクター制作 | 作者配布から利用者が用意したTHA3本体・モデル・Python環境のフォルダ。設定画面で選択して保存し、共通許可ルートで検証する |
 | `PICOAGENT_DESKTOP_ENABLED` | `false` | desktop_control | デスクトップ操作（マウス・キーボード）の有効化（既定は無効） |
 | `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | desktop_control | 1分あたりの操作回数の上限（1〜600）。暴走時の歯止め |
 | `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |

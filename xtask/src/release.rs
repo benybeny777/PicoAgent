@@ -291,11 +291,6 @@ pub fn check(strict: bool) -> Result<Value> {
                 blockers.push(format!("{label}が未設定です"));
             }
         }
-    } else {
-        warnings.push(
-            "初期販売は更新署名付きの完全自動更新なしです。Windows版は設定から利用者が明示実行します"
-                .to_string(),
-        );
     }
     let platforms = value
         .get("platforms")
@@ -304,17 +299,30 @@ pub fn check(strict: bool) -> Result<Value> {
     if platforms.is_empty() {
         bail!("販売対象OSが1件も指定されていません");
     }
+    if !updates_required {
+        warnings.push(
+            "初期販売は更新署名付きの完全自動更新なしです。利用者が明示操作する更新手順を販売対象OSごとに案内してください"
+                .to_string(),
+        );
+    }
     let signing_required = value
         .pointer("/signing/required")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    let mut unsigned_targets = Vec::new();
     for platform in platforms {
         let platform = platform
             .as_str()
             .context("platforms に文字列以外の値があります")?;
         let (key, label) = match platform {
-            "windows" => ("windowsReady", "Windowsコード署名"),
-            "macos" => ("macosReady", "macOS署名・公証"),
+            "windows" => {
+                unsigned_targets.push("Windowsコード署名");
+                ("windowsReady", "Windowsコード署名")
+            }
+            "macos" => {
+                unsigned_targets.push("macOS署名・公証");
+                ("macosReady", "macOS署名・公証")
+            }
             other => {
                 blockers.push(format!("未対応の販売対象OSです: {other}"));
                 continue;
@@ -331,10 +339,15 @@ pub fn check(strict: bool) -> Result<Value> {
         }
     }
     if !signing_required {
-        warnings.push(
-            "初期販売はコード署名なしです。Windows SmartScreenとmacOS Gatekeeperの警告を販売ページで事前案内してください"
-                .to_string(),
-        );
+        let target_label = if unsigned_targets.is_empty() {
+            "コード署名".to_string()
+        } else {
+            unsigned_targets.join("・")
+        };
+        warnings.push(format!(
+            "初期販売は{}なしです。販売対象OSの未署名警告と正規配布元を販売ページで事前案内してください",
+            target_label
+        ));
     }
 
     let cargo_version = package_version(&root.join("src-tauri/Cargo.toml"))?;
@@ -438,7 +451,15 @@ mod tests {
         assert!(!joined.contains("署名・公証"));
         assert!(!joined.contains("更新署名"));
         assert!(!joined.contains("Tauri updater"));
-        assert!(report["warnings"].as_array().unwrap().len() >= 2);
+        let warnings = report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(warnings.contains("Windowsコード署名"));
+        assert!(!warnings.contains("macOS Gatekeeper"));
     }
 
     #[test]

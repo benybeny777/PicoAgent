@@ -1,4 +1,4 @@
-// xtask/src/bundled.rs - 同梱物と制作ツール（推論エンジン / Whisper / Live2D / THA3）の取得。
+// xtask/src/bundled.rs - 同梱物と開発用制作ツール（推論エンジン / Whisper / Live2D / THA3）の取得。
 //
 // 旧 `scripts/fetch-engine.mjs` / `fetch-whisper.mjs` / `fetch-live2d.mjs` の置き換え。
 // 実体は巨大なのでリポジトリには含めず、各環境で取得する。
@@ -83,7 +83,7 @@ fn work_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("picoagent-{label}"))
 }
 
-// ── THA3（キャラクター制作専用。同梱するが通常実行時は読み込まない） ────
+// ── THA3（キャラクター制作専用。通常の開発ビルド用に準備する） ────
 
 const THA3_REVISION: &str = "8946939ec7b417f443d7b0e3fcd97384313fcdb8";
 const THA3_SOURCE_URL: &str = "https://github.com/pkhungurn/talking-head-anime-3-demo/archive/8946939ec7b417f443d7b0e3fcd97384313fcdb8.zip";
@@ -92,7 +92,7 @@ const THA3_MODELS_URL: &str =
     "https://www.dropbox.com/s/y7b8jl4n2euv8xe/talking-head-anime-3-models.zip?dl=1";
 const THA3_PYTHON_VERSION: &str = "3.11";
 const THA3_TORCH_VERSION: &str = "2.10.0";
-const THA3_BUNDLED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
+const THA3_REQUIRED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
 const UV_VERSION: &str = "0.11.6";
 
 fn tha3_source_root(extracted: &Path) -> Option<PathBuf> {
@@ -131,7 +131,7 @@ fn tha3_models_root(extracted: &Path) -> Option<PathBuf> {
 }
 
 fn tha3_model_ready(dir: &Path) -> bool {
-    THA3_BUNDLED_MODELS.iter().all(|model| {
+    THA3_REQUIRED_MODELS.iter().all(|model| {
         [
             "editor.pt",
             "eyebrow_decomposer.pt",
@@ -233,10 +233,10 @@ fn run_uv(args: &[String], cache: &Path) -> Result<()> {
         .args(args)
         .env("UV_CACHE_DIR", cache)
         .status()
-        .context("THA3同梱Pythonを用意するuvを起動できません")?;
+        .context("THA3開発用Pythonを用意するuvを起動できません")?;
     if !status.success() {
         bail!(
-            "uvによるTHA3同梱Pythonの準備に失敗しました（終了コード {:?}）",
+            "uvによるTHA3開発用Pythonの準備に失敗しました（終了コード {:?}）",
             status.code()
         );
     }
@@ -254,7 +254,7 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
         return Ok(());
     }
     if !command_exists("uv") {
-        bail!("THA3同梱Pythonの作成にuvが必要です。https://docs.astral.sh/uv/ からuvを導入してください");
+        bail!("THA3開発用Pythonの作成にuvが必要です。https://docs.astral.sh/uv/ からuvを導入してください");
     }
 
     let runtime = dir.join("runtime");
@@ -272,7 +272,7 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
         if unfinished.exists() {
             fs::remove_dir_all(&unfinished).with_context(|| {
                 format!(
-                    "中断された同梱Pythonを掃除できません: {}",
+                    "中断された開発用Pythonを掃除できません: {}",
                     unfinished.display()
                 )
             })?;
@@ -290,7 +290,8 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
             &cache,
         )?;
     }
-    let python = tha3_runtime_python(dir).context("同梱Pythonの実行ファイルを見つけられません")?;
+    let python =
+        tha3_runtime_python(dir).context("開発用Pythonの実行ファイルを見つけられません")?;
     if flag("THA3_FORCE") && packages.exists() {
         fs::remove_dir_all(&packages).with_context(|| {
             format!(
@@ -320,7 +321,7 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
         )?;
     }
     if !tha3_runtime_ready(dir) {
-        bail!("THA3同梱Pythonの必要ファイルが揃いませんでした");
+        bail!("THA3開発用Pythonの必要ファイルが揃いませんでした");
     }
     log(
         "setup:tha3",
@@ -329,9 +330,9 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Talking Head Anime 3 のコード・学習済みモデル・Pythonを同梱領域へ配置する。
+/// Talking Head Anime 3 のコード・学習済みモデル・Pythonを開発用領域へ配置する。
 ///
-/// THA3 は製品へ同梱するが、キャラクター制作を開始した時だけ読み込む。
+/// 通常の開発ビルドでは利用できるが、販売用軽量版へは再配布しない。
 /// `THA3_FORCE=1` で再取得できる。
 pub fn fetch_tha3() -> Result<()> {
     let root = repo_root();
@@ -357,7 +358,10 @@ pub fn fetch_tha3() -> Result<()> {
         })?;
         log(
             "setup:tha3",
-            format!("旧tools/tha3から同梱領域へ移行しました: {}", dir.display()),
+            format!(
+                "旧tools/tha3から開発用領域へ移行しました: {}",
+                dir.display()
+            ),
         );
     }
 
@@ -415,7 +419,7 @@ pub fn fetch_tha3() -> Result<()> {
             extract(&archive, &extracted)?;
             let models = tha3_models_root(&extracted)
                 .ok_or_else(|| anyhow!("THA3 の data/models を展開物から見つけられません"))?;
-            for model in THA3_BUNDLED_MODELS {
+            for model in THA3_REQUIRED_MODELS {
                 copy_dir(
                     &models.join(model),
                     &dir.join("data/models").join(model),
@@ -445,7 +449,7 @@ pub fn fetch_tha3() -> Result<()> {
             );
         }
         if !tha3_model_ready(&dir) {
-            bail!("同梱に必要なTHA3モデルが不足しています");
+            bail!("THA3制作に必要なモデルが不足しています");
         }
         install_tha3_runtime(&runtime_owner, &work)?;
         Ok(())

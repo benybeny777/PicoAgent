@@ -1196,7 +1196,11 @@ pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value,
             );
             Ok(json!({ "ok": true, "id": id, "name": name }))
         }
-        Err(error) => Err(format!("{error:#}")),
+        Err(error) => {
+            let message = format!("キャラクターパックの導入に失敗しました: {error:#}");
+            crate::log_paths::append_app_log(&app, &message);
+            Err(message)
+        }
     }
 }
 
@@ -1217,7 +1221,11 @@ pub fn settings_character_install_live2d(
             );
             Ok(json!({ "ok": true, "id": id, "name": name }))
         }
-        Err(error) => Err(format!("{error:#}")),
+        Err(error) => {
+            let message = format!("Live2Dキャラクターの導入に失敗しました: {error:#}");
+            crate::log_paths::append_app_log(&app, &message);
+            Err(message)
+        }
     }
 }
 
@@ -1331,7 +1339,11 @@ pub async fn settings_tha3_generate(
             );
             Ok(json!({ "ok": true, "id": generated_id, "name": generated_name }))
         }
-        Err(error) => Err(format!("{error:#}")),
+        Err(error) => {
+            let message = format!("THA3キャラクター生成に失敗しました: {error:#}");
+            crate::log_paths::append_app_log(&app, &message);
+            Err(message)
+        }
     }
 }
 

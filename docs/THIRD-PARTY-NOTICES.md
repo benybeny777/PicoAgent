@@ -9,7 +9,7 @@
 | 音声 | AivisSpeech Engine、音声モデル、whisper.cpp | Aivis／Whisper本体は公式配布元から直接取得。各音声・認識モデルの商用条件と表示を確認 |
 | キャラクター制作 | THA3、学習済みモデル、Python、PyTorch、uv | 販売物へ再配布せず作者配布を案内。THA3 MIT、重みCC BY 4.0の帰属を画面と文書へ表示 |
 | Live2D | Cubism Core、PIXI、pixi-live2d-display、利用者モデル | 拡張性アプリ審査・契約、指定ロゴ・文言、SDKとモデルの条件 |
-| 文書・メディア | LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep | 販売物へ再配布せず各公式ページと設定手順を案内。開発版同梱物は開発利用とライセンス表示を確認 |
+| 文書・メディア | LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep | 販売物へ再配布せず各公式ページと設定手順を案内。ライセンスは一律ではないため、実際に使う版・ビルド・依存物ごとに確認する |
 
 販売用キャラは `distribution/release.json` の明示リストだけを同期します。開発用のLive2D公式サンプルは通常ビルドを含む販売成果物へ同期せず、アプリからも自動取得しません。利用者が配布元から取得したモデルは利用者領域へ入り、PicoAgentの配布物にはなりません。
 

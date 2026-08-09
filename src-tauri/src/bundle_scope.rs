@@ -153,4 +153,20 @@ mod guard {
              bundle_scope::ALLOWED_UI_EXTENSIONS へ追加）: {violations:?}"
         );
     }
+
+    #[test]
+    fn フロントのinvoke失敗は診断ログへ残す() {
+        let path = guard_scan::repo_root().join("ui/picoagent.js");
+        let source = std::fs::read_to_string(path).expect("ui/picoagent.js");
+        assert!(
+            source.contains("async function call(name, args)")
+                && source.contains("logInvokeError(name, error)"),
+            "共通invoke入口は失敗をapp.logへ記録してから再スローしてください"
+        );
+        assert_eq!(
+            source.matches("invoke(").count(),
+            3,
+            "invokeを直接追加せず、失敗ログを保証するcall()を使ってください"
+        );
+    }
 }

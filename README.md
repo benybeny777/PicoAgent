@@ -91,12 +91,12 @@ cargo xtask dev
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Cubism Editor 5.3互換のLive2Dランタイム（Cubism 4／5モデル対応。サンプルは含まない） |
 | `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない） |
-| `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（Windowsの製品ランタイムはインストール時取得） |
+| `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（開発環境専用。販売版は作者配布物を利用者が用意） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止 |
 
-引数なしの `cargo xtask setup` で製品へ同梱する全対象を取得します。THA3も設定画面からすぐ制作できる機能なので対象に含みますが、通常動作中はPythonもモデルも読み込みません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+引数なしの `cargo xtask setup` で通常の開発・製品ビルドに使う全対象を取得します。THA3は開発環境で制作機能を確認するために含みますが、販売用軽量版には再配布しません。通常動作中はPythonもモデルも読み込みません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
 一部の OS では公式のポータブル配布が無いツールがあります。その場合は警告のみで起動を続け、`apt` / `brew` で入れた PATH 上のツールへ自動で切り替わります。
 
@@ -110,7 +110,7 @@ cargo xtask dev
 cargo xtask setup tha3
 ```
 
-販売版はTHA3を再配布しません。初回起動と設定の「追加機能」から作者のGitHubとモデル配布を開き、利用者が条件を確認して取得します。取得後は右クリック →「キャラクター・音声の設定…」→「キャラクターを追加・作成」でTHA3フォルダを指定します。開発者向けの `cargo xtask setup tha3` も同じ上流から開発領域へ取得します。グローバルPythonや既存のPyTorchへ黙って干渉しません。
+販売版はTHA3を再配布しません。初回起動と設定の「追加機能」から作者のGitHubとモデル配布を開き、利用者が条件を確認して取得します。取得後は右クリック →「キャラクター・音声の設定…」→「キャラクターを追加・作成」でTHA3フォルダを指定して保存します。保存した場所は次回も使い、「選択解除」で自動検出へ戻せます。開発者向けの `cargo xtask setup tha3` も同じ上流から開発領域へ取得します。グローバルPythonや既存のPyTorchへ黙って干渉しません。
 
 キャラクター選択は同じ画面の画像カードから行えます。名前・内部ID・説明の検索と、`Live2D` / `PNGアニメ` / `自作THA3` / `追加キャラ` の絞り込みに対応し、各カードにも描画形式と内部IDを表示するため、同じ表示名のキャラも区別できます。カードの「このキャラを選ぶ」を押すと上の性格・口調設定もそのキャラへ切り替わり、「保存」で反映します。Cubism 4／5の両モデルを持つLive2Dパックでは「Live2D の SDK 世代」を自動・4固定・5固定から選べるため、自動判定で表示が崩れる場合も切り替えて確認できます。
 
@@ -459,7 +459,7 @@ Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のA
 - RAM 16 GBではOS・GPU・モデルが同じメモリを使うため、他アプリとの併用時に余裕が少なくなります。応答が極端に遅い、またはメモリ不足になる場合は `small` を選ぶか、`PICOAGENT_LOCAL_NGL=0` でCPU固定にしてください
 - BIOS/UEFIのUMA Frame Buffer設定は機種ごとに異なるため必須値にはしません。変更する場合はPCメーカーの仕様を優先してください
 
-- ディスクは上表のモデル本体に加えて、同梱物（推論エンジン・Aivis・Whisper・Live2D・THA3・OSS ツール）の取得分が必要です。取得済み GGUF は「AIモデル・連携」タブから一覧・削除できます
+- ディスクは上表のモデル本体に加えて、推論エンジン、選択導入したAivis／Whisper、Live2Dランタイム、利用者が用意したTHA3／外部ツールの容量が必要です。販売版はTHA3と文書・画像ツールを再配布しません。取得済み GGUF は「AIモデル・連携」タブから一覧・削除できます
 - コンテキスト長は `PICOAGENT_LOCAL_CTX`（既定 `8192`）、GPU オフロードは `PICOAGENT_LOCAL_NGL`（既定 `999`=全レイヤ優先 / `0`=CPU 固定）で調整します
 - クラウド AI を選んだ場合、ローカルモデルは取得も起動もしません
 
@@ -473,8 +473,8 @@ Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のA
 AMD APU／AMD GPU、Intel Mac、LinuxでのTHA3生成は対象外です（Windows版THA3はCUDA対応NVIDIA GPUが必須）。通常のPicoAgent利用、ローカルモデルのVulkan推論、生成済みキャラクターの表示には、このTHA3用GPU要件は適用されません。
 
 - 軽量WindowsインストーラにはTHA3を入れません。作者配布のコードとモデルを利用者が取得し、専用環境を準備した場合の全体容量は実測約5.2GBです
-- 新規インストール時は一時キャッシュを含め10GB以上、更新で旧ランタイムを保持しながら入れ替える場合は15GB以上の空き容量を確保してください。成功・失敗のどちらでも取得キャッシュを片付けます
-- Apple Silicon MacはOS別PyTorchをアプリへ同梱します。最終容量はPyTorch配布物の版で変わるため、ビルド時に `src-tauri/resources/bundled/tha3/` の実測値を確認してください
+- 作者配布物から環境を用意するときは、一時キャッシュを含め10GB以上の空き容量を確保してください。開発用 `cargo xtask setup tha3` は成功時に取得キャッシュを片付け、失敗時は再開用キャッシュをPicoAgentの `temp/` に保持します
+- Apple Silicon Macも販売版へPyTorchを同梱しません。作者配布のTHA3とMPS対応PyTorch環境を利用者が用意し、設定画面でそのTHA3フォルダを選びます
 
 ### 応答性・描画
 
@@ -642,8 +642,8 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 **THA3 キャラクター制作ツール**
 
 - `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、VRAM自動調整に使う `standard_float` / `standard_half` / `separable_half` を開発用の `src-tauri/resources/bundled/tha3/` へ取得します。実体はGit管理外です
-- 軽量販売版はTHA3コード・モデル・Python／PyTorchを再配布しません。設定画面に作者GitHubと作者案内のモデル配布を表示し、利用者が条件を確認して導入したフォルダを指定します。GUI用制御スクリプトはアプリへ文字列として埋め込み、生成時だけ `app_cache_dir/tha3-creator/` へ一時展開します
-- **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、重みの再配布に伴う帰属をREADME、同梱上流LICENSE／README、設定画面に表示します。同梱Python・PyTorchは各配布物に含まれるライセンスに従います
+- 軽量販売版はTHA3コード・モデル・Python／PyTorchを再配布しません。設定画面に作者GitHubと作者案内のモデル配布を表示し、利用者が条件を確認して導入したフォルダを選んで保存します。GUI用制御スクリプトはアプリへ文字列として埋め込み、生成時だけ `app_cache_dir/tha3-creator/` へ一時展開します
+- **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、帰属をREADMEと設定画面に表示します。利用者が用意するPython・PyTorchは各配布物のライセンスに従います
 
 **その他**
 
@@ -676,7 +676,7 @@ NSIS アンインストーラは関連プロセスとPicoAgent専用の一時フ
 
 **署名・自動更新**
 
-初期販売はコード署名（Authenticode）・macOS署名／公証・バックグラウンドでの完全自動更新を使いません。`distribution/release.json` の `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenやmacOS Gatekeeperの警告が表示されるため、販売ページで事前に明記します。Windows版は利用者が設定画面で明示した場合だけ、公開Gitのサイズ・SHA-256を照合して更新インストーラを実行します。将来、更新署名付きの完全自動更新を有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
+初期販売のWindows版はコード署名（Authenticode）とバックグラウンドでの完全自動更新を使いません。`distribution/release.json` の `platforms=["windows"]` / `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenの警告が表示されるため、販売ページで事前に明記します。Windows版は利用者が設定画面で明示した場合だけ、公開Gitのサイズ・SHA-256を照合して更新インストーラを実行します。将来macOSを販売対象へ加える場合は署名・公証と実機QAを先に行います。更新署名付きの完全自動更新を有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
 
 </details>
 
@@ -696,7 +696,7 @@ PicoAgent/
 ├── docs/            ← 検討資料（layout-proposal.md など）と README 掲載画像（images/）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
-    ├── resources/bundled/tha3/ ← 通常の開発ビルド用THA3（軽量販売版は選択取得）
+    ├── resources/bundled/tha3/ ← 通常の開発ビルド用THA3（販売用軽量版には含めない）
     └── src/
         ├── agent.rs        ← エージェントループ
         ├── providers/      ← 叩く AI コネクタ（.rs を足すと自動登録）

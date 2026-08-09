@@ -16,6 +16,8 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 
 2026-08-09にClaude #69を再検証し、モデル一覧の待ち時間を設定画面へ追加した。Aivisの大容量取得を全体30秒制限から接続・無通信制限へ改め、再導入を旧版復元可能なステージング入替へ変更し、設定保存・再導入後の再起動フラグも修正した。古いClaudeブランチ3本は固有差分を確認し、有効なTHA3販売説明だけを現行仕様として統合したうえで削除した。オープンPRは0件、リモートブランチは `main` だけで、GitHubのマージ後ブランチ自動削除も有効である。
 
+同日に重要度順の反復全体再点検を行い、販売版THA3の誤った同梱案内と保存漏れ、Windowsだけの販売時にmacOS警告まで出す問題、販売資料の古いRepo・鍵・Free／Pro・販路・第三者ライセンス説明を修正した。THA3フォルダは設定へ保存・再利用・解除できる。全フロントinvoke失敗が`app.log`へ残る経路を設計ガードで固定し、THA3操作には文脈付きログも追加した。販売前ブロッカーは外部確認が必要な4件のままである。
+
 ## 残る確認境界
 
 自動撮影できるPNG系4キャラ×8形式は確認済み。以下は実機または人の判断が要る境界。詳細と判断理由は `docs/REVIEW-LOG.md` を参照する。
@@ -28,8 +30,8 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 319件
-cargo test --manifest-path xtask/Cargo.toml             # 30件成功
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 320件
+cargo test --manifest-path xtask/Cargo.toml             # 31件成功
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui --release

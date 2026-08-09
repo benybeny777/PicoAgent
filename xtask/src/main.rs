@@ -33,7 +33,7 @@ const USAGE: &str = "\
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
   setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
-                      （省略時は製品へ同梱する全対象）
+                      （省略時は通常の開発・製品ビルドで使う全対象。販売用軽量版とは別）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
   build-ui [--release] ui/ を ui-dist/ へ配信ビルド（--release で最小化）
@@ -98,8 +98,8 @@ fn preview_distribution() -> Result<()> {
 ///
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
-    // THA3も利用者が設定画面からすぐ制作できる製品同梱物なので一括取得へ含める。
-    // 通常動作中は読み込まず、生成開始時だけPythonとモデルを起動する。
+    // THA3も開発環境で制作機能をすぐ確認できるよう一括取得へ含める。
+    // 販売用軽量版には再配布せず、利用者が作者配布物を用意して設定する。
     let all = [
         "live2d", "engine", "aivis", "whisper", "tha3", "office", "tools",
     ];
@@ -227,5 +227,20 @@ mod tests {
             }
         }
         assert!(checked > 0, "年別変更履歴へのリンクがありません");
+    }
+
+    #[test]
+    fn 販売資料のスキル数が実装と一致する() {
+        let root = super::repo_root();
+        let skill_count = std::fs::read_dir(root.join("skills"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().join("mod.rs").is_file())
+            .count();
+        let sales = std::fs::read_to_string(root.join("docs/SALES.md")).unwrap();
+        assert!(
+            sales.contains(&format!("実務スキル {skill_count} 種")),
+            "docs/SALES.md のスキル数が実装（{skill_count}種）と一致しません"
+        );
     }
 }

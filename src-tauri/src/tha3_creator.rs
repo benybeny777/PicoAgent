@@ -22,7 +22,8 @@ const MODEL_FILES: [&str; 5] = [
     "face_morpher.pt",
     "two_algo_face_body_rotator.pt",
 ];
-const BUNDLED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
+const THA3_ROOT_KEY: &str = "PICOAGENT_THA3_ROOT";
+const REQUIRED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
 
 pub struct Tha3CreatorState {
     control: Mutex<GenerationControl>,
@@ -115,7 +116,7 @@ fn source_ready(root: &Path) -> bool {
 }
 
 fn model_ready(root: &Path) -> bool {
-    BUNDLED_MODELS.iter().all(|model| {
+    REQUIRED_MODELS.iter().all(|model| {
         MODEL_FILES
             .iter()
             .all(|name| root.join("data/models").join(model).join(name).is_file())
@@ -281,10 +282,7 @@ fn validate_tha3_root(root: PathBuf) -> Result<PathBuf> {
         bail!("VRAM自動調整用モデルが不足しています: {}", root.display());
     }
     if !runtime_ready(&root) {
-        bail!(
-            "同梱THA3 Pythonランタイムが不足しています: {}",
-            root.display()
-        );
+        bail!("THA3用Pythonランタイムが不足しています: {}", root.display());
     }
     Ok(root)
 }
@@ -305,9 +303,24 @@ fn locate_tha3(app: &AppHandle, selected: Option<PathBuf>) -> Result<PathBuf> {
         .cloned()
         .context("THA3の確認先を決められません")?;
     bail!(
-        "同梱THA3本体・モデル・Pythonランタイムがありません。`cargo xtask setup tha3` を実行してください（確認先: {}）。",
+        "THA3本体・モデル・Pythonランタイムがありません。設定で作者配布から導入したTHA3フォルダを選んでください。開発環境では `cargo xtask setup tha3` でも準備できます（確認先: {}）。",
         expected.display()
     )
+}
+
+fn selected_root(
+    config: &crate::config::Config,
+    explicit: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    let configured = explicit
+        .map(str::to_owned)
+        .unwrap_or_else(|| config.get(THA3_ROOT_KEY, ""));
+    if configured.trim().is_empty() {
+        return Ok(None);
+    }
+    permissions::resolve(config, &configured)
+        .map_err(anyhow::Error::msg)
+        .map(|path| Some(path.as_path().to_path_buf()))
 }
 
 pub fn status(
@@ -315,11 +328,8 @@ pub fn status(
     config: &crate::config::Config,
     selected: Option<&str>,
 ) -> Result<Tha3Status> {
-    let root = if let Some(selected) = selected.filter(|value| !value.trim().is_empty()) {
-        permissions::resolve(config, selected)
-            .map_err(anyhow::Error::msg)?
-            .as_path()
-            .to_path_buf()
+    let root = if let Some(selected) = selected_root(config, selected)? {
+        selected
     } else {
         let roots = candidate_roots(app)?;
         roots
@@ -342,7 +352,7 @@ pub fn status(
         model_ready: model,
         runtime_ready: runtime,
         root: root.to_string_lossy().to_string(),
-        install_hint: "Windows配布版はインストール中に専用ランタイムを取得します。不足時はネット接続を確認して再インストールしてください。開発環境は cargo xtask setup tha3 で準備できます。".to_string(),
+        install_hint: "販売版はTHA3を同梱しません。追加機能に表示する作者配布元から本体・モデル・Python環境を用意し、この画面でTHA3フォルダを選んで保存してください。開発環境は cargo xtask setup tha3 でも準備できます。".to_string(),
     })
 }
 
@@ -519,14 +529,8 @@ pub async fn generate(
     if user_characters::root(&app).join(id).exists() {
         bail!("同じIDの追加キャラクターが既にあります: {id}");
     }
-    let selected_root = tha3_root_path
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| permissions::resolve(config, value).map_err(anyhow::Error::msg))
-        .transpose()?
-        .map(|path| path.as_path().to_path_buf());
-    let tha3_root = locate_tha3(&app, selected_root)?;
-    let python =
-        python_command(&tha3_root).context("THA3用の同梱Python実行ファイルがありません")?;
+    let tha3_root = locate_tha3(&app, selected_root(config, tha3_root_path)?)?;
+    let python = python_command(&tha3_root).context("THA3用Python実行ファイルがありません")?;
 
     let cache = app
         .path()

@@ -2772,7 +2772,11 @@ async function render() {
     textContent: "THA3: © Pramook Khungurn (pkhungurn)。コード MIT License、学習済みモデル CC BY 4.0。",
   });
   const tha3ToolStatus = el("div", { className: "tha3-tool-status", textContent: "制作ツールを確認中…" });
+  const tha3RootField = field("PICOAGENT_THA3_ROOT", "使用するTHA3フォルダ", "text", v.PICOAGENT_THA3_ROOT ?? "", "作者配布から用意したTHA3フォルダを選択");
+  const tha3RootInput = inputs.get("PICOAGENT_THA3_ROOT");
+  tha3RootInput.readOnly = true;
   const pickTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "THA3フォルダを選ぶ" });
+  const clearTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "選択解除" });
   const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "透過PNGを選んでください" });
   const sourcePreview = el("img", { className: "tha3-source-preview", alt: "選択した立ち絵のプレビュー" });
   sourcePreview.hidden = true;
@@ -2792,7 +2796,7 @@ async function render() {
   progress.hidden = true;
   const createStatus = el("p", { className: "hint" });
   let selectedSource = "";
-  let selectedTha3Root = "";
+  let selectedTha3Root = tha3RootInput.value.trim();
   let toolReady = false;
 
   function updateCreateEnabled() {
@@ -2820,6 +2824,7 @@ async function render() {
       createStatus.textContent = "画像を選びました。512×512・背景透過・正面向きか確認してください。";
     } catch (error) {
       createStatus.textContent = `画像を選べませんでした: ${error?.message || error}`;
+      logApp("warn", "THA3入力画像を選べませんでした", errorDetail(error));
     } finally {
       updateCreateEnabled();
     }
@@ -2830,10 +2835,14 @@ async function render() {
   async function refreshTha3Status(rootPath = null) {
     const tha3Status = await window.picoagent.settings.tha3Status(rootPath);
     toolReady = Boolean(tha3Status.ready);
-    // 自動検出パスはバックエンド内部で再検出する。ユーザーが選んだ場合だけ明示パスを渡す。
-    selectedTha3Root = toolReady && rootPath ? tha3Status.root : "";
+    // 自動検出パスは保存せず、ユーザーが選んだパスだけを保存して次回も確認する。
+    selectedTha3Root = rootPath ? tha3Status.root : "";
+    if (rootPath && tha3Status.root && tha3RootInput.value !== tha3Status.root) {
+      tha3RootInput.value = tha3Status.root;
+      tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     tha3ToolStatus.textContent = toolReady
-      ? `同梱制作ツール準備済み: ${tha3Status.root}`
+      ? `制作ツール準備済み: ${tha3Status.root}`
       : `${tha3Status.installHint} 本体=${tha3Status.sourceReady ? "OK" : "不足"}、モデル=${tha3Status.modelReady ? "OK" : "不足"}、Python=${tha3Status.runtimeReady ? "OK" : "不足"}。確認先: ${tha3Status.root}`;
     tha3ToolStatus.classList.toggle("ready", toolReady);
     updateCreateEnabled();
@@ -2855,6 +2864,22 @@ async function render() {
       tha3ToolStatus.classList.remove("ready");
       tha3ToolStatus.textContent = `選択したフォルダを使えません: ${error?.message || error}`;
       createStatus.textContent = "THA3フォルダを確認できませんでした。";
+      logApp("warn", "THA3フォルダを確認できませんでした", errorDetail(error));
+      updateCreateEnabled();
+    }
+  });
+  clearTha3RootButton.addEventListener("click", async () => {
+    tha3RootInput.value = "";
+    tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
+    selectedTha3Root = "";
+    createStatus.textContent = "保存するとTHA3フォルダの選択を解除します。";
+    try {
+      await refreshTha3Status("");
+    } catch (error) {
+      toolReady = false;
+      tha3ToolStatus.classList.remove("ready");
+      tha3ToolStatus.textContent = `自動検出先を確認できませんでした: ${error?.message || error}`;
+      logApp("warn", "THA3フォルダの選択解除後に自動検出先を確認できませんでした", errorDetail(error));
       updateCreateEnabled();
     }
   });
@@ -2878,6 +2903,7 @@ async function render() {
       await window.picoagent.settings.cancelTha3Generation();
     } catch (error) {
       createStatus.textContent = `キャンセル要求に失敗しました: ${error?.message || error}`;
+      logApp("warn", "THA3生成のキャンセル要求に失敗しました", errorDetail(error));
     }
   });
 
@@ -2911,16 +2937,18 @@ async function render() {
   });
 
   try {
-    await refreshTha3Status();
+    await refreshTha3Status(selectedTha3Root || null);
   } catch (error) {
     tha3ToolStatus.textContent = `制作ツールを確認できませんでした: ${error?.message || error}`;
+    logApp("warn", "THA3制作ツールの状態を確認できませんでした", errorDetail(error));
   }
   updateCreateEnabled();
   tha3Sec.append(
     tha3Hint,
     tha3Credit,
     tha3ToolStatus,
-    el("div", { className: "character-add-actions" }, [pickTha3RootButton]),
+    tha3RootField,
+    el("div", { className: "character-add-actions" }, [pickTha3RootButton, clearTha3RootButton]),
     el("div", { className: "field" }, [el("label", { textContent: "元画像" }), sourceInput, sourceActions]),
     sourcePreview,
     el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), idInput]),
