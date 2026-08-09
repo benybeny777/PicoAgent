@@ -113,7 +113,11 @@ impl Provider for Ollama {
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/api/tags", host(cfg));
-        let res = reqwest::get(&url).await?;
+        let res = crate::tools::http::client()
+            .get(&url)
+            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .send()
+            .await?;
         if !res.status().is_success() {
             anyhow::bail!("Ollama /api/tags failed: {}", res.status());
         }

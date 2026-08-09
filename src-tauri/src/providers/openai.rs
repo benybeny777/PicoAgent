@@ -290,6 +290,7 @@ impl Provider for OpenAI {
         let res = crate::tools::http::client()
             .get(&url)
             .bearer_auth(&key)
+            .timeout(crate::tools::http::metadata_timeout(cfg))
             .send()
             .await?;
         if !res.status().is_success() {

@@ -130,7 +130,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
 | `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。`PICOAGENT_BOOT_TIMEOUT_MS` 以内に `pet_frontend_ready` が届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP が `script-src 'self'` のため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
-| `src-tauri/src/providers/{mod,local,ollama,openai}.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録） |
+| `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |
 | `xtask/src/util.rs` | **同梱物取得の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
 | `xtask`（`bundled::fetch_engine`） | 同梱エンジン取得（`cargo xtask setup engine`） |
 | `xtask`（`bundled::fetch_whisper`） | 同梱Whisper CLIとモデル取得（`cargo xtask setup whisper`） |
@@ -180,7 +180,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │   └── src/
 │       ├── main.rs / lib.rs / commands.rs / menu.rs
 │       ├── config.rs / agent.rs / message.rs / engine.rs
-│       ├── providers/{mod,local,ollama,openai}.rs ← 叩く AI（.rs を足すと自動登録）
+│       ├── providers/*.rs      ← 叩く AI（local/ollama/openai/anthropic/gemini/deepseek/xai/mistral/agent_cli。.rs を足すと自動登録）
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/*.py                ← キャラクター画像の生成（連番アニメ・Live2D 用 PSD）

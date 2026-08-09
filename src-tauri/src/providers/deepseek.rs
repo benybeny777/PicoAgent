@@ -59,7 +59,12 @@ impl Provider for DeepSeek {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = crate::tools::http::client().get(&url).bearer_auth(&key).send().await?;
+        let res = crate::tools::http::client()
+            .get(&url)
+            .bearer_auth(&key)
+            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .send()
+            .await?;
         if !res.status().is_success() {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }

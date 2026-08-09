@@ -898,6 +898,8 @@ function detachLipSyncAudio() {
   pendingLipSyncAudio = null;
   if (rigMouthTimer) { clearInterval(rigMouthTimer); rigMouthTimer = 0; }
   if (rigVolFrame) { cancelAnimationFrame(rigVolFrame); rigVolFrame = 0; }
+  // フォールバック許可: 解放処理なので、既に切断済み・AudioContext 破棄済みで
+  // 例外になっても続けて残りの参照を捨てる（ここで止まると解放漏れになる）。
   try { rigSource?.disconnect(); rigAnalyser?.disconnect(); } catch {}
   rigSource = null;
   rigAnalyser = null;
