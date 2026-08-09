@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use std::time::Duration;
@@ -23,6 +23,8 @@ const AIVIS_API_URL: &str =
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
 const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
+static AIVIS_INSTALL_FS_LOCK: Mutex<()> = Mutex::new(());
+static AIVIS_INSTALL_NONCE: AtomicU64 = AtomicU64::new(1);
 
 struct AivisInstallCleanup(PathBuf);
 
@@ -472,7 +474,8 @@ async fn download_aivis_archive(url: &str, dest: &Path, expected_size: u64) -> a
         tokio::fs::create_dir_all(parent).await?;
     }
     let mut response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(30))
+        .read_timeout(Duration::from_secs(120))
         .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
         .build()?
         .get(url)
@@ -604,6 +607,55 @@ fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn install_stage_path(install: &Path) -> PathBuf {
+    let nonce = AIVIS_INSTALL_NONCE.fetch_add(1, Ordering::Relaxed);
+    install.with_file_name(format!(".installing-aivis-{}-{nonce}", std::process::id()))
+}
+
+fn replace_install_tree(stage: &Path, install: &Path) -> anyhow::Result<()> {
+    let _guard = match AIVIS_INSTALL_FS_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(parent) = install.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if install.exists() {
+        let nonce = AIVIS_INSTALL_NONCE.fetch_add(1, Ordering::Relaxed);
+        let backup =
+            install.with_file_name(format!(".backup-aivis-{}-{nonce}", std::process::id()));
+        if backup.exists() {
+            std::fs::remove_dir_all(&backup)?;
+        }
+        std::fs::rename(install, &backup)?;
+        if let Err(error) = std::fs::rename(stage, install) {
+            if let Err(restore_error) = std::fs::rename(&backup, install) {
+                anyhow::bail!(
+                    "Aivisの入れ替えと旧版復元に失敗しました: 入れ替え={error} / 復元={restore_error}"
+                );
+            }
+            return Err(error.into());
+        }
+        std::fs::remove_dir_all(backup)?;
+    } else {
+        std::fs::rename(stage, install)?;
+    }
+    Ok(())
+}
+
+fn stage_and_replace(source: &Path, install: &Path) -> anyhow::Result<()> {
+    let stage = install_stage_path(install);
+    if stage.exists() {
+        std::fs::remove_dir_all(&stage)?;
+    }
+    let _cleanup = AivisInstallCleanup(stage.clone());
+    copy_dir_all(source, &stage)?;
+    let run = find_run_file(&stage)
+        .ok_or_else(|| anyhow::anyhow!("準備した Aivis に run 実行ファイルが見つかりません。"))?;
+    ensure_executable(&run)?;
+    replace_install_tree(&stage, install)
+}
+
 fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<PathBuf>> {
     let Some(resource_run) = resource_engine_path(app) else {
         return Ok(None);
@@ -613,10 +665,7 @@ fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<Pat
         .ok_or_else(|| anyhow::anyhow!("Aivis 同梱リソースの親ディレクトリを取得できません。"))?
         .to_path_buf();
     let install = install_dir(app)?;
-    if install.exists() {
-        std::fs::remove_dir_all(&install)?;
-    }
-    copy_dir_all(&resource_root, &install)?;
+    stage_and_replace(&resource_root, &install)?;
     let Some(path) = runtime_engine_path(app) else {
         anyhow::bail!("Aivis 同梱リソースをコピーしましたが、実行ファイルを見つけられません。");
     };
@@ -632,18 +681,23 @@ fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<Pat
     Ok(Some(path))
 }
 
-async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+async fn ensure_installed_inner(
+    app: &tauri::AppHandle,
+    force_repair: bool,
+) -> anyhow::Result<PathBuf> {
     migrate_legacy_install(app)?;
-    if let Some(path) = runtime_engine_path(app) {
-        if let Some(resource) = resource_engine_path(app) {
-            if resource_is_newer(&resource, &path) {
-                if let Some(copied) = copy_resource_to_install(app)? {
-                    return Ok(copied);
+    if !force_repair {
+        if let Some(path) = runtime_engine_path(app) {
+            if let Some(resource) = resource_engine_path(app) {
+                if resource_is_newer(&resource, &path) {
+                    if let Some(copied) = copy_resource_to_install(app)? {
+                        return Ok(copied);
+                    }
                 }
             }
+            ensure_executable(&path)?;
+            return Ok(path);
         }
-        ensure_executable(&path)?;
-        return Ok(path);
     }
     if let Some(path) = copy_resource_to_install(app)? {
         ensure_executable(&path)?;
@@ -654,7 +708,11 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
         "Aivis が見つからないため、公式リリースから自動取得します。",
     )?;
     let (asset_name, asset_url, asset_size, asset_sha256) = aivis_release_asset_url().await?;
-    let work = std::env::temp_dir().join("picoagent-aivis-runtime");
+    let nonce = AIVIS_INSTALL_NONCE.fetch_add(1, Ordering::Relaxed);
+    let work = std::env::temp_dir().join(format!(
+        "picoagent-aivis-runtime-{}-{nonce}",
+        std::process::id()
+    ));
     let _ = tokio::fs::remove_dir_all(&work).await;
     tokio::fs::create_dir_all(&work).await?;
     let _cleanup = AivisInstallCleanup(work.clone());
@@ -680,12 +738,10 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("Aivis 実行ファイルの親ディレクトリを取得できません。"))?
         .to_path_buf();
     let install = install_dir(app)?;
-    if install.exists() {
-        tokio::fs::remove_dir_all(&install).await?;
-    }
     let root_for_copy = root.clone();
     let install_for_copy = install.clone();
-    tokio::task::spawn_blocking(move || copy_dir_all(&root_for_copy, &install_for_copy)).await??;
+    tokio::task::spawn_blocking(move || stage_and_replace(&root_for_copy, &install_for_copy))
+        .await??;
     let installed = runtime_engine_path(app).ok_or_else(|| {
         anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
     })?;
@@ -694,10 +750,30 @@ async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     Ok(installed)
 }
 
-/// 追加機能画面からAivis本体だけを公式Releaseから導入する。
-/// エンジンの起動や読み上げ設定の変更は行わない。
+async fn ensure_installed(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+    ensure_installed_inner(app, false).await
+}
+
+/// 追加機能画面からAivis本体を公式配布物で再導入する。
+/// 読み上げ設定は変更せず、有効な場合だけ入れ替え後にエンジンを再起動する。
 pub async fn install_component(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
-    ensure_installed(app).await
+    let should_restart = app
+        .try_state::<AppState>()
+        .map(|state| state.config.get_bool("PICOAGENT_TTS_ENABLED", false))
+        .unwrap_or(false);
+    let was_running = has_running_child(app);
+    if was_running {
+        stop(app);
+        clear_stopping(app);
+    }
+    let result = ensure_installed_inner(app, true).await;
+    if should_restart {
+        clear_stopping(app);
+        if let Err(error) = ensure_started(app).await {
+            let _ = append_log(app, &format!("Aivis修復後の再起動に失敗しました: {error}"));
+        }
+    }
+    result
 }
 
 fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
@@ -1111,6 +1187,13 @@ pub fn stop(app: &tauri::AppHandle) {
     }
 }
 
+/// 設定変更や修復後に再起動するときだけ、終了防止フラグを戻す。
+pub fn clear_stopping(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<AivisState>() {
+        state.stopping.store(false, Ordering::SeqCst);
+    }
+}
+
 fn terminate_child(child: &mut std::process::Child) {
     #[cfg(windows)]
     {
@@ -1145,5 +1228,35 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
     };
     if let Some(mut child) = child {
         terminate_child(&mut child);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replace_install_tree;
+
+    #[test]
+    fn aivis入れ替え失敗時は旧版を復元する() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-aivis-replace-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let install = root.join("aivis");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("version.txt"), b"old").unwrap();
+
+        assert!(replace_install_tree(&root.join("missing-stage"), &install).is_err());
+        assert_eq!(std::fs::read(install.join("version.txt")).unwrap(), b"old");
+
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("version.txt"), b"new").unwrap();
+        replace_install_tree(&stage, &install).unwrap();
+        assert_eq!(std::fs::read(install.join("version.txt")).unwrap(), b"new");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

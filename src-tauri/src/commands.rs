@@ -2710,6 +2710,7 @@ pub fn restart_app(
     if restart_aivis {
         aivis::stop(&app);
         if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+            aivis::clear_stopping(&app);
             let handle = app.clone();
             if let Err(error) = aivis::start_background(&handle) {
                 crate::log_paths::append_app_log(

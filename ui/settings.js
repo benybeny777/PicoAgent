@@ -905,7 +905,7 @@ function buildComponentManager() {
       const button = el("button", {
         className: item.ready ? "secondary" : "primary",
         type: "button",
-        textContent: managed ? (item.ready ? "公式配布から修復" : "公式配布から導入") : "公式ページを開く",
+        textContent: managed ? (item.ready ? "公式配布から再導入" : "公式配布から導入") : "公式ページを開く",
         disabled: !item.available,
       });
       button.addEventListener("click", async () => {
@@ -2394,6 +2394,7 @@ async function render() {
     field("PICOAGENT_HOTKEY_SUMMON", "呼び出すキー", "text", v.PICOAGENT_HOTKEY_SUMMON ?? "", "CommandOrControl+Alt+P"),
     field("PICOAGENT_HOTKEY_HIDE", "隠す／戻すキー", "text", v.PICOAGENT_HOTKEY_HIDE ?? "", "CommandOrControl+Alt+H"),
     field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"),
+    field("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", "AIモデル一覧の待ち時間（秒）", "text", v.PICOAGENT_HTTP_METADATA_TIMEOUT_SECS ?? "", "15"),
     field("PICOAGENT_SUPER_AGENT", "計画・自己評価・分担を強化する", "checkbox", v.PICOAGENT_SUPER_AGENT === true),
     field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "強化モードの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"),
     field("PICOAGENT_QUICK_ACTIONS", "クイックアクション（1行1件「ラベル|送る文章」）", "textarea", v.PICOAGENT_QUICK_ACTIONS ?? "", "👀 画面を見る|今の画面を見て、状況を短く教えて"),
