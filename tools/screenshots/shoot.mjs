@@ -77,7 +77,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs }) => `
+const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -112,7 +112,7 @@ window.__TAURI__ = {
       live2dSdkOverrides: ${JSON.stringify(live2dSdkOverrides)},
       history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0",
-      onboardingDone: true, relationshipMemoryEnabled: false,
+      onboardingDone: ${JSON.stringify(onboardingDone)}, relationshipMemoryEnabled: false,
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
     }), ${JSON.stringify(initDelayMs)}));
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
@@ -125,6 +125,13 @@ window.__TAURI__ = {
     if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), 80));
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
+    if (name === "settings_components_status") return Promise.resolve([
+      { id: "aivis", ready: true, available: true },
+      { id: "whisper", ready: false, available: true },
+      { id: "tha3", ready: false, available: true },
+      { id: "office", ready: false, available: false },
+      { id: "tools", ready: false, available: true },
+    ]);
     return Promise.resolve({});
   } },
   event: { listen: (ch, cb) => { const a = (window.__listeners[ch] ||= []); a.push(cb);
@@ -242,14 +249,14 @@ function unionBounds(boxes) {
 async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0,
-  bootHoldMs = 0, waitForReady = true, forcePng = false,
+  bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   // 「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone }));
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -813,6 +820,18 @@ if (process.env.SHOOT_DEBUG_BOOT) {
   await page.screenshot({ path: join(debugDir, `boot-${characterId}-${layout}.png`), omitBackground: true });
   await page.close();
   console.log(`  起動画面確認: ${join(debugDir, `boot-${characterId}-${layout}.png`)}`);
+}
+
+if (process.env.SHOOT_DEBUG_ONBOARDING) {
+  const page = await openScene({ width: 680, height: 430, onboardingDone: false });
+  await page.locator('button[data-mode="both"]').click();
+  await page.waitForSelector("#onboardingComponentStep:not([hidden])");
+  await page.waitForTimeout(300);
+  const debugDir = join(ROOT, "temp", "onboarding-check");
+  mkdirSync(debugDir, { recursive: true });
+  await page.screenshot({ path: join(debugDir, "components.png"), omitBackground: true });
+  await page.close();
+  console.log(`  初回追加機能確認: ${join(debugDir, "components.png")}`);
 }
 
 const wantsLive2d = (!only.length || only.some(name => name.startsWith("live2d-")))

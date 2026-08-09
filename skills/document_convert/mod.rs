@@ -15,6 +15,9 @@ pub struct DocumentConvertTool;
 /// 同梱 OfficeCLI（LibreOffice）の探索先ディレクトリ候補。
 fn bundled_office_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    if let Some(root) = crate::components::runtime_root() {
+        dirs.push(root.join("office"));
+    }
     if let Ok(cwd) = std::env::current_dir() {
         dirs.push(cwd.join("src-tauri/resources/bundled/office"));
         dirs.push(cwd.join("resources/bundled/office"));

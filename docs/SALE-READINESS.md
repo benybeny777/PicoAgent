@@ -19,6 +19,7 @@ cargo xtask build-distribution
 - [ ] EULAを事業者情報・販売条件・返金条件に合わせ、専門家確認後に `eulaReviewed=true`
 - [ ] プライバシー表示を実際の販売サイト・外部連携一覧に合わせ、専門家確認後に `privacyReviewed=true`
 - [ ] `src-tauri/resources/bundled/` と `ui/vendor/` の実ファイルを台帳へ落とし、再配布・帰属・ソース提供条件を確認後に `thirdPartyInventoryReviewed=true`
+- [ ] `cargo xtask package-components` でWindows／macOSの追加機能パッケージを作成・公開し、`component-manifest.json` のURL／サイズ／SHA-256を確定後に `components.packagesPublished=true`
 - [ ] Live2D拡張性アプリケーションの審査と契約を完了し、追跡可能な社内参照番号を登録
 - [ ] サポート、プライバシー表示、利用条件の公開URLを登録
 - [ ] Tauri updaterの公開鍵と更新先を登録し、秘密鍵を別媒体へバックアップ

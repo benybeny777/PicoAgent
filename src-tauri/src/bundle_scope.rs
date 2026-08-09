@@ -12,10 +12,16 @@
 // 追加すること。
 
 /// `bundle.resources` に書いてよいもの。追加するときは、なぜ製品へ同梱するのかを書き添える。
-const ALLOWED_RESOURCES: [(&str, &str); 1] = [(
-    "resources/bundled/**/*",
-    "同梱エンジン・読み上げ・Whisper・THA3・OfficeCLI・OSS ツールの実行ファイル",
-)];
+const ALLOWED_RESOURCES: [(&str, &str); 2] = [
+    (
+        "resources/bundled/**/*",
+        "通常ビルド用の同梱エンジン・追加機能実行ファイル",
+    ),
+    (
+        "resources/component-manifest.json",
+        "軽量配布版が追加機能の取得先・サイズ・SHA-256を検証するためのマニフェスト",
+    ),
+];
 
 /// `ui/` に置いてよい拡張子。ここは製品へ丸ごと入るため、webview が実行時に使うものだけ。
 const ALLOWED_UI_EXTENSIONS: [&str; 12] = [

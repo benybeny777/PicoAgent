@@ -51,6 +51,13 @@ window.__TAURI__ = {
     if (name === "settings_load") return ${JSON.stringify(settingsData)};
     if (name === "pet_user_characters") return { characters: [], root: "" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
+    if (name === "settings_components_status") return [
+      { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: false },
+      { id: "whisper", label: "音声入力・文字起こし", description: "Whisperを端末内で動かします。", sizeLabel: "約0.5GB", ready: false, available: true, removable: false },
+      { id: "tha3", label: "1枚絵からキャラ作成", description: "THA3で動く2Dキャラを作ります。", sizeLabel: "約5.2GB", ready: false, available: true, removable: false },
+      { id: "office", label: "Office変換", description: "OfficeCLIで文書変換を補助します。", sizeLabel: "約1.5GB", ready: false, available: false, removable: false },
+      { id: "tools", label: "PDF・画像・文書ツール", description: "FFmpeg等を追加します。", sizeLabel: "約1.0GB", ready: false, available: true, removable: false },
+    ];
     if (name === "pet_list_downloaded_models") return { models: [] };
     if (name === "settings_list_models") return [];
     if (name === "engine_status") return { phase: "ready" };
@@ -91,9 +98,14 @@ try {
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   await page.getByRole("tab", { name: "基本設定" }).click();
-  if (await page.locator(".quick-settings-card").count() !== 4) throw new Error("よく使う設定への入口が4件ではありません");
+  if (await page.locator(".quick-settings-card").count() !== 5) throw new Error("よく使う設定への入口が5件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
   await page.screenshot({ path: join(OUT, "basic-tab.png") });
+  await page.getByRole("tab", { name: "追加機能" }).click();
+  await page.waitForSelector(".component-card");
+  if (await page.locator(".component-card").count() !== 6) throw new Error("基本を含む追加機能カードが6件ではありません");
+  await page.screenshot({ path: join(OUT, "components-tab.png") });
+  await page.getByRole("tab", { name: "基本設定" }).click();
   await page.locator('[data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
   const dirtyText = await page.locator("#dirtySummary").textContent();
   if (!dirtyText?.includes("未保存")) throw new Error(`未保存件数が表示されません: ${dirtyText}`);
@@ -116,7 +128,7 @@ try {
   if (await page.locator(".product-info-card").count() !== 4) throw new Error("製品情報カードが4件ではありません");
   if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
   await page.screenshot({ path: join(OUT, "diagnostics-tab.png") });
-  console.log(`設定画面確認: 入口4件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図・配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図・配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

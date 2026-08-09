@@ -100,6 +100,23 @@
           </div>
           <small>軽く、邪魔せず、必要なときにそっと手伝います。</small>
         </div>
+        <div id="onboardingComponentStep" hidden>
+          <h1 id="onboardingComponentTitle">追加機能を準備する？</h1>
+          <p>必要なものだけ選べます。あとから設定の「追加機能」で変更できます。本体、ローカルAIエンジン、Live2D表示は基本機能です。</p>
+          <div class="onboarding-components">
+            <label data-component-id="aivis"><input type="checkbox" value="aivis"><span><b>音声読み上げ</b><small>Aivis・約0.8GB＋音声モデル（導入後もミュート）</small></span><em>確認中</em></label>
+            <label data-component-id="whisper"><input type="checkbox" value="whisper"><span><b>音声入力・文字起こし</b><small>Whisper・約0.5GB</small></span><em>確認中</em></label>
+            <label data-component-id="tha3"><input type="checkbox" value="tha3"><span><b>1枚絵からキャラ作成</b><small>THA3・Windowsは約5.2GB</small></span><em>確認中</em></label>
+            <label data-component-id="office"><input type="checkbox" value="office"><span><b>Office変換</b><small>OfficeCLI・約1.5GB</small></span><em>確認中</em></label>
+            <label data-component-id="tools"><input type="checkbox" value="tools"><span><b>PDF・画像・文書ツール</b><small>FFmpeg等・約1.0GB</small></span><em>確認中</em></label>
+          </div>
+          <p id="onboardingComponentStatus" class="onboarding-component-status" aria-live="polite"></p>
+          <div class="onboarding-component-actions">
+            <button type="button" data-onboarding-action="install-components">選んだ機能を準備</button>
+            <button type="button" data-onboarding-action="skip-components">今はしない</button>
+          </div>
+          <button class="onboarding-back" type="button" data-onboarding-action="back-purpose">← 用途選択へ戻る</button>
+        </div>
         <div id="onboardingCharacterStep" hidden>
           <h1 id="onboardingCharacterTitle">好きなキャラを追加する？</h1>
           <p>Live2Dは配布元から自分で取得したzipを追加できます。今は追加せず、あとから設定しても大丈夫です。</p>
@@ -108,7 +125,7 @@
             <a class="onboarding-link" href="https://www.live2d.com/learn/sample/" target="_blank" rel="noreferrer"><b>公式サンプルを見る</b><span>利用条件を確認してブラウザから取得</span></a>
             <button type="button" data-onboarding-action="skip-character"><b>今はしない</b><span>いつでも「キャラ・音声」から追加できます</span></button>
           </div>
-          <button class="onboarding-back" type="button" data-onboarding-action="back">← 用途選択へ戻る</button>
+          <button class="onboarding-back" type="button" data-onboarding-action="back-components">← 追加機能へ戻る</button>
           <small>サンプルモデルはPicoAgentに同梱せず、自動ダウンロードもしません。</small>
         </div>
       </div>

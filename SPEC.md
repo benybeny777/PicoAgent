@@ -187,7 +187,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 `PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。起動時・キャラクター変更時に吹き出しへ出る挨拶（`character.json` の `greeting`）も同じ経路で読み上げる。
 
-- 読み上げには同梱 Aivis だけを使い、接続先は `http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）とする。旧固定ポート `10102` が保存されている場合は起動時に旧既定扱いで `11436` へ移行する。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に同梱 AivisSpeech Engine を即 spawn する。設定画面で表示する音声項目は ON/OFF と音量だけにし、デバイス・ポート・speaker ID は通常UIでは非表示の内部設定として扱う。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
+- 読み上げにはPicoAgent管理下の Aivis だけを使う。通常開発版はアプリ資源、軽量販売版は初回／設定画面で選択導入した利用者データ側を解決する。接続先は `http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）とする。旧固定ポート `10102` が保存されている場合は起動時に旧既定扱いで `11436` へ移行する。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に AivisSpeech Engine を即 spawn する。設定画面で表示する音声項目は ON/OFF と音量だけにし、デバイス・ポート・speaker ID は通常UIでは非表示の内部設定として扱う。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
 - フロントは `pet_speak` が返す WAV バイト列を `Blob` / `Audio` で再生するため、Tauri の CSP は `media-src 'self' blob: data:` を許可する。再生時は `PICOAGENT_TTS_VOLUME`（0〜100）を `Audio.volume` に反映し、設定保存後の `pet:ui` で再生中の音量も即時変更する。再生失敗時はエラー内容をステータスへ表示する。
 - 推論デバイスは内部設定 `PICOAGENT_TTS_DEVICE` で `auto` / `cpu` / `gpu` を選ぶ。`gpu` は `--use_gpu`、`cpu` は `--no-use_gpu` で起動する。`auto` は起動前に GPU 候補を確認し、Windows では NVIDIA / Radeon・Vega・Graphics 表記のある AMD APU/表示アダプタ / Intel 系の表示アダプタを候補として、GPU 候補があれば `--use_gpu`、なければ `--no-use_gpu` で起動する。AMD CPU だけの環境は GPU 候補にしない。CPU/GPU の明示指定は自動判定より優先する。
 - 初回合成では話者モデルのロードで時間がかかるため、Aivis への HTTP タイムアウトは 180 秒にする。キャラクター固有の AivisHub モデル導入は `pet_prepare_voice_model` で事前に行い、未導入時の長い AIVMX ダウンロード待ちはローディング画面の「声を準備中…」に集約する。
@@ -200,12 +200,22 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 ### 同梱Whisper CLI（`meeting_recorder`）
 
-録音文字起こしには whisper.cpp の `whisper-cli` をCLI実行で使う。常駐サーバは立てず、ポートも使わないため、ユーザーが手動で起動している別Whisperサーバや別ツールとはポート競合しない。
+録音文字起こしには whisper.cpp の `whisper-cli` をCLI実行で使う。通常開発版はアプリ資源、軽量販売版は選択導入した利用者データ側を解決する。常駐サーバは立てず、ポートも使わないため、ユーザーが手動で起動している別Whisperサーバや別ツールとはポート競合しない。
 
-- 実行ファイルとモデルはリポジトリに含めず、`xtask`（`bundled::fetch_whisper`）（`cargo xtask setup whisper`）で PicoAgent 管理下の専用ディレクトリ `src-tauri/resources/bundled/whisper/` に取得する。既存の手動インストール先、グローバルPATH、常駐サーバ用ポートには既定で触れない。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
+- 実行ファイルとモデルはリポジトリに含めない。通常開発版は `cargo xtask setup whisper` で `src-tauri/resources/bundled/whisper/` に取得し、軽量販売版は追加機能パッケージから利用者データ側へ導入する。既存の手動インストール先、グローバルPATH、常駐サーバ用ポートには既定で触れない。
 - `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されている場合は、手動インストール済みの実行ファイル・モデルを最優先する。空の場合だけ同梱 `whisper-cli` と同梱モデルを使う。
 - 文字起こし時は `whisper-cli` を子プロセスとして1回だけ起動し、完了・失敗・タイムアウトで終了する。標準入力は使わず、`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` で上限時間を設ける。
-- Windows のアンインストールでは、PicoAgent 管理下の `resources/bundled/whisper/` と一時展開先 `%TEMP%\picoagent-whisper` だけを削除する。外部に手動導入した `whisper-cli` やモデルは削除しない。
+- 設定画面から削除できるのは利用者データ側のPicoAgent管理領域だけとする。外部に手動導入した `whisper-cli` やモデル、アプリ資源側の開発用同梱物は削除しない。
+
+### 初回追加機能ウィザード（`components.rs`）
+
+初回セットアップは「用途 → 追加機能 → Live2D追加案内」の三段階とする。追加機能では Aivis／Whisper／THA3／OfficeCLI／PDF・画像・文書ツールを個別選択し、選ばなくても本体、ローカルAIエンジン、Live2D表示は使える。設定画面にも独立した「追加機能」タブを置き、同じ `settings_components_status` / `settings_components_install` 経路で状態確認・導入・修復し、`settings_components_remove` で利用者領域の対象だけを二段階確認後に削除する。「使い方」から初回セットアップ全体を再表示しても履歴・設定・追加済みキャラは削除しない。Aivisを導入しても `PICOAGENT_TTS_ENABLED` は変更せず、読み上げはミュートのままとする。
+
+- 実行時の正本はユーザーデータ配下 `PicoAgent/bundled/<component-id>/`。各実行パスはここを最優先し、開発版・従来版では `resources/bundled/<component-id>/` を互換配置として使う。
+- 軽量販売ビルドは `tauri.distribution.conf.json` と `installer-hooks-lite.nsh` を使い、基本のローカルAIエンジンと `component-manifest.json` だけを同梱する。通常の開発用 `build` は回帰確認用に従来の同梱物を保持する。
+- OS別パッケージは `cargo xtask package-components` で `distribution/components/` に作る。THA3はコード・モデルだけでなく専用runtimeが揃わなければパッケージ作成を拒否する。生成したファイル名・バイト数・SHA-256を `src-tauri/resources/component-manifest.json` へ原子的に記録する。
+- 取得は接続30秒・無受信120秒タイムアウト、単体8GB上限とし、ストリームを一時ファイルへ書く。予定サイズとSHA-256が一致した場合だけ展開する。zipは `enclosed_name()`、10万ファイル、展開後16GB上限で検査し、`.installing-*` へ展開後にrenameで確定する。失敗・アプリ終了・Future中断では一時zipとステージをDropガードで掃除する。macOSではzip内の実行権限も復元する。
+- パッケージ未公開・対象OSなしは黙って無効化せず、初回／設定画面で「公開準備中」と表示する。`distribution/release.json` の `components.packagesPublished` と `components.baseUrl` が確定するまで販売ゲートを通さない。
 - `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` を追加する。既定は whisper.cpp の tinydiarize 用 `-tdrz` だが、話者分類の精度とマーカー形式は利用するローカル実装・モデルに依存する。
 
 ---
@@ -273,7 +283,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 同梱キャラクターは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれるため、実行時には増減できない。**自分で追加した Live2D モデル等は `app_data_dir/characters/<id>/` に置く**（`user_characters.rs`）。webview へは asset プロトコル（`convertFileSrc`）で読ませるので、`tauri.conf.json` の `app.security.assetProtocol.scope` を `$APPDATA/characters/**` に限定し、CSP へ `asset:` / `http://asset.localhost` を足してある（`tauri` の `protocol-asset` フィーチャが必要）。
 
 - 導入経路は設定画面の「キャラ・音声」タブ（zip またはフォルダを選ぶ）。選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、フロントへはパスだけを返す（プラグインの JS バインディングを配信物へ足さずに済ませるため）。完成済みPicoAgentパックは `settings_character_install`、利用者が配布元から自分で取得した生のLive2Dデータは `settings_character_install_live2d` を使う。
-- 生のLive2D導入は `.model3.json` を再帰的に探し、1個だけならその親フォルダを組み込み用データとしてコピーして `character.json` を自動生成する。0個または複数なら曖昧に選ばず拒否する。公式サンプルを含むモデル実体をアプリが代理取得・再配布しない。通常の `cargo xtask setup live2d` / `dev` / `build` はランタイムだけを取得し、開発者向けサンプル取得は `cargo xtask setup live2d-samples` の明示操作に限定する。製品ビルドは `distribution/release.json` の配布許可リストだけを同期する。初回案内は用途選択の次にLive2D追加／公式配布ページ／後回しを選ばせ、追加時は `character-add` 経路でキャラタブの導入欄を開く。`pet_show_onboarding` は設定ウィンドウを隠してメインへ `pet:show-onboarding` を送り、保存済みデータを消さず同じ案内を再表示する。
+- 生のLive2D導入は `.model3.json` を再帰的に探し、1個だけならその親フォルダを組み込み用データとしてコピーして `character.json` を自動生成する。0個または複数なら曖昧に選ばず拒否する。公式サンプルを含むモデル実体をアプリが代理取得・再配布しない。通常の `cargo xtask setup live2d` / `dev` / `build` はランタイムだけを取得し、開発者向けサンプル取得は `cargo xtask setup live2d-samples` の明示操作に限定する。製品ビルドは `distribution/release.json` の配布許可リストだけを同期する。初回案内は用途選択と追加機能選択の次にLive2D追加／公式配布ページ／後回しを選ばせ、追加時は `character-add` 経路でキャラタブの導入欄を開く。`pet_show_onboarding` は設定ウィンドウを隠してメインへ `pet:show-onboarding` を送り、保存済みデータを消さず同じ案内を再表示する。
 - THA3生成経路は同じタブの「1枚絵からキャラクターを作成」。`settings_tha3_status` / `settings_tha3_pick_source` / `settings_tha3_pick_root` / `settings_tha3_generate` / `settings_tha3_cancel` を使い、512x512透過PNGから17キーポーズ・42フレームの一時パックを生成する。入力画像と手動選択したTHA3フォルダは共通permissionsで検証する。画像プレビューはasset protocolの許可範囲を広げず、20MB以下の選択済みPNGだけをdata URLとして返す。生成パックは通常の `character_pack::validate` と `user_characters::install` を通った場合だけ確定する。
 - THA3のPython子プロセスは `tha3_creator.rs` が `tools::process::command()` で起動し、標準出力・標準エラーを `tha3:progress` で設定画面へ送る。長時間生成なので全体timeoutは設けないが、GUIキャンセルではkill後にwaitして回収する。設定画面を閉じる際はキャンセルを要求し、アプリ終了時はバックエンドもキャンセル後の回収完了を待つ。生成途中のスクリプト・画像・パックは `app_cache_dir/tha3-creator/` に限定し、成功・失敗・中断の全経路で掃除する。
 - 導入は「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順。検証を通らなかったものが導入先へ残らない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
@@ -742,6 +752,6 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - ウィンドウ: 透明・枠なし・常に手前・タスクバー表示・最大化不可（`tauri.conf.json`）。ドラッグは `data-tauri-drag-region`。`pet_open_settings(tab)` は省略可能なタブIDを受け取り、新規設定ウィンドウではクエリ、既存ウィンドウでは `settings:navigate` イベントで同じタブへ遷移する。設定画面は保存・再描画後も選択中タブを維持する。
 - アプリ終了時は `RunEvent::Exit` で `engine::stop` が同梱 llama-server の子プロセスを kill し、`aivis::stop` がアプリ自身で裏起動した AivisSpeech Engine だけを停止する。右クリックメニューの「PicoAgent を終了」に加え、チャットでは `app_control` スキルの `quit` で終了できる。さらに `cargo xtask dev` / `cargo xtask build` は Tauri 起動前に残存プロセスの停止を実行し、前回の残存プロセスを停止して同梱 DLL ロックによるビルド失敗（Windows os error 32）を防ぐ。Unix 系では `pgrep` / `pkill` の完全一致で `llama-server` / `PicoAgent` / `picoagent` だけを止め、Aivis は PicoAgent 管理下の `resources/bundled/aivis/run` / `resources/aivis/run` / `PicoAgent/bundled/aivis/run` に一致する `run` だけを止める。手動停止は `cargo xtask stop`。起動・アプリ・フロント・音声・エンジンログは `PicoAgent/log/` に日付付き（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）で集約し、1 日ごとにローテート・1 週間保持する（履歴は対象外）。
 - 権限は `src-tauri/capabilities/default.json`（start-dragging / set-always-on-top / set-fullscreen / set-position / set-size / event / webview 生成）。
-- 製品化: `productName=PicoAgent` / `identifier=com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app` から移行）。設定・履歴・メモリは `app_config_dir`/`app_data_dir` を使い、初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行識別子へコピー移行する。同梱系の実行時取得物はユーザーデータ配下の `PicoAgent/bundled/`、ログは `PicoAgent/log/` にまとめる。`bundle.targets=all` で各 OS の標準バンドルを生成し、Windows は NSIS 設定を保持する。Aivis 同梱で入力データが大きいため、NSIS 圧縮は `zlib` を使う。Rust release profile は LTO・strip・panic abort・debug 情報無効化を有効にして、配布バイナリのシンボル情報を減らす。NSIS は `installer-hooks.nsh` を使い、アンインストール前に PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止する。専用一時ファイルは削除するが、設定・会話履歴・追加キャラ・モデル等のユーザーデータは対話時に削除確認し、既定の「いいえ」とサイレントアンインストールでは残す。
+- 製品化: `productName=PicoAgent` / `identifier=com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app` から移行）。設定・履歴・メモリは `app_config_dir`/`app_data_dir` を使い、初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行識別子へコピー移行する。同梱系の実行時取得物はユーザーデータ配下の `PicoAgent/bundled/`、ログは `PicoAgent/log/` にまとめる。`bundle.targets=all` で各 OS の標準バンドルを生成し、Windows は NSIS 設定を保持する。通常開発版は従来同梱物と `installer-hooks.nsh`、軽量販売版は基本エンジンと `installer-hooks-lite.nsh` を使う。後者の追加機能はマニフェストの予定サイズとSHA-256を検査して選択導入する。Rust release profile は LTO・strip・panic abort・debug 情報無効化を有効にして、配布バイナリのシンボル情報を減らす。アンインストール前は PicoAgent / llama-server / PicoAgent 配下の Aivis `run.exe` を停止する。専用一時ファイルは削除するが、設定・会話履歴・追加キャラ・モデル等のユーザーデータは対話時に削除確認し、既定の「いいえ」とサイレントアンインストールでは残す。
   アイコンは `src-tauri/icons/`（`npx tauri icon src-tauri/icon-source.png` で再生成）。
   `cargo xtask build` と `cargo xtask build-distribution` はどちらも `distribution/release.json` の許可キャラだけを同期し、開発用サンプルが手元にあっても製品へ混ぜない。後者だけはEULA／プライバシー確認、第三者同梱物台帳、Live2D審査参照、公開URL、更新署名、Windows／macOS署名、3箇所の版一致、販売対象キャラの存在を検査し、未完了なら取得・同期より前に停止する。秘密鍵・証明書は販売設定へ含めない。

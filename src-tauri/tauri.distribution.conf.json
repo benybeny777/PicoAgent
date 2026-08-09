@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "resources": [
+      "resources/bundled/engine/**/*",
+      "resources/component-manifest.json"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer-hooks-lite.nsh"
+      }
+    }
+  }
+}

@@ -116,6 +116,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
 | `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `SPEC.md` に載っているか、逆に SPEC だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
 | `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる |
+| `src-tauri/src/components.rs` | **初回追加機能の取得・検証・原子的導入**。Aivis／Whisper／THA3／Office／文書ツールの状態とOS別パッケージを管理し、設定画面の再実行も同じ経路を使う。販売用パッケージは `cargo xtask package-components` で作る |
 | `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないかを検出する |
 | `src-tauri/src/tha3_creator.rs` | 設定画面の1枚絵THA3生成。同梱／開発用の専用Python子プロセス・進捗・キャンセル・一時パックを管理し、共通検証後に追加キャラクター領域へ導入する |
 | `src-tauri/src/bundle_scope.rs` | **配布物の範囲を固定する設計ガード**（テスト専用）。製品に入るのは `ui/` を写した `ui-dist/` と `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・撮影用画像（`tools/` `docs/` `scripts/` `xtask/`）が混ざらないよう、リソース指定・配信元・`ui/` に置ける拡張子を allowlist で固定する |

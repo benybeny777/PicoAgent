@@ -123,6 +123,9 @@ fn minutes_path_from_transcript(cfg: &Config, transcript_path: &SafePath) -> Res
 
 fn bundled_whisper_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    if let Some(root) = crate::components::runtime_root() {
+        dirs.push(root.join("whisper"));
+    }
     if let Ok(cwd) = std::env::current_dir() {
         dirs.push(cwd.join("src-tauri/resources/bundled/whisper"));
         dirs.push(cwd.join("resources/bundled/whisper"));

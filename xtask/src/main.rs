@@ -9,6 +9,7 @@ mod assets;
 mod bundled;
 mod character_pack;
 mod cli;
+mod component_packages;
 mod office;
 mod release;
 mod tools;
@@ -28,6 +29,7 @@ const USAGE: &str = "\
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
+  package-components  現在のOS向け追加機能パッケージと取得マニフェストを生成
   setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
                       （省略時は製品へ同梱する全対象）
   sync-characters     characters/ を ui/assets/characters/ へ同期
@@ -65,6 +67,7 @@ fn run(args: &[String]) -> Result<()> {
             let _ = release::check(false)?;
             Ok(())
         }
+        "package-components" => component_packages::package_current_platform(),
         "setup" => setup(rest),
         "sync-characters" => assets::sync_characters(),
         "character-pack" => character_pack::run(rest),
@@ -143,27 +146,31 @@ fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
     }
     assets::build_ui_dist(release)?;
     bundled::fetch_engine()?;
-    office::fetch_aivis()?;
-    // 文字起こしはベストエフォート（公式バイナリ配布が無い OS がある）。
-    if let Err(error) = bundled::fetch_whisper() {
-        util::warn("setup:whisper", error.to_string());
-        util::warn(
-            "setup:whisper",
-            "文字起こしなしでの起動を続行します。必須にする場合は WHISPER_REQUIRED=1 を指定してください。",
-        );
-        if util::flag("WHISPER_REQUIRED") {
-            bail!("同梱 Whisper を取得できませんでした");
+    if !distribution {
+        office::fetch_aivis()?;
+        // 文字起こしはベストエフォート（公式バイナリ配布が無い OS がある）。
+        if let Err(error) = bundled::fetch_whisper() {
+            util::warn("setup:whisper", error.to_string());
+            util::warn(
+                "setup:whisper",
+                "文字起こしなしでの起動を続行します。必須にする場合は WHISPER_REQUIRED=1 を指定してください。",
+            );
+            if util::flag("WHISPER_REQUIRED") {
+                bail!("同梱 Whisper を取得できませんでした");
+            }
         }
+        bundled::fetch_tha3()?;
+        office::fetch_office()?;
+        tools::fetch_all()?;
     }
-    bundled::fetch_tha3()?;
-    office::fetch_office()?;
-    tools::fetch_all()?;
 
     log("xtask", format!("cargo tauri {mode} を開始します"));
-    let status = Command::new("cargo")
-        .arg("tauri")
-        .arg(mode)
-        .args(extra)
+    let mut command = Command::new("cargo");
+    command.arg("tauri").arg(mode).args(extra);
+    if distribution {
+        command.args(["--config", "src-tauri/tauri.distribution.conf.json"]);
+    }
+    let status = command
         .current_dir(repo_root())
         .status()
         .context(

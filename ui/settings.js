@@ -28,6 +28,7 @@ let characterDefaultVoices = {};
 let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
 let tha3ProgressUnlisten = null;
+let componentProgressUnlisten = null;
 let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
@@ -42,7 +43,7 @@ let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGEN
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
   { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
@@ -94,6 +95,7 @@ window.picoagent.listen("settings:navigate", tabId => {
 
 window.addEventListener("beforeunload", () => {
   if (tha3ProgressUnlisten) tha3ProgressUnlisten();
+  if (componentProgressUnlisten) componentProgressUnlisten();
   // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
   if (tha3GenerationRunning) window.picoagent.settings.cancelTha3Generation().catch(() => {});
 });
@@ -825,6 +827,7 @@ function quickSettingsGuide(v) {
     { tab: "character", title: "キャラと声", summary: `${v.PICOAGENT_CHARACTER || "既定キャラ"}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}` },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
     { tab: "providers", title: "使うAI", summary: provider?.label || v.PICOAGENT_PROVIDER || "ローカル" },
+    { tab: "components", title: "追加機能", summary: "音声・文字起こし・文書ツール" },
     { tab: "diagnostics", title: "困ったとき", summary: "接続確認と修復" },
   ];
   const grid = el("div", { className: "quick-settings-grid" });
@@ -841,10 +844,10 @@ function quickSettingsGuide(v) {
   return markSearchable(el("section", { className: "quick-settings" }, [
     el("div", { className: "quick-settings-heading" }, [
       el("h2", { textContent: "まずはここから" }),
-      el("p", { textContent: "普段はこの4つだけ見れば大丈夫です。" }),
+      el("p", { textContent: "普段はこの5つを入口にすれば大丈夫です。" }),
     ]),
     grid,
-  ]), "よく使う 設定 キャラクター 音声 画面 レイアウト AI モデル 診断 修復");
+  ]), "よく使う 設定 キャラクター 音声 画面 レイアウト AI モデル 追加機能 診断 修復");
 }
 
 function setQuickSettingsSummary(tabId, summary) {
@@ -871,6 +874,100 @@ function advancedGroup(title, note, children) {
     note ? el("p", { className: "advanced-group-note", textContent: note }) : null,
     ...children,
   ].filter(Boolean));
+}
+
+function buildComponentManager() {
+  const sec = section("追加機能を導入・修復");
+  sec.classList.add("component-manager");
+  sec.append(el("p", {
+    className: "settings-intro",
+    textContent: "必要な機能だけをPicoAgent専用領域へ導入します。グローバル環境やPATHは変更しません。読み上げ機能を導入してもミュート設定は変わりません。",
+  }));
+  const core = el("div", { className: "component-card is-ready" }, [
+    el("div", { className: "component-card-copy" }, [
+      el("strong", { textContent: "基本機能" }),
+      el("span", { textContent: "PicoAgent本体・ローカルAIエンジン・Live2D表示" }),
+      el("small", { textContent: "常に使用できます。ローカルAIモデルはPC性能に合わせて起動時に準備します。" }),
+    ]),
+    el("span", { className: "component-badge", textContent: "基本" }),
+  ]);
+  const list = el("div", { className: "component-list" }, [el("p", { className: "hint", textContent: "状態を確認中…" })]);
+  const status = el("p", { className: "hint component-manager-status" });
+  sec.append(core, list, status);
+
+  async function refresh() {
+    const items = await window.picoagent.settings.componentStatus();
+    list.innerHTML = "";
+    for (const item of items) {
+      const button = el("button", {
+        className: item.ready ? "secondary" : "primary",
+        type: "button",
+        textContent: item.ready ? "確認・修復" : "導入する",
+        disabled: !item.available,
+      });
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        status.textContent = `${item.label}を準備しています…`;
+        try {
+          await window.picoagent.settings.installComponents([item.id]);
+          status.textContent = `${item.label}を準備しました。`;
+          await refresh();
+        } catch (error) {
+          status.textContent = `準備できませんでした: ${error?.message || error}`;
+          button.disabled = false;
+        }
+      });
+      const actions = el("div", { className: "component-card-actions" }, [button]);
+      if (item.removable) {
+        const remove = el("button", { className: "danger", type: "button", textContent: "削除" });
+        remove.addEventListener("click", async () => {
+          if (remove.dataset.confirming !== "true") {
+            remove.dataset.confirming = "true";
+            remove.textContent = "もう一度押して削除";
+            return;
+          }
+          remove.disabled = true;
+          status.textContent = `${item.label}を削除しています…`;
+          try {
+            await window.picoagent.settings.removeComponent(item.id);
+            status.textContent = `${item.label}を削除しました。`;
+            await refresh();
+          } catch (error) {
+            status.textContent = `削除できませんでした: ${error?.message || error}`;
+            remove.disabled = false;
+          }
+        });
+        remove.addEventListener("blur", () => {
+          remove.dataset.confirming = "false";
+          remove.textContent = "削除";
+        });
+        actions.append(remove);
+      }
+      list.append(markSearchable(el("div", { className: `component-card${item.ready ? " is-ready" : ""}` }, [
+        el("div", { className: "component-card-copy" }, [
+          el("strong", { textContent: item.label }),
+          el("span", { textContent: item.description }),
+          el("small", { textContent: item.sizeLabel }),
+        ]),
+        el("span", { className: "component-badge", textContent: item.ready ? "準備済み" : (item.available ? "未導入" : "公開準備中") }),
+        actions,
+      ]), item.id, item.label, item.description));
+    }
+    applySettingsSearch();
+  }
+
+  if (componentProgressUnlisten) componentProgressUnlisten();
+  window.picoagent.listen("component:progress", progress => {
+    const percent = progress.total > 0 ? ` ${Math.min(100, Math.round(progress.downloaded / progress.total * 100))}%` : "";
+    status.textContent = `${progress.message}${percent}`;
+  }).then(unlisten => { componentProgressUnlisten = unlisten; }).catch(error => {
+    logApp("warn", "追加機能の進捗を受け取れませんでした", errorDetail(error));
+  });
+  refresh().catch(error => {
+    list.innerHTML = "";
+    list.append(el("p", { className: "hint", textContent: `状態を確認できません: ${error?.message || error}` }));
+  });
+  return sec;
 }
 
 function createTabs(items) {
@@ -2148,12 +2245,14 @@ async function render() {
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
     { id: "character", label: "キャラ・音声" },
+    { id: "components", label: "追加機能" },
     { id: "providers", label: "AIモデル・連携" },
     { id: "tools", label: "スキル" },
     { id: "permissions", label: "安全・許可" },
     { id: "skillguide", label: "使い方" },
     { id: "diagnostics", label: "診断・修復" },
   ]);
+  panels.components.append(buildComponentManager());
 
   // --- グローバル設定 ---
   const global = section("基本");

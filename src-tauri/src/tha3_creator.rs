@@ -99,6 +99,7 @@ fn candidate_roots(app: &AppHandle) -> Result<Vec<PathBuf>> {
         .app_data_dir()
         .context("アプリデータフォルダを取得できません")?;
     let mut roots = Vec::new();
+    roots.push(crate::log_paths::bundled_dir(app).join("tha3"));
     if let Ok(resources) = app.path().resource_dir() {
         roots.push(resources.join("resources/bundled/tha3"));
     }

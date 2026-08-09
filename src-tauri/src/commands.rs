@@ -770,6 +770,41 @@ pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
     main.set_focus().map_err(|error| error.to_string())
 }
 
+/// 初回起動と設定画面で共用する追加コンポーネントの準備状態。
+#[tauri::command]
+pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
+    crate::components::statuses(&app)
+        .and_then(|items| serde_json::to_value(items).map_err(Into::into))
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// 選択した追加コンポーネントをPicoAgent専用領域へ導入する。
+#[tauri::command]
+pub async fn settings_components_install(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<Value, String> {
+    crate::components::install(&app, &ids)
+        .await
+        .and_then(|items| serde_json::to_value(items).map_err(Into::into))
+        .map_err(|error| {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("追加機能の導入に失敗しました: {error:#}"),
+            );
+            format!("{error:#}")
+        })
+}
+
+/// 利用者が選んだ追加コンポーネントだけをPicoAgent専用領域から削除する。
+#[tauri::command]
+pub async fn settings_components_remove(app: AppHandle, id: String) -> Result<Value, String> {
+    crate::components::remove(&app, &id)
+        .await
+        .and_then(|items| serde_json::to_value(items).map_err(Into::into))
+        .map_err(|error| format!("{error:#}"))
+}
+
 #[tauri::command]
 pub fn pet_daily_greeting(state: State<'_, AppState>) -> Result<Value, String> {
     use chrono::{Datelike, Local, Timelike};
@@ -3534,8 +3569,8 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
         // 旧「音声」入口は統合後のキャラクター・音声タブへ送る。
         Some("voice") => Some("character"),
         Some(
-            value @ ("basic" | "display" | "character" | "character-add" | "providers" | "tools"
-            | "permissions" | "skillguide" | "diagnostics"),
+            value @ ("basic" | "display" | "character" | "character-add" | "components"
+            | "providers" | "tools" | "permissions" | "skillguide" | "diagnostics"),
         ) => Some(value),
         _ => None,
     }
@@ -3612,6 +3647,7 @@ mod tests {
         assert_eq!(settings_tab(Some("display")), Some("display"));
         assert_eq!(settings_tab(Some("voice")), Some("character"));
         assert_eq!(settings_tab(Some("character-add")), Some("character-add"));
+        assert_eq!(settings_tab(Some("components")), Some("components"));
         assert_eq!(settings_tab(Some("../index")), None);
         assert_eq!(settings_tab(None), None);
     }

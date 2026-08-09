@@ -39,7 +39,9 @@ const variantRow = document.getElementById("variantRow");
 const variantSelect = document.getElementById("variantSelect");
 const onboarding = document.getElementById("onboarding");
 const onboardingPurposeStep = document.getElementById("onboardingPurposeStep");
+const onboardingComponentStep = document.getElementById("onboardingComponentStep");
 const onboardingCharacterStep = document.getElementById("onboardingCharacterStep");
+const onboardingComponentStatus = document.getElementById("onboardingComponentStatus");
 const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
@@ -4430,14 +4432,58 @@ function startAlarmPolling() {
 let selectedOnboardingMode = "";
 
 function showOnboardingStep(step) {
+  const components = step === "components";
   const character = step === "character";
-  if (onboardingPurposeStep) onboardingPurposeStep.hidden = character;
+  if (onboardingPurposeStep) onboardingPurposeStep.hidden = components || character;
+  if (onboardingComponentStep) onboardingComponentStep.hidden = !components;
   if (onboardingCharacterStep) onboardingCharacterStep.hidden = !character;
-  onboarding?.setAttribute("aria-labelledby", character ? "onboardingCharacterTitle" : "onboardingTitle");
-  const focusTarget = character
-    ? onboardingCharacterStep?.querySelector("button[data-onboarding-action]")
-    : onboardingPurposeStep?.querySelector("button[data-mode]");
+  const title = character ? "onboardingCharacterTitle" : (components ? "onboardingComponentTitle" : "onboardingTitle");
+  onboarding?.setAttribute("aria-labelledby", title);
+  const focusTarget = character ? onboardingCharacterStep?.querySelector("button[data-onboarding-action]")
+    : components ? onboardingComponentStep?.querySelector("input:not([disabled]),button[data-onboarding-action]")
+      : onboardingPurposeStep?.querySelector("button[data-mode]");
   focusTarget?.focus();
+  if (components) refreshOnboardingComponents();
+}
+
+async function refreshOnboardingComponents() {
+  if (!onboardingComponentStep) return;
+  try {
+    const statuses = await window.picoagent.settings.componentStatus();
+    for (const item of statuses) {
+      const row = onboardingComponentStep.querySelector(`[data-component-id="${item.id}"]`);
+      if (!row) continue;
+      row.classList.toggle("is-ready", item.ready);
+      row.classList.toggle("is-unavailable", !item.available);
+      const input = row.querySelector("input");
+      if (input) input.disabled = item.ready || !item.available;
+      const badge = row.querySelector("em");
+      if (badge) badge.textContent = item.ready ? "準備済み" : (item.available ? "未導入" : "公開準備中");
+    }
+  } catch (error) {
+    logApp("warn", "追加機能の状態を確認できませんでした", errorDetail(error));
+    if (onboardingComponentStatus) onboardingComponentStatus.textContent = `状態を確認できません: ${error?.message || error}`;
+  }
+}
+
+async function installSelectedOnboardingComponents() {
+  const ids = [...onboardingComponentStep.querySelectorAll("input:checked:not([disabled])")].map(input => input.value);
+  if (!ids.length) {
+    showOnboardingStep("character");
+    return;
+  }
+  onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = true; });
+  if (onboardingComponentStatus) onboardingComponentStatus.textContent = "選んだ追加機能を準備しています…";
+  try {
+    await window.picoagent.settings.installComponents(ids);
+    if (onboardingComponentStatus) onboardingComponentStatus.textContent = "準備できました。";
+    showOnboardingStep("character");
+  } catch (error) {
+    logApp("error", "追加機能を準備できませんでした", errorDetail(error));
+    if (onboardingComponentStatus) onboardingComponentStatus.textContent = `準備できませんでした: ${error?.message || error}`;
+    onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = false; });
+    await refreshOnboardingComponents();
+  }
 }
 
 async function completeSelectedOnboarding(openCharacterSettings) {
@@ -4471,13 +4517,19 @@ onboarding?.addEventListener("click", async event => {
   const modeButton = target?.closest("button[data-mode]");
   if (modeButton) {
     selectedOnboardingMode = modeButton.dataset.mode || "both";
-    showOnboardingStep("character");
+    showOnboardingStep("components");
     return;
   }
   const actionButton = target?.closest("button[data-onboarding-action]");
   const action = actionButton?.dataset.onboardingAction;
-  if (action === "back") {
+  if (action === "back-purpose") {
     showOnboardingStep("purpose");
+  } else if (action === "back-components") {
+    showOnboardingStep("components");
+  } else if (action === "install-components") {
+    await installSelectedOnboardingComponents();
+  } else if (action === "skip-components") {
+    showOnboardingStep("character");
   } else if (action === "add-character") {
     await completeSelectedOnboarding(true);
   } else if (action === "skip-character") {

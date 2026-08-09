@@ -64,3 +64,6 @@ __pycache__/
 
 # 作業用ツールが作る Node のパッケージ置き場（Node はアプリの依存ではないので含めない）
 node_modules/
+
+# OS別の追加機能パッケージ（releaseへ別途アップロードする大容量生成物）
+distribution/components/

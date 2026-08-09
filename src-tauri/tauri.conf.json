@@ -38,7 +38,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["resources/bundled/**/*"],
+    "resources": ["resources/bundled/**/*", "resources/component-manifest.json"],
     "windows": {
       "nsis": {
         "compression": "zlib",

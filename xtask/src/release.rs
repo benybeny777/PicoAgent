@@ -99,6 +99,22 @@ pub fn check(strict: bool) -> Result<Value> {
     {
         blockers.push("Live2D拡張性アプリケーションの審査・契約参照が未登録です".to_string());
     }
+    if value
+        .pointer("/components/packagesPublished")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        blockers.push("初回ウィザード用の追加機能パッケージが未公開です".to_string());
+    }
+    if value
+        .pointer("/components/baseUrl")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        blockers.push("追加機能パッケージの配信URLが未設定です".to_string());
+    }
 
     for (group, key, label) in [
         ("support", "supportUrl", "サポート窓口URL"),
@@ -245,10 +261,37 @@ mod tests {
     #[test]
     fn アンインストールはユーザーデータを無確認で削除しない() {
         let root = crate::util::repo_root();
-        let script = std::fs::read_to_string(root.join("src-tauri/installer-hooks.nsh")).unwrap();
-        let prompt = script.find("MessageBox MB_YESNO").unwrap();
-        let delete = script.find("RMDir /r \"$APPDATA\\PicoAgent\"").unwrap();
-        assert!(prompt < delete);
-        assert!(script.contains("IfSilent picoagent_keep_user_data"));
+        for name in ["installer-hooks.nsh", "installer-hooks-lite.nsh"] {
+            let script = std::fs::read_to_string(root.join("src-tauri").join(name)).unwrap();
+            let prompt = script.find("MessageBox MB_YESNO").unwrap();
+            let delete = script.find("RMDir /r \"$APPDATA\\PicoAgent\"").unwrap();
+            assert!(prompt < delete, "{name}");
+            assert!(
+                script.contains("IfSilent picoagent_keep_user_data"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn 軽量配布版は追加機能を一括同梱しない() {
+        let root = crate::util::repo_root();
+        let config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("src-tauri/tauri.distribution.conf.json")).unwrap(),
+        )
+        .unwrap();
+        let resources = config["bundle"]["resources"].as_array().unwrap();
+        let joined = resources
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("bundled/engine"));
+        for optional in ["aivis", "whisper", "tha3", "office", "tools"] {
+            assert!(
+                !joined.contains(optional),
+                "{optional} を軽量配布へ入れない"
+            );
+        }
     }
 }

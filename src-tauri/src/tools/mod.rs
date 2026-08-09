@@ -57,6 +57,9 @@ include!(concat!(env!("OUT_DIR"), "/tool_mods.rs"));
 fn bundled_tool_dirs(tool: &str) -> Vec<PathBuf> {
     let rel = format!("resources/bundled/tools/{tool}");
     let mut dirs = Vec::new();
+    if let Some(root) = crate::components::runtime_root() {
+        dirs.push(root.join("tools").join(tool));
+    }
     if let Ok(cwd) = std::env::current_dir() {
         dirs.push(cwd.join("src-tauri").join(&rel));
         dirs.push(cwd.join(&rel));

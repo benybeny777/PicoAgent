@@ -11,6 +11,7 @@ mod bundle_scope;
 mod character_framing;
 mod character_pack;
 mod commands;
+mod components;
 mod config;
 mod daily;
 #[cfg(test)]
@@ -93,6 +94,9 @@ pub fn run() {
             commands::pet_relationship_clear,
             commands::pet_complete_onboarding,
             commands::pet_show_onboarding,
+            commands::settings_components_status,
+            commands::settings_components_install,
+            commands::settings_components_remove,
             commands::settings_load,
             commands::settings_character_pick,
             commands::settings_character_install,
@@ -136,6 +140,7 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
+            components::init(app.handle());
             // 設定の正本を読み込み、選択中プロバイダ・モデル・会話を初期化する。
             let state = app.state::<AppState>();
             let config_dir = app
