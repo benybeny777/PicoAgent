@@ -6,6 +6,8 @@
 
 ## 現在の作業
 
+2026-08-10にローカル取得モデルを再点検した。自動選定と既定はGemma 4 E2B／E4B／12Bのまま維持し、手動候補を量子化GGUFのQwen3.5 4B／9B、OpenAI gpt-oss-20b、Phi-4 miniへ更新した。Mistralと一般PC向け後継のないLlamaは新規一覧から外し、旧プリセットIDは同等負荷帯の現行候補へ移行する。Claudeは重み非公開のため従来どおりAPI連携のみ。全7取得URLの実在と容量をHugging Face APIで確認し、Qwen3.5は内部推論を発話へ混ぜない起動引数を追加した。
+
 2026-08-10に `distribution/site/` の販売用LPを全面更新した。実画面のアニメーションWebPで完成済み2DのむぎとLive2D動作例のひよりを見せ、機能、全8表示形式、通信境界、無料版／準備中Pro、導入、Windows動作環境、SmartScreen警告、更新方法を1ページへ整理した。制作中の `mugi-live2d` はLPに掲載しない。Pro価格、事業者情報、返金範囲は未確定のため公開文言へ仮置きせず、販売前ゲートに残している。全体点検では、公開Releaseが0件のため取得導線を準備中へ戻し、ひよりのLive2D著作権表示、公開Issuesの無料サポート導線、44px級ナビ操作領域、画像の遅延読込、OSの動きを減らす設定向け静止画を追加した。公開Pagesはまだ旧LPのままなので、販売開始時に `distribution/site/` 全体を公開配布Repoへ同期して実URLを再確認する。
 
 同日の10巡再帰全体点検では、25スキルと9プロバイダ等に残っていた外部API本文・JSON失敗の空データ降格を共通Result経路へ統一し、再発ガードを追加した。壊れたキャラ別構図・配信設定を位置変更や設定保存で空上書きしない検証、関係性イベント詳細の厳密解析、ComfyUI履歴確認の共有HTTP化、年別変更履歴の相対リンク修正も行った。過去の画面外、二重拡大、起動レイヤー、青枠、口パク、読み上げ、指示混入、要約積み上がり、状態全消去、子プロセス孤立、物理削除迂回と同型を再確認し、新しい再発は検出していない。
@@ -38,7 +40,7 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 335件
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 337件
 cargo test --manifest-path xtask/Cargo.toml             # 31件成功
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings

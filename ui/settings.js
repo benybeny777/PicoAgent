@@ -516,7 +516,7 @@ function field(key, label, type, value, placeholder) {
 function localModelPresetField(key, label, value) {
   const presets = data.localModelPresets || [];
   const localPresetLabel = (preset) => `${preset.localSize || preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize || "-"}`;
-  const modelFamilies = ["Gemma", "Qwen", "Llama", "Mistral", "Phi", "DeepSeek"];
+  const modelFamilies = ["Gemma", "Qwen", "OpenAI", "Phi"];
   const presetGroups = modelFamilies.map((family) => ({
     label: family,
     options: presets.filter(preset => preset.family === family).map(preset => ({

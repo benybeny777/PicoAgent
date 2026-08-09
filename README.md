@@ -137,7 +137,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 既定は **`local`（同梱エンジン）** です。何も設定しなくても動きます。
 
-- **ローカルモデルの自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら Gemma / Qwen / Llama / Mistral / Phi 系の主要プリセットも選べます。
+- **ローカルモデルの自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら最新世代の Qwen3.5、OpenAI gpt-oss、Phi-4 mini も選べます。
 - **設定画面での選択** — 「種類 → サイズ」で選べ、推奨 VRAM・推奨 RAM・ダウンロード目安を表示します。取得中はフキダシ下に「モデルを準備中… NN%」と出ます。
 - **ディスク整理** — 「AIモデル・連携」タブの「ダウンロード済みモデル」から、取得済み GGUF の一覧・サイズ確認・削除ができます（使用中のモデルは削除不可）。
 - **クラウド AI を使う**（費用が発生します） — 右クリック →「設定を開く…」→「AIモデル・連携」でプロバイダ・API キー・モデルを設定。OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral に対応しています。
@@ -446,6 +446,17 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | `small` | Gemma 4 E2B Q4 | 不要（CPU 中心でも可） | 8 GB | 約 3.1 GB |
 | `balanced`（通常利用の推奨） | Gemma 4 E4B Q4 | 4 GB | 16 GB | 約 5.0 GB |
 | `large` | Gemma 4 12B Q4 | 8 GB | 24 GB | 約 7.1 GB |
+
+自動選定の既定は上のGemma 4系から変えません。設定画面では、次の追加モデルも手動で選べます。
+
+| プリセット | モデル | 推奨 VRAM | 推奨 RAM | ダウンロード目安 |
+|---|---|---|---|---|
+| `qwen35_4b` | Qwen3.5 4B Q4 | 4 GB | 12 GB | 約 2.7 GB |
+| `qwen35_9b` | Qwen3.5 9B Q4 | 6 GB | 16 GB | 約 5.7 GB |
+| `gpt_oss_20b` | OpenAI gpt-oss-20b MXFP4 | 16 GB | 32 GB | 約 12.1 GB |
+| `phi4mini` | Phi-4 mini Instruct Q4 | 4 GB | 12 GB | 約 2.5 GB |
+
+旧版で選択したQwen 2.5／3、Llama 3.x、Mistral 7B、Phi 3.5のプリセットIDは、初回起動時に同等負荷帯の現行候補へ移行します。Claudeはモデル重みが公開されていないため、ローカルダウンロードではなくClaude APIプロバイダから利用します。
 
 #### AMD APU（Radeon内蔵GPU）を使う場合
 

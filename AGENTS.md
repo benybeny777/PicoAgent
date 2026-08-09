@@ -85,6 +85,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 - 開発起動: `cargo xtask setup engine`（同梱エンジン取得）→ `cargo xtask dev`。製品ビルド: `cargo xtask build`（`src-tauri/target/release/bundle/`）。
 - **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM/RAM 目安から Gemma 4 系プリセットを選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL し、以後オフライン。Ollama / OpenAI 互換は任意プロバイダとして存続。
 - **OpenAI 互換プロバイダ（`OPENAI_API_KEY` 利用）は費用が発生するため、ユーザー指示または運用上の明確な必要がある場合だけ実行する。** local / Ollama はコストがかからない。
+- **アプリがプリセットとして案内・取得するローカルモデルは、原則として量子化済みGGUFを使う。** 一般PCでの容量・メモリ・速度を優先し、非量子化重みをプリセットへ追加しない。モデル公式の量子化版が無い場合は、出所と形式を確認できるGGUFを使う。利用者が明示する`custom` URLはこの制限の対象外。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
 - 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`cargo xtask setup engine` で取得）。
 - **Claude Code on the web（Linux コンテナ）で作業する場合は `.claude/hooks/session-start.sh` が環境を用意する。** clone 直後は (1) Tauri / cpal / enigo が要求するシステムライブラリが無い、(2) `frontendDist` が指す `ui-dist/` が Git 管理外で存在せず `tauri::generate_context!` がコンパイル時に落ちる、の2点で `cargo check` すら通らない。フックが apt 導入と `sync-characters` → `build-ui` を済ませ、テストバイナリまで事前ビルドする。手で毎回入れ直さないこと。Windows / macOS のローカル環境では `CLAUDE_CODE_REMOTE` を見て何もしない。

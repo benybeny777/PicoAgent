@@ -170,17 +170,20 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 `local` プロバイダのために、Ollama の代わりに llama.cpp の `llama-server` をアプリに同梱して使う。
 
+アプリがプリセットとして提供するモデルは一般PCでの容量・メモリ・速度を優先し、原則として量子化済みGGUFに限定する。現在はGemma 4／Qwen3.5／Phi-4 miniがQ4_K_M、gpt-oss-20bがMXFP4である。利用者が明示する`custom` URLにはこの制限を適用しない。
+
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`xtask`（`bundled::fetch_engine`）（`cargo xtask setup engine`）で
   `src-tauri/resources/bundled/engine/` に取得。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
-  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットを選べる。`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
+  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Qwen3.5 4B／9B、OpenAI gpt-oss-20b、Phi-4 mini の GGUF も選べる。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
   3. `llama-server` は実行時配置の `PicoAgent/bundled/engine/`、同梱配置 `resources/bundled/engine/`、旧同梱配置 `resources/engine/`、開発時の `src-tauri/resources/bundled/engine/` / `src-tauri/resources/engine/` の順に探し、`cargo xtask dev` / `cargo xtask build` は事前に `xtask`（`bundled::fetch_engine`） で同梱配置を確認・取得してから Tauri を起動する。起動時は `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja`
      を spawn（`PICOAGENT_LOCAL_GPU_DEVICE` 指定時は `--device <値>` を追加。Windows は CREATE_NO_WINDOW）。
+     Qwen3.5だけは、内部推論をキャラクター発話へ混ぜずツール解析を安定させるため、`--chat-template-kwargs {"enable_thinking":false} --reasoning-budget 0` も追加する。
      既定の同梱ビルドは Vulkan(GPU) 版で、`-ngl 999` により全レイヤを GPU へオフロードする（GPU 非対応環境では自動 CPU フォールバック）。
      `/health` が 200 になったら `engine:status {phase:"ready"}`。前回クラッシュなどで既存 `llama-server` が同じポートに残っている場合は、`/v1/models` のモデルIDが要求中の GGUF と一致する時だけ再利用する。別モデルなら誤用せずエラーにし、残存プロセス停止を促す。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
-- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / Llama / Mistral / Phi / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
+- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / OpenAI / Phi / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
 - 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。選択中キャラクターの AivisHub 音声モデル導入は `pet_prepare_voice_model` command で起動シーケンス中に明示実行する。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
@@ -490,7 +493,7 @@ CSP の `script-src` は `'self' 'unsafe-eval' 'wasm-unsafe-eval'` とする。*
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_VOLUME` | `100` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映 |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（内部設定。通常UIでは非表示。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
-| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen3`: Qwen3 4B/約2.5GB、`qwen25_7b`: Qwen2.5 7B/約4.7GB、`llama32_3b`: Llama 3.2 3B/約2.0GB、`llama31_8b`: Llama 3.1 8B/約4.9GB、`mistral7b`: Mistral 7B/約4.4GB、`phi35mini`: Phi 3.5 mini/約2.4GB、`custom`） |
+| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、`custom`）。旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |

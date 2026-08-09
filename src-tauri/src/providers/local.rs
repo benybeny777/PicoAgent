@@ -62,80 +62,67 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         note: "品質優先。起動や応答は重くなる。",
     },
     LocalModelPreset {
-        id: "qwen3",
+        id: "qwen35_4b",
         family: "Qwen",
-        size: "Qwen3 4B Instruct",
-        label: "選択: Qwen3 4B Instruct Q4（日本語・推論向け）",
-        url: "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-        ctx: "8192",
-        recommended_vram_gb: 4,
-        recommended_ram_gb: 16,
-        download_size: "約2.5GB",
-        note: "Qwen3 系を使いたい場合の追加選択肢。",
-    },
-    LocalModelPreset {
-        id: "qwen25_7b",
-        family: "Qwen",
-        size: "Qwen2.5 7B Instruct",
-        label: "選択: Qwen2.5 7B Instruct Q4（日本語・汎用）",
-        url: "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-        ctx: "8192",
-        recommended_vram_gb: 6,
-        recommended_ram_gb: 16,
-        download_size: "約4.7GB",
-        note: "日本語を含む汎用会話やツール利用で使いやすい Qwen2.5 系。",
-    },
-    LocalModelPreset {
-        id: "llama32_3b",
-        family: "Llama",
-        size: "Llama 3.2 3B Instruct",
-        label: "選択: Llama 3.2 3B Instruct Q4（軽量・英語強め）",
-        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        size: "Qwen3.5 4B",
+        label: "選択: Qwen3.5 4B Q4（軽量・日本語向け）",
+        url: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
         ctx: "8192",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
-        download_size: "約2.0GB",
-        note: "軽量な Llama 系。英語中心の応答や低めの負荷を優先する場合向け。",
+        download_size: "約2.7GB",
+        note: "軽さ、日本語、指示追従のバランスを重視する場合の候補。",
     },
     LocalModelPreset {
-        id: "llama31_8b",
-        family: "Llama",
-        size: "Llama 3.1 8B Instruct",
-        label: "選択: Llama 3.1 8B Instruct Q4（高品質・英語強め）",
-        url: "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
-        ctx: "8192",
-        recommended_vram_gb: 8,
-        recommended_ram_gb: 24,
-        download_size: "約4.9GB",
-        note: "品質寄りの Llama 系。英語の推論や一般会話を重視する場合向け。",
-    },
-    LocalModelPreset {
-        id: "mistral7b",
-        family: "Mistral",
-        size: "Mistral 7B Instruct",
-        label: "選択: Mistral 7B Instruct v0.3 Q4（汎用）",
-        url: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+        id: "qwen35_9b",
+        family: "Qwen",
+        size: "Qwen3.5 9B",
+        label: "選択: Qwen3.5 9B Q4（高品質・日本語向け）",
+        url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
         ctx: "8192",
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
-        download_size: "約4.4GB",
-        note: "応答の軽さと品質のバランスを取りやすい Mistral 系。",
+        download_size: "約5.7GB",
+        note: "日本語、指示追従、ツール利用の品質を優先する場合の候補。",
     },
     LocalModelPreset {
-        id: "phi35mini",
+        id: "gpt_oss_20b",
+        family: "OpenAI",
+        size: "gpt-oss-20b",
+        label: "選択: OpenAI gpt-oss-20b MXFP4（高性能PC向け）",
+        url: "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-MXFP4.gguf",
+        ctx: "16384",
+        recommended_vram_gb: 16,
+        recommended_ram_gb: 32,
+        download_size: "約12.1GB",
+        note: "OpenAIの公開モデル。推論とツール利用を重視する高性能PC向け。",
+    },
+    LocalModelPreset {
+        id: "phi4mini",
         family: "Phi",
-        size: "Phi 3.5 mini Instruct",
-        label: "選択: Phi 3.5 mini Instruct Q4（軽量）",
-        url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
+        size: "Phi-4 mini Instruct",
+        label: "選択: Phi-4 mini Instruct Q4（軽量）",
+        url: "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf",
         ctx: "8192",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
-        download_size: "約2.4GB",
-        note: "軽量で扱いやすい Phi 系。小さめのモデルを試したい場合向け。",
+        download_size: "約2.5GB",
+        note: "小型モデルで推論と指示追従を重視する場合の候補。",
     },
 ];
 
+/// 旧版で保存されたプリセットIDを、現在提供する同等負荷帯のモデルへ移行する。
+pub fn canonical_preset_id(id: &str) -> &str {
+    match id {
+        "qwen3" | "llama32_3b" => "qwen35_4b",
+        "qwen25_7b" | "llama31_8b" | "mistral7b" => "qwen35_9b",
+        "phi35mini" => "phi4mini",
+        _ => id,
+    }
+}
+
 pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
+    let id = canonical_preset_id(id);
     LOCAL_MODEL_PRESETS.iter().find(|preset| preset.id == id)
 }
 
@@ -243,7 +230,7 @@ impl Provider for Local {
         vec![
             Field::new(
                 "PICOAGENT_LOCAL_MODEL_PRESET",
-                "ローカルモデル（auto/Gemma/Qwen/Llama/Mistral/Phi/custom）",
+                "ローカルモデル（auto/Gemma/Qwen/OpenAI/Phi/custom）",
                 "text",
                 "auto",
             ),
@@ -416,8 +403,48 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_for_local;
+    use super::{canonical_preset_id, normalize_for_local, preset, LOCAL_MODEL_PRESETS};
     use crate::message::Message;
+
+    #[test]
+    fn 追加モデルは現行の量子化ggufだけを公開する() {
+        let ids: Vec<&str> = LOCAL_MODEL_PRESETS.iter().map(|preset| preset.id).collect();
+        assert_eq!(
+            ids,
+            [
+                "small",
+                "balanced",
+                "large",
+                "qwen35_4b",
+                "qwen35_9b",
+                "gpt_oss_20b",
+                "phi4mini",
+            ]
+        );
+        for preset in LOCAL_MODEL_PRESETS {
+            assert!(preset.url.ends_with(".gguf"));
+            let file_name = preset.url.rsplit('/').next().unwrap_or("");
+            let quantized = ["-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-"]
+                .iter()
+                .any(|marker| file_name.contains(marker));
+            assert!(
+                quantized,
+                "量子化形式が明示されていません: {}",
+                preset.url
+            );
+        }
+    }
+
+    #[test]
+    fn 旧プリセットidを同等負荷帯の現行モデルへ移行する() {
+        assert_eq!(canonical_preset_id("qwen3"), "qwen35_4b");
+        assert_eq!(canonical_preset_id("qwen25_7b"), "qwen35_9b");
+        assert_eq!(canonical_preset_id("llama32_3b"), "qwen35_4b");
+        assert_eq!(canonical_preset_id("llama31_8b"), "qwen35_9b");
+        assert_eq!(canonical_preset_id("mistral7b"), "qwen35_9b");
+        assert_eq!(canonical_preset_id("phi35mini"), "phi4mini");
+        assert_eq!(preset("mistral7b").map(|item| item.id), Some("qwen35_9b"));
+    }
 
     // OpenAI 互換 SSE を返すスタブ llama-server に対して、既定のローカルプロバイダが
     // チャンクを逐次受信できることを検証する（実 TCP 経由）。

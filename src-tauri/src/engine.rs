@@ -346,7 +346,7 @@ async fn ensure_local_model_selection(app: &AppHandle) {
     let selected = if should_auto {
         auto_model_preset().await
     } else if local::preset(&requested).is_some() || requested == "custom" {
-        requested.as_str()
+        local::canonical_preset_id(&requested)
     } else {
         "balanced"
     };
@@ -363,7 +363,9 @@ async fn ensure_local_model_selection(app: &AppHandle) {
             Value::String(selected.to_string()),
         );
     }
-    if !state.config.has_value("PICOAGENT_MODEL") {
+    let configured_model = state.config.get("PICOAGENT_MODEL", "");
+    let canonical_model = local::canonical_preset_id(&configured_model);
+    if configured_model.is_empty() || configured_model != canonical_model {
         patch.insert(
             "PICOAGENT_MODEL".to_string(),
             Value::String(preset.id.to_string()),
@@ -417,6 +419,18 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
         .arg("-ngl")
         .arg(&ngl)
         .arg("--jinja");
+    // Qwen3.5 は既定で推論過程を生成する。キャラクターの発話へ内部推論を混ぜず、
+    // llama.cpp のツール呼び出し解析を安定させるため、非推論モードで起動する。
+    if model
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("Qwen3.5-"))
+    {
+        cmd.arg("--chat-template-kwargs")
+            .arg(r#"{"enable_thinking":false}"#)
+            .arg("--reasoning-budget")
+            .arg("0");
+    }
     if !gpu_device.trim().is_empty() {
         cmd.arg("--device").arg(gpu_device.trim());
     }
