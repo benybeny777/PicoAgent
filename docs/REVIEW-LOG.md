@@ -11,6 +11,33 @@
 
 ---
 
+## 2026-08-09 — 全体点検（外向きHTTPの待ち時間とガードの穴）
+
+`main` と同じ状態のブランチで全体を点検した。`cargo test --lib`（317件）・`cargo test`（xtask 29件）・`cargo clippy --all-targets -D warnings`（バックエンド／xtask とも）はいずれも点検前から成功で、設計ガード（permissions / store / text / process / secret / doc_sync / bundle_scope / guard_scan / user_characters）も全通過。エラー処理も良好で、テスト外の `unwrap()` / `expect()` は 15 箇所すべてが Mutex ロックか起動時の致命的初期化だった。アプリ内更新の取得経路（URL前置き・サイズ上限・SHA-256・PE署名・原子的rename・版番号の数値検証）にも穴は見つからなかった。以下が実際に直したもの。
+
+### 対応したもの
+
+| # | 指摘・提案 | 判定 | 反映先 |
+|---|---|---|---|
+| 1 | `providers/ollama.rs::list_models` だけが `reqwest::get()` のままで、共有クライアントを通らず**待ち時間も無い**。到達しないホストを設定すると設定画面のモデル一覧が固まる | 対応済み | `tools::http::client()` + `metadata_timeout()` へ移行 |
+| 2 | **`tools::http` のガードが `reqwest::Client::new()` しか見ておらず、#1 の `reqwest::get()` を素通ししていた**（ガードの穴はガードが無いのと同じ） | 対応済み | `tools::http::guard` の禁止パターンを配列化し `reqwest::get(` を追加。違反を仕込んで実際に失敗することも確認 |
+| 3 | 共有クライアントが `Client::new()` 由来で接続確立の上限を持たず、ブラックホール化した宛先で OS 既定（分単位）まで滞留する | 対応済み | `tools::http::client()` に `connect_timeout` 10秒。応答本文には掛からないのでモデルDL・生成のストリーミングは従来どおり |
+| 4 | 共有クライアント移行の際に `list_models` の待ち時間が落ちていた（anthropic / openai / gemini / deepseek / xai / mistral の6プロバイダ。`local` だけ2秒を持っていた） | 対応済み | `PICOAGENT_HTTP_METADATA_TIMEOUT_SECS`（既定15秒、3〜60）を新設し6プロバイダへ適用。SPEC・README にも記載 |
+| 5 | `xtask cli` の `reqwest::blocking::Client::new()` に上限が無い（ガードは xtask を走査しないため検出できない） | 対応済み | 接続確立だけ5秒で打ち切る。応答は待つ（ローカルモデルの生成は分単位になりうる） |
+| 6 | `AGENTS.md` の主要ファイル表とフォルダ構成が `providers/{mod,local,ollama,openai}.rs` のままで、実在する anthropic / gemini / deepseek / xai / mistral / agent_cli が載っていない | 対応済み | 両方を実体へ更新（SPEC 側は正しかった） |
+| 7 | `renderer.js::detachLipSyncAudio` の空 `catch {}` に「フォールバック許可」の理由コメントが無い | 対応済み | 解放処理として意図的に握りつぶす理由を明記 |
+| 8 | `HANDOFF.md` の検証件数が実際とずれている（318件→317件、xtask 30件→29件） | 対応済み | 実測値へ更新 |
+
+### 見送り・保留
+
+| # | 内容 | 判定 | 理由 |
+|---|---|---|---|
+| 9 | プロバイダの `is_up()` などが残す個別 `Client::builder()`（バックエンド・スキル計約20ファイル） | 保留 | 既存の段階移行（同ログ 2026-08-08 の #6）の続き。いずれも 2 秒等の待ち時間は持っており実害は無い。移行を完了させてから `Client::builder()` をガードへ追加する |
+| 10 | `api_server::authorized` の Bearer 照合が定数時間比較でない | 見送り | 127.0.0.1 に閉じており、同一PCの別プロセスは `config.json` を直接読めるため、比較時間から得られる情報が攻撃者の到達範囲を広げない。ローカルAPIをLANへ開く仕様変更をするなら、その時点で定数時間比較へ変える |
+| 11 | `commands.rs`（4,115行）・`ui/renderer.js`（4,595行）・`ui/settings.js`（3,318行）の分割 | 保留 | 同ログ 2026-08-08 の #9 と同じ判断。今回の変更でも新規行は足していない |
+
+---
+
 ## 2026-08-09 — 全体再点検（導入・更新・販売経路）
 
 | # | 指摘・提案 | 判定 | 反映先 |

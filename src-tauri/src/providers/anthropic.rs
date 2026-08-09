@@ -211,6 +211,7 @@ impl Provider for Anthropic {
             .get(&url)
             .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .timeout(crate::tools::http::metadata_timeout(cfg))
             .send()
             .await?;
         if !res.status().is_success() {

@@ -245,6 +245,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
 - 候補判定語彙は `Tool::intent_keywords()` が返す登録メタデータを正本とし、schema候補選定と副作用のない直接実行判定は `tools::intent_matches()` を共有する。全ルートが登録済みToolを指すことと代表発話を共通テストで検査する。
 - 標準的な外向きHTTPは `tools::http::client()` の接続プールを共有し、待ち時間設定は `tools::http::timeout()` で範囲を統一する。User-Agent、Cookie、プロキシ等の専用構築が必要なコネクタだけ個別builderを使う。
+- 共有クライアントは接続確立に 10 秒の上限を持つ（応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない）。モデル一覧のような短い問い合わせは `tools::http::metadata_timeout()`（`PICOAGENT_HTTP_METADATA_TIMEOUT_SECS`）でリクエスト全体にも上限を付ける。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/ms_office/scripts/office.ps1` のような補助ファイル変更もビルドに反映される。
 
 ### スキルの分類（エージェント設計としての位置づけ）
@@ -636,6 +637,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_HTTP_API_KEY_HEADER` | `X-API-Key` | http_api | 汎用HTTPに付与する API key ヘッダー名 |
 | `PICOAGENT_HTTP_API_KEY_VALUE` | （なし） | http_api | 汎用HTTPに付与する API key 値 |
 | `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | http_api | 汎用HTTPの待ち時間（秒、3〜60） |
+| `PICOAGENT_HTTP_METADATA_TIMEOUT_SECS` | `15` | 全プロバイダ | モデル一覧取得など短い問い合わせの待ち時間（秒、3〜60） |
 | `PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS` | （空） | web_fetch | URL取得を許可するドメイン（カンマ区切り。空なら制限なし） |
 | `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | web_fetch | URL取得の待ち時間（秒、3〜60） |
 | `PICOAGENT_AGENT_CLI_KIND` | `claude` | agent_cli | 手元の CLI エージェントの種類（`claude` / `codex` / `custom`） |

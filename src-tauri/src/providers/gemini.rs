@@ -55,7 +55,12 @@ impl Provider for Gemini {
             return Ok(Vec::new());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = crate::tools::http::client().get(&url).bearer_auth(&key).send().await?;
+        let res = crate::tools::http::client()
+            .get(&url)
+            .bearer_auth(&key)
+            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .send()
+            .await?;
         if !res.status().is_success() {
             anyhow::bail!("Gemini /models failed: {}", res.status());
         }

@@ -30,7 +30,11 @@ fn base_url() -> String {
 fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value> {
     let base = base_url();
     let url = format!("{base}{path}");
-    let client = reqwest::blocking::Client::new();
+    // 応答は待つが（ローカルモデルの生成は分単位になりうる）、到達しないホストでの
+    // 接続滞留だけは切る。
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()?;
     let mut builder = match method {
         "GET" => client.get(&url),
         _ => client.post(&url),
