@@ -61,7 +61,7 @@
 
 ### 前提
 
-**対応 OS は Windows と macOS です。**
+**対応 OS は Windows と macOS です。初期販売版の配布はWindows 10/11 x64から開始します。** macOS版は署名・公証と実機QAが揃ってから追加します。
 
 | | 必要なもの |
 |---|---|
@@ -587,6 +587,16 @@ cargo xtask build-distribution
 
 `build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売はコード署名・macOS公証・自動更新を必須にしません。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
 
+初期販売はBOOTHとSteamを想定します。公開GitHubにはソースではなく、Windows無料版・初回追加機能パッケージ・サポート／プライバシー／利用条件だけを置きます。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
+
+```powershell
+# 初回だけ販売者署名鍵を作る（既存鍵は上書きしない）
+cargo xtask license keygen
+
+# BOOTH注文ごとのProキーを発行
+cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文番号" --edition pro
+```
+
 ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
 通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと追加機能マニフェストだけを入れ、Aivis・Whisper・THA3・Office/PDF/画像ツールは初回起動後に取得します。開発用のツール・ドキュメント・README用画像は含まれません。
@@ -605,6 +615,8 @@ cargo xtask build-distribution
 
 - 通常の開発ビルドは、公式 GitHub Releases の既定 `1.2.0` を `src-tauri/resources/bundled/aivis/` へ準備します（更新時は `AIVIS_RELEASE=latest` またはタグを指定）
 - 軽量販売版はAivisをインストーラへ含めず、初回起動または設定の「追加機能」で選んだ場合だけ、検証済みOS別パッケージを `%APPDATA%\PicoAgent\bundled\aivis\` へ取得します
+- Windows追加機能は `cargo xtask package-components` で速度優先のZIPへまとめます。GitHub Releaseの1ファイル上限を避けるため1.9GBで自動分割し、各分割と連結後全体のSHA-256をアプリが検証します。公開先は [PicoAgent-Distribution](https://github.com/benybeny777/PicoAgent-Distribution) です
+- 公開前は `cargo xtask verify-components` で生成済み全ファイルの存在・サイズ・各分割SHA-256・連結後SHA-256をマニフェストと照合します
 - `PICOAGENT_TTS_ENABLED` が有効なら起動時に内部ポート（既定 `11436`）で裏起動し、アプリ終了時に停止します。旧既定の `10102` が保存済みなら起動時に移行します
 - 推論デバイスは内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で GPU 候補を確認し、あれば GPU、なければ CPU（通常の設定画面には出しません）
 - 話者は設定画面に出さずキャラクター既定声を使います。未導入なら起動時のローディング画面で AIVMX を追加し、合成時に `/speakers` から実際の style ID を解決します

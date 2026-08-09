@@ -10,6 +10,7 @@ mod bundled;
 mod character_pack;
 mod cli;
 mod component_packages;
+mod license;
 mod office;
 mod release;
 mod tools;
@@ -30,6 +31,9 @@ const USAGE: &str = "\
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
   package-components  現在のOS向け追加機能パッケージと取得マニフェストを生成
+  verify-components   生成済み追加機能のサイズとSHA-256をマニフェスト照合
+  license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
+  license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
   setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
                       （省略時は製品へ同梱する全対象）
   sync-characters     characters/ を ui/assets/characters/ へ同期
@@ -68,6 +72,8 @@ fn run(args: &[String]) -> Result<()> {
             Ok(())
         }
         "package-components" => component_packages::package_current_platform(),
+        "verify-components" => component_packages::verify_current_platform(),
+        "license" => license::run(rest),
         "setup" => setup(rest),
         "sync-characters" => assets::sync_characters(),
         "character-pack" => character_pack::run(rest),

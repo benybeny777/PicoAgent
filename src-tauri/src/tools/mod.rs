@@ -855,6 +855,9 @@ pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
 /// 承認マーカーをそのまま返すため、**呼び出し側が承認フローを実装している場合のみ**使う。
 /// 失敗は例外にせず文字列で返す。出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切る。
 pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> String {
+    if crate::license::tool_requires_pro(name) && !crate::license::is_pro(cfg) {
+        return "エラー: このスキルは PicoAgent Pro のライセンスが必要です。設定の「製品情報・ライセンス」でライセンスキーを登録してください。".to_string();
+    }
     let result = if let Some(idx) = index().get(name) {
         all()[*idx].run(cfg, args).await
     } else if crate::mcp::client::is_mcp_tool(name) {

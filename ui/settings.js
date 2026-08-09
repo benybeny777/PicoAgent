@@ -2142,12 +2142,18 @@ function buildDiagnosticsSection() {
 
 function buildProductInfoSection() {
   const product = data.product || {};
-  const productSec = section("製品情報・データの扱い");
+  const license = data.license || { active: false, edition: "free", message: "無料版として利用中です。" };
+  const productSec = section("製品情報・ライセンス");
   productSec.append(el("div", { className: "product-info-grid" }, [
     el("div", { className: "product-info-card" }, [
       el("span", { textContent: "製品" }),
       el("strong", { textContent: `${product.name || "PicoAgent"} ${product.version || ""}`.trim() }),
       el("small", { textContent: product.identifier || "com.picoagent.desktop" }),
+    ]),
+    el("div", { className: "product-info-card" }, [
+      el("span", { textContent: "ライセンス" }),
+      el("strong", { textContent: license.active ? `${license.edition.toUpperCase()} 有効` : "無料版" }),
+      el("small", { textContent: license.customer ? `${license.customer} ・ ${license.message}` : license.message }),
     ]),
     el("div", { className: "product-info-card" }, [
       el("span", { textContent: "ローカルAI" }),
@@ -2165,9 +2171,16 @@ function buildProductInfoSection() {
       el("small", { textContent: "Live2D、Aivis、ローカルモデルなどの表示と配布条件は販売前監査の対象です。" }),
     ]),
   ]));
+  productSec.append(field(
+    "PICOAGENT_LICENSE_TOKEN",
+    "BOOTHなどで購入したライセンスキー",
+    "password",
+    data.values?.PICOAGENT_LICENSE_TOKEN || "",
+    "PA1. から始まるキーを貼り付け"
+  ));
   productSec.append(el("p", {
     className: "hint",
-    textContent: "販売版では、利用条件・プライバシー表示・サポート窓口・更新署名を出荷前監査で確認します。",
+    textContent: "無料版は会話・天気・時刻などを利用できます。ProではPC操作、ファイル編集、Office・外部サービス・MCPなどの高度なスキルが有効になります。キーはWindowsのDPAPIで暗号化して保存します。Steam版は将来Steamworksの所有確認へ対応予定です。",
   }));
   return markSearchable(productSec, "製品 バージョン データ プライバシー ライセンス サポート 更新");
 }

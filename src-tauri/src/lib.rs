@@ -23,6 +23,7 @@ mod guard_scan;
 mod history;
 mod hotkey;
 mod layout;
+mod license;
 mod log_paths;
 mod mcp;
 mod memory;

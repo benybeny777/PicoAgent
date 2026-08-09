@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
 const MAX_PACKAGE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MAX_PART_BYTES: u64 = 2 * 1024 * 1024 * 1024 - 1;
 const MAX_EXTRACTED_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 100_000;
 const COMPONENT_IDS: [&str; 5] = ["aivis", "whisper", "tha3", "office", "tools"];
@@ -55,6 +56,17 @@ struct Manifest {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Package {
+    #[serde(default)]
+    file: String,
+    sha256: String,
+    size: u64,
+    #[serde(default)]
+    parts: Vec<PackagePart>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PackagePart {
     file: String,
     sha256: String,
     size: u64,
@@ -308,49 +320,70 @@ async fn install_package_inner(
     paths: &InstallPaths,
 ) -> Result<()> {
     anyhow::ensure!(
-        !package.file.trim().is_empty(),
-        "{id} のファイル名がありません"
-    );
-    anyhow::ensure!(
         package.size > 0 && package.size <= MAX_PACKAGE_BYTES,
         "{id} のパッケージサイズが不正です"
     );
     anyhow::ensure!(package.sha256.len() == 64, "{id} のSHA-256が不正です");
-    let url = format!(
-        "{}/{}",
-        manifest.base_url.trim_end_matches('/'),
-        package.file
-    );
+    let parts = package_parts(package)?;
     tokio::fs::create_dir_all(&paths.cache).await?;
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .read_timeout(std::time::Duration::from_secs(120))
-        .build()?
-        .get(&url)
-        .send()
-        .await
-        .with_context(|| format!("{id} の取得を開始できません"))?
-        .error_for_status()
-        .with_context(|| format!("{id} の取得先がエラーを返しました"))?;
-    let total = response.content_length().unwrap_or(package.size);
-    anyhow::ensure!(
-        total <= MAX_PACKAGE_BYTES,
-        "{id} の取得サイズが上限を超えています"
-    );
-    emit_progress(app, id, "download", "ダウンロード中…", 0, total);
+        .build()?;
     let mut file = tokio::fs::File::create(&paths.archive).await?;
-    let mut stream = response.bytes_stream();
     let mut downloaded = 0_u64;
     use tokio::io::AsyncWriteExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        downloaded = downloaded.saturating_add(chunk.len() as u64);
+    emit_progress(app, id, "download", "ダウンロード中…", 0, package.size);
+    for part in parts {
+        let url = format!("{}/{}", manifest.base_url.trim_end_matches('/'), part.file);
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("{id} の取得を開始できません"))?
+            .error_for_status()
+            .with_context(|| format!("{id} の取得先がエラーを返しました"))?;
+        if let Some(length) = response.content_length() {
+            anyhow::ensure!(
+                length == part.size,
+                "{id} の分割ファイルサイズが予定と一致しません"
+            );
+        }
+        let mut stream = response.bytes_stream();
+        let mut part_downloaded = 0_u64;
+        let mut part_digest = Sha256::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            part_downloaded = part_downloaded.saturating_add(chunk.len() as u64);
+            downloaded = downloaded.saturating_add(chunk.len() as u64);
+            anyhow::ensure!(
+                part_downloaded <= part.size,
+                "{id} の分割ファイルサイズが予定を超えています"
+            );
+            anyhow::ensure!(
+                downloaded <= MAX_PACKAGE_BYTES,
+                "{id} の取得サイズが上限を超えています"
+            );
+            part_digest.update(&chunk);
+            file.write_all(&chunk).await?;
+            emit_progress(
+                app,
+                id,
+                "download",
+                "ダウンロード中…",
+                downloaded,
+                package.size,
+            );
+        }
         anyhow::ensure!(
-            downloaded <= MAX_PACKAGE_BYTES,
-            "{id} の取得サイズが上限を超えています"
+            part_downloaded == part.size,
+            "{id} の分割ファイルサイズが予定と一致しません"
         );
-        file.write_all(&chunk).await?;
-        emit_progress(app, id, "download", "ダウンロード中…", downloaded, total);
+        let actual = format!("{:x}", part_digest.finalize());
+        anyhow::ensure!(
+            actual == part.sha256,
+            "{id} の分割ファイルSHA-256が一致しません"
+        );
     }
     file.flush().await?;
     drop(file);
@@ -367,7 +400,7 @@ async fn install_package_inner(
         "install",
         "安全性を確認して導入中…",
         downloaded,
-        total,
+        package.size,
     );
     let archive_for_extract = paths.archive.clone();
     let stage_for_extract = paths.stage.clone();
@@ -389,8 +422,43 @@ async fn install_package_inner(
         std::fs::rename(&paths.stage, &paths.destination)?;
     }
     tokio::fs::remove_file(&paths.archive).await?;
-    emit_progress(app, id, "ready", "導入しました", downloaded, total);
+    emit_progress(app, id, "ready", "導入しました", downloaded, package.size);
     Ok(())
+}
+
+fn package_parts(package: &Package) -> Result<Vec<PackagePart>> {
+    let parts = if package.parts.is_empty() {
+        vec![PackagePart {
+            file: package.file.clone(),
+            sha256: package.sha256.clone(),
+            size: package.size,
+        }]
+    } else {
+        package.parts.clone()
+    };
+    let mut total = 0_u64;
+    for part in &parts {
+        anyhow::ensure!(safe_asset_name(&part.file), "危険な分割ファイル名です");
+        anyhow::ensure!(
+            part.size > 0 && part.size <= MAX_PART_BYTES,
+            "分割ファイルサイズが不正です"
+        );
+        anyhow::ensure!(part.sha256.len() == 64, "分割ファイルのSHA-256が不正です");
+        total = total.saturating_add(part.size);
+    }
+    anyhow::ensure!(
+        total == package.size,
+        "分割ファイルの合計サイズが一致しません"
+    );
+    Ok(parts)
+}
+
+fn safe_asset_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
 }
 
 fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
@@ -511,5 +579,35 @@ mod tests {
         if destination.exists() {
             std::fs::remove_dir_all(destination).unwrap();
         }
+    }
+
+    #[test]
+    fn 分割パッケージは合計サイズと安全な名前を検査する() {
+        let package = Package {
+            file: String::new(),
+            sha256: "0".repeat(64),
+            size: 7,
+            parts: vec![
+                PackagePart {
+                    file: "tha3.zip.001".to_string(),
+                    sha256: "1".repeat(64),
+                    size: 4,
+                },
+                PackagePart {
+                    file: "tha3.zip.002".to_string(),
+                    sha256: "2".repeat(64),
+                    size: 3,
+                },
+            ],
+        };
+        assert_eq!(package_parts(&package).unwrap().len(), 2);
+
+        let mut unsafe_package = package.clone();
+        unsafe_package.parts[0].file = "../escape".to_string();
+        assert!(package_parts(&unsafe_package).is_err());
+
+        let mut wrong_size = package;
+        wrong_size.size = 8;
+        assert!(package_parts(&wrong_size).is_err());
     }
 }

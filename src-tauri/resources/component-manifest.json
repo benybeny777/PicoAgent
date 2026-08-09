@@ -1,5 +1,52 @@
 {
-  "version": 1,
-  "baseUrl": "https://github.com/benybeny777/PicoAgent/releases/download/components-v1",
-  "packages": {}
+  "baseUrl": "https://github.com/benybeny777/PicoAgent-Distribution/releases/download/components-v1",
+  "packages": {
+    "aivis-windows-x64": {
+      "file": "aivis-windows-x64.zip",
+      "parts": [],
+      "sha256": "7c5ef1cccfdb7d9bc167faf954a7fcd5b4784006eb660704f5ceaa2259667d9c",
+      "size": 845455888
+    },
+    "office-windows-x64": {
+      "file": "office-windows-x64.zip",
+      "parts": [],
+      "sha256": "99fd2748309fe8bdba10db75d78cc23d5a558d6ec7f32644ce23b6072ebab671",
+      "size": 1539280473
+    },
+    "tha3-windows-x64": {
+      "file": "",
+      "parts": [
+        {
+          "file": "tha3-windows-x64.zip.001",
+          "sha256": "f7f1eab0b826c6891300f1a08b3a83bad39881ff0857ee20bc69df840e0f0e8d",
+          "size": 1900000000
+        },
+        {
+          "file": "tha3-windows-x64.zip.002",
+          "sha256": "c09f76ee4c562d4a202ca77c43284ae9fdd52f37ab2958a41c14af6bbaa5858e",
+          "size": 1900000000
+        },
+        {
+          "file": "tha3-windows-x64.zip.003",
+          "sha256": "ae4cdb8333fb67f355c2d87e097dc816efdcccdb6c4f6ada14e2274648378dea",
+          "size": 1803118600
+        }
+      ],
+      "sha256": "0fe55c5921b64ff3dee60c7f2a16c6b6fab8d1fd0ce7dcf13c27f3c031c74503",
+      "size": 5603118600
+    },
+    "tools-windows-x64": {
+      "file": "tools-windows-x64.zip",
+      "parts": [],
+      "sha256": "e6da7f522a7ac26d1e7a396a57c2990cc33e5ee203f8fea1f6b99ac90fba8b3e",
+      "size": 1024117723
+    },
+    "whisper-windows-x64": {
+      "file": "whisper-windows-x64.zip",
+      "parts": [],
+      "sha256": "723d08483624e6bf71ac290e07cc5d82cefdd0df47d0fba24a4c6e15be21cdc0",
+      "size": 500452746
+    }
+  },
+  "version": 1
 }

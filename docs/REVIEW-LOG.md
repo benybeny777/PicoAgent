@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-08-09 — BOOTH／Steam販売基盤と公開経路レビュー
+
+| # | 指摘・提案 | 判定 | 反映先 |
+|---|---|---|---|
+| 1 | 非公開ソースRepoをアプリの公開取得先にすると未認証利用者が取得できない | 対応済み | 公開専用 `PicoAgent-Distribution` を分離。ソースは含めずPagesだけ公開済み |
+| 2 | BOOTH販売で共通キーを配ると流出時に全購入者へ影響する | 対応済み | Ed25519署名の購入者／注文別キー、Git外秘密鍵、アプリ内公開鍵検証を実装 |
+| 3 | Pro判定を各スキルへ散らすと抜けが生じる | 対応済み | `license.rs` と `tools::dispatch_interactive` の共通境界へ集約。無料の会話・時刻・天気等は維持 |
+| 4 | Steam購入確認をBOOTH用キーへ無理に統一しない | 保留 | 初期版はBOOTHキー。Steam公開時にSteamworks所有確認を追加し、同じentitlementへ接続する |
+| 5 | THA3 5GB超はGitHub Releaseの単一ファイル上限を超える | 対応済み | 1.9GBで3分割し、アプリが各部と連結全体を検証。全5種の実パッケージ生成成功 |
+| 6 | 数GB・2万ファイル超のDeflateは公開作業が遅すぎ、既定スタックではoverflowする | 対応済み | 64MB作業スレッドと速度優先Stored ZIPへ変更。全生成は674秒で完走 |
+| 7 | サポート・プライバシー・利用条件の公開URLが空 | 対応済み | GitHub Pagesで3ページを公開し `distribution/release.json` へ設定。法務専門家レビューは未完了のためreviewedフラグは変更しない |
+| 8 | GitHub CLIがRelease作成権限を持たない | 保留 | 生成物7件はローカル検証済み。OAuth最終承認がGitHub画面で無効化され403のため、`packagesPublished=false` を維持し公開済みと扱わない |
+| 9 | 実Windows Sandboxでの完全クリーン導入 | 保留 | Windows Sandbox/Dockerが未導入。パッケージ生成・ハッシュ・アプリcheck/testで代替し、販売前に別Windows環境でNSIS導入／初回取得／修復／削除を実施する |
+
+---
+
 ## 2026-08-08 — Live2D自己導入と第三者再配布境界のレビュー
 
 対象: Live2Dサンプル取得、キャラクター導入、通常／販売ビルド、`resources/bundled` の第三者同梱物。

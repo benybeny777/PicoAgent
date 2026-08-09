@@ -668,6 +668,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
 | `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型。キー名に `API_KEY` を含むためシークレットとして扱われ、Windows では DPAPI 暗号化して保存される） |
+| `PICOAGENT_LICENSE_TOKEN` | 空 | 製品ライセンス | `PA1.<payload>.<Ed25519署名>` 形式のPro／Businessライセンス。`password` 型でWindowsではDPAPI暗号化保存。無効・期限切れ・未設定は無料版として動作し、PC操作・ファイル編集・Office・外部サービス・MCP等の高度なスキルを共通dispatch境界で拒否する |
 | `PICOAGENT_API_ALLOWED_ORIGINS` | 空 | ローカルAPI | ブラウザからの横断リクエストを許可する Origin（カンマ区切り。空＝Origin 付きは全て拒否） |
 | `PICOAGENT_MCP_SERVERS` | 空 | MCP | 外部 MCP サーバ（1行1件「名前\|コマンド 引数…」。stdio 接続。`#` でコメント。変更は再起動後に反映） |
 | `PICOAGENT_PDF_TIMEOUT_SECS` | `120` | pdf_tools | PDF操作タイムアウト秒（5〜300） |

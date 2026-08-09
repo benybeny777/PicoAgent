@@ -1,6 +1,6 @@
 {
   "channel": "direct",
-  "platforms": ["windows", "macos"],
+  "platforms": ["windows"],
   "includedCharacters": ["mugi", "rin", "mai"],
   "legal": {
     "eulaReviewed": false,
@@ -9,9 +9,9 @@
     "live2dApprovalReference": ""
   },
   "support": {
-    "supportUrl": "",
-    "privacyUrl": "",
-    "termsUrl": ""
+    "supportUrl": "https://benybeny777.github.io/PicoAgent-Distribution/support.html",
+    "privacyUrl": "https://benybeny777.github.io/PicoAgent-Distribution/privacy.html",
+    "termsUrl": "https://benybeny777.github.io/PicoAgent-Distribution/terms.html"
   },
   "updates": {
     "required": false,
@@ -20,7 +20,7 @@
   },
   "components": {
     "packagesPublished": false,
-    "baseUrl": "https://github.com/benybeny777/PicoAgent/releases/download/components-v1"
+    "baseUrl": "https://github.com/benybeny777/PicoAgent-Distribution/releases/download/components-v1"
   },
   "signing": {
     "required": false,
