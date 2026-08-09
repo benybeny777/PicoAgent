@@ -369,12 +369,18 @@ fn timestamp_to_date(value: i64) -> Result<String, String> {
 
 fn color_hex_to_rgb(text: &str) -> Result<String, String> {
     let hex = text.trim().trim_start_matches('#');
-    if hex.len() != 6 {
-        return Err("hex は #RRGGBB 形式で指定してください。".to_string());
+    // `len()` はバイト長なので、16進数字であることまで確かめる。3バイト文字2つの
+    // 「あい」でも長さ6を満たすため、この検査が無いとバイト添字が文字の途中に落ちる。
+    if hex.len() != 6 || !hex.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err("hex は #RRGGBB 形式（16進6桁）で指定してください。".to_string());
     }
-    let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "R値を解釈できません。".to_string())?;
-    let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "G値を解釈できません。".to_string())?;
-    let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "B値を解釈できません。".to_string())?;
+    let mut channels = [0_u8; 3];
+    for (index, channel) in channels.iter_mut().enumerate() {
+        let pair: String = hex.chars().skip(index * 2).take(2).collect();
+        *channel = u8::from_str_radix(&pair, 16)
+            .map_err(|_| format!("{}値を解釈できません。", ["R", "G", "B"][index]))?;
+    }
+    let [r, g, b] = channels;
     Ok(format!("rgb({r}, {g}, {b})"))
 }
 
@@ -592,7 +598,16 @@ inventory::submit! { ToolReg { make: || Box::new(ProductivityTools) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{json_format, text_case, unit_convert, url_decode, url_encode};
+    use super::{color_hex_to_rgb, json_format, text_case, unit_convert, url_decode, url_encode};
+
+    #[test]
+    fn 色指定は16進6桁だけを受け付ける() {
+        assert_eq!(color_hex_to_rgb("#1A2B3C").unwrap(), "rgb(26, 43, 60)");
+        // バイト長は6でも文字は2つ。長さだけで判定していた頃はここで panic していた。
+        assert!(color_hex_to_rgb("あい").is_err());
+        assert!(color_hex_to_rgb("#12345").is_err());
+        assert!(color_hex_to_rgb("#12345g").is_err());
+    }
 
     #[test]
     fn jsonを整形する() {

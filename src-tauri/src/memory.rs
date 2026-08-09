@@ -217,11 +217,15 @@ pub fn update_from_turn(app: &AppHandle, cfg: &Config, user_text: &str) -> Optio
             return None;
         }
     };
-    let before = serde_json::to_string(&store).unwrap_or_default();
+    let before = serde_json::to_string(&store);
     merge_candidates(&mut store, candidates, max_items(cfg));
-    let after = serde_json::to_string(&store).unwrap_or_default();
-    if before == after {
-        return None;
+    let after = serde_json::to_string(&store);
+    // 直列化できなかったときは「変わっていない」と誤判定しない。両方 `unwrap_or_default()`
+    // にすると失敗時に空文字どうしが一致し、いま覚えた内容を黙って捨ててしまう。
+    if let (Ok(before), Ok(after)) = (&before, &after) {
+        if before == after {
+            return None;
+        }
     }
     save(app, &store);
     Some(context_from_store(&store))

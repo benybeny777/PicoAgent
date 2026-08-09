@@ -13,19 +13,55 @@ pub use picoagent_core::text::{preview, truncate_bytes, Utf8Stream};
 mod guard {
     use crate::guard_scan;
 
-    /// `[..120]` のように**数値リテラル**で切り出している箇所を探す。
+    /// `[..120]` `[0..2]` `[4..]` のように**数値リテラル**で切り出している箇所を探す。
     /// 変数添字（`&chunk[..n]` など、バイト列の読み込み量で切る用途）は対象外。
+    ///
+    /// 以前は `[..N]`（先頭からの切り出し）しか見ておらず、`&hex[0..2]` のような
+    /// 途中区間の切り出しを素通りさせていた。実際に `productivity_tools` の
+    /// 色変換が「バイト長6の日本語2文字」で panic する状態で残っていた。
     fn fixed_byte_slice(line: &str) -> bool {
-        let Some(head) = line.find("[..") else {
-            return false;
-        };
-        let rest = &line[head + 3..];
-        let Some(close) = rest.find(']') else {
-            return false;
-        };
-        let index = rest[..close].trim();
-        !index.is_empty() && index.chars().all(|c| c.is_ascii_digit() || c == '_')
+        fn numeric_literal(part: &str) -> bool {
+            !part.is_empty() && part.chars().all(|c| c.is_ascii_digit() || c == '_')
+        }
+        let bytes = line.as_bytes();
+        for (open, _) in line.match_indices('[') {
+            let Some(length) = line[open + 1..].find(']') else {
+                continue;
+            };
+            let inner = line[open + 1..open + 1 + length].trim();
+            let Some((start, end)) = inner.split_once("..") else {
+                continue;
+            };
+            let end = end.strip_prefix('=').unwrap_or(end).trim();
+            let start = start.trim();
+            // 両側とも空（`[..]`）や、片側でも変数・式なら対象外。
+            if !(numeric_literal(start) || start.is_empty())
+                || !(numeric_literal(end) || end.is_empty())
+                || (start.is_empty() && end.is_empty())
+            {
+                continue;
+            }
+            // 配列リテラルの型注釈（`[u8; 4]`）などと違い、直前が識別子・`)`・`]` の
+            // ときだけ「何かを添字で切っている」と判断する。
+            let before = bytes[..open]
+                .iter()
+                .rposition(|byte| !byte.is_ascii_whitespace());
+            let Some(before) = before.map(|index| bytes[index] as char) else {
+                continue;
+            };
+            if before.is_alphanumeric() || before == '_' || before == ')' || before == ']' {
+                return true;
+            }
+        }
+        false
     }
+
+    /// 文字列ではなくスライス（`&[T]`）を数値で切っている箇所。型は行のテキストから
+    /// 判別できないため、ここだけ理由付きで除外する。**文字列の切り出しは足さないこと。**
+    const NON_STRING_SLICE_ALLOWED: [(&str, &str); 1] = [(
+        "skills/glob_files/mod.rs",
+        "`&pattern[1..]` / `&parts[skip..]` はパス区切りで分割済みの `&[&str]` を進めるもので、文字列のバイト添字ではない",
+    )];
 
     #[test]
     fn 固定長のバイト添字で文字列を切らない() {
@@ -34,7 +70,18 @@ mod guard {
             if source.name == "text.rs" {
                 continue; // 定義元（このガード自身の説明文を含む）
             }
+            let path = source.path.display().to_string().replace('\\', "/");
+            if NON_STRING_SLICE_ALLOWED
+                .iter()
+                .any(|(allowed, _)| path.ends_with(allowed))
+            {
+                continue;
+            }
             for (number, line) in source.body().lines().enumerate() {
+                // コメント行の説明文（このガード自身の例示を含む）は対象外。
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
                 if fixed_byte_slice(line) {
                     offenders.push(format!("{}:{}", source.path.display(), number + 1));
                 }

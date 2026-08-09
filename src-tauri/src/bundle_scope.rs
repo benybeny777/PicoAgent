@@ -23,6 +23,23 @@ const ALLOWED_RESOURCES: [(&str, &str); 2] = [
     ),
 ];
 
+/// 販売版（`tauri.distribution.conf.json`）の `bundle.resources` に書いてよいもの。
+///
+/// 販売版は**第三者ソフトを再配布しない**方針なので、通常ビルドより狭い。ここを広げると
+/// LibreOffice・AivisSpeech・Whisper・THA3 のような取得物がそのまま販売物へ入る。
+/// 通常ビルド側（`ALLOWED_RESOURCES`）は `resources/bundled/**/*` を許しているため、
+/// 販売用の上書き設定を見ていないと、この違いが誰にも検出されないまま消える。
+const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 2] = [
+    (
+        "resources/bundled/engine/**/*",
+        "販売版に入れるのはローカルAIエンジンだけ（自前配布が許される同梱物）",
+    ),
+    (
+        "resources/component-manifest.json",
+        "第三者追加機能の公式取得元と導入方式を表示・検証するためのマニフェスト",
+    ),
+];
+
 /// `ui/` に置いてよい拡張子。ここは製品へ丸ごと入るため、webview が実行時に使うものだけ。
 const ALLOWED_UI_EXTENSIONS: [&str; 12] = [
     "html", "js", "css", "json", "png", "jpg", "jpeg", "svg", "webp", "gif", "ico", "woff2",
@@ -44,14 +61,25 @@ const UI_GENERATED_DIRS: [(&str, &str); 2] = [
 const DEV_ONLY_DIRS: [&str; 4] = ["tools", "docs", "scripts", "xtask"];
 
 mod guard {
-    use super::{ALLOWED_RESOURCES, ALLOWED_UI_EXTENSIONS, DEV_ONLY_DIRS, UI_GENERATED_DIRS};
+    use super::{
+        ALLOWED_DISTRIBUTION_RESOURCES, ALLOWED_RESOURCES, ALLOWED_UI_EXTENSIONS, DEV_ONLY_DIRS,
+        UI_GENERATED_DIRS,
+    };
     use crate::guard_scan;
     use std::path::{Path, PathBuf};
 
+    fn read_conf(name: &str) -> serde_json::Value {
+        let path = guard_scan::repo_root().join("src-tauri").join(name);
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{name} を読めない"));
+        serde_json::from_str(&text).unwrap_or_else(|_| panic!("{name} が JSON として読めない"))
+    }
+
     fn tauri_conf() -> serde_json::Value {
-        let path = guard_scan::repo_root().join("src-tauri/tauri.conf.json");
-        let text = std::fs::read_to_string(&path).expect("tauri.conf.json");
-        serde_json::from_str(&text).expect("tauri.conf.json が JSON として読めない")
+        read_conf("tauri.conf.json")
+    }
+
+    fn distribution_conf() -> serde_json::Value {
+        read_conf("tauri.distribution.conf.json")
     }
 
     /// `ui/` 配下の実ファイル（生成ディレクトリを除く）を相対パスで集める。
@@ -118,16 +146,55 @@ mod guard {
         );
     }
 
+    /// 販売版の上書き設定（`--config tauri.distribution.conf.json`）だけを見て決まる範囲。
+    ///
+    /// 通常ビルドは `resources/bundled/**/*` を丸ごと同梱してよいが、販売版は
+    /// 第三者ソフトを再配布しないためエンジンだけに絞っている。実際に利用者へ届くのは
+    /// こちらなので、通常設定と同じ強さで固定する。
+    #[test]
+    fn 販売版へ同梱するリソースは許可したものだけ() {
+        let conf = distribution_conf();
+        let resources = conf["bundle"]["resources"]
+            .as_array()
+            .expect("販売版の bundle.resources が配列でない");
+        let violations: Vec<String> = resources
+            .iter()
+            .map(|value| value.as_str().unwrap_or_default().to_string())
+            .filter(|pattern| {
+                !ALLOWED_DISTRIBUTION_RESOURCES
+                    .iter()
+                    .any(|(allowed, _)| allowed == pattern)
+            })
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "販売版へ同梱するリソースが増えています。第三者ソフトを自前で再配布しない方針です。\
+             本当に必要なら bundle_scope::ALLOWED_DISTRIBUTION_RESOURCES へ理由付きで追加して\
+             ください: {violations:?}"
+        );
+
+        // 販売版が通常設定より広くなっていないか（上書き設定なので、書き忘れると
+        // 通常設定の `resources/bundled/**/*` がそのまま効いてしまう）。
+        assert!(
+            resources.len() <= ALLOWED_RESOURCES.len(),
+            "販売版のリソース指定が通常ビルドより多くなっています"
+        );
+    }
+
     #[test]
     fn 開発用フォルダは配布経路に現れない() {
-        let conf = tauri_conf();
-        let serialized = conf.to_string();
         let mut violations = Vec::new();
-        for dir in DEV_ONLY_DIRS {
-            // アイコンやリソースの指定に開発用フォルダが紛れ込んでいないか。
-            for prefix in ["\"", "/", "../"] {
-                if serialized.contains(&format!("{prefix}{dir}/")) {
-                    violations.push(format!("tauri.conf.json が {dir}/ を参照しています"));
+        for (label, conf) in [
+            ("tauri.conf.json", tauri_conf()),
+            ("tauri.distribution.conf.json", distribution_conf()),
+        ] {
+            let serialized = conf.to_string();
+            for dir in DEV_ONLY_DIRS {
+                // アイコンやリソースの指定に開発用フォルダが紛れ込んでいないか。
+                for prefix in ["\"", "/", "../"] {
+                    if serialized.contains(&format!("{prefix}{dir}/")) {
+                        violations.push(format!("{label} が {dir}/ を参照しています"));
+                    }
                 }
             }
         }

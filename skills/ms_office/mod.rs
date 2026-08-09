@@ -1,8 +1,12 @@
 // skills/ms_office/mod.rs - OfficeCLI によるオフィスファイル編集スキル。
 //
 // 旧実装は Windows + Microsoft Office COM（PowerShell）が必要だったが、
-// OfficeCLI（同梱 LibreOffice。cargo xtask setup office で取得）と OOXML の直接編集へ置き換え、
-// OS や Microsoft Office の有無に依存しないようにした。
+// OfficeCLI（LibreOffice）と OOXML の直接編集へ置き換え、OS や Microsoft Office の
+// 有無に依存しないようにした。
+//
+// LibreOffice は**販売版には同梱しない**（第三者ソフトを自前で再配布しない方針）。
+// 利用者が公式ページから導入したものを `PICOAGENT_LIBREOFFICE_PATH` で指すか、PATH の
+// soffice を使う。開発用ビルドだけ `cargo xtask setup office` が開発機へ取得する。
 //
 //   replace_text … docx/xlsx/pptx を ZIP として開き、内部 XML の文字列を直接置換する
 //                  （Office 本体を起動しないため速く、書式・レイアウトを崩さない）

@@ -75,6 +75,8 @@ struct Progress {
 }
 
 pub fn init(app: &AppHandle) {
+    // フォールバック許可: `OnceLock::set` は2回目以降 Err を返すだけで、
+    // 先に入っている同じ値がそのまま残る（起動時に一度だけ呼ぶ初期化）。
     let _ = RUNTIME_ROOT.set(crate::log_paths::bundled_dir(app));
 }
 
