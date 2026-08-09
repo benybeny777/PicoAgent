@@ -585,7 +585,7 @@ cargo xtask preview-distribution
 cargo xtask build-distribution
 ```
 
-`build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL・更新署名・OSコード署名を検査し、未完了が1件でもあれば同梱物取得前に停止します。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
+`build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売はコード署名・macOS公証・自動更新を必須にしません。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
 
 ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
@@ -662,7 +662,7 @@ NSIS アンインストーラは関連プロセスとPicoAgent専用の一時フ
 
 **署名・自動更新**
 
-コード署名（Authenticode）、macOS署名・公証、自動更新（`tauri-plugin-updater`）は現状未設定です。`build-distribution` は、公開URL・更新公開鍵・実装・手動確認フラグが揃うまで販売用成果物を生成しません。秘密鍵と証明書は `distribution/release.json` やリポジトリへ保存しません。
+初期販売はコード署名（Authenticode）・macOS署名／公証・自動更新を使いません。`distribution/release.json` の `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenやmacOS Gatekeeperの警告が表示されるため、販売ページで事前に明記し、更新版は手動ダウンロードで案内します。将来有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
 
 </details>
 

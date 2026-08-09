@@ -49,6 +49,7 @@ pub fn check(strict: bool) -> Result<Value> {
     let value = manifest()?;
     let characters = included_characters(&value)?;
     let mut blockers = Vec::new();
+    let mut warnings = Vec::new();
 
     for document in REQUIRED_DOCUMENTS {
         if !root.join(document).is_file() {
@@ -120,8 +121,6 @@ pub fn check(strict: bool) -> Result<Value> {
         ("support", "supportUrl", "サポート窓口URL"),
         ("support", "privacyUrl", "プライバシー表示URL"),
         ("support", "termsUrl", "利用条件URL"),
-        ("updates", "endpoint", "更新配信エンドポイント"),
-        ("updates", "publicKey", "更新署名の公開鍵"),
     ] {
         if value
             .get(group)
@@ -134,6 +133,30 @@ pub fn check(strict: bool) -> Result<Value> {
             blockers.push(format!("{label}が未設定です"));
         }
     }
+    let updates_required = value
+        .pointer("/updates/required")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if updates_required {
+        for (key, label) in [
+            ("endpoint", "更新配信エンドポイント"),
+            ("publicKey", "更新署名の公開鍵"),
+        ] {
+            if value
+                .get("updates")
+                .and_then(|item| item.get(key))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+            {
+                blockers.push(format!("{label}が未設定です"));
+            }
+        }
+    } else {
+        warnings
+            .push("初期販売は自動更新なしです。更新版は利用者へ手動で案内してください".to_string());
+    }
     let platforms = value
         .get("platforms")
         .and_then(Value::as_array)
@@ -141,6 +164,10 @@ pub fn check(strict: bool) -> Result<Value> {
     if platforms.is_empty() {
         bail!("販売対象OSが1件も指定されていません");
     }
+    let signing_required = value
+        .pointer("/signing/required")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     for platform in platforms {
         let platform = platform
             .as_str()
@@ -153,14 +180,21 @@ pub fn check(strict: bool) -> Result<Value> {
                 continue;
             }
         };
-        if value
-            .get("signing")
-            .and_then(|item| item.get(key))
-            .and_then(Value::as_bool)
-            != Some(true)
+        if signing_required
+            && value
+                .get("signing")
+                .and_then(|item| item.get(key))
+                .and_then(Value::as_bool)
+                != Some(true)
         {
             blockers.push(format!("{label}の準備が未完了です"));
         }
+    }
+    if !signing_required {
+        warnings.push(
+            "初期販売はコード署名なしです。Windows SmartScreenとmacOS Gatekeeperの警告を販売ページで事前案内してください"
+                .to_string(),
+        );
     }
 
     let cargo_version = package_version(&root.join("src-tauri/Cargo.toml"))?;
@@ -181,9 +215,10 @@ pub fn check(strict: bool) -> Result<Value> {
     }
     let cargo_text = fs::read_to_string(root.join("src-tauri/Cargo.toml"))?;
     let lib_text = fs::read_to_string(root.join("src-tauri/src/lib.rs"))?;
-    if !cargo_text.contains("tauri-plugin-updater")
-        || !lib_text.contains("tauri_plugin_updater")
-        || tauri_config.pointer("/bundle/createUpdaterArtifacts") != Some(&Value::Bool(true))
+    if updates_required
+        && (!cargo_text.contains("tauri-plugin-updater")
+            || !lib_text.contains("tauri_plugin_updater")
+            || tauri_config.pointer("/bundle/createUpdaterArtifacts") != Some(&Value::Bool(true)))
     {
         blockers.push("Tauri updater本体と更新成果物の生成設定が未実装です".to_string());
     }
@@ -200,12 +235,16 @@ pub fn check(strict: bool) -> Result<Value> {
     for blocker in &blockers {
         eprintln!("  未完了: {blocker}");
     }
+    for warning in &warnings {
+        eprintln!("  注意: {warning}");
+    }
     if strict && !blockers.is_empty() {
         bail!("販売用ビルドを停止しました。上の未完了項目を解消してください");
     }
     Ok(serde_json::json!({
         "ready": blockers.is_empty(),
         "blockers": blockers,
+        "warnings": warnings,
         "characters": characters,
         "version": cargo_version,
     }))
@@ -242,7 +281,24 @@ mod tests {
         let report = check(false).unwrap();
         assert!(report["ready"].is_boolean());
         assert!(report["blockers"].is_array());
+        assert!(report["warnings"].is_array());
         assert_eq!(report["version"], "1.0.0");
+    }
+
+    #[test]
+    fn 初期販売は署名と自動更新を必須にしない() {
+        let report = check(false).unwrap();
+        let blockers = report["blockers"].as_array().unwrap();
+        let joined = blockers
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!joined.contains("コード署名"));
+        assert!(!joined.contains("署名・公証"));
+        assert!(!joined.contains("更新署名"));
+        assert!(!joined.contains("Tauri updater"));
+        assert!(report["warnings"].as_array().unwrap().len() >= 2);
     }
 
     #[test]

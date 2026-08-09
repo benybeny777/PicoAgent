@@ -14,6 +14,7 @@
     "termsUrl": ""
   },
   "updates": {
+    "required": false,
     "endpoint": "",
     "publicKey": ""
   },
@@ -22,6 +23,7 @@
     "baseUrl": "https://github.com/benybeny777/PicoAgent/releases/download/components-v1"
   },
   "signing": {
+    "required": false,
     "windowsReady": false,
     "macosReady": false
   }

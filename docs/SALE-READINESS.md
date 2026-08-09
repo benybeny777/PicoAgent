@@ -10,9 +10,9 @@ cargo xtask preview-distribution
 cargo xtask build-distribution
 ```
 
-`release-check` は現在地を一覧表示します。`preview-distribution` は法務・署名の完了前でも販売対象キャラだけのUIを生成し、内容を確認できます。`build-distribution` は未完了項目が1件でもあれば、同梱物取得やビルドを始める前に停止します。`cargo xtask dev` は全開発キャラを扱いますが、製品成果物を作る通常の `cargo xtask build` も配布許可リストだけを使います。
+`release-check` は現在地を一覧表示します。`preview-distribution` は法務確認の完了前でも販売対象キャラだけのUIを生成し、内容を確認できます。`build-distribution` は必須項目が1件でも残っていれば、同梱物取得やビルドを始める前に停止します。`cargo xtask dev` は全開発キャラを扱いますが、製品成果物を作る通常の `cargo xtask build` も配布許可リストだけを使います。
 
-販売設定の正本は `distribution/release.json` です。販売対象OSとキャラ、利用条件・プライバシー表示・第三者同梱物台帳の確認、Live2D審査参照、公開URL、更新署名、OSコード署名の準備状態をここへ記録します。Windows先行販売なら `platforms` をWindowsだけにできます。秘密鍵や証明書は記録しません。
+販売設定の正本は `distribution/release.json` です。販売対象OSとキャラ、利用条件・プライバシー表示・第三者同梱物台帳の確認、Live2D審査参照、公開URLをここへ記録します。初期販売は `signing.required=false` / `updates.required=false` とし、署名・公証・自動更新を必須ゲートにしません。Windows先行販売なら `platforms` をWindowsだけにできます。秘密鍵や証明書は記録しません。
 
 ## 必須ゲート
 
@@ -22,15 +22,14 @@ cargo xtask build-distribution
 - [ ] `cargo xtask package-components` でWindows／macOSの追加機能パッケージを作成・公開し、`component-manifest.json` のURL／サイズ／SHA-256を確定後に `components.packagesPublished=true`
 - [ ] Live2D拡張性アプリケーションの審査と契約を完了し、追跡可能な社内参照番号を登録
 - [ ] サポート、プライバシー表示、利用条件の公開URLを登録
-- [ ] Tauri updaterの公開鍵と更新先を登録し、秘密鍵を別媒体へバックアップ
-- [ ] Windowsコード署名、macOS署名・公証を実機で確認
 - [ ] `THIRD-PARTY-NOTICES.md` を実際の同梱物と突合
-- [ ] Windows／macOSのクリーン環境でインストール、初回モデル取得、更新、アンインストールを確認
+- [ ] Windows／macOSのクリーン環境で未署名警告、インストール、初回モデル取得、手動更新、アンインストールを確認
 - [ ] 販売ページに事業者情報、価格、動作環境、外部通信、返金・サポート範囲を表示
+- [ ] 販売ページにWindows SmartScreen／macOS Gatekeeperの警告と、正規ダウンロード元・手動更新手順を表示
 
 Live2D公式は、不特定多数のモデルを追加・組み合わせられる作品を拡張性アプリケーションに含め、一般ユーザー・小規模事業者を含めてリリース前の審査と特別契約を求めています。PicoAgentはキャラ追加を提供するため、契約確認を出荷ゲートから外しません。
 
-Tauri updaterは更新ファイルの署名検証を必須としており、秘密鍵を失うと既存利用者へ同じ更新経路で配布できなくなります。公開鍵だけを設定へ入れ、秘密鍵はリポジトリ・ログ・配布物へ含めません。
+将来自動更新を導入する場合、Tauri updaterは更新ファイルの署名検証を必須とします。`updates.required=true` に変え、公開鍵・更新先・更新成果物生成が揃ってから有効化します。秘密鍵はリポジトリ・ログ・配布物へ含めません。コード署名を導入する場合も `signing.required=true` に変えてWindows署名とmacOS署名／公証を販売ゲートへ戻します。
 
 ## 販売用キャラ境界
 
