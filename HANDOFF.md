@@ -20,7 +20,7 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 
 続く再帰監査では、過去の破損状態の空書き戻し、保存先の無言降格、会話リセットの見かけ上の成功、子プロセス未回収、Promise空catchと同型の経路を全体から洗い直した。正規保存先を得られない場合と破損退避に失敗した場合は更新を止め、リセット・更新確認・リソース解放・ウィンドウ復元の失敗を利用者通知または診断ログへ残す。二巡目では録音スレッド・WAV確定、Whisper出力回収、MCP停止の残件も修正した。再発ガードを追加し、正式キャラ11体とLive2D口パク設定も再確認した。
 
-さらに再帰全体点検を3巡行い、設計ガード自体の穴を2件塞いだ。`text::guard` は先頭切り出し `[..N]` しか見ておらず、その穴を通っていた `productivity_tools` の色変換が「バイト長6の日本語2文字」で実際に panic する状態だったため、検査と切り出しを文字ベースへ直して回帰テストを追加した。`bundle_scope` は通常設定だけを見ており、実際に利用者へ届く `tauri.distribution.conf.json` が無検査だったので、販売版専用の許可リストと検査を追加した。あわせて長期記憶の変更検知が直列化失敗時に保存を飛ばす問題、CSPの `unsafe-eval` が無文書だった点、未参照のモバイルアイコン35ファイル、AGENTSの実在しない例示や不足していたスクリプト一覧も直した。
+さらに再帰全体点検を3巡行い、設計ガード自体の穴を2件塞いだ。`text::guard` は先頭切り出し `[..N]` しか見ておらず、その穴を通っていた `productivity_tools` の色変換が「バイト長6の日本語2文字」で実際に panic する状態だったため、検査と切り出しを文字ベースへ直して回帰テストを追加した。`bundle_scope` は通常設定だけを見ており、実際に利用者へ届く `tauri.distribution.conf.json` が無検査だったので、販売版専用の許可リストと検査を追加した。Codexの事後確認では、文字列ガードに追加されたファイル単位の例外を削除し、販売版ガードを双方向化、色指定の`#`重複受理とxtask件数誤記録も修正した。あわせて長期記憶の変更検知が直列化失敗時に保存を飛ばす問題、CSPの `unsafe-eval` が無文書だった点、未参照のモバイルアイコン35ファイル、AGENTSの実在しない例示や不足していたスクリプト一覧も直した。
 
 ## 残る確認境界
 
@@ -34,8 +34,8 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 328件
-cargo test --manifest-path xtask/Cargo.toml             # 30件成功
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 330件
+cargo test --manifest-path xtask/Cargo.toml             # 31件成功
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui --release

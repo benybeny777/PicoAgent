@@ -49,19 +49,12 @@ mod guard {
             let Some(before) = before.map(|index| bytes[index] as char) else {
                 continue;
             };
-            if before.is_alphanumeric() || before == '_' || before == ')' || before == ']' {
+            if before.is_alphanumeric() || matches!(before, '_' | ')' | ']' | '"' | '#') {
                 return true;
             }
         }
         false
     }
-
-    /// 文字列ではなくスライス（`&[T]`）を数値で切っている箇所。型は行のテキストから
-    /// 判別できないため、ここだけ理由付きで除外する。**文字列の切り出しは足さないこと。**
-    const NON_STRING_SLICE_ALLOWED: [(&str, &str); 1] = [(
-        "skills/glob_files/mod.rs",
-        "`&pattern[1..]` / `&parts[skip..]` はパス区切りで分割済みの `&[&str]` を進めるもので、文字列のバイト添字ではない",
-    )];
 
     #[test]
     fn 固定長のバイト添字で文字列を切らない() {
@@ -69,13 +62,6 @@ mod guard {
         for source in guard_scan::all_sources() {
             if source.name == "text.rs" {
                 continue; // 定義元（このガード自身の説明文を含む）
-            }
-            let path = source.path.display().to_string().replace('\\', "/");
-            if NON_STRING_SLICE_ALLOWED
-                .iter()
-                .any(|(allowed, _)| path.ends_with(allowed))
-            {
-                continue;
             }
             for (number, line) in source.body().lines().enumerate() {
                 // コメント行の説明文（このガード自身の例示を含む）は対象外。
@@ -91,6 +77,27 @@ mod guard {
             offenders.is_empty(),
             "文字列は text::preview / text::truncate_bytes で切ってください（バイト添字は文字の途中で panic します）: {offenders:?}"
         );
+    }
+
+    #[test]
+    fn 固定範囲の検出器は代表的な表記を見落とさない() {
+        for source in [
+            "&text[..120]",
+            "&text[0..2]",
+            "&text[4..]",
+            "&\"日本語\"[0..3]",
+            "&r#\"日本語\"#[0..3]",
+            "method()[1..=2].to_vec()",
+        ] {
+            assert!(fixed_byte_slice(source), "検出できません: {source}");
+        }
+        for source in [
+            "let bytes = [0_u8; 4];",
+            "&chunk[..count]",
+            "&items[start..]",
+        ] {
+            assert!(!fixed_byte_slice(source), "誤検出しました: {source}");
+        }
     }
 
     /// ストリーミング受信は `text::Utf8Stream` を通す。`from_utf8_lossy` を直接使うと、

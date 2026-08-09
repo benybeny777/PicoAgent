@@ -70,11 +70,19 @@ fn match_segments(pattern: &[&str], parts: &[&str]) -> bool {
     match pattern.first() {
         None => parts.is_empty(),
         // `**` は 0 階層以上に一致する。
-        Some(&"**") => (0..=parts.len()).any(|skip| match_segments(&pattern[1..], &parts[skip..])),
+        Some(&"**") => (0..=parts.len()).any(|skip| {
+            match_segments(
+                pattern.get(1..).unwrap_or_default(),
+                parts.get(skip..).unwrap_or_default(),
+            )
+        }),
         Some(segment) => {
             !parts.is_empty()
                 && match_name(segment, parts[0])
-                && match_segments(&pattern[1..], &parts[1..])
+                && match_segments(
+                    pattern.get(1..).unwrap_or_default(),
+                    parts.get(1..).unwrap_or_default(),
+                )
         }
     }
 }

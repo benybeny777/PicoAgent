@@ -172,6 +172,19 @@ mod guard {
              本当に必要なら bundle_scope::ALLOWED_DISTRIBUTION_RESOURCES へ理由付きで追加して\
              ください: {violations:?}"
         );
+        let missing: Vec<&str> = ALLOWED_DISTRIBUTION_RESOURCES
+            .iter()
+            .map(|(allowed, _)| *allowed)
+            .filter(|allowed| {
+                !resources
+                    .iter()
+                    .any(|value| value.as_str() == Some(*allowed))
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "販売版に必要なリソース指定が欠けています: {missing:?}"
+        );
 
         // 販売版が通常設定より広くなっていないか（上書き設定なので、書き忘れると
         // 通常設定の `resources/bundled/**/*` がそのまま効いてしまう）。

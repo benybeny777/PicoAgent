@@ -368,7 +368,8 @@ fn timestamp_to_date(value: i64) -> Result<String, String> {
 }
 
 fn color_hex_to_rgb(text: &str) -> Result<String, String> {
-    let hex = text.trim().trim_start_matches('#');
+    let text = text.trim();
+    let hex = text.strip_prefix('#').unwrap_or(text);
     // `len()` はバイト長なので、16進数字であることまで確かめる。3バイト文字2つの
     // 「あい」でも長さ6を満たすため、この検査が無いとバイト添字が文字の途中に落ちる。
     if hex.len() != 6 || !hex.chars().all(|character| character.is_ascii_hexdigit()) {
@@ -607,6 +608,7 @@ mod tests {
         assert!(color_hex_to_rgb("あい").is_err());
         assert!(color_hex_to_rgb("#12345").is_err());
         assert!(color_hex_to_rgb("#12345g").is_err());
+        assert!(color_hex_to_rgb("##123456").is_err());
     }
 
     #[test]
