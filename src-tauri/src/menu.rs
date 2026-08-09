@@ -279,12 +279,19 @@ pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
     let layout = crate::layout::current(&state.config);
     let _framing_guard = crate::store::lock_state("PICOAGENT_CHARACTER_FRAMING");
-    let framing = state
+    let stored_framing = state
         .config
         .get_all()
         .get("PICOAGENT_CHARACTER_FRAMING")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let framing = match crate::character_framing::normalize_checked(&stored_framing) {
+        Ok(framing) => framing,
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &error);
+            return;
+        }
+    };
     patch.insert(
         "PICOAGENT_CHARACTER_FRAMING".to_string(),
         crate::character_framing::remove(&framing, &character_id, &layout),

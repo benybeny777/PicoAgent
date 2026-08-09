@@ -95,11 +95,11 @@ impl Tool for GoogleDriveTool {
                     Err(error) => return format!("エラー: Google Drive API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Google Drive API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Drive検索結果:\n");
                 for file in parsed.get("files").and_then(Value::as_array).into_iter().flatten() {
                     out.push_str(&format!(
@@ -126,7 +126,7 @@ impl Tool for GoogleDriveTool {
                     Err(error) => return format!("エラー: Google Drive API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if status.is_success() {
                     body
                 } else {
@@ -166,11 +166,11 @@ impl Tool for GoogleDriveTool {
                     Err(error) => return format!("エラー: Google Drive API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let text = response.text().await.unwrap_or_default();
+                let text = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Google Drive API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&text);
                 format!("OK: Drive ファイルを作成しました。id={}", parsed.get("id").and_then(Value::as_str).unwrap_or("unknown"))
             }
             _ => "エラー: action は search/get/create_text のいずれかを指定してください。".to_string(),

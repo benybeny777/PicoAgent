@@ -119,11 +119,11 @@ impl Tool for WeatherTool {
             Err(error) => return format!("エラー: 天気APIへの接続に失敗しました: {}", error),
         };
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tool_response_text!(response);
         if !status.is_success() {
             return format!("エラー: 天気APIが HTTP {} を返しました。", status);
         }
-        let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let parsed: Value = crate::tool_response_json!(&body);
         summarize_weather(&name, &parsed)
     }
 }
@@ -136,7 +136,7 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
         .await
         .map_err(|error| format!("地名検索に失敗しました: {}", error))?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
         return Err(format!("地名検索APIが HTTP {} を返しました。", status));
     }

@@ -109,11 +109,11 @@ impl Tool for SlackTool {
                     Err(error) => return format!("エラー: Slack API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Slack API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 if parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                     return format!(
                         "OK: Slack Bot token は有効です。team={} user={}",
@@ -163,11 +163,11 @@ impl Tool for SlackTool {
                 Err(error) => return format!("エラー: Slack API への接続に失敗しました: {}", error),
             };
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = crate::tool_response_text!(response);
             if !status.is_success() {
                 return format!("エラー: Slack API が HTTP {} を返しました。", status);
             }
-            let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+            let parsed: Value = crate::tool_response_json!(&body);
             if !parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                 return format!(
                     "エラー: Slack API が失敗を返しました: {}",
@@ -225,11 +225,11 @@ impl Tool for SlackTool {
             Err(error) => return format!("エラー: Slack API への接続に失敗しました: {}", error),
         };
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tool_response_text!(response);
         if !status.is_success() {
             return format!("エラー: Slack API が HTTP {} を返しました。", status);
         }
-        let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let parsed: Value = crate::tool_response_json!(&body);
         if parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
             "OK: Slack へ送信しました。".to_string()
         } else {

@@ -975,13 +975,17 @@ pub fn pet_set_character_offset(
             return Err("キャラクターまたは表示形式が不正です。".to_string());
         }
         let _guard = crate::store::lock_state("PICOAGENT_CHARACTER_FRAMING");
-        let mut all = state
+        let stored = state
             .config
             .get_all()
             .get("PICOAGENT_CHARACTER_FRAMING")
             .cloned()
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let normalized = crate::character_framing::normalize_checked(&stored)?;
+        let mut all = normalized
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "キャラクター構図設定を正規化できません".to_string())?;
         let characters = all
             .entry(character_id)
             .or_insert_with(|| Value::Object(Map::new()));
@@ -2427,13 +2431,13 @@ pub async fn settings_save(
     if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
         patch.insert(
             "PICOAGENT_CHARACTER_FRAMING".to_string(),
-            crate::character_framing::normalize(&value),
+            crate::character_framing::normalize_checked(&value)?,
         );
     }
     if let Some(value) = patch.get("PICOAGENT_STREAM_PROFILES").cloned() {
         patch.insert(
             "PICOAGENT_STREAM_PROFILES".to_string(),
-            crate::stream_profile::normalize(&value),
+            crate::stream_profile::normalize_checked(&value)?,
         );
     }
     let changed_text = |key: &str, fallback: &str| {

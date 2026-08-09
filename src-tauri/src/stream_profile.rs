@@ -70,6 +70,14 @@ pub fn normalize(value: &Value) -> Value {
     Value::Object(profiles)
 }
 
+/// 保存経路では、壊れた既存値を空オブジェクトへ置き換えないよう最上位の型を検証する。
+pub fn normalize_checked(value: &Value) -> Result<Value, String> {
+    if !value.is_object() {
+        return Err("キャラクター別の配信設定がオブジェクトではありません。元の値を保持して保存を中止しました。".to_string());
+    }
+    Ok(normalize(value))
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Appearance {
     pub background: String,
@@ -128,5 +136,10 @@ mod tests {
                 "mugi": { "background": "pastel", "backgroundImage": "", "display": "image", "displayImage": "", "captionColor": "#5a3b4b" }
             })
         );
+    }
+
+    #[test]
+    fn 壊れた配信設定を空で上書きしない() {
+        assert!(normalize_checked(&serde_json::json!("broken")).is_err());
     }
 }

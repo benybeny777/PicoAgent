@@ -120,7 +120,7 @@ impl Tool for ImageGenerateTool {
 
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tool_response_text!(res);
             return format!("エラー: 画像生成に失敗しました ({status}): {text}");
         }
 

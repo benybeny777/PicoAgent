@@ -31,6 +31,10 @@ struct EventDetail {
     resume_prompt: String,
 }
 
+fn parse_event_detail(detail: &str) -> Result<EventDetail, String> {
+    serde_json::from_str(detail).map_err(|error| format!("関係性イベントの詳細が不正です: {error}"))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationshipState {
@@ -190,7 +194,7 @@ pub fn record(
         _ => return Err("記録できない関係性イベントです。".to_string()),
     }
     if matches!(kind, "task_success" | "task_failure") {
-        let detail = serde_json::from_str::<EventDetail>(detail).unwrap_or_default();
+        let detail = parse_event_detail(detail)?;
         let tools = safe_tool_names(&detail.tools);
         let tool_text = if tools.is_empty() {
             "ツール".to_string()
@@ -357,6 +361,11 @@ mod tests {
         state.familiarity = 50;
         state.trust = 50;
         assert_eq!(state.bond_label(), "頼れる相棒");
+    }
+
+    #[test]
+    fn 不正なイベント詳細を既定値へ落とさない() {
+        assert!(parse_event_detail("not-json").is_err());
     }
 
     fn moment(text: &str, pinned: bool) -> SharedMoment {

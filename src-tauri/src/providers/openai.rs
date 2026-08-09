@@ -152,7 +152,9 @@ pub(crate) async fn stream_chat(
 
     if !res.status().is_success() {
         let status = res.status();
-        let text = res.text().await.unwrap_or_default();
+        let text = crate::tools::http::response_text(res)
+            .await
+            .map_err(anyhow::Error::msg)?;
         anyhow::bail!("OpenAI streaming /chat/completions 失敗: {} {}", status, text);
     }
 
@@ -359,7 +361,9 @@ impl Provider for OpenAI {
             .await?;
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tools::http::response_text(res)
+                .await
+                .map_err(anyhow::Error::msg)?;
             anyhow::bail!("OpenAI /chat/completions 失敗: {} {}", status, text);
         }
         let data: Value = res.json().await?;
@@ -426,7 +430,9 @@ impl Provider for OpenAI {
             .await?;
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tools::http::response_text(res)
+                .await
+                .map_err(anyhow::Error::msg)?;
             anyhow::bail!("OpenAI /chat/completions 失敗: {} {}", status, text);
         }
         let data: Value = res.json().await?;

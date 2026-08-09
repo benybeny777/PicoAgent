@@ -118,11 +118,11 @@ impl Tool for GoogleCalendarTool {
                     Err(error) => return format!("エラー: Google Calendar API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Google Calendar API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("予定一覧:\n");
                 for item in parsed.get("items").and_then(Value::as_array).into_iter().flatten() {
                     let summary = item.get("summary").and_then(Value::as_str).unwrap_or("（無題）");
@@ -177,11 +177,11 @@ impl Tool for GoogleCalendarTool {
                     Err(error) => return format!("エラー: Google Calendar API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Google Calendar API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 format!(
                     "OK: 予定を作成しました。id={}",
                     parsed.get("id").and_then(Value::as_str).unwrap_or("unknown")

@@ -129,11 +129,11 @@ impl Tool for GoogleDocsTool {
                     Err(error) => return format!("エラー: Google Docs API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Google Docs API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 let mut text = String::new();
                 collect_text(&parsed, &mut text);
                 if text.chars().count() > MAX_TEXT_CHARS {
@@ -225,7 +225,7 @@ async fn fetch_end_index(client: &reqwest::Client, token: &str, document_id: &st
         .await
         .map_err(|error| format!("Google Docs API への接続に失敗しました: {}", error))?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
         return Err(format!("Google Docs API が HTTP {} を返しました。", status));
     }
@@ -246,7 +246,7 @@ async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
     };
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tool_response_text!(response);
     if status.is_success() {
         body
     } else {

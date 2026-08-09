@@ -129,11 +129,11 @@ impl Tool for CurrencyRatesTool {
             Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
         };
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tool_response_text!(response);
         if !status.is_success() {
             return format!("エラー: 為替APIが HTTP {} を返しました。", status);
         }
-        let data: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let data: Value = crate::tool_response_json!(&body);
         let date = data.get("date").and_then(Value::as_str).unwrap_or("");
         let Some(rates) = data.get("rates").and_then(Value::as_object) else {
             return body; // 想定外の形式はそのまま返す。

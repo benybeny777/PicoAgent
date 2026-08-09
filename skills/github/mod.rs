@@ -101,11 +101,11 @@ impl Tool for GitHubTool {
                     Err(error) => return format!("エラー: GitHub API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: GitHub API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!([]));
+                let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Issue一覧:\n");
                 for issue in parsed.as_array().into_iter().flatten() {
                     if issue.get("pull_request").is_some() {
@@ -146,11 +146,11 @@ impl Tool for GitHubTool {
                     Err(error) => return format!("エラー: GitHub API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: GitHub API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 format!(
                     "OK: Issueを作成しました。{}",
                     parsed.get("html_url").and_then(Value::as_str).unwrap_or("")

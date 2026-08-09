@@ -93,11 +93,11 @@ impl Tool for NotionTool {
                     Err(error) => return format!("エラー: Notion API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Notion API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Notion検索結果:\n");
                 for item in parsed.get("results").and_then(Value::as_array).into_iter().flatten() {
                     let title = item
@@ -163,11 +163,11 @@ impl Tool for NotionTool {
                     Err(error) => return format!("エラー: Notion API への接続に失敗しました: {}", error),
                 };
                 let status = response.status();
-                let body = response.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!("エラー: Notion API が HTTP {} を返しました。", status);
                 }
-                let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let parsed: Value = crate::tool_response_json!(&body);
                 format!(
                     "OK: Notionページを作成しました。{}",
                     parsed.get("url").and_then(Value::as_str).unwrap_or("")

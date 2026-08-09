@@ -124,7 +124,9 @@ impl Provider for Xai {
             .await?;
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tools::http::response_text(res)
+                .await
+                .map_err(anyhow::Error::msg)?;
             anyhow::bail!("xAI /chat/completions failed: {} {}", status, text);
         }
         let data: Value = res.json().await?;

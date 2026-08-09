@@ -140,7 +140,7 @@ impl Tool for HttpApiTool {
             Err(error) => return format!("エラー: HTTP API への接続に失敗しました: {}", error),
         };
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tool_response_text!(response);
         if status.is_success() {
             format!("HTTP {}\n{}", status, trim_response(&body))
         } else {

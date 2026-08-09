@@ -168,7 +168,7 @@ async fn create_session(
         .await
         .map_err(|error| format!("Bluesky セッション作成に失敗しました: {}", error))?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
         return Err(format!("Bluesky セッション作成が HTTP {} を返しました。", status));
     }
@@ -205,7 +205,7 @@ async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
     };
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tool_response_text!(response);
     if status.is_success() {
         body
     } else {

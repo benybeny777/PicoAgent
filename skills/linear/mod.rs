@@ -112,7 +112,7 @@ async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
     };
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tool_response_text!(response);
     if status.is_success() {
         body
     } else {

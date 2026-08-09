@@ -8,6 +8,8 @@
 
 2026-08-10に `distribution/site/` の販売用LPを全面更新した。実画面のアニメーションWebPで完成済み2DのむぎとLive2D動作例のひよりを見せ、機能、全8表示形式、通信境界、無料版／準備中Pro、導入、Windows動作環境、SmartScreen警告、更新方法を1ページへ整理した。制作中の `mugi-live2d` はLPに掲載しない。Pro価格、事業者情報、返金範囲は未確定のため公開文言へ仮置きせず、販売前ゲートに残している。全体点検では、公開Releaseが0件のため取得導線を準備中へ戻し、ひよりのLive2D著作権表示、公開Issuesの無料サポート導線、44px級ナビ操作領域、画像の遅延読込、OSの動きを減らす設定向け静止画を追加した。公開Pagesはまだ旧LPのままなので、販売開始時に `distribution/site/` 全体を公開配布Repoへ同期して実URLを再確認する。
 
+同日の10巡再帰全体点検では、25スキルと9プロバイダ等に残っていた外部API本文・JSON失敗の空データ降格を共通Result経路へ統一し、再発ガードを追加した。壊れたキャラ別構図・配信設定を位置変更や設定保存で空上書きしない検証、関係性イベント詳細の厳密解析、ComfyUI履歴確認の共有HTTP化、年別変更履歴の相対リンク修正も行った。過去の画面外、二重拡大、起動レイヤー、青枠、口パク、読み上げ、指示混入、要約積み上がり、状態全消去、子プロセス孤立、物理削除迂回と同型を再確認し、新しい再発は検出していない。
+
 ひよりの口ArtMesh消失を、SDK 5用Core 6（Cubism 5.3形式）とSDK 4互換Core 5の使い分けで修正した。キャラクター設定には自動／Cubism 4／Cubism 5の世代選択を追加した。通常表示とVTuber形式の起動画面は上半身表示へ揃え、フキダシ拡大、画面内クランプ、キャラ別の既定声も反映済み。2026-08-08に全8形式を実用寸法・文字付き操作・独立入力欄へ揃え、設定画面を8カテゴリへ整理し、右クリックの危険なリセット操作をサブメニューへ移した。基本設定には4つの目的別入口、検索候補・解除、未保存件数、キーボード保存を追加し、レイアウトカードが初期表示から見えるよう大型プレビューを縮めた。さらにキャラ×表示形式の構図、配信背景と画面内ディスプレイ、LIVE・日付・時刻、左右画面配置、状態付き読み上げスイッチを追加した。読み上げはユーザー指示があるまでローカル設定で無効のまま扱う。
 
 Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430の誤記録、履歴ロック不一致、起動中の形式適用、キャラ別挨拶、配信キャンバス寸法とアセット版の二重管理も修正した。2026-08-08にはClaudeの追加提案を現行mainで再検証してCodex案と統合し、既存の会話コンテキスト圧縮を要約1ブロック置換・system込み予算・localの実コンテキスト長追従へ直した。PNG系4キャラは制作正本を分離し、Photoshop「ディテールを保持 2.0」による高精細化、元アルファ再適用、4背景QA、全件成功後だけ反映する工程へ更新した。42コマは `framePaths` で共有し、待機即時＋120ms後に残りを読む速度優先プリロードにした。制作正本208配置も71個の内容ハッシュblobへ共有化し、Photoshop工程が自動展開する。
@@ -36,12 +38,13 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 330件
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 335件
 cargo test --manifest-path xtask/Cargo.toml             # 31件成功
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui --release
 cargo run --manifest-path xtask/Cargo.toml -- release-check  # 販売前ブロッカー4件を正しく検出
+git ls-files '*.js' '*.mjs' | ForEach-Object { node --check $_ } # 6件成功
 git diff --check
 ```
 

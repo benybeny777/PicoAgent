@@ -77,6 +77,14 @@ pub fn normalize(value: &Value) -> Value {
     Value::Object(characters)
 }
 
+/// 保存経路では、壊れた既存値を空オブジェクトへ置き換えないよう最上位の型を検証する。
+pub fn normalize_checked(value: &Value) -> Result<Value, String> {
+    if !value.is_object() {
+        return Err("キャラクター構図設定がオブジェクトではありません。元の値を保持して保存を中止しました。".to_string());
+    }
+    Ok(normalize(value))
+}
+
 /// 指定したキャラと表示形式の構図だけを削除し、空になった親要素も掃除する。
 pub fn remove(value: &Value, character_id: &str, layout: &str) -> Value {
     let mut normalized = normalize(value);
@@ -126,5 +134,10 @@ mod tests {
             remove(&value, "mugi", "pet"),
             json!({ "mugi": { "stream": { "preset": "bust", "zoom": 2.05, "x": 0.0, "y": 38.0 } } })
         );
+    }
+
+    #[test]
+    fn 壊れた構図設定を空で上書きしない() {
+        assert!(normalize_checked(&json!(["broken"])).is_err());
     }
 }

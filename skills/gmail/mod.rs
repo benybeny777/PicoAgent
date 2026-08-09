@@ -176,11 +176,11 @@ async fn list_message_ids(
             .await
             .map_err(|error| format!("Gmail API への接続に失敗しました: {}", error))?;
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tools::http::response_text(response).await?;
         if !status.is_success() {
             return Err(format!("Gmail API が HTTP {} を返しました。", status));
         }
-        let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let parsed: Value = crate::tools::http::response_json(&body)?;
         let page_ids: Vec<String> = parsed
             .get("messages")
             .and_then(Value::as_array)
@@ -217,11 +217,11 @@ async fn post_gmail_json(
         .await
         .map_err(|error| format!("Gmail API への接続に失敗しました: {}", error))?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
         return Err(format!("Gmail API が HTTP {} を返しました。", status));
     }
-    Ok(serde_json::from_str(&body).unwrap_or_else(|_| json!({})))
+    crate::tools::http::response_json(&body)
 }
 
 async fn trash_messages(
@@ -441,11 +441,11 @@ impl Tool for GmailTool {
                 Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
             };
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = crate::tool_response_text!(response);
             if !status.is_success() {
                 return format!("エラー: Gmail API が HTTP {} を返しました。", status);
             }
-            let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+            let parsed: Value = crate::tool_response_json!(&body);
             let labels = parsed
                 .get("labels")
                 .and_then(Value::as_array)
@@ -588,11 +588,11 @@ impl Tool for GmailTool {
                 Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
             };
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = crate::tool_response_text!(response);
             if !status.is_success() {
                 return format!("エラー: Gmail API が HTTP {} を返しました。", status);
             }
-            let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+            let parsed: Value = crate::tool_response_json!(&body);
             let messages: Vec<Value> = parsed
                 .get("messages")
                 .and_then(Value::as_array)
@@ -617,11 +617,11 @@ impl Tool for GmailTool {
                     Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
                 };
                 let status = detail.status();
-                let body = detail.text().await.unwrap_or_default();
+                let body = crate::tool_response_text!(detail);
                 if !status.is_success() {
                     return format!("エラー: Gmail API が HTTP {} を返しました。", status);
                 }
-                let message: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let message: Value = crate::tool_response_json!(&body);
                 out.push_str(&format!(
                     "\n- id={} / {} / {} / {} / {}",
                     id,
@@ -649,11 +649,11 @@ impl Tool for GmailTool {
                 Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
             };
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = crate::tool_response_text!(response);
             if !status.is_success() {
                 return format!("エラー: Gmail API が HTTP {} を返しました。", status);
             }
-            let message: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+            let message: Value = crate::tool_response_json!(&body);
             let mut text = message
                 .get("payload")
                 .map(extract_text_part)
@@ -695,11 +695,11 @@ impl Tool for GmailTool {
             Err(error) => return format!("エラー: Gmail API への接続に失敗しました: {}", error),
         };
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tool_response_text!(response);
         if !status.is_success() {
             return format!("エラー: Gmail API が HTTP {} を返しました。", status);
         }
-        let parsed: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let parsed: Value = crate::tool_response_json!(&body);
         format!("OK: Gmail の{}が完了しました。id={}", action_label, message_id(&parsed))
     }
 }

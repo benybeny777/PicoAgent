@@ -154,7 +154,9 @@ pub async fn ensure_model_installed(
         .await?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = crate::tools::http::response_text(response)
+            .await
+            .map_err(anyhow::Error::msg)?;
         anyhow::bail!("Aivis モデル導入に失敗しました: HTTP {status} {body}");
     }
     for _ in 0..60 {

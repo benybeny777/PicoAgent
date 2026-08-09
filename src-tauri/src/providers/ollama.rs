@@ -164,7 +164,9 @@ impl Provider for Ollama {
         let res = crate::tools::http::client().post(&url).json(&body).send().await?;
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tools::http::response_text(res)
+                .await
+                .map_err(anyhow::Error::msg)?;
             anyhow::bail!("Ollama /api/chat failed: {} {}", status, text);
         }
         let data: Value = res.json().await?;
@@ -197,7 +199,9 @@ impl Provider for Ollama {
         let res = crate::tools::http::client().post(&url).json(&body).send().await?;
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tools::http::response_text(res)
+                .await
+                .map_err(anyhow::Error::msg)?;
             anyhow::bail!("Ollama streaming /api/chat failed: {} {}", status, text);
         }
 

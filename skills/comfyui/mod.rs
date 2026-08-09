@@ -288,7 +288,7 @@ impl Tool for ComfyuiTool {
         };
         if !res.status().is_success() {
             let status = res.status();
-            let text = res.text().await.unwrap_or_default();
+            let text = crate::tool_response_text!(res);
             return format!("エラー: ComfyUI へのキュー投入に失敗しました ({status}): {text}");
         }
         let queue_data: Value = match res.json().await {
@@ -305,20 +305,23 @@ impl Tool for ComfyuiTool {
 
         // ── 2. /history/{prompt_id} をポーリングして完了待ち ────────────────
         let history_url = format!("{base_url}/history/{prompt_id}");
-        let poll_client = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => return format!("エラー: ポーリングクライアントの初期化に失敗しました: {e}"),
-        };
         let max_polls = (POLL_MAX_SECS * 1_000 / POLL_INTERVAL_MS) as u32;
         let mut output_info: Option<(String, String, String)> = None;
 
         for _ in 0..max_polls {
             tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-            let history: Value = match poll_client.get(&history_url).send().await {
-                Ok(r) if r.status().is_success() => r.json().await.unwrap_or(json!({})),
+            let history: Value = match crate::tools::http::client()
+                .get(&history_url)
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => match r.json().await {
+                    Ok(history) => history,
+                    Err(error) => {
+                        return format!("エラー: ComfyUI の履歴JSONを解析できません: {error}")
+                    }
+                },
                 _ => continue,
             };
             if let Some(info) = extract_output(&history, &prompt_id) {

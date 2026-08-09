@@ -45,6 +45,42 @@ pub fn timeout(
     Duration::from_secs(seconds)
 }
 
+/// 外部サービスの応答本文を、読取失敗を空本文へ落とさず取得する。
+pub async fn response_text(response: reqwest::Response) -> Result<String, String> {
+    response
+        .text()
+        .await
+        .map_err(|error| format!("外部サービスの応答本文を読み取れません: {error}"))
+}
+
+/// 外部サービスのJSONを、解析失敗を空オブジェクトへ落とさず取得する。
+pub fn response_json(text: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(text)
+        .map_err(|error| format!("外部サービスの応答JSONを解析できません: {error}"))
+}
+
+/// `Tool::run()` の `String` 戻り値で、本文読取失敗をその場でエラー文字列へ変換する。
+#[macro_export]
+macro_rules! tool_response_text {
+    ($response:expr) => {
+        match $crate::tools::http::response_text($response).await {
+            Ok(body) => body,
+            Err(error) => return format!("エラー: {error}"),
+        }
+    };
+}
+
+/// `Tool::run()` の `String` 戻り値で、不正JSONをその場でエラー文字列へ変換する。
+#[macro_export]
+macro_rules! tool_response_json {
+    ($text:expr) => {
+        match $crate::tools::http::response_json($text) {
+            Ok(value) => value,
+            Err(error) => return format!("エラー: {error}"),
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -60,6 +96,12 @@ mod tests {
             super::timeout(&cfg, "TEST_TIMEOUT", 20, 3, 60).as_secs(),
             20
         );
+    }
+
+    #[test]
+    fn 不正な応答jsonを空オブジェクトへ落とさない() {
+        let error = super::response_json("not-json").expect_err("不正JSONはエラーにする");
+        assert!(error.contains("応答JSONを解析できません"));
     }
 }
 
@@ -87,6 +129,33 @@ mod guard {
         assert!(
             violations.is_empty(),
             "標準HTTPはtools::http::client()を共有してください:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    #[test]
+    fn 応答本文とjsonの失敗を空へ落とさない() {
+        let banned = [
+            ".text().await.unwrap_or_default()",
+            ".json().await.unwrap_or(",
+            "serde_json::from_str(&body).unwrap_or_else(|_| json!({}))",
+            "serde_json::from_str(&body).unwrap_or_else(|_| json!([]))",
+            "serde_json::from_str(&text).unwrap_or_else(|_| json!({}))",
+        ];
+        let violations: Vec<String> = crate::guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| !source.path.ends_with("tools/http.rs"))
+            .flat_map(|source| {
+                banned
+                    .iter()
+                    .filter(|pattern| source.text.contains(**pattern))
+                    .map(|pattern| format!("{} ({pattern})", source.path.display()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "外部応答の失敗を空本文・空JSONへ落とさないでください:\n{}",
             violations.join("\n")
         );
     }
