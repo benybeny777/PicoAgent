@@ -895,12 +895,7 @@ pub fn pet_set_character_profile(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Value, String> {
-    if character_id.is_empty()
-        || character_id.len() > 64
-        || !character_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
+    if !crate::character_pack::is_valid_id(&character_id) {
         return Err("キャラクターIDが不正です。".to_string());
     }
     if profile.chars().count() > 4000 {
@@ -965,9 +960,7 @@ pub fn pet_set_character_offset(
         json!(y.round().to_string()),
     );
     if let (Some(character_id), Some(layout)) = (character_id, layout) {
-        if !character_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        if !crate::character_pack::is_valid_id(&character_id)
             || !crate::layout::LAYOUTS
                 .iter()
                 .any(|(id, _, _, _)| *id == layout)

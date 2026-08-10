@@ -92,12 +92,7 @@ fn normalize_mode(mode: &str) -> &'static str {
 }
 
 fn path(app: &AppHandle, character_id: &str) -> Result<PathBuf, String> {
-    if character_id.is_empty()
-        || character_id.len() > 64
-        || !character_id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    if !crate::character_pack::is_valid_id(character_id) {
         return Err("キャラクターIDが不正です。".to_string());
     }
     let root = app

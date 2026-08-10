@@ -357,12 +357,7 @@ pub fn status(
 }
 
 fn validate_identity(id: &str, name: &str) -> Result<()> {
-    if id.is_empty()
-        || id.chars().count() > character_pack::MAX_ID_CHARS
-        || !id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    if !character_pack::is_valid_id(id) {
         bail!(
             "IDは{}文字以内の英数字・ハイフン・アンダースコアにしてください。",
             character_pack::MAX_ID_CHARS

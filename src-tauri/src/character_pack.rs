@@ -42,6 +42,22 @@ pub const MAX_TOTAL_BYTES: u64 = 250 * 1024 * 1024;
 pub const MAX_FILE_BYTES: u64 = 40 * 1024 * 1024;
 pub const MAX_ID_CHARS: usize = 64;
 
+/// キャラクターIDとして使ってよい文字列か。**このファイルが唯一の判定元。**
+///
+/// IDはそのままフォルダ名（`app_data_dir/characters/<id>/`）と設定キーの一部になるため、
+/// 英数字・ハイフン・アンダースコアだけに絞って `.` や区切り文字を弾く。
+///
+/// 以前は同じ規則が6箇所へ写されており、`character_framing` と `stream_profile` の
+/// 2つでは**長さ制限が抜けていた**（文字種だけ見ていた）。判定を写すと必ずどれかが
+/// ずれるので、`character_pack::guard` が写しの復活を検出する。
+pub fn is_valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.chars().count() <= MAX_ID_CHARS
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
 #[derive(Default)]
 pub struct PackStats {
     pub files: usize,
@@ -65,11 +81,7 @@ pub fn validate(source: &Path) -> Result<Value> {
     let manifest: Value = serde_json::from_str(&text).context("character.json が不正なJSONです")?;
 
     let id = required_text(&manifest, "id")?;
-    if id.len() > MAX_ID_CHARS
-        || !id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    if !is_valid_id(id) {
         bail!("id は{MAX_ID_CHARS}文字以内の英数字・ハイフン・アンダースコアだけにしてください");
     }
     required_text(&manifest, "name")?;
