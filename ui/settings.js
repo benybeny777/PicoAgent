@@ -29,6 +29,7 @@ let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
 let tha3ProgressUnlisten = null;
 let componentProgressUnlisten = null;
+let modalOpen = false; // 確認ダイアログ表示中は全体ショートカットを止める
 let updateProgressUnlisten = null;
 let tha3GenerationRunning = false;
 let characterPersona;
@@ -2208,16 +2209,16 @@ function buildDiagnosticsSection() {
         const phase = engine.phase || "";
         const progress = engine.percent != null ? ` / ${Math.round(Number(engine.percent))}%` : "";
         const engineCard = diagnosticCard(
-          "同梱エンジン",
+          "ローカルAI",
           enginePhaseLabel(phase),
           `${engine.message || "状態メッセージなし"}${progress}`,
           phase === "ready" ? "ok" : statusTone(false, phase !== "error"),
           ["engine", "local", phase, engine.message]
         );
-        if (phase === "error") engineCard.append(diagnosticRepairButton("同梱エンジンを再起動", () => window.picoagent.restartApp(true, false)));
+        if (phase === "error") engineCard.append(diagnosticRepairButton("ローカルAIを再起動", () => window.picoagent.restartApp(true, false)));
         grid.append(engineCard);
       } else {
-        grid.append(diagnosticsFailureCard("同梱エンジン", engineResult.reason));
+        grid.append(diagnosticsFailureCard("ローカルAI", engineResult.reason));
       }
       if (aivisResult.status === "fulfilled") {
         const aivis = aivisResult.value || {};
@@ -2804,7 +2805,10 @@ async function render() {
   };
   characterSelect.addEventListener("change", refreshCharacterCards);
   for (const character of characterCatalog.characters) {
-    const fallback = el("div", { className: "character-icon-fallback", textContent: String(character.name || character.id || "?").slice(0, 1) });
+    // 先頭1文字。`slice(0, 1)` は絵文字始まりの名前を半分で切って壊すため、
+    // コードポイント単位で取る。
+    const initial = Array.from(String(character.name || character.id || "?"))[0] || "?";
+    const fallback = el("div", { className: "character-icon-fallback", textContent: initial });
     const icon = el("img", { className: "character-icon", alt: `${character.name}のアイコン`, draggable: false });
     icon.hidden = true;
     characterIconUrl(character).then(url => {
@@ -3324,20 +3328,56 @@ function confirmRestart() {
   return new Promise((resolve) => {
     const overlay = el("div", { className: "restart-overlay" });
     const card = el("div", { className: "restart-card" });
+    // 前面に出す確認なので、支援技術にもダイアログとして伝え、背後のフォームへ
+    // Tab で抜けられないようにする（抜けられると、確認中に裏の設定を操作できてしまう）。
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-labelledby", "restartDialogTitle");
     card.append(
-      el("h2", { textContent: "再起動して反映します" }),
+      el("h2", { id: "restartDialogTitle", textContent: "再起動して反映します" }),
       el("p", { textContent: "選んだ設定（使うAI・モデル・音声・キャラクターなど）は、PicoAgent を再起動して起動画面でまとめて反映します。今すぐ再起動しますか？" }),
     );
     const actions = el("div", { className: "restart-actions" });
     const later = el("button", { className: "btn", textContent: "あとで", type: "button" });
     const now = el("button", { className: "btn primary", textContent: "今すぐ再起動", type: "button" });
-    const close = (value) => { overlay.remove(); resolve(value); };
+    const previousFocus = document.activeElement;
+    const close = (value) => {
+      document.removeEventListener("keydown", onKeydown, true);
+      modalOpen = false;
+      overlay.remove();
+      if (previousFocus instanceof HTMLElement) previousFocus.focus();
+      resolve(value);
+    };
+    function onKeydown(event) {
+      if (event.key === "Escape") {
+        // 取り消し側（あとで）へ倒す。設定は保存済みで、次回起動時に反映される。
+        event.preventDefault();
+        close(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [later, now];
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (!focusable.includes(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
     later.addEventListener("click", () => close(false));
     now.addEventListener("click", () => close(true));
     actions.append(later, now);
     card.append(actions);
     overlay.append(card);
     document.body.append(overlay);
+    modalOpen = true;
+    document.addEventListener("keydown", onKeydown, true);
     now.focus();
   });
 }
@@ -3422,6 +3462,7 @@ settingsSearch?.addEventListener("input", () => {
   if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
 });
 document.addEventListener("keydown", event => {
+  if (modalOpen) return; // 確認ダイアログ表示中は裏の保存・検索を動かさない
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     if (!saveBtn.disabled && !resetChangesBtn.disabled) saveBtn.click();
