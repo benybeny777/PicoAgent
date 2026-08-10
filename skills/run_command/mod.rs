@@ -501,4 +501,31 @@ mod tests {
         assert!(is_physical_delete("git", &["clean".to_string(), "-fd".to_string()]));
         assert!(!is_physical_delete("git", &["status".to_string()]));
     }
+
+    /// 対応OSのもう一方（macOS）のシェルが許可コマンドに入っていると、
+    /// PowerShell と同じ形で物理削除を通せてしまっていた。
+    #[test]
+    fn posixシェル経由の物理削除も拒否する() {
+        for shell in ["sh", "bash", "zsh", "/bin/bash"] {
+            assert!(
+                is_physical_delete(shell, &["-c".to_string(), "rm -rf ~/Documents".to_string()]),
+                "{shell} 経由の rm を拒否していない"
+            );
+        }
+        assert!(is_physical_delete(
+            "bash",
+            &["-c".to_string(), "find . -name '*.tmp' -delete".to_string()]
+        ));
+        assert!(is_physical_delete("shred", &["secret.txt".to_string()]));
+        // 削除でないシェル実行までは止めない。POSIX に無い cmd 語彙（del / erase / rd）を
+        // 巻き込むと、無関係なファイル名やサブコマンドまで拒否してしまう。
+        assert!(!is_physical_delete(
+            "bash",
+            &["-c".to_string(), "cargo test --release".to_string()]
+        ));
+        assert!(!is_physical_delete(
+            "bash",
+            &["-c".to_string(), "python del.py && ls erase/".to_string()]
+        ));
+    }
 }

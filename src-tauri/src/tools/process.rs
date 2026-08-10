@@ -26,17 +26,36 @@ const MAX_TIMEOUT_SECS: u64 = 7200;
 /// この判定は**ユーザー / AI が指定したプログラムを実行するすべての経路**で使う。
 /// 以前は run_command だけが持っていて、同じ allowlist で動くスケジューラには無く、
 /// 許可コマンドに `powershell` があれば予約実行から `Remove-Item` を通せてしまった。
+///
+/// **シェル本体が許可コマンドになっている場合は、その引数の中まで見る。** Windows の
+/// `powershell` / `cmd` だけを見ていた頃は、対応OSのもう一方である macOS の
+/// `sh -c "rm -rf ~/Documents"` が素通りした（同じ形の穴が OS 違いで残っていた）。
 pub fn is_physical_delete(program: &str, args: &[String]) -> bool {
     let program = program_stem(program);
     match program.as_str() {
-        "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" => true,
+        "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" | "shred" => true,
         "git" => args
             .first()
             .is_some_and(|arg| arg.eq_ignore_ascii_case("clean")),
-        "powershell" | "pwsh" => args.iter().any(|arg| contains_delete_token(arg, true)),
-        "cmd" => args.iter().any(|arg| contains_delete_token(arg, false)),
+        "powershell" | "pwsh" => args
+            .iter()
+            .any(|arg| contains_delete_token(arg, ShellFamily::PowerShell)),
+        "cmd" => args
+            .iter()
+            .any(|arg| contains_delete_token(arg, ShellFamily::Cmd)),
+        "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => args
+            .iter()
+            .any(|arg| contains_delete_token(arg, ShellFamily::Posix)),
         _ => false,
     }
+}
+
+/// 削除語彙はシェルごとに違う（`Remove-Item` は PowerShell だけ、`unlink` は POSIX だけ）。
+#[derive(Clone, Copy)]
+enum ShellFamily {
+    Cmd,
+    PowerShell,
+    Posix,
 }
 
 /// 物理削除を断るときの共通メッセージ。
@@ -56,13 +75,28 @@ fn program_stem(program: &str) -> String {
 }
 
 /// 単語境界で削除コマンドを含むか（`-Recurse` などの中に埋もれた一致は拾わない）。
-fn contains_delete_token(arg: &str, powershell: bool) -> bool {
-    let lower = arg.to_ascii_lowercase();
-    let mut tokens = vec!["del", "erase", "rmdir", "rd"];
-    if powershell {
-        tokens.extend_from_slice(&["remove-item", "rm"]);
-    }
-    lower
+///
+/// 語彙はシェルごとに**別**にする。共通の土台に `del` / `erase` / `rd` を置くと、
+/// それらを削除語として持たない POSIX シェルで `bash -c "python del.py"` のような
+/// 無関係な語まで拒否してしまう（実行できないほうへ倒れるので気づきにくい）。
+fn contains_delete_token(arg: &str, shell: ShellFamily) -> bool {
+    let tokens: &[&str] = match shell {
+        ShellFamily::Cmd => &["del", "erase", "rmdir", "rd"],
+        // `rm` / `ri` は Remove-Item の別名。cmd の内部コマンドも解釈できる。
+        ShellFamily::PowerShell => &[
+            "remove-item",
+            "rm",
+            "ri",
+            "del",
+            "erase",
+            "rmdir",
+            "rd",
+            "unlink",
+        ],
+        // `-delete` は `find . -delete` の形を拾う（分割時に `-` を残すので語として一致する）。
+        ShellFamily::Posix => &["rm", "rmdir", "unlink", "shred", "-delete"],
+    };
+    arg.to_ascii_lowercase()
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
         .any(|part| tokens.iter().any(|token| part.eq_ignore_ascii_case(token)))
 }
@@ -231,6 +265,36 @@ mod guard {
             violations.is_empty(),
             "外部プロセスを直接起動しています。`tools::process::command()` を使ってください\n（Windows のコンソール窓抑止・中断時の子プロセス回収が漏れます）:\n{}",
             violations.join("\n")
+        );
+    }
+
+    /// 子プロセスの完了待ちに上限を付けること。
+    ///
+    /// `command.output().await` をそのまま呼ぶと**待ち時間の上限が無くなる**。
+    /// `tokio::time::timeout(..., command.output())` で包むか、共通層の
+    /// `process::output()` を使えばこの形にはならない。実際に `image_tools` の
+    /// ImageMagick 名乗り確認だけが素の `.output().await` で残っており、壊れた
+    /// 実行ファイルを掴むと画像変換が永久に止まる状態だった。
+    #[test]
+    fn 子プロセスの完了待ちに上限を付ける() {
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "process.rs" {
+                continue; // 上限を実装している共通層そのもの
+            }
+            for (number, line) in source.body().lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                if line.contains(".output().await") {
+                    violations.push(format!("{}:{}", source.path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "子プロセスの完了待ちに上限がありません。`process::output()` を使うか \
+             `tokio::time::timeout` で包んでください: {violations:?}"
         );
     }
 

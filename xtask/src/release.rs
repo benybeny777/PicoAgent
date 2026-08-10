@@ -350,6 +350,18 @@ pub fn check(strict: bool) -> Result<Value> {
         ));
     }
 
+    // 販売版に入る第三者バイナリは同梱エンジン（llama-server）だけだが、その取得は
+    // `releases/latest` 固定なしで、SHA-256 の照合も無い（Live2D Core の取得は照合している）。
+    // 同じ PicoAgent の版でもビルド日ごとに中身が変わるため、出荷物を再現できず、
+    // ライセンス台帳にどの版を同梱したかも書けない。販売前に版を固定して照合を入れる。
+    if !bundled_engine_pinned(&root)? {
+        warnings.push(
+            "同梱エンジン（llama-server）が releases/latest 取得のままで、版の固定とSHA-256照合がありません。\
+             販売物を再現できず第三者ライセンス台帳にも版を記載できないため、販売前に固定してください"
+                .to_string(),
+        );
+    }
+
     let cargo_version = package_version(&root.join("src-tauri/Cargo.toml"))?;
     let xtask_version = package_version(&root.join("xtask/Cargo.toml"))?;
     let tauri_text = fs::read_to_string(root.join("src-tauri/tauri.conf.json"))
@@ -416,6 +428,28 @@ fn package_version(path: &std::path::Path) -> Result<String> {
         .find_map(|line| line.trim().strip_prefix("version = "))
         .map(|value| value.trim().trim_matches('"').to_string())
         .context("package.versionを見つけられません")
+}
+
+/// 同梱エンジンの取得が版固定＋SHA-256照合になっているか。
+///
+/// 実装（`bundled::fetch_engine`）を読んで判定する。`releases/latest` を引いている間は
+/// 固定されていない。ここを直したら判定も一緒に更新すること。
+fn bundled_engine_pinned(root: &Path) -> Result<bool> {
+    let text = fs::read_to_string(root.join("xtask/src/bundled.rs"))
+        .context("xtask/src/bundled.rsを読めません")?;
+    let Some(start) = text.find("pub fn fetch_engine(") else {
+        bail!("fetch_engine が見つかりません（判定を更新してください）");
+    };
+    // 次に現れる関数定義までを本体とみなす。`\nfn ` だけを探すと `pub fn` が続く
+    // 並びで本体が伸び、無関係な箇所の `sha256` を拾って「固定済み」と誤判定する。
+    let body = &text[start + 1..];
+    let end = ["\nfn ", "\npub fn ", "\npub(crate) fn "]
+        .iter()
+        .filter_map(|marker| body.find(marker))
+        .min()
+        .unwrap_or(body.len());
+    let body = &body[..end];
+    Ok(!body.contains("releases/latest") && body.contains("sha256"))
 }
 
 #[cfg(test)]

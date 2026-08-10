@@ -43,7 +43,11 @@ const MULTI_LAYER_EXTS: [&str; 5] = ["psd", "xcf", "tif", "tiff", "gif"];
 /// 名前が同じだけの無関係なシステムユーティリティへ画像変換の引数を渡さないよう、
 /// 出力に `ImageMagick` が含まれることまで確認する。
 async fn is_imagemagick(program: &str) -> bool {
-    match crate::tools::process::command(program).arg("-version").stdin(Stdio::null()).output().await {
+    let mut command = crate::tools::process::command(program);
+    command.arg("-version").stdin(Stdio::null());
+    // 名乗りの確認だけなので短い上限で打ち切る。共通層を通さず `.output().await` を
+    // 直接呼ぶと上限が無くなり、壊れた実行ファイルを掴んだときに変換全体が止まる。
+    match crate::tools::process::output(command, 10, "ImageMagick の確認").await {
         Ok(output) if output.status.success() => {
             String::from_utf8_lossy(&output.stdout).contains("ImageMagick")
         }
