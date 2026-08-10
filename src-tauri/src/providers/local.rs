@@ -340,7 +340,7 @@ impl Provider for Local {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("local /chat/completions failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("ローカルAIエンジン", "/chat/completions", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data

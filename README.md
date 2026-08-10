@@ -59,6 +59,10 @@
 
 ## 🚀 まず動かす
 
+> [!IMPORTANT]
+> **この節はソースから動かす開発者向けです。** 製品を使うだけなら Rust も cargo も要りません。
+> 配布ページのインストーラを実行してください（利用者向けの案内は公開サイトの `support.html`／`distribution/site/support.html`）。
+
 ### 前提
 
 **対応 OS は Windows と macOS です。初期販売版の配布はWindows 10/11 x64から開始します。** macOS版は署名・公証と実機QAが揃ってから追加します。

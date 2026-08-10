@@ -295,7 +295,7 @@ impl Provider for Anthropic {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("Anthropic /messages failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("Claude", "/messages", status, &text));
         }
         let data: Value = res.json().await?;
         Ok(from_anthropic_message(&data))

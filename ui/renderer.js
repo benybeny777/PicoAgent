@@ -1861,16 +1861,33 @@ function stopVoice(toIdle = true) {
 // 読み上げが有効かどうかの学習キャッシュ（pet_speak の結果から更新）。
 // false のときはストリーミング先行読み上げの合成要求を出さない（無駄な往復を省く）。
 let ttsEnabledCache = null;
+// 読み上げ失敗をこのセッションで既に知らせたか。
+// 読み上げをONにしたのにエンジンが無いと、以前は診断ログへ書くだけで画面には何も出ず、
+// キャラが黙るだけだった（利用者からは故障に見える）。かといって発話のたびに出すと
+// うるさいので、原因が分かる形で1度だけ知らせる。
+let voiceFailureNotified = false;
+function notifyVoiceFailure(error) {
+  logApp("warn", "音声の事前合成に失敗しました", errorDetail(error));
+  if (voiceFailureNotified) return;
+  voiceFailureNotified = true;
+  const detail = String(error?.message || error || "").trim();
+  status.textContent = detail
+    ? `読み上げできません: ${detail}`
+    : "読み上げできません。設定の「追加機能」から音声読み上げを導入してください";
+}
 // 合成のみ行い、再生はしない（起動時に描画と同時再生するための事前合成）。失敗・無効・空は null。
 async function prepareSpeech(text) {
   try {
     const result = await window.picoagent.speak(text);
     if (result?.enabled === false) ttsEnabledCache = false;
-    else if (result?.enabled) ttsEnabledCache = true;
+    else if (result?.enabled) {
+      ttsEnabledCache = true;
+      voiceFailureNotified = false; // 復旧したら次の失敗はまた知らせる
+    }
     if (!result?.enabled || result.skipped || !result.audio?.length) return null;
     return result;
   } catch (error) {
-    logApp("warn", "音声の事前合成に失敗しました", errorDetail(error));
+    notifyVoiceFailure(error);
     return null;
   }
 }
@@ -4532,12 +4549,26 @@ async function refreshOnboardingComponents() {
         : "";
     }
   } catch (error) {
+    // 状態を取れなかったときは、初期表示の「確認中」を必ず終わらせる。
+    // 放置すると5項目すべてが「確認中」のまま固まり、待てば変わるように見えてしまう。
+    settleOnboardingComponentBadges(navigator.onLine ? "確認できません" : "オフライン");
     if (!navigator.onLine) {
-      if (onboardingComponentStatus) onboardingComponentStatus.textContent = "オフラインのため取得確認を見送りました。基本機能はそのまま使えます。";
+      if (onboardingComponentStatus) onboardingComponentStatus.textContent = "オフラインのため取得確認を見送りました。基本機能はそのまま使えます。あとから「設定 → 追加機能・更新」で導入できます。";
       return;
     }
     logApp("warn", "追加機能の状態を確認できませんでした", errorDetail(error));
-    if (onboardingComponentStatus) onboardingComponentStatus.textContent = `状態を確認できません: ${error?.message || error}`;
+    if (onboardingComponentStatus) onboardingComponentStatus.textContent = `状態を確認できません: ${error?.message || error}。このまま進めて、あとから「設定 → 追加機能・更新」で導入できます。`;
+  }
+}
+
+// 取得できなかった項目の見出しバッジを、待ち状態のままにしない。
+function settleOnboardingComponentBadges(label) {
+  if (!onboardingComponentStep) return;
+  for (const row of onboardingComponentStep.querySelectorAll("[data-component-id]")) {
+    const badge = row.querySelector("em");
+    if (badge && badge.textContent.trim() === "確認中") badge.textContent = label;
+    const input = row.querySelector("input");
+    if (input) input.disabled = true; // 状態不明のまま取得を走らせない
   }
 }
 

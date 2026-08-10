@@ -47,7 +47,9 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     .checked(tts_enabled)
     .build(&app)
     .map_err(|e| e.to_string())?;
-    let reset = MenuItemBuilder::with_id("reset", "会話履歴を消してリセット")
+    // 会話履歴だけでなく**これまで覚えたこと（長期メモリ）も消える**。以前のラベルは
+    // 「会話履歴を消して」としか言っておらず、失うものを実際より小さく見せていた。
+    let reset = MenuItemBuilder::with_id("reset", "消す（元に戻せません）")
         .build(&app)
         .map_err(|e| e.to_string())?;
     let reset_layout = MenuItemBuilder::with_id("reset_layout", "今の画面位置・サイズを戻す")
@@ -106,12 +108,18 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .build()
         .map_err(|e| e.to_string())?;
 
-    // 取り消しにくい会話消去を通常操作から離し、表示を整える操作と同じサブメニューへまとめる。
+    // 会話と記憶の消去は取り消せないので、もう一段めくらないと押せない位置へ置く。
+    // 同じ階層に並べていた頃は、キャラ位置を直しに来た利用者の目に、見た目が同じ3項目
+    // として並んでいた（2つは無害、1つは全消去）。
+    let reset_conversation_menu = SubmenuBuilder::new(&app, "会話履歴と覚えたことを消す")
+        .item(&reset)
+        .build()
+        .map_err(|e| e.to_string())?;
     let reset_menu = SubmenuBuilder::new(&app, "表示と会話をリセット")
         .item(&reset_character)
         .item(&reset_layout)
         .separator()
-        .item(&reset)
+        .item(&reset_conversation_menu)
         .build()
         .map_err(|e| e.to_string())?;
 

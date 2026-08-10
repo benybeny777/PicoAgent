@@ -155,7 +155,7 @@ pub(crate) async fn stream_chat(
         let text = crate::tools::http::response_text(res)
             .await
             .map_err(anyhow::Error::msg)?;
-        anyhow::bail!("OpenAI streaming /chat/completions 失敗: {} {}", status, text);
+        anyhow::bail!("{}", crate::tools::http::service_error("OpenAI互換API", "/chat/completions（ストリーミング）", status, &text));
     }
 
     let mut full_content = String::new();
@@ -364,7 +364,7 @@ impl Provider for OpenAI {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("OpenAI /chat/completions 失敗: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("OpenAI互換API", "/chat/completions", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data
@@ -433,7 +433,7 @@ impl Provider for OpenAI {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("OpenAI /chat/completions 失敗: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("OpenAI互換API", "/chat/completions", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data

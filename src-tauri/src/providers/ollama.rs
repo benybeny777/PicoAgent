@@ -119,7 +119,10 @@ impl Provider for Ollama {
             .send()
             .await?;
         if !res.status().is_success() {
-            anyhow::bail!("Ollama /api/tags failed: {}", res.status());
+            anyhow::bail!(
+                "Ollamaがモデル一覧を返しませんでした（HTTP {}）。Ollamaが起動しているか、接続先を確認してください。",
+                res.status()
+            );
         }
         let data: Value = res.json().await?;
         Ok(data
@@ -167,7 +170,7 @@ impl Provider for Ollama {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("Ollama /api/chat failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("Ollama", "/api/chat", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data.get("message").cloned().unwrap_or_else(|| json!({}));
@@ -202,7 +205,7 @@ impl Provider for Ollama {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("Ollama streaming /api/chat failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("Ollama", "/api/chat（ストリーミング）", status, &text));
         }
 
         let mut full_content = String::new();
