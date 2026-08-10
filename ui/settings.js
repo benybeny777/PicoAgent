@@ -25,12 +25,12 @@ let characterFramingEditor = null;
 let characterStreamProfiles = {};
 let characterStreamProfileEditor = null;
 let characterDefaultVoices = {};
+let characterDefaultPersonas = {};
 let characterSelect;
 let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表示用）
-let tha3ProgressUnlisten = null;
-let componentProgressUnlisten = null;
 let modalOpen = false; // 確認ダイアログ表示中は全体ショートカットを止める
-let updateProgressUnlisten = null;
+let settingsMutationBusy = false;
+const settingsListeners = new Map();
 let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
@@ -89,16 +89,28 @@ window.addEventListener("unhandledrejection", event => {
   logApp("error", "設定画面の未処理 Promise rejection", errorDetail(event.reason));
 });
 
-window.picoagent.listen("settings:navigate", tabId => {
+async function replaceSettingsListener(key, channel, callback) {
+  const previous = settingsListeners.get(key);
+  previous?.release?.();
+  const slot = { release: null };
+  settingsListeners.set(key, slot);
+  const release = await window.picoagent.listen(channel, callback);
+  if (settingsListeners.get(key) !== slot) {
+    release();
+    return;
+  }
+  slot.release = release;
+}
+
+replaceSettingsListener("navigate", "settings:navigate", tabId => {
   activateSettingsTab(String(tabId || ""));
 }).catch(error => {
   logApp("warn", "設定タブ遷移イベントの購読に失敗しました", errorDetail(error));
 });
 
 window.addEventListener("beforeunload", () => {
-  if (tha3ProgressUnlisten) tha3ProgressUnlisten();
-  if (componentProgressUnlisten) componentProgressUnlisten();
-  if (updateProgressUnlisten) updateProgressUnlisten();
+  for (const slot of settingsListeners.values()) slot.release?.();
+  settingsListeners.clear();
   // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
   if (tha3GenerationRunning) {
     window.picoagent.settings.cancelTha3Generation().catch(error => {
@@ -199,13 +211,21 @@ function updateDirtyState() {
   for (const group of form.querySelectorAll(".advanced-group")) {
     group.classList.toggle("has-changed", Boolean(group.querySelector(".changed")));
   }
-  resetChangesBtn.disabled = !dirty;
+  resetChangesBtn.disabled = settingsMutationBusy || !dirty;
+  saveBtn.disabled = settingsMutationBusy;
   saveBtn.classList.toggle("dirty", dirty);
   saveBtn.textContent = dirty ? `変更を保存（${changedKeys.size}件）` : "変更を保存";
   if (dirtySummary) {
     dirtySummary.textContent = dirty ? `未保存 ${changedKeys.size}件` : "保存済み";
     dirtySummary.classList.toggle("dirty", dirty);
   }
+}
+
+function setSettingsMutationBusy(busy) {
+  settingsMutationBusy = busy;
+  form.inert = busy;
+  form.setAttribute("aria-busy", String(busy));
+  updateDirtyState();
 }
 
 function nodeSearchText(node) {
@@ -1064,11 +1084,10 @@ function buildComponentManager() {
     applySettingsSearch();
   }
 
-  if (componentProgressUnlisten) componentProgressUnlisten();
-  window.picoagent.listen("component:progress", progress => {
+  replaceSettingsListener("component-progress", "component:progress", progress => {
     const percent = progress.total > 0 ? ` ${Math.min(100, Math.round(progress.downloaded / progress.total * 100))}%` : "";
     status.textContent = `${progress.message}${percent}`;
-  }).then(unlisten => { componentProgressUnlisten = unlisten; }).catch(error => {
+  }).catch(error => {
     logApp("warn", "追加機能の進捗を受け取れませんでした", errorDetail(error));
   });
   refresh().catch(error => {
@@ -1723,7 +1742,15 @@ async function loadCharacterPersona(id) {
     `ユーザーの呼び方: ${persona.userName || ""}`,
     persona.systemPrompt || "",
   ].filter(Boolean).join("\n");
+  characterDefaultPersonas[id] = defaultText;
   characterPersona.value = characterOverrides[id] || defaultText;
+}
+
+function saveCurrentCharacterPersona(id) {
+  if (!characterPersona) return;
+  const value = characterPersona.value;
+  if (value === characterDefaultPersonas[id]) delete characterOverrides[id];
+  else characterOverrides[id] = value;
 }
 
 function live2dModelEntries(config) {
@@ -2371,11 +2398,10 @@ function buildProductInfoSection() {
     updateStatus,
     updateActions,
   ]));
-  if (updateProgressUnlisten) updateProgressUnlisten();
-  window.picoagent.listen("update:progress", progress => {
+  replaceSettingsListener("update-progress", "update:progress", progress => {
     const percent = progress.total > 0 ? Math.min(100, Math.round(progress.downloaded / progress.total * 100)) : 0;
     updateStatus.textContent = `アップデートをダウンロードしています… ${percent}%`;
-  }).then(unlisten => { updateProgressUnlisten = unlisten; }).catch(error => {
+  }).catch(error => {
     logApp("warn", "アップデート進捗を受け取れませんでした", errorDetail(error));
   });
   productSec.append(field(
@@ -2673,15 +2699,11 @@ async function render() {
   await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
-  characterSelect.addEventListener("change", event => {
-    // 人格の読込は非同期なので、form の委譲 change が先に collect() すると、切替前の
-    // 人格を新しいキャラの上書き値として保存してしまう。切替完了後に未保存判定する。
-    event.stopPropagation();
-    const requestedCharacter = characterSelect.value;
+  function queueCharacterSwitch(requestedCharacter) {
     // 素早い連続選択でも、表示中の人格を読み終えてから次へ進む。並列に読むと、
     // 遅く完了した古い読込が新しいキャラの編集欄を上書きしてしまう。
     characterSwitchQueue = characterSwitchQueue.then(async () => {
-      characterOverrides[previousCharacter] = characterPersona.value;
+      saveCurrentCharacterPersona(previousCharacter);
       saveCurrentCharacterVoice(previousCharacter);
       saveCurrentCharacterLive2dSdk(previousCharacter);
       try {
@@ -2701,6 +2723,13 @@ async function render() {
       refreshCharacterCards();
       updateDirtyState();
     });
+    return characterSwitchQueue;
+  }
+  characterSelect.addEventListener("change", event => {
+    // 人格の読込は非同期なので、form の委譲 change が先に collect() すると、切替前の
+    // 人格を新しいキャラの上書き値として保存してしまう。切替完了後に未保存判定する。
+    event.stopPropagation();
+    queueCharacterSwitch(characterSelect.value);
   });
   // 関係性は人格そのものではなく「人格の上に重ねる差分」なので、キャラ選択とは別の欄にする。
   const relationshipSelect = el("select");
@@ -2888,6 +2917,7 @@ async function render() {
       });
       removeButton.addEventListener("click", async () => {
         if (!removeConfirmation.request()) return;
+        setSettingsMutationBusy(true);
         removeButton.disabled = true;
         removeButton.textContent = "ゴミ箱へ移動中…";
         try {
@@ -2901,7 +2931,7 @@ async function render() {
             characterSelect.value = fallbackCharacter;
             if (savedSnapshot) savedSnapshot.PICOAGENT_CHARACTER = fallbackCharacter;
             data.values.PICOAGENT_CHARACTER = fallbackCharacter;
-            characterSelect.dispatchEvent(new Event("change"));
+            await queueCharacterSwitch(fallbackCharacter);
           }
           applyCharacterFilters();
           statusEl.textContent = `${character.name}をOSのゴミ箱へ移動しました。`;
@@ -2909,6 +2939,8 @@ async function render() {
           removeButton.disabled = false;
           removeButton.textContent = "削除";
           removeStatus.textContent = `削除できませんでした: ${error?.message || error}`;
+        } finally {
+          setSettingsMutationBusy(false);
         }
       });
       texts.push(removeStatus, removeButton);
@@ -3068,11 +3100,7 @@ async function render() {
     });
   });
 
-  if (tha3ProgressUnlisten) {
-    tha3ProgressUnlisten();
-    tha3ProgressUnlisten = null;
-  }
-  tha3ProgressUnlisten = await window.picoagent.listen("tha3:progress", event => {
+  await replaceSettingsListener("tha3-progress", "tha3:progress", event => {
     const line = String(event?.message || "").trim();
     if (!line) return;
     progress.hidden = false;
@@ -3385,7 +3413,7 @@ function collect() {
     const preset = patch.PICOAGENT_LOCAL_MODEL_PRESET || "auto";
     patch.PICOAGENT_MODEL = preset === "auto" ? "" : preset;
   }
-  if (characterSelect && characterPersona) characterOverrides[characterSelect.value] = characterPersona.value;
+  if (characterSelect && characterPersona) saveCurrentCharacterPersona(characterSelect.value);
   if (characterSelect && characterSpeaker) saveCurrentCharacterVoice(characterSelect.value);
   if (characterSelect && characterLive2dSdkSelect) saveCurrentCharacterLive2dSdk(characterSelect.value);
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
@@ -3459,7 +3487,8 @@ function confirmRestart() {
 }
 
 saveBtn.addEventListener("click", async () => {
-  saveBtn.disabled = true;
+  if (settingsMutationBusy) return;
+  setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {
     const patch = collect();
@@ -3489,12 +3518,13 @@ saveBtn.addEventListener("click", async () => {
     logApp("error", "設定保存に失敗しました", errorDetail(error));
     statusEl.textContent = `保存に失敗: ${error.message}`;
   } finally {
-    saveBtn.disabled = false;
+    setSettingsMutationBusy(false);
   }
 });
 
 resetChangesBtn?.addEventListener("click", async () => {
-  if (!savedSnapshot || resetChangesBtn.disabled) return;
+  if (!savedSnapshot || resetChangesBtn.disabled || settingsMutationBusy) return;
+  setSettingsMutationBusy(true);
   renderingSettings = true;
   data.values = cloneSettings(savedSnapshot);
   statusEl.textContent = "未保存の変更を戻しました";
@@ -3507,6 +3537,7 @@ resetChangesBtn?.addEventListener("click", async () => {
     statusEl.textContent = `設定の復元表示に失敗: ${error.message}`;
   } finally {
     renderingSettings = false;
+    setSettingsMutationBusy(false);
     updateDirtyState();
   }
 });

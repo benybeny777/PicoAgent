@@ -1260,7 +1260,9 @@ pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, St
             .map_err(|error| format!("選択中キャラクターを戻せません: {error}"))?;
     }
     if let Err(error) = crate::user_characters::remove(&app, &id) {
-        if was_selected {
+        // 削除処理中に別経路が選択キャラを変えていたら、その新しい選択を古いIDで
+        // 上書きしない。自分が設定した既定値のままの場合だけ元へ戻す。
+        if was_selected && state.config.get("PICOAGENT_CHARACTER", "mugi") == "mugi" {
             state
                 .config
                 .set_string("PICOAGENT_CHARACTER", id.clone())
@@ -1273,9 +1275,10 @@ pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, St
         return Err(format!("{error:#}"));
     }
     crate::log_paths::append_app_log(&app, &format!("キャラクター {id} をゴミ箱へ移動しました。"));
+    let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
     Ok(json!({
         "ok": true,
-        "activeCharacter": was_selected.then_some("mugi"),
+        "activeCharacter": active_character,
     }))
 }
 

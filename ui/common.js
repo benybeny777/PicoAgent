@@ -71,9 +71,7 @@
       return false;
     }
 
-    button.addEventListener("blur", () => {
-      if (!button.disabled) reset();
-    });
+    button.addEventListener("blur", () => reset());
     return Object.freeze({ request, reset, isArmed: () => armed });
   }
 

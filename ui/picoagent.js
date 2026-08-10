@@ -6,6 +6,8 @@ const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { LogicalSize, PhysicalPosition } = window.__TAURI__.dpi || {};
+const eventUnlisteners = new Set();
+let eventListenersClosing = false;
 
 // すべての invoke 失敗を app.log へ記録してから再スローする（呼び出し側の try/catch で
 // 握られたエラーも確実にログへ残すため）。pet_log 自身は再帰を避けて素の invoke を使う。
@@ -29,6 +31,28 @@ async function call(name, args) {
     throw error;
   }
 }
+
+async function managedListen(channel, callback) {
+  const unlisten = await listen(channel, (event) => callback(event.payload));
+  if (eventListenersClosing) {
+    unlisten();
+    return () => {};
+  }
+  let active = true;
+  const release = () => {
+    if (!active) return;
+    active = false;
+    eventUnlisteners.delete(release);
+    unlisten();
+  };
+  eventUnlisteners.add(release);
+  return release;
+}
+
+window.addEventListener("beforeunload", () => {
+  eventListenersClosing = true;
+  for (const release of [...eventUnlisteners]) release();
+});
 
 window.picoagent = {
   init: () => call("pet_init"),
@@ -113,12 +137,15 @@ window.picoagent = {
   showOnboarding: () => call("pet_show_onboarding"),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return;
+    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
-    listen(channel, (event) => callback(event.payload));
+    return managedListen(channel, callback).catch(error => {
+      logInvokeError(`event:${channel}`, error);
+      return () => {};
+    });
   },
   // Tauri イベントをリッスンして unlisten 関数を返す（ストリーミング等に使用）。
-  listen: (channel, callback) => listen(channel, (event) => callback(event.payload)),
+  listen: (channel, callback) => managedListen(channel, callback),
   // 感情状態を取得する。
   emotion: () => call("pet_emotion"),
   // 今月のトークン使用量を取得する。

@@ -2994,15 +2994,17 @@ async function handleNativeDrop(paths) {
   }
 }
 
-try {
-  window.picoagent.listen("tauri://drag-enter", () => setDropOverlay(true));
-  window.picoagent.listen("tauri://drag-leave", () => setDropOverlay(false));
-  window.picoagent.listen("tauri://drag-drop", (payload) => {
+for (const [channel, callback] of [
+  ["tauri://drag-enter", () => setDropOverlay(true)],
+  ["tauri://drag-leave", () => setDropOverlay(false)],
+  ["tauri://drag-drop", (payload) => {
     setDropOverlay(false);
     handleNativeDrop(payload?.paths);
+  }],
+]) {
+  window.picoagent.listen(channel, callback).catch(error => {
+    logApp("warn", `${channel} の購読に失敗しました`, errorDetail(error));
   });
-} catch (error) {
-  logApp("warn", "ネイティブD&Dの購読に失敗しました", errorDetail(error));
 }
 
 // ── テキスト/URL のドロップ: ブラウザ等からの文字列は入力欄へ挿入する ─────────
@@ -4004,7 +4006,10 @@ window.picoagent.on("pet:character-reset", (reset) => {
   savedCharacterOffset = { x: 0, y: 0 };
   applyCharacterFraming();
 });
-window.picoagent.on("pet:model", model => { status.textContent = model; setTimeout(() => status.textContent = "", 1800); });
+window.picoagent.on("pet:model", model => {
+  status.textContent = model;
+  setTimeout(() => { if (status.textContent === model) status.textContent = ""; }, 1800);
+});
 window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
   conversationRevision += 1;
