@@ -362,12 +362,7 @@ pub fn install_live2d(
     }
     let id = id.trim();
     let name = name.trim();
-    if id.is_empty()
-        || id.len() > character_pack::MAX_ID_CHARS
-        || !id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    if !character_pack::is_valid_id(id) {
         bail!(
             "id は{}文字以内の英数字・ハイフン・アンダースコアだけにしてください",
             character_pack::MAX_ID_CHARS
@@ -412,11 +407,7 @@ pub fn install_live2d(
 /// 追加キャラクターを削除する。ユーザーが持ち込んだデータなので OS のゴミ箱へ移す。
 pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
     let _state_lock = crate::store::lock_state("user-characters");
-    if id.is_empty()
-        || !id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    if !character_pack::is_valid_id(id) {
         bail!("不正なidです: {id}");
     }
     let target = root(app)?.join(id);
@@ -436,6 +427,78 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
 /// 取り込む側でない**アプリ側**のこのファイルに置く。
 #[cfg(test)]
 mod guard {
+    /// `character_pack.rs` は xtask が `#[path]` で取り込むため、`crate::` の
+    /// アプリ内部モジュールを参照してはいけない（依存は std / serde_json / anyhow だけ）。
+    ///
+    /// この制約は AGENTS.md に文章でだけ書かれていて検査が無く、実際に設計ガードを
+    /// あのファイルへ足したときに `crate::guard_scan` を参照して xtask のビルドが壊れた。
+    /// 壊れるのは xtask 側だけなので、アプリのテストを回しても気づけない。
+    #[test]
+    fn 検証規則の正本はアプリ内部へ依存しない() {
+        let path = crate::guard_scan::repo_root().join("src-tauri/src/character_pack.rs");
+        let text = std::fs::read_to_string(&path).expect("character_pack.rs を読めない");
+        let violations: Vec<String> = text
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| !line.trim_start().starts_with("//"))
+            .filter(|(_, line)| line.contains("crate::"))
+            .map(|(number, line)| format!("{}: {}", number + 1, line.trim()))
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "character_pack.rs は xtask からも取り込まれるため crate:: を参照できません\
+             （設計ガードを足すなら user_characters.rs 側へ置いてください）:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    /// キャラクターIDの判定を写して持たないこと。
+    ///
+    /// 同じ規則が9箇所へ写されており、`character_framing` / `stream_profile` /
+    /// 構図保存 / `user_characters::remove` の4つでは**長さ制限が抜けていた**
+    /// （文字種だけ見ていて、いくら長いIDでも通っていた）。IDはフォルダ名と設定キーの
+    /// 一部になるため、判定は `character_pack::is_valid_id()` の1箇所に保つ。
+    ///
+    /// このガードを `character_pack.rs` へ置いてはいけない。あのファイルは xtask が
+    /// `#[path]` で取り込むため `crate::` のアプリ内部（`guard_scan` 等）を参照できない。
+    fn is_id_rejection(line: &str, window: &str) -> bool {
+        let rejects = line.contains(".all(")
+            && line.contains("is_ascii_alphanumeric()")
+            && (line.contains('-') || line.contains('_'));
+        if !rejects {
+            return false;
+        }
+        // 判定対象がキャラクターIDのときだけ。ツール名・サーバ名の検査や、
+        // `.filter()` / `.map()` で落とす正規化は用途が違うので含めない。
+        window.contains("character_id") || window.contains("id.is_empty()")
+    }
+
+    #[test]
+    fn キャラクターidの判定を自前実装しない() {
+        let mut violations = Vec::new();
+        for source in crate::guard_scan::all_sources() {
+            if source.name == "character_pack.rs" {
+                continue; // 判定の定義元
+            }
+            let lines: Vec<&str> = source.body().lines().collect();
+            for (index, line) in lines.iter().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                let from = index.saturating_sub(6);
+                let window = lines[from..=index].join("\n");
+                if is_id_rejection(line, &window) {
+                    violations.push(format!("{}:{}", source.path.display(), index + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "キャラクターIDの判定は character_pack::is_valid_id() を使ってください\
+             （写すと長さ制限が抜けます）: {violations:?}"
+        );
+    }
+
     #[test]
     fn xtaskは検証規則を自前実装しない() {
         let path = crate::guard_scan::repo_root().join("xtask/src/character_pack.rs");

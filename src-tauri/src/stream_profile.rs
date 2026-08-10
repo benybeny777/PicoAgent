@@ -8,10 +8,7 @@ const BACKGROUNDS: [&str; 4] = ["pastel", "gaming", "simple", "custom"];
 const DISPLAYS: [&str; 5] = ["dashboard", "game", "clock", "image", "none"];
 
 fn valid_character_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.chars().all(|character| {
-            character.is_ascii_alphanumeric() || character == '-' || character == '_'
-        })
+    crate::character_pack::is_valid_id(value)
 }
 
 fn allowed(value: Option<&Value>, choices: &[&str], fallback: &str) -> String {

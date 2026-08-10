@@ -24,10 +24,7 @@ fn defaults(preset: &str) -> (f64, f64, f64) {
 }
 
 fn valid_character_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.chars().all(|character| {
-            character.is_ascii_alphanumeric() || character == '-' || character == '_'
-        })
+    crate::character_pack::is_valid_id(value)
 }
 
 /// 保存前と読み込み後に同じ規則を使えるよう、未知キーと不正値を落として返す。
