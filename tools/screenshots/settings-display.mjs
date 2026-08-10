@@ -52,13 +52,13 @@ window.__TAURI__ = {
     if (name === "pet_user_characters") return { characters: [], root: "" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
     if (name === "settings_components_status") return [
-      { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: false },
-      { id: "whisper", label: "音声入力・文字起こし", description: "Whisperを端末内で動かします。", sizeLabel: "約0.5GB", ready: false, available: true, removable: false },
-      { id: "tha3", label: "1枚絵からキャラ作成", description: "THA3で動く2Dキャラを作ります。", sizeLabel: "約5.2GB", ready: false, available: true, removable: false },
-      { id: "office", label: "Office変換", description: "OfficeCLIで文書変換を補助します。", sizeLabel: "約1.5GB", ready: false, available: false, removable: false },
-      { id: "tools", label: "PDF・画像・文書ツール", description: "FFmpeg等を追加します。", sizeLabel: "約1.0GB", ready: false, available: true, removable: false },
+      { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
+      { id: "whisper", label: "音声入力・文字起こし", description: "Whisperを端末内で動かします。", sizeLabel: "約0.5GB", ready: false, available: true, removable: false, installMode: "managed", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
+      { id: "tha3", label: "1枚絵からキャラ作成", description: "THA3で動く2Dキャラを作ります。", sizeLabel: "約5.2GB", ready: false, available: true, removable: false, installMode: "external", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
+      { id: "office", label: "Office変換", description: "LibreOfficeで文書変換を補助します。", sizeLabel: "外部アプリ", ready: false, available: true, removable: false, installMode: "external", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
+      { id: "tools", label: "PDF・画像・文書ツール", description: "FFmpeg等を追加します。", sizeLabel: "外部ツール", ready: false, available: true, removable: false, installMode: "external", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
     ];
-    if (name === "pet_list_downloaded_models") return { models: [] };
+    if (name === "pet_list_downloaded_models") return { totalLabel: "2GB", models: [{ name: "gemma-test.gguf", label: "Gemma", sizeLabel: "2GB", active: false }] };
     if (name === "settings_list_models") return [];
     if (name === "engine_status") return { phase: "ready" };
     if (name === "aivis_status") return { enabled: true, up: true };
@@ -101,10 +101,16 @@ try {
   if (await page.locator(".quick-settings-card").count() !== 5) throw new Error("よく使う設定への入口が5件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
   await page.screenshot({ path: join(OUT, "basic-tab.png") });
-  await page.getByRole("tab", { name: "追加機能" }).click();
+  await page.getByRole("tab", { name: "追加機能・更新（1）", exact: true }).click();
   await page.waitForSelector(".component-card");
   if (await page.locator(".component-card").count() !== 6) throw new Error("基本を含む追加機能カードが6件ではありません");
+  if ((await page.locator(".component-card").allTextContents()).some(text => text.includes("null"))) throw new Error("追加機能カードに空値が文字として表示されています");
+  await page.getByRole("button", { name: "1.2.0へ更新", exact: true }).click();
+  if (!(await page.locator(".component-manager-status").textContent())?.includes("音声モデル・辞書・設定は残ります")) throw new Error("更新前に維持データが案内されません");
   await page.screenshot({ path: join(OUT, "components-tab.png") });
+  await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
+  await page.getByRole("button", { name: "削除", exact: true }).click();
+  if (!(await page.locator(".model-manager-status").textContent())?.includes("再ダウンロードが必要")) throw new Error("モデル削除前に再ダウンロードが案内されません");
   await page.getByRole("tab", { name: "基本設定" }).click();
   await page.locator('[data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
   const dirtyText = await page.locator("#dirtySummary").textContent();

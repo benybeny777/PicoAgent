@@ -2331,6 +2331,12 @@ relationshipMoments?.addEventListener("click", async event => {
       input.focus();
       return;
     }
+    if (button.dataset.action === "delete" && button.dataset.confirming !== "true") {
+      button.dataset.confirming = "true";
+      button.textContent = "もう一度押す";
+      showToast("この記録だけを消します。もう一度押すと実行します", "info");
+      return;
+    }
     button.disabled = true;
     const result = button.dataset.action === "pin"
       ? await window.picoagent.pinRelationshipMoment(button.dataset.id, button.dataset.pinned !== "true")
@@ -2339,20 +2345,47 @@ relationshipMoments?.addEventListener("click", async event => {
   } catch (error) {
     logApp("warn", "いっしょの記録を更新できませんでした", errorDetail(error));
     showToast("記録を更新できませんでした", "error");
+    if (button.dataset.action === "delete") {
+      button.dataset.confirming = "false";
+      button.textContent = "削除";
+    }
   } finally {
     button.disabled = false;
   }
 });
 
+relationshipMoments?.addEventListener("blur", event => {
+  const button = event.target instanceof Element ? event.target.closest('button[data-action="delete"]') : null;
+  if (!button || button.disabled) return;
+  button.dataset.confirming = "false";
+  button.textContent = "削除";
+}, true);
+
 relationshipClear?.addEventListener("click", async () => {
-  if (!window.confirm("このキャラクターとの記録をすべて消しますか？")) return;
+  if (relationshipClear.dataset.confirming !== "true") {
+    relationshipClear.dataset.confirming = "true";
+    relationshipClear.textContent = "もう一度押してすべて消す";
+    showToast("このキャラクターとの記録をすべて消します。もう一度押すと実行します", "info");
+    return;
+  }
+  relationshipClear.disabled = true;
   try {
     renderRelationship(await window.picoagent.clearRelationship());
     showToast("いっしょの記録を消しました", "success");
   } catch (error) {
     logApp("warn", "いっしょの記録を消せませんでした", errorDetail(error));
     showToast("記録を消せませんでした", "error");
+  } finally {
+    relationshipClear.disabled = false;
+    relationshipClear.dataset.confirming = "false";
+    relationshipClear.textContent = "記録をすべて消す";
   }
+});
+
+relationshipClear?.addEventListener("blur", () => {
+  if (relationshipClear.disabled) return;
+  relationshipClear.dataset.confirming = "false";
+  relationshipClear.textContent = "記録をすべて消す";
 });
 
 function queueNotice(line) {
@@ -4461,6 +4494,7 @@ async function refreshOnboardingComponents() {
   if (!onboardingComponentStep) return;
   try {
     const statuses = await window.picoagent.settings.componentStatus();
+    let attentionCount = 0;
     for (const item of statuses) {
       const row = onboardingComponentStep.querySelector(`[data-component-id="${item.id}"]`);
       if (!row) continue;
@@ -4470,7 +4504,13 @@ async function refreshOnboardingComponents() {
       const input = row.querySelector("input");
       if (input) input.disabled = item.ready || !item.available || item.installMode === "external";
       const badge = row.querySelector("em");
-      if (badge) badge.textContent = item.updateAvailable ? "設定で更新" : (item.ready ? "準備済み" : (item.installMode === "managed" ? "公式から取得" : "設定で案内"));
+      const needsAttention = item.updateAvailable || item.newerThanTarget || item.versionUnknown;
+      if (needsAttention) attentionCount += 1;
+      if (badge) badge.textContent = item.updateAvailable
+        ? "設定で更新"
+        : (item.newerThanTarget || item.versionUnknown
+          ? "設定で確認"
+          : (item.ready ? "準備済み" : (item.installMode === "managed" ? "公式から取得" : "設定で案内")));
       let source = row.querySelector("a.onboarding-component-source");
       if (item.installMode === "external" && item.sources?.[0]?.url) {
         if (!source) {
@@ -4485,6 +4525,11 @@ async function refreshOnboardingComponents() {
       } else {
         source?.remove();
       }
+    }
+    if (onboardingComponentStatus) {
+      onboardingComponentStatus.textContent = attentionCount
+        ? `導入済みの追加機能に${attentionCount}件の確認項目があります。初回設定の完了後、「設定 → 追加機能・更新」で確認できます。`
+        : "";
     }
   } catch (error) {
     if (!navigator.onLine) {

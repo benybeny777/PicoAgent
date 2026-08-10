@@ -885,6 +885,7 @@ body.searching .tab-panel {
   padding: 0 12px;
   background: #c0627a;
 }
+.model-manager-status { min-height:18px; margin:4px 0 8px; }
 .model-active {
   flex: 0 0 auto;
   font-size: 11px;
@@ -1076,6 +1077,7 @@ button.tab:active {
 .component-list { display:grid; gap:10px; margin-top:12px; }
 .component-card { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:14px 16px; border:1px solid var(--line); border-radius:14px; background:var(--surface); }
 .component-card.is-ready { border-color:var(--ok-border); }
+.component-card.has-update,.component-card.has-warning,.component-card.is-newer { border-color:var(--warn-border); background:var(--warn-bg); }
 .component-card-copy strong,.component-card-copy span,.component-card-copy small { display:block; }
 .component-card-copy strong { font-size:14px; }
 .component-card-copy span { margin-top:3px; color:var(--ink); font-size:12px; }
@@ -1088,10 +1090,16 @@ button.tab:active {
 .product-update-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .component-badge { padding:4px 8px; border-radius:999px; background:var(--surface-soft); color:var(--muted); font-size:10px; white-space:nowrap; }
 .component-card.is-ready .component-badge { color:var(--ok-ink); }
+.component-card.has-update .component-badge,.component-card.has-warning .component-badge,.component-card.is-newer .component-badge { color:var(--warn-ink); }
+.component-version-warning { color:var(--warn-ink) !important; font-weight:650; }
 .component-manager-status { min-height:20px; margin-top:10px; }
 .component-card-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
 .component-card-actions .danger { border-color:var(--err-border); background:var(--err-bg); color:var(--err-ink); }
-@media (max-width:760px) { .component-card { grid-template-columns:1fr auto; } .component-card button { grid-column:1 / -1; width:100%; } }
+@media (max-width:760px) {
+  .component-card { grid-template-columns:minmax(0,1fr) auto; }
+  .component-card-actions { grid-column:1 / -1; width:100%; }
+  .component-card-actions button { flex:1 1 180px; }
+}
 .tha3-tool-status {
   margin: 10px 0;
   padding: 8px 10px;

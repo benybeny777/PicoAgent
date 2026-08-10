@@ -4,6 +4,7 @@
 // Aivis／Whisperは各公式配布元から利用者のPCへ直接取得し、それ以外は公式ページと
 // 手動設定を案内する。取得物はPicoAgent管理領域だけへ置き、グローバルPATHを変更しない。
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ const WHISPER_MODEL_URL: &str =
 const WHISPER_MODEL_SHA256: &str =
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
 static RUNTIME_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static COMPONENT_OPERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,7 +68,9 @@ pub struct ComponentStatus {
     installed_version: Option<String>,
     target_version: Option<String>,
     update_available: bool,
+    newer_than_target: bool,
     version_unknown: bool,
+    version_error: Option<String>,
     sources: Vec<SourceLink>,
 }
 
@@ -273,16 +277,16 @@ fn numeric_version(value: &str) -> Option<Vec<u64>> {
     (!parts.is_empty()).then_some(parts)
 }
 
-fn version_is_older(installed: &str, target: &str) -> bool {
+fn compare_versions(installed: &str, target: &str) -> Option<Ordering> {
     let (Some(mut installed), Some(mut target)) =
         (numeric_version(installed), numeric_version(target))
     else {
-        return false;
+        return None;
     };
     let width = installed.len().max(target.len());
     installed.resize(width, 0);
     target.resize(width, 0);
-    installed < target
+    Some(installed.cmp(&target))
 }
 
 fn command_exists(program: &str) -> bool {
@@ -339,22 +343,44 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
             } else {
                 packaged_root
             };
-            let installed_version = version_root
+            let (installed_version, mut version_error) = match version_root
                 .as_deref()
                 .map(|root| installed_component_version(id, root))
-                .transpose()?
-                .flatten();
+                .transpose()
+            {
+                Ok(version) => (version.flatten(), None),
+                Err(error) => {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("{label}の導入済み版を確認できません: {error:#}"),
+                    );
+                    (
+                        None,
+                        Some(
+                            "導入済み版を確認できません。修復すると推奨版を取得します。"
+                                .to_string(),
+                        ),
+                    )
+                }
+            };
             let target_version = info.target_version.clone();
-            let update_available = installed_version
+            let version_ordering = installed_version
                 .as_deref()
                 .zip(target_version.as_deref())
-                .is_some_and(|(current, target)| version_is_older(current, target));
+                .and_then(|(current, target)| compare_versions(current, target));
+            let update_available = version_ordering == Some(Ordering::Less);
+            let newer_than_target = version_ordering == Some(Ordering::Greater);
             let version_unknown = (installed || packaged)
                 && target_version.is_some()
                 && installed_version
                     .as_deref()
                     .and_then(numeric_version)
                     .is_none();
+            if version_unknown && version_error.is_none() {
+                version_error = Some(
+                    "導入済み版の表記を比較できません。修復すると推奨版を取得します。".to_string(),
+                );
+            }
             Ok(ComponentStatus {
                 id,
                 label,
@@ -376,7 +402,9 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 installed_version,
                 target_version,
                 update_available,
+                newer_than_target,
                 version_unknown,
+                version_error,
                 sources: info.sources,
             })
         })
@@ -393,6 +421,7 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
         info.install_mode == "managed",
         "外部アプリはPicoAgentから削除できません。提供元の手順で削除してください"
     );
+    let _operation = COMPONENT_OPERATION_LOCK.lock().await;
     if id == "aivis" {
         crate::aivis::stop(app);
     }
@@ -452,6 +481,9 @@ pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentSta
             "{} は提供元の公式ページから導入してください",
             definitions(id).map(|item| item.0).unwrap_or(id)
         );
+    }
+    let _operation = COMPONENT_OPERATION_LOCK.lock().await;
+    for id in ids {
         match id.as_str() {
             "aivis" => {
                 emit_progress(app, id, "download", "Aivis公式配布から取得中…", 0, 0);
@@ -875,11 +907,23 @@ mod tests {
 
     #[test]
     fn 配布対象より古い版だけを更新対象にする() {
-        assert!(super::version_is_older("1.2.0", "1.3.0"));
-        assert!(super::version_is_older("v1.2", "1.2.1"));
-        assert!(!super::version_is_older("1.2.0", "1.2.0"));
-        assert!(!super::version_is_older("1.3.0", "1.2.0"));
-        assert!(!super::version_is_older("不明", "1.2.0"));
+        assert_eq!(
+            super::compare_versions("1.2.0", "1.3.0"),
+            Some(std::cmp::Ordering::Less)
+        );
+        assert_eq!(
+            super::compare_versions("v1.2", "1.2.1"),
+            Some(std::cmp::Ordering::Less)
+        );
+        assert_eq!(super::compare_versions("不明", "1.2.0"), None);
+        assert_eq!(
+            super::compare_versions("1.3.0", "1.2.0"),
+            Some(std::cmp::Ordering::Greater)
+        );
+        assert_eq!(
+            super::compare_versions("1.2", "1.2.0"),
+            Some(std::cmp::Ordering::Equal)
+        );
     }
 
     #[test]

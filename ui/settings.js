@@ -899,22 +899,46 @@ function buildComponentManager() {
   ]);
   const list = el("div", { className: "component-list" }, [el("p", { className: "hint", textContent: "状態を確認中…" })]);
   const status = el("p", { className: "hint component-manager-status" });
+  status.setAttribute("aria-live", "polite");
   sec.append(core, list, status);
+
+  function setBusy(busy) {
+    sec.setAttribute("aria-busy", busy ? "true" : "false");
+    list.querySelectorAll("button").forEach(action => {
+      action.disabled = busy || action.dataset.available === "false";
+    });
+  }
 
   async function refresh() {
     const items = await window.picoagent.settings.componentStatus();
     list.innerHTML = "";
+    const attentionCount = items.filter(item => item.updateAvailable || item.newerThanTarget || item.versionUnknown).length;
+    const updateCount = items.filter(item => item.updateAvailable).length;
+    const componentTab = document.getElementById("tab-components");
+    if (componentTab) componentTab.textContent = `追加機能・更新${attentionCount ? `（${attentionCount}）` : ""}`;
+    setQuickSettingsSummary("components", updateCount
+      ? `${updateCount}件の更新があります`
+      : (attentionCount ? `${attentionCount}件の確認が必要です` : "導入・修復・更新を管理"));
     for (const item of items) {
       const managed = item.installMode === "managed";
-      const updateLabel = item.targetVersion ? `${item.targetVersion}へ更新` : "公式配布から更新";
+      const actionLabel = !managed
+        ? "公式ページを開く"
+        : !item.ready
+          ? "公式からインストール"
+          : item.updateAvailable
+            ? `${item.targetVersion || "推奨版"}へ更新`
+            : item.newerThanTarget
+              ? `推奨版${item.targetVersion ? ` ${item.targetVersion}` : ""}へ戻す`
+              : item.versionUnknown
+                ? "修復して版を確認"
+                : "修復（再ダウンロード）";
       const button = el("button", {
         className: item.updateAvailable ? "primary" : (item.ready ? "secondary" : "primary"),
         type: "button",
-        textContent: managed
-          ? (item.updateAvailable ? updateLabel : (item.ready ? "公式配布から再導入" : "公式配布から導入"))
-          : "公式ページを開く",
+        textContent: actionLabel,
         disabled: !item.available,
       });
+      button.dataset.available = String(Boolean(item.available));
       button.addEventListener("click", async () => {
         if (!managed) {
           const url = item.sources?.[0]?.url;
@@ -922,13 +946,21 @@ function buildComponentManager() {
           status.textContent = `${item.label}は提供元の手順で導入し、必要なら「スキル」で実行ファイルを指定してください。`;
           return;
         }
-        if (item.updateAvailable && button.dataset.confirming !== "true") {
+        if (item.ready && button.dataset.confirming !== "true") {
           button.dataset.confirming = "true";
-          button.textContent = "もう一度押して更新";
-          status.textContent = `${item.label}を${item.installedVersion || "現在の版"}から${item.targetVersion}へ更新します。音声モデルと設定は残ります。`;
+          button.textContent = item.updateAvailable
+            ? "もう一度押して更新"
+            : (item.newerThanTarget ? "もう一度押して戻す" : "もう一度押して修復");
+          const versionMove = item.updateAvailable || item.newerThanTarget
+            ? `${item.installedVersion || "現在の版"}から${item.targetVersion || "推奨版"}へ入れ替えます。`
+            : "公式配布を再ダウンロードして入れ替えます。";
+          const preserved = item.id === "aivis"
+            ? "音声モデル・辞書・設定は残ります。"
+            : "PicoAgentの設定は残ります。";
+          status.textContent = `${item.label}: ${versionMove}${preserved}`;
           return;
         }
-        button.disabled = true;
+        setBusy(true);
         status.textContent = item.updateAvailable
           ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…`
           : `${item.label}を公式配布元から取得しています…`;
@@ -936,31 +968,41 @@ function buildComponentManager() {
           await window.picoagent.settings.installComponents([item.id]);
           status.textContent = item.updateAvailable
             ? `${item.label}を${item.targetVersion}へ更新しました。`
-            : `${item.label}を公式配布元から導入しました。`;
+            : (item.newerThanTarget
+              ? `${item.label}を推奨版${item.targetVersion ? ` ${item.targetVersion}` : ""}へ戻しました。`
+              : `${item.label}を公式配布元から${item.ready ? "修復" : "導入"}しました。`);
           await refresh();
         } catch (error) {
           status.textContent = navigator.onLine
             ? `導入できませんでした: ${error?.message || error}`
             : "オフラインのため導入を見送りました。接続後にもう一度押してください。";
-          button.disabled = false;
+          button.dataset.confirming = "false";
+          button.textContent = actionLabel;
+        } finally {
+          setBusy(false);
         }
       });
       button.addEventListener("blur", () => {
         if (button.dataset.confirming === "true") {
           button.dataset.confirming = "false";
-          button.textContent = updateLabel;
+          button.textContent = actionLabel;
         }
       });
       const actions = el("div", { className: "component-card-actions" }, [button]);
       if (item.removable) {
-        const remove = el("button", { className: "danger", type: "button", textContent: "削除" });
+        const removeLabel = item.id === "aivis" ? "本体を削除" : "削除";
+        const remove = el("button", { className: "danger", type: "button", textContent: removeLabel });
+        remove.dataset.available = "true";
         remove.addEventListener("click", async () => {
           if (remove.dataset.confirming !== "true") {
             remove.dataset.confirming = "true";
             remove.textContent = "もう一度押して削除";
+            status.textContent = item.id === "aivis"
+              ? "音声読み上げ本体だけを削除します。ダウンロード済みの音声モデル・辞書・設定は残ります。"
+              : `${item.label}のPicoAgent管理下の本体とモデルを削除します。必要になれば再ダウンロードできます。`;
             return;
           }
-          remove.disabled = true;
+          setBusy(true);
           status.textContent = `${item.label}を削除しています…`;
           try {
             await window.picoagent.settings.removeComponent(item.id);
@@ -968,12 +1010,15 @@ function buildComponentManager() {
             await refresh();
           } catch (error) {
             status.textContent = `削除できませんでした: ${error?.message || error}`;
-            remove.disabled = false;
+            remove.dataset.confirming = "false";
+            remove.textContent = removeLabel;
+          } finally {
+            setBusy(false);
           }
         });
         remove.addEventListener("blur", () => {
           remove.dataset.confirming = "false";
-          remove.textContent = "削除";
+          remove.textContent = removeLabel;
         });
         actions.append(remove);
       }
@@ -988,20 +1033,29 @@ function buildComponentManager() {
       }
       const versionText = item.targetVersion
         ? (item.installedVersion
-          ? `導入済み ${item.installedVersion} ／ 配布対象 ${item.targetVersion}`
-          : `${item.ready ? "導入済み版は未確認" : "未導入"} ／ 配布対象 ${item.targetVersion}`)
+          ? `インストール済み ${item.installedVersion} ／ 推奨版 ${item.targetVersion}`
+          : `${item.ready ? "インストール済み版は未確認" : "未導入"} ／ 推奨版 ${item.targetVersion}`)
         : "";
-      list.append(markSearchable(el("div", { className: `component-card${item.ready ? " is-ready" : ""}` }, [
+      const stateClass = item.updateAvailable
+        ? " has-update"
+        : (item.newerThanTarget ? " is-newer" : (item.versionUnknown ? " has-warning" : ""));
+      const badgeText = item.updateAvailable
+        ? "更新あり"
+        : (item.newerThanTarget
+          ? "推奨版より新しい"
+          : (item.versionUnknown ? "確認が必要" : (item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入"))));
+      list.append(markSearchable(el("div", { className: `component-card${item.ready ? " is-ready" : ""}${stateClass}` }, [
         el("div", { className: "component-card-copy" }, [
           el("strong", { textContent: item.label }),
           el("span", { textContent: item.description }),
           el("small", { textContent: item.sizeLabel }),
           versionText ? el("small", { textContent: versionText }) : null,
+          item.versionError ? el("small", { className: "component-version-warning", textContent: item.versionError }) : null,
           sourceLinks,
-        ]),
-        el("span", { className: "component-badge", textContent: item.updateAvailable ? "更新あり" : (item.versionUnknown ? "版を確認" : (item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入"))) }),
+        ].filter(Boolean)),
+        el("span", { className: "component-badge", textContent: badgeText }),
         actions,
-      ].filter(Boolean)), item.id, item.label, item.description, versionText));
+      ].filter(Boolean)), item.id, item.label, item.description, versionText, item.versionError));
     }
     applySettingsSearch();
   }
@@ -1014,6 +1068,9 @@ function buildComponentManager() {
     logApp("warn", "追加機能の進捗を受け取れませんでした", errorDetail(error));
   });
   refresh().catch(error => {
+    const componentTab = document.getElementById("tab-components");
+    if (componentTab) componentTab.textContent = "追加機能・更新（要確認）";
+    setQuickSettingsSummary("components", "状態を確認できません");
     list.innerHTML = "";
     list.append(el("p", { className: "hint", textContent: `状態を確認できません: ${error?.message || error}` }));
   });
@@ -2295,9 +2352,11 @@ function buildDownloadedModelsSection() {
   const toolbar = el("div", { className: "diagnostics-toolbar" });
   const refresh = el("button", { type: "button", textContent: "更新" });
   const total = el("div", { className: "hint", textContent: "" });
+  const modelStatus = el("p", { className: "hint model-manager-status" });
+  modelStatus.setAttribute("aria-live", "polite");
   toolbar.append(refresh, total);
   const list = el("div", { className: "model-list" });
-  sec.append(toolbar, list);
+  sec.append(toolbar, modelStatus, list);
 
   async function refreshModels() {
     refresh.disabled = true;
@@ -2322,16 +2381,30 @@ function buildDownloadedModelsSection() {
           : el("button", { type: "button", className: "model-delete", textContent: "削除" });
         if (!model.active) {
           action.addEventListener("click", async () => {
-            if (!confirm(`モデル「${model.name}」を削除します。よろしいですか？\n（再度使うときは再ダウンロードが必要です）`)) return;
+            if (action.dataset.confirming !== "true") {
+              action.dataset.confirming = "true";
+              action.textContent = "もう一度押して削除";
+              modelStatus.textContent = `モデル「${model.name}」を削除すると、再度使うときに再ダウンロードが必要です。`;
+              return;
+            }
             action.disabled = true;
+            modelStatus.textContent = `モデル「${model.name}」を削除しています…`;
             try {
               await window.picoagent.deleteDownloadedModel(model.name);
+              modelStatus.textContent = `モデル「${model.name}」を削除しました。`;
               await refreshModels();
             } catch (error) {
               logApp("warn", "モデル削除に失敗しました", `${model.name}: ${errorDetail(error)}`);
               action.disabled = false;
-              alert(`削除に失敗しました: ${error?.message || error}`);
+              action.dataset.confirming = "false";
+              action.textContent = "削除";
+              modelStatus.textContent = `削除に失敗しました: ${error?.message || error}`;
             }
+          });
+          action.addEventListener("blur", () => {
+            if (action.disabled) return;
+            action.dataset.confirming = "false";
+            action.textContent = "削除";
           });
         }
         list.append(el("div", { className: "model-row" }, [info, action]));
@@ -2362,7 +2435,7 @@ async function render() {
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
     { id: "character", label: "キャラ・音声" },
-    { id: "components", label: "追加機能" },
+    { id: "components", label: "追加機能・更新" },
     { id: "providers", label: "AIモデル・連携" },
     { id: "tools", label: "スキル" },
     { id: "permissions", label: "安全・許可" },
