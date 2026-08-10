@@ -222,10 +222,15 @@ window.addEventListener("beforeunload", () => {
   if (pushToTalkTimer) clearTimeout(pushToTalkTimer);
   if (historySearchTimer) clearTimeout(historySearchTimer);
   if (napTimer) clearInterval(napTimer);
+  if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
   if (animationRequestId) cancelAnimationFrame(animationRequestId);
+  if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
+  if (unlistenStream) { unlistenStream(); unlistenStream = null; }
+  if (unlistenStreamReset) { unlistenStreamReset(); unlistenStreamReset = null; }
   stopVoice(false);
+  stopRig();
   if (micStream) stopMicCapture();
   const closingAudioCtx = audioCtx;
   audioCtx = null;

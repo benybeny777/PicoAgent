@@ -9,12 +9,12 @@ const { LogicalSize, PhysicalPosition } = window.__TAURI__.dpi || {};
 const eventUnlisteners = new Set();
 let eventListenersClosing = false;
 
-// すべての invoke 失敗を app.log へ記録してから再スローする（呼び出し側の try/catch で
-// 握られたエラーも確実にログへ残すため）。pet_log 自身は再帰を避けて素の invoke を使う。
-function logInvokeError(name, error) {
+// フロントとTauriの橋渡しで起きた失敗を app.log へ残す。pet_log 自身は再帰を避けて
+// 素の invoke を使い、最後の失敗だけ開発者コンソールへ出す。
+function logBridgeError(context, error) {
   const detail = error && (error.stack || error.message) ? error.stack || error.message : String(error);
   try {
-    invoke("pet_log", { level: "error", message: `invoke ${name} 失敗`, detail: String(detail) }).catch(logError => {
+    invoke("pet_log", { level: "error", message: `${context} 失敗`, detail: String(detail) }).catch(logError => {
       // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
       console.warn("invoke エラーログ保存に失敗しました", logError);
     });
@@ -22,6 +22,10 @@ function logInvokeError(name, error) {
     // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
     console.warn("invoke エラーログ保存に失敗しました", logError);
   }
+}
+// invoke 失敗は呼び出し側で処理されても診断ログへ残す。
+function logInvokeError(name, error) {
+  logBridgeError(`invoke ${name}`, error);
 }
 async function call(name, args) {
   try {
@@ -33,9 +37,19 @@ async function call(name, args) {
 }
 
 async function managedListen(channel, callback) {
-  const unlisten = await listen(channel, (event) => callback(event.payload));
+  const unlisten = await listen(channel, (event) => {
+    try {
+      const result = callback(event.payload);
+      if (result && typeof result.then === "function") {
+        result.catch(error => logBridgeError(`event ${channel} callback`, error));
+      }
+    } catch (error) {
+      logBridgeError(`event ${channel} callback`, error);
+    }
+  });
   if (eventListenersClosing) {
-    unlisten();
+    try { unlisten(); }
+    catch (error) { logBridgeError(`event ${channel} release`, error); }
     return () => {};
   }
   let active = true;
@@ -43,7 +57,8 @@ async function managedListen(channel, callback) {
     if (!active) return;
     active = false;
     eventUnlisteners.delete(release);
-    unlisten();
+    try { unlisten(); }
+    catch (error) { logBridgeError(`event ${channel} release`, error); }
   };
   eventUnlisteners.add(release);
   return release;
@@ -140,7 +155,7 @@ window.picoagent = {
     if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     return managedListen(channel, callback).catch(error => {
-      logInvokeError(`event:${channel}`, error);
+      logBridgeError(`event ${channel} subscribe`, error);
       return () => {};
     });
   },

@@ -61,6 +61,7 @@ window.__TAURI__ = {
     ];
     if (name === "pet_list_downloaded_models") return { totalLabel: "2GB", models: [{ name: "gemma-test.gguf", label: "Gemma", sizeLabel: "2GB", active: false }] };
     if (name === "settings_list_models") return [];
+    if (name === "settings_check_update") return { status: "available", downloadReady: true, message: "1.1.0を利用できます。" };
     if (name === "engine_status") return { phase: "ready" };
     if (name === "aivis_status") return { enabled: true, up: true };
     if (name === "pet_usage") return {};
@@ -110,6 +111,7 @@ try {
   if (!(await page.locator(".component-manager-status").textContent())?.includes("音声モデル・辞書・設定は残ります")) throw new Error("更新前に維持データが案内されません");
   await page.screenshot({ path: join(OUT, "components-tab.png") });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
+  if (await page.getByRole("button", { name: "一覧を再読み込み", exact: true }).count() !== 1) throw new Error("モデル一覧の再読込操作が更新操作と区別できません");
   await page.getByRole("button", { name: "削除", exact: true }).click();
   if (!(await page.locator(".model-manager-status").textContent())?.includes("再ダウンロードが必要")) throw new Error("モデル削除前に再ダウンロードが案内されません");
   await page.getByRole("tab", { name: "基本設定" }).click();
@@ -140,8 +142,13 @@ try {
   if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("明るく元気")) throw new Error("削除後の選択と人格表示が一致しません");
   if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("既定人格だけで未保存扱いになっています");
   await page.getByRole("tab", { name: "診断・修復" }).click();
-  if (await page.locator(".product-info-card").count() !== 4) throw new Error("製品情報カードが4件ではありません");
+  if (await page.locator(".product-info-card").count() !== 5) throw new Error("製品情報カードが5件ではありません");
   if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
+  if (!(await page.locator(".product-update-card").textContent())?.includes("再ダウンロードしません")) throw new Error("アプリ更新で維持されるデータが案内されません");
+  await page.getByRole("button", { name: "更新を確認", exact: true }).click();
+  await page.getByRole("button", { name: "アップデート", exact: true }).click();
+  if (await page.getByRole("button", { name: "もう一度押してダウンロード", exact: true }).count() !== 1) throw new Error("アプリ更新が二段階確認になっていません");
+  if (!(await page.locator(".product-update-status").textContent())?.includes("モデル・追加機能は残ります")) throw new Error("アプリ更新前に維持データが案内されません");
   await page.screenshot({ path: join(OUT, "diagnostics-tab.png") });
   await page.setViewportSize({ width: 400, height: 820 });
   const [resetBox, saveBox] = await Promise.all([

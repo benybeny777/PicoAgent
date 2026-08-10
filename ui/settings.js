@@ -1010,12 +1010,18 @@ function buildComponentManager() {
           : `${item.label}を公式配布元から取得しています…${keepsRunning}`;
         try {
           await window.picoagent.settings.installComponents([item.id]);
-          status.textContent = item.updateAvailable
+          const successMessage = item.updateAvailable
             ? `${item.label}を${item.targetVersion}へ更新しました。`
             : (item.newerThanTarget
               ? `${item.label}を推奨版${item.targetVersion ? ` ${item.targetVersion}` : ""}へ戻しました。`
               : `${item.label}を公式配布元から${item.ready ? "修復" : "導入"}しました。`);
-          await refresh();
+          status.textContent = successMessage;
+          try {
+            await refresh();
+          } catch (refreshError) {
+            logApp("warn", "追加機能の状態を再読み込みできませんでした", errorDetail(refreshError));
+            status.textContent = `${successMessage} 状態表示だけ再読み込みできませんでした。`;
+          }
         } catch (error) {
           status.textContent = navigator.onLine
             ? `導入できませんでした: ${error?.message || error}`
@@ -1048,8 +1054,14 @@ function buildComponentManager() {
           status.textContent = `${item.label}を削除しています…`;
           try {
             await window.picoagent.settings.removeComponent(item.id);
-            status.textContent = `${item.label}を削除しました。`;
-            await refresh();
+            const successMessage = `${item.label}を削除しました。`;
+            status.textContent = successMessage;
+            try {
+              await refresh();
+            } catch (refreshError) {
+              logApp("warn", "追加機能の状態を再読み込みできませんでした", errorDetail(refreshError));
+              status.textContent = `${successMessage} 状態表示だけ再読み込みできませんでした。`;
+            }
           } catch (error) {
             status.textContent = `削除できませんでした: ${error?.message || error}`;
             remove.textContent = removeLabel;
@@ -2357,6 +2369,13 @@ function buildProductInfoSection() {
   });
   const checkUpdate = el("button", { type: "button", className: "secondary", textContent: "更新を確認" });
   const installUpdate = el("button", { type: "button", className: "primary", textContent: "アップデート", hidden: true });
+  const installUpdateConfirmation = twoStepAction(installUpdate, {
+    initialLabel: "アップデート",
+    confirmLabel: "もう一度押してダウンロード",
+    onArm: () => {
+      updateStatus.textContent = "PicoAgent本体を更新します。設定・会話・追加キャラ・モデル・追加機能は残ります。";
+    },
+  });
   checkUpdate.addEventListener("click", async () => {
     checkUpdate.disabled = true;
     installUpdate.hidden = true;
@@ -2374,6 +2393,7 @@ function buildProductInfoSection() {
     }
   });
   installUpdate.addEventListener("click", async () => {
+    if (!installUpdateConfirmation.request()) return;
     installUpdate.disabled = true;
     checkUpdate.disabled = true;
     updateStatus.textContent = "アップデートをダウンロードしています…";
@@ -2395,6 +2415,7 @@ function buildProductInfoSection() {
   const updateActions = el("div", { className: "product-update-actions" }, [checkUpdate, installUpdate]);
   productSec.append(el("div", { className: "product-update-card" }, [
     el("strong", { textContent: "アプリのアップデート" }),
+    el("p", { className: "hint", textContent: "更新するのはPicoAgent本体です。設定・会話履歴・追加キャラ・ダウンロード済みLLMモデル・導入済み追加機能はそのまま使い、再ダウンロードしません。各追加機能の版は「追加機能・更新」で個別に管理します。" }),
     updateStatus,
     updateActions,
   ]));
@@ -2422,7 +2443,7 @@ function buildDownloadedModelsSection() {
   const sec = section("ダウンロード済みモデル");
   sec.append(el("p", { className: "hint", textContent: "ローカルエンジンが取得した GGUF モデルです。使わないモデルを削除してディスクを空けられます（使用中のモデルは削除できません）。" }));
   const toolbar = el("div", { className: "diagnostics-toolbar" });
-  const refresh = el("button", { type: "button", textContent: "更新" });
+  const refresh = el("button", { type: "button", textContent: "一覧を再読み込み" });
   const total = el("div", { className: "hint", textContent: "" });
   const modelStatus = el("p", { className: "hint model-manager-status" });
   modelStatus.setAttribute("aria-live", "polite");
@@ -2699,14 +2720,20 @@ async function render() {
   await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
+  let characterSwitchPending = 0;
+  let restoreCharacterSelectFocus = false;
   function queueCharacterSwitch(requestedCharacter) {
+    characterSwitchPending += 1;
+    restoreCharacterSelectFocus ||= document.activeElement === characterSelect;
+    characterSelect.disabled = true;
+    characterSelect.setAttribute("aria-busy", "true");
     // 素早い連続選択でも、表示中の人格を読み終えてから次へ進む。並列に読むと、
     // 遅く完了した古い読込が新しいキャラの編集欄を上書きしてしまう。
     characterSwitchQueue = characterSwitchQueue.then(async () => {
-      saveCurrentCharacterPersona(previousCharacter);
-      saveCurrentCharacterVoice(previousCharacter);
-      saveCurrentCharacterLive2dSdk(previousCharacter);
       try {
+        saveCurrentCharacterPersona(previousCharacter);
+        saveCurrentCharacterVoice(previousCharacter);
+        saveCurrentCharacterLive2dSdk(previousCharacter);
         await loadCharacterPersona(requestedCharacter);
         loadCharacterVoice(requestedCharacter);
         await loadCharacterLive2dSdk(requestedCharacter);
@@ -2718,12 +2745,26 @@ async function render() {
         setQuickSettingsSummary("character", `${selectedEntry?.name || requestedCharacter}・${inputs.get("PICOAGENT_TTS_ENABLED")?.checked ? "読み上げ有効" : "ミュート中"}`);
       } catch (error) {
         characterSelect.value = previousCharacter;
-        statusEl.textContent = `人格設定を読み込めませんでした: ${error.message}`;
+        logApp("warn", "キャラクター設定の切替に失敗しました", errorDetail(error));
+        statusEl.textContent = `人格設定を読み込めませんでした: ${error?.message || error}`;
       }
       refreshCharacterCards();
       updateDirtyState();
+    }).catch(error => {
+      // 表示更新の想定外エラーでもキューを rejected のまま残さず、次の切替操作を受け付ける。
+      characterSelect.value = previousCharacter;
+      logApp("error", "キャラクター設定の表示更新に失敗しました", errorDetail(error));
+      statusEl.textContent = `キャラクター設定の表示を更新できませんでした: ${error?.message || error}`;
     });
-    return characterSwitchQueue;
+    return characterSwitchQueue.finally(() => {
+      characterSwitchPending -= 1;
+      if (characterSwitchPending === 0) {
+        characterSelect.disabled = false;
+        characterSelect.setAttribute("aria-busy", "false");
+        if (restoreCharacterSelectFocus) characterSelect.focus({ preventScroll: true });
+        restoreCharacterSelectFocus = false;
+      }
+    });
   }
   characterSelect.addEventListener("change", event => {
     // 人格の読込は非同期なので、form の委譲 change が先に collect() すると、切替前の
@@ -2933,6 +2974,11 @@ async function render() {
             data.values.PICOAGENT_CHARACTER = fallbackCharacter;
             await queueCharacterSwitch(fallbackCharacter);
           }
+          // 選択中キャラの既定値と現在値を照合し終えてから破棄する。先に消すと既定人格が
+          // ユーザー上書きとして残り、削除直後に「未保存」と誤表示される。
+          characterManifestCache.delete(character.id);
+          delete characterDefaultPersonas[character.id];
+          delete characterDefaultVoices[character.id];
           applyCharacterFilters();
           statusEl.textContent = `${character.name}をOSのゴミ箱へ移動しました。`;
         } catch (error) {
