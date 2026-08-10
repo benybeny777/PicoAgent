@@ -17,9 +17,6 @@ use crate::commands::AppState;
 
 const DEFAULT_PORT: u16 = 11436;
 const LEGACY_DEFAULT_PORT: u16 = 10102;
-const AIVIS_RELEASE: &str = "1.2.0";
-const AIVIS_API_URL: &str =
-    "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/1.2.0";
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
 const MODEL_INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
@@ -444,12 +441,17 @@ fn release_asset_pattern() -> &'static str {
     }
 }
 
-async fn aivis_release_asset_url() -> anyhow::Result<(String, String, u64, String)> {
+async fn aivis_release_asset_url(
+    target_version: &str,
+) -> anyhow::Result<(String, String, u64, String)> {
+    let release_api = format!(
+        "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/{target_version}"
+    );
     let data: serde_json::Value = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
         .build()?
-        .get(AIVIS_API_URL)
+        .get(release_api)
         .send()
         .await?
         .error_for_status()?
@@ -472,7 +474,7 @@ async fn aivis_release_asset_url() -> anyhow::Result<(String, String, u64, Strin
             })
         })
     else {
-        anyhow::bail!("Aivis {AIVIS_RELEASE} の自動取得対象アセットが見つかりません。");
+        anyhow::bail!("Aivis {target_version} の自動取得対象アセットが見つかりません。");
     };
     let name = asset
         .get("name")
@@ -740,7 +742,9 @@ async fn ensure_installed_inner(
         app,
         "Aivis が見つからないため、公式リリースから自動取得します。",
     )?;
-    let (asset_name, asset_url, asset_size, asset_sha256) = aivis_release_asset_url().await?;
+    let target_version = crate::components::managed_target_version(app, "aivis")?;
+    let (asset_name, asset_url, asset_size, asset_sha256) =
+        aivis_release_asset_url(&target_version).await?;
     let nonce = AIVIS_INSTALL_NONCE.fetch_add(1, Ordering::Relaxed);
     let work = std::env::temp_dir().join(format!(
         "picoagent-aivis-runtime-{}-{nonce}",

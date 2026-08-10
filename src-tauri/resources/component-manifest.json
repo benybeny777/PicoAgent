@@ -4,6 +4,7 @@
   "components": {
     "aivis": {
       "installMode": "managed",
+      "targetVersion": "1.2.0",
       "sources": [
         {
           "name": "Aivis Project 公式GitHub Releases",

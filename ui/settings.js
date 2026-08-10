@@ -906,10 +906,13 @@ function buildComponentManager() {
     list.innerHTML = "";
     for (const item of items) {
       const managed = item.installMode === "managed";
+      const updateLabel = item.targetVersion ? `${item.targetVersion}へ更新` : "公式配布から更新";
       const button = el("button", {
-        className: item.ready ? "secondary" : "primary",
+        className: item.updateAvailable ? "primary" : (item.ready ? "secondary" : "primary"),
         type: "button",
-        textContent: managed ? (item.ready ? "公式配布から再導入" : "公式配布から導入") : "公式ページを開く",
+        textContent: managed
+          ? (item.updateAvailable ? updateLabel : (item.ready ? "公式配布から再導入" : "公式配布から導入"))
+          : "公式ページを開く",
         disabled: !item.available,
       });
       button.addEventListener("click", async () => {
@@ -919,17 +922,33 @@ function buildComponentManager() {
           status.textContent = `${item.label}は提供元の手順で導入し、必要なら「スキル」で実行ファイルを指定してください。`;
           return;
         }
+        if (item.updateAvailable && button.dataset.confirming !== "true") {
+          button.dataset.confirming = "true";
+          button.textContent = "もう一度押して更新";
+          status.textContent = `${item.label}を${item.installedVersion || "現在の版"}から${item.targetVersion}へ更新します。音声モデルと設定は残ります。`;
+          return;
+        }
         button.disabled = true;
-        status.textContent = `${item.label}を公式配布元から取得しています…`;
+        status.textContent = item.updateAvailable
+          ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…`
+          : `${item.label}を公式配布元から取得しています…`;
         try {
           await window.picoagent.settings.installComponents([item.id]);
-          status.textContent = `${item.label}を公式配布元から導入しました。`;
+          status.textContent = item.updateAvailable
+            ? `${item.label}を${item.targetVersion}へ更新しました。`
+            : `${item.label}を公式配布元から導入しました。`;
           await refresh();
         } catch (error) {
           status.textContent = navigator.onLine
             ? `導入できませんでした: ${error?.message || error}`
             : "オフラインのため導入を見送りました。接続後にもう一度押してください。";
           button.disabled = false;
+        }
+      });
+      button.addEventListener("blur", () => {
+        if (button.dataset.confirming === "true") {
+          button.dataset.confirming = "false";
+          button.textContent = updateLabel;
         }
       });
       const actions = el("div", { className: "component-card-actions" }, [button]);
@@ -967,16 +986,22 @@ function buildComponentManager() {
           textContent: source.name,
         }));
       }
+      const versionText = item.targetVersion
+        ? (item.installedVersion
+          ? `導入済み ${item.installedVersion} ／ 配布対象 ${item.targetVersion}`
+          : `${item.ready ? "導入済み版は未確認" : "未導入"} ／ 配布対象 ${item.targetVersion}`)
+        : "";
       list.append(markSearchable(el("div", { className: `component-card${item.ready ? " is-ready" : ""}` }, [
         el("div", { className: "component-card-copy" }, [
           el("strong", { textContent: item.label }),
           el("span", { textContent: item.description }),
           el("small", { textContent: item.sizeLabel }),
+          versionText ? el("small", { textContent: versionText }) : null,
           sourceLinks,
         ]),
-        el("span", { className: "component-badge", textContent: item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入") }),
+        el("span", { className: "component-badge", textContent: item.updateAvailable ? "更新あり" : (item.versionUnknown ? "版を確認" : (item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入"))) }),
         actions,
-      ]), item.id, item.label, item.description));
+      ].filter(Boolean)), item.id, item.label, item.description, versionText));
     }
     applySettingsSearch();
   }

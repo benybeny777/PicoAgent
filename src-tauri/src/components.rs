@@ -40,6 +40,8 @@ struct Manifest {
 #[serde(rename_all = "camelCase")]
 struct ComponentSource {
     install_mode: String,
+    #[serde(default)]
+    target_version: Option<String>,
     sources: Vec<SourceLink>,
 }
 
@@ -61,6 +63,10 @@ pub struct ComponentStatus {
     available: bool,
     removable: bool,
     install_mode: String,
+    installed_version: Option<String>,
+    target_version: Option<String>,
+    update_available: bool,
+    version_unknown: bool,
     sources: Vec<SourceLink>,
 }
 
@@ -166,6 +172,25 @@ fn manifest(app: &AppHandle) -> Result<Manifest> {
             "{id} の導入方式が不正です"
         );
         anyhow::ensure!(!source.sources.is_empty(), "{id} の公式取得元がありません");
+        if id == "aivis" {
+            let target_version = source
+                .target_version
+                .as_deref()
+                .filter(|version| numeric_version(version).is_some())
+                .context("Aivis の配布対象版が不正です")?;
+            anyhow::ensure!(
+                !target_version.contains(['/', '\\']),
+                "Aivis の配布対象版にパス区切りを含められません"
+            );
+            let expected_suffix = format!("/tag/{target_version}");
+            anyhow::ensure!(
+                source
+                    .sources
+                    .iter()
+                    .any(|link| link.url.ends_with(&expected_suffix)),
+                "Aivis の公式取得元表示が配布対象版と一致しません"
+            );
+        }
         for link in &source.sources {
             anyhow::ensure!(
                 !link.name.trim().is_empty() && link.url.starts_with("https://"),
@@ -174,6 +199,22 @@ fn manifest(app: &AppHandle) -> Result<Manifest> {
         }
     }
     Ok(parsed)
+}
+
+pub fn managed_target_version(app: &AppHandle, id: &str) -> Result<String> {
+    let parsed = manifest(app)?;
+    let component = parsed
+        .components
+        .get(id)
+        .with_context(|| format!("{id} の取得元情報がありません"))?;
+    anyhow::ensure!(
+        component.install_mode == "managed",
+        "{id} はPicoAgent管理対象ではありません"
+    );
+    component
+        .target_version
+        .clone()
+        .with_context(|| format!("{id} の配布対象版がありません"))
 }
 
 fn packaged_dir(app: &AppHandle, id: &str) -> Option<PathBuf> {
@@ -198,6 +239,50 @@ fn development_dir(id: &str) -> Option<PathBuf> {
 
 fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
     crate::log_paths::bundled_dir(app).join(id)
+}
+
+fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
+    let manifest_name = match id {
+        "aivis" => "engine_manifest.json",
+        _ => return Ok(None),
+    };
+    let path = root.join(manifest_name);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("{} を読めません", path.display()))?;
+    let value = serde_json::from_str::<serde_json::Value>(&text)
+        .with_context(|| format!("{} が不正なJSONです", path.display()))?;
+    Ok(value
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(ToString::to_string))
+}
+
+fn numeric_version(value: &str) -> Option<Vec<u64>> {
+    let core = value.trim().trim_start_matches(['v', 'V']);
+    let core = core.split(['-', '+']).next()?;
+    let parts = core
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (!parts.is_empty()).then_some(parts)
+}
+
+fn version_is_older(installed: &str, target: &str) -> bool {
+    let (Some(mut installed), Some(mut target)) =
+        (numeric_version(installed), numeric_version(target))
+    else {
+        return false;
+    };
+    let width = installed.len().max(target.len());
+    installed.resize(width, 0);
+    target.resize(width, 0);
+    installed < target
 }
 
 fn command_exists(program: &str) -> bool {
@@ -235,15 +320,42 @@ fn external_ready(id: &str) -> bool {
 
 pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
     let manifest = manifest(app)?;
-    Ok(COMPONENT_IDS
+    COMPONENT_IDS
         .into_iter()
-        .filter_map(|id| {
-            let (label, description, size_label) = definitions(id)?;
-            let info = manifest.components.get(id)?.clone();
+        .map(|id| -> Result<ComponentStatus> {
+            let (label, description, size_label) =
+                definitions(id).with_context(|| format!("{id} の定義がありません"))?;
+            let info = manifest
+                .components
+                .get(id)
+                .with_context(|| format!("{id} の取得元情報がありません"))?
+                .clone();
             let installed = installed_dir(app, id).is_dir();
-            let packaged = packaged_dir(app, id).is_some() || development_dir(id).is_some();
+            let packaged_root = packaged_dir(app, id).or_else(|| development_dir(id));
+            let packaged = packaged_root.is_some();
             let system = external_ready(id);
-            Some(ComponentStatus {
+            let version_root = if installed {
+                Some(installed_dir(app, id))
+            } else {
+                packaged_root
+            };
+            let installed_version = version_root
+                .as_deref()
+                .map(|root| installed_component_version(id, root))
+                .transpose()?
+                .flatten();
+            let target_version = info.target_version.clone();
+            let update_available = installed_version
+                .as_deref()
+                .zip(target_version.as_deref())
+                .is_some_and(|(current, target)| version_is_older(current, target));
+            let version_unknown = (installed || packaged)
+                && target_version.is_some()
+                && installed_version
+                    .as_deref()
+                    .and_then(numeric_version)
+                    .is_none();
+            Ok(ComponentStatus {
                 id,
                 label,
                 description,
@@ -261,10 +373,14 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 available: true,
                 removable: installed && info.install_mode == "managed",
                 install_mode: info.install_mode,
+                installed_version,
+                target_version,
+                update_available,
+                version_unknown,
                 sources: info.sources,
             })
         })
-        .collect())
+        .collect()
 }
 
 pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
@@ -740,11 +856,43 @@ mod tests {
         assert_eq!(value.version, 2);
         assert_eq!(value.policy, "direct-upstream");
         assert_eq!(value.components["aivis"].install_mode, "managed");
+        let aivis_target = value.components["aivis"]
+            .target_version
+            .as_deref()
+            .expect("Aivisの配布対象版");
+        assert!(super::numeric_version(aivis_target).is_some());
+        assert!(value.components["aivis"]
+            .sources
+            .iter()
+            .any(|source| source.url.ends_with(&format!("/tag/{aivis_target}"))));
         assert_eq!(value.components["office"].install_mode, "external");
         assert!(value
             .components
             .values()
             .flat_map(|component| &component.sources)
             .all(|source| source.url.starts_with("https://")));
+    }
+
+    #[test]
+    fn 配布対象より古い版だけを更新対象にする() {
+        assert!(super::version_is_older("1.2.0", "1.3.0"));
+        assert!(super::version_is_older("v1.2", "1.2.1"));
+        assert!(!super::version_is_older("1.2.0", "1.2.0"));
+        assert!(!super::version_is_older("1.3.0", "1.2.0"));
+        assert!(!super::version_is_older("不明", "1.2.0"));
+    }
+
+    #[test]
+    fn aivisの実体マニフェストから導入版を読む() {
+        let root = test_path("aivis-version");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("engine_manifest.json"), br#"{"version":"1.2.3"}"#).unwrap();
+        assert_eq!(
+            super::installed_component_version("aivis", &root)
+                .unwrap()
+                .as_deref(),
+            Some("1.2.3")
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

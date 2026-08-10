@@ -4470,7 +4470,7 @@ async function refreshOnboardingComponents() {
       const input = row.querySelector("input");
       if (input) input.disabled = item.ready || !item.available || item.installMode === "external";
       const badge = row.querySelector("em");
-      if (badge) badge.textContent = item.ready ? "準備済み" : (item.installMode === "managed" ? "公式から取得" : "設定で案内");
+      if (badge) badge.textContent = item.updateAvailable ? "設定で更新" : (item.ready ? "準備済み" : (item.installMode === "managed" ? "公式から取得" : "設定で案内"));
       let source = row.querySelector("a.onboarding-component-source");
       if (item.installMode === "external" && item.sources?.[0]?.url) {
         if (!source) {

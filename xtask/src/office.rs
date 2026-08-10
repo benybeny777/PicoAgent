@@ -205,7 +205,8 @@ fn fetch_aivis_inner() -> Result<()> {
         }
     }
 
-    let tag = env_or("AIVIS_RELEASE", "1.2.0");
+    let default_tag = aivis_target_version()?;
+    let tag = env_or("AIVIS_RELEASE", &default_tag);
     let api = if tag == "latest" {
         "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/latest".to_string()
     } else {
@@ -231,6 +232,21 @@ fn fetch_aivis_inner() -> Result<()> {
     fs::remove_dir_all(&work).ok();
     log("setup:aivis", format!("aivis ready: {}", dir.display()));
     Ok(())
+}
+
+fn aivis_target_version() -> Result<String> {
+    let path = repo_root().join("src-tauri/resources/component-manifest.json");
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("{} を読めません", path.display()))?;
+    let manifest: Value = serde_json::from_str(&text)
+        .with_context(|| format!("{} が不正なJSONです", path.display()))?;
+    manifest
+        .pointer("/components/aivis/targetVersion")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|version| !version.is_empty() && !version.contains(['/', '\\']))
+        .map(ToString::to_string)
+        .context("Aivis の配布対象版が不正です")
 }
 
 fn pick_aivis_asset(release: &Value) -> Result<(String, String)> {
@@ -318,6 +334,15 @@ fn copy_engine_tree(run_path: &Path, dest: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aivisの開発取得も配布対象版を正本にする() {
+        let version = aivis_target_version().unwrap();
+        assert!(
+            version.split('.').all(|part| part.parse::<u64>().is_ok()),
+            "配布対象版は数値の版にすること: {version}"
+        );
+    }
 
     /// Aivis のリリース資産名からプラットフォーム用を選べること。
     #[test]
