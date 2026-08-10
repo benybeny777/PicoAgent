@@ -134,7 +134,17 @@ try {
   if (await page.locator(".product-info-card").count() !== 4) throw new Error("製品情報カードが4件ではありません");
   if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
   await page.screenshot({ path: join(OUT, "diagnostics-tab.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図・配信・ミュート表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  await page.setViewportSize({ width: 400, height: 820 });
+  const [resetBox, saveBox] = await Promise.all([
+    page.locator("#resetChanges").boundingBox(),
+    page.locator("#save").boundingBox(),
+  ]);
+  if (!resetBox || !saveBox || resetBox.width < 140 || saveBox.width < 140) throw new Error("狭幅で保存操作の可読幅が足りません");
+  if (Math.abs(resetBox.y - saveBox.y) > 2) throw new Error("狭幅で保存と取り消しが不揃いです");
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
+  await page.screenshot({ path: join(OUT, "narrow-footer.png") });
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

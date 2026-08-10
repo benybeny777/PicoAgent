@@ -48,7 +48,7 @@ const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
 let busy = false;
-const { errorDetail, logApp, preview } = window.PicoUI;
+const { errorDetail, logApp, preview, twoStepAction } = window.PicoUI;
 
 // decorations:false の透明ウィンドウにはOSの枠が無いため、各辺と四隅を明示的な
 // リサイズ領域にする。幅だけ・高さだけ・縦横同時のいずれもOS標準操作で変更できる。
@@ -172,7 +172,10 @@ function showToast(msg, kind = "info", options = {}) {
     action.addEventListener("click", async () => {
       action.disabled = true;
       try { await options.onAction(); }
-      catch (error) { logApp("error", "通知アクションに失敗しました", errorDetail(error)); }
+      catch (error) {
+        logApp("error", "通知アクションに失敗しました", errorDetail(error));
+        showToast(`操作できませんでした: ${preview(error?.message || error, 60)}`, "error");
+      }
       dismiss();
     });
     el.append(action);
@@ -277,6 +280,18 @@ function persistNotices() {
 }
 persistNotices();
 
+async function requestAgentCancellation(button) {
+  button.disabled = true;
+  setStatus("停止を要求しています…");
+  try {
+    await window.picoagent.cancel();
+  } catch (error) {
+    logApp("warn", "中断要求の送信に失敗しました", errorDetail(error));
+    setStatus(`停止を要求できませんでした: ${error?.message || error}`);
+    button.disabled = false;
+  }
+}
+
 function renderNoticePanel() {
   if (!noticeList) return;
   noticeList.replaceChildren();
@@ -336,7 +351,10 @@ function renderNoticePanel() {
         const cancel = document.createElement("button");
         cancel.type = "button";
         cancel.textContent = "停止";
-        cancel.addEventListener("click", async event => { event.stopPropagation(); await window.picoagent.cancel(); });
+        cancel.addEventListener("click", event => {
+          event.stopPropagation();
+          requestAgentCancellation(cancel);
+        });
         actions.append(cancel);
       } else if (notice.kind === "job" && notice.prompt) {
         const retry = document.createElement("button");
@@ -356,8 +374,10 @@ function renderNoticePanel() {
       settings.textContent = "設定";
       settings.addEventListener("click", async event => {
         event.stopPropagation();
+        settings.disabled = true;
         try { await window.picoagent.openSettings(); }
         catch (error) { setStatus(`設定を開けませんでした: ${error?.message || error}`); }
+        finally { settings.disabled = false; }
       });
       actions.append(settings);
       item.append(actions);
@@ -741,15 +761,30 @@ function renderVariantPicker(variants, selectedId) {
 
 variantSelect?.addEventListener("change", async () => {
   if (!characterManifest?.id) return;
-  localStorage.setItem(`picoagent.variant.${characterManifest.id}`, variantSelect.value);
+  const characterId = characterManifest.id;
+  const storageKey = `picoagent.variant.${characterId}`;
+  const previousVariant = character.dataset.variant || "default";
+  const requestedVariant = variantSelect.value;
+  variantSelect.disabled = true;
+  localStorage.setItem(storageKey, requestedVariant);
   loadedCharacterSignature = "";
   try {
-    await loadCharacter(characterManifest.id, characterOverridesCache, { speakGreeting: false });
+    await loadCharacter(characterId, characterOverridesCache, { speakGreeting: false });
     setAnimation("pleased", true);
     setTimeout(() => setAnimation("idle"), 900);
   } catch (error) {
     logApp("error", "雰囲気の切替に失敗しました", errorDetail(error));
+    localStorage.setItem(storageKey, previousVariant);
+    variantSelect.value = previousVariant;
+    loadedCharacterSignature = "";
+    try {
+      await loadCharacter(characterId, characterOverridesCache, { speakGreeting: false });
+    } catch (restoreError) {
+      logApp("error", "雰囲気の切替失敗後に元の表示へ戻せませんでした", errorDetail(restoreError));
+    }
     showToast("雰囲気を切り替えられませんでした", "error");
+  } finally {
+    variantSelect.disabled = false;
   }
 });
 function setAnimation(name, force = false) {
@@ -2284,6 +2319,11 @@ function renderRelationship(data) {
         remove.dataset.action = "delete";
         remove.dataset.id = moment.id;
         remove.textContent = "削除";
+        remove.picoConfirmation = twoStepAction(remove, {
+          initialLabel: "削除",
+          confirmLabel: "もう一度押す",
+          onArm: () => showToast("この記録だけを消します。もう一度押すと実行します", "info"),
+        });
         actions.append(pin, remove);
         row.append(actions);
         relationshipMoments.append(row);
@@ -2291,6 +2331,12 @@ function renderRelationship(data) {
     }
   }
   if (relationshipClear) relationshipClear.hidden = !relationshipState.recentMoments?.length;
+}
+
+function setRelationshipBusy(busy) {
+  relationshipCard?.setAttribute("aria-busy", String(busy));
+  relationshipMoments?.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+  if (relationshipClear) relationshipClear.disabled = busy;
 }
 
 async function recordRelationship(kind, detail = "") {
@@ -2331,9 +2377,17 @@ relationshipButton?.addEventListener("click", async event => {
   relationshipCard.hidden = !relationshipCard.hidden;
   relationshipButton.setAttribute("aria-expanded", String(!relationshipCard.hidden));
   if (!relationshipCard.hidden) {
-    try { renderRelationship(await window.picoagent.relationshipState()); }
-    catch (error) { logApp("warn", "いっしょの記録を読めませんでした", errorDetail(error)); }
-    document.getElementById("relationshipClose")?.focus();
+    relationshipButton.disabled = true;
+    relationshipMoments.textContent = "記録を読み込んでいます…";
+    try {
+      renderRelationship(await window.picoagent.relationshipState());
+    } catch (error) {
+      logApp("warn", "いっしょの記録を読めませんでした", errorDetail(error));
+      relationshipMoments.textContent = `記録を読み込めませんでした: ${error?.message || error}`;
+    } finally {
+      relationshipButton.disabled = false;
+    }
+    if (!relationshipCard.hidden) document.getElementById("relationshipClose")?.focus();
   }
 });
 document.getElementById("relationshipClose")?.addEventListener("click", () => {
@@ -2354,13 +2408,9 @@ relationshipMoments?.addEventListener("click", async event => {
       input.focus();
       return;
     }
-    if (button.dataset.action === "delete" && button.dataset.confirming !== "true") {
-      button.dataset.confirming = "true";
-      button.textContent = "もう一度押す";
-      showToast("この記録だけを消します。もう一度押すと実行します", "info");
-      return;
-    }
-    button.disabled = true;
+    if (button.dataset.action === "delete" && !button.picoConfirmation?.request()) return;
+    setRelationshipBusy(true);
+    if (button.dataset.action === "delete") button.textContent = "削除中…";
     const result = button.dataset.action === "pin"
       ? await window.picoagent.pinRelationshipMoment(button.dataset.id, button.dataset.pinned !== "true")
       : await window.picoagent.deleteRelationshipMoment(button.dataset.id);
@@ -2368,30 +2418,21 @@ relationshipMoments?.addEventListener("click", async event => {
   } catch (error) {
     logApp("warn", "いっしょの記録を更新できませんでした", errorDetail(error));
     showToast("記録を更新できませんでした", "error");
-    if (button.dataset.action === "delete") {
-      button.dataset.confirming = "false";
-      button.textContent = "削除";
-    }
+    if (button.dataset.action === "delete") button.textContent = "削除";
   } finally {
-    button.disabled = false;
+    setRelationshipBusy(false);
   }
 });
 
-relationshipMoments?.addEventListener("blur", event => {
-  const button = event.target instanceof Element ? event.target.closest('button[data-action="delete"]') : null;
-  if (!button || button.disabled) return;
-  button.dataset.confirming = "false";
-  button.textContent = "削除";
-}, true);
-
+const relationshipClearConfirmation = relationshipClear ? twoStepAction(relationshipClear, {
+  initialLabel: "記録をすべて消す",
+  confirmLabel: "もう一度押してすべて消す",
+  onArm: () => showToast("このキャラクターとの記録をすべて消します。もう一度押すと実行します", "info"),
+}) : null;
 relationshipClear?.addEventListener("click", async () => {
-  if (relationshipClear.dataset.confirming !== "true") {
-    relationshipClear.dataset.confirming = "true";
-    relationshipClear.textContent = "もう一度押してすべて消す";
-    showToast("このキャラクターとの記録をすべて消します。もう一度押すと実行します", "info");
-    return;
-  }
-  relationshipClear.disabled = true;
+  if (!relationshipClearConfirmation.request()) return;
+  setRelationshipBusy(true);
+  relationshipClear.textContent = "記録を削除中…";
   try {
     renderRelationship(await window.picoagent.clearRelationship());
     showToast("いっしょの記録を消しました", "success");
@@ -2399,16 +2440,9 @@ relationshipClear?.addEventListener("click", async () => {
     logApp("warn", "いっしょの記録を消せませんでした", errorDetail(error));
     showToast("記録を消せませんでした", "error");
   } finally {
-    relationshipClear.disabled = false;
-    relationshipClear.dataset.confirming = "false";
+    setRelationshipBusy(false);
     relationshipClear.textContent = "記録をすべて消す";
   }
-});
-
-relationshipClear?.addEventListener("blur", () => {
-  if (relationshipClear.disabled) return;
-  relationshipClear.dataset.confirming = "false";
-  relationshipClear.textContent = "記録をすべて消す";
 });
 
 function queueNotice(line) {
@@ -3237,6 +3271,8 @@ composer.addEventListener("submit", async event => {
 const micButton = document.getElementById("micButton");
 const voiceLoopButton = document.getElementById("voiceLoopButton");
 let micStream = null;
+let micStarting = false;
+let micStartRequest = 0;
 let micCtx = null;
 let micNode = null;
 let micChunks = [];
@@ -3330,6 +3366,9 @@ function encodeWav(chunks, sampleRate) {
 }
 
 function stopMicCapture() {
+  micStartRequest += 1;
+  micStarting = false;
+  if (micButton) micButton.disabled = false;
   micSession++; // 進行中の逐次文字起こし結果を無効化する
   if (micInterimTimer) { clearInterval(micInterimTimer); micInterimTimer = null; }
   micNode?.disconnect();
@@ -3405,15 +3444,28 @@ async function finishRecording() {
 }
 
 async function startRecording() {
-  if (micStream) return;
+  if (micStream || micStarting) return;
+  const request = ++micStartRequest;
+  micStarting = true;
+  if (micButton) micButton.disabled = true;
   stopVoice(false); // 読み上げ中でも話し始められるよう、マイク操作を割り込みとして扱う。
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    if (request !== micStartRequest || document.hidden) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    micStream = stream;
   } catch (error) {
     logApp("warn", "マイクを利用できません", errorDetail(error));
     showToast("マイクを利用できません（権限を確認してね）", "error");
     micStream = null;
     return;
+  } finally {
+    if (request === micStartRequest && !micStream) {
+      micStarting = false;
+      if (micButton) micButton.disabled = false;
+    }
   }
   try {
     micCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
@@ -3490,6 +3542,11 @@ async function startRecording() {
     logApp("error", "録音を開始できません", errorDetail(error));
     showToast("録音を開始できませんでした", "error");
     stopMicCapture();
+  } finally {
+    if (request === micStartRequest) {
+      micStarting = false;
+      if (micButton) micButton.disabled = false;
+    }
   }
 }
 
@@ -3518,7 +3575,7 @@ function scheduleContinuousListening(delay = CONTINUOUS_VOICE_MIN_MS) {
   }, delay);
 }
 
-voiceLoopButton?.addEventListener("click", async () => {
+voiceLoopButton?.addEventListener("click", () => {
   continuousVoice = !continuousVoice;
   updateContinuousVoiceButton();
   if (!continuousVoice) {
@@ -3546,7 +3603,7 @@ let pushToTalkTimer = null;
 let pushToTalkActive = false;
 let suppressMicClick = false;
 micButton?.addEventListener("pointerdown", event => {
-  if (event.button !== 0 || micStream) return;
+  if (event.button !== 0 || micStream || micStarting) return;
   pushToTalkTimer = setTimeout(async () => {
     pushToTalkTimer = null;
     pushToTalkActive = true;
@@ -3580,8 +3637,10 @@ document.getElementById("regenReply")?.addEventListener("click", () => {
 });
 
 // ── 会話履歴の Markdown 書き出し ──────────────────────────────────────
-document.getElementById("exportHistory")?.addEventListener("click", async () => {
+document.getElementById("exportHistory")?.addEventListener("click", async event => {
   if (!conversationHistory.length) { showToast("書き出す会話がありません", "warn"); return; }
+  const exportButton = event.currentTarget;
+  exportButton.disabled = true;
   const name = characterManifest?.name || "キャラクター";
   const lines = [`# PicoAgent 会話履歴（${name}） ${new Date().toLocaleString("ja-JP")}`, ""];
   for (const item of conversationHistory) {
@@ -3595,6 +3654,8 @@ document.getElementById("exportHistory")?.addEventListener("click", async () => 
     pushNotice({ kind: "export", ok: true, title: "会話履歴を書き出しました", body: String(result?.path || ""), at: new Date().toISOString() });
   } catch (error) {
     showToast(preview(error?.message || error || "書き出しに失敗しました", 60), "error");
+  } finally {
+    exportButton.disabled = false;
   }
 });
 
@@ -3863,10 +3924,7 @@ const napTimer = setInterval(() => {
 // 停止ボタン: バックエンドへ中断を要求する。エージェントは次のステップ境界で止まる。
 cancelSendButton?.addEventListener("click", async () => {
   if (!busy) return;
-  cancelSendButton.disabled = true;
-  status.textContent = "止めるね…";
-  try { await window.picoagent.cancel(); }
-  catch (error) { logApp("warn", "中断要求の送信に失敗しました", errorDetail(error)); }
+  await requestAgentCancellation(cancelSendButton);
 });
 input.addEventListener("input", () => {
   autosizeInput();

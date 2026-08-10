@@ -999,13 +999,30 @@ button.tab:active {
   }
   .tab { width: auto; min-width: max-content; min-height: 40px; }
   .section { padding: 15px 14px; }
-  footer { padding: 10px 16px; gap: 8px; }
-  footer button { padding-inline: 14px; }
+  footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  footer .status {
+    grid-column: 1 / -1;
+    min-height: 18px;
+    margin-right: 0;
+  }
+  footer .dirty-summary { justify-self: start; }
+  footer button { padding-inline: 14px; white-space: nowrap; }
   .quick-settings-grid { grid-template-columns:1fr; }
   .quick-settings-heading { display:block; }
   .quick-settings-heading p { margin-top:4px; }
   .search-shortcuts span { width:100%; }
   .product-info-grid { grid-template-columns:1fr; }
+}
+
+@media (max-width: 480px) {
+  footer { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  footer .dirty-summary { grid-column: 1 / -1; }
+  footer button { width: 100%; white-space: normal; }
 }
 
 /* 再起動確認の画面（自前ダイアログ） */

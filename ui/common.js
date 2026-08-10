@@ -32,5 +32,50 @@
     return chars.slice(0, maxChars).join("") + "…";
   }
 
-  window.PicoUI = Object.freeze({ errorDetail, logApp, preview });
+  function tail(text, maxChars) {
+    const chars = Array.from(String(text ?? ""));
+    return chars.length <= maxChars ? chars.join("") : chars.slice(-maxChars).join("");
+  }
+
+  function twoStepAction(button, options = {}) {
+    const initialLabel = options.initialLabel || button.textContent || "実行";
+    const confirmLabel = options.confirmLabel || "もう一度押して実行";
+    const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : 10_000;
+    let armed = false;
+    let timer = null;
+
+    function reset({ notify = true } = {}) {
+      if (timer != null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (!armed) return;
+      armed = false;
+      button.dataset.confirming = "false";
+      button.textContent = initialLabel;
+      if (notify) options.onCancel?.();
+    }
+
+    function request() {
+      if (armed) {
+        reset({ notify: false });
+        return true;
+      }
+      armed = true;
+      button.dataset.confirming = "true";
+      button.textContent = confirmLabel;
+      options.onArm?.();
+      timer = setTimeout(() => reset(), timeoutMs);
+      return false;
+    }
+
+    button.addEventListener("blur", () => {
+      if (!button.disabled) reset();
+    });
+    return Object.freeze({ request, reset, isArmed: () => armed });
+  }
+
+  window.PicoUI = Object.freeze({ errorDetail, logApp, preview, tail, twoStepAction });
 }());

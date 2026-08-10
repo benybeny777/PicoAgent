@@ -10,7 +10,7 @@ const modelOptions = document.getElementById("modelOptions");
 const settingsSearch = document.getElementById("settingsSearch");
 const clearSettingsSearch = document.getElementById("clearSettingsSearch");
 const dirtySummary = document.getElementById("dirtySummary");
-const { errorDetail, logApp } = window.PicoUI;
+const { errorDetail, logApp, tail, twoStepAction } = window.PicoUI;
 
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
@@ -109,7 +109,9 @@ window.addEventListener("beforeunload", () => {
 
 function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);
-  for (const c of children) node.append(c);
+  for (const child of children) {
+    if (child != null && child !== false) node.append(child);
+  }
   return node;
 }
 
@@ -883,6 +885,32 @@ function advancedGroup(title, note, children) {
   ].filter(Boolean));
 }
 
+function componentPresentation(item) {
+  const managed = item.installMode === "managed";
+  let actionLabel = "公式ページを開く";
+  if (managed && !item.ready) actionLabel = "公式からインストール";
+  if (managed && item.ready) actionLabel = "修復（再ダウンロード）";
+  if (item.versionUnknown) actionLabel = "修復して版を確認";
+  if (item.newerThanTarget) actionLabel = `推奨版${item.targetVersion ? ` ${item.targetVersion}` : ""}へ戻す`;
+  if (item.updateAvailable) actionLabel = `${item.targetVersion || "推奨版"}へ更新`;
+
+  let stateClass = "";
+  let badgeText = item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入");
+  if (item.versionUnknown) [stateClass, badgeText] = [" has-warning", "確認が必要"];
+  if (item.newerThanTarget) [stateClass, badgeText] = [" is-newer", "推奨版より新しい"];
+  if (item.updateAvailable) [stateClass, badgeText] = [" has-update", "更新あり"];
+  const versionText = item.targetVersion
+    ? (item.installedVersion
+      ? `インストール済み ${item.installedVersion} ／ 推奨版 ${item.targetVersion}`
+      : `${item.ready ? "インストール済み版は未確認" : "未導入"} ／ 推奨版 ${item.targetVersion}`)
+    : "";
+  let confirmLabel = "もう一度押して修復";
+  let pendingLabel = item.ready ? "修復中…" : "インストール中…";
+  if (item.newerThanTarget) [confirmLabel, pendingLabel] = ["もう一度押して戻す", "推奨版へ変更中…"];
+  if (item.updateAvailable) [confirmLabel, pendingLabel] = ["もう一度押して更新", "更新中…"];
+  return { managed, actionLabel, stateClass, badgeText, versionText, confirmLabel, pendingLabel };
+}
+
 function buildComponentManager() {
   const sec = section("追加機能と公式取得元");
   sec.classList.add("component-manager");
@@ -921,18 +949,7 @@ function buildComponentManager() {
       ? `${updateCount}件の更新があります`
       : (attentionCount ? `${attentionCount}件の確認が必要です` : "導入・修復・更新を管理"));
     for (const item of items) {
-      const managed = item.installMode === "managed";
-      const actionLabel = !managed
-        ? "公式ページを開く"
-        : !item.ready
-          ? "公式からインストール"
-          : item.updateAvailable
-            ? `${item.targetVersion || "推奨版"}へ更新`
-            : item.newerThanTarget
-              ? `推奨版${item.targetVersion ? ` ${item.targetVersion}` : ""}へ戻す`
-              : item.versionUnknown
-                ? "修復して版を確認"
-                : "修復（再ダウンロード）";
+      const { managed, actionLabel, stateClass, badgeText, versionText, confirmLabel, pendingLabel } = componentPresentation(item);
       const button = el("button", {
         className: item.updateAvailable ? "primary" : (item.ready ? "secondary" : "primary"),
         type: "button",
@@ -940,6 +957,21 @@ function buildComponentManager() {
         disabled: !item.available,
       });
       button.dataset.available = String(Boolean(item.available));
+      const versionMove = item.updateAvailable || item.newerThanTarget
+        ? `${item.installedVersion || "現在の版"}から${item.targetVersion || "推奨版"}へ入れ替えます。`
+        : "公式配布を再ダウンロードして入れ替えます。";
+      const preserved = item.id === "aivis"
+        ? "音声モデル・辞書・設定は残ります。"
+        : "PicoAgentの設定は残ります。";
+      const confirmationMessage = `${item.label}: ${versionMove}${preserved}`;
+      const actionConfirmation = item.ready ? twoStepAction(button, {
+        initialLabel: actionLabel,
+        confirmLabel,
+        onArm: () => { status.textContent = confirmationMessage; },
+        onCancel: () => {
+          if (status.textContent === confirmationMessage) status.textContent = "";
+        },
+      }) : null;
       button.addEventListener("click", async () => {
         if (!managed) {
           const url = item.sources?.[0]?.url;
@@ -947,24 +979,12 @@ function buildComponentManager() {
           status.textContent = `${item.label}は提供元の手順で導入し、必要なら「スキル」で実行ファイルを指定してください。`;
           return;
         }
-        if (item.ready && button.dataset.confirming !== "true") {
-          button.dataset.confirming = "true";
-          button.textContent = item.updateAvailable
-            ? "もう一度押して更新"
-            : (item.newerThanTarget ? "もう一度押して戻す" : "もう一度押して修復");
-          const versionMove = item.updateAvailable || item.newerThanTarget
-            ? `${item.installedVersion || "現在の版"}から${item.targetVersion || "推奨版"}へ入れ替えます。`
-            : "公式配布を再ダウンロードして入れ替えます。";
-          const preserved = item.id === "aivis"
-            ? "音声モデル・辞書・設定は残ります。"
-            : "PicoAgentの設定は残ります。";
-          status.textContent = `${item.label}: ${versionMove}${preserved}`;
-          return;
-        }
+        if (actionConfirmation && !actionConfirmation.request()) return;
         setBusy(true);
         // 取得はバックエンドで走るので、この画面を閉じても止まらない。黙っていると
         // 「閉じれば止まる」と誤解され、数百MBの取得が知らないうちに続くことになる。
         const keepsRunning = "（この画面を閉じても取得は続きます）";
+        button.textContent = pendingLabel;
         status.textContent = item.updateAvailable
           ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…${keepsRunning}`
           : `${item.label}を公式配布元から取得しています…${keepsRunning}`;
@@ -980,16 +1000,9 @@ function buildComponentManager() {
           status.textContent = navigator.onLine
             ? `導入できませんでした: ${error?.message || error}`
             : "オフラインのため導入を見送りました。接続後にもう一度押してください。";
-          button.dataset.confirming = "false";
           button.textContent = actionLabel;
         } finally {
           setBusy(false);
-        }
-      });
-      button.addEventListener("blur", () => {
-        if (button.dataset.confirming === "true") {
-          button.dataset.confirming = "false";
-          button.textContent = actionLabel;
         }
       });
       const actions = el("div", { className: "component-card-actions" }, [button]);
@@ -997,16 +1010,21 @@ function buildComponentManager() {
         const removeLabel = item.id === "aivis" ? "本体を削除" : "削除";
         const remove = el("button", { className: "danger", type: "button", textContent: removeLabel });
         remove.dataset.available = "true";
+        const removeMessage = item.id === "aivis"
+          ? "音声読み上げ本体だけを削除します。ダウンロード済みの音声モデル・辞書・設定は残ります。"
+          : `${item.label}のPicoAgent管理下の本体とモデルを削除します。必要になれば再ダウンロードできます。`;
+        const removeConfirmation = twoStepAction(remove, {
+          initialLabel: removeLabel,
+          confirmLabel: "もう一度押して削除",
+          onArm: () => { status.textContent = removeMessage; },
+          onCancel: () => {
+            if (status.textContent === removeMessage) status.textContent = "";
+          },
+        });
         remove.addEventListener("click", async () => {
-          if (remove.dataset.confirming !== "true") {
-            remove.dataset.confirming = "true";
-            remove.textContent = "もう一度押して削除";
-            status.textContent = item.id === "aivis"
-              ? "音声読み上げ本体だけを削除します。ダウンロード済みの音声モデル・辞書・設定は残ります。"
-              : `${item.label}のPicoAgent管理下の本体とモデルを削除します。必要になれば再ダウンロードできます。`;
-            return;
-          }
+          if (!removeConfirmation.request()) return;
           setBusy(true);
+          remove.textContent = "削除中…";
           status.textContent = `${item.label}を削除しています…`;
           try {
             await window.picoagent.settings.removeComponent(item.id);
@@ -1014,15 +1032,10 @@ function buildComponentManager() {
             await refresh();
           } catch (error) {
             status.textContent = `削除できませんでした: ${error?.message || error}`;
-            remove.dataset.confirming = "false";
             remove.textContent = removeLabel;
           } finally {
             setBusy(false);
           }
-        });
-        remove.addEventListener("blur", () => {
-          remove.dataset.confirming = "false";
-          remove.textContent = removeLabel;
         });
         actions.append(remove);
       }
@@ -1035,19 +1048,6 @@ function buildComponentManager() {
           textContent: source.name,
         }));
       }
-      const versionText = item.targetVersion
-        ? (item.installedVersion
-          ? `インストール済み ${item.installedVersion} ／ 推奨版 ${item.targetVersion}`
-          : `${item.ready ? "インストール済み版は未確認" : "未導入"} ／ 推奨版 ${item.targetVersion}`)
-        : "";
-      const stateClass = item.updateAvailable
-        ? " has-update"
-        : (item.newerThanTarget ? " is-newer" : (item.versionUnknown ? " has-warning" : ""));
-      const badgeText = item.updateAvailable
-        ? "更新あり"
-        : (item.newerThanTarget
-          ? "推奨版より新しい"
-          : (item.versionUnknown ? "確認が必要" : (item.ready ? "準備済み" : (managed ? "公式から取得" : "外部導入"))));
       list.append(markSearchable(el("div", { className: `component-card${item.ready ? " is-ready" : ""}${stateClass}` }, [
         el("div", { className: "component-card-copy" }, [
           el("strong", { textContent: item.label }),
@@ -1969,14 +1969,21 @@ function layoutResetField() {
 
 function windowPlacementField() {
   const actions = el("div", { className: "placement-actions" });
+  function setPlacementBusy(busy) {
+    actions.setAttribute("aria-busy", String(busy));
+    actions.querySelectorAll("button").forEach(item => { item.disabled = busy; });
+  }
   for (const [id, label] of [["left", "左画面"], ["right", "右画面"], ["current", "現在の画面"], ["primary", "主画面"]]) {
     const button = el("button", { type: "button", className: "secondary", textContent: label });
     button.addEventListener("click", async () => {
+      setPlacementBusy(true);
       try {
         await window.picoagent.placeWindow(id);
         statusEl.textContent = `${label}の中央へ移動しました。`;
       } catch (error) {
         statusEl.textContent = `移動できませんでした: ${error?.message || error}`;
+      } finally {
+        setPlacementBusy(false);
       }
     });
     actions.append(button);
@@ -1985,6 +1992,27 @@ function windowPlacementField() {
     el("label", { textContent: "表示するモニター" }), actions,
     el("p", { className: "hint", textContent: "動画を見ながら使う場合は「左画面」などを選ぶと、接続中ディスプレイの中央へ移動します。" }),
   ]), "ウィンドウ 配置 左画面 右画面 主画面 ディスプレイ");
+}
+
+function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () => true) {
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    statusEl.textContent = `${label}を選択しています…`;
+    try {
+      const result = await window.picoagent.settings.pickStreamImage(kind);
+      if (!result?.path) {
+        statusEl.textContent = `${label}の選択をキャンセルしました。`;
+        return;
+      }
+      onPicked(result.path);
+      statusEl.textContent = `${label}を選びました。「変更を保存」で反映します。`;
+    } catch (error) {
+      logApp("warn", `${label}を取り込めませんでした`, errorDetail(error));
+      statusEl.textContent = `${label}を取り込めませんでした: ${error?.message || error}`;
+    } finally {
+      button.disabled = !isAvailable();
+    }
+  });
 }
 
 function streamSettingsField(values) {
@@ -1997,11 +2025,10 @@ function streamSettingsField(values) {
   ]));
   const backgroundPath = el("input", { type: "text", readOnly: true, value: values.PICOAGENT_STREAM_BACKGROUND_IMAGE || "", placeholder: "画像未選択" });
   const backgroundButton = el("button", { type: "button", className: "secondary", textContent: "背景画像を選ぶ" });
-  backgroundButton.addEventListener("click", async () => {
-    try {
-      const result = await window.picoagent.settings.pickStreamImage("background");
-      if (result?.path) { backgroundPath.value = result.path; inputs.get("PICOAGENT_STREAM_BACKGROUND").value = "custom"; updateDirtyState(); }
-    } catch (error) { statusEl.textContent = `背景画像を取り込めませんでした: ${error?.message || error}`; }
+  bindStreamImagePicker(backgroundButton, "background", "背景画像", path => {
+    backgroundPath.value = path;
+    inputs.get("PICOAGENT_STREAM_BACKGROUND").value = "custom";
+    updateDirtyState();
   });
   wrapper.append(registerInput("PICOAGENT_STREAM_BACKGROUND_IMAGE", backgroundPath, el("div", { className: "field" }, [el("label", { textContent: "自分の背景画像" }), backgroundPath, backgroundButton])));
   wrapper.append(selectField("PICOAGENT_STREAM_DISPLAY", "背景内ディスプレイ", values.PICOAGENT_STREAM_DISPLAY || "dashboard", [
@@ -2013,11 +2040,10 @@ function streamSettingsField(values) {
   ]));
   const displayPath = el("input", { type: "text", readOnly: true, value: values.PICOAGENT_STREAM_DISPLAY_IMAGE || "", placeholder: "画像未選択" });
   const displayButton = el("button", { type: "button", className: "secondary", textContent: "ディスプレイ画像を選ぶ" });
-  displayButton.addEventListener("click", async () => {
-    try {
-      const result = await window.picoagent.settings.pickStreamImage("display");
-      if (result?.path) { displayPath.value = result.path; inputs.get("PICOAGENT_STREAM_DISPLAY").value = "image"; updateDirtyState(); }
-    } catch (error) { statusEl.textContent = `ディスプレイ画像を取り込めませんでした: ${error?.message || error}`; }
+  bindStreamImagePicker(displayButton, "display", "ディスプレイ画像", path => {
+    displayPath.value = path;
+    inputs.get("PICOAGENT_STREAM_DISPLAY").value = "image";
+    updateDirtyState();
   });
   wrapper.append(registerInput("PICOAGENT_STREAM_DISPLAY_IMAGE", displayPath, el("div", { className: "field" }, [el("label", { textContent: "ディスプレイに映す画像" }), displayPath, displayButton])));
   wrapper.append(el("p", { className: "hint", textContent: "配信表示では、左上に LIVE・日付・時刻を常時表示します。" }));
@@ -2080,14 +2106,16 @@ function buildCharacterStreamProfileEditor(values) {
   };
   enabled.addEventListener("change", save);
   for (const control of [background, display, captionColor]) control.addEventListener("change", save);
-  backgroundButton.addEventListener("click", async () => {
-    const result = await window.picoagent.settings.pickStreamImage("background");
-    if (result?.path) { backgroundPath.value = result.path; background.value = "custom"; save(); }
-  });
-  displayButton.addEventListener("click", async () => {
-    const result = await window.picoagent.settings.pickStreamImage("display");
-    if (result?.path) { displayPath.value = result.path; display.value = "image"; save(); }
-  });
+  bindStreamImagePicker(backgroundButton, "background", "キャラ用背景画像", path => {
+    backgroundPath.value = path;
+    background.value = "custom";
+    save();
+  }, () => enabled.checked);
+  bindStreamImagePicker(displayButton, "display", "キャラ用画面画像", path => {
+    displayPath.value = path;
+    display.value = "image";
+    save();
+  }, () => enabled.checked);
   const reset = el("button", { type: "button", className: "secondary", textContent: "共通の配信設定へ戻す" });
   reset.addEventListener("click", () => { enabled.checked = false; save(); load(); });
   const node = markSearchable(el("div", { className: "field stream-profile-editor" }, [
@@ -2127,8 +2155,16 @@ function buildCharacterFramingEditor() {
     y.value = String(saved.y ?? fallback.y ?? 0);
     updatePreview();
     const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
-    const url = character ? await characterIconUrl(character) : "";
-    if (url) preview.querySelector("img").src = url;
+    const image = preview.querySelector("img");
+    image.removeAttribute("src");
+    try {
+      const url = character ? await characterIconUrl(character) : "";
+      if (url) image.src = url;
+      image.alt = "選択キャラの構図プレビュー";
+    } catch (error) {
+      image.alt = "構図プレビューを読み込めません";
+      logApp("warn", "構図プレビューを読み込めませんでした", errorDetail(error));
+    }
   };
   const save = () => {
     characterFraming[characterSelect.value] ||= {};
@@ -2144,14 +2180,20 @@ function buildCharacterFramingEditor() {
   layoutSelect.addEventListener("change", load);
   const reset = el("button", { type: "button", className: "secondary", textContent: "この構図を初期値へ戻す" });
   reset.addEventListener("click", async () => {
+    reset.disabled = true;
     const characterId = characterSelect.value;
     const layout = layoutSelect.value;
     if (characterFraming?.[characterId]) {
       delete characterFraming[characterId][layout];
       if (!Object.keys(characterFraming[characterId]).length) delete characterFraming[characterId];
     }
-    await load();
-    updateDirtyState();
+    try {
+      await load();
+      updateDirtyState();
+      statusEl.textContent = "この表示形式の構図を初期値へ戻しました。「変更を保存」で反映します。";
+    } finally {
+      reset.disabled = false;
+    }
   });
   const node = markSearchable(el("div", { className: "field framing-editor" }, [
     el("label", { textContent: "キャラごとの構図（表示形式別）" }),
@@ -2384,14 +2426,19 @@ function buildDownloadedModelsSection() {
           ? el("span", { className: "model-active", textContent: "使用中" })
           : el("button", { type: "button", className: "model-delete", textContent: "削除" });
         if (!model.active) {
+          const deleteMessage = `モデル「${model.name}」を削除すると、再度使うときに再ダウンロードが必要です。`;
+          const deleteConfirmation = twoStepAction(action, {
+            initialLabel: "削除",
+            confirmLabel: "もう一度押して削除",
+            onArm: () => { modelStatus.textContent = deleteMessage; },
+            onCancel: () => {
+              if (modelStatus.textContent === deleteMessage) modelStatus.textContent = "";
+            },
+          });
           action.addEventListener("click", async () => {
-            if (action.dataset.confirming !== "true") {
-              action.dataset.confirming = "true";
-              action.textContent = "もう一度押して削除";
-              modelStatus.textContent = `モデル「${model.name}」を削除すると、再度使うときに再ダウンロードが必要です。`;
-              return;
-            }
+            if (!deleteConfirmation.request()) return;
             action.disabled = true;
+            action.textContent = "削除中…";
             modelStatus.textContent = `モデル「${model.name}」を削除しています…`;
             try {
               await window.picoagent.deleteDownloadedModel(model.name);
@@ -2400,15 +2447,9 @@ function buildDownloadedModelsSection() {
             } catch (error) {
               logApp("warn", "モデル削除に失敗しました", `${model.name}: ${errorDetail(error)}`);
               action.disabled = false;
-              action.dataset.confirming = "false";
               action.textContent = "削除";
               modelStatus.textContent = `削除に失敗しました: ${error?.message || error}`;
             }
-          });
-          action.addEventListener("blur", () => {
-            if (action.disabled) return;
-            action.dataset.confirming = "false";
-            action.textContent = "削除";
           });
         }
         list.append(el("div", { className: "model-row" }, [info, action]));
@@ -2836,19 +2877,37 @@ async function render() {
     if (character.user) {
       const removeStatus = el("div", { className: "card-desc" });
       const removeButton = el("button", { className: "secondary", type: "button", textContent: "削除" });
+      const removeMessage = "OS のゴミ箱へ移動します。設定・会話履歴は削除しません。";
+      const removeConfirmation = twoStepAction(removeButton, {
+        initialLabel: "削除",
+        confirmLabel: "もう一度押して削除",
+        onArm: () => { removeStatus.textContent = removeMessage; },
+        onCancel: () => {
+          if (removeStatus.textContent === removeMessage) removeStatus.textContent = "";
+        },
+      });
       removeButton.addEventListener("click", async () => {
-        if (removeButton.dataset.confirm !== "1") {
-          removeButton.dataset.confirm = "1";
-          removeButton.textContent = "もう一度押すと削除";
-          removeStatus.textContent = "OS のゴミ箱へ移動します。";
-          return;
-        }
+        if (!removeConfirmation.request()) return;
         removeButton.disabled = true;
+        removeButton.textContent = "ゴミ箱へ移動中…";
         try {
-          await window.picoagent.settings.removeCharacter(character.id);
-          removeStatus.textContent = "ゴミ箱へ移動しました。「設定」を開き直すと一覧から消えます。";
+          const result = await window.picoagent.settings.removeCharacter(character.id);
+          const wasSelected = characterSelect.value === character.id;
+          characterCatalog.characters = characterCatalog.characters.filter(item => item.id !== character.id);
+          [...characterSelect.options].find(option => option.value === character.id)?.remove();
+          card.remove();
+          if (wasSelected) {
+            const fallbackCharacter = result?.activeCharacter || characterCatalog.default;
+            characterSelect.value = fallbackCharacter;
+            if (savedSnapshot) savedSnapshot.PICOAGENT_CHARACTER = fallbackCharacter;
+            data.values.PICOAGENT_CHARACTER = fallbackCharacter;
+            characterSelect.dispatchEvent(new Event("change"));
+          }
+          applyCharacterFilters();
+          statusEl.textContent = `${character.name}をOSのゴミ箱へ移動しました。`;
         } catch (error) {
           removeButton.disabled = false;
+          removeButton.textContent = "削除";
           removeStatus.textContent = `削除できませんでした: ${error?.message || error}`;
         }
       });
@@ -2907,36 +2966,50 @@ async function render() {
   let selectedSource = "";
   let selectedTha3Root = tha3RootInput.value.trim();
   let toolReady = false;
+  let tha3ControlBusy = false;
 
   function updateCreateEnabled() {
     createButton.disabled = tha3GenerationRunning || !toolReady || !selectedSource || !idInput.value.trim() || !nameInput.value.trim();
-    pickSourceButton.disabled = tha3GenerationRunning;
-    pickTha3RootButton.disabled = tha3GenerationRunning;
+    pickSourceButton.disabled = tha3GenerationRunning || tha3ControlBusy;
+    pickTha3RootButton.disabled = tha3GenerationRunning || tha3ControlBusy;
+    clearTha3RootButton.disabled = tha3GenerationRunning || tha3ControlBusy;
     idInput.disabled = tha3GenerationRunning;
     nameInput.disabled = tha3GenerationRunning;
     cancelButton.hidden = !tha3GenerationRunning;
   }
 
-  pickSourceButton.addEventListener("click", async () => {
-    createStatus.textContent = "画像を選択中…";
+  async function withTha3ControlsLocked(task) {
+    if (tha3GenerationRunning || tha3ControlBusy) return;
+    tha3ControlBusy = true;
+    updateCreateEnabled();
     try {
-      const picked = await window.picoagent.settings.pickTha3Source();
-      if (!picked?.path) {
-        createStatus.textContent = "画像選択をキャンセルしました。";
-        return;
-      }
-      selectedSource = picked.path;
-      sourceInput.value = picked.path;
-      sourcePreview.src = picked.dataUrl;
-      sourcePreview.onerror = () => { sourcePreview.hidden = true; };
-      sourcePreview.hidden = false;
-      createStatus.textContent = "画像を選びました。512×512・背景透過・正面向きか確認してください。";
-    } catch (error) {
-      createStatus.textContent = `画像を選べませんでした: ${error?.message || error}`;
-      logApp("warn", "THA3入力画像を選べませんでした", errorDetail(error));
+      await task();
     } finally {
+      tha3ControlBusy = false;
       updateCreateEnabled();
     }
+  }
+
+  pickSourceButton.addEventListener("click", async () => {
+    await withTha3ControlsLocked(async () => {
+      createStatus.textContent = "画像を選択中…";
+      try {
+        const picked = await window.picoagent.settings.pickTha3Source();
+        if (!picked?.path) {
+          createStatus.textContent = "画像選択をキャンセルしました。";
+          return;
+        }
+        selectedSource = picked.path;
+        sourceInput.value = picked.path;
+        sourcePreview.src = picked.dataUrl;
+        sourcePreview.onerror = () => { sourcePreview.hidden = true; };
+        sourcePreview.hidden = false;
+        createStatus.textContent = "画像を選びました。512×512・背景透過・正面向きか確認してください。";
+      } catch (error) {
+        createStatus.textContent = `画像を選べませんでした: ${error?.message || error}`;
+        logApp("warn", "THA3入力画像を選べませんでした", errorDetail(error));
+      }
+    });
   });
   idInput.addEventListener("input", updateCreateEnabled);
   nameInput.addEventListener("input", updateCreateEnabled);
@@ -2958,39 +3031,41 @@ async function render() {
   }
 
   pickTha3RootButton.addEventListener("click", async () => {
-    createStatus.textContent = "THA3フォルダを選択中…";
-    try {
-      const picked = await window.picoagent.settings.pickTha3Root();
-      if (!picked?.path) {
-        createStatus.textContent = "フォルダ選択をキャンセルしました。";
-        return;
+    await withTha3ControlsLocked(async () => {
+      createStatus.textContent = "THA3フォルダを選択中…";
+      try {
+        const picked = await window.picoagent.settings.pickTha3Root();
+        if (!picked?.path) {
+          createStatus.textContent = "フォルダ選択をキャンセルしました。";
+          return;
+        }
+        await refreshTha3Status(picked.path);
+        createStatus.textContent = toolReady ? "THA3制作ツールを確認しました。" : "必要な本体またはモデルが不足しています。";
+      } catch (error) {
+        toolReady = false;
+        selectedTha3Root = "";
+        tha3ToolStatus.classList.remove("ready");
+        tha3ToolStatus.textContent = `選択したフォルダを使えません: ${error?.message || error}`;
+        createStatus.textContent = "THA3フォルダを確認できませんでした。";
+        logApp("warn", "THA3フォルダを確認できませんでした", errorDetail(error));
       }
-      await refreshTha3Status(picked.path);
-      createStatus.textContent = toolReady ? "THA3制作ツールを確認しました。" : "必要な本体またはモデルが不足しています。";
-    } catch (error) {
-      toolReady = false;
-      selectedTha3Root = "";
-      tha3ToolStatus.classList.remove("ready");
-      tha3ToolStatus.textContent = `選択したフォルダを使えません: ${error?.message || error}`;
-      createStatus.textContent = "THA3フォルダを確認できませんでした。";
-      logApp("warn", "THA3フォルダを確認できませんでした", errorDetail(error));
-      updateCreateEnabled();
-    }
+    });
   });
   clearTha3RootButton.addEventListener("click", async () => {
-    tha3RootInput.value = "";
-    tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
-    selectedTha3Root = "";
-    createStatus.textContent = "保存するとTHA3フォルダの選択を解除します。";
-    try {
-      await refreshTha3Status("");
-    } catch (error) {
-      toolReady = false;
-      tha3ToolStatus.classList.remove("ready");
-      tha3ToolStatus.textContent = `自動検出先を確認できませんでした: ${error?.message || error}`;
-      logApp("warn", "THA3フォルダの選択解除後に自動検出先を確認できませんでした", errorDetail(error));
-      updateCreateEnabled();
-    }
+    await withTha3ControlsLocked(async () => {
+      tha3RootInput.value = "";
+      tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
+      selectedTha3Root = "";
+      createStatus.textContent = "保存するとTHA3フォルダの選択を解除します。";
+      try {
+        await refreshTha3Status("");
+      } catch (error) {
+        toolReady = false;
+        tha3ToolStatus.classList.remove("ready");
+        tha3ToolStatus.textContent = `自動検出先を確認できませんでした: ${error?.message || error}`;
+        logApp("warn", "THA3フォルダの選択解除後に自動検出先を確認できませんでした", errorDetail(error));
+      }
+    });
   });
 
   if (tha3ProgressUnlisten) {
@@ -3001,7 +3076,7 @@ async function render() {
     const line = String(event?.message || "").trim();
     if (!line) return;
     progress.hidden = false;
-    progress.textContent = `${progress.textContent}${progress.textContent ? "\n" : ""}${line}`.slice(-6000);
+    progress.textContent = tail(`${progress.textContent}${progress.textContent ? "\n" : ""}${line}`, 6000);
     progress.scrollTop = progress.scrollHeight;
   });
 
@@ -3013,6 +3088,7 @@ async function render() {
     } catch (error) {
       createStatus.textContent = `キャンセル要求に失敗しました: ${error?.message || error}`;
       logApp("warn", "THA3生成のキャンセル要求に失敗しました", errorDetail(error));
+      cancelButton.disabled = false;
     }
   });
 

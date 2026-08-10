@@ -1250,17 +1250,33 @@ pub fn settings_character_install_live2d(
 #[tauri::command]
 pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, String> {
     let id = id.trim().to_string();
-    crate::user_characters::remove(&app, &id).map_err(|error| format!("{error:#}"))?;
     // 削除したキャラを選んだままだと起動時に読み込めないので、選択を既定へ戻す。
     let state = app.state::<AppState>();
-    if state.config.get("PICOAGENT_CHARACTER", "mugi") == id {
+    let was_selected = state.config.get("PICOAGENT_CHARACTER", "mugi") == id;
+    if was_selected {
         state
             .config
             .set_string("PICOAGENT_CHARACTER", "mugi".to_string())
             .map_err(|error| format!("選択中キャラクターを戻せません: {error}"))?;
     }
+    if let Err(error) = crate::user_characters::remove(&app, &id) {
+        if was_selected {
+            state
+                .config
+                .set_string("PICOAGENT_CHARACTER", id.clone())
+                .map_err(|restore_error| {
+                    format!(
+                        "キャラクターを削除できず、選択状態も復元できませんでした: 削除={error:#} / 復元={restore_error}"
+                    )
+                })?;
+        }
+        return Err(format!("{error:#}"));
+    }
     crate::log_paths::append_app_log(&app, &format!("キャラクター {id} をゴミ箱へ移動しました。"));
-    Ok(json!({ "ok": true }))
+    Ok(json!({
+        "ok": true,
+        "activeCharacter": was_selected.then_some("mugi"),
+    }))
 }
 
 /// THA3制作ツールと学習済みモデルがGUI生成に使える状態か返す。
