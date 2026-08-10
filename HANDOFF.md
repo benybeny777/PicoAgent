@@ -28,6 +28,8 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 
 さらに再帰全体点検を3巡行い、設計ガード自体の穴を2件塞いだ。`text::guard` は先頭切り出し `[..N]` しか見ておらず、その穴を通っていた `productivity_tools` の色変換が「バイト長6の日本語2文字」で実際に panic する状態だったため、検査と切り出しを文字ベースへ直して回帰テストを追加した。`bundle_scope` は通常設定だけを見ており、実際に利用者へ届く `tauri.distribution.conf.json` が無検査だったので、販売版専用の許可リストと検査を追加した。Codexの事後確認では、文字列ガードに追加されたファイル単位の例外を削除し、販売版ガードを双方向化、色指定の`#`重複受理とxtask件数誤記録も修正した。あわせて長期記憶の変更検知が直列化失敗時に保存を飛ばす問題、CSPの `unsafe-eval` が無文書だった点、未参照のモバイルアイコン35ファイル、AGENTSの実在しない例示や不足していたスクリプト一覧も直した。
 
+観点を変えた10巡レビューでは、物理削除の拒否が Windows のシェルしか見ておらず `sh -c "rm -rf ..."` を通していた穴（過去のPowerShellの穴と同型がOS違いで残存）と、画像変換のImageMagick確認だけ子プロセス待ちに上限が無かった点を修正した。待ち方を検査するガードが存在しなかったため新設した。販売版に入る同梱エンジンが版固定もSHA-256照合もなく取得されている点は、版の選定が製品判断のため固定自体は行わず、`release-check` の注意として常時表示する形にした。テスト件数の記述は過去4回すべてでずれていたので、数値を書かない方針へ変更した。
+
 ## 残る確認境界
 
 自動撮影できるPNG系4キャラ×8形式は確認済み。以下は実機または人の判断が要る境界。詳細と判断理由は `docs/REVIEW-LOG.md` を参照する。
@@ -40,15 +42,18 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 ## 検証
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 337件
-cargo test --manifest-path xtask/Cargo.toml             # 31件成功
+cargo test --lib --manifest-path src-tauri/Cargo.toml   # 全件成功すること
+cargo test --manifest-path xtask/Cargo.toml             # 全件成功すること
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui --release
 cargo run --manifest-path xtask/Cargo.toml -- release-check  # 販売前ブロッカー4件を正しく検出
-git ls-files '*.js' '*.mjs' | ForEach-Object { node --check $_ } # 6件成功
+git ls-files '*.js' '*.mjs' | ForEach-Object { node --check $_ }
 git diff --check
 ```
+
+テスト件数は変更のたびに増減するため、この文書には具体的な数を書かない（過去4回の点検で毎回ずれ、
+そのたびに直す作業が発生した）。件数を残したい場合は失敗0であることを見るほうが確実。
 
 `mugi-live2d` は制作途中でモデル実体をまだ持たず、別パックへの `..` 参照も残るため、単体パック検証の対象外。正式パック11体は検証済み。
 
