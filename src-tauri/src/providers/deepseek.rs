@@ -143,7 +143,7 @@ impl Provider for DeepSeek {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("DeepSeek /chat/completions failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("DeepSeek", "/chat/completions", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data

@@ -961,9 +961,12 @@ function buildComponentManager() {
           return;
         }
         setBusy(true);
+        // 取得はバックエンドで走るので、この画面を閉じても止まらない。黙っていると
+        // 「閉じれば止まる」と誤解され、数百MBの取得が知らないうちに続くことになる。
+        const keepsRunning = "（この画面を閉じても取得は続きます）";
         status.textContent = item.updateAvailable
-          ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…`
-          : `${item.label}を公式配布元から取得しています…`;
+          ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…${keepsRunning}`
+          : `${item.label}を公式配布元から取得しています…${keepsRunning}`;
         try {
           await window.picoagent.settings.installComponents([item.id]);
           status.textContent = item.updateAvailable

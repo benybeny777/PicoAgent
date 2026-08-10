@@ -53,6 +53,26 @@ pub async fn response_text(response: reqwest::Response) -> Result<String, String
         .map_err(|error| format!("外部サービスの応答本文を読み取れません: {error}"))
 }
 
+/// 外部サービスがエラー応答を返したときの、利用者へ出す共通メッセージ。
+///
+/// この文字列は**キャラクターのフキダシにそのまま出る**。以前は各プロバイダが
+/// `"Ollama /api/chat failed: {status} {body}"` のように英語の定型文と応答本文を
+/// 無制限に連結しており、日本語の利用者に英語＋JSONの塊が見えていた。
+/// 本文は原因の手がかりとして残すが、長さを抑える（全文は診断ログへ残る）。
+pub fn service_error(
+    service: &str,
+    endpoint: &str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> String {
+    let detail = crate::text::preview(body.trim(), 200);
+    if detail.is_empty() {
+        format!("{service} がエラーを返しました（{endpoint} / HTTP {status}）")
+    } else {
+        format!("{service} がエラーを返しました（{endpoint} / HTTP {status}）: {detail}")
+    }
+}
+
 /// 外部サービスのJSONを、解析失敗を空オブジェクトへ落とさず取得する。
 pub fn response_json(text: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(text)

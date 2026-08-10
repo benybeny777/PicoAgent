@@ -62,7 +62,10 @@ impl Provider for Gemini {
             .send()
             .await?;
         if !res.status().is_success() {
-            anyhow::bail!("Gemini /models failed: {}", res.status());
+            anyhow::bail!(
+                "Geminiがモデル一覧を返しませんでした（HTTP {}）。APIキーと接続先を確認してください。",
+                res.status()
+            );
         }
         let data: Value = res.json().await?;
         Ok(data
@@ -133,7 +136,7 @@ impl Provider for Gemini {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("Gemini /chat/completions failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("Gemini", "/chat/completions", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data

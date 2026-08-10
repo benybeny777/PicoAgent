@@ -393,7 +393,9 @@ async fn ensure_local_model_selection(app: &AppHandle) {
 fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
     let server = server_path(app).ok_or_else(|| {
         anyhow::anyhow!(
-            "同梱エンジン llama-server が見つかりません（cargo xtask setup engine を実行してください）"
+            "ローカルAIエンジンの実行ファイルが見つかりません。設定の「診断・修復」から\
+             再インストールを試すか、公式サイトから入れ直してください（開発環境では\
+             `cargo xtask setup engine` でも用意できます）。"
         )
     })?;
     ensure_executable(&server)?;

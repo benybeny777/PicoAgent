@@ -154,7 +154,15 @@ pub async fn ensure_model_installed(
         let body = crate::tools::http::response_text(response)
             .await
             .map_err(anyhow::Error::msg)?;
-        anyhow::bail!("Aivis モデル導入に失敗しました: HTTP {status} {body}");
+        anyhow::bail!(
+            "{}",
+            crate::tools::http::service_error(
+                "読み上げエンジン（AivisSpeech）",
+                "音声モデルの導入",
+                status,
+                &body
+            )
+        );
     }
     for _ in 0..60 {
         if speaker_uuid_available(endpoint, speaker_uuid).await? {
@@ -169,7 +177,8 @@ pub async fn ensure_model_installed(
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     anyhow::bail!(
-        "Aivis モデル導入後に speaker_uuid={speaker_uuid} が /speakers に見つかりません。"
+        "音声モデルを導入しましたが、読み上げエンジンの音声一覧に現れませんでした。\
+         設定の「追加機能」から「公式配布から再導入」を試してください（内部ID: {speaker_uuid}）。"
     );
 }
 
@@ -180,7 +189,10 @@ async fn fetch_speakers(endpoint: &str) -> anyhow::Result<Vec<Value>> {
         .build()?;
     let response = client.get(format!("{endpoint}/speakers")).send().await?;
     if !response.status().is_success() {
-        anyhow::bail!("Aivis /speakers failed: HTTP {}", response.status());
+        anyhow::bail!(
+            "読み上げエンジン（AivisSpeech）が音声一覧を返しませんでした（HTTP {}）。設定の「追加機能」から再導入を試してください。",
+            response.status()
+        );
     }
     let speakers: Value = response.json().await?;
     speakers
@@ -285,7 +297,8 @@ fn resource_is_newer(resource: &Path, installed: &Path) -> bool {
 }
 
 fn path_hint() -> &'static str {
-    "Aivis の実行ファイルが見つかりません。ネットワーク接続を確認するか、cargo xtask setup aivis を実行してください。"
+    "読み上げエンジン（AivisSpeech）が見つかりません。設定の「追加機能」から\
+     「音声読み上げ」を導入してください（開発環境では `cargo xtask setup aivis` でも用意できます）。"
 }
 
 fn is_executable_file(path: &Path) -> bool {

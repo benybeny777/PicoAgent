@@ -127,7 +127,7 @@ impl Provider for Xai {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("xAI /chat/completions failed: {} {}", status, text);
+            anyhow::bail!("{}", crate::tools::http::service_error("xAI Grok", "/chat/completions", status, &text));
         }
         let data: Value = res.json().await?;
         let message = data
