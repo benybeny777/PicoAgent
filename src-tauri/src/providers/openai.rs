@@ -24,6 +24,23 @@ fn api_key(cfg: &Config) -> String {
     cfg.get("OPENAI_API_KEY", "")
 }
 
+/// 公式エンドポイントを使うのにキーが空なら、生の 401 ではなく設定案内を返す。
+///
+/// 他の5プロバイダは未設定を明示しているのに、いちばん使われるここだけが
+/// `HTTP 401 Unauthorized` とJSONの塊をフキダシへ出していた。
+/// ただし `OPENAI_BASE_URL` を自前サーバーへ向けた OpenAI 互換構成では
+/// キーが不要なこともあるので、公式ホストのときだけ要求する。
+fn ensure_api_key(cfg: &Config) -> anyhow::Result<()> {
+    let url = base_url(cfg);
+    let official = url.contains("api.openai.com");
+    if official && api_key(cfg).trim().is_empty() {
+        anyhow::bail!(
+            "OpenAI API キーが未設定です（設定画面の「AIモデル・連携」→ OpenAI で入力してください）"
+        );
+    }
+    Ok(())
+}
+
 // 正規形 -> OpenAI ワイヤ形式。local プロバイダからも再利用する。
 pub(crate) fn to_wire(messages: &[Message]) -> Vec<Value> {
     messages
@@ -344,6 +361,7 @@ impl Provider for OpenAI {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
+        ensure_api_key(cfg)?;
         let mut body = json!({
             "model": model,
             "messages": to_wire(messages),
@@ -389,6 +407,7 @@ impl Provider for OpenAI {
         tools: &[Value],
         on_chunk: Arc<dyn Fn(String) + Send + Sync>,
     ) -> anyhow::Result<Message> {
+        ensure_api_key(cfg)?;
         let mut body = json!({
             "model": model,
             "messages": to_wire(messages),

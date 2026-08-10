@@ -48,7 +48,7 @@ const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
 let busy = false;
-const { errorDetail, logApp } = window.PicoUI;
+const { errorDetail, logApp, preview } = window.PicoUI;
 
 // decorations:false の透明ウィンドウにはOSの枠が無いため、各辺と四隅を明示的な
 // リサイズ領域にする。幅だけ・高さだけ・縦横同時のいずれもOS標準操作で変更できる。
@@ -147,7 +147,10 @@ let activeAlarmSnooze = null;
 // 画面下部にトースト通知を表示する。必要な場合は次の操作へ進むボタンも付けられる。
 // kind: "info"（既定）/ "success" / "warn" / "error" で配色が変わる。
 function showToast(msg, kind = "info", options = {}) {
-  const duration = Math.max(1200, Number(options.duration) || 1800);
+  // 失敗の通知は成功と同じ速さで消さない。1.8秒では、原因を含む文が読み終わる前に
+  // 消えてしまい「何か起きたのは分かるが理由は分からない」で終わる。
+  const defaultDuration = kind === "error" ? 5000 : 1800;
+  const duration = Math.max(1200, Number(options.duration) || defaultDuration);
   const el = document.createElement("div");
   el.className = kind === "info" ? "toast" : `toast toast-${kind}`;
   const text = document.createElement("span");
@@ -174,6 +177,9 @@ function showToast(msg, kind = "info", options = {}) {
     });
     el.append(action);
   }
+  // クリックで閉じる案は採らない。`.toast` は `pointer-events:none` で、透明な
+  // ペットウィンドウの下にあるデスクトップへクリックを通すためにそうしている。
+  // 受け取るようにすると、通知が出ている間だけ画面下部が押せない帯になる。
   document.body.append(el);
   requestAnimationFrame(() => el.classList.add("toast-show"));
   timer = setTimeout(dismiss, duration);
@@ -2754,7 +2760,7 @@ function renderAttachmentPreview() {
     icon.textContent = fileIcon(file.name);
     const label = document.createElement("span");
     label.className = "file-chip-name";
-    label.textContent = file.name.length > 22 ? file.name.slice(0, 20) + "…" : file.name;
+    label.textContent = preview(file.name, 20);
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "file-remove";
@@ -2853,7 +2859,7 @@ function addDocumentFile(file) {
     attachedFiles.push({ name: file.name, dataUrl: e.target.result });
     renderAttachmentPreview();
     updateComposerState();
-    showToast(`${file.name.length > 20 ? file.name.slice(0, 18) + "…" : file.name} を添付`, "success");
+    showToast(`${preview(file.name, 18)} を添付`, "success");
   };
   reader.onerror = () => {
     logApp("error", "ファイルの読み込みに失敗しました", `${file.name}: ${reader.error?.message || ""}`);
@@ -3389,7 +3395,7 @@ async function finishRecording() {
   } catch (error) {
     logApp("error", "音声入力に失敗しました", errorDetail(error));
     // 逐次プレビューが入力欄に残っていれば、それを最終結果として使う。
-    if (!hadInterim) showToast(String(error?.message || error || "文字起こしに失敗しました").slice(0, 60), "error");
+    if (!hadInterim) showToast(preview(error?.message || error || "文字起こしに失敗しました", 60), "error");
     else showToast("確定に失敗したため途中結果を残しました", "warn");
   } finally {
     status.classList.remove("busy");
@@ -3588,7 +3594,7 @@ document.getElementById("exportHistory")?.addEventListener("click", async () => 
     showToast("書き出しました", "success");
     pushNotice({ kind: "export", ok: true, title: "会話履歴を書き出しました", body: String(result?.path || ""), at: new Date().toISOString() });
   } catch (error) {
-    showToast(String(error?.message || error || "書き出しに失敗しました").slice(0, 60), "error");
+    showToast(preview(error?.message || error || "書き出しに失敗しました", 60), "error");
   }
 });
 
@@ -3742,7 +3748,7 @@ function endCharacterDrag(event) {
   savedCharacterOffset = { ...characterOffset };
   markActivity();
   window.picoagent.setCharacterOffset(characterOffset.x, characterOffset.y, characterManifest?.id, currentLayout, characterZoom).catch(error => {
-    showToast(String(error?.message || error || "立ち絵の位置を保存できませんでした").slice(0, 60), "error");
+    showToast(preview(error?.message || error || "立ち絵の位置を保存できませんでした", 60), "error");
   });
 }
 character.addEventListener("pointerup", endCharacterDrag);
@@ -3870,7 +3876,16 @@ input.addEventListener("input", () => {
   const len = input.value.length;
   if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
 });
+// 日本語入力（IME）の変換中かどうか。変換中のキーはアプリの操作へ流さない。
+function isImeComposing(event) {
+  return event.isComposing === true || event.keyCode === 229;
+}
 input.addEventListener("keydown", event => {
+  // 日本語入力（IME）の変換中はキーをアプリの操作に使わない。
+  // 変換確定の Enter で書きかけが送信され、候補選択の ↑↓ で入力欄が履歴に
+  // 置き換わり、変換取消の Escape で入力欄ごと閉じてしまう。
+  // `keyCode === 229` は isComposing を出さない環境向けの保険。
+  if (isImeComposing(event)) return;
   if (event.key === "Escape") {
     if (cancelPendingVoiceSubmit()) {
       event.preventDefault();
@@ -3902,6 +3917,7 @@ historySearch?.addEventListener("input", () => {
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
+  if (isImeComposing(event)) return; // 変換の取消を画面の Escape として扱わない
   if (cancelPendingVoiceSubmit()) return;
   if (relationshipCard && !relationshipCard.hidden) {
     relationshipCard.hidden = true;
@@ -3961,10 +3977,13 @@ function applyEngineStatus(s) {
   // 通常時はフキダシに「準備中…」を出さない（重い反映は再起動側で行う方針のため）。
   const booting = petApp.classList.contains("is-booting");
   if (s.phase === "download") {
-    if (booting) setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%`);
+    // 初回だけ数GBを取る。割合しか出さないと、待ち時間の見当が付かず固まって見える。
+    const gb = bytes => (Number(bytes) / (1024 ** 3)).toFixed(1);
+    const size = Number(s.totalBytes) > 0 ? `（${gb(s.receivedBytes)} / ${gb(s.totalBytes)}GB）` : "";
+    if (booting) setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
     online.dataset.up = false;
   } else if (s.phase === "starting") {
-    if (booting) setStatus("ローカル推論エンジンを起動中…");
+    if (booting) setStatus("ローカルAIを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
@@ -4220,7 +4239,7 @@ async function waitForEngineReady() {
       return;
     }
     applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
-    if (!s || s.phase === "idle") setStatus("ローカルモデルと推論エンジンを確認中…");
+    if (!s || s.phase === "idle") setStatus("ローカルAIを確認中…");
     if (s && (s.phase === "ready" || s.phase === "error")) return;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }

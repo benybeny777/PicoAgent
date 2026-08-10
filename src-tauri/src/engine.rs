@@ -243,7 +243,17 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
             let pct = pct as i64;
             if pct != last_emit {
                 last_emit = pct;
-                set_status(app, json!({ "phase": "download", "percent": pct }));
+                // 数GBの取得は10分以上かかることがある。割合だけだと「どれくらい待つのか」
+                // が分からず、止まっているようにも見えるので実サイズも渡す。
+                set_status(
+                    app,
+                    json!({
+                        "phase": "download",
+                        "percent": pct,
+                        "receivedBytes": received,
+                        "totalBytes": total
+                    }),
+                );
             }
         }
     }
@@ -514,7 +524,7 @@ pub async fn ensure_and_start(app: AppHandle) {
                 &app,
                 json!({
                     "phase": "error",
-                    "message": "別モデルのローカルエンジンが既に起動しています。PicoAgent を終了して残った llama-server を停止してから再起動してください"
+                    "message": "前に使っていたローカルAIがまだ動いています。設定の「診断・修復」から「ローカルAIを再起動」を押してください。直らないときは PicoAgent を終了して開き直してください"
                 }),
             );
             return;
@@ -534,7 +544,7 @@ pub async fn ensure_and_start(app: AppHandle) {
             terminate_managed_child(&app);
             set_status(
                 &app,
-                json!({ "phase": "error", "message": "local プロバイダが登録されていません" }),
+                json!({ "phase": "error", "message": "ローカルAIを利用できません。設定の「AIモデル・連携」から使うAIを選び直してください" }),
             );
             return;
         }
@@ -567,7 +577,7 @@ pub async fn ensure_and_start(app: AppHandle) {
     terminate_managed_child(&app);
     set_status(
         &app,
-        json!({ "phase": "error", "message": "エンジンの起動がタイムアウトしました" }),
+        json!({ "phase": "error", "message": "ローカルAIが時間内に起動しませんでした。設定の「診断・修復」から「ローカルAIを再起動」を試してください" }),
     );
 }
 
