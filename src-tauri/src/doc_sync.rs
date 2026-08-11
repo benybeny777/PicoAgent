@@ -7,7 +7,7 @@
 
 /// 設定キーとして扱わない文字列（マーカー・テスト用ダミー・ドキュメント中の例）。
 /// 追加するときは、なぜ設定キーでないのかを理由として書き添えること。
-const NOT_CONFIG_KEYS: [(&str, &str); 9] = [
+const NOT_CONFIG_KEYS: [(&str, &str); 10] = [
     (
         "PICOAGENT_COMMAND_APPROVAL__",
         "run_command と対話ループの内部プロトコルのマーカー",
@@ -21,6 +21,10 @@ const NOT_CONFIG_KEYS: [(&str, &str); 9] = [
         "view_image とエージェントループの内部プロトコルのマーカー",
     ),
     ("PICOAGENT_TEST_KEY", "config のテストで使うダミー"),
+    (
+        "PICOAGENT_TEST_SECRET",
+        "config の復号失敗テストで使うダミー",
+    ),
     ("PICOAGENT_TEST_LIST", "store の並列更新テストで使うダミー"),
     (
         "PICOAGENT_TEST_KEY_",
