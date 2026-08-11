@@ -11,6 +11,19 @@
 
 ---
 
+## 2026-08-12 — GitHub Actionsの開始前失敗と通知連発を停止
+
+最新の品質確認・Rust依存脆弱性確認がすべて失敗し、メールが連続して届くとの指摘を調査した。GitHubの注釈はコードや依存の失敗ではなく、`The job was not started because recent account payments have failed or your spending limit needs to be increased` で、全ジョブが手順を1つも開始していなかった。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P0 | プッシュごとに品質3OSと依存監査2件が開始前失敗し、失敗通知だけを送る | 対応済み | `.github/workflows/quality.yml` と `security-audit.yml` を削除。無料枠／請求制限下で自動実行を維持しても品質証拠にならず、通知だけが増えるため |
+| 2 | P1 | Actions削除後も品質・脆弱性確認を維持する | 対応済み | `AGENTS.md` と `HANDOFF.md` をローカル検証へ更新。依存変更時と販売前に `cargo test` / `clippy` / `cargo audit` を実行する |
+| 3 | 確認 | 過去の失敗がコード不良を示していないか | 対応済み | 最新2ワークフローは全ジョブの `steps=[]`。GitHubの請求・利用枠注釈だけで、ビルドや監査コマンドは未実行だった |
+| 4 | 確認 | Actions削除時点のローカル品質と依存状態 | 対応済み | 本体349件・xtask34件、両clippy警告ゼロ、fmt、UI配信ビルドが成功。`src-tauri` / `xtask` の既知脆弱性は0件。`src-tauri` の18件は未対応LinuxのGTK3系、旧マクロ・UNIC系などの情報警告で、脆弱性ではないため今回の通知停止と分けて記録。xtaskは警告0件 |
+
+---
+
 ## 2026-08-11 — 多重起動の保護を実装（前回の保留を解消）
 
 前回「起動経路の変更でGUI検証が要る」として保留していた多重起動の保護を、判断を受けて実装した。
@@ -27,7 +40,7 @@
 
 ### 依存の追加
 
-`tauri-plugin-single-instance 2.4.3`。推移的な新規 crate は無く、`Cargo.lock` の増加はこの1件のみ。`cargo audit` はこの環境に未導入のため、`security-audit` ワークフローが push / PR で実行する。
+`tauri-plugin-single-instance 2.4.3`。推移的な新規 crate は無く、`Cargo.lock` の増加はこの1件のみ。当時の `security-audit` はGitHubの利用枠制限で開始できなかったため、2026-08-12のローカル監査で確認する。
 
 ---
 
