@@ -76,11 +76,24 @@ fn day_codes(token: &str) -> Vec<&'static str> {
 }
 
 /// 曜日表現を mon..sun の正規形へ。空指定や「毎日」は空ベクタ（=毎日）。
-pub fn normalize_days(input: &[String]) -> Vec<String> {
+///
+/// **解釈できない曜日が混じっていたらエラーにする。** 以前は黙って捨てており、
+/// 指定がすべて未知語（`"Mon."` や全角の揺れなど）だと結果が空になり、
+/// 空＝毎日の規則に吸い込まれて**「月曜だけ」の依頼が毎日鳴る**状態になっていた。
+/// 落とすなら気づける形で落とす。
+pub fn normalize_days(input: &[String]) -> Result<Vec<String>, String> {
     let mut set: Vec<&'static str> = Vec::new();
     let mut everyday = false;
+    let mut unknown: Vec<String> = Vec::new();
     for raw in input {
+        if raw.trim().is_empty() {
+            continue;
+        }
         let codes = day_codes(raw);
+        if codes.is_empty() {
+            unknown.push(raw.trim().to_string());
+            continue;
+        }
         if codes.len() == 7 {
             everyday = true;
         }
@@ -90,14 +103,20 @@ pub fn normalize_days(input: &[String]) -> Vec<String> {
             }
         }
     }
-    if everyday {
-        return Vec::new();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "曜日を解釈できません: {}\n             「月」「月曜」「mon」「平日」「週末」「毎日」のように指定してください。",
+            unknown.join("、")
+        ));
     }
-    WEEKDAYS
+    if everyday {
+        return Ok(Vec::new());
+    }
+    Ok(WEEKDAYS
         .iter()
         .filter(|d| set.contains(d))
         .map(|d| d.to_string())
-        .collect()
+        .collect())
 }
 
 /// "H:MM" / "HH:MM" を "HH:MM" へ正規化（範囲外は None）。
@@ -147,15 +166,29 @@ mod tests {
         assert_eq!(normalize_time("おはよう"), None);
     }
 
+    /// 解釈できない曜日を黙って捨てると、空＝毎日の規則に吸い込まれて
+    /// 「月曜だけ」の依頼が毎日鳴る。落とすなら気づける形で落とす。
+    #[test]
+    fn 解釈できない曜日は毎日へ吸い込まれない() {
+        let error = normalize_days(&["Mon.".to_string()]).expect_err("未知語を通した");
+        assert!(error.contains("Mon."), "error: {error}");
+        let error = normalize_days(&["月".to_string(), "げつよう".to_string()])
+            .expect_err("一部でも未知語なら断る");
+        assert!(error.contains("げつよう"), "error: {error}");
+        // 指定なしは従来どおり毎日。
+        assert!(normalize_days(&[]).unwrap().is_empty());
+        assert!(normalize_days(&["".to_string()]).unwrap().is_empty());
+    }
+
     #[test]
     fn 曜日を正規化する() {
         assert_eq!(
-            normalize_days(&["平日".to_string()]),
+            normalize_days(&["平日".to_string()]).unwrap(),
             vec!["mon", "tue", "wed", "thu", "fri"]
         );
-        assert!(normalize_days(&["毎日".to_string()]).is_empty());
+        assert!(normalize_days(&["毎日".to_string()]).unwrap().is_empty());
         assert_eq!(
-            normalize_days(&["日".to_string(), "土".to_string()]),
+            normalize_days(&["日".to_string(), "土".to_string()]).unwrap(),
             vec!["sat", "sun"]
         );
         assert_eq!(
@@ -189,5 +222,28 @@ mod tests {
         assert!(load(&cfg).unwrap().is_empty());
         cfg.set(CONFIG_KEY, "[]");
         assert!(load(&cfg).unwrap().is_empty());
+    }
+}
+
+/// 設計ガード: 曜日・時刻の語彙をこのファイル以外へ写さないこと。
+///
+/// `scheduler.rs` が `day_codes` / `normalize_days` / `normalize_time` / `days_label`
+/// を丸ごと写しており、`days_label` は既に書き方が分かれていた（出力は同じだが、
+/// 片方だけ直せば静かにずれる状態）。曜日の解釈は目覚ましと予約実行の両方が
+/// 依存するので、定義元を1つに保つ。
+#[cfg(test)]
+mod guard {
+    #[test]
+    fn 曜日語彙の写しを増やさない() {
+        let violations: Vec<String> = crate::guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| source.name != "alarm.rs")
+            .filter(|source| source.body().contains("\"everyday\" | \"daily\" | \"all\""))
+            .map(|source| source.path.display().to_string())
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "曜日の解釈は alarm::day_codes（および normalize_days）を使ってください: {violations:?}"
+        );
     }
 }

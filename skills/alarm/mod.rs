@@ -150,7 +150,10 @@ impl Tool for AlarmTool {
                 let Some(time) = alarm::normalize_time(&str_arg(&args, "time")) else {
                     return "エラー: 時刻は HH:MM（24時間表記）で指定してください。".to_string();
                 };
-                let days = alarm::normalize_days(&days_arg(&args));
+                let days = match alarm::normalize_days(&days_arg(&args)) {
+                    Ok(days) => days,
+                    Err(error) => return format!("エラー: {error}"),
+                };
                 let repeat = args.get("repeat").and_then(Value::as_bool).unwrap_or(true);
                 let snooze_minutes = args
                     .get("snooze_minutes")
