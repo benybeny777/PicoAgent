@@ -21,6 +21,8 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon", "protocol
 tauri-plugin-dialog = "2"
 # 他のアプリの裏に居ても呼び出すためのグローバルホットキー（Rust API のみ利用。hotkey.rs）。
 tauri-plugin-global-shortcut = "2"
+# 多重起動の防止。2つ目の起動は既存ウィンドウを前面へ出して終了する。
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
