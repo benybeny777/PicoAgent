@@ -44,6 +44,7 @@ mod tools;
 mod tracer;
 mod usage;
 mod user_characters;
+mod window_surface;
 
 use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
 
@@ -55,6 +56,19 @@ use engine::EngineState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // 多重起動を防ぐ。`store::lock_state` はプロセス内 Mutex なので、2つ目の
+        // インスタンスが動くと設定・記憶・使用量・実行履歴を「全体を読んで全体を
+        // 書き戻す」際に、片方の保存がもう片方の古いスナップショットで丸ごと
+        // 上書きされる（＝利用者のデータが黙って消える）。スケジュールの二重実行や
+        // エンジン・ローカルAPIのポート衝突も起きるため、入口で1つに絞る。
+        // 2つ目の起動は、既にいるウィンドウを前面へ出して自分は終了する。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            crate::log_paths::append_app_log(
+                app,
+                "PicoAgent は既に起動しています。既存のウィンドウを前面へ出しました。",
+            );
+            crate::window_surface::surface_main_window(app);
+        }))
         // キャラクターパックを選ぶネイティブダイアログ（Rust 側だけで使う）。
         .plugin(tauri_plugin_dialog::init())
         // グローバルホットキー（他のアプリの裏に居ても呼び出せるようにする）。

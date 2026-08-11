@@ -41,6 +41,7 @@
   - 子プロセスは終了時に `kill` し、`wait` でハンドルまで回収する（ゾンビ・ハンドルリークを残さない）。
   - `reqwest` の `is_up` などプローブ系には `timeout` を付ける（接続が永久に滞留しないようにする）。長時間ストリーミング（モデル DL・生成）は全体 timeout を付けない代わりに接続自体の滞留に注意する。
   - フロントの `URL.createObjectURL` は再生終了・失敗・中断で必ず `revokeObjectURL` する。`setInterval` 等のタイマーは全経路で `clearInterval` する。
+- **PicoAgent は同時に1つしか動かさない**（`tauri-plugin-single-instance`）。`store::lock_state` はプロセス内 Mutex でプロセスをまたぐと効かず、設定・記憶・使用量・実行履歴・会話履歴はどれも「全体を読んで全体を書き戻す」ため、2つ目のインスタンスがあると片方の保存が古いスナップショットで丸ごと上書きされる（＝利用者のデータが黙って消える）。2つ目の起動は既存ウィンドウを前面へ出して終了する。**この前提を外す変更（複数ウィンドウ・複数プロセス）をするなら、状態ファイルのプロセス間排他を先に用意すること。**
 - ユーザーから明示指示がない限り、同梱実行ファイル・同梱モデル・同梱ランタイムは PicoAgent 管理下の専用ディレクトリ（原則 `src-tauri/resources/bundled/<機能名>/`、実行時データは `app_data_dir` 配下）に設置し、既存の手動インストール先・グローバルPATH・共有ポートを既定で使わない。手動インストールを使う場合は設定で明示されたときだけ優先し、同梱物のアンインストール・一時ファイル削除は PicoAgent 管理下のパスだけを対象にする。
 
 ## 設定値・シークレット
@@ -107,6 +108,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
 | `crates/picoagent-core/` | **OSS化準備中の再利用コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。公開準備が整うまでは `publish = false` を保つ |
 | `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで8形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
+| `src-tauri/src/window_surface.rs` | メインウィンドウを利用者の目の前へ出す共通手順（表示 → 最小化解除 → 前面化）。ホットキー呼び出しと、多重起動時に2つ目の起動が既存ウィンドウを前面化する経路が共有する |
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
 | `src-tauri/src/secret.rs` | シークレット（`password` 型設定）の DPAPI 暗号化／復号（Windows）。非 Windows は平文 |
 | `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |

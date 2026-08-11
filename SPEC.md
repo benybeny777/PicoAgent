@@ -282,6 +282,12 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - **プロジェクト管理は `project` 1本に統合してある。** 以前は「ワークスペース（環境の名前付きセット）」と「課題・記録」が別スキルだったが、ユーザーから見ればどちらも同じ「いま取り組んでいる案件」で、名前も概念も二重だった。1つの `Project` レコードが環境（許可ルート・追加許可パス・AI・モデル・キャラクター）と課題・記録を持ち、`switch` すれば全部が一緒に切り替わる。`todo_plan`（1本の作業計画）とは別物で、あちらは「いま取りかかっている手順」、`project` の課題は「残っている案件のやること」を持つ。
 - `ask_user` は「聞かないとやり直しになる」場面専用で、既定値で進める・調べれば分かることには使わない。候補ツールの圧縮（最大12件）に載るのはキーワードルーティング経由なので、曖昧な依頼で必ず提示されるとは限らない。
 
+### 多重起動の防止
+
+**PicoAgent は同時に1つしか動かさない**（`tauri-plugin-single-instance`）。2つ目の起動は、既に動いているウィンドウを「表示 → 最小化解除 → 前面化」して自分は終了する（`window_surface::surface_main_window`。ホットキー呼び出しと同じ手順）。
+
+理由は利用者データの保護。`store::lock_state` は**プロセス内 Mutex** なのでプロセスをまたぐと効かず、`config.json` / `memory.json` / `usage.json` / `schedule-runs.json` / `history-<キャラID>.json` はいずれも「全体を読んで全体を書き戻す」ため、片方の保存がもう片方の古いスナップショットで丸ごと上書きされる。原子的書き込み・破損退避・ロックで守ってきたものが、プロセス境界で崩れる。あわせてスケジュールの二重実行、同梱エンジンとローカルAPIのポート衝突も防ぐ。
+
 ### キャラクターの追加（ユーザー導入）
 
 同梱キャラクターは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれるため、実行時には増減できない。**自分で追加した Live2D モデル等は `app_data_dir/characters/<id>/` に置く**（`user_characters.rs`）。webview へは asset プロトコル（`convertFileSrc`）で読ませるので、`tauri.conf.json` の `app.security.assetProtocol.scope` を `$APPDATA/characters/**` に限定し、CSP へ `asset:` / `http://asset.localhost` を足してある（`tauri` の `protocol-asset` フィーチャが必要）。
