@@ -85,11 +85,20 @@ pub fn start(app: tauri::AppHandle) {
                     handle_connection(&app, stream),
                 )
                 .await;
-                if let Ok(Err(error)) = result {
-                    crate::log_paths::append_app_log(
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => crate::log_paths::append_app_log(
                         &app,
                         &format!("ローカルAPIのリクエスト処理に失敗しました: {error}"),
-                    );
+                    ),
+                    // 打ち切りだけ記録が無いと、応答が返らない相談を受けたときに
+                    // 「そもそも届いていない」のか「時間切れで切った」のか分からない。
+                    Err(_) => crate::log_paths::append_app_log(
+                        &app,
+                        &format!(
+                            "ローカルAPIのリクエストが {REQUEST_TIMEOUT_SECS} 秒で時間切れになり接続を切りました"
+                        ),
+                    ),
                 }
             });
         }
