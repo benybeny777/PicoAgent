@@ -885,7 +885,6 @@ mod tests {
         assert!(normalize_days(&["毎日".to_string()]).is_empty());
     }
 
-    #[test]
     /// 保存できたのに一度も発火しない予約を作らせないこと。
     #[test]
     fn 照合できないcronは保存前に断る() {
