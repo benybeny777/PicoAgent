@@ -70,7 +70,17 @@ impl Config {
             if let Some(s) = v.as_str() {
                 if !s.is_empty() {
                     // シークレットは暗号化保存されているため、読み取り時に復号する（非暗号値は素通り）。
-                    return crate::secret::decrypt(s);
+                    let decrypted = crate::secret::decrypt(s);
+                    // 復号できないまま暗号文が残るのは、別PC・別Windowsユーザーの
+                    // `config.json` を持ち込んだ場合。以前はその暗号文をそのまま
+                    // APIキーとして外部サービスへ送っており、返ってくるのは 401 で、
+                    // 利用者には原因が分からなかった。**この端末では使えない値**なので
+                    // 未設定として扱い、各プロバイダの「設定画面で入力してください」
+                    // という案内へ乗せる。保存値自体は上書きしない。
+                    if crate::secret::is_encrypted(&decrypted) {
+                        return fallback.to_string();
+                    }
+                    return decrypted;
                 }
             } else if !v.is_null() {
                 return v.to_string();
@@ -180,6 +190,20 @@ impl Default for Config {
 
 #[cfg(test)]
 mod tests {
+    /// 別PC・別Windowsユーザーの config.json を持ち込むと復号できない。
+    /// その暗号文をAPIキーとして外部へ送ると 401 が返るだけで原因が分からないので、
+    /// 未設定として扱い各プロバイダの設定案内へ乗せる。
+    #[test]
+    fn 復号できない暗号文は未設定として扱う() {
+        let cfg = super::Config::new();
+        cfg.set("PICOAGENT_TEST_SECRET", "enc:dpapi:v1:こわれたデータ");
+        assert_eq!(cfg.get("PICOAGENT_TEST_SECRET", ""), "");
+        assert_eq!(cfg.get("PICOAGENT_TEST_SECRET", "既定値"), "既定値");
+        // 平文はそのまま読める。
+        cfg.set("PICOAGENT_TEST_SECRET", "sk-plain");
+        assert_eq!(cfg.get("PICOAGENT_TEST_SECRET", ""), "sk-plain");
+    }
+
     use super::Config;
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
