@@ -20,6 +20,11 @@ const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
 const MAX_RUN_HISTORY: usize = 100;
 
+// 曜日・時刻の語彙と正規化は `alarm` が唯一の定義元。以前はこのファイルへ
+// 丸ごと写されており、`days_label` は既に書き方が分かれていた（挙動は同じだが、
+// 片方だけ直せば静かにずれる状態だった）。
+pub use crate::alarm::{days_label, normalize_days, normalize_time};
+
 fn default_true() -> bool {
     true
 }
@@ -77,8 +82,6 @@ pub struct ScheduledRunRecord {
     pub body: String,
 }
 
-const WEEKDAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-
 // 実行の許可ルートは全スキル共通の permissions を参照する。
 fn command_root(cfg: &Config) -> PathBuf {
     crate::permissions::primary_root(cfg)
@@ -98,78 +101,6 @@ pub fn new_id() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("st{nanos}")
-}
-
-fn day_codes(token: &str) -> Vec<&'static str> {
-    match token.trim().to_lowercase().as_str() {
-        "everyday" | "daily" | "all" | "毎日" | "まいにち" => WEEKDAYS.to_vec(),
-        "weekday" | "weekdays" | "平日" => vec!["mon", "tue", "wed", "thu", "fri"],
-        "weekend" | "weekends" | "週末" => vec!["sat", "sun"],
-        "mon" | "monday" | "月" | "月曜" | "月曜日" => vec!["mon"],
-        "tue" | "tuesday" | "火" | "火曜" | "火曜日" => vec!["tue"],
-        "wed" | "wednesday" | "水" | "水曜" | "水曜日" => vec!["wed"],
-        "thu" | "thursday" | "木" | "木曜" | "木曜日" => vec!["thu"],
-        "fri" | "friday" | "金" | "金曜" | "金曜日" => vec!["fri"],
-        "sat" | "saturday" | "土" | "土曜" | "土曜日" => vec!["sat"],
-        "sun" | "sunday" | "日" | "日曜" | "日曜日" => vec!["sun"],
-        _ => vec![],
-    }
-}
-
-pub fn normalize_days(input: &[String]) -> Vec<String> {
-    let mut set: Vec<&'static str> = Vec::new();
-    let mut everyday = false;
-    for raw in input {
-        let codes = day_codes(raw);
-        if codes.len() == 7 {
-            everyday = true;
-        }
-        for code in codes {
-            if !set.contains(&code) {
-                set.push(code);
-            }
-        }
-    }
-    if everyday {
-        return Vec::new();
-    }
-    WEEKDAYS
-        .iter()
-        .filter(|d| set.contains(d))
-        .map(|d| d.to_string())
-        .collect()
-}
-
-pub fn normalize_time(input: &str) -> Option<String> {
-    let (h, m) = input.trim().split_once(':')?;
-    let hour: u32 = h.trim().parse().ok()?;
-    let minute: u32 = m.trim().parse().ok()?;
-    if hour > 23 || minute > 59 {
-        return None;
-    }
-    Some(format!("{hour:02}:{minute:02}"))
-}
-
-pub fn days_label(days: &[String]) -> String {
-    if days.is_empty() {
-        return "毎日".to_string();
-    }
-    let jp = |code: &str| match code {
-        "mon" => "月",
-        "tue" => "火",
-        "wed" => "水",
-        "thu" => "木",
-        "fri" => "金",
-        "sat" => "土",
-        "sun" => "日",
-        _ => "?",
-    };
-    WEEKDAYS
-        .iter()
-        .filter(|d| days.iter().any(|x| x == *d))
-        .map(|d| jp(d))
-        .collect::<Vec<_>>()
-        .join("・")
 }
 
 /// 保存済みのスケジュール一覧を読む。壊れていた場合は空一覧にせずエラーを返す
@@ -600,10 +531,49 @@ fn cron_weekday_value() -> u32 {
     Local::now().weekday().num_days_from_sunday()
 }
 
+/// `parse_cron_value` が理解できる字句かどうか。検証と照合で同じ文法を使う。
+fn cron_token_valid(part: &str, min: u32, max: u32) -> bool {
+    !part.trim().is_empty()
+        && part.split(',').all(|raw| {
+            let token = raw.trim();
+            if token == "*" {
+                return true;
+            }
+            if let Some(step) = token.strip_prefix("*/") {
+                return step
+                    .parse::<u32>()
+                    .is_ok_and(|step| step > 0 && step <= max);
+            }
+            token
+                .parse::<u32>()
+                .is_ok_and(|value| value >= min && value <= max)
+        })
+}
+
+/// 保存前に、照合器が実際に解釈できる書式かまで確かめる。
+///
+/// 以前はフィールド数しか見ておらず、`1-5`（本物のcronにはある範囲指定）や `99`、
+/// 綴り誤りをそのまま保存できた。`matches_cron` はそれらに一致しないため、
+/// **登録は成功したように見えて予約が二度と発火しない**。無言で動かないのは、
+/// エラーで断られるより悪い。
 fn validate_cron(cron: &str) -> Result<(), String> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
     if parts.len() != 5 {
         return Err("cron は「分 時 日 月 曜日」の5フィールドで指定してください。".to_string());
+    }
+    for (part, (label, min, max)) in parts.iter().zip([
+        ("分", 0, 59),
+        ("時", 0, 23),
+        ("日", 1, 31),
+        ("月", 1, 12),
+        ("曜日", 0, 6),
+    ]) {
+        if !cron_token_valid(part, min, max) {
+            return Err(format!(
+                "cron の「{label}」が解釈できません: {part}\n                 使えるのは `*`、数値（{min}〜{max}）、カンマ区切り、`*/N` です。\
+                 `1-5` のような範囲指定には対応していないので `1,2,3,4,5` と書いてください。"
+            ));
+        }
     }
     Ok(())
 }
@@ -840,10 +810,28 @@ mod tests {
         assert_eq!(normalize_time("7:05").as_deref(), Some("07:05"));
         assert_eq!(normalize_time("24:00"), None);
         assert_eq!(
-            normalize_days(&["平日".to_string()]),
+            normalize_days(&["平日".to_string()]).unwrap(),
             vec!["mon", "tue", "wed", "thu", "fri"]
         );
-        assert!(normalize_days(&["毎日".to_string()]).is_empty());
+        assert!(normalize_days(&["毎日".to_string()]).unwrap().is_empty());
+    }
+
+    /// 保存できたのに一度も発火しない予約を作らせないこと。
+    #[test]
+    fn 照合できないcronは保存前に断る() {
+        assert!(super::validate_cron("*/5 * * * *").is_ok());
+        assert!(super::validate_cron("0,30 9 * * 1").is_ok());
+        assert!(super::validate_cron("* * * * *").is_ok());
+        // 本物のcronにはある範囲指定。照合器は解釈しないので保存させない。
+        let error = super::validate_cron("1-5 * * * *").expect_err("範囲指定を通した");
+        assert!(error.contains("範囲指定"), "error: {error}");
+        // 値域外・綴り誤り・空フィールドも、無言で不発になる前に断る。
+        assert!(super::validate_cron("99 * * * *").is_err());
+        assert!(super::validate_cron("* 25 * * *").is_err());
+        assert!(super::validate_cron("* * * * 9").is_err());
+        assert!(super::validate_cron("abc * * * *").is_err());
+        assert!(super::validate_cron("*/0 * * * *").is_err());
+        assert!(super::validate_cron("* * * *").is_err());
     }
 
     #[test]

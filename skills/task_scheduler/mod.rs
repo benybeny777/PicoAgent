@@ -96,12 +96,16 @@ fn build_task(cfg: &Config, args: &Value) -> Result<ScheduledTask, String> {
         .cloned()
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
+    let days = match scheduler::normalize_days(&string_array_arg(args, "days")) {
+        Ok(days) => days,
+        Err(error) => return Err(format!("エラー: {error}")),
+    };
     let task = ScheduledTask {
         id: scheduler::new_id(),
         kind,
         time,
         cron,
-        days: scheduler::normalize_days(&string_array_arg(args, "days")),
+        days,
         date: str_arg(args, "date"),
         repeat,
         label: str_arg(args, "label"),
