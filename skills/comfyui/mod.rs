@@ -343,11 +343,11 @@ impl Tool for ComfyuiTool {
 
         let mut view_url = format!(
             "{base_url}/view?filename={}&type={}",
-            urlenccode(&filename),
-            urlenccode(&file_type)
+            percent_encode_component(&filename),
+            percent_encode_component(&file_type)
         );
         if !subfolder.is_empty() {
-            view_url.push_str(&format!("&subfolder={}", urlenccode(&subfolder)));
+            view_url.push_str(&format!("&subfolder={}", percent_encode_component(&subfolder)));
         }
 
         let alt: String = prompt.chars().take(40).collect();
@@ -377,7 +377,11 @@ fn rand_seed() -> i64 {
     (d.as_secs().wrapping_mul(1_000_000_007) ^ d.subsec_nanos() as u64) as i64
 }
 
-fn urlenccode(s: &str) -> String {
+/// クエリ値をRFC3986の非予約文字だけ残して百分率符号化する。
+///
+/// `productivity_tools::url_encode` は利用者向け機能の form-urlencoded（空白が `+`）で
+/// 用途が違うため共有しない。
+fn percent_encode_component(s: &str) -> String {
     s.chars()
         .flat_map(|c| {
             if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
