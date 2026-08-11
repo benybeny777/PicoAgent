@@ -6,6 +6,8 @@
 
 ## 現在の作業
 
+2026-08-11にコード、設定、配布UI、キャラクター表示、Live2D、販売ゲート、依存、GitHub状態を全体監査した。RustSec監査で `quick-xml` 旧版4系統の高重要度DoS脆弱性8件を検出し、`calamine` / `feed-rs` / `plist` / `xcb` を更新して `quick-xml 0.41.0` へ統一、`anyhow` の不健全性も修正版へ更新した。3つのlockfileをpush・PR・毎週監査するCIを追加した。監査後は既知脆弱性0件で、Linux専用GTK3経路等の情報警告だけが残る。
+
 2026-08-11にさらに10巡点検し、アプリ更新で維持されるデータの画面案内と二段階確認、キャラ切替キューのロック・失敗回復・フォーカス復元、追加キャラ削除後のキャッシュ破棄順序、追加機能の操作成功と一覧再取得失敗の区別、Tauriイベント失敗ログ、終了時リソース解放を修正した。配布UI回帰では、更新案内、モデル一覧の再読込表記、未保存で選んだ追加キャラの削除後にひより・既定人格・保存済みへ戻ること、狭幅表示、コンソールエラー0件を確認した。
 
 2026-08-10に前回収束後から観点を変えてさらに10巡点検した。追加キャラ削除と未保存選択の競合、キャラ切替キューと人格表示の不一致、既定人格の不要な上書き保存、Tauriイベント解除関数の喪失、進捗再購読の競合、確認待ちと遅延表示の残留を修正した。実画面では「未保存で追加キャラを選択→削除」を再現し、保存中のひよりへ選択・人格とも戻り、保存済み表示、ロック解除、コンソール警告0件を確認した。
@@ -63,6 +65,9 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
 cargo run --manifest-path xtask/Cargo.toml -- build-ui --release
 cargo run --manifest-path xtask/Cargo.toml -- release-check  # 販売前ブロッカー4件を正しく検出
+cargo audit --file src-tauri/Cargo.lock              # 既知脆弱性0件（情報警告は別途評価）
+cargo audit --file xtask/Cargo.lock
+cargo audit --file crates/picoagent-core/Cargo.lock
 git ls-files '*.js' '*.mjs' | ForEach-Object { node --check $_ }
 git diff --check
 ```
