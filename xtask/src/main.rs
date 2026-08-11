@@ -243,4 +243,32 @@ mod tests {
             "docs/SALES.md のスキル数が実装（{skill_count}種）と一致しません"
         );
     }
+
+    /// 販売資料が挙げる自前キャラが、実際の同梱対象と食い違わないこと。
+    ///
+    /// スキル数と同じ形のずれが実際に起きた（3体と書いたまま6体へ増えていた）。
+    /// キャラは商品の中身そのものなので、増減したら販売資料も必ず直す。
+    #[test]
+    fn 販売資料の自前キャラが同梱対象と一致する() {
+        let root = super::repo_root();
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("distribution/release.json")).unwrap(),
+        )
+        .unwrap();
+        let included: Vec<String> = manifest["includedCharacters"]
+            .as_array()
+            .expect("includedCharacters が配列でない")
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect();
+        let sales = std::fs::read_to_string(root.join("docs/SALES.md")).unwrap();
+        let missing: Vec<&String> = included
+            .iter()
+            .filter(|id| !sales.contains(id.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "docs/SALES.md が同梱キャラを挙げていません: {missing:?}"
+        );
+    }
 }
