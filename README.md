@@ -195,7 +195,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
     <tr>
       <td align="center"><img src="docs/images/layout-shot-bar.webp" alt="バー表示" width="230" /><br /><b>バー</b><br /><sub>1 行入力。呼んで消す</sub></td>
       <td align="center"><img src="docs/images/layout-shot-workspace.webp" alt="作業表示" width="230" /><br /><b>作業</b><br /><sub>履歴・回答・実行状況の 3 ペイン</sub></td>
-      <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>キャラを大きく＋字幕テロップ</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>上半身を大きく＋字幕テロップ</sub></td>
       <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
     </tr>
   </table>
