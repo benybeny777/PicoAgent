@@ -600,10 +600,49 @@ fn cron_weekday_value() -> u32 {
     Local::now().weekday().num_days_from_sunday()
 }
 
+/// `parse_cron_value` が理解できる字句かどうか。検証と照合で同じ文法を使う。
+fn cron_token_valid(part: &str, min: u32, max: u32) -> bool {
+    !part.trim().is_empty()
+        && part.split(',').all(|raw| {
+            let token = raw.trim();
+            if token == "*" {
+                return true;
+            }
+            if let Some(step) = token.strip_prefix("*/") {
+                return step
+                    .parse::<u32>()
+                    .is_ok_and(|step| step > 0 && step <= max);
+            }
+            token
+                .parse::<u32>()
+                .is_ok_and(|value| value >= min && value <= max)
+        })
+}
+
+/// 保存前に、照合器が実際に解釈できる書式かまで確かめる。
+///
+/// 以前はフィールド数しか見ておらず、`1-5`（本物のcronにはある範囲指定）や `99`、
+/// 綴り誤りをそのまま保存できた。`matches_cron` はそれらに一致しないため、
+/// **登録は成功したように見えて予約が二度と発火しない**。無言で動かないのは、
+/// エラーで断られるより悪い。
 fn validate_cron(cron: &str) -> Result<(), String> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
     if parts.len() != 5 {
         return Err("cron は「分 時 日 月 曜日」の5フィールドで指定してください。".to_string());
+    }
+    for (part, (label, min, max)) in parts.iter().zip([
+        ("分", 0, 59),
+        ("時", 0, 23),
+        ("日", 1, 31),
+        ("月", 1, 12),
+        ("曜日", 0, 6),
+    ]) {
+        if !cron_token_valid(part, min, max) {
+            return Err(format!(
+                "cron の「{label}」が解釈できません: {part}\n                 使えるのは `*`、数値（{min}〜{max}）、カンマ区切り、`*/N` です。\
+                 `1-5` のような範囲指定には対応していないので `1,2,3,4,5` と書いてください。"
+            ));
+        }
     }
     Ok(())
 }
@@ -844,6 +883,25 @@ mod tests {
             vec!["mon", "tue", "wed", "thu", "fri"]
         );
         assert!(normalize_days(&["毎日".to_string()]).is_empty());
+    }
+
+    #[test]
+    /// 保存できたのに一度も発火しない予約を作らせないこと。
+    #[test]
+    fn 照合できないcronは保存前に断る() {
+        assert!(super::validate_cron("*/5 * * * *").is_ok());
+        assert!(super::validate_cron("0,30 9 * * 1").is_ok());
+        assert!(super::validate_cron("* * * * *").is_ok());
+        // 本物のcronにはある範囲指定。照合器は解釈しないので保存させない。
+        let error = super::validate_cron("1-5 * * * *").expect_err("範囲指定を通した");
+        assert!(error.contains("範囲指定"), "error: {error}");
+        // 値域外・綴り誤り・空フィールドも、無言で不発になる前に断る。
+        assert!(super::validate_cron("99 * * * *").is_err());
+        assert!(super::validate_cron("* 25 * * *").is_err());
+        assert!(super::validate_cron("* * * * 9").is_err());
+        assert!(super::validate_cron("abc * * * *").is_err());
+        assert!(super::validate_cron("*/0 * * * *").is_err());
+        assert!(super::validate_cron("* * * *").is_err());
     }
 
     #[test]
