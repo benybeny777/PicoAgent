@@ -708,7 +708,7 @@ CSP の `script-src` は `'self' 'unsafe-eval' 'wasm-unsafe-eval'` とする。*
 JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 
 - **サーバ側（スキルの公開）**: `POST /mcp` が `initialize` / `tools/list` / `tools/call` / `ping` に応答し、`agent_callable` なスキルを MCP ツールとして公開する。**公開していないスキル（アプリが内部で使うもの）は `tools/call` でも実行を拒否する**（一覧に出す面と実行できる面をずらさない）。スキルは失敗も文字列で返す設計のため、「エラー」始まりの結果を `isError: true` へ写像する。通知（id なし）には本文なしの 202 を返す。Claude Code からは `claude mcp add --transport http picoagent http://127.0.0.1:11500/mcp` で登録できる。
-- **クライアント側（外部ツールの取り込み）**: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動時に spawn し、`initialize` → `tools/list` の結果を `mcp__<サーバ名>__<ツール名>` として動的登録する。`tools::schemas_for_text` が候補へ加え、`tools::dispatch` が `mcp__` 接頭辞をクライアントへフォールバックして `tools/call` へ中継する。tokio の `read_line` はキャンセル安全でないため、タイムアウト・I/O 失敗後はその接続を切断して再利用しない。終了時（`RunEvent::Exit`）に全子プロセスを停止する。
+- **クライアント側（外部ツールの取り込み）**: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動時に spawn し、`initialize` → `tools/list` の結果を `mcp__<サーバ名>__<ツール名>` として動的登録する。`tools::schemas_for_text` が候補へ加え、`tools::dispatch` が `mcp__` 接頭辞をクライアントへフォールバックして `tools/call` へ中継する。応答の読み取りは**1行8MBで打ち切る**（`read_line` に上限が無く、改行を出さないサーバに付き合ってメモリを伸ばし続けるため。他の外部入力と同じく必ず上限を持たせる）。tokio の `read_line` はキャンセル安全でないため、タイムアウト・I/O 失敗後はその接続を切断して再利用しない。終了時（`RunEvent::Exit`）に全子プロセスを停止する。
 
 ---
 

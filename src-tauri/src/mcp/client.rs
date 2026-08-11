@@ -32,11 +32,65 @@ pub struct McpToolInfo {
     pub input_schema: Value,
 }
 
+/// MCP サーバの1行あたりの受信上限。
+///
+/// `read_line` には長さの上限が無く、改行を出さずに送り続けるサーバがいると
+/// 応答待ちのタイムアウトが切れるまでメモリを伸ばし続ける。外部から来る入力は
+/// 他の経路（更新フィード256KB、ローカルAPIボディ1MB、コマンド出力16KB）と同じく
+/// 必ず上限を持たせる。ツール結果を運ぶので、それらより緩めに取る。
+const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
+
 struct Connection {
     child: Child,
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
     next_id: u64,
+}
+
+/// 改行までを上限付きで読む。`None` は相手が終了したことを表す。
+///
+/// `read_line` は上限を持たないため、改行を出さないサーバに付き合ってメモリを
+/// 伸ばし続けてしまう。ここで打ち切り、接続は呼び出し元が破棄する。
+async fn read_line_limited<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> Result<Option<String>, String> {
+    let mut bytes: Vec<u8> = Vec::new();
+    loop {
+        let (chunk, used, finished) = {
+            let available = reader
+                .fill_buf()
+                .await
+                .map_err(|error| format!("MCP サーバからの読み取りに失敗: {error}"))?;
+            if available.is_empty() {
+                (Vec::new(), 0, true)
+            } else {
+                match available.iter().position(|byte| *byte == b'\n') {
+                    Some(position) => (available[..position].to_vec(), position + 1, true),
+                    None => (available.to_vec(), available.len(), false),
+                }
+            }
+        };
+        reader.consume(used);
+        if used == 0 && finished {
+            return Ok(if bytes.is_empty() {
+                None
+            } else {
+                Some(String::from_utf8_lossy(&bytes).into_owned())
+            });
+        }
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(format!(
+                "MCP サーバの応答が1行 {max_bytes} バイトを超えました。接続を切ります。"
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+        if finished {
+            // 行はここで完結している。JSON-RPC はUTF-8だが、サーバのログ行が
+            // 混ざることもあるので不正バイトは置換して読み飛ばし判定へ回す。
+            return Ok(Some(String::from_utf8_lossy(&bytes).into_owned()));
+        }
+    }
 }
 
 fn tools_registry() -> &'static RwLock<Vec<McpToolInfo>> {
@@ -52,21 +106,20 @@ fn connections() -> &'static RwLock<HashMap<String, Arc<Mutex<Connection>>>> {
 
 impl Connection {
     /// JSON-RPC リクエストを送り、同じ id の応答が返るまで読む（改行区切り JSON）。
+    /// 改行までを上限付きで読む。`None` は相手が終了したことを表す。
+    async fn read_line_limited(&mut self) -> Result<Option<String>, String> {
+        read_line_limited(&mut self.reader, MAX_LINE_BYTES).await
+    }
+
     async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id += 1;
         let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         self.write_line(&message).await?;
         loop {
-            let mut line = String::new();
-            let n = self
-                .reader
-                .read_line(&mut line)
-                .await
-                .map_err(|error| format!("MCP サーバからの読み取りに失敗: {error}"))?;
-            if n == 0 {
+            let Some(line) = self.read_line_limited().await? else {
                 return Err("MCP サーバが終了しました".to_string());
-            }
+            };
             let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
                 continue; // JSON でない行（サーバのログ等）は読み飛ばす
             };
@@ -359,6 +412,38 @@ pub async fn dispatch(full_name: &str, args: Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// 上限が無いと、改行を出さないサーバに付き合ってメモリを伸ばし続ける。
+    #[test]
+    fn 上限を超える行は読み切らずに断る() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            // 改行あり: そのまま1行として返す。
+            let mut reader = tokio::io::BufReader::new(&b"{\"id\":1}\nrest"[..]);
+            let line = super::read_line_limited(&mut reader, 64).await.unwrap();
+            assert_eq!(line.as_deref(), Some("{\"id\":1}"));
+
+            // 改行なしで上限超え: エラーで打ち切る。
+            let huge = [b'x'; 200];
+            let mut reader = tokio::io::BufReader::new(&huge[..]);
+            let error = super::read_line_limited(&mut reader, 64)
+                .await
+                .expect_err("上限を超えた行を通した");
+            assert!(error.contains("64 バイトを超えました"), "error: {error}");
+
+            // 相手が何も出さずに終了: None（終了として扱う）。
+            let mut reader = tokio::io::BufReader::new(&b""[..]);
+            assert!(super::read_line_limited(&mut reader, 64)
+                .await
+                .unwrap()
+                .is_none());
+
+            // 改行なしで終了した最終行も読み落とさない。
+            let mut reader = tokio::io::BufReader::new(&b"tail"[..]);
+            let line = super::read_line_limited(&mut reader, 64).await.unwrap();
+            assert_eq!(line.as_deref(), Some("tail"));
+        });
+    }
+
     use super::{connect, dispatch, is_mcp_tool, parse_server_lines, schemas};
     use serde_json::json;
 
