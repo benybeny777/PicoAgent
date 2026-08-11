@@ -28,6 +28,8 @@ characters/<id>/
 `animations/` 配下は `scripts/build-character-animations.py` で生成する。手で直接直さない。
 `source.png` などの元画像は任意の制作素材。実行時に使わないPSD・確認用シート・生成途中画像は、必要がなくなったらリポジトリへ残さない。
 
+`koharu` / `sena` / `noa` はLive2DやTHA3を使わない1枚絵の通常2Dパックで、`preview.png` を各状態から共有参照する。`secondaryMotion` の `type=bust` と胸元の中心・範囲・強さ・周期を指定すると、全身の呼吸とは別に羽根付きマスク内だけへ遅れた二次動作を付けられる。矩形レイヤーや色面を合成せず、透明輪郭は元PNGのまま維持する。
+
 ## 画像作成ルール
 
 - `preview.png`、`layers/*.png` は同じキャンバスサイズ、同じ全身位置にする。

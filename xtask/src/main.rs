@@ -205,7 +205,7 @@ mod tests {
             .is_none());
         assert_eq!(
             super::product_characters_for_build(true).unwrap().unwrap(),
-            ["mugi", "rin", "mai"]
+            ["mugi", "rin", "mai", "koharu", "sena", "noa"]
         );
     }
 

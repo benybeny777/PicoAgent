@@ -279,14 +279,17 @@ const MATRIX_LAYOUTS = {
   bar: [900, 320], workspace: [1400, 850], stream: [1560, 920], widget: [440, 600],
 };
 
-// 4体のPNGキャラを全8形式で描画し、表示欠けと初期表示時間を一括検査する。
+// 検証対象のPNGキャラを全8形式で描画し、表示欠けと初期表示時間を一括検査する。
 async function shootCharacterMatrix() {
   const output = join(ROOT, "temp", "character-layout-matrix");
   mkdirSync(output, { recursive: true });
   const baseline = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "performance-baseline.json"), "utf8"));
   const results = [];
   const warnings = [];
-  for (const characterId of ["mugi", "rin", "mai", "rin-tha3"]) {
+  const selectedCharacters = process.env.SHOOT_CHARACTER_IDS
+    ? process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean)
+    : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa"];
+  for (const characterId of selectedCharacters) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
       const started = performance.now();
       const page = await openScene({ characterId, layout, width, height, forcePng: true });
@@ -312,11 +315,22 @@ async function shootCharacterMatrix() {
         const visual = await page.evaluate(() => {
           const image = document.getElementById("petSprite");
           const character = document.getElementById("character");
+          const secondary = document.getElementById("characterSecondaryMotion");
+          const secondarySprite = document.getElementById("characterSecondarySprite");
+          const secondaryStyle = secondary ? getComputedStyle(secondary) : null;
+          const secondarySpriteStyle = secondarySprite ? getComputedStyle(secondarySprite) : null;
           const rect = image.getBoundingClientRect();
           const characterRect = character.getBoundingClientRect();
           return {
             naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
             imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            secondaryMotion: secondary ? {
+              visible: !secondary.hidden && secondaryStyle.display !== "none",
+              bodyAnimationName: secondaryStyle.animationName,
+              localAnimationName: secondarySpriteStyle?.animationName || "none",
+              localTransform: secondarySpriteStyle?.transform || "none",
+              maskImage: secondaryStyle.webkitMaskImage || secondaryStyle.maskImage,
+            } : null,
             characterRect: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
             resources: performance.getEntriesByType("resource").length,
             timings: {
@@ -330,6 +344,15 @@ async function shootCharacterMatrix() {
           || visual.imageRect.x >= width || visual.imageRect.y >= height
           || visual.imageRect.x + visual.imageRect.width <= 0 || visual.imageRect.y + visual.imageRect.height <= 0) {
           throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません`);
+        }
+        const expectsSecondary = ["koharu", "sena", "noa"].includes(characterId)
+          && !["chat", "talk", "bar"].includes(layout);
+        if (expectsSecondary && (!visual.secondaryMotion?.visible
+          || visual.secondaryMotion.bodyAnimationName === "none"
+          || visual.secondaryMotion.localAnimationName !== "pet-secondary-bust"
+          || visual.secondaryMotion.localTransform === "none"
+          || visual.secondaryMotion.maskImage === "none")) {
+          throw new Error(`${characterId}/${layout}: 胸元の局所二次動作が適用されていません ${JSON.stringify(visual.secondaryMotion)}`);
         }
         const file = `${characterId}-${layout}.png`;
         const png = await page.screenshot({ path: join(output, file), omitBackground: true });
@@ -779,7 +802,7 @@ if (process.env.SHOOT_CHARACTER_MATRIX) {
   await browser.close();
   server.close();
   const average = Math.round(matrix.results.reduce((sum, item) => sum + item.readyMs, 0) / matrix.results.length);
-  console.log(`32形式の表示検査完了: ${matrix.output}（平均 ${average}ms）`);
+  console.log(`${matrix.results.length}形式の表示検査完了: ${matrix.output}（平均 ${average}ms）`);
   process.exit(0);
 }
 

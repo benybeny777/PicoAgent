@@ -25,6 +25,24 @@
       "name": "まい"
     },
     {
+      "description": "親しみやすく穏やかな18歳の通常2D作業相棒。",
+      "id": "koharu",
+      "manifest": "koharu/character.json",
+      "name": "こはる"
+    },
+    {
+      "description": "凛とした18歳の歌姫系通常2D作業相棒。",
+      "id": "sena",
+      "manifest": "sena/character.json",
+      "name": "セナ"
+    },
+    {
+      "description": "上品で面倒見のよい18歳のツンデレ通常2D作業相棒。",
+      "id": "noa",
+      "manifest": "noa/character.json",
+      "name": "ノア"
+    },
+    {
       "description": "Live2Dで動く元気いっぱいの作業相棒。",
       "id": "hiyori",
       "manifest": "hiyori/character.json",

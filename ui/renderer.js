@@ -27,6 +27,8 @@ const noticeList = document.getElementById("noticeList");
 const noticeClear = document.getElementById("noticeClear");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
+const characterSecondaryMotion = document.getElementById("characterSecondaryMotion");
+const characterSecondarySprite = document.getElementById("characterSecondarySprite");
 const characterView = document.getElementById("characterView");
 const online = document.getElementById("online");
 const relationshipButton = document.getElementById("relationshipButton");
@@ -684,6 +686,48 @@ function resolveLive2dConfig(manifest, variant) {
   return variant?.live2d || manifest.live2d || null;
 }
 
+let activeSecondaryMotion = null;
+
+function syncSecondaryMotionFrame() {
+  if (!activeSecondaryMotion || live2dActive || !characterSecondarySprite) return;
+  const source = petSprite.currentSrc || petSprite.src;
+  if (source && characterSecondarySprite.src !== source) characterSecondarySprite.src = source;
+}
+
+function updateSecondaryMotionVisibility() {
+  if (!characterSecondaryMotion) return;
+  characterSecondaryMotion.hidden = !activeSecondaryMotion || live2dActive;
+  if (!characterSecondaryMotion.hidden) syncSecondaryMotionFrame();
+}
+
+function configureSecondaryMotion(config) {
+  const numberInRange = (value, minimum, maximum, fallback) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
+  };
+  activeSecondaryMotion = config?.type === "bust" ? config : null;
+  if (!activeSecondaryMotion || !characterSecondaryMotion) {
+    updateSecondaryMotionVisibility();
+    return;
+  }
+  const centerX = numberInRange(config.centerX, 0, 100, 50);
+  const centerY = numberInRange(config.centerY, 0, 100, 34);
+  const radiusX = numberInRange(config.radiusX, 4, 45, 16);
+  const radiusY = numberInRange(config.radiusY, 4, 35, 10);
+  const strength = numberInRange(config.strength, 0.2, 2, 1);
+  const duration = numberInRange(config.duration, 1.8, 8, 3.8);
+  characterSecondaryMotion.style.setProperty("--secondary-center-x", `${centerX}%`);
+  characterSecondaryMotion.style.setProperty("--secondary-center-y", `${centerY}%`);
+  characterSecondaryMotion.style.setProperty("--secondary-radius-x", `${radiusX}%`);
+  characterSecondaryMotion.style.setProperty("--secondary-radius-y", `${radiusY}%`);
+  characterSecondaryMotion.style.setProperty("--secondary-rise", `${(-1.45 * strength).toFixed(2)}px`);
+  characterSecondaryMotion.style.setProperty("--secondary-settle", `${(0.65 * strength).toFixed(2)}px`);
+  characterSecondaryMotion.style.setProperty("--secondary-return", `${(-0.35 * strength).toFixed(2)}px`);
+  characterSecondaryMotion.style.setProperty("--secondary-expand", (1 + 0.008 * strength).toFixed(4));
+  characterSecondaryMotion.style.setProperty("--secondary-duration", `${duration}s`);
+  updateSecondaryMotionVisibility();
+}
+
 async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterOverridesCache = overrides;
   if (options.live2dSdkOverrides) live2dSdkOverridesCache = options.live2dSdkOverrides;
@@ -709,6 +753,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
+  configureSecondaryMotion(variant?.secondaryMotion ?? manifest.secondaryMotion);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
@@ -1288,6 +1333,7 @@ async function startLive2D(cfg) {
   character.dataset.renderKind = "live2d";
   applyCharacterZoom(characterZoom);
   petSprite.style.display = "none";
+  updateSecondaryMotionVisibility();
   if (motionEnabled && cfg.motions?.idle) {
     const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
     model.motion(cfg.motions.idle, 0, idlePriority);
@@ -1323,6 +1369,7 @@ function stopLive2D() {
     applyCharacterZoom(characterZoom);
     petSprite.style.display = "";
   }
+  updateSecondaryMotionVisibility();
 }
 
 // ── 疑似視線追従: マウスの方向へキャラクターがわずかに傾く ─────────────
@@ -4180,7 +4227,10 @@ function applyBubbleLayout(width, height, left, top) {
   refreshBubblePlacement();
 }
 window.addEventListener("resize", refreshBubblePlacement);
-petSprite.addEventListener("load", refreshBubblePlacement);
+petSprite.addEventListener("load", () => {
+  refreshBubblePlacement();
+  syncSecondaryMotionFrame();
+});
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
   if (ui.theme != null) applyTheme(ui.theme);

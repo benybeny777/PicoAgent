@@ -104,6 +104,7 @@ pub fn validate(source: &Path) -> Result<Value> {
     }
     validate_animations(source, &manifest)?;
     validate_variants(source, &manifest)?;
+    validate_secondary_motion(&manifest, "secondaryMotion")?;
     validate_interactions(&manifest)?;
     Ok(manifest)
 }
@@ -342,6 +343,35 @@ pub fn validate_variants(source: &Path, manifest: &Value) -> Result<()> {
                 bail!("variants[].root のフォルダがありません: {root}");
             }
         }
+        validate_secondary_motion(variant, "variants[].secondaryMotion")?;
+    }
+    Ok(())
+}
+
+pub fn validate_secondary_motion(manifest: &Value, label: &str) -> Result<()> {
+    let Some(motion) = manifest.get("secondaryMotion") else {
+        return Ok(());
+    };
+    let Some(motion) = motion.as_object() else {
+        bail!("{label} はオブジェクトで指定してください");
+    };
+    if motion.get("type").and_then(Value::as_str) != Some("bust") {
+        bail!("{label}.type は bust を指定してください");
+    }
+    for (key, minimum, maximum) in [
+        ("centerX", 0.0, 100.0),
+        ("centerY", 0.0, 100.0),
+        ("radiusX", 4.0, 45.0),
+        ("radiusY", 4.0, 35.0),
+        ("strength", 0.2, 2.0),
+        ("duration", 1.8, 8.0),
+    ] {
+        let Some(value) = motion.get(key).and_then(Value::as_f64) else {
+            bail!("{label}.{key} は数値で指定してください");
+        };
+        if !(minimum..=maximum).contains(&value) {
+            bail!("{label}.{key} は {minimum} 以上 {maximum} 以下にしてください");
+        }
     }
     Ok(())
 }
@@ -478,6 +508,28 @@ mod tests {
         let error = validate(&dir).unwrap_err().to_string();
         assert!(error.contains("件数が一致"), "error: {error}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 通常2dの胸元二次動作を検証する() {
+        let valid = json!({
+            "secondaryMotion": {
+                "type": "bust", "centerX": 50, "centerY": 32,
+                "radiusX": 16, "radiusY": 10, "strength": 1.1, "duration": 3.8
+            }
+        });
+        validate_secondary_motion(&valid, "secondaryMotion").expect("正しい二次動作を拒否した");
+
+        let invalid = json!({
+            "secondaryMotion": {
+                "type": "bust", "centerX": 50, "centerY": 32,
+                "radiusX": 80, "radiusY": 10, "strength": 1.1, "duration": 3.8
+            }
+        });
+        let error = validate_secondary_motion(&invalid, "secondaryMotion")
+            .expect_err("範囲外のマスクを許可した")
+            .to_string();
+        assert!(error.contains("radiusX"), "error: {error}");
     }
 
     /// テクスチャ欠けは導入前に止める（通すとキャラ選択時に描画が崩れる）。

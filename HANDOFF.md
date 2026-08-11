@@ -87,7 +87,7 @@ git diff --check
 - chat / talk / bar のLive2Dアイコンは285×315の固定描画をCSSで切り出す
 - 8形式の実フロント描画を `tools/screenshots/shoot.mjs layout-shot-*.webp` で再生成し、設定カード8件の選択回帰も `settings-display.mjs` で確認する
 - PNG系4キャラの計208枚を72画像へ重複除外し、Photoshop「ディテールを保持 2.0」で通常立ち絵を2倍化。起動画像は元解像度を維持。白／濃紺／マゼンタ／市松の一覧と自動境界検査は警告0件
-- `SHOOT_CHARACTER_MATRIX=1` でPNG系4キャラ×8形式を撮影。平均1,214ms、全32画面で描画を確認し、一覧で見つけたマスコット／ペットの顔だけ表示も修正済み。成果物は `temp/character-layout-matrix/`
+- `SHOOT_CHARACTER_MATRIX=1` はPNG系7キャラ×8形式を撮影し、追加3体では胸元の局所二次動作と羽根付きマスクの適用も検査する。2026-08-11に `SHOOT_CHARACTER_IDS=koharu,sena,noa` で24画面を最終再撮影し、平均758ms、描画・配信上半身構図・局所二次動作・透過市松の背景残りなしを確認済み。成果物は `temp/character-layout-matrix/`
 - 同じ32画面でmanifest・待機・全件プリロード時刻を記録し、今回平均1,077ms・基準超過警告0件
 - 2D表示のエッジ光・多段影・小型アイコン・フキダシを調整後、同じ32画面を再撮影。平均1,154ms、描画欠けと速度警告は0件。初回撮影で見つけた配信形式の背景ぼかし継承も修正済み
 - `SHOOT_INTERACTION_MATRIX=1` で麦／ひより×8形式の起動遷移・入力欄・縮小後の収まりを16件確認
