@@ -26,10 +26,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # crates/picoagent-core/Cargo.lock は .gitignore で追跡していないため対象にしない。
+        # checkout 後に存在せず cargo audit が必ず失敗する（恒久的に赤いジョブは、
+        # 本当の脆弱性検出まで無視される原因になる）。同 crate は src-tauri のパス依存で、
+        # 依存する serde / serde_json は src-tauri/Cargo.lock 側で監査される。
         lockfile:
           - src-tauri/Cargo.lock
           - xtask/Cargo.lock
-          - crates/picoagent-core/Cargo.lock
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
