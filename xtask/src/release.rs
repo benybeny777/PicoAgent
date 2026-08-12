@@ -460,7 +460,18 @@ mod tests {
     fn 販売設定はキャラを重複なく列挙する() {
         let value = super::manifest().unwrap();
         let characters = included_characters(&value).unwrap();
-        assert_eq!(characters, ["mugi", "rin", "mai", "koharu", "sena", "noa"]);
+        assert_eq!(
+            characters,
+            [
+                "mugi",
+                "rin",
+                "mai",
+                "koharu",
+                "sena",
+                "noa",
+                "photoreal-prototype"
+            ]
+        );
     }
 
     #[test]

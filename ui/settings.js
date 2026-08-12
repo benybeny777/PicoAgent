@@ -2006,33 +2006,6 @@ function layoutResetField() {
   );
 }
 
-function windowPlacementField() {
-  const actions = el("div", { className: "placement-actions" });
-  function setPlacementBusy(busy) {
-    actions.setAttribute("aria-busy", String(busy));
-    actions.querySelectorAll("button").forEach(item => { item.disabled = busy; });
-  }
-  for (const [id, label] of [["left", "左画面"], ["right", "右画面"], ["current", "現在の画面"], ["primary", "主画面"]]) {
-    const button = el("button", { type: "button", className: "secondary", textContent: label });
-    button.addEventListener("click", async () => {
-      setPlacementBusy(true);
-      try {
-        await window.picoagent.placeWindow(id);
-        statusEl.textContent = `${label}の中央へ移動しました。`;
-      } catch (error) {
-        statusEl.textContent = `移動できませんでした: ${error?.message || error}`;
-      } finally {
-        setPlacementBusy(false);
-      }
-    });
-    actions.append(button);
-  }
-  return markSearchable(el("div", { className: "field" }, [
-    el("label", { textContent: "表示するモニター" }), actions,
-    el("p", { className: "hint", textContent: "動画を見ながら使う場合は「左画面」などを選ぶと、接続中ディスプレイの中央へ移動します。" }),
-  ]), "ウィンドウ 配置 左画面 右画面 主画面 ディスプレイ");
-}
-
 function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () => true) {
   button.addEventListener("click", async () => {
     button.disabled = true;
@@ -2619,7 +2592,6 @@ async function render() {
   ]));
   displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "会話文字の大きさ（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
-  displaySec.append(windowPlacementField());
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));

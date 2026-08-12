@@ -4023,6 +4023,12 @@ pub fn open_character_settings(app: &tauri::AppHandle) {
 fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let tab = settings_tab(tab);
     if let Some(win) = app.get_webview_window("settings") {
+        if let Err(error) = place_settings_with_main(app, &win) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
+            );
+        }
         if let Err(error) = win.show() {
             crate::log_paths::append_app_log(app, &format!("設定画面を表示できません: {error}"));
         }
@@ -4045,14 +4051,73 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let path = tab
         .map(|tab| format!("settings.html?tab={tab}"))
         .unwrap_or_else(|| "settings.html".to_string());
-    if let Err(error) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
+    match WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
         .title("PicoAgent の設定")
         .inner_size(960.0, 760.0)
         .min_inner_size(720.0, 560.0)
+        .visible(false)
         .build()
     {
-        crate::log_paths::append_app_log(app, &format!("設定画面を開けません: {error}"));
+        Ok(win) => {
+            if let Err(error) = place_settings_with_main(app, &win) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
+                );
+            }
+            if let Err(error) = win.show() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面を表示できません: {error}"),
+                );
+            }
+            if let Err(error) = win.set_focus() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面へフォーカスできません: {error}"),
+                );
+            }
+        }
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &format!("設定画面を開けません: {error}"));
+        }
     }
+}
+
+fn centered_window_position(
+    monitor_position: tauri::PhysicalPosition<i32>,
+    monitor_size: tauri::PhysicalSize<u32>,
+    window_size: tauri::PhysicalSize<u32>,
+) -> tauri::PhysicalPosition<i32> {
+    tauri::PhysicalPosition::new(
+        monitor_position.x + (monitor_size.width.saturating_sub(window_size.width) / 2) as i32,
+        monitor_position.y + (monitor_size.height.saturating_sub(window_size.height) / 2) as i32,
+    )
+}
+
+/// 設定画面はモニターを選ばせず、メイン画面が現在あるディスプレイの中央へ出す。
+fn place_settings_with_main(
+    app: &tauri::AppHandle,
+    settings: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "メインウィンドウがありません。".to_string())?;
+    // フォールバック許可: 起動直後など current_monitor が未確定なら主画面へ出し、
+    // 設定画面自体が見えなくなることを防ぐ。
+    let monitor = main
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .or(main.primary_monitor().map_err(|error| error.to_string())?)
+        .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
+    let window_size = settings.outer_size().map_err(|error| error.to_string())?;
+    settings
+        .set_position(centered_window_position(
+            *monitor.position(),
+            *monitor.size(),
+            window_size,
+        ))
+        .map_err(|error| error.to_string())
 }
 
 fn settings_tab(tab: Option<&str>) -> Option<&str> {
@@ -4070,12 +4135,24 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compacted_conversation, default_character_tts_voice, parse_update_feed,
-        replace_auto_summary, settings_tab, speech_text, update_status, verify_windows_installer,
-        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        centered_window_position, compacted_conversation, default_character_tts_voice,
+        parse_update_feed, replace_auto_summary, settings_tab, speech_text, update_status,
+        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
 
+    #[test]
+    fn 設定画面を負座標モニターの中央へ配置する() {
+        assert_eq!(
+            centered_window_position(
+                tauri::PhysicalPosition::new(-1920, 0),
+                tauri::PhysicalSize::new(1920, 1080),
+                tauri::PhysicalSize::new(960, 760),
+            ),
+            tauri::PhysicalPosition::new(-1440, 160)
+        );
+    }
     #[test]
     fn 自動要約は積み重ならず最新一件へ置き換わる() {
         let first = replace_auto_summary("人格設定", "最初の要約");

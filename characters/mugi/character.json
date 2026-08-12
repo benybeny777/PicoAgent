@@ -3,6 +3,7 @@
   "name": "むぎ",
   "assetVersion": "2026-08-08-preserve-details-v2",
   "description": "星のヘアピンと緑の瞳が印象的な、年下っぽく明るく寄り添う作業相棒。",
+  "motionProfile": "full",
   "greeting": "こんにちは、むぎだよ。えへへ、今日もそばで見てるね。いっしょにがんばろ？",
   "voice": {
     "provider": "aivis",
@@ -66,18 +67,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/fd108714be99fb96c250.png",
-        "frames/170e3b00c9f644e076e8.png",
-        "layers/blink_half.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/a998648eeb30ae8e9aaf.png",
-        "frames/a998648eeb30ae8e9aaf.png"
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png",
+        "frames/a63a444e57fbb656/8bce9019a09edadfa9c6.png",
+        "frames/a63a444e57fbb656/8bce9019a09edadfa9c6.png",
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png",
+        "frames/a63a444e57fbb656/295a39c5af937ece0554.png",
+        "frames/a63a444e57fbb656/c69b9a46ba9916369e10.png",
+        "frames/a63a444e57fbb656/7ae32e571c71e1b317af.png",
+        "frames/a63a444e57fbb656/8bce9019a09edadfa9c6.png",
+        "frames/a63a444e57fbb656/8bce9019a09edadfa9c6.png",
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png",
+        "frames/a63a444e57fbb656/051bcb3a5ab30143e97f.png",
+        "frames/a63a444e57fbb656/051bcb3a5ab30143e97f.png"
       ]
     },
     "thinking": {
@@ -99,18 +100,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/206ab438cd98ad08c894.png",
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/a998648eeb30ae8e9aaf.png",
-        "frames/a998648eeb30ae8e9aaf.png",
-        "layers/blink_closed.png",
-        "frames/206ab438cd98ad08c894.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/a998648eeb30ae8e9aaf.png",
-        "frames/faed952b7ece14a99cd2.png"
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png",
+        "frames/a63a444e57fbb656/8bce9019a09edadfa9c6.png",
+        "frames/a63a444e57fbb656/c1426cdc2451281bcade.png",
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png",
+        "frames/a63a444e57fbb656/051bcb3a5ab30143e97f.png",
+        "frames/a63a444e57fbb656/051bcb3a5ab30143e97f.png",
+        "frames/a63a444e57fbb656/e82ac5c0c2f05880801c.png",
+        "frames/a63a444e57fbb656/c1426cdc2451281bcade.png",
+        "frames/a63a444e57fbb656/8bce9019a09edadfa9c6.png",
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png",
+        "frames/a63a444e57fbb656/051bcb3a5ab30143e97f.png",
+        "frames/a63a444e57fbb656/a6289033c3f6e2063249.png"
       ]
     },
     "talking": {
@@ -132,18 +133,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/3f74275694a112d89ab5.png",
-        "frames/3a2f9277c46e6685123c.png",
-        "frames/e78abc8a8d81c534baae.png",
-        "frames/3f74275694a112d89ab5.png",
-        "frames/5daefb09f1be578b9502.png",
-        "frames/5daefb09f1be578b9502.png",
-        "frames/e78abc8a8d81c534baae.png",
-        "frames/3a2f9277c46e6685123c.png",
-        "frames/206ab438cd98ad08c894.png",
-        "frames/3f74275694a112d89ab5.png",
-        "layers/mouth_open.png",
-        "frames/5daefb09f1be578b9502.png"
+        "frames/a63a444e57fbb656/28ce5ac709841fc32d0f.png",
+        "frames/a63a444e57fbb656/bafd6a4714ccc12738ed.png",
+        "frames/a63a444e57fbb656/a5c830a8194398622508.png",
+        "frames/a63a444e57fbb656/28ce5ac709841fc32d0f.png",
+        "frames/a63a444e57fbb656/28ad1ed85a1e70b61b0e.png",
+        "frames/a63a444e57fbb656/28ad1ed85a1e70b61b0e.png",
+        "frames/a63a444e57fbb656/a5c830a8194398622508.png",
+        "frames/a63a444e57fbb656/bafd6a4714ccc12738ed.png",
+        "frames/a63a444e57fbb656/c1426cdc2451281bcade.png",
+        "frames/a63a444e57fbb656/28ce5ac709841fc32d0f.png",
+        "frames/a63a444e57fbb656/cefde5aedfa3b56f254b.png",
+        "frames/a63a444e57fbb656/28ad1ed85a1e70b61b0e.png"
       ]
     },
     "sad": {
@@ -159,13 +160,14 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/faed952b7ece14a99cd2.png",
-        "frames/fd108714be99fb96c250.png",
-        "frames/170e3b00c9f644e076e8.png",
-        "layers/blink_half.png",
-        "frames/672550ee9d970d35228a.png",
-        "frames/faed952b7ece14a99cd2.png"
+        "frames/a63a444e57fbb656/abf95148d600cd26d51c.png",
+        "frames/a63a444e57fbb656/eef10c461aa97c5d90a5.png",
+        "frames/a63a444e57fbb656/c69b9a46ba9916369e10.png",
+        "frames/a63a444e57fbb656/abf95148d600cd26d51c.png",
+        "frames/a63a444e57fbb656/1e5d38e5482ae2f4773b.png",
+        "frames/a63a444e57fbb656/abf95148d600cd26d51c.png"
       ]
     }
-  }
+  },
+  "frameGeneration": "a63a444e57fbb656"
 }

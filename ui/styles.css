@@ -122,8 +122,8 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character-view > canvas { position:absolute; left:50%; bottom:0; transform:translateX(-50%); }
 .character-secondary-motion {
   position:absolute; inset:0; z-index:1; overflow:hidden; pointer-events:none;
-  -webkit-mask-image:radial-gradient(ellipse var(--secondary-radius-x,16%) var(--secondary-radius-y,10%) at var(--secondary-center-x,50%) var(--secondary-center-y,34%),#000 45%,rgba(0,0,0,.82) 61%,rgba(0,0,0,.28) 76%,transparent 90%);
-  mask-image:radial-gradient(ellipse var(--secondary-radius-x,16%) var(--secondary-radius-y,10%) at var(--secondary-center-x,50%) var(--secondary-center-y,34%),#000 45%,rgba(0,0,0,.82) 61%,rgba(0,0,0,.28) 76%,transparent 90%);
+  -webkit-mask-image:radial-gradient(ellipse var(--secondary-radius-x,19%) var(--secondary-radius-y,12%) at var(--secondary-center-x,50%) var(--secondary-center-y,34%),#000 18%,rgba(0,0,0,.72) 43%,rgba(0,0,0,.28) 68%,rgba(0,0,0,.08) 84%,transparent 100%);
+  mask-image:radial-gradient(ellipse var(--secondary-radius-x,19%) var(--secondary-radius-y,12%) at var(--secondary-center-x,50%) var(--secondary-center-y,34%),#000 18%,rgba(0,0,0,.72) 43%,rgba(0,0,0,.28) 68%,rgba(0,0,0,.08) 84%,transparent 100%);
 }
 .character-secondary-motion[hidden] { display:none!important; }
 .character-secondary-motion > img {
@@ -227,9 +227,9 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes pet-live2d-sad { 0%,100%{transform:translateY(4px) scale(.992,.986)} 50%{transform:translateY(11px) scale(.982,.972)} }
 @keyframes pet-secondary-bust {
   0%,100% { transform:translateY(0) scale(1); }
-  42% { transform:translateY(var(--secondary-rise,-1.45px)) scale(1.002,var(--secondary-expand,1.008)); }
-  58% { transform:translateY(var(--secondary-settle,.65px)) scale(.999,.996); }
-  72% { transform:translateY(var(--secondary-return,-.35px)) scale(1.001,1.003); }
+  42% { transform:translateY(var(--secondary-rise,-.38px)) scale(var(--secondary-expand-x,1.0005),var(--secondary-expand,1.0028)); }
+  58% { transform:translateY(var(--secondary-settle,.18px)) scale(.9998,var(--secondary-contract,.9988)); }
+  72% { transform:translateY(var(--secondary-return,-.1px)) scale(1.0002,1.001); }
 }
 @keyframes boot-sleep { 0%,100%{transform:translateY(1px) scale(1)} 50%{transform:translateY(-4px) scale(1.006,.996)} }
 @keyframes boot-shadow { 0%,100%{transform:scaleX(.94); opacity:.72} 50%{transform:scaleX(1.08); opacity:.48} }
@@ -747,13 +747,13 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 /* ── 7. 配信: キャラを大きく、回答は字幕テロップ ─────────────────────────── */
 .pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); --stream-canvas-scale:2.1; --stream-caption-color:#5a3b4b; }
 [data-layout="stream"] .bubble {
+  z-index:auto;
   left:8px; right:8px; top:8px; bottom:8px; width:auto; height:auto; max-width:none;
   background:transparent; border:none; box-shadow:none; backdrop-filter:none; padding:0;
   display:grid; grid-template-columns:minmax(0,1fr) var(--stream-chat-width);
   grid-template-rows:minmax(0,1fr) auto auto; column-gap:8px; row-gap:0;
 }
-/* 配信枠の背景。キャラ（z-index:1）→ フキダシの中身（z-index:3）の順に重なるよう、
-   背景はフキダシの中ではなくアプリ直下へ置く。 */
+/* 配信枠の背景。背景(0) → PICO STUDIO(1) → キャラ(2) → 操作UI(3以上)の順で重ねる。 */
 .pet-app[data-layout="stream"]::before {
   content:""; position:absolute; z-index:0; left:8px; right:var(--stream-chat-width); top:8px; bottom:8px;
   border-radius:12px;
@@ -793,7 +793,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="stream"] .stream-info > span:last-child { font-size:11px; font-weight:700; opacity:.9; }
 .stream-info,.stream-display { display:none; }
 [data-layout="stream"] .stream-display {
-  display:flex; position:absolute; z-index:2; left:2.5%; right:auto; top:13%; width:18%; aspect-ratio:16/9;
+  display:flex; position:absolute; z-index:1; left:2.5%; right:auto; top:13%; width:18%; aspect-ratio:16/9;
   flex-direction:column; align-items:center; justify-content:center; gap:5px; overflow:hidden;
   border:7px solid rgba(39,31,49,.78); border-radius:7px; color:#f9edf5;
   background:linear-gradient(145deg,rgba(59,51,79,.92),rgba(81,55,78,.92));
@@ -807,7 +807,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="stream"][data-stream-display="image"] .stream-display > * { display:none; }
 [data-layout="stream"][data-stream-display="none"] .stream-display { display:none; }
 [data-layout="stream"] .character {
-  z-index:1; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px;
+  z-index:2; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px;
   bottom:8px; width:auto; height:auto; transform:none;
 }
 /* WebGLの内部描画寸法は維持し、通常配信時だけキャンバスの表示寸法を --stream-canvas-scale 倍にする。
@@ -818,7 +818,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   transform:translate(calc(var(--char-x,0px) + 15%),var(--char-y,0px));
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view {
-  transform:translate(calc(var(--char-x,0px) + 75%),var(--char-y,0px));
+  transform:translate(calc(var(--char-x,0px) + 25%),var(--char-y,0px));
 }
 /* 配信の2D立ち絵は全身表示の1.65倍を上端基準に置き、右寄りで顔から腰までを大きく見せる。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
@@ -839,7 +839,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   transform:translateX(-50%); transform-origin:50% 100%;
 }
 [data-layout="stream"] .reply {
-  position:relative; z-index:2; grid-column:1; grid-row:2 / span 2; min-height:88px; align-self:end;
+  position:relative; z-index:3; grid-column:1; grid-row:2 / span 2; min-height:88px; align-self:end;
   margin:0 12px 4px; padding:20px 22px 11px; max-height:clamp(110px,18vh,170px);
   display:flex; align-items:center; justify-content:flex-start; text-align:left;
   font-size:clamp(24px,1.8vw,30px); line-height:1.5;
@@ -852,20 +852,23 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="stream"] .reply .md,
 [data-layout="stream"] .reply .md p { width:100%; font-size:28px!important; font-weight:700; line-height:1.45; text-wrap:balance; text-shadow:0 1px 0 rgba(255,255,255,.85); }
 [data-layout="stream"] .history-log {
-  grid-column:2; grid-row:1; margin:0; padding:14px; border-radius:13px;
+  position:relative; z-index:3; grid-column:2; grid-row:1; margin:0; padding:14px; border-radius:13px;
   border:1px solid var(--panel-border); background:var(--panel-bg);
 }
 [data-layout="stream"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
 [data-layout="stream"] .history-name { font-size:11px; }
 [data-layout="stream"] .history-log { border-radius:13px 13px 0 0; border-bottom:0; }
 [data-layout="stream"] .composer {
-  grid-column:2; grid-row:2 / span 2; margin:0; padding:12px; align-self:stretch;
+  position:relative; z-index:3; grid-column:2; grid-row:2 / span 2; margin:0; padding:12px; align-self:stretch;
   border:1px solid var(--panel-border); border-top:0; border-radius:0 0 13px 13px;
   background:var(--panel-bg);
 }
 [data-layout="stream"] .composer textarea { min-height:96px; max-height:180px; font-size:15px; }
 [data-layout="stream"] .status { display:none; }
-[data-layout="stream"] .reply-actions { position:absolute; z-index:3; left:90px; right:calc(var(--stream-chat-width) + 12px); top:12px; width:auto; margin:0; }
+[data-layout="stream"] .reply-actions {
+  position:absolute; z-index:4; left:auto; right:calc(var(--stream-chat-width) + 20px); top:12px;
+  width:max-content; max-width:calc(100% - var(--stream-chat-width) - 118px); margin:0;
+}
 [data-layout="stream"] .history-tools,
 [data-layout="stream"] .quick-actions { display:none; }
 [data-layout="stream"] .online { right:auto; left:14px; bottom:auto; top:40px; }

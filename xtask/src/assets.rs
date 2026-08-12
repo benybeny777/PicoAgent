@@ -3,9 +3,11 @@
 // 旧 `scripts/sync-characters.mjs` / `build-ui-dist.mjs` / `stop-stale.mjs` の置き換え。
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Result};
+use sha2::{Digest, Sha256};
 
 use crate::util::{copy_dir, list_files, log, repo_root};
 
@@ -29,6 +31,7 @@ pub fn sync_characters() -> Result<()> {
     copy_dir(&src, &dest, &|path| {
         path.to_string_lossy().contains("live2d-src")
     })?;
+    stamp_character_asset_versions(&dest)?;
     log(
         "sync-characters",
         format!("{} -> {} を同期しました", src.display(), dest.display()),
@@ -87,6 +90,7 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
     if placeholder.is_file() {
         fs::copy(placeholder, dest.join("_preview-placeholder.png"))?;
     }
+    stamp_character_asset_versions(&dest)?;
     log(
         "sync-characters",
         format!(
@@ -96,6 +100,229 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
         ),
     );
     Ok(())
+}
+
+/// 同期済みキャラの全内容から自動版を作り、manifestへ書き込む。
+///
+/// 手書き版だけでは画像差し替え時に更新を忘れ、WebViewが旧画像を表示し続ける。
+/// 配信するファイル自体のハッシュなら、通常の同期だけでURLが変わりキャッシュが切り替わる。
+fn stamp_character_asset_versions(dest: &Path) -> Result<()> {
+    let mut character_dirs = fs::read_dir(dest)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("character.json").is_file())
+        .collect::<Vec<_>>();
+    character_dirs.sort();
+
+    for character_dir in character_dirs {
+        let manifest_path = character_dir.join("character.json");
+        let version = character_content_version(&character_dir)?;
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+        validate_character_asset_generation(&character_dir, &manifest)?;
+        manifest["assetVersion"] = serde_json::Value::String(format!("auto-{version}"));
+        fs::write(
+            manifest_path,
+            format!("{}\n", serde_json::to_string_pretty(&manifest)?),
+        )?;
+    }
+    Ok(())
+}
+
+const THA3_MOTION_LAYERS: [&str; 12] = [
+    "idle_breathe",
+    "idle_left",
+    "idle_right",
+    "sad",
+    "sad_blink",
+    "talking_left_closed",
+    "talking_left_open",
+    "talking_right_closed",
+    "talking_right_open",
+    "thinking_blink",
+    "thinking_left",
+    "thinking_right",
+];
+
+fn validate_sharp_expression_pack(
+    character_dir: &Path,
+    manifest: &serde_json::Value,
+) -> Result<()> {
+    if manifest
+        .get("animationQualityMode")
+        .and_then(serde_json::Value::as_str)
+        != Some("sharp-expression")
+    {
+        return Ok(());
+    }
+    let stale = THA3_MOTION_LAYERS
+        .iter()
+        .filter(|name| {
+            character_dir
+                .join("layers")
+                .join(format!("{name}.png"))
+                .is_file()
+        })
+        .copied()
+        .collect::<Vec<_>>();
+    if !stale.is_empty() {
+        bail!(
+            "{} はsharp-expressionですが旧THA3全身レイヤーが残っています: {}",
+            character_dir.display(),
+            stale.join(", ")
+        );
+    }
+    Ok(())
+}
+
+const FULL_MOTION_LAYERS: &[&str] = &[
+    "base",
+    "blink_half",
+    "blink_closed",
+    "mouth_closed",
+    "mouth_open",
+    "gaze_left",
+    "gaze_right",
+    "expression_happy",
+    "expression_sad",
+];
+
+fn validate_full_motion_pack(character_dir: &Path, manifest: &serde_json::Value) -> Result<()> {
+    if manifest
+        .get("motionProfile")
+        .and_then(serde_json::Value::as_str)
+        != Some("full")
+    {
+        return Ok(());
+    }
+    let missing = FULL_MOTION_LAYERS
+        .iter()
+        .filter(|name| {
+            !character_dir
+                .join("layers")
+                .join(format!("{name}.png"))
+                .is_file()
+        })
+        .copied()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        bail!(
+            "{} はmotionProfile=fullですが共通モーションレイヤーが不足しています: {}",
+            character_dir.display(),
+            missing.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn validate_character_asset_generation(
+    character_dir: &Path,
+    manifest: &serde_json::Value,
+) -> Result<()> {
+    if manifest.get("live2d").is_some() {
+        return validate_live2d_model_sets(character_dir, manifest);
+    }
+    validate_sharp_expression_pack(character_dir, manifest)?;
+    validate_full_motion_pack(character_dir, manifest)?;
+    let generation = manifest
+        .get("frameGeneration")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            anyhow::anyhow!("{} にframeGenerationがありません", character_dir.display())
+        })?;
+    let expected_prefix = format!("frames/{generation}/");
+    let animations = manifest
+        .get("animations")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("{} にanimationsがありません", character_dir.display()))?;
+    for (name, animation) in animations {
+        let paths = animation
+            .get("framePaths")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| anyhow::anyhow!("animations.{name} にframePathsがありません"))?;
+        for path in paths {
+            let path = path.as_str().unwrap_or("");
+            if !path.starts_with(&expected_prefix) {
+                bail!(
+                    "{} の{}が現世代{}以外を参照しています: {}",
+                    character_dir.display(),
+                    name,
+                    generation,
+                    path
+                );
+            }
+        }
+    }
+    let frame_root = character_dir.join("frames");
+    let entries = fs::read_dir(&frame_root)?
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    if entries.len() != 1 || entries[0] != generation {
+        bail!(
+            "{} のframesに複数世代があります: {}",
+            character_dir.display(),
+            entries.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn validate_live2d_model_sets(character_dir: &Path, manifest: &serde_json::Value) -> Result<()> {
+    let live2d = &manifest["live2d"];
+    let mut models = Vec::new();
+    if let Some(path) = live2d.get("model").and_then(serde_json::Value::as_str) {
+        models.push(path);
+    }
+    if let Some(sets) = live2d.get("models").and_then(serde_json::Value::as_array) {
+        for set in sets {
+            let path = set
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if path.is_empty() {
+                bail!(
+                    "{} のLive2Dモデル世代にpathがありません",
+                    character_dir.display()
+                );
+            }
+            models.push(path);
+        }
+    }
+    if models.is_empty() {
+        bail!("{} のLive2Dモデル定義が空です", character_dir.display());
+    }
+    for model in models {
+        if !character_dir.join(model).is_file() {
+            bail!(
+                "{} のLive2Dモデル一式がありません: {model}",
+                character_dir.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn character_content_version(character_dir: &Path) -> Result<String> {
+    let mut files = list_files(character_dir);
+    files.sort();
+    let mut hasher = Sha256::new();
+    for file in files {
+        let relative = file.strip_prefix(character_dir).unwrap_or(&file);
+        hasher.update(relative.to_string_lossy().replace('\\', "/").as_bytes());
+        hasher.update([0]);
+        let mut bytes = fs::read(&file)?;
+        if relative == Path::new("character.json") {
+            let mut manifest: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if let Some(object) = manifest.as_object_mut() {
+                object.remove("assetVersion");
+            }
+            bytes = serde_json::to_vec(&manifest)?;
+        }
+        hasher.update(bytes);
+        hasher.update([0]);
+    }
+    Ok(format!("{:x}", hasher.finalize())[..16].to_string())
 }
 
 /// `ui/` を Tauri 配信用 `ui-dist/` へコピーする。
@@ -285,7 +512,9 @@ fn minify_css(text: &str) -> String {
     }
     // 記号の前後の空白を落とす。
     let mut out = String::with_capacity(collapsed.len());
-    let symbols = ['{', '}', ':', ';', ',', '>', '~', '+'];
+    // `calc(100% + 16px)` の + / - は前後の空白が必須。ここで削ると宣言全体が
+    // 無効になり、release 配布版だけキャラ幅が0になるため演算子は対象に含めない。
+    let symbols = ['{', '}', ':', ';', ',', '>', '~'];
     let chars: Vec<char> = collapsed.chars().collect();
     let mut index = 0;
     while index < chars.len() {
@@ -409,7 +638,12 @@ fn stop_managed_aivis(stopped: &mut Vec<&'static str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_version, rewrite_asset_refs};
+    use std::fs;
+
+    use super::{
+        character_content_version, content_version, rewrite_asset_refs,
+        stamp_character_asset_versions, validate_character_asset_generation,
+    };
 
     #[test]
     fn 同梱のcssとjsへ内容版を付ける() {
@@ -450,5 +684,83 @@ mod tests {
         assert_eq!(content_version(b"body{}"), content_version(b"body{}"));
         assert_ne!(content_version(b"body{}"), content_version(b"body{ }"));
         assert_eq!(content_version(b"body{}").len(), 8);
+    }
+
+    #[test]
+    fn css圧縮でcalc演算子の空白を保つ() {
+        assert_eq!(
+            super::minify_css(".a { right: calc(var(--width) + 16px); }").as_str(),
+            ".a{right:calc(var(--width) + 16px)}"
+        );
+    }
+
+    #[test]
+    fn キャラ素材更新でmanifestの自動版が変わる() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-character-version-{}",
+            std::process::id()
+        ));
+        let character = root.join("sample");
+        fs::create_dir_all(&character).unwrap();
+        fs::write(
+            character.join("character.json"),
+            r#"{"id":"sample","assetVersion":"manual","frameGeneration":"current","animations":{"idle":{"framePaths":["frames/current/a.png"]}}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(character.join("frames/current")).unwrap();
+        fs::write(character.join("frames/current/a.png"), b"frame").unwrap();
+        fs::write(character.join("preview.png"), b"old image").unwrap();
+        let old = character_content_version(&character).unwrap();
+        fs::write(character.join("preview.png"), b"new image").unwrap();
+        let new = character_content_version(&character).unwrap();
+        assert_ne!(old, new);
+
+        stamp_character_asset_versions(&root).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(character.join("character.json")).unwrap())
+                .unwrap();
+        assert!(manifest["assetVersion"]
+            .as_str()
+            .unwrap()
+            .starts_with("auto-"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pngキャラは単一フレーム世代だけを許可する() {
+        let root =
+            std::env::temp_dir().join(format!("picoagent-frame-generation-{}", std::process::id()));
+        let character = root.join("sample");
+        fs::create_dir_all(character.join("frames/current")).unwrap();
+        fs::write(character.join("frames/current/a.png"), b"image").unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(
+            r#"{"frameGeneration":"current","animations":{"idle":{"framePaths":["frames/current/a.png"]}}}"#,
+        )
+        .unwrap();
+        validate_character_asset_generation(&character, &manifest).unwrap();
+
+        fs::create_dir_all(character.join("frames/old")).unwrap();
+        assert!(validate_character_asset_generation(&character, &manifest).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn フルモーション宣言は全共通レイヤーを必須にする() {
+        let root =
+            std::env::temp_dir().join(format!("picoagent-full-motion-{}", std::process::id()));
+        let character = root.join("sample");
+        fs::create_dir_all(character.join("layers")).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(r#"{"motionProfile":"full"}"#).unwrap();
+        assert!(super::validate_full_motion_pack(&character, &manifest).is_err());
+        for name in super::FULL_MOTION_LAYERS {
+            fs::write(
+                character.join("layers").join(format!("{name}.png")),
+                b"image",
+            )
+            .unwrap();
+        }
+        super::validate_full_motion_pack(&character, &manifest).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

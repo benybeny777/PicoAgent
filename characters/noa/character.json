@@ -3,6 +3,7 @@
   "name": "ノア",
   "assetVersion": "2026-08-12-highres-motion-v2-noa",
   "description": "黒いぱっつん前髪と素直なツインテール、上品な吸血姫風メイド衣装の18歳ツンデレ作業相棒。",
+  "motionProfile": "full",
   "greeting": "ノアよ。べ、別に待ってたわけじゃないけど……用件は聞いてあげる。",
   "boot": {
     "sleeping": "preview.png"
@@ -32,10 +33,10 @@
     "type": "bust",
     "centerX": 50,
     "centerY": 31,
-    "radiusX": 18,
-    "radiusY": 10,
-    "strength": 1.2,
-    "duration": 3.7
+    "radiusX": 21,
+    "radiusY": 12,
+    "strength": 0.46,
+    "duration": 4.1
   },
   "animations": {
     "idle": {
@@ -57,18 +58,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/5791dccb5653223f9519.png",
-        "frames/fdc43cdff17e98b4681e.png",
-        "frames/ba314c7e48cd7612a810.png",
-        "frames/c72959dc08d85258aa1e.png",
-        "layers/blink_half.png",
-        "layers/blink_closed.png",
-        "layers/blink_half.png",
-        "frames/fdc43cdff17e98b4681e.png",
-        "frames/5791dccb5653223f9519.png",
-        "frames/c72959dc08d85258aa1e.png",
-        "frames/ba314c7e48cd7612a810.png",
-        "frames/5791dccb5653223f9519.png"
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
+        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
+        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
+        "frames/1f30c096d704c38a/8e41ec4e128164349f15.png",
+        "frames/1f30c096d704c38a/f34e9be0f76ae048ce78.png",
+        "frames/1f30c096d704c38a/0f35c4ac6883ea5ad3bb.png",
+        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
+        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
+        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
+        "frames/1f30c096d704c38a/16696dddfc060250d282.png"
       ]
     },
     "thinking": {
@@ -90,18 +91,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/485029172271a024adb5.png",
-        "frames/a6329ea2c381d6ea7ebf.png",
-        "frames/485029172271a024adb5.png",
-        "frames/dac288724b4625ed9e27.png",
-        "frames/a6329ea2c381d6ea7ebf.png",
-        "frames/485029172271a024adb5.png",
-        "layers/blink_closed.png",
-        "frames/dac288724b4625ed9e27.png",
-        "frames/a6329ea2c381d6ea7ebf.png",
-        "frames/485029172271a024adb5.png",
-        "frames/a6329ea2c381d6ea7ebf.png",
-        "frames/485029172271a024adb5.png"
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
+        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
+        "frames/1f30c096d704c38a/945f6fe7deabce3c36dc.png",
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
+        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
+        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
+        "frames/1f30c096d704c38a/b477b559e7ccbdfcd7ff.png",
+        "frames/1f30c096d704c38a/945f6fe7deabce3c36dc.png",
+        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
+        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
+        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png"
       ]
     },
     "talking": {
@@ -123,18 +124,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/87186de0b55974983e47.png",
-        "frames/96e9fdf93f7e58e12303.png",
-        "frames/9d5a21c9d5da28e874bc.png",
-        "frames/dd507a631df26a26b7ce.png",
-        "frames/96e9fdf93f7e58e12303.png",
-        "frames/87186de0b55974983e47.png",
-        "frames/9d5a21c9d5da28e874bc.png",
-        "frames/dd507a631df26a26b7ce.png",
-        "layers/blink_half.png",
-        "frames/96e9fdf93f7e58e12303.png",
-        "frames/9d5a21c9d5da28e874bc.png",
-        "frames/87186de0b55974983e47.png"
+        "frames/1f30c096d704c38a/331a6aa61b97eab17607.png",
+        "frames/1f30c096d704c38a/60f1ee5f78be5b8d5e67.png",
+        "frames/1f30c096d704c38a/481bb1a76099fd26afa3.png",
+        "frames/1f30c096d704c38a/331a6aa61b97eab17607.png",
+        "frames/1f30c096d704c38a/0d587b060339161db654.png",
+        "frames/1f30c096d704c38a/0d587b060339161db654.png",
+        "frames/1f30c096d704c38a/481bb1a76099fd26afa3.png",
+        "frames/1f30c096d704c38a/60f1ee5f78be5b8d5e67.png",
+        "frames/1f30c096d704c38a/945f6fe7deabce3c36dc.png",
+        "frames/1f30c096d704c38a/331a6aa61b97eab17607.png",
+        "frames/1f30c096d704c38a/6ed5f7f261476adfd585.png",
+        "frames/1f30c096d704c38a/0d587b060339161db654.png"
       ]
     },
     "sad": {
@@ -150,13 +151,15 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/47a617294db1837c976e.png",
-        "frames/8b24398b4ce79c9650f0.png",
-        "layers/blink_closed.png",
-        "frames/8b24398b4ce79c9650f0.png",
-        "frames/47a617294db1837c976e.png",
-        "frames/47a617294db1837c976e.png"
+        "frames/1f30c096d704c38a/6fd9d5ab6d8534df42b1.png",
+        "frames/1f30c096d704c38a/ee9a1e770fb4783b042c.png",
+        "frames/1f30c096d704c38a/f34e9be0f76ae048ce78.png",
+        "frames/1f30c096d704c38a/6fd9d5ab6d8534df42b1.png",
+        "frames/1f30c096d704c38a/80e6aa20e2b179fea4fa.png",
+        "frames/1f30c096d704c38a/6fd9d5ab6d8534df42b1.png"
       ]
     }
-  }
+  },
+  "animationQualityMode": "sharp-expression",
+  "frameGeneration": "1f30c096d704c38a"
 }

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+# build-sharp-expression-layers.py - 高精細な立ち絵と顔差分から、ぼけない基本表情レイヤーを組み立てる。
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+from PIL import Image
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MINIMUM_OUTPUT_SIZE = (890, 1800)
+
+
+def normalize(
+    source: Image.Image,
+    output_size: tuple[int, int],
+    target_box: tuple[int, int, int, int],
+) -> Image.Image:
+    source = source.convert("RGBA")
+    source_box = source.getchannel("A").getbbox()
+    if source_box is None:
+        raise ValueError("立ち絵に不透明な画素がありません")
+    size = (target_box[2] - target_box[0], target_box[3] - target_box[1])
+    result = Image.new("RGBA", output_size, (0, 0, 0, 0))
+    fitted = source.crop(source_box).resize(size, Image.Resampling.LANCZOS)
+    result.alpha_composite(fitted, target_box[:2])
+    return result
+
+
+def apply_face_patch(source: Image.Image, patch: Image.Image, opacity: float = 1.0) -> Image.Image:
+    result = source.copy().convert("RGBA")
+    patch = patch.convert("RGBA")
+    if patch.size != result.size:
+        raise ValueError(f"顔差分と立ち絵の寸法が違います: {patch.size} != {result.size}")
+    if opacity != 1.0:
+        alpha = patch.getchannel("A").point(lambda value: round(value * opacity))
+        patch.putalpha(alpha)
+    result.alpha_composite(patch)
+    result.putalpha(source.getchannel("A"))
+    return result
+
+
+def save_atomic(image: Image.Image, destination: Path) -> None:
+    temporary = destination.with_suffix(".png.part")
+    image.save(temporary, format="PNG", optimize=True)
+    temporary.replace(destination)
+
+
+def build(character_id: str, prepare_photoshop: bool) -> None:
+    character_dir = ROOT / "characters" / character_id
+    preview_path = character_dir / "preview.png"
+    layers_dir = character_dir / "layers"
+    patches_dir = character_dir / "expression-patches"
+    required = [
+        preview_path,
+        layers_dir / "base.png",
+        patches_dir / "blink_half.png",
+        patches_dir / "blink_closed.png",
+        patches_dir / "mouth_open.png",
+    ]
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise FileNotFoundError("必要な画像がありません: " + ", ".join(missing))
+
+    with Image.open(layers_dir / "base.png") as old_base:
+        old_base = old_base.convert("RGBA")
+        output_size = old_base.size
+        target_box = old_base.getchannel("A").getbbox()
+    if target_box is None:
+        raise ValueError("既存base.pngに不透明な画素がありません")
+    if output_size[0] < MINIMUM_OUTPUT_SIZE[0] or output_size[1] < MINIMUM_OUTPUT_SIZE[1]:
+        raise ValueError(f"既存base.pngが小さすぎます: {output_size}")
+    if prepare_photoshop:
+        output_size = (output_size[0] // 2, output_size[1] // 2)
+        target_box = tuple(value // 2 for value in target_box)
+    with Image.open(preview_path) as opened:
+        preview = opened.convert("RGBA")
+    with Image.open(patches_dir / "blink_half.png") as opened:
+        blink_half_patch = opened.convert("RGBA")
+    with Image.open(patches_dir / "blink_closed.png") as opened:
+        blink_closed_patch = opened.convert("RGBA")
+    with Image.open(patches_dir / "mouth_open.png") as opened:
+        mouth_patch = opened.convert("RGBA")
+    mouth_closed_path = patches_dir / "mouth_closed.png"
+    if mouth_closed_path.is_file():
+        with Image.open(mouth_closed_path) as opened:
+            resting = apply_face_patch(preview, opened.convert("RGBA"))
+    else:
+        resting = preview
+
+    variants = {
+        "base": resting,
+        "mouth_closed": resting,
+        "blink_half": apply_face_patch(resting, blink_half_patch),
+        "blink_closed": apply_face_patch(resting, blink_closed_patch),
+        "mouth_open": apply_face_patch(preview, mouth_patch),
+    }
+    layers_dir.mkdir(parents=True, exist_ok=True)
+    for name, image in variants.items():
+        save_atomic(normalize(image, output_size, target_box), layers_dir / f"{name}.png")
+
+    manifest_path = character_dir / "character.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["animationQualityMode"] = "sharp-expression"
+    temporary = manifest_path.with_suffix(".json.part")
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(manifest_path)
+
+    if not prepare_photoshop:
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "build-character-animations.py"), "--character-dir", str(character_dir)],
+            check=True,
+        )
+        print(f"[sharp-expression] {character_id}: 高精細な基本表情と連番を再生成しました")
+    else:
+        print(f"[sharp-expression] {character_id}: Photoshop仕上げ前の基本表情を生成しました")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="高精細な立ち絵と顔差分から基本表情を再生成します。")
+    parser.add_argument("character_ids", nargs="+", help="対象キャラクターID")
+    parser.add_argument(
+        "--prepare-photoshop",
+        action="store_true",
+        help="Photoshopの2倍拡大前の寸法で書き出します。",
+    )
+    args = parser.parse_args()
+    for character_id in args.character_ids:
+        build(character_id, args.prepare_photoshop)
+
+
+if __name__ == "__main__":
+    main()

@@ -3,6 +3,7 @@
   "name": "セナ",
   "assetVersion": "2026-08-12-highres-motion-v2-sena",
   "description": "銀青色のハイポニーと星空色の衣装が印象的な、凛とした18歳の歌姫系作業相棒。",
+  "motionProfile": "full",
   "greeting": "セナだよ。今日のステージも、きれいに仕上げようか。",
   "boot": {
     "sleeping": "preview.png"
@@ -32,10 +33,10 @@
     "type": "bust",
     "centerX": 49,
     "centerY": 32,
-    "radiusX": 16,
-    "radiusY": 9,
-    "strength": 1.0,
-    "duration": 3.55
+    "radiusX": 19,
+    "radiusY": 11,
+    "strength": 0.4,
+    "duration": 4.0
   },
   "animations": {
     "idle": {
@@ -57,18 +58,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/288989e7a14d4e79d1d2.png",
-        "frames/5aec9934a4619911ba56.png",
-        "frames/94f5987f87e6786c2877.png",
-        "frames/6206243061d56c79a1b5.png",
-        "layers/blink_half.png",
-        "layers/blink_closed.png",
-        "layers/blink_half.png",
-        "frames/5aec9934a4619911ba56.png",
-        "frames/288989e7a14d4e79d1d2.png",
-        "frames/6206243061d56c79a1b5.png",
-        "frames/94f5987f87e6786c2877.png",
-        "frames/288989e7a14d4e79d1d2.png"
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png",
+        "frames/a12098277070efa2/f204c75b5ebbbf2bdaea.png",
+        "frames/a12098277070efa2/f204c75b5ebbbf2bdaea.png",
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png",
+        "frames/a12098277070efa2/2300a2a8d3f0c8e8ab13.png",
+        "frames/a12098277070efa2/4cd564da5ad4dba2939a.png",
+        "frames/a12098277070efa2/78f9fd02a38e69004612.png",
+        "frames/a12098277070efa2/f204c75b5ebbbf2bdaea.png",
+        "frames/a12098277070efa2/f204c75b5ebbbf2bdaea.png",
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png",
+        "frames/a12098277070efa2/0546e1eda624299804b8.png",
+        "frames/a12098277070efa2/0546e1eda624299804b8.png"
       ]
     },
     "thinking": {
@@ -90,18 +91,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/707f18962ec44d1d4c8a.png",
-        "frames/5f275211ddd6fec62de9.png",
-        "frames/707f18962ec44d1d4c8a.png",
-        "frames/b3626556fefdc144c27c.png",
-        "frames/5f275211ddd6fec62de9.png",
-        "frames/707f18962ec44d1d4c8a.png",
-        "layers/blink_closed.png",
-        "frames/b3626556fefdc144c27c.png",
-        "frames/5f275211ddd6fec62de9.png",
-        "frames/707f18962ec44d1d4c8a.png",
-        "frames/5f275211ddd6fec62de9.png",
-        "frames/707f18962ec44d1d4c8a.png"
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png",
+        "frames/a12098277070efa2/f204c75b5ebbbf2bdaea.png",
+        "frames/a12098277070efa2/a02e5a34558744f24247.png",
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png",
+        "frames/a12098277070efa2/0546e1eda624299804b8.png",
+        "frames/a12098277070efa2/0546e1eda624299804b8.png",
+        "frames/a12098277070efa2/d4148edee486ffc6fe56.png",
+        "frames/a12098277070efa2/a02e5a34558744f24247.png",
+        "frames/a12098277070efa2/f204c75b5ebbbf2bdaea.png",
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png",
+        "frames/a12098277070efa2/0546e1eda624299804b8.png",
+        "frames/a12098277070efa2/9a8ebdf40510575d4ef0.png"
       ]
     },
     "talking": {
@@ -123,18 +124,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/c6b131f45ec42c9b192b.png",
-        "frames/70067455fad3f96ad36b.png",
-        "frames/b4aec27625f4378146a1.png",
-        "frames/075a1f6026430b6913f4.png",
-        "frames/70067455fad3f96ad36b.png",
-        "frames/c6b131f45ec42c9b192b.png",
-        "frames/b4aec27625f4378146a1.png",
-        "frames/075a1f6026430b6913f4.png",
-        "layers/blink_half.png",
-        "frames/70067455fad3f96ad36b.png",
-        "frames/b4aec27625f4378146a1.png",
-        "frames/c6b131f45ec42c9b192b.png"
+        "frames/a12098277070efa2/d7bc7fa2e8b93a0c82ad.png",
+        "frames/a12098277070efa2/49b4ee7c357b745a449d.png",
+        "frames/a12098277070efa2/ffa653030ce0dd98fe0b.png",
+        "frames/a12098277070efa2/d7bc7fa2e8b93a0c82ad.png",
+        "frames/a12098277070efa2/5886a520bd1977ada8bf.png",
+        "frames/a12098277070efa2/5886a520bd1977ada8bf.png",
+        "frames/a12098277070efa2/ffa653030ce0dd98fe0b.png",
+        "frames/a12098277070efa2/49b4ee7c357b745a449d.png",
+        "frames/a12098277070efa2/a02e5a34558744f24247.png",
+        "frames/a12098277070efa2/d7bc7fa2e8b93a0c82ad.png",
+        "frames/a12098277070efa2/40942d9b790ab81f311c.png",
+        "frames/a12098277070efa2/5886a520bd1977ada8bf.png"
       ]
     },
     "sad": {
@@ -150,13 +151,15 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/014b474d03acf6c52dc0.png",
-        "frames/114415f5809a45d746c9.png",
-        "layers/blink_closed.png",
-        "frames/114415f5809a45d746c9.png",
-        "frames/014b474d03acf6c52dc0.png",
-        "frames/014b474d03acf6c52dc0.png"
+        "frames/a12098277070efa2/b326df2e2a4f536ad5b6.png",
+        "frames/a12098277070efa2/263a4ea31a585262a591.png",
+        "frames/a12098277070efa2/4cd564da5ad4dba2939a.png",
+        "frames/a12098277070efa2/b326df2e2a4f536ad5b6.png",
+        "frames/a12098277070efa2/53649d39e79d5ec1b888.png",
+        "frames/a12098277070efa2/b326df2e2a4f536ad5b6.png"
       ]
     }
-  }
+  },
+  "animationQualityMode": "sharp-expression",
+  "frameGeneration": "a12098277070efa2"
 }

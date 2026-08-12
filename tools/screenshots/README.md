@@ -10,8 +10,8 @@
 - ウィンドウサイズは各表示形式の既定値に合わせています（ペット形式は 900×600）
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
 - 1本あたり 4 秒・12fps・48 コマ。文字送りとキャラクターのモーションがそのまま入ります
-- キャラクター一覧（`character-*.webp`）だけは 6.4 秒・10fps・64 コマ。README では 150px 幅で表示するので、書き出しは 200px に落として 1枚 600KB 前後に収めています
-- **キャラクター一覧は全モーションを通しで見せます。** 返答フローで自然に出るのは会話中と成功だけなので、残り（考え中・照れ・傾聴・落胆・待機）は `step` から実装と同じ `setAnimation()` を呼んで巡回させています。状態の解決も CSS のキーフレームも本物のままです
+- キャラクター一覧（`character-*.webp`）だけは 8.4 秒・10fps・84 コマ。README では 150px 幅で表示するので、書き出しは 200px に落としています
+- **キャラクター一覧は全モーションを通しで見せます。** 返答フローで自然に出るのは会話中と成功だけなので、残り（考え中・照れ・傾聴・落胆・左右視線・待機）は `step` から実装と同じ `setAnimation()` / 差分リグを呼んで巡回させています。状態の解決も CSS のキーフレームも本物のままです
   - 考え中を巡回に入れているのは、`record()` が録画前に時計を10秒進めるため、送信直後の考え中が録画開始時点で終わっているからです
   - 成功を巡回に入れていないのは逆に、返答完了時にアプリ自身が `success` へ入るのが録画の最初に写るからです
 - **口パクはミュート中も会話モーションの開閉フレームで動きます。** 音声がある場合は WebAudio の振幅へ同期する疑似Live2D／Live2D口パクへ切り替わります。キャラクター一覧と Live2D の絵は `voice: true`（`openScene` のオプション）で音節風の振幅を持つ WAV を返させ、実アプリと同じ音声解析経路も確認します。まばたきは音声と無関係に常時動きます（`layers/` を持つキャラのみ）
@@ -42,7 +42,7 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
-| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系7キャラ×8表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
+| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×8表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
 | `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×8形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
 | `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×8形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
@@ -62,7 +62,7 @@ node tools/screenshots/shoot.mjs composer-light.webp
 | `composer-light.webp` | 入力欄とクイック操作 | 次の依頼を 1 文字ずつ打ち込むところ |
 | `fullscreen-light.webp` | 全画面フキダシ（履歴の検索・コピー・再利用・書き出し） | 返答が履歴へ積まれて末尾までスクロールするところ |
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
-| `character-<キャラID>.webp` | README のキャラクター一覧（ミニ形式 360×560、6.4秒・10fps・200px 幅） | 返事のあと、会話中 → 成功 → 考え中 → 照れ → 傾聴 → 落胆 → 待機と全モーションを通しで。`layers/` を持つキャラはまばたきと口パクも入る |
+| `character-<キャラID>.webp` | README のキャラクター一覧（ミニ形式 360×560、8.4秒・10fps・200px 幅） | 返事のあと、会話中 → 成功 → 考え中 → 照れ → 傾聴 → 落胆 → 左右視線 → 待機を通しで。PNGはまばたきと口パクも入る |
 | `layout-shot-*.webp` | 8種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）

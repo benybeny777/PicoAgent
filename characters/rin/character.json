@@ -3,6 +3,7 @@
   "name": "りん",
   "assetVersion": "2026-08-08-preserve-details-v2-rin",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
+  "motionProfile": "full",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
     "sleeping": "boot/sleeping.png"
@@ -66,18 +67,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/86b46a6469c089372ba9.png",
-        "frames/86b46a6469c089372ba9.png",
-        "layers/blink_half.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/7a720127c90797729f3a.png",
-        "frames/7a720127c90797729f3a.png"
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/4032ce0658d4cf8556ed.png",
+        "frames/08184286df66a49f/4032ce0658d4cf8556ed.png",
+        "frames/08184286df66a49f/242aa5fb1fb7a308738a.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png"
       ]
     },
     "thinking": {
@@ -99,18 +100,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/f51b51855b6fbaa0e954.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/7a720127c90797729f3a.png",
-        "frames/7a720127c90797729f3a.png",
-        "layers/blink_half.png",
-        "frames/f51b51855b6fbaa0e954.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/7a720127c90797729f3a.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png"
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/86d498c61b98de766265.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
+        "frames/08184286df66a49f/242aa5fb1fb7a308738a.png",
+        "frames/08184286df66a49f/86d498c61b98de766265.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png"
       ]
     },
     "talking": {
@@ -132,18 +133,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/b69378fe3c6710239d18.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/7a720127c90797729f3a.png",
-        "frames/7a720127c90797729f3a.png",
-        "frames/b69378fe3c6710239d18.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/f51b51855b6fbaa0e954.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "layers/mouth_open.png",
-        "frames/7a720127c90797729f3a.png"
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/b3a2658700712e96014e.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
+        "frames/08184286df66a49f/b3a2658700712e96014e.png",
+        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
+        "frames/08184286df66a49f/86d498c61b98de766265.png",
+        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
+        "frames/08184286df66a49f/6eb0e94ae228f5cb4e9a.png",
+        "frames/08184286df66a49f/1db56fad4eb146f57c46.png"
       ]
     },
     "sad": {
@@ -159,13 +160,14 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/7e2fa7b6aab1d1aee6c9.png",
-        "frames/86b46a6469c089372ba9.png",
-        "frames/86b46a6469c089372ba9.png",
-        "layers/blink_half.png",
-        "frames/4bdb6f84bb6736b0cf6c.png",
-        "frames/7e2fa7b6aab1d1aee6c9.png"
+        "frames/08184286df66a49f/d1a49df5c75eddc55169.png",
+        "frames/08184286df66a49f/17b649b434f22a206a0b.png",
+        "frames/08184286df66a49f/4032ce0658d4cf8556ed.png",
+        "frames/08184286df66a49f/d1a49df5c75eddc55169.png",
+        "frames/08184286df66a49f/404e7310c3415b6a2882.png",
+        "frames/08184286df66a49f/d1a49df5c75eddc55169.png"
       ]
     }
-  }
+  },
+  "frameGeneration": "08184286df66a49f"
 }

@@ -3,6 +3,7 @@
   "name": "こはる",
   "assetVersion": "2026-08-12-highres-motion-v2-koharu",
   "description": "柔らかな茶色のボブとキャメル色の上着が似合う、親しみやすい18歳の作業相棒。",
+  "motionProfile": "full",
   "greeting": "こんにちは、こはるだよ。今日のこと、気軽に話してね。",
   "boot": {
     "sleeping": "preview.png"
@@ -32,10 +33,10 @@
     "type": "bust",
     "centerX": 50,
     "centerY": 34,
-    "radiusX": 16,
-    "radiusY": 10,
-    "strength": 1.05,
-    "duration": 3.8
+    "radiusX": 19,
+    "radiusY": 12,
+    "strength": 0.42,
+    "duration": 4.15
   },
   "animations": {
     "idle": {
@@ -57,18 +58,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/5810bb8da5c0e96e45e2.png",
-        "frames/9b6c4dd42d07a626e485.png",
-        "frames/bb2048bc00af5d410e7d.png",
-        "frames/d4494b2ee52e2211e2b5.png",
-        "layers/blink_half.png",
-        "layers/blink_closed.png",
-        "layers/blink_half.png",
-        "frames/9b6c4dd42d07a626e485.png",
-        "frames/5810bb8da5c0e96e45e2.png",
-        "frames/d4494b2ee52e2211e2b5.png",
-        "frames/bb2048bc00af5d410e7d.png",
-        "frames/5810bb8da5c0e96e45e2.png"
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/0876525a70f6d144cda6.png",
+        "frames/1c0180f6a28dd78d/669b7a4ac553455e1162.png",
+        "frames/1c0180f6a28dd78d/5f972c968c62deef5388.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png"
       ]
     },
     "thinking": {
@@ -90,18 +91,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/d97033b42a5ccf780f59.png",
-        "frames/eef9fd94c1a8d8c80a50.png",
-        "frames/d97033b42a5ccf780f59.png",
-        "frames/c8b4e646dc97eec769d1.png",
-        "frames/eef9fd94c1a8d8c80a50.png",
-        "frames/d97033b42a5ccf780f59.png",
-        "layers/blink_closed.png",
-        "frames/c8b4e646dc97eec769d1.png",
-        "frames/eef9fd94c1a8d8c80a50.png",
-        "frames/d97033b42a5ccf780f59.png",
-        "frames/eef9fd94c1a8d8c80a50.png",
-        "frames/d97033b42a5ccf780f59.png"
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/bb1c5080c128e741ea58.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png",
+        "frames/1c0180f6a28dd78d/04188123835007469bf0.png",
+        "frames/1c0180f6a28dd78d/bb1c5080c128e741ea58.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png"
       ]
     },
     "talking": {
@@ -123,18 +124,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/5d97ff0f7dc18a07f7a7.png",
-        "frames/4b22bfc2c06ade049251.png",
-        "frames/f7608150c661e5210ca4.png",
-        "frames/5828777713475ad70445.png",
-        "frames/4b22bfc2c06ade049251.png",
-        "frames/5d97ff0f7dc18a07f7a7.png",
-        "frames/f7608150c661e5210ca4.png",
-        "frames/5828777713475ad70445.png",
-        "layers/blink_half.png",
-        "frames/4b22bfc2c06ade049251.png",
-        "frames/f7608150c661e5210ca4.png",
-        "frames/5d97ff0f7dc18a07f7a7.png"
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/49970d0fb9ef8c9716db.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png",
+        "frames/1c0180f6a28dd78d/49970d0fb9ef8c9716db.png",
+        "frames/1c0180f6a28dd78d/33ca850ea1ef70030873.png",
+        "frames/1c0180f6a28dd78d/bb1c5080c128e741ea58.png",
+        "frames/1c0180f6a28dd78d/eefb469d9e783ec54771.png",
+        "frames/1c0180f6a28dd78d/9dd0336bd45fc3e1b83f.png",
+        "frames/1c0180f6a28dd78d/624e4d450005720ab646.png"
       ]
     },
     "sad": {
@@ -150,13 +151,15 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/cd947cc31160ee00ed52.png",
-        "frames/a8f7a5043105e0c9617f.png",
-        "layers/blink_closed.png",
-        "frames/a8f7a5043105e0c9617f.png",
-        "frames/cd947cc31160ee00ed52.png",
-        "frames/cd947cc31160ee00ed52.png"
+        "frames/1c0180f6a28dd78d/e68db3ecf5d58e97b7a4.png",
+        "frames/1c0180f6a28dd78d/139c401889592f78c011.png",
+        "frames/1c0180f6a28dd78d/669b7a4ac553455e1162.png",
+        "frames/1c0180f6a28dd78d/e68db3ecf5d58e97b7a4.png",
+        "frames/1c0180f6a28dd78d/9f2d83f87e6d89974211.png",
+        "frames/1c0180f6a28dd78d/e68db3ecf5d58e97b7a4.png"
       ]
     }
-  }
+  },
+  "animationQualityMode": "sharp-expression",
+  "frameGeneration": "1c0180f6a28dd78d"
 }

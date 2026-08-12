@@ -83,6 +83,12 @@
       "id": "rin-tha3",
       "manifest": "rin-tha3/character.json",
       "name": "りん"
+    },
+    {
+      "description": "黒髪と黒系ファッションの、実写調で制作した成人の試作キャラクター。",
+      "id": "photoreal-prototype",
+      "manifest": "photoreal-prototype/character.json",
+      "name": "実写（試作）"
     }
   ],
   "default": "mugi"

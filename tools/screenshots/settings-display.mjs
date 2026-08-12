@@ -89,8 +89,7 @@ try {
   const selectedValue = await page.locator("select.layout-native-select").inputValue();
   if (selectedValue !== "chat") throw new Error(`カード選択が設定値へ反映されません: ${selectedValue}`);
   await page.getByTitle("配信へ変更").click();
-  const placementCount = await page.locator(".placement-actions button").count();
-  if (placementCount !== 4) throw new Error(`画面配置ボタンが4件ではありません: ${placementCount}`);
+  if (await page.getByText("表示するモニター", { exact: true }).count()) throw new Error("不要なモニター指定欄が残っています");
   if (await page.locator(".layout-live-preview img").count() !== 1) throw new Error("選択中レイアウトの大型プレビューがありません");
   if (await page.locator('[data-setting-key="PICOAGENT_STREAM_BACKGROUND"]').count() !== 1) throw new Error("配信背景の選択欄がありません");
   const previewHeight = await page.locator(".layout-live-preview img").evaluate(node => node.getBoundingClientRect().height);
@@ -180,7 +179,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

@@ -3,6 +3,7 @@
   "name": "りん",
   "assetVersion": "2026-08-08-preserve-details-v2-rin-tha3",
   "description": "自作（THA3）版。既存のりんとは別キャラクターとして扱われる、17キーポーズ／42フレームの試作モデル。人格・声・挨拶は既存のりんと同じ。",
+  "motionProfile": "full",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
     "sleeping": "boot/sleeping.png"
@@ -66,18 +67,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/a8bbb23d05153878d1e4.png",
-        "frames/4a8fc80e12e2b3d3ab81.png",
-        "frames/263e384029699a3e4025.png",
-        "frames/86495d6b4768c5ae5f48.png",
-        "layers/blink_half.png",
-        "layers/blink_closed.png",
-        "layers/blink_half.png",
-        "frames/4a8fc80e12e2b3d3ab81.png",
-        "frames/a8bbb23d05153878d1e4.png",
-        "frames/86495d6b4768c5ae5f48.png",
-        "frames/263e384029699a3e4025.png",
-        "frames/a8bbb23d05153878d1e4.png"
+        "frames/da9b2d24e2f0ca1e/9eed4e5b89e37cba82bd.png",
+        "frames/da9b2d24e2f0ca1e/e089b0f8d6e83417cd77.png",
+        "frames/da9b2d24e2f0ca1e/51fad4c8f476a161881b.png",
+        "frames/da9b2d24e2f0ca1e/3b61657a3f48680ccc7e.png",
+        "frames/da9b2d24e2f0ca1e/99daf78f95b55e932a8c.png",
+        "frames/da9b2d24e2f0ca1e/9c99ee857d383f24aedc.png",
+        "frames/da9b2d24e2f0ca1e/99daf78f95b55e932a8c.png",
+        "frames/da9b2d24e2f0ca1e/e089b0f8d6e83417cd77.png",
+        "frames/da9b2d24e2f0ca1e/9eed4e5b89e37cba82bd.png",
+        "frames/da9b2d24e2f0ca1e/3b61657a3f48680ccc7e.png",
+        "frames/da9b2d24e2f0ca1e/51fad4c8f476a161881b.png",
+        "frames/da9b2d24e2f0ca1e/9eed4e5b89e37cba82bd.png"
       ]
     },
     "thinking": {
@@ -99,18 +100,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/440fda09e4cf68adbc70.png",
-        "frames/a04203958abd13d5039d.png",
-        "frames/440fda09e4cf68adbc70.png",
-        "frames/dd67a2c0867f6fc85a69.png",
-        "frames/a04203958abd13d5039d.png",
-        "frames/440fda09e4cf68adbc70.png",
-        "layers/blink_closed.png",
-        "frames/dd67a2c0867f6fc85a69.png",
-        "frames/a04203958abd13d5039d.png",
-        "frames/440fda09e4cf68adbc70.png",
-        "frames/a04203958abd13d5039d.png",
-        "frames/440fda09e4cf68adbc70.png"
+        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
+        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
+        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
+        "frames/da9b2d24e2f0ca1e/21ba5c245eb5c8e97ef2.png",
+        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
+        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
+        "frames/da9b2d24e2f0ca1e/9c99ee857d383f24aedc.png",
+        "frames/da9b2d24e2f0ca1e/21ba5c245eb5c8e97ef2.png",
+        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
+        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
+        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
+        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png"
       ]
     },
     "talking": {
@@ -132,18 +133,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/205973fff29c90920330.png",
-        "frames/7a68102ccbcf031e2bd2.png",
-        "frames/4f2610891066ca82bd01.png",
-        "frames/a173694ce75c36e9bfb9.png",
-        "frames/7a68102ccbcf031e2bd2.png",
-        "frames/205973fff29c90920330.png",
-        "frames/4f2610891066ca82bd01.png",
-        "frames/a173694ce75c36e9bfb9.png",
-        "layers/blink_half.png",
-        "frames/7a68102ccbcf031e2bd2.png",
-        "frames/4f2610891066ca82bd01.png",
-        "frames/205973fff29c90920330.png"
+        "frames/da9b2d24e2f0ca1e/b7eccb88eb0180270aa7.png",
+        "frames/da9b2d24e2f0ca1e/fb58eeca84389080519e.png",
+        "frames/da9b2d24e2f0ca1e/f529f2aeb6c4cd6afbaa.png",
+        "frames/da9b2d24e2f0ca1e/a36c0207e71a6c783a1b.png",
+        "frames/da9b2d24e2f0ca1e/fb58eeca84389080519e.png",
+        "frames/da9b2d24e2f0ca1e/b7eccb88eb0180270aa7.png",
+        "frames/da9b2d24e2f0ca1e/f529f2aeb6c4cd6afbaa.png",
+        "frames/da9b2d24e2f0ca1e/a36c0207e71a6c783a1b.png",
+        "frames/da9b2d24e2f0ca1e/99daf78f95b55e932a8c.png",
+        "frames/da9b2d24e2f0ca1e/fb58eeca84389080519e.png",
+        "frames/da9b2d24e2f0ca1e/f529f2aeb6c4cd6afbaa.png",
+        "frames/da9b2d24e2f0ca1e/b7eccb88eb0180270aa7.png"
       ]
     },
     "sad": {
@@ -159,12 +160,12 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/999c188ae15a62fa1d09.png",
-        "frames/37f3251b59df802af26f.png",
-        "layers/blink_closed.png",
-        "frames/37f3251b59df802af26f.png",
-        "frames/999c188ae15a62fa1d09.png",
-        "frames/999c188ae15a62fa1d09.png"
+        "frames/da9b2d24e2f0ca1e/45d11a0b1bea1092bea0.png",
+        "frames/da9b2d24e2f0ca1e/2eea6958041fca2e1fde.png",
+        "frames/da9b2d24e2f0ca1e/9c99ee857d383f24aedc.png",
+        "frames/da9b2d24e2f0ca1e/2eea6958041fca2e1fde.png",
+        "frames/da9b2d24e2f0ca1e/45d11a0b1bea1092bea0.png",
+        "frames/da9b2d24e2f0ca1e/45d11a0b1bea1092bea0.png"
       ]
     }
   },
@@ -174,5 +175,6 @@
     "model": "standard_half",
     "source": "source.png",
     "keyPoseCount": 17
-  }
+  },
+  "frameGeneration": "da9b2d24e2f0ca1e"
 }

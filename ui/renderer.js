@@ -720,10 +720,14 @@ function configureSecondaryMotion(config) {
   characterSecondaryMotion.style.setProperty("--secondary-center-y", `${centerY}%`);
   characterSecondaryMotion.style.setProperty("--secondary-radius-x", `${radiusX}%`);
   characterSecondaryMotion.style.setProperty("--secondary-radius-y", `${radiusY}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-rise", `${(-1.45 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-settle", `${(0.65 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-return", `${(-0.35 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-expand", (1 + 0.008 * strength).toFixed(4));
+  // 同じ全身画像の局所複製なので、大きな移動・拡大はマスク境界を別パーツのように見せる。
+  // 横幅より縦方向を中心にごく小さく変形し、広いフェザーで本体へ馴染ませる。
+  characterSecondaryMotion.style.setProperty("--secondary-rise", `${(-0.9 * strength).toFixed(2)}px`);
+  characterSecondaryMotion.style.setProperty("--secondary-settle", `${(0.42 * strength).toFixed(2)}px`);
+  characterSecondaryMotion.style.setProperty("--secondary-return", `${(-0.24 * strength).toFixed(2)}px`);
+  characterSecondaryMotion.style.setProperty("--secondary-expand-x", (1 + 0.0012 * strength).toFixed(4));
+  characterSecondaryMotion.style.setProperty("--secondary-expand", (1 + 0.0065 * strength).toFixed(4));
+  characterSecondaryMotion.style.setProperty("--secondary-contract", (1 - 0.0028 * strength).toFixed(4));
   characterSecondaryMotion.style.setProperty("--secondary-duration", `${duration}s`);
   updateSecondaryMotionVisibility();
 }
@@ -847,11 +851,11 @@ function setAnimation(name, force = false) {
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
-  // layers を持つキャラは待機・返答状態を常時リグ描画にする（Live2D 風の常時まばたき）。
-  // 音声が無い会話中は連番の talking を使う。差分リグは音声振幅が無いと
-  // 閉口のままなので、ミュート中の返答が「口パクしない」ように見えていた。
-  if (rigAvailable && !reduceMotion && (animationName === "idle" || (animationName === "talking" && currentVoice))) {
+  // layers を持つキャラは待機・返答状態を常時リグ描画にする。返答中はミュートでも
+  // タイマー式の口パクを開始し、音声出力の有無で見た目が止まらないようにする。
+  if (rigAvailable && (animationName === "idle" || animationName === "talking")) {
     startRig();
+    if (animationName === "talking" && !currentVoice) startSilentLipSync();
     return;
   }
   stopRig();
@@ -865,7 +869,13 @@ function frameDuration(animation, index) {
 function animate(now) {
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
   if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
-  if (reduceMotion) { if (animations.idle) petSprite.src = frameUrl("idle", 0); return; }
+  // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
+  // 待機・思考などの装飾モーションだけを先頭フレームへ止め、ループ自体は継続する。
+  if (reduceMotion && animationName !== "talking") {
+    if (!rigActive && animations[animationName]) petSprite.src = frameUrl(animationName, 0);
+    animationRequestId = requestAnimationFrame(animate);
+    return;
+  }
   // リグ動作中・居眠り中はフレーム送りを止める（それぞれ差分絵・寝姿を表示している）。
   if (rigActive || napping) { animationRequestId = requestAnimationFrame(animate); return; }
   const animation = animations[animationName] || animations.idle;
@@ -902,6 +912,21 @@ let rigSource = null;
 let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
 
+function startSilentLipSync() {
+  if (!rigActive || animationName !== "talking" || currentVoice || rigMouthTimer) return;
+  rigMouthTimer = setInterval(() => {
+    if (!rigActive || animationName !== "talking" || currentVoice) {
+      clearInterval(rigMouthTimer);
+      rigMouthTimer = 0;
+      rigMouthOpen = false;
+      rigRefresh();
+      return;
+    }
+    rigMouthOpen = !rigMouthOpen;
+    rigRefresh();
+  }, 150);
+}
+
 function layerUrl(name) {
   const url = `${characterRoot}/layers/${name}.png`;
   return characterAssetVersion ? `${url}?v=${encodeURIComponent(characterAssetVersion)}` : url;
@@ -922,7 +947,7 @@ async function probeRigLayers() {
   const results = await Promise.all(names.map(probe));
   rigAvailable = results.every(Boolean);
   if (rigAvailable) {
-    const gazeResults = await Promise.all(["thinking_left", "thinking_right"].map(probe));
+    const gazeResults = await Promise.all(["gaze_left", "gaze_right"].map(probe));
     rigGazeAvailable = gazeResults.every(Boolean);
   }
   retryPendingLipSync(); // 素材の判定待ちで保留していた読み上げへ口パクを付ける
@@ -934,9 +959,10 @@ async function probeRigLayers() {
 function rigRefresh() {
   if (!rigActive) return;
   const gazing = rigGazeAvailable && !currentVoice && animationName === "idle" && rigLookDirection !== 0;
-  const gaze = gazing ? (rigLookDirection < 0 ? "thinking_left" : "thinking_right") : "mouth_closed";
+  const gaze = gazing ? (rigLookDirection < 0 ? "gaze_left" : "gaze_right") : "mouth_closed";
   const blink = gazing ? null : rigBlinkPhase;
-  const name = blink || (rigMouthOpen ? "mouth_open" : gaze);
+  const happy = ["success", "pleased", "shy"].includes(character.dataset.motion) ? "expression_happy" : null;
+  const name = blink || (rigMouthOpen ? "mouth_open" : (happy || gaze));
   if (rigFace === name) return;
   rigFace = name;
   petSprite.src = layerUrl(name);
@@ -1021,12 +1047,6 @@ function retryPendingLipSync() {
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
-  // 口が動かない原因を後から追えるようにする（OS の「アニメーションを減らす」が入っていると
-  // Live2D は口だけでなく視線・モーションもすべて止まる）。
-  if (reduceMotion) {
-    logApp("info", "リップシンクを行いません", "OSの「アニメーションを減らす」設定が有効です");
-    return;
-  }
   if (!rigAvailable && !live2dActive) {
     logApp("info", "リップシンクを保留しました", "キャラクターの表示準備が終わってから接続します");
     pendingLipSyncAudio = audio;
@@ -1135,7 +1155,7 @@ function stopRig() {
 // 音声解析だけ解除し、リグ非対応キャラのみ完全に終了してフレーム表示へ戻す。
 function stopLipSync() {
   if (live2dActive) { detachLipSyncAudio(); return; }
-  if (rigAvailable && !reduceMotion) { detachLipSyncAudio(); return; }
+  if (rigAvailable) { detachLipSyncAudio(); return; }
   const wasActive = rigActive;
   stopRig();
   if (wasActive && animations[animationName]) petSprite.src = frameUrl(animationName, frame);
@@ -3764,7 +3784,12 @@ const FRAMING_PRESETS = {
 function applyCharacterFraming() {
   const characterId = characterManifest?.id;
   const saved = characterId && characterFraming?.[characterId]?.[currentLayout];
-  if (!saved) return;
+  // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
+  // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
+  if (!saved) {
+    applyCharacterOffset(0, 0, { clamp: false });
+    return;
+  }
   const preset = FRAMING_PRESETS[saved.preset] || null;
   const frame = preset || saved;
   applyCharacterZoom(saved.zoom ?? frame.zoom ?? 1.55);
@@ -3790,8 +3815,9 @@ character.addEventListener("pointerdown", event => {
   window.picoagent.startWindowDrag();
 });
 
-// ウィンドウの大きさや表示形式が変わると枠の位置も変わる。見えなくならないよう丸め直す。
-window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y));
+// 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
+// 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
+window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false }));
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];

@@ -1,7 +1,7 @@
 {
   "channel": "direct",
   "platforms": ["windows"],
-  "includedCharacters": ["mugi", "rin", "mai", "koharu", "sena", "noa"],
+  "includedCharacters": ["mugi", "rin", "mai", "koharu", "sena", "noa", "photoreal-prototype"],
   "legal": {
     "eulaReviewed": false,
     "privacyReviewed": false,

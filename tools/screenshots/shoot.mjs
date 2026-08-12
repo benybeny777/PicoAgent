@@ -101,6 +101,7 @@ window.__previewVoice = (() => {
   return [...new Uint8Array(buffer)];
 })();
 window.__listeners = {};
+window.__startDraggingCalls = 0;
 window.__bootReadyAt = Date.now() + ${JSON.stringify(bootHoldMs)};
 window.__TAURI__ = {
   core: { invoke: (name) => {
@@ -138,7 +139,7 @@ window.__TAURI__ = {
     return Promise.resolve(() => { const i = a.indexOf(cb); if (i >= 0) a.splice(i, 1); }); } },
   window: { getCurrentWindow: () => ({ setFullscreen: async () => {}, setSize: async () => {},
     scaleFactor: async () => 1, outerPosition: async () => ({ x: 0, y: 0 }), setPosition: async () => {},
-    startDragging: async () => {} }) },
+    startDragging: async () => { window.__startDraggingCalls += 1; } }) },
   dpi: {},
 };
 `;
@@ -249,9 +250,10 @@ function unionBounds(boxes) {
 async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
-  bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true,
+  bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
   // 「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
@@ -288,7 +290,7 @@ async function shootCharacterMatrix() {
   const warnings = [];
   const selectedCharacters = process.env.SHOOT_CHARACTER_IDS
     ? process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean)
-    : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa"];
+    : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa", "photoreal-prototype"];
   for (const characterId of selectedCharacters) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
       const started = performance.now();
@@ -414,6 +416,13 @@ async function validateInteractionMatrix() {
         if (!target.forcePng) {
           await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
         }
+        await page.locator("#character").dispatchEvent("pointerdown", { button: 0, pointerType: "mouse" });
+        if (await page.evaluate(() => window.__startDraggingCalls) < 1) {
+          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグがウィンドウ移動へ渡りません`);
+        }
+        if (!await page.locator("#petSprite").evaluate((node) => node.hasAttribute("data-tauri-drag-region"))) {
+          throw new Error(`${target.id}/${layout}: キャラ画像にTauriドラッグ領域がありません`);
+        }
         await page.evaluate(() => {
           if (typeof openComposer === "function") openComposer();
           const composer = document.getElementById("composer");
@@ -457,6 +466,60 @@ async function validateInteractionMatrix() {
         await page.close();
       }
     }
+  }
+  const reducedPage = await openScene({ characterId: "mugi", forcePng: true, reducedMotion: true });
+  try {
+    await reducedPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, { timeout: 20000 });
+    const blinkApplied = await reducedPage.evaluate(() => {
+      rigBlinkPhase = "blink_closed";
+      rigRefresh();
+      return petSprite.src.includes("blink_closed");
+    });
+    if (!blinkApplied) throw new Error("アニメーションを減らす設定でまばたき差分が反映されません");
+    const firstTalkingFrame = await reducedPage.evaluate(() => {
+      rigBlinkPhase = null;
+      setAnimation("talking", true);
+      return petSprite.src;
+    });
+    await reducedPage.waitForFunction(
+      (initialSrc) => petSprite.src !== initialSrc,
+      firstTalkingFrame,
+      { timeout: 2000 },
+    );
+    console.log("  reduced-motion検査: まばたき・ミュート口パクOK");
+  } finally {
+    await reducedPage.close();
+  }
+  const resizePage = await openScene({ characterId: "mugi", forcePng: true, width: 900, height: 600 });
+  try {
+    const beforeResize = await resizePage.evaluate(() => {
+      applyCharacterOffset(137, -43, { clamp: false });
+      return { ...characterOffset };
+    });
+    await resizePage.setViewportSize({ width: 1800, height: 1000 });
+    await resizePage.setViewportSize({ width: 900, height: 600 });
+    const afterResize = await resizePage.evaluate(() => ({ ...characterOffset }));
+    if (afterResize.x !== beforeResize.x || afterResize.y !== beforeResize.y) {
+      throw new Error(`最大化・復元相当のサイズ変更でキャラ位置が変わりました: ${JSON.stringify({ beforeResize, afterResize })}`);
+    }
+    console.log("  サイズ変更検査: キャラ位置維持OK");
+  } finally {
+    await resizePage.close();
+  }
+  const staleOffsetPage = await openScene({ characterId: "sena", forcePng: true, layout: "stream" });
+  try {
+    const resetOffset = await staleOffsetPage.evaluate(() => {
+      characterFraming = { hiyori: { stream: { preset: "custom", x: -386, y: 159, zoom: 1.55 } } };
+      applyCharacterOffset(-386, 159, { clamp: false });
+      applyCharacterFraming();
+      return { ...characterOffset };
+    });
+    if (resetOffset.x !== 0 || resetOffset.y !== 0) {
+      throw new Error(`別キャラの旧位置を引き継いでいます: ${JSON.stringify(resetOffset)}`);
+    }
+    console.log("  キャラ切替検査: 別キャラの旧位置を引き継がない");
+  } finally {
+    await staleOffsetPage.close();
   }
   await writeFile(join(output, "results.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
   return { output, results };
@@ -771,7 +834,7 @@ async function validateLive2dSdkModels() {
 const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
-const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 6.4, fps: 10, outputWidth: 200, voice: true };
+const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 8.4, fps: 10, outputWidth: 200, voice: true };
 
 // 前半は返答フローそのまま（文字送り → 会話中＋口パク → 成功）。後半で、返答フローでは
 // 出てこないモーションへ順に切り替える。実装と同じ `setAnimation()` を呼ぶだけなので、
@@ -787,7 +850,10 @@ const GALLERY_TOUR = [
   [2900, "shy"],       // 照れ（pet-shy 1.6s）
   [3900, "listening"], // 傾聴（pet-listening 1.25s）
   [4900, "sad"],       // 落胆（pet-live2d-sad / pet-sad）
-  [5900, "idle"],      // 待機へ戻す（無限ループの継ぎ目を呼吸で揃える）
+  [5900, "idle"],      // 待機へ戻す
+  [6400, "gaze-left"], // PNGは左視線、Live2Dは待機を継続
+  [7100, "gaze-right"],// PNGは右視線、Live2Dは待機を継続
+  [7800, "idle"],      // 無限ループの継ぎ目を呼吸で揃える
 ];
 
 // 毎コマ呼んで構わない。`setAnimation()` は同じ状態なら早期 return するので、
@@ -798,8 +864,20 @@ const galleryStep = async (page, index) => {
   // SHOOT_DEBUG_MOTION=1 で、実際に適用された data-motion を毎コマ出す
   // （巡回を足しても「切り替わったつもり」で撮れてしまうのを防ぐ）。
   const applied = await page.evaluate(name => {
-    if (name) setAnimation(name);
-    return document.getElementById("character")?.dataset.motion || "";
+    if (name === "gaze-left" || name === "gaze-right") {
+      setAnimation("idle");
+      if (typeof live2dActive === "undefined" || !live2dActive) {
+        rigLookDirection = name === "gaze-left" ? -1 : 1;
+        rigRefresh();
+      }
+    } else if (name) {
+      setAnimation(name);
+      if (typeof live2dActive === "undefined" || !live2dActive) {
+        rigLookDirection = 0;
+        rigRefresh();
+      }
+    }
+    return `${document.getElementById("character")?.dataset.motion || ""}/${name || "reply"}`;
   }, current ? current[1] : null);
   if (process.env.SHOOT_DEBUG_MOTION) console.log(`    ${String(elapsedMs).padStart(5)}ms  data-motion=${applied}`);
 };
@@ -828,6 +906,7 @@ const GALLERY = [
   ["sena", "おはよう。今日のステージも、きれいに仕上げようか。"],
   ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
   ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
+  ["photoreal-prototype", "こんにちは。焦らず、今日やることから一緒に整理しましょう。"],
   ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", true],
   ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", true],
   ["epsilon", "動作確認でも、作業の整理でも、必要なところから始めましょう。", true],
