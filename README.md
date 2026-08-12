@@ -103,6 +103,8 @@
 
 ### 起動
 
+Windowsでは、リポジトリ直下の **`PicoAgentを起動.bat`** をダブルクリックすれば起動できます。BATは自身の置かれたフォルダへ移動してから、下記と同じ正規の開発起動を実行します。起動中に開く黒い画面はPicoAgentを終了するまで閉じないでください。
+
 ```bash
 cargo install tauri-cli --version '^2'   # 初回だけ
 cargo xtask dev
