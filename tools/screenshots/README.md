@@ -11,6 +11,7 @@
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
 - 1本あたり 4 秒・12fps・48 コマ。文字送りとキャラクターのモーションがそのまま入ります
 - キャラクター一覧（`character-*.webp`）だけは 3 秒・10fps・30 コマ。1枚あたり 400KB 前後に収めるためです
+- **口パクは `pet_speak` が音声を返したときだけ動きます。** モックは既定で `{enabled:false}` を返すため、口は閉じたままになります。キャラクター一覧と Live2D の絵は `voice: true`（`openScene` のオプション）で音節風の振幅を持つ WAV を返させ、実アプリと同じ WebAudio 解析の経路を通しています。まばたきは音声と無関係に常時動きます（`layers/` を持つキャラのみ）
 - **ffmpeg は WebP エンコーダ（`libwebp_anim`）付きのものが要ります。** Playwright 同梱の ffmpeg は最小構成で WebP を持たないため使えません（`SHOOT_FFMPEG` に指定すると入力オープンで失敗します）
 
 ## 使い方
@@ -57,7 +58,7 @@ node tools/screenshots/shoot.mjs composer-light.webp
 | `composer-light.webp` | 入力欄とクイック操作 | 次の依頼を 1 文字ずつ打ち込むところ |
 | `fullscreen-light.webp` | 全画面フキダシ（履歴の検索・コピー・再利用・書き出し） | 返答が履歴へ積まれて末尾までスクロールするところ |
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
-| `character-<キャラID>.webp` | README のキャラクター一覧（ミニ形式 360×560、3秒・10fps・260px 幅） | 同じ問いかけへの返事を、キャラごとの口調と待機モーションで |
+| `character-<キャラID>.webp` | README のキャラクター一覧（ミニ形式 360×560、3秒・10fps・260px 幅） | 同じ問いかけへの返事を、キャラごとの口調と待機モーションで。`layers/` を持つキャラはまばたきと口パクも入る |
 | `layout-shot-*.webp` | 8種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）

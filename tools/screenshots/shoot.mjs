@@ -77,7 +77,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone }) => `
+const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -118,7 +118,7 @@ window.__TAURI__ = {
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
     if (name === "aivis_status") return Promise.resolve({ enabled: true, up: Date.now() >= window.__bootReadyAt });
     if (name === "pet_speak") return Promise.resolve(
-      ${JSON.stringify(characterId)} === "hiyori"
+      ${JSON.stringify(Boolean(voice))} || ${JSON.stringify(characterId)} === "hiyori"
         ? { enabled: true, mime: "audio/wav", audio: window.__previewVoice }
         : { enabled: false },
     );
@@ -248,7 +248,7 @@ function unionBounds(boxes) {
 // ペット形式の既定寸法。各レイアウト画像はそれぞれの実寸で撮る。
 async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
-  reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0,
+  reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
@@ -256,7 +256,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice }));
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -769,7 +769,9 @@ async function validateLive2dSdkModels() {
 // README のキャラクター一覧。同じ問いかけへの返事を、キャラごとの口調で見せる。
 // 寸法はミニ形式（360x560）。キャラが主役の形式なので一覧に並べたときに見分けやすい。
 const GALLERY_ASK = "おはよう。今日もよろしくね";
-const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 3, fps: 10, outputWidth: 260 };
+// voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
+// `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
+const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 3, fps: 10, outputWidth: 260, voice: true };
 
 // 一覧の Live2D キャラは「描画が始まっていること」だけ確かめる。
 // `prepareLive2D` の口パク検査は寸法とモデルがひより固定なので、ここでは通さない
