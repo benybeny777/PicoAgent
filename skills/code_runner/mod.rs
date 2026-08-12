@@ -85,8 +85,15 @@ impl Tool for CodeRunnerTool {
         "自力実行（コード実行）"
     }
 
+    // OSレベルのサンドボックスが無い任意コードをモデルへ公開すると、cwd の検査だけでは
+    // 許可ルート外の読書きや難読化した削除を防げない。安全な隔離実行を用意するまで
+    // エージェントのツール一覧には出さない。
+    fn agent_callable(&self) -> bool {
+        false
+    }
+
     fn description(&self) -> String {
-        "他のスキルでは要望を満たせないときの最終手段。PowerShell または Python のスクリプトを書いて実行し、標準出力・エラー・終了コードを受け取って自力でタスクを達成する。既定では無効。物理削除系のコードは拒否される。".to_string()
+        "安全な隔離実行を準備中のため、現在はエージェントから呼び出せない内部機能。".to_string()
     }
 
     fn parameters(&self) -> Value {

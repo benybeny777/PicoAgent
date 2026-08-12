@@ -116,9 +116,11 @@ pub fn tool_requires_pro(name: &str) -> bool {
             name,
             "app_control"
                 | "browser_control"
+                | "bluesky"
                 | "code_runner"
                 | "command_job"
                 | "desktop_control"
+                | "discord_send_message"
                 | "document_convert"
                 | "edit_file"
                 | "gmail_message"
@@ -129,7 +131,12 @@ pub fn tool_requires_pro(name: &str) -> bool {
                 | "google_tasks"
                 | "github"
                 | "http_api"
+                | "jira"
+                | "linear"
+                | "linkedin"
+                | "mastodon"
                 | "meeting_recorder"
+                | "misskey"
                 | "microsoft_graph"
                 | "ms_office"
                 | "notion"
@@ -140,9 +147,11 @@ pub fn tool_requires_pro(name: &str) -> bool {
                 | "subagent"
                 | "task_scheduler"
                 | "todoist"
+                | "trello"
                 | "trash_file"
                 | "workflow"
                 | "workspace_files"
+                | "x_twitter"
         )
 }
 

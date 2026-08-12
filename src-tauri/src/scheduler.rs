@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::config::Config;
 
 pub const CONFIG_KEY: &str = "PICOAGENT_SCHEDULED_TASKS";
+pub const TOOL_ALLOWLIST_KEY: &str = "PICOAGENT_SCHEDULED_TOOL_ALLOWLIST";
+const DEFAULT_TOOL_ALLOWLIST: &str = "time,weather,web_fetch";
 const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
 const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
@@ -80,15 +82,6 @@ pub struct ScheduledRunRecord {
     pub ok: bool,
     pub at: String,
     pub body: String,
-}
-
-// 実行の許可ルートは全スキル共通の permissions を参照する。
-fn command_root(cfg: &Config) -> PathBuf {
-    crate::permissions::primary_root(cfg)
-}
-
-fn command_roots(cfg: &Config) -> Vec<PathBuf> {
-    crate::permissions::allowed_roots(cfg)
 }
 
 fn default_kind() -> String {
@@ -253,38 +246,9 @@ fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
     }
 }
 
-fn normalize(base: &Path, input: &str) -> PathBuf {
-    let joined = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        base.join(input)
-    };
-    let mut out = PathBuf::new();
-    for comp in joined.components() {
-        use std::path::Component::*;
-        match comp {
-            ParentDir => {
-                out.pop();
-            }
-            CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn bounded_cwd(base: &Path, roots: Vec<PathBuf>, cwd: &str) -> Result<PathBuf, String> {
-    let target = normalize(base, if cwd.trim().is_empty() { "." } else { cwd });
-    for root in roots {
-        let root = normalize(&root, ".");
-        if target == root || target.starts_with(&root) {
-            return Ok(target);
-        }
-    }
-    Err(format!(
-        "許可ルートの外では実行できません: {}",
-        target.display()
-    ))
+fn bounded_cwd(cfg: &Config, cwd: &str) -> Result<PathBuf, String> {
+    crate::permissions::resolve(cfg, if cwd.trim().is_empty() { "." } else { cwd })
+        .map(|path| path.as_path().to_path_buf())
 }
 
 fn is_protected_edit_path(path: &Path) -> bool {
@@ -318,13 +282,7 @@ fn allowlist_entries(cfg: &Config) -> Vec<Vec<String>> {
 
 fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
     let tokens = command_tokens(program, args);
-    allowlist_entries(cfg).iter().any(|entry| {
-        entry.len() <= tokens.len()
-            && entry
-                .iter()
-                .zip(tokens.iter())
-                .all(|(allowed, actual)| allowed == actual)
-    })
+    allowlist_entries(cfg).iter().any(|entry| entry == &tokens)
 }
 
 fn validate_args(args: &[String]) -> Result<(), String> {
@@ -380,6 +338,18 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
                     "task_scheduler 自身をスケジュール実行することはできません。".to_string(),
                 );
             }
+            let allowed = cfg
+                .get(TOOL_ALLOWLIST_KEY, DEFAULT_TOOL_ALLOWLIST)
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .any(|name| name == task.tool_name);
+            if !allowed {
+                return Err(format!(
+                    "スケジュール実行を許可されていないスキルです: {}。設定の {} で明示的に許可してください。",
+                    task.tool_name, TOOL_ALLOWLIST_KEY
+                ));
+            }
             if !task.tool_args.is_object() {
                 return Err("tool_args は JSON オブジェクトで指定してください。".to_string());
             }
@@ -430,8 +400,7 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
     if let Err(error) = validate_task(cfg, task) {
         return format!("エラー: {error}");
     }
-    let base = command_root(cfg);
-    let cwd = match bounded_cwd(&base, command_roots(cfg), &task.cwd) {
+    let cwd = match bounded_cwd(cfg, &task.cwd) {
         Ok(cwd) => cwd,
         Err(error) => return format!("エラー: {error}"),
     };
@@ -784,6 +753,26 @@ mod tests {
         task.program = "git".to_string();
         task.args = vec!["status".to_string()];
         cfg.set("PICOAGENT_COMMAND_ALLOWLIST", "git status");
+        assert!(validate_task(&cfg, &task).is_ok());
+    }
+
+    #[test]
+    fn 無人実行するスキルは専用allowlistへ完全一致が必要() {
+        let cfg = crate::config::Config::new();
+        let mut task = 固定時刻タスク("07:05");
+        task.kind = "tool".to_string();
+        task.tool_name = "gmail_message".to_string();
+        task.tool_args = serde_json::json!({"action": "send"});
+        assert!(validate_task(&cfg, &task)
+            .unwrap_err()
+            .contains("許可されていないスキル"));
+
+        cfg.set(super::TOOL_ALLOWLIST_KEY, "weather,gmail_message_preview");
+        assert!(
+            validate_task(&cfg, &task).is_err(),
+            "prefix一致では許可しない"
+        );
+        cfg.set(super::TOOL_ALLOWLIST_KEY, "weather,gmail_message");
         assert!(validate_task(&cfg, &task).is_ok());
     }
 

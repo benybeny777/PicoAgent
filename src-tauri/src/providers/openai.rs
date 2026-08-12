@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::{Provider, ProviderReg};
 use crate::config::Config;
@@ -14,6 +15,10 @@ pub struct OpenAI;
 
 const DEFAULT_MODEL: &str = "gpt-5.4-mini";
 const STATIC_MODELS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
+const MAX_STREAM_BUFFER_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
+const STREAM_IDLE_TIMEOUT_SECS: u64 = 60;
 
 fn base_url(cfg: &Config) -> String {
     cfg.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -21,7 +26,19 @@ fn base_url(cfg: &Config) -> String {
         .to_string()
 }
 fn api_key(cfg: &Config) -> String {
-    cfg.get("OPENAI_API_KEY", "")
+    if is_official_origin(&base_url(cfg)) {
+        cfg.get("OPENAI_API_KEY", "")
+    } else {
+        cfg.get("OPENAI_COMPAT_API_KEY", "")
+    }
+}
+
+fn is_official_origin(raw: &str) -> bool {
+    url::Url::parse(raw).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("api.openai.com")
+            && url.port_or_known_default() == Some(443)
+    })
 }
 
 /// 公式エンドポイントを使うのにキーが空なら、生の 401 ではなく設定案内を返す。
@@ -32,7 +49,7 @@ fn api_key(cfg: &Config) -> String {
 /// キーが不要なこともあるので、公式ホストのときだけ要求する。
 fn ensure_api_key(cfg: &Config) -> anyhow::Result<()> {
     let url = base_url(cfg);
-    let official = url.contains("api.openai.com");
+    let official = is_official_origin(&url);
     if official && api_key(cfg).trim().is_empty() {
         anyhow::bail!(
             "OpenAI API キーが未設定です（設定画面の「AIモデル・連携」→ OpenAI で入力してください）"
@@ -159,7 +176,10 @@ pub(crate) async fn stream_chat(
 
     // API キー不要のローカルエンジン（llama-server）からも呼ばれるため、
     // 空キーのときは Authorization ヘッダ自体を付けない（空 Bearer で弾かれるのを防ぐ）。
-    let request = crate::tools::http::client().post(url).json(&body);
+    let request = crate::tools::http::client()
+        .post(url)
+        .json(&body)
+        .timeout(Duration::from_secs(600));
     let request = if api_key.is_empty() {
         request
     } else {
@@ -182,9 +202,23 @@ pub(crate) async fn stream_chat(
     let mut decoder = crate::text::Utf8Stream::default();
 
     let mut stream = res.bytes_stream();
-    'outer: while let Some(chunk_result) = stream.next().await {
+    let mut received = 0usize;
+    'outer: loop {
+        let next = tokio::time::timeout(Duration::from_secs(STREAM_IDLE_TIMEOUT_SECS), stream.next())
+            .await
+            .map_err(|_| anyhow::anyhow!("OpenAI互換APIのストリームが60秒間停止しました"))?;
+        let Some(chunk_result) = next else { break };
         let chunk = chunk_result?;
+        received = received.saturating_add(chunk.len());
+        anyhow::ensure!(
+            received <= MAX_STREAM_BYTES,
+            "OpenAI互換APIのストリームが上限（16 MiB）を超えました"
+        );
         buf.push_str(&decoder.push(&chunk));
+        anyhow::ensure!(
+            buf.len() <= MAX_SSE_LINE_BYTES,
+            "OpenAI互換APIのSSE行が上限（1 MiB）を超えました"
+        );
 
         while let Some(line_end) = buf.find('\n') {
             let line = buf[..line_end].trim_end_matches('\r').to_string();
@@ -205,6 +239,11 @@ pub(crate) async fn stream_chat(
             // テキストチャンク。
             if let Some(content) = delta.get("content").and_then(Value::as_str) {
                 if !content.is_empty() {
+                    anyhow::ensure!(
+                        full_content.len().saturating_add(content.len())
+                            <= MAX_STREAM_BUFFER_BYTES,
+                        "OpenAI互換APIの応答内容が上限（8 MiB）を超えました"
+                    );
                     full_content.push_str(content);
                     on_chunk(content.to_string());
                 }
@@ -226,6 +265,11 @@ pub(crate) async fn stream_chat(
                             pt.name = name.to_string();
                         }
                         if let Some(args) = fn_delta.get("arguments").and_then(Value::as_str) {
+                            anyhow::ensure!(
+                                pt.args_buf.len().saturating_add(args.len())
+                                    <= MAX_STREAM_BUFFER_BYTES,
+                                "OpenAI互換APIのツール引数が上限（8 MiB）を超えました"
+                            );
                             pt.args_buf.push_str(args);
                         }
                     }
@@ -293,6 +337,12 @@ impl Provider for OpenAI {
                 "https://api.openai.com/v1",
             ),
             Field::new("OPENAI_API_KEY", "API キー", "password", "sk-..."),
+            Field::new(
+                "OPENAI_COMPAT_API_KEY",
+                "互換エンドポイント専用 API キー",
+                "password",
+                "",
+            ),
             Field::new("OPENAI_MODEL", "既定モデル", "text", DEFAULT_MODEL),
         ]
     }
@@ -315,7 +365,10 @@ impl Provider for OpenAI {
         if !res.status().is_success() {
             return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
         }
-        let data: Value = res.json().await?;
+        let text = crate::tools::http::response_text(res)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let data = crate::tools::http::response_json(&text).map_err(anyhow::Error::msg)?;
         let mut models: Vec<String> = data
             .get("data")
             .and_then(|v| v.as_array())
@@ -375,6 +428,7 @@ impl Provider for OpenAI {
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)
+            .timeout(Duration::from_secs(180))
             .send()
             .await?;
         if !res.status().is_success() {
@@ -384,7 +438,10 @@ impl Provider for OpenAI {
                 .map_err(anyhow::Error::msg)?;
             anyhow::bail!("{}", crate::tools::http::service_error("OpenAI互換API", "/chat/completions", status, &text));
         }
-        let data: Value = res.json().await?;
+        let text = crate::tools::http::response_text(res)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let data = crate::tools::http::response_json(&text).map_err(anyhow::Error::msg)?;
         let message = data
             .get("choices")
             .and_then(|v| v.as_array())
@@ -429,6 +486,7 @@ impl Provider for OpenAI {
         tools: &[Value],
         json_mode: bool,
     ) -> anyhow::Result<Message> {
+        ensure_api_key(cfg)?;
         let mut body = json!({
             "model": model,
             "messages": to_wire(messages),
@@ -445,6 +503,7 @@ impl Provider for OpenAI {
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)
+            .timeout(Duration::from_secs(180))
             .send()
             .await?;
         if !res.status().is_success() {
@@ -454,7 +513,10 @@ impl Provider for OpenAI {
                 .map_err(anyhow::Error::msg)?;
             anyhow::bail!("{}", crate::tools::http::service_error("OpenAI互換API", "/chat/completions", status, &text));
         }
-        let data: Value = res.json().await?;
+        let text = crate::tools::http::response_text(res)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let data = crate::tools::http::response_json(&text).map_err(anyhow::Error::msg)?;
         let message = data
             .get("choices")
             .and_then(|v| v.as_array())

@@ -14,10 +14,12 @@ use std::ffi::OsStr;
 use std::process::{Output, Stdio};
 use std::time::Duration;
 
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 /// タイムアウトの上限（どんな設定値でもこれを超えて待たない）。
 const MAX_TIMEOUT_SECS: u64 = 7200;
+const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 
 /// 物理削除コマンドかどうか。
 ///
@@ -32,22 +34,45 @@ const MAX_TIMEOUT_SECS: u64 = 7200;
 /// `sh -c "rm -rf ~/Documents"` が素通りした（同じ形の穴が OS 違いで残っていた）。
 pub fn is_physical_delete(program: &str, args: &[String]) -> bool {
     let program = program_stem(program);
+    // シェルを入れ子にした場合も、どのシェルの削除語彙も見落とさない。
+    // allowlist にシェル本体を追加した利用者設定でも物理削除禁止を保つ。
+    let shell_family = match program.as_str() {
+        "powershell" | "pwsh" => Some(ShellFamily::PowerShell),
+        "cmd" => Some(ShellFamily::Cmd),
+        "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => Some(ShellFamily::Posix),
+        _ => None,
+    };
     match program.as_str() {
         "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" | "shred" => true,
         "git" => args
             .first()
             .is_some_and(|arg| arg.eq_ignore_ascii_case("clean")),
-        "powershell" | "pwsh" => args
-            .iter()
-            .any(|arg| contains_delete_token(arg, ShellFamily::PowerShell)),
-        "cmd" => args
-            .iter()
-            .any(|arg| contains_delete_token(arg, ShellFamily::Cmd)),
-        "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => args
-            .iter()
-            .any(|arg| contains_delete_token(arg, ShellFamily::Posix)),
+        "powershell" | "pwsh" | "cmd" | "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => {
+            args.iter().any(|arg| {
+                shell_family.is_some_and(|family| contains_delete_token(arg, family))
+                    || (contains_shell_name(arg)
+                        && [
+                            ShellFamily::PowerShell,
+                            ShellFamily::Cmd,
+                            ShellFamily::Posix,
+                        ]
+                        .into_iter()
+                        .any(|family| contains_delete_token(arg, family)))
+            })
+        }
         _ => false,
     }
+}
+
+fn contains_shell_name(arg: &str) -> bool {
+    arg.to_ascii_lowercase()
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .any(|part| {
+            matches!(
+                part,
+                "powershell" | "pwsh" | "cmd" | "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish"
+            )
+        })
 }
 
 /// 削除語彙はシェルごとに違う（`Remove-Item` は PowerShell だけ、`unlink` は POSIX だけ）。
@@ -158,12 +183,55 @@ pub async fn output(
     label: &str,
 ) -> Result<Output, String> {
     let timeout = timeout_secs.clamp(1, MAX_TIMEOUT_SECS);
-    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(format!("{label}を起動できません: {error}")),
-        // kill_on_drop により、ここで打ち切られた子プロセスは確実に停止される。
-        Err(_) => Err(format!("{label}が {timeout} 秒でタイムアウトしました。")),
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("{label}を起動できません: {error}"))?;
+    let stdout_task = tokio::spawn(read_capture(child.stdout.take()));
+    let stderr_task = tokio::spawn(read_capture(child.stderr.take()));
+    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => return Err(format!("{label}の終了を待てません: {error}")),
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(format!("{label}が {timeout} 秒でタイムアウトしました。"));
+        }
+    };
+    let stdout = stdout_task
+        .await
+        .map_err(|error| format!("{label}の標準出力回収に失敗しました: {error}"))??;
+    let stderr = stderr_task
+        .await
+        .map_err(|error| format!("{label}の標準エラー回収に失敗しました: {error}"))??;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
+    reader: Option<R>,
+) -> Result<Vec<u8>, String> {
+    let Some(mut reader) = reader else {
+        return Ok(Vec::new());
+    };
+    let mut kept = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let count = reader
+            .read(&mut chunk)
+            .await
+            .map_err(|error| format!("プロセス出力を読み取れません: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        let remaining = MAX_CAPTURE_BYTES.saturating_sub(kept.len());
+        kept.extend_from_slice(&chunk[..count.min(remaining)]);
     }
+    Ok(kept)
 }
 
 #[cfg(test)]

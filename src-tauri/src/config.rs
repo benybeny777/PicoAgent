@@ -134,19 +134,6 @@ impl Config {
     /// 更新なので、ポーリング経路（通知の期限チェックなど）から同じ値で呼ばれるたびに
     /// config.json 全体を書き直してしまい、無意味なディスク書き込みが延々と続く。
     pub fn set_all(&self, patch: Map<String, Value>) -> anyhow::Result<()> {
-        {
-            let mut values = self.values.lock().unwrap();
-            let mut changed = false;
-            for (k, v) in patch {
-                if values.get(&k) != Some(&v) {
-                    values.insert(k, v);
-                    changed = true;
-                }
-            }
-            if !changed {
-                return Ok(());
-            }
-        }
         // スナップショットの採取から書き込みまでを直列化する（並び替わりを防ぐ）。
         // フォールバック許可: 毒された場合も保存自体は続ける（中身は () で不変）。
         let _write = self
@@ -159,9 +146,23 @@ impl Config {
             .unwrap()
             .clone()
             .ok_or_else(|| anyhow::anyhow!("config.load() が未実行です"))?;
-        let snapshot = Value::Object(self.values.lock().unwrap().clone());
+        let mut values = self.values.lock().unwrap();
+        let mut next = values.clone();
+        let mut changed = false;
+        for (k, v) in patch {
+            if next.get(&k) != Some(&v) {
+                next.insert(k, v);
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        let snapshot = Value::Object(next.clone());
         // 書き込み中に落ちても設定が全損しないよう、共通層の原子的な書き込みを使う。
-        crate::store::write_json_atomic(&path, &snapshot)
+        crate::store::write_json_atomic(&path, &snapshot)?;
+        *values = next;
+        Ok(())
     }
 
     /// 単一の設定を永続化する。

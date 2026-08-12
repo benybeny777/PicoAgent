@@ -200,22 +200,16 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
         if let Some(mut pipe) = stdout {
-            pipe.read_to_end(&mut buf)
-                .await
-                .map_err(|error| format!("標準出力を読み取れません: {error}"))?;
+            return read_bounded(&mut pipe, "標準出力").await;
         }
-        Ok::<_, String>(buf)
+        Ok::<_, String>(Vec::new())
     });
     let stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
         if let Some(mut pipe) = stderr {
-            pipe.read_to_end(&mut buf)
-                .await
-                .map_err(|error| format!("標準エラー出力を読み取れません: {error}"))?;
+            return read_bounded(&mut pipe, "標準エラー出力").await;
         }
-        Ok::<_, String>(buf)
+        Ok::<_, String>(Vec::new())
     });
 
     let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
@@ -267,6 +261,27 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
         stdout,
         stderr,
     })
+}
+
+async fn read_bounded<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut R,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let mut kept = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let count = reader
+            .read(&mut chunk)
+            .await
+            .map_err(|error| format!("{label}を読み取れません: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        let remaining = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(kept.len());
+        kept.extend_from_slice(&chunk[..count.min(remaining)]);
+        // 上限後も読み捨てを続け、子プロセスをパイプ詰まりで停止させない。
+    }
+    Ok(kept)
 }
 
 /// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。

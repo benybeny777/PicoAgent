@@ -2259,7 +2259,17 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
         }
         if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                patch.insert(key.clone(), Value::String(crate::secret::encrypt(text)));
+                match crate::secret::encrypt(text) {
+                    Ok(value) => {
+                        patch.insert(key.clone(), Value::String(value));
+                    }
+                    Err(error) => {
+                        crate::log_paths::append_app_log(
+                            app,
+                            &format!("既存シークレットを暗号化できないため平文を維持します: {key} ({error})"),
+                        );
+                    }
+                }
             }
         }
     }
@@ -2528,7 +2538,12 @@ pub async fn settings_save(
         }
         if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                encrypted.push((key.clone(), crate::secret::encrypt(text)));
+                encrypted.push((
+                    key.clone(),
+                    crate::secret::encrypt(text).map_err(|error| {
+                        log_command_error(&app, "シークレットを安全に保存できません", error)
+                    })?,
+                ));
             }
         }
     }

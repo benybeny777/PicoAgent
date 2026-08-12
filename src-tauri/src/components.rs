@@ -752,16 +752,15 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
             std::fs::create_dir_all(&output)?;
             continue;
         }
-        extracted = extracted.saturating_add(entry.size());
-        anyhow::ensure!(
-            extracted <= MAX_EXTRACTED_BYTES,
-            "展開サイズが上限を超えています"
-        );
         if let Some(parent) = output.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let mut target = std::fs::File::create(output)?;
-        std::io::copy(&mut entry, &mut target)?;
+        let remaining = MAX_EXTRACTED_BYTES.saturating_sub(extracted);
+        let mut limited = std::io::Read::take(&mut entry, remaining.saturating_add(1));
+        let copied = std::io::copy(&mut limited, &mut target)?;
+        anyhow::ensure!(copied <= remaining, "展開サイズが上限を超えています");
+        extracted = extracted.saturating_add(copied);
         target.flush()?;
         #[cfg(unix)]
         if let Some(mode) = entry.unix_mode() {

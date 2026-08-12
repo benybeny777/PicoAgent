@@ -45,7 +45,9 @@ pub const EXTRACT_JS: &str = r#"
   }
   window.__picoAgentElements = nodes;
   const body = document.body ? document.body.innerText : "";
-  const text = body.replace(/[ \t ]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  // CDP 応答へ巨大な DOM 全文を複製しない。表示用の分割とは別に、ブラウザから
+  // アプリへ渡す時点で上限を置いてメモリ枯渇を防ぐ。
+  const text = body.replace(/[ \t ]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, 1000000);
   return JSON.stringify({ title: document.title || "", url: location.href, text, elements });
 })()
 "#;

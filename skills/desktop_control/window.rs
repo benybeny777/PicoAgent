@@ -1,7 +1,7 @@
 // skills/desktop_control/window.rs - ウィンドウの一覧取得と前面化。
 //
 // 座標だけで操作させると、モデルは「どのウィンドウを触っているか」を見失いやすい。
-// 先に対象ウィンドウを番号で選ばせてから座標を扱う方が、誤爆がはっきり減る
+// 先に対象ウィンドウをOSハンドル由来の識別子で選ばせてから座標を扱う方が、誤爆がはっきり減る
 // （`browser_control` で要素へ番号を振ったのと同じ考え方）。
 //
 // Windows は `EnumWindows` 系で COM を使わずに実装できる。macOS は Accessibility の
@@ -14,8 +14,21 @@ pub struct WindowInfo {
     pub y: i32,
     pub width: i32,
     pub height: i32,
-    /// OS 内部のハンドル。フロントやモデルへは見せず、番号経由でのみ使う。
+    /// OS 内部のハンドル。モデルには文字列の不透明な識別子としてだけ見せる。
     pub handle: isize,
+}
+
+/// HWNDは破棄後に再利用され得るため、ハンドルだけでなく一覧取得時のタイトルと矩形も
+/// 識別子へ含める。別ウィンドウへ再利用された場合は同じIDにならない。
+pub fn identifier(window: &WindowInfo) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    window.title.hash(&mut hasher);
+    window.x.hash(&mut hasher);
+    window.y.hash(&mut hasher);
+    window.width.hash(&mut hasher);
+    window.height.hash(&mut hasher);
+    format!("{}-{:016x}", window.handle, hasher.finish())
 }
 
 /// 表示中のトップレベルウィンドウを、画面に見えている順で返す。
@@ -117,16 +130,16 @@ pub fn focus(_handle: isize) -> Result<(), String> {
     Err("エラー: ウィンドウの前面化は現在 Windows でのみ利用できます。".to_string())
 }
 
-/// 一覧を番号付きの短い行へ整形する。モデルにはこの番号だけを扱わせる。
+/// 一覧を安定識別子付きの短い行へ整形する。
 pub fn format(windows: &[WindowInfo]) -> String {
     if windows.is_empty() {
         return "表示中のウィンドウは見つかりませんでした。".to_string();
     }
     let mut out = String::from("表示中のウィンドウ:\n");
-    for (index, window) in windows.iter().enumerate() {
+    for window in windows {
         out.push_str(&format!(
-            "  {} {} （{},{} {}x{}）\n",
-            index + 1,
+            "  id={} {} （{},{} {}x{}）\n",
+            identifier(window),
             window.title,
             window.x,
             window.y,
@@ -139,17 +152,23 @@ pub fn format(windows: &[WindowInfo]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format, WindowInfo};
+    use super::{format, identifier, WindowInfo};
 
-    fn sample(title: &str) -> WindowInfo {
-        WindowInfo { title: title.to_string(), x: 10, y: 20, width: 800, height: 600, handle: 1 }
+    fn sample(handle: isize, title: &str) -> WindowInfo {
+        WindowInfo { title: title.to_string(), x: 10, y: 20, width: 800, height: 600, handle }
     }
 
     #[test]
-    fn 一覧は番号と位置を並べる() {
-        let text = format(&[sample("メモ帳"), sample("ブラウザ")]);
-        assert!(text.contains("1 メモ帳 （10,20 800x600）"), "text: {text}");
-        assert!(text.contains("2 ブラウザ"), "text: {text}");
+    fn 一覧は識別子と位置を並べる() {
+        let text = format(&[sample(101, "メモ帳"), sample(202, "ブラウザ")]);
+        assert!(
+            text.contains(&format!("id={} メモ帳 （10,20 800x600）", identifier(&sample(101, "メモ帳")))),
+            "text: {text}"
+        );
+        assert!(
+            text.contains(&format!("id={} ブラウザ", identifier(&sample(202, "ブラウザ")))),
+            "text: {text}"
+        );
     }
 
     #[test]
