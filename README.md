@@ -34,6 +34,31 @@
   </sub>
 </div>
 
+<br />
+
+<div align="center">
+  <h3>同梱キャラクター</h3>
+  <table>
+    <tr>
+      <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎ" width="150" /><br /><sub><b>むぎ</b><br />PNGアニメ</sub></td>
+      <td align="center"><img src="docs/images/character-rin.webp" alt="りん" width="150" /><br /><sub><b>りん</b><br />PNGアニメ</sub></td>
+      <td align="center"><img src="docs/images/character-mai.webp" alt="まい" width="150" /><br /><sub><b>まい</b><br />PNGアニメ</sub></td>
+      <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）" width="150" /><br /><sub><b>りん（自作THA3）</b><br />1枚絵から生成</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="docs/images/character-koharu.webp" alt="こはる" width="150" /><br /><sub><b>こはる</b><br />通常2D</sub></td>
+      <td align="center"><img src="docs/images/character-sena.webp" alt="セナ" width="150" /><br /><sub><b>セナ</b><br />通常2D</sub></td>
+      <td align="center"><img src="docs/images/character-noa.webp" alt="ノア" width="150" /><br /><sub><b>ノア</b><br />通常2D</sub></td>
+      <td align="center"><a href="#1枚絵から動く自作キャラクターを追加するtha3"><sub>＋<br />自分で<br />追加する</sub></a></td>
+    </tr>
+  </table>
+  <sub>
+    同じ「おはよう。今日もよろしくね」への返事です。人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
+    このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・レン・ライス・わんこ）があります。<br />
+    Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
+  </sub>
+</div>
+
 ---
 
 ## 📑 目次

@@ -690,13 +690,13 @@ async function prepareFullscreen(page) {
 
 // Live2D は WebGL 描画。ランタイムとモデルは cargo xtask setup live2d で取得する。
 const LIVE2D_CHARACTER = "hiyori";
-const LIVE2D_REQUIRED = [
+const LIVE2D_RUNTIME = [
   "ui/vendor/live2d/live2dcubismcore-5.3.min.js",
   "ui/vendor/live2d/live2dcubismcore-compat.min.js",
   "ui/vendor/live2d/pixi.min.js",
   "ui/vendor/live2d/cubism4.min.js",
-  `ui/assets/characters/${LIVE2D_CHARACTER}/live2d`,
 ];
+const LIVE2D_REQUIRED = [...LIVE2D_RUNTIME, `ui/assets/characters/${LIVE2D_CHARACTER}/live2d`];
 
 async function prepareLive2D(page) {
   await page.waitForFunction(() => {
@@ -764,9 +764,63 @@ async function validateLive2dSdkModels() {
   }
 }
 
+// ---------------------------------------------------------------- キャラクター一覧の絵
+
+// README のキャラクター一覧。同じ問いかけへの返事を、キャラごとの口調で見せる。
+// 寸法はミニ形式（360x560）。キャラが主役の形式なので一覧に並べたときに見分けやすい。
+const GALLERY_ASK = "おはよう。今日もよろしくね";
+const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 3, fps: 10, outputWidth: 260 };
+
+// 一覧の Live2D キャラは「描画が始まっていること」だけ確かめる。
+// `prepareLive2D` の口パク検査は寸法とモデルがひより固定なので、ここでは通さない
+// （検査は live2d-light / live2d-dark の担当。一覧で流用すると他モデルで必ず落ちる）。
+async function prepareGalleryLive2D(page) {
+  await page.waitForFunction(() => {
+    const canvas = document.getElementById("live2dCanvas");
+    return canvas && canvas.style.display !== "none" && canvas.width > 0
+      && typeof live2dActive !== "undefined" && live2dActive;
+  }, { timeout: 40000 });
+  await page.waitForTimeout(1500); // 初回モーションでポーズが決まるまで待つ
+  await submit(page, GALLERY_ASK);
+}
+
+// Live2D キャラのランタイムとモデルは git 管理外（`cargo xtask setup live2d` / `setup live2d-samples`）。
+// 未取得の環境では `requires` が効いて自動でスキップされるので、一覧の定義からは外さない。
+// 制作中の `mugi-live2d` だけは、完成扱いに見えるため一覧へ載せない（販売用LPと同じ扱い）。
+const GALLERY = [
+  ["mugi", "おはよう！えへへ、今日もそばで見てるね。まずはやること、3つに絞ろっか。"],
+  ["rin", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
+  ["mai", "おはよう。あせらなくて大丈夫よ、ゆっくり一緒に進めましょう。"],
+  ["koharu", "おはよう。今日のこと、気軽に話してね。"],
+  ["sena", "おはよう。今日のステージも、きれいに仕上げようか。"],
+  ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
+  ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
+  ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", true],
+  ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", true],
+  ["epsilon", "動作確認でも、作業の整理でも、必要なところから始めましょう。", true],
+  ["mao", "こんにちは。今日は何から片づけましょうか。ゆっくりで大丈夫ですよ。", true],
+  ["ren", "準備はできています。どこから手をつけますか。", true],
+  ["rice", "よく来た。……さて、何を調べようか。", true],
+  ["wanko", "わふっ！　……よし、いっしょにやろう！", true],
+];
+
+const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d = false]) => [
+  `character-${id}.webp`,
+  {
+    ...GALLERY_SCENE,
+    characterId: id,
+    reply,
+    prepare: live2d ? prepareGalleryLive2D : startReply(GALLERY_ASK),
+    requires: live2d
+      ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
+      : [`ui/assets/characters/${id}/character.json`],
+  },
+]));
+
 // ---------------------------------------------------------------- 撮る絵の一覧
 
 const SHOTS = {
+  ...GALLERY_SHOTS,
   "main-light.webp": { prepare: startReply() },
   "main-dark.webp": { theme: "dark", prepare: startReply() },
   "composer-light.webp": {
