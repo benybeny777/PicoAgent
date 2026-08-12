@@ -106,6 +106,21 @@ cargo xtask dev
 
 </details>
 
+### バストアップ写真1枚から通常2Dキャラクターを作る
+
+GPUもTHA3も使わず、背景付きのバストアップ画像1枚から「こはる／セナ／ノア」と同じ通常2Dパック（`preview.png` + `character.json`）を作れます。動きは全身の呼吸と胸元の二次動作だけで、まばたきと口パクはありません。手軽さを優先する場合はこちら、表情まで動かしたい場合は次のTHA3を使ってください。
+
+```bash
+uv run --with pillow --with numpy --with rembg --with onnxruntime \
+    python scripts/build-portrait-2d-character.py \
+    --input temp/source.png --id my-character --name "マイキャラ" \
+    --description "説明" --greeting "はじめまして。"
+```
+
+スクリプトは背景抜き（rembg + alpha matting）に加えて、**上端で切れた頭頂部を輪郭の円弧から復元**します。バストアップ写真は頭のてっぺんが画面外へ出ていることが多く、そのまま透過すると透明な画面で頭が平らに切り落とされて見えるためです。仕上げに上の四隅の透過とハローの有無を検査し、市松・暗色・白・緑へ重ねた確認シートを `temp/qa-<ID>.png` へ書き出すので、必ず目で見てから採用してください。生成後は `cargo xtask sync-characters` で配信コピーへ反映します。
+
+`secondaryMotion` の胸元の位置（画像全体に対する百分率）は `--motion-center-x` / `--motion-center-y` / `--motion-radius-x` / `--motion-radius-y` で渡します。詳細は[キャラクター画像の準備手順](characters/README.md)を参照してください。
+
 ### 1枚絵から動く自作キャラクターを追加する（THA3）
 
 [Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使うと、透過した全身立ち絵から、待機・呼吸・左右の頭／身体揺れ・まばたき・口パク・考え中・落胆を含む**17枚のキーポーズ**を生成し、PicoAgentが使う**42枚の連番アニメ**へ変換できます。通常の自作キャラは名前に「（自作）」、全自作キャラは説明と生成元情報に「自作（THA3）」が付き、組み込みキャラと見分けられます。同じ表示名を使う場合も内部IDを別にすれば別キャラクターとして扱われます。

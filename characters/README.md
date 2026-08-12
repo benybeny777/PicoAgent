@@ -28,7 +28,7 @@ characters/<id>/
 `animations/` 配下は `scripts/build-character-animations.py` で生成する。手で直接直さない。
 `source.png` などの元画像は任意の制作素材。実行時に使わないPSD・確認用シート・生成途中画像は、必要がなくなったらリポジトリへ残さない。
 
-`koharu` / `sena` / `noa` はLive2DやTHA3を使わない1枚絵の通常2Dパックで、`preview.png` を各状態から共有参照する。`secondaryMotion` の `type=bust` と胸元の中心・範囲・強さ・周期を指定すると、全身の呼吸とは別に羽根付きマスク内だけへ遅れた二次動作を付けられる。矩形レイヤーや色面を合成せず、透明輪郭は元PNGのまま維持する。
+`koharu` / `sena` / `noa` / `hinano` はLive2DやTHA3を使わない1枚絵の通常2Dパックで、`preview.png` を各状態から共有参照する。`secondaryMotion` の `type=bust` と胸元の中心・範囲・強さ・周期を指定すると、全身の呼吸とは別に羽根付きマスク内だけへ遅れた二次動作を付けられる。矩形レイヤーや色面を合成せず、透明輪郭は元PNGのまま維持する。
 
 ## 画像作成ルール
 
@@ -37,6 +37,38 @@ characters/<id>/
 - まばたきや口パクの差分を AI 生成する場合も、最終的には `layers/` に同じサイズで配置する。
 - `boot/sleeping.png` は横向きに寝ている構図にし、むぎ・りん・まいで同じローディング画面に見える比率にする。
 - 背景は透過 PNG にする。AI 生成で緑背景を使った場合は chroma key 除去後の PNG だけを `boot/` や `layers/` に置く。
+
+## バストアップ1枚から通常2Dパックを作る
+
+`scripts/build-portrait-2d-character.py` は、背景付きのバストアップ画像1枚から
+`preview.png` + `character.json` だけの通常2Dパックを作り、`characters/index.json` へ登録する。
+THA3と違いGPUもPython常駐環境も要らず、動きは呼吸と胸元の二次動作だけになる（まばたき・口パクは無い）。
+
+```bash
+uv run --with pillow --with numpy --with rembg --with onnxruntime \
+    python scripts/build-portrait-2d-character.py \
+    --input temp/source.png --id my-character --name "マイキャラ" \
+    --description "説明" --greeting "はじめまして。" \
+    --motion-center-x 42 --motion-center-y 74 --motion-radius-x 18 --motion-radius-y 11
+```
+
+スクリプトの処理は次の3つ。
+
+1. **背景抜き**（rembg `isnet-general-use` + alpha matting）。alpha matting を外すと髪の毛先が
+   元の背景色を抱えたまま残り、暗い画面でハローとして浮くため必ず通す。
+2. **頭頂部の復元**。バストアップ写真は頭のてっぺんが画面外へ出ていることが多く、そのまま透過すると
+   透明な画面で頭が平らに切り落とされて見える。上端付近の輪郭へ円を最小二乗で当て、欠けた高さぶんだけ
+   キャンバスを広げて、既存の髪を折り返した texture を円弧の形へ収める。切れていなければ何もしない。
+3. **検査と確認シート**。上の四隅の透過と、半透明の縁が本体より極端に明るくないこと（＝ハローが無いこと）を
+   検査したうえで、市松・暗色・白・緑へ重ねた `temp/qa-<id>.png` を書き出す。四隅のアルファ値だけで
+   合格にせず、必ずこのシートを目で見る。
+
+被写体が下端・左右へ抜けるのはバストアップでは正常で、`object-fit:contain` + `object-position:50% 100%` が
+ウィンドウ下端へ合わせるため切り口はウィンドウの縁と重なる。上端だけは宙に浮くので 2 の復元が要る。
+
+`secondaryMotion` の座標は画像全体に対する百分率なので、胸元の位置を画像上で測って渡す。
+生成後は `cargo xtask sync-characters` で配信コピーへ反映し、
+`SHOOT_CHARACTER_MATRIX=1 SHOOT_CHARACTER_IDS=<id> node tools/screenshots/shoot.mjs` で8形式の見え方を確認する。
 
 ## THA3で1枚絵から自作キャラを追加する
 

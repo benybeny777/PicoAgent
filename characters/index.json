@@ -89,6 +89,12 @@
       "id": "rin-tha3",
       "manifest": "rin-tha3/character.json",
       "name": "りん"
+    },
+    {
+      "description": "ふんわり穏やかで、そばで見守ってくれる19歳の通常2D作業相棒。",
+      "id": "hinano",
+      "manifest": "hinano/character.json",
+      "name": "ひなの"
     }
   ],
   "default": "mugi"

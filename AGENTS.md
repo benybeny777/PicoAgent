@@ -150,6 +150,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
+| `scripts/build-portrait-2d-character.py` | 背景付きバストアップ1枚から通常2D（1枚絵）パックを作る。背景抜き（rembg + alpha matting）、上端で切れた頭頂部の円弧復元、ハロー検査と透過確認シート出力、`characters/index.json` への登録まで行う。GPU不要で、動きは呼吸と `secondaryMotion` だけ |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |

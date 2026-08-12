@@ -313,6 +313,7 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 - 設定「キャラ・音声」タブで切替と、性格・口調（人格プロンプト）のキャラ別編集ができます。
 - **Live2D**: `cargo xtask setup live2d` で Cubism ランタイムとサンプルモデル「ひより」を取得すると、対応キャラは Live2D で動きます（まばたき・リップシンク・タップモーション）。非対応キャラも差分絵ベースの疑似リグ（PNGTuber 式）で常時アニメーションします。
 - **自作キャラの Live2D 化**: `python scripts/build-live2d-psd.py` で `characters/<id>/layers/` からレイヤー分け PSD（ひより互換の 15 パーツ構成）を生成し、Live2D Cubism Editor で開いてモデル化できます。
+- **バストアップ1枚から通常2Dキャラ**: `python scripts/build-portrait-2d-character.py --input <画像> --id <ID> --name <名前>` で、背景抜き・頭頂部の復元・透過確認シートまで済ませた1枚絵パックを作れます。GPU も THA3 も不要で、動きは呼吸と胸元の二次動作だけです。手順は [キャラクター画像の準備手順](characters/README.md) を参照してください。
 - キャラ画像・アニメーションの正本は `characters/` 配下です（`ui/assets/characters/` へ自動同期）。
 
 ---
@@ -492,6 +493,7 @@ cargo xtask cli repl              # 対話モード（会話文脈を保持。ex
 | `cargo xtask setup tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
+| `python scripts/build-portrait-2d-character.py` | バストアップ1枚から通常2D（1枚絵）キャラクターパックを生成 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
 
