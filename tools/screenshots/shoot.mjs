@@ -771,7 +771,38 @@ async function validateLive2dSdkModels() {
 const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
-const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 3, fps: 10, outputWidth: 260, voice: true };
+const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 6.4, fps: 10, outputWidth: 200, voice: true };
+
+// 前半は返答フローそのまま（文字送り → 会話中＋口パク → 成功）。後半で、返答フローでは
+// 出てこないモーションへ順に切り替える。実装と同じ `setAnimation()` を呼ぶだけなので、
+// 状態の解決（`fallbacks`）も CSS のキーフレームも本物のまま動く。
+// 経過msで指定するのは、fps や尺を変えてもモーションの見せ時間がずれないようにするため。
+//
+// 巡回に「考え中」が入っているのは、`record()` が録画前に時計を10秒進めるので、送信直後の
+// 考え中が録画開始時点では終わっているため。「成功」を入れていないのは逆に、返答完了時に
+// アプリ自身が `success` へ入るのが録画の最初に写るため（二重に見せる意味がない）。
+// この2つは `SHOOT_DEBUG_MOTION=1` で data-motion を読み返して確かめた。
+const GALLERY_TOUR = [
+  [1800, "thinking"],  // 考え中（pet-live2d-thinking / pet-thinking）
+  [2900, "shy"],       // 照れ（pet-shy 1.6s）
+  [3900, "listening"], // 傾聴（pet-listening 1.25s）
+  [4900, "sad"],       // 落胆（pet-live2d-sad / pet-sad）
+  [5900, "idle"],      // 待機へ戻す（無限ループの継ぎ目を呼吸で揃える）
+];
+
+// 毎コマ呼んで構わない。`setAnimation()` は同じ状態なら早期 return するので、
+// 読み上げ終了でアプリ側が idle へ戻しても次のコマで巡回中の状態へ復帰する。
+const galleryStep = async (page, index) => {
+  const elapsedMs = (index * 1000) / GALLERY_SCENE.fps;
+  const current = GALLERY_TOUR.filter(([at]) => elapsedMs >= at).pop();
+  // SHOOT_DEBUG_MOTION=1 で、実際に適用された data-motion を毎コマ出す
+  // （巡回を足しても「切り替わったつもり」で撮れてしまうのを防ぐ）。
+  const applied = await page.evaluate(name => {
+    if (name) setAnimation(name);
+    return document.getElementById("character")?.dataset.motion || "";
+  }, current ? current[1] : null);
+  if (process.env.SHOOT_DEBUG_MOTION) console.log(`    ${String(elapsedMs).padStart(5)}ms  data-motion=${applied}`);
+};
 
 // 一覧の Live2D キャラは「描画が始まっていること」だけ確かめる。
 // `prepareLive2D` の口パク検査は寸法とモデルがひより固定なので、ここでは通さない
@@ -813,6 +844,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d = false
     characterId: id,
     reply,
     prepare: live2d ? prepareGalleryLive2D : startReply(GALLERY_ASK),
+    step: galleryStep,
     requires: live2d
       ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
       : [`ui/assets/characters/${id}/character.json`],

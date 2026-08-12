@@ -10,7 +10,10 @@
 - ウィンドウサイズは各表示形式の既定値に合わせています（ペット形式は 900×600）
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
 - 1本あたり 4 秒・12fps・48 コマ。文字送りとキャラクターのモーションがそのまま入ります
-- キャラクター一覧（`character-*.webp`）だけは 3 秒・10fps・30 コマ。1枚あたり 400KB 前後に収めるためです
+- キャラクター一覧（`character-*.webp`）だけは 6.4 秒・10fps・64 コマ。README では 150px 幅で表示するので、書き出しは 200px に落として 1枚 600KB 前後に収めています
+- **キャラクター一覧は全モーションを通しで見せます。** 返答フローで自然に出るのは会話中と成功だけなので、残り（考え中・照れ・傾聴・落胆・待機）は `step` から実装と同じ `setAnimation()` を呼んで巡回させています。状態の解決も CSS のキーフレームも本物のままです
+  - 考え中を巡回に入れているのは、`record()` が録画前に時計を10秒進めるため、送信直後の考え中が録画開始時点で終わっているからです
+  - 成功を巡回に入れていないのは逆に、返答完了時にアプリ自身が `success` へ入るのが録画の最初に写るからです
 - **口パクは `pet_speak` が音声を返したときだけ動きます。** モックは既定で `{enabled:false}` を返すため、口は閉じたままになります。キャラクター一覧と Live2D の絵は `voice: true`（`openScene` のオプション）で音節風の振幅を持つ WAV を返させ、実アプリと同じ WebAudio 解析の経路を通しています。まばたきは音声と無関係に常時動きます（`layers/` を持つキャラのみ）
 - **ffmpeg は WebP エンコーダ（`libwebp_anim`）付きのものが要ります。** Playwright 同梱の ffmpeg は最小構成で WebP を持たないため使えません（`SHOOT_FFMPEG` に指定すると入力オープンで失敗します）
 
@@ -38,6 +41,7 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
+| `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
 | `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系7キャラ×8表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
 | `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×8形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
@@ -58,7 +62,7 @@ node tools/screenshots/shoot.mjs composer-light.webp
 | `composer-light.webp` | 入力欄とクイック操作 | 次の依頼を 1 文字ずつ打ち込むところ |
 | `fullscreen-light.webp` | 全画面フキダシ（履歴の検索・コピー・再利用・書き出し） | 返答が履歴へ積まれて末尾までスクロールするところ |
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
-| `character-<キャラID>.webp` | README のキャラクター一覧（ミニ形式 360×560、3秒・10fps・260px 幅） | 同じ問いかけへの返事を、キャラごとの口調と待機モーションで。`layers/` を持つキャラはまばたきと口パクも入る |
+| `character-<キャラID>.webp` | README のキャラクター一覧（ミニ形式 360×560、6.4秒・10fps・200px 幅） | 返事のあと、会話中 → 成功 → 考え中 → 照れ → 傾聴 → 落胆 → 待機と全モーションを通しで。`layers/` を持つキャラはまばたきと口パクも入る |
 | `layout-shot-*.webp` | 8種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）
