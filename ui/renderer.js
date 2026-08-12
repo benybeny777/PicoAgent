@@ -902,6 +902,7 @@ let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマー�
 let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
 let rigLookDirection = 0;  // -1=左、0=正面、1=右
 let rigGazeSyncAt = 0;     // カーソル追従を反映した時刻（mousemove の間引き用）
+let gazeTrackingEnabled = false; // 既定OFF。設定で明示した場合だけ視線を動かす
 let rigMouthTimer = 0;
 let rigBlinkTimer = 0;
 let rigBlinkStepTimer = 0;
@@ -968,20 +969,22 @@ function rigRefresh() {
   petSprite.src = layerUrl(name);
 }
 
-// 待機中はときどき左右を見て正面へ戻る。カーソル移動時は後段のmousemoveが方向を上書きする。
+// 待機中のよそ見は短く低頻度にする。頻繁に視線差分へ切り替えると、会話相手を
+// 見ずに常に下や横を向いている印象になる。
 function scheduleGaze() {
   clearTimeout(rigGazeTimer);
-  if (!rigActive || !rigGazeAvailable) return;
+  if (!gazeTrackingEnabled || !rigActive || !rigGazeAvailable) return;
   rigGazeTimer = setTimeout(() => {
-    if (!rigActive || currentVoice) { scheduleGaze(); return; }
+    if (!gazeTrackingEnabled || !rigActive) return;
+    if (currentVoice) { scheduleGaze(); return; }
     rigLookDirection = Math.random() < 0.5 ? -1 : 1;
     rigRefresh();
     rigGazeTimer = setTimeout(() => {
       rigLookDirection = 0;
       rigRefresh();
       scheduleGaze();
-    }, 650 + Math.random() * 850);
-  }, 1800 + Math.random() * 3000);
+    }, 350 + Math.random() * 300);
+  }, 8000 + Math.random() * 6000);
 }
 
 // まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
@@ -1394,23 +1397,58 @@ function stopLive2D() {
   updateSecondaryMotionVisibility();
 }
 
-// ── 疑似視線追従: マウスの方向へキャラクターがわずかに傾く ─────────────
+// ── 疑似視線追従: 設定ONかつ顔の近くにいるときだけ、短時間マウス方向を見る ──
 if (!reduceMotion) {
   let lookResetTimer = 0;
+  const resetLook = () => {
+    character.style.setProperty("--look-rot", "0deg");
+    rigLookDirection = 0;
+    rigRefresh();
+    // Live2DModel.focus()へcanvas外の座標を渡すと上下限へ張り付きやすい。
+    // 内部の正規化済みコントローラを中央へ戻して、下向きが残らないようにする。
+    live2dModel?.internalModel?.focusController?.focus(0, 0);
+  };
+  const applyGazeTrackingSetting = enabled => {
+    gazeTrackingEnabled = enabled === true;
+    clearTimeout(lookResetTimer);
+    clearTimeout(rigGazeTimer);
+    lookResetTimer = 0;
+    rigGazeTimer = 0;
+    resetLook();
+    if (gazeTrackingEnabled) scheduleGaze();
+  };
+  window.applyGazeTrackingSetting = applyGazeTrackingSetting;
   document.addEventListener("mousemove", event => {
-    // Live2D はモデル自身の視線・顔向きをカーソルへ向ける。
-    if (live2dActive && live2dModel && live2dCanvas) {
-      const canvasRect = live2dCanvas.getBoundingClientRect();
-      live2dModel.focus(event.clientX - canvasRect.left, event.clientY - canvasRect.top);
-    }
+    if (!gazeTrackingEnabled) return;
     const rect = character.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
-    const dx = Math.max(-1, Math.min(1, (event.clientX - centerX) / Math.max(240, window.innerWidth / 2)));
-    character.style.setProperty("--look-rot", `${(dx * 2.6).toFixed(2)}deg`);
+    const centerY = rect.top + rect.height * 0.38;
+    const normalizedX = (event.clientX - centerX) / Math.max(160, rect.width * 0.9);
+    const normalizedY = (event.clientY - centerY) / Math.max(180, rect.height * 0.8);
+    const insideFaceBand = event.clientY >= rect.top + rect.height * 0.02
+      && event.clientY <= rect.top + rect.height * 0.58;
+    const nearFace = insideFaceBand && Math.abs(normalizedX) <= 1.15;
+    const deadZone = Math.abs(normalizedX) < 0.28 && Math.abs(normalizedY) < 0.28;
+
+    // Live2Dはライブラリ内部の正規化視線へ弱く渡す。canvasローカルの大きなpx値を
+    // 直接focus()へ渡す旧実装では、画面下のカーソルに反応して下限へ張り付いていた。
+    if (live2dActive && live2dModel && live2dCanvas) {
+      const controller = live2dModel.internalModel?.focusController;
+      if (controller) {
+        if (nearFace && !deadZone) {
+          controller.focus(
+            Math.max(-0.38, Math.min(0.38, normalizedX * 0.32)),
+            Math.max(-0.2, Math.min(0.2, -normalizedY * 0.18)),
+          );
+        } else controller.focus(0, 0);
+      }
+    }
+    const dx = nearFace ? Math.max(-1, Math.min(1, normalizedX)) : 0;
+    character.style.setProperty("--look-rot", `${(dx * 1.15).toFixed(2)}deg`);
     // mousemove は毎ピクセル届くので、向きが変わったときと一定間隔でだけ反映する
     // （毎イベントで自動視線タイマーを張り直すとタイマーの作り直しだけが積み上がる）。
-    if (rigActive && rigGazeAvailable && !currentVoice) {
-      const direction = dx < -0.16 ? -1 : dx > 0.16 ? 1 : 0;
+    if (rigActive && rigGazeAvailable && !currentVoice && animationName === "idle") {
+      const direction = nearFace && !deadZone ? (dx < -0.38 ? -1 : dx > 0.38 ? 1 : 0) : 0;
       const now = performance.now();
       if (direction !== rigLookDirection || now - rigGazeSyncAt > 400) {
         rigGazeSyncAt = now;
@@ -1421,12 +1459,14 @@ if (!reduceMotion) {
     }
     clearTimeout(lookResetTimer);
     lookResetTimer = setTimeout(() => {
-      character.style.setProperty("--look-rot", "0deg");
-      rigLookDirection = 0;
-      rigRefresh();
+      resetLook();
       scheduleGaze();
-    }, 2600);
+    }, 700);
   });
+} else {
+  window.applyGazeTrackingSetting = () => {
+    gazeTrackingEnabled = false;
+  };
 }
 
 function autosizeInput() {
@@ -4174,6 +4214,7 @@ window.picoagent.on("pet:ui", (ui) => {
       : "いっしょの記録は設定で停止中";
   }
   if (ui.characterZoom != null) applyCharacterZoom(ui.characterZoom);
+  if (ui.gazeTrackingEnabled != null) window.applyGazeTrackingSetting?.(ui.gazeTrackingEnabled);
   if (ui.characterFraming != null) characterFraming = ui.characterFraming || {};
   if (ui.streamBackground != null) applyStreamAppearance(ui.streamBackground, ui.streamBackgroundImage, ui.streamDisplay, ui.streamDisplayImage, ui.streamCaptionColor);
   if (ui.ttsEnabled != null) {
@@ -4458,6 +4499,7 @@ function startAlarmPolling() {
   if (info.theme != null) applyTheme(info.theme);
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
+  window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);

@@ -26,6 +26,8 @@
 - 既に未コミット変更がある場合は、ユーザーまたは別エージェントの作業として扱い、勝手に巻き戻さない。
 - 作業中のスクリーンショット・連番フレーム・変換途中のファイルなど、一時的な作成物はリポジトリ直下の `temp/` 内だけに置く。ルートやソースディレクトリへ `tmp-*` 等を作らない。`temp/` は `.gitignore` で除外し、一時作成物をコミットへ含めない。
 - **透過キャラクターの成果物に、背景の消し残しと誤認されるハロー・矩形・色面・太い外周影を付けない。** 画像四隅のアルファ値だけで合格にせず、透過市松または透明な画面で実表示を確認する。意図した背景が必要な配信画面などは、キャラクター画像ではなく画面側の明示的な背景レイヤーとして分離する。
+- **`animationQualityMode=sharp-expression` の高精細キャラは、`scripts/rebuild-sharp-expression-assets.ps1` だけを正規の再生成入口にする。** 工程順は「基準寸法で局所差分を合成 → Photoshopで全9レイヤーを1780×3600以上へ拡大 → 連番生成 → キャラ同期」で固定し、Photoshop拡大後に差分合成スクリプトを再実行して高精細版を890×1800へ戻してはならない。寸法の大きさだけを画質合格にせず、顔・髪・輪郭の実効解像度を元絵、完成レイヤー、実WebViewの拡大表示で比較する。`cargo xtask sync-characters` は高精細レイヤーが1780×3600未満なら失敗させる。
+- 作業エージェント向けの再利用手順は `.agents/skills/<名前>/SKILL.md` を正本にする。Claude Code用の `.claude/skills/<名前>/SKILL.md` は同名の共通スキルを読むだけの薄い入口とし、手順を複製しない。キャラクター追加・再生成は `.agents/skills/rebuild-picoagent-character/SKILL.md` を使い、会話履歴から個別コマンドを組み直さない。
 - 修正・作業が完了したら、ユーザーからの個別指示がなくても、作業ツリーの未コミット変更を `git add -A` で全てステージしてコミットし、`origin` へプッシュまで行う。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含めてプッシュする（コミットメッセージは日本語。本ファイルの他ルールに従う）。破壊的な履歴操作（force push・reset --hard など）はしない。
 - **PR のマージは squash merge を使う。** 1 PR = 1 コミットになり `main` の履歴が読みやすい、というだけの理由。なお API 経由のマージは、squash / 通常マージのいずれでも GitHub 側が committer を `noreply@github.com` にして署名するため、`git log` 上は Unverified に見える（GitHub の画面上は Verified）。これは避けられないので気にしない。すでに `origin` に載ったコミットを後から書き換えるのは共有履歴の破壊操作になるので行わない（上のルールのとおり）。
 
@@ -155,6 +157,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
 | `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/REVIEW-LOG.md` | **レビューと修正提案の記録**。対応・見送り・保留を理由付きで残す台帳（判定の履歴。進行状況は `HANDOFF.md`、恒久ルールは `AGENTS.md`、仕様は `SPEC.md`） |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
@@ -193,7 +196,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/                    ← キャラクター画像の生成・高精細化（*.py と Windows 専用の *.ps1 / *.cs）
 ├── tools/tha3-runtime/         ← Windows開発用THA3 Python環境（git管理外、製品には含めない）
-├── .claude/                    ← Claude Code の設定（permissions）とセッション開始フック
+├── .agents/skills/             ← 複数の作業エージェントで共有する手順スキルの正本
+├── .claude/                    ← Claude Code の設定、共通スキルへの入口、セッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ├── HANDOFF.md                  ← 進行中の作業・未確認項目

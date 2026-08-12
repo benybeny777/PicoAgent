@@ -11,6 +11,20 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 EXTENDED_LAYERS = ("gaze_left", "gaze_right", "expression_happy", "expression_sad")
+PRE_PHOTOSHOP_SIZE = (890, 1800)
+
+
+def scale_box(
+    box: tuple[int, int, int, int],
+    source_size: tuple[int, int],
+    destination_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    scale_x = destination_size[0] / source_size[0]
+    scale_y = destination_size[1] / source_size[1]
+    return tuple(
+        round(value * (scale_x if index % 2 == 0 else scale_y))
+        for index, value in enumerate(box)
+    )
 
 
 def normalize(source: Image.Image, size: tuple[int, int], box: tuple[int, int, int, int]) -> Image.Image:
@@ -57,8 +71,8 @@ def build(character_id: str, prepare_photoshop: bool) -> None:
     if target_box is None:
         raise ValueError("base.pngに不透明画素がありません")
     if prepare_photoshop:
-        output_size = (output_size[0] // 2, output_size[1] // 2)
-        target_box = tuple(value // 2 for value in target_box)
+        target_box = scale_box(target_box, output_size, PRE_PHOTOSHOP_SIZE)
+        output_size = PRE_PHOTOSHOP_SIZE
 
     with Image.open(preview_path) as opened:
         preview = opened.convert("RGBA")

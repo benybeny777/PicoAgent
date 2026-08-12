@@ -144,6 +144,19 @@ const THA3_MOTION_LAYERS: [&str; 12] = [
     "thinking_right",
 ];
 
+const SHARP_EXPRESSION_MINIMUM_SIZE: (u32, u32) = (1780, 3600);
+
+fn png_dimensions(path: &Path) -> Result<(u32, u32)> {
+    let bytes = fs::read(path)?;
+    if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
+        bail!("PNGヘッダーを読み取れません: {}", path.display());
+    }
+    Ok((
+        u32::from_be_bytes(bytes[16..20].try_into()?),
+        u32::from_be_bytes(bytes[20..24].try_into()?),
+    ))
+}
+
 fn validate_sharp_expression_pack(
     character_dir: &Path,
     manifest: &serde_json::Value,
@@ -171,6 +184,21 @@ fn validate_sharp_expression_pack(
             character_dir.display(),
             stale.join(", ")
         );
+    }
+    for name in FULL_MOTION_LAYERS {
+        let path = character_dir.join("layers").join(format!("{name}.png"));
+        let (width, height) = png_dimensions(&path)?;
+        if width < SHARP_EXPRESSION_MINIMUM_SIZE.0 || height < SHARP_EXPRESSION_MINIMUM_SIZE.1 {
+            bail!(
+                "{} はsharp-expressionですが{}が低解像度です: {}x{}（最低{}x{}）",
+                character_dir.display(),
+                name,
+                width,
+                height,
+                SHARP_EXPRESSION_MINIMUM_SIZE.0,
+                SHARP_EXPRESSION_MINIMUM_SIZE.1
+            );
+        }
     }
     Ok(())
 }
@@ -761,6 +789,28 @@ mod tests {
             .unwrap();
         }
         super::validate_full_motion_pack(&character, &manifest).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 高精細表情キャラは全レイヤーの最低寸法を満たす() {
+        let root =
+            std::env::temp_dir().join(format!("picoagent-sharp-size-{}", std::process::id()));
+        let character = root.join("sample");
+        fs::create_dir_all(character.join("layers")).unwrap();
+        let mut header = Vec::from(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice());
+        header.extend_from_slice(&890_u32.to_be_bytes());
+        header.extend_from_slice(&1800_u32.to_be_bytes());
+        for name in super::FULL_MOTION_LAYERS {
+            fs::write(
+                character.join("layers").join(format!("{name}.png")),
+                &header,
+            )
+            .unwrap();
+        }
+        let manifest: serde_json::Value =
+            serde_json::from_str(r#"{"animationQualityMode":"sharp-expression"}"#).unwrap();
+        assert!(super::validate_sharp_expression_pack(&character, &manifest).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

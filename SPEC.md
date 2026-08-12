@@ -465,6 +465,7 @@ CSP の `script-src` は `'self' 'unsafe-eval' 'wasm-unsafe-eval'` とする。*
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_GAZE_TRACKING_ENABLED` | `false` | キャラクター | 視線追従。OFFではPNGの自動よそ見・マウス方向の顔差分と傾き・Live2Dのマウス追従を止め、常に正面へ戻す。ONでは顔付近のカーソルだけへ控えめに追従し、画面下など顔から離れた位置では追従しない。`pet:ui` で即反映 |
 | `PICOAGENT_CHARACTER_ZOOM` | `1.55` | 内部UI | 構図未設定時に使う互換用の共通拡大率。新しい調整は `PICOAGENT_CHARACTER_FRAMING` を使う |
 | `PICOAGENT_CHARACTER_FRAMING` | `{}` | 画面 | キャラクターID×表示形式ごとの構図。`preset`（`bust` / `upper` / `full` / `custom`）、`zoom`、`x`、`y`を保持する。未設定時は旧共通の拡大率・位置を使う |
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 旧版の立ち絵横移動量（px）。通常ドラッグはウィンドウ移動へ戻したため新規には書き込まず、既存値の互換表示と位置リセットだけに使う |

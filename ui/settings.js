@@ -2709,6 +2709,12 @@ async function render() {
     { value: "both", label: "暮らしと仕事の両方" },
   ]));
   characterSec.append(field("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", "いっしょの記録を保存する", "checkbox", v.PICOAGENT_RELATIONSHIP_MEMORY_ENABLED !== false));
+  characterSec.append(field(
+    "PICOAGENT_GAZE_TRACKING_ENABLED",
+    "視線追従を使う（マウスと自動よそ見）",
+    "checkbox",
+    v.PICOAGENT_GAZE_TRACKING_ENABLED === true,
+  ));
   characterFramingEditor = buildCharacterFramingEditor();
   characterSec.append(characterFramingEditor.node);
   await characterFramingEditor.load();

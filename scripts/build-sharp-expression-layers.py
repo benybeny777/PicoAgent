@@ -16,6 +16,19 @@ ROOT = Path(__file__).resolve().parents[1]
 MINIMUM_OUTPUT_SIZE = (890, 1800)
 
 
+def scale_box(
+    box: tuple[int, int, int, int],
+    source_size: tuple[int, int],
+    destination_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    scale_x = destination_size[0] / source_size[0]
+    scale_y = destination_size[1] / source_size[1]
+    return tuple(
+        round(value * (scale_x if index % 2 == 0 else scale_y))
+        for index, value in enumerate(box)
+    )
+
+
 def normalize(
     source: Image.Image,
     output_size: tuple[int, int],
@@ -76,8 +89,10 @@ def build(character_id: str, prepare_photoshop: bool) -> None:
     if output_size[0] < MINIMUM_OUTPUT_SIZE[0] or output_size[1] < MINIMUM_OUTPUT_SIZE[1]:
         raise ValueError(f"既存base.pngが小さすぎます: {output_size}")
     if prepare_photoshop:
-        output_size = (output_size[0] // 2, output_size[1] // 2)
-        target_box = tuple(value // 2 for value in target_box)
+        # 現在の完成寸法を単純に半分へすると、再実行のたび1780→890→445と劣化する。
+        # Photoshop前の正本寸法へ必ず正規化し、何度実行しても同じ結果にする。
+        target_box = scale_box(target_box, output_size, MINIMUM_OUTPUT_SIZE)
+        output_size = MINIMUM_OUTPUT_SIZE
     with Image.open(preview_path) as opened:
         preview = opened.convert("RGBA")
     with Image.open(patches_dir / "blink_half.png") as opened:

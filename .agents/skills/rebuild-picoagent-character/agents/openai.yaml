@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoAgentキャラクター再生成"
+  short_description: "PicoAgentの高精細キャラ素材とモーションを安全に再生成する"
+  default_prompt: "PicoAgentのキャラクター画像を正規手順で追加または再生成し、解像度・単一世代・実表示を検証してください。"

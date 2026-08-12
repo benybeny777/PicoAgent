@@ -77,7 +77,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice }) => `
+const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -114,6 +114,7 @@ window.__TAURI__ = {
       history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0",
       onboardingDone: ${JSON.stringify(onboardingDone)}, relationshipMemoryEnabled: false,
+      gazeTrackingEnabled: ${JSON.stringify(gazeTrackingEnabled)},
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
     }), ${JSON.stringify(initDelayMs)}));
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
@@ -251,6 +252,7 @@ async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
+  gazeTrackingEnabled = false,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -258,7 +260,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled }));
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -490,6 +492,36 @@ async function validateInteractionMatrix() {
   } finally {
     await reducedPage.close();
   }
+  const gazeOffPage = await openScene({ characterId: "mugi", forcePng: true, width: 900, height: 600 });
+  try {
+    await gazeOffPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, { timeout: 20000 });
+    const rect = await gazeOffPage.locator("#character").boundingBox();
+    await gazeOffPage.mouse.move(rect.x + rect.width * 0.85, rect.y + rect.height * 0.38);
+    const defaultDirection = await gazeOffPage.evaluate(() => rigLookDirection);
+    if (defaultDirection !== 0) throw new Error(`既定OFFなのに視線が追従しました: ${defaultDirection}`);
+    console.log("  視線設定検査: 既定OFFで正面を維持");
+  } finally {
+    await gazeOffPage.close();
+  }
+  const gazePage = await openScene({
+    characterId: "mugi", forcePng: true, width: 900, height: 600, gazeTrackingEnabled: true,
+  });
+  try {
+    await gazePage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, { timeout: 20000 });
+    const rect = await gazePage.locator("#character").boundingBox();
+    await gazePage.mouse.move(450, 590);
+    const farDirection = await gazePage.evaluate(() => rigLookDirection);
+    if (farDirection !== 0) throw new Error(`画面下の遠いカーソルへ視線が張り付いています: ${farDirection}`);
+    await gazePage.mouse.move(rect.x + rect.width * 0.85, rect.y + rect.height * 0.38);
+    const nearDirection = await gazePage.evaluate(() => rigLookDirection);
+    if (nearDirection !== 1) throw new Error(`顔付近の右カーソルへ視線が追従しません: ${nearDirection}`);
+    await gazePage.waitForTimeout(800);
+    const resetDirection = await gazePage.evaluate(() => rigLookDirection);
+    if (resetDirection !== 0) throw new Error(`視線が700ms後に正面へ戻りません: ${resetDirection}`);
+    console.log("  視線設定検査: ONでは顔周辺だけ追従し、画面下では正面、700ms後に復帰");
+  } finally {
+    await gazePage.close();
+  }
   const resizePage = await openScene({ characterId: "mugi", forcePng: true, width: 900, height: 600 });
   try {
     const beforeResize = await resizePage.evaluate(() => {
@@ -531,10 +563,14 @@ async function validateLive2dMatrix() {
   const index = JSON.parse(await readFile(join(ROOT, "characters", "index.json"), "utf8"));
   const targets = [];
   const skipped = [];
+  const selectedLive2d = process.env.SHOOT_LIVE2D_IDS
+    ? new Set(process.env.SHOOT_LIVE2D_IDS.split(",").map(value => value.trim()).filter(Boolean))
+    : null;
   for (const entry of index.characters || []) {
     const manifestPath = join(ROOT, "characters", entry.manifest);
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     if (!manifest.live2d) continue;
+    if (selectedLive2d && !selectedLive2d.has(manifest.id)) continue;
     const relativeRoot = dirname(entry.manifest);
     const candidates = manifest.live2d.models?.length
       ? manifest.live2d.models.map(model => model.path)
@@ -553,6 +589,14 @@ async function validateLive2dMatrix() {
       try {
         await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
         await page.waitForTimeout(250);
+        await page.mouse.move(width / 2, height - 1);
+        const farFocus = await page.evaluate(() => ({
+          x: live2dModel?.internalModel?.focusController?.targetX ?? 0,
+          y: live2dModel?.internalModel?.focusController?.targetY ?? 0,
+        }));
+        if (Math.abs(farFocus.x) > 0.01 || Math.abs(farFocus.y) > 0.01) {
+          throw new Error(`${target.id}/${layout}: 画面下のカーソルでLive2D視線が中央へ戻りません ${JSON.stringify(farFocus)}`);
+        }
         const info = await page.evaluate(() => {
           const canvas = document.getElementById("live2dCanvas");
           const rect = canvas.getBoundingClientRect();

@@ -38,11 +38,10 @@
 ## 3. レイヤー組み立てとPhotoshop仕上げ
 
 ```powershell
-uv run --with pillow python scripts/build-sharp-expression-layers.py --prepare-photoshop <id>
-scripts/finish-sharp-expression-assets.ps1 -CharacterIds <id> -Scale 2
+powershell -ExecutionPolicy Bypass -File scripts/rebuild-sharp-expression-assets.ps1 -CharacterIds <id>
 ```
 
-1つ目は高精細元絵と局所差分からレイヤーを作ります。`sharp-expression` に旧THA3全身ポーズが残る場合は新旧混在を避けるため失敗します。2つ目はPhotoshop「ディテールを保持」で2倍化し、元アルファを再適用します。既定完成寸法は1780×3600、QAレポートは `temp/sharp-expression-finish/<日時>/qa/qa-report.json` です。
+この一括入口だけを使います。内部では「890×1800の基準寸法で基本・視線・感情の局所差分を合成 → Photoshop『ディテールを保持』で全9レイヤーを2倍化 → 連番生成 → 配信コピー同期」の順に実行します。Photoshop後に個別の差分生成スクリプトを実行すると1780×3600を890×1800へ戻すため禁止です。一括入口は何度実行しても準備寸法を890×1800へ正規化し、半分ずつ縮小しません。QAレポートは `temp/sharp-expression-finish/<日時>/qa/qa-report.json` です。
 
 ## 4. 単一世代を生成
 
@@ -53,7 +52,7 @@ cargo xtask sync-characters
 
 生成先は `frames/<内容ハッシュ>/` です。新世代を完成しmanifestを原子的に保存した後だけ旧世代を除去します。複数世代または世代外参照は同期時に拒否します。Live2Dは別管理とし、PNG世代へ混ぜません。
 
-`motionProfile=full` を宣言したパックは、基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーが同期時に機械検査されます。1枚でも不足した状態で配布へ進めません。
+`motionProfile=full` を宣言したパックは、基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーが同期時に機械検査されます。さらに `animationQualityMode=sharp-expression` は全9レイヤーが1780×3600以上でなければ同期が失敗します。1枚でも不足・低解像度の状態では配布へ進めません。
 
 ## 5. 実WebView検査
 
@@ -62,6 +61,7 @@ cargo xtask sync-characters
 - 音声ありは声量同期、ミュート中はタイマー式で口が開閉する
 - 左右視線で身体・髪・服が変化しない
 - 感情切替で顔以外の解像感・輪郭・位置が変化しない
+- PNG寸法だけで合格にせず、顔・髪・輪郭を元絵、完成レイヤー、実WebViewの拡大表示で並べて確認する
 - 胸元二次動作は広いフェザーと小さい縦変形で境界が見えない
 - 配信ではPICO STUDIOの後ろ、背景の前に描画される
 

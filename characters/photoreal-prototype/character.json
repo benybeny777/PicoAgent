@@ -56,18 +56,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/dab7fb009af861886fb7.png",
-        "frames/9db0f5cceb8eaf92/cc6a7045bd3da7c61052.png",
-        "frames/9db0f5cceb8eaf92/0175455a61c3282bddf5.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png"
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png",
+        "frames/a734b6eacfab9e07/514013af8f91db8a969c.png",
+        "frames/a734b6eacfab9e07/514013af8f91db8a969c.png",
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png",
+        "frames/a734b6eacfab9e07/29d55d0c7cdc561a33d0.png",
+        "frames/a734b6eacfab9e07/daee3ccb32fb1fcdcff4.png",
+        "frames/a734b6eacfab9e07/c8a088e0d83069abc248.png",
+        "frames/a734b6eacfab9e07/514013af8f91db8a969c.png",
+        "frames/a734b6eacfab9e07/514013af8f91db8a969c.png",
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png",
+        "frames/a734b6eacfab9e07/295ca5d5547484da0894.png",
+        "frames/a734b6eacfab9e07/295ca5d5547484da0894.png"
       ]
     },
     "thinking": {
@@ -89,18 +89,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/8bf1a3b1a5be8366362a.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png",
-        "frames/9db0f5cceb8eaf92/78095254ff6cc31fc70f.png",
-        "frames/9db0f5cceb8eaf92/8bf1a3b1a5be8366362a.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png"
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png",
+        "frames/a734b6eacfab9e07/514013af8f91db8a969c.png",
+        "frames/a734b6eacfab9e07/5430d8a4854197ceed41.png",
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png",
+        "frames/a734b6eacfab9e07/295ca5d5547484da0894.png",
+        "frames/a734b6eacfab9e07/295ca5d5547484da0894.png",
+        "frames/a734b6eacfab9e07/1de6da07b01390145fe1.png",
+        "frames/a734b6eacfab9e07/5430d8a4854197ceed41.png",
+        "frames/a734b6eacfab9e07/514013af8f91db8a969c.png",
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png",
+        "frames/a734b6eacfab9e07/295ca5d5547484da0894.png",
+        "frames/a734b6eacfab9e07/ec4e38b83f2636ffab62.png"
       ]
     },
     "talking": {
@@ -122,18 +122,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/782588c0aa1c9838ecad.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png",
-        "frames/9db0f5cceb8eaf92/782588c0aa1c9838ecad.png",
-        "frames/9db0f5cceb8eaf92/a88eb7ce88613a1bed1f.png",
-        "frames/9db0f5cceb8eaf92/8bf1a3b1a5be8366362a.png",
-        "frames/9db0f5cceb8eaf92/7cc5264fb58ffb06bb66.png",
-        "frames/9db0f5cceb8eaf92/88702b1315967c9542a6.png",
-        "frames/9db0f5cceb8eaf92/5edf6257733e55ae7556.png"
+        "frames/a734b6eacfab9e07/0a7ddaf95d9c12597bc1.png",
+        "frames/a734b6eacfab9e07/63a2a77c9e6915389b87.png",
+        "frames/a734b6eacfab9e07/a915fa8f2d0c3e9e50b8.png",
+        "frames/a734b6eacfab9e07/0a7ddaf95d9c12597bc1.png",
+        "frames/a734b6eacfab9e07/4ecf5ad76cac77ab1083.png",
+        "frames/a734b6eacfab9e07/4ecf5ad76cac77ab1083.png",
+        "frames/a734b6eacfab9e07/a915fa8f2d0c3e9e50b8.png",
+        "frames/a734b6eacfab9e07/63a2a77c9e6915389b87.png",
+        "frames/a734b6eacfab9e07/5430d8a4854197ceed41.png",
+        "frames/a734b6eacfab9e07/0a7ddaf95d9c12597bc1.png",
+        "frames/a734b6eacfab9e07/12b82dd018aa5cdfdccc.png",
+        "frames/a734b6eacfab9e07/4ecf5ad76cac77ab1083.png"
       ]
     },
     "sad": {
@@ -149,15 +149,15 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/9db0f5cceb8eaf92/be0d390f4e38d43cb10d.png",
-        "frames/9db0f5cceb8eaf92/4ebb031312683e0f4218.png",
-        "frames/9db0f5cceb8eaf92/cc6a7045bd3da7c61052.png",
-        "frames/9db0f5cceb8eaf92/be0d390f4e38d43cb10d.png",
-        "frames/9db0f5cceb8eaf92/64de3bb6d4c3111965b9.png",
-        "frames/9db0f5cceb8eaf92/be0d390f4e38d43cb10d.png"
+        "frames/a734b6eacfab9e07/38e4cde55f105c6f6a00.png",
+        "frames/a734b6eacfab9e07/f7770ad565f24ebe50e4.png",
+        "frames/a734b6eacfab9e07/daee3ccb32fb1fcdcff4.png",
+        "frames/a734b6eacfab9e07/38e4cde55f105c6f6a00.png",
+        "frames/a734b6eacfab9e07/5f94bca288a33dca5428.png",
+        "frames/a734b6eacfab9e07/38e4cde55f105c6f6a00.png"
       ]
     }
   },
   "animationQualityMode": "sharp-expression",
-  "frameGeneration": "9db0f5cceb8eaf92"
+  "frameGeneration": "a734b6eacfab9e07"
 }
