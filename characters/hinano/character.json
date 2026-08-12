@@ -1,7 +1,7 @@
 {
   "id": "hinano",
   "name": "ひなの",
-  "assetVersion": "2026-08-12-portrait-2d-v1",
+  "assetVersion": "2026-08-12-portrait-2d-v2",
   "description": "ふんわり穏やかで、そばで見守ってくれる19歳の通常2D作業相棒。",
   "greeting": "こんにちは、ひなのです。今日は何から始めましょうか。",
   "boot": {
@@ -34,7 +34,7 @@
     "centerY": 74,
     "radiusX": 18,
     "radiusY": 11,
-    "strength": 0.9,
+    "strength": 1.6,
     "duration": 4.0
   },
   "animations": {
