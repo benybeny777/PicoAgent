@@ -745,7 +745,7 @@ async function prepareLive2D(page) {
 
 async function validateLive2dSdkModels() {
   for (const sdk of ["5", "4"]) {
-    const page = await openScene({ characterId: "mugi", live2dSdkOverrides: { mugi: sdk } });
+    const page = await openScene({ characterId: "hiyori", live2dSdkOverrides: { hiyori: sdk } });
     try {
       await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
       const loaded = await page.evaluate(() => ({
@@ -819,7 +819,7 @@ async function prepareGalleryLive2D(page) {
 
 // Live2D キャラのランタイムとモデルは git 管理外（`cargo xtask setup live2d` / `setup live2d-samples`）。
 // 未取得の環境では `requires` が効いて自動でスキップされるので、一覧の定義からは外さない。
-// 制作中の `mugi-live2d` だけは、完成扱いに見えるため一覧へ載せない（販売用LPと同じ扱い）。
+// Live2Dの表示例は公式サンプルのひよりに限る。2Dむぎは通常のPNGキャラとして撮影する。
 const GALLERY = [
   ["mugi", "おはよう！えへへ、今日もそばで見てるね。まずはやること、3つに絞ろっか。"],
   ["rin", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],

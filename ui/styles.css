@@ -108,12 +108,11 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 /* 立ち絵枠の基準寸法。Live2D の内部描画寸法もこれに合わせるので、配信形式の
    キャンバス拡大はこの変数からの倍率で書く（数値を二重管理しない）。 */
 :root { --char-frame-width:285px; --char-frame-height:315px; }
-.character { position:absolute; right:10px; bottom:2px; width:var(--char-frame-width); height:var(--char-frame-height); display:grid; place-items:end center; cursor:grab; }
-.character.is-dragging { cursor:grabbing; }
+.character { position:absolute; right:10px; bottom:2px; width:var(--char-frame-width); height:var(--char-frame-height); display:grid; place-items:end center; cursor:move; }
 .character { touch-action:none; user-select:none; -webkit-user-select:none; }
 /* 立ち絵の拡大と移動。既定の --char-zoom は「上半身が枠いっぱいに出る」倍率で、
    原点を上端に置くことで顔を残したまま脚が枠の下へ抜ける。移動量はドラッグで決まり
-   `PICOAGENT_CHARACTER_OFFSET_X/Y` に保存する。 */
+   旧 `PICOAGENT_CHARACTER_OFFSET_X/Y` も互換表示する。新しい構図は設定画面で保存する。 */
 .character-view {
   position:absolute; inset:0; display:block;
   transform:translate(var(--char-x,0px), var(--char-y,0px)) scale(var(--char-zoom,1.55));
@@ -794,7 +793,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="stream"] .stream-info > span:last-child { font-size:11px; font-weight:700; opacity:.9; }
 .stream-info,.stream-display { display:none; }
 [data-layout="stream"] .stream-display {
-  display:flex; position:absolute; z-index:1; left:2.5%; top:13%; width:18%; aspect-ratio:16/9;
+  display:flex; position:absolute; z-index:2; left:2.5%; right:auto; top:13%; width:18%; aspect-ratio:16/9;
   flex-direction:column; align-items:center; justify-content:center; gap:5px; overflow:hidden;
   border:7px solid rgba(39,31,49,.78); border-radius:7px; color:#f9edf5;
   background:linear-gradient(145deg,rgba(59,51,79,.92),rgba(81,55,78,.92));
@@ -816,16 +815,19 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
    描画レイヤーは左ステージへ直接固定する。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view {
   position:fixed; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px; bottom:8px;
-  transform:translate(var(--char-x,0px),var(--char-y,0px));
+  transform:translate(calc(var(--char-x,0px) + 15%),var(--char-y,0px));
 }
-/* 配信の2D立ち絵は全身表示の1.85倍を上端基準に置き、顔から腰までを大きく見せる。
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view {
+  transform:translate(calc(var(--char-x,0px) + 75%),var(--char-y,0px));
+}
+/* 配信の2D立ち絵は全身表示の1.65倍を上端基準に置き、右寄りで顔から腰までを大きく見せる。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
-  inset:0 auto auto -42.5%; width:185%; height:185%;
+  inset:0 auto auto -32.5%; width:165%; height:165%;
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion {
-  inset:0 auto auto -42.5%; width:185%; height:185%;
+  inset:0 auto auto -32.5%; width:165%; height:165%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion > img {
   object-position:50% 0%;

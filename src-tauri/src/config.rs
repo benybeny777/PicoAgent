@@ -172,6 +172,22 @@ impl Config {
         self.set_all(patch)
     }
 
+    /// 削除済みキャラクターを選択していた旧設定だけを安全な代替へ移す。
+    pub fn migrate_removed_character(&self, removed: &str, fallback: &str) -> anyhow::Result<bool> {
+        let selected = self
+            .values
+            .lock()
+            .unwrap()
+            .get("PICOAGENT_CHARACTER")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if selected.as_deref() != Some(removed) {
+            return Ok(false);
+        }
+        self.set_string("PICOAGENT_CHARACTER", fallback.to_string())?;
+        Ok(true)
+    }
+
     /// テスト専用: 永続化せずインメモリの設定値だけを書き換える
     /// （環境変数と違いテスト間で競合しない）。
     #[cfg(test)]
@@ -241,6 +257,29 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert_eq!(left, vec!["config.json".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 削除済みキャラの保存選択だけを既定キャラへ移す() {
+        let dir = temp_dir("removed-character");
+        let path = dir.join("config.json");
+        let cfg = Config::new();
+        cfg.load(path.clone()).unwrap();
+        cfg.set_string("PICOAGENT_CHARACTER", "mugi-live2d".to_string())
+            .unwrap();
+
+        assert!(cfg
+            .migrate_removed_character("mugi-live2d", "mugi")
+            .unwrap());
+        assert_eq!(cfg.get("PICOAGENT_CHARACTER", ""), "mugi");
+        assert!(!cfg
+            .migrate_removed_character("mugi-live2d", "mugi")
+            .unwrap());
+
+        let reloaded = Config::new();
+        reloaded.load(path.clone()).unwrap();
+        assert_eq!(reloaded.get("PICOAGENT_CHARACTER", ""), "mugi");
         std::fs::remove_dir_all(&dir).ok();
     }
 

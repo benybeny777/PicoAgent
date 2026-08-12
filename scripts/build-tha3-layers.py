@@ -18,8 +18,10 @@ CHARACTERS_DIR = ROOT / "characters"
 INDEX_PATH = CHARACTERS_DIR / "index.json"
 THA3_DIR = ROOT / "src-tauri" / "resources" / "bundled" / "tha3"
 TEMP_DIR = ROOT / "temp"
-OUTPUT_SIZE = (445, 900)
-OUTPUT_MARGIN = (24, 38)
+# 900px高では上半身構図の1.55〜2.05倍表示時に原寸を超え、
+# 既存の高精細キャラよりぼやけて見える。既存と同等の縦1800pxで生成する。
+OUTPUT_SIZE = (890, 1800)
+OUTPUT_MARGIN = (48, 76)
 # 基準ポーズの被写体範囲を全レイヤーへ共通適用するが、頭・身体を振るポーズは基準の輪郭より
 # わずかに外へ出る。切り取り箱をこの比率だけ広げて、髪先や肩が欠けないようにする。
 OUTPUT_BOX_PADDING = 0.05

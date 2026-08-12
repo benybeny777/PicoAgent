@@ -848,7 +848,9 @@ function setAnimation(name, force = false) {
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
   // layers を持つキャラは待機・返答状態を常時リグ描画にする（Live2D 風の常時まばたき）。
-  if (rigAvailable && !reduceMotion && (animationName === "idle" || animationName === "talking")) {
+  // 音声が無い会話中は連番の talking を使う。差分リグは音声振幅が無いと
+  // 閉口のままなので、ミュート中の返答が「口パクしない」ように見えていた。
+  if (rigAvailable && !reduceMotion && (animationName === "idle" || (animationName === "talking" && currentVoice))) {
     startRig();
     return;
   }
@@ -2520,7 +2522,6 @@ bubble.addEventListener("click", event => {
 character.addEventListener("click", event => {
   if (event.target instanceof Element && event.target.closest("button")) return;
   // 立ち絵を動かした直後のクリックは、はねる反応ではなくドラッグの終わりなので無視する。
-  if (consumeCharacterDrag()) return;
   // クリックのたびに小さくはねる（連打時はアニメーションを巻き戻して再生）。
   character.classList.remove("boop");
   void character.offsetWidth;
@@ -3714,29 +3715,12 @@ document.getElementById("exportHistory")?.addEventListener("click", async event 
 });
 
 // ── 立ち絵のドラッグ移動 ────────────────────────────────────────────
-// ウィンドウではなく**キャラだけ**を枠の中で動かす。既定位置は上半身が出る座標で、
-// ここからドラッグしてずらした量を PICOAGENT_CHARACTER_OFFSET_X/Y に保存する。
-// ウィンドウを動かしたいときは透明な余白（#petApp の drag region）か、
-// キャラの上で Ctrl（macOS は ⌘）を押しながらドラッグする。
+// キャラの構図は設定画面のプレビューで調整する。通常画面ではキャラのどこを
+// 掴んでもウィンドウを移動できるよう、OS標準のドラッグへ渡す。
 let characterOffset = { x: 0, y: 0 };
 let characterZoom = 1.55;
 let characterFraming = {};
 // 保存済みの値。同じ位置での重複保存を避けるために持つ。
-let savedCharacterOffset = { x: 0, y: 0 };
-let characterDragging = null;
-let characterDragMoved = false;
-
-// アイコンとして顔だけ出す形式では動かさない（枠が 32px しかなく、意味がない）。
-function layoutShowsStandingCharacter() {
-  return currentLayout !== "chat" && currentLayout !== "talk" && currentLayout !== "bar";
-}
-
-/** 直前のドラッグでクリックを打ち消すべきかを返し、フラグを下ろす。 */
-function consumeCharacterDrag() {
-  if (!characterDragMoved) return false;
-  characterDragMoved = false;
-  return true;
-}
 
 /** 枠がウィンドウから完全に出ていかないよう移動量を丸める。 */
 function clampCharacterOffset(x, y) {
@@ -3785,7 +3769,6 @@ function applyCharacterFraming() {
   const frame = preset || saved;
   applyCharacterZoom(saved.zoom ?? frame.zoom ?? 1.55);
   applyCharacterOffset(saved.x ?? frame.x ?? 0, saved.y ?? frame.y ?? 0, { clamp: false });
-  savedCharacterOffset = { ...characterOffset };
 }
 
 function applyStreamAppearance(background, imagePath, display, displayImagePath, captionColor = "#5a3b4b") {
@@ -3799,91 +3782,14 @@ function applyStreamAppearance(background, imagePath, display, displayImagePath,
   petApp.style.setProperty("--stream-caption-color", safeCaptionColor);
 }
 
-/** ドラッグを取りやめて、掴む前の位置へ戻す（保存もしない）。 */
-function cancelCharacterDrag() {
-  if (!characterDragging) return;
-  applyCharacterOffset(characterDragging.baseX, characterDragging.baseY, { clamp: false });
-  if (character.hasPointerCapture(characterDragging.pointerId)) {
-    character.releasePointerCapture(characterDragging.pointerId);
-  }
-  character.classList.remove("is-dragging");
-  characterDragging = null;
-  // 取りやめでもクリック扱いに戻さない（掴んだ位置ではねられると驚くため）。
-  characterDragMoved = true;
-}
-
 character.addEventListener("pointerdown", event => {
   if (event.button !== 0) return;
   if (event.target instanceof Element && event.target.closest("button")) return;
-  // 2本目以降の指は無視する（ピンチ操作で立ち絵が飛ぶのを防ぐ）。
-  if (characterDragging) return;
-  // Ctrl（macOS は ⌘）を押しながらならウィンドウを動かす。
-  // キャラが画面の大半を占める形式（マスコット等）でも、ウィンドウを掴む手段を残すため。
-  if (event.ctrlKey || event.metaKey) {
-    window.picoagent.startWindowDrag();
-    return;
-  }
-  if (!layoutShowsStandingCharacter()) {
-    window.picoagent.startWindowDrag();
-    return;
-  }
-  // 画像の既定ドラッグ（ゴースト表示）と文字選択を止める。
   event.preventDefault();
-  characterDragging = {
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    baseX: characterOffset.x,
-    baseY: characterOffset.y,
-  };
-  character.setPointerCapture(event.pointerId);
-  character.classList.add("is-dragging");
-});
-
-character.addEventListener("pointermove", event => {
-  if (!characterDragging || event.pointerId !== characterDragging.pointerId) return;
-  const dx = event.clientX - characterDragging.startX;
-  const dy = event.clientY - characterDragging.startY;
-  // 小さな揺れはクリックとして扱う（はねる反応を潰さない）。触ろうとしただけで
-  // 立ち絵がずれると操作ミスに感じるので、しきい値は指でも押せる大きさにする。
-  if (!characterDragMoved && Math.hypot(dx, dy) < 6) return;
-  characterDragMoved = true;
-  applyCharacterOffset(characterDragging.baseX + dx, characterDragging.baseY + dy);
-});
-
-function endCharacterDrag(event) {
-  if (!characterDragging || event.pointerId !== characterDragging.pointerId) return;
-  const moved = characterDragMoved;
-  if (character.hasPointerCapture(event.pointerId)) character.releasePointerCapture(event.pointerId);
-  character.classList.remove("is-dragging");
-  characterDragging = null;
-  if (!moved) return;
-  // 位置が変わっていなければ書き込まない（同じ値の保存で設定ファイルを触らない）。
-  if (characterOffset.x === savedCharacterOffset.x && characterOffset.y === savedCharacterOffset.y) return;
-  savedCharacterOffset = { ...characterOffset };
   markActivity();
-  window.picoagent.setCharacterOffset(characterOffset.x, characterOffset.y, characterManifest?.id, currentLayout, characterZoom).catch(error => {
-    showToast(preview(error?.message || error || "立ち絵の位置を保存できませんでした", 60), "error");
-  });
-}
-character.addEventListener("pointerup", endCharacterDrag);
-character.addEventListener("pointercancel", endCharacterDrag);
-// 途中でキャプチャを失った場合も（別ウィンドウへ切り替わった等）掴んだままにしない。
-character.addEventListener("lostpointercapture", endCharacterDrag);
-// 右クリックやウィンドウ外へフォーカスが移ったら、動かしかけを取りやめて元へ戻す。
-character.addEventListener("contextmenu", cancelCharacterDrag);
-window.addEventListener("blur", cancelCharacterDrag);
-// Esc で「やっぱりやめる」。掴んだ時点の位置へ戻し、保存もしない。
-window.addEventListener("keydown", event => {
-  if (event.key === "Escape" && characterDragging) {
-    event.stopPropagation();
-    cancelCharacterDrag();
-  }
-}, true);
-// ドラッグ直後のダブルクリックでフキダシが全画面になると事故に見えるので抑える。
-character.addEventListener("dblclick", event => {
-  if (consumeCharacterDrag()) { event.stopPropagation(); event.preventDefault(); }
-}, true);
+  window.picoagent.startWindowDrag();
+});
+
 // ウィンドウの大きさや表示形式が変わると枠の位置も変わる。見えなくならないよう丸め直す。
 window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y));
 
@@ -4055,7 +3961,6 @@ window.picoagent.on("pet:character-reset", (reset) => {
     if (!Object.keys(characterFraming[characterId]).length) delete characterFraming[characterId];
   }
   applyCharacterOffset(0, 0, { clamp: false });
-  savedCharacterOffset = { x: 0, y: 0 };
   applyCharacterFraming();
 });
 window.picoagent.on("pet:model", model => {
@@ -4532,7 +4437,6 @@ function startAlarmPolling() {
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;
   applyCharacterOffset(info.characterOffsetX, info.characterOffsetY, { clamp: false });
-  savedCharacterOffset = { ...characterOffset };
   savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };
   applyLayout(info.layout);
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
@@ -4814,6 +4718,5 @@ window.picoagent.on("pet:layout-reset", () => {
   resetFullscreenBubbleLayoutVars();
   // 立ち絵の移動量も既定（上半身が出る位置）へ戻す。
   applyCharacterOffset(0, 0, { clamp: false });
-  savedCharacterOffset = { x: 0, y: 0 };
   setTimeout(refreshBubblePlacement, 0);
 });

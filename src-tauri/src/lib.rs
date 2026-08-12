@@ -175,6 +175,16 @@ pub fn run() {
             {
                 log_paths::append_app_log(app.handle(), &warning);
             }
+            // 削除した失敗版を選択したままの旧設定は、2Dむぎへ一度だけ移す。
+            if state
+                .config
+                .migrate_removed_character("mugi-live2d", "mugi")?
+            {
+                log_paths::append_app_log(
+                    app.handle(),
+                    "削除済みのむぎLive2D選択を2Dむぎへ移行しました。",
+                );
+            }
             // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
             commands::encrypt_existing_secrets(app.handle(), &state.config);
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。

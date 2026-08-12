@@ -2178,12 +2178,25 @@ function buildCharacterFramingEditor() {
   const zoom = el("input", { type: "range", min: "1", max: "4", step: ".05" });
   const x = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
   const y = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
-  const preview = el("div", { className: "framing-preview" }, [el("img", { alt: "選択キャラの構図プレビュー" }), el("span", { textContent: "字幕テロップ" })]);
+  const zoomValue = el("output", { textContent: "1.55倍" });
+  const positionValue = el("output", { textContent: "X 0 / Y 18" });
+  const preview = el("div", {
+    className: "framing-preview",
+    role: "group",
+    tabIndex: "0",
+    ariaLabel: "キャラをドラッグして位置を調整",
+  }, [
+    el("img", { alt: "選択キャラの構図プレビュー", draggable: false }),
+    el("strong", { textContent: "キャラをドラッグして位置調整" }),
+    el("span", { textContent: "字幕テロップ" }),
+  ]);
   const defaults = { bust: { zoom: 2.05, x: 0, y: 38 }, upper: { zoom: 1.55, x: 0, y: 18 }, full: { zoom: 1, x: 0, y: 0 } };
   const current = () => characterFraming?.[characterSelect.value]?.[layoutSelect.value];
   const updatePreview = () => {
     const image = preview.querySelector("img");
     image.style.transform = `translate(${Number(x.value) / 8}px,${Number(y.value) / 8}px) scale(${Number(zoom.value) / 1.55})`;
+    zoomValue.textContent = `${Number(zoom.value).toFixed(2)}倍`;
+    positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
   };
   const load = async () => {
     const saved = current() || { preset: "upper", ...defaults.upper };
@@ -2216,6 +2229,30 @@ function buildCharacterFramingEditor() {
     save();
   });
   for (const input of [zoom, x, y]) input.addEventListener("input", () => { presetSelect.value = "custom"; save(); });
+  let drag = null;
+  preview.addEventListener("pointerdown", event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: Number(x.value), y: Number(y.value) };
+    preview.setPointerCapture(event.pointerId);
+    preview.classList.add("is-dragging");
+  });
+  preview.addEventListener("pointermove", event => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    x.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.x + (event.clientX - drag.startX) * 8))));
+    y.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.y + (event.clientY - drag.startY) * 8))));
+    presetSelect.value = "custom";
+    save();
+  });
+  const endDrag = event => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
+    preview.classList.remove("is-dragging");
+    drag = null;
+  };
+  preview.addEventListener("pointerup", endDrag);
+  preview.addEventListener("pointercancel", endDrag);
+  preview.addEventListener("lostpointercapture", endDrag);
   layoutSelect.addEventListener("change", load);
   const reset = el("button", { type: "button", className: "secondary", textContent: "この構図を初期値へ戻す" });
   reset.addEventListener("click", async () => {
@@ -2236,9 +2273,16 @@ function buildCharacterFramingEditor() {
   });
   const node = markSearchable(el("div", { className: "field framing-editor" }, [
     el("label", { textContent: "キャラごとの構図（表示形式別）" }),
-    el("div", { className: "framing-controls" }, [layoutSelect, presetSelect, zoom, x, y]), preview,
+    el("div", { className: "framing-controls" }, [
+      el("label", {}, [el("span", { textContent: "表示形式" }), layoutSelect]),
+      el("label", {}, [el("span", { textContent: "基本構図" }), presetSelect]),
+      el("label", { className: "framing-zoom" }, [el("span", { textContent: "キャラサイズ" }), zoomValue, zoom]),
+      el("label", {}, [el("span", { textContent: "横位置（X）" }), x]),
+      el("label", {}, [el("span", { textContent: "縦位置（Y）" }), y]),
+      positionValue,
+    ]), preview,
     reset,
-    el("p", { className: "hint", textContent: "胸上・上半身・全身を選び、必要なら拡大率と位置を微調整できます。キャラと表示形式ごとに保存します。" }),
+    el("p", { className: "hint", textContent: "サイズはスライダー、位置はプレビュー内のキャラをドラッグして調整できます。キャラと表示形式ごとに保存します。" }),
   ]), "キャラ 構図 胸上 上半身 全身 拡大 位置 プレビュー");
   return { node, load };
 }

@@ -46,30 +46,6 @@
       "name": "集中オーラ"
     }
   ],
-  "live2d": {
-    "model": "live2d/sdk4/mugi.model3.json",
-    "models": [
-      {
-        "sdk": "5",
-        "path": "live2d/sdk5/mugi.model3.json"
-      },
-      {
-        "sdk": "4",
-        "path": "live2d/sdk4/mugi.model3.json"
-      }
-    ],
-    "motions": {
-      "idle": "Idle",
-      "thinking": "TapBody",
-      "talking": "TapBody",
-      "sad": "Idle"
-    },
-    "lipSyncParam": "ParamMouthOpenY",
-    "faceOverlayFallback": false,
-    "alwaysAnimate": true,
-    "scale": 1.7,
-    "offsetY": 230
-  },
   "animations": {
     "idle": {
       "frames": 12,

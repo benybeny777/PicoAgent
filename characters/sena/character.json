@@ -1,7 +1,7 @@
 {
   "id": "sena",
   "name": "セナ",
-  "assetVersion": "2026-08-12-full-motion-v1-sena",
+  "assetVersion": "2026-08-12-highres-motion-v2-sena",
   "description": "銀青色のハイポニーと星空色の衣装が印象的な、凛とした18歳の歌姫系作業相棒。",
   "greeting": "セナだよ。今日のステージも、きれいに仕上げようか。",
   "boot": {
@@ -57,18 +57,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/620dee24c4b926be9176.png",
-        "frames/11f87e3f1ad647950b3f.png",
-        "frames/6061a96160be5c932e08.png",
-        "frames/abbdb4fa5d2c7bdfbae5.png",
+        "frames/288989e7a14d4e79d1d2.png",
+        "frames/5aec9934a4619911ba56.png",
+        "frames/94f5987f87e6786c2877.png",
+        "frames/6206243061d56c79a1b5.png",
         "layers/blink_half.png",
         "layers/blink_closed.png",
         "layers/blink_half.png",
-        "frames/11f87e3f1ad647950b3f.png",
-        "frames/620dee24c4b926be9176.png",
-        "frames/abbdb4fa5d2c7bdfbae5.png",
-        "frames/6061a96160be5c932e08.png",
-        "frames/620dee24c4b926be9176.png"
+        "frames/5aec9934a4619911ba56.png",
+        "frames/288989e7a14d4e79d1d2.png",
+        "frames/6206243061d56c79a1b5.png",
+        "frames/94f5987f87e6786c2877.png",
+        "frames/288989e7a14d4e79d1d2.png"
       ]
     },
     "thinking": {
@@ -90,18 +90,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/93cf38dbb6cf37e60643.png",
-        "frames/491a515d22705b3d0513.png",
-        "frames/93cf38dbb6cf37e60643.png",
-        "frames/5dc562686963f2aa92aa.png",
-        "frames/491a515d22705b3d0513.png",
-        "frames/93cf38dbb6cf37e60643.png",
+        "frames/707f18962ec44d1d4c8a.png",
+        "frames/5f275211ddd6fec62de9.png",
+        "frames/707f18962ec44d1d4c8a.png",
+        "frames/b3626556fefdc144c27c.png",
+        "frames/5f275211ddd6fec62de9.png",
+        "frames/707f18962ec44d1d4c8a.png",
         "layers/blink_closed.png",
-        "frames/5dc562686963f2aa92aa.png",
-        "frames/491a515d22705b3d0513.png",
-        "frames/93cf38dbb6cf37e60643.png",
-        "frames/491a515d22705b3d0513.png",
-        "frames/93cf38dbb6cf37e60643.png"
+        "frames/b3626556fefdc144c27c.png",
+        "frames/5f275211ddd6fec62de9.png",
+        "frames/707f18962ec44d1d4c8a.png",
+        "frames/5f275211ddd6fec62de9.png",
+        "frames/707f18962ec44d1d4c8a.png"
       ]
     },
     "talking": {
@@ -123,18 +123,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/7930104c2a80991287d3.png",
-        "frames/f7a5f97368f7612c493f.png",
-        "frames/e578aeb0c509973033d0.png",
-        "frames/3847bfc6464bce4f4def.png",
-        "frames/f7a5f97368f7612c493f.png",
-        "frames/7930104c2a80991287d3.png",
-        "frames/e578aeb0c509973033d0.png",
-        "frames/3847bfc6464bce4f4def.png",
+        "frames/c6b131f45ec42c9b192b.png",
+        "frames/70067455fad3f96ad36b.png",
+        "frames/b4aec27625f4378146a1.png",
+        "frames/075a1f6026430b6913f4.png",
+        "frames/70067455fad3f96ad36b.png",
+        "frames/c6b131f45ec42c9b192b.png",
+        "frames/b4aec27625f4378146a1.png",
+        "frames/075a1f6026430b6913f4.png",
         "layers/blink_half.png",
-        "frames/f7a5f97368f7612c493f.png",
-        "frames/e578aeb0c509973033d0.png",
-        "frames/7930104c2a80991287d3.png"
+        "frames/70067455fad3f96ad36b.png",
+        "frames/b4aec27625f4378146a1.png",
+        "frames/c6b131f45ec42c9b192b.png"
       ]
     },
     "sad": {
@@ -150,12 +150,12 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/78e60e27c6fe73c7fcc7.png",
-        "frames/2ddbc65389168916fbb8.png",
+        "frames/014b474d03acf6c52dc0.png",
+        "frames/114415f5809a45d746c9.png",
         "layers/blink_closed.png",
-        "frames/2ddbc65389168916fbb8.png",
-        "frames/78e60e27c6fe73c7fcc7.png",
-        "frames/78e60e27c6fe73c7fcc7.png"
+        "frames/114415f5809a45d746c9.png",
+        "frames/014b474d03acf6c52dc0.png",
+        "frames/014b474d03acf6c52dc0.png"
       ]
     }
   }

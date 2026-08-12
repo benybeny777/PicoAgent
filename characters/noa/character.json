@@ -1,7 +1,7 @@
 {
   "id": "noa",
   "name": "ノア",
-  "assetVersion": "2026-08-12-full-motion-v1-noa",
+  "assetVersion": "2026-08-12-highres-motion-v2-noa",
   "description": "黒いぱっつん前髪と素直なツインテール、上品な吸血姫風メイド衣装の18歳ツンデレ作業相棒。",
   "greeting": "ノアよ。べ、別に待ってたわけじゃないけど……用件は聞いてあげる。",
   "boot": {
@@ -57,18 +57,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/75183af4dac1f3dd94a1.png",
-        "frames/9e99e6fd52727dcddb54.png",
-        "frames/d76e5085d58447259a72.png",
-        "frames/2234fb9d86e07abe56d8.png",
+        "frames/5791dccb5653223f9519.png",
+        "frames/fdc43cdff17e98b4681e.png",
+        "frames/ba314c7e48cd7612a810.png",
+        "frames/c72959dc08d85258aa1e.png",
         "layers/blink_half.png",
         "layers/blink_closed.png",
         "layers/blink_half.png",
-        "frames/9e99e6fd52727dcddb54.png",
-        "frames/75183af4dac1f3dd94a1.png",
-        "frames/2234fb9d86e07abe56d8.png",
-        "frames/d76e5085d58447259a72.png",
-        "frames/75183af4dac1f3dd94a1.png"
+        "frames/fdc43cdff17e98b4681e.png",
+        "frames/5791dccb5653223f9519.png",
+        "frames/c72959dc08d85258aa1e.png",
+        "frames/ba314c7e48cd7612a810.png",
+        "frames/5791dccb5653223f9519.png"
       ]
     },
     "thinking": {
@@ -90,18 +90,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/c4744c5c50aabfd3745c.png",
-        "frames/fba79d91e8c6006632c5.png",
-        "frames/c4744c5c50aabfd3745c.png",
-        "frames/2c2954eb22a6dc09c849.png",
-        "frames/fba79d91e8c6006632c5.png",
-        "frames/c4744c5c50aabfd3745c.png",
+        "frames/485029172271a024adb5.png",
+        "frames/a6329ea2c381d6ea7ebf.png",
+        "frames/485029172271a024adb5.png",
+        "frames/dac288724b4625ed9e27.png",
+        "frames/a6329ea2c381d6ea7ebf.png",
+        "frames/485029172271a024adb5.png",
         "layers/blink_closed.png",
-        "frames/2c2954eb22a6dc09c849.png",
-        "frames/fba79d91e8c6006632c5.png",
-        "frames/c4744c5c50aabfd3745c.png",
-        "frames/fba79d91e8c6006632c5.png",
-        "frames/c4744c5c50aabfd3745c.png"
+        "frames/dac288724b4625ed9e27.png",
+        "frames/a6329ea2c381d6ea7ebf.png",
+        "frames/485029172271a024adb5.png",
+        "frames/a6329ea2c381d6ea7ebf.png",
+        "frames/485029172271a024adb5.png"
       ]
     },
     "talking": {
@@ -123,18 +123,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/22f5ff4323efd77c6273.png",
-        "frames/c1ca25bea2b022954a4b.png",
-        "frames/d394bb442602c27589e5.png",
-        "frames/ccb36829170c099413d2.png",
-        "frames/c1ca25bea2b022954a4b.png",
-        "frames/22f5ff4323efd77c6273.png",
-        "frames/d394bb442602c27589e5.png",
-        "frames/ccb36829170c099413d2.png",
+        "frames/87186de0b55974983e47.png",
+        "frames/96e9fdf93f7e58e12303.png",
+        "frames/9d5a21c9d5da28e874bc.png",
+        "frames/dd507a631df26a26b7ce.png",
+        "frames/96e9fdf93f7e58e12303.png",
+        "frames/87186de0b55974983e47.png",
+        "frames/9d5a21c9d5da28e874bc.png",
+        "frames/dd507a631df26a26b7ce.png",
         "layers/blink_half.png",
-        "frames/c1ca25bea2b022954a4b.png",
-        "frames/d394bb442602c27589e5.png",
-        "frames/22f5ff4323efd77c6273.png"
+        "frames/96e9fdf93f7e58e12303.png",
+        "frames/9d5a21c9d5da28e874bc.png",
+        "frames/87186de0b55974983e47.png"
       ]
     },
     "sad": {
@@ -150,12 +150,12 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/72e64570229cc58c0559.png",
-        "frames/59fd8f3e7d496bfa7f4e.png",
+        "frames/47a617294db1837c976e.png",
+        "frames/8b24398b4ce79c9650f0.png",
         "layers/blink_closed.png",
-        "frames/59fd8f3e7d496bfa7f4e.png",
-        "frames/72e64570229cc58c0559.png",
-        "frames/72e64570229cc58c0559.png"
+        "frames/8b24398b4ce79c9650f0.png",
+        "frames/47a617294db1837c976e.png",
+        "frames/47a617294db1837c976e.png"
       ]
     }
   }

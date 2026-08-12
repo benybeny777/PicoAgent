@@ -2037,7 +2037,7 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
             style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
         }),
-        "mugi" | "mugi-live2d" => Some(aivis_voice(
+        "mugi" => Some(aivis_voice(
             HIYORI_AIVIS_MODEL_UUID,
             HIYORI_AIVIS_SPEAKER_UUID,
             "あまあま",
@@ -4108,7 +4108,6 @@ mod tests {
     fn 組み込みキャラはそれぞれ既定声を持つ() {
         let expected = [
             ("mugi", "あまあま"),
-            ("mugi-live2d", "あまあま"),
             ("rin", "ノーマル"),
             ("rin-tha3", "ノーマル"),
             ("mai", "ノーマル"),

@@ -1,7 +1,7 @@
 {
   "id": "koharu",
   "name": "こはる",
-  "assetVersion": "2026-08-12-full-motion-v1-koharu",
+  "assetVersion": "2026-08-12-highres-motion-v2-koharu",
   "description": "柔らかな茶色のボブとキャメル色の上着が似合う、親しみやすい18歳の作業相棒。",
   "greeting": "こんにちは、こはるだよ。今日のこと、気軽に話してね。",
   "boot": {
@@ -57,18 +57,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/3ed154fddb93cf95908a.png",
-        "frames/4dfa71203e55964b614d.png",
-        "frames/b7e870a60972dc50b966.png",
-        "frames/70df273b80e38ec345f9.png",
+        "frames/5810bb8da5c0e96e45e2.png",
+        "frames/9b6c4dd42d07a626e485.png",
+        "frames/bb2048bc00af5d410e7d.png",
+        "frames/d4494b2ee52e2211e2b5.png",
         "layers/blink_half.png",
         "layers/blink_closed.png",
         "layers/blink_half.png",
-        "frames/4dfa71203e55964b614d.png",
-        "frames/3ed154fddb93cf95908a.png",
-        "frames/70df273b80e38ec345f9.png",
-        "frames/b7e870a60972dc50b966.png",
-        "frames/3ed154fddb93cf95908a.png"
+        "frames/9b6c4dd42d07a626e485.png",
+        "frames/5810bb8da5c0e96e45e2.png",
+        "frames/d4494b2ee52e2211e2b5.png",
+        "frames/bb2048bc00af5d410e7d.png",
+        "frames/5810bb8da5c0e96e45e2.png"
       ]
     },
     "thinking": {
@@ -90,18 +90,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/80de7d3abee86177cf98.png",
-        "frames/08801562ab6fc9a73a20.png",
-        "frames/80de7d3abee86177cf98.png",
-        "frames/f4ab264268fd1ee941ed.png",
-        "frames/08801562ab6fc9a73a20.png",
-        "frames/80de7d3abee86177cf98.png",
+        "frames/d97033b42a5ccf780f59.png",
+        "frames/eef9fd94c1a8d8c80a50.png",
+        "frames/d97033b42a5ccf780f59.png",
+        "frames/c8b4e646dc97eec769d1.png",
+        "frames/eef9fd94c1a8d8c80a50.png",
+        "frames/d97033b42a5ccf780f59.png",
         "layers/blink_closed.png",
-        "frames/f4ab264268fd1ee941ed.png",
-        "frames/08801562ab6fc9a73a20.png",
-        "frames/80de7d3abee86177cf98.png",
-        "frames/08801562ab6fc9a73a20.png",
-        "frames/80de7d3abee86177cf98.png"
+        "frames/c8b4e646dc97eec769d1.png",
+        "frames/eef9fd94c1a8d8c80a50.png",
+        "frames/d97033b42a5ccf780f59.png",
+        "frames/eef9fd94c1a8d8c80a50.png",
+        "frames/d97033b42a5ccf780f59.png"
       ]
     },
     "talking": {
@@ -123,18 +123,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/01371a37b5550064446d.png",
-        "frames/76f85221b3b6da69bb8a.png",
-        "frames/9e46325dfd9d3da32290.png",
-        "frames/21728a6af56b376a41a9.png",
-        "frames/76f85221b3b6da69bb8a.png",
-        "frames/01371a37b5550064446d.png",
-        "frames/9e46325dfd9d3da32290.png",
-        "frames/21728a6af56b376a41a9.png",
+        "frames/5d97ff0f7dc18a07f7a7.png",
+        "frames/4b22bfc2c06ade049251.png",
+        "frames/f7608150c661e5210ca4.png",
+        "frames/5828777713475ad70445.png",
+        "frames/4b22bfc2c06ade049251.png",
+        "frames/5d97ff0f7dc18a07f7a7.png",
+        "frames/f7608150c661e5210ca4.png",
+        "frames/5828777713475ad70445.png",
         "layers/blink_half.png",
-        "frames/76f85221b3b6da69bb8a.png",
-        "frames/9e46325dfd9d3da32290.png",
-        "frames/01371a37b5550064446d.png"
+        "frames/4b22bfc2c06ade049251.png",
+        "frames/f7608150c661e5210ca4.png",
+        "frames/5d97ff0f7dc18a07f7a7.png"
       ]
     },
     "sad": {
@@ -150,12 +150,12 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/8f8290f7915074c07401.png",
-        "frames/762f0f7eeb23f83a05eb.png",
+        "frames/cd947cc31160ee00ed52.png",
+        "frames/a8f7a5043105e0c9617f.png",
         "layers/blink_closed.png",
-        "frames/762f0f7eeb23f83a05eb.png",
-        "frames/8f8290f7915074c07401.png",
-        "frames/8f8290f7915074c07401.png"
+        "frames/a8f7a5043105e0c9617f.png",
+        "frames/cd947cc31160ee00ed52.png",
+        "frames/cd947cc31160ee00ed52.png"
       ]
     }
   }
