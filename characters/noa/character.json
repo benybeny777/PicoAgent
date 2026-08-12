@@ -1,7 +1,7 @@
 {
   "id": "noa",
   "name": "ノア",
-  "assetVersion": "2026-08-11-standard-2d-v1",
+  "assetVersion": "2026-08-12-full-motion-v1-noa",
   "description": "黒いぱっつん前髪と素直なツインテール、上品な吸血姫風メイド衣装の18歳ツンデレ作業相棒。",
   "greeting": "ノアよ。べ、別に待ってたわけじゃないけど……用件は聞いてあげる。",
   "boot": {
@@ -16,9 +16,16 @@
   },
   "interactions": {
     "reactions": {
-      "head": ["な、なによ。ちゃんと見てるわよ", "髪を乱さないでちょうだい"],
-      "cheek": ["ちょっと……近いわよ"],
-      "hand": ["仕方ないわね。手伝ってあげる"]
+      "head": [
+        "な、なによ。ちゃんと見てるわよ",
+        "髪を乱さないでちょうだい"
+      ],
+      "cheek": [
+        "ちょっと……近いわよ"
+      ],
+      "hand": [
+        "仕方ないわね。手伝ってあげる"
+      ]
     }
   },
   "secondaryMotion": {
@@ -31,9 +38,125 @@
     "duration": 3.7
   },
   "animations": {
-    "idle": { "frames": 1, "fps": 1, "motion": "breathe", "framePaths": ["preview.png"] },
-    "thinking": { "frames": 1, "fps": 1, "motion": "thinking", "framePaths": ["preview.png"] },
-    "talking": { "frames": 1, "fps": 1, "motion": "talking", "framePaths": ["preview.png"] },
-    "sad": { "frames": 1, "fps": 1, "motion": "sad", "framePaths": ["preview.png"] }
+    "idle": {
+      "frames": 12,
+      "fps": 3.2,
+      "frameDurations": [
+        760,
+        760,
+        760,
+        520,
+        70,
+        90,
+        70,
+        760,
+        760,
+        760,
+        760,
+        1100
+      ],
+      "motion": "live2d-idle",
+      "framePaths": [
+        "frames/75183af4dac1f3dd94a1.png",
+        "frames/9e99e6fd52727dcddb54.png",
+        "frames/d76e5085d58447259a72.png",
+        "frames/2234fb9d86e07abe56d8.png",
+        "layers/blink_half.png",
+        "layers/blink_closed.png",
+        "layers/blink_half.png",
+        "frames/9e99e6fd52727dcddb54.png",
+        "frames/75183af4dac1f3dd94a1.png",
+        "frames/2234fb9d86e07abe56d8.png",
+        "frames/d76e5085d58447259a72.png",
+        "frames/75183af4dac1f3dd94a1.png"
+      ]
+    },
+    "thinking": {
+      "frames": 12,
+      "fps": 7.0,
+      "frameDurations": [
+        180,
+        150,
+        120,
+        170,
+        150,
+        170,
+        120,
+        120,
+        170,
+        150,
+        170,
+        150
+      ],
+      "motion": "live2d-thinking",
+      "framePaths": [
+        "frames/c4744c5c50aabfd3745c.png",
+        "frames/fba79d91e8c6006632c5.png",
+        "frames/c4744c5c50aabfd3745c.png",
+        "frames/2c2954eb22a6dc09c849.png",
+        "frames/fba79d91e8c6006632c5.png",
+        "frames/c4744c5c50aabfd3745c.png",
+        "layers/blink_closed.png",
+        "frames/2c2954eb22a6dc09c849.png",
+        "frames/fba79d91e8c6006632c5.png",
+        "frames/c4744c5c50aabfd3745c.png",
+        "frames/fba79d91e8c6006632c5.png",
+        "frames/c4744c5c50aabfd3745c.png"
+      ]
+    },
+    "talking": {
+      "frames": 12,
+      "fps": 8.0,
+      "frameDurations": [
+        120,
+        90,
+        75,
+        120,
+        120,
+        120,
+        75,
+        120,
+        90,
+        120,
+        75,
+        140
+      ],
+      "motion": "live2d-talking",
+      "framePaths": [
+        "frames/22f5ff4323efd77c6273.png",
+        "frames/c1ca25bea2b022954a4b.png",
+        "frames/d394bb442602c27589e5.png",
+        "frames/ccb36829170c099413d2.png",
+        "frames/c1ca25bea2b022954a4b.png",
+        "frames/22f5ff4323efd77c6273.png",
+        "frames/d394bb442602c27589e5.png",
+        "frames/ccb36829170c099413d2.png",
+        "layers/blink_half.png",
+        "frames/c1ca25bea2b022954a4b.png",
+        "frames/d394bb442602c27589e5.png",
+        "frames/22f5ff4323efd77c6273.png"
+      ]
+    },
+    "sad": {
+      "frames": 6,
+      "fps": 4.2,
+      "frameDurations": [
+        320,
+        110,
+        150,
+        120,
+        420,
+        560
+      ],
+      "motion": "live2d-sad",
+      "framePaths": [
+        "frames/72e64570229cc58c0559.png",
+        "frames/59fd8f3e7d496bfa7f4e.png",
+        "layers/blink_closed.png",
+        "frames/59fd8f3e7d496bfa7f4e.png",
+        "frames/72e64570229cc58c0559.png",
+        "frames/72e64570229cc58c0559.png"
+      ]
+    }
   }
 }

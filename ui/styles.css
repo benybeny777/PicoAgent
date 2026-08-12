@@ -572,13 +572,13 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 [data-layout="widget"] .character img {
   position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%;
 }
-/* アイコンにする形式では顔だけを見せる。立ち絵の待機モーションは、拡大の
-   transform を上書きして顔が外れるので止める。 */
+/* 小型アイコン形式も2D立ち絵は頭から腰までの上半身を見せる。
+   object-fit:cover の上端基準だけで切り出し、追加拡大で顔だけにしない。 */
 [data-layout="chat"] .character img,
 [data-layout="talk"] .character img,
 [data-layout="bar"] .character img {
   object-fit:cover; object-position:50% 0%;
-  transform:scale(1.9)!important; transform-origin:50% 8%; animation:none!important;
+  transform-origin:50% 8%;
 }
 
 /* ── 1. マスコット: キャラだけ。吹き出しは中身の分だけ出て、黙れば消える ────── */
@@ -794,7 +794,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="stream"] .stream-info > span:last-child { font-size:11px; font-weight:700; opacity:.9; }
 .stream-info,.stream-display { display:none; }
 [data-layout="stream"] .stream-display {
-  display:flex; position:absolute; z-index:1; left:5.5%; top:13%; width:25%; aspect-ratio:16/9;
+  display:flex; position:absolute; z-index:1; left:2.5%; top:13%; width:18%; aspect-ratio:16/9;
   flex-direction:column; align-items:center; justify-content:center; gap:5px; overflow:hidden;
   border:7px solid rgba(39,31,49,.78); border-radius:7px; color:#f9edf5;
   background:linear-gradient(145deg,rgba(59,51,79,.92),rgba(81,55,78,.92));
@@ -818,14 +818,14 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
   position:fixed; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px; bottom:8px;
   transform:translate(var(--char-x,0px),var(--char-y,0px));
 }
-/* 配信の2D立ち絵は全身表示の1.65倍を上端基準に置き、顔から上半身を大きく見せる。
+/* 配信の2D立ち絵は全身表示の1.85倍を上端基準に置き、顔から腰までを大きく見せる。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto -42.5%; width:185%; height:185%;
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto -42.5%; width:185%; height:185%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion > img {
   object-position:50% 0%;
@@ -909,8 +909,8 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
    潜り込む。行数ぶんの高さを確保して重なりを避ける。 */
 [data-layout="widget"] .composer textarea { min-height:74px; }
 
-/* アイコンとして顔だけ出す形式は、枠側の拡大・移動を効かせない
-   （32px のアイコンを動かしても意味がなく、顔の切り出しと二重に変形してしまう）。 */
+/* 小型の上半身アイコン形式は、枠側の拡大・移動を効かせない
+   （アイコンを動かしても意味がなく、上端基準の切り出しと二重に変形してしまう）。 */
 [data-layout="chat"] .character-view,
 [data-layout="talk"] .character-view,
 [data-layout="bar"] .character-view { transform:none; }
@@ -945,13 +945,13 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="widget"] .character-secondary-motion > img {
   object-fit:contain; object-position:50% 0%;
 }
-/* 2D立ち絵は共通の --char-zoom だけで上半身基準に補正する。
-   cover と追加 scale を重ねると、高解像度画像が顔だけになるため二重拡大しない。 */
+/* 2D立ち絵は共通の --char-zoom に1.32倍を重ね、全形式で頭から腰までを主役にする。
+   画像自体を切らないため、キャラ別の構図調整と透明輪郭はそのまま保てる。 */
 [data-layout="mascot"] .character[data-render-kind="2d"] .character-view,
 [data-layout="pet"] .character[data-render-kind="2d"] .character-view,
 [data-layout="workspace"] .character[data-render-kind="2d"] .character-view,
 [data-layout="widget"] .character[data-render-kind="2d"] .character-view {
-  scale:1; transform-origin:50% 0%;
+  scale:1.32; transform-origin:50% 0%;
 }
 [data-layout="mascot"] .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0; width:360px!important; height:398px!important;
@@ -972,7 +972,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="pet"] .reply { font-size:15px; line-height:1.75; }
 [data-layout="pet"] textarea { min-height:88px; }
 
-/* チャット / トーク: 顔アイコン、履歴、入力を一段大きくする。 */
+/* チャット / トーク: 上半身アイコン、履歴、入力を一段大きくする。 */
 [data-layout="chat"] .bubble,
 [data-layout="talk"] .bubble { padding:100px 16px 15px; }
 [data-layout="chat"] .character,
