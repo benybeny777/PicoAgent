@@ -22,16 +22,18 @@ powershell -ExecutionPolicy Bypass -File scripts/rebuild-sharp-expression-assets
 この入口は次の順番を固定する。
 
 1. 890×1800の基準寸法で基本、瞬き、口、視線、感情の局所差分を合成する。
-2. Photoshop「ディテールを保持」で全9レイヤーを1780×3600へ仕上げる。
+2. Photoshop「ディテールを保持 2.0」で全9レイヤーを1780×3600へ仕上げ、元アルファを再適用する。
 3. 内容ハッシュ付き `frames/<世代>/` を生成する。
 4. 配信コピーを同期する。
 
 Photoshop後に `build-sharp-expression-layers.py` または `build-extended-expression-layers.py` を再実行しない。高精細版が低解像度で上書きされる。
 
+画像の引き伸ばし拡大を禁止する。nearest／bilinear／bicubic／Lanczos等で縦横ピクセル数だけを増やした画像を成果物へ使わない。Photoshop前の配置正規化も等倍以下かつ縦横比維持に限定する。最終レイヤーの再サンプリングをPillow、ImageMagick、OS画像API、ブラウザ、CSSへ代替しない。QAレポートの方式が `Photoshop Preserve Details 2.0` で、処理前後の寸法が記録されていることを確認する。Photoshop処理も寸法だけでは合格にせず、顔・髪・輪郭がぼける場合は高解像度の元絵または局所再制作へ戻る。
+
 ## 品質を検証する
 
 - `cargo xtask sync-characters` を通し、全9レイヤー、1780×3600最低寸法、単一世代を検査する。
-- PNG寸法だけで合格にしない。元絵、完成レイヤー、実WebViewの顔・髪・輪郭を同じ表示倍率で比較する。
+- PNG寸法だけで合格にしない。元絵、Photoshop完成レイヤー、実WebViewの顔・髪・輪郭を同じ表示倍率で比較する。
 - 状態切替で身体、服、髪、顔形、解像感が変わらないことを確認する。
 - 半目は閉じ目の透明化で代用しない。
 - 透過市松で矩形、ハロー、背景色、太い影がないことを確認する。

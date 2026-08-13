@@ -3,6 +3,7 @@
 window.picoagent?.frontendReady?.();
 
 const petApp = document.getElementById("petApp");
+const betaBadge = document.querySelector(".beta-badge");
 window.__picoagentPerformance = { startedAt: performance.now() };
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
@@ -4490,6 +4491,7 @@ function startAlarmPolling() {
   startBootLogTicker();
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
+  if (betaBadge) betaBadge.hidden = info.betaBuild !== true;
   relationshipMemoryEnabled = info.relationshipMemoryEnabled !== false;
   renderRelationship({ relationship: info.relationship, bondLabel: info.bondLabel });
   if (relationshipButton) relationshipButton.title = relationshipMemoryEnabled

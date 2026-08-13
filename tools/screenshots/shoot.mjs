@@ -77,7 +77,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled }) => `
+const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -109,6 +109,7 @@ window.__TAURI__ = {
       up: true, providerId: "local", model: "gemma-3-4b-it-Q4_K_M",
       theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "100",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {},
+      betaBuild: ${JSON.stringify(betaBuild)},
       layout: ${JSON.stringify(layout)},
       live2dSdkOverrides: ${JSON.stringify(live2dSdkOverrides)},
       history: ${JSON.stringify(history)},
@@ -252,7 +253,7 @@ async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
-  gazeTrackingEnabled = false,
+  gazeTrackingEnabled = false, betaBuild = true,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -260,7 +261,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -474,6 +475,14 @@ async function validateInteractionMatrix() {
         await page.close();
       }
     }
+  }
+  const formalPage = await openScene({ characterId: "mugi", forcePng: true, betaBuild: false });
+  try {
+    const betaVisible = await formalPage.locator(".beta-badge").isVisible();
+    if (betaVisible) throw new Error("通常／正式ビルド相当でもBETA表示が残っています");
+    console.log("  ビルド種別検査: beta-fullなしではBETA表示を隠す");
+  } finally {
+    await formalPage.close();
   }
   const reducedPage = await openScene({ characterId: "mugi", forcePng: true, reducedMotion: true });
   try {
