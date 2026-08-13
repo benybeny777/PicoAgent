@@ -253,9 +253,9 @@ async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
-  gazeTrackingEnabled = false, betaBuild = true,
+  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1,
 } = {}) {
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
   // 「時計を止めて 1 コマずつ進める」ので、読み込み前に偽の時計を差し込む。
   // 準備の間は resume() で実時間どおりに流す。
@@ -717,6 +717,9 @@ async function record(page, { seconds, fps, step }) {
 // 連番 PNG をアニメーション WebP へ束ねる。GIF と違って透過が 1bit に落ちないので、
 // 背景なしのまま README のライト / ダーク両方で使える。同じ絵で APNG は 4.8MB、WebP は 0.9MB。
 async function encodeAnimation(frames, box, { fps, width, file }) {
+  if (width && box.width < width) {
+    throw new Error(`入力幅${box.width}pxを出力幅${width}pxへ引き伸ばす処理は禁止です: ${file}`);
+  }
   const dir = await mkdtemp(join(tmpdir(), "picoagent-shot-"));
   try {
     for (const [index, png] of frames.entries()) {
@@ -731,6 +734,12 @@ async function encodeAnimation(frames, box, { fps, width, file }) {
       // compression_level は既定の 4 のまま。6 にすると探索が跳ね上がり、数十コマで数分かかる。
       "-c:v", "libwebp_anim", "-loop", "0", "-q:v", "80", file,
     ]);
+    const encoded = await readFile(file);
+    const format = encoded.toString("ascii", 12, 16);
+    const actualWidth = 1 + encoded[24] + (encoded[25] * 256) + (encoded[26] * 65536);
+    if (format !== "VP8X" || (width && actualWidth !== width)) {
+      throw new Error(`WebPの出力寸法が不正です: ${file}（形式${format}、幅${actualWidth}px、期待${width}px）`);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -934,7 +943,12 @@ async function validateLive2dSdkModels() {
 const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
-const GALLERY_SCENE = { layout: "pet", width: 900, height: 600, seconds: 8.4, fps: 16, outputWidth: 480, voice: true };
+// 公開用は実画面を2倍密度で描画してから960pxへ縮小する。480px撮影を960pxへ
+// 引き伸ばすのではなく、PNG／Live2Dとも高密度な実レンダリングを入力にする。
+const GALLERY_SCENE = {
+  layout: "pet", width: 900, height: 600, deviceScaleFactor: 2,
+  seconds: 8.4, fps: 16, outputWidth: 960, voice: true,
+};
 
 // 前半は返答フローそのまま（文字送り → 会話中＋口パク）。後半は考え中、成功、待機だけへ
 // ゆっくり切り替える。多数の感情や視線を短時間で巡回すると製品より落ち着きがなく見えるため、
@@ -1031,6 +1045,9 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d 
     layout: "stream",
     width: 1560,
     height: 920,
+    // 配信画面は論理幅だけで1560pxあるため、ネイティブ描画から960pxへ縮小すれば
+    // 引き伸ばしにならない。2倍密度の3120px全画面キャプチャは不要な負荷を避ける。
+    deviceScaleFactor: 1,
     characterId: id,
     reply,
     prepare: live2d ? prepareGalleryLive2D : startReply(GALLERY_ASK),
