@@ -6,6 +6,10 @@ authors = ["PicoAgent"]
 edition = "2021"
 rust-version = "1.77"
 
+[features]
+# 開発中ベータだけでPro対象スキルを試用可能にする。正式版はこのfeatureを付けない。
+beta-full = []
+
 [lib]
 name = "picoagent_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

@@ -62,10 +62,10 @@ fn run(args: &[String]) -> Result<()> {
     let rest = &args[args.len().min(1)..];
 
     match command {
-        "dev" => tauri("dev", rest, false, false),
-        "build" => tauri("build", rest, false, false),
-        "build-beta" => tauri("build", rest, true, false),
-        "build-distribution" => tauri("build", rest, true, true),
+        "dev" => tauri("dev", rest, false, false, false),
+        "build" => tauri("build", rest, false, false, false),
+        "build-beta" => tauri("build", rest, true, false, true),
+        "build-distribution" => tauri("build", rest, true, true, false),
         "preview-distribution" => preview_distribution(),
         "release-check" => {
             let _ = release::check(false)?;
@@ -138,6 +138,7 @@ fn tauri(
     extra: &[String],
     lightweight_bundle: bool,
     require_release_check: bool,
+    beta_full: bool,
 ) -> Result<()> {
     let release = mode == "build";
     if require_release_check {
@@ -179,6 +180,9 @@ fn tauri(
     command.arg("tauri").arg(mode).args(extra);
     if lightweight_bundle {
         command.args(["--config", "src-tauri/tauri.distribution.conf.json"]);
+    }
+    if beta_full {
+        command.args(["--features", "beta-full"]);
     }
     let status = command
         .current_dir(repo_root())

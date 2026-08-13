@@ -15,6 +15,7 @@
 
 > [!WARNING]
 > 公開インストーラは現在、開発中のベータ版です。アプリ画面の小型`BETA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
+> ベータ版は`beta-full`ビルドでPro対象を含む全機能を試用可能にし、正式リリースではこのfeatureを付けずFree／Pro制限を有効にします。
 
 <div align="center">
   <table>
@@ -31,6 +32,21 @@
       <td><img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
     </tr>
   </table>
+  <h3>Live2D動作例（非同梱）</h3>
+  <table>
+    <tr>
+      <td align="center"><img src="docs/images/character-hiyori.webp" alt="ひよりの通常表示" width="120" /><br /><img src="docs/images/character-hiyori-stream.webp" alt="ひよりの配信表示" width="120" /><br /><sub><b>ひより</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-haru.webp" alt="はるの通常表示" width="120" /><br /><img src="docs/images/character-haru-stream.webp" alt="はるの配信表示" width="120" /><br /><sub><b>はる</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-epsilon.webp" alt="イプシロンの通常表示" width="120" /><br /><img src="docs/images/character-epsilon-stream.webp" alt="イプシロンの配信表示" width="120" /><br /><sub><b>イプシロン</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-mao.webp" alt="まおの通常表示" width="120" /><br /><img src="docs/images/character-mao-stream.webp" alt="まおの配信表示" width="120" /><br /><sub><b>まお</b>（通常／配信）</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="docs/images/character-ren.webp" alt="レンの通常表示" width="120" /><br /><img src="docs/images/character-ren-stream.webp" alt="レンの配信表示" width="120" /><br /><sub><b>レン</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-rice.webp" alt="ライスの通常表示" width="120" /><br /><img src="docs/images/character-rice-stream.webp" alt="ライスの配信表示" width="120" /><br /><sub><b>ライス</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-wanko.webp" alt="わんこの通常表示" width="120" /><br /><img src="docs/images/character-wanko-stream.webp" alt="わんこの配信表示" width="120" /><br /><sub><b>わんこ</b>（通常／配信）</sub></td>
+      <td></td>
+    </tr>
+  </table>
   <sub>
     ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（上：ライト／下：ダーク）。実際の動きです。<br />
     左は 2D キャラ「むぎ」、右は Live2D キャラ「ひより」。Live2D はまばたき・モーション・口パクをモデル自身が行います。
@@ -43,20 +59,20 @@
   <h3>同梱キャラクター</h3>
   <table>
     <tr>
-      <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎ" width="150" /><br /><sub><b>むぎ</b><br />PNGアニメ</sub></td>
-      <td align="center"><img src="docs/images/character-rin.webp" alt="りん" width="150" /><br /><sub><b>りん</b><br />PNGアニメ</sub></td>
-      <td align="center"><img src="docs/images/character-mai.webp" alt="まい" width="150" /><br /><sub><b>まい</b><br />PNGアニメ</sub></td>
+      <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-stream.webp" alt="むぎの配信表示" width="150" /><br /><sub><b>むぎ</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-rin.webp" alt="りんの通常表示" width="150" /><br /><img src="docs/images/character-rin-stream.webp" alt="りんの配信表示" width="150" /><br /><sub><b>りん</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-mai.webp" alt="まいの通常表示" width="150" /><br /><img src="docs/images/character-mai-stream.webp" alt="まいの配信表示" width="150" /><br /><sub><b>まい</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）" width="150" /><br /><sub><b>りん（自作THA3）</b><br />1枚絵から生成</sub></td>
     </tr>
     <tr>
-      <td align="center"><img src="docs/images/character-koharu.webp" alt="こはる" width="150" /><br /><sub><b>こはる</b><br />通常2D</sub></td>
-      <td align="center"><img src="docs/images/character-sena.webp" alt="セナ" width="150" /><br /><sub><b>セナ</b><br />通常2D</sub></td>
-      <td align="center"><img src="docs/images/character-noa.webp" alt="ノア" width="150" /><br /><sub><b>ノア</b><br />通常2D</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写（試作）" width="150" /><br /><sub><b>実写（試作）</b><br />通常2D</sub></td>
+      <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写試作の通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写試作の配信表示" width="150" /><br /><sub><b>実写（試作）</b><br />通常／配信</sub></td>
     </tr>
   </table>
   <sub>
-    同じ「おはよう。今日もよろしくね」への返事から、<b>会話中 → 成功 → 考え中 → 照れ → 傾聴 → 落胆 → 左右視線 → 待機</b>を通しで再生しています。<br />
+    各キャラを標準ペット表示と配信表示の両方で、480px・16fps・134コマ撮影しています。同じ「おはよう。今日もよろしくね」への返事から、<b>会話中 → 成功 → 考え中 → 照れ → 傾聴 → 落胆 → 左右視線 → 待機</b>を通しで再生しています。<br />
     人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
     同梱PNG 8体はすべて同じフルモーション仕様で、自然なまばたき、ミュート時を含む口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。<br />
     このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・レン・ライス・わんこ）があります。<br />
@@ -655,7 +671,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_1.0.0_x64
 
 `build-beta` は、販売条件を完了扱いにせず、販売版と同じ軽量同梱範囲で試用インストーラを生成します。`build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売対象はWindowsだけで、コード署名と完全自動更新を必須にしません。macOSは販売対象へ追加する前に署名・公証と実機QAを行います。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
 
-初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、`distribution/site/` の販売用LP、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件だけを置きます。LPのキャラ例は完成済み2DのむぎとLive2D動作例のひよりに限定します。公開配布Repoへの同期は販売時の明示作業で、Releaseに実インストーラがない間はLPも取得導線も「準備中」と表示します。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
+初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、`distribution/site/` の販売用LP、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件だけを置きます。LPの主画面例は完成済み2DのむぎとLive2Dのひよりを使い、別のキャラ一覧ページでは取得済みのLive2D公式サンプルも非同梱の動作例として紹介します。公開配布Repoへの同期は販売時の明示作業で、Releaseに実インストーラがない間はLPも取得導線も「準備中」と表示します。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
 
 設定の「製品情報・ライセンス」には「更新を確認」と「アップデート」があります。公開Gitの `latest.json` で新しい版を確認し、Windows x64インストーラの配布Repo内URL・サイズ・SHA-256が揃い、取得物がPE形式の場合だけ起動します。更新情報自体も256KBを上限とし、HTTP異常や破損は設定欄へ表示します。オフライン時は起動時確認を黙って見送り、手動確認では見送ったことだけを同じ欄へ表示します。
 

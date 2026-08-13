@@ -15,6 +15,7 @@ description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビ�
 ## 混入を防ぐ
 
 - 公開ベータ版は必ず`cargo xtask build-beta --bundles nsis`を正規入口にする。
+- `build-beta`が`beta-full` featureを自動付与し、製品情報へベータ全機能試用中と表示することを確認する。正式版コマンドへこのfeatureを付けない。
 - `cargo xtask build`はOffice、Aivis、Whisper、THA3、開発ツール等を扱う開発用経路なので、公開ベータ版へ使わない。
 - `src-tauri/tauri.distribution.conf.json`の資産許可範囲が基本エンジンと`component-manifest.json`だけであることを確認する。
 - `distribution/release.json`の許可キャラ以外、Live2Dサンプル、制作途中素材、過去のインストーラを含めない。
@@ -35,6 +36,8 @@ description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビ�
 3. `latest.json`のURL、サイズ、SHA-256が実ファイルと完全一致することを再計算して確認する。
 4. `cargo test --manifest-path xtask/Cargo.toml`、変更範囲に応じたRustテスト、全JSの`node --check`、`git diff --check`を通す。
 5. UIや動画を変えた場合は`verify-picoagent-ui`も使い、実WebView成果物を更新する。
+   - キャラ一覧動画は変則的な小型形式を使わず、実利用と同じ標準ペット表示と配信表示を各キャラ480px以上で撮る。10fps以下へ戻さず、16fps・8.4秒・134コマ以上で待機、まばたき、口パク、感情またはモデルモーションを巡回する。
+   - Live2Dを紹介するときはひよりだけに固定せず、取得済みの全公式サンプルを同条件で撮影する。中間フレームを目視し、画面外・極端な拡大縮小・透明化があれば`character.json`の正本を直して再同期する。
 
 ## Distributionへ公開する
 

@@ -232,17 +232,17 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character[data-render-kind="2d"]:hover .character-secondary-motion > img {
   filter:var(--pet-tone,saturate(1)) saturate(1.055) contrast(1.03) brightness(1.025);
 }
-@keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-2px) scale(1.008,1.012)} }
-@keyframes pet-thinking { 0%,100%{transform:translateY(0) rotate(-.45deg)} 50%{transform:translateY(-4px) rotate(.55deg)} }
-@keyframes pet-talking { 0%,100%{transform:translateY(0) rotate(0)} 30%{transform:translateY(-3px) rotate(-.6deg)} 68%{transform:translateY(-1px) rotate(.7deg)} }
-@keyframes pet-sad { 0%,100%{transform:translateY(1px) rotate(0)} 50%{transform:translateY(4px) rotate(-.35deg)} }
-@keyframes pet-listening { 0%,100%{transform:rotate(-.4deg) translateY(0)} 50%{transform:rotate(1.2deg) translateY(-2px)} }
-@keyframes pet-success { 0%{transform:translateY(0) scale(1)} 42%{transform:translateY(-13px) scale(1.035)} 72%{transform:translateY(1px) scale(.985,1.02)} 100%{transform:none} }
-@keyframes pet-shy { 0%,100%{transform:translateX(0) rotate(0)} 35%{transform:translateX(-3px) rotate(-1deg)} 70%{transform:translateX(2px) rotate(.5deg)} }
-@keyframes pet-live2d-idle { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-3px) scale(1.006,1.01)} }
-@keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) scale(1)} 38%{transform:translateY(-8px) scale(1.012,1.018)} 70%{transform:translateY(-2px) scale(1.004)} }
-@keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) scale(1)} 28%{transform:translateY(-5px) scale(1.01,1.014)} 62%{transform:translateY(-2px) scale(1.006)} }
-@keyframes pet-live2d-sad { 0%,100%{transform:translateY(4px) scale(.992,.986)} 50%{transform:translateY(11px) scale(.982,.972)} }
+@keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-1px) scale(1.003,1.005)} }
+@keyframes pet-thinking { 0%,100%{transform:translateY(0) rotate(-.18deg)} 50%{transform:translateY(-2px) rotate(.22deg)} }
+@keyframes pet-talking { 0%,100%{transform:translateY(0) rotate(0)} 30%{transform:translateY(-1.5px) rotate(-.24deg)} 68%{transform:translateY(-.5px) rotate(.28deg)} }
+@keyframes pet-sad { 0%,100%{transform:translateY(.5px) rotate(0)} 50%{transform:translateY(2px) rotate(-.14deg)} }
+@keyframes pet-listening { 0%,100%{transform:rotate(-.16deg) translateY(0)} 50%{transform:rotate(.48deg) translateY(-1px)} }
+@keyframes pet-success { 0%{transform:translateY(0) scale(1)} 42%{transform:translateY(-6px) scale(1.014)} 72%{transform:translateY(.5px) scale(.994,1.008)} 100%{transform:none} }
+@keyframes pet-shy { 0%,100%{transform:translateX(0) rotate(0)} 35%{transform:translateX(-1.5px) rotate(-.4deg)} 70%{transform:translateX(1px) rotate(.2deg)} }
+@keyframes pet-live2d-idle { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-1px) scale(1.002,1.004)} }
+@keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) scale(1)} 38%{transform:translateY(-3px) scale(1.005,1.007)} 70%{transform:translateY(-1px) scale(1.002)} }
+@keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) scale(1)} 28%{transform:translateY(-2px) scale(1.004,1.006)} 62%{transform:translateY(-1px) scale(1.002)} }
+@keyframes pet-live2d-sad { 0%,100%{transform:translateY(2px) scale(.997,.995)} 50%{transform:translateY(5px) scale(.993,.989)} }
 @keyframes pet-secondary-bust {
   0%,100% { transform:translateY(0) scale(1); }
   42% { transform:translateY(var(--secondary-rise,-.38px)) scale(var(--secondary-expand-x,1.0005),var(--secondary-expand,1.0028)); }
@@ -1001,6 +1001,23 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="talk"] .bubble { padding:100px 16px 15px; }
 [data-layout="chat"] .character,
 [data-layout="talk"] .character { left:18px; top:16px; width:62px; height:62px; }
+[data-layout="chat"] .reply-actions,
+[data-layout="talk"] .reply-actions {
+  position:absolute; top:16px; right:16px; left:112px;
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px;
+  width:auto; margin:0; align-self:auto;
+}
+[data-layout="chat"] .reply-actions button,
+[data-layout="talk"] .reply-actions button { min-width:0; width:100%; height:34px; padding:0 7px; }
+/* チャットは長時間使う主画面なので、丸い顔アイコンだけでなく選択中キャラの
+   上半身が分かるポートレートを残す。トークはメッセージアプリ風の小型アイコンを維持する。 */
+[data-layout="chat"] .bubble { padding-top:164px; }
+[data-layout="chat"] .character {
+  left:18px; top:16px; width:120px; height:144px;
+  border-radius:18px;
+}
+[data-layout="chat"] .character img { object-fit:contain; object-position:50% 100%; }
+[data-layout="chat"] .reply-actions { left:154px; }
 [data-layout="chat"] .character canvas,
 [data-layout="talk"] .character canvas {
   width:100%!important; height:100%!important;
@@ -1012,6 +1029,11 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="talk"] .online { left:70px; top:68px; }
 [data-layout="chat"] .relationship-button,
 [data-layout="talk"] .relationship-button { left:88px; top:35px; }
+[data-layout="chat"] .character canvas {
+  transform:translateX(-50%) scale(1.55); transform-origin:50% 7%;
+}
+[data-layout="chat"] .online { left:132px; top:148px; }
+[data-layout="chat"] .relationship-button { left:128px; top:20px; }
 [data-layout="chat"] .history-body,
 [data-layout="talk"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
 [data-layout="chat"] .reply,

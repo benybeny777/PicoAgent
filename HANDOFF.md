@@ -10,7 +10,9 @@
 
 2026-08-13、Windows向けの開発中ベータ版を `PicoAgent-Distribution` から試せる状態へ更新する。アプリ全形式へ操作を遮らない小型`BETA`表示を追加し、配布READMEとLPへベータ注意、Windowsインストール、基本操作、未署名警告、最新の2Dむぎ／Live2Dひより動画を反映した。Windows NSISは現行mainの作業ツリーから新規生成し、サイズ・SHA-256を`latest.json`とRelease実体で照合して公開する。macOSはWindows環境では成果物と実機動作を検証できず、GitHub Actionsも使わない運用のため今回の公開対象から外す。
 
-同日のベータ生成では、通常`build`が4.5GiBの開発用追加ツール群までNSISへ渡してメモリマップ失敗することを確認し、販売条件を完了扱いにせず軽量設定だけを使う`cargo xtask build-beta`を追加した。生成済みNSISは412,158,805 bytes、SHA-256 `1a9f210f3177fd0fae71d95f994b9131b996a76d317bcf8ab8fd4e3921e25332`。外部ツール混入は0だが、高精細7キャラがUI配布物の405.6MiBを占めるため、画質を落とさず選択ダウンロードへ分離する改善は次回へ残す。再利用手順は`build-picoagent-beta`、`add-picoagent-setting`、`add-picoagent-connector`の共通スキルへ切り出した。
+同日のベータ生成では、通常`build`が4.5GiBの開発用追加ツール群までNSISへ渡してメモリマップ失敗することを確認し、販売条件を完了扱いにせず軽量設定だけを使う`cargo xtask build-beta`を追加した。チャット切れと共通揺れ縮小後の最終NSISは412,114,552 bytes、SHA-256 `845c9f283a5ece4eddbeb1b3e707db317b9c3159c18e90d4bca50a28c894cff6`。外部ツール混入は0だが、高精細7キャラがUI配布物の405.6MiBを占めるため、画質を落とさず選択ダウンロードへ分離する改善は次回へ残す。再利用手順は`build-picoagent-beta`、`add-picoagent-setting`、`add-picoagent-connector`の共通スキルへ切り出した。
+
+公開直前に、ベータを全機能試用とする方針へ合わせて`beta-full` Cargo featureを追加した。`build-beta`だけが自動付与し、正式版はFree／Pro制限を維持する。配布サイトは付属7キャラ、機能一覧、1枚絵から17姿勢・42フレームを作る試験機能、OS／CPU／メモリ／GPU／容量／通信の独立スペックカード、スマホ固定取得CTAを追加した。むぎ／ひよりの配布動画は通常オーラを外し、24fps×5秒の120コマで多状態を巡回する専用品へ変更した。キャラ全体・胸元の揺れ幅調整はユーザー指示により公開後へ後回し。
 
 2026-08-12、利用中アプリでドラッグ・高精細素材・まばたき・口パクが反映されていないとの再報告を受けた。キャラDOMへTauri標準ドラッグ領域を追加し、reduced-motionでも機能的なまばたきと口パクは残す。設定画面のモニター指定欄を削除し、メイン画面と同じモニター中央へ自動配置する。実WebView調査で配布版CSS圧縮が `calc()` を壊してキャラ幅0にしていた点も修正した。新3体は512px THA3全身出力の単純拡大を廃止し、高精細元絵と局所的な目・口差分へ再制作した。最新版実行ファイルでのWindows実画面確認を完了条件とする。
 
@@ -105,5 +107,6 @@ git diff --check
 - 2D表示のエッジ光・多段影・小型アイコン・フキダシを調整後、同じ32画面を再撮影。平均1,154ms、描画欠けと速度警告は0件。初回撮影で見つけた配信形式の背景ぼかし継承も修正済み
 - `SHOOT_INTERACTION_MATRIX=1` で麦／ひより×8形式の起動遷移・入力欄・縮小後の収まりを16件確認
 - `SHOOT_LIVE2D_MATRIX=1` で導入済み8モデル×8形式=64件のSDK・口パラメータ・描画を確認
+- 配布用Live2D一覧は、ひより／はる／イプシロン／まお／レン／ライス／わんこを各134コマ・16fpsで撮影済み。`docs/images/character-*.webp`と`distribution/site/assets/character-*.webp`へ反映し、中間フレームも目視確認した
 
 ルールの正本は [AGENTS.md](AGENTS.md)、レビューの判断履歴は [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md)。この文書には進行状況だけを記録する。

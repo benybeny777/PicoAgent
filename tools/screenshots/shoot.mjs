@@ -855,6 +855,57 @@ async function prepareLive2D(page) {
   await page.waitForFunction(() => typeof live2dMouth !== "undefined" && live2dMouth > 0.05, null, { timeout: 5000 });
 }
 
+// 配布ページ用は小さい埋め込み表示でもキャラの輪郭が読める構図にし、感情オーラを
+// キャラ素材の背景と誤認させない。アプリ本体のモーションや表情には手を加えない。
+async function prepareDistribution2D(page) {
+  await page.addStyleTag({ content: ".character::before,.character-view::before{display:none!important}" });
+  await submit(page, ASK);
+  await page.waitForFunction(() => {
+    const image = document.getElementById("petSprite");
+    return image?.complete && image.naturalWidth > 0;
+  }, null, { timeout: 20000 });
+}
+
+async function prepareDistributionLive2D(page) {
+  await prepareLive2D(page);
+  await page.addStyleTag({ content: ".character::before,.character-view::before{display:none!important}" });
+}
+
+const DISTRIBUTION_TOUR = [
+  [650, "thinking"],
+  [1250, "talking"],
+  [2050, "success"],
+  [2650, "shy"],
+  [3200, "sad"],
+  [3850, "gaze-left"],
+  [4300, "gaze-right"],
+  [4700, "idle"],
+];
+
+const distributionStep = async (page, index) => {
+  const elapsedMs = (index * 1000) / 24;
+  const current = DISTRIBUTION_TOUR.filter(([at]) => elapsedMs >= at).pop();
+  await page.evaluate(name => {
+    if (!name) return;
+    if (name === "gaze-left" || name === "gaze-right") {
+      setAnimation("idle");
+      if (typeof live2dActive === "undefined" || !live2dActive) {
+        rigLookDirection = name === "gaze-left" ? -1 : 1;
+        rigRefresh();
+      } else {
+        live2dTargetX = name === "gaze-left" ? -0.42 : 0.42;
+        live2dTargetY = -0.08;
+      }
+      return;
+    }
+    setAnimation(name);
+    if (typeof live2dActive === "undefined" || !live2dActive) {
+      rigLookDirection = 0;
+      rigRefresh();
+    }
+  }, current ? current[1] : null);
+};
+
 async function validateLive2dSdkModels() {
   const manifest = JSON.parse(await readFile(join(ROOT, "characters", "hiyori", "character.json"), "utf8"));
   const candidates = Array.isArray(manifest.live2d?.models) && manifest.live2d.models.length
@@ -884,11 +935,12 @@ async function validateLive2dSdkModels() {
 // ---------------------------------------------------------------- キャラクター一覧の絵
 
 // README のキャラクター一覧。同じ問いかけへの返事を、キャラごとの口調で見せる。
-// 寸法はミニ形式（360x560）。キャラが主役の形式なので一覧に並べたときに見分けやすい。
+// 一覧も実利用時と同じ標準ペット形式を使う。小型形式へ詰め込むと会話操作が目立ち、
+// キャラも切れて実画面とかけ離れるため、配布用だけの変則構図は作らない。
 const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
-const GALLERY_SCENE = { layout: "mascot", width: 360, height: 560, seconds: 8.4, fps: 10, outputWidth: 200, voice: true };
+const GALLERY_SCENE = { layout: "pet", width: 900, height: 600, seconds: 8.4, fps: 16, outputWidth: 480, voice: true };
 
 // 前半は返答フローそのまま（文字送り → 会話中＋口パク → 成功）。後半で、返答フローでは
 // 出てこないモーションへ順に切り替える。実装と同じ `setAnimation()` を呼ぶだけなので、
@@ -951,7 +1003,7 @@ async function prepareGalleryLive2D(page) {
 
 // Live2D キャラのランタイムとモデルは git 管理外（`cargo xtask setup live2d` / `setup live2d-samples`）。
 // 未取得の環境では `requires` が効いて自動でスキップされるので、一覧の定義からは外さない。
-// Live2Dの表示例は公式サンプルのひよりに限る。2Dむぎは通常のPNGキャラとして撮影する。
+// Live2Dの表示例は取得済みの公式サンプルを個別に撮影する。2Dむぎは通常のPNGキャラとして撮影する。
 const GALLERY = [
   ["mugi", "おはよう！えへへ、今日もそばで見てるね。まずはやること、3つに絞ろっか。"],
   ["rin", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
@@ -984,10 +1036,28 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d = false
   },
 ]));
 
+const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d = false]) => [
+  `character-${id}-stream.webp`,
+  {
+    ...GALLERY_SCENE,
+    layout: "stream",
+    width: 1560,
+    height: 920,
+    characterId: id,
+    reply,
+    prepare: live2d ? prepareGalleryLive2D : startReply(GALLERY_ASK),
+    step: galleryStep,
+    requires: live2d
+      ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
+      : [`ui/assets/characters/${id}/character.json`],
+  },
+]));
+
 // ---------------------------------------------------------------- 撮る絵の一覧
 
 const SHOTS = {
   ...GALLERY_SHOTS,
+  ...GALLERY_STREAM_SHOTS,
   "main-light.webp": { prepare: startReply() },
   "main-dark.webp": { theme: "dark", prepare: startReply() },
   "composer-light.webp": {
@@ -998,6 +1068,8 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
+  "distribution-main.webp": { width: 900, height: 600, layout: "pet", seconds: 5, fps: 24, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
+  "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", seconds: 5, fps: 24, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
   // 1フレームだけなのでアニメーションではないが、同じ透過 WebP 経路を使える。
   "layout-shot-mascot.webp": { width: 360, height: 560, layout: "mascot", seconds: 1, fps: 1, outputWidth: 480 },
