@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from PIL import Image
-
 
 ROOT = Path(__file__).resolve().parents[1]
 MINIMUM_OUTPUT_SIZE = (890, 1800)
@@ -38,10 +37,20 @@ def normalize(
     source_box = source.getchannel("A").getbbox()
     if source_box is None:
         raise ValueError("立ち絵に不透明な画素がありません")
-    size = (target_box[2] - target_box[0], target_box[3] - target_box[1])
+    target_size = (target_box[2] - target_box[0], target_box[3] - target_box[1])
+    cropped = source.crop(source_box)
+    scale = min(1.0, target_size[0] / cropped.width, target_size[1] / cropped.height)
+    if scale < 1.0:
+        fitted_size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
+        fitted = cropped.resize(fitted_size, Image.Resampling.LANCZOS)
+    else:
+        fitted = cropped
+    offset = (
+        target_box[0] + (target_size[0] - fitted.width) // 2,
+        target_box[1] + (target_size[1] - fitted.height) // 2,
+    )
     result = Image.new("RGBA", output_size, (0, 0, 0, 0))
-    fitted = source.crop(source_box).resize(size, Image.Resampling.LANCZOS)
-    result.alpha_composite(fitted, target_box[:2])
+    result.alpha_composite(fitted, offset)
     return result
 
 

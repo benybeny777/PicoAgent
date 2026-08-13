@@ -98,6 +98,9 @@ foreach ($job in $jobs) {
     $report += [PSCustomObject]@{
         character = $job.CharacterId
         layer = $job.Name
+        resamplingMethod = 'Photoshop Preserve Details 2.0'
+        sourceWidth = $job.Analysis.Width
+        sourceHeight = $job.Analysis.Height
         width = $analysis.Width
         height = $analysis.Height
         cornerAlpha = $analysis.CornerAlpha

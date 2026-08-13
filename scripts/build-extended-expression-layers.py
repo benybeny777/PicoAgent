@@ -8,7 +8,6 @@ from pathlib import Path
 
 from PIL import Image
 
-
 ROOT = Path(__file__).resolve().parents[1]
 EXTENDED_LAYERS = ("gaze_left", "gaze_right", "expression_happy", "expression_sad")
 PRE_PHOTOSHOP_SIZE = (890, 1800)
@@ -33,8 +32,19 @@ def normalize(source: Image.Image, size: tuple[int, int], box: tuple[int, int, i
     if source_box is None:
         raise ValueError("元立ち絵に不透明画素がありません")
     target_size = (box[2] - box[0], box[3] - box[1])
+    cropped = source.crop(source_box)
+    scale = min(1.0, target_size[0] / cropped.width, target_size[1] / cropped.height)
+    if scale < 1.0:
+        fitted_size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
+        fitted = cropped.resize(fitted_size, Image.Resampling.LANCZOS)
+    else:
+        fitted = cropped
+    offset = (
+        box[0] + (target_size[0] - fitted.width) // 2,
+        box[1] + (target_size[1] - fitted.height) // 2,
+    )
     result = Image.new("RGBA", size, (0, 0, 0, 0))
-    result.alpha_composite(source.crop(source_box).resize(target_size, Image.Resampling.LANCZOS), box[:2])
+    result.alpha_composite(fitted, offset)
     return result
 
 

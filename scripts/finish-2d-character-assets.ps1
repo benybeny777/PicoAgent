@@ -353,6 +353,9 @@ foreach ($record in $destinationRecords) {
     $reportItems += [PSCustomObject]@{
         character = $record.CharacterId
         path = $record.Relative.Replace('\', '/')
+        resamplingMethod = if ($scale -gt 1) { 'Photoshop Preserve Details 2.0' } else { 'none' }
+        sourceWidth = $source.Width
+        sourceHeight = $source.Height
         width = $analysis.Width
         height = $analysis.Height
         bbox = @($analysis.MinX, $analysis.MinY, $analysis.MaxX, $analysis.MaxY)
@@ -369,6 +372,7 @@ $report = [PSCustomObject]@{
     generatedAt = (Get-Date).ToString('o')
     sourceRoot = $SourceRoot
     scale = $Scale
+    resamplingMethod = if ($Scale -gt 1) { 'Photoshop Preserve Details 2.0' } else { 'none' }
     files = $destinationRecords.Count
     uniqueImages = $allJobs.Count
     warnings = @($reportItems | Where-Object { $_.warnings.Count -gt 0 }).Count
