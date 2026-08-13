@@ -1077,14 +1077,17 @@ const SHOTS = {
   "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", seconds: 5, fps: 24, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
   // 1フレームだけなのでアニメーションではないが、同じ透過 WebP 経路を使える。
-  "layout-shot-mascot.webp": { width: 360, height: 560, layout: "mascot", seconds: 1, fps: 1, outputWidth: 480 },
+  // 小型形式は論理幅が出力幅（480px）に届かないため、2倍密度で描画してから縮小する。
+  // 等倍のままだと不透明領域の切り出し幅が480pxを下回り、引き伸ばし禁止の検査で止まる
+  // （実際に mascot 360px と widget 440px は、旧実装で480pxへ引き伸ばされたまま同梱されていた）。
+  "layout-shot-mascot.webp": { width: 360, height: 560, layout: "mascot", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-pet.webp": { width: 900, height: 600, layout: "pet", seconds: 1, fps: 1, outputWidth: 480 },
-  "layout-shot-chat.webp": { width: 520, height: 760, layout: "chat", seconds: 1, fps: 1, outputWidth: 480 },
-  "layout-shot-talk.webp": { width: 520, height: 760, layout: "talk", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-chat.webp": { width: 520, height: 760, layout: "chat", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-talk.webp": { width: 520, height: 760, layout: "talk", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-bar.webp": { width: 900, height: 320, layout: "bar", seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-workspace.webp": { width: 1400, height: 850, layout: "workspace", seconds: 1, fps: 1, outputWidth: 640 },
   "layout-shot-stream.webp": { width: 1560, height: 920, layout: "stream", seconds: 1, fps: 1, outputWidth: 640 },
-  "layout-shot-widget.webp": { width: 440, height: 600, layout: "widget", seconds: 1, fps: 1, outputWidth: 480 },
+  "layout-shot-widget.webp": { width: 440, height: 600, layout: "widget", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
 };
 
 // ---------------------------------------------------------------- 実行

@@ -21,7 +21,19 @@ Claudeの事後レビュー2巡（`docs/REVIEW-LOG.md` の 2026-08-13「ベー�
   生成物の `ui-dist/index.html` に `beta-badge` が**ある**こと（ベータなので残るのが正）。
 - **禁止**: 通常 `build` の成果物を使わない。古い成果物を流用・改名しない。
 
-## P0-2. Windows実機でプロセス層のテストを走らせる
+## P0-2. 引き伸ばしのまま同梱されている静止ショット2枚を撮り直す
+
+- **なぜ**: `layout-shot-mascot.webp`（論理360px→480px）と `layout-shot-widget.webp`（440px→480px）は、引き伸ばし禁止ルールが入る前の生成物で、いま同梱・公開されているものが**引き伸ばし画像**のまま。設定画面のレイアウト選択カードと配布ページの表示形式サムネの両方に出ている。
+- **やること**: `deviceScaleFactor: 2` を指定済みなので、`node tools/screenshots/shoot.mjs layout-shot-mascot.webp layout-shot-widget.webp layout-shot-chat.webp layout-shot-talk.webp` を実行して差し替える。WebPエンコーダ（`libwebp_anim`）付きのffmpegが要る。
+- **完了条件**: 4枚が480px幅で生成され、引き伸ばし検査に引っかからないこと。設定画面のカードと配布ページのサムネを実表示で確認する。
+
+## P0-3. 配布ページの画像重量を下げる
+
+- **なぜ**: 960px化で `characters.html` が画像だけで**60.2MB**（28本、最大5MB/本）、`index.html` が15.1MBになった。カードの実表示幅は約275pxで、960pxは表示スロットの3倍以上ある。スマホ回線では実質開けない。
+- **やること**: 高精細の正本は `docs/images/` に残し、LPが配る `distribution/site/assets/` だけ480〜640px幅で別途書き出す。既存の960pxファイルを縮小再エンコードするのではなく、同じ2倍密度描画から目的の幅で書き出す（引き伸ばしにはならない）。`characters.html` は静止画＋クリックで再生に切り替える案も併せて検討する。
+- **完了条件**: `characters.html` の画像合計が15MB以下、`index.html` が5MB以下。カードの見た目が現状と同等であることを実表示で確認する。
+
+## P0-4. Windows実機でプロセス層のテストを走らせる
 
 - **なぜ**: タイムアウトの回帰テストは長らく `#[cfg(unix)]` だけで、Windows中心の開発では**一度も実行されていなかった**。
   今回 `cmd /c` 版を追加したが、Linuxコンテナでは `#[cfg(windows)]` 側が走らないため未実行のまま。
