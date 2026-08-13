@@ -285,6 +285,28 @@ mod tests {
             sales.contains(&format!("実務スキル {skill_count} 種")),
             "docs/SALES.md のスキル数が実装（{skill_count}種）と一致しません"
         );
+        // 公開資料も同じ数を載せている。実装が増減したまま文言だけ古くならないようにする。
+        for (path, expected) in [
+            ("distribution/site/index.html", format!("{skill_count} SKILLS")),
+            (
+                "distribution/site/index.html",
+                format!("{skill_count}種のスキル"),
+            ),
+            (
+                "distribution/site/README.md",
+                format!("実務スキル{skill_count}種"),
+            ),
+            (
+                "distribution/site/README.md",
+                format!("スキル{skill_count}種）"),
+            ),
+        ] {
+            let text = std::fs::read_to_string(root.join(path)).unwrap();
+            assert!(
+                text.contains(&expected),
+                "{path} に「{expected}」がありません（実装は{skill_count}種）"
+            );
+        }
     }
 
     /// 販売資料が挙げる自前キャラが、実際の同梱対象と食い違わないこと。
