@@ -232,17 +232,17 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character[data-render-kind="2d"]:hover .character-secondary-motion > img {
   filter:var(--pet-tone,saturate(1)) saturate(1.055) contrast(1.03) brightness(1.025);
 }
-@keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-1px) scale(1.003,1.005)} }
-@keyframes pet-thinking { 0%,100%{transform:translateY(0) rotate(-.18deg)} 50%{transform:translateY(-2px) rotate(.22deg)} }
-@keyframes pet-talking { 0%,100%{transform:translateY(0) rotate(0)} 30%{transform:translateY(-1.5px) rotate(-.24deg)} 68%{transform:translateY(-.5px) rotate(.28deg)} }
-@keyframes pet-sad { 0%,100%{transform:translateY(.5px) rotate(0)} 50%{transform:translateY(2px) rotate(-.14deg)} }
-@keyframes pet-listening { 0%,100%{transform:rotate(-.16deg) translateY(0)} 50%{transform:rotate(.48deg) translateY(-1px)} }
-@keyframes pet-success { 0%{transform:translateY(0) scale(1)} 42%{transform:translateY(-6px) scale(1.014)} 72%{transform:translateY(.5px) scale(.994,1.008)} 100%{transform:none} }
-@keyframes pet-shy { 0%,100%{transform:translateX(0) rotate(0)} 35%{transform:translateX(-1.5px) rotate(-.4deg)} 70%{transform:translateX(1px) rotate(.2deg)} }
-@keyframes pet-live2d-idle { 0%,100%{transform:translateY(0) scale(1)} 48%{transform:translateY(-1px) scale(1.002,1.004)} }
-@keyframes pet-live2d-thinking { 0%,100%{transform:translateY(0) scale(1)} 38%{transform:translateY(-3px) scale(1.005,1.007)} 70%{transform:translateY(-1px) scale(1.002)} }
-@keyframes pet-live2d-talking { 0%,100%{transform:translateY(0) scale(1)} 28%{transform:translateY(-2px) scale(1.004,1.006)} 62%{transform:translateY(-1px) scale(1.002)} }
-@keyframes pet-live2d-sad { 0%,100%{transform:translateY(2px) scale(.997,.995)} 50%{transform:translateY(5px) scale(.993,.989)} }
+@keyframes pet-breathe { 0%,100%{transform:none} }
+@keyframes pet-thinking { 0%,100%{transform:none} }
+@keyframes pet-talking { 0%,100%{transform:none} }
+@keyframes pet-sad { 0%,100%{transform:none} }
+@keyframes pet-listening { 0%,100%{transform:none} }
+@keyframes pet-success { 0%,100%{transform:none} 45%{transform:translateY(-1px)} }
+@keyframes pet-shy { 0%,100%{transform:none} }
+@keyframes pet-live2d-idle { 0%,100%{transform:none} }
+@keyframes pet-live2d-thinking { 0%,100%{transform:none} }
+@keyframes pet-live2d-talking { 0%,100%{transform:none} }
+@keyframes pet-live2d-sad { 0%,100%{transform:none} }
 @keyframes pet-secondary-bust {
   0%,100% { transform:translateY(0) scale(1); }
   42% { transform:translateY(var(--secondary-rise,-.38px)) scale(var(--secondary-expand-x,1.0005),var(--secondary-expand,1.0028)); }
@@ -442,9 +442,9 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 /* 通知パネルはふわっと開く。 */
 .notice-panel:not([hidden]) { animation:panel-in .18s ease; }
 @keyframes panel-in { from { opacity:0; transform:translateY(-4px); } }
-/* キャラクターをクリックすると「ぽよん」と反応する。 */
+/* キャラクターをクリックした反応は、常駐表示を邪魔しない1px級に留める。 */
 .character.boop img { animation:pet-boop .45s cubic-bezier(.3,1.6,.4,1)!important; }
-@keyframes pet-boop { 0%{transform:scale(1)} 30%{transform:scale(1.07,.93) translateY(2px)} 62%{transform:scale(.96,1.05) translateY(-5px)} 100%{transform:scale(1)} }
+@keyframes pet-boop { 0%,100%{transform:none} 35%{transform:translateY(1px) scale(1.006,.994)} 68%{transform:translateY(-1px) scale(.997,1.003)} }
 @media (prefers-reduced-motion:reduce) {
   .pet-app:not(.is-booting) .bubble, .status.busy::before, .notice-panel:not([hidden]), .character.boop img { animation:none!important; }
 }
@@ -506,9 +506,9 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 /* なでなでで浮かぶハート。 */
 .pet-heart { position:absolute; z-index:5; bottom:55%; font-size:18px; color:#f27e91; pointer-events:none; opacity:0; animation:heart-float 1.2s ease-out forwards; text-shadow:0 1px 3px rgba(0,0,0,.15); }
 @keyframes heart-float { 0% { opacity:0; transform:translateY(0) scale(.6); } 25% { opacity:1; } 100% { opacity:0; transform:translateY(-46px) scale(1.15); } }
-/* 居眠り中はゆっくり揺れる。 */
+/* 居眠りは寝顔だけで伝え、全身を常時揺らさない。 */
 .character.napping img { animation:nap-breathe 4.6s ease-in-out infinite!important; }
-@keyframes nap-breathe { 0%,100% { transform:translateY(1px) scale(1); } 50% { transform:translateY(-2px) scale(1.005,.998); } }
+@keyframes nap-breathe { 0%,100% { transform:none; } }
 /* 履歴の書き出しボタン（検索欄の右）。 */
 .history-tools { gap:8px; }
 .history-tools #exportHistory { position:static; flex:0 0 auto; height:30px; padding:0 12px; border-radius:9px; background:var(--chip-bg); border:1px solid var(--chip-border); color:var(--muted); font-size:11px; font-weight:700; }

@@ -872,14 +872,9 @@ async function prepareDistributionLive2D(page) {
 }
 
 const DISTRIBUTION_TOUR = [
-  [650, "thinking"],
-  [1250, "talking"],
-  [2050, "success"],
-  [2650, "shy"],
-  [3200, "sad"],
-  [3850, "gaze-left"],
-  [4300, "gaze-right"],
-  [4700, "idle"],
+  [1600, "thinking"],
+  [3100, "success"],
+  [3900, "idle"],
 ];
 
 const distributionStep = async (page, index) => {
@@ -942,24 +937,18 @@ const GALLERY_ASK = "おはよう。今日もよろしくね";
 // `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
 const GALLERY_SCENE = { layout: "pet", width: 900, height: 600, seconds: 8.4, fps: 16, outputWidth: 480, voice: true };
 
-// 前半は返答フローそのまま（文字送り → 会話中＋口パク → 成功）。後半で、返答フローでは
-// 出てこないモーションへ順に切り替える。実装と同じ `setAnimation()` を呼ぶだけなので、
-// 状態の解決（`fallbacks`）も CSS のキーフレームも本物のまま動く。
+// 前半は返答フローそのまま（文字送り → 会話中＋口パク）。後半は考え中、成功、待機だけへ
+// ゆっくり切り替える。多数の感情や視線を短時間で巡回すると製品より落ち着きがなく見えるため、
+// 一覧では実装と同じ `setAnimation()` を使いつつ状態切替を3回に制限する。
 // 経過msで指定するのは、fps や尺を変えてもモーションの見せ時間がずれないようにするため。
 //
 // 巡回に「考え中」が入っているのは、`record()` が録画前に時計を10秒進めるので、送信直後の
-// 考え中が録画開始時点では終わっているため。「成功」を入れていないのは逆に、返答完了時に
-// アプリ自身が `success` へ入るのが録画の最初に写るため（二重に見せる意味がない）。
-// この2つは `SHOOT_DEBUG_MOTION=1` で data-motion を読み返して確かめた。
+// 考え中が録画開始時点では終わっているため。成功は短い反応を1回だけ確認して待機へ戻す。
+// `SHOOT_DEBUG_MOTION=1` で data-motion を読み返して切替回数を確かめられる。
 const GALLERY_TOUR = [
-  [1800, "thinking"],  // 考え中（pet-live2d-thinking / pet-thinking）
-  [2900, "shy"],       // 照れ（pet-shy 1.6s）
-  [3900, "listening"], // 傾聴（pet-listening 1.25s）
-  [4900, "sad"],       // 落胆（pet-live2d-sad / pet-sad）
-  [5900, "idle"],      // 待機へ戻す
-  [6400, "gaze-left"], // PNGは左視線、Live2Dは待機を継続
-  [7100, "gaze-right"],// PNGは右視線、Live2Dは待機を継続
-  [7800, "idle"],      // 無限ループの継ぎ目を呼吸で揃える
+  [2600, "thinking"], // 考え中（共通の画面全体変形はなし）
+  [5000, "success"],  // 最大1pxの短い反応
+  [6200, "idle"],     // 待機へ戻す
 ];
 
 // 毎コマ呼んで構わない。`setAnimation()` は同じ状態なら早期 return するので、
