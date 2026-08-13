@@ -26,6 +26,7 @@ const USAGE: &str = "\
 
   dev                 開発起動（同梱物の未取得分を取得してから tauri dev）
   build               開発用の製品ビルド（同上 + tauri build）
+  build-beta          販売ゲート前の軽量ベータ版インストーラを生成
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
@@ -61,9 +62,10 @@ fn run(args: &[String]) -> Result<()> {
     let rest = &args[args.len().min(1)..];
 
     match command {
-        "dev" => tauri("dev", rest, false),
-        "build" => tauri("build", rest, false),
-        "build-distribution" => tauri("build", rest, true),
+        "dev" => tauri("dev", rest, false, false),
+        "build" => tauri("build", rest, false, false),
+        "build-beta" => tauri("build", rest, true, false),
+        "build-distribution" => tauri("build", rest, true, true),
         "preview-distribution" => preview_distribution(),
         "release-check" => {
             let _ = release::check(false)?;
@@ -131,9 +133,14 @@ fn setup(targets: &[String]) -> Result<()> {
 ///
 /// 前処理は旧 `npm run dev` / `npm run build` と同じ順序:
 /// 残存プロセス停止 → Live2Dランタイム取得 → キャラ同期 → UI 配信ビルド → 同梱物取得。
-fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
+fn tauri(
+    mode: &str,
+    extra: &[String],
+    lightweight_bundle: bool,
+    require_release_check: bool,
+) -> Result<()> {
     let release = mode == "build";
-    if distribution {
+    if require_release_check {
         let _ = release::check(true)?;
     }
     // 製品ビルドは通常版も販売版も配布許可リストだけを使う。開発サンプルを含む
@@ -149,7 +156,7 @@ fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
     }
     assets::build_ui_dist(release)?;
     bundled::fetch_engine()?;
-    if !distribution {
+    if !lightweight_bundle {
         office::fetch_aivis()?;
         // 文字起こしはベストエフォート（公式バイナリ配布が無い OS がある）。
         if let Err(error) = bundled::fetch_whisper() {
@@ -170,7 +177,7 @@ fn tauri(mode: &str, extra: &[String], distribution: bool) -> Result<()> {
     log("xtask", format!("cargo tauri {mode} を開始します"));
     let mut command = Command::new("cargo");
     command.arg("tauri").arg(mode).args(extra);
-    if distribution {
+    if lightweight_bundle {
         command.args(["--config", "src-tauri/tauri.distribution.conf.json"]);
     }
     let status = command

@@ -273,7 +273,7 @@ async function openScene({
   page.on("pageerror", error => console.error(`  [pageerror] ${error.message}`));
   await page.goto(`http://127.0.0.1:${PORT}/index.html`);
   if (waitForReady) {
-    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), { timeout: 20000 });
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
   }
   return page;
 }
@@ -301,7 +301,7 @@ async function shootCharacterMatrix() {
         await page.waitForFunction(() => {
           const image = document.getElementById("petSprite");
           return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== "none";
-        }, { timeout: 20000 });
+        }, null, { timeout: 20000 });
         try {
           await page.waitForFunction(() => Number.isFinite(window.__picoagentPerformance?.idlePreloadReady), null, { timeout: baseline.idlePreloadReadyMs * 2 });
         } catch (error) {
@@ -414,9 +414,9 @@ async function validateInteractionMatrix() {
       try {
         const bootVisible = await page.evaluate(() => document.getElementById("petApp")?.classList.contains("is-booting"));
         if (!bootVisible) throw new Error(`${target.id}/${layout}: 起動画面が表示されません`);
-        await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), { timeout: 40000 });
+        await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 40000 });
         if (!target.forcePng) {
-          await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+          await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
         }
         await page.locator("#character").dispatchEvent("pointerdown", { button: 0, pointerType: "mouse" });
         if (await page.evaluate(() => window.__startDraggingCalls) < 1) {
@@ -442,6 +442,8 @@ async function validateInteractionMatrix() {
             return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
           };
           return {
+            beta: visibleRect(document.querySelector(".beta-badge")),
+            betaPointerEvents: getComputedStyle(document.querySelector(".beta-badge")).pointerEvents,
             bubble: visibleRect(document.getElementById("bubble")),
             character: visibleRect(document.getElementById("character")),
             composer: visibleRect(document.getElementById("composer")),
@@ -454,6 +456,9 @@ async function validateInteractionMatrix() {
         const intersects = rect => rect && rect.width > 0 && rect.height > 0
           && rect.x < viewportRect.width && rect.y < viewportRect.height
           && rect.x + rect.width > 0 && rect.y + rect.height > 0;
+        if (!intersects(state.beta) || state.betaPointerEvents !== "none") {
+          throw new Error(`${target.id}/${layout}: BETA表示が画面外または操作を遮っています ${JSON.stringify(state.beta)}`);
+        }
         if (!intersects(state.bubble) || !intersects(state.character) || !intersects(state.composer) || !intersects(state.input)) {
           throw new Error(`${target.id}/${layout}: 縮小後に主要UIが画面から消えました ${JSON.stringify(state)}`);
         }
@@ -471,7 +476,7 @@ async function validateInteractionMatrix() {
   }
   const reducedPage = await openScene({ characterId: "mugi", forcePng: true, reducedMotion: true });
   try {
-    await reducedPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, { timeout: 20000 });
+    await reducedPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
     const blinkApplied = await reducedPage.evaluate(() => {
       rigBlinkPhase = "blink_closed";
       rigRefresh();
@@ -494,7 +499,7 @@ async function validateInteractionMatrix() {
   }
   const gazeOffPage = await openScene({ characterId: "mugi", forcePng: true, width: 900, height: 600 });
   try {
-    await gazeOffPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, { timeout: 20000 });
+    await gazeOffPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
     const rect = await gazeOffPage.locator("#character").boundingBox();
     await gazeOffPage.mouse.move(rect.x + rect.width * 0.85, rect.y + rect.height * 0.38);
     const defaultDirection = await gazeOffPage.evaluate(() => rigLookDirection);
@@ -507,7 +512,7 @@ async function validateInteractionMatrix() {
     characterId: "mugi", forcePng: true, width: 900, height: 600, gazeTrackingEnabled: true,
   });
   try {
-    await gazePage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, { timeout: 20000 });
+    await gazePage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
     const rect = await gazePage.locator("#character").boundingBox();
     await gazePage.mouse.move(450, 590);
     const farDirection = await gazePage.evaluate(() => rigLookDirection);
@@ -587,7 +592,7 @@ async function validateLive2dMatrix() {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
       const page = await openScene({ characterId: target.id, layout, width, height });
       try {
-        await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+        await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
         await page.waitForTimeout(250);
         await page.mouse.move(width / 2, height - 1);
         const farFocus = await page.evaluate(() => ({
@@ -636,7 +641,7 @@ async function validateLive2dMatrix() {
       for (const model of target.manifest.live2d.models) {
         const page = await openScene({ characterId: target.id, live2dSdkOverrides: { [target.id]: String(model.sdk) } });
         try {
-          await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+          await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
           const loaded = await page.evaluate(() => ({ preference: activeLive2dSdkPreference, runtime: live2dRuntimeSdk }));
           if (loaded.preference !== String(model.sdk) || loaded.runtime !== String(model.sdk)) {
             throw new Error(`${target.id}: SDK${model.sdk}固定読込に失敗 ${JSON.stringify(loaded)}`);
@@ -763,7 +768,7 @@ async function prepareComposer(page) {
   await waitForReply(page, COMPOSER_REPLY);
   await clearStatus(page);
   // フロントの openComposer() は応答中だと何もしないので、busy が下りるのを待ってから開く。
-  await page.waitForFunction(() => typeof busy === "undefined" || busy === false, { timeout: 10000 });
+  await page.waitForFunction(() => typeof busy === "undefined" || busy === false, null, { timeout: 10000 });
   await page.evaluate(() => {
     const composer = document.getElementById("composer");
     if (typeof openComposer === "function") openComposer();
@@ -809,7 +814,7 @@ async function prepareLive2D(page) {
   await page.waitForFunction(() => {
     const canvas = document.getElementById("live2dCanvas");
     return canvas && canvas.style.display !== "none" && canvas.width > 0 && typeof live2dActive !== "undefined" && live2dActive;
-  }, { timeout: 40000 });
+  }, null, { timeout: 40000 });
   // 初回モーションが動き出してポーズが決まるまで少し待つ。
   await page.waitForTimeout(1500);
   // パラメータ名が合っているだけでなく、閉口と開口で口元の描画が実際に変わることを確認する。
@@ -847,14 +852,19 @@ async function prepareLive2D(page) {
     playLive2DMotion("idle");
   });
   await submit(page, ASK);
-  await page.waitForFunction(() => typeof live2dMouth !== "undefined" && live2dMouth > 0.05, { timeout: 5000 });
+  await page.waitForFunction(() => typeof live2dMouth !== "undefined" && live2dMouth > 0.05, null, { timeout: 5000 });
 }
 
 async function validateLive2dSdkModels() {
-  for (const sdk of ["5", "4"]) {
+  const manifest = JSON.parse(await readFile(join(ROOT, "characters", "hiyori", "character.json"), "utf8"));
+  const candidates = Array.isArray(manifest.live2d?.models) && manifest.live2d.models.length
+    ? manifest.live2d.models
+    : [{ path: manifest.live2d?.model, sdk: "4" }];
+  const supportedSdks = [...new Set(candidates.map(candidate => String(candidate.sdk || "4")))];
+  for (const sdk of supportedSdks) {
     const page = await openScene({ characterId: "hiyori", live2dSdkOverrides: { hiyori: sdk } });
     try {
-      await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, { timeout: 40000 });
+      await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
       const loaded = await page.evaluate(() => ({
         sdk: activeLive2dSdkPreference,
         core: live2dRuntimeSdk,
@@ -934,7 +944,7 @@ async function prepareGalleryLive2D(page) {
     const canvas = document.getElementById("live2dCanvas");
     return canvas && canvas.style.display !== "none" && canvas.width > 0
       && typeof live2dActive !== "undefined" && live2dActive;
-  }, { timeout: 40000 });
+  }, null, { timeout: 40000 });
   await page.waitForTimeout(1500); // 初回モーションでポーズが決まるまで待つ
   await submit(page, GALLERY_ASK);
 }
@@ -1047,7 +1057,7 @@ if (process.env.SHOOT_DEBUG_BOOT) {
   const layout = process.env.SHOOT_BOOT_LAYOUT || "pet";
   const page = await openScene({ characterId, layout, bootHoldMs: 5000, waitForReady: false });
   await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("is-booting"));
-  await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("boot-character-ready"), { timeout: 40000 });
+  await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("boot-character-ready"), null, { timeout: 40000 });
   await page.waitForTimeout(500);
   const debugDir = join(ROOT, "temp", "boot-check");
   mkdirSync(debugDir, { recursive: true });

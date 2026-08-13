@@ -7,10 +7,11 @@
 ```powershell
 cargo xtask release-check
 cargo xtask preview-distribution
+cargo xtask build-beta --bundles nsis
 cargo xtask build-distribution
 ```
 
-`release-check` は現在地を一覧表示します。`preview-distribution` は法務確認の完了前でも販売対象キャラだけのUIを生成し、内容を確認できます。`build-distribution` は必須項目が1件でも残っていれば、同梱物取得やビルドを始める前に停止します。`cargo xtask dev` は全開発キャラを扱いますが、製品成果物を作る通常の `cargo xtask build` も配布許可リストだけを使います。
+`release-check` は現在地を一覧表示します。`preview-distribution` は法務確認の完了前でも販売対象キャラだけのUIを生成し、内容を確認できます。`build-beta` は販売条件を完了扱いにせず、正式配布と同じ軽量同梱範囲で試用インストーラを生成します。`build-distribution` は必須項目が1件でも残っていれば、同梱物取得やビルドを始める前に停止します。`cargo xtask dev` は全開発キャラを扱いますが、製品成果物を作る通常の `cargo xtask build` も配布許可リストだけを使います。
 
 販売設定の正本は `distribution/release.json` です。販売対象OSとキャラ、利用条件・プライバシー表示・第三者同梱物台帳の確認、Live2D審査参照、公開URLをここへ記録します。初期販売は `signing.required=false` / `updates.required=false` とし、署名・公証・自動更新を必須ゲートにしません。Windows先行販売なら `platforms` をWindowsだけにできます。秘密鍵や証明書は記録しません。
 

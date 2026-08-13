@@ -59,7 +59,9 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
     verify_windows_pe(&installer)?;
     let mut file = fs::File::open(&installer)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Windowsの既定スレッドスタックと同じ1MiBをローカル配列にすると、
+    // 実インストーラのハッシュ計算へ入る前にスタックオーバーフローする。
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
