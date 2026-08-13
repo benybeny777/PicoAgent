@@ -613,6 +613,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
     let bond_label = relationship.bond_label();
     let stream = crate::stream_profile::resolve(&state.config, &character_id);
     Ok(json!({
+        "betaBuild": cfg!(feature = "beta-full"),
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
         "up": current_up(&state).await,
