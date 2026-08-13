@@ -42,8 +42,8 @@ impl Tool for TrelloTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_TRELLO_KEY", "Trello API key", "password", ""),
-            Field::new("PICOAGENT_TRELLO_TOKEN", "Trello token", "password", ""),
+            Field::new("PICOAGENT_TRELLO_KEY", "Trello の API キー", "password", ""),
+            Field::new("PICOAGENT_TRELLO_TOKEN", "Trello のトークン", "password", ""),
             Field::new("PICOAGENT_TRELLO_LIST_ID", "Trello 既定 list ID", "text", ""),
             Field::new("PICOAGENT_TRELLO_TIMEOUT_SECS", "Trello API 待ち時間（秒、3〜60）", "text", "15"),
         ]

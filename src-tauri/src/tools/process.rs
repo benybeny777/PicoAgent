@@ -216,23 +216,37 @@ pub async fn output(
 
 /// 子プロセス終了後に出力の回収を待つ上限。
 /// 終端が来ないのは孫プロセスがパイプを握っている場合だけなので、短くてよい。
-const CAPTURE_DRAIN_SECS: u64 = 5;
+pub const CAPTURE_DRAIN_SECS: u64 = 5;
+
+/// 出力を読むタスクを上限付きで待ち、上限を超えたら中断して `None` を返す。
+///
+/// 子を停止しても、`sh -c` / `powershell -Command` が産んだ孫や、子がさらに起動した
+/// プロセスがパイプの書き込み端を握っていると終端（EOF）が来ない。ここで待ち切ると
+/// タイムアウトも中断も効かなくなるため、待ち方を共通化する。
+pub async fn join_capture<T>(
+    mut task: tokio::task::JoinHandle<T>,
+) -> Option<Result<T, tokio::task::JoinError>> {
+    match tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut task).await {
+        Ok(joined) => Some(joined),
+        Err(_) => {
+            task.abort();
+            None
+        }
+    }
+}
 
 /// 出力回収タスクを上限付きで待つ。上限を超えたらタスクを中断し、握りつぶさずエラーで返す。
 async fn collect(
-    mut task: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+    task: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
     label: &str,
     kind: &str,
 ) -> Result<Vec<u8>, String> {
-    match tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut task).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) => Err(format!("{label}の{kind}回収に失敗しました: {error}")),
-        Err(_) => {
-            task.abort();
-            Err(format!(
-                "{label}の{kind}を回収できません（終了後もパイプを握った孫プロセスが残っています）。"
-            ))
-        }
+    match join_capture(task).await {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => Err(format!("{label}の{kind}回収に失敗しました: {error}")),
+        None => Err(format!(
+            "{label}の{kind}を回収できません（終了後もパイプを握った孫プロセスが残っています）。"
+        )),
     }
 }
 
@@ -404,6 +418,37 @@ mod guard {
             violations.is_empty(),
             "子プロセスの完了待ちに上限がありません。`process::output()` を使うか \
              `tokio::time::timeout` で包んでください: {violations:?}"
+        );
+    }
+
+    /// 一度きりの実行（起動 → 出力回収 → 終了待ち）は共通層の `process::output()` を通すこと。
+    ///
+    /// 同じ処理を各所で書き直すと、**出力回収の待ち方だけが抜ける**。実際に
+    /// `whisper_transcribe` と `meeting_recorder` が共通層と同型の実装を持ち、
+    /// どちらもタイムアウト後に回収タスクを待ち切っていた（孫プロセスがパイプを
+    /// 握っていると終端が来ないため、上限を付けた意味が消える）。常駐プロセスや
+    /// 進捗つき長時間処理は `child` を自分で持ってよいが、その場合も回収の待ちは
+    /// `process::join_capture()` を使う。
+    #[test]
+    fn 一度きりの実行は共通層を通す() {
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "process.rs" {
+                continue; // 共通層の実装そのもの
+            }
+            for (number, line) in source.body().lines().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if line.contains("tokio::time::timeout") && line.contains(".wait()") {
+                    violations.push(format!("{}:{}", source.path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "子プロセスの起動と終了待ちを自前で組み立てています。`process::output()` を使ってください: {violations:?}"
         );
     }
 

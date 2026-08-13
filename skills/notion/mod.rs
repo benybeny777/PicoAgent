@@ -61,7 +61,7 @@ impl Tool for NotionTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_NOTION_TOKEN", "Notion integration token", "password", "secret_..."),
+            Field::new("PICOAGENT_NOTION_TOKEN", "Notion のインテグレーショントークン", "password", "secret_..."),
             Field::new("PICOAGENT_NOTION_DATABASE_ID", "Notion 既定 database ID", "text", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
             Field::new("PICOAGENT_NOTION_TIMEOUT_SECS", "Notion API 待ち時間（秒、3〜60）", "text", "20"),
         ]

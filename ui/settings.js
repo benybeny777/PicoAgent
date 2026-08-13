@@ -1373,7 +1373,7 @@ const SETUP_GUIDES = {
     links: [["Mistral Console", "https://console.mistral.ai/"]],
   },
   gmail_message: {
-    title: "Gmail OAuth access token",
+    title: "Gmail の OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意します。個人利用なら OAuth Playground で access token を発行できます。",
       "Gmail の読み取り/変更/送信に必要な scope を許可します。例: gmail.modify と gmail.send。",
@@ -1386,7 +1386,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_calendar: {
-    title: "Google Calendar OAuth access token",
+    title: "Google カレンダーの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Calendar API を有効にします。",
       "OAuth Playground などで Calendar scope を許可して access token を発行します。",
@@ -1399,7 +1399,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_docs: {
-    title: "Google Docs OAuth access token",
+    title: "Google ドキュメントの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Docs API を有効にします。",
       "OAuth Playground などで docs scope を許可して access token を発行します。",
@@ -1412,7 +1412,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_drive: {
-    title: "Google Drive OAuth access token",
+    title: "Google ドライブの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Drive API を有効にします。",
       "OAuth Playground などで Drive scope を許可して access token を発行します。",
@@ -1425,7 +1425,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_sheets: {
-    title: "Google Sheets OAuth access token",
+    title: "Google スプレッドシートの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Sheets API を有効にします。",
       "OAuth Playground などで spreadsheets scope を許可して access token を発行します。",
@@ -1438,7 +1438,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_tasks: {
-    title: "Google Tasks OAuth access token",
+    title: "Google ToDo リストの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Tasks API を有効にします。",
       "OAuth Playground などで tasks scope を許可して access token を発行します。",
@@ -1451,7 +1451,7 @@ const SETUP_GUIDES = {
     ],
   },
   slack_send_message: {
-    title: "Slack Bot token / Webhook URL",
+    title: "Slack の Bot トークン／Webhook URL",
     steps: [
       "Slack API の Your Apps でアプリを作成します。",
       "OAuth & Permissions で bot scopes を追加します。投稿は chat:write、履歴取得は channels:history などが必要です。",
@@ -1464,7 +1464,7 @@ const SETUP_GUIDES = {
     ],
   },
   github_issue: {
-    title: "GitHub token",
+    title: "GitHub のアクセストークン",
     steps: [
       "GitHub の Personal access tokens で fine-grained token を作ります。",
       "対象 repository を選び、Issues の Read/Write 権限を付けます。",
@@ -1476,7 +1476,7 @@ const SETUP_GUIDES = {
     ],
   },
   notion: {
-    title: "Notion integration token",
+    title: "Notion のインテグレーショントークン",
     steps: [
       "Notion の My integrations で integration を作成します。",
       "Internal Integration Secret を PICOAGENT_NOTION_TOKEN に貼ります。",
@@ -1488,7 +1488,7 @@ const SETUP_GUIDES = {
     ],
   },
   discord_send_message: {
-    title: "Discord Webhook URL",
+    title: "Discord の Webhook URL",
     steps: [
       "Discord のチャンネル設定で 連携サービス > ウェブフック を開きます。",
       "新しい Webhook を作成し、URL をコピーします。",
@@ -1497,7 +1497,7 @@ const SETUP_GUIDES = {
     links: [["Discord Webhooks", "https://support.discord.com/hc/articles/228383668-Intro-to-Webhooks"]],
   },
   todoist: {
-    title: "Todoist API token",
+    title: "Todoist の API トークン",
     steps: [
       "Todoist の設定 > Integrations > Developer を開きます。",
       "API token をコピーして PICOAGENT_TODOIST_TOKEN に貼ります。",
@@ -1506,7 +1506,7 @@ const SETUP_GUIDES = {
     links: [["Todoist Developer", "https://app.todoist.com/app/settings/integrations/developer"]],
   },
   trello: {
-    title: "Trello key / token",
+    title: "Trello の API キー／トークン",
     steps: [
       "Trello Developer API Keys で key を確認します。",
       "同じページから token を生成します。",
@@ -1515,7 +1515,7 @@ const SETUP_GUIDES = {
     links: [["Trello API Keys", "https://trello.com/app-key"]],
   },
   bluesky: {
-    title: "Bluesky app password",
+    title: "Bluesky のアプリパスワード",
     steps: [
       "Bluesky の Settings > Privacy and security > App passwords を開きます。",
       "新しい App Password を作り、PICOAGENT_BLUESKY_APP_PASSWORD に貼ります。",
@@ -1530,7 +1530,7 @@ function setupGuideFor(id, schema = []) {
   const keys = schema.map(field => field.key).join(" ");
   if (/GOOGLE_.*ACCESS_TOKEN|GMAIL_ACCESS_TOKEN/.test(keys)) {
     return {
-      title: "Google OAuth access token",
+      title: "Google の OAuth アクセストークン",
       steps: [
         "Google Cloud Console で OAuth クライアントを用意します。",
         "OAuth Playground などで対象APIの scope を許可し、access token を発行します。",

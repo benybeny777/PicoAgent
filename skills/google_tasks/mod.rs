@@ -44,7 +44,7 @@ impl Tool for GoogleTasksTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN", "Google Tasks OAuth access token", "password", "ya29..."),
+            Field::new("PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN", "Google ToDo リストの OAuth アクセストークン", "password", "ya29..."),
             Field::new("PICOAGENT_GOOGLE_TASKS_LIST_ID", "Google Tasks 既定 tasklist ID", "text", "@default"),
             Field::new("PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS", "Google Tasks API 待ち時間（秒、3〜60）", "text", "15"),
         ]

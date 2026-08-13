@@ -46,7 +46,7 @@ impl Tool for GitHubTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GITHUB_TOKEN", "GitHub token", "password", "github_pat_..."),
+            Field::new("PICOAGENT_GITHUB_TOKEN", "GitHub のアクセストークン", "password", "github_pat_..."),
             Field::new("PICOAGENT_GITHUB_OWNER", "GitHub 既定 owner", "text", "owner"),
             Field::new("PICOAGENT_GITHUB_REPO", "GitHub 既定 repository", "text", "repo"),
             Field::new("PICOAGENT_GITHUB_TIMEOUT_SECS", "GitHub API 待ち時間（秒、3〜60）", "text", "20"),

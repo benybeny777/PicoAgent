@@ -972,8 +972,6 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 /* チャット / トーク: 上半身アイコン、履歴、入力を一段大きくする。 */
 [data-layout="chat"] .bubble,
 [data-layout="talk"] .bubble { padding:100px 16px 15px; }
-[data-layout="chat"] .character,
-[data-layout="talk"] .character { left:18px; top:16px; width:62px; height:62px; }
 [data-layout="chat"] .reply-actions,
 [data-layout="talk"] .reply-actions {
   position:absolute; top:16px; right:16px; left:112px;
@@ -982,29 +980,21 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 }
 [data-layout="chat"] .reply-actions button,
 [data-layout="talk"] .reply-actions button { min-width:0; width:100%; height:34px; padding:0 7px; }
-/* チャットは長時間使う主画面なので、丸い顔アイコンだけでなく選択中キャラの
-   上半身が分かるポートレートを残す。トークはメッセージアプリ風の小型アイコンを維持する。 */
-[data-layout="chat"] .bubble { padding-top:164px; }
-[data-layout="chat"] .character {
-  left:18px; top:16px; width:120px; height:144px;
-  border-radius:18px;
-}
-[data-layout="chat"] .character img { object-fit:contain; object-position:50% 100%; }
-[data-layout="chat"] .reply-actions { left:154px; }
 [data-layout="chat"] .character canvas,
-[data-layout="talk"] .character canvas {
-  width:100%!important; height:100%!important;
-  transform:translateX(-50%) scale(2.55); transform-origin:50% 9%;
-}
-/* 顔アイコンを 48px から 62px へ広げたぶん、接続ランプと♡ボタンも外側へずらす。
-   元の座標のままだと、ランプがアイコンの内側へ埋もれ、♡がアイコンの右端に重なる。 */
-[data-layout="chat"] .online,
+[data-layout="talk"] .character canvas { width:100%!important; height:100%!important; }
+/* トークはメッセージアプリ風の小型アイコン。顔アイコンを 48px から 62px へ広げたぶん、
+   接続ランプと♡ボタンも外側へずらす（元の座標だとランプが埋もれ、♡が右端に重なる）。 */
+[data-layout="talk"] .character { left:18px; top:16px; width:62px; height:62px; }
+[data-layout="talk"] .character canvas { transform:translateX(-50%) scale(2.55); transform-origin:50% 9%; }
 [data-layout="talk"] .online { left:70px; top:68px; }
-[data-layout="chat"] .relationship-button,
 [data-layout="talk"] .relationship-button { left:88px; top:35px; }
-[data-layout="chat"] .character canvas {
-  transform:translateX(-50%) scale(1.55); transform-origin:50% 7%;
-}
+/* チャットは長時間使う主画面なので、丸い顔アイコンではなく選択中キャラの
+   上半身が分かるポートレートにする。枠へ収めるため画像は contain で表示する。 */
+[data-layout="chat"] .bubble { padding-top:164px; }
+[data-layout="chat"] .character { left:18px; top:16px; width:120px; height:144px; border-radius:18px; }
+[data-layout="chat"] .character img { object-fit:contain; object-position:50% 100%; }
+[data-layout="chat"] .character canvas { transform:translateX(-50%) scale(1.55); transform-origin:50% 7%; }
+[data-layout="chat"] .reply-actions { left:154px; }
 [data-layout="chat"] .online { left:132px; top:148px; }
 [data-layout="chat"] .relationship-button { left:128px; top:20px; }
 [data-layout="chat"] .history-body,

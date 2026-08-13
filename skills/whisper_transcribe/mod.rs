@@ -2,12 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use chrono::Local;
 use serde_json::{json, Value};
-use tokio::io::AsyncReadExt;
 
 use super::{config_guide, Tool, ToolReg};
 use crate::config::Config;
@@ -188,100 +187,14 @@ fn trim_output(bytes: &[u8]) -> String {
     )
 }
 
+/// 共通層でタイムアウト付き実行する。起動失敗・タイムアウト・出力回収の
+/// 打ち切りはすべて共通層の判断に任せ、ここでは案内文の先頭だけ揃える。
 async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Result<Output, String> {
-    let mut child = crate::tools::process::command(program)
-        .args(args_list)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("エラー: Whisper文字起こしを起動できません: {error}"))?;
-
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_task = tokio::spawn(async move {
-        if let Some(mut pipe) = stdout {
-            return read_bounded(&mut pipe, "標準出力").await;
-        }
-        Ok::<_, String>(Vec::new())
-    });
-    let stderr_task = tokio::spawn(async move {
-        if let Some(mut pipe) = stderr {
-            return read_bounded(&mut pipe, "標準エラー出力").await;
-        }
-        Ok::<_, String>(Vec::new())
-    });
-
-    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            return Err(format!(
-                "エラー: Whisper文字起こしの終了待ちに失敗しました: {error}"
-            ))
-        }
-        Err(_) => {
-            let kill_error = child.kill().await.err();
-            let wait_error = child.wait().await.err();
-            let stdout_error = stdout_task
-                .await
-                .map_err(|error| format!("標準出力の回収タスクが失敗しました: {error}"))
-                .and_then(|result| result)
-                .err();
-            let stderr_error = stderr_task
-                .await
-                .map_err(|error| format!("標準エラー出力の回収タスクが失敗しました: {error}"))
-                .and_then(|result| result)
-                .err();
-            let cleanup = kill_error
-                .or(wait_error)
-                .map(|error| error.to_string())
-                .into_iter()
-                .chain(stdout_error)
-                .chain(stderr_error)
-                .collect::<Vec<_>>()
-                .join("、");
-            if !cleanup.is_empty() {
-                return Err(format!(
-                    "エラー: Whisper文字起こしが {timeout} 秒でタイムアウトし、子プロセスの解放にも失敗しました: {cleanup}"
-                ));
-            }
-            return Err(format!(
-                "エラー: Whisper文字起こしが {timeout} 秒でタイムアウトしました。"
-            ));
-        }
-    };
-    let stdout = stdout_task
+    let mut command = crate::tools::process::command(program);
+    command.args(args_list).stdin(Stdio::null());
+    crate::tools::process::output(command, timeout, "Whisper文字起こし")
         .await
-        .map_err(|error| format!("エラー: 標準出力の回収タスクが失敗しました: {error}"))??;
-    let stderr = stderr_task
-        .await
-        .map_err(|error| format!("エラー: 標準エラー出力の回収タスクが失敗しました: {error}"))??;
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
-
-async fn read_bounded<R: tokio::io::AsyncRead + Unpin>(
-    reader: &mut R,
-    label: &str,
-) -> Result<Vec<u8>, String> {
-    let mut kept = Vec::new();
-    let mut chunk = [0u8; 8192];
-    loop {
-        let count = reader
-            .read(&mut chunk)
-            .await
-            .map_err(|error| format!("{label}を読み取れません: {error}"))?;
-        if count == 0 {
-            break;
-        }
-        let remaining = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(kept.len());
-        kept.extend_from_slice(&chunk[..count.min(remaining)]);
-        // 上限後も読み捨てを続け、子プロセスをパイプ詰まりで停止させない。
-    }
-    Ok(kept)
+        .map_err(|error| format!("エラー: {error}"))
 }
 
 /// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。

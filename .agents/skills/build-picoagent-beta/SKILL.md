@@ -16,6 +16,7 @@ description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビ�
 
 - 公開ベータ版は必ず`cargo xtask build-beta --bundles nsis`を正規入口にする。
 - `build-beta`が`beta-full` featureを自動付与し、製品情報へベータ全機能試用中と表示することを確認する。正式版コマンドへこのfeatureを付けない。
+- `build-beta`だけが`BETA`バッジを配信物へ残す。生成後の`ui-dist/index.html`に`beta-badge`があること、通常`build`では無いことを確認する。
 - `cargo xtask build`はOffice、Aivis、Whisper、THA3、開発ツール等を扱う開発用経路なので、公開ベータ版へ使わない。
 - `src-tauri/tauri.distribution.conf.json`の資産許可範囲が基本エンジンと`component-manifest.json`だけであることを確認する。
 - `distribution/release.json`の許可キャラ以外、Live2Dサンプル、制作途中素材、過去のインストーラを含めない。

@@ -402,8 +402,8 @@ impl Tool for GmailTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GMAIL_ACCESS_TOKEN", "Gmail OAuth access token", "password", "ya29..."),
-            Field::new("PICOAGENT_GMAIL_BASE_URL", "Gmail API base URL", "text", "https://gmail.googleapis.com/gmail/v1"),
+            Field::new("PICOAGENT_GMAIL_ACCESS_TOKEN", "Gmail の OAuth アクセストークン", "password", "ya29..."),
+            Field::new("PICOAGENT_GMAIL_BASE_URL", "Gmail API のベース URL", "text", "https://gmail.googleapis.com/gmail/v1"),
             Field::new("PICOAGENT_GMAIL_TIMEOUT_SECS", "Gmail API 待ち時間（秒、3〜60）", "text", "20"),
             Field::new("PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS", "Gmail整理/掃除の既定上限（0で無制限）", "text", "50"),
         ]

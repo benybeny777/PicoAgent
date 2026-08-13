@@ -42,7 +42,7 @@ impl Tool for GoogleSheetsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN", "Google Sheets OAuth access token", "password", "ya29..."),
+            Field::new("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN", "Google スプレッドシートの OAuth アクセストークン", "password", "ya29..."),
             Field::new("PICOAGENT_GOOGLE_SHEETS_ID", "Google Sheets 既定 spreadsheet ID", "text", ""),
             Field::new("PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS", "Google Sheets API 待ち時間（秒、3〜60）", "text", "20"),
         ]

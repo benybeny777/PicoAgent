@@ -40,7 +40,7 @@ impl Tool for DiscordTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_DISCORD_WEBHOOK_URL", "Discord Webhook URL", "password", "https://discord.com/api/webhooks/..."),
+            Field::new("PICOAGENT_DISCORD_WEBHOOK_URL", "Discord の Webhook URL", "password", "https://discord.com/api/webhooks/..."),
             Field::new("PICOAGENT_DISCORD_TIMEOUT_SECS", "Discord API 待ち時間（秒、3〜60）", "text", "15"),
         ]
     }

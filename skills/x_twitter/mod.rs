@@ -44,7 +44,7 @@ impl Tool for XTwitterTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_X_BEARER_TOKEN", "X OAuth2 bearer token", "password", ""),
+            Field::new("PICOAGENT_X_BEARER_TOKEN", "X の OAuth2 bearer トークン", "password", ""),
             Field::new("PICOAGENT_X_USER_ID", "X 既定 user ID", "text", ""),
             Field::new("PICOAGENT_X_TIMEOUT_SECS", "X API 待ち時間（秒、3〜60）", "text", "20"),
         ]

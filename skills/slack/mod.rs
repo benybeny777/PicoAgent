@@ -81,9 +81,9 @@ impl Tool for SlackTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_SLACK_BOT_TOKEN", "Slack Bot token", "password", "xoxb-..."),
+            Field::new("PICOAGENT_SLACK_BOT_TOKEN", "Slack の Bot トークン", "password", "xoxb-..."),
             Field::new("PICOAGENT_SLACK_CHANNEL", "Slack 既定チャンネル", "text", "#general"),
-            Field::new("PICOAGENT_SLACK_WEBHOOK_URL", "Slack Incoming Webhook URL", "password", "https://hooks.slack.com/services/..."),
+            Field::new("PICOAGENT_SLACK_WEBHOOK_URL", "Slack の Incoming Webhook URL", "password", "https://hooks.slack.com/services/..."),
             Field::new("PICOAGENT_SLACK_TIMEOUT_SECS", "Slack API 待ち時間（秒、3〜60）", "text", "15"),
         ]
     }

@@ -44,9 +44,9 @@ impl Tool for BlueskyTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_BLUESKY_BASE_URL", "Bluesky PDS URL", "text", "https://bsky.social"),
-            Field::new("PICOAGENT_BLUESKY_IDENTIFIER", "Bluesky identifier", "text", "user.bsky.social"),
-            Field::new("PICOAGENT_BLUESKY_APP_PASSWORD", "Bluesky app password", "password", ""),
+            Field::new("PICOAGENT_BLUESKY_BASE_URL", "Bluesky の PDS URL", "text", "https://bsky.social"),
+            Field::new("PICOAGENT_BLUESKY_IDENTIFIER", "Bluesky の識別子（ハンドルまたはメール）", "text", "user.bsky.social"),
+            Field::new("PICOAGENT_BLUESKY_APP_PASSWORD", "Bluesky のアプリパスワード", "password", ""),
             Field::new("PICOAGENT_BLUESKY_TIMEOUT_SECS", "Bluesky API 待ち時間（秒、3〜60）", "text", "20"),
         ]
     }

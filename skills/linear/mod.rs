@@ -42,7 +42,7 @@ impl Tool for LinearTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LINEAR_API_KEY", "Linear API key", "password", ""),
+            Field::new("PICOAGENT_LINEAR_API_KEY", "Linear の API キー", "password", ""),
             Field::new("PICOAGENT_LINEAR_TEAM_ID", "Linear 既定 team ID", "text", ""),
             Field::new("PICOAGENT_LINEAR_TIMEOUT_SECS", "Linear API 待ち時間（秒、3〜60）", "text", "20"),
         ]

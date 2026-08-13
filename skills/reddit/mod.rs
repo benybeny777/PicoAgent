@@ -46,8 +46,8 @@ impl Tool for RedditTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_REDDIT_BEARER_TOKEN", "Reddit OAuth bearer token", "password", ""),
-            Field::new("PICOAGENT_REDDIT_USER_AGENT", "Reddit User-Agent", "text", "PicoAgent/1.0"),
+            Field::new("PICOAGENT_REDDIT_BEARER_TOKEN", "Reddit の OAuth bearer トークン", "password", ""),
+            Field::new("PICOAGENT_REDDIT_USER_AGENT", "Reddit の User-Agent", "text", "PicoAgent/1.0"),
             Field::new("PICOAGENT_REDDIT_SUBREDDIT", "Reddit 既定 subreddit", "text", ""),
             Field::new("PICOAGENT_REDDIT_TIMEOUT_SECS", "Reddit API 待ち時間（秒、3〜60）", "text", "20"),
         ]
