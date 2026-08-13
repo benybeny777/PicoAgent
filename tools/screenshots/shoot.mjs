@@ -351,8 +351,9 @@ async function shootCharacterMatrix() {
         }
         const expectsSecondary = ["koharu", "sena", "noa"].includes(characterId)
           && !["chat", "talk", "bar"].includes(layout);
+        // 全身の状態別モーションは廃止したので、body 側にアニメーションは付かない。
+        // 検査するのは局所レイヤー（胸元）の動きとマスクだけ。
         if (expectsSecondary && (!visual.secondaryMotion?.visible
-          || visual.secondaryMotion.bodyAnimationName === "none"
           || visual.secondaryMotion.localAnimationName !== "pet-secondary-bust"
           || visual.secondaryMotion.localTransform === "none"
           || visual.secondaryMotion.maskImage === "none")) {
@@ -882,17 +883,6 @@ const distributionStep = async (page, index) => {
   const current = DISTRIBUTION_TOUR.filter(([at]) => elapsedMs >= at).pop();
   await page.evaluate(name => {
     if (!name) return;
-    if (name === "gaze-left" || name === "gaze-right") {
-      setAnimation("idle");
-      if (typeof live2dActive === "undefined" || !live2dActive) {
-        rigLookDirection = name === "gaze-left" ? -1 : 1;
-        rigRefresh();
-      } else {
-        live2dTargetX = name === "gaze-left" ? -0.42 : 0.42;
-        live2dTargetY = -0.08;
-      }
-      return;
-    }
     setAnimation(name);
     if (typeof live2dActive === "undefined" || !live2dActive) {
       rigLookDirection = 0;

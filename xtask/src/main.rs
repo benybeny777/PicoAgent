@@ -37,7 +37,7 @@ const USAGE: &str = "\
                       （省略時は通常の開発・製品ビルドで使う全対象。販売用軽量版とは別）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
-  build-ui [--release] ui/ を ui-dist/ へ配信ビルド（--release で最小化）
+  build-ui [--release] [--beta] ui/ を ui-dist/ へ配信ビルド（--release で最小化、--beta で BETA 表示を残す）
   stop                残存プロセスの停止
   cli <コマンド…>      ローカル API を叩く CLI（status / models / chat / ask / repl）
 
@@ -62,10 +62,26 @@ fn run(args: &[String]) -> Result<()> {
     let rest = &args[args.len().min(1)..];
 
     match command {
-        "dev" => tauri("dev", rest, false, false, false),
-        "build" => tauri("build", rest, false, false, false),
-        "build-beta" => tauri("build", rest, true, false, true),
-        "build-distribution" => tauri("build", rest, true, true, false),
+        "dev" => tauri("dev", rest, Build::default()),
+        "build" => tauri("build", rest, Build::default()),
+        "build-beta" => tauri(
+            "build",
+            rest,
+            Build {
+                lightweight_bundle: true,
+                beta: true,
+                ..Build::default()
+            },
+        ),
+        "build-distribution" => tauri(
+            "build",
+            rest,
+            Build {
+                lightweight_bundle: true,
+                require_release_check: true,
+                ..Build::default()
+            },
+        ),
         "preview-distribution" => preview_distribution(),
         "release-check" => {
             let _ = release::check(false)?;
@@ -76,7 +92,10 @@ fn run(args: &[String]) -> Result<()> {
         "setup" => setup(rest),
         "sync-characters" => assets::sync_characters(),
         "character-pack" => character_pack::run(rest),
-        "build-ui" => assets::build_ui_dist(rest.iter().any(|a| a == "--release")),
+        "build-ui" => assets::build_ui_dist(
+            rest.iter().any(|a| a == "--release"),
+            rest.iter().any(|a| a == "--beta"),
+        ),
         "stop" => assets::stop_stale(),
         "cli" => cli::run(rest),
         "" | "help" | "-h" | "--help" => {
@@ -93,7 +112,18 @@ fn run(args: &[String]) -> Result<()> {
 fn preview_distribution() -> Result<()> {
     let characters = release::included_characters(&release::manifest()?)?;
     assets::sync_distribution_characters(&characters)?;
-    assets::build_ui_dist(false)
+    assets::build_ui_dist(false, false)
+}
+
+/// ビルドの種類。真偽値を並べて渡すと呼び出し側で取り違えるため、名前を付けて渡す。
+#[derive(Clone, Copy, Default)]
+struct Build {
+    /// 販売用の軽量バンドル設定（開発用の追加ツールを同梱しない）を使う。
+    lightweight_bundle: bool,
+    /// 販売前ゲート（`release-check`）を必須にする。
+    require_release_check: bool,
+    /// 開発中ベータ版として作る（全機能試用の `beta-full` と画面の BETA 表示）。
+    beta: bool,
 }
 
 /// 同梱物を取得する。対象を省略するとすべて。
@@ -133,15 +163,9 @@ fn setup(targets: &[String]) -> Result<()> {
 ///
 /// 前処理は旧 `npm run dev` / `npm run build` と同じ順序:
 /// 残存プロセス停止 → Live2Dランタイム取得 → キャラ同期 → UI 配信ビルド → 同梱物取得。
-fn tauri(
-    mode: &str,
-    extra: &[String],
-    lightweight_bundle: bool,
-    require_release_check: bool,
-    beta_full: bool,
-) -> Result<()> {
+fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     let release = mode == "build";
-    if require_release_check {
+    if build.require_release_check {
         let _ = release::check(true)?;
     }
     // 製品ビルドは通常版も販売版も配布許可リストだけを使う。開発サンプルを含む
@@ -155,9 +179,9 @@ fn tauri(
     } else {
         assets::sync_characters()?;
     }
-    assets::build_ui_dist(release)?;
+    assets::build_ui_dist(release, build.beta)?;
     bundled::fetch_engine()?;
-    if !lightweight_bundle {
+    if !build.lightweight_bundle {
         office::fetch_aivis()?;
         // 文字起こしはベストエフォート（公式バイナリ配布が無い OS がある）。
         if let Err(error) = bundled::fetch_whisper() {
@@ -178,10 +202,10 @@ fn tauri(
     log("xtask", format!("cargo tauri {mode} を開始します"));
     let mut command = Command::new("cargo");
     command.arg("tauri").arg(mode).args(extra);
-    if lightweight_bundle {
+    if build.lightweight_bundle {
         command.args(["--config", "src-tauri/tauri.distribution.conf.json"]);
     }
-    if beta_full {
+    if build.beta {
         command.args(["--features", "beta-full"]);
     }
     let status = command

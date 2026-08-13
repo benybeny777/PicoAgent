@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::util::{copy_dir, list_files, log, repo_root};
@@ -357,7 +357,9 @@ fn character_content_version(character_dir: &Path) -> Result<String> {
 ///
 /// release では依存追加なしで HTML/CSS/JS の余分な空白とコメントを落とし、
 /// 配布物から読みやすいソースを減らす（解析を不可能にするものではない）。
-pub fn build_ui_dist(release: bool) -> Result<()> {
+///
+/// `beta` は開発中ベータ版のときだけ真にする。偽なら画面の BETA 表示を取り除く。
+pub fn build_ui_dist(release: bool, beta: bool) -> Result<()> {
     let root = repo_root();
     let src = root.join("ui");
     let dest = root.join("ui-dist");
@@ -391,6 +393,10 @@ pub fn build_ui_dist(release: bool) -> Result<()> {
         fs::copy(source, preview_dest.join(format!("{id}.webp")))?;
     }
 
+    if !beta {
+        strip_beta_badge(&dest)?;
+    }
+
     if release {
         for file in list_files(&dest) {
             let ext = file
@@ -416,11 +422,39 @@ pub fn build_ui_dist(release: bool) -> Result<()> {
     log(
         "build-ui-dist",
         format!(
-            "ui -> ui-dist ({})",
-            if release { "release" } else { "dev" }
+            "ui -> ui-dist ({}{})",
+            if release { "release" } else { "dev" },
+            if beta { " / beta" } else { "" }
         ),
     );
     Ok(())
+}
+
+/// 配信用 `index.html` から BETA 表示を取り除く。
+///
+/// BETA 表示は `ui/index.html` に直接書いてあり、`ui/` はどのビルドでもそのまま
+/// `ui-dist/` へ写る。剥がさないと販売版にも「BETA」が出続けるため、ベータ以外の
+/// ビルドはここで確実に落とす（表示の有無をビルド種別だけで決める）。
+fn strip_beta_badge(dest: &std::path::Path) -> Result<()> {
+    let index = dest.join("index.html");
+    let text = fs::read_to_string(&index)
+        .with_context(|| format!("index.html を読めません: {}", index.display()))?;
+    let Some(stripped) = remove_beta_badge(&text) else {
+        return Ok(()); // 目印が無いソース（将来 BETA 表示を廃止した場合）は何もしない
+    };
+    fs::write(&index, stripped)?;
+    Ok(())
+}
+
+/// `<span class="beta-badge" …>BETA</span>` を1つ取り除く。見つからなければ `None`。
+fn remove_beta_badge(text: &str) -> Option<String> {
+    const OPEN: &str = "<span class=\"beta-badge\"";
+    let start = text.find(OPEN)?;
+    let end = text[start..].find("</span>")? + start + "</span>".len();
+    let mut stripped = String::with_capacity(text.len());
+    stripped.push_str(&text[..start]);
+    stripped.push_str(text[end..].trim_start_matches(['\r', '\n', ' ', '\t']));
+    Some(stripped)
 }
 
 /// HTML が読み込むローカルの CSS / JS へ、内容から決まる `?v=…` を付ける。
@@ -669,7 +703,7 @@ mod tests {
     use std::fs;
 
     use super::{
-        character_content_version, content_version, rewrite_asset_refs,
+        character_content_version, content_version, remove_beta_badge, rewrite_asset_refs,
         stamp_character_asset_versions, validate_character_asset_generation,
     };
 
@@ -705,6 +739,22 @@ mod tests {
                 .then(|| "dddddddd".to_string())),
             untouched
         );
+    }
+
+    /// BETA 表示は開発中ベータ版だけの目印。`ui/index.html` に直接書いてあるため、
+    /// 剥がす処理が実際の記述と噛み合っていないと販売版へそのまま出てしまう。
+    #[test]
+    fn ベータ表示は販売ビルドから取り除ける() {
+        let index = fs::read_to_string(crate::util::repo_root().join("ui/index.html")).unwrap();
+        assert!(
+            index.contains("beta-badge"),
+            "ui/index.html に BETA 表示がありません。廃止したなら strip_beta_badge も消すこと"
+        );
+        let stripped = remove_beta_badge(&index).expect("BETA 表示を取り除けません");
+        assert!(!stripped.contains("beta-badge"));
+        assert!(remove_beta_badge(&stripped).is_none());
+        // 目印が無い HTML は書き換え対象にしない。
+        assert!(remove_beta_badge("<main></main>").is_none());
     }
 
     #[test]

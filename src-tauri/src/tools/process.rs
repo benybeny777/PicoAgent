@@ -194,22 +194,46 @@ pub async fn output(
         Err(_) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+            // 出力の回収を待たずに打ち切る。`sh -c` / `powershell -Command` のように
+            // 子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を
+            // 握ったままで終端（EOF）が来ない。ここで待つと孫が終わるまで戻れず、
+            // タイムアウトを設けた意味がなくなる（実際に1秒指定が30秒待ちになっていた）。
+            stdout_task.abort();
+            stderr_task.abort();
             return Err(format!("{label}が {timeout} 秒でタイムアウトしました。"));
         }
     };
-    let stdout = stdout_task
-        .await
-        .map_err(|error| format!("{label}の標準出力回収に失敗しました: {error}"))??;
-    let stderr = stderr_task
-        .await
-        .map_err(|error| format!("{label}の標準エラー回収に失敗しました: {error}"))??;
+    // 子が正常終了しても、孫がパイプを握っていれば同じ理由で終端が来ない。
+    // 終了後の回収にも上限を置き、待ち続けずエラーとして返す。
+    let stdout = collect(stdout_task, label, "標準出力").await?;
+    let stderr = collect(stderr_task, label, "標準エラー").await?;
     Ok(Output {
         status,
         stdout,
         stderr,
     })
+}
+
+/// 子プロセス終了後に出力の回収を待つ上限。
+/// 終端が来ないのは孫プロセスがパイプを握っている場合だけなので、短くてよい。
+const CAPTURE_DRAIN_SECS: u64 = 5;
+
+/// 出力回収タスクを上限付きで待つ。上限を超えたらタスクを中断し、握りつぶさずエラーで返す。
+async fn collect(
+    mut task: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+    label: &str,
+    kind: &str,
+) -> Result<Vec<u8>, String> {
+    match tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut task).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => Err(format!("{label}の{kind}回収に失敗しました: {error}")),
+        Err(_) => {
+            task.abort();
+            Err(format!(
+                "{label}の{kind}を回収できません（終了後もパイプを握った孫プロセスが残っています）。"
+            ))
+        }
+    }
 }
 
 async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
@@ -265,13 +289,30 @@ mod tests {
     }
 
     // タイムアウトで打ち切っても、kill_on_drop により子プロセスが残らないこと。
+    // シェル経由（孫プロセスあり）でも指定秒数で戻ること。孫がパイプを握っていると
+    // 出力の終端が来ないため、回収を待つ実装では孫が終わるまで戻れなかった。
     #[cfg(unix)]
     #[test]
     fn タイムアウトで子プロセスを残さない() {
+        let mut cmd = command("sh");
+        cmd.args(["-c", "sleep 30"]);
+        タイムアウトが指定秒数で戻る(cmd);
+    }
+
+    // 対応OSのもう一方でも同じ形（`cmd /c` の孫プロセス）で検査する。
+    // unix だけで検査していたため、Windows 中心の開発では退行に気づけなかった。
+    #[cfg(windows)]
+    #[test]
+    fn タイムアウトで子プロセスを残さない() {
+        let mut cmd = command("cmd");
+        cmd.args(["/c", "ping -n 31 127.0.0.1"]);
+        タイムアウトが指定秒数で戻る(cmd);
+    }
+
+    #[cfg(any(unix, windows))]
+    fn タイムアウトが指定秒数で戻る(cmd: tokio::process::Command) {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let mut cmd = command("sh");
-            cmd.args(["-c", "sleep 30"]);
             let started = std::time::Instant::now();
             let error = output(cmd, 1, "長い処理").await.unwrap_err();
             assert!(error.contains("タイムアウト"), "error: {error}");
