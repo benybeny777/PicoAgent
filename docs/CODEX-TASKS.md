@@ -1,8 +1,13 @@
-# Codexへの作業指示（2026-08-13 レビュー分の残件）
+# Codexへの作業指示
 
-Claudeの事後レビュー2巡（`docs/REVIEW-LOG.md` の 2026-08-13「ベータ公開分の事後レビュー」）で、
 **直しきれなかった・環境がなくて確認できなかった項目**をここへ作業指示としてまとめる。判断の理由は
 レビュー記録、進行状況は `HANDOFF.md`、ルールは `AGENTS.md` が持ち場。ここは「次に手を動かす内容」だけ。
+現在の内容は 2026-08-13 のレビュー2巡（`docs/REVIEW-LOG.md` の「ベータ公開分の事後レビュー」）の残件と、
+2026-08-14 に追加した依存ライブラリの検討分。
+
+> **Moveable 導入回で先に読むもの: [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md)。**
+> `ui/vendor/` へ依存を置くときの制約（CSP、拡張子 allowlist、`bundle_scope.rs` の走査除外、
+> Git 管理下に置くか取得方式にするか）と、他に入れる価値のあるライブラリの採否をまとめてある。
 
 優先度は P0（配布前に必須）→ P1（次の作業回で）→ 保留（条件が揃うまで着手しない）。
 着手したら、完了条件まで満たしてから `docs/REVIEW-LOG.md` の該当行を更新し、この項目を消す。
@@ -72,6 +77,28 @@ Claudeの事後レビュー2巡（`docs/REVIEW-LOG.md` の 2026-08-13「ベー�
 - **やること**: 長時間音声（10分以上）で文字起こしし、メモリと応答の体感を確認する。
 - **完了条件**: 問題がなければそのまま。過大なら共通層側へ上限の設定キーを足す（スキル側で再実装しない）。
 
+## P1-5. Moveable を `ui/vendor/` へ置く方式を決めて、設計ガードを実態に合わせる
+
+- **なぜ**: `.gitignore` が無視しているのは `ui/vendor/live2d/` と `ui/vendor/vrm/` の2つだけなのに、
+  `src-tauri/src/bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、
+  理由を「Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている。Moveable を Git 管理下へ
+  置く場合、**同梱物の範囲を固定するはずの設計ガードが `ui/vendor/` 配下を素通しし続ける**。
+- **やること**: [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §1 の案A（`cargo xtask setup moveable` で
+  SHA-256 ピン留め取得）／案B（Git へ直接コミット。MIT なので再配布条件は無い）から選ぶ。**案Bを推奨**。
+  案Bなら `UI_GENERATED_DIRS` の除外を `vendor/live2d` と `vendor/vrm` へ狭め、コメントを実態へ直し、
+  `docs/THIRD-PARTY-NOTICES.md` へ Moveable（MIT）を追記する。
+- **完了条件**: 採用した版・取得元 URL・SHA-256 が記録されていること。`cargo xtask build-ui` の `ui-dist/` に
+  実体が入ること。`bundle_scope` のテストが通り、コメントの説明と除外範囲が一致していること。
+- **禁止**: CDN からの読み込み（CSP が `script-src 'self'`）。`package.json` の追加。ビルドステップ前提の配布形式。
+
+## P1-6. `cargo-deny` でライセンス検査を足す
+
+- **なぜ**: 現在の監査は `cargo audit`（既知脆弱性）だけで、**ライセンスの混入検査が無い**。販売品では
+  GPL 系の紛れ込みのほうが致命的になりうる。アプリの依存は1つも増えない（開発ツール）。
+- **やること**: `deny.toml` を置いて `licenses`（MIT / Apache-2.0 / BSD 系を allow）と `advisories` を有効にし、
+  `.agents/skills/prepare-picoagent-release/SKILL.md` の販売前監査へ実行手順を1行足す。GitHub Actions は使わない。
+- **完了条件**: `cargo deny check` が通ること。落ちる依存があれば、置き換えか例外登録の理由を `docs/REVIEW-LOG.md` へ残す。
+
 ---
 
 ## 保留（条件が揃うまで着手しない）
@@ -79,6 +106,6 @@ Claudeの事後レビュー2巡（`docs/REVIEW-LOG.md` の 2026-08-13「ベー�
 | # | 内容 | 着手条件 |
 |---|---|---|
 | 1 | 配布物412MBの分離ダウンロード設計（高精細7キャラで405.6MiBを占める） | 画質を落とさない前提での設計判断。ベータの試用結果を見てから |
-| 2 | macOS版のビルド・署名・公証と実機QA | macOSホストが要る。WindowsホストとGitHub Actionsは使わない方針 |
+| 2 | macOS版のビルド・署名・公証と実機QA。**着手時は `secret.rs` の平文フォールバックを先に塞ぐ**（`keyring` で Keychain へ寄せる。`enc:dpapi:v1:` の Windows 経路と `secret::guard` の password 判定はそのまま残す） | macOSホストが要る。WindowsホストとGitHub Actionsは使わない方針。詳細は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §2-1 |
 | 3 | Windows実機の残り目視（8方向リサイズ、端寄せ位置の復元、起動画面からの復帰、多重起動時の前面化、Aivis更新導線の新旧版表示、キャラ別挨拶の文面、配信立ち絵の0.5px差） | Windows実機を触る回にまとめて |
 | 4 | Free／Pro のスキル制限とライセンス入力欄の設計見直し（`beta-full` ビルドでも入力欄が出る、`license::CONFIG_KEY` の cfg 分岐、制限の粒度） | **ベータ期間中は全機能試用で運用する方針のため着手しない。** 正式版の準備時に、制限そのものの設計から見直す |

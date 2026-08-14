@@ -20,6 +20,22 @@
 | 3 | P1 | 設定画面の数値スライダーだけでは、OBSのように見たまま配置しづらい | 対応済み | Moveableを使う独立した「配置」モードを追加し、対象選択、ドラッグ、拡大縮小、スナップ、元に戻す、保存、リセットを同じ画面へまとめた |
 | 4 | P0 | 配置操作と従来のキャラクタードラッグが競合すると、編集中にウィンドウが動く | 対応済み | 配置モード中はウィンドウドラッグ開始を抑止し、自動検査で編集ドラッグ中の開始回数0、保存後の再読込復元、リセットを確認する |
 | 5 | 確認 | 静止画だけでは体型別構図、アニメーション途中、LP同期を証明できない | 対応済み | PNG系8体×7形式の56画面、Moveableのドラッグ／拡大縮小／保存復元／リセット、麦・ひより×7形式の14操作を検査。構図変更対象16本と主要画面5本、7形式画像を再撮影し、README画像56点を開始・中間・終端で一覧確認。LPトップ／キャラ一覧を1440px・390pxで描画し、画像欠落・横はみ出し・コンソールエラー0を確認した |
+---
+
+## 2026-08-14 — 外部ライブラリ候補の棚卸し（コード変更なし）
+
+Moveable の導入に合わせて「他に入れる価値のある依存はあるか」を調べた。**コードは変更していない**（調査と資料化のみ、Linuxコンテナでのコード読み。実機確認・実測なし）。候補ごとの詳細・制約・見送り理由は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) が正本で、ここには判定だけ残す。
+
+| # | 候補・指摘 | 判定 | 理由・反映先 |
+|---|---|---|---|
+| 1 | `.gitignore` は `ui/vendor/live2d/` と `ui/vendor/vrm/` だけを無視しているのに、`bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` をディレクトリごと走査から外している。Moveable を Git 管理下へ置くと、同梱物の範囲を固定する設計ガードが `ui/vendor/` 配下を素通しし続ける | 保留 | Moveable の置き場所（取得方式／直コミット）を決めてからでないと直す形が決まらない。`CODEX-TASKS.md` P1-5 へ登録。直コミット（案B）を推奨 |
+| 2 | `secret.rs` が非 Windows で平文フォールバックする。初期販売は Windows のみで現時点の実害は無いが、この状態で macOS 版を出すと API キーが `config.json` に平文で載る | 保留 | `keyring` で Keychain へ寄せる。macOS を販売対象へ入れる回の前提条件として、保留 #2（macOS 対応）へ条件を追記した |
+| 3 | 監査が `cargo audit`（脆弱性）だけで、ライセンス混入の検査が無い | 保留 | `cargo-deny` の導入を `CODEX-TASKS.md` P1-6 へ登録。アプリの依存は増えない |
+| 4 | 位置・サイズ保存に `tauri-plugin-window-state` を入れるか | 見送り | `layout.rs` が表示形式ごとの寸法を、`lib.rs` が復元とモニタ内への丸めを既に持っている。併存させると起動順で勝ち負けが変わる不具合になる。プラグインは入れず `layout.rs` を伸ばす |
+| 5 | `markdown-it` + `DOMPurify` で自前 Markdown を置き換えるか | 見送り | 現行の `renderMarkdown` は `innerHTML` を使わず DOM を直接組んでおり、XSS 面では今のほうが安全。HTML 文字列経由は後退 |
+| 6 | `highlight.js` / Shiki によるコードハイライト | 見送り | 数百KB規模。フキダシ表示に過剰で、配布サイズを下げたい方針（P0-3）と逆行 |
+| 7 | `pixi-live2d-display` への移行 | 見送り | Cubism SDK 直接呼び出しが既に動いており、乗り換えが割に合わない |
+| 8 | `@floating-ui/dom`（フキダシ・トーストの位置決め）、BudouX（日本語の折り返し）、`streaming-markdown`、Motion、`@tanstack/virtual`、`rodio` / `symphonia`、`tauri-plugin-autostart` / `updater`、`insta`、`@pixiv/three-vrm-animation` | 保留 | いずれも実害が出ている箇所ではなく、優先度と判断材料を `LIBRARY-CANDIDATES.md` §2・§3 へ整理した。着手はMoveableの後 |
 
 ---
 
