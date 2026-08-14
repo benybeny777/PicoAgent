@@ -185,13 +185,18 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
   width:auto; height:auto; overflow:hidden; border-radius:0; background:transparent; transform:none;
 }
 .pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character-view {
-  transform:translateY(4%) scale(1.28); transform-origin:50% 0;
+  transform:none;
 }
 .pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character img {
   object-fit:contain; object-position:50% 100%; transform:none!important;
 }
+/* WebGLの内部描画寸法（285x315）は変えず、表示だけを枠いっぱいの `contain` で下端合わせに
+   する。`width/height:auto` だと canvas 固有寸法＝内部寸法×DPR になり高DPI画面で倍に出て、
+   `height:100%` だけだと縦横比を保たず横へ潰れる。どちらも避けるため object-fit で入れる。 */
 .pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character canvas {
-  width:auto!important; height:auto!important; transform:translateX(-50%)!important;
+  width:100%!important; height:100%!important;
+  object-fit:contain; object-position:50% 100%;
+  transform:translateX(-50%)!important;
 }
 .pet-app.is-booting .relationship-button,
 .pet-app.is-booting .online { display:none; }

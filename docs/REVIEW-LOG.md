@@ -17,7 +17,7 @@
 
 | # | 優先 | 指摘 | 判定 | 対応・根拠 |
 |---|---|---|---|---|
-| 1 | P0 | **Live2Dキャラの起動画面が無人になる**。`prepareBootCharacter()` は Live2D で仮画像を出さない（`src` を外す）のに、実モデル `.character` を起動画面の枠へ出す CSS が消え、`.pet-app.is-booting .character { visibility:hidden }` だけが残っていた | 対応済み | `renderer.js` が `data-boot-artwork="live2d"` を付け、`styles.css` がその場合だけ `.boot-character` を隠して `.character` を起動画面のキャラ枠へ出す。枠は新しい `.boot-character`（stage基準 `left:0; right:320px; inset 0`／狭幅 `top:6%; bottom:78px`）へ `.boot-screen` の padding 8px を足した値で、2D・寝姿キャラの表示は変えない |
+| 1 | P0 | **Live2Dキャラの起動画面が無人になる**。`prepareBootCharacter()` は Live2D で仮画像を出さない（`src` を外す）のに、実モデル `.character` を起動画面の枠へ出す CSS が消え、`.pet-app.is-booting .character { visibility:hidden }` だけが残っていた | 対応済み | `renderer.js` が `data-boot-artwork="live2d"` を付け、`styles.css` がその場合だけ `.boot-character` を隠して `.character` を起動画面のキャラ枠へ出す。枠は新しい `.boot-character`（stage基準 `left:0; right:320px; inset 0`／狭幅 `top:6%; bottom:78px`）へ `.boot-screen` の padding 8px を足した値で、2D・寝姿キャラの表示は変えない。canvas の表示寸法は #7 の実測で決めた |
 | 2 | P1 | 起動完了処理で `applyLayout(info.layout)` が `await finishBoot()` と同じ `try` にあり、`finishBoot` が失敗すると**起動用の `stream` 形式のまま**保存形式へ戻らない | 対応済み | `renderer.js`。`try` を2つに分け、通知に失敗しても保存形式を必ず当てる。失敗はそれぞれ別の警告ログにする |
 | 3 | P1 | 収納中の上端メニューが開けない。窓の上端7px（四隅16px）はリサイズ領域（`z-index:2000`）が覆っており、メニュー本体（`z-index:220`）の露出5pxはそこへ隠れる。実際に開くのは橋渡し用 `::after` の6pxだけ | 対応済み | `styles.css`。`:has()` で上辺3方向のリサイズ領域のホバー中もメニューを展開する。リサイズ操作自体は従来どおり |
 | 4 | P1 | 配布動画の巡回 `distributionStep` が経過msを `/ 24` で出したままで、撮影は30fpsへ変わっていた（状態切替が約25%早い） | 対応済み | `shoot.mjs`。`DISTRIBUTION_SCENE = { seconds: 7, fps: 30 }` を巡回計算と2つの撮影定義の両方から使う |
@@ -28,12 +28,13 @@
 
 | # | 内容 | 判定 | 理由 |
 |---|---|---|---|
-| 7 | Live2D起動画面の実表示（構図・見切れ・LIVEバッジとの重なり）を目視確認する | 保留 | 作業環境（Linuxコンテナ）に Live2D ランタイム・モデルが無く（`ui/vendor/live2d` は git 管理外、`setup live2d-samples` は条件確認のうえ手動実行）ヘッドレス撮影でも再現できない。枠は 2D 側の確定値から機械的に導いており、`.character` は `z-index:1002` で `.boot-stage::after` の LIVE バッジより前に出る（キャンバスは透過なのでバッジは透けて見える想定）。Windows実機で Live2D キャラを既定にして起動したときに確認する |
+| 7 | Live2D起動画面のキャラ枠を実画面で確認する | 対応済み | **枠の実測で当初の指定に2つの不備が見つかり、直した。** (1) `.character-view` の `scale(1.28)` で canvas が 365×403 になり枠 344×414 から左右各10px はみ出して切れる、(2) `width/height:auto` は canvas 固有寸法＝内部寸法×DPR なので高DPI画面では倍の大きさで出る。`height:100%` 単独は縦横比を保たず横へ潰れた（実測 344×414＝比0.83、本来0.905）。最終的に `width/height:100%` ＋ `object-fit:contain` ＋ `object-position:50% 100%` とし、680×430 で 344×380、狭幅440×430 で 281×310 と**縦横比のまま枠内へ収まる**ことを実測・目視で確認した。LIVEバッジ（`.boot-stage::after`）とも重ならない（バッジ下端30px < canvas上端42px）。起動ログ面（x=360〜）とも重ならない |
 | 8 | `renderReplySpeaking` から `setAnimation("talking")` が外れている | 見送り | ミュート時に口を動かさない今回の仕様（CHANGELOG・#1の口パク統一）どおりで、退行ではない |
 | 9 | `animateSpringMotion` の `const stopped = false` により到達しない分岐が残る | 見送り | 停止判定を将来足す前提の骨組みで実害が無い。物理演算の停止条件を見直すときにまとめて整理する |
 | 10 | `bodyMotion` をRust側で検証していない（JS側でクランプのみ） | 見送り | 値はキャラクターパック検証を通った `character.json` 由来で、範囲外でも表示が崩れるだけ。`character_pack.rs` へ検証を足すなら他のモーション項目とまとめて行う |
+| 11 | 起動画面での**実モデルの描画そのもの**（Cubismランタイムの読み込み、モデルの縦位置・顔の入り方、まばたき） | 保留 | この作業環境は `cubism.live2d.com` がネットワークポリシーで遮断され（CONNECT 403）、`cargo xtask setup live2d` / `live2d-samples` を実行できない。#7 は PIXI と同じ 285×315 の代用 canvas を置いて**枠・縦横比・重なりだけ**を実画面で確認したもので、モデルの絵が枠のどこへ来るかは実機確認が要る。Windows実機で Live2D キャラを既定にして起動したときに見る |
 
-検証: `node --check ui/renderer.js`、`node --check tools/screenshots/shoot.mjs`、`node --test tools/tests/voice-lipsync-contract.mjs`（3件）、`cargo xtask build-ui` / `--release`（最小化後も `:has()` と `calc(8px + 6%)` が壊れないことを `ui-dist/styles.css` で確認）、`cargo test --lib`（360件）。
+検証: `node --check ui/renderer.js`、`node --check tools/screenshots/shoot.mjs`、`node --test tools/tests/voice-lipsync-contract.mjs`（3件）、`cargo xtask build-ui` / `--release`（最小化後も `:has()`・`calc(8px + 6%)`・`object-fit` が壊れないことを `ui-dist/styles.css` で確認）、`cargo test --lib`（360件）。起動画面はヘッドレス実WebViewで 680×430（Live2D／2D）と 440×430（狭幅）を撮影し、枠・canvas寸法・重なりを実測した（使い捨てスクリプトと画像は `temp/live2d-boot-check/`）。
 
 ---
 
