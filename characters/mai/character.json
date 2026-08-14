@@ -168,7 +168,8 @@
     }
   },
   "boot": {
-    "sleeping": "boot/sleeping.png"
+    "sleeping": "boot/sleeping.png",
+    "useSleepingOnStartup": true
   },
   "frameGeneration": "37e3703c81e0bcd8"
 }

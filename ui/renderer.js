@@ -557,6 +557,20 @@ async function prepareBootCharacter(characterId) {
   const version = String(manifest.assetVersion || "");
   bootCharacterName = manifest.name || "キャラクター";
   bootPetImage.alt = `起動を待つ${bootCharacterName}`;
+  const dedicatedSleeping = manifest.boot?.useSleepingOnStartup === true
+    ? manifest.boot?.sleeping
+    : "";
+  petApp.dataset.bootArtwork = dedicatedSleeping ? "sleeping" : "idle";
+  // 寝姿を起動時にも使うのは専用原画を持つ3キャラだけ。他キャラの preview は
+  // 紹介画像や全身コラージュの場合があるため、通常表示と同じ idle 先頭フレームを使う。
+  if (dedicatedSleeping) {
+    bootPetImage.onerror = () => {
+      bootPetImage.onerror = null;
+      bootPetImage.src = "assets/characters/_preview-placeholder.png";
+    };
+    bootPetImage.src = versionedAssetUrl(`${root}/${dedicatedSleeping}`, version);
+    return;
+  }
   // Live2D の preview.jpg は配布元の紹介画像や全身コラージュの場合があり、実モデルへ
   // 切り替わる一瞬だけ別の絵に見える。Live2D は仮画像を出さず、読み込み完了した
   // 実モデルをそのまま起動画面へ出す。2Dキャラは通常表示と同じ idle 先頭フレームを使う。
@@ -725,6 +739,8 @@ function resolveLive2dConfig(manifest, variant) {
 
 let activeSpringMotion = [];
 let springLastAt = 0;
+let activeBodyMotion = null;
+let springRenderingPaused = true;
 
 function syncSpringMotionFrame() {
   if (!activeSpringMotion.length || live2dActive) return;
@@ -744,6 +760,8 @@ function configureSpringMotion(config, legacyConfig = null) {
   if (!characterSpringMotion) return;
   characterSpringMotion.replaceChildren();
   activeSpringMotion = [];
+  activeBodyMotion = null;
+  characterView?.style.removeProperty("--body-breathe-y");
   const legacy = legacyConfig?.type === "bust" ? [{
     id: "bust", centerX: legacyConfig.centerX, centerY: legacyConfig.centerY,
     radiusX: legacyConfig.radiusX, radiusY: legacyConfig.radiusY,
@@ -754,6 +772,14 @@ function configureSpringMotion(config, legacyConfig = null) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
   };
+  const bodyMotion = config?.bodyMotion;
+  if (bodyMotion && typeof bodyMotion === "object") {
+    activeBodyMotion = {
+      amplitudeY: clamp(bodyMotion.amplitudeY, 0, 4, 1.2),
+      frequency: clamp(bodyMotion.frequency, 0.08, 0.8, 0.18),
+      phase: clamp(bodyMotion.phase, -6.3, 6.3, 0),
+    };
+  }
   regions.slice(0, 12).forEach((region, index) => {
     const layer = document.createElement("div");
     layer.className = "character-spring-region";
@@ -761,10 +787,26 @@ function configureSpringMotion(config, legacyConfig = null) {
     layer.style.setProperty("--spring-center-y", `${clamp(region.centerY, 0, 100, 34)}%`);
     layer.style.setProperty("--spring-radius-x", `${clamp(region.radiusX, 3, 48, 16)}%`);
     layer.style.setProperty("--spring-radius-y", `${clamp(region.radiusY, 3, 42, 10)}%`);
+    const centerX = clamp(region.centerX, 0, 100, 50);
+    const centerY = clamp(region.centerY, 0, 100, 34);
+    const radiusX = clamp(region.radiusX, 3, 48, 16);
+    const radiusY = clamp(region.radiusY, 3, 42, 10);
+    layer.style.left = `${centerX - radiusX}%`;
+    layer.style.top = `${centerY - radiusY}%`;
+    layer.style.width = `${radiusX * 2}%`;
+    layer.style.height = `${radiusY * 2}%`;
+    const inferredLayer = String(region.id || "").startsWith("hair-") ? 4
+      : String(region.id || "").startsWith("bust-") ? 3
+        : String(region.id || "").startsWith("shoulder-") ? 2 : 1;
+    layer.style.zIndex = String(clamp(region.zIndex, 1, 8, inferredLayer));
     const sprite = document.createElement("img");
     sprite.alt = "";
     sprite.draggable = false;
     sprite.setAttribute("data-tauri-drag-region", "");
+    sprite.style.left = `${-((centerX - radiusX) / (radiusX * 2)) * 100}%`;
+    sprite.style.top = `${-((centerY - radiusY) / (radiusY * 2)) * 100}%`;
+    sprite.style.width = `${10000 / (radiusX * 2)}%`;
+    sprite.style.height = `${10000 / (radiusY * 2)}%`;
     layer.append(sprite);
     characterSpringMotion.append(layer);
     activeSpringMotion.push({
@@ -774,21 +816,52 @@ function configureSpringMotion(config, legacyConfig = null) {
       drive: clamp(region.drive, 0.05, 2.4, 0.45),
       frequency: clamp(region.frequency, 0.08, 1.2, 0.24),
       phase: clamp(region.phase, -6.3, 6.3, index * 0.7),
-      axisX: clamp(region.axisX, -1, 1, 0),
-      axisY: clamp(region.axisY, -1, 1, -1),
-      rotation: clamp(region.rotation, -2, 2, 0),
-      scale: clamp(region.scale, 0, 0.012, 0.0025),
+      // The axis values are pixel multipliers for the spring displacement.
+      // Keeping them within +/-1 made soft-body regions move less than one
+      // visible pixel even on a Full HD stream canvas.
+      axisX: clamp(region.axisX, -8, 8, 0),
+      axisY: clamp(region.axisY, -8, 8, -1),
+      rotation: clamp(region.rotation, -6, 6, 0),
+      scale: clamp(region.scale, 0, 0.03, 0.0025),
     });
   });
   springLastAt = 0;
+  springRenderingPaused = true;
   updateSpringMotionVisibility();
 }
 
 function animateSpringMotion(now) {
   if (!activeSpringMotion.length || live2dActive) return;
+  const layout = petApp.dataset.layout || "pet";
+  const shouldRender = !reduceMotion
+    && !document.hidden
+    && !petApp.classList.contains("is-booting")
+    && layout !== "chat"
+    && layout !== "bar";
+  if (!shouldRender) {
+    if (!springRenderingPaused) {
+      for (const spring of activeSpringMotion) {
+        spring.position = 0;
+        spring.velocity = 0;
+        spring.sprite.style.transform = "none";
+      }
+      characterView?.style.setProperty("--body-breathe-y", "0px");
+    }
+    springRenderingPaused = true;
+    springLastAt = 0;
+    return;
+  }
+  springRenderingPaused = false;
+  if (springLastAt && now - springLastAt < 1000 / 30) return;
   const dt = springLastAt ? Math.min(1 / 30, Math.max(1 / 240, (now - springLastAt) / 1000)) : 1 / 60;
   springLastAt = now;
-  const stopped = reduceMotion;
+  const stopped = false;
+  if (activeBodyMotion && characterView) {
+    const bodyY = stopped ? 0 : Math.sin(
+      (now / 1000) * Math.PI * 2 * activeBodyMotion.frequency + activeBodyMotion.phase,
+    ) * activeBodyMotion.amplitudeY;
+    characterView.style.setProperty("--body-breathe-y", `${bodyY.toFixed(3)}px`);
+  }
   for (const spring of activeSpringMotion) {
     const target = stopped ? 0 : Math.sin((now / 1000) * Math.PI * 2 * spring.frequency + spring.phase) * spring.drive;
     const acceleration = (target - spring.position) * spring.stiffness - spring.velocity * spring.damping;
@@ -925,11 +998,10 @@ function setAnimation(name, force = false) {
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
-  // layers を持つキャラは待機・返答状態を常時リグ描画にする。返答中はミュートでも
-  // タイマー式の口パクを開始し、音声出力の有無で見た目が止まらないようにする。
+  // layers を持つキャラは待機・返答状態を常時リグ描画にする。
+  // 口パクは Audio の playing 後にだけ attachLipSync() から開始する。
   if (rigAvailable && (animationName === "idle" || animationName === "talking")) {
     startRig();
-    if (animationName === "talking" && !currentVoice) startSilentLipSync();
     return;
   }
   stopRig();
@@ -987,21 +1059,6 @@ let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
-
-function startSilentLipSync() {
-  if (!rigActive || animationName !== "talking" || currentVoice || rigMouthTimer) return;
-  rigMouthTimer = setInterval(() => {
-    if (!rigActive || animationName !== "talking" || currentVoice) {
-      clearInterval(rigMouthTimer);
-      rigMouthTimer = 0;
-      rigMouthOpen = false;
-      rigRefresh();
-      return;
-    }
-    rigMouthOpen = !rigMouthOpen;
-    rigRefresh();
-  }, 150);
-}
 
 function layerUrl(name) {
   const url = `${characterRoot}/layers/${name}.png`;
@@ -1114,17 +1171,34 @@ function detachLipSyncAudio() {
 // 起動直後の挨拶や読み込み中に届いた返答が、口の動かないまま読み上げられていた。
 let pendingLipSyncAudio = null;
 
+// リップシンクの正本。読み上げ無効（ミュート）・音量0・再生前/停止後は、
+// 2D / Live2D / タイマーフォールバックのどの経路でも口を動かさない。
+function shouldLipSync(audio) {
+  return Boolean(
+    audio
+    && audio === currentVoice
+    && ttsEnabledCache !== false
+    && voiceVolume > 0.001
+    && !audio.paused
+    && !audio.ended
+  );
+}
+
 function retryPendingLipSync() {
   const audio = pendingLipSyncAudio;
   if (!audio) return;
   pendingLipSyncAudio = null;
-  if (audio !== currentVoice || audio.paused || audio.ended) return;
+  if (!shouldLipSync(audio)) return;
   attachLipSync(audio);
 }
 
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
+  if (!shouldLipSync(audio)) {
+    detachLipSyncAudio();
+    return;
+  }
   if (!rigAvailable && !live2dActive) {
     logApp("info", "リップシンクを保留しました", "キャラクターの表示準備が終わってから接続します");
     pendingLipSyncAudio = audio;
@@ -1154,6 +1228,12 @@ function attachLipSync(audio) {
   }
   if (useTimer) {
     rigMouthTimer = setInterval(() => {
+      if (voiceVolume <= 0.001) {
+        rigMouthOpen = false;
+        live2dMouth = 0;
+        rigRefresh();
+        return;
+      }
       rigMouthOpen = !rigMouthOpen;
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
@@ -1184,7 +1264,7 @@ function attachLipSync(audio) {
     // 少し遅い包絡線にして、音節へ追従しつつフレーム間の細かな揺れを吸収する。
     const floor = peak * 0.22;
     const span = Math.max(peak * 0.72, 0.001);
-    const target = Math.max(0, Math.min(1, (rms - floor) / span));
+    const target = voiceVolume <= 0.001 ? 0 : Math.max(0, Math.min(1, (rms - floor) / span));
     const desired = Math.min(0.78, target * 0.78);
     const smoothing = desired > rigMouthLevel ? 0.34 : 0.16;
     rigMouthLevel += (desired - rigMouthLevel) * smoothing;
@@ -2140,6 +2220,16 @@ function playPreparedSpeech(result) {
     logApp("error", "音声データの読み込みに失敗しました", audioError);
     status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗: 音声データを読み込めません";
   }, { once: true });
+  audio.addEventListener("playing", () => {
+    if (currentVoice !== audio) return;
+    status.textContent = "読み上げ中…";
+    if (!shouldLipSync(audio)) {
+      setAnimation("idle", true);
+      return;
+    }
+    setAnimation("talking", true);
+    attachLipSync(audio);
+  }, { once: true });
   audio.play().catch(error => {
     finishVoice(true, audio);
     logApp("error", "音声再生に失敗しました", errorDetail(error));
@@ -2147,9 +2237,7 @@ function playPreparedSpeech(result) {
       status.textContent = `音声再生に失敗: ${error?.message || error || "再生がブロックされました"}`;
     }
   });
-  status.textContent = "読み上げ中…";
-  setAnimation("talking", true);
-  attachLipSync(audio);
+  status.textContent = "音声再生準備中…";
 }
 // 起動時の挨拶を組み立てる。キャラ固定挨拶と日次の時刻挨拶で「挨拶語」が二重にならないようまとめる。
 // - 固定挨拶が時刻挨拶語（おはよう/こんにちは/こんばんは等）で始まる場合: 時刻に合った挨拶語を1回だけ使い、
@@ -2233,13 +2321,21 @@ function playChunkAndWait(result, session) {
       logApp("error", "音声データの読み込みに失敗しました", audio.error?.message || "");
       cleanup();
     }, { once: true });
+    audio.addEventListener("playing", () => {
+      if (session !== voiceSession || currentVoice !== audio) return;
+      status.textContent = "読み上げ中…";
+      if (!shouldLipSync(audio)) {
+        setAnimation("idle", true);
+        return;
+      }
+      setAnimation("talking", true);
+      attachLipSync(audio);
+    }, { once: true });
     audio.play().catch(error => {
       logApp("error", "音声再生に失敗しました", errorDetail(error));
       cleanup();
     });
-    status.textContent = "読み上げ中…";
-    setAnimation("talking", true);
-    attachLipSync(audio);
+    status.textContent = "音声再生準備中…";
   });
 }
 async function speakReply(text) {
@@ -2431,7 +2527,6 @@ async function renderReplySpeaking(text) {
   const token = ++speakingToken;
   const source = String(text ?? "");
   const chars = [...source];
-  setAnimation("talking", true);
   const stepMs = chars.length > 180 ? 14 : 22;
   // 生の Markdown 記号を見せないよう、部分テキストを都度 Markdown 描画する
   // （rAF スロットルで1フレーム1回に抑える）。
@@ -4195,6 +4290,18 @@ function applyVoiceVolume(value) {
   if (!Number.isFinite(n)) return;
   voiceVolume = Math.min(1, Math.max(0, n / 100));
   if (currentVoice) currentVoice.volume = voiceVolume;
+  if (voiceVolume <= 0.001) {
+    rigMouthLevel = 0;
+    rigMouthOpen = false;
+    live2dMouth = 0;
+    rigRefresh();
+    if (animationName === "talking") setAnimation("idle", true);
+    return;
+  }
+  if (shouldLipSync(currentVoice)) {
+    setAnimation("talking", true);
+    if (!rigAnalyser && !rigMouthTimer) attachLipSync(currentVoice);
+  }
 }
 function applyTheme(value) {
   const theme = value === "light" || value === "dark" ? value : "system";
@@ -4313,7 +4420,7 @@ window.picoagent.on("pet:ui", (ui) => {
   if (ui.streamBackground != null) applyStreamAppearance(ui.streamBackground, ui.streamBackgroundImage, ui.streamDisplay, ui.streamDisplayImage, ui.streamCaptionColor);
   if (ui.ttsEnabled != null) {
     ttsEnabledCache = ui.ttsEnabled !== false;
-    if (!ttsEnabledCache) stopVoice(false);
+    if (!ttsEnabledCache) stopVoice(true);
   }
   if (ui.characterOffsetX != null) applyCharacterOffset(ui.characterOffsetX, ui.characterOffsetY);
   if (ui.layout != null) applyLayout(ui.layout);
@@ -4571,7 +4678,7 @@ async function fireAlarm(a) {
   renderAlarmReply(line);
   addHistory("assistant", line);
   if (prepared) playPreparedSpeech(prepared);
-  else setAnimation("talking", true);
+  else if (animationName === "talking") setAnimation("idle");
   armAlarmSnooze(a);
 }
 function startAlarmPolling() {
@@ -4601,7 +4708,9 @@ function startAlarmPolling() {
   ttsEnabledCache = info.ttsEnabled !== false;
   applyCharacterOffset(info.characterOffsetX, info.characterOffsetY, { clamp: false });
   savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };
-  applyLayout(info.layout);
+  // 起動準備中だけは保存中の形式に関係なく、小型の配信レイアウトを見せる。
+  // finishBoot 後にバックエンドの pet:layout イベントで保存形式へ戻る。
+  applyLayout("stream");
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
@@ -4658,7 +4767,12 @@ function startAlarmPolling() {
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    try { await window.picoagent.finishBoot(); }
+    try {
+      await window.picoagent.finishBoot();
+      // 実アプリはpet:layoutイベントでも戻るが、イベント配送の遅延や撮影モックに依存せず、
+      // 起動用streamを確実に終了させる。保存形式がstreamなら同じ値を再適用するだけ。
+      applyLayout(info.layout);
+    }
     catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
     petApp.classList.remove("is-booting");
     stopBootLogTicker();

@@ -10,10 +10,10 @@
   <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
     <span class="beta-badge" aria-label="ベータ版" hidden>BETA</span>
     <section id="bootScreen" class="boot-screen" aria-live="polite" data-tauri-drag-region>
-      <div class="boot-stage">
+      <div class="boot-stage" data-tauri-drag-region>
         <div id="bootLog" class="boot-log" aria-label="起動ログ"></div>
-        <div class="boot-character">
-          <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" />
+        <div class="boot-character" data-tauri-drag-region>
+          <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" data-tauri-drag-region />
           <span class="boot-shadow" aria-hidden="true"></span>
         </div>
         <div class="boot-progress" aria-hidden="true"><span></span></div>
@@ -145,28 +145,36 @@
     <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
       <div class="drop-overlay-inner">📎 ここにドロップして添付</div>
     </div>
-    <button id="layoutEditToggle" class="layout-edit-toggle" type="button" aria-pressed="false" title="OBS風に画面を編集">配置</button>
-    <section id="layoutEditorToolbar" class="layout-editor-toolbar" aria-label="レイアウト編集" hidden>
-      <strong>レイアウト編集</strong>
-      <label>対象
-        <select id="layoutEditorTarget">
-          <option value="character">キャラクター</option>
-          <option value="bubble">会話パネル</option>
-          <option value="reply">字幕</option>
-          <option value="history">配信チャット</option>
-          <option value="display">配信表示</option>
-        </select>
-      </label>
-      <button id="layoutEditorUndo" type="button">元に戻す</button>
-      <button id="layoutEditorSave" type="button">保存</button>
-      <button id="layoutEditorReset" type="button">既定へ戻す</button>
-      <button id="layoutEditorClose" type="button">閉じる</button>
-    </section>
+    <nav id="topWindowMenu" class="top-window-menu" aria-label="PicoAgent メニュー">
+      <span class="top-window-menu-brand" data-tauri-drag-region>PicoAgent</span>
+      <button type="button" data-settings-tab="display">表示</button>
+      <button id="layoutEditToggle" class="layout-edit-toggle" type="button" aria-pressed="false" title="OBS風に画面を編集">配置</button>
+      <button type="button" data-settings-tab="character">キャラ・音声</button>
+      <button type="button" data-settings-tab="">設定</button>
+      <span class="top-window-menu-drag" data-tauri-drag-region aria-hidden="true"></span>
+      <section id="layoutEditorToolbar" class="layout-editor-toolbar" aria-label="レイアウト編集" hidden>
+        <strong>レイアウト編集</strong>
+        <label>対象
+          <select id="layoutEditorTarget">
+            <option value="character">キャラクター</option>
+            <option value="bubble">会話パネル</option>
+            <option value="reply">字幕</option>
+            <option value="history">配信チャット</option>
+            <option value="display">配信表示</option>
+          </select>
+        </label>
+        <button id="layoutEditorUndo" type="button">元に戻す</button>
+        <button id="layoutEditorSave" type="button">保存</button>
+        <button id="layoutEditorReset" type="button">既定へ戻す</button>
+        <button id="layoutEditorClose" type="button">閉じる</button>
+      </section>
+    </nav>
   </main>
   <script src="vendor/moveable/moveable.min.js"></script>
   <script src="picoagent.js"></script>
   <script src="common.js"></script>
   <script src="renderer.js"></script>
+  <script src="top-menu.js"></script>
   <script src="layout-editor.js"></script>
 </body>
 </html>

@@ -411,6 +411,21 @@ pub fn validate_spring_physics(manifest: &Value, label: &str) -> Result<()> {
                 );
             }
         }
+        for (key, minimum, maximum) in [
+            ("axisX", -8.0, 8.0),
+            ("axisY", -8.0, 8.0),
+            ("rotation", -6.0, 6.0),
+            ("scale", 0.0, 0.03),
+        ] {
+            let Some(value) = region.get(key).and_then(Value::as_f64) else {
+                continue;
+            };
+            if !(minimum..=maximum).contains(&value) {
+                bail!(
+                    "{label}.regions[{index}].{key} は {minimum} 以上 {maximum} 以下にしてください"
+                );
+            }
+        }
     }
     Ok(())
 }

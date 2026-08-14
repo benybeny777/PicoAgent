@@ -135,6 +135,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character-view {
   position:absolute; inset:0; display:block;
   transform:translate(var(--char-x,0px), var(--char-y,0px)) scale(var(--char-zoom,1.55));
+  translate:0 var(--body-breathe-y,0px);
   transform-origin:50% 0%; will-change:transform;
 }
 .character-view > img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%; }
@@ -144,57 +145,48 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 }
 .character-spring-motion[hidden] { display:none!important; }
 .character-spring-region {
-  position:absolute; inset:0; z-index:1; overflow:hidden; pointer-events:none;
-  -webkit-mask-image:radial-gradient(ellipse var(--spring-radius-x,19%) var(--spring-radius-y,12%) at var(--spring-center-x,50%) var(--spring-center-y,34%),#000 12%,rgba(0,0,0,.76) 40%,rgba(0,0,0,.32) 67%,rgba(0,0,0,.08) 84%,transparent 100%);
-  mask-image:radial-gradient(ellipse var(--spring-radius-x,19%) var(--spring-radius-y,12%) at var(--spring-center-x,50%) var(--spring-center-y,34%),#000 12%,rgba(0,0,0,.76) 40%,rgba(0,0,0,.32) 67%,rgba(0,0,0,.08) 84%,transparent 100%);
+  position:absolute; z-index:1; overflow:hidden; pointer-events:none; contain:strict;
+  -webkit-mask-image:radial-gradient(ellipse 50% 50% at 50% 50%,#000 12%,rgba(0,0,0,.76) 40%,rgba(0,0,0,.32) 67%,rgba(0,0,0,.08) 84%,transparent 100%);
+  mask-image:radial-gradient(ellipse 50% 50% at 50% 50%,#000 12%,rgba(0,0,0,.76) 40%,rgba(0,0,0,.32) 67%,rgba(0,0,0,.08) 84%,transparent 100%);
 }
 .character-spring-region > img {
-  position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%;
+  position:absolute; max-width:none; max-height:none; object-fit:contain; object-position:50% 100%;
   transform-origin:var(--spring-center-x,50%) var(--spring-center-y,34%);
-  will-change:transform;
 }
-/* 起動直後（音声エンジン準備待ち）は通常のキャラ・フキダシを隠し、待機画面だけを見せる。
-   準備完了で is-booting を外し、その瞬間に挨拶を再生する。 */
-.boot-screen { position:absolute; inset:0; z-index:1000; padding:10px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; overflow:hidden; }
+/* 起動直後は通常の「配信」画面を680x430へ縮めた構図を使う。右側を起動ログ、左側を
+   キャラクターと字幕にして、専用の別レイアウトへ見えないようにする。背景からドラッグできる。 */
+.boot-screen { position:absolute; inset:0; z-index:1000; padding:8px; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .28s ease; overflow:hidden; }
 .pet-app.is-booting .boot-screen { visibility:visible; opacity:1; pointer-events:auto; }
 .pet-app.is-booting .bubble,
 .pet-app.is-booting .character { visibility:hidden; }
-.boot-stage { position:relative; box-sizing:border-box; width:100%; height:100%; min-height:0; border:1px solid var(--boot-stage-border); border-radius:18px; background:linear-gradient(155deg,#302944 0%,#51405f 58%,#76576e 100%); box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),0 12px 28px rgba(42,31,46,.18); overflow:hidden; }
-.boot-stage::before { content:""; position:absolute; left:2%; top:3%; width:62%; height:82%; border-radius:50%; background:radial-gradient(circle,rgba(255,220,232,.24),rgba(198,174,226,.1) 48%,transparent 72%); filter:blur(5px); animation:boot-shadow 4.2s ease-in-out infinite; }
-.boot-stage::after { content:"● 起動中…"; position:absolute; z-index:4; left:16px; top:14px; padding:8px 16px; border:2px solid rgba(255,255,255,.88); border-radius:999px; background:linear-gradient(135deg,#e64f6a,#c42f55); color:#fff; box-shadow:0 0 0 4px rgba(242,126,145,.2),0 7px 20px rgba(24,10,30,.36); font-size:15px; font-weight:900; letter-spacing:.08em; text-shadow:0 1px 2px rgba(64,10,28,.5); animation:boot-badge-pulse 1.35s ease-in-out infinite; }
-.boot-character { position:absolute; z-index:2; left:1%; right:35%; top:3%; bottom:42px; display:grid; place-items:end center; transform-origin:48% 70%; animation:boot-sleep 4.2s ease-in-out infinite; }
-.boot-character img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; object-position:50% 100%; transform:translateY(2%) scale(1.3); transform-origin:50% 0; filter:drop-shadow(0 7px 5px rgba(20,12,28,.3)); pointer-events:none; }
+.boot-stage { position:relative; box-sizing:border-box; width:100%; height:100%; min-height:0; overflow:hidden; border-radius:12px; }
+/* 配信のチャット列と同じ幅・質感の起動ログ面。 */
+.boot-stage::before { content:""; position:absolute; z-index:0; right:0; top:0; bottom:0; width:312px; border:1px solid var(--panel-border); border-radius:13px; background:var(--panel-bg); box-shadow:0 8px 28px rgba(35,25,42,.16); }
+.boot-stage::after { content:"● LIVE  起動中"; position:absolute; z-index:4; left:6px; top:6px; padding:6px 11px; border:1px solid rgba(255,255,255,.7); border-radius:12px; background:rgba(43,35,54,.72); color:#fff; box-shadow:0 5px 18px rgba(31,23,42,.18); font-size:11px; font-weight:900; letter-spacing:.08em; backdrop-filter:blur(10px); animation:boot-badge-pulse 1.35s ease-in-out infinite; }
+.boot-character { position:absolute; z-index:2; left:0; right:320px; top:0; bottom:0; display:grid; place-items:end center; transform-origin:52% 80%; animation:boot-sleep 4.2s ease-in-out infinite; }
+.boot-character img { position:relative; z-index:2; width:100%; height:100%; object-fit:contain; object-position:50% 100%; transform:translate(10%,4%) scale(1.28); transform-origin:50% 100%; filter:drop-shadow(0 7px 5px rgba(20,12,28,.3)); pointer-events:none; }
+.pet-app.is-booting[data-boot-artwork="sleeping"] .boot-character img { transform:translate(5%,3%) scale(1.18); }
 /* 選択中キャラクターの画像が決まるまでは出さない（既定キャラが一瞬映るのを防ぐ）。 */
 .boot-character img:not([src]) { visibility:hidden; }
-.boot-shadow { position:absolute; z-index:1; left:30px; right:30px; bottom:28px; height:18px; border-radius:50%; background:rgba(72,53,82,.16); filter:blur(5px); }
-.boot-progress { position:absolute; z-index:4; left:14px; right:37%; bottom:52px; height:4px; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.15); }
+.boot-shadow { position:absolute; z-index:1; left:44px; right:34px; bottom:12px; height:18px; border-radius:50%; background:rgba(36,26,45,.22); filter:blur(5px); }
+.boot-progress { position:absolute; z-index:4; right:12px; bottom:58px; width:288px; height:4px; overflow:hidden; border-radius:999px; background:rgba(102,86,109,.18); }
 .boot-progress span { position:absolute; top:0; bottom:0; width:42%; border-radius:999px; background:linear-gradient(90deg,#f27e91,#64c99b); animation:boot-progress 1.55s ease-in-out infinite; }
-.boot-status { position:absolute; z-index:4; left:14px; right:37%; bottom:14px; min-height:20px; padding:7px 10px; border-radius:9px; background:rgba(30,22,39,.78); color:#fff; font-size:11px; line-height:1.45; text-align:left; word-break:keep-all; overflow-wrap:anywhere; box-shadow:0 5px 16px rgba(0,0,0,.22); }
-.boot-log { position:absolute; z-index:3; right:12px; top:48px; bottom:14px; width:31%; box-sizing:border-box; overflow:hidden; pointer-events:none; display:flex; flex-direction:column; justify-content:flex-end; gap:7px; padding:10px; border:1px solid rgba(255,255,255,.12); border-radius:12px; background:rgba(27,22,38,.48); color:#fff; font:700 11px/1.45 Consolas,"Yu Gothic UI",monospace; text-align:left; }
+.boot-status { position:absolute; z-index:4; right:12px; bottom:12px; width:288px; box-sizing:border-box; min-height:36px; padding:8px 10px; border-radius:9px; background:rgba(90,66,84,.92); color:#fff; font-size:11px; line-height:1.45; text-align:left; word-break:keep-all; overflow-wrap:anywhere; box-shadow:0 5px 16px rgba(0,0,0,.18); }
+.boot-log { position:absolute; z-index:3; right:8px; top:8px; bottom:70px; width:304px; box-sizing:border-box; overflow:hidden; pointer-events:none; display:flex; flex-direction:column; justify-content:flex-end; gap:7px; padding:12px; color:var(--text); font:700 11px/1.45 Consolas,"Yu Gothic UI",monospace; text-align:left; }
 .boot-log-line { position:static; flex:0 0 auto; padding:6px 8px; border-radius:8px; white-space:normal; overflow-wrap:anywhere; opacity:.92; background:var(--log-line-bg); box-shadow:0 1px 8px rgba(42,31,46,.1); text-shadow:0 1px 0 var(--log-line-glow); animation:boot-log-in .28s ease-out both; }
 .boot-log-line.boot-kind-status { color:var(--log-status); }
 .boot-log-line.boot-kind-system { color:var(--log-system); }
 .boot-log-line.boot-kind-trace { color:var(--log-trace); }
-.pet-app.is-booting.boot-character-ready .boot-character { display:none; }
-.pet-app.is-booting.boot-character-ready .character {
-  visibility:visible; z-index:1002; left:1%; right:35%; top:12px; bottom:48px;
-  width:auto; height:auto; overflow:hidden; border-radius:0; background:transparent; transform:none;
-}
-.pet-app.is-booting.boot-character-ready .character-view { transform:translateY(2%) scale(1.3); transform-origin:50% 0; }
-.pet-app.is-booting.boot-character-ready .character img {
-  object-fit:contain; object-position:50% 100%; transform:none!important;
-}
-.pet-app.is-booting.boot-character-ready .character canvas {
-  width:auto!important; height:auto!important; transform:translateX(-50%)!important;
-}
+.pet-app.is-booting.boot-character-ready .boot-character { display:grid; }
+.pet-app.is-booting.boot-character-ready .character { visibility:hidden; }
 .pet-app.is-booting .relationship-button,
 .pet-app.is-booting .online { display:none; }
 @media (max-width:460px) {
+  .boot-stage::before { display:none; }
   .boot-character { left:0; right:0; top:6%; bottom:78px; }
   .boot-log { display:none; }
-  .boot-progress { right:12px; bottom:58px; }
-  .boot-status { right:12px; bottom:14px; }
-  .pet-app.is-booting.boot-character-ready .character { left:0; right:0; top:8%; bottom:86px; }
+  .boot-progress { left:12px; right:12px; width:auto; bottom:58px; }
+  .boot-status { left:12px; right:12px; width:auto; bottom:14px; }
 }
 .character-view::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; will-change:transform; }
@@ -235,27 +227,43 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes boot-badge-pulse { 0%,100%{transform:scale(1); filter:brightness(1)} 50%{transform:scale(1.06); filter:brightness(1.16)} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
-.layout-edit-toggle {
-  position:fixed; z-index:60; left:10px; bottom:10px; width:auto; min-width:58px; height:34px;
-  padding:0 12px; border:1px solid rgba(255,255,255,.8); border-radius:10px;
-  background:rgba(67,52,76,.88); color:#fff; box-shadow:0 5px 18px rgba(31,22,36,.22);
-  font-size:12px; font-weight:800;
+.top-window-menu {
+  position:fixed; z-index:220; top:0; left:0; right:0; min-height:32px; display:flex; align-items:center;
+  padding:3px 6px; border-bottom:1px solid rgba(74,70,82,.34);
+  background:rgba(246,246,248,.96); color:#25232a; box-shadow:0 4px 14px rgba(28,24,34,.16);
+  transform:translateY(calc(-100% + 5px)); opacity:.08;
+  transition:transform .16s ease,opacity .16s ease; backdrop-filter:blur(12px);
 }
-.pet-app.is-booting .layout-edit-toggle { display:none; }
-.layout-edit-toggle[aria-pressed="true"] { background:#c65f78; }
+.top-window-menu::after { content:""; position:absolute; top:100%; left:0; right:0; height:8px; }
+.top-window-menu:hover,.top-window-menu:focus-within,.pet-app.is-layout-editing .top-window-menu {
+  transform:translateY(0); opacity:1;
+}
+.top-window-menu-brand { flex:0 0 auto; padding:0 10px 0 6px; font-size:11px; font-weight:700; color:#66616c; }
+.top-window-menu-drag { min-width:18px; height:26px; flex:1 1 auto; }
+.top-window-menu > button,.layout-edit-toggle {
+  position:static; width:auto; min-width:0; height:26px; padding:0 10px; border:0; border-radius:3px;
+  background:transparent; color:inherit; box-shadow:none; font-size:12px; font-weight:400;
+}
+.top-window-menu > button:hover,.top-window-menu > button:focus-visible { background:rgba(0,0,0,.08); outline:none; }
+.pet-app.is-booting .top-window-menu { display:none; }
+.layout-edit-toggle[aria-pressed="true"] { background:#d96e86; color:#fff; }
+html[data-theme="dark"] .top-window-menu { border-color:rgba(255,255,255,.16); background:rgba(39,36,44,.96); color:#f1edf4; }
+html[data-theme="dark"] .top-window-menu-brand { color:#bbb3c1; }
+html[data-theme="dark"] .top-window-menu > button:hover,
+html[data-theme="dark"] .top-window-menu > button:focus-visible { background:rgba(255,255,255,.1); }
 .layout-editor-toolbar {
-  position:fixed; z-index:70; left:78px; bottom:10px; display:flex; flex-wrap:wrap; align-items:center; gap:7px;
-  max-width:calc(100vw - 96px); padding:8px 10px; border:1px solid rgba(255,255,255,.82);
-  border-radius:12px; background:rgba(47,36,55,.94); color:#fff;
-  box-shadow:0 8px 28px rgba(25,18,31,.28); font-size:12px;
+  position:static; z-index:auto; display:flex; flex:0 1 auto; flex-wrap:wrap; align-items:center; gap:6px;
+  max-width:min(720px,calc(100vw - 270px)); margin-left:5px; padding-left:9px;
+  border:0; border-left:1px solid rgba(74,70,82,.3); border-radius:0; background:transparent; color:inherit;
+  box-shadow:none; font-size:11px;
 }
 .layout-editor-toolbar[hidden] { display:none; }
 .layout-editor-toolbar strong { white-space:nowrap; }
 .layout-editor-toolbar label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
 .layout-editor-toolbar select,
 .layout-editor-toolbar button { height:30px; padding:0 9px; border:0; border-radius:8px; font-size:11px; }
-.layout-editor-toolbar select { min-width:116px; background:#fff; color:#302537; }
-.layout-editor-toolbar button { position:static; background:#f58da2; color:#fff; font-weight:700; }
+.layout-editor-toolbar select { min-width:108px; border:1px solid #b8b4bc; background:#fff; color:#302537; }
+.layout-editor-toolbar button { position:static; background:#e7e5e9; color:#302d35; font-weight:600; }
 .layout-editor-toolbar #layoutEditorSave { background:#64a98a; }
 .pet-app.is-layout-editing [data-layout-editor-source="true"] { cursor:move; outline:1px dashed rgba(246,111,139,.78); outline-offset:2px; }
 .pet-app.is-layout-editing .character { transition:none; }

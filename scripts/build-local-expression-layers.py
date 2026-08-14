@@ -60,16 +60,18 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     eye_mask = feathered_mask(base.size, EYE_BOXES)
     mouth_mask = feathered_mask(base.size, (MOUTH_BOX,))
+    happy = composite_local(base, mouth, mouth_mask)
+    happy = composite_local(happy, blink, eye_mask, 0.32)
     layers = {
         "base.png": base,
         "mouth_closed.png": base,
         "blink_half.png": composite_local(base, blink, eye_mask, 0.46),
         "blink_closed.png": composite_local(base, blink, eye_mask),
-        "mouth_open.png": composite_local(base, mouth, mouth_mask, 0.82),
+        "mouth_open.png": composite_local(base, mouth, mouth_mask),
         "gaze_left.png": gaze_layer(base, -4),
         "gaze_right.png": gaze_layer(base, 4),
-        "expression_happy.png": base,
-        "expression_sad.png": composite_local(base, blink, eye_mask, 0.28),
+        "expression_happy.png": happy,
+        "expression_sad.png": composite_local(base, blink, eye_mask, 0.58),
     }
     for name, layer in layers.items():
         layer.save(args.output / name, optimize=True)

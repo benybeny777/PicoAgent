@@ -22,7 +22,7 @@ description: PicoAgentの画面崩れ、ドラッグ、最大化、キャラ位�
 ## 検証する
 
 - PNGは`SHOOT_CHARACTER_MATRIX=1`、操作は`SHOOT_INTERACTION_MATRIX=1`、Live2Dは`SHOOT_LIVE2D_MATRIX=1`を使い、必要ならIDで対象を絞る。
-- 代表レイアウトだけで済ませず、変更に関係する8形式を確認する。
+- 代表レイアウトだけで済ませず、変更に関係する現行7形式を確認する。
 - スクリーンショットを実際に開き、キャラの鮮明さ、切れ、左右位置、前後関係、操作部品を目視する。
 - 一時画像・結果は`temp/`だけへ置き、成果物のREADME WebPだけを`docs/images/`へ出す。
 

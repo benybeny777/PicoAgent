@@ -11,6 +11,26 @@
 
 ---
 
+## 2026-08-15 — 起動画面・音声同期・物理演算・公開動画の最終レビュー
+
+対象: `ui/`、`src-tauri/src/commands.rs`、`characters/photoreal-prototype/`、`tools/screenshots/`、`tools/video-gallery/`、`docs/images/`、`distribution/site/`。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P0 | 音声より先に口パクし、以前のミュート仕様修正が退行している | 対応済み | 口パク開始を `Audio.playing` 後へ限定し、読み上げ無効・ミュート・音量0を共通判定にした。契約テスト3件と操作マトリクスのreduced-motion／ミュート検査に成功 |
+| 2 | P0 | 起動完了後も配信形式のまま残り、起動画面のキャラ下へ進捗バーが重なる | 対応済み | 起動中だけ配信形式を使い、`finishBoot` 後に保存形式を明示適用。進捗・ログ・状態を右パネルへ固定し、寝姿3体と通常表示1体を実画面で目視確認 |
+| 3 | P1 | 常設の下部配置バーが動画と重なり、通常のWindowsメニューのように扱えない | 対応済み | 上端ホバー式メニューへ置換し、配置・表示・キャラ／音声・設定を収容。通常動画ではカーソルを右下へ退避し、配置検査だけ上端へ戻す |
+| 4 | P1 | 動きがない画面でも局所物理演算を更新し、負荷が高い | 対応済み | 非表示・起動中・チャット・バーでは更新を停止し、表示中も30fpsに制限。PNG／実写56画面で対象領域数・マスク・変形適用を検査 |
+| 5 | P1 | 実写キャラの顔が変形し、髪以外の動きと胸揺れも不足する | 対応済み | 顔を物理領域から外し、髪・胸・肩・腰の局所領域へ整理。新しい単一フレーム世代と表情差分を採用し、通常／配信動画と7形式を確認 |
+| 6 | P1 | README／LP動画が短く、フレームレート・口パク・表情確認が不足する | 対応済み | 全45本を30fpsで再生成。キャラ30本は12秒・360フレームで口パク、考え中、成功、悲しみ、左右視線、待機を収録。LPの37素材を直列コピーしSHA-256一致を確認 |
+| 7 | P2 | キャラ配置機能と設定画面の構図調整が重複する | 保留 | ユーザー指定により今回は削除・統合せず、別タスクで整理する |
+| 8 | P2 | 手動構図の最終調整を今回も行う | 見送り | ユーザー指定により別タスクで直すため、今回は自動構図・画面欠けの回帰検査だけを行った |
+| 9 | 仕様 | Riceも口パク必須にする | 見送り | 取得済み元モデルに口パラメータがなく、キャラ一覧の明示的な技術例外とした。他14キャラは口パク検査を必須化 |
+
+検証: `cargo test --lib --manifest-path src-tauri/Cargo.toml` 361件、`cargo test --manifest-path xtask/Cargo.toml` 43件、`cargo check --manifest-path src-tauri/Cargo.toml`、JS構文、口パク契約3件、`git diff --check`。実WebViewはPNG／実写56画面、Live2D 49画面、操作14件、配置編集、起動画面4種、動画一覧30カード・欠損0・拡大表示を確認した。
+
+---
+
 ## 2026-08-14 — 実写2D物理演算テストの最終レビュー（Claude・再確認）
 
 対象: `characters/photoreal-prototype/`（layers・frames・character.json）、`scripts/remove-chroma-background.py`、`scripts/build-local-expression-layers.py`、`ui/renderer.js`、`ui/styles.css`、`temp/physics-character/video-qa/contact-sheet-new.png`、`temp/character-layout-matrix/`。

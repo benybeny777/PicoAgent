@@ -2643,7 +2643,7 @@ async function render() {
     const selectedEntry = characterCatalog?.characters?.find(character => character.id === characterSelect?.value);
     setQuickSettingsSummary("character", `${selectedEntry?.name || characterSelect?.value || v.PICOAGENT_CHARACTER || "既定キャラ"}・${enabled ? "読み上げ有効" : "ミュート中"}`);
   });
-  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
+  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値50）", "number", v.PICOAGENT_TTS_VOLUME ?? "50", "50"));
   panels.basic.append(quickSettingsGuide(v), global);
   panels.display.append(displaySec);
   providerSelect.addEventListener("change", () => {

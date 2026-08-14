@@ -82,7 +82,7 @@ const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, 
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
 window.__previewVoice = (() => {
-  const rate = 8000, seconds = 4, samples = rate * seconds;
+  const rate = 8000, seconds = 5, samples = rate * seconds;
   const buffer = new ArrayBuffer(44 + samples * 2);
   const view = new DataView(buffer);
   const write = (offset, text) => [...text].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
@@ -276,6 +276,9 @@ async function openScene({
   if (waitForReady) {
     await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
   }
+  // Chromiumの初期カーソルは左上にあり、上端ホバーメニューを常時開いてしまう。
+  // 通常の製品画面・公開動画ではカーソルを右下へ退避し、専用の配置編集検査だけが明示的に上端へ戻す。
+  await page.mouse.move(Math.max(20, width - 40), Math.max(20, height - 40));
   return page;
 }
 
@@ -340,6 +343,9 @@ async function shootCharacterMatrix() {
             viewStyle: viewStyle ? { transform: viewStyle.transform, scale: viewStyle.scale } : null,
             springMotion: springRoot ? {
               visible: !springRoot.hidden && springRootStyle.display !== "none",
+              configuredRegions: Array.isArray(characterManifest?.springPhysics?.regions)
+                ? characterManifest.springPhysics.regions.length
+                : characterManifest?.secondaryMotion?.type === "bust" ? 1 : 0,
               regionCount: springRegions.length,
               transformedRegions: springRegions.filter(region => getComputedStyle(region.querySelector("img")).transform !== "none").length,
               maskedRegions: springRegions.filter(region => {
@@ -359,13 +365,11 @@ async function shootCharacterMatrix() {
         if (visual.imageRect.width <= 0 || visual.imageRect.height <= 0
           || visual.imageRect.x >= width || visual.imageRect.y >= height
           || visual.imageRect.x + visual.imageRect.width <= 0 || visual.imageRect.y + visual.imageRect.height <= 0) {
-          throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません`);
+          throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません ${JSON.stringify({ imageRect: visual.imageRect, characterRect: visual.characterRect, imageStyle: visual.imageStyle, viewStyle: visual.viewStyle })}`);
         }
-        const expectsSecondary = ["koharu", "sena", "noa"].includes(characterId)
-          && !["chat", "bar"].includes(layout);
-        const expectedSpringRegions = characterId === "photoreal-prototype" && !["chat", "bar"].includes(layout)
-          ? 8
-          : expectsSecondary ? 1 : 0;
+        const expectedSpringRegions = ["chat", "bar"].includes(layout)
+          ? 0
+          : visual.springMotion?.configuredRegions || 0;
         if (expectedSpringRegions && (!visual.springMotion?.visible
           || visual.springMotion.regionCount !== expectedSpringRegions
           || visual.springMotion.transformedRegions !== expectedSpringRegions
@@ -416,7 +420,12 @@ async function validateLayoutEditor() {
   mkdirSync(output, { recursive: true });
   const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true });
   try {
-    await page.locator("#layoutEditToggle").click();
+  // 上端へカーソルを置いた時だけ現れる実UIを通す。直接clickすると、収納中の5px部分を
+  // ウィンドウリサイズ領域が覆う退行を見逃すため、hover → 展開確認 → click の順にする。
+  await page.mouse.move(220, 7);
+  await page.locator("#topWindowMenu").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.getElementById("topWindowMenu").getBoundingClientRect().top > -1);
+  await page.locator("#layoutEditToggle").click();
     await page.waitForSelector("#layoutEditorToolbar:not([hidden])");
     await page.waitForSelector(".moveable-control-box");
     const before = await page.locator("#character").boundingBox();
@@ -454,6 +463,8 @@ async function validateLayoutEditor() {
     if (restored.translate !== saved.stream.character.translate || restored.scale !== saved.stream.character.scale) {
       throw new Error("保存した配置が再読み込み後に復元されませんでした");
     }
+    await page.mouse.move(220, 7);
+    await page.waitForFunction(() => document.getElementById("topWindowMenu").getBoundingClientRect().top > -1);
     await page.locator("#layoutEditToggle").click();
     await page.locator("#layoutEditorReset").click();
     const reset = await page.evaluate(() => ({
@@ -822,12 +833,18 @@ async function encodeAnimation(frames, box, { fps, width, file }) {
 // prepare の役目にしてある（完了を待ってから録り始めると動きが写らない）。
 // `outputWidth` は書き出し時の横幅（未指定なら等倍）。`width` はウィンドウ幅なので別物。
 async function shoot(name, {
-  seconds = 4, fps = 12, outputWidth, prepare, step, ...scene
+  seconds = 6, fps = 30, outputWidth, prepare, step, verifyLipSync = false, ...scene
 } = {}) {
   const page = await openScene(scene);
   if (prepare) await prepare(page);
   const frames = await record(page, { seconds, fps, step });
+  let lipSyncFailure = "";
+  if (verifyLipSync) {
+    const mouthSeen = await page.evaluate(() => window.__galleryMouthSeen === true);
+    if (!mouthSeen) lipSyncFailure = `${name}: 読み上げ区間の口パクを確認できませんでした`;
+  }
   await page.close();
+  if (lipSyncFailure) throw new Error(lipSyncFailure);
   if (process.env.SHOOT_DEBUG_FRAMES) {
     const debugDir = join(ROOT, "temp", "recording-frames");
     mkdirSync(debugDir, { recursive: true });
@@ -935,7 +952,9 @@ async function prepareLive2D(page) {
       writeFile(join(debugDir, "opened.png"), opened),
     ]);
   }
-  const mouthPixels = await changedPixels(closed, opened, { x: 105, y: 105, width: 75, height: 80 });
+  // モデルのscale・offset・表示寸法で口のキャンバス座標は変わる。tickerと全motionを止めた
+  // 同一ポーズ比較なので、固定座標を決め打ちせずキャンバス全体の差分を口開閉の結果として測る。
+  const mouthPixels = await changedPixels(closed, opened);
   if (mouthPixels < 20) throw new Error(`Live2D の口が描画へ反映されていません（変化 ${mouthPixels}px）`);
   console.log(`  口元の開閉描画差: ${mouthPixels}px`);
   await page.evaluate(() => {
@@ -1015,26 +1034,28 @@ async function validateLive2dSdkModels() {
 // キャラも切れて実画面とかけ離れるため、配布用だけの変則構図は作らない。
 const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
-// `layers/` を持つキャラだけが差分絵で口を開ける。1枚絵の通常2Dは素材が1枚なので変化しない。
+// 対応キャラは録画中に実際の口開閉が1回以上起きたことまで検査する。
 // 公開用は実画面を2倍密度で描画してから960pxへ縮小する。480px撮影を960pxへ
 // 引き伸ばすのではなく、PNG／Live2Dとも高密度な実レンダリングを入力にする。
 const GALLERY_SCENE = {
   layout: "pet", width: 900, height: 600, deviceScaleFactor: 2,
-  seconds: 8.4, fps: 16, outputWidth: 960, voice: true,
+  seconds: 12, fps: 30, outputWidth: 960, voice: true,
 };
 
-// 前半は返答フローそのまま（文字送り → 会話中＋口パク）。後半は考え中、成功、待機だけへ
-// ゆっくり切り替える。多数の感情や視線を短時間で巡回すると製品より落ち着きがなく見えるため、
-// 一覧では実装と同じ `setAnimation()` を使いつつ状態切替を3回に制限する。
+// 前半5秒は返答フローそのまま（文字送り → 音声開始後の口パク）を保ち、後半に
+// 考え中、成功、悲しみ、左右視線、待機を間隔を空けて見せる。
 // 経過msで指定するのは、fps や尺を変えてもモーションの見せ時間がずれないようにするため。
 //
 // 巡回に「考え中」が入っているのは、`record()` が録画前に時計を10秒進めるので、送信直後の
 // 考え中が録画開始時点では終わっているため。成功は短い反応を1回だけ確認して待機へ戻す。
 // `SHOOT_DEBUG_MOTION=1` で data-motion を読み返して切替回数を確かめられる。
 const GALLERY_TOUR = [
-  [2600, "thinking"], // 考え中（共通の画面全体変形はなし）
-  [5000, "success"],  // 最大1pxの短い反応
-  [6200, "idle"],     // 待機へ戻す
+  [5200, "thinking"],
+  [6700, "success"],
+  [8000, "sad"],
+  [9300, "gaze-left"],
+  [10400, "gaze-right"],
+  [11400, "idle"],
 ];
 
 // 毎コマ呼んで構わない。`setAnimation()` は同じ状態なら早期 return するので、
@@ -1045,6 +1066,14 @@ const galleryStep = async (page, index) => {
   // SHOOT_DEBUG_MOTION=1 で、実際に適用された data-motion を毎コマ出す
   // （巡回を足しても「切り替わったつもり」で撮れてしまうのを防ぐ）。
   const applied = await page.evaluate(name => {
+    const mouthMoving = (typeof rigMouthOpen !== "undefined" && rigMouthOpen)
+      || (typeof live2dMouth !== "undefined" && live2dMouth > 0.05)
+      // レイヤー差分を持たないPNGキャラは、発話用フレーム列そのものが口パク。
+      // `animationName === "talking"` は読み上げ開始後にだけ設定されるため、
+      // 音声より先に口を動かすデグレも見逃さず、両方式を同じ契約で検査できる。
+      || (typeof rigAvailable !== "undefined" && !rigAvailable
+        && typeof animationName !== "undefined" && animationName === "talking");
+    if (mouthMoving) window.__galleryMouthSeen = true;
     if (name === "gaze-left" || name === "gaze-right") {
       setAnimation("idle");
       if (typeof live2dActive === "undefined" || !live2dActive) {
@@ -1113,6 +1142,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"])
     reply,
     prepare: galleryPrepare(kind),
     step: galleryStep,
+    verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
 ]));
@@ -1131,6 +1161,7 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     reply,
     prepare: galleryPrepare(kind),
     step: galleryStep,
+    verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
 ]));
@@ -1150,8 +1181,8 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
-  "distribution-main.webp": { width: 900, height: 600, layout: "pet", seconds: 5, fps: 24, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
-  "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", seconds: 5, fps: 24, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
+  "distribution-main.webp": { width: 900, height: 600, layout: "pet", seconds: 7, fps: 30, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
+  "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", seconds: 7, fps: 30, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
   // 1フレームだけなのでアニメーションではないが、同じ透過 WebP 経路を使える。
   // 小型形式は論理幅が出力幅（480px）に届かないため、2倍密度で描画してから縮小する。

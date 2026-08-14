@@ -7,7 +7,8 @@
   "bodyProportion": "compact",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
-    "sleeping": "boot/sleeping.png"
+    "sleeping": "boot/sleeping.png",
+    "useSleepingOnStartup": true
   },
   "voice": {
     "provider": "aivis",
