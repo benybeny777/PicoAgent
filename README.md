@@ -156,7 +156,7 @@ cargo xtask dev
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ） |
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Cubism Editor 5.3互換のLive2Dランタイム（Cubism 4／5モデル対応。サンプルは含まない） |
-| `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない） |
+| `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない）。未実行でも `dev` / `build` は通る（サンプル7体が一覧から外れるだけ） |
 | `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（開発環境専用。販売版は作者配布物を利用者が用意） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
