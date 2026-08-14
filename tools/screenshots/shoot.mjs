@@ -120,6 +120,9 @@ window.__TAURI__ = {
     }), ${JSON.stringify(initDelayMs)}));
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
     if (name === "aivis_status") return Promise.resolve({ enabled: true, up: Date.now() >= window.__bootReadyAt });
+    // 起動画面の撮影は外部コンポーネント待ちに依存させない。画面起動が非ブロック化されても、
+    // 完了通知だけを明示的に遅らせれば同じ起動中DOMを確実に検査できる。
+    if (name === "pet_finish_boot") return new Promise(resolve => setTimeout(() => resolve({}), ${JSON.stringify(bootHoldMs)}));
     if (name === "pet_speak") return Promise.resolve(
       ${JSON.stringify(Boolean(voice))} || ${JSON.stringify(characterId)} === "hiyori"
         ? { enabled: true, mime: "audio/wav", audio: window.__previewVoice }
@@ -1266,6 +1269,10 @@ if (process.env.SHOOT_DEBUG_BOOT) {
   await page.screenshot({ path: join(debugDir, `boot-${characterId}-${layout}.png`), omitBackground: true });
   await page.close();
   console.log(`  起動画面確認: ${join(debugDir, `boot-${characterId}-${layout}.png`)}`);
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  process.exit(0);
 }
 
 if (process.env.SHOOT_DEBUG_ONBOARDING) {

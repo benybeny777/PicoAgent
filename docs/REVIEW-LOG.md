@@ -24,8 +24,9 @@
 | 5 | P1 | Aivisと音声モデル準備が画面起動を最大約17分待たせる | 対応済み | 音声準備と起動挨拶を画面起動後へ移し、会話開始後などは遅延挨拶を割り込ませない |
 | 6 | P1 | `cargo xtask dev` が未使用の外部コンポーネント取得失敗で中断する | 対応済み | `dev` を最小起動へ変更し、追加機能は明示 `setup`、製品ビルドは従来の配布ゲートを維持した |
 | 7 | 確認 | Live2Dモデルを1体も取得していないキャラを同期・`index.json`から外す既知修正 | 対応済み | xtask回帰テストが成功。一部だけ欠ける破損状態は従来どおり同期検証で停止する |
+| 8 | P1 | 起動画面撮影モックがAivis待機で画面を止めていたため、音声準備の非ブロック化後は起動後画面を誤って撮影する | 対応済み | `pet_finish_boot` だけを明示遅延させ、撮影後はブラウザ・サーバーを閉じて専用モードを終了する。実モデルの起動画面を再撮影して確認した |
 
-検証: `cargo test --manifest-path src-tauri/Cargo.toml --lib` 363件、`cargo test --manifest-path xtask/Cargo.toml` 43件、起動非ブロック・音声契約のNodeテスト5件が成功。実WebView確認は Claude PR #88 と統合した最終状態で行う。
+検証: `cargo test --manifest-path src-tauri/Cargo.toml --lib` 363件、`cargo test --manifest-path xtask/Cargo.toml` 43件、起動非ブロック・音声契約のNodeテスト5件が成功。Claude PR #88 と統合した最終状態をビルドし、取得済みLive2Dランタイムと「ひより」の実モデルを680×430のヘッドレス実WebView起動画面で確認した。
 
 ---
 
@@ -50,9 +51,9 @@
 | 8 | `renderReplySpeaking` から `setAnimation("talking")` が外れている | 見送り | ミュート時に口を動かさない今回の仕様（CHANGELOG・#1の口パク統一）どおりで、退行ではない |
 | 9 | `animateSpringMotion` の `const stopped = false` により到達しない分岐が残る | 見送り | 停止判定を将来足す前提の骨組みで実害が無い。物理演算の停止条件を見直すときにまとめて整理する |
 | 10 | `bodyMotion` をRust側で検証していない（JS側でクランプのみ） | 見送り | 値はキャラクターパック検証を通った `character.json` 由来で、範囲外でも表示が崩れるだけ。`character_pack.rs` へ検証を足すなら他のモーション項目とまとめて行う |
-| 11 | 起動画面での**実モデルの描画そのもの**（Cubismランタイムの読み込み、モデルの縦位置・顔の入り方、まばたき） | 保留 | この作業環境は `cubism.live2d.com` がネットワークポリシーで遮断され（CONNECT 403）、`cargo xtask setup live2d` / `live2d-samples` を実行できない。#7 は PIXI と同じ 285×315 の代用 canvas を置いて**枠・縦横比・重なりだけ**を実画面で確認したもので、モデルの絵が枠のどこへ来るかは実機確認が要る。Windows実機で Live2D キャラを既定にして起動したときに見る |
+| 11 | 起動画面での**実モデルの描画そのもの**（Cubismランタイムの読み込み、モデルの縦位置・顔の入り方、まばたき） | 対応済み | 統合環境に取得済みのCubismランタイムと「ひより」モデルがあったため、680×430のヘッドレス実WebViewで再確認した。顔から上半身が起動枠内へ下端合わせで描画され、LIVEバッジ・右ログ面と重ならない |
 
-検証: `node --check ui/renderer.js`、`node --check tools/screenshots/shoot.mjs`、`node --test tools/tests/voice-lipsync-contract.mjs`（3件）、`cargo xtask build-ui` / `--release`（最小化後も `:has()`・`calc(8px + 6%)`・`object-fit` が壊れないことを `ui-dist/styles.css` で確認）、`cargo test --lib`（360件）。起動画面はヘッドレス実WebViewで 680×430（Live2D／2D）と 440×430（狭幅）を撮影し、枠・canvas寸法・重なりを実測した（使い捨てスクリプトと画像は `temp/live2d-boot-check/`）。
+検証: `node --check ui/renderer.js`、`node --check tools/screenshots/shoot.mjs`、`node --test tools/tests/voice-lipsync-contract.mjs`（3件）、`cargo xtask build-ui` / `--release`（最小化後も `:has()`・`calc(8px + 6%)`・`object-fit` が壊れないことを `ui-dist/styles.css` で確認）、`cargo test --lib`（360件）。起動画面はヘッドレス実WebViewで 680×430（Live2D／2D）と 440×430（狭幅）を撮影し、枠・canvas寸法・重なりを実測した。統合時には取得済み「ひより」の実モデルも `temp/boot-check/boot-hiyori-pet.png` で確認した。
 
 ---
 
