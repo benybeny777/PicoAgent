@@ -299,7 +299,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 CSP の `script-src` は `'self' 'unsafe-eval' 'wasm-unsafe-eval'` とする。**この緩和は Live2D Cubism Core（`ui/vendor/live2d/`）のためだけにある**——ランタイムが WASM を実体化し、内部で動的コード生成を行うため、これが無いと Live2D キャラが描画できない。PicoAgent 自身のフロントコードは `eval()` / `new Function()` を使わないので、自前コードでこの緩和に依存しないこと。`'unsafe-inline'` は `script-src` に無い（インライン `<script>` は動かない）。
 
 - 導入経路は設定画面の「キャラ・音声」タブ（zip またはフォルダを選ぶ）。選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、フロントへはパスだけを返す（プラグインの JS バインディングを配信物へ足さずに済ませるため）。完成済みPicoAgentパックは `settings_character_install`、利用者が配布元から自分で取得した生のLive2Dデータは `settings_character_install_live2d` を使う。
-- 生のLive2D導入は `.model3.json` を再帰的に探し、1個だけならその親フォルダを組み込み用データとしてコピーして `character.json` を自動生成する。0個または複数なら曖昧に選ばず拒否する。公式サンプルを含むモデル実体をアプリが代理取得・再配布しない。通常の `cargo xtask setup live2d` / `dev` / `build` はランタイムだけを取得し、開発者向けサンプル取得は `cargo xtask setup live2d-samples` の明示操作に限定する。製品ビルドは `distribution/release.json` の配布許可リストだけを同期する。初回案内は用途選択と追加機能選択の次にLive2D追加／公式配布ページ／後回しを選ばせ、追加時は `character-add` 経路でキャラタブの導入欄を開く。`pet_show_onboarding` は設定ウィンドウを隠してメインへ `pet:show-onboarding` を送り、保存済みデータを消さず同じ案内を再表示する。
+- 生のLive2D導入は `.model3.json` を再帰的に探し、1個だけならその親フォルダを組み込み用データとしてコピーして `character.json` を自動生成する。0個または複数なら曖昧に選ばず拒否する。公式サンプルを含むモデル実体をアプリが代理取得・再配布しない。ランタイム取得は `cargo xtask setup live2d` と製品 `build` に限定し、最小の `cargo xtask dev` はネットワーク取得を行わない。開発者向けサンプル取得は `cargo xtask setup live2d-samples` の明示操作に限定する。製品ビルドは `distribution/release.json` の配布許可リストだけを同期する。初回案内は用途選択と追加機能選択の次にLive2D追加／公式配布ページ／後回しを選ばせ、追加時は `character-add` 経路でキャラタブの導入欄を開く。`pet_show_onboarding` は設定ウィンドウを隠してメインへ `pet:show-onboarding` を送り、保存済みデータを消さず同じ案内を再表示する。
 - THA3生成経路は同じタブの「1枚絵からキャラクターを作成」。`settings_tha3_status` / `settings_tha3_pick_source` / `settings_tha3_pick_root` / `settings_tha3_generate` / `settings_tha3_cancel` を使い、512x512透過PNGから17キーポーズ・42フレームの一時パックを生成する。THA3モデル出力をPillow等で引き伸ばさず、実効解像度で配置枠を満たせない場合はパックを確定せず理由を返す。高解像度で直接生成する経路またはPhotoshop「ディテールを保持 2.0」の仕上げが用意されるまで、その素材を配布品質として扱わない。入力画像と手動選択したTHA3フォルダは共通permissionsで検証する。画像・フォルダ選択と選択解除は同時に走らせず、生成中も変更できない。中断要求に失敗した場合は理由を表示して再試行可能にする。画像プレビューはasset protocolの許可範囲を広げず、20MB以下の選択済みPNGだけをdata URLとして返す。生成パックは通常の `character_pack::validate` と `user_characters::install` を通った場合だけ確定する。
 - キャラクターIDは**英数字・ハイフン・アンダースコアだけの64文字以内**とし、判定は `character_pack::is_valid_id()` の1箇所で行う。IDはそのまま `app_data_dir/characters/<id>/` のフォルダ名と設定キーの一部になるため、区切り文字や `.` を含む値を受け付けない。導入・削除・構図保存・配信設定・関係性・THA3生成はすべて同じ判定を通す。
 - 選択したTHA3フォルダは `PICOAGENT_THA3_ROOT` に保存し、次回設定画面と生成時に再利用する。「選択解除」は空文字を保存し、開発用の自動検出へ戻す。販売用軽量版はTHA3本体・モデル・Python／PyTorchを同梱せず、利用者が作者配布元から用意したフォルダだけを使う。通常の開発環境では `cargo xtask setup tha3` がGit管理外の開発用領域へ準備する。
@@ -322,7 +322,7 @@ CSP の `script-src` は `'self' 'unsafe-eval' 'wasm-unsafe-eval'` とする。*
 
 ### 同梱ツール
 
-同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、`xtask`（`tools::fetch_all`）（`cargo xtask setup tools`、`cargo xtask dev` / `cargo xtask build` の前に自動実行）が PicoAgent 管理下の `src-tauri/resources/bundled/tools/` へ取得する。再取得は `TOOLS_FORCE=1`、対象を絞る場合は `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep` のようにカンマ区切りで指定する。各スキルは `PICOAGENT_*_PATH` の明示設定 → 同梱 → PATH の順に実行ファイルを解決する。
+同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、`xtask`（`tools::fetch_all`）を `cargo xtask setup tools` または通常の製品 `build` 前処理から実行し、PicoAgent 管理下の `src-tauri/resources/bundled/tools/` へ取得する。最小の `cargo xtask dev` は自動取得しない。再取得は `TOOLS_FORCE=1`、対象を絞る場合は `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep` のようにカンマ区切りで指定する。各スキルは `PICOAGENT_*_PATH` の明示設定 → 同梱 → PATH の順に実行ファイルを解決する。
 
 
 | name | 機能 | 安全策 |

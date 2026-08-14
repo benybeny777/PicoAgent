@@ -142,10 +142,11 @@ cargo install tauri-cli --version '^2'   # 初回だけ
 cargo xtask dev
 ```
 
-これだけです。`cargo xtask dev` が推論エンジン・読み上げ・Whisper・Live2Dランタイム・THA3・OSS ツールの**未取得分を自動で取得**してから起動します。Live2Dサンプルモデルは自動取得しません。
+`cargo xtask dev` は、残存プロセス停止・キャラクター同期・UI生成だけを行う**最小の開発起動**です。未使用の追加機能や取得元の障害で本体起動を止めません。ローカルAI、読み上げ、Live2D、THA3などを使う場合だけ、下表の `cargo xtask setup <対象>` を先に実行してください。Live2Dサンプルモデルも自動取得しません。
 
 > [!NOTE]
-> 初回はネットワークが必要です。Rust の crate 取得・コンパイルとモデル DL（数 GB）で時間がかかりますが、2 回目以降は速くなり、オフラインで動きます。
+> [!NOTE]
+> 初回コンパイルではRustのcrate取得にネットワークが必要な場合があります。AIモデルなど数GBの追加取得は `setup` を明示実行したときだけ行います。取得済みなら以後はオフラインでも開発起動できます。
 
 <details>
 <summary>個別に取得したいとき（通常は不要）</summary>
@@ -807,7 +808,7 @@ PicoAgent/
 | 「モデルを準備中…」のまま | 初回のモデル DL 中です（数 GB）。ネット接続を確認。`PICOAGENT_MODEL_URL` を変えると別モデルを取得します |
 | 「準備に失敗」と出る | `cargo xtask setup engine` でエンジンが入っているか、DL 元 URL が有効かを確認 |
 | `cargo tauri` が見つからない | `cargo install tauri-cli --version '^2'` を実行してください |
-| `cargo xtask dev` が遅い / 失敗する | 初回は Rust のコンパイルに時間がかかります。Rust（cargo）・Tauri CLI・WebView2 が入っているか確認 |
+| `cargo xtask dev` が遅い / 失敗する | 初回は Rust のコンパイルに時間がかかります。追加機能の取得は行わないため、Rust（cargo）・Tauri CLI・WebView2と表示されたコンパイルエラーを確認 |
 | ビルドが `os error 32`（別のプロセスが使用中）で失敗 | 前回の `llama-server` やアプリ本体が残って同梱 DLL を掴んでいます。`cargo xtask stop` で停止（dev / build は起動前に自動停止します） |
 | 起動直後に `picoagent.exe (exit code: 1)` で落ちる | 前回起動のプロセスが残って WebView の生成が競合した状態です。`cargo xtask stop` 後に再実行してください |
 | macOS で背景が透過されない | `src-tauri/tauri.conf.json` の `app.macOSPrivateApi` を `true` にして再ビルド（Tauri v2 は macOS でこれが無いと透過が効きません） |

@@ -82,8 +82,10 @@ fn unfetched_live2d_characters(src: &Path) -> Result<Vec<String>> {
     let mut unfetched = Vec::new();
     for character_dir in character_dirs {
         let manifest_path = character_dir.join("character.json");
-        let manifest: serde_json::Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)
-            .with_context(|| format!("character.json を読めません: {}", manifest_path.display()))?;
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path)?).with_context(|| {
+                format!("character.json を読めません: {}", manifest_path.display())
+            })?;
         if manifest.get("live2d").is_none() {
             continue;
         }

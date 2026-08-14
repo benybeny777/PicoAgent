@@ -24,7 +24,7 @@ use util::{log, repo_root};
 const USAGE: &str = "\
 使い方: cargo xtask <サブコマンド>
 
-  dev                 開発起動（同梱物の未取得分を取得してから tauri dev）
+  dev                 最小構成で開発起動（追加機能は setup で明示取得）
   build               開発用の製品ビルド（同上 + tauri build）
   build-beta          販売ゲート前の軽量ベータ版インストーラを生成
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
@@ -161,8 +161,8 @@ fn setup(targets: &[String]) -> Result<()> {
 
 /// `tauri dev` / `tauri build` を前処理つきで実行する。
 ///
-/// 前処理は旧 `npm run dev` / `npm run build` と同じ順序:
-/// 残存プロセス停止 → Live2Dランタイム取得 → キャラ同期 → UI 配信ビルド → 同梱物取得。
+/// 開発起動はネットワークや未使用の追加機能に阻まれない最小構成とする。
+/// 製品ビルドだけは配布に必要なランタイムと同梱物を事前に揃える。
 fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     let release = mode == "build";
     if build.require_release_check {
@@ -173,15 +173,19 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     let product_characters = product_characters_for_build(release)?;
 
     assets::stop_stale()?;
-    bundled::fetch_live2d_runtime()?;
+    if release {
+        bundled::fetch_live2d_runtime()?;
+    }
     if let Some(characters) = product_characters.as_ref() {
         assets::sync_distribution_characters(characters)?;
     } else {
         assets::sync_characters()?;
     }
     assets::build_ui_dist(release, build.beta)?;
-    bundled::fetch_engine()?;
-    if !build.lightweight_bundle {
+    if release {
+        bundled::fetch_engine()?;
+    }
+    if release && !build.lightweight_bundle {
         office::fetch_aivis()?;
         // 文字起こしはベストエフォート（公式バイナリ配布が無い OS がある）。
         if let Err(error) = bundled::fetch_whisper() {

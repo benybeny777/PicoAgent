@@ -4464,36 +4464,9 @@ bubble?.addEventListener("click", event => {
 renderNoticePanel();
 updateNoticeBadge();
 
-// TTS 有効時は同梱 Aivis が応答するまで待ってからキャラを描画する（無効時は待たない）。
-// 起動失敗で永久に出ないことを避けるため、上限（約120秒）を超えたら諦めて描画する。
-async function waitForAivisReady() {
-  let s;
-  try { s = await window.picoagent.aivisStatus(); }
-  catch (error) {
-    logApp("warn", "Aivis 状態取得に失敗しました", errorDetail(error));
-    return;
-  }
-  if (!s || !s.enabled || s.up) return;
-  const startedAt = Date.now();
-  setStatus("音声エンジンの起動を確認中…");
-  for (let i = 0; i < 240; i += 1) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    try { s = await window.picoagent.aivisStatus(); }
-    catch (error) {
-      logApp("warn", "Aivis 起動待ち中の状態取得に失敗しました", errorDetail(error));
-      break;
-    }
-    if (s && s.up) break;
-    if (i % 2 === 1) {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      setStatus(`音声エンジンの起動を確認中… ${seconds}秒`);
-    }
-  }
-  if (status.textContent.startsWith("音声エンジンの起動を確認中")) setStatus("");
-}
-
-// 選択中キャラの AivisHub 音声モデルを、初回読み上げ前にローディング画面で導入する。
-async function prepareSelectedVoiceModel() {
+// 選択中キャラの AivisHub 音声モデルを準備する。起動時は画面を先に使える状態へ
+// 戻してからバックグラウンドで呼ぶため、音声配布元の障害で本体起動を塞がない。
+async function prepareSelectedVoiceModel(showStatus = true) {
   let statusInfo;
   try { statusInfo = await window.picoagent.aivisStatus(); }
   catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
@@ -4501,28 +4474,31 @@ async function prepareSelectedVoiceModel() {
   const startedAt = Date.now();
   let timer = null;
   try {
-    setStatus(`${bootCharacterName}の声を準備中…`);
-    timer = setInterval(() => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      setStatus(`${bootCharacterName}の声を準備中… ${seconds}秒`);
-    }, 1000);
+    if (showStatus) {
+      setStatus(`${bootCharacterName}の声を準備中…`);
+      timer = setInterval(() => {
+        const seconds = Math.floor((Date.now() - startedAt) / 1000);
+        setStatus(`${bootCharacterName}の声を準備中… ${seconds}秒`);
+      }, 1000);
+    }
     await window.picoagent.prepareVoiceModel();
     if (timer) clearInterval(timer);
     timer = null;
-    setStatus("");
+    if (showStatus) setStatus("");
     return true;
   } catch (error) {
     if (timer) clearInterval(timer);
     logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
-    setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    if (showStatus) {
+      setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    }
     return false;
   }
 }
 
-// 同梱エンジン(local)のモデル DL・起動をローディング画面の間に終わらせる。
-// 通常時にフキダシへ「モデルを準備中…」を出さないため、ここで ready/error まで待つ。
-// DL は数 GB で時間がかかりうるので上限は長め（約30分）。error は即終了する。
+// 同梱エンジン(local)のモデルDL・起動をバックグラウンドで監視する。
+// DLは数GBになりうるが、キャラと画面の起動完了はこの処理を待たない。
 async function waitForEngineReady() {
   for (let i = 0; i < 1800; i += 1) {
     let s;
@@ -4536,6 +4512,26 @@ async function waitForEngineReady() {
     if (s && (s.phase === "ready" || s.phase === "error")) return;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
+}
+
+function startBackgroundStartupServices(info, greeting) {
+  if ((info.providerId || "local") === "local") {
+    void waitForEngineReady().catch(error => {
+      logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error));
+    });
+  }
+  if (!info.onboardingDone || !greeting) return;
+  const requestRevision = conversationRevision;
+  void (async () => {
+    const voiceReady = await prepareSelectedVoiceModel(false);
+    if (!voiceReady || requestRevision !== conversationRevision || busy || currentVoice) return;
+    const prepared = await prepareSpeech(greeting);
+    if (prepared && requestRevision === conversationRevision && !busy && !currentVoice) {
+      playPreparedSpeech(prepared);
+    }
+  })().catch(error => {
+    logApp("warn", "起動後の読み上げ準備に失敗しました", errorDetail(error));
+  });
 }
 
 // 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
@@ -4720,8 +4716,8 @@ function startAlarmPolling() {
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
-  // 推論・音声エンジンを待つ間に通常キャラクターも並行して読み込む。完了したら
-  // 起動画面のプレビュー画像から実キャラへ切り替え、配信画面と同じ大きな立ち絵で見せる。
+  // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
+  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンは待たない。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
   const characterLoadPromise = loadCharacter(
@@ -4735,17 +4731,8 @@ function startAlarmPolling() {
     },
     error => ({ ok: false, error }),
   );
-  setStatus("音声設定を確認中…");
-  await waitForAivisReady();
-  await prepareSelectedVoiceModel();
-  // local プロバイダはモデル DL・エンジン起動もローディング画面の間に終わらせる。
-  if ((info.providerId || "local") === "local") {
-    try { await waitForEngineReady(); }
-    catch (error) { logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error)); }
-  }
-  let preparedGreeting = null;
+  let startupGreeting = "";
   try {
-    // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
     const characterLoad = await characterLoadPromise;
     if (!characterLoad.ok) throw characterLoad.error;
     setStatus("会話履歴を画面へ復元中…");
@@ -4760,14 +4747,14 @@ function startAlarmPolling() {
     }
     if (greeting) {
       characterManifest.greeting = greeting;
-      setStatus("起動時の読み上げ音声を準備中…");
-      preparedGreeting = await prepareSpeech(greeting);
+      startupGreeting = greeting;
     }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
-    // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
+    // キャラクターと履歴が読めた時点で画面を使える状態へ戻す。AIモデル・音声モデルの
+    // 取得はこの後のバックグラウンド処理へ分離し、外部サービス障害で起動を塞がない。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
     try { await window.picoagent.finishBoot(); }
     catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
@@ -4777,8 +4764,8 @@ function startAlarmPolling() {
     catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
-    if (preparedGreeting) playPreparedSpeech(preparedGreeting);
   }
+  startBackgroundStartupServices(info, startupGreeting);
   if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); }
