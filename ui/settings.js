@@ -2584,7 +2584,7 @@ async function render() {
   const displaySec = section("画面レイアウト");
   displaySec.append(el("p", {
     className: "settings-intro",
-    textContent: "用途に合う画面レイアウトをプレビューから選べます。通常2Dは従来の上半身位置、Live2D／VRMは胸上を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
+    textContent: "用途に合う画面レイアウトをプレビューから選べます。通常2Dは従来の上半身位置、長身キャラとLive2Dは胸上を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
   }));
   displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT === "talk" ? "chat" : (v.PICOAGENT_LAYOUT || "pet")));
   displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [

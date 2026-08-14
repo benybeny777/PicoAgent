@@ -1,6 +1,0 @@
-OK
-source=tools/mugi-vrm/source/mugi-tpose-source-v1.png
-output=tools/mugi-vrm/source/mugi-tpose-source-v1-photoshop-pd2-2920x4096.psd
-original=730x1024
-upscaled=2920x4096
-method=Photoshop Preserve Details 2.0

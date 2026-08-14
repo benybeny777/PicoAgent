@@ -4,14 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>PicoAgent</title>
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "./vendor/vrm/three.module.min.js",
-          "@pixiv/three-vrm": "./vendor/vrm/three-vrm.module.min.js"
-        }
-      }
-    </script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -79,9 +71,7 @@
            同じ要素に transform を重ねないよう1枚挟んでいる。 -->
       <div id="characterView" class="character-view" data-tauri-drag-region>
         <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" data-tauri-drag-region />
-        <div id="characterSecondaryMotion" class="character-secondary-motion" aria-hidden="true" data-tauri-drag-region hidden>
-          <img id="characterSecondarySprite" alt="" draggable="false" data-tauri-drag-region />
-        </div>
+        <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" data-tauri-drag-region hidden></div>
       </div>
       <span id="online" class="online"></span>
       <button id="relationshipButton" class="relationship-button" type="button" title="いっしょの記録を見る" aria-label="いっしょの記録を見る" aria-controls="relationshipCard" aria-expanded="false">♡</button>

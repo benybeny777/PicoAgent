@@ -324,10 +324,9 @@ async function shootCharacterMatrix() {
         const visual = await page.evaluate(() => {
           const image = document.getElementById("petSprite");
           const character = document.getElementById("character");
-          const secondary = document.getElementById("characterSecondaryMotion");
-          const secondarySprite = document.getElementById("characterSecondarySprite");
-          const secondaryStyle = secondary ? getComputedStyle(secondary) : null;
-          const secondarySpriteStyle = secondarySprite ? getComputedStyle(secondarySprite) : null;
+          const springRoot = document.getElementById("characterSpringMotion");
+          const springRegions = [...document.querySelectorAll(".character-spring-region")];
+          const springRootStyle = springRoot ? getComputedStyle(springRoot) : null;
           const rect = image.getBoundingClientRect();
           const characterRect = character.getBoundingClientRect();
           const imageStyle = getComputedStyle(image);
@@ -339,12 +338,14 @@ async function shootCharacterMatrix() {
             imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             imageStyle: { width: imageStyle.width, height: imageStyle.height, left: imageStyle.left, inset: imageStyle.inset, transform: imageStyle.transform },
             viewStyle: viewStyle ? { transform: viewStyle.transform, scale: viewStyle.scale } : null,
-            secondaryMotion: secondary ? {
-              visible: !secondary.hidden && secondaryStyle.display !== "none",
-              bodyAnimationName: secondaryStyle.animationName,
-              localAnimationName: secondarySpriteStyle?.animationName || "none",
-              localTransform: secondarySpriteStyle?.transform || "none",
-              maskImage: secondaryStyle.webkitMaskImage || secondaryStyle.maskImage,
+            springMotion: springRoot ? {
+              visible: !springRoot.hidden && springRootStyle.display !== "none",
+              regionCount: springRegions.length,
+              transformedRegions: springRegions.filter(region => getComputedStyle(region.querySelector("img")).transform !== "none").length,
+              maskedRegions: springRegions.filter(region => {
+                const style = getComputedStyle(region);
+                return (style.webkitMaskImage || style.maskImage) !== "none";
+              }).length,
             } : null,
             characterRect: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
             resources: performance.getEntriesByType("resource").length,
@@ -362,13 +363,14 @@ async function shootCharacterMatrix() {
         }
         const expectsSecondary = ["koharu", "sena", "noa"].includes(characterId)
           && !["chat", "bar"].includes(layout);
-        // 全身の状態別モーションは廃止したので、body 側にアニメーションは付かない。
-        // 検査するのは局所レイヤー（胸元）の動きとマスクだけ。
-        if (expectsSecondary && (!visual.secondaryMotion?.visible
-          || visual.secondaryMotion.localAnimationName !== "pet-secondary-bust"
-          || visual.secondaryMotion.localTransform === "none"
-          || visual.secondaryMotion.maskImage === "none")) {
-          throw new Error(`${characterId}/${layout}: 胸元の局所二次動作が適用されていません ${JSON.stringify(visual.secondaryMotion)}`);
+        const expectedSpringRegions = characterId === "photoreal-prototype" && !["chat", "bar"].includes(layout)
+          ? 8
+          : expectsSecondary ? 1 : 0;
+        if (expectedSpringRegions && (!visual.springMotion?.visible
+          || visual.springMotion.regionCount !== expectedSpringRegions
+          || visual.springMotion.transformedRegions !== expectedSpringRegions
+          || visual.springMotion.maskedRegions !== expectedSpringRegions)) {
+          throw new Error(`${characterId}/${layout}: 局所バネ物理が適用されていません ${JSON.stringify(visual.springMotion)}`);
         }
         const file = `${characterId}-${layout}.png`;
         const png = await page.screenshot({ path: join(output, file), omitBackground: true });
@@ -640,58 +642,6 @@ async function validateInteractionMatrix() {
     await staleOffsetPage.close();
   }
   await writeFile(join(output, "results.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
-  return { output, results };
-}
-
-// 実験VRMを本物のrenderer.jsとTauriモックの組み合わせで読み込み、全レイアウトで
-// canvas表示と継続モーションを確認する。出力はレビュー用なのでtemp/だけへ置く。
-async function validateVrmMatrix() {
-  const output = join(ROOT, "temp", "vrm-layout-matrix");
-  mkdirSync(output, { recursive: true });
-  const results = [];
-  for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
-    const page = await openScene({
-      characterId: "mugi-vrm-experimental", layout, width, height, voice: true,
-    });
-    try {
-      await page.waitForFunction(() => typeof vrmActive !== "undefined" && vrmActive, null, { timeout: 40000 });
-      await page.waitForFunction(() => {
-        const canvas = document.getElementById("vrmCanvas");
-        return canvas && getComputedStyle(canvas).display !== "none" && canvas.width > 0 && canvas.height > 0;
-      }, null, { timeout: 20000 });
-      await page.waitForTimeout(450);
-      const canvas = page.locator("#vrmCanvas");
-      const before = await canvas.screenshot({ omitBackground: true });
-      await page.waitForTimeout(750);
-      const after = await canvas.screenshot({ omitBackground: true });
-      const motionPixels = await changedPixels(before, after);
-      const visual = await page.evaluate(() => {
-        const canvas = document.getElementById("vrmCanvas");
-        const character = document.getElementById("character");
-        const rect = canvas.getBoundingClientRect();
-        const characterRect = character.getBoundingClientRect();
-        return {
-          renderKind: character.dataset.renderKind,
-          canvasPixels: [canvas.width, canvas.height],
-          canvasRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-          characterRect: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
-        };
-      });
-      if (visual.renderKind !== "vrm") throw new Error(`${layout}: data-render-kindがVRMではありません`);
-      if (visual.canvasRect.width <= 0 || visual.canvasRect.height <= 0 || motionPixels < 20) {
-        throw new Error(`${layout}: VRMの描画またはモーションが確認できません (${motionPixels}px)`);
-      }
-      const file = `mugi-vrm-experimental-${layout}.png`;
-      const png = await page.screenshot({ path: join(output, file), omitBackground: true });
-      const opaqueBounds = await bounds(png, 0);
-      if (!opaqueBounds) throw new Error(`${layout}: VRMの不透明描画がありません`);
-      results.push({ layout, viewport: { width, height }, motionPixels, opaqueBounds, ...visual, file });
-      console.log(`  VRM表示検査: ${layout} / motion ${motionPixels}px`);
-    } finally {
-      await page.close();
-    }
-  }
-  await writeFile(join(output, "metrics.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
   return { output, results };
 }
 
@@ -1126,33 +1076,13 @@ async function prepareGalleryLive2D(page) {
   await submit(page, GALLERY_ASK);
 }
 
-async function prepareGalleryVrm(page) {
-  await page.waitForFunction(() => {
-    const canvas = document.getElementById("vrmCanvas");
-    return canvas && canvas.style.display !== "none" && canvas.width > 0
-      && typeof vrmActive !== "undefined" && vrmActive;
-  }, null, { timeout: 40000 });
-  await page.waitForTimeout(1500);
-  await submit(page, GALLERY_ASK);
-}
-
-const VRM_RUNTIME = [
-  "ui/vendor/vrm/three.core.min.js",
-  "ui/vendor/vrm/three.module.min.js",
-  "ui/vendor/vrm/three-vrm.module.min.js",
-];
-
 const galleryPrepare = kind => kind === "live2d"
   ? prepareGalleryLive2D
-  : kind === "vrm"
-    ? prepareGalleryVrm
-    : startReply(GALLERY_ASK);
+  : startReply(GALLERY_ASK);
 
 const galleryRequires = (id, kind) => kind === "live2d"
   ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
-  : kind === "vrm"
-    ? [...VRM_RUNTIME, `ui/assets/characters/${id}/mugi.vrm`]
-    : [`ui/assets/characters/${id}/character.json`];
+  : [`ui/assets/characters/${id}/character.json`];
 
 // Live2D キャラのランタイムとモデルは git 管理外（`cargo xtask setup live2d` / `setup live2d-samples`）。
 // 未取得の環境では `requires` が効いて自動でスキップされるので、一覧の定義からは外さない。
@@ -1166,7 +1096,6 @@ const GALLERY = [
   ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
   ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
   ["photoreal-prototype", "こんにちは。焦らず、今日やることから一緒に整理しましょう。"],
-  ["mugi-vrm-experimental", "おはよう！VRMの実験中でも、今日もそばで見てるね。", "vrm"],
   ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", "live2d"],
   ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", "live2d"],
   ["epsilon", "動作確認でも、作業の整理でも、必要なところから始めましょう。", "live2d"],
@@ -1278,15 +1207,6 @@ if (process.env.SHOOT_LIVE2D_MATRIX) {
   await browser.close();
   server.close();
   console.log(`Live2D表示検査完了: ${matrix.output}（${matrix.results.length}件、未取得${matrix.skipped.length}件）`);
-  process.exit(0);
-}
-
-if (process.env.SHOOT_VRM_MATRIX) {
-  const matrix = await validateVrmMatrix();
-  await trimmer.close();
-  await browser.close();
-  server.close();
-  console.log(`VRM表示検査完了: ${matrix.output}（${matrix.results.length}件）`);
   process.exit(0);
 }
 

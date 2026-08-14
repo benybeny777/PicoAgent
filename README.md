@@ -32,14 +32,6 @@
       <td><img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
     </tr>
   </table>
-  <h3>VRM実験キャラクター</h3>
-  <table>
-    <tr>
-      <td align="center"><img src="docs/images/character-mugi-vrm-experimental.webp" alt="むぎ VRM実験キャラクターの通常表示" width="190" /><br /><sub>通常</sub></td>
-      <td align="center"><img src="docs/images/character-mugi-vrm-experimental-stream.webp" alt="むぎ VRM実験キャラクターの配信表示" width="190" /><br /><sub>配信</sub></td>
-    </tr>
-  </table>
-  <sub><b>むぎ VRM（実験）</b> — 正式なむぎとは別の検証キャラです。胸上表示・まばたき・口パク・視線・表情・揺れ物をThree.js／three-vrmで動かします。</sub>
   <h3>Live2D動作例（非同梱）</h3>
   <table>
     <tr>
@@ -76,7 +68,7 @@
       <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写試作の通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写試作の配信表示" width="150" /><br /><sub><b>実写（試作）</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写物理演算テストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写物理演算テストの配信表示" width="150" /><br /><sub><b>実写・物理演算テスト</b><br />84フレーム／局所バネ物理</sub></td>
     </tr>
   </table>
   <sub>
@@ -96,12 +88,11 @@
 |---|---|---:|---:|---:|---:|---:|---:|
 | むぎ / りん / まい / りん（自作THA3） | PNG | ○ | ◎ | ◎ | ◎ | ◎ | — |
 | こはる / セナ / ノア | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
-| 実写（試作） | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
-| むぎ VRM（実験） | VRM 1.0 | ◎ | ◎ | ◎ | ◎ | ◎ | Spring Bone |
+| 実写・物理演算テスト | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎（8領域） |
 | ひより / はる / イプシロン / まお / レン / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
-PNGの口パクは音声ありなら声量同期、ミュート中でも返答中はタイマー同期で動きます。Live2Dはモデルに存在するパラメータと物理設定の範囲で動き、ライスだけはモデル設定により口パクを無効にしています。VRMは実験キャラとして `cargo xtask setup vrm` で固定ランタイムを取得した環境で表示します。低頭身2Dは上半身、長身・実写・Live2D／VRMは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)、VRM詳細は[VRM実験キャラ資料](docs/vrm/VRM.md)に固定しています。
+PNGの口パクは音声ありなら声量同期、ミュート中でも返答中はタイマー同期で動きます。Live2Dはモデルに存在するパラメータと物理設定の範囲で動き、ライスだけはモデル設定により口パクを無効にしています。通常2Dは複数領域のローカルバネ物理に対応し、実写テストキャラは84フレームと髪・胸元・リボンの60fpsバネ計算を併用します。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
 
 ---
 
@@ -269,7 +260,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
       <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
     </tr>
   </table>
-  <sub>既定寸法は、ミニ360×560／ペット900×600／チャット520×760／バー900×320／作業1400×850／配信1920×1080（フルHD）／ウィジェット440×600です。寸法は形式ごとに覚えます。枠なしウィンドウの<b>辺をドラッグすると幅または高さ、四隅をドラッグすると縦横を同時に変更</b>できます。キャラをドラッグするとウィンドウを動かせます。低頭身2Dは上半身、長身・実写・Live2D／VRMは胸全体がぎりぎり入る胸上が初期構図です。「配置」モードではOBSのようにキャラやフキダシを直接ドラッグ／拡大縮小し、表示形式ごとに保存できます。</sub>
+  <sub>既定寸法は、ミニ360×560／ペット900×600／チャット520×760／バー900×320／作業1400×850／配信1920×1080（フルHD）／ウィジェット440×600です。寸法は形式ごとに覚えます。枠なしウィンドウの<b>辺をドラッグすると幅または高さ、四隅をドラッグすると縦横を同時に変更</b>できます。キャラをドラッグするとウィンドウを動かせます。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上が初期構図です。「配置」モードではOBSのようにキャラやフキダシを直接ドラッグ／拡大縮小し、表示形式ごとに保存できます。</sub>
 </div>
 
 ### キャラクター

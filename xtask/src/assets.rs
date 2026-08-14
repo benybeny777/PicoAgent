@@ -247,9 +247,6 @@ fn validate_character_asset_generation(
     character_dir: &Path,
     manifest: &serde_json::Value,
 ) -> Result<()> {
-    if manifest.get("vrm").is_some() {
-        return validate_vrm_model(character_dir, &manifest["vrm"]);
-    }
     if manifest.get("live2d").is_some() {
         return validate_live2d_model_sets(character_dir, manifest);
     }
@@ -295,32 +292,6 @@ fn validate_character_asset_generation(
             character_dir.display(),
             entries.join(", ")
         );
-    }
-    Ok(())
-}
-
-fn validate_vrm_model(character_dir: &Path, vrm: &serde_json::Value) -> Result<()> {
-    let model = vrm
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("{} のVRMモデル定義が空です", character_dir.display()))?;
-    if !model.to_ascii_lowercase().ends_with(".vrm") {
-        bail!(
-            "{} のVRMモデル拡張子が不正です: {model}",
-            character_dir.display()
-        );
-    }
-    let path = character_dir.join(model);
-    if !path.is_file() {
-        bail!(
-            "{} のVRMモデルがありません: {model}",
-            character_dir.display()
-        );
-    }
-    let bytes = fs::read(&path)?;
-    if bytes.len() < 20 || &bytes[..4] != b"glTF" || &bytes[16..20] != b"JSON" {
-        bail!("{} は有効なGLB形式のVRMではありません", path.display());
     }
     Ok(())
 }

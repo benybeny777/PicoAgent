@@ -38,19 +38,11 @@ Live2Dの「ひより」は動作例です。ほかのモデルは下の一覧�
 | **こはる** — 親しみやすい作業相棒 | ![こはる通常](assets/character-koharu.webp) | ![こはる配信](assets/character-koharu-stream.webp) |
 | **セナ** — 凛とした歌姫系作業相棒 | ![セナ通常](assets/character-sena.webp) | ![セナ配信](assets/character-sena-stream.webp) |
 | **ノア** — 上品な吸血姫風メイド | ![ノア通常](assets/character-noa.webp) | ![ノア配信](assets/character-noa-stream.webp) |
-| **実写（試作）** — 実写調で制作した成人キャラクター | ![実写通常](assets/character-photoreal-prototype.webp) | ![実写配信](assets/character-photoreal-prototype-stream.webp) |
+| **実写・物理演算テスト** — 84フレームと局所バネ物理を持つ成人キャラクター | ![実写通常](assets/character-photoreal-prototype.webp) | ![実写配信](assets/character-photoreal-prototype-stream.webp) |
 
-全7体が、まばたき、口パク、視線、喜び／悲しみ、待機モーションに対応します。さらに、利用権を持つ1枚絵から17キーポーズ・42フレームの2Dキャラを作る試験機能もあります。制作コンポーネントは必要時に別途導入し、入力絵や環境により仕上がりは変わります。
+全7体が、まばたき、口パク、視線、喜び／悲しみ、待機モーションに対応します。実写テストキャラでは84フレームと、髪・胸・肩・腰の局所バネ物理も検証しています。
 
-低頭身2Dは上半身、長身・実写・Live2D／VRMは胸全体がぎりぎり入る胸上、チャット／バーの小型アイコンは首上を初期構図にします。利用者が保存したキャラ別構図は初期値より優先します。
-
-### VRM実験キャラクター
-
-| キャラクター | 通常表示 | 配信表示 |
-|---|---|---|
-| **むぎ VRM（実験）** — 正式なむぎとは別の検証キャラ | ![むぎVRM通常](assets/character-mugi-vrm-experimental.webp) | ![むぎVRM配信](assets/character-mugi-vrm-experimental-stream.webp) |
-
-Three.js／three-vrmで胸上表示、まばたき、口パク、視線、表情、揺れ物を検証しています。実験枠のため付属7体の数には含めません。
+低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上、チャット／バーの小型アイコンは首上を初期構図にします。利用者が保存したキャラ別構図は初期値より優先します。
 
 ## 機能一覧
 

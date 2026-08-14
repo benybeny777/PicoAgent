@@ -139,16 +139,19 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 }
 .character-view > img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%; }
 .character-view > canvas { position:absolute; left:50%; bottom:0; transform:translateX(-50%); }
-.character-secondary-motion {
+.character-spring-motion {
   position:absolute; inset:0; z-index:1; overflow:hidden; pointer-events:none;
-  -webkit-mask-image:radial-gradient(ellipse var(--secondary-radius-x,19%) var(--secondary-radius-y,12%) at var(--secondary-center-x,50%) var(--secondary-center-y,34%),#000 18%,rgba(0,0,0,.72) 43%,rgba(0,0,0,.28) 68%,rgba(0,0,0,.08) 84%,transparent 100%);
-  mask-image:radial-gradient(ellipse var(--secondary-radius-x,19%) var(--secondary-radius-y,12%) at var(--secondary-center-x,50%) var(--secondary-center-y,34%),#000 18%,rgba(0,0,0,.72) 43%,rgba(0,0,0,.28) 68%,rgba(0,0,0,.08) 84%,transparent 100%);
 }
-.character-secondary-motion[hidden] { display:none!important; }
-.character-secondary-motion > img {
+.character-spring-motion[hidden] { display:none!important; }
+.character-spring-region {
+  position:absolute; inset:0; z-index:1; overflow:hidden; pointer-events:none;
+  -webkit-mask-image:radial-gradient(ellipse var(--spring-radius-x,19%) var(--spring-radius-y,12%) at var(--spring-center-x,50%) var(--spring-center-y,34%),#000 12%,rgba(0,0,0,.76) 40%,rgba(0,0,0,.32) 67%,rgba(0,0,0,.08) 84%,transparent 100%);
+  mask-image:radial-gradient(ellipse var(--spring-radius-x,19%) var(--spring-radius-y,12%) at var(--spring-center-x,50%) var(--spring-center-y,34%),#000 12%,rgba(0,0,0,.76) 40%,rgba(0,0,0,.32) 67%,rgba(0,0,0,.08) 84%,transparent 100%);
+}
+.character-spring-region > img {
   position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%;
-  transform-origin:var(--secondary-center-x,50%) var(--secondary-center-y,34%);
-  animation:pet-secondary-bust var(--secondary-duration,3.8s) cubic-bezier(.45,.05,.35,1) infinite;
+  transform-origin:var(--spring-center-x,50%) var(--spring-center-y,34%);
+  will-change:transform;
 }
 /* 起動直後（音声エンジン準備待ち）は通常のキャラ・フキダシを隠し、待機画面だけを見せる。
    準備完了で is-booting を外し、その瞬間に挨拶を再生する。 */
@@ -197,8 +200,6 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; will-change:transform; }
 .character canvas { position:relative; display:block; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; }
 #live2dCanvas { background:transparent !important; filter:none; }
-#vrmCanvas { background:transparent !important; filter:none; }
-.character[data-render-kind="vrm"] .character-view::before { display:none; }
 /* 2D立ち絵は透過輪郭を活かし、背景色を選ばず髪先と服の暗部が読めるようにする。
    Live2Dキャンバスには適用せず、PNGキャラだけを同じ質感へ揃える。 */
 .character[data-render-kind="2d"] .character-view::before { display:none; }
@@ -211,7 +212,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 /* 常駐アプリなので、全身を揺らし続ける状態別モーションは持たない（待機・思考・会話は
    まばたきと口パク、Live2Dのモデルモーションで伝える）。成功だけは反応が分かるよう
    1px級の一度きりの動きを残す。 */
-.character[data-motion="success"] #petSprite,.character[data-motion="pleased"] #petSprite,.character[data-motion="success"] .character-secondary-motion,.character[data-motion="pleased"] .character-secondary-motion { animation:pet-success .72s cubic-bezier(.2,.9,.3,1.25); }
+.character[data-motion="success"] #petSprite,.character[data-motion="pleased"] #petSprite { animation:pet-success .72s cubic-bezier(.2,.9,.3,1.25); }
 .character:hover img { filter:drop-shadow(0 9px 7px rgba(242,126,145,.22)) var(--pet-tone,saturate(1)) brightness(1.035); }
 .character[data-render-kind="2d"]:hover img {
   filter:
@@ -220,19 +221,13 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 }
 /* 局所レイヤーへ全身の輪郭影を再生成すると、マスク境界の内側が暗く見える。
    元画像と同じ色調だけを適用し、影は下の本体1枚に任せる。 */
-.character[data-render-kind="2d"] .character-secondary-motion > img {
+.character[data-render-kind="2d"] .character-spring-region > img {
   filter:var(--pet-tone,saturate(1)) saturate(1.045) contrast(1.025);
 }
-.character[data-render-kind="2d"]:hover .character-secondary-motion > img {
+.character[data-render-kind="2d"]:hover .character-spring-region > img {
   filter:var(--pet-tone,saturate(1)) saturate(1.055) contrast(1.03) brightness(1.025);
 }
 @keyframes pet-success { 0%,100%{transform:none} 45%{transform:translateY(-1px)} }
-@keyframes pet-secondary-bust {
-  0%,100% { transform:translateY(0) scale(1); }
-  42% { transform:translateY(var(--secondary-rise,-.38px)) scale(var(--secondary-expand-x,1.0005),var(--secondary-expand,1.0028)); }
-  58% { transform:translateY(var(--secondary-settle,.18px)) scale(.9998,var(--secondary-contract,.9988)); }
-  72% { transform:translateY(var(--secondary-return,-.1px)) scale(1.0002,1.001); }
-}
 @keyframes boot-sleep { 0%,100%{transform:translateY(1px) scale(1)} 50%{transform:translateY(-4px) scale(1.006,.996)} }
 @keyframes boot-shadow { 0%,100%{transform:scaleX(.94); opacity:.72} 50%{transform:scaleX(1.08); opacity:.48} }
 @keyframes boot-progress { 0%{left:-45%} 55%{left:32%} 100%{left:105%} }
@@ -379,7 +374,7 @@ button:disabled { opacity:.48; cursor:default; }
 .notice-actions button:first-child { background:#64a98a; }
 .notice-actions button:disabled { opacity:.55; }
 .notice-empty { padding:18px 4px; color:var(--muted); font-size:12px; text-align:center; }
-@media (prefers-reduced-motion:reduce) { .character img,.character-secondary-motion,.boot-character,.boot-stage::before,.boot-stage::after,.boot-progress span,.boot-log-line { animation:none!important; } .character-secondary-motion { display:none!important; } }
+@media (prefers-reduced-motion:reduce) { .character img,.character-spring-motion,.boot-character,.boot-stage::before,.boot-stage::after,.boot-progress span,.boot-log-line { animation:none!important; } .character-spring-motion { display:none!important; } }
 .reply { white-space:normal; }
 .md { font-size:13px; line-height:1.65; word-break:break-word; }
 .md h1,.md h2,.md h3 { font-weight:700; margin:8px 0 3px; line-height:1.35; }
@@ -829,10 +824,10 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   inset:0 auto auto -80%; width:260%; height:260%;
   object-fit:contain; object-position:50% 0%;
 }
-.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion {
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-motion {
   inset:0 auto auto -80%; width:260%; height:260%;
 }
-.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion > img {
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-region > img {
   object-position:50% 0%;
 }
 /* Low-proportion 2D characters use an upper-body crop in stream mode.
@@ -840,8 +835,16 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-view > img {
   inset:0 auto auto -32.5%; width:165%; height:165%;
 }
-.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-secondary-motion {
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-spring-motion {
   inset:0 auto auto -32.5%; width:165%; height:165%;
+}
+/* ネイティブ胸上原画は全身絵向けの260%クロップを重ねず、胸全体までをそのまま使う。 */
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-view > img {
+  inset:0 auto auto 0; width:100%; height:135%;
+  object-fit:contain; object-position:50% 0%;
+}
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-spring-motion {
+  inset:0 auto auto 0; width:100%; height:135%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0;
@@ -929,8 +932,13 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
    （アイコンを動かしても意味がなく、上端基準の切り出しと二重に変形してしまう）。 */
 [data-layout="chat"] .character-view,
 [data-layout="bar"] .character-view { transform:none; }
-[data-layout="chat"] .character-secondary-motion,
-[data-layout="bar"] .character-secondary-motion { display:none!important; }
+[data-layout="chat"] .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-view > img,
+[data-layout="bar"] .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-view > img {
+  inset:-8% auto auto -42.5%; width:185%; height:185%;
+  object-fit:cover; object-position:50% 0%;
+}
+[data-layout="chat"] .character-spring-motion,
+[data-layout="bar"] .character-spring-motion { display:none!important; }
 
 /* ── 全形式の可読性仕上げ ────────────────────────────────────────────────
    配信形式だけを大きくした状態から、残り7形式も入力・本文・キャラが用途に応じて
@@ -953,10 +961,10 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="widget"] .character-view > img {
   object-fit:contain; object-position:50% 0%;
 }
-[data-layout="mascot"] .character-secondary-motion > img,
-[data-layout="pet"] .character-secondary-motion > img,
-[data-layout="workspace"] .character-secondary-motion > img,
-[data-layout="widget"] .character-secondary-motion > img {
+[data-layout="mascot"] .character-spring-region > img,
+[data-layout="pet"] .character-spring-region > img,
+[data-layout="workspace"] .character-spring-region > img,
+[data-layout="widget"] .character-spring-region > img {
   object-fit:contain; object-position:50% 0%;
 }
 /* 2D立ち絵は以前の上半身位置を維持し、共通の --char-zoom に1.32倍を重ねる。

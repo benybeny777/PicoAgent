@@ -28,8 +28,7 @@ const noticeList = document.getElementById("noticeList");
 const noticeClear = document.getElementById("noticeClear");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
-const characterSecondaryMotion = document.getElementById("characterSecondaryMotion");
-const characterSecondarySprite = document.getElementById("characterSecondarySprite");
+const characterSpringMotion = document.getElementById("characterSpringMotion");
 const characterView = document.getElementById("characterView");
 const online = document.getElementById("online");
 const relationshipButton = document.getElementById("relationshipButton");
@@ -241,7 +240,6 @@ window.addEventListener("beforeunload", () => {
     logApp("warn", "終了時に音声解析を解放できませんでした", errorDetail(error));
   });
   stopLive2D();
-  stopVRM();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
 
@@ -688,55 +686,83 @@ function resolveLive2dConfig(manifest, variant) {
   return variant?.live2d || manifest.live2d || null;
 }
 
-function resolveVrmConfig(manifest, variant) {
-  if (variant?.vrm === false) return null;
-  return variant?.vrm || manifest.vrm || null;
-}
+let activeSpringMotion = [];
+let springLastAt = 0;
 
-let activeSecondaryMotion = null;
-
-function syncSecondaryMotionFrame() {
-  if (!activeSecondaryMotion || live2dActive || vrmActive || !characterSecondarySprite) return;
+function syncSpringMotionFrame() {
+  if (!activeSpringMotion.length || live2dActive) return;
   const source = petSprite.currentSrc || petSprite.src;
-  if (source && characterSecondarySprite.src !== source) characterSecondarySprite.src = source;
+  for (const spring of activeSpringMotion) {
+    if (source && spring.sprite.src !== source) spring.sprite.src = source;
+  }
 }
 
-function updateSecondaryMotionVisibility() {
-  if (!characterSecondaryMotion) return;
-  characterSecondaryMotion.hidden = !activeSecondaryMotion || live2dActive || vrmActive;
-  if (!characterSecondaryMotion.hidden) syncSecondaryMotionFrame();
+function updateSpringMotionVisibility() {
+  if (!characterSpringMotion) return;
+  characterSpringMotion.hidden = !activeSpringMotion.length || live2dActive;
+  if (!characterSpringMotion.hidden) syncSpringMotionFrame();
 }
 
-function configureSecondaryMotion(config) {
-  const numberInRange = (value, minimum, maximum, fallback) => {
+function configureSpringMotion(config, legacyConfig = null) {
+  if (!characterSpringMotion) return;
+  characterSpringMotion.replaceChildren();
+  activeSpringMotion = [];
+  const legacy = legacyConfig?.type === "bust" ? [{
+    id: "bust", centerX: legacyConfig.centerX, centerY: legacyConfig.centerY,
+    radiusX: legacyConfig.radiusX, radiusY: legacyConfig.radiusY,
+    drive: Number(legacyConfig.strength || 1) * 0.55,
+  }] : [];
+  const regions = Array.isArray(config?.regions) ? config.regions : legacy;
+  const clamp = (value, minimum, maximum, fallback) => {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
   };
-  activeSecondaryMotion = config?.type === "bust" ? config : null;
-  if (!activeSecondaryMotion || !characterSecondaryMotion) {
-    updateSecondaryMotionVisibility();
-    return;
+  regions.slice(0, 12).forEach((region, index) => {
+    const layer = document.createElement("div");
+    layer.className = "character-spring-region";
+    layer.style.setProperty("--spring-center-x", `${clamp(region.centerX, 0, 100, 50)}%`);
+    layer.style.setProperty("--spring-center-y", `${clamp(region.centerY, 0, 100, 34)}%`);
+    layer.style.setProperty("--spring-radius-x", `${clamp(region.radiusX, 3, 48, 16)}%`);
+    layer.style.setProperty("--spring-radius-y", `${clamp(region.radiusY, 3, 42, 10)}%`);
+    const sprite = document.createElement("img");
+    sprite.alt = "";
+    sprite.draggable = false;
+    sprite.setAttribute("data-tauri-drag-region", "");
+    layer.append(sprite);
+    characterSpringMotion.append(layer);
+    activeSpringMotion.push({
+      layer, sprite, position: 0, velocity: 0,
+      stiffness: clamp(region.stiffness, 4, 80, 22),
+      damping: clamp(region.damping, 1, 24, 8),
+      drive: clamp(region.drive, 0.05, 2.4, 0.45),
+      frequency: clamp(region.frequency, 0.08, 1.2, 0.24),
+      phase: clamp(region.phase, -6.3, 6.3, index * 0.7),
+      axisX: clamp(region.axisX, -1, 1, 0),
+      axisY: clamp(region.axisY, -1, 1, -1),
+      rotation: clamp(region.rotation, -2, 2, 0),
+      scale: clamp(region.scale, 0, 0.012, 0.0025),
+    });
+  });
+  springLastAt = 0;
+  updateSpringMotionVisibility();
+}
+
+function animateSpringMotion(now) {
+  if (!activeSpringMotion.length || live2dActive) return;
+  const dt = springLastAt ? Math.min(1 / 30, Math.max(1 / 240, (now - springLastAt) / 1000)) : 1 / 60;
+  springLastAt = now;
+  const stopped = reduceMotion;
+  for (const spring of activeSpringMotion) {
+    const target = stopped ? 0 : Math.sin((now / 1000) * Math.PI * 2 * spring.frequency + spring.phase) * spring.drive;
+    const acceleration = (target - spring.position) * spring.stiffness - spring.velocity * spring.damping;
+    spring.velocity += acceleration * dt;
+    spring.position += spring.velocity * dt;
+    if (stopped && Math.abs(spring.position) < 0.002 && Math.abs(spring.velocity) < 0.002) {
+      spring.position = 0; spring.velocity = 0;
+    }
+    const p = spring.position;
+    spring.sprite.style.transform = `translate(${(p * spring.axisX).toFixed(3)}px, ${(p * spring.axisY).toFixed(3)}px) rotate(${(p * spring.rotation).toFixed(3)}deg) scale(${(1 + Math.abs(p) * spring.scale).toFixed(5)})`;
   }
-  const centerX = numberInRange(config.centerX, 0, 100, 50);
-  const centerY = numberInRange(config.centerY, 0, 100, 34);
-  const radiusX = numberInRange(config.radiusX, 4, 45, 16);
-  const radiusY = numberInRange(config.radiusY, 4, 35, 10);
-  const strength = numberInRange(config.strength, 0.2, 2, 1);
-  const duration = numberInRange(config.duration, 1.8, 8, 3.8);
-  characterSecondaryMotion.style.setProperty("--secondary-center-x", `${centerX}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-center-y", `${centerY}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-radius-x", `${radiusX}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-radius-y", `${radiusY}%`);
-  // 同じ全身画像の局所複製なので、大きな移動・拡大はマスク境界を別パーツのように見せる。
-  // 横幅より縦方向を中心にごく小さく変形し、広いフェザーで本体へ馴染ませる。
-  characterSecondaryMotion.style.setProperty("--secondary-rise", `${(-0.9 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-settle", `${(0.42 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-return", `${(-0.24 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-expand-x", (1 + 0.0012 * strength).toFixed(4));
-  characterSecondaryMotion.style.setProperty("--secondary-expand", (1 + 0.0065 * strength).toFixed(4));
-  characterSecondaryMotion.style.setProperty("--secondary-contract", (1 - 0.0028 * strength).toFixed(4));
-  characterSecondaryMotion.style.setProperty("--secondary-duration", `${duration}s`);
-  updateSecondaryMotionVisibility();
 }
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
@@ -746,10 +772,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
-  const hasVrmDefinition = config => Boolean(config?.model);
-  const hasAnyVrm = hasVrmDefinition(manifest.vrm)
-    || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasVrmDefinition(item?.vrm)));
-  if (!hasAnyLive2d && !hasAnyVrm && !manifest.animations?.idle) throw new Error("VRM、Live2D、idleアニメーションのいずれも定義されていません");
+  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("Live2D、idleアニメーションのいずれも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
@@ -762,33 +785,18 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
   character.dataset.bodyProportion = manifest.bodyProportion === "compact" ? "compact" : "standard";
+  character.dataset.sourceFraming = manifest.sourceFraming === "native-bust" ? "native-bust" : "default";
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
-  activeVrmConfig = resolveVrmConfig(manifest, variant);
-  configureSecondaryMotion(variant?.secondaryMotion ?? manifest.secondaryMotion);
+  configureSpringMotion(variant?.springPhysics ?? manifest.springPhysics, variant?.secondaryMotion ?? manifest.secondaryMotion);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
-  if (hasVrmDefinition(activeVrmConfig)) {
-    rigAvailable = false;
-    stopLive2D();
-    try {
-      await startVRM(activeVrmConfig);
-    } catch (error) {
-      stopVRM();
-      activeVrmConfig = null;
-      if (!animations.idle) throw error;
-      logApp("error", "VRMの初期化に失敗しました（PNG表示で継続）", errorDetail(error));
-      setStatus("VRMを読み込めないのでPNG表示で続けるね");
-      preloadAnimations();
-      await probeRigLayers();
-    }
-  } else if (hasLive2dDefinition(activeLive2dConfig)) {
-    stopVRM();
+  if (hasLive2dDefinition(activeLive2dConfig)) {
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
       await startLive2D(activeLive2dConfig);
@@ -806,7 +814,6 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     }
   } else {
     stopLive2D();
-    stopVRM();
     preloadAnimations();
     await probeRigLayers(); // layers 素材があればリップシンク対応
   }
@@ -874,9 +881,8 @@ function setAnimation(name, force = false) {
   const sourceName = animations[name] ? name : (fallbacks[name] && animations[fallbacks[name]] ? fallbacks[name] : "idle");
   const requestedMotion = animations[name]?.motion || name;
   if (!force && animationName === sourceName && character.dataset.motion === requestedMotion) return;
-  animationName = (animations[sourceName] || live2dActive || vrmActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
+  animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
-  if (vrmActive) { character.dataset.motion = animationName; playVRMMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
@@ -896,8 +902,9 @@ function frameDuration(animation, index) {
   return 1000 / animation.fps;
 }
 function animate(now) {
+  animateSpringMotion(now);
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
-  if (live2dActive || vrmActive) { animationRequestId = requestAnimationFrame(animate); return; }
+  if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
   // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
   // 待機・思考などの装飾モーションだけを先頭フレームへ止め、ループ自体は継続する。
   if (reduceMotion && animationName !== "talking") {
@@ -1060,8 +1067,6 @@ function detachLipSyncAudio() {
   rigMouthLevel = 0;
   rigMouthOpen = false;
   live2dMouth = -1;
-  vrmMouth = -1;
-  vrmController?.setMouth(0);
   rigRefresh();
 }
 
@@ -1081,12 +1086,12 @@ function retryPendingLipSync() {
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
-  if (!rigAvailable && !live2dActive && !vrmActive) {
+  if (!rigAvailable && !live2dActive) {
     logApp("info", "リップシンクを保留しました", "キャラクターの表示準備が終わってから接続します");
     pendingLipSyncAudio = audio;
     return;
   }
-  if (!live2dActive && !vrmActive) startRig();
+  if (!live2dActive) startRig();
   detachLipSyncAudio();
   // WebAudio の振幅解析を試み、使えない環境ではタイマー口パクへフォールバックする。
   let useTimer = true;
@@ -1114,7 +1119,6 @@ function attachLipSync(audio) {
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
       if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
-      else if (vrmActive) setVrmMouth(rigMouthOpen ? 0.58 : 0.04);
       else rigRefresh();
     }, 150);
     return;
@@ -1122,7 +1126,7 @@ function attachLipSync(audio) {
   const data = new Uint8Array(rigAnalyser.fftSize);
   let peak = 0.04; // 音量差に追従する適応しきい値
   const analyserLoop = () => {
-    if ((!rigActive && !live2dActive && !vrmActive) || !rigAnalyser) return;
+    if ((!rigActive && !live2dActive) || !rigAnalyser) return;
     rigAnalyser.getByteTimeDomainData(data);
     let sum = 0;
     for (let i = 0; i < data.length; i += 1) {
@@ -1148,8 +1152,6 @@ function attachLipSync(audio) {
     if (rigMouthLevel < 0.015) rigMouthLevel = 0;
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
-    } else if (vrmActive) {
-      setVrmMouth(rigMouthLevel);
     } else {
       rigMouthOpen = rigMouthLevel > 0.3;
       rigRefresh();
@@ -1191,7 +1193,7 @@ function stopRig() {
 // 読み上げ終了時の処理。layers を持つキャラは待機中も常時リグ（まばたき）を続けるため
 // 音声解析だけ解除し、リグ非対応キャラのみ完全に終了してフレーム表示へ戻す。
 function stopLipSync() {
-  if (live2dActive || vrmActive) { detachLipSyncAudio(); return; }
+  if (live2dActive) { detachLipSyncAudio(); return; }
   if (rigAvailable) { detachLipSyncAudio(); return; }
   const wasActive = rigActive;
   stopRig();
@@ -1392,7 +1394,7 @@ async function startLive2D(cfg) {
   character.dataset.renderKind = "live2d";
   applyCharacterZoom(characterZoom);
   petSprite.style.display = "none";
-  updateSecondaryMotionVisibility();
+  updateSpringMotionVisibility();
   if (motionEnabled && cfg.motions?.idle) {
     const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
     model.motion(cfg.motions.idle, 0, idlePriority);
@@ -1428,62 +1430,7 @@ function stopLive2D() {
     applyCharacterZoom(characterZoom);
     petSprite.style.display = "";
   }
-  updateSecondaryMotionVisibility();
-}
-
-// ── VRM 1.0 本体レンダリング ────────────────────────────────────────
-let vrmActive = false;
-let activeVrmConfig = null;
-let vrmController = null;
-let vrmCanvas = null;
-let vrmMouth = -1;
-
-async function startVRM(config) {
-  stopVRM();
-  if (!vrmCanvas) {
-    vrmCanvas = document.createElement("canvas");
-    vrmCanvas.id = "vrmCanvas";
-    characterView.insertBefore(vrmCanvas, petSprite);
-  }
-  vrmCanvas.style.display = "";
-  const runtime = await import("./vrm-runtime.js");
-  vrmController = await runtime.createVrmRuntime(
-    vrmCanvas,
-    `${characterRoot}/${config.model}`,
-    {
-      ...config,
-      width: LIVE2D_RENDER_WIDTH,
-      height: LIVE2D_RENDER_HEIGHT,
-    },
-  );
-  vrmActive = true;
-  character.dataset.renderKind = "vrm";
-  petSprite.style.display = "none";
-  updateSecondaryMotionVisibility();
-  applyCharacterZoom(characterZoom);
-  retryPendingLipSync();
-}
-
-function setVrmMouth(value) {
-  vrmMouth = Number(value);
-  vrmController?.setMouth(vrmMouth >= 0 ? vrmMouth : 0);
-}
-
-function playVRMMotion(name) {
-  vrmController?.setState(name);
-}
-
-function stopVRM() {
-  vrmMouth = -1;
-  vrmController?.destroy();
-  vrmController = null;
-  if (vrmCanvas) vrmCanvas.style.display = "none";
-  if (vrmActive) {
-    vrmActive = false;
-    character.dataset.renderKind = "2d";
-    petSprite.style.display = "";
-  }
-  updateSecondaryMotionVisibility();
+  updateSpringMotionVisibility();
 }
 
 // ── 疑似視線追従: 設定ONかつ顔の近くにいるときだけ、短時間マウス方向を見る ──
@@ -1531,12 +1478,6 @@ if (!reduceMotion) {
           );
         } else controller.focus(0, 0);
       }
-    }
-    if (vrmActive && vrmController) {
-      vrmController.focus(
-        nearFace && !deadZone ? Math.max(-0.38, Math.min(0.38, normalizedX * 0.32)) : 0,
-        nearFace && !deadZone ? Math.max(-0.2, Math.min(0.2, -normalizedY * 0.18)) : 0,
-      );
     }
     const dx = nearFace ? Math.max(-1, Math.min(1, normalizedX)) : 0;
     character.style.setProperty("--look-rot", `${(dx * 1.15).toFixed(2)}deg`);
@@ -2683,7 +2624,6 @@ character.addEventListener("click", event => {
   character.classList.add("boop");
   // Live2D はタップモーションで反応する（boop の CSS は img にしか効かない）。
   if (live2dActive && !currentVoice) playLive2DMotion("talking");
-  if (vrmActive && !currentVoice) playVRMMotion("pleased");
   const rect = character.getBoundingClientRect();
   const y = (event.clientY - rect.top) / Math.max(1, rect.height);
   const x = (event.clientX - rect.left) / Math.max(1, rect.width);
@@ -3907,7 +3847,7 @@ function applyCharacterZoom(zoom) {
   // Live2D は character.json の scale / offsetY がすでにモデルごとの上半身表示へ調整済み。
   // PNG向けの既定 1.55 倍をさらに重ねると、ひよりは顔だけに切り取られてしまう。
   // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
-  const viewZoom = live2dActive || vrmActive ? characterZoom / 1.55 : characterZoom;
+  const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
 }
 
@@ -3923,7 +3863,7 @@ function applyCharacterFraming() {
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
-    // 低頭身2Dは以前の上半身位置を維持し、長身・実写・Live2D／VRMは胸上を標準にする。
+    // 低頭身2Dは以前の上半身位置を維持し、長身・実写・Live2Dは胸上を標準にする。
     // manifestの既定構図は原画固有の余白だけを吸収し、利用者の保存値がある場合は使わない。
     const isCompact2d = character.dataset.renderKind === "2d"
       && character.dataset.bodyProportion === "compact";
@@ -4025,7 +3965,7 @@ function markActivity() {
 
 function fallAsleep() {
   // 全画面で履歴を読んでいる間（マウス操作なしでも閲覧中）は寝ない。
-  if (napping || busy || currentVoice || !composer.hidden || live2dActive || vrmActive
+  if (napping || busy || currentVoice || !composer.hidden || live2dActive
     || bubble.classList.contains("fullscreen")) return;
   const sleeping = characterManifest?.boot?.sleeping;
   if (!sleeping) return;
@@ -4314,7 +4254,7 @@ function applyBubbleLayout(width, height, left, top) {
 window.addEventListener("resize", refreshBubblePlacement);
 petSprite.addEventListener("load", () => {
   refreshBubblePlacement();
-  syncSecondaryMotionFrame();
+  syncSpringMotionFrame();
 });
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;

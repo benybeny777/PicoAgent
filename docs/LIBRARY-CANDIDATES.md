@@ -28,12 +28,12 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 ## 1. 導入済み Moveable に残っている宿題
 
 Moveable は `ui/vendor/moveable/moveable.min.js` と `LICENSE` を**Git へ直接コミットする形**で入っている
-（Live2D / VRM のような `cargo xtask setup` 取得ではない）。MIT で再配布に条件が無く、配置操作は基本機能なので
+（Live2Dのような `cargo xtask setup` 取得ではない）。MIT で再配布に条件が無く、配置操作は基本機能なので
 「clone しただけで動く」この形が妥当。以下は**その形を選んだことで残っている、未処理の3点**。
 
 ### 1-1. 設計ガードが `ui/vendor/` を素通ししている（要修正）
 
-- `.gitignore` が無視しているのは `ui/vendor/live2d/` と `ui/vendor/vrm/` の**2つだけ**
+- `.gitignore` が無視しているのは `ui/vendor/live2d/` だけ
 - 一方 `bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、理由を
   「`cargo xtask setup live2d` が取得する Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている
 - **`ui/vendor/moveable/` は Git 管理下にあり製品へ入るのに、同梱物の範囲を固定するはずの検査が当たっていない。**
@@ -41,7 +41,7 @@ Moveable は `ui/vendor/moveable/moveable.min.js` と `LICENSE` を**Git へ直�
 
 ### 1-2. 除外を狭めると `LICENSE` が拡張子検査に引っかかる（先に決めておく）
 
-`UI_GENERATED_DIRS` の除外を `vendor/live2d` と `vendor/vrm` へ狭めると、`ui/vendor/moveable/LICENSE` が
+`UI_GENERATED_DIRS` の除外を `vendor/live2d` へ狭めると、`ui/vendor/moveable/LICENSE` が
 `ui配下に開発用ファイルを置かない` テストで落ちる。拡張子が無いファイルは
 `extension().map(...).unwrap_or_default()` で空文字になり、`ALLOWED_UI_EXTENSIONS`（12種）に一致しないため。
 
@@ -61,7 +61,7 @@ Moveable は `ui/vendor/moveable/moveable.min.js` と `LICENSE` を**Git へ直�
 ### 1-4. 参考: 読み込みかた
 
 CSP は `script-src 'self'` なので追加の緩和は不要。`ui-dist/` へは `ui/` の写しとして自動で入る。
-既存の前例は `ui/index.html` の importmap（three / three-vrm）と `renderer.js::loadScriptOnce`（Live2D）の2通り。
+既存の前例は `renderer.js::loadScriptOnce` によるLive2Dランタイムの読込。
 
 ---
 
@@ -122,7 +122,6 @@ CSP は `script-src 'self'` なので追加の緩和は不要。`ui-dist/` へ�
 | `tauri-plugin-autostart` | MIT・Apache-2.0 | — | デスクトップペットではログイン時起動は定番の要望。設定1項目で足りる |
 | `tauri-plugin-updater` | MIT・Apache-2.0 | `latest.json` を見て手動更新する現行導線 | 価値は大きいが**署名鍵の運用が増える**（`license.rs` の配布鍵とは別建て）。`signing.required=false` / `updates.required=false` を正本にしている現在の方針と衝突するので、方針変更とセットで |
 | `insta`（スナップショットテスト） | Apache-2.0 | `message.rs` の正規形、`character_pack.rs` の検証結果の期待値 | 仕様の固定に向く。テスト専用依存 |
-| `@pixiv/three-vrm-animation` | MIT | — | `mugi-vrm-experimental` があるので VRMA モーション対応は自然な次の一歩。実験キャラの位置づけを決めてから |
 
 ---
 

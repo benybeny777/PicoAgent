@@ -82,13 +82,13 @@
 Moveable 本体（`ui/vendor/moveable/moveable.min.js` の直コミットと「配置」モード）は導入済み。以下はその残り。
 背景と選択肢は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §1。
 
-- **なぜ**: `.gitignore` が無視しているのは `ui/vendor/live2d/` と `ui/vendor/vrm/` の2つだけなのに、
+- **なぜ**: `.gitignore` が無視しているのは `ui/vendor/live2d/` だけなのに、
   `src-tauri/src/bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、
   理由を「Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている。**`ui/vendor/moveable/` は
   Git 管理下にあり製品へ入るのに、同梱物の範囲を固定するはずの検査が当たっていない。** さらに
   `docs/THIRD-PARTY-NOTICES.md` に Moveable の項目が無く、MIT の表示義務を満たしていない。
 - **やること**:
-  1. `UI_GENERATED_DIRS` の除外を `vendor/live2d` と `vendor/vrm` へ狭め、コメントの説明を実態へ直す。
+  1. `UI_GENERATED_DIRS` の除外を `vendor/live2d` へ狭め、コメントの説明を実態へ直す。
   2. 狭めると `ui/vendor/moveable/LICENSE` が `ui配下に開発用ファイルを置かない` で落ちる（拡張子なしは
      空文字になり `ALLOWED_UI_EXTENSIONS` に一致しない）。ライセンス本文を `THIRD-PARTY-NOTICES.md` へ移して
      `ui/` から消す／`LICENSE.txt` へ改名して `txt` を allowlist へ足す／例外として明記する、から選ぶ。

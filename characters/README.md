@@ -5,7 +5,7 @@
 PicoAgent のキャラクター画像は、各キャラフォルダを同じ構成にそろえて管理する。
 正本は `characters/<キャラクターID>/` で、`ui/assets/characters/` は同期生成物。
 
-低頭身2Dは上半身、長身・実写・Live2D・VRMは胸全体がぎりぎり入る胸上を標準にする。素材は全身・透過で保持し、manifestの `bodyProportion`、`defaultFraming`、`streamFraming` で原画固有の余白だけを非破壊に吸収する。利用者が対象キャラへ保存した構図は既定値より優先する。チャット／バーの小型アイコンは共通CSSで首上を切り出す。
+低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を標準にする。素材は透過・余白つきで保持し、manifestの `bodyProportion`、`defaultFraming`、`streamFraming` で原画固有の余白だけを非破壊に吸収する。利用者が対象キャラへ保存した構図は既定値より優先する。チャット／バーの小型アイコンは共通CSSで首上を切り出す。
 
 組み込みキャラの既定声は `character.json` の `voice` とバックエンドの
 `default_character_tts_voice` を同じモデルUUID・話者UUID・スタイル名にそろえる。
@@ -13,7 +13,6 @@ PicoAgent のキャラクター画像は、各キャラフォルダを同じ構�
 Live2D キャラ（`character.json` に `live2d` を持つキャラ）は本ページの連番フレーム構成を使わない。
 末尾の「Live2D キャラクター」を参照。
 
-VRMキャラ（`character.json` に `vrm` を持つキャラ）も連番フレームを使わない。実験モデルの再生成と検査は [VRM実験キャラ資料](../docs/vrm/VRM.md) を参照する。
 
 ## 必須ファイル
 
@@ -34,7 +33,7 @@ characters/<id>/
 `animations/` 配下は `scripts/build-character-animations.py` で生成する。手で直接直さない。
 `source.png` などの元画像は任意の制作素材。実行時に使わないPSD・確認用シート・生成途中画像は、必要がなくなったらリポジトリへ残さない。
 
-同梱PNG 8体は `motionProfile=full` を持ち、`base`、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを共通仕様とする。状態モーションはこれらから単一世代の連番を生成し、口パクは音声ありなら声量、ミュート中なら返答状態へ同期する。`koharu` / `sena` / `noa` / `photoreal-prototype` は `secondaryMotion` の局所マスクで胸元の遅れも付ける。矩形レイヤーや色面は合成せず、透明輪郭を維持する。
+同梱PNGは `motionProfile=full` を持ち、`base`、半目／閉じ目、閉口／開口などの表情レイヤーから単一世代の連番を生成する。口パクは音声ありなら声量、ミュート中なら返答状態へ同期する。`springPhysics.regions` を持つキャラは同じフレームの局所領域を60fpsの減衰バネで重ね、髪・胸元・リボンなどに別々の遅れを付ける。`animationQualityMode=spring-high` は通常42枚の倍となる84フレームを生成する。矩形レイヤーや色面は合成せず、透明輪郭を維持する。
 
 ## 画像作成ルール
 
@@ -162,25 +161,6 @@ characters/<id>/
 - Live2D 側にも `animations` を残しておくと、**モデルが未書き出し・壊れている間は PNG 表示へ退避**できる。
   `animations` を持たせないと、モデルが読めない時点でそのキャラ自体を読み込めなくなる。
 - `persona` は別ファイルへ複製する形になる。**片方だけ直すと食い違う**ので、人格を変えるときは両方直す。
-
-## VRMキャラクター
-
-トップレベルへ次を定義すると、Three.js／three-vrmでVRM 1.0を描画する。
-
-```json
-{
-  "id": "example-vrm-experimental",
-  "vrm": {
-    "model": "model.vrm",
-    "framing": "bust",
-    "licenseUrl": "https://example.com/license"
-  }
-}
-```
-
-- VRM試作は正式キャラのvariantへ混ぜず、独立した実験キャラとして登録する。
-- `cargo xtask setup vrm` で固定版ランタイムを取得し、`cargo xtask sync-characters` でGLBと参照先を検査する。
-- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実 `renderer.js` の胸上表示とモーションを検査する。
 
 ### 同じキャラのまま「絵版」と「Live2D 版」を持つ（variant 運用）
 

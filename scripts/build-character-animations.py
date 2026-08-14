@@ -100,6 +100,29 @@ SEQUENCES = {
     ],
 }
 
+
+def doubled_sequences() -> dict[str, list[tuple[str, int]]]:
+    """Return the high-quality 84-frame sequence used with real-time springs."""
+    return {
+        name: [frame for frame in frames for _ in range(2)]
+        for name, frames in SEQUENCES.items()
+    }
+
+
+def doubled_animations() -> dict[str, dict]:
+    """Preserve timing while doubling expression keyframes."""
+    result = copy.deepcopy(ANIMATIONS)
+    for animation in result.values():
+        durations = animation.get("frameDurations", [])
+        animation["frameDurations"] = [
+            half
+            for duration in durations
+            for half in (max(16, duration // 2), max(16, duration - duration // 2))
+        ]
+        animation["frames"] *= 2
+        animation["fps"] *= 2
+    return result
+
 # THA3で追加キーポーズが揃っているキャラだけが使う42フレーム構成。
 # 通常キャラは従来のSEQUENCESをそのまま使うため、既存素材の見た目は変わらない。
 THA3_SEQUENCES = {
@@ -385,7 +408,11 @@ def build_frames(
     use_tha3_motion = quality_mode != "sharp-expression" and all(
         (layers_dir / f"{name}.png").is_file() for name in THA3_LAYER_NAMES
     )
-    sequences = THA3_SEQUENCES if use_tha3_motion else SEQUENCES
+    sequences = (
+        THA3_SEQUENCES
+        if use_tha3_motion
+        else doubled_sequences() if quality_mode == "spring-high" else SEQUENCES
+    )
     if use_tha3_motion:
         for name in THA3_LAYER_NAMES:
             layer_paths[name] = layers_dir / f"{name}.png"
@@ -457,7 +484,11 @@ def build_character(
     layer_paths = ensure_layers(character_dir)
     clean_expression_layers(layer_paths)
     build_frames(character_dir, layer_paths, disable_sway, manifest.get("animationQualityMode"))
-    manifest["animations"] = copy.deepcopy(ANIMATIONS)
+    manifest["animations"] = (
+        doubled_animations()
+        if manifest.get("animationQualityMode") == "spring-high"
+        else copy.deepcopy(ANIMATIONS)
+    )
     if version:
         manifest["assetVersion"] = f"{version}-{manifest.get('id', character_dir.name)}"
     compact_animation_frames(character_dir, manifest)

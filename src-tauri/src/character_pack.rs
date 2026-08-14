@@ -105,6 +105,7 @@ pub fn validate(source: &Path) -> Result<Value> {
     validate_animations(source, &manifest)?;
     validate_variants(source, &manifest)?;
     validate_secondary_motion(&manifest, "secondaryMotion")?;
+    validate_spring_physics(&manifest, "springPhysics")?;
     validate_interactions(&manifest)?;
     Ok(manifest)
 }
@@ -344,6 +345,7 @@ pub fn validate_variants(source: &Path, manifest: &Value) -> Result<()> {
             }
         }
         validate_secondary_motion(variant, "variants[].secondaryMotion")?;
+        validate_spring_physics(variant, "variants[].springPhysics")?;
     }
     Ok(())
 }
@@ -371,6 +373,43 @@ pub fn validate_secondary_motion(manifest: &Value, label: &str) -> Result<()> {
         };
         if !(minimum..=maximum).contains(&value) {
             bail!("{label}.{key} は {minimum} 以上 {maximum} 以下にしてください");
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_spring_physics(manifest: &Value, label: &str) -> Result<()> {
+    let Some(config) = manifest.get("springPhysics") else {
+        return Ok(());
+    };
+    let Some(regions) = config.get("regions").and_then(Value::as_array) else {
+        bail!("{label}.regions は配列で指定してください");
+    };
+    if regions.is_empty() || regions.len() > 12 {
+        bail!("{label}.regions は1件以上12件以下にしてください");
+    }
+    for (index, region) in regions.iter().enumerate() {
+        let Some(region) = region.as_object() else {
+            bail!("{label}.regions[{index}] はオブジェクトで指定してください");
+        };
+        for (key, minimum, maximum) in [
+            ("centerX", 0.0, 100.0),
+            ("centerY", 0.0, 100.0),
+            ("radiusX", 3.0, 48.0),
+            ("radiusY", 3.0, 42.0),
+            ("stiffness", 4.0, 80.0),
+            ("damping", 1.0, 24.0),
+            ("drive", 0.05, 2.4),
+            ("frequency", 0.08, 1.2),
+        ] {
+            let Some(value) = region.get(key).and_then(Value::as_f64) else {
+                bail!("{label}.regions[{index}].{key} は数値で指定してください");
+            };
+            if !(minimum..=maximum).contains(&value) {
+                bail!(
+                    "{label}.regions[{index}].{key} は {minimum} 以上 {maximum} 以下にしてください"
+                );
+            }
         }
     }
     Ok(())
@@ -530,6 +569,28 @@ mod tests {
             .expect_err("範囲外のマスクを許可した")
             .to_string();
         assert!(error.contains("radiusX"), "error: {error}");
+    }
+
+    #[test]
+    fn 通常2dのバネ物理を検証する() {
+        let valid = json!({
+            "springPhysics": { "regions": [{
+                "centerX": 50, "centerY": 48, "radiusX": 20, "radiusY": 12,
+                "stiffness": 22, "damping": 8, "drive": 0.6, "frequency": 0.24
+            }]}
+        });
+        validate_spring_physics(&valid, "springPhysics").expect("正しいバネ物理を拒否した");
+
+        let invalid = json!({
+            "springPhysics": { "regions": [{
+                "centerX": 50, "centerY": 48, "radiusX": 20, "radiusY": 12,
+                "stiffness": 22, "damping": 8, "drive": 9.0, "frequency": 0.24
+            }]}
+        });
+        let error = validate_spring_physics(&invalid, "springPhysics")
+            .expect_err("範囲外のバネ力を許可した")
+            .to_string();
+        assert!(error.contains("drive"), "error: {error}");
     }
 
     /// テクスチャ欠けは導入前に止める（通すとキャラ選択時に描画が崩れる）。

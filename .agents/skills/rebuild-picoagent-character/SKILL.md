@@ -1,65 +1,59 @@
 ---
 name: rebuild-picoagent-character
-description: PicoAgentの通常2D・Live2D・VRMキャラクターを追加・差し替え・高精細化し、瞬き、口パク、視線、感情、単一フレーム世代、実ランタイム表示まで安全に再生成する。キャラがぼやける、状態ごとに新旧画像が混ざる、VRM実験キャラを追加する、Photoshopで仕上げる、キャラクター画像の追加手順を再現する依頼で使う。
+description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、ローカル物理演算、実画面QAまで再現する。実写テスト、Photoshopでの有効な高精細化、Claude CLIレビュー、旧3D実験の撤去にも使う。
 ---
 
-# PicoAgentキャラクター再生成
+# PicoAgentキャラクター再構築
 
 ## 最初に読む
 
-1. リポジトリ直下の `AGENTS.md` と `HANDOFF.md` を読む。
-2. `docs/CHARACTER-ASSET-WORKFLOW.md` を最後まで読む。
-3. `git status --short` で既存変更を確認し、巻き戻さない。
+1. `AGENTS.md`、`HANDOFF.md`、`docs/CHARACTER-ASSET-WORKFLOW.md` を読む。
+2. `git status --short` で既存変更を確認し、手作業を巻き戻さない。
+3. 検証画像、生成途中の素材、旧ファイルの退避先はリポジトリ直下の `temp/` だけにする。
 
-## 高精細キャラを再生成する
+## 対応形式と構図
 
-低頭身2Dは以前の上半身位置を標準にし、manifestへ `"bodyProportion": "compact"` を付ける。長身・実写・Live2D／VRMは胸全体がぎりぎり入る胸上を標準にする。原画固有の余白だけ `defaultFraming` / `streamFraming` で吸収し、利用者が保存した構図を優先する。キャラ切替時は前のキャラの倍率を引き継がない。チャット／バーの小型アイコンは首上で切り出す。主要レイアウトの実表示で頭頂、顔、肩、胸全体が用途どおり入り、低頭身が顔面アップ、長身が腰までの表示になっていないことを確認する。旧 `talk` はLINE風の `chat` へ統合済みなので、検証や公開素材へ再追加しない。
+- 対応ランタイムは通常2D PNGとLive2D。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
+- 低頭身2Dは従来の上半身位置、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にする。
+- チャット／バーの小型アイコンは首上にする。保存済みの利用者構図は初期値より優先する。
+- 画面位置の手動調整は別作業。依頼がなければ原画やmanifestへ焼き込まない。
+- 配信背景は1920×1080以上を基準にする。目立つ劣化がなければWebPやJPEGも使える。
 
-OBS風の直接配置を検証するときは「配置」モードを使い、Moveableのドラッグ、拡大縮小、スナップ、元に戻す、保存後の再読込、リセットを確認する。配置モード中にキャラクタードラッグでウィンドウ移動が始まらず、通常モードに戻せば従来操作へ復帰することを必須とする。配置値は表示形式ごとのローカル設定で、原画やmanifestへ焼き込まない。
+## 原画と解像度
 
-`animationQualityMode=sharp-expression` は個別スクリプトを順不同で実行せず、必ず次の一括入口を使う。
+- 顔がアップになる用途では、最初から胸上のネイティブ解像度で制作する。低解像度の全身絵を拡大して成果物にしない。
+- Photoshop「ディテールを保持 2.0」は、同倍率で顔、髪、輪郭が実際に改善するときだけ使う。候補を別名で保存し、元画像を上書きしない。
+- Photoshopの生成AIは、権利を持つ画像の局所補修に限定する。本人性、服、髪型、構図を無断で作り替えない。
+- Pillow、ブラウザ、CSS等による単純なピクセル拡大を高精細化と呼ばない。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/rebuild-sharp-expression-assets.ps1 -CharacterIds <id>
-```
+## 表情差分と透過
 
-この入口は次の順番を固定する。
+- 画像生成サービスが返した全身画像をそのまま状態フレームにしない。目と口の局所パッチだけを基準画像へ合成し、マスク外の画素を同一に保つ。
+- 半目は基準目と閉じ目の中間から作り、下まぶたを巻き込まない。自動モーションOFF時は必ず中立の目と口へ戻す。
+- 専用クロマ背景では、外周だけでなく腕と胴の間・髪の隙間など閉じた背景色も除去する。色かぶり除去、柔らかいマット、不透明な被写体色から半透明縁への色伸長を組み合わせる。
+- 透過素材は白／黒／暖色背景へ原寸合成し、髪や服の周囲に背景色、閉じた色面、矩形、太い縁がないことを確認する。
+- 実写素材では髪、胸、肩、腰を独立した `springPhysics.regions` として重ねる。`prefers-reduced-motion` では完全に静止させる。
+- 高品質試作は84フレームを標準とし、待機24、考え中24、会話24、悲しみ12を基準にする。
 
-1. 890×1800の基準寸法で基本、瞬き、口、視線、感情の局所差分を合成する。
-2. Photoshop「ディテールを保持 2.0」で全9レイヤーを1780×3600へ仕上げ、元アルファを再適用する。
-3. 内容ハッシュ付き `frames/<世代>/` を生成する。
-4. 配信コピーを同期する。
+## 外部サービスとレビュー
 
-Photoshop後に `build-sharp-expression-layers.py` または `build-extended-expression-layers.py` を再実行しない。高精細版が低解像度で上書きされる。
+- ユーザーが許可した画像だけを外部画像生成・編集サービスへ送る。利用後に送信素材、送信先、目的を事後報告する。
+- 画像品質と採用方針はClaude CLIにも確認させる。`claude -p` へ対象パス、用途、判定基準を明示し、回答は実画像と照合する。
+- Claudeへ渡す7形式一覧は、対象を絞った直前の撮影で一覧が上書きされていないことを確認する。チャット／バー／配信は個別画像も渡す。
+- 透過PNGをビューアーの緑や黒の背景色だけで未透過と判定しない。四隅alpha、透明／半透明／不透明ピクセル数、最上段の不透明数を数値で添え、実合成画面の縁と一緒に判定する。
+- Claudeの判定だけで合格にしない。PicoAgentの実レンダラーで通常、配信、チャット、バー、作業、ウィジェットを撮影する。
+- 動画は先頭、中間、終端を確認し、瞬き、口、透過、継ぎ目、胸上構図、物理演算、背景サイズを検査する。
 
-画像の引き伸ばし拡大を禁止する。nearest／bilinear／bicubic／Lanczos等で縦横ピクセル数だけを増やした画像を成果物へ使わない。Photoshop前の配置正規化も等倍以下かつ縦横比維持に限定する。最終レイヤーの再サンプリングをPillow、ImageMagick、OS画像API、ブラウザ、CSSへ代替しない。QAレポートの方式が `Photoshop Preserve Details 2.0` で、処理前後の寸法が記録されていることを確認する。Photoshop処理も寸法だけでは合格にせず、顔・髪・輪郭がぼける場合は高解像度の元絵または局所再制作へ戻る。
-
-## VRM実験キャラを追加する
-
-- 正式な2Dキャラのvariantへ混ぜず、`characters/<id>/character.json` のトップレベル `vrm` を持つ独立した実験キャラとして登録する。
-- VRMも全形式共通の胸上ルールに従い、manifestへ `"framing": "bust"` を明記する。上半身や全身はユーザーが明示した場合だけ `upper-body` / `full-body` を使う。
-- VRMモデル本体は `characters/<id>/*.vrm`、再生成可能な原画・PSD・スクリプト・テストは `tools/<id>-vrm/`、説明とレビュー用動画は `docs/vrm/` に分ける。
-- `cargo xtask setup vrm` でSHA-256固定のThree.js／three-vrmを取得し、`cargo xtask sync-characters` でGLBヘッダーと参照先を検査する。
-- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実際の `renderer.js` を通し、全7形式の胸上表示（チャット／バーの小型アイコンを含む）、透明背景、canvas描画、継続モーションを確認する。構造検査だけで表示完了とはしない。
-- 配信形式は1920×1080の実画面を基準にし、背景はフルHD以上を使う。PNGに固定せず、原寸で目立つ劣化がなければWebP／JPEGも許容し、既存の高品質圧縮画像を無意味に再圧縮しない。
-- 公開動画は通常表示を2倍密度、配信表示を1920×1080ネイティブで描画してから960pxへ縮小する。低解像度素材や旧動画の拡大で帳尻を合わせない。
-- 元リポジトリからVRMを撤去する移行では、PicoAgent側のビルド・構造検査・実表示・コミット・pushが全部成功するまで元ファイルを削除しない。スキルは移行対象外として残す。
-
-## 品質を検証する
-
-- `cargo xtask sync-characters` を通し、全9レイヤー、1780×3600最低寸法、単一世代を検査する。
-- PNG寸法だけで合格にしない。元絵、Photoshop完成レイヤー、実WebViewの顔・髪・輪郭を同じ表示倍率で比較する。
-- 状態切替で身体、服、髪、顔形、解像感が変わらないことを確認する。
-- 半目は閉じ目の透明化で代用しない。
-- 透過市松で矩形、ハロー、背景色、太い影がないことを確認する。
-- GUI確認は最新の利用モニター指示へ従い、指定がなければヘッドレス検査を優先する。
-
-## 完了条件
+## 再構築と検証
 
 ```powershell
+uv run python scripts/build-character-animations.py --character-id <id>
+cargo xtask sync-characters
+node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml
+cargo test --lib --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
 
-READMEのキャラプレビューを変更した場合は、実WebViewの `tools/screenshots/shoot.mjs` で対象WebPを再生成する。コード、`SPEC.md`、`CHANGELOG.md`、`docs/REVIEW-LOG.md`、手順書を同じ作業内で同期し、`AGENTS.md`の指示どおりコミットしてpushする。
+READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。実画面の確認後にREADME、配布README、LP、`SPEC.md`、`CHANGELOG.md`、`docs/REVIEW-LOG.md`を同期する。

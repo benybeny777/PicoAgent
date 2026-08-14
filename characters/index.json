@@ -85,16 +85,10 @@
       "name": "りん"
     },
     {
-      "description": "黒髪と黒系ファッションの、実写調で制作した成人の試作キャラクター。",
+      "description": "ピンクのショートヘアと地雷系衣装の、実写調バネ物理テストキャラクター。",
       "id": "photoreal-prototype",
       "manifest": "photoreal-prototype/character.json",
-      "name": "実写（試作）"
-    },
-    {
-      "description": "VRMランタイム検証用に分離した、むぎの実験キャラクター。",
-      "id": "mugi-vrm-experimental",
-      "manifest": "mugi-vrm-experimental/character.json",
-      "name": "むぎ VRM（実験）"
+      "name": "実写・物理演算テスト"
     }
   ],
   "default": "mugi"
