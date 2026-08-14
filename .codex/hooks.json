@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'c:\\00_PG\\20_PicoAgent\\.codex\\hooks\\session-start.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}

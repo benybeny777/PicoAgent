@@ -33,7 +33,7 @@ const USAGE: &str = "\
   update-feed <NSIS> [説明] 公開Git用latest.jsonへWindows更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
-  setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
+  setup [対象…]        取得対象は engine / aivis / whisper / live2d / vrm / live2d-samples / tha3 / office / tools
                       （省略時は通常の開発・製品ビルドで使う全対象。販売用軽量版とは別）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
@@ -133,7 +133,7 @@ fn setup(targets: &[String]) -> Result<()> {
     // THA3も開発環境で制作機能をすぐ確認できるよう一括取得へ含める。
     // 販売用軽量版には再配布せず、利用者が作者配布物を用意して設定する。
     let all = [
-        "live2d", "engine", "aivis", "whisper", "tha3", "office", "tools",
+        "live2d", "vrm", "engine", "aivis", "whisper", "tha3", "office", "tools",
     ];
     let wanted: Vec<&str> = if targets.is_empty() {
         all.to_vec()
@@ -146,13 +146,14 @@ fn setup(targets: &[String]) -> Result<()> {
             "engine" => bundled::fetch_engine()?,
             "whisper" => bundled::fetch_whisper()?,
             "live2d" => bundled::fetch_live2d_runtime()?,
+            "vrm" => bundled::fetch_vrm_runtime()?,
             "live2d-samples" => bundled::fetch_live2d_samples()?,
             "tha3" => bundled::fetch_tha3()?,
             "aivis" => office::fetch_aivis()?,
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools）"
+                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / vrm / live2d-samples / tha3 / office / tools）"
             ),
         }
     }
@@ -174,6 +175,7 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
 
     assets::stop_stale()?;
     bundled::fetch_live2d_runtime()?;
+    bundled::fetch_vrm_runtime()?;
     if let Some(characters) = product_characters.as_ref() {
         assets::sync_distribution_characters(characters)?;
     } else {
@@ -287,7 +289,10 @@ mod tests {
         );
         // 公開資料も同じ数を載せている。実装が増減したまま文言だけ古くならないようにする。
         for (path, expected) in [
-            ("distribution/site/index.html", format!("{skill_count} SKILLS")),
+            (
+                "distribution/site/index.html",
+                format!("{skill_count} SKILLS"),
+            ),
             (
                 "distribution/site/index.html",
                 format!("{skill_count}種のスキル"),

@@ -241,6 +241,7 @@ window.addEventListener("beforeunload", () => {
     logApp("warn", "終了時に音声解析を解放できませんでした", errorDetail(error));
   });
   stopLive2D();
+  stopVRM();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
 
@@ -687,17 +688,22 @@ function resolveLive2dConfig(manifest, variant) {
   return variant?.live2d || manifest.live2d || null;
 }
 
+function resolveVrmConfig(manifest, variant) {
+  if (variant?.vrm === false) return null;
+  return variant?.vrm || manifest.vrm || null;
+}
+
 let activeSecondaryMotion = null;
 
 function syncSecondaryMotionFrame() {
-  if (!activeSecondaryMotion || live2dActive || !characterSecondarySprite) return;
+  if (!activeSecondaryMotion || live2dActive || vrmActive || !characterSecondarySprite) return;
   const source = petSprite.currentSrc || petSprite.src;
   if (source && characterSecondarySprite.src !== source) characterSecondarySprite.src = source;
 }
 
 function updateSecondaryMotionVisibility() {
   if (!characterSecondaryMotion) return;
-  characterSecondaryMotion.hidden = !activeSecondaryMotion || live2dActive;
+  characterSecondaryMotion.hidden = !activeSecondaryMotion || live2dActive || vrmActive;
   if (!characterSecondaryMotion.hidden) syncSecondaryMotionFrame();
 }
 
@@ -740,7 +746,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
-  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
+  const hasVrmDefinition = config => Boolean(config?.model);
+  const hasAnyVrm = hasVrmDefinition(manifest.vrm)
+    || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasVrmDefinition(item?.vrm)));
+  if (!hasAnyLive2d && !hasAnyVrm && !manifest.animations?.idle) throw new Error("VRM、Live2D、idleアニメーションのいずれも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
@@ -758,11 +767,27 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
+  activeVrmConfig = resolveVrmConfig(manifest, variant);
   configureSecondaryMotion(variant?.secondaryMotion ?? manifest.secondaryMotion);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
-  if (hasLive2dDefinition(activeLive2dConfig)) {
+  if (hasVrmDefinition(activeVrmConfig)) {
+    rigAvailable = false;
+    stopLive2D();
+    try {
+      await startVRM(activeVrmConfig);
+    } catch (error) {
+      stopVRM();
+      activeVrmConfig = null;
+      if (!animations.idle) throw error;
+      logApp("error", "VRMの初期化に失敗しました（PNG表示で継続）", errorDetail(error));
+      setStatus("VRMを読み込めないのでPNG表示で続けるね");
+      preloadAnimations();
+      await probeRigLayers();
+    }
+  } else if (hasLive2dDefinition(activeLive2dConfig)) {
+    stopVRM();
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
       await startLive2D(activeLive2dConfig);
@@ -780,6 +805,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     }
   } else {
     stopLive2D();
+    stopVRM();
     preloadAnimations();
     await probeRigLayers(); // layers 素材があればリップシンク対応
   }
@@ -847,8 +873,9 @@ function setAnimation(name, force = false) {
   const sourceName = animations[name] ? name : (fallbacks[name] && animations[fallbacks[name]] ? fallbacks[name] : "idle");
   const requestedMotion = animations[name]?.motion || name;
   if (!force && animationName === sourceName && character.dataset.motion === requestedMotion) return;
-  animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
+  animationName = (animations[sourceName] || live2dActive || vrmActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
+  if (vrmActive) { character.dataset.motion = animationName; playVRMMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
@@ -869,7 +896,7 @@ function frameDuration(animation, index) {
 }
 function animate(now) {
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
-  if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
+  if (live2dActive || vrmActive) { animationRequestId = requestAnimationFrame(animate); return; }
   // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
   // 待機・思考などの装飾モーションだけを先頭フレームへ止め、ループ自体は継続する。
   if (reduceMotion && animationName !== "talking") {
@@ -1032,6 +1059,8 @@ function detachLipSyncAudio() {
   rigMouthLevel = 0;
   rigMouthOpen = false;
   live2dMouth = -1;
+  vrmMouth = -1;
+  vrmController?.setMouth(0);
   rigRefresh();
 }
 
@@ -1051,12 +1080,12 @@ function retryPendingLipSync() {
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
-  if (!rigAvailable && !live2dActive) {
+  if (!rigAvailable && !live2dActive && !vrmActive) {
     logApp("info", "リップシンクを保留しました", "キャラクターの表示準備が終わってから接続します");
     pendingLipSyncAudio = audio;
     return;
   }
-  if (!live2dActive) startRig();
+  if (!live2dActive && !vrmActive) startRig();
   detachLipSyncAudio();
   // WebAudio の振幅解析を試み、使えない環境ではタイマー口パクへフォールバックする。
   let useTimer = true;
@@ -1084,6 +1113,7 @@ function attachLipSync(audio) {
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
       if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
+      else if (vrmActive) setVrmMouth(rigMouthOpen ? 0.58 : 0.04);
       else rigRefresh();
     }, 150);
     return;
@@ -1091,7 +1121,7 @@ function attachLipSync(audio) {
   const data = new Uint8Array(rigAnalyser.fftSize);
   let peak = 0.04; // 音量差に追従する適応しきい値
   const analyserLoop = () => {
-    if ((!rigActive && !live2dActive) || !rigAnalyser) return;
+    if ((!rigActive && !live2dActive && !vrmActive) || !rigAnalyser) return;
     rigAnalyser.getByteTimeDomainData(data);
     let sum = 0;
     for (let i = 0; i < data.length; i += 1) {
@@ -1117,6 +1147,8 @@ function attachLipSync(audio) {
     if (rigMouthLevel < 0.015) rigMouthLevel = 0;
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
+    } else if (vrmActive) {
+      setVrmMouth(rigMouthLevel);
     } else {
       rigMouthOpen = rigMouthLevel > 0.3;
       rigRefresh();
@@ -1158,7 +1190,7 @@ function stopRig() {
 // 読み上げ終了時の処理。layers を持つキャラは待機中も常時リグ（まばたき）を続けるため
 // 音声解析だけ解除し、リグ非対応キャラのみ完全に終了してフレーム表示へ戻す。
 function stopLipSync() {
-  if (live2dActive) { detachLipSyncAudio(); return; }
+  if (live2dActive || vrmActive) { detachLipSyncAudio(); return; }
   if (rigAvailable) { detachLipSyncAudio(); return; }
   const wasActive = rigActive;
   stopRig();
@@ -1398,6 +1430,61 @@ function stopLive2D() {
   updateSecondaryMotionVisibility();
 }
 
+// ── VRM 1.0 本体レンダリング ────────────────────────────────────────
+let vrmActive = false;
+let activeVrmConfig = null;
+let vrmController = null;
+let vrmCanvas = null;
+let vrmMouth = -1;
+
+async function startVRM(config) {
+  stopVRM();
+  if (!vrmCanvas) {
+    vrmCanvas = document.createElement("canvas");
+    vrmCanvas.id = "vrmCanvas";
+    characterView.insertBefore(vrmCanvas, petSprite);
+  }
+  vrmCanvas.style.display = "";
+  const runtime = await import("./vrm-runtime.js");
+  vrmController = await runtime.createVrmRuntime(
+    vrmCanvas,
+    `${characterRoot}/${config.model}`,
+    {
+      ...config,
+      width: LIVE2D_RENDER_WIDTH,
+      height: LIVE2D_RENDER_HEIGHT,
+    },
+  );
+  vrmActive = true;
+  character.dataset.renderKind = "vrm";
+  petSprite.style.display = "none";
+  updateSecondaryMotionVisibility();
+  applyCharacterZoom(characterZoom);
+  retryPendingLipSync();
+}
+
+function setVrmMouth(value) {
+  vrmMouth = Number(value);
+  vrmController?.setMouth(vrmMouth >= 0 ? vrmMouth : 0);
+}
+
+function playVRMMotion(name) {
+  vrmController?.setState(name);
+}
+
+function stopVRM() {
+  vrmMouth = -1;
+  vrmController?.destroy();
+  vrmController = null;
+  if (vrmCanvas) vrmCanvas.style.display = "none";
+  if (vrmActive) {
+    vrmActive = false;
+    character.dataset.renderKind = "2d";
+    petSprite.style.display = "";
+  }
+  updateSecondaryMotionVisibility();
+}
+
 // ── 疑似視線追従: 設定ONかつ顔の近くにいるときだけ、短時間マウス方向を見る ──
 if (!reduceMotion) {
   let lookResetTimer = 0;
@@ -1443,6 +1530,12 @@ if (!reduceMotion) {
           );
         } else controller.focus(0, 0);
       }
+    }
+    if (vrmActive && vrmController) {
+      vrmController.focus(
+        nearFace && !deadZone ? Math.max(-0.38, Math.min(0.38, normalizedX * 0.32)) : 0,
+        nearFace && !deadZone ? Math.max(-0.2, Math.min(0.2, -normalizedY * 0.18)) : 0,
+      );
     }
     const dx = nearFace ? Math.max(-1, Math.min(1, normalizedX)) : 0;
     character.style.setProperty("--look-rot", `${(dx * 1.15).toFixed(2)}deg`);
@@ -2589,6 +2682,7 @@ character.addEventListener("click", event => {
   character.classList.add("boop");
   // Live2D はタップモーションで反応する（boop の CSS は img にしか効かない）。
   if (live2dActive && !currentVoice) playLive2DMotion("talking");
+  if (vrmActive && !currentVoice) playVRMMotion("pleased");
   const rect = character.getBoundingClientRect();
   const y = (event.clientY - rect.top) / Math.max(1, rect.height);
   const x = (event.clientX - rect.left) / Math.max(1, rect.width);
@@ -3812,7 +3906,7 @@ function applyCharacterZoom(zoom) {
   // Live2D は character.json の scale / offsetY がすでにモデルごとの上半身表示へ調整済み。
   // PNG向けの既定 1.55 倍をさらに重ねると、ひよりは顔だけに切り取られてしまう。
   // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
-  const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
+  const viewZoom = live2dActive || vrmActive ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
 }
 
@@ -3828,6 +3922,9 @@ function applyCharacterFraming() {
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
+    // PicoAgentの全キャラクターは上半身表示が標準。前のキャラで選んだ全身倍率を
+    // 未設定の別キャラへ持ち越さず、明示保存がない限り必ずupperへ戻す。
+    applyCharacterZoom(FRAMING_PRESETS.upper.zoom);
     applyCharacterOffset(0, 0, { clamp: false });
     return;
   }
@@ -3913,7 +4010,7 @@ function markActivity() {
 
 function fallAsleep() {
   // 全画面で履歴を読んでいる間（マウス操作なしでも閲覧中）は寝ない。
-  if (napping || busy || currentVoice || !composer.hidden || live2dActive
+  if (napping || busy || currentVoice || !composer.hidden || live2dActive || vrmActive
     || bubble.classList.contains("fullscreen")) return;
   const sleeping = characterManifest?.boot?.sleeping;
   if (!sleeping) return;

@@ -572,6 +572,60 @@ async function validateInteractionMatrix() {
   return { output, results };
 }
 
+// 実験VRMを本物のrenderer.jsとTauriモックの組み合わせで読み込み、主要レイアウトで
+// canvas表示と継続モーションを確認する。出力はレビュー用なのでtemp/だけへ置く。
+async function validateVrmMatrix() {
+  const output = join(ROOT, "temp", "vrm-layout-matrix");
+  mkdirSync(output, { recursive: true });
+  const targets = ["mascot", "pet", "stream"];
+  const results = [];
+  for (const layout of targets) {
+    const [width, height] = MATRIX_LAYOUTS[layout];
+    const page = await openScene({
+      characterId: "mugi-vrm-experimental", layout, width, height, voice: true,
+    });
+    try {
+      await page.waitForFunction(() => typeof vrmActive !== "undefined" && vrmActive, null, { timeout: 40000 });
+      await page.waitForFunction(() => {
+        const canvas = document.getElementById("vrmCanvas");
+        return canvas && getComputedStyle(canvas).display !== "none" && canvas.width > 0 && canvas.height > 0;
+      }, null, { timeout: 20000 });
+      await page.waitForTimeout(450);
+      const canvas = page.locator("#vrmCanvas");
+      const before = await canvas.screenshot({ omitBackground: true });
+      await page.waitForTimeout(750);
+      const after = await canvas.screenshot({ omitBackground: true });
+      const motionPixels = await changedPixels(before, after);
+      const visual = await page.evaluate(() => {
+        const canvas = document.getElementById("vrmCanvas");
+        const character = document.getElementById("character");
+        const rect = canvas.getBoundingClientRect();
+        const characterRect = character.getBoundingClientRect();
+        return {
+          renderKind: character.dataset.renderKind,
+          canvasPixels: [canvas.width, canvas.height],
+          canvasRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          characterRect: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
+        };
+      });
+      if (visual.renderKind !== "vrm") throw new Error(`${layout}: data-render-kindがVRMではありません`);
+      if (visual.canvasRect.width <= 0 || visual.canvasRect.height <= 0 || motionPixels < 20) {
+        throw new Error(`${layout}: VRMの描画またはモーションが確認できません (${motionPixels}px)`);
+      }
+      const file = `mugi-vrm-experimental-${layout}.png`;
+      const png = await page.screenshot({ path: join(output, file), omitBackground: true });
+      const opaqueBounds = await bounds(png, 0);
+      if (!opaqueBounds) throw new Error(`${layout}: VRMの不透明描画がありません`);
+      results.push({ layout, viewport: { width, height }, motionPixels, opaqueBounds, ...visual, file });
+      console.log(`  VRM表示検査: ${layout} / motion ${motionPixels}px`);
+    } finally {
+      await page.close();
+    }
+  }
+  await writeFile(join(output, "metrics.json"), `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
+  return { output, results };
+}
+
 async function validateLive2dMatrix() {
   const output = join(ROOT, "temp", "live2d-layout-matrix");
   mkdirSync(output, { recursive: true });
@@ -1122,6 +1176,15 @@ if (process.env.SHOOT_LIVE2D_MATRIX) {
   await browser.close();
   server.close();
   console.log(`Live2D表示検査完了: ${matrix.output}（${matrix.results.length}件、未取得${matrix.skipped.length}件）`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_VRM_MATRIX) {
+  const matrix = await validateVrmMatrix();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`VRM表示検査完了: ${matrix.output}（${matrix.results.length}件）`);
   process.exit(0);
 }
 

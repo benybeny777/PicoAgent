@@ -89,6 +89,12 @@
       "id": "photoreal-prototype",
       "manifest": "photoreal-prototype/character.json",
       "name": "実写（試作）"
+    },
+    {
+      "description": "VRMランタイム検証用に分離した、むぎの実験キャラクター。",
+      "id": "mugi-vrm-experimental",
+      "manifest": "mugi-vrm-experimental/character.json",
+      "name": "むぎ VRM（実験）"
     }
   ],
   "default": "mugi"

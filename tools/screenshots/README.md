@@ -47,6 +47,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×8形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
 | `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×8形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
+| `SHOOT_VRM_MATRIX` | `1` なら実験VRMキャラをマスコット／ペット／配信の3形式で実ランタイム描画し、canvas表示と継続モーションを `temp/vrm-layout-matrix/` へ検査する |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能ステップを `temp/onboarding-check/` へ撮影する |
 
 引数に画像名を並べると、その絵だけを撮り直します。全部で 3 分ほどかかるので、普段はこちらを使います。

@@ -1,6 +1,6 @@
 ---
 name: rebuild-picoagent-character
-description: PicoAgentの通常2Dキャラクターを追加・差し替え・高精細化し、瞬き、口パク、視線、感情、単一フレーム世代、READMEプレビューまで安全に再生成する。キャラがぼやける、状態ごとに新旧画像が混ざる、表情やモーションを追加する、Photoshopで仕上げる、キャラクター画像の追加手順を再現する依頼で使う。
+description: PicoAgentの通常2D・Live2D・VRMキャラクターを追加・差し替え・高精細化し、瞬き、口パク、視線、感情、単一フレーム世代、実ランタイム表示まで安全に再生成する。キャラがぼやける、状態ごとに新旧画像が混ざる、VRM実験キャラを追加する、Photoshopで仕上げる、キャラクター画像の追加手順を再現する依頼で使う。
 ---
 
 # PicoAgentキャラクター再生成
@@ -12,6 +12,8 @@ description: PicoAgentの通常2Dキャラクターを追加・差し替え・�
 3. `git status --short` で既存変更を確認し、巻き戻さない。
 
 ## 高精細キャラを再生成する
+
+PicoAgentの全キャラクターは、PNG、Live2D、VRMを問わず顔と手元が読める上半身表示を標準にする。新規キャラと構図未設定キャラは `upper` を使い、全身表示はユーザーがそのキャラへ明示した場合だけ保存構図 `full` を使う。キャラ切替時は前のキャラの全身倍率を引き継がない。主要レイアウトの実表示で頭頂、顔、肩、手元が欠けず、下半身が主役になっていないことを確認する。
 
 `animationQualityMode=sharp-expression` は個別スクリプトを順不同で実行せず、必ず次の一括入口を使う。
 
@@ -29,6 +31,15 @@ powershell -ExecutionPolicy Bypass -File scripts/rebuild-sharp-expression-assets
 Photoshop後に `build-sharp-expression-layers.py` または `build-extended-expression-layers.py` を再実行しない。高精細版が低解像度で上書きされる。
 
 画像の引き伸ばし拡大を禁止する。nearest／bilinear／bicubic／Lanczos等で縦横ピクセル数だけを増やした画像を成果物へ使わない。Photoshop前の配置正規化も等倍以下かつ縦横比維持に限定する。最終レイヤーの再サンプリングをPillow、ImageMagick、OS画像API、ブラウザ、CSSへ代替しない。QAレポートの方式が `Photoshop Preserve Details 2.0` で、処理前後の寸法が記録されていることを確認する。Photoshop処理も寸法だけでは合格にせず、顔・髪・輪郭がぼける場合は高解像度の元絵または局所再制作へ戻る。
+
+## VRM実験キャラを追加する
+
+- 正式な2Dキャラのvariantへ混ぜず、`characters/<id>/character.json` のトップレベル `vrm` を持つ独立した実験キャラとして登録する。
+- VRMも共通の上半身ルールに従い、manifestへ `"framing": "upper-body"` を明記する。全身表示はユーザーが明示した場合だけ `full-body` を使う。
+- VRMモデル本体は `characters/<id>/*.vrm`、再生成可能な原画・PSD・スクリプト・テストは `tools/<id>-vrm/`、説明とレビュー用動画は `docs/vrm/` に分ける。
+- `cargo xtask setup vrm` でSHA-256固定のThree.js／three-vrmを取得し、`cargo xtask sync-characters` でGLBヘッダーと参照先を検査する。
+- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実際の `renderer.js` を通し、マスコット／ペット／配信の上半身表示、透明背景、canvas描画、継続モーションを確認する。構造検査だけで表示完了とはしない。
+- 元リポジトリからVRMを撤去する移行では、PicoAgent側のビルド・構造検査・実表示・コミット・pushが全部成功するまで元ファイルを削除しない。スキルは移行対象外として残す。
 
 ## 品質を検証する
 

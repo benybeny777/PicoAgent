@@ -197,6 +197,8 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; will-change:transform; }
 .character canvas { position:relative; display:block; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; }
 #live2dCanvas { background:transparent !important; filter:none; }
+#vrmCanvas { background:transparent !important; filter:none; }
+.character[data-render-kind="vrm"] .character-view::before { display:none; }
 /* 2D立ち絵は透過輪郭を活かし、背景色を選ばず髪先と服の暗部が読めるようにする。
    Live2Dキャンバスには適用せず、PNGキャラだけを同じ質感へ揃える。 */
 .character[data-render-kind="2d"] .character-view::before { display:none; }

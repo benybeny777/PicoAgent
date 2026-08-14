@@ -779,6 +779,55 @@ pub fn fetch_live2d_runtime() -> Result<()> {
     Ok(())
 }
 
+/// VRM 1.0描画用のThree.jsとthree-vrmを固定版・SHA-256照合つきで取得する。
+pub fn fetch_vrm_runtime() -> Result<()> {
+    let vendor = repo_root().join("ui/vendor/vrm");
+    let runtime = [
+        (
+            "three.core.min.js",
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.min.js",
+            "61ba0df005b05991361d040d8ff670e1aadfd0ce7aeebd1fdb0725957a8957de",
+        ),
+        (
+            "three.module.min.js",
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.min.js",
+            "e2b5ee6bccd38fd6d8a2428546b83c5f2426d84b152ef82be8055556e3b40eb6",
+        ),
+        (
+            "loaders/GLTFLoader.js",
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/loaders/GLTFLoader.js",
+            "67ac5551fdafa6e349bd80c8f8e5e39c136d6b2fb1ad647db9abb21dc86f9e4a",
+        ),
+        (
+            "utils/BufferGeometryUtils.js",
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/utils/BufferGeometryUtils.js",
+            "fda7e946b8e0b5ab39b779206589e7a1079a22eb24efb89d7223e03fdfb1f751",
+        ),
+        (
+            "three-vrm.module.min.js",
+            "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.5.3/lib/three-vrm.module.min.js",
+            "022283a806f498d17c8b80919769ff9f7a19f69b68186264e8f8e5912490e441",
+        ),
+    ];
+    let mut fetched = 0;
+    for (name, url, sha256) in runtime {
+        fetched += ensure_pinned_file(url, &vendor.join(name), sha256, "VRM_FORCE")?;
+    }
+    log(
+        "setup:vrm",
+        if fetched > 0 {
+            format!(
+                "vrm runtime fetched: {} ({})",
+                vendor.display(),
+                mb(fetched)
+            )
+        } else {
+            format!("vrm runtime ready: {}", vendor.display())
+        },
+    );
+    Ok(())
+}
+
 /// 開発時の動作確認用に公式サンプルを明示取得する。
 /// 通常のsetup・dev・build・販売ビルドからは呼ばない。
 pub fn fetch_live2d_samples() -> Result<()> {
@@ -918,6 +967,24 @@ fn ensure_compatible_live2d_core(url: &str, dest: &Path, sha256: &str) -> Result
     let downloaded = fs::read(dest)?;
     if !is_compatible_live2d_core(&downloaded, sha256) {
         bail!("取得した Cubism Core が検証済みの公式版と一致しません");
+    }
+    Ok(bytes)
+}
+
+fn ensure_pinned_file(url: &str, dest: &Path, sha256: &str, force_flag: &str) -> Result<u64> {
+    use sha2::{Digest, Sha256};
+
+    let matches = dest.exists()
+        && fs::read(dest)
+            .map(|bytes| format!("{:x}", Sha256::digest(bytes)) == sha256)
+            .unwrap_or(false);
+    if matches && !flag(force_flag) {
+        return Ok(0);
+    }
+    let bytes = download_to(url, dest)?;
+    let downloaded = fs::read(dest)?;
+    if format!("{:x}", Sha256::digest(downloaded)) != sha256 {
+        bail!("固定ランタイムのSHA-256が一致しません: {}", dest.display());
     }
     Ok(bytes)
 }
