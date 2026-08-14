@@ -24,7 +24,10 @@ test("口パクは有効な音声が実際に再生中のときだけ許可す�
   assert.equal(makePredicate({ currentVoice: audio, ttsEnabledCache: false, voiceVolume: 0.5 })(audio), false, "ミュート中");
   assert.equal(makePredicate({ currentVoice: audio, ttsEnabledCache: true, voiceVolume: 0 })(audio), false, "音量0");
   assert.equal(makePredicate({ currentVoice: audio, ttsEnabledCache: true, voiceVolume: 0.5 })({ paused: false, ended: false }), false, "別の音声");
-  assert.equal(makePredicate({ currentVoice: audio, ttsEnabledCache: true, voiceVolume: 0.5 })({ ...audio, paused: true }), false, "再生前または停止中");
+  // 再生前／停止中は「別インスタンスだから false」では検証にならないので、
+  // currentVoice と同一の要素を paused にして判定させる。
+  const paused = { paused: true, ended: false };
+  assert.equal(makePredicate({ currentVoice: paused, ttsEnabledCache: true, voiceVolume: 0.5 })(paused), false, "再生前または停止中");
   audio.ended = true;
   assert.equal(makePredicate({ currentVoice: audio, ttsEnabledCache: true, voiceVolume: 0.5 })(audio), false, "再生終了後");
 });

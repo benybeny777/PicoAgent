@@ -341,11 +341,13 @@ async function shootCharacterMatrix() {
             imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             imageStyle: { width: imageStyle.width, height: imageStyle.height, left: imageStyle.left, inset: imageStyle.inset, transform: imageStyle.transform },
             viewStyle: viewStyle ? { transform: viewStyle.transform, scale: viewStyle.scale } : null,
+            // 期待値は manifest から取る。springRoot ごと消える退行でも 0 期待へ落ちないよう、
+            // springMotion（実装側の観測結果）とは別のフィールドに置く。
+            configuredRegions: Array.isArray(characterManifest?.springPhysics?.regions)
+              ? characterManifest.springPhysics.regions.length
+              : characterManifest?.secondaryMotion?.type === "bust" ? 1 : 0,
             springMotion: springRoot ? {
               visible: !springRoot.hidden && springRootStyle.display !== "none",
-              configuredRegions: Array.isArray(characterManifest?.springPhysics?.regions)
-                ? characterManifest.springPhysics.regions.length
-                : characterManifest?.secondaryMotion?.type === "bust" ? 1 : 0,
               regionCount: springRegions.length,
               transformedRegions: springRegions.filter(region => getComputedStyle(region.querySelector("img")).transform !== "none").length,
               maskedRegions: springRegions.filter(region => {
@@ -369,7 +371,7 @@ async function shootCharacterMatrix() {
         }
         const expectedSpringRegions = ["chat", "bar"].includes(layout)
           ? 0
-          : visual.springMotion?.configuredRegions || 0;
+          : visual.configuredRegions || 0;
         if (expectedSpringRegions && (!visual.springMotion?.visible
           || visual.springMotion.regionCount !== expectedSpringRegions
           || visual.springMotion.transformedRegions !== expectedSpringRegions
@@ -982,6 +984,10 @@ async function prepareDistributionLive2D(page) {
   await page.addStyleTag({ content: ".character::before,.character-view::before{display:none!important}" });
 }
 
+// 配布ページ用の尺とフレームレート。distributionStep の経過msもここから出すので、
+// fps を変えても巡回の見せ時間がずれない。
+const DISTRIBUTION_SCENE = { seconds: 7, fps: 30 };
+
 const DISTRIBUTION_TOUR = [
   [1600, "thinking"],
   [3100, "success"],
@@ -989,7 +995,7 @@ const DISTRIBUTION_TOUR = [
 ];
 
 const distributionStep = async (page, index) => {
-  const elapsedMs = (index * 1000) / 24;
+  const elapsedMs = (index * 1000) / DISTRIBUTION_SCENE.fps;
   const current = DISTRIBUTION_TOUR.filter(([at]) => elapsedMs >= at).pop();
   await page.evaluate(name => {
     if (!name) return;
@@ -1181,8 +1187,8 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
-  "distribution-main.webp": { width: 900, height: 600, layout: "pet", seconds: 7, fps: 30, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
-  "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", seconds: 7, fps: 30, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
+  "distribution-main.webp": { width: 900, height: 600, layout: "pet", ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
+  "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
   // 1フレームだけなのでアニメーションではないが、同じ透過 WebP 経路を使える。
   // 小型形式は論理幅が出力幅（480px）に届かないため、2倍密度で描画してから縮小する。

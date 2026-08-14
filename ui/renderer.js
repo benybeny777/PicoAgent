@@ -575,6 +575,8 @@ async function prepareBootCharacter(characterId) {
   // 切り替わる一瞬だけ別の絵に見える。Live2D は仮画像を出さず、読み込み完了した
   // 実モデルをそのまま起動画面へ出す。2Dキャラは通常表示と同じ idle 先頭フレームを使う。
   if (manifest.live2d) {
+    // 仮画像が無いので、起動画面のキャラ枠は CSS 側で実モデル（.character）へ差し替える。
+    petApp.dataset.bootArtwork = "live2d";
     bootPetImage.onerror = null;
     bootPetImage.removeAttribute("src");
     return;
@@ -4767,12 +4769,11 @@ function startAlarmPolling() {
   } finally {
     // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    try {
-      await window.picoagent.finishBoot();
-      // 実アプリはpet:layoutイベントでも戻るが、イベント配送の遅延や撮影モックに依存せず、
-      // 起動用streamを確実に終了させる。保存形式がstreamなら同じ値を再適用するだけ。
-      applyLayout(info.layout);
-    }
+    try { await window.picoagent.finishBoot(); }
+    catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
+    // 実アプリはpet:layoutイベントでも戻るが、イベント配送の遅延や撮影モックに依存せず、
+    // 起動用streamを確実に終了させる。finishBoot が失敗しても起動用の形式のままにはしない。
+    try { applyLayout(info.layout); }
     catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
