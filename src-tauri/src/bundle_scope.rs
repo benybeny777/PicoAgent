@@ -266,7 +266,10 @@ mod guard {
             .split_once("function sanitizeSpeechText(text)")
             .expect("sanitizeSpeechText がありません")
             .1;
-        let body = sanitize.split_once("\n}").expect("関数の終端がありません").0;
+        let body = sanitize
+            .split_once("\n}")
+            .expect("関数の終端がありません")
+            .0;
         assert!(
             body.contains("stripPersonaLeak("),
             "読み上げテキストの共通入口 sanitizeSpeechText から stripPersonaLeak を呼んでください\

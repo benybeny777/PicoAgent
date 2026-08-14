@@ -30,6 +30,7 @@ impl Config {
     /// 起動時にファイルパスを設定し、あれば読み込む。
     /// 設定ファイルを読み込む。破損などで読めなかった場合は警告文字列を返す
     /// （呼び出し側が app.log へ記録する。ファイルが無いだけの初回起動は正常なので None）。
+    /// 原本を安全に退避できない場合は保存先を設定せず、読み取り専用の既定値で起動する。
     pub fn load(&self, file: PathBuf) -> Result<Option<String>, String> {
         let mut warning = None;
         match std::fs::read_to_string(&file) {
@@ -39,24 +40,25 @@ impl Config {
                     // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
                     // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
                     // 破損ファイルはその場に残すと次の保存（＝空設定の書き戻し）で消えてしまうので退避する。
-                    let saved = crate::store::quarantine_corrupt(&file).ok_or_else(|| {
-                        format!(
-                            "壊れた設定ファイルを退避できません。上書きを中止しました: {}",
+                    if let Some(saved) = crate::store::quarantine_corrupt(&file) {
+                        warning = Some(format!(
+                            "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
+                            file.display(),
+                            saved.display()
+                        ));
+                    } else {
+                        return Ok(Some(format!(
+                            "壊れた設定ファイルを退避できないため、設定を保存しない読み取り専用状態で起動します: {}",
                             file.display()
-                        )
-                    })?;
-                    warning = Some(format!(
-                        "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
-                        file.display(),
-                        saved.display()
-                    ));
+                        )));
+                    }
                 }
             },
-            Err(error) if file.exists() => {
-                return Err(format!(
-                    "設定ファイルを読み込めません。上書きを中止しました: {} ({error})",
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Ok(Some(format!(
+                    "設定ファイルを読み込めないため、設定を保存しない読み取り専用状態で起動します: {} ({error})",
                     file.display()
-                ));
+                )));
             }
             Err(_) => {} // ファイルが無いのは初回起動の正常系
         }
@@ -372,6 +374,24 @@ mod tests {
         assert_eq!(saved.len(), 1, "破損ファイルが退避されていない");
         let text = std::fs::read_to_string(dir.join(&saved[0])).unwrap();
         assert!(text.contains("PICOAGENT_TEST_KEY"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 読み込めない設定でも保存を止めて起動を続ける() {
+        let dir = temp_dir("unreadable");
+        // ファイルの代わりにディレクトリを渡し、読み取り不能をOS共通で再現する。
+        let cfg = Config::new();
+        let warning = cfg
+            .load(dir.clone())
+            .expect("読み取り失敗だけで起動を止めない")
+            .expect("読み取り専用状態を警告する");
+        assert!(warning.contains("読み取り専用"), "warning: {warning}");
+        let error = cfg
+            .set_string("PICOAGENT_OTHER", "x".to_string())
+            .expect_err("原本を読めない状態では保存しない");
+        assert!(error.to_string().contains("config.load() が未実行"));
+        assert!(dir.is_dir(), "元の対象を上書きしていない");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

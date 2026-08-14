@@ -177,8 +177,27 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .boot-log-line.boot-kind-status { color:var(--log-status); }
 .boot-log-line.boot-kind-system { color:var(--log-system); }
 .boot-log-line.boot-kind-trace { color:var(--log-trace); }
-.pet-app.is-booting.boot-character-ready .boot-character { display:grid; }
-.pet-app.is-booting.boot-character-ready .character { visibility:hidden; }
+/* Live2D は仮画像を出さない（prepareBootCharacter）ので、読み込みの終わった実モデルを
+   起動画面のキャラ枠へそのまま出す。2D・寝姿キャラは boot-character の静止画を使う。 */
+.pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .boot-character { display:none; }
+.pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character {
+  visibility:visible; z-index:1002; left:8px; right:328px; top:8px; bottom:8px;
+  width:auto; height:auto; overflow:hidden; border-radius:0; background:transparent; transform:none;
+}
+.pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character-view {
+  transform:none;
+}
+.pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character img {
+  object-fit:contain; object-position:50% 100%; transform:none!important;
+}
+/* WebGLの内部描画寸法（285x315）は変えず、表示だけを枠いっぱいの `contain` で下端合わせに
+   する。`width/height:auto` だと canvas 固有寸法＝内部寸法×DPR になり高DPI画面で倍に出て、
+   `height:100%` だけだと縦横比を保たず横へ潰れる。どちらも避けるため object-fit で入れる。 */
+.pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character canvas {
+  width:100%!important; height:100%!important;
+  object-fit:contain; object-position:50% 100%;
+  transform:translateX(-50%)!important;
+}
 .pet-app.is-booting .relationship-button,
 .pet-app.is-booting .online { display:none; }
 @media (max-width:460px) {
@@ -187,6 +206,9 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
   .boot-log { display:none; }
   .boot-progress { left:12px; right:12px; width:auto; bottom:58px; }
   .boot-status { left:12px; right:12px; width:auto; bottom:14px; }
+  /* 2Dの `.boot-character`（stage基準 left:0; right:0; top:6%; bottom:78px）と同じ枠。
+     `.character` は stage の外側（pet-app基準）なので、padding 8px の分だけ足す。 */
+  .pet-app.is-booting[data-boot-artwork="live2d"].boot-character-ready .character { left:8px; right:8px; top:calc(8px + 6%); bottom:86px; }
 }
 .character-view::before { content:""; position:absolute; inset:18% 8% 5%; border-radius:50%; background:radial-gradient(circle,rgba(255,209,225,.34),rgba(221,205,255,.12) 48%,transparent 72%); filter:blur(7px); opacity:.75; pointer-events:none; }
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; will-change:transform; }
@@ -236,6 +258,14 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 }
 .top-window-menu::after { content:""; position:absolute; top:100%; left:0; right:0; height:8px; }
 .top-window-menu:hover,.top-window-menu:focus-within,.pet-app.is-layout-editing .top-window-menu {
+  transform:translateY(0); opacity:1;
+}
+/* 上端7px（四隅は16px）はウィンドウのリサイズ領域（z-index:2000）が覆っていて、収納中の
+   メニュー本体はホバーできない。窓の一番上へカーソルを寄せる普通の操作でも開くよう、
+   上辺のリサイズ領域に乗っている間もメニューを展開する。 */
+.pet-app:has(.window-resize-handles [data-resize-direction="North"]:hover) .top-window-menu,
+.pet-app:has(.window-resize-handles [data-resize-direction="NorthWest"]:hover) .top-window-menu,
+.pet-app:has(.window-resize-handles [data-resize-direction="NorthEast"]:hover) .top-window-menu {
   transform:translateY(0); opacity:1;
 }
 .top-window-menu-brand { flex:0 0 auto; padding:0 10px 0 6px; font-size:11px; font-weight:700; color:#66616c; }

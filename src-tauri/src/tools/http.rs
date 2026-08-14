@@ -12,6 +12,8 @@ static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 /// 接続確立の上限。応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない。
 /// 到達しないホストでTCP接続がOS既定（分単位）まで滞留するのを防ぐ。
 const CONNECT_TIMEOUT_SECS: u64 = 10;
+/// 接続後に1バイトも届かない状態の上限。長時間ストリーム全体の時間は制限しない。
+const READ_TIMEOUT_SECS: u64 = 120;
 const MAX_SERVICE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 /// 接続プールを共有する標準クライアント。個別の待ち時間はRequestBuilder::timeoutで指定する。
@@ -19,6 +21,7 @@ pub fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .read_timeout(Duration::from_secs(READ_TIMEOUT_SECS))
             .build()
             // フォールバック許可: TLSバックエンド初期化の失敗でHTTPを一切使えなくしないため、
             // 接続上限なしの既定クライアントで続行する。
