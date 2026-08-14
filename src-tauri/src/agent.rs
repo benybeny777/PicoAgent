@@ -183,6 +183,54 @@ fn looks_like_rss_dump_line(line: &str) -> bool {
         && (rest.contains("http://") || rest.contains("https://"))
 }
 
+/// `personaText`（ui/renderer.js）が人格設定を組み立てるときの項目名。
+/// この形の行は普通の話し言葉ではなく設定文なので、短くてもプロンプト混入として扱う。
+const PERSONA_FIELD_LABELS: [&str; 5] = ["名前", "性格", "口調", "一人称", "ユーザーの呼び方"];
+
+fn is_persona_field_line(line: &str) -> bool {
+    PERSONA_FIELD_LABELS.iter().any(|label| {
+        line.strip_prefix(label)
+            .is_some_and(|rest| rest.starts_with(':') || rest.starts_with('：'))
+    })
+}
+
+/// system プロンプト（選択中キャラの人格設定を含む）が最終回答へそのまま混ざったときに取り除く。
+///
+/// 小型ローカルモデルは指示文を復唱することがあり、そのまま返すとフキダシと履歴へ設定文が出て、
+/// 読み上げも設定文を喋る。**プロンプトに実在する行と同一の行だけ**を落とすため、
+/// 普通の返答は削らない。偶然の一致を消さないよう8文字以上に限るが、`名前:` のような
+/// 人格設定の項目行は短くても設定文なので長さを問わず落とす。
+fn remove_prompt_leak(answer: String, system_prompt: &str) -> String {
+    let blocked: Vec<&str> = system_prompt
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.chars().count() >= 8 || is_persona_field_line(line))
+        .collect();
+    if blocked.is_empty() {
+        return answer;
+    }
+    let kept = answer
+        .lines()
+        .filter(|line| !blocked.contains(&line.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // 改行を潰して1文へ流し込まれた場合に備え、長い行は文中からも取り除く。
+    let cleaned = blocked
+        .iter()
+        .filter(|line| line.chars().count() >= 12)
+        .fold(kept, |text, line| text.replace(line, ""));
+    cleaned.trim().to_string()
+}
+
+/// 会話履歴から system プロンプトを取り出す（混入判定の照合元）。
+fn system_prompt_of(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .find(|message| message.role == "system")
+        .map(|message| message.content.clone())
+        .unwrap_or_default()
+}
+
 fn remove_material_leaks(answer: String) -> String {
     let answer = strip_between_markers(
         answer,
@@ -1666,7 +1714,11 @@ pub async fn run(
             }
             // tool_calls が無ければ最終応答（自己評価が有効なら品質チェックして返す）。
             _ => {
-                let answer = append_sources(remove_material_leaks(last), &sources);
+                let prompt = system_prompt_of(messages);
+                let answer = append_sources(
+                    remove_prompt_leak(remove_material_leaks(last), &prompt),
+                    &sources,
+                );
                 return Ok(self_improve(provider, cfg, model, messages, answer).await);
             }
         }
@@ -1677,12 +1729,16 @@ pub async fn run(
     } else {
         last
     };
+    let prompt = system_prompt_of(messages);
     Ok(self_improve(
         provider,
         cfg,
         model,
         messages,
-        append_sources(remove_material_leaks(answer), &sources),
+        append_sources(
+            remove_prompt_leak(remove_material_leaks(answer), &prompt),
+            &sources,
+        ),
     )
     .await)
 }
@@ -1693,9 +1749,45 @@ mod tests {
         append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
         extract_source_urls, genspark_suite_query, is_local_action_query, is_news_summary_query,
         is_weather_query, market_query, meeting_recorder_query, remove_material_leaks,
-        research_report_query, setup_guide_answer, should_web_search, simple_greeting_answer,
-        spark_workspace_query, web_search_query,
+        remove_prompt_leak, research_report_query, setup_guide_answer, should_web_search,
+        simple_greeting_answer, spark_workspace_query, system_prompt_of, web_search_query,
     };
+    use crate::message::Message;
+
+    /// 小型ローカルモデルは system プロンプトを復唱することがある。そのまま返すと
+    /// フキダシと履歴へ人格設定が出て、読み上げも設定文を喋る。
+    #[test]
+    fn 最終回答から人格プロンプトの混入を除外する() {
+        let prompt = "あなたはデスクトップの相棒です。\n\n選択中キャラクターの人格設定:\n名前: むぎ\n性格: 明るく観察上手な小さな作業相棒\n口調: やわらかい敬語まじりのため口";
+        let answer = "選択中キャラクターの人格設定:\n名前: むぎ\n性格: 明るく観察上手な小さな作業相棒\nこんにちは、今日はなにする？";
+        assert_eq!(
+            remove_prompt_leak(answer.to_string(), prompt),
+            "こんにちは、今日はなにする？"
+        );
+
+        // 改行を潰して1文へ流し込まれた形でも落とす。
+        let inline = format!("はい。{} だよ。", "性格: 明るく観察上手な小さな作業相棒");
+        assert_eq!(remove_prompt_leak(inline, prompt), "はい。 だよ。");
+
+        // プロンプトに無い普通の返答は削らない。
+        let normal = "名前は？\nむぎだよ。";
+        assert_eq!(remove_prompt_leak(normal.to_string(), prompt), normal);
+
+        // 照合元に無い設定文らしき行は落とさない（他キャラの設定文まで消さない）。
+        let other = "名前: りん";
+        assert_eq!(remove_prompt_leak(other.to_string(), prompt), other);
+    }
+
+    #[test]
+    fn 照合元はsystemメッセージから取る() {
+        let messages = vec![
+            Message::new("system", "人格設定の本文"),
+            Message::new("user", "こんにちは"),
+        ];
+        assert_eq!(system_prompt_of(&messages), "人格設定の本文");
+        // system が無い会話でも落ちない（混入判定は行われないだけ）。
+        assert_eq!(system_prompt_of(&messages[1..]), "");
+    }
 
     #[test]
     fn 検索が必要な質問だけ検索する() {

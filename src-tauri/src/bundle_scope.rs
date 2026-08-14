@@ -250,6 +250,30 @@ mod guard {
         );
     }
 
+    /// 人格プロンプトの混入は Rust の `remove_prompt_leak` が最終回答から消すが、
+    /// ストリーム読み上げは最終回答が整う前の途中テキストを声にする。フロント側の
+    /// 除去を外すと、表示には出ないのに設定文だけを喋る状態へ戻る。
+    #[test]
+    fn 読み上げ経路は人格プロンプトの混入を落とす() {
+        let path = guard_scan::repo_root().join("ui/renderer.js");
+        let source = std::fs::read_to_string(path).expect("ui/renderer.js");
+        assert!(
+            source.contains("function stripPersonaLeak(text)")
+                && source.contains("setPersonaSpeechBlocklist(profile)"),
+            "人格プロンプトの除去と、選択中キャラへの照合表の更新を残してください"
+        );
+        let sanitize = source
+            .split_once("function sanitizeSpeechText(text)")
+            .expect("sanitizeSpeechText がありません")
+            .1;
+        let body = sanitize.split_once("\n}").expect("関数の終端がありません").0;
+        assert!(
+            body.contains("stripPersonaLeak("),
+            "読み上げテキストの共通入口 sanitizeSpeechText から stripPersonaLeak を呼んでください\
+             （合成前に通る唯一の経路のため）"
+        );
+    }
+
     #[test]
     fn フロントのpromise失敗を空のcatchで捨てない() {
         let root = guard_scan::repo_root();

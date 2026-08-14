@@ -678,6 +678,43 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
+// 読み上げから外す人格プロンプトの行（`loadCharacter` が選択中キャラのぶんへ入れ替える）。
+let personaSpeechBlocklist = [];
+
+// `personaText` が人格設定を組み立てるときの項目名。この形の行は話し言葉ではなく
+// 設定文なので、短くてもプロンプト混入として扱う（Rust の PERSONA_FIELD_LABELS と対）。
+const PERSONA_FIELD_LINE = /^(名前|性格|口調|一人称|ユーザーの呼び方)[:：]/;
+
+// 人格プロンプトが混ざった返答をモデルが返しても、設定文を声に出さないための照合用。
+// 偶然の一致で普通の返答を消さないよう、8文字以上か人格項目行だけを対象にする。
+function setPersonaSpeechBlocklist(profile) {
+  const lines = String(profile ?? "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => Array.from(line).length >= 8 || PERSONA_FIELD_LINE.test(line));
+  // Rust 側が人格の前へ置く見出し。モデルがプロンプト構造ごと復唱したときに拾う。
+  personaSpeechBlocklist = [...new Set([...lines, "選択中キャラクターの人格設定:"])];
+}
+
+// 人格プロンプトの混入を読み上げテキストから取り除く。
+//
+// 表示と履歴は Rust の `remove_prompt_leak` が最終回答から消すが、ストリーム読み上げは
+// 最終回答が整う前の途中テキストを声にするため、フロント側でも同じものを止める。
+function stripPersonaLeak(text) {
+  let out = String(text ?? "");
+  if (!personaSpeechBlocklist.length) return out;
+  // 1行そのままの混入を落とす。
+  out = out
+    .split("\n")
+    .filter(line => !personaSpeechBlocklist.includes(line.trim()))
+    .join("\n");
+  // 改行を潰して1文へ流し込まれた場合に備え、長い行は文中からも取り除く。
+  for (const line of personaSpeechBlocklist) {
+    if (Array.from(line).length >= 12) out = out.split(line).join("");
+  }
+  return out;
+}
+
 // variant は見た目の切替なので、フレームアニメと Live2D の切替もここで解決する。
 // variant.live2d があればそれを使い、`false` なら（キャラ本体が Live2D でも）フレーム表示に戻す。
 // これで「同じキャラの絵版と Live2D 版」を1つの character.json で持てる。
@@ -774,6 +811,8 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
   if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("Live2D、idleアニメーションのいずれも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
+  // 同じキャラの再読込で早期 return する場合も含め、照合表は必ず現在の人格へ合わせる。
+  setPersonaSpeechBlocklist(profile);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
   const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
@@ -2142,6 +2181,7 @@ function combineStartupGreeting(manifestGreeting, dailyReply) {
 // ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
 function sanitizeSpeechText(text) {
   let out = String(text ?? "").replace(/\r\n/g, "\n");
+  out = stripPersonaLeak(out); // 人格プロンプトの混入は声に出さない
   out = out.split(/\n\s*参考[:：]/)[0];
   out = out.replace(/!?\[([^\]]*)\]\((?:https?:\/\/|mailto:)[^)]+\)/g, "$1");
   out = out.replace(/https?:\/\/[^\s、。）」』】]+/g, "");
