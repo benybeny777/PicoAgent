@@ -678,40 +678,57 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
-// 読み上げから外す人格プロンプトの行（`loadCharacter` が選択中キャラのぶんへ入れ替える）。
-let personaSpeechBlocklist = [];
+// 読み上げから外す人格プロンプト（`loadCharacter` が選択中キャラのぶんへ入れ替える）。
+// blocked は行照合用の正規化済み、inline は1文へ流し込まれた場合に備えた原文。
+let personaSpeechBlocklist = { blocked: [], inline: [] };
 
 // `personaText` が人格設定を組み立てるときの項目名。この形の行は話し言葉ではなく
 // 設定文なので、短くてもプロンプト混入として扱う（Rust の PERSONA_FIELD_LABELS と対）。
 const PERSONA_FIELD_LINE = /^(名前|性格|口調|一人称|ユーザーの呼び方)[:：]/;
 
+// 混入判定のために行を正規化する（空白除去・先頭の箇条書き記号除去・コロンの全角統一）。
+// モデルは `- 名前：むぎ` のように整形し直して復唱することがあるため、見た目の差を均す。
+// Rust の `normalize_leak_line` と同じ規則。
+function normalizeLeakLine(line) {
+  return String(line ?? "")
+    .replace(/\s+/g, "")
+    .replace(/^[-*・>#]+/, "")
+    .replace(/：/g, ":");
+}
+
 // 人格プロンプトが混ざった返答をモデルが返しても、設定文を声に出さないための照合用。
 // 偶然の一致で普通の返答を消さないよう、8文字以上か人格項目行だけを対象にする。
 function setPersonaSpeechBlocklist(profile) {
-  const lines = String(profile ?? "")
-    .split("\n")
-    .map(line => line.trim())
+  const raw = String(profile ?? "").split("\n").map(line => line.trim());
+  const blocked = raw
+    .map(normalizeLeakLine)
     .filter(line => Array.from(line).length >= 8 || PERSONA_FIELD_LINE.test(line));
-  // Rust 側が人格の前へ置く見出し。モデルがプロンプト構造ごと復唱したときに拾う。
-  personaSpeechBlocklist = [...new Set([...lines, "選択中キャラクターの人格設定:"])];
+  personaSpeechBlocklist = {
+    // Rust 側が人格の前へ置く見出し。モデルがプロンプト構造ごと復唱したときに拾う。
+    blocked: [...new Set([...blocked, normalizeLeakLine("選択中キャラクターの人格設定:")])],
+    inline: raw.filter(line => Array.from(line).length >= 12),
+  };
 }
 
 // 人格プロンプトの混入を読み上げテキストから取り除く。
 //
-// 表示と履歴は Rust の `remove_prompt_leak` が最終回答から消すが、ストリーム読み上げは
-// 最終回答が整う前の途中テキストを声にするため、フロント側でも同じものを止める。
+// 表示と履歴は Rust の `remove_prompt_leak` が消すが、フロント側を省略できない理由が2つある。
+// ストリーム読み上げは最終回答が整う前の途中テキストを声にすること、挨拶・自発雑談・
+// 目覚ましは `prepareSpeech` へ直接来ることの2点。
 function stripPersonaLeak(text) {
   let out = String(text ?? "");
-  if (!personaSpeechBlocklist.length) return out;
-  // 1行そのままの混入を落とす。
+  const { blocked, inline } = personaSpeechBlocklist;
+  if (!blocked.length) return out;
+  // 中身が同じ行を落とす（整形し直された復唱も正規化して照合する）。
   out = out
     .split("\n")
-    .filter(line => !personaSpeechBlocklist.includes(line.trim()))
+    .filter(line => {
+      const normalized = normalizeLeakLine(line);
+      return !normalized || !blocked.includes(normalized);
+    })
     .join("\n");
   // 改行を潰して1文へ流し込まれた場合に備え、長い行は文中からも取り除く。
-  for (const line of personaSpeechBlocklist) {
-    if (Array.from(line).length >= 12) out = out.split(line).join("");
-  }
+  for (const line of inline) out = out.split(line).join("");
   return out;
 }
 
@@ -2106,9 +2123,13 @@ function notifyVoiceFailure(error) {
     : "読み上げできません。設定の「追加機能」から音声読み上げを導入してください";
 }
 // 合成のみ行い、再生はしない（起動時に描画と同時再生するための事前合成）。失敗・無効・空は null。
+// 合成前の最後の関門。挨拶・自発雑談・目覚ましは `sanitizeSpeechText` を通さずここへ
+// 直接来るため、人格プロンプトの除去はこの1か所で全経路へ効かせる。
 async function prepareSpeech(text) {
+  const speech = stripPersonaLeak(String(text ?? "")).trim();
+  if (!speech) return null; // 混入だけの文は合成しない（無音の再生を挟まない）
   try {
-    const result = await window.picoagent.speak(text);
+    const result = await window.picoagent.speak(speech);
     if (result?.enabled === false) ttsEnabledCache = false;
     else if (result?.enabled) {
       ttsEnabledCache = true;

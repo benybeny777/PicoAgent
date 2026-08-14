@@ -1722,7 +1722,11 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
 
     match provider.chat(&state.config, &model, &convo, &[]).await {
         Ok(message) => {
-            let reply = message.content.trim().to_string();
+            // 雑談は「人格(system)＋指示」だけを文脈にするぶん、小型モデルが人格設定を
+            // そのまま返しやすい。エージェント経路を通らないのでここで落とす。
+            let prompt = crate::agent::system_prompt_of(&convo);
+            let reply =
+                crate::agent::remove_prompt_leak(message.content.trim().to_string(), &prompt);
             if !conversation_is_current(&state, &request_character_id, request_epoch) {
                 crate::log_paths::append_app_log(
                     &app,
@@ -1811,7 +1815,10 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
         .chat(&state.config, &model, &convo, &[])
         .await
         .ok()?;
-    let reply = message.content.trim().to_string();
+    // エージェント経路を通らないので、人格プロンプトの混入はここで落とす
+    // （起こし文はそのまま表示・読み上げへ回る）。
+    let prompt = crate::agent::system_prompt_of(&convo);
+    let reply = crate::agent::remove_prompt_leak(message.content.trim().to_string(), &prompt);
     if reply.is_empty() {
         None
     } else {
