@@ -5,7 +5,8 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 ルールは [AGENTS.md](../AGENTS.md)** が持ち場。
 
 - 調査日: 2026-08-14（Linux コンテナ上のコード読みのみ。**実機での動作確認・実測は一切していない**）
-- 調査時点でリポジトリに Moveable の痕跡は無く、コード変更もしていない
+- **Moveable 自体は codex 側で導入済み**（`ui/vendor/moveable/moveable.min.js` を Git へ直接コミット、
+  設定画面の「配置」モード）。本ファイルの §1 は、その導入で**残っている宿題**を書いている
 - サイズの数値はすべて**未実測の概算**。採用時に実ファイルで測り直すこと
 
 ---
@@ -24,44 +25,43 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 
 ---
 
-## 1. Moveable 本体をどこへ置くか（着手前に決める）
+## 1. 導入済み Moveable に残っている宿題
 
-`ui/vendor/` の扱いが2通りあり、**Moveable をどちらにするかで壊れかたが変わる**ので先に決める。
+Moveable は `ui/vendor/moveable/moveable.min.js` と `LICENSE` を**Git へ直接コミットする形**で入っている
+（Live2D / VRM のような `cargo xtask setup` 取得ではない）。MIT で再配布に条件が無く、配置操作は基本機能なので
+「clone しただけで動く」この形が妥当。以下は**その形を選んだことで残っている、未処理の3点**。
 
-現状:
+### 1-1. 設計ガードが `ui/vendor/` を素通ししている（要修正）
 
-- `.gitignore` が無視しているのは `ui/vendor/live2d/` と `ui/vendor/vrm/` の**2つだけ**（`ui/vendor/` 全体ではない）
+- `.gitignore` が無視しているのは `ui/vendor/live2d/` と `ui/vendor/vrm/` の**2つだけ**
 - 一方 `bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、理由を
   「`cargo xtask setup live2d` が取得する Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている
+- **`ui/vendor/moveable/` は Git 管理下にあり製品へ入るのに、同梱物の範囲を固定するはずの検査が当たっていない。**
+  コメントの説明も実態と食い違っている
 
-### 案A: 取得方式（Live2D / VRM と同じ）
+### 1-2. 除外を狭めると `LICENSE` が拡張子検査に引っかかる（先に決めておく）
 
-`cargo xtask setup moveable` で取得し、`xtask/src/bundled.rs::ensure_pinned_file` と同じく URL と SHA-256 をピン留めする。
+`UI_GENERATED_DIRS` の除外を `vendor/live2d` と `vendor/vrm` へ狭めると、`ui/vendor/moveable/LICENSE` が
+`ui配下に開発用ファイルを置かない` テストで落ちる。拡張子が無いファイルは
+`extension().map(...).unwrap_or_default()` で空文字になり、`ALLOWED_UI_EXTENSIONS`（12種）に一致しないため。
 
-- 利点: 既存の導線に完全に乗る。取得元と版が1か所に固定される
-- 欠点: **setup を踏んでいない環境では UI が壊れる**。`.claude/hooks/session-start.sh`、他のエージェント、
-  ビルド機のそれぞれで取得が要る。Live2D は「対応キャラを使うときだけ」の機能なので欠けても動くが、
-  ドラッグ・リサイズは基本操作なので、欠けたら成立しない
+取りうる形は3つ。**ライセンス本文は同梱したままにするのが前提**（MIT の条件）。
 
-### 案B: Git へ直接コミットする（推奨）
+1. `LICENSE` を `ui/vendor/moveable/LICENSE.txt` にはせず、`docs/THIRD-PARTY-NOTICES.md` へ本文を移して
+   `ui/` 配下からは消す（`ui/` は実行時に使うものだけ、という現行の考えかたに最も近い）
+2. `ALLOWED_UI_EXTENSIONS` へ `txt` を足し、`LICENSE.txt` へ改名する
+3. ライセンスファイルだけを検査の例外として `bundle_scope.rs` へ明記する
 
-`ui/vendor/moveable/moveable.esm.js` を Git 管理下に置く。
+### 1-3. 第三者表記が未追記
 
-- 利点: Moveable は MIT で**再配布に条件が無い**（Live2D と事情が違う）。clone しただけでビルドが通る状態を保てる
-- 欠点: 依存の実体がリポジトリに入る。更新は手作業になる
-- 採るなら**必ず併せて直すもの**:
-  1. `bundle_scope.rs::UI_GENERATED_DIRS` の除外を `vendor` 全体から `vendor/live2d` と `vendor/vrm` へ狭め、
-     コメントの説明（「Git 管理外」）を実態と合わせる。**放置すると、同梱物を固定するはずの設計ガードが
-     `ui/vendor/` 配下を素通しし続ける**
-  2. `docs/THIRD-PARTY-NOTICES.md` へ Moveable（MIT）を追記する
-  3. 採用した版・取得元 URL・SHA-256 をコミットメッセージか本ファイルへ残す（案A の `ensure_pinned_file` と同じ意図）
+`docs/THIRD-PARTY-NOTICES.md` に **Moveable の項目が無い**。販売品なので MIT の表示義務を満たすため追記する。
+併せて、採用した版・取得元 URL・SHA-256 を記録する（`ensure_pinned_file` でピン留めしない形を選んだぶん、
+どこから持ってきた何なのかが追えなくなる）。
 
-### どちらでも共通
+### 1-4. 参考: 読み込みかた
 
-- 使うのは **dist の ESM 単一ファイル（依存を内包した版）**。CJS 版・非 minified の開発用ビルドは入れない
-- CSP は `'self'` なので追加の緩和は不要。`ui-dist/` へは `ui/` の写しとして自動で入る
-- 読み込みは既存の2通りが参考になる。`ui/index.html` の importmap（three / three-vrm）か、
-  `renderer.js::loadScriptOnce`（Live2D）。**欠けたときに UI 全体を道連れにしない**書き方にすること
+CSP は `script-src 'self'` なので追加の緩和は不要。`ui-dist/` へは `ui/` の写しとして自動で入る。
+既存の前例は `ui/index.html` の importmap（three / three-vrm）と `renderer.js::loadScriptOnce`（Live2D）の2通り。
 
 ---
 
@@ -102,7 +102,7 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 
 ### 2-5. `tauri-plugin-window-state` — 採否より先に `layout.rs` との重複を決める
 
-- **なぜ**: Moveable で動かせるようにするなら、位置とサイズの永続化が必ず要る
+- **なぜ**: Moveable の「配置」モードで動かした結果は永続化が要る（保存・復元・リセットは実装済み）
 - **ただし**: `src-tauri/src/layout.rs` が既に `PICOAGENT_WINDOW_LAYOUTS` で**表示形式ごとに寸法を覚えている**。
   さらに `lib.rs::restore_window_layout` と `clamp_to_best_monitor` が復元とモニタ内への丸めを持っている。
   プラグインを足すと保存経路が二重になり、**どちらが勝つかが起動順に依存する不具合**になりやすい
@@ -159,6 +159,6 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 ## 6. この回でやっていないこと
 
 - 各ライブラリの**実サイズ・実動作は未確認**。数値は概算で、採用時に実測すること
-- Moveable 自体の統合設計（どの要素を掴めるようにするか、`layout.rs` / `character_framing.rs` の
-  保存経路とどう繋ぐか、8方向リサイズの既存実装との住み分け）は codex 側の作業として手を付けていない
+- §1 の3点（設計ガードの除外範囲、`LICENSE` の置き場所、第三者表記）は**指摘のみで未修正**。
+  Moveable の「配置」モードそのものの動作確認もしていない
 - Linux コンテナでの調査のみ。Windows / macOS 実機での確認はしていない

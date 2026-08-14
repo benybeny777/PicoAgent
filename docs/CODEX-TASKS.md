@@ -5,9 +5,9 @@
 現在の内容は 2026-08-13 のレビュー2巡（`docs/REVIEW-LOG.md` の「ベータ公開分の事後レビュー」）の残件と、
 2026-08-14 に追加した依存ライブラリの検討分。
 
-> **Moveable 導入回で先に読むもの: [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md)。**
-> `ui/vendor/` へ依存を置くときの制約（CSP、拡張子 allowlist、`bundle_scope.rs` の走査除外、
-> Git 管理下に置くか取得方式にするか）と、他に入れる価値のあるライブラリの採否をまとめてある。
+> **依存ライブラリを足すときに先に読むもの: [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md)。**
+> `ui/vendor/` へ依存を置くときの制約（CSP、拡張子 allowlist、`bundle_scope.rs` の走査除外）と、
+> 他に入れる価値のあるライブラリの採否・見送り理由をまとめてある。
 
 優先度は P0（配布前に必須）→ P1（次の作業回で）→ 保留（条件が揃うまで着手しない）。
 着手したら、完了条件まで満たしてから `docs/REVIEW-LOG.md` の該当行を更新し、この項目を消す。
@@ -77,19 +77,27 @@
 - **やること**: 長時間音声（10分以上）で文字起こしし、メモリと応答の体感を確認する。
 - **完了条件**: 問題がなければそのまま。過大なら共通層側へ上限の設定キーを足す（スキル側で再実装しない）。
 
-## P1-5. Moveable を `ui/vendor/` へ置く方式を決めて、設計ガードを実態に合わせる
+## P1-5. 導入済み Moveable の未処理3点（設計ガード・LICENSE・第三者表記）
+
+Moveable 本体（`ui/vendor/moveable/moveable.min.js` の直コミットと「配置」モード）は導入済み。以下はその残り。
+背景と選択肢は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §1。
 
 - **なぜ**: `.gitignore` が無視しているのは `ui/vendor/live2d/` と `ui/vendor/vrm/` の2つだけなのに、
   `src-tauri/src/bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、
-  理由を「Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている。Moveable を Git 管理下へ
-  置く場合、**同梱物の範囲を固定するはずの設計ガードが `ui/vendor/` 配下を素通しし続ける**。
-- **やること**: [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §1 の案A（`cargo xtask setup moveable` で
-  SHA-256 ピン留め取得）／案B（Git へ直接コミット。MIT なので再配布条件は無い）から選ぶ。**案Bを推奨**。
-  案Bなら `UI_GENERATED_DIRS` の除外を `vendor/live2d` と `vendor/vrm` へ狭め、コメントを実態へ直し、
-  `docs/THIRD-PARTY-NOTICES.md` へ Moveable（MIT）を追記する。
-- **完了条件**: 採用した版・取得元 URL・SHA-256 が記録されていること。`cargo xtask build-ui` の `ui-dist/` に
-  実体が入ること。`bundle_scope` のテストが通り、コメントの説明と除外範囲が一致していること。
-- **禁止**: CDN からの読み込み（CSP が `script-src 'self'`）。`package.json` の追加。ビルドステップ前提の配布形式。
+  理由を「Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている。**`ui/vendor/moveable/` は
+  Git 管理下にあり製品へ入るのに、同梱物の範囲を固定するはずの検査が当たっていない。** さらに
+  `docs/THIRD-PARTY-NOTICES.md` に Moveable の項目が無く、MIT の表示義務を満たしていない。
+- **やること**:
+  1. `UI_GENERATED_DIRS` の除外を `vendor/live2d` と `vendor/vrm` へ狭め、コメントの説明を実態へ直す。
+  2. 狭めると `ui/vendor/moveable/LICENSE` が `ui配下に開発用ファイルを置かない` で落ちる（拡張子なしは
+     空文字になり `ALLOWED_UI_EXTENSIONS` に一致しない）。ライセンス本文を `THIRD-PARTY-NOTICES.md` へ移して
+     `ui/` から消す／`LICENSE.txt` へ改名して `txt` を allowlist へ足す／例外として明記する、から選ぶ。
+     **1案目を推奨**（`ui/` は実行時に使うものだけ、という現行の考えかたに合う）。
+  3. `docs/THIRD-PARTY-NOTICES.md` へ Moveable（MIT）を追記し、採用した版・取得元 URL・SHA-256 を記録する。
+- **完了条件**: `cargo test --lib --manifest-path src-tauri/Cargo.toml bundle_scope` が通り、除外範囲と
+  コメントの説明が一致していること。`cargo xtask build-ui` の `ui-dist/` に `moveable.min.js` が入ること。
+  第三者表記に Moveable があること。
+- **禁止**: CDN からの読み込み（CSP が `script-src 'self'`）。`package.json` の追加。ライセンス本文を消すこと。
 
 ## P1-6. `cargo-deny` でライセンス検査を足す
 

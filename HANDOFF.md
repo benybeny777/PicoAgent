@@ -78,7 +78,7 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 
 **次に手を動かす内容は [docs/CODEX-TASKS.md](docs/CODEX-TASKS.md) にまとめてある**（ベータNSISの再生成、Windows実機でのプロセス層テスト、日本語ラベルの収まり確認など）。以下はそのうち実機または人の判断が要る境界の一覧。
 
-**Moveable の導入をcodexで進める場合は [docs/LIBRARY-CANDIDATES.md](docs/LIBRARY-CANDIDATES.md) を先に読む。** `ui/vendor/` へ依存を置くときの制約（CSP、`bundle_scope.rs` の拡張子allowlistと走査除外、Git管理下に置くか取得方式にするか）と、併せて検討したライブラリの採否・見送り理由をまとめてある。位置とサイズの保存は `tauri-plugin-window-state` を入れず `layout.rs` を伸ばす方針を推奨（保存経路の二重化を避ける）。
+**依存ライブラリの判断材料は [docs/LIBRARY-CANDIDATES.md](docs/LIBRARY-CANDIDATES.md) にある。** `ui/vendor/` へ依存を置くときの制約（CSP、`bundle_scope.rs` の拡張子allowlistと走査除外）と、検討した候補の採否・見送り理由をまとめてある。導入済みMoveableの未処理3点（設計ガードが `ui/vendor/moveable/` を素通し、`LICENSE` の置き場所、第三者表記の未追記）は `CODEX-TASKS.md` P1-5。位置とサイズの保存は `tauri-plugin-window-state` を入れず `layout.rs` を伸ばす方針を推奨（保存経路の二重化を避ける）。
 
 自動撮影できるPNG系8キャラ×7形式は確認対象（`photoreal-prototype` を含む）。以下は実機または人の判断が要る境界。詳細と判断理由は `docs/REVIEW-LOG.md` を参照する。
 

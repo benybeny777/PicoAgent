@@ -24,11 +24,12 @@
 
 ## 2026-08-14 — 外部ライブラリ候補の棚卸し（コード変更なし）
 
-Moveable の導入に合わせて「他に入れる価値のある依存はあるか」を調べた。**コードは変更していない**（調査と資料化のみ、Linuxコンテナでのコード読み。実機確認・実測なし）。候補ごとの詳細・制約・見送り理由は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) が正本で、ここには判定だけ残す。
+導入済みMoveable（`ui/vendor/moveable/` の直コミットと「配置」モード）に合わせて「他に入れる価値のある依存はあるか」を調べ、併せてMoveable導入の未処理点を洗い出した。**コードは変更していない**（調査と資料化のみ、Linuxコンテナでのコード読み。実機確認・実測なし）。候補ごとの詳細・制約・見送り理由は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) が正本で、ここには判定だけ残す。
 
 | # | 候補・指摘 | 判定 | 理由・反映先 |
 |---|---|---|---|
-| 1 | `.gitignore` は `ui/vendor/live2d/` と `ui/vendor/vrm/` だけを無視しているのに、`bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` をディレクトリごと走査から外している。Moveable を Git 管理下へ置くと、同梱物の範囲を固定する設計ガードが `ui/vendor/` 配下を素通しし続ける | 保留 | Moveable の置き場所（取得方式／直コミット）を決めてからでないと直す形が決まらない。`CODEX-TASKS.md` P1-5 へ登録。直コミット（案B）を推奨 |
+| 1 | `.gitignore` は `ui/vendor/live2d/` と `ui/vendor/vrm/` だけを無視しているのに、`bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` をディレクトリごと走査から外している。**導入済みの `ui/vendor/moveable/` は Git 管理下で製品にも入るのに、同梱物の範囲を固定する検査が当たっていない**（コメントの「Git 管理外」も実態と食い違う） | 保留 | `CODEX-TASKS.md` P1-5 へ登録。除外を狭めると拡張子なしの `ui/vendor/moveable/LICENSE` が `ui配下に開発用ファイルを置かない` で落ちるため、ライセンス本文の置き場所とセットで決める |
+| 1-2 | `docs/THIRD-PARTY-NOTICES.md` に Moveable の項目が無く、MIT の表示義務を満たしていない（`LICENSE` ファイルは同梱済み） | 保留 | 同じく P1-5 で対応。採用した版・取得元 URL・SHA-256 も併せて記録する |
 | 2 | `secret.rs` が非 Windows で平文フォールバックする。初期販売は Windows のみで現時点の実害は無いが、この状態で macOS 版を出すと API キーが `config.json` に平文で載る | 保留 | `keyring` で Keychain へ寄せる。macOS を販売対象へ入れる回の前提条件として、保留 #2（macOS 対応）へ条件を追記した |
 | 3 | 監査が `cargo audit`（脆弱性）だけで、ライセンス混入の検査が無い | 保留 | `cargo-deny` の導入を `CODEX-TASKS.md` P1-6 へ登録。アプリの依存は増えない |
 | 4 | 位置・サイズ保存に `tauri-plugin-window-state` を入れるか | 見送り | `layout.rs` が表示形式ごとの寸法を、`lib.rs` が復元とモニタ内への丸めを既に持っている。併存させると起動順で勝ち負けが変わる不具合になる。プラグインは入れず `layout.rs` を伸ばす |
