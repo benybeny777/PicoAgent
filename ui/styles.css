@@ -240,6 +240,31 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 @keyframes boot-badge-pulse { 0%,100%{transform:scale(1); filter:brightness(1)} 50%{transform:scale(1.06); filter:brightness(1.16)} }
 .online { position:absolute; right:52px; bottom:45px; width:11px; height:11px; border:3px solid rgba(255,255,255,.9); border-radius:50%; background:#d56b73; box-shadow:0 1px 5px rgba(0,0,0,.2); }
 .online[data-up="true"] { background:var(--mint); }
+.layout-edit-toggle {
+  position:fixed; z-index:60; left:10px; bottom:10px; width:auto; min-width:58px; height:34px;
+  padding:0 12px; border:1px solid rgba(255,255,255,.8); border-radius:10px;
+  background:rgba(67,52,76,.88); color:#fff; box-shadow:0 5px 18px rgba(31,22,36,.22);
+  font-size:12px; font-weight:800;
+}
+.pet-app.is-booting .layout-edit-toggle { display:none; }
+.layout-edit-toggle[aria-pressed="true"] { background:#c65f78; }
+.layout-editor-toolbar {
+  position:fixed; z-index:70; left:78px; bottom:10px; display:flex; flex-wrap:wrap; align-items:center; gap:7px;
+  max-width:calc(100vw - 96px); padding:8px 10px; border:1px solid rgba(255,255,255,.82);
+  border-radius:12px; background:rgba(47,36,55,.94); color:#fff;
+  box-shadow:0 8px 28px rgba(25,18,31,.28); font-size:12px;
+}
+.layout-editor-toolbar[hidden] { display:none; }
+.layout-editor-toolbar strong { white-space:nowrap; }
+.layout-editor-toolbar label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.layout-editor-toolbar select,
+.layout-editor-toolbar button { height:30px; padding:0 9px; border:0; border-radius:8px; font-size:11px; }
+.layout-editor-toolbar select { min-width:116px; background:#fff; color:#302537; }
+.layout-editor-toolbar button { position:static; background:#f58da2; color:#fff; font-weight:700; }
+.layout-editor-toolbar #layoutEditorSave { background:#64a98a; }
+.pet-app.is-layout-editing [data-layout-editor-source="true"] { cursor:move; outline:1px dashed rgba(246,111,139,.78); outline-offset:2px; }
+.pet-app.is-layout-editing .character { transition:none; }
+.moveable-control-box { z-index:65!important; }
 .relationship-button { position:absolute; z-index:8; right:67px; bottom:39px; width:28px; height:28px; padding:0; border:2px solid rgba(255,255,255,.9); border-radius:50%; background:var(--accent); box-shadow:0 2px 8px rgba(42,31,46,.2); font-size:14px; }
 .relationship-card { position:absolute; z-index:14; right:28px; bottom:73px; width:250px; max-height:290px; overflow:auto; padding:16px; border:1px solid var(--panel-border); border-radius:16px 16px 5px 16px; background:var(--panel-bg); color:var(--ink); box-shadow:0 12px 30px rgba(42,31,46,.2); }
 .relationship-card[hidden] { display:none; }
@@ -809,6 +834,14 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion > img {
   object-position:50% 0%;
+}
+/* Low-proportion 2D characters use an upper-body crop in stream mode.
+   The standard 260% crop is reserved for tall characters because it becomes a face close-up on chibi art. */
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-view > img {
+  inset:0 auto auto -32.5%; width:165%; height:165%;
+}
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-secondary-motion {
+  inset:0 auto auto -32.5%; width:165%; height:165%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0;

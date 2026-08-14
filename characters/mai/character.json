@@ -4,6 +4,7 @@
   "assetVersion": "2026-08-08-preserve-details-v2-mai",
   "description": "落ち着いた紫のドレスがよく似合う、包容力のあるやさしいお姉さん。",
   "motionProfile": "full",
+  "bodyProportion": "compact",
   "greeting": "おかえりなさい。今日もよく来たわね。大丈夫、まいがそばにいるから、ゆっくり一緒に進めましょう。",
   "voice": {
     "provider": "aivis",

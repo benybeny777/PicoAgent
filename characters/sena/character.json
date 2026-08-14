@@ -4,6 +4,7 @@
   "assetVersion": "2026-08-12-highres-motion-v2-sena",
   "description": "銀青色のハイポニーと星空色の衣装が印象的な、凛とした18歳の歌姫系作業相棒。",
   "motionProfile": "full",
+  "defaultFraming": { "zoom": 1.72, "x": 0, "y": 20 },
   "greeting": "セナだよ。今日のステージも、きれいに仕上げようか。",
   "boot": {
     "sleeping": "preview.png"

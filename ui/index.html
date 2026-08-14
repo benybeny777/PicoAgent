@@ -155,9 +155,28 @@
     <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
       <div class="drop-overlay-inner">📎 ここにドロップして添付</div>
     </div>
+    <button id="layoutEditToggle" class="layout-edit-toggle" type="button" aria-pressed="false" title="OBS風に画面を編集">配置</button>
+    <section id="layoutEditorToolbar" class="layout-editor-toolbar" aria-label="レイアウト編集" hidden>
+      <strong>レイアウト編集</strong>
+      <label>対象
+        <select id="layoutEditorTarget">
+          <option value="character">キャラクター</option>
+          <option value="bubble">会話パネル</option>
+          <option value="reply">字幕</option>
+          <option value="history">配信チャット</option>
+          <option value="display">配信表示</option>
+        </select>
+      </label>
+      <button id="layoutEditorUndo" type="button">元に戻す</button>
+      <button id="layoutEditorSave" type="button">保存</button>
+      <button id="layoutEditorReset" type="button">既定へ戻す</button>
+      <button id="layoutEditorClose" type="button">閉じる</button>
+    </section>
   </main>
+  <script src="vendor/moveable/moveable.min.js"></script>
   <script src="picoagent.js"></script>
   <script src="common.js"></script>
   <script src="renderer.js"></script>
+  <script src="layout-editor.js"></script>
 </body>
 </html>

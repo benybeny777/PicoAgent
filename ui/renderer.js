@@ -761,6 +761,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
+  character.dataset.bodyProportion = manifest.bodyProportion === "compact" ? "compact" : "standard";
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";
@@ -3922,9 +3923,21 @@ function applyCharacterFraming() {
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
-    // 通常2Dは以前の上半身位置を維持する。VRM／Live2Dだけ胸上を標準にして、
-    // 低頭身2Dの頭頂や肩が共通倍率で見切れないようにする。
-    const fallback = character.dataset.renderKind === "2d" ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
+    // 低頭身2Dは以前の上半身位置を維持し、長身・実写・Live2D／VRMは胸上を標準にする。
+    // manifestの既定構図は原画固有の余白だけを吸収し、利用者の保存値がある場合は使わない。
+    const isCompact2d = character.dataset.renderKind === "2d"
+      && character.dataset.bodyProportion === "compact";
+    const usesStream2dCrop = character.dataset.renderKind === "2d" && currentLayout === "stream";
+    const manifestFrame = usesStream2dCrop
+      ? characterManifest?.streamFraming
+      : characterManifest?.defaultFraming;
+    const fallback = manifestFrame && Number.isFinite(Number(manifestFrame.zoom))
+      ? {
+          zoom: Number(manifestFrame.zoom),
+          x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
+          y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
+        }
+      : isCompact2d || usesStream2dCrop ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
     applyCharacterZoom(fallback.zoom);
     applyCharacterOffset(fallback.x, fallback.y, { clamp: false });
     return;
@@ -3948,6 +3961,7 @@ function applyStreamAppearance(background, imagePath, display, displayImagePath,
 
 character.addEventListener("pointerdown", event => {
   if (event.button !== 0) return;
+  if (petApp.classList.contains("is-layout-editing")) return;
   if (event.target instanceof Element && event.target.closest("button")) return;
   event.preventDefault();
   markActivity();

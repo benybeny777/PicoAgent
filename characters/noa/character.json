@@ -4,6 +4,7 @@
   "assetVersion": "2026-08-12-highres-motion-v2-noa",
   "description": "黒いぱっつん前髪と素直なツインテール、上品な吸血姫風メイド衣装の18歳ツンデレ作業相棒。",
   "motionProfile": "full",
+  "defaultFraming": { "zoom": 1.82, "x": 0, "y": 24 },
   "greeting": "ノアよ。べ、別に待ってたわけじゃないけど……用件は聞いてあげる。",
   "boot": {
     "sleeping": "preview.png"

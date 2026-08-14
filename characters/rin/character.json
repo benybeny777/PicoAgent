@@ -4,6 +4,7 @@
   "assetVersion": "2026-08-08-preserve-details-v2-rin",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "motionProfile": "full",
+  "bodyProportion": "compact",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
     "sleeping": "boot/sleeping.png"

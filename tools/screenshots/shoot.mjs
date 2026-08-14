@@ -294,8 +294,12 @@ async function shootCharacterMatrix() {
   const selectedCharacters = process.env.SHOOT_CHARACTER_IDS
     ? process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean)
     : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa", "photoreal-prototype"];
+  const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
+    ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
+    : null;
   for (const characterId of selectedCharacters) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      if (selectedLayouts && !selectedLayouts.has(layout)) continue;
       const started = performance.now();
       const page = await openScene({ characterId, layout, width, height, forcePng: true });
       try {
@@ -326,9 +330,15 @@ async function shootCharacterMatrix() {
           const secondarySpriteStyle = secondarySprite ? getComputedStyle(secondarySprite) : null;
           const rect = image.getBoundingClientRect();
           const characterRect = character.getBoundingClientRect();
+          const imageStyle = getComputedStyle(image);
+          const view = document.querySelector(".character-view");
+          const viewStyle = view ? getComputedStyle(view) : null;
           return {
             naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+            characterDataset: { ...character.dataset },
             imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            imageStyle: { width: imageStyle.width, height: imageStyle.height, left: imageStyle.left, inset: imageStyle.inset, transform: imageStyle.transform },
+            viewStyle: viewStyle ? { transform: viewStyle.transform, scale: viewStyle.scale } : null,
             secondaryMotion: secondary ? {
               visible: !secondary.hidden && secondaryStyle.display !== "none",
               bodyAnimationName: secondaryStyle.animationName,
@@ -397,6 +407,64 @@ async function shootCharacterMatrix() {
     await contact.close();
   }
   return { output, results, warnings };
+}
+
+async function validateLayoutEditor() {
+  const output = join(ROOT, "temp", "layout-editor-qa");
+  mkdirSync(output, { recursive: true });
+  const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true });
+  try {
+    await page.locator("#layoutEditToggle").click();
+    await page.waitForSelector("#layoutEditorToolbar:not([hidden])");
+    await page.waitForSelector(".moveable-control-box");
+    const before = await page.locator("#character").boundingBox();
+    if (!before) throw new Error("レイアウト編集対象のキャラクターが見つかりません");
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width / 2 - 80, before.y + before.height / 2 + 35, { steps: 8 });
+    await page.mouse.up();
+    const after = await page.locator("#character").boundingBox();
+    const state = await page.evaluate(() => ({
+      translate: document.getElementById("character")?.style.translate || "",
+      framingTransform: getComputedStyle(document.querySelector(".character-view")).transform,
+      dragCalls: window.__startDraggingCalls || 0,
+    }));
+    if (!after || Math.abs(after.x - before.x) < 20 || Math.abs(after.y - before.y) < 10 || !state.translate) {
+      throw new Error(`Moveableのドラッグが反映されませんでした: ${JSON.stringify({ before, after, state })}`);
+    }
+    if (state.framingTransform === "none") throw new Error("Moveableのドラッグで既定のキャラ構図が失われました");
+    if (state.dragCalls !== 0) throw new Error("編集モード中にウィンドウドラッグが開始されました");
+    const scaleHandle = page.locator(".moveable-control.moveable-ne");
+    const scaleBox = await scaleHandle.boundingBox();
+    if (!scaleBox) throw new Error("Moveableの拡大縮小ハンドルが見つかりません");
+    await page.mouse.move(scaleBox.x + scaleBox.width / 2, scaleBox.y + scaleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(scaleBox.x + scaleBox.width / 2 - 60, scaleBox.y + scaleBox.height / 2 + 60, { steps: 8 });
+    await page.mouse.up();
+    const scaled = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+    if (!scaled.scale) throw new Error(`Moveableの拡大縮小が反映されませんでした: ${JSON.stringify(scaled)}`);
+    await page.locator("#layoutEditorSave").click();
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"));
+    if (!saved.stream?.character?.translate || !saved.stream?.character?.scale) throw new Error("表示形式ごとの編集値が保存されませんでした");
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+    const restored = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+    if (restored.translate !== saved.stream.character.translate || restored.scale !== saved.stream.character.scale) {
+      throw new Error("保存した配置が再読み込み後に復元されませんでした");
+    }
+    await page.locator("#layoutEditToggle").click();
+    await page.locator("#layoutEditorReset").click();
+    const reset = await page.evaluate(() => ({
+      translate: document.getElementById("character")?.style.translate || "",
+      scale: document.getElementById("character")?.style.scale || "",
+      saved: JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"),
+    }));
+    if (reset.translate || reset.scale || reset.saved.stream) throw new Error("既定配置へ戻せませんでした");
+    await page.screenshot({ path: join(output, "stream-editor.png"), omitBackground: true });
+    return output;
+  } finally {
+    await page.close();
+  }
 }
 
 async function validateInteractionMatrix() {
@@ -555,14 +623,17 @@ async function validateInteractionMatrix() {
   }
   const staleOffsetPage = await openScene({ characterId: "sena", forcePng: true, layout: "stream" });
   try {
-    const resetOffset = await staleOffsetPage.evaluate(() => {
+    const offsets = await staleOffsetPage.evaluate(() => {
+      characterFraming = {};
+      applyCharacterFraming();
+      const expected = { ...characterOffset };
       characterFraming = { hiyori: { stream: { preset: "custom", x: -386, y: 159, zoom: 1.55 } } };
       applyCharacterOffset(-386, 159, { clamp: false });
       applyCharacterFraming();
-      return { ...characterOffset };
+      return { expected, actual: { ...characterOffset } };
     });
-    if (resetOffset.x !== 0 || resetOffset.y !== 0) {
-      throw new Error(`別キャラの旧位置を引き継いでいます: ${JSON.stringify(resetOffset)}`);
+    if (offsets.actual.x !== offsets.expected.x || offsets.actual.y !== offsets.expected.y) {
+      throw new Error(`別キャラの旧位置を引き継いでいます: ${JSON.stringify(offsets)}`);
     }
     console.log("  キャラ切替検査: 別キャラの旧位置を引き継がない");
   } finally {
@@ -1180,6 +1251,15 @@ if (process.env.SHOOT_CHARACTER_MATRIX) {
   server.close();
   const average = Math.round(matrix.results.reduce((sum, item) => sum + item.readyMs, 0) / matrix.results.length);
   console.log(`${matrix.results.length}形式の表示検査完了: ${matrix.output}（平均 ${average}ms）`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_LAYOUT_EDITOR) {
+  const output = await validateLayoutEditor();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`レイアウト編集検査完了: ${output}`);
   process.exit(0);
 }
 

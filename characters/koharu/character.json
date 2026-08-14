@@ -4,6 +4,7 @@
   "assetVersion": "2026-08-12-highres-motion-v2-koharu",
   "description": "柔らかな茶色のボブとキャメル色の上着が似合う、親しみやすい18歳の作業相棒。",
   "motionProfile": "full",
+  "defaultFraming": { "zoom": 1.82, "x": 0, "y": 24 },
   "greeting": "こんにちは、こはるだよ。今日のこと、気軽に話してね。",
   "boot": {
     "sleeping": "preview.png"

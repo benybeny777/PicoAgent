@@ -5,7 +5,7 @@
 PicoAgent のキャラクター画像は、各キャラフォルダを同じ構成にそろえて管理する。
 正本は `characters/<キャラクターID>/` で、`ui/assets/characters/` は同期生成物。
 
-PNG、Live2D、VRMの全キャラクターは胸上表示を標準にする。素材は全身・透過で保持するが、構図未設定時は共通の `bust` へ戻し、`upper` / `full` はユーザーが対象キャラへ明示保存した場合だけ使う。チャット／トーク／バーの小型アイコンだけは共通CSSで首上を切り出す。
+低頭身2Dは上半身、長身・実写・Live2D・VRMは胸全体がぎりぎり入る胸上を標準にする。素材は全身・透過で保持し、manifestの `bodyProportion`、`defaultFraming`、`streamFraming` で原画固有の余白だけを非破壊に吸収する。利用者が対象キャラへ保存した構図は既定値より優先する。チャット／バーの小型アイコンは共通CSSで首上を切り出す。
 
 組み込みキャラの既定声は `character.json` の `voice` とバックエンドの
 `default_character_tts_voice` を同じモデルUUID・話者UUID・スタイル名にそろえる。

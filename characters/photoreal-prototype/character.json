@@ -3,6 +3,8 @@
   "name": "実写（試作）",
   "description": "黒髪と黒系ファッションの、実写調で制作した成人の試作キャラクター。",
   "motionProfile": "full",
+  "defaultFraming": { "zoom": 2.75, "x": 0, "y": 48 },
+  "streamFraming": { "zoom": 2.05, "x": 0, "y": 38 },
   "greeting": "こんにちは。実写スタイルの試作キャラクターです。今日も一緒に進めましょう。",
   "boot": {
     "sleeping": "sleeping.png"
