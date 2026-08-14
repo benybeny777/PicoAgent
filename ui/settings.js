@@ -53,7 +53,7 @@ const LAYOUT_CHOICES = [
   { id: "talk", label: "トーク", size: "520×760", description: "メッセージアプリ風に会話する" },
   { id: "bar", label: "バー", size: "900×320", description: "呼び出してすばやく質問する" },
   { id: "workspace", label: "作業", size: "1400×850", description: "履歴・回答・実行状況を並べて見る" },
-  { id: "stream", label: "配信", size: "1560×920", description: "キャラを大きく、字幕を見やすく映す" },
+  { id: "stream", label: "配信", size: "1920×1080", description: "フルHD背景でキャラと字幕を映す" },
   { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
@@ -2143,16 +2143,16 @@ function buildCharacterStreamProfileEditor(values) {
 function buildCharacterFramingEditor() {
   const layoutSelect = el("select", {}, LAYOUT_CHOICES.map(layout => el("option", { value: layout.id, textContent: layout.label })));
   const presetSelect = el("select", {}, [
-    el("option", { value: "bust", textContent: "胸上（配信向け）" }),
-    el("option", { value: "upper", textContent: "上半身（基本）" }),
+    el("option", { value: "bust", textContent: "胸上（基本）" }),
+    el("option", { value: "upper", textContent: "上半身" }),
     el("option", { value: "full", textContent: "全身" }),
     el("option", { value: "custom", textContent: "細かく調整" }),
   ]);
   const zoom = el("input", { type: "range", min: "1", max: "4", step: ".05" });
   const x = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
   const y = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
-  const zoomValue = el("output", { textContent: "1.55倍" });
-  const positionValue = el("output", { textContent: "X 0 / Y 18" });
+  const zoomValue = el("output", { textContent: "2.05倍" });
+  const positionValue = el("output", { textContent: "X 0 / Y 38" });
   const preview = el("div", {
     className: "framing-preview",
     role: "group",
@@ -2172,10 +2172,10 @@ function buildCharacterFramingEditor() {
     positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
   };
   const load = async () => {
-    const saved = current() || { preset: "upper", ...defaults.upper };
+    const saved = current() || { preset: "bust", ...defaults.bust };
     const fallback = defaults[saved.preset] || saved;
     presetSelect.value = saved.preset || "custom";
-    zoom.value = String(saved.zoom ?? fallback.zoom ?? 1.55);
+    zoom.value = String(saved.zoom ?? fallback.zoom ?? defaults.bust.zoom);
     x.value = String(saved.x ?? fallback.x ?? 0);
     y.value = String(saved.y ?? fallback.y ?? 0);
     updatePreview();

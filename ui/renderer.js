@@ -3922,15 +3922,15 @@ function applyCharacterFraming() {
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
-    // PicoAgentの全キャラクターは上半身表示が標準。前のキャラで選んだ全身倍率を
-    // 未設定の別キャラへ持ち越さず、明示保存がない限り必ずupperへ戻す。
-    applyCharacterZoom(FRAMING_PRESETS.upper.zoom);
-    applyCharacterOffset(0, 0, { clamp: false });
+    // PicoAgentの全キャラクターは胸上表示が標準。長身キャラでも腰まで入りすぎないよう、
+    // 未設定の別キャラは前の全身倍率を継承せず必ずbustへ戻す。
+    applyCharacterZoom(FRAMING_PRESETS.bust.zoom);
+    applyCharacterOffset(FRAMING_PRESETS.bust.x, FRAMING_PRESETS.bust.y, { clamp: false });
     return;
   }
   const preset = FRAMING_PRESETS[saved.preset] || null;
   const frame = preset || saved;
-  applyCharacterZoom(saved.zoom ?? frame.zoom ?? 1.55);
+  applyCharacterZoom(saved.zoom ?? frame.zoom ?? FRAMING_PRESETS.bust.zoom);
   applyCharacterOffset(saved.x ?? frame.x ?? 0, saved.y ?? frame.y ?? 0, { clamp: false });
 }
 

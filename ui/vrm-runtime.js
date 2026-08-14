@@ -20,12 +20,14 @@ export async function createVrmRuntime(canvas, url, config = {}) {
 
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
-  // PicoAgentのキャラクター表示は顔と手元が読める上半身を標準にする。
-  // VRMの全身をcanvasへ収めると常駐サイズでは表情が潰れるため、腰上を中心に固定する。
+  // PicoAgentのキャラクター表示は顔と胸元が読める胸上を標準にする。
+  // VRMの全身をcanvasへ収めると常駐サイズでは表情が潰れるため、胸上を中心に固定する。
   const upperBody = config.framing !== "full-body";
-  const halfWidth = upperBody ? 0.62 : 0.72;
-  const halfHeight = upperBody ? 0.64 : 0.92;
-  const targetY = upperBody ? 1.3 : 0.9;
+  // 共通の通常表示は胸上を基準にする。キャラ別の手動座標ではなく、
+  // VRMヒューマノイドの標準身長を前提とした一つのカメラ範囲を全レイアウトで共有する。
+  const halfWidth = upperBody ? 0.48 : 0.72;
+  const halfHeight = upperBody ? 0.38 : 0.92;
+  const targetY = upperBody ? 1.43 : 0.9;
   const camera = new THREE.OrthographicCamera(-halfWidth, halfWidth, halfHeight, -halfHeight, 0.1, 10);
   camera.position.set(0, targetY, 3);
   camera.lookAt(0, targetY, 0);

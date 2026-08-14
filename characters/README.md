@@ -5,7 +5,7 @@
 PicoAgent のキャラクター画像は、各キャラフォルダを同じ構成にそろえて管理する。
 正本は `characters/<キャラクターID>/` で、`ui/assets/characters/` は同期生成物。
 
-PNG、Live2D、VRMの全キャラクターは上半身表示を標準にする。素材は全身・透過で保持するが、構図未設定時は `upper` へ戻し、`full` はユーザーが対象キャラへ明示保存した場合だけ使う。
+PNG、Live2D、VRMの全キャラクターは胸上表示を標準にする。素材は全身・透過で保持するが、構図未設定時は共通の `bust` へ戻し、`upper` / `full` はユーザーが対象キャラへ明示保存した場合だけ使う。チャット／トーク／バーの小型アイコンだけは共通CSSで首上を切り出す。
 
 組み込みキャラの既定声は `character.json` の `voice` とバックエンドの
 `default_character_tts_voice` を同じモデルUUID・話者UUID・スタイル名にそろえる。
@@ -172,7 +172,7 @@ characters/<id>/
   "id": "example-vrm-experimental",
   "vrm": {
     "model": "model.vrm",
-    "framing": "upper-body",
+    "framing": "bust",
     "licenseUrl": "https://example.com/license"
   }
 }
@@ -180,7 +180,7 @@ characters/<id>/
 
 - VRM試作は正式キャラのvariantへ混ぜず、独立した実験キャラとして登録する。
 - `cargo xtask setup vrm` で固定版ランタイムを取得し、`cargo xtask sync-characters` でGLBと参照先を検査する。
-- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実 `renderer.js` の上半身表示とモーションを検査する。
+- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実 `renderer.js` の胸上表示とモーションを検査する。
 
 ### 同じキャラのまま「絵版」と「Live2D 版」を持つ（variant 運用）
 

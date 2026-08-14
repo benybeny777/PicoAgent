@@ -71,20 +71,28 @@ def validate_release(root: Path = REPOSITORY) -> tuple[list[str], dict[str, Any]
         errors.append("VRM exceeds the 10 MiB A-plan release budget")
 
     readme = (root / "README.md").read_text(encoding="utf-8")
-    for name in ("mugi-vrm-preview.gif", "mugi-vrm-preview.mp4"):
-        path = root / "docs" / "vrm" / name
+    previews = {
+        "character-mugi-vrm-experimental.webp": (960, 640),
+        "character-mugi-vrm-experimental-stream.webp": (960, 540),
+    }
+    for name, expected_size in previews.items():
+        path = root / "docs" / "images" / name
         if not path.is_file() or path.stat().st_size == 0:
-            errors.append(f"missing main VRM preview: {path.relative_to(root)}")
-        if f"docs/vrm/{name}" not in readme:
-            errors.append(f"README does not link main VRM preview: {name}")
-    gif_path = root / "docs" / "vrm" / "mugi-vrm-preview.gif"
-    if gif_path.is_file():
-        with Image.open(gif_path) as gif:
-            if (gif.width, gif.height) != (940, 720):
-                errors.append("main VRM GIF must be 940x720")
-    mp4_path = root / "docs" / "vrm" / "mugi-vrm-preview.mp4"
-    if mp4_path.is_file() and mp4_path.read_bytes()[4:8] != b"ftyp":
-        errors.append("main VRM MP4 has no ISO BMFF ftyp box")
+            errors.append(f"missing runtime VRM preview: {path.relative_to(root)}")
+            continue
+        if f"docs/images/{name}" not in readme:
+            errors.append(f"README does not link runtime VRM preview: {name}")
+        with Image.open(path) as image:
+            if image.format != "WEBP" or image.size != expected_size:
+                errors.append(
+                    f"runtime VRM preview {name}: expected WEBP {expected_size}, "
+                    f"got {image.format} {image.size}"
+                )
+            if getattr(image, "n_frames", 1) != 134:
+                errors.append(f"runtime VRM preview {name} must contain 134 frames")
+    for obsolete in ("docs/vrm/mugi-vrm-preview.gif", "docs/vrm/mugi-vrm-preview.mp4"):
+        if obsolete in readme:
+            errors.append(f"README must not link obsolete VRM preview: {obsolete}")
     if "vrm-phase" in readme:
         errors.append("README must show only the latest VRM preview")
     if list((root / "docs" / "vrm").glob("vrm-phase*")):

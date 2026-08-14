@@ -13,7 +13,7 @@ description: PicoAgentの通常2D・Live2D・VRMキャラクターを追加・�
 
 ## 高精細キャラを再生成する
 
-PicoAgentの全キャラクターは、PNG、Live2D、VRMを問わず顔と手元が読める上半身表示を標準にする。新規キャラと構図未設定キャラは `upper` を使い、全身表示はユーザーがそのキャラへ明示した場合だけ保存構図 `full` を使う。キャラ切替時は前のキャラの全身倍率を引き継がない。主要レイアウトの実表示で頭頂、顔、肩、手元が欠けず、下半身が主役になっていないことを確認する。
+PicoAgentの全キャラクターは、PNG、Live2D、VRMを問わず胸上表示を標準にする。新規キャラと構図未設定キャラは共通の `bust` を使い、上半身／全身表示はユーザーがそのキャラへ明示した場合だけ保存構図 `upper` / `full` を使う。キャラ切替時は前のキャラの倍率を引き継がない。チャット／トーク／バーの小型アイコンだけは首上にする。主要レイアウトの実表示で頭頂、顔、肩が欠けず、長身キャラでも腰まで入りすぎていないことを確認する。
 
 `animationQualityMode=sharp-expression` は個別スクリプトを順不同で実行せず、必ず次の一括入口を使う。
 
@@ -35,10 +35,12 @@ Photoshop後に `build-sharp-expression-layers.py` または `build-extended-exp
 ## VRM実験キャラを追加する
 
 - 正式な2Dキャラのvariantへ混ぜず、`characters/<id>/character.json` のトップレベル `vrm` を持つ独立した実験キャラとして登録する。
-- VRMも共通の上半身ルールに従い、manifestへ `"framing": "upper-body"` を明記する。全身表示はユーザーが明示した場合だけ `full-body` を使う。
+- VRMも全形式共通の胸上ルールに従い、manifestへ `"framing": "bust"` を明記する。上半身や全身はユーザーが明示した場合だけ `upper-body` / `full-body` を使う。
 - VRMモデル本体は `characters/<id>/*.vrm`、再生成可能な原画・PSD・スクリプト・テストは `tools/<id>-vrm/`、説明とレビュー用動画は `docs/vrm/` に分ける。
 - `cargo xtask setup vrm` でSHA-256固定のThree.js／three-vrmを取得し、`cargo xtask sync-characters` でGLBヘッダーと参照先を検査する。
-- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実際の `renderer.js` を通し、マスコット／ペット／配信の上半身表示、透明背景、canvas描画、継続モーションを確認する。構造検査だけで表示完了とはしない。
+- `SHOOT_VRM_MATRIX=1 node tools/screenshots/shoot.mjs` で実際の `renderer.js` を通し、全8形式の胸上表示（チャット系の小型アイコンは首上）、透明背景、canvas描画、継続モーションを確認する。構造検査だけで表示完了とはしない。
+- 配信形式は1920×1080の実画面を基準にし、背景はフルHD以上を使う。PNGに固定せず、原寸で目立つ劣化がなければWebP／JPEGも許容し、既存の高品質圧縮画像を無意味に再圧縮しない。
+- 公開動画は通常表示を2倍密度、配信表示を1920×1080ネイティブで描画してから960pxへ縮小する。低解像度素材や旧動画の拡大で帳尻を合わせない。
 - 元リポジトリからVRMを撤去する移行では、PicoAgent側のビルド・構造検査・実表示・コミット・pushが全部成功するまで元ファイルを削除しない。スキルは移行対象外として残す。
 
 ## 品質を検証する

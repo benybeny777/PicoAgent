@@ -33,10 +33,13 @@
     </tr>
   </table>
   <h3>VRM実験キャラクター</h3>
-  <p>
-    <a href="docs/vrm/mugi-vrm-preview.mp4"><img src="docs/vrm/mugi-vrm-preview.gif" alt="むぎ VRM実験キャラクター" width="380" /></a><br />
-    <sub><b>むぎ VRM（実験）</b> — 独立した検証キャラとして、上半身表示・まばたき・口パク・視線・表情・揺れ物をThree.js／three-vrmで動かします。</sub>
-  </p>
+  <table>
+    <tr>
+      <td align="center"><img src="docs/images/character-mugi-vrm-experimental.webp" alt="むぎ VRM実験キャラクターの通常表示" width="190" /><br /><sub>通常</sub></td>
+      <td align="center"><img src="docs/images/character-mugi-vrm-experimental-stream.webp" alt="むぎ VRM実験キャラクターの配信表示" width="190" /><br /><sub>配信</sub></td>
+    </tr>
+  </table>
+  <sub><b>むぎ VRM（実験）</b> — 正式なむぎとは別の検証キャラです。胸上表示・まばたき・口パク・視線・表情・揺れ物をThree.js／three-vrmで動かします。</sub>
   <h3>Live2D動作例（非同梱）</h3>
   <table>
     <tr>
@@ -67,7 +70,7 @@
       <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-stream.webp" alt="むぎの配信表示" width="150" /><br /><sub><b>むぎ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-rin.webp" alt="りんの通常表示" width="150" /><br /><img src="docs/images/character-rin-stream.webp" alt="りんの配信表示" width="150" /><br /><sub><b>りん</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-mai.webp" alt="まいの通常表示" width="150" /><br /><img src="docs/images/character-mai-stream.webp" alt="まいの配信表示" width="150" /><br /><sub><b>まい</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）" width="150" /><br /><sub><b>りん（自作THA3）</b><br />1枚絵から生成</sub></td>
+      <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）の通常表示" width="150" /><br /><img src="docs/images/character-rin-tha3-stream.webp" alt="りん（自作THA3）の配信表示" width="150" /><br /><sub><b>りん（自作THA3）</b><br />通常／配信・1枚絵から生成</sub></td>
     </tr>
     <tr>
       <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
@@ -77,7 +80,7 @@
     </tr>
   </table>
   <sub>
-    各キャラを標準ペット表示と配信表示の両方で、960px・16fps・134コマ撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1560px画面から縮小しているため、旧480px動画の引き伸ばしではありません。同じ「おはよう。今日もよろしくね」への返事から、<b>会話中 → 考え中 → 成功 → 待機</b>を落ち着いた間隔で再生し、まばたきと口パクはその間に自然に動かしています。<br />
+    各キャラを標準ペット表示と配信表示の両方で、960px・16fps・134コマ撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から縮小しているため、旧480px動画の引き伸ばしではありません。同じ「おはよう。今日もよろしくね」への返事から、<b>会話中 → 考え中 → 成功 → 待機</b>を落ち着いた間隔で再生し、まばたきと口パクはその間に自然に動かしています。<br />
     人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
     同梱PNG 8体はすべて同じフルモーション仕様で、自然なまばたき、ミュート時を含む口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。<br />
     このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・レン・ライス・わんこ）があります。<br />
@@ -98,7 +101,7 @@
 | ひより / はる / イプシロン / まお / レン / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
-PNGの口パクは音声ありなら声量同期、ミュート中でも返答中はタイマー同期で動きます。Live2Dはモデルに存在するパラメータと物理設定の範囲で動き、ライスだけはモデル設定により口パクを無効にしています。VRMは実験キャラとして `cargo xtask setup vrm` で固定ランタイムを取得した環境で表示します。全形式のキャラクターは上半身表示を標準とし、全身表示はキャラごとに明示保存した場合だけ使います。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)、VRM詳細は[VRM実験キャラ資料](docs/vrm/VRM.md)に固定しています。
+PNGの口パクは音声ありなら声量同期、ミュート中でも返答中はタイマー同期で動きます。Live2Dはモデルに存在するパラメータと物理設定の範囲で動き、ライスだけはモデル設定により口パクを無効にしています。VRMは実験キャラとして `cargo xtask setup vrm` で固定ランタイムを取得した環境で表示します。全形式のキャラクターは長身でも腰まで入りすぎない胸上表示を標準とし、上半身／全身表示はキャラごとに明示保存した場合だけ使います。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)、VRM詳細は[VRM実験キャラ資料](docs/vrm/VRM.md)に固定しています。
 
 ---
 
@@ -263,11 +266,11 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
     <tr>
       <td align="center"><img src="docs/images/layout-shot-bar.webp" alt="バー表示" width="230" /><br /><b>バー</b><br /><sub>1 行入力。呼んで消す</sub></td>
       <td align="center"><img src="docs/images/layout-shot-workspace.webp" alt="作業表示" width="230" /><br /><b>作業</b><br /><sub>履歴・回答・実行状況の 3 ペイン</sub></td>
-      <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>上半身を大きく＋字幕テロップ</sub></td>
+      <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>フルHD背景＋胸上キャラ＋字幕</sub></td>
       <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
     </tr>
   </table>
-  <sub>既定寸法は、ミニ360×560／ペット900×600／チャット・トーク520×760／バー900×320／作業1400×850／配信1560×920／ウィジェット440×600です。寸法は形式ごとに覚えます。枠なしウィンドウの<b>辺をドラッグすると幅または高さ、四隅をドラッグすると縦横を同時に変更</b>できます。キャラをドラッグするとウィンドウを動かせます。キャラのサイズと位置は設定の「キャラ・音声」で、表示形式ごとにスライダーとプレビュー上のドラッグで調整できます。</sub>
+  <sub>既定寸法は、ミニ360×560／ペット900×600／チャット・トーク520×760／バー900×320／作業1400×850／配信1920×1080（フルHD）／ウィジェット440×600です。寸法は形式ごとに覚えます。枠なしウィンドウの<b>辺をドラッグすると幅または高さ、四隅をドラッグすると縦横を同時に変更</b>できます。キャラをドラッグするとウィンドウを動かせます。キャラのサイズと位置は設定の「キャラ・音声」で、表示形式ごとにスライダーとプレビュー上のドラッグで調整できます。</sub>
 </div>
 
 ### キャラクター

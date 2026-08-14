@@ -7,7 +7,7 @@
   "greeting": "こんにちは、むぎだよ。VRMの実験中だよ。",
   "vrm": {
     "model": "mugi.vrm",
-    "framing": "upper-body",
+    "framing": "bust",
     "licenseUrl": "https://github.com/benybeny777/PicoAgent/blob/main/docs/vrm/VRM.md#%E5%88%A9%E7%94%A8%E6%9D%A1%E4%BB%B6",
     "leftArmAngle": -1.22,
     "rightArmAngle": 1.22

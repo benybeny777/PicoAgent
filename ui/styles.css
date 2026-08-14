@@ -129,8 +129,8 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 :root { --char-frame-width:285px; --char-frame-height:315px; }
 .character { position:absolute; right:10px; bottom:2px; width:var(--char-frame-width); height:var(--char-frame-height); display:grid; place-items:end center; cursor:move; }
 .character { touch-action:none; user-select:none; -webkit-user-select:none; }
-/* 立ち絵の拡大と移動。既定の --char-zoom は「上半身が枠いっぱいに出る」倍率で、
-   原点を上端に置くことで顔を残したまま脚が枠の下へ抜ける。移動量はドラッグで決まり
+/* 立ち絵の拡大と移動。未設定時はJSから胸上プリセットを適用し、
+   原点を上端に置くことで顔を残したまま下半身が枠の下へ抜ける。移動量はドラッグで決まり
    旧 `PICOAGENT_CHARACTER_OFFSET_X/Y` も互換表示する。新しい構図は設定画面で保存する。 */
 .character-view {
   position:absolute; inset:0; display:block;
@@ -565,11 +565,12 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 [data-layout="widget"] .character img {
   position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%;
 }
-/* 小型アイコン形式も2D立ち絵は頭から腰までの上半身を見せる。
-   object-fit:cover の上端基準だけで切り出し、追加拡大で顔だけにしない。 */
+/* 小型アイコン形式は首上を基本にする。全身素材を2倍の表示面へ置き、
+   上端基準で頭と首を残して胸から下だけを丸い枠の外へ切る。 */
 [data-layout="chat"] .character img,
 [data-layout="talk"] .character img,
 [data-layout="bar"] .character img {
+  inset:0 auto auto -50%; width:200%; height:200%;
   object-fit:cover; object-position:50% 0%;
   transform-origin:50% 8%;
 }
@@ -739,7 +740,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="workspace"] .character { z-index:5; right:24px; bottom:14px; width:135px; height:165px; }
 
 /* ── 7. 配信: キャラを大きく、回答は字幕テロップ ─────────────────────────── */
-.pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); --stream-canvas-scale:2.1; --stream-caption-color:#5a3b4b; }
+.pet-app[data-layout="stream"] { --stream-chat-width:clamp(320px,36vw,560px); --stream-canvas-scale:2.75; --stream-caption-color:#5a3b4b; }
 [data-layout="stream"] .beta-badge { top:48px; right:auto; left:14px; }
 [data-layout="stream"] .bubble {
   z-index:auto;
@@ -815,14 +816,14 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view {
   transform:translate(calc(var(--char-x,0px) + 25%),var(--char-y,0px));
 }
-/* 配信の2D立ち絵は全身表示の1.65倍を上端基準に置き、右寄りで顔から腰までを大きく見せる。
+/* 配信の2D立ち絵は2.6倍の表示面を上端基準に置き、右寄りの胸上構図にする。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto -80%; width:260%; height:260%;
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto -80%; width:260%; height:260%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-secondary-motion > img {
   object-position:50% 0%;
@@ -909,7 +910,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
    潜り込む。行数ぶんの高さを確保して重なりを避ける。 */
 [data-layout="widget"] .composer textarea { min-height:74px; }
 
-/* 小型の上半身アイコン形式は、枠側の拡大・移動を効かせない
+/* 小型の首上アイコン形式は、枠側の拡大・移動を効かせない
    （アイコンを動かしても意味がなく、上端基準の切り出しと二重に変形してしまう）。 */
 [data-layout="chat"] .character-view,
 [data-layout="talk"] .character-view,
@@ -945,7 +946,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="widget"] .character-secondary-motion > img {
   object-fit:contain; object-position:50% 0%;
 }
-/* 2D立ち絵は共通の --char-zoom に1.32倍を重ね、全形式で頭から腰までを主役にする。
+/* 2D立ち絵は共通の --char-zoom に1.32倍を重ね、全形式で胸上を主役にする。
    画像自体を切らないため、キャラ別の構図調整と透明輪郭はそのまま保てる。 */
 [data-layout="mascot"] .character[data-render-kind="2d"] .character-view,
 [data-layout="pet"] .character[data-render-kind="2d"] .character-view,
@@ -972,7 +973,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="pet"] .reply { font-size:15px; line-height:1.75; }
 [data-layout="pet"] textarea { min-height:88px; }
 
-/* チャット / トーク: 上半身アイコン、履歴、入力を一段大きくする。 */
+/* チャット / トーク: 首上アイコン、履歴、入力を一段大きくする。 */
 [data-layout="chat"] .bubble,
 [data-layout="talk"] .bubble { padding:100px 16px 15px; }
 [data-layout="chat"] .reply-actions,
@@ -991,11 +992,10 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="talk"] .character canvas { transform:translateX(-50%) scale(2.55); transform-origin:50% 9%; }
 [data-layout="talk"] .online { left:70px; top:68px; }
 [data-layout="talk"] .relationship-button { left:88px; top:35px; }
-/* チャットは長時間使う主画面なので、丸い顔アイコンではなく選択中キャラの
-   上半身が分かるポートレートにする。枠へ収めるため画像は contain で表示する。 */
+/* チャットは長時間使う主画面なので、選択中キャラが分かる首上ポートレートにする。 */
 [data-layout="chat"] .bubble { padding-top:164px; }
 [data-layout="chat"] .character { left:18px; top:16px; width:120px; height:144px; border-radius:18px; }
-[data-layout="chat"] .character img { object-fit:contain; object-position:50% 100%; }
+[data-layout="chat"] .character img { object-fit:cover; object-position:50% 0%; }
 [data-layout="chat"] .character canvas { transform:translateX(-50%) scale(1.55); transform-origin:50% 7%; }
 [data-layout="chat"] .reply-actions { left:154px; }
 [data-layout="chat"] .online { left:132px; top:148px; }

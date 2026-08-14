@@ -281,7 +281,7 @@ async function openScene({
 
 const MATRIX_LAYOUTS = {
   mascot: [360, 560], pet: [900, 600], chat: [520, 760], talk: [520, 760],
-  bar: [900, 320], workspace: [1400, 850], stream: [1560, 920], widget: [440, 600],
+  bar: [900, 320], workspace: [1400, 850], stream: [1920, 1080], widget: [440, 600],
 };
 
 // 検証対象のPNGキャラを全8形式で描画し、表示欠けと初期表示時間を一括検査する。
@@ -572,15 +572,13 @@ async function validateInteractionMatrix() {
   return { output, results };
 }
 
-// 実験VRMを本物のrenderer.jsとTauriモックの組み合わせで読み込み、主要レイアウトで
+// 実験VRMを本物のrenderer.jsとTauriモックの組み合わせで読み込み、全レイアウトで
 // canvas表示と継続モーションを確認する。出力はレビュー用なのでtemp/だけへ置く。
 async function validateVrmMatrix() {
   const output = join(ROOT, "temp", "vrm-layout-matrix");
   mkdirSync(output, { recursive: true });
-  const targets = ["mascot", "pet", "stream"];
   const results = [];
-  for (const layout of targets) {
-    const [width, height] = MATRIX_LAYOUTS[layout];
+  for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
     const page = await openScene({
       characterId: "mugi-vrm-experimental", layout, width, height, voice: true,
     });
@@ -1057,6 +1055,34 @@ async function prepareGalleryLive2D(page) {
   await submit(page, GALLERY_ASK);
 }
 
+async function prepareGalleryVrm(page) {
+  await page.waitForFunction(() => {
+    const canvas = document.getElementById("vrmCanvas");
+    return canvas && canvas.style.display !== "none" && canvas.width > 0
+      && typeof vrmActive !== "undefined" && vrmActive;
+  }, null, { timeout: 40000 });
+  await page.waitForTimeout(1500);
+  await submit(page, GALLERY_ASK);
+}
+
+const VRM_RUNTIME = [
+  "ui/vendor/vrm/three.core.min.js",
+  "ui/vendor/vrm/three.module.min.js",
+  "ui/vendor/vrm/three-vrm.module.min.js",
+];
+
+const galleryPrepare = kind => kind === "live2d"
+  ? prepareGalleryLive2D
+  : kind === "vrm"
+    ? prepareGalleryVrm
+    : startReply(GALLERY_ASK);
+
+const galleryRequires = (id, kind) => kind === "live2d"
+  ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
+  : kind === "vrm"
+    ? [...VRM_RUNTIME, `ui/assets/characters/${id}/mugi.vrm`]
+    : [`ui/assets/characters/${id}/character.json`];
+
 // Live2D キャラのランタイムとモデルは git 管理外（`cargo xtask setup live2d` / `setup live2d-samples`）。
 // 未取得の環境では `requires` が効いて自動でスキップされるので、一覧の定義からは外さない。
 // Live2Dの表示例は取得済みの公式サンプルを個別に撮影する。2Dむぎは通常のPNGキャラとして撮影する。
@@ -1069,46 +1095,43 @@ const GALLERY = [
   ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
   ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
   ["photoreal-prototype", "こんにちは。焦らず、今日やることから一緒に整理しましょう。"],
-  ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", true],
-  ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", true],
-  ["epsilon", "動作確認でも、作業の整理でも、必要なところから始めましょう。", true],
-  ["mao", "こんにちは。今日は何から片づけましょうか。ゆっくりで大丈夫ですよ。", true],
-  ["ren", "準備はできています。どこから手をつけますか。", true],
-  ["rice", "よく来た。……さて、何を調べようか。", true],
-  ["wanko", "わふっ！　……よし、いっしょにやろう！", true],
+  ["mugi-vrm-experimental", "おはよう！VRMの実験中でも、今日もそばで見てるね。", "vrm"],
+  ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", "live2d"],
+  ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", "live2d"],
+  ["epsilon", "動作確認でも、作業の整理でも、必要なところから始めましょう。", "live2d"],
+  ["mao", "こんにちは。今日は何から片づけましょうか。ゆっくりで大丈夫ですよ。", "live2d"],
+  ["ren", "準備はできています。どこから手をつけますか。", "live2d"],
+  ["rice", "よく来た。……さて、何を調べようか。", "live2d"],
+  ["wanko", "わふっ！　……よし、いっしょにやろう！", "live2d"],
 ];
 
-const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d = false]) => [
+const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"]) => [
   `character-${id}.webp`,
   {
     ...GALLERY_SCENE,
     characterId: id,
     reply,
-    prepare: live2d ? prepareGalleryLive2D : startReply(GALLERY_ASK),
+    prepare: galleryPrepare(kind),
     step: galleryStep,
-    requires: live2d
-      ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
-      : [`ui/assets/characters/${id}/character.json`],
+    requires: galleryRequires(id, kind),
   },
 ]));
 
-const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, live2d = false]) => [
+const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"]) => [
   `character-${id}-stream.webp`,
   {
     ...GALLERY_SCENE,
     layout: "stream",
-    width: 1560,
-    height: 920,
-    // 配信画面は論理幅だけで1560pxあるため、ネイティブ描画から960pxへ縮小すれば
-    // 引き伸ばしにならない。2倍密度の3120px全画面キャプチャは不要な負荷を避ける。
+    width: 1920,
+    height: 1080,
+    // 配信画面はフルHDのネイティブ描画から960pxへ縮小すれば
+    // 引き伸ばしにならない。2倍密度の3840px全画面キャプチャは不要な負荷を避ける。
     deviceScaleFactor: 1,
     characterId: id,
     reply,
-    prepare: live2d ? prepareGalleryLive2D : startReply(GALLERY_ASK),
+    prepare: galleryPrepare(kind),
     step: galleryStep,
-    requires: live2d
-      ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
-      : [`ui/assets/characters/${id}/character.json`],
+    requires: galleryRequires(id, kind),
   },
 ]));
 
@@ -1140,7 +1163,7 @@ const SHOTS = {
   "layout-shot-talk.webp": { width: 520, height: 760, layout: "talk", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-bar.webp": { width: 900, height: 320, layout: "bar", seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-workspace.webp": { width: 1400, height: 850, layout: "workspace", seconds: 1, fps: 1, outputWidth: 640 },
-  "layout-shot-stream.webp": { width: 1560, height: 920, layout: "stream", seconds: 1, fps: 1, outputWidth: 640 },
+  "layout-shot-stream.webp": { width: 1920, height: 1080, layout: "stream", seconds: 1, fps: 1, outputWidth: 640 },
   "layout-shot-widget.webp": { width: 440, height: 600, layout: "widget", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
 };
 
