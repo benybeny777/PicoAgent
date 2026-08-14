@@ -406,7 +406,6 @@ pub fn build_ui_dist(release: bool, beta: bool) -> Result<()> {
         "pet",
         "mascot",
         "chat",
-        "talk",
         "bar",
         "workspace",
         "stream",

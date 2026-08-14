@@ -280,11 +280,11 @@ async function openScene({
 }
 
 const MATRIX_LAYOUTS = {
-  mascot: [360, 560], pet: [900, 600], chat: [520, 760], talk: [520, 760],
+  mascot: [360, 560], pet: [900, 600], chat: [520, 760],
   bar: [900, 320], workspace: [1400, 850], stream: [1920, 1080], widget: [440, 600],
 };
 
-// 検証対象のPNGキャラを全8形式で描画し、表示欠けと初期表示時間を一括検査する。
+// 検証対象のPNGキャラを全7形式で描画し、表示欠けと初期表示時間を一括検査する。
 async function shootCharacterMatrix() {
   const output = join(ROOT, "temp", "character-layout-matrix");
   mkdirSync(output, { recursive: true });
@@ -351,7 +351,7 @@ async function shootCharacterMatrix() {
           throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません`);
         }
         const expectsSecondary = ["koharu", "sena", "noa"].includes(characterId)
-          && !["chat", "talk", "bar"].includes(layout);
+          && !["chat", "bar"].includes(layout);
         // 全身の状態別モーションは廃止したので、body 側にアニメーションは付かない。
         // 検査するのは局所レイヤー（胸元）の動きとマスクだけ。
         if (expectsSecondary && (!visual.secondaryMotion?.visible
@@ -1160,7 +1160,6 @@ const SHOTS = {
   "layout-shot-mascot.webp": { width: 360, height: 560, layout: "mascot", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-pet.webp": { width: 900, height: 600, layout: "pet", seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-chat.webp": { width: 520, height: 760, layout: "chat", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
-  "layout-shot-talk.webp": { width: 520, height: 760, layout: "talk", deviceScaleFactor: 2, seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-bar.webp": { width: 900, height: 320, layout: "bar", seconds: 1, fps: 1, outputWidth: 480 },
   "layout-shot-workspace.webp": { width: 1400, height: 850, layout: "workspace", seconds: 1, fps: 1, outputWidth: 640 },
   "layout-shot-stream.webp": { width: 1920, height: 1080, layout: "stream", seconds: 1, fps: 1, outputWidth: 640 },

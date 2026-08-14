@@ -23,11 +23,10 @@ pub const DEFAULT: &str = "pet";
 ///
 /// 寸法は「その形式が成立する最小限」を既定にする。ユーザーが手で変えた寸法は
 /// 形式ごとに覚えるので（`PICOAGENT_WINDOW_LAYOUTS`）、ここは初回の見え方を決める値。
-pub const LAYOUTS: [(&str, &str, f64, f64); 8] = [
+pub const LAYOUTS: [(&str, &str, f64, f64); 7] = [
     ("mascot", "ミニ（キャラ中心）", 360.0, 560.0),
     ("pet", "ペット（キャラ＋会話）", 900.0, 600.0),
-    ("chat", "チャット（履歴を読む）", 520.0, 760.0),
-    ("talk", "トーク（会話に集中）", 520.0, 760.0),
+    ("chat", "チャット（LINE風）", 520.0, 760.0),
     ("bar", "バー（すばやく質問）", 900.0, 320.0),
     ("workspace", "作業（情報を並べる）", 1400.0, 850.0),
     ("stream", "配信（キャラを大きく）", 1920.0, 1080.0),
@@ -80,6 +79,15 @@ fn boot_size_active() -> bool {
 /// （置き場所はユーザーの習慣で、形式ごとに変えたいものではないため）。
 pub(crate) const SIZES_KEY: &str = "PICOAGENT_WINDOW_LAYOUTS";
 
+/// 旧 `talk` は見た目も用途も近かった `chat` へ統合する。
+fn normalize_id(id: &str) -> &str {
+    if id == "talk" {
+        "chat"
+    } else {
+        id
+    }
+}
+
 /// 指定 ID が定義済みかどうか。
 pub fn is_known(id: &str) -> bool {
     LAYOUTS.iter().any(|(layout, _, _, _)| *layout == id)
@@ -88,8 +96,9 @@ pub fn is_known(id: &str) -> bool {
 /// 選択中の表示形式。未知の値は既定へ丸める。
 pub fn current(config: &crate::config::Config) -> String {
     let id = config.get("PICOAGENT_LAYOUT", DEFAULT);
-    if is_known(&id) {
-        id
+    let normalized = normalize_id(&id);
+    if is_known(normalized) {
+        normalized.to_string()
     } else {
         DEFAULT.to_string()
     }
@@ -97,6 +106,7 @@ pub fn current(config: &crate::config::Config) -> String {
 
 /// 表示形式の既定寸法。
 fn default_size(id: &str) -> (f64, f64) {
+    let id = normalize_id(id);
     LAYOUTS
         .iter()
         .find(|(layout, _, _, _)| *layout == id)
@@ -107,11 +117,14 @@ fn default_size(id: &str) -> (f64, f64) {
 
 /// 形式ごとに覚えている寸法。無ければ既定寸法。
 pub fn size_for(config: &crate::config::Config, id: &str) -> (f64, f64) {
+    let id = normalize_id(id);
     let (default_width, default_height) = default_size(id);
-    let saved = config
-        .get_all()
-        .get(SIZES_KEY)
-        .and_then(|value| value.get(id).cloned());
+    let saved = config.get_all().get(SIZES_KEY).and_then(|value| {
+        value
+            .get(id)
+            .cloned()
+            .or_else(|| (id == "chat").then(|| value.get("talk").cloned()).flatten())
+    });
     let Some(saved) = saved else {
         return (default_width, default_height);
     };
@@ -139,6 +152,7 @@ pub fn size_for(config: &crate::config::Config, id: &str) -> (f64, f64) {
 
 /// 形式ごとの寸法を覚える（ユーザーがウィンドウを手で変えたとき）。
 pub fn remember_size(app: &AppHandle, id: &str, width: f64, height: f64) -> Result<(), String> {
+    let id = normalize_id(id);
     if !is_known(id) {
         return Ok(());
     }
@@ -212,7 +226,12 @@ pub fn forget_sizes(app: &AppHandle, id: Option<&str>) -> Result<(), String> {
 /// 選択中の表示形式に合わせてウィンドウ寸法を当て、フロントへ通知する。
 /// 起動時と切り替え時の両方から呼ぶ。
 pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
-    let id = if is_known(id) { id } else { DEFAULT };
+    let normalized = normalize_id(id);
+    let id = if is_known(normalized) {
+        normalized
+    } else {
+        DEFAULT
+    };
     let (width, height) = {
         let state = app.state::<AppState>();
         size_for(&state.config, id)
@@ -280,6 +299,7 @@ fn apply_window_size(
 
 /// 表示形式を切り替えて保存する（右クリックメニューの入口）。
 pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
+    let id = normalize_id(id);
     if !is_known(id) {
         return Err(format!("未知の表示形式です: {id}"));
     }
@@ -368,6 +388,12 @@ mod tests {
     fn 未知の表示形式は既定寸法へ丸める() {
         assert!(!is_known("unknown"));
         assert_eq!(default_size("unknown"), default_size(DEFAULT));
+    }
+
+    #[test]
+    fn 旧トーク形式はチャットへ統合する() {
+        assert!(!is_known("talk"));
+        assert_eq!(default_size("talk"), default_size("chat"));
     }
 
     fn read_repo_file(relative: &str) -> String {

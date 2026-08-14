@@ -42,9 +42,18 @@ pub fn normalize(value: &Value) -> Value {
         };
         let mut normalized_layouts = Map::new();
         for (layout, framing) in layouts {
+            // 旧トークの個別構図はチャットへ移す。両方あれば現行chatを正本にする。
+            if layout == "talk" && layouts.contains_key("chat") {
+                continue;
+            }
+            let layout = if layout == "talk" {
+                "chat"
+            } else {
+                layout.as_str()
+            };
             if !crate::layout::LAYOUTS
                 .iter()
-                .any(|(known, _, _, _)| known == layout)
+                .any(|(known, _, _, _)| *known == layout)
             {
                 continue;
             }
@@ -58,7 +67,7 @@ pub fn normalize(value: &Value) -> Value {
                 .unwrap_or("custom");
             let (default_zoom, default_x, default_y) = defaults(preset);
             normalized_layouts.insert(
-                layout.clone(),
+                layout.to_string(),
                 json!({
                     "preset": preset,
                     "zoom": number(framing.get("zoom"), default_zoom).clamp(1.0, 4.0),
@@ -136,5 +145,16 @@ mod tests {
     #[test]
     fn 壊れた構図設定を空で上書きしない() {
         assert!(normalize_checked(&json!(["broken"])).is_err());
+    }
+
+    #[test]
+    fn 旧トーク構図をチャットへ移す() {
+        let value = json!({
+            "mugi": { "talk": { "preset": "upper", "zoom": 1.55, "x": 3, "y": 18 } }
+        });
+        assert_eq!(
+            normalize(&value),
+            json!({ "mugi": { "chat": { "preset": "upper", "zoom": 1.55, "x": 3.0, "y": 18.0 } } })
+        );
     }
 }

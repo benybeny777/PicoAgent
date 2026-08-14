@@ -49,8 +49,7 @@ const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components",
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
   { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
-  { id: "chat", label: "チャット", size: "520×760", description: "履歴を読みながら入力する" },
-  { id: "talk", label: "トーク", size: "520×760", description: "メッセージアプリ風に会話する" },
+  { id: "chat", label: "チャット", size: "520×760", description: "LINE風の吹き出しで会話する" },
   { id: "bar", label: "バー", size: "900×320", description: "呼び出してすばやく質問する" },
   { id: "workspace", label: "作業", size: "1400×850", description: "履歴・回答・実行状況を並べて見る" },
   { id: "stream", label: "配信", size: "1920×1080", description: "フルHD背景でキャラと字幕を映す" },
@@ -791,6 +790,7 @@ function selectField(key, label, value, options) {
 }
 
 function layoutPickerField(value) {
+  if (value === "talk") value = "chat";
   const select = el("select", { className: "layout-native-select", ariaLabel: "画面レイアウト" });
   const cards = el("div", { className: "layout-card-grid" });
   const livePreview = el("div", { className: "layout-live-preview" }, [
@@ -850,7 +850,8 @@ function layoutPickerField(value) {
 }
 
 function quickSettingsGuide(v) {
-  const layout = LAYOUT_CHOICES.find(choice => choice.id === (v.PICOAGENT_LAYOUT || "pet"));
+  const layoutId = v.PICOAGENT_LAYOUT === "talk" ? "chat" : (v.PICOAGENT_LAYOUT || "pet");
+  const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
     { tab: "character", title: "キャラと声", summary: `${v.PICOAGENT_CHARACTER || "既定キャラ"}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}` },
@@ -2172,14 +2173,15 @@ function buildCharacterFramingEditor() {
     positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
   };
   const load = async () => {
-    const saved = current() || { preset: "bust", ...defaults.bust };
+    const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
+    const defaultPreset = character?.renderKind === "2d" ? "upper" : "bust";
+    const saved = current() || { preset: defaultPreset, ...defaults[defaultPreset] };
     const fallback = defaults[saved.preset] || saved;
     presetSelect.value = saved.preset || "custom";
-    zoom.value = String(saved.zoom ?? fallback.zoom ?? defaults.bust.zoom);
+    zoom.value = String(saved.zoom ?? fallback.zoom ?? defaults[defaultPreset].zoom);
     x.value = String(saved.x ?? fallback.x ?? 0);
     y.value = String(saved.y ?? fallback.y ?? 0);
     updatePreview();
-    const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
     const image = preview.querySelector("img");
     image.removeAttribute("src");
     try {
@@ -2582,9 +2584,9 @@ async function render() {
   const displaySec = section("画面レイアウト");
   displaySec.append(el("p", {
     className: "settings-intro",
-    textContent: "用途に合う画面レイアウトをプレビューから選べます。キャラは全形式で上半身を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
+    textContent: "用途に合う画面レイアウトをプレビューから選べます。通常2Dは従来の上半身位置、Live2D／VRMは胸上を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
   }));
-  displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT || "pet"));
+  displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT === "talk" ? "chat" : (v.PICOAGENT_LAYOUT || "pet")));
   displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
     { value: "system", label: "システム設定に追従" },
     { value: "light", label: "通常" },

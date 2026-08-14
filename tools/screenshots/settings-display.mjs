@@ -1,4 +1,4 @@
-// 設定画面の「画面」タブを配布UIから描画し、8形式のカードを回帰確認する。
+// 設定画面の「画面」タブを配布UIから描画し、7形式のカードを回帰確認する。
 import { createReadStream, existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -81,7 +81,7 @@ try {
   await page.goto(`http://127.0.0.1:${port}/settings.html?tab=display`);
   await page.waitForSelector(".layout-card-grid .layout-card");
   const cardCount = await page.locator(".layout-card").count();
-  if (cardCount !== 8) throw new Error(`表示形式カードが8件ではありません: ${cardCount}`);
+  if (cardCount !== 7) throw new Error(`表示形式カードが7件ではありません: ${cardCount}`);
   await page.waitForFunction(() => [...document.querySelectorAll(".layout-card img")].every(image => image.complete && image.naturalWidth > 0));
   const selected = await page.locator(".layout-card.selected strong").textContent();
   if (selected !== "配信") throw new Error(`保存中の配信カードが選択状態ではありません: ${selected}`);
@@ -179,7 +179,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

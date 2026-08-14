@@ -1212,7 +1212,7 @@ let live2dCanvas = null;
 let live2dMouth = -1; // 読み上げ中の口の開き（0〜1）。-1 はモーション任せ。
 let live2dRuntimePromise = null;
 let live2dRuntimeSdk = "";
-// 表示形式が chat / talk / bar の状態で起動すると character は32px前後しかない。
+// 表示形式が chat / bar の状態で起動すると character は小型アイコン寸法しかない。
 // その寸法でモデルの scale / offsetY を計算すると描画が全てキャンバス外へ出るため、
 // Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
 const LIVE2D_RENDER_WIDTH = 285;
@@ -3922,10 +3922,11 @@ function applyCharacterFraming() {
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
-    // PicoAgentの全キャラクターは胸上表示が標準。長身キャラでも腰まで入りすぎないよう、
-    // 未設定の別キャラは前の全身倍率を継承せず必ずbustへ戻す。
-    applyCharacterZoom(FRAMING_PRESETS.bust.zoom);
-    applyCharacterOffset(FRAMING_PRESETS.bust.x, FRAMING_PRESETS.bust.y, { clamp: false });
+    // 通常2Dは以前の上半身位置を維持する。VRM／Live2Dだけ胸上を標準にして、
+    // 低頭身2Dの頭頂や肩が共通倍率で見切れないようにする。
+    const fallback = character.dataset.renderKind === "2d" ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
+    applyCharacterZoom(fallback.zoom);
+    applyCharacterOffset(fallback.x, fallback.y, { clamp: false });
     return;
   }
   const preset = FRAMING_PRESETS[saved.preset] || null;
@@ -4218,7 +4219,7 @@ let currentLayout = "pet";
 function layoutUsesFreeBubble() { return currentLayout === "pet"; }
 // 会話履歴を常に出しておく形式。全画面にしなくても過去の発言が読める。
 function layoutShowsHistory() {
-  return currentLayout === "chat" || currentLayout === "talk"
+  return currentLayout === "chat"
     || currentLayout === "workspace" || currentLayout === "stream";
 }
 // ペット表示へ戻ったときに復元するため、保存済みのフキダシ寸法・位置を控えておく。
@@ -4254,7 +4255,8 @@ function syncWidgetClock() {
 }
 
 function applyLayout(id) {
-  const next = typeof id === "string" && id ? id : "pet";
+  const requested = typeof id === "string" && id ? id : "pet";
+  const next = requested === "talk" ? "chat" : requested;
   currentLayout = next;
   petApp.dataset.layout = next;
   if (layoutUsesFreeBubble()) {

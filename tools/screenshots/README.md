@@ -1,7 +1,7 @@
 # README 用スクリーンショット（動く絵）の撮影
 
 `docs/images/` に置いている README 掲載画像を再生成するツールです。通常プレビューは**透過つきの
-アニメーション WebP**（無限ループ）、8形式の比較画像は1フレームの透過 WebPです。
+アニメーション WebP**（無限ループ）、7形式の比較画像は1フレームの透過 WebPです。
 
 実物の `ui/` をローカル HTTP で配信し、**バックエンド（`window.__TAURI__`）だけをモック**して
 ヘッドレス Chromium で描画します。フロントの JS・CSS・キャラクター画像は本物をそのまま使うため、
@@ -42,12 +42,12 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
-| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×8表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
+| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
-| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×8形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
-| `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×8形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
+| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
+| `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×7形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
-| `SHOOT_VRM_MATRIX` | `1` なら実験VRMキャラを全8形式で実ランタイム描画し、canvas表示と継続モーションを `temp/vrm-layout-matrix/` へ検査する |
+| `SHOOT_VRM_MATRIX` | `1` なら実験VRMキャラを全7形式で実ランタイム描画し、canvas表示と継続モーションを `temp/vrm-layout-matrix/` へ検査する |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能ステップを `temp/onboarding-check/` へ撮影する |
 
 引数に画像名を並べると、その絵だけを撮り直します。全部で 3 分ほどかかるので、普段はこちらを使います。
@@ -66,7 +66,7 @@ node tools/screenshots/shoot.mjs composer-light.webp
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
 | `character-<キャラID>.webp` | README の通常表示一覧（標準ペット形式900×600、胸上構図、2倍密度描画、8.4秒・16fps・960px幅） | 返事のあと、会話中 → 考え中 → 成功 → 待機。PNGはまばたきと口パクも入る |
 | `character-<キャラID>-stream.webp` | README の配信表示一覧（フルHD 1920×1080、ネイティブ描画、8.4秒・16fps・960px幅） | 通常表示と同じ3切替を、背景 → PICO STUDIO → キャラ → 字幕・操作UIの実レイヤー順で撮る |
-| `layout-shot-*.webp` | 8種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
+| `layout-shot-*.webp` | 7種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）
 
@@ -82,7 +82,7 @@ node tools/screenshots/shoot.mjs composer-light.webp
 - **`ffmpeg` の `-compression_level` は既定（4）のまま**にしてください。6 にすると libwebp の探索が
   跳ね上がり、48 コマの書き出しが数分たっても終わりません。サイズはほとんど変わりません
 - 書き出し前に切り出し元の実ピクセル幅が出力幅以上か検査し、引き伸ばしになる指定は停止します。書き出し後もWebPヘッダーの実寸が指定幅と一致しなければ失敗します
-- 論理幅が出力幅に届かない小型形式（マスコット360px、ウィジェット440px、チャット／トーク520px）は `deviceScaleFactor: 2` で描画してから縮小します。等倍のままだと上の検査で止まります
+- 論理幅が出力幅に届かない小型形式（マスコット360px、ウィジェット440px、チャット520px）は `deviceScaleFactor: 2` で描画してから縮小します。等倍のままだと上の検査で止まります
 
 ## Live2D の絵について
 
@@ -101,7 +101,7 @@ Live2D撮影は、ひよりのCubism 5／4モデルを個別に読み込んだ�
 身体モーションだけを口パク成功と誤認しません。
 
 起動画面だけを確認する場合は `SHOOT_DEBUG_BOOT=1` を指定する。保存形式が小型でも共通画面に
-なることは `SHOOT_BOOT_LAYOUT=chat`（または `talk` / `bar`）、キャラは
+なることは `SHOOT_BOOT_LAYOUT=chat`（または `bar`）、キャラは
 `SHOOT_BOOT_CHARACTER=hiyori` のように指定し、生成された `temp/boot-check/` を確認する。
 
 > [!NOTE]

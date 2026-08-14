@@ -24,7 +24,7 @@ Claudeの事後レビュー2巡（`docs/REVIEW-LOG.md` の 2026-08-13「ベー�
 ## P0-2. 引き伸ばしのまま同梱されている静止ショット2枚を撮り直す
 
 - **なぜ**: `layout-shot-mascot.webp`（論理360px→480px）と `layout-shot-widget.webp`（440px→480px）は、引き伸ばし禁止ルールが入る前の生成物で、いま同梱・公開されているものが**引き伸ばし画像**のまま。設定画面のレイアウト選択カードと配布ページの表示形式サムネの両方に出ている。
-- **やること**: `deviceScaleFactor: 2` を指定済みなので、`node tools/screenshots/shoot.mjs layout-shot-mascot.webp layout-shot-widget.webp layout-shot-chat.webp layout-shot-talk.webp` を実行して差し替える。WebPエンコーダ（`libwebp_anim`）付きのffmpegが要る。
+- **やること**: `deviceScaleFactor: 2` を指定済みなので、`node tools/screenshots/shoot.mjs layout-shot-mascot.webp layout-shot-widget.webp layout-shot-chat.webp` を実行して差し替える。旧 `layout-shot-talk.webp` はLINE風チャットへ統合したため対象外。WebPエンコーダ（`libwebp_anim`）付きのffmpegが要る。
 - **完了条件**: 4枚が480px幅で生成され、引き伸ばし検査に引っかからないこと。設定画面のカードと配布ページのサムネを実表示で確認する。
 
 ## P0-3. 配布ページの画像重量を下げる
@@ -54,15 +54,15 @@ Claudeの事後レビュー2巡（`docs/REVIEW-LOG.md` の 2026-08-13「ベー�
 
 - **なぜ**: 全身の常時モーションを廃止し、撮影側の検査からも body 側アニメーション名の条件を外した。
   実際の見え方（待機が完全な静止に見えないか）は人の目でしか判断できない。
-- **やること**: `SHOOT_CHARACTER_MATRIX=1` でPNG系8キャラ×8形式を再撮影し、中間フレームを目視する。
+- **やること**: `SHOOT_CHARACTER_MATRIX=1` でPNG系8キャラ×7形式を再撮影し、中間フレームを目視する。
 - **完了条件**: 描画欠け・速度警告0件、`胸元の局所二次動作が適用されていません` が出ないこと、
   まばたき・口パク・胸元の局所動作で「生きている」と見えること。静止に見える場合だけ、
   `pet-success` と同じ1px級の待機モーションを**1つだけ**足す（10種のループを戻さない）。
 
-## P1-3. チャット／トーク形式CSS整理後の実表示
+## P1-3. LINE風チャット統合後の実表示
 
-- **なぜ**: 共通規則と `talk` / `chat` 固有の重複を整理した。適用値は変えていないが、実WebViewでは未確認。
-- **やること**: `chat` と `talk` を実表示し、キャラ枠120×144pxのポートレート、上端3列の操作、接続ランプ・♡の位置を確認する。
+- **なぜ**: `talk` をLINE風の `chat` へ統合し、通常2Dの切り出しを以前の位置へ戻したため、実WebViewでの確認が必要。
+- **やること**: `chat` を実表示し、62×62pxの丸いキャラ枠、白／緑の左右吹き出し、上端3列の操作、接続ランプ・♡の位置を確認する。
 - **完了条件**: 整理前の撮影（`temp/character-layout-matrix/`）と見た目が一致すること。
 
 ## P1-4. 文字起こしの出力上限が変わった影響を見る

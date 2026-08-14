@@ -551,26 +551,22 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
    内容高さに対して解決され、画像が枠を縦へ突き抜ける） */
 [data-layout="mascot"] .character,
 [data-layout="chat"] .character,
-[data-layout="talk"] .character,
 [data-layout="bar"] .character,
 [data-layout="stream"] .character,
 [data-layout="workspace"] .character,
 [data-layout="widget"] .character { display:block; overflow:hidden; }
 [data-layout="mascot"] .character img,
 [data-layout="chat"] .character img,
-[data-layout="talk"] .character img,
 [data-layout="bar"] .character img,
 [data-layout="stream"] .character img,
 [data-layout="workspace"] .character img,
 [data-layout="widget"] .character img {
   position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%;
 }
-/* 小型アイコン形式は首上を基本にする。全身素材を2倍の表示面へ置き、
-   上端基準で頭と首を残して胸から下だけを丸い枠の外へ切る。 */
+/* 小型アイコン形式は以前の2D切り出しを維持する。画像自体を追加拡大せず、
+   上端基準のcoverだけで頭と首を丸い枠へ収める。 */
 [data-layout="chat"] .character img,
-[data-layout="talk"] .character img,
 [data-layout="bar"] .character img {
-  inset:0 auto auto -50%; width:200%; height:200%;
   object-fit:cover; object-position:50% 0%;
   transform-origin:50% 8%;
 }
@@ -598,95 +594,81 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 [data-layout="pet"] .bubble { width:min(420px,calc(100% - 317px)); }
 [data-layout="pet"] .bubble.fullscreen { right:var(--fullscreen-bubble-right,311px); }
 
-/* ── 3. チャット / 4. トーク: 縦長パネル。履歴を常に出す ────────────────────── */
+/* ── 3. チャット: LINE風の縦長パネル。履歴を常に出す ─────────────────────── */
 [data-layout="chat"] .bubble,
-[data-layout="talk"] .bubble,
 [data-layout="workspace"] .bubble {
   left:8px; right:8px; top:8px; bottom:8px; width:auto; height:auto; max-width:none;
   border-radius:14px; padding:10px 12px 11px;
 }
 /* パネル上部はキャラのアイコンぶん空ける（キャラは絶対配置で重ねる）。 */
 [data-layout="chat"] .bubble,
-[data-layout="talk"] .bubble { padding-top:62px; }
-[data-layout="chat"] .character,
-[data-layout="talk"] .character {
-  z-index:5; left:16px; top:14px; right:auto; bottom:auto; width:48px; height:48px;
+[data-layout="chat"] .bubble { padding-top:100px; }
+[data-layout="chat"] .character {
+  z-index:5; left:18px; top:16px; right:auto; bottom:auto; width:62px; height:62px;
   border:1px solid var(--chip-border); border-radius:50%; overflow:hidden;
   background:radial-gradient(circle at 50% 35%,var(--paper),var(--chip-bg));
   box-shadow:inset 0 1px 0 var(--panel-highlight),0 5px 14px rgba(42,31,46,.16); transform:none;
 }
-[data-layout="chat"] .character-view::before,
-[data-layout="talk"] .character-view::before { display:none; }
+[data-layout="chat"] .character-view::before { display:none; }
 /* 全身の立ち絵から顔だけを切り出してアイコンにする。 */
-[data-layout="chat"] .character img,
-[data-layout="talk"] .character img { filter:none; }
-[data-layout="chat"] .character[data-render-kind="2d"] img,
-[data-layout="talk"] .character[data-render-kind="2d"] img {
+[data-layout="chat"] .character img { filter:none; }
+[data-layout="chat"] .character[data-render-kind="2d"] img {
   filter:drop-shadow(0 1px 1px var(--character-shadow)) saturate(1.055) contrast(1.035);
 }
 [data-layout="chat"] .character canvas,
-[data-layout="talk"] .character canvas,
 [data-layout="bar"] .character canvas {
   width:100%!important; height:100%!important;
   transform:translateX(-50%) scale(2.15); transform-origin:50% 8%;
 }
-[data-layout="chat"] .online,
-[data-layout="talk"] .online { right:auto; bottom:auto; left:54px; top:52px; width:9px; height:9px; border-width:2px; }
-[data-layout="chat"] .relationship-button,
-[data-layout="talk"] .relationship-button { right:auto; bottom:auto; left:72px; top:27px; width:24px; height:24px; font-size:12px; }
+[data-layout="chat"] .online { right:auto; bottom:auto; left:70px; top:68px; width:9px; height:9px; border-width:2px; }
+[data-layout="chat"] .relationship-button { right:auto; bottom:auto; left:88px; top:35px; width:24px; height:24px; font-size:12px; }
 /* 履歴と入力欄を常設する。全画面にしなくても会話の流れが読める。 */
 [data-layout="chat"] .history-log,
-[data-layout="talk"] .history-log,
 [data-layout="workspace"] .history-log,
 [data-layout="stream"] .history-log { display:block; flex:1 1 auto; min-height:0; overflow:auto; }
 [data-layout="chat"] .composer[hidden],
-[data-layout="talk"] .composer[hidden],
 [data-layout="workspace"] .composer[hidden],
 [data-layout="stream"] .composer[hidden],
 [data-layout="bar"] .composer[hidden],
 [data-layout="widget"] .composer[hidden] { display:block; }
 /* 入力欄が常設なので、返答本文は「いま届いた分」として下に少しだけ置く。 */
 [data-layout="chat"] .reply,
-[data-layout="talk"] .reply,
 [data-layout="workspace"] .reply { flex:0 0 auto; max-height:34%; overflow:auto; }
 [data-layout="chat"] .reply.compact,
-[data-layout="talk"] .reply.compact,
 [data-layout="workspace"] .reply.compact,
 [data-layout="stream"] .reply.compact { flex:0 0 auto; color:var(--ink); }
 [data-layout="chat"] .history-tools { display:flex; flex:0 0 auto; margin:0 0 8px; }
 /* 履歴の続きに見えないよう、いま届いた返答の上に区切りを入れる。 */
 [data-layout="chat"] .reply,
-[data-layout="talk"] .reply { padding-top:9px; border-top:1px solid var(--panel-border); }
+[data-layout="chat"] .reply { padding-top:9px; border-top:1px solid var(--panel-border); }
 
-/* トークだけの化粧: 壁紙・尻尾つき吹き出し・役割ラベルなし。 */
-[data-layout="talk"] .history-log {
+/* LINE風の化粧: 青灰色の壁紙、左右の白／緑吹き出し、役割ラベルなし。 */
+[data-layout="chat"] .history-log {
   margin:0 -12px; padding:10px 12px;
-  background:linear-gradient(180deg,var(--talk-wall-a),var(--talk-wall-b));
+  background:linear-gradient(180deg,var(--chat-wall-a),var(--chat-wall-b));
 }
-:root { --talk-wall-a:#dfe4ef; --talk-wall-b:#e7e0ea; }
-@media (prefers-color-scheme:dark) { :root { --talk-wall-a:#282332; --talk-wall-b:#2f2738; } }
-html[data-theme="light"] { --talk-wall-a:#dfe4ef; --talk-wall-b:#e7e0ea; }
-html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
-[data-layout="talk"] .history-role { display:none; }
-[data-layout="talk"] .history-meta { margin-bottom:0; }
-[data-layout="talk"] .history-time { margin:0; font-size:9px; }
-[data-layout="talk"] .history-item { display:flex; align-items:flex-end; gap:5px; margin-bottom:9px; }
-[data-layout="talk"] .history-item.user { flex-direction:row-reverse; }
-[data-layout="talk"] .history-meta { order:2; flex:0 0 auto; align-self:flex-end; }
-[data-layout="talk"] .history-body { order:1; box-shadow:0 1px 2px rgba(30,20,36,.12); }
-[data-layout="talk"] .history-item.assistant .history-body { background:var(--paper); border-radius:4px 13px 13px 13px; }
-[data-layout="talk"] .history-item.user .history-body { background:var(--user-msg); border-radius:13px 4px 13px 13px; }
-[data-layout="talk"] .history-actions { order:3; }
-[data-layout="talk"] .quick-actions { display:none; }
+:root { --chat-wall-a:#8fa8c0; --chat-wall-b:#a8bacb; --chat-user-msg:#9eea6a; }
+@media (prefers-color-scheme:dark) { :root { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-user-msg:#5f9f48; } }
+html[data-theme="light"] { --chat-wall-a:#8fa8c0; --chat-wall-b:#a8bacb; --chat-user-msg:#9eea6a; }
+html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-user-msg:#5f9f48; }
+[data-layout="chat"] .history-role { display:none; }
+[data-layout="chat"] .history-meta { margin-bottom:0; }
+[data-layout="chat"] .history-time { margin:0; font-size:9px; }
+[data-layout="chat"] .history-item { display:flex; align-items:flex-end; gap:5px; margin-bottom:9px; }
+[data-layout="chat"] .history-item.user { flex-direction:row-reverse; }
+[data-layout="chat"] .history-meta { order:2; flex:0 0 auto; align-self:flex-end; }
+[data-layout="chat"] .history-body { order:1; box-shadow:0 1px 2px rgba(30,20,36,.12); }
+[data-layout="chat"] .history-item.assistant .history-body { background:var(--paper); border-radius:4px 13px 13px 13px; }
+[data-layout="chat"] .history-item.user .history-body { background:var(--chat-user-msg); border-radius:13px 4px 13px 13px; }
+[data-layout="chat"] .history-actions { order:3; }
+[data-layout="chat"] .quick-actions { display:none; }
 /* 発言が少ないうちは下端に寄せる（メッセージアプリと同じ見え方）。
    justify-content:flex-end はスクロール時に上端へ戻れなくなるので使わない。 */
-[data-layout="talk"] .history-item:first-child,
 [data-layout="chat"] .history-item:first-child { margin-top:auto; }
-[data-layout="talk"] .history-log,
 [data-layout="chat"] .history-log { display:flex; flex-direction:column; }
-[data-layout="talk"] .history-actions { opacity:0; }
-[data-layout="talk"] .history-item:hover .history-actions,
-[data-layout="talk"] .history-actions:focus-within { opacity:1; }
+[data-layout="chat"] .history-actions { opacity:0; }
+[data-layout="chat"] .history-item:hover .history-actions,
+[data-layout="chat"] .history-actions:focus-within { opacity:1; }
 
 /* ── 5. バー: 1行入力。答えたら消える使い方 ─────────────────────────────── */
 [data-layout="bar"] .bubble {
@@ -910,13 +892,11 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
    潜り込む。行数ぶんの高さを確保して重なりを避ける。 */
 [data-layout="widget"] .composer textarea { min-height:74px; }
 
-/* 小型の首上アイコン形式は、枠側の拡大・移動を効かせない
+/* 小型アイコン形式は、枠側の拡大・移動を効かせない
    （アイコンを動かしても意味がなく、上端基準の切り出しと二重に変形してしまう）。 */
 [data-layout="chat"] .character-view,
-[data-layout="talk"] .character-view,
 [data-layout="bar"] .character-view { transform:none; }
 [data-layout="chat"] .character-secondary-motion,
-[data-layout="talk"] .character-secondary-motion,
 [data-layout="bar"] .character-secondary-motion { display:none!important; }
 
 /* ── 全形式の可読性仕上げ ────────────────────────────────────────────────
@@ -946,7 +926,7 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="widget"] .character-secondary-motion > img {
   object-fit:contain; object-position:50% 0%;
 }
-/* 2D立ち絵は共通の --char-zoom に1.32倍を重ね、全形式で胸上を主役にする。
+/* 2D立ち絵は以前の上半身位置を維持し、共通の --char-zoom に1.32倍を重ねる。
    画像自体を切らないため、キャラ別の構図調整と透明輪郭はそのまま保てる。 */
 [data-layout="mascot"] .character[data-render-kind="2d"] .character-view,
 [data-layout="pet"] .character[data-render-kind="2d"] .character-view,
@@ -973,39 +953,18 @@ html[data-theme="dark"] { --talk-wall-a:#282332; --talk-wall-b:#2f2738; }
 [data-layout="pet"] .reply { font-size:15px; line-height:1.75; }
 [data-layout="pet"] textarea { min-height:88px; }
 
-/* チャット / トーク: 首上アイコン、履歴、入力を一段大きくする。 */
-[data-layout="chat"] .bubble,
-[data-layout="talk"] .bubble { padding:100px 16px 15px; }
-[data-layout="chat"] .reply-actions,
-[data-layout="talk"] .reply-actions {
+/* LINE風チャット: 丸いアイコン、履歴、入力を一段大きくする。 */
+[data-layout="chat"] .bubble { padding:100px 16px 15px; }
+[data-layout="chat"] .reply-actions {
   position:absolute; top:16px; right:16px; left:112px;
   display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px;
   width:auto; margin:0; align-self:auto;
 }
-[data-layout="chat"] .reply-actions button,
-[data-layout="talk"] .reply-actions button { min-width:0; width:100%; height:34px; padding:0 7px; }
-[data-layout="chat"] .character canvas,
-[data-layout="talk"] .character canvas { width:100%!important; height:100%!important; }
-/* トークはメッセージアプリ風の小型アイコン。顔アイコンを 48px から 62px へ広げたぶん、
-   接続ランプと♡ボタンも外側へずらす（元の座標だとランプが埋もれ、♡が右端に重なる）。 */
-[data-layout="talk"] .character { left:18px; top:16px; width:62px; height:62px; }
-[data-layout="talk"] .character canvas { transform:translateX(-50%) scale(2.55); transform-origin:50% 9%; }
-[data-layout="talk"] .online { left:70px; top:68px; }
-[data-layout="talk"] .relationship-button { left:88px; top:35px; }
-/* チャットは長時間使う主画面なので、選択中キャラが分かる首上ポートレートにする。 */
-[data-layout="chat"] .bubble { padding-top:164px; }
-[data-layout="chat"] .character { left:18px; top:16px; width:120px; height:144px; border-radius:18px; }
-[data-layout="chat"] .character img { object-fit:cover; object-position:50% 0%; }
-[data-layout="chat"] .character canvas { transform:translateX(-50%) scale(1.55); transform-origin:50% 7%; }
-[data-layout="chat"] .reply-actions { left:154px; }
-[data-layout="chat"] .online { left:132px; top:148px; }
-[data-layout="chat"] .relationship-button { left:128px; top:20px; }
-[data-layout="chat"] .history-body,
-[data-layout="talk"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
-[data-layout="chat"] .reply,
-[data-layout="talk"] .reply { font-size:14px; line-height:1.65; }
-[data-layout="chat"] .composer textarea,
-[data-layout="talk"] .composer textarea { min-height:82px; }
+[data-layout="chat"] .reply-actions button { min-width:0; width:100%; height:34px; padding:0 7px; }
+[data-layout="chat"] .character canvas { width:100%!important; height:100%!important; transform:translateX(-50%) scale(2.55); transform-origin:50% 9%; }
+[data-layout="chat"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
+[data-layout="chat"] .reply { font-size:14px; line-height:1.65; }
+[data-layout="chat"] .composer textarea { min-height:82px; }
 
 /* バー: 余った下半分を空白にせず、回答欄として使う。 */
 [data-layout="bar"] .bubble { bottom:8px; height:auto; padding:12px 14px 13px; }
