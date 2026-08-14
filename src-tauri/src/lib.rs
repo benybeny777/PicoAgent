@@ -263,9 +263,17 @@ pub fn run() {
             // 旧版が短い挨拶へ追記して保存した内部ガイドは、選択中以外もまとめて原文へ戻す。
             history::migrate_saved_greeting_guidance(app.handle());
             // 選択中キャラの直近会話をファイルから文脈へ復元する（再起動をまたいで踏まえて話す）。
-            let recent = history::load_recent(app.handle(), &character_id)?;
-            if !recent.is_empty() {
-                state.messages.lock().unwrap().extend(recent);
+            match history::load_recent(app.handle(), &character_id) {
+                Ok(recent) if !recent.is_empty() => {
+                    state.messages.lock().unwrap().extend(recent);
+                }
+                Ok(_) => {}
+                Err(error) => log_paths::append_app_log(
+                    app.handle(),
+                    &format!(
+                        "会話履歴を読み込めないため、履歴なしで起動します。原本への保存は行いません: {error}"
+                    ),
+                ),
             }
 
             // 選択中の表示形式をウィンドウ寸法へ反映する。保存済みレイアウトの復元より先に

@@ -2957,7 +2957,7 @@ pub fn pet_reset_layout(app: AppHandle) {
 /// これが届かないと `boot_screen` が読み込み失敗と判断し、案内画面へ切り替える。
 #[tauri::command]
 pub fn pet_frontend_ready(app: AppHandle) {
-    crate::boot_screen::mark_ready(&app);
+    crate::boot_screen::mark_started(&app);
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
@@ -2967,7 +2967,9 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    crate::layout::apply(&app, &id)
+    crate::layout::apply(&app, &id)?;
+    crate::boot_screen::mark_finished(&app);
+    Ok(())
 }
 
 #[tauri::command]

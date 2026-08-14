@@ -29,8 +29,10 @@ const CHARACTER_PNG: &[u8] = include_bytes!("../assets/boot_screen/character.png
 /// フロントの準備状況と、案内ページに載せる情報。
 #[derive(Default)]
 pub struct BootScreenState {
-    /// フロントが `pet_frontend_ready` を呼んだか。
-    ready: AtomicBool,
+    /// フロントが `pet_frontend_ready` を呼び、JavaScriptの実行を開始したか。
+    started: AtomicBool,
+    /// フロントが `pet_finish_boot` まで到達し、起動画面を終了したか。
+    finished: AtomicBool,
     /// 案内ページへ切り替え済みか（多重 navigate を避ける）。
     shown: AtomicBool,
     /// 本来表示するはずだったアプリの URL（「もう一度読み込む」の遷移先）。
@@ -45,10 +47,16 @@ impl BootScreenState {
     }
 }
 
-/// フロントの準備完了を記録する。以後、案内ページへは切り替えない。
-pub fn mark_ready(app: &AppHandle) {
+/// フロントのJavaScript実行開始を記録する。これだけでは起動完了扱いにしない。
+pub fn mark_started(app: &AppHandle) {
     let state = app.state::<BootScreenState>();
-    state.ready.store(true, Ordering::SeqCst);
+    state.started.store(true, Ordering::SeqCst);
+}
+
+/// フロントが起動画面を終了したことを記録する。
+pub fn mark_finished(app: &AppHandle) {
+    let state = app.state::<BootScreenState>();
+    state.finished.store(true, Ordering::SeqCst);
 }
 
 /// 案内ページの URL。Windows / Android は `http://<scheme>.localhost/`、他は `<scheme>://localhost/`。
@@ -137,7 +145,7 @@ fn escape(raw: &str) -> String {
     out
 }
 
-/// フロントの準備完了を待ち、時間内に来なければ案内ページへ切り替える。
+/// フロントの読込開始と起動完了を別々に待ち、時間内に来なければ案内ページへ切り替える。
 pub fn watch(app: AppHandle) {
     let timeout_ms = {
         let config = &app.state::<crate::commands::AppState>().config;
@@ -150,55 +158,81 @@ pub fn watch(app: AppHandle) {
 
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
-        let state = app.state::<BootScreenState>();
-        if state.ready.load(Ordering::SeqCst) {
-            return;
-        }
-        // 二重に navigate しない（再読み込み後に再度タイムアウトした場合の保険）。
-        if state.shown.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        *state.detail.lock().unwrap() =
-            format!("{timeout_ms} ミリ秒以内にフロントエンドの準備完了が届きませんでした");
-
-        let Some(window) = app.get_webview_window("main") else {
-            crate::log_paths::append_app_log(
+        let started = app
+            .state::<BootScreenState>()
+            .started
+            .load(Ordering::SeqCst);
+        if !started {
+            show_failure(
                 &app,
-                "フロント読み込みの案内画面を出せませんでした（main ウィンドウがありません）。",
+                timeout_ms,
+                format!("{timeout_ms} ミリ秒以内にフロントエンドの読込開始通知が届きませんでした"),
             );
             return;
-        };
-
-        // 本来の表示先（案内ページの「もう一度読み込む」の遷移先）は**ここで**控える。
-        // `setup` の時点では webview がまだ遷移を始めておらず `about:blank` しか返らない。
-        if let Ok(url) = window.url() {
-            let url = url.to_string();
-            if url != "about:blank" {
-                *state.app_url.lock().unwrap() = url;
-            }
         }
-        match tauri::Url::parse(&page_url()) {
-            Ok(url) => {
-                if let Err(error) = window.navigate(url) {
-                    crate::log_paths::append_app_log(
-                        &app,
-                        &format!("フロント読み込みの案内画面へ切り替えられませんでした: {error}"),
-                    );
-                    return;
-                }
-                crate::log_paths::append_app_log(
-                    &app,
-                    &format!(
-                        "フロントエンドを {timeout_ms}ms 以内に読み込めなかったため、案内画面へ切り替えました。"
-                    ),
-                );
-            }
-            Err(error) => crate::log_paths::append_app_log(
-                &app,
-                &format!("案内画面の URL を組み立てられませんでした: {error}"),
-            ),
+        // JavaScript先頭の通知だけで監視を解除しない。その後のトップレベル例外や
+        // 初期化停止も検出できるよう、起動完了通知をもう1区間待つ。
+        tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+        if app
+            .state::<BootScreenState>()
+            .finished
+            .load(Ordering::SeqCst)
+        {
+            return;
         }
+        show_failure(
+            &app,
+            timeout_ms,
+            format!("フロントエンドの読込開始後、{timeout_ms} ミリ秒以内に起動完了通知が届きませんでした"),
+        );
     });
+}
+
+fn show_failure(app: &AppHandle, timeout_ms: u64, detail: String) {
+    let state = app.state::<BootScreenState>();
+    // 二重に navigate しない（再読み込み後に再度タイムアウトした場合の保険）。
+    if state.shown.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    *state.detail.lock().unwrap() = detail;
+
+    let Some(window) = app.get_webview_window("main") else {
+        crate::log_paths::append_app_log(
+            app,
+            "フロント読み込みの案内画面を出せませんでした（main ウィンドウがありません）。",
+        );
+        return;
+    };
+
+    // 本来の表示先（案内ページの「もう一度読み込む」の遷移先）は**ここで**控える。
+    // `setup` の時点では webview がまだ遷移を始めておらず `about:blank` しか返らない。
+    if let Ok(url) = window.url() {
+        let url = url.to_string();
+        if url != "about:blank" {
+            *state.app_url.lock().unwrap() = url;
+        }
+    }
+    match tauri::Url::parse(&page_url()) {
+        Ok(url) => {
+            if let Err(error) = window.navigate(url) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("フロント読み込みの案内画面へ切り替えられませんでした: {error}"),
+                );
+                return;
+            }
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "フロントエンドの起動が完了しなかったため、案内画面へ切り替えました（監視区間 {timeout_ms}ms）。"
+                ),
+            );
+        }
+        Err(error) => crate::log_paths::append_app_log(
+            app,
+            &format!("案内画面の URL を組み立てられませんでした: {error}"),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +267,17 @@ mod tests {
         assert!(
             !PAGE_HTML.contains("<script"),
             "案内ページは JavaScript なしで完結させてください"
+        );
+    }
+
+    #[test]
+    fn 読込開始だけでは起動完了扱いにしない() {
+        let state = BootScreenState::new();
+        state.started.store(true, Ordering::SeqCst);
+        assert!(state.started.load(Ordering::SeqCst));
+        assert!(
+            !state.finished.load(Ordering::SeqCst),
+            "JavaScript開始後の例外も監視するため、完了通知は別に必要"
         );
     }
 }
