@@ -9,7 +9,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::util::{copy_dir, list_files, log, repo_root};
+use crate::util::{copy_dir, list_files, log, repo_root, warn};
 
 /// ルートの `characters/`（正本）を webview 配信先 `ui/assets/characters/` へ同期する。
 ///
@@ -23,19 +23,126 @@ pub fn sync_characters() -> Result<()> {
     if !src.exists() {
         bail!("キャラクターの正本が見つかりません: {}", src.display());
     }
+    // 配信先を消す前に判定する。消してから失敗すると、キャラが1体も居ない状態が残り、
+    // 次の `dev` / `build` は `ui-dist/` を作れないままになる。
+    let unfetched = unfetched_live2d_characters(&src)?;
     fs::remove_dir_all(&dest).ok();
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
     // live2d-src/（Cubism Editor 用の制作素材 PSD）は実行時に使わないため配信へ含めない。
+    // モデル未取得の Live2D サンプルも、正本直下のフォルダごと外す。
     copy_dir(&src, &dest, &|path| {
-        path.to_string_lossy().contains("live2d-src")
+        if path.to_string_lossy().contains("live2d-src") {
+            return true;
+        }
+        path.parent() == Some(src.as_path())
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| unfetched.iter().any(|id| id == name))
     })?;
+    if !unfetched.is_empty() {
+        drop_characters_from_index(&dest, &unfetched)?;
+        warn(
+            "sync-characters",
+            format!(
+                "Live2Dサンプル{}体はモデルが手元に無いため同期から外しました（使うなら cargo xtask setup live2d-samples）: {}",
+                unfetched.len(),
+                unfetched.join(", ")
+            ),
+        );
+    }
     stamp_character_asset_versions(&dest)?;
     log(
         "sync-characters",
         format!("{} -> {} を同期しました", src.display(), dest.display()),
     );
+    Ok(())
+}
+
+/// モデル一式が手元に無い Live2D キャラのIDを集める。
+///
+/// `characters/*/live2d/` は再配布条件があるため Git 管理外で、
+/// `cargo xtask setup live2d-samples` を実行した環境にしか無い。一方 `character.json` は
+/// Git 管理下にあり Live2D を宣言しているため、clone 直後は「宣言だけあってモデルが無い」
+/// 状態になる。ここで外しておかないと同期が中断し、`ui-dist/` が作られず
+/// `tauri::generate_context!` がコンパイル時に落ちて**アプリが起動しなくなる**。
+///
+/// 宣言したモデルが**1つも無い**ものだけを未取得と見なす。一部だけ欠けているのは
+/// 取得が壊れているか書き出し漏れなので、外さずに後段の検証でエラーにする。
+fn unfetched_live2d_characters(src: &Path) -> Result<Vec<String>> {
+    let mut character_dirs = fs::read_dir(src)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("character.json").is_file())
+        .collect::<Vec<_>>();
+    character_dirs.sort();
+
+    let mut unfetched = Vec::new();
+    for character_dir in character_dirs {
+        let manifest_path = character_dir.join("character.json");
+        let manifest: serde_json::Value = serde_json::from_str(&fs::read_to_string(&manifest_path)?)
+            .with_context(|| format!("character.json を読めません: {}", manifest_path.display()))?;
+        if manifest.get("live2d").is_none() {
+            continue;
+        }
+        // 定義自体が壊れている場合は判定せず、検証側の詳しいエラーへ委ねる。
+        let Ok(models) = live2d_model_paths(&manifest) else {
+            continue;
+        };
+        if models
+            .iter()
+            .any(|model| character_dir.join(model).is_file())
+        {
+            continue;
+        }
+        if let Some(id) = character_dir.file_name().and_then(|name| name.to_str()) {
+            unfetched.push(id.to_string());
+        }
+    }
+    Ok(unfetched)
+}
+
+/// 同期から外したキャラを、配信先の `index.json` からも取り除く。
+///
+/// 一覧に残したままだと、設定画面が「選べるのに読み込めないキャラ」を見せてしまう。
+fn drop_characters_from_index(dest: &Path, dropped: &[String]) -> Result<()> {
+    let index_path = dest.join("index.json");
+    let mut index: serde_json::Value = serde_json::from_str(&fs::read_to_string(&index_path)?)?;
+    let characters = index
+        .get_mut("characters")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| anyhow::anyhow!("{} にcharacters配列がありません", index_path.display()))?;
+    characters.retain(|character| {
+        character
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|id| !dropped.iter().any(|removed| removed == id))
+    });
+    let Some(first) = characters
+        .first()
+        .and_then(|character| character.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+    else {
+        bail!(
+            "同期できるキャラクターが1体もありません: {}",
+            index_path.display()
+        );
+    };
+    // 既定キャラを外した場合だけ、残っている先頭へ寄せる（キャラ不在で起動しないため）。
+    if index
+        .get("default")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|default| dropped.iter().any(|removed| removed == default))
+    {
+        index["default"] = serde_json::Value::String(first);
+    }
+    fs::write(
+        &index_path,
+        format!("{}\n", serde_json::to_string_pretty(&index)?),
+    )?;
     Ok(())
 }
 
@@ -296,11 +403,14 @@ fn validate_character_asset_generation(
     Ok(())
 }
 
-fn validate_live2d_model_sets(character_dir: &Path, manifest: &serde_json::Value) -> Result<()> {
+/// マニフェストが宣言する Live2D モデルのパス一覧（`live2d.model` と `live2d.models[].path`）。
+///
+/// 検証（実在確認）と同期（未取得サンプルの判定）が同じ定義を見るよう1か所にまとめる。
+fn live2d_model_paths(manifest: &serde_json::Value) -> Result<Vec<String>> {
     let live2d = &manifest["live2d"];
     let mut models = Vec::new();
     if let Some(path) = live2d.get("model").and_then(serde_json::Value::as_str) {
-        models.push(path);
+        models.push(path.to_string());
     }
     if let Some(sets) = live2d.get("models").and_then(serde_json::Value::as_array) {
         for set in sets {
@@ -309,19 +419,22 @@ fn validate_live2d_model_sets(character_dir: &Path, manifest: &serde_json::Value
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
             if path.is_empty() {
-                bail!(
-                    "{} のLive2Dモデル世代にpathがありません",
-                    character_dir.display()
-                );
+                bail!("Live2Dモデル世代にpathがありません");
             }
-            models.push(path);
+            models.push(path.to_string());
         }
     }
     if models.is_empty() {
-        bail!("{} のLive2Dモデル定義が空です", character_dir.display());
+        bail!("Live2Dモデル定義が空です");
     }
+    Ok(models)
+}
+
+fn validate_live2d_model_sets(character_dir: &Path, manifest: &serde_json::Value) -> Result<()> {
+    let models = live2d_model_paths(manifest)
+        .with_context(|| format!("{} のLive2D定義", character_dir.display()))?;
     for model in models {
-        if !character_dir.join(model).is_file() {
+        if !character_dir.join(&model).is_file() {
             bail!(
                 "{} のLive2Dモデル一式がありません: {model}",
                 character_dir.display()
@@ -702,9 +815,98 @@ mod tests {
     use std::fs;
 
     use super::{
-        character_content_version, content_version, remove_beta_badge, rewrite_asset_refs,
-        stamp_character_asset_versions, validate_character_asset_generation,
+        character_content_version, content_version, drop_characters_from_index, remove_beta_badge,
+        rewrite_asset_refs, stamp_character_asset_versions, unfetched_live2d_characters,
+        validate_character_asset_generation,
     };
+
+    /// `characters/<id>/` を1体ぶん作る。`models` は `character.json` へ書く宣言、
+    /// `present` は実際に置くファイル（宣言だけあってファイルが無い状態を作れるようにする）。
+    fn live2d_character(src: &std::path::Path, id: &str, models: &[&str], present: &[&str]) {
+        let dir = src.join(id);
+        fs::create_dir_all(&dir).unwrap();
+        let declared = models
+            .iter()
+            .map(|model| format!(r#"{{"path":"{model}"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        fs::write(
+            dir.join("character.json"),
+            format!(r#"{{"id":"{id}","live2d":{{"models":[{declared}]}}}}"#),
+        )
+        .unwrap();
+        for model in present {
+            let path = dir.join(model);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"model").unwrap();
+        }
+    }
+
+    /// `characters/*/live2d/` は再配布条件があるため Git 管理外で、clone 直後には無い。
+    /// ここで外し損ねると同期が中断し、`ui-dist/` が作られずアプリが起動しなくなる。
+    #[test]
+    fn モデル未取得のlive2dサンプルは同期から外す() {
+        let root =
+            std::env::temp_dir().join(format!("picoagent-unfetched-live2d-{}", std::process::id()));
+        fs::remove_dir_all(&root).ok();
+        let src = root.join("characters");
+        fs::create_dir_all(&src).unwrap();
+
+        // 宣言だけあってモデルが1つも無い＝未取得。
+        live2d_character(&src, "hiyori", &["live2d/hiyori.model3.json"], &[]);
+        // 取得済み＝外さない。
+        live2d_character(
+            &src,
+            "mugi-live2d",
+            &["live2d/mugi.model3.json"],
+            &["live2d/mugi.model3.json"],
+        );
+        // 一部だけ欠けているのは壊れた状態なので、外さず検証側のエラーに任せる。
+        live2d_character(
+            &src,
+            "half",
+            &["live2d/sdk4/a.model3.json", "live2d/sdk5/b.model3.json"],
+            &["live2d/sdk4/a.model3.json"],
+        );
+        // Live2D を宣言しない PNG キャラは対象外。
+        let png = src.join("mugi");
+        fs::create_dir_all(&png).unwrap();
+        fs::write(png.join("character.json"), r#"{"id":"mugi"}"#).unwrap();
+
+        assert_eq!(unfetched_live2d_characters(&src).unwrap(), vec!["hiyori"]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 外したキャラを一覧に残すと、設定画面が「選べるのに読み込めないキャラ」を見せてしまう。
+    #[test]
+    fn 外したキャラは一覧と既定からも消す() {
+        let dest =
+            std::env::temp_dir().join(format!("picoagent-drop-index-{}", std::process::id()));
+        fs::remove_dir_all(&dest).ok();
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(
+            dest.join("index.json"),
+            r#"{"default":"hiyori","characters":[{"id":"hiyori"},{"id":"mugi"},{"id":"rin"}]}"#,
+        )
+        .unwrap();
+
+        drop_characters_from_index(&dest, &["hiyori".to_string()]).unwrap();
+        let index: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dest.join("index.json")).unwrap()).unwrap();
+        let ids = index["characters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|character| character["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["mugi", "rin"]);
+        // 既定キャラを外したときだけ、残っている先頭へ寄せる。
+        assert_eq!(index["default"].as_str(), Some("mugi"));
+
+        // 全部外すと選べるキャラが居なくなるため、黙って空の一覧を配らない。
+        assert!(drop_characters_from_index(&dest, &["mugi".into(), "rin".into()]).is_err());
+        fs::remove_dir_all(&dest).unwrap();
+    }
 
     #[test]
     fn 同梱のcssとjsへ内容版を付ける() {
