@@ -3,6 +3,7 @@
 window.picoagent?.frontendReady?.();
 
 const petApp = document.getElementById("petApp");
+const betaBadge = document.querySelector(".beta-badge");
 window.__picoagentPerformance = { startedAt: performance.now() };
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
@@ -27,8 +28,6 @@ const noticeList = document.getElementById("noticeList");
 const noticeClear = document.getElementById("noticeClear");
 const character = document.getElementById("character");
 const petSprite = document.getElementById("petSprite");
-const characterSecondaryMotion = document.getElementById("characterSecondaryMotion");
-const characterSecondarySprite = document.getElementById("characterSecondarySprite");
 const characterView = document.getElementById("characterView");
 const online = document.getElementById("online");
 const relationshipButton = document.getElementById("relationshipButton");
@@ -557,10 +556,26 @@ async function prepareBootCharacter(characterId) {
   const version = String(manifest.assetVersion || "");
   bootCharacterName = manifest.name || "キャラクター";
   bootPetImage.alt = `起動を待つ${bootCharacterName}`;
+  const dedicatedSleeping = manifest.boot?.useSleepingOnStartup === true
+    ? manifest.boot?.sleeping
+    : "";
+  petApp.dataset.bootArtwork = dedicatedSleeping ? "sleeping" : "idle";
+  // 寝姿を起動時にも使うのは専用原画を持つ3キャラだけ。他キャラの preview は
+  // 紹介画像や全身コラージュの場合があるため、通常表示と同じ idle 先頭フレームを使う。
+  if (dedicatedSleeping) {
+    bootPetImage.onerror = () => {
+      bootPetImage.onerror = null;
+      bootPetImage.src = "assets/characters/_preview-placeholder.png";
+    };
+    bootPetImage.src = versionedAssetUrl(`${root}/${dedicatedSleeping}`, version);
+    return;
+  }
   // Live2D の preview.jpg は配布元の紹介画像や全身コラージュの場合があり、実モデルへ
   // 切り替わる一瞬だけ別の絵に見える。Live2D は仮画像を出さず、読み込み完了した
   // 実モデルをそのまま起動画面へ出す。2Dキャラは通常表示と同じ idle 先頭フレームを使う。
   if (manifest.live2d) {
+    // 仮画像が無いので、起動画面のキャラ枠は CSS 側で実モデル（.character）へ差し替える。
+    petApp.dataset.bootArtwork = "live2d";
     bootPetImage.onerror = null;
     bootPetImage.removeAttribute("src");
     return;
@@ -678,54 +693,49 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
+// 読み上げから外す人格プロンプトの行（`loadCharacter` が選択中キャラのぶんへ入れ替える）。
+let personaSpeechBlocklist = [];
+
+// `personaText` が人格設定を組み立てるときの項目名。この形の行は話し言葉ではなく
+// 設定文なので、短くてもプロンプト混入として扱う（Rust の PERSONA_FIELD_LABELS と対）。
+const PERSONA_FIELD_LINE = /^(名前|性格|口調|一人称|ユーザーの呼び方)[:：]/;
+
+// 人格プロンプトが混ざった返答をモデルが返しても、設定文を声に出さないための照合用。
+// 偶然の一致で普通の返答を消さないよう、8文字以上か人格項目行だけを対象にする。
+function setPersonaSpeechBlocklist(profile) {
+  const lines = String(profile ?? "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => Array.from(line).length >= 8 || PERSONA_FIELD_LINE.test(line));
+  // Rust 側が人格の前へ置く見出し。モデルがプロンプト構造ごと復唱したときに拾う。
+  personaSpeechBlocklist = [...new Set([...lines, "選択中キャラクターの人格設定:"])];
+}
+
+// 人格プロンプトの混入を読み上げテキストから取り除く。
+//
+// 表示と履歴は Rust の `remove_prompt_leak` が最終回答から消すが、ストリーム読み上げは
+// 最終回答が整う前の途中テキストを声にするため、フロント側でも同じものを止める。
+function stripPersonaLeak(text) {
+  let out = String(text ?? "");
+  if (!personaSpeechBlocklist.length) return out;
+  // 1行そのままの混入を落とす。
+  out = out
+    .split("\n")
+    .filter(line => !personaSpeechBlocklist.includes(line.trim()))
+    .join("\n");
+  // 改行を潰して1文へ流し込まれた場合に備え、長い行は文中からも取り除く。
+  for (const line of personaSpeechBlocklist) {
+    if (Array.from(line).length >= 12) out = out.split(line).join("");
+  }
+  return out;
+}
+
 // variant は見た目の切替なので、フレームアニメと Live2D の切替もここで解決する。
 // variant.live2d があればそれを使い、`false` なら（キャラ本体が Live2D でも）フレーム表示に戻す。
 // これで「同じキャラの絵版と Live2D 版」を1つの character.json で持てる。
 function resolveLive2dConfig(manifest, variant) {
   if (variant?.live2d === false) return null;
   return variant?.live2d || manifest.live2d || null;
-}
-
-let activeSecondaryMotion = null;
-
-function syncSecondaryMotionFrame() {
-  if (!activeSecondaryMotion || live2dActive || !characterSecondarySprite) return;
-  const source = petSprite.currentSrc || petSprite.src;
-  if (source && characterSecondarySprite.src !== source) characterSecondarySprite.src = source;
-}
-
-function updateSecondaryMotionVisibility() {
-  if (!characterSecondaryMotion) return;
-  characterSecondaryMotion.hidden = !activeSecondaryMotion || live2dActive;
-  if (!characterSecondaryMotion.hidden) syncSecondaryMotionFrame();
-}
-
-function configureSecondaryMotion(config) {
-  const numberInRange = (value, minimum, maximum, fallback) => {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? Math.min(maximum, Math.max(minimum, numeric)) : fallback;
-  };
-  activeSecondaryMotion = config?.type === "bust" ? config : null;
-  if (!activeSecondaryMotion || !characterSecondaryMotion) {
-    updateSecondaryMotionVisibility();
-    return;
-  }
-  const centerX = numberInRange(config.centerX, 0, 100, 50);
-  const centerY = numberInRange(config.centerY, 0, 100, 34);
-  const radiusX = numberInRange(config.radiusX, 4, 45, 16);
-  const radiusY = numberInRange(config.radiusY, 4, 35, 10);
-  const strength = numberInRange(config.strength, 0.2, 2, 1);
-  const duration = numberInRange(config.duration, 1.8, 8, 3.8);
-  characterSecondaryMotion.style.setProperty("--secondary-center-x", `${centerX}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-center-y", `${centerY}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-radius-x", `${radiusX}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-radius-y", `${radiusY}%`);
-  characterSecondaryMotion.style.setProperty("--secondary-rise", `${(-1.45 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-settle", `${(0.65 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-return", `${(-0.35 * strength).toFixed(2)}px`);
-  characterSecondaryMotion.style.setProperty("--secondary-expand", (1 + 0.008 * strength).toFixed(4));
-  characterSecondaryMotion.style.setProperty("--secondary-duration", `${duration}s`);
-  updateSecondaryMotionVisibility();
 }
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
@@ -735,8 +745,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
-  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("live2d モデルも idle アニメーションも定義されていません");
+  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("Live2D、idleアニメーションのいずれも定義されていません");
   const profile = personaText(manifest, overrides[manifest.id]);
+  // 同じキャラの再読込で早期 return する場合も含め、照合表は必ず現在の人格へ合わせる。
+  setPersonaSpeechBlocklist(profile);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
   const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
@@ -747,13 +759,14 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
   characterAssetVersion = assetVersion;
+  character.dataset.bodyProportion = manifest.bodyProportion === "compact" ? "compact" : "standard";
+  character.dataset.sourceFraming = manifest.sourceFraming === "native-bust" ? "native-bust" : "default";
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
-  configureSecondaryMotion(variant?.secondaryMotion ?? manifest.secondaryMotion);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
@@ -847,8 +860,10 @@ function setAnimation(name, force = false) {
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
-  // layers を持つキャラは待機・返答状態を常時リグ描画にする（Live2D 風の常時まばたき）。
-  if (rigAvailable && !reduceMotion && (animationName === "idle" || animationName === "talking")) {
+  // layers を持つキャラは待機・返答状態を常時リグ描画にする。
+  // 口パクは Audio の playing 後にだけ attachLipSync() から開始する。
+  const rigExpressionMotion = ["success", "pleased", "shy", "concern", "angry", "surprised", "wake"].includes(requestedMotion);
+  if (rigAvailable && (animationName === "idle" || animationName === "talking" || rigExpressionMotion)) {
     startRig();
     return;
   }
@@ -863,7 +878,13 @@ function frameDuration(animation, index) {
 function animate(now) {
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
   if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
-  if (reduceMotion) { if (animations.idle) petSprite.src = frameUrl("idle", 0); return; }
+  // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
+  // 待機・思考などの装飾モーションだけを先頭フレームへ止め、ループ自体は継続する。
+  if (reduceMotion && animationName !== "talking") {
+    if (!rigActive && animations[animationName]) petSprite.src = frameUrl(animationName, 0);
+    animationRequestId = requestAnimationFrame(animate);
+    return;
+  }
   // リグ動作中・居眠り中はフレーム送りを止める（それぞれ差分絵・寝姿を表示している）。
   if (rigActive || napping) { animationRequestId = requestAnimationFrame(animate); return; }
   const animation = animations[animationName] || animations.idle;
@@ -890,6 +911,7 @@ let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマー�
 let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
 let rigLookDirection = 0;  // -1=左、0=正面、1=右
 let rigGazeSyncAt = 0;     // カーソル追従を反映した時刻（mousemove の間引き用）
+let gazeTrackingEnabled = false; // 既定OFF。設定で明示した場合だけ視線を動かす
 let rigMouthTimer = 0;
 let rigBlinkTimer = 0;
 let rigBlinkStepTimer = 0;
@@ -920,7 +942,7 @@ async function probeRigLayers() {
   const results = await Promise.all(names.map(probe));
   rigAvailable = results.every(Boolean);
   if (rigAvailable) {
-    const gazeResults = await Promise.all(["thinking_left", "thinking_right"].map(probe));
+    const gazeResults = await Promise.all(["gaze_left", "gaze_right"].map(probe));
     rigGazeAvailable = gazeResults.every(Boolean);
   }
   retryPendingLipSync(); // 素材の判定待ちで保留していた読み上げへ口パクを付ける
@@ -932,28 +954,40 @@ async function probeRigLayers() {
 function rigRefresh() {
   if (!rigActive) return;
   const gazing = rigGazeAvailable && !currentVoice && animationName === "idle" && rigLookDirection !== 0;
-  const gaze = gazing ? (rigLookDirection < 0 ? "thinking_left" : "thinking_right") : "mouth_closed";
+  const gaze = gazing ? (rigLookDirection < 0 ? "gaze_left" : "gaze_right") : "mouth_closed";
   const blink = gazing ? null : rigBlinkPhase;
-  const name = blink || (rigMouthOpen ? "mouth_open" : gaze);
+  const expressionByMotion = {
+    success: "expression_happy",
+    pleased: "expression_happy",
+    shy: "expression_shy",
+    concern: "expression_confused",
+    angry: "expression_angry",
+    surprised: "expression_surprised",
+    wake: "expression_surprised",
+  };
+  const expression = expressionByMotion[character.dataset.motion] || null;
+  const name = blink || (rigMouthOpen ? "mouth_open" : (expression || gaze));
   if (rigFace === name) return;
   rigFace = name;
   petSprite.src = layerUrl(name);
 }
 
-// 待機中はときどき左右を見て正面へ戻る。カーソル移動時は後段のmousemoveが方向を上書きする。
+// 待機中のよそ見は短く低頻度にする。頻繁に視線差分へ切り替えると、会話相手を
+// 見ずに常に下や横を向いている印象になる。
 function scheduleGaze() {
   clearTimeout(rigGazeTimer);
-  if (!rigActive || !rigGazeAvailable) return;
+  if (!gazeTrackingEnabled || !rigActive || !rigGazeAvailable) return;
   rigGazeTimer = setTimeout(() => {
-    if (!rigActive || currentVoice) { scheduleGaze(); return; }
+    if (!gazeTrackingEnabled || !rigActive) return;
+    if (currentVoice) { scheduleGaze(); return; }
     rigLookDirection = Math.random() < 0.5 ? -1 : 1;
     rigRefresh();
     rigGazeTimer = setTimeout(() => {
       rigLookDirection = 0;
       rigRefresh();
       scheduleGaze();
-    }, 650 + Math.random() * 850);
-  }, 1800 + Math.random() * 3000);
+    }, 350 + Math.random() * 300);
+  }, 8000 + Math.random() * 6000);
 }
 
 // まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
@@ -1008,21 +1042,32 @@ function detachLipSyncAudio() {
 // 起動直後の挨拶や読み込み中に届いた返答が、口の動かないまま読み上げられていた。
 let pendingLipSyncAudio = null;
 
+// リップシンクの正本。読み上げ無効（ミュート）・音量0・再生前/停止後は、
+// 2D / Live2D / タイマーフォールバックのどの経路でも口を動かさない。
+function shouldLipSync(audio) {
+  return Boolean(
+    audio
+    && audio === currentVoice
+    && ttsEnabledCache !== false
+    && voiceVolume > 0.001
+    && !audio.paused
+    && !audio.ended
+  );
+}
+
 function retryPendingLipSync() {
   const audio = pendingLipSyncAudio;
   if (!audio) return;
   pendingLipSyncAudio = null;
-  if (audio !== currentVoice || audio.paused || audio.ended) return;
+  if (!shouldLipSync(audio)) return;
   attachLipSync(audio);
 }
 
 // 音声要素へリップシンクを接続する。リグ未対応キャラでは何もしない。
 // Live2D キャラでは差分絵の代わりに live2dMouth（モデルの口パラメータ）を動かす。
 function attachLipSync(audio) {
-  // 口が動かない原因を後から追えるようにする（OS の「アニメーションを減らす」が入っていると
-  // Live2D は口だけでなく視線・モーションもすべて止まる）。
-  if (reduceMotion) {
-    logApp("info", "リップシンクを行いません", "OSの「アニメーションを減らす」設定が有効です");
+  if (!shouldLipSync(audio)) {
+    detachLipSyncAudio();
     return;
   }
   if (!rigAvailable && !live2dActive) {
@@ -1054,6 +1099,12 @@ function attachLipSync(audio) {
   }
   if (useTimer) {
     rigMouthTimer = setInterval(() => {
+      if (voiceVolume <= 0.001) {
+        rigMouthOpen = false;
+        live2dMouth = 0;
+        rigRefresh();
+        return;
+      }
       rigMouthOpen = !rigMouthOpen;
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
@@ -1084,7 +1135,7 @@ function attachLipSync(audio) {
     // 少し遅い包絡線にして、音節へ追従しつつフレーム間の細かな揺れを吸収する。
     const floor = peak * 0.22;
     const span = Math.max(peak * 0.72, 0.001);
-    const target = Math.max(0, Math.min(1, (rms - floor) / span));
+    const target = voiceVolume <= 0.001 ? 0 : Math.max(0, Math.min(1, (rms - floor) / span));
     const desired = Math.min(0.78, target * 0.78);
     const smoothing = desired > rigMouthLevel ? 0.34 : 0.16;
     rigMouthLevel += (desired - rigMouthLevel) * smoothing;
@@ -1133,7 +1184,7 @@ function stopRig() {
 // 音声解析だけ解除し、リグ非対応キャラのみ完全に終了してフレーム表示へ戻す。
 function stopLipSync() {
   if (live2dActive) { detachLipSyncAudio(); return; }
-  if (rigAvailable && !reduceMotion) { detachLipSyncAudio(); return; }
+  if (rigAvailable) { detachLipSyncAudio(); return; }
   const wasActive = rigActive;
   stopRig();
   if (wasActive && animations[animationName]) petSprite.src = frameUrl(animationName, frame);
@@ -1142,8 +1193,8 @@ function stopLipSync() {
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
 // character.json に live2d.model がある場合、PNG フレームの代わりに Cubism ランタイム
 // （ui/vendor/live2d/、cargo xtask setup live2d で取得）でモデルを WebGL 描画する。
-// まばたき（EyeBlink グループ）・髪の揺れ（physics3）・呼吸と自然な揺らぎはランタイムの
-// 自動処理に任せる。手で書いた固定波形はこれらを毎フレーム上書きして不自然になるため使わない。
+// まばたき（EyeBlink グループ）とCubismモーションはランタイムへ任せる。
+// 物理演算は製品機能として廃止したため、モデルにphysics3が含まれていても適用しない。
 // ただしランタイムはモーション再生中に自動まばたきを回さないので、startLive2D で自前に回す。
 // 読み上げ中は attachLipSync の振幅解析が live2dMouth を介して口パラメータを直接動かす。
 let live2dActive = false;
@@ -1154,7 +1205,7 @@ let live2dCanvas = null;
 let live2dMouth = -1; // 読み上げ中の口の開き（0〜1）。-1 はモーション任せ。
 let live2dRuntimePromise = null;
 let live2dRuntimeSdk = "";
-// 表示形式が chat / talk / bar の状態で起動すると character は32px前後しかない。
+// 表示形式が chat / bar の状態で起動すると character は小型アイコン寸法しかない。
 // その寸法でモデルの scale / offsetY を計算すると描画が全てキャンバス外へ出るため、
 // Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
 const LIVE2D_RENDER_WIDTH = 285;
@@ -1276,6 +1327,9 @@ async function startLive2D(cfg) {
     }
   }
   if (!model) throw modelError || new Error("利用可能なLive2D互換モデルがありません");
+  // 既存のLive2Dパックを読み込み不能にはせず、物理シミュレーションだけを無効化する。
+  // これにより古いmodel3.jsonのPhysics参照を残したままでも起動を妨げない。
+  model.internalModel.physics = null;
   logApp("info", "Live2D表示寸法", JSON.stringify({
     canvas: [width, height],
     original: [model.internalModel.originalWidth, model.internalModel.originalHeight],
@@ -1288,7 +1342,7 @@ async function startLive2D(cfg) {
   model.scale.set(fit * (Number(cfg.scale) || 1));
   model.anchor.set(0.5, 1);
   model.position.set(width / 2, height + (Number(cfg.offsetY) || 0));
-  // 表情・視線・物理・ポーズ更新の後、モデル描画の直前にリップシンク値を上書きする。
+  // 表情・視線・ポーズ更新の後、モデル描画の直前にリップシンク値を上書きする。
   // 口パラメータIDはモデル定義（Groups: LipSync）から自動検出する。旧モデルは
   // PARAM_MOUTH_OPEN_Y のような旧命名のため、固定既定値だと口が動かない。
   const coreModel = model.internalModel.coreModel;
@@ -1297,10 +1351,8 @@ async function startLive2D(cfg) {
   // 既定値を当てても存在しない ID を毎フレーム書き込むだけになるため。
   const lipSyncEnabled = cfg.lipSync !== false;
   const lipParam = String(cfg.lipSyncParam || lipSyncGroup?.Ids?.[0] || "ParamMouthOpenY");
-  // 呼吸・体の揺らぎ（updateNaturalMovements）・髪の揺れ（physics3）・まばたき（EyeBlink）は
-  // すべてランタイムの自動処理が担当する。ここで固定 sin 波を上書きすると、
-  // 物理演算の出力（例: ParamHairBack）や自動の自然な揺らぎを毎フレーム潰してしまい、
-  // 機械的で不自然な動きになる。手で書くのはリップシンクだけにとどめる。
+  // 呼吸などのモデル標準更新とまばたきはランタイムへ任せ、手で書くのは
+  // 読み上げへ同期するリップシンクだけにとどめる。
   model.internalModel.on("beforeModelUpdate", () => {
     // 口はモーションや表情が閉じ戻すため、全更新の後に読み上げ振幅で上書きする。
     if (lipSyncEnabled && live2dMouth >= 0) {
@@ -1333,7 +1385,6 @@ async function startLive2D(cfg) {
   character.dataset.renderKind = "live2d";
   applyCharacterZoom(characterZoom);
   petSprite.style.display = "none";
-  updateSecondaryMotionVisibility();
   if (motionEnabled && cfg.motions?.idle) {
     const idlePriority = window.PIXI?.live2d?.MotionPriority?.IDLE ?? 1;
     model.motion(cfg.motions.idle, 0, idlePriority);
@@ -1369,26 +1420,60 @@ function stopLive2D() {
     applyCharacterZoom(characterZoom);
     petSprite.style.display = "";
   }
-  updateSecondaryMotionVisibility();
 }
 
-// ── 疑似視線追従: マウスの方向へキャラクターがわずかに傾く ─────────────
+// ── 疑似視線追従: 設定ONかつ顔の近くにいるときだけ、短時間マウス方向を見る ──
 if (!reduceMotion) {
   let lookResetTimer = 0;
+  const resetLook = () => {
+    character.style.setProperty("--look-rot", "0deg");
+    rigLookDirection = 0;
+    rigRefresh();
+    // Live2DModel.focus()へcanvas外の座標を渡すと上下限へ張り付きやすい。
+    // 内部の正規化済みコントローラを中央へ戻して、下向きが残らないようにする。
+    live2dModel?.internalModel?.focusController?.focus(0, 0);
+  };
+  const applyGazeTrackingSetting = enabled => {
+    gazeTrackingEnabled = enabled === true;
+    clearTimeout(lookResetTimer);
+    clearTimeout(rigGazeTimer);
+    lookResetTimer = 0;
+    rigGazeTimer = 0;
+    resetLook();
+    if (gazeTrackingEnabled) scheduleGaze();
+  };
+  window.applyGazeTrackingSetting = applyGazeTrackingSetting;
   document.addEventListener("mousemove", event => {
-    // Live2D はモデル自身の視線・顔向きをカーソルへ向ける。
-    if (live2dActive && live2dModel && live2dCanvas) {
-      const canvasRect = live2dCanvas.getBoundingClientRect();
-      live2dModel.focus(event.clientX - canvasRect.left, event.clientY - canvasRect.top);
-    }
+    if (!gazeTrackingEnabled) return;
     const rect = character.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
-    const dx = Math.max(-1, Math.min(1, (event.clientX - centerX) / Math.max(240, window.innerWidth / 2)));
-    character.style.setProperty("--look-rot", `${(dx * 2.6).toFixed(2)}deg`);
+    const centerY = rect.top + rect.height * 0.38;
+    const normalizedX = (event.clientX - centerX) / Math.max(160, rect.width * 0.9);
+    const normalizedY = (event.clientY - centerY) / Math.max(180, rect.height * 0.8);
+    const insideFaceBand = event.clientY >= rect.top + rect.height * 0.02
+      && event.clientY <= rect.top + rect.height * 0.58;
+    const nearFace = insideFaceBand && Math.abs(normalizedX) <= 1.15;
+    const deadZone = Math.abs(normalizedX) < 0.28 && Math.abs(normalizedY) < 0.28;
+
+    // Live2Dはライブラリ内部の正規化視線へ弱く渡す。canvasローカルの大きなpx値を
+    // 直接focus()へ渡す旧実装では、画面下のカーソルに反応して下限へ張り付いていた。
+    if (live2dActive && live2dModel && live2dCanvas) {
+      const controller = live2dModel.internalModel?.focusController;
+      if (controller) {
+        if (nearFace && !deadZone) {
+          controller.focus(
+            Math.max(-0.38, Math.min(0.38, normalizedX * 0.32)),
+            Math.max(-0.2, Math.min(0.2, -normalizedY * 0.18)),
+          );
+        } else controller.focus(0, 0);
+      }
+    }
+    const dx = nearFace ? Math.max(-1, Math.min(1, normalizedX)) : 0;
+    character.style.setProperty("--look-rot", `${(dx * 1.15).toFixed(2)}deg`);
     // mousemove は毎ピクセル届くので、向きが変わったときと一定間隔でだけ反映する
     // （毎イベントで自動視線タイマーを張り直すとタイマーの作り直しだけが積み上がる）。
-    if (rigActive && rigGazeAvailable && !currentVoice) {
-      const direction = dx < -0.16 ? -1 : dx > 0.16 ? 1 : 0;
+    if (rigActive && rigGazeAvailable && !currentVoice && animationName === "idle") {
+      const direction = nearFace && !deadZone ? (dx < -0.38 ? -1 : dx > 0.38 ? 1 : 0) : 0;
       const now = performance.now();
       if (direction !== rigLookDirection || now - rigGazeSyncAt > 400) {
         rigGazeSyncAt = now;
@@ -1399,12 +1484,14 @@ if (!reduceMotion) {
     }
     clearTimeout(lookResetTimer);
     lookResetTimer = setTimeout(() => {
-      character.style.setProperty("--look-rot", "0deg");
-      rigLookDirection = 0;
-      rigRefresh();
+      resetLook();
       scheduleGaze();
-    }, 2600);
+    }, 700);
   });
+} else {
+  window.applyGazeTrackingSetting = () => {
+    gazeTrackingEnabled = false;
+  };
 }
 
 function autosizeInput() {
@@ -2003,6 +2090,16 @@ function playPreparedSpeech(result) {
     logApp("error", "音声データの読み込みに失敗しました", audioError);
     status.textContent = activeAlarmSnooze ? status.textContent : "音声再生に失敗: 音声データを読み込めません";
   }, { once: true });
+  audio.addEventListener("playing", () => {
+    if (currentVoice !== audio) return;
+    status.textContent = "読み上げ中…";
+    if (!shouldLipSync(audio)) {
+      setAnimation("idle", true);
+      return;
+    }
+    setAnimation("talking", true);
+    attachLipSync(audio);
+  }, { once: true });
   audio.play().catch(error => {
     finishVoice(true, audio);
     logApp("error", "音声再生に失敗しました", errorDetail(error));
@@ -2010,9 +2107,7 @@ function playPreparedSpeech(result) {
       status.textContent = `音声再生に失敗: ${error?.message || error || "再生がブロックされました"}`;
     }
   });
-  status.textContent = "読み上げ中…";
-  setAnimation("talking", true);
-  attachLipSync(audio);
+  status.textContent = "音声再生準備中…";
 }
 // 起動時の挨拶を組み立てる。キャラ固定挨拶と日次の時刻挨拶で「挨拶語」が二重にならないようまとめる。
 // - 固定挨拶が時刻挨拶語（おはよう/こんにちは/こんばんは等）で始まる場合: 時刻に合った挨拶語を1回だけ使い、
@@ -2044,6 +2139,7 @@ function combineStartupGreeting(manifestGreeting, dailyReply) {
 // ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
 function sanitizeSpeechText(text) {
   let out = String(text ?? "").replace(/\r\n/g, "\n");
+  out = stripPersonaLeak(out); // 人格プロンプトの混入は声に出さない
   out = out.split(/\n\s*参考[:：]/)[0];
   out = out.replace(/!?\[([^\]]*)\]\((?:https?:\/\/|mailto:)[^)]+\)/g, "$1");
   out = out.replace(/https?:\/\/[^\s、。）」』】]+/g, "");
@@ -2095,13 +2191,21 @@ function playChunkAndWait(result, session) {
       logApp("error", "音声データの読み込みに失敗しました", audio.error?.message || "");
       cleanup();
     }, { once: true });
+    audio.addEventListener("playing", () => {
+      if (session !== voiceSession || currentVoice !== audio) return;
+      status.textContent = "読み上げ中…";
+      if (!shouldLipSync(audio)) {
+        setAnimation("idle", true);
+        return;
+      }
+      setAnimation("talking", true);
+      attachLipSync(audio);
+    }, { once: true });
     audio.play().catch(error => {
       logApp("error", "音声再生に失敗しました", errorDetail(error));
       cleanup();
     });
-    status.textContent = "読み上げ中…";
-    setAnimation("talking", true);
-    attachLipSync(audio);
+    status.textContent = "音声再生準備中…";
   });
 }
 async function speakReply(text) {
@@ -2293,7 +2397,6 @@ async function renderReplySpeaking(text) {
   const token = ++speakingToken;
   const source = String(text ?? "");
   const chars = [...source];
-  setAnimation("talking", true);
   const stepMs = chars.length > 180 ? 14 : 22;
   // 生の Markdown 記号を見せないよう、部分テキストを都度 Markdown 描画する
   // （rAF スロットルで1フレーム1回に抑える）。
@@ -2520,7 +2623,6 @@ bubble.addEventListener("click", event => {
 character.addEventListener("click", event => {
   if (event.target instanceof Element && event.target.closest("button")) return;
   // 立ち絵を動かした直後のクリックは、はねる反応ではなくドラッグの終わりなので無視する。
-  if (consumeCharacterDrag()) return;
   // クリックのたびに小さくはねる（連打時はアニメーションを巻き戻して再生）。
   character.classList.remove("boop");
   void character.offsetWidth;
@@ -3714,29 +3816,12 @@ document.getElementById("exportHistory")?.addEventListener("click", async event 
 });
 
 // ── 立ち絵のドラッグ移動 ────────────────────────────────────────────
-// ウィンドウではなく**キャラだけ**を枠の中で動かす。既定位置は上半身が出る座標で、
-// ここからドラッグしてずらした量を PICOAGENT_CHARACTER_OFFSET_X/Y に保存する。
-// ウィンドウを動かしたいときは透明な余白（#petApp の drag region）か、
-// キャラの上で Ctrl（macOS は ⌘）を押しながらドラッグする。
+// キャラの構図は設定画面のプレビューで調整する。通常画面ではキャラのどこを
+// 掴んでもウィンドウを移動できるよう、OS標準のドラッグへ渡す。
 let characterOffset = { x: 0, y: 0 };
 let characterZoom = 1.55;
 let characterFraming = {};
 // 保存済みの値。同じ位置での重複保存を避けるために持つ。
-let savedCharacterOffset = { x: 0, y: 0 };
-let characterDragging = null;
-let characterDragMoved = false;
-
-// アイコンとして顔だけ出す形式では動かさない（枠が 32px しかなく、意味がない）。
-function layoutShowsStandingCharacter() {
-  return currentLayout !== "chat" && currentLayout !== "talk" && currentLayout !== "bar";
-}
-
-/** 直前のドラッグでクリックを打ち消すべきかを返し、フラグを下ろす。 */
-function consumeCharacterDrag() {
-  if (!characterDragMoved) return false;
-  characterDragMoved = false;
-  return true;
-}
 
 /** 枠がウィンドウから完全に出ていかないよう移動量を丸める。 */
 function clampCharacterOffset(x, y) {
@@ -3780,12 +3865,32 @@ const FRAMING_PRESETS = {
 function applyCharacterFraming() {
   const characterId = characterManifest?.id;
   const saved = characterId && characterFraming?.[characterId]?.[currentLayout];
-  if (!saved) return;
+  // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
+  // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
+  if (!saved) {
+    // 低頭身2Dは以前の上半身位置を維持し、長身・実写・Live2Dは胸上を標準にする。
+    // manifestの既定構図は原画固有の余白だけを吸収し、利用者の保存値がある場合は使わない。
+    const isCompact2d = character.dataset.renderKind === "2d"
+      && character.dataset.bodyProportion === "compact";
+    const usesStream2dCrop = character.dataset.renderKind === "2d" && currentLayout === "stream";
+    const manifestFrame = usesStream2dCrop
+      ? characterManifest?.streamFraming
+      : characterManifest?.defaultFraming;
+    const fallback = manifestFrame && Number.isFinite(Number(manifestFrame.zoom))
+      ? {
+          zoom: Number(manifestFrame.zoom),
+          x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
+          y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
+        }
+      : isCompact2d || usesStream2dCrop ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
+    applyCharacterZoom(fallback.zoom);
+    applyCharacterOffset(fallback.x, fallback.y, { clamp: false });
+    return;
+  }
   const preset = FRAMING_PRESETS[saved.preset] || null;
   const frame = preset || saved;
-  applyCharacterZoom(saved.zoom ?? frame.zoom ?? 1.55);
+  applyCharacterZoom(saved.zoom ?? frame.zoom ?? FRAMING_PRESETS.bust.zoom);
   applyCharacterOffset(saved.x ?? frame.x ?? 0, saved.y ?? frame.y ?? 0, { clamp: false });
-  savedCharacterOffset = { ...characterOffset };
 }
 
 function applyStreamAppearance(background, imagePath, display, displayImagePath, captionColor = "#5a3b4b") {
@@ -3799,93 +3904,18 @@ function applyStreamAppearance(background, imagePath, display, displayImagePath,
   petApp.style.setProperty("--stream-caption-color", safeCaptionColor);
 }
 
-/** ドラッグを取りやめて、掴む前の位置へ戻す（保存もしない）。 */
-function cancelCharacterDrag() {
-  if (!characterDragging) return;
-  applyCharacterOffset(characterDragging.baseX, characterDragging.baseY, { clamp: false });
-  if (character.hasPointerCapture(characterDragging.pointerId)) {
-    character.releasePointerCapture(characterDragging.pointerId);
-  }
-  character.classList.remove("is-dragging");
-  characterDragging = null;
-  // 取りやめでもクリック扱いに戻さない（掴んだ位置ではねられると驚くため）。
-  characterDragMoved = true;
-}
-
 character.addEventListener("pointerdown", event => {
   if (event.button !== 0) return;
+  if (petApp.classList.contains("is-layout-editing")) return;
   if (event.target instanceof Element && event.target.closest("button")) return;
-  // 2本目以降の指は無視する（ピンチ操作で立ち絵が飛ぶのを防ぐ）。
-  if (characterDragging) return;
-  // Ctrl（macOS は ⌘）を押しながらならウィンドウを動かす。
-  // キャラが画面の大半を占める形式（マスコット等）でも、ウィンドウを掴む手段を残すため。
-  if (event.ctrlKey || event.metaKey) {
-    window.picoagent.startWindowDrag();
-    return;
-  }
-  if (!layoutShowsStandingCharacter()) {
-    window.picoagent.startWindowDrag();
-    return;
-  }
-  // 画像の既定ドラッグ（ゴースト表示）と文字選択を止める。
   event.preventDefault();
-  characterDragging = {
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    baseX: characterOffset.x,
-    baseY: characterOffset.y,
-  };
-  character.setPointerCapture(event.pointerId);
-  character.classList.add("is-dragging");
-});
-
-character.addEventListener("pointermove", event => {
-  if (!characterDragging || event.pointerId !== characterDragging.pointerId) return;
-  const dx = event.clientX - characterDragging.startX;
-  const dy = event.clientY - characterDragging.startY;
-  // 小さな揺れはクリックとして扱う（はねる反応を潰さない）。触ろうとしただけで
-  // 立ち絵がずれると操作ミスに感じるので、しきい値は指でも押せる大きさにする。
-  if (!characterDragMoved && Math.hypot(dx, dy) < 6) return;
-  characterDragMoved = true;
-  applyCharacterOffset(characterDragging.baseX + dx, characterDragging.baseY + dy);
-});
-
-function endCharacterDrag(event) {
-  if (!characterDragging || event.pointerId !== characterDragging.pointerId) return;
-  const moved = characterDragMoved;
-  if (character.hasPointerCapture(event.pointerId)) character.releasePointerCapture(event.pointerId);
-  character.classList.remove("is-dragging");
-  characterDragging = null;
-  if (!moved) return;
-  // 位置が変わっていなければ書き込まない（同じ値の保存で設定ファイルを触らない）。
-  if (characterOffset.x === savedCharacterOffset.x && characterOffset.y === savedCharacterOffset.y) return;
-  savedCharacterOffset = { ...characterOffset };
   markActivity();
-  window.picoagent.setCharacterOffset(characterOffset.x, characterOffset.y, characterManifest?.id, currentLayout, characterZoom).catch(error => {
-    showToast(preview(error?.message || error || "立ち絵の位置を保存できませんでした", 60), "error");
-  });
-}
-character.addEventListener("pointerup", endCharacterDrag);
-character.addEventListener("pointercancel", endCharacterDrag);
-// 途中でキャプチャを失った場合も（別ウィンドウへ切り替わった等）掴んだままにしない。
-character.addEventListener("lostpointercapture", endCharacterDrag);
-// 右クリックやウィンドウ外へフォーカスが移ったら、動かしかけを取りやめて元へ戻す。
-character.addEventListener("contextmenu", cancelCharacterDrag);
-window.addEventListener("blur", cancelCharacterDrag);
-// Esc で「やっぱりやめる」。掴んだ時点の位置へ戻し、保存もしない。
-window.addEventListener("keydown", event => {
-  if (event.key === "Escape" && characterDragging) {
-    event.stopPropagation();
-    cancelCharacterDrag();
-  }
-}, true);
-// ドラッグ直後のダブルクリックでフキダシが全画面になると事故に見えるので抑える。
-character.addEventListener("dblclick", event => {
-  if (consumeCharacterDrag()) { event.stopPropagation(); event.preventDefault(); }
-}, true);
-// ウィンドウの大きさや表示形式が変わると枠の位置も変わる。見えなくならないよう丸め直す。
-window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y));
+  window.picoagent.startWindowDrag();
+});
+
+// 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
+// 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
+window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false }));
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];
@@ -4055,7 +4085,6 @@ window.picoagent.on("pet:character-reset", (reset) => {
     if (!Object.keys(characterFraming[characterId]).length) delete characterFraming[characterId];
   }
   applyCharacterOffset(0, 0, { clamp: false });
-  savedCharacterOffset = { x: 0, y: 0 };
   applyCharacterFraming();
 });
 window.picoagent.on("pet:model", model => {
@@ -4131,6 +4160,18 @@ function applyVoiceVolume(value) {
   if (!Number.isFinite(n)) return;
   voiceVolume = Math.min(1, Math.max(0, n / 100));
   if (currentVoice) currentVoice.volume = voiceVolume;
+  if (voiceVolume <= 0.001) {
+    rigMouthLevel = 0;
+    rigMouthOpen = false;
+    live2dMouth = 0;
+    rigRefresh();
+    if (animationName === "talking") setAnimation("idle", true);
+    return;
+  }
+  if (shouldLipSync(currentVoice)) {
+    setAnimation("talking", true);
+    if (!rigAnalyser && !rigMouthTimer) attachLipSync(currentVoice);
+  }
 }
 function applyTheme(value) {
   const theme = value === "light" || value === "dark" ? value : "system";
@@ -4149,7 +4190,7 @@ let currentLayout = "pet";
 function layoutUsesFreeBubble() { return currentLayout === "pet"; }
 // 会話履歴を常に出しておく形式。全画面にしなくても過去の発言が読める。
 function layoutShowsHistory() {
-  return currentLayout === "chat" || currentLayout === "talk"
+  return currentLayout === "chat"
     || currentLayout === "workspace" || currentLayout === "stream";
 }
 // ペット表示へ戻ったときに復元するため、保存済みのフキダシ寸法・位置を控えておく。
@@ -4185,7 +4226,8 @@ function syncWidgetClock() {
 }
 
 function applyLayout(id) {
-  const next = typeof id === "string" && id ? id : "pet";
+  const requested = typeof id === "string" && id ? id : "pet";
+  const next = requested === "talk" ? "chat" : requested;
   currentLayout = next;
   petApp.dataset.layout = next;
   if (layoutUsesFreeBubble()) {
@@ -4229,7 +4271,6 @@ function applyBubbleLayout(width, height, left, top) {
 window.addEventListener("resize", refreshBubblePlacement);
 petSprite.addEventListener("load", () => {
   refreshBubblePlacement();
-  syncSecondaryMotionFrame();
 });
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
@@ -4243,11 +4284,12 @@ window.picoagent.on("pet:ui", (ui) => {
       : "いっしょの記録は設定で停止中";
   }
   if (ui.characterZoom != null) applyCharacterZoom(ui.characterZoom);
+  if (ui.gazeTrackingEnabled != null) window.applyGazeTrackingSetting?.(ui.gazeTrackingEnabled);
   if (ui.characterFraming != null) characterFraming = ui.characterFraming || {};
   if (ui.streamBackground != null) applyStreamAppearance(ui.streamBackground, ui.streamBackgroundImage, ui.streamDisplay, ui.streamDisplayImage, ui.streamCaptionColor);
   if (ui.ttsEnabled != null) {
     ttsEnabledCache = ui.ttsEnabled !== false;
-    if (!ttsEnabledCache) stopVoice(false);
+    if (!ttsEnabledCache) stopVoice(true);
   }
   if (ui.characterOffsetX != null) applyCharacterOffset(ui.characterOffsetX, ui.characterOffsetY);
   if (ui.layout != null) applyLayout(ui.layout);
@@ -4289,36 +4331,9 @@ bubble?.addEventListener("click", event => {
 renderNoticePanel();
 updateNoticeBadge();
 
-// TTS 有効時は同梱 Aivis が応答するまで待ってからキャラを描画する（無効時は待たない）。
-// 起動失敗で永久に出ないことを避けるため、上限（約120秒）を超えたら諦めて描画する。
-async function waitForAivisReady() {
-  let s;
-  try { s = await window.picoagent.aivisStatus(); }
-  catch (error) {
-    logApp("warn", "Aivis 状態取得に失敗しました", errorDetail(error));
-    return;
-  }
-  if (!s || !s.enabled || s.up) return;
-  const startedAt = Date.now();
-  setStatus("音声エンジンの起動を確認中…");
-  for (let i = 0; i < 240; i += 1) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    try { s = await window.picoagent.aivisStatus(); }
-    catch (error) {
-      logApp("warn", "Aivis 起動待ち中の状態取得に失敗しました", errorDetail(error));
-      break;
-    }
-    if (s && s.up) break;
-    if (i % 2 === 1) {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      setStatus(`音声エンジンの起動を確認中… ${seconds}秒`);
-    }
-  }
-  if (status.textContent.startsWith("音声エンジンの起動を確認中")) setStatus("");
-}
-
-// 選択中キャラの AivisHub 音声モデルを、初回読み上げ前にローディング画面で導入する。
-async function prepareSelectedVoiceModel() {
+// 選択中キャラの AivisHub 音声モデルを準備する。起動時は画面を先に使える状態へ
+// 戻してからバックグラウンドで呼ぶため、音声配布元の障害で本体起動を塞がない。
+async function prepareSelectedVoiceModel(showStatus = true) {
   let statusInfo;
   try { statusInfo = await window.picoagent.aivisStatus(); }
   catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
@@ -4326,28 +4341,31 @@ async function prepareSelectedVoiceModel() {
   const startedAt = Date.now();
   let timer = null;
   try {
-    setStatus(`${bootCharacterName}の声を準備中…`);
-    timer = setInterval(() => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      setStatus(`${bootCharacterName}の声を準備中… ${seconds}秒`);
-    }, 1000);
+    if (showStatus) {
+      setStatus(`${bootCharacterName}の声を準備中…`);
+      timer = setInterval(() => {
+        const seconds = Math.floor((Date.now() - startedAt) / 1000);
+        setStatus(`${bootCharacterName}の声を準備中… ${seconds}秒`);
+      }, 1000);
+    }
     await window.picoagent.prepareVoiceModel();
     if (timer) clearInterval(timer);
     timer = null;
-    setStatus("");
+    if (showStatus) setStatus("");
     return true;
   } catch (error) {
     if (timer) clearInterval(timer);
     logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
-    setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    if (showStatus) {
+      setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    }
     return false;
   }
 }
 
-// 同梱エンジン(local)のモデル DL・起動をローディング画面の間に終わらせる。
-// 通常時にフキダシへ「モデルを準備中…」を出さないため、ここで ready/error まで待つ。
-// DL は数 GB で時間がかかりうるので上限は長め（約30分）。error は即終了する。
+// 同梱エンジン(local)のモデルDL・起動をバックグラウンドで監視する。
+// DLは数GBになりうるが、キャラと画面の起動完了はこの処理を待たない。
 async function waitForEngineReady() {
   for (let i = 0; i < 1800; i += 1) {
     let s;
@@ -4361,6 +4379,26 @@ async function waitForEngineReady() {
     if (s && (s.phase === "ready" || s.phase === "error")) return;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
+}
+
+function startBackgroundStartupServices(info, greeting) {
+  if ((info.providerId || "local") === "local") {
+    void waitForEngineReady().catch(error => {
+      logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error));
+    });
+  }
+  if (!info.onboardingDone || !greeting) return;
+  const requestRevision = conversationRevision;
+  void (async () => {
+    const voiceReady = await prepareSelectedVoiceModel(false);
+    if (!voiceReady || requestRevision !== conversationRevision || busy || currentVoice) return;
+    const prepared = await prepareSpeech(greeting);
+    if (prepared && requestRevision === conversationRevision && !busy && !currentVoice) {
+      playPreparedSpeech(prepared);
+    }
+  })().catch(error => {
+    logApp("warn", "起動後の読み上げ準備に失敗しました", errorDetail(error));
+  });
 }
 
 // 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
@@ -4505,7 +4543,7 @@ async function fireAlarm(a) {
   renderAlarmReply(line);
   addHistory("assistant", line);
   if (prepared) playPreparedSpeech(prepared);
-  else setAnimation("talking", true);
+  else if (animationName === "talking") setAnimation("idle");
   armAlarmSnooze(a);
 }
 function startAlarmPolling() {
@@ -4518,6 +4556,7 @@ function startAlarmPolling() {
   startBootLogTicker();
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
+  if (betaBadge) betaBadge.hidden = info.betaBuild !== true;
   relationshipMemoryEnabled = info.relationshipMemoryEnabled !== false;
   renderRelationship({ relationship: info.relationship, bondLabel: info.bondLabel });
   if (relationshipButton) relationshipButton.title = relationshipMemoryEnabled
@@ -4527,14 +4566,16 @@ function startAlarmPolling() {
   if (info.theme != null) applyTheme(info.theme);
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
+  window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;
   applyCharacterOffset(info.characterOffsetX, info.characterOffsetY, { clamp: false });
-  savedCharacterOffset = { ...characterOffset };
   savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };
-  applyLayout(info.layout);
+  // 起動準備中だけは保存中の形式に関係なく、小型の配信レイアウトを見せる。
+  // finishBoot 後にバックエンドの pet:layout イベントで保存形式へ戻る。
+  applyLayout("stream");
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
@@ -4542,8 +4583,8 @@ function startAlarmPolling() {
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
-  // 推論・音声エンジンを待つ間に通常キャラクターも並行して読み込む。完了したら
-  // 起動画面のプレビュー画像から実キャラへ切り替え、配信画面と同じ大きな立ち絵で見せる。
+  // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
+  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンは待たない。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
   const characterLoadPromise = loadCharacter(
@@ -4557,17 +4598,8 @@ function startAlarmPolling() {
     },
     error => ({ ok: false, error }),
   );
-  setStatus("音声設定を確認中…");
-  await waitForAivisReady();
-  await prepareSelectedVoiceModel();
-  // local プロバイダはモデル DL・エンジン起動もローディング画面の間に終わらせる。
-  if ((info.providerId || "local") === "local") {
-    try { await waitForEngineReady(); }
-    catch (error) { logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error)); }
-  }
-  let preparedGreeting = null;
+  let startupGreeting = "";
   try {
-    // 非表示のまま挨拶を描画し、表示と同時に再生できるよう音声を事前合成しておく。
     const characterLoad = await characterLoadPromise;
     if (!characterLoad.ok) throw characterLoad.error;
     setStatus("会話履歴を画面へ復元中…");
@@ -4582,21 +4614,25 @@ function startAlarmPolling() {
     }
     if (greeting) {
       characterManifest.greeting = greeting;
-      setStatus("起動時の読み上げ音声を準備中…");
-      preparedGreeting = await prepareSpeech(greeting);
+      startupGreeting = greeting;
     }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
-    // ここで初めて全描画を見せ、描画した瞬間に挨拶を再生する。
+    // キャラクターと履歴が読めた時点で画面を使える状態へ戻す。AIモデル・音声モデルの
+    // 取得はこの後のバックグラウンド処理へ分離し、外部サービス障害で起動を塞がない。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
     try { await window.picoagent.finishBoot(); }
+    catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
+    // 実アプリはpet:layoutイベントでも戻るが、イベント配送の遅延や撮影モックに依存せず、
+    // 起動用streamを確実に終了させる。finishBoot が失敗しても起動用の形式のままにはしない。
+    try { applyLayout(info.layout); }
     catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
-    if (preparedGreeting) playPreparedSpeech(preparedGreeting);
   }
+  startBackgroundStartupServices(info, startupGreeting);
   if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); }
@@ -4814,6 +4850,5 @@ window.picoagent.on("pet:layout-reset", () => {
   resetFullscreenBubbleLayoutVars();
   // 立ち絵の移動量も既定（上半身が出る位置）へ戻す。
   applyCharacterOffset(0, 0, { clamp: false });
-  savedCharacterOffset = { x: 0, y: 0 };
   setTimeout(refreshBubblePlacement, 0);
 });

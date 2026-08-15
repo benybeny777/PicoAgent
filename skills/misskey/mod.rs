@@ -43,8 +43,8 @@ impl Tool for MisskeyTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MISSKEY_BASE_URL", "Misskey instance URL", "text", "https://misskey.io"),
-            Field::new("PICOAGENT_MISSKEY_TOKEN", "Misskey API token", "password", ""),
+            Field::new("PICOAGENT_MISSKEY_BASE_URL", "Misskey のインスタンス URL", "text", "https://misskey.io"),
+            Field::new("PICOAGENT_MISSKEY_TOKEN", "Misskey の API トークン", "password", ""),
             Field::new("PICOAGENT_MISSKEY_TIMEOUT_SECS", "Misskey API 待ち時間（秒、3〜60）", "text", "20"),
         ]
     }

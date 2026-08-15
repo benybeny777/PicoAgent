@@ -7,12 +7,6 @@
       "name": "むぎ"
     },
     {
-      "description": "むぎの Live2D 版（制作中）。会話と記録は PNG 版と別。",
-      "id": "mugi-live2d",
-      "manifest": "mugi-live2d/character.json",
-      "name": "むぎ（Live2D）"
-    },
-    {
       "description": "口は強いけれど面倒見がいいツンデレ作業相棒。",
       "id": "rin",
       "manifest": "rin/character.json",
@@ -91,10 +85,10 @@
       "name": "りん"
     },
     {
-      "description": "ふんわり穏やかで、そばで見守ってくれる19歳の通常2D作業相棒。",
-      "id": "hinano",
-      "manifest": "hinano/character.json",
-      "name": "ひなの"
+      "description": "ピンクのショートヘアと地雷系衣装の、実写調バネ物理テストキャラクター。",
+      "id": "photoreal-prototype",
+      "manifest": "photoreal-prototype/character.json",
+      "name": "実写2Dテスト"
     }
   ],
   "default": "mugi"

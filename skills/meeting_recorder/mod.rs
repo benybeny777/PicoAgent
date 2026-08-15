@@ -15,7 +15,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat};
 use hound::{SampleFormat as WavSampleFormat, WavSpec, WavWriter};
 use serde_json::{json, Value};
-use tokio::io::AsyncReadExt;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -501,89 +500,18 @@ fn trim_output(bytes: &[u8]) -> String {
     )
 }
 
+/// 共通層でタイムアウト付き実行する。起動失敗・タイムアウト・出力回収の
+/// 打ち切りはすべて共通層の判断に任せ、ここでは案内文の先頭だけ揃える。
 async fn run_transcribe_command(
     program: &str,
     args_list: &[String],
     timeout: u64,
 ) -> Result<Output, String> {
-    let mut child = crate::tools::process::command(program)
-        .args(args_list)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("エラー: ローカル文字起こしを起動できません: {error}"))?;
-
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = stdout {
-            pipe.read_to_end(&mut buf)
-                .await
-                .map_err(|error| format!("標準出力を読み取れません: {error}"))?;
-        }
-        Ok::<_, String>(buf)
-    });
-    let stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = stderr {
-            pipe.read_to_end(&mut buf)
-                .await
-                .map_err(|error| format!("標準エラー出力を読み取れません: {error}"))?;
-        }
-        Ok::<_, String>(buf)
-    });
-
-    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            return Err(format!(
-                "エラー: ローカル文字起こしの終了待ちに失敗しました: {error}"
-            ))
-        }
-        Err(_) => {
-            let kill_error = child.kill().await.err();
-            let wait_error = child.wait().await.err();
-            let stdout_error = stdout_task
-                .await
-                .map_err(|error| format!("標準出力の回収タスクが失敗しました: {error}"))
-                .and_then(|result| result)
-                .err();
-            let stderr_error = stderr_task
-                .await
-                .map_err(|error| format!("標準エラー出力の回収タスクが失敗しました: {error}"))
-                .and_then(|result| result)
-                .err();
-            let cleanup = kill_error
-                .or(wait_error)
-                .map(|error| error.to_string())
-                .into_iter()
-                .chain(stdout_error)
-                .chain(stderr_error)
-                .collect::<Vec<_>>()
-                .join("、");
-            if !cleanup.is_empty() {
-                return Err(format!(
-                    "エラー: ローカル文字起こしが {timeout} 秒でタイムアウトし、子プロセスの解放にも失敗しました: {cleanup}"
-                ));
-            }
-            return Err(format!(
-                "エラー: ローカル文字起こしが {timeout} 秒でタイムアウトしました。"
-            ));
-        }
-    };
-    let stdout = stdout_task
+    let mut command = crate::tools::process::command(program);
+    command.args(args_list).stdin(Stdio::null());
+    crate::tools::process::output(command, timeout, "ローカル文字起こし")
         .await
-        .map_err(|error| format!("エラー: 標準出力の回収タスクが失敗しました: {error}"))??;
-    let stderr = stderr_task
-        .await
-        .map_err(|error| format!("エラー: 標準エラー出力の回収タスクが失敗しました: {error}"))??;
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
-    })
+        .map_err(|error| format!("エラー: {error}"))
 }
 
 async fn transcribe(cfg: &Config, args: &Value) -> String {

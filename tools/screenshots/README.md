@@ -1,7 +1,7 @@
 # README 用スクリーンショット（動く絵）の撮影
 
 `docs/images/` に置いている README 掲載画像を再生成するツールです。通常プレビューは**透過つきの
-アニメーション WebP**（無限ループ）、8形式の比較画像は1フレームの透過 WebPです。
+アニメーション WebP**（無限ループ）、7形式の比較画像は1フレームの透過 WebPです。
 
 実物の `ui/` をローカル HTTP で配信し、**バックエンド（`window.__TAURI__`）だけをモック**して
 ヘッドレス Chromium で描画します。フロントの JS・CSS・キャラクター画像は本物をそのまま使うため、
@@ -9,7 +9,13 @@
 
 - ウィンドウサイズは各表示形式の既定値に合わせています（ペット形式は 900×600）
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
-- 1本あたり 4 秒・12fps・48 コマ。文字送りとキャラクターのモーションがそのまま入ります
+- 通常の動画は1本あたり6秒・30fps・180コマ。文字送りとキャラクターのモーションがそのまま入ります
+- キャラクター一覧（`character-*.webp`）は標準ペット表示、`character-*-stream.webp`は配信表示で、どちらも12秒・30fps・360コマ・960px幅です。通常版は900px画面を2倍ピクセル密度で描画し、配信版はフルHD 1920×1080のネイティブ画面から縮小します。480px素材の引き伸ばしは行いません
+- **キャラクター一覧は口パクを先に十分見せてから、状態を巡回します。** 前半5秒は実音声の再生開始後だけ口パクし、後半は考え中 → 成功 → 悲しみ → 左右視線 → 待機を間隔を空けて見せます。まばたき、Live2D固有モーション／物理、対応キャラの局所二次動作はそのまま動きます
+  - 考え中を明示的に入れているのは、`record()` が録画前に時計を進めるため、送信直後の考え中が録画開始時点で終わっているからです
+  - 12秒へ延ばし、状態ごとの見せ時間を確保してから次へ切り替えます
+- **口パクは実際の音声再生開始後だけ動きます。** 読み上げ無効（ミュート）または音量0では、2D／Live2Dとも口を閉じたままです。キャラクター一覧と Live2D の絵は `voice: true`（`openScene` のオプション）で音節風の振幅を持つ WAV を返させ、実アプリと同じ音声解析経路を確認します。まばたきは音声と無関係に常時動きます（`layers/` を持つキャラのみ）
+- **ffmpeg は WebP エンコーダ（`libwebp_anim`）付きのものが要ります。** Playwright 同梱の ffmpeg は最小構成で WebP を持たないため使えません（`SHOOT_FFMPEG` に指定すると入力オープンで失敗します）
 
 ## 使い方
 
@@ -35,10 +41,14 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
-| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系7キャラ×8表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
+| `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
+| `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
-| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×8形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
-| `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×8形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
+| `SHOOT_LAYOUT_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`stream,pet` のように撮影する表示形式だけを絞る |
+| `SHOOT_LAYOUT_EDITOR` | `1` ならMoveable編集モードのドラッグ、拡大縮小、ウィンドウドラッグ抑止、保存、再読込復元、既定へ戻すを検査する |
+| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
+| `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×7形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
+| `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能ステップを `temp/onboarding-check/` へ撮影する |
 
 引数に画像名を並べると、その絵だけを撮り直します。全部で 3 分ほどかかるので、普段はこちらを使います。
@@ -55,7 +65,9 @@ node tools/screenshots/shoot.mjs composer-light.webp
 | `composer-light.webp` | 入力欄とクイック操作 | 次の依頼を 1 文字ずつ打ち込むところ |
 | `fullscreen-light.webp` | 全画面フキダシ（履歴の検索・コピー・再利用・書き出し） | 返答が履歴へ積まれて末尾までスクロールするところ |
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
-| `layout-shot-*.webp` | 8種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
+| `character-<キャラID>.webp` | README の通常表示一覧（標準ペット形式900×600、胸上構図、2倍密度描画、12秒・30fps・960px幅） | 音声同期の口パク → 考え中 → 成功 → 悲しみ → 左右視線 → 待機。対応キャラは録画中の口開閉も自動検査する |
+| `character-<キャラID>-stream.webp` | README の配信表示一覧（フルHD 1920×1080、ネイティブ描画、12秒・30fps・960px幅） | 通常表示と同じ巡回を、背景 → PICO STUDIO → キャラ → 字幕・操作UIの実レイヤー順で撮る |
+| `layout-shot-*.webp` | 7種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）
 
@@ -69,7 +81,9 @@ node tools/screenshots/shoot.mjs composer-light.webp
   「1/fps だけ時間を進める → 1 枚撮る」を繰り返すと、撮影に何秒かかってもページ内の経過時間は一定なので
   狙ったフレームレートで滑らかになります
 - **`ffmpeg` の `-compression_level` は既定（4）のまま**にしてください。6 にすると libwebp の探索が
-  跳ね上がり、48 コマの書き出しが数分たっても終わりません。サイズはほとんど変わりません
+  跳ね上がり、数百コマの書き出しが極端に長くなります。サイズはほとんど変わりません
+- 書き出し前に切り出し元の実ピクセル幅が出力幅以上か検査し、引き伸ばしになる指定は停止します。書き出し後もWebPヘッダーの実寸が指定幅と一致しなければ失敗します
+- 論理幅が出力幅に届かない小型形式（マスコット360px、ウィジェット440px、チャット520px）は `deviceScaleFactor: 2` で描画してから縮小します。等倍のままだと上の検査で止まります
 
 ## Live2D の絵について
 
@@ -83,12 +97,12 @@ cargo xtask setup live2d   # 先にこれを実行する
 `ui/assets/characters/hiyori/live2d/` です。いずれも再配布条件があるためリポジトリには含めていません
 （`.gitignore` 済み）。
 
-Live2D撮影は、麦のCubism 5／4モデルを個別に読み込んだあと、ひよりのtickerを止めて同一ポーズの
+Live2D撮影は、ひよりのCubism 5／4モデルを個別に読み込んだあと、tickerを止めて同一ポーズの
 口元だけを閉口・開口比較します。その後、実際のテストWAVをWebAudio解析へ通して録画するため、
 身体モーションだけを口パク成功と誤認しません。
 
 起動画面だけを確認する場合は `SHOOT_DEBUG_BOOT=1` を指定する。保存形式が小型でも共通画面に
-なることは `SHOOT_BOOT_LAYOUT=chat`（または `talk` / `bar`）、キャラは
+なることは `SHOOT_BOOT_LAYOUT=chat`（または `bar`）、キャラは
 `SHOOT_BOOT_CHARACTER=hiyori` のように指定し、生成された `temp/boot-check/` を確認する。
 
 > [!NOTE]

@@ -613,6 +613,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
     let bond_label = relationship.bond_label();
     let stream = crate::stream_profile::resolve(&state.config, &character_id);
     Ok(json!({
+        "betaBuild": cfg!(feature = "beta-full"),
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
         "up": current_up(&state).await,
@@ -622,7 +623,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
         "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),
         "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
-        "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "100"),
+        "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "50"),
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
@@ -633,6 +634,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
         "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
+        "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
         "streamBackground": stream.background,
         "streamBackgroundImage": stream.background_image,
@@ -2037,7 +2039,7 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
             style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
         }),
-        "mugi" | "mugi-live2d" => Some(aivis_voice(
+        "mugi" => Some(aivis_voice(
             HIYORI_AIVIS_MODEL_UUID,
             HIYORI_AIVIS_SPEAKER_UUID,
             "あまあま",
@@ -2259,7 +2261,17 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
         }
         if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                patch.insert(key.clone(), Value::String(crate::secret::encrypt(text)));
+                match crate::secret::encrypt(text) {
+                    Ok(value) => {
+                        patch.insert(key.clone(), Value::String(value));
+                    }
+                    Err(error) => {
+                        crate::log_paths::append_app_log(
+                            app,
+                            &format!("既存シークレットを暗号化できないため平文を維持します: {key} ({error})"),
+                        );
+                    }
+                }
             }
         }
     }
@@ -2528,7 +2540,12 @@ pub async fn settings_save(
         }
         if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                encrypted.push((key.clone(), crate::secret::encrypt(text)));
+                encrypted.push((
+                    key.clone(),
+                    crate::secret::encrypt(text).map_err(|error| {
+                        log_command_error(&app, "シークレットを安全に保存できません", error)
+                    })?,
+                ));
             }
         }
     }
@@ -2641,7 +2658,7 @@ pub async fn settings_save(
             "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
             "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),
             "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
-            "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "100"),
+            "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "50"),
             "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
             "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
             "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
@@ -2650,6 +2667,7 @@ pub async fn settings_save(
             "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
             "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
             "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
+            "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
             "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
             "streamBackground": stream.background,
             "streamBackgroundImage": stream.background_image,
@@ -2939,7 +2957,7 @@ pub fn pet_reset_layout(app: AppHandle) {
 /// これが届かないと `boot_screen` が読み込み失敗と判断し、案内画面へ切り替える。
 #[tauri::command]
 pub fn pet_frontend_ready(app: AppHandle) {
-    crate::boot_screen::mark_ready(&app);
+    crate::boot_screen::mark_started(&app);
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
@@ -2949,7 +2967,9 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    crate::layout::apply(&app, &id)
+    crate::layout::apply(&app, &id)?;
+    crate::boot_screen::mark_finished(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -4008,6 +4028,12 @@ pub fn open_character_settings(app: &tauri::AppHandle) {
 fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let tab = settings_tab(tab);
     if let Some(win) = app.get_webview_window("settings") {
+        if let Err(error) = place_settings_with_main(app, &win) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
+            );
+        }
         if let Err(error) = win.show() {
             crate::log_paths::append_app_log(app, &format!("設定画面を表示できません: {error}"));
         }
@@ -4030,14 +4056,73 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let path = tab
         .map(|tab| format!("settings.html?tab={tab}"))
         .unwrap_or_else(|| "settings.html".to_string());
-    if let Err(error) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
+    match WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
         .title("PicoAgent の設定")
         .inner_size(960.0, 760.0)
         .min_inner_size(720.0, 560.0)
+        .visible(false)
         .build()
     {
-        crate::log_paths::append_app_log(app, &format!("設定画面を開けません: {error}"));
+        Ok(win) => {
+            if let Err(error) = place_settings_with_main(app, &win) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
+                );
+            }
+            if let Err(error) = win.show() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面を表示できません: {error}"),
+                );
+            }
+            if let Err(error) = win.set_focus() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("設定画面へフォーカスできません: {error}"),
+                );
+            }
+        }
+        Err(error) => {
+            crate::log_paths::append_app_log(app, &format!("設定画面を開けません: {error}"));
+        }
     }
+}
+
+fn centered_window_position(
+    monitor_position: tauri::PhysicalPosition<i32>,
+    monitor_size: tauri::PhysicalSize<u32>,
+    window_size: tauri::PhysicalSize<u32>,
+) -> tauri::PhysicalPosition<i32> {
+    tauri::PhysicalPosition::new(
+        monitor_position.x + (monitor_size.width.saturating_sub(window_size.width) / 2) as i32,
+        monitor_position.y + (monitor_size.height.saturating_sub(window_size.height) / 2) as i32,
+    )
+}
+
+/// 設定画面はモニターを選ばせず、メイン画面が現在あるディスプレイの中央へ出す。
+fn place_settings_with_main(
+    app: &tauri::AppHandle,
+    settings: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "メインウィンドウがありません。".to_string())?;
+    // フォールバック許可: 起動直後など current_monitor が未確定なら主画面へ出し、
+    // 設定画面自体が見えなくなることを防ぐ。
+    let monitor = main
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .or(main.primary_monitor().map_err(|error| error.to_string())?)
+        .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
+    let window_size = settings.outer_size().map_err(|error| error.to_string())?;
+    settings
+        .set_position(centered_window_position(
+            *monitor.position(),
+            *monitor.size(),
+            window_size,
+        ))
+        .map_err(|error| error.to_string())
 }
 
 fn settings_tab(tab: Option<&str>) -> Option<&str> {
@@ -4055,12 +4140,24 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compacted_conversation, default_character_tts_voice, parse_update_feed,
-        replace_auto_summary, settings_tab, speech_text, update_status, verify_windows_installer,
-        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        centered_window_position, compacted_conversation, default_character_tts_voice,
+        parse_update_feed, replace_auto_summary, settings_tab, speech_text, update_status,
+        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
 
+    #[test]
+    fn 設定画面を負座標モニターの中央へ配置する() {
+        assert_eq!(
+            centered_window_position(
+                tauri::PhysicalPosition::new(-1920, 0),
+                tauri::PhysicalSize::new(1920, 1080),
+                tauri::PhysicalSize::new(960, 760),
+            ),
+            tauri::PhysicalPosition::new(-1440, 160)
+        );
+    }
     #[test]
     fn 自動要約は積み重ならず最新一件へ置き換わる() {
         let first = replace_auto_summary("人格設定", "最初の要約");
@@ -4093,7 +4190,6 @@ mod tests {
     fn 組み込みキャラはそれぞれ既定声を持つ() {
         let expected = [
             ("mugi", "あまあま"),
-            ("mugi-live2d", "あまあま"),
             ("rin", "ノーマル"),
             ("rin-tha3", "ノーマル"),
             ("mai", "ノーマル"),

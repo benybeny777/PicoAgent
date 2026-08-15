@@ -104,7 +104,6 @@ pub fn validate(source: &Path) -> Result<Value> {
     }
     validate_animations(source, &manifest)?;
     validate_variants(source, &manifest)?;
-    validate_secondary_motion(&manifest, "secondaryMotion")?;
     validate_interactions(&manifest)?;
     Ok(manifest)
 }
@@ -164,7 +163,7 @@ fn validate_animations(source: &Path, manifest: &Value) -> Result<()> {
     Ok(())
 }
 
-/// `model3.json` が参照するファイル（moc3・テクスチャ・モーション・物理演算など）が
+/// `model3.json` が参照する実行対象ファイル（moc3・テクスチャ・モーションなど）が
 /// すべて同梱されているか確かめる。
 ///
 /// Live2D の配布物はフォルダ構成が作者ごとに違い、テクスチャだけ入れ忘れた zip が
@@ -207,8 +206,14 @@ fn model_references(model: &Value) -> Vec<String> {
     let Some(references) = model.get("FileReferences") else {
         return Vec::new();
     };
+    let mut references = references.clone();
+    // 物理演算は廃止済みなので、旧モデルのPhysics参照は存在確認の対象にしない。
+    // ファイルが欠けていても描画には使わず、キャラクターの起動を妨げない。
+    if let Some(map) = references.as_object_mut() {
+        map.remove("Physics");
+    }
     let mut out = Vec::new();
-    collect_files(references, &mut out);
+    collect_files(&references, &mut out);
     out
 }
 
@@ -342,35 +347,6 @@ pub fn validate_variants(source: &Path, manifest: &Value) -> Result<()> {
             if !path.is_dir() {
                 bail!("variants[].root のフォルダがありません: {root}");
             }
-        }
-        validate_secondary_motion(variant, "variants[].secondaryMotion")?;
-    }
-    Ok(())
-}
-
-pub fn validate_secondary_motion(manifest: &Value, label: &str) -> Result<()> {
-    let Some(motion) = manifest.get("secondaryMotion") else {
-        return Ok(());
-    };
-    let Some(motion) = motion.as_object() else {
-        bail!("{label} はオブジェクトで指定してください");
-    };
-    if motion.get("type").and_then(Value::as_str) != Some("bust") {
-        bail!("{label}.type は bust を指定してください");
-    }
-    for (key, minimum, maximum) in [
-        ("centerX", 0.0, 100.0),
-        ("centerY", 0.0, 100.0),
-        ("radiusX", 4.0, 45.0),
-        ("radiusY", 4.0, 35.0),
-        ("strength", 0.2, 2.0),
-        ("duration", 1.8, 8.0),
-    ] {
-        let Some(value) = motion.get(key).and_then(Value::as_f64) else {
-            bail!("{label}.{key} は数値で指定してください");
-        };
-        if !(minimum..=maximum).contains(&value) {
-            bail!("{label}.{key} は {minimum} 以上 {maximum} 以下にしてください");
         }
     }
     Ok(())
@@ -511,25 +487,26 @@ mod tests {
     }
 
     #[test]
-    fn 通常2dの胸元二次動作を検証する() {
-        let valid = json!({
-            "secondaryMotion": {
-                "type": "bust", "centerX": 50, "centerY": 32,
-                "radiusX": 16, "radiusY": 10, "strength": 1.1, "duration": 3.8
-            }
-        });
-        validate_secondary_motion(&valid, "secondaryMotion").expect("正しい二次動作を拒否した");
-
-        let invalid = json!({
-            "secondaryMotion": {
-                "type": "bust", "centerX": 50, "centerY": 32,
-                "radiusX": 80, "radiusY": 10, "strength": 1.1, "duration": 3.8
-            }
-        });
-        let error = validate_secondary_motion(&invalid, "secondaryMotion")
-            .expect_err("範囲外のマスクを許可した")
-            .to_string();
-        assert!(error.contains("radiusX"), "error: {error}");
+    fn 廃止済み物理設定は旧パックの起動を妨げない() {
+        let dir = temp_dir("retired-physics-ok");
+        std::fs::create_dir_all(dir.join("frames")).unwrap();
+        std::fs::write(dir.join("frames/a.png"), [0u8; 8]).unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "legacy-physics",
+                "name": "旧パック",
+                "secondaryMotion": "廃止済みなので形式を解釈しない",
+                "springPhysics": { "regions": "壊れた旧値" },
+                "animations": {
+                    "idle": { "frames": 1, "framePaths": ["frames/a.png"] }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        validate(&dir).expect("廃止済みの物理設定で旧パックの起動を止めた");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// テクスチャ欠けは導入前に止める（通すとキャラ選択時に描画が崩れる）。
@@ -603,7 +580,6 @@ mod tests {
                 "a.moc3",
                 "e0.exp3.json",
                 "m0.motion3.json",
-                "p.physics3.json",
                 "t0.png",
                 "t1.png"
             ]

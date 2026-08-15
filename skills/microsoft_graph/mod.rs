@@ -66,7 +66,7 @@ impl Tool for MicrosoftGraphTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MS_GRAPH_ACCESS_TOKEN", "Microsoft Graph OAuth access token", "password", ""),
+            Field::new("PICOAGENT_MS_GRAPH_ACCESS_TOKEN", "Microsoft Graph の OAuth アクセストークン", "password", ""),
             Field::new("PICOAGENT_MS_GRAPH_TEAM_ID", "Microsoft Teams 既定 team ID", "text", ""),
             Field::new("PICOAGENT_MS_GRAPH_CHANNEL_ID", "Microsoft Teams 既定 channel ID", "text", ""),
             Field::new("PICOAGENT_MS_GRAPH_TIMEOUT_SECS", "Microsoft Graph API 待ち時間（秒、3〜60）", "text", "20"),

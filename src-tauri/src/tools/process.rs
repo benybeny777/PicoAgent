@@ -14,10 +14,12 @@ use std::ffi::OsStr;
 use std::process::{Output, Stdio};
 use std::time::Duration;
 
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 /// タイムアウトの上限（どんな設定値でもこれを超えて待たない）。
 const MAX_TIMEOUT_SECS: u64 = 7200;
+const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 
 /// 物理削除コマンドかどうか。
 ///
@@ -32,22 +34,45 @@ const MAX_TIMEOUT_SECS: u64 = 7200;
 /// `sh -c "rm -rf ~/Documents"` が素通りした（同じ形の穴が OS 違いで残っていた）。
 pub fn is_physical_delete(program: &str, args: &[String]) -> bool {
     let program = program_stem(program);
+    // シェルを入れ子にした場合も、どのシェルの削除語彙も見落とさない。
+    // allowlist にシェル本体を追加した利用者設定でも物理削除禁止を保つ。
+    let shell_family = match program.as_str() {
+        "powershell" | "pwsh" => Some(ShellFamily::PowerShell),
+        "cmd" => Some(ShellFamily::Cmd),
+        "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => Some(ShellFamily::Posix),
+        _ => None,
+    };
     match program.as_str() {
         "rm" | "del" | "erase" | "rmdir" | "rd" | "unlink" | "shred" => true,
         "git" => args
             .first()
             .is_some_and(|arg| arg.eq_ignore_ascii_case("clean")),
-        "powershell" | "pwsh" => args
-            .iter()
-            .any(|arg| contains_delete_token(arg, ShellFamily::PowerShell)),
-        "cmd" => args
-            .iter()
-            .any(|arg| contains_delete_token(arg, ShellFamily::Cmd)),
-        "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => args
-            .iter()
-            .any(|arg| contains_delete_token(arg, ShellFamily::Posix)),
+        "powershell" | "pwsh" | "cmd" | "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" => {
+            args.iter().any(|arg| {
+                shell_family.is_some_and(|family| contains_delete_token(arg, family))
+                    || (contains_shell_name(arg)
+                        && [
+                            ShellFamily::PowerShell,
+                            ShellFamily::Cmd,
+                            ShellFamily::Posix,
+                        ]
+                        .into_iter()
+                        .any(|family| contains_delete_token(arg, family)))
+            })
+        }
         _ => false,
     }
+}
+
+fn contains_shell_name(arg: &str) -> bool {
+    arg.to_ascii_lowercase()
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .any(|part| {
+            matches!(
+                part,
+                "powershell" | "pwsh" | "cmd" | "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish"
+            )
+        })
 }
 
 /// 削除語彙はシェルごとに違う（`Remove-Item` は PowerShell だけ、`unlink` は POSIX だけ）。
@@ -158,12 +183,93 @@ pub async fn output(
     label: &str,
 ) -> Result<Output, String> {
     let timeout = timeout_secs.clamp(1, MAX_TIMEOUT_SECS);
-    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(format!("{label}を起動できません: {error}")),
-        // kill_on_drop により、ここで打ち切られた子プロセスは確実に停止される。
-        Err(_) => Err(format!("{label}が {timeout} 秒でタイムアウトしました。")),
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("{label}を起動できません: {error}"))?;
+    let stdout_task = tokio::spawn(read_capture(child.stdout.take()));
+    let stderr_task = tokio::spawn(read_capture(child.stderr.take()));
+    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => return Err(format!("{label}の終了を待てません: {error}")),
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            // 出力の回収を待たずに打ち切る。`sh -c` / `powershell -Command` のように
+            // 子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を
+            // 握ったままで終端（EOF）が来ない。ここで待つと孫が終わるまで戻れず、
+            // タイムアウトを設けた意味がなくなる（実際に1秒指定が30秒待ちになっていた）。
+            stdout_task.abort();
+            stderr_task.abort();
+            return Err(format!("{label}が {timeout} 秒でタイムアウトしました。"));
+        }
+    };
+    // 子が正常終了しても、孫がパイプを握っていれば同じ理由で終端が来ない。
+    // 終了後の回収にも上限を置き、待ち続けずエラーとして返す。
+    let stdout = collect(stdout_task, label, "標準出力").await?;
+    let stderr = collect(stderr_task, label, "標準エラー").await?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+/// 子プロセス終了後に出力の回収を待つ上限。
+/// 終端が来ないのは孫プロセスがパイプを握っている場合だけなので、短くてよい。
+pub const CAPTURE_DRAIN_SECS: u64 = 5;
+
+/// 出力を読むタスクを上限付きで待ち、上限を超えたら中断して `None` を返す。
+///
+/// 子を停止しても、`sh -c` / `powershell -Command` が産んだ孫や、子がさらに起動した
+/// プロセスがパイプの書き込み端を握っていると終端（EOF）が来ない。ここで待ち切ると
+/// タイムアウトも中断も効かなくなるため、待ち方を共通化する。
+pub async fn join_capture<T>(
+    mut task: tokio::task::JoinHandle<T>,
+) -> Option<Result<T, tokio::task::JoinError>> {
+    match tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut task).await {
+        Ok(joined) => Some(joined),
+        Err(_) => {
+            task.abort();
+            None
+        }
     }
+}
+
+/// 出力回収タスクを上限付きで待つ。上限を超えたらタスクを中断し、握りつぶさずエラーで返す。
+async fn collect(
+    task: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+    label: &str,
+    kind: &str,
+) -> Result<Vec<u8>, String> {
+    match join_capture(task).await {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => Err(format!("{label}の{kind}回収に失敗しました: {error}")),
+        None => Err(format!(
+            "{label}の{kind}を回収できません（終了後もパイプを握った孫プロセスが残っています）。"
+        )),
+    }
+}
+
+async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
+    reader: Option<R>,
+) -> Result<Vec<u8>, String> {
+    let Some(mut reader) = reader else {
+        return Ok(Vec::new());
+    };
+    let mut kept = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let count = reader
+            .read(&mut chunk)
+            .await
+            .map_err(|error| format!("プロセス出力を読み取れません: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        let remaining = MAX_CAPTURE_BYTES.saturating_sub(kept.len());
+        kept.extend_from_slice(&chunk[..count.min(remaining)]);
+    }
+    Ok(kept)
 }
 
 #[cfg(test)]
@@ -197,13 +303,30 @@ mod tests {
     }
 
     // タイムアウトで打ち切っても、kill_on_drop により子プロセスが残らないこと。
+    // シェル経由（孫プロセスあり）でも指定秒数で戻ること。孫がパイプを握っていると
+    // 出力の終端が来ないため、回収を待つ実装では孫が終わるまで戻れなかった。
     #[cfg(unix)]
     #[test]
     fn タイムアウトで子プロセスを残さない() {
+        let mut cmd = command("sh");
+        cmd.args(["-c", "sleep 30"]);
+        タイムアウトが指定秒数で戻る(cmd);
+    }
+
+    // 対応OSのもう一方でも同じ形（`cmd /c` の孫プロセス）で検査する。
+    // unix だけで検査していたため、Windows 中心の開発では退行に気づけなかった。
+    #[cfg(windows)]
+    #[test]
+    fn タイムアウトで子プロセスを残さない() {
+        let mut cmd = command("cmd");
+        cmd.args(["/c", "ping -n 31 127.0.0.1"]);
+        タイムアウトが指定秒数で戻る(cmd);
+    }
+
+    #[cfg(any(unix, windows))]
+    fn タイムアウトが指定秒数で戻る(cmd: tokio::process::Command) {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let mut cmd = command("sh");
-            cmd.args(["-c", "sleep 30"]);
             let started = std::time::Instant::now();
             let error = output(cmd, 1, "長い処理").await.unwrap_err();
             assert!(error.contains("タイムアウト"), "error: {error}");
@@ -295,6 +418,37 @@ mod guard {
             violations.is_empty(),
             "子プロセスの完了待ちに上限がありません。`process::output()` を使うか \
              `tokio::time::timeout` で包んでください: {violations:?}"
+        );
+    }
+
+    /// 一度きりの実行（起動 → 出力回収 → 終了待ち）は共通層の `process::output()` を通すこと。
+    ///
+    /// 同じ処理を各所で書き直すと、**出力回収の待ち方だけが抜ける**。実際に
+    /// `whisper_transcribe` と `meeting_recorder` が共通層と同型の実装を持ち、
+    /// どちらもタイムアウト後に回収タスクを待ち切っていた（孫プロセスがパイプを
+    /// 握っていると終端が来ないため、上限を付けた意味が消える）。常駐プロセスや
+    /// 進捗つき長時間処理は `child` を自分で持ってよいが、その場合も回収の待ちは
+    /// `process::join_capture()` を使う。
+    #[test]
+    fn 一度きりの実行は共通層を通す() {
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "process.rs" {
+                continue; // 共通層の実装そのもの
+            }
+            for (number, line) in source.body().lines().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if line.contains("tokio::time::timeout") && line.contains(".wait()") {
+                    violations.push(format!("{}:{}", source.path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "子プロセスの起動と終了待ちを自前で組み立てています。`process::output()` を使ってください: {violations:?}"
         );
     }
 

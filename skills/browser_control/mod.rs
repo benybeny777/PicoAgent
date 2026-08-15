@@ -49,11 +49,12 @@ fn enabled(cfg: &Config) -> bool {
         .eq_ignore_ascii_case("true")
 }
 
-/// 到達してよいドメインか。空なら制限なし（`web_fetch` と同じ規則）。
+/// 到達してよいドメインか。ブラウザはリダイレクト時の接続を事前遮断できないため、
+/// 空欄を全拒否にして明示したドメインだけへ限定する。
 fn allowed_domain(cfg: &Config, url: &Url) -> bool {
     let allowed = cfg.get("PICOAGENT_BROWSER_ALLOWED_DOMAINS", "");
     if allowed.trim().is_empty() {
-        return true;
+        return false;
     }
     let Some(host) = url.host_str() else {
         return false;
@@ -140,6 +141,7 @@ async fn render_page(
     let page = extract::parse(&raw)?;
     let actual_url = Url::parse(&page.url)
         .map_err(|error| format!("エラー: 表示中 URL の解析に失敗しました: {error}"))?;
+    crate::tools::http::require_public_http_url(&actual_url).await?;
     if !allowed_domain(cfg, &actual_url) {
         return Err(format!(
             "エラー: リダイレクト先または現在のタブが許可ドメイン外です: {}。ページ内容は返しません。",
@@ -224,7 +226,7 @@ impl Tool for BrowserControlTool {
             Field::new("PICOAGENT_BROWSER_PATH", "Chrome / Edge の実行パス（空なら自動検出）", "text", ""),
             Field::new(
                 "PICOAGENT_BROWSER_ALLOWED_DOMAINS",
-                "開いてよいドメイン（空なら制限なし。例: example.com,docs.example.com）",
+                "開いてよいドメイン（必須。例: example.com,docs.example.com）",
                 "textarea",
                 "",
             ),
@@ -285,6 +287,9 @@ impl Tool for BrowserControlTool {
                         "エラー: 許可されていないドメインです: {}。設定の PICOAGENT_BROWSER_ALLOWED_DOMAINS を確認してください。",
                         url.host_str().unwrap_or("")
                     );
+                }
+                if let Err(error) = crate::tools::http::require_public_http_url(&url).await {
+                    return error;
                 }
                 if let Err(error) = cdp::ensure_running(&options).await {
                     return error;
@@ -384,10 +389,10 @@ mod tests {
     }
 
     #[test]
-    fn 許可ドメインが空なら制限しない() {
+    fn 許可ドメインが空なら全拒否する() {
         let cfg = config(&[]);
         let url = Url::parse("https://example.com/page").unwrap();
-        assert!(allowed_domain(&cfg, &url));
+        assert!(!allowed_domain(&cfg, &url));
     }
 
     #[test]

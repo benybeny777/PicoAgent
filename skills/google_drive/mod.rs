@@ -56,7 +56,7 @@ impl Tool for GoogleDriveTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN", "Google Drive OAuth access token", "password", "ya29..."),
+            Field::new("PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN", "Google ドライブの OAuth アクセストークン", "password", "ya29..."),
             Field::new("PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS", "Google Drive API 待ち時間（秒、3〜60）", "text", "20"),
         ]
     }

@@ -45,7 +45,7 @@ impl Tool for TodoistTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_TODOIST_TOKEN", "Todoist API token", "password", ""),
+            Field::new("PICOAGENT_TODOIST_TOKEN", "Todoist の API トークン", "password", ""),
             Field::new("PICOAGENT_TODOIST_PROJECT_ID", "Todoist 既定 project ID", "text", ""),
             Field::new("PICOAGENT_TODOIST_TIMEOUT_SECS", "Todoist API 待ち時間（秒、3〜60）", "text", "15"),
         ]

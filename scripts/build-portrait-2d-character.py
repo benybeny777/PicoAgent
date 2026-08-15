@@ -2,45 +2,45 @@
 # build-portrait-2d-character.py - 1枚のバストアップ画像から通常2D（1枚絵）キャラクターパックを作る。
 #
 # こはる／セナ／ノアと同じ「preview.png + character.json だけ」の構成を出力する。
-# THA3 と違い GPU も Python 常駐環境も要らず、呼吸と胸元の二次動作だけで動く。
+# THA3 と違い GPU も Python 常駐環境も要らず、1枚絵へ軽い状態モーションだけを適用する。
 #
 # 実行例:
 #   uv run --with pillow --with numpy --with rembg --with onnxruntime \
 #       python scripts/build-portrait-2d-character.py \
-#       --input temp/source-raw.png --id hinano --name ひなの
+#       --input temp/source-raw.png --id my-character --name マイキャラ
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import math
 import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 CHARACTERS_DIR = ROOT / "characters"
 INDEX_PATH = CHARACTERS_DIR / "index.json"
+FORMAT_PATH = CHARACTERS_DIR / "portrait-2d-format.json"
 TEMP_DIR = ROOT / "temp"
 
 # 背景抜きモデル。人物の髪の輪郭が u2net より安定する。
 REMBG_MODEL = "isnet-general-use"
 # 輪郭が「不透明」と言えるアルファ下限。ハローの検査と輪郭測定で共通に使う。
 SOLID_ALPHA = 40
-# 頭頂部の円弧推定に使う走査高さ（画像上端からの画素数）。
-CROWN_FIT_ROWS = 300
-# 復元した頭頂部の上に残す透明余白。
-CROWN_MARGIN = 16
+MAX_ID_CHARS = 64
+PORTRAIT_FORMAT = json.loads(FORMAT_PATH.read_text(encoding="utf-8"))
+ANIMATION_STATES = PORTRAIT_FORMAT["animations"]
+RIG_LAYER_NAMES = [name for name in PORTRAIT_FORMAT["layers"] if name != "base"]
 
 
-def remove_background(source: Path) -> Image.Image:
+def remove_background(source: Path, session: object) -> Image.Image:
     """写真の背景を抜いて RGBA を返す。"""
-    from rembg import new_session, remove
+    from rembg import remove
 
     image = Image.open(source).convert("RGBA")
-    session = new_session(REMBG_MODEL)
     # alpha matting は髪の毛先の半透明を残しつつ、背景色の混ざりを前景色へ置き換える
     # （これを省くと暗い画面でベージュのハローが出る）。
     return remove(
@@ -53,95 +53,18 @@ def remove_background(source: Path) -> Image.Image:
     )
 
 
-def fit_head_circle(alpha: np.ndarray) -> tuple[float, float, float]:
-    """画像上端付近の輪郭へ円を最小二乗で当て、(中心x, 中心y, 半径) を返す。"""
-    points: list[tuple[float, float]] = []
-    for y in range(0, min(CROWN_FIT_ROWS, alpha.shape[0]), 4):
-        columns = np.where(alpha[y] > SOLID_ALPHA)[0]
-        if columns.size:
-            points.append((float(columns.min()), float(y)))
-            points.append((float(columns.max()), float(y)))
-    if len(points) < 12:
-        raise ValueError("頭頂部の輪郭を測れませんでした。人物が上端付近に写っているか確認してください。")
-    array = np.array(points)
-    x, y = array[:, 0], array[:, 1]
-    design = np.c_[x, y, np.ones(len(array))]
-    solution, *_ = np.linalg.lstsq(design, x**2 + y**2, rcond=None)
-    center_x, center_y = solution[0] / 2, solution[1] / 2
-    radius = math.sqrt(solution[2] + center_x**2 + center_y**2)
-    return center_x, center_y, radius
+def ensure_crown_not_clipped(image: Image.Image) -> None:
+    """頭頂部が入力画像の上端で切れていないことを確かめる。
 
-
-def reconstruct_crown(image: Image.Image) -> tuple[Image.Image, int]:
-    """上端で平らに切れた頭頂部を、輪郭の円弧に沿って描き足す。
-
-    バストアップ写真は頭のてっぺんが画面外へ出ていることが多く、そのまま透過すると
-    透明な画面で頭が平らに切り落とされて見える。切れ量が数十画素なら、既存の髪を
-    上へ折り返した texture を円弧の形へ収めるだけで自然に埋まる。
-    戻り値は (復元後の画像, 足した高さ)。切れていなければ元画像と 0 を返す。
+    欠けた髪を既存画素の引き伸ばしで補うと、輪郭と実効解像度を偽装した素材になる。
+    自動補完はせず、上端へ被写体が接していれば余白を含む元画像への差し替えを求める。
     """
     alpha = np.asarray(image.getchannel("A"))
-    if int((alpha[0] > SOLID_ALPHA).sum()) == 0:
-        return image, 0
-
-    center_x, center_y, radius = fit_head_circle(alpha)
-    apex = center_y - radius
-    if apex >= 0:
-        return image, 0
-
-    pad = int(math.ceil(-apex)) + CROWN_MARGIN
-    width, height = image.size
-    canvas = Image.new("RGBA", (width, height + pad), (0, 0, 0, 0))
-    canvas.paste(image, (0, pad))
-
-    source = np.asarray(image).astype(np.float32)
-    target = np.asarray(canvas).astype(np.float32)
-    seam_center_y = center_y + pad
-
-    seam_columns = np.where(alpha[0] > SOLID_ALPHA)[0]
-    seam_left, seam_right = float(seam_columns.min()), float(seam_columns.max())
-    seam_mid = (seam_left + seam_right) / 2
-    seam_half_width = (seam_right - seam_left) / 2
-    seam_arc_half = math.sqrt(max(1.0, radius**2 - (pad - seam_center_y) ** 2))
-
-    for y in range(pad):
-        offset = y - seam_center_y
-        if abs(offset) >= radius:
-            continue
-        # 円弧の幅比で、継ぎ目の実輪郭を頭頂へ向けて絞る（髪の左右非対称を保てる）。
-        scale = math.sqrt(radius**2 - offset**2) / seam_arc_half
-        half_width = seam_half_width * scale
-        if half_width < 1.0:
-            continue
-        # 中心は継ぎ目の実中心から円の中心へ滑らかに寄せる。
-        mid = center_x + (seam_mid - center_x) * scale
-        left, right = int(round(mid - half_width)), int(round(mid + half_width))
-        if right <= left:
-            continue
-
-        # texture は継ぎ目を軸に折り返した行から取り、目的の幅へ引き伸ばす。
-        source_row = pad - y
-        if source_row >= height:
-            continue
-        row_columns = np.where(np.asarray(image.getchannel("A"))[source_row] > SOLID_ALPHA)[0]
-        if row_columns.size < 4:
-            continue
-        strip = source[source_row, row_columns.min() : row_columns.max() + 1, :3]
-        positions = np.linspace(0, strip.shape[0] - 1, right - left)
-        sampled = np.stack(
-            [np.interp(positions, np.arange(strip.shape[0]), strip[:, ch]) for ch in range(3)],
-            axis=1,
+    if int((alpha[0] > SOLID_ALPHA).sum()) > 0:
+        raise ValueError(
+            "被写体が画像上端へ接しているため、頭頂部が切れている可能性があります。"
+            "自動で引き伸ばさず、頭上に透明余白を含む元画像へ差し替えてください。"
         )
-        # 頭頂へ向かってごく軽く落とす。明るい面を足すと後光に見えるため上げない。
-        sampled *= 1.0 - 0.10 * (1.0 - scale)
-        target[y, left:right, :3] = sampled
-        target[y, left:right, 3] = 255.0
-
-    filled = Image.fromarray(np.clip(target, 0, 255).astype(np.uint8), "RGBA")
-    # 描き足した帯と継ぎ目だけを軽くぼかし、折り返しの筋と階段状の輪郭を均す。
-    band = filled.crop((0, 0, width, pad + 8))
-    filled.paste(band.filter(ImageFilter.GaussianBlur(1.1)), (0, 0))
-    return filled, pad
 
 
 def check_no_halo(image: Image.Image) -> None:
@@ -149,15 +72,17 @@ def check_no_halo(image: Image.Image) -> None:
     array = np.asarray(image).astype(np.int16)
     alpha = array[..., 3]
     corners = [alpha[0, 0], alpha[0, -1], alpha[-1, 0], alpha[-1, -1]]
-    height, width = alpha.shape
     # 被写体が下端・左右へ抜けるバストアップでは下の隅が不透明になりうるので上の隅だけ必須。
     if corners[0] != 0 or corners[1] != 0:
         raise ValueError(f"上の四隅が透過していません: {corners}")
     edge = (alpha > 20) & (alpha < 235)
     if not edge.any():
         return
+    core = alpha > 250
+    if not core.any():
+        raise ValueError("不透明な被写体画素がなく、半透明画像だけになっています。")
     edge_rgb = array[..., :3][edge].mean(axis=0)
-    core_rgb = array[..., :3][alpha > 250].mean(axis=0)
+    core_rgb = array[..., :3][core].mean(axis=0)
     # 縁が本体よりはるかに明るいと、暗い画面でハローとして浮く。
     if float(edge_rgb.mean() - core_rgb.mean()) > 60.0:
         raise ValueError(
@@ -187,12 +112,129 @@ def write_qa_sheet(image: Image.Image, path: Path) -> None:
     sheet.save(path)
 
 
-def build_manifest(args: argparse.Namespace, asset_version: str) -> dict:
-    frame = {"frames": 1, "fps": 1, "framePaths": ["preview.png"]}
+def load_action_frames(
+    frames_dir: Path | None, expected_size: tuple[int, int], background_session: object
+) -> dict[str, list[Image.Image]]:
+    """状態別の透過連番を読む。補間・拡大・自動変形は行わない。"""
+    if frames_dir is None:
+        return {}
+    if not frames_dir.is_dir():
+        raise FileNotFoundError(f"連番フォルダが見つかりません: {frames_dir}")
+
+    result: dict[str, list[Image.Image]] = {}
+    for state, required in ANIMATION_STATES.items():
+        state_dir = frames_dir / state
+        if not state_dir.exists():
+            continue
+        paths = sorted(state_dir.glob("*.png"))
+        if not paths:
+            raise ValueError(f"状態フォルダにPNGがありません: {state_dir}")
+        frames: list[Image.Image] = []
+        for path in paths:
+            image = Image.open(path).convert("RGBA")
+            if image.getchannel("A").getextrema() == (255, 255):
+                image = remove_background(path, background_session)
+            if image.size != expected_size:
+                raise ValueError(
+                    f"連番の寸法が基準画像と違います: {path}（{image.size[0]}x{image.size[1]} / "
+                    f"基準 {expected_size[0]}x{expected_size[1]}）"
+                )
+            ensure_crown_not_clipped(image)
+            check_no_halo(image)
+            frames.append(image.copy())
+        unique_count = len({hashlib.sha256(image.tobytes()).digest() for image in frames})
+        if len(frames) < required["frames"] or unique_count < required["minUniqueFrames"]:
+            raise ValueError(
+                f"{state} の連番が不足しています: 全{len(frames)}枚・固有{unique_count}枚。"
+                f"全{required['frames']}枚以上・固有{required['minUniqueFrames']}枚以上を用意してください。"
+            )
+        result[state] = frames
+    return result
+
+
+def load_rig_layers(
+    layers_dir: Path | None, expected_size: tuple[int, int], background_session: object
+) -> dict[str, Image.Image]:
+    """まばたき・口・視線・感情の同一ポーズ差分を読む。"""
+    if layers_dir is None:
+        return {}
+    if not layers_dir.is_dir():
+        raise FileNotFoundError(f"表情レイヤーフォルダが見つかりません: {layers_dir}")
+    layers: dict[str, Image.Image] = {}
+    for name in RIG_LAYER_NAMES:
+        path = layers_dir / f"{name}.png"
+        if not path.is_file():
+            raise FileNotFoundError(f"表情レイヤーが不足しています: {path}")
+        image = Image.open(path).convert("RGBA")
+        if image.getchannel("A").getextrema() == (255, 255):
+            image = remove_background(path, background_session)
+        if image.size != expected_size:
+            raise ValueError(
+                f"表情レイヤーの寸法が基準画像と違います: {path}（{image.size[0]}x{image.size[1]} / "
+                f"基準 {expected_size[0]}x{expected_size[1]}）"
+            )
+        ensure_crown_not_clipped(image)
+        check_no_halo(image)
+        layers[name] = image.copy()
+
+    for left, right in [
+        ("blink_half", "blink_closed"), ("mouth_closed", "mouth_open"),
+        ("gaze_left", "gaze_right"), ("expression_happy", "expression_sad"),
+        ("expression_angry", "expression_shy"),
+        ("expression_surprised", "expression_confused"),
+    ]:
+        if layers[left].tobytes() == layers[right].tobytes():
+            raise ValueError(f"表情差分の内容が同じです: {left}.png / {right}.png")
+    return layers
+
+
+def write_rig_layers(base: Image.Image, layers: dict[str, Image.Image], destination: Path) -> None:
+    if not layers:
+        return
+    output_dir = destination / "layers"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    base.save(output_dir / "base.png")
+    for name, image in layers.items():
+        image.save(output_dir / f"{name}.png")
+
+
+def write_action_frames(
+    frames: dict[str, list[Image.Image]], destination: Path
+) -> dict[str, list[str]]:
+    """入力連番を内容ハッシュ名で保存し、manifest用の相対パスを返す。"""
+    output_dir = destination / "frames" / "portrait-2d"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result: dict[str, list[str]] = {}
+    for state, images in frames.items():
+        paths: list[str] = []
+        for image in images:
+            digest = hashlib.sha256(image.tobytes()).hexdigest()[:20]
+            relative = f"frames/portrait-2d/{digest}.png"
+            target = destination / relative
+            if not target.exists():
+                image.save(target)
+            paths.append(relative)
+        result[state] = paths
+    return result
+
+
+def build_manifest(
+    args: argparse.Namespace, asset_version: str, action_paths: dict[str, list[str]]
+) -> dict:
+    animations = {}
+    for state, config in ANIMATION_STATES.items():
+        paths = action_paths.get(state, ["preview.png"])
+        animations[state] = {
+            "frames": len(paths),
+            "fps": config["fps"] if len(paths) > 1 else 1,
+            "motion": config["motion"],
+            "framePaths": paths,
+        }
     return {
         "id": args.id,
         "name": args.name,
         "assetVersion": asset_version,
+        "characterFormat": PORTRAIT_FORMAT["format"],
         "description": args.description,
         "greeting": args.greeting,
         "boot": {"sleeping": "preview.png"},
@@ -210,21 +252,7 @@ def build_manifest(args: argparse.Namespace, asset_version: str) -> dict:
                 "hand": args.reaction_hand,
             }
         },
-        "secondaryMotion": {
-            "type": "bust",
-            "centerX": args.motion_center_x,
-            "centerY": args.motion_center_y,
-            "radiusX": args.motion_radius_x,
-            "radiusY": args.motion_radius_y,
-            "strength": args.motion_strength,
-            "duration": args.motion_duration,
-        },
-        "animations": {
-            "idle": {**frame, "motion": "breathe"},
-            "thinking": {**frame, "motion": "thinking"},
-            "talking": {**frame, "motion": "talking"},
-            "sad": {**frame, "motion": "sad"},
-        },
+        "animations": animations,
     }
 
 
@@ -252,7 +280,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="1枚のバストアップ画像から通常2D（1枚絵）キャラクターパックを生成する。"
     )
     parser.add_argument("--input", type=Path, required=True, help="入力画像（PNG / JPEG）。")
-    parser.add_argument("--id", required=True, help="キャラクターID（英数字・ハイフン・アンダースコア）。")
+    parser.add_argument("--id", required=True, help="キャラクターID（64文字以内の英数字・ハイフン・アンダースコア）。")
     parser.add_argument("--name", required=True, help="表示名。")
     parser.add_argument("--asset-version", default="", help="assetVersion。省略時は日付から作る。")
     parser.add_argument("--description", default="")
@@ -265,19 +293,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--reaction-head", nargs="*", default=["どうしたの？"])
     parser.add_argument("--reaction-cheek", nargs="*", default=["ちょっとくすぐったいな"])
     parser.add_argument("--reaction-hand", nargs="*", default=["うん、いっしょにやろう"])
-    parser.add_argument("--motion-center-x", type=float, default=50.0)
-    parser.add_argument("--motion-center-y", type=float, default=34.0)
-    parser.add_argument("--motion-radius-x", type=float, default=16.0)
-    parser.add_argument("--motion-radius-y", type=float, default=10.0)
-    parser.add_argument("--motion-strength", type=float, default=1.0)
-    parser.add_argument("--motion-duration", type=float, default=3.8)
+    parser.add_argument(
+        "--frames-dir",
+        type=Path,
+        help="任意の透過連番ルート。idle / thinking / talking / sad の各フォルダへPNGを置く。",
+    )
+    parser.add_argument(
+        "--layers-dir",
+        type=Path,
+        help="任意の表情差分ルート。目・口・左右視線と6感情のPNGを置く。",
+    )
     parser.add_argument("--force", action="store_true", help="既存の preview.png を上書きする。")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    if not args.id or not all(ch.isascii() and (ch.isalnum() or ch in "-_") for ch in args.id):
+    if (
+        not args.id
+        or len(args.id) > MAX_ID_CHARS
+        or not all(ch.isascii() and (ch.isalnum() or ch in "-_") for ch in args.id)
+    ):
         raise ValueError(f"キャラクターIDに使えない文字があります: {args.id}")
     if not args.input.exists():
         raise FileNotFoundError(f"入力画像が見つかりません: {args.input}")
@@ -287,18 +323,23 @@ def main(argv: list[str]) -> int:
     if preview.exists() and not args.force:
         raise FileExistsError(f"既に存在します（上書きするなら --force）: {preview}")
 
+    from rembg import new_session
+
     print(f"[build-portrait-2d-character] 背景を抜いています（{REMBG_MODEL}）…")
-    cut = remove_background(args.input)
-    filled, added = reconstruct_crown(cut)
-    if added:
-        print(f"[build-portrait-2d-character] 上端で切れた頭頂部を {added}px 復元しました。")
+    background_session = new_session(REMBG_MODEL)
+    filled = remove_background(args.input, background_session)
+    ensure_crown_not_clipped(filled)
     check_no_halo(filled)
+    action_frames = load_action_frames(args.frames_dir, filled.size, background_session)
+    rig_layers = load_rig_layers(args.layers_dir, filled.size, background_session)
 
     destination.mkdir(parents=True, exist_ok=True)
     filled.save(preview)
+    action_paths = write_action_frames(action_frames, destination)
+    write_rig_layers(filled, rig_layers, destination)
     asset_version = args.asset_version or f"{__import__('datetime').date.today():%Y-%m-%d}-portrait-2d-v1"
     (destination / "character.json").write_text(
-        json.dumps(build_manifest(args, asset_version), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(build_manifest(args, asset_version, action_paths), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     register_in_index(args.id, args.name, args.description)
@@ -306,6 +347,11 @@ def main(argv: list[str]) -> int:
     qa_path = TEMP_DIR / f"qa-{args.id}.png"
     write_qa_sheet(filled, qa_path)
     print(f"[build-portrait-2d-character] {preview}（{filled.size[0]}x{filled.size[1]}）を書き出しました。")
+    if action_paths:
+        summary = " / ".join(f"{state}:{len(paths)}枚" for state, paths in action_paths.items())
+        print(f"[build-portrait-2d-character] 表情・アクション連番: {summary}")
+    if rig_layers:
+        print(f"[build-portrait-2d-character] まばたき・口・視線・感情レイヤー: {len(rig_layers) + 1}枚")
     print(f"[build-portrait-2d-character] 透過確認シート: {qa_path}")
     print("[build-portrait-2d-character] 仕上げに `cargo xtask sync-characters` を実行してください。")
     return 0

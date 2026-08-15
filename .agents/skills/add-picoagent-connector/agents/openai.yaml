@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoAgent コネクタ追加"
+  short_description: "プロバイダ・ツールコネクタを安全規則どおり追加する"
+  default_prompt: "PicoAgentへコネクタを追加し、自動登録、権限、状態、エラー処理、文書とガードを検証してください。"

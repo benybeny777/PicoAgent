@@ -51,8 +51,8 @@
       "talking": "TapBody",
       "sad": "Idle"
     },
-    "scale": 3.2,
-    "offsetY": 645,
+    "scale": 1.8,
+    "offsetY": 0,
     "lipSync": false
   },
   "boot": {

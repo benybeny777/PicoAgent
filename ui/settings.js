@@ -49,11 +49,10 @@ const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components",
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
   { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
-  { id: "chat", label: "チャット", size: "520×760", description: "履歴を読みながら入力する" },
-  { id: "talk", label: "トーク", size: "520×760", description: "メッセージアプリ風に会話する" },
+  { id: "chat", label: "チャット", size: "520×760", description: "LINE風の吹き出しで会話する" },
   { id: "bar", label: "バー", size: "900×320", description: "呼び出してすばやく質問する" },
   { id: "workspace", label: "作業", size: "1400×850", description: "履歴・回答・実行状況を並べて見る" },
-  { id: "stream", label: "配信", size: "1560×920", description: "キャラを大きく、字幕を見やすく映す" },
+  { id: "stream", label: "配信", size: "1920×1080", description: "フルHD背景でキャラと字幕を映す" },
   { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
@@ -791,6 +790,7 @@ function selectField(key, label, value, options) {
 }
 
 function layoutPickerField(value) {
+  if (value === "talk") value = "chat";
   const select = el("select", { className: "layout-native-select", ariaLabel: "画面レイアウト" });
   const cards = el("div", { className: "layout-card-grid" });
   const livePreview = el("div", { className: "layout-live-preview" }, [
@@ -850,7 +850,8 @@ function layoutPickerField(value) {
 }
 
 function quickSettingsGuide(v) {
-  const layout = LAYOUT_CHOICES.find(choice => choice.id === (v.PICOAGENT_LAYOUT || "pet"));
+  const layoutId = v.PICOAGENT_LAYOUT === "talk" ? "chat" : (v.PICOAGENT_LAYOUT || "pet");
+  const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
     { tab: "character", title: "キャラと声", summary: `${v.PICOAGENT_CHARACTER || "既定キャラ"}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}` },
@@ -1373,7 +1374,7 @@ const SETUP_GUIDES = {
     links: [["Mistral Console", "https://console.mistral.ai/"]],
   },
   gmail_message: {
-    title: "Gmail OAuth access token",
+    title: "Gmail の OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意します。個人利用なら OAuth Playground で access token を発行できます。",
       "Gmail の読み取り/変更/送信に必要な scope を許可します。例: gmail.modify と gmail.send。",
@@ -1386,7 +1387,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_calendar: {
-    title: "Google Calendar OAuth access token",
+    title: "Google カレンダーの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Calendar API を有効にします。",
       "OAuth Playground などで Calendar scope を許可して access token を発行します。",
@@ -1399,7 +1400,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_docs: {
-    title: "Google Docs OAuth access token",
+    title: "Google ドキュメントの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Docs API を有効にします。",
       "OAuth Playground などで docs scope を許可して access token を発行します。",
@@ -1412,7 +1413,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_drive: {
-    title: "Google Drive OAuth access token",
+    title: "Google ドライブの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Drive API を有効にします。",
       "OAuth Playground などで Drive scope を許可して access token を発行します。",
@@ -1425,7 +1426,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_sheets: {
-    title: "Google Sheets OAuth access token",
+    title: "Google スプレッドシートの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Sheets API を有効にします。",
       "OAuth Playground などで spreadsheets scope を許可して access token を発行します。",
@@ -1438,7 +1439,7 @@ const SETUP_GUIDES = {
     ],
   },
   google_tasks: {
-    title: "Google Tasks OAuth access token",
+    title: "Google ToDo リストの OAuth アクセストークン",
     steps: [
       "Google Cloud Console で OAuth クライアントを用意し、Google Tasks API を有効にします。",
       "OAuth Playground などで tasks scope を許可して access token を発行します。",
@@ -1451,7 +1452,7 @@ const SETUP_GUIDES = {
     ],
   },
   slack_send_message: {
-    title: "Slack Bot token / Webhook URL",
+    title: "Slack の Bot トークン／Webhook URL",
     steps: [
       "Slack API の Your Apps でアプリを作成します。",
       "OAuth & Permissions で bot scopes を追加します。投稿は chat:write、履歴取得は channels:history などが必要です。",
@@ -1464,7 +1465,7 @@ const SETUP_GUIDES = {
     ],
   },
   github_issue: {
-    title: "GitHub token",
+    title: "GitHub のアクセストークン",
     steps: [
       "GitHub の Personal access tokens で fine-grained token を作ります。",
       "対象 repository を選び、Issues の Read/Write 権限を付けます。",
@@ -1476,7 +1477,7 @@ const SETUP_GUIDES = {
     ],
   },
   notion: {
-    title: "Notion integration token",
+    title: "Notion のインテグレーショントークン",
     steps: [
       "Notion の My integrations で integration を作成します。",
       "Internal Integration Secret を PICOAGENT_NOTION_TOKEN に貼ります。",
@@ -1488,7 +1489,7 @@ const SETUP_GUIDES = {
     ],
   },
   discord_send_message: {
-    title: "Discord Webhook URL",
+    title: "Discord の Webhook URL",
     steps: [
       "Discord のチャンネル設定で 連携サービス > ウェブフック を開きます。",
       "新しい Webhook を作成し、URL をコピーします。",
@@ -1497,7 +1498,7 @@ const SETUP_GUIDES = {
     links: [["Discord Webhooks", "https://support.discord.com/hc/articles/228383668-Intro-to-Webhooks"]],
   },
   todoist: {
-    title: "Todoist API token",
+    title: "Todoist の API トークン",
     steps: [
       "Todoist の設定 > Integrations > Developer を開きます。",
       "API token をコピーして PICOAGENT_TODOIST_TOKEN に貼ります。",
@@ -1506,7 +1507,7 @@ const SETUP_GUIDES = {
     links: [["Todoist Developer", "https://app.todoist.com/app/settings/integrations/developer"]],
   },
   trello: {
-    title: "Trello key / token",
+    title: "Trello の API キー／トークン",
     steps: [
       "Trello Developer API Keys で key を確認します。",
       "同じページから token を生成します。",
@@ -1515,7 +1516,7 @@ const SETUP_GUIDES = {
     links: [["Trello API Keys", "https://trello.com/app-key"]],
   },
   bluesky: {
-    title: "Bluesky app password",
+    title: "Bluesky のアプリパスワード",
     steps: [
       "Bluesky の Settings > Privacy and security > App passwords を開きます。",
       "新しい App Password を作り、PICOAGENT_BLUESKY_APP_PASSWORD に貼ります。",
@@ -1530,7 +1531,7 @@ function setupGuideFor(id, schema = []) {
   const keys = schema.map(field => field.key).join(" ");
   if (/GOOGLE_.*ACCESS_TOKEN|GMAIL_ACCESS_TOKEN/.test(keys)) {
     return {
-      title: "Google OAuth access token",
+      title: "Google の OAuth アクセストークン",
       steps: [
         "Google Cloud Console で OAuth クライアントを用意します。",
         "OAuth Playground などで対象APIの scope を許可し、access token を発行します。",
@@ -2006,33 +2007,6 @@ function layoutResetField() {
   );
 }
 
-function windowPlacementField() {
-  const actions = el("div", { className: "placement-actions" });
-  function setPlacementBusy(busy) {
-    actions.setAttribute("aria-busy", String(busy));
-    actions.querySelectorAll("button").forEach(item => { item.disabled = busy; });
-  }
-  for (const [id, label] of [["left", "左画面"], ["right", "右画面"], ["current", "現在の画面"], ["primary", "主画面"]]) {
-    const button = el("button", { type: "button", className: "secondary", textContent: label });
-    button.addEventListener("click", async () => {
-      setPlacementBusy(true);
-      try {
-        await window.picoagent.placeWindow(id);
-        statusEl.textContent = `${label}の中央へ移動しました。`;
-      } catch (error) {
-        statusEl.textContent = `移動できませんでした: ${error?.message || error}`;
-      } finally {
-        setPlacementBusy(false);
-      }
-    });
-    actions.append(button);
-  }
-  return markSearchable(el("div", { className: "field" }, [
-    el("label", { textContent: "表示するモニター" }), actions,
-    el("p", { className: "hint", textContent: "動画を見ながら使う場合は「左画面」などを選ぶと、接続中ディスプレイの中央へ移動します。" }),
-  ]), "ウィンドウ 配置 左画面 右画面 主画面 ディスプレイ");
-}
-
 function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () => true) {
   button.addEventListener("click", async () => {
     button.disabled = true;
@@ -2170,30 +2144,44 @@ function buildCharacterStreamProfileEditor(values) {
 function buildCharacterFramingEditor() {
   const layoutSelect = el("select", {}, LAYOUT_CHOICES.map(layout => el("option", { value: layout.id, textContent: layout.label })));
   const presetSelect = el("select", {}, [
-    el("option", { value: "bust", textContent: "胸上（配信向け）" }),
-    el("option", { value: "upper", textContent: "上半身（基本）" }),
+    el("option", { value: "bust", textContent: "胸上（基本）" }),
+    el("option", { value: "upper", textContent: "上半身" }),
     el("option", { value: "full", textContent: "全身" }),
     el("option", { value: "custom", textContent: "細かく調整" }),
   ]);
   const zoom = el("input", { type: "range", min: "1", max: "4", step: ".05" });
   const x = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
   const y = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
-  const preview = el("div", { className: "framing-preview" }, [el("img", { alt: "選択キャラの構図プレビュー" }), el("span", { textContent: "字幕テロップ" })]);
+  const zoomValue = el("output", { textContent: "2.05倍" });
+  const positionValue = el("output", { textContent: "X 0 / Y 38" });
+  const preview = el("div", {
+    className: "framing-preview",
+    role: "group",
+    tabIndex: "0",
+    ariaLabel: "キャラをドラッグして位置を調整",
+  }, [
+    el("img", { alt: "選択キャラの構図プレビュー", draggable: false }),
+    el("strong", { textContent: "キャラをドラッグして位置調整" }),
+    el("span", { textContent: "字幕テロップ" }),
+  ]);
   const defaults = { bust: { zoom: 2.05, x: 0, y: 38 }, upper: { zoom: 1.55, x: 0, y: 18 }, full: { zoom: 1, x: 0, y: 0 } };
   const current = () => characterFraming?.[characterSelect.value]?.[layoutSelect.value];
   const updatePreview = () => {
     const image = preview.querySelector("img");
     image.style.transform = `translate(${Number(x.value) / 8}px,${Number(y.value) / 8}px) scale(${Number(zoom.value) / 1.55})`;
+    zoomValue.textContent = `${Number(zoom.value).toFixed(2)}倍`;
+    positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
   };
   const load = async () => {
-    const saved = current() || { preset: "upper", ...defaults.upper };
+    const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
+    const defaultPreset = character?.renderKind === "2d" ? "upper" : "bust";
+    const saved = current() || { preset: defaultPreset, ...defaults[defaultPreset] };
     const fallback = defaults[saved.preset] || saved;
     presetSelect.value = saved.preset || "custom";
-    zoom.value = String(saved.zoom ?? fallback.zoom ?? 1.55);
+    zoom.value = String(saved.zoom ?? fallback.zoom ?? defaults[defaultPreset].zoom);
     x.value = String(saved.x ?? fallback.x ?? 0);
     y.value = String(saved.y ?? fallback.y ?? 0);
     updatePreview();
-    const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
     const image = preview.querySelector("img");
     image.removeAttribute("src");
     try {
@@ -2216,6 +2204,30 @@ function buildCharacterFramingEditor() {
     save();
   });
   for (const input of [zoom, x, y]) input.addEventListener("input", () => { presetSelect.value = "custom"; save(); });
+  let drag = null;
+  preview.addEventListener("pointerdown", event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: Number(x.value), y: Number(y.value) };
+    preview.setPointerCapture(event.pointerId);
+    preview.classList.add("is-dragging");
+  });
+  preview.addEventListener("pointermove", event => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    x.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.x + (event.clientX - drag.startX) * 8))));
+    y.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.y + (event.clientY - drag.startY) * 8))));
+    presetSelect.value = "custom";
+    save();
+  });
+  const endDrag = event => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
+    preview.classList.remove("is-dragging");
+    drag = null;
+  };
+  preview.addEventListener("pointerup", endDrag);
+  preview.addEventListener("pointercancel", endDrag);
+  preview.addEventListener("lostpointercapture", endDrag);
   layoutSelect.addEventListener("change", load);
   const reset = el("button", { type: "button", className: "secondary", textContent: "この構図を初期値へ戻す" });
   reset.addEventListener("click", async () => {
@@ -2236,9 +2248,16 @@ function buildCharacterFramingEditor() {
   });
   const node = markSearchable(el("div", { className: "field framing-editor" }, [
     el("label", { textContent: "キャラごとの構図（表示形式別）" }),
-    el("div", { className: "framing-controls" }, [layoutSelect, presetSelect, zoom, x, y]), preview,
+    el("div", { className: "framing-controls" }, [
+      el("label", {}, [el("span", { textContent: "表示形式" }), layoutSelect]),
+      el("label", {}, [el("span", { textContent: "基本構図" }), presetSelect]),
+      el("label", { className: "framing-zoom" }, [el("span", { textContent: "キャラサイズ" }), zoomValue, zoom]),
+      el("label", {}, [el("span", { textContent: "横位置（X）" }), x]),
+      el("label", {}, [el("span", { textContent: "縦位置（Y）" }), y]),
+      positionValue,
+    ]), preview,
     reset,
-    el("p", { className: "hint", textContent: "胸上・上半身・全身を選び、必要なら拡大率と位置を微調整できます。キャラと表示形式ごとに保存します。" }),
+    el("p", { className: "hint", textContent: "サイズはスライダー、位置はプレビュー内のキャラをドラッグして調整できます。キャラと表示形式ごとに保存します。" }),
   ]), "キャラ 構図 胸上 上半身 全身 拡大 位置 プレビュー");
   return { node, load };
 }
@@ -2565,9 +2584,9 @@ async function render() {
   const displaySec = section("画面レイアウト");
   displaySec.append(el("p", {
     className: "settings-intro",
-    textContent: "用途に合う画面レイアウトをプレビューから選べます。キャラは全形式で上半身を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
+    textContent: "用途に合う画面レイアウトをプレビューから選べます。通常2Dは従来の上半身位置、長身キャラとLive2Dは胸上を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
   }));
-  displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT || "pet"));
+  displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT === "talk" ? "chat" : (v.PICOAGENT_LAYOUT || "pet")));
   displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
     { value: "system", label: "システム設定に追従" },
     { value: "light", label: "通常" },
@@ -2575,7 +2594,6 @@ async function render() {
   ]));
   displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "会話文字の大きさ（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
-  displaySec.append(windowPlacementField());
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
@@ -2625,7 +2643,7 @@ async function render() {
     const selectedEntry = characterCatalog?.characters?.find(character => character.id === characterSelect?.value);
     setQuickSettingsSummary("character", `${selectedEntry?.name || characterSelect?.value || v.PICOAGENT_CHARACTER || "既定キャラ"}・${enabled ? "読み上げ有効" : "ミュート中"}`);
   });
-  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100）", "number", v.PICOAGENT_TTS_VOLUME ?? "100", "100"));
+  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値50）", "number", v.PICOAGENT_TTS_VOLUME ?? "50", "50"));
   panels.basic.append(quickSettingsGuide(v), global);
   panels.display.append(displaySec);
   providerSelect.addEventListener("change", () => {
@@ -2693,6 +2711,12 @@ async function render() {
     { value: "both", label: "暮らしと仕事の両方" },
   ]));
   characterSec.append(field("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", "いっしょの記録を保存する", "checkbox", v.PICOAGENT_RELATIONSHIP_MEMORY_ENABLED !== false));
+  characterSec.append(field(
+    "PICOAGENT_GAZE_TRACKING_ENABLED",
+    "視線追従を使う（マウスと自動よそ見）",
+    "checkbox",
+    v.PICOAGENT_GAZE_TRACKING_ENABLED === true,
+  ));
   characterFramingEditor = buildCharacterFramingEditor();
   characterSec.append(characterFramingEditor.node);
   await characterFramingEditor.load();

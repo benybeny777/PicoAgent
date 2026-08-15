@@ -1,0 +1,49 @@
+{
+  "format": "picoagent-portrait-2d-v1",
+  "physics": false,
+  "layers": [
+    "base",
+    "blink_half",
+    "blink_closed",
+    "mouth_closed",
+    "mouth_open",
+    "gaze_left",
+    "gaze_right",
+    "expression_happy",
+    "expression_sad",
+    "expression_angry",
+    "expression_shy",
+    "expression_surprised",
+    "expression_confused"
+  ],
+  "animations": {
+    "idle": {
+      "frames": 24,
+      "minUniqueFrames": 12,
+      "fps": 3.2,
+      "motion": "live2d-idle"
+    },
+    "thinking": {
+      "frames": 24,
+      "minUniqueFrames": 12,
+      "fps": 7.0,
+      "motion": "live2d-thinking"
+    },
+    "talking": {
+      "frames": 24,
+      "minUniqueFrames": 12,
+      "fps": 8.0,
+      "motion": "live2d-talking"
+    },
+    "sad": {
+      "frames": 12,
+      "minUniqueFrames": 8,
+      "fps": 4.2,
+      "motion": "live2d-sad"
+    }
+  },
+  "review": {
+    "backgrounds": ["checker", "dark", "white", "green"],
+    "claudeBatchSize": [4, 8]
+  }
+}

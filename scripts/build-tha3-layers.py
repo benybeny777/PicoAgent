@@ -12,19 +12,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CHARACTERS_DIR = ROOT / "characters"
 INDEX_PATH = CHARACTERS_DIR / "index.json"
 THA3_DIR = ROOT / "src-tauri" / "resources" / "bundled" / "tha3"
 TEMP_DIR = ROOT / "temp"
-OUTPUT_SIZE = (445, 900)
-OUTPUT_MARGIN = (24, 38)
+# 900px高では上半身構図の1.55〜2.05倍表示時に原寸を超え、
+# 既存の高精細キャラよりぼやけて見える。既存と同等の縦1800pxで生成する。
+OUTPUT_SIZE = (890, 1800)
+OUTPUT_MARGIN = (48, 76)
 # 基準ポーズの被写体範囲を全レイヤーへ共通適用するが、頭・身体を振るポーズは基準の輪郭より
 # わずかに外へ出る。切り取り箱をこの比率だけ広げて、髪先や肩が欠けないようにする。
 OUTPUT_BOX_PADDING = 0.05
-# 口の比較・補正に使う窓（左上・右下の画像比）。入力要件どおり頭部がある上半分中央だけを見る。
-MOUTH_WINDOW = (0.38, 0.30, 0.62, 0.42)
+# 口の比較・補正に使う窓（左上・右下の画像比）。入力要件の頭部領域
+# （x=192..320 / y=64..192）内で、目や首を拾わない口元だけを見る。
+MOUTH_WINDOW = (0.40, 0.25, 0.60, 0.36)
 MODEL_FILES = (
     "editor.pt",
     "eyebrow_decomposer.pt",
@@ -249,8 +251,8 @@ def platform_model(model: str) -> str:
 def padded_box(box, width: int, height: int):
     """被写体範囲を少しだけ広げる（頭・身体を振るポーズが基準の輪郭から出るため）。"""
     x1, y1, x2, y2 = box
-    pad_x = int(round((x2 - x1) * OUTPUT_BOX_PADDING))
-    pad_y = int(round((y2 - y1) * OUTPUT_BOX_PADDING))
+    pad_x = round((x2 - x1) * OUTPUT_BOX_PADDING)
+    pad_y = round((y2 - y1) * OUTPUT_BOX_PADDING)
     return (max(0, x1 - pad_x), max(0, y1 - pad_y), min(width, x2 + pad_x), min(height, y2 + pad_y))
 
 
@@ -258,18 +260,6 @@ def mouth_window(width: int, height: int):
     """口の比較・補正に使う窓を画素座標で返す。"""
     left, top, right, bottom = MOUTH_WINDOW
     return (int(width * left), int(height * top), int(width * right), int(height * bottom))
-
-
-def sharpen_upscaled(image, image_filter):
-    """拡大でにじんだ輪郭を軽く戻す。
-
-    THA3 の出力は 512x512 で、入力要件（頭部が上半分中央の128x128付近）に従うと全身キャラの
-    被写体は 150x330 程度にしかならない。これを出力枠へ 2 倍以上に拡大するため、そのままでは
-    手描き素材より眠い絵になる。アルファは対象外にする（縁に輪郭が出るため）。
-    """
-    sharpened = image.convert("RGB").filter(image_filter.UnsharpMask(radius=1.2, percent=55, threshold=3))
-    sharpened.putalpha(image.getchannel("A"))
-    return sharpened
 
 
 def canvas_placement(box):
@@ -282,7 +272,12 @@ def canvas_placement(box):
     box_width = max(1, box[2] - box[0])
     box_height = max(1, box[3] - box[1])
     scale = min((OUTPUT_SIZE[0] - margin_x * 2) / box_width, (OUTPUT_SIZE[1] - margin_y * 2) / box_height)
-    size = (max(1, int(round(box_width * scale))), max(1, int(round(box_height * scale))))
+    if scale > 1.0:
+        raise RuntimeError(
+            "THA3の出力解像度では配置枠を満たせません。画像の引き伸ばし拡大は禁止されているため、"
+            "高解像度で直接生成できる経路かPhotoshop仕上げを用意してから再実行してください。"
+        )
+    size = (max(1, round(box_width * scale)), max(1, round(box_height * scale)))
     return size, ((OUTPUT_SIZE[0] - size[0]) // 2, OUTPUT_SIZE[1] - margin_y - size[1])
 
 
@@ -302,7 +297,7 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
     try:
         import numpy
         import torch
-        from PIL import Image, ImageDraw, ImageFilter
+        from PIL import Image, ImageDraw
     except ImportError as error:
         raise RuntimeError("同梱THA3ランタイム（PyTorch・NumPy・Pillow）が不足しています。`cargo xtask setup tha3` を実行してください。") from error
     if sys.platform == "win32":
@@ -380,8 +375,8 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
             total = float(intensity.sum())
             if total > 1e-3:
                 rows, columns = numpy.indices(intensity.shape)
-                center_x = x1 + int(round(float((intensity * columns).sum()) / total))
-                center_y = y1 + int(round(float((intensity * rows).sum()) / total))
+                center_x = x1 + round(float((intensity * columns).sum()) / total)
+                center_y = y1 + round(float((intensity * rows).sum()) / total)
             # デフォルメ絵で肌や髪を誤って拾わないよう、口内と舌は小さな共通色に限定する。
             dark = (84, 38, 52)
             tongue = (226, 120, 138)
@@ -423,8 +418,12 @@ def render_poses(image, model: str, names: list[str], temp_paths: dict[str, Path
                     assert base_box is not None
                     size, position = canvas_placement(base_box)
                     with Image.new("RGBA", OUTPUT_SIZE, (0, 0, 0, 0)) as normalized:
-                        with rendered.crop(base_box).resize(size, Image.Resampling.LANCZOS) as fitted:
-                            normalized.alpha_composite(sharpen_upscaled(fitted, ImageFilter), position)
+                        cropped = rendered.crop(base_box)
+                        if cropped.size == size:
+                            normalized.alpha_composite(cropped, position)
+                        else:
+                            with cropped.resize(size, Image.Resampling.LANCZOS) as fitted:
+                                normalized.alpha_composite(fitted, position)
                         normalized.save(temp_paths[name])
                 print(f"[build-tha3-layers] 生成: {name}.png")
     finally:
@@ -499,7 +498,7 @@ def register_character(character_id: str, manifest: dict) -> None:
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     characters = index.get("characters")
     if not isinstance(characters, list):
-        raise ValueError(f"characters/index.json の characters が配列ではありません: {INDEX_PATH}")
+        raise TypeError(f"characters/index.json の characters が配列ではありません: {INDEX_PATH}")
     if any(entry.get("id") == character_id for entry in characters if isinstance(entry, dict)):
         return
     characters.append(
@@ -593,7 +592,7 @@ def remove_character(character_id: str) -> None:
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     entries = index.get("characters", [])
     if not isinstance(entries, list):
-        raise ValueError(f"characters/index.json の characters が配列ではありません: {INDEX_PATH}")
+        raise TypeError(f"characters/index.json の characters が配列ではありません: {INDEX_PATH}")
     move_to_trash(character_dir)
     index["characters"] = [
         entry for entry in entries if not isinstance(entry, dict) or entry.get("id") != character_id

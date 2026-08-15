@@ -49,14 +49,14 @@ pub async fn handle_rpc(cfg: &Config, message: &Value) -> Option<Value> {
             };
             // 一覧に出していないツール（アプリが内部で使うもの）は外から呼ばせない。
             // 公開している面と実行できる面をずらさないため、`tools/list` と同じ条件で絞る。
-            if crate::tools::all()
+            let published = crate::tools::all()
                 .iter()
-                .any(|tool| tool.name() == name && !tool.agent_callable())
-            {
+                .any(|tool| tool.name() == name && tool.agent_callable());
+            if !published {
                 return Some(rpc_error(
                     &id,
                     -32601,
-                    &format!("公開していないツールです: {name}"),
+                    &format!("公開していない、または未登録のツールです: {name}"),
                 ));
             }
             let args = params

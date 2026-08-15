@@ -40,21 +40,23 @@ pub fn is_encrypted(value: &str) -> bool {
 }
 
 /// シークレット値を暗号化した保存用文字列にする。空・暗号化済み・非対応時はそのまま返す。
-pub fn encrypt(plain: &str) -> String {
+pub fn encrypt(plain: &str) -> Result<String, String> {
     if plain.is_empty() || is_encrypted(plain) {
-        return plain.to_string();
+        return Ok(plain.to_string());
     }
     #[cfg(windows)]
     {
         if let Some(bytes) = win::protect(plain.as_bytes()) {
-            return format!(
+            return Ok(format!(
                 "{PREFIX}{}",
                 base64::engine::general_purpose::STANDARD.encode(bytes)
-            );
+            ));
         }
+        Err("Windowsの資格情報保護で暗号化できないため、シークレットを保存しません".to_string())
     }
-    // フォールバック許可: DPAPI 非対応（非Windows）や失敗時は平文で保存する（保存自体は止めない）。
-    plain.to_string()
+    // フォールバック許可: 非WindowsにはDPAPIが無いため平文で保存する。
+    #[cfg(not(windows))]
+    Ok(plain.to_string())
 }
 
 /// 保存用文字列を平文へ復号する。暗号化されていなければそのまま返す。
@@ -156,7 +158,7 @@ mod tests {
     #[test]
     fn 暗号化往復で元の値に戻る() {
         let plain = "sk-test-APIKEY-0123456789-あいう";
-        let stored = encrypt(plain);
+        let stored = encrypt(plain).unwrap();
         assert_eq!(decrypt(&stored), plain);
         // Windows では実際に暗号化され、平文とは別の文字列になる。
         #[cfg(windows)]
@@ -184,7 +186,7 @@ mod tests {
     fn 非暗号文字列はそのまま扱う() {
         assert!(!is_encrypted("plain-token"));
         assert_eq!(decrypt("plain-token"), "plain-token");
-        assert_eq!(encrypt(""), "");
+        assert_eq!(encrypt("").unwrap(), "");
     }
 }
 

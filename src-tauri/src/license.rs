@@ -1,14 +1,21 @@
 //! 販売版ライセンスの検証と権限制御。
 
+#[cfg(any(not(feature = "beta-full"), test))]
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+#[cfg(any(not(feature = "beta-full"), test))]
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use serde::{Deserialize, Serialize};
+#[cfg(any(not(feature = "beta-full"), test))]
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::config::Config;
 
+#[cfg(not(feature = "beta-full"))]
 pub const CONFIG_KEY: &str = "PICOAGENT_LICENSE_TOKEN";
+#[cfg(not(feature = "beta-full"))]
 const PUBLIC_KEY_B64: &str = include_str!("../resources/license-public-key.txt");
 
+#[cfg(any(not(feature = "beta-full"), test))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub version: u8,
@@ -28,6 +35,17 @@ pub struct Status {
     pub message: String,
 }
 
+#[cfg(feature = "beta-full")]
+pub fn status(_cfg: &Config) -> Status {
+    Status {
+        active: true,
+        edition: "beta".to_string(),
+        customer: String::new(),
+        message: "ベータ期間中は全機能を試用できます。".to_string(),
+    }
+}
+
+#[cfg(not(feature = "beta-full"))]
 pub fn status(cfg: &Config) -> Status {
     let token = cfg.get(CONFIG_KEY, "");
     match verify(&token) {
@@ -50,18 +68,18 @@ pub fn status(cfg: &Config) -> Status {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(feature = "beta-full")))]
 pub fn is_pro(cfg: &Config) -> bool {
     status(cfg).active
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "beta-full"))]
 pub fn is_pro(_cfg: &Config) -> bool {
-    // テストは既存の各安全境界まで到達させる。無料版の対象判定自体は
-    // `tool_requires_pro` の純粋テストで検査する。
+    // テストは安全境界まで到達させる。beta-fullは試用版だけの明示的な全機能開放。
     true
 }
 
+#[cfg(not(feature = "beta-full"))]
 pub fn verify(token: &str) -> Result<Claims, String> {
     let public_bytes = URL_SAFE_NO_PAD
         .decode(PUBLIC_KEY_B64.trim())
@@ -74,6 +92,7 @@ pub fn verify(token: &str) -> Result<Claims, String> {
     verify_with_key(token, &key, chrono::Utc::now().timestamp())
 }
 
+#[cfg(any(not(feature = "beta-full"), test))]
 fn verify_with_key(token: &str, key: &VerifyingKey, now: i64) -> Result<Claims, String> {
     let mut parts = token.trim().split('.');
     if parts.next() != Some("PA1") {
@@ -116,9 +135,11 @@ pub fn tool_requires_pro(name: &str) -> bool {
             name,
             "app_control"
                 | "browser_control"
+                | "bluesky"
                 | "code_runner"
                 | "command_job"
                 | "desktop_control"
+                | "discord_send_message"
                 | "document_convert"
                 | "edit_file"
                 | "gmail_message"
@@ -129,7 +150,12 @@ pub fn tool_requires_pro(name: &str) -> bool {
                 | "google_tasks"
                 | "github"
                 | "http_api"
+                | "jira"
+                | "linear"
+                | "linkedin"
+                | "mastodon"
                 | "meeting_recorder"
+                | "misskey"
                 | "microsoft_graph"
                 | "ms_office"
                 | "notion"
@@ -140,9 +166,11 @@ pub fn tool_requires_pro(name: &str) -> bool {
                 | "subagent"
                 | "task_scheduler"
                 | "todoist"
+                | "trello"
                 | "trash_file"
                 | "workflow"
                 | "workspace_files"
+                | "x_twitter"
         )
 }
 

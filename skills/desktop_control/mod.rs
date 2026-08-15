@@ -202,7 +202,7 @@ impl Tool for DesktopControlTool {
                 "action": {
                     "type": "string",
                     "enum": ["screen_size", "cursor", "window_list", "window_focus", "move", "click", "double_click", "drag", "scroll", "type_text", "key"],
-                    "description": "screen_size: 画面サイズ / cursor: 現在のカーソル位置 / window_list: ウィンドウ一覧（番号つき）/ window_focus: 番号のウィンドウを前面へ / move: 移動 / click: クリック / double_click: ダブルクリック / drag: ドラッグ / scroll: スクロール / type_text: 文字入力 / key: キー送出。"
+                    "description": "screen_size: 画面サイズ / cursor: 現在のカーソル位置 / window_list: ウィンドウ一覧（識別子つき）/ window_focus: 識別子のウィンドウを前面へ / move: 移動 / click: クリック / double_click: ダブルクリック / drag: ドラッグ / scroll: スクロール / type_text: 文字入力 / key: キー送出。"
                 },
                 "x": { "type": "integer", "description": "対象の X 座標（画面左上が 0,0）。" },
                 "y": { "type": "integer", "description": "対象の Y 座標。" },
@@ -212,7 +212,7 @@ impl Tool for DesktopControlTool {
                 "text": { "type": "string", "description": "type_text で入力する文字列。" },
                 "keys": { "type": "string", "description": "key で送るキー。単体（Enter / Tab / F5 / a）か組み合わせ（Ctrl+C / Alt+Tab / Ctrl+Shift+T）。" },
                 "amount": { "type": "integer", "description": "scroll の量。正が下/右、負が上/左。" },
-                "window": { "type": "integer", "description": "window_focus で前面にするウィンドウの番号（window_list が返した番号）。" },
+                "window_id": { "type": "string", "description": "window_focus で前面にするウィンドウの識別子（window_list が返した id）。" },
                 "axis": { "type": "string", "enum": ["vertical", "horizontal"], "description": "scroll の方向（既定 vertical）。" }
             },
             "required": ["action"]
@@ -285,21 +285,19 @@ impl Tool for DesktopControlTool {
 
         match action.as_str() {
             "window_focus" => {
-                // 番号は window_list の並びに対応する。ハンドルはモデルへ見せない。
-                let Some(number) = args.get("window").and_then(Value::as_u64) else {
-                    return "エラー: window_focus には window（window_list の番号）が必要です。".to_string();
+                let Some(window_id) = args.get("window_id").and_then(Value::as_str) else {
+                    return "エラー: window_focus には window_id（window_list の識別子）が必要です。".to_string();
                 };
                 let windows = match window::list() {
                     Ok(windows) => windows,
                     Err(error) => return error,
                 };
-                let Some(target) = number
-                    .checked_sub(1)
-                    .and_then(|index| windows.get(index as usize))
+                let Some(target) = windows
+                    .iter()
+                    .find(|window| window::identifier(window) == window_id)
                 else {
                     return format!(
-                        "エラー: ウィンドウ番号 {number} は範囲外です（1〜{}）。window_list で取り直してください。",
-                        windows.len()
+                        "エラー: ウィンドウ識別子 {window_id} は現在の一覧にありません。window_list で取り直してください。"
                     );
                 };
                 match window::focus(target.handle) {

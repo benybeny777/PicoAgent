@@ -178,12 +178,20 @@ impl Tool for TaskSchedulerTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            scheduler::CONFIG_KEY,
-            "スケジュールタスク一覧（JSON。通常はチャットで設定。kind=command/tool、time または cron を指定）",
-            "textarea",
-            "[]",
-        )]
+        vec![
+            Field::new(
+                scheduler::CONFIG_KEY,
+                "スケジュールタスク一覧（JSON。通常はチャットで設定。kind=command/tool、time または cron を指定）",
+                "textarea",
+                "[]",
+            ),
+            Field::new(
+                scheduler::TOOL_ALLOWLIST_KEY,
+                "無人スケジュール実行を許可するスキル名（カンマ区切り）",
+                "textarea",
+                "time,weather,web_fetch",
+            ),
+        ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {

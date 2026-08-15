@@ -43,8 +43,8 @@ impl Tool for LinkedInTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LINKEDIN_ACCESS_TOKEN", "LinkedIn access token", "password", ""),
-            Field::new("PICOAGENT_LINKEDIN_AUTHOR_URN", "LinkedIn author URN", "text", "urn:li:person:..."),
+            Field::new("PICOAGENT_LINKEDIN_ACCESS_TOKEN", "LinkedIn のアクセストークン", "password", ""),
+            Field::new("PICOAGENT_LINKEDIN_AUTHOR_URN", "LinkedIn の投稿者 URN", "text", "urn:li:person:..."),
             Field::new("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "LinkedIn API 待ち時間（秒、3〜60）", "text", "20"),
         ]
     }

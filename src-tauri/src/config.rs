@@ -30,6 +30,7 @@ impl Config {
     /// 起動時にファイルパスを設定し、あれば読み込む。
     /// 設定ファイルを読み込む。破損などで読めなかった場合は警告文字列を返す
     /// （呼び出し側が app.log へ記録する。ファイルが無いだけの初回起動は正常なので None）。
+    /// 原本を安全に退避できない場合は保存先を設定せず、読み取り専用の既定値で起動する。
     pub fn load(&self, file: PathBuf) -> Result<Option<String>, String> {
         let mut warning = None;
         match std::fs::read_to_string(&file) {
@@ -39,24 +40,25 @@ impl Config {
                     // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
                     // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
                     // 破損ファイルはその場に残すと次の保存（＝空設定の書き戻し）で消えてしまうので退避する。
-                    let saved = crate::store::quarantine_corrupt(&file).ok_or_else(|| {
-                        format!(
-                            "壊れた設定ファイルを退避できません。上書きを中止しました: {}",
+                    if let Some(saved) = crate::store::quarantine_corrupt(&file) {
+                        warning = Some(format!(
+                            "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
+                            file.display(),
+                            saved.display()
+                        ));
+                    } else {
+                        return Ok(Some(format!(
+                            "壊れた設定ファイルを退避できないため、設定を保存しない読み取り専用状態で起動します: {}",
                             file.display()
-                        )
-                    })?;
-                    warning = Some(format!(
-                        "設定ファイルが JSON として読めないため空設定で起動します: {}（破損ファイルは {} へ退避しました）",
-                        file.display(),
-                        saved.display()
-                    ));
+                        )));
+                    }
                 }
             },
-            Err(error) if file.exists() => {
-                return Err(format!(
-                    "設定ファイルを読み込めません。上書きを中止しました: {} ({error})",
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Ok(Some(format!(
+                    "設定ファイルを読み込めないため、設定を保存しない読み取り専用状態で起動します: {} ({error})",
                     file.display()
-                ));
+                )));
             }
             Err(_) => {} // ファイルが無いのは初回起動の正常系
         }
@@ -134,19 +136,6 @@ impl Config {
     /// 更新なので、ポーリング経路（通知の期限チェックなど）から同じ値で呼ばれるたびに
     /// config.json 全体を書き直してしまい、無意味なディスク書き込みが延々と続く。
     pub fn set_all(&self, patch: Map<String, Value>) -> anyhow::Result<()> {
-        {
-            let mut values = self.values.lock().unwrap();
-            let mut changed = false;
-            for (k, v) in patch {
-                if values.get(&k) != Some(&v) {
-                    values.insert(k, v);
-                    changed = true;
-                }
-            }
-            if !changed {
-                return Ok(());
-            }
-        }
         // スナップショットの採取から書き込みまでを直列化する（並び替わりを防ぐ）。
         // フォールバック許可: 毒された場合も保存自体は続ける（中身は () で不変）。
         let _write = self
@@ -159,9 +148,23 @@ impl Config {
             .unwrap()
             .clone()
             .ok_or_else(|| anyhow::anyhow!("config.load() が未実行です"))?;
-        let snapshot = Value::Object(self.values.lock().unwrap().clone());
+        let mut values = self.values.lock().unwrap();
+        let mut next = values.clone();
+        let mut changed = false;
+        for (k, v) in patch {
+            if next.get(&k) != Some(&v) {
+                next.insert(k, v);
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        let snapshot = Value::Object(next.clone());
         // 書き込み中に落ちても設定が全損しないよう、共通層の原子的な書き込みを使う。
-        crate::store::write_json_atomic(&path, &snapshot)
+        crate::store::write_json_atomic(&path, &snapshot)?;
+        *values = next;
+        Ok(())
     }
 
     /// 単一の設定を永続化する。
@@ -169,6 +172,22 @@ impl Config {
         let mut patch = Map::new();
         patch.insert(key.to_string(), Value::String(value));
         self.set_all(patch)
+    }
+
+    /// 削除済みキャラクターを選択していた旧設定だけを安全な代替へ移す。
+    pub fn migrate_removed_character(&self, removed: &str, fallback: &str) -> anyhow::Result<bool> {
+        let selected = self
+            .values
+            .lock()
+            .unwrap()
+            .get("PICOAGENT_CHARACTER")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if selected.as_deref() != Some(removed) {
+            return Ok(false);
+        }
+        self.set_string("PICOAGENT_CHARACTER", fallback.to_string())?;
+        Ok(true)
     }
 
     /// テスト専用: 永続化せずインメモリの設定値だけを書き換える
@@ -240,6 +259,29 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert_eq!(left, vec!["config.json".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 削除済みキャラの保存選択だけを既定キャラへ移す() {
+        let dir = temp_dir("removed-character");
+        let path = dir.join("config.json");
+        let cfg = Config::new();
+        cfg.load(path.clone()).unwrap();
+        cfg.set_string("PICOAGENT_CHARACTER", "mugi-live2d".to_string())
+            .unwrap();
+
+        assert!(cfg
+            .migrate_removed_character("mugi-live2d", "mugi")
+            .unwrap());
+        assert_eq!(cfg.get("PICOAGENT_CHARACTER", ""), "mugi");
+        assert!(!cfg
+            .migrate_removed_character("mugi-live2d", "mugi")
+            .unwrap());
+
+        let reloaded = Config::new();
+        reloaded.load(path.clone()).unwrap();
+        assert_eq!(reloaded.get("PICOAGENT_CHARACTER", ""), "mugi");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -332,6 +374,24 @@ mod tests {
         assert_eq!(saved.len(), 1, "破損ファイルが退避されていない");
         let text = std::fs::read_to_string(dir.join(&saved[0])).unwrap();
         assert!(text.contains("PICOAGENT_TEST_KEY"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 読み込めない設定でも保存を止めて起動を続ける() {
+        let dir = temp_dir("unreadable");
+        // ファイルの代わりにディレクトリを渡し、読み取り不能をOS共通で再現する。
+        let cfg = Config::new();
+        let warning = cfg
+            .load(dir.clone())
+            .expect("読み取り失敗だけで起動を止めない")
+            .expect("読み取り専用状態を警告する");
+        assert!(warning.contains("読み取り専用"), "warning: {warning}");
+        let error = cfg
+            .set_string("PICOAGENT_OTHER", "x".to_string())
+            .expect_err("原本を読めない状態では保存しない");
+        assert!(error.to_string().contains("config.load() が未実行"));
+        assert!(dir.is_dir(), "元の対象を上書きしていない");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

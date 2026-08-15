@@ -63,7 +63,7 @@ impl Tool for GoogleCalendarTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN", "Google Calendar OAuth access token", "password", "ya29..."),
+            Field::new("PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN", "Google カレンダーの OAuth アクセストークン", "password", "ya29..."),
             Field::new("PICOAGENT_GOOGLE_CALENDAR_ID", "Google Calendar 既定カレンダーID", "text", "primary"),
             Field::new("PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS", "Google Calendar API 待ち時間（秒、3〜60）", "text", "20"),
         ]

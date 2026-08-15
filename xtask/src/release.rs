@@ -59,7 +59,9 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
     verify_windows_pe(&installer)?;
     let mut file = fs::File::open(&installer)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Windowsの既定スレッドスタックと同じ1MiBをローカル配列にすると、
+    // 実インストーラのハッシュ計算へ入る前にスタックオーバーフローする。
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
@@ -460,7 +462,18 @@ mod tests {
     fn 販売設定はキャラを重複なく列挙する() {
         let value = super::manifest().unwrap();
         let characters = included_characters(&value).unwrap();
-        assert_eq!(characters, ["mugi", "rin", "mai", "koharu", "sena", "noa"]);
+        assert_eq!(
+            characters,
+            [
+                "mugi",
+                "rin",
+                "mai",
+                "koharu",
+                "sena",
+                "noa",
+                "photoreal-prototype"
+            ]
+        );
     }
 
     #[test]

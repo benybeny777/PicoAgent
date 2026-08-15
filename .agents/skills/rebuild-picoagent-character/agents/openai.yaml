@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoAgentキャラクター再生成"
+  short_description: "PicoAgentの高精細キャラ、表情、連番を安全に再生成する"
+  default_prompt: "$rebuild-picoagent-character を使い、キャラクター画像を正規手順で追加または再生成し、表情・視線・連番・実表示を検証してください。"

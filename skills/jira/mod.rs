@@ -48,9 +48,9 @@ impl Tool for JiraTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_JIRA_BASE_URL", "Jira base URL", "text", "https://example.atlassian.net"),
-            Field::new("PICOAGENT_JIRA_EMAIL", "Jira account email", "text", ""),
-            Field::new("PICOAGENT_JIRA_API_TOKEN", "Jira API token", "password", ""),
+            Field::new("PICOAGENT_JIRA_BASE_URL", "Jira のベース URL", "text", "https://example.atlassian.net"),
+            Field::new("PICOAGENT_JIRA_EMAIL", "Jira のアカウントメールアドレス", "text", ""),
+            Field::new("PICOAGENT_JIRA_API_TOKEN", "Jira の API トークン", "password", ""),
             Field::new("PICOAGENT_JIRA_PROJECT_KEY", "Jira 既定 project key", "text", ""),
             Field::new("PICOAGENT_JIRA_TIMEOUT_SECS", "Jira API 待ち時間（秒、3〜60）", "text", "20"),
         ]

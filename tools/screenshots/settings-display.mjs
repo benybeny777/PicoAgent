@@ -1,4 +1,4 @@
-// 設定画面の「画面」タブを配布UIから描画し、8形式のカードを回帰確認する。
+// 設定画面の「画面」タブを配布UIから描画し、7形式のカードを回帰確認する。
 import { createReadStream, existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -81,7 +81,7 @@ try {
   await page.goto(`http://127.0.0.1:${port}/settings.html?tab=display`);
   await page.waitForSelector(".layout-card-grid .layout-card");
   const cardCount = await page.locator(".layout-card").count();
-  if (cardCount !== 8) throw new Error(`表示形式カードが8件ではありません: ${cardCount}`);
+  if (cardCount !== 7) throw new Error(`表示形式カードが7件ではありません: ${cardCount}`);
   await page.waitForFunction(() => [...document.querySelectorAll(".layout-card img")].every(image => image.complete && image.naturalWidth > 0));
   const selected = await page.locator(".layout-card.selected strong").textContent();
   if (selected !== "配信") throw new Error(`保存中の配信カードが選択状態ではありません: ${selected}`);
@@ -89,8 +89,7 @@ try {
   const selectedValue = await page.locator("select.layout-native-select").inputValue();
   if (selectedValue !== "chat") throw new Error(`カード選択が設定値へ反映されません: ${selectedValue}`);
   await page.getByTitle("配信へ変更").click();
-  const placementCount = await page.locator(".placement-actions button").count();
-  if (placementCount !== 4) throw new Error(`画面配置ボタンが4件ではありません: ${placementCount}`);
+  if (await page.getByText("表示するモニター", { exact: true }).count()) throw new Error("不要なモニター指定欄が残っています");
   if (await page.locator(".layout-live-preview img").count() !== 1) throw new Error("選択中レイアウトの大型プレビューがありません");
   if (await page.locator('[data-setting-key="PICOAGENT_STREAM_BACKGROUND"]').count() !== 1) throw new Error("配信背景の選択欄がありません");
   const previewHeight = await page.locator(".layout-live-preview img").evaluate(node => node.getBoundingClientRect().height);
@@ -133,6 +132,26 @@ try {
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
   const muteStatus = await page.locator(".tts-master-status").textContent();
   if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
+  const framing = page.locator(".framing-editor");
+  if (!(await framing.textContent())?.includes("キャラサイズ")) throw new Error("構図にキャラサイズのスライダーがありません");
+  const zoom = framing.locator('input[type="range"]');
+  await zoom.fill("2.1");
+  if ((await framing.locator("output").first().textContent()) !== "2.10倍") throw new Error("キャラサイズの現在値が表示されません");
+  const preview = framing.locator(".framing-preview");
+  const xInput = framing.locator('input[type="number"]').first();
+  const beforeX = Number(await xInput.inputValue());
+  await preview.scrollIntoViewIfNeeded();
+  const previewBox = await preview.boundingBox();
+  if (!previewBox) throw new Error("構図プレビューの位置を取得できません");
+  await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(previewBox.x + previewBox.width / 2 + 12, previewBox.y + previewBox.height / 2 + 8);
+  await page.mouse.up();
+  if (Number(await xInput.inputValue()) <= beforeX) throw new Error("プレビューのドラッグが横位置へ反映されません");
+  if ((await framing.locator("select").nth(1).inputValue()) !== "custom") throw new Error("ドラッグ後に細かく調整へ切り替わりません");
+  await page.screenshot({ path: join(OUT, "character-framing.png") });
+  await framing.getByRole("button", { name: "この構図を初期値へ戻す", exact: true }).click();
+  if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("構図を初期値へ戻しても未保存状態が解消されません");
   const addedCharacter = page.locator(".character-card").filter({ hasText: "追加テスト" });
   await addedCharacter.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
@@ -160,7 +179,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式8件 / 配置=${placementCount}件 / 未保存件数・検索解除・製品情報・構図・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

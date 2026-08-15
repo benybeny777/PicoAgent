@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PicoAgent キャラクター画像パーツ</title>
+  <link rel="stylesheet" href="gallery.css">
+  <link rel="stylesheet" href="parts.css">
+</head>
+<body>
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">LOCAL ASSET QA</p>
+      <h1>キャラクター画像パーツ</h1>
+      <p>正本のプレビュー、表情差分、連番フレーム、Live2Dテクスチャを原寸で確認します。</p>
+      <a class="page-link" href="index.html">← 動画一覧へ戻る</a>
+    </div>
+    <div class="summary" aria-live="polite"><strong id="visibleCount">0</strong><span>パーツを表示</span></div>
+  </header>
+
+  <nav class="filters parts-filters" aria-label="画像パーツの表示フィルター">
+    <button type="button" class="is-active" data-filter="all">すべて</button>
+    <button type="button" data-filter="preview">基本画像</button>
+    <button type="button" data-filter="layer">表情レイヤー</button>
+    <button type="button" data-filter="frame">連番フレーム</button>
+    <button type="button" data-filter="live2d">Live2D</button>
+    <label><span>キャラ</span><select id="characterFilter"><option value="all">すべて</option></select></label>
+    <label><span>検索</span><input id="search" type="search" placeholder="口、まばたき、idle…"></label>
+  </nav>
+
+  <p id="loading" class="loading" role="status">画像パーツを検査中…</p>
+  <main id="partsGallery" class="gallery parts-gallery" aria-live="polite"></main>
+
+  <dialog id="detail" class="detail parts-detail">
+    <button id="closeDetail" class="close" type="button" aria-label="閉じる">×</button>
+    <button id="previous" class="step previous" type="button" aria-label="前の画像">‹</button>
+    <figure>
+      <div class="detail-canvas"><img id="detailImage" alt=""></div>
+      <figcaption><strong id="detailTitle"></strong><span id="detailMeta"></span></figcaption>
+    </figure>
+    <button id="next" class="step next" type="button" aria-label="次の画像">›</button>
+  </dialog>
+
+  <script src="parts.js"></script>
+</body>
+</html>

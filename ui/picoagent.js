@@ -130,7 +130,7 @@ window.picoagent = {
   // 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
   setCharacterOffset: (x, y, characterId, layout, zoom) => call("pet_set_character_offset", { x, y, characterId, layout, zoom }),
   placeWindow: (position) => call("pet_place_window", { position }),
-  // キャラの上から Ctrl+ドラッグしたときなど、明示的にウィンドウを掴んで動かす。
+  // キャラ上の通常ドラッグをOS標準のウィンドウ移動へ渡す。
   startWindowDrag: async () => {
     try { return await getCurrentWindow().startDragging(); }
     catch (error) { logInvokeError("startDragging", error); }

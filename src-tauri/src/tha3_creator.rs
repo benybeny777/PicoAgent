@@ -485,12 +485,18 @@ async fn run_generator(
             ProcessResult::Cancelled(stop_and_reap(&mut child).await)
         }
     };
-    let stdout = stdout_task
-        .await
-        .unwrap_or_else(|error| format!("出力処理に失敗しました: {error}"));
-    let stderr = stderr_task
-        .await
-        .unwrap_or_else(|error| format!("エラー出力処理に失敗しました: {error}"));
+    // 中断時に出力の終端を待ち切らない。Python 側が子プロセスを持つと、停止しても
+    // 孫がパイプを握ったままで終端が来ず、キャンセル操作が戻らなくなる。
+    let stdout = match tools::process::join_capture(stdout_task).await {
+        Some(joined) => joined.unwrap_or_else(|error| format!("出力処理に失敗しました: {error}")),
+        None => "出力の回収が終わらないため打ち切りました。".to_string(),
+    };
+    let stderr = match tools::process::join_capture(stderr_task).await {
+        Some(joined) => {
+            joined.unwrap_or_else(|error| format!("エラー出力処理に失敗しました: {error}"))
+        }
+        None => "エラー出力の回収が終わらないため打ち切りました。".to_string(),
+    };
     match result {
         ProcessResult::Completed(status) if status.success() => Ok(()),
         ProcessResult::Completed(status) => {

@@ -168,8 +168,7 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
             std::fs::create_dir_all(&target)?;
             continue;
         }
-        total = total.saturating_add(entry.size());
-        if total > MAX_TOTAL_BYTES || entry.size() > character_pack::MAX_FILE_BYTES {
+        if entry.size() > character_pack::MAX_FILE_BYTES {
             bail!("zip の中身が大きすぎます（合計250MB・1ファイル40MBまで）");
         }
         if let Some(parent) = target.parent() {
@@ -177,16 +176,62 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
         }
         let mut out = std::fs::File::create(&target)
             .with_context(|| format!("展開できません: {}", target.display()))?;
-        std::io::copy(&mut entry, &mut out)?;
+        let remaining = MAX_TOTAL_BYTES.saturating_sub(total);
+        let limit = remaining.min(character_pack::MAX_FILE_BYTES);
+        let mut limited = std::io::Read::take(&mut entry, limit.saturating_add(1));
+        let copied = std::io::copy(&mut limited, &mut out)?;
+        if copied > limit {
+            bail!("zip の中身が大きすぎます（合計250MB・1ファイル40MBまで）");
+        }
+        total = total.saturating_add(copied);
     }
     Ok(())
 }
 
 fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
     std::fs::create_dir_all(destination)?;
+    let source_root = std::fs::canonicalize(source)?;
+    let destination_root = std::fs::canonicalize(destination)?;
+    if destination_root.starts_with(&source_root) || source_root.starts_with(&destination_root) {
+        bail!("コピー元とコピー先が重なっています。別のフォルダを選んでください。");
+    }
+    let mut entries = 0usize;
+    let mut total = 0u64;
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(source_root.clone());
+    copy_dir_bounded(
+        source,
+        destination,
+        &source_root,
+        &mut visited,
+        &mut entries,
+        &mut total,
+    )
+}
+
+fn copy_dir_bounded(
+    source: &Path,
+    destination: &Path,
+    source_root: &Path,
+    visited: &mut std::collections::HashSet<PathBuf>,
+    entries: &mut usize,
+    total: &mut u64,
+) -> Result<()> {
+    std::fs::create_dir_all(destination)?;
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
+        *entries = entries.saturating_add(1);
+        if *entries > MAX_ENTRIES {
+            bail!("フォルダの項目が多すぎます（{MAX_ENTRIES} 件まで）");
+        }
         let from = entry.path();
+        let resolved = std::fs::canonicalize(&from)?;
+        if !resolved.starts_with(source_root) {
+            bail!(
+                "パック外を指すリンクやジャンクションは置けません: {}",
+                from.display()
+            );
+        }
         // シンボリックリンクは辿らない（実体がパック外を指す可能性がある）。
         if std::fs::symlink_metadata(&from)?.file_type().is_symlink() {
             bail!(
@@ -196,9 +241,27 @@ fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
         }
         let to = destination.join(entry.file_name());
         if from.is_dir() {
-            copy_dir(&from, &to)?;
+            if !visited.insert(resolved) {
+                bail!(
+                    "パック内のリンクやジャンクションが同じフォルダを再び指しています: {}",
+                    from.display()
+                );
+            }
+            copy_dir_bounded(&from, &to, source_root, visited, entries, total)?;
         } else {
-            std::fs::copy(&from, &to)?;
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut input = std::fs::File::open(&from)?;
+            let mut output = std::fs::File::create(&to)?;
+            let remaining = MAX_TOTAL_BYTES.saturating_sub(*total);
+            let limit = remaining.min(character_pack::MAX_FILE_BYTES);
+            let mut limited = std::io::Read::take(&mut input, limit.saturating_add(1));
+            let copied = std::io::copy(&mut limited, &mut output)?;
+            if copied > limit {
+                bail!("フォルダの中身が大きすぎます（合計250MB・1ファイル40MBまで）");
+            }
+            *total = total.saturating_add(copied);
         }
     }
     Ok(())

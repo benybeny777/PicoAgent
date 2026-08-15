@@ -85,7 +85,7 @@ impl Tool for GoogleDocsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN", "Google Docs OAuth access token", "password", "ya29..."),
+            Field::new("PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN", "Google ドキュメントの OAuth アクセストークン", "password", "ya29..."),
             Field::new("PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS", "Google Docs API 待ち時間（秒、3〜60）", "text", "20"),
         ]
     }

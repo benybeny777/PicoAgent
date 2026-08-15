@@ -43,8 +43,8 @@ impl Tool for MastodonTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MASTODON_BASE_URL", "Mastodon instance URL", "text", "https://mastodon.social"),
-            Field::new("PICOAGENT_MASTODON_ACCESS_TOKEN", "Mastodon access token", "password", ""),
+            Field::new("PICOAGENT_MASTODON_BASE_URL", "Mastodon のインスタンス URL", "text", "https://mastodon.social"),
+            Field::new("PICOAGENT_MASTODON_ACCESS_TOKEN", "Mastodon のアクセストークン", "password", ""),
             Field::new("PICOAGENT_MASTODON_TIMEOUT_SECS", "Mastodon API 待ち時間（秒、3〜60）", "text", "20"),
         ]
     }

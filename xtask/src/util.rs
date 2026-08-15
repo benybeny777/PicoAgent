@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 
@@ -30,9 +31,11 @@ pub fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn client() -> Result<reqwest::blocking::Client> {
+fn client(timeout: Duration) -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(timeout)
         .build()
         .context("HTTP クライアントを作れません")
 }
@@ -54,7 +57,8 @@ pub fn download_to(url: &str, dest: &Path) -> Result<u64> {
     ));
 
     let result = (|| -> Result<u64> {
-        let mut response = client()?
+        // 数GBのモデルを低速回線でも取得できる余裕を持たせつつ、無期限には待たない。
+        let mut response = client(Duration::from_secs(2 * 60 * 60))?
             .get(url)
             .send()
             .with_context(|| format!("取得に失敗しました: {url}"))?;
@@ -80,7 +84,7 @@ pub fn download_to(url: &str, dest: &Path) -> Result<u64> {
 
 /// GitHub API から JSON を取る（リリース情報の参照用）。
 pub fn get_json(url: &str) -> Result<serde_json::Value> {
-    let response = client()?
+    let response = client(Duration::from_secs(60))?
         .get(url)
         .header("accept", "application/vnd.github+json")
         .send()

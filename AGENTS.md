@@ -26,6 +26,17 @@
 - 既に未コミット変更がある場合は、ユーザーまたは別エージェントの作業として扱い、勝手に巻き戻さない。
 - 作業中のスクリーンショット・連番フレーム・変換途中のファイルなど、一時的な作成物はリポジトリ直下の `temp/` 内だけに置く。ルートやソースディレクトリへ `tmp-*` 等を作らない。`temp/` は `.gitignore` で除外し、一時作成物をコミットへ含めない。
 - **透過キャラクターの成果物に、背景の消し残しと誤認されるハロー・矩形・色面・太い外周影を付けない。** 画像四隅のアルファ値だけで合格にせず、透過市松または透明な画面で実表示を確認する。意図した背景が必要な配信画面などは、キャラクター画像ではなく画面側の明示的な背景レイヤーとして分離する。
+- **画像の引き伸ばし拡大は禁止する。** 縦横のピクセル数だけを増やすnearest／bilinear／bicubic／Lanczos等の補間、OS画像API、Pillow、ImageMagick、ブラウザ、CSSによる拡大結果を高精細素材や最終レイヤーへ採用してはならない。Photoshop前の配置正規化も等倍以下かつ縦横比維持に限定する。`animationQualityMode=sharp-expression` の高精細キャラは、`scripts/rebuild-sharp-expression-assets.ps1` だけを正規の再生成入口にする。工程順は「基準寸法で局所差分を合成 → Photoshopの「ディテールを保持 2.0」で全9レイヤーを1780×3600以上へ再サンプリング → 元アルファ再適用 → 連番生成 → キャラ同期」で固定する。Photoshop処理も寸法を大きくするだけでは合格にせず、顔・髪・輪郭の実効解像度を元絵、Photoshop完成レイヤー、実WebViewの拡大表示で比較し、細部が明瞭に保たれた場合だけ採用する。Photoshop処理後も元絵由来のぼけが残る場合は「高精細」として合格させず、高解像度の元絵または局所再制作を用意する。Photoshop拡大後に差分合成スクリプトを再実行して高精細版を890×1800へ戻すことも禁止する。QAレポートへ方式と処理前後の寸法を残す。`cargo xtask sync-characters` は高精細レイヤーが1780×3600未満なら失敗させる。
+- **キャラクターの物理演算機能は廃止済み。** 通常2Dの `secondaryMotion` / `springPhysics` とLive2Dの`physics3`を新規実装・manifest・制作手順へ追加しない。髪・服・身体の自然な動きは、承認済みの同寸キーポーズを連番へ事前描画するか、物理を使わないCubismモーションで表現する。旧パックの物理設定は起動互換のため読込自体を妨げないが、描画へ反映しない。
+- Gemini、Nano Bananaなどブラウザの画像生成・編集サービスは、ユーザーが対象に指定した画像をその作業目的へアップロードして利用してよい。構図変更、ポーズ変更、局所修正、再生成には利用できるが、拡大・超解像・hires-fixには利用しない。元画像と承認済み成果物を上書きせず、候補を別名で保存して比較する。拡大はPhotoshop「ディテールを保持 2.0」だけを許可する。
+- ユーザーが許可した場合、同一キャラクターのLive2D、通常2D、PicoAgent用素材を本人性・ポーズ・パーツ構造の参照として外部画像編集サービスへ添付してよい。利用後に、送信した素材、送信先、参照目的を報告する。関連のないプロジェクトファイルは送信しない。
+- 作業エージェント向けの再利用手順は `.agents/skills/<名前>/SKILL.md` を正本にする。Claude Code用の `.claude/skills/<名前>/SKILL.md` は同名の共通スキルを読むだけの薄い入口とし、手順を複製しない。キャラクター追加・再生成は `.agents/skills/rebuild-picoagent-character/SKILL.md` を使い、会話履歴から個別コマンドを組み直さない。
+- **同じ種類の作業が2回以上発生した、工程順を誤ると成果物が壊れる、混入・公開・破壊・課金の危険がある、または複数エージェントへ引き継ぐ作業は、その作業内で共通スキル化する。** 配布ビルド、キャラクター生成、実画面検証、販売前監査、外部公開はこの対象とする。単発の小修正や一般知識だけの手順は無理にスキルへしない。
+  - 新規作成前に `.agents/skills/` を検索し、目的が重なるスキルがあれば新設せず既存スキルへ統合する。1つの依頼で複数スキルが必要な場合も、責務が重複しない最小構成にする。
+  - スキル名は英小文字・数字・ハイフンだけの動詞始まりとし、`SKILL.md` のfrontmatterは `name` と「何をするか・どの依頼で使うか」を含む `description` だけにする。本文は日本語、命令形、500行未満を目安とし、一般論や作業日記を入れない。
+  - 壊れやすい工程は、正規入口、入力条件、禁止経路、成果物の識別方法、失敗時の停止条件、検証、公開前照合まで書く。単なるコマンド一覧にせず、古い成果物や開発用資産を混ぜない条件を明示する。繰り返し組み直す処理は `scripts/` へ置き、説明を重複させない。
+  - 新規スキルは `skill-creator` の初期化手順で作り、`quick_validate.py` を通す。Pythonが直接使えない環境では `uv run --python 3.12 python ...` を使う。作成後は今回の実タスクで手順どおりに実行して検証し、失敗から得た分岐を同じ作業内で反映する。
+  - Claude Code入口は共通正本を最後まで読む指示だけにし、同名フォルダへ手順・スクリプト・参照資料を複製しない。スキルの追加・更新時はCodex側とClaude側の名前一致、リンク先の存在、重複手順なしを確認する。
 - 修正・作業が完了したら、ユーザーからの個別指示がなくても、作業ツリーの未コミット変更を `git add -A` で全てステージしてコミットし、`origin` へプッシュまで行う。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含めてプッシュする（コミットメッセージは日本語。本ファイルの他ルールに従う）。破壊的な履歴操作（force push・reset --hard など）はしない。
 - **PR のマージは squash merge を使う。** 1 PR = 1 コミットになり `main` の履歴が読みやすい、というだけの理由。なお API 経由のマージは、squash / 通常マージのいずれでも GitHub 側が committer を `noreply@github.com` にして署名するため、`git log` 上は Unverified に見える（GitHub の画面上は Verified）。これは避けられないので気にしない。すでに `origin` に載ったコミットを後から書き換えるのは共有履歴の破壊操作になるので行わない（上のルールのとおり）。
 
@@ -46,6 +57,8 @@
 
 ## 設定値・シークレット
 
+設定項目を追加・変更・削除する作業は、先に `.agents/skills/add-picoagent-setting/SKILL.md` を読む。以下は個別手順ではなく、すべての設定実装へ常時適用する安全規則とする。
+
 - 設定の正本は `src-tauri/src/config.rs`（永続ファイル `app_config_dir/config.json`）。優先順位は **永続ファイル > 環境変数 > ハードコード既定値**。新規設定で環境変数を「正本・保存先」にしてはならない（環境変数は既定値としてのみ参照する）。
 - 数値・閾値・パス・モデル名など「設定として変えうる値」はソースに散らさず `cfg.get(キー, 既定値)` で都度読む。コネクタは自分の設定項目を `config_schema()`（`Vec<Field>`）で申告し、設定画面に自動で並ぶようにする。新しい設定キーを足したら README と SPEC に必ず記載する。
 - 設定画面（右クリック →「設定…」）が唯一の GUI 設定入口。`ui/settings.{html,css,js}` と `commands.rs` の `settings_*` command で構成し、保存後は実行中に反映する（コネクタは `cfg.get()` で都度読むため再起動不要）。
@@ -55,6 +68,8 @@
 
 ## コネクタ開発ルール（このプロジェクトの中核）
 
+プロバイダまたはツールコネクタを追加・変更する作業は、先に `.agents/skills/add-picoagent-connector/SKILL.md` を読む。以下は個別手順ではなく、すべてのコネクタへ常時適用する設計規則とする。
+
 PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント機能（スキル/ツール）」をコネクタとして拡張する。**どちらも決まった場所へファイルを置けば自動登録される**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して `#[path] pub mod` を生成し、各ファイルの `inventory::submit!` で登録されるため、中央の `mod.rs` 編集は不要。スキルは扱いやすいようプロジェクト直下の `skills/<スキル名>/mod.rs` に置く（トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`）。スキル専用の補助モジュール、スクリプト、テンプレート、少量の静的アセットは同じ `skills/<スキル名>/` 配下へ同梱する（例: `skills/chitchat/trends.rs`、`skills/run_command/jobs.rs`、`skills/browser_control/cdp.rs`）。
 
 - **プロバイダコネクタ** は `src-tauri/src/providers/` に置き、`Provider` トレイトを実装して `inventory::submit! { ProviderReg { make: || Box::new(<型>) } }` で登録する。`chat()` は正規形メッセージ（`message.rs`）を受け取り正規形 assistant を返す。プロバイダ固有のワイヤ形式変換は各コネクタ内に閉じ込め、`agent.rs` に漏らさない。
@@ -62,6 +77,7 @@ PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント
 - スキル固有の Rust 補助モジュールは `skills/<スキル名>/*.rs` に置いて `mod xxx;` で読み込む。PowerShell / Python / テンプレート等は `skills/<スキル名>/scripts/` や `skills/<スキル名>/templates/` に置き、必要なら `include_str!` でバイナリへ同梱する。複数スキルで本当に共有するトレイト・型だけを `src-tauri/src/tools/mod.rs` 等の共通層に置く。
 - アプリとスキルが使う外部依存クレートは `src-tauri/Cargo.toml` に集約する。Rust はスキルごとの独立 `Cargo.toml` を持たないため、依存クレート自体を各スキルフォルダに複製しない。例外は、Tauriや製品設定から独立してOSS化を準備する `crates/picoagent-core/` だけで、このcrate自身が必要最小限の依存を申告する。
 - **外部プロセスの起動は `tools::process::command()` を使う**（`Command::new` を直接使わない）。Windows のコンソール窓抑止（CREATE_NO_WINDOW）・中断時の子プロセス回収（kill_on_drop）・stdio の既定を1箇所に集約している。実行は `process::output()` / `output_text()` でタイムアウト付きにする。常駐プロセス（同梱エンジン・AivisSpeech）のように future の終了後も動かし続けるものは同期版の `process::command_sync()` を使う（窓抑止だけを共通化し、stdio と待ち方は用途ごとに指定する）。以前は `hide_window` を各所へコピーする運用で散らばり、抜けたファイルでは Windows で窓が明滅し子プロセスが残った。`tools::process::guard` のテストが**スキルとバックエンド `src-tauri/src/` の両方を走査して**直接起動と自前 `hide_window` を検出する。
+  - **一度きりの実行（起動 → 出力回収 → 終了待ち）を自前で組み立てない。** 同じ処理を書き直すと出力回収の待ち方だけが抜ける。実際に共通層・`whisper_transcribe`・`meeting_recorder` の3箇所が同型の実装を持ち、**どれもタイムアウト後に回収タスクを待ち切っていた**。`sh -c` / `powershell -Command` のように子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を握ったままで終端（EOF）が来ないため、1秒指定が孫の寿命（30秒）まで戻らなかった。進捗表示や中断が要る長時間処理で `child` を自分で持つ場合も、**出力回収の待ちは `process::join_capture()` を通す**（上限を超えたら中断して戻る）。`tools::process::guard` が `timeout(..., wait())` の自前実装を検出する。
 - **`PICOAGENT_COMMAND_ALLOWLIST` でユーザー / AI 指定のコマンドを実行する経路は、`process::is_physical_delete()` による物理削除の拒否も必ず通す。** この判定は以前 `run_command` だけが持っており、同じ allowlist で動くスケジューラには無かった（許可コマンドに `powershell` があれば予約実行から `Remove-Item` を通せた）。`tools::process::guard` のテストが、この設定キーを読むのに判定を通していないファイルを検出して失敗させる。
 - **ストリーミング受信のバイト列は `text::Utf8Stream` を通してデコードする**（チャンクごとに `String::from_utf8_lossy` しない）。HTTP のチャンク境界は文字の途中に落ちるため、直接 lossy 変換すると「まだ続きが来ていないだけ」の末尾バイトが `\u{FFFD}` に置き換わって確定し、日本語の応答に文字化けが混ざる。`text::guard` のテストが `bytes_stream()` を使うファイルでの `from_utf8_lossy` を検出して失敗させる。
 - **設計ガード（`mod guard`）を書くときは走査範囲を自前で決めず、`crate::guard_scan` の `all_sources()` / `skill_sources()` を使う。** 各ガードが独自にディレクトリを歩いていた結果、`tools::process::guard` は `skills/` しか見ておらず、同じ規則を破っていたバックエンド5ファイルを1つも検出できていなかった。**ガードの穴はガードが無いのと同じ。** `guard_scan::guard` のメタガードが自前走査を検出して失敗させる。
@@ -107,7 +123,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
 | `crates/picoagent-core/` | **OSS化準備中の再利用コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。公開準備が整うまでは `publish = false` を保つ |
-| `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで8形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
+| `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで7形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。旧 `talk` はLINE風の `chat` へ移行する。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
 | `src-tauri/src/window_surface.rs` | メインウィンドウを利用者の目の前へ出す共通手順（表示 → 最小化解除 → 前面化）。ホットキー呼び出しと、多重起動時に2つ目の起動が既存ウィンドウを前面化する経路が共有する |
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
 | `src-tauri/src/secret.rs` | シークレット（`password` 型設定）の DPAPI 暗号化／復号（Windows）。非 Windows は平文 |
@@ -150,12 +166,13 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
-| `scripts/build-portrait-2d-character.py` | 背景付きバストアップ1枚から通常2D（1枚絵）パックを作る。背景抜き（rembg + alpha matting）、上端で切れた頭頂部の円弧復元、ハロー検査と透過確認シート出力、`characters/index.json` への登録まで行う。GPU不要で、動きは呼吸と `secondaryMotion` だけ |
+| `scripts/build-portrait-2d-character.py` | 背景付きバストアップ1枚から簡易通常2Dパックを作る。背景抜き、頭頂部の切れ・ハロー検査、透過確認シート、一覧登録まで行う。任意の同寸透過連番で表情・口・視線・髪の動きを追加できるが、補間・拡大・物理演算は行わない |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
 | `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/REVIEW-LOG.md` | **レビューと修正提案の記録**。対応・見送り・保留を理由付きで残す台帳（判定の履歴。進行状況は `HANDOFF.md`、恒久ルールは `AGENTS.md`、仕様は `SPEC.md`） |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
@@ -194,7 +211,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/                    ← キャラクター画像の生成・高精細化（*.py と Windows 専用の *.ps1 / *.cs）
 ├── tools/tha3-runtime/         ← Windows開発用THA3 Python環境（git管理外、製品には含めない）
-├── .claude/                    ← Claude Code の設定（permissions）とセッション開始フック
+├── .agents/skills/             ← 複数の作業エージェントで共有する手順スキルの正本
+├── .claude/                    ← Claude Code の設定、共通スキルへの入口、セッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / SPEC.md / CHANGELOG.md
 ├── HANDOFF.md                  ← 進行中の作業・未確認項目

@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoAgent 設定追加"
+  short_description: "設定保存・画面反映・秘密値・文書同期を安全に実装する"
+  default_prompt: "PicoAgentへ設定項目を追加し、永続化、画面反映、秘密値保護、文書とテストまで同期してください。"

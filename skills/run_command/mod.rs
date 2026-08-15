@@ -1,7 +1,7 @@
 // skills/run_command/mod.rs - allowlist 制限付きのコマンド実行スキル。
 //
 // shell は使わず program + args で起動する。既定は無効で、設定で有効化し、
-// PICOAGENT_COMMAND_ALLOWLIST に一致する prefix だけを実行する。
+// PICOAGENT_COMMAND_ALLOWLIST に完全一致するコマンドだけを実行する。
 //
 // `background=true` のときは待たずに起動して job_id を返す（開発サーバ・長いビルド用）。
 // 起動後の様子見と停止は `command_job` スキルが担う。実体は `jobs.rs`。
@@ -9,7 +9,6 @@
 pub mod jobs;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -42,10 +41,6 @@ pub fn command_root(cfg: &Config) -> PathBuf {
     crate::permissions::primary_root(cfg)
 }
 
-fn command_roots(cfg: &Config) -> Vec<PathBuf> {
-    crate::permissions::allowed_roots(cfg)
-}
-
 fn normalize(base: &Path, input: &str) -> PathBuf {
     let joined = if Path::new(input).is_absolute() {
         PathBuf::from(input)
@@ -66,27 +61,9 @@ fn normalize(base: &Path, input: &str) -> PathBuf {
     out
 }
 
-fn bounded_cwd_in_roots(
-    base: &Path,
-    roots: Vec<PathBuf>,
-    cwd: Option<&str>,
-) -> Result<PathBuf, String> {
-    let target = normalize(base, cwd.unwrap_or("."));
-    for root in roots {
-        let root = normalize(&root, ".");
-        if target == root || target.starts_with(&root) {
-            return Ok(target);
-        }
-    }
-    Err(format!(
-        "許可ルートの外では実行できません: {}",
-        target.display()
-    ))
-}
-
 pub fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
-    let base = command_root(cfg);
-    bounded_cwd_in_roots(&base, command_roots(cfg), cwd)
+    crate::permissions::resolve(cfg, cwd.unwrap_or("."))
+        .map(|path| path.as_path().to_path_buf())
 }
 
 // Windows / Program Files などの保護領域は全スキル共通の permissions で判定する。
@@ -148,13 +125,7 @@ fn allowlist_entries(cfg: &Config) -> Vec<Vec<String>> {
 
 fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
     let tokens = command_tokens(program, args);
-    allowlist_entries(cfg).iter().any(|entry| {
-        entry.len() <= tokens.len()
-            && entry
-                .iter()
-                .zip(tokens.iter())
-                .all(|(allowed, actual)| allowed == actual)
-    })
+    allowlist_entries(cfg).iter().any(|entry| entry == &tokens)
 }
 
 
@@ -181,7 +152,7 @@ pub fn parse_approval_marker(text: &str) -> Option<PendingCommandApproval> {
 
 pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
     format!(
-        "このコマンドはまだ許可されていません。\n\nコマンド: {} {}\n作業ディレクトリ: {}\n理由: {}\n\n実行する場合は次のどれかを送ってください。\n- 「許可」: 今回だけ実行\n- 「永続許可」: 今後も同じコマンド prefix と作業ディレクトリを許可して実行\n- 「キャンセル」: 実行しない",
+        "このコマンドはまだ許可されていません。\n\nコマンド: {} {}\n作業ディレクトリ: {}\n理由: {}\n\n実行する場合は次のどれかを送ってください。\n- 「許可」: 今回だけ実行\n- 「永続許可」: 今後も同じコマンド全体と作業ディレクトリを許可して実行\n- 「キャンセル」: 実行しない",
         pending.program,
         pending.args.join(" "),
         pending.cwd,
@@ -253,7 +224,7 @@ impl Tool for RunCommandTool {
             Field::new("PICOAGENT_COMMAND_ENABLED", "run_command を有効化（true/false）", "text", "false"),
             Field::new(
                 "PICOAGENT_COMMAND_ALLOWLIST",
-                "run_command の許可コマンド（カンマ区切り prefix）",
+                "run_command の許可コマンド（カンマ区切り・完全一致）",
                 "textarea",
                 DEFAULT_ALLOWLIST,
             ),
@@ -382,7 +353,7 @@ pub async fn execute_with_persistent_approval(
             "PICOAGENT_COMMAND_ALLOWLIST".to_string(),
             Value::String(next),
         );
-        saved.push(format!("コマンド prefix `{entry}`"));
+        saved.push(format!("コマンド `{entry}`"));
     }
     if bounded_cwd(cfg, Some(&pending.cwd)).is_err() {
         let entry = cwd.to_string_lossy().to_string();
@@ -434,10 +405,9 @@ async fn execute_approved(
         .current_dir(cwd)
         ;
 
-    let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => return format!("エラー: コマンド起動に失敗しました（{}）", error),
-        Err(_) => return format!("エラー: コマンドが {} 秒でタイムアウトしました。", timeout_secs),
+    let output = match crate::tools::process::output(command, timeout_secs, "コマンド").await {
+        Ok(output) => output,
+        Err(error) => return format!("エラー: {error}"),
     };
     let mut result = format!(
         "終了コード: {}\n作業ディレクトリ: {}\n",
@@ -458,33 +428,54 @@ inventory::submit! { ToolReg { make: || Box::new(RunCommandTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_cwd_in_roots, command_tokens};
+    use super::{allowed, bounded_cwd, command_tokens};
+    use crate::config::Config;
     use crate::tools::process::is_physical_delete;
-    #[cfg(windows)]
-    use std::path::PathBuf;
 
     #[test]
-    fn コマンドトークンをprefix比較用に組み立てる() {
+    fn コマンドトークンを完全一致比較用に組み立てる() {
         assert_eq!(
             command_tokens("git", &["status".to_string(), "--short".to_string()]),
             vec!["git", "status", "--short"]
         );
     }
 
-    // Windows のパス区切り（\）とドライブレターを前提にしたテスト。Linux では \ が
-    // ファイル名の一部として扱われ意味が変わるため Windows 限定で実行する。
     #[test]
-    #[cfg(windows)]
-    fn 実行cwdのルート外を拒否する() {
-        let base = PathBuf::from(r"C:\work\root");
-        assert!(bounded_cwd_in_roots(&base, vec![base.clone()], Some(r"..\other")).is_err());
+    fn 許可コマンドへ後続引数を足しても通らない() {
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_COMMAND_ALLOWLIST", "git diff,cargo test");
+        assert!(allowed(&cfg, "git", &["diff".to_string()]));
+        assert!(!allowed(
+            &cfg,
+            "git",
+            &[
+                "diff".to_string(),
+                "--no-index".to_string(),
+                "C:\\secret.txt".to_string(),
+            ]
+        ));
+        assert!(!allowed(
+            &cfg,
+            "cargo",
+            &[
+                "test".to_string(),
+                "--manifest-path".to_string(),
+                "..\\outside\\Cargo.toml".to_string(),
+            ]
+        ));
     }
 
-    // どの OS でも成り立つ境界チェック（/ 区切り）。
     #[test]
     fn 実行cwdのルート外を拒否する_スラッシュ区切り() {
-        let base = std::env::temp_dir().join("picoagent-cmd-test");
-        assert!(bounded_cwd_in_roots(&base, vec![base.clone()], Some("../other")).is_err());
+        let base = std::env::temp_dir().join(format!(
+            "picoagent-cmd-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", base.to_string_lossy().as_ref());
+        assert!(bounded_cwd(&cfg, Some("../other")).is_err());
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
@@ -499,6 +490,13 @@ mod tests {
             &["/C".to_string(), "del target.txt".to_string()]
         ));
         assert!(is_physical_delete("git", &["clean".to_string(), "-fd".to_string()]));
+        assert!(is_physical_delete(
+            "cmd",
+            &[
+                "/C".to_string(),
+                "powershell -Command Remove-Item target.txt".to_string(),
+            ]
+        ));
         assert!(!is_physical_delete("git", &["status".to_string()]));
     }
 
