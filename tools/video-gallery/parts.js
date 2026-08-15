@@ -1,5 +1,6 @@
 const LAYER_NAMES = [
-  "base", "blink_half", "blink_closed", "mouth_closed", "mouth_open",
+  "base", "blink_17", "blink_33", "blink_half", "blink_67", "blink_83", "blink_closed",
+  "mouth_closed", "mouth_17", "mouth_33", "mouth_half", "mouth_67", "mouth_83", "mouth_open",
   "gaze_left", "gaze_right", "expression_happy", "expression_sad",
   "expression_angry", "expression_shy", "expression_surprised", "expression_confused",
 ];

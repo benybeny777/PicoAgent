@@ -315,9 +315,18 @@ fn validate_sharp_expression_pack(
 
 const FULL_MOTION_LAYERS: &[&str] = &[
     "base",
+    "blink_17",
+    "blink_33",
     "blink_half",
+    "blink_67",
+    "blink_83",
     "blink_closed",
     "mouth_closed",
+    "mouth_17",
+    "mouth_33",
+    "mouth_half",
+    "mouth_67",
+    "mouth_83",
     "mouth_open",
     "gaze_left",
     "gaze_right",

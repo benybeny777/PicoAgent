@@ -1,0 +1,4 @@
+interface:
+  display_name: "Claude設計レビュー"
+  short_description: "PicoAgent全改修の設計を実装前にClaude CLIと照合する"
+  default_prompt: "Use $review-with-claude to review this PicoAgent change design before implementation."

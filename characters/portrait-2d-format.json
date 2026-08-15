@@ -3,9 +3,18 @@
   "physics": false,
   "layers": [
     "base",
+    "blink_17",
+    "blink_33",
     "blink_half",
+    "blink_67",
+    "blink_83",
     "blink_closed",
     "mouth_closed",
+    "mouth_17",
+    "mouth_33",
+    "mouth_half",
+    "mouth_67",
+    "mouth_83",
     "mouth_open",
     "gaze_left",
     "gaze_right",
@@ -18,27 +27,27 @@
   ],
   "animations": {
     "idle": {
-      "frames": 24,
-      "minUniqueFrames": 12,
-      "fps": 3.2,
+      "frames": 48,
+      "minUniqueFrames": 24,
+      "fps": 12.0,
       "motion": "live2d-idle"
     },
     "thinking": {
-      "frames": 24,
-      "minUniqueFrames": 12,
-      "fps": 7.0,
+      "frames": 36,
+      "minUniqueFrames": 24,
+      "fps": 12.0,
       "motion": "live2d-thinking"
     },
     "talking": {
-      "frames": 24,
-      "minUniqueFrames": 12,
-      "fps": 8.0,
+      "frames": 42,
+      "minUniqueFrames": 28,
+      "fps": 15.0,
       "motion": "live2d-talking"
     },
     "sad": {
-      "frames": 12,
-      "minUniqueFrames": 8,
-      "fps": 4.2,
+      "frames": 24,
+      "minUniqueFrames": 16,
+      "fps": 12.0,
       "motion": "live2d-sad"
     }
   },

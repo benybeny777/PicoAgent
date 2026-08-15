@@ -30,24 +30,24 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 ## 表情差分と透過
 
 - 画像生成サービスが返した全身画像をそのまま状態フレームにしない。目と口の局所パッチだけを基準画像へ合成し、マスク外の画素を同一に保つ。
-- 半目は基準目と閉じ目の中間から作り、下まぶたを巻き込まない。自動モーションOFF時は必ず中立の目と口へ戻す。
+- まばたきは開眼を含む7段階、口パクは閉口から最大開口まで7段階を作る。隣接段階で開閉量が単調に変わり、下まぶたを巻き込まない。自動モーションOFF時は必ず中立の目と口へ戻す。
 - 専用クロマ背景では、外周だけでなく腕と胴の間・髪の隙間など閉じた背景色も除去する。色かぶり除去、柔らかいマット、不透明な被写体色から半透明縁への色伸長を組み合わせる。
 - 透過素材は白／黒／暖色背景へ原寸合成し、髪や服の周囲に背景色、閉じた色面、矩形、太い縁がないことを確認する。
 - `secondaryMotion`、`springPhysics`、Live2Dの`physics3`を実行機能として使わない。髪・服・身体の動きは、承認済みのキーポーズを同寸連番へ事前描画して表現する。
 - 通常、笑顔、考え中、悲しみ、会話は、顔全体を拡縮せず目元と口元で判別できる差を付ける。静止画1枚ではなく複数時点を比較する。
-- 高品質試作は84フレームを標準とし、待機24、考え中24、会話24、悲しみ12を基準にする。
+- 高品質試作は150フレームを標準とし、待機48、考え中36、会話42、悲しみ24を基準にする。
 
 ## バストアップ1枚からの簡易通常2D
 
 - 形式正本を `characters/portrait-2d-format.json`、manifestひな形を `assets/portrait-2d-template/character.template.json`、正規生成入口を `scripts/build-portrait-2d-character.py` に限定する。未完成の試作キャラ、仮の名前・人格・年齢、販売許可をスクリプトと同じPRへ混ぜない。
 - 基準画像は頭頂部と左右に余白があり、胸元または腰まで輪郭が分かる画像を使う。上端へ被写体が接する場合は停止し、既存画素の補間・引き伸ばしで頭頂部を復元しない。
 - 物理演算なしでも髪・服を動かす場合は、同寸の透過連番を `--frames-dir` の `idle` / `thinking` / `talking` / `sad` へ置き、入力画像をそのまま再生する。
-- 連番の品質下限を、待機24コマ・固有12枚、考え中24コマ・固有12枚、会話24コマ・固有12枚、悲しみ12コマ・固有8枚とする。内容ハッシュが同じ複製は固有絵に数えない。既存通常2Dもこの下限へ揃える。
-- `--layers-dir` は基準 `base` に加え、`blink_half` / `blink_closed`、`mouth_closed` / `mouth_open`、`gaze_left` / `gaze_right`、`expression_happy` / `expression_sad` / `expression_angry` / `expression_shy` / `expression_surprised` / `expression_confused` の計13レイヤーを必須にする。
+- 連番の品質下限を、待機48コマ・固有24枚・12fps、考え中36コマ・固有24枚・12fps、会話42コマ・固有28枚・15fps、悲しみ24コマ・固有16枚・12fpsとする。内容ハッシュが同じ複製は固有絵に数えない。既存通常2Dもこの下限へ揃える。
+- `--layers-dir` は基準 `base`、`blink_17` / `blink_33` / `blink_half` / `blink_67` / `blink_83` / `blink_closed`、`mouth_closed` / `mouth_17` / `mouth_33` / `mouth_half` / `mouth_67` / `mouth_83` / `mouth_open`、左右視線、感情6種の計22レイヤーを必須にする。
 - まばたき、音声同期口パク、左右視線、喜び、悲しみ、怒り、恥ずかしさ、驚き、困惑を別画像で判別できるようにする。顔全体の拡縮や同一画像の色替えだけを表情差分として採用しない。
 - Nano Banana等はユーザーが許可した基準画像だけへ使う。同一人物・構図・キャンバスを維持し、目、口、視線、感情、髪・服の小さな動きだけを変える。元画像を上書きせず候補を別名で保存し、超解像・hires-fixには使わない。
 - 候補を4〜8枚ずつ作るたびにClaude CLIへ基準画像、候補、透過確認シートを渡し、「採用／条件付き採用／不採用」と「ブロッカー／軽微事項」を別々に判定させる。本人性、キャンバスずれ、顔・髪・服の不要変化、背景残りを直してから次のバッチへ進む。Claudeの判定だけで採用しない。
-- 完成後は `tools/video-gallery/parts.html` で13レイヤーと状態別連番を分類表示し、原寸ダイアログで確認する。`node tools/video-gallery/check.mjs` を実行し、動画一覧から画像パーツ一覧へ辿れることも検査する。
+- 完成後は `tools/video-gallery/parts.html` で22レイヤーと状態別連番を分類表示し、原寸ダイアログで確認する。`node tools/video-gallery/check.mjs` を実行し、動画一覧から画像パーツ一覧へ辿れることも検査する。
 
 ## 外部サービスとレビュー
 
@@ -62,7 +62,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 ## 再構築と検証
 
 ```powershell
-uv run python scripts/build-character-animations.py --character-id <id>
+uv run --with pillow --with numpy --with opencv-python-headless python scripts/build-character-animations.py --character-id <id>
 cargo xtask sync-characters
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml

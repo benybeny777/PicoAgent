@@ -23,9 +23,9 @@
     }
   },
   "animations": {
-    "idle": { "frames": 24, "fps": 3.2, "motion": "live2d-idle", "framePaths": [] },
-    "thinking": { "frames": 24, "fps": 7.0, "motion": "live2d-thinking", "framePaths": [] },
-    "talking": { "frames": 24, "fps": 8.0, "motion": "live2d-talking", "framePaths": [] },
-    "sad": { "frames": 12, "fps": 4.2, "motion": "live2d-sad", "framePaths": [] }
+    "idle": { "frames": 48, "fps": 12.0, "motion": "live2d-idle", "framePaths": [] },
+    "thinking": { "frames": 36, "fps": 12.0, "motion": "live2d-thinking", "framePaths": [] },
+    "talking": { "frames": 42, "fps": 15.0, "motion": "live2d-talking", "framePaths": [] },
+    "sad": { "frames": 24, "fps": 12.0, "motion": "live2d-sad", "framePaths": [] }
   }
 }

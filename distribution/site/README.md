@@ -38,9 +38,9 @@ Live2Dの「ひより」は動作例です。ほかのモデルは下の一覧�
 | **こはる** — 親しみやすい作業相棒 | ![こはる通常](assets/character-koharu.webp) | ![こはる配信](assets/character-koharu-stream.webp) |
 | **セナ** — 凛とした歌姫系作業相棒 | ![セナ通常](assets/character-sena.webp) | ![セナ配信](assets/character-sena-stream.webp) |
 | **ノア** — 上品な吸血姫風メイド | ![ノア通常](assets/character-noa.webp) | ![ノア配信](assets/character-noa-stream.webp) |
-| **実写2Dテスト** — 84フレームと局所表情を持つ成人キャラクター | ![実写通常](assets/character-photoreal-prototype.webp) | ![実写配信](assets/character-photoreal-prototype-stream.webp) |
+| **実写2Dテスト** — 150フレームと目・口7段階を持つ成人キャラクター | ![実写通常](assets/character-photoreal-prototype.webp) | ![実写配信](assets/character-photoreal-prototype-stream.webp) |
 
-全7体が、まばたき、口パク、視線、喜び／悲しみ、待機モーションに対応します。通常2Dは84フレームへ統一し、髪や服の動きも物理演算ではなく事前描画した連番で表現します。
+全7体が、目7段階のまばたき、口7段階の口パク、視線、喜び／悲しみ、待機モーションに対応します。通常2Dは150フレームへ統一し、髪や服の動きも物理演算ではなく事前描画した連番で表現します。
 
 低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上、チャット／バーの小型アイコンは首上を初期構図にします。利用者が保存したキャラ別構図は初期値より優先します。
 

@@ -13,7 +13,17 @@ const template = await readJson(
 
 assert.equal(format.format, "picoagent-portrait-2d-v1");
 assert.equal(format.physics, false);
-assert.equal(format.layers.length, 13);
+assert.equal(format.layers.length, 22);
+assert.deepEqual(
+  format.layers.filter(name => name === "base" || name.startsWith("blink_")),
+  ["base", "blink_17", "blink_33", "blink_half", "blink_67", "blink_83", "blink_closed"],
+  "まばたきは開眼を含む7段階",
+);
+assert.deepEqual(
+  format.layers.filter(name => name.startsWith("mouth_")),
+  ["mouth_closed", "mouth_17", "mouth_33", "mouth_half", "mouth_67", "mouth_83", "mouth_open"],
+  "口パクは閉口から最大開口まで7段階",
+);
 assert.equal(template.characterFormat, format.format);
 assert.equal("secondaryMotion" in template, false);
 assert.equal("springPhysics" in template, false);

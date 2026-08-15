@@ -900,14 +900,14 @@ function animate(now) {
 animationRequestId = requestAnimationFrame(animate);
 
 // ── 疑似Live2Dリグ ─────────────────────────────────────────────────
-// layers/（base・mouth_open/closed・blink_half/closed）は「同一ポーズの全身差分絵」。
+// layers/ の目7段階・口7段階は「同一ポーズの全身差分絵」。
 // 読み上げ中はフレームアニメの代わりに差分絵を切り替え（PNGTuber方式）、
 // WebAudio の振幅解析で実際の声量に合わせて口を動かし、ランダムにまばたきする。
 let rigAvailable = false; // 選択中キャラに layers 素材が揃っているか
 let rigGazeAvailable = false; // 左右視線レイヤーも使えるか
 let rigActive = false;
 let rigFace = "";          // 表示中の差分名（無駄な src 再設定を避ける）
-let rigMouthOpen = false;  // 口の開閉（振幅解析またはタイマーが更新）
+let rigMouthStage = 0;     // 口の開き段階（0=閉口、6=最大開口）
 let rigBlinkPhase = null;  // まばたき中の差分名（null = まばたき中でない）
 let rigLookDirection = 0;  // -1=左、0=正面、1=右
 let rigGazeSyncAt = 0;     // カーソル追従を反映した時刻（mousemove の間引き用）
@@ -938,7 +938,10 @@ async function probeRigLayers() {
     img.onerror = () => resolve(false);
     img.src = layerUrl(name);
   });
-  const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
+  const names = [
+    "base", "blink_17", "blink_33", "blink_half", "blink_67", "blink_83", "blink_closed",
+    "mouth_closed", "mouth_17", "mouth_33", "mouth_half", "mouth_67", "mouth_83", "mouth_open",
+  ];
   const results = await Promise.all(names.map(probe));
   rigAvailable = results.every(Boolean);
   if (rigAvailable) {
@@ -966,7 +969,10 @@ function rigRefresh() {
     wake: "expression_surprised",
   };
   const expression = expressionByMotion[character.dataset.motion] || null;
-  const name = blink || (rigMouthOpen ? "mouth_open" : (expression || gaze));
+  const mouthLayers = [
+    "mouth_closed", "mouth_17", "mouth_33", "mouth_half", "mouth_67", "mouth_83", "mouth_open",
+  ];
+  const name = blink || (rigMouthStage > 0 ? mouthLayers[rigMouthStage] : (expression || gaze));
   if (rigFace === name) return;
   rigFace = name;
   petSprite.src = layerUrl(name);
@@ -990,7 +996,7 @@ function scheduleGaze() {
   }, 8000 + Math.random() * 6000);
 }
 
-// まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
+// まばたき: 開眼を含む7段階を約240msで往復し、1.4〜4.2秒間隔で繰り返す。
 function scheduleBlink() {
   clearTimeout(rigBlinkTimer);
   if (!rigActive) return;
@@ -1008,12 +1014,15 @@ function scheduleBlink() {
         resolve();
       }, ms);
     });
-    await step("blink_half", sleepy ? 160 : 100);
-    if (!rigActive) return;
-    await step("blink_closed", 140);
-    if (!rigActive) return;
-    await step("blink_half", sleepy ? 280 : 100);
-    if (!rigActive) return;
+    const blinkSequence = [
+      ["blink_17", 20], ["blink_33", 20], ["blink_half", 20], ["blink_67", 20],
+      ["blink_83", 20], ["blink_closed", 36], ["blink_83", 20], ["blink_67", 20],
+      ["blink_half", 20], ["blink_33", 20], ["blink_17", 20],
+    ];
+    for (const [phase, duration] of blinkSequence) {
+      await step(phase, sleepy ? Math.round(duration * 2.2) : duration);
+      if (!rigActive) return;
+    }
     rigBlinkPhase = null;
     rigRefresh();
     scheduleBlink();
@@ -1032,7 +1041,7 @@ function detachLipSyncAudio() {
   rigSource = null;
   rigAnalyser = null;
   rigMouthLevel = 0;
-  rigMouthOpen = false;
+  rigMouthStage = 0;
   live2dMouth = -1;
   rigRefresh();
 }
@@ -1098,17 +1107,20 @@ function attachLipSync(audio) {
     logApp("warn", "リップシンクの音声解析を初期化できませんでした（タイマー式で継続）", errorDetail(error));
   }
   if (useTimer) {
+    const timerStages = [0, 2, 4, 6, 5, 3, 1];
+    let timerIndex = 0;
     rigMouthTimer = setInterval(() => {
       if (voiceVolume <= 0.001) {
-        rigMouthOpen = false;
+        rigMouthStage = 0;
         live2dMouth = 0;
         rigRefresh();
         return;
       }
-      rigMouthOpen = !rigMouthOpen;
+      timerIndex = (timerIndex + 1) % timerStages.length;
+      rigMouthStage = timerStages[timerIndex];
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
-      if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
+      if (live2dActive) live2dMouth = rigMouthStage / 6 * 0.58;
       else rigRefresh();
     }, 150);
     return;
@@ -1143,7 +1155,10 @@ function attachLipSync(audio) {
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
     } else {
-      rigMouthOpen = rigMouthLevel > 0.3;
+      const scaled = Math.max(0, Math.min(6, rigMouthLevel / 0.78 * 6));
+      const upper = rigMouthStage + 0.62;
+      const lower = rigMouthStage - 0.62;
+      if (scaled >= upper || scaled <= lower) rigMouthStage = Math.round(scaled);
       rigRefresh();
     }
     rigVolFrame = requestAnimationFrame(analyserLoop);
@@ -1156,7 +1171,7 @@ function startRig() {
   if (rigActive) return;
   rigActive = true;
   rigFace = "";
-  rigMouthOpen = false;
+  rigMouthStage = 0;
   rigBlinkPhase = null;
   rigLookDirection = 0;
   rigRefresh();
@@ -4162,7 +4177,7 @@ function applyVoiceVolume(value) {
   if (currentVoice) currentVoice.volume = voiceVolume;
   if (voiceVolume <= 0.001) {
     rigMouthLevel = 0;
-    rigMouthOpen = false;
+    rigMouthStage = 0;
     live2dMouth = 0;
     rigRefresh();
     if (animationName === "talking") setAnimation("idle", true);

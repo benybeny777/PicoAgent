@@ -68,7 +68,7 @@
       <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />84フレーム／局所表情</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />150フレーム／目・口7段階</sub></td>
     </tr>
   </table>
   <sub>
@@ -82,7 +82,7 @@
 
 ### キャラクター別モーション対応
 
-`◎` は専用素材またはモデルパラメータ、`○` は共通の状態モーションです。PNGのフル仕様は `motionProfile=full` で宣言し、必要な9レイヤーが1枚でも欠けると同期テストが失敗します。
+`◎` は専用素材またはモデルパラメータ、`○` は共通の状態モーションです。PNGのフル仕様は `motionProfile=full` で宣言し、目7段階・口7段階を含む必要な18レイヤーが1枚でも欠けると同期テストが失敗します。
 
 | キャラクター | 形式 | 状態動作 | まばたき | 口パク | 視線 | 感情表情 |
 |---|---|---:|---:|---:|---:|---:|
@@ -183,7 +183,7 @@ uv run --with pillow --with numpy --with rembg --with onnxruntime \
 
 スクリプトは背景抜き（rembg + alpha matting）後に、頭頂部が上端で切れていないか、上の四隅が透過しているか、半透明の縁に背景色のハローが残っていないかを検査します。頭が切れた素材を既存画素の引き伸ばしで補うことはせず、余白を含む元画像への差し替えを求めます。市松・暗色・白・緑へ重ねた確認シートを `temp/qa-<ID>.png` へ書き出すので、必ず目で見てから採用してください。生成後は `cargo xtask sync-characters` で配信コピーへ反映します。
 
-`--frames-dir` は `idle/`、`thinking/`、`talking/`、`sad/` の各フォルダに、基準画像と同じ寸法のPNGを名前順で置きます。指定する状態は、待機・考え中・会話を各24コマ・固有12枚、悲しみを12コマ・固有8枚以上とします。開閉の中間、髪や服の遅れも別画像にし、同じ画像を複製しただけでは検査を通りません。未指定の状態は基準画像1枚へ戻ります。Nano Banana等で候補を作る場合も、拡大用途には使わず、同じ人物・構図・キャンバスを維持した別ファイルとして保存してから渡してください。形式正本は `characters/portrait-2d-format.json`、manifestひな形は `.agents/skills/rebuild-picoagent-character/assets/portrait-2d-template/character.template.json` です。詳細は[キャラクター画像の準備手順](characters/README.md)を参照してください。
+`--frames-dir` は `idle/`、`thinking/`、`talking/`、`sad/` の各フォルダに、基準画像と同じ寸法のPNGを名前順で置きます。指定する状態は、待機48コマ・固有24枚、考え中36コマ・固有24枚、会話42コマ・固有28枚、悲しみ24コマ・固有16枚以上とします。開閉の中間、髪や服の遅れも別画像にし、同じ画像を複製しただけでは検査を通りません。未指定の状態は基準画像1枚へ戻ります。Nano Banana等で候補を作る場合も、拡大用途には使わず、同じ人物・構図・キャンバスを維持した別ファイルとして保存してから渡してください。形式正本は `characters/portrait-2d-format.json`、manifestひな形は `.agents/skills/rebuild-picoagent-character/assets/portrait-2d-template/character.template.json` です。詳細は[キャラクター画像の準備手順](characters/README.md)を参照してください。
 
 ### 1枚絵から動く自作キャラクターを追加する（THA3）
 

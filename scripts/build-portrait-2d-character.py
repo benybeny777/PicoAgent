@@ -153,7 +153,10 @@ def load_action_frames(
 
 
 def load_rig_layers(
-    layers_dir: Path | None, expected_size: tuple[int, int], background_session: object
+    layers_dir: Path | None,
+    base: Image.Image,
+    expected_size: tuple[int, int],
+    background_session: object,
 ) -> dict[str, Image.Image]:
     """まばたき・口・視線・感情の同一ポーズ差分を読む。"""
     if layers_dir is None:
@@ -177,8 +180,19 @@ def load_rig_layers(
         check_no_halo(image)
         layers[name] = image.copy()
 
+    blink_names = [
+        "base", "blink_17", "blink_33", "blink_half", "blink_67", "blink_83", "blink_closed",
+    ]
+    mouth_names = [
+        "mouth_closed", "mouth_17", "mouth_33", "mouth_half", "mouth_67", "mouth_83", "mouth_open",
+    ]
+    blink_images = [base, *(layers[name] for name in blink_names[1:])]
+    for label, images in (("まばたき", blink_images), ("口パク", [layers[name] for name in mouth_names])):
+        unique = {hashlib.sha256(image.tobytes()).digest() for image in images}
+        if len(unique) != 7:
+            raise ValueError(f"{label}の7段階に同一内容の画像があります。全段階を固有画像にしてください。")
+
     for left, right in [
-        ("blink_half", "blink_closed"), ("mouth_closed", "mouth_open"),
         ("gaze_left", "gaze_right"), ("expression_happy", "expression_sad"),
         ("expression_angry", "expression_shy"),
         ("expression_surprised", "expression_confused"),
@@ -331,7 +345,7 @@ def main(argv: list[str]) -> int:
     ensure_crown_not_clipped(filled)
     check_no_halo(filled)
     action_frames = load_action_frames(args.frames_dir, filled.size, background_session)
-    rig_layers = load_rig_layers(args.layers_dir, filled.size, background_session)
+    rig_layers = load_rig_layers(args.layers_dir, filled, filled.size, background_session)
 
     destination.mkdir(parents=True, exist_ok=True)
     filled.save(preview)
