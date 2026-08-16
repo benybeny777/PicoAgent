@@ -1,3 +1,5 @@
+> **[PicoAgent 公式ページ・Windowsベータ版ダウンロード](https://benybeny777.github.io/PicoAgent-Distribution/)**
+
 <div align="center">
   <h1>🐾 PicoAgent</h1>
   <p><strong>キャラクターとフキダシだけの透明デスクトップペット。<br />叩く AI もエージェント機能も、コネクタを足すだけで増やせる。</strong></p>
