@@ -268,6 +268,8 @@ pub fn run() {
                     state.messages.lock().unwrap().extend(recent);
                 }
                 Ok(_) => {}
+                // 中身が分からない原本は `load_recent` が保存禁止に印を付けているので、
+                // このあと会話しても短い新規履歴で上書きされない。
                 Err(error) => log_paths::append_app_log(
                     app.handle(),
                     &format!(

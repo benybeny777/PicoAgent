@@ -6,7 +6,9 @@
 // 話す」ことができ、別キャラの一人称・自己紹介が混ざらない。設定ではなく対話データ
 // なので config.json とは分ける。
 
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use tauri::{AppHandle, Manager};
 
@@ -42,6 +44,32 @@ fn sanitize(character_id: &str) -> String {
 
 pub fn path(app: &AppHandle, character_id: &str) -> anyhow::Result<PathBuf> {
     Ok(data_dir(app)?.join(format!("history-{}.json", sanitize(character_id))))
+}
+
+/// 読み込みに失敗した履歴ファイル（＝中身が分からない原本）を持つキャラクターID。
+/// 履歴は「全部読んで全部書き戻す」更新なので、読めないまま空で続けて保存すると、
+/// 読めなかっただけの原本が短い新規履歴で丸ごと消える。読めたことを確認できるまで
+/// 保存を止め、原本をそのまま残す。
+fn unreadable() -> &'static Mutex<HashSet<String>> {
+    static UNREADABLE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    UNREADABLE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// 履歴を読めなかったキャラクターの保存を止める。
+fn block_saving(character_id: &str) {
+    unreadable().lock().unwrap().insert(sanitize(character_id));
+}
+
+/// 原本の中身が分かった（読めた・退避した・利用者が消した）ので保存を再開する。
+fn allow_saving(character_id: &str) {
+    unreadable().lock().unwrap().remove(&sanitize(character_id));
+}
+
+fn saving_blocked(character_id: &str) -> bool {
+    unreadable()
+        .lock()
+        .unwrap()
+        .contains(&sanitize(character_id))
 }
 
 /// 旧仕様の単一ファイル history.json を、指定キャラクターのファイルへ一度だけ移行する。
@@ -152,8 +180,14 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
     let target = path(app, character_id)?;
     let text = match std::fs::read_to_string(&target) {
         Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            allow_saving(character_id);
+            return Ok(Vec::new());
+        }
         Err(error) => {
+            // 読めた保証が無い原本を、このあとの保存で上書きさせない。
+            // 起動は続けられるが、保存を許すと「読めなかっただけ」の会話が消える。
+            block_saving(character_id);
             return Err(anyhow::anyhow!(
                 "会話履歴を読み込めません: {} ({error})",
                 target.display()
@@ -166,6 +200,7 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
         Ok(all) => all,
         Err(error) => {
             let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+                block_saving(character_id);
                 anyhow::anyhow!("壊れた会話履歴を退避できません。上書きを中止しました: {error}")
             })?;
             crate::log_paths::append_app_log(
@@ -178,12 +213,23 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
             Vec::new()
         }
     };
+    // ここまで来たら原本の中身は分かっている（読めた／退避済み）ので保存を再開してよい。
+    allow_saving(character_id);
     let start = all.len().saturating_sub(MAX_CONTEXT_LOAD);
     Ok(all[start..].to_vec())
 }
 
 /// 指定キャラクターの会話（system 以外）を末尾 MAX_PERSIST 件だけ保存する。
 pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
+    if saving_blocked(character_id) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!(
+                "会話履歴を読めなかったため保存を止めています（原本を保護中）: {character_id}"
+            ),
+        );
+        return;
+    }
     let convo: Vec<&Message> = messages.iter().filter(|m| m.role != "system").collect();
     let start = convo.len().saturating_sub(MAX_PERSIST);
     let recent = &convo[start..];
@@ -213,16 +259,57 @@ pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
     let target = path(app, character_id)?;
     let _guard = crate::store::lock_state(&lock_name(&target));
     match std::fs::remove_file(target) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // 利用者自身が消したので、読めなかった原本を守る必要も無くなる。
+        Ok(()) => {
+            allow_saving(character_id);
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            allow_saving(character_id);
+            Ok(())
+        }
         Err(error) => Err(error.into()),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_legacy_greeting_guidance, LEGACY_GREETING_GUIDANCE};
+    use super::{
+        allow_saving, block_saving, clean_legacy_greeting_guidance, saving_blocked,
+        LEGACY_GREETING_GUIDANCE,
+    };
     use crate::message::Message;
+
+    #[test]
+    fn 読めなかった履歴はキャラ単位で保存を止めて復旧で再開する() {
+        block_saving("test-unreadable");
+        assert!(saving_blocked("test-unreadable"));
+        // ファイル名と同じ正規化を通すので、区切り文字違いでも同じ原本として扱う。
+        assert!(saving_blocked("test-unreadable!"));
+        assert!(!saving_blocked("test-readable"));
+        allow_saving("test-unreadable");
+        assert!(!saving_blocked("test-unreadable"));
+    }
+
+    #[test]
+    fn 履歴保存は保存禁止の確認を通す() {
+        // 履歴は「全部読んで全部書き戻す」更新なので、読めないまま空で保存すると
+        // 原本が丸ごと消える。確認が外れていないことをソースで固定する。
+        let source = crate::guard_scan::all_sources()
+            .into_iter()
+            .find(|source| source.name == "history.rs")
+            .expect("history.rs を走査できません");
+        let save = source
+            .body()
+            .split_once("pub fn save(")
+            .expect("save() がありません")
+            .1;
+        let body = save.split_once("\n}").expect("関数の終端がありません").0;
+        assert!(
+            body.contains("saving_blocked("),
+            "読めなかった履歴の上書きを止めるため、save() の先頭で saving_blocked() を確認してください"
+        );
+    }
 
     #[test]
     fn 全キャラ共通の旧挨拶ガイドをユーザー原文へ戻す() {
