@@ -25,6 +25,7 @@ assert.deepEqual(
   "口パクは閉口から最大開口まで7段階",
 );
 assert.equal(template.characterFormat, format.format);
+assert.equal(typeof template.frameGeneration, "string");
 assert.equal("secondaryMotion" in template, false);
 assert.equal("springPhysics" in template, false);
 for (const [state, rule] of Object.entries(format.animations)) {
@@ -48,18 +49,39 @@ for (const entry of await readdir(charactersRoot, { withFileTypes: true })) {
     assert.equal("secondaryMotion" in variant, false, `${entry.name}: variant secondaryMotionは廃止済み`);
     assert.equal("springPhysics" in variant, false, `${entry.name}: variant springPhysicsは廃止済み`);
   }
-  if (manifest.live2d || manifest.motionProfile !== "full") continue;
+  if (manifest.live2d) continue;
+  const isPortrait = manifest.characterFormat === format.format;
+  if (isPortrait) {
+    assert.match(manifest.frameGeneration || "", /^[0-9a-f]{16}$/, `${entry.name}: frameGeneration`);
+    for (const layer of format.layers) {
+      await readFile(new URL(`characters/${entry.name}/layers/${layer}.png`, root));
+    }
+  }
+  if (manifest.motionProfile !== "full" && !isPortrait) continue;
   for (const [state, rule] of Object.entries(format.animations)) {
     const paths = manifest.animations?.[state]?.framePaths || [];
     const hashes = new Set();
     for (const relative of paths) {
       const bytes = await readFile(join(fileURLToPath(new URL(`characters/${entry.name}/`, root)), relative));
+      if (isPortrait) {
+        assert.ok(
+          relative.startsWith(`frames/${manifest.frameGeneration}/`),
+          `${entry.name}/${state}: 現世代以外を参照`,
+        );
+      }
       hashes.add(createHash("sha256").update(bytes).digest("hex"));
     }
     assert.ok(paths.length >= rule.frames, `${entry.name}/${state}: 総コマ数が不足`);
     assert.ok(hashes.size >= rule.minUniqueFrames, `${entry.name}/${state}: 固有絵が不足`);
   }
 }
+
+const builder = await readFile(new URL("scripts/build-portrait-2d-character.py", root), "utf8");
+assert.match(builder, /"frameGeneration": generation/);
+assert.match(builder, /f"frames\/\{generation\}\//);
+assert.doesNotMatch(builder, /action_paths\.get\(state, \["preview\.png"\]\)/);
+assert.equal((builder.match(/required=True/g) || []).length >= 3, true, "連番・22レイヤー・顔ROIを必須にする");
+assert.match(builder, /ensure_changes_inside_roi/, "顔ROI外のRGBA一致を検査する");
 
 const renderer = await readFile(new URL("ui/renderer.js", root), "utf8");
 assert.match(renderer, /model\.internalModel\.physics = null;/, "Live2D物理を無効化する");

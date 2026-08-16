@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-# build-portrait-2d-character.py - 1枚のバストアップ画像から通常2D（1枚絵）キャラクターパックを作る。
+# build-portrait-2d-character.py - バストアップ原画と承認済み差分から通常2Dキャラクターパックを作る。
 #
-# こはる／セナ／ノアと同じ「preview.png + character.json だけ」の構成を出力する。
-# THA3 と違い GPU も Python 常駐環境も要らず、1枚絵へ軽い状態モーションだけを適用する。
+# THA3 と違い GPU も Python 常駐環境も要らない。原画をbaseにした21表情差分（計22レイヤー）と、
+# 物理演算を使わない状態別150フレームを検査して出力する。
 #
 # 実行例:
 #   uv run --with pillow --with numpy --with rembg --with onnxruntime \
 #       python scripts/build-portrait-2d-character.py \
-#       --input temp/source-raw.png --id my-character --name マイキャラ
+#       --input temp/source-raw.png --id my-character --name マイキャラ \
+#       --layers-dir temp/my-character-layers --face-roi 0.25,0.08,0.5,0.38 \
+#       --frames-dir temp/my-character-frames
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import shutil
 import sys
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -40,17 +44,21 @@ def remove_background(source: Path, session: object) -> Image.Image:
     """写真の背景を抜いて RGBA を返す。"""
     from rembg import remove
 
-    image = Image.open(source).convert("RGBA")
+    with Image.open(source) as opened:
+        image = opened.convert("RGBA")
     # alpha matting は髪の毛先の半透明を残しつつ、背景色の混ざりを前景色へ置き換える
     # （これを省くと暗い画面でベージュのハローが出る）。
-    return remove(
-        image,
-        session=session,
-        alpha_matting=True,
-        alpha_matting_foreground_threshold=248,
-        alpha_matting_background_threshold=12,
-        alpha_matting_erode_size=6,
-    )
+    try:
+        return remove(
+            image,
+            session=session,
+            alpha_matting=True,
+            alpha_matting_foreground_threshold=248,
+            alpha_matting_background_threshold=12,
+            alpha_matting_erode_size=6,
+        )
+    finally:
+        image.close()
 
 
 def ensure_crown_not_clipped(image: Image.Image) -> None:
@@ -113,35 +121,38 @@ def write_qa_sheet(image: Image.Image, path: Path) -> None:
 
 
 def load_action_frames(
-    frames_dir: Path | None, expected_size: tuple[int, int], background_session: object
+    frames_dir: Path, expected_size: tuple[int, int], background_session: object
 ) -> dict[str, list[Image.Image]]:
     """状態別の透過連番を読む。補間・拡大・自動変形は行わない。"""
-    if frames_dir is None:
-        return {}
     if not frames_dir.is_dir():
         raise FileNotFoundError(f"連番フォルダが見つかりません: {frames_dir}")
 
     result: dict[str, list[Image.Image]] = {}
     for state, required in ANIMATION_STATES.items():
         state_dir = frames_dir / state
-        if not state_dir.exists():
-            continue
+        if not state_dir.is_dir():
+            raise FileNotFoundError(f"必須の状態フォルダが見つかりません: {state_dir}")
         paths = sorted(state_dir.glob("*.png"))
         if not paths:
             raise ValueError(f"状態フォルダにPNGがありません: {state_dir}")
         frames: list[Image.Image] = []
         for path in paths:
-            image = Image.open(path).convert("RGBA")
+            with Image.open(path) as opened:
+                image = opened.convert("RGBA")
             if image.getchannel("A").getextrema() == (255, 255):
+                image.close()
                 image = remove_background(path, background_session)
-            if image.size != expected_size:
-                raise ValueError(
-                    f"連番の寸法が基準画像と違います: {path}（{image.size[0]}x{image.size[1]} / "
-                    f"基準 {expected_size[0]}x{expected_size[1]}）"
-                )
-            ensure_crown_not_clipped(image)
-            check_no_halo(image)
-            frames.append(image.copy())
+            try:
+                if image.size != expected_size:
+                    raise ValueError(
+                        f"連番の寸法が基準画像と違います: {path}（{image.size[0]}x{image.size[1]} / "
+                        f"基準 {expected_size[0]}x{expected_size[1]}）"
+                    )
+                ensure_crown_not_clipped(image)
+                check_no_halo(image)
+                frames.append(image.copy())
+            finally:
+                image.close()
         unique_count = len({hashlib.sha256(image.tobytes()).digest() for image in frames})
         if len(frames) < required["frames"] or unique_count < required["minUniqueFrames"]:
             raise ValueError(
@@ -152,15 +163,34 @@ def load_action_frames(
     return result
 
 
+def ensure_changes_inside_roi(
+    base: Image.Image,
+    candidate: Image.Image,
+    face_roi: tuple[float, float, float, float],
+    label: str,
+) -> None:
+    """顔ROI外のRGBAが基準画像と1画素でも違えば停止する。"""
+    width, height = base.size
+    roi_x, roi_y, roi_width, roi_height = face_roi
+    left = round(width * roi_x)
+    top = round(height * roi_y)
+    right = round(width * (roi_x + roi_width))
+    bottom = round(height * (roi_y + roi_height))
+    outside_changed = np.asarray(candidate) != np.asarray(base)
+    outside_changed[top:bottom, left:right] = False
+    changed_pixels = int(outside_changed.any(axis=2).sum())
+    if changed_pixels:
+        raise ValueError(f"表情レイヤーが顔ROI外を変更しています: {label}（{changed_pixels}画素）")
+
+
 def load_rig_layers(
-    layers_dir: Path | None,
+    layers_dir: Path,
     base: Image.Image,
     expected_size: tuple[int, int],
     background_session: object,
+    face_roi: tuple[float, float, float, float],
 ) -> dict[str, Image.Image]:
     """まばたき・口・視線・感情の同一ポーズ差分を読む。"""
-    if layers_dir is None:
-        return {}
     if not layers_dir.is_dir():
         raise FileNotFoundError(f"表情レイヤーフォルダが見つかりません: {layers_dir}")
     layers: dict[str, Image.Image] = {}
@@ -168,17 +198,23 @@ def load_rig_layers(
         path = layers_dir / f"{name}.png"
         if not path.is_file():
             raise FileNotFoundError(f"表情レイヤーが不足しています: {path}")
-        image = Image.open(path).convert("RGBA")
+        with Image.open(path) as opened:
+            image = opened.convert("RGBA")
         if image.getchannel("A").getextrema() == (255, 255):
+            image.close()
             image = remove_background(path, background_session)
-        if image.size != expected_size:
-            raise ValueError(
-                f"表情レイヤーの寸法が基準画像と違います: {path}（{image.size[0]}x{image.size[1]} / "
-                f"基準 {expected_size[0]}x{expected_size[1]}）"
-            )
-        ensure_crown_not_clipped(image)
-        check_no_halo(image)
-        layers[name] = image.copy()
+        try:
+            if image.size != expected_size:
+                raise ValueError(
+                    f"表情レイヤーの寸法が基準画像と違います: {path}（{image.size[0]}x{image.size[1]} / "
+                    f"基準 {expected_size[0]}x{expected_size[1]}）"
+                )
+            ensure_crown_not_clipped(image)
+            check_no_halo(image)
+            ensure_changes_inside_roi(base, image, face_roi, f"{name}.png")
+            layers[name] = image.copy()
+        finally:
+            image.close()
 
     blink_names = [
         "base", "blink_17", "blink_33", "blink_half", "blink_67", "blink_83", "blink_closed",
@@ -191,6 +227,19 @@ def load_rig_layers(
         unique = {hashlib.sha256(image.tobytes()).digest() for image in images}
         if len(unique) != 7:
             raise ValueError(f"{label}の7段階に同一内容の画像があります。全段階を固有画像にしてください。")
+        start = np.asarray(images[0], dtype=np.float32)
+        end = np.asarray(images[-1], dtype=np.float32)
+        direction = end - start
+        denominator = float(np.square(direction).sum())
+        if denominator <= 0:
+            raise ValueError(f"{label}の始点と終点が同一です。")
+        previous = -1.0
+        for index, image in enumerate(images):
+            current = np.asarray(image, dtype=np.float32)
+            progress = float(((current - start) * direction).sum()) / denominator
+            if progress <= previous + 1e-5:
+                raise ValueError(f"{label}の7段階が単調に変化していません: 段階{index + 1}")
+            previous = progress
 
     for left, right in [
         ("gaze_left", "gaze_right"), ("expression_happy", "expression_sad"),
@@ -213,17 +262,17 @@ def write_rig_layers(base: Image.Image, layers: dict[str, Image.Image], destinat
 
 
 def write_action_frames(
-    frames: dict[str, list[Image.Image]], destination: Path
+    frames: dict[str, list[Image.Image]], destination: Path, generation: str
 ) -> dict[str, list[str]]:
     """入力連番を内容ハッシュ名で保存し、manifest用の相対パスを返す。"""
-    output_dir = destination / "frames" / "portrait-2d"
+    output_dir = destination / "frames" / generation
     output_dir.mkdir(parents=True, exist_ok=True)
     result: dict[str, list[str]] = {}
     for state, images in frames.items():
         paths: list[str] = []
         for image in images:
             digest = hashlib.sha256(image.tobytes()).hexdigest()[:20]
-            relative = f"frames/portrait-2d/{digest}.png"
+            relative = f"frames/{generation}/{digest}.png"
             target = destination / relative
             if not target.exists():
                 image.save(target)
@@ -233,11 +282,14 @@ def write_action_frames(
 
 
 def build_manifest(
-    args: argparse.Namespace, asset_version: str, action_paths: dict[str, list[str]]
+    args: argparse.Namespace,
+    asset_version: str,
+    generation: str,
+    action_paths: dict[str, list[str]],
 ) -> dict:
     animations = {}
     for state, config in ANIMATION_STATES.items():
-        paths = action_paths.get(state, ["preview.png"])
+        paths = action_paths[state]
         animations[state] = {
             "frames": len(paths),
             "fps": config["fps"] if len(paths) > 1 else 1,
@@ -248,6 +300,7 @@ def build_manifest(
         "id": args.id,
         "name": args.name,
         "assetVersion": asset_version,
+        "frameGeneration": generation,
         "characterFormat": PORTRAIT_FORMAT["format"],
         "description": args.description,
         "greeting": args.greeting,
@@ -270,7 +323,7 @@ def build_manifest(
     }
 
 
-def register_in_index(character_id: str, name: str, description: str) -> None:
+def build_index_text(character_id: str, name: str, description: str) -> str:
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     entry = {
         "description": description,
@@ -286,12 +339,53 @@ def register_in_index(character_id: str, name: str, description: str) -> None:
     else:
         entries.append(entry)
     index["characters"] = entries
-    INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return json.dumps(index, ensure_ascii=False, indent=2) + "\n"
+
+
+def frame_generation(frames: dict[str, list[Image.Image]]) -> str:
+    digest = hashlib.sha256()
+    for state in ANIMATION_STATES:
+        for index, image in enumerate(frames[state]):
+            digest.update(state.encode("utf-8"))
+            digest.update(index.to_bytes(4, "big"))
+            digest.update(image.tobytes())
+    return digest.hexdigest()[:16]
+
+
+def install_staged_pack(staging: Path, destination: Path, index_text: str) -> None:
+    """完成済みステージだけを正本へ入れ、索引更新失敗時は旧パックを戻す。"""
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    backup = TEMP_DIR / f"portrait-2d-backup-{destination.name}-{uuid.uuid4().hex}"
+    index_staging = TEMP_DIR / f"characters-index-{uuid.uuid4().hex}.json"
+    had_destination = destination.exists()
+    pack_installed = False
+    install_completed = False
+    try:
+        index_staging.write_text(index_text, encoding="utf-8")
+        if had_destination:
+            destination.replace(backup)
+        try:
+            staging.replace(destination)
+            pack_installed = True
+            index_staging.replace(INDEX_PATH)
+        except Exception:
+            if pack_installed:
+                shutil.rmtree(destination)
+            if had_destination and backup.exists():
+                backup.replace(destination)
+            raise
+        install_completed = True
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+        if install_completed and backup.exists():
+            shutil.rmtree(backup)
+        index_staging.unlink(missing_ok=True)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="1枚のバストアップ画像から通常2D（1枚絵）キャラクターパックを生成する。"
+        description="バストアップ原画と承認済みの22レイヤー・150フレームから通常2Dパックを生成する。"
     )
     parser.add_argument("--input", type=Path, required=True, help="入力画像（PNG / JPEG）。")
     parser.add_argument("--id", required=True, help="キャラクターID（64文字以内の英数字・ハイフン・アンダースコア）。")
@@ -310,15 +404,32 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--frames-dir",
         type=Path,
-        help="任意の透過連番ルート。idle / thinking / talking / sad の各フォルダへPNGを置く。",
+        required=True,
+        help="必須の透過連番ルート。idle / thinking / talking / sad の各フォルダへPNGを置く。",
     )
     parser.add_argument(
         "--layers-dir",
         type=Path,
-        help="任意の表情差分ルート。目・口・左右視線と6感情のPNGを置く。",
+        required=True,
+        help="必須の21表情差分ルート。入力原画をbaseとし、目・口・左右視線と6感情のPNGを置く。",
+    )
+    parser.add_argument(
+        "--face-roi",
+        required=True,
+        help="顔差分を許可する正規化範囲 x,y,width,height（例: 0.25,0.08,0.5,0.38）。",
     )
     parser.add_argument("--force", action="store_true", help="既存の preview.png を上書きする。")
     return parser.parse_args(argv)
+
+
+def parse_face_roi(value: str) -> tuple[float, float, float, float]:
+    try:
+        x, y, width, height = (float(part.strip()) for part in value.split(","))
+    except (TypeError, ValueError):
+        raise ValueError("--face-roi は x,y,width,height の4数値で指定してください。") from None
+    if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
+        raise ValueError("--face-roi は0～1のキャンバス内へ収めてください。")
+    return x, y, width, height
 
 
 def main(argv: list[str]) -> int:
@@ -333,42 +444,60 @@ def main(argv: list[str]) -> int:
         raise FileNotFoundError(f"入力画像が見つかりません: {args.input}")
 
     destination = CHARACTERS_DIR / args.id
-    preview = destination / "preview.png"
-    if preview.exists() and not args.force:
-        raise FileExistsError(f"既に存在します（上書きするなら --force）: {preview}")
+    if destination.exists() and not args.force:
+        raise FileExistsError(f"既に存在します（置き換えるなら --force）: {destination}")
 
     from rembg import new_session
 
     print(f"[build-portrait-2d-character] 背景を抜いています（{REMBG_MODEL}）…")
     background_session = new_session(REMBG_MODEL)
     filled = remove_background(args.input, background_session)
-    ensure_crown_not_clipped(filled)
-    check_no_halo(filled)
-    action_frames = load_action_frames(args.frames_dir, filled.size, background_session)
-    rig_layers = load_rig_layers(args.layers_dir, filled, filled.size, background_session)
+    action_frames: dict[str, list[Image.Image]] = {}
+    rig_layers: dict[str, Image.Image] = {}
+    staging: Path | None = None
+    try:
+        ensure_crown_not_clipped(filled)
+        check_no_halo(filled)
+        action_frames = load_action_frames(args.frames_dir, filled.size, background_session)
+        rig_layers = load_rig_layers(
+            args.layers_dir,
+            filled,
+            filled.size,
+            background_session,
+            parse_face_roi(args.face_roi),
+        )
+        generation = frame_generation(action_frames)
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        staging = TEMP_DIR / f"portrait-2d-build-{args.id}-{uuid.uuid4().hex}"
+        staging.mkdir(parents=True)
+        filled.save(staging / "preview.png")
+        action_paths = write_action_frames(action_frames, staging, generation)
+        write_rig_layers(filled, rig_layers, staging)
+        asset_version = args.asset_version or f"{__import__('datetime').date.today():%Y-%m-%d}-portrait-2d-v1"
+        (staging / "character.json").write_text(
+            json.dumps(build_manifest(args, asset_version, generation, action_paths), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        install_staged_pack(staging, destination, build_index_text(args.id, args.name, args.description))
 
-    destination.mkdir(parents=True, exist_ok=True)
-    filled.save(preview)
-    action_paths = write_action_frames(action_frames, destination)
-    write_rig_layers(filled, rig_layers, destination)
-    asset_version = args.asset_version or f"{__import__('datetime').date.today():%Y-%m-%d}-portrait-2d-v1"
-    (destination / "character.json").write_text(
-        json.dumps(build_manifest(args, asset_version, action_paths), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    register_in_index(args.id, args.name, args.description)
-
-    qa_path = TEMP_DIR / f"qa-{args.id}.png"
-    write_qa_sheet(filled, qa_path)
-    print(f"[build-portrait-2d-character] {preview}（{filled.size[0]}x{filled.size[1]}）を書き出しました。")
-    if action_paths:
+        qa_path = TEMP_DIR / f"qa-{args.id}.png"
+        write_qa_sheet(filled, qa_path)
+        print(f"[build-portrait-2d-character] {destination / 'preview.png'}（{filled.size[0]}x{filled.size[1]}）を書き出しました。")
         summary = " / ".join(f"{state}:{len(paths)}枚" for state, paths in action_paths.items())
         print(f"[build-portrait-2d-character] 表情・アクション連番: {summary}")
-    if rig_layers:
         print(f"[build-portrait-2d-character] まばたき・口・視線・感情レイヤー: {len(rig_layers) + 1}枚")
-    print(f"[build-portrait-2d-character] 透過確認シート: {qa_path}")
-    print("[build-portrait-2d-character] 仕上げに `cargo xtask sync-characters` を実行してください。")
-    return 0
+        print(f"[build-portrait-2d-character] 透過確認シート: {qa_path}")
+        print("[build-portrait-2d-character] 仕上げに `cargo xtask sync-characters` を実行してください。")
+        return 0
+    finally:
+        if staging is not None and staging.exists():
+            shutil.rmtree(staging)
+        filled.close()
+        for images in action_frames.values():
+            for image in images:
+                image.close()
+        for image in rig_layers.values():
+            image.close()
 
 
 if __name__ == "__main__":

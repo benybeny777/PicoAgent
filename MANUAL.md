@@ -314,7 +314,7 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 - 設定「キャラ・音声」タブで切替と、性格・口調（人格プロンプト）のキャラ別編集ができます。
 - **Live2D**: `cargo xtask setup live2d` で Cubism ランタイムとサンプルモデル「ひより」を取得すると、対応キャラは Live2D で動きます（まばたき・リップシンク・タップモーション）。非対応キャラも差分絵ベースの疑似リグ（PNGTuber 式）で常時アニメーションします。
 - **自作キャラの Live2D 化**: `python scripts/build-live2d-psd.py` で `characters/<id>/layers/` からレイヤー分け PSD（ひより互換の 15 パーツ構成）を生成し、Live2D Cubism Editor で開いてモデル化できます。
-- **バストアップ1枚から通常2Dキャラ**: `python scripts/build-portrait-2d-character.py --input <画像> --id <ID> --name <名前>` で、背景抜き・頭頂部の切れ検査・透過確認シートまで済ませた簡易パックを作れます。`--frames-dir` へ任意の同寸連番を渡すと、物理演算なしで表情・口・視線・髪の動きも登録できます。手順は [キャラクター画像の準備手順](characters/README.md) を参照してください。
+- **バストアップ原画から通常2Dキャラ**: `python scripts/build-portrait-2d-character.py --input <画像> --id <ID> --name <名前> --layers-dir <21表情差分> --face-roi <x,y,w,h> --frames-dir <150フレーム>` で、原画をbaseにした計22レイヤーについて、背景抜き、頭頂部の切れ、顔ROI外RGBA、目・口の段階、固有フレーム数を検査したパックを作れます。物理演算は使いません。手順は [キャラクター画像の準備手順](characters/README.md) を参照してください。
 - キャラ画像・アニメーションの正本は `characters/` 配下です（`ui/assets/characters/` へ自動同期）。
 
 ---

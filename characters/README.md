@@ -51,6 +51,8 @@ characters/<id>/
 uv run --with pillow --with numpy --with rembg --with onnxruntime `
   python scripts/build-portrait-2d-character.py `
   --input temp/source.png --id my-character --name "マイキャラ" `
+  --layers-dir temp/my-character-layers `
+  --face-roi 0.25,0.08,0.5,0.38 `
   --frames-dir temp/my-character-frames
 ```
 
@@ -64,6 +66,8 @@ temp/my-character-frames/
 
 - 入力は頭頂部と左右に余白があり、腰または胸元まで輪郭が分かる画像を使う。被写体が上端へ接している素材は、既存画素を引き伸ばして補わずエラーで停止する。
 - 出力先に同じIDの `preview.png` がある場合は停止する。意図的に作り直す場合だけ `--force` を付ける。
+- `--layers-dir`と`--frames-dir`は必須。入力原画をbaseとする21表情差分（計22レイヤー）または4状態の連番が不足する場合は、既存パックと索引を変更せず停止する。
+- `--face-roi`は顔差分を許可する範囲をキャンバス比率の`x,y,width,height`で指定する。22レイヤーのROI外RGBAは基準画像と完全一致させる。
 - 連番はファイル名順に読み、すべて基準画像と同じ寸法でなければ停止する。透過済みPNGはそのまま使い、不透明背景なら基準画像と同じ `rembg` セッションで背景を抜く。補間、拡大、パーツ変形は行わない。
 - 品質下限は `idle` が48コマ・固有24枚、`thinking` が36コマ・固有24枚、`talking` が42コマ・固有28枚、`sad` が24コマ・固有16枚。目7段階、口7段階だけでなく、髪・服の遅れと戻りも別画像にする。同じ内容のPNGを複製しただけでは固有絵に数えず停止する。
 - Nano Banana等を使う場合は、同一人物・同一構図・同一キャンバスを維持し、候補を元画像とは別名で保存する。まばたき、閉口／開口、左右視線、喜び／悲しみ、髪・服の小さな動きだけを変え、超解像やhires-fixには使わない。

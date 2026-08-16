@@ -2,6 +2,7 @@
   "id": "portrait-template",
   "name": "キャラクター名",
   "assetVersion": "YYYY-MM-DD-portrait-2d-v1",
+  "frameGeneration": "生成内容のSHA-256先頭16桁",
   "characterFormat": "picoagent-portrait-2d-v1",
   "description": "キャラクターの説明",
   "greeting": "こんにちは。",
