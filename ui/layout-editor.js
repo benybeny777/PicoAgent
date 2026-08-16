@@ -10,7 +10,14 @@
   const saveButton = document.getElementById("layoutEditorSave");
   const resetButton = document.getElementById("layoutEditorReset");
   const closeButton = document.getElementById("layoutEditorClose");
-  if (!app || !toggle || !toolbar || !targetSelect || typeof window.Moveable !== "function") return;
+  if (!app || !toggle || !toolbar || !targetSelect) return;
+  if (typeof window.Moveable !== "function") {
+    // 黙って何も起きないボタンを残さない（配信物から vendor が落ちた場合に気づけない）。
+    toggle.disabled = true;
+    toggle.title = "配置編集の部品（Moveable）を読み込めませんでした";
+    window.PicoUI?.logApp?.("error", "配置編集を初期化できません", "window.Moveable がありません");
+    return;
+  }
 
   const sources = {
     character: document.getElementById("character"),
@@ -21,11 +28,20 @@
   };
   for (const source of Object.values(sources)) source?.setAttribute("data-layout-editor-source", "true");
 
+  // 読めない保存値をそのまま空で上書きすると、他の表示形式へ作った配置まで消える。
+  // Rust 側の `store::quarantine_corrupt()` と同じく、退避してから空で続ける。
   const readStore = () => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
     try {
-      const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      return value && typeof value === "object" ? value : {};
-    } catch {
+      const value = JSON.parse(raw);
+      if (value && typeof value === "object" && !Array.isArray(value)) return value;
+      throw new Error("配置の保存値がオブジェクトではありません");
+    } catch (error) {
+      const backup = `${STORAGE_KEY}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      try { localStorage.setItem(backup, raw); }
+      catch (saveError) { window.PicoUI?.logApp?.("error", "壊れた配置設定を退避できませんでした", saveError); }
+      window.PicoUI?.logApp?.("warn", `配置設定を読めないため空で続けます（退避先: ${backup}）`, error);
       return {};
     }
   };
@@ -153,9 +169,15 @@
       undoButton.click();
     }
   });
-  new MutationObserver(() => {
+  const layoutObserver = new MutationObserver(() => {
     if (editing) leave({ keepWorking: true });
     applySavedLayout();
-  }).observe(app, { attributes: true, attributeFilter: ["data-layout"] });
+  });
+  layoutObserver.observe(app, { attributes: true, attributeFilter: ["data-layout"] });
+  // Moveable は document へ独自のリスナを張るので、離脱時に明示的に解放する。
+  window.addEventListener("pagehide", () => {
+    layoutObserver.disconnect();
+    moveable.destroy();
+  }, { once: true });
   applySavedLayout();
 })();

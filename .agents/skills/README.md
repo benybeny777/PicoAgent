@@ -4,8 +4,12 @@
 
 | スキル | 用途 |
 |---|---|
+| `add-picoagent-connector` | プロバイダ／ツールコネクタの追加・変更 |
+| `add-picoagent-setting` | 設定項目の追加・変更（永続化、画面、秘密値、文書） |
+| `build-picoagent-beta` | 開発中ベータ版のビルド・検証・公開 |
 | `rebuild-picoagent-character` | キャラクター追加、高精細化、モーション、単一世代、READMEプレビュー |
 | `verify-picoagent-ui` | 実WebViewの画面崩れ、レイヤー、ドラッグ、レイアウト、PNG／Live2D QA |
 | `prepare-picoagent-release` | 配布前のコード、資産、文書、監査、ローカルテスト、Git確認 |
+| `review-picoagent-change` | mainへ入った変更の事後レビュー、指摘の記録、未レビュー管理 |
 
 Claude Codeが自動認識する`.claude/skills/<名前>/SKILL.md`には、同名の共通スキルを読む指示だけを置きます。手順を追加・修正するときは、このフォルダの正本だけを編集してください。

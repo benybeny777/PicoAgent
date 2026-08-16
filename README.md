@@ -162,6 +162,7 @@ cargo xtask dev
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止 |
+| `cargo xtask review-status` | まだ Codex / Claude の事後レビューが済んでいないコミットの一覧（`--strict` で未レビューがあれば失敗） |
 
 引数なしの `cargo xtask setup` で通常の開発・製品ビルドに使う全対象を取得します。THA3は開発環境で制作機能を確認するために含みますが、販売用軽量版には再配布しません。通常動作中はPythonもモデルも読み込みません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
