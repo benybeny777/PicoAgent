@@ -1,12 +1,20 @@
-// review.rs - 「main へ入った変更は Codex と Claude の両方が事後レビューする」運用の管理。
+// review.rs - 「main へ入った変更は書いた側の相手がレビューする」クロスチェック運用の管理。
 //
 // レビューは指示があるときだけ行うと抜ける。抜けたことに気づく手段が無いと、
 // 実際に「起動を止めない」修正が会話履歴を消す状態のまま数日残った（`ac04622`）。
 // レビュー済みかどうかの正本は `docs/REVIEW-LOG.md` に書いてある記録そのものとし、
 // ここではその記録と `git log` を突き合わせて、まだ誰も見ていないコミットを出す。
 //
-// 記録側の書き方（レビュー1回につき1行、見出しの直下）:
+// **求めるのは書いた本人以外のレビュー**。自分の書いた変更を自分で見ても、同じ前提の
+// まま同じ見落としが残る（それを防ぐためのクロスチェックなので、そこを数えない）。
+// 作成者が分からないコミットは、どちらが書いたか決められないので両方を求める。
+//
+// 記録側の書き方（どちらも1行、見出しの直下）:
 //   対象コミット: d371577, ac04622 ｜ レビュアー: claude
+//   作成コミット: e9bbd7f ｜ 作成者: claude
+//
+// 作成者は、squash merge で GitHub アカウントへ付け替わると git からは分からなくなるため
+// 台帳へ書く。git の author が Claude のコミットだけは自動で判別する。
 //
 // 起点（ここより前は個別記録を要求しない）:
 //   レビュー必須の起点: ac04622
@@ -18,19 +26,25 @@ use anyhow::{bail, Context, Result};
 
 use crate::util::{log, repo_root};
 
-/// レビューを必須にする作業エージェント。両方そろって初めて「レビュー済み」とする。
+/// レビューを担当する作業エージェント。書いた本人以外がそろって「レビュー済み」とする。
 pub const REVIEWERS: [&str; 2] = ["codex", "claude"];
 
 const LOG_PATH: &str = "docs/REVIEW-LOG.md";
 const BASELINE_MARKER: &str = "レビュー必須の起点:";
 const TARGET_MARKER: &str = "対象コミット:";
 const REVIEWER_MARKER: &str = "レビュアー:";
+const AUTHOR_TARGET_MARKER: &str = "作成コミット:";
+const AUTHOR_MARKER: &str = "作成者:";
+/// Claude Code が作ったコミットの git author（squash 前のコミットで残る）。
+const CLAUDE_AUTHOR_MAIL: &str = "noreply@anthropic.com";
 
 /// レビュー対象のコミット1件。
 struct Commit {
     sha: String,
     date: String,
     subject: String,
+    /// git の author から分かる作成者（判別できるのは Claude だけ）。
+    author: Option<String>,
 }
 
 impl Commit {
@@ -65,13 +79,27 @@ pub struct Coverage {
     pub baseline: String,
     /// コミット（短縮 SHA）→ レビューした人の一覧。
     pub reviewed: BTreeMap<String, Vec<String>>,
+    /// コミット（短縮 SHA）→ 書いた人（台帳に記録があるぶん）。
+    pub authors: BTreeMap<String, String>,
 }
 
 impl Coverage {
-    /// そのコミットをまだ見ていない人。
-    pub fn missing(&self, commit: &str) -> Vec<&'static str> {
+    /// 台帳に記録された作成者。
+    fn author(&self, commit: &str) -> Option<&str> {
+        self.authors
+            .iter()
+            .find(|(sha, _)| same_commit(sha, commit))
+            .map(|(_, author)| author.as_str())
+    }
+
+    /// そのコミットのレビューがまだ足りない人。
+    /// `author` は git から分かった作成者（台帳の記録があればそちらを優先する）。
+    pub fn missing(&self, commit: &str, author: Option<&str>) -> Vec<&'static str> {
+        let author = self.author(commit).or(author);
         REVIEWERS
             .iter()
+            // 書いた本人は数えない。同じ前提のまま読み直しても見落としは同じ場所に残る。
+            .filter(|reviewer| author != Some(**reviewer))
             .filter(|reviewer| {
                 !self.reviewed.iter().any(|(sha, reviewers)| {
                     same_commit(sha, commit) && reviewers.iter().any(|done| done == *reviewer)
@@ -122,11 +150,35 @@ fn reviewer_name(raw: &str) -> String {
 pub fn coverage(text: &str) -> Result<Coverage> {
     let mut baseline = String::new();
     let mut reviewed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut authors: BTreeMap<String, String> = BTreeMap::new();
     for (number, line) in text.lines().enumerate() {
         if baseline.is_empty() {
             if let Some(raw) = entry(line, BASELINE_MARKER) {
                 baseline = shas(raw).first().cloned().unwrap_or_default();
             }
+        }
+        if let Some(targets) = entry(line, AUTHOR_TARGET_MARKER) {
+            let author = after(line, AUTHOR_MARKER)
+                .map(reviewer_name)
+                .unwrap_or_default();
+            if !REVIEWERS.contains(&author.as_str()) {
+                bail!(
+                    "{LOG_PATH}:{} の `{AUTHOR_MARKER}` は {} のいずれかにしてください",
+                    number + 1,
+                    REVIEWERS.join(" / ")
+                );
+            }
+            let targets = shas(targets);
+            if targets.is_empty() {
+                bail!(
+                    "{LOG_PATH}:{} の `{AUTHOR_TARGET_MARKER}` にコミットがありません",
+                    number + 1
+                );
+            }
+            for target in targets {
+                authors.insert(target, author.clone());
+            }
+            continue;
         }
         let Some(targets) = entry(line, TARGET_MARKER) else {
             continue;
@@ -158,7 +210,11 @@ pub fn coverage(text: &str) -> Result<Coverage> {
     if baseline.is_empty() {
         bail!("{LOG_PATH} に `{BASELINE_MARKER} <コミット>` がありません");
     }
-    Ok(Coverage { baseline, reviewed })
+    Ok(Coverage {
+        baseline,
+        reviewed,
+        authors,
+    })
 }
 
 /// 数える対象の枝。既定は「`main` へ入った変更」なので `origin/main` を見る。
@@ -189,7 +245,7 @@ fn commits(baseline: &str, target: &str) -> Result<Vec<Commit>> {
         .args([
             "log",
             "--date=short",
-            "--format=%h\t%ad\t%s",
+            "--format=%h\t%ad\t%ae\t%s",
             &format!("{baseline}..{target}"),
         ])
         .output()
@@ -204,10 +260,18 @@ fn commits(baseline: &str, target: &str) -> Result<Vec<Commit>> {
         .lines()
         .filter_map(|line| {
             let mut columns = line.split('\t');
+            let sha = columns.next()?.trim().to_string();
+            let date = columns.next()?.trim().to_string();
+            let mail = columns.next()?.trim().to_lowercase();
             Some(Commit {
-                sha: columns.next()?.trim().to_string(),
-                date: columns.next()?.trim().to_string(),
+                sha,
+                date,
                 subject: columns.next()?.trim().to_string(),
+                // squash merge で GitHub アカウントへ付け替わると判別できない。
+                // 分からない場合は台帳の `作成者:` に任せる。
+                author: mail
+                    .ends_with(CLAUDE_AUTHOR_MAIL)
+                    .then(|| "claude".to_string()),
             })
         })
         .collect())
@@ -223,7 +287,7 @@ pub fn status(args: &[String]) -> Result<()> {
     let commits = commits(&coverage.baseline, &target)?;
     let mut pending = Vec::new();
     for commit in &commits {
-        let missing = coverage.missing(&commit.sha);
+        let missing = coverage.missing(&commit.sha, commit.author.as_deref());
         if !missing.is_empty() {
             pending.push((commit, missing));
         }
@@ -277,6 +341,7 @@ mod tests {
         - レビュー必須の起点: ac04622（これより前は個別記録を求めない）\n\
         \n\
         ## 2026-08-16 — 例\n\
+        作成コミット: 7654321 ｜ 作成者: claude\n\
         対象コミット: d371577, `91ea586` ｜ レビュアー: claude\n\
         対象コミット: d371577 ｜ レビュアー: codex（指摘0件）\n";
 
@@ -284,9 +349,35 @@ mod tests {
     fn 起点とレビュー済みコミットを読み取る() {
         let coverage = coverage(SAMPLE).expect("読み取れること");
         assert_eq!(coverage.baseline, "ac04622");
-        assert!(coverage.missing("d371577").is_empty(), "両者が確認済み");
-        assert_eq!(coverage.missing("91ea586"), vec!["codex"]);
-        assert_eq!(coverage.missing("1234567"), vec!["codex", "claude"]);
+        assert!(
+            coverage.missing("d371577", None).is_empty(),
+            "両者が確認済み"
+        );
+        assert_eq!(coverage.missing("91ea586", None), vec!["codex"]);
+        assert_eq!(coverage.missing("1234567", None), vec!["codex", "claude"]);
+    }
+
+    #[test]
+    fn 書いた本人のレビューは求めない() {
+        let coverage = coverage(SAMPLE).expect("読み取れること");
+        // 台帳に作成者があるコミットは、相手のレビューだけが残件。
+        assert_eq!(coverage.missing("7654321", None), vec!["codex"]);
+        // 台帳に無い場合は git の author から渡された作成者を使う。
+        assert_eq!(coverage.missing("1234567", Some("claude")), vec!["codex"]);
+        assert_eq!(coverage.missing("1234567", Some("codex")), vec!["claude"]);
+        // 作成者が分からなければ従来どおり両方を求める。
+        assert_eq!(coverage.missing("1234567", None), vec!["codex", "claude"]);
+    }
+
+    #[test]
+    fn 未知の作成者名は失敗させる() {
+        assert!(
+            coverage("レビュー必須の起点: ac04622\n作成コミット: 1234567 ｜ 作成者: 誰か\n")
+                .is_err()
+        );
+        assert!(
+            coverage("レビュー必須の起点: ac04622\n作成コミット: ｜ 作成者: claude\n").is_err()
+        );
     }
 
     #[test]
@@ -308,6 +399,7 @@ mod tests {
             sha: "abc1234".into(),
             date: "2026-08-16".into(),
             subject: subject.into(),
+            author: None,
         };
         assert_eq!(
             commit("docs: レビュー必須の起点を変更する (#92)").pull_request(),
