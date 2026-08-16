@@ -10,6 +10,8 @@
 
 2026-08-17、版番号の手入力と同一Release資産の上書きを廃止する。通常更新は同じ系列のpatchを自動加算し、minor／majorはユーザー明示指示だけで上げる。`cargo xtask bump-version <種別>`が公開中の`latest.json`を起点に3設定を同期する。patch番号も公開表示する。起動時にはpatchを通知せず、利用者が設定から手動確認した場合だけ案内・ダウンロードできる。minor変更時は起動時にも通知する。今回は`1.0.0`から`1.0.1`を採番し、`PicoAgent 1.0.1 Beta`として最新mainの軽量NSISを新しいプレリリースへ公開する。LP画像は変更せず、更新情報とバイナリだけを差し替える。
 
+同日の最新`main`から軽量NSISを生成し、`PicoAgent_1.0.1_x64-setup.exe`（400,271,033 bytes、SHA-256 `4a62dcffd96f4ff881d021ee2184d66e8ef4522cb8086cf151be4604771ec14b`）のPE、Beta表示、許可7キャラ、基本エンジンだけの同梱範囲を確認した。旧`1.0.0`のローカルNSISは検証後にごみ箱へ移動した。`latest.json`は実ファイルから生成済み。次は本体の公開PR、配布Repoの同期PR、新規`v1.0.1`プレリリース、Pages／外部再取得照合を完了する。
+
 2026-08-17、Cargo直接依存、THA3 Pythonランタイム、Aivis、Whisper、llama.cpp、LibreOffice、外部CLI、Webランタイム、クラウド／ローカルLLMモデルを公式一次情報と照合した。LTS相当があるLibreOfficeは成熟版25.8.7.2、それ以外は安定版latest、LLMは最新安定版を採用する。GitHub Release資産とモデルはサイズ・SHA-256検証を追加し、ローカルGGUFはrevision入りの別名で保存する。日本語向けにLLM-jp-4 8B Thinking公式GGUFも追加した。AMD／Intel／GPUなしWindowsへTHA3用CUDA PyTorchを取得していた経路は、コード・モデル・Pythonを取る前の`nvidia-smi -L`確認と通常版NSISの正常スキップへ修正した。引数なしsetupと通常buildの暗黙一括取得も外し、全取得は`setup all`／`build-full`の明示操作に限定した。`.agents/skills/audit-picoagent-dependencies`を毎月1日の全体点検の正本とする。このPRをマージ後、最新`main`からNSISを再生成してLPとReleaseへ公開する。
 
 2026-08-16、README先頭へ公開LPの導線を追加し、Live2Dへモデル固有構図とPNG向け既定倍率が二重適用される不具合を修正した。「まお」の通常／配信を実WebViewで再検査し、帽子上端・顔・胸上が収まることを確認した。構図修正前に生成したNSISは公開せず破棄扱いにし、`distribution/site/latest.json`は公開中の実体へ戻した。依存更新は別PRで行い、そのマージ後の最新`main`からWindowsベータ版を再生成する。配布作業の正本`build-picoagent-beta`には、LP・Release・Pages・公開ハッシュの現行照合と、ビルド後に変更した場合の再生成を追加した。
