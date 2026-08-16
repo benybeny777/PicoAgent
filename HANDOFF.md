@@ -8,7 +8,7 @@
 
 ## 現在の作業
 
-2026-08-16、事後レビューを必須運用へ変えた。`main` へ入った変更は指示が無くても Codex と Claude の両方が見る決まりを `AGENTS.md` へ入れ、`docs/REVIEW-LOG.md` の見出し直下に `対象コミット: … ｜ レビュアー: …` の1行を置く形にした。未レビューは `cargo xtask review-status`（既定は `origin/main`、`--strict` で失敗）で分かり、セッション開始フックからも表示する。手順は共通スキル `review-picoagent-change` に固定した。**次に作業するエージェントは、まず `cargo xtask review-status` を実行して残件を片付けること。**
+2026-08-16、事後レビューを必須運用へ変えた。`main` へ入った変更は指示が無くても Codex と Claude の両方が見る決まりを `AGENTS.md` へ入れ、`docs/REVIEW-LOG.md` の見出し直下に `対象コミット: … ｜ レビュアー: …` の1行を置く形にした。未レビューは `cargo xtask review-status`（既定は `origin/main`、`--strict` で失敗）で分かり、セッション開始フックからも表示する。手順は共通スキル `review-picoagent-change` に固定した。**次に作業するエージェントは、まず `cargo xtask review-status` を実行して残件を片付けること。** さかのぼりは直近2日分までで打ち切る方針（2026-08-16 決定）。起点 `ac04622` より後は日付にかかわらず全件が対象で、現在は `b89b726` が Codex・Claude とも未レビュー。
 
 2026-08-16、2026-08-14〜15 の実装（`ebb128e..da9fec5`）をさかのぼって再確認し、配置編集の3件を修正した（壊れた保存値の空上書き、部品が無いときの無反応ボタン、`Moveable` / `MutationObserver` の未解放）。`history` と同型の「読めないまま空で保存」は他の状態ファイルには無いことも確認した。
 
