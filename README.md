@@ -142,9 +142,8 @@ cargo install tauri-cli --version '^2'   # 初回だけ
 cargo xtask dev
 ```
 
-`cargo xtask dev` は、残存プロセス停止・キャラクター同期・UI生成だけを行う**最小の開発起動**です。未使用の追加機能や取得元の障害で本体起動を止めません。ローカルAI、読み上げ、Live2D、THA3などを使う場合だけ、下表の `cargo xtask setup <対象>` を先に実行してください。Live2Dサンプルモデルも自動取得しません。
+`cargo xtask dev` は、残存プロセス停止・キャラクター同期・UI生成だけを行う**最小の開発起動**です。未使用の追加機能や取得元の障害で本体起動を止めません。ローカルAI、読み上げ、Live2D、THA3などを使う場合だけ、下表の `cargo xtask setup <対象>` を先に実行してください。Live2Dサンプルモデルも自動取得しません。保存中の追加キャラやLive2Dが欠損・破損・応答停止している場合も、短時間で同梱2Dキャラ「むぎ」へ切り替えて画面を起動します。
 
-> [!NOTE]
 > [!NOTE]
 > 初回コンパイルではRustのcrate取得にネットワークが必要な場合があります。AIモデルなど数GBの追加取得は `setup` を明示実行したときだけ行います。取得済みなら以後はオフラインでも開発起動できます。
 
@@ -162,7 +161,6 @@ cargo xtask dev
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止 |
-| `cargo xtask review-status` | まだ Codex / Claude の事後レビューが済んでいないコミットの一覧（`--strict` で未レビューがあれば失敗） |
 
 引数なしの `cargo xtask setup` で通常の開発・製品ビルドに使う全対象を取得します。THA3は開発環境で制作機能を確認するために含みますが、販売用軽量版には再配布しません。通常動作中はPythonもモデルも読み込みません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
@@ -386,7 +384,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | 種類 | 例 | 反映 |
 |---|---|---|
 | 軽い設定 | 文字サイズ、常に手前、人格、自発雑談 | 保存すると**即反映** |
-| 重い設定 | 叩く AI、モデル、音声（Aivis）、キャラクター | 確認画面が出て、承諾すると**再起動**し、モデル取得やエンジン起動を起動画面でまとめて実行 |
+| 重い設定 | 叩く AI、モデル、音声（Aivis）、キャラクター | 確認画面が出て、承諾すると画面を再読込。キャラを先に表示し、モデル取得やエンジン準備は画面起動後に続行 |
 
 「あとで」を選んでも設定は保存され、次回起動時に反映されます。
 
