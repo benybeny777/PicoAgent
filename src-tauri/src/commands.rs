@@ -3185,7 +3185,7 @@ fn parse_update_feed(bytes: &[u8]) -> Result<Value, String> {
     Ok(body)
 }
 
-fn update_status(feed: Option<&Value>) -> Result<Value, String> {
+fn update_status(feed: Option<&Value>, include_patch: bool) -> Result<Value, String> {
     let current = env!("CARGO_PKG_VERSION");
     let Some(feed) = feed else {
         return Ok(json!({
@@ -3234,7 +3234,11 @@ fn update_status(feed: Option<&Value>) -> Result<Value, String> {
                             && sha.chars().all(|character| character.is_ascii_hexdigit())
                     })
         });
-    let available = version_is_newer(latest, current);
+    let available = if include_patch {
+        version_is_newer(latest, current)
+    } else {
+        update_series_is_newer(latest, current)
+    };
     Ok(json!({
         "status": if available { "available" } else { "current" },
         "currentVersion": current,
@@ -3255,14 +3259,14 @@ fn update_status(feed: Option<&Value>) -> Result<Value, String> {
 #[tauri::command]
 pub async fn settings_check_update() -> Result<Value, String> {
     let feed = fetch_update_feed().await?;
-    update_status(feed.as_ref())
+    update_status(feed.as_ref(), true)
 }
 
 /// 署名・サイズ・SHA-256を更新情報と照合し、Windowsインストーラを起動して終了する。
 #[tauri::command]
 pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
     let feed = fetch_update_feed().await?;
-    let status = update_status(feed.as_ref())?;
+    let status = update_status(feed.as_ref(), true)?;
     if status.get("status").and_then(Value::as_str) == Some("offline") {
         return Ok(status);
     }
@@ -3460,7 +3464,7 @@ pub fn spawn_update_check(app: AppHandle) {
                 return;
             }
         };
-        let status = match update_status(Some(&body)) {
+        let status = match update_status(Some(&body), false) {
             Ok(status) => status,
             Err(error) => {
                 crate::log_paths::append_app_log(
@@ -3516,7 +3520,7 @@ fn valid_update_version(value: &str) -> bool {
             .all(|part| !part.is_empty() && part.parse::<u64>().is_ok())
 }
 
-/// "1.2.3" 形式のバージョン比較（数値の桁ごと）。
+/// 手動確認で使うSemVer全体の比較。
 fn version_is_newer(latest: &str, current: &str) -> bool {
     let parse = |value: &str| -> Vec<u64> {
         value
@@ -3540,6 +3544,18 @@ fn version_is_newer(latest: &str, current: &str) -> bool {
         }
     }
     false
+}
+
+/// 起動時に自動通知するmajor.minor系列の比較。patchだけの差分は通知しない。
+fn update_series_is_newer(latest: &str, current: &str) -> bool {
+    let series = |value: &str| {
+        value
+            .split('.')
+            .take(2)
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+    series(latest) > series(current)
 }
 
 /// 実行中のエージェント処理へ中断を要求する。
@@ -4155,8 +4171,8 @@ mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
         parse_update_feed, probe_with_timeout, replace_auto_summary, settings_tab, speech_text,
-        update_status, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
-        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        update_series_is_newer, update_status, verify_windows_installer, version_is_newer,
+        AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
 
@@ -4253,13 +4269,35 @@ mod tests {
     #[test]
     fn 更新版の数値比較は桁ごとに行う() {
         assert!(version_is_newer("1.10.0", "1.9.9"));
+        assert!(version_is_newer("2.0.0", "1.99.99"));
+        assert!(version_is_newer("1.0.1", "1.0.0"));
+        assert!(version_is_newer("1.0.99", "1.0.1"));
         assert!(!version_is_newer("1.0.0", "1.0.0"));
         assert!(!version_is_newer("0.9.9", "1.0.0"));
+        assert!(!update_series_is_newer("1.0.99", "1.0.0"));
+        assert!(update_series_is_newer("1.1.0", "1.0.99"));
+    }
+
+    #[test]
+    fn patch更新は手動確認だけで案内する() {
+        let feed = serde_json::json!({
+            "version": "1.0.2",
+            "releasePage": "https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v1.0.2",
+            "platforms": {}
+        });
+        assert_eq!(
+            update_status(Some(&feed), false).unwrap()["status"],
+            "current"
+        );
+        assert_eq!(
+            update_status(Some(&feed), true).unwrap()["status"],
+            "available"
+        );
     }
 
     #[test]
     fn オフラインはエラーではなく見送りになる() {
-        let status = update_status(None).unwrap();
+        let status = update_status(None, true).unwrap();
         assert_eq!(status["status"], "offline");
     }
 
@@ -4270,7 +4308,7 @@ mod tests {
             "releasePage": "https://github.com/benybeny777/PicoAgent-Distribution/releases",
             "platforms": { "windows-x64": { "url": "https://example.com/setup.exe" } }
         });
-        let status = update_status(Some(&feed)).unwrap();
+        let status = update_status(Some(&feed), true).unwrap();
         assert_eq!(status["status"], "available");
         assert_eq!(status["downloadReady"], false);
     }
@@ -4281,7 +4319,7 @@ mod tests {
             "version": "99.0/../../outside",
             "platforms": {}
         });
-        assert!(update_status(Some(&feed)).is_err());
+        assert!(update_status(Some(&feed), true).is_err());
     }
 
     #[test]

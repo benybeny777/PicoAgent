@@ -2,6 +2,7 @@
 
 ## 2026-08-17
 
+- 製品版のSemVer判定を規則化し、公開中の`latest.json`から同じ系列の`patch`を自動採番してアプリCargo・xtask Cargo・Tauri設定へ同期する`cargo xtask bump-version`を追加した。`minor`／`major`はユーザー明示指示だけで上げる。起動時はpatchを通知せず、設定からの手動確認・適用ではpatchも対象にする。同じ版のRelease資産上書きも廃止した。
 - Cargo、Pythonランタイム、同梱・管理導入アプリ、外部CLI、Webランタイム、音声／LLMモデルを横断監査し、公式LTSまたは安定版latestへ更新した。LLMモデルはリビジョン、サイズ、SHA-256を固定し、同名旧版の黙示利用を防いだ。
 - OpenAI、Anthropic、Gemini、xAI、DeepSeekの既定候補を公式の最新安定モデルへ更新し、国立情報学研究所のLLM-jp-4 8B Thinking公式GGUFを日本語推論向けローカルプリセットへ追加した。
 - llama.cppとWhisperのGitHub Release資産、Whisper既定モデル、ローカルGGUFへサイズ・SHA-256検証を追加した。依存監査を範囲別に再実行できる共通スキルを追加した。
