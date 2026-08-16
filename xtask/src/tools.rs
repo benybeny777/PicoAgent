@@ -17,9 +17,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
-use crate::util::{download_to, env_or, exe_name, extract, find_file, flag, log, repo_root, warn};
+use crate::util::{
+    cleanup_dir, cleanup_file, download_to, env_or, exe_name, extract, find_file, flag, log,
+    repo_root, warn,
+};
 
 struct Tool {
     name: &'static str,
@@ -31,10 +34,10 @@ struct Tool {
 }
 
 fn tools() -> Vec<Tool> {
-    let pandoc = env_or("PANDOC_VERSION", "3.6.3");
-    let ripgrep = env_or("RIPGREP_VERSION", "14.1.1");
-    let qpdf = env_or("QPDF_VERSION", "12.3.2");
-    let poppler = env_or("POPPLER_WIN_VERSION", "24.08.0-0");
+    let pandoc = env_or("PANDOC_VERSION", "3.10.2");
+    let ripgrep = env_or("RIPGREP_VERSION", "15.2.0");
+    let qpdf = env_or("QPDF_VERSION", "12.4.0");
+    let poppler = env_or("POPPLER_WIN_VERSION", "26.02.0-0");
     let imagemagick = env_or("IMAGEMAGICK_VERSION", "7.1.2-29");
 
     let arm = cfg!(target_arch = "aarch64");
@@ -169,7 +172,7 @@ fn fetch_one(tool: &Tool) -> Result<()> {
 
     let wanted = exe_name(tool.exe);
     if flag("TOOLS_FORCE") {
-        fs::remove_dir_all(&dir).ok();
+        cleanup_dir(&dir, "旧ツール配置")?;
         fs::create_dir_all(&dir)?;
     } else if let Some(existing) = find_file(&dir, &wanted) {
         log(
@@ -194,7 +197,7 @@ fn fetch_one(tool: &Tool) -> Result<()> {
     // 直接 dir へ展開すると、中断時に半端に展開されたツリーが残り、次回の
     // 「実行ファイルがあるか」判定を通ってしまう（DLL 欠けのまま「取得済み」になる）。
     let work = dir.with_extension("incoming");
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "前回のツール導入途中フォルダ")?;
     fs::create_dir_all(&work)?;
 
     let install = (|| -> Result<()> {
@@ -206,20 +209,21 @@ fn fetch_one(tool: &Tool) -> Result<()> {
         let archive = work.join(file_name);
         download_to(url, &archive)?;
         extract(&archive, &work)?;
-        fs::remove_file(&archive).ok();
+        cleanup_file(&archive, "展開済みツールアーカイブ")?;
 
         if find_file(&work, &wanted).is_none() {
             bail!("展開後に {wanted} が見つかりません。");
         }
-        fs::remove_dir_all(&dir).ok();
+        cleanup_dir(&dir, "旧ツール配置")?;
         fs::rename(&work, &dir)?;
         Ok(())
     })();
 
-    if install.is_err() {
-        fs::remove_dir_all(&work).ok();
+    if let Err(error) = install {
+        cleanup_dir(&work, "失敗したツール導入途中フォルダ")
+            .with_context(|| format!("元のツール導入エラー: {error:#}"))?;
+        return Err(error);
     }
-    install?;
 
     let found = find_file(&dir, &wanted)
         .ok_or_else(|| anyhow::anyhow!("設置後に {wanted} が見つかりません。"))?;

@@ -1,5 +1,13 @@
 # 変更履歴
 
+## 2026-08-17
+
+- Cargo、Pythonランタイム、同梱・管理導入アプリ、外部CLI、Webランタイム、音声／LLMモデルを横断監査し、公式LTSまたは安定版latestへ更新した。LLMモデルはリビジョン、サイズ、SHA-256を固定し、同名旧版の黙示利用を防いだ。
+- OpenAI、Anthropic、Gemini、xAI、DeepSeekの既定候補を公式の最新安定モデルへ更新し、国立情報学研究所のLLM-jp-4 8B Thinking公式GGUFを日本語推論向けローカルプリセットへ追加した。
+- llama.cppとWhisperのGitHub Release資産、Whisper既定モデル、ローカルGGUFへサイズ・SHA-256検証を追加した。依存監査を範囲別に再実行できる共通スキルを追加した。
+- AMD／Intel／GPUなしのWindowsへ利用不能なTHA3用CUDA PyTorchを数GB取得していた経路を止めた。対応GPUを取得前に確認し、引数なしsetupと通常buildから任意の大容量取得を外して、全取得は`setup all`／`build-full`の明示操作だけにした。
+- revision入り保存名へ移行したローカルGGUFは、旧配布名の取得済み実体をサイズ・SHA-256一致時だけ再利用し、同じ数GBを取り直さないようにした。現行版の検証成功後は不一致だった旧版も削除し、管理領域へゴミを残さない。
+
 ルートには直近の大きな変更と年別索引を置き、詳細は年別ファイルへ保存します。
 
 ## 直近の変更

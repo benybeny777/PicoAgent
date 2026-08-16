@@ -23,6 +23,24 @@ pub fn warn(tag: &str, message: impl AsRef<str>) {
     eprintln!("[{tag}] 警告: {}", message.as_ref());
 }
 
+/// PicoAgent管理下の一時・旧ディレクトリを、存在する場合だけ確実に削除する。
+pub fn cleanup_dir(path: &Path, label: &str) -> Result<()> {
+    if path.exists() {
+        fs::remove_dir_all(path)
+            .with_context(|| format!("{label}を掃除できません: {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// PicoAgent管理下の一時・旧ファイルを、存在する場合だけ確実に削除する。
+pub fn cleanup_file(path: &Path, label: &str) -> Result<()> {
+    if path.exists() {
+        fs::remove_file(path)
+            .with_context(|| format!("{label}を掃除できません: {}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// リポジトリのルート（`xtask/` の親）。
 pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -76,10 +94,14 @@ pub fn download_to(url: &str, dest: &Path) -> Result<u64> {
         Ok(bytes)
     })();
 
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
+    match result {
+        Ok(bytes) => Ok(bytes),
+        Err(error) => {
+            cleanup_file(&temp, "失敗した取得の一時ファイル")
+                .with_context(|| format!("元の取得エラー: {error:#}"))?;
+            Err(error)
+        }
     }
-    result
 }
 
 /// GitHub API から JSON を取る（リリース情報の参照用）。

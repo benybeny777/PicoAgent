@@ -2,11 +2,13 @@
 
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、単一世代化、実WebView検査まで省略しない。同梱PNGは `rin-tha3` を機能基準に `motionProfile=full` とし、基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。
 
-- 最終更新: 2026-08-16
-- ブランチ: `main`
-- 目的: Live2D構図と公開手順を先に統合し、依存更新後の最新`main`からWindowsベータ版を再公開する
+- 最終更新: 2026-08-17
+- ブランチ: `chore/update-dependencies-20260816`
+- 目的: 全依存・同梱アプリ・LLMモデルを更新し、マージ後の最新`main`からWindowsベータ版とLPを再公開する
 
 ## 現在の作業
+
+2026-08-17、Cargo直接依存、THA3 Pythonランタイム、Aivis、Whisper、llama.cpp、LibreOffice、外部CLI、Webランタイム、クラウド／ローカルLLMモデルを公式一次情報と照合した。LTS相当があるLibreOfficeは成熟版25.8.7.2、それ以外は安定版latest、LLMは最新安定版を採用する。GitHub Release資産とモデルはサイズ・SHA-256検証を追加し、ローカルGGUFはrevision入りの別名で保存する。日本語向けにLLM-jp-4 8B Thinking公式GGUFも追加した。AMD／Intel／GPUなしWindowsへTHA3用CUDA PyTorchを取得していた経路は、コード・モデル・Pythonを取る前の`nvidia-smi -L`確認と通常版NSISの正常スキップへ修正した。引数なしsetupと通常buildの暗黙一括取得も外し、全取得は`setup all`／`build-full`の明示操作に限定した。`.agents/skills/audit-picoagent-dependencies`を毎月1日の全体点検の正本とする。このPRをマージ後、最新`main`からNSISを再生成してLPとReleaseへ公開する。
 
 2026-08-16、README先頭へ公開LPの導線を追加し、Live2Dへモデル固有構図とPNG向け既定倍率が二重適用される不具合を修正した。「まお」の通常／配信を実WebViewで再検査し、帽子上端・顔・胸上が収まることを確認した。構図修正前に生成したNSISは公開せず破棄扱いにし、`distribution/site/latest.json`は公開中の実体へ戻した。依存更新は別PRで行い、そのマージ後の最新`main`からWindowsベータ版を再生成する。配布作業の正本`build-picoagent-beta`には、LP・Release・Pages・公開ハッシュの現行照合と、ビルド後に変更した場合の再生成を追加した。
 

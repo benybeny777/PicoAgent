@@ -465,7 +465,7 @@ fn character_content_version(character_dir: &Path) -> Result<String> {
         hasher.update(bytes);
         hasher.update([0]);
     }
-    Ok(format!("{:x}", hasher.finalize())[..16].to_string())
+    Ok(hex::encode(hasher.finalize())[..16].to_string())
 }
 
 /// `ui/` を Tauri 配信用 `ui-dist/` へコピーする。

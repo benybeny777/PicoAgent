@@ -131,7 +131,7 @@ PNGの口パクは実際の音声再生開始後に声量同期し、ミュー�
 
 | | 必要なもの |
 |---|---|
-| 共通 | **Rust（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） |
+| 共通 | **Rust 1.88以上（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） |
 | Windows | WebView2 ランタイム |
 | macOS | Xcode Command Line Tools（`xcode-select --install`）<br />読み上げも使うなら `brew install p7zip` |
 
@@ -164,7 +164,9 @@ cargo xtask dev
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止 |
 
-引数なしの `cargo xtask setup` で通常の開発・製品ビルドに使う全対象を取得します。THA3は開発環境で制作機能を確認するために含みますが、販売用軽量版には再配布しません。通常動作中はPythonもモデルも読み込みません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+全対象が本当に必要な場合だけ `cargo xtask setup all` を明示します。引数なしの `cargo xtask setup` は、不要な数GB級ランタイムの取得を防ぐため実行しません。THA3は開発環境で制作機能を確認するための任意対象で、販売用軽量版には再配布しません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+
+`cargo xtask build`も任意の大容量追加機能を暗黙取得しない軽量構成です。Aivis、Whisper、THA3、Office、外部CLIまで含む開発用フルビルドが本当に必要な場合だけ、`cargo xtask build-full`を明示します。
 
 一部の OS では公式のポータブル配布が無いツールがあります。その場合は警告のみで起動を続け、`apt` / `brew` で入れた PATH 上のツールへ自動で切り替わります。
 
@@ -205,7 +207,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 既定は **`local`（同梱エンジン）** です。何も設定しなくても動きます。
 
-- **ローカルモデルの自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら最新世代の Qwen3.5、OpenAI gpt-oss、Phi-4 mini も選べます。
+- **ローカルモデルの自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら最新世代の Qwen3.5、OpenAI gpt-oss、Phi-4 mini、LLM-jp-4 8B も選べます。Windows同梱エンジンはVulkan経由で対応GPUへ推論層をオフロードします。
 - **設定画面での選択** — 「種類 → サイズ」で選べ、推奨 VRAM・推奨 RAM・ダウンロード目安を表示します。取得中はフキダシ下に「モデルを準備中… NN%」と出ます。
 - **ディスク整理** — 「AIモデル・連携」タブの「ダウンロード済みモデル」から、取得済み GGUF の一覧・サイズ確認・削除ができます（使用中のモデルは削除不可）。削除は再ダウンロードが必要になることを画面内で案内し、同じボタンをもう一度押したときだけ実行します。
 - **クラウド AI を使う**（費用が発生します） — 右クリック →「設定を開く…」→「AIモデル・連携」でプロバイダ・API キー・モデルを設定。OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral に対応しています。
@@ -523,6 +525,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | `qwen35_9b` | Qwen3.5 9B Q4 | 6 GB | 16 GB | 約 5.7 GB |
 | `gpt_oss_20b` | OpenAI gpt-oss-20b MXFP4 | 16 GB | 32 GB | 約 12.1 GB |
 | `phi4mini` | Phi-4 mini Instruct Q4 | 4 GB | 12 GB | 約 2.5 GB |
+| `llmjp4_8b` | LLM-jp-4 8B Thinking Q4（日本語推論向け） | 6 GB | 16 GB | 約 5.3 GB |
 
 旧版で選択したQwen 2.5／3、Llama 3.x、Mistral 7B、Phi 3.5のプリセットIDは、初回起動時に同等負荷帯の現行候補へ移行します。Claudeはモデル重みが公開されていないため、ローカルダウンロードではなくClaude APIプロバイダから利用します。
 
@@ -549,7 +552,7 @@ Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のA
 | Windows | Windows 10/11 x64、CUDA対応NVIDIA GPU、VRAM 4GB、CUDA 12.8対応ドライバー | VRAM 8GB以上、RAM 16GB以上 | VRAM 4～6GB未満=`separable_half`、6～10GB未満=`standard_half`、10GB以上=`standard_float` |
 | Apple Silicon Mac | Apple Silicon、MPS対応macOS、ユニファイドメモリ16GB | 24GB以上 | 互換性優先の`standard_float` |
 
-AMD APU／AMD GPU、Intel Mac、LinuxでのTHA3生成は対象外です（Windows版THA3はCUDA対応NVIDIA GPUが必須）。通常のPicoAgent利用、ローカルモデルのVulkan推論、生成済みキャラクターの表示には、このTHA3用GPU要件は適用されません。
+AMD APU／AMD GPU、Intel Mac、LinuxでのTHA3生成は対象外です（Windows版THA3はCUDA対応NVIDIA GPUが必須）。`cargo xtask setup tha3` と通常版インストーラは取得開始前にNVIDIA環境を確認し、AMD／Intel／GPUなし環境へCUDA版PyTorchをダウンロードしません。通常のPicoAgent利用、ローカルモデルのVulkan推論、生成済みキャラクターの表示には、このTHA3用GPU要件は適用されません。
 
 - 軽量WindowsインストーラにはTHA3を入れません。作者配布のコードとモデルを利用者が取得し、専用環境を準備した場合の全体容量は実測約5.2GBです
 - 作者配布物から環境を用意するときは、一時キャッシュを含め10GB以上の空き容量を確保してください。開発用 `cargo xtask setup tha3` は成功時に取得キャッシュを片付け、失敗時は再開用キャッシュをPicoAgentの `temp/` に保持します

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signer, SigningKey};
-use rand_core::OsRng;
+use rand::{rngs::SysRng, TryRng};
 use serde::Serialize;
 
 use crate::util::repo_root;
@@ -41,7 +41,11 @@ fn keygen() -> Result<()> {
     if private_path.exists() {
         bail!("秘密鍵は既に存在します: {}", private_path.display());
     }
-    let signing = SigningKey::generate(&mut OsRng);
+    let mut secret = [0_u8; 32];
+    SysRng
+        .try_fill_bytes(&mut secret)
+        .context("OSから署名鍵用の乱数を取得できません")?;
+    let signing = SigningKey::from_bytes(&secret);
     fs::create_dir_all(
         private_path
             .parent()

@@ -13,7 +13,19 @@ $pythonInstall = Join-Path $stage "python"
 $venv = Join-Path $stage "venv"
 $python = Join-Path $venv "Scripts\python.exe"
 $torch = Join-Path $venv "Lib\site-packages\torch\__init__.py"
-$runtimeVersion = "python3.11-torch2.10.0-cu128-v1"
+$runtimeVersion = "python3.11-torch2.12.1-cu126-v1"
+
+# Windows版THA3はCUDA専用。非対応PCへ数GBのCUDAランタイムを取得しない。
+$nvidiaSmi = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue
+if ($null -eq $nvidiaSmi) {
+    Write-Output "THA3 runtime was skipped because a CUDA-capable NVIDIA GPU was not detected."
+    exit 0
+}
+& $nvidiaSmi.Source -L *> $null
+if ($LASTEXITCODE -ne 0) {
+    Write-Output "THA3 runtime was skipped because a working CUDA-capable NVIDIA GPU was not detected."
+    exit 0
+}
 
 function Test-RuntimeReady([string]$Path) {
     $marker = Join-Path $Path "picoagent-runtime-version.txt"
@@ -43,8 +55,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Failed to install the bundled Python." }
     & $UvPath venv --python 3.11 --managed-python --relocatable $venv
     if ($LASTEXITCODE -ne 0) { throw "Failed to create the bundled Python environment." }
-    & $UvPath pip install --python $python --torch-backend cu128 `
-        "torch==2.10.0" "numpy==2.2.6" "pillow==11.3.0" "matplotlib==3.10.5"
+    & $UvPath pip install --python $python --torch-backend cu126 `
+        "torch==2.12.1" "numpy==2.4.6" "pillow==12.3.0" "matplotlib==3.11.1"
     if ($LASTEXITCODE -ne 0) { throw "Failed to install CUDA PyTorch." }
     if (-not (Test-Path -LiteralPath $torch)) { throw "THA3 runtime validation failed." }
     Set-Content -LiteralPath (Join-Path $stage "picoagent-runtime-version.txt") `

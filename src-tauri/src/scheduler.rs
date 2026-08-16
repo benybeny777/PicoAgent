@@ -486,7 +486,7 @@ fn parse_cron_value(part: &str, value: u32, min: u32, max: u32) -> bool {
             return true;
         }
         if let Some(step) = token.strip_prefix("*/").and_then(|s| s.parse::<u32>().ok()) {
-            return step > 0 && value >= min && value <= max && (value - min) % step == 0;
+            return step > 0 && value >= min && value <= max && (value - min).is_multiple_of(step);
         }
         token
             .parse::<u32>()

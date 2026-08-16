@@ -11,11 +11,12 @@ use crate::message::{Field, Message, ToolCall};
 pub struct Anthropic;
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
-const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+const DEFAULT_MODEL: &str = "claude-sonnet-5";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const STATIC_MODELS: &[&str] = &[
-    "claude-opus-4-8",
-    "claude-sonnet-4-6",
+    "claude-fable-5",
+    "claude-opus-5",
+    "claude-sonnet-5",
     "claude-haiku-4-5",
 ];
 

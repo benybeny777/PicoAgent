@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-08-17 — 全依存・同梱アプリ・LLMモデル監査
+
+対象: Cargo直接依存、THA3 Pythonランタイム、Aivis、Whisper、llama.cpp、LibreOffice、外部CLI、Webランタイム、クラウド／ローカルLLMモデル。Codexが公式一次情報と実際の取得経路を確認した。Claudeはユーザー指示どおり起動していない。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P1 | Rust直接依存とMSRVが旧版で、ロックも現行系列へ更新されていない | 対応済み | Rust 1.88を下限にし、reqwest 0.13、zip 8.6、ed25519-dalek 3、cpal 0.18、windows-sys 0.61等へ更新。API差分を修正した |
+| 2 | P1 | llama.cpp／Whisper Release資産と既定Whisperモデルの取得後に実体検証が不足している | 対応済み | GitHub公式digest・sizeとSHA-256を検証し、不一致時は配置しない。llama.cppはstagingから検証済み一式だけを交換する |
+| 3 | P1 | ローカルGGUFが`resolve/main`または同名保存で、上流更新後も旧ファイルを黙示利用できる | 対応済み | 全プリセットをrevision URL、size、SHA-256、revision入り保存名へ固定し、日本語向けにLLM-jp-4 8B Thinking公式GGUFを追加した |
+| 4 | P1 | クラウドLLM候補が公式の最新安定モデルと一致しない | 対応済み | OpenAI GPT-5.6、Claude 5系列、Gemini 3.6／3.5、Grok 4.5、DeepSeek V4へ更新。Mistralは公式latest aliasを維持した |
+| 5 | 確認 | Aivis／THA3／Office／外部CLI／Webランタイムの採用版 | 対応済み | Aivis 1.2.0、THA3上流8946939、LibreOffice成熟版25.8.7.2、uv 0.12.5、Pandoc 3.10.2、ripgrep 15.2.0、qpdf 12.4.0、Poppler 26.02.0-0へ更新。ImageMagick 7.1.2-29と動的FFmpegは現行を維持した |
+| 6 | 見送り | pixi.jsを全体latest 8系へ更新する | 見送り | pixi-live2d-display 0.4.0がPixiJS 6系を前提とするため6.5.10を維持。Cubism Coreもモデル互換と再配布条件を優先して固定する |
+| 7 | P2 | 開発用Office／CLIの一部取得経路は公式URLとアセット名を固定するがdigest検証を持たない | 保留 | ベータNSISへ同梱しない開発時の任意取得物。公式digest提供状況が不均一なため、署名またはdigestの共通検証設計を別PR候補とする |
+| 8 | P1 | 取得物のSHA-256検証がWindowsの既定スレッドスタックと同じ1MiB配列をスタック確保し、最新llama.cpp取得時に異常終了する | 対応済み | xtask、Aivis、Whisper、更新NSISの4経路をヒープ確保へ変更し、強制再取得で再検証する |
+| 9 | P1 | WindowsならGPU種別を見ずTHA3用CUDA PyTorchを数GB取得し、AMD／Intel環境では利用不能なうえ通常版インストール後処理でも暗黙実行する | 対応済み | `nvidia-smi -L`の成功でCUDA対応NVIDIA環境を取得前に確認する。開発用setupはコード・モデル・Pythonを取る前に停止し、通常版インストーラは正常スキップする。引数なしsetupの全取得を廃止して`setup all`を明示必須とし、通常`build`も軽量化して任意機能は`build-full`だけにした |
+| 10 | P1 | GGUF保存名へrevisionを付けると同内容の旧配布名ファイルを見つけられず数GBを再取得し、旧保存先からの移行も内容を検証せず採用する | 対応済み | 現在のモデル領域と旧保存先でrevision名・旧配布名の両方を探し、固定sizeとSHA-256が一致したファイルだけ原子的な移行へ使う。不一致・読取不能は新規取得の成功までは保持し、現行版の再検証後に全旧候補を削除する |
+| 11 | P1 | 取得失敗や更新成功後の`.part`、staging、旧版、再試行用キャッシュの削除失敗を一部で無視し、不要物が残っても成功扱いになりうる | 対応済み | 取得共通処理へ削除失敗を伝播する関数を追加し、正常完了時は検証済み現行版以外を残さない。既存環境では旧GGUF 4件（約16.9GB）、旧THA3画像36件、空作業領域1件、古い一時ジョブ5件を回収可能なごみ箱へ移し、残存0件を再走査した |
+
+検証: `cargo check`、Rustライブラリ370件、xtask 44件、本体／xtask全target clippy（警告をエラー扱い）、全JavaScript構文、`git diff --check`、依存監査スキルの`all`と形式検証が成功した。`cargo audit`は既知脆弱性0件。Windows/macOSの対象実行経路外にあるLinux GTK3系、`proc-macro-error`、`unic-*`の保守・健全性警告17件は許容し、対象OSを変えず追跡する。Git管理外実体はAivis 1.2.0、llama.cpp build 10453、Whisper 1.9.2＋smallモデル487,601,967 bytes／SHA-256一致、LibreOffice 25.8.7.2、Pandoc 3.10.2、ripgrep 15.2.0、FFmpeg 2026-08-16、qpdf 12.4.0、Poppler 26.02.0、ImageMagick 7.1.2-29を版表示で確認した。NVIDIA実機ではPyTorch 2.12.1+cu126／CUDA利用可能、NVIDIAを検出できない模擬環境ではTHA3ランタイム取得を正常スキップして対象フォルダを作らないことを確認した。NSIS再生成と公開照合は依存PRをマージ後の別PRで行う。
+
+---
+
 ## 2026-08-16 — Windowsベータ版と公開LPの更新
 
 対象: PR #97までの`main`、Windows NSIS、`distribution/site/latest.json`、公開LP、開発README。Codexが配布成果物と公開導線を独立確認した。Claudeはユーザー指示どおり起動していない。

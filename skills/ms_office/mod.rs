@@ -64,8 +64,8 @@ fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replaceme
     for index in 0..archive.len() {
         let entry = archive.by_index(index).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
-        let options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
         if name.ends_with('/') {
             writer.add_directory(&name, options).map_err(|e| e.to_string())?;
             continue;
@@ -271,7 +271,7 @@ mod tests {
         let path = dir.join("test.docx");
         let file = std::fs::File::create(&path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
-        let options = zip::write::FileOptions::default();
+        let options = zip::write::SimpleFileOptions::default();
         writer.start_file("word/document.xml", options).unwrap();
         writer
             .write_all(format!("<w:document><w:t>{}</w:t></w:document>", xml_escape(body)).as_bytes())
@@ -342,7 +342,7 @@ mod tests {
         {
             let file = std::fs::File::create(&docx).unwrap();
             let mut writer = zip::ZipWriter::new(file);
-            let options = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             writer.start_file("[Content_Types].xml", options).unwrap();
             writer.write_all(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#.as_bytes()).unwrap();
             writer.start_file("_rels/.rels", options).unwrap();

@@ -105,11 +105,15 @@ fn model_url(app: &AppHandle) -> String {
 
 fn model_path(app: &AppHandle) -> PathBuf {
     let url = model_url(app);
-    let name = url
-        .split('/')
-        .next_back()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("model.gguf");
+    let name = local::preset_by_url(&url).map_or_else(
+        || {
+            url.split('/')
+                .next_back()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("model.gguf")
+        },
+        |preset| preset.file_name,
+    );
     crate::log_paths::bundled_dir(app).join("models").join(name)
 }
 
@@ -165,28 +169,109 @@ async fn running_server_uses_model(app: &AppHandle, model: &Path) -> bool {
     }
 }
 
-fn legacy_model_paths(app: &AppHandle) -> Vec<PathBuf> {
-    let url = model_url(app);
-    let name = url
+fn migration_file_names(url: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    if let Some(preset) = local::preset_by_url(url) {
+        names.push(preset.file_name);
+    }
+    let source_name = url
         .split('/')
         .next_back()
-        .filter(|s| !s.is_empty())
+        .filter(|name| !name.is_empty())
         .unwrap_or("model.gguf");
-    let mut paths = vec![crate::log_paths::data_dir(app).join("models").join(name)];
-    if let Ok(dir) = app.path().app_data_dir() {
-        paths.push(dir.join("models").join(name));
+    if !names.contains(&source_name) {
+        names.push(source_name);
     }
-    paths
+    names
+}
+
+fn legacy_model_paths(app: &AppHandle) -> Vec<PathBuf> {
+    let url = model_url(app);
+    let names = migration_file_names(&url);
+    model_storage_roots(app)
+        .into_iter()
+        .flat_map(|root| names.iter().map(move |name| root.join(name)))
+        .collect()
+}
+
+fn model_storage_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let mut roots = vec![
+        models_dir(app),
+        crate::log_paths::data_dir(app).join("models"),
+    ];
+    if let Ok(dir) = app.path().app_data_dir() {
+        roots.push(dir.join("models"));
+    }
+    roots
+}
+
+async fn preset_model_matches(
+    path: &Path,
+    preset: &local::LocalModelPreset,
+) -> anyhow::Result<bool> {
+    model_file_matches(path, preset.size_bytes, preset.sha256).await
+}
+
+async fn model_file_matches(path: &Path, size_bytes: u64, sha256: &str) -> anyhow::Result<bool> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+
+    if tokio::fs::metadata(path).await?.len() != size_bytes {
+        return Ok(false);
+    }
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).await?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(hex::encode(digest.finalize()) == sha256)
 }
 
 async fn migrate_legacy_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     if dest.exists() {
         return Ok(());
     }
-    let Some(old_path) = legacy_model_paths(app)
-        .into_iter()
-        .find(|path| path.exists())
-    else {
+    let url = model_url(app);
+    let expected = local::preset_by_url(&url);
+    let mut selected = None;
+    for path in legacy_model_paths(app) {
+        if path == *dest || !path.exists() {
+            continue;
+        }
+        if let Some(preset) = expected {
+            match preset_model_matches(&path, preset).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!(
+                            "旧ローカルモデルは現在の固定版と一致しないため再利用しません: {}",
+                            path.display()
+                        ),
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!(
+                            "旧ローカルモデルを検証できません: {} ({error})",
+                            path.display()
+                        ),
+                    );
+                    continue;
+                }
+            }
+        }
+        selected = Some(path);
+        break;
+    }
+    let Some(old_path) = selected else {
         return Ok(());
     };
     if let Some(parent) = dest.parent() {
@@ -216,14 +301,57 @@ async fn migrate_legacy_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result
     }
 }
 
+async fn remove_obsolete_model_files(
+    dest: &Path,
+    candidates: Vec<PathBuf>,
+    size_bytes: u64,
+    sha256: &str,
+) -> anyhow::Result<usize> {
+    let obsolete: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|path| path != dest && path.is_file())
+        .collect();
+    if obsolete.is_empty() {
+        return Ok(0);
+    }
+    anyhow::ensure!(
+        model_file_matches(dest, size_bytes, sha256).await?,
+        "現行ローカルモデルの検証前に旧ファイルを削除しようとしました"
+    );
+    for path in &obsolete {
+        tokio::fs::remove_file(path).await.map_err(|error| {
+            anyhow::anyhow!(
+                "旧ローカルモデルを削除できません: {} ({error})",
+                path.display()
+            )
+        })?;
+    }
+    Ok(obsolete.len())
+}
+
+async fn cleanup_obsolete_preset_models(app: &AppHandle, dest: &Path) -> anyhow::Result<usize> {
+    let url = model_url(app);
+    let Some(preset) = local::preset_by_url(&url) else {
+        return Ok(0);
+    };
+    let names = local::obsolete_model_file_names();
+    let candidates = model_storage_roots(app)
+        .into_iter()
+        .flat_map(|root| names.iter().map(move |name| root.join(name)))
+        .collect();
+    remove_obsolete_model_files(dest, candidates, preset.size_bytes, preset.sha256).await
+}
+
 // モデルをストリーミングダウンロード（進捗を emit）。
 async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
 
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
     let url = model_url(app);
+    let expected = local::preset_by_url(&url);
     set_status(app, json!({ "phase": "download", "percent": 0 }));
 
     let mut res = crate::tools::http::client().get(&url).send().await?;
@@ -232,34 +360,61 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     }
     let total = res.content_length().unwrap_or(0);
     let tmp = dest.with_extension("part");
-    let mut file = tokio::fs::File::create(&tmp).await?;
-    let mut received: u64 = 0;
-    let mut last_emit: i64 = -1;
+    let result: anyhow::Result<()> = async {
+        let mut file = tokio::fs::File::create(&tmp).await?;
+        let mut received: u64 = 0;
+        let mut digest = Sha256::new();
+        let mut last_emit: i64 = -1;
 
-    while let Some(chunk) = res.chunk().await? {
-        file.write_all(&chunk).await?;
-        received += chunk.len() as u64;
-        if let Some(pct) = received.saturating_mul(100).checked_div(total) {
-            let pct = pct as i64;
-            if pct != last_emit {
-                last_emit = pct;
-                // 数GBの取得は10分以上かかることがある。割合だけだと「どれくらい待つのか」
-                // が分からず、止まっているようにも見えるので実サイズも渡す。
-                set_status(
-                    app,
-                    json!({
-                        "phase": "download",
-                        "percent": pct,
-                        "receivedBytes": received,
-                        "totalBytes": total
-                    }),
+        while let Some(chunk) = res.chunk().await? {
+            file.write_all(&chunk).await?;
+            digest.update(&chunk);
+            received += chunk.len() as u64;
+            if let Some(pct) = received.saturating_mul(100).checked_div(total) {
+                let pct = pct as i64;
+                if pct != last_emit {
+                    last_emit = pct;
+                    // 数GBの取得は10分以上かかることがある。割合だけだと「どれくらい待つのか」
+                    // が分からず、止まっているようにも見えるので実サイズも渡す。
+                    set_status(
+                        app,
+                        json!({
+                            "phase": "download",
+                            "percent": pct,
+                            "receivedBytes": received,
+                            "totalBytes": total
+                        }),
+                    );
+                }
+            }
+        }
+        file.flush().await?;
+        drop(file);
+        if let Some(preset) = expected {
+            let actual_sha256 = hex::encode(digest.finalize());
+            anyhow::ensure!(
+                received == preset.size_bytes && actual_sha256 == preset.sha256,
+                "モデル検証に失敗: size={received}/{} sha256={actual_sha256}/{}",
+                preset.size_bytes,
+                preset.sha256
+            );
+        }
+        tokio::fs::rename(&tmp, dest).await?;
+        Ok(())
+    }
+    .await;
+    if let Err(error) = result {
+        match tokio::fs::remove_file(&tmp).await {
+            Ok(()) => return Err(error),
+            Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => return Err(error),
+            Err(cleanup) => {
+                anyhow::bail!(
+                    "モデル取得に失敗し、一時ファイルも削除できません: {} ({cleanup}); 元のエラー: {error}",
+                    tmp.display()
                 );
             }
         }
     }
-    file.flush().await?;
-    drop(file);
-    tokio::fs::rename(&tmp, dest).await?;
     Ok(())
 }
 
@@ -503,6 +658,18 @@ pub async fn ensure_and_start(app: AppHandle) {
             return;
         }
     }
+    match cleanup_obsolete_preset_models(&app, &model).await {
+        Ok(removed) if removed > 0 => crate::log_paths::append_app_log(
+            &app,
+            &format!("検証済み現行版へ移行し、旧ローカルモデル{removed}件を削除しました"),
+        ),
+        Ok(_) => {}
+        // フォールバック許可: 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
+        Err(error) => crate::log_paths::append_app_log(
+            &app,
+            &format!("旧ローカルモデルの掃除に失敗しました: {error}"),
+        ),
+    }
     // 終了処理が始まっていたら spawn しない（ダウンロード完了後のレースコンディション対策）。
     if app
         .try_state::<EngineState>()
@@ -665,5 +832,73 @@ pub fn stop(app: &AppHandle) {
 pub fn clear_stopping(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
         engine.stopping.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{migration_file_names, model_file_matches, remove_obsolete_model_files};
+    use crate::providers::local;
+
+    #[test]
+    fn revision保存名への移行候補に旧配布名も含める() {
+        let preset = local::preset("small").unwrap();
+        let names = migration_file_names(preset.url);
+        assert_eq!(names[0], preset.file_name);
+        assert_eq!(names[1], "gemma-4-E2B-it-Q4_K_M.gguf");
+    }
+
+    #[test]
+    fn 旧モデルはサイズとsha256の両方が一致した場合だけ再利用する() {
+        use sha2::{Digest, Sha256};
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let path = std::env::temp_dir().join(format!(
+                "picoagent-model-migration-{}-{}.gguf",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            tokio::fs::write(&path, b"picoagent").await.unwrap();
+            let sha256 = hex::encode(Sha256::digest(b"picoagent"));
+            assert!(model_file_matches(&path, 9, &sha256).await.unwrap());
+            assert!(!model_file_matches(&path, 8, &sha256).await.unwrap());
+            assert!(!model_file_matches(&path, 9, &"0".repeat(64)).await.unwrap());
+            tokio::fs::remove_file(path).await.unwrap();
+        });
+    }
+
+    #[test]
+    fn 現行モデルの検証成功後だけ旧ファイルを削除する() {
+        use sha2::{Digest, Sha256};
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let root = std::env::temp_dir().join(format!(
+                "picoagent-model-cleanup-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            tokio::fs::create_dir_all(&root).await.unwrap();
+            let dest = root.join("current.gguf");
+            let old = root.join("old.gguf");
+            tokio::fs::write(&dest, b"current").await.unwrap();
+            tokio::fs::write(&old, b"old").await.unwrap();
+            let sha256 = hex::encode(Sha256::digest(b"current"));
+            let removed =
+                remove_obsolete_model_files(&dest, vec![dest.clone(), old.clone()], 7, &sha256)
+                    .await
+                    .unwrap();
+            assert_eq!(removed, 1);
+            assert!(dest.is_file());
+            assert!(!old.exists());
+            tokio::fs::remove_dir_all(root).await.unwrap();
+        });
     }
 }

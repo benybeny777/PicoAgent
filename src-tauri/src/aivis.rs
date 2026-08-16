@@ -551,7 +551,7 @@ async fn download_aivis_archive(url: &str, dest: &Path, expected_size: u64) -> a
 fn verify_archive_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {
     let mut file = std::fs::File::open(path)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = std::io::Read::read(&mut file, &mut buffer)?;
         if count == 0 {
@@ -560,7 +560,7 @@ fn verify_archive_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {
         digest.update(&buffer[..count]);
     }
     anyhow::ensure!(
-        format!("{:x}", digest.finalize()) == expected,
+        hex::encode(digest.finalize()) == expected,
         "Aivis 公式配布のSHA-256が一致しません。"
     );
     Ok(())

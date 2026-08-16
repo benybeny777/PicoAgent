@@ -17,6 +17,9 @@ pub struct LocalModelPreset {
     pub size: &'static str,
     pub label: &'static str,
     pub url: &'static str,
+    pub file_name: &'static str,
+    pub size_bytes: u64,
+    pub sha256: &'static str,
     pub ctx: &'static str,
     pub recommended_vram_gb: u64,
     pub recommended_ram_gb: u64,
@@ -30,7 +33,10 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "Gemma",
         size: "軽量 E2B",
         label: "軽量: Gemma 4 E2B Q4（低VRAM/CPU向け）",
-        url: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/0314792d7f1f7e229411f620751375812bb9faf2/gemma-4-E2B-it-Q4_K_M.gguf",
+        file_name: "gemma-4-E2B-it-Q4_K_M-0314792d.gguf",
+        size_bytes: 3_106_738_272,
+        sha256: "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
         ctx: "8192",
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
@@ -42,7 +48,10 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "Gemma",
         size: "標準 E4B",
         label: "標準: Gemma 4 E4B Q4（推奨）",
-        url: "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/bfc15c382204943c3a8fff0c750b94ae2364d7a3/gemma-4-E4B-it-Q4_K_M.gguf",
+        file_name: "gemma-4-E4B-it-Q4_K_M-bfc15c38.gguf",
+        size_bytes: 4_977_171_584,
+        sha256: "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
         ctx: "8192",
         recommended_vram_gb: 4,
         recommended_ram_gb: 16,
@@ -54,7 +63,10 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "Gemma",
         size: "高品質 12B",
         label: "高品質: Gemma 4 12B Q4（VRAM 8GB以上推奨）",
-        url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/fc034cfff751157913579611efad8462ac1be606/gemma-4-12b-it-Q4_K_M.gguf",
+        file_name: "gemma-4-12b-it-Q4_K_M-fc034cff.gguf",
+        size_bytes: 7_121_861_440,
+        sha256: "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
         ctx: "16384",
         recommended_vram_gb: 8,
         recommended_ram_gb: 24,
@@ -66,7 +78,10 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "Qwen",
         size: "Qwen3.5 4B",
         label: "選択: Qwen3.5 4B Q4（軽量・日本語向け）",
-        url: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf",
+        file_name: "Qwen3.5-4B-Q4_K_M-e87f1764.gguf",
+        size_bytes: 2_740_937_888,
+        sha256: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
         ctx: "8192",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
@@ -78,7 +93,10 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "Qwen",
         size: "Qwen3.5 9B",
         label: "選択: Qwen3.5 9B Q4（高品質・日本語向け）",
-        url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf",
+        file_name: "Qwen3.5-9B-Q4_K_M-3885219b.gguf",
+        size_bytes: 5_680_522_464,
+        sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
         ctx: "8192",
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
@@ -90,7 +108,10 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "OpenAI",
         size: "gpt-oss-20b",
         label: "選択: OpenAI gpt-oss-20b MXFP4（高性能PC向け）",
-        url: "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-MXFP4.gguf",
+        url: "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/ef9b12f2ff56c69cf32153a02784e7a3c88bf524/gpt-oss-20b-MXFP4.gguf",
+        file_name: "gpt-oss-20b-MXFP4-ef9b12f2.gguf",
+        size_bytes: 12_109_566_624,
+        sha256: "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
         ctx: "16384",
         recommended_vram_gb: 16,
         recommended_ram_gb: 32,
@@ -102,14 +123,59 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         family: "Phi",
         size: "Phi-4 mini Instruct",
         label: "選択: Phi-4 mini Instruct Q4（軽量）",
-        url: "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/78eb92a46fc37e6b524df991ed9aca9bc6aa7b80/Phi-4-mini-instruct-Q4_K_M.gguf",
+        file_name: "Phi-4-mini-instruct-Q4_K_M-78eb92a4.gguf",
+        size_bytes: 2_491_874_272,
+        sha256: "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
         ctx: "8192",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.5GB",
         note: "小型モデルで推論と指示追従を重視する場合の候補。",
     },
+    LocalModelPreset {
+        id: "llmjp4_8b",
+        family: "LLM-jp",
+        size: "LLM-jp-4 8B Thinking",
+        label: "選択: LLM-jp-4 8B Thinking Q4（日本語推論向け）",
+        url: "https://huggingface.co/llm-jp/llm-jp-4-8b-thinking-gguf/resolve/2cc04f0cf7f2bfccca0298aaecfdf8272228ea85/llm-jp-4-8b-thinking-Q4_K_M.gguf",
+        file_name: "llm-jp-4-8b-thinking-Q4_K_M-2cc04f0c.gguf",
+        size_bytes: 5_304_882_240,
+        sha256: "b8a1b3ef962d95dfaa02c241e0d2376e028aaddcda83191cc232e95ed2b14ae8",
+        ctx: "8192",
+        recommended_vram_gb: 6,
+        recommended_ram_gb: 16,
+        download_size: "約5.3GB",
+        note: "国立情報学研究所LLM-jpの日本語推論モデル。応答品質を優先する場合の候補。",
+    },
 ];
+
+const RETIRED_MODEL_FILES: &[&str] = &[
+    "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
+    "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+    "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+    "Phi-3.5-mini-instruct-Q4_K_M.gguf",
+    "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "gemma-3-1b-it-Q4_K_M.gguf",
+    "gemma-3n-E2B-it-Q4_K_M.gguf",
+    "gemma-3n-E4B-it-Q4_K_M.gguf",
+];
+
+/// revision入り保存名へ移行済み、またはプリセットから廃止した管理モデル名。
+/// 現行版の検証後にだけ削除し、利用者指定のcustomファイルは対象にしない。
+pub fn obsolete_model_file_names() -> Vec<&'static str> {
+    let mut names = RETIRED_MODEL_FILES.to_vec();
+    for preset in LOCAL_MODEL_PRESETS {
+        if let Some(name) = preset.url.rsplit('/').next() {
+            if name != preset.file_name && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
 
 /// 旧版で保存されたプリセットIDを、現在提供する同等負荷帯のモデルへ移行する。
 pub fn canonical_preset_id(id: &str) -> &str {
@@ -130,12 +196,16 @@ pub fn preset_url(id: &str) -> Option<&'static str> {
     preset(id).map(|preset| preset.url)
 }
 
+pub fn preset_by_url(url: &str) -> Option<&'static LocalModelPreset> {
+    LOCAL_MODEL_PRESETS.iter().find(|preset| preset.url == url)
+}
+
 /// GGUF ファイル名から、対応するプリセットのラベルを引く（ダウンロード済みモデル一覧の表示用）。
-/// URL 末尾のファイル名が一致するプリセットを返す。該当が無ければ None。
+/// 監査済みrevisionを含む保存名が一致するプリセットを返す。該当が無ければ None。
 pub fn label_for_filename(file_name: &str) -> Option<&'static str> {
     LOCAL_MODEL_PRESETS
         .iter()
-        .find(|preset| preset.url.rsplit('/').next() == Some(file_name))
+        .find(|preset| preset.file_name == file_name)
         .map(|preset| preset.label)
 }
 
@@ -403,7 +473,10 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_preset_id, normalize_for_local, preset, LOCAL_MODEL_PRESETS};
+    use super::{
+        canonical_preset_id, normalize_for_local, obsolete_model_file_names, preset,
+        LOCAL_MODEL_PRESETS,
+    };
     use crate::message::Message;
 
     #[test]
@@ -419,10 +492,15 @@ mod tests {
                 "qwen35_9b",
                 "gpt_oss_20b",
                 "phi4mini",
+                "llmjp4_8b",
             ]
         );
         for preset in LOCAL_MODEL_PRESETS {
             assert!(preset.url.ends_with(".gguf"));
+            assert!(preset.file_name.ends_with(".gguf"));
+            assert!(preset.url.contains("/resolve/") && !preset.url.contains("/resolve/main/"));
+            assert!(preset.size_bytes > 0);
+            assert_eq!(preset.sha256.len(), 64);
             let file_name = preset.url.rsplit('/').next().unwrap_or("");
             let quantized = ["-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-"]
                 .iter()
@@ -444,6 +522,18 @@ mod tests {
         assert_eq!(canonical_preset_id("mistral7b"), "qwen35_9b");
         assert_eq!(canonical_preset_id("phi35mini"), "phi4mini");
         assert_eq!(preset("mistral7b").map(|item| item.id), Some("qwen35_9b"));
+    }
+
+    #[test]
+    fn 旧モデル名は現行revision名を含めず重複しない() {
+        let names = obsolete_model_file_names();
+        let unique: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len());
+        for preset in LOCAL_MODEL_PRESETS {
+            assert!(!names.contains(&preset.file_name));
+        }
+        assert!(names.contains(&"Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
+        assert!(names.contains(&"gemma-4-E2B-it-Q4_K_M.gguf"));
     }
 
     // OpenAI 互換 SSE を返すスタブ llama-server に対して、既定のローカルプロバイダが

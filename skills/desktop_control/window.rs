@@ -34,12 +34,12 @@ pub fn identifier(window: &WindowInfo) -> String {
 /// 表示中のトップレベルウィンドウを、画面に見えている順で返す。
 #[cfg(windows)]
 pub fn list() -> Result<Vec<WindowInfo>, String> {
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, TRUE};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT, TRUE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible,
     };
 
-    unsafe extern "system" fn collect(handle: HWND, param: LPARAM) -> BOOL {
+    unsafe extern "system" fn collect(handle: HWND, param: LPARAM) -> i32 {
         // 安全性: param には呼び出し側で確保した Vec<WindowInfo> の生ポインタだけを渡す。
         let windows = unsafe { &mut *(param as *mut Vec<WindowInfo>) };
         if unsafe { IsWindowVisible(handle) } == 0 {
