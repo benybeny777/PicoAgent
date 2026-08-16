@@ -70,7 +70,7 @@
       <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写物理演算テストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写物理演算テストの配信表示" width="150" /><br /><sub><b>実写・物理演算テスト</b><br />84フレーム／局所バネ物理</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />150フレーム／目・口7段階</sub></td>
     </tr>
   </table>
   <sub>
