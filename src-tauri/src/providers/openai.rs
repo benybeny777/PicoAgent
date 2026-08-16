@@ -13,8 +13,8 @@ use crate::message::{Field, Message, TokenUsage, ToolCall};
 
 pub struct OpenAI;
 
-const DEFAULT_MODEL: &str = "gpt-5.4-mini";
-const STATIC_MODELS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+const DEFAULT_MODEL: &str = "gpt-5.6-luna";
+const STATIC_MODELS: &[&str] = &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STREAM_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;

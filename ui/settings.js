@@ -355,31 +355,31 @@ function applySettingsSearch() {
 const MODEL_GROUPS = {
   OPENAI_MODEL: [
     {
-      label: "GPT-5.5",
+      label: "GPT-5.6",
       options: [
-        { value: "gpt-5.5", label: "標準（最高品質）", hint: "OpenAI の最上位候補。品質優先のときに使います。" },
-      ],
-    },
-    {
-      label: "GPT-5.4",
-      options: [
-        { value: "gpt-5.4", label: "標準", hint: "品質と速度のバランス候補です。" },
-        { value: "gpt-5.4-mini", label: "mini", hint: "低コスト・低遅延の既定候補です。" },
-        { value: "gpt-5.4-nano", label: "nano", hint: "最軽量候補です。" },
+        { value: "gpt-5.6-sol", label: "Sol", hint: "OpenAI の最上位候補です。" },
+        { value: "gpt-5.6-terra", label: "Terra", hint: "品質と費用のバランス候補です。" },
+        { value: "gpt-5.6-luna", label: "Luna", hint: "低コスト・高頻度利用向けの既定候補です。" },
       ],
     },
   ],
   PICOAGENT_ANTHROPIC_MODEL: [
     {
+      label: "Claude Fable",
+      options: [
+        { value: "claude-fable-5", label: "5", hint: "Claude の最上位一般提供候補です。" },
+      ],
+    },
+    {
       label: "Claude Opus",
       options: [
-        { value: "claude-opus-4-8", label: "4.8", hint: "Claude の高品質候補です。" },
+        { value: "claude-opus-5", label: "5", hint: "Claude の高品質候補です。" },
       ],
     },
     {
       label: "Claude Sonnet",
       options: [
-        { value: "claude-sonnet-4-6", label: "4.6", hint: "Claude の標準候補です。" },
+        { value: "claude-sonnet-5", label: "5", hint: "Claude の標準候補です。" },
       ],
     },
     {
@@ -407,10 +407,10 @@ const MODEL_GROUPS = {
   ],
   PICOAGENT_GEMINI_MODEL: [
     {
-      label: "Gemini 2.5",
+      label: "Gemini 3",
       options: [
-        { value: "gemini-2.5-flash", label: "Flash", hint: "速度と費用を抑える候補です。" },
-        { value: "gemini-2.5-pro", label: "Pro", hint: "品質優先の候補です。" },
+        { value: "gemini-3.6-flash", label: "3.6 Flash", hint: "最新の安定版Flashです。" },
+        { value: "gemini-3.5-flash-lite", label: "3.5 Flash-Lite", hint: "低遅延・低コストの安定版です。" },
       ],
     },
   ],
@@ -418,8 +418,7 @@ const MODEL_GROUPS = {
     {
       label: "Grok",
       options: [
-        { value: "grok-4.3", label: "4.3", hint: "xAI の汎用主要候補です。" },
-        { value: "grok-build-0.1", label: "Build 0.1", hint: "コーディング用途向けの候補です。" },
+        { value: "grok-4.5", label: "4.5", hint: "xAI の最新安定版です。" },
       ],
     },
   ],

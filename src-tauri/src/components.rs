@@ -24,7 +24,7 @@ const COMPONENT_IDS: [&str; 5] = ["aivis", "whisper", "tha3", "office", "tools"]
 const WHISPER_RELEASE_API: &str =
     "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest";
 const WHISPER_MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin";
 const WHISPER_MODEL_SHA256: &str =
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
 static RUNTIME_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -713,7 +713,7 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
     anyhow::ensure!(expected.len() == 64, "SHA-256が不正です");
     let mut file = std::fs::File::open(path)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
@@ -721,7 +721,7 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
         }
         digest.update(&buffer[..count]);
     }
-    let actual = format!("{:x}", digest.finalize());
+    let actual = hex::encode(digest.finalize());
     anyhow::ensure!(
         actual == expected.to_ascii_lowercase(),
         "SHA-256が一致しません"
@@ -853,7 +853,7 @@ mod tests {
     fn sha256が一致しないファイルを拒否する() {
         let path = test_path("sha256");
         std::fs::write(&path, b"picoagent").unwrap();
-        let correct = format!("{:x}", Sha256::digest(b"picoagent"));
+        let correct = hex::encode(Sha256::digest(b"picoagent"));
         assert!(verify_sha256(&path, &correct).is_ok());
         assert!(verify_sha256(&path, &"0".repeat(64)).is_err());
         std::fs::remove_file(path).unwrap();
@@ -867,7 +867,7 @@ mod tests {
         let file = std::fs::File::create(&archive).unwrap();
         let mut writer = zip::ZipWriter::new(file);
         writer
-            .start_file("../escaped.txt", zip::write::FileOptions::default())
+            .start_file("../escaped.txt", zip::write::SimpleFileOptions::default())
             .unwrap();
         writer.write_all(b"blocked").unwrap();
         writer.finish().unwrap();

@@ -394,7 +394,7 @@ impl PageConn {
         self.next_id += 1;
         let payload = json!({ "id": id, "method": method, "params": params });
         self.socket
-            .send(Message::Text(payload.to_string()))
+            .send(Message::Text(payload.to_string().into()))
             .await
             .map_err(|error| format!("エラー: ブラウザへの送信に失敗しました: {error}"))?;
 

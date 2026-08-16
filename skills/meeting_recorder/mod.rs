@@ -83,7 +83,7 @@ fn latest_file(cfg: &Config, base: &Path, matcher: fn(&Path) -> bool) -> Option<
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 if best
                     .as_ref()
-                    .map_or(true, |(_, best_modified)| modified > *best_modified)
+                    .is_none_or(|(_, best_modified)| modified > *best_modified)
                 {
                     best = Some((path, modified));
                 }
@@ -194,7 +194,7 @@ fn transcribe_model(cfg: &Config) -> String {
 fn wav_spec(config: &cpal::SupportedStreamConfig) -> WavSpec {
     WavSpec {
         channels: config.channels(),
-        sample_rate: config.sample_rate().0,
+        sample_rate: config.sample_rate(),
         bits_per_sample: match config.sample_format() {
             SampleFormat::F32 => 32,
             _ => 16,
@@ -307,22 +307,22 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
         };
         let writer_for_stream = writer.clone();
         let error_callback = |error| eprintln!("meeting_recorder stream error: {error}");
-        let stream_config = config.clone().into();
+        let stream_config: cpal::StreamConfig = config.into();
         let stream = match config.sample_format() {
             SampleFormat::F32 => device.build_input_stream(
-                &stream_config,
+                stream_config,
                 move |data: &[f32], _| write_input_f32(data, &writer_for_stream),
                 error_callback,
                 None,
             ),
             SampleFormat::I16 => device.build_input_stream(
-                &stream_config,
+                stream_config,
                 move |data: &[i16], _| write_input(data, &writer_for_stream),
                 error_callback,
                 None,
             ),
             SampleFormat::U16 => device.build_input_stream(
-                &stream_config,
+                stream_config,
                 move |data: &[u16], _| write_input(data, &writer_for_stream),
                 error_callback,
                 None,

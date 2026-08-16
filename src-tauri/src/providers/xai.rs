@@ -11,8 +11,8 @@ use crate::message::{Field, Message};
 pub struct Xai;
 
 const DEFAULT_BASE_URL: &str = "https://api.x.ai/v1";
-const DEFAULT_MODEL: &str = "grok-4.3";
-const STATIC_MODELS: &[&str] = &["grok-4.3", "grok-build-0.1"];
+const DEFAULT_MODEL: &str = "grok-4.5";
+const STATIC_MODELS: &[&str] = &["grok-4.5"];
 
 fn base_url(cfg: &Config) -> String {
     cfg.get("PICOAGENT_XAI_BASE_URL", DEFAULT_BASE_URL)

@@ -160,7 +160,7 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index)?;
         // `enclosed_name` は `..` や絶対パスを含むエントリに None を返す（zip slip 対策）。
-        let Some(relative) = entry.enclosed_name().map(Path::to_path_buf) else {
+        let Some(relative) = entry.enclosed_name() else {
             bail!("zip に安全でないパスが含まれています: {}", entry.name());
         };
         let target = destination.join(&relative);
@@ -633,7 +633,7 @@ mod tests {
         {
             let file = std::fs::File::create(&archive).unwrap();
             let mut zip = zip::ZipWriter::new(file);
-            let options = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             zip.start_file("../escaped.txt", options).unwrap();
             zip.write_all(b"x").unwrap();
             zip.finish().unwrap();
@@ -655,7 +655,7 @@ mod tests {
         {
             let file = std::fs::File::create(&archive).unwrap();
             let mut zip = zip::ZipWriter::new(file);
-            let options = zip::write::FileOptions::default();
+            let options = zip::write::SimpleFileOptions::default();
             zip.start_file("MyModel/character.json", options).unwrap();
             zip.write_all(b"{}").unwrap();
             zip.finish().unwrap();

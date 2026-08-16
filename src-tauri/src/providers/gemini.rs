@@ -14,7 +14,7 @@ use crate::message::{Field, Message};
 pub struct Gemini;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
-const DEFAULT_MODEL: &str = "gemini-2.5-flash";
+const DEFAULT_MODEL: &str = "gemini-3.6-flash";
 
 fn base_url(cfg: &Config) -> String {
     cfg.get("PICOAGENT_GEMINI_BASE_URL", DEFAULT_BASE_URL)
@@ -74,7 +74,7 @@ impl Provider for Gemini {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|m| m.get("id").and_then(|v| v.as_str()))
-                    // Gemini は "models/gemini-2.5-flash" 形式で返すことがあるため前置詞を外す。
+                    // Gemini は "models/gemini-3.6-flash" 形式で返すことがあるため前置詞を外す。
                     .map(|id| id.strip_prefix("models/").unwrap_or(id).to_string())
                     .collect()
             })

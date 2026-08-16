@@ -25,7 +25,8 @@ const USAGE: &str = "\
 使い方: cargo xtask <サブコマンド>
 
   dev                 最小構成で開発起動（追加機能は setup で明示取得）
-  build               開発用の製品ビルド（同上 + tauri build）
+  build               任意の大容量追加機能を含めない開発用製品ビルド
+  build-full          全追加機能を明示取得して作る開発用フルビルド
   build-beta          販売ゲート前の軽量ベータ版インストーラを生成
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
@@ -33,8 +34,8 @@ const USAGE: &str = "\
   update-feed <NSIS> [説明] 公開Git用latest.jsonへWindows更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
-  setup [対象…]        取得対象は engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
-                      （省略時は通常の開発・製品ビルドで使う全対象。販売用軽量版とは別）
+  setup <対象…>        取得対象は all / engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
+                      （不要な大容量取得を防ぐため対象指定は必須）
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
   build-ui [--release] [--beta] ui/ を ui-dist/ へ配信ビルド（--release で最小化、--beta で BETA 表示を残す）
@@ -63,7 +64,15 @@ fn run(args: &[String]) -> Result<()> {
 
     match command {
         "dev" => tauri("dev", rest, Build::default()),
-        "build" => tauri("build", rest, Build::default()),
+        "build" => tauri(
+            "build",
+            rest,
+            Build {
+                lightweight_bundle: true,
+                ..Build::default()
+            },
+        ),
+        "build-full" => tauri("build", rest, Build::default()),
         "build-beta" => tauri(
             "build",
             rest,
@@ -126,7 +135,7 @@ struct Build {
     beta: bool,
 }
 
-/// 同梱物を取得する。対象を省略するとすべて。
+/// 同梱物を取得する。全対象の取得も `all` の明示を必須にする。
 ///
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
@@ -135,7 +144,12 @@ fn setup(targets: &[String]) -> Result<()> {
     let all = [
         "live2d", "engine", "aivis", "whisper", "tha3", "office", "tools",
     ];
-    let wanted: Vec<&str> = if targets.is_empty() {
+    anyhow::ensure!(
+        !targets.is_empty(),
+        "不要な大容量取得を防ぐため対象を指定してください（例: cargo xtask setup engine、全対象は cargo xtask setup all）"
+    );
+    let wanted: Vec<&str> = if targets.iter().any(|target| target == "all") {
+        anyhow::ensure!(targets.len() == 1, "all と個別対象は同時に指定できません");
         all.to_vec()
     } else {
         targets.iter().map(String::as_str).collect()
@@ -152,7 +166,7 @@ fn setup(targets: &[String]) -> Result<()> {
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools）"
+                "未知の取得対象です: {other}（all / engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools）"
             ),
         }
     }

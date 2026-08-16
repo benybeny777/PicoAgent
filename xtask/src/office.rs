@@ -11,8 +11,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
 use crate::util::{
-    command_exists, download_to, env_or, exe_name, extract, find_file, flag, get_json, log,
-    make_executable, mb, repo_root, warn,
+    cleanup_dir, cleanup_file, command_exists, download_to, env_or, exe_name, extract, find_file,
+    flag, get_json, log, make_executable, mb, repo_root, warn,
 };
 
 // ── OfficeCLI（LibreOffice） ───────────────────────────────────────────
@@ -48,7 +48,7 @@ fn fetch_office_inner() -> Result<()> {
     let wanted = exe_name("soffice");
 
     if flag("OFFICE_FORCE") {
-        fs::remove_dir_all(&dir).ok();
+        cleanup_dir(&dir, "旧Office配置")?;
         fs::create_dir_all(&dir)?;
     } else if let Some(existing) = find_file(&dir, &wanted) {
         log(
@@ -58,10 +58,10 @@ fn fetch_office_inner() -> Result<()> {
         return Ok(());
     }
 
-    // downloadarchive は旧版も恒久的に配布されるため、latest 追従より安定する。
+    // 公式が慎重な利用者向けに案内する成熟ブランチを固定し、監査時に最新版へ更新する。
     // **バージョンは4桁**（`24.8.7.2`）。`old/` 配下は4桁のディレクトリしか無く、
     // 3桁（`24.8.4`）を指定すると 404 になる（実際にこれで取得できていなかった）。
-    let version = env_or("LIBREOFFICE_VERSION", "24.8.7.2");
+    let version = env_or("LIBREOFFICE_VERSION", "25.8.7.2");
     let base = format!("https://downloadarchive.documentfoundation.org/libreoffice/old/{version}");
 
     if cfg!(windows) {
@@ -112,7 +112,7 @@ fn fetch_office_windows(dir: &Path, base: &str, version: &str) -> Result<()> {
         .arg(format!("TARGETDIR={}", msiexec_path(&target)))
         .status()
         .context("msiexec を起動できません")?;
-    fs::remove_file(&msi).ok();
+    cleanup_file(&msi, "展開済みLibreOffice MSI")?;
     if !status.success() {
         bail!(
             "msiexec /a に失敗しました（終了コード {:?}）",
@@ -149,7 +149,7 @@ fn fetch_office_macos(dir: &Path, base: &str, version: &str) -> Result<()> {
         .status();
     // マウント解除は失敗しても続行する（コピー結果で判定する）。
     let _ = Command::new("hdiutil").arg("detach").arg(&mount).status();
-    fs::remove_file(&dmg).ok();
+    cleanup_file(&dmg, "展開済みLibreOffice DMG")?;
 
     if !copied.map(|status| status.success()).unwrap_or(false) {
         bail!("LibreOffice.app のコピーに失敗しました");
@@ -216,7 +216,7 @@ fn fetch_aivis_inner() -> Result<()> {
     let (name, url) = pick_aivis_asset(&release)?;
 
     let work = std::env::temp_dir().join("picoagent-aivis");
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "前回のAivis導入途中フォルダ")?;
     fs::create_dir_all(&work)?;
     let archive = work.join(&name);
     let bytes = download_to(&url, &archive)?;
@@ -229,7 +229,7 @@ fn fetch_aivis_inner() -> Result<()> {
     let run_path = find_file(&extracted, &run)
         .ok_or_else(|| anyhow!("AivisSpeech Engine の run 実行ファイルが見つかりません"))?;
     copy_engine_tree(&run_path, &dir)?;
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "完了したAivis導入途中フォルダ")?;
     log("setup:aivis", format!("aivis ready: {}", dir.display()));
     Ok(())
 }
@@ -315,7 +315,7 @@ fn copy_engine_tree(run_path: &Path, dest: &Path) -> Result<()> {
     let root = run_path
         .parent()
         .ok_or_else(|| anyhow!("run の親ディレクトリを特定できません"))?;
-    fs::remove_dir_all(dest).ok();
+    cleanup_dir(dest, "旧Aivis配置")?;
     crate::util::copy_dir(root, dest, &|_| false)?;
     fs::write(dest.join(".gitkeep"), "\n")?;
 

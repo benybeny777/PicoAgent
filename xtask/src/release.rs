@@ -69,7 +69,7 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
         }
         digest.update(&buffer[..count]);
     }
-    let sha256 = format!("{:x}", digest.finalize());
+    let sha256 = hex::encode(digest.finalize());
     let notes = if args.len() > 1 {
         args[1..].join(" ")
     } else {

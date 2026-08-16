@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoAgent 依存監査"
+  short_description: "パッケージと同梱アプリを範囲選択して最新版監査する"
+  default_prompt: "Use $audit-picoagent-dependencies to audit all PicoAgent packages and bundled apps."

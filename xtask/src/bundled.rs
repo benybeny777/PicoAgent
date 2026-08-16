@@ -4,15 +4,17 @@
 // 実体は巨大なのでリポジトリには含めず、各環境で取得する。
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::util::{
-    command_exists, copy_dir, download_to, env_or, exe_name, extract, flag, get_json, list_files,
-    log, make_executable, mb, repo_root, warn,
+    cleanup_dir, cleanup_file, command_exists, copy_dir, download_to, env_or, exe_name, extract,
+    flag, get_json, list_files, log, make_executable, mb, repo_root, warn,
 };
 
 // ── 共通 ────────────────────────────────────────────────────────────────
@@ -54,7 +56,14 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
 }
 
 /// GitHub リリースのアセットから、名前が条件に合う最初のものを選ぶ。
-fn pick_asset(release: &Value, matches: impl Fn(&str) -> bool) -> Result<(String, String)> {
+struct ReleaseAsset {
+    name: String,
+    url: String,
+    size: u64,
+    sha256: String,
+}
+
+fn pick_asset(release: &Value, matches: impl Fn(&str) -> bool) -> Result<ReleaseAsset> {
     let assets = release
         .get("assets")
         .and_then(Value::as_array)
@@ -66,7 +75,22 @@ fn pick_asset(release: &Value, matches: impl Fn(&str) -> bool) -> Result<(String
                 .get("browser_download_url")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow!("アセットの URL がありません: {name}"))?;
-            return Ok((name.to_string(), url.to_string()));
+            let size = asset
+                .get("size")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| anyhow!("アセットサイズがありません: {name}"))?;
+            let sha256 = asset
+                .get("digest")
+                .and_then(Value::as_str)
+                .and_then(|value| value.strip_prefix("sha256:"))
+                .filter(|value| value.len() == 64)
+                .ok_or_else(|| anyhow!("アセットのSHA-256 digestがありません: {name}"))?;
+            return Ok(ReleaseAsset {
+                name: name.to_string(),
+                url: url.to_string(),
+                size,
+                sha256: sha256.to_string(),
+            });
         }
     }
     let available: Vec<&str> = assets
@@ -77,6 +101,33 @@ fn pick_asset(release: &Value, matches: impl Fn(&str) -> bool) -> Result<(String
         "一致するアセットが見つかりません。利用可能: {}",
         available.join(", ")
     )
+}
+
+fn verify_release_asset(path: &Path, asset: &ReleaseAsset) -> Result<()> {
+    let actual_size = fs::metadata(path)?.len();
+    anyhow::ensure!(
+        actual_size == asset.size,
+        "{} のサイズが一致しません: {actual_size}/{}",
+        asset.name,
+        asset.size
+    );
+    let mut file = fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let actual_sha256 = hex::encode(digest.finalize());
+    anyhow::ensure!(
+        actual_sha256 == asset.sha256,
+        "{} のSHA-256が一致しません",
+        asset.name
+    );
+    Ok(())
 }
 
 fn work_dir(label: &str) -> PathBuf {
@@ -91,9 +142,57 @@ const THA3_SOURCE_URL: &str = "https://github.com/pkhungurn/talking-head-anime-3
 const THA3_MODELS_URL: &str =
     "https://www.dropbox.com/s/y7b8jl4n2euv8xe/talking-head-anime-3-models.zip?dl=1";
 const THA3_PYTHON_VERSION: &str = "3.11";
-const THA3_TORCH_VERSION: &str = "2.10.0";
+const THA3_TORCH_VERSION: &str = "2.12.1";
 const THA3_REQUIRED_MODELS: [&str; 3] = ["standard_float", "standard_half", "separable_half"];
-const UV_VERSION: &str = "0.11.6";
+const UV_VERSION: &str = "0.12.5";
+const WHISPER_SMALL_REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
+const WHISPER_SMALL_SIZE: u64 = 487_601_967;
+const WHISPER_SMALL_SHA256: &str =
+    "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Tha3Backend {
+    Cuda,
+    Mps,
+}
+
+fn select_tha3_backend(
+    is_windows: bool,
+    is_macos_arm: bool,
+    has_nvidia: bool,
+) -> Result<Tha3Backend> {
+    if is_windows {
+        anyhow::ensure!(
+            has_nvidia,
+            "WindowsのTHA3生成にはCUDA対応NVIDIA GPUが必要です。AMD／Intel環境ではCUDA版PyTorchを取得しません"
+        );
+        return Ok(Tha3Backend::Cuda);
+    }
+    if is_macos_arm {
+        return Ok(Tha3Backend::Mps);
+    }
+    bail!("THA3生成の対応環境はCUDA対応NVIDIA GPU搭載WindowsとApple Silicon Macです")
+}
+
+fn tha3_backend() -> Result<Tha3Backend> {
+    select_tha3_backend(
+        cfg!(windows),
+        cfg!(all(target_os = "macos", target_arch = "aarch64")),
+        nvidia_gpu_available(),
+    )
+}
+
+fn nvidia_gpu_available() -> bool {
+    if !cfg!(windows) || !command_exists("nvidia-smi") {
+        return false;
+    }
+    Command::new("nvidia-smi")
+        .arg("-L")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
 
 fn tha3_source_root(extracted: &Path) -> Option<PathBuf> {
     list_files(extracted)
@@ -180,19 +279,9 @@ fn tha3_runtime_ready(dir: &Path) -> bool {
         .all(|name| dir.join("runtime/packages").join(name).is_file())
 }
 
-fn cleanup_tha3_uv_cache(root: &Path) {
+fn cleanup_tha3_uv_cache(root: &Path) -> Result<()> {
     let cache = root.join("temp/tha3-uv-cache");
-    if cache.exists() {
-        if let Err(error) = fs::remove_dir_all(&cache) {
-            warn(
-                "setup:tha3",
-                format!(
-                    "完了済みuvキャッシュを掃除できません: {} ({error})",
-                    cache.display()
-                ),
-            );
-        }
-    }
+    cleanup_dir(&cache, "完了済みTHA3 uvキャッシュ")
 }
 
 fn tha3_bootstrap_ready(root: &Path) -> bool {
@@ -244,12 +333,7 @@ fn run_uv(args: &[String], cache: &Path) -> Result<()> {
 }
 
 fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
-    if cfg!(target_os = "linux") {
-        bail!("LinuxはTHA3生成の対応対象外です");
-    }
-    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        bail!("Intel MacはTHA3生成の対応対象外です");
-    }
+    let backend = tha3_backend()?;
     if tha3_runtime_ready(dir) && !flag("THA3_FORCE") {
         return Ok(());
     }
@@ -301,7 +385,10 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
         })?;
     }
     if !tha3_runtime_ready(dir) {
-        let backend = if cfg!(windows) { "cu128" } else { "auto" };
+        let torch_backend = match backend {
+            Tha3Backend::Cuda => "cu126",
+            Tha3Backend::Mps => "auto",
+        };
         run_uv(
             &[
                 "pip".into(),
@@ -311,11 +398,11 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
                 "--target".into(),
                 packages.to_string_lossy().into_owned(),
                 "--torch-backend".into(),
-                backend.into(),
+                torch_backend.into(),
                 format!("torch=={THA3_TORCH_VERSION}"),
-                "numpy==2.2.6".into(),
-                "pillow==11.3.0".into(),
-                "matplotlib==3.10.5".into(),
+                "numpy==2.4.6".into(),
+                "pillow==12.3.0".into(),
+                "matplotlib==3.11.1".into(),
             ],
             &cache,
         )?;
@@ -335,6 +422,9 @@ fn install_tha3_runtime(dir: &Path, work: &Path) -> Result<()> {
 /// 通常の開発ビルドでは利用できるが、販売用軽量版へは再配布しない。
 /// `THA3_FORCE=1` で再取得できる。
 pub fn fetch_tha3() -> Result<()> {
+    // 数GBのコード・モデル・Pythonを取る前に、実際に生成できる環境か確認する。
+    // AMD／Intel搭載WindowsへCUDAランタイムを取得しても利用できないため停止する。
+    let _ = tha3_backend()?;
     let root = repo_root();
     let dir = root.join("src-tauri/resources/bundled/tha3");
     // WindowsのCUDA版PyTorchは約4.4GB展開されNSISの約2GB上限を超えるため、
@@ -373,7 +463,7 @@ pub fn fetch_tha3() -> Result<()> {
         && tha3_bootstrap_ready(&root)
         && !flag("THA3_FORCE")
     {
-        cleanup_tha3_uv_cache(&root);
+        cleanup_tha3_uv_cache(&root)?;
         log("setup:tha3", format!("THA3 ready: {}", dir.display()));
         return Ok(());
     }
@@ -454,14 +544,15 @@ pub fn fetch_tha3() -> Result<()> {
         install_tha3_runtime(&runtime_owner, &work)?;
         Ok(())
     })();
-    if let Err(error) = fs::remove_dir_all(&work) {
-        warn(
-            "setup:tha3",
-            format!("一時フォルダを掃除できません: {} ({error})", work.display()),
-        );
+    match result {
+        Ok(()) => cleanup_dir(&work, "完了したTHA3一時フォルダ")?,
+        Err(error) => {
+            cleanup_dir(&work, "失敗したTHA3一時フォルダ")
+                .with_context(|| format!("元のTHA3準備エラー: {error:#}"))?;
+            return Err(error);
+        }
     }
-    result?;
-    cleanup_tha3_uv_cache(&root);
+    cleanup_tha3_uv_cache(&root)?;
     log(
         "setup:tha3",
         format!("THA3 bundle ready: {}", dir.display()),
@@ -491,7 +582,7 @@ pub fn fetch_engine() -> Result<()> {
     // 旧配置（resources/engine）に取得済みならコピーで移行する。
     let legacy_server = legacy.join(exe_name("llama-server"));
     if legacy_server.exists() && !flag("LLAMACPP_FORCE") {
-        fs::remove_dir_all(&dir).ok();
+        cleanup_dir(&dir, "旧llama-server配置")?;
         crate::util::copy_dir(&legacy, &dir, &|_| false)?;
         fs::write(dir.join(".gitkeep"), "\n")?;
         make_executable(&server);
@@ -503,29 +594,46 @@ pub fn fetch_engine() -> Result<()> {
     }
 
     let release = get_json("https://api.github.com/repos/ggml-org/llama.cpp/releases/latest")?;
-    let (name, url) = pick_asset(&release, engine_asset_matcher())?;
+    let asset = pick_asset(&release, engine_asset_matcher())?;
     let tag = release
         .get("tag_name")
         .and_then(Value::as_str)
         .unwrap_or("?");
 
     let work = work_dir("engine");
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "前回のllama-server導入途中フォルダ")?;
     fs::create_dir_all(&work)?;
-    let archive = work.join(&name);
-    let bytes = download_to(&url, &archive)?;
+    let archive = work.join(&asset.name);
+    let bytes = download_to(&asset.url, &archive)?;
+    verify_release_asset(&archive, &asset)?;
     log(
         "setup:engine",
-        format!("fetched {name} ({}), tag {tag}", mb(bytes)),
+        format!("fetched {} ({}), tag {tag}", asset.name, mb(bytes)),
     );
 
     let extracted = work.join("x");
     extract(&archive, &extracted)?;
-    let ok = flatten(&extracted, &dir, "llama-server")?;
-    fs::remove_dir_all(&work).ok();
+    let staged = work.join("staged");
+    let ok = flatten(&extracted, &staged, "llama-server")?;
     if !ok {
         bail!("llama-server が展開物に見つかりません");
     }
+    fs::write(staged.join(".gitkeep"), "\n")?;
+    let old = dir.with_file_name(format!("engine-old-{}", std::process::id()));
+    cleanup_dir(&old, "前回のllama-server退避フォルダ")?;
+    if dir.exists() {
+        fs::rename(&dir, &old).context("旧llama-serverを退避できません")?;
+    }
+    if let Err(error) = fs::rename(&staged, &dir) {
+        if old.exists() {
+            fs::rename(&old, &dir).with_context(|| {
+                format!("llama-server配置失敗後に旧版を復元できません: {error}")
+            })?;
+        }
+        return Err(error).context("検証済みllama-serverを配置できません");
+    }
+    cleanup_dir(&old, "置換済みllama-server退避フォルダ")?;
+    cleanup_dir(&work, "完了したllama-server導入途中フォルダ")?;
     log("setup:engine", format!("engine ready: {}", dir.display()));
     Ok(())
 }
@@ -601,19 +709,23 @@ fn fetch_whisper_binary(dir: &Path) -> Result<()> {
         format!("https://api.github.com/repos/ggml-org/whisper.cpp/releases/tags/{tag}")
     };
     let release = get_json(&api)?;
-    let (name, url) = pick_asset(&release, whisper_asset_matcher())?;
+    let asset = pick_asset(&release, whisper_asset_matcher())?;
 
     let work = work_dir("whisper");
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "前回のWhisper導入途中フォルダ")?;
     fs::create_dir_all(&work)?;
-    let archive = work.join(&name);
-    let bytes = download_to(&url, &archive)?;
-    log("setup:whisper", format!("fetched {name} ({})", mb(bytes)));
+    let archive = work.join(&asset.name);
+    let bytes = download_to(&asset.url, &archive)?;
+    verify_release_asset(&archive, &asset)?;
+    log(
+        "setup:whisper",
+        format!("fetched {} ({})", asset.name, mb(bytes)),
+    );
 
     let extracted = work.join("x");
     extract(&archive, &extracted)?;
     let ok = flatten(&extracted, dir, "whisper-cli")?;
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "完了したWhisper導入途中フォルダ")?;
     if !ok {
         bail!("whisper-cli が展開物に見つかりません");
     }
@@ -676,7 +788,19 @@ fn whisper_model_file() -> String {
 
 fn fetch_whisper_model(dir: &Path) -> Result<()> {
     let dest = dir.join("models").join(whisper_model_file());
+    let default_small = whisper_model_choice() == "small";
     if dest.exists() && !flag("WHISPER_FORCE") {
+        if default_small {
+            verify_release_asset(
+                &dest,
+                &ReleaseAsset {
+                    name: "ggml-small.bin".to_string(),
+                    url: String::new(),
+                    size: WHISPER_SMALL_SIZE,
+                    sha256: WHISPER_SMALL_SHA256.to_string(),
+                },
+            )?;
+        }
         let size = fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         log(
             "setup:whisper",
@@ -687,6 +811,10 @@ fn fetch_whisper_model(dir: &Path) -> Result<()> {
     let choice = whisper_model_choice();
     let url = if choice.starts_with("http://") || choice.starts_with("https://") {
         choice
+    } else if default_small {
+        format!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/{WHISPER_SMALL_REVISION}/ggml-small.bin"
+        )
     } else {
         format!(
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
@@ -694,6 +822,17 @@ fn fetch_whisper_model(dir: &Path) -> Result<()> {
         )
     };
     let bytes = download_to(&url, &dest)?;
+    if default_small {
+        verify_release_asset(
+            &dest,
+            &ReleaseAsset {
+                name: "ggml-small.bin".to_string(),
+                url,
+                size: WHISPER_SMALL_SIZE,
+                sha256: WHISPER_SMALL_SHA256.to_string(),
+            },
+        )?;
+    }
     log(
         "setup:whisper",
         format!("fetched {} ({})", whisper_model_file(), mb(bytes)),
@@ -740,7 +879,7 @@ pub fn fetch_live2d_runtime() -> Result<()> {
         fetched += ensure_compatible_live2d_core(url, &vendor.join(name), sha256)?;
     }
     // 旧単一Coreは描画経路から外れた生成物。配布へ混ざらないようsetup時に掃除する。
-    fs::remove_file(vendor.join("live2dcubismcore.min.js")).ok();
+    cleanup_file(&vendor.join("live2dcubismcore.min.js"), "旧Live2D Core")?;
 
     // 残りも読み込み順どおり（core → pixi → display）に固定版を置く。
     let runtime = [
@@ -923,9 +1062,7 @@ fn ensure_compatible_live2d_core(url: &str, dest: &Path, sha256: &str) -> Result
 }
 
 fn is_compatible_live2d_core(bytes: &[u8], sha256: &str) -> bool {
-    use sha2::{Digest, Sha256};
-
-    format!("{:x}", Sha256::digest(bytes)) == sha256
+    hex::encode(Sha256::digest(bytes)) == sha256
 }
 
 fn fetch_live2d_raw(sample: &Sample, characters: &Path) -> Result<()> {
@@ -962,7 +1099,7 @@ fn fetch_live2d_zip(
         return Ok(());
     }
     let work = work_dir(&format!("live2d-{}", sample.id));
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "前回のLive2Dモデル導入途中フォルダ")?;
     fs::create_dir_all(&work)?;
     let name = zip_url.rsplit('/').next().unwrap_or("model.zip");
     let archive = work.join(name);
@@ -978,9 +1115,9 @@ fn fetch_live2d_zip(
             sample.model_json
         );
     }
-    fs::remove_dir_all(&model_dir).ok();
+    cleanup_dir(&model_dir, "旧Live2Dモデル配置")?;
     crate::util::copy_dir(&runtime, &model_dir, &|_| false)?;
-    fs::remove_dir_all(&work).ok();
+    cleanup_dir(&work, "完了したLive2Dモデル導入途中フォルダ")?;
     log(
         "setup:live2d",
         format!("live2d model fetched: {} ({})", sample.id, mb(bytes)),
@@ -1029,6 +1166,20 @@ fn referenced_files(model3: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tha3は対応gpuにだけランタイムを選ぶ() {
+        assert_eq!(
+            select_tha3_backend(true, false, true).unwrap(),
+            Tha3Backend::Cuda
+        );
+        assert!(select_tha3_backend(true, false, false).is_err());
+        assert_eq!(
+            select_tha3_backend(false, true, false).unwrap(),
+            Tha3Backend::Mps
+        );
+        assert!(select_tha3_backend(false, false, false).is_err());
+    }
 
     /// llama.cpp のリリース資産名からプラットフォーム用を選べること。
     #[test]
