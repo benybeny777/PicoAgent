@@ -4464,35 +4464,19 @@ bubble?.addEventListener("click", event => {
 renderNoticePanel();
 updateNoticeBadge();
 
-// 選択中キャラの AivisHub 音声モデルを準備する。起動時は画面を先に使える状態へ
-// 戻してからバックグラウンドで呼ぶため、音声配布元の障害で本体起動を塞がない。
-async function prepareSelectedVoiceModel(showStatus = true) {
+// 選択中キャラの AivisHub 音声モデルを準備する。画面を先に使える状態へ戻してから
+// バックグラウンドで呼ぶため、音声配布元の障害で本体起動を塞がない。
+// 画面はすでに利用者のものなので、待ち時間も失敗も状態表示へは出さずログだけに残す。
+async function prepareSelectedVoiceModel() {
   let statusInfo;
   try { statusInfo = await window.picoagent.aivisStatus(); }
   catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
   if (!statusInfo?.enabled) return null;
-  const startedAt = Date.now();
-  let timer = null;
   try {
-    if (showStatus) {
-      setStatus(`${bootCharacterName}の声を準備中…`);
-      timer = setInterval(() => {
-        const seconds = Math.floor((Date.now() - startedAt) / 1000);
-        setStatus(`${bootCharacterName}の声を準備中… ${seconds}秒`);
-      }, 1000);
-    }
     await window.picoagent.prepareVoiceModel();
-    if (timer) clearInterval(timer);
-    timer = null;
-    if (showStatus) setStatus("");
     return true;
   } catch (error) {
-    if (timer) clearInterval(timer);
     logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
-    if (showStatus) {
-      setStatus(`音声モデル準備に失敗: ${error?.message || error}`);
-      await new Promise(resolve => setTimeout(resolve, 2500));
-    }
     return false;
   }
 }
@@ -4508,7 +4492,11 @@ async function waitForEngineReady() {
       return;
     }
     applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
-    if (!s || s.phase === "idle") setStatus("ローカルAIを確認中…");
+    // 起動画面を抜けたあとは監視だけ続ける。ここで書くと、通常利用中の状態表示
+    // （読み上げ中・エラーなど）を1秒ごとに上書きしてしまう。
+    if ((!s || s.phase === "idle") && petApp.classList.contains("is-booting")) {
+      setStatus("ローカルAIを確認中…");
+    }
     if (s && (s.phase === "ready" || s.phase === "error")) return;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
@@ -4522,11 +4510,19 @@ function startBackgroundStartupServices(info, greeting) {
   }
   if (!info.onboardingDone || !greeting) return;
   const requestRevision = conversationRevision;
+  // 音声モデルの取得は数分かかることがあるため、待っている間に会話が1往復でも
+  // 進んでいたら起動時の挨拶はもう読み上げない。`conversationRevision` は会話リセット
+  // でしか変わらず「利用者が話しかけた」を捕まえられないので、履歴の増減も見る。
+  const startupHistoryLength = conversationHistory.length;
+  const conversationMovedOn = () => requestRevision !== conversationRevision
+    || conversationHistory.length !== startupHistoryLength
+    || busy
+    || currentVoice;
   void (async () => {
-    const voiceReady = await prepareSelectedVoiceModel(false);
-    if (!voiceReady || requestRevision !== conversationRevision || busy || currentVoice) return;
+    const voiceReady = await prepareSelectedVoiceModel();
+    if (!voiceReady || conversationMovedOn()) return;
     const prepared = await prepareSpeech(greeting);
-    if (prepared && requestRevision === conversationRevision && !busy && !currentVoice) {
+    if (prepared && !conversationMovedOn()) {
       playPreparedSpeech(prepared);
     }
   })().catch(error => {

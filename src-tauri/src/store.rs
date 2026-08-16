@@ -219,15 +219,43 @@ mod guard {
         );
     }
 
+    /// 退避に失敗した場合の分岐は、呼び出し行ごとに確かめる。
+    ///
+    /// 「ファイル内のどこかに `ok_or_else(` があれば合格」にすると、無関係な別の
+    /// `ok_or_else` で通ってしまう（実際に `config.rs` は退避失敗を `if let ... else`
+    /// で正しく扱うようになった後も、別関数の `ok_or_else` だけで合格していた）。
+    /// 認めるのは (1) 戻り値へ `ok_or_else(` を連ねる形、(2) `if let Some(...)` で
+    /// 受けて `else` 側から抜ける形、の2つだけ。
     #[test]
     fn 破損ファイルの退避失敗時は空状態で続けない() {
-        let offenders: Vec<String> = guard_scan::all_sources()
-            .into_iter()
-            .filter(|source| source.name != "store.rs")
-            .filter(|source| source.body().contains("quarantine_corrupt("))
-            .filter(|source| !source.body().contains("ok_or_else("))
-            .map(|source| source.path.display().to_string())
-            .collect();
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "store.rs" {
+                continue; // 退避の定義元
+            }
+            for (index, line) in source.body().lines().enumerate() {
+                if !line.contains("quarantine_corrupt(") {
+                    continue;
+                }
+                let chained = line.contains("ok_or_else(");
+                let branched = line.contains("if let Some(")
+                    && source
+                        .body()
+                        .lines()
+                        .skip(index)
+                        .take(12)
+                        .any(|line| line.contains("else"))
+                    && source
+                        .body()
+                        .lines()
+                        .skip(index)
+                        .take(12)
+                        .any(|line| line.contains("return"));
+                if !chained && !branched {
+                    offenders.push(format!("{}:{}", source.path.display(), index + 1));
+                }
+            }
+        }
         assert!(
             offenders.is_empty(),
             "破損ファイルを退避できなければ空状態の保存へ進ませないでください: {offenders:?}"
