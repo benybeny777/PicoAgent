@@ -1,5 +1,6 @@
 <div align="center">
   <h1>🐾 PicoAgent</h1>
+  <p><a href="https://benybeny777.github.io/PicoAgent-Distribution/"><strong>公開LPを見る</strong></a></p>
   <p><strong>キャラクターとフキダシだけの透明デスクトップペット。<br />叩く AI もエージェント機能も、コネクタを足すだけで増やせる。</strong></p>
 
   ![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)

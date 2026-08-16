@@ -840,8 +840,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   inset:0 auto auto -80%; width:260%; height:260%;
   object-fit:contain; object-position:50% 0%;
 }
-/* Low-proportion 2D characters use an upper-body crop in stream mode.
-   The standard 260% crop is reserved for tall characters because it becomes a face close-up on chibi art. */
+/* 低頭身2Dは配信形式でも上半身構図にする。
+   長身向けの260%切り出しは低頭身だと顔だけになるため適用しない。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-view > img {
   inset:0 auto auto -32.5%; width:165%; height:165%;
 }
