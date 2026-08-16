@@ -256,7 +256,7 @@ async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
-  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1,
+  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -272,6 +272,14 @@ async function openScene({
       delete manifest.live2d;
       for (const variant of Object.values(manifest.variants || {})) delete variant.live2d;
       await route.fulfill({ response, json: manifest });
+    });
+  }
+  if (stallCharacterId) {
+    await page.route(`**/assets/characters/${stallCharacterId}/character.json*`, async route => {
+      // 応答しない任意キャラを再現する。フロント側のAbortControllerが先に打ち切り、
+      // 同梱既定PNGへ切り替わった後で遅延中のrouteを安全に破棄する。
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      try { await route.abort("timedout"); } catch { /* ページ側で中断済み */ }
     });
   }
   page.on("pageerror", error => console.error(`  [pageerror] ${error.message}`));
@@ -1247,6 +1255,27 @@ if (process.env.SHOOT_LIVE2D_MATRIX) {
   await browser.close();
   server.close();
   console.log(`Live2D表示検査完了: ${matrix.output}（${matrix.results.length}件、未取得${matrix.skipped.length}件）`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_STARTUP_FAILURES) {
+  const page = await openScene({ characterId: "hiyori", layout: "pet", stallCharacterId: "hiyori" });
+  const state = await page.evaluate(() => ({
+    booting: document.getElementById("petApp")?.classList.contains("is-booting"),
+    characterId: typeof characterManifest === "object" ? characterManifest?.id : "",
+    renderKind: document.getElementById("character")?.dataset.renderKind || "",
+    status: document.getElementById("status")?.textContent || "",
+  }));
+  if (state.booting || state.characterId !== "mugi" || state.renderKind !== "2d") {
+    throw new Error(`停止キャラから既定PNGへ復帰できません: ${JSON.stringify(state)}`);
+  }
+  const output = join(ROOT, "temp", "startup-fallback.png");
+  await page.screenshot({ path: output, omitBackground: true });
+  await page.close();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`起動フォールバック検査完了: ${output} / ${JSON.stringify(state)}`);
   process.exit(0);
 }
 

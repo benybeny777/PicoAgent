@@ -535,10 +535,21 @@ impl Default for AppState {
 }
 
 /// 選択中プロバイダの is_up。
+const STARTUP_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+async fn probe_with_timeout(
+    probe: impl std::future::Future<Output = bool>,
+    timeout: std::time::Duration,
+) -> bool {
+    tokio::time::timeout(timeout, probe).await.unwrap_or(false)
+}
+
 async fn current_up(state: &AppState) -> bool {
     let id = state.provider_id.lock().unwrap().clone();
     match providers::get(&id) {
-        Some(p) => p.is_up(&state.config).await,
+        // フォールバック許可: 起動時の接続可否表示は本体初期化の必須条件ではない。
+        // 外部CLIや接続先が停止していても短時間でfalseへ正規化し、画面を先に起動する。
+        Some(p) => probe_with_timeout(p.is_up(&state.config), STARTUP_PROVIDER_PROBE_TIMEOUT).await,
         None => false,
     }
 }
@@ -4141,11 +4152,23 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
-        parse_update_feed, replace_auto_summary, settings_tab, speech_text, update_status,
-        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
-        MAX_UPDATE_FEED_BYTES,
+        parse_update_feed, probe_with_timeout, replace_auto_summary, settings_tab, speech_text,
+        update_status, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
+        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
+
+    #[tokio::test]
+    async fn 起動時の接続確認は時間内に戻る() {
+        let started = std::time::Instant::now();
+        let result = probe_with_timeout(
+            std::future::pending::<bool>(),
+            std::time::Duration::from_millis(10),
+        )
+        .await;
+        assert!(!result);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
 
     #[test]
     fn 設定画面を負座標モニターの中央へ配置する() {

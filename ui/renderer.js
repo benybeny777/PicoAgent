@@ -525,10 +525,31 @@ async function userCharacterEntries() {
   }
 }
 
+const STARTUP_RESOURCE_TIMEOUT_MS = 4000;
+const LIVE2D_MODEL_TIMEOUT_MS = 8000;
+
+async function fetchJsonWithTimeout(url, label, timeoutMs = STARTUP_RESOURCE_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new Error(`${label}: HTTP ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`${label}が${timeoutMs}ミリ秒以内に応答しませんでした`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function loadCharacterManifest(characterId) {
-  const catalogResponse = await fetch(`assets/characters/index.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
-  if (!catalogResponse.ok) throw new Error(`キャラクター一覧: HTTP ${catalogResponse.status}`);
-  const catalog = await catalogResponse.json();
+  const catalog = await fetchJsonWithTimeout(
+    `assets/characters/index.json?v=${characterManifestCacheKey}`,
+    "キャラクター一覧",
+  );
   const bundled = catalog.characters.map(character => ({
     id: character.id,
     name: character.name,
@@ -543,9 +564,10 @@ async function loadCharacterManifest(characterId) {
     || entries[0];
   if (!entry) throw new Error("利用できるキャラクターがありません");
   const root = entry.root;
-  const manifestResponse = await fetch(`${root}/character.json?v=${characterManifestCacheKey}`, { cache: "no-store" });
-  if (!manifestResponse.ok) throw new Error(`キャラクター定義: HTTP ${manifestResponse.status}`);
-  const manifest = await manifestResponse.json();
+  const manifest = await fetchJsonWithTimeout(
+    `${root}/character.json?v=${characterManifestCacheKey}`,
+    "キャラクター定義",
+  );
   window.__picoagentPerformance.manifestReady = performance.now();
   performance.mark("picoagent-character-manifest-ready");
   return { entry, manifest, root };
@@ -1074,9 +1096,21 @@ async function probeRigLayers() {
   rigGazeAvailable = false;
   const probe = name => new Promise(resolve => {
     const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
+    let finished = false;
+    const finish = result => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      img.onload = null;
+      img.onerror = null;
+      if (!result) img.src = "";
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(false), STARTUP_RESOURCE_TIMEOUT_MS);
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
     img.src = layerUrl(name);
+    if (img.complete) queueMicrotask(() => finish(img.naturalWidth > 0));
   });
   const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
   const results = await Promise.all(names.map(probe));
@@ -1349,10 +1383,56 @@ document.documentElement.style.setProperty("--char-frame-height", `${LIVE2D_REND
 function loadScriptOnce(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
+    let finished = false;
+    const finish = error => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      script.onload = null;
+      script.onerror = null;
+      if (error) {
+        script.remove();
+        reject(error);
+      } else resolve();
+    };
+    const timer = setTimeout(
+      () => finish(new Error(`スクリプトが${STARTUP_RESOURCE_TIMEOUT_MS}ミリ秒以内に応答しませんでした: ${src}`)),
+      STARTUP_RESOURCE_TIMEOUT_MS,
+    );
     script.src = src;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`スクリプトを読み込めませんでした: ${src}`));
+    script.onload = () => finish(null);
+    script.onerror = () => finish(new Error(`スクリプトを読み込めませんでした: ${src}`));
     document.head.append(script);
+  });
+}
+
+function destroyDetachedLive2DModel(model) {
+  try { model?.destroy?.(); }
+  catch (error) { logApp("warn", "遅れて完了したLive2Dモデルを破棄できませんでした", errorDetail(error)); }
+}
+
+function loadLive2DModelWithTimeout(url) {
+  const pending = PIXI.live2d.Live2DModel.from(url, { autoInteract: false });
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      finished = true;
+      reject(new Error(`Live2Dモデルが${LIVE2D_MODEL_TIMEOUT_MS}ミリ秒以内に応答しませんでした: ${url}`));
+    }, LIVE2D_MODEL_TIMEOUT_MS);
+    pending.then(model => {
+      if (finished) {
+        destroyDetachedLive2DModel(model);
+        return;
+      }
+      finished = true;
+      clearTimeout(timer);
+      resolve(model);
+    }, error => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 }
 
@@ -1450,7 +1530,7 @@ async function startLive2D(cfg) {
   let modelError = null;
   for (const candidate of modelCandidates) {
     try {
-      model = await PIXI.live2d.Live2DModel.from(`${characterRoot}/${candidate.path}`, { autoInteract: false });
+      model = await loadLive2DModelWithTimeout(`${characterRoot}/${candidate.path}`);
       break;
     } catch (error) {
       modelError = error;
@@ -4507,7 +4587,7 @@ async function waitForEngineReady() {
       logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error));
       return;
     }
-    applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
+    applyEngineStatus(s); // download/starting は起動後の通常画面へ進捗表示する。
     if (!s || s.phase === "idle") setStatus("ローカルAIを確認中…");
     if (s && (s.phase === "ready" || s.phase === "error")) return;
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -4720,11 +4800,21 @@ function startAlarmPolling() {
   // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンは待たない。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
-  const characterLoadPromise = loadCharacter(
-    info.characterId || "mugi",
-    info.characterOverrides || {},
-    { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} },
-  ).then(
+  const requestedCharacterId = info.characterId || "mugi";
+  const loadOptions = { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} };
+  const loadStartupCharacter = async () => {
+    try {
+      await loadCharacter(requestedCharacterId, info.characterOverrides || {}, loadOptions);
+    } catch (error) {
+      if (requestedCharacterId === "mugi") throw error;
+      // フォールバック許可: 保存中の任意キャラが欠損・破損・応答停止でも、同梱の
+      // 既定PNGキャラで画面を起動する。失敗理由はログへ残し、1回だけ切り替える。
+      logApp("error", `${requestedCharacterId}を起動できないため既定キャラへ切り替えます`, errorDetail(error));
+      setStatus("選択中のキャラクターを読み込めないので、むぎで起動するね");
+      await loadCharacter("mugi", info.characterOverrides || {}, loadOptions);
+    }
+  };
+  const characterLoadPromise = loadStartupCharacter().then(
     () => {
       petApp.classList.add("boot-character-ready");
       return { ok: true };
