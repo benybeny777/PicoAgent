@@ -678,6 +678,9 @@ async function validateLive2dMatrix() {
   const selectedLive2d = process.env.SHOOT_LIVE2D_IDS
     ? new Set(process.env.SHOOT_LIVE2D_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
+  const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
+    ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
+    : null;
   for (const entry of index.characters || []) {
     const manifestPath = join(ROOT, "characters", entry.manifest);
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -697,6 +700,7 @@ async function validateLive2dMatrix() {
   const results = [];
   for (const target of targets) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      if (selectedLayouts && !selectedLayouts.has(layout)) continue;
       const page = await openScene({ characterId: target.id, layout, width, height });
       try {
         await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });

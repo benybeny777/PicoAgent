@@ -4094,10 +4094,12 @@ function applyCharacterFraming() {
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
-    // 低頭身2Dは以前の上半身位置を維持し、長身・実写・Live2Dは胸上を標準にする。
+    // 低頭身2Dは以前の上半身位置を維持し、長身・実写は胸上を標準にする。
+    // Live2Dはモデル側のscale/offsetYで胸上へ調整済みなので追加拡大しない。
     // manifestの既定構図は原画固有の余白だけを吸収し、利用者の保存値がある場合は使わない。
     const isCompact2d = character.dataset.renderKind === "2d"
       && character.dataset.bodyProportion === "compact";
+    const isLive2d = character.dataset.renderKind === "live2d";
     const usesStream2dCrop = character.dataset.renderKind === "2d" && currentLayout === "stream";
     const manifestFrame = usesStream2dCrop
       ? characterManifest?.streamFraming
@@ -4108,7 +4110,7 @@ function applyCharacterFraming() {
           x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
           y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
         }
-      : isCompact2d || usesStream2dCrop ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
+      : isCompact2d || usesStream2dCrop || isLive2d ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
     applyCharacterZoom(fallback.zoom);
     applyCharacterOffset(fallback.x, fallback.y, { clamp: false });
     return;
