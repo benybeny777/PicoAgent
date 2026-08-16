@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-08-16 — 任意機能による起動ブロッカー再監査（保留）
+
+対象: Live2Dモデル未取得の既知不具合に類似し、任意機能の欠損・停止・外部待ちがPicoAgent本体の起動完了を塞ぐ経路。`HANDOFF.md`と現在の`xtask/src/main.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/commands.rs`、`ui/renderer.js`、`src-tauri/src/boot_screen.rs`を照合した。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P0 | 起動処理が`loadCharacter()`の完了を待ち、内部のキャラ一覧・manifest取得、Live2Dスクリプト、`Live2DModel.from()`、PNGレイヤー画像プローブに明示的な待機上限がない | 保留 | 欠損は通常エラーになるが、I/Oが応答しない場合は`finishBoot()`へ到達しない。各I/Oへtimeout・中断・遅延完了時のモデル破棄を入れる設計をClaudeへレビュー依頼したが、認証拒否で回答を得られなかったため未実装 |
+| 2 | P1 | `pet_init()`が選択プロバイダの`is_up()`を直列に待ち、CLIプロバイダは最大15秒待つ | 保留 | 疎通表示は本体起動の必須条件ではない。起動時は短い上限で`false`へ正規化し、後続確認へ分離する案をレビュー依頼したが同じ理由で未実装 |
+| 3 | P1 | 起動監視はJavaScript開始後も`finishBoot()`が来なければ案内ページへ遷移し、停止した任意キャラ読込のために操作可能な画面自体を置き換える | 保留 | キャラ読込を有界化し、失敗時は同梱既定PNGへ1回だけ切り替えてから必ず起動完了させる案をレビュー依頼したが同じ理由で未実装 |
+| 4 | 確認 | ローカルAIモデル、Aivis音声モデル、開発起動時の追加ランタイム取得 | 対応済み | 現行コードではAI・音声モデル準備は画面起動後のバックグラウンド処理。`cargo xtask dev`もネットワーク取得を行わず、キャラ同期とUI生成だけを起動前に行う |
+
+Claude CLIは通常モデルと軽量モデルの2回とも、`Your organization has disabled Claude subscription access for Claude Code`で回答前に終了した。ワークスペース信頼の警告も併記された。`.agents/skills/review-with-claude/SKILL.md`の停止条件に従い、実装・テスト追加・GUI再現は開始していない。Claude Codeの組織アクセスを有効化してワークスペースを信頼するか、ユーザーが今回の監査をClaude不要のCodex独立修正として明示した後に再開する。
+
+---
+
 ## 2026-08-16 — Draft PR #81 Codex独立レビュー
 
 対象: `claude/character-movement-creation-m0zfde` のDraft PR #81。ユーザーがClaude制作物を別のCodexレビュー対象に指定し、Claude CLIを使わず、明白な欠陥は確認待ちにせず修正・pushするよう明示したため、差分、生成契約、実画像、回帰検査をCodexが直接確認した。
