@@ -26,6 +26,13 @@ const BASELINE_MARKER: &str = "レビュー必須の起点:";
 const TARGET_MARKER: &str = "対象コミット:";
 const REVIEWER_MARKER: &str = "レビュアー:";
 
+/// レビュー対象のコミット1件。
+struct Commit {
+    sha: String,
+    date: String,
+    subject: String,
+}
+
 /// レビュー記録から読み取った「どのコミットを誰が見たか」。
 pub struct Coverage {
     /// この起点より後のコミットが個別記録の対象。
@@ -149,11 +156,16 @@ fn target_ref(args: &[String]) -> String {
     "HEAD".to_string()
 }
 
-/// 起点より後のコミット（新しい順）。
-fn commits(baseline: &str, target: &str) -> Result<Vec<(String, String)>> {
+/// 起点より後のコミット（新しい順）。日付は「いつから待たせているか」を出すため。
+fn commits(baseline: &str, target: &str) -> Result<Vec<Commit>> {
     let output = Command::new("git")
         .current_dir(repo_root())
-        .args(["log", "--format=%h\t%s", &format!("{baseline}..{target}")])
+        .args([
+            "log",
+            "--date=short",
+            "--format=%h\t%ad\t%s",
+            &format!("{baseline}..{target}"),
+        ])
         .output()
         .context("git log を実行できません")?;
     if !output.status.success() {
@@ -164,8 +176,14 @@ fn commits(baseline: &str, target: &str) -> Result<Vec<(String, String)>> {
     }
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
-        .filter_map(|line| line.split_once('\t'))
-        .map(|(sha, subject)| (sha.trim().to_string(), subject.trim().to_string()))
+        .filter_map(|line| {
+            let mut columns = line.split('\t');
+            Some(Commit {
+                sha: columns.next()?.trim().to_string(),
+                date: columns.next()?.trim().to_string(),
+                subject: columns.next()?.trim().to_string(),
+            })
+        })
         .collect())
 }
 
@@ -178,10 +196,10 @@ pub fn status(args: &[String]) -> Result<()> {
     let target = target_ref(args);
     let commits = commits(&coverage.baseline, &target)?;
     let mut pending = Vec::new();
-    for (sha, subject) in &commits {
-        let missing = coverage.missing(sha);
+    for commit in &commits {
+        let missing = coverage.missing(&commit.sha);
         if !missing.is_empty() {
-            pending.push((sha, subject, missing));
+            pending.push((commit, missing));
         }
     }
     log(
@@ -193,8 +211,14 @@ pub fn status(args: &[String]) -> Result<()> {
             pending.len()
         ),
     );
-    for (sha, subject, missing) in &pending {
-        println!("  {sha} {subject}（未: {}）", missing.join(", "));
+    for (commit, missing) in &pending {
+        println!(
+            "  {} {} {}（未: {}）",
+            commit.date,
+            commit.sha,
+            commit.subject,
+            missing.join(", ")
+        );
     }
     if pending.is_empty() {
         log("review-status", "全コミットを Codex と Claude が確認済み");
