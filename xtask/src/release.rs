@@ -432,6 +432,112 @@ fn package_version(path: &std::path::Path) -> Result<String> {
         .context("package.versionを見つけられません")
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VersionBump {
+    Major,
+    Minor,
+    Patch,
+}
+
+impl VersionBump {
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "major" => Ok(Self::Major),
+            "minor" => Ok(Self::Minor),
+            "patch" => Ok(Self::Patch),
+            _ => bail!("版の種別は major / minor / patch のいずれかを指定してください"),
+        }
+    }
+}
+
+fn next_version(current: &str, bump: VersionBump) -> Result<String> {
+    let parts = current
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("現在の版がSemVer形式ではありません: {current}"))?;
+    anyhow::ensure!(
+        parts.len() == 3,
+        "現在の版がSemVer形式ではありません: {current}"
+    );
+    let (major, minor, patch) = (parts[0], parts[1], parts[2]);
+    let next = match bump {
+        VersionBump::Major => (major.checked_add(1), Some(0), Some(0)),
+        VersionBump::Minor => (Some(major), minor.checked_add(1), Some(0)),
+        VersionBump::Patch => (Some(major), Some(minor), patch.checked_add(1)),
+    };
+    let (Some(major), Some(minor), Some(patch)) = next else {
+        bail!("版番号が上限を超えました: {current}");
+    };
+    Ok(format!("{major}.{minor}.{patch}"))
+}
+
+fn replace_once(text: &str, before: &str, after: &str, label: &str) -> Result<String> {
+    anyhow::ensure!(
+        text.matches(before).count() == 1,
+        "{label}の版番号が一意ではありません: {before}"
+    );
+    Ok(text.replacen(before, after, 1))
+}
+
+/// 公開中の版を起点にSemVerを1段上げ、アプリ・xtask・Tauri設定を一括同期する。
+pub fn bump_version(args: &[String]) -> Result<()> {
+    anyhow::ensure!(
+        args.len() == 1,
+        "使い方: cargo xtask bump-version <major|minor|patch>"
+    );
+    let bump = VersionBump::parse(&args[0])?;
+    let root = repo_root();
+    let app_path = root.join("src-tauri/Cargo.toml");
+    let xtask_path = root.join("xtask/Cargo.toml");
+    let tauri_path = root.join("src-tauri/tauri.conf.json");
+    let feed_path = root.join("distribution/site/latest.json");
+    let current = package_version(&app_path)?;
+    anyhow::ensure!(
+        package_version(&xtask_path)? == current,
+        "xtaskの版がアプリと一致しません"
+    );
+    let feed: Value = serde_json::from_str(
+        &fs::read_to_string(&feed_path)
+            .with_context(|| format!("公開版情報を読めません: {}", feed_path.display()))?,
+    )
+    .context("latest.jsonが不正です")?;
+    anyhow::ensure!(
+        feed.get("version").and_then(Value::as_str) == Some(current.as_str()),
+        "公開中の版とソースの版が一致しません。二重採番を防ぐため停止しました"
+    );
+    let tauri_text = fs::read_to_string(&tauri_path)?;
+    let tauri: Value = serde_json::from_str(&tauri_text).context("tauri.conf.jsonが不正です")?;
+    anyhow::ensure!(
+        tauri.get("version").and_then(Value::as_str) == Some(current.as_str()),
+        "Tauri設定の版がアプリと一致しません"
+    );
+
+    let next = next_version(&current, bump)?;
+    let cargo_before = format!("version = \"{current}\"");
+    let cargo_after = format!("version = \"{next}\"");
+    let json_before = format!("\"version\": \"{current}\"");
+    let json_after = format!("\"version\": \"{next}\"");
+    let app_text = replace_once(
+        &fs::read_to_string(&app_path)?,
+        &cargo_before,
+        &cargo_after,
+        "アプリCargo.toml",
+    )?;
+    let xtask_text = replace_once(
+        &fs::read_to_string(&xtask_path)?,
+        &cargo_before,
+        &cargo_after,
+        "xtask Cargo.toml",
+    )?;
+    let tauri_text = replace_once(&tauri_text, &json_before, &json_after, "tauri.conf.json")?;
+    write_atomic(&app_path, app_text.as_bytes())?;
+    write_atomic(&xtask_path, xtask_text.as_bytes())?;
+    write_atomic(&tauri_path, tauri_text.as_bytes())?;
+    log("bump-version", format!("{current} -> {next} ({})", args[0]));
+    Ok(())
+}
+
 /// 同梱エンジンの取得が版固定＋SHA-256照合になっているか。
 ///
 /// 実装（`bundled::fetch_engine`）を読んで判定する。`releases/latest` を引いている間は
@@ -456,7 +562,10 @@ fn bundled_engine_pinned(root: &Path) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{check, included_characters, package_version, verify_windows_pe, write_atomic};
+    use super::{
+        check, included_characters, next_version, package_version, replace_once, verify_windows_pe,
+        write_atomic, VersionBump,
+    };
 
     #[test]
     fn 販売設定はキャラを重複なく列挙する() {
@@ -482,7 +591,10 @@ mod tests {
         assert!(report["ready"].is_boolean());
         assert!(report["blockers"].is_array());
         assert!(report["warnings"].is_array());
-        assert_eq!(report["version"], "1.0.0");
+        assert_eq!(
+            report["version"],
+            package_version(&crate::util::repo_root().join("src-tauri/Cargo.toml")).unwrap()
+        );
     }
 
     #[test]
@@ -520,6 +632,25 @@ mod tests {
         .unwrap();
         assert_eq!(app, xtask);
         assert_eq!(app, config["version"]);
+    }
+
+    #[test]
+    fn semverの種別ごとに次版を決める() {
+        assert_eq!(next_version("1.2.3", VersionBump::Patch).unwrap(), "1.2.4");
+        assert_eq!(next_version("1.2.3", VersionBump::Minor).unwrap(), "1.3.0");
+        assert_eq!(next_version("1.2.3", VersionBump::Major).unwrap(), "2.0.0");
+        assert!(next_version("1.2", VersionBump::Patch).is_err());
+        assert!(VersionBump::parse("beta").is_err());
+    }
+
+    #[test]
+    fn 版の置換は一意なときだけ許可する() {
+        assert_eq!(
+            replace_once("version = \"1.0.0\"", "1.0.0", "1.0.1", "test").unwrap(),
+            "version = \"1.0.1\""
+        );
+        assert!(replace_once("1.0.0 1.0.0", "1.0.0", "1.0.1", "test").is_err());
+        assert!(replace_once("none", "1.0.0", "1.0.1", "test").is_err());
     }
 
     #[test]

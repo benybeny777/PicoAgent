@@ -31,6 +31,7 @@ const USAGE: &str = "\
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
+  bump-version <種別> 公開中の版から major / minor / patch を自動採番して全設定へ反映
   update-feed <NSIS> [説明] 公開Git用latest.jsonへWindows更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
@@ -96,6 +97,7 @@ fn run(args: &[String]) -> Result<()> {
             let _ = release::check(false)?;
             Ok(())
         }
+        "bump-version" => release::bump_version(rest),
         "update-feed" => release::write_update_feed(rest),
         "license" => license::run(rest),
         "setup" => setup(rest),

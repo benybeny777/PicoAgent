@@ -665,16 +665,19 @@ cargo xtask release-check
 cargo xtask preview-distribution
 
 # 販売条件が確定する前の試用インストーラ（軽量版）
+cargo xtask bump-version patch
 cargo xtask build-beta --bundles nsis
 
 # 全ゲート通過後だけ作れる販売用ビルド
 cargo xtask build-distribution
 
 # 作成したWindows NSISからlatest.jsonのサイズ・SHA-256を生成
-cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_1.0.0_x64-setup.exe "更新内容"
+cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64-setup.exe "更新内容"
 ```
 
 `build-beta` は、販売条件を完了扱いにせず、販売版と同じ軽量同梱範囲で試用インストーラを生成します。`build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売対象はWindowsだけで、コード署名と完全自動更新を必須にしません。macOSは販売対象へ追加する前に署名・公証と実機QAを行います。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](docs/SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
+
+版番号はSemVerで管理します。通常の更新は同じ`major.minor`系列の`patch`を自動加算し、`minor`と`major`は製品管理者の明示指示がある場合だけ上げます。公開中の`latest.json`を起点に`cargo xtask bump-version <種別>`が3か所の版を同期するため、個別ファイルへ版番号を手入力しません。同じ版のRelease資産も上書きしません。patch番号もLP、アプリ、ファイル名、Releaseへ正確に表示します。起動時の自動確認はpatchだけなら通知せず、利用者が設定から「更新を確認」を実行した場合はpatchも案内し、手動でダウンロード・適用できます。`major.minor`が上がった場合は起動時にも通知します。ベータ期間中は表示名と更新説明へ`Beta`を付けます。
 
 初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、`distribution/site/` の販売用LP、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件だけを置きます。LPの主画面例は完成済み2DのむぎとLive2Dのひよりを使い、別のキャラ一覧ページでは取得済みのLive2D公式サンプルも非同梱の動作例として紹介します。公開配布Repoへの同期は販売時の明示作業で、Releaseに実インストーラがない間はLPも取得導線も「準備中」と表示します。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
 
