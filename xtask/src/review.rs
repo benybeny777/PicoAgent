@@ -33,6 +33,32 @@ struct Commit {
     subject: String,
 }
 
+impl Commit {
+    /// squash merge の件名末尾に残る `(#92)` から PR 番号を取る。
+    /// PR 経由が必須なので、レビュー相手へ渡す入口はコミットではなく PR の差分になる。
+    fn pull_request(&self) -> Option<u32> {
+        let tail = self.subject.rsplit_once("(#")?.1;
+        tail.strip_suffix(')')?.parse().ok()
+    }
+}
+
+/// `origin` の URL から `owner/repo` を取る（PR の URL を組み立てるため）。
+fn repo_slug() -> Option<String> {
+    let output = Command::new("git")
+        .current_dir(repo_root())
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let slug = url
+        .rsplit_once("github.com")
+        .map(|(_, rest)| rest.trim_start_matches([':', '/']).to_string())?;
+    Some(slug.trim_end_matches(".git").to_string())
+}
+
 /// レビュー記録から読み取った「どのコミットを誰が見たか」。
 pub struct Coverage {
     /// この起点より後のコミットが個別記録の対象。
@@ -211,6 +237,7 @@ pub fn status(args: &[String]) -> Result<()> {
             pending.len()
         ),
     );
+    let slug = repo_slug();
     for (commit, missing) in &pending {
         println!(
             "  {} {} {}（未: {}）",
@@ -219,6 +246,10 @@ pub fn status(args: &[String]) -> Result<()> {
             commit.subject,
             missing.join(", ")
         );
+        // レビューは PR の差分で行う運用なので、開く先をそのまま出す。
+        if let (Some(number), Some(slug)) = (commit.pull_request(), slug.as_ref()) {
+            println!("    https://github.com/{slug}/pull/{number}");
+        }
     }
     if pending.is_empty() {
         log("review-status", "全コミットを Codex と Claude が確認済み");
@@ -269,6 +300,25 @@ mod tests {
             "説明行の SHA まで拾っています: {:?}",
             coverage.reviewed
         );
+    }
+
+    #[test]
+    fn squashコミットの件名からpr番号を取る() {
+        let commit = |subject: &str| super::Commit {
+            sha: "abc1234".into(),
+            date: "2026-08-16".into(),
+            subject: subject.into(),
+        };
+        assert_eq!(
+            commit("docs: レビュー必須の起点を変更する (#92)").pull_request(),
+            Some(92)
+        );
+        // PR を通さず直接コミットしたものは番号が付かない。
+        assert_eq!(
+            commit("docs: 起動ブロッカー調査結果を記録").pull_request(),
+            None
+        );
+        assert_eq!(commit("fix: 課題(#123)への対応の話").pull_request(), None);
     }
 
     #[test]
