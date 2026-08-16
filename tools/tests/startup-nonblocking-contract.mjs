@@ -28,6 +28,8 @@ test("任意キャラクターのI/O待ちはすべて有界化する", () => {
   assert.match(renderer, /probeRigLayers[\s\S]*STARTUP_RESOURCE_TIMEOUT_MS/);
   assert.match(renderer, /loadLive2DModelWithTimeout/);
   assert.match(renderer, /destroyDetachedLive2DModel\(model\)/, "遅延完了したモデルを破棄する");
+  assert.match(renderer, /function displayPreloadedFrame[\s\S]*image\.naturalWidth < 1/, "未読込フレームを表示しない");
+  assert.doesNotMatch(renderer, /petSprite\.src = frameUrl\(animationName, frame\)/, "連番を先読み前に直接表示しない");
 });
 
 test("選択キャラ失敗時は既定PNGへ一度だけ切り替えて起動完了する", () => {

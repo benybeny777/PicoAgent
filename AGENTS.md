@@ -37,8 +37,8 @@
   - 壊れやすい工程は、正規入口、入力条件、禁止経路、成果物の識別方法、失敗時の停止条件、検証、公開前照合まで書く。単なるコマンド一覧にせず、古い成果物や開発用資産を混ぜない条件を明示する。繰り返し組み直す処理は `scripts/` へ置き、説明を重複させない。
   - 新規スキルは `skill-creator` の初期化手順で作り、`quick_validate.py` を通す。Pythonが直接使えない環境では `uv run --python 3.12 python ...` を使う。作成後は今回の実タスクで手順どおりに実行して検証し、失敗から得た分岐を同じ作業内で反映する。
   - Claude Code入口は共通正本を最後まで読む指示だけにし、同名フォルダへ手順・スクリプト・参照資料を複製しない。スキルの追加・更新時はCodex側とClaude側の名前一致、リンク先の存在、重複手順なしを確認する。
-- 修正・作業が完了したら、ユーザーからの個別指示がなくても、作業ツリーの未コミット変更を `git add -A` で全てステージしてコミットし、`origin` へプッシュまで行う。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含めてプッシュする（コミットメッセージは日本語。本ファイルの他ルールに従う）。破壊的な履歴操作（force push・reset --hard など）はしない。
-- **すべての変更はPRで行い、`main`へ直接pushしない。** 作業開始時に`origin/main`から目的別ブランチを作り、同じ目的の変更だけを1つのPRへまとめる。無関係な修正は別ブランチ・別PRへ分ける。ユーザーが相互レビューを指定した場合も、その指示の有効範囲は指定された同一PR内だけとする。
+- **修正・作業が完了したら、ユーザーからの個別指示がなくても `main` へのマージまで終わらせる。** 手順は「`git add -A` で全ステージ → コミット → 作業ブランチへプッシュ → PR 作成 → squash merge」。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含める（コミットメッセージは日本語。本ファイルの他ルールに従う）。**止めるのは、利用者が「マージしない」「PRだけ」と明示した場合と、破壊的・不可逆な操作を伴う場合だけ**。判断に迷って作業を宙ぶらりんにしない。
+- **すべての変更はPRで行い、`main`へ直接pushしない。** 作業開始時に`origin/main`から目的別ブランチを作り、同じ目的の変更だけを1つのPRへまとめる。無関係な修正は別ブランチ・別PRへ分ける。ユーザーが相互レビューを指定した場合も、その指示の有効範囲は指定された同一PR内だけとする。公開済みコミットの書き換えやforce pushはしない。
 - **PR のマージは squash merge を使う。** 1 PR = 1 コミットになり `main` の履歴が読みやすい、というだけの理由。なお API 経由のマージは、squash / 通常マージのいずれでも GitHub 側が committer を `noreply@github.com` にして署名するため、`git log` 上は Unverified に見える（GitHub の画面上は Verified）。これは避けられないので気にしない。すでに `origin` に載ったコミットを後から書き換えるのは共有履歴の破壊操作になるので行わない（上のルールのとおり）。
 
 ## エラー処理・リソース
@@ -150,7 +150,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
 | `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
-| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。`PICOAGENT_BOOT_TIMEOUT_MS` 以内に `pet_frontend_ready` が届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
+| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。読込開始（`pet_frontend_ready`）と起動完了（`pet_finish_boot`）を別々に監視し、`PICOAGENT_BOOT_TIMEOUT_MS` の区間内にどちらかが届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する（監視は2区間なので案内までの最長はその2倍）。**起動完了の記録はウィンドウ寸法の復元より先に行う**（寸法変更の失敗で、動いている画面を案内画面へ差し替えないため）。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |
 | `xtask/src/util.rs` | **同梱物取得の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。展開は OS 標準の tar / unzip / PowerShell へ委譲 |

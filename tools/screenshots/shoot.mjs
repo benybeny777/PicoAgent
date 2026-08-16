@@ -1260,13 +1260,26 @@ if (process.env.SHOOT_LIVE2D_MATRIX) {
 
 if (process.env.SHOOT_STARTUP_FAILURES) {
   const page = await openScene({ characterId: "hiyori", layout: "pet", stallCharacterId: "hiyori" });
+  await page.waitForFunction(() => {
+    const sprite = document.getElementById("petSprite");
+    return sprite?.complete && sprite.naturalWidth > 0 && sprite.naturalHeight > 0;
+  }, null, { timeout: 5000 });
   const state = await page.evaluate(() => ({
     booting: document.getElementById("petApp")?.classList.contains("is-booting"),
     characterId: typeof characterManifest === "object" ? characterManifest?.id : "",
     renderKind: document.getElementById("character")?.dataset.renderKind || "",
     status: document.getElementById("status")?.textContent || "",
+    layout: document.getElementById("petApp")?.dataset.layout || "",
+    characterRect: document.getElementById("character")?.getBoundingClientRect().toJSON(),
+    characterViewRect: document.getElementById("characterView")?.getBoundingClientRect().toJSON(),
+    spriteRect: document.getElementById("petSprite")?.getBoundingClientRect().toJSON(),
+    spriteTransform: getComputedStyle(document.getElementById("petSprite")).transform,
+    spriteNaturalWidth: document.getElementById("petSprite")?.naturalWidth || 0,
+    spriteNaturalHeight: document.getElementById("petSprite")?.naturalHeight || 0,
   }));
-  if (state.booting || state.characterId !== "mugi" || state.renderKind !== "2d") {
+  if (state.booting || state.characterId !== "mugi" || state.renderKind !== "2d"
+      || !state.spriteRect || state.spriteRect.width < 240 || state.spriteRect.left > 700
+      || state.spriteNaturalWidth < 1 || state.spriteNaturalHeight < 1) {
     throw new Error(`停止キャラから既定PNGへ復帰できません: ${JSON.stringify(state)}`);
   }
   const output = join(ROOT, "temp", "startup-fallback.png");

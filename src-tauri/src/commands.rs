@@ -2978,9 +2978,11 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    crate::layout::apply(&app, &id)?;
+    // 起動完了の記録は寸法変更より先に行う。フロントはここまで到達できているので、
+    // ウィンドウ寸法の変更だけが失敗しても「起動できなかった」ことにはならない。
+    // あとにすると、動いている画面が監視のタイムアウトで案内画面へ差し替わる。
     crate::boot_screen::mark_finished(&app);
-    Ok(())
+    crate::layout::apply(&app, &id)
 }
 
 #[tauri::command]

@@ -10,6 +10,9 @@ use serde_json::{Map, Value};
 
 pub struct Config {
     path: Mutex<Option<PathBuf>>,
+    /// 原本を読めず・退避できず、保存先を持てないまま起動した理由。
+    /// 保存要求が来たときに「なぜ保存できないのか」を利用者へそのまま返すため覚えておく。
+    read_only_reason: Mutex<Option<String>>,
     values: Mutex<Map<String, Value>>,
     /// 「スナップショットを取る → ファイルへ書く」を直列化するためのロック。
     /// これが無いと、2つの保存が同時に走ったとき **あとから取ったスナップショットが
@@ -22,6 +25,7 @@ impl Config {
     pub fn new() -> Self {
         Config {
             path: Mutex::new(None),
+            read_only_reason: Mutex::new(None),
             values: Mutex::new(Map::new()),
             write: Mutex::new(()),
         }
@@ -47,23 +51,31 @@ impl Config {
                             saved.display()
                         ));
                     } else {
-                        return Ok(Some(format!(
+                        return Ok(Some(self.start_read_only(format!(
                             "壊れた設定ファイルを退避できないため、設定を保存しない読み取り専用状態で起動します: {}",
                             file.display()
-                        )));
+                        ))));
                     }
                 }
             },
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                return Ok(Some(format!(
+                return Ok(Some(self.start_read_only(format!(
                     "設定ファイルを読み込めないため、設定を保存しない読み取り専用状態で起動します: {} ({error})",
                     file.display()
-                )));
+                ))));
             }
             Err(_) => {} // ファイルが無いのは初回起動の正常系
         }
         *self.path.lock().unwrap() = Some(file);
         Ok(warning)
+    }
+
+    /// 保存先を持たない読み取り専用状態に入り、その理由を覚えて同じ文言を返す。
+    /// 覚えておかないと、設定画面の保存が「config.load() が未実行です」という
+    /// 実装都合の文言になり、利用者には原因も対象ファイルも分からない。
+    fn start_read_only(&self, reason: String) -> String {
+        *self.read_only_reason.lock().unwrap() = Some(reason.clone());
+        reason
     }
 
     /// 文字列設定を取得。空文字は未設定とみなし env → 既定値へフォールバック。
@@ -142,12 +154,14 @@ impl Config {
             .write
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let path = self
-            .path
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("config.load() が未実行です"))?;
+        let path = self.path.lock().unwrap().clone();
+        let Some(path) = path else {
+            // 読み取り専用で起動した場合は、その理由（対象ファイルを含む）をそのまま返す。
+            let reason = self.read_only_reason.lock().unwrap().clone();
+            return Err(anyhow::anyhow!(
+                reason.unwrap_or_else(|| "config.load() が未実行です".to_string())
+            ));
+        };
         let mut values = self.values.lock().unwrap();
         let mut next = values.clone();
         let mut changed = false;
@@ -390,7 +404,12 @@ mod tests {
         let error = cfg
             .set_string("PICOAGENT_OTHER", "x".to_string())
             .expect_err("原本を読めない状態では保存しない");
-        assert!(error.to_string().contains("config.load() が未実行"));
+        // 保存できない理由は、実装都合ではなく起動時と同じ文言（対象パス付き）で返す。
+        assert!(error.to_string().contains("読み取り専用"), "error: {error}");
+        assert!(
+            error.to_string().contains(&dir.display().to_string()),
+            "error: {error}"
+        );
         assert!(dir.is_dir(), "元の対象を上書きしていない");
         std::fs::remove_dir_all(&dir).ok();
     }
