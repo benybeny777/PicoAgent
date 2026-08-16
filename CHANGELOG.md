@@ -2,6 +2,7 @@
 
 ## 2026-08-17
 
+- 最新`main`からPicoAgent v1.0.1 Betaの軽量Windows NSISを再生成した。公開LPの画像は変更せず、版表示、取得先、実サイズ、SHA-256だけを新しいプレリリースへ同期する。
 - 製品版のSemVer判定を規則化し、公開中の`latest.json`から同じ系列の`patch`を自動採番してアプリCargo・xtask Cargo・Tauri設定へ同期する`cargo xtask bump-version`を追加した。`minor`／`major`はユーザー明示指示だけで上げる。起動時はpatchを通知せず、設定からの手動確認・適用ではpatchも対象にする。同じ版のRelease資産上書きも廃止した。
 - Cargo、Pythonランタイム、同梱・管理導入アプリ、外部CLI、Webランタイム、音声／LLMモデルを横断監査し、公式LTSまたは安定版latestへ更新した。LLMモデルはリビジョン、サイズ、SHA-256を固定し、同名旧版の黙示利用を防いだ。
 - OpenAI、Anthropic、Gemini、xAI、DeepSeekの既定候補を公式の最新安定モデルへ更新し、国立情報学研究所のLLM-jp-4 8B Thinking公式GGUFを日本語推論向けローカルプリセットへ追加した。
