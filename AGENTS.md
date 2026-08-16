@@ -13,6 +13,7 @@
 - 設定キーの `SPEC.md` への記載漏れ・削除漏れは `doc_sync::guard` のテストが双方向で検出する（手作業の突き合わせは不要。設定キーでない `PICOAGENT_*` 文字列は理由付きで `NOT_CONFIG_KEYS` へ）。
 - 対象ドキュメントの目安: アーキテクチャ・コネクタ仕様・メッセージ正規形・設定値 → `SPEC.md`、大きな変更 → `CHANGELOG.md`、起動手順・セットアップ・設定キー・依存関係 → `README.md`。
 - ドキュメント更新が本当に不要な軽微修正の場合のみ、不要と判断した理由を作業完了時に明記する。
+- **`main` へ入った変更は、指示が無くても Codex と Claude の両方が事後レビューする。** 片方だけの確認だと、書いた本人と同じ見落としが残る（実際に「起動を止めない」修正が、読めなかった会話履歴を次の1往復で上書きする状態のまま `main` にあった）。作業を始める前に `cargo xtask review-status` を実行し、未レビューのコミットがあれば**その回のレビューを先に済ませてから**新しい作業へ移る。レビューしたら `docs/REVIEW-LOG.md` の見出し直下へ `対象コミット: <SHA…> ｜ レビュアー: codex`（または `claude`）を残す。この行が唯一の管理台帳で、`review-status` が `git log` と突き合わせて未確認分を出す（`--strict` で失敗させられる）。指摘が0件でも「見て0件だった」ことを記録する。
 - **レビューや修正提案を行ったら、その結果を [docs/REVIEW-LOG.md](docs/REVIEW-LOG.md) へ必ず残す。対応したものだけでなく、見送ったもの・保留したものも理由付きで書く。** チャットの返答とコミットメッセージだけでは、次に作業する人（別のエージェント含む）が判断の理由も残件も追えない。実機での目視確認のように後回しにした確認も、ここへ「保留」として書き、確認できたら消す。恒久ルールになったものは `AGENTS.md`、仕様になったものは `SPEC.md` へ移し、レビュー記録には判定だけ残す。
 - コミットメッセージ・ソースコードのコメント（Rust / JS とも）は基本的に日本語で書く（コミットは英語だけの件名にしない）。`feat` / `fix` / `docs` / `chore` などの短い英語プレフィックスや、API / JSON / trait / 識別子・関数名など技術用語の英語はそのまま使ってよい（無理に和訳しない）。
 - 運用や品質に影響する大きめの変更は `CHANGELOG.md` に残す。
@@ -106,7 +107,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 - **アプリがプリセットとして案内・取得するローカルモデルは、原則として量子化済みGGUFを使う。** 一般PCでの容量・メモリ・速度を優先し、非量子化重みをプリセットへ追加しない。モデル公式の量子化版が無い場合は、出所と形式を確認できるGGUFを使う。利用者が明示する`custom` URLはこの制限の対象外。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
 - 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`cargo xtask setup engine` で取得）。
-- **Claude Code on the web（Linux コンテナ）で作業する場合は `.claude/hooks/session-start.sh` が環境を用意する。** clone 直後は (1) Tauri / cpal / enigo が要求するシステムライブラリが無い、(2) `frontendDist` が指す `ui-dist/` が Git 管理外で存在せず `tauri::generate_context!` がコンパイル時に落ちる、の2点で `cargo check` すら通らない。フックが apt 導入と `sync-characters` → `build-ui` を済ませ、テストバイナリまで事前ビルドする。手で毎回入れ直さないこと。Windows / macOS のローカル環境では `CLAUDE_CODE_REMOTE` を見て何もしない。
+- **Claude Code on the web（Linux コンテナ）で作業する場合は `.claude/hooks/session-start.sh` が環境を用意する。** clone 直後は (1) Tauri / cpal / enigo が要求するシステムライブラリが無い、(2) `frontendDist` が指す `ui-dist/` が Git 管理外で存在せず `tauri::generate_context!` がコンパイル時に落ちる、の2点で `cargo check` すら通らない。フックが apt 導入と `sync-characters` → `build-ui` を済ませ、テストバイナリまで事前ビルドし、最後に `review-status` で未レビューのコミットを知らせる。手で毎回入れ直さないこと。Windows / macOS のローカル環境では `CLAUDE_CODE_REMOTE` を見て何もしない。
 
 ## 製品化（配布）
 
@@ -161,6 +162,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`bundled::fetch_tha3`） | THA3コード・VRAM別モデル・OS別Pythonを準備する（`cargo xtask setup tha3`）。コードとモデルは `resources/bundled/tha3/` へ、Windows開発用Pythonは製品外の `tools/tha3-runtime/` へ置き、製品PythonはNSISインストール時に専用領域へ取得する |
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期、`ui/` を `ui-dist/` へ配信ビルド、残存プロセス停止（いずれも dev/build 前に自動実行） |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
+| `xtask/src/review.rs` | **レビュー必須運用の管理**。`docs/REVIEW-LOG.md` の `対象コミット: … ｜ レビュアー: …` と `git log`（既定は `origin/main`）を突き合わせ、Codex / Claude のどちらかが未確認のコミットを出す（`cargo xtask review-status`。セッション開始フックからも呼ぶ） |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
@@ -169,9 +171,9 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
-| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド → 未レビューのコミットの表示）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
 | `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
-| `docs/REVIEW-LOG.md` | **レビューと修正提案の記録**。対応・見送り・保留を理由付きで残す台帳（判定の履歴。進行状況は `HANDOFF.md`、恒久ルールは `AGENTS.md`、仕様は `SPEC.md`） |
+| `docs/REVIEW-LOG.md` | **レビューと修正提案の記録**。対応・見送り・保留を理由付きで残す台帳。見出し直下の `対象コミット: … ｜ レビュアー: …` が `cargo xtask review-status`（`xtask/src/review.rs`）の唯一の入力（判定の履歴。進行状況は `HANDOFF.md`、恒久ルールは `AGENTS.md`、仕様は `SPEC.md`） |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |

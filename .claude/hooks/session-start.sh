@@ -90,4 +90,11 @@ else
   fi
 fi
 
+# ── 4. 未レビューのコミットを知らせる ─────────────────────────────────
+# レビューを指示待ちにすると抜ける。セッションの最初に残件を出しておき、
+# 新しい作業より先に片付けられるようにする（判定は cargo xtask review-status）。
+log "未レビューのコミットを確認"
+cargo run --quiet --manifest-path xtask/Cargo.toml -- review-status || \
+  log "レビュー状況を取得できませんでした（cargo xtask review-status で確認すること）"
+
 log "準備完了"

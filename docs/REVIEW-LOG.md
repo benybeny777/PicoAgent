@@ -6,12 +6,44 @@
 
 - 記録の単位は「レビュー1回」。新しい回は**上へ**追加する。
 - 判定は `対応済み` / `見送り` / `保留` の3つ。**見送り・保留には必ず理由を書く**。
+- **見出しの直下へ機械可読の1行を置く**: `対象コミット: <SHA…> ｜ レビュアー: codex` または `claude`。
+  `cargo xtask review-status` がこの行と `git log` を突き合わせ、まだ Codex / Claude のどちらかが
+  見ていないコミットを一覧する（レビューを指示待ちにしないための管理。詳細は AGENTS.md）。
+- レビュー必須の起点: ac04622（これより前は個別記録を求めない。当時までの記録は本文のとおり）
 - 恒久ルールになったものは [AGENTS.md](../AGENTS.md)、仕様になったものは [SPEC.md](../SPEC.md) へ移し、ここには判定だけ残す。
 - 進行中のブランチや環境の作りかたは [HANDOFF.md](../HANDOFF.md) の持ち場。ここは「判断の履歴」に絞る。
 
 ---
 
+## 2026-08-16 — 2026-08-14〜15 の実装をさかのぼって再確認
+
+対象コミット: d48f55c, 06e3ef5, 567833e, 16c90bf, aea86c2, d2c7fac, bb582d3, da9fec5 ｜ レビュアー: claude
+
+`ebb128e..da9fec5` のコード差分（`src-tauri/src/`、`skills/`、`xtask/`、`ui/*.{js,css,html}`。画像・`character.json`・文書は対象外）を、`ac04622` で見つけた欠陥（読めない原本の上書き、無言の縮退、文書のずれ）と同じ観点で読み直した。各コミット当日のレビュー記録で扱い済みの指摘は再掲しない。
+
+| # | 優先 | 指摘 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P1 | `ui/layout-editor.js` の `readStore()` が壊れた `localStorage` を黙って `{}` にし、次の「保存」で**他の表示形式に作った配置まで空で上書き**していた。Rust 側で禁じている「破損 → 空で継続 → そのまま書き戻す」と同型 | 対応済み | 読めない値を `picoagent.layoutEditor.v1.corrupt-<日時>` へ退避し、理由をログへ残してから空で続ける（`store::quarantine_corrupt()` と同じ扱い） |
+| 2 | P2 | 同ファイルは `window.Moveable` が無いと**何もせず return** するため、上端メニューの「配置」ボタンが押しても無反応の死んだ操作になる（配信物から vendor が落ちても気づけない） | 対応済み | ボタンを `disabled` にして理由を `title` とログへ出す |
+| 3 | P2 | `Moveable` と `MutationObserver` を解放する経路が無い（AGENTS「確保したものは全経路で解放する」） | 対応済み | `pagehide` で `disconnect()` と `destroy()` を呼ぶ |
+| 4 | 確認 | `history` と同型の「読めないまま空で続けて保存」が他の状態ファイルにも無いか（`relationship` / `memory` / `usage` / `scheduler` / `character_framing`） | 対応不要 | `relationship::record()` は書き戻し前に `read()` を通して失敗を伝播し、`pet_init` の空フォールバックは表示専用で保存しない。ほかも読み取り失敗は `Result` のまま。`ac04622` で直した `history` だけが例外だった |
+| 5 | 確認 | `layout` / `character_framing` の旧 `talk` → `chat` 移行（`567833e`）で、保存済みの寸法・構図を落とさないか | 対応不要 | `size_for()` は `chat` が無ければ `talk` の保存値へ落ち、`normalize()` は両方あるとき `chat` を正本にする。回帰テストも両方にある |
+| 6 | 確認 | `license.rs` の `beta-full` 分岐が、正式版の Free / Pro 判定を素通しにしていないか | 対応不要 | `is_pro` の常時 `true` は `#[cfg(any(test, feature = "beta-full"))]` に閉じ、feature 無しでは従来の署名検証を通る |
+
+### 見送り・保留
+
+| # | 内容 | 判定 | 理由 |
+|---|---|---|---|
+| 7 | 配置編集の保存先が `localStorage` で、他の設定（`config.json`）と分かれている | 保留 | 設定へ移すなら設定キー・移行・設定画面の3点セットが要る。`CODEX-TASKS.md` の位置・サイズ保存方針（`layout.rs` を伸ばす）とまとめて扱う |
+| 8 | `ui/vendor/moveable/` が設計ガードの走査を素通しで、第三者ライセンス表記も未追記 | 保留 | 既に `CODEX-TASKS.md` P1-5 として追跡中。ここでは重複させない |
+
+検証: `cargo test --lib`、`cargo test`（xtask）、`node --check ui/layout-editor.js`、`cargo xtask build-ui --release`。GUI での配置編集の実操作は未実施（Windows実機の確認項目）。
+
+---
+
 ## 2026-08-16 — `d371577`（起動ブロッカー修正）の事後レビュー
+
+対象コミット: d371577, 91ea586 ｜ レビュアー: claude
 
 対象: `d371577` の差分（`src-tauri/src/{config,boot_screen,commands,lib,tools/http}.rs`、`ui/renderer.js`、`ui/styles.css`、`xtask/src/{main,util,assets}.rs`、`tools/`）。「起動を止めない」ための縮退が、代わりにデータ喪失・誤検知・表示の上書きを生んでいないかを読み直した。
 
