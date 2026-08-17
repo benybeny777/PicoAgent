@@ -2,8 +2,7 @@
 
 **直しきれなかった・環境がなくて確認できなかった項目**をここへ作業指示としてまとめる。判断の理由は
 レビュー記録、進行状況は `HANDOFF.md`、ルールは `AGENTS.md` が持ち場。ここは「次に手を動かす内容」だけ。
-現在の内容は 2026-08-13 のレビュー2巡（`docs/REVIEW-LOG.md` の「ベータ公開分の事後レビュー」）の残件と、
-2026-08-14 に追加した依存ライブラリの検討分。
+現在の内容は、完了済み項目を除いたレビュー残件と依存ライブラリの検討分。
 
 > **依存ライブラリを足すときに先に読むもの: [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md)。**
 > `ui/vendor/` へ依存を置くときの制約（CSP、拡張子 allowlist、`bundle_scope.rs` の走査除外）と、
@@ -13,24 +12,6 @@
 着手したら、完了条件まで満たしてから `docs/REVIEW-LOG.md` の該当行を更新し、この項目を消す。
 
 ---
-
-## P0-1. ベータNSISを作り直して公開しなおす
-
-- **なぜ**: 公開済みの `412,114,239 bytes` / SHA-256 `cdd0…c545c` は、レビューで直した3件の不具合を**含んでいない**。
-  - 外部コマンドのタイムアウトが指定秒数で戻らない（`sh -c` / `powershell -Command` の孫プロセスがパイプを握ると回収待ちで停止）
-  - `BETA` バッジが通常ビルド・販売ビルドにも出る
-  - 文字起こし2スキル・THA3生成の同型の待ち切り
-- **やること**: `.agents/skills/build-picoagent-beta/SKILL.md` の手順どおりに `cargo xtask build-beta --bundles nsis` から再生成し、
-  `distribution/site/latest.json` のサイズ・SHA-256を実ファイルから計算して更新、Release実体と一致させて差し替える。
-- **完了条件**: NSISのサイレントインストール／アンインストール成功、`latest.json` と Release実体のサイズ・SHA-256一致、
-  生成物の `ui-dist/index.html` に `beta-badge` が**ある**こと（ベータなので残るのが正）。
-- **禁止**: 通常 `build` の成果物を使わない。古い成果物を流用・改名しない。
-
-## P0-2. 引き伸ばしのまま同梱されている静止ショット2枚を撮り直す
-
-- **なぜ**: `layout-shot-mascot.webp`（論理360px→480px）と `layout-shot-widget.webp`（440px→480px）は、引き伸ばし禁止ルールが入る前の生成物で、いま同梱・公開されているものが**引き伸ばし画像**のまま。設定画面のレイアウト選択カードと配布ページの表示形式サムネの両方に出ている。
-- **やること**: `deviceScaleFactor: 2` を指定済みなので、`node tools/screenshots/shoot.mjs layout-shot-mascot.webp layout-shot-widget.webp layout-shot-chat.webp` を実行して差し替える。旧 `layout-shot-talk.webp` はLINE風チャットへ統合したため対象外。WebPエンコーダ（`libwebp_anim`）付きのffmpegが要る。
-- **完了条件**: 4枚が480px幅で生成され、引き伸ばし検査に引っかからないこと。設定画面のカードと配布ページのサムネを実表示で確認する。
 
 ## P0-3. 配布ページの画像重量を下げる
 

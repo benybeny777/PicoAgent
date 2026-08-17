@@ -30,11 +30,11 @@ const settingsData = {
   product: { name: "PicoAgent", version: "1.0.0", identifier: "com.picoagent.desktop" },
   values: {
     PICOAGENT_PROVIDER: "local",
-    PICOAGENT_CHARACTER: "hiyori",
+    PICOAGENT_CHARACTER: "mugi",
     PICOAGENT_LAYOUT: "stream",
     PICOAGENT_THEME: "dark",
     PICOAGENT_CHARACTER_ZOOM: "1.55",
-    PICOAGENT_STREAM_PROFILES: { hiyori: { background: "simple", backgroundImage: "", display: "clock", displayImage: "", captionColor: "#a04070" } },
+    PICOAGENT_STREAM_PROFILES: { mugi: { background: "simple", backgroundImage: "", display: "clock", displayImage: "", captionColor: "#a04070" } },
     PICOAGENT_ALWAYS_ON_TOP: true,
   },
   active: { providerId: "local", model: "gemma" },
@@ -50,7 +50,7 @@ window.__TAURI__ = {
   core: { convertFileSrc: path => path, invoke: async (name) => {
     if (name === "settings_load") return ${JSON.stringify(settingsData)};
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
-    if (name === "settings_character_remove") return { ok: true, activeCharacter: "hiyori" };
+    if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
@@ -128,7 +128,7 @@ try {
   await page.waitForSelector(".framing-editor");
   await page.waitForSelector(".stream-profile-editor");
   const streamEnabled = await page.locator('.stream-profile-editor input[type="checkbox"]').isChecked();
-  if (!streamEnabled) throw new Error("ひよりのキャラ別配信設定が読み込まれていません");
+  if (!streamEnabled) throw new Error("むぎのキャラ別配信設定が読み込まれていません");
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
   const muteStatus = await page.locator(".tts-master-status").textContent();
   if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
@@ -157,8 +157,8 @@ try {
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "もう一度押して削除", exact: true }).click();
   if (await addedCharacter.count()) throw new Error("削除した追加キャラが一覧に残っています");
-  if (await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').inputValue() !== "hiyori") throw new Error("未保存選択の削除後に保存中キャラへ戻りません");
-  if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("明るく元気")) throw new Error("削除後の選択と人格表示が一致しません");
+  if (await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').inputValue() !== "mugi") throw new Error("未保存選択の削除後に保存中キャラへ戻りません");
+  if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("年下っぽく")) throw new Error("削除後の選択と人格表示が一致しません");
   if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("既定人格だけで未保存扱いになっています");
   await page.getByRole("tab", { name: "診断・修復" }).click();
   if (await page.locator(".product-info-card").count() !== 5) throw new Error("製品情報カードが5件ではありません");
