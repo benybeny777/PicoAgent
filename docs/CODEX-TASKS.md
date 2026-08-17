@@ -214,6 +214,8 @@
   `frames`＋`layers` の382.6MBへ当てはめると、**lossless で約209MB（-173MB）、q92 で約48MB（-334MB）**。
   `webp` は `bundle_scope::ALLOWED_UI_EXTENSIONS`（`bundle_scope.rs:45`）に既に入っており、
   LP画像（`docs/images/layout-shot-*.webp`）で採用実績もある。WebView2／WKWebView とも透過WebPを表示できる。
+- **順序**: 着手前に **P1-19（画像をLFS管理にするか）を決めること。** この作業は全キャラの画像を書き換えるので、
+  方針を決める前に入れると履歴へ約209MBの増加を1回ぶん確定させてしまう。
 - **やること**: **losslessから始める**。lossless は復号結果が元PNGとビット一致するので、
   「引き伸ばし禁止」「高精細維持」の既存ルールと衝突せず、画質議論なしで-45%を取れる。
   1. `scripts/build-character-animations.py` の書き出しをWebPにし、`character.json` の `framePaths` と
@@ -363,6 +365,34 @@
 - **触ってはいけない**: `config.get()` が未設定として扱う既存動作（`AGENTS.md` に理由つきで書かれている）。
   `secret::encrypt()` の「暗号化済みはそのまま返す」性質（これが二重暗号化を防いでいる）。
   非Windowsの平文フォールバック（別件。`macOS` 対応時に `keyring` へ寄せる保留項目がある）。
+
+## P1-19. キャラクター画像をLFS管理にするか決める（P1-12 より前に）
+
+- **なぜ**: `.gitattributes` は `*.psd` と `*.mp4` を LFS 管理にしているのに、**キャラクター画像は素のGit管理**
+  （`*.png binary` だけ）。現在の追跡PNGは **357件・464MB**。キャラクター再生成は
+  `rebuild-picoagent-character` の工程で9レイヤー＋42フレームをまとめて作り直すため、
+  1体直すたびに数十MBが**履歴へ永久に積まれる**。
+  本セッションの計測（**shallow clone なので全履歴ではない。取得済み範囲だけの下限値**）:
+  - `.git` = **1.2GB**
+  - この clone から到達できるPNG blob合計 = **633MB**（作業ツリーの464MBを既に上回っている
+    ＝再生成ぶんの旧版が積み上がっている）
+  - `git lfs ls-files` = **0件**（LFS宣言はあるが実運用されていない）
+  clone・CI・バックアップのコストが単調に増え続ける。
+- **やること**: **まず方針を決める**。履歴の書き換え（`git filter-repo` 等）は
+  `AGENTS.md` の「公開済みコミットの書き換え・force push はしない」に触れるので**選択肢から外す**。
+  取れるのは次の2つ。
+  - 案A: `.gitattributes` へ画像の LFS 追跡を足し、**これ以降のコミットだけ**LFSへ載せる。
+    既存blobは履歴に残るが、増加は止まる。GitHub の LFS 帯域・容量枠（無料枠は小さい）と、
+    配布Repo側の運用（`PicoAgent-Distribution` は別Repo）への影響を先に確認すること。
+  - 案B: 素のGit管理を続けると決め、その理由と「再生成のたびに履歴が増える」ことを
+    `docs/CHARACTER-ASSET-WORKFLOW.md` へ明記する。**決めずに放置しない**のが目的。
+- **完了条件**: どちらかの方針が `docs/REVIEW-LOG.md` と（案Aなら）`.gitattributes` に反映されること。
+  案Aなら `git lfs ls-files` に新規コミットぶんが載ること。
+- **順序**: **P1-12（WebP化）より前に決めること。** P1-12 はキャラクター画像を全件書き換えるので、
+  そのコミットで**全キャラの資産がもう1世代ぶん履歴へ積まれる**（lossless でも約209MB）。
+  方針を決める前にP1-12を入れると、後戻りできない増加を1回ぶん確定させてしまう。
+- **触ってはいけない**: 既存履歴の書き換え・force push。`character-sources/` の内容ハッシュ共有の仕組み
+  （`scripts/manage-character-sources.py`。同じ絵を何度も持たないための既存の対策）。
 
 ## P1-1. 設定画面の実表示で日本語ラベルの収まりを見る
 
