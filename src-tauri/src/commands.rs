@@ -4292,9 +4292,19 @@ mod tests {
 
     #[test]
     fn patch更新は手動確認だけで案内する() {
+        let current = env!("CARGO_PKG_VERSION");
+        let mut parts = current
+            .split('.')
+            .map(|part| part.parse::<u64>().expect("製品版はSemVerであること"));
+        let next_patch = format!(
+            "{}.{}.{}",
+            parts.next().unwrap_or(0),
+            parts.next().unwrap_or(0),
+            parts.next().unwrap_or(0) + 1
+        );
         let feed = serde_json::json!({
-            "version": "1.0.2",
-            "releasePage": "https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v1.0.2",
+            "version": next_patch,
+            "releasePage": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v{next_patch}"),
             "platforms": {}
         });
         assert_eq!(
