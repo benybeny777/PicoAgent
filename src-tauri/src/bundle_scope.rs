@@ -262,18 +262,17 @@ mod guard {
                 && source.contains("setPersonaSpeechBlocklist(profile)"),
             "人格プロンプトの除去と、選択中キャラへの照合表の更新を残してください"
         );
-        let sanitize = source
-            .split_once("function sanitizeSpeechText(text)")
-            .expect("sanitizeSpeechText がありません")
+        // 挨拶・自発雑談・目覚ましは sanitizeSpeechText を通さず prepareSpeech へ直接来る。
+        // 全経路が必ず通るのは prepareSpeech だけなので、除去はそこにあることを確かめる。
+        let prepare = source
+            .split_once("async function prepareSpeech(text)")
+            .expect("prepareSpeech がありません")
             .1;
-        let body = sanitize
-            .split_once("\n}")
-            .expect("関数の終端がありません")
-            .0;
+        let body = prepare.split_once("\n}").expect("関数の終端がありません").0;
         assert!(
             body.contains("stripPersonaLeak("),
-            "読み上げテキストの共通入口 sanitizeSpeechText から stripPersonaLeak を呼んでください\
-             （合成前に通る唯一の経路のため）"
+            "音声合成の唯一の入口 prepareSpeech で人格プロンプトの混入を落としてください\
+             （挨拶・自発雑談・目覚ましは sanitizeSpeechText を通らない）"
         );
     }
 

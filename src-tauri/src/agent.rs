@@ -194,16 +194,28 @@ fn is_persona_field_line(line: &str) -> bool {
     })
 }
 
+/// 混入判定のために行を正規化する（空白除去・先頭の箇条書き記号除去・コロンの全角統一）。
+///
+/// モデルは復唱するときに `- 名前：むぎ` のように整形し直すことがある。原文の一致だけで
+/// 見ていると、この形の混入をすべて取り逃す。中身は同じなので、見た目の差だけを均す。
+pub(crate) fn normalize_leak_line(line: &str) -> String {
+    line.chars()
+        .filter(|c| !c.is_whitespace())
+        .skip_while(|c| matches!(c, '-' | '*' | '・' | '>' | '#'))
+        .map(|c| if c == '：' { ':' } else { c })
+        .collect()
+}
+
 /// system プロンプト（選択中キャラの人格設定を含む）が最終回答へそのまま混ざったときに取り除く。
 ///
 /// 小型ローカルモデルは指示文を復唱することがあり、そのまま返すとフキダシと履歴へ設定文が出て、
-/// 読み上げも設定文を喋る。**プロンプトに実在する行と同一の行だけ**を落とすため、
+/// 読み上げも設定文を喋る。**プロンプトに実在する行と中身が同一の行だけ**を落とすため、
 /// 普通の返答は削らない。偶然の一致を消さないよう8文字以上に限るが、`名前:` のような
 /// 人格設定の項目行は短くても設定文なので長さを問わず落とす。
-fn remove_prompt_leak(answer: String, system_prompt: &str) -> String {
-    let blocked: Vec<&str> = system_prompt
+pub(crate) fn remove_prompt_leak(answer: String, system_prompt: &str) -> String {
+    let blocked: Vec<String> = system_prompt
         .lines()
-        .map(str::trim)
+        .map(normalize_leak_line)
         .filter(|line| line.chars().count() >= 8 || is_persona_field_line(line))
         .collect();
     if blocked.is_empty() {
@@ -211,19 +223,24 @@ fn remove_prompt_leak(answer: String, system_prompt: &str) -> String {
     }
     let kept = answer
         .lines()
-        .filter(|line| !blocked.contains(&line.trim()))
+        .filter(|line| {
+            let normalized = normalize_leak_line(line);
+            normalized.is_empty() || !blocked.contains(&normalized)
+        })
         .collect::<Vec<_>>()
         .join("\n");
     // 改行を潰して1文へ流し込まれた場合に備え、長い行は文中からも取り除く。
-    let cleaned = blocked
-        .iter()
+    // ここは原文どおりに現れた場合だけを対象にする（正規化して消すと範囲が広がりすぎる）。
+    let cleaned = system_prompt
+        .lines()
+        .map(str::trim)
         .filter(|line| line.chars().count() >= 12)
         .fold(kept, |text, line| text.replace(line, ""));
     cleaned.trim().to_string()
 }
 
 /// 会話履歴から system プロンプトを取り出す（混入判定の照合元）。
-fn system_prompt_of(messages: &[Message]) -> String {
+pub(crate) fn system_prompt_of(messages: &[Message]) -> String {
     messages
         .iter()
         .find(|message| message.role == "system")
@@ -1715,11 +1732,11 @@ pub async fn run(
             // tool_calls が無ければ最終応答（自己評価が有効なら品質チェックして返す）。
             _ => {
                 let prompt = system_prompt_of(messages);
-                let answer = append_sources(
-                    remove_prompt_leak(remove_material_leaks(last), &prompt),
-                    &sources,
-                );
-                return Ok(self_improve(provider, cfg, model, messages, answer).await);
+                let answer = append_sources(remove_material_leaks(last), &sources);
+                // 混入の除去は self_improve の後に置く。自己評価は回答を作り直すことがあり、
+                // 先に消しても作り直した側が素通りしてしまうため。
+                let improved = self_improve(provider, cfg, model, messages, answer).await;
+                return Ok(remove_prompt_leak(improved, &prompt));
             }
         }
     }
@@ -1730,17 +1747,15 @@ pub async fn run(
         last
     };
     let prompt = system_prompt_of(messages);
-    Ok(self_improve(
+    let improved = self_improve(
         provider,
         cfg,
         model,
         messages,
-        append_sources(
-            remove_prompt_leak(remove_material_leaks(answer), &prompt),
-            &sources,
-        ),
+        append_sources(remove_material_leaks(answer), &sources),
     )
-    .await)
+    .await;
+    Ok(remove_prompt_leak(improved, &prompt))
 }
 
 #[cfg(test)]
@@ -1776,6 +1791,22 @@ mod tests {
         // 照合元に無い設定文らしき行は落とさない（他キャラの設定文まで消さない）。
         let other = "名前: りん";
         assert_eq!(remove_prompt_leak(other.to_string(), prompt), other);
+
+        // 復唱しかしなかった場合は空文字になる（読み上げ側はこれを合成しない）。
+        assert_eq!(
+            remove_prompt_leak(
+                "名前: むぎ\n口調: やわらかい敬語まじりのため口".to_string(),
+                prompt
+            ),
+            ""
+        );
+
+        // 箇条書き・全角コロン・空白の入れ替えで整形し直された復唱も落とす。
+        let reformatted = "- 名前：むぎ\n* 性格 : 明るく観察上手な小さな作業相棒\nこんにちは。";
+        assert_eq!(
+            remove_prompt_leak(reformatted.to_string(), prompt),
+            "こんにちは。"
+        );
     }
 
     #[test]

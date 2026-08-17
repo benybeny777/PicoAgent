@@ -60,7 +60,26 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
 /// staging は一時ディレクトリ配下に作るため、TEMP がリポジトリと別ドライブ（Windows）や
 /// tmpfs（Linux コンテナ）にあると `rename` が EXDEV で必ず失敗する。`flatten` と同じく
 /// コピーで代替し、失敗したときは中途半端な配置先を残さない。
+///
+/// **配置が済んだあとの後処理失敗で `Err` を返してはいけない。** 呼び出し側は `Err` を
+/// 「配置できなかった」と解釈して旧版を同じパスへ `rename` し戻すため、配置先が埋まった
+/// まま `Err` を返すと Windows では復元も失敗し、旧版が `*-old-*` に取り残される
+/// （AGENTS.md の「取得・更新・ビルドの正常終了後は旧版・退避を残さない」に反する）。
+/// staging は一時ディレクトリ配下で、呼び出し側が作業フォルダごと掃除する。
 fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
+    place_dir_inner(staged, dest, cleanup_dir)
+}
+
+/// `place_dir` の本体。staging の掃除だけテストから差し替えられるようにしている。
+///
+/// 掃除失敗を実ファイルシステムで再現する手が無い（root では権限で削除を阻めず、
+/// `remove_dir_all` はシンボリックリンクを追わずに消して成功する）ため、
+/// 「配置後の掃除失敗で巻き戻さない」という肝心の分岐を注入で検査する。
+fn place_dir_inner(
+    staged: &Path,
+    dest: &Path,
+    cleanup_staged: fn(&Path, &str) -> Result<()>,
+) -> Result<()> {
     if fs::rename(staged, dest).is_ok() {
         return Ok(());
     }
@@ -68,7 +87,12 @@ fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
         cleanup_dir(dest, "配置に失敗したフォルダ")?;
         return Err(error);
     }
-    cleanup_dir(staged, "配置済みstagingフォルダ")?;
+    if let Err(error) = cleanup_staged(staged, "配置済みstagingフォルダ") {
+        warn(
+            "setup",
+            format!("配置済みstagingフォルダを掃除できません（配置は完了しています）: {error:#}"),
+        );
+    }
     Ok(())
 }
 
@@ -1202,6 +1226,76 @@ fn referenced_files(model3: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_dir(label: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "picoagent-place-{label}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    /// `rename` が使えない状況（別ドライブ・tmpfs の EXDEV 相当）でもコピーで配置し、
+    /// staging を残さないこと。ここでは配置先を非空にして `rename` を失敗させ、
+    /// コピー経路を通す（EXDEV そのものは単体テストから再現できない）。
+    #[test]
+    fn renameできない場合もコピーで配置してstagingを残さない() {
+        let base = test_dir("copy");
+        let staged = base.join("staged");
+        let dest = base.join("engine");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("llama-server"), b"new").unwrap();
+        // 非空の配置先があると rename は失敗する（ENOTEMPTY / Windows も同様）。
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("occupied"), b"old").unwrap();
+
+        place_dir(&staged, &dest).unwrap();
+
+        assert_eq!(fs::read(dest.join("llama-server")).unwrap(), b"new");
+        assert!(!staged.exists(), "配置後に staging を残してはいけない");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// 配置が済んだあとに staging の掃除だけ失敗しても `Ok` を返すこと。
+    ///
+    /// `Err` を返すと呼び出し側が「配置できなかった」と解釈して旧版を同じパスへ
+    /// `rename` し戻し、配置先が埋まっているため Windows では復元も失敗して旧版が
+    /// `engine-old-*` に取り残される。掃除できなかった staging は呼び出し側が
+    /// 作業フォルダごと消すので、ここでは警告だけにする。
+    ///
+    /// 掃除失敗は注入で作る。権限を落とす方式は root で無視され、シンボリックリンク方式は
+    /// `remove_dir_all` がリンクを追わずに消して成功するため、どちらも検査が空振りする。
+    #[test]
+    fn 配置後のstaging掃除失敗では配置を巻き戻さない() {
+        fn 掃除は必ず失敗する(_path: &Path, label: &str) -> Result<()> {
+            bail!("{label}を掃除できません（テスト用の注入）")
+        }
+
+        let base = test_dir("cleanup-fail");
+        let staged = base.join("staged");
+        let dest = base.join("engine");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("llama-server"), b"new").unwrap();
+        // 非空の配置先があると rename は失敗し、コピー経路（EXDEV 相当）へ入る。
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("occupied"), b"old").unwrap();
+
+        let result = place_dir_inner(&staged, &dest, 掃除は必ず失敗する);
+
+        assert!(
+            result.is_ok(),
+            "配置が済んだあとの掃除失敗で Err を返すと、呼び出し側が旧版を復元できない: {result:?}"
+        );
+        assert_eq!(
+            fs::read(dest.join("llama-server")).unwrap(),
+            b"new",
+            "配置自体は完了していること"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn tha3は対応gpuにだけランタイムを選ぶ() {
