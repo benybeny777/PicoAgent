@@ -2029,9 +2029,6 @@ const HARU_AIVIS_STYLE_NAME: &str = "ノーマル";
 const EPSILON_AIVIS_MODEL_UUID: &str = "22e8ed77-94fe-4ef2-871f-a86f94e9a579";
 const EPSILON_AIVIS_SPEAKER_UUID: &str = "5680ac39-43c9-487a-bc3e-018c0d29cc38";
 const EPSILON_AIVIS_STYLE_NAME: &str = "せつなめ";
-// レン（AivisHub「天深シノ」）
-const REN_AIVIS_MODEL_UUID: &str = "0f6821f4-9f86-4da1-a41a-fbe6fff9ca88";
-const REN_AIVIS_SPEAKER_UUID: &str = "c175ee3c-5a1d-4901-a7fe-62d813370845";
 // ライス（AivisHub「阿井田 茂」）
 const RICE_AIVIS_MODEL_UUID: &str = "47e53151-a378-46f3-abee-ce13aa07feb1";
 const RICE_AIVIS_SPEAKER_UUID: &str = "561e4e59-3bc9-4726-9028-44a3c12a6f1d";
@@ -2086,11 +2083,6 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             HIYORI_AIVIS_MODEL_UUID,
             HIYORI_AIVIS_SPEAKER_UUID,
             "おちつき",
-        )),
-        "ren" => Some(aivis_voice(
-            REN_AIVIS_MODEL_UUID,
-            REN_AIVIS_SPEAKER_UUID,
-            "ささやき",
         )),
         "rice" => Some(aivis_voice(
             RICE_AIVIS_MODEL_UUID,
@@ -4250,7 +4242,6 @@ mod tests {
             ("haru", "ノーマル"),
             ("epsilon", "せつなめ"),
             ("mao", "おちつき"),
-            ("ren", "ささやき"),
             ("rice", "Calm"),
             ("wanko", "Happy"),
         ];

@@ -14,7 +14,6 @@ import http from "node:http";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { extname, isAbsolute, join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -24,6 +23,9 @@ const run = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const UI_ROOT = join(ROOT, "ui");
 const OUT = join(ROOT, "docs", "images");
+const SITE_OUT = join(ROOT, "distribution", "site", "assets");
+const TEMP_OUT = join(ROOT, "temp", "screenshots");
+const SITE_GALLERY = process.env.SHOOT_SITE_GALLERY === "1";
 
 // Node をアプリの依存に戻さないため、playwright はグローバル導入を前提に動的解決する。
 // Windows の絶対パス（C:\...）はそのままだとパッケージ名扱いで解決に失敗するため file:// URL へ直す。
@@ -187,6 +189,45 @@ async function bounds(png, pad = 8) {
       right = Math.min(c.width - 1, right + pad); bottom = Math.min(c.height - 1, bottom + pad);
       return { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
     }, { url: "data:image/png;base64," + png.toString("base64"), pad });
+  } finally {
+    await page.close();
+  }
+}
+
+// WebGL canvasのスクリーンショットは、透過指定でも背景が不透明な黒になる環境がある。
+// 四隅の背景色との差を数え、canvas要素だけ存在してモデル本体が描かれていない退行を検出する。
+async function contentBounds(png, threshold = 12) {
+  const page = await trimmer.newPage();
+  try {
+    return await page.evaluate(async ({ url, threshold }) => {
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+      const c = document.createElement("canvas");
+      c.width = img.width; c.height = img.height;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, c.width, c.height);
+      const samples = [[0, 0], [c.width - 1, 0], [0, c.height - 1], [c.width - 1, c.height - 1]]
+        .map(([x, y]) => [...data.slice((y * c.width + x) * 4, (y * c.width + x) * 4 + 4)]);
+      const bg = samples.sort((a, b) =>
+        samples.filter(v => v.every((n, i) => Math.abs(n - a[i]) <= 2)).length
+        - samples.filter(v => v.every((n, i) => Math.abs(n - b[i]) <= 2)).length).at(-1);
+      let top = c.height, left = c.width, right = -1, bottom = -1, pixels = 0;
+      for (let y = 0; y < c.height; y += 1) {
+        for (let x = 0; x < c.width; x += 1) {
+          const i = (y * c.width + x) * 4;
+          const differs = Math.max(
+            Math.abs(data[i] - bg[0]), Math.abs(data[i + 1] - bg[1]),
+            Math.abs(data[i + 2] - bg[2]), Math.abs(data[i + 3] - bg[3]),
+          ) > threshold;
+          if (!differs) continue;
+          pixels += 1;
+          if (y < top) top = y; if (y > bottom) bottom = y;
+          if (x < left) left = x; if (x > right) right = x;
+        }
+      }
+      return pixels ? { x: left, y: top, width: right - left + 1, height: bottom - top + 1, pixels } : null;
+    }, { url: `data:image/png;base64,${png.toString("base64")}`, threshold });
   } finally {
     await page.close();
   }
@@ -727,6 +768,13 @@ async function validateLive2dMatrix() {
             sdk: activeLive2dSdkPreference, runtimeSdk: live2dRuntimeSdk,
             sourceWidth: live2dModel?.internalModel?.originalWidth || 0,
             sourceHeight: live2dModel?.internalModel?.originalHeight || 0,
+            configuredScale: Number(cfg.scale) || 1,
+            configuredOffsetY: Number(cfg.offsetY) || 0,
+            modelTransform: live2dModel ? {
+              x: live2dModel.x, y: live2dModel.y,
+              width: live2dModel.width, height: live2dModel.height,
+              scaleX: live2dModel.scale.x, scaleY: live2dModel.scale.y,
+            } : null,
             lipSync: cfg.lipSync !== false, lipParam, lipIndex,
             rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
           };
@@ -740,9 +788,16 @@ async function validateLive2dMatrix() {
         if (info.lipSync && info.lipIndex < 0) {
           throw new Error(`${target.id}/${layout}: 口パラメータ ${info.lipParam} がモデルにありません`);
         }
+        // canvas要素の矩形だけでは、モデル本体が透明でも検査を通ってしまう。
+        // 実際のWebGL出力をPNGへ読み戻し、不透明画素があることまで確認する。
+        const canvasPng = await page.locator("#live2dCanvas").screenshot({ omitBackground: true });
+        const canvasContentBounds = await contentBounds(canvasPng);
+        if (!canvasContentBounds || canvasContentBounds.pixels < 400) {
+          throw new Error(`${target.id}/${layout}: Live2Dモデル本体の描画画素がありません ${JSON.stringify({ info, canvasContentBounds })}`);
+        }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
-        results.push({ characterId: target.id, layout, ...info, file });
+        results.push({ characterId: target.id, layout, ...info, canvasContentBounds, file });
         console.log(`  Live2D検査: ${target.id}/${layout} SDK${info.runtimeSdk} ${info.lipSync ? info.lipParam : "口パクなし"}`);
       } finally {
         await page.close();
@@ -817,23 +872,27 @@ async function record(page, { seconds, fps, step }) {
 
 // 連番 PNG をアニメーション WebP へ束ねる。GIF と違って透過が 1bit に落ちないので、
 // 背景なしのまま README のライト / ダーク両方で使える。同じ絵で APNG は 4.8MB、WebP は 0.9MB。
-async function encodeAnimation(frames, box, { fps, width, file }) {
+async function encodeAnimation(frames, box, { fps, outputFps = fps, width, quality = 80, file }) {
   if (width && box.width < width) {
     throw new Error(`入力幅${box.width}pxを出力幅${width}pxへ引き伸ばす処理は禁止です: ${file}`);
   }
-  const dir = await mkdtemp(join(tmpdir(), "picoagent-shot-"));
+  mkdirSync(TEMP_OUT, { recursive: true });
+  const dir = await mkdtemp(join(TEMP_OUT, "encode-"));
   try {
     for (const [index, png] of frames.entries()) {
       await writeFile(join(dir, `f-${String(index).padStart(4, "0")}.png`), png);
     }
     const crop = `crop=${box.width}:${box.height}:${box.x}:${box.y}`;
+    const filters = [crop];
+    if (outputFps !== fps) filters.push(`fps=${outputFps}`);
+    if (width) filters.push(`scale=${width}:-1:flags=lanczos`);
     await run(FFMPEG, [
       "-y", "-loglevel", "error",
       "-framerate", String(fps),
       "-i", join(dir, "f-%04d.png"),
-      "-vf", width ? `${crop},scale=${width}:-1:flags=lanczos` : crop,
+      "-vf", filters.join(","),
       // compression_level は既定の 4 のまま。6 にすると探索が跳ね上がり、数十コマで数分かかる。
-      "-c:v", "libwebp_anim", "-loop", "0", "-q:v", "80", file,
+      "-c:v", "libwebp_anim", "-loop", "0", "-q:v", String(quality), file,
     ]);
     const encoded = await readFile(file);
     const format = encoded.toString("ascii", 12, 16);
@@ -850,11 +909,13 @@ async function encodeAnimation(frames, box, { fps, width, file }) {
 // prepare の役目にしてある（完了を待ってから録り始めると動きが写らない）。
 // `outputWidth` は書き出し時の横幅（未指定なら等倍）。`width` はウィンドウ幅なので別物。
 async function shoot(name, {
-  seconds = 6, fps = 30, outputWidth, prepare, step, verifyLipSync = false, ...scene
+  seconds = 6, fps = 30, outputWidth, siteSeconds = seconds, siteOutputWidth,
+  siteOutputFps = 16, siteQuality = 70,
+  prepare, step, verifyLipSync = false, ...scene
 } = {}) {
   const page = await openScene(scene);
   if (prepare) await prepare(page);
-  const frames = await record(page, { seconds, fps, step });
+  const frames = await record(page, { seconds: SITE_GALLERY ? siteSeconds : seconds, fps, step });
   let lipSyncFailure = "";
   if (verifyLipSync) {
     const mouthSeen = await page.evaluate(() => window.__galleryMouthSeen === true);
@@ -874,8 +935,18 @@ async function shoot(name, {
   const box = unionBounds(await Promise.all(sampled.map(png => bounds(png, 16))));
   if (!box) throw new Error(`不透明な領域がありません: ${name}`);
 
-  await encodeAnimation(frames, box, { fps, width: outputWidth, file: join(OUT, name) });
-  console.log(`撮影: ${name}（${frames.length} コマ / ${fps} fps）`);
+  if (SITE_GALLERY) {
+    if (!siteOutputWidth) throw new Error(`LP用の出力条件がありません: ${name}`);
+    mkdirSync(SITE_OUT, { recursive: true });
+    await encodeAnimation(frames, box, {
+      fps, outputFps: siteOutputFps, width: siteOutputWidth, quality: siteQuality,
+      file: join(SITE_OUT, name),
+    });
+    console.log(`LP用撮影: ${name}（入力${frames.length}コマ / ${fps}fps → ${siteOutputFps}fps / ${siteOutputWidth}px）`);
+  } else {
+    await encodeAnimation(frames, box, { fps, width: outputWidth, file: join(OUT, name) });
+    console.log(`撮影: ${name}（${frames.length} コマ / ${fps} fps）`);
+  }
 }
 
 // ---------------------------------------------------------------- 絵ごとの準備と動き
@@ -1060,7 +1131,9 @@ const GALLERY_ASK = "おはよう。今日もよろしくね";
 // 引き伸ばすのではなく、PNG／Live2Dとも高密度な実レンダリングを入力にする。
 const GALLERY_SCENE = {
   layout: "pet", width: 900, height: 600, deviceScaleFactor: 2,
-  seconds: 12, fps: 30, outputWidth: 960, voice: true,
+  seconds: 12, fps: 30, outputWidth: 960,
+  // LPは同じ生PNGから480px・16fpsへ直接書き出す。既存960pxの再エンコードは禁止。
+  siteSeconds: 6, siteOutputWidth: 480, siteOutputFps: 16, siteQuality: 50, voice: true,
 };
 
 // 前半5秒は返答フローそのまま（文字送り → 音声開始後の口パク）を保ち、後半に
@@ -1078,12 +1151,17 @@ const GALLERY_TOUR = [
   [10400, "gaze-right"],
   [11400, "idle"],
 ];
+const SITE_GALLERY_TOUR = [
+  [4800, "thinking"],
+  [5600, "idle"],
+];
 
 // 毎コマ呼んで構わない。`setAnimation()` は同じ状態なら早期 return するので、
 // 読み上げ終了でアプリ側が idle へ戻しても次のコマで巡回中の状態へ復帰する。
 const galleryStep = async (page, index) => {
   const elapsedMs = (index * 1000) / GALLERY_SCENE.fps;
-  const current = GALLERY_TOUR.filter(([at]) => elapsedMs >= at).pop();
+  const tour = SITE_GALLERY ? SITE_GALLERY_TOUR : GALLERY_TOUR;
+  const current = tour.filter(([at]) => elapsedMs >= at).pop();
   // SHOOT_DEBUG_MOTION=1 で、実際に適用された data-motion を毎コマ出す
   // （巡回を足しても「切り替わったつもり」で撮れてしまうのを防ぐ）。
   const applied = await page.evaluate(name => {
@@ -1150,7 +1228,6 @@ const GALLERY = [
   ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", "live2d"],
   ["epsilon", "動作確認でも、作業の整理でも、必要なところから始めましょう。", "live2d"],
   ["mao", "こんにちは。今日は何から片づけましょうか。ゆっくりで大丈夫ですよ。", "live2d"],
-  ["ren", "準備はできています。どこから手をつけますか。", "live2d"],
   ["rice", "よく来た。……さて、何を調べようか。", "live2d"],
   ["wanko", "わふっ！　……よし、いっしょにやろう！", "live2d"],
 ];
@@ -1163,6 +1240,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"])
     reply,
     prepare: galleryPrepare(kind),
     step: galleryStep,
+    siteQuality: kind === "live2d" ? 45 : 50,
     verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
@@ -1182,10 +1260,23 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     reply,
     prepare: galleryPrepare(kind),
     step: galleryStep,
+    siteQuality: kind === "live2d" ? 50 : 55,
     verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
 ]));
+
+// LPへ出す自前キャラはrelease.jsonを正本にし、公式Live2Dサンプルだけを動作例として加える。
+// README専用のrin-tha3など、販売対象外の試作をLP資産へ混ぜない。
+const RELEASE = JSON.parse(await readFile(join(ROOT, "distribution", "release.json"), "utf8"));
+const SITE_GALLERY_IDS = new Set([
+  ...(RELEASE.includedCharacters || []),
+  ...GALLERY.filter(([, , kind = "png"]) => kind === "live2d").map(([id]) => id),
+]);
+const SITE_GALLERY_FILES = new Set([
+  ...[...SITE_GALLERY_IDS].map(id => `character-${id}.webp`),
+  ...[...SITE_GALLERY_IDS].map(id => `character-${id}-stream.webp`),
+]);
 
 // ---------------------------------------------------------------- 撮る絵の一覧
 
@@ -1224,6 +1315,13 @@ mkdirSync(OUT, { recursive: true });
 const only = process.argv.slice(2);
 const skipped = [];
 let failed = 0;
+
+if (SITE_GALLERY && only.some(name => !name.startsWith("character-"))) {
+  throw new Error("SHOOT_SITE_GALLERY=1 は character-*.webp だけを対象にしてください。");
+}
+if (SITE_GALLERY && only.some(name => !SITE_GALLERY_FILES.has(name))) {
+  throw new Error("販売対象または公式Live2D動作例ではないキャラクターをLPへ出力しようとしました。");
+}
 
 if (process.env.SHOOT_CHARACTER_MATRIX) {
   const matrix = await shootCharacterMatrix();
@@ -1338,6 +1436,7 @@ const wantsLive2d = (!only.length || only.some(name => name.startsWith("live2d-"
 if (wantsLive2d) await validateLive2dSdkModels();
 
 for (const [name, { requires = [], ...options }] of Object.entries(SHOTS)) {
+  if (SITE_GALLERY && !SITE_GALLERY_FILES.has(name)) continue;
   if (only.length && !only.includes(name)) continue;
   const missing = requires.filter(path => !existsSync(join(ROOT, path)));
   if (missing.length) {
@@ -1358,5 +1457,17 @@ server.close();
 
 for (const [name, missing] of skipped) {
   console.warn(`スキップ: ${name}（未取得: ${missing.join(", ")}）\n  → cargo xtask setup live2d で取得できます。`);
+}
+if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
+  const galleryFiles = [...SITE_GALLERY_FILES];
+  const bytes = (await Promise.all(galleryFiles.map(name => readFile(join(SITE_OUT, name)))))
+    .reduce((sum, content) => sum + content.length, 0);
+  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-noa.webp", "character-photoreal-prototype.webp"];
+  const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(SITE_OUT, name)))))
+    .reduce((sum, content) => sum + content.length, 0);
+  if (bytes > 15 * 1024 * 1024 || indexBytes > 5 * 1024 * 1024) {
+    throw new Error(`LP画像容量が上限を超えています: キャラ一覧${(bytes / 1024 / 1024).toFixed(2)}MiB / トップ${(indexBytes / 1024 / 1024).toFixed(2)}MiB`);
+  }
+  console.log(`LP画像容量: キャラ一覧${(bytes / 1024 / 1024).toFixed(2)}MiB / トップ${(indexBytes / 1024 / 1024).toFixed(2)}MiB`);
 }
 if (failed) process.exitCode = 1;
