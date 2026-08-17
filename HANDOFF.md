@@ -3,17 +3,91 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、単一世代化、実WebView検査まで省略しない。同梱PNGは `rin-tha3` を機能基準に `motionProfile=full` とし、基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。
 
 - 最終更新: 2026-08-17
-- ブランチ: `claude/persona-leak-remaining-paths`
-- 目的: 人格プロンプト読み上げの残存3経路を現行`main`へ統合し、PR #97〜#105の事後レビュー結果を記録する
+- ブランチ: `main`（`c52c32d` まで反映済み。未処理の残件は下記のとおり着手待ち）
+- 目的: 残件A〜Cの引き継ぎ。A は Windows 実機、B は文書のみ、C は実機確認
 
-## 未処理の残件（次に作業する人がここから見る）
+## 未処理の残件（次に作業する人＝Codex はここから始める）
 
-- **配布中の`v1.0.1 Beta`に、今日修正したローカルモデル喪失バグが入っている。** `cleanup_obsolete_preset_models` は PR #100 で追加され PR #103 で `v1.0.1` として公開済み。インストールした利用者は起動時に、選択中でないプリセットのGGUF（1件で数GB）を失う。修正は PR #106 で `main` へ入ったが**配布物には入っていない**。`v1.0.2` のpatch採番とWindows NSIS再生成・再公開が必要（正本は `.agents/skills/build-picoagent-beta/SKILL.md`）。
-- **READMEと配布READMEの通常2D説明が実行仕様と合っていない。** 「150フレームへ統一」「物理演算ではなく事前描画」と書いてあるが、実行パックは通常7体が各42フレーム（idle 12／thinking 12／talking 12／sad 6）、実写2Dテストが84フレーム（24／24／24／12）で、実写2Dテストの `springPhysics` と実行時の局所バネ描画も残っている。実装・素材は変えず、本体README・配布README・公開LPの説明を実行仕様へ訂正する（Codexの2026-08-17「Claude修正文書の事後レビュー」#1から引き継ぎ）。
-- **実機確認の保留2件**（いずれもGUI起動またはWindowsが必要でLinuxコンテナでは不可）。
-  - `engine:status {phase:"verify"}` の実表示（起動時の数GB照合中の案内）。
-  - `cargo xtask setup engine` のEXDEV修正（TEMPが別ドライブ・tmpfsのとき）。
-  - 人格プロンプト復唱の再現確認（`kontiwa` のような短い入力。小型モデルの気まぐれで再現条件を作りにくい）。**利用者側は再ビルドしないと修正が入らない。**
+Linuxコンテナ（Claude Code on the web）では A の NSIS 生成と C の GUI 起動ができないため、Windows 実機の Codex へ引き継ぐ。
+**着手順は A → B → C。** A が利用者へ届く不具合の解消で最優先、B は A の公開物へ載る文言なので A の公開前に終わらせる。
+
+### 残件A（最優先・Windows必須）— `v1.0.2` を採番して再配布する
+
+**なぜ急ぐか**: 配布中の `v1.0.1 Beta` に、起動時にローカルモデルを失うバグが入っている。
+`cleanup_obsolete_preset_models` が全プリセットの旧保存名を削除していたため、利用者が**選択中でないプリセット**として
+持っている GGUF（1件で数GB）が起動時に消え、切り替え時に再ダウンロードになる。PR #100 で追加され PR #103 で
+`v1.0.1` として公開済み。修正は `main` に入ったが**配布物には入っていない**。
+
+**正規入口**: `.agents/skills/build-picoagent-beta/SKILL.md` を最後まで読んでから着手する。手順はそちらが正本なので
+ここには複製しない。着手前にスキル記載のパス・コマンド・版・公開先が現行と合っているか照合する（AGENTS.mdの規則）。
+
+確定済みの前提（このセッションで実測）:
+
+| 項目 | 現状 |
+|---|---|
+| 版番号3か所 | `src-tauri/tauri.conf.json` `1.0.1` / `src-tauri/Cargo.toml` `1.0.1` / `xtask/Cargo.toml` `1.0.1`（一致） |
+| 公開中 `distribution/site/latest.json` | `1.0.1`、`windows-x64` size `400271033`、SHA-256 `4a62dcffd96f4ff881d021ee2184d66e8ef4522cb8086cf151be4604771ec14b` |
+| 公開Release | `PicoAgent-Distribution` の `v1.0.1` プレリリース（上記と一致確認済み） |
+| 版種別の判定 | **`patch`**。修正のみで機能追加・破壊的変更なし。`cargo xtask bump-version patch` を1回だけ実行する（3設定を個別に編集しない） |
+| 対象OS | Windows のみ（`distribution/release.json` の `platforms=["windows"]`、`signing.required=false`、`updates.required=false`） |
+| 許可キャラ | `mugi` `rin` `mai` `koharu` `sena` `noa` `photoreal-prototype` の7体（`distribution/release.json`） |
+
+`v1.0.2` に入る修正（`v1.0.1` 公開後に `main` へ入った分。更新説明はこの範囲で書く）:
+
+- PR #106 — 事後レビューの8件。ローカルモデル喪失、壊れたフレームでモーション永久停止、`setup engine` の EXDEV 失敗、
+  Whisperモデル不一致で `setup` が毎回停止、Cubism Core の2世代同居、起動時照合の無表示、設定保存直後のプロバイダ誤表示、
+  `img.src=""` の再取得。
+- PR #110 — 人格プロンプト混入の残存4経路（自発雑談・目覚ましに除去が無い、`prepareSpeech` に除去が無い、
+  `self_improve` の後へ移動、整形し直された復唱の正規化照合）と、`place_dir` の後処理失敗で配置を巻き戻す欠陥。
+
+**踏まないこと**: 同じ版の Release 資産を上書きしない（新規 `v1.0.2` プレリリースを作る）。
+`cargo xtask build`／`build-full` を公開ベータへ使わない（`build-full` は開発ツールまで同梱して NSIS が
+`error mmapping datablock` で失敗する）。ビルド後にコード・UI・資産・設定を触ったらその NSIS は破棄して再ビルドする。
+
+### 残件B（文書のみ・Linuxでも可）— 通常2Dの説明を実行仕様へ訂正する
+
+Codex の2026-08-17「Claude修正文書の事後レビュー」#1 からの引き継ぎ。**実装・素材・画像・動画は変更しない。文言だけを直す。**
+
+`characters/*/character.json` を機械集計した確定値:
+
+| 対象 | 実フレーム数 | 内訳 | `springPhysics` |
+|---|---|---|---|
+| 通常PNG 7体（`mugi` `rin` `mai` `koharu` `sena` `noa` `rin-tha3`） | **各42** | idle 12／thinking 12／talking 12／sad 6 | なし |
+| `photoreal-prototype`（実写2Dテスト） | **84** | idle 24／thinking 24／talking 24／sad 12 | **あり**（実行時の局所バネ描画も残存） |
+| Live2D 7体（`hiyori` `haru` `epsilon` `mao` `ren` `rice` `wanko`） | 連番なし | モデル側のモーション | — |
+
+直す箇所（いずれも「150フレーム」が現行のどの数値とも一致しない）:
+
+| ファイル:行 | 現在の記述 | 問題 |
+|---|---|---|
+| `README.md:97` | 「通常2Dは150フレームへ統一し、…髪や服の動きを事前描画した連番で表現します」 | 42が正。実写2Dテストだけ84で、髪の動きは実行時バネ |
+| `README.md:73` | 実写2Dテストの説明「150フレーム／目・口7段階」 | 84が正 |
+| `distribution/site/README.md:43` | 「通常2Dは150フレームへ統一し、髪や服の動きも**物理演算ではなく**事前描画した連番で表現します」 | 数値も、物理演算の否定も誤り。`README.md:93` の表は同じ実写を「◎（8領域）」と書いており自己矛盾 |
+| `distribution/site/README.md:41` | 実写2Dテスト「150フレームと目・口7段階」 | 84が正 |
+| `distribution/site/index.html:216` / `:220` | 「150フレームと目・口7段階」／「高品質試作は150フレームで検証しています」 | 84が正 |
+| `distribution/site/characters.html:33` / `:50` | 同上2箇所 | 84が正 |
+
+注意点:
+- 配布README・LPの「全7体」は `distribution/release.json` の許可7体を指す。そのうち6体が42フレーム、`photoreal-prototype` だけ84。
+  「統一」という表現は成り立たないので、体別に書き分ける。
+- 「12秒・30fps・360コマ」「16fps・134コマ」は**撮影動画のコマ数**でキャラの連番数とは別物。混同して直さない。
+- LP（`distribution/site/`）を直したら、`build-picoagent-beta` スキルの手順どおり本体正本を先に直し、
+  公開配布リポジトリへ同じ版として同期する。公開側だけ先に直して正本と分岐させない。
+
+### 残件C（実機確認）— Linuxで確認できなかった3件
+
+いずれもコードの正しさでは判断済みで、残っているのは実表示・実環境の確認だけ。
+
+1. **`engine:status {phase:"verify"}` の実表示**（PR #106）。起動時に数GBのSHA-256照合が走る間、
+   起動画面へ「ローカルモデルを確認中… ※数分かかることがあります」が出ること。照合対象が実在するときだけ出る
+   （旧保存名のGGUFがある状態を作る必要がある）。
+2. **`cargo xtask setup engine` の EXDEV 修正**（PR #106・#110）。`TEMP` をリポジトリと別ドライブへ向けて実行し、
+   コピー経路で配置が成功すること。`place_dir` の掃除失敗分岐は注入テストで担保済みなので、ここでは配置成功だけ見る。
+3. **人格プロンプト復唱の再現確認**（PR #110）。`kontiwa` のような短い入力で復唱が起きないこと。自発雑談・目覚まし・
+   挨拶の読み上げも対象。小型モデルの気まぐれで再現条件を作りにくいため、出たときに確認できれば十分。
+   **利用者側は再ビルドしないと修正が入らない**ので、残件Aの `v1.0.2` を入れてから確認する。
+
+確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
 
