@@ -1794,7 +1794,10 @@ mod tests {
 
         // 復唱しかしなかった場合は空文字になる（読み上げ側はこれを合成しない）。
         assert_eq!(
-            remove_prompt_leak("名前: むぎ\n口調: やわらかい敬語まじりのため口".to_string(), prompt),
+            remove_prompt_leak(
+                "名前: むぎ\n口調: やわらかい敬語まじりのため口".to_string(),
+                prompt
+            ),
             ""
         );
 

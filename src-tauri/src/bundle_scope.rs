@@ -268,10 +268,7 @@ mod guard {
             .split_once("async function prepareSpeech(text)")
             .expect("prepareSpeech がありません")
             .1;
-        let body = prepare
-            .split_once("\n}")
-            .expect("関数の終端がありません")
-            .0;
+        let body = prepare.split_once("\n}").expect("関数の終端がありません").0;
         assert!(
             body.contains("stripPersonaLeak("),
             "音声合成の唯一の入口 prepareSpeech で人格プロンプトの混入を落としてください\
