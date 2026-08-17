@@ -217,6 +217,30 @@
 - **触ってはいけない**: 「配信先を消す前に判定する」既存の安全策（`assets.rs:26`〜`28` のコメント参照。
   消してから失敗するとキャラ0体の状態が残り、次の `dev` / `build` が `ui-dist/` を作れなくなる）。
 
+## P1-14. CSP から `'unsafe-eval'` を外せるか確かめて外す
+
+- **なぜ**: `src-tauri/tauri.conf.json:31` の CSP は `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'` で、
+  JavaScript の `eval()` / `new Function()` を許可している。ところが**リポジトリ内に使用箇所が1つも無い**:
+  `ui/*.js` で0件、同梱ベンダの `ui/vendor/moveable/moveable.min.js` でも0件（本セッションで実測）。
+  WASM のコンパイルは別ディレクティブ `'wasm-unsafe-eval'` が担うので、Live2D Cubism Core が WASM を使うことは
+  `'unsafe-eval'` を残す理由にならない。
+  このアプリは**モデルが生成した文字列を画面へ出す**（`renderMarkdown` は `createElement` と `textContent` で
+  組み立てており `innerHTML` を使っていないので現状は安全）。`'unsafe-eval'` は、将来そこに1箇所でも
+  文字列→コード実行の経路が生まれたときに被害を跳ね上げる設定なので、要らないなら外しておきたい。
+- **やること**:
+  1. `cargo xtask setup live2d` で `ui/vendor/live2d/` を取得し、**Live2D ランタイム本体に `eval(` / `new Function` が
+     無いことを確認する**（本セッションの環境では Live2D が Git 管理外で未取得のため、ここだけ確認できていない）。
+  2. 無ければ `'unsafe-eval'` を CSP から削り、Live2D キャラ（`hiyori`）の表示・モーション・
+     PNG キャラの通常表示・設定画面をひととおり動かす。
+  3. 必要だった場合は**外さずに**、`tauri.conf.json` の CSP 行へ「Live2D ランタイムが要求するため残す」と
+     理由コメントを残せる形（`SPEC.md` の該当節）へ書く。**理由が分からないまま残っている状態をなくすのが目的**で、
+     外すこと自体が目的ではない。
+- **完了条件**: `'unsafe-eval'` が消えて全キャラ・全表示形式が動くこと。または、必要な根拠が文書に残ること。
+  どちらの結果でも `SPEC.md` のセキュリティ節へ現在のCSPと各ディレクティブの理由を書く。
+- **触ってはいけない**: `'wasm-unsafe-eval'`（Live2D の WASM に要る）、`style-src 'unsafe-inline'`（別件。
+  外すと既存のインラインスタイルが全部落ちるので、この作業に混ぜない）、`img-src` の `data:` / `asset:`
+  （キャラ画像とスクリーンショット添付が通らなくなる）。
+
 ## P1-1. 設定画面の実表示で日本語ラベルの収まりを見る
 
 - **なぜ**: 外部サービス連携22スキルと設定ガイドの英語ラベル40件を日本語へ統一したが、**GUIでの折り返しは未確認**。

@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-08-18 — CSPの `'unsafe-eval'`（Claude、コード変更なし）
+
+対象: `b743b08`。Tauri の権限（ACL）と CSP を見た。**新規の指摘は1件で、Codex への作業指示へ引き継いだ**（P1-14）。
+
+| # | 優先 | 指摘・確認 | 判定 | 根拠・理由 |
+|---|---|---|---|---|
+| 1 | P1 | **CSP の `'unsafe-eval'` に使用実績が無い** | 保留（引き継ぎ済み: P1-14） | `tauri.conf.json:31` は `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'`。`eval(` / `new Function` の使用箇所を実測したところ `ui/*.js` で0件、同梱ベンダ `ui/vendor/moveable/moveable.min.js` でも0件。WASM は `'wasm-unsafe-eval'` が担うので Live2D の WASM は残す理由にならない。**Live2D ランタイム本体だけは Git 管理外で未取得のため確認できず**、取得して確かめてから外す条件で引き継いだ。外すこと自体より「理由が分からないまま残っている状態をなくす」ことを完了条件にした |
+| 2 | 確認 | モデル生成テキストの画面描画 | 対応済み（既存実装） | `renderMarkdown()`（`renderer.js:1880`）は `createElement` と `textContent` で組み立てており `innerHTML` を使っていない。加えて CSP の `img-src` が `'self' data: asset:` に限られているため、仮に要素を差し込めても外部への画像ビーコンは飛ばない。指摘なし |
+| 3 | 確認 | Tauri の権限（ACL） | 対応済み（既存実装） | `capabilities/default.json` は `main` / `settings` の2ウィンドウへ、ドラッグ・リサイズ・最前面・位置・寸法・イベント・webview生成だけを与えている。シェル実行やファイルシステムのプラグイン権限は入っていない（ファイル操作は自前の `permissions` 層を通る）。指摘なし |
+| 4 | 確認 | `assetProtocol` の公開範囲 | 対応済み（既存実装） | `$APPDATA/characters/**` と `$APPDATA/display/**` に限定。利用者データ全体や任意パスへは開いていない。指摘なし |
+
+検証: コード変更なし（文書追記のみ）。`eval` / `new Function` の0件は `ui/` 配下と同梱ベンダへの全文検索による実測。
+Live2D ランタイム（`ui/vendor/live2d/`、`cargo xtask setup live2d` で取得）は本環境に存在しないため未確認。
+
+---
+
 ## 2026-08-18 — 最適化の調査（Claude、コード変更なし）
 
 対象: `b743b08`。「最適化もしたい」を受け、配布サイズ・開発ループ・実行時コスト・ビルド設定を実測した。
