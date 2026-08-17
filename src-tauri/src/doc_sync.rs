@@ -7,7 +7,7 @@
 
 /// 設定キーとして扱わない文字列（マーカー・テスト用ダミー・ドキュメント中の例）。
 /// 追加するときは、なぜ設定キーでないのかを理由として書き添えること。
-const NOT_CONFIG_KEYS: [(&str, &str); 10] = [
+const NOT_CONFIG_KEYS: [(&str, &str); 11] = [
     (
         "PICOAGENT_COMMAND_APPROVAL__",
         "run_command と対話ループの内部プロトコルのマーカー",
@@ -38,6 +38,10 @@ const NOT_CONFIG_KEYS: [(&str, &str); 10] = [
     (
         "PICOAGENT_OPENAI_API_KEY",
         "secret のテストで使う架空キー（実キーは OPENAI_API_KEY）",
+    ),
+    (
+        "PICOAGENT_QA_LONG_AUDIO",
+        "長時間文字起こしの明示実機テストだけで使う入力パス",
     ),
 ];
 

@@ -40,7 +40,32 @@ const settingsData = {
   active: { providerId: "local", model: "gemma" },
   defaults: { systemPrompt: "" },
   providers: [{ id: "local", label: "ローカル", defaultModel: "gemma", configSchema: [] }],
-  tools: [],
+  tools: [
+    {
+      name: "google_sheets",
+      label: "Google スプレッドシート",
+      description: "Google スプレッドシートを読み書きします。",
+      configSchema: [
+        { key: "PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN", label: "Google スプレッドシートの OAuth アクセストークン", type: "password", placeholder: "ya29..." },
+      ],
+    },
+    {
+      name: "bluesky",
+      label: "Bluesky",
+      description: "Blueskyへ投稿します。",
+      configSchema: [
+        { key: "PICOAGENT_BLUESKY_IDENTIFIER", label: "Bluesky の識別子（ハンドルまたはメール）", type: "text", placeholder: "user.bsky.social" },
+      ],
+    },
+    {
+      name: "microsoft_graph",
+      label: "Microsoft Graph",
+      description: "Microsoft Graphで予定やメッセージを扱います。",
+      configSchema: [
+        { key: "PICOAGENT_MS_GRAPH_ACCESS_TOKEN", label: "Microsoft Graph の OAuth アクセストークン", type: "password", placeholder: "" },
+      ],
+    },
+  ],
   relationships: [],
   localModelPresets: [],
 };
@@ -109,6 +134,52 @@ try {
   await page.getByRole("button", { name: "1.2.0へ更新", exact: true }).click();
   if (!(await page.locator(".component-manager-status").textContent())?.includes("音声モデル・辞書・設定は残ります")) throw new Error("更新前に維持データが案内されません");
   await page.screenshot({ path: join(OUT, "components-tab.png") });
+  await page.getByRole("tab", { name: "スキル", exact: true }).click();
+  for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
+    await page.locator(".card-item").filter({ hasText: name }).click();
+  }
+  const verifyLongSkillLabels = async width => {
+    await page.setViewportSize({ width, height: 820 });
+    const result = await page.evaluate(() => {
+      const labels = [
+        "Google スプレッドシートの OAuth アクセストークン",
+        "Bluesky の識別子（ハンドルまたはメール）",
+        "Microsoft Graph の OAuth アクセストークン",
+      ];
+      return labels.map(text => {
+        const label = [...document.querySelectorAll(".card-config .field label")].find(node => node.textContent === text);
+        const input = label?.parentElement?.querySelector("input");
+        const labelBox = label?.getBoundingClientRect();
+        const inputBox = input?.getBoundingClientRect();
+        return {
+          text,
+          visible: !!labelBox && labelBox.width > 0 && labelBox.height > 0,
+          inside: !!labelBox && labelBox.left >= 0 && labelBox.right <= document.documentElement.clientWidth,
+          inputWidth: inputBox?.width || 0,
+        };
+      });
+    });
+    for (const item of result) {
+      if (!item.visible || !item.inside || item.inputWidth < 220) {
+        throw new Error(`${width}px幅でスキル設定が収まりません: ${JSON.stringify(item)}`);
+      }
+    }
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    if (overflow) throw new Error(`${width}px幅でスキル設定が横にはみ出しています`);
+    await page.screenshot({ path: join(OUT, `skills-${width}px.png`), fullPage: true });
+    for (const [key, text] of [
+      ["google-sheets", "Google スプレッドシートの OAuth アクセストークン"],
+      ["bluesky", "Bluesky の識別子（ハンドルまたはメール）"],
+      ["microsoft-graph", "Microsoft Graph の OAuth アクセストークン"],
+    ]) {
+      const setting = page.locator(".card-config .field").filter({ has: page.locator("label", { hasText: text }) });
+      await setting.scrollIntoViewIfNeeded();
+      await setting.screenshot({ path: join(OUT, `skill-${key}-${width}px.png`) });
+    }
+  };
+  await verifyLongSkillLabels(600);
+  await verifyLongSkillLabels(400);
+  await page.setViewportSize({ width: 960, height: 760 });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
   if (await page.getByRole("button", { name: "一覧を再読み込み", exact: true }).count() !== 1) throw new Error("モデル一覧の再読込操作が更新操作と区別できません");
   await page.getByRole("button", { name: "削除", exact: true }).click();
@@ -179,7 +250,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));
