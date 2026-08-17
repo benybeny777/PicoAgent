@@ -180,6 +180,8 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
   1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Qwen3.5 4B／9B、OpenAI gpt-oss-20b、Phi-4 mini、LLM-jp-4 8B Thinking の GGUF も選べる。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
+     移行判定と旧ファイル削除前の照合は数GBのSHA-256になるため、照合対象が実在するときだけ `engine:status {phase:"verify"}` を出す（無表示だと起動が固まったように見える）。
+     旧保存名の削除対象は、廃止済みプリセット（`RETIRED_MODEL_FILES`）と**選択中プリセットの旧保存名だけ**に限る。全プリセット分を消すと、利用者が別プリセットとして持っている実体まで巻き込んで再取得になる。
   3. `llama-server` は実行時配置の `PicoAgent/bundled/engine/`、同梱配置 `resources/bundled/engine/`、旧同梱配置 `resources/engine/`、開発時の `src-tauri/resources/bundled/engine/` / `src-tauri/resources/engine/` の順に探し、`cargo xtask dev` / `cargo xtask build` は事前に `xtask`（`bundled::fetch_engine`） で同梱配置を確認・取得してから Tauri を起動する。起動時は `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja`
      を spawn（`PICOAGENT_LOCAL_GPU_DEVICE` 指定時は `--device <値>` を追加。Windows は CREATE_NO_WINDOW）。
      Qwen3.5だけは、内部推論をキャラクター発話へ混ぜずツール解析を安定させるため、`--chat-template-kwargs {"enable_thinking":false} --reasoning-budget 0` も追加する。

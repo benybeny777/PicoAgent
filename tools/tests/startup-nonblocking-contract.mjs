@@ -42,4 +42,9 @@ test("プロバイダ疎通は起動時の短い上限でfalseへ正規化する
   assert.match(commands, /STARTUP_PROVIDER_PROBE_TIMEOUT[\s\S]*from_secs\(3\)/);
   assert.match(commands, /probe_with_timeout\(p\.is_up/);
   assert.match(commands, /timeout\(timeout, probe\)\.await\.unwrap_or\(false\)/);
+  // 起動経路は短い上限を保つ。設定保存後の確認は利用者が結果を待つ場面なので、
+  // 同じ3秒だと「遅いが生きている」リモートプロバイダを停止中と誤表示する。
+  assert.match(commands, /current_up\(&state, STARTUP_PROVIDER_PROBE_TIMEOUT\)/);
+  assert.match(commands, /SETTINGS_PROVIDER_PROBE_TIMEOUT: std::time::Duration =\s*std::time::Duration::from_secs\(10\)/);
+  assert.match(commands, /current_up\(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT\)/);
 });

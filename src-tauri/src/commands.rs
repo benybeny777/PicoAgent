@@ -535,7 +535,12 @@ impl Default for AppState {
 }
 
 /// 選択中プロバイダの is_up。
+///
+/// 起動時は画面を先に出すことが優先なので短く打ち切る。設定保存後の確認は利用者が
+/// 結果を待っている場面で、同じ3秒だと「遅いが生きている」リモートプロバイダを
+/// 停止中と誤表示するため、待ち時間を分ける。
 const STARTUP_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+const SETTINGS_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 async fn probe_with_timeout(
     probe: impl std::future::Future<Output = bool>,
@@ -544,12 +549,12 @@ async fn probe_with_timeout(
     tokio::time::timeout(timeout, probe).await.unwrap_or(false)
 }
 
-async fn current_up(state: &AppState) -> bool {
+async fn current_up(state: &AppState, timeout: std::time::Duration) -> bool {
     let id = state.provider_id.lock().unwrap().clone();
     match providers::get(&id) {
-        // フォールバック許可: 起動時の接続可否表示は本体初期化の必須条件ではない。
-        // 外部CLIや接続先が停止していても短時間でfalseへ正規化し、画面を先に起動する。
-        Some(p) => probe_with_timeout(p.is_up(&state.config), STARTUP_PROVIDER_PROBE_TIMEOUT).await,
+        // フォールバック許可: 接続可否表示は本体初期化の必須条件ではない。
+        // 外部CLIや接続先が停止していても上限時間でfalseへ正規化し、画面を先に進める。
+        Some(p) => probe_with_timeout(p.is_up(&state.config), timeout).await,
         None => false,
     }
 }
@@ -627,7 +632,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "betaBuild": cfg!(feature = "beta-full"),
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
-        "up": current_up(&state).await,
+        "up": current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await,
         "theme": state.config.get("PICOAGENT_THEME", "system"),
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
         "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
@@ -2722,7 +2727,7 @@ pub async fn settings_save(
         "restartEngine": restart_engine,
         "restartAivis": restart_aivis,
         "hotkeyWarning": hotkey_warning,
-        "up": current_up(&state).await
+        "up": current_up(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT).await
     }))
 }
 
