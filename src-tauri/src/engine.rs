@@ -239,10 +239,15 @@ async fn migrate_legacy_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result
     let url = model_url(app);
     let expected = local::preset_by_url(&url);
     let mut selected = None;
-    for path in legacy_model_paths(app) {
-        if path == *dest || !path.exists() {
-            continue;
-        }
+    let candidates: Vec<PathBuf> = legacy_model_paths(app)
+        .into_iter()
+        .filter(|path| path != dest && path.exists())
+        .collect();
+    // 数GBのSHA-256照合は分単位かかる。無表示のままだと起動が固まったように見える。
+    if !candidates.is_empty() {
+        set_status(app, json!({ "phase": "verify" }));
+    }
+    for path in candidates {
         if let Some(preset) = expected {
             match preset_model_matches(&path, preset).await {
                 Ok(true) => {}
@@ -334,11 +339,17 @@ async fn cleanup_obsolete_preset_models(app: &AppHandle, dest: &Path) -> anyhow:
     let Some(preset) = local::preset_by_url(&url) else {
         return Ok(0);
     };
-    let names = local::obsolete_model_file_names();
-    let candidates = model_storage_roots(app)
+    let names = local::obsolete_model_file_names(Some(preset));
+    let candidates: Vec<PathBuf> = model_storage_roots(app)
         .into_iter()
         .flat_map(|root| names.iter().map(move |name| root.join(name)))
+        .filter(|path| path != dest && path.is_file())
         .collect();
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    // 削除前の現行モデル照合も数GBのSHA-256になるため、進行中であることを画面へ出す。
+    set_status(app, json!({ "phase": "verify" }));
     remove_obsolete_model_files(dest, candidates, preset.size_bytes, preset.sha256).await
 }
 

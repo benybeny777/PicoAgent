@@ -713,6 +713,13 @@ function displayPreloadedFrame(name, index) {
   return true;
 }
 
+// 読み込みが終わったのに寸法を持たないフレーム（404・途中で切れたPNG）は、待っても表示できない。
+// 「まだ読込中」と同じ扱いにすると animate() が同じ1枚を送り続け、モーションが以後ずっと止まる。
+function isBrokenFrame(name, index) {
+  const image = animationPreloadCache.get(frameUrl(name, index));
+  return !!image?.complete && (image.naturalWidth < 1 || image.naturalHeight < 1);
+}
+
 function personaText(manifest, override) {
   if (override?.trim()) return override.trim();
   const persona = manifest.persona || {};
@@ -1063,12 +1070,20 @@ function animate(now) {
   if (!animation) { animationRequestId = requestAnimationFrame(animate); return; } // フレーム定義が無いキャラ（Live2D 初期化失敗時）はループだけ維持する
   if (!lastFrameAt) lastFrameAt = now;
   if (!displayPreloadedFrame(animationName, frame)) {
+    // 壊れたフレームで送りを止めると、そのモーションが以後ずっと固まる。通常の間隔で次へ進める。
+    if (isBrokenFrame(animationName, frame) && now - lastFrameAt >= frameDuration(animation, frame)) {
+      frame = (frame + 1) % animationFrameCount(animation);
+      lastFrameAt = now;
+    }
     animationRequestId = requestAnimationFrame(animate);
     return;
   }
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
     const nextFrame = (frame + 1) % animationFrameCount(animation);
-    if (displayPreloadedFrame(animationName, nextFrame)) frame = nextFrame;
+    // 壊れたフレームは表示できないが、送りは進める（前の完成フレームを出したまま先へ抜ける）。
+    if (displayPreloadedFrame(animationName, nextFrame) || isBrokenFrame(animationName, nextFrame)) {
+      frame = nextFrame;
+    }
     lastFrameAt = now;
   }
   animationRequestId = requestAnimationFrame(animate);
@@ -1117,7 +1132,8 @@ async function probeRigLayers() {
       clearTimeout(timer);
       img.onload = null;
       img.onerror = null;
-      if (!result) img.src = "";
+      // src="" は文書URLの再取得になるため、属性ごと外して読み込みを手放す。
+      if (!result) img.removeAttribute("src");
       resolve(result);
     };
     const timer = setTimeout(() => finish(false), STARTUP_RESOURCE_TIMEOUT_MS);
@@ -1384,6 +1400,9 @@ let live2dCanvas = null;
 let live2dMouth = -1; // 読み上げ中の口の開き（0〜1）。-1 はモーション任せ。
 let live2dRuntimePromise = null;
 let live2dRuntimeSdk = "";
+// ページへ挿入したCubism Coreの世代。script要素を消してもグローバルは戻せないため、
+// 「読み込みを試みた」時点で確定させ、以後は別世代を読ませない。
+let live2dCoreSdk = "";
 // 表示形式が chat / bar の状態で起動すると character は小型アイコン寸法しかない。
 // その寸法でモデルの scale / offsetY を計算すると描画が全てキャンバス外へ出るため、
 // Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
@@ -1453,15 +1472,16 @@ function loadLive2DModelWithTimeout(url) {
 // ランタイム3点を一度だけ順に読み込む（Cubism Core → PIXI → pixi-live2d-display）。
 async function ensureLive2DRuntime(sdk) {
   const requestedSdk = sdk === "5" ? "5" : "4";
-  if (window.PIXI?.live2d?.Live2DModel) {
-    if (live2dRuntimeSdk && live2dRuntimeSdk !== requestedSdk) {
-      throw new Error("Cubism Coreの世代を切り替えるにはPicoAgentの再起動が必要です");
-    }
-    return;
+  // 読み込みが途中で失敗・タイムアウトしても、挿入済みCoreは残る（scriptを外しても実行は止まらない）。
+  // 成否ではなく挿入済み世代で判定しないと、再試行時に1ページへ2世代が同居する。
+  if (live2dCoreSdk && live2dCoreSdk !== requestedSdk) {
+    throw new Error("Cubism Coreの世代を切り替えるにはPicoAgentの再起動が必要です");
   }
+  if (window.PIXI?.live2d?.Live2DModel) return;
   if (!live2dRuntimePromise) {
     live2dRuntimeSdk = requestedSdk;
     live2dRuntimePromise = (async () => {
+      live2dCoreSdk = requestedSdk;
       const core = live2dRuntimeSdk === "5"
         ? "vendor/live2d/live2dcubismcore-5.3.min.js?v=5.3-pinned"
         : "vendor/live2d/live2dcubismcore-compat.min.js?v=compat-pinned";
@@ -4353,6 +4373,10 @@ function applyEngineStatus(s) {
     const gb = bytes => (Number(bytes) / (1024 ** 3)).toFixed(1);
     const size = Number(s.totalBytes) > 0 ? `（${gb(s.receivedBytes)} / ${gb(s.totalBytes)}GB）` : "";
     if (booting) setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
+    online.dataset.up = false;
+  } else if (s.phase === "verify") {
+    // 数GBのモデル照合は分単位かかる。無表示だと起動が固まったように見える。
+    if (booting) setStatus("ローカルモデルを確認中… ※数分かかることがあります");
     online.dataset.up = false;
   } else if (s.phase === "starting") {
     if (booting) setStatus("ローカルAIを起動中…");

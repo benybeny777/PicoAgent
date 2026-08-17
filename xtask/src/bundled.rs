@@ -55,6 +55,23 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
     Ok(found_exe)
 }
 
+/// 検証済み staging を最終配置先へ移す。
+///
+/// staging は一時ディレクトリ配下に作るため、TEMP がリポジトリと別ドライブ（Windows）や
+/// tmpfs（Linux コンテナ）にあると `rename` が EXDEV で必ず失敗する。`flatten` と同じく
+/// コピーで代替し、失敗したときは中途半端な配置先を残さない。
+fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
+    if fs::rename(staged, dest).is_ok() {
+        return Ok(());
+    }
+    if let Err(error) = copy_dir(staged, dest, &|_| false) {
+        cleanup_dir(dest, "配置に失敗したフォルダ")?;
+        return Err(error);
+    }
+    cleanup_dir(staged, "配置済みstagingフォルダ")?;
+    Ok(())
+}
+
 /// GitHub リリースのアセットから、名前が条件に合う最初のものを選ぶ。
 struct ReleaseAsset {
     name: String,
@@ -79,12 +96,21 @@ fn pick_asset(release: &Value, matches: impl Fn(&str) -> bool) -> Result<Release
                 .get("size")
                 .and_then(Value::as_u64)
                 .ok_or_else(|| anyhow!("アセットサイズがありません: {name}"))?;
+            // GitHubがdigestを返すのは比較的新しいアセットだけ。古いタグを指定すると
+            // ここで止まるが、検証できない配布物を同梱するより安全なので必須のままにする。
+            // 原因が分かるよう、digest付きのタグを選び直すことを案内する。
             let sha256 = asset
                 .get("digest")
                 .and_then(Value::as_str)
                 .and_then(|value| value.strip_prefix("sha256:"))
                 .filter(|value| value.len() == 64)
-                .ok_or_else(|| anyhow!("アセットのSHA-256 digestがありません: {name}"))?;
+                .ok_or_else(|| {
+                    anyhow!(
+                        "アセットのSHA-256 digestがありません: {name}。\
+                         GitHubがdigestを公開していない古いリリースは検証できないため配置しません。\
+                         digestのある新しいタグを指定してください"
+                    )
+                })?;
             return Ok(ReleaseAsset {
                 name: name.to_string(),
                 url: url.to_string(),
@@ -624,7 +650,9 @@ pub fn fetch_engine() -> Result<()> {
     if dir.exists() {
         fs::rename(&dir, &old).context("旧llama-serverを退避できません")?;
     }
-    if let Err(error) = fs::rename(&staged, &dir) {
+    // stagingは一時ディレクトリなので、TEMPが別ドライブ・tmpfsのときrenameがEXDEVで必ず失敗する。
+    // その場合はコピーで配置する（flatten と同じ方針）。
+    if let Err(error) = place_dir(&staged, &dir) {
         if old.exists() {
             fs::rename(&old, &dir).with_context(|| {
                 format!("llama-server配置失敗後に旧版を復元できません: {error}")
@@ -786,21 +814,32 @@ fn whisper_model_file() -> String {
     }
 }
 
+fn whisper_small_asset(url: String) -> ReleaseAsset {
+    ReleaseAsset {
+        name: "ggml-small.bin".to_string(),
+        url,
+        size: WHISPER_SMALL_SIZE,
+        sha256: WHISPER_SMALL_SHA256.to_string(),
+    }
+}
+
 fn fetch_whisper_model(dir: &Path) -> Result<()> {
     let dest = dir.join("models").join(whisper_model_file());
     let default_small = whisper_model_choice() == "small";
-    if dest.exists() && !flag("WHISPER_FORCE") {
-        if default_small {
-            verify_release_asset(
-                &dest,
-                &ReleaseAsset {
-                    name: "ggml-small.bin".to_string(),
-                    url: String::new(),
-                    size: WHISPER_SMALL_SIZE,
-                    sha256: WHISPER_SMALL_SHA256.to_string(),
-                },
-            )?;
+    let mut reuse = dest.exists() && !flag("WHISPER_FORCE");
+    if reuse && default_small {
+        // 一致しない既存ファイルを残したまま失敗すると、以降の setup が毎回同じ検証で止まる。
+        // 上流の固定版更新や前回の破損取得から自力で復帰できるよう、消して取り直す。
+        if let Err(error) = verify_release_asset(&dest, &whisper_small_asset(String::new())) {
+            warn(
+                "setup:whisper",
+                format!("既存のggml-small.binが固定版と一致しないため取得し直します: {error:#}"),
+            );
+            cleanup_file(&dest, "固定版と一致しないWhisperモデル")?;
+            reuse = false;
         }
+    }
+    if reuse {
         let size = fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         log(
             "setup:whisper",
@@ -823,15 +862,12 @@ fn fetch_whisper_model(dir: &Path) -> Result<()> {
     };
     let bytes = download_to(&url, &dest)?;
     if default_small {
-        verify_release_asset(
-            &dest,
-            &ReleaseAsset {
-                name: "ggml-small.bin".to_string(),
-                url,
-                size: WHISPER_SMALL_SIZE,
-                sha256: WHISPER_SMALL_SHA256.to_string(),
-            },
-        )?;
+        // 検証に落ちたファイルを置いたままにすると、次回は「既存あり」経路で同じ失敗を繰り返す。
+        if let Err(error) = verify_release_asset(&dest, &whisper_small_asset(url)) {
+            cleanup_file(&dest, "検証に失敗したWhisperモデル")
+                .with_context(|| format!("元の検証エラー: {error:#}"))?;
+            return Err(error);
+        }
     }
     log(
         "setup:whisper",

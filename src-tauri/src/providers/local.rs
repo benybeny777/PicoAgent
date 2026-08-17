@@ -165,9 +165,13 @@ const RETIRED_MODEL_FILES: &[&str] = &[
 
 /// revision入り保存名へ移行済み、またはプリセットから廃止した管理モデル名。
 /// 現行版の検証後にだけ削除し、利用者指定のcustomファイルは対象にしない。
-pub fn obsolete_model_file_names() -> Vec<&'static str> {
+///
+/// `active` には「いま選ばれているプリセット」だけを渡す。全プリセットの旧保存名を返すと、
+/// 利用者が別プリセットとして持っている実体（1件で数GB）まで起動時に消えて再取得になる。
+/// 廃止済みプリセット（`RETIRED_MODEL_FILES`）はもう選べないため、選択と無関係に掃除してよい。
+pub fn obsolete_model_file_names(active: Option<&LocalModelPreset>) -> Vec<&'static str> {
     let mut names = RETIRED_MODEL_FILES.to_vec();
-    for preset in LOCAL_MODEL_PRESETS {
+    if let Some(preset) = active {
         if let Some(name) = preset.url.rsplit('/').next() {
             if name != preset.file_name && !names.contains(&name) {
                 names.push(name);
@@ -475,7 +479,7 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 mod tests {
     use super::{
         canonical_preset_id, normalize_for_local, obsolete_model_file_names, preset,
-        LOCAL_MODEL_PRESETS,
+        LOCAL_MODEL_PRESETS, RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
 
@@ -526,14 +530,41 @@ mod tests {
 
     #[test]
     fn 旧モデル名は現行revision名を含めず重複しない() {
-        let names = obsolete_model_file_names();
-        let unique: std::collections::HashSet<_> = names.iter().collect();
-        assert_eq!(unique.len(), names.len());
-        for preset in LOCAL_MODEL_PRESETS {
-            assert!(!names.contains(&preset.file_name));
+        for active in LOCAL_MODEL_PRESETS {
+            let names = obsolete_model_file_names(Some(active));
+            let unique: std::collections::HashSet<_> = names.iter().collect();
+            assert_eq!(unique.len(), names.len());
+            for preset in LOCAL_MODEL_PRESETS {
+                assert!(!names.contains(&preset.file_name));
+            }
+            assert!(names.contains(&"Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
         }
-        assert!(names.contains(&"Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
-        assert!(names.contains(&"gemma-4-E2B-it-Q4_K_M.gguf"));
+        assert!(obsolete_model_file_names(None).contains(&"gemma-3-1b-it-Q4_K_M.gguf"));
+    }
+
+    #[test]
+    fn 旧モデル名の掃除は選択中プリセット以外の実体を巻き込まない() {
+        // 全プリセットの旧保存名を消していたため、切り替えて使う別モデルの実体まで起動時に失われていた。
+        for active in LOCAL_MODEL_PRESETS {
+            let names = obsolete_model_file_names(Some(active));
+            for other in LOCAL_MODEL_PRESETS {
+                if other.id == active.id {
+                    continue;
+                }
+                let Some(legacy) = other.url.rsplit('/').next() else {
+                    continue;
+                };
+                if RETIRED_MODEL_FILES.contains(&legacy) || legacy == other.file_name {
+                    continue;
+                }
+                assert!(
+                    !names.contains(&legacy),
+                    "{} の掃除対象に別プリセット {} の旧保存名 {legacy} が入っている",
+                    active.id,
+                    other.id
+                );
+            }
+        }
     }
 
     // OpenAI 互換 SSE を返すスタブ llama-server に対して、既定のローカルプロバイダが
