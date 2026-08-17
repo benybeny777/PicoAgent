@@ -459,10 +459,14 @@ impl Tool for WhisperTranscribeTool {
             Err(error) => return format!("エラー: {error}"),
         };
         let content = if generated.exists() {
-            match std::fs::read_to_string(&generated) {
+            let content = match std::fs::read_to_string(&generated) {
                 Ok(content) => content,
                 Err(error) => return format!("エラー: 文字起こし結果を読めません: {error}"),
+            };
+            if let Err(error) = remove_internal_file(generated.as_path()) {
+                return format!("エラー: {error}");
             }
+            content
         } else {
             trim_output(&output.stdout)
         };
@@ -499,8 +503,9 @@ impl Tool for WhisperTranscribeTool {
 
 #[cfg(test)]
 mod tests {
-    use super::convert_to_wav;
+    use super::{convert_to_wav, WhisperTranscribeTool};
     use crate::permissions::SafePath;
+    use crate::tools::Tool;
 
     // ffmpeg がある環境だけで走る E2E（無ければ即成功で抜ける）。
     // sine 波の mp3 を生成し、16kHz WAV へ前処理できることを確認する。
@@ -540,6 +545,42 @@ mod tests {
             .unwrap()
             .is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `PICOAGENT_QA_LONG_AUDIO` に10分以上のWAVを指定して明示実行する実機検査。
+    /// 通常の単体テストでは大容量モデルを起動しない。
+    #[test]
+    #[ignore = "10分以上の音声と同梱Whisperモデルを使う実機検査"]
+    fn 長時間音声を共通プロセス回収経由で文字起こしできる() {
+        let audio = std::env::var("PICOAGENT_QA_LONG_AUDIO")
+            .expect("PICOAGENT_QA_LONG_AUDIO に10分以上のWAVを指定してください");
+        let audio = std::path::PathBuf::from(audio);
+        assert!(audio.exists(), "音声がありません: {}", audio.display());
+        let root = audio.parent().expect("音声の親フォルダが必要です");
+        let target = root.join("long-audio.transcript.txt");
+        let generated = audio.with_extension("txt");
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &root.to_string_lossy());
+        cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "7200");
+        let started = std::time::Instant::now();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(
+            WhisperTranscribeTool.run(
+                &cfg,
+                serde_json::json!({
+                    "audio_path": audio,
+                    "output_path": target,
+                }),
+            ),
+        );
+        assert!(result.contains("音声文字起こしが完了しました"), "{result}");
+        let transcript = std::fs::read_to_string(&target).expect("文字起こし結果を読める");
+        assert!(!transcript.trim().is_empty(), "文字起こし結果が空です");
+        assert!(!generated.exists(), "Whisperの中間テキストが残っています");
+        eprintln!(
+            "長時間文字起こし: elapsed={:?} transcript_bytes={}",
+            started.elapsed(),
+            transcript.len()
+        );
     }
 }
 

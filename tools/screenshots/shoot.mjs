@@ -387,6 +387,14 @@ async function shootCharacterMatrix() {
           const imageStyle = getComputedStyle(image);
           const view = document.querySelector(".character-view");
           const viewStyle = view ? getComputedStyle(view) : null;
+          const rectOf = node => {
+            if (!node) return null;
+            const value = node.getBoundingClientRect();
+            return { x: value.x, y: value.y, width: value.width, height: value.height };
+          };
+          const replyAction = document.querySelector(".reply-actions");
+          const userBody = document.querySelector(".history-item.user .history-body");
+          const assistantBody = document.querySelector(".history-item.assistant .history-body");
           return {
             naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
             characterDataset: { ...character.dataset },
@@ -414,6 +422,15 @@ async function shootCharacterMatrix() {
               "picoagent-idle-preload-ready": Math.round(window.__picoagentPerformance?.idlePreloadReady || 0),
               "picoagent-all-preload-ready": Math.round(window.__picoagentPerformance?.allPreloadReady || 0),
             },
+            chatUi: {
+              avatar: rectOf(character),
+              online: rectOf(document.getElementById("online")),
+              relationship: rectOf(document.getElementById("relationshipButton")),
+              relationshipText: document.getElementById("relationshipButton")?.textContent || "",
+              replyActionColumns: replyAction ? getComputedStyle(replyAction).gridTemplateColumns.split(" ").filter(Boolean).length : 0,
+              userBubble: userBody ? getComputedStyle(userBody).backgroundColor : "",
+              assistantBubble: assistantBody ? getComputedStyle(assistantBody).backgroundColor : "",
+            },
           };
         });
         if (visual.imageRect.width <= 0 || visual.imageRect.height <= 0
@@ -429,6 +446,18 @@ async function shootCharacterMatrix() {
           || visual.springMotion.transformedRegions !== expectedSpringRegions
           || visual.springMotion.maskedRegions !== expectedSpringRegions)) {
           throw new Error(`${characterId}/${layout}: 局所バネ物理が適用されていません ${JSON.stringify(visual.springMotion)}`);
+        }
+        if (layout === "chat") {
+          const chat = visual.chatUi;
+          const avatarOk = chat?.avatar?.width === 62 && chat.avatar.height === 62;
+          const onlineOk = chat?.online?.width > 0 && chat.online.height > 0
+            && chat.online.x >= chat.avatar.x && chat.online.y >= chat.avatar.y;
+          const relationshipOk = chat?.relationship?.width === 24 && chat.relationship.height === 24
+            && chat.relationshipText.trim() === "♡" && chat.relationship.x > chat.avatar.x;
+          const bubblesOk = chat?.userBubble && chat.assistantBubble && chat.userBubble !== chat.assistantBubble;
+          if (!avatarOk || !onlineOk || !relationshipOk || chat?.replyActionColumns !== 3 || !bubblesOk) {
+            throw new Error(`${characterId}/${layout}: LINE風チャットの配置・配色が不正です ${JSON.stringify(chat)}`);
+          }
         }
         const file = `${characterId}-${layout}.png`;
         const png = await page.screenshot({ path: join(output, file), omitBackground: true });
