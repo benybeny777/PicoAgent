@@ -61,12 +61,6 @@
       "name": "まお"
     },
     {
-      "description": "Live2Dで動く、涼しげで芯のある作業相棒。",
-      "id": "ren",
-      "manifest": "ren/character.json",
-      "name": "レン"
-    },
-    {
       "description": "Live2Dで動く、魔法使いのような佇まいの作業相棒。",
       "id": "rice",
       "manifest": "rice/character.json",

@@ -11,6 +11,7 @@
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
 - 通常の動画は1本あたり6秒・30fps・180コマ。文字送りとキャラクターのモーションがそのまま入ります
 - キャラクター一覧（`character-*.webp`）は標準ペット表示、`character-*-stream.webp`は配信表示で、どちらも12秒・30fps・360コマ・960px幅です。通常版は900px画面を2倍ピクセル密度で描画し、配信版はフルHD 1920×1080のネイティブ画面から縮小します。480px素材の引き伸ばしは行いません
+- LP配信用は`SHOOT_SITE_GALLERY=1`で、同じ撮影経路の生PNGから`distribution/site/assets/`へ6秒・480px・16fpsで直接書き出します。既存の960px WebPを入力にした縮小・再エンコードは行いません。全件実行時はキャラ一覧15MiB、トップ4本5MiBの上限も検査します
 - **キャラクター一覧は口パクを先に十分見せてから、状態を巡回します。** 前半5秒は実音声の再生開始後だけ口パクし、後半は考え中 → 成功 → 悲しみ → 左右視線 → 待機を間隔を空けて見せます。まばたき、Live2D固有モーション／物理、対応キャラの局所二次動作はそのまま動きます
   - 考え中を明示的に入れているのは、`record()` が録画前に時計を進めるため、送信直後の考え中が録画開始時点で終わっているからです
   - 12秒へ延ばし、状態ごとの見せ時間を確保してから次へ切り替えます
@@ -41,6 +42,7 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
+| `SHOOT_SITE_GALLERY` | `1`ならキャラクター一覧をREADME用960pxではなく、同じ撮影経路の生PNGからLP用6秒・480px・16fpsとして`distribution/site/assets/`へ直接書き出す。引数なしの全件実行では容量上限も検査する |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
 | `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
@@ -57,6 +59,15 @@ node tools/screenshots/shoot.mjs
 node tools/screenshots/shoot.mjs composer-light.webp
 ```
 
+LP用キャラクター動画を全件再生成する場合は、先に全キャラを`ui/assets/characters/`へ同期してから実行します。
+
+```powershell
+cargo xtask sync-characters
+$env:SHOOT_SITE_GALLERY = "1"
+node tools/screenshots/shoot.mjs
+Remove-Item Env:SHOOT_SITE_GALLERY
+```
+
 ## 撮れる絵
 
 | ファイル | 内容 | 何が動くか |
@@ -67,6 +78,7 @@ node tools/screenshots/shoot.mjs composer-light.webp
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
 | `character-<キャラID>.webp` | README の通常表示一覧（標準ペット形式900×600、胸上構図、2倍密度描画、12秒・30fps・960px幅） | 音声同期の口パク → 考え中 → 成功 → 悲しみ → 左右視線 → 待機。対応キャラは録画中の口開閉も自動検査する |
 | `character-<キャラID>-stream.webp` | README の配信表示一覧（フルHD 1920×1080、ネイティブ描画、12秒・30fps・960px幅） | 通常表示と同じ巡回を、背景 → PICO STUDIO → キャラ → 字幕・操作UIの実レイヤー順で撮る |
+| `distribution/site/assets/character-*.webp` | LP用一覧（上記と同じ撮影経路から6秒・480px・16fpsで直接生成） | 音声同期の口パクを十分見せてから、考え中 → 待機へ戻る。表示スロット向けに尺・解像度・フレームレートを分ける |
 | `layout-shot-*.webp` | 7種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）

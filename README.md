@@ -43,9 +43,9 @@
       <td align="center"><img src="docs/images/character-mao.webp" alt="まおの通常表示" width="120" /><br /><img src="docs/images/character-mao-stream.webp" alt="まおの配信表示" width="120" /><br /><sub><b>まお</b>（通常／配信）</sub></td>
     </tr>
     <tr>
-      <td align="center"><img src="docs/images/character-ren.webp" alt="レンの通常表示" width="120" /><br /><img src="docs/images/character-ren-stream.webp" alt="レンの配信表示" width="120" /><br /><sub><b>レン</b>（通常／配信）</sub></td>
       <td align="center"><img src="docs/images/character-rice.webp" alt="ライスの通常表示" width="120" /><br /><img src="docs/images/character-rice-stream.webp" alt="ライスの配信表示" width="120" /><br /><sub><b>ライス</b>（通常／配信）</sub></td>
       <td align="center"><img src="docs/images/character-wanko.webp" alt="わんこの通常表示" width="120" /><br /><img src="docs/images/character-wanko-stream.webp" alt="わんこの配信表示" width="120" /><br /><sub><b>わんこ</b>（通常／配信）</sub></td>
+      <td></td>
       <td></td>
     </tr>
   </table>
@@ -77,7 +77,7 @@
     各キャラを標準ペット表示と配信表示の両方で、960px・30fps・12秒（360コマ）撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から縮小しているため、旧480px動画の引き伸ばしではありません。同じ「おはよう。今日もよろしくね」への返事から、<b>音声同期の口パク → 考え中 → 成功 → 悲しみ → 左右視線 → 待機</b>を間隔を空けて再生し、まばたきや物理演算もそのまま動かしています。<br />
     人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
     同梱PNG 8体はすべて同じフルモーション仕様で、自然なまばたき、音声再生中の口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。ミュート中と音量0では口パクしません。<br />
-    このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・レン・ライス・わんこ）があります。<br />
+    このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・ライス・わんこ）があります。<br />
     Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
   </sub>
 </div>
@@ -91,7 +91,7 @@
 | むぎ / りん / まい / りん（自作THA3） | PNG | ○ | ◎ | ◎ | ◎ | ◎ | — |
 | こはる / セナ / ノア | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
 | 実写・物理演算テスト | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎（8領域） |
-| ひより / はる / イプシロン / まお / レン / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
+| ひより / はる / イプシロン / まお / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
 PNGの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
@@ -158,7 +158,7 @@ cargo xtask dev
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ） |
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Cubism Editor 5.3互換のLive2Dランタイム（Cubism 4／5モデル対応。サンプルは含まない） |
-| `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない）。未実行でも `dev` / `build` は通る（サンプル7体が一覧から外れるだけ） |
+| `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない）。未実行でも `dev` / `build` は通る（対応済みサンプル6体が一覧から外れるだけ） |
 | `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（開発環境専用。販売版は作者配布物を利用者が用意） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |

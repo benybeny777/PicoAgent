@@ -1024,14 +1024,6 @@ pub fn fetch_live2d_samples() -> Result<()> {
             preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-mao.jpg",
         },
         Sample {
-            id: "ren",
-            label: "レン",
-            zip: None,
-            base: "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Ren/",
-            model_json: "Ren.model3.json",
-            preview_url: "https://www.live2d.com/wp-content/uploads/2026/06/sample-img-ren.jpg",
-        },
-        Sample {
             id: "rice",
             label: "ライス",
             zip: None,

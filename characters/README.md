@@ -134,7 +134,8 @@ characters/<id>/
   `preview.jpg` はローディング画面と設定画面アイコンに使い、取得できなかった場合は
   `_preview-placeholder.png` で代替する。
   - **Free Material License**（公式リポジトリ CubismWebSamples の `LICENSE.md` に明記）:
-    `hiyori` / `haru` / `mao` / `ren` / `rice` / `wanko`
+    `hiyori` / `haru` / `mao` / `rice` / `wanko`
+  - `ren` はCubism Web SDK R5で追加されたオフスクリーン描画を必要とし、現行のPIXI描画層ではモデル本体を描けないため、対応完了まで取得・選択・公開対象外にする。
   - **上記リストに無い別配布**: `epsilon`（`cubism.live2d.com` の epsilon_free）
   - いずれもモデルごとに Live2D のサンプルモデル利用条件への同意が必要。売上高が一定規模を
     超える事業者は Cubism SDK リリースライセンスも必要になる。判断は利用者側で行うこと。
