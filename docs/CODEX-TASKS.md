@@ -19,6 +19,71 @@
 - **やること**: 高精細の正本は `docs/images/` に残し、LPが配る `distribution/site/assets/` だけ480〜640px幅で別途書き出す。既存の960pxファイルを縮小再エンコードするのではなく、同じ2倍密度描画から目的の幅で書き出す（引き伸ばしにはならない）。`characters.html` は静止画＋クリックで再生に切り替える案も併せて検討する。
 - **完了条件**: `characters.html` の画像合計が15MB以下、`index.html` が5MB以下。カードの見た目が現状と同等であることを実表示で確認する。
 
+## P0-4. 停止ボタンを生成中・ツール実行中にも効かせる
+
+- **なぜ**: `pet_cancel`（`commands.rs:3576`）が立てる `AppState::cancel_requested` を `agent::run` が見るのは
+  ステップ境界（`agent.rs:1548`）とツール実行直前（`agent.rs:1595`）の2箇所だけ。`chat_with_retry`（`agent.rs:1295`）は
+  `cancel` を引数に取らずストリーム受信を最後まで回し、並列ツール実行の `join_all`（`agent.rs:1630`）にも中断点がない。
+  そのため長い生成や分単位のツール（`whisper_transcribe` / `meeting_recorder` / `research_report` / `run_command`）の最中は、
+  押しても `renderer.js:292` の「停止を要求しています…」のまま待たされる。**公開済み `v1.0.2` に入っている利用者向けの不具合**。
+- **やること**:
+  1. 中断の伝達を `&AtomicBool` から `tokio::sync::watch::Receiver<bool>`（または `CancellationToken` 相当）へ替える。
+     `AtomicBool` のままだと待ち受けができず、ポーリング間隔ぶんの遅れが残る。`commands.rs:124` の `cancel_requested` と
+     `pet_cancel` が送信側、`agent::run` の引数が受信側になる。スケジューラ等の `None` 経路は「発火しない受信側」で置き換える。
+  2. ストリーム受信ループ（プロバイダ側の `bytes_stream()` を読む箇所）を `tokio::select!` で包み、中断で読み取りを止める。
+     **`text::Utf8Stream` の途中で止めるので、確定済みテキストだけを `last` に残すこと**（末尾の未確定バイトを混ぜない）。
+  3. `join_all` の各ツール future を `tokio::select!` で包む。中断で抜けた分は、既に `agent.rs:1596`〜にある
+     「未実行の tool メッセージを対で積む」処理と同じ形で `tool_call_id` を対応させて履歴へ積む
+     （対応が崩れるとプロバイダ側が次の chat を拒否する）。
+  4. 子プロセスを持つツールは `process::command()` が `kill_on_drop` を付けているので future の drop で停止するが、
+     Windows は孫が残る。2026-08-18 に入れた `taskkill /T /F` の経路を通ること（`tools/process.rs`）を確認する。
+- **完了条件**: 遅いダミーツール（10秒以上）と長い生成それぞれで、停止要求から**2秒以内**に `CANCEL_MESSAGE` が返る回帰テストが通ること。
+  中断後に同じ会話を継続しても、プロバイダが `tool_calls` の対応崩れでエラーを返さないこと。Windows実機で中断後に子プロセスが残らないこと。
+- **触ってはいけない**: 中断時の履歴整合（tool_calls とツール結果の対応）を崩さない。中断を「空応答で成功」にして
+  会話へ積まない（サイレントスキップ禁止のルールに触れる）。
+
+## P1-5. スキル先回りルーティングをスキル側へ寄せる
+
+- **なぜ**: 2026-08-08 のレビュー #5「キーワード→スキル判定と直接実行をスキル登録情報へ集約する」を対応済みとしたが、
+  **中央化されたのはキーワード表だけで、引数の組み立てと分岐順は `agent.rs` に残っている**。実測（`b743b08`）:
+  - `agent.rs:1431`〜`1500` の `if / else if` 連鎖が13分岐。スキル名の文字列リテラルが24個
+    （`weather` `currency_rates` `market_indices` `news_scrape` `daily_briefing` `clipboard_text` `research_report`
+    `genspark_suite` `spark_workspace` `meeting_recorder` `whisper_transcribe` `run_command` `ask_user` `view_image` ほか）。
+  - `TOOL_ROUTES`（`tools/mod.rs:142`）は中央表のまま。`intent_keywords()` を上書きしているスキルは**0件**（70スキル中）。
+  つまり先回り実行させたい新スキルは「`skills/<名前>/mod.rs` を足せば自動登録」では済まず、必ず中央2ファイルの編集が要る。
+  コネクタ設計の前提が崩れている箇所なので、新スキルを足す前に直したい。
+- **やること**: `Tool` トレイト（`src-tauri/src/tools/mod.rs:19`〜）へ既定実装付きで意図判定を足す。
+  戻り値は「引数」と「直接返す／材料として user メッセージへ差し込む」の別を持たせる（`weather` は直接返す、
+  `news_scrape` は材料として差し込む、と現状で挙動が分かれているため、片方だけでは置き換えられない）。
+  `agent.rs` 側は登録済みスキルを優先度順に走査して最初の一致を使うだけにし、`TOOL_ROUTES` は空にして
+  各スキルの `intent_keywords()` へ移す。`run_command` / `ask_user` / `view_image` の制御マーカー処理は
+  ループ本体の責務なので `agent.rs` に残す。
+- **完了条件**: `agent.rs` にスキル名リテラルが無いこと・`TOOL_ROUTES` が空であることを検出する設計ガードを
+  `guard_scan::all_sources()` 経由で追加し、既存の表駆動検査（天候・リマインダー・文字起こし・調査の代表発話）が
+  移行後も同じ結果を返すこと。`SPEC.md` のスキル分類表・インターフェース定義を同じPRで更新する。
+
+## P1-6. 長文プロンプトを `agent.rs` から出す
+
+- **なぜ**: ニュース要約の内部資料プロンプト（`agent.rs:1445`）のように、1行数百文字のモデル向け指示文が
+  ループ本体へ直書きされている。文面調整のたびに `agent.rs` を触ることになり、差分もレビューしづらい。
+- **やること**: `skills/<スキル名>/prompts/*.md` へ出して `include_str!` で読む（スキル同梱物の既存ルールに沿う）。
+  P1-5 と同じ範囲を触るので**同一PRでまとめてよい**。
+- **完了条件**: `agent.rs` に3行を超えるモデル向け指示文リテラルが残らないこと。移動前後で文面が1文字も変わらないこと
+  （文面調整は別PRにする。同時にやると、挙動変化がプロンプト移動のせいか調整のせいか切り分けられない）。
+
+## P1-7. 検証コマンドを `cargo xtask verify` へ一本化する
+
+- **なぜ**: `HANDOFF.md:155`〜`166` の10コマンドは人手の手順書のままで、実際に取りこぼしが起きている
+  （2026-08-13 の記録では `cargo check` が `build.rs` 子プロセスで停止し、lib test / clippy まで到達していない）。
+  GitHub Actions を使わない方針は維持したまま、ローカル1コマンドへ寄せれば、途中停止しても何が未実行か残せる。
+- **やること**: `xtask` へ `verify` サブコマンドを足し、`cargo fmt --check` / `cargo clippy --all-targets -- -D warnings`（本体・xtask）/
+  両ワークスペースのテスト / `git ls-files '*.js' '*.mjs'` への `node --check` / `git diff --check` を順に実行する。
+  **失敗しても最後まで走らせ、末尾に失敗一覧を出す**（最初の失敗で止めると、残りが未実行なのか成功なのか分からない）。
+  `node` が無い環境ではJS構文検査だけスキップし、スキップした事実を一覧へ出す（黙って飛ばさない）。
+  `cargo audit` は依存更新時と販売前だけなので `verify` には含めない（既存ルールどおり）。
+- **完了条件**: `cargo xtask verify` が現行 `main` で全項目成功すること。`HANDOFF.md` の10コマンド列挙をこの1コマンドへ置き換え、
+  `README.md` の開発手順にも記載すること。
+
 ## P1-1. 設定画面の実表示で日本語ラベルの収まりを見る
 
 - **なぜ**: 外部サービス連携22スキルと設定ガイドの英語ラベル40件を日本語へ統一したが、**GUIでの折り返しは未確認**。
@@ -60,3 +125,4 @@
 | 2 | macOS版のビルド・署名・公証と実機QA。**着手時は `secret.rs` の平文フォールバックを先に塞ぐ**（`keyring` で Keychain へ寄せる。`enc:dpapi:v1:` の Windows 経路と `secret::guard` の password 判定はそのまま残す） | macOSホストが要る。WindowsホストとGitHub Actionsは使わない方針。詳細は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §2-1 |
 | 3 | Windows実機の残り目視（8方向リサイズ、端寄せ位置の復元、起動画面からの復帰、多重起動時の前面化、Aivis更新導線の新旧版表示、キャラ別挨拶の文面、配信立ち絵の0.5px差） | Windows実機を触る回にまとめて |
 | 4 | Free／Pro のスキル制限とライセンス入力欄の設計見直し（`beta-full` ビルドでも入力欄が出る、`license::CONFIG_KEY` の cfg 分岐、制限の粒度） | **ベータ期間中は全機能試用で運用する方針のため着手しない。** 正式版の準備時に、制限そのものの設計から見直す |
+| 5 | フロント巨大ファイル（`ui/renderer.js` 5,134行・`ui/settings.js` 3,669行）の段階分割と、切り出した純関数の `node --test` 化。`bundle_scope.rs:237`〜`295` のフロント規約ガードは関数名・`invoke(` の出現回数といった文字列一致で、無害な整形で壊れる一方で規約違反そのものは検出できないため、単体テストへ置き換えていく。`commands.rs`（4,452行・64 command）も同じ方針で、一括移動はしない | 機能変更でその周辺を触る回に限る。分割だけを目的にした一括移動はしない（2026-08-08 #9・#11 と同じ判断）。P0-4 を実装するときは `pet_cancel` 周辺だけを境界として切り出せる |
