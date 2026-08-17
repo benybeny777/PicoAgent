@@ -19,14 +19,6 @@
 - **やること**: 高精細の正本は `docs/images/` に残し、LPが配る `distribution/site/assets/` だけ480〜640px幅で別途書き出す。既存の960pxファイルを縮小再エンコードするのではなく、同じ2倍密度描画から目的の幅で書き出す（引き伸ばしにはならない）。`characters.html` は静止画＋クリックで再生に切り替える案も併せて検討する。
 - **完了条件**: `characters.html` の画像合計が15MB以下、`index.html` が5MB以下。カードの見た目が現状と同等であることを実表示で確認する。
 
-## P0-4. Windows実機でプロセス層のテストを走らせる
-
-- **なぜ**: タイムアウトの回帰テストは長らく `#[cfg(unix)]` だけで、Windows中心の開発では**一度も実行されていなかった**。
-  今回 `cmd /c` 版を追加したが、Linuxコンテナでは `#[cfg(windows)]` 側が走らないため未実行のまま。
-- **やること**: Windowsで `cargo test --lib --manifest-path src-tauri/Cargo.toml tools::process` を実行する。
-- **完了条件**: `タイムアウトで子プロセスを残さない` が成功し、所要が1秒指定に対して5秒未満で戻る（30秒まで待たない）。
-  失敗する場合は `process::output()` の打ち切り経路（`join_capture` / `abort`）を疑い、テストの期待値を緩めない。
-
 ## P1-1. 設定画面の実表示で日本語ラベルの収まりを見る
 
 - **なぜ**: 外部サービス連携22スキルと設定ガイドの英語ラベル40件を日本語へ統一したが、**GUIでの折り返しは未確認**。
@@ -57,36 +49,6 @@
   出力の保持上限がスキル独自の 32KiB から共通層の 1MiB になった（表示側の `trim_output` は32KiBのまま）。
 - **やること**: 長時間音声（10分以上）で文字起こしし、メモリと応答の体感を確認する。
 - **完了条件**: 問題がなければそのまま。過大なら共通層側へ上限の設定キーを足す（スキル側で再実装しない）。
-
-## P1-5. 導入済み Moveable の未処理3点（設計ガード・LICENSE・第三者表記）
-
-Moveable 本体（`ui/vendor/moveable/moveable.min.js` の直コミットと「配置」モード）は導入済み。以下はその残り。
-背景と選択肢は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §1。
-
-- **なぜ**: `.gitignore` が無視しているのは `ui/vendor/live2d/` だけなのに、
-  `src-tauri/src/bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、
-  理由を「Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている。**`ui/vendor/moveable/` は
-  Git 管理下にあり製品へ入るのに、同梱物の範囲を固定するはずの検査が当たっていない。** さらに
-  `docs/THIRD-PARTY-NOTICES.md` に Moveable の項目が無く、MIT の表示義務を満たしていない。
-- **やること**:
-  1. `UI_GENERATED_DIRS` の除外を `vendor/live2d` へ狭め、コメントの説明を実態へ直す。
-  2. 狭めると `ui/vendor/moveable/LICENSE` が `ui配下に開発用ファイルを置かない` で落ちる（拡張子なしは
-     空文字になり `ALLOWED_UI_EXTENSIONS` に一致しない）。ライセンス本文を `THIRD-PARTY-NOTICES.md` へ移して
-     `ui/` から消す／`LICENSE.txt` へ改名して `txt` を allowlist へ足す／例外として明記する、から選ぶ。
-     **1案目を推奨**（`ui/` は実行時に使うものだけ、という現行の考えかたに合う）。
-  3. `docs/THIRD-PARTY-NOTICES.md` へ Moveable（MIT）を追記し、採用した版・取得元 URL・SHA-256 を記録する。
-- **完了条件**: `cargo test --lib --manifest-path src-tauri/Cargo.toml bundle_scope` が通り、除外範囲と
-  コメントの説明が一致していること。`cargo xtask build-ui` の `ui-dist/` に `moveable.min.js` が入ること。
-  第三者表記に Moveable があること。
-- **禁止**: CDN からの読み込み（CSP が `script-src 'self'`）。`package.json` の追加。ライセンス本文を消すこと。
-
-## P1-6. `cargo-deny` でライセンス検査を足す
-
-- **なぜ**: 現在の監査は `cargo audit`（既知脆弱性）だけで、**ライセンスの混入検査が無い**。販売品では
-  GPL 系の紛れ込みのほうが致命的になりうる。アプリの依存は1つも増えない（開発ツール）。
-- **やること**: `deny.toml` を置いて `licenses`（MIT / Apache-2.0 / BSD 系を allow）と `advisories` を有効にし、
-  `.agents/skills/prepare-picoagent-release/SKILL.md` の販売前監査へ実行手順を1行足す。GitHub Actions は使わない。
-- **完了条件**: `cargo deny check` が通ること。落ちる依存があれば、置き換えか例外登録の理由を `docs/REVIEW-LOG.md` へ残す。
 
 ---
 

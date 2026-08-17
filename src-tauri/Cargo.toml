@@ -1,10 +1,11 @@
 [package]
 name = "picoagent"
-version = "1.0.2"
+version = "1.0.3"
 description = "PicoAgent - コネクタ駆動のデスクトップペット"
 authors = ["PicoAgent"]
 edition = "2021"
 rust-version = "1.88"
+publish = false
 
 [features]
 # 開発中ベータだけでPro対象スキルを試用可能にする。正式版はこのfeatureを付けない。
@@ -18,7 +19,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-picoagent-core = { path = "../crates/picoagent-core" }
+picoagent-core = { version = "0.1.0", path = "../crates/picoagent-core" }
 # protocol-asset: 追加キャラクター（app_data_dir 配下）を webview から読ませる asset プロトコル。
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "protocol-asset"] }
 # 設定画面から「キャラクターパックを選ぶ」ためのネイティブダイアログ（Rust API のみ利用）。

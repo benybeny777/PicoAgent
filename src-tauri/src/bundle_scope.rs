@@ -45,14 +45,14 @@ const ALLOWED_UI_EXTENSIONS: [&str; 12] = [
     "html", "js", "css", "json", "png", "jpg", "jpeg", "svg", "webp", "gif", "ico", "woff2",
 ];
 
-/// `ui/` の中で走査しないディレクトリ（いずれも Git 管理外の生成物・取得物）。
+/// `ui/` の中で走査しない Git 管理外の生成物・取得物。
 const UI_GENERATED_DIRS: [(&str, &str); 2] = [
     (
         "assets/characters",
         "cargo xtask sync-characters が characters/ から生成する配信コピー",
     ),
     (
-        "vendor",
+        "vendor/live2d",
         "cargo xtask setup live2d が取得する Live2D ランタイム（再配布条件があるため Git 管理外）",
     ),
 ];

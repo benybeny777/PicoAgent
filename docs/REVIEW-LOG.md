@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-08-18 — Windowsプロセス回収・Moveable表示・Cargoライセンス監査
+
+対象: `CODEX-TASKS.md` P0-4、P1-5、P1-6。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P0 | 1秒指定のWindowsプロセスタイムアウト試験が成功表示後も30秒残る | 対応済み | `Child::kill()`では`cmd /c`配下の孫が残り、Tokioランタイム終了時にパイプ終端を30秒待っていた。Windowsは`taskkill /T /F`でツリーごと停止し、停止失敗もエラーへ含める。単独試験は1.38秒で成功 |
+| 2 | P1 | Moveableが`ui/vendor/`の設計ガード対象外で、販売台帳にMIT本文がない | 対応済み | 走査除外を`vendor/live2d`だけへ狭め、実行時不要の`ui/vendor/moveable/LICENSE`を削除。Moveable 0.53.0のMIT全文、公式npm配布URL、SHA-256を`docs/THIRD-PARTY-NOTICES.md`へ移管した |
+| 3 | P1 | Cargo依存にライセンス混入検査がない | 対応済み | `cargo-deny` 0.20.2と`deny.toml`を導入。本体・xtaskともadvisories / bans / licenses / sourcesが成功。MPL-2.0はHTML/CSS解析等の既存5クレート、BSL-1.0はWindowsクリップボードの既存2クレートだけへ限定許可した |
+| 4 | P2 | 製品Cargoが公開可能扱いで自身を未ライセンス依存として検出する | 対応済み | 販売ソフトをcrates.ioへ誤公開しないよう`publish = false`を明示。パス依存`picoagent-core`も期待版`0.1.0`を固定した |
+
+検証: `bundle_scope` 7件成功、`cargo xtask build-ui`成功、`ui-dist/vendor/moveable/moveable.min.js`同梱・LICENSE非同梱、Windowsの単独タイムアウト試験1.38秒、両ワークスペースの`cargo deny check`成功。`cargo audit`は既知脆弱性0件で、本体に従来の情報警告17件（未対応LinuxのGTK3経路、推移依存の保守・健全性警告）だけを確認した。重複クレートはTauri等の上流依存世代差なので警告として可視化し、今回のライセンス監査導入では置き換えない。
+
+---
+
 ## 2026-08-17 — v1.0.2 Beta再配布と通常2D説明訂正
 
 対象: 残件A・B、製品版、Windows NSIS、更新フィード、通常2Dの公開説明。

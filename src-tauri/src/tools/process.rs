@@ -15,7 +15,7 @@ use std::process::{Output, Stdio};
 use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 /// タイムアウトの上限（どんな設定値でもこれを超えて待たない）。
 const MAX_TIMEOUT_SECS: u64 = 7200;
@@ -192,15 +192,19 @@ pub async fn output(
         Ok(Ok(status)) => status,
         Ok(Err(error)) => return Err(format!("{label}の終了を待てません: {error}")),
         Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            let cleanup_error = terminate_process_tree(&mut child, label).await.err();
             // 出力の回収を待たずに打ち切る。`sh -c` / `powershell -Command` のように
             // 子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を
             // 握ったままで終端（EOF）が来ない。ここで待つと孫が終わるまで戻れず、
             // タイムアウトを設けた意味がなくなる（実際に1秒指定が30秒待ちになっていた）。
             stdout_task.abort();
             stderr_task.abort();
-            return Err(format!("{label}が {timeout} 秒でタイムアウトしました。"));
+            return Err(match cleanup_error {
+                Some(error) => format!(
+                    "{label}が {timeout} 秒でタイムアウトし、子プロセスの回収にも失敗しました: {error}"
+                ),
+                None => format!("{label}が {timeout} 秒でタイムアウトしました。"),
+            });
         }
     };
     // 子が正常終了しても、孫がパイプを握っていれば同じ理由で終端が来ない。
@@ -212,6 +216,54 @@ pub async fn output(
         stdout,
         stderr,
     })
+}
+
+/// タイムアウトしたプロセスと、その配下で起動した孫プロセスを回収する。
+///
+/// Windows の `Child::kill()` は直下の子だけを止める。`cmd /c` の配下に残った孫が
+/// stdout/stderr のパイプを握ると、呼び出し元へ戻った後も Tokio ランタイムの終了が
+/// 孫の寿命まで待たされるため、`taskkill /T` でツリーごと止める。
+#[cfg(windows)]
+async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), String> {
+    let pid = child
+        .id()
+        .ok_or_else(|| format!("{label}のプロセスIDを取得できません"))?;
+    let mut killer = command("taskkill.exe");
+    killer.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    let result = tokio::time::timeout(Duration::from_secs(3), killer.output())
+        .await
+        .map_err(|_| format!("{label}のプロセスツリー停止が3秒でタイムアウトしました"))?
+        .map_err(|error| format!("{label}のプロセスツリーを停止できません: {error}"))?;
+    if !result.status.success() {
+        if child
+            .try_wait()
+            .map_err(|error| format!("{label}の終了状態を確認できません: {error}"))?
+            .is_none()
+        {
+            return Err(format!(
+                "taskkillが失敗しました: {}",
+                String::from_utf8_lossy(&result.stderr).trim()
+            ));
+        }
+    }
+    tokio::time::timeout(Duration::from_secs(3), child.wait())
+        .await
+        .map_err(|_| format!("{label}の停止完了待ちが3秒でタイムアウトしました"))?
+        .map_err(|error| format!("{label}の停止完了を待てません: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), String> {
+    child
+        .kill()
+        .await
+        .map_err(|error| format!("{label}を停止できません: {error}"))?;
+    child
+        .wait()
+        .await
+        .map_err(|error| format!("{label}の停止完了を待てません: {error}"))?;
+    Ok(())
 }
 
 /// 子プロセス終了後に出力の回収を待つ上限。

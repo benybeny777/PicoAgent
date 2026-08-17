@@ -5,8 +5,8 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 ルールは [AGENTS.md](../AGENTS.md)** が持ち場。
 
 - 調査日: 2026-08-14（Linux コンテナ上のコード読みのみ。**実機での動作確認・実測は一切していない**）
-- **Moveable 自体は codex 側で導入済み**（`ui/vendor/moveable/moveable.min.js` を Git へ直接コミット、
-  設定画面の「配置」モード）。本ファイルの §1 は、その導入で**残っている宿題**を書いている
+- **Moveable 自体と導入後の設計ガード・第三者表記は対応済み**（`ui/vendor/moveable/moveable.min.js` を Git へ直接コミット、
+  設定画面の「配置」モード）。本ファイルの §1 は、採用した処理の記録として残す
 - サイズの数値はすべて**未実測の概算**。採用時に実ファイルで測り直すこと
 
 ---
@@ -25,38 +25,14 @@ Moveable の導入に合わせて「他に入れる価値のある依存はあ�
 
 ---
 
-## 1. 導入済み Moveable に残っている宿題
+## 1. 導入済み Moveable の管理方法
 
-Moveable は `ui/vendor/moveable/moveable.min.js` と `LICENSE` を**Git へ直接コミットする形**で入っている
-（Live2Dのような `cargo xtask setup` 取得ではない）。MIT で再配布に条件が無く、配置操作は基本機能なので
-「clone しただけで動く」この形が妥当。以下は**その形を選んだことで残っている、未処理の3点**。
+Moveable 0.53.0 は `ui/vendor/moveable/moveable.min.js` を**Git へ直接コミットする形**で入れる
+（Live2Dのような `cargo xtask setup` 取得ではない）。`bundle_scope.rs::UI_GENERATED_DIRS` は
+`vendor/live2d` だけを除外するため、Moveableは通常のUI同梱物として拡張子検査を受ける。
 
-### 1-1. 設計ガードが `ui/vendor/` を素通ししている（要修正）
-
-- `.gitignore` が無視しているのは `ui/vendor/live2d/` だけ
-- 一方 `bundle_scope.rs::UI_GENERATED_DIRS` は `vendor` を**ディレクトリごと**走査から外し、理由を
-  「`cargo xtask setup live2d` が取得する Live2D ランタイム（再配布条件があるため Git 管理外）」と書いている
-- **`ui/vendor/moveable/` は Git 管理下にあり製品へ入るのに、同梱物の範囲を固定するはずの検査が当たっていない。**
-  コメントの説明も実態と食い違っている
-
-### 1-2. 除外を狭めると `LICENSE` が拡張子検査に引っかかる（先に決めておく）
-
-`UI_GENERATED_DIRS` の除外を `vendor/live2d` へ狭めると、`ui/vendor/moveable/LICENSE` が
-`ui配下に開発用ファイルを置かない` テストで落ちる。拡張子が無いファイルは
-`extension().map(...).unwrap_or_default()` で空文字になり、`ALLOWED_UI_EXTENSIONS`（12種）に一致しないため。
-
-取りうる形は3つ。**ライセンス本文は同梱したままにするのが前提**（MIT の条件）。
-
-1. `LICENSE` を `ui/vendor/moveable/LICENSE.txt` にはせず、`docs/THIRD-PARTY-NOTICES.md` へ本文を移して
-   `ui/` 配下からは消す（`ui/` は実行時に使うものだけ、という現行の考えかたに最も近い）
-2. `ALLOWED_UI_EXTENSIONS` へ `txt` を足し、`LICENSE.txt` へ改名する
-3. ライセンスファイルだけを検査の例外として `bundle_scope.rs` へ明記する
-
-### 1-3. 第三者表記が未追記
-
-`docs/THIRD-PARTY-NOTICES.md` に **Moveable の項目が無い**。販売品なので MIT の表示義務を満たすため追記する。
-併せて、採用した版・取得元 URL・SHA-256 を記録する（`ensure_pinned_file` でピン留めしない形を選んだぶん、
-どこから持ってきた何なのかが追えなくなる）。
+MIT本文、版、取得元URL、SHA-256は `docs/THIRD-PARTY-NOTICES.md` へ集約した。実行時に使わない
+`ui/vendor/moveable/LICENSE` は削除し、ライセンス本文を失わずに `ui/` を実行時ファイルだけへ戻した。
 
 ### 1-4. 参考: 読み込みかた
 
@@ -79,6 +55,10 @@ CSP は `script-src 'self'` なので追加の緩和は不要。`ui-dist/` へ�
 - **関連**: `CODEX-TASKS.md` の保留 #2（macOS のビルド・署名・公証と実機 QA）の前提条件になる
 
 ### 2-2. `cargo-deny`（開発ツール / アプリの依存は増えない）
+
+**採用済み。** リポジトリ直下の `deny.toml` と配布前検証スキルで、本体・xtaskの
+advisories / licenses / sources / bans をローカル検査する。MPL-2.0とBSL-1.0は既存の推移依存だけへ
+クレート名で限定許可し、新規依存へ一括許可しない。
 
 - **なぜ**: `AGENTS.md` が求めているのは `cargo audit`（＝既知脆弱性）だけで、**ライセンスの混入検査が無い**。
   販売品にとっては GPL 系の紛れ込みのほうが致命的になりうる。重複依存も見える
