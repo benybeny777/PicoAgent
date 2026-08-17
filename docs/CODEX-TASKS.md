@@ -154,6 +154,69 @@
 - **順序**: P1-5 と同じ関数を触るので、**P1-5 に取り込むか、P1-5 の直前に単独で入れる**。P1-5 の後に回すと、
   移したばかりの意図判定をもう一度書き換えることになる。
 
+## P1-11. 制作用 `expression-patches/` を配信コピーから外す（実測 -45.8MiB）
+
+- **なぜ**: `cargo xtask sync-characters`（`xtask/src/assets.rs:19`）は `live2d-src/` と未取得Live2Dだけを除いて
+  `characters/` を丸ごと `ui/assets/characters/` へ写す。そのため**制作工程でしか使わない `expression-patches/` が製品へ入っている**。
+  実測で7キャラ計 **46,852KB（約45.8MiB）**。参照元は `scripts/build-extended-expression-layers.py:71` と
+  `scripts/build-sharp-expression-layers.py:80` の2つだけで、`character.json`・`ui/*.js`・`src-tauri/src/**` からの参照は0件
+  （`docs/CHARACTER-ASSET-WORKFLOW.md:22` も「局所合成する透過パッチ」＝生成入力と説明している）。
+  **挙動を1つも変えずにインストーラが45.8MiB縮む。** 除外の仕組みは `live2d-src` 用に既にある。
+- **やること**: `sync_characters()` の除外述語へ `expression-patches` を足す（`live2d-src` と同じ形）。
+  `bundle_scope.rs` へ「制作用ディレクトリが配信へ入っていないこと」の検査を足し、次に増えたときに気づけるようにする。
+- **完了条件**: 同期後の `ui/assets/characters/` に `expression-patches` が1件も無いこと。
+  キャラ8体の表示・リグ（まばたき・口パク）・連番アニメーションが従来どおり動くこと（`layers/` と `frames/` は**残す**）。
+- **触ってはいけない**: `layers/` は実行時に使う（`ui/renderer.js:1134` がリグ描画で読む）。`frames/` も当然使う。
+  正本 `characters/` からは消さない（生成の入力なので、消すと再生成できなくなる）。
+
+## P1-12. キャラ画像をWebP化する（実測 lossless で -45%、q92 で -87%）
+
+- **なぜ**: `characters/` は **438MB**（`frames/` 209.6MB＋`layers/` 173MB＋`expression-patches/` 45.8MB）で、
+  中身は **PNG 267件・WebP 0件**。配布物412MBのほぼ全量がこれ。保留 #1「分離ダウンロード設計」は
+  この重さが理由だが、**先に符号化を替えるほうが安く効く**。本セッションで実測した圧縮率（Pillow、method=6）:
+
+  | 対象 | 元PNG | WebP lossless | WebP q92 |
+  |---|---|---|---|
+  | `sena/layers/base.png`（1780×3600 RGBA） | 4.16MB | 1.82MB（43.7%） | 0.42MB（10.0%） |
+  | `mugi/layers/base.png`（720×1280 RGBA） | 0.92MB | 0.43MB（47.3%） | 0.11MB（12.1%） |
+  | `sena/frames/…`（1780×3600 RGBA）2枚 | 各2.84MB | 各1.81MB（64%） | 各0.42MB（15%） |
+  | **4件合計** | **10.7MB** | **5.9MB（54.7%）** | **1.4MB（12.7%）** |
+
+  `frames`＋`layers` の382.6MBへ当てはめると、**lossless で約209MB（-173MB）、q92 で約48MB（-334MB）**。
+  `webp` は `bundle_scope::ALLOWED_UI_EXTENSIONS`（`bundle_scope.rs:45`）に既に入っており、
+  LP画像（`docs/images/layout-shot-*.webp`）で採用実績もある。WebView2／WKWebView とも透過WebPを表示できる。
+- **やること**: **losslessから始める**。lossless は復号結果が元PNGとビット一致するので、
+  「引き伸ばし禁止」「高精細維持」の既存ルールと衝突せず、画質議論なしで-45%を取れる。
+  1. `scripts/build-character-animations.py` の書き出しをWebPにし、`character.json` の `framePaths` と
+     `assetVersion` を更新する。`scripts/build-sharp-expression-assets.ps1` を正規入口とする既存工程は変えない。
+  2. `character_pack.rs` の検証（拡張子・参照ファイルの実在）をWebPへ対応させる。**ここはアプリと
+     `cargo xtask character-pack` の共通正本**なので、片方だけ直さない。
+  3. `.agents/skills/rebuild-picoagent-character/SKILL.md` と `docs/CHARACTER-ASSET-WORKFLOW.md` を同じPRで更新する。
+  4. 既存の追加キャラクターパック（利用者が導入済みのPNG）は**読めるまま残す**（後方互換。検証を「PNGまたはWebP」にする）。
+  5. q92（-87%）へ進めるかは**別PR・別判断**にする。透過の縁と髪の細部が落ちないかを、
+     透過市松と実WebViewの拡大表示で確認してからでないと採用しない（既存の高精細ルールどおり）。
+- **完了条件**: lossless変換後、全キャラの全フレームが**復号してPNGとピクセル一致**すること（スクリプトで機械確認できる）。
+  `SHOOT_CHARACTER_MATRIX=1` の撮影で描画欠け0件・**速度警告0件**（WebPの復号はPNGより遅くなる場合があるため、
+  ここが実質の性能ゲート）。配布物サイズの前後を `docs/REVIEW-LOG.md` へ記録する。
+- **触ってはいけない**: 元PNGの正本（`character-sources/`・`characters/*/layers/`）を上書き削除しない。
+  q92をlosslessと同じPRに混ぜない（サイズ差の原因が符号化か画質かを切り分けられなくなる）。
+
+## P1-13. 資産同期の「全消し・全コピー」を差分同期にする（実測 22.6秒/回）
+
+- **なぜ**: `sync_characters()`（`assets.rs:29`）も `build_ui_dist()`（同 `484`）も、毎回 `fs::remove_dir_all()` してから
+  全件コピーする。`characters/` は438MBあるので、**`cargo xtask dev` / `build` のたびに438MBを2度書き直している**。
+  本セッションの実測（Linuxコンテナ、ページキャッシュ温）で **`sync-characters` 21.7秒＋`build-ui` 0.9秒＝22.6秒**。
+  Windows実機はDefenderの実時間スキャンが挟まるぶん、これより悪化するはず（未計測）。
+  開発の起動待ちに毎回乗るので、体感への効きが大きい。
+- **やること**: サイズと更新時刻が一致するファイルはコピーを飛ばし、**配信先に残った余分なファイルだけ消す**方式にする。
+  `--force` 相当の全再構築オプションは残す（生成物が壊れたときの逃げ道）。
+  P1-12 を先にやると対象が209MBまで減るので、**P1-12 → P1-13 の順**が効率的。
+- **完了条件**: 変更なしの2回目の `sync-characters` が**1秒未満**で終わること。
+  ファイルを1件消す・1件足す・1件書き換えるそれぞれで、配信先が正しく追従する回帰テストが通ること。
+  `stamp_character_asset_versions()` と `stamp_asset_versions()`（内容ハッシュの `?v=`）が従来どおり効くこと。
+- **触ってはいけない**: 「配信先を消す前に判定する」既存の安全策（`assets.rs:26`〜`28` のコメント参照。
+  消してから失敗するとキャラ0体の状態が残り、次の `dev` / `build` が `ui-dist/` を作れなくなる）。
+
 ## P1-1. 設定画面の実表示で日本語ラベルの収まりを見る
 
 - **なぜ**: 外部サービス連携22スキルと設定ガイドの英語ラベル40件を日本語へ統一したが、**GUIでの折り返しは未確認**。
@@ -191,7 +254,7 @@
 
 | # | 内容 | 着手条件 |
 |---|---|---|
-| 1 | 配布物412MBの分離ダウンロード設計（高精細7キャラで405.6MiBを占める） | 画質を落とさない前提での設計判断。ベータの試用結果を見てから |
+| 1 | 配布物412MBの分離ダウンロード設計（高精細7キャラで405.6MiBを占める） | 画質を落とさない前提での設計判断。ベータの試用結果を見てから。**着手前に P1-11（-45.8MiB）と P1-12（WebP lossless で約-173MB）を先に済ませること。** 両方入れると配布物は概算200MB前後まで落ちるので、分離ダウンロードの設計自体が不要になる可能性がある |
 | 2 | macOS版のビルド・署名・公証と実機QA。**着手時は `secret.rs` の平文フォールバックを先に塞ぐ**（`keyring` で Keychain へ寄せる。`enc:dpapi:v1:` の Windows 経路と `secret::guard` の password 判定はそのまま残す） | macOSホストが要る。WindowsホストとGitHub Actionsは使わない方針。詳細は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §2-1 |
 | 3 | Windows実機の残り目視（8方向リサイズ、端寄せ位置の復元、起動画面からの復帰、多重起動時の前面化、Aivis更新導線の新旧版表示、キャラ別挨拶の文面、配信立ち絵の0.5px差） | Windows実機を触る回にまとめて |
 | 4 | Free／Pro のスキル制限とライセンス入力欄の設計見直し（`beta-full` ビルドでも入力欄が出る、`license::CONFIG_KEY` の cfg 分岐、制限の粒度） | **ベータ期間中は全機能試用で運用する方針のため着手しない。** 正式版の準備時に、制限そのものの設計から見直す |
