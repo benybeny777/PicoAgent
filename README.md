@@ -16,7 +16,7 @@
 **Ollama も Node.js も要りません。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安からローカルモデルを自動で選んで取得します。以後はオフラインで動きます。
 
 > [!WARNING]
-> 公開インストーラは現在、**PicoAgent v1.0.1 Beta**です。アプリ画面の小型`BETA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
+> 公開インストーラは現在、**PicoAgent v1.0.2 Beta**です。アプリ画面の小型`BETA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
 > ベータ版は`beta-full`ビルドでPro対象を含む全機能を試用可能にし、正式リリースではこのfeatureを付けずFree／Pro制限を有効にします。
 
 <div align="center">
@@ -70,7 +70,7 @@
       <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />150フレーム／目・口7段階</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />84フレーム／目・口7段階</sub></td>
     </tr>
   </table>
   <sub>
@@ -94,7 +94,7 @@
 | ひより / はる / イプシロン / まお / レン / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
-PNGの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。通常2Dは150フレームへ統一し、目・口の各7段階、視線、表情、髪や服の動きを事前描画した連番で表現します。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
+PNGの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
 
 ---
 
