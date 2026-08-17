@@ -9,6 +9,7 @@
 ## 未処理の残件（次に作業する人がここから見る）
 
 - **配布中の`v1.0.1 Beta`に、今日修正したローカルモデル喪失バグが入っている。** `cleanup_obsolete_preset_models` は PR #100 で追加され PR #103 で `v1.0.1` として公開済み。インストールした利用者は起動時に、選択中でないプリセットのGGUF（1件で数GB）を失う。修正は PR #106 で `main` へ入ったが**配布物には入っていない**。`v1.0.2` のpatch採番とWindows NSIS再生成・再公開が必要（正本は `.agents/skills/build-picoagent-beta/SKILL.md`）。
+- **READMEと配布READMEの通常2D説明が実行仕様と合っていない。** 「150フレームへ統一」「物理演算ではなく事前描画」と書いてあるが、実行パックは通常7体が各42フレーム（idle 12／thinking 12／talking 12／sad 6）、実写2Dテストが84フレーム（24／24／24／12）で、実写2Dテストの `springPhysics` と実行時の局所バネ描画も残っている。実装・素材は変えず、本体README・配布README・公開LPの説明を実行仕様へ訂正する（Codexの2026-08-17「Claude修正文書の事後レビュー」#1から引き継ぎ）。
 - **実機確認の保留2件**（いずれもGUI起動またはWindowsが必要でLinuxコンテナでは不可）。
   - `engine:status {phase:"verify"}` の実表示（起動時の数GB照合中の案内）。
   - `cargo xtask setup engine` のEXDEV修正（TEMPが別ドライブ・tmpfsのとき）。
