@@ -11,6 +11,21 @@
 
 ---
 
+## 2026-08-19 — 未マージのClaudeブランチ4本の照合
+
+対象: `origin/main` へ未マージのまま残っている Claude 作業ブランチ4本。マージすべき残りがあるかを確認した。
+
+| ブランチ | 分岐元 | 最終更新 | 判定 | 根拠 |
+|---|---|---|---|---|
+| `claude/moveable-codex-integration-wik54v` | `bb582d3a` | 2026-08-14 | 移植済み（マージ不要） | 人格プロンプト混入の正規化 `normalize_leak_line` と、`self_improve` の後段で `remove_prompt_leak` を掛ける順序は現行`main`に存在する（PR #110で移植済み） |
+| `claude/readme-gallery-lipsync` | `b21e0f16` | 2026-08-12 | 移植済み（マージ不要） | `GALLERY_SCENE`／`GALLERY_TOUR`／`openScene` の `voice` 引数はいずれも現行`main`に存在する |
+| `claude/optimization-issues-report-nw01v7` | `d09ef206` | 2026-08-18 | 移植済み（マージ不要） | バネ演出のdead code（`const stopped = false`）は削除済み、変更印のフレーム集約は `PicoFrameScheduler` として実装済み、目覚ましの二重発火防止は `PicoAlarmRuntime.markFired` が「追加前に全消去」で実装済み。A〜Iの作業指示はPR #133〜#139で全件完了した |
+| `claude/improvement-proposal-u9n8k5` | `b743b08e` | 2026-08-18 | 移植済み（マージ不要） | 文書だけの枝で、P0-3はPR #116、P0-4／P0-5はPR #121、P1-1〜P1-4はPR #117、P1-18〜P1-20はPR #121／#123で完了済み |
+
+4本とも基準が古く、そのままマージすると完了済みの作業指示を`docs/CODEX-TASKS.md`へ戻し、
+`main`の新しい実装を巻き戻す。PR #119を重複として閉じたのと同じ理由なので、マージしない。
+枝の削除はリモート履歴の操作なので、利用者の判断に委ねて残している。
+
 ## 2026-08-19 — 作業用nodeの確実な終了
 
 対象: 利用者からの指摘「nodeはちゃんと終了するようルールにして」。作業後に `node.exe` が残っていた件。
