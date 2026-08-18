@@ -4799,6 +4799,14 @@ async function checkDailyEvents() {
     logApp("warn", "日次イベント取得に失敗しました", errorDetail(error));
     return;
   }
+  // 日時を読めない予定は永久に発火しない。バックエンドが1件につき1度だけ返すので、
+  // 届いたぶんはそのまま知らせる（黙って飛ばすと、鳴らない理由が利用者に分からない）。
+  const broken = Array.isArray(res?.broken) ? res.broken : [];
+  for (const item of broken) {
+    const label = String(item?.text || item?.label || "").trim() || "登録した通知";
+    logApp("warn", "通知の日時を解析できません", `${label} / ${item?.due_at ?? ""}`);
+    showToast(`「${label}」は日時を読めないため鳴りません。登録し直してください`, "error");
+  }
   const events = Array.isArray(res?.events) ? res.events : [];
   if (!events.length) return;
   const line = (events[0]?.text || "時間だよ。").trim();
