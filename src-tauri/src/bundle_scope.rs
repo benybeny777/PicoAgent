@@ -234,6 +234,66 @@ mod guard {
         );
     }
 
+    /// 同梱PIXI 6.5.10はWebGL同期関数を`new Function`で生成するため、CSPの
+    /// `unsafe-eval`を現時点では外せない。必要性を第三者ランタイムだけへ閉じ込め、
+    /// PicoAgent自身のコードが同じ緩和へ依存し始めるのを防ぐ。
+    #[test]
+    fn 自前フロントは動的コード実行へ依存しない() {
+        let ui = guard_scan::repo_root().join("ui");
+        let mut violations = Vec::new();
+        for relative in ui_files() {
+            if relative
+                .extension()
+                .and_then(|extension| extension.to_str())
+                != Some("js")
+            {
+                continue;
+            }
+            let path = ui.join(&relative);
+            let source = std::fs::read_to_string(&path).expect("UIのJavaScriptを読めない");
+            let normalized = source.split_whitespace().collect::<Vec<_>>().join(" ");
+            let has_call = |needle: &str| {
+                normalized.match_indices(needle).any(|(index, _)| {
+                    normalized[..index]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|before| {
+                            !before.is_ascii_alphanumeric() && before != '_' && before != '$'
+                        })
+                })
+            };
+            if has_call("eval(")
+                || has_call("eval (")
+                || has_call("Function(")
+                || has_call("Function (")
+            {
+                violations.push(relative.display().to_string());
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "PicoAgent自身のJavaScriptでeval／Functionコンストラクタを使わないでください。\
+             CSPのunsafe-evalはGit管理外のLive2D用PIXIだけに限定します: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn 現行live2d描画に必要なcspだけを維持する() {
+        let conf = tauri_conf();
+        let csp = conf["app"]["security"]["csp"]
+            .as_str()
+            .expect("app.security.csp が文字列でない");
+        assert!(
+            csp.contains("script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'"),
+            "PIXI 6.5.10の動的WebGL同期とCubism CoreのWASMに必要な許可です。\
+             外す場合はLive2D実描画とSPECの理由を同じ変更で更新してください"
+        );
+        assert!(
+            !csp.contains("script-src 'self' 'unsafe-inline'"),
+            "インラインJavaScriptは許可しないでください"
+        );
+    }
+
     #[test]
     fn フロントのinvoke失敗は診断ログへ残す() {
         let path = guard_scan::repo_root().join("ui/picoagent.js");
