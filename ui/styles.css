@@ -313,7 +313,7 @@ html[data-theme="dark"] .top-window-menu > button:focus-visible { background:rgb
 .relationship-clear { margin-top:9px; }
 .variant-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; color:var(--muted); font-size:11px; }
 .variant-row select { min-width:130px; padding:5px 7px; border:1px solid var(--field-border); border-radius:8px; background:var(--field-bg); color:var(--ink); }
-.bubble { position:absolute; z-index:3; top:36px; left:16px; width:min(420px,calc(100% - 297px)); min-width:180px; min-height:92px; height:calc(100% - 50px); max-width:none; max-height:none; padding:17px 18px 15px; border:1px solid var(--panel-border); border-radius:22px 22px 7px 22px; background:var(--bubble-bg); color:var(--ink); box-shadow:inset 0 1px 0 var(--panel-highlight),0 10px 28px rgba(42,31,46,.13),0 2px 7px rgba(42,31,46,.07); backdrop-filter:blur(14px) saturate(1.08); cursor:text; display:flex; flex-direction:column; }
+.bubble { container-type:inline-size; position:absolute; z-index:3; top:36px; left:16px; width:min(420px,calc(100% - 297px)); min-width:180px; min-height:92px; height:calc(100% - 50px); max-width:none; max-height:none; padding:17px 18px 15px; border:1px solid var(--panel-border); border-radius:22px 22px 7px 22px; background:var(--bubble-bg); color:var(--ink); box-shadow:inset 0 1px 0 var(--panel-highlight),0 10px 28px rgba(42,31,46,.13),0 2px 7px rgba(42,31,46,.07); backdrop-filter:blur(14px) saturate(1.08); cursor:text; display:flex; flex-direction:column; }
 .character:focus-visible { outline:3px solid var(--accent); outline-offset:-4px; border-radius:24px; }
 .pet-app.is-listening::after { content:"🎙 録音中"; position:absolute; z-index:70; top:8px; right:12px; padding:5px 9px; border-radius:999px; background:#b83f59; color:#fff; box-shadow:0 3px 12px rgba(80,20,35,.28); font-size:10px; font-weight:800; pointer-events:none; }
 /* 尻尾は縦長フキダシでも右下のキャラの方を向くよう、やや下寄りに置く。 */
@@ -383,10 +383,10 @@ button:disabled { opacity:.48; cursor:default; }
 .bubble-resize:hover { background:linear-gradient(135deg,transparent 0 42%,var(--accent) 43% 51%,transparent 52% 62%,var(--accent) 63% 71%,transparent 72%); }
 .bubble-resize:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .status { flex:0 0 auto; min-height:15px; margin-top:6px; color:var(--muted); font-size:10.5px; }
-.reply-actions { flex:0 0 auto; align-self:flex-end; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; margin:-8px -8px 8px 0; opacity:.82; transition:opacity .16s ease; }
+.reply-actions { flex:0 0 auto; align-self:flex-end; display:flex; flex-wrap:nowrap; justify-content:flex-end; gap:clamp(3px,1.1cqi,5px); margin:-8px -8px 8px 0; opacity:.82; transition:opacity .16s ease; }
 .bubble:hover .reply-actions,
 .reply-actions:focus-within { opacity:1; }
-.reply-actions button { position:static; display:flex; align-items:center; justify-content:center; width:auto; min-width:62px; height:36px; padding:0 11px; border-radius:8px; background:rgba(242,126,145,.92); font-size:12px; line-height:1; }
+.reply-actions button { position:static; display:flex; flex:0 1 auto; align-items:center; justify-content:center; width:auto; min-width:0; height:36px; padding:0 clamp(5px,2.4cqi,11px); border-radius:8px; background:rgba(242,126,145,.92); font-size:clamp(9px,2.7cqi,12px); line-height:1; white-space:nowrap; overflow:hidden; }
 .reply-actions button:hover { filter:brightness(1.04); }
 .reply-actions #noticeToggle { position:relative; inset:auto; background:#64a98a; }
 .reply-actions #noticeToggle::after { content:attr(data-count); position:absolute; right:-5px; top:-6px; min-width:14px; height:14px; padding:0 3px; border-radius:999px; background:#c0627a; color:#fff; font-size:9px; line-height:14px; text-align:center; box-shadow:0 1px 4px rgba(42,31,46,.22); }
@@ -642,14 +642,14 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 [data-layout="mascot"] .bubble::after { right:auto; left:18px; top:auto; bottom:-13px; width:18px; height:16px; clip-path:polygon(0 0,100% 0,30% 100%); }
 [data-layout="mascot"] .reply { font-size:11.5px; }
 [data-layout="mascot"] .reply-actions { margin:-5px -5px 5px 0; }
-[data-layout="mascot"] .reply-actions button { width:auto; min-width:42px; height:28px; padding:0 6px; font-size:9px; }
+[data-layout="mascot"] .reply-actions button { width:auto; min-width:0; height:28px; padding:0 clamp(4px,1.6cqi,6px); font-size:clamp(9px,3cqi,11px); }
 [data-layout="mascot"] .quick-actions { display:none; }
 [data-layout="mascot"] textarea { min-height:44px; }
 [data-layout="mascot"] .online { right:auto; left:8px; bottom:8px; }
 [data-layout="mascot"] .relationship-button { right:auto; left:24px; bottom:4px; width:24px; height:24px; font-size:12px; }
 
 /* ── 2. ペット: 既定。広げたLive2D枠と重ならない範囲でフキダシを最大化する ───── */
-[data-layout="pet"] .bubble { width:min(420px,calc(100% - 317px)); }
+[data-layout="pet"] .bubble { width:min(420px,calc(100% - min(317px,52%))); }
 [data-layout="pet"] .bubble.fullscreen { right:var(--fullscreen-bubble-right,311px); }
 
 /* ── 3. チャット: LINE風の縦長パネル。履歴を常に出す ─────────────────────── */
@@ -1019,14 +1019,15 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 }
 [data-layout="mascot"] .reply { font-size:14px; line-height:1.6; }
 [data-layout="mascot"] textarea { min-height:68px; }
-[data-layout="mascot"] .reply-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); width:100%; margin:0 0 7px; }
-[data-layout="mascot"] .reply-actions button { min-width:0; width:100%; height:34px; font-size:11.5px; }
+[data-layout="mascot"] .reply-actions { display:flex; flex-wrap:nowrap; width:100%; margin:0 0 7px; }
+[data-layout="mascot"] .reply-actions button { flex:1 1 0; min-width:0; width:auto; height:34px; }
 
 /* ペット: 大きくしたウィンドウを会話と上半身へ均等に使う。 */
-[data-layout="pet"] .bubble { width:min(540px,calc(100% - 450px)); padding:20px 21px 17px; }
-[data-layout="pet"] .character { right:12px; bottom:4px; width:430px; height:540px; }
+[data-layout="pet"] .bubble { width:min(540px,calc(100% - min(450px,52%))); padding:20px 21px 17px; }
+[data-layout="pet"] .character { right:12px; bottom:4px; width:min(430px,48%); height:min(540px,96%); }
 [data-layout="pet"] .character-view > canvas {
-  position:absolute; left:50%; top:auto; bottom:0; width:430px!important; height:475px!important;
+  /* キャラ枠を比率で縮めるため、Live2D canvasも枠へ追随させる（430:475=幅100%:高さ88%）。 */
+  position:absolute; left:50%; top:auto; bottom:0; width:100%!important; height:88%!important;
   transform:translateX(-50%); transform-origin:50% 100%;
 }
 [data-layout="pet"] .reply { font-size:15px; line-height:1.75; }
@@ -1036,10 +1037,10 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="chat"] .bubble { padding:100px 16px 15px; }
 [data-layout="chat"] .reply-actions {
   position:absolute; top:16px; right:16px; left:112px;
-  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px;
+  display:flex; flex-wrap:nowrap; gap:clamp(3px,1.1cqi,6px);
   width:auto; margin:0; align-self:auto;
 }
-[data-layout="chat"] .reply-actions button { min-width:0; width:100%; height:34px; padding:0 7px; }
+[data-layout="chat"] .reply-actions button { flex:1 1 0; min-width:0; width:auto; height:34px; }
 [data-layout="chat"] .character canvas { width:100%!important; height:100%!important; transform:translateX(-50%) scale(2.55); transform-origin:50% 9%; }
 [data-layout="chat"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
 [data-layout="chat"] .reply { font-size:14px; line-height:1.65; }

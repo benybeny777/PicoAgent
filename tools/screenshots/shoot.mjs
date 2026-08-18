@@ -344,6 +344,18 @@ const MATRIX_LAYOUTS = {
   bar: [900, 320], workspace: [1400, 850], stream: [1920, 1080], widget: [440, 600],
 };
 
+// 窓を狭めた状態の再検査用に、形式ごとの寸法を `pet=560x430` 形式で上書きできる。
+const LAYOUT_SIZE_OVERRIDES = new Map((process.env.SHOOT_LAYOUT_SIZE || "").split(",")
+  .map(entry => entry.trim()).filter(Boolean)
+  .map(entry => {
+    const [layout, size] = entry.split("=");
+    const [width, height] = String(size || "").split("x").map(Number);
+    if (!layout || !Number.isFinite(width) || !Number.isFinite(height)) {
+      throw new Error(`SHOOT_LAYOUT_SIZE の指定が不正です: ${entry}`);
+    }
+    return [layout.trim(), [width, height]];
+  }));
+
 // 検証対象のPNGキャラを全7形式で描画し、表示欠けと初期表示時間を一括検査する。
 async function shootCharacterMatrix() {
   const output = join(ROOT, "temp", "character-layout-matrix");
@@ -358,8 +370,9 @@ async function shootCharacterMatrix() {
     ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
   for (const characterId of selectedCharacters) {
-    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+    for (const [layout, defaultSize] of Object.entries(MATRIX_LAYOUTS)) {
       if (selectedLayouts && !selectedLayouts.has(layout)) continue;
+      const [width, height] = LAYOUT_SIZE_OVERRIDES.get(layout) || defaultSize;
       const started = performance.now();
       const page = await openScene({ characterId, layout, width, height, forcePng: true });
       try {
@@ -397,7 +410,6 @@ async function shootCharacterMatrix() {
             const value = node.getBoundingClientRect();
             return { x: value.x, y: value.y, width: value.width, height: value.height };
           };
-          const replyAction = document.querySelector(".reply-actions");
           const userBody = document.querySelector(".history-item.user .history-body");
           const assistantBody = document.querySelector(".history-item.assistant .history-body");
           return {
@@ -427,12 +439,18 @@ async function shootCharacterMatrix() {
               "picoagent-idle-preload-ready": Math.round(window.__picoagentPerformance?.idlePreloadReady || 0),
               "picoagent-all-preload-ready": Math.round(window.__picoagentPerformance?.allPreloadReady || 0),
             },
+            actionRow: (() => {
+              const buttons = [...document.querySelectorAll("#replyActions button")]
+                .filter(button => button.offsetParent !== null || button.getClientRects().length > 0);
+              const tops = new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top)));
+              return { count: buttons.length, rows: buttons.length ? tops.size : 0 };
+            })(),
+            bubbleRect: rectOf(document.getElementById("bubble") || document.querySelector(".bubble")),
             chatUi: {
               avatar: rectOf(character),
               online: rectOf(document.getElementById("online")),
               relationship: rectOf(document.getElementById("relationshipButton")),
               relationshipText: document.getElementById("relationshipButton")?.textContent || "",
-              replyActionColumns: replyAction ? getComputedStyle(replyAction).gridTemplateColumns.split(" ").filter(Boolean).length : 0,
               userBubble: userBody ? getComputedStyle(userBody).backgroundColor : "",
               assistantBubble: assistantBody ? getComputedStyle(assistantBody).backgroundColor : "",
             },
@@ -452,6 +470,14 @@ async function shootCharacterMatrix() {
           || visual.springMotion.maskedRegions !== expectedSpringRegions)) {
           throw new Error(`${characterId}/${layout}: 局所バネ物理が適用されていません ${JSON.stringify(visual.springMotion)}`);
         }
+        // 回答操作は全形式で1段に収める。折り返すと画面が狭い形式で本文を押し出す。
+        if (!visual.actionRow || visual.actionRow.count < 1 || visual.actionRow.rows !== 1) {
+          throw new Error(`${characterId}/${layout}: 回答操作が1段に収まっていません ${JSON.stringify(visual.actionRow)}`);
+        }
+        // フキダシは窓幅の45%以上を保つ。狭い窓でキャラの取り分に潰されないことの確認。
+        if (!(visual.bubbleRect?.width >= width * 0.45)) {
+          throw new Error(`${characterId}/${layout}: フキダシ幅が窓幅の45%未満です ${JSON.stringify({ bubble: visual.bubbleRect, window: width })}`);
+        }
         if (layout === "chat") {
           const chat = visual.chatUi;
           const avatarOk = chat?.avatar?.width === 62 && chat.avatar.height === 62;
@@ -460,7 +486,7 @@ async function shootCharacterMatrix() {
           const relationshipOk = chat?.relationship?.width === 24 && chat.relationship.height === 24
             && chat.relationshipText.trim() === "♡" && chat.relationship.x > chat.avatar.x;
           const bubblesOk = chat?.userBubble && chat.assistantBubble && chat.userBubble !== chat.assistantBubble;
-          if (!avatarOk || !onlineOk || !relationshipOk || chat?.replyActionColumns !== 3 || !bubblesOk) {
+          if (!avatarOk || !onlineOk || !relationshipOk || !bubblesOk) {
             throw new Error(`${characterId}/${layout}: LINE風チャットの配置・配色が不正です ${JSON.stringify(chat)}`);
           }
         }
@@ -877,8 +903,9 @@ async function validateLive2dMatrix() {
   }
   const results = [];
   for (const target of targets) {
-    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+    for (const [layout, defaultSize] of Object.entries(MATRIX_LAYOUTS)) {
       if (selectedLayouts && !selectedLayouts.has(layout)) continue;
+      const [width, height] = LAYOUT_SIZE_OVERRIDES.get(layout) || defaultSize;
       const page = await openScene({ characterId: target.id, layout, width, height });
       try {
         await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
