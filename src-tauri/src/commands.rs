@@ -1791,7 +1791,21 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
 #[tauri::command]
 pub fn pet_daily_events(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     match crate::daily::due_events(&state.config) {
-        Ok(events) => Ok(json!({ "events": events })),
+        Ok(poll) => {
+            // 日時を読めない予定は永久に発火しない。ログと画面の両方へ1度だけ出す
+            // （`daily::due_events` が同じ予定を繰り返し返さないので、ここでは重複しない）。
+            for event in &poll.broken {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!(
+                        "通知「{}」の日時「{}」を解析できないため発火しません。設定から登録し直してください。",
+                        crate::text::preview(&event.text, 40),
+                        crate::text::preview(&event.due_at, 40),
+                    ),
+                );
+            }
+            Ok(json!({ "events": poll.due, "broken": poll.broken }))
+        }
         Err(error) => Err(log_command_error(&app, "通知の確認に失敗しました", error)),
     }
 }

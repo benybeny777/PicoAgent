@@ -87,7 +87,15 @@
           try {
             const response = await api.deleteMemory(category, text, updatedAt);
             if (!itemNode.isConnected) return;
-            renderItems(response?.items);
+            // 応答が一覧を含まない形（想定外）のときに空一覧で描き直すと、
+            // 実際は残っている記憶を「0件」と誤って見せてしまう。読み直しへ倒す。
+            if (!Array.isArray(response?.items)) {
+              logApp("warn", "長期メモリの削除応答に一覧が含まれていません", JSON.stringify(response ?? null));
+              setPageStatus("長期メモリを1件削除しました。次の会話から参照されません。");
+              await refresh();
+              return;
+            }
+            renderItems(response.items);
             setPageStatus("長期メモリを1件削除しました。次の会話から参照されません。");
           } catch (error) {
             logApp("error", "長期メモリの削除に失敗しました", errorDetail(error));
@@ -109,7 +117,13 @@
       try {
         const response = await api.listMemories();
         if (!manager.isConnected) return;
-        renderItems(response?.items);
+        if (!Array.isArray(response?.items)) {
+          // 一覧を受け取れていないので、表示中の内容を空へ置き換えず理由だけ出す。
+          logApp("warn", "長期メモリ一覧の応答に items がありません", JSON.stringify(response ?? null));
+          status.textContent = "一覧を読み込めませんでした: 応答の形式が想定と違います";
+          return;
+        }
+        renderItems(response.items);
       } catch (error) {
         if (!manager.isConnected) return;
         logApp("warn", "長期メモリ一覧の読み込みに失敗しました", errorDetail(error));

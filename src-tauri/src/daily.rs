@@ -3,6 +3,9 @@
 // 通知系の一覧は config の JSON 文字列へ保存する。チャットのスキルが追加/削除し、
 // フロントは `pet_daily_events` で期限到来分を取り出して声で知らせる。
 
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
+
 use chrono::{Duration, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -93,18 +96,43 @@ pub fn save_praise(cfg: &Config, entries: &[PraiseEntry]) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub fn due_events(cfg: &Config) -> anyhow::Result<Vec<DailyEvent>> {
+/// 期限到来分と、日時を解析できないまま残っている予定。
+/// 後者は放置すると永久に発火しないので、利用者へ知らせる材料として一緒に返す。
+#[derive(Clone, Debug, Default)]
+pub struct DuePoll {
+    pub due: Vec<DailyEvent>,
+    pub broken: Vec<DailyEvent>,
+}
+
+/// 壊れた予定を知らせ済みかどうか（この起動中だけ覚える）。
+/// `due_events()` はフロントから 20 秒ごとに呼ばれるため、同じ予定の警告を出し続けない。
+fn reported_broken() -> &'static Mutex<HashSet<String>> {
+    static REPORTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    REPORTED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// 予定を直せば `due_at` が変わるので、ID と日時を合わせて印にする。
+fn broken_key(event: &DailyEvent) -> String {
+    format!("{}@{}", event.id, event.due_at)
+}
+
+pub fn due_events(cfg: &Config) -> anyhow::Result<DuePoll> {
     let now = Local::now().naive_local();
     // 読む→直す→書き戻すの間、reminder / focus_timer の更新と競合しないようにする。
     let _guard = crate::store::lock_state(EVENTS_KEY);
     // 読めなかった場合は空一覧で続けず、そのままエラーにする（空で書き戻さないため）。
     let mut events = load_events(cfg).map_err(|error| anyhow::anyhow!(error))?;
     let mut due = Vec::new();
+    let mut broken = Vec::new();
     for event in events.iter_mut() {
         if !event.enabled {
             continue;
         }
         let Some(due_at) = parse_local_minute(&event.due_at) else {
+            // 日時を読めない予定は永久に発火しない。黙って飛ばさず、1度だけ知らせる。
+            if reported_broken().lock().unwrap().insert(broken_key(event)) {
+                broken.push(event.clone());
+            }
             continue;
         };
         if due_at > now {
@@ -126,7 +154,7 @@ pub fn due_events(cfg: &Config) -> anyhow::Result<Vec<DailyEvent>> {
     if !due.is_empty() {
         save_events(cfg, &events)?; // 実際に変わったときだけ書く
     }
-    Ok(due)
+    Ok(DuePoll { due, broken })
 }
 
 #[cfg(test)]
@@ -174,8 +202,9 @@ mod tests {
 
         // 保存済みファイルを消してから呼ぶ。書き込みが起きればファイルが再生成される。
         std::fs::remove_file(&path).unwrap();
-        let due = due_events(&cfg).unwrap();
-        assert!(due.is_empty());
+        let poll = due_events(&cfg).unwrap();
+        assert!(poll.due.is_empty());
+        assert!(poll.broken.is_empty());
         assert!(!path.exists(), "期限到来が無いのに保存している");
 
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
@@ -199,13 +228,41 @@ mod tests {
         save_events(&cfg, &[past]).unwrap();
         std::fs::remove_file(&path).unwrap();
 
-        let due = due_events(&cfg).unwrap();
-        assert_eq!(due.len(), 1);
+        let poll = due_events(&cfg).unwrap();
+        assert_eq!(poll.due.len(), 1);
         assert!(path.exists(), "期限到来時は保存する");
         // 一度きりの通知は無効化され、次のポーリングでは何も出ない（＝保存も起きない）。
         std::fs::remove_file(&path).unwrap();
-        assert!(due_events(&cfg).unwrap().is_empty());
+        assert!(due_events(&cfg).unwrap().due.is_empty());
         assert!(!path.exists());
+
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// 日時を読めない予定は永久に発火しない。黙って飛ばすと、利用者は
+    /// 登録したはずのリマインダーが鳴らない理由を知る手段が無い。
+    #[test]
+    fn 日時を読めない予定は一度だけ知らせる() {
+        let (cfg, path) = temp_config("broken");
+        let broken = DailyEvent {
+            id: "broken-1".to_string(),
+            kind: "reminder".to_string(),
+            due_at: "明日の朝".to_string(),
+            text: "薬を飲む".to_string(),
+            label: String::new(),
+            enabled: true,
+            repeat_minutes: None,
+        };
+        save_events(&cfg, &[broken]).unwrap();
+
+        let first = due_events(&cfg).unwrap();
+        assert!(first.due.is_empty(), "解析できない予定を発火させない");
+        assert_eq!(first.broken.len(), 1, "解析できない予定を黙って飛ばさない");
+        assert_eq!(first.broken[0].id, "broken-1");
+
+        // 20 秒ごとのポーリングで同じ警告を出し続けない。
+        let second = due_events(&cfg).unwrap();
+        assert!(second.broken.is_empty(), "同じ予定を繰り返し知らせている");
 
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
