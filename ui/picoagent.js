@@ -183,6 +183,8 @@ window.picoagent = {
   restartApp: (restartEngine, restartAivis) => call("restart_app", { restartEngine: !!restartEngine, restartAivis: !!restartAivis }),
   settings: {
     load: () => call("settings_load"),
+    listMemories: () => call("settings_memory_list"),
+    deleteMemory: (category, text, updatedAt) => call("settings_memory_delete", { category, text, updatedAt }),
     listModels: (id) => call("settings_list_models", { id }),
     testTool: (name) => call("settings_test_tool", { name }),
     save: (patch) => call("settings_save", { patch }),

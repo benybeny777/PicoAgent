@@ -2644,7 +2644,19 @@ async function render() {
     setQuickSettingsSummary("character", `${selectedEntry?.name || characterSelect?.value || v.PICOAGENT_CHARACTER || "既定キャラ"}・${enabled ? "読み上げ有効" : "ミュート中"}`);
   });
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値50）", "number", v.PICOAGENT_TTS_VOLUME ?? "50", "50"));
-  panels.basic.append(quickSettingsGuide(v), global);
+  const memoryManager = window.PicoMemorySettings.buildMemoryManager({
+    api: window.picoagent.settings,
+    section,
+    el,
+    markSearchable,
+    refreshSearch: applySettingsSearch,
+    setPageStatus: message => { statusEl.textContent = message; },
+    setBusy: setSettingsMutationBusy,
+    isBusy: () => settingsMutationBusy,
+    logApp,
+    errorDetail,
+  });
+  panels.basic.append(quickSettingsGuide(v), global, memoryManager);
   panels.display.append(displaySec);
   providerSelect.addEventListener("change", () => {
     const selected = data.providers.find(item => item.id === providerSelect.value);
