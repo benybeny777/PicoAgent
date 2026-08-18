@@ -12,7 +12,7 @@
 // 詳細は同じフォルダの README.md を参照。
 import http from "node:http";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { extname, isAbsolute, join, dirname } from "node:path";
@@ -873,6 +873,141 @@ async function validateInteractionMatrix() {
   return { output, results };
 }
 
+// 常時表示のフキダシにある `backdrop-filter: blur(14px) saturate(1.08)` の再合成負荷を測る。
+// 立ち絵を動かし続けた状態で、重なり有無・背後の描き替え負荷有無を掛けた12条件を測る。
+// ぼかし有無は同じページ内で両方取り、暖機分が片側へ寄らないよう試行ごとに順序を入れ替える。
+const BLUR_LAYOUTS = { pet: [900, 600], mascot: [360, 560], stream: [1920, 1080] };
+const BLUR_TRIALS = 3;
+const BLUR_SAMPLE_MS = 3000;
+
+function summarizeFrames(intervals) {
+  const sorted = [...intervals].sort((a, b) => a - b);
+  const at = ratio => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] || 0;
+  return {
+    frames: sorted.length,
+    medianMs: Number(at(0.5).toFixed(2)),
+    p95Ms: Number(at(0.95).toFixed(2)),
+    slowFrames: sorted.filter(value => value > 20).length,
+  };
+}
+
+async function measureBubbleFrames(page, { blur, overlap, load }) {
+  return page.evaluate(async ({ blur, overlap, load, sampleMs }) => {
+    const bubble = document.querySelector(".bubble");
+    const character = document.querySelector(".character");
+    if (!bubble || !character) throw new Error("フキダシまたは立ち絵が見つかりません");
+    const style = document.createElement("style");
+    style.id = "bubble-blur-probe";
+    // 比較条件はぼかしの有無だけにする。位置・幅・文字組みには触れない。
+    style.textContent = blur ? "" : ".bubble { backdrop-filter:none !important; }";
+    document.head.append(style);
+    const previousLeft = bubble.style.left;
+    const previousTop = bubble.style.top;
+    if (overlap) {
+      // 立ち絵の真上へ重ねた最悪条件。保存済み配置は書き換えず、この場限りの検査用。
+      const rect = character.getBoundingClientRect();
+      bubble.style.left = `${Math.round(rect.left)}px`;
+      bubble.style.top = `${Math.round(rect.top)}px`;
+    }
+    // 立ち絵が動き続ける状態を作る。描画ループの休止判断とは独立に再合成させる。
+    const motion = character.animate(
+      [{ transform: "translateX(-14px)" }, { transform: "translateX(14px)" }],
+      { duration: 900, iterations: Infinity, direction: "alternate", easing: "ease-in-out" },
+    );
+    // 負荷条件では、フキダシの背後だけを動く矩形で埋めてフレーム予算を使い切らせる。
+    // ぼかしに実費用があるなら、ここで期限落ちの差として現れる。
+    const stress = document.createElement("div");
+    const stressAnimations = [];
+    if (load) {
+      stress.id = "bubble-blur-stress";
+      stress.style.cssText = "position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;";
+      const bubbleRect = bubble.getBoundingClientRect();
+      for (let index = 0; index < 80; index += 1) {
+        const cell = document.createElement("div");
+        const size = 40 + (index % 7) * 12;
+        cell.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:8px;`
+          + `background:hsl(${index * 4} 70% 60%);`
+          + `left:${Math.round(bubbleRect.left + (index * 37) % Math.max(1, bubbleRect.width))}px;`
+          + `top:${Math.round(bubbleRect.top + (index * 53) % Math.max(1, bubbleRect.height))}px;`;
+        stress.append(cell);
+        stressAnimations.push(cell.animate(
+          [{ transform: "translate3d(0,0,0) rotate(0deg)" }, { transform: "translate3d(60px,40px,0) rotate(180deg)" }],
+          { duration: 700 + index, iterations: Infinity, direction: "alternate" },
+        ));
+      }
+      (bubble.parentElement || document.body).insertBefore(stress, bubble);
+    }
+    const intervals = [];
+    await new Promise(resolve => {
+      let previous = performance.now();
+      const deadline = previous + sampleMs;
+      const step = now => {
+        intervals.push(now - previous);
+        previous = now;
+        if (now < deadline) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+    motion.cancel();
+    for (const animation of stressAnimations) animation.cancel();
+    stress.remove();
+    style.remove();
+    bubble.style.left = previousLeft;
+    bubble.style.top = previousTop;
+    // 最初の1コマは計測開始の基準なので落とす。
+    return intervals.slice(1);
+  }, { blur, overlap, load, sampleMs: BLUR_SAMPLE_MS });
+}
+
+async function measureBubbleBlur() {
+  const output = join(ROOT, "temp", "bubble-blur");
+  mkdirSync(output, { recursive: true });
+  const results = [];
+  for (const [layout, [width, height]] of Object.entries(BLUR_LAYOUTS)) {
+    for (const [overlap, load] of [[false, false], [true, false], [false, true], [true, true]]) {
+      const samples = { blur: [], plain: [] };
+      for (let trial = 0; trial < BLUR_TRIALS; trial += 1) {
+        const page = await openScene({ characterId: "mugi", layout, width, height, forcePng: true });
+        try {
+          // 同じページで両方を測り、起動ゆらぎを条件差として拾わないようにする。
+          // 先に測った側が暖機分を負うため、試行ごとに順序を入れ替える。
+          const order = trial % 2 === 0 ? [true, false] : [false, true];
+          for (const blur of order) {
+            const summary = summarizeFrames(await measureBubbleFrames(page, { blur, overlap, load }));
+            samples[blur ? "blur" : "plain"].push(summary);
+          }
+        } finally {
+          await page.close();
+        }
+      }
+      const median = key => {
+        const values = samples[key].map(item => item.medianMs).sort((a, b) => a - b);
+        return values[Math.floor(values.length / 2)];
+      };
+      const worst = key => Math.max(...samples[key].map(item => item.p95Ms));
+      const slow = key => samples[key].reduce((sum, item) => sum + item.slowFrames, 0);
+      const entry = {
+        layout,
+        overlap,
+        load,
+        blurMedianMs: median("blur"),
+        plainMedianMs: median("plain"),
+        differenceMs: Number((median("blur") - median("plain")).toFixed(2)),
+        blurP95Ms: worst("blur"),
+        plainP95Ms: worst("plain"),
+        blurSlowFrames: slow("blur"),
+        plainSlowFrames: slow("plain"),
+        trials: samples,
+      };
+      results.push(entry);
+      console.log(`  ぼかし計測: ${layout} 重なり${overlap ? "あり" : "なし"} 負荷${load ? "あり" : "なし"} 中央値 ぼかし${entry.blurMedianMs}ms / なし${entry.plainMedianMs}ms、p95 ${entry.blurP95Ms}ms / ${entry.plainP95Ms}ms、20ms超 ${entry.blurSlowFrames}件 / ${entry.plainSlowFrames}件`);
+    }
+  }
+  writeFileSync(join(output, "metrics.json"), JSON.stringify({ sampleMs: BLUR_SAMPLE_MS, trials: BLUR_TRIALS, results }, null, 2));
+  return { output, results };
+}
+
 async function validateLive2dMatrix() {
   const output = join(ROOT, "temp", "live2d-layout-matrix");
   mkdirSync(output, { recursive: true });
@@ -1526,6 +1661,15 @@ if (process.env.SHOOT_INTERACTION_MATRIX) {
   await browser.close();
   server.close();
   console.log(`表示操作検査完了: ${matrix.output}（${matrix.results.length}件）`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_BUBBLE_BLUR) {
+  const measured = await measureBubbleBlur();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`フキダシ背景ぼかし計測完了: ${measured.output}（${measured.results.length}条件）`);
   process.exit(0);
 }
 
