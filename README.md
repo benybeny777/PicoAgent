@@ -76,7 +76,7 @@
   <sub>
     各キャラを標準ペット表示と配信表示の両方で、960px・30fps・12秒（360コマ）撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から縮小しているため、旧480px動画の引き伸ばしではありません。同じ「おはよう。今日もよろしくね」への返事から、<b>音声同期の口パク → 考え中 → 成功 → 悲しみ → 左右視線 → 待機</b>を間隔を空けて再生し、まばたきや物理演算もそのまま動かしています。<br />
     人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
-    同梱PNG 8体はすべて同じフルモーション仕様で、自然なまばたき、音声再生中の口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。ミュート中と音量0では口パクしません。<br />
+    同梱通常2D 8体はすべて同じフルモーション仕様で、自然なまばたき、音声再生中の口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。ミュート中と音量0では口パクしません。<br />
     このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・ライス・わんこ）があります。<br />
     Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
   </sub>
@@ -94,7 +94,7 @@
 | ひより / はる / イプシロン / まお / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
-PNGの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
+通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。同梱通常2Dの実行フレームと差分レイヤーは、制作正本PNGと復号画素が完全一致するlossless WebPです。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
 
 ---
 
@@ -201,7 +201,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 既存のPNGキャラを試す場合は、元IDを上書きせず `rin-tha3` / `mai-tha3` のような別IDで作って見比べてください。ひよりなどのLive2DキャラはLive2Dの方が滑らかなため、THA3での作り直しは推奨しません。既知のむぎ素材もこの生成機能では自動変更しません。THA3の512px出力を配置枠へ引き伸ばす処理は禁止しており、元の実効解像度で枠を満たせない場合は生成を停止します。高解像度で直接生成できる経路またはPhotoshop仕上げを用意するまで、その素材を配布品質として採用しないでください。
 
-同梱PNGキャラの公開用画像を仕上げ直す場合は、Windows版Photoshopを閉じた状態で `powershell -ExecutionPolicy Bypass -File scripts/finish-2d-character-assets.ps1` を実行します。`character-sources/index.json` と `blobs/` の処理前1倍PNGを正本に、内容ハッシュで重複を除いてPhotoshopの「ディテールを保持 2.0」で通常立ち絵を2倍化します。仕上げスクリプトは208配置を `temp/` へ自動展開します。手編集時は `uv run python scripts/manage-character-sources.py expand --output temp/character-sources-expanded` で展開し、確認後に `compact --input temp/character-sources-expanded` で共有ストアへ戻します。起動用大判画像は元解像度を保ち、白マット除去と元アルファの再適用で輪郭を仕上げます。208点すべての寸法・四隅アルファ・被写体範囲を検査し、白／濃紺／マゼンタ／市松のQA一覧が成功してから `characters/` へ一括反映します。失敗時は製品画像を処理前へ戻します。処理記録はGit管理外の `temp/character-asset-finish/<日時>/` に残り、処理用に起動したPhotoshopは成功・失敗のどちらでも終了します。既に開いているPhotoshopには割り込みません。続けて `uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only` を実行すると、42フレームの見た目を維持したまま同一PNGを共有参照へまとめられます。制作元 `source.png` とLive2Dテクスチャは変更しません。
+同梱通常2Dキャラの公開用画像を仕上げ直す場合は、Windows版Photoshopを閉じた状態で `powershell -ExecutionPolicy Bypass -File scripts/finish-2d-character-assets.ps1` を実行します。`character-sources/index.json` と `blobs/` の処理前1倍PNGを正本に、内容ハッシュで重複を除いてPhotoshopの「ディテールを保持 2.0」で通常立ち絵を2倍化します。仕上げスクリプトは208配置を `temp/` へ自動展開します。手編集時は `uv run python scripts/manage-character-sources.py expand --output temp/character-sources-expanded` で展開し、確認後に `compact --input temp/character-sources-expanded` で共有ストアへ戻します。起動用大判画像は元解像度を保ち、白マット除去と元アルファの再適用で輪郭を仕上げます。208点すべての寸法・四隅アルファ・被写体範囲を検査し、白／濃紺／マゼンタ／市松のQA一覧が成功してから `characters/` へ一括反映します。失敗時は製品画像を処理前へ戻します。処理記録はGit管理外の `temp/character-asset-finish/<日時>/` に残り、処理用に起動したPhotoshopは成功・失敗のどちらでも終了します。既に開いているPhotoshopには割り込みません。続けて `uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only` を実行すると、42フレームの見た目を維持したまま実行画像をlossless WebPへまとめられます。制作正本の `layers/*.png`、`source.png`、Live2Dテクスチャは変更しません。
 
 ### 叩く AI を選ぶ
 

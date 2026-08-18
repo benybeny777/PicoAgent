@@ -3,6 +3,7 @@
 // 旧 `scripts/sync-characters.mjs` / `build-ui-dist.mjs` / `stop-stale.mjs` の置き換え。
 
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
@@ -211,10 +212,12 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
 
 fn is_character_source_only(path: &Path) -> bool {
     path.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_some_and(|name| matches!(name, "live2d-src" | "expression-patches"))
+        component.as_os_str().to_str().is_some_and(|name| {
+            matches!(
+                name,
+                "live2d-src" | "expression-patches" | "runtime-layers.part"
+            ) || (name.starts_with("frames-") && name.ends_with(".part"))
+        })
     })
 }
 
@@ -232,15 +235,75 @@ fn stamp_character_asset_versions(dest: &Path) -> Result<()> {
 
     for character_dir in character_dirs {
         let manifest_path = character_dir.join("character.json");
-        let version = character_content_version(&character_dir)?;
         let mut manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
         validate_character_asset_generation(&character_dir, &manifest)?;
+        remove_source_layers_from_runtime_copy(&character_dir, &manifest)?;
+        let version = character_content_version(&character_dir)?;
         manifest["assetVersion"] = serde_json::Value::String(format!("auto-{version}"));
         fs::write(
             manifest_path,
             format!("{}\n", serde_json::to_string_pretty(&manifest)?),
         )?;
+    }
+    Ok(())
+}
+
+fn is_lossless_webp(path: &Path) -> Result<bool> {
+    let mut bytes = Vec::with_capacity(16);
+    fs::File::open(path)?.take(16).read_to_end(&mut bytes)?;
+    Ok(bytes.len() == 16
+        && &bytes[..4] == b"RIFF"
+        && &bytes[8..12] == b"WEBP"
+        && &bytes[12..16] == b"VP8L")
+}
+
+/// 制作正本のlayers/*.pngは同期時の構造検証に使ったあと、配信用コピーからだけ外す。
+/// 実行時はmanifestのruntimeLayersが指すlossless WebPを読む。
+fn remove_source_layers_from_runtime_copy(
+    character_dir: &Path,
+    manifest: &serde_json::Value,
+) -> Result<()> {
+    let Some(runtime_layers) = manifest
+        .get("runtimeLayers")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return Ok(());
+    };
+    if manifest
+        .get("runtimeLayerEncoding")
+        .and_then(serde_json::Value::as_str)
+        != Some("webp-lossless-v1")
+    {
+        bail!("runtimeLayersを使う場合はruntimeLayerEncoding=webp-lossless-v1が必要です");
+    }
+    for name in FULL_MOTION_LAYERS {
+        let relative = runtime_layers
+            .get(*name)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("runtimeLayers.{name} がありません"))?;
+        let relative_path = Path::new(relative);
+        if relative_path.is_absolute()
+            || relative_path
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            bail!("runtimeLayers.{name} は安全な相対パスにしてください: {relative}");
+        }
+        let path = character_dir.join(relative_path);
+        if path.extension().and_then(|extension| extension.to_str()) != Some("webp")
+            || !path.is_file()
+            || !is_lossless_webp(&path)?
+        {
+            bail!(
+                "runtimeLayers.{name} がlossless WebPを指していません: {}",
+                path.display()
+            );
+        }
+    }
+    let source_layers = character_dir.join("layers");
+    if source_layers.exists() {
+        fs::remove_dir_all(source_layers)?;
     }
     Ok(())
 }
@@ -392,6 +455,32 @@ fn validate_character_asset_generation(
                     character_dir.display(),
                     name,
                     generation,
+                    path
+                );
+            }
+            let asset = character_dir.join(path);
+            if !asset.is_file() {
+                bail!(
+                    "{} の{}が存在しません: {}",
+                    character_dir.display(),
+                    name,
+                    path
+                );
+            }
+            if manifest
+                .get("frameEncoding")
+                .and_then(serde_json::Value::as_str)
+                == Some("webp-lossless-v1")
+                && (Path::new(path)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    != Some("webp")
+                    || !is_lossless_webp(&asset)?)
+            {
+                bail!(
+                    "{} の{}がlossless WebPではありません: {}",
+                    character_dir.display(),
+                    name,
                     path
                 );
             }
@@ -825,8 +914,8 @@ mod tests {
 
     use super::{
         character_content_version, content_version, drop_characters_from_index,
-        is_character_source_only, remove_beta_badge, rewrite_asset_refs,
-        stamp_character_asset_versions, unfetched_live2d_characters,
+        is_character_source_only, remove_beta_badge, remove_source_layers_from_runtime_copy,
+        rewrite_asset_refs, stamp_character_asset_versions, unfetched_live2d_characters,
         validate_character_asset_generation,
     };
 
@@ -837,6 +926,12 @@ mod tests {
         )));
         assert!(is_character_source_only(std::path::Path::new(
             "characters/hiyori/live2d-src/source.psd"
+        )));
+        assert!(is_character_source_only(std::path::Path::new(
+            "characters/mugi/runtime-layers.part/base.webp"
+        )));
+        assert!(is_character_source_only(std::path::Path::new(
+            "characters/mugi/frames-deadbeef.part/base.webp"
         )));
         assert!(!is_character_source_only(std::path::Path::new(
             "characters/mugi/frames/idle.png"
@@ -1086,6 +1181,66 @@ mod tests {
     }
 
     #[test]
+    fn 同梱2dの実行画像はlossless_webp単一世代にする() {
+        let characters = crate::util::repo_root().join("characters");
+        for entry in fs::read_dir(characters).unwrap().flatten() {
+            let character = entry.path();
+            let manifest_path = character.join("character.json");
+            if !manifest_path.is_file() {
+                continue;
+            }
+            let manifest: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(manifest_path).unwrap()).unwrap();
+            if manifest.get("live2d").is_some() {
+                continue;
+            }
+            assert_eq!(
+                manifest
+                    .get("frameEncoding")
+                    .and_then(serde_json::Value::as_str),
+                Some("webp-lossless-v1"),
+                "{} のフレームがlossless WebPではありません",
+                character.display()
+            );
+            assert_eq!(
+                manifest
+                    .get("runtimeLayerEncoding")
+                    .and_then(serde_json::Value::as_str),
+                Some("webp-lossless-v1"),
+                "{} の実行レイヤーがlossless WebPではありません",
+                character.display()
+            );
+            validate_character_asset_generation(&character, &manifest).unwrap();
+            for name in super::FULL_MOTION_LAYERS {
+                assert!(
+                    character
+                        .join("layers")
+                        .join(format!("{name}.png"))
+                        .is_file(),
+                    "制作正本PNGを消しています: {}/layers/{name}.png",
+                    character.display()
+                );
+                let runtime = manifest["runtimeLayers"][*name].as_str().unwrap();
+                assert!(super::is_lossless_webp(&character.join(runtime)).unwrap());
+            }
+            assert_eq!(
+                fs::read_dir(character.join("frames"))
+                    .unwrap()
+                    .flatten()
+                    .flat_map(|generation| fs::read_dir(generation.path()).unwrap().flatten())
+                    .filter(
+                        |frame| frame.path().extension().and_then(|ext| ext.to_str())
+                            == Some("png")
+                    )
+                    .count(),
+                0,
+                "{} の実行フレームにPNGが残っています",
+                character.display()
+            );
+        }
+    }
+
+    #[test]
     fn フルモーション宣言は全共通レイヤーを必須にする() {
         let root =
             std::env::temp_dir().join(format!("picoagent-full-motion-{}", std::process::id()));
@@ -1102,6 +1257,67 @@ mod tests {
             .unwrap();
         }
         super::validate_full_motion_pack(&character, &manifest).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 配信コピーはlossless_webpレイヤーだけを残す() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-runtime-webp-layers-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        fs::create_dir_all(root.join("layers")).unwrap();
+        fs::create_dir_all(root.join("runtime-layers")).unwrap();
+        let mut runtime_layers = serde_json::Map::new();
+        for name in super::FULL_MOTION_LAYERS {
+            fs::write(root.join("layers").join(format!("{name}.png")), b"source").unwrap();
+            fs::write(
+                root.join("runtime-layers").join(format!("{name}.webp")),
+                b"RIFF\0\0\0\0WEBPVP8L",
+            )
+            .unwrap();
+            runtime_layers.insert(
+                (*name).to_string(),
+                serde_json::Value::String(format!("runtime-layers/{name}.webp")),
+            );
+        }
+        let manifest = serde_json::json!({
+            "runtimeLayers": runtime_layers,
+            "runtimeLayerEncoding": "webp-lossless-v1"
+        });
+        remove_source_layers_from_runtime_copy(&root, &manifest).unwrap();
+        assert!(!root.join("layers").exists());
+        assert!(root.join("runtime-layers/base.webp").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lossy_webpをlossless宣言では通さない() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-runtime-lossy-webp-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        fs::create_dir_all(root.join("layers")).unwrap();
+        fs::create_dir_all(root.join("runtime-layers")).unwrap();
+        let mut runtime_layers = serde_json::Map::new();
+        for name in super::FULL_MOTION_LAYERS {
+            fs::write(
+                root.join("runtime-layers").join(format!("{name}.webp")),
+                b"RIFF\0\0\0\0WEBPVP8 ",
+            )
+            .unwrap();
+            runtime_layers.insert(
+                (*name).to_string(),
+                serde_json::Value::String(format!("runtime-layers/{name}.webp")),
+            );
+        }
+        let manifest = serde_json::json!({
+            "runtimeLayers": runtime_layers,
+            "runtimeLayerEncoding": "webp-lossless-v1"
+        });
+        assert!(remove_source_layers_from_runtime_copy(&root, &manifest).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

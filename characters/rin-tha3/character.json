@@ -1,7 +1,7 @@
 {
   "id": "rin-tha3",
   "name": "りん",
-  "assetVersion": "2026-08-08-preserve-details-v2-rin-tha3",
+  "assetVersion": "lossless-webp-776505e41f588e6d",
   "description": "自作（THA3）版。既存のりんとは別キャラクターとして扱われる、17キーポーズ／42フレームの試作モデル。人格・声・挨拶は既存のりんと同じ。",
   "motionProfile": "full",
   "bodyProportion": "compact",
@@ -68,18 +68,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/da9b2d24e2f0ca1e/9eed4e5b89e37cba82bd.png",
-        "frames/da9b2d24e2f0ca1e/e089b0f8d6e83417cd77.png",
-        "frames/da9b2d24e2f0ca1e/51fad4c8f476a161881b.png",
-        "frames/da9b2d24e2f0ca1e/3b61657a3f48680ccc7e.png",
-        "frames/da9b2d24e2f0ca1e/99daf78f95b55e932a8c.png",
-        "frames/da9b2d24e2f0ca1e/9c99ee857d383f24aedc.png",
-        "frames/da9b2d24e2f0ca1e/99daf78f95b55e932a8c.png",
-        "frames/da9b2d24e2f0ca1e/e089b0f8d6e83417cd77.png",
-        "frames/da9b2d24e2f0ca1e/9eed4e5b89e37cba82bd.png",
-        "frames/da9b2d24e2f0ca1e/3b61657a3f48680ccc7e.png",
-        "frames/da9b2d24e2f0ca1e/51fad4c8f476a161881b.png",
-        "frames/da9b2d24e2f0ca1e/9eed4e5b89e37cba82bd.png"
+        "frames/776505e41f588e6d/08cc8d80a3f8512c8e89.webp",
+        "frames/776505e41f588e6d/6e5417535432726e881a.webp",
+        "frames/776505e41f588e6d/be5b6a623d95f435c8a2.webp",
+        "frames/776505e41f588e6d/03f1f35b6f6a41e7f588.webp",
+        "frames/776505e41f588e6d/6ad0a9841756200b62bd.webp",
+        "frames/776505e41f588e6d/7c3353c524ad4a9cf359.webp",
+        "frames/776505e41f588e6d/6ad0a9841756200b62bd.webp",
+        "frames/776505e41f588e6d/6e5417535432726e881a.webp",
+        "frames/776505e41f588e6d/08cc8d80a3f8512c8e89.webp",
+        "frames/776505e41f588e6d/03f1f35b6f6a41e7f588.webp",
+        "frames/776505e41f588e6d/be5b6a623d95f435c8a2.webp",
+        "frames/776505e41f588e6d/08cc8d80a3f8512c8e89.webp"
       ]
     },
     "thinking": {
@@ -101,18 +101,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
-        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
-        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
-        "frames/da9b2d24e2f0ca1e/21ba5c245eb5c8e97ef2.png",
-        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
-        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
-        "frames/da9b2d24e2f0ca1e/9c99ee857d383f24aedc.png",
-        "frames/da9b2d24e2f0ca1e/21ba5c245eb5c8e97ef2.png",
-        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
-        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png",
-        "frames/da9b2d24e2f0ca1e/93ed38a062fa20293b9b.png",
-        "frames/da9b2d24e2f0ca1e/b4a31b4ef8d3577fc5ec.png"
+        "frames/776505e41f588e6d/7a5007e8ff12f12e6fac.webp",
+        "frames/776505e41f588e6d/8124e0954396f11b2d86.webp",
+        "frames/776505e41f588e6d/7a5007e8ff12f12e6fac.webp",
+        "frames/776505e41f588e6d/699754bf9d70a7ee0c59.webp",
+        "frames/776505e41f588e6d/8124e0954396f11b2d86.webp",
+        "frames/776505e41f588e6d/7a5007e8ff12f12e6fac.webp",
+        "frames/776505e41f588e6d/7c3353c524ad4a9cf359.webp",
+        "frames/776505e41f588e6d/699754bf9d70a7ee0c59.webp",
+        "frames/776505e41f588e6d/8124e0954396f11b2d86.webp",
+        "frames/776505e41f588e6d/7a5007e8ff12f12e6fac.webp",
+        "frames/776505e41f588e6d/8124e0954396f11b2d86.webp",
+        "frames/776505e41f588e6d/7a5007e8ff12f12e6fac.webp"
       ]
     },
     "talking": {
@@ -134,18 +134,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/da9b2d24e2f0ca1e/b7eccb88eb0180270aa7.png",
-        "frames/da9b2d24e2f0ca1e/fb58eeca84389080519e.png",
-        "frames/da9b2d24e2f0ca1e/f529f2aeb6c4cd6afbaa.png",
-        "frames/da9b2d24e2f0ca1e/a36c0207e71a6c783a1b.png",
-        "frames/da9b2d24e2f0ca1e/fb58eeca84389080519e.png",
-        "frames/da9b2d24e2f0ca1e/b7eccb88eb0180270aa7.png",
-        "frames/da9b2d24e2f0ca1e/f529f2aeb6c4cd6afbaa.png",
-        "frames/da9b2d24e2f0ca1e/a36c0207e71a6c783a1b.png",
-        "frames/da9b2d24e2f0ca1e/99daf78f95b55e932a8c.png",
-        "frames/da9b2d24e2f0ca1e/fb58eeca84389080519e.png",
-        "frames/da9b2d24e2f0ca1e/f529f2aeb6c4cd6afbaa.png",
-        "frames/da9b2d24e2f0ca1e/b7eccb88eb0180270aa7.png"
+        "frames/776505e41f588e6d/1f6e1aa4e457b3925bbf.webp",
+        "frames/776505e41f588e6d/314f172d15cd7c3d3dd8.webp",
+        "frames/776505e41f588e6d/06aa28b49e7aaa2ab186.webp",
+        "frames/776505e41f588e6d/47aa21ee0a03ace3d0cb.webp",
+        "frames/776505e41f588e6d/314f172d15cd7c3d3dd8.webp",
+        "frames/776505e41f588e6d/1f6e1aa4e457b3925bbf.webp",
+        "frames/776505e41f588e6d/06aa28b49e7aaa2ab186.webp",
+        "frames/776505e41f588e6d/47aa21ee0a03ace3d0cb.webp",
+        "frames/776505e41f588e6d/6ad0a9841756200b62bd.webp",
+        "frames/776505e41f588e6d/314f172d15cd7c3d3dd8.webp",
+        "frames/776505e41f588e6d/06aa28b49e7aaa2ab186.webp",
+        "frames/776505e41f588e6d/1f6e1aa4e457b3925bbf.webp"
       ]
     },
     "sad": {
@@ -161,12 +161,12 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/da9b2d24e2f0ca1e/45d11a0b1bea1092bea0.png",
-        "frames/da9b2d24e2f0ca1e/2eea6958041fca2e1fde.png",
-        "frames/da9b2d24e2f0ca1e/9c99ee857d383f24aedc.png",
-        "frames/da9b2d24e2f0ca1e/2eea6958041fca2e1fde.png",
-        "frames/da9b2d24e2f0ca1e/45d11a0b1bea1092bea0.png",
-        "frames/da9b2d24e2f0ca1e/45d11a0b1bea1092bea0.png"
+        "frames/776505e41f588e6d/1d1a541592adb4c61a96.webp",
+        "frames/776505e41f588e6d/63925ea379fc3fbe4b17.webp",
+        "frames/776505e41f588e6d/7c3353c524ad4a9cf359.webp",
+        "frames/776505e41f588e6d/63925ea379fc3fbe4b17.webp",
+        "frames/776505e41f588e6d/1d1a541592adb4c61a96.webp",
+        "frames/776505e41f588e6d/1d1a541592adb4c61a96.webp"
       ]
     }
   },
@@ -177,5 +177,18 @@
     "source": "source.png",
     "keyPoseCount": 17
   },
-  "frameGeneration": "da9b2d24e2f0ca1e"
+  "frameGeneration": "776505e41f588e6d",
+  "runtimeLayers": {
+    "base": "runtime-layers/base.webp",
+    "blink_half": "runtime-layers/blink_half.webp",
+    "blink_closed": "runtime-layers/blink_closed.webp",
+    "mouth_closed": "runtime-layers/mouth_closed.webp",
+    "mouth_open": "runtime-layers/mouth_open.webp",
+    "gaze_left": "runtime-layers/gaze_left.webp",
+    "gaze_right": "runtime-layers/gaze_right.webp",
+    "expression_happy": "runtime-layers/expression_happy.webp",
+    "expression_sad": "runtime-layers/expression_sad.webp"
+  },
+  "runtimeLayerEncoding": "webp-lossless-v1",
+  "frameEncoding": "webp-lossless-v1"
 }

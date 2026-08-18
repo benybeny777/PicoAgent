@@ -96,6 +96,15 @@ fn read_repo_file(relative: &str) -> Option<String> {
 mod guard {
     use super::{read_repo_file, referenced_keys};
 
+    #[test]
+    fn 実行レイヤーはmanifestのwebpと追加パックのpngを両立する() {
+        let source = read_repo_file("ui/renderer.js").expect("renderer.js を読めない");
+        assert!(source
+            .contains("runtimeLayers = variant?.runtimeLayers || manifest.runtimeLayers || {}"));
+        assert!(source.contains("typeof runtimeLayers[name] === \"string\""));
+        assert!(source.contains(": `layers/${name}.png`"));
+    }
+
     /// 実装が参照する設定キーは、すべて `SPEC.md` に載っていること。
     #[test]
     fn 設定キーはspecに記載する() {

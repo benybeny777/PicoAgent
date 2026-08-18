@@ -542,6 +542,31 @@ mod tests {
     }
 
     #[test]
+    fn lossless_webpの共有フレームも通る() {
+        let dir = temp_dir("webp-frame-paths-ok");
+        std::fs::create_dir_all(dir.join("frames")).unwrap();
+        std::fs::write(dir.join("frames/a.webp"), b"RIFF\0\0\0\0WEBP").unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "compact-webp-2d",
+                "name": "WebP共有フレーム",
+                "animations": {
+                    "idle": {
+                        "frames": 2,
+                        "framePaths": ["frames/a.webp", "frames/a.webp"],
+                        "fps": 3.0
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        validate(&dir).expect("WebP共有フレーム参照を検証できない");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn 共有フレーム参照の件数ずれと欠損を弾く() {
         let dir = temp_dir("frame-paths-ng");
         std::fs::write(

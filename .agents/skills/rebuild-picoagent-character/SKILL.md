@@ -13,7 +13,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 
 ## 対応形式と構図
 
-- 対応ランタイムは通常2D PNGとLive2D。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
+- 対応ランタイムは通常2D画像とLive2D。同梱通常2Dの制作正本はPNG、実行フレームと差分レイヤーはlossless WebPとする。利用者が追加済みのPNGパックは後方互換で読み続ける。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
 - 低頭身2Dは従来の上半身位置、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にする。
 - チャット／バーの小型アイコンは首上にする。保存済みの利用者構図は初期値より優先する。
 - 画面位置の手動調整は別作業。依頼がなければ原画やmanifestへ焼き込まない。
@@ -26,6 +26,8 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - Photoshop「ディテールを保持 2.0」は、同倍率で顔、髪、輪郭が実際に改善するときだけ使う。候補を別名で保存し、元画像を上書きしない。
 - Photoshopの生成AIは、権利を持つ画像の局所補修に限定する。本人性、服、髪型、構図を無断で作り替えない。
 - Pillow、ブラウザ、CSS等による単純なピクセル拡大を高精細化と呼ばない。
+- `characters/<id>/layers/*.png` は制作正本として残し、`scripts/build-character-animations.py` だけで `runtime-layers/*.webp` と `frames/<世代>/*.webp` へ変換する。変換後は寸法と復号RGBAを元画像と完全一致させ、1画素でも違えば採用しない。
+- 生成後に `cargo xtask sync-characters` を通し、配信コピーから制作正本の `layers/` が除外され、manifestの `runtimeLayers` と `framePaths` がlossless WebPだけを指すことを確認する。
 
 ## 表情差分と透過
 
@@ -52,7 +54,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 ## 再構築と検証
 
 ```powershell
-uv run python scripts/build-character-animations.py --character-id <id>
+uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
 cargo xtask sync-characters
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml
@@ -61,4 +63,4 @@ cargo check --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
 
-READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。実画面の確認後にREADME、配布README、LP、`SPEC.md`、`CHANGELOG.md`、`docs/REVIEW-LOG.md`を同期する。
+画像を追加・更新したコミットでは `git lfs ls-files` に対象PNG／WebPが載ることも確認する。READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。通常2Dの実行画像を変えた場合は `SHOOT_CHARACTER_MATRIX=1` で全キャラ・全7形式を撮影し、速度警告0件と実画像の欠け・矩形・輪郭劣化なしを確認する。実画面の確認後にREADME、配布README、LP、`SPEC.md`、`CHANGELOG.md`、`docs/REVIEW-LOG.md`を同期する。

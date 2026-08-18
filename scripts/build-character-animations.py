@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import filecmp
 import hashlib
 import json
 from pathlib import Path
@@ -240,12 +241,133 @@ def write_manifest(character_dir: Path, manifest: dict) -> None:
     temporary.replace(manifest_path)
 
 
-def file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def image_pixel_digest(path: Path) -> str:
+    """画像形式やメタデータではなく、復号後RGBAの内容を識別する。"""
+    with Image.open(path) as opened:
+        image = opened.convert("RGBA")
+    try:
+        digest = hashlib.sha256()
+        digest.update(image.width.to_bytes(4, "big"))
+        digest.update(image.height.to_bytes(4, "big"))
+        digest.update(image.tobytes())
+        return digest.hexdigest()
+    finally:
+        image.close()
+
+
+def save_lossless_webp_exact(source: Path, destination: Path) -> None:
+    """透過画素のRGBも含め、復号後RGBAが一致するlossless WebPだけを書き出す。"""
+    with Image.open(source) as opened:
+        original = opened.convert("RGBA")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        original.save(
+            destination,
+            format="WEBP",
+            lossless=True,
+            quality=100,
+            # method=6は大判9レイヤーだけで5分を超え、正規の再生成入口として使えない。
+            # 復号画素の一致は直後に別途検査するため、圧縮探索だけを実用的な4へ抑える。
+            method=4,
+            exact=True,
+        )
+        with Image.open(destination) as opened:
+            restored = opened.convert("RGBA")
+        try:
+            if restored.size != original.size or restored.tobytes() != original.tobytes():
+                destination.unlink(missing_ok=True)
+                raise ValueError(
+                    f"lossless WebPの復号画素が元画像と一致しません: {source}"
+                )
+        finally:
+            restored.close()
+    finally:
+        original.close()
+
+
+def directories_identical(left: Path, right: Path) -> bool:
+    """ファイル一覧と内容が同じ生成済みディレクトリかを判定する。"""
+    left_files = sorted(path.relative_to(left) for path in left.rglob("*") if path.is_file())
+    right_files = sorted(path.relative_to(right) for path in right.rglob("*") if path.is_file())
+    return left_files == right_files and all(
+        filecmp.cmp(left / relative, right / relative, shallow=False)
+        for relative in left_files
+    )
+
+
+def install_new_directory(staging: Path, destination: Path) -> None:
+    """完成済みstagingをrenameし、Windowsの一時ロック時だけ全件コピーする。"""
+    try:
+        staging.replace(destination)
+    except PermissionError:
+        # フォールバック許可: Git LFS対象パスをWindows側が一時的に開くと、同一ボリュームでも
+        # ディレクトリrenameがWinError 5になる。manifest更新前なので、全件コピー完了後に
+        # stagingを回収すれば同じトランザクション境界を保てる。
+        try:
+            shutil.copytree(staging, destination)
+        except Exception:
+            if destination.exists():
+                shutil.rmtree(destination)
+            raise
+        else:
+            shutil.rmtree(staging)
+
+
+def place_directory(staging: Path, destination: Path) -> None:
+    """既存世代を保持したまま完成済みディレクトリへ切り替える。"""
+    backup = destination.with_name(f"{destination.name}.old")
+    if not destination.exists() and backup.exists():
+        backup.replace(destination)
+    elif destination.exists() and backup.exists():
+        shutil.rmtree(backup)
+
+    if not destination.exists():
+        install_new_directory(staging, destination)
+        return
+    if directories_identical(staging, destination):
+        shutil.rmtree(staging)
+        return
+
+    destination.replace(backup)
+    try:
+        install_new_directory(staging, destination)
+    except Exception:
+        if destination.exists():
+            shutil.rmtree(destination)
+        try:
+            backup.replace(destination)
+        except Exception as restore_error:
+            raise RuntimeError(
+                f"生成先の復元に失敗しました。退避を残します: {backup}"
+            ) from restore_error
+        raise
+    shutil.rmtree(backup)
+
+
+def build_runtime_layers(character_dir: Path, layer_paths: dict[str, Path], manifest: dict) -> None:
+    """制作正本PNGを残し、実行時に読む共通差分だけをlossless WebP化する。"""
+    runtime_dir = character_dir / "runtime-layers"
+    staging = character_dir / "runtime-layers.part"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    runtime_layers: dict[str, str] = {}
+    for name in ("base", *FALLBACK_LAYERS):
+        source = layer_paths[name]
+        destination = staging / f"{name}.webp"
+        current = runtime_dir / f"{name}.webp"
+        if (
+            manifest.get("runtimeLayerEncoding") == "webp-lossless-v1"
+            and current.is_file()
+            and image_pixel_digest(current) == image_pixel_digest(source)
+        ):
+            shutil.copy2(current, destination)
+        else:
+            save_lossless_webp_exact(source, destination)
+        runtime_layers[name] = f"runtime-layers/{name}.webp"
+    place_directory(staging, runtime_dir)
+    manifest["runtimeLayers"] = runtime_layers
+    manifest["runtimeLayerEncoding"] = "webp-lossless-v1"
 
 
 def compact_animation_frames(character_dir: Path, manifest: dict) -> None:
@@ -257,6 +379,7 @@ def compact_animation_frames(character_dir: Path, manifest: dict) -> None:
     frame_store = character_dir / "frames"
     sources: dict[str, list[tuple[str, Path]]] = {}
     generation_hasher = hashlib.sha256()
+    generation_hasher.update(b"lossless-webp-v1\0")
     for animation_name in sorted(animations):
         animation = animations[animation_name]
         if not isinstance(animation, dict):
@@ -283,7 +406,7 @@ def compact_animation_frames(character_dir: Path, manifest: dict) -> None:
             source = character_dir / relative
             if not source.is_file():
                 raise FileNotFoundError(f"連番フレームがありません: {source}")
-            digest = file_digest(source)
+            digest = image_pixel_digest(source)
             generation_hasher.update(animation_name.encode("utf-8"))
             generation_hasher.update(index.to_bytes(4, "big"))
             generation_hasher.update(digest.encode("ascii"))
@@ -296,12 +419,16 @@ def compact_animation_frames(character_dir: Path, manifest: dict) -> None:
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     copied: set[str] = set()
+    reuse_existing_webp = manifest.get("frameEncoding") == "webp-lossless-v1"
     for animation_name, state_sources in sources.items():
         paths: list[str] = []
         for digest, source in state_sources:
-            filename = f"{digest[:20]}.png"
+            filename = f"{digest[:20]}.webp"
             if filename not in copied:
-                shutil.copy2(source, staging / filename)
+                if reuse_existing_webp and source.suffix.lower() == ".webp":
+                    shutil.copy2(source, staging / filename)
+                else:
+                    save_lossless_webp_exact(source, staging / filename)
                 copied.add(filename)
             paths.append(f"frames/{generation}/{filename}")
         animations[animation_name]["framePaths"] = paths
@@ -310,10 +437,10 @@ def compact_animation_frames(character_dir: Path, manifest: dict) -> None:
 
     generation_dir = frame_store / generation
     frame_store.mkdir(parents=True, exist_ok=True)
-    if generation_dir.exists():
-        shutil.rmtree(generation_dir)
-    staging.replace(generation_dir)
+    place_directory(staging, generation_dir)
     manifest["frameGeneration"] = generation
+    manifest["frameEncoding"] = "webp-lossless-v1"
+    manifest["assetVersion"] = f"lossless-webp-{generation}"
     # 新世代の配置とmanifestの原子的保存後だけ、旧世代と一時連番を消す。
     write_manifest(character_dir, manifest)
     animation_root = character_dir / "animations"
@@ -476,8 +603,10 @@ def build_character(
     manifest = load_manifest(character_dir)
     reject_mixed_sharp_assets(character_dir, manifest)
     if compact_only:
+        layer_paths = ensure_layers(character_dir)
+        build_runtime_layers(character_dir, layer_paths, manifest)
         compact_animation_frames(character_dir, manifest)
-        print(f"[build-character-animations] {character_dir.name} の連番を共有化しました")
+        print(f"[build-character-animations] {character_dir.name} の実行画像をlossless WebP化しました")
         return
     if manifest.get("live2d"):
         # Live2D キャラはモデル自身が動くため連番フレームを生成しない。
@@ -487,6 +616,7 @@ def build_character(
     layer_paths = ensure_layers(character_dir)
     clean_expression_layers(layer_paths)
     build_frames(character_dir, layer_paths, disable_sway, manifest.get("animationQualityMode"))
+    build_runtime_layers(character_dir, layer_paths, manifest)
     manifest["animations"] = (
         doubled_animations()
         if manifest.get("animationQualityMode") == "spring-high"
