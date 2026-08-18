@@ -915,21 +915,17 @@ function animateSpringMotion(now) {
   if (springLastAt && now - springLastAt < 1000 / 30) return;
   const dt = springLastAt ? Math.min(1 / 30, Math.max(1 / 240, (now - springLastAt) / 1000)) : 1 / 60;
   springLastAt = now;
-  const stopped = false;
   if (activeBodyMotion && characterView) {
-    const bodyY = stopped ? 0 : Math.sin(
+    const bodyY = Math.sin(
       (now / 1000) * Math.PI * 2 * activeBodyMotion.frequency + activeBodyMotion.phase,
     ) * activeBodyMotion.amplitudeY;
     characterView.style.setProperty("--body-breathe-y", `${bodyY.toFixed(3)}px`);
   }
   for (const spring of activeSpringMotion) {
-    const target = stopped ? 0 : Math.sin((now / 1000) * Math.PI * 2 * spring.frequency + spring.phase) * spring.drive;
+    const target = Math.sin((now / 1000) * Math.PI * 2 * spring.frequency + spring.phase) * spring.drive;
     const acceleration = (target - spring.position) * spring.stiffness - spring.velocity * spring.damping;
     spring.velocity += acceleration * dt;
     spring.position += spring.velocity * dt;
-    if (stopped && Math.abs(spring.position) < 0.002 && Math.abs(spring.velocity) < 0.002) {
-      spring.position = 0; spring.velocity = 0;
-    }
     const p = spring.position;
     spring.sprite.style.transform = `translate(${(p * spring.axisX).toFixed(3)}px, ${(p * spring.axisY).toFixed(3)}px) rotate(${(p * spring.rotation).toFixed(3)}deg) scale(${(1 + Math.abs(p) * spring.scale).toFixed(5)})`;
   }
@@ -4804,9 +4800,7 @@ async function checkAlarms() {
     const days = Array.isArray(a.days) ? a.days : [];
     if (days.length && !days.includes(today)) continue;
     const key = `${a.id}@${minuteKey}`;
-    if (firedAlarms.has(key)) continue;
-    firedAlarms.add(key);
-    if (firedAlarms.size > 50) firedAlarms.clear();
+    if (!window.PicoAlarmRuntime.markFired(firedAlarms, key)) continue;
     await fireAlarm(a);
     break; // 1ティックにつき1件だけ鳴らす。
   }

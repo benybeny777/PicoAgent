@@ -343,6 +343,8 @@ mod guard {
         for name in [
             "renderer.js",
             "settings.js",
+            "frame-scheduler.js",
+            "alarm-runtime.js",
             "memory-settings.js",
             "common.js",
             "picoagent.js",

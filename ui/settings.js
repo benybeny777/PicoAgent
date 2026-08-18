@@ -43,6 +43,7 @@ const characterManifestCache = new Map();
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
+let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
@@ -109,6 +110,7 @@ replaceSettingsListener("navigate", "settings:navigate", tabId => {
 });
 
 window.addEventListener("beforeunload", () => {
+  dirtyStateScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
   // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
@@ -169,7 +171,7 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-function updateDirtyState() {
+function updateDirtyStateNow() {
   if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
   const current = collect();
   const changedKeys = new Set(
@@ -221,11 +223,19 @@ function updateDirtyState() {
   }
 }
 
+// collect()と全設定の比較は高コストなので、入力・ドラッグが連続しても1フレーム1回だけ行う。
+dirtyStateScheduler = window.PicoFrameScheduler.create(updateDirtyStateNow);
+
+function updateDirtyState() {
+  dirtyStateScheduler.schedule();
+}
+
 function setSettingsMutationBusy(busy) {
   settingsMutationBusy = busy;
   form.inert = busy;
   form.setAttribute("aria-busy", String(busy));
-  updateDirtyState();
+  // 保存中のボタン無効化は次フレームまで遅らせず、二重押しの窓を作らない。
+  dirtyStateScheduler.flush();
 }
 
 function nodeSearchText(node) {
