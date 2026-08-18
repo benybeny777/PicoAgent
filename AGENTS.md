@@ -157,7 +157,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/guard_scan.rs` | **設計ガードの走査範囲の正本**（テスト専用）。`all_sources()` がスキルとバックエンド `src-tauri/src/` の全ソースを返す。スキル側は `mod.rs` だけでなく `skills/<スキル名>/*.rs` の補助モジュール（`run_command/jobs.rs` など）も含める（`mod.rs` だけ見ると、補助モジュールへ書いた違反を見逃す）。各ガードが自前でディレクトリを歩くと範囲がずれて違反を見逃すため、`guard_scan::guard` のメタガードが自前走査を検出 |
 | `src-tauri/src/store.rs` | **アプリ状態ファイル永続化の共通層**。`write_atomic()` / `write_json_atomic()` が「一時ファイル → `sync_all` → `rename`」で原子的に書き換え、途中で落ちても既存データを壊さない。`quarantine_corrupt()` は読めなかったファイルを `.corrupt-<日時>` へ退避する。`store::guard` のテストが `fs::write` の直接使用を検出 |
 | `src-tauri/src/tools/process.rs` | **外部プロセス実行の共通層**。`command()` が Windows のコンソール窓抑止・`kill_on_drop`・stdio 既定を適用し、`output()` / `output_text()` がタイムアウト付きで実行する。`tools::process::guard` のテストが `Command::new` の直接使用を検出 |
-| `src-tauri/src/scheduler.rs` | cron 風スケジュールタスクの常駐実行と実行履歴（`app_data_dir/schedule-runs.json`）。**検出（同期）と実行（単一ワーカー）はキューで分離**し、長時間タスク中も検出が止まらないようにしている（`scheduler::tests` の設計ガードが検出関数の `async` 化を検出） |
+| `src-tauri/src/scheduler.rs` | cron 風スケジュールタスクの常駐実行と実行履歴（`app_data_dir/schedule-runs.json`）。日と曜日を両方制限した場合は標準cron互換のOR条件。**検出（同期）と実行（単一ワーカー）はキューで分離**し、長時間タスク中も検出が止まらないようにしている（`scheduler::tests` の設計ガードが検出関数の `async` 化を検出） |
 | `src-tauri/src/memory.rs` / `emotion.rs` | 暗黙的な長期メモリ（`app_data_dir/memory.json`）／ルールベースの感情状態推定 |
 | `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
 | `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |

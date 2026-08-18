@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-18
-- ブランチ: `security/remove-unsafe-eval`
-- 目的: ClaudeブランチのP1-14を完了する
-- 対応PR: #129
+- ブランチ: `fix/cron-day-weekday-semantics`
+- 目的: ClaudeブランチのP1-15を完了する
+- 対応PR: 作成中
 
 ## 未処理の残件（次に作業する人はここから始める）
 
@@ -36,6 +36,14 @@ PR #119から現行`main`で実在を確認したP0 2件・P1 6件は、すべ�
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-18、ClaudeブランチのP1-15は推奨案Aを採用し、cronの「日」と「曜日」を
+両方制限した場合だけ標準cron互換のORで結ぶようにした。`0 9 1 * 1`は毎月1日または
+毎週月曜の9時、`0 9 1 * *`は毎月1日だけ、`0 9 * * 1`は毎週月曜だけになる。
+既存の両方指定タスクは更新後に発火回数が増えるためCHANGELOGとREADMEへ明記した。
+`1-5`の範囲指定を受け付けない既存方針と、ほかの4フィールドの判定は変更していない。
+`cargo xtask verify`は全19項目成功。本体libは380件成功・長時間Whisper 1件だけ既定ignore、
+xtaskは58件、追跡JavaScript／MJSは12件で失敗0だった。
 
 2026-08-18、ClaudeブランチのP1-14を確認した。`cargo xtask setup live2d`で現行ランタイムを
 検証したところ、Cubism CoreではなくPIXI 6.5.10がWebGLのバッファ・uniform同期関数を
