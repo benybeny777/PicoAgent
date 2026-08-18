@@ -5,7 +5,9 @@ import test from "node:test";
 await import("../../ui/frame-scheduler.js");
 
 const settingsHtml = await readFile(new URL("../../ui/settings.html", import.meta.url), "utf8");
+const indexHtml = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
 const settings = await readFile(new URL("../../ui/settings.js", import.meta.url), "utf8");
+const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
 
 function fixture() {
   let nextId = 1;
@@ -50,6 +52,51 @@ test("即時更新は予約済みフレームを取り消して1回だけ実行�
   assert.equal(cancelled.length, 1);
 });
 
+test("最新イベントだけを1フレーム1回へ渡す", () => {
+  const { timing, queued } = fixture();
+  const applied = [];
+  const scheduler = globalThis.PicoFrameScheduler.createLatest(value => applied.push(value), timing);
+
+  assert.equal(scheduler.schedule({ x: 10, y: 20 }), true);
+  assert.equal(scheduler.schedule({ x: 30, y: 40 }), false);
+  assert.equal(queued.size, 1);
+  queued.values().next().value();
+  assert.deepEqual(applied, [{ x: 30, y: 40 }]);
+  assert.equal(scheduler.pending(), false);
+});
+
+test("処理不要になったループは停止し状態変化から再開する", () => {
+  const { timing, queued, cancelled } = fixture();
+  let active = true;
+  let ticks = 0;
+  const loop = globalThis.PicoFrameScheduler.createLoop(() => {
+    ticks += 1;
+    return active;
+  }, timing);
+
+  assert.equal(loop.start(), true);
+  assert.equal(loop.start(), false);
+  let [frameId, callback] = queued.entries().next().value;
+  queued.delete(frameId); // ブラウザは実行するrAFを予約一覧から先に外す
+  callback(16);
+  assert.equal(ticks, 1);
+  assert.equal(queued.size, 1);
+
+  active = false;
+  [frameId, callback] = queued.entries().next().value;
+  queued.delete(frameId);
+  callback(32);
+  assert.equal(ticks, 2);
+  assert.equal(queued.size, 0);
+  assert.equal(loop.pending(), false);
+
+  active = true;
+  assert.equal(loop.start(), true);
+  assert.equal(loop.stop(), true);
+  assert.equal(queued.size, 0);
+  assert.equal(cancelled.length, 1);
+});
+
 test("設定画面がフレーム合流と即時更新を使い分ける", () => {
   assert.ok(
     settingsHtml.indexOf('<script src="frame-scheduler.js')
@@ -58,4 +105,15 @@ test("設定画面がフレーム合流と即時更新を使い分ける", () =>
   assert.match(settings, /PicoFrameScheduler\.create\(updateDirtyStateNow\)/);
   assert.match(settings, /dirtyStateScheduler\.schedule\(\)/);
   assert.match(settings, /dirtyStateScheduler\.flush\(\)/);
+});
+
+test("メイン画面が停止可能ループと最新視線イベントを使う", () => {
+  assert.ok(
+    indexHtml.indexOf('<script src="frame-scheduler.js')
+      < indexHtml.indexOf('<script src="renderer.js'),
+  );
+  assert.match(renderer, /PicoFrameScheduler\.createLoop\(animate\)/);
+  assert.match(renderer, /PicoFrameScheduler\.createLatest\(applyGazePoint\)/);
+  assert.match(renderer, /gazeFrameScheduler\.schedule\(\{ clientX: event\.clientX, clientY: event\.clientY \}\)/);
+  assert.doesNotMatch(renderer, /animationRequestId\s*=\s*requestAnimationFrame\(animate\)/);
 });

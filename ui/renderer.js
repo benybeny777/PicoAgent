@@ -116,7 +116,7 @@ const QUICK_ACTIONS = [
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
 let dailyTimer = null;
-let animationRequestId = null;
+let animationLoop = null;
 let bootLogTimer = null;
 let lastBootStatus = "";
 let lastAssistantText = "";
@@ -215,6 +215,9 @@ window.addEventListener("unhandledrejection", event => {
   logApp("error", "未処理 Promise rejection", errorDetail(event.reason));
 });
 window.addEventListener("beforeunload", () => {
+  document.removeEventListener("mousemove", onGazeMouseMove);
+  reduceMotionPreference.removeEventListener("change", onReduceMotionChange);
+  if (lookResetTimer) { clearTimeout(lookResetTimer); lookResetTimer = 0; }
   if (chatterTimer) clearTimeout(chatterTimer);
   if (dailyTimer) clearInterval(dailyTimer);
   if (alarmTimer) clearInterval(alarmTimer);
@@ -226,7 +229,6 @@ window.addEventListener("beforeunload", () => {
   if (historySearchTimer) clearTimeout(historySearchTimer);
   if (napTimer) clearInterval(napTimer);
   if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
-  if (animationRequestId) cancelAnimationFrame(animationRequestId);
   if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
@@ -241,6 +243,8 @@ window.addEventListener("beforeunload", () => {
     logApp("warn", "終了時に音声解析を解放できませんでした", errorDetail(error));
   });
   stopLive2D();
+  animationLoop?.stop();
+  gazeFrameScheduler?.cancel();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
 });
 
@@ -260,7 +264,8 @@ let animations = {
   talking: { path: "animations/review", frames: 6, fps: 5.4, motion: "talking" },
   sad: { path: "animations/failed", frames: 8, fps: 4.6, motion: "sad" },
 };
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reduceMotionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+let reduceMotion = reduceMotionPreference.matches;
 let animationName = "idle";
 let frame = 0;
 let lastFrameAt = 0;
@@ -876,9 +881,8 @@ function configureSpringMotion(config, legacyConfig = null) {
       drive: clamp(region.drive, 0.05, 2.4, 0.45),
       frequency: clamp(region.frequency, 0.08, 1.2, 0.24),
       phase: clamp(region.phase, -6.3, 6.3, index * 0.7),
-      // The axis values are pixel multipliers for the spring displacement.
-      // Keeping them within +/-1 made soft-body regions move less than one
-      // visible pixel even on a Full HD stream canvas.
+      // 軸値はバネ変位へ掛けるピクセル倍率。±1以内では配信画面上の柔らかい部位が
+      // 1px未満しか動かず見えなかったため、許容範囲を±8までにする。
       axisX: clamp(region.axisX, -8, 8, 0),
       axisY: clamp(region.axisY, -8, 8, -1),
       rotation: clamp(region.rotation, -6, 6, 0),
@@ -888,13 +892,15 @@ function configureSpringMotion(config, legacyConfig = null) {
   springLastAt = 0;
   springRenderingPaused = true;
   updateSpringMotionVisibility();
+  wakeAnimationLoop();
 }
 
 function animateSpringMotion(now) {
-  if (!activeSpringMotion.length || live2dActive) return;
+  if (!activeSpringMotion.length || live2dActive) return false;
   const layout = petApp.dataset.layout || "pet";
   const shouldRender = !reduceMotion
     && !document.hidden
+    && !napping
     && !petApp.classList.contains("is-booting")
     && layout !== "chat"
     && layout !== "bar";
@@ -909,10 +915,10 @@ function animateSpringMotion(now) {
     }
     springRenderingPaused = true;
     springLastAt = 0;
-    return;
+    return false;
   }
   springRenderingPaused = false;
-  if (springLastAt && now - springLastAt < 1000 / 30) return;
+  if (springLastAt && now - springLastAt < 1000 / 30) return true;
   const dt = springLastAt ? Math.min(1 / 30, Math.max(1 / 240, (now - springLastAt) / 1000)) : 1 / 60;
   springLastAt = now;
   if (activeBodyMotion && characterView) {
@@ -929,6 +935,7 @@ function animateSpringMotion(now) {
     const p = spring.position;
     spring.sprite.style.transform = `translate(${(p * spring.axisX).toFixed(3)}px, ${(p * spring.axisY).toFixed(3)}px) rotate(${(p * spring.rotation).toFixed(3)}deg) scale(${(1 + Math.abs(p) * spring.scale).toFixed(5)})`;
   }
+  return true;
 }
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
@@ -1049,8 +1056,12 @@ function setAnimation(name, force = false) {
   const fallbacks = { listening: "idle", searching: "thinking", working: "thinking", success: "talking", pleased: "talking", shy: "idle", concern: "sad", wake: "idle", sleep: "idle" };
   const sourceName = animations[name] ? name : (fallbacks[name] && animations[fallbacks[name]] ? fallbacks[name] : "idle");
   const requestedMotion = animations[name]?.motion || name;
-  if (!force && animationName === sourceName && character.dataset.motion === requestedMotion) return;
+  if (!force && animationName === sourceName && character.dataset.motion === requestedMotion) {
+    wakeAnimationLoop();
+    return;
+  }
   animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
+  wakeAnimationLoop();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   preloadAnimation(animationName);
@@ -1069,21 +1080,27 @@ function frameDuration(animation, index) {
   if (Number.isFinite(duration) && duration > 0) return duration;
   return 1000 / animation.fps;
 }
+
+function wakeAnimationLoop() {
+  animationLoop?.start();
+}
+
 function animate(now) {
-  animateSpringMotion(now);
+  const springActive = animateSpringMotion(now);
+  if (document.hidden) return false;
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
-  if (live2dActive) { animationRequestId = requestAnimationFrame(animate); return; }
+  if (live2dActive) return false;
   // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
-  // 待機・思考などの装飾モーションだけを先頭フレームへ止め、ループ自体は継続する。
+  // 待機・思考などの装飾モーションは先頭フレームへ止め、次の状態変化までループも休止する。
   if (reduceMotion && animationName !== "talking") {
     if (!rigActive && animations[animationName]) displayPreloadedFrame(animationName, 0);
-    animationRequestId = requestAnimationFrame(animate);
-    return;
+    return false;
   }
   // リグ動作中・居眠り中はフレーム送りを止める（それぞれ差分絵・寝姿を表示している）。
-  if (rigActive || napping) { animationRequestId = requestAnimationFrame(animate); return; }
+  // 局所バネが実際に描画中のリグだけは、バネ更新のためループを維持する。
+  if (rigActive || napping) return springActive;
   const animation = animations[animationName] || animations.idle;
-  if (!animation) { animationRequestId = requestAnimationFrame(animate); return; } // フレーム定義が無いキャラ（Live2D 初期化失敗時）はループだけ維持する
+  if (!animation) return springActive;
   if (!lastFrameAt) lastFrameAt = now;
   if (!displayPreloadedFrame(animationName, frame)) {
     // 壊れたフレームで送りを止めると、そのモーションが以後ずっと固まる。通常の間隔で次へ進める。
@@ -1091,8 +1108,7 @@ function animate(now) {
       frame = (frame + 1) % animationFrameCount(animation);
       lastFrameAt = now;
     }
-    animationRequestId = requestAnimationFrame(animate);
-    return;
+    return true;
   }
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
     const nextFrame = (frame + 1) % animationFrameCount(animation);
@@ -1102,9 +1118,10 @@ function animate(now) {
     }
     lastFrameAt = now;
   }
-  animationRequestId = requestAnimationFrame(animate);
+  return true;
 }
-animationRequestId = requestAnimationFrame(animate);
+animationLoop = window.PicoFrameScheduler.createLoop(animate);
+wakeAnimationLoop();
 
 // ── 疑似Live2Dリグ ─────────────────────────────────────────────────
 // runtimeLayers（未指定の追加パックはlayers/*.png）は「同一ポーズの全身差分絵」。
@@ -1124,6 +1141,8 @@ let rigBlinkTimer = 0;
 let rigBlinkStepTimer = 0;
 let rigGazeTimer = 0;
 let rigVolFrame = 0;
+let lookResetTimer = 0;
+let gazeFrameScheduler = null;
 let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
@@ -1190,9 +1209,9 @@ function rigRefresh() {
 // 見ずに常に下や横を向いている印象になる。
 function scheduleGaze() {
   clearTimeout(rigGazeTimer);
-  if (!gazeTrackingEnabled || !rigActive || !rigGazeAvailable) return;
+  if (reduceMotion || !gazeTrackingEnabled || !rigActive || !rigGazeAvailable) return;
   rigGazeTimer = setTimeout(() => {
-    if (!gazeTrackingEnabled || !rigActive) return;
+    if (reduceMotion || !gazeTrackingEnabled || !rigActive) return;
     if (currentVoice) { scheduleGaze(); return; }
     rigLookDirection = Math.random() < 0.5 ? -1 : 1;
     rigRefresh();
@@ -1367,7 +1386,7 @@ function attachLipSync(audio) {
 
 // リグ描画を開始する（既に動作中なら何もしない。口は閉じ・まばたき開始）。
 function startRig() {
-  if (rigActive) return;
+  if (rigActive) { wakeAnimationLoop(); return; }
   rigActive = true;
   rigFace = "";
   rigMouthOpen = false;
@@ -1376,11 +1395,12 @@ function startRig() {
   rigRefresh();
   scheduleBlink();
   scheduleGaze();
+  wakeAnimationLoop();
 }
 
 // リグを完全に終了する（キャラ切替・thinking/sad などフレームアニメ状態への遷移用）。
 function stopRig() {
-  if (!rigActive) return;
+  if (!rigActive) { wakeAnimationLoop(); return; }
   rigActive = false;
   detachLipSyncAudio();
   clearTimeout(rigBlinkTimer);
@@ -1392,6 +1412,7 @@ function stopRig() {
   rigBlinkPhase = null;
   rigLookDirection = 0;
   rigFace = "";
+  wakeAnimationLoop();
 }
 
 // 読み上げ終了時の処理。layers を持つキャラは待機中も常時リグ（まばたき）を続けるため
@@ -1654,6 +1675,7 @@ async function startLive2D(cfg) {
     model.motion(cfg.motions.idle, 0, idlePriority);
   }
   retryPendingLipSync(); // 読み込み中に始まった読み上げへ、いまから口パクを付ける
+  wakeAnimationLoop(); // PNG側の空ループを1回進め、Live2D中はその場で休止させる
 }
 
 // 状態名（idle/thinking/talking/sad）を character.json の live2d.motions でグループへ写像して再生する。
@@ -1685,38 +1707,29 @@ function stopLive2D() {
     petSprite.style.display = "";
   }
   updateSpringMotionVisibility();
+  wakeAnimationLoop(); // Live2D終了後にPNGフレームまたは局所バネを再開する
 }
 
 // ── 疑似視線追従: 設定ONかつ顔の近くにいるときだけ、短時間マウス方向を見る ──
-if (!reduceMotion) {
-  let lookResetTimer = 0;
-  const resetLook = () => {
-    character.style.setProperty("--look-rot", "0deg");
-    rigLookDirection = 0;
-    rigRefresh();
-    // Live2DModel.focus()へcanvas外の座標を渡すと上下限へ張り付きやすい。
-    // 内部の正規化済みコントローラを中央へ戻して、下向きが残らないようにする。
-    live2dModel?.internalModel?.focusController?.focus(0, 0);
-  };
-  const applyGazeTrackingSetting = enabled => {
-    gazeTrackingEnabled = enabled === true;
-    clearTimeout(lookResetTimer);
-    clearTimeout(rigGazeTimer);
-    lookResetTimer = 0;
-    rigGazeTimer = 0;
-    resetLook();
-    if (gazeTrackingEnabled) scheduleGaze();
-  };
-  window.applyGazeTrackingSetting = applyGazeTrackingSetting;
-  document.addEventListener("mousemove", event => {
-    if (!gazeTrackingEnabled) return;
+function resetLook() {
+  character.style.setProperty("--look-rot", "0deg");
+  rigLookDirection = 0;
+  rigRefresh();
+  // Live2DModel.focus()へcanvas外の座標を渡すと上下限へ張り付きやすい。
+  // 内部の正規化済みコントローラを中央へ戻して、下向きが残らないようにする。
+  live2dModel?.internalModel?.focusController?.focus(0, 0);
+}
+
+function applyGazePoint({ clientX, clientY }) {
+    if (reduceMotion || !gazeTrackingEnabled) return;
+    // 高頻度mousemoveは最新座標だけを1フレームへ合流するため、矩形の読取も最大1回になる。
     const rect = character.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height * 0.38;
-    const normalizedX = (event.clientX - centerX) / Math.max(160, rect.width * 0.9);
-    const normalizedY = (event.clientY - centerY) / Math.max(180, rect.height * 0.8);
-    const insideFaceBand = event.clientY >= rect.top + rect.height * 0.02
-      && event.clientY <= rect.top + rect.height * 0.58;
+    const normalizedX = (clientX - centerX) / Math.max(160, rect.width * 0.9);
+    const normalizedY = (clientY - centerY) / Math.max(180, rect.height * 0.8);
+    const insideFaceBand = clientY >= rect.top + rect.height * 0.02
+      && clientY <= rect.top + rect.height * 0.58;
     const nearFace = insideFaceBand && Math.abs(normalizedX) <= 1.15;
     const deadZone = Math.abs(normalizedX) < 0.28 && Math.abs(normalizedY) < 0.28;
 
@@ -1752,12 +1765,49 @@ if (!reduceMotion) {
       resetLook();
       scheduleGaze();
     }, 700);
-  });
-} else {
-  window.applyGazeTrackingSetting = () => {
-    gazeTrackingEnabled = false;
-  };
 }
+
+gazeFrameScheduler = window.PicoFrameScheduler.createLatest(applyGazePoint);
+
+function applyGazeTrackingSetting(enabled) {
+  gazeTrackingEnabled = enabled === true;
+  gazeFrameScheduler.cancel();
+  clearTimeout(lookResetTimer);
+  clearTimeout(rigGazeTimer);
+  lookResetTimer = 0;
+  rigGazeTimer = 0;
+  resetLook();
+  if (!reduceMotion && gazeTrackingEnabled) scheduleGaze();
+}
+
+function onGazeMouseMove(event) {
+  if (reduceMotion || !gazeTrackingEnabled) return;
+  gazeFrameScheduler.schedule({ clientX: event.clientX, clientY: event.clientY });
+}
+
+function onReduceMotionChange(event) {
+  reduceMotion = event.matches;
+  gazeFrameScheduler.cancel();
+  clearTimeout(lookResetTimer);
+  clearTimeout(rigGazeTimer);
+  lookResetTimer = 0;
+  rigGazeTimer = 0;
+  resetLook();
+  if (!reduceMotion && gazeTrackingEnabled) scheduleGaze();
+  if (live2dActive) {
+    const alwaysAnimate = activeLive2dConfig?.alwaysAnimate === true;
+    if (reduceMotion && !alwaysAnimate) {
+      live2dModel?.internalModel?.motionManager?.stopAllMotions?.();
+    } else {
+      playLive2DMotion(animationName);
+    }
+  }
+  wakeAnimationLoop();
+}
+
+window.applyGazeTrackingSetting = applyGazeTrackingSetting;
+document.addEventListener("mousemove", onGazeMouseMove);
+reduceMotionPreference.addEventListener("change", onReduceMotionChange);
 
 function autosizeInput() {
   input.style.height = "auto";
@@ -4016,6 +4066,14 @@ voiceLoopButton?.addEventListener("click", () => {
 updateContinuousVoiceButton();
 
 document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    animationLoop?.stop();
+    gazeFrameScheduler?.cancel();
+  } else {
+    lastFrameAt = performance.now();
+    springLastAt = 0;
+    wakeAnimationLoop();
+  }
   if (!document.hidden || !continuousVoice) return;
   continuousVoice = false;
   updateContinuousVoiceButton();
@@ -4520,6 +4578,10 @@ function applyLayout(id) {
   // 履歴を常設する形式では、切り替えた時点の履歴をその場で描き直す。
   renderHistory();
   refreshBubblePlacement();
+  gazeFrameScheduler?.cancel();
+  resetLook();
+  if (!reduceMotion && gazeTrackingEnabled) scheduleGaze();
+  wakeAnimationLoop();
 }
 
 function applyBubbleLayout(width, height, left, top) {
@@ -4950,6 +5012,7 @@ function startAlarmPolling() {
   }).finally(() => {
     petApp.classList.remove("is-booting");
     stopBootLogTicker();
+    wakeAnimationLoop();
   });
 });
 

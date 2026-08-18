@@ -584,6 +584,19 @@ async function validateInteractionMatrix() {
         if (!target.forcePng) {
           await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
         }
+        // むぎは局所バネを持たず、待機リグはタイマー駆動。Live2DはPIXI tickerが担当するため、
+        // どちらもrenderer側の常時rAFは不要。
+        const loopExpected = false;
+        if (loopExpected) {
+          await page.waitForFunction(() => animationLoop?.pending() === true, null, { timeout: 1000 });
+        } else {
+          // 状態変更直後の単発wakeは許可し、空ループが1秒以内に予約0へ収束することを見る。
+          await page.waitForFunction(() => animationLoop?.pending() !== true, null, { timeout: 1000 });
+        }
+        const loopPending = await page.evaluate(() => animationLoop?.pending() === true);
+        if (loopPending !== loopExpected) {
+          throw new Error(`${target.id}/${layout}: アニメーションループの休止状態が不正です ${JSON.stringify({ loopPending, loopExpected })}`);
+        }
         await page.locator("#character").dispatchEvent("pointerdown", { button: 0, pointerType: "mouse" });
         if (await page.evaluate(() => window.__startDraggingCalls) < 1) {
           throw new Error(`${target.id}/${layout}: キャラ画像のドラッグがウィンドウ移動へ渡りません`);
@@ -633,7 +646,7 @@ async function validateInteractionMatrix() {
         }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
-        results.push({ characterId: target.id, layout, bootVisible, resized, state, file });
+        results.push({ characterId: target.id, layout, bootVisible, loopPending, resized, state, file });
         console.log(`  操作検査: ${target.id}/${layout}`);
       } finally {
         await page.close();
@@ -657,6 +670,10 @@ async function validateInteractionMatrix() {
       return petSprite.src.includes("blink_closed");
     });
     if (!blinkApplied) throw new Error("アニメーションを減らす設定でまばたき差分が反映されません");
+    await reducedPage.waitForTimeout(80);
+    if (await reducedPage.evaluate(() => animationLoop?.pending() === true)) {
+      throw new Error("アニメーションを減らす設定でも空のフレームループが動いています");
+    }
     const firstTalkingFrame = await reducedPage.evaluate(() => {
       rigBlinkPhase = null;
       setAnimation("talking", true);
@@ -688,6 +705,72 @@ async function validateInteractionMatrix() {
   try {
     await gazePage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
     const rect = await gazePage.locator("#character").boundingBox();
+    const batch = await gazePage.evaluate(async ({ x, y }) => {
+      let reads = 0;
+      const original = character.getBoundingClientRect.bind(character);
+      character.getBoundingClientRect = () => {
+        reads += 1;
+        return original();
+      };
+      for (let index = 0; index < 200; index += 1) {
+        document.dispatchEvent(new MouseEvent("mousemove", {
+          clientX: x + index / 100,
+          clientY: y,
+        }));
+      }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      delete character.getBoundingClientRect;
+      return { reads, direction: rigLookDirection };
+    }, { x: rect.x + rect.width * 0.85, y: rect.y + rect.height * 0.38 });
+    if (batch.reads !== 1 || batch.direction !== 1) {
+      throw new Error(`高頻度mousemoveが1フレーム1回へ合流していません: ${JSON.stringify(batch)}`);
+    }
+    const loopTransitions = await gazePage.evaluate(async () => {
+      const waitFrames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      applyLayout("chat");
+      await waitFrames();
+      const chatPending = animationLoop.pending();
+      applyLayout("pet");
+      await waitFrames();
+      const petPending = animationLoop.pending();
+      fallAsleep();
+      await waitFrames();
+      const sleep = { napping, pending: animationLoop.pending() };
+      markActivity();
+      await waitFrames();
+      const wake = { napping, pending: animationLoop.pending(), rigActive };
+      let hidden = false;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      const hiddenPending = animationLoop.pending();
+      hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      const visiblePending = animationLoop.pending();
+      delete document.hidden;
+      return { chatPending, petPending, sleep, wake, hiddenPending, visiblePending };
+    });
+    if (loopTransitions.chatPending || loopTransitions.petPending
+      || !loopTransitions.sleep.napping || loopTransitions.sleep.pending
+      || loopTransitions.wake.napping || loopTransitions.wake.pending || !loopTransitions.wake.rigActive
+      || loopTransitions.hiddenPending || !loopTransitions.visiblePending) {
+      throw new Error(`状態変化後のアニメーション再開・休止が不正です: ${JSON.stringify(loopTransitions)}`);
+    }
+    await gazePage.emulateMedia({ reducedMotion: "reduce" });
+    await gazePage.waitForFunction(() => reduceMotion && !animationLoop.pending());
+    await gazePage.emulateMedia({ reducedMotion: "no-preference" });
+    await gazePage.waitForFunction(() => !reduceMotion);
+    await gazePage.waitForTimeout(80);
+    if (await gazePage.evaluate(() => animationLoop.pending())) {
+      throw new Error("局所バネのない待機リグで空のフレームループが再開しています");
+    }
+    await gazePage.evaluate(() => setAnimation("thinking", true));
+    await gazePage.waitForFunction(() => animationLoop.pending());
+    await gazePage.evaluate(() => setAnimation("idle", true));
+    await gazePage.waitForTimeout(80);
+    if (await gazePage.evaluate(() => animationLoop.pending())) {
+      throw new Error("フレームモーションから待機リグへ戻った後もループが残っています");
+    }
     await gazePage.mouse.move(450, 590);
     const farDirection = await gazePage.evaluate(() => rigLookDirection);
     if (farDirection !== 0) throw new Error(`画面下の遠いカーソルへ視線が張り付いています: ${farDirection}`);
@@ -697,9 +780,29 @@ async function validateInteractionMatrix() {
     await gazePage.waitForTimeout(800);
     const resetDirection = await gazePage.evaluate(() => rigLookDirection);
     if (resetDirection !== 0) throw new Error(`視線が700ms後に正面へ戻りません: ${resetDirection}`);
-    console.log("  視線設定検査: ONでは顔周辺だけ追従し、画面下では正面、700ms後に復帰");
+    console.log("  描画ループ検査: 形式・居眠り・表示・アニメ削減の休止と再開OK");
+    console.log("  視線設定検査: 200イベントを1フレームへ合流し、顔周辺だけ追従、700ms後に復帰");
   } finally {
     await gazePage.close();
+  }
+  const springPage = await openScene({ characterId: "sena", forcePng: true, width: 900, height: 600 });
+  try {
+    await springPage.waitForFunction(
+      () => typeof rigAvailable !== "undefined" && rigAvailable && rigActive && activeSpringMotion.length > 0,
+      null,
+      { timeout: 20000 },
+    );
+    await springPage.waitForFunction(() => animationLoop.pending());
+    await springPage.evaluate(() => applyLayout("chat"));
+    await springPage.waitForTimeout(80);
+    if (await springPage.evaluate(() => animationLoop.pending())) {
+      throw new Error("チャット形式で非表示の局所バネがループを維持しています");
+    }
+    await springPage.evaluate(() => applyLayout("pet"));
+    await springPage.waitForFunction(() => animationLoop.pending());
+    console.log("  局所バネ検査: 表示形式に応じた休止・再開OK");
+  } finally {
+    await springPage.close();
   }
   const resizePage = await openScene({ characterId: "mugi", forcePng: true, width: 900, height: 600 });
   try {

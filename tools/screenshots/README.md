@@ -48,7 +48,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
 | `SHOOT_LAYOUT_IDS` | `SHOOT_CHARACTER_MATRIX=1` または `SHOOT_LIVE2D_MATRIX=1` と併用し、`stream,pet` のように撮影する表示形式だけを絞る |
 | `SHOOT_LAYOUT_EDITOR` | `1` ならMoveable編集モードのドラッグ、拡大縮小、ウィンドウドラッグ抑止、保存、再読込復元、既定へ戻すを検査する |
-| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まりを `temp/layout-interaction-matrix/` へ検査する |
+| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まり、描画ループの休止・再開、視線イベントのフレーム合流を `temp/layout-interaction-matrix/` へ検査する |
 | `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×7形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能ステップを `temp/onboarding-check/` へ撮影する |
