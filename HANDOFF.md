@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-18
-- ブランチ: `perf/differential-asset-sync`
-- 目的: ClaudeブランチのP1-13を完了する
-- 対応PR: #128
+- ブランチ: `security/remove-unsafe-eval`
+- 目的: ClaudeブランチのP1-14を完了する
+- 対応PR: 作成中
 
 ## 未処理の残件（次に作業する人はここから始める）
 
@@ -36,6 +36,15 @@ PR #119から現行`main`で実在を確認したP0 2件・P1 6件は、すべ�
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-18、ClaudeブランチのP1-14を確認した。`cargo xtask setup live2d`で現行ランタイムを
+検証したところ、Cubism CoreではなくPIXI 6.5.10がWebGLのバッファ・uniform同期関数を
+3箇所の`new Function`で生成していた。Chromeヘッドレスで同じPIXI描画を比較し、
+`unsafe-eval`なしでは動的コード実行不可エラー、許可時は描画成功となることを確認した。
+このためCSPからは削除せず、PIXIだけが必要とする例外としてSPECへ現在値と各ディレクティブの理由を記録した。
+PicoAgent自身と追跡ベンダのJavaScriptへ`eval`／`Function`コンストラクタを追加できないガードも追加した。
+`cargo xtask verify`は全19項目成功。本体libは379件成功・長時間Whisper 1件だけ既定ignore、
+xtaskは58件、追跡JavaScript／MJSは12件で失敗0だった。
 
 2026-08-18、ClaudeブランチのP1-13として、キャラクターとUIの生成物をサイズ・更新日時による
 差分同期へ変更した。正本のindex、制作レイヤー、実行WebP、フレーム世代、Live2Dモデルを生成先へ

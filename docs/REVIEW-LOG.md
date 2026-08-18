@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-08-18 — P1-14 CSPの`unsafe-eval`必要性確認
+
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-14。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P1 | CSPの`script-src 'unsafe-eval'`に必要根拠がなく、削除可能か分からない | 対応済み（維持） | `cargo xtask setup live2d`で取得物を検証。Cubism Core 2本とpixi-live2d-displayは該当0件だが、PIXI 6.5.10がWebGLのバッファ・uniform同期関数を3箇所の`new Function`で生成するため、現構成では削除できない |
+| 2 | 実行 | 文字列が存在するだけでなく描画時に実際に必要か | 対応済み | Chromeヘッドレスで同一のPIXI WebGL描画をCSPだけ変えて比較。`unsafe-eval`なしは動的コード実行不可エラーで停止し、許可時は`PIXI_RENDER_OK`となった。右画面とGUIは使っていない |
+| 3 | 境界 | 第三者ランタイムの都合でPicoAgent自身まで動的コード実行へ依存しないか | 対応済み | 追跡UIとMoveableを走査し、`eval`／`Function`コンストラクタを拒否する`bundle_scope::guard`を追加。Git管理外の`vendor/live2d`だけを例外境界にした |
+| 4 | 文書 | 現行CSPの各ディレクティブと理由が不明 | 対応済み | SPECへ`default-src`、`script-src`、`wasm-unsafe-eval`、`style-src`、`img-src`、`media-src`の用途を明記。指示どおりWASM、インラインスタイル、data／asset画像許可は変更していない |
+
+`unsafe-eval`を外すにはPIXIの実行時生成を置き換える別ランタイムまたは追加モジュールの採否・ライセンス・
+互換検証が必要で、この「必要性を確定する」作業へ依存変更は混ぜなかった。CSP設定値と製品挙動は変わらないため、
+README更新と全キャラGUI再撮影は不要と判断した。動的コード実行ガードの単体テストは成功した。
+`cargo xtask verify`全19項目にも成功し、本体libは379件成功・長時間Whisper 1件だけ既定ignore、
+xtaskは58件、追跡JavaScript／MJSは12件で失敗0。本体・xtaskのfmt check、全target clippy
+`-D warnings`、Git差分検査も成功した。
+
 ## 2026-08-18 — P1-13 キャラクター・UI生成物の差分同期
 
 対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-13。
