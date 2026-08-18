@@ -1,14 +1,14 @@
 // release.rs - 販売用ビルドを作る前の出荷条件と同梱キャラを検査する。
 
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::util::{log, repo_root};
+use crate::util::{log, repo_root, write_atomic};
 
 const REQUIRED_DOCUMENTS: [&str; 5] = [
     "docs/EULA-DRAFT.md",
@@ -129,46 +129,6 @@ fn verify_windows_pe(path: &Path) -> Result<()> {
     file.read_exact(&mut signature)?;
     anyhow::ensure!(signature == *b"PE\0\0", "Windows PE署名がありません");
     Ok(())
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path.parent().context("保存先の親フォルダがありません")?;
-    fs::create_dir_all(parent)?;
-    let nonce = std::process::id();
-    let temporary = parent.join(format!(".update-feed-{nonce}.tmp"));
-    let backup = parent.join(format!(".update-feed-{nonce}.backup"));
-    let result = (|| -> Result<()> {
-        if temporary.exists() {
-            fs::remove_file(&temporary)?;
-        }
-        if backup.exists() {
-            fs::remove_file(&backup)?;
-        }
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        if path.exists() {
-            fs::rename(path, &backup)?;
-        }
-        if let Err(error) = fs::rename(&temporary, path) {
-            if backup.exists() {
-                let _ = fs::rename(&backup, path);
-            }
-            return Err(error.into());
-        }
-        if backup.exists() {
-            fs::remove_file(&backup)?;
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-        if backup.exists() && !path.exists() {
-            let _ = fs::rename(&backup, path);
-        }
-    }
-    result
 }
 
 pub fn included_characters(value: &Value) -> Result<Vec<String>> {

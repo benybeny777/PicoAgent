@@ -11,7 +11,6 @@ const characters = [
   ["haru", "はる", "Live2D"],
   ["epsilon", "イプシロン", "Live2D"],
   ["mao", "まお", "Live2D"],
-  ["ren", "レン", "Live2D"],
   ["rice", "ライス", "Live2D"],
   ["wanko", "わんこ", "Live2D"],
 ];
@@ -44,7 +43,7 @@ function openDetail(item) {
   detailImage.src = item.src;
   detailImage.alt = `${item.name}の${item.modeLabel}動画`;
   detailTitle.textContent = item.name;
-  detailMeta.textContent = `${item.kind}・${item.modeLabel}・12秒 / 30fps`;
+  detailMeta.textContent = `${item.kind}・${item.modeLabel}・6秒 / 16fps`;
   detail.showModal();
 }
 

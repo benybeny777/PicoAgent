@@ -6,13 +6,12 @@
 // このファイルに残すのは、リポジトリの `characters/` へ入れる導入手順だけ。
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::util::{copy_dir, log, repo_root};
+use crate::util::{copy_dir, log, repo_root, write_atomic};
 
 // 検証規則の正本をそのまま取り込む。CLI が直接呼ばない補助関数・定数も含むため
 // dead_code は許可する（アプリ側では使っている）。
@@ -111,44 +110,6 @@ fn install(source: &Path) -> Result<()> {
     result?;
     log("character-pack", format!("{name} ({id}) を導入しました"));
     Ok(())
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("保存先の親フォルダがありません"))?;
-    fs::create_dir_all(parent)?;
-    let temp = parent.join(format!(".character-pack-{}.tmp", std::process::id()));
-    let backup = parent.join(format!(".character-pack-{}.backup", std::process::id()));
-    let result = (|| -> Result<()> {
-        if backup.exists() {
-            fs::remove_file(&backup)?;
-        }
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        if path.exists() {
-            fs::rename(path, &backup)?;
-        }
-        if let Err(error) = fs::rename(&temp, path) {
-            if backup.exists() {
-                let _ = fs::rename(&backup, path);
-            }
-            return Err(error.into());
-        }
-        if backup.exists() {
-            fs::remove_file(&backup)?;
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
-        if backup.exists() && !path.exists() {
-            let _ = fs::rename(&backup, path);
-        }
-    }
-    result
 }
 
 #[cfg(test)]

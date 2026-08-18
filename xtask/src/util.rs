@@ -6,6 +6,7 @@
 // 壊れたモデルや実行ファイルが永久に「取得済み」として扱われてしまう。
 
 use std::fs::{self, FileTimes, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -39,6 +40,50 @@ pub fn cleanup_file(path: &Path, label: &str) -> Result<()> {
             .with_context(|| format!("{label}を掃除できません: {}", path.display()))?;
     }
     Ok(())
+}
+
+/// 同じフォルダの一時ファイルへ書き切ってから保存先を置き換える。
+///
+/// Windowsでは既存ファイルへのrenameができないため、先に退避してから差し替える。
+/// 失敗時は元ファイルを戻し、成功時は一時・退避ファイルを残さない。
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("保存先の親フォルダがありません"))?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("output");
+    fs::create_dir_all(parent)?;
+    let nonce = std::process::id();
+    let temporary = parent.join(format!(".{name}.{nonce}.tmp"));
+    let backup = parent.join(format!(".{name}.{nonce}.backup"));
+    let result = (|| -> Result<()> {
+        cleanup_file(&temporary, "前回の一時ファイル")?;
+        cleanup_file(&backup, "前回の退避ファイル")?;
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        if path.exists() {
+            fs::rename(path, &backup)?;
+        }
+        if let Err(error) = fs::rename(&temporary, path) {
+            if backup.exists() {
+                let _ = fs::rename(&backup, path);
+            }
+            return Err(error.into());
+        }
+        cleanup_file(&backup, "置換済みファイルの退避")?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+        if backup.exists() && !path.exists() {
+            let _ = fs::rename(&backup, path);
+        }
+    }
+    result
 }
 
 /// リポジトリのルート（`xtask/` の親）。

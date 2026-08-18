@@ -25,3 +25,18 @@ ed25519-dalek = { version = "3", features = ["rand_core"] }
 rand = { version = "0.10", default-features = false, features = ["sys_rng"] }
 serde = { version = "1", features = ["derive"] }
 chrono = "0.4"
+image = { version = "0.25.10", default-features = false, features = ["webp"] }
+
+# 高精細画像のlossless WebP圧縮はデバッグ最適化なしだと起動前処理として遅すぎる。
+# xtask本体のデバッグ情報は保ち、画像処理依存だけをリリース相当でコンパイルする。
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.image-webp]
+opt-level = 3
+
+[profile.dev.package.moxcms]
+opt-level = 3
+
+[profile.dev.package.pxfm]
+opt-level = 3
