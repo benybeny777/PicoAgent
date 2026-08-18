@@ -184,4 +184,65 @@ mod guard {
             "存在しないスキルが SPEC.md の分類表に残っています（削除・改名の反映漏れ）: {orphaned:?}"
         );
     }
+
+    /// 破壊的な右クリック操作は、実装と利用者向け文書の双方で同じ完全ラベルを使う。
+    #[test]
+    fn 会話と記憶の消去メニュー名は文書と一致する() {
+        const LABELS: [&str; 3] = [
+            "表示と会話をリセット",
+            "会話履歴と覚えたことを消す",
+            "消す（元に戻せません）",
+        ];
+        // 旧名を移行別名として残さない理由: 失われる長期メモリと不可逆性を隠すため。
+        const FORBIDDEN: [&str; 1] = ["会話履歴を消してリセット"];
+        let menu = read_repo_file("src-tauri/src/menu.rs").expect("menu.rs を読めない");
+        for label in LABELS {
+            assert!(
+                menu.contains(label),
+                "右クリックメニューにラベルがありません: {label}"
+            );
+            for document in ["README.md", "MANUAL.md", "SPEC.md"] {
+                let text =
+                    read_repo_file(document).unwrap_or_else(|| panic!("{document} を読めない"));
+                assert!(
+                    text.contains(label),
+                    "{document} にメニューラベルがありません: {label}"
+                );
+            }
+        }
+        for old in FORBIDDEN {
+            for file in ["src-tauri/src/menu.rs", "README.md", "MANUAL.md", "SPEC.md"] {
+                let text = read_repo_file(file).unwrap_or_else(|| panic!("{file} を読めない"));
+                assert!(
+                    !text.contains(old),
+                    "{file} に誤解を招く旧ラベルが残っています: {old}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn スヌーズ再発火は多重実行と失敗を解放する() {
+        let source = read_repo_file("ui/renderer.js").expect("renderer.js を読めない");
+        let start = source
+            .find("async function checkAlarms()")
+            .expect("checkAlarms がない");
+        let body = &source[start
+            ..source
+                .find("async function fireAlarm")
+                .expect("fireAlarm がない")];
+        let guard = body
+            .find("if (alarmCheckInFlight) return")
+            .expect("多重実行ガードがない");
+        let advance = body
+            .find("activeAlarmSnooze.dueAt =")
+            .expect("次回期限の先行更新がない");
+        let fire = body
+            .find("await fireAlarm(alarm, snoozeState)")
+            .expect("スヌーズ発火がない");
+        let release = body.find("finally").expect("失敗時の解放がない");
+        assert!(guard < advance && advance < fire && fire < release);
+        assert!(body.contains("alarmCheckInFlight = false"));
+        assert!(source.contains("activeAlarmSnooze === snoozeState"));
+    }
 }

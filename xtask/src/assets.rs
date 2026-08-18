@@ -30,10 +30,10 @@ pub fn sync_characters() -> Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
-    // live2d-src/（Cubism Editor 用の制作素材 PSD）は実行時に使わないため配信へ含めない。
+    // live2d-src/ と expression-patches/ は制作素材で実行時に使わないため配信へ含めない。
     // モデル未取得の Live2D サンプルも、正本直下のフォルダごと外す。
     copy_dir(&src, &dest, &|path| {
-        if path.to_string_lossy().contains("live2d-src") {
+        if is_character_source_only(path) {
             return true;
         }
         path.parent() == Some(src.as_path())
@@ -191,9 +191,7 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
     )?;
 
     for id in included {
-        copy_dir(&src.join(id), &dest.join(id), &|path| {
-            path.to_string_lossy().contains("live2d-src")
-        })?;
+        copy_dir(&src.join(id), &dest.join(id), &is_character_source_only)?;
     }
     let placeholder = src.join("_preview-placeholder.png");
     if placeholder.is_file() {
@@ -209,6 +207,15 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
         ),
     );
     Ok(())
+}
+
+fn is_character_source_only(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|name| matches!(name, "live2d-src" | "expression-patches"))
+    })
 }
 
 /// 同期済みキャラの全内容から自動版を作り、manifestへ書き込む。
@@ -817,10 +824,63 @@ mod tests {
     use std::fs;
 
     use super::{
-        character_content_version, content_version, drop_characters_from_index, remove_beta_badge,
-        rewrite_asset_refs, stamp_character_asset_versions, unfetched_live2d_characters,
+        character_content_version, content_version, drop_characters_from_index,
+        is_character_source_only, remove_beta_badge, rewrite_asset_refs,
+        stamp_character_asset_versions, unfetched_live2d_characters,
         validate_character_asset_generation,
     };
+
+    #[test]
+    fn 制作用素材は配信コピーから外す() {
+        assert!(is_character_source_only(std::path::Path::new(
+            "characters/mugi/expression-patches/blink.png"
+        )));
+        assert!(is_character_source_only(std::path::Path::new(
+            "characters/hiyori/live2d-src/source.psd"
+        )));
+        assert!(!is_character_source_only(std::path::Path::new(
+            "characters/mugi/frames/idle.png"
+        )));
+
+        let ui = crate::util::repo_root().join("ui");
+        let mut stack = vec![ui];
+        let mut references = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().and_then(|name| name.to_str()) != Some("assets") {
+                        stack.push(path);
+                    }
+                } else if matches!(
+                    path.extension().and_then(|ext| ext.to_str()),
+                    Some("js" | "html" | "css")
+                ) && fs::read_to_string(&path)
+                    .is_ok_and(|text| text.contains("expression-patches"))
+                {
+                    references.push(path);
+                }
+            }
+        }
+        let mut character_stack = vec![crate::util::repo_root().join("characters")];
+        while let Some(dir) = character_stack.pop() {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    character_stack.push(path);
+                } else if path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                    && fs::read_to_string(&path)
+                        .is_ok_and(|text| text.contains("expression-patches"))
+                {
+                    references.push(path);
+                }
+            }
+        }
+        assert!(
+            references.is_empty(),
+            "実行UIから制作用素材を参照しています: {references:?}"
+        );
+    }
 
     /// `characters/<id>/` を1体ぶん作る。`models` は `character.json` へ書く宣言、
     /// `present` は実際に置くファイル（宣言だけあってファイルが無い状態を作れるようにする）。

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{Datelike, Local, Timelike};
+use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -21,6 +21,7 @@ const MAX_ARGS: usize = 32;
 const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
 const MAX_RUN_HISTORY: usize = 100;
+const MAX_CATCH_UP_MINUTES: i64 = 24 * 60;
 
 // 曜日・時刻の語彙と正規化は `alarm` が唯一の定義元。以前はこのファイルへ
 // 丸ごと写されており、`days_label` は既に書き方が分かれていた（挙動は同じだが、
@@ -70,6 +71,9 @@ pub struct ScheduledTask {
     pub tool_args: Value,
     #[serde(default)]
     pub last_run_minute: String,
+    /// 最後に発火判定を終えた分。スリープ・再起動後の未処理分を限定的に追跡する。
+    #[serde(default)]
+    pub last_checked_minute: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -456,8 +460,8 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
     result
 }
 
-fn current_weekday_code() -> &'static str {
-    match Local::now().weekday().num_days_from_monday() {
+fn weekday_code(at: DateTime<Local>) -> &'static str {
+    match at.weekday().num_days_from_monday() {
         0 => "mon",
         1 => "tue",
         2 => "wed",
@@ -468,15 +472,14 @@ fn current_weekday_code() -> &'static str {
     }
 }
 
-fn matches_fixed_time(task: &ScheduledTask, minute_key: &str) -> bool {
-    let now = Local::now();
-    if !task.date.trim().is_empty() && task.date != now.format("%Y-%m-%d").to_string() {
+fn matches_fixed_time(task: &ScheduledTask, at: DateTime<Local>) -> bool {
+    if !task.date.trim().is_empty() && task.date != at.format("%Y-%m-%d").to_string() {
         return false;
     }
-    if !task.days.is_empty() && !task.days.iter().any(|day| day == current_weekday_code()) {
+    if !task.days.is_empty() && !task.days.iter().any(|day| day == weekday_code(at)) {
         return false;
     }
-    task.time == minute_key
+    task.time == at.format("%H:%M").to_string()
 }
 
 fn parse_cron_value(part: &str, value: u32, min: u32, max: u32) -> bool {
@@ -495,9 +498,9 @@ fn parse_cron_value(part: &str, value: u32, min: u32, max: u32) -> bool {
     })
 }
 
-fn cron_weekday_value() -> u32 {
+fn cron_weekday_value(at: DateTime<Local>) -> u32 {
     // cron 互換で日曜=0、月曜=1。
-    Local::now().weekday().num_days_from_sunday()
+    at.weekday().num_days_from_sunday()
 }
 
 /// `parse_cron_value` が理解できる字句かどうか。検証と照合で同じ文法を使う。
@@ -547,27 +550,50 @@ fn validate_cron(cron: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn matches_cron(task: &ScheduledTask) -> bool {
+fn matches_cron(task: &ScheduledTask, at: DateTime<Local>) -> bool {
     let parts: Vec<&str> = task.cron.split_whitespace().collect();
     if parts.len() != 5 {
         return false;
     }
-    let now = Local::now();
-    parse_cron_value(parts[0], now.minute(), 0, 59)
-        && parse_cron_value(parts[1], now.hour(), 0, 23)
-        && parse_cron_value(parts[2], now.day(), 1, 31)
-        && parse_cron_value(parts[3], now.month(), 1, 12)
-        && parse_cron_value(parts[4], cron_weekday_value(), 0, 6)
+    parse_cron_value(parts[0], at.minute(), 0, 59)
+        && parse_cron_value(parts[1], at.hour(), 0, 23)
+        && parse_cron_value(parts[2], at.day(), 1, 31)
+        && parse_cron_value(parts[3], at.month(), 1, 12)
+        && parse_cron_value(parts[4], cron_weekday_value(at), 0, 6)
 }
 
-fn should_run(task: &ScheduledTask, minute_stamp: &str, hhmm: &str) -> bool {
+fn should_run_at(task: &ScheduledTask, at: DateTime<Local>) -> bool {
+    let minute_stamp = at.format("%Y-%m-%d %H:%M").to_string();
     task.enabled
         && task.last_run_minute != minute_stamp
         && if task.cron.trim().is_empty() {
-            matches_fixed_time(task, hhmm)
+            matches_fixed_time(task, at)
         } else {
-            matches_cron(task)
+            matches_cron(task, at)
         }
+}
+
+fn checked_minute(value: &str) -> Option<DateTime<Local>> {
+    let naive = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M").ok()?;
+    Local.from_local_datetime(&naive).single()
+}
+
+fn minutes_to_check(task: &ScheduledTask, now: DateTime<Local>) -> Vec<DateTime<Local>> {
+    let Some(previous) = checked_minute(&task.last_checked_minute) else {
+        return vec![now];
+    };
+    if previous > now {
+        return Vec::new();
+    }
+    let start = std::cmp::max(
+        previous + chrono::Duration::minutes(1),
+        now - chrono::Duration::minutes(MAX_CATCH_UP_MINUTES),
+    );
+    std::iter::successors(Some(start), |minute| {
+        Some(*minute + chrono::Duration::minutes(1))
+    })
+    .take_while(|minute| *minute <= now)
+    .collect()
 }
 
 /// 実行すべきタスクを取り出し、二重起動しないよう `last_run_minute` を先に保存する。
@@ -578,7 +604,6 @@ fn should_run(task: &ScheduledTask, minute_stamp: &str, hhmm: &str) -> bool {
 fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
     let now = Local::now();
     let minute_stamp = now.format("%Y-%m-%d %H:%M").to_string();
-    let hhmm = now.format("%H:%M").to_string();
     // 読む→直す→書き戻すの間、task_scheduler スキルの更新と競合しないようにする。
     let _guard = crate::store::lock_state(CONFIG_KEY);
     // 読めなかった場合は空一覧で続けない（そのまま書き戻すと予約が全部消える）。
@@ -590,22 +615,25 @@ fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
         }
     };
     let mut changed = false;
-    let due: Vec<ScheduledTask> = tasks
-        .iter_mut()
-        .filter_map(|task| {
-            if should_run(task, &minute_stamp, &hhmm) {
-                task.last_run_minute = minute_stamp.clone();
+    let mut due = Vec::new();
+    for task in &mut tasks {
+        let minutes = minutes_to_check(task, now);
+        for minute in minutes {
+            if should_run_at(task, minute) {
+                task.last_run_minute = minute.format("%Y-%m-%d %H:%M").to_string();
+                due.push(task.clone());
                 if !task.repeat {
                     task.enabled = false;
+                    break;
                 }
-                changed = true;
-                Some(task.clone())
-            } else {
-                None
             }
-        })
-        .collect();
-    if changed {
+        }
+        if task.last_checked_minute != minute_stamp {
+            task.last_checked_minute = minute_stamp.clone();
+            changed = true;
+        }
+    }
+    if changed || !due.is_empty() {
         if let Err(error) = save(cfg, &tasks) {
             crate::log_paths::append_app_log(
                 app,
@@ -681,8 +709,10 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_days, normalize_time, parse_cron_value, should_run, validate_task, ScheduledTask,
+        minutes_to_check, normalize_days, normalize_time, parse_cron_value, should_run_at,
+        validate_task, ScheduledTask,
     };
+    use chrono::TimeZone;
 
     fn 固定時刻タスク(time: &str) -> ScheduledTask {
         ScheduledTask {
@@ -702,27 +732,54 @@ mod tests {
             tool_name: String::new(),
             tool_args: serde_json::Value::Null,
             last_run_minute: String::new(),
+            last_checked_minute: String::new(),
         }
+    }
+
+    fn minute(day: u32, hour: u32, minute: u32) -> chrono::DateTime<chrono::Local> {
+        chrono::Local
+            .with_ymd_and_hms(2026, 7, day, hour, minute, 0)
+            .single()
+            .expect("テスト日時")
     }
 
     #[test]
     fn 同じ分では二重に実行しない() {
         let mut task = 固定時刻タスク("07:05");
-        assert!(should_run(&task, "2026-07-28 07:05", "07:05"));
+        assert!(should_run_at(&task, minute(28, 7, 5)));
         // 検出時に last_run_minute を刻む＝同じ分の再検出では拾わない。
         task.last_run_minute = "2026-07-28 07:05".to_string();
-        assert!(!should_run(&task, "2026-07-28 07:05", "07:05"));
+        assert!(!should_run_at(&task, minute(28, 7, 5)));
         // 分が変われば次の予定は通常どおり拾える。
-        assert!(!should_run(&task, "2026-07-28 08:05", "08:05"));
+        assert!(!should_run_at(&task, minute(28, 8, 5)));
         task.time = "08:05".to_string();
-        assert!(should_run(&task, "2026-07-28 08:05", "08:05"));
+        assert!(should_run_at(&task, minute(28, 8, 5)));
     }
 
     #[test]
     fn 無効タスクは検出しない() {
         let mut task = 固定時刻タスク("07:05");
         task.enabled = false;
-        assert!(!should_run(&task, "2026-07-28 07:05", "07:05"));
+        assert!(!should_run_at(&task, minute(28, 7, 5)));
+    }
+
+    #[test]
+    fn スリープ中の未処理分を上限付きで拾う() {
+        let mut task = 固定時刻タスク("07:05");
+        task.last_checked_minute = "2026-07-28 07:00".to_string();
+        let minutes = minutes_to_check(&task, minute(28, 7, 10));
+        assert_eq!(minutes.len(), 10);
+        assert!(minutes.into_iter().any(|at| should_run_at(&task, at)));
+
+        task.last_checked_minute = "2026-07-20 00:00".to_string();
+        assert_eq!(minutes_to_check(&task, minute(28, 7, 10)).len(), 1441);
+    }
+
+    #[test]
+    fn 時計巻き戻り時は過去予定を二重実行しない() {
+        let mut task = 固定時刻タスク("07:05");
+        task.last_checked_minute = "2026-07-28 08:00".to_string();
+        assert!(minutes_to_check(&task, minute(28, 7, 10)).is_empty());
     }
 
     /// 物理削除は allowlist を通っても実行させない（run_command と同じ規則）。

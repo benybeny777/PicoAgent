@@ -46,6 +46,7 @@ let scheduleEditorState = null; // スケジュールタスクエディタ（保
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const PRESERVE_UNREADABLE_SECRET = "__PRESERVE_UNREADABLE_SECRET__";
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
   { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
@@ -3471,6 +3472,10 @@ function collect() {
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }
+  for (const warning of data.unavailableSecrets || []) {
+    const input = inputs.get(warning.key);
+    if (input && input.value === "") patch[warning.key] = PRESERVE_UNREADABLE_SECRET;
+  }
   if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
   if (patch.PICOAGENT_PROVIDER === "openai") patch.PICOAGENT_MODEL = patch.OPENAI_MODEL || "";
   if (patch.PICOAGENT_PROVIDER === "anthropic") patch.PICOAGENT_MODEL = patch.PICOAGENT_ANTHROPIC_MODEL || "";
@@ -3656,6 +3661,11 @@ document.addEventListener("keydown", event => {
     await render();
     savedSnapshot = cloneSettings(collect());
     updateDirtyState();
+    if (data.unavailableSecrets?.length) {
+      statusEl.textContent = data.unavailableSecrets
+        .map(item => `${item.key}: ${item.reason}`)
+        .join(" / ");
+    }
   }
   catch (error) {
     renderingSettings = false;

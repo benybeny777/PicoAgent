@@ -145,6 +145,7 @@ const ALARM_POLL_MS = 20000;
 let alarmTimer = null;
 const firedAlarms = new Set();
 let activeAlarmSnooze = null;
+let alarmCheckInFlight = false;
 
 // 画面下部にトースト通知を表示する。必要な場合は次の操作へ進むボタンも付けられる。
 // kind: "info"（既定）/ "success" / "warn" / "error" で配色が変わる。
@@ -4770,10 +4771,16 @@ function armAlarmSnooze(a) {
   status.textContent = `「おきたよ！」を押すまで${minutes}分おきに起こします`;
 }
 async function checkAlarms() {
+  if (alarmCheckInFlight) return;
+  alarmCheckInFlight = true;
+  try {
   const now = new Date();
   if (activeAlarmSnooze && Date.now() >= activeAlarmSnooze.dueAt) {
+    const snoozeState = activeAlarmSnooze;
     const alarm = activeAlarmSnooze.alarm;
-    await fireAlarm(alarm);
+    // 遅い音声合成を待つ間に次のポーリングが同じスヌーズを発火しないよう、先に期限を進める。
+    activeAlarmSnooze.dueAt = Date.now() + alarmSnoozeMinutes(alarm) * 60 * 1000;
+    await fireAlarm(alarm, snoozeState);
     return;
   }
   let res;
@@ -4798,8 +4805,11 @@ async function checkAlarms() {
     await fireAlarm(a);
     break; // 1ティックにつき1件だけ鳴らす。
   }
+  } finally {
+    alarmCheckInFlight = false;
+  }
 }
-async function fireAlarm(a) {
+async function fireAlarm(a, snoozeState = null) {
   let line = "";
   try {
     const res = await window.picoagent.alarmWake(a.id);
@@ -4814,7 +4824,8 @@ async function fireAlarm(a) {
   addHistory("assistant", line);
   if (prepared) playPreparedSpeech(prepared);
   else if (animationName === "talking") setAnimation("idle");
-  armAlarmSnooze(a);
+  // 生成中に「おきたよ！」で解除された場合は、完了後にスヌーズを復活させない。
+  if (!snoozeState || activeAlarmSnooze === snoozeState) armAlarmSnooze(a);
 }
 function startAlarmPolling() {
   if (alarmTimer) clearInterval(alarmTimer);

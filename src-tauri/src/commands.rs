@@ -120,7 +120,7 @@ pub struct AppState {
     pub pending_question: Mutex<Option<crate::tools::ask_user::PendingQuestion>>,
     /// キャラクターの現在感情状態（ルールベース推定）。
     pub emotion: Mutex<crate::emotion::EmotionState>,
-    /// 停止ボタンによる中断要求。送信開始時に false へ戻し、エージェントがステップ境界で確認する。
+    /// 停止ボタンによる中断要求。送信開始時に false へ戻し、実行中の生成・ツール処理でも確認する。
     pub cancel_requested: std::sync::atomic::AtomicBool,
     /// 会話状態の世代番号。リセット・キャラ切替・再初期化後に古い非同期処理が
     /// 履歴や文脈を書き戻さないよう、送信開始時の値と完了時の値を照合する。
@@ -2307,10 +2307,20 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
     let model = state.model.lock().unwrap().clone();
     let mut values = state.config.get_all();
     // 暗号化済みのシークレットは設定画面で編集できるよう復号して返す（非暗号の値は不変）。
-    for value in values.values_mut() {
+    let mut unavailable_secrets = Vec::new();
+    for (key, value) in values.iter_mut() {
         if let Value::String(text) = value {
             if crate::secret::is_encrypted(text) {
-                *value = Value::String(crate::secret::decrypt(text));
+                let decrypted = crate::secret::decrypt(text);
+                if crate::secret::is_encrypted(&decrypted) {
+                    *value = Value::String(String::new());
+                    unavailable_secrets.push(json!({
+                        "key": key,
+                        "reason": "このPCまたはWindowsユーザーでは復号できません。値は保存したままなので、使う場合だけ再入力してください。"
+                    }));
+                } else {
+                    *value = Value::String(decrypted);
+                }
             }
         }
     }
@@ -2362,6 +2372,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         },
         "license": crate::license::status(&state.config),
         "values": values,
+        "unavailableSecrets": unavailable_secrets,
         "active": { "providerId": provider_id, "model": model },
         "defaults": { "systemPrompt": DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
@@ -2467,6 +2478,8 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
+    let current_values = state.config.get_all();
+    preserve_unreadable_secrets(&mut patch, &current_values)?;
     if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
         patch.insert(
             "PICOAGENT_CHARACTER_FRAMING".to_string(),
@@ -2728,6 +2741,23 @@ pub async fn settings_save(
         "hotkeyWarning": hotkey_warning,
         "up": current_up(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT).await
     }))
+}
+
+fn preserve_unreadable_secrets(
+    patch: &mut Map<String, Value>,
+    current_values: &Map<String, Value>,
+) -> Result<(), String> {
+    const PRESERVE_SECRET: &str = "__PRESERVE_UNREADABLE_SECRET__";
+    for (key, value) in patch.iter_mut() {
+        if value.as_str() != Some(PRESERVE_SECRET) {
+            continue;
+        }
+        let Some(current) = current_values.get(key) else {
+            return Err(format!("保持対象のシークレットが見つかりません: {key}"));
+        };
+        *value = current.clone();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -3563,7 +3593,7 @@ fn update_series_is_newer(latest: &str, current: &str) -> bool {
 }
 
 /// 実行中のエージェント処理へ中断を要求する。
-/// エージェントは次のステップ境界（再考前・ツール実行前）で停止する。
+/// エージェントは実行中の生成・再試行待機・ツール処理を中断する。
 #[tauri::command]
 pub fn pet_cancel(state: State<'_, AppState>) {
     state
@@ -4174,11 +4204,33 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
-        parse_update_feed, probe_with_timeout, replace_auto_summary, settings_tab, speech_text,
-        update_series_is_newer, update_status, verify_windows_installer, version_is_newer,
-        AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
+        settings_tab, speech_text, update_series_is_newer, update_status, verify_windows_installer,
+        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 復号不能シークレットは未編集保存で暗号文を保持する() {
+        let mut current = serde_json::Map::new();
+        current.insert(
+            "OPENAI_API_KEY".into(),
+            serde_json::json!("enc:dpapi:v1:old"),
+        );
+        let mut patch = serde_json::Map::new();
+        patch.insert(
+            "OPENAI_API_KEY".into(),
+            serde_json::json!("__PRESERVE_UNREADABLE_SECRET__"),
+        );
+        preserve_unreadable_secrets(&mut patch, &current).unwrap();
+        assert_eq!(patch["OPENAI_API_KEY"], current["OPENAI_API_KEY"]);
+
+        patch.insert(
+            "MISSING_TOKEN".into(),
+            serde_json::json!("__PRESERVE_UNREADABLE_SECRET__"),
+        );
+        assert!(preserve_unreadable_secrets(&mut patch, &current).is_err());
+    }
 
     #[tokio::test]
     async fn 起動時の接続確認は時間内に戻る() {

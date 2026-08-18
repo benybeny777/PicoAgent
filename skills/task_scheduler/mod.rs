@@ -117,6 +117,7 @@ fn build_task(cfg: &Config, args: &Value) -> Result<ScheduledTask, String> {
         tool_name: str_arg(args, "tool_name"),
         tool_args,
         last_run_minute: String::new(),
+        last_checked_minute: String::new(),
     };
     scheduler::validate_task(cfg, &task)?;
     Ok(task)

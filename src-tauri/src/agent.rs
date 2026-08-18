@@ -1277,10 +1277,14 @@ async fn dispatch_with_activity(
     app: Option<&tauri::AppHandle>,
     name: &str,
     args: serde_json::Value,
+    cancel: Option<&AtomicBool>,
 ) -> String {
     let names = vec![name.to_string()];
     emit_activity(app, "started", &names, &[]);
-    let answer = tools::dispatch(cfg, name, args).await;
+    let Some(answer) = cancel_while(tools::dispatch(cfg, name, args), cancel).await else {
+        emit_activity(app, "completed", &names, &[]);
+        return CANCEL_MESSAGE.to_string();
+    };
     let failed = if answer.starts_with("エラー:") {
         names.clone()
     } else {
@@ -1299,18 +1303,32 @@ async fn chat_with_retry(
     messages: &[Message],
     schemas: &[serde_json::Value],
     on_chunk: Arc<dyn Fn(String) + Send + Sync>,
-    app: Option<&tauri::AppHandle>,
+    control: (Option<&tauri::AppHandle>, Option<&AtomicBool>),
 ) -> anyhow::Result<Message> {
+    let (app, cancel) = control;
     let mut last_err = anyhow::anyhow!("リトライ上限に達しました");
     for attempt in 0u32..3 {
         if attempt > 0 {
             let wait_ms = (1u64 << attempt) * 1000;
-            tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
-        }
-        match provider
-            .chat_stream(cfg, model, messages, schemas, on_chunk.clone())
+            if cancel_while(
+                tokio::time::sleep(std::time::Duration::from_millis(wait_ms)),
+                cancel,
+            )
             .await
-        {
+            .is_none()
+            {
+                anyhow::bail!("{CANCEL_MESSAGE}");
+            }
+        }
+        let Some(result) = cancel_while(
+            provider.chat_stream(cfg, model, messages, schemas, on_chunk.clone()),
+            cancel,
+        )
+        .await
+        else {
+            anyhow::bail!("{CANCEL_MESSAGE}");
+        };
+        match result {
             Ok(msg) => return Ok(msg),
             Err(e) => {
                 let msg = e.to_string();
@@ -1351,6 +1369,46 @@ async fn chat_with_retry(
 
 /// ユーザーが停止ボタンで中断を要求したときに返す一言。
 const CANCEL_MESSAGE: &str = "りょうかい、いまの処理は途中で止めたよ。";
+
+async fn wait_for_cancel(cancel: Option<&AtomicBool>) {
+    match cancel {
+        Some(cancel) => loop {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        },
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// 実行中のfutureを停止要求と競合させる。`None` は停止要求によりfutureを破棄したことを示す。
+async fn cancel_while<T>(
+    future: impl std::future::Future<Output = T>,
+    cancel: Option<&AtomicBool>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        _ = wait_for_cancel(cancel) => None,
+        output = future => Some(output),
+    }
+}
+
+fn append_cancelled_tool_results(
+    messages: &mut Vec<Message>,
+    calls: &[crate::message::ToolCall],
+    content: &str,
+) {
+    messages.extend(calls.iter().map(|call| Message {
+        role: "tool".to_string(),
+        content: content.to_string(),
+        tool_calls: None,
+        tool_call_id: Some(call.id.clone()),
+        name: Some(call.name.clone()),
+        images: None,
+        usage: None,
+    }));
+}
 
 pub async fn run(
     cfg: &Config,
@@ -1438,6 +1496,7 @@ pub async fn run(
                 app,
                 "news_scrape",
                 serde_json::json!({ "max_items": 8 }),
+                cancel,
             )
             .await;
             sources = extract_source_urls(&news_result);
@@ -1450,37 +1509,38 @@ pub async fn run(
                 Some(location) => serde_json::json!({ "location": location }),
                 None => serde_json::json!({}),
             };
-            let answer = dispatch_with_activity(cfg, app, "weather", args).await;
+            let answer = dispatch_with_activity(cfg, app, "weather", args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = currency_query(&user_text) {
             // 為替もモデルに任せず currency_rates の整形済み出力（レート/推移チャート）を直接返す。
-            let answer = dispatch_with_activity(cfg, app, "currency_rates", args).await;
+            let answer = dispatch_with_activity(cfg, app, "currency_rates", args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = market_query(&user_text) {
             // 市場指数もモデルに任せず、専用スキルの取得結果を直接返す。
-            let answer = dispatch_with_activity(cfg, app, "market_indices", args).await;
+            let answer = dispatch_with_activity(cfg, app, "market_indices", args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = direct_local_tool_query(&user_text) {
-            let answer = dispatch_with_activity(cfg, app, tool, args).await;
+            let answer = dispatch_with_activity(cfg, app, tool, args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = audio_transcribe_query(&user_text) {
-            let answer = dispatch_with_activity(cfg, app, "whisper_transcribe", args).await;
+            let answer = dispatch_with_activity(cfg, app, "whisper_transcribe", args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some((tool, args)) = meeting_recorder_query(&user_text) {
-            let answer = dispatch_with_activity(cfg, app, tool, args).await;
+            let answer = dispatch_with_activity(cfg, app, tool, args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = genspark_suite_query(&user_text) {
-            let answer = dispatch_with_activity(cfg, app, "genspark_suite", args).await;
+            let answer = dispatch_with_activity(cfg, app, "genspark_suite", args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = spark_workspace_query(&user_text) {
-            let answer = dispatch_with_activity(cfg, app, "spark_workspace", args).await;
+            let answer = dispatch_with_activity(cfg, app, "spark_workspace", args, cancel).await;
             return direct_answer(messages, answer);
         } else if let Some(args) = research_report_query(&user_text) {
-            let answer = dispatch_with_activity(cfg, app, "research_report", args).await;
+            let answer = dispatch_with_activity(cfg, app, "research_report", args, cancel).await;
             return direct_answer(messages, answer);
         } else if is_daily_briefing_query(&user_text) {
             let answer =
-                dispatch_with_activity(cfg, app, "daily_briefing", serde_json::json!({})).await;
+                dispatch_with_activity(cfg, app, "daily_briefing", serde_json::json!({}), cancel)
+                    .await;
             return direct_answer(messages, answer);
         } else if is_clipboard_query(&user_text) {
             let mode = if user_text.contains("todo")
@@ -1498,6 +1558,7 @@ pub async fn run(
                 app,
                 "clipboard_text",
                 serde_json::json!({ "mode": mode }),
+                cancel,
             )
             .await;
             messages[user_index].content = format!(
@@ -1514,6 +1575,7 @@ pub async fn run(
                 app,
                 "web_search",
                 serde_json::json!({ "query": query }),
+                cancel,
             )
             .await;
             sources = extract_source_urls(&search_result);
@@ -1533,7 +1595,16 @@ pub async fn run(
     if super_agent {
         emit_status("計画を立てています…".to_string());
     }
-    if let Some(plan) = planning_step(provider, cfg, model, &original_user_text).await {
+    let plan = cancel_while(
+        planning_step(provider, cfg, model, &original_user_text),
+        cancel,
+    )
+    .await
+    .flatten();
+    if cancelled() {
+        return direct_answer(messages, CANCEL_MESSAGE.to_string());
+    }
+    if let Some(plan) = plan {
         if super_agent {
             // 計画本文をそのままフロントへ送り、実行前にステップ一覧を見せる。
             emit_status(plan.clone());
@@ -1563,9 +1634,19 @@ pub async fn run(
             messages,
             &schemas,
             emit_fn.clone(),
-            app,
+            (app, cancel),
         )
-        .await?;
+        .await
+        .or_else(|error| {
+            if cancelled() && error.to_string() == CANCEL_MESSAGE {
+                Ok(Message::new("assistant", CANCEL_MESSAGE))
+            } else {
+                Err(error)
+            }
+        })?;
+        if cancelled() {
+            return direct_answer(messages, CANCEL_MESSAGE.to_string());
+        }
         // reasoning モデルの <think> 推論ブロックを最終回答・履歴・読み上げから除外する
         // （DeepSeek-R1 / Qwen3 系などで英語/中国語の推論が混ざるのを防ぐ）。
         msg.content = crate::message::strip_reasoning(&msg.content);
@@ -1593,17 +1674,11 @@ pub async fn run(
                 // ツール実行前に中断要求を確認する。tool_calls には空応答を対で積み、
                 // プロバイダへ渡す会話履歴の整合（tool_calls とツール結果の対応）を保つ。
                 if cancelled() {
-                    for c in cs.iter() {
-                        messages.push(Message {
-                            role: "tool".to_string(),
-                            content: "（ユーザーが処理を中断したため未実行）".to_string(),
-                            tool_calls: None,
-                            tool_call_id: Some(c.id.clone()),
-                            name: Some(c.name.clone()),
-                            images: None,
-                            usage: None,
-                        });
-                    }
+                    append_cancelled_tool_results(
+                        messages,
+                        &cs,
+                        "（ユーザーが処理を中断したため未実行）",
+                    );
                     return direct_answer(messages, CANCEL_MESSAGE.to_string());
                 }
                 // ツール実行前にフロントへ「何を実行中か」を通知する（固まり防止）。
@@ -1627,7 +1702,15 @@ pub async fn run(
                         }
                     })
                     .collect();
-                let results = futures::future::join_all(futs).await;
+                let Some(results) = cancel_while(futures::future::join_all(futs), cancel).await
+                else {
+                    append_cancelled_tool_results(
+                        messages,
+                        &cs,
+                        "（ユーザーが処理を中断したため実行を終了）",
+                    );
+                    return direct_answer(messages, CANCEL_MESSAGE.to_string());
+                };
 
                 // ユーザーの応答待ちになるマーカーを最初にチェックする。
                 // どちらもループを止めて、返答を次のユーザー発話として受け取る。
@@ -1735,7 +1818,12 @@ pub async fn run(
                 let answer = append_sources(remove_material_leaks(last), &sources);
                 // 混入の除去は self_improve の後に置く。自己評価は回答を作り直すことがあり、
                 // 先に消しても作り直した側が素通りしてしまうため。
-                let improved = self_improve(provider, cfg, model, messages, answer).await;
+                let Some(improved) =
+                    cancel_while(self_improve(provider, cfg, model, messages, answer), cancel)
+                        .await
+                else {
+                    return direct_answer(messages, CANCEL_MESSAGE.to_string());
+                };
                 return Ok(remove_prompt_leak(improved, &prompt));
             }
         }
@@ -1747,27 +1835,146 @@ pub async fn run(
         last
     };
     let prompt = system_prompt_of(messages);
-    let improved = self_improve(
-        provider,
-        cfg,
-        model,
-        messages,
-        append_sources(remove_material_leaks(answer), &sources),
+    let Some(improved) = cancel_while(
+        self_improve(
+            provider,
+            cfg,
+            model,
+            messages,
+            append_sources(remove_material_leaks(answer), &sources),
+        ),
+        cancel,
     )
-    .await;
+    .await
+    else {
+        return direct_answer(messages, CANCEL_MESSAGE.to_string());
+    };
     Ok(remove_prompt_leak(improved, &prompt))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_sources, audio_transcribe_query, currency_query, direct_local_tool_query,
-        extract_source_urls, genspark_suite_query, is_local_action_query, is_news_summary_query,
-        is_weather_query, market_query, meeting_recorder_query, remove_material_leaks,
-        remove_prompt_leak, research_report_query, setup_guide_answer, should_web_search,
-        simple_greeting_answer, spark_workspace_query, system_prompt_of, web_search_query,
+        append_cancelled_tool_results, append_sources, audio_transcribe_query, currency_query,
+        direct_local_tool_query, extract_source_urls, genspark_suite_query, is_local_action_query,
+        is_news_summary_query, is_weather_query, market_query, meeting_recorder_query,
+        remove_material_leaks, remove_prompt_leak, research_report_query, setup_guide_answer,
+        should_web_search, simple_greeting_answer, spark_workspace_query, system_prompt_of,
+        web_search_query,
     };
-    use crate::message::Message;
+    use crate::message::{Message, ToolCall};
+
+    #[test]
+    fn ツール中断結果は全call_idと対応する() {
+        let calls = vec![
+            ToolCall {
+                id: "呼出し一".into(),
+                name: "time".into(),
+                arguments: serde_json::json!({}),
+            },
+            ToolCall {
+                id: "call-2".into(),
+                name: "weather".into(),
+                arguments: serde_json::json!({}),
+            },
+        ];
+        let mut messages = Vec::new();
+        append_cancelled_tool_results(&mut messages, &calls, "中断しました");
+        assert_eq!(messages.len(), calls.len());
+        for (message, call) in messages.iter().zip(calls) {
+            assert_eq!(message.role, "tool");
+            assert_eq!(message.tool_call_id.as_deref(), Some(call.id.as_str()));
+            assert_eq!(message.name.as_deref(), Some(call.name.as_str()));
+            assert!(std::str::from_utf8(message.content.as_bytes()).is_ok());
+        }
+    }
+
+    struct SlowProvider;
+
+    #[async_trait::async_trait]
+    impl crate::providers::Provider for SlowProvider {
+        fn id(&self) -> &'static str {
+            "slow-test"
+        }
+        fn label(&self) -> &'static str {
+            "停止テスト"
+        }
+        fn default_model(&self, _cfg: &crate::config::Config) -> String {
+            "test".to_string()
+        }
+        async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn is_up(&self, _cfg: &crate::config::Config) -> bool {
+            true
+        }
+        async fn chat(
+            &self,
+            _cfg: &crate::config::Config,
+            _model: &str,
+            _messages: &[Message],
+            _tools: &[serde_json::Value],
+        ) -> anyhow::Result<Message> {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            Ok(Message::new("assistant", "完了"))
+        }
+    }
+
+    #[test]
+    fn 生成中の停止要求を二秒以内に反映する() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
+        cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let request = Arc::clone(&cancel);
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            request.store(true, Ordering::Relaxed);
+        });
+        let mut messages = vec![Message::new("user", "長い応答を生成してください")];
+        let started = std::time::Instant::now();
+        let answer = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(super::run(
+                &cfg,
+                &SlowProvider,
+                "test",
+                &mut messages,
+                5,
+                None,
+                Some(cancel.as_ref()),
+            ))
+            .unwrap();
+        worker.join().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(answer, super::CANCEL_MESSAGE);
+        assert!(std::str::from_utf8(answer.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn 実行中ツール相当のfutureを二秒以内に破棄する() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let request = Arc::clone(&cancel);
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            request.store(true, Ordering::Relaxed);
+        });
+        let started = std::time::Instant::now();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(async {
+            super::cancel_while(
+                tokio::time::sleep(std::time::Duration::from_secs(10)),
+                Some(cancel.as_ref()),
+            )
+            .await
+        });
+        worker.join().unwrap();
+        assert!(result.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
 
     /// 小型ローカルモデルは system プロンプトを復唱することがある。そのまま返すと
     /// フキダシと履歴へ人格設定が出て、読み上げも設定文を喋る。
