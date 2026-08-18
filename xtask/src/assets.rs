@@ -1412,6 +1412,8 @@ pub fn stop_stale() -> Result<()> {
     stop_managed_aivis(&mut stopped);
     // 撮影・検査ツールの node も、このリポジトリの経路から起動したものだけを止める。
     stop_managed_screenshot_node(&mut stopped);
+    // browser_control が残したブラウザも、PicoAgent 専用プロファイルのものだけを止める。
+    stop_managed_browser(&mut stopped);
 
     if stopped.is_empty() {
         log("stop-stale", "停止対象の残存プロセスはありません");
@@ -1490,6 +1492,54 @@ fn stop_managed_screenshot_node(stopped: &mut Vec<&'static str>) {
         .unwrap_or(false);
     if stopped_any {
         stopped.push("screenshot-node");
+    }
+}
+
+/// `browser_control` が残したブラウザの目印。`--user-data-dir` に渡す PicoAgent 専用
+/// プロファイルの経路そのものを見るため、利用者が普段使っている Chrome / Edge には当たらない。
+///
+/// ブラウザは自分で描画・GPU の別プロセスを立てるので、実行ファイル名だけで止めると
+/// 無関係なタブごと巻き込む。逆に止めないと、デバッグポートを握った実体が残り、
+/// 次回の起動が「PicoAgent が管理していないブラウザに使われています」で必ず失敗する。
+const BROWSER_PROFILE_NEEDLE: &str = "PicoAgent/browser-profile";
+
+/// プロファイル経路で絞り込んだうえで、対象にする実行ファイル名。
+/// 判定に使う PowerShell 自身のコマンドラインにも目印が載るため、名前でも絞って自滅を防ぐ。
+const BROWSER_PROCESS_NAMES: [&str; 4] = ["chrome.exe", "msedge.exe", "chromium.exe", "brave.exe"];
+
+#[cfg(unix)]
+fn stop_managed_browser(stopped: &mut Vec<&'static str>) {
+    let ok = Command::new("pkill")
+        .args(["-f", BROWSER_PROFILE_NEEDLE])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if ok {
+        stopped.push("browser-control");
+    }
+}
+
+#[cfg(not(unix))]
+fn stop_managed_browser(stopped: &mut Vec<&'static str>) {
+    // 円記号の区切りをスラッシュへ揃えてから判定し、相対・絶対どちらの起動でも拾う。
+    let names = BROWSER_PROCESS_NAMES
+        .iter()
+        .map(|name| format!("Name='{name}'"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let script = format!(
+        "$needle = '{BROWSER_PROFILE_NEEDLE}';          Get-CimInstance Win32_Process -Filter \"{names}\" |          Where-Object {{ $_.CommandLine -and $_.CommandLine.Replace('\\', '/').Contains($needle) }} |          ForEach-Object {{ taskkill /PID $_.ProcessId /T /F > $null 2>&1; 'stopped' }}",
+    );
+    let stopped_any = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains("stopped"))
+        .unwrap_or(false);
+    if stopped_any {
+        stopped.push("browser-control");
     }
 }
 
@@ -2129,6 +2179,37 @@ mod tests {
                 !command.replace('\\', "/").contains(needle),
                 "誤検出: {command}"
             );
+        }
+    }
+
+    #[test]
+    fn ブラウザ判定は専用プロファイル経路と実行ファイル名の両方で絞る() {
+        let needle = super::BROWSER_PROFILE_NEEDLE;
+        assert_eq!(needle, "PicoAgent/browser-profile");
+        // 相対・スラッシュ、絶対・円記号のどちらの起動でも拾う。
+        for command in [
+            "chrome --user-data-dir=C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\browser-profile",
+            "chrome --user-data-dir=/home/me/.local/share/PicoAgent/browser-profile",
+        ] {
+            assert!(
+                command.replace('\\', "/").contains(needle),
+                "拾えません: {command}"
+            );
+        }
+        // 利用者が普段使っているブラウザは拾わない。
+        for command in [
+            "chrome --user-data-dir=C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\User Data",
+            "msedge about:blank",
+        ] {
+            assert!(
+                !command.replace('\\', "/").contains(needle),
+                "誤検出: {command}"
+            );
+        }
+        // 判定に使う PowerShell 自身のコマンドラインにも目印が載る。名前で絞って自滅を防ぐ。
+        for name in super::BROWSER_PROCESS_NAMES {
+            assert_ne!(name, "powershell.exe");
+            assert_ne!(name, "node.exe");
         }
     }
 }

@@ -11,6 +11,29 @@
 
 ---
 
+## 2026-08-19 — browser_control のブラウザ残留
+
+対象: PR #142 の検証中に見つけた `cargo xtask verify` の再実行失敗。1回目は成功し、2回目以降は
+`tools::browser_control::cdp::tests::ブラウザを起動してページ内容を読める` が
+「デバッグポート 11446 は PicoAgent が管理していないブラウザに使われています」で必ず落ちる。
+
+| # | 重要度 | 指摘 | 判定 | 内容 |
+|---|---|---|---|---|
+| 1 | P1 | `browser_control` の停止が保持している `Child` にしか届かず、実体のブラウザが残る | 対応済み | Chrome / Edge は起動直後に本体を立て直して最初のプロセスが終了する。実測で本体（`--type` なしの chrome.exe）の `ParentProcessId` が既に存在せず、`kill()` も `taskkill /T` も届いていなかった。`--user-data-dir` の PicoAgent 専用プロファイル経路で名指しして回収する `stop_profile_browsers()` を `cdp::stop()` へ足した |
+| 2 | P1 | `cargo xtask stop` の回収対象にブラウザが無く、残ったあと復旧できない | 対応済み | 撮影ツールの `node` と同じ形で、`PicoAgent/browser-profile` を持つブラウザだけをプロセスツリーごと止める `stop_managed_browser()` を追加した。判定に使う PowerShell 自身のコマンドラインにも目印が載るため、実行ファイル名でも絞って自滅を防ぐ |
+| 3 | P2 | テストの `BrowserGuard` が `ensure_running` の**後**に作られており、起動途中で失敗すると回収されない | 対応済み | guard を起動より先に持つ順序へ変更した |
+| 4 | P2 | 同期側にプロセスツリー停止の共通処理が無く、各所が `Child::kill()` を書いていた | 対応済み | 非同期の `terminate_process_tree()` と対になる `tools::process::terminate_tree_sync()` を共通層へ追加した |
+
+実測: 修正前は `cargo test --lib browser_control` のたびに headless Chrome が9プロセス
+（本体・crashpad・GPU・utility 2・renderer 4）残り、ポート11446を握り続けていた。
+修正後は連続2回の実行で残留0・ポート開放を確認した。
+恒久ルールは `AGENTS.md`（子ハンドルだけで回収できると考えない／`cargo xtask stop` の対象）、
+仕様は `SPEC.md`（終了時の回収範囲）へ移した。
+
+利用者側の実害は無い（アプリ本体は `lib.rs` の `RunEvent::Exit` で `browser_control::stop()` を通る）が、
+その経路も同じ子ハンドル頼みだったため、`browser_control` を使った利用者が正常終了しても
+実体が残っていた。今回の修正はアプリ終了経路にも同じく効く。
+
 ## 2026-08-19 — 不要ブランチの整理と再発防止ルール
 
 対象: 利用者からの指摘「不要ブランチはけして」「ゴミブランチを残さないようルール追加して」。

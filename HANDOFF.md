@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-19
-- ブランチ: `chore/no-stale-branches`
-- 目的: 不要ブランチを整理し、残さないルールを追加する
-- 対応PR: #141
+- ブランチ: `fix/reclaim-browser-control-chrome`
+- 目的: `browser_control` が残すブラウザを実体ごと回収する
+- 関連PR: #142（無言スキップと記憶一覧の空表示。マージ待ち）
 
 ## 未処理の残件（次に作業する人はここから始める）
 
@@ -55,6 +55,17 @@ squash mergeでは`git branch --merged`が効かないため、判定は枝の�
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-19、`browser_control` が起動したブラウザの残留を直した。Chrome / Edge は起動直後に
+本体を立て直して最初のプロセスが終了するため、こちらが握る `Child` は本体の親ではなくなり、
+`kill()` も `taskkill /T` も届いていなかった（実測で本体の `ParentProcessId` が既に存在しない）。
+結果として `cargo test --lib browser_control` のたびに headless Chrome が9プロセス残り、
+ポート11446を握るため2回目以降の `cargo xtask verify` が必ず失敗していた。
+`--user-data-dir` の PicoAgent 専用プロファイル経路で名指しして回収する `stop_profile_browsers()` を
+`cdp::stop()` へ足し、`cargo xtask stop` にも同じ目印の回収を追加した。同期側の共通処理として
+`tools::process::terminate_tree_sync()` を置き、テストの guard は起動より先に持つ順序へ変えた。
+連続2回の実行で残留0・ポート開放を確認した。利用者が普段使っているブラウザは別プロファイルなので
+対象にならない。アプリ終了経路（`RunEvent::Exit` → `browser_control::stop()`）にも同じく効く。
 
 2026-08-19、Claude横断レビューIとして、常時表示のフキダシにある`backdrop-filter: blur(14px)`の
 再合成負荷を測った。立ち絵を動かし続けた状態で、ペット／ミニ／配信×重なり有無×背後の描き替え負荷
