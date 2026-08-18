@@ -11,6 +11,27 @@
 
 ---
 
+## 2026-08-18 — Claude PR #119の現行main再監査
+
+対象: PR #119（`claude/improvement-proposal-u9n8k5`、基準`b743b08`）と現行`main`。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P0 | 停止ボタンが生成ストリーム中と`join_all`のツール実行中に効かない | 保留（引き継ぎ済み） | `pet_cancel`はAtomicBoolを立てるだけで、`chat_with_retry`と実行中futureに待受点がない。公開済み機能の実不具合として`CODEX-TASKS.md`へ移した |
+| 2 | P0 | スヌーズの起こし文生成が20秒を超えると同じ通知を多重発火できる | 保留（引き継ぎ済み） | `activeAlarmSnooze.dueAt`を過去のまま`await fireAlarm()`し、`setInterval`の次tickを止めない。非スヌーズだけはawait前に印を持つため、スヌーズ固有の欠陥 |
+| 3 | 確認 | PR #119のP0-3とP1-1〜4 | 対応済み | LP重量はPR #116、設定狭幅・PNG行列・LINE風チャット・長時間文字起こしはPR #117で完了済み。再追加しない |
+| 4 | P1 | RSSのSSRF、制作用パッチ混入、予約の分またぎ消失、復号不能シークレット表示、説明書メニュー名、スキル候補登録順依存 | 保留（引き継ぎ済み） | 現行コードで各経路を確認し、再現条件と完了条件を`CODEX-TASKS.md`へ選別して移した。`expression-patches/`は配信コピーにも46件・47,858,422 bytes存在し、実行時参照0件 |
+| 5 | 提案 | ルーティング集約、プロンプト分離、verify一本化、HTTP共通化、WebP、差分同期、CSP、記憶UI、LFS、巨大ファイル分割 | 保留（要判断） | 有用な案を含むが、欠陥修正・仕様変更・容量最適化・開発体験が混在する。一括採用せず目的別PRへ分ける。cronの日・曜日ANDは現仕様が「cron風」のため、互換仕様を決めてから変更する |
+| 6 | 運用 | PR #119をそのままマージできるか | 見送り | 基準がPR #115時点で、PR #116〜#118と競合し、完了済み項目と古いHANDOFFを再導入する。必要項目だけ現行mainへ移植する |
+| 7 | 販売 | `release-check`の現在状態 | 保留 | EULA、プライバシー、第三者再配布条件・台帳、Live2D審査・契約参照の4ブロッカー。同梱`llama-server`の版・SHA-256未固定注意も残る |
+
+検証: PR #119のメタデータ・13コミット・差分、現行`agent.rs`／`commands.rs`／`renderer.js`／
+`rss_feed`／`scheduler.rs`／`settings_load`／`tools::schemas_for_text`／`sync-characters`を静的照合し、
+`cargo xtask release-check`を実行した。コードは変更していない。残件台帳と引き継ぎだけを同期したため、
+`README.md`、`SPEC.md`、`CHANGELOG.md`の更新は不要と判断した。
+
+---
+
 ## 2026-08-18 — Claude向け引き継ぎのマージ後再確認
 
 対象: PR #117をマージしたあとの`HANDOFF.md`、`main`、GitHub PR状態。
