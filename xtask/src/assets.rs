@@ -2,15 +2,16 @@
 //
 // 旧 `scripts/sync-characters.mjs` / `build-ui-dist.mjs` / `stop-stale.mjs` の置き換え。
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::util::{copy_dir, list_files, log, repo_root, warn};
+use crate::util::{list_files, log, repo_root, sync_dir, sync_dir_with_equivalence, warn};
 
 /// ルートの `characters/`（正本）を webview 配信先 `ui/assets/characters/` へ同期する。
 ///
@@ -18,6 +19,11 @@ use crate::util::{copy_dir, list_files, log, repo_root, warn};
 /// `frontendDist`（`ui/`）配下しか配信できないため、dev / build 前にコピーして配る。
 /// 生成物は `.gitignore` 対象。
 pub fn sync_characters() -> Result<()> {
+    sync_characters_with_force(false)
+}
+
+/// 通常同期。`force` のときだけ、検証後に配信先を全再構築する。
+pub fn sync_characters_with_force(force: bool) -> Result<()> {
     let root = repo_root();
     let src = root.join("characters");
     let dest = root.join("ui/assets/characters");
@@ -27,22 +33,37 @@ pub fn sync_characters() -> Result<()> {
     // 配信先を消す前に判定する。消してから失敗すると、キャラが1体も居ない状態が残り、
     // 次の `dev` / `build` は `ui-dist/` を作れないままになる。
     let unfetched = unfetched_live2d_characters(&src)?;
-    fs::remove_dir_all(&dest).ok();
+    validate_character_index(&src)?;
+    let runtime_layer_sources = validate_character_sources(&src, &|id| {
+        !unfetched.iter().any(|unfetched_id| unfetched_id == id)
+    })?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
     // live2d-src/ と expression-patches/ は制作素材で実行時に使わないため配信へ含めない。
     // モデル未取得の Live2D サンプルも、正本直下のフォルダごと外す。
-    copy_dir(&src, &dest, &|path| {
-        if is_character_source_only(path) {
-            return true;
-        }
-        path.parent() == Some(src.as_path())
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| unfetched.iter().any(|id| id == name))
-    })?;
+    let stats = sync_dir_with_equivalence(
+        &src,
+        &dest,
+        &|path| {
+            if is_character_source_only(path) {
+                return true;
+            }
+            if runtime_layer_sources
+                .iter()
+                .any(|source_layers| path.starts_with(source_layers))
+            {
+                return true;
+            }
+            path.parent() == Some(src.as_path())
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| unfetched.iter().any(|id| id == name))
+        },
+        force,
+        &character_manifests_equivalent,
+    )?;
     if !unfetched.is_empty() {
         drop_characters_from_index(&dest, &unfetched)?;
         warn(
@@ -54,10 +75,18 @@ pub fn sync_characters() -> Result<()> {
             ),
         );
     }
-    stamp_character_asset_versions(&dest)?;
+    let changed_characters = changed_character_ids(&dest, &stats.changed_paths);
+    stamp_character_asset_versions(&dest, Some(&changed_characters))?;
     log(
         "sync-characters",
-        format!("{} -> {} を同期しました", src.display(), dest.display()),
+        format!(
+            "{} -> {} を同期しました（コピー{}件、変更なし{}件、削除{}件）",
+            src.display(),
+            dest.display(),
+            stats.copied_files,
+            stats.unchanged_files,
+            stats.removed_entries
+        ),
     );
     Ok(())
 }
@@ -105,6 +134,97 @@ fn unfetched_live2d_characters(src: &Path) -> Result<Vec<String>> {
         }
     }
     Ok(unfetched)
+}
+
+/// index と各キャラ正本を、配信先へ触る前に検証する。
+fn validate_character_index(src: &Path) -> Result<()> {
+    let index_path = src.join("index.json");
+    let index: serde_json::Value = serde_json::from_str(&fs::read_to_string(&index_path)?)
+        .with_context(|| format!("index.json を読めません: {}", index_path.display()))?;
+    if index
+        .get("characters")
+        .and_then(serde_json::Value::as_array)
+        .is_none()
+    {
+        bail!("{} にcharacters配列がありません", index_path.display());
+    }
+    Ok(())
+}
+
+/// 対象キャラを検証し、実行時コピーから外せる制作正本レイヤーの場所を返す。
+fn validate_character_sources(src: &Path, include: &dyn Fn(&str) -> bool) -> Result<Vec<PathBuf>> {
+    let mut character_dirs = fs::read_dir(src)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("character.json").is_file())
+        .collect::<Vec<_>>();
+    character_dirs.sort();
+
+    let mut runtime_layer_sources = Vec::new();
+    for character_dir in character_dirs {
+        let Some(id) = character_dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !include(id) {
+            continue;
+        }
+        let manifest_path = character_dir.join("character.json");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path)?).with_context(|| {
+                format!("character.json を読めません: {}", manifest_path.display())
+            })?;
+        validate_character_asset_generation(&character_dir, &manifest)?;
+        if manifest
+            .get("runtimeLayers")
+            .and_then(serde_json::Value::as_object)
+            .is_some()
+        {
+            runtime_layer_sources.push(character_dir.join("layers"));
+        }
+    }
+    Ok(runtime_layer_sources)
+}
+
+/// 自動版以外が同じmanifestは、配信先の自動版を保つ。
+fn character_manifests_equivalent(source: &Path, target: &Path) -> Result<bool> {
+    if source.file_name().and_then(|name| name.to_str()) != Some("character.json") {
+        return Ok(false);
+    }
+    let Ok(mut source_manifest) =
+        serde_json::from_str::<serde_json::Value>(&fs::read_to_string(source)?)
+    else {
+        return Ok(false);
+    };
+    let Ok(mut target_manifest) =
+        serde_json::from_str::<serde_json::Value>(&fs::read_to_string(target)?)
+    else {
+        return Ok(false);
+    };
+    if !target_manifest
+        .get("assetVersion")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|version| version.starts_with("auto-"))
+    {
+        return Ok(false);
+    }
+    source_manifest
+        .as_object_mut()
+        .map(|object| object.remove("assetVersion"));
+    target_manifest
+        .as_object_mut()
+        .map(|object| object.remove("assetVersion"));
+    Ok(source_manifest == target_manifest)
+}
+
+fn changed_character_ids(dest: &Path, paths: &[PathBuf]) -> HashSet<String> {
+    paths
+        .iter()
+        .filter_map(|path| match path.components().next() {
+            Some(Component::Normal(id)) => id.to_str().map(str::to_owned),
+            _ => None,
+        })
+        .filter(|id| dest.join(id).join("character.json").is_file())
+        .collect()
 }
 
 /// 同期から外したキャラを、配信先の `index.json` からも取り除く。
@@ -157,8 +277,12 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
     let root = repo_root();
     let src = root.join("characters");
     let dest = root.join("ui/assets/characters");
-    fs::remove_dir_all(&dest).ok();
-    fs::create_dir_all(&dest)?;
+    if !src.is_dir() {
+        bail!("キャラクターの正本が見つかりません: {}", src.display());
+    }
+    if included.is_empty() {
+        bail!("販売対象キャラが空です");
+    }
 
     let index_path = src.join("index.json");
     let mut index: serde_json::Value = serde_json::from_str(&fs::read_to_string(&index_path)?)?;
@@ -186,24 +310,52 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
     if !included.iter().any(|id| id == default) {
         index["default"] = serde_json::Value::String(included[0].clone());
     }
-    fs::write(
-        dest.join("index.json"),
-        format!("{}\n", serde_json::to_string_pretty(&index)?),
-    )?;
-
     for id in included {
-        copy_dir(&src.join(id), &dest.join(id), &is_character_source_only)?;
+        let manifest = src.join(id).join("character.json");
+        if !manifest.is_file() {
+            bail!(
+                "販売対象キャラの正本が見つかりません: {}",
+                manifest.display()
+            );
+        }
     }
-    let placeholder = src.join("_preview-placeholder.png");
-    if placeholder.is_file() {
-        fs::copy(placeholder, dest.join("_preview-placeholder.png"))?;
-    }
-    stamp_character_asset_versions(&dest)?;
+    let index_text = format!("{}\n", serde_json::to_string_pretty(&index)?);
+    let included_set = included.iter().cloned().collect::<HashSet<_>>();
+    let runtime_layer_sources = validate_character_sources(&src, &|id| included_set.contains(id))?;
+    let stats = sync_dir_with_equivalence(
+        &src,
+        &dest,
+        &|path| {
+            if path == index_path || is_character_source_only(path) {
+                return true;
+            }
+            if runtime_layer_sources
+                .iter()
+                .any(|source_layers| path.starts_with(source_layers))
+            {
+                return true;
+            }
+            path.parent() == Some(src.as_path())
+                && path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|id| !included_set.contains(id))
+        },
+        false,
+        &character_manifests_equivalent,
+    )?;
+    fs::write(dest.join("index.json"), index_text)?;
+    let changed_characters = changed_character_ids(&dest, &stats.changed_paths);
+    stamp_character_asset_versions(&dest, Some(&changed_characters))?;
     log(
         "sync-characters",
         format!(
-            "販売対象{}体だけを同期しました: {}",
+            "販売対象{}体だけを同期しました（コピー{}件、変更なし{}件、削除{}件）: {}",
             included.len(),
+            stats.copied_files,
+            stats.unchanged_files,
+            stats.removed_entries,
             included.join(", ")
         ),
     );
@@ -225,7 +377,7 @@ fn is_character_source_only(path: &Path) -> bool {
 ///
 /// 手書き版だけでは画像差し替え時に更新を忘れ、WebViewが旧画像を表示し続ける。
 /// 配信するファイル自体のハッシュなら、通常の同期だけでURLが変わりキャッシュが切り替わる。
-fn stamp_character_asset_versions(dest: &Path) -> Result<()> {
+fn stamp_character_asset_versions(dest: &Path, changed: Option<&HashSet<String>>) -> Result<()> {
     let mut character_dirs = fs::read_dir(dest)?
         .flatten()
         .map(|entry| entry.path())
@@ -234,10 +386,18 @@ fn stamp_character_asset_versions(dest: &Path) -> Result<()> {
     character_dirs.sort();
 
     for character_dir in character_dirs {
+        if changed.is_some_and(|ids| {
+            character_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_none_or(|id| !ids.contains(id))
+        }) {
+            continue;
+        }
         let manifest_path = character_dir.join("character.json");
         let mut manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
-        validate_character_asset_generation(&character_dir, &manifest)?;
+        validate_character_runtime_generation(&character_dir, &manifest)?;
         remove_source_layers_from_runtime_copy(&character_dir, &manifest)?;
         let version = character_content_version(&character_dir)?;
         manifest["assetVersion"] = serde_json::Value::String(format!("auto-{version}"));
@@ -258,8 +418,8 @@ fn is_lossless_webp(path: &Path) -> Result<bool> {
         && &bytes[12..16] == b"VP8L")
 }
 
-/// 制作正本のlayers/*.pngは同期時の構造検証に使ったあと、配信用コピーからだけ外す。
-/// 実行時はmanifestのruntimeLayersが指すlossless WebPを読む。
+/// 旧同期で残った制作正本のlayers/*.pngを配信用コピーからだけ外す。
+/// 現行同期は正本側で検証してコピーを省くが、実行時WebPの検証はここでも行う。
 fn remove_source_layers_from_runtime_copy(
     character_dir: &Path,
     manifest: &serde_json::Value,
@@ -326,8 +486,9 @@ const THA3_MOTION_LAYERS: [&str; 12] = [
 const SHARP_EXPRESSION_MINIMUM_SIZE: (u32, u32) = (1780, 3600);
 
 fn png_dimensions(path: &Path) -> Result<(u32, u32)> {
-    let bytes = fs::read(path)?;
-    if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
+    let mut bytes = [0_u8; 24];
+    fs::File::open(path)?.read_exact(&mut bytes)?;
+    if &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
         bail!("PNGヘッダーを読み取れません: {}", path.display());
     }
     Ok((
@@ -427,10 +588,21 @@ fn validate_character_asset_generation(
     manifest: &serde_json::Value,
 ) -> Result<()> {
     if manifest.get("live2d").is_some() {
-        return validate_live2d_model_sets(character_dir, manifest);
+        return validate_character_runtime_generation(character_dir, manifest);
     }
     validate_sharp_expression_pack(character_dir, manifest)?;
     validate_full_motion_pack(character_dir, manifest)?;
+    validate_character_runtime_generation(character_dir, manifest)
+}
+
+/// 配信用コピーだけで確認できるフレーム・Live2D・世代整合性を検証する。
+fn validate_character_runtime_generation(
+    character_dir: &Path,
+    manifest: &serde_json::Value,
+) -> Result<()> {
+    if manifest.get("live2d").is_some() {
+        return validate_live2d_model_sets(character_dir, manifest);
+    }
     let generation = manifest
         .get("frameGeneration")
         .and_then(serde_json::Value::as_str)
@@ -570,15 +742,14 @@ fn character_content_version(character_dir: &Path) -> Result<String> {
 /// 配布物から読みやすいソースを減らす（解析を不可能にするものではない）。
 ///
 /// `beta` は開発中ベータ版のときだけ真にする。偽なら画面の BETA 表示を取り除く。
-pub fn build_ui_dist(release: bool, beta: bool) -> Result<()> {
+pub fn build_ui_dist(release: bool, beta: bool, force: bool) -> Result<()> {
     let root = repo_root();
     let src = root.join("ui");
     let dest = root.join("ui-dist");
     if !src.exists() {
         bail!("ui が見つかりません: {}", src.display());
     }
-    fs::remove_dir_all(&dest).ok();
-    copy_dir(&src, &dest, &|_| false)?;
+    let stats = sync_dir(&src, &dest, &|_| false, force)?;
     // READMEで実表示を検証した8形式の画像を、設定画面の選択カードにも使う。
     // 正本を二重管理せず、配信用生成物へだけまとめてコピーする。
     let preview_src = root.join("docs/images");
@@ -632,9 +803,12 @@ pub fn build_ui_dist(release: bool, beta: bool) -> Result<()> {
     log(
         "build-ui-dist",
         format!(
-            "ui -> ui-dist ({}{})",
+            "ui -> ui-dist ({}{}、コピー{}件、変更なし{}件、削除{}件)",
             if release { "release" } else { "dev" },
-            if beta { " / beta" } else { "" }
+            if beta { " / beta" } else { "" },
+            stats.copied_files,
+            stats.unchanged_files,
+            stats.removed_entries
         ),
     );
     Ok(())
@@ -913,9 +1087,10 @@ mod tests {
     use std::fs;
 
     use super::{
-        character_content_version, content_version, drop_characters_from_index,
-        is_character_source_only, remove_beta_badge, remove_source_layers_from_runtime_copy,
-        rewrite_asset_refs, stamp_character_asset_versions, unfetched_live2d_characters,
+        character_content_version, character_manifests_equivalent, content_version,
+        drop_characters_from_index, is_character_source_only, remove_beta_badge,
+        remove_source_layers_from_runtime_copy, rewrite_asset_refs, stamp_asset_versions,
+        stamp_character_asset_versions, unfetched_live2d_characters,
         validate_character_asset_generation,
     };
 
@@ -1081,6 +1256,45 @@ mod tests {
     }
 
     #[test]
+    fn 配信htmlへ実ファイルの内容版を打てる() {
+        let root =
+            std::env::temp_dir().join(format!("picoagent-ui-version-{}", std::process::id()));
+        fs::remove_dir_all(&root).ok();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("styles.css"), "body{}").unwrap();
+        fs::write(
+            root.join("index.html"),
+            r#"<link rel="stylesheet" href="styles.css">"#,
+        )
+        .unwrap();
+        stamp_asset_versions(&root).unwrap();
+        let html = fs::read_to_string(root.join("index.html")).unwrap();
+        assert!(html.contains("styles.css?v="));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn キャラmanifestは自動版だけの差なら再コピーしない() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-manifest-equivalence-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("character.json");
+        let target = root.join("target/character.json");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&source, r#"{"id":"sample","assetVersion":"source"}"#).unwrap();
+        fs::write(&target, r#"{"id":"sample","assetVersion":"manual"}"#).unwrap();
+        assert!(!character_manifests_equivalent(&source, &target).unwrap());
+        fs::write(&target, r#"{"id":"sample","assetVersion":"auto-1234"}"#).unwrap();
+        assert!(character_manifests_equivalent(&source, &target).unwrap());
+        fs::write(&target, r#"{"id":"changed","assetVersion":"auto-1234"}"#).unwrap();
+        assert!(!character_manifests_equivalent(&source, &target).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn 手書きの版と外部参照は壊さない() {
         // 手書きの `?v=…` は内容版へ置き換える（付け忘れ・食い違いを残さない）。
         let stamped =
@@ -1151,7 +1365,7 @@ mod tests {
         let new = character_content_version(&character).unwrap();
         assert_ne!(old, new);
 
-        stamp_character_asset_versions(&root).unwrap();
+        stamp_character_asset_versions(&root, None).unwrap();
         let manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(character.join("character.json")).unwrap())
                 .unwrap();

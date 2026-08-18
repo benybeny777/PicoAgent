@@ -165,7 +165,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。読込開始（`pet_frontend_ready`）と起動完了（`pet_finish_boot`）を別々に監視し、`PICOAGENT_BOOT_TIMEOUT_MS` の区間内にどちらかが届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する（監視は2区間なので案内までの最長はその2倍）。**起動完了の記録はウィンドウ寸法の復元より先に行う**（寸法変更の失敗で、動いている画面を案内画面へ差し替えないため）。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |
-| `xtask/src/util.rs` | **同梱物取得の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
+| `xtask/src/util.rs` | **同梱物取得と差分同期の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。`sync_dir()`はサイズと更新日時が同じファイルを飛ばし、同期元にない生成先だけを削除する。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
 | `xtask`（`bundled::fetch_engine`） | 同梱エンジン取得（`cargo xtask setup engine`） |
 | `xtask`（`bundled::fetch_whisper`） | 同梱Whisper CLIとモデル取得（`cargo xtask setup whisper`） |
 | `xtask/src/office.rs` | OfficeCLI（LibreOffice）と AivisSpeech Engine の取得（`cargo xtask setup office` / `setup aivis`。`src-tauri/resources/bundled/` 配下、Git 管理外。どちらもベストエフォート） |
@@ -173,7 +173,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d_runtime`） | Live2D ランタイムを `ui/vendor/live2d/` へ取得（`cargo xtask setup live2d`）。公式サンプルは自動取得せず、開発者が条件確認後に `cargo xtask setup live2d-samples` を明示実行する。いずれも git 管理外 |
 | `xtask`（`bundled::fetch_tha3`） | THA3コード・VRAM別モデル・OS別Pythonを準備する（`cargo xtask setup tha3`）。コードとモデルは `resources/bundled/tha3/` へ、Windows開発用Pythonは製品外の `tools/tha3-runtime/` へ置き、製品PythonはNSISインストール時に専用領域へ取得する |
-| `xtask/src/assets.rs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期、`ui/` を `ui-dist/` へ配信ビルド、残存プロセス停止（いずれも dev/build 前に自動実行） |
+| `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。全再構築は直接コマンドの`--force`だけ |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
 | `xtask/src/verify.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |

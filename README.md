@@ -156,6 +156,10 @@ cargo xtask verify
 途中で失敗しても残りを実行し、最後に失敗一覧を出します。`node`が無い環境ではJavaScript構文だけを
 スキップし、その事実を結果へ表示します。依存更新時と販売前の`cargo audit`は別の必須検査です。
 
+キャラクターまたはUIの生成物だけを更新するときは、`cargo xtask sync-characters` と
+`cargo xtask build-ui`を使います。通常はサイズと更新日時が同じファイルを飛ばす差分同期です。
+生成先をすべて作り直す必要がある場合だけ、それぞれへ`--force`を付けます。
+
 > [!NOTE]
 > 初回コンパイルではRustのcrate取得にネットワークが必要な場合があります。AIモデルなど数GBの追加取得は `setup` を明示実行したときだけ行います。取得済みなら以後はオフラインでも開発起動できます。
 
@@ -748,7 +752,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 - macOS では `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します
 - AivisとWhisperはPicoAgent専用ディレクトリ・専用ポートだけを使い、グローバルインストールや既存プロセスへ干渉しません。外部導入のTHA3・LibreOffice・各種ツールはPicoAgentから削除せず、提供元の手順に従います
-- 配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へコピーし、コメントと余分な空白を削ったものを同梱します。開発中ベータ版の `BETA` バッジは `--beta`（`build-beta` が自動で付与）を付けたときだけ残り、通常ビルドと販売ビルドの配信物からは取り除かれます。Rust の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています（解析を不可能にするものではなく、読みやすいソースやシンボル情報を減らすための基本対策です）
+- 配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へ差分同期し、コメントと余分な空白を削ったものを同梱します。同期元にない生成先ファイルは削除し、必要な場合だけ`--force`で全再構築します。開発中ベータ版の `BETA` バッジは `--beta`（`build-beta` が自動で付与）を付けたときだけ残り、通常ビルドと販売ビルドの配信物からは取り除かれます。Rust の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています（解析を不可能にするものではなく、読みやすいソースやシンボル情報を減らすための基本対策です）
 
 </details>
 

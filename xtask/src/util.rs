@@ -5,7 +5,7 @@
 // 「ファイルがあれば取得済み」と判断するため、中断で途中まで書けたファイルが残ると
 // 壊れたモデルや実行ファイルが永久に「取得済み」として扱われてしまう。
 
-use std::fs;
+use std::fs::{self, FileTimes, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -227,6 +227,135 @@ pub fn copy_dir(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result<
     Ok(())
 }
 
+/// 差分同期で行った処理の件数と、内容が変わった相対パス。
+#[derive(Debug, Default)]
+pub struct SyncStats {
+    pub copied_files: usize,
+    pub unchanged_files: usize,
+    pub removed_entries: usize,
+    pub changed_paths: Vec<PathBuf>,
+}
+
+/// ディレクトリをサイズと更新日時で差分同期する。
+///
+/// `skip` が真の正本パスは同期対象から外し、配信先に残っていれば削除する。
+/// `force` は正本の検証が済んだあとに呼び出し側から指定し、配信先を作り直す。
+pub fn sync_dir(
+    from: &Path,
+    to: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+    force: bool,
+) -> Result<SyncStats> {
+    sync_dir_with_equivalence(from, to, skip, force, &|_, _| Ok(false))
+}
+
+/// 通常のサイズ・更新日時比較に加え、用途固有の同値判定を使って差分同期する。
+///
+/// `equivalent` はメタデータが異なるファイルだけに呼ぶ。自動生成する版だけが違う
+/// manifest のように、配信先をそのまま保つ必要がある場合に使う。
+pub fn sync_dir_with_equivalence(
+    from: &Path,
+    to: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+    force: bool,
+    equivalent: &dyn Fn(&Path, &Path) -> Result<bool>,
+) -> Result<SyncStats> {
+    if !from.is_dir() {
+        bail!("同期元ディレクトリが見つかりません: {}", from.display());
+    }
+    if force && to.exists() {
+        fs::remove_dir_all(to)
+            .with_context(|| format!("同期先を作り直せません: {}", to.display()))?;
+    }
+    let mut stats = SyncStats::default();
+    sync_dir_inner(from, to, from, to, skip, equivalent, &mut stats)?;
+    Ok(stats)
+}
+
+fn sync_dir_inner(
+    from: &Path,
+    to: &Path,
+    from_root: &Path,
+    to_root: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+    equivalent: &dyn Fn(&Path, &Path) -> Result<bool>,
+    stats: &mut SyncStats,
+) -> Result<()> {
+    if to.exists() && !to.is_dir() {
+        fs::remove_file(to)?;
+    }
+    fs::create_dir_all(to)?;
+
+    let mut expected = std::collections::HashSet::new();
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let source = entry.path();
+        if skip(&source) {
+            continue;
+        }
+        expected.insert(entry.file_name());
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            if target.exists() && !target.is_dir() {
+                fs::remove_file(&target)?;
+                stats.removed_entries += 1;
+                stats.changed_paths.push(relative_to(&target, to_root));
+            }
+            sync_dir_inner(
+                &source, &target, from_root, to_root, skip, equivalent, stats,
+            )?;
+            continue;
+        }
+
+        let source_meta = fs::metadata(&source)?;
+        let unchanged = if target.is_file() {
+            let target_meta = fs::metadata(&target)?;
+            (source_meta.len() == target_meta.len()
+                && source_meta.modified()? == target_meta.modified()?)
+                || equivalent(&source, &target)?
+        } else {
+            false
+        };
+        if unchanged {
+            stats.unchanged_files += 1;
+            continue;
+        }
+        if target.is_dir() {
+            fs::remove_dir_all(&target)?;
+            stats.removed_entries += 1;
+        }
+        fs::copy(&source, &target)
+            .with_context(|| format!("コピーできません: {}", source.display()))?;
+        // fs::copy の更新日時保持はOSごとに異なる。明示的に合わせ、次回比較を安定させる。
+        let times = FileTimes::new().set_modified(source_meta.modified()?);
+        OpenOptions::new()
+            .write(true)
+            .open(&target)?
+            .set_times(times)?;
+        stats.copied_files += 1;
+        stats.changed_paths.push(relative_to(&source, from_root));
+    }
+
+    for entry in fs::read_dir(to)?.collect::<std::io::Result<Vec<_>>>()? {
+        if expected.contains(&entry.file_name()) {
+            continue;
+        }
+        let target = entry.path();
+        if target.is_dir() {
+            fs::remove_dir_all(&target)?;
+        } else {
+            fs::remove_file(&target)?;
+        }
+        stats.removed_entries += 1;
+        stats.changed_paths.push(relative_to(&target, to_root));
+    }
+    Ok(())
+}
+
+fn relative_to(path: &Path, root: &Path) -> PathBuf {
+    path.strip_prefix(root).unwrap_or(path).to_path_buf()
+}
+
 /// 配下のファイルを再帰的に列挙する。
 pub fn list_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -280,4 +409,45 @@ pub fn env_or(name: &str, fallback: &str) -> String {
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| fallback.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 差分同期は無変更を飛ばし追加編集削除と強制作り直しを扱う() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-differential-sync-{}",
+            std::process::id()
+        ));
+        let source = root.join("source");
+        let target = root.join("target");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("nested/edited.txt"), "old").unwrap();
+
+        let first = sync_dir(&source, &target, &|_| false, false).unwrap();
+        assert_eq!(first.copied_files, 1);
+        let second = sync_dir(&source, &target, &|_| false, false).unwrap();
+        assert_eq!(second.copied_files, 0);
+        assert_eq!(second.unchanged_files, 1);
+
+        fs::write(source.join("nested/edited.txt"), "new content").unwrap();
+        fs::write(source.join("added.txt"), "added").unwrap();
+        fs::write(target.join("deleted.txt"), "obsolete").unwrap();
+        let changed = sync_dir(&source, &target, &|_| false, false).unwrap();
+        assert_eq!(changed.copied_files, 2);
+        assert_eq!(changed.removed_entries, 1);
+        assert_eq!(
+            fs::read_to_string(target.join("nested/edited.txt")).unwrap(),
+            "new content"
+        );
+        assert!(target.join("added.txt").is_file());
+        assert!(!target.join("deleted.txt").exists());
+
+        let forced = sync_dir(&source, &target, &|_| false, true).unwrap();
+        assert_eq!(forced.copied_files, 2);
+        assert_eq!(forced.unchanged_files, 0);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

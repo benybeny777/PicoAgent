@@ -38,9 +38,9 @@ const USAGE: &str = "\
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
   setup <対象…>        取得対象は all / engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools
                       （不要な大容量取得を防ぐため対象指定は必須）
-  sync-characters     characters/ を ui/assets/characters/ へ同期
+  sync-characters [--force] characters/ を ui/assets/characters/ へ差分同期（--force で全再構築）
   character-pack      2Dキャラクターパックを検証・導入
-  build-ui [--release] [--beta] ui/ を ui-dist/ へ配信ビルド（--release で最小化、--beta で BETA 表示を残す）
+  build-ui [--release] [--beta] [--force] ui/ を ui-dist/ へ差分ビルド（--force で全再構築）
   verify              本体・xtask・JavaScript・Git差分の検証を最後まで実行
   stop                残存プロセスの停止
   cli <コマンド…>      ローカル API を叩く CLI（status / models / chat / ask / repl）
@@ -103,12 +103,19 @@ fn run(args: &[String]) -> Result<()> {
         "update-feed" => release::write_update_feed(rest),
         "license" => license::run(rest),
         "setup" => setup(rest),
-        "sync-characters" => assets::sync_characters(),
+        "sync-characters" => {
+            reject_unknown_flags(rest, &["--force"])?;
+            assets::sync_characters_with_force(rest.iter().any(|a| a == "--force"))
+        }
         "character-pack" => character_pack::run(rest),
-        "build-ui" => assets::build_ui_dist(
-            rest.iter().any(|a| a == "--release"),
-            rest.iter().any(|a| a == "--beta"),
-        ),
+        "build-ui" => {
+            reject_unknown_flags(rest, &["--release", "--beta", "--force"])?;
+            assets::build_ui_dist(
+                rest.iter().any(|a| a == "--release"),
+                rest.iter().any(|a| a == "--beta"),
+                rest.iter().any(|a| a == "--force"),
+            )
+        }
         "verify" => verify::run(),
         "stop" => assets::stop_stale(),
         "cli" => cli::run(rest),
@@ -123,10 +130,17 @@ fn run(args: &[String]) -> Result<()> {
     }
 }
 
+fn reject_unknown_flags(args: &[String], allowed: &[&str]) -> Result<()> {
+    if let Some(unknown) = args.iter().find(|arg| !allowed.contains(&arg.as_str())) {
+        bail!("未対応のオプションです: {unknown}");
+    }
+    Ok(())
+}
+
 fn preview_distribution() -> Result<()> {
     let characters = release::included_characters(&release::manifest()?)?;
     assets::sync_distribution_characters(&characters)?;
-    assets::build_ui_dist(false, false)
+    assets::build_ui_dist(false, false, false)
 }
 
 /// ビルドの種類。真偽値を並べて渡すと呼び出し側で取り違えるため、名前を付けて渡す。
@@ -200,7 +214,7 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     } else {
         assets::sync_characters()?;
     }
-    assets::build_ui_dist(release, build.beta)?;
+    assets::build_ui_dist(release, build.beta, false)?;
     if release {
         bundled::fetch_engine()?;
     }
