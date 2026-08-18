@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-19
-- ブランチ: `chore/node-process-cleanup-rule`
-- 目的: 作業用nodeを起動経路で判別して確実に止める
-- 対応PR: #139
+- ブランチ: `docs/claude-branch-supersession`
+- 目的: 未マージのClaudeブランチ4本を現行mainへ照合して判定を残す
+- 対応PR: 作成後に更新
 
 ## 未処理の残件（次に作業する人はここから始める）
 
@@ -17,6 +17,12 @@ A〜CはPR #133、GはPR #134、D/HはPR #135、E/FはPR #136で統合し、Iは
 着手できる残件は0件である。** 次に手を動かす対象は`docs/CODEX-TASKS.md`の販売ゲートと
 保留表だけで、いずれも外部条件が揃うまで着手しない。
 外部条件が必要な実環境確認と販売ゲートは、条件が揃うまでコード作業と分けて残す。
+
+`origin`へ残っている未マージのClaudeブランチ4本（`moveable-codex-integration-wik54v`、
+`readme-gallery-lipsync`、`optimization-issues-report-nw01v7`、`improvement-proposal-u9n8k5`）は、
+2026-08-19に1本ずつ現行`main`と照合し、**全件が移植済みでマージ不要**と判定した。根拠は
+`docs/REVIEW-LOG.md`の同日「未マージのClaudeブランチ4本の照合」にある。基準が古く、
+マージすると完了済みの作業指示と旧実装を戻すため、PR #119と同じ理由で取り込まない。
 
 従来の実機確認は、再現条件を安全に用意できなかった次の項目だけ残る。
 
