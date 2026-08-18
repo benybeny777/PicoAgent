@@ -1,0 +1,61 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+await import("../../ui/frame-scheduler.js");
+
+const settingsHtml = await readFile(new URL("../../ui/settings.html", import.meta.url), "utf8");
+const settings = await readFile(new URL("../../ui/settings.js", import.meta.url), "utf8");
+
+function fixture() {
+  let nextId = 1;
+  const queued = new Map();
+  const cancelled = [];
+  const timing = {
+    requestFrame: callback => {
+      const id = nextId++;
+      queued.set(id, callback);
+      return id;
+    },
+    cancelFrame: id => {
+      queued.delete(id);
+      cancelled.push(id);
+    },
+  };
+  return { timing, queued, cancelled };
+}
+
+test("連続イベントを1フレーム1回へまとめる", () => {
+  const { timing, queued } = fixture();
+  let updates = 0;
+  const scheduler = globalThis.PicoFrameScheduler.create(() => { updates += 1; }, timing);
+
+  assert.equal(scheduler.schedule(), true);
+  assert.equal(scheduler.schedule(), false);
+  assert.equal(queued.size, 1);
+  queued.values().next().value();
+  assert.equal(updates, 1);
+  assert.equal(scheduler.pending(), false);
+});
+
+test("即時更新は予約済みフレームを取り消して1回だけ実行する", () => {
+  const { timing, queued, cancelled } = fixture();
+  let updates = 0;
+  const scheduler = globalThis.PicoFrameScheduler.create(() => { updates += 1; }, timing);
+
+  scheduler.schedule();
+  scheduler.flush();
+  assert.equal(updates, 1);
+  assert.equal(queued.size, 0);
+  assert.equal(cancelled.length, 1);
+});
+
+test("設定画面がフレーム合流と即時更新を使い分ける", () => {
+  assert.ok(
+    settingsHtml.indexOf('<script src="frame-scheduler.js')
+      < settingsHtml.indexOf('<script src="settings.js'),
+  );
+  assert.match(settings, /PicoFrameScheduler\.create\(updateDirtyStateNow\)/);
+  assert.match(settings, /dirtyStateScheduler\.schedule\(\)/);
+  assert.match(settings, /dirtyStateScheduler\.flush\(\)/);
+});

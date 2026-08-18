@@ -220,6 +220,7 @@ try {
   if (!(await page.locator(".model-manager-status").textContent())?.includes("再ダウンロードが必要")) throw new Error("モデル削除前に再ダウンロードが案内されません");
   await page.getByRole("tab", { name: "基本設定" }).click();
   await page.locator('[data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存"));
   const dirtyText = await page.locator("#dirtySummary").textContent();
   if (!dirtyText?.includes("未保存")) throw new Error(`未保存件数が表示されません: ${dirtyText}`);
   if (!(await page.locator("#save").textContent())?.includes("1件")) throw new Error("保存ボタンに変更件数が表示されません");
