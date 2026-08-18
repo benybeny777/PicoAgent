@@ -131,7 +131,7 @@ PNGの口パクは実際の音声再生開始後に声量同期し、ミュー�
 
 | | 必要なもの |
 |---|---|
-| 共通 | **Rust 1.88以上（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） |
+| 共通 | **Rust 1.88以上（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） / **Git LFS**（clone後に`git lfs pull`） |
 | Windows | WebView2 ランタイム |
 | macOS | Xcode Command Line Tools（`xcode-select --install`）<br />読み上げも使うなら `brew install p7zip` |
 
