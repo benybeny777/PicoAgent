@@ -30,6 +30,29 @@ impl Tool for PraiseLogTool {
         "praise_log"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["できた", "書けた", "終わった", "やったこと", "がんばった", "褒め", "ほめ", "praise"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        880
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !self.matches_intent(text) {
+            return None;
+        }
+        let args = if ["一覧", "見せて", "まとめ", "リスト"]
+            .iter()
+            .any(|word| text.contains(word))
+        {
+            json!({ "action": "list" })
+        } else {
+            json!({ "action": "add", "text": text })
+        };
+        Some(crate::tools::IntentInvocation::direct(args))
+    }
+
     fn label(&self) -> &'static str {
         "できたことメモ"
     }

@@ -30,6 +30,10 @@ impl Tool for GoogleDriveTool {
         "google_drive"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["drive", "ドライブ"]
+    }
+
     fn label(&self) -> &'static str {
         "Google Drive"
     }

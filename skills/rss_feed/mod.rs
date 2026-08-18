@@ -23,6 +23,10 @@ impl Tool for RssFeedTool {
         "rss_feed"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["rss", "atom", "フィード", "ニュース", "ブログ", "更新"]
+    }
+
     fn label(&self) -> &'static str {
         "RSS/Atom"
     }

@@ -183,6 +183,10 @@ impl Tool for ImageToolsTool {
         "image_tools"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["psd", "xcf", "heic", "heif", "tiff", "webp", "avif", "画像変換", "pngに", "png化", "jpgに", "jpegに", "リサイズ", "縮小して", "画像情報", "レイヤー"]
+    }
+
     fn label(&self) -> &'static str {
         "画像ファイル変換"
     }

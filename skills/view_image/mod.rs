@@ -98,6 +98,10 @@ impl Tool for ViewImageTool {
         "view_image"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["画像を見", "スクリーンショット", "写真を見", "何が写", "この図", "画面の内容"]
+    }
+
     fn label(&self) -> &'static str {
         "画像を見る"
     }

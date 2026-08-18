@@ -186,6 +186,10 @@ impl Tool for WorkspaceFilesTool {
         "workspace_files"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["ファイル", "書いて", "保存", "追記", "フォルダ", "workspace"]
+    }
+
     fn label(&self) -> &'static str {
         "ワークスペースファイル操作"
     }

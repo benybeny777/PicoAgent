@@ -19,6 +19,10 @@ impl Tool for LinearTool {
         "linear"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["linear"]
+    }
+
     fn label(&self) -> &'static str {
         "Linear"
     }

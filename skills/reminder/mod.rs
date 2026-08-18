@@ -9,6 +9,36 @@ use crate::daily::{self, DailyEvent};
 
 pub struct ReminderTool;
 
+const LOCAL_ACTION_PROMPT: &str = include_str!("prompts/local-action.md");
+
+fn render_local_action(user_text: &str, tool_result: &str) -> String {
+    crate::tools::render_intent_prompt(LOCAL_ACTION_PROMPT, user_text, tool_result)
+}
+
+fn number_before(text: &str, marker: &str) -> Option<i64> {
+    let marker_index = text.find(marker)?;
+    let prefix = &text[..marker_index];
+    let digits: String = prefix
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    digits.parse::<i64>().ok()
+}
+
+fn relative_minutes(text: &str) -> Option<i64> {
+    if let Some(minutes) = number_before(text, "分後") {
+        return Some(minutes.clamp(1, 24 * 60));
+    }
+    if let Some(hours) = number_before(text, "時間後") {
+        return Some((hours * 60).clamp(1, 24 * 60));
+    }
+    None
+}
+
 fn str_arg(args: &Value, key: &str) -> String {
     args.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string()
 }
@@ -41,6 +71,31 @@ fn list_text(events: &[DailyEvent]) -> String {
 impl Tool for ReminderTool {
     fn name(&self) -> &'static str {
         "reminder"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["リマインダー", "思い出させて", "通知して", "あとで教えて", "reminder"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        900
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !self.matches_intent(text) {
+            return None;
+        }
+        if let Some(minutes) = relative_minutes(text) {
+            return Some(crate::tools::IntentInvocation::direct(json!({
+                "action": "add",
+                "minutes_from_now": minutes,
+                "text": text
+            })));
+        }
+        if crate::tools::web_search::is_explicit_request(text) {
+            return None;
+        }
+        Some(crate::tools::IntentInvocation::guide(render_local_action))
     }
 
     fn label(&self) -> &'static str {

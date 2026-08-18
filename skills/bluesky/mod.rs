@@ -20,6 +20,10 @@ impl Tool for BlueskyTool {
         "bluesky"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["bluesky", "bsky", "ブルースカイ"]
+    }
+
     fn label(&self) -> &'static str {
         "Bluesky"
     }

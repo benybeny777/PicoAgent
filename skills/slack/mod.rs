@@ -48,6 +48,10 @@ impl Tool for SlackTool {
         "slack_send_message"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["slack", "スラック", "slack履歴", "slack history"]
+    }
+
     fn label(&self) -> &'static str {
         "Slack送信"
     }

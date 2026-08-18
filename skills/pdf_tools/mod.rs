@@ -29,6 +29,10 @@ impl Tool for PdfToolsTool {
         "pdf_tools"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["pdf", "結合", "抽出", "回転"]
+    }
+
     fn label(&self) -> &'static str {
         "PDF編集"
     }

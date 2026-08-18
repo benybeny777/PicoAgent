@@ -20,6 +20,58 @@ const MAX_RESPONSE_BYTES: usize = 32 * 1024;
 
 pub struct WebSearchTool;
 
+const RESULT_MATERIAL_PROMPT: &str = include_str!("prompts/result-material.md");
+const WEB_SEARCH_REQUESTS: [&str; 8] = [
+    "WEB検索して",
+    "Web検索して",
+    "web検索して",
+    "ウェブ検索して",
+    "ウェブで検索して",
+    "Webで検索して",
+    "webで検索して",
+    "ネットで調べて",
+];
+
+fn render_result_material(user_text: &str, tool_result: &str) -> String {
+    crate::tools::render_intent_prompt(RESULT_MATERIAL_PROMPT, user_text, tool_result)
+}
+
+pub(crate) fn is_explicit_request(text: &str) -> bool {
+    WEB_SEARCH_REQUESTS
+        .iter()
+        .any(|marker| text.contains(marker))
+}
+
+fn should_search(text: &str) -> bool {
+    if is_explicit_request(text) {
+        return true;
+    }
+    let lower = text.to_lowercase();
+    const INFO_MARKERS: &[&str] = &[
+        "最新", "ニュース", "今日", "昨日", "今週", "今月", "今年", "現在", "価格", "値段",
+        "いくら", "相場", "株価", "ランキング", "発売", "リリース", "結果", "スコア", "順位",
+        "誰", "だれ", "いつ", "どこ", "なぜ", "方法", "やり方", "調べ", "検索", "スペック",
+        "比較", "おすすめ", "レビュー", "評判", "何年", "何月", "何時", "とは", "意味",
+        "とは何", "history", "news", "price",
+    ];
+    INFO_MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
+fn search_query(text: &str) -> String {
+    let mut query = text.to_string();
+    for marker in WEB_SEARCH_REQUESTS {
+        query = query.replace(marker, " ");
+    }
+    let query = query
+        .trim_matches(|character: char| character.is_whitespace() || "、。,.！？!?：:".contains(character))
+        .trim();
+    if query.is_empty() {
+        text.trim().to_string()
+    } else {
+        query.to_string()
+    }
+}
+
 fn parse_setting(cfg: &Config, key: &str, fallback: &str, min: usize, max: usize) -> usize {
     let raw = cfg.get(key, fallback);
     parse_setting_value(&raw, fallback, min, max)
@@ -108,6 +160,20 @@ fn extract_results(html: &str, query: &str, max_results: usize) -> Result<String
 impl Tool for WebSearchTool {
     fn name(&self) -> &'static str {
         "web_search"
+    }
+
+    fn intent_priority(&self) -> i32 {
+        100
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        should_search(text).then(|| {
+            crate::tools::IntentInvocation::material(
+                json!({ "query": search_query(text) }),
+                render_result_material,
+                true,
+            )
+        })
     }
 
     fn label(&self) -> &'static str {

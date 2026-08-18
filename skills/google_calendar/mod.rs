@@ -33,6 +33,10 @@ impl Tool for GoogleCalendarTool {
         "google_calendar"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["calendar", "カレンダー", "予定", "スケジュール"]
+    }
+
     fn label(&self) -> &'static str {
         "Googleカレンダー"
     }

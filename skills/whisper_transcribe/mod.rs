@@ -304,6 +304,30 @@ impl Tool for WhisperTranscribeTool {
         "whisper_transcribe"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["文字起こし", "whisper", "transcribe", "話者", "speaker"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        800
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        let lower = text.to_lowercase();
+        let recording_workflow = ["録音", "議事録", "会議メモ", "meeting notes"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()));
+        if !self.matches_intent(text) || recording_workflow {
+            return None;
+        }
+        let diarize = ["話者", "speaker", "diarize"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()));
+        Some(crate::tools::IntentInvocation::direct(json!({
+            "diarize": diarize
+        })))
+    }
+
     fn label(&self) -> &'static str {
         "音声文字起こし"
     }

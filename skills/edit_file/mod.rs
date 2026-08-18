@@ -131,6 +131,10 @@ impl Tool for EditFileTool {
         "edit_file"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["編集", "書き換え", "置換", "直して", "修正", "リファクタ"]
+    }
+
     fn label(&self) -> &'static str {
         "ファイル部分編集"
     }

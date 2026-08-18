@@ -356,6 +356,10 @@ impl Tool for GmailTool {
         "gmail_message"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["gmail", "メール", "下書き", "送信", "未読", "受信", "メール一覧", "振り分け", "ラベル", "ゴミメール", "掃除", "アーカイブ", "既読", "ゴミ箱"]
+    }
+
     fn label(&self) -> &'static str {
         "Gmail操作"
     }

@@ -129,6 +129,10 @@ impl Tool for TaskSchedulerTool {
         "task_scheduler"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["スケジュール", "スケジューラ", "cron", "定期実行", "指定時刻", "毎朝", "毎日", "毎週"]
+    }
+
     fn label(&self) -> &'static str {
         "タスクスケジューラ"
     }

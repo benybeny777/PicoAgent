@@ -19,6 +19,10 @@ impl Tool for GoogleSheetsTool {
         "google_sheets"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["sheets", "スプレッドシート", "表計算", "セル"]
+    }
+
     fn label(&self) -> &'static str {
         "Google Sheets"
     }

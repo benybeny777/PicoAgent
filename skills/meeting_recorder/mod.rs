@@ -755,6 +755,52 @@ impl Tool for MeetingRecorderTool {
         "meeting_recorder"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["録音", "議事録", "会議メモ", "meeting notes"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        790
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !self.matches_intent(text) {
+            return None;
+        }
+        let lower = text.to_lowercase();
+        let action = if ["停止", "止め", "終了", "stop"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()))
+        {
+            "stop"
+        } else if ["状態", "ステータス", "status", "録音中"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()))
+        {
+            "status"
+        } else if ["文字起こし", "whisper", "transcribe"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()))
+        {
+            "transcribe"
+        } else if ["議事録", "会議メモ", "meeting notes"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()))
+        {
+            "minutes"
+        } else {
+            "start"
+        };
+        let diarize = ["話者", "speaker", "diarize"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()));
+        Some(crate::tools::IntentInvocation::direct(json!({
+            "action": action,
+            "title": text.trim(),
+            "diarize": diarize
+        })))
+    }
+
     fn label(&self) -> &'static str {
         "会議記録"
     }

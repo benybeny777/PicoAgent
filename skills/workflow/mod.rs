@@ -21,6 +21,7 @@ fn save(cfg: &Config, items: &[Value]) -> Result<(), String> {
 #[async_trait]
 impl Tool for WorkflowTool {
     fn name(&self) -> &'static str { "workflow" }
+    fn intent_keywords(&self) -> &'static [&'static str] { &["ワークフロー", "手順を覚えて", "この操作を覚えて", "自動化", "再実行"] }
     fn label(&self) -> &'static str { "記憶したワークフロー" }
     fn description(&self) -> String { "複数スキルの手順を名前付きで保存し、一覧・再実行・登録解除する。".to_string() }
     fn examples(&self) -> Vec<&'static str> { vec!["この手順を週報作成として覚えて", "週報作成ワークフローを実行して"] }

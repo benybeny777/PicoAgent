@@ -19,6 +19,10 @@ impl Tool for TrelloTool {
         "trello"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["trello"]
+    }
+
     fn label(&self) -> &'static str {
         "Trello"
     }

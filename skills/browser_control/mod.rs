@@ -188,6 +188,10 @@ impl Tool for BrowserControlTool {
         "browser_control"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["ブラウザ", "browser", "chrome", "edge", "ログインが必要", "ログインして", "開いて読", "画面を開いて"]
+    }
+
     fn label(&self) -> &'static str {
         "ブラウザ操作"
     }

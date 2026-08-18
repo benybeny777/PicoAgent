@@ -20,6 +20,10 @@ impl Tool for LinkedInTool {
         "linkedin"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["linkedin"]
+    }
+
     fn label(&self) -> &'static str {
         "LinkedIn"
     }

@@ -229,6 +229,10 @@ impl Tool for GrepSearchTool {
         "grep_search"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["使っている箇所", "使われている", "呼んでいる", "含むファイル", "中身を検索", "文字列を検索", "grep", "todo"]
+    }
+
     fn label(&self) -> &'static str {
         "ファイル内容検索"
     }

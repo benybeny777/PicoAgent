@@ -21,6 +21,10 @@ impl Tool for RedditTool {
         "reddit"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["reddit"]
+    }
+
     fn label(&self) -> &'static str {
         "Reddit"
     }

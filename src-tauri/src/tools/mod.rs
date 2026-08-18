@@ -14,6 +14,93 @@ use std::sync::OnceLock;
 use crate::config::Config;
 use crate::message::Field;
 
+/// 先回り実行したスキルの結果を、ユーザー発話へ差し込む文面へ変換する関数。
+pub type IntentPromptRenderer = fn(&str, &str) -> String;
+
+/// スキル側で判定した先回り実行の扱い。
+#[derive(Clone, Copy)]
+pub enum IntentHandling {
+    /// 整形済みのスキル出力を、そのまま利用者へ返す。
+    Direct,
+    /// スキル出力またはローカル操作向けガイドを、モデル用の内部資料として差し込む。
+    Material {
+        renderer: IntentPromptRenderer,
+        run_tool: bool,
+        collect_sources: bool,
+    },
+}
+
+/// 発話に一致したスキルが組み立てた引数と、実行後の扱い。
+pub struct IntentInvocation {
+    pub args: Value,
+    pub handling: IntentHandling,
+}
+
+impl IntentInvocation {
+    pub fn direct(args: Value) -> Self {
+        Self {
+            args,
+            handling: IntentHandling::Direct,
+        }
+    }
+
+    pub fn material(args: Value, renderer: IntentPromptRenderer, collect_sources: bool) -> Self {
+        Self {
+            args,
+            handling: IntentHandling::Material {
+                renderer,
+                run_tool: true,
+                collect_sources,
+            },
+        }
+    }
+
+    pub fn guide(renderer: IntentPromptRenderer) -> Self {
+        Self {
+            args: Value::Null,
+            handling: IntentHandling::Material {
+                renderer,
+                run_tool: false,
+                collect_sources: false,
+            },
+        }
+    }
+}
+
+/// 優先度順の走査で最初に一致した、登録済みスキルの先回り実行情報。
+pub struct MatchedIntent {
+    pub tool_name: &'static str,
+    pub invocation: IntentInvocation,
+}
+
+/// スキル同梱のプロンプトをLFへ正規化し、テンプレートに元からある差し込み位置だけを置換する。
+pub fn render_intent_prompt(template: &str, user_text: &str, tool_result: &str) -> String {
+    const USER_TOKEN: &str = "{user_text}";
+    const RESULT_TOKEN: &str = "{tool_result}";
+
+    let normalized = template.replace("\r\n", "\n");
+    let mut remaining = normalized.trim_end_matches('\n');
+    let mut rendered = String::with_capacity(remaining.len() + user_text.len() + tool_result.len());
+    loop {
+        let user_at = remaining.find(USER_TOKEN);
+        let result_at = remaining.find(RESULT_TOKEN);
+        let (position, token, replacement) = match (user_at, result_at) {
+            (Some(user), Some(result)) if user <= result => (user, USER_TOKEN, user_text),
+            (Some(_), Some(result)) => (result, RESULT_TOKEN, tool_result),
+            (Some(user), None) => (user, USER_TOKEN, user_text),
+            (None, Some(result)) => (result, RESULT_TOKEN, tool_result),
+            (None, None) => {
+                rendered.push_str(remaining);
+                break;
+            }
+        };
+        rendered.push_str(&remaining[..position]);
+        rendered.push_str(replacement);
+        remaining = &remaining[position + token.len()..];
+    }
+    rendered
+}
+
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
@@ -27,11 +114,22 @@ pub trait Tool: Send + Sync {
     }
     /// ユーザー発話からこのスキルを候補へ出す、副作用のない意図判定語彙。
     fn intent_keywords(&self) -> &'static [&'static str] {
-        route_keywords(self.name())
+        &[]
     }
     /// 同じ発話へ複数スキルが一致したときの明示優先度。大きい方を先に提示する。
     fn intent_priority(&self) -> i32 {
         0
+    }
+    /// 発話から先回り実行の引数と扱いを組み立てる。通常のモデル呼び出しだけでよいスキルは `None` のままにする。
+    fn intent_invocation(&self, _text: &str) -> Option<IntentInvocation> {
+        None
+    }
+    /// このスキル自身が申告した語彙だけで発話との一致を判定する。
+    fn matches_intent(&self, text: &str) -> bool {
+        let normalized = text.to_lowercase();
+        self.intent_keywords()
+            .iter()
+            .any(|keyword| normalized.contains(&keyword.to_lowercase()))
     }
     fn config_schema(&self) -> Vec<Field> {
         Vec::new()
@@ -143,538 +241,51 @@ static TOOL_SCHEMA_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new
 
 const CORE_AGENT_TOOLS: [&str; 3] = ["get_time", "web_search", "web_fetch"];
 const MAX_SELECTED_SCHEMAS: usize = 12;
-const TOOL_ROUTES: &[(&str, &[&str])] = &[
-    (
-        "app_control",
-        &[
-            "アプリ終了",
-            "アプリを終了",
-            "アプリ閉じ",
-            "アプリを閉じ",
-            "このアプリ",
-            "このソフト",
-            "picoagent",
-            "ピコエージェント",
-            "pico agent",
-        ],
-    ),
-    (
-        "weather",
-        &[
-            "天気", "天候", "気象", "気温", "雨", "降水", "予報", "weather",
-        ],
-    ),
-    (
-        "currency_rates",
-        &["為替", "換算", "円", "ドル", "ユーロ", "usd", "jpy", "eur"],
-    ),
-    (
-        "market_indices",
-        &[
-            "日経平均",
-            "日系平均",
-            "nikkei",
-            "topix",
-            "トピックス",
-            "ダウ",
-            "nasdaq",
-            "ナスダック",
-            "s&p",
-            "株価指数",
-        ],
-    ),
-    (
-        "news_scrape",
-        &[
-            "ニュース",
-            "ニューす",
-            "にゅーす",
-            "news",
-            "出来事",
-            "時事",
-            "ヘッドライン",
-        ],
-    ),
-    (
-        "rss_feed",
-        &["rss", "atom", "フィード", "ニュース", "ブログ", "更新"],
-    ),
-    (
-        "research_report",
-        &[
-            "調査",
-            "リサーチ",
-            "レポート",
-            "出典",
-            "競合比較",
-            "市場調査",
-            "まとめて調べ",
-            "ダッシュボード",
-            "html",
-            "research",
-            "report",
-        ],
-    ),
-    (
-        "spark_workspace",
-        &[
-            "genspark",
-            "資料一式",
-            "ワークスペース",
-            "スライドとサイト",
-            "サイトとスライド",
-            "ページと資料",
-            "spark",
-            "deck",
-            "brief",
-        ],
-    ),
-    (
-        "genspark_suite",
-        &[
-            "genspark全部",
-            "genspark風",
-            "deep research",
-            "ai slides",
-            "ai sheets",
-            "ai docs",
-            "sparkpage",
-            "autopilot",
-            "meeting notes",
-            "multi-agent",
-            "ai browser",
-            "全部やって",
-        ],
-    ),
-    (
-        "subagent",
-        &[
-            "サブエージェント",
-            "分担",
-            "手分け",
-            "それぞれ調べ",
-            "並行で調べ",
-            "担当",
-            "subagent",
-        ],
-    ),
-    (
-        "alarm",
-        &[
-            "アラーム",
-            "目覚まし",
-            "めざまし",
-            "起こして",
-            "起こし",
-            "alarm",
-            "wake",
-            "何時に",
-        ],
-    ),
-    (
-        "reminder",
-        &[
-            "リマインダー",
-            "思い出させて",
-            "通知して",
-            "あとで教えて",
-            "reminder",
-        ],
-    ),
-    (
-        "focus_timer",
-        &[
-            "集中",
-            "ポモドーロ",
-            "タイマー",
-            "見守り",
-            "作業を見て",
-            "focus",
-            "pomodoro",
-        ],
-    ),
-    (
-        "praise_log",
-        &[
-            "できた",
-            "書けた",
-            "終わった",
-            "やったこと",
-            "がんばった",
-            "褒め",
-            "ほめ",
-            "praise",
-        ],
-    ),
-    (
-        "daily_briefing",
-        &[
-            "おでかけ",
-            "出かける",
-            "外出",
-            "持っていく",
-            "出る前",
-            "briefing",
-        ],
-    ),
-    (
-        "whisper_transcribe",
-        &["文字起こし", "whisper", "transcribe", "話者", "speaker"],
-    ),
-    (
-        "meeting_recorder",
-        &["録音", "議事録", "会議メモ", "meeting notes"],
-    ),
-    (
-        "clipboard_text",
-        &["クリップボード", "コピーした", "clipboard"],
-    ),
-    ("read_file", &["読んで", "読み取", "ファイル", "read_file"]),
-    (
-        "desktop_control",
-        &[
-            "クリックして",
-            "クリックし",
-            "マウス",
-            "キーボード",
-            "キーを押",
-            "入力して",
-            "画面を操作",
-            "pc操作",
-            "デスクトップ操作",
-            "ドラッグ",
-        ],
-    ),
-    (
-        "browser_control",
-        &[
-            "ブラウザ",
-            "browser",
-            "chrome",
-            "edge",
-            "ログインが必要",
-            "ログインして",
-            "開いて読",
-            "画面を開いて",
-        ],
-    ),
-    (
-        "workspace_files",
-        &[
-            "ファイル",
-            "書いて",
-            "保存",
-            "追記",
-            "フォルダ",
-            "workspace",
-        ],
-    ),
-    (
-        "glob_files",
-        &[
-            "ファイルを探",
-            "ファイルはどこ",
-            "どこにある",
-            "ファイル名",
-            "拡張子",
-            "一覧して",
-            "glob",
-        ],
-    ),
-    (
-        "grep_search",
-        &[
-            "使っている箇所",
-            "使われている",
-            "呼んでいる",
-            "含むファイル",
-            "中身を検索",
-            "文字列を検索",
-            "grep",
-            "todo",
-        ],
-    ),
-    (
-        "edit_file",
-        &["編集", "書き換え", "置換", "直して", "修正", "リファクタ"],
-    ),
-    (
-        "todo_plan",
-        &[
-            "計画",
-            "手順を整理",
-            "やることを整理",
-            "進捗",
-            "どこまで終わ",
-            "タスク整理",
-        ],
-    ),
-    (
-        "view_image",
-        &[
-            "画像を見",
-            "スクリーンショット",
-            "写真を見",
-            "何が写",
-            "この図",
-            "画面の内容",
-        ],
-    ),
-    (
-        "ask_user",
-        &[
-            "どっち",
-            "どれがいい",
-            "選んで",
-            "決めて",
-            "おまかせ",
-            "確認して",
-        ],
-    ),
-    (
-        "notebook_edit",
-        &["ノートブック", "notebook", "ipynb", "jupyter", "セル"],
-    ),
-    (
-        "command_job",
-        &[
-            "バックグラウンド",
-            "ジョブ",
-            "job",
-            "実行中の",
-            "起動したまま",
-            "ログを見せ",
-            "様子を見",
-        ],
-    ),
-    (
-        "project",
-        &[
-            "プロジェクト",
-            "案件",
-            "ワークスペース",
-            "課題",
-            "タスク",
-            "やること",
-            "残り",
-            "締切",
-            "期限",
-            "決定事項",
-            "決めたこと",
-            "進捗",
-            "経緯",
-        ],
-    ),
-    (
-        "workflow",
-        &[
-            "ワークフロー",
-            "手順を覚えて",
-            "この操作を覚えて",
-            "自動化",
-            "再実行",
-        ],
-    ),
-    (
-        "trash_file",
-        &[
-            "削除",
-            "消して",
-            "ゴミ箱",
-            "捨てて",
-            "ファイル削除",
-            "フォルダ削除",
-        ],
-    ),
-    (
-        "run_command",
-        &[
-            "コマンド",
-            "実行",
-            "テスト",
-            "ビルド",
-            "cargo",
-            "npm",
-            "git",
-        ],
-    ),
-    (
-        "code_runner",
-        &[
-            "スクリプト",
-            "コードを書いて",
-            "コード実行",
-            "プログラムで",
-            "自力で",
-            "なんとかして",
-            "script",
-            "code",
-        ],
-    ),
-    (
-        "task_scheduler",
-        &[
-            "スケジュール",
-            "スケジューラ",
-            "cron",
-            "定期実行",
-            "指定時刻",
-            "毎朝",
-            "毎日",
-            "毎週",
-        ],
-    ),
-    (
-        "slack_send_message",
-        &["slack", "スラック", "slack履歴", "slack history"],
-    ),
-    ("discord_send_message", &["discord", "ディスコード"]),
-    (
-        "gmail_message",
-        &[
-            "gmail",
-            "メール",
-            "下書き",
-            "送信",
-            "未読",
-            "受信",
-            "メール一覧",
-            "振り分け",
-            "ラベル",
-            "ゴミメール",
-            "掃除",
-            "アーカイブ",
-            "既読",
-            "ゴミ箱",
-        ],
-    ),
-    (
-        "google_calendar",
-        &["calendar", "カレンダー", "予定", "スケジュール"],
-    ),
-    (
-        "google_docs",
-        &["google docs", "docs", "ドキュメント", "文書"],
-    ),
-    ("google_drive", &["drive", "ドライブ"]),
-    (
-        "google_sheets",
-        &["sheets", "スプレッドシート", "表計算", "セル"],
-    ),
-    ("google_tasks", &["tasks", "タスク", "todo", "やること"]),
-    ("github_issue", &["github", "issue", "イシュー"]),
-    ("notion", &["notion"]),
-    (
-        "microsoft_graph",
-        &["outlook", "teams", "microsoft", "office365"],
-    ),
-    ("jira", &["jira"]),
-    ("linear", &["linear"]),
-    ("trello", &["trello"]),
-    ("todoist", &["todoist"]),
-    ("http_api", &["api", "webhook", "http"]),
-    (
-        "ms_office",
-        &["word", "excel", "powerpoint", "office", "オフィス"],
-    ),
-    (
-        "document_convert",
-        &["変換", "pdf化", "libreoffice", "convert"],
-    ),
-    (
-        "productivity_tools",
-        &[
-            "文字数",
-            "行数",
-            "json",
-            "base64",
-            "urlエンコード",
-            "urlデコード",
-            "単位換算",
-            "日付計算",
-            "csv",
-            "markdown表",
-            "スラッグ",
-            "slug",
-            "チェックサム",
-            "bmi",
-            "rgb",
-            "hex",
-        ],
-    ),
-    ("pdf_tools", &["pdf", "結合", "抽出", "回転"]),
-    (
-        "image_tools",
-        &[
-            "psd",
-            "xcf",
-            "heic",
-            "heif",
-            "tiff",
-            "webp",
-            "avif",
-            "画像変換",
-            "pngに",
-            "png化",
-            "jpgに",
-            "jpegに",
-            "リサイズ",
-            "縮小して",
-            "画像情報",
-            "レイヤー",
-        ],
-    ),
-    (
-        "comfyui_generate",
-        &[
-            "画像",
-            "絵",
-            "イラスト",
-            "描いて",
-            "生成して",
-            "comfyui",
-            "image",
-            "写真",
-            "動画",
-        ],
-    ),
-    ("image_generate", &["dall-e", "dall\u{00b7}e", "openai画像"]),
-    ("x_twitter", &["twitter", "xに", "ポスト", "ツイート"]),
-    ("mastodon", &["mastodon", "マストドン"]),
-    ("bluesky", &["bluesky", "bsky", "ブルースカイ"]),
-    ("reddit", &["reddit"]),
-    ("linkedin", &["linkedin"]),
-    ("misskey", &["misskey", "ミスキー", "ノート"]),
-];
+const TOOL_ROUTES: &[(&str, &[&str])] = &[];
 
-fn route_keywords(name: &str) -> &'static [&'static str] {
-    TOOL_ROUTES
-        .iter()
-        .find_map(|(route_name, keywords)| (*route_name == name).then_some(*keywords))
-        .unwrap_or(&[])
-}
-
-/// 登録済みスキルの意図メタデータだけで発話との一致を判定する。
-pub fn intent_matches(name: &str, text: &str) -> bool {
+/// 登録済みスキルを優先度・一致語長・名前順で走査し、最初の先回り実行だけを返す。
+pub fn intent_for_text(text: &str) -> Option<MatchedIntent> {
+    debug_assert!(TOOL_ROUTES.is_empty());
     let normalized = text.to_lowercase();
-    index()
-        .get(name)
-        .and_then(|position| all().get(*position))
-        .is_some_and(|tool| {
-            tool.intent_keywords()
+    let mut matched: Vec<_> = all()
+        .iter()
+        .filter_map(|tool| {
+            let invocation = tool.intent_invocation(text)?;
+            let score = tool
+                .intent_keywords()
                 .iter()
-                .any(|keyword| normalized.contains(&keyword.to_lowercase()))
+                .filter(|keyword| normalized.contains(&keyword.to_lowercase()))
+                .map(|keyword| keyword.chars().count())
+                .max()
+                .unwrap_or(0);
+            Some((tool.intent_priority(), score, tool.name(), invocation))
+        })
+        .collect();
+    matched.sort_unstable_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
+    matched
+        .into_iter()
+        .next()
+        .map(|(_, _, tool_name, invocation)| MatchedIntent {
+            tool_name,
+            invocation,
         })
 }
-
 /// 登録済みスキルを返す。各スキルはプロセス内で1回だけ生成する。
 pub fn all() -> &'static [Box<dyn Tool>] {
     TOOLS
         .get_or_init(|| {
-            inventory::iter::<ToolReg>
+            let mut tools: Vec<_> = inventory::iter::<ToolReg>
                 .into_iter()
                 .map(|r| (r.make)())
-                .collect()
+                .collect();
+            tools.sort_unstable_by_key(|tool| tool.name());
+            tools
         })
         .as_slice()
 }
@@ -944,6 +555,7 @@ mod tests {
     #[test]
     fn 全スキルのメタデータとschemaは一意で妥当() {
         let mut names = std::collections::HashSet::new();
+        let mut labels = std::collections::HashSet::new();
         let allowed_field_types = [
             "text", "password", "textarea", "checkbox", "number", "select",
         ];
@@ -958,6 +570,11 @@ mod tests {
                 !tool.label().trim().is_empty(),
                 "{} の表示名が空です",
                 tool.name()
+            );
+            assert!(
+                labels.insert(tool.label()),
+                "スキル表示名が重複しています: {}",
+                tool.label()
             );
             assert!(
                 !tool.description().trim().is_empty(),
@@ -995,35 +612,180 @@ mod tests {
     }
 
     #[test]
-    fn 意図ルートは登録済みスキルだけを参照する() {
-        let registered: std::collections::HashSet<&str> =
-            super::all().iter().map(|tool| tool.name()).collect();
-        for (name, keywords) in super::TOOL_ROUTES {
-            assert!(
-                registered.contains(name),
-                "未登録スキルの意図ルートです: {name}"
-            );
-            assert!(!keywords.is_empty(), "意図語彙が空です: {name}");
-        }
+    fn 意図ルートは各スキルの登録情報だけを参照する() {
+        assert!(
+            super::TOOL_ROUTES.is_empty(),
+            "中央の意図ルート表へスキルを戻さないでください"
+        );
         for (text, name) in [
             ("今日の気象を教えて", "weather"),
             ("15分後にリマインダーして", "reminder"),
             ("Whisperで文字起こし", "whisper_transcribe"),
             ("競合比較を調査", "research_report"),
         ] {
-            assert!(
-                super::intent_matches(name, text),
-                "{text} -> {name} が一致しません"
-            );
+            let matched = super::intent_for_text(text)
+                .unwrap_or_else(|| panic!("{text} の先回り実行が見つかりません"));
+            assert_eq!(matched.tool_name, name, "{text} の割当先が違います");
+            assert!(matches!(
+                matched.invocation.handling,
+                super::IntentHandling::Direct
+            ));
             assert!(
                 schema_names(text).contains(&name.to_string()),
                 "{text} のschema候補に{name}がありません"
+            );
+        }
+
+        let weather = super::intent_for_text("大阪の気温").unwrap();
+        assert_eq!(weather.tool_name, "weather");
+        assert_eq!(weather.invocation.args["location"], "大阪");
+
+        let reminder = super::intent_for_text("15分後に洗濯物をリマインダーして").unwrap();
+        assert_eq!(reminder.tool_name, "reminder");
+        assert_eq!(reminder.invocation.args["minutes_from_now"], 15);
+
+        let transcription = super::intent_for_text("話者分類つきでWhisper文字起こしして").unwrap();
+        assert_eq!(transcription.tool_name, "whisper_transcribe");
+        assert_eq!(transcription.invocation.args["diarize"], true);
+
+        let research =
+            super::intent_for_text("AIエージェント領域を出典付きで調査してレポートにして").unwrap();
+        assert_eq!(research.tool_name, "research_report");
+        assert_eq!(research.invocation.args["save"], true);
+        assert_eq!(research.invocation.args["artifact_bundle"], true);
+    }
+
+    #[test]
+    fn 先回り実行は旧分岐と同じ引数と扱いを返す() {
+        let currency = super::intent_for_text("ドル円のチャート見せて").unwrap();
+        assert_eq!(currency.tool_name, "currency_rates");
+        assert_eq!(currency.invocation.args["base"], "USD");
+        assert_eq!(currency.invocation.args["symbols"], "JPY");
+        assert_eq!(currency.invocation.args["chart"], true);
+
+        let market = super::intent_for_text("日系平均のチャートを見せて").unwrap();
+        assert_eq!(market.tool_name, "market_indices");
+        assert_eq!(market.invocation.args["symbol"], "nikkei225");
+        assert_eq!(market.invocation.args["chart"], true);
+
+        let focus = super::intent_for_text("25分集中タイマー").unwrap();
+        assert_eq!(focus.tool_name, "focus_timer");
+        assert_eq!(focus.invocation.args["action"], "start");
+        assert_eq!(focus.invocation.args["minutes"], 25);
+
+        let praise = super::intent_for_text("企画書を書けた").unwrap();
+        assert_eq!(praise.tool_name, "praise_log");
+        assert_eq!(praise.invocation.args["action"], "add");
+
+        let meeting = super::intent_for_text("会議の議事録を作って").unwrap();
+        assert_eq!(meeting.tool_name, "meeting_recorder");
+        assert_eq!(meeting.invocation.args["action"], "minutes");
+
+        let suite = super::intent_for_text("Genspark風の機能を全部やって").unwrap();
+        assert_eq!(suite.tool_name, "genspark_suite");
+        assert_eq!(suite.invocation.args["audience"], "一般読者");
+
+        let workspace = super::intent_for_text("Gensparkみたいに資料一式を作って").unwrap();
+        assert_eq!(workspace.tool_name, "spark_workspace");
+        assert_eq!(
+            workspace.invocation.args["project"],
+            "Gensparkみたいに資料一式を作って"
+        );
+    }
+
+    #[test]
+    fn 資料差し込みと直接返却の区別を維持する() {
+        let news = super::intent_for_text("今日のニュースをまとめて").unwrap();
+        assert_eq!(news.tool_name, "news_scrape");
+        assert!(matches!(
+            news.invocation.handling,
+            super::IntentHandling::Material {
+                run_tool: true,
+                collect_sources: true,
+                ..
+            }
+        ));
+
+        let clipboard = super::intent_for_text("クリップボードを要約して").unwrap();
+        assert_eq!(clipboard.tool_name, "clipboard_text");
+        assert!(matches!(
+            clipboard.invocation.handling,
+            super::IntentHandling::Material {
+                run_tool: true,
+                collect_sources: false,
+                ..
+            }
+        ));
+
+        let reminder = super::intent_for_text("リマインダー一覧を見せて").unwrap();
+        assert_eq!(reminder.tool_name, "reminder");
+        assert!(matches!(
+            reminder.invocation.handling,
+            super::IntentHandling::Material {
+                run_tool: false,
+                collect_sources: false,
+                ..
+            }
+        ));
+
+        let search = super::intent_for_text("Rustとは").unwrap();
+        assert_eq!(search.tool_name, "web_search");
+        assert!(matches!(
+            search.invocation.handling,
+            super::IntentHandling::Material {
+                run_tool: true,
+                collect_sources: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn プロンプト差し込みは入力内のプレースホルダーを再置換しない() {
+        let rendered = super::render_intent_prompt(
+            "{user_text}\n---\n{tool_result}",
+            "入力{tool_result}",
+            "結果{user_text}",
+        );
+        assert_eq!(rendered, "入力{tool_result}\n---\n結果{user_text}");
+    }
+
+    #[test]
+    fn エージェントループへスキル名と長文資料プロンプトを戻さない() {
+        let agent = crate::guard_scan::all_sources()
+            .into_iter()
+            .find(|source| source.path.ends_with("src-tauri/src/agent.rs"))
+            .expect("agent.rs");
+        let allowed = ["run_command", "ask_user", "view_image"];
+        let leaked_names: Vec<_> = super::all()
+            .iter()
+            .map(|tool| tool.name())
+            .filter(|name| !allowed.contains(name))
+            .filter(|name| agent.body().contains(&format!("\"{name}\"")))
+            .collect();
+        assert!(
+            leaked_names.is_empty(),
+            "agent.rsへスキル名リテラルを戻さないでください: {leaked_names:?}"
+        );
+        for marker in [
+            "以下はGoogle News / Yahoo!ニュースから取得した内部資料です",
+            "以下はローカルのクリップボード取得結果です",
+            "以下は回答前に必ず実行したWeb検索の結果です",
+        ] {
+            assert!(
+                !agent.body().contains(marker),
+                "長文資料プロンプトは対応するskills/<名前>/promptsへ置いてください: {marker}"
             );
         }
     }
 
     #[test]
     fn スキル候補と能力一覧は登録順に依存しない() {
+        let registered: Vec<_> = super::all().iter().map(|tool| tool.name()).collect();
+        let mut sorted_registered = registered.clone();
+        sorted_registered.sort_unstable();
+        assert_eq!(registered, sorted_registered);
+
         let first = schema_names("画像変換して画像を作って");
         assert_eq!(first, schema_names("画像変換して画像を作って"));
         let image_tools = first.iter().position(|name| name == "image_tools").unwrap();

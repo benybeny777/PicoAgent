@@ -187,6 +187,10 @@ impl Tool for DesktopControlTool {
         "desktop_control"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["クリックして", "クリックし", "マウス", "キーボード", "キーを押", "入力して", "画面を操作", "pc操作", "デスクトップ操作", "ドラッグ"]
+    }
+
     fn label(&self) -> &'static str {
         "デスクトップ操作"
     }

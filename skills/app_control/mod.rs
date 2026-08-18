@@ -15,6 +15,10 @@ impl Tool for AppControlTool {
         "app_control"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["アプリ終了", "アプリを終了", "アプリ閉じ", "アプリを閉じ", "このアプリ", "このソフト", "picoagent", "ピコエージェント", "pico agent"]
+    }
+
     fn label(&self) -> &'static str {
         "アプリ操作"
     }

@@ -81,6 +81,10 @@ impl Tool for CodeRunnerTool {
         "code_runner"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["スクリプト", "コードを書いて", "コード実行", "プログラムで", "自力で", "なんとかして", "script", "code"]
+    }
+
     fn label(&self) -> &'static str {
         "自力実行（コード実行）"
     }

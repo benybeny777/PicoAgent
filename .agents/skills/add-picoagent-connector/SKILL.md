@@ -14,10 +14,11 @@ description: PicoAgentへLLMプロバイダまたはツールコネクタを追�
 ## 実装
 
 1. ProviderまたはToolトレイトと`inventory::submit!`で自動登録し、中央の手動一覧を増やさない。
-2. 設定が必要なら`add-picoagent-setting`も使い、`config_schema()`と実行時`cfg.get()`へ接続する。
-3. ユーザーパスは`permissions`、外部プロセスは`tools::process`、文字列は`text`、状態更新は`store`の共通層を使う。独自の許可判定、直接起動、直接上書きを作らない。
-4. Toolの失敗はモデルが回復できる文字列として返し、それ以外は`Result`で伝播する。許可したフォールバックだけ理由コメントを付ける。
-5. 正常、失敗、キャンセルの全経路でプロセス、接続、タイマー、リスナ、オブジェクトURLを解放する。
+2. 発話候補の語彙と優先度は`intent_keywords()`／`intent_priority()`、先回り実行の引数と直接返却／資料差し込みの別は`intent_invocation()`へ置く。`agent.rs`へスキル名分岐を足さない。長文の資料プロンプトは同じスキルの`prompts/*.md`から`include_str!`で読む。
+3. 設定が必要なら`add-picoagent-setting`も使い、`config_schema()`と実行時`cfg.get()`へ接続する。
+4. ユーザーパスは`permissions`、外部プロセスは`tools::process`、文字列は`text`、状態更新は`store`の共通層を使う。独自の許可判定、直接起動、直接上書きを作らない。
+5. Toolの失敗はモデルが回復できる文字列として返し、それ以外は`Result`で伝播する。許可したフォールバックだけ理由コメントを付ける。
+6. 正常、失敗、キャンセルの全経路でプロセス、接続、タイマー、リスナ、オブジェクトURLを解放する。
 
 ## 検証
 

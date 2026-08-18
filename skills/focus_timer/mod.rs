@@ -9,6 +9,20 @@ use crate::daily::{self, DailyEvent};
 
 pub struct FocusTimerTool;
 
+fn number_before(text: &str, marker: &str) -> Option<i64> {
+    let marker_index = text.find(marker)?;
+    let prefix = &text[..marker_index];
+    let digits: String = prefix
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    digits.parse::<i64>().ok()
+}
+
 fn str_arg(args: &Value, key: &str) -> String {
     args.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string()
 }
@@ -39,6 +53,30 @@ fn list_text(events: &[DailyEvent]) -> String {
 impl Tool for FocusTimerTool {
     fn name(&self) -> &'static str {
         "focus_timer"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["集中", "ポモドーロ", "タイマー", "見守り", "作業を見て", "focus", "pomodoro"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        890
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !self.matches_intent(text) {
+            return None;
+        }
+        let (action, minutes) = if text.contains("見守") {
+            ("watch", number_before(text, "分").unwrap_or(60).clamp(5, 240))
+        } else {
+            ("start", number_before(text, "分").unwrap_or(25).clamp(1, 240))
+        };
+        Some(crate::tools::IntentInvocation::direct(json!({
+            "action": action,
+            "minutes": minutes,
+            "label": text
+        })))
     }
 
     fn label(&self) -> &'static str {
@@ -149,4 +187,3 @@ impl Tool for FocusTimerTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(FocusTimerTool) } }
-

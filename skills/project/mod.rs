@@ -475,6 +475,10 @@ impl Tool for ProjectTool {
         "project"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["プロジェクト", "案件", "ワークスペース", "課題", "タスク", "やること", "残り", "締切", "期限", "決定事項", "決めたこと", "進捗", "経緯"]
+    }
+
     fn label(&self) -> &'static str {
         "プロジェクト管理"
     }

@@ -13,6 +13,70 @@ const FRANKFURTER_BASE: &str = "https://api.frankfurter.app";
 
 pub struct CurrencyRatesTool;
 
+fn parse_days(text: &str) -> Option<i64> {
+    let chars: Vec<char> = text.chars().collect();
+    for (index, character) in chars.iter().enumerate() {
+        if character.is_ascii_digit() {
+            continue;
+        }
+        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
+        if !unit_month && *character != '日' {
+            continue;
+        }
+        let mut cursor = index;
+        let mut number = String::new();
+        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
+            number.insert(0, chars[cursor - 1]);
+            cursor -= 1;
+        }
+        if let Ok(number) = number.parse::<i64>() {
+            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
+        }
+    }
+    None
+}
+
+fn direct_query(text: &str) -> Option<Value> {
+    let lower = text.to_lowercase();
+    const NON_JPY: &[(&str, &str)] = &[
+        ("豪ドル", "AUD"), ("カナダドル", "CAD"), ("人民元", "CNY"),
+        ("ドル", "USD"), ("ユーロ", "EUR"), ("ポンド", "GBP"),
+        ("ウォン", "KRW"), ("フラン", "CHF"), ("元", "CNY"),
+        ("usd", "USD"), ("eur", "EUR"), ("gbp", "GBP"), ("aud", "AUD"),
+        ("cny", "CNY"), ("krw", "KRW"), ("chf", "CHF"), ("cad", "CAD"),
+    ];
+    let base = NON_JPY
+        .iter()
+        .filter_map(|(token, code)| lower.find(token).map(|position| (position, *code)))
+        .min_by_key(|(position, _)| *position)
+        .map(|(_, code)| code);
+    let has_jpy = lower.contains('円') || lower.contains("jpy");
+    let strong = ["為替", "かわせ", "レート", "相場"]
+        .iter()
+        .any(|word| lower.contains(word));
+    let chart = ["推移", "チャート", "グラフ", "trend"]
+        .iter()
+        .any(|word| lower.contains(word));
+    if !(strong || base.is_some() || (has_jpy && (chart || lower.contains("換算")))) {
+        return None;
+    }
+
+    let mut args = serde_json::Map::new();
+    if let Some(base) = base {
+        args.insert("base".to_string(), json!(base));
+    }
+    if has_jpy {
+        args.insert("symbols".to_string(), json!("JPY"));
+    }
+    if chart {
+        args.insert("chart".to_string(), json!(true));
+        if let Some(days) = parse_days(text) {
+            args.insert("days".to_string(), json!(days));
+        }
+    }
+    Some(Value::Object(args))
+}
+
 // 値の並びを Unicode ブロックのスパークライン（簡易チャート）にする。
 fn sparkline(values: &[f64]) -> String {
     const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
@@ -34,6 +98,18 @@ fn sparkline(values: &[f64]) -> String {
 impl Tool for CurrencyRatesTool {
     fn name(&self) -> &'static str {
         "currency_rates"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["為替", "換算", "円", "ドル", "ユーロ", "usd", "jpy", "eur"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        1_100
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        direct_query(text).map(crate::tools::IntentInvocation::direct)
     }
 
     fn label(&self) -> &'static str {

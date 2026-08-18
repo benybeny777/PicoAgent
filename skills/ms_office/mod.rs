@@ -167,6 +167,10 @@ impl Tool for MsOfficeTool {
         "ms_office"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["word", "excel", "powerpoint", "office", "オフィス"]
+    }
+
     fn label(&self) -> &'static str {
         "Office編集（OfficeCLI）"
     }
