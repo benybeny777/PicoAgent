@@ -11,6 +11,23 @@
 
 ---
 
+## 2026-08-18 — P1-19 キャラクター画像のLFS方針
+
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-19。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P1 | キャラクター再生成のたびに大判画像が通常Git履歴へ積み上がる | 対応済み | 案Aを採用し、今後追加・更新する`characters/**/*.png`と`characters/**/*.webp`をGit LFSへ載せる。既存履歴は書き換えずforce pushもしない |
+| 2 | 運用 | LFS容量・帯域と開発者の取得経路 | 対応済み | 現行RepoはGitHub表示で1,408,840KiB、追跡PNGは357件・485,228,859 bytes。GitHub Free／Proの現行LFS無償枠は保存・月間帯域各10GiBで、次のlossless WebP世代は枠内。READMEへGit LFSと`git lfs pull`を追加した |
+
+既存画像を一括renormalizeせず、属性追加後に実際に更新した画像だけをLFSへ移す。GitHubのソースアーカイブは
+既定でLFSポインタだけになるため、開発正規経路はGit clone＋`git lfs pull`とする。配布物は別RepoのRelease資産で、
+この開発Repoのソースアーカイブを製品配布には使わない。P1-12はこの方針を前提に別PRで実施する。
+
+検証: `git lfs version`、現行`git lfs ls-files` 0件、追跡画像件数・容量、GitHub Repo使用量を実測した。
+GitHub公式のLFS課金資料（https://docs.github.com/en/billing/concepts/product-billing/git-lfs ）で現行枠と
+「新しい版はファイル全体を追加計上」「downloadは帯域計上」を確認した。文書変更のみのためビルドは不要。
+
 ## 2026-08-18 — PR #119から選別したP0/P1残件の修正
 
 対象: 現行`main`で再現を確認済みだったP0 2件・P1 6件。
