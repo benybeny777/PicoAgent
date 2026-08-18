@@ -27,6 +27,8 @@
   - **大容量のモデル・ランタイム・SDK・GPU向けパッケージは、機能の利用意思とOS・CPUアーキテクチャ・GPU種別・必要能力を取得前に判定し、利用できない物を予備またはフォールバック目的で取得しない。** とくにCUDA版はCUDA対応NVIDIA GPUを確認できた場合だけ取得し、AMD／Intel／GPUなし環境ではCPU版が実際に対応する機能だけCPU版を選ぶ。自動判定を明示指定で上書きできる場合も、非対応構成の既定取得を許さない。全対象の一括取得は`cargo xtask setup all`のような明示操作だけにし、起動・通常ビルド・引数省略へ任意機能の取得を混ぜない。
   - **取得・更新・ビルドの正常終了後は、PicoAgent管理下の旧版、退避、staging、`.part`、`.incoming`、`*-old-*`、完了済み再開キャッシュを残さない。** 新版のサイズ・ハッシュ・起動可否など必要な検証が成功してから旧版を削除し、失敗時は復旧に必要な物だけを残す。失敗時に残した再開用ファイルも次回成功時に必ず回収する。共有キャッシュ、利用者が指定した外部配置、他アプリの管理領域は削除対象にしない。
   - 起動して確認したら使い終わったプロセスは止め、ロックや再ビルドの無駄を避ける。確認が自動化しづらい（GUI・音声など）場合は、コードの正しさで判断し、最終目視はユーザーに委ねてよい。
+  - **Node製の作業ツール（`tools/screenshots/` の撮影・検査など）を起動したら、正常終了・失敗・中断のどの経路でも `node.exe` を残さない。** タイムアウトや上限で打ち切った場合ほど残りやすいので、打ち切った直後にプロセスを確認し、残っていれば回収してから次の作業へ進む。撮影ツールは自前のHTTPサーバとChromiumを抱えるため、残すとポート占有と数百MBのメモリがそのまま居座る。
+  - **プロセスを止める前に、必ず親プロセスとコマンドラインで「自分が起動したもの」かを確かめる。** `node.exe` は Codex の MCP サーバやカーネル、Adobe Creative Cloud なども使っており、名前だけで一括終了すると稼働中アプリを壊す。判別には `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` の `ParentProcessId` と `CommandLine` を使い、自分が起動した経路（`tools/screenshots/shoot.mjs` 等）と一致するものだけを対象にする。`cargo xtask stop` は、PicoAgent本体と同梱エンジンに加えて、コマンドラインへ `tools/screenshots/` を含む `node` だけをプロセスツリーごと回収する（区切りをスラッシュへ揃えて判定するため、相対・絶対のどちらの起動でも拾う）。名前一致で止める対象へ `node` を足さないことは `assets` の回帰テストが固定している。
 - **対応 OS は Windows と macOS の 2 つ。Linux は対応対象外**。Linux 専用の分岐・取得経路を新たに増やさない。開発を Linux で行う場合に備えてビルドは通るようにしておくが（未対応を返すスタブ等）、機能の動作保証はしない。
 - PowerShell で日本語ファイルを確認するときは、文字化けを避けるため UTF-8 を明示する。表示が文字化けしても、すぐにソース破損と判断せず UTF-8 で読み直してから判断する。
 - ファイルや配布物の容量を利用者向け返信・引き継ぎ・レビュー記録へ書くときは、十進表記のMB／GBへ丸める。生のbyte数やMiB／GiBは併記しない。識別子・実装上のbyte列・検証ロジックの説明は容量報告ではないため対象外とする。
@@ -174,7 +176,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d_runtime`） | Live2D ランタイムを `ui/vendor/live2d/` へ取得（`cargo xtask setup live2d`）。公式サンプルは自動取得せず、開発者が条件確認後に `cargo xtask setup live2d-samples` を明示実行する。いずれも git 管理外 |
 | `xtask`（`bundled::fetch_tha3`） | THA3コード・VRAM別モデル・OS別Pythonを準備する（`cargo xtask setup tha3`）。コードとモデルは `resources/bundled/tha3/` へ、Windows開発用Pythonは製品外の `tools/tha3-runtime/` へ置き、製品PythonはNSISインストール時に専用領域へ取得する |
-| `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。全再構築は直接コマンドの`--force`だけ |
+| `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
 | `xtask/src/verify.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |

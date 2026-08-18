@@ -1375,9 +1375,13 @@ fn strip_between(text: &str, open: &str, close: &str) -> String {
 ///
 /// 残っていると同梱 DLL を掴んだままになり、ビルドが `os error 32` で失敗したり、
 /// 新しいインスタンスの WebView 生成と競合して起動直後に落ちたりする。
+/// 名前一致だけで止めてよい対象。PicoAgent 管理下の実行ファイル名に限る。
+/// `node` のように他アプリと共用される名前をここへ足さない（別の経路で判別して止める）。
+const NAME_MATCH_STOP_TARGETS: [&str; 3] = ["picoagent", "llama-server", "whisper-cli"];
+
 pub fn stop_stale() -> Result<()> {
     // PicoAgent 管理下のものだけを対象にする（同名の無関係プロセスを巻き込まない）。
-    let targets = ["picoagent", "llama-server", "whisper-cli"];
+    let targets = NAME_MATCH_STOP_TARGETS;
     let mut stopped = Vec::new();
 
     for name in targets {
@@ -1406,6 +1410,8 @@ pub fn stop_stale() -> Result<()> {
 
     // Aivis は PicoAgent 管理下のパスから起動したものだけを止める。
     stop_managed_aivis(&mut stopped);
+    // 撮影・検査ツールの node も、このリポジトリの経路から起動したものだけを止める。
+    stop_managed_screenshot_node(&mut stopped);
 
     if stopped.is_empty() {
         log("stop-stale", "停止対象の残存プロセスはありません");
@@ -1444,6 +1450,46 @@ fn stop_managed_aivis(stopped: &mut Vec<&'static str>) {
         .unwrap_or(false);
     if ok {
         stopped.push("aivis");
+    }
+}
+
+/// 撮影・検査ツールが残した `node` の目印。名前だけで止めると Codex の MCP サーバや
+/// Adobe Creative Cloud の `node.exe` まで巻き込むため、必ずこの経路と突き合わせる。
+///
+/// コマンドラインは `node tools/screenshots/shoot.mjs` のような相対・スラッシュ表記にも
+/// 絶対・円記号表記にもなる。区切りをスラッシュへ揃えてから含有判定するため、
+/// ここは絶対パスではなくフォルダ構成そのものを目印にする。
+const SCREENSHOT_TOOL_NEEDLE: &str = "tools/screenshots/";
+
+#[cfg(unix)]
+fn stop_managed_screenshot_node(stopped: &mut Vec<&'static str>) {
+    let ok = Command::new("pkill")
+        .args(["-f", SCREENSHOT_TOOL_NEEDLE])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if ok {
+        stopped.push("screenshot-node");
+    }
+}
+
+#[cfg(not(unix))]
+fn stop_managed_screenshot_node(stopped: &mut Vec<&'static str>) {
+    // コマンドラインへ撮影ツールの経路を含む node だけを、プロセスツリーごと止める。
+    // 円記号の区切りをスラッシュへ揃えてから判定し、相対・絶対どちらの起動でも拾う。
+    let script = format!(
+        "$needle = '{SCREENSHOT_TOOL_NEEDLE}';          Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" |          Where-Object {{ $_.CommandLine -and $_.CommandLine.Replace('\\', '/').Contains($needle) }} |          ForEach-Object {{ taskkill /PID $_.ProcessId /T /F > $null 2>&1; 'stopped' }}",
+    );
+    let stopped_any = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains("stopped"))
+        .unwrap_or(false);
+    if stopped_any {
+        stopped.push("screenshot-node");
     }
 }
 
@@ -2051,5 +2097,38 @@ mod tests {
             serde_json::from_str(r#"{"animationQualityMode":"sharp-expression"}"#).unwrap();
         assert!(super::validate_sharp_expression_pack(&character, &manifest).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 名前一致で止める対象へ他アプリと共用する名前を入れない() {
+        // `node` は Codex の MCP サーバや Adobe Creative Cloud も使う。名前だけで
+        // 止めると稼働中アプリを巻き込むため、経路一致の停止経路だけを使う。
+        for name in super::NAME_MATCH_STOP_TARGETS {
+            assert_ne!(name, "node");
+            assert_ne!(name, "powershell");
+        }
+    }
+
+    #[test]
+    fn 撮影ツールのnode判定は区切りを揃えた経路で行う() {
+        // 実際の起動は相対・スラッシュ、絶対・円記号のどちらもある。
+        let needle = super::SCREENSHOT_TOOL_NEEDLE;
+        assert_eq!(needle, "tools/screenshots/");
+        for command in [
+            "node tools/screenshots/shoot.mjs",
+            "C:\\repo\\tools\\screenshots\\shoot.mjs",
+        ] {
+            assert!(
+                command.replace('\\', "/").contains(needle),
+                "拾えません: {command}"
+            );
+        }
+        // 無関係な node は拾わない。
+        for command in ["node ./mcp/server.mjs", "C:\\Adobe\\js\\main.js"] {
+            assert!(
+                !command.replace('\\', "/").contains(needle),
+                "誤検出: {command}"
+            );
+        }
     }
 }

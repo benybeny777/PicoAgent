@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-19
-- ブランチ: `measure/bubble-backdrop-blur`
-- 目的: フキダシ背景ぼかしの再合成負荷を実測して採否を決める
-- 対応PR: #138
+- ブランチ: `chore/node-process-cleanup-rule`
+- 目的: 作業用nodeを起動経路で判別して確実に止める
+- 対応PR: #139
 
 ## 未処理の残件（次に作業する人はここから始める）
 
