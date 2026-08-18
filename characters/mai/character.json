@@ -1,7 +1,7 @@
 {
   "id": "mai",
   "name": "まい",
-  "assetVersion": "2026-08-08-preserve-details-v2-mai",
+  "assetVersion": "lossless-webp-d25f2e0965b8c32d",
   "description": "落ち着いた紫のドレスがよく似合う、包容力のあるやさしいお姉さん。",
   "motionProfile": "full",
   "bodyProportion": "compact",
@@ -65,18 +65,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png",
-        "frames/37e3703c81e0bcd8/7b6717d81fe5b198a5cb.png",
-        "frames/37e3703c81e0bcd8/7b6717d81fe5b198a5cb.png",
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png",
-        "frames/37e3703c81e0bcd8/c8e5754e760cf7b61139.png",
-        "frames/37e3703c81e0bcd8/c8e5754e760cf7b61139.png",
-        "frames/37e3703c81e0bcd8/cbf23e29a3b1c51b875d.png",
-        "frames/37e3703c81e0bcd8/7b6717d81fe5b198a5cb.png",
-        "frames/37e3703c81e0bcd8/7b6717d81fe5b198a5cb.png",
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png",
-        "frames/37e3703c81e0bcd8/d7a9784b0a20dda69b86.png",
-        "frames/37e3703c81e0bcd8/d7a9784b0a20dda69b86.png"
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
+        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
+        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
+        "frames/d25f2e0965b8c32d/0d1a6784b27b774819fe.webp",
+        "frames/d25f2e0965b8c32d/0d1a6784b27b774819fe.webp",
+        "frames/d25f2e0965b8c32d/2bb885f896e40fb85e0d.webp",
+        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
+        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
+        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
+        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp"
       ]
     },
     "thinking": {
@@ -98,18 +98,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png",
-        "frames/37e3703c81e0bcd8/7b6717d81fe5b198a5cb.png",
-        "frames/37e3703c81e0bcd8/69a3de38cc5b25950931.png",
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png",
-        "frames/37e3703c81e0bcd8/d7a9784b0a20dda69b86.png",
-        "frames/37e3703c81e0bcd8/d7a9784b0a20dda69b86.png",
-        "frames/37e3703c81e0bcd8/cbf23e29a3b1c51b875d.png",
-        "frames/37e3703c81e0bcd8/69a3de38cc5b25950931.png",
-        "frames/37e3703c81e0bcd8/7b6717d81fe5b198a5cb.png",
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png",
-        "frames/37e3703c81e0bcd8/d7a9784b0a20dda69b86.png",
-        "frames/37e3703c81e0bcd8/3e6d632dbe84479b0335.png"
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
+        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
+        "frames/d25f2e0965b8c32d/49ddc13476847650d967.webp",
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
+        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
+        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
+        "frames/d25f2e0965b8c32d/2bb885f896e40fb85e0d.webp",
+        "frames/d25f2e0965b8c32d/49ddc13476847650d967.webp",
+        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
+        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
+        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp"
       ]
     },
     "talking": {
@@ -131,18 +131,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/37e3703c81e0bcd8/b1bbd170dc8cf7c071a2.png",
-        "frames/37e3703c81e0bcd8/1fa28bc679347fc03388.png",
-        "frames/37e3703c81e0bcd8/93a6ca622ec0614eddbc.png",
-        "frames/37e3703c81e0bcd8/b1bbd170dc8cf7c071a2.png",
-        "frames/37e3703c81e0bcd8/8d420988777fc68a322c.png",
-        "frames/37e3703c81e0bcd8/8d420988777fc68a322c.png",
-        "frames/37e3703c81e0bcd8/93a6ca622ec0614eddbc.png",
-        "frames/37e3703c81e0bcd8/1fa28bc679347fc03388.png",
-        "frames/37e3703c81e0bcd8/69a3de38cc5b25950931.png",
-        "frames/37e3703c81e0bcd8/b1bbd170dc8cf7c071a2.png",
-        "frames/37e3703c81e0bcd8/fc7ae41c8c59dfba7ff9.png",
-        "frames/37e3703c81e0bcd8/8d420988777fc68a322c.png"
+        "frames/d25f2e0965b8c32d/72a73a4b241f0ed52403.webp",
+        "frames/d25f2e0965b8c32d/d1b7ef0ddbd7bab2a145.webp",
+        "frames/d25f2e0965b8c32d/3c91599f3ec1c2435383.webp",
+        "frames/d25f2e0965b8c32d/72a73a4b241f0ed52403.webp",
+        "frames/d25f2e0965b8c32d/3e7fa300647f8de8bc6c.webp",
+        "frames/d25f2e0965b8c32d/3e7fa300647f8de8bc6c.webp",
+        "frames/d25f2e0965b8c32d/3c91599f3ec1c2435383.webp",
+        "frames/d25f2e0965b8c32d/d1b7ef0ddbd7bab2a145.webp",
+        "frames/d25f2e0965b8c32d/49ddc13476847650d967.webp",
+        "frames/d25f2e0965b8c32d/72a73a4b241f0ed52403.webp",
+        "frames/d25f2e0965b8c32d/5fcd03f175b329a5fd50.webp",
+        "frames/d25f2e0965b8c32d/3e7fa300647f8de8bc6c.webp"
       ]
     },
     "sad": {
@@ -158,12 +158,12 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/37e3703c81e0bcd8/507563fb11ee753c7d96.png",
-        "frames/37e3703c81e0bcd8/4d39e7fc93967467ca3c.png",
-        "frames/37e3703c81e0bcd8/c8e5754e760cf7b61139.png",
-        "frames/37e3703c81e0bcd8/507563fb11ee753c7d96.png",
-        "frames/37e3703c81e0bcd8/972d192167059306200c.png",
-        "frames/37e3703c81e0bcd8/507563fb11ee753c7d96.png"
+        "frames/d25f2e0965b8c32d/b7dac17fae93a81f413c.webp",
+        "frames/d25f2e0965b8c32d/8c8acf62f93f59a44b6a.webp",
+        "frames/d25f2e0965b8c32d/0d1a6784b27b774819fe.webp",
+        "frames/d25f2e0965b8c32d/b7dac17fae93a81f413c.webp",
+        "frames/d25f2e0965b8c32d/9cefa303d8a50570b3b7.webp",
+        "frames/d25f2e0965b8c32d/b7dac17fae93a81f413c.webp"
       ]
     }
   },
@@ -171,5 +171,18 @@
     "sleeping": "boot/sleeping.png",
     "useSleepingOnStartup": true
   },
-  "frameGeneration": "37e3703c81e0bcd8"
+  "frameGeneration": "d25f2e0965b8c32d",
+  "runtimeLayers": {
+    "base": "runtime-layers/base.webp",
+    "blink_half": "runtime-layers/blink_half.webp",
+    "blink_closed": "runtime-layers/blink_closed.webp",
+    "mouth_closed": "runtime-layers/mouth_closed.webp",
+    "mouth_open": "runtime-layers/mouth_open.webp",
+    "gaze_left": "runtime-layers/gaze_left.webp",
+    "gaze_right": "runtime-layers/gaze_right.webp",
+    "expression_happy": "runtime-layers/expression_happy.webp",
+    "expression_sad": "runtime-layers/expression_sad.webp"
+  },
+  "runtimeLayerEncoding": "webp-lossless-v1",
+  "frameEncoding": "webp-lossless-v1"
 }

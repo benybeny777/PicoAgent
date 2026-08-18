@@ -251,6 +251,7 @@ let characterOverridesCache = {};
 let live2dSdkOverridesCache = {};
 let activeLive2dSdkPreference = "auto";
 let characterAssetVersion = "";
+let runtimeLayers = {};
 let bootCharacterName = "キャラクター";
 let loadedCharacterSignature = "";
 let animations = {
@@ -962,6 +963,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   animations = variant?.animations || manifest.animations || {};
+  runtimeLayers = variant?.runtimeLayers || manifest.runtimeLayers || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
   configureSpringMotion(variant?.springPhysics ?? manifest.springPhysics, variant?.secondaryMotion ?? manifest.secondaryMotion);
   renderVariantPicker(variants, variant?.id || "default");
@@ -1109,7 +1111,7 @@ function animate(now) {
 animationRequestId = requestAnimationFrame(animate);
 
 // ── 疑似Live2Dリグ ─────────────────────────────────────────────────
-// layers/（base・mouth_open/closed・blink_half/closed）は「同一ポーズの全身差分絵」。
+// runtimeLayers（未指定の追加パックはlayers/*.png）は「同一ポーズの全身差分絵」。
 // 読み上げ中はフレームアニメの代わりに差分絵を切り替え（PNGTuber方式）、
 // WebAudio の振幅解析で実際の声量に合わせて口を動かし、ランダムにまばたきする。
 let rigAvailable = false; // 選択中キャラに layers 素材が揃っているか
@@ -1132,7 +1134,10 @@ let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
 
 function layerUrl(name) {
-  const url = `${characterRoot}/layers/${name}.png`;
+  const relative = typeof runtimeLayers[name] === "string"
+    ? runtimeLayers[name]
+    : `layers/${name}.png`;
+  const url = `${characterRoot}/${relative}`;
   return characterAssetVersion ? `${url}?v=${encodeURIComponent(characterAssetVersion)}` : url;
 }
 

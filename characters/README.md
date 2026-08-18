@@ -22,18 +22,20 @@ characters/<id>/
 ├── preview.png              # 通常立ち絵
 ├── boot/
 │   └── sleeping.png         # ローディング画面用の横向き寝姿
-└── layers/
-    ├── base.png             # 通常表情。通常は preview.png と同じ
-    ├── blink_half.png       # 半目または閉じ目へ向かう中間表情
-    ├── blink_closed.png     # 目を閉じた表情
-    ├── mouth_closed.png     # 口を閉じた表情。通常は base.png と同じ
-    └── mouth_open.png       # 会話中の口開き表情
+├── layers/
+│   ├── base.png             # 通常表情。通常は preview.png と同じ
+│   ├── blink_half.png       # 半目または閉じ目へ向かう中間表情
+│   ├── blink_closed.png     # 目を閉じた表情
+│   ├── mouth_closed.png     # 口を閉じた表情。通常は base.png と同じ
+│   └── mouth_open.png       # 会話中の口開き表情
+├── runtime-layers/          # 自動生成。制作正本とRGBA一致するlossless WebP
+└── frames/<世代>/           # 自動生成。重複除外したlossless WebP
 ```
 
-`animations/` 配下は `scripts/build-character-animations.py` で生成する。手で直接直さない。
+`runtime-layers/` と `frames/` は `scripts/build-character-animations.py` で生成する。手で直接直さない。
 `source.png` などの元画像は任意の制作素材。実行時に使わないPSD・確認用シート・生成途中画像は、必要がなくなったらリポジトリへ残さない。
 
-同梱PNGは `motionProfile=full` を持ち、`base`、半目／閉じ目、閉口／開口などの表情レイヤーから単一世代の連番を生成する。口パクは音声ありなら声量、ミュート中なら返答状態へ同期する。`springPhysics.regions` を持つキャラは同じフレームの局所領域を60fpsの減衰バネで重ね、髪・胸元・リボンなどに別々の遅れを付ける。`animationQualityMode=spring-high` は通常42枚の倍となる84フレームを生成する。矩形レイヤーや色面は合成せず、透明輪郭を維持する。
+同梱通常2Dは `motionProfile=full` を持ち、`base`、半目／閉じ目、閉口／開口などの制作正本PNGからlossless WebPの単一世代を生成する。口パクは音声ありなら声量、ミュート中なら返答状態へ同期する。`springPhysics.regions` を持つキャラは同じフレームの局所領域を60fpsの減衰バネで重ね、髪・胸元・リボンなどに別々の遅れを付ける。`animationQualityMode=spring-high` は通常42枚の倍となる84フレームを生成する。矩形レイヤーや色面は合成せず、透明輪郭を維持する。利用者が追加済みのPNGパックは従来どおり読み込む。
 
 ## 画像作成ルール
 
@@ -84,17 +86,19 @@ uv run --with pillow python scripts/build-character-animations.py -- rin mai --v
 cargo xtask sync-characters
 ```
 
-このスクリプトは内部で次の42枚を生成したあと、同一内容をハッシュでまとめる。
+このスクリプトは内部で次の42枚相当を組み立てたあと、復号RGBAの内容ハッシュで重複をまとめ、lossless WebPへ保存する。
 
 - `animations/idle/00.png` 〜 `11.png`
 - `animations/running/00.png` 〜 `11.png`
 - `animations/review/00.png` 〜 `11.png`
 - `animations/failed/00.png` 〜 `05.png`
-- 固有画像だけを置く `frames/`（既存 `layers/` / `preview.png` と同じ画像はそれらを直接共有）
+- 固有画像だけを置く `frames/<frameGeneration>/*.webp`
+- 制作正本9枚に対応する `runtime-layers/*.webp`
 - `character.json` の `animations.*.framePaths`
+- `character.json` の `runtimeLayers`、`frameEncoding`、`runtimeLayerEncoding`
 - `--version` 指定時は `assetVersion`
 
-最終パックには重複した `animations/` 連番を残さない。実行時のコマ数と順序は `framePaths` が保持する。
+最終パックには重複した `animations/` 連番を残さない。実行時のコマ数と順序は `framePaths` が保持する。制作正本の `layers/*.png` は残し、配信用コピーからだけ同期時に除外する。生成時は全WebPを再読込し、寸法・RGBAが変換元と完全一致しなければ停止する。
 既存の連番だけを共有化する場合は `--compact-only` を使う。
 
 ```powershell

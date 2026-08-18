@@ -23,8 +23,10 @@ PicoAgentは、低頭身2Dを従来の上半身位置 `upper`、長身・実写�
 - `layers/mouth_closed.png` / `mouth_open.png`: 閉口・開口
 - `layers/gaze_left.png` / `gaze_right.png`: 頭と身体を固定した左右視線
 - `layers/expression_happy.png` / `expression_sad.png`: 喜び・悲しみの顔差分
+- `runtime-layers/*.webp`: 9枚の制作正本を復号RGBA完全一致で変換した実行用lossless WebP
+- `frames/<内容ハッシュ>/*.webp`: 状態フレームを重複除外した実行用lossless WebP単一世代
 - `expression-patches/`: 元立ち絵と同じ座標へ局所合成する透過パッチ
-- `character.json`: 同梱PNGは `motionProfile=full`、高精細優先なら `animationQualityMode=sharp-expression`、生成後は `frameGeneration`
+- `character.json`: 同梱通常2Dは `motionProfile=full`、高精細優先なら `animationQualityMode=sharp-expression`、生成後は `frameGeneration`、`frameEncoding=webp-lossless-v1`、`runtimeLayers`
 
 ## 1. 元立ち絵
 
@@ -62,13 +64,16 @@ uv run --with pillow python scripts/build-character-animations.py --character-di
 cargo xtask sync-characters
 ```
 
-生成先は `frames/<内容ハッシュ>/` です。新世代を完成しmanifestを原子的に保存した後だけ旧世代を除去します。複数世代または世代外参照は同期時に拒否します。Live2Dは別管理とし、PNG世代へ混ぜません。
+制作正本の `layers/*.png` は上書き・削除せず、実行用の9レイヤーを `runtime-layers/*.webp`、状態フレームを `frames/<内容ハッシュ>/*.webp` へlossless変換します。各WebPは保存直後に再読込し、元画像と寸法・RGBAが完全一致しなければ生成を停止します。新世代を完成しmanifestを原子的に保存した後だけ旧世代を除去します。複数世代または世代外参照は同期時に拒否します。Live2Dは別管理とし、通常2D世代へ混ぜません。
+
+`cargo xtask sync-characters` は制作正本を検証したあと、配信用コピーからだけ `layers/` を除外し、`runtimeLayers` が指すWebPを残します。利用者が追加済みの `layers/*.png` パックはmanifestに `runtimeLayers` がないため従来どおり読み込めます。lossy WebPは別判断とし、この工程へ混ぜません。
 
 `motionProfile=full` を宣言したパックは、基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーが同期時に機械検査されます。さらに `animationQualityMode=sharp-expression` は全9レイヤーが1780×3600以上でなければ同期が失敗します。1枚でも不足・低解像度の状態では配布へ進めません。
 
 ## 5. 実WebView検査
 
 - 実寸が完成レイヤーと一致する
+- 全WebPを復号した寸法・RGBAが変換元PNGと完全一致する
 - 半目→閉眼→半目が順に出る
 - 音声ありは声量同期、ミュート中はタイマー式で口が開閉する
 - 左右視線で身体・髪・服が変化しない
@@ -76,6 +81,7 @@ cargo xtask sync-characters
 - PNG寸法だけで合格にせず、顔・髪・輪郭を元絵、完成レイヤー、実WebViewの拡大表示で並べて確認する
 - 胸元二次動作は広いフェザーと小さい縦変形で境界が見えない
 - 配信ではPICO STUDIOの後ろ、背景の前に描画される
+- `SHOOT_CHARACTER_MATRIX=1` の全キャラ×7形式で描画欠け・速度警告が0件
 
 最後に `cargo test --manifest-path xtask/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、必要なら `cargo test --manifest-path src-tauri/Cargo.toml --lib`、`git diff --check` を実行します。
 

@@ -1,7 +1,7 @@
 {
   "id": "rin",
   "name": "りん",
-  "assetVersion": "2026-08-08-preserve-details-v2-rin",
+  "assetVersion": "lossless-webp-d121335e7267df24",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "motionProfile": "full",
   "bodyProportion": "compact",
@@ -69,18 +69,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/4032ce0658d4cf8556ed.png",
-        "frames/08184286df66a49f/4032ce0658d4cf8556ed.png",
-        "frames/08184286df66a49f/242aa5fb1fb7a308738a.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png"
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/001e9eb78bd09e0b9979.webp",
+        "frames/d121335e7267df24/001e9eb78bd09e0b9979.webp",
+        "frames/d121335e7267df24/944cc0fb8bbda653354b.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp"
       ]
     },
     "thinking": {
@@ -102,18 +102,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/86d498c61b98de766265.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
-        "frames/08184286df66a49f/242aa5fb1fb7a308738a.png",
-        "frames/08184286df66a49f/86d498c61b98de766265.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png"
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/5d00744f5791941ff530.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
+        "frames/d121335e7267df24/944cc0fb8bbda653354b.webp",
+        "frames/d121335e7267df24/5d00744f5791941ff530.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp"
       ]
     },
     "talking": {
@@ -135,18 +135,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/b3a2658700712e96014e.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png",
-        "frames/08184286df66a49f/b3a2658700712e96014e.png",
-        "frames/08184286df66a49f/9f60e742e496ccf271ff.png",
-        "frames/08184286df66a49f/86d498c61b98de766265.png",
-        "frames/08184286df66a49f/255cdbad87a7de7ec81f.png",
-        "frames/08184286df66a49f/6eb0e94ae228f5cb4e9a.png",
-        "frames/08184286df66a49f/1db56fad4eb146f57c46.png"
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/0c83606165c277221487.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
+        "frames/d121335e7267df24/0c83606165c277221487.webp",
+        "frames/d121335e7267df24/98184f833d964f24d183.webp",
+        "frames/d121335e7267df24/5d00744f5791941ff530.webp",
+        "frames/d121335e7267df24/b6c456105a524787493a.webp",
+        "frames/d121335e7267df24/2bbaab84f8116cdd47f3.webp",
+        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp"
       ]
     },
     "sad": {
@@ -162,14 +162,27 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/08184286df66a49f/d1a49df5c75eddc55169.png",
-        "frames/08184286df66a49f/17b649b434f22a206a0b.png",
-        "frames/08184286df66a49f/4032ce0658d4cf8556ed.png",
-        "frames/08184286df66a49f/d1a49df5c75eddc55169.png",
-        "frames/08184286df66a49f/404e7310c3415b6a2882.png",
-        "frames/08184286df66a49f/d1a49df5c75eddc55169.png"
+        "frames/d121335e7267df24/b666b40d65a227bc4c23.webp",
+        "frames/d121335e7267df24/d129942888a7d0f4cec0.webp",
+        "frames/d121335e7267df24/001e9eb78bd09e0b9979.webp",
+        "frames/d121335e7267df24/b666b40d65a227bc4c23.webp",
+        "frames/d121335e7267df24/f06a564841d9d1c242fa.webp",
+        "frames/d121335e7267df24/b666b40d65a227bc4c23.webp"
       ]
     }
   },
-  "frameGeneration": "08184286df66a49f"
+  "frameGeneration": "d121335e7267df24",
+  "runtimeLayers": {
+    "base": "runtime-layers/base.webp",
+    "blink_half": "runtime-layers/blink_half.webp",
+    "blink_closed": "runtime-layers/blink_closed.webp",
+    "mouth_closed": "runtime-layers/mouth_closed.webp",
+    "mouth_open": "runtime-layers/mouth_open.webp",
+    "gaze_left": "runtime-layers/gaze_left.webp",
+    "gaze_right": "runtime-layers/gaze_right.webp",
+    "expression_happy": "runtime-layers/expression_happy.webp",
+    "expression_sad": "runtime-layers/expression_sad.webp"
+  },
+  "runtimeLayerEncoding": "webp-lossless-v1",
+  "frameEncoding": "webp-lossless-v1"
 }

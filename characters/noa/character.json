@@ -1,10 +1,14 @@
 {
   "id": "noa",
   "name": "ノア",
-  "assetVersion": "2026-08-12-highres-motion-v2-noa",
+  "assetVersion": "lossless-webp-c55804539c91a5ae",
   "description": "黒いぱっつん前髪と素直なツインテール、上品な吸血姫風メイド衣装の18歳ツンデレ作業相棒。",
   "motionProfile": "full",
-  "defaultFraming": { "zoom": 1.82, "x": 0, "y": 24 },
+  "defaultFraming": {
+    "zoom": 1.82,
+    "x": 0,
+    "y": 24
+  },
   "greeting": "ノアよ。べ、別に待ってたわけじゃないけど……用件は聞いてあげる。",
   "boot": {
     "sleeping": "preview.png"
@@ -59,18 +63,18 @@
       ],
       "motion": "live2d-idle",
       "framePaths": [
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
-        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
-        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
-        "frames/1f30c096d704c38a/8e41ec4e128164349f15.png",
-        "frames/1f30c096d704c38a/f34e9be0f76ae048ce78.png",
-        "frames/1f30c096d704c38a/0f35c4ac6883ea5ad3bb.png",
-        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
-        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
-        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
-        "frames/1f30c096d704c38a/16696dddfc060250d282.png"
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp",
+        "frames/c55804539c91a5ae/7b7368b4bfbeffe2005a.webp",
+        "frames/c55804539c91a5ae/7b7368b4bfbeffe2005a.webp",
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp",
+        "frames/c55804539c91a5ae/692b8b1d35552fdf8030.webp",
+        "frames/c55804539c91a5ae/a5c855e07c884e35e36e.webp",
+        "frames/c55804539c91a5ae/fc4bd896935496ed751f.webp",
+        "frames/c55804539c91a5ae/7b7368b4bfbeffe2005a.webp",
+        "frames/c55804539c91a5ae/7b7368b4bfbeffe2005a.webp",
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp",
+        "frames/c55804539c91a5ae/fe0975c1ef4f9c8142e5.webp",
+        "frames/c55804539c91a5ae/fe0975c1ef4f9c8142e5.webp"
       ]
     },
     "thinking": {
@@ -92,18 +96,18 @@
       ],
       "motion": "live2d-thinking",
       "framePaths": [
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
-        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
-        "frames/1f30c096d704c38a/945f6fe7deabce3c36dc.png",
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
-        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
-        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
-        "frames/1f30c096d704c38a/b477b559e7ccbdfcd7ff.png",
-        "frames/1f30c096d704c38a/945f6fe7deabce3c36dc.png",
-        "frames/1f30c096d704c38a/445ba6db0c1e2ab81286.png",
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png",
-        "frames/1f30c096d704c38a/16696dddfc060250d282.png",
-        "frames/1f30c096d704c38a/4c5e521fc702a747dc24.png"
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp",
+        "frames/c55804539c91a5ae/7b7368b4bfbeffe2005a.webp",
+        "frames/c55804539c91a5ae/ce54c4f960f28dd9c71c.webp",
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp",
+        "frames/c55804539c91a5ae/fe0975c1ef4f9c8142e5.webp",
+        "frames/c55804539c91a5ae/fe0975c1ef4f9c8142e5.webp",
+        "frames/c55804539c91a5ae/3e32aa35cb95a8901ac4.webp",
+        "frames/c55804539c91a5ae/ce54c4f960f28dd9c71c.webp",
+        "frames/c55804539c91a5ae/7b7368b4bfbeffe2005a.webp",
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp",
+        "frames/c55804539c91a5ae/fe0975c1ef4f9c8142e5.webp",
+        "frames/c55804539c91a5ae/b5cbaedd6203987e7ee0.webp"
       ]
     },
     "talking": {
@@ -125,18 +129,18 @@
       ],
       "motion": "live2d-talking",
       "framePaths": [
-        "frames/1f30c096d704c38a/331a6aa61b97eab17607.png",
-        "frames/1f30c096d704c38a/60f1ee5f78be5b8d5e67.png",
-        "frames/1f30c096d704c38a/481bb1a76099fd26afa3.png",
-        "frames/1f30c096d704c38a/331a6aa61b97eab17607.png",
-        "frames/1f30c096d704c38a/0d587b060339161db654.png",
-        "frames/1f30c096d704c38a/0d587b060339161db654.png",
-        "frames/1f30c096d704c38a/481bb1a76099fd26afa3.png",
-        "frames/1f30c096d704c38a/60f1ee5f78be5b8d5e67.png",
-        "frames/1f30c096d704c38a/945f6fe7deabce3c36dc.png",
-        "frames/1f30c096d704c38a/331a6aa61b97eab17607.png",
-        "frames/1f30c096d704c38a/6ed5f7f261476adfd585.png",
-        "frames/1f30c096d704c38a/0d587b060339161db654.png"
+        "frames/c55804539c91a5ae/f6c01e8459a0fdd269c2.webp",
+        "frames/c55804539c91a5ae/0fa0e55f2173a28a96e1.webp",
+        "frames/c55804539c91a5ae/55b08f2e3873e3a95bff.webp",
+        "frames/c55804539c91a5ae/f6c01e8459a0fdd269c2.webp",
+        "frames/c55804539c91a5ae/8ac826d24c501671fc55.webp",
+        "frames/c55804539c91a5ae/8ac826d24c501671fc55.webp",
+        "frames/c55804539c91a5ae/55b08f2e3873e3a95bff.webp",
+        "frames/c55804539c91a5ae/0fa0e55f2173a28a96e1.webp",
+        "frames/c55804539c91a5ae/ce54c4f960f28dd9c71c.webp",
+        "frames/c55804539c91a5ae/f6c01e8459a0fdd269c2.webp",
+        "frames/c55804539c91a5ae/5244955ac28c4bd3a76d.webp",
+        "frames/c55804539c91a5ae/8ac826d24c501671fc55.webp"
       ]
     },
     "sad": {
@@ -152,15 +156,28 @@
       ],
       "motion": "live2d-sad",
       "framePaths": [
-        "frames/1f30c096d704c38a/6fd9d5ab6d8534df42b1.png",
-        "frames/1f30c096d704c38a/ee9a1e770fb4783b042c.png",
-        "frames/1f30c096d704c38a/f34e9be0f76ae048ce78.png",
-        "frames/1f30c096d704c38a/6fd9d5ab6d8534df42b1.png",
-        "frames/1f30c096d704c38a/80e6aa20e2b179fea4fa.png",
-        "frames/1f30c096d704c38a/6fd9d5ab6d8534df42b1.png"
+        "frames/c55804539c91a5ae/3346eab89d6d6775cff2.webp",
+        "frames/c55804539c91a5ae/d1c0c8d160ea7a78bf9f.webp",
+        "frames/c55804539c91a5ae/a5c855e07c884e35e36e.webp",
+        "frames/c55804539c91a5ae/3346eab89d6d6775cff2.webp",
+        "frames/c55804539c91a5ae/eee52b7e11ce3f8b769a.webp",
+        "frames/c55804539c91a5ae/3346eab89d6d6775cff2.webp"
       ]
     }
   },
   "animationQualityMode": "sharp-expression",
-  "frameGeneration": "1f30c096d704c38a"
+  "frameGeneration": "c55804539c91a5ae",
+  "runtimeLayers": {
+    "base": "runtime-layers/base.webp",
+    "blink_half": "runtime-layers/blink_half.webp",
+    "blink_closed": "runtime-layers/blink_closed.webp",
+    "mouth_closed": "runtime-layers/mouth_closed.webp",
+    "mouth_open": "runtime-layers/mouth_open.webp",
+    "gaze_left": "runtime-layers/gaze_left.webp",
+    "gaze_right": "runtime-layers/gaze_right.webp",
+    "expression_happy": "runtime-layers/expression_happy.webp",
+    "expression_sad": "runtime-layers/expression_sad.webp"
+  },
+  "runtimeLayerEncoding": "webp-lossless-v1",
+  "frameEncoding": "webp-lossless-v1"
 }

@@ -31,6 +31,7 @@
 - 作業中のスクリーンショット・連番フレーム・変換途中のファイルなど、一時的な作成物はリポジトリ直下の `temp/` 内だけに置く。ルートやソースディレクトリへ `tmp-*` 等を作らない。`temp/` は `.gitignore` で除外し、一時作成物をコミットへ含めない。
 - **透過キャラクターの成果物に、背景の消し残しと誤認されるハロー・矩形・色面・太い外周影を付けない。** 画像四隅のアルファ値だけで合格にせず、透過市松または透明な画面で実表示を確認する。意図した背景が必要な配信画面などは、キャラクター画像ではなく画面側の明示的な背景レイヤーとして分離する。
 - **画像の引き伸ばし拡大は禁止する。** 縦横のピクセル数だけを増やすnearest／bilinear／bicubic／Lanczos等の補間、OS画像API、Pillow、ImageMagick、ブラウザ、CSSによる拡大結果を高精細素材や最終レイヤーへ採用してはならない。Photoshop前の配置正規化も等倍以下かつ縦横比維持に限定する。`animationQualityMode=sharp-expression` の高精細キャラは、`scripts/rebuild-sharp-expression-assets.ps1` だけを正規の再生成入口にする。工程順は「基準寸法で局所差分を合成 → Photoshopの「ディテールを保持 2.0」で全9レイヤーを1780×3600以上へ再サンプリング → 元アルファ再適用 → 連番生成 → キャラ同期」で固定する。Photoshop処理も寸法を大きくするだけでは合格にせず、顔・髪・輪郭の実効解像度を元絵、Photoshop完成レイヤー、実WebViewの拡大表示で比較し、細部が明瞭に保たれた場合だけ採用する。Photoshop処理後も元絵由来のぼけが残る場合は「高精細」として合格させず、高解像度の元絵または局所再制作を用意する。Photoshop拡大後に差分合成スクリプトを再実行して高精細版を890×1800へ戻すことも禁止する。QAレポートへ方式と処理前後の寸法を残す。`cargo xtask sync-characters` は高精細レイヤーが1780×3600未満なら失敗させる。
+- **通常2Dの制作正本と実行画像を分離する。** `characters/<id>/layers/*.png` は上書き・削除せず、`scripts/build-character-animations.py` だけを正規入口として `runtime-layers/*.webp` と `frames/<世代>/*.webp` のlossless WebPを生成する。保存直後に復号した寸法・RGBAを変換元と完全一致させ、1画素でも違えば停止する。`cargo xtask sync-characters` は制作正本を検証してから配信コピーの `layers/` だけを除外し、manifestの `runtimeLayers` と `framePaths` が指すWebPを残す。利用者が追加済みのPNGパックは後方互換で読み続ける。lossy WebPは画質判断を分離した別PRでのみ扱う。
 - Gemini、Nano Bananaなどブラウザの画像生成・編集サービスは、ユーザーが対象に指定した画像をその作業目的へアップロードして利用してよい。構図変更、ポーズ変更、局所修正、再生成には利用できるが、拡大・超解像・hires-fixには利用しない。元画像と承認済み成果物を上書きせず、候補を別名で保存して比較する。拡大はPhotoshop「ディテールを保持 2.0」だけを許可する。
 - ユーザーが許可した場合、同一キャラクターのLive2D、通常2D、PicoAgent用素材を本人性・ポーズ・パーツ構造の参照として外部画像編集サービスへ添付してよい。利用後に、送信した素材、送信先、参照目的を報告する。関連のないプロジェクトファイルは送信しない。
 - 作業エージェント向けの再利用手順は `.agents/skills/<名前>/SKILL.md` を正本にする。Claude Code用の `.claude/skills/<名前>/SKILL.md` は同名の共通スキルを読むだけの薄い入口とし、手順を複製しない。キャラクター追加・再生成は `.agents/skills/rebuild-picoagent-character/SKILL.md` を使い、会話履歴から個別コマンドを組み直さない。
@@ -172,7 +173,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
-| `scripts/build-character-animations.py` | `characters/<id>/layers/` から連番アニメーションを生成し、`character.json` の `animations` / `assetVersion` を更新する |
+| `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |

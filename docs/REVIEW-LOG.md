@@ -11,6 +11,31 @@
 
 ---
 
+## 2026-08-18 — P1-12 同梱通常2Dのlossless WebP化
+
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-12。同ブランチのP1-19をPR #123で先に完了してから着手した。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P1 | `frames/`と`layers/`の大判PNGが配信用キャラ画像の大半を占める | 対応済み | 同梱通常2D 8体の実行フレーム120枚と実行レイヤー72枚をlossless WebPへ移行。対象は391,326,215 bytesから222,705,992 bytesへ168,620,223 bytes（43.1%）削減した |
+| 2 | 品質 | 符号化変更で透過縁・細部・透明画素のRGBが変わらないか | 対応済み | 192枚すべてを保存直後に再読込し、変換元と寸法・RGBAを完全一致検査する。制作正本`characters/*/layers/*.png`は上書き・削除していない |
+| 3 | 互換 | 利用者が追加済みのPNGパックを読めなくしないか | 対応済み | 同梱manifestは`runtimeLayers`でWebPを指定し、指定がない追加パックは従来の`layers/<名前>.png`へフォールバックする。アプリ共通パック検証もPNG／WebPの双方を通す |
+| 4 | 運用 | WebPの圧縮時間と再生成可能性 | 対応済み | Pillowのlossless `method=4`を採用。`method=6`はむぎ1体で5分を超えて完了しなかったため見送り、同じ復号画素を保つ`method=4`は初回44.858秒。退避復元と同一内容無変更を加えた最終実装の全8体再実行は87.625秒で、全ハッシュ一致・staging／退避残り0件 |
+| 5 | 表示 | WebP復号で描画欠けまたは起動遅延が出ないか | 対応済み | ヘッドレス実WebViewで8体×7形式＝56画面を厳格撮影し、警告0件、平均1,617ms、最大3,743ms。コンタクトシートと各8体の原寸画像を実際に開き、欠け・矩形背景・新しい輪郭劣化なしと判定 |
+
+同期後の`ui/assets/characters/`は435,298,457 bytesから266,678,860 bytesへ減り、配信コピー全体で
+168,619,597 bytes削減した。画像本体だけの削減は168,620,223 bytesで、差の626 bytesは同じPRで更新した
+`characters/README.md`の増分。`runtimeLayers`を持つ同梱パックは制作正本`layers/`を配信コピーから除外し、
+実行WebPだけを残す。q92などlossy変換は画質判断を伴うため、このPRへ混ぜず採用していない。
+
+検証: 生成直後のRGBA完全一致、全8体の再生成ハッシュ一致、`cargo xtask sync-characters`、`build-ui`、
+xtask全53件、本体lib 385件成功・長時間Whisper 1件だけ既定ignore、本体check、両Cargoのfmt・全target clippy
+警告0件、全JavaScript／MJS 12件の構文、`git diff --check`、実WebView 56画面の厳格撮影に成功した。
+配置失敗注入では旧実行世代を復元し、再実行成功時は同一内容を置換せずstaging／退避を回収した。
+新規WebP 192枚・222,705,992 bytesは、ステージ済みGit LFSポインタ、ローカルLFS実体サイズ、作業ツリーの
+SHA-256を全件照合して失敗0件。全履歴向け`git lfs fsck`は、P1-19で意図的にrenormalizeしなかった既存PNGを
+旧コミット上の通常Gitオブジェクトとして検出するため、このPRの合否には今回追加した192枚の個別照合を使った。
+
 ## 2026-08-18 — P1-19 キャラクター画像のLFS方針
 
 対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-19。
@@ -22,7 +47,7 @@
 
 既存画像を一括renormalizeせず、属性追加後に実際に更新した画像だけをLFSへ移す。GitHubのソースアーカイブは
 既定でLFSポインタだけになるため、開発正規経路はGit clone＋`git lfs pull`とする。配布物は別RepoのRelease資産で、
-この開発Repoのソースアーカイブを製品配布には使わない。P1-12はこの方針を前提に別PRで実施する。
+この開発Repoのソースアーカイブを製品配布には使わない。P1-12はこの方針を前提に別PRで実施した。
 
 検証: `git lfs version`、現行`git lfs ls-files` 0件、追跡画像件数・容量、GitHub Repo使用量を実測した。
 GitHub公式のLFS課金資料（https://docs.github.com/en/billing/concepts/product-billing/git-lfs ）で現行枠と
