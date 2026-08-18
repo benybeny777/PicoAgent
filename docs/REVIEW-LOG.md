@@ -13,7 +13,7 @@
 
 ## 2026-08-18 — P1-12 同梱通常2Dのlossless WebP化
 
-対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-12。同ブランチのP1-19をPR #123で先に完了してから着手した。
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-12。同ブランチのP1-19をPR #123で先に完了してから着手し、PR #124で対応した。
 
 | # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
 |---|---|---|---|---|
