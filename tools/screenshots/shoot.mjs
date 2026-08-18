@@ -26,6 +26,11 @@ const OUT = join(ROOT, "docs", "images");
 const SITE_OUT = join(ROOT, "distribution", "site", "assets");
 const TEMP_OUT = join(ROOT, "temp", "screenshots");
 const SITE_GALLERY = process.env.SHOOT_SITE_GALLERY === "1";
+const README_GALLERY = process.env.SHOOT_README_GALLERY === "1";
+if (SITE_GALLERY && README_GALLERY) {
+  throw new Error("SHOOT_SITE_GALLERYとSHOOT_README_GALLERYは同時に指定できません。");
+}
+const LIGHTWEIGHT_GALLERY = SITE_GALLERY || README_GALLERY;
 
 // Node をアプリの依存に戻さないため、playwright はグローバル導入を前提に動的解決する。
 // Windows の絶対パス（C:\...）はそのままだとパッケージ名扱いで解決に失敗するため file:// URL へ直す。
@@ -995,7 +1000,7 @@ async function record(page, { seconds, fps, step }) {
   await page.clock.pauseAt(new Date(now + 10000));
   const total = Math.round((seconds * 1000) / gap);
   for (let index = 0; index < total; index++) {
-    if (step) await step(page, index);
+    if (step) await step(page, index, fps);
     await page.clock.runFor(Math.round(gap));
     frames.push(await page.screenshot({ omitBackground: true }));
   }
@@ -1047,7 +1052,12 @@ async function shoot(name, {
 } = {}) {
   const page = await openScene(scene);
   if (prepare) await prepare(page);
-  const frames = await record(page, { seconds: SITE_GALLERY ? siteSeconds : seconds, fps, step });
+  const captureFps = LIGHTWEIGHT_GALLERY ? siteOutputFps : fps;
+  const frames = await record(page, {
+    seconds: LIGHTWEIGHT_GALLERY ? siteSeconds : seconds,
+    fps: captureFps,
+    step,
+  });
   let lipSyncFailure = "";
   if (verifyLipSync) {
     const mouthSeen = await page.evaluate(() => window.__galleryMouthSeen === true);
@@ -1067,14 +1077,16 @@ async function shoot(name, {
   const box = unionBounds(await Promise.all(sampled.map(png => bounds(png, 16))));
   if (!box) throw new Error(`不透明な領域がありません: ${name}`);
 
-  if (SITE_GALLERY) {
-    if (!siteOutputWidth) throw new Error(`LP用の出力条件がありません: ${name}`);
-    mkdirSync(SITE_OUT, { recursive: true });
+  if (LIGHTWEIGHT_GALLERY) {
+    if (!siteOutputWidth) throw new Error(`軽量一覧用の出力条件がありません: ${name}`);
+    const output = SITE_GALLERY ? SITE_OUT : OUT;
+    const label = SITE_GALLERY ? "LP" : "README";
+    mkdirSync(output, { recursive: true });
     await encodeAnimation(frames, box, {
-      fps, outputFps: siteOutputFps, width: siteOutputWidth, quality: siteQuality,
-      file: join(SITE_OUT, name),
+      fps: captureFps, outputFps: siteOutputFps, width: siteOutputWidth, quality: siteQuality,
+      file: join(output, name),
     });
-    console.log(`LP用撮影: ${name}（入力${frames.length}コマ / ${fps}fps → ${siteOutputFps}fps / ${siteOutputWidth}px）`);
+    console.log(`${label}用撮影: ${name}（${frames.length}コマ / ${siteOutputFps}fps / ${siteOutputWidth}px）`);
   } else {
     await encodeAnimation(frames, box, { fps, width: outputWidth, file: join(OUT, name) });
     console.log(`撮影: ${name}（${frames.length} コマ / ${fps} fps）`);
@@ -1259,12 +1271,12 @@ async function validateLive2dSdkModels() {
 const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // 対応キャラは録画中に実際の口開閉が1回以上起きたことまで検査する。
-// 公開用は実画面を2倍密度で描画してから960pxへ縮小する。480px撮影を960pxへ
-// 引き伸ばすのではなく、PNG／Live2Dとも高密度な実レンダリングを入力にする。
+// 高解像度の比較・保管を明示した場合は、実画面を2倍密度で描画してから960pxへ縮小する。
+// README／LP公開用はこの生描画から480pxへ直接書き出し、既存WebPを再圧縮しない。
 const GALLERY_SCENE = {
   layout: "pet", width: 900, height: 600, deviceScaleFactor: 2,
   seconds: 12, fps: 30, outputWidth: 960,
-  // LPは同じ生PNGから480px・16fpsへ直接書き出す。既存960pxの再エンコードは禁止。
+  // README／LPは同じ生PNGから480px・16fpsへ直接書き出す。既存WebPの再エンコードは禁止。
   siteSeconds: 6, siteOutputWidth: 480, siteOutputFps: 16, siteQuality: 50, voice: true,
 };
 
@@ -1283,16 +1295,16 @@ const GALLERY_TOUR = [
   [10400, "gaze-right"],
   [11400, "idle"],
 ];
-const SITE_GALLERY_TOUR = [
+const LIGHTWEIGHT_GALLERY_TOUR = [
   [4800, "thinking"],
   [5600, "idle"],
 ];
 
 // 毎コマ呼んで構わない。`setAnimation()` は同じ状態なら早期 return するので、
 // 読み上げ終了でアプリ側が idle へ戻しても次のコマで巡回中の状態へ復帰する。
-const galleryStep = async (page, index) => {
-  const elapsedMs = (index * 1000) / GALLERY_SCENE.fps;
-  const tour = SITE_GALLERY ? SITE_GALLERY_TOUR : GALLERY_TOUR;
+const galleryStep = async (page, index, captureFps = GALLERY_SCENE.fps) => {
+  const elapsedMs = (index * 1000) / captureFps;
+  const tour = LIGHTWEIGHT_GALLERY ? LIGHTWEIGHT_GALLERY_TOUR : GALLERY_TOUR;
   const current = tour.filter(([at]) => elapsedMs >= at).pop();
   // SHOOT_DEBUG_MOTION=1 で、実際に適用された data-motion を毎コマ出す
   // （巡回を足しても「切り替わったつもり」で撮れてしまうのを防ぐ）。
@@ -1385,8 +1397,8 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     layout: "stream",
     width: 1920,
     height: 1080,
-    // 配信画面はフルHDのネイティブ描画から960pxへ縮小すれば
-    // 引き伸ばしにならない。2倍密度の3840px全画面キャプチャは不要な負荷を避ける。
+    // 配信画面はフルHDのネイティブ描画から目的の幅へ縮小する。
+    // 2倍密度の3840px全画面キャプチャは不要な負荷を避ける。
     deviceScaleFactor: 1,
     characterId: id,
     reply,
@@ -1408,6 +1420,10 @@ const SITE_GALLERY_IDS = new Set([
 const SITE_GALLERY_FILES = new Set([
   ...[...SITE_GALLERY_IDS].map(id => `character-${id}.webp`),
   ...[...SITE_GALLERY_IDS].map(id => `character-${id}-stream.webp`),
+]);
+const README_GALLERY_FILES = new Set([
+  ...GALLERY.map(([id]) => `character-${id}.webp`),
+  ...GALLERY.map(([id]) => `character-${id}-stream.webp`),
 ]);
 
 // ---------------------------------------------------------------- 撮る絵の一覧
@@ -1448,11 +1464,14 @@ const only = process.argv.slice(2);
 const skipped = [];
 let failed = 0;
 
-if (SITE_GALLERY && only.some(name => !name.startsWith("character-"))) {
-  throw new Error("SHOOT_SITE_GALLERY=1 は character-*.webp だけを対象にしてください。");
+if (LIGHTWEIGHT_GALLERY && only.some(name => !name.startsWith("character-"))) {
+  throw new Error("軽量一覧モードは character-*.webp だけを対象にしてください。");
 }
 if (SITE_GALLERY && only.some(name => !SITE_GALLERY_FILES.has(name))) {
   throw new Error("販売対象または公式Live2D動作例ではないキャラクターをLPへ出力しようとしました。");
+}
+if (README_GALLERY && only.some(name => !README_GALLERY_FILES.has(name))) {
+  throw new Error("README一覧にないキャラクターを書き出そうとしました。");
 }
 
 if (process.env.SHOOT_CHARACTER_MATRIX) {
@@ -1569,6 +1588,7 @@ if (wantsLive2d) await validateLive2dSdkModels();
 
 for (const [name, { requires = [], ...options }] of Object.entries(SHOTS)) {
   if (SITE_GALLERY && !SITE_GALLERY_FILES.has(name)) continue;
+  if (README_GALLERY && !README_GALLERY_FILES.has(name)) continue;
   if (only.length && !only.includes(name)) continue;
   const missing = requires.filter(path => !existsSync(join(ROOT, path)));
   if (missing.length) {
@@ -1597,9 +1617,21 @@ if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
   const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-noa.webp", "character-photoreal-prototype.webp"];
   const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
-  if (bytes > 15 * 1024 * 1024 || indexBytes > 5 * 1024 * 1024) {
-    throw new Error(`LP画像容量が上限を超えています: キャラ一覧${(bytes / 1024 / 1024).toFixed(2)}MiB / トップ${(indexBytes / 1024 / 1024).toFixed(2)}MiB`);
+  if (bytes > 15_000_000 || indexBytes > 5_000_000) {
+    throw new Error(`LP画像容量が上限を超えています: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
   }
-  console.log(`LP画像容量: キャラ一覧${(bytes / 1024 / 1024).toFixed(2)}MiB / トップ${(indexBytes / 1024 / 1024).toFixed(2)}MiB`);
+  console.log(`LP画像容量: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
+}
+if (README_GALLERY && !only.length && !failed && !skipped.length) {
+  const sizes = await Promise.all([...README_GALLERY_FILES].map(async name => ({
+    name,
+    size: (await readFile(join(OUT, name))).length,
+  })));
+  const total = sizes.reduce((sum, item) => sum + item.size, 0);
+  const largest = sizes.reduce((left, right) => left.size >= right.size ? left : right);
+  if (total > 20_000_000 || largest.size > 2_000_000) {
+    throw new Error(`README画像容量が上限を超えています: 合計${(total / 1_000_000).toFixed(2)}MB / 最大${(largest.size / 1_000_000).toFixed(2)}MB（${largest.name}）`);
+  }
+  console.log(`README画像容量: 合計${(total / 1_000_000).toFixed(2)}MB / 最大${(largest.size / 1_000_000).toFixed(2)}MB（${largest.name}）`);
 }
 if (failed) process.exitCode = 1;

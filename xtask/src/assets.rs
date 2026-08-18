@@ -2,16 +2,40 @@
 //
 // 旧 `scripts/sync-characters.mjs` / `build-ui-dist.mjs` / `stop-stale.mjs` の置き換え。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
+use image::codecs::webp::WebPEncoder;
+use image::imageops::FilterType;
+use image::{ExtendedColorType, ImageReader};
 use sha2::{Digest, Sha256};
 
-use crate::util::{list_files, log, repo_root, sync_dir, sync_dir_with_equivalence, warn};
+use crate::util::{
+    list_files, log, repo_root, sync_dir, sync_dir_with_equivalence, warn, write_atomic,
+};
+
+const DELIVERY_IMAGE_POLICY: &str = "lanczos3-webp-lossless-v1";
+const DELIVERY_IMAGE_MAX_HEIGHT: u32 = 1800;
+
+#[derive(Clone, Debug)]
+struct DeliveryImage {
+    character_id: String,
+    source: PathBuf,
+    relative: PathBuf,
+    width: u32,
+    height: u32,
+    reusable: bool,
+}
+
+#[derive(Default)]
+struct DeliveryPlan {
+    by_source: HashMap<PathBuf, DeliveryImage>,
+    desired_metadata: HashMap<String, Option<serde_json::Value>>,
+}
 
 /// ルートの `characters/`（正本）を webview 配信先 `ui/assets/characters/` へ同期する。
 ///
@@ -35,6 +59,9 @@ pub fn sync_characters_with_force(force: bool) -> Result<()> {
     let unfetched = unfetched_live2d_characters(&src)?;
     validate_character_index(&src)?;
     let runtime_layer_sources = validate_character_sources(&src, &|id| {
+        !unfetched.iter().any(|unfetched_id| unfetched_id == id)
+    })?;
+    let delivery_plan = build_delivery_plan(&src, &dest, &|id| {
         !unfetched.iter().any(|unfetched_id| unfetched_id == id)
     })?;
     if let Some(parent) = dest.parent() {
@@ -62,7 +89,7 @@ pub fn sync_characters_with_force(force: bool) -> Result<()> {
                     .is_some_and(|name| unfetched.iter().any(|id| id == name))
         },
         force,
-        &character_manifests_equivalent,
+        &|source, target| sync_files_equivalent(source, target, &delivery_plan),
     )?;
     if !unfetched.is_empty() {
         drop_characters_from_index(&dest, &unfetched)?;
@@ -75,7 +102,8 @@ pub fn sync_characters_with_force(force: bool) -> Result<()> {
             ),
         );
     }
-    let changed_characters = changed_character_ids(&dest, &stats.changed_paths);
+    let mut changed_characters = changed_character_ids(&dest, &stats.changed_paths);
+    changed_characters.extend(apply_delivery_plan(&dest, &delivery_plan)?);
     stamp_character_asset_versions(&dest, Some(&changed_characters))?;
     log(
         "sync-characters",
@@ -185,7 +213,7 @@ fn validate_character_sources(src: &Path, include: &dyn Fn(&str) -> bool) -> Res
     Ok(runtime_layer_sources)
 }
 
-/// 自動版以外が同じmanifestは、配信先の自動版を保つ。
+/// 自動版と配信用画像情報以外が同じmanifestは、配信先の生成情報を保つ。
 fn character_manifests_equivalent(source: &Path, target: &Path) -> Result<bool> {
     if source.file_name().and_then(|name| name.to_str()) != Some("character.json") {
         return Ok(false);
@@ -207,13 +235,348 @@ fn character_manifests_equivalent(source: &Path, target: &Path) -> Result<bool> 
     {
         return Ok(false);
     }
-    source_manifest
-        .as_object_mut()
-        .map(|object| object.remove("assetVersion"));
-    target_manifest
-        .as_object_mut()
-        .map(|object| object.remove("assetVersion"));
+    for manifest in [&mut source_manifest, &mut target_manifest] {
+        if let Some(object) = manifest.as_object_mut() {
+            object.remove("assetVersion");
+            object.remove("deliveryImages");
+        }
+    }
     Ok(source_manifest == target_manifest)
+}
+
+fn sync_files_equivalent(source: &Path, target: &Path, plan: &DeliveryPlan) -> Result<bool> {
+    if character_manifests_equivalent(source, target)? {
+        return Ok(true);
+    }
+    let Some(image) = plan.by_source.get(source) else {
+        return Ok(false);
+    };
+    Ok(image.reusable && delivery_image_matches(target, image.width, image.height)?)
+}
+
+/// 高精細な制作正本から、WebViewが実際に使う寸法の配信用コピーを計画する。
+/// 正本manifestには生成情報を書かず、配信先のmanifestだけへ元画像ハッシュを残す。
+fn build_delivery_plan(
+    src: &Path,
+    dest: &Path,
+    include: &dyn Fn(&str) -> bool,
+) -> Result<DeliveryPlan> {
+    let mut plan = DeliveryPlan::default();
+    let mut character_dirs = fs::read_dir(src)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("character.json").is_file())
+        .collect::<Vec<_>>();
+    character_dirs.sort();
+
+    for character_dir in character_dirs {
+        let Some(id) = character_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if !include(&id) {
+            continue;
+        }
+        plan.desired_metadata.insert(id.clone(), None);
+        let manifest_path = character_dir.join("character.json");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+        if manifest
+            .get("animationQualityMode")
+            .and_then(serde_json::Value::as_str)
+            != Some("sharp-expression")
+        {
+            continue;
+        }
+
+        let target_manifest = dest
+            .join(&id)
+            .join("character.json")
+            .is_file()
+            .then(|| fs::read_to_string(dest.join(&id).join("character.json")))
+            .transpose()?
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        let mut paths = referenced_delivery_images(&manifest)?;
+        paths.sort();
+        paths.dedup();
+        let mut hashes = serde_json::Map::new();
+
+        for relative in paths {
+            let source = character_dir.join(&relative);
+            if !source.is_file() {
+                bail!("配信用画像の正本が見つかりません: {}", source.display());
+            }
+            let (source_width, source_height) = image_dimensions(&source)
+                .with_context(|| format!("画像寸法を読めません: {}", source.display()))?;
+            if source_height <= DELIVERY_IMAGE_MAX_HEIGHT {
+                continue;
+            }
+            if source.extension().and_then(|extension| extension.to_str()) != Some("webp") {
+                bail!(
+                    "高精細な実行画像はlossless WebPにしてください: {}",
+                    source.display()
+                );
+            }
+            let width = ((u64::from(source_width) * u64::from(DELIVERY_IMAGE_MAX_HEIGHT)
+                + u64::from(source_height) / 2)
+                / u64::from(source_height)) as u32;
+            let source_hash = file_sha256(&source)?;
+            let key = relative.to_string_lossy().replace('\\', "/");
+            hashes.insert(key.clone(), serde_json::Value::String(source_hash.clone()));
+            let target = dest.join(&id).join(&relative);
+            let reusable = target_manifest.as_ref().is_some_and(|existing| {
+                existing.get("deliveryImages").is_some_and(|delivery| {
+                    delivery.get("policy").and_then(serde_json::Value::as_str)
+                        == Some(DELIVERY_IMAGE_POLICY)
+                        && delivery
+                            .get("maxHeight")
+                            .and_then(serde_json::Value::as_u64)
+                            == Some(u64::from(DELIVERY_IMAGE_MAX_HEIGHT))
+                        && delivery
+                            .get("sources")
+                            .and_then(|sources| sources.get(&key))
+                            .and_then(serde_json::Value::as_str)
+                            == Some(source_hash.as_str())
+                })
+            }) && delivery_image_matches(&target, width, DELIVERY_IMAGE_MAX_HEIGHT)?;
+            plan.by_source.insert(
+                source.clone(),
+                DeliveryImage {
+                    character_id: id.clone(),
+                    source,
+                    relative,
+                    width,
+                    height: DELIVERY_IMAGE_MAX_HEIGHT,
+                    reusable,
+                },
+            );
+        }
+
+        if !hashes.is_empty() {
+            plan.desired_metadata.insert(
+                id,
+                Some(serde_json::json!({
+                    "policy": DELIVERY_IMAGE_POLICY,
+                    "maxHeight": DELIVERY_IMAGE_MAX_HEIGHT,
+                    "sources": hashes,
+                })),
+            );
+        }
+    }
+    Ok(plan)
+}
+
+fn referenced_delivery_images(manifest: &serde_json::Value) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    if let Some(layers) = manifest
+        .get("runtimeLayers")
+        .and_then(serde_json::Value::as_object)
+    {
+        for value in layers.values() {
+            let relative = value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("runtimeLayersのパスが文字列ではありません"))?;
+            paths.push(safe_delivery_path(relative)?);
+        }
+    }
+    if let Some(animations) = manifest
+        .get("animations")
+        .and_then(serde_json::Value::as_object)
+    {
+        for animation in animations.values() {
+            if let Some(frame_paths) = animation
+                .get("framePaths")
+                .and_then(serde_json::Value::as_array)
+            {
+                for value in frame_paths {
+                    let relative = value.as_str().ok_or_else(|| {
+                        anyhow::anyhow!("animations.framePathsのパスが文字列ではありません")
+                    })?;
+                    paths.push(safe_delivery_path(relative)?);
+                }
+            }
+        }
+    }
+    Ok(paths)
+}
+
+fn safe_delivery_path(relative: &str) -> Result<PathBuf> {
+    let path = PathBuf::from(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        bail!("配信用画像は安全な相対パスにしてください: {relative}");
+    }
+    Ok(path)
+}
+
+fn image_dimensions(path: &Path) -> Result<(u32, u32)> {
+    Ok(ImageReader::open(path)?
+        .with_guessed_format()?
+        .into_dimensions()?)
+}
+
+fn file_sha256(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn delivery_image_matches(path: &Path, width: u32, height: u32) -> Result<bool> {
+    if !path.is_file() || !is_lossless_webp(path)? {
+        return Ok(false);
+    }
+    Ok(image_dimensions(path).is_ok_and(|dimensions| dimensions == (width, height)))
+}
+
+fn write_delivery_image(source: &Path, target: &Path, width: u32, height: u32) -> Result<()> {
+    let decoded = ImageReader::open(source)?
+        .with_guessed_format()?
+        .decode()?
+        .to_rgba8();
+    let resized = image::imageops::resize(&decoded, width, height, FilterType::Lanczos3);
+    let mut encoded = Vec::new();
+    WebPEncoder::new_lossless(&mut encoded).encode(
+        resized.as_raw(),
+        width,
+        height,
+        ExtendedColorType::Rgba8,
+    )?;
+    write_atomic(target, &encoded)
+}
+
+/// 計画した画像だけを配信先で縮小し、正本ハッシュを配信manifestへ記録する。
+fn apply_delivery_plan(dest: &Path, plan: &DeliveryPlan) -> Result<HashSet<String>> {
+    // 元画像ハッシュを先に記録する。途中中断後も、寸法と形式まで検証済みの画像だけを
+    // 次回再利用でき、未生成分は正本コピーのままなので必ず再生成される。
+    let mut changed = apply_delivery_metadata(dest, plan)?;
+    let mut source_size = 0_u64;
+    let mut images = plan.by_source.values().cloned().collect::<Vec<_>>();
+    images.sort_by(|left, right| {
+        (&left.character_id, &left.relative).cmp(&(&right.character_id, &right.relative))
+    });
+
+    let mut pending = Vec::new();
+    for image in &images {
+        let target = dest.join(&image.character_id).join(&image.relative);
+        source_size += fs::metadata(&image.source)?.len();
+        if !(image.reusable && delivery_image_matches(&target, image.width, image.height)?) {
+            pending.push(image.clone());
+        }
+    }
+    let converted = pending.len();
+    changed.extend(convert_delivery_images(dest, pending)?);
+    let target_size = images.iter().try_fold(0_u64, |total, image| {
+        Ok::<_, anyhow::Error>(
+            total + fs::metadata(dest.join(&image.character_id).join(&image.relative))?.len(),
+        )
+    })?;
+
+    if !plan.by_source.is_empty() {
+        log(
+            "sync-characters",
+            format!(
+                "配信用画像{}件を確認しました（再生成{}件、正本{:.2}MB -> 配信{:.2}MB）",
+                plan.by_source.len(),
+                converted,
+                source_size as f64 / 1_000_000.0,
+                target_size as f64 / 1_000_000.0
+            ),
+        );
+    }
+    Ok(changed)
+}
+
+fn convert_delivery_images(dest: &Path, pending: Vec<DeliveryImage>) -> Result<HashSet<String>> {
+    if pending.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let workers = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(4)
+        .min(pending.len());
+    let mut chunks = vec![Vec::new(); workers];
+    for (index, image) in pending.into_iter().enumerate() {
+        chunks[index % workers].push(image);
+    }
+    let results = std::thread::scope(|scope| {
+        chunks
+            .into_iter()
+            .map(|chunk| {
+                scope.spawn(move || -> Result<Vec<String>> {
+                    let mut changed = Vec::new();
+                    for image in chunk {
+                        let target = dest.join(&image.character_id).join(&image.relative);
+                        write_delivery_image(&image.source, &target, image.width, image.height)?;
+                        if !delivery_image_matches(&target, image.width, image.height)? {
+                            bail!("配信用画像の検証に失敗しました: {}", target.display());
+                        }
+                        changed.push(image.character_id);
+                    }
+                    Ok(changed)
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|handle| handle.join())
+            .collect::<Vec<_>>()
+    });
+    let mut changed = HashSet::new();
+    for result in results {
+        let ids =
+            result.map_err(|_| anyhow::anyhow!("配信用画像の変換スレッドが異常終了しました"))??;
+        changed.extend(ids);
+    }
+    Ok(changed)
+}
+
+fn apply_delivery_metadata(dest: &Path, plan: &DeliveryPlan) -> Result<HashSet<String>> {
+    let mut changed = HashSet::new();
+    let mut metadata = plan.desired_metadata.iter().collect::<Vec<_>>();
+    metadata.sort_by(|left, right| left.0.cmp(right.0));
+    for (id, desired) in metadata {
+        let manifest_path = dest.join(id).join("character.json");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+        let current = manifest.get("deliveryImages");
+        if current == desired.as_ref() {
+            continue;
+        }
+        let object = manifest
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("character.jsonのルートがobjectではありません"))?;
+        match desired {
+            Some(value) => {
+                object.insert("deliveryImages".to_string(), value.clone());
+            }
+            None => {
+                object.remove("deliveryImages");
+            }
+        }
+        write_atomic(
+            &manifest_path,
+            format!("{}\n", serde_json::to_string_pretty(&manifest)?).as_bytes(),
+        )?;
+        changed.insert(id.clone());
+    }
+    Ok(changed)
 }
 
 fn changed_character_ids(dest: &Path, paths: &[PathBuf]) -> HashSet<String> {
@@ -322,6 +685,7 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
     let index_text = format!("{}\n", serde_json::to_string_pretty(&index)?);
     let included_set = included.iter().cloned().collect::<HashSet<_>>();
     let runtime_layer_sources = validate_character_sources(&src, &|id| included_set.contains(id))?;
+    let delivery_plan = build_delivery_plan(&src, &dest, &|id| included_set.contains(id))?;
     let stats = sync_dir_with_equivalence(
         &src,
         &dest,
@@ -343,10 +707,11 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
                     .is_some_and(|id| !included_set.contains(id))
         },
         false,
-        &character_manifests_equivalent,
+        &|source, target| sync_files_equivalent(source, target, &delivery_plan),
     )?;
     fs::write(dest.join("index.json"), index_text)?;
-    let changed_characters = changed_character_ids(&dest, &stats.changed_paths);
+    let mut changed_characters = changed_character_ids(&dest, &stats.changed_paths);
+    changed_characters.extend(apply_delivery_plan(&dest, &delivery_plan)?);
     stamp_character_asset_versions(&dest, Some(&changed_characters))?;
     log(
         "sync-characters",
@@ -1087,12 +1452,33 @@ mod tests {
     use std::fs;
 
     use super::{
-        character_content_version, character_manifests_equivalent, content_version,
-        drop_characters_from_index, is_character_source_only, remove_beta_badge,
-        remove_source_layers_from_runtime_copy, rewrite_asset_refs, stamp_asset_versions,
-        stamp_character_asset_versions, unfetched_live2d_characters,
+        apply_delivery_plan, build_delivery_plan, character_content_version,
+        character_manifests_equivalent, content_version, delivery_image_matches,
+        drop_characters_from_index, file_sha256, image_dimensions, is_character_source_only,
+        remove_beta_badge, remove_source_layers_from_runtime_copy, rewrite_asset_refs,
+        stamp_asset_versions, stamp_character_asset_versions, unfetched_live2d_characters,
         validate_character_asset_generation,
     };
+
+    fn write_test_webp(path: &std::path::Path, width: u32, height: u32, seed: u8) {
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                pixels.extend_from_slice(&[
+                    (x * 40 + 20) as u8,
+                    (y % 251) as u8,
+                    180_u8.wrapping_add(seed),
+                    if y % 3 == 0 { 64 } else { 255 },
+                ]);
+            }
+        }
+        let mut encoded = Vec::new();
+        image::codecs::webp::WebPEncoder::new_lossless(&mut encoded)
+            .encode(&pixels, width, height, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, encoded).unwrap();
+    }
 
     #[test]
     fn 制作用素材は配信コピーから外す() {
@@ -1289,8 +1675,118 @@ mod tests {
         assert!(!character_manifests_equivalent(&source, &target).unwrap());
         fs::write(&target, r#"{"id":"sample","assetVersion":"auto-1234"}"#).unwrap();
         assert!(character_manifests_equivalent(&source, &target).unwrap());
+        fs::write(
+            &target,
+            r#"{"id":"sample","assetVersion":"auto-1234","deliveryImages":{"policy":"test"}}"#,
+        )
+        .unwrap();
+        assert!(character_manifests_equivalent(&source, &target).unwrap());
         fs::write(&target, r#"{"id":"changed","assetVersion":"auto-1234"}"#).unwrap();
         assert!(!character_manifests_equivalent(&source, &target).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 高精細な正本を保ったまま配信用webpだけを縮小する() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-delivery-image-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let src = root.join("characters");
+        let dest = root.join("ui/assets/characters");
+        let source_character = src.join("sample");
+        let target_character = dest.join("sample");
+        fs::create_dir_all(&source_character).unwrap();
+        fs::create_dir_all(&target_character).unwrap();
+        let manifest = r#"{
+          "id":"sample",
+          "animationQualityMode":"sharp-expression",
+          "runtimeLayers":{"base":"runtime/base.webp"},
+          "animations":{"idle":{"framePaths":["runtime/base.webp"]}}
+        }"#;
+        fs::write(source_character.join("character.json"), manifest).unwrap();
+        fs::write(target_character.join("character.json"), manifest).unwrap();
+        let source_image = source_character.join("runtime/base.webp");
+        let target_image = target_character.join("runtime/base.webp");
+        write_test_webp(&source_image, 2, 1801, 0);
+        fs::create_dir_all(target_image.parent().unwrap()).unwrap();
+        fs::copy(&source_image, &target_image).unwrap();
+        let source_hash = file_sha256(&source_image).unwrap();
+
+        let plan = build_delivery_plan(&src, &dest, &|_| true).unwrap();
+        assert_eq!(plan.by_source.len(), 1);
+        assert!(!plan.by_source.values().next().unwrap().reusable);
+        let changed = apply_delivery_plan(&dest, &plan).unwrap();
+        assert_eq!(changed, ["sample".to_string()].into_iter().collect());
+        assert_eq!(image_dimensions(&source_image).unwrap(), (2, 1801));
+        assert_eq!(file_sha256(&source_image).unwrap(), source_hash);
+        assert!(delivery_image_matches(&target_image, 2, 1800).unwrap());
+        let alpha = image::ImageReader::open(&target_image)
+            .unwrap()
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgba8()
+            .pixels()
+            .map(|pixel| pixel.0[3])
+            .collect::<Vec<_>>();
+        assert!(alpha.iter().any(|value| *value < 255));
+        assert!(alpha.contains(&255));
+        let target_manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(target_character.join("character.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            target_manifest["deliveryImages"]["policy"].as_str(),
+            Some(super::DELIVERY_IMAGE_POLICY)
+        );
+        assert!(serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(source_character.join("character.json")).unwrap()
+        )
+        .unwrap()
+        .get("deliveryImages")
+        .is_none());
+
+        let reusable = build_delivery_plan(&src, &dest, &|_| true).unwrap();
+        assert!(reusable.by_source.values().next().unwrap().reusable);
+        assert!(apply_delivery_plan(&dest, &reusable).unwrap().is_empty());
+        write_test_webp(&source_image, 2, 1801, 1);
+        let changed_source = build_delivery_plan(&src, &dest, &|_| true).unwrap();
+        assert!(!changed_source.by_source.values().next().unwrap().reusable);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 通常品質と配信上限内の画像は縮小しない() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-delivery-image-skip-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&root).ok();
+        let src = root.join("characters");
+        let dest = root.join("ui/assets/characters");
+        for (id, quality, height) in [
+            ("normal", "standard", 1801),
+            ("within-limit", "sharp-expression", 1800),
+        ] {
+            let character = src.join(id);
+            fs::create_dir_all(&character).unwrap();
+            fs::write(
+                character.join("character.json"),
+                format!(
+                    r#"{{"id":"{id}","animationQualityMode":"{quality}","animations":{{"idle":{{"framePaths":["frame.webp"]}}}}}}"#
+                ),
+            )
+            .unwrap();
+            write_test_webp(&character.join("frame.webp"), 2, height, 0);
+        }
+        let plan = build_delivery_plan(&src, &dest, &|_| true).unwrap();
+        assert!(plan.by_source.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 
