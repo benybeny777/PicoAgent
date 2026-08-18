@@ -5,7 +5,7 @@
 - 最終更新: 2026-08-19
 - ブランチ: `optimize/character-delivery-assets`
 - 目的: Claude横断レビューE/Fの配信用キャラ画像とREADME動画を軽量化する
-- 対応PR: 作成後に更新
+- 対応PR: #136
 
 ## 未処理の残件（次に作業する人はここから始める）
 
