@@ -15,8 +15,10 @@ const CONNECT_TIMEOUT_SECS: u64 = 10;
 /// 接続後に1バイトも届かない状態の上限。長時間ストリーム全体の時間は制限しない。
 const READ_TIMEOUT_SECS: u64 = 120;
 const MAX_SERVICE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SERVICE_RESPONSE_LABEL: &str = "8.39 MB";
 
-/// 接続プールを共有する標準クライアント。個別の待ち時間はRequestBuilder::timeoutで指定する。
+/// 専用のUser-Agent、DNS固定、リダイレクト制御等が不要な経路で接続プールを共有する標準クライアント。
+/// 個別の待ち時間はRequestBuilder::timeoutで指定する。
 pub fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -133,8 +135,7 @@ pub async fn response_text(response: reqwest::Response) -> Result<String, String
     {
         if bytes.len().saturating_add(chunk.len()) > MAX_SERVICE_RESPONSE_BYTES {
             return Err(format!(
-                "外部サービスの応答本文が上限（{} MiB）を超えました",
-                MAX_SERVICE_RESPONSE_BYTES / 1024 / 1024
+                "外部サービスの応答本文が上限（{MAX_SERVICE_RESPONSE_LABEL}）を超えました"
             ));
         }
         bytes.extend_from_slice(&chunk);
@@ -237,8 +238,37 @@ mod tests {
 /// ガードを数えるときに見落とす。実際にこのガードだけ `tests` に紛れていた）。
 #[cfg(test)]
 mod guard {
+    fn client_builder_timeout_violations(text: &str) -> Vec<(usize, String)> {
+        const BUILDER: &str = "Client::builder()";
+        let mut violations = Vec::new();
+        let mut search_start = 0;
+
+        while let Some(relative_start) = text[search_start..].find(BUILDER) {
+            let start = search_start + relative_start;
+            let after_builder = &text[start + BUILDER.len()..];
+            let line = text[..start].bytes().filter(|byte| *byte == b'\n').count() + 1;
+            let Some(relative_end) = after_builder.find(".build(") else {
+                violations.push((line, "対応する.build()が見つかりません".to_string()));
+                break;
+            };
+            let chain = &after_builder[..relative_end];
+            let has_total_timeout = chain.contains(".timeout(");
+            let has_stall_timeouts =
+                chain.contains(".connect_timeout(") && chain.contains(".read_timeout(");
+            if !has_total_timeout && !has_stall_timeouts {
+                violations.push((
+                    line,
+                    "要求全体timeout、または接続＋無通信timeoutがありません".to_string(),
+                ));
+            }
+            search_start = start + BUILDER.len() + relative_end + ".build(".len();
+        }
+
+        violations
+    }
+
     #[test]
-    fn 共有外の既定クライアントを増やさない() {
+    fn httpクライアントは共有または有限待ち時間つきで構築する() {
         // `reqwest::get()` は既定クライアントを毎回作り直すうえ待ち時間も付かないため、
         // `Client::new()` と同じ違反として検出する（この穴を通って ollama の
         // list_models が待ち時間なしのまま残っていた）。
@@ -259,6 +289,45 @@ mod guard {
             "標準HTTPはtools::http::client()を共有してください:\n{}",
             violations.join("\n")
         );
+
+        let builder_violations: Vec<String> = crate::guard_scan::all_sources()
+            .into_iter()
+            .flat_map(|source| {
+                // このファイルのガード用fixture文字列は実装ではない。共有クライアント本体は
+                // 最初のcfg(test)より前にあるため、そこまでは他ファイルと同じ規則で検査する。
+                let implementation = if source.path.ends_with("tools/http.rs") {
+                    source.text.split("#[cfg(test)]").next().unwrap_or("")
+                } else {
+                    source.text.as_str()
+                };
+                client_builder_timeout_violations(implementation)
+                    .into_iter()
+                    .map(|(line, reason)| format!("{}:{line} ({reason})", source.path.display()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert!(
+            builder_violations.is_empty(),
+            "個別HTTPクライアントには要求全体timeout、または長時間処理向けの接続＋無通信timeoutを設定してください:\n{}",
+            builder_violations.join("\n")
+        );
+    }
+
+    #[test]
+    fn 個別builderの上限検査は抜けを検出する() {
+        assert!(
+            client_builder_timeout_violations("Client::builder().timeout(duration).build()")
+                .is_empty()
+        );
+        assert!(client_builder_timeout_violations(
+            "reqwest::Client::builder().connect_timeout(a).read_timeout(b).build()"
+        )
+        .is_empty());
+        let violations = client_builder_timeout_violations(
+            "reqwest::Client::builder().user_agent(\"test\").build()",
+        );
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].1.contains("timeout"));
     }
 
     #[test]

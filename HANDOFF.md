@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-18
-- ブランチ: `feat/xtask-verify`
-- 目的: ClaudeブランチのP1-7を完了する
-- 対応PR: #126
+- ブランチ: `refactor/http-client-policy`
+- 目的: ClaudeブランチのP1-9を完了する
+- 対応PR: #127
 
 ## 未処理の残件（次に作業する人はここから始める）
 
@@ -36,6 +36,14 @@ PR #119から現行`main`で実在を確認したP0 2件・P1 6件は、すべ�
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-18、ClaudeブランチのP1-9は案Bを採用した。現行の個別`Client::builder()`は47ファイル・
+54箇所で、49箇所が要求全体timeout、長時間取得の5箇所が接続＋無通信timeoutを持つ。
+User-Agent、DNS固定・リダイレクト禁止、CDP、長時間ストリームの構成差が実在するため、標準経路は
+共有接続プール、固有構成は有限上限付き個別builderとして正式化した。全スキル・バックエンドを走査し、
+上限なしの個別builderを拒否する設計ガードを追加した。段階移行allowlistは残していない。HTTP対象6件と
+`cargo xtask verify`全19項目に成功し、本体libは377件成功・長時間Whisper 1件だけ既定ignore、
+xtaskは55件、追跡JavaScript／MJSは12件で失敗0だった。
 
 2026-08-18、ClaudeブランチのP1-7として`cargo xtask verify`を追加した。本体・xtaskの書式、
 全target静的解析、両テスト、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、
