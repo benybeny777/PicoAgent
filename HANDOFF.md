@@ -3,9 +3,9 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-18
-- ブランチ: `refactor/skill-owned-routing-prompts`
-- 目的: ClaudeブランチのP1-5／P1-6／P1-10を完了する
-- 対応PR: #125
+- ブランチ: `feat/xtask-verify`
+- 目的: ClaudeブランチのP1-7を完了する
+- 対応PR: 作成前
 
 ## 未処理の残件（次に作業する人はここから始める）
 
@@ -36,6 +36,13 @@ PR #119から現行`main`で実在を確認したP0 2件・P1 6件は、すべ�
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-18、ClaudeブランチのP1-7として`cargo xtask verify`を追加した。本体・xtaskの書式、
+全target静的解析、両テスト、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、
+末尾に失敗とスキップをまとめる。`node`が無い環境はJavaScript構文だけを明示スキップする。
+依存更新時と販売前の監査は従来どおり別に行う。このブランチで正規入口を実行し、全19項目が成功した。
+本体libは376件成功・長時間Whisper 1件だけ既定ignore、xtaskは55件、追跡JavaScript／MJSは12件で
+失敗0。本体・xtaskのfmt check、全target clippy、Git差分も同じ実行内で成功した。
 
 2026-08-18、ClaudeブランチのP1-5／P1-6／P1-10として、意図語彙を65スキルへ移し、優先度、
 引数組み立て、直接返却／資料差し込みの別も各`Tool`へ集約した。中央`TOOL_ROUTES`は空にし、
@@ -199,24 +206,15 @@ Claudeの事後レビューで、復元寸法の下限ずれ、起動中680×430
 
 ## 検証
 
-2026-08-13の事後レビューではxtask 39件、UI生成、全JS/MJS構文、PNGむぎの8形式操作マトリクス、差分検査に成功した。`src-tauri`の`cargo check`は2回ともエラー出力前の`build.rs`子プロセスで停止したため中断・回収しており、次回は停止原因を切り分けてlib test／clippyまで再実行する。
+PR前の一括ローカル検証は、次の1コマンドを使う。途中で失敗しても残りを実行し、末尾の失敗・
+スキップ一覧で未実行を区別する。
 
 ```powershell
-cargo test --lib --manifest-path src-tauri/Cargo.toml   # 全件成功すること
-cargo test --manifest-path xtask/Cargo.toml             # 全件成功すること
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
-cargo run --manifest-path xtask/Cargo.toml -- build-ui --release
-cargo run --manifest-path xtask/Cargo.toml -- release-check  # 販売前ブロッカー4件を正しく検出
-cargo audit --file src-tauri/Cargo.lock              # 既知脆弱性0件（情報警告は別途評価）
-cargo audit --file xtask/Cargo.lock
-cargo audit --file crates/picoagent-core/Cargo.lock
-git ls-files '*.js' '*.mjs' | ForEach-Object { node --check $_ }
-git diff --check
+cargo xtask verify
 ```
 
-テスト件数は変更のたびに増減するため、この文書には具体的な数を書かない（過去4回の点検で毎回ずれ、
-そのたびに直す作業が発生した）。件数を残したい場合は失敗0であることを見るほうが確実。
+依存更新時の`cargo audit`、販売前の`release-check`、配信UI生成、実画面QAは対象条件があるため、
+`verify`へ混ぜず各作業の正規手順で実行する。テスト件数は変更のたびに増減するため、この節では固定しない。
 
 失敗作のむぎLive2Dモデルと `mugi-live2d` パックは削除済み。むぎは2D専用で、Live2Dの表示例とSDK検証はひよりを使う。
 

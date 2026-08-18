@@ -20,6 +20,7 @@
 - **大きなファイル容量・配布容量・転送量は、一般的なMBまたはGBだけで見やすく書く。bytesを単独表示または併記せず、外部仕様がMiB／GiB表記の場合も10進のMB／GBへ換算する。**
 - **常に Codex / Claude（作業エージェント自身）の利用クレジット消費を最小化して作業する。** 不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
   - 検証コストの優先順位: まず `cargo check`（コンパイル）→ 必要なら `cargo test --lib`（ロジック）で済ませる。**GUI 起動（`cargo xtask dev`）・スクリーンショット・フルビルドは高コストなので最後の手段**とし、目視確認が本当に必要なときだけ、複数の確認をまとめて 1 回で行う。
+  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtaskの書式、全target静的解析、テスト、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
   - 編集はまとめて行い、**ビルド/テスト/起動は変更が出揃ってから最小回数**だけ実行する。同じ内容のビルド・テスト・起動・読み取りを繰り返さない。
   - `Cargo.toml` / `Cargo.lock` を変更したら `cargo audit --file <Cargo.lock>` で既知脆弱性を確認する。GitHub Actions は無料枠・請求制限による開始前失敗と通知の連発を避けるため使わない。依存更新時と販売前のローカル検証で監査し、保守終了などの情報警告と脆弱性を分けて評価して、対象OS・実行経路と見送り理由をレビュー記録へ残す。
   - **外部依存は原則として公式LTSまたは長期保守安定版を採用し、LTS相当が無ければ安定版latestを採用する。LLMモデルはLTS扱いにせず常に公式の最新安定版へ追従する。** Cargo・JavaScript・Python等のパッケージ、同梱アプリ、管理導入ツール、Webランタイム、音声・LLMモデルを毎月1日に`.agents/skills/audit-picoagent-dependencies/SKILL.md`の`all`で点検する。互換性、ライセンス、対象OS、再現可能なハッシュ固定の問題で旧版を維持する場合は理由と確認日を`docs/REVIEW-LOG.md`へ残す。
@@ -174,6 +175,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を `ui/assets/characters/` へ同期、`ui/` を `ui-dist/` へ配信ビルド、残存プロセス停止（いずれも dev/build 前に自動実行） |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
+| `xtask/src/verify.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
