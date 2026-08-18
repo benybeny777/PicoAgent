@@ -13,6 +13,66 @@ const YAHOO_CHART_BASE: &str = "https://query1.finance.yahoo.com/v8/finance/char
 
 pub struct MarketIndicesTool;
 
+fn parse_days(text: &str) -> Option<i64> {
+    let chars: Vec<char> = text.chars().collect();
+    for (index, character) in chars.iter().enumerate() {
+        if character.is_ascii_digit() {
+            continue;
+        }
+        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
+        if !unit_month && *character != '日' {
+            continue;
+        }
+        let mut cursor = index;
+        let mut number = String::new();
+        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
+            number.insert(0, chars[cursor - 1]);
+            cursor -= 1;
+        }
+        if let Ok(number) = number.parse::<i64>() {
+            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
+        }
+    }
+    None
+}
+
+fn direct_query(text: &str) -> Option<Value> {
+    let lower = text.to_lowercase();
+    let market_words = [
+        "日経平均", "日系平均", "nikkei", "n225", "topix", "トピックス", "ダウ", "dow",
+        "nasdaq", "ナスダック", "s&p", "sp500", "s&p500", "株価指数", "市場",
+    ];
+    if !market_words
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+    {
+        return None;
+    }
+    let symbol = if lower.contains("topix") || text.contains("トピックス") {
+        "topix"
+    } else if lower.contains("dow") || text.contains("ダウ") {
+        "dow"
+    } else if lower.contains("nasdaq") || text.contains("ナスダック") {
+        "nasdaq"
+    } else if lower.contains("s&p") || lower.contains("sp500") {
+        "sp500"
+    } else {
+        "nikkei225"
+    };
+    let chart = ["推移", "チャート", "グラフ", "trend"]
+        .iter()
+        .any(|word| lower.contains(word));
+    let mut args = serde_json::Map::new();
+    args.insert("symbol".to_string(), json!(symbol));
+    if chart {
+        args.insert("chart".to_string(), json!(true));
+        if let Some(days) = parse_days(text) {
+            args.insert("days".to_string(), json!(days));
+        }
+    }
+    Some(Value::Object(args))
+}
+
 fn sparkline(values: &[f64]) -> String {
     const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -73,6 +133,18 @@ fn format_time(timestamp: Option<i64>) -> String {
 impl Tool for MarketIndicesTool {
     fn name(&self) -> &'static str {
         "market_indices"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["日経平均", "日系平均", "nikkei", "topix", "トピックス", "ダウ", "nasdaq", "ナスダック", "s&p", "株価指数"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        1_000
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        direct_query(text).map(crate::tools::IntentInvocation::direct)
     }
 
     fn label(&self) -> &'static str {

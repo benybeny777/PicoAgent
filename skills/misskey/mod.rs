@@ -19,6 +19,10 @@ impl Tool for MisskeyTool {
         "misskey"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["misskey", "ミスキー", "ノート"]
+    }
+
     fn label(&self) -> &'static str {
         "Misskey"
     }

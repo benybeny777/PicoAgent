@@ -23,6 +23,10 @@ impl Tool for CommandJobTool {
         "command_job"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["バックグラウンド", "ジョブ", "job", "実行中の", "起動したまま", "ログを見せ", "様子を見"]
+    }
+
     fn label(&self) -> &'static str {
         "バックグラウンド実行の確認"
     }

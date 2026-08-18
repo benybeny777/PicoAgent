@@ -145,6 +145,10 @@ impl Tool for AskUserTool {
         "ask_user"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["どっち", "どれがいい", "選んで", "決めて", "おまかせ", "確認して"]
+    }
+
     fn label(&self) -> &'static str {
         "ユーザーに確認"
     }

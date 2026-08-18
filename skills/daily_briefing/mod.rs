@@ -19,6 +19,21 @@ impl Tool for DailyBriefingTool {
         "daily_briefing"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["おでかけ", "出かける", "外出", "持っていく", "出る前", "briefing"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        600
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        ["おでかけ", "出かける", "外出", "出る前", "持っていく"]
+            .iter()
+            .any(|word| text.contains(word))
+            .then(|| crate::tools::IntentInvocation::direct(json!({})))
+    }
+
     fn label(&self) -> &'static str {
         "おでかけ前チェック"
     }
@@ -67,4 +82,3 @@ impl Tool for DailyBriefingTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(DailyBriefingTool) } }
-

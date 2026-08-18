@@ -19,6 +19,10 @@ impl Tool for MastodonTool {
         "mastodon"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["mastodon", "マストドン"]
+    }
+
     fn label(&self) -> &'static str {
         "Mastodon"
     }

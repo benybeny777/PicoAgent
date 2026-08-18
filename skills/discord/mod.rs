@@ -19,6 +19,10 @@ impl Tool for DiscordTool {
         "discord_send_message"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["discord", "ディスコード"]
+    }
+
     fn label(&self) -> &'static str {
         "Discord送信"
     }

@@ -47,6 +47,10 @@ impl Tool for HttpApiTool {
         "http_api"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["api", "webhook", "http"]
+    }
+
     fn label(&self) -> &'static str {
         "汎用HTTP API"
     }

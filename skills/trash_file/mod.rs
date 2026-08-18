@@ -134,6 +134,10 @@ impl Tool for TrashFileTool {
         "trash_file"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["削除", "消して", "ゴミ箱", "捨てて", "ファイル削除", "フォルダ削除"]
+    }
+
     fn label(&self) -> &'static str {
         "ファイルをゴミ箱へ移動"
     }

@@ -83,6 +83,10 @@ impl Tool for AlarmTool {
         "alarm"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["アラーム", "目覚まし", "めざまし", "起こして", "起こし", "alarm", "wake", "何時に"]
+    }
+
     fn label(&self) -> &'static str {
         "目覚まし時計"
     }

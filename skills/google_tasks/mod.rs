@@ -19,6 +19,10 @@ impl Tool for GoogleTasksTool {
         "google_tasks"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["tasks", "タスク", "todo", "やること"]
+    }
+
     fn label(&self) -> &'static str {
         "Google Tasks"
     }

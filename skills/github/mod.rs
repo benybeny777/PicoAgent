@@ -21,6 +21,10 @@ impl Tool for GitHubTool {
         "github_issue"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["github", "issue", "イシュー"]
+    }
+
     fn label(&self) -> &'static str {
         "GitHub Issue"
     }

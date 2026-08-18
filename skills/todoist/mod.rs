@@ -20,6 +20,10 @@ impl Tool for TodoistTool {
         "todoist"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["todoist"]
+    }
+
     fn label(&self) -> &'static str {
         "Todoist"
     }

@@ -177,6 +177,10 @@ impl Tool for GlobFilesTool {
         "glob_files"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["ファイルを探", "ファイルはどこ", "どこにある", "ファイル名", "拡張子", "一覧して", "glob"]
+    }
+
     fn label(&self) -> &'static str {
         "ファイル名検索"
     }

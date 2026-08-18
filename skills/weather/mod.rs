@@ -14,10 +14,52 @@ const FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
 
 pub struct WeatherTool;
 
+const DIRECT_WEATHER_WORDS: [&str; 7] = ["天気", "気温", "降水", "予報", "天候", "気象", "weather"];
+
+fn is_direct_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    DIRECT_WEATHER_WORDS
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+}
+
+fn extract_location(text: &str) -> Option<String> {
+    let mut query = text.to_string();
+    for word in [
+        "天気", "天候", "気象", "気温", "降水確率", "降水", "予報", "weather", "明後日",
+        "明日", "あした", "今日", "きょう", "現在", "いまの", "今の", "今", "この",
+        "教えて", "おしえて", "ですか", "を", "は", "の", "が", "って", "?", "？", "。",
+        "、", "!", "！", " ", "　",
+    ] {
+        query = query.replace(word, "");
+    }
+    let query = query.trim();
+    (query.chars().count() >= 2).then(|| query.to_string())
+}
+
 #[async_trait]
 impl Tool for WeatherTool {
     fn name(&self) -> &'static str {
         "weather"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["天気", "天候", "気象", "気温", "雨", "降水", "予報", "weather"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        1_200
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !is_direct_query(text) {
+            return None;
+        }
+        let args = match extract_location(text) {
+            Some(location) => json!({ "location": location }),
+            None => json!({}),
+        };
+        Some(crate::tools::IntentInvocation::direct(args))
     }
 
     fn label(&self) -> &'static str {

@@ -59,6 +59,10 @@ impl Tool for GoogleDocsTool {
         "google_docs"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["google docs", "docs", "ドキュメント", "文書"]
+    }
+
     fn label(&self) -> &'static str {
         "Google Docs"
     }

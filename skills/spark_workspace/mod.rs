@@ -186,6 +186,24 @@ impl Tool for SparkWorkspaceTool {
         "spark_workspace"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["genspark", "資料一式", "ワークスペース", "スライドとサイト", "サイトとスライド", "ページと資料", "spark", "deck", "brief"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        690
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        self.matches_intent(text).then(|| {
+            crate::tools::IntentInvocation::direct(json!({
+                "project": text.trim(),
+                "goal": "資料、スライド、表、共有ページ、実行計画をまとめて作る",
+                "source_text": text.trim()
+            }))
+        })
+    }
+
     fn label(&self) -> &'static str {
         "資料ワークスペース生成"
     }

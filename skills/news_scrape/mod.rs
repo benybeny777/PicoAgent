@@ -32,6 +32,47 @@ const SOURCES: &[NewsSource] = &[
 
 pub struct NewsScrapeTool;
 
+const SUMMARY_MATERIAL_PROMPT: &str = include_str!("prompts/summary-material.md");
+
+fn render_summary_material(user_text: &str, tool_result: &str) -> String {
+    crate::tools::render_intent_prompt(SUMMARY_MATERIAL_PROMPT, user_text, tool_result)
+}
+
+fn is_summary_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let normalized = lower
+        .replace("ニューす", "ニュース")
+        .replace("にゅーす", "ニュース")
+        .replace("ﾆｭｰｽ", "ニュース");
+    if lower.contains("ニュースリリース")
+        || lower.contains("リリースノート")
+        || lower.contains("release note")
+    {
+        return false;
+    }
+    let has_news_word = normalized.contains("ニュース")
+        || normalized.contains("news")
+        || normalized.contains("出来事")
+        || normalized.contains("時事")
+        || normalized.contains("ヘッドライン");
+    if !has_news_word {
+        return false;
+    }
+    let asks_current_or_summary = normalized.contains("今日")
+        || normalized.contains("本日")
+        || normalized.contains("最新")
+        || normalized.contains("いま")
+        || normalized.contains("今の")
+        || normalized.contains("最近")
+        || normalized.contains("主要")
+        || normalized.contains("トップ")
+        || normalized.contains("まとめ")
+        || normalized.contains("要約")
+        || normalized.contains("教えて")
+        || normalized.contains("知りたい");
+    asks_current_or_summary || text.chars().count() <= 16
+}
+
 fn parse_setting_value(raw: &str, fallback: &str, min: usize, max: usize) -> usize {
     // フォールバック許可: ニュース取得の補助設定が壊れていても既定値で続行する。
     let fallback_value = fallback.parse::<usize>().unwrap_or(min).clamp(min, max);
@@ -105,6 +146,24 @@ fn extract_items(source: &NewsSource, html: &str, max_items: usize) -> Result<Ve
 impl Tool for NewsScrapeTool {
     fn name(&self) -> &'static str {
         "news_scrape"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["ニュース", "ニューす", "にゅーす", "news", "出来事", "時事", "ヘッドライン"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        1_300
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        is_summary_query(text).then(|| {
+            crate::tools::IntentInvocation::material(
+                json!({ "max_items": 8 }),
+                render_summary_material,
+                true,
+            )
+        })
     }
 
     fn label(&self) -> &'static str {

@@ -37,6 +37,10 @@ impl Tool for NotionTool {
         "notion"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["notion"]
+    }
+
     fn label(&self) -> &'static str {
         "Notion"
     }

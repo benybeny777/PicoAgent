@@ -126,6 +126,10 @@ impl Tool for ComfyuiTool {
     fn name(&self) -> &'static str {
         "comfyui_generate"
     }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["画像", "絵", "イラスト", "描いて", "生成して", "comfyui", "image", "写真", "動画"]
+    }
     fn label(&self) -> &'static str {
         "ComfyUI 画像生成"
     }

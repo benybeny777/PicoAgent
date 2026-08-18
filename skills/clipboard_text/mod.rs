@@ -17,6 +17,12 @@ use crate::message::Field;
 
 pub struct ClipboardTextTool;
 
+const RESULT_MATERIAL_PROMPT: &str = include_str!("prompts/result-material.md");
+
+fn render_result_material(user_text: &str, tool_result: &str) -> String {
+    crate::tools::render_intent_prompt(RESULT_MATERIAL_PROMPT, user_text, tool_result)
+}
+
 async fn read_clipboard() -> Result<String, String> {
     // arboard は同期 API なので、UI を止めないようブロッキングスレッドへ逃がす。
     tokio::task::spawn_blocking(|| {
@@ -35,6 +41,32 @@ async fn read_clipboard() -> Result<String, String> {
 impl Tool for ClipboardTextTool {
     fn name(&self) -> &'static str {
         "clipboard_text"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["クリップボード", "コピーした", "clipboard"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        500
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !self.matches_intent(text) {
+            return None;
+        }
+        let mode = if text.contains("todo") || text.contains("TODO") || text.contains("タスク") {
+            "todo"
+        } else if text.contains("返信") || text.contains("返事") {
+            "reply"
+        } else {
+            "summary"
+        };
+        Some(crate::tools::IntentInvocation::material(
+            json!({ "mode": mode }),
+            render_result_material,
+            false,
+        ))
     }
 
     fn label(&self) -> &'static str {
@@ -94,4 +126,3 @@ impl Tool for ClipboardTextTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(ClipboardTextTool) } }
-

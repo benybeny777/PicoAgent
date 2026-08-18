@@ -125,6 +125,10 @@ impl Tool for NotebookEditTool {
         "notebook_edit"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["ノートブック", "notebook", "ipynb", "jupyter", "セル"]
+    }
+
     fn label(&self) -> &'static str {
         "ノートブック編集"
     }

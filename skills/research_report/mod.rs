@@ -776,6 +776,44 @@ impl Tool for ResearchReportTool {
         "research_report"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["調査", "リサーチ", "レポート", "出典", "競合比較", "市場調査", "まとめて調べ", "ダッシュボード", "html", "research", "report"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        680
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        if !self.matches_intent(text) {
+            return None;
+        }
+        let lower = text.to_lowercase();
+        let wants_artifact = [
+            "レポート",
+            "資料",
+            "スライド",
+            "ダッシュボード",
+            "html",
+            "ページ",
+            "表",
+            "json",
+            "csv",
+            "markdown",
+            "md",
+        ]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()));
+        let save = ["保存", "ファイル", "出力", "作成して", "作って", "まとめて"]
+            .iter()
+            .any(|word| lower.contains(&word.to_lowercase()));
+        Some(crate::tools::IntentInvocation::direct(json!({
+            "topic": text.trim(),
+            "save": save || wants_artifact,
+            "artifact_bundle": true
+        })))
+    }
+
     fn label(&self) -> &'static str {
         "調査レポート生成"
     }

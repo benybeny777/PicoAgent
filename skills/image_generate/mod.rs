@@ -16,6 +16,10 @@ impl Tool for ImageGenerateTool {
     fn name(&self) -> &'static str {
         "image_generate"
     }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["dall-e", "dall\u{00b7}e", "openai画像"]
+    }
     fn label(&self) -> &'static str {
         "画像生成"
     }

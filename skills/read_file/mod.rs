@@ -67,6 +67,10 @@ impl Tool for ReadFileTool {
     fn name(&self) -> &'static str {
         "read_file"
     }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["読んで", "読み取", "ファイル", "read_file"]
+    }
     fn label(&self) -> &'static str {
         "ファイル読込"
     }

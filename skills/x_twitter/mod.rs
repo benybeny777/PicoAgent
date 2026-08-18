@@ -20,6 +20,10 @@ impl Tool for XTwitterTool {
         "x_twitter"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["twitter", "xに", "ポスト", "ツイート"]
+    }
+
     fn label(&self) -> &'static str {
         "X/Twitter"
     }

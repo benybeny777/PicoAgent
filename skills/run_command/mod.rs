@@ -178,6 +178,10 @@ impl Tool for RunCommandTool {
         "run_command"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["コマンド", "実行", "テスト", "ビルド", "cargo", "npm", "git"]
+    }
+
     fn label(&self) -> &'static str {
         "コマンド実行"
     }

@@ -245,6 +245,9 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> String;
     fn parameters(&self) -> Value;            // JSON Schema
     fn examples(&self) -> Vec<&'static str> { Vec::new() }
+    fn intent_keywords(&self) -> &'static [&'static str] { &[] }
+    fn intent_priority(&self) -> i32 { 0 }
+    fn intent_invocation(&self, text: &str) -> Option<IntentInvocation> { None }
     fn config_schema(&self) -> Vec<Field> { Vec::new() }
     async fn run(&self, cfg: &Config, args: Value) -> String;  // 失敗もエラー文字列で返す
 }
@@ -255,7 +258,9 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。出力が `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` の上限を超える場合は末尾を切り捨て、コンテキスト超過を防ぐ。
 - スキル実体、名前インデックス、function schema は `OnceLock` でキャッシュする。多数のスキルを導入しても会話ごとの schema 構築や dispatch 時の全スキル再生成を避ける。
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
-- 候補判定語彙は `Tool::intent_keywords()` が返す登録メタデータを正本とし、schema候補選定と副作用のない直接実行判定は `tools::intent_matches()` を共有する。候補が上限を超える場合は `Tool::intent_priority()` の降順、一致した語の長さの降順、スキル名の昇順で安定選択する。全ルートが登録済みToolを指すことと代表発話を共通テストで検査する。
+- 候補判定語彙は各`Tool::intent_keywords()`、候補・先回り実行の優先度は`intent_priority()`を正本とする。`tools::all()`はスキル名順、候補が上限を超える場合は優先度の降順、一致語の長さの降順、スキル名の昇順で安定選択し、リンク順へ依存させない。
+- 小型モデルのfunction callingを待たずに動かすスキルは、各`Tool::intent_invocation()`が引数と`IntentHandling`を返す。`Direct`は整形済み出力をそのまま利用者へ返し、`Material`はスキル結果を内部資料としてモデルへ差し込む。`agent.rs`は登録済みスキルを同じ優先順で走査して最初の一致を実行するだけで、スキル名・引数組み立て・分岐順を持たない。`run_command`／`ask_user`／`view_image`の制御マーカー解釈だけはループ本体の責務として残す。
+- 資料差し込みの長文プロンプトは`skills/<スキル名>/prompts/*.md`を`include_str!`で同梱する。現在はニュース要約、クリップボード、Web検索、時刻未指定リマインダーのローカル操作ガイドがこの経路を使う。中央ルート表が空であること、`agent.rs`へスキル名と長文資料プロンプトを戻していないこと、代表発話の割当先・引数・直接返却／資料差し込みの別を設計ガードで検査する。
 - 標準的な外向きHTTPは `tools::http::client()` の接続プールを共有し、待ち時間設定は `tools::http::timeout()` で範囲を統一する。User-Agent、Cookie、プロキシ等の専用構築が必要なコネクタだけ個別builderを使う。
 - 共有クライアントは接続確立に 10 秒の上限を持つ（応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない）。モデル一覧のような短い問い合わせは `tools::http::metadata_timeout()`（`PICOAGENT_HTTP_METADATA_TIMEOUT_SECS`）でリクエスト全体にも上限を付け、この値は基本設定の「詳細設定」から変更できる。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/run_command/jobs.rs` のような補助ファイル変更もビルドに反映される。

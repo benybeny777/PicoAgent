@@ -31,6 +31,10 @@ impl Tool for SubagentTool {
         "subagent"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["サブエージェント", "分担", "手分け", "それぞれ調べ", "並行で調べ", "担当", "subagent"]
+    }
+
     fn label(&self) -> &'static str {
         "サブエージェント"
     }

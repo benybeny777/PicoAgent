@@ -207,6 +207,41 @@ impl Tool for GensparkSuiteTool {
         "genspark_suite"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["genspark全部", "genspark風", "deep research", "ai slides", "ai sheets", "ai docs", "sparkpage", "autopilot", "meeting notes", "multi-agent", "ai browser", "全部やって"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        700
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        let lower = text.to_lowercase();
+        let wants_suite = [
+            "genspark全部",
+            "genspark風",
+            "deep research",
+            "ai slides",
+            "ai sheets",
+            "ai docs",
+            "sparkpage",
+            "autopilot",
+            "meeting notes",
+            "multi-agent",
+            "ai browser",
+        ]
+        .iter()
+        .any(|word| lower.contains(&word.to_lowercase()))
+            || (lower.contains("genspark") && text.contains("全部"));
+        wants_suite.then(|| {
+            crate::tools::IntentInvocation::direct(json!({
+                "topic": text.trim(),
+                "audience": "一般読者",
+                "source_text": text.trim()
+            }))
+        })
+    }
+
     fn label(&self) -> &'static str {
         "Genspark風ワークフロー"
     }

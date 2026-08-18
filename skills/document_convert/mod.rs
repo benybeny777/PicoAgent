@@ -97,6 +97,10 @@ impl Tool for DocumentConvertTool {
         "document_convert"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["変換", "pdf化", "libreoffice", "convert"]
+    }
+
     fn label(&self) -> &'static str {
         "文書変換"
     }

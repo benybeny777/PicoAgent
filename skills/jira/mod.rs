@@ -23,6 +23,10 @@ impl Tool for JiraTool {
         "jira"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["jira"]
+    }
+
     fn label(&self) -> &'static str {
         "Jira"
     }

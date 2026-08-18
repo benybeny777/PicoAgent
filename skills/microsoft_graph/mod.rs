@@ -38,6 +38,10 @@ impl Tool for MicrosoftGraphTool {
         "microsoft_graph"
     }
 
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["outlook", "teams", "microsoft", "office365"]
+    }
+
     fn label(&self) -> &'static str {
         "Microsoft Graph"
     }
