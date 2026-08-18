@@ -11,6 +11,20 @@
 
 ---
 
+## 2026-08-19 — Claude横断レビューGのローカルAPIキー比較
+
+対象: Claudeブランチ`claude/optimization-issues-report-nw01v7`のGを現行`main`へ再評価して実装。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| G | P2・セキュリティ | `api_server.rs::authorized`がBearerキーを通常の文字列比較で照合し、共通接頭辞の位置で処理時間が変わり得る | 対応済み | 既存の`sha2`で受信キーと設定キーをSHA-256の固定長ダイジェストへ変換し、32要素すべてのXORを集約してから一致を判定する。新規依存は追加していない |
+| 回帰 | - | 現在の認証契約や多重防御を変えない | 対応済み | 一致、共通接頭辞だけが同じ不一致、異なる長さ、Unicode、前後空白を単体回帰へ追加した。既存のキー未設定時の許可、Bearer形式必須、Origin拒否、JSON限定、実HTTPのCSRF拒否を含むAPIテスト10件がすべて成功した |
+| 範囲 | - | 保存・暗号化・応答内容へ影響させない | 対応済み | `PICOAGENT_API_KEY`の保存とDPAPI、127.0.0.1限定、エラー応答、公開APIの引数・形式は変更していない。README／SPECへ追加する利用者向け仕様はなく、セキュリティ強化だけをCHANGELOGへ記録した |
+
+完了したGは`docs/CODEX-TASKS.md`から削除し、D／E／F／H／Iだけを未完了として残した。
+`cargo xtask verify`は全25項目成功。本体libは388件成功・長時間Whisper 1件だけ既定ignore、
+xtaskは58件、追跡JavaScript／MJSは18件で失敗0だった。
+
 ## 2026-08-19 — Claude横断レビューA〜Cのバックエンド応答性
 
 対象: Claudeブランチ`claude/optimization-issues-report-nw01v7`のA〜Cを現行`main`へ再評価して実装。

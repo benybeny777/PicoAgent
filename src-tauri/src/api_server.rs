@@ -20,6 +20,7 @@
 // 会話はリクエスト内で完結するステートレス設計（デスクトップの会話履歴とは混ざらない）。
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::Manager;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -200,6 +201,20 @@ fn find_head_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
+/// APIキーを固定長ダイジェストへ変換し、すべての要素を走査して比較する。
+/// 入力長は送信側自身に既知だが、秘密値と一致した接頭辞の位置は処理時間へ出さない。
+fn constant_time_key_eq(left: &str, right: &str) -> bool {
+    let left = Sha256::digest(left.as_bytes());
+    let right = Sha256::digest(right.as_bytes());
+    let difference = left
+        .iter()
+        .zip(right.iter())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        });
+    difference == 0
+}
+
 /// PICOAGENT_API_KEY が設定されている場合、Bearer トークンの一致を検査する。
 fn authorized(expected_key: &str, auth_header: Option<&str>) -> bool {
     let expected = expected_key.trim();
@@ -209,7 +224,7 @@ fn authorized(expected_key: &str, auth_header: Option<&str>) -> bool {
     match auth_header {
         Some(value) => value
             .strip_prefix("Bearer ")
-            .map(|token| token.trim() == expected)
+            .map(|token| constant_time_key_eq(token.trim(), expected))
             .unwrap_or(false),
         None => false,
     }
@@ -521,7 +536,10 @@ async fn write_sse_completion(
 
 #[cfg(test)]
 mod tests {
-    use super::{authorized, find_head_end, openai_completion_json, parse_head, parse_messages};
+    use super::{
+        authorized, constant_time_key_eq, find_head_end, openai_completion_json, parse_head,
+        parse_messages,
+    };
     use serde_json::json;
 
     #[test]
@@ -584,9 +602,19 @@ mod tests {
     fn 認証はキー設定時のみ必須になる() {
         assert!(authorized("", None)); // キー未設定なら常に許可
         assert!(authorized("secret", Some("Bearer secret")));
+        assert!(authorized(" secret ", Some("Bearer  secret  "))); // 既存のtrim意味を維持
         assert!(!authorized("secret", Some("Bearer wrong")));
         assert!(!authorized("secret", Some("secret"))); // Bearer 形式のみ
         assert!(!authorized("secret", None));
+    }
+
+    #[test]
+    fn apiキーは固定長ダイジェスト全体で比較する() {
+        assert!(constant_time_key_eq("secret", "secret"));
+        assert!(!constant_time_key_eq("secret-a", "secret-b")); // 共通接頭辞
+        assert!(!constant_time_key_eq("secret", "secret-long")); // 異なる長さ
+        assert!(constant_time_key_eq("日本語の鍵🔑", "日本語の鍵🔑"));
+        assert!(!constant_time_key_eq("日本語の鍵🔑", "日本語の鍵🔒"));
     }
 
     #[test]
