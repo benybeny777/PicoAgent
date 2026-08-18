@@ -13,7 +13,7 @@
 
 ## 2026-08-18 — P1-9 HTTPクライアント方針と実装ガードの一致
 
-対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-9。
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-9。PR #127で対応した。
 
 | # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
 |---|---|---|---|---|
