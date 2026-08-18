@@ -3,18 +3,18 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-19
-- ブランチ: `fix/constant-time-api-key`
-- 目的: Claude横断レビューGのローカルAPIキー比較を定数時間化する
-- 対応PR: #134
+- ブランチ: `fix/renderer-idle-and-gaze`
+- 目的: Claude横断レビューD/Hの停止中描画と視線追従負荷を解消する
+- 対応PR: 作成前
 
 ## 未処理の残件（次に作業する人はここから始める）
 
 PR #119から現行`main`で実在を確認したP0 2件・P1 6件は、すべてPR #121で修正した。
 古いPR #119は基準が`b743b08`で完了済み変更を再導入するため、修正PRの統合後に重複として閉じる。
 長期メモリ管理UIと3巡目の実バグは統合済み。最新Claudeブランチに残っていたA〜Iのうち、
-A〜CはPR #133で統合し、Gをこのブランチで完了した。未完了のD／E／F／H／Iは
-現行mainへ照合した作業指示を`docs/CODEX-TASKS.md`へ残しているため、次はD/Hのフロント負荷、
-E/Fの画像実測、Iの背景ぼかし計測を順に進める。
+A〜CはPR #133、GはPR #134で統合し、D/Hをこのブランチで完了した。未完了のE／F／Iは
+現行mainへ照合した作業指示を`docs/CODEX-TASKS.md`へ残しているため、次はE/Fの画像実測、
+Iの背景ぼかし計測を順に進める。
 外部条件が必要な実環境確認と販売ゲートは、条件が揃うまでコード作業と分けて残す。
 
 従来の実機確認は、再現条件を安全に用意できなかった次の項目だけ残る。
@@ -39,6 +39,18 @@ E/Fの画像実測、Iの背景ぼかし計測を順に進める。
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-19、通常2Dのフレーム描画を、アイドル中・居眠り中・非表示・アニメ削減中・
+Live2D表示中など描画不要な状態で自己停止する共通rAFループへ変更した。必要な再開点は
+アニメ、リグ、レイアウト、可視性、アニメ削減、Live2Dの状態変化へ集約した。むぎの
+まばたき・視線タイマーはrAFと独立する一方、4キャラの局所バネは表示中だけ30fps上限で
+動かす必要があるため、バネが見える形式だけループを維持する。視線追従は最新マウス位置を
+1フレーム1回へ合流し、200件の連続入力を矩形読取1回へ抑えた。通常2D 8体×7形式、
+通常2D／Live2Dの操作14画面、スケジューラ回帰6件に成功した。実Tauriも左画面内
+X=1008〜1908、Y=549〜1149で確認し、むぎとひよりの見た目、停止・復帰、Live2D表示、
+視線合流を確認した。右画面には触れていない。
+`cargo xtask verify`は全25項目成功。本体lib 388件成功・長時間Whisper 1件だけ既定ignore、
+xtask 58件、追跡JavaScript／MJS 18件で失敗0だった。
 
 2026-08-19、ローカルAPIのBearerキー比較を、SHA-256の固定長ダイジェスト32要素を
 すべてXOR集約してから一致判定する経路へ変更した。既存の`sha2`だけを使い、新規依存はない。
@@ -154,7 +166,7 @@ PNG 8体×7形式＝56画面は速度警告0件（平均1,617ms、最大3,743ms�
 
 この残レビュー完了とClaude向け引き継ぎ更新は、本体PR #117として`main`へsquash merge済み。マージコミットは`6b6d3d6`で、マージ後のオープンPRは0件だった。
 
-2026-08-17、残件AとBを完了した。`cargo xtask bump-version patch`を1回だけ実行して3設定を`1.0.2`へ同期し、通常2Dの説明を同梱6体各42フレーム、実写2Dテスト84フレーム・8領域局所バネ物理へ訂正した。採番後に「patch更新は手動確認だけで案内する」テストが固定`1.0.2`のfixtureと現在版の一致で失敗したため、現在版の次patchを動的に作る回帰へ修正し、コード変更前のNSISはごみ箱へ移して再生成した。本体PR #113をsquash mergeし、最終`PicoAgent_1.0.2_x64-setup.exe`（400,272,773 bytes、SHA-256 `234cac3e685d712658b669cd03837bc9a9c2e91e64233122ac57ee0b5698b5a0`）を配布Repoの新規`v1.0.2`プレリリースへ公開した。配布Repo PR #3をsquash mergeし、Pagesは`dc13f75`を対象にbuilt。GitHub側digest、外部再取得、公開`latest.json`がすべて一致し、本体`distribution/site/`と公開Repoの追跡47ファイルもGit blob一致、画像差分0件だった。PE、Beta表示、許可7キャラ、軽量同梱範囲、全テスト、PC／スマホLP、サイレント導入・削除、既存ユーザーデータ3,524ファイルの不変も確認済み。旧`v1.0.1`ローカルNSIS、外部再取得物、一時cloneはごみ箱へ移した。
+2026-08-17、残件AとBを完了した。`cargo xtask bump-version patch`を1回だけ実行して3設定を`1.0.2`へ同期し、通常2Dの説明を同梱6体各42フレーム、実写2Dテスト84フレーム・8領域局所バネ物理へ訂正した。採番後に「patch更新は手動確認だけで案内する」テストが固定`1.0.2`のfixtureと現在版の一致で失敗したため、現在版の次patchを動的に作る回帰へ修正し、コード変更前のNSISはごみ箱へ移して再生成した。本体PR #113をsquash mergeし、最終`PicoAgent_1.0.2_x64-setup.exe`（約400.27MB、SHA-256 `234cac3e685d712658b669cd03837bc9a9c2e91e64233122ac57ee0b5698b5a0`）を配布Repoの新規`v1.0.2`プレリリースへ公開した。配布Repo PR #3をsquash mergeし、Pagesは`dc13f75`を対象にbuilt。GitHub側digest、外部再取得、公開`latest.json`がすべて一致し、本体`distribution/site/`と公開Repoの追跡47ファイルもGit blob一致、画像差分0件だった。PE、Beta表示、許可7キャラ、軽量同梱範囲、全テスト、PC／スマホLP、サイレント導入・削除、既存ユーザーデータ3,524ファイルの不変も確認済み。旧`v1.0.1`ローカルNSIS、外部再取得物、一時cloneはごみ箱へ移した。
 
 2026-08-17、`layout-shot-mascot.webp`、`layout-shot-widget.webp`、`layout-shot-chat.webp`を実WebViewの2倍密度描画から480pxへ縮小して再生成した。撮影ツールの引き伸ばし検査、WebP寸法検査、3枚の原寸目視、`build-ui --release`後の設定画面カード読込を確認した。設定画面回帰スクリプトは配布UIから除外済みの`hiyori`を保存中キャラに固定して後段で停止したため、現行同梱キャラ`mugi`のfixtureへ更新した。
 
@@ -164,7 +176,7 @@ PNG 8体×7形式＝56画面は速度警告0件（平均1,617ms、最大3,743ms�
 
 2026-08-17、版番号の手入力と同一Release資産の上書きを廃止する。通常更新は同じ系列のpatchを自動加算し、minor／majorはユーザー明示指示だけで上げる。`cargo xtask bump-version <種別>`が公開中の`latest.json`を起点に3設定を同期する。patch番号も公開表示する。起動時にはpatchを通知せず、利用者が設定から手動確認した場合だけ案内・ダウンロードできる。minor変更時は起動時にも通知する。今回は`1.0.0`から`1.0.1`を採番し、`PicoAgent 1.0.1 Beta`として最新mainの軽量NSISを新しいプレリリースへ公開する。LP画像は変更せず、更新情報とバイナリだけを差し替える。
 
-同日の最新`main`から軽量NSISを生成し、`PicoAgent_1.0.1_x64-setup.exe`（400,271,033 bytes、SHA-256 `4a62dcffd96f4ff881d021ee2184d66e8ef4522cb8086cf151be4604771ec14b`）のPE、Beta表示、許可7キャラ、基本エンジンだけの同梱範囲を確認した。旧`1.0.0`のローカルNSISは検証後にごみ箱へ移動した。本体PR #103／#104と配布Repo PR #1／#2をsquash mergeし、新規`v1.0.1`プレリリースを公開した。GitHub側digest、外部再取得、公開`latest.json`はいずれも実サイズ・SHA-256一致。Pagesは配布Repoの最終マージ`922d126`からbuiltとなり、公開LPを1440×1000と390×844で目視確認した。LP画像は変更していない。配布Repoには公開運用用`AGENTS.md`と`publish-picoagent-distribution`スキルをGit管理で追加した。
+同日の最新`main`から軽量NSISを生成し、`PicoAgent_1.0.1_x64-setup.exe`（約400.27MB、SHA-256 `4a62dcffd96f4ff881d021ee2184d66e8ef4522cb8086cf151be4604771ec14b`）のPE、Beta表示、許可7キャラ、基本エンジンだけの同梱範囲を確認した。旧`1.0.0`のローカルNSISは検証後にごみ箱へ移動した。本体PR #103／#104と配布Repo PR #1／#2をsquash mergeし、新規`v1.0.1`プレリリースを公開した。GitHub側digest、外部再取得、公開`latest.json`はいずれも実サイズ・SHA-256一致。Pagesは配布Repoの最終マージ`922d126`からbuiltとなり、公開LPを1440×1000と390×844で目視確認した。LP画像は変更していない。配布Repoには公開運用用`AGENTS.md`と`publish-picoagent-distribution`スキルをGit管理で追加した。
 
 2026-08-17、Cargo直接依存、THA3 Pythonランタイム、Aivis、Whisper、llama.cpp、LibreOffice、外部CLI、Webランタイム、クラウド／ローカルLLMモデルを公式一次情報と照合した。LTS相当があるLibreOfficeは成熟版25.8.7.2、それ以外は安定版latest、LLMは最新安定版を採用する。GitHub Release資産とモデルはサイズ・SHA-256検証を追加し、ローカルGGUFはrevision入りの別名で保存する。日本語向けにLLM-jp-4 8B Thinking公式GGUFも追加した。AMD／Intel／GPUなしWindowsへTHA3用CUDA PyTorchを取得していた経路は、コード・モデル・Pythonを取る前の`nvidia-smi -L`確認と通常版NSISの正常スキップへ修正した。引数なしsetupと通常buildの暗黙一括取得も外し、全取得は`setup all`／`build-full`の明示操作に限定した。`.agents/skills/audit-picoagent-dependencies`を毎月1日の全体点検の正本とする。このPRをマージ後、最新`main`からNSISを再生成してLPとReleaseへ公開する。
 
@@ -198,7 +210,7 @@ README／LP用動画は全15キャラの通常・配信30本を含む45本を30f
 
 2026-08-13、Windows向けの開発中ベータ版を `PicoAgent-Distribution` から試せる状態へ更新する。アプリ全形式へ操作を遮らない小型`BETA`表示を追加し、配布READMEとLPへベータ注意、Windowsインストール、基本操作、未署名警告、最新の2Dむぎ／Live2Dひより動画を反映した。Windows NSISは現行mainの作業ツリーから新規生成し、サイズ・SHA-256を`latest.json`とRelease実体で照合して公開する。macOSはWindows環境では成果物と実機動作を検証できず、GitHub Actionsも使わない運用のため今回の公開対象から外す。
 
-同日のベータ生成では、通常`build`が4.5GiBの開発用追加ツール群までNSISへ渡してメモリマップ失敗することを確認し、販売条件を完了扱いにせず軽量設定だけを使う`cargo xtask build-beta`を追加した。外部ツール混入は0だが、高精細7キャラがUI配布物の405.6MiBを占めるため、画質を落とさず選択ダウンロードへ分離する改善は次回へ残す。チャット切れ修正後に、PNG／Live2D共通の全身変形ループを停止し、成功・クリック反応を最大1px級へ縮小した最終NSISは412,114,239 bytes、SHA-256 `cdd06034a3c2c88e918ae2959b7a72576742d977bcacdf1c1545bdd9dd1c545c`。再利用手順は`build-picoagent-beta`、`add-picoagent-setting`、`add-picoagent-connector`の共通スキルへ切り出した。
+同日のベータ生成では、通常`build`が約4.83GBの開発用追加ツール群までNSISへ渡してメモリマップ失敗することを確認し、販売条件を完了扱いにせず軽量設定だけを使う`cargo xtask build-beta`を追加した。外部ツール混入は0だが、高精細7キャラがUI配布物の約425.30MBを占めるため、画質を落とさず選択ダウンロードへ分離する改善は次回へ残す。チャット切れ修正後に、PNG／Live2D共通の全身変形ループを停止し、成功・クリック反応を最大1px級へ縮小した最終NSISは約412.11MB、SHA-256 `cdd06034a3c2c88e918ae2959b7a72576742d977bcacdf1c1545bdd9dd1c545c`。再利用手順は`build-picoagent-beta`、`add-picoagent-setting`、`add-picoagent-connector`の共通スキルへ切り出した。
 
 旧実写試作のPhotoshop拡大素材は、顔の実効解像度不足を解消できなかったため採用を終了した。現行の実写物理演算テストは1024×1536のネイティブ胸上原画を正本とし、単純拡大せず使用する。背景除去は外周連結、デスピル、0.7pxマット、透明RGB色伸長を使い、目と口だけを局所合成する。7形式の実WebView、通常／フルHD配信の各134コマ動画、先頭・中間・終端を確認し、Claude CLIも最終的に採用・ブロッカーなしと判定した。Photoshopは今後も同倍率比較で実際に改善するときだけ「ディテールを保持 2.0」を使い、改善しなければネイティブ原画へ戻る。
 
