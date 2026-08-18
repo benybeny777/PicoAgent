@@ -71,9 +71,20 @@ const settingsData = {
 };
 const mock = `
 window.__listeners = {};
+window.__memoryItems = [
+  { category: "好み", text: "私は結論から読むのが好き", updated_at: "2026-08-18T08:30:00Z", hits: 4 },
+  { category: "継続指示", text: "今後はサイズをMBかGBで表示してほしい", updated_at: "2026-08-18T07:15:00Z", hits: 2 },
+];
 window.__TAURI__ = {
-  core: { convertFileSrc: path => path, invoke: async (name) => {
+  core: { convertFileSrc: path => path, invoke: async (name, args = {}) => {
     if (name === "settings_load") return ${JSON.stringify(settingsData)};
+    if (name === "settings_memory_list") return { items: window.__memoryItems };
+    if (name === "settings_memory_delete") {
+      window.__memoryItems = window.__memoryItems.filter(item => !(
+        item.category === args.category && item.text === args.text && item.updated_at === args.updatedAt
+      ));
+      return { items: window.__memoryItems };
+    }
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
@@ -98,12 +109,24 @@ window.__TAURI__ = {
   dpi: {},
 };`;
 
-const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined });
+const headful = process.env.PICOAGENT_UI_HEADFUL === "1";
+const browser = await chromium.launch({
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined,
+  headless: !headful,
+  args: headful ? ["--window-position=0,0"] : [],
+});
 try {
   const page = await browser.newPage({ viewport: { width: 960, height: 760 }, deviceScaleFactor: 1 });
   await page.addInitScript(mock);
   page.on("pageerror", error => { throw error; });
   await page.goto(`http://127.0.0.1:${port}/settings.html?tab=display`);
+  if (headful) {
+    const windowBounds = await page.evaluate(() => ({ x: window.screenX, width: window.outerWidth }));
+    const leftScreenRight = Number(process.env.PICOAGENT_LEFT_SCREEN_RIGHT || 0);
+    if (leftScreenRight > 0 && (windowBounds.x < 0 || windowBounds.x + windowBounds.width > leftScreenRight)) {
+      throw new Error(`可視確認ウィンドウが左画面内にありません: x=${windowBounds.x}, width=${windowBounds.width}`);
+    }
+  }
   await page.waitForSelector(".layout-card-grid .layout-card");
   const cardCount = await page.locator(".layout-card").count();
   if (cardCount !== 7) throw new Error(`表示形式カードが7件ではありません: ${cardCount}`);
@@ -126,7 +149,18 @@ try {
   await page.getByRole("tab", { name: "基本設定" }).click();
   if (await page.locator(".quick-settings-card").count() !== 5) throw new Error("よく使う設定への入口が5件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
+  await page.waitForSelector(".memory-item");
+  if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
+  const memoryText = await page.locator(".memory-manager").textContent();
+  for (const expected of ["全キャラクター", "覚えた日時", "言及 4回", "この記憶を削除"]) {
+    if (!memoryText?.includes(expected)) throw new Error(`長期メモリ欄に「${expected}」がありません`);
+  }
   await page.screenshot({ path: join(OUT, "basic-tab.png") });
+  await page.locator(".memory-manager").scrollIntoViewIfNeeded();
+  await page.locator(".memory-manager").screenshot({ path: join(OUT, "memory-manager.png") });
+  await page.locator(".memory-item").first().getByRole("button", { name: /長期メモリから削除/ }).click();
+  if (await page.locator(".memory-item").count() !== 1) throw new Error("長期メモリの個別削除が一覧へ反映されません");
+  if ((await page.locator(".memory-manager").textContent())?.includes("私は結論から読むのが好き")) throw new Error("削除した長期メモリが一覧に残っています");
   await page.getByRole("tab", { name: "追加機能・更新（1）", exact: true }).click();
   await page.waitForSelector(".component-card");
   if (await page.locator(".component-card").count() !== 6) throw new Error("基本を含む追加機能カードが6件ではありません");

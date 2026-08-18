@@ -36,6 +36,7 @@ mod relationship;
 mod relationship_preset;
 mod scheduler;
 mod secret;
+mod settings_memory;
 mod store;
 mod stream_profile;
 mod text;
@@ -115,6 +116,8 @@ pub fn run() {
             commands::settings_check_update,
             commands::settings_install_update,
             commands::settings_load,
+            settings_memory::settings_memory_list,
+            settings_memory::settings_memory_delete,
             commands::settings_character_pick,
             commands::settings_character_install,
             commands::settings_character_install_live2d,

@@ -70,19 +70,50 @@ pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {
     }
 }
 
+fn save_checked(app: &AppHandle, store: &MemoryStore) -> anyhow::Result<()> {
+    let target = path(app)?;
+    if let Some(dir) = target.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    crate::store::write_json_atomic(&target, store)?;
+    Ok(())
+}
+
 pub fn save(app: &AppHandle, store: &MemoryStore) {
-    let result = (|| -> anyhow::Result<()> {
-        let target = path(app)?;
-        if let Some(dir) = target.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        crate::store::write_json_atomic(&target, store)?;
-        Ok(())
-    })();
+    let result = save_checked(app, store);
     // フォールバック許可: メモリ保存失敗は会話を止めず、ログのみに留める。
     if let Err(error) = result {
         crate::log_paths::append_app_log(app, &format!("長期メモリの保存に失敗しました: {error}"));
     }
+}
+
+/// 設定画面で選ばれた長期メモリを1件だけ削除する。
+///
+/// 配列番号は会話中の更新で変わるため、画面へ返した3項目を同時に照合する。
+/// 最終更新日時まで一致しなければ、古い画面から別の内容を誤削除せずエラーにする。
+pub fn delete_item(
+    app: &AppHandle,
+    category: &str,
+    text: &str,
+    updated_at: &str,
+) -> anyhow::Result<MemoryStore> {
+    let _guard = crate::store::lock_state("memory.json");
+    let mut store = load(app)?;
+    if !remove_item(&mut store, category, text, updated_at) {
+        anyhow::bail!("対象の長期メモリは見つからないか更新されています。画面を開き直してください");
+    }
+    save_checked(app, &store)?;
+    Ok(store)
+}
+
+fn remove_item(store: &mut MemoryStore, category: &str, text: &str, updated_at: &str) -> bool {
+    let Some(position) = store.items.iter().position(|item| {
+        item.category == category && item.text == text && item.updated_at == updated_at
+    }) else {
+        return false;
+    };
+    store.items.remove(position);
+    true
 }
 
 pub fn clear(app: &AppHandle) -> anyhow::Result<()> {
@@ -357,7 +388,7 @@ fn normalize(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{context_from_store, extract_candidates, MemoryItem, MemoryStore};
+    use super::{context_from_store, extract_candidates, remove_item, MemoryItem, MemoryStore};
 
     #[test]
     fn 自己情報と継続指示だけを抽出する() {
@@ -382,5 +413,55 @@ mod tests {
         let context = context_from_store(&store);
         assert!(context.contains("長期メモリ"));
         assert!(context.contains("[好み] 私はRustをよく使う"));
+    }
+
+    #[test]
+    fn 指定したメモリだけを削除して文脈から除外する() {
+        let mut store = MemoryStore {
+            items: vec![
+                MemoryItem {
+                    category: "好み".to_string(),
+                    text: "私はRustをよく使う".to_string(),
+                    updated_at: "2026-06-26T00:00:00Z".to_string(),
+                    hits: 3,
+                },
+                MemoryItem {
+                    category: "継続指示".to_string(),
+                    text: "今後は結論から話してほしい".to_string(),
+                    updated_at: "2026-06-27T00:00:00Z".to_string(),
+                    hits: 1,
+                },
+            ],
+        };
+
+        assert!(remove_item(
+            &mut store,
+            "好み",
+            "私はRustをよく使う",
+            "2026-06-26T00:00:00Z"
+        ));
+        let context = context_from_store(&store);
+        assert!(!context.contains("私はRustをよく使う"));
+        assert!(context.contains("今後は結論から話してほしい"));
+    }
+
+    #[test]
+    fn 更新後のメモリを古い日時で誤削除しない() {
+        let mut store = MemoryStore {
+            items: vec![MemoryItem {
+                category: "好み".to_string(),
+                text: "私はRustをよく使う".to_string(),
+                updated_at: "2026-06-27T00:00:00Z".to_string(),
+                hits: 2,
+            }],
+        };
+
+        assert!(!remove_item(
+            &mut store,
+            "好み",
+            "私はRustをよく使う",
+            "2026-06-26T00:00:00Z"
+        ));
+        assert_eq!(store.items.len(), 1);
     }
 }

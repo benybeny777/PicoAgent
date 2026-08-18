@@ -340,7 +340,13 @@ mod guard {
     fn フロントのpromise失敗を空のcatchで捨てない() {
         let root = guard_scan::repo_root();
         let mut offenders = Vec::new();
-        for name in ["renderer.js", "settings.js", "common.js", "picoagent.js"] {
+        for name in [
+            "renderer.js",
+            "settings.js",
+            "memory-settings.js",
+            "common.js",
+            "picoagent.js",
+        ] {
             let path = root.join("ui").join(name);
             let source = std::fs::read_to_string(&path).expect("UIソースを読めない");
             if source.contains(".catch(() => {})") {
