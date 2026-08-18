@@ -42,6 +42,7 @@ pub struct ScheduledTask {
     #[serde(default)]
     pub time: String,
     /// cron 風の5フィールド（分 時 日 月 曜日）。`*` と数値、カンマ区切り、`*/N` に対応。
+    /// 日と曜日を両方制限した場合は標準cron互換でORとして扱う。
     #[serde(default)]
     pub cron: String,
     /// 曜日 mon..sun。空なら毎日。
@@ -555,11 +556,19 @@ fn matches_cron(task: &ScheduledTask, at: DateTime<Local>) -> bool {
     if parts.len() != 5 {
         return false;
     }
+    let day_matches = parse_cron_value(parts[2], at.day(), 1, 31);
+    let weekday_matches = parse_cron_value(parts[4], cron_weekday_value(at), 0, 6);
+    // Vixie cron互換: 日と曜日を両方制限した場合だけORで結ぶ。
+    // 片方が`*`なら、そのフィールドは常に真なので、もう片方だけで決まる。
+    let day_or_weekday_matches = if parts[2].trim() != "*" && parts[4].trim() != "*" {
+        day_matches || weekday_matches
+    } else {
+        day_matches && weekday_matches
+    };
     parse_cron_value(parts[0], at.minute(), 0, 59)
         && parse_cron_value(parts[1], at.hour(), 0, 23)
-        && parse_cron_value(parts[2], at.day(), 1, 31)
         && parse_cron_value(parts[3], at.month(), 1, 12)
-        && parse_cron_value(parts[4], cron_weekday_value(at), 0, 6)
+        && day_or_weekday_matches
 }
 
 fn should_run_at(task: &ScheduledTask, at: DateTime<Local>) -> bool {
@@ -736,6 +745,12 @@ mod tests {
         }
     }
 
+    fn cronタスク(cron: &str) -> ScheduledTask {
+        let mut task = 固定時刻タスク("");
+        task.cron = cron.to_string();
+        task
+    }
+
     fn minute(day: u32, hour: u32, minute: u32) -> chrono::DateTime<chrono::Local> {
         chrono::Local
             .with_ymd_and_hms(2026, 7, day, hour, minute, 0)
@@ -886,5 +901,22 @@ mod tests {
         assert!(parse_cron_value("*/5", 10, 0, 59));
         assert!(!parse_cron_value("*/5", 11, 0, 59));
         assert!(parse_cron_value("1,3,5", 3, 0, 59));
+    }
+
+    #[test]
+    fn cronの日と曜日は標準どおり両方指定時だけorで結ぶ() {
+        // 2026-07-01は水曜、07-06は月曜、07-07は火曜。
+        let both = cronタスク("0 9 1 * 1");
+        assert!(should_run_at(&both, minute(1, 9, 0)), "毎月1日で発火");
+        assert!(should_run_at(&both, minute(6, 9, 0)), "毎週月曜で発火");
+        assert!(!should_run_at(&both, minute(7, 9, 0)));
+
+        let day_only = cronタスク("0 9 1 * *");
+        assert!(should_run_at(&day_only, minute(1, 9, 0)));
+        assert!(!should_run_at(&day_only, minute(6, 9, 0)));
+
+        let weekday_only = cronタスク("0 9 * * 1");
+        assert!(!should_run_at(&weekday_only, minute(1, 9, 0)));
+        assert!(should_run_at(&weekday_only, minute(6, 9, 0)));
     }
 }
