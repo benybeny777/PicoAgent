@@ -11,6 +11,34 @@
 
 ---
 
+## 2026-08-19 — 不要ブランチの整理と再発防止ルール
+
+対象: 利用者からの指摘「不要ブランチはけして」「ゴミブランチを残さないようルール追加して」。
+
+照合のうえ、次の11本を不要と判定した。いずれも中身が現行`main`に存在する。
+
+| 種別 | ブランチ | 判定根拠 |
+|---|---|---|
+| ローカル | `chore/review-audit-licenses` | PR #115の元。`deny.toml`はmainに存在し、Moveableのライセンスは`THIRD_PARTY_NOTICES.md`と`docs/THIRD-PARTY-NOTICES.md`へ移した形で一致する（枝側でも`ui/vendor/moveable/LICENSE`は削除済み） |
+| ローカル | `docs/v102-public-handoff` | レビュー記録「2026-08-17 — v1.0.2 Beta再配布と通常2D説明訂正」がmainに存在する |
+| ローカル | `fix/restore-pr106-review-log` | 対象範囲`c234175..17d5537`の記録がmainに存在する |
+| ローカル | `review/claude-doc-fix-20260817` | 対象`1faa067`の記録がmainに存在する |
+| ローカル | `review/claude-pr106-20260817` | 対象`01bbb6e`の記録がmainに存在する |
+| リモート | `claude/overall-inspection-ffon02`、`claude/review-p2w5u6` | `git branch -r --merged origin/main` で取り込み済み |
+| リモート | `claude/improvement-proposal-u9n8k5`、`claude/moveable-codex-integration-wik54v`、`claude/optimization-issues-report-nw01v7`、`claude/readme-gallery-lipsync` | 同日「未マージのClaudeブランチ4本の照合」で全件移植済みと判定した |
+
+| # | 対応 | 状態 |
+|---|---|---|
+| 1 | ローカル5本の削除 | 完了。残るローカルは`main`と作業中worktreeの枝だけ |
+| 2 | リモート6本の削除 | **未実施。** 実行環境がリモートブランチ削除を許可しておらず、利用者の操作が要る |
+| 3 | 再発防止 | `AGENTS.md`へ「作業ブランチを残さない」を追加した。squash mergeでは`git branch --merged`が効かないこと、判定は枝の中身が`main`にあるかで行うこと、古い枝はマージではなく現行`main`からの移植で扱うことを根拠付きで書いた |
+
+リモート6本は次のコマンドで消せる。
+
+```
+git push origin --delete claude/overall-inspection-ffon02 claude/review-p2w5u6 claude/improvement-proposal-u9n8k5 claude/moveable-codex-integration-wik54v claude/optimization-issues-report-nw01v7 claude/readme-gallery-lipsync
+```
+
 ## 2026-08-19 — 未マージのClaudeブランチ4本の照合
 
 対象: `origin/main` へ未マージのまま残っている Claude 作業ブランチ4本。マージすべき残りがあるかを確認した。
