@@ -494,6 +494,23 @@ pub(crate) fn is_on_screen(
     })
 }
 
+/// 現在モニタから完全に外れた場合だけ全モニタを取得し、どこにも見えていないか判定する。
+/// 通常のドラッグ／リサイズでは列挙APIを呼ばないため、イベントごとのOS問い合わせを避けられる。
+fn is_outside_all_monitors(
+    current: MonitorRect,
+    x: i32,
+    y: i32,
+    win_w: u32,
+    win_h: u32,
+    load_all: impl FnOnce() -> Vec<MonitorRect>,
+) -> bool {
+    if is_on_screen(std::slice::from_ref(&current), x, y, win_w, win_h) {
+        return false;
+    }
+    let monitors = load_all();
+    !monitors.is_empty() && !is_on_screen(&monitors, x, y, win_w, win_h)
+}
+
 /// 指定寸法にしたウィンドウが画面外へはみ出していたら、見える位置へ引き戻す。
 ///
 /// 表示形式の切り替えでウィンドウが大きくなると、右下寄りに置いていた場合に
@@ -548,15 +565,20 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     // 動かし直すとここへ `Moved` が飛ぶので、その場で見える位置へ引き戻す。
     // **画面外の座標をキャッシュ＝保存させない**ことも兼ねる（次回起動で復元を
     // 諦めて既定位置へ飛ぶより、その場で直したほうが体験が良い）。
-    let monitors: Vec<MonitorRect> = window
-        .available_monitors()
-        .unwrap_or_default()
-        .iter()
-        .map(to_rect)
-        .collect();
-    if !monitors.is_empty() && !is_on_screen(&monitors, pos.x, pos.y, size.width, size.height) {
-        let rect = to_rect(&monitor);
-        let (x, y) = default_window_position(rect, size.width, size.height);
+    let current_rect = to_rect(&monitor);
+    // 通常のドラッグ中は現在モニタとの重なりだけで判定できる。全モニタ列挙は、
+    // 現在モニタから完全に外れたとき（モニタ間の移動・構成変更）だけに限定する。
+    let outside_all =
+        is_outside_all_monitors(current_rect, pos.x, pos.y, size.width, size.height, || {
+            window
+                .available_monitors()
+                .unwrap_or_default()
+                .iter()
+                .map(to_rect)
+                .collect()
+        });
+    if outside_all {
+        let (x, y) = default_window_position(current_rect, size.width, size.height);
         if (x, y) != (pos.x, pos.y) {
             log_paths::append_app_log(
                 &window.app_handle().clone(),
@@ -932,6 +954,55 @@ mod window_layout_tests {
         );
         // 完全に画面外なら引き戻す。
         assert!(!is_on_screen(&monitors, -560, 300, 560, 430));
+    }
+
+    #[test]
+    fn 現在モニタ内の移動では全モニタを列挙しない() {
+        use std::cell::Cell;
+
+        let current = primary_swapped()[0];
+        let enumerated = Cell::new(false);
+        assert!(!is_outside_all_monitors(
+            current,
+            300,
+            200,
+            560,
+            430,
+            || {
+                enumerated.set(true);
+                primary_swapped()
+            }
+        ));
+        assert!(!enumerated.get(), "通常の移動で全モニタを列挙している");
+    }
+
+    #[test]
+    fn 現在モニタ外では他画面を確認してから引き戻しを決める() {
+        use std::cell::Cell;
+
+        let current = primary_swapped()[0];
+        let enumerated = Cell::new(false);
+        assert!(!is_outside_all_monitors(
+            current,
+            2400,
+            300,
+            560,
+            430,
+            || {
+                enumerated.set(true);
+                primary_swapped()
+            }
+        ));
+        assert!(enumerated.get(), "他モニタへ移ったのに全体を確認していない");
+
+        assert!(is_outside_all_monitors(
+            current,
+            7000,
+            3000,
+            560,
+            430,
+            primary_swapped,
+        ));
     }
 
     #[test]

@@ -148,6 +148,14 @@ impl Config {
     /// 更新なので、ポーリング経路（通知の期限チェックなど）から同じ値で呼ばれるたびに
     /// config.json 全体を書き直してしまい、無意味なディスク書き込みが延々と続く。
     pub fn set_all(&self, patch: Map<String, Value>) -> anyhow::Result<()> {
+        self.set_all_with_writer(patch, crate::store::write_json_atomic)
+    }
+
+    fn set_all_with_writer(
+        &self,
+        patch: Map<String, Value>,
+        write_snapshot: impl FnOnce(&std::path::Path, &Value) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
         // スナップショットの採取から書き込みまでを直列化する（並び替わりを防ぐ）。
         // フォールバック許可: 毒された場合も保存自体は続ける（中身は () で不変）。
         let _write = self
@@ -162,22 +170,29 @@ impl Config {
                 reason.unwrap_or_else(|| "config.load() が未実行です".to_string())
             ));
         };
-        let mut values = self.values.lock().unwrap();
-        let mut next = values.clone();
-        let mut changed = false;
-        for (k, v) in patch {
-            if next.get(&k) != Some(&v) {
-                next.insert(k, v);
-                changed = true;
+        let next = {
+            let values = self.values.lock().unwrap();
+            let mut next = values.clone();
+            let mut changed = false;
+            for (k, v) in patch {
+                if next.get(&k) != Some(&v) {
+                    next.insert(k, v);
+                    changed = true;
+                }
             }
-        }
-        if !changed {
-            return Ok(());
-        }
-        let snapshot = Value::Object(next.clone());
+            if !changed {
+                return Ok(());
+            }
+            next
+        };
+        let snapshot = Value::Object(next);
         // 書き込み中に落ちても設定が全損しないよう、共通層の原子的な書き込みを使う。
-        crate::store::write_json_atomic(&path, &snapshot)?;
-        *values = next;
+        // ディスクI/O中は values ロックを外し、プロバイダ等の get() を止めない。
+        write_snapshot(&path, &snapshot)?;
+        let Value::Object(next) = snapshot else {
+            unreachable!("設定スナップショットは必ずJSONオブジェクト")
+        };
+        *self.values.lock().unwrap() = next;
         Ok(())
     }
 
@@ -359,6 +374,81 @@ mod tests {
                 "同時保存で {index} 番目の変更がファイルから消えている"
             );
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 保存のディスク待ち中も現在値を読める() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+
+        let dir = temp_dir("read-during-write");
+        let path = dir.join("config.json");
+        let cfg = Arc::new(Config::new());
+        cfg.load(path.clone()).unwrap();
+        cfg.set_string("PICOAGENT_TEST_KEY", "保存前".to_string())
+            .unwrap();
+
+        let (write_started_tx, write_started_rx) = mpsc::channel();
+        let (release_write_tx, release_write_rx) = mpsc::channel();
+        let writer_cfg = Arc::clone(&cfg);
+        let writer = std::thread::spawn(move || {
+            let mut patch = serde_json::Map::new();
+            patch.insert(
+                "PICOAGENT_TEST_KEY".to_string(),
+                serde_json::Value::String("保存後".to_string()),
+            );
+            writer_cfg
+                .set_all_with_writer(patch, move |path, snapshot| {
+                    write_started_tx.send(()).unwrap();
+                    release_write_rx.recv().unwrap();
+                    crate::store::write_json_atomic(path, snapshot)
+                })
+                .unwrap();
+        });
+        write_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("ディスク書き込み待ちへ入る");
+
+        let (read_tx, read_rx) = mpsc::channel();
+        let reader_cfg = Arc::clone(&cfg);
+        let reader = std::thread::spawn(move || {
+            read_tx
+                .send(reader_cfg.get("PICOAGENT_TEST_KEY", ""))
+                .unwrap();
+        });
+        let observed = read_rx.recv_timeout(Duration::from_secs(1));
+        release_write_tx.send(()).unwrap();
+        writer.join().unwrap();
+        reader.join().unwrap();
+
+        assert_eq!(
+            observed.expect("保存中のget()がvaluesロックで止まっている"),
+            "保存前"
+        );
+        assert_eq!(cfg.get("PICOAGENT_TEST_KEY", ""), "保存後");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 設定ファイルの保存失敗時は実行中の値を変えない() {
+        let dir = temp_dir("write-failure");
+        let path = dir.join("config.json");
+        let cfg = Config::new();
+        cfg.load(path).unwrap();
+        cfg.set_string("PICOAGENT_TEST_KEY", "保存前".to_string())
+            .unwrap();
+
+        let mut patch = serde_json::Map::new();
+        patch.insert(
+            "PICOAGENT_TEST_KEY".to_string(),
+            serde_json::Value::String("保存後".to_string()),
+        );
+        let error = cfg
+            .set_all_with_writer(patch, |_, _| anyhow::bail!("書き込み失敗"))
+            .expect_err("保存失敗を返す");
+        assert!(error.to_string().contains("書き込み失敗"));
+        assert_eq!(cfg.get("PICOAGENT_TEST_KEY", ""), "保存前");
         std::fs::remove_dir_all(&dir).ok();
     }
 

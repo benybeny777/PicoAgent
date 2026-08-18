@@ -801,7 +801,7 @@ pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
 }
 
 /// 初回起動と設定画面で共用する追加コンポーネントの準備状態。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
     crate::components::statuses(&app)
         .and_then(|items| serde_json::to_value(items).map_err(Into::into))
@@ -1220,7 +1220,7 @@ pub async fn settings_character_pick(app: AppHandle, folder: bool) -> Result<Val
 }
 
 /// キャラクターパックを導入する。導入後は一覧へすぐ反映される（再起動は不要）。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value, String> {
     let source = std::path::PathBuf::from(path.trim());
     match crate::user_characters::install(&app, &source) {
@@ -1240,7 +1240,7 @@ pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value,
 }
 
 /// 利用者が自分で取得したLive2Dのzip／フォルダを、パック作成と検証まで行って導入する。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn settings_character_install_live2d(
     app: AppHandle,
     path: String,
@@ -2915,7 +2915,7 @@ fn human_size(bytes: u64) -> String {
 
 /// ダウンロード済みのローカルモデル（GGUF）一覧を返す。各要素にファイル名・サイズ・
 /// 対応プリセット名・使用中フラグを付ける。設定画面のモデル管理に使う。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pet_list_downloaded_models(app: AppHandle) -> Result<Value, String> {
     let dir = crate::engine::models_dir(&app);
     let active = crate::engine::active_model_filename(&app);
@@ -3119,7 +3119,7 @@ pub async fn pet_transcribe_audio(
 }
 
 /// 会話履歴の Markdown をダウンロードフォルダへ書き出し、保存先パスを返す。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pet_export_history(markdown: String, app: AppHandle) -> Result<Value, String> {
     if markdown.trim().is_empty() {
         return Err("書き出す会話がありません。".to_string());
@@ -4491,5 +4491,41 @@ mod project_context_tests {
         let mut messages = vec![Message::new("user", "やあ")];
         apply_project_context(&mut messages, "課題A");
         assert_eq!(messages[0].content, "やあ");
+    }
+}
+
+#[cfg(test)]
+mod guard {
+    /// ファイル走査・展開・書き込みを行うcommandを同期IPCへ戻すと、処理中にWebViewが固まる。
+    #[test]
+    fn 重いio_commandはtauriの非同期実行枠を使う() {
+        let source = crate::guard_scan::backend_sources()
+            .into_iter()
+            .find(|source| source.path.ends_with("src-tauri/src/commands.rs"))
+            .expect("commands.rsを読み込める")
+            .text;
+        for name in [
+            "settings_components_status",
+            "settings_character_install",
+            "settings_character_install_live2d",
+            "pet_list_downloaded_models",
+            "pet_export_history",
+        ] {
+            let marker = format!("pub fn {name}");
+            let before = source
+                .split_once(&marker)
+                .unwrap_or_else(|| panic!("{name} が見つかりません"))
+                .0;
+            let attribute = before
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("")
+                .trim();
+            assert_eq!(
+                attribute, "#[tauri::command(async)]",
+                "{name} が同期IPCへ戻っています"
+            );
+        }
     }
 }
