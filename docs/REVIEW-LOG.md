@@ -11,6 +11,24 @@
 
 ---
 
+## 2026-08-18 — P1-7 ローカル検証の`cargo xtask verify`一本化
+
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-7。PR #126で対応した。
+
+| # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
+|---|---|---|---|---|
+| 1 | P1 | PR前の検証が複数コマンドの手順書だけで、途中停止後に何が未実行か分からない | 対応済み | `cargo xtask verify`を追加し、本体・xtaskの書式、全target clippy、両テスト、追跡JavaScript／MJS構文、Git差分を順に実行する。1項目が失敗しても残りを続行し、末尾へ失敗一覧を出す |
+| 2 | 環境 | `node`が無いWindows／macOSでもRust検証を止めない | 対応済み | 実行ファイルが見つからない場合だけJavaScript構文を明示スキップする。`node --version`自体の異常終了はスキップせず失敗にする |
+| 3 | 運用 | 依存監査や販売ゲートまで日常の一括検証へ混ぜると過剰になる | 見送り | `cargo audit`は依存更新時と販売前、`release-check`と実表示は各正規手順で実行する既存ルールを維持し、`verify`へ含めない |
+
+途中失敗後も3件すべてを呼ぶ単体テストと、スキップを必須失敗へ数えない単体テストを追加した。
+READMEの開発手順、AGENTSの検証規則と構成表、CHANGELOG、HANDOFFを同期した。製品の実行仕様や
+設定キーは変わらないためSPEC更新は不要と判断した。
+
+検証: 実装した`cargo xtask verify`をこのブランチで実行し、全19項目が成功した。本体libは376件成功・
+長時間Whisper 1件だけ既定ignore、xtaskは55件、追跡JavaScript／MJSは12件で失敗0。本体・xtaskの
+fmt check、全target clippy `-D warnings`、`git diff --check`も同じ実行内で成功した。
+
 ## 2026-08-18 — P1-5／P1-6／P1-10 スキル所有の意図ルーティング
 
 対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-5、P1-6、P1-10。PR #125で対応した。

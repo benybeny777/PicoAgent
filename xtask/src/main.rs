@@ -14,6 +14,7 @@ mod office;
 mod release;
 mod tools;
 mod util;
+mod verify;
 
 use std::process::Command;
 
@@ -40,6 +41,7 @@ const USAGE: &str = "\
   sync-characters     characters/ を ui/assets/characters/ へ同期
   character-pack      2Dキャラクターパックを検証・導入
   build-ui [--release] [--beta] ui/ を ui-dist/ へ配信ビルド（--release で最小化、--beta で BETA 表示を残す）
+  verify              本体・xtask・JavaScript・Git差分の検証を最後まで実行
   stop                残存プロセスの停止
   cli <コマンド…>      ローカル API を叩く CLI（status / models / chat / ask / repl）
 
@@ -107,6 +109,7 @@ fn run(args: &[String]) -> Result<()> {
             rest.iter().any(|a| a == "--release"),
             rest.iter().any(|a| a == "--beta"),
         ),
+        "verify" => verify::run(),
         "stop" => assets::stop_stale(),
         "cli" => cli::run(rest),
         "" | "help" | "-h" | "--help" => {
