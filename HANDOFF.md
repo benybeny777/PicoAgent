@@ -130,6 +130,16 @@ squash mergeでは`git branch --merged`が効かないため、判定は枝の�
 削除後は読み直し、一覧取得時は理由を出す。保存データには触れていない。
 再点検で問題なしと判定した範囲（自己停止rAFループの再開点、音声の`createObjectURL`／`setInterval`解放、
 `unwrap()`の通常経路混入、空`catch`、プロバイダ一覧の文書ずれ）は`docs/REVIEW-LOG.md`へ残した。
+2026-08-19、`browser_control` が起動したブラウザの残留を直した。Chrome / Edge は起動直後に
+本体を立て直して最初のプロセスが終了するため、こちらが握る `Child` は本体の親ではなくなり、
+`kill()` も `taskkill /T` も届いていなかった（実測で本体の `ParentProcessId` が既に存在しない）。
+結果として `cargo test --lib browser_control` のたびに headless Chrome が9プロセス残り、
+ポート11446を握るため2回目以降の `cargo xtask verify` が必ず失敗していた。
+`--user-data-dir` の PicoAgent 専用プロファイル経路で名指しして回収する `stop_profile_browsers()` を
+`cdp::stop()` へ足し、`cargo xtask stop` にも同じ目印の回収を追加した。同期側の共通処理として
+`tools::process::terminate_tree_sync()` を置き、テストの guard は起動より先に持つ順序へ変えた。
+連続2回の実行で残留0・ポート開放を確認した。利用者が普段使っているブラウザは別プロファイルなので
+対象にならない。アプリ終了経路（`RunEvent::Exit` → `browser_control::stop()`）にも同じく効く。
 
 2026-08-19、Claude横断レビューIとして、常時表示のフキダシにある`backdrop-filter: blur(14px)`の
 再合成負荷を測った。立ち絵を動かし続けた状態で、ペット／ミニ／配信×重なり有無×背後の描き替え負荷

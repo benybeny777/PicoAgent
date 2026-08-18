@@ -175,6 +175,48 @@ fn apply_no_window_sync(command: &mut std::process::Command) {
 #[cfg(not(windows))]
 fn apply_no_window_sync(_command: &mut std::process::Command) {}
 
+/// `command_sync()` で spawn した常駐プロセスを、その配下ごと停止して回収する。
+///
+/// Windows の `Child::kill()` は**直下の子だけ**を止める。ブラウザのように自分で
+/// 別プロセスを立てて役割を分けるものは、親を落としても実体（描画・GPU・ネットワーク）が
+/// 生き残り、握ったポートやプロファイルもそのまま占有され続ける。実際に
+/// `browser_control` の headless Chrome が9プロセス残り、以後の起動が
+/// 「PicoAgent が管理していないブラウザに使われています」で必ず失敗していた。
+/// 非同期側の `terminate_process_tree()` と同じ考え方の同期版。
+pub fn terminate_tree_sync(child: &mut std::process::Child, label: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let mut killer = command_sync("taskkill.exe");
+        killer.args(["/PID", &child.id().to_string(), "/T", "/F"]);
+        let result = killer
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|error| format!("{label}のプロセスツリーを停止できません: {error}"))?;
+        // taskkill は「既に終了している」場合も失敗を返す。実際に残っているときだけ errorにする。
+        if !result.success()
+            && child
+                .try_wait()
+                .map_err(|error| format!("{label}の終了状態を確認できません: {error}"))?
+                .is_none()
+        {
+            return Err(format!("{label}のプロセスツリーを停止できませんでした"));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Err(error) = child.kill() {
+            if error.kind() != std::io::ErrorKind::InvalidInput {
+                return Err(format!("{label}を停止できません: {error}"));
+            }
+        }
+    }
+    child
+        .wait()
+        .map(|_| ())
+        .map_err(|error| format!("{label}の終了ハンドルを回収できません: {error}"))
+}
+
 /// `command()` で作ったコマンドをタイムアウト付きで実行する。
 /// `label` は失敗時のメッセージに使う日本語の処理名（例: 「画像変換」）。
 pub async fn output(

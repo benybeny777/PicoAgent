@@ -156,16 +156,10 @@ pub struct LaunchOptions {
     pub startup_timeout_secs: u64,
 }
 
+/// ブラウザは自分で描画・GPU・ネットワークの別プロセスを立てるため、直下の子だけを
+/// 止めると実体が残り、デバッグポートとプロファイルを握ったままになる。ツリーごと回収する。
 fn stop_child(child: &mut std::process::Child) -> Result<(), String> {
-    if let Err(error) = child.kill() {
-        if error.kind() != std::io::ErrorKind::InvalidInput {
-            return Err(format!("ブラウザを停止できません: {error}"));
-        }
-    }
-    child
-        .wait()
-        .map(|_| ())
-        .map_err(|error| format!("ブラウザの終了ハンドルを回収できません: {error}"))
+    crate::tools::process::terminate_tree_sync(child, "ブラウザ")
 }
 
 fn managed_child_running() -> Result<bool, String> {
@@ -295,8 +289,65 @@ pub fn stop() -> Result<(), String> {
         stop_child(child)?;
     }
     *slot = None;
+    // 子ハンドルだけでは足りない。Chrome / Edge は起動直後に本体を立て直して最初の
+    // プロセスが終了するため、こちらが握っている `Child` は本体の親ではなくなっている
+    // （実測: 本体の ParentProcessId が既に存在しない）。ツリー停止も届かないので、
+    // 専用プロファイルを使っているブラウザを経路で名指しして回収する。
+    stop_profile_browsers()
+}
+
+/// PicoAgent 専用プロファイル（`--user-data-dir`）で動いているブラウザだけを止める。
+/// 利用者が普段使っているブラウザは別プロファイルなので巻き込まない。
+///
+/// 残すとデバッグポートを握ったままになり、次回の起動が
+/// 「PicoAgent が管理していないブラウザに使われています」で必ず失敗する。
+/// `cargo xtask stop` にも同じ目印での回収がある（`assets::BROWSER_PROFILE_NEEDLE`）。
+fn stop_profile_browsers() -> Result<(), String> {
+    let Ok(profile) = isolated_profile_dir() else {
+        return Ok(()); // フォールバック許可: 保存先を決められない環境では起動もしていない。
+    };
+    let needle = profile.display().to_string().replace('\\', "/");
+    terminate_by_command_line(&needle)
+}
+
+#[cfg(windows)]
+fn terminate_by_command_line(needle: &str) -> Result<(), String> {
+    // 判定に使う PowerShell 自身のコマンドラインにも目印が載るため、実行ファイル名でも絞る。
+    let names = BROWSER_PROCESS_NAMES
+        .iter()
+        .map(|name| format!("Name='{name}'"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let script = format!(
+        "$needle = '{needle}'; Get-CimInstance Win32_Process -Filter \"{names}\" | Where-Object {{ $_.CommandLine -and $_.CommandLine.Replace('\\', '/').Contains($needle) }} | ForEach-Object {{ taskkill /PID $_.ProcessId /T /F > $null 2>&1 }}"
+    );
+    let status = crate::tools::process::command_sync("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|error| format!("ブラウザの回収を実行できません: {error}"))?;
+    if !status.success() {
+        return Err("ブラウザの回収に失敗しました".to_string());
+    }
     Ok(())
 }
+
+#[cfg(not(windows))]
+fn terminate_by_command_line(needle: &str) -> Result<(), String> {
+    // 見つからない場合（終了コード1）は正常。実行自体が失敗したときだけエラーにする。
+    crate::tools::process::command_sync("pkill")
+        .args(["-f", needle])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|_| ())
+        .map_err(|error| format!("ブラウザの回収を実行できません: {error}"))
+}
+
+/// プロファイル経路で絞り込んだうえで対象にする実行ファイル名。
+#[cfg(windows)]
+const BROWSER_PROCESS_NAMES: [&str; 4] = ["chrome.exe", "msedge.exe", "chromium.exe", "brave.exe"];
 
 #[derive(Clone)]
 pub struct Target {
@@ -532,8 +583,9 @@ mod tests {
                 use_default_profile: false,
                 startup_timeout_secs: 60,
             };
-            ensure_running(&options).await.expect("ブラウザを起動できる");
+            // 起動途中で失敗した場合もブラウザを残さないよう、guard は起動より先に持つ。
             let _guard = BrowserGuard;
+            ensure_running(&options).await.expect("ブラウザを起動できる");
             let target = new_page(options.port).await.expect("タブを開ける");
             let mut conn = PageConn::connect(&target.ws_url, 30)
                 .await
