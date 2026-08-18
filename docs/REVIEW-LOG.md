@@ -13,7 +13,7 @@
 
 ## 2026-08-18 — P1-7 ローカル検証の`cargo xtask verify`一本化
 
-対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-7。
+対象: Claudeブランチ`claude/improvement-proposal-u9n8k5`のP1-7。PR #126で対応した。
 
 | # | 優先 | 指摘・確認 | 判定 | 対応・根拠 |
 |---|---|---|---|---|
