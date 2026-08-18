@@ -234,17 +234,16 @@ async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), St
         .await
         .map_err(|_| format!("{label}のプロセスツリー停止が3秒でタイムアウトしました"))?
         .map_err(|error| format!("{label}のプロセスツリーを停止できません: {error}"))?;
-    if !result.status.success() {
-        if child
+    if !result.status.success()
+        && child
             .try_wait()
             .map_err(|error| format!("{label}の終了状態を確認できません: {error}"))?
             .is_none()
-        {
-            return Err(format!(
-                "taskkillが失敗しました: {}",
-                String::from_utf8_lossy(&result.stderr).trim()
-            ));
-        }
+    {
+        return Err(format!(
+            "taskkillが失敗しました: {}",
+            String::from_utf8_lossy(&result.stderr).trim()
+        ));
     }
     tokio::time::timeout(Duration::from_secs(3), child.wait())
         .await

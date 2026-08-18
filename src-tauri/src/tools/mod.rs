@@ -29,6 +29,10 @@ pub trait Tool: Send + Sync {
     fn intent_keywords(&self) -> &'static [&'static str] {
         route_keywords(self.name())
     }
+    /// 同じ発話へ複数スキルが一致したときの明示優先度。大きい方を先に提示する。
+    fn intent_priority(&self) -> i32 {
+        0
+    }
     fn config_schema(&self) -> Vec<Field> {
         Vec::new()
     }
@@ -683,6 +687,7 @@ pub fn capability_summary() -> String {
         .filter(|t| t.agent_callable())
         .map(|t| t.label())
         .collect();
+    labels.sort_unstable();
     labels.dedup();
     labels.join("、")
 }
@@ -755,17 +760,31 @@ pub fn schemas_for_text(text: &str) -> Vec<Value> {
     for name in CORE_AGENT_TOOLS {
         push_schema_by_name(&mut selected, name);
     }
-    for tool in all().iter().filter(|tool| tool.agent_callable()) {
+    let mut matched: Vec<_> = all()
+        .iter()
+        .filter(|tool| tool.agent_callable())
+        .filter_map(|tool| {
+            let score = tool
+                .intent_keywords()
+                .iter()
+                .filter(|keyword| normalized.contains(&keyword.to_lowercase()))
+                .map(|keyword| keyword.chars().count())
+                .max()?;
+            Some((tool.intent_priority(), score, tool.name()))
+        })
+        .collect();
+    matched.sort_unstable_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
+    for (_, _, name) in matched {
         if selected.len() >= MAX_SELECTED_SCHEMAS {
             break;
         }
-        if tool
-            .intent_keywords()
-            .iter()
-            .any(|keyword| normalized.contains(&keyword.to_lowercase()))
-        {
-            push_schema_by_name(&mut selected, tool.name());
-        }
+        push_schema_by_name(&mut selected, name);
     }
     // 外部 MCP サーバのツール（ユーザーが明示設定したもの）は常に候補へ加える。
     for schema in crate::mcp::client::schemas() {
@@ -1001,6 +1020,28 @@ mod tests {
                 "{text} のschema候補に{name}がありません"
             );
         }
+    }
+
+    #[test]
+    fn スキル候補と能力一覧は登録順に依存しない() {
+        let first = schema_names("画像変換して画像を作って");
+        assert_eq!(first, schema_names("画像変換して画像を作って"));
+        let image_tools = first.iter().position(|name| name == "image_tools").unwrap();
+        let generator = first
+            .iter()
+            .position(|name| name == "comfyui_generate")
+            .unwrap();
+        assert!(
+            image_tools < generator,
+            "長い一致語を先にしてください: {first:?}"
+        );
+
+        let summary = super::capability_summary();
+        let labels: Vec<_> = summary.split('、').collect();
+        let mut sorted = labels.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(labels, sorted);
     }
 
     /// 承認マーカーは対話ループ専用の内部プロトコル。安全側の `dispatch` からは

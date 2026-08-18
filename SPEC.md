@@ -1,7 +1,7 @@
 # PicoAgent 仕様書
 
 対象: PicoAgent（コネクタ駆動デスクトップペット / Tauri）
-最終更新: 2026-08-11
+最終更新: 2026-08-18
 
 ---
 
@@ -13,9 +13,12 @@ PicoAgent は透明な **Tauri** ウィンドウに常駐する、キャラク�
 
 - **叩く AI** → プロバイダコネクタ（`src-tauri/src/providers/`）。**既定は `local`（同梱 llama-server、Ollama 不要）**、Ollama / OpenAI 互換も同梱。
 - **エージェント機能** → スキル（ツール）コネクタ（連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、トレイトは `src-tauri/src/tools/mod.rs`）。モデルが function calling で呼び出す。
-- **キャラクター** → 正本はプロジェクト直下の `characters/index.json` と各 `character.json`。`cargo xtask sync-characters` が `ui/assets/characters/` へ同期し webview が配信。見た目・アニメーション・人格を一体で切り替える。
+- **キャラクター** → 正本はプロジェクト直下の `characters/index.json` と各 `character.json`。`cargo xtask sync-characters` が `ui/assets/characters/` へ同期し webview が配信。見た目・アニメーション・人格を一体で切り替える。制作専用の `expression-patches/` と `live2d-src/` は配信コピーへ含めない。
 - **関係性** → `relationship.rs` がキャラクター別の `app_data_dir/relationship-<キャラクターID>.json` に、会話・完了作業・ふれあい・共有した出来事を原子的に保存する。数値は内部更新だけに使い、UIとシステム文脈では段階名と最近の出来事だけを扱う。
 - **両者をつなぐ中核** → エージェントループ（`src-tauri/src/agent.rs`）。
+- **中断** → 停止要求は生成ストリーム、再試行待機、並列ツール実行と競合させて即時に反映する。中断したツール呼び出しにも同じ `tool_call_id` の中断結果を補い、履歴の対応関係を崩さない。
+- **予約の追いつき** → `last_checked_minute` から現在分までを調べ、スリープ・再起動中の未処理分は直近24時間を上限に実行する。時計巻き戻り時は過去予定を二重実行しない。
+- **復号不能シークレット** → 設定画面では暗号文を入力値として表示せず、空欄と理由を示す。利用者が再入力しないまま保存した場合は既存暗号文を保持する。
 
 > [!NOTE]
 > 起動・セットアップ・設定キーは **[README.md](README.md)**、作業ルールは **[AGENTS.md](AGENTS.md)** を参照。本書は仕様の正本。
@@ -56,7 +59,7 @@ graph TD
 
 - コネクタは **`inventory` でコンパイル時自動登録**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して
   `#[path] pub mod` を生成するため、**プロバイダは `.rs` を1枚、スキルは `<スキル名>/mod.rs` を1つ置くだけ**でコネクタ追加（中央 `mod.rs` 編集不要）。
-- 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。
+- 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。一致候補は `intent_priority`、一致語の長さ、スキル名の順で安定整列し、登録順に依存させない。
 - `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
 - `hi` / `こんにちは` などの短い挨拶は `agent::simple_greeting_answer()` がプロバイダを呼ばず直接返す。小型モデルへ「AIとして説明しない」等の内部ガイドをユーザー本文に追記すると、禁止事項そのものを返答として説明・読み上げることがあるため、挨拶経路へ内部指示を混ぜない。履歴へはユーザーが入力した原文と自然な短文だけを残す。返す一言は全キャラ共通の定型文にせず、`pet_set_character_profile` が受け取った `character.json` の `greeting`（人格そのままの挨拶）を使う。時間帯は「おはよう」「こんばんは」のように挨拶自体が指していればそれに合わせ、`hi` / `やっほー` のように時間帯を含まない挨拶は実時刻（5〜10時=朝 / 11〜16時=昼 / それ以外=夜）で決める。朝・夜は先頭の挨拶語だけを差し替えて二重挨拶を避け、キャラクターの挨拶が無い場合だけ既定文へ落とす。
 - キャラの通常ドラッグはOS標準のウィンドウ移動とする。通常2Dは従来の上半身位置 `upper` を標準とし、長身・実写・Live2Dは長身でも腰まで入りすぎない胸上 `bust` を標準にする。Live2Dはモデル別の`live2d.scale` / `offsetY`で胸上へ調整済みなので、未保存時にPNG向け`bust`倍率を重ねず、中立の`upper=1.55`を基準倍率として扱う。立ち絵の構図は設定画面の「キャラごとの構図」で編集し、表示形式ごとにサイズスライダーとプレビュー上のドラッグ（数値入力も併設）で調整する。`PICOAGENT_CHARACTER_FRAMING` はキャラIDと表示形式ごとに `zoom` / `x` / `y` / `preset` を保存する。表示側は `#characterView` に `translate(--char-x, --char-y) scale(--char-zoom)` を当て、中の `img` が持つ待機モーションと干渉させない。
@@ -71,7 +74,7 @@ graph TD
 - `memory.rs` の長期メモリ検索が意味的類似度（バイグラムジャカード係数）に対応した。`context_for_query(app, cfg, query)` がユーザー発話に近いメモリ項目を優先して提示し、閾値（0.05）以下なら全件フォールバック。
 - 設定の正本は `config.rs`（`app_config_dir/config.json`）。コネクタは `cfg.get()` で都度読むため、設定変更は再起動なしに反映。
 - 会話履歴は `history.rs` がキャラクター別に `app_data_dir/history-<キャラクターID>.json` へ永続化する（対話データなので config とは分離）。`pet_send` のたびにコンテキストを圧縮して選択中キャラのファイルへ保存し、起動時に末尾 20 件を文脈へ復元する。保存先取得や既存ファイル読み取りに失敗した場合は空履歴として保存可能状態へ進まず、エラーを上位へ返す。JSON破損時は元ファイルの退避成功を確認してからだけ空履歴で継続し、退避できなければ上書きを止める。圧縮は2段階: ① `maybe_summarize_context()` がsystemを含むトークン推定量（日本語 ×2・ASCII ÷4）が予算の70%を超えた場合に古い40%のターンをLLMで要約し、systemメッセージ内の自動要約1ブロックを置換更新する（要約失敗時は元の会話を保持）。② `compacted_conversation()` で予算上限を超えた発話を古い順に削除する（最低 2 件は保持）。予算はlocalなら `PICOAGENT_LOCAL_CTX` の75%（下限1,500／上限24,000トークン）、コンテキスト長を取得できないプロバイダは6,000トークンで、system文の消費量も含める。これにより再起動をまたいで直近の会話を踏まえて話す。途中の tool 呼び出し/結果は順序破綻を避けるため文脈・履歴に残さない。`AppState.character_id` が文脈の持ち主キャラを保持し、`pet_set_character_profile` でキャラが変わったら現在の文脈を破棄して切替先キャラの履歴を復元する（旧キャラの一人称・自己紹介が混ざらない）。`AppState.conversation_epoch` はリセット・キャラ切替・設定再初期化で進み、応答中だった `pet_send` / `pet_send_image` / `pet_idle_chatter` / 承認待ちコマンドが後から完了しても、開始時のキャラIDまたは世代と異なる場合は履歴ファイル・画面履歴へ書き戻さない。旧仕様の単一 `history.json` は起動時に既定キャラ `mugi` のファイルへ一度だけ移行する（旧履歴はキャラ別管理が無かった時代のもので当時の既定キャラが mugi のため。選択中キャラへ割り当てると人格が混ざる）。さらに旧版が短い挨拶へ追記していた内部ガイドは、起動時に全 `history-*.json` を対象としてユーザー原文へ戻し、未選択キャラへ切り替えた後も文脈へ再混入させない。
-- 暗黙的な長期メモリは `memory.rs` が `app_data_dir/memory.json` に保存する。ユーザーの自己情報・好み・継続指示らしい文だけを保守的に抽出し、起動時と設定変更時に system 文脈へ短く差し込む。人格やプロンプトの変更（`reset_conversation`）では会話の流れを保持し、右クリックメニュー「表示と会話をリセット」→「会話履歴を消してリセット」（`clear_conversation_and_history`）では、履歴ファイルと長期メモリの削除が両方成功してから文脈・直近雑談を消して `pet:reset` を通知する。削除に失敗した場合は画面状態を成功扱いで消さず、エラー通知と診断ログを残す。
+- 暗黙的な長期メモリは `memory.rs` が `app_data_dir/memory.json` に保存する。ユーザーの自己情報・好み・継続指示らしい文だけを保守的に抽出し、起動時と設定変更時に system 文脈へ短く差し込む。人格やプロンプトの変更（`reset_conversation`）では会話の流れを保持し、右クリックメニュー「表示と会話をリセット」→「会話履歴と覚えたことを消す」→「消す（元に戻せません）」（`clear_conversation_and_history`）では、履歴ファイルと長期メモリの削除が両方成功してから文脈・直近雑談を消して `pet:reset` を通知する。削除に失敗した場合は画面状態を成功扱いで消さず、エラー通知と診断ログを残す。
 
 ---
 
@@ -252,7 +255,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - `tools::dispatch(cfg, name, args)` が実行を仲介する。未登録ツールもエラー文字列で返す（エージェントが回復できるように）。出力が `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` の上限を超える場合は末尾を切り捨て、コンテキスト超過を防ぐ。
 - スキル実体、名前インデックス、function schema は `OnceLock` でキャッシュする。多数のスキルを導入しても会話ごとの schema 構築や dispatch 時の全スキル再生成を避ける。
 - `tools::schemas_for_text(text)` がユーザー発話から必要そうな function schema を選び、通常会話で全スキル定義をLLMへ渡さない。`dispatch` は全スキルを呼べるため、これはモデルへ見せる候補の圧縮であり、内部スキルや明示呼び出しの実行能力は維持する。
-- 候補判定語彙は `Tool::intent_keywords()` が返す登録メタデータを正本とし、schema候補選定と副作用のない直接実行判定は `tools::intent_matches()` を共有する。全ルートが登録済みToolを指すことと代表発話を共通テストで検査する。
+- 候補判定語彙は `Tool::intent_keywords()` が返す登録メタデータを正本とし、schema候補選定と副作用のない直接実行判定は `tools::intent_matches()` を共有する。候補が上限を超える場合は `Tool::intent_priority()` の降順、一致した語の長さの降順、スキル名の昇順で安定選択する。全ルートが登録済みToolを指すことと代表発話を共通テストで検査する。
 - 標準的な外向きHTTPは `tools::http::client()` の接続プールを共有し、待ち時間設定は `tools::http::timeout()` で範囲を統一する。User-Agent、Cookie、プロキシ等の専用構築が必要なコネクタだけ個別builderを使う。
 - 共有クライアントは接続確立に 10 秒の上限を持つ（応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない）。モデル一覧のような短い問い合わせは `tools::http::metadata_timeout()`（`PICOAGENT_HTTP_METADATA_TIMEOUT_SECS`）でリクエスト全体にも上限を付け、この値は基本設定の「詳細設定」から変更できる。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/run_command/jobs.rs` のような補助ファイル変更もビルドに反映される。
@@ -335,7 +338,7 @@ CSP の `script-src` は `'self' 'unsafe-eval' 'wasm-unsafe-eval'` とする。*
 | `currency_rates` | Frankfurter API による為替レート取得・換算・推移チャート（スパークライン。`chart=true` / `days`） | APIキー不要、timeout |
 | `market_indices` | Yahoo Finance chart API による日経平均・TOPIX・NYダウ・NASDAQ・S&P500 の取得と推移チャート（スパークライン） | APIキー不要、timeout、User-Agent 指定 |
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新ニュース見出し候補を取得。今日のニュース要約ではこのスキルを先に使う | 対象ドメインを Google News / Yahoo!ニュースに限定、HTML 1MB上限、件数上限、timeout、User-Agent 指定 |
-| `rss_feed` | RSS/Atom フィードの最新記事取得 | フィードサイズ1MB上限、件数上限、timeout |
+| `rss_feed` | RSS/Atom フィードの最新記事取得 | 各リダイレクト先を含む公開HTTP(S)宛先検査、DNS解決先固定、最大5回、フィードサイズ1MB上限、件数上限、timeout |
 | `read_file` | ローカルのテキストファイルを行番号つきで読込。`offset` / `limit` で範囲指定できる | 共通許可ルート（`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS`）配下に限定、`..` やリンク経由のルート外を拒否。ファイル4MB・既定800行（最大2000）・1行800文字・出力128KB で打ち切り、続きの `offset` を案内する |
 | `view_image` | 許可ルート配下の画像をモデルへ見せる（png / jpg / gif / webp / bmp、最大3枚） | 共通許可ルート配下に限定、1枚4MB上限。ツール結果には画像を載せず、`agent.rs` が画像付き user メッセージを会話へ差し込む。実際に読めるかはモデルがマルチモーダルかどうかに依るため、「非対応モデルでは無視される」旨をツール結果へ明記する。画像を運べる形式へは各プロバイダが変換する（OpenAI 互換は `image_url`、Ollama は `images` 配列、Anthropic は image ブロック） |
 | `ask_user` | 判断が分かれる点を2〜4個の選択肢つきでユーザーへ確認する | 外部送信なし。マーカーを返してエージェントループを止め、質問文と選択肢をチャットへ返す（フロントはクイック操作欄へ選択肢ボタンを出す）。次のユーザー発話は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま渡す。質問300文字・ラベル40文字・説明120文字で切り詰める |
