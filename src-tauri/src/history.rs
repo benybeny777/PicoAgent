@@ -65,7 +65,9 @@ fn allow_saving(character_id: &str) {
     unreadable().lock().unwrap().remove(&sanitize(character_id));
 }
 
-fn saving_blocked(character_id: &str) -> bool {
+/// 保存を止めているか。止めている間の会話はどこにも残らないため、
+/// `pet_init` がこの状態を画面へ返して利用者へ知らせる（ログだけでは気づけない）。
+pub fn saving_blocked(character_id: &str) -> bool {
     unreadable()
         .lock()
         .unwrap()
