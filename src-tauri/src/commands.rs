@@ -644,6 +644,9 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "history": recent_history,
+        // 原本を読めなかったキャラクターは保存を止めている。黙っていると利用者は
+        // 保存されていると思ったまま会話を続け、再起動でその分がまるごと消える。
+        "historySaveBlocked": crate::history::saving_blocked(&character_id),
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
         "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
         "layout": crate::layout::current(&state.config),
