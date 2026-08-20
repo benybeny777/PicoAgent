@@ -1,5 +1,9 @@
 # 変更履歴
 
+## 2026-08-20
+
+- PicoAgentの紹介スライド `distribution/site/PicoAgent-Intro.pptx` を追加した。16:9・15ページで、概要、3つの柱、スキル70種、AIモデルの選択、声とふれあい、付属キャラクター、表示形式7種、プライバシー、開発者向けのAPI／MCP、動作環境、導入3ステップ、ベータ版の制限、料金、取得導線までを扱う。文言・キャラクター紹介・数値は公開LP（`distribution/site/index.html` と `characters.html`）に合わせ、配色もLPの`style.css`のトークンを使う。配布リポジトリへも同じファイルを同期する。
+
 ## 2026-08-19
 
 - `cargo xtask stop` が、撮影・検査ツール（`tools/screenshots/`）の残した `node` もプロセスツリーごと回収するようにした。実行ファイル名ではなく起動経路で判別するため、Codex の MCP サーバなど無関係な `node` は止めない。
