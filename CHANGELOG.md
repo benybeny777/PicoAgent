@@ -2,6 +2,8 @@
 
 ## 2026-08-20
 
+- 公開LPと配布リポジトリの文書から、有料版に関する記述を削除した。`index.html` のPro版プランカード、Free／Proの機能区分、BOOTH／Steamの販売予告、購入後の返品・キャンセル・返金の案内、FAQの購入項目を外し、プラン節は無料のベータ版1枚に整理した。`README.md`・`support.html`・`privacy.html`・`terms.html` の購入・販売・ライセンスキーを前提とした記述も同じ方針へ揃えた。未使用になった `.plan-card.pro` と `.plan-ribbon` のCSSも削除した。アプリ側のライセンス機能と `distribution/release.json` は変更していない。
+
 - PicoAgentの紹介スライド `distribution/site/PicoAgent-Intro.pptx` を追加した。16:9・15ページで、概要、3つの柱、スキル70種、AIモデルの選択、声とふれあい、付属キャラクター、表示形式7種、プライバシー、開発者向けのAPI／MCP、動作環境、導入3ステップ、ベータ版の制限、料金、取得導線までを扱う。文言・キャラクター紹介・数値は公開LP（`distribution/site/index.html` と `characters.html`）に合わせ、配色もLPの`style.css`のトークンを使う。配布リポジトリへも同じファイルを同期する。
 
 ## 2026-08-19
