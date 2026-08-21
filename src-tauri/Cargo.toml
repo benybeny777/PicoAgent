@@ -8,7 +8,7 @@ rust-version = "1.88"
 publish = false
 
 [features]
-# 開発中ベータだけでPro対象スキルを試用可能にする。正式版はこのfeatureを付けない。
+# 開発中アルファだけでPro対象スキルを試用可能にする。正式版はこのfeatureを付けない。
 beta-full = []
 
 [lib]

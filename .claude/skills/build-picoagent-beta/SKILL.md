@@ -1,6 +1,6 @@
 ---
 name: build-picoagent-beta
-description: PicoAgentの軽量な開発中ベータ版をビルド・検証・公開する依頼で使う。
+description: PicoAgentの軽量な開発中アルファ版をビルド・検証・公開する依頼で使う。
 ---
 
 # 共通スキルへの入口

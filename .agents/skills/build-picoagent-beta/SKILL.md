@@ -1,9 +1,9 @@
 ---
 name: build-picoagent-beta
-description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビルドし、不要な開発用同梱物や旧インストーラを混ぜず、ハッシュ付き更新情報、Distribution README、動画、GitHub Releaseまで検証・公開する依頼で使う。
+description: PicoAgentの開発中アルファ版をWindows NSISとして軽量ビルドし、不要な開発用同梱物や旧インストーラを混ぜず、ハッシュ付き更新情報、Distribution README、動画、GitHub Releaseまで検証・公開する依頼で使う。
 ---
 
-# PicoAgentベータ版をビルドする
+# PicoAgentアルファ版をビルドする
 
 ## 事前確認
 
@@ -16,10 +16,10 @@ description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビ�
 
 ## 混入を防ぐ
 
-- 公開ベータ版は必ず`cargo xtask build-beta --bundles nsis`を正規入口にする。
-- `build-beta`が`beta-full` featureを自動付与し、製品情報へベータ全機能試用中と表示することを確認する。正式版コマンドへこのfeatureを付けない。
-- `build-beta`だけが`BETA`バッジを配信物へ残す。生成後の`ui-dist/index.html`に`beta-badge`があること、通常`build`では無いことを確認する。
-- `cargo xtask build`も軽量構成だがBETA表示と全機能試用featureが付かないため、公開ベータ版へ使わない。Office、Aivis、Whisper、THA3、開発ツールまで暗黙取得する`build-full`は配布へ使わない。
+- 公開アルファ版は必ず`cargo xtask build-beta --bundles nsis`を正規入口にする。
+- `build-beta`が`beta-full` featureを自動付与し、製品情報へアルファ全機能試用中と表示することを確認する。正式版コマンドへこのfeatureを付けない。
+- `build-beta`だけが`ALPHA`バッジを配信物へ残す。生成後の`ui-dist/index.html`に`beta-badge`があること、通常`build`では無いことを確認する。
+- `cargo xtask build`も軽量構成だがALPHA表示と全機能試用featureが付かないため、公開アルファ版へ使わない。Office、Aivis、Whisper、THA3、開発ツールまで暗黙取得する`build-full`は配布へ使わない。
 - `src-tauri/tauri.distribution.conf.json`の資産許可範囲が基本エンジンと`component-manifest.json`だけであることを確認する。
 - `distribution/release.json`の許可キャラ以外、Live2Dサンプル、制作途中素材、過去のインストーラを含めない。
 - ビルド開始時刻より古い成果物は失敗扱いにし、公開しない。
@@ -28,13 +28,13 @@ description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビ�
 ## 版を決める
 
 1. 公開中の`latest.json`と公開Releaseの版が一致することを確認する。
-2. 通常の修正、依存・モデル・同梱物更新、文書・LP、既存ベータ再配布は同じ`major.minor`系列の`patch`とする。
+2. 通常の修正、依存・モデル・同梱物更新、文書・LP、既存アルファ再配布は同じ`major.minor`系列の`patch`とする。
 3. `minor`と`major`はユーザーが版を上げるよう明示した場合だけ選ぶ。機能内容から独断で上げない。
 5. `cargo xtask bump-version <major|minor|patch>`を1回だけ実行する。アプリCargo、xtask Cargo、Tauri設定を個別に編集しない。
 6. 公開済みと同じ版のRelease資産を上書きしない。採番後の版で新しいプレリリースを作る。
 7. 判定した種別と理由を`docs/REVIEW-LOG.md`へ記録する。
 8. `patch`版もLP、アプリ、ファイル名、Releaseへ正確に表示する。起動時の自動確認ではpatchを通知せず、利用者が設定から手動確認した場合だけpatchも案内・ダウンロードできるようにする。`major.minor`が上がった場合は起動時にも通知する。
-9. ベータ期間中は製品表示、LP、更新説明、Release名へ`Beta`を付ける。比較用SemVerとタグには接尾辞を混ぜず数値版を使う。
+9. アルファ期間中は製品表示、LP、更新説明、Release名へ`Alpha`を付ける。比較用SemVerとタグには接尾辞を混ぜず数値版を使う。
 
 ## ビルド
 
@@ -58,7 +58,7 @@ description: PicoAgentの開発中ベータ版をWindows NSISとして軽量ビ�
 
 1. 本体リポジトリ側でLP、README、規約、キャラ構成、現行UI画像、`latest.json`を最新仕様へ直し、目的別PRをsquash mergeする。公開側だけを先行修正して正本と分岐させない。
 2. `distribution/site/`の全追跡ファイルを配布リポジトリへ同じ版として同期する。公開側にだけある追跡ファイルは、由来と参照を確認し、旧機能や旧資産なら目的別PRで削除する。
-3. READMEへ開発中ベータ、対応OS、未署名警告、インストール、基本操作、問題報告先を明記する。
+3. READMEへ開発中アルファ、対応OS、未署名警告、インストール、基本操作、問題報告先を明記する。
 4. 配布リポジトリも目的別PRでsquash mergeし、`main`への直接pushをしない。
 5. 同じ版のGitHub Releaseをプレリリースとして作り、検証済みNSISだけを添付する。既存Releaseを更新する場合も、資産を差し替えた後に外部から再取得してサイズとSHA-256を照合する。
 6. Pagesの最新ビルドが配布リポジトリのマージコミットを`built`としていることを確認する。公開LPをPC幅とスマホ幅で開き、CTA、現行UI、キャラの見切れ、旧機能の残存、動画表示を目視する。

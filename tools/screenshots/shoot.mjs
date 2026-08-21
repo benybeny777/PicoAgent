@@ -667,7 +667,7 @@ async function validateInteractionMatrix() {
           && rect.x < viewportRect.width && rect.y < viewportRect.height
           && rect.x + rect.width > 0 && rect.y + rect.height > 0;
         if (!intersects(state.beta) || state.betaPointerEvents !== "none") {
-          throw new Error(`${target.id}/${layout}: BETA表示が画面外または操作を遮っています ${JSON.stringify(state.beta)}`);
+          throw new Error(`${target.id}/${layout}: ALPHA表示が画面外または操作を遮っています ${JSON.stringify(state.beta)}`);
         }
         if (!intersects(state.bubble) || !intersects(state.character) || !intersects(state.composer) || !intersects(state.input)) {
           throw new Error(`${target.id}/${layout}: 縮小後に主要UIが画面から消えました ${JSON.stringify(state)}`);
@@ -687,8 +687,8 @@ async function validateInteractionMatrix() {
   const formalPage = await openScene({ characterId: "mugi", forcePng: true, betaBuild: false });
   try {
     const betaVisible = await formalPage.locator(".beta-badge").isVisible();
-    if (betaVisible) throw new Error("通常／正式ビルド相当でもBETA表示が残っています");
-    console.log("  ビルド種別検査: beta-fullなしではBETA表示を隠す");
+    if (betaVisible) throw new Error("通常／正式ビルド相当でもALPHA表示が残っています");
+    console.log("  ビルド種別検査: beta-fullなしではALPHA表示を隠す");
   } finally {
     await formalPage.close();
   }

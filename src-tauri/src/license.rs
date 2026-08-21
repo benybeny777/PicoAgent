@@ -39,9 +39,9 @@ pub struct Status {
 pub fn status(_cfg: &Config) -> Status {
     Status {
         active: true,
-        edition: "beta".to_string(),
+        edition: "alpha".to_string(),
         customer: String::new(),
-        message: "ベータ期間中は全機能を試用できます。".to_string(),
+        message: "アルファ期間中は全機能を試用できます。".to_string(),
     }
 }
 
