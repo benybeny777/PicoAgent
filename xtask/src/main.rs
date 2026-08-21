@@ -28,7 +28,7 @@ const USAGE: &str = "\
   dev                 最小構成で開発起動（追加機能は setup で明示取得）
   build               任意の大容量追加機能を含めない開発用製品ビルド
   build-full          全追加機能を明示取得して作る開発用フルビルド
-  build-beta          販売ゲート前の軽量ベータ版インストーラを生成
+  build-beta          販売ゲート前の軽量アルファ版インストーラを生成
   build-distribution  販売条件を検査し、販売対象キャラだけで製品ビルド
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
@@ -150,7 +150,7 @@ struct Build {
     lightweight_bundle: bool,
     /// 販売前ゲート（`release-check`）を必須にする。
     require_release_check: bool,
-    /// 開発中ベータ版として作る（全機能試用の `beta-full` と画面の BETA 表示）。
+    /// 開発中アルファ版として作る（全機能試用の `beta-full` と画面の ALPHA 表示）。
     beta: bool,
 }
 

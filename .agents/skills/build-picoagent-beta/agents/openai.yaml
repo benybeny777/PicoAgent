@@ -1,4 +1,4 @@
 interface:
-  display_name: "PicoAgent ベータビルド"
-  short_description: "最新LPと配布物を照合してWindowsベータ版を公開する"
+  display_name: "PicoAgent アルファビルド"
+  short_description: "最新LPと配布物を照合してWindowsアルファ版を公開する"
   default_prompt: "Use $build-picoagent-beta to build, verify, and publish the latest PicoAgent Windows beta and LP."

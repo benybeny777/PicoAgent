@@ -11,6 +11,20 @@
 
 ---
 
+## 2026-08-21 — 呼称を「ベータ版」から「アルファ版」へ変更
+
+対象: 利用者からの指示「ベータ版というのもおこがましいのでアルファ版としましょうか」「LPもついでにコードのほうも」。
+
+| # | 指摘・確認 | 対応 | 状態 |
+|---|---|---|---|
+| 1 | 公開LPとアプリ表示の呼称 | `distribution/site/`一式、`latest.json`の説明文、`ui/index.html`のバッジ表示、`src-tauri/src/license.rs`の`edition`と案内文、README・SPEC・`docs/SALE-READINESS.md`・ビルド手順スキルを「アルファ」へ置き換えた | 対応済み |
+| 2 | `edition` の値を変えると画面が壊れないか | `ui/settings.js`は`license.edition.toUpperCase()`を表示するだけで、値を比較する分岐がないことを確認してから変更した | 対応済み |
+| 3 | 識別子（`beta-full` / `build-beta` / `--beta` / `betaBuild` / `beta-badge` / `remove_beta_badge` / `build-picoagent-beta`） | 見送り。ビルド経路・Cargo feature・xtaskのテスト前提に触れるため、表示名の変更とは切り離す。利用者に見えない名前であり、改名するなら`cargo check`と全テストを通せる状態で別PRにする | 見送り |
+| 4 | `providers/gemini.rs` の `v1beta` | 変更なし。Google側APIのパスであり、製品の呼称とは無関係 | 見送り |
+| 5 | `CHANGELOG.md`・`docs/REVIEW-LOG.md`・`HANDOFF.md`・`docs/changelog/` の過去記述 | 変更なし。当時の記録であり、遡って書き換えると履歴が事実と食い違うため | 見送り |
+| 6 | 既に公開済みのRelease（タグ`v1.0.2`、資産`PicoAgent_1.0.2_x64-setup.exe`） | 未対応。こちらからは変更できない。LPの表示だけ「v1.0.2 Alpha」になるため、Release側の表記合わせは利用者の操作が要る | 保留 |
+| 7 | 検証 | `xtask`のテストは61件中60件通過。失敗した`同梱2dの実行画像はlossless_webp単一世代にする`は、変更前の`main`でも同じく失敗することを確認済み（キャラのWebPがLFSポインタのままの環境要因）。バッジ剥がしのテストは通過。LPはChromiumで1440×900と390×844を表示し、横はみ出し0px・「ベータ」の残り0件を確認 | 対応済み |
+
 ## 2026-08-20 — 「手元の CLI エージェント」を通常の選択肢として書き直し
 
 対象: 利用者からの指示「叩くAIでコマンドもいけるのはもっと普通にかいて。開発用とかじゃなく」「cliは普通」。
