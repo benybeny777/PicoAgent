@@ -9,11 +9,12 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   DetailPrint "PicoAgent の関連プロセスを停止しています..."
-  nsExec::ExecToLog 'taskkill /F /T /IM PicoAgent.exe'
-  nsExec::ExecToLog 'taskkill /F /T /IM picoagent.exe'
-  nsExec::ExecToLog 'taskkill /F /T /IM llama-server.exe'
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq ''run.exe'' -and ($$_.ExecutablePath -like ''*PicoAgent*'' -or $$_.ExecutablePath -like ''*resources\\bundled\\aivis\\run.exe'' -or $$_.ExecutablePath -like ''*resources\\aivis\\run.exe'') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"'
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq ''whisper-cli.exe'' -and $$_.ExecutablePath -like ''*resources\\bundled\\whisper\\whisper-cli.exe'' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"'
+  ; 同名の別アプリや利用者が単独で起動したローカルAIを止めない。
+  ; インストール先またはPicoAgent管理データ配下の実体だけを対象にする。
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -ieq 'PicoAgent.exe' -and $$_.ExecutablePath -ieq '$INSTDIR\PicoAgent.exe' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'llama-server.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\engine\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\engine\*' -or $$_.ExecutablePath -like '$LOCALAPPDATA\PicoAgent\bundled\engine\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'run.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\aivis\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\aivis\*' -or $$_.ExecutablePath -like '$LOCALAPPDATA\PicoAgent\bundled\aivis\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'whisper-cli.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\whisper\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\whisper\*' -or $$_.ExecutablePath -like '$LOCALAPPDATA\PicoAgent\bundled\whisper\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL

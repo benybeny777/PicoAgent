@@ -612,26 +612,48 @@ pub fn fetch_tha3() -> Result<()> {
 
 // ── 推論エンジン（llama-server） ────────────────────────────────────────
 
+// llama.cpp v0.2.0 が配布用に案内する対応nightly。stableタグ自体には実行資産がなく、
+// `nightly-tag.txt` が指すこのタグへ固定する。同じPicoAgent版を別の日に作っても中身を変えない。
+const LLAMACPP_RELEASE_TAG: &str = "b10566";
+const LLAMACPP_WIN_VULKAN_ASSET: (&str, &str) = (
+    "llama-b10566-bin-win-vulkan-x64.zip",
+    "68e15a0a0d07df55a695ec4d81465cf57400431d54ae19fadcb51dc919724042",
+);
+const LLAMACPP_MAC_ARM64_ASSET: (&str, &str) = (
+    "llama-b10566-bin-macos-arm64.tar.gz",
+    "533f546dab2ce2f8e29ce3070f26acc55acc59528e177f2cd0d52b7f69b44f50",
+);
+const LLAMACPP_MAC_X64_ASSET: (&str, &str) = (
+    "llama-b10566-bin-macos-x64.tar.gz",
+    "968669b2ec00acf9804e325b51180014d09939894202d44206b4a190d9ef0369",
+);
+const LLAMACPP_LINUX_X64_ASSET: (&str, &str) = (
+    "llama-b10566-bin-ubuntu-x64.tar.gz",
+    "0c34561d623299c113e46f9fdd97bff5b219b25554243a21a243aebc81253ea1",
+);
+const ENGINE_BUNDLE_MANIFEST: &str = "picoagent-engine.json";
+
 /// 推論エンジン llama.cpp（llama-server）を `resources/bundled/engine/` へ配置する。
 ///
-/// 既定は Windows x64 の Vulkan(GPU) ビルド。別 OS / CPU ビルドは環境変数で上書きできる。
-///   `LLAMACPP_ASSET`  … アセット名の一部を直接指定（最優先）
+/// 既定は Windows x64 の Vulkan(GPU) ビルド。別資産へ明示変更する場合は名前とSHA-256を両方指定する。
+///   `LLAMACPP_ASSET`   … 固定タグ内のアセット名の一部
+///   `LLAMACPP_SHA256`  … 上のアセットに対応する固定SHA-256
 ///   `LLAMACPP_FORCE=1` … 既存配置を再取得
 pub fn fetch_engine() -> Result<()> {
     let dir = repo_root().join("src-tauri/resources/bundled/engine");
     let legacy = repo_root().join("src-tauri/resources/engine");
     fs::create_dir_all(&dir)?;
 
+    let (asset_selector, expected_sha256) = engine_asset_spec()?;
     let server = dir.join(exe_name("llama-server"));
-    if server.exists() && !flag("LLAMACPP_FORCE") {
+    if engine_bundle_ready(&dir, &asset_selector, &expected_sha256) && !flag("LLAMACPP_FORCE") {
         make_executable(&server);
         log("setup:engine", format!("engine ready: {}", dir.display()));
         return Ok(());
     }
 
     // 旧配置（resources/engine）に取得済みならコピーで移行する。
-    let legacy_server = legacy.join(exe_name("llama-server"));
-    if legacy_server.exists() && !flag("LLAMACPP_FORCE") {
+    if engine_bundle_ready(&legacy, &asset_selector, &expected_sha256) && !flag("LLAMACPP_FORCE") {
         cleanup_dir(&dir, "旧llama-server配置")?;
         crate::util::copy_dir(&legacy, &dir, &|_| false)?;
         fs::write(dir.join(".gitkeep"), "\n")?;
@@ -643,8 +665,15 @@ pub fn fetch_engine() -> Result<()> {
         return Ok(());
     }
 
-    let release = get_json("https://api.github.com/repos/ggml-org/llama.cpp/releases/latest")?;
-    let asset = pick_asset(&release, engine_asset_matcher())?;
+    let release = get_json(&format!(
+        "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/{LLAMACPP_RELEASE_TAG}"
+    ))?;
+    let asset = pick_asset(&release, |name| name.contains(&asset_selector))?;
+    anyhow::ensure!(
+        asset.sha256.eq_ignore_ascii_case(&expected_sha256),
+        "{} のGitHub digestが固定値と一致しません。上流資産が差し替わった可能性があるため停止します",
+        asset.name
+    );
     let tag = release
         .get("tag_name")
         .and_then(Value::as_str)
@@ -668,6 +697,15 @@ pub fn fetch_engine() -> Result<()> {
     if !ok {
         bail!("llama-server が展開物に見つかりません");
     }
+    let bundle_manifest = serde_json::json!({
+        "releaseTag": LLAMACPP_RELEASE_TAG,
+        "asset": asset.name,
+        "sha256": expected_sha256,
+    });
+    fs::write(
+        staged.join(ENGINE_BUNDLE_MANIFEST),
+        serde_json::to_vec_pretty(&bundle_manifest)?,
+    )?;
     fs::write(staged.join(".gitkeep"), "\n")?;
     let old = dir.with_file_name(format!("engine-old-{}", std::process::id()));
     cleanup_dir(&old, "前回のllama-server退避フォルダ")?;
@@ -690,26 +728,52 @@ pub fn fetch_engine() -> Result<()> {
     Ok(())
 }
 
-fn engine_asset_matcher() -> impl Fn(&str) -> bool {
+fn engine_asset_spec() -> Result<(String, String)> {
     let override_name = env_or("LLAMACPP_ASSET", "");
-    move |name: &str| {
-        if !override_name.is_empty() {
-            return name.contains(&override_name);
-        }
-        if cfg!(windows) {
-            // Windows Vulkan x64（GPU 優先・NVIDIA / Intel 兼用）
-            name.contains("-bin-win-vulkan-x64") && name.ends_with(".zip")
-        } else if cfg!(target_os = "macos") {
-            let want = if cfg!(target_arch = "aarch64") {
-                "-bin-macos-arm64"
-            } else {
-                "-bin-macos-x64"
-            };
-            name.contains(want) && name.ends_with(".tar.gz")
-        } else {
-            name.contains("-bin-ubuntu-x64") && name.ends_with(".tar.gz")
-        }
+    if !override_name.is_empty() {
+        let sha256 = env_or("LLAMACPP_SHA256", "");
+        anyhow::ensure!(
+            sha256.len() == 64
+                && sha256
+                    .chars()
+                    .all(|character| character.is_ascii_hexdigit()),
+            "LLAMACPP_ASSETを変更する場合は対応する64桁のLLAMACPP_SHA256も指定してください"
+        );
+        return Ok((override_name, sha256.to_ascii_lowercase()));
     }
+    let (name, sha256) = if cfg!(windows) {
+        LLAMACPP_WIN_VULKAN_ASSET
+    } else if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            LLAMACPP_MAC_ARM64_ASSET
+        } else {
+            LLAMACPP_MAC_X64_ASSET
+        }
+    } else {
+        LLAMACPP_LINUX_X64_ASSET
+    };
+    Ok((name.to_string(), sha256.to_string()))
+}
+
+fn engine_bundle_ready(dir: &Path, asset_selector: &str, expected_sha256: &str) -> bool {
+    if !dir.join(exe_name("llama-server")).is_file() {
+        return false;
+    }
+    let Ok(text) = fs::read_to_string(dir.join(ENGINE_BUNDLE_MANIFEST)) else {
+        return false;
+    };
+    let Ok(manifest) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    manifest.get("releaseTag").and_then(Value::as_str) == Some(LLAMACPP_RELEASE_TAG)
+        && manifest
+            .get("asset")
+            .and_then(Value::as_str)
+            .is_some_and(|asset| asset.contains(asset_selector))
+        && manifest
+            .get("sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|sha256| sha256.eq_ignore_ascii_case(expected_sha256))
 }
 
 // ── Whisper（文字起こし） ──────────────────────────────────────────────
@@ -1303,32 +1367,26 @@ mod tests {
         assert!(select_tha3_backend(false, false, false).is_err());
     }
 
-    /// llama.cpp のリリース資産名からプラットフォーム用を選べること。
+    /// llama.cpp のリリース資産とSHA-256がプラットフォームごとに固定されていること。
     #[test]
     fn エンジンのアセットを選ぶ() {
-        let names = [
-            "llama-b4321-bin-win-vulkan-x64.zip",
-            "llama-b4321-bin-win-cpu-x64.zip",
-            "llama-b4321-bin-macos-arm64.tar.gz",
-            "llama-b4321-bin-macos-x64.tar.gz",
-            "llama-b4321-bin-ubuntu-x64.tar.gz",
-        ];
-        let matcher = engine_asset_matcher();
-        let picked: Vec<&str> = names.into_iter().filter(|name| matcher(name)).collect();
-        assert_eq!(picked.len(), 1, "1つだけ選ばれること: {picked:?}");
-
+        let (name, sha256) = engine_asset_spec().unwrap();
         let expected = if cfg!(windows) {
-            "llama-b4321-bin-win-vulkan-x64.zip"
+            LLAMACPP_WIN_VULKAN_ASSET.0
         } else if cfg!(target_os = "macos") {
             if cfg!(target_arch = "aarch64") {
-                "llama-b4321-bin-macos-arm64.tar.gz"
+                LLAMACPP_MAC_ARM64_ASSET.0
             } else {
-                "llama-b4321-bin-macos-x64.tar.gz"
+                LLAMACPP_MAC_X64_ASSET.0
             }
         } else {
-            "llama-b4321-bin-ubuntu-x64.tar.gz"
+            LLAMACPP_LINUX_X64_ASSET.0
         };
-        assert_eq!(picked[0], expected);
+        assert_eq!(name, expected);
+        assert_eq!(sha256.len(), 64);
+        assert!(sha256
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()));
     }
 
     #[test]

@@ -312,10 +312,10 @@ pub fn check(strict: bool) -> Result<Value> {
         ));
     }
 
-    // 販売版に入る第三者バイナリは同梱エンジン（llama-server）だけだが、その取得は
-    // `releases/latest` 固定なしで、SHA-256 の照合も無い（Live2D Core の取得は照合している）。
-    // 同じ PicoAgent の版でもビルド日ごとに中身が変わるため、出荷物を再現できず、
-    // ライセンス台帳にどの版を同梱したかも書けない。販売前に版を固定して照合を入れる。
+    // 販売版に入る第三者バイナリは同梱エンジン（llama-server）だけなので、
+    // タグとSHA-256が固定されていることを検査する。
+    // 同じPicoAgentの版でもビルド日ごとに中身が変わる状態へ戻ると、出荷物を再現できず、
+    // ライセンス台帳にどの版を同梱したかも書けないため、販売監査で回帰を止める。
     if !bundled_engine_pinned(&root)? {
         warnings.push(
             "同梱エンジン（llama-server）が releases/latest 取得のままで、版の固定とSHA-256照合がありません。\
@@ -500,8 +500,8 @@ pub fn bump_version(args: &[String]) -> Result<()> {
 
 /// 同梱エンジンの取得が版固定＋SHA-256照合になっているか。
 ///
-/// 実装（`bundled::fetch_engine`）を読んで判定する。`releases/latest` を引いている間は
-/// 固定されていない。ここを直したら判定も一緒に更新すること。
+/// 実装（`bundled::fetch_engine`）を読んで判定する。`releases/latest`を引かず、
+/// 固定SHA-256との一致を明示的に検査すること。
 fn bundled_engine_pinned(root: &Path) -> Result<bool> {
     let text = fs::read_to_string(root.join("xtask/src/bundled.rs"))
         .context("xtask/src/bundled.rsを読めません")?;
@@ -517,7 +517,9 @@ fn bundled_engine_pinned(root: &Path) -> Result<bool> {
         .min()
         .unwrap_or(body.len());
     let body = &body[..end];
-    Ok(!body.contains("releases/latest") && body.contains("sha256"))
+    Ok(!body.contains("releases/latest")
+        && body.contains("expected_sha256")
+        && body.contains("eq_ignore_ascii_case"))
 }
 
 #[cfg(test)]
@@ -625,6 +627,46 @@ mod tests {
                 script.contains("IfSilent picoagent_keep_user_data"),
                 "{name}"
             );
+        }
+    }
+
+    #[test]
+    fn アンインストールは名前だけで外部プロセスを停止しない() {
+        let root = crate::util::repo_root();
+        for name in ["installer-hooks.nsh", "installer-hooks-lite.nsh"] {
+            let script = std::fs::read_to_string(root.join("src-tauri").join(name)).unwrap();
+            for process in ["PicoAgent.exe", "llama-server.exe", "run.exe"] {
+                assert!(
+                    script.contains(process),
+                    "{name}: {process} の停止処理がない"
+                );
+            }
+            assert!(
+                script.contains("$INSTDIR\\PicoAgent.exe"),
+                "{name}: 本体をインストール先へ限定していない"
+            );
+            assert!(
+                script.contains("$APPDATA\\PicoAgent\\bundled\\engine\\*"),
+                "{name}: 管理下エンジンの停止経路がない"
+            );
+            assert!(
+                script.contains("nsExec::ExecToLog `powershell"),
+                "{name}: PowerShell内の単一引用符を壊さないNSIS文字列ではない"
+            );
+            for unsafe_command in [
+                "taskkill /F /T /IM PicoAgent.exe",
+                "taskkill /F /T /IM picoagent.exe",
+                "taskkill /F /T /IM llama-server.exe",
+                "-like ''*PicoAgent*''",
+                "-like ''*resources\\\\bundled",
+                "''run.exe''",
+                "''llama-server.exe''",
+            ] {
+                assert!(
+                    !script.contains(unsafe_command),
+                    "{name}: 名前または広すぎる末尾パスだけで停止しています: {unsafe_command}"
+                );
+            }
         }
     }
 

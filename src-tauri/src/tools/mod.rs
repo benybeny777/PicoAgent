@@ -853,6 +853,8 @@ mod tests {
                     .and_then(|name| name.as_str())
                     .map(ToString::to_string)
             })
+            // 外部MCPは別テストが接続中でも変化するため、組み込み候補の検査から分離する。
+            .filter(|name| !name.starts_with("mcp__"))
             .collect()
     }
 
