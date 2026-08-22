@@ -716,6 +716,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **同梱推論エンジン（llama-server）**
 
+- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64の資産名とSHA-256をコードで照合します。取得済み配置も`picoagent-engine.json`のタグ・資産名・SHA-256が一致する場合だけ再利用します
 - 実行ファイルは配布物へ同梱しますが、モデル GGUF（数 GB）は含めず、初回起動時に `%APPDATA%\PicoAgent\bundled\models\` へ取得します
 - 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します
 
@@ -774,7 +775,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **アンインストール**
 
-NSIS アンインストーラは関連プロセスとPicoAgent専用の一時ファイルを止めて削除します。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。
+NSIS アンインストーラは、インストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止め、PicoAgent専用の一時ファイルを削除します。PC上の同名プロセスは停止しません。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。
 
 **署名・自動更新**
 

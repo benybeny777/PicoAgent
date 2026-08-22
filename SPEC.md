@@ -179,7 +179,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 アプリがプリセットとして提供するモデルは一般PCでの容量・メモリ・速度を優先し、原則として量子化済みGGUFに限定する。現在はGemma 4／Qwen3.5／Phi-4 miniがQ4_K_M、gpt-oss-20bがMXFP4である。利用者が明示する`custom` URLにはこの制限を適用しない。
 
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`xtask`（`bundled::fetch_engine`）（`cargo xtask setup engine`）で
-  `src-tauri/resources/bundled/engine/` に取得。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
+  `src-tauri/resources/bundled/engine/` に取得。llama.cpp安定版v0.2.0が配布用に対応付けた`b10566`を正本とし、対象OS別の資産名と固定SHA-256をGitHub digest・ダウンロード実体の両方へ照合する。配置後は`picoagent-engine.json`へタグ・資産名・SHA-256を残し、3項目が一致しない既存配置は再取得する。`LLAMACPP_ASSET`で資産を明示変更する場合も対応する`LLAMACPP_SHA256`を必須にする。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
   1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Qwen3.5 4B／9B、OpenAI gpt-oss-20b、Phi-4 mini、LLM-jp-4 8B Thinking の GGUF も選べる。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
