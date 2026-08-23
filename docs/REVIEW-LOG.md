@@ -20,12 +20,14 @@
 | 1 | P1 | PR #142の解析不能な通知と長期メモリ一覧の誤った空表示が未統合 | Ubuntu Linux対応後の現行`main`へ移植し、壊れた日時を理由付きで1度だけ通知、想定外応答で既存一覧を空へ置き換えない契約を維持した | 対応済み |
 | 2 | P1 | PR #143の`browser_control`用Chrome／Edge回収が未統合 | 専用`browser-profile`を持つ実体だけを終了時と`cargo xtask stop`で回収する差分を移植。旧枝の「Linux非対応」記述は現行仕様と衝突するため採用しなかった | 対応済み |
 | 3 | P1 | PR #144の履歴保存停止・目覚まし／日常通知取得失敗が利用者へ見えない | `historySaveBlocked`と`notifyBackgroundFailure`を移植し、PR #142の解析不能イベント通知とフロント上で併存させた | 対応済み |
-| 4 | 確認 | 古いClaude枝6本をそのままマージすると旧実装を戻す可能性がある | `overall-inspection`と`review-p2w5u6`は固有コミットなし、`readme-gallery-lipsync`はpatch-equivalent、残り3本は後続PRで同等内容を実装済みと既存記録・現行コードで照合した。統合PR後に削除する | 対応待ち |
+| 4 | 確認 | 古いClaude枝6本をそのままマージすると旧実装を戻す可能性がある | `overall-inspection`と`review-p2w5u6`は固有コミットなし、`readme-gallery-lipsync`はpatch-equivalent、残り3本は後続PRで同等内容を実装済みと既存記録・現行コードで照合した。PR #155統合後に6本を削除した | 対応済み |
 | 5 | 確認 | 「15枚版は古い」とされた紹介PowerPointの短縮版が残存枝にあるか | 本体・配布リポジトリの全追跡枝、PowerPoint回復先、Desktop／Documents／Downloadsを検索。見つかったPPTXはすべて15枚で、短縮版は現在のファイル・残存枝には存在しない | 入力待ち |
 
 判定: **有効差分3本は現行`main`へ移植し、内容が既に統合済みの古い枝は再マージせず削除する**。15枚版は最新版として再編集せず、短縮版の保存先またはファイル提供を待つ。
 
 検証: `cargo xtask verify`の必須26項目がすべて成功。本体は391件成功・長時間Whisper実機検査1件を既定除外、xtaskは66件成功した。追加した`memory-settings-contract.mjs`と`background-failure-contract.mjs`の契約8件も成功した。
+
+枝整理: PR #155をsquash mergeし、PR #142〜#144を重複として閉じた。対応するリモート3枝・ローカル3枝と、照合済みの古いClaudeリモート6枝を削除した。`git ls-remote --heads origin`でリモートは`main`だけ、`git branch`で通常のローカル枝も`main`だけと確認した。
 
 ## 2026-08-23 — 紹介PowerPointへLinux対応実態を反映
 
@@ -233,7 +235,7 @@
 
 あわせて、前回のブランチ整理で拾えていなかったローカル枝`claude/codex-credit-exhausted-989f91`を削除した。
 指す先が`cc80ec1`（PR #135、現行`main`の祖先）で固有コミット0件のため、`git branch -d`が成功する形で取り込み済みだった。
-**リモート6本の削除は引き続き未実施**で、判定根拠と実行コマンドは下の「不要ブランチの整理と再発防止ルール」のとおり。
+**リモート6本は2026-08-23に削除済み**。判定根拠は下の「不要ブランチの整理と再発防止ルール」のとおり。
 ## 2026-08-19 — browser_control のブラウザ残留
 
 対象: PR #142 の検証中に見つけた `cargo xtask verify` の再実行失敗。1回目は成功し、2回目以降は
@@ -296,14 +298,10 @@
 | # | 対応 | 状態 |
 |---|---|---|
 | 1 | ローカル5本の削除 | 完了。残るローカルは`main`と作業中worktreeの枝だけ |
-| 2 | リモート6本の削除 | **未実施。** 実行環境がリモートブランチ削除を許可しておらず、利用者の操作が要る |
+| 2 | リモート6本の削除 | 2026-08-23に完了。削除直前にも中身が現行`main`へ存在することを再確認した |
 | 3 | 再発防止 | `AGENTS.md`へ「作業ブランチを残さない」を追加した。squash mergeでは`git branch --merged`が効かないこと、判定は枝の中身が`main`にあるかで行うこと、古い枝はマージではなく現行`main`からの移植で扱うことを根拠付きで書いた |
 
-リモート6本は次のコマンドで消せる。
-
-```
-git push origin --delete claude/overall-inspection-ffon02 claude/review-p2w5u6 claude/improvement-proposal-u9n8k5 claude/moveable-codex-integration-wik54v claude/optimization-issues-report-nw01v7 claude/readme-gallery-lipsync
-```
+リモート6本は2026-08-23に削除し、`origin/main`だけが残ることを確認した。
 
 ## 2026-08-19 — 未マージのClaudeブランチ4本の照合
 

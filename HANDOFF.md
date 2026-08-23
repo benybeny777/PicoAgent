@@ -3,12 +3,12 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-23
-- ブランチ: `integrate/pending-user-fixes`
-- 目的: 未統合PR #142〜#144を現行mainへ移植し、残存ブランチを整理する
-- 対応PR: #142、#143、#144（統合PR作成前）
+- ブランチ: `main`（PR #155統合後）
+- 目的: 未統合PR #142〜#144の移植と残存ブランチ整理
+- 対応PR: #155（#142〜#144を現行mainへ移植）
 - 直前の作業: 利用者向け不具合3本の統合とブランチ監査
 
-2026-08-23、利用者の「ブランチ全部マージして」に対し、残存ブランチを内容で照合した。PR #142〜#144には現行`main`に無い有効差分があったため、Ubuntu Linux対応後の`main`から作った統合ブランチへ順に移植した。競合では旧ブランチ側の「Linux非対応」を採用せず、現行のWindows／macOS／Ubuntu 24.04 LTS対応を維持した。古いClaudeブランチ6本は、固有コミットなし・patch-equivalent・後続PRで同等内容を実装済みのいずれかであり、旧実装を再導入するマージ対象ではない。統合PRのsquash merge後、PR #142〜#144を重複として閉じ、各リモート枝と古い6枝を削除する。
+2026-08-23、利用者の「ブランチ全部マージして」に対し、残存ブランチを内容で照合した。PR #142〜#144には現行`main`に無い有効差分があったため、Ubuntu Linux対応後の`main`から作ったPR #155へ順に移植してsquash mergeした。競合では旧ブランチ側の「Linux非対応」を採用せず、現行のWindows／macOS／Ubuntu 24.04 LTS対応を維持した。古いClaudeブランチ6本は、固有コミットなし・patch-equivalent・後続PRで同等内容を実装済みのいずれかであり、旧実装を再導入するマージ対象ではない。PR #142〜#144は重複として閉じ、各リモート枝3本と古い6枝を削除した。ローカル側の旧PR枝3本も削除し、通常ブランチは`main`だけになった。
 統合後の`cargo xtask verify`は必須26項目すべて成功し、本体391件・xtask 66件が合格した（長時間Whisper実機検査1件は既定どおり除外）。追加したJavaScript契約8件も成功した。
 
 2026-08-23、Ubuntu 24.04 LTS x64で現行コードのcheckとライブラリテストを行い、Linux画面取得を`xcap`のX11／Wayland／PipeWire経路へ接続した。配布リンクで見つかった`libgbm-dev`不足とfat LTOの未解決参照を解消し、固定Linux x64版`llama-server`をSHA-256照合して取得した。debとAppImageを生成し、Xvfb上の実WebViewで初回設定画面を目視した。debは実導入・起動・削除、AppImageは音声用GStreamer同梱後の起動、画面取得はPNG必須回帰まで成功した。右画面とComputer Useは使わず、検証プロセスと検査用debは回収済み。販売対象は引き続きWindowsのみで、Linux公開・署名・更新フィードは未実施。
@@ -90,13 +90,8 @@ A〜CはPR #133、GはPR #134、D/HはPR #135、E/FはPR #136で統合し、Iは
 `review/claude-doc-fix-20260817`、`review/claude-pr106-20260817`）を削除した。
 同日の再点検で拾い漏れていた`claude/codex-credit-exhausted-989f91`（指す先が`cc80ec1`で固有コミット0件）も削除した。
 
-**リモート6本の削除だけ残っている。** 実行環境がリモートブランチ削除を許可しないため、
-次のコマンドを利用者が実行する必要がある。対象と判定根拠は`docs/REVIEW-LOG.md`の
+残っていたリモート6本は2026-08-23に削除した。判定根拠は`docs/REVIEW-LOG.md`の
 同日「不要ブランチの整理と再発防止ルール」と「未マージのClaudeブランチ4本の照合」にある。
-
-```
-git push origin --delete claude/overall-inspection-ffon02 claude/review-p2w5u6 claude/improvement-proposal-u9n8k5 claude/moveable-codex-integration-wik54v claude/optimization-issues-report-nw01v7 claude/readme-gallery-lipsync
-```
 
 以後は`AGENTS.md`の「作業ブランチを残さない」に従い、マージのたびにリモートとローカルを消す。
 squash mergeでは`git branch --merged`が効かないため、判定は枝の中身が`main`にあるかで行う。
