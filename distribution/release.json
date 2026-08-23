@@ -22,6 +22,7 @@
   "signing": {
     "required": false,
     "windowsReady": false,
-    "macosReady": false
+    "macosReady": false,
+    "linuxReady": false
   }
 }

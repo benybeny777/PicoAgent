@@ -30,7 +30,7 @@
   - **CodexのComputer Useは、Windows画面を実際に操作・撮影する直前だけ開始し、確認が終わった直後に毎回セッションを終了する。** 青い対象枠を使っていない間も残さない。作業全体の終了時だけでなく、ターミナル調査・ビルド・文書編集など別の作業へ移る前にも必ずオフにする。Computer Useや検証のために起動した対象アプリと子プロセスも、不要になった時点で自分が起動した実体を確認して終了する。
   - **Node製の作業ツール（`tools/screenshots/` の撮影・検査など）を起動したら、正常終了・失敗・中断のどの経路でも `node.exe` を残さない。** タイムアウトや上限で打ち切った場合ほど残りやすいので、打ち切った直後にプロセスを確認し、残っていれば回収してから次の作業へ進む。撮影ツールは自前のHTTPサーバとChromiumを抱えるため、残すとポート占有と数百MBのメモリがそのまま居座る。
   - **プロセスを止める前に、必ず親プロセスとコマンドラインで「自分が起動したもの」かを確かめる。** `node.exe` は Codex の MCP サーバやカーネル、Adobe Creative Cloud なども使っており、名前だけで一括終了すると稼働中アプリを壊す。判別には `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` の `ParentProcessId` と `CommandLine` を使い、自分が起動した経路（`tools/screenshots/shoot.mjs` 等）と一致するものだけを対象にする。`cargo xtask stop` は、PicoAgent本体と同梱エンジンに加えて、コマンドラインへ `tools/screenshots/` を含む `node` だけをプロセスツリーごと回収する（区切りをスラッシュへ揃えて判定するため、相対・絶対のどちらの起動でも拾う）。名前一致で止める対象へ `node` を足さないことは `assets` の回帰テストが固定している。
-- **対応 OS は Windows と macOS の 2 つ。Linux は対応対象外**。Linux 専用の分岐・取得経路を新たに増やさない。開発を Linux で行う場合に備えてビルドは通るようにしておくが（未対応を返すスタブ等）、機能の動作保証はしない。
+- **対応 OS は Windows、macOS、Ubuntu Linux 24.04 LTS x64**。Linuxは`.deb`とAppImageを配布形式とし、実行ファイルだけでなく実パッケージの導入・起動・削除まで検証する。WaylandでOS側の許可やポータルに依存する画面取得・入力操作は、拒否や未提供を成功扱いにせず理由付きエラーを返す。Linux専用依存を変えたら`.claude/hooks/session-start.sh`とREADMEのapt一覧を同じ作業で同期する。
 - PowerShell で日本語ファイルを確認するときは、文字化けを避けるため UTF-8 を明示する。表示が文字化けしても、すぐにソース破損と判断せず UTF-8 で読み直してから判断する。
 - ファイルや配布物の容量を利用者向け返信・引き継ぎ・レビュー記録へ書くときは、十進表記のMB／GBへ丸める。生のbyte数やMiB／GiBは併記しない。識別子・実装上のbyte列・検証ロジックの説明は容量報告ではないため対象外とする。
 - 既に未コミット変更がある場合は、ユーザーまたは別エージェントの作業として扱い、勝手に巻き戻さない。
@@ -132,8 +132,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 
 ## 製品化（配布）
 
-- `src-tauri/tauri.conf.json` の `productName` / `identifier=com.picoagent.desktop` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。同じコマンドが作る `icons/ios/` `icons/android/` は対応OSが Windows / macOS だけで参照されないため、`.gitignore` で追跡しない。
-- Windows バンドルは NSIS（`bundle.targets`）。初期販売はWindows先行で、コード署名と更新署名付きの完全自動更新なしで行い、`distribution/release.json` の `platforms=["windows"]` / `signing.required=false` / `updates.required=false` を正本とする。Windows版は利用者が設定から明示した場合だけ、公開Gitのサイズ・SHA-256を検証してNSISを実行する。Windows SmartScreenの警告と更新手順は販売ページで事前案内する。将来macOSを販売対象へ追加する場合は署名・公証と実機QAを先に行い、完全自動更新を有効化するときは各 `required` を `true` にして、証明書・更新鍵・配信先を販売ゲートで必須化する。
+- `src-tauri/tauri.conf.json` の `productName` / `identifier=com.picoagent.desktop` / `version` を保つ。アイコンは `src-tauri/icons/`（`npx tauri icon <1024pxソース>` で再生成。ソースは `src-tauri/icon-source.png`）。同じコマンドが作る `icons/ios/` `icons/android/` はデスクトップ3OSでは参照されないため、`.gitignore` で追跡しない。
+- Windows バンドルはNSIS、Ubuntu Linuxは`.deb`とAppImage。初期販売はWindows先行で、コード署名と更新署名付きの完全自動更新なしで行い、`distribution/release.json` の `platforms=["windows"]` / `signing.required=false` / `updates.required=false` を正本とする。Windows版は利用者が設定から明示した場合だけ、公開Gitのサイズ・SHA-256を検証してNSISを実行する。Windows SmartScreenの警告と更新手順は販売ページで事前案内する。macOSまたはLinuxを販売対象へ追加する場合は、対象パッケージの署名方針と実機QAを先に行い、完全自動更新を有効化するときは各 `required` を `true` にして、証明書・更新鍵・配信先を販売ゲートで必須化する。
 
 ## 主要ファイル
 

@@ -3699,8 +3699,18 @@ pub async fn pet_capture_screen() -> Result<Value, String> {
 }
 
 /// 主モニタを取得して PNG バイト列へエンコードする。
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn capture_primary_png() -> Result<Vec<u8>, String> {
+    std::panic::catch_unwind(capture_primary_png_inner).unwrap_or_else(|_| {
+        Err(
+            "スクリーンショット取得に失敗しました: OSの画面共有機能が対応していないか、許可されていません。"
+                .to_string(),
+        )
+    })
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+fn capture_primary_png_inner() -> Result<Vec<u8>, String> {
     use std::io::Cursor;
     use xcap::Monitor;
 
@@ -3882,10 +3892,10 @@ pub async fn pet_read_dropped_path(
     }))
 }
 
-/// 対応対象外の OS（Linux など）向けのスタブ。開発を Linux で行ってもビルドは通る。
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+/// 対応対象外の OS 向けのスタブ。未対応環境でもビルドは通る。
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 fn capture_primary_png() -> Result<Vec<u8>, String> {
-    Err("スクリーンショットは Windows と macOS でのみ利用できます。".to_string())
+    Err("スクリーンショットはこのOSでは利用できません。".to_string())
 }
 
 #[cfg(test)]
@@ -3909,6 +3919,16 @@ mod capture_tests {
                 assert!(error.contains("スクリーンショット"), "error: {error}");
             }
         }
+    }
+
+    /// 仮想または実ディスプレイを用意したOS別QAでは、エラーを許容せず取得経路まで確認する。
+    #[test]
+    fn 画面付きqaではpng取得を必須にできる() {
+        if std::env::var_os("REQUIRE_SCREEN_CAPTURE_QA").is_none() {
+            return;
+        }
+        let png = capture_primary_png().expect("画面付きQAでスクリーンショットを取得できません");
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
     }
 }
 

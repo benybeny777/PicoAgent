@@ -91,7 +91,8 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
                 "sha256": sha256
             },
             "macos-arm64": { "url": "", "size": 0, "sha256": "" },
-            "macos-x64": { "url": "", "size": 0, "sha256": "" }
+            "macos-x64": { "url": "", "size": 0, "sha256": "" },
+            "linux-x64": { "url": "", "size": 0, "sha256": "" }
         }
     });
     let destination = repo_root().join("distribution/site/latest.json");
@@ -284,6 +285,10 @@ pub fn check(strict: bool) -> Result<Value> {
             "macos" => {
                 unsigned_targets.push("macOS署名・公証");
                 ("macosReady", "macOS署名・公証")
+            }
+            "linux" => {
+                unsigned_targets.push("Linuxパッケージ署名");
+                ("linuxReady", "Linuxパッケージ署名")
             }
             other => {
                 blockers.push(format!("未対応の販売対象OSです: {other}"));

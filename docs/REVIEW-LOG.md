@@ -11,6 +11,28 @@
 
 ---
 
+## 2026-08-23 — Ubuntu Linux 24.04 x64対応と配布実機検証
+
+対象: 利用者からの依頼「linuxでも動作するようにしたい」。Ubuntu 24.04 LTS x64のWSL2環境を用意し、単なるクロスコンパイルではなくLinux用エンジン取得、画面取得、実行ファイル、deb、AppImageを確認した。右画面とComputer Useは使わず、Xvfbの隔離画面だけで実WebViewを撮影した。起動したPicoAgent、Xvfb、Cargo、Rust、インストールした検査用debは確認直後に終了・削除した。
+
+| # | 優先 | 指摘・確認 | 対応・実測 | 状態 |
+|---|---|---|---|---|
+| 1 | P0 | Linuxは対応対象外のルールと`cfg`スタブにより、画面取得が必ず未対応エラーになる | 対応OSをUbuntu 24.04 LTS x64へ拡張し、`xcap 0.9.8`のX11／Wayland／PipeWire経路を有効化。Xvfb上でPNG取得を必須にする回帰が成功した | 対応済み |
+| 2 | P0 | `cargo check`は通るが、配布リンクでは`libgbm`不足とfat LTO時の`encoding_rs`未解決参照で停止する | apt正本へ`libgbm-dev`を含む画面取得依存を追加し、thin LTOへ変更。releaseビルドが成功した | 対応済み |
+| 3 | P0 | AppImageは起動するがGStreamerの`appsink`が無く、音声再生経路が欠ける | `tauri.linux.conf.json`で`bundleMediaFramework=true`を指定。`base`／`good`プラグインを同梱して再生成し、警告が消えた実WebViewを目視した。`ugly`はライセンス境界を広げないため含めない | 対応済み |
+| 4 | P0 | Linux配布物が実際に導入・起動・削除できるか | 1.0.3のdeb（160.59MB、SHA-256`7264D2D1F10AB93DDBC02E8DF55ADB6E5E77FF8576078DB32BC582AC5879DA80`）を導入し、900×600の初回設定画面を確認後に削除。`/usr/bin/picoagent`と`/usr/lib/PicoAgent`の残留0件を確認した | 対応済み |
+| 5 | P0 | AppImageが隔離環境で起動できるか | 1.0.3 AppImage（237.11MB、SHA-256`5317B051621C89BF24A597CAF465D12F0C1DB31B417C083D4E1A05A448BB1331`）を展開実行し、同じ初回設定画面とプロセス終了を確認した | 対応済み |
+| 6 | P1 | ローカルAIのLinux資産をWindows版やCUDA版から流用しない | 固定`llama-b10566-bin-ubuntu-x64.tar.gz`を公式Releaseから取得し、GitHub digestと固定SHA-256を照合。`llama-server --version`は0.2.0-dev build 10566を返した | 対応済み |
+| 7 | P1 | Linuxの全PC操作がWindowsと同等か | マウス・キーボードはX11／デスクトップ環境の許可範囲で利用可能。ウィンドウ一覧・前面化はWindows専用のまま、Waylandの入力拒否もあり得るためREADMEとSPECへ制限を明記した | 保留 |
+| 8 | P1 | Ubuntu以外・ARM64・実Waylandデスクトップでの配布QA | 今回の対応範囲はUbuntu 24.04 LTS x64。Wayland画面取得の依存は組み込んだが、WSL2の隔離X11で確認したため、実Waylandの許可ダイアログとARM64は対応範囲へ含めない | 保留 |
+| 9 | 確認 | SemVer patch採番 | `cargo xtask bump-version patch`は公開版とソース版の不一致を検出して二重採番防止で停止した。手作業では変更せず、未公開の現行1.0.3へ含める | 対応済み |
+| 10 | P2 | Linux対応化後のGTK3依存監査 | `cargo audit`は既知脆弱性0件、Tauri／WebKitGTK経路のGTK3保守終了と`glib::VariantStrIter`等の情報警告17件。`cargo deny check`はadvisories／bans／licenses／sourcesの4分類すべて合格。Tauri 2のLinuxランタイムがGTK3を使うためアプリ単独では除去できず、上流移行時に再評価する | 保留 |
+| 11 | P1 | WSLgのWaylandポータルが非対応版を返すと`xcap`内部が`UnsupportedVersion`でpanicする | 画面取得境界でpanicを捕捉し、OSの画面共有機能または許可に関する理由付きエラーへ変換。Wayland環境の全ライブラリテストと、X11上のPNG取得必須回帰の両方を成功させた | 対応済み |
+
+検証: `cargo xtask verify`の必須25項目、本体390件（長時間Whisper 1件を既定ignore）、xtask 65件が成功。Linuxでは画面取得必須回帰、基本実行ファイル、deb、AppImageを別途確認した。
+
+判定: **Ubuntu 24.04 LTS x64の基本アプリ、Linux固定エンジン、画面取得、deb、AppImageは対応済み**。販売対象は引き続き`platforms=["windows"]`であり、Linux成果物の一般公開・署名・更新フィードは別の販売判断まで行っていない。
+
 ## 2026-08-23 — Claude再レビューとWindows実機保留の解消
 
 対象: 利用者からの依頼「claudeのレビューして、保留がるのでやって。右画面はつかいます」。PR #149・#150統合後の現行`main`、販売ゲート、Windows実機保留を対象にした。最初のClaude横断レビューは7分超で応答しなかったため所有CLIだけを終了し、コード5ファイルと保留分類の2回へ分けて読み取り専用で再実行した。Claudeデスクトップ版など利用者の既存プロセスは停止していない。

@@ -635,7 +635,7 @@ const ENGINE_BUNDLE_MANIFEST: &str = "picoagent-engine.json";
 
 /// 推論エンジン llama.cpp（llama-server）を `resources/bundled/engine/` へ配置する。
 ///
-/// 既定は Windows x64 の Vulkan(GPU) ビルド。別資産へ明示変更する場合は名前とSHA-256を両方指定する。
+/// 既定は実行OS・CPUアーキテクチャに対応する固定資産。別資産へ明示変更する場合は名前とSHA-256を両方指定する。
 ///   `LLAMACPP_ASSET`   … 固定タグ内のアセット名の一部
 ///   `LLAMACPP_SHA256`  … 上のアセットに対応する固定SHA-256
 ///   `LLAMACPP_FORCE=1` … 既存配置を再取得
