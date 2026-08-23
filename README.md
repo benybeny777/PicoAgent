@@ -241,7 +241,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 既定は **`local`（同梱エンジン）** です。何も設定しなくても動きます。
 
-- **ローカルモデルの自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら最新世代の Qwen3.5、OpenAI gpt-oss、Phi-4 mini、LLM-jp-4 8B も選べます。Windows同梱エンジンはVulkan経由で対応GPUへ推論層をオフロードします。
+- **ローカルモデルと推論方式の自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら最新世代の Qwen3.5、OpenAI gpt-oss、Phi-4 mini、LLM-jp-4 8B も選べます。Windowsは対応NVIDIAで`CUDA → Vulkan → CPU`、AMDで`ROCm → Vulkan → CPU`、Intelで`SYCL → Vulkan → CPU`の順に起動確認します。Ubuntu LinuxはVulkan、macOSはMetalをGPU経路に使います。
 - **設定画面での選択** — 「種類 → サイズ」で選べ、推奨 VRAM・推奨 RAM・ダウンロード目安を表示します。取得中はフキダシ下に「モデルを準備中… NN%」と出ます。
 - **ディスク整理** — 「AIモデル・連携」タブの「ダウンロード済みモデル」から、取得済み GGUF の一覧・サイズ確認・削除ができます（使用中のモデルは削除不可）。削除は再ダウンロードが必要になることを画面内で案内し、同じボタンをもう一度押したときだけ実行します。
 - **クラウド AI を使う**（費用が発生します） — 右クリック →「設定を開く…」→「AIモデル・連携」でプロバイダ・API キー・モデルを設定。OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral に対応しています。
@@ -563,6 +563,28 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 旧版で選択したQwen 2.5／3、Llama 3.x、Mistral 7B、Phi 3.5のプリセットIDは、初回起動時に同等負荷帯の現行候補へ移行します。Claudeはモデル重みが公開されていないため、ローカルダウンロードではなくClaude APIプロバイダから利用します。
 
+#### GPUバックエンドの対応境界
+
+| OS / GPU | 第一候補 | 対応境界 | 失敗時 |
+|---|---|---|---|
+| Windows / NVIDIA | CUDA 13.3 | Turing世代以降（目安: GeForce RTX 20シリーズ以降）かつドライバー580以上 | Vulkan → CPU |
+| Windows / AMD | ROCm 7.14 | 下記のAMD公式HIP Runtime対応SKUだけ | Vulkan → CPU |
+| Windows / Intel（対応済み・主要訴求外） | SYCL | Intel Arc、Iris Xe、Core Ultra系で使われる`Intel Graphics`、Data Center GPU Flex／Max、Server GPU。旧UHD／HD Graphicsは対象外 | Vulkan → CPU |
+| Ubuntu 24.04 LTS x64 | Vulkan | Vulkan対応GPU | CPU |
+| macOS | Metal | Apple Silicon／Metal対応Mac | CPU |
+
+CUDA／ROCm／SYCLの追加エンジンは対象GPUを確認したPCだけが取得します。固定サイズとSHA-256を照合し、実行ファイル自身が対象GPUを列挙できた場合だけ有効化します。古い／未掲載GPUを高速経路へ無理に含めず、同梱VulkanまたはCPUで動かします。UbuntuのCUDA／ROCm専用版は固定上流Releaseに配布資産がないため未対応で、Vulkanより速くなる可能性のある専用経路を現時点では使いません。
+
+Intel SYCLは対応済みです。ただし想定利用者に占めるIntel GPUのシェアを踏まえ、主要な訴求・優先対応の対象には置きません。機能とフォールバックは維持し、推奨構成の案内はNVIDIA CUDAまたはAMD ROCmを主軸にします。
+
+Windows ROCmの対象AMD機種（2026-08-24確認）は次のとおりです。「この番号以降」ではなく、[AMD公式HIP SDK Windows対応表](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/shared/hipsdk/reference/system-requirements.html)でRuntime対応になっている下記SKUだけを対象にします。
+
+- Radeon RX: 6600 / 6600 XT / 6650 XT / 6700 / 6700 XT / 6750 XT / 6800 / 6800 XT / 6900 XT / 6950 XT / 7600 / 7600 XT / 7650 GRE / 7700 XT / 7800 XT / 7900 XT / 7900 XTX / 9060 / 9060 XT / 9070 / 9070 XT / 9070 GRE
+- Radeon PRO: W6600 / W6800 / W7700 / W7800 / W7900 / W7900 Dual Slot、Radeon AI PRO R9700
+- Ryzen APU: Ryzen AI Max Pro 380、Max／Max Pro 385、Max／Max Pro 390、Max+／Max+ Pro 395
+
+一覧外のRadeon、型番を特定できない「AMD Radeon Graphics」、RX 6500系以前などはROCmを取得せずVulkanを使います。この一覧はllama.cpp固定版またはPicoAgent配布版を更新するたびに公式表と照合して更新します。
+
 #### AMD APU（Radeon内蔵GPU）を使う場合
 
 Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のAMD Ryzen APUでもローカルモデルを実行できます。ただしAPUは独立したVRAMではなくシステムRAMをGPUと共有するため、上表の「推奨VRAM」と「推奨RAM」を別々に足せる構成ではありません。
@@ -736,7 +758,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **同梱推論エンジン（llama-server）**
 
-- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux x64の資産名とSHA-256をコードで照合します。取得済み配置も`picoagent-engine.json`のタグ・資産名・SHA-256が一致する場合だけ再利用します
+- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux Vulkan x64の資産名とSHA-256をコードで照合します。WindowsのNVIDIA CUDA 13.3版、AMD ROCm 7.14版、Intel SYCL版は対応GPUを検出した場合だけ公式Releaseから追加取得し、固定サイズ・SHA-256・`--list-devices`の実認識をすべて確認した後に使います。取得済み配置もマニフェストのタグ・方式・資産名・SHA-256が一致する場合だけ再利用します
 - 実行ファイルは配布物へ同梱しますが、モデル GGUF（数 GB）は含めず、初回起動時に `%APPDATA%\PicoAgent\bundled\models\` へ取得します
 - 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します
 

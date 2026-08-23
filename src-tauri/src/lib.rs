@@ -18,6 +18,8 @@ mod daily;
 mod doc_sync;
 mod emotion;
 mod engine;
+mod engine_backend;
+mod gpu;
 #[cfg(test)]
 mod guard_scan;
 mod history;

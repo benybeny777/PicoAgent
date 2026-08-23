@@ -39,7 +39,7 @@ impl Default for EngineState {
     }
 }
 
-fn set_status(app: &AppHandle, value: Value) {
+pub(crate) fn set_status(app: &AppHandle, value: Value) {
     if let Some(engine) = app.try_state::<EngineState>() {
         *engine.status.lock().unwrap() = value.clone();
     }
@@ -566,26 +566,24 @@ async fn ensure_local_model_selection(app: &AppHandle) {
 }
 
 // llama-server を起動する。
-fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
-    let server = server_path(app).ok_or_else(|| {
-        anyhow::anyhow!(
-            "ローカルAIエンジンの実行ファイルが見つかりません。設定の「診断・修復」から\
-             再インストールを試すか、公式サイトから入れ直してください（開発環境では\
-             `cargo xtask setup engine` でも用意できます）。"
-        )
-    })?;
-    ensure_executable(&server)?;
+fn spawn_server(
+    app: &AppHandle,
+    model: &PathBuf,
+    candidate: &crate::engine_backend::BackendCandidate,
+) -> anyhow::Result<()> {
+    let server = &candidate.server;
+    ensure_executable(server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
     let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "8192");
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
-    let ngl = state.config.get("PICOAGENT_LOCAL_NGL", "999");
+    let ngl = &candidate.ngl;
     // 使用 GPU の指定（複数 GPU 環境向け）。空なら llama-server の既定（先頭デバイス）。
     // 例: Vulkan ビルドで discrete GPU を使う場合は "Vulkan1" のように指定する。
     let gpu_device = state.config.get("PICOAGENT_LOCAL_GPU_DEVICE", "");
 
-    let mut cmd = crate::tools::process::command_sync(&server);
+    let mut cmd = crate::tools::process::command_sync(server);
     cmd.arg("-m")
         .arg(model)
         .arg("--host")
@@ -595,7 +593,7 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
         .arg("-c")
         .arg(&ctx)
         .arg("-ngl")
-        .arg(&ngl)
+        .arg(ngl)
         .arg("--jinja");
     // Qwen3.5 は既定で推論過程を生成する。キャラクターの発話へ内部推論を混ぜず、
     // llama.cpp のツール呼び出し解析を安定させるため、非推論モードで起動する。
@@ -609,7 +607,8 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
             .arg("--reasoning-budget")
             .arg("0");
     }
-    if !gpu_device.trim().is_empty() {
+    // CPUフォールバックでは、保存済みのVulkan/CUDAデバイス名を渡して起動を壊さない。
+    if ngl.trim() != "0" && !gpu_device.trim().is_empty() {
         cmd.arg("--device").arg(gpu_device.trim());
     }
     let log_path = crate::log_paths::log_file(app, "engine.log");
@@ -622,7 +621,8 @@ fn spawn_server(app: &AppHandle, model: &PathBuf) -> anyhow::Result<()> {
         .open(&log_path)?;
     writeln!(
         log,
-        "\n==== llama-server 起動: model={} port={} ctx={} ngl={} device={} ====",
+        "\n==== llama-server 起動: backend={} model={} port={} ctx={} ngl={} device={} ====",
+        candidate.label,
         model.display(),
         port,
         ctx,
@@ -708,13 +708,20 @@ pub async fn ensure_and_start(app: AppHandle) {
             return;
         }
     }
-    set_status(&app, json!({ "phase": "starting" }));
-    if let Err(e) = spawn_server(&app, &model) {
-        set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
+    let Some(bundled_server) = server_path(&app) else {
+        set_status(
+            &app,
+            json!({ "phase": "error", "message": "ローカルAIエンジンの実行ファイルが見つかりません。設定の「診断・修復」から再インストールを試してください" }),
+        );
         return;
-    }
+    };
+    let configured_ngl = app
+        .state::<AppState>()
+        .config
+        .get("PICOAGENT_LOCAL_NGL", "999");
+    let candidates = crate::engine_backend::candidates(&app, bundled_server, configured_ngl).await;
 
-    // /health が 200 を返すまで待ち、ready を通知する（最大 ~5 分）。
+    // /health が 200 を返すまで待つ。CUDAが起動失敗した場合はVulkan、最後にCPUへ切り替える。
     let state = app.state::<AppState>();
     let provider = match crate::providers::get("local") {
         Some(p) => p,
@@ -727,35 +734,59 @@ pub async fn ensure_and_start(app: AppHandle) {
             return;
         }
     };
-    for _ in 0..300 {
-        if provider.is_up(&state.config).await {
-            set_status(&app, json!({ "phase": "ready" }));
-            return;
+    let mut failures = Vec::new();
+    for candidate in candidates {
+        set_status(
+            &app,
+            json!({ "phase": "starting", "message": format!("{}でローカルAIを起動しています", candidate.label) }),
+        );
+        if let Err(error) = spawn_server(&app, &model, &candidate) {
+            failures.push(format!("{}: {error}", candidate.label));
+            continue;
         }
-        match managed_child_exit_status(&app) {
-            Ok(Some(status)) => {
+        let mut failed = None;
+        for _ in 0..300 {
+            if provider.is_up(&state.config).await {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("ローカルAIを{}バックエンドで起動しました", candidate.label),
+                );
                 set_status(
                     &app,
-                    json!({
-                        "phase": "error",
-                        "message": format!("エンジンが起動直後に終了しました: {status}（engine.log を確認してください）")
-                    }),
+                    json!({ "phase": "ready", "backend": candidate.label }),
                 );
                 return;
             }
-            Ok(None) => {}
-            Err(error) => {
-                terminate_managed_child(&app);
-                set_status(&app, json!({ "phase": "error", "message": error }));
-                return;
+            match managed_child_exit_status(&app) {
+                Ok(Some(status)) => {
+                    failed = Some(format!("起動直後に終了しました: {status}"));
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    failed = Some(error);
+                    break;
+                }
             }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        terminate_managed_child(&app);
+        failures.push(format!(
+            "{}: {}",
+            candidate.label,
+            failed.unwrap_or_else(|| "時間内に起動しませんでした".to_string())
+        ));
+        crate::log_paths::append_app_log(
+            &app,
+            &format!(
+                "ローカルAIのバックエンドを切り替えます: {}",
+                failures.last().unwrap()
+            ),
+        );
     }
-    terminate_managed_child(&app);
     set_status(
         &app,
-        json!({ "phase": "error", "message": "ローカルAIが時間内に起動しませんでした。設定の「診断・修復」から「ローカルAIを再起動」を試してください" }),
+        json!({ "phase": "error", "message": format!("ローカルAIを起動できませんでした（{}）。設定の「診断・修復」から再起動を試してください", failures.join(" / ")) }),
     );
 }
 

@@ -927,41 +927,9 @@ fn has_running_child(app: &tauri::AppHandle) -> bool {
     false
 }
 
-/// 接続されているディスプレイアダプタ名を列挙する。
-///
-/// 以前は PowerShell から `Get-CimInstance Win32_VideoController` を叩いていたが、
-/// GPU の有無を見るだけのためにシェルと WMI を起動するのは重すぎる。
-/// `EnumDisplayDevicesW` は COM も要らず、同じ用途に十分な情報（アダプタ名）を返す。
-#[cfg(windows)]
-fn gpu_adapter_names() -> Vec<String> {
-    use windows_sys::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
-
-    let mut names = Vec::new();
-    for index in 0..16u32 {
-        let mut device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
-        device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
-        // 安全性: cb を正しく埋めた自前のバッファだけを渡し、戻り値が 0 なら打ち切る。
-        let ok = unsafe { EnumDisplayDevicesW(std::ptr::null(), index, &mut device, 0) };
-        if ok == 0 {
-            break;
-        }
-        let end = device
-            .DeviceString
-            .iter()
-            .position(|&ch| ch == 0)
-            .unwrap_or(device.DeviceString.len());
-        let name = String::from_utf16_lossy(&device.DeviceString[..end]);
-        let name = name.trim().to_string();
-        if !name.is_empty() && !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
 #[cfg(windows)]
 fn gpu_candidate_available(app: &tauri::AppHandle) -> bool {
-    let adapters = gpu_adapter_names();
+    let adapters = crate::gpu::adapter_names();
     if adapters.is_empty() {
         append_log_best_effort(
             app,

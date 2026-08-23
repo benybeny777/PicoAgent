@@ -11,6 +11,23 @@
 
 ---
 
+## 2026-08-24 — GPU別ローカル推論バックエンドの自動選択
+
+対象: 利用者からの依頼「判定して最速で処理できるやつにしたい」「nvidiaもvulkanいれて」「ROCm優先じゃなく？」。
+
+| # | 優先 | 指摘・確認 | 対応・実測 | 状態 |
+|---|---|---|---|---|
+| 1 | P1 | WindowsでNVIDIA GPUがあっても同梱Vulkanしか使わず、CUDA最適化を選ばない | `nvidia-smi`でcompute capability 7.5以上とドライバー580以上を確認した場合だけCUDA 13.3版を取得し、`CUDA → Vulkan → CPU`の候補順にした。Maxwell／Pascal／Voltaと古いドライバーはVulkanへ回す | 対応済み |
+| 2 | P1 | AMD対応GPUでもVulkan固定ではROCmの高速経路を使えない | 2026-08-24時点のAMD公式HIP SDK Windows Runtime対応SKUだけをROCm候補とし、`ROCm → Vulkan → CPU`の順にした。固定版更新時と配布版更新時に公式表を再確認する | 対応済み |
+| 3 | P1 | GPU種別だけで大容量ランタイムを同梱・取得すると、対象外PCへ不要な数百MBを配る | CUDA／ROCm／SYCLは対象GPUを確認した場合だけ追加取得し、固定サイズ、SHA-256、安全な展開、デバイス実認識を通った配置だけを有効化する。失敗時は同梱Vulkanへ戻す | 対応済み |
+| 4 | P1 | Ubuntu Linux x64の固定資産がCPU版で、Vulkan対応GPUを推論に使えない | 固定資産を同じ`b10566`のUbuntu Vulkan x64版へ変更し、GPUオフロード失敗時はCPU候補へ切り替える | 対応済み |
+| 5 | P1 | Intel対応GPUでもVulkan固定ではSYCLの高速経路を使えない | Intel Arc／Iris Xe／Core Ultra系の`Intel Graphics`／Data Center Flex・Max／Server GPUだけSYCLを取得・実認識し、`SYCL → Vulkan → CPU`とした。旧UHD／HDはVulkanへ回す。対応は維持するが、想定利用者に占めるシェアを踏まえて主要な訴求・優先対応の対象には置かない | 対応済み |
+| 6 | 確認 | Linux専用CUDA／ROCmを同じPRで自動取得できるか | 固定`b10566`にはLinux CUDA／ROCm資産がなく、独自ビルド・配布・実GPU QAが必要。Ubuntu同梱資産はCPU版からVulkan版へ改善したが、専用方式より遅い可能性を残す | 保留 |
+
+実機確認: 公式CUDA 13.3本体（146.9MB、SHA-256 `c3e2336c1427e8bd7b5beb3c8618d2f7a268bc5fb6ec3f28c1e06cdb78d2e80a`）とCUDA runtime（391.0MB、SHA-256 `1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e`）を固定Releaseから取得・照合し、RTX 5060 Laptop GPU／ドライバー591.59で`CUDA0`（約8.2GB）を認識した。SYCL版（119.8MB、SHA-256 `118ae5d788ef29c2cb79a0ed0230e2f26adc725d82f7c188960ef62bd36f58a5`）も同じ固定Releaseから照合し、このPCのIntel Graphicsを`SYCL0`（共有メモリ約15.5GB）として認識した。Ubuntu Vulkan版（33.3MB、SHA-256 `773b3445348b5527dfe1601a7a37d9cf0e144a1023eee115351334bdb851b164`）はWSL Ubuntu 24.04でbuild 10566として起動したが、WSL環境ではVulkanデバイス0件だったためGPU成功とは扱わない。AMD ROCmも対応実機がなく未確認とする。
+
+判定: **対応実機で専用方式を優先しつつ、NVIDIAにもVulkanを残し、全Windows環境で最終CPU候補まで安全にフォールバックする。**
+
 ## 2026-08-24 — 配布リポジトリ作業を21側へ集約
 
 対象: 利用者からの指示「21で管理してください」「PicoAgent側でLP直す指示は今後もあります」。

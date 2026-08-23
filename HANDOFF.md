@@ -2,11 +2,15 @@
 
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
-- 最終更新: 2026-08-23
-- ブランチ: `main`（配布Repo PR #13統合後）
-- 目的: 紹介資料の要点版整備と、利用者向け呼称・公開LPの現状合わせ
+- 最終更新: 2026-08-24
+- ブランチ: `fix/use-cuda-engine`
+- 目的: GPU別ローカル推論バックエンドの自動選択
 - 対応PR: 本体 #145〜#148／#154、配布Repo #11〜#13
 - 直前の作業: 公開LPへUbuntu Linux対応を反映
+
+2026-08-24、Windowsのローカル推論をGPU別に自動選択する実装へ変更した。Turing以降かつドライバー580以上のNVIDIAはCUDA 13.3、AMD公式HIP Runtime対応SKUはROCm 7.14、Intel Arc／Iris Xe／Core Ultra系`Intel Graphics`等はSYCLを第一候補にし、いずれもVulkan、CPUの順にフォールバックする。Intelは対応済みだが、想定利用者に占めるIntel GPUのシェアを踏まえ、主要な訴求・優先対応の対象には置かない。Ubuntu x64は同じ固定`b10566`のCPU資産からVulkan資産へ変更した。固定ReleaseにLinux CUDA／ROCm資産がないため、専用経路は独自ビルド・配布・実GPU QAが必要な保留事項として`docs/REVIEW-LOG.md`へ残した。
+
+追加ランタイムは対象GPUの確認後だけ取得し、固定サイズ、SHA-256、安全な展開、`--list-devices`の実認識を通ったステージングだけを原子的に有効化する。RTX 5060 Laptop GPUでCUDA 13.3、同じPCのIntel GraphicsでSYCLを実認識した。Ubuntu Vulkan版はWSL Ubuntu 24.04でbuild 10566として起動したが、WSLのVulkanデバイスは0件なのでGPU成功とは扱わない。`cargo xtask verify`は必須26項目、本体395件、xtask66件が成功し、長時間Whisper実機検査1件だけ既定除外。
 
 2026-08-23、紹介資料と公開LPを現状へ合わせた。紹介資料は15ページの`PicoAgent-Intro.pptx`に加え、要点だけを5ページへ畳んだ`PicoAgent-Overview.pptx`（約1.1MB）を配布Repoへ置いた。5ページ版は1枚目に表紙と2本の録画、2枚目に目的・課題・利用シーン・入出力、3枚目に処理の流れと使いかた、4枚目に構成要素と独自性、5枚目に実行結果と制約を入れ、エージェント名・目的・利用シーン・入力・処理概要・出力・使いかた・構成要素・独自性・アピール・実行結果・制約の12項目を全部拾う構成にした。
 
