@@ -628,8 +628,8 @@ const LLAMACPP_MAC_X64_ASSET: (&str, &str) = (
     "968669b2ec00acf9804e325b51180014d09939894202d44206b4a190d9ef0369",
 );
 const LLAMACPP_LINUX_X64_ASSET: (&str, &str) = (
-    "llama-b10566-bin-ubuntu-x64.tar.gz",
-    "0c34561d623299c113e46f9fdd97bff5b219b25554243a21a243aebc81253ea1",
+    "llama-b10566-bin-ubuntu-vulkan-x64.tar.gz",
+    "773b3445348b5527dfe1601a7a37d9cf0e144a1023eee115351334bdb851b164",
 );
 const ENGINE_BUNDLE_MANIFEST: &str = "picoagent-engine.json";
 
