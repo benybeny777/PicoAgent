@@ -5,6 +5,7 @@
 - 最終更新: 2026-08-23
 - ブランチ: `claude/startup-blocker-fix-review-vogctr`
 - 目的: 起動ブロッカーの修正と、PR #149（Codex）のレビュー
+- 対応PR: #150
 - 直前の作業: `fix/installer-blocker-audit` / PR #149
 
 2026-08-23、PR #149 を読み直し、そこで塞げていない「起動しない」経路を修正した。
