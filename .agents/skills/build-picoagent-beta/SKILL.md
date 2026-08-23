@@ -10,7 +10,7 @@ description: PicoAgentの開発中アルファ版をWindows NSISまたはUbuntu 
 1. `AGENTS.md`と`HANDOFF.md`を読む。
 2. `git status --short`で既存変更を把握し、巻き戻さない。
 3. `origin/main`、作業ブランチ、`distribution/release.json`の版・対象OS・許可キャラ、既存GitHub Release、配布リポジトリの`main`、Pages状態を取得し、今回の公開対象を確定する。
-4. `distribution/site/`と公開配布リポジトリの全追跡ファイルを相対パス・サイズ・SHA-256で比較する。差分があれば双方のコミット履歴と実画面を確認し、古い側を新しい側へ機械的に上書きしない。
+4. 配布リポジトリ`C:\00_PG\21_PicoAgent-LP`の`main`を、全追跡ファイル、Pages、Releaseを含む公開状態の正本として確認する。20側の`distribution/site/`は同期元にせず、差分があっても21側を上書きしない。
 5. このスキルのパス、コマンド、公開先、版、成果物名が現行実装とずれていたら、同じPRでスキルを先に更新する。
 6. ホストOSに対応する成果物だけを作る。WindowsではNSIS、Ubuntu Linux x64ではdebとAppImageを作り、別OSの成果物を推測・改名・流用しない。
 
@@ -46,7 +46,7 @@ description: PicoAgentの開発中アルファ版をWindows NSISまたはUbuntu 
 ## 成果物を検証する
 
 1. Windowsは`src-tauri/target/release/bundle/nsis/PicoAgent_<版>_x64-setup.exe`の更新時刻、サイズ、PE先頭`MZ`、SHA-256を確認する。Linuxは`bundle/deb/*.deb`と`bundle/appimage/*.AppImage`の更新時刻、形式、SHA-256を確認し、隔離環境でdebの導入・起動・削除とAppImageの起動を行う。
-2. Windows公開時だけ`cargo xtask update-feed <NSIS> <説明>`で`distribution/site/latest.json`を生成する。Linux更新情報は専用生成経路が実装されるまで空欄を維持し、Windows用PE検証を流用しない。
+2. Windows公開時だけ`cargo xtask update-feed <NSIS> <説明>`で検証用の`distribution/site/latest.json`を生成する。このファイルは20側の正本ではなく、実ファイルとの照合後に21側へ取り込むための生成物として扱う。Linux更新情報は専用生成経路が実装されるまで空欄を維持し、Windows用PE検証を流用しない。
    - ハッシュ用バッファを1MiBのスタック配列へ戻さない。Windowsでは`update-feed`開始時にスタックオーバーフローするため、ヒープ確保を維持する。
 3. `latest.json`のURL、サイズ、SHA-256が実ファイルと完全一致することを再計算して確認する。
 4. `cargo test --manifest-path xtask/Cargo.toml`、変更範囲に応じたRustテスト、全JSの`node --check`、`git diff --check`を通す。
@@ -56,13 +56,13 @@ description: PicoAgentの開発中アルファ版をWindows NSISまたはUbuntu 
 
 ## Distributionへ公開する
 
-1. 本体リポジトリ側でLP、README、規約、キャラ構成、現行UI画像、`latest.json`を最新仕様へ直し、目的別PRをsquash mergeする。公開側だけを先行修正して正本と分岐させない。
-2. `distribution/site/`の全追跡ファイルを配布リポジトリへ同じ版として同期する。公開側にだけある追跡ファイルは、由来と参照を確認し、旧機能や旧資産なら目的別PRで削除する。
+1. LP、README、規約、キャラ構成、現行UI画像、`latest.json`、紹介PowerPointなど配布リポジトリに属する変更は、依頼を本体側で受けた場合も`C:\00_PG\21_PicoAgent-LP`へ移って実施する。21側の目的別PRをsquash mergeし、20側のコピーを先に直さない。
+2. 20側から21側へ取り込むのは、正規入口で生成・検証したインストーラと、その実体から生成した更新情報など明示した成果物だけにする。`distribution/site/`一式の同期や、20側に残る古いLP・PPT・資産による上書きを行わない。
 3. READMEへ開発中アルファ、対応OS、未署名警告、インストール、基本操作、問題報告先を明記する。
 4. 配布リポジトリも目的別PRでsquash mergeし、`main`への直接pushをしない。
 5. 同じ版のGitHub Releaseをプレリリースとして作り、検証済みNSISだけを添付する。既存Releaseを更新する場合も、資産を差し替えた後に外部から再取得してサイズとSHA-256を照合する。
 6. Pagesの最新ビルドが配布リポジトリのマージコミットを`built`としていることを確認する。公開LPをPC幅とスマホ幅で開き、CTA、現行UI、キャラの見切れ、旧機能の残存、動画表示を目視する。
-7. 公開`latest.json`、公開Release、外部再取得したNSISがURL・サイズ・SHA-256で完全一致し、ローカル`distribution/site/`と公開配布リポジトリの追跡ファイル差分が0件になるまで完了扱いにしない。
+7. 公開`latest.json`、公開Release、外部再取得したNSISがURL・サイズ・SHA-256で完全一致し、公開Pagesの内容が21側のマージ後`main`と一致するまで完了扱いにしない。20側`distribution/site/`との全ファイル一致は完了条件にしない。
 
 ## 記録
 
