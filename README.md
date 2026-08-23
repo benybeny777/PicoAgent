@@ -773,6 +773,10 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 - 設定・履歴・メモリは `app_config_dir` / `app_data_dir` 配下、同梱系の実行時取得物は `PicoAgent/bundled/`、ログは `PicoAgent/log/`
 - アイコンは `src-tauri/icons/`（`cargo tauri icon src-tauri/icon-source.png` で再生成）
 
+**インストール（上書き導入）**
+
+NSIS インストーラは、ファイルをコピーする前にインストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止めます。本体だけを終了しても子プロセスは残り、インストール先の実行ファイルとDLLを掴んだままだと上書き導入が失敗して新旧が混ざり、更新後に起動できなくなるためです。PC上の同名プロセスは停止しません。
+
 **アンインストール**
 
 NSIS アンインストーラは、インストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止め、PicoAgent専用の一時ファイルを削除します。PC上の同名プロセスは停止しません。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。

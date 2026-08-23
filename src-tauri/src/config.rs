@@ -73,7 +73,8 @@ impl Config {
     /// 保存先を持たない読み取り専用状態に入り、その理由を覚えて同じ文言を返す。
     /// 覚えておかないと、設定画面の保存が「config.load() が未実行です」という
     /// 実装都合の文言になり、利用者には原因も対象ファイルも分からない。
-    fn start_read_only(&self, reason: String) -> String {
+    /// 起動処理からも呼ぶ（保存先を決められない場合でも画面は出す）ため公開する。
+    pub fn start_read_only(&self, reason: String) -> String {
         *self.read_only_reason.lock().unwrap() = Some(reason.clone());
         reason
     }
@@ -312,6 +313,24 @@ mod tests {
         reloaded.load(path.clone()).unwrap();
         assert_eq!(reloaded.get("PICOAGENT_CHARACTER", ""), "mugi");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 読み取り専用起動は「保存できない」状態であって「起動できない」状態ではない。
+    /// 起動処理側がここで受け取る `Err` を握って進めるよう、理由付きで返し続けること。
+    #[test]
+    fn 読み取り専用起動でも移行の失敗を理由付きで返す() {
+        let cfg = Config::new();
+        let reason = cfg.start_read_only("設定の保存先を取得できません".to_string());
+        assert!(reason.contains("設定の保存先を取得できません"));
+        cfg.set("PICOAGENT_CHARACTER", "mugi-live2d");
+
+        let error = cfg
+            .migrate_removed_character("mugi-live2d", "mugi")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("設定の保存先を取得できません"), "{error}");
+        // 保存できないだけで、実行中の値は起動に使える状態のまま残す。
+        assert_eq!(cfg.get("PICOAGENT_CHARACTER", ""), "mugi-live2d");
     }
 
     /// 設定は毎回「全体を書き戻す」ので、同じ値での保存を弾かないと

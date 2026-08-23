@@ -7,7 +7,7 @@
 
 /// 設定キーとして扱わない文字列（マーカー・テスト用ダミー・ドキュメント中の例）。
 /// 追加するときは、なぜ設定キーでないのかを理由として書き添えること。
-const NOT_CONFIG_KEYS: [(&str, &str); 11] = [
+const NOT_CONFIG_KEYS: [(&str, &str); 12] = [
     (
         "PICOAGENT_COMMAND_APPROVAL__",
         "run_command と対話ループの内部プロトコルのマーカー",
@@ -42,6 +42,10 @@ const NOT_CONFIG_KEYS: [(&str, &str); 11] = [
     (
         "PICOAGENT_QA_LONG_AUDIO",
         "長時間文字起こしの明示実機テストだけで使う入力パス",
+    ),
+    (
+        "PICOAGENT_STOP_MANAGED_PROCESSES",
+        "NSISインストーラの共通マクロ名（設定キーではない）",
     ),
 ];
 
@@ -132,6 +136,12 @@ mod guard {
         // SPEC の表に現れる `PICOAGENT_*` を拾う。
         let mut in_spec = std::collections::BTreeSet::new();
         super::collect_keys(&spec, &mut in_spec);
+        // 設定キーでない `PICOAGENT_*`（内部マーカー、インストーラのマクロ名など）は
+        // 実装側の収集と同じ基準で外す。片側だけ外すと、`NOT_CONFIG_KEYS` へ登録した
+        // 文字列を SPEC で説明できなくなる。
+        for (skip, _) in super::NOT_CONFIG_KEYS {
+            in_spec.remove(skip);
+        }
 
         // 旧キー（移行のために記載を残しているもの）は「旧」と同じ行で説明されている。
         let legacy: Vec<&str> = spec

@@ -671,6 +671,33 @@ mod tests {
     }
 
     #[test]
+    fn 導入前にも管理下プロセスを停止する() {
+        let root = crate::util::repo_root();
+        for name in ["installer-hooks.nsh", "installer-hooks-lite.nsh"] {
+            let script = std::fs::read_to_string(root.join("src-tauri").join(name)).unwrap();
+            // 上書き導入で$INSTDIR配下を掴んだままの子プロセスが残ると、
+            // 新旧が混ざった導入結果になって起動できなくなる。
+            assert!(
+                script.contains("!macro NSIS_HOOK_PREINSTALL"),
+                "{name}: 導入前フックがない"
+            );
+            for hook in ["NSIS_HOOK_PREINSTALL", "NSIS_HOOK_PREUNINSTALL"] {
+                let start = script.find(&format!("!macro {hook}")).unwrap();
+                let end = script[start..].find("!macroend").unwrap() + start;
+                assert!(
+                    script[start..end].contains("!insertmacro PICOAGENT_STOP_MANAGED_PROCESSES"),
+                    "{name}: {hook} が共通の停止処理を呼んでいない"
+                );
+            }
+            // 実行時ディレクトリへ導入する追加機能も、導入前・削除前に止める。
+            assert!(
+                script.contains("$APPDATA\\PicoAgent\\bundled\\whisper\\*"),
+                "{name}: 管理下Whisperの停止経路がない"
+            );
+        }
+    }
+
+    #[test]
     fn 軽量配布版は追加機能を一括同梱しない() {
         let root = crate::util::repo_root();
         let config: serde_json::Value = serde_json::from_str(
