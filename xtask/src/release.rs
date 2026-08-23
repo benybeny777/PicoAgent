@@ -688,6 +688,7 @@ mod tests {
                 ("run.exe", "aivis"),
                 ("whisper-cli.exe", "whisper"),
                 ("python.exe", "tha3"),
+                ("uv.exe", "tha3-bootstrap"),
             ] {
                 assert!(
                     script.contains(&format!(
