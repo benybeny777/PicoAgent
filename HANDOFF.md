@@ -3,10 +3,10 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-24
-- ブランチ: `fix/use-cuda-engine`
+- ブランチ: `main`（PR #159統合後）
 - 目的: GPU別ローカル推論バックエンドの自動選択
-- 対応PR: 本体 #145〜#148／#154、配布Repo #11〜#13
-- 直前の作業: 公開LPへUbuntu Linux対応を反映
+- 対応PR: 本体 #145〜#148／#154／#159、配布Repo #11〜#13
+- 直前の作業: GPU別ローカル推論バックエンドの自動選択を実装
 
 2026-08-24、Windowsのローカル推論をGPU別に自動選択する実装へ変更した。Turing以降かつドライバー580以上のNVIDIAはCUDA 13.3、AMD公式HIP Runtime対応SKUはROCm 7.14、Intel Arc／Iris Xe／Core Ultra系`Intel Graphics`等はSYCLを第一候補にし、いずれもVulkan、CPUの順にフォールバックする。Intelは対応済みだが、想定利用者に占めるIntel GPUのシェアを踏まえ、主要な訴求・優先対応の対象には置かない。Ubuntu x64は同じ固定`b10566`のCPU資産からVulkan資産へ変更した。固定ReleaseにLinux CUDA／ROCm資産がないため、専用経路は独自ビルド・配布・実GPU QAが必要な保留事項として`docs/REVIEW-LOG.md`へ残した。
 
