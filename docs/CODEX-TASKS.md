@@ -32,3 +32,5 @@ Claude横断レビューA〜Iは2026-08-19にすべて完了した。結果は`d
 | 2 | macOS版のビルド・署名・公証と実機QA。**着手時は `secret.rs` の平文フォールバックを先に塞ぐ**（`keyring` で Keychain へ寄せる。`enc:dpapi:v1:` の Windows 経路と `secret::guard` の password 判定はそのまま残す） | macOSホストが要る。WindowsホストとGitHub Actionsは使わない方針。詳細は [LIBRARY-CANDIDATES.md](LIBRARY-CANDIDATES.md) §2-1 |
 | 3 | Windows実機のうち再現条件が必要な残り（8方向リサイズ、端寄せ位置の復元、旧版Aivisを置いた更新導線、稼働中ローカルAIでのキャラ別挨拶） | 対象の保存状態・旧版Aivis・ローカルAIを安全に用意できる回にまとめて。起動復帰、単一起動、配信立ち絵は2026-08-18に左画面で確認済み |
 | 4 | Free／Pro のスキル制限とライセンス入力欄の設計見直し（`beta-full` ビルドでも入力欄が出る、`license::CONFIG_KEY` の cfg 分岐、制限の粒度） | **アルファ期間中は全機能試用で運用する方針のため着手しない。** 正式版の準備時に、制限そのものの設計から見直す |
+| 5 | 紹介資料`PicoAgent-Overview.pptx`の実機確認。Windows実機のPowerPointでスライドショーへ入り、表紙の2本（ペット表示・配信表示）が自動再生され、音が鳴らないことを見る。自動再生しない場合は`<p:timing>`の`playFrom(0.0)`が2本目以降で`withEffect`になっているかを疑う | Windows実機のPowerPoint。Linux側はLibreOffice経由のPDF描画までしか確認できず、動画の再生自体は検証不能 |
+| 6 | 配布Repoのマージ済みブランチ`claude/picoagent-ai-agent-n0qqia`を削除する | Linux作業環境からのブランチ削除はプロキシに切られて通らない（`send-pack: unexpected disconnect`。`--force-with-lease`でも同じ）。通常のpush経路がある環境かWeb UIから消す |
