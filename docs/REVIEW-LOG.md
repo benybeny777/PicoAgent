@@ -11,7 +11,7 @@
 
 ---
 
-## 2026-08-23 — Ubuntu Linux 24.04 x64対応と配布実機検証
+## 2026-08-23 — Ubuntu Linux 24.04 x64対応と配布実機検証（PR #153）
 
 対象: 利用者からの依頼「linuxでも動作するようにしたい」。Ubuntu 24.04 LTS x64のWSL2環境を用意し、単なるクロスコンパイルではなくLinux用エンジン取得、画面取得、実行ファイル、deb、AppImageを確認した。右画面とComputer Useは使わず、Xvfbの隔離画面だけで実WebViewを撮影した。起動したPicoAgent、Xvfb、Cargo、Rust、インストールした検査用debは確認直後に終了・削除した。
 
