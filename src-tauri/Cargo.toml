@@ -55,9 +55,9 @@ hound = "3.5"
 enigo = "0.6"
 arboard = { version = "3.6.1", default-features = false }
 
-# 画面取得。対応 OS（Windows / macOS）だけに入れる。Linux は対応対象外で、
-# 入れると Wayland / PipeWire の開発ヘッダが開発環境にも必要になるため含めない。
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+# 画面取得。Windows / macOS / Linux で外部コマンドを介さず取得する。
+# Linux のビルドには X11 / Wayland / PipeWire の開発ヘッダが必要。
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 xcap = "0.9.8"
 
 [target.'cfg(unix)'.dependencies]
@@ -78,7 +78,9 @@ windows-sys = { version = "0.61", features = [
 
 [profile.release]
 opt-level = "s"
-lto = true
+# Linux の実行ファイルと cdylib をfat LTOで同時に作ると、encoding_rsの公開定数が
+# 未解決になりリンクできない。全OSで最適化を維持できるthin LTOを使う。
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true

@@ -8,8 +8,7 @@
 #      `tauri::generate_context!` はコンパイル時にこのパスの実在を確かめるため、
 #      無いとビルドがマクロの段階で止まる。
 #
-# 対応 OS は Windows と macOS で Linux は対象外（AGENTS.md）。ここで入れるのは
-# 「Linux 上で開発タスクを回すため」だけのもので、製品の動作保証とは無関係。
+# Ubuntu Linux も対応OSなので、Tauri本体に加えて画面取得のX11／Wayland／PipeWire依存を揃える。
 set -euo pipefail
 
 # ローカル（Windows / macOS）の開発環境には触らない。web セッションでだけ動かす。
@@ -22,7 +21,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 log() { printf '[session-start] %s\n' "$1"; }
 
 # ── 1. システムライブラリ ───────────────────────────────────────────
-# Tauri v2 の Linux 前提パッケージ ＋ 本プロジェクト固有の2つ:
+# Tauri v2 の Linux 前提パッケージ ＋ 本プロジェクト固有の依存:
 #   libasound2-dev … cpal（マイク録音）が使う alsa-sys
 #   libxdo-dev     … enigo（PC 操作スキル）
 APT_PACKAGES=(
@@ -34,6 +33,14 @@ APT_PACKAGES=(
   libayatana-appindicator3-dev
   libasound2-dev
   libxdo-dev
+  libclang-dev
+  libxcb1-dev
+  libxrandr-dev
+  libdbus-1-dev
+  libpipewire-0.3-dev
+  libwayland-dev
+  libegl-dev
+  libgbm-dev
 )
 
 if [ "$(id -u)" -eq 0 ]; then

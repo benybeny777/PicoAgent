@@ -1,6 +1,6 @@
 ---
 name: build-picoagent-beta
-description: PicoAgentの開発中アルファ版をWindows NSISとして軽量ビルドし、不要な開発用同梱物や旧インストーラを混ぜず、ハッシュ付き更新情報、Distribution README、動画、GitHub Releaseまで検証・公開する依頼で使う。
+description: PicoAgentの開発中アルファ版をWindows NSISまたはUbuntu Linuxのdeb・AppImageとして軽量ビルドし、不要な開発用同梱物や旧成果物を混ぜず検証・公開する依頼で使う。
 ---
 
 # PicoAgentアルファ版をビルドする
@@ -12,11 +12,11 @@ description: PicoAgentの開発中アルファ版をWindows NSISとして軽量�
 3. `origin/main`、作業ブランチ、`distribution/release.json`の版・対象OS・許可キャラ、既存GitHub Release、配布リポジトリの`main`、Pages状態を取得し、今回の公開対象を確定する。
 4. `distribution/site/`と公開配布リポジトリの全追跡ファイルを相対パス・サイズ・SHA-256で比較する。差分があれば双方のコミット履歴と実画面を確認し、古い側を新しい側へ機械的に上書きしない。
 5. このスキルのパス、コマンド、公開先、版、成果物名が現行実装とずれていたら、同じPRでスキルを先に更新する。
-6. WindowsホストではWindows成果物だけを作る。macOS成果物を推測・改名・流用しない。
+6. ホストOSに対応する成果物だけを作る。WindowsではNSIS、Ubuntu Linux x64ではdebとAppImageを作り、別OSの成果物を推測・改名・流用しない。
 
 ## 混入を防ぐ
 
-- 公開アルファ版は必ず`cargo xtask build-beta --bundles nsis`を正規入口にする。
+- 公開アルファ版は必ず`cargo xtask build-beta --bundles <形式>`を正規入口にする。Windowsは`nsis`、Ubuntu Linux x64は`deb,appimage`を指定する。
 - `build-beta`が`beta-full` featureを自動付与し、製品情報へアルファ全機能試用中と表示することを確認する。正式版コマンドへこのfeatureを付けない。
 - `build-beta`だけが`ALPHA`バッジを配信物へ残す。生成後の`ui-dist/index.html`に`beta-badge`があること、通常`build`では無いことを確認する。
 - `cargo xtask build`も軽量構成だがALPHA表示と全機能試用featureが付かないため、公開アルファ版へ使わない。Office、Aivis、Whisper、THA3、開発ツールまで暗黙取得する`build-full`は配布へ使わない。
@@ -39,14 +39,14 @@ description: PicoAgentの開発中アルファ版をWindows NSISとして軽量�
 ## ビルド
 
 1. 長時間実行は`temp/`へ標準出力・標準エラー・PIDを保存し、隠しウィンドウで起動する。
-2. `cargo xtask build-beta --bundles nsis`を実行する。
+2. Windowsでは`cargo xtask build-beta --bundles nsis`、Ubuntu Linux x64では`cargo xtask build-beta --bundles deb,appimage`を実行する。LinuxはREADMEのapt依存を先に揃え、AppImageの`bundleMediaFramework`を無効化しない。
 3. 親プロセスの終了コードとログ末尾を回収する。`makensis`だけが終了しても成功扱いにしない。
 4. NSISの`error mmapping datablock`が出た場合は、通常ビルドの巨大な同梱範囲を使っていないか確認する。圧縮方式を場当たり的に変えたり、古い成果物へ戻したりしない。
 
 ## 成果物を検証する
 
-1. `src-tauri/target/release/bundle/nsis/PicoAgent_<版>_x64-setup.exe`の更新時刻、サイズ、PE先頭`MZ`、SHA-256を確認する。
-2. `cargo xtask update-feed <NSIS> <説明>`で`distribution/site/latest.json`を生成する。
+1. Windowsは`src-tauri/target/release/bundle/nsis/PicoAgent_<版>_x64-setup.exe`の更新時刻、サイズ、PE先頭`MZ`、SHA-256を確認する。Linuxは`bundle/deb/*.deb`と`bundle/appimage/*.AppImage`の更新時刻、形式、SHA-256を確認し、隔離環境でdebの導入・起動・削除とAppImageの起動を行う。
+2. Windows公開時だけ`cargo xtask update-feed <NSIS> <説明>`で`distribution/site/latest.json`を生成する。Linux更新情報は専用生成経路が実装されるまで空欄を維持し、Windows用PE検証を流用しない。
    - ハッシュ用バッファを1MiBのスタック配列へ戻さない。Windowsでは`update-feed`開始時にスタックオーバーフローするため、ヒープ確保を維持する。
 3. `latest.json`のURL、サイズ、SHA-256が実ファイルと完全一致することを再計算して確認する。
 4. `cargo test --manifest-path xtask/Cargo.toml`、変更範囲に応じたRustテスト、全JSの`node --check`、`git diff --check`を通す。

@@ -127,13 +127,26 @@
 
 ### 前提
 
-**対応 OS は Windows と macOS です。初期販売版の配布はWindows 10/11 x64から開始します。** macOS版は署名・公証と実機QAが揃ってから追加します。
+**対応 OS は Windows、macOS、Ubuntu Linux 24.04 LTS x64です。初期販売版の配布はWindows 10/11 x64から開始します。** macOS版とLinux版の一般公開は、各形式の署名方針と実機QAが揃ってから追加します。
 
 | | 必要なもの |
 |---|---|
 | 共通 | **Rust 1.88以上（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） / **Git LFS**（clone後に`git lfs pull`） |
 | Windows | WebView2 ランタイム |
 | macOS | Xcode Command Line Tools（`xcode-select --install`）<br />読み上げも使うなら `brew install p7zip` |
+| Ubuntu Linux 24.04 x64 | 下記のTauri／音声／入力操作／画面取得用パッケージ |
+
+Ubuntuでは、ソースからのビルド前に次を1回実行します。AppImageの音声同梱に必要なGStreamerは`base`と`good`だけを使い、再配布条件の異なる`ugly`は既定へ入れません。
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential pkg-config curl ca-certificates git git-lfs \
+  libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev \
+  libayatana-appindicator3-dev libasound2-dev libxdo-dev libclang-dev \
+  libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev \
+  libwayland-dev libegl-dev libgbm-dev patchelf squashfs-tools \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+```
 
 ### 起動
 
@@ -181,6 +194,13 @@ cargo xtask verify
 全対象が本当に必要な場合だけ `cargo xtask setup all` を明示します。引数なしの `cargo xtask setup` は、不要な数GB級ランタイムの取得を防ぐため実行しません。THA3は開発環境で制作機能を確認するための任意対象で、販売用軽量版には再配布しません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
 `cargo xtask build`も任意の大容量追加機能を暗黙取得しない軽量構成です。Aivis、Whisper、THA3、Office、外部CLIまで含む開発用フルビルドが本当に必要な場合だけ、`cargo xtask build-full`を明示します。
+
+Ubuntu Linuxの配布確認は、Linux x64用エンジンを準備してから標準形式を指定します。AppImageは音声再生に必要なGStreamerを`tauri.linux.conf.json`で同梱します。
+
+```bash
+cargo xtask setup engine
+cargo xtask build --bundles deb,appimage
+```
 
 一部の OS では公式のポータブル配布が無いツールがあります。その場合は警告のみで起動を続け、`apt` / `brew` で入れた PATH 上のツールへ自動で切り替わります。
 
@@ -303,7 +323,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | 調査・資料 | 出典付き調査レポート、スライド下書き、HTML ダッシュボード、資料一式の生成 |
 | 外部連携 | Gmail、Slack、Google カレンダー / Docs / Sheets / Drive、GitHub、Notion、各種 SNS |
 | ローカル操作 | ファイル読み書き、コマンド実行、自力コード実行、cron 風スケジュール |
-| PC 操作 | マウス・キーボードの直接操作とウィンドウ一覧・前面化（シェルを介さない固定操作のみ。既定は無効） |
+| PC 操作 | マウス・キーボードの直接操作とウィンドウ一覧・前面化（シェルを介さない固定操作のみ。既定は無効。ウィンドウ一覧・前面化は現在Windowsのみ） |
 | プロジェクト管理 | 案件ごとの作業環境の切替、課題台帳（期限・優先度・タグ）、決定事項と進捗の記録、切替時の文脈復元 |
 | コーディング支援 | 行番号つき部分読み、ファイル名検索（glob）、内容検索（正規表現）、既存ファイルの部分編集、ノートブック編集、バックグラウンド実行の様子見、多段タスクの作業計画、画像を見る、選択肢つきの確認 |
 | 実用ツール | 文字数分析、JSON 整形、Base64、URL 変換、単位換算、日付計算、CSV 表化、色変換 ほか約 30 種 |
@@ -705,18 +725,18 @@ cargo xtask license keygen
 cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文番号" --edition pro
 ```
 
-ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（Windows は NSIS、macOS は `.app` / `.dmg` など）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
+ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（WindowsはNSIS、macOSは`.app`／`.dmg`、Ubuntu Linux x64は`.deb`／AppImage）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
 通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと公式取得元マニフェストだけを入れます。Aivis・Whisperは初回起動後に公式配布から直接取得し、THA3・LibreOffice・PDF/画像ツールは利用者による公式導入を案内します。開発用のツール・ドキュメント・README用画像は含まれません。
 
 <details>
 <summary>同梱物・制作ツールの扱い（エンジン / Aivis / Whisper / Live2D / THA3）</summary>
 
-以下のパスは Windows 表記です。macOS では同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
+以下のパスは Windows 表記です。macOSとLinuxでは同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
 
 **同梱推論エンジン（llama-server）**
 
-- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64の資産名とSHA-256をコードで照合します。取得済み配置も`picoagent-engine.json`のタグ・資産名・SHA-256が一致する場合だけ再利用します
+- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux x64の資産名とSHA-256をコードで照合します。取得済み配置も`picoagent-engine.json`のタグ・資産名・SHA-256が一致する場合だけ再利用します
 - 実行ファイルは配布物へ同梱しますが、モデル GGUF（数 GB）は含めず、初回起動時に `%APPDATA%\PicoAgent\bundled\models\` へ取得します
 - 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します
 
@@ -783,7 +803,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 **署名・自動更新**
 
-初期販売のWindows版はコード署名（Authenticode）とバックグラウンドでの完全自動更新を使いません。`distribution/release.json` の `platforms=["windows"]` / `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenの警告が表示されるため、販売ページで事前に明記します。Windows版は利用者が設定画面で明示した場合だけ、公開Gitのサイズ・SHA-256を照合して更新インストーラを実行します。将来macOSを販売対象へ加える場合は署名・公証と実機QAを先に行います。更新署名付きの完全自動更新を有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
+初期販売のWindows版はコード署名（Authenticode）とバックグラウンドでの完全自動更新を使いません。`distribution/release.json` の `platforms=["windows"]` / `signing.required=false` / `updates.required=false` がこの方針の正本です。未署名版ではWindows SmartScreenの警告が表示されるため、販売ページで事前に明記します。Windows版は利用者が設定画面で明示した場合だけ、公開Gitのサイズ・SHA-256を照合して更新インストーラを実行します。macOSまたはLinuxを販売対象へ加える場合は、対象形式の署名方針と実機QAを先に行います。更新署名付きの完全自動更新を有効化するときは各 `required` を `true` にし、公開URL・更新公開鍵・実装・署名確認が揃うまで販売ゲートで停止します。秘密鍵と証明書はリポジトリへ保存しません。
 
 </details>
 

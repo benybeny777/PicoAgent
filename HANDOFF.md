@@ -3,10 +3,12 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-23
-- ブランチ: `review/claude-installer-holds`
-- 目的: PR #149・#150のClaude再レビューとWindows実機保留の解消
-- 対応PR: #150（起動ブロッカー修正）、#151（THA3 Python停止）、#152（Claude再レビュー・Windows実機確認・uv停止）
-- 直前の作業: PR #151
+- ブランチ: `main`（PR #153統合後）
+- 目的: Ubuntu Linux 24.04 LTS x64の対応OS追加とdeb／AppImage検証
+- 対応PR: #153
+- 直前の作業: Linux対応
+
+2026-08-23、Ubuntu 24.04 LTS x64で現行コードのcheckとライブラリテストを行い、Linux画面取得を`xcap`のX11／Wayland／PipeWire経路へ接続した。配布リンクで見つかった`libgbm-dev`不足とfat LTOの未解決参照を解消し、固定Linux x64版`llama-server`をSHA-256照合して取得した。debとAppImageを生成し、Xvfb上の実WebViewで初回設定画面を目視した。debは実導入・起動・削除、AppImageは音声用GStreamer同梱後の起動、画面取得はPNG必須回帰まで成功した。右画面とComputer Useは使わず、検証プロセスと検査用debは回収済み。販売対象は引き続きWindowsのみで、Linux公開・署名・更新フィードは未実施。
 
 2026-08-23、利用者の明示指示でClaude CLIにPR #149・#150と保留項目を再レビューさせた。
 ClaudeがP1として指摘した、THA3生成中の管理下`python.exe`／導入用`uv.exe`が導入前・削除前に
