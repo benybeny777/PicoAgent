@@ -189,7 +189,7 @@ cargo xtask verify
 | `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（開発環境専用。販売版は作者配布物を利用者が用意） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
-| `cargo xtask stop` | 残存プロセスの停止（本体・同梱エンジンに加えて、`tools/screenshots/` の撮影ツールが残した `node` も回収します。無関係な `node` は止めません） |
+| `cargo xtask stop` | 残存プロセスの停止（本体・同梱エンジンに加えて、`tools/screenshots/` の撮影ツールが残した `node` と、PicoAgent 専用プロファイルで動く `browser_control` のブラウザも回収します。無関係な `node` や普段使いのブラウザは止めません） |
 
 全対象が本当に必要な場合だけ `cargo xtask setup all` を明示します。引数なしの `cargo xtask setup` は、不要な数GB級ランタイムの取得を防ぐため実行しません。THA3は開発環境で制作機能を確認するための任意対象で、販売用軽量版には再配布しません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 

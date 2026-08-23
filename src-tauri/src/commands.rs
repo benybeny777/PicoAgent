@@ -644,6 +644,9 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "history": recent_history,
+        // 原本を読めなかったキャラクターは保存を止めている。黙っていると利用者は
+        // 保存されていると思ったまま会話を続け、再起動でその分がまるごと消える。
+        "historySaveBlocked": crate::history::saving_blocked(&character_id),
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
         "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
         "layout": crate::layout::current(&state.config),
@@ -1791,7 +1794,21 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
 #[tauri::command]
 pub fn pet_daily_events(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     match crate::daily::due_events(&state.config) {
-        Ok(events) => Ok(json!({ "events": events })),
+        Ok(poll) => {
+            // 日時を読めない予定は永久に発火しない。ログと画面の両方へ1度だけ出す
+            // （`daily::due_events` が同じ予定を繰り返し返さないので、ここでは重複しない）。
+            for event in &poll.broken {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!(
+                        "通知「{}」の日時「{}」を解析できないため発火しません。設定から登録し直してください。",
+                        crate::text::preview(&event.text, 40),
+                        crate::text::preview(&event.due_at, 40),
+                    ),
+                );
+            }
+            Ok(json!({ "events": poll.due, "broken": poll.broken }))
+        }
         Err(error) => Err(log_command_error(&app, "通知の確認に失敗しました", error)),
     }
 }

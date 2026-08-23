@@ -191,6 +191,21 @@ function showToast(msg, kind = "info", options = {}) {
   timer = setTimeout(dismiss, duration);
 }
 
+// 目覚まし・通知のように裏で繰り返し確認している機能は、失敗しても画面へ何も出ないと
+// 「登録したのに動かない」という結果だけが利用者に残る。ログは利用者が見る場所ではない。
+// 同じ理由で毎回（20秒ごとに）出すとうるさいので、原因ごとに1度だけ知らせ、
+// 復旧したら次の失敗はまた知らせる。
+const notifiedBackgroundFailures = new Set();
+function notifyBackgroundFailure(key, message, error) {
+  logApp("warn", message, errorDetail(error));
+  if (notifiedBackgroundFailures.has(key)) return;
+  notifiedBackgroundFailures.add(key);
+  showToast(message, "error", { duration: 8000 });
+}
+function clearBackgroundFailure(key) {
+  notifiedBackgroundFailures.delete(key);
+}
+
 // エラー表示後にリトライボタンを返信エリアへ追加する。
 function addRetryButton() {
   const md = reply.querySelector(".md");
@@ -4796,8 +4811,21 @@ async function checkDailyEvents() {
   let res;
   try { res = await window.picoagent.dailyEvents(); }
   catch (error) {
-    logApp("warn", "日次イベント取得に失敗しました", errorDetail(error));
+    notifyBackgroundFailure(
+      "daily-events",
+      "リマインダーを確認できないため通知が出ません。設定の「リマインダー」を確認してください",
+      error,
+    );
     return;
+  }
+  clearBackgroundFailure("daily-events");
+  // 日時を読めない予定は永久に発火しない。バックエンドが1件につき1度だけ返すので、
+  // 届いたぶんはそのまま知らせる（黙って飛ばすと、鳴らない理由が利用者に分からない）。
+  const broken = Array.isArray(res?.broken) ? res.broken : [];
+  for (const item of broken) {
+    const label = String(item?.text || item?.label || "").trim() || "登録した通知";
+    logApp("warn", "通知の日時を解析できません", `${label} / ${item?.due_at ?? ""}`);
+    showToast(`「${label}」は日時を読めないため鳴りません。登録し直してください`, "error");
   }
   const events = Array.isArray(res?.events) ? res.events : [];
   if (!events.length) return;
@@ -4849,9 +4877,14 @@ async function checkAlarms() {
   let res;
   try { res = await window.picoagent.alarms(); }
   catch (error) {
-    logApp("warn", "目覚まし一覧取得に失敗しました", errorDetail(error));
+    notifyBackgroundFailure(
+      "alarms",
+      "目覚ましの一覧を読めないため鳴りません。設定の「目覚まし時計」を確認してください",
+      error,
+    );
     return;
   }
+  clearBackgroundFailure("alarms");
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
   const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
@@ -4905,6 +4938,15 @@ function startAlarmPolling() {
     ? "いっしょの記録を見る"
     : "いっしょの記録は設定で停止中";
   online.dataset.up = info.up;
+  // 原本を読めなかった履歴は保存を止めている。黙っていると、保存されていると思ったまま
+  // 会話を続けて、再起動でその分がまるごと消える。起動時に1度だけはっきり知らせる。
+  if (info.historySaveBlocked === true) {
+    notifyBackgroundFailure(
+      "history-save-blocked",
+      "会話履歴を読めなかったため、この会話は保存されません（元の履歴は残しています）",
+      "history save blocked",
+    );
+  }
   if (info.theme != null) applyTheme(info.theme);
   if (info.fontPx != null) applyFontPx(info.fontPx);
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);

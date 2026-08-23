@@ -3,10 +3,13 @@
 キャラクター画像の追加・再生成は `docs/CHARACTER-ASSET-WORKFLOW.md` に手順を固定した。高精細差分、Photoshop仕上げ、lossless WebP単一世代化、実WebView検査まで省略しない。同梱通常2Dは `rin-tha3` を機能基準に `motionProfile=full` とし、制作正本PNGの基本、半目／閉じ目、閉口／開口、左右視線、喜び／悲しみの9レイヤーを全8体で必須にする。実行時は復号RGBA完全一致のWebPを使う。
 
 - 最終更新: 2026-08-23
-- ブランチ: `main`（PR #153統合後）
-- 目的: Ubuntu Linux 24.04 LTS x64の対応OS追加とdeb／AppImage検証
-- 対応PR: #153
-- 直前の作業: Linux対応
+- ブランチ: `integrate/pending-user-fixes`
+- 目的: 未統合PR #142〜#144を現行mainへ移植し、残存ブランチを整理する
+- 対応PR: #142、#143、#144（統合PR作成前）
+- 直前の作業: 利用者向け不具合3本の統合とブランチ監査
+
+2026-08-23、利用者の「ブランチ全部マージして」に対し、残存ブランチを内容で照合した。PR #142〜#144には現行`main`に無い有効差分があったため、Ubuntu Linux対応後の`main`から作った統合ブランチへ順に移植した。競合では旧ブランチ側の「Linux非対応」を採用せず、現行のWindows／macOS／Ubuntu 24.04 LTS対応を維持した。古いClaudeブランチ6本は、固有コミットなし・patch-equivalent・後続PRで同等内容を実装済みのいずれかであり、旧実装を再導入するマージ対象ではない。統合PRのsquash merge後、PR #142〜#144を重複として閉じ、各リモート枝と古い6枝を削除する。
+統合後の`cargo xtask verify`は必須26項目すべて成功し、本体391件・xtask 66件が合格した（長時間Whisper実機検査1件は既定どおり除外）。追加したJavaScript契約8件も成功した。
 
 2026-08-23、Ubuntu 24.04 LTS x64で現行コードのcheckとライブラリテストを行い、Linux画面取得を`xcap`のX11／Wayland／PipeWire経路へ接続した。配布リンクで見つかった`libgbm-dev`不足とfat LTOの未解決参照を解消し、固定Linux x64版`llama-server`をSHA-256照合して取得した。debとAppImageを生成し、Xvfb上の実WebViewで初回設定画面を目視した。debは実導入・起動・削除、AppImageは音声用GStreamer同梱後の起動、画面取得はPNG必須回帰まで成功した。右画面とComputer Useは使わず、検証プロセスと検査用debは回収済み。販売対象は引き続きWindowsのみで、Linux公開・署名・更新フィードは未実施。
 
@@ -85,6 +88,7 @@ A〜CはPR #133、GはPR #134、D/HはPR #135、E/FはPR #136で統合し、Iは
 不要ブランチは2026-08-19に整理した。中身が現行`main`に存在することを1本ずつ照合したうえで、
 ローカル5本（`chore/review-audit-licenses`、`docs/v102-public-handoff`、`fix/restore-pr106-review-log`、
 `review/claude-doc-fix-20260817`、`review/claude-pr106-20260817`）を削除した。
+同日の再点検で拾い漏れていた`claude/codex-credit-exhausted-989f91`（指す先が`cc80ec1`で固有コミット0件）も削除した。
 
 **リモート6本の削除だけ残っている。** 実行環境がリモートブランチ削除を許可しないため、
 次のコマンドを利用者が実行する必要がある。対象と判定根拠は`docs/REVIEW-LOG.md`の
@@ -118,6 +122,35 @@ squash mergeでは`git branch --merged`が効かないため、判定は枝の�
 確認できたものは、この節から消して `docs/REVIEW-LOG.md` の該当エントリの「保留」を落とす。
 
 ## 現在の作業
+
+2026-08-19、残件0の確認後にあらためて`main`を点検し、無言スキップと誤った空表示を2件直した。
+`daily::due_events()`は`due_at`を解析できない予定を無言で飛ばしており、登録したリマインダーが
+永久に鳴らないのに利用者へ何も出ていなかった。`DuePoll { due, broken }`で解析できない予定を返し、
+`pet_daily_events`が`app.log`へ理由を書いてフロントがエラー通知を1回出す。20秒ごとのポーリングで
+同じ警告を出し続けないよう、`id@due_at`をこの起動中だけ覚える。設定画面の長期メモリ一覧は、
+削除・一覧の応答に`items`が無い形を受け取ると空一覧で描き直しており、実際は残っている記憶を
+「0件」と見せうる。`Array.isArray`で確かめ、受け取れなかった場合は表示を空へ置き換えず、
+削除後は読み直し、一覧取得時は理由を出す。保存データには触れていない。
+再点検で問題なしと判定した範囲（自己停止rAFループの再開点、音声の`createObjectURL`／`setInterval`解放、
+`unwrap()`の通常経路混入、空`catch`、プロバイダ一覧の文書ずれ）は`docs/REVIEW-LOG.md`へ残した。
+2026-08-19、`browser_control` が起動したブラウザの残留を直した。Chrome / Edge は起動直後に
+本体を立て直して最初のプロセスが終了するため、こちらが握る `Child` は本体の親ではなくなり、
+`kill()` も `taskkill /T` も届いていなかった（実測で本体の `ParentProcessId` が既に存在しない）。
+結果として `cargo test --lib browser_control` のたびに headless Chrome が9プロセス残り、
+ポート11446を握るため2回目以降の `cargo xtask verify` が必ず失敗していた。
+`--user-data-dir` の PicoAgent 専用プロファイル経路で名指しして回収する `stop_profile_browsers()` を
+`cdp::stop()` へ足し、`cargo xtask stop` にも同じ目印の回収を追加した。同期側の共通処理として
+`tools::process::terminate_tree_sync()` を置き、テストの guard は起動より先に持つ順序へ変えた。
+連続2回の実行で残留0・ポート開放を確認した。利用者が普段使っているブラウザは別プロファイルなので
+対象にならない。アプリ終了経路（`RunEvent::Exit` → `browser_control::stop()`）にも同じく効く。
+2026-08-19、利用者にとって実害があるのに無言だった失敗を3件直した。会話履歴の原本を読めなかった
+キャラクターは保存を止めているが、通知が`app.log`だけで、利用者は保存されていると思ったまま
+会話を続けて再起動でその分を失っていた。`pet_init`の`historySaveBlocked`で状態を返し、起動時に
+画面へ知らせる（原本の保護は従来どおり）。目覚まし一覧と日常通知の取得失敗も、20秒ごとに黙って
+諦め続けるだけで「登録したのに鳴らない」結果しか残らなかったため、画面へ理由を出す。
+「1度だけ知らせる・復旧したら次の失敗はまた知らせる」は`notifyBackgroundFailure`へ共通化した。
+`AGENTS.md`へ「実害のあるバグは見つけ次第その場で直す」「利用者から見える失敗をログだけで済ませない」を
+恒久ルールとして追加した。回帰は`tools/tests/background-failure-contract.mjs`の4件。
 
 2026-08-19、Claude横断レビューIとして、常時表示のフキダシにある`backdrop-filter: blur(14px)`の
 再合成負荷を測った。立ち絵を動かし続けた状態で、ペット／ミニ／配信×重なり有無×背後の描き替え負荷
