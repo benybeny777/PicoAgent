@@ -1,10 +1,26 @@
-!macro NSIS_HOOK_PREUNINSTALL
+; PicoAgentが管理する常駐プロセスだけを停止する共通処理。
+; 同名の別アプリや、利用者が単独で起動したローカルAIは止めない。
+; インストール先またはPicoAgent管理データ配下の実体パス一致に限定する。
+; 導入前にも呼ぶ: 本体を強制終了しても子プロセスは残り、$INSTDIR配下の
+; 実行ファイルとDLLを掴んだままだと上書き導入が失敗し、新旧が混ざった
+; 導入結果になって起動できなくなるため。
+!macro PICOAGENT_STOP_MANAGED_PROCESSES
   DetailPrint "PicoAgent の関連プロセスを停止しています..."
-  ; 同名の別アプリや利用者が単独で起動したローカルAIを止めない。
-  ; インストール先またはPicoAgent管理データ配下の実体だけを対象にする。
   nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -ieq 'PicoAgent.exe' -and $$_.ExecutablePath -ieq '$INSTDIR\PicoAgent.exe' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
-  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'llama-server.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\engine\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\engine\*' -or $$_.ExecutablePath -like '$LOCALAPPDATA\PicoAgent\bundled\engine\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
-  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'run.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\aivis\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\aivis\*' -or $$_.ExecutablePath -like '$LOCALAPPDATA\PicoAgent\bundled\aivis\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'llama-server.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\engine\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\engine\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'run.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\aivis\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\aivis\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'whisper-cli.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\whisper\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\whisper\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  ; 停止直後はまだファイルハンドルが返っていないことがある。上書き導入と削除が
+  ; 「使用中」で失敗しないよう、ハンドルが閉じるまでの猶予を取る。
+  Sleep 1000
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  !insertmacro PICOAGENT_STOP_MANAGED_PROCESSES
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro PICOAGENT_STOP_MANAGED_PROCESSES
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL

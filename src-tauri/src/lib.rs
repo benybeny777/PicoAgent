@@ -163,30 +163,49 @@ pub fn run() {
             components::init(app.handle());
             // 設定の正本を読み込み、選択中プロバイダ・モデル・会話を初期化する。
             let state = app.state::<AppState>();
-            let config_dir = app.path().app_config_dir()?;
-            if let Err(error) = migration::migrate_identity_dirs(app.handle(), &config_dir) {
-                log_paths::append_app_log(
+            // 設定まわりの失敗で `setup` を中断すると、`build()` の `expect` がそのまま
+            // パニックになり、ウィンドウも案内画面も出ないまま終了する（＝利用者から見て
+            // 「起動しない」）。保存先を決められない場合も、読み取り専用で起動だけは通す。
+            match app.path().app_config_dir() {
+                Ok(config_dir) => {
+                    if let Err(error) = migration::migrate_identity_dirs(app.handle(), &config_dir)
+                    {
+                        log_paths::append_app_log(
+                            app.handle(),
+                            &format!("旧識別子からのデータ移行に失敗しました: {error}"),
+                        );
+                    }
+                    let config_path = config_dir.join("config.json");
+                    match state.config.load(config_path) {
+                        Ok(Some(warning)) => log_paths::append_app_log(app.handle(), &warning),
+                        Ok(None) => {}
+                        Err(error) => log_paths::append_app_log(
+                            app.handle(),
+                            &state.config.start_read_only(format!(
+                                "設定を読み込めないため、設定を保存しない読み取り専用状態で起動します: {error}"
+                            )),
+                        ),
+                    }
+                }
+                Err(error) => log_paths::append_app_log(
                     app.handle(),
-                    &format!("旧識別子からのデータ移行に失敗しました: {error}"),
-                );
-            }
-            let config_path = config_dir.join("config.json");
-            if let Some(warning) = state
-                .config
-                .load(config_path.clone())
-                .map_err(anyhow::Error::msg)?
-            {
-                log_paths::append_app_log(app.handle(), &warning);
+                    &state.config.start_read_only(format!(
+                        "設定の保存先を取得できないため、設定を保存しない読み取り専用状態で起動します: {error}"
+                    )),
+                ),
             }
             // 削除した失敗版を選択したままの旧設定は、2Dむぎへ一度だけ移す。
-            if state
-                .config
-                .migrate_removed_character("mugi-live2d", "mugi")?
-            {
-                log_paths::append_app_log(
+            // 保存に失敗しても起動は続ける（読み取り専用起動・空き容量不足でも画面は出す）。
+            match state.config.migrate_removed_character("mugi-live2d", "mugi") {
+                Ok(true) => log_paths::append_app_log(
                     app.handle(),
                     "削除済みのむぎLive2D選択を2Dむぎへ移行しました。",
-                );
+                ),
+                Ok(false) => {}
+                Err(error) => log_paths::append_app_log(
+                    app.handle(),
+                    &format!("削除済みのむぎLive2D選択を移行できませんでした: {error}"),
+                ),
             }
             // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
             commands::encrypt_existing_secrets(app.handle(), &state.config);
@@ -314,13 +333,28 @@ pub fn run() {
             }
             if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
                 let handle = app.handle().clone();
-                if let Err(error) = aivis::start_background(&handle) {
-                    log_paths::append_app_log(
-                        &handle,
-                        &format!("同梱 Aivis のバックグラウンド起動に失敗しました: {error}"),
-                    );
-                }
+                // 先行起動は同梱リソースの実行時ディレクトリへのコピー（同梱版で約0.8GB）を
+                // 伴う。`setup` の中で待つと、その分だけウィンドウが出ない。ブロッキングI/Oを
+                // 専用スレッドへ出してから起動確認へ進む。
                 tauri::async_runtime::spawn(async move {
+                    let background = handle.clone();
+                    let started = tauri::async_runtime::spawn_blocking(move || {
+                        aivis::start_background(&background)
+                    })
+                    .await;
+                    match started {
+                        Ok(Err(error)) => log_paths::append_app_log(
+                            &handle,
+                            &format!("同梱 Aivis のバックグラウンド起動に失敗しました: {error}"),
+                        ),
+                        Err(error) => log_paths::append_app_log(
+                            &handle,
+                            &format!(
+                                "同梱 Aivis のバックグラウンド起動を実行できませんでした: {error}"
+                            ),
+                        ),
+                        Ok(Ok(())) => {}
+                    }
                     if let Err(error) = aivis::ensure_started(&handle).await {
                         log_paths::append_app_log(
                             &handle,
