@@ -7,7 +7,7 @@
 
 /// 設定キーとして扱わない文字列（マーカー・テスト用ダミー・ドキュメント中の例）。
 /// 追加するときは、なぜ設定キーでないのかを理由として書き添えること。
-const NOT_CONFIG_KEYS: [(&str, &str); 12] = [
+const NOT_CONFIG_KEYS: [(&str, &str); 13] = [
     (
         "PICOAGENT_COMMAND_APPROVAL__",
         "run_command と対話ループの内部プロトコルのマーカー",
@@ -45,6 +45,10 @@ const NOT_CONFIG_KEYS: [(&str, &str); 12] = [
     ),
     (
         "PICOAGENT_STOP_MANAGED_PROCESSES",
+        "NSISインストーラの共通マクロ名（設定キーではない）",
+    ),
+    (
+        "PICOAGENT_STOP_BUNDLED_PROCESS",
         "NSISインストーラの共通マクロ名（設定キーではない）",
     ),
 ];

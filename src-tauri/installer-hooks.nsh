@@ -1,5 +1,12 @@
+; PicoAgent管理下の常駐プロセス1種を、実体パス一致だけで停止する。
+; NAME は実行ファイル名、SUBDIR は同梱ディレクトリ名（engine / aivis / whisper / tha3）。
+; インストール先と実行時ディレクトリ（%APPDATA%\PicoAgent\bundled\）の両方を見る。
+!macro PICOAGENT_STOP_BUNDLED_PROCESS NAME SUBDIR
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq '${NAME}' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\${SUBDIR}\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\${SUBDIR}\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+!macroend
+
 ; PicoAgentが管理する常駐プロセスだけを停止する共通処理。
-; 同名の別アプリや、利用者が単独で起動したローカルAIは止めない。
+; 同名の別アプリや、利用者が単独で起動したローカルAI・Pythonは止めない。
 ; インストール先またはPicoAgent管理データ配下の実体パス一致に限定する。
 ; 導入前にも呼ぶ: 本体を強制終了しても子プロセスは残り、$INSTDIR配下の
 ; 実行ファイルとDLLを掴んだままだと上書き導入が失敗し、新旧が混ざった
@@ -7,9 +14,12 @@
 !macro PICOAGENT_STOP_MANAGED_PROCESSES
   DetailPrint "PicoAgent の関連プロセスを停止しています..."
   nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -ieq 'PicoAgent.exe' -and $$_.ExecutablePath -ieq '$INSTDIR\PicoAgent.exe' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
-  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'llama-server.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\engine\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\engine\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
-  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'run.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\aivis\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\aivis\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
-  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'whisper-cli.exe' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\whisper\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\whisper\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "llama-server.exe" "engine"
+  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "run.exe" "aivis"
+  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "whisper-cli.exe" "whisper"
+  ; THA3のPythonは `<tha3>/runtime/venv/Scripts/python.exe` などから動く。
+  ; 生成中に導入・削除を行うと、この実体が同梱ディレクトリを掴んだまま残る。
+  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "python.exe" "tha3"
   ; 停止直後はまだファイルハンドルが返っていないことがある。上書き導入と削除が
   ; 「使用中」で失敗しないよう、ハンドルが閉じるまでの猶予を取る。
   Sleep 1000

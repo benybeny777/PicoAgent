@@ -635,19 +635,11 @@ mod tests {
         let root = crate::util::repo_root();
         for name in ["installer-hooks.nsh", "installer-hooks-lite.nsh"] {
             let script = std::fs::read_to_string(root.join("src-tauri").join(name)).unwrap();
-            for process in ["PicoAgent.exe", "llama-server.exe", "run.exe"] {
-                assert!(
-                    script.contains(process),
-                    "{name}: {process} の停止処理がない"
-                );
-            }
+            // 停止対象そのものは「導入前にも管理下プロセスを停止する」が検査する。
+            // ここは「危険な止めかたをしていないこと」に絞る。
             assert!(
                 script.contains("$INSTDIR\\PicoAgent.exe"),
                 "{name}: 本体をインストール先へ限定していない"
-            );
-            assert!(
-                script.contains("$APPDATA\\PicoAgent\\bundled\\engine\\*"),
-                "{name}: 管理下エンジンの停止経路がない"
             );
             assert!(
                 script.contains("nsExec::ExecToLog `powershell"),
@@ -690,11 +682,117 @@ mod tests {
                 );
             }
             // 実行時ディレクトリへ導入する追加機能も、導入前・削除前に止める。
+            // 停止対象は「実行ファイル名」と「同梱ディレクトリ名」の組で共通マクロへ渡す。
+            for (process, subdir) in [
+                ("llama-server.exe", "engine"),
+                ("run.exe", "aivis"),
+                ("whisper-cli.exe", "whisper"),
+                ("python.exe", "tha3"),
+            ] {
+                assert!(
+                    script.contains(&format!(
+                        "!insertmacro PICOAGENT_STOP_BUNDLED_PROCESS \"{process}\" \"{subdir}\""
+                    )),
+                    "{name}: {process}（{subdir}）の停止経路がない"
+                );
+            }
+            // 実体パスの限定は共通マクロ側で1か所にまとめる。
             assert!(
-                script.contains("$APPDATA\\PicoAgent\\bundled\\whisper\\*"),
-                "{name}: 管理下Whisperの停止経路がない"
+                script.contains("$INSTDIR\\resources\\bundled\\${SUBDIR}\\*")
+                    && script.contains("$APPDATA\\PicoAgent\\bundled\\${SUBDIR}\\*"),
+                "{name}: 同梱プロセスの停止をインストール先と実行時ディレクトリへ限定していない"
             );
         }
+    }
+
+    /// インストーラが実際に流す PowerShell を取り出し、NSIS の展開と同じ形へ戻す。
+    /// `$$` は NSIS のエスケープで、実行時には `$` 1つになる。
+    fn 停止コマンドを取り出す(script: &str, name: &str, subdir: &str) -> String {
+        let line = script
+            .lines()
+            .find(|line| line.contains("${NAME}") && line.contains("${SUBDIR}"))
+            .expect("同梱プロセスの停止コマンドが見つからない");
+        let body = line
+            .split_once("-Command \"")
+            .expect("-Command がない")
+            .1
+            .rsplit_once('"')
+            .expect("-Command の閉じ引用符がない")
+            .0;
+        body.replace("${NAME}", name)
+            .replace("${SUBDIR}", subdir)
+            .replace("$$", "$")
+            .replace("$INSTDIR", r"C:\Program Files\PicoAgent")
+            .replace("$APPDATA", r"C:\Users\test\AppData\Roaming")
+    }
+
+    fn powershell() -> Option<std::process::Command> {
+        for name in ["pwsh", "powershell"] {
+            let found = std::process::Command::new(name)
+                .args(["-NoProfile", "-Command", "exit 0"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+            if found {
+                return Some(std::process::Command::new(name));
+            }
+        }
+        None
+    }
+
+    /// 停止条件を PowerShell に実行させ、**管理下だけが止まり、管理外は残る**ことを確かめる。
+    /// 文字列だけの検査では、`''run.exe''` のような構文エラー（PR #149 で見つかった実害）も、
+    /// 条件の書き間違いによる巻き込みも見つけられない。
+    #[test]
+    fn 停止条件は管理下だけに当たる() {
+        let Some(mut shell) = powershell() else {
+            println!("PowerShell が無いためスキップ（Windows と pwsh 導入環境で検査する）");
+            return;
+        };
+        let root = crate::util::repo_root();
+        let script = std::fs::read_to_string(root.join("src-tauri/installer-hooks.nsh")).unwrap();
+        let filter = 停止コマンドを取り出す(&script, "llama-server.exe", "engine");
+
+        // 実プロセス一覧の代わりに、管理下2件と管理外3件を並べる。
+        // 停止の代わりに ProcessId を出力させ、どれに当たったかを見る。
+        let probe = format!(
+            r#"$候補 = @(
+  [pscustomobject]@{{ Name = 'llama-server.exe'; ExecutablePath = 'C:\Program Files\PicoAgent\resources\bundled\engine\llama-server.exe'; ProcessId = 1 }},
+  [pscustomobject]@{{ Name = 'llama-server.exe'; ExecutablePath = 'C:\Users\test\AppData\Roaming\PicoAgent\bundled\engine\llama-server.exe'; ProcessId = 2 }},
+  [pscustomobject]@{{ Name = 'llama-server.exe'; ExecutablePath = 'C:\Users\test\llama.cpp\llama-server.exe'; ProcessId = 3 }},
+  [pscustomobject]@{{ Name = 'llama-server.exe'; ExecutablePath = 'C:\Program Files\OtherApp\resources\bundled\engine\llama-server.exe'; ProcessId = 4 }},
+  [pscustomobject]@{{ Name = 'notepad.exe'; ExecutablePath = 'C:\Program Files\PicoAgent\resources\bundled\engine\notepad.exe'; ProcessId = 5 }}
+)
+{}"#,
+            filter
+                .replace("Get-CimInstance Win32_Process", "$候補")
+                .replace(
+                    "Stop-Process -Id $_.ProcessId -Force",
+                    "Write-Output $_.ProcessId"
+                )
+        );
+
+        let output = shell
+            .args(["-NoProfile", "-Command", &probe])
+            .output()
+            .expect("PowerShell を実行できない");
+        assert!(
+            output.status.success(),
+            "停止条件が構文エラーです: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stopped: Vec<&str> = std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(
+            stopped,
+            ["1", "2"],
+            "インストール先と実行時ディレクトリの実体だけを止めること（stderr: {}）",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
