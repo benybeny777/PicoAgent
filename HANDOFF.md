@@ -5,7 +5,7 @@
 - 最終更新: 2026-08-23
 - ブランチ: `review/claude-installer-holds`
 - 目的: PR #149・#150のClaude再レビューとWindows実機保留の解消
-- 対応PR: #150（起動ブロッカー修正）、#151（THA3 Python停止）、今回PRは作成後に追記
+- 対応PR: #150（起動ブロッカー修正）、#151（THA3 Python停止）、#152（Claude再レビュー・Windows実機確認・uv停止）
 - 直前の作業: PR #151
 
 2026-08-23、利用者の明示指示でClaude CLIにPR #149・#150と保留項目を再レビューさせた。
