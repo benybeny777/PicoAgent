@@ -123,6 +123,9 @@ pub struct AppState {
     /// 停止ボタンによる中断要求。送信開始時に false へ戻し、実行中の生成・ツール処理でも確認する。
     /// マルチAIのようにツール経由で子エージェントを起こす経路へも渡せるよう `Arc` で持つ。
     pub cancel_requested: Arc<AtomicBool>,
+    /// 通常会話で手元CLIを叩く場合の明示セッション。同じキャラ・会話世代・人格・CLI設定
+    /// の間だけ再利用し、別会話や設定変更では新しいセッションへ切り替える。
+    agent_cli_session: Mutex<Option<(String, crate::providers::agent_cli::Session)>>,
     /// 会話状態の世代番号。リセット・キャラ切替・再初期化後に古い非同期処理が
     /// 履歴や文脈を書き戻さないよう、送信開始時の値と完了時の値を照合する。
     pub conversation_epoch: AtomicU64,
@@ -145,6 +148,7 @@ impl AppState {
             pending_question: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
             cancel_requested: Arc::new(AtomicBool::new(false)),
+            agent_cli_session: Mutex::new(None),
             conversation_epoch: AtomicU64::new(0),
         }
     }
@@ -155,6 +159,18 @@ impl AppState {
 
     pub fn bump_conversation_epoch(&self) {
         self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn agent_cli_session(&self, key: String) -> crate::providers::agent_cli::Session {
+        let mut current = self.agent_cli_session.lock().unwrap();
+        if let Some((current_key, session)) = current.as_ref() {
+            if current_key == &key {
+                return session.clone();
+            }
+        }
+        let session = crate::providers::agent_cli::Session::new();
+        *current = Some((key, session.clone()));
+        session
     }
 
     /// 関係性の文脈を更新する。**中身が変わったときだけ true を返す。**
@@ -461,9 +477,20 @@ async fn run_agent_and_persist(
     state.cancel_requested.store(false, Ordering::Relaxed);
     // ツール経由で起こす子エージェント（サブエージェント／マルチAI）も同じ停止ボタンで
     // 止められるよう、中断フラグをタスクローカルへ載せて配下へ伝播させる。
-    let reply = agent::with_cancel(
-        Arc::clone(&state.cancel_requested),
-        agent::run(
+    let run = async {
+        let cli_session = if provider.id() == "agent_cli" {
+            let mut prompt_hash = Sha256::new();
+            prompt_hash.update(agent::system_prompt_of(convo).as_bytes());
+            let key = format!(
+                "{character_id}|{epoch}|{}|{}",
+                crate::providers::agent_cli::session_identity(&state.config, model),
+                hex::encode(prompt_hash.finalize())
+            );
+            Some(state.agent_cli_session(key))
+        } else {
+            None
+        };
+        let task = agent::run(
             &state.config,
             provider,
             model,
@@ -471,9 +498,13 @@ async fn run_agent_and_persist(
             5,
             Some(app),
             Some(&*state.cancel_requested),
-        ),
-    )
-    .await?;
+        );
+        if let Some(session) = cli_session {
+            return crate::providers::agent_cli::with_session(session, task).await;
+        }
+        task.await
+    };
+    let reply = agent::with_cancel(Arc::clone(&state.cancel_requested), run).await?;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
     if conversation_is_current(state, character_id, epoch) {
@@ -521,6 +552,24 @@ fn resolved_judge_model(
     } else {
         String::new()
     }
+}
+
+/// 統合AIへ渡すのは回答の口調に必要な基本指示とキャラクター設定だけにする。
+/// 会話中の system には長期メモリやプロジェクト文脈も差し込まれるため、その全文を
+/// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
+fn multi_ai_judge_persona(state: &AppState) -> String {
+    let mut persona = effective_system_prompt(&state.config);
+    let character_profile = state.character_profile.lock().unwrap().clone();
+    if !character_profile.is_empty() {
+        persona.push_str("\n\n選択中キャラクターの人格設定:\n");
+        persona.push_str(&character_profile);
+        let character_id = state.character_id.lock().unwrap().clone();
+        persona.push_str(&crate::relationship_preset::profile_suffix(
+            &state.config,
+            &character_id,
+        ));
+    }
+    persona
 }
 
 fn configured_multi_ai_args(
@@ -574,7 +623,7 @@ fn configured_multi_ai_args(
             "model": judge_model,
             // 統合結果はキャラクターの発話としてそのまま表示・読み上げされる。
             // 候補AIは作業担当なので素の文体でよいが、統合AIには人格設定を渡す。
-            "persona": agent::system_prompt_of(convo),
+            "persona": multi_ai_judge_persona(state),
         }
     })))
 }
@@ -890,17 +939,18 @@ pub fn pet_relationship_clear(app: AppHandle, state: State<'_, AppState>) -> Res
 
 #[tauri::command]
 pub fn pet_complete_onboarding(
-    mode: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let mode = match mode.as_str() {
-        "life" | "work" | "both" => mode,
-        _ => return Err("相棒モードが不正です。".to_string()),
-    };
+    // 初回案内では用途を質問しない。通常利用と作業支援のどちらも狭めない `both` を
+    // システム既定として保存し、必要な利用者だけが設定画面から後で変更する。
+    let has_mode = state.config.has_value("PICOAGENT_COMPANION_MODE");
+    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let mut patch = Map::new();
     patch.insert("PICOAGENT_ONBOARDING_DONE".to_string(), json!("true"));
-    patch.insert("PICOAGENT_COMPANION_MODE".to_string(), json!(mode));
+    if !has_mode {
+        patch.insert("PICOAGENT_COMPANION_MODE".to_string(), json!(mode.clone()));
+    }
     state
         .config
         .set_all(patch)
@@ -914,8 +964,7 @@ pub fn pet_complete_onboarding(
     Ok(json!({ "ok": true, "relationship": relationship, "bondLabel": bond_label }))
 }
 
-/// 設定画面から初回セットアップを再表示する。保存済みデータは消さず、選び直した
-/// 相棒モードだけを完了時に上書きする。
+/// 設定画面から初回セットアップを再表示する。保存済みデータと相棒モードは変えない。
 #[tauri::command]
 pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
     let main = app
@@ -943,17 +992,34 @@ pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
 pub async fn settings_components_install(
     app: AppHandle,
     ids: Vec<String>,
+    enable_tts: Option<bool>,
+    state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    crate::components::install(&app, &ids)
+    let installed = crate::components::install(&app, &ids)
         .await
-        .and_then(|items| serde_json::to_value(items).map_err(Into::into))
         .map_err(|error| {
             crate::log_paths::append_app_log(
                 &app,
                 &format!("追加機能の導入に失敗しました: {error:#}"),
             );
             format!("{error:#}")
-        })
+        })?;
+    if enable_tts_after_component_install(&ids, enable_tts) {
+        let mut patch = Map::new();
+        patch.insert("PICOAGENT_TTS_ENABLED".to_string(), json!(true));
+        state.config.set_all(patch).map_err(|error| {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("音声読み上げ設定を有効にできませんでした: {error:#}"),
+            );
+            format!("Aivisは導入できましたが、音声読み上げを有効にできませんでした: {error:#}")
+        })?;
+    }
+    serde_json::to_value(installed).map_err(|error| error.to_string())
+}
+
+fn enable_tts_after_component_install(ids: &[String], requested: Option<bool>) -> bool {
+    requested == Some(true) && ids.iter().any(|id| id == "aivis")
 }
 
 /// 利用者が選んだ追加コンポーネントだけをPicoAgent専用領域から削除する。
@@ -4498,11 +4564,11 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
-        multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
-        replace_auto_summary, resolved_judge_model, settings_tab, speech_text,
-        update_series_is_newer, update_status, validate_multi_ai_settings,
-        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
-        MAX_UPDATE_FEED_BYTES,
+        enable_tts_after_component_install, multi_ai_context, multi_ai_judge_persona,
+        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
+        resolved_judge_model, settings_tab, speech_text, update_series_is_newer, update_status,
+        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
+        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
     use crate::config::Config;
     use crate::message::Message;
@@ -4606,6 +4672,33 @@ mod tests {
         assert_eq!(resolved_judge_model("", "local", "local", "qwen3"), "qwen3");
         // 別プロバイダなら空のまま渡し、プロバイダ既定モデルへ解決させる。
         assert_eq!(resolved_judge_model("  ", "openai", "local", "qwen3"), "");
+    }
+
+    #[test]
+    fn 統合aiの人格には長期メモリと会話中のsystem文脈を混ぜない() {
+        let state = super::AppState::new();
+        *state.character_profile.lock().unwrap() = "むぎとして柔らかく話す。".to_string();
+        *state.memory_context.lock().unwrap() = "外へ重ねて渡さない長期メモリ".to_string();
+        state.messages.lock().unwrap().push(Message::new(
+            "system",
+            "[プロジェクト文脈]\n外へ重ねて渡さない課題\n[/プロジェクト文脈]",
+        ));
+
+        let persona = multi_ai_judge_persona(&state);
+        assert!(persona.contains("むぎとして柔らかく話す。"));
+        assert!(!persona.contains("外へ重ねて渡さない長期メモリ"));
+        assert!(!persona.contains("外へ重ねて渡さない課題"));
+        assert!(!persona.contains("[プロジェクト文脈]"));
+    }
+
+    #[test]
+    fn 初回でaivisを明示選択した成功時だけ読み上げを有効にする() {
+        let aivis = vec!["aivis".to_string(), "whisper".to_string()];
+        let whisper = vec!["whisper".to_string()];
+        assert!(enable_tts_after_component_install(&aivis, Some(true)));
+        assert!(!enable_tts_after_component_install(&aivis, Some(false)));
+        assert!(!enable_tts_after_component_install(&aivis, None));
+        assert!(!enable_tts_after_component_install(&whisper, Some(true)));
     }
 
     #[test]

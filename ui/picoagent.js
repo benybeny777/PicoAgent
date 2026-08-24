@@ -148,7 +148,7 @@ window.picoagent = {
   pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),
   deleteRelationshipMoment: (momentId) => call("pet_relationship_delete_moment", { momentId }),
   clearRelationship: () => call("pet_relationship_clear"),
-  completeOnboarding: (mode) => call("pet_complete_onboarding", { mode }),
+  completeOnboarding: () => call("pet_complete_onboarding"),
   showOnboarding: () => call("pet_show_onboarding"),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
@@ -194,7 +194,7 @@ window.picoagent = {
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
     componentStatus: () => call("settings_components_status"),
-    installComponents: (ids) => call("settings_components_install", { ids }),
+    installComponents: (ids, enableTts = false) => call("settings_components_install", { ids, enableTts }),
     removeComponent: (id) => call("settings_components_remove", { id }),
     checkUpdate: () => call("settings_check_update"),
     installUpdate: () => call("settings_install_update"),

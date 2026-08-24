@@ -3072,7 +3072,7 @@ async function render() {
     }
   });
   onboardingGuideSec.append(
-    el("p", { className: "hint", textContent: "用途の選択とLive2D追加案内をいつでもやり直せます。会話履歴、設定、追加済みキャラクターは削除しません。" }),
+    el("p", { className: "hint", textContent: "追加機能の選択とLive2D追加案内をいつでもやり直せます。会話履歴、設定、追加済みキャラクターは削除しません。" }),
     reopenOnboardingButton,
     reopenOnboardingStatus,
   );
