@@ -57,20 +57,35 @@ fn kind(cfg: &Config) -> Kind {
     }
 }
 
-fn program(cfg: &Config) -> String {
+/// マルチエージェントからモデル名として `claude` / `codex` を指定した場合は、
+/// グローバル設定を変えずにその実行だけCLIの種類を切り替える。
+fn kind_for_model(cfg: &Config, model: &str) -> Kind {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "claude" => Kind::Claude,
+        "codex" => Kind::Codex,
+        "custom" => Kind::Custom,
+        _ => kind(cfg),
+    }
+}
+
+fn program_for_kind(cfg: &Config, selected: Kind) -> String {
     let configured = cfg.get("PICOAGENT_AGENT_CLI_PATH", "");
     let trimmed = configured.trim();
     if !trimmed.is_empty() {
         return trimmed.to_string();
     }
-    match kind(cfg) {
+    match selected {
         Kind::Codex => "codex".to_string(),
         _ => "claude".to_string(),
     }
 }
 
+fn program(cfg: &Config) -> String {
+    program_for_kind(cfg, kind(cfg))
+}
+
 /// 非対話で1往復だけ実行するための引数。プロンプト本体はこの後ろへ足す。
-fn lead_args(cfg: &Config) -> Vec<String> {
+fn lead_args_for_kind(cfg: &Config, selected: Kind) -> Vec<String> {
     let configured = cfg.get("PICOAGENT_AGENT_CLI_ARGS", "");
     let trimmed = configured.trim();
     let configured: Vec<String> = if trimmed.is_empty() {
@@ -78,7 +93,7 @@ fn lead_args(cfg: &Config) -> Vec<String> {
     } else {
         trimmed.split_whitespace().map(str::to_string).collect()
     };
-    match kind(cfg) {
+    match selected {
         Kind::Codex => {
             let mut args = vec!["exec".to_string()];
             args.extend(configured);
@@ -108,6 +123,11 @@ fn lead_args(cfg: &Config) -> Vec<String> {
         // custom はどの CLI か判断できないため、明示された引数をそのまま使う。
         Kind::Custom => configured,
     }
+}
+
+#[cfg(test)]
+fn lead_args(cfg: &Config) -> Vec<String> {
+    lead_args_for_kind(cfg, kind(cfg))
 }
 
 fn timeout_secs(cfg: &Config) -> u64 {
@@ -347,7 +367,7 @@ impl Provider for AgentCli {
     async fn chat(
         &self,
         cfg: &Config,
-        _model: &str,
+        model: &str,
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
@@ -364,9 +384,10 @@ impl Provider for AgentCli {
         if prompt.trim().is_empty() {
             anyhow::bail!("CLI へ渡す内容がありません。");
         }
-        let program = program(cfg);
+        let selected = kind_for_model(cfg, model);
+        let program = program_for_kind(cfg, selected);
         let mut command = crate::tools::process::command(&program);
-        command.args(lead_args(cfg));
+        command.args(lead_args_for_kind(cfg, selected));
         // プロンプトは引数として渡す。シェルを経由しないので解釈の事故が起きない。
         command.arg(&prompt);
 
@@ -400,8 +421,8 @@ inventory::submit! { ProviderReg { make: || Box::new(AgentCli) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        flatten, kind, lead_args, parse_tool_call, program, timeout_secs, tool_instructions, Kind,
-        MAX_PROMPT_CHARS,
+        flatten, kind, kind_for_model, lead_args, parse_tool_call, program, timeout_secs,
+        tool_instructions, Kind, MAX_PROMPT_CHARS,
     };
     use crate::config::Config;
     use crate::message::Message;
@@ -423,6 +444,8 @@ mod tests {
         assert_eq!(codex_args.first().map(String::as_str), Some("exec"));
         assert!(codex_args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
         assert!(codex_args.iter().any(|arg| arg == "--ignore-user-config"));
+        assert!(matches!(kind_for_model(&cfg, "codex"), Kind::Codex));
+        assert!(matches!(kind_for_model(&codex, "claude"), Kind::Claude));
     }
 
     #[test]

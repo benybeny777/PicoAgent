@@ -482,6 +482,91 @@ async fn run_agent_and_persist(
     }
 }
 
+fn multi_ai_context(messages: &[Message]) -> String {
+    const LIMIT: usize = 20_000;
+    let mut blocks = messages
+        .iter()
+        .rev()
+        .skip_while(|message| message.role == "user")
+        .filter(|message| !message.content.trim().is_empty())
+        .map(|message| format!("[{}]\n{}", message.role, message.content.trim()))
+        .collect::<Vec<_>>();
+    blocks.reverse();
+    let joined = blocks.join("\n\n");
+    let count = joined.chars().count();
+    if count <= LIMIT {
+        joined
+    } else {
+        joined.chars().skip(count - LIMIT).collect()
+    }
+}
+
+fn configured_multi_ai_args(
+    state: &AppState,
+    task: &str,
+    convo: &[Message],
+) -> Result<Option<Value>, String> {
+    let mode = state.config.get("PICOAGENT_MULTI_AI_MODE", "single");
+    let tool_mode = match mode.as_str() {
+        "consensus" => "consensus",
+        "collaborate" => "collaborate",
+        "divide" => "divide",
+        _ => return Ok(None),
+    };
+    let raw = state.config.get("PICOAGENT_MULTI_AI_AGENTS", "[]");
+    let agents: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("マルチAIの参加AI設定を読めません: {error}"))?;
+    let Some(agent_list) = agents.as_array() else {
+        return Err("マルチAIの参加AI設定はJSON配列で保存してください。".to_string());
+    };
+    if !(2..=8).contains(&agent_list.len()) {
+        return Err("マルチAIを使うには参加AIを2〜8件にしてください。".to_string());
+    }
+    let fallback_provider = state.provider_id.lock().unwrap().clone();
+    let fallback_model = state.model.lock().unwrap().clone();
+    let judge_provider = state
+        .config
+        .get("PICOAGENT_MULTI_AI_JUDGE_PROVIDER", &fallback_provider);
+    let judge_model = state
+        .config
+        .get("PICOAGENT_MULTI_AI_JUDGE_MODEL", &fallback_model);
+    Ok(Some(json!({
+        "task": task,
+        "context": multi_ai_context(convo),
+        "mode": tool_mode,
+        "agents": agents,
+        "judge": {
+            "name": "統合AI",
+            "provider": judge_provider,
+            "model": judge_model,
+        }
+    })))
+}
+
+async fn run_multi_ai_and_persist(
+    app: &AppHandle,
+    state: &AppState,
+    args: Value,
+    convo: &mut Vec<Message>,
+    character_id: &str,
+    epoch: u64,
+) -> anyhow::Result<PersistedReply> {
+    state
+        .cancel_requested
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let reply = tools::dispatch(&state.config, "subagent", args).await;
+    convo.push(Message::new("assistant", reply.clone()));
+    let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
+    if conversation_is_current(state, character_id, epoch) {
+        *state.messages.lock().unwrap() = compacted.clone();
+        crate::history::save(app, character_id, &compacted);
+        Ok(PersistedReply::Current(reply))
+    } else {
+        crate::log_paths::append_app_log(app, "古いマルチAI応答の会話履歴書き戻しを破棄しました。");
+        Ok(PersistedReply::Stale)
+    }
+}
+
 /// 感情状態をルールベースで更新してフロントへ通知し、返信 JSON を組み立てる。
 fn apply_emotion_and_reply(
     app: &AppHandle,
@@ -1512,23 +1597,56 @@ pub async fn pet_send(
     );
     convo.push(Message::new("user", text));
 
-    // 会話が長くなった場合、古いターンをLLMで要約してコンテキストを節約する。
-    let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
+    let multi_ai_args = match configured_multi_ai_args(&state, &user_text, &convo) {
+        Ok(args) => args,
+        Err(reply) => {
+            return record_turn(
+                &state,
+                &app,
+                &request_character_id,
+                request_epoch,
+                &user_text,
+                reply,
+            )
+        }
+    };
+    // 単一AIだけは従来どおり、長い会話を選択中AIで要約してから実行する。
+    // マルチAIは候補数+計画/統合の推論を行うため、ここで追加の要約推論を重ねない。
+    let mut convo = if multi_ai_args.is_none() {
+        maybe_summarize_context(convo, provider, &state.config, &model).await
+    } else {
+        convo
+    };
     if !conversation_is_current(&state, &request_character_id, request_epoch) {
         crate::log_paths::append_app_log(&app, "古いAI応答の実行開始を破棄しました。");
         return Ok(json!({ "stale": true, "reply": "" }));
     }
 
-    let result = run_agent_and_persist(
-        &app,
-        &state,
-        provider,
-        &model,
-        &mut convo,
-        &request_character_id,
-        request_epoch,
-    )
-    .await;
+    let result = match multi_ai_args {
+        Some(args) => {
+            run_multi_ai_and_persist(
+                &app,
+                &state,
+                args,
+                &mut convo,
+                &request_character_id,
+                request_epoch,
+            )
+            .await
+        }
+        None => {
+            run_agent_and_persist(
+                &app,
+                &state,
+                provider,
+                &model,
+                &mut convo,
+                &request_character_id,
+                request_epoch,
+            )
+            .await
+        }
+    };
     if matches!(result, Ok(PersistedReply::Current(_))) {
         if state
             .config
@@ -2282,6 +2400,69 @@ fn is_secret_setting(schema_keys: &std::collections::HashSet<String>, key: &str)
     schema_keys.contains(key) || crate::secret::is_secret_key(key)
 }
 
+fn validate_multi_ai_settings(patch: &Map<String, Value>) -> Result<(), String> {
+    let mode = patch
+        .get("PICOAGENT_MULTI_AI_MODE")
+        .and_then(Value::as_str)
+        .unwrap_or("single");
+    if !matches!(mode, "single" | "consensus" | "collaborate" | "divide") {
+        return Err("マルチAIの実行方法が不正です。".to_string());
+    }
+    let raw = patch
+        .get("PICOAGENT_MULTI_AI_AGENTS")
+        .and_then(Value::as_str)
+        .unwrap_or("[]");
+    let agents: Value = serde_json::from_str(raw)
+        .map_err(|error| format!("参加AIの設定をJSONとして読めません: {error}"))?;
+    let list = agents
+        .as_array()
+        .ok_or_else(|| "参加AIの設定は配列にしてください。".to_string())?;
+    if mode != "single" && !(2..=8).contains(&list.len()) {
+        return Err("単一AI以外では参加AIを2〜8件にしてください。".to_string());
+    }
+    for (index, agent) in list.iter().enumerate() {
+        let provider = agent
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if providers::get(provider).is_none() {
+            return Err(format!(
+                "参加AI {} のプロバイダ \"{}\" が見つかりません。",
+                index + 1,
+                provider
+            ));
+        }
+        let focus_len = agent
+            .get("focus")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .chars()
+            .count();
+        if focus_len > 500 {
+            return Err(format!("参加AI {} の担当希望が長すぎます。", index + 1));
+        }
+    }
+    let judge = patch
+        .get("PICOAGENT_MULTI_AI_JUDGE_PROVIDER")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if mode != "single" && providers::get(judge).is_none() {
+        return Err(format!(
+            "統合・分担用プロバイダ \"{judge}\" が見つかりません。"
+        ));
+    }
+    let concurrency = patch
+        .get("PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY")
+        .and_then(|value| value.as_str().and_then(|text| text.parse::<usize>().ok()))
+        .unwrap_or(3);
+    if !(1..=8).contains(&concurrency) {
+        return Err("マルチAIの最大並列数は1〜8にしてください。".to_string());
+    }
+    Ok(())
+}
+
 /// 既存の平文シークレットを起動時に DPAPI 暗号化へ移行する（次回保存を待たずに保護する）。
 pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
     let all = config.get_all();
@@ -2497,6 +2678,7 @@ pub async fn settings_save(
 ) -> Result<Value, String> {
     let current_values = state.config.get_all();
     preserve_unreadable_secrets(&mut patch, &current_values)?;
+    validate_multi_ai_settings(&patch)?;
     if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
         patch.insert(
             "PICOAGENT_CHARACTER_FRAMING".to_string(),
@@ -4241,9 +4423,10 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
-        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
-        settings_tab, speech_text, update_series_is_newer, update_status, verify_windows_installer,
-        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
+        replace_auto_summary, settings_tab, speech_text, update_series_is_newer, update_status,
+        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
+        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
     use crate::message::Message;
 
@@ -4318,6 +4501,57 @@ mod tests {
         assert_eq!(compacted[0].role, "system");
         assert_eq!(compacted[1].content, "発話4");
         assert_eq!(compacted[2].content, "発話5");
+    }
+
+    #[test]
+    fn マルチaiへは現在の質問を重複せず直前までの会話を渡す() {
+        let messages = vec![
+            Message::new("system", "人格"),
+            Message::new("user", "前の質問"),
+            Message::new("assistant", "前の回答"),
+            Message::new("user", "今回の質問"),
+        ];
+        let context = multi_ai_context(&messages);
+        assert!(context.contains("人格"));
+        assert!(context.contains("前の質問"));
+        assert!(context.contains("前の回答"));
+        assert!(!context.contains("今回の質問"));
+    }
+
+    #[test]
+    fn マルチai設定は単発を既定にし複数時だけ人数とプロバイダを検証する() {
+        let mut single = serde_json::Map::new();
+        single.insert(
+            "PICOAGENT_MULTI_AI_MODE".into(),
+            serde_json::json!("single"),
+        );
+        single.insert("PICOAGENT_MULTI_AI_AGENTS".into(), serde_json::json!("[]"));
+        assert!(validate_multi_ai_settings(&single).is_ok());
+
+        let mut consensus = serde_json::Map::new();
+        consensus.insert(
+            "PICOAGENT_MULTI_AI_MODE".into(),
+            serde_json::json!("consensus"),
+        );
+        consensus.insert(
+            "PICOAGENT_MULTI_AI_AGENTS".into(),
+            serde_json::json!(r#"[{"provider":"local"},{"provider":"agent_cli","model":"codex"}]"#),
+        );
+        consensus.insert(
+            "PICOAGENT_MULTI_AI_JUDGE_PROVIDER".into(),
+            serde_json::json!("local"),
+        );
+        consensus.insert(
+            "PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY".into(),
+            serde_json::json!("3"),
+        );
+        assert!(validate_multi_ai_settings(&consensus).is_ok());
+
+        consensus.insert(
+            "PICOAGENT_MULTI_AI_AGENTS".into(),
+            serde_json::json!(r#"[{"provider":"local"}]"#),
+        );
+        assert!(validate_multi_ai_settings(&consensus).is_err());
     }
 
     #[test]
