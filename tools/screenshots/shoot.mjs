@@ -25,6 +25,10 @@ const UI_ROOT = join(ROOT, "ui");
 const OUT = join(ROOT, "docs", "images");
 const SITE_OUT = join(ROOT, "distribution", "site", "assets");
 const TEMP_OUT = join(ROOT, "temp", "screenshots");
+const CUSTOM_OUT = process.env.SHOOT_OUTPUT_DIR || "";
+if (CUSTOM_OUT && !isAbsolute(CUSTOM_OUT)) {
+  throw new Error("SHOOT_OUTPUT_DIR は絶対パスで指定してください。");
+}
 const SITE_GALLERY = process.env.SHOOT_SITE_GALLERY === "1";
 const README_GALLERY = process.env.SHOOT_README_GALLERY === "1";
 if (SITE_GALLERY && README_GALLERY) {
@@ -84,7 +88,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
+const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -116,6 +120,7 @@ window.__TAURI__ = {
       up: true, providerId: "local", model: "gemma-3-4b-it-Q4_K_M",
       theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "100",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {},
+      characterFraming: ${JSON.stringify(characterFraming)},
       betaBuild: ${JSON.stringify(betaBuild)},
       layout: ${JSON.stringify(layout)},
       live2dSdkOverrides: ${JSON.stringify(live2dSdkOverrides)},
@@ -301,6 +306,7 @@ function unionBounds(boxes) {
 async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
+  characterFraming = {},
   bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
   gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
 } = {}) {
@@ -310,7 +316,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -1241,7 +1247,7 @@ async function shoot(name, {
 
   if (LIGHTWEIGHT_GALLERY) {
     if (!siteOutputWidth) throw new Error(`軽量一覧用の出力条件がありません: ${name}`);
-    const output = SITE_GALLERY ? SITE_OUT : OUT;
+    const output = CUSTOM_OUT || (SITE_GALLERY ? SITE_OUT : OUT);
     const label = SITE_GALLERY ? "LP" : "README";
     mkdirSync(output, { recursive: true });
     await encodeAnimation(frames, box, {
@@ -1250,7 +1256,9 @@ async function shoot(name, {
     });
     console.log(`${label}用撮影: ${name}（${frames.length}コマ / ${siteOutputFps}fps / ${siteOutputWidth}px）`);
   } else {
-    await encodeAnimation(frames, box, { fps, width: outputWidth, file: join(OUT, name) });
+    const output = CUSTOM_OUT || OUT;
+    mkdirSync(output, { recursive: true });
+    await encodeAnimation(frames, box, { fps, width: outputWidth, file: join(output, name) });
     console.log(`撮影: ${name}（${frames.length} コマ / ${fps} fps）`);
   }
 }
@@ -1442,6 +1450,15 @@ const GALLERY_SCENE = {
   siteSeconds: 6, siteOutputWidth: 480, siteOutputFps: 16, siteQuality: 50, voice: true,
 };
 
+// 低頭身のむぎはアプリ既定の上半身構図だと、小さいLP／README枠で顔だけが
+// 大きく見える。公開用の実画面撮影だけ少し引き、表情と手の動きを一緒に見せる。
+const MUGI_PUBLIC_FRAMING = {
+  mugi: {
+    pet: { preset: "custom", zoom: 1.28, x: 0, y: 0 },
+    stream: { preset: "custom", zoom: 1.35, x: 0, y: 0 },
+  },
+};
+
 // 前半5秒は返答フローそのまま（文字送り → 音声開始後の口パク）を保ち、後半に
 // 考え中、成功、悲しみ、左右視線、待機を間隔を空けて見せる。
 // 経過msで指定するのは、fps や尺を変えてもモーションの見せ時間がずれないようにするため。
@@ -1543,6 +1560,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"])
   {
     ...GALLERY_SCENE,
     characterId: id,
+    characterFraming: id === "mugi" ? MUGI_PUBLIC_FRAMING : {},
     reply,
     prepare: galleryPrepare(kind),
     step: galleryStep,
@@ -1563,6 +1581,7 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     // 2倍密度の3840px全画面キャプチャは不要な負荷を避ける。
     deviceScaleFactor: 1,
     characterId: id,
+    characterFraming: id === "mugi" ? MUGI_PUBLIC_FRAMING : {},
     reply,
     prepare: galleryPrepare(kind),
     step: galleryStep,
@@ -1603,7 +1622,7 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
-  "distribution-main.webp": { width: 900, height: 600, layout: "pet", ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
+  "distribution-main.webp": { width: 900, height: 600, layout: "pet", characterFraming: MUGI_PUBLIC_FRAMING, ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
   "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
   // 1フレームだけなのでアニメーションではないが、同じ透過 WebP 経路を使える。
@@ -1621,7 +1640,7 @@ const SHOTS = {
 
 // ---------------------------------------------------------------- 実行
 
-mkdirSync(OUT, { recursive: true });
+mkdirSync(CUSTOM_OUT || OUT, { recursive: true });
 const only = process.argv.slice(2);
 const skipped = [];
 let failed = 0;
