@@ -11,6 +11,18 @@
 
 ---
 
+## 2026-08-25 — Claude Code／Codex CLI明示セッション実機確認
+
+対象: PR #166で実装した手元CLIセッションを、利用者の許可を受けて最小の実AI応答で確認した。ファイル操作は無効またはread-onlyとし、各CLIを新規1ターン＋明示ID再開1ターンだけ実行した。
+
+| # | 確認 | 実測 | 状態 |
+|---|---|---|---|
+| 1 | Claude Code 2.1.221の`session_id`取得と`--resume <ID>` | safe mode・組み込みツールなし・plan権限で「7だけ」へ`7`、同じIDへ「1を足す」で`8`を返した。初回と再開後の`session_id`は一致し、`is_error=false` | 対応済み |
+| 2 | Codex CLI 0.146.0の`thread_id`取得と`codex exec ... resume <ID>` | ユーザー設定なし・read-only sandboxで「7だけ」へ`7`、同じIDへ「1を足す」で`8`を返した。初回と再開後の`thread_id`は一致 | 対応済み |
+| 3 | 実行後の状態 | テスト用の`claude -p`／`codex exec`プロセスは残っていない。Codexは既存モデルキャッシュの読込警告とPowerShell shell snapshot非対応警告をstderrへ出したが、JSONL応答と明示再開は成功したためPicoAgentの成功経路へ影響しない | 対応済み |
+
+---
+
 ## 2026-08-25 — 複数AI再チェック・初回案内・CLIセッション設計
 
 対象: Claude修正後の直近差分を中心に、複数AIの停止・統合人格、初回セットアップ、通常会話と複数AIでのCLIセッション境界を再レビューし、その場で修正した。
