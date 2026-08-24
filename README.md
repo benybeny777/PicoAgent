@@ -275,6 +275,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 ### エージェント
 
 - **スーパーエージェントモード** — 複雑な依頼を「計画 → 多段ツール実行 → 自己評価」まで自律的に回し、必要なら `subagent` スキルでサブタスクを分担。進捗はフキダシ上部のステータス行にリアルタイム表示
+- **マルチAI合議・分担** — 設定した複数のlocal／Ollama／各社API／Claude Code・Codex CLIへ同じ質問を送り、まとめ役がより良い回答へ統合できる。作業を自動分担して統合するモードと、分担結果を個別に返すモードにも対応。AIごとにモデルと「担当の希望」を指定でき、空欄なら自動で割り振る。既定は従来どおり単発
 - **原則 Web 検索** — 通常の質問はローカルモデルの判断に頼らず検索してから、参照元リンク付きで回答（短い挨拶は例外扱いでキャラクター本人として返答）
 
 
@@ -487,6 +488,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 | 目覚まし | `PICOAGENT_ALARMS` | 通常はチャットで設定。設定画面では専用フォーム |
 | タスクスケジュール | `PICOAGENT_SCHEDULED_TASKS` / `PICOAGENT_SCHEDULED_TOOL_ALLOWLIST` | `kind=command` / 許可済み `kind=tool` の指定時刻タスク |
 | 自力実行 | `PICOAGENT_CODE_RUNNER_ENABLED` / `PICOAGENT_CODE_RUNNER_PYTHON` | 安全な隔離実行を準備中のため、現在はモデルへ非公開 |
+| 複数AI | `PICOAGENT_MULTI_AI_MODE` / `PICOAGENT_MULTI_AI_AGENTS` / `PICOAGENT_MULTI_AI_JUDGE_PROVIDER` / `PICOAGENT_MULTI_AI_JUDGE_MODEL` / `PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY` | 単発・合議・分担＋統合・分担のみ、参加AIとまとめ役、最大同時数。設定画面から変更 |
 | サブエージェント | `PICOAGENT_SUBAGENT_MAX_DEPTH` | サブタスク分担のネスト上限 |
 | 情報取得 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` / `PICOAGENT_WEB_SEARCH_MAX_RESULTS` / `PICOAGENT_NEWS_SCRAPE_MAX_ITEMS` / `PICOAGENT_RSS_DEFAULT_URL` / `PICOAGENT_RESEARCH_TIMEOUT_SECS` | 各種既定値 |
 | 外部連携 | 各サービスの token / 既定 ID / timeout | 使うサービスだけ設定。`PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS=0` で Gmail 整理の件数上限を無制限に |

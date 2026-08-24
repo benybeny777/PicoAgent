@@ -2,7 +2,7 @@
 // モデルが tool_calls を返す限りツールを実行し、結果を会話に積んで再問い合わせする。
 // 機能: 並列ツール実行・指数バックオフリトライ・ストリーミング応答・分散トレーシング。
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use chrono::Timelike;
@@ -13,30 +13,15 @@ use crate::message::Message;
 use crate::providers::Provider;
 use crate::tools;
 
-/// 現在のエージェントループのネスト深さ。サブエージェントの無限再帰を防ぐためのプロセス全体カウンタ。
-/// `1` がトップレベル、`2` 以降はサブエージェントから呼ばれたネスト実行。
-pub static AGENT_DEPTH: AtomicUsize = AtomicUsize::new(0);
-
-/// エージェントループのネスト深さを RAII で増減するガード。
-/// 早期 return・エラー経路でも `Drop` で確実に減算する。
-struct DepthGuard;
-
-impl DepthGuard {
-    fn enter() -> Self {
-        AGENT_DEPTH.fetch_add(1, Ordering::SeqCst);
-        DepthGuard
-    }
+tokio::task_local! {
+    /// 現在の非同期タスクに属するエージェントループのネスト深さ。
+    /// 並列エージェント同士をネストと誤認しないよう、プロセス全体ではなくFuture単位で保持する。
+    static AGENT_DEPTH: usize;
 }
 
-impl Drop for DepthGuard {
-    fn drop(&mut self) {
-        AGENT_DEPTH.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// 現在の深さ（`enter` 後に呼ぶ。トップレベルは 1）。
-fn agent_depth() -> usize {
-    AGENT_DEPTH.load(Ordering::SeqCst)
+/// 現在の深さ。エージェントループ外は0、トップレベルは1、委譲先は2以降。
+pub fn agent_depth() -> usize {
+    AGENT_DEPTH.try_with(|depth| *depth).unwrap_or(0)
 }
 
 /// スーパーエージェントモード。計画ステップ・自己評価・深い自律ループ・進捗可視化を一括で有効化する。
@@ -871,10 +856,26 @@ pub async fn run(
     app: Option<&tauri::AppHandle>,
     cancel: Option<&AtomicBool>,
 ) -> anyhow::Result<String> {
+    let depth = agent_depth().saturating_add(1);
+    AGENT_DEPTH
+        .scope(
+            depth,
+            run_scoped(cfg, provider, model, messages, max_steps, app, cancel),
+        )
+        .await
+}
+
+async fn run_scoped(
+    cfg: &Config,
+    provider: &dyn Provider,
+    model: &str,
+    messages: &mut Vec<Message>,
+    max_steps: usize,
+    app: Option<&tauri::AppHandle>,
+    cancel: Option<&AtomicBool>,
+) -> anyhow::Result<String> {
     // 中断要求の確認。フラグ未指定（スケジューラ経由など）では常に false。
     let cancelled = || cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false);
-    // ネスト深さを増やし、関数を抜けるとき（成功・失敗・中断のいずれでも）減らす。
-    let _depth = DepthGuard::enter();
     let super_agent = super_agent_enabled(cfg);
     // スーパーエージェントモードのトップレベルでは自律ループの上限を引き上げる
     // （多段のツール連鎖・自己反省を回し切れるようにする）。サブエージェントは元の上限のまま。

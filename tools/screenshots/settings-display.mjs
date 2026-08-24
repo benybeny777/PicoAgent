@@ -36,10 +36,23 @@ const settingsData = {
     PICOAGENT_CHARACTER_ZOOM: "1.55",
     PICOAGENT_STREAM_PROFILES: { mugi: { background: "simple", backgroundImage: "", display: "clock", displayImage: "", captionColor: "#a04070" } },
     PICOAGENT_ALWAYS_ON_TOP: true,
+    PICOAGENT_MULTI_AI_MODE: "consensus",
+    PICOAGENT_MULTI_AI_AGENTS: JSON.stringify([
+      { name: "ローカル", provider: "local", model: "gemma", focus: "" },
+      { name: "Codex", provider: "agent_cli", model: "codex", focus: "技術確認" },
+    ]),
+    PICOAGENT_MULTI_AI_JUDGE_PROVIDER: "local",
+    PICOAGENT_MULTI_AI_JUDGE_MODEL: "gemma",
+    PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY: "3",
   },
   active: { providerId: "local", model: "gemma" },
   defaults: { systemPrompt: "" },
-  providers: [{ id: "local", label: "ローカル", defaultModel: "gemma", configSchema: [] }],
+  providers: [
+    { id: "local", label: "ローカル", defaultModel: "gemma", configSchema: [] },
+    { id: "ollama", label: "Ollama", defaultModel: "gemma3", configSchema: [] },
+    { id: "openai", label: "OpenAI互換", defaultModel: "gpt-5", configSchema: [] },
+    { id: "agent_cli", label: "手元のCLI", defaultModel: "claude", configSchema: [] },
+  ],
   tools: [
     {
       name: "google_sheets",
@@ -215,8 +228,20 @@ try {
   await verifyLongSkillLabels(400);
   await page.setViewportSize({ width: 960, height: 760 });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
+  const multiAi = page.locator(".multi-ai-editor");
+  if (await multiAi.count() !== 1) throw new Error("複数AI設定がありません");
+  if (await page.locator(".multi-ai-row").count() !== 2) throw new Error("保存済みの参加AIが2件表示されていません");
+  if (await page.locator('[data-setting-key="PICOAGENT_MULTI_AI_MODE"] select').inputValue() !== "consensus") throw new Error("合議モードが復元されていません");
+  if (await page.locator('.multi-ai-row input[placeholder="担当の希望（空なら自動）"]').nth(1).inputValue() !== "技術確認") throw new Error("参加AIの担当希望が復元されていません");
+  await multiAi.scrollIntoViewIfNeeded();
+  await multiAi.screenshot({ path: join(OUT, "multi-ai.png") });
+  await page.setViewportSize({ width: 400, height: 820 });
+  const multiAiOverflow = await multiAi.evaluate(node => node.scrollWidth > node.clientWidth);
+  if (multiAiOverflow) throw new Error("400px幅で複数AI設定が横にはみ出しています");
+  await multiAi.screenshot({ path: join(OUT, "multi-ai-400px.png") });
+  await page.setViewportSize({ width: 960, height: 760 });
   if (await page.getByRole("button", { name: "一覧を再読み込み", exact: true }).count() !== 1) throw new Error("モデル一覧の再読込操作が更新操作と区別できません");
-  await page.getByRole("button", { name: "削除", exact: true }).click();
+  await page.locator(".model-delete").click();
   if (!(await page.locator(".model-manager-status").textContent())?.includes("再ダウンロードが必要")) throw new Error("モデル削除前に再ダウンロードが案内されません");
   await page.getByRole("tab", { name: "基本設定" }).click();
   await page.locator('[data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
@@ -225,6 +250,7 @@ try {
   if (!dirtyText?.includes("未保存")) throw new Error(`未保存件数が表示されません: ${dirtyText}`);
   if (!(await page.locator("#save").textContent())?.includes("1件")) throw new Error("保存ボタンに変更件数が表示されません");
   await page.locator("#resetChanges").click();
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
   await page.locator('[data-settings-query="読み上げ"]').click();
   if (await page.locator("#clearSettingsSearch").isHidden()) throw new Error("検索解除ボタンが表示されません");
   if (await page.locator('.searchable:not([hidden])').count() < 1) throw new Error("音声の検索候補が表示されません");
@@ -257,7 +283,11 @@ try {
   if ((await framing.locator("select").nth(1).inputValue()) !== "custom") throw new Error("ドラッグ後に細かく調整へ切り替わりません");
   await page.screenshot({ path: join(OUT, "character-framing.png") });
   await framing.getByRole("button", { name: "この構図を初期値へ戻す", exact: true }).click();
-  if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("構図を初期値へ戻しても未保存状態が解消されません");
+  const framingResetDirty = await page.locator("#dirtySummary").textContent();
+  if (framingResetDirty !== "保存済み") {
+    const changed = await page.locator(".changed").evaluateAll(nodes => nodes.map(node => node.dataset.settingKey || `${node.className}:${node.textContent?.slice(0, 40)}`));
+    throw new Error(`構図を初期値へ戻しても未保存状態が解消されません: ${framingResetDirty} / ${changed.join(",")}`);
+  }
   const addedCharacter = page.locator(".character-card").filter({ hasText: "追加テスト" });
   await addedCharacter.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
@@ -285,7 +315,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

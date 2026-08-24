@@ -545,6 +545,175 @@ function field(key, label, type, value, placeholder) {
   return registerInput(key, input, markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder));
 }
 
+function multiAiSettingsField(values) {
+  const wrapper = markSearchable(
+    el("div", { className: "multi-ai-settings" }),
+    "マルチAI 合議 分担 統合 複数の叩くAI Claude Codex CLI"
+  );
+  const intro = el("p", {
+    className: "settings-intro",
+    textContent: "既定は単一AIです。複数AIを使うと、参加AIの推論に加えて分担計画や最終統合の推論が発生し、API利用量と処理時間が増えます。",
+  });
+  const mode = el("select");
+  const modes = [
+    { value: "single", label: "単一AI（既定・現在と同じ）" },
+    { value: "consensus", label: "同じ質問を合議して統合" },
+    { value: "collaborate", label: "仕事を分担して統合" },
+    { value: "divide", label: "仕事を分担して個別結果を返す" },
+  ];
+  const selectedMode = values.PICOAGENT_MULTI_AI_MODE || "single";
+  for (const item of modes) {
+    mode.append(el("option", { value: item.value, textContent: item.label, selected: item.value === selectedMode }));
+  }
+  wrapper.append(intro, registerInput(
+    "PICOAGENT_MULTI_AI_MODE",
+    mode,
+    el("div", { className: "field" }, [el("label", { textContent: "回答の作り方" }), mode])
+  ));
+
+  const raw = values.PICOAGENT_MULTI_AI_AGENTS || "[]";
+  let agents = [];
+  let parseError = "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error("配列ではありません");
+    agents = parsed.map(item => ({
+      name: String(item?.name || ""),
+      provider: String(item?.provider || data.active.providerId || "local"),
+      model: String(item?.model || ""),
+      focus: String(item?.focus || ""),
+    }));
+  } catch (error) {
+    parseError = `保存済みの参加AI設定を読めません: ${errorDetail(error)}`;
+  }
+  const hidden = el("input", { type: "hidden", value: raw });
+  const editor = el("div", { className: "multi-ai-editor" });
+  const rows = el("div", { className: "multi-ai-rows" });
+  const warning = el("p", { className: "field-note", textContent: parseError });
+  warning.hidden = !parseError;
+
+  function providerSelect(value) {
+    const select = el("select");
+    for (const provider of data.providers) {
+      select.append(el("option", {
+        value: provider.id,
+        textContent: provider.label,
+        selected: provider.id === value,
+      }));
+    }
+    return select;
+  }
+
+  function syncAgents() {
+    hidden.value = JSON.stringify(agents);
+    hidden.dispatchEvent(new Event("input", { bubbles: true }));
+    warning.hidden = true;
+    updateDirtyState();
+  }
+
+  function renderRows() {
+    rows.replaceChildren();
+    agents.forEach((agent, index) => {
+      const provider = providerSelect(agent.provider);
+      const model = el("input", {
+        type: "text",
+        value: agent.model,
+        placeholder: provider.value === "agent_cli" ? "claude または codex" : "空なら既定モデル",
+      });
+      const focus = el("input", {
+        type: "text",
+        value: agent.focus,
+        placeholder: "担当の希望（空なら自動）",
+      });
+      const remove = el("button", { type: "button", className: "btn", textContent: "削除" });
+      provider.addEventListener("change", () => {
+        agent.provider = provider.value;
+        model.placeholder = provider.value === "agent_cli" ? "claude または codex" : "空なら既定モデル";
+        syncAgents();
+      });
+      model.addEventListener("input", () => { agent.model = model.value.trim(); syncAgents(); });
+      focus.addEventListener("input", () => { agent.focus = focus.value.trim(); syncAgents(); });
+      remove.addEventListener("click", () => {
+        agents.splice(index, 1);
+        renderRows();
+        syncAgents();
+      });
+      rows.append(el("div", { className: "multi-ai-row" }, [
+        el("span", { className: "subhead", textContent: `AI ${index + 1}` }),
+        provider,
+        model,
+        focus,
+        remove,
+      ]));
+    });
+  }
+
+  const add = el("button", { type: "button", className: "btn", textContent: "参加AIを追加" });
+  add.addEventListener("click", () => {
+    if (agents.length >= 8) {
+      warning.textContent = "参加AIは最大8件です。";
+      warning.hidden = false;
+      return;
+    }
+    agents.push({ name: "", provider: data.active.providerId || "local", model: "", focus: "" });
+    renderRows();
+    syncAgents();
+  });
+  const agentsField = registerInput(
+    "PICOAGENT_MULTI_AI_AGENTS",
+    hidden,
+    el("div", { className: "field" }, [
+      el("label", { textContent: "参加するAI（2〜8件）" }),
+      hidden,
+      rows,
+      add,
+      warning,
+      el("p", { className: "field-note", textContent: "同じAIを複数追加して回答のばらつきを比較することもできます。内蔵ローカルAIは安定性のため順番に実行します。" }),
+    ])
+  );
+  editor.append(agentsField);
+
+  const judgeProvider = providerSelect(values.PICOAGENT_MULTI_AI_JUDGE_PROVIDER || data.active.providerId || "local");
+  editor.append(registerInput(
+    "PICOAGENT_MULTI_AI_JUDGE_PROVIDER",
+    judgeProvider,
+    el("div", { className: "field" }, [el("label", { textContent: "分担計画・最終統合に使うAI" }), judgeProvider])
+  ));
+  editor.append(field(
+    "PICOAGENT_MULTI_AI_JUDGE_MODEL",
+    "分担計画・最終統合に使うモデル",
+    "text",
+    values.PICOAGENT_MULTI_AI_JUDGE_MODEL || "",
+    "空なら選んだAIの既定モデル"
+  ));
+  editor.append(field(
+    "PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY",
+    "最大並列数（1〜8、内蔵ローカルAIは常に1）",
+    "number",
+    values.PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY || "3",
+    "3"
+  ));
+  wrapper.append(editor);
+
+  function updateVisibility() {
+    editor.hidden = mode.value === "single";
+    if (!editor.hidden && agents.length < 2 && !parseError) {
+      while (agents.length < 2) {
+        agents.push({ name: "", provider: data.active.providerId || "local", model: "", focus: "" });
+      }
+      renderRows();
+      syncAgents();
+    }
+  }
+  mode.addEventListener("change", () => {
+    updateVisibility();
+    updateDirtyState();
+  });
+  renderRows();
+  updateVisibility();
+  return wrapper;
+}
+
 function localModelPresetField(key, label, value) {
   const presets = data.localModelPresets || [];
   const localPresetLabel = (preset) => `${preset.localSize || preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize || "-"}`;
@@ -3403,10 +3572,13 @@ async function render() {
     provSec.append(block);
   }
   renderProviderConfig(data.active.providerId);
+  const multiAiSec = section("複数AIの使い方");
+  multiAiSec.append(multiAiSettingsField(v));
   panels.providers.append(el("p", {
     className: "settings-intro",
     textContent: "AIの種類と外部連携をまとめています。普段は選択中のAIだけ確認すれば十分です。",
   }));
+  panels.providers.append(multiAiSec);
   panels.providers.append(provSec);
   panels.providers.append(buildDownloadedModelsSection());
   panels.providers.append(apiSec);
