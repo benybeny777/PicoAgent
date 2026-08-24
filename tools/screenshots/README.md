@@ -44,6 +44,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
 | `SHOOT_README_GALLERY` | `1`ならキャラクター一覧を同じ撮影経路の生PNGからREADME用6秒・480px・16fpsとして`docs/images/`へ直接書き出す。引数なしの全件実行では合計20MB、最大2MBの上限も検査する |
 | `SHOOT_SITE_GALLERY` | `1`ならキャラクター一覧を同じ撮影経路の生PNGからLP用6秒・480px・16fpsとして`distribution/site/assets/`へ直接書き出す。引数なしの全件実行では容量上限も検査する |
+| `SHOOT_OUTPUT_DIR` | 撮影結果を既定の公開先へ書かず、指定した絶対パスへ出す。公開前の構図比較や別リポジトリへ取り込む成果物の確認に使う |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
 | `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
