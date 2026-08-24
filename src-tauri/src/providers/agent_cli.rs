@@ -69,10 +69,16 @@ fn kind_for_model(cfg: &Config, model: &str) -> Kind {
 }
 
 fn program_for_kind(cfg: &Config, selected: Kind) -> String {
-    let configured = cfg.get("PICOAGENT_AGENT_CLI_PATH", "");
-    let trimmed = configured.trim();
-    if !trimmed.is_empty() {
-        return trimmed.to_string();
+    // 設定した実行パスは、設定した種類のCLIにだけ使う。マルチAIの候補側で
+    // `claude` / `codex` を指定して切り替えた場合にこのパスを流用すると、
+    // 片方のCLIの実行ファイルへもう片方の引数（`exec --sandbox read-only` など）を
+    // 渡してしまうため、切り替えた側は既定のコマンド名で起動する。
+    if selected == kind(cfg) {
+        let configured = cfg.get("PICOAGENT_AGENT_CLI_PATH", "");
+        let trimmed = configured.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
     }
     match selected {
         Kind::Codex => "codex".to_string(),
@@ -86,7 +92,13 @@ fn program(cfg: &Config) -> String {
 
 /// 非対話で1往復だけ実行するための引数。プロンプト本体はこの後ろへ足す。
 fn lead_args_for_kind(cfg: &Config, selected: Kind) -> Vec<String> {
-    let configured = cfg.get("PICOAGENT_AGENT_CLI_ARGS", "");
+    // 追加引数も実行パスと同じく、設定した種類のCLIにだけ渡す。
+    // 候補側で切り替えた別CLIへ、そのCLIが解釈できない引数を混ぜない。
+    let configured = if selected == kind(cfg) {
+        cfg.get("PICOAGENT_AGENT_CLI_ARGS", "")
+    } else {
+        String::new()
+    };
     let trimmed = configured.trim();
     let configured: Vec<String> = if trimmed.is_empty() {
         Vec::new()
@@ -421,8 +433,8 @@ inventory::submit! { ProviderReg { make: || Box::new(AgentCli) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        flatten, kind, kind_for_model, lead_args, parse_tool_call, program, timeout_secs,
-        tool_instructions, Kind, MAX_PROMPT_CHARS,
+        flatten, kind, kind_for_model, lead_args, lead_args_for_kind, parse_tool_call, program,
+        program_for_kind, timeout_secs, tool_instructions, Kind, MAX_PROMPT_CHARS,
     };
     use crate::config::Config;
     use crate::message::Message;
@@ -457,6 +469,23 @@ mod tests {
         let args = lead_args(&cfg);
         assert_eq!(&args[..3], ["-p", "run", "--quiet"]);
         assert!(args.iter().any(|arg| arg == "--safe-mode"));
+    }
+
+    #[test]
+    fn 明示指定の実行パスと追加引数は設定した種類のcliにだけ使う() {
+        // マルチAIの候補が `codex` を指定した場合、claude 用に設定したパスと追加引数を
+        // 流用すると、claude の実行ファイルへ codex の引数を渡してしまう。
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_AGENT_CLI_PATH", "/opt/bin/my-claude");
+        cfg.set("PICOAGENT_AGENT_CLI_ARGS", "--model opus");
+        assert_eq!(program_for_kind(&cfg, Kind::Claude), "/opt/bin/my-claude");
+        assert_eq!(program_for_kind(&cfg, Kind::Codex), "codex");
+        assert!(lead_args_for_kind(&cfg, Kind::Claude).contains(&"opus".to_string()));
+        assert!(!lead_args_for_kind(&cfg, Kind::Codex).contains(&"opus".to_string()));
+        assert_eq!(
+            lead_args_for_kind(&cfg, Kind::Codex).first().map(String::as_str),
+            Some("exec")
+        );
     }
 
     #[test]

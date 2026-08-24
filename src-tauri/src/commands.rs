@@ -2,8 +2,8 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
 use serde_json::{json, Map, Value};
@@ -121,7 +121,8 @@ pub struct AppState {
     /// キャラクターの現在感情状態（ルールベース推定）。
     pub emotion: Mutex<crate::emotion::EmotionState>,
     /// 停止ボタンによる中断要求。送信開始時に false へ戻し、実行中の生成・ツール処理でも確認する。
-    pub cancel_requested: std::sync::atomic::AtomicBool,
+    /// マルチAIのようにツール経由で子エージェントを起こす経路へも渡せるよう `Arc` で持つ。
+    pub cancel_requested: Arc<AtomicBool>,
     /// 会話状態の世代番号。リセット・キャラ切替・再初期化後に古い非同期処理が
     /// 履歴や文脈を書き戻さないよう、送信開始時の値と完了時の値を照合する。
     pub conversation_epoch: AtomicU64,
@@ -143,7 +144,7 @@ impl AppState {
             pending_command: Mutex::new(None),
             pending_question: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
-            cancel_requested: std::sync::atomic::AtomicBool::new(false),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
             conversation_epoch: AtomicU64::new(0),
         }
     }
@@ -457,17 +458,20 @@ async fn run_agent_and_persist(
     epoch: u64,
 ) -> anyhow::Result<PersistedReply> {
     // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
-    state
-        .cancel_requested
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-    let reply = agent::run(
-        &state.config,
-        provider,
-        model,
-        convo,
-        5,
-        Some(app),
-        Some(&state.cancel_requested),
+    state.cancel_requested.store(false, Ordering::Relaxed);
+    // ツール経由で起こす子エージェント（サブエージェント／マルチAI）も同じ停止ボタンで
+    // 止められるよう、中断フラグをタスクローカルへ載せて配下へ伝播させる。
+    let reply = agent::with_cancel(
+        Arc::clone(&state.cancel_requested),
+        agent::run(
+            &state.config,
+            provider,
+            model,
+            convo,
+            5,
+            Some(app),
+            Some(&*state.cancel_requested),
+        ),
     )
     .await?;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
@@ -501,7 +505,26 @@ fn multi_ai_context(messages: &[Message]) -> String {
     }
 }
 
+/// 統合AI用モデルを解決する。空欄のときに選択中AIのモデル名をそのまま渡すと、別プロバイダの
+/// 統合AIへ存在しないモデル名を送ってしまう。同じプロバイダのときだけ引き継ぎ、違う場合は
+/// 空のまま渡して、サブエージェント側でプロバイダ既定モデルへ解決させる。
+fn resolved_judge_model(
+    configured: &str,
+    judge_provider: &str,
+    selected_provider: &str,
+    selected_model: &str,
+) -> String {
+    if !configured.trim().is_empty() {
+        configured.to_string()
+    } else if judge_provider == selected_provider {
+        selected_model.to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn configured_multi_ai_args(
+    app: &AppHandle,
     state: &AppState,
     task: &str,
     convo: &[Message],
@@ -513,6 +536,17 @@ fn configured_multi_ai_args(
         "divide" => "divide",
         _ => return Ok(None),
     };
+    // マルチAIはPro対象の `subagent` を通る。ライセンスが切れた状態でそのまま呼ぶと
+    // 会話のたびにライセンスエラーだけが返り、相棒が何も答えられなくなる。
+    // 設定画面では Pro でなければ有効にできないため、ここは期限切れの救済として
+    // 単一AIへ戻し、理由をアプリログへ残す。
+    if !crate::license::is_pro(&state.config) {
+        crate::log_paths::append_app_log(
+            app,
+            "マルチAIには PicoAgent Pro のライセンスが必要です。今回は単一AIで応答しました。",
+        );
+        return Ok(None);
+    }
     let raw = state.config.get("PICOAGENT_MULTI_AI_AGENTS", "[]");
     let agents: Value = serde_json::from_str(&raw)
         .map_err(|error| format!("マルチAIの参加AI設定を読めません: {error}"))?;
@@ -527,9 +561,12 @@ fn configured_multi_ai_args(
     let judge_provider = state
         .config
         .get("PICOAGENT_MULTI_AI_JUDGE_PROVIDER", &fallback_provider);
-    let judge_model = state
-        .config
-        .get("PICOAGENT_MULTI_AI_JUDGE_MODEL", &fallback_model);
+    let judge_model = resolved_judge_model(
+        &state.config.get("PICOAGENT_MULTI_AI_JUDGE_MODEL", ""),
+        &judge_provider,
+        &fallback_provider,
+        &fallback_model,
+    );
     Ok(Some(json!({
         "task": task,
         "context": multi_ai_context(convo),
@@ -539,6 +576,9 @@ fn configured_multi_ai_args(
             "name": "統合AI",
             "provider": judge_provider,
             "model": judge_model,
+            // 統合結果はキャラクターの発話としてそのまま表示・読み上げされる。
+            // 候補AIは作業担当なので素の文体でよいが、統合AIには人格設定を渡す。
+            "persona": agent::system_prompt_of(convo),
         }
     })))
 }
@@ -551,10 +591,16 @@ async fn run_multi_ai_and_persist(
     character_id: &str,
     epoch: u64,
 ) -> anyhow::Result<PersistedReply> {
-    state
-        .cancel_requested
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-    let reply = tools::dispatch(&state.config, "subagent", args).await;
+    state.cancel_requested.store(false, Ordering::Relaxed);
+    // 設定由来のこの経路は `agent::run` を通らないため、そのままだとネスト深さが0から
+    // 始まり、チャット経由より1段深く委譲できてしまう。深さ1のスコープを張って
+    // 上限判定をチャット経由とそろえる。中断フラグも配下の候補AIへ伝播させる。
+    // 戻り値はツール出力ではなく利用者への最終返信なので、ツール出力上限で打ち切らない。
+    let reply = agent::with_cancel(
+        Arc::clone(&state.cancel_requested),
+        agent::with_agent_depth(1, tools::dispatch_final(&state.config, "subagent", args)),
+    )
+    .await;
     convo.push(Message::new("assistant", reply.clone()));
     let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
     if conversation_is_current(state, character_id, epoch) {
@@ -1597,7 +1643,7 @@ pub async fn pet_send(
     );
     convo.push(Message::new("user", text));
 
-    let multi_ai_args = match configured_multi_ai_args(&state, &user_text, &convo) {
+    let multi_ai_args = match configured_multi_ai_args(&app, &state, &user_text, &convo) {
         Ok(args) => args,
         Err(reply) => {
             return record_turn(
@@ -2017,6 +2063,25 @@ pub async fn pet_alarm_wake(
     Ok(json!({ "reply": reply }))
 }
 
+/// 行全体が括弧の注記だけでできているか。`【マルチAI合議の統合結果】` の見出しや
+/// `［候補2件中2件成功／統合: …］` の内訳は画面表示用のメタ情報なので、読み上げには乗せない。
+/// 括弧を閉じたあとに本文が続く行（`【重要】明日は雨です` など）は本文なので残す。
+fn is_bracketed_note_line(line: &str) -> bool {
+    let line = line.trim();
+    [('【', '】'), ('［', '］'), ('[', ']')]
+        .iter()
+        .any(|(open, close)| {
+            line.starts_with(*open)
+                && line.ends_with(*close)
+                && line.chars().count() > 2
+                && !line
+                    .chars()
+                    .skip(1)
+                    .take(line.chars().count() - 2)
+                    .any(|c| c == *close)
+        })
+}
+
 fn speech_text(text: &str) -> String {
     let mut out = String::new();
     let mut chars = text.chars().peekable();
@@ -2056,6 +2121,7 @@ fn speech_text(text: &str) -> String {
         .filter(|line| !line.is_empty())
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
         .filter(|line| !looks_like_rss_speech_dump_line(line))
+        .filter(|line| !is_bracketed_note_line(line))
         .filter(|line| {
             !line
                 .trim_matches(|c: char| {
@@ -2400,13 +2466,21 @@ fn is_secret_setting(schema_keys: &std::collections::HashSet<String>, key: &str)
     schema_keys.contains(key) || crate::secret::is_secret_key(key)
 }
 
-fn validate_multi_ai_settings(patch: &Map<String, Value>) -> Result<(), String> {
+fn validate_multi_ai_settings(cfg: &Config, patch: &Map<String, Value>) -> Result<(), String> {
     let mode = patch
         .get("PICOAGENT_MULTI_AI_MODE")
         .and_then(Value::as_str)
         .unwrap_or("single");
     if !matches!(mode, "single" | "consensus" | "collaborate" | "divide") {
         return Err("マルチAIの実行方法が不正です。".to_string());
+    }
+    // マルチAIはPro対象の `subagent` を通る。ここで止めないと、保存はできるのに
+    // 会話のたびにライセンスエラーだけが返る状態になる。
+    if mode != "single" && !crate::license::is_pro(cfg) {
+        return Err(
+            "複数AIの合議・分担は PicoAgent Pro の機能です。設定の「製品情報・ライセンス」でライセンスキーを登録してください。"
+                .to_string(),
+        );
     }
     let raw = patch
         .get("PICOAGENT_MULTI_AI_AGENTS")
@@ -2678,7 +2752,7 @@ pub async fn settings_save(
 ) -> Result<Value, String> {
     let current_values = state.config.get_all();
     preserve_unreadable_secrets(&mut patch, &current_values)?;
-    validate_multi_ai_settings(&patch)?;
+    validate_multi_ai_settings(&state.config, &patch)?;
     if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
         patch.insert(
             "PICOAGENT_CHARACTER_FRAMING".to_string(),
@@ -4424,10 +4498,12 @@ mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
         multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
-        replace_auto_summary, settings_tab, speech_text, update_series_is_newer, update_status,
-        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
-        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        replace_auto_summary, resolved_judge_model, settings_tab, speech_text,
+        update_series_is_newer, update_status, validate_multi_ai_settings,
+        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        MAX_UPDATE_FEED_BYTES,
     };
+    use crate::config::Config;
     use crate::message::Message;
 
     #[test]
@@ -4519,6 +4595,19 @@ mod tests {
     }
 
     #[test]
+    fn 統合ai用モデルが空なら別プロバイダへ選択中モデルを渡さない() {
+        // 明示指定はそのまま使う。
+        assert_eq!(
+            resolved_judge_model("gpt-5", "openai", "local", "qwen3"),
+            "gpt-5"
+        );
+        // 統合先が選択中と同じプロバイダなら選択中モデルを引き継ぐ。
+        assert_eq!(resolved_judge_model("", "local", "local", "qwen3"), "qwen3");
+        // 別プロバイダなら空のまま渡し、プロバイダ既定モデルへ解決させる。
+        assert_eq!(resolved_judge_model("  ", "openai", "local", "qwen3"), "");
+    }
+
+    #[test]
     fn マルチai設定は単発を既定にし複数時だけ人数とプロバイダを検証する() {
         let mut single = serde_json::Map::new();
         single.insert(
@@ -4526,7 +4615,7 @@ mod tests {
             serde_json::json!("single"),
         );
         single.insert("PICOAGENT_MULTI_AI_AGENTS".into(), serde_json::json!("[]"));
-        assert!(validate_multi_ai_settings(&single).is_ok());
+        assert!(validate_multi_ai_settings(&Config::new(), &single).is_ok());
 
         let mut consensus = serde_json::Map::new();
         consensus.insert(
@@ -4545,13 +4634,13 @@ mod tests {
             "PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY".into(),
             serde_json::json!("3"),
         );
-        assert!(validate_multi_ai_settings(&consensus).is_ok());
+        assert!(validate_multi_ai_settings(&Config::new(), &consensus).is_ok());
 
         consensus.insert(
             "PICOAGENT_MULTI_AI_AGENTS".into(),
             serde_json::json!(r#"[{"provider":"local"}]"#),
         );
-        assert!(validate_multi_ai_settings(&consensus).is_err());
+        assert!(validate_multi_ai_settings(&Config::new(), &consensus).is_err());
     }
 
     #[test]
@@ -4709,6 +4798,14 @@ mod tests {
     fn 読み上げではrssダンプ行を除外する() {
         let text = "フィード: Google ニュース\n- 2026-07-03T00:00:00+00:00 見出し https://example.com/a\n要約です。";
         assert_eq!(speech_text(text), "要約です。");
+    }
+
+    #[test]
+    fn 読み上げでは括弧だけの注記行を外す() {
+        let text = "【マルチAI合議の統合結果】\n明日は晴れです。\n\n［候補2件中2件成功／統合: 統合AI（local / a）］";
+        assert_eq!(speech_text(text), "明日は晴れです。");
+        // 括弧のあとに本文が続く行は読み上げる。
+        assert_eq!(speech_text("【重要】明日は雨です"), "【重要】明日は雨です");
     }
 
     #[test]
