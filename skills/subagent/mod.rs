@@ -56,28 +56,9 @@ fn cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
         .unwrap_or(false)
 }
 
-async fn wait_for_cancel(cancel: Arc<AtomicBool>) {
-    while !cancel.load(Ordering::Relaxed) {
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-}
-
-/// 分担計画・最終統合は `agent::run` を通らずプロバイダへ直接問い合わせるため、
-/// ここで停止要求と競合させる。停止時は通信futureを破棄し、CLIなら共通process層の
-/// `kill_on_drop`、HTTPならクライアントfutureのdropで処理を打ち切る。
-async fn cancel_while<T>(
-    future: impl std::future::Future<Output = T>,
-    cancel: &Option<Arc<AtomicBool>>,
-) -> Option<T> {
-    match cancel {
-        Some(flag) => tokio::select! {
-            result = future => Some(result),
-            _ = wait_for_cancel(Arc::clone(flag)) => None,
-        },
-        None => Some(future.await),
-    }
-}
-
+/// 分担計画・最終統合は `agent::run` を通らずプロバイダへ直接問い合わせる。停止との競合は
+/// `agent::cancel_while` に任せ、停止時は通信futureを破棄する。CLIなら共通process層の
+/// `kill_on_drop`、HTTPならクライアントfutureのdropで処理が打ち切られる。
 async fn provider_chat(
     provider: &dyn providers::Provider,
     cfg: &Config,
@@ -315,11 +296,18 @@ async fn run_candidate(
 
 fn candidates_for_judge(
     task: &str,
+    context: &str,
     candidates: &[(AiSelection, String, Result<String, String>)],
 ) -> String {
-    let mut prompt = format!(
+    // 候補AIは `system_prompt`、分担計画は計画プロンプトで直前の会話を受け取る。
+    // 統合AIだけ文脈が無いと、指示語や言い直しを含む依頼で候補の取捨選択を誤る。
+    let mut prompt = String::new();
+    if !context.is_empty() {
+        prompt.push_str(&format!("直前までの会話:\n{context}\n\n"));
+    }
+    prompt.push_str(&format!(
         "次の質問に対する複数のAI回答を比較し、良い部分を統合して最終回答を1つ作ってください。\n\n質問:\n{task}\n\n"
-    );
+    ));
     for (index, (selection, assigned_task, result)) in candidates.iter().enumerate() {
         prompt.push_str(&format!(
             "--- 候補{}: {}（{} / {}） ---\n",
@@ -373,11 +361,14 @@ async fn merge_candidates(
     }
     let messages = vec![
         Message::new("system", system),
-        Message::new("user", candidates_for_judge(&request.task, candidates)),
+        Message::new(
+            "user",
+            candidates_for_judge(&request.task, &request.context, candidates),
+        ),
     ];
-    let response = cancel_while(
+    let response = agent::cancel_while(
         provider_chat(provider, cfg, &model, &messages, judge_session),
-        cancel,
+        cancel.as_deref(),
     )
         .await
         .ok_or_else(|| agent::cancel_message().to_string())?
@@ -487,9 +478,9 @@ async fn assigned_tasks(
             ),
         ),
     ];
-    let response = cancel_while(
+    let response = agent::cancel_while(
         provider_chat(provider, cfg, &model, &messages, judge_session),
-        cancel,
+        cancel.as_deref(),
     )
         .await
         .ok_or_else(|| agent::cancel_message().to_string())?
@@ -777,7 +768,11 @@ inventory::submit! { ToolReg { make: || Box::new(SubagentTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{cancel_while, fallback_candidates, parse_multi_request, parse_planned_tasks, AiSelection};
+    use super::{
+        candidates_for_judge, fallback_candidates, parse_multi_request, parse_planned_tasks,
+        AiSelection,
+    };
+    use crate::agent;
     use crate::config::Config;
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -900,7 +895,23 @@ mod tests {
             request.store(true, Ordering::Relaxed);
         });
         let cancel = Some(flag);
-        let result = cancel_while(std::future::pending::<()>(), &cancel).await;
+        let result = agent::cancel_while(std::future::pending::<()>(), cancel.as_deref()).await;
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn 統合aiのプロンプトへ直前の会話を渡す() {
+        let selection = AiSelection {
+            name: "候補1".to_string(),
+            provider: "local".to_string(),
+            model: "test".to_string(),
+            focus: String::new(),
+        };
+        let candidates = vec![(selection, "担当".to_string(), Ok("回答".to_string()))];
+        let prompt = candidates_for_judge("3行にして", "[user]\n昨日の要約\n\n[assistant]\n長い要約", &candidates);
+        assert!(prompt.contains("直前までの会話:"));
+        assert!(prompt.contains("昨日の要約"));
+        // 文脈が無いときは見出しごと出さない。
+        assert!(!candidates_for_judge("質問", "", &candidates).contains("直前までの会話:"));
     }
 }
