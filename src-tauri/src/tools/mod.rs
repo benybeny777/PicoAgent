@@ -471,7 +471,11 @@ pub fn check_injection(content: &str) -> bool {
 /// スケジューラ / 接続テストなど対話できない経路から呼んでも内部トークンが露出しない。
 /// 承認フローを自分で扱えるのは `agent.rs` だけで、そこは `dispatch_interactive` を使う。
 pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
-    let result = dispatch_interactive(cfg, name, args).await;
+    readable_approval_notice(dispatch_interactive(cfg, name, args).await)
+}
+
+/// 承認マーカーは内部プロトコル。承認を受け付けられない経路では人が読める案内文へ変換する。
+fn readable_approval_notice(result: String) -> String {
     match run_command::parse_approval_marker(&result) {
         Some(pending) => format!(
             "エラー: この操作には実行許可が必要です（この経路では承認を受け付けられません）。\n{}\n\nチャットで同じコマンドを直接依頼すると、その場で許可・永続許可・キャンセルを選べます。",
@@ -481,21 +485,33 @@ pub async fn dispatch(cfg: &Config, name: &str, args: Value) -> String {
     }
 }
 
-/// モデルが要求したツール呼び出しを実行する（対話ループ専用の生の入口）。
-/// 承認マーカーをそのまま返すため、**呼び出し側が承認フローを実装している場合のみ**使う。
-/// 失敗は例外にせず文字列で返す。出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切る。
-pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> String {
+/// ライセンス判定とツール本体の実行だけを行う共通部分。打ち切りは呼び出し側の判断。
+async fn run_tool(cfg: &Config, name: &str, args: Value) -> String {
     if crate::license::tool_requires_pro(name) && !crate::license::is_pro(cfg) {
         return "エラー: このスキルは PicoAgent Pro のライセンスが必要です。設定の「製品情報・ライセンス」でライセンスキーを登録してください。".to_string();
     }
-    let result = if let Some(idx) = index().get(name) {
+    if let Some(idx) = index().get(name) {
         all()[*idx].run(cfg, args).await
     } else if crate::mcp::client::is_mcp_tool(name) {
         // 外部 MCP サーバのツール（mcp__<サーバ>__<ツール>）へフォールバックする。
         crate::mcp::client::dispatch(name, args).await
     } else {
         format!("エラー: 未登録のツール \"{}\" が呼び出されました。", name)
-    };
+    }
+}
+
+/// 戻り値をモデルへ渡すツール出力ではなく、**利用者への最終返信としてそのまま使う**呼び出し。
+/// マルチAIの統合結果のように、途中で打ち切ると回答自体が欠けるものへ使う。
+/// ツール出力上限を当てない代わりに、呼び出し側が長さと表示先に責任を持つ。
+pub async fn dispatch_final(cfg: &Config, name: &str, args: Value) -> String {
+    readable_approval_notice(run_tool(cfg, name, args).await)
+}
+
+/// モデルが要求したツール呼び出しを実行する（対話ループ専用の生の入口）。
+/// 承認マーカーをそのまま返すため、**呼び出し側が承認フローを実装している場合のみ**使う。
+/// 失敗は例外にせず文字列で返す。出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切る。
+pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> String {
+    let result = run_tool(cfg, name, args).await;
     let limit = tool_output_limit(cfg);
     if result.chars().count() > limit {
         let truncated: String = result.chars().take(limit).collect();

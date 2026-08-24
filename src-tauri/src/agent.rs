@@ -24,6 +24,28 @@ pub fn agent_depth() -> usize {
     AGENT_DEPTH.try_with(|depth| *depth).unwrap_or(0)
 }
 
+/// エージェントループの外から委譲する場合に、チャット経由と同じ深さから始める。
+/// 設定由来のマルチAIのように `run` を通らない入口で使う。
+pub async fn with_agent_depth<F: std::future::Future>(depth: usize, task: F) -> F::Output {
+    AGENT_DEPTH.scope(depth, task).await
+}
+
+tokio::task_local! {
+    /// 現在の非同期タスクへ伝播する中断要求。ツール経由で起動した子エージェントも
+    /// 同じ停止ボタンで止められるよう、呼び出し側がスコープを張って渡す。
+    static CANCEL_FLAG: Arc<AtomicBool>;
+}
+
+/// このタスクへ伝播している中断フラグ。スコープ外（スケジューラ経由など）は None。
+pub fn cancel_flag() -> Option<Arc<AtomicBool>> {
+    CANCEL_FLAG.try_with(Arc::clone).ok()
+}
+
+/// 中断フラグを配下の非同期処理へ伝播させる。
+pub async fn with_cancel<F: std::future::Future>(flag: Arc<AtomicBool>, task: F) -> F::Output {
+    CANCEL_FLAG.scope(flag, task).await
+}
+
 /// スーパーエージェントモード。計画ステップ・自己評価・深い自律ループ・進捗可視化を一括で有効化する。
 pub fn super_agent_enabled(cfg: &Config) -> bool {
     cfg.get_bool("PICOAGENT_SUPER_AGENT", false)

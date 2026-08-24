@@ -91,7 +91,7 @@ graph TD
 - `arguments` は **`serde_json::Value`（オブジェクト）** で持つ（OpenAI の JSON 文字列はプロバイダ内で相互変換）。
 - Ollama は tool 結果を id で紐付けず位置・名前で扱うため `tool_call_id` は無視（正規形には残す）。
 - `images` は **マルチモーダル入力**用のフィールド（省略可）。base64 data URL 文字列の配列。プロバイダが OpenAI 互換の場合、user メッセージの `content` を `[{type:"text",...}, {type:"image_url",...}]` 配列形式へ変換して送信する。`usage` フィールドは ephemeral（`#[serde(skip)]`）で、プロバイダから返ったトークン数を一時的に保持する。
-- **手元の CLI エージェントを叩く AI にする（`providers/agent_cli.rs`）**: Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で1往復だけ呼び、テキスト応答を受け取る。通常は `PICOAGENT_AGENT_CLI_KIND` を使い、マルチAIでは候補のモデル欄へ `claude` / `codex` を指定して呼び分けられる。Claude は safe mode かつ組み込みツールなし、Codex はユーザー設定なし・read-only sandbox・一時セッションで起動し、**CLI 自身のツールから PicoAgent の権限境界を迂回させない**。ツール呼び出しは OpenAI 形式を受け付けないため、**プロンプト側の約束事**で代替する——使えるスキルの一覧（名前・説明・引数キーだけに削ったもの）を渡し、「ツールを使うときは `{"tool":..,"args":..}` だけを返す」と指示して、その JSON を `tool_calls` へ変換する。コードフェンスや前後の文章は剥がして最初の JSON オブジェクトだけを見る。**JSON でない出力は通常の返答として扱い**、**一覧に無いツール名も採用しない**（幻覚をそのまま実行へ回さない）。約束が守られなくても壊れず、単にツールなしの応答になる。プロンプトは引数として渡し、シェルは経由しない。会話は役割ラベル付きで1本に畳み、長すぎる場合は**古い方から**落として直近の指示を残す。CLI の導入とログインは利用者側で行い、配布構成の既定にはしない。
+- **手元の CLI エージェントを叩く AI にする（`providers/agent_cli.rs`）**: Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で1往復だけ呼び、テキスト応答を受け取る。通常は `PICOAGENT_AGENT_CLI_KIND` を使い、マルチAIでは候補のモデル欄へ `claude` / `codex` を指定して呼び分けられる。`PICOAGENT_AGENT_CLI_PATH` と `PICOAGENT_AGENT_CLI_ARGS` は `PICOAGENT_AGENT_CLI_KIND` と一致する種類にだけ使い、候補側で切り替えた別CLIへは既定のコマンド名と引数を使う（片方のCLIへもう片方の引数を渡さない）。Claude は safe mode かつ組み込みツールなし、Codex はユーザー設定なし・read-only sandbox・一時セッションで起動し、**CLI 自身のツールから PicoAgent の権限境界を迂回させない**。ツール呼び出しは OpenAI 形式を受け付けないため、**プロンプト側の約束事**で代替する——使えるスキルの一覧（名前・説明・引数キーだけに削ったもの）を渡し、「ツールを使うときは `{"tool":..,"args":..}` だけを返す」と指示して、その JSON を `tool_calls` へ変換する。コードフェンスや前後の文章は剥がして最初の JSON オブジェクトだけを見る。**JSON でない出力は通常の返答として扱い**、**一覧に無いツール名も採用しない**（幻覚をそのまま実行へ回さない）。約束が守られなくても壊れず、単にツールなしの応答になる。プロンプトは引数として渡し、シェルは経由しない。会話は役割ラベル付きで1本に畳み、長すぎる場合は**古い方から**落として直近の指示を残す。CLI の導入とログインは利用者側で行い、配布構成の既定にはしない。
 - **スクリーンショット解析**: `pet_capture_screen` コマンドがデスクトップ画像を PNG base64 data URL で返す。取得は**外部コマンドを介さず** `xcap` で主モニタを直接キャプチャし、PNG へエンコードして返す（以前は Windows で PowerShell + GDI、macOS で `screencapture` を起動していた。起動が重く、実行ポリシーやプロファイルの影響を受け、失敗の切り分けもしづらかった）。**対応 OS は Windows / macOS / Linux**。LinuxではX11に加えてWayland／PipeWire経路を組み込み、OSの画面共有許可やポータルが拒否・未提供の場合は理由付きエラーを返す。対応対象外のOSではビルドを維持するスタブになる。取得と PNG 変換は同期処理なので `spawn_blocking` で UI スレッドから逃がす。フロントエンドは「画面を見て」「スクリーンショット」などの発話を検出し、自動で `pet_capture_screen` → `pet_send_image` へ切り替えてビジョン対応モデルへ送る。
 - **インライン画像表示**: `appendLinkedText()` が `![alt](url)` Markdown 画像記法を `<img>` 要素としてフキダシ内にインライン表示する。DALL-E 3 生成画像や外部 URL の画像をそのまま確認できる。
 
@@ -354,7 +354,7 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 | `research_report` | 複数観点のWeb検索を束ね、出典付きMarkdown調査レポートを生成する。`save=true` または `save_path` 指定で保存し、既定で1ページ要約 `.brief.md`、HTMLダッシュボード `.dashboard.html`、スライド下書き `.slides.md`、出典CSV `.sources.csv`、出典JSON `.sources.json` も生成する | 検索待ち時間3〜60秒、観点最大6件、各観点最大5件、レポート96KB上限、保存は共通許可ルート配下の `.md` のみ |
 | `spark_workspace` | brief、deck、sheet、共有HTMLページ、エージェント実行計画、プロンプト集、チェックリストを含む資料ワークスペースを一括生成する | 保存は共通許可ルート配下のみ、入力テキスト24,000文字上限、外部通信なし |
 | `genspark_suite` | Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統を同じフォルダに生成する | 保存は共通許可ルート配下のみ、入力テキスト32,000文字上限、外部通信なし |
-| `subagent` | 単独委譲に加え、複数AIへ同じ質問を送る `consensus`、まとめ役が作業を割り振って統合する `collaborate`、分担結果を個別に返す `divide` を実行する | `agents` ごとに provider / model / 任意の focus を指定（2〜8件）。まとめ役 judge も別指定できる。local候補は同梱モデルの競合を避けて直列、その他は最大同時数まで並行実行。AppHandle は渡さず、タスク単位の `AGENT_DEPTH` と最大深さ（既定2）で再帰を制限。合議は候補数＋統合、分担＋統合は計画＋候補数＋統合だけ各AIを呼ぶ |
+| `subagent` | 単独委譲に加え、複数AIへ同じ質問を送る `consensus`、まとめ役が作業を割り振って統合する `collaborate`、分担結果を個別に返す `divide` を実行する | `agents` ごとに provider / model / 任意の focus を指定（2〜8件）。まとめ役 judge も別指定でき、judge の `persona` に選択中キャラの人格設定を渡すと統合結果を本人の口調で返す。候補は宣言順で並べ、完了順に入れ替えない。local候補は同梱モデルの競合を避けて直列、その他は最大同時数まで並行実行。AppHandle は渡さず、タスク単位の `AGENT_DEPTH` と最大深さ（既定2）で再帰を制限。`agent::cancel_flag()` の中断要求は候補ループへ渡し、分担計画前と統合前でも確認する。合議は候補数＋統合、分担＋統合は計画＋候補数＋統合だけ各AIを呼ぶ |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | `skills/chitchat/trends.rs` で X API / 急上昇RSS / ニュースRSSの話題メモを取得し、生成は人格込みで `provider.chat`（tools 無し）。生成後は「直前の自発雑談」として会話文脈へ短く残す |
 | `alarm` | 目覚まし時計。声でやさしく起こすアラームを add/list/remove/clear/enable/disable できる。時刻(HH:MM)・曜日・繰り返し・スヌーズ分数を指定 | 一覧は `crate::alarm` 経由で config `PICOAGENT_ALARMS` に保存。発火はフロントの時刻ポーリングが `pet_alarm_wake` を呼ぶ。一度きりは発火後に無効化し、`おきたよ！` が押されるまで指定分数おきに再通知 |
 | `task_scheduler` | 指定時刻または cron 風5フィールドで、許可済みコマンドまたは別スキルを定期実行する。add/list/remove/clear/enable/disable に対応 | 一覧は config `PICOAGENT_SCHEDULED_TASKS` に保存。バックエンド常駐タスクが30秒間隔で確認し、実行結果をログ、`app_data_dir/schedule-runs.json`、`pet:notice` へ送る |
@@ -502,10 +502,10 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
 | `PICOAGENT_SUPER_AGENT` | `false` | 基本 | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
 | `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | 基本 | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
-| `PICOAGENT_MULTI_AI_MODE` | `single` | 複数AI | `single` / `consensus` / `collaborate` / `divide`。既定は従来どおり単発 |
+| `PICOAGENT_MULTI_AI_MODE` | `single` | 複数AI | `single` / `consensus` / `collaborate` / `divide`。既定は従来どおり単発。単発以外は Pro 対象の `subagent` を通るため、Pro でなければ保存を拒否し、実行時にライセンスが切れていれば単発へ戻して続行する |
 | `PICOAGENT_MULTI_AI_AGENTS` | `[]` | 複数AI | 参加AI（name / provider / model / focus）のJSON配列。複数モードでは2〜8件 |
 | `PICOAGENT_MULTI_AI_JUDGE_PROVIDER` | 現在のプロバイダ | 複数AI | 分担計画と回答統合を行うまとめ役のプロバイダ |
-| `PICOAGENT_MULTI_AI_JUDGE_MODEL` | 現在のモデル | 複数AI | まとめ役のモデル |
+| `PICOAGENT_MULTI_AI_JUDGE_MODEL` | 空 | 複数AI | まとめ役のモデル。空欄のときは、まとめ役が選択中と同じプロバイダなら現在のモデル、違うプロバイダならそのプロバイダの既定モデルを使う（別プロバイダへ存在しないモデル名を渡さない） |
 | `PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY` | `3` | 複数AI | 外部AI候補の最大同時数（1〜8）。内蔵local候補は常に直列 |
 | `PICOAGENT_SUBAGENT_MAX_DEPTH` | `2` | スキル(subagent) | サブエージェントの最大ネスト深さ。これ以上は再帰委譲を拒否する |
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | 基本 | 長期メモリに保持する最大件数（10〜200） |

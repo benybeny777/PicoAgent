@@ -554,6 +554,13 @@ function multiAiSettingsField(values) {
     className: "settings-intro",
     textContent: "既定は単一AIです。複数AIを使うと、参加AIの推論に加えて分担計画や最終統合の推論が発生し、API利用量と処理時間が増えます。",
   });
+  // 単一AI以外は Pro 対象の subagent を通る。保存を拒否されてから気づくことのないよう、
+  // 無料版では選ぶ前に理由を出す。
+  const proNote = el("p", {
+    className: "field-note",
+    textContent: "単一AI以外は PicoAgent Pro の機能です。「製品情報・ライセンス」でライセンスキーを登録すると保存できます。",
+  });
+  proNote.hidden = Boolean(data.license?.active);
   const mode = el("select");
   const modes = [
     { value: "single", label: "単一AI（既定・現在と同じ）" },
@@ -565,7 +572,7 @@ function multiAiSettingsField(values) {
   for (const item of modes) {
     mode.append(el("option", { value: item.value, textContent: item.label, selected: item.value === selectedMode }));
   }
-  wrapper.append(intro, registerInput(
+  wrapper.append(intro, proNote, registerInput(
     "PICOAGENT_MULTI_AI_MODE",
     mode,
     el("div", { className: "field" }, [el("label", { textContent: "回答の作り方" }), mode])

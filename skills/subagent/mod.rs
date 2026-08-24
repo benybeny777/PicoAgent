@@ -8,6 +8,7 @@
 // CLIエージェントは全体の並列上限内で同時実行できる。無限再帰はタスクローカルな
 // AGENT_DEPTHで防ぎ、並列エージェント同士をネストと誤認しない。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,6 +24,7 @@ use crate::providers;
 pub struct SubagentTool;
 
 const MAX_AGENTS: usize = 8;
+const CANCELLED_REPLY: &str = "マルチAIの実行を中断しました。";
 const MAX_TEXT_CHARS: usize = 32_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +44,17 @@ struct MultiRequest {
     max_concurrency: usize,
     agents: Vec<AiSelection>,
     judge: AiSelection,
+    /// 統合AIへ渡すキャラクターの人格設定。統合結果は利用者へそのまま表示・読み上げ
+    /// されるため、候補AI（作業担当）と違って口調まで合わせる。
+    judge_persona: String,
+}
+
+/// 停止ボタンによる中断要求。伝播していない経路（スケジューラ等）では常に false。
+fn cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
+    cancel
+        .as_ref()
+        .map(|flag| flag.load(Ordering::Relaxed))
+        .unwrap_or(false)
 }
 
 fn str_arg(args: &Value, key: &str) -> String {
@@ -152,6 +165,11 @@ fn parse_multi_request(cfg: &Config, args: &Value) -> Result<Option<MultiRequest
     if judge_value.is_null() || judge.name == "候補1" {
         judge.name = "統合AI".to_string();
     }
+    // 人格設定は長さで拒否せず、上限を超えた分だけ落とす（渡せなくても統合自体は成立する）。
+    let judge_persona: String = str_arg(judge_value, "persona")
+        .chars()
+        .take(MAX_TEXT_CHARS)
+        .collect();
 
     Ok(Some(MultiRequest {
         task,
@@ -161,6 +179,7 @@ fn parse_multi_request(cfg: &Config, args: &Value) -> Result<Option<MultiRequest
         max_concurrency,
         agents,
         judge,
+        judge_persona,
     }))
 }
 
@@ -178,19 +197,29 @@ fn system_prompt(context: &str) -> String {
     system
 }
 
-async fn run_candidate(
-    cfg: &Config,
-    task: String,
-    context: &str,
+/// 候補ごとに変わらない実行条件。候補の数だけ引数を並べ直さないようまとめる。
+struct CandidateContext<'a> {
+    cfg: &'a Config,
+    context: &'a str,
     steps: usize,
-    selection: AiSelection,
+    /// 内蔵ローカルAIは1モデル常駐なので、この錠で候補を直列化する。
     local_gate: Arc<futures::lock::Mutex<()>>,
-) -> (AiSelection, String, Result<String, String>) {
+    cancel: Option<Arc<AtomicBool>>,
+}
+
+async fn run_candidate(
+    ctx: &CandidateContext<'_>,
+    index: usize,
+    task: String,
+    selection: AiSelection,
+) -> (usize, AiSelection, String, Result<String, String>) {
+    let cfg = ctx.cfg;
     let provider = match providers::get(&selection.provider) {
         Some(provider) => provider,
         None => {
             let id = selection.provider.clone();
             return (
+                index,
                 selection,
                 task,
                 Err(format!("プロバイダ \"{id}\" が見つかりません。")),
@@ -205,18 +234,26 @@ async fn run_candidate(
     let mut resolved = selection;
     resolved.model = model.clone();
     let mut messages = vec![
-        Message::new("system", system_prompt(context)),
+        Message::new("system", system_prompt(ctx.context)),
         Message::new("user", task.clone()),
     ];
 
     // 内蔵ローカルAIは1モデル常駐。複数リクエストを同時に投げず、候補ごとに完了を待つ。
     let _local_guard = if resolved.provider == "local" {
-        Some(local_gate.lock().await)
+        Some(ctx.local_gate.lock().await)
     } else {
         None
     };
-    let result = agent::run(cfg, provider, &model, &mut messages, steps, None, None)
-        .await
+    let result = agent::run(
+        cfg,
+        provider,
+        &model,
+        &mut messages,
+        ctx.steps,
+        None,
+        ctx.cancel.as_deref(),
+    )
+    .await
         .map_err(|error| error.to_string())
         .and_then(|answer| {
             let answer = answer.trim().to_string();
@@ -226,7 +263,7 @@ async fn run_candidate(
                 Ok(answer)
             }
         });
-    (resolved, task, result)
+    (index, resolved, task, result)
 }
 
 fn candidates_for_judge(
@@ -274,11 +311,19 @@ async fn merge_candidates(
     };
     let mut judge = request.judge.clone();
     judge.model = model.clone();
+    // 統合結果はキャラクターの発話としてそのまま表示・読み上げされるため、
+    // 人格設定を先に置いてから統合の指示を与える。
+    let mut system = String::new();
+    if !request.judge_persona.is_empty() {
+        system.push_str(&request.judge_persona);
+        system.push_str("\n\n");
+    }
+    system.push_str("あなたは複数のAI回答を統合する編集者です。候補を盲目的に多数決せず、質問への適合性、事実の整合、具体性、抜け、注意点を比較してください。候補間で矛盾し確認できない点は断定せず明示してください。候補や統合手順の説明はせず、利用者へ返す完成した回答だけを書いてください。");
+    if !request.judge_persona.is_empty() {
+        system.push_str("文体と一人称は上の人格設定に従ってください。");
+    }
     let messages = vec![
-        Message::new(
-            "system",
-            "あなたは複数のAI回答を統合する編集者です。候補を盲目的に多数決せず、質問への適合性、事実の整合、具体性、抜け、注意点を比較してください。候補間で矛盾し確認できない点は断定せず明示してください。候補や統合手順の説明はせず、利用者へ返す完成した回答だけを書いてください。",
-        ),
+        Message::new("system", system),
         Message::new("user", candidates_for_judge(&request.task, candidates)),
     ];
     let response = provider
@@ -292,8 +337,11 @@ async fn merge_candidates(
     Ok((judge, answer))
 }
 
-fn fallback_candidates(candidates: &[(AiSelection, String, Result<String, String>)]) -> String {
-    let mut output = String::from("統合AIでまとめられなかったため、候補回答を個別に返します。");
+fn fallback_candidates(
+    lead: &str,
+    candidates: &[(AiSelection, String, Result<String, String>)],
+) -> String {
+    let mut output = String::from(lead);
     for (selection, assigned_task, result) in candidates {
         output.push_str(&format!(
             "\n\n【{}（{} / {}）】\n",
@@ -497,6 +545,9 @@ impl Tool for SubagentTool {
             );
         }
 
+        // 停止ボタンの要求は呼び出し側がタスクローカルへ載せている。候補AIのループにも
+        // 渡し、統合・分担計画の前後でも確認して、押したのに走り続ける状態をなくす。
+        let cancel = agent::cancel_flag();
         let request = match parse_multi_request(cfg, &args) {
             Ok(Some(request)) => request,
             Ok(None) => {
@@ -522,7 +573,17 @@ impl Tool for SubagentTool {
                     Message::new("system", system_prompt(&context)),
                     Message::new("user", task),
                 ];
-                return match agent::run(cfg, provider, &model, &mut messages, steps, None, None).await {
+                return match agent::run(
+                    cfg,
+                    provider,
+                    &model,
+                    &mut messages,
+                    steps,
+                    None,
+                    cancel.as_deref(),
+                )
+                .await
+                {
                     Ok(result) if !result.trim().is_empty() => {
                         format!("【サブエージェントの結果】\n{}", result.trim())
                     }
@@ -533,45 +594,66 @@ impl Tool for SubagentTool {
             Err(error) => return error,
         };
 
+        if cancelled(&cancel) {
+            return CANCELLED_REPLY.to_string();
+        }
         let tasks = assigned_tasks(cfg, &request).await;
-        let local_gate = Arc::new(futures::lock::Mutex::new(()));
-        let mut candidates = stream::iter(request.agents.clone().into_iter().zip(tasks).map(|(selection, assigned_task)| {
-            run_candidate(
-                cfg,
-                assigned_task,
-                &request.context,
-                request.steps,
-                selection,
-                Arc::clone(&local_gate),
-            )
-        }))
+        if cancelled(&cancel) {
+            return CANCELLED_REPLY.to_string();
+        }
+        let candidate_context = CandidateContext {
+            cfg,
+            context: &request.context,
+            steps: request.steps,
+            local_gate: Arc::new(futures::lock::Mutex::new(())),
+            cancel: cancel.clone(),
+        };
+        let mut collected = stream::iter(
+            request
+                .agents
+                .clone()
+                .into_iter()
+                .zip(tasks)
+                .enumerate()
+                .map(|(index, (selection, assigned_task))| {
+                    run_candidate(&candidate_context, index, assigned_task, selection)
+                }),
+        )
         .buffer_unordered(request.max_concurrency)
         .collect::<Vec<_>>()
         .await;
 
-        candidates.sort_by_key(|(selection, _, _)| {
-            request
-                .agents
-                .iter()
-                .position(|candidate| candidate == selection)
-                .unwrap_or(usize::MAX)
-        });
+        // 完了順ではなく設定した宣言順で返す。モデル未指定の候補は既定モデルで補完されて
+        // 元の指定と一致しなくなるため、突き合わせではなく開始時の添字で並べ直す。
+        collected.sort_by_key(|(index, _, _, _)| *index);
+        let candidates = collected
+            .into_iter()
+            .map(|(_, selection, task, result)| (selection, task, result))
+            .collect::<Vec<_>>();
 
         let successful = candidates
             .iter()
             .filter(|(_, _, result)| result.is_ok())
             .count();
         if successful == 0 {
-            return fallback_candidates(&candidates);
+            // 統合AIは呼んでいないので、統合の失敗として案内しない。
+            return fallback_candidates(
+                "どの候補AIも回答を返せなかったため、それぞれの失敗理由を返します。",
+                &candidates,
+            );
         }
         if request.mode == "divide" {
             return format!(
                 "【マルチAIの分担結果】\n{}\n\n［担当{}件中{}件成功／最終統合なし］",
-                fallback_candidates(&candidates)
-                    .trim_start_matches("統合AIでまとめられなかったため、候補回答を個別に返します。")
-                    .trim(),
+                fallback_candidates("", &candidates).trim(),
                 candidates.len(),
                 successful
+            );
+        }
+        if cancelled(&cancel) {
+            return fallback_candidates(
+                "中断したため統合まで進めず、集まった候補回答を個別に返します。",
+                &candidates,
             );
         }
 
@@ -585,7 +667,13 @@ impl Tool for SubagentTool {
                 judge.provider,
                 judge.model
             ),
-            Err(error) => format!("{}\n\n統合エラー: {error}", fallback_candidates(&candidates)),
+            Err(error) => format!(
+                "{}\n\n統合エラー: {error}",
+                fallback_candidates(
+                    "統合AIでまとめられなかったため、候補回答を個別に返します。",
+                    &candidates
+                )
+            ),
         }
     }
 }
@@ -594,7 +682,7 @@ inventory::submit! { ToolReg { make: || Box::new(SubagentTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_multi_request, AiSelection};
+    use super::{fallback_candidates, parse_multi_request, AiSelection};
     use crate::config::Config;
     use serde_json::json;
 
@@ -632,6 +720,46 @@ mod tests {
                 focus: String::new(),
             }
         );
+    }
+
+    #[test]
+    fn 統合aiへ人格設定を渡し候補一覧の前置きを切り替える() {
+        let cfg = Config::new();
+        let request = parse_multi_request(
+            &cfg,
+            &json!({
+                "task": "質問",
+                "agents": [{"provider": "local"}, {"provider": "local"}],
+                "judge": {"provider": "local", "persona": "あなたはむぎ。やわらかい口調で話す。"}
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(request.judge_persona, "あなたはむぎ。やわらかい口調で話す。");
+
+        let candidates = vec![
+            (
+                request.agents[0].clone(),
+                "担当A".to_string(),
+                Ok("回答A".to_string()),
+            ),
+            (
+                request.agents[1].clone(),
+                "担当B".to_string(),
+                Err("失敗".to_string()),
+            ),
+        ];
+        // 分担モードは前置きなしで候補をそのまま並べる。
+        assert!(fallback_candidates("", &candidates)
+            .trim_start()
+            .starts_with('【'));
+        // 全候補が失敗した場合は統合AIを呼んでいないので、統合の失敗として案内しない。
+        let failed = fallback_candidates(
+            "どの候補AIも回答を返せなかったため、それぞれの失敗理由を返します。",
+            &candidates,
+        );
+        assert!(failed.starts_with("どの候補AIも"));
+        assert!(!failed.contains("統合AIでまとめられなかった"));
     }
 
     #[test]
