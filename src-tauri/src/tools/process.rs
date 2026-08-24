@@ -219,10 +219,39 @@ pub fn terminate_tree_sync(child: &mut std::process::Child, label: &str) -> Resu
 
 /// `command()` で作ったコマンドをタイムアウト付きで実行する。
 /// `label` は失敗時のメッセージに使う日本語の処理名（例: 「画像変換」）。
-pub async fn output(
+pub async fn output(command: Command, timeout_secs: u64, label: &str) -> Result<Output, String> {
+    // 呼び出し元が停止要求との `select!` でこのfutureを破棄しても、実行本体は専用タスクに
+    // 残して中断通知を受け取らせる。`kill_on_drop` だけでは直下のラッパーしか止まらず、
+    // Codex／Claude CLIなどが起動した孫プロセスを残すため、必ず共通のツリー回収へ通す。
+    let (abandon_tx, abandon_rx) = tokio::sync::oneshot::channel();
+    let label_owned = label.to_string();
+    let worker = tokio::spawn(async move {
+        output_worker(command, timeout_secs, &label_owned, abandon_rx).await
+    });
+    let mut abandon = AbandonOutput(Some(abandon_tx));
+    let result = worker
+        .await
+        .map_err(|error| format!("{label}の実行タスクを回収できません: {error}"))?;
+    abandon.0.take();
+    result
+}
+
+/// `output()` の呼び出しfutureが破棄されたことを、子プロセスを所有する実行タスクへ伝える。
+struct AbandonOutput(Option<tokio::sync::oneshot::Sender<()>>);
+
+impl Drop for AbandonOutput {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+async fn output_worker(
     mut command: Command,
     timeout_secs: u64,
     label: &str,
+    mut abandon: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<Output, String> {
     let timeout = timeout_secs.clamp(1, MAX_TIMEOUT_SECS);
     let mut child = command
@@ -230,7 +259,20 @@ pub async fn output(
         .map_err(|error| format!("{label}を起動できません: {error}"))?;
     let stdout_task = tokio::spawn(read_capture(child.stdout.take()));
     let stderr_task = tokio::spawn(read_capture(child.stderr.take()));
-    let status = match tokio::time::timeout(Duration::from_secs(timeout), child.wait()).await {
+    let waited = tokio::select! {
+        biased;
+        _ = &mut abandon => {
+            let cleanup_error = terminate_process_tree(&mut child, label).await.err();
+            stdout_task.abort();
+            stderr_task.abort();
+            return Err(match cleanup_error {
+                Some(error) => format!("{label}の中断後に子プロセスを回収できません: {error}"),
+                None => format!("{label}を中断しました。"),
+            });
+        }
+        waited = tokio::time::timeout(Duration::from_secs(timeout), child.wait()) => waited,
+    };
+    let status = match waited {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => return Err(format!("{label}の終了を待てません: {error}")),
         Err(_) => {
@@ -395,7 +437,7 @@ mod tests {
         });
     }
 
-    // タイムアウトで打ち切っても、kill_on_drop により子プロセスが残らないこと。
+    // タイムアウトで打ち切っても、プロセスツリーを回収して子孫を残さないこと。
     // シェル経由（孫プロセスあり）でも指定秒数で戻ること。孫がパイプを握っていると
     // 出力の終端が来ないため、回収を待つ実装では孫が終わるまで戻れなかった。
     #[cfg(unix)]
@@ -430,6 +472,75 @@ mod tests {
                 started.elapsed()
             );
         });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 呼び出しfutureを破棄しても孫プロセスまで回収する() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let marker = std::env::temp_dir().join(format!(
+                "picoagent-process-cancel-{}-{}.txt",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let escaped = marker.to_string_lossy().replace('\'', "''");
+            let script = format!(
+                "$child = Start-Process -FilePath 'ping.exe' -ArgumentList '-n','31','127.0.0.1' -PassThru -WindowStyle Hidden; \"$PID,$($child.Id)\" | Set-Content -Encoding ascii -LiteralPath '{escaped}'; Wait-Process -Id $child.Id"
+            );
+            let mut cmd = command("powershell.exe");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+            let running = tokio::spawn(output(cmd, 30, "破棄検査"));
+
+            for _ in 0..100 {
+                if marker.exists() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            let ids = std::fs::read_to_string(&marker)
+                .expect("親子PIDを書いた検査ファイルが作られること");
+            let ids = ids
+                .trim()
+                .split(',')
+                .map(|value| value.parse::<u32>().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(ids.len(), 2);
+
+            running.abort();
+            let _ = running.await;
+            let mut alive = ids.clone();
+            for _ in 0..120 {
+                alive.retain(|pid| windows_process_exists(*pid));
+                if alive.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            if !alive.is_empty() {
+                // テスト失敗でも、自分が起動してPIDを記録したツリーだけを回収する。
+                let _ = std::process::Command::new("taskkill.exe")
+                    .args(["/PID", &ids[0].to_string(), "/T", "/F"])
+                    .output();
+            }
+            let _ = std::fs::remove_file(&marker);
+            assert!(alive.is_empty(), "中断後も残った検査プロセス: {alive:?}");
+        });
+    }
+
+    #[cfg(windows)]
+    fn windows_process_exists(pid: u32) -> bool {
+        let filter = format!("PID eq {pid}");
+        let Ok(result) = std::process::Command::new("tasklist.exe")
+            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+            .output()
+        else {
+            return true;
+        };
+        String::from_utf8_lossy(&result.stdout).contains(&format!("\"{pid}\""))
     }
 }
 

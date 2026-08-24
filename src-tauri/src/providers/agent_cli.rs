@@ -11,7 +11,8 @@
 // 知らないツール名を返してきた場合も、実行せず通常の返答として扱う。
 //
 // 制約（重要）:
-// - CLI の起動に毎回1〜3秒かかる。常駐アプリの会話としては重い。
+// - CLI のプロセス起動は応答ごとに行う。同じ論理会話では明示セッションIDを再開するが、
+//   常駐プロセスにはせず、停止・失敗時に毎回回収する。
 // - 配布物の既定として使うと、利用者側に CLI の導入とログインを要求することになり、
 //   「Ollama も要らない」という前提と逆行する。**販売する構成での既定にはしない。**
 //
@@ -22,6 +23,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::sync::{Arc, Mutex};
 
 use super::{Provider, ProviderReg};
 use crate::config::Config;
@@ -37,11 +39,98 @@ const MAX_SYSTEM_CHARS: usize = 12_000;
 const MAX_TOOL_INSTRUCTION_CHARS: usize = 10_000;
 
 /// 対応している CLI の種類。
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Claude,
     Codex,
     Custom,
+}
+
+/// 1つの論理会話だけで共有するCLIセッション。CLIが作る永続セッションIDは設定ファイルへ
+/// 保存せず、このアプリ起動中だけ保持する。別会話・別候補へ同じ値を渡さない。
+#[derive(Clone, Default)]
+pub struct Session {
+    inner: Arc<Mutex<SessionState>>,
+}
+
+#[derive(Default)]
+struct SessionState {
+    kind: Option<Kind>,
+    id: Option<String>,
+    in_use: bool,
+}
+
+tokio::task_local! {
+    static ACTIVE_SESSION: Session;
+}
+
+impl Session {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// 指定した論理エージェントの実行中だけCLIセッションを有効にする。
+pub async fn with_session<F: std::future::Future>(session: Session, task: F) -> F::Output {
+    ACTIVE_SESSION.scope(session, task).await
+}
+
+/// 通常会話で設定変更・CLI切替を検出するための識別子。
+pub fn session_identity(cfg: &Config, model: &str) -> String {
+    let selected = kind_for_model(cfg, model);
+    format!(
+        "{:?}|{}|{}",
+        selected,
+        program_for_kind(cfg, selected),
+        cfg.get("PICOAGENT_AGENT_CLI_ARGS", "")
+    )
+}
+
+struct SessionUse {
+    session: Session,
+    resume_id: Option<String>,
+    committed: bool,
+}
+
+impl SessionUse {
+    fn begin(session: Session, selected: Kind) -> anyhow::Result<Self> {
+        let mut state = session.inner.lock().unwrap();
+        if state.in_use {
+            anyhow::bail!("同じCLIセッションが並列に呼ばれました。処理を分けて再実行してください。");
+        }
+        if state.kind != Some(selected) {
+            state.kind = Some(selected);
+            state.id = None;
+        }
+        state.in_use = true;
+        let resume_id = state.id.clone();
+        drop(state);
+        Ok(Self {
+            session,
+            resume_id,
+            committed: false,
+        })
+    }
+
+    fn commit(mut self, id: String) {
+        let mut state = self.session.inner.lock().unwrap();
+        state.id = Some(id);
+        state.in_use = false;
+        self.committed = true;
+    }
+}
+
+impl Drop for SessionUse {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let mut state = self.session.inner.lock().unwrap();
+        // 中断・解析失敗・CLI異常終了後のセッションは途中ターンを含む可能性がある。
+        // 次回へ無言で引き継がず、新しい明示セッションからやり直す。
+        state.id = None;
+        state.in_use = false;
+    }
 }
 
 fn kind(cfg: &Config) -> Kind {
@@ -90,7 +179,7 @@ fn program(cfg: &Config) -> String {
     program_for_kind(cfg, kind(cfg))
 }
 
-/// 非対話で1往復だけ実行するための引数。プロンプト本体はこの後ろへ足す。
+/// セッションを使わない非対話1往復の引数。プロンプト本体はこの後ろへ足す。
 fn lead_args_for_kind(cfg: &Config, selected: Kind) -> Vec<String> {
     // 追加引数も実行パスと同じく、設定した種類のCLIにだけ渡す。
     // 候補側で切り替えた別CLIへ、そのCLIが解釈できない引数を混ぜない。
@@ -137,6 +226,33 @@ fn lead_args_for_kind(cfg: &Config, selected: Kind) -> Vec<String> {
     }
 }
 
+fn session_args_for_kind(
+    cfg: &Config,
+    selected: Kind,
+    resume_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = lead_args_for_kind(cfg, selected);
+    match selected {
+        Kind::Claude => {
+            args.retain(|arg| arg != "--no-session-persistence");
+            args.extend(["--output-format".to_string(), "json".to_string()]);
+            if let Some(id) = resume_id {
+                args.extend(["--resume".to_string(), id.to_string()]);
+            }
+        }
+        Kind::Codex => {
+            args.retain(|arg| arg != "--ephemeral");
+            args.push("--json".to_string());
+            // Codexのexec共通オプションはresumeより前へ置く必要がある。
+            if let Some(id) = resume_id {
+                args.extend(["resume".to_string(), id.to_string()]);
+            }
+        }
+        Kind::Custom => {}
+    }
+    args
+}
+
 #[cfg(test)]
 fn lead_args(cfg: &Config) -> Vec<String> {
     lead_args_for_kind(cfg, kind(cfg))
@@ -150,8 +266,8 @@ fn timeout_secs(cfg: &Config) -> u64 {
         .unwrap_or(180)
 }
 
-/// 会話を1つのプロンプト文字列へ畳む。CLI は1往復しか受け取れないため、
-/// 役割が分かるように明示のラベルを付ける。長すぎる場合は**古い方から**落とす。
+/// 正規形会話をCLIの1ターン用プロンプトへ畳む。初回またはセッション非対応CLIでは
+/// 履歴全体、明示セッション再開時は必要な差分を渡す。長すぎる場合は**古い方から**落とす。
 fn truncate_keep_edges(text: &str, limit: usize) -> String {
     let count = text.chars().count();
     if count <= limit {
@@ -231,6 +347,85 @@ fn flatten(messages: &[Message], limit: usize) -> String {
         (false, true) => system,
         _ => recent,
     }
+}
+
+/// 再開済みCLIは以前のassistant発話まで知っている。通常会話とツールループでは、
+/// 最後のassistantより後ろだけを送り、履歴全文を二重投入しない。分担計画→統合のように
+/// 独立したメッセージ列にはassistantが無いため、その指示全体を次ターンとして送る。
+fn flatten_for_resume(messages: &[Message], limit: usize) -> String {
+    let start = messages
+        .iter()
+        .rposition(|message| message.role == "assistant")
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    flatten(&messages[start..], limit)
+}
+
+fn parse_claude_session_output(text: &str) -> Result<(String, String), String> {
+    let value: Value = serde_json::from_str(text.trim())
+        .map_err(|error| format!("Claude CLIのJSON応答を読めません: {error}"))?;
+    if value.get("is_error").and_then(Value::as_bool) == Some(true) {
+        return Err(value
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("Claude CLIがエラーを返しました。")
+            .to_string());
+    }
+    let content = value
+        .get("result")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let session_id = value
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if content.is_empty() || session_id.is_empty() {
+        return Err("Claude CLIのJSON応答に本文またはsession_idがありません。".to_string());
+    }
+    Ok((content, session_id))
+}
+
+fn parse_codex_session_output(text: &str) -> Result<(String, String), String> {
+    let mut session_id = String::new();
+    let mut content = String::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line)
+            .map_err(|error| format!("Codex CLIのJSONL応答を読めません: {error}"))?;
+        match value.get("type").and_then(Value::as_str) {
+            Some("thread.started") => {
+                session_id = value
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+            }
+            Some("item.completed")
+                if value
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("agent_message") =>
+            {
+                content = value
+                    .get("item")
+                    .and_then(|item| item.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+            }
+            _ => {}
+        }
+    }
+    if content.is_empty() || session_id.is_empty() {
+        return Err("Codex CLIのJSONL応答に最終本文またはthread_idがありません。".to_string());
+    }
+    Ok((content, session_id))
 }
 
 /// 使えるスキルの一覧と、ツールを使うときの返し方を伝える指示文を作る。
@@ -383,12 +578,28 @@ impl Provider for AgentCli {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
+        let selected = kind_for_model(cfg, model);
+        let session = ACTIVE_SESSION.try_with(Clone::clone).ok();
+        // custom CLIは応答形式もセッション引数も分からないため、従来どおり1往復に限定する。
+        let mut session_use = if selected == Kind::Custom {
+            None
+        } else {
+            session.map(|session| SessionUse::begin(session, selected)).transpose()?
+        };
         let instructions = tool_instructions(tools);
         let instruction_chars = instructions.chars().count();
         let conversation_limit = MAX_PROMPT_CHARS
             .saturating_sub(instruction_chars.saturating_add(2))
             .max(1_000);
-        let mut prompt = flatten(messages, conversation_limit);
+        let mut prompt = if session_use
+            .as_ref()
+            .and_then(|session| session.resume_id.as_ref())
+            .is_some()
+        {
+            flatten_for_resume(messages, conversation_limit)
+        } else {
+            flatten(messages, conversation_limit)
+        };
         if !instructions.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(&instructions);
@@ -396,10 +607,17 @@ impl Provider for AgentCli {
         if prompt.trim().is_empty() {
             anyhow::bail!("CLI へ渡す内容がありません。");
         }
-        let selected = kind_for_model(cfg, model);
         let program = program_for_kind(cfg, selected);
         let mut command = crate::tools::process::command(&program);
-        command.args(lead_args_for_kind(cfg, selected));
+        if let Some(session) = &session_use {
+            command.args(session_args_for_kind(
+                cfg,
+                selected,
+                session.resume_id.as_deref(),
+            ));
+        } else {
+            command.args(lead_args_for_kind(cfg, selected));
+        }
         // プロンプトは引数として渡す。シェルを経由しないので解釈の事故が起きない。
         command.arg(&prompt);
 
@@ -415,7 +633,44 @@ impl Provider for AgentCli {
                 stderr.trim().chars().take(500).collect::<String>()
             );
         }
-        let content = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let content = match selected {
+            Kind::Claude if session_use.is_some() => {
+                let (content, returned_id) =
+                    parse_claude_session_output(&raw).map_err(anyhow::Error::msg)?;
+                if let Some(requested) = session_use
+                    .as_ref()
+                    .and_then(|session| session.resume_id.as_deref())
+                {
+                    if requested != returned_id {
+                        anyhow::bail!(
+                            "Claude CLIが指定したセッションを再開せず、別のsession_idを返しました。"
+                        );
+                    }
+                }
+                session_use.take().unwrap().commit(returned_id);
+                content
+            }
+            Kind::Codex if session_use.is_some() => {
+                let (content, returned_id) =
+                    parse_codex_session_output(&raw).map_err(anyhow::Error::msg)?;
+                if let Some(requested) = session_use
+                    .as_ref()
+                    .and_then(|session| session.resume_id.as_deref())
+                {
+                    // Codexは存在しないIDを渡すと成功扱いで新規threadを作る版がある。
+                    // ID一致を必須にし、無言で文脈を失ったまま続行しない。
+                    if requested != returned_id {
+                        anyhow::bail!(
+                            "Codex CLIが指定したセッションを再開せず、別のthread_idを返しました。"
+                        );
+                    }
+                }
+                session_use.take().unwrap().commit(returned_id);
+                content
+            }
+            _ => raw,
+        };
         if content.is_empty() {
             anyhow::bail!("CLI エージェントが空の応答を返しました（ログインが済んでいるか確認してください）。");
         }
@@ -433,8 +688,10 @@ inventory::submit! { ProviderReg { make: || Box::new(AgentCli) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        flatten, kind, kind_for_model, lead_args, lead_args_for_kind, parse_tool_call, program,
-        program_for_kind, timeout_secs, tool_instructions, Kind, MAX_PROMPT_CHARS,
+        flatten, flatten_for_resume, kind, kind_for_model, lead_args, lead_args_for_kind,
+        parse_claude_session_output, parse_codex_session_output, parse_tool_call, program,
+        program_for_kind, session_args_for_kind, timeout_secs, tool_instructions, Kind,
+        Session, SessionUse, MAX_PROMPT_CHARS,
     };
     use crate::config::Config;
     use crate::message::Message;
@@ -458,6 +715,70 @@ mod tests {
         assert!(codex_args.iter().any(|arg| arg == "--ignore-user-config"));
         assert!(matches!(kind_for_model(&cfg, "codex"), Kind::Codex));
         assert!(matches!(kind_for_model(&codex, "claude"), Kind::Claude));
+    }
+
+    #[test]
+    fn セッション利用時だけ永続化と明示id再開を有効にする() {
+        let claude = Config::new();
+        let first = session_args_for_kind(&claude, Kind::Claude, None);
+        assert!(!first.iter().any(|arg| arg == "--no-session-persistence"));
+        assert!(first.windows(2).any(|pair| pair == ["--output-format", "json"]));
+        let resumed = session_args_for_kind(&claude, Kind::Claude, Some("claude-session"));
+        assert!(resumed
+            .windows(2)
+            .any(|pair| pair == ["--resume", "claude-session"]));
+
+        let codex = Config::new();
+        codex.set("PICOAGENT_AGENT_CLI_KIND", "codex");
+        let first = session_args_for_kind(&codex, Kind::Codex, None);
+        assert!(!first.iter().any(|arg| arg == "--ephemeral"));
+        assert!(first.iter().any(|arg| arg == "--json"));
+        let resumed = session_args_for_kind(&codex, Kind::Codex, Some("codex-thread"));
+        assert!(resumed
+            .windows(2)
+            .any(|pair| pair == ["resume", "codex-thread"]));
+        let resume_index = resumed.iter().position(|arg| arg == "resume").unwrap();
+        assert!(resumed[..resume_index]
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "read-only"]));
+    }
+
+    #[test]
+    fn cliの構造化出力から本文と明示セッションidを取る() {
+        let (content, id) = parse_claude_session_output(
+            r#"{"type":"result","is_error":false,"result":"回答","session_id":"claude-1"}"#,
+        )
+        .unwrap();
+        assert_eq!((content.as_str(), id.as_str()), ("回答", "claude-1"));
+
+        let codex = "{\"type\":\"thread.started\",\"thread_id\":\"codex-1\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"途中\"}}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"最終回答\"}}";
+        let (content, id) = parse_codex_session_output(codex).unwrap();
+        assert_eq!((content.as_str(), id.as_str()), ("最終回答", "codex-1"));
+    }
+
+    #[test]
+    fn 再開時は最後のassistant以後だけを送る() {
+        let messages = vec![
+            Message::new("system", "人格"),
+            Message::new("user", "最初"),
+            Message::new("assistant", "前の回答"),
+            Message::new("user", "続き"),
+        ];
+        let prompt = flatten_for_resume(&messages, MAX_PROMPT_CHARS);
+        assert_eq!(prompt, "［ユーザー］\n続き");
+    }
+
+    #[test]
+    fn 中断または失敗したcliセッションは次回へ引き継がない() {
+        let session = Session::new();
+        SessionUse::begin(session.clone(), Kind::Claude)
+            .unwrap()
+            .commit("session-1".to_string());
+        let resumed = SessionUse::begin(session.clone(), Kind::Claude).unwrap();
+        assert_eq!(resumed.resume_id.as_deref(), Some("session-1"));
+        drop(resumed); // commitせず終了＝中断・解析失敗
+        let fresh = SessionUse::begin(session, Kind::Claude).unwrap();
+        assert!(fresh.resume_id.is_none());
     }
 
     #[test]

@@ -1762,14 +1762,20 @@ if (process.env.SHOOT_DEBUG_BOOT) {
 
 if (process.env.SHOOT_DEBUG_ONBOARDING) {
   const page = await openScene({ width: 680, height: 430, onboardingDone: false });
-  await page.locator('button[data-mode="both"]').click();
   await page.waitForSelector("#onboardingComponentStep:not([hidden])");
   await page.waitForTimeout(300);
   const debugDir = join(ROOT, "temp", "onboarding-check");
   mkdirSync(debugDir, { recursive: true });
   await page.screenshot({ path: join(debugDir, "components.png"), omitBackground: true });
+  await page.locator('button[data-onboarding-action="skip-components"]').click();
+  await page.waitForSelector("#onboardingCharacterStep:not([hidden])");
+  await page.screenshot({ path: join(debugDir, "live2d-guide.png"), omitBackground: true });
   await page.close();
-  console.log(`  初回追加機能確認: ${join(debugDir, "components.png")}`);
+  console.log(`  初回案内確認: ${join(debugDir, "components.png")} / ${join(debugDir, "live2d-guide.png")}`);
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  process.exit(0);
 }
 
 const wantsLive2d = (!only.length || only.some(name => name.startsWith("live2d-")))

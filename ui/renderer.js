@@ -40,7 +40,6 @@ const relationshipClear = document.getElementById("relationshipClear");
 const variantRow = document.getElementById("variantRow");
 const variantSelect = document.getElementById("variantSelect");
 const onboarding = document.getElementById("onboarding");
-const onboardingPurposeStep = document.getElementById("onboardingPurposeStep");
 const onboardingComponentStep = document.getElementById("onboardingComponentStep");
 const onboardingCharacterStep = document.getElementById("onboardingCharacterStep");
 const onboardingComponentStatus = document.getElementById("onboardingComponentStatus");
@@ -5042,7 +5041,7 @@ function startAlarmPolling() {
   if (!info.onboardingDone && onboarding) {
     onboarding.hidden = false;
     stopVoice();
-    onboarding.querySelector("button[data-mode]")?.focus();
+    showOnboardingStep("components");
   } else {
     scheduleContinuousListening();
   }
@@ -5058,19 +5057,15 @@ function startAlarmPolling() {
   });
 });
 
-let selectedOnboardingMode = "";
-
 function showOnboardingStep(step) {
   const components = step === "components";
   const character = step === "character";
-  if (onboardingPurposeStep) onboardingPurposeStep.hidden = components || character;
   if (onboardingComponentStep) onboardingComponentStep.hidden = !components;
   if (onboardingCharacterStep) onboardingCharacterStep.hidden = !character;
-  const title = character ? "onboardingCharacterTitle" : (components ? "onboardingComponentTitle" : "onboardingTitle");
+  const title = character ? "onboardingCharacterTitle" : "onboardingComponentTitle";
   onboarding?.setAttribute("aria-labelledby", title);
   const focusTarget = character ? onboardingCharacterStep?.querySelector("button[data-onboarding-action]")
-    : components ? onboardingComponentStep?.querySelector("input:not([disabled]),button[data-onboarding-action]")
-      : onboardingPurposeStep?.querySelector("button[data-mode]");
+    : onboardingComponentStep?.querySelector("input:not([disabled]),button[data-onboarding-action]");
   focusTarget?.focus();
   if (components) refreshOnboardingComponents();
 }
@@ -5149,7 +5144,9 @@ async function installSelectedOnboardingComponents() {
   onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = true; });
   if (onboardingComponentStatus) onboardingComponentStatus.textContent = "選んだ追加機能を準備しています…";
   try {
-    await window.picoagent.settings.installComponents(ids);
+    // 初回画面で「音声読み上げ」を明示選択した場合だけ、導入成功後に読み上げも有効にする。
+    // 設定画面からの単なる導入・更新では、既存のON/OFFを勝手に変えない。
+    await window.picoagent.settings.installComponents(ids, ids.includes("aivis"));
     if (onboardingComponentStatus) onboardingComponentStatus.textContent = "準備できました。";
     showOnboardingStep("character");
   } catch (error) {
@@ -5165,7 +5162,7 @@ async function installSelectedOnboardingComponents() {
 async function completeSelectedOnboarding(openCharacterSettings) {
   onboarding.querySelectorAll("button").forEach(item => { item.disabled = true; });
   try {
-    const result = await window.picoagent.completeOnboarding(selectedOnboardingMode || "both");
+    const result = await window.picoagent.completeOnboarding();
     renderRelationship(result);
     onboarding.hidden = true;
     setAnimation("success", true);
@@ -5190,17 +5187,9 @@ async function completeSelectedOnboarding(openCharacterSettings) {
 
 onboarding?.addEventListener("click", async event => {
   const target = event.target instanceof Element ? event.target : null;
-  const modeButton = target?.closest("button[data-mode]");
-  if (modeButton) {
-    selectedOnboardingMode = modeButton.dataset.mode || "both";
-    showOnboardingStep("components");
-    return;
-  }
   const actionButton = target?.closest("button[data-onboarding-action]");
   const action = actionButton?.dataset.onboardingAction;
-  if (action === "back-purpose") {
-    showOnboardingStep("purpose");
-  } else if (action === "back-components") {
+  if (action === "back-components") {
     showOnboardingStep("components");
   } else if (action === "install-components") {
     await installSelectedOnboardingComponents();
@@ -5228,9 +5217,8 @@ onboarding?.addEventListener("keydown", event => {
   }
 });
 window.picoagent.listen("pet:show-onboarding", () => {
-  selectedOnboardingMode = "";
   onboarding?.querySelectorAll("button").forEach(item => { item.disabled = false; });
-  showOnboardingStep("purpose");
+  showOnboardingStep("components");
   if (onboarding) onboarding.hidden = false;
   stopVoice();
 }).catch(error => {

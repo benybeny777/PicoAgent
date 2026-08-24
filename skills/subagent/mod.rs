@@ -78,6 +78,22 @@ async fn cancel_while<T>(
     }
 }
 
+async fn provider_chat(
+    provider: &dyn providers::Provider,
+    cfg: &Config,
+    model: &str,
+    messages: &[Message],
+    session: Option<&crate::providers::agent_cli::Session>,
+) -> anyhow::Result<Message> {
+    let task = provider.chat(cfg, model, messages, &[]);
+    match session {
+        Some(session) if provider.id() == "agent_cli" => {
+            crate::providers::agent_cli::with_session(session.clone(), task).await
+        }
+        _ => task.await,
+    }
+}
+
 fn str_arg(args: &Value, key: &str) -> String {
     args.get(key)
         .and_then(Value::as_str)
@@ -265,7 +281,7 @@ async fn run_candidate(
     } else {
         None
     };
-    let result = agent::run(
+    let execution = agent::run(
         cfg,
         provider,
         &model,
@@ -273,8 +289,18 @@ async fn run_candidate(
         ctx.steps,
         None,
         ctx.cancel.as_deref(),
-    )
-    .await
+    );
+    // 各候補は互いの文脈を見せない。候補内のツール往復だけは同じCLIセッションを使う。
+    let result = if provider.id() == "agent_cli" {
+        crate::providers::agent_cli::with_session(
+            crate::providers::agent_cli::Session::new(),
+            execution,
+        )
+        .await
+    } else {
+        execution.await
+    };
+    let result = result
         .map_err(|error| error.to_string())
         .and_then(|answer| {
             let answer = answer.trim().to_string();
@@ -319,6 +345,7 @@ async fn merge_candidates(
     request: &MultiRequest,
     candidates: &[(AiSelection, String, Result<String, String>)],
     cancel: &Option<Arc<AtomicBool>>,
+    judge_session: Option<&crate::providers::agent_cli::Session>,
 ) -> Result<(AiSelection, String), String> {
     let provider = providers::get(&request.judge.provider).ok_or_else(|| {
         format!(
@@ -348,7 +375,10 @@ async fn merge_candidates(
         Message::new("system", system),
         Message::new("user", candidates_for_judge(&request.task, candidates)),
     ];
-    let response = cancel_while(provider.chat(cfg, &model, &messages, &[]), cancel)
+    let response = cancel_while(
+        provider_chat(provider, cfg, &model, &messages, judge_session),
+        cancel,
+    )
         .await
         .ok_or_else(|| agent::cancel_message().to_string())?
         .map_err(|error| error.to_string())?;
@@ -400,6 +430,7 @@ async fn assigned_tasks(
     cfg: &Config,
     request: &MultiRequest,
     cancel: &Option<Arc<AtomicBool>>,
+    judge_session: Option<&crate::providers::agent_cli::Session>,
 ) -> Result<Vec<String>, String> {
     if request.mode != "collaborate" && request.mode != "divide" {
         return Ok(vec![request.task.clone(); request.agents.len()]);
@@ -456,7 +487,10 @@ async fn assigned_tasks(
             ),
         ),
     ];
-    let response = cancel_while(provider.chat(cfg, &model, &messages, &[]), cancel)
+    let response = cancel_while(
+        provider_chat(provider, cfg, &model, &messages, judge_session),
+        cancel,
+    )
         .await
         .ok_or_else(|| agent::cancel_message().to_string())?
         .map_err(|error| format!("分担計画AIの呼び出しに失敗しました: {error}"))?;
@@ -611,7 +645,7 @@ impl Tool for SubagentTool {
                     Message::new("system", system_prompt(&context)),
                     Message::new("user", task),
                 ];
-                return match agent::run(
+                let task = agent::run(
                     cfg,
                     provider,
                     &model,
@@ -619,9 +653,17 @@ impl Tool for SubagentTool {
                     steps,
                     None,
                     cancel.as_deref(),
-                )
-                .await
-                {
+                );
+                let result = if provider.id() == "agent_cli" {
+                    crate::providers::agent_cli::with_session(
+                        crate::providers::agent_cli::Session::new(),
+                        task,
+                    )
+                    .await
+                } else {
+                    task.await
+                };
+                return match result {
                     Ok(result) if !result.trim().is_empty() => {
                         format!("【サブエージェントの結果】\n{}", result.trim())
                     }
@@ -635,7 +677,11 @@ impl Tool for SubagentTool {
         if cancelled(&cancel) {
             return agent::cancel_message().to_string();
         }
-        let tasks = match assigned_tasks(cfg, &request, &cancel).await {
+        // 分担計画と最終統合が同じCLIなら、この1依頼の間だけ同じ明示セッションを使う。
+        // 候補AIは別Sessionなので、計画・候補・別依頼の文脈は混ざらない。
+        let judge_session = (request.judge.provider == "agent_cli")
+            .then(crate::providers::agent_cli::Session::new);
+        let tasks = match assigned_tasks(cfg, &request, &cancel, judge_session.as_ref()).await {
             Ok(tasks) => tasks,
             Err(error) => return error,
         };
@@ -695,7 +741,14 @@ impl Tool for SubagentTool {
                 successful
             );
         }
-        let merged = merge_candidates(cfg, &request, &candidates, &cancel).await;
+        let merged = merge_candidates(
+            cfg,
+            &request,
+            &candidates,
+            &cancel,
+            judge_session.as_ref(),
+        )
+        .await;
         if cancelled(&cancel) {
             return agent::cancel_message().to_string();
         }
