@@ -361,9 +361,17 @@ fn flatten_for_resume(messages: &[Message], limit: usize) -> String {
     flatten(&messages[start..], limit)
 }
 
+/// CLIは更新案内やログイン案内を本文の前後へ混ぜることがある。1行ずつ試して
+/// **JSONとして読めた行だけ**を応答として扱い、案内文でターンごと失敗させない。
+fn first_json_value(text: &str) -> Option<Value> {
+    serde_json::from_str::<Value>(text.trim())
+        .ok()
+        .or_else(|| text.lines().find_map(|line| serde_json::from_str(line.trim()).ok()))
+}
+
 fn parse_claude_session_output(text: &str) -> Result<(String, String), String> {
-    let value: Value = serde_json::from_str(text.trim())
-        .map_err(|error| format!("Claude CLIのJSON応答を読めません: {error}"))?;
+    let value = first_json_value(text)
+        .ok_or_else(|| "Claude CLIのJSON応答を読めません。".to_string())?;
     if value.get("is_error").and_then(Value::as_bool) == Some(true) {
         return Err(value
             .get("result")
@@ -393,8 +401,11 @@ fn parse_codex_session_output(text: &str) -> Result<(String, String), String> {
     let mut session_id = String::new();
     let mut content = String::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        let value: Value = serde_json::from_str(line)
-            .map_err(|error| format!("Codex CLIのJSONL応答を読めません: {error}"))?;
+        // JSONL以外の案内行（更新通知・キャッシュ警告など）は読み飛ばす。
+        // 必要な `thread.started` と本文が取れなければ、最後にまとめて失敗させる。
+        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
         match value.get("type").and_then(Value::as_str) {
             Some("thread.started") => {
                 session_id = value
@@ -596,7 +607,15 @@ impl Provider for AgentCli {
             .and_then(|session| session.resume_id.as_ref())
             .is_some()
         {
-            flatten_for_resume(messages, conversation_limit)
+            // 自己評価の再生成のように、末尾がassistantのまま呼ばれると差分が空になる。
+            // そのまま空プロンプトで失敗させるとセッションIDまで破棄され、次ターンの
+            // 会話継続が黙って切れるため、この呼び出しだけ会話全文へ戻す。
+            let diff = flatten_for_resume(messages, conversation_limit);
+            if diff.trim().is_empty() {
+                flatten(messages, conversation_limit)
+            } else {
+                diff
+            }
         } else {
             flatten(messages, conversation_limit)
         };
@@ -695,6 +714,44 @@ mod tests {
     };
     use crate::config::Config;
     use crate::message::Message;
+
+    #[test]
+    fn 再開時の差分が空になる会話では全文へ戻す() {
+        // 自己評価の再生成は末尾がassistantのまま呼ばれるため、差分は空になる。
+        // 空のまま送るとCLI呼び出しが失敗し、SessionUseのDropでセッションIDまで消える。
+        let messages = [
+            Message::new("system", "人格"),
+            Message::new("user", "質問"),
+            Message::new("assistant", "短い回答"),
+        ];
+        assert!(flatten_for_resume(&messages, 1_000).trim().is_empty());
+        assert!(!flatten(&messages, 1_000).trim().is_empty());
+        // 末尾がuserなら従来どおり差分だけを送る。
+        let next = [
+            Message::new("user", "前の質問"),
+            Message::new("assistant", "前の回答"),
+            Message::new("user", "次の質問"),
+        ];
+        let diff = flatten_for_resume(&next, 1_000);
+        assert!(diff.contains("次の質問"));
+        assert!(!diff.contains("前の質問"));
+    }
+
+    #[test]
+    fn cliの案内行が混ざってもjson応答を読み取る() {
+        let claude = parse_claude_session_output(
+            "新しいバージョンがあります\n{\"result\":\"7\",\"session_id\":\"abc\"}",
+        )
+        .unwrap();
+        assert_eq!(claude, ("7".to_string(), "abc".to_string()));
+
+        let codex = parse_codex_session_output(
+            "モデルキャッシュを読み込めませんでした\n{\"type\":\"thread.started\",\"thread_id\":\"xyz\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"7\"}}",
+        )
+        .unwrap();
+        assert_eq!(codex.1, "xyz");
+        assert_eq!(codex.0, "7");
+    }
 
     #[test]
     fn 種類ごとに既定の実行ファイルと引数が変わる() {

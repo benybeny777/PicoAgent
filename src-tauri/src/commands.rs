@@ -479,8 +479,11 @@ async fn run_agent_and_persist(
     // 止められるよう、中断フラグをタスクローカルへ載せて配下へ伝播させる。
     let run = async {
         let cli_session = if provider.id() == "agent_cli" {
+            // 会話のsystemはリクエストごとに検索連動の長期メモリとプロジェクト文脈で
+            // 書き換わるため、それを鍵にすると毎ターン別セッション扱いになり再開が働かず、
+            // 明示IDのCLIセッションを1ターンごとに残す。人格・設定など安定した要素だけで作る。
             let mut prompt_hash = Sha256::new();
-            prompt_hash.update(agent::system_prompt_of(convo).as_bytes());
+            prompt_hash.update(stable_persona_prompt(state).as_bytes());
             let key = format!(
                 "{character_id}|{epoch}|{}|{}",
                 crate::providers::agent_cli::session_identity(&state.config, model),
@@ -557,7 +560,7 @@ fn resolved_judge_model(
 /// 統合AIへ渡すのは回答の口調に必要な基本指示とキャラクター設定だけにする。
 /// 会話中の system には長期メモリやプロジェクト文脈も差し込まれるため、その全文を
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
-fn multi_ai_judge_persona(state: &AppState) -> String {
+fn stable_persona_prompt(state: &AppState) -> String {
     let mut persona = effective_system_prompt(&state.config);
     let character_profile = state.character_profile.lock().unwrap().clone();
     if !character_profile.is_empty() {
@@ -623,7 +626,7 @@ fn configured_multi_ai_args(
             "model": judge_model,
             // 統合結果はキャラクターの発話としてそのまま表示・読み上げされる。
             // 候補AIは作業担当なので素の文体でよいが、統合AIには人格設定を渡す。
-            "persona": multi_ai_judge_persona(state),
+            "persona": stable_persona_prompt(state),
         }
     })))
 }
@@ -1014,6 +1017,16 @@ pub async fn settings_components_install(
             );
             format!("Aivisは導入できましたが、音声読み上げを有効にできませんでした: {error:#}")
         })?;
+        // 画面側は `ttsEnabled` をキャッシュしており、通知しないと初回起動時の false のまま
+        // ストリーム読み上げを抑止し続ける。設定保存経路と同じく即座に知らせる。
+        if let Some(win) = app.get_webview_window("main") {
+            if let Err(error) = win.emit("pet:ui", json!({ "ttsEnabled": true })) {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("読み上げ有効化をメイン画面へ反映できません: {error}"),
+                );
+            }
+        }
     }
     serde_json::to_value(installed).map_err(|error| error.to_string())
 }
@@ -4564,11 +4577,12 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         centered_window_position, compacted_conversation, default_character_tts_voice,
-        enable_tts_after_component_install, multi_ai_context, multi_ai_judge_persona,
-        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
-        resolved_judge_model, settings_tab, speech_text, update_series_is_newer, update_status,
-        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
-        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        enable_tts_after_component_install, multi_ai_context, parse_update_feed,
+        preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
+        resolved_judge_model, settings_tab, speech_text, stable_persona_prompt,
+        update_series_is_newer, update_status, validate_multi_ai_settings,
+        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        MAX_UPDATE_FEED_BYTES,
     };
     use crate::config::Config;
     use crate::message::Message;
@@ -4684,7 +4698,7 @@ mod tests {
             "[プロジェクト文脈]\n外へ重ねて渡さない課題\n[/プロジェクト文脈]",
         ));
 
-        let persona = multi_ai_judge_persona(&state);
+        let persona = stable_persona_prompt(&state);
         assert!(persona.contains("むぎとして柔らかく話す。"));
         assert!(!persona.contains("外へ重ねて渡さない長期メモリ"));
         assert!(!persona.contains("外へ重ねて渡さない課題"));
