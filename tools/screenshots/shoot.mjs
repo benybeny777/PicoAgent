@@ -1802,10 +1802,12 @@ for (const [name, missing] of skipped) {
 }
 if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
   const galleryFiles = [...SITE_GALLERY_FILES];
-  const bytes = (await Promise.all(galleryFiles.map(name => readFile(join(SITE_OUT, name)))))
+  // 容量検査は実際の出力先を見る。SHOOT_OUTPUT_DIR 指定時に既定の出力先を読むと、
+  // 今回書いていない古いファイルを検査するか、未生成でENOENTになる。
+  const bytes = (await Promise.all(galleryFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
   const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-noa.webp", "character-photoreal-prototype.webp"];
-  const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(SITE_OUT, name)))))
+  const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
   if (bytes > 15_000_000 || indexBytes > 5_000_000) {
     throw new Error(`LP画像容量が上限を超えています: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
@@ -1815,7 +1817,7 @@ if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
 if (README_GALLERY && !only.length && !failed && !skipped.length) {
   const sizes = await Promise.all([...README_GALLERY_FILES].map(async name => ({
     name,
-    size: (await readFile(join(OUT, name))).length,
+    size: (await readFile(join(CUSTOM_OUT || OUT, name))).length,
   })));
   const total = sizes.reduce((sum, item) => sum + item.size, 0);
   const largest = sizes.reduce((left, right) => left.size >= right.size ? left : right);
