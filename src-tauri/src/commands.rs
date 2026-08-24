@@ -536,16 +536,12 @@ fn configured_multi_ai_args(
         "divide" => "divide",
         _ => return Ok(None),
     };
-    // マルチAIはPro対象の `subagent` を通る。ライセンスが切れた状態でそのまま呼ぶと
-    // 会話のたびにライセンスエラーだけが返り、相棒が何も答えられなくなる。
-    // 設定画面では Pro でなければ有効にできないため、ここは期限切れの救済として
-    // 単一AIへ戻し、理由をアプリログへ残す。
+    // マルチAIはPro対象の `subagent` を通る。ライセンス失効をログだけで単一AIへ
+    // 降格すると、利用者は合議・分担が動いたと誤認するため、画面へ理由を返して止める。
     if !crate::license::is_pro(&state.config) {
-        crate::log_paths::append_app_log(
-            app,
-            "マルチAIには PicoAgent Pro のライセンスが必要です。今回は単一AIで応答しました。",
-        );
-        return Ok(None);
+        let message = "マルチAIには PicoAgent Pro のライセンスが必要です。設定の「製品情報・ライセンス」を確認するか、回答の作り方を「単一AI」へ戻してください。";
+        crate::log_paths::append_app_log(app, message);
+        return Err(message.to_string());
     }
     let raw = state.config.get("PICOAGENT_MULTI_AI_AGENTS", "[]");
     let agents: Value = serde_json::from_str(&raw)
@@ -2481,6 +2477,11 @@ fn validate_multi_ai_settings(cfg: &Config, patch: &Map<String, Value>) -> Resul
             "複数AIの合議・分担は PicoAgent Pro の機能です。設定の「製品情報・ライセンス」でライセンスキーを登録してください。"
                 .to_string(),
         );
+    }
+    // 単一AIへ戻す操作は、古い参加AI設定が壊れている・プロバイダが削除済みでも
+    // 必ず保存できるようにする。非表示の複数AI項目で復旧操作を塞がない。
+    if mode == "single" {
+        return Ok(());
     }
     let raw = patch
         .get("PICOAGENT_MULTI_AI_AGENTS")
@@ -4615,6 +4616,12 @@ mod tests {
             serde_json::json!("single"),
         );
         single.insert("PICOAGENT_MULTI_AI_AGENTS".into(), serde_json::json!("[]"));
+        assert!(validate_multi_ai_settings(&Config::new(), &single).is_ok());
+        // 保存済みの参加AI設定が壊れていても、単一AIへ戻す復旧操作は塞がない。
+        single.insert(
+            "PICOAGENT_MULTI_AI_AGENTS".into(),
+            serde_json::json!("壊れたJSON"),
+        );
         assert!(validate_multi_ai_settings(&Config::new(), &single).is_ok());
 
         let mut consensus = serde_json::Map::new();

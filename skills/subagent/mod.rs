@@ -24,7 +24,6 @@ use crate::providers;
 pub struct SubagentTool;
 
 const MAX_AGENTS: usize = 8;
-const CANCELLED_REPLY: &str = "マルチAIの実行を中断しました。";
 const MAX_TEXT_CHARS: usize = 32_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +54,28 @@ fn cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
         .as_ref()
         .map(|flag| flag.load(Ordering::Relaxed))
         .unwrap_or(false)
+}
+
+async fn wait_for_cancel(cancel: Arc<AtomicBool>) {
+    while !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
+/// 分担計画・最終統合は `agent::run` を通らずプロバイダへ直接問い合わせるため、
+/// ここで停止要求と競合させる。停止時は通信futureを破棄し、CLIなら共通process層の
+/// `kill_on_drop`、HTTPならクライアントfutureのdropで処理を打ち切る。
+async fn cancel_while<T>(
+    future: impl std::future::Future<Output = T>,
+    cancel: &Option<Arc<AtomicBool>>,
+) -> Option<T> {
+    match cancel {
+        Some(flag) => tokio::select! {
+            result = future => Some(result),
+            _ = wait_for_cancel(Arc::clone(flag)) => None,
+        },
+        None => Some(future.await),
+    }
 }
 
 fn str_arg(args: &Value, key: &str) -> String {
@@ -297,6 +318,7 @@ async fn merge_candidates(
     cfg: &Config,
     request: &MultiRequest,
     candidates: &[(AiSelection, String, Result<String, String>)],
+    cancel: &Option<Arc<AtomicBool>>,
 ) -> Result<(AiSelection, String), String> {
     let provider = providers::get(&request.judge.provider).ok_or_else(|| {
         format!(
@@ -326,9 +348,9 @@ async fn merge_candidates(
         Message::new("system", system),
         Message::new("user", candidates_for_judge(&request.task, candidates)),
     ];
-    let response = provider
-        .chat(cfg, &model, &messages, &[])
+    let response = cancel_while(provider.chat(cfg, &model, &messages, &[]), cancel)
         .await
+        .ok_or_else(|| agent::cancel_message().to_string())?
         .map_err(|error| error.to_string())?;
     let answer = response.content.trim().to_string();
     if answer.is_empty() {
@@ -374,13 +396,20 @@ fn parse_planned_tasks(text: &str, expected: usize) -> Option<Vec<String>> {
     Some(tasks)
 }
 
-async fn assigned_tasks(cfg: &Config, request: &MultiRequest) -> Vec<String> {
+async fn assigned_tasks(
+    cfg: &Config,
+    request: &MultiRequest,
+    cancel: &Option<Arc<AtomicBool>>,
+) -> Result<Vec<String>, String> {
     if request.mode != "collaborate" && request.mode != "divide" {
-        return vec![request.task.clone(); request.agents.len()];
+        return Ok(vec![request.task.clone(); request.agents.len()]);
     }
-    let Some(provider) = providers::get(&request.judge.provider) else {
-        return vec![request.task.clone(); request.agents.len()];
-    };
+    let provider = providers::get(&request.judge.provider).ok_or_else(|| {
+        format!(
+            "分担計画用プロバイダ \"{}\" が見つかりません。",
+            request.judge.provider
+        )
+    })?;
     let model = if request.judge.model.is_empty() {
         provider.default_model(cfg)
     } else {
@@ -406,6 +435,11 @@ async fn assigned_tasks(cfg: &Config, request: &MultiRequest) -> Vec<String> {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let context = if request.context.is_empty() {
+        String::new()
+    } else {
+        format!("直前までの会話:\n{}\n\n", request.context)
+    };
     let messages = vec![
         Message::new(
             "system",
@@ -414,18 +448,22 @@ async fn assigned_tasks(cfg: &Config, request: &MultiRequest) -> Vec<String> {
         Message::new(
             "user",
             format!(
-                "元の依頼:\n{}\n\n担当AI:\n{}\n\n{}件へ分けてください。",
+                "{}元の依頼:\n{}\n\n担当AI:\n{}\n\n{}件へ分けてください。",
+                context,
                 request.task,
                 members,
                 request.agents.len()
             ),
         ),
     ];
-    match provider.chat(cfg, &model, &messages, &[]).await {
-        Ok(response) => parse_planned_tasks(&response.content, request.agents.len())
-            .unwrap_or_else(|| vec![request.task.clone(); request.agents.len()]),
-        Err(_) => vec![request.task.clone(); request.agents.len()],
-    }
+    let response = cancel_while(provider.chat(cfg, &model, &messages, &[]), cancel)
+        .await
+        .ok_or_else(|| agent::cancel_message().to_string())?
+        .map_err(|error| format!("分担計画AIの呼び出しに失敗しました: {error}"))?;
+    parse_planned_tasks(&response.content, request.agents.len()).ok_or_else(|| {
+        "分担計画AIの応答を指定件数のJSONタスクとして読めませんでした。候補AIは実行していません。"
+            .to_string()
+    })
 }
 
 #[async_trait]
@@ -595,11 +633,14 @@ impl Tool for SubagentTool {
         };
 
         if cancelled(&cancel) {
-            return CANCELLED_REPLY.to_string();
+            return agent::cancel_message().to_string();
         }
-        let tasks = assigned_tasks(cfg, &request).await;
+        let tasks = match assigned_tasks(cfg, &request, &cancel).await {
+            Ok(tasks) => tasks,
+            Err(error) => return error,
+        };
         if cancelled(&cancel) {
-            return CANCELLED_REPLY.to_string();
+            return agent::cancel_message().to_string();
         }
         let candidate_context = CandidateContext {
             cfg,
@@ -631,6 +672,10 @@ impl Tool for SubagentTool {
             .map(|(_, selection, task, result)| (selection, task, result))
             .collect::<Vec<_>>();
 
+        if cancelled(&cancel) {
+            return agent::cancel_message().to_string();
+        }
+
         let successful = candidates
             .iter()
             .filter(|(_, _, result)| result.is_ok())
@@ -650,14 +695,11 @@ impl Tool for SubagentTool {
                 successful
             );
         }
+        let merged = merge_candidates(cfg, &request, &candidates, &cancel).await;
         if cancelled(&cancel) {
-            return fallback_candidates(
-                "中断したため統合まで進めず、集まった候補回答を個別に返します。",
-                &candidates,
-            );
+            return agent::cancel_message().to_string();
         }
-
-        match merge_candidates(cfg, &request, &candidates).await {
+        match merged {
             Ok((judge, answer)) => format!(
                 "【マルチAI合議の統合結果】\n{}\n\n［候補{}件中{}件成功／統合: {}（{} / {}）］",
                 answer.trim(),
@@ -682,9 +724,11 @@ inventory::submit! { ToolReg { make: || Box::new(SubagentTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_candidates, parse_multi_request, AiSelection};
+    use super::{cancel_while, fallback_candidates, parse_multi_request, parse_planned_tasks, AiSelection};
     use crate::config::Config;
     use serde_json::json;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn 複数aiへ同じ質問と個別モデルを指定できる() {
@@ -781,5 +825,29 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("最大 8 件"));
+    }
+
+    #[test]
+    fn 分担計画は件数不一致や空タスクを受け付けない() {
+        assert_eq!(
+            parse_planned_tasks(r#"前置き {"tasks":["調査","実装"]} 後置き"#, 2),
+            Some(vec!["調査".to_string(), "実装".to_string()])
+        );
+        assert!(parse_planned_tasks(r#"{"tasks":["同じ依頼"]}"#, 2).is_none());
+        assert!(parse_planned_tasks(r#"{"tasks":["調査",""]}"#, 2).is_none());
+        assert!(parse_planned_tasks("JSONではない", 2).is_none());
+    }
+
+    #[tokio::test]
+    async fn 分担計画と統合の直接通信も停止要求で打ち切れる() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let request = Arc::clone(&flag);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            request.store(true, Ordering::Relaxed);
+        });
+        let cancel = Some(flag);
+        let result = cancel_while(std::future::pending::<()>(), &cancel).await;
+        assert!(result.is_none());
     }
 }

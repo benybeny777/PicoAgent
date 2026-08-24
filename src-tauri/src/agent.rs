@@ -829,6 +829,11 @@ async fn chat_with_retry(
 /// ユーザーが停止ボタンで中断を要求したときに返す一言。
 const CANCEL_MESSAGE: &str = "りょうかい、いまの処理は途中で止めたよ。";
 
+/// 画面側もこの文言で中断完了を判定するため、子エージェント経路も同じ文言を使う。
+pub fn cancel_message() -> &'static str {
+    CANCEL_MESSAGE
+}
+
 async fn wait_for_cancel(cancel: Option<&AtomicBool>) {
     match cancel {
         Some(cancel) => loop {
