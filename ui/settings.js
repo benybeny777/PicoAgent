@@ -2442,7 +2442,7 @@ function buildProductInfoSection() {
   ));
   productSec.append(el("p", {
     className: "hint",
-    textContent: "無料版は会話・天気・時刻などを利用できます。ProではPC操作、ファイル編集、Office・外部サービス・MCPなどの高度なスキルが有効になります。キーはWindowsのDPAPIで暗号化して保存します。Steam版は将来Steamworksの所有確認へ対応予定です。",
+    textContent: "無料版は会話・天気・時刻などを利用できます。ProではPC操作、ファイル編集、Office・外部サービス・MCPなどの高度なスキルが有効になります。キーはWindowsではDPAPIで暗号化、macOSではログインキーチェーンへ預けて保存します。Steam版は将来Steamworksの所有確認へ対応予定です。",
   }));
   return markSearchable(productSec, "製品 バージョン データ プライバシー ライセンス サポート 更新");
 }

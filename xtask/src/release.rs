@@ -27,20 +27,28 @@ pub fn manifest() -> Result<Value> {
     serde_json::from_str(&text).context("distribution/release.json が正しいJSONではありません")
 }
 
-/// 公開配布Gitへ置く最新版情報へ、実際のWindows NSISのサイズとSHA-256を書き込む。
+/// 更新フィードが扱う配布物の種類。
+struct Artifact {
+    /// `latest.json` の `platforms` に使う枠名。
+    platform: &'static str,
+    /// ログ表示用のOS名。
+    label: &'static str,
+}
+
+/// 公開配布Gitへ置く最新版情報へ、実際の配布物のサイズとSHA-256を書き込む。
+///
+/// Windows NSIS（`.exe`）とmacOSディスクイメージ（`.dmg`）を受け付ける。既存の
+/// `latest.json` が同じ版なら他OSの枠を残したまま該当枠だけを差し替えるので、
+/// OSごとに1回ずつ実行できる。版が変わった場合は前の版のURLを引き継がず枠を空にする。
 pub fn write_update_feed(args: &[String]) -> Result<()> {
     let installer = args
         .first()
         .map(std::path::PathBuf::from)
-        .context("使い方: cargo xtask update-feed <NSISインストーラ> [更新内容]")?;
+        .context("使い方: cargo xtask update-feed <配布物(.exe/.dmg)> [更新内容]")?;
     anyhow::ensure!(
         installer.is_file(),
-        "インストーラが見つかりません: {}",
+        "配布物が見つかりません: {}",
         installer.display()
-    );
-    anyhow::ensure!(
-        installer.extension().and_then(|ext| ext.to_str()) == Some("exe"),
-        "Windows NSISの.exeを指定してください"
     );
     let name = installer
         .file_name()
@@ -49,18 +57,105 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
             name.chars()
                 .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
         })
-        .context("インストーラ名が不正です")?;
+        .context("配布物のファイル名が不正です")?;
+    let artifact = classify_artifact(name)?;
     let version = package_version(&repo_root().join("src-tauri/Cargo.toml"))?;
     let size = fs::metadata(&installer)?.len();
     anyhow::ensure!(
         size > 0 && size <= MAX_UPDATE_INSTALLER_BYTES,
-        "インストーラのサイズが更新上限を超えています"
+        "配布物のサイズが更新上限を超えています"
     );
-    verify_windows_pe(&installer)?;
-    let mut file = fs::File::open(&installer)?;
+    if artifact.platform == "windows-x64" {
+        verify_windows_pe(&installer)?;
+    } else {
+        verify_macos_dmg(&installer)?;
+    }
+    let sha256 = file_sha256(&installer)?;
+    let destination = repo_root().join("distribution/site/latest.json");
+    let mut feed =
+        same_version_feed(&destination, &version).unwrap_or_else(|| empty_feed(&version));
+    if args.len() > 1 {
+        let notes = args[1..].join(" ");
+        anyhow::ensure!(
+            notes.len() <= MAX_UPDATE_NOTES_BYTES,
+            "更新内容が長すぎます"
+        );
+        feed["notes"] = Value::String(notes);
+    }
+    feed["platforms"][artifact.platform] = serde_json::json!({
+        "url": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/download/v{version}/{name}"),
+        "size": size,
+        "sha256": sha256
+    });
+    write_atomic(
+        &destination,
+        format!("{}\n", serde_json::to_string_pretty(&feed)?).as_bytes(),
+    )?;
+    log(
+        "update-feed",
+        format!("{} / {} bytes / SHA-256 {}", artifact.label, size, sha256),
+    );
+    Ok(())
+}
+
+/// ファイル名の拡張子とCPU種別から、書き込む `platforms` の枠を決める。
+fn classify_artifact(name: &str) -> Result<Artifact> {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".exe") {
+        return Ok(Artifact {
+            platform: "windows-x64",
+            label: "Windows x64",
+        });
+    }
+    if lower.ends_with(".dmg") {
+        // Tauri の macOS バンドル名は `<製品>_<版>_<aarch64|x64>.dmg`。
+        // Apple SiliconとIntelでは別バイナリなので、取り違えると起動できない配布物になる。
+        if lower.contains("aarch64") || lower.contains("arm64") {
+            return Ok(Artifact {
+                platform: "macos-arm64",
+                label: "macOS Apple Silicon",
+            });
+        }
+        if lower.contains("x64") || lower.contains("x86_64") {
+            return Ok(Artifact {
+                platform: "macos-x64",
+                label: "macOS Intel",
+            });
+        }
+        bail!("macOS DMGの名前にCPU種別（aarch64 / x64）が含まれていません: {name}");
+    }
+    bail!("対応していない配布物です。.exe または .dmg を指定してください: {name}")
+}
+
+/// 同じ版の既存フィードだけを引き継ぐ。版が変われば他OSの枠は前の版のURLなので破棄する。
+fn same_version_feed(path: &Path, version: &str) -> Option<Value> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    if !value.is_object() || !value.get("platforms")?.is_object() {
+        return None;
+    }
+    (value.get("version")?.as_str()? == version).then_some(value)
+}
+
+fn empty_feed(version: &str) -> Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "version": version,
+        "notes": format!("PicoAgent v{version}"),
+        "releasePage": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v{version}"),
+        "platforms": {
+            "windows-x64": { "url": "", "size": 0, "sha256": "" },
+            "macos-arm64": { "url": "", "size": 0, "sha256": "" },
+            "macos-x64": { "url": "", "size": 0, "sha256": "" },
+            "linux-x64": { "url": "", "size": 0, "sha256": "" }
+        }
+    })
+}
+
+fn file_sha256(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
     let mut digest = Sha256::new();
     // Windowsの既定スレッドスタックと同じ1MiBをローカル配列にすると、
-    // 実インストーラのハッシュ計算へ入る前にスタックオーバーフローする。
+    // 実配布物のハッシュ計算へ入る前にスタックオーバーフローする。
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
@@ -69,42 +164,7 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
         }
         digest.update(&buffer[..count]);
     }
-    let sha256 = hex::encode(digest.finalize());
-    let notes = if args.len() > 1 {
-        args[1..].join(" ")
-    } else {
-        format!("PicoAgent v{version}")
-    };
-    anyhow::ensure!(
-        notes.len() <= MAX_UPDATE_NOTES_BYTES,
-        "更新内容が長すぎます"
-    );
-    let feed = serde_json::json!({
-        "schemaVersion": 1,
-        "version": version,
-        "notes": notes,
-        "releasePage": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/tag/v{version}"),
-        "platforms": {
-            "windows-x64": {
-                "url": format!("https://github.com/benybeny777/PicoAgent-Distribution/releases/download/v{version}/{name}"),
-                "size": size,
-                "sha256": sha256
-            },
-            "macos-arm64": { "url": "", "size": 0, "sha256": "" },
-            "macos-x64": { "url": "", "size": 0, "sha256": "" },
-            "linux-x64": { "url": "", "size": 0, "sha256": "" }
-        }
-    });
-    let destination = repo_root().join("distribution/site/latest.json");
-    write_atomic(
-        &destination,
-        format!("{}\n", serde_json::to_string_pretty(&feed)?).as_bytes(),
-    )?;
-    log(
-        "update-feed",
-        format!("{} bytes / SHA-256 {}", size, sha256),
-    );
-    Ok(())
+    Ok(hex::encode(digest.finalize()))
 }
 
 fn verify_windows_pe(path: &Path) -> Result<()> {
@@ -129,6 +189,19 @@ fn verify_windows_pe(path: &Path) -> Result<()> {
     let mut signature = [0_u8; 4];
     file.read_exact(&mut signature)?;
     anyhow::ensure!(signature == *b"PE\0\0", "Windows PE署名がありません");
+    Ok(())
+}
+
+/// macOSのDMG（UDIF）は末尾512バイトが `koly` で始まるトレーラを持つ。
+/// 別のファイルを登録して、利用者が開けない配布物を配ることを防ぐ。
+fn verify_macos_dmg(path: &Path) -> Result<()> {
+    let mut file = fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    anyhow::ensure!(length >= 512, "macOS DMGとしては小さすぎます");
+    file.seek(SeekFrom::Start(length - 512))?;
+    let mut signature = [0_u8; 4];
+    file.read_exact(&mut signature)?;
+    anyhow::ensure!(signature == *b"koly", "macOS DMG（UDIF）ではありません");
     Ok(())
 }
 
@@ -530,8 +603,9 @@ fn bundled_engine_pinned(root: &Path) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::{
-        check, included_characters, next_version, package_version, replace_once, verify_windows_pe,
-        write_atomic, VersionBump,
+        check, classify_artifact, empty_feed, included_characters, next_version, package_version,
+        replace_once, same_version_feed, verify_macos_dmg, verify_windows_pe, write_atomic,
+        VersionBump,
     };
 
     #[test]
@@ -842,6 +916,68 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn 配布物の名前から書き込む枠を決める() {
+        for (name, platform) in [
+            ("PicoAgent_1.0.3_x64-setup.exe", "windows-x64"),
+            ("PicoAgent_1.0.3_aarch64.dmg", "macos-arm64"),
+            ("PicoAgent_1.0.3_x64.dmg", "macos-x64"),
+        ] {
+            assert_eq!(classify_artifact(name).unwrap().platform, platform);
+        }
+        // CPU種別が読めないDMGを黙って片方の枠へ入れると、起動できない配布物を配ってしまう。
+        assert!(classify_artifact("PicoAgent.dmg").is_err());
+        assert!(classify_artifact("PicoAgent_1.0.3.deb").is_err());
+    }
+
+    #[test]
+    fn 同じ版のフィードだけ別環境の枠を引き継ぐ() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-feed-merge-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("latest.json");
+        let mut existing = empty_feed("1.0.3");
+        existing["platforms"]["windows-x64"]["url"] = serde_json::Value::String("既存".into());
+        std::fs::write(&path, serde_json::to_string(&existing).unwrap()).unwrap();
+
+        // 同じ版ならWindowsの枠を残したままmacOSの枠を足せる。
+        let same = same_version_feed(&path, "1.0.3").unwrap();
+        assert_eq!(same["platforms"]["windows-x64"]["url"], "既存");
+        // 版が上がったら前の版のURLを引き継がない。
+        assert!(same_version_feed(&path, "1.0.4").is_none());
+        // JSONとして壊れていても落ちずに空のひな形へ落ちる。
+        std::fs::write(&path, b"{").unwrap();
+        assert!(same_version_feed(&path, "1.0.3").is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 最新版情報へ登録するディスクイメージはudifトレーラを持つ() {
+        let path = std::env::temp_dir().join(format!(
+            "picoagent-update-dmg-{}-{}.dmg",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::write(&path, vec![0_u8; 1024]).unwrap();
+        assert!(verify_macos_dmg(&path).is_err());
+        let mut image = vec![0_u8; 1024];
+        image[512..516].copy_from_slice(b"koly");
+        std::fs::write(&path, image).unwrap();
+        assert!(verify_macos_dmg(&path).is_ok());
+        // NSISのPEをDMGとして登録しない。
+        std::fs::write(&path, b"MZ").unwrap();
+        assert!(verify_macos_dmg(&path).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn 最新版情報へ登録する実行ファイルはpe署名を持つ() {
         let path = std::env::temp_dir().join(format!(

@@ -1,14 +1,18 @@
-// secret.rs - APIキー等のシークレットを Windows DPAPI で暗号化して保存する。
+// secret.rs - APIキー等のシークレットをOSの資格情報保護へ預けて保存する。
 //
-// 同一 Windows ユーザーアカウントだけが復号でき、config.json への平文保存を避ける。
-// 保存形式は "enc:dpapi:v1:" + base64(DPAPI出力)。`config.get()` が読み取り時に透過的に復号し、
-// 設定保存時にパスワード型の項目だけを暗号化する。
-// 非 Windows では DPAPI が無いため平文で保存する（フォールバック許可: OS機能が無いため）。
+// Windows は DPAPI で暗号化し、暗号文を `config.json` に置く。同一Windowsユーザーだけが復号できる。
+// macOS は値そのものをログインキーチェーンへ預け、`config.json` には項目名だけを置く。
+// どちらも同じPC・同じOSユーザーでだけ元の値へ戻せる。
+// `config.get()` が読み取り時に透過的に復号し、設定保存時にパスワード型の項目だけを保護する。
+// Linux は同等のOS機能を使っていないため平文で保存する（フォールバック許可: OS機能が無いため）。
 
 #[cfg(windows)]
 use base64::Engine;
 
-const PREFIX: &str = "enc:dpapi:v1:";
+/// Windows DPAPIで暗号化した値。本体は base64(DPAPI出力) で、秘密は`config.json`内にある。
+const DPAPI_PREFIX: &str = "enc:dpapi:v1:";
+/// macOSキーチェーンへ預けた値。本体は項目のアカウント名（＝設定キー名）だけで、秘密は入らない。
+const KEYCHAIN_PREFIX: &str = "enc:keychain:v1:";
 
 /// 名前は秘密っぽいが実際は秘密でないキー（意図的な例外のみ。理由を添えること）。
 /// - `PICOAGENT_HTTP_API_KEY_HEADER`: APIキーを載せる「ヘッダー名」。値そのものは
@@ -34,39 +38,55 @@ pub fn is_secret_key(key: &str) -> bool {
     !NOT_SECRET.contains(&key) && SECRET_WORDS.iter().any(|word| key.contains(word))
 }
 
-/// 値が本モジュールで暗号化済みか。
+/// 値が本モジュールで保護済みか。復号できないOSの形式（別OSのconfig.jsonを持ち込んだ場合）も真になる。
 pub fn is_encrypted(value: &str) -> bool {
-    value.starts_with(PREFIX)
+    value.starts_with(DPAPI_PREFIX) || value.starts_with(KEYCHAIN_PREFIX)
 }
 
-/// シークレット値を暗号化した保存用文字列にする。空・暗号化済み・非対応時はそのまま返す。
-pub fn encrypt(plain: &str) -> Result<String, String> {
+/// シークレット値を保存用文字列にする。空・保護済み・非対応時はそのまま返す。
+///
+/// `key` は設定キー名。macOSではキーチェーン項目のアカウント名になるため、同じ設定を
+/// 上書き保存しても項目が増えない（古い秘密が孤児として残らない）。
+pub fn encrypt(key: &str, plain: &str) -> Result<String, String> {
     if plain.is_empty() || is_encrypted(plain) {
         return Ok(plain.to_string());
     }
     #[cfg(windows)]
     {
+        let _ = key;
         if let Some(bytes) = win::protect(plain.as_bytes()) {
             return Ok(format!(
-                "{PREFIX}{}",
+                "{DPAPI_PREFIX}{}",
                 base64::engine::general_purpose::STANDARD.encode(bytes)
             ));
         }
         Err("Windowsの資格情報保護で暗号化できないため、シークレットを保存しません".to_string())
     }
-    // フォールバック許可: 非WindowsにはDPAPIが無いため平文で保存する。
-    #[cfg(not(windows))]
-    Ok(plain.to_string())
+    #[cfg(target_os = "macos")]
+    {
+        if !mac::is_valid_account(key) {
+            return Err(format!("キーチェーンへ預けられない設定キー名です: {key}"));
+        }
+        mac::store(key, plain).map_err(|error| {
+            format!("macOSのキーチェーンへ保存できないため、シークレットを保存しません（{error}）")
+        })?;
+        Ok(format!("{KEYCHAIN_PREFIX}{key}"))
+    }
+    // フォールバック許可: DPAPIもキーチェーンも無いため平文で保存する。
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = key;
+        Ok(plain.to_string())
+    }
 }
 
-/// 保存用文字列を平文へ復号する。暗号化されていなければそのまま返す。
+/// 保存用文字列を平文へ復号する。保護されていなければそのまま返す。
 pub fn decrypt(value: &str) -> String {
     if !is_encrypted(value) {
         return value.to_string();
     }
     #[cfg(windows)]
-    {
-        let encoded = &value[PREFIX.len()..];
+    if let Some(encoded) = value.strip_prefix(DPAPI_PREFIX) {
         if let Ok(raw) = base64::engine::general_purpose::STANDARD.decode(encoded) {
             if let Some(plain) = win::unprotect(&raw) {
                 if let Ok(text) = String::from_utf8(plain) {
@@ -75,8 +95,64 @@ pub fn decrypt(value: &str) -> String {
             }
         }
     }
-    // フォールバック許可: 別ユーザー/別PC/破損で復号できない場合は元の文字列を返す。
+    #[cfg(target_os = "macos")]
+    if let Some(account) = value.strip_prefix(KEYCHAIN_PREFIX) {
+        if mac::is_valid_account(account) {
+            if let Some(plain) = mac::load(account) {
+                return plain;
+            }
+        }
+    }
+    // フォールバック許可: 別ユーザー/別PC/別OS/破損で復号できない場合は元の文字列を返す。
+    // 呼び出し側は `is_encrypted()` が真のままであることで「この端末では使えない値」と判断する。
     value.to_string()
+}
+
+/// 保存済みシークレットの実体を消す。設定画面で値を空にしたとき、OS側へ古い秘密を残さない。
+pub fn forget(key: &str) {
+    // macOSは秘密がキーチェーン側にあるため、`config.json`を空にするだけでは実体が残る。
+    #[cfg(target_os = "macos")]
+    if mac::is_valid_account(key) {
+        mac::remove(key);
+    }
+    // Windows DPAPIとLinuxは値が`config.json`内にあり、空にすれば実体も消える。
+    #[cfg(not(target_os = "macos"))]
+    let _ = key;
+}
+
+/// macOSのログインキーチェーンへシークレットを預ける。
+#[cfg(target_os = "macos")]
+mod mac {
+    use security_framework::passwords::{
+        delete_generic_password, get_generic_password, set_generic_password,
+    };
+
+    /// キーチェーン上のサービス名。「キーチェーンアクセス」で PicoAgent の項目としてまとまる。
+    const SERVICE: &str = "PicoAgent";
+
+    /// 参照に使えるアカウント名か。設定キーはASCIIの `PICOAGENT_*` だけなので、
+    /// `config.json` を手で書き換えても想定外の項目を引かないよう文字種を絞る。
+    pub fn is_valid_account(account: &str) -> bool {
+        !account.is_empty()
+            && account.len() <= 256
+            && account
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    }
+
+    /// 同じサービス・アカウントの項目があれば上書きする（増殖しない）。
+    pub fn store(account: &str, plain: &str) -> Result<(), String> {
+        set_generic_password(SERVICE, account, plain.as_bytes()).map_err(|error| error.to_string())
+    }
+
+    pub fn load(account: &str) -> Option<String> {
+        String::from_utf8(get_generic_password(SERVICE, account).ok()?).ok()
+    }
+
+    pub fn remove(account: &str) {
+        // 項目が無い場合も errSecItemNotFound で失敗するため、結果は捨てる。
+        let _ = delete_generic_password(SERVICE, account);
+    }
 }
 
 #[cfg(windows)]
@@ -157,14 +233,32 @@ mod tests {
 
     #[test]
     fn 暗号化往復で元の値に戻る() {
-        let plain = "sk-test-APIKEY-0123456789-あいう";
-        let stored = encrypt(plain).unwrap();
-        assert_eq!(decrypt(&stored), plain);
-        // Windows では実際に暗号化され、平文とは別の文字列になる。
-        #[cfg(windows)]
+        // macOSはキーチェーン（OSの実体）へ書き込むため、単体テストでは往復させない。
+        // 未署名バイナリのキーチェーン許可ダイアログでテストが止まる。実機QAで確認する。
+        #[cfg(not(target_os = "macos"))]
         {
-            assert!(is_encrypted(&stored));
-            assert_ne!(stored, plain);
+            let plain = "sk-test-APIKEY-0123456789-あいう";
+            let stored = encrypt("TEST_API_KEY", plain).unwrap();
+            assert_eq!(decrypt(&stored), plain);
+            // Windows では実際に暗号化され、平文とは別の文字列になる。
+            #[cfg(windows)]
+            {
+                assert!(is_encrypted(&stored));
+                assert_ne!(stored, plain);
+            }
+        }
+    }
+
+    #[test]
+    fn 別環境で作られた保護値は復号せず保護済みのまま返す() {
+        // Windowsの`config.json`をmacOSへ持ち込んだ場合とその逆。復号できないので
+        // 保護済み判定を保ったまま元の文字列を返し、呼び出し側が未設定として扱う。
+        for stored in [
+            "enc:dpapi:v1:これはbase64ではない",
+            "enc:keychain:v1:UNSTORED_API_KEY",
+        ] {
+            assert!(is_encrypted(stored));
+            assert!(is_encrypted(&decrypt(stored)));
         }
     }
 
@@ -186,7 +280,7 @@ mod tests {
     fn 非暗号文字列はそのまま扱う() {
         assert!(!is_encrypted("plain-token"));
         assert_eq!(decrypt("plain-token"), "plain-token");
-        assert_eq!(encrypt("").unwrap(), "");
+        assert_eq!(encrypt("TEST_API_KEY", "").unwrap(), "");
     }
 }
 
