@@ -838,7 +838,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ```text
 PicoAgent/
-├── crates/picoagent-core/ ← OSS化準備中の再利用コア（内部crate、publish=false）
+├── crates/picoagent-core/ ← 非公開の内部共通コア（publish=false）
 ├── characters/       ← キャラクター正本（人格定義・連番フレームまたは Live2D モデル）
 ├── skills/           ← エージェント機能コネクタ（<スキル名>/mod.rs と補助ファイル）
 ├── ui/               ← webview フロント（ペット UI・設定画面）
@@ -862,8 +862,6 @@ PicoAgent/
 `ui/assets/characters/` は `characters/` の配信コピー、`ui/vendor/live2d/` は Live2D ランタイムで、いずれも自動生成・自動取得です。
 
 **ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [AGENTS.md](AGENTS.md)（作業ルール） / [HANDOFF.md](HANDOFF.md)（未マージ作業） / [docs/TASKS.md](docs/TASKS.md)（未完了・条件待ち）
-
-**設計資料**: [docs/oss-core-plan.md](docs/oss-core-plan.md) — エージェント中核のOSS化準備と公開条件。
 
 ---
 
