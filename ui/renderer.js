@@ -5148,6 +5148,9 @@ async function installSelectedOnboardingComponents() {
     // 設定画面からの単なる導入・更新では、既存のON/OFFを勝手に変えない。
     await window.picoagent.settings.installComponents(ids, ids.includes("aivis"));
     if (onboardingComponentStatus) onboardingComponentStatus.textContent = "準備できました。";
+    // 成功時も操作を戻しておく。戻さないと、次の画面から「追加機能へ戻る」で帰ってきたとき
+    // 全部が無効のまま操作できない行き止まりになる。
+    onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = false; });
     showOnboardingStep("character");
   } catch (error) {
     logApp("error", "追加機能を準備できませんでした", errorDetail(error));
