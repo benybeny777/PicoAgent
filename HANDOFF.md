@@ -6,7 +6,7 @@
 
 - 最終確認日: 2026-08-26
 - 進行中作業: `docs/freetoken-engine-design`でFreeTokenのWindowsネイティブPoCと`llama-server`比較を中断中
-- 別PR: [PR #175](https://github.com/benybeny777/PicoAgent/pull/175)へCodex・Claude Code共用の`windows-process-jobs`プラグインを実装済み。利用者指示によりOPENのままマージしない
+- 開発プラグイン: [PR #175](https://github.com/benybeny777/PicoAgent/pull/175)でCodex・Claude Code共用の`windows-process-jobs`を`main`へマージ済み。`temp\windows-process-jobs-worktree`は`main`へ切り替え、両エージェントの導入元として維持している
 - 次に着手する内容: Gemma 4 26B A4B Q4_0の取得を再開し、同一GGUFで`llama-server`とFreeTokenを比較する
 
 ## FreeToken再開情報
