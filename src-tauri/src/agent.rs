@@ -829,7 +829,8 @@ async fn chat_with_retry(
 /// ユーザーが停止ボタンで中断を要求したときに返す一言。
 const CANCEL_MESSAGE: &str = "りょうかい、いまの処理は途中で止めたよ。";
 
-/// 画面側もこの文言で中断完了を判定するため、子エージェント経路も同じ文言を使う。
+/// 停止したときにキャラクターが返す一言。マルチAIのように `run` を通らない経路でも
+/// 同じ文言を返し、どこで止まったかによって言い回しが変わらないようにする。
 pub fn cancel_message() -> &'static str {
     CANCEL_MESSAGE
 }
@@ -847,7 +848,9 @@ async fn wait_for_cancel(cancel: Option<&AtomicBool>) {
 }
 
 /// 実行中のfutureを停止要求と競合させる。`None` は停止要求によりfutureを破棄したことを示す。
-async fn cancel_while<T>(
+/// `run` を通らずプロバイダへ直接問い合わせる経路（マルチAIの分担計画・最終統合）もこれを使う。
+/// `biased` により、すでに停止要求が立っている場合はfutureを一度も進めずに戻る。
+pub async fn cancel_while<T>(
     future: impl std::future::Future<Output = T>,
     cancel: Option<&AtomicBool>,
 ) -> Option<T> {
