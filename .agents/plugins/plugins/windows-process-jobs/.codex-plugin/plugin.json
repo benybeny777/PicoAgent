@@ -1,0 +1,21 @@
+{
+  "name": "windows-process-jobs",
+  "version": "0.1.0",
+  "description": "Windowsで有限の長時間コマンドを安全に追跡する開発運用プラグイン",
+  "author": {
+    "name": "PicoAgent developers"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Windows Process Jobs",
+    "shortDescription": "Windowsの長時間処理を永続追跡します。",
+    "longDescription": "Windows Job ObjectとPID識別を使い、開始、状態、ログ、結果、取消、再実行をCodexとClaude Codeで共有します。",
+    "developerName": "PicoAgent developers",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "長時間かかるビルドをWindows Process Jobsで開始して",
+      "直近のWindows Process Jobsの状態を確認して"
+    ]
+  }
+}
