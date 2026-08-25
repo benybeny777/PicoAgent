@@ -101,7 +101,7 @@ PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント
 - **スキル（ツール）コネクタ** はプロジェクト直下の `skills/<スキル名>/mod.rs` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
 - **発話からスキルを候補へ出す語彙、優先度、先回り実行の引数組み立ては、各`Tool`の`intent_keywords()`／`intent_priority()`／`intent_invocation()`へ置く。** `agent.rs`へスキル名の分岐を足さない。整形済み出力を直接返すか、内部資料としてモデルへ渡すかも`IntentInvocation`でスキル側が申告する。長文の内部資料プロンプトは`skills/<名前>/prompts/*.md`へ置いて`include_str!`で同梱し、ループ本体へ直書きしない。
 - スキル固有の Rust 補助モジュールは `skills/<スキル名>/*.rs` に置いて `mod xxx;` で読み込む。PowerShell / Python / テンプレート等は `skills/<スキル名>/scripts/` や `skills/<スキル名>/templates/` に置き、必要なら `include_str!` でバイナリへ同梱する。複数スキルで本当に共有するトレイト・型だけを `src-tauri/src/tools/mod.rs` 等の共通層に置く。
-- アプリとスキルが使う外部依存クレートは `src-tauri/Cargo.toml` に集約する。Rust はスキルごとの独立 `Cargo.toml` を持たないため、依存クレート自体を各スキルフォルダに複製しない。例外は、Tauriや製品設定から独立してOSS化を準備する `crates/picoagent-core/` だけで、このcrate自身が必要最小限の依存を申告する。
+- アプリとスキルが使う外部依存クレートは `src-tauri/Cargo.toml` に集約する。Rust はスキルごとの独立 `Cargo.toml` を持たないため、依存クレート自体を各スキルフォルダに複製しない。例外は、Tauriや製品設定から独立した内部共通部品の `crates/picoagent-core/` だけで、このcrate自身が必要最小限の依存を申告する。外部公開は行わず `publish = false` を維持する。
 - **標準的な外向きHTTPは`tools::http::client()`の接続プールを共有する。専用User-Agent、Cookie、プロキシ、DNS固定・リダイレクト制御、長時間ストリームなどコネクタ固有の構築が必要なら`Client::builder()`を使ってよいが、要求全体の`.timeout()`、または長時間処理向けの`.connect_timeout()`＋`.read_timeout()`を必ず設定する。** `Client::new()`と`reqwest::get()`は禁止する。`tools::http::guard`がスキルとバックエンドを走査し、上限なしの個別builderも検出する。
 - **外部プロセスの起動は `tools::process::command()` を使う**（`Command::new` を直接使わない）。Windows のコンソール窓抑止（CREATE_NO_WINDOW）・中断時の子プロセス回収（kill_on_drop）・stdio の既定を1箇所に集約している。実行は `process::output()` / `output_text()` でタイムアウト付きにする。常駐プロセス（同梱エンジン・AivisSpeech）のように future の終了後も動かし続けるものは同期版の `process::command_sync()` を使う（窓抑止だけを共通化し、stdio と待ち方は用途ごとに指定する）。以前は `hide_window` を各所へコピーする運用で散らばり、抜けたファイルでは Windows で窓が明滅し子プロセスが残った。`tools::process::guard` のテストが**スキルとバックエンド `src-tauri/src/` の両方を走査して**直接起動と自前 `hide_window` を検出する。
   - **一度きりの実行（起動 → 出力回収 → 終了待ち）を自前で組み立てない。** 同じ処理を書き直すと出力回収の待ち方だけが抜ける。実際に共通層・`whisper_transcribe`・`meeting_recorder` の3箇所が同型の実装を持ち、**どれもタイムアウト後に回収タスクを待ち切っていた**。`sh -c` / `powershell -Command` のように子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を握ったままで終端（EOF）が来ないため、1秒指定が孫の寿命（30秒）まで戻らなかった。進捗表示や中断が要る長時間処理で `child` を自分で持つ場合も、**出力回収の待ちは `process::join_capture()` を通す**（上限を超えたら中断して戻る）。`tools::process::guard` が `timeout(..., wait())` の自前実装を検出する。
@@ -149,7 +149,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState` |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
-| `crates/picoagent-core/` | **OSS化準備中の再利用コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。公開準備が整うまでは `publish = false` を保つ |
+| `crates/picoagent-core/` | **非公開の内部共通コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。外部公開は行わず `publish = false` を保つ |
 | `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで7形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。旧 `talk` はLINE風の `chat` へ移行する。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
 | `src-tauri/src/window_surface.rs` | メインウィンドウを利用者の目の前へ出す共通手順（表示 → 最小化解除 → 前面化）。ホットキー呼び出しと、多重起動時に2つ目の起動が既存ウィンドウを前面化する経路が共有する |
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
@@ -214,7 +214,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 
 ```text
 20_PicoAgent/
-├── crates/picoagent-core/       ← OSS化準備中の再利用コア（内部crate、publish=false）
+├── crates/picoagent-core/       ← 非公開の内部共通コア（publish=false）
 ├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
 ├── skills/                     ← エージェント機能（スキル）連結ディレクトリ（<スキル名>/mod.rs を足すと自動登録）
 │   └── {time,weather,currency_rates,...}/mod.rs

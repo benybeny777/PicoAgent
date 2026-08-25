@@ -5,7 +5,7 @@
 // 切ると高い確率で境界を外す。ログ・プレビュー・出力の打ち切りは全体を通して
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
-// 実装はOSS切り出し準備中のpicoagent-coreへ置き、既存のアプリ内パスを保つ。
+// 実装は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
 pub use picoagent_core::text::{preview, truncate_bytes, Utf8Stream};
 
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
