@@ -221,7 +221,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── ui/                         ← webview フロント正本（編集対象）
 │   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
 │   ├── index.html / renderer.js / styles.css       ← ペット UI
-│   ├── settings.html / settings.js / settings.css  ← 設定ウィンドウ
+│   ├── settings.html / settings*.js / settings.css ← 設定ウィンドウ
 │   ├── vendor/live2d/          ← Live2D ランタイム（git 管理外、setup live2d で取得）
 │   └── assets/characters/      ← characters/ の配信コピー（git 管理外、sync:characters で生成）
 ├── ui-dist/                    ← Tauri frontendDist（git 管理外、build-ui-dist で生成）

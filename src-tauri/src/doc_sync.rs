@@ -63,6 +63,7 @@ fn referenced_keys() -> std::collections::BTreeSet<String> {
     for relative in [
         "ui/renderer.js",
         "ui/settings.js",
+        "ui/settings-schedules.js",
         "ui/picoagent.js",
         "xtask/src/tools.rs",
         "xtask/src/cli.rs",
