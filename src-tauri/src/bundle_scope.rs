@@ -343,6 +343,7 @@ mod guard {
         for name in [
             "renderer.js",
             "settings.js",
+            "settings-schedules.js",
             "frame-scheduler.js",
             "alarm-runtime.js",
             "memory-settings.js",
