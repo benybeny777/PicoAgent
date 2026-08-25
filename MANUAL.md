@@ -2,7 +2,7 @@
 
 デスクトップに住むキャラクターに話しかけるだけで、調べもの・ファイル操作・文書/画像/音声の変換・外部サービス連携までこなすローカルファーストの AI エージェント「PicoAgent」の総合マニュアルです。導入から日常の使いかた、スキル活用、ローカル API、セキュリティまでを一冊にまとめています。
 
-- 開発者向けの内部仕様は [SPEC.md](SPEC.md)、AIエージェント向け作業ルールは [AGENTS.md](AGENTS.md)、概要と利用条件は [README.md](README.md) を参照してください。変更の経緯はGitHubのPR、公開版の変更点は配布RepoのRelease notesが正本です。
+- 開発者向けの手順は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、内部仕様は [SPEC.md](SPEC.md)、AIエージェント向け作業ルールは [AGENTS.md](AGENTS.md)、概要と利用条件は [README.md](README.md) を参照してください。変更の経緯はGitHubのPR、公開版の変更点は配布RepoのRelease notesが正本です。
 
 ---
 
@@ -23,7 +23,6 @@
 13. [データの保存場所](#13-データの保存場所)
 14. [主要設定リファレンス](#14-主要設定リファレンス)
 15. [トラブルシューティング](#15-トラブルシューティング)
-16. [付録: cargo xtask コマンド一覧](#16-付録-cargo-xtask-コマンド一覧)
 
 ---
 
@@ -442,7 +441,7 @@ cargo xtask cli repl              # 対話モード（会話文脈を保持。ex
 
 ## 14. 主要設定リファレンス
 
-よく使うキーの抜粋です（全キーは [SPEC.md](SPEC.md#設定キー一覧)）。設定画面から編集でき、環境変数としても渡せます（保存先は常に `config.json`）。
+よく使うキーの抜粋です（全キーは [docs/SETTINGS.md](docs/SETTINGS.md)）。設定画面から編集でき、環境変数としても渡せます（保存先は常に `config.json`）。
 
 | キー | 内容（既定値） |
 |---|---|
@@ -477,25 +476,3 @@ cargo xtask cli repl              # 対話モード（会話文脈を保持。ex
 その他は [README のトラブルシューティング](README.md#-トラブルシューティング) を参照してください。
 
 ---
-
-## 16. 付録: cargo xtask コマンド一覧
-
-| コマンド | 内容 |
-|---|---|
-| `cargo xtask dev` | 開発起動（未取得の同梱物は自動取得） |
-| `cargo xtask build` | 製品ビルド（各 OS の配布バンドルを生成） |
-| `cargo xtask stop` | 残存プロセスの停止 |
-| `cargo xtask cli <cmd>` | ローカル API を叩く CLI（status/models/chat/ask/repl） |
-| `cargo xtask setup engine` | 同梱推論エンジンの取得 |
-| `cargo xtask setup aivis` | 同梱 Aivis（読み上げ）の取得 |
-| `cargo xtask setup whisper` | 同梱 Whisper の取得 |
-| `cargo xtask setup live2d` | Live2D ランタイム + サンプルモデルの取得 |
-| `cargo xtask setup office` | OfficeCLI（LibreOffice）の取得 |
-| `cargo xtask setup tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
-| `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
-| `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
-| `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
-| `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
-
-> `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
-> `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。

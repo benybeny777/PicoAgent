@@ -10,9 +10,10 @@
 - ルールに反する記述・命名・コメント・dead code を発見した場合は、その場で修正して作業完了後に事後報告する。都度確認を求めない。
 - ルール正本は `AGENTS.md` 1本。`CLAUDE.md` はリダイレクトのみなので編集しない。恒久ルールはすべてこのファイルに追記する。
 - **ドキュメントは常に最新を保つ。コード・スクリプト・設定・依存関係・フォルダ構成・コネクタのインターフェースなど、README や SPEC.md に記載のある内容を変更したら、必ず同じ作業内でドキュメントも更新する。ユーザーから指摘されてから直すのは禁止。**
+- **大きなファイルは、肥大化を検知したら責務を棚卸しし、分割するか一体のまま保つかを先に判断する。** 行数だけを理由に分けず、唯一の正本、参照方向、外部へ公開する最小インターフェース、機械検査の境界を決め、その境界で保守・検証が独立する場合だけ分ける。分割によって読むファイル、共有状態、相互呼び出しが増えるなら、一体の方が効率的として分けない。単なる行移動、同じ状態の相互書き換え、循環依存、同じ説明の複製になる分割は禁止する。文書は読者と更新理由、コードは状態の所有者と副作用を分割基準にする。判断結果と、分ける場合の境界または分けない理由をPR本文へ残す。
 - **LP、配布README、`latest.json`、紹介PowerPoint、画像・動画・CSS、Pages、Releaseなど`PicoAgent-Distribution`に属する変更依頼は、この本体リポジトリで受けても、実作業を`C:\00_PG\21_PicoAgent-LP`へ切り替える。** 配布リポジトリ全体の正本は21側の`main`であり、20側の`distribution/site/`を編集正本・同期元にしない。20側で行うのはアプリ実装と配布バイナリ生成までとし、検証済み成果物を21側へ取り込む場合も21側の目的別PRと公開手順で管理する。
-- 設定キーの `SPEC.md` への記載漏れ・削除漏れは `doc_sync::guard` のテストが双方向で検出する（手作業の突き合わせは不要。設定キーでない `PICOAGENT_*` 文字列は理由付きで `NOT_CONFIG_KEYS` へ）。
-- 対象ドキュメントの目安: アーキテクチャ・コネクタ仕様・メッセージ正規形・設定値 → `SPEC.md`、起動手順・セットアップ・設定キー・依存関係 → `README.md`、未完了・条件待ち → `docs/TASKS.md`。変更の履歴はPR本文とGit履歴へ残し、別の変更履歴ファイルを二重管理しない。
+- 設定キー一覧の正本は `docs/SETTINGS.md` とし、記載漏れ・削除漏れは `doc_sync::guard` のテストが実装と双方向で検出する（手作業の突き合わせは不要。設定キーでない `PICOAGENT_*` 文字列は理由付きで `NOT_CONFIG_KEYS` へ）。`SPEC.md` は設定の保存・反映機構、`README.md` と `MANUAL.md` は利用者がよく使う項目だけを説明し、全キーを複製しない。
+- 対象ドキュメントの目安: アーキテクチャ・コネクタ仕様・メッセージ正規形・設定機構 → `SPEC.md`、全設定キー → `docs/SETTINGS.md`、概要・起動・主要機能 → `README.md`、一連の利用手順 → `MANUAL.md`、開発・xtask・配布ビルド・リポジトリ構成 → `docs/DEVELOPMENT.md`、未完了・条件待ち → `docs/TASKS.md`。変更の履歴はPR本文とGit履歴へ残し、別の変更履歴ファイルを二重管理しない。
 - ドキュメント更新が本当に不要な軽微修正の場合のみ、不要と判断した理由を作業完了時に明記する。
 - **利用者が「読み取り専用」「編集禁止」と明示していない限り、「レビューして」は修正までの依頼である。指摘を並べて終わりにしない。** 見つけた問題はその作業内で直し、テストまで済ませる。方針判断が要るものも妥当な既定を選び、採否、理由、代替案、検証境界をPR本文へ書く。直さずに残すのは、実機や外部資産が無くてコードでは解消できない場合だけで、再現条件と着手条件を`docs/TASKS.md`へ残す。
 - **PR本文を変更記録とレビュー記録の正本にする。** 目的、主な変更、採否と理由、実施した検証、未確認事項をそのPRへ書く。完了した作業を別のMarkdown台帳へ複写しない。恒久ルールは`AGENTS.md`、現行仕様は`SPEC.md`、利用手順は`README.md`または`MANUAL.md`、未完了だけは`docs/TASKS.md`へ移す。
@@ -85,7 +86,7 @@
 設定項目を追加・変更・削除する作業は、先に `.agents/skills/add-picoagent-setting/SKILL.md` を読む。以下は個別手順ではなく、すべての設定実装へ常時適用する安全規則とする。
 
 - 設定の正本は `src-tauri/src/config.rs`（永続ファイル `app_config_dir/config.json`）。優先順位は **永続ファイル > 環境変数 > ハードコード既定値**。新規設定で環境変数を「正本・保存先」にしてはならない（環境変数は既定値としてのみ参照する）。
-- 数値・閾値・パス・モデル名など「設定として変えうる値」はソースに散らさず `cfg.get(キー, 既定値)` で都度読む。コネクタは自分の設定項目を `config_schema()`（`Vec<Field>`）で申告し、設定画面に自動で並ぶようにする。新しい設定キーを足したら README と SPEC に必ず記載する。
+- 数値・閾値・パス・モデル名など「設定として変えうる値」はソースに散らさず `cfg.get(キー, 既定値)` で都度読む。コネクタは自分の設定項目を `config_schema()`（`Vec<Field>`）で申告し、設定画面に自動で並ぶようにする。新しい設定キーを足したら `docs/SETTINGS.md` に必ず記載し、利用者が日常的に触るキーなら README と MANUAL も更新する。設定の保存・反映方式を変えた場合は SPEC も更新する。
 - 設定画面（右クリック →「設定…」）が唯一の GUI 設定入口。`ui/settings.{html,css,js}` と `commands.rs` の `settings_*` command で構成し、保存後は実行中に反映する（コネクタは `cfg.get()` で都度読むため再起動不要）。
 - API キー・トークン等のシークレットはコミットしない。ログ・エラーメッセージ・ドキュメントに値を出さない。OpenAI 互換プロバイダの `Authorization`（`bearer_auth`）など秘密値を含む箇所は、エラー文へ連結しない。`config.json` はローカル個人 PC 専用で、リポジトリにコミットしない（`app_config_dir` 配下に保存される）。
 - **API キー・トークン等は必ず `type="password"` で申告し、キー名に `API_KEY` / `TOKEN` / `SECRET` / `PASSWORD` / `WEBHOOK` / `CREDENTIAL` のいずれかを含める。** 暗号化の要否は「スキーマでの password 申告」に加えて**キー名でも判定する**（`secret::is_secret_key`）。スキーマ（`config_schema()`）に載らない設定項目——設定画面 `ui/settings.js` が直接組み立てる `field(...)` など——は型申告だけでは拾えないため（実際にローカル API の `PICOAGENT_API_KEY` がこの経路で平文保存されていた）。`secret::guard` のテストが (1) コネクタのスキーマで秘密っぽいキーが password 型でない申告、(2) 設定画面の password 項目が `is_secret_key` に載らない名前、の両方を検出して失敗させる。
@@ -115,7 +116,7 @@ PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント
 - システムに副作用を持つツール（ファイル・ネットワーク・プロセス等）は、必ず境界（許可ルート・サイズ上限・確認など）を設ける。**ユーザー由来のパスは必ず `permissions::resolve(cfg, input)` で `SafePath` に変換してから使う**。`SafePath` は許可判定を通過したパスを表す型で、生成経路が `resolve` / `SafePath::join` / `SafePath::sibling` に限られている（派生パスも `..` による脱出を防ぐため再検証される）。ファイル操作は `permissions::fs`（`read_to_string` / `write` / `create_dir_all`）を使う。アプリ自身が決めた内部パス（一時ファイル等、ユーザー入力を含まないもの）だけ `SafePath::app_owned` を使ってよい。**許可判定を各スキルで再実装しない**（リンク実体検査・追加許可ルート・拒否パス判定が抜ける。過去に7スキルで同じ抜けが発生した）。`permissions::guard` のテストがスキルを走査して、自前の許可判定とパス引数の `resolve` 漏れを検出し失敗させる。新しいスキルで独自のルート設定キー（`PICOAGENT_*_ROOT` 等）を作らず、`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` を使う。`C:\Windows` / `Program Files` は permissions が常に拒否する。例: `skills/read_file/mod.rs` は `permissions::resolve` で許可ルート外・保護パス・トラバーサルを拒否する。
 - スキル経由でユーザーファイルを削除相当の扱いにする場合、物理削除は禁止し、必ず OS のゴミ箱へ移動する。`workspace_files` などに削除機能を追加するときも `delete` ではなく `trash` / `move_to_trash` として実装し、`remove_file` / `remove_dir_all` でユーザー指定ファイルを消さない。`run_command` でも `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドは拒否する。内部一時ファイル、ログローテーション、ビルド生成物、同梱物アンインストールなど PicoAgent 管理下の掃除はこの限りではない。
 - コネクタが設定値を必要とするなら `config_schema()` で申告する。値はフィールドに固定せず**メソッド内で `cfg.get()` から都度読む**（設定画面での変更を再起動なしに反映するため）。
-- コネクタを追加・変更したら `SPEC.md` のインターフェース定義と一覧、必要なら `README.md` の設定キーを更新する。
+- コネクタを追加・変更したら `SPEC.md` のインターフェース定義と一覧、`docs/SETTINGS.md` の設定キー、必要なら `README.md` と `MANUAL.md` の利用手順を更新する。
 - メッセージ正規形（コネクタ間の共通言語）を崩さない。詳細は [SPEC.md](SPEC.md) を参照。
 
 詳細仕様は [SPEC.md](SPEC.md) を参照。ここには作業上の注意点だけを書く。
@@ -162,7 +163,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_text からフォールバック参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
 | `src-tauri/src/permissions.rs` | **全スキル共通のファイル許可の正本**。`resolve()` が許可判定を通した `SafePath` を返し（生成経路は resolve / join / sibling のみ）、`permissions::fs` が `SafePath` 専用のファイル操作を提供する。`permissions::guard` のテストがスキルの自前実装・`resolve` 漏れを検出 |
 | `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
-| `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `SPEC.md` に載っているか、逆に SPEC だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
+| `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `docs/SETTINGS.md` に載っているか、逆に一覧だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
 | `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる。**キャラクターIDの判定 `is_valid_id()` もここが唯一の定義元**（IDはフォルダ名と設定キーの一部になる。以前は9箇所へ写され、うち4箇所で長さ制限が抜けていた） |
 | `src-tauri/src/components.rs` | **初回追加機能の公式取得元・検証・導入境界**。Aivis／Whisperは各公式配布元からPicoAgent管理領域へ直接取得し、THA3／LibreOffice／文書ツールは公式ページと手動設定を案内する。第三者ソフトをPicoAgentのReleaseへ再配布しない |
 | `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないか、キャラクターID判定の写しが増えていないか、`character_pack.rs` が `crate::` のアプリ内部へ依存していないか（xtask のビルドが壊れる）を検出する |
@@ -242,6 +243,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 ├── .claude/                    ← Claude Code の設定、共通スキルへの入口、セッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / MANUAL.md / SPEC.md
+├── docs/SETTINGS.md             ← 全設定キーの唯一の一覧
+├── docs/DEVELOPMENT.md          ← 開発・xtask・配布ビルド・リポジトリ構成
 ├── HANDOFF.md                  ← 未マージ作業の短い引き継ぎ
 ├── docs/TASKS.md               ← 未完了・条件待ちだけを置く一覧
 ```
