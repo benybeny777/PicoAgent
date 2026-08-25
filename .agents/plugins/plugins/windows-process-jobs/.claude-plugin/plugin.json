@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "windows-process-jobs",
   "description": "Windowsで有限の長時間コマンドを安全に追跡する開発運用プラグイン",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "PicoAgent developers"
   },
