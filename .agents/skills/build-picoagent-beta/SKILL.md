@@ -12,7 +12,7 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 3. `origin/main`、作業ブランチ、`distribution/release.json`の版・対象OS・許可キャラ、既存GitHub Release、配布リポジトリの`main`、Pages状態を取得し、今回の公開対象を確定する。
 4. 配布リポジトリ`C:\00_PG\21_PicoAgent-LP`の`main`を、全追跡ファイル、Pages、Releaseを含む公開状態の正本として確認する。20側の`distribution/site/`は同期元にせず、差分があっても21側を上書きしない。
 5. このスキルのパス、コマンド、公開先、版、成果物名が現行実装とずれていたら、同じPRでスキルを先に更新する。
-6. ホストOSに対応する成果物だけを作る。WindowsではNSIS、macOSでは`.app`と`.dmg`、Ubuntu Linux x64ではdebとAppImageを作り、別OSの成果物を推測・改名・流用しない。macOSバンドルはmacOS実機でだけ作れる。クロスビルドは行わない。Apple SiliconとIntelは別バイナリなので、実行した機種の分だけが作られる。
+6. ホストOSに対応する成果物だけを作る。WindowsではNSIS、macOSでは`.app`と`.dmg`、Ubuntu Linux x64ではdebとAppImageを作り、別OSの成果物を推測・改名・流用しない。macOSバンドルはmacOS実機でだけ作れる。クロスビルドは行わない。**配布対象はApple Siliconだけで、Intel Macは対象外**（理由と解除条件は`docs/TASKS.md`の「macOS Intel版」）。Intel機でビルドした成果物を配らない。
 
 ## 混入を防ぐ
 
@@ -47,7 +47,7 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 
 ## 成果物を検証する
 
-1. Windowsは`src-tauri/target/release/bundle/nsis/PicoAgent_<版>_x64-setup.exe`の更新時刻、サイズ、PE先頭`MZ`、SHA-256を確認する。macOSは`bundle/dmg/PicoAgent_<版>_<aarch64|x64>.dmg`の更新時刻、サイズ、末尾512バイトのUDIFトレーラ`koly`、SHA-256を確認し、マウントして`.app`をアプリケーションフォルダへコピーし、初回だけ右クリック→「開く」でGatekeeperを越えて起動する。Linuxは`bundle/deb/*.deb`と`bundle/appimage/*.AppImage`の更新時刻、形式、SHA-256を確認し、隔離環境でdebの導入・起動・削除とAppImageの起動を行う。
+1. Windowsは`src-tauri/target/release/bundle/nsis/PicoAgent_<版>_x64-setup.exe`の更新時刻、サイズ、PE先頭`MZ`、SHA-256を確認する。macOSは`bundle/dmg/PicoAgent_<版>_aarch64.dmg`の更新時刻、サイズ、末尾512バイトのUDIFトレーラ`koly`、SHA-256を確認し、マウントして`.app`をアプリケーションフォルダへコピーし、初回だけ右クリック→「開く」でGatekeeperを越えて起動する。Linuxは`bundle/deb/*.deb`と`bundle/appimage/*.AppImage`の更新時刻、形式、SHA-256を確認し、隔離環境でdebの導入・起動・削除とAppImageの起動を行う。
 2. WindowsとmacOSの公開時に`cargo xtask update-feed <成果物> <説明>`で検証用の`distribution/site/latest.json`を生成する。`.exe`はPE、`.dmg`はUDIFトレーラを確認し、ファイル名のCPU種別から`windows-x64`／`macos-arm64`／`macos-x64`の枠へ書く。同じ版なら他OSの枠を残したまま該当枠だけが差し替わるので、OSごとに1回ずつ実行する。版が上がった場合は前の版のURLを引き継がず枠が空になるため、その版の全OS分をあらためて登録する。このファイルは20側の正本ではなく、実ファイルとの照合後に21側へ取り込むための生成物として扱う。Linux更新情報は専用生成経路が実装されるまで空欄を維持し、他OSの検証を流用しない。
    - ハッシュ用バッファを1MiBのスタック配列へ戻さない。Windowsでは`update-feed`開始時にスタックオーバーフローするため、ヒープ確保を維持する。
 3. `latest.json`のURL、サイズ、SHA-256が実ファイルと完全一致することを再計算して確認する。

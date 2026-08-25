@@ -75,7 +75,9 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 ### macOS版のビルド（未署名アルファ）
 
-macOSバンドルはmacOS実機でだけ作れます。WindowsやLinuxからのクロスビルドはできません。Apple Silicon機ではApple Silicon版、Intel機ではIntel版が作られるため、両方を配るなら実機を2台使います。
+macOSバンドルはmacOS実機でだけ作れます。WindowsやLinuxからのクロスビルドはできません。**配布対象はApple Siliconだけで、Intel Macは対象外です。**
+
+Intelを対象外にしているのは、`xtask/src/bundled.rs` が同梱ローカルAIエンジンの資産を **xtask自身のホストarch** で選ぶためです（`let arm = cfg!(target_arch = "aarch64")`）。Apple Silicon機で `--target x86_64-apple-darwin` を指定してIntel版を作ると、arm64版のllama.cpp／Whisperが入ったx64アプリになり、ローカルAIが起動しません。Intelを対象へ加える場合は、実機のIntel Macでビルドするか、`bundled.rs` をビルド対象archへ追従させる修正を先に行います（[docs/TASKS.md](TASKS.md)）。
 
 ```bash
 # 前提: Xcode Command Line Tools、Rust、Tauri CLI、7z（Aivisの分割書庫展開に使う）
@@ -88,9 +90,9 @@ cargo xtask build-beta --bundles app,dmg
 
 # 生成物
 # src-tauri/target/release/bundle/macos/PicoAgent.app
-# src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg（Intel機は _x64.dmg）
+# src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg
 
-# latest.json へ登録（Apple Silicon版とIntel版を1回ずつ実行できる）
+# latest.json へ登録（OSごとに1回ずつ実行できる）
 cargo xtask update-feed src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg "更新内容"
 ```
 
@@ -101,7 +103,7 @@ macOS固有の注意点は次のとおりです。
 - **未署名アルファはGatekeeperに止められます。** 初回は Finder で右クリック →「開く」、または `xattr -dr com.apple.quarantine /Applications/PicoAgent.app` が必要です。取得ページで事前に案内します。署名・公証は販売対象へ追加する時点で行います
 - **マイク・画面収録・アクセシビリティはOSの許可が要ります。** マイクの用途説明は `src-tauri/Info.plist` に入れてあります（無いとマイク取得の瞬間にOSがアプリを終了します）。画面収録と入力操作は「システム設定 → プライバシーとセキュリティ」で許可します
 - **APIキー等はログインキーチェーンへ預けます。** `config.json` には項目名だけが残ります。未署名アプリは再ビルドのたびに署名が変わるため、キーチェーンの許可ダイアログが繰り返し出ます。署名を入れるまでの既知の使い勝手の劣化です
-- **対応OS版は macOS 11 以上**（`src-tauri/tauri.macos.conf.json`）。同梱ローカルAIエンジンのmacOS資産に合わせた下限で、実機QAで確定します
+- **対応OS版は macOS 11 以上のApple Silicon機**（`src-tauri/tauri.macos.conf.json`）。同梱ローカルAIエンジンのmacOS資産に合わせた下限で、実機QAで確定します
 
 版番号はSemVerで管理します。通常の更新は同じ`major.minor`系列の`patch`を自動加算し、`minor`と`major`は製品管理者の明示指示がある場合だけ上げます。公開中の`latest.json`を起点に`cargo xtask bump-version <種別>`が3か所の版を同期するため、個別ファイルへ版番号を手入力しません。同じ版のRelease資産も上書きしません。patch番号もLP、アプリ、ファイル名、Releaseへ正確に表示します。起動時の自動確認はpatchだけなら通知せず、利用者が設定から「更新を確認」を実行した場合はpatchも案内し、手動でダウンロード・適用できます。`major.minor`が上がった場合は起動時にも通知します。アルファ期間中は表示名と更新説明へ`Alpha`を付けます。
 
