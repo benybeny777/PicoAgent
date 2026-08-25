@@ -28,4 +28,4 @@ description: PicoAgentの画面崩れ、ドラッグ、最大化、キャラ位�
 
 ## 完了条件
 
-原因、修正、機械検査、目視結果を`docs/REVIEW-LOG.md`へ記録する。仕様変更は`SPEC.md`、利用手順変更は`README.md`、大きな変更は`CHANGELOG.md`も同期し、`git diff --check`を通してコミット・pushする。
+原因、修正、機械検査、目視結果をPR本文へ記録する。仕様変更は`SPEC.md`、利用手順変更は`README.md`へ同期し、未確認項目だけを`docs/TASKS.md`へ残す。`git diff --check`を通してコミット・pushする。

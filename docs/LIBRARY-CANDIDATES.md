@@ -1,8 +1,7 @@
 # 外部ライブラリの候補と採否（Moveable 導入回の引き継ぎ）
 
 Moveable の導入に合わせて「他に入れる価値のある依存はあるか」を調べた結果を、判断材料としてここへ残す。
-**判断の理由はここ、手を動かす内容は [CODEX-TASKS.md](CODEX-TASKS.md)、判定の履歴は [REVIEW-LOG.md](REVIEW-LOG.md)、
-ルールは [AGENTS.md](../AGENTS.md)** が持ち場。
+**判断の理由はここ、手を動かす内容は [TASKS.md](TASKS.md)、ルールは [AGENTS.md](../AGENTS.md)** が持ち場。
 
 - 調査日: 2026-08-14（Linux コンテナ上のコード読みのみ。**実機での動作確認・実測は一切していない**）
 - **Moveable 自体と導入後の設計ガード・第三者表記は対応済み**（`ui/vendor/moveable/moveable.min.js` を Git へ直接コミット、
@@ -52,7 +51,7 @@ CSP は `script-src 'self'` なので追加の緩和は不要。`ui-dist/` へ�
   保存形式のプレフィックス（`enc:dpapi:v1:`）はそのまま残し、OS ごとの分岐として足す
 - **注意**: `secret::guard` の password 判定（`SECRET_WORDS` / `NOT_SECRET`）は保存先が変わっても正本のまま。
   判定側をいじらないこと
-- **関連**: `CODEX-TASKS.md` の保留 #2（macOS のビルド・署名・公証と実機 QA）の前提条件になる
+- **関連**: `TASKS.md` のmacOS版（ビルド・署名・公証と実機QA）の前提条件になる
 
 ### 2-2. `cargo-deny`（開発ツール / アプリの依存は増えない）
 
@@ -110,7 +109,7 @@ advisories / licenses / sources / bans をローカル検査する。MPL-2.0とB
 | 候補 | 判定 | 理由 |
 |---|---|---|
 | `markdown-it` + `DOMPurify` | 見送り | 現行の `renderMarkdown` は `innerHTML` を使わず DOM を直接組んでおり、XSS 面では**今のほうが安全**。HTML 文字列を経由する方式へ変えるのは後退 |
-| `highlight.js` / Shiki | 見送り | 数百 KB 規模。フキダシのコード表示に対して過剰で、配布サイズを下げたい現状（`CODEX-TASKS.md` P0-3）と逆行する |
+| `highlight.js` / Shiki | 見送り | 数百KB規模。フキダシのコード表示に対して過剰で、配布サイズを下げたい現状と逆行する |
 | `pixi-live2d-display` | 見送り | Cubism SDK を直接呼ぶ経路（`renderer.js::ensureLive2DRuntime` / `startLive2D`）が既に動いている。いまからの乗り換えは割に合わない |
 | React / Vue / Svelte など | 見送り | `package.json` を置かない方針と正面から衝突する。UI 全体の作り直しになる |
 | CDN からの読み込み全般 | 不可 | CSP が `script-src 'self'`。オフライン動作の前提も崩れる |
@@ -130,7 +129,7 @@ advisories / licenses / sources / bans をローカル検査する。MPL-2.0とB
 **Rust（`src-tauri/Cargo.toml`）**
 
 1. 依存は `src-tauri/Cargo.toml` へ集約（スキルごとに複製しない）
-2. `cargo audit --file src-tauri/Cargo.lock`。情報警告と脆弱性を分けて評価し、見送るなら理由を `REVIEW-LOG.md` へ
+2. `cargo audit --file src-tauri/Cargo.lock`。情報警告と脆弱性を分けて評価し、採否と理由をPR本文へ書く
 3. 対応 OS 限定のものは `[target.'cfg(...)'.dependencies]` へ（`xcap` と同じ形。Linux は対応対象外）
 
 ---

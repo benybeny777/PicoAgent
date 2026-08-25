@@ -25,5 +25,5 @@ description: PicoAgentへLLMプロバイダまたはツールコネクタを追�
 
 1. 正常系に加え、未設定、タイムアウト、権限外、破損状態、並列呼び出し、キャンセルをテストする。
 2. 関係する設計ガードを`guard_scan`共通走査で追加または更新する。ガードの例外で実装ミスを隠さない。
-3. SPECのインターフェースと一覧、READMEの設定、必要なCHANGELOGを同期する。
+3. SPECのインターフェースと一覧、READMEの設定を同期し、採否と検証結果をPR本文へ書く。
 4. `cargo check`、関係する単体テスト、設計ガード、`git diff --check`を通す。依存変更時は対象lockfileを`cargo audit`する。

@@ -845,7 +845,7 @@ PicoAgent/
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
 ├── tools/            ← 開発用の作業ツール（tha3-runtime/ はWindows開発用・Git管理外）
-├── docs/            ← 検討資料（layout-proposal.md など）と README 掲載画像（images/）
+├── docs/            ← 未完了タスク、販売・設計資料、README掲載画像（images/）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
     ├── resources/bundled/tha3/ ← 通常の開発ビルド用THA3（販売用軽量版には含めない）
@@ -861,9 +861,9 @@ PicoAgent/
 
 `ui/assets/characters/` は `characters/` の配信コピー、`ui/vendor/live2d/` は Live2D ランタイムで、いずれも自動生成・自動取得です。
 
-**ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [CHANGELOG.md](CHANGELOG.md)（変更履歴） / [AGENTS.md](AGENTS.md)（作業ルール） / [HANDOFF.md](HANDOFF.md)（引き継ぎメモ）
+**ドキュメント**: [README.md](README.md)（この文書） / [MANUAL.md](MANUAL.md)（使いかた） / [SPEC.md](SPEC.md)（仕様） / [AGENTS.md](AGENTS.md)（作業ルール） / [HANDOFF.md](HANDOFF.md)（未マージ作業） / [docs/TASKS.md](docs/TASKS.md)（未完了・条件待ち）
 
-**設計資料**: [docs/layout-proposal.md](docs/layout-proposal.md) — 表示形式 8 つの設計意図とモックアップ（実装済み） / [docs/oss-core-plan.md](docs/oss-core-plan.md) — エージェント中核のOSS化準備と公開条件。
+**設計資料**: [docs/oss-core-plan.md](docs/oss-core-plan.md) — エージェント中核のOSS化準備と公開条件。
 
 ---
 
