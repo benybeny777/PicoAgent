@@ -58,6 +58,9 @@ struct SessionState {
     kind: Option<Kind>,
     id: Option<String>,
     in_use: bool,
+    /// このCLIセッションへ最後に渡したsystem文脈。再開ターンは履歴を送り直さないため、
+    /// これと違う内容になったときだけ更新分を明示し、古い前提を置き換えさせる。
+    system: Option<String>,
 }
 
 tokio::task_local! {
@@ -89,6 +92,8 @@ pub fn session_identity(cfg: &Config, model: &str) -> String {
 struct SessionUse {
     session: Session,
     resume_id: Option<String>,
+    /// 再開先のCLIがすでに持っているsystem文脈。新規セッションでは `None`。
+    sent_system: Option<String>,
     committed: bool,
 }
 
@@ -101,20 +106,29 @@ impl SessionUse {
         if state.kind != Some(selected) {
             state.kind = Some(selected);
             state.id = None;
+            state.system = None;
         }
         state.in_use = true;
         let resume_id = state.id.clone();
+        let sent_system = state.system.clone();
         drop(state);
         Ok(Self {
             session,
             resume_id,
+            sent_system,
             committed: false,
         })
     }
 
-    fn commit(mut self, id: String) {
+    /// 再開先のCLIが持っている前提と、今回のリクエストの前提が食い違うか。
+    fn system_changed(&self, system: &str) -> bool {
+        self.sent_system.as_deref() != Some(system)
+    }
+
+    fn commit(mut self, id: String, system: String) {
         let mut state = self.session.inner.lock().unwrap();
         state.id = Some(id);
+        state.system = Some(system);
         state.in_use = false;
         self.committed = true;
     }
@@ -129,6 +143,7 @@ impl Drop for SessionUse {
         // 中断・解析失敗・CLI異常終了後のセッションは途中ターンを含む可能性がある。
         // 次回へ無言で引き継がず、新しい明示セッションからやり直す。
         state.id = None;
+        state.system = None;
         state.in_use = false;
     }
 }
@@ -359,6 +374,30 @@ fn flatten_for_resume(messages: &[Message], limit: usize) -> String {
         .map(|index| index + 1)
         .unwrap_or(0);
     flatten(&messages[start..], limit)
+}
+
+/// 会話のsystemを1つの文字列にまとめる。検索連動の長期メモリ・プロジェクト文脈・関係性文脈は
+/// リクエストごとにここへ差し込まれるため、再開ターンでも変化を検出できるようにする。
+fn system_text(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .filter(|message| message.role == "system" && !message.content.trim().is_empty())
+        .map(|message| message.content.trim())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// 再開中のCLIは初回ターンのsystemしか知らない。前提が変わったターンでは最新版を明示して渡し、
+/// 古い長期メモリやプロジェクト文脈のまま答えさせない。
+fn resumed_system_block(system: &str, limit: usize) -> String {
+    const HEAD: &str = "［前提の更新］ここまでの前提は次の内容へ置き換えてください。";
+    let body_limit = limit
+        .saturating_sub(HEAD.chars().count() + 1)
+        .min(MAX_SYSTEM_CHARS);
+    if body_limit == 0 {
+        return String::new();
+    }
+    format!("{HEAD}\n{}", truncate_keep_edges(system.trim(), body_limit))
 }
 
 /// CLIは更新案内やログイン案内を本文の前後へ混ぜることがある。1行ずつ試して
@@ -602,19 +641,37 @@ impl Provider for AgentCli {
         let conversation_limit = MAX_PROMPT_CHARS
             .saturating_sub(instruction_chars.saturating_add(2))
             .max(1_000);
+        let current_system = system_text(messages);
         let mut prompt = if session_use
             .as_ref()
             .and_then(|session| session.resume_id.as_ref())
             .is_some()
         {
+            // 再開ターンは履歴を送り直さないので、systemが変わっていれば更新分だけ先に渡す。
+            // これが無いと、検索連動の長期メモリ・プロジェクト文脈・関係性文脈が初回ターンの
+            // 内容のまま固定され、切り替えても古い前提で答え続ける。
+            let system_block = if session_use
+                .as_ref()
+                .is_some_and(|session| session.system_changed(&current_system))
+                && !current_system.trim().is_empty()
+            {
+                resumed_system_block(&current_system, conversation_limit / 2)
+            } else {
+                String::new()
+            };
+            let rest_limit = conversation_limit
+                .saturating_sub(system_block.chars().count() + 2)
+                .max(1_000);
             // 自己評価の再生成のように、末尾がassistantのまま呼ばれると差分が空になる。
             // そのまま空プロンプトで失敗させるとセッションIDまで破棄され、次ターンの
-            // 会話継続が黙って切れるため、この呼び出しだけ会話全文へ戻す。
-            let diff = flatten_for_resume(messages, conversation_limit);
+            // 会話継続が黙って切れるため、この呼び出しだけ会話全文へ戻す（systemを含む）。
+            let diff = flatten_for_resume(messages, rest_limit);
             if diff.trim().is_empty() {
                 flatten(messages, conversation_limit)
-            } else {
+            } else if system_block.is_empty() {
                 diff
+            } else {
+                format!("{system_block}\n\n{diff}")
             }
         } else {
             flatten(messages, conversation_limit)
@@ -667,7 +724,10 @@ impl Provider for AgentCli {
                         );
                     }
                 }
-                session_use.take().unwrap().commit(returned_id);
+                session_use
+                    .take()
+                    .unwrap()
+                    .commit(returned_id, current_system.clone());
                 content
             }
             Kind::Codex if session_use.is_some() => {
@@ -685,7 +745,10 @@ impl Provider for AgentCli {
                         );
                     }
                 }
-                session_use.take().unwrap().commit(returned_id);
+                session_use
+                    .take()
+                    .unwrap()
+                    .commit(returned_id, current_system.clone());
                 content
             }
             _ => raw,
@@ -709,7 +772,8 @@ mod tests {
     use super::{
         flatten, flatten_for_resume, kind, kind_for_model, lead_args, lead_args_for_kind,
         parse_claude_session_output, parse_codex_session_output, parse_tool_call, program,
-        program_for_kind, session_args_for_kind, timeout_secs, tool_instructions, Kind,
+        program_for_kind, resumed_system_block, session_args_for_kind, system_text, timeout_secs,
+        tool_instructions, Kind,
         Session, SessionUse, MAX_PROMPT_CHARS,
     };
     use crate::config::Config;
@@ -735,6 +799,43 @@ mod tests {
         let diff = flatten_for_resume(&next, 1_000);
         assert!(diff.contains("次の質問"));
         assert!(!diff.contains("前の質問"));
+    }
+
+    #[test]
+    fn 再開中にsystemが変わったターンだけ前提を送り直す() {
+        let session = Session::new();
+        // 初回ターン：全文を送るので、そのときのsystemを覚える。
+        SessionUse::begin(session.clone(), Kind::Claude)
+            .unwrap()
+            .commit("session-1".to_string(), "人格\n\n[プロジェクト文脈]\nA\n[/プロジェクト文脈]".to_string());
+
+        // 同じ前提の再開ターンでは更新分を足さない。
+        let same = SessionUse::begin(session.clone(), Kind::Claude).unwrap();
+        assert_eq!(same.resume_id.as_deref(), Some("session-1"));
+        assert!(!same.system_changed("人格\n\n[プロジェクト文脈]\nA\n[/プロジェクト文脈]"));
+        // プロジェクトを切り替えた（＝systemが書き換わった）ターンでは送り直す。
+        assert!(same.system_changed("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]"));
+        same.commit("session-1".to_string(), "人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]".to_string());
+
+        // 送り直した内容が次ターンの基準になる。
+        let next = SessionUse::begin(session, Kind::Claude).unwrap();
+        assert!(!next.system_changed("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]"));
+
+        let block = resumed_system_block("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]", 1_000);
+        assert!(block.starts_with("［前提の更新］"));
+        assert!(block.contains("[プロジェクト文脈]\nB"));
+    }
+
+    #[test]
+    fn systemの本文だけを取り出して変化を見る() {
+        let messages = [
+            Message::new("system", "  人格  "),
+            Message::new("user", "質問"),
+            Message::new("system", "追加の前提"),
+            Message::new("system", "   "),
+        ];
+        assert_eq!(system_text(&messages), "人格\n\n追加の前提");
+        assert!(system_text(&[Message::new("user", "質問")]).is_empty());
     }
 
     #[test]
@@ -830,7 +931,7 @@ mod tests {
         let session = Session::new();
         SessionUse::begin(session.clone(), Kind::Claude)
             .unwrap()
-            .commit("session-1".to_string());
+            .commit("session-1".to_string(), "人格".to_string());
         let resumed = SessionUse::begin(session.clone(), Kind::Claude).unwrap();
         assert_eq!(resumed.resume_id.as_deref(), Some("session-1"));
         drop(resumed); // commitせず終了＝中断・解析失敗
