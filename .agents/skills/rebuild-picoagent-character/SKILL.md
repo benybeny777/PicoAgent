@@ -63,4 +63,4 @@ cargo check --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
 
-画像を追加・更新したコミットでは `git lfs ls-files` に対象PNG／WebPが載ることも確認する。READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。通常2Dの実行画像を変えた場合は `SHOOT_CHARACTER_MATRIX=1` で全キャラ・全7形式を撮影し、速度警告0件と実画像の欠け・矩形・輪郭劣化なしを確認する。実画面の確認後にREADME、配布README、LP、`SPEC.md`、`CHANGELOG.md`、`docs/REVIEW-LOG.md`を同期する。
+画像を追加・更新したコミットでは `git lfs ls-files` に対象PNG／WebPが載ることも確認する。READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。通常2Dの実行画像を変えた場合は `SHOOT_CHARACTER_MATRIX=1` で全キャラ・全7形式を撮影し、速度警告0件と実画像の欠け・矩形・輪郭劣化なしを確認する。実画面の確認後にREADME、配布README、LP、`SPEC.md`を同期し、採否と検証結果をPR本文へ書く。未確認項目だけを`docs/TASKS.md`へ残す。

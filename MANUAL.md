@@ -2,7 +2,7 @@
 
 デスクトップに住むキャラクターに話しかけるだけで、調べもの・ファイル操作・文書/画像/音声の変換・外部サービス連携までこなすローカルファーストの AI エージェント「PicoAgent」の総合マニュアルです。導入から日常の使いかた、スキル活用、ローカル API、セキュリティまでを一冊にまとめています。
 
-- 開発者向けの内部仕様は [SPEC.md](SPEC.md)、AI エージェント向け作業ルールは [AGENTS.md](AGENTS.md)、概要と最新情報は [README.md](README.md) / [CHANGELOG.md](CHANGELOG.md) を参照してください。
+- 開発者向けの内部仕様は [SPEC.md](SPEC.md)、AIエージェント向け作業ルールは [AGENTS.md](AGENTS.md)、概要と利用条件は [README.md](README.md) を参照してください。変更の経緯はGitHubのPR、公開版の変更点は配布RepoのRelease notesが正本です。
 
 ---
 

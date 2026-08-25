@@ -32,7 +32,7 @@ description: PicoAgentの開発中アルファ版をWindows NSISまたはUbuntu 
 3. `minor`と`major`はユーザーが版を上げるよう明示した場合だけ選ぶ。機能内容から独断で上げない。
 5. `cargo xtask bump-version <major|minor|patch>`を1回だけ実行する。アプリCargo、xtask Cargo、Tauri設定を個別に編集しない。
 6. 公開済みと同じ版のRelease資産を上書きしない。採番後の版で新しいプレリリースを作る。
-7. 判定した種別と理由を`docs/REVIEW-LOG.md`へ記録する。
+7. 判定した種別と理由をPR本文へ記録する。
 8. `patch`版もLP、アプリ、ファイル名、Releaseへ正確に表示する。起動時の自動確認ではpatchを通知せず、利用者が設定から手動確認した場合だけpatchも案内・ダウンロードできるようにする。`major.minor`が上がった場合は起動時にも通知する。
 9. アルファ期間中は製品表示、LP、更新説明、Release名へ`Alpha`を付ける。比較用SemVerとタグには接尾辞を混ぜず数値版を使う。
 
@@ -66,6 +66,6 @@ description: PicoAgentの開発中アルファ版をWindows NSISまたはUbuntu 
 
 ## 記録
 
-- `docs/REVIEW-LOG.md`へ対応、見送り、実機確認境界、成果物のサイズとSHA-256を残す。
-- `README.md`、`SPEC.md`、`CHANGELOG.md`、`HANDOFF.md`を同じ作業で同期する。
+- PR本文へ対応、見送り、実機確認境界、成果物のサイズとSHA-256を残す。公開版の利用者向け変更点は21側のRelease notesへ版単位で書く。
+- `README.md`と`SPEC.md`を現行状態へ同期する。未完了は`docs/TASKS.md`、未マージ作業の再開情報だけは`HANDOFF.md`へ反映する。
 - インストーラを実際に起動する試験は、既存アプリや利用中画面を妨げない条件を確認する。実行できなければ、未確認境界として明記する。

@@ -290,26 +290,6 @@ mod tests {
     }
 
     #[test]
-    fn 変更履歴の年別リンクが存在する() {
-        let root = super::repo_root();
-        let changelog = std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap();
-        let mut checked = 0;
-        for segment in changelog.split("](").skip(1) {
-            let Some(target) = segment.split(')').next() else {
-                continue;
-            };
-            if target.starts_with("docs/changelog/") {
-                checked += 1;
-                assert!(
-                    root.join(target).is_file(),
-                    "変更履歴リンクが切れています: {target}"
-                );
-            }
-        }
-        assert!(checked > 0, "年別変更履歴へのリンクがありません");
-    }
-
-    #[test]
     fn 販売資料のスキル数が実装と一致する() {
         let root = super::repo_root();
         let skill_count = std::fs::read_dir(root.join("skills"))
