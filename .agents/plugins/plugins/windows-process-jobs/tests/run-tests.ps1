@@ -8,6 +8,10 @@ $testBase = Join-Path $pluginRoot 'temp-tests'
 $testRoot = Join-Path $testBase ([Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 $env:WINDOWS_PROCESS_JOBS_HOME = $testRoot
+$env:WINDOWS_PROCESS_JOBS_DISABLE_OS_NOTIFICATION = '1'
+$env:WINDOWS_PROCESS_JOBS_DISABLE_CODEX_QUEUE = '1'
+$env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS = '1'
+$env:CODEX_THREAD_ID = '00000000-0000-0000-0000-000000000001'
 
 function Invoke-Job([string[]]$Arguments) {
     $text = & $pwsh -NoProfile -File $jobScript @Arguments
@@ -30,6 +34,13 @@ function Assert-Equal($Actual, $Expected, [string]$Message) {
 }
 
 try {
+    $claudeEnvFile = Join-Path $testRoot 'claude-env.sh'
+    $env:CLAUDE_ENV_FILE = $claudeEnvFile
+    '{"hook_event_name":"SessionStart","session_id":"claude-session-test-0001"}' | node (Join-Path $pluginRoot 'hooks\session-hook.mjs')
+    if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $claudeEnvFile) -notmatch "WINDOWS_PROCESS_JOBS_OWNER_THREAD_ID='claude-session-test-0001'") {
+        throw 'Claude Codeの所有セッション引き継ぎを作成できません'
+    }
+
     $success = Invoke-Job @(
         'start', '--name', 'success', '--cwd', $pluginRoot, '--estimate-minutes', '5', '--',
         $pwsh, '-NoProfile', '-Command',
@@ -42,6 +53,36 @@ try {
     if ($successResult.timing.PSObject.Properties.Name -match 'seconds') { throw '利用者向け時間表示に秒が含まれています' }
     if ($successResult.stdout_tail -notcontains 'success-output') { throw '標準出力を取得できません' }
     if ($successResult.stderr_tail -notcontains 'success-error') { throw '標準エラーを取得できません' }
+    $successEvents = @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $testRoot $success.id) 'events') -Filter '*.json')
+    $successEventValues = @($successEvents | ForEach-Object { Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName | ConvertFrom-Json })
+    if (@($successEventValues | Where-Object kind -eq 'completion').Count -ne 1) { throw '成功完了通知イベントが1件ではありません' }
+    Assert-Equal $successResult.record.notification.owner_thread_id $env:CODEX_THREAD_ID '通知先スレッドが保存されていません'
+    Assert-Equal $successResult.record.notification.last_delivery.event_saved $true '通知イベント保存結果が記録されていません'
+
+    $progress = Invoke-Job @(
+        'start', '--name', 'progress', '--cwd', $pluginRoot, '--estimate-minutes', '5', '--',
+        $pwsh, '-NoProfile', '-Command', 'Start-Sleep -Seconds 5'
+    )
+    $progressResult = Wait-Terminal $progress.id
+    Assert-Equal $progressResult.record.status 'succeeded' '進捗通知ジョブが成功しません'
+    if ($progressResult.record.notification.progress_count -lt 2) { throw '定期進捗通知が複数回作成されません' }
+    $progressEvents = @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $testRoot $progress.id) 'events') -Filter '*.json')
+    if (@($progressEvents | ForEach-Object { Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName | ConvertFrom-Json } | Where-Object kind -eq 'progress').Count -lt 2) {
+        throw '進捗通知イベントが不足しています'
+    }
+
+    $hook = Join-Path $pluginRoot 'hooks\notification-hook.mjs'
+    $hookInput = [ordered]@{ hook_event_name = 'UserPromptSubmit'; thread_id = $env:CODEX_THREAD_ID } | ConvertTo-Json -Compress
+    $hookOutput = $hookInput | node $hook | ConvertFrom-Json
+    if ($hookOutput.hookSpecificOutput.additionalContext -notmatch 'バックグラウンドで実行中') { throw 'フックが進捗通知を会話へ返しません' }
+
+    $quiet = Invoke-Job @(
+        'start', '--name', 'quiet', '--cwd', $pluginRoot, '--no-notify', '--',
+        $pwsh, '-NoProfile', '-Command', "Write-Output 'quiet-output'"
+    )
+    $quietResult = Wait-Terminal $quiet.id
+    Assert-Equal $quietResult.record.status 'succeeded' '通知なしジョブが成功しません'
+    if (Test-Path -LiteralPath (Join-Path (Join-Path $testRoot $quiet.id) 'events')) { throw '通知なしジョブがイベントを作成しました' }
 
     $failure = Invoke-Job @(
         'start', '--name', 'failure', '--cwd', $pluginRoot, '--',
@@ -111,6 +152,8 @@ Wait-Process -Id $child.Id
 
     [ordered]@{
         success = $success.id
+        progress = $progress.id
+        quiet = $quiet.id
         failure = $failure.id
         cancelled = $cancel.id
         rerun = $rerun.id
