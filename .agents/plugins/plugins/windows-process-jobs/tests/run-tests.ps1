@@ -10,7 +10,6 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 $env:WINDOWS_PROCESS_JOBS_HOME = $testRoot
 $env:WINDOWS_PROCESS_JOBS_DISABLE_OS_NOTIFICATION = '1'
 $env:WINDOWS_PROCESS_JOBS_DISABLE_CODEX_QUEUE = '1'
-$env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS = '1'
 $env:CODEX_THREAD_ID = '00000000-0000-0000-0000-000000000001'
 
 function Invoke-Job([string[]]$Arguments) {
@@ -59,22 +58,32 @@ try {
     Assert-Equal $successResult.record.notification.owner_thread_id $env:CODEX_THREAD_ID '通知先スレッドが保存されていません'
     Assert-Equal $successResult.record.notification.last_delivery.event_saved $true '通知イベント保存結果が記録されていません'
 
-    $progress = Invoke-Job @(
-        'start', '--name', 'progress', '--cwd', $pluginRoot, '--estimate-minutes', '5', '--',
+    $completionOnly = Invoke-Job @(
+        'start', '--name', 'completion-only', '--cwd', $pluginRoot, '--estimate-minutes', '5', '--',
         $pwsh, '-NoProfile', '-Command', 'Start-Sleep -Seconds 5'
     )
-    $progressResult = Wait-Terminal $progress.id
-    Assert-Equal $progressResult.record.status 'succeeded' '進捗通知ジョブが成功しません'
-    if ($progressResult.record.notification.progress_count -lt 2) { throw '定期進捗通知が複数回作成されません' }
-    $progressEvents = @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $testRoot $progress.id) 'events') -Filter '*.json')
-    if (@($progressEvents | ForEach-Object { Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName | ConvertFrom-Json } | Where-Object kind -eq 'progress').Count -lt 2) {
-        throw '進捗通知イベントが不足しています'
+    $controllerDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        Start-Sleep -Milliseconds 100
+        $completionOnlyStatus = Invoke-Job @('status', $completionOnly.id, '--json')
+    } while (-not $completionOnlyStatus.record.controller.started_at_utc -and [DateTime]::UtcNow -lt $controllerDeadline)
+    if (-not $completionOnlyStatus.record.controller.started_at_utc) { throw '管理プロセスの起動を確認できません' }
+    $controllerProcess = Get-Process -Id $completionOnlyStatus.record.controller.pid -ErrorAction Stop
+    Assert-Equal $controllerProcess.MainWindowHandle 0 '管理プロセスの画面が表示されています'
+    $completionOnlyResult = Wait-Terminal $completionOnly.id
+    Assert-Equal $completionOnlyResult.record.status 'succeeded' '完了時だけ通知するジョブが成功しません'
+    $completionOnlyEvents = @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $testRoot $completionOnly.id) 'events') -Filter '*.json')
+    Assert-Equal $completionOnlyEvents.Count 1 '完了以外の通知イベントが作成されました'
+    $completionOnlyEvent = Get-Content -Raw -Encoding UTF8 -LiteralPath $completionOnlyEvents[0].FullName | ConvertFrom-Json
+    Assert-Equal $completionOnlyEvent.kind 'completion' '通知イベントが完了通知ではありません'
+    if ($completionOnlyResult.record.notification.PSObject.Properties.Name -match 'progress|interval') {
+        throw '廃止した定期進捗の状態が記録に残っています'
     }
 
     $hook = Join-Path $pluginRoot 'hooks\notification-hook.mjs'
     $hookInput = [ordered]@{ hook_event_name = 'UserPromptSubmit'; thread_id = $env:CODEX_THREAD_ID } | ConvertTo-Json -Compress
     $hookOutput = $hookInput | node $hook | ConvertFrom-Json
-    if ($hookOutput.hookSpecificOutput.additionalContext -notmatch 'バックグラウンドで実行中') { throw 'フックが進捗通知を会話へ返しません' }
+    if ($hookOutput.hookSpecificOutput.additionalContext -notmatch '完了しました') { throw 'フックが完了通知を会話へ返しません' }
 
     $quiet = Invoke-Job @(
         'start', '--name', 'quiet', '--cwd', $pluginRoot, '--no-notify', '--',
@@ -152,7 +161,7 @@ Wait-Process -Id $child.Id
 
     [ordered]@{
         success = $success.id
-        progress = $progress.id
+        completion_only = $completionOnly.id
         quiet = $quiet.id
         failure = $failure.id
         cancelled = $cancel.id

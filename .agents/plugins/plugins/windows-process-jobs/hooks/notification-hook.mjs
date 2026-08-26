@@ -37,7 +37,7 @@ function validEvent(value, owner) {
     && value.schema_version === 1
     && value.owner_thread_id === owner
     && /^[A-Za-z0-9._-]{8,160}$/.test(value.id)
-    && ["progress", "completion"].includes(value.kind)
+    && value.kind === "completion"
     && typeof value.message === "string"
     && value.message.length > 0
     && value.message.length <= 1000;
@@ -76,7 +76,7 @@ if (owner) {
   const events = claimEvents(owner);
   if (events.length > 0) {
     const context = [
-      "Windows Process Jobsの検証済み通知です。利用者への回答の冒頭で、次の各通知を簡潔に伝えてください。進捗は推定であり、完了と断定しないでください。",
+      "Windows Process Jobsの検証済み完了通知です。利用者への回答の冒頭で、次の各通知を簡潔に伝えてください。",
       ...events.map((event) => `- ${event.message}`),
     ].join("\n");
     process.stdout.write(JSON.stringify({

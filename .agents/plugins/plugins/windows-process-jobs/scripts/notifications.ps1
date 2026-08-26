@@ -1,10 +1,3 @@
-function Get-NotificationIntervalSeconds([object]$Record) {
-    if ($Record.notification.PSObject.Properties['interval_seconds_override'] -and $Record.notification.interval_seconds_override) {
-        return [Math]::Max(1, [double]$Record.notification.interval_seconds_override)
-    }
-    return [Math]::Max(60, [double]$Record.notification.interval_minutes * 60)
-}
-
 function Show-WindowsNotification([string]$Title, [string]$Message) {
     if ($env:WINDOWS_PROCESS_JOBS_DISABLE_OS_NOTIFICATION -eq '1') { return $false }
     try {
@@ -60,21 +53,17 @@ function Send-CodexQueue([string]$ThreadId, [string]$Message) {
     }
 }
 
-function Publish-Notification([object]$Record, [string]$JobDirectory, [string]$Kind) {
+function Publish-Notification([object]$Record, [string]$JobDirectory) {
     if (-not $Record.notification -or -not $Record.notification.enabled) {
         return [ordered]@{ success = $true; event_saved = $false; os_sent = $false; queue_sent = $false; error = $null }
     }
     $timing = Get-Timing $Record
-    $message = if ($Kind -eq 'progress') {
-        "Windows Process Jobs: $($Record.id) はバックグラウンドで実行中です。経過$($timing.elapsed)、残り目安$($timing.remaining_estimate)。"
-    } else {
-        $outcome = switch ($Record.status) {
-            'succeeded' { '完了しました' }
-            'cancelled' { '取り消されました' }
-            default { "失敗しました（終了コード$($Record.exit_code)）" }
-        }
-        "Windows Process Jobs: $($Record.id) は$outcome。経過$($timing.elapsed)。"
+    $outcome = switch ($Record.status) {
+        'succeeded' { '完了しました' }
+        'cancelled' { '取り消されました' }
+        default { "失敗しました（終了コード$($Record.exit_code)）" }
     }
+    $message = "Windows Process Jobs: $($Record.id) は$outcome。経過$($timing.elapsed)。"
     try {
         $eventDirectory = Join-Path $JobDirectory 'events'
         New-Item -ItemType Directory -Force -Path $eventDirectory | Out-Null
@@ -82,7 +71,7 @@ function Publish-Notification([object]$Record, [string]$JobDirectory, [string]$K
             schema_version = 1
             id = $Record.id
             owner_thread_id = $Record.notification.owner_thread_id
-            kind = $Kind
+            kind = 'completion'
             status = $Record.status
             elapsed = $timing.elapsed
             remaining_estimate = $timing.remaining_estimate
@@ -100,19 +89,4 @@ function Publish-Notification([object]$Record, [string]$JobDirectory, [string]$K
     } catch {
         return [ordered]@{ success = $false; event_saved = $false; os_sent = $false; queue_sent = $false; error = $_.Exception.Message }
     }
-}
-
-function Invoke-ProgressNotification([object]$Record, [string]$JobDirectory, [string]$RecordPath) {
-    if (-not $Record.PSObject.Properties['notification'] -or -not $Record.notification -or -not $Record.notification.enabled) { return }
-    $lastValue = if ($Record.notification.last_progress_at_utc) { $Record.notification.last_progress_at_utc } else { $Record.started_at_utc }
-    if (-not $lastValue) { return }
-    $elapsed = ([DateTime]::UtcNow - ([DateTimeOffset]$lastValue).UtcDateTime).TotalSeconds
-    if ($elapsed -lt (Get-NotificationIntervalSeconds $Record)) { return }
-    [void](Update-EstimateIfNeeded $Record)
-    $published = Publish-Notification $Record $JobDirectory 'progress'
-    $Record.notification.last_error = $published.error
-    $Record.notification.last_delivery = $published
-    $Record.notification.progress_count = [int]$Record.notification.progress_count + 1
-    $Record.notification.last_progress_at_utc = [DateTime]::UtcNow.ToString('o')
-    Write-JsonAtomic $RecordPath $Record
 }

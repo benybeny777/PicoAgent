@@ -142,8 +142,12 @@ function Start-Controller([string]$JobDirectory) {
     $escapedScript = $PSCommandPath.Replace('"', '\"')
     $escapedDir = $JobDirectory.Replace('"', '\"')
     $commandLine = "`"$escapedPwsh`" -NoProfile -File `"$escapedScript`" worker --job-dir `"$escapedDir`""
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+        ShowWindow = [uint16]0
+    }
     $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
         CommandLine = $commandLine
+        ProcessStartupInformation = $startup
     }
     if ($created.ReturnValue -ne 0 -or -not $created.ProcessId) {
         throw "管理プロセスを開始できません: Win32_Process.Create=$($created.ReturnValue)"
@@ -182,13 +186,9 @@ function New-Job([object]$Request, [string]$Name, [bool]$Critical, [object]$Esti
         }
         notification = [ordered]@{
             enabled = [bool](Get-OptionalValue $Request 'notify' $true)
-            interval_minutes = Get-OptionalValue $Request 'notify_interval_minutes' 10.0
             owner_thread_id = Get-OptionalValue $Request 'owner_thread_id'
-            interval_seconds_override = Get-OptionalValue $Request 'notification_interval_seconds_override'
             os_disabled = [bool](Get-OptionalValue $Request 'notification_os_disabled' $false)
             queue_disabled = [bool](Get-OptionalValue $Request 'notification_queue_disabled' $false)
-            progress_count = 0
-            last_progress_at_utc = $null
             completion_sent_at_utc = $null
             last_error = $null
             last_delivery = $null
@@ -216,7 +216,6 @@ function Parse-Start([string[]]$Arguments) {
     $critical = $false
     $estimatedMinutes = $null
     $notify = $true
-    $notifyIntervalMinutes = 10.0
     $separator = [Array]::IndexOf($Arguments, '--')
     if ($separator -lt 0 -or $separator -eq $Arguments.Count - 1) {
         throw 'startは「-- 実行ファイル 引数...」を必要とします'
@@ -231,12 +230,6 @@ function Parse-Start([string[]]$Arguments) {
                 $minutes = [double]$Arguments[$i]
                 if ($minutes -le 0) { throw '--estimate-minutesは0より大きい値が必要です' }
                 $estimatedMinutes = [Math]::Round($minutes, 1)
-            }
-            '--notify-interval-minutes' {
-                if (++$i -ge $separator) { throw '--notify-interval-minutesの値がありません' }
-                $minutes = [double]$Arguments[$i]
-                if ($minutes -lt 1) { throw '--notify-interval-minutesは1以上が必要です' }
-                $notifyIntervalMinutes = [Math]::Round($minutes, 1)
             }
             '--no-notify' { $notify = $false }
             '--json' { }
@@ -258,11 +251,7 @@ function Parse-Start([string[]]$Arguments) {
         arguments = @($payload | Select-Object -Skip 1)
         cwd = $resolvedCwd
         notify = $notify
-        notify_interval_minutes = $notifyIntervalMinutes
         owner_thread_id = $ownerThreadId
-        notification_interval_seconds_override = if ($env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS) {
-            [Math]::Max(1, [double]$env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS)
-        } else { $null }
         notification_os_disabled = $env:WINDOWS_PROCESS_JOBS_DISABLE_OS_NOTIFICATION -eq '1'
         notification_queue_disabled = $env:WINDOWS_PROCESS_JOBS_DISABLE_CODEX_QUEUE -eq '1'
     }
@@ -375,14 +364,12 @@ function Invoke-Worker([string]$JobDirectory) {
             Write-JsonAtomic $recordPath $record
             $cancelled = $false
             while (-not $managed.WaitForExit(250)) {
-                Invoke-ProgressNotification $record $JobDirectory $recordPath
                 if (Test-Path -LiteralPath (Join-Path $JobDirectory 'cancel.request') -PathType Leaf) {
                     $cancelled = $true
                     $managed.RequestCancel(5000)
                     break
                 }
             }
-            Invoke-ProgressNotification $record $JobDirectory $recordPath
             $outcome = $managed.Finish($cancelled)
             $record.exit_code = $outcome.ExitCode
             $record.status = if ($outcome.Cancelled) { 'cancelled' } elseif ($outcome.ExitCode -eq 0) { 'succeeded' } else { 'failed' }
@@ -396,7 +383,7 @@ function Invoke-Worker([string]$JobDirectory) {
         $record.finished_at_utc = [DateTime]::UtcNow.ToString('o')
         Write-JsonAtomic $recordPath $record
         if ($record.PSObject.Properties['notification'] -and $record.notification -and $record.notification.enabled -and -not $record.notification.completion_sent_at_utc) {
-            $published = Publish-Notification $record $JobDirectory 'completion'
+            $published = Publish-Notification $record $JobDirectory
             $record.notification.last_error = $published.error
             $record.notification.last_delivery = $published
             $record.notification.completion_sent_at_utc = [DateTime]::UtcNow.ToString('o')
