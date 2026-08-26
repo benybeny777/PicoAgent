@@ -84,9 +84,9 @@ impl Config {
         if let Some(v) = self.values.lock().unwrap().get(key) {
             if let Some(s) = v.as_str() {
                 if !s.is_empty() {
-                    // シークレットは暗号化保存されているため、読み取り時に復号する（非暗号値は素通り）。
+                    // シークレットはOSの資格情報保護へ預けてあるため、読み取り時に復号する（非保護値は素通り）。
                     let decrypted = crate::secret::decrypt(s);
-                    // 復号できないまま暗号文が残るのは、別PC・別Windowsユーザーの
+                    // 復号できないまま保護形式が残るのは、別PC・別OSユーザー・別OSの
                     // `config.json` を持ち込んだ場合。以前はその暗号文をそのまま
                     // APIキーとして外部サービスへ送っており、返ってくるのは 401 で、
                     // 利用者には原因が分からなかった。**この端末では使えない値**なので

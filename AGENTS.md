@@ -90,7 +90,7 @@
 - 設定画面（右クリック →「設定…」）が唯一の GUI 設定入口。`ui/settings.{html,css,js}` と `commands.rs` の `settings_*` command で構成し、保存後は実行中に反映する（コネクタは `cfg.get()` で都度読むため再起動不要）。
 - API キー・トークン等のシークレットはコミットしない。ログ・エラーメッセージ・ドキュメントに値を出さない。OpenAI 互換プロバイダの `Authorization`（`bearer_auth`）など秘密値を含む箇所は、エラー文へ連結しない。`config.json` はローカル個人 PC 専用で、リポジトリにコミットしない（`app_config_dir` 配下に保存される）。
 - **API キー・トークン等は必ず `type="password"` で申告し、キー名に `API_KEY` / `TOKEN` / `SECRET` / `PASSWORD` / `WEBHOOK` / `CREDENTIAL` のいずれかを含める。** 暗号化の要否は「スキーマでの password 申告」に加えて**キー名でも判定する**（`secret::is_secret_key`）。スキーマ（`config_schema()`）に載らない設定項目——設定画面 `ui/settings.js` が直接組み立てる `field(...)` など——は型申告だけでは拾えないため（実際にローカル API の `PICOAGENT_API_KEY` がこの経路で平文保存されていた）。`secret::guard` のテストが (1) コネクタのスキーマで秘密っぽいキーが password 型でない申告、(2) 設定画面の password 項目が `is_secret_key` に載らない名前、の両方を検出して失敗させる。
-- 設定スキーマで `type="password"` の値（API キー等）は平文で `config.json` に置かない。Windows では DPAPI（`src-tauri/src/secret.rs`）で暗号化して `enc:dpapi:v1:` 形式で保存し、`config.get()` が読み取り時に透過的に復号する（同一 Windows ユーザーのみ復号可能）。既存の平文値は起動時に自動で暗号化へ移行する。**復号できないまま暗号文が残る値（別PC・別Windowsユーザーの `config.json` を持ち込んだ場合）は `config.get()` が未設定として扱う。**以前は暗号文をそのままAPIキーとして外部サービスへ送っており、返るのは 401 だけで原因が分からなかった。未設定にすることで各プロバイダの「設定画面で入力してください」という案内へ乗る（保存値自体は上書きしない）。非 Windows は DPAPI が無いため平文保存（フォールバック許可）。新しいシークレット設定は必ず `type="password"` で申告し、この暗号化経路に乗せる。
+- 設定スキーマで `type="password"` の値（API キー等）は平文で `config.json` に置かない。OSの資格情報保護（`src-tauri/src/secret.rs`）へ預ける。Windows は DPAPI で暗号化して `enc:dpapi:v1:` 形式、macOS はログインキーチェーンへ預けて `enc:keychain:v1:<設定キー>` 形式で保存し（`config.json` に秘密そのものは残らない）、`config.get()` が読み取り時に透過的に復号する（同一PCの同一OSユーザーのみ復号可能）。既存の平文値は起動時に自動で移行し、設定を空にしたときは `secret::forget()` がキーチェーン側の実体も消す。**復号できないまま保護形式が残る値（別PC・別OSユーザー・別OSの `config.json` を持ち込んだ場合）は `config.get()` が未設定として扱う。**以前は暗号文をそのままAPIキーとして外部サービスへ送っており、返るのは 401 だけで原因が分からなかった。未設定にすることで各プロバイダの「設定画面で入力してください」という案内へ乗る（保存値自体は上書きしない）。Linux は同等のOS機能を使っていないため平文保存（フォールバック許可）。新しいシークレット設定は必ず `type="password"` で申告し、この暗号化経路に乗せる。
 
 ## コネクタ開発ルール（このプロジェクトの中核）
 
@@ -154,7 +154,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで7形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。旧 `talk` はLINE風の `chat` へ移行する。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
 | `src-tauri/src/window_surface.rs` | メインウィンドウを利用者の目の前へ出す共通手順（表示 → 最小化解除 → 前面化）。ホットキー呼び出しと、多重起動時に2つ目の起動が既存ウィンドウを前面化する経路が共有する |
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
-| `src-tauri/src/secret.rs` | シークレット（`password` 型設定）の DPAPI 暗号化／復号（Windows）。非 Windows は平文 |
+| `src-tauri/src/secret.rs` | シークレット（`password` 型設定）をOSの資格情報保護へ預ける（Windows は DPAPI、macOS はログインキーチェーン）。Linux は平文 |
 | `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |
 | `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |

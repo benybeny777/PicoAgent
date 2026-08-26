@@ -209,7 +209,7 @@ pub fn run() {
                     &format!("削除済みのむぎLive2D選択を移行できませんでした: {error}"),
                 ),
             }
-            // 既存の平文 API キー等を DPAPI 暗号化へ移行する（次回保存を待たず保護する）。
+            // 既存の平文 API キー等をOSの資格情報保護へ移行する（次回保存を待たず保護する）。
             commands::encrypt_existing_secrets(app.handle(), &state.config);
             // ログ置き場は起動時に作っておき、Aivis と同梱エンジンのログをここへ集約する。
             if let Err(error) = log_paths::ensure_log_dir(app.handle()) {

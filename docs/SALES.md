@@ -75,7 +75,7 @@ B 群（OSS）に対して「ソースが見えない」不利が生じます。
 | B6 | **第三者ソフトのライセンス台帳** | 外部ツールのライセンスは一律ではない。例として[FFmpeg](https://ffmpeg.org/legal.html)はビルド構成によりLGPL/GPL、[ImageMagick](https://imagemagick.org/license/)は独自の許諾、[qpdf](https://qpdf.readthedocs.io/en/stable/license.html)はApache-2.0、[ripgrep](https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#how-is-ripgrep-licensed)はMIT/Unlicense | 販売版はTHA3／LibreOffice／文書・メディアツールを再配布しない。Aivis／Whisperの直接取得と開発版同梱物を含め、実際の版・ビルド・依存物ごとに台帳と表示義務を確認する |
 | B7 | **モデルの利用規約** | Gemma / Qwen / Llama は各々の規約 | 初回 DL 時に規約同意 UI を挟む |
 | B8 | **コード署名・自動更新** | **初期方針決定済み。** Windows先行版は未署名・利用者操作のアプリ内更新で開始し、SmartScreen警告を事前表示する | 初期販売ではブロッカーにしない。将来導入時は `signing.required` / `updates.required` を有効にし、署名・公開鍵・成果物生成をゲートへ戻す |
-| B9 | **ライセンスキー** | **実装済み。** Ed25519署名済み `PA1.` キーをオフライン検証し、WindowsではDPAPI暗号化保存 | BOOTHの実注文で発行・再発行・返金時の運用を確認する。Steam所有確認は将来対応 |
+| B9 | **ライセンスキー** | **実装済み。** Ed25519署名済み `PA1.` キーをオフライン検証し、WindowsはDPAPI、macOSはログインキーチェーンへ預けて保存 | BOOTHの実注文で発行・再発行・返金時の運用を確認する。Steam所有確認は将来対応 |
 | B10 | **特定商取引法表記・返金規定** | 返金規定は確定・表示済み（返品・キャンセル・返金は一切受け付けない）。特商法表記は事業者情報が未確定のため未整備 | 事業者名・所在地・連絡先が決まり次第、特商法ページを設置し、同じ文面で「返品・キャンセル不可」を記載する。Steamで販売する場合は同社の返金がプラットフォーム側で実行される点だけ、運用として把握しておく |
 
 ### Live2D 拡張性アプリケーションの扱い（B3 の詳細）

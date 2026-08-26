@@ -26,7 +26,9 @@
 | 旧名ローカルモデルの照合表示 | 現行固定サイズ・SHA-256に合う旧保存名GGUFを隔離状態で用意し、起動画面の「ローカルモデルを確認中」表示を確認する |
 | Linuxの専用GPU経路 | 固定llama.cpp版に対応するLinux CUDA／ROCm資産を独自ビルド・配布し、対応実GPUで起動とGPU利用を確認する。現状のUbuntu版はVulkan→CPU |
 | Ubuntu実Wayland | Ubuntu 24.04 LTS x64の実Wayland環境で、画面共有許可、画面取得、入力拒否時の理由付きエラーを確認する |
-| macOS版 | macOSホストを用意し、`secret.rs`の平文フォールバックをOSのKeychainへ移してから、ビルド・署名・公証・実機QAを行う |
+| macOS版の実機QA | Apple Silicon機で`cargo xtask build-beta --bundles app,dmg`を実行し、Gatekeeper回避後の起動、マイク・画面収録・アクセシビリティの許可、ログインキーチェーンへのAPIキー保存と再起動後の復号、同梱ローカルAIエンジンの起動、対応OS版の下限（現在はmacOS 11）を確認する |
+| macOS Intel版 | 現在は配布対象外。`xtask/src/bundled.rs`が同梱エンジンの資産をxtask自身のホストarch（`cfg!(target_arch)`）で選ぶため、Apple Silicon機から`--target x86_64-apple-darwin`で作るとarm64版エンジンが入ったx64アプリになり、ローカルAIが起動しない。対象へ加えるには、実機のIntel Macでビルドするか、`bundled.rs`をビルド対象archへ追従させる（xtaskへ対象archを渡し、資産選択・SHA-256照合・配置先をすべてその値で行う）。どちらを採るか決めてから着手する |
+| macOS版の署名・公証 | Apple Developer Programの証明書と`notarytool`を用意し、署名・公証を通してから`distribution/release.json`の`platforms`へ`macos`を追加し、`signing.macosReady`を判定する。未署名アルファの間はGatekeeperの回避手順を取得ページで案内する |
 | 高精細キャラの分離取得 | アルファ版の試用結果を踏まえ、画質を落とさず配布容量を分離する設計を決める |
 | Free／Pro設計 | アルファ期間終了時に、スキル制限、ライセンス入力欄、`beta-full`時の挙動を制限設計から見直す |
 | 紹介資料の動画再生 | Windows PowerPointのスライドショーで`PicoAgent-Overview.pptx`表紙の2動画が自動・無音再生されることを確認する |

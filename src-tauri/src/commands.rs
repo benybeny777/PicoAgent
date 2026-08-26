@@ -2617,7 +2617,7 @@ fn validate_multi_ai_settings(cfg: &Config, patch: &Map<String, Value>) -> Resul
     Ok(())
 }
 
-/// 既存の平文シークレットを起動時に DPAPI 暗号化へ移行する（次回保存を待たずに保護する）。
+/// 既存の平文シークレットを起動時にOSの資格情報保護へ移行する（次回保存を待たずに保護する）。
 pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
     let all = config.get_all();
     let schema_keys = secret_keys();
@@ -2628,14 +2628,14 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
         }
         if let Some(text) = value.as_str() {
             if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                match crate::secret::encrypt(text) {
+                match crate::secret::encrypt(key, text) {
                     Ok(value) => {
                         patch.insert(key.clone(), Value::String(value));
                     }
                     Err(error) => {
                         crate::log_paths::append_app_log(
                             app,
-                            &format!("既存シークレットを暗号化できないため平文を維持します: {key} ({error})"),
+                            &format!("既存シークレットを保護できないため平文を維持します: {key} ({error})"),
                         );
                     }
                 }
@@ -2647,7 +2647,7 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
         if let Err(error) = config.set_all(patch) {
             crate::log_paths::append_app_log(
                 app,
-                &format!("既存シークレットの暗号化保存に失敗しました: {error}"),
+                &format!("既存シークレットの保護保存に失敗しました: {error}"),
             );
         }
     }
@@ -2668,7 +2668,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
                     *value = Value::String(String::new());
                     unavailable_secrets.push(json!({
                         "key": key,
-                        "reason": "このPCまたはWindowsユーザーでは復号できません。値は保存したままなので、使う場合だけ再入力してください。"
+                        "reason": "このPCまたはOSユーザーアカウントでは復号できません。値は保存したままなので、使う場合だけ再入力してください。"
                     }));
                 } else {
                     *value = Value::String(decrypted);
@@ -2912,7 +2912,7 @@ pub async fn settings_save(
             .map_err(|e| log_command_error(&app, "切替前の表示サイズ保存に失敗しました", e))?;
     }
 
-    // シークレットは平文保存せず、DPAPI で暗号化してから永続化する。
+    // シークレットは平文保存せず、OSの資格情報保護（Windows DPAPI／macOSキーチェーン）へ預けてから永続化する。
     let schema_keys = secret_keys();
     let mut encrypted: Vec<(String, String)> = Vec::new();
     for (key, value) in patch.iter() {
@@ -2920,10 +2920,13 @@ pub async fn settings_save(
             continue;
         }
         if let Some(text) = value.as_str() {
-            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+            if text.is_empty() {
+                // 空にした秘密はOS側の実体も消す（macOSキーチェーンへ古い値を残さない）。
+                crate::secret::forget(key);
+            } else if !crate::secret::is_encrypted(text) {
                 encrypted.push((
                     key.clone(),
-                    crate::secret::encrypt(text).map_err(|error| {
+                    crate::secret::encrypt(key, text).map_err(|error| {
                         log_command_error(&app, "シークレットを安全に保存できません", error)
                     })?,
                 ));
