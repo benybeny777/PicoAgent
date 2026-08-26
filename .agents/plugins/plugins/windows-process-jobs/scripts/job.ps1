@@ -185,6 +185,8 @@ function New-Job([object]$Request, [string]$Name, [bool]$Critical, [object]$Esti
             interval_minutes = Get-OptionalValue $Request 'notify_interval_minutes' 10.0
             owner_thread_id = Get-OptionalValue $Request 'owner_thread_id'
             interval_seconds_override = Get-OptionalValue $Request 'notification_interval_seconds_override'
+            os_disabled = [bool](Get-OptionalValue $Request 'notification_os_disabled' $false)
+            queue_disabled = [bool](Get-OptionalValue $Request 'notification_queue_disabled' $false)
             progress_count = 0
             last_progress_at_utc = $null
             completion_sent_at_utc = $null
@@ -261,6 +263,8 @@ function Parse-Start([string[]]$Arguments) {
         notification_interval_seconds_override = if ($env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS) {
             [Math]::Max(1, [double]$env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS)
         } else { $null }
+        notification_os_disabled = $env:WINDOWS_PROCESS_JOBS_DISABLE_OS_NOTIFICATION -eq '1'
+        notification_queue_disabled = $env:WINDOWS_PROCESS_JOBS_DISABLE_CODEX_QUEUE -eq '1'
     }
     if (-not $name) { $name = [IO.Path]::GetFileNameWithoutExtension($executable) }
     return New-Job $request $name $critical $estimatedMinutes
