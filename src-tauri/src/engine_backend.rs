@@ -4,30 +4,52 @@
 // nvidia-smi が実GPUを報告した場合だけ取得し、固定サイズ/SHA-256/実行時デバイス列挙を
 // すべて通ったものだけ有効化する。失敗時は呼び出し元が同梱Vulkanへ戻す。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(windows)]
+use std::path::Path;
 
+#[cfg(windows)]
 use anyhow::{Context, Result};
+#[cfg(windows)]
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
 use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 
+// 以下の定数・型・判定関数はWindows本番コードから使われるが、
+// クロスプラットフォームのテスト（tests モジュール、OS問わず実行）からも参照するため
+// `#[cfg(windows)]` では隠さず `allow(dead_code)` で非Windowsビルドの警告だけを抑止する。
+#[cfg_attr(not(windows), allow(dead_code))]
 const RELEASE_TAG: &str = "b10566";
+#[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_CORE_NAME: &str = "llama-b10566-bin-win-cuda-13.3-x64.zip";
+#[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_CORE_SIZE: u64 = 146_890_631;
+#[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_CORE_SHA256: &str = "c3e2336c1427e8bd7b5beb3c8618d2f7a268bc5fb6ec3f28c1e06cdb78d2e80a";
+#[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_RUNTIME_NAME: &str = "cudart-llama-bin-win-cuda-13.3-x64.zip";
+#[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_RUNTIME_SIZE: u64 = 390_970_417;
+#[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_RUNTIME_SHA256: &str =
     "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e";
+#[cfg_attr(not(windows), allow(dead_code))]
 const ROCM_NAME: &str = "llama-b10566-bin-win-rocm-7.14-x64.zip";
+#[cfg_attr(not(windows), allow(dead_code))]
 const ROCM_SIZE: u64 = 196_945_718;
+#[cfg_attr(not(windows), allow(dead_code))]
 const ROCM_SHA256: &str = "699027a1017a0d1309abe3d6528639611de18ec24e006ece7d6400a4630e8ba6";
+#[cfg_attr(not(windows), allow(dead_code))]
 const SYCL_NAME: &str = "llama-b10566-bin-win-sycl-x64.zip";
+#[cfg_attr(not(windows), allow(dead_code))]
 const SYCL_SIZE: u64 = 119_838_336;
+#[cfg_attr(not(windows), allow(dead_code))]
 const SYCL_SHA256: &str = "118ae5d788ef29c2cb79a0ed0230e2f26adc725d82f7c188960ef62bd36f58a5";
 // 正本: https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/shared/hipsdk/reference/system-requirements.html
 // 2026-08-24確認。llama.cpp固定版またはPicoAgent配布版の更新時に再確認する。
+#[cfg_attr(not(windows), allow(dead_code))]
 const WINDOWS_ROCM_RUNTIME_SKUS: &[&str] = &[
     "radeon ai pro r9700",
     "radeon pro w7900 dual slot",
@@ -66,8 +88,11 @@ const WINDOWS_ROCM_RUNTIME_SKUS: &[&str] = &[
     "ryzen ai max 385",
     "ryzen ai max pro 380",
 ];
+#[cfg(windows)]
 const MAX_ARCHIVE_SIZE: u64 = 450 * 1024 * 1024;
+#[cfg(windows)]
 const MAX_EXTRACTED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+#[cfg(windows)]
 const MAX_FILES: usize = 512;
 
 #[derive(Clone, Debug)]
@@ -78,6 +103,7 @@ pub struct BackendCandidate {
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(not(windows), allow(dead_code))]
 struct InstalledManifest {
     release_tag: String,
     backend: String,
@@ -87,6 +113,7 @@ struct InstalledManifest {
     runtime_sha256: String,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 impl InstalledManifest {
     fn cuda() -> Self {
         Self {
@@ -152,6 +179,9 @@ pub async fn candidates(
     bundled_server: PathBuf,
     configured_ngl: String,
 ) -> Vec<BackendCandidate> {
+    // Windows以外ではCUDA/ROCm/SYCL判定を行わないため app を使わない。
+    #[cfg(not(windows))]
+    let _ = app;
     if configured_ngl.trim() == "0" {
         return vec![BackendCandidate {
             label: "CPU",
@@ -252,6 +282,7 @@ async fn has_nvidia_cuda_device() -> bool {
         .is_ok_and(|output| output.status.success() && supports_cuda_13(&output.stdout))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn supports_cuda_13(output: &[u8]) -> bool {
     let Ok(output) = std::str::from_utf8(output) else {
         return false;
@@ -277,6 +308,7 @@ fn has_supported_amd_rocm_device() -> bool {
         .any(|name| is_supported_amd_rocm_name(name))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_supported_amd_rocm_name(name: &str) -> bool {
     let normalized = name.trim().to_ascii_lowercase();
     let normalized = normalized.strip_prefix("amd ").unwrap_or(&normalized);
@@ -290,6 +322,7 @@ fn has_supported_intel_sycl_device() -> bool {
         .any(|name| is_supported_intel_sycl_name(name))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_supported_intel_sycl_name(name: &str) -> bool {
     // 正本: https://www.intel.com/content/www/us/en/developer/articles/release-notes/oneapi-dpcpp/2026.html
     // Intel oneAPI 2026のGPU要件に明記された系統。旧世代にも同名が多いUHD/HDは
@@ -644,6 +677,7 @@ async fn sycl_probe(server: &Path) -> bool {
         .is_ok_and(|output| output.status.success() && output_contains(&output, "SYCL0:"))
 }
 
+#[cfg(windows)]
 fn output_contains(output: &std::process::Output, needle: &str) -> bool {
     std::str::from_utf8(&output.stdout).is_ok_and(|text| text.contains(needle))
         || std::str::from_utf8(&output.stderr).is_ok_and(|text| text.contains(needle))
