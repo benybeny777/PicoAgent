@@ -203,12 +203,6 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ---
 
-## Windowsの長時間処理
-
-`.agents/plugins/plugins/windows-process-jobs/`は、CodexとClaude Codeが共用するWindows向け開発プラグインです。モデル取得、依存導入、ビルド、テスト、ベンチマークなどの有限処理をPowerShell 7で開始し、状態、容量制限付きログ、結果、取消、再実行を後続セッションから扱えます。開始時に分単位の所要目安を指定しますが、実行中の定期進捗は通知しません。状態と推定残り時間は利用者が求めたときだけ確認し、完了または失敗だけ通知します。PicoAgent製品と配布物には同梱しません。
-
-CodexとClaude Codeのどちらもリポジトリ直下をマーケットプレイスとして追加します。Codexは`windows-process-jobs@personal`、Claude Codeは`windows-process-jobs@picoagent-dev-tools`を導入します。導入後はクライアントを再起動し、通知フックを確認してから、新しいセッションで`start`、`status`、`tail`、`result`、`cancel`、`rerun`の各スキルを使います。詳しいコマンド、通知経路、状態保存先は[プラグインREADME](../.agents/plugins/plugins/windows-process-jobs/README.md)を参照してください。
-
 ## 📁 フォルダ構成
 
 ```text
