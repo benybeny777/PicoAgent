@@ -179,22 +179,25 @@ public sealed class ManagedWindowsJob : IDisposable
         }
     }
 
-    public WindowsJobOutcome Wait(string cancelPath, int graceMilliseconds)
+    public bool WaitForExit(int milliseconds)
     {
-        bool cancelled = false;
-        while (!process.WaitForExit(250))
+        return process.WaitForExit(milliseconds);
+    }
+
+    public void RequestCancel(int graceMilliseconds)
+    {
+        if (process.HasExited) return;
+        try { process.CloseMainWindow(); } catch { }
+        if (!process.WaitForExit(graceMilliseconds))
         {
-            if (!File.Exists(cancelPath)) continue;
-            cancelled = true;
-            try { process.CloseMainWindow(); } catch { }
-            if (!process.WaitForExit(graceMilliseconds))
-            {
-                if (!TerminateJobObject(jobHandle, 1223))
-                    throw new InvalidOperationException("TerminateJobObject failed: " + Marshal.GetLastWin32Error());
-                process.WaitForExit(30000);
-            }
-            break;
+            if (!TerminateJobObject(jobHandle, 1223))
+                throw new InvalidOperationException("TerminateJobObject failed: " + Marshal.GetLastWin32Error());
+            process.WaitForExit(30000);
         }
+    }
+
+    public WindowsJobOutcome Finish(bool cancelled)
+    {
         process.WaitForExit();
         Task.WaitAll(new[] { stdoutPump, stderrPump }, 30000);
         stdoutLog.TrimToLimit();

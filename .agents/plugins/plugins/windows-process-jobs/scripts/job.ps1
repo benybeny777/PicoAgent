@@ -9,6 +9,9 @@ $stateRoot = if ($env:WINDOWS_PROCESS_JOBS_HOME) {
     Join-Path $env:LOCALAPPDATA 'Codex\windows-process-jobs'
 }
 $maxLogBytes = 10MB
+$script:codexQueueAvailable = $null
+$script:codexQueuePath = $null
+. (Join-Path $scriptRoot 'notifications.ps1')
 
 function Write-JsonAtomic([string]$Path, [object]$Value) {
     $tempPath = "$Path.$PID.tmp"
@@ -25,6 +28,12 @@ function Read-Json([string]$Path) {
         throw "記録がありません: $Path"
     }
     return Get-Content -Raw -Encoding UTF8 -LiteralPath $Path | ConvertFrom-Json
+}
+
+function Get-OptionalValue([object]$Value, [string]$Name, [object]$Default = $null) {
+    if ($Value -is [Collections.IDictionary] -and $Value.Contains($Name)) { return $Value[$Name] }
+    if ($Value -and $Value.PSObject.Properties[$Name]) { return $Value.$Name }
+    return $Default
 }
 
 function Protect-Request([object]$Request, [string]$Path) {
@@ -171,6 +180,17 @@ function New-Job([object]$Request, [string]$Name, [bool]$Critical, [object]$Esti
             updated_count = 0
             last_updated_at_utc = $null
         }
+        notification = [ordered]@{
+            enabled = [bool](Get-OptionalValue $Request 'notify' $true)
+            interval_minutes = Get-OptionalValue $Request 'notify_interval_minutes' 10.0
+            owner_thread_id = Get-OptionalValue $Request 'owner_thread_id'
+            interval_seconds_override = Get-OptionalValue $Request 'notification_interval_seconds_override'
+            progress_count = 0
+            last_progress_at_utc = $null
+            completion_sent_at_utc = $null
+            last_error = $null
+            last_delivery = $null
+        }
         logs = [ordered]@{ stdout = 'stdout.log'; stderr = 'stderr.log'; max_mb = 10 }
     }
     Write-JsonAtomic (Join-Path $jobDir 'record.json') $record
@@ -193,6 +213,8 @@ function Parse-Start([string[]]$Arguments) {
     $cwd = (Get-Location).Path
     $critical = $false
     $estimatedMinutes = $null
+    $notify = $true
+    $notifyIntervalMinutes = 10.0
     $separator = [Array]::IndexOf($Arguments, '--')
     if ($separator -lt 0 -or $separator -eq $Arguments.Count - 1) {
         throw 'startは「-- 実行ファイル 引数...」を必要とします'
@@ -208,6 +230,13 @@ function Parse-Start([string[]]$Arguments) {
                 if ($minutes -le 0) { throw '--estimate-minutesは0より大きい値が必要です' }
                 $estimatedMinutes = [Math]::Round($minutes, 1)
             }
+            '--notify-interval-minutes' {
+                if (++$i -ge $separator) { throw '--notify-interval-minutesの値がありません' }
+                $minutes = [double]$Arguments[$i]
+                if ($minutes -lt 1) { throw '--notify-interval-minutesは1以上が必要です' }
+                $notifyIntervalMinutes = [Math]::Round($minutes, 1)
+            }
+            '--no-notify' { $notify = $false }
             '--json' { }
             default { throw "不明なstartオプションです: $($Arguments[$i])" }
         }
@@ -215,10 +244,23 @@ function Parse-Start([string[]]$Arguments) {
     $resolvedCwd = (Resolve-Path -LiteralPath $cwd).Path
     $payload = @($Arguments[($separator + 1)..($Arguments.Count - 1)])
     $executable = Resolve-Executable $payload[0]
+    $ownerThreadId = @(
+        $env:WINDOWS_PROCESS_JOBS_OWNER_THREAD_ID
+        $env:CODEX_THREAD_ID
+        $env:CODEX_SESSION_ID
+        $env:CLAUDE_SESSION_ID
+        $env:CLAUDE_CODE_SESSION_ID
+    ) | Where-Object { $_ -match '^[a-zA-Z0-9._-]{8,160}$' } | Select-Object -First 1
     $request = [ordered]@{
         executable = $executable
         arguments = @($payload | Select-Object -Skip 1)
         cwd = $resolvedCwd
+        notify = $notify
+        notify_interval_minutes = $notifyIntervalMinutes
+        owner_thread_id = $ownerThreadId
+        notification_interval_seconds_override = if ($env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS) {
+            [Math]::Max(1, [double]$env:WINDOWS_PROCESS_JOBS_TEST_INTERVAL_SECONDS)
+        } else { $null }
     }
     if (-not $name) { $name = [IO.Path]::GetFileNameWithoutExtension($executable) }
     return New-Job $request $name $critical $estimatedMinutes
@@ -327,7 +369,17 @@ function Invoke-Worker([string]$JobDirectory) {
                 executable = (Get-PwshPath)
             }
             Write-JsonAtomic $recordPath $record
-            $outcome = $managed.Wait((Join-Path $JobDirectory 'cancel.request'), 5000)
+            $cancelled = $false
+            while (-not $managed.WaitForExit(250)) {
+                Invoke-ProgressNotification $record $JobDirectory $recordPath
+                if (Test-Path -LiteralPath (Join-Path $JobDirectory 'cancel.request') -PathType Leaf) {
+                    $cancelled = $true
+                    $managed.RequestCancel(5000)
+                    break
+                }
+            }
+            Invoke-ProgressNotification $record $JobDirectory $recordPath
+            $outcome = $managed.Finish($cancelled)
             $record.exit_code = $outcome.ExitCode
             $record.status = if ($outcome.Cancelled) { 'cancelled' } elseif ($outcome.ExitCode -eq 0) { 'succeeded' } else { 'failed' }
         } finally {
@@ -339,6 +391,13 @@ function Invoke-Worker([string]$JobDirectory) {
     } finally {
         $record.finished_at_utc = [DateTime]::UtcNow.ToString('o')
         Write-JsonAtomic $recordPath $record
+        if ($record.PSObject.Properties['notification'] -and $record.notification -and $record.notification.enabled -and -not $record.notification.completion_sent_at_utc) {
+            $published = Publish-Notification $record $JobDirectory 'completion'
+            $record.notification.last_error = $published.error
+            $record.notification.last_delivery = $published
+            $record.notification.completion_sent_at_utc = [DateTime]::UtcNow.ToString('o')
+            Write-JsonAtomic $recordPath $record
+        }
     }
 }
 
