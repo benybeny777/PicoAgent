@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOSビルド専用の追加Info.plist。`cargo tauri build` が .app のInfo.plistへ自動で合成する。
+  TCC（プライバシー保護）が要求する用途説明が無いと、マイク取得の瞬間にmacOSがアプリを強制終了する。
+  画面取得・入力操作（画面収録・アクセシビリティ）は用途説明キーを持たず、OSの許可ダイアログで扱う。
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>音声で話しかけるため、マイクの音声を取得します。音声はこのPC内で文字起こしされ、外部へ送るのは会話に使うAIへの文章だけです。</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>あなたが許可したフォルダの中だけで、ファイルの読み書きを行います。</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>あなたが許可したフォルダの中だけで、ファイルの読み書きを行います。</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>あなたが許可したフォルダの中だけで、ファイルの読み書きを行います。</string>
+  </dict>
+</plist>

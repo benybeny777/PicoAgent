@@ -1505,6 +1505,9 @@ const BROWSER_PROFILE_NEEDLE: &str = "PicoAgent/browser-profile";
 
 /// プロファイル経路で絞り込んだうえで、対象にする実行ファイル名。
 /// 判定に使う PowerShell 自身のコマンドラインにも目印が載るため、名前でも絞って自滅を防ぐ。
+/// `#[cfg(not(unix))]` の `stop_managed_browser` からのみ使うが、内容の回帰テストは
+/// OS問わず実行するため `#[cfg(windows)]` では隠さず `allow(dead_code)` で警告だけ抑止する。
+#[cfg_attr(unix, allow(dead_code))]
 const BROWSER_PROCESS_NAMES: [&str; 4] = ["chrome.exe", "msedge.exe", "chromium.exe", "brave.exe"];
 
 #[cfg(unix)]

@@ -33,7 +33,7 @@ const USAGE: &str = "\
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
   bump-version <種別> 公開中の版から major / minor / patch を自動採番して全設定へ反映
-  update-feed <NSIS> [説明] 公開Git用latest.jsonへWindows更新情報を書き出す
+  update-feed <配布物> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
   setup <対象…>        取得対象は all / engine / aivis / whisper / live2d / live2d-samples / tha3 / office / tools

@@ -60,6 +60,11 @@ arboard = { version = "3.6.1", default-features = false }
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 xcap = "0.9.8"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# シークレット（APIキー等）をログインキーチェーンへ預けるために使用する。
+# rustls 経由で既に依存グラフへ入っているため、直接依存にしても追加のクレートは増えない。
+security-framework = "3"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

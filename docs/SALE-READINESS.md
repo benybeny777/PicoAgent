@@ -35,7 +35,7 @@ cargo xtask build-distribution
 
 Live2D公式は、不特定多数のモデルを追加・組み合わせられる作品を拡張性アプリケーションに含め、一般ユーザー・小規模事業者を含めてリリース前の審査と特別契約を求めています。PicoAgentはキャラ追加を提供するため、契約確認を出荷ゲートから外しません。
 
-Windows版を公開するときは、NSISを作成後に `cargo xtask update-feed <インストーラ.exe> "更新内容"` を実行します。生成された `distribution/site/latest.json` と同じインストーラを `PicoAgent-Distribution` の `v<version>` Releaseへ置き、Pages反映後に設定画面から更新確認・ダウンロード・SHA-256検証・インストーラ起動を実機確認します。
+Windows版を公開するときは、NSISを作成後に `cargo xtask update-feed <インストーラ.exe> "更新内容"` を実行します。macOSの未署名アルファを配る場合はmacOS実機で作成したDMGを同じコマンドへ渡します（`cargo xtask update-feed <イメージ.dmg>`）。同じ版なら他OSの枠を残したまま該当枠だけが差し替わります。生成された `distribution/site/latest.json` と同じインストーラを `PicoAgent-Distribution` の `v<version>` Releaseへ置き、Pages反映後に設定画面から更新確認・ダウンロード・SHA-256検証・インストーラ起動を実機確認します。
 
 初期版のアプリ内更新は利用者が設定から明示実行し、公開配布GitのURL・サイズ・SHA-256を検証してNSISを起動します。オフライン時は見送ります。将来、完全自動更新へ進める場合はTauri updaterの更新署名を必須にし、`updates.required=true`、公開鍵、更新成果物生成を揃えます。秘密鍵はリポジトリ・ログ・配布物へ含めません。コード署名を導入する場合も `signing.required=true` に変えてWindows署名とmacOS署名／公証を販売ゲートへ戻します。
 
