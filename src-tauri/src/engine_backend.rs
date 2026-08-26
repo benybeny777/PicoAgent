@@ -4,9 +4,9 @@
 // nvidia-smi が実GPUを報告した場合だけ取得し、固定サイズ/SHA-256/実行時デバイス列挙を
 // すべて通ったものだけ有効化する。失敗時は呼び出し元が同梱Vulkanへ戻す。
 
-use std::path::PathBuf;
 #[cfg(windows)]
 use std::path::Path;
+use std::path::PathBuf;
 
 #[cfg(windows)]
 use anyhow::{Context, Result};
