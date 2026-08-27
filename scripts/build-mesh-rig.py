@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,6 +44,59 @@ def feathered_region(image: Image.Image, box: tuple[int, int, int, int], feather
     return result
 
 
+def gaze_sources(
+    base: Image.Image,
+    config: dict[str, object],
+) -> tuple[dict[str, Image.Image], dict[str, dict[str, object]]]:
+    """高精細正本の瞳だけを小さく移動し、左右視線の局所キーフォームを作る。"""
+    iris_boxes = [tuple(int(value) for value in box) for box in config.get("irisBoxes", [])]
+    if len(iris_boxes) != 2 or any(len(box) != 4 for box in iris_boxes):
+        raise ValueError("gaze.irisBoxesには左右2個の矩形が必要です")
+    for box in iris_boxes:
+        left, top, right, bottom = box
+        if not (0 <= left < right <= base.width and 0 <= top < bottom <= base.height):
+            raise ValueError(f"瞳領域が画像外です: {box} / {base.size}")
+
+    offset = int(config.get("offset", 0))
+    if not 1 <= offset <= 24:
+        raise ValueError(f"gaze.offsetは1から24画素にしてください: {offset}")
+    mask_feather = max(0, int(config.get("maskFeather", 0)))
+    patch_box = tuple(int(value) for value in config.get("box", []))
+    if len(patch_box) != 4:
+        raise ValueError("gaze.boxには局所テクスチャの矩形が必要です")
+    patch_feather = max(0, int(config.get("feather", 0)))
+
+    mask = Image.new("L", base.size, 0)
+    draw = ImageDraw.Draw(mask)
+    for box in iris_boxes:
+        draw.ellipse(box, fill=255)
+    if mask_feather:
+        mask = mask.filter(ImageFilter.GaussianBlur(mask_feather))
+
+    sources: dict[str, Image.Image] = {}
+    regions: dict[str, dict[str, object]] = {}
+    for name, horizontal_offset in (("gaze_left", -offset), ("gaze_right", offset)):
+        shifted = ImageChops.offset(base, horizontal_offset, 0)
+        source = Image.composite(shifted, base, mask)
+        difference_box = ImageChops.difference(source, base).getbbox()
+        if difference_box is None:
+            raise ValueError(f"視線差分を生成できません: {name}")
+        if not (
+            patch_box[0] <= difference_box[0]
+            and patch_box[1] <= difference_box[1]
+            and patch_box[2] >= difference_box[2]
+            and patch_box[3] >= difference_box[3]
+        ):
+            raise ValueError(f"視線差分がgaze.boxを越えています: {name} {difference_box} / {patch_box}")
+        sources[name] = source
+        regions[name] = {
+            "source": name,
+            "box": list(patch_box),
+            "feather": patch_feather,
+        }
+    return sources, regions
+
+
 def build(character_id: str) -> None:
     character_dir = ROOT / "characters" / character_id
     source_config_path = character_dir / "mesh-rig" / "source" / "regions.json"
@@ -63,11 +116,25 @@ def build(character_id: str) -> None:
 
     parts_dir = character_dir / "mesh-rig" / "parts"
     save_lossless_webp(base_runtime, parts_dir / "base.webp")
+    generated_sources: dict[str, Image.Image] = {}
+    regions = dict(config.get("regions", {}))
+    if gaze_config := config.get("gaze"):
+        if not isinstance(gaze_config, dict):
+            raise ValueError("gazeはオブジェクトにしてください")
+        generated_sources, gaze_regions = gaze_sources(base, gaze_config)
+        for name in gaze_regions:
+            if name in regions:
+                raise ValueError(f"局所レイヤー名が重複しています: {name}")
+        regions.update(gaze_regions)
+
     drawables: dict[str, dict[str, object]] = {}
-    for name, region in config.get("regions", {}).items():
+    for name, region in regions.items():
         source_name = str(region["source"])
-        with Image.open(layers_dir / f"{source_name}.png") as opened:
-            source = opened.convert("RGBA")
+        if source_name in generated_sources:
+            source = generated_sources[source_name]
+        else:
+            with Image.open(layers_dir / f"{source_name}.png") as opened:
+                source = opened.convert("RGBA")
         if source.size != base.size:
             raise ValueError(f"レイヤー寸法が一致しません: {source_name} {source.size} != {base.size}")
         runtime = source.resize(runtime_size, Image.Resampling.LANCZOS)
@@ -112,7 +179,8 @@ def build(character_id: str) -> None:
         "quality": {
             "source": "existing-sharp-expression-layers",
             "hiddenAreaSource": False,
-            "limit": "顔内部の補間と一枚メッシュの微細変形。大きなパーツ分離は隠れ無し原画の追加後に行う",
+            "gazeSource": "高精細正本の瞳領域を同一座標で局所移動",
+            "limit": "顔内部の補間、局所視線、一枚メッシュの微細変形。大きなパーツ分離は隠れ無し原画の追加後に行う",
         },
     }
     rig_path = character_dir / "mesh-rig" / "rig.json"
