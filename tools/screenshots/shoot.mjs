@@ -591,6 +591,7 @@ async function validateMeshRig() {
       mouthAlpha: plane("mouth_open")?.alpha || 0,
       blinkClosedAlpha: plane("blink_closed")?.alpha || 0,
       gazeDrawable: Boolean(plane("gaze_right")),
+      gazeRightClosedAlpha: plane("gaze_right")?.alpha || 0,
       angleX: meshRigController.angleX,
       vertexDelta,
       canvas: {
@@ -605,12 +606,30 @@ async function validateMeshRig() {
     meshRigController.updateAlphas();
     meshRigController.app.renderer.render(meshRigController.app.stage);
   });
+  const gazeRight = await page.evaluate(() => ({
+    rightAlpha: meshRigController.planes.get("gaze_right")?.plane.alpha || 0,
+    leftAlpha: meshRigController.planes.get("gaze_left")?.plane.alpha || 0,
+  }));
   await page.screenshot({ path: join(output, "gaze-right.png"), omitBackground: true });
+  await page.evaluate(() => {
+    meshRigController.setGaze(-1, 0);
+    meshRigController.gazeX = -1;
+    meshRigController.updateAlphas();
+    meshRigController.app.renderer.render(meshRigController.app.stage);
+  });
+  const gazeLeft = await page.evaluate(() => ({
+    rightAlpha: meshRigController.planes.get("gaze_right")?.plane.alpha || 0,
+    leftAlpha: meshRigController.planes.get("gaze_left")?.plane.alpha || 0,
+  }));
+  await page.screenshot({ path: join(output, "gaze-left.png"), omitBackground: true });
   await page.close();
   if (active.renderKind !== "mesh-rig" || active.mouthAlpha < 0.99 || active.blinkClosedAlpha < 0.99
-      || active.gazeDrawable || Math.abs(active.angleX) < 0.01 || active.vertexDelta < 0.01
+      || !active.gazeDrawable || active.gazeRightClosedAlpha > 0.01
+      || gazeRight.rightAlpha < 0.99 || gazeRight.leftAlpha > 0.01
+      || gazeLeft.leftAlpha < 0.99 || gazeLeft.rightAlpha > 0.01
+      || Math.abs(active.angleX) < 0.01 || active.vertexDelta < 0.01
       || active.canvas.height < 1400) {
-    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify(active)}`);
+    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify({ active, gazeRight, gazeLeft })}`);
   }
   const reduced = await openScene({ characterId: "sena", layout: "pet", width: 900, height: 600, reducedMotion: true });
   const reducedState = await reduced.evaluate(() => ({
@@ -621,7 +640,7 @@ async function validateMeshRig() {
   if (reducedState.renderKind !== "2d" || !reducedState.imageVisible) {
     throw new Error(`省モーション時に差分絵へ退避できません: ${JSON.stringify(reducedState)}`);
   }
-  const metrics = { generatedAt: new Date().toISOString(), active, reduced: reducedState };
+  const metrics = { generatedAt: new Date().toISOString(), active, gazeRight, gazeLeft, reduced: reducedState };
   await writeFile(join(output, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
   return { output, metrics };
 }

@@ -69,6 +69,38 @@
         501
       ],
       "feather": 12
+    },
+    "gaze_left": {
+      "texture": "parts/gaze_left.webp",
+      "box": [
+        350,
+        280,
+        525,
+        390
+      ],
+      "textureBox": [
+        322,
+        249,
+        556,
+        421
+      ],
+      "feather": 12
+    },
+    "gaze_right": {
+      "texture": "parts/gaze_right.webp",
+      "box": [
+        350,
+        280,
+        525,
+        390
+      ],
+      "textureBox": [
+        322,
+        249,
+        556,
+        421
+      ],
+      "feather": 12
     }
   },
   "parameters": {
@@ -106,6 +138,7 @@
   "quality": {
     "source": "existing-sharp-expression-layers",
     "hiddenAreaSource": false,
-    "limit": "顔内部の補間と一枚メッシュの微細変形。大きなパーツ分離は隠れ無し原画の追加後に行う"
+    "gazeSource": "高精細正本の瞳領域を同一座標で局所移動",
+    "limit": "顔内部の補間、局所視線、一枚メッシュの微細変形。大きなパーツ分離は隠れ無し原画の追加後に行う"
   }
 }
