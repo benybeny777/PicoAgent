@@ -47,7 +47,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_OUTPUT_DIR` | 撮影結果を既定の公開先へ書かず、指定した絶対パスへ出す。公開前の構図比較や別リポジトリへ取り込む成果物の確認に使う |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
 | `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
-| `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
+| `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1`または`SHOOT_INTERACTION_MATRIX=1`と併用し、`koharu,sena,noa`のように撮影対象だけを絞る。操作検査の対象は`mugi,hiyori` |
 | `SHOOT_LAYOUT_IDS` | `SHOOT_CHARACTER_MATRIX=1` または `SHOOT_LIVE2D_MATRIX=1` と併用し、`stream,pet` のように撮影する表示形式だけを絞る |
 | `SHOOT_BUBBLE_BLUR` | `1` ならフキダシの`backdrop-filter`有無を、立ち絵を動かした状態でペット／ミニ／配信×重なり有無×負荷有無の12条件、各3試行ずつ交互に測り `temp/bubble-blur/metrics.json` へ書く。ffmpeg不要 |
 | `SHOOT_LAYOUT_SIZE` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`pet=520x430,mascot=300x480` のように形式ごとの撮影寸法を上書きする。窓を狭めたときも回答操作が1段のままか、フキダシが潰れていないかを確認する用 |

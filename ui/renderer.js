@@ -1161,6 +1161,20 @@ let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
+const RIG_MOUTH_OPEN_THRESHOLD = 0.34;
+const RIG_MOUTH_CLOSE_THRESHOLD = 0.22;
+const RIG_BLINK_TIMINGS = Object.freeze({
+  normal: Object.freeze({ closing: 60, closed: 80, opening: 170 }),
+  sleepy: Object.freeze({ closing: 130, closed: 260, opening: 300 }),
+});
+
+function quantizeRigMouthOpen(level, wasOpen) {
+  return level > (wasOpen ? RIG_MOUTH_CLOSE_THRESHOLD : RIG_MOUTH_OPEN_THRESHOLD);
+}
+
+function rigBlinkTimings(sleepy) {
+  return sleepy ? RIG_BLINK_TIMINGS.sleepy : RIG_BLINK_TIMINGS.normal;
+}
 
 function layerUrl(name) {
   const relative = typeof runtimeLayers[name] === "string"
@@ -1237,13 +1251,16 @@ function scheduleGaze() {
   }, 8000 + Math.random() * 6000);
 }
 
-// まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
+// まばたき: half → closed → half を挟み、1.4〜4.2秒間隔で繰り返す。
+// 実際のまばたきは閉じが速く開きが遅い。3段を同じ長さにすると機械的な明滅に見えるため、
+// 閉じ側を詰めて開き側を伸ばした非対称の配分にする。
 function scheduleBlink() {
   clearTimeout(rigBlinkTimer);
   if (!rigActive) return;
   // 深夜〜早朝（23時〜5時）は眠そうに: まばたき間隔を詰め、半目を長めに保つ。
   const hour = new Date().getHours();
   const sleepy = hour >= 23 || hour < 5;
+  const timings = rigBlinkTimings(sleepy);
   const interval = sleepy ? 900 + Math.random() * 1600 : 1400 + Math.random() * 2800;
   rigBlinkTimer = setTimeout(async () => {
     if (!rigActive) return;
@@ -1255,11 +1272,14 @@ function scheduleBlink() {
         resolve();
       }, ms);
     });
-    await step("blink_half", sleepy ? 160 : 100);
+    // 閉じ際は素早く通過させる。
+    await step("blink_half", timings.closing);
     if (!rigActive) return;
-    await step("blink_closed", 140);
+    // 眠い時間帯は閉じたまま保つ長さで眠さを出す。
+    await step("blink_closed", timings.closed);
     if (!rigActive) return;
-    await step("blink_half", sleepy ? 280 : 100);
+    // 開き際は閉じ際の倍以上かけて戻す。
+    await step("blink_half", timings.opening);
     if (!rigActive) return;
     rigBlinkPhase = null;
     rigRefresh();
@@ -1390,7 +1410,9 @@ function attachLipSync(audio) {
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
     } else {
-      rigMouthOpen = rigMouthLevel > 0.3;
+      // 差分絵は開閉2枚しか無く、単一しきい値だと包絡線が境界付近に留まる音節で
+      // 開閉が細かく往復する。開く側を高く閉じる側を低くして、跳ねを止める。
+      rigMouthOpen = quantizeRigMouthOpen(rigMouthLevel, rigMouthOpen);
       rigRefresh();
     }
     rigVolFrame = requestAnimationFrame(analyserLoop);

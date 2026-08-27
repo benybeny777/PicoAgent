@@ -603,10 +603,17 @@ async function validateLayoutEditor() {
 async function validateInteractionMatrix() {
   const output = join(ROOT, "temp", "layout-interaction-matrix");
   mkdirSync(output, { recursive: true });
-  const characters = [{ id: "mugi", forcePng: true }];
+  const selectedCharacterIds = process.env.SHOOT_CHARACTER_IDS
+    ? new Set(process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean))
+    : null;
+  let characters = [{ id: "mugi", forcePng: true }];
   if (LIVE2D_REQUIRED.every(path => existsSync(join(ROOT, path)))) {
     characters.push({ id: LIVE2D_CHARACTER, forcePng: false });
   }
+  if (selectedCharacterIds) {
+    characters = characters.filter(character => selectedCharacterIds.has(character.id));
+  }
+  if (!characters.length) throw new Error("操作検査の対象キャラクターがありません");
   const results = [];
   for (const target of characters) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
@@ -701,6 +708,25 @@ async function validateInteractionMatrix() {
   const reducedPage = await openScene({ characterId: "mugi", forcePng: true, reducedMotion: true });
   try {
     await reducedPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
+    const rigTimingContract = await reducedPage.evaluate(() => ({
+      staysClosedBelowOpenThreshold: quantizeRigMouthOpen(0.33, false),
+      opensAboveOpenThreshold: quantizeRigMouthOpen(0.35, false),
+      staysOpenAboveCloseThreshold: quantizeRigMouthOpen(0.23, true),
+      closesBelowCloseThreshold: quantizeRigMouthOpen(0.21, true),
+      normal: { ...rigBlinkTimings(false) },
+      sleepy: { ...rigBlinkTimings(true) },
+    }));
+    const expectedRigTimingContract = {
+      staysClosedBelowOpenThreshold: false,
+      opensAboveOpenThreshold: true,
+      staysOpenAboveCloseThreshold: true,
+      closesBelowCloseThreshold: false,
+      normal: { closing: 60, closed: 80, opening: 170 },
+      sleepy: { closing: 130, closed: 260, opening: 300 },
+    };
+    if (JSON.stringify(rigTimingContract) !== JSON.stringify(expectedRigTimingContract)) {
+      throw new Error(`差分絵リグの口ヒステリシスまたはまばたき配分が不正です ${JSON.stringify(rigTimingContract)}`);
+    }
     const blinkApplied = await reducedPage.evaluate(() => {
       rigBlinkPhase = "blink_closed";
       rigRefresh();
@@ -712,15 +738,24 @@ async function validateInteractionMatrix() {
       throw new Error("アニメーションを減らす設定でも空のフレームループが動いています");
     }
     const firstTalkingFrame = await reducedPage.evaluate(() => {
+      // ミュート時の口を調べる間にランダムなまばたきでsrcが変わらないよう隔離する。
+      clearTimeout(rigBlinkTimer);
+      clearTimeout(rigBlinkStepTimer);
       rigBlinkPhase = null;
+      rigMouthOpen = false;
+      rigRefresh();
       setAnimation("talking", true);
       return petSprite.src;
     });
-    await reducedPage.waitForFunction(
-      (initialSrc) => petSprite.src !== initialSrc,
-      firstTalkingFrame,
-      { timeout: 2000 },
-    );
+    await reducedPage.waitForTimeout(300);
+    const mutedTalkingState = await reducedPage.evaluate(initialSrc => ({
+      mouthOpen: rigMouthOpen,
+      src: petSprite.src,
+      changed: petSprite.src !== initialSrc,
+    }), firstTalkingFrame);
+    if (mutedTalkingState.mouthOpen || mutedTalkingState.changed || !mutedTalkingState.src.includes("mouth_closed")) {
+      throw new Error(`ミュート中に差分絵の口が動きました ${JSON.stringify(mutedTalkingState)}`);
+    }
     console.log("  reduced-motion検査: まばたき・ミュート口パクOK");
   } finally {
     await reducedPage.close();
@@ -809,9 +844,11 @@ async function validateInteractionMatrix() {
       throw new Error("フレームモーションから待機リグへ戻った後もループが残っています");
     }
     await gazePage.mouse.move(450, 590);
+    await gazePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const farDirection = await gazePage.evaluate(() => rigLookDirection);
     if (farDirection !== 0) throw new Error(`画面下の遠いカーソルへ視線が張り付いています: ${farDirection}`);
     await gazePage.mouse.move(rect.x + rect.width * 0.85, rect.y + rect.height * 0.38);
+    await gazePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const nearDirection = await gazePage.evaluate(() => rigLookDirection);
     if (nearDirection !== 1) throw new Error(`顔付近の右カーソルへ視線が追従しません: ${nearDirection}`);
     await gazePage.waitForTimeout(800);
