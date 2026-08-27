@@ -1092,7 +1092,9 @@ function setAnimation(name, force = false) {
   wakeAnimationLoop();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
-  const meshMotion = animationName === "idle" || animationName === "talking";
+  // 待機・会話・思考中は同じキャンバスを保つ。thinkingだけ差分絵へ切り替えると、
+  // 配信表示のフレーミング差でキャラクター全体が拡縮して見える。
+  const meshMotion = animationName === "idle" || animationName === "thinking" || animationName === "talking";
   if (meshRigController && meshMotion && meshRigCanRender()) {
     setMeshRigVisible(true);
     character.dataset.motion = requestedMotion;
@@ -1465,7 +1467,7 @@ function startRig() {
   wakeAnimationLoop();
 }
 
-// リグを完全に終了する（キャラ切替・thinking/sad などフレームアニメ状態への遷移用）。
+// リグを完全に終了する（キャラ切替・sad などフレームアニメ状態への遷移用）。
 function stopRig() {
   if (!rigActive) { wakeAnimationLoop(); return; }
   rigActive = false;
