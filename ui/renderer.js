@@ -1161,6 +1161,20 @@ let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
+const RIG_MOUTH_OPEN_THRESHOLD = 0.34;
+const RIG_MOUTH_CLOSE_THRESHOLD = 0.22;
+const RIG_BLINK_TIMINGS = Object.freeze({
+  normal: Object.freeze({ closing: 60, closed: 80, opening: 170 }),
+  sleepy: Object.freeze({ closing: 130, closed: 260, opening: 300 }),
+});
+
+function quantizeRigMouthOpen(level, wasOpen) {
+  return level > (wasOpen ? RIG_MOUTH_CLOSE_THRESHOLD : RIG_MOUTH_OPEN_THRESHOLD);
+}
+
+function rigBlinkTimings(sleepy) {
+  return sleepy ? RIG_BLINK_TIMINGS.sleepy : RIG_BLINK_TIMINGS.normal;
+}
 
 function layerUrl(name) {
   const relative = typeof runtimeLayers[name] === "string"
@@ -1246,6 +1260,7 @@ function scheduleBlink() {
   // 深夜〜早朝（23時〜5時）は眠そうに: まばたき間隔を詰め、半目を長めに保つ。
   const hour = new Date().getHours();
   const sleepy = hour >= 23 || hour < 5;
+  const timings = rigBlinkTimings(sleepy);
   const interval = sleepy ? 900 + Math.random() * 1600 : 1400 + Math.random() * 2800;
   rigBlinkTimer = setTimeout(async () => {
     if (!rigActive) return;
@@ -1258,13 +1273,13 @@ function scheduleBlink() {
       }, ms);
     });
     // 閉じ際は素早く通過させる。
-    await step("blink_half", sleepy ? 130 : 60);
+    await step("blink_half", timings.closing);
     if (!rigActive) return;
     // 眠い時間帯は閉じたまま保つ長さで眠さを出す。
-    await step("blink_closed", sleepy ? 260 : 80);
+    await step("blink_closed", timings.closed);
     if (!rigActive) return;
     // 開き際は閉じ際の倍以上かけて戻す。
-    await step("blink_half", sleepy ? 300 : 170);
+    await step("blink_half", timings.opening);
     if (!rigActive) return;
     rigBlinkPhase = null;
     rigRefresh();
@@ -1397,7 +1412,7 @@ function attachLipSync(audio) {
     } else {
       // 差分絵は開閉2枚しか無く、単一しきい値だと包絡線が境界付近に留まる音節で
       // 開閉が細かく往復する。開く側を高く閉じる側を低くして、跳ねを止める。
-      rigMouthOpen = rigMouthLevel > (rigMouthOpen ? 0.22 : 0.34);
+      rigMouthOpen = quantizeRigMouthOpen(rigMouthLevel, rigMouthOpen);
       rigRefresh();
     }
     rigVolFrame = requestAnimationFrame(analyserLoop);
