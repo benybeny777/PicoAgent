@@ -966,6 +966,36 @@ fn fetch_whisper_model(dir: &Path) -> Result<()> {
 
 // ── Live2D（通常はランタイムだけ、公式サンプルは明示取得） ──────────────
 
+const PIXI_URL: &str = "https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js";
+const PIXI_SHA256: &str = "403f2f2ee8145fa17f60c5c89403056efe2680e5096ec2762036486914ed19c5";
+
+/// 自前メッシュリグとLive2Dが共用するPIXIだけを取得する。
+pub fn fetch_pixi_runtime() -> Result<()> {
+    let root = repo_root();
+    let vendor = root.join("ui/vendor/pixi");
+    let destination = vendor.join("pixi.min.js");
+    let force = flag("PIXI_FORCE") || flag("LIVE2D_FORCE");
+    let fetched = ensure_pinned_file(PIXI_URL, &destination, PIXI_SHA256, force, "PIXI 6.5.10")?;
+    cleanup_file(
+        &root.join("ui/vendor/live2d/pixi.min.js"),
+        "旧Live2D配下のPIXI",
+    )?;
+    log(
+        "setup:pixi",
+        if fetched > 0 {
+            format!(
+                "PIXI runtime fetched: {} ({})",
+                destination.display(),
+                mb(fetched)
+            )
+        } else {
+            format!("PIXI runtime ready: {}", destination.display())
+        },
+    );
+    log("setup:pixi", "PIXI.js 6.5.10 はMITライセンスです。");
+    Ok(())
+}
+
 struct Sample {
     id: &'static str,
     label: &'static str,
@@ -981,6 +1011,7 @@ struct Sample {
 pub fn fetch_live2d_runtime() -> Result<()> {
     let root = repo_root();
     let vendor = root.join("ui/vendor/live2d");
+    fetch_pixi_runtime()?;
 
     // 公式ホスティング版Coreをモデル世代別に固定する。Cubism 5.3用Core（URLの06）は
     // 5.3 MOCを読める一方、従来のpixi-live2d-displayでは旧モデルの一部（ひより）の
@@ -1005,20 +1036,14 @@ pub fn fetch_live2d_runtime() -> Result<()> {
     // 旧単一Coreは描画経路から外れた生成物。配布へ混ざらないようsetup時に掃除する。
     cleanup_file(&vendor.join("live2dcubismcore.min.js"), "旧Live2D Core")?;
 
-    // 残りも読み込み順どおり（core → pixi → display）に固定版を置く。
-    let runtime = [
-        (
-            "pixi.min.js",
-            "https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js",
-        ),
-        (
-            "cubism4.min.js",
-            "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js",
-        ),
-    ];
-    for (name, url) in runtime {
-        fetched += ensure_file(url, &vendor.join(name))?;
-    }
+    // pixi-live2d-displayも固定版とハッシュを照合する。PIXI本体は共用先へ取得済み。
+    fetched += ensure_pinned_file(
+        "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js",
+        &vendor.join("cubism4.min.js"),
+        "af1267e6d52759b245766c578d905bfa025b532d5c3cc727c370957c4409e21b",
+        flag("LIVE2D_FORCE"),
+        "pixi-live2d-display 0.4.0",
+    )?;
     log(
         "setup:live2d",
         if fetched > 0 {
@@ -1159,6 +1184,28 @@ fn ensure_file(url: &str, dest: &Path) -> Result<u64> {
         return Ok(0);
     }
     download_to(url, dest)
+}
+
+fn ensure_pinned_file(
+    url: &str,
+    dest: &Path,
+    sha256: &str,
+    force: bool,
+    label: &str,
+) -> Result<u64> {
+    let compatible = dest.exists()
+        && fs::read(dest)
+            .map(|bytes| hex::encode(Sha256::digest(bytes)) == sha256)
+            .unwrap_or(false);
+    if compatible && !force {
+        return Ok(0);
+    }
+    let bytes = download_to(url, dest)?;
+    let downloaded = fs::read(dest)?;
+    if hex::encode(Sha256::digest(downloaded)) != sha256 {
+        bail!("取得した {label} が固定SHA-256と一致しません");
+    }
+    Ok(bytes)
 }
 
 fn ensure_compatible_live2d_core(url: &str, dest: &Path, sha256: &str) -> Result<u64> {

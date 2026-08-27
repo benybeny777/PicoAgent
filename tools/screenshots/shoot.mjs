@@ -384,7 +384,11 @@ async function shootCharacterMatrix() {
       try {
         await page.waitForFunction(() => {
           const image = document.getElementById("petSprite");
-          return image?.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== "none";
+          const mesh = document.getElementById("meshRigCanvas");
+          const imageReady = image?.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== "none";
+          const meshReady = mesh && getComputedStyle(mesh).display !== "none"
+            && document.getElementById("character")?.dataset.renderKind === "mesh-rig";
+          return imageReady || meshReady;
         }, null, { timeout: 20000 });
         try {
           await page.waitForFunction(() => Number.isFinite(window.__picoagentPerformance?.idlePreloadReady), null, { timeout: baseline.idlePreloadReadyMs * 2 });
@@ -418,9 +422,19 @@ async function shootCharacterMatrix() {
           };
           const userBody = document.querySelector(".history-item.user .history-body");
           const assistantBody = document.querySelector(".history-item.assistant .history-body");
+          const meshCanvas = document.getElementById("meshRigCanvas");
+          const meshRect = meshCanvas?.getBoundingClientRect();
           return {
             naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
             characterDataset: { ...character.dataset },
+            meshRig: {
+              configured: Boolean(characterManifest?.meshRig?.rig),
+              canvas: Boolean(meshCanvas),
+              visible: Boolean(meshCanvas && getComputedStyle(meshCanvas).display !== "none"),
+              width: meshCanvas?.width || 0,
+              height: meshCanvas?.height || 0,
+              rect: meshRect ? { x: meshRect.x, y: meshRect.y, width: meshRect.width, height: meshRect.height } : null,
+            },
             imageRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             imageStyle: { width: imageStyle.width, height: imageStyle.height, left: imageStyle.left, inset: imageStyle.inset, transform: imageStyle.transform },
             viewStyle: viewStyle ? { transform: viewStyle.transform, scale: viewStyle.scale } : null,
@@ -462,14 +476,15 @@ async function shootCharacterMatrix() {
             },
           };
         });
-        if (visual.imageRect.width <= 0 || visual.imageRect.height <= 0
-          || visual.imageRect.x >= width || visual.imageRect.y >= height
-          || visual.imageRect.x + visual.imageRect.width <= 0 || visual.imageRect.y + visual.imageRect.height <= 0) {
-          throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません ${JSON.stringify({ imageRect: visual.imageRect, characterRect: visual.characterRect, imageStyle: visual.imageStyle, viewStyle: visual.viewStyle })}`);
+        const activeRect = visual.characterDataset.renderKind === "mesh-rig" ? visual.meshRig.rect : visual.imageRect;
+        if (!activeRect || activeRect.width <= 0 || activeRect.height <= 0
+          || activeRect.x >= width || activeRect.y >= height
+          || activeRect.x + activeRect.width <= 0 || activeRect.y + activeRect.height <= 0) {
+          throw new Error(`${characterId}/${layout}: キャラクターが画面内に描画されていません ${JSON.stringify({ activeRect, imageRect: visual.imageRect, meshRig: visual.meshRig, characterRect: visual.characterRect, imageStyle: visual.imageStyle, viewStyle: visual.viewStyle })}`);
         }
         const expectedSpringRegions = ["chat", "bar"].includes(layout)
           ? 0
-          : visual.configuredRegions || 0;
+          : visual.characterDataset.renderKind === "mesh-rig" ? 0 : visual.configuredRegions || 0;
         if (expectedSpringRegions && (!visual.springMotion?.visible
           || visual.springMotion.regionCount !== expectedSpringRegions
           || visual.springMotion.transformedRegions !== expectedSpringRegions
@@ -533,6 +548,82 @@ async function shootCharacterMatrix() {
     await contact.close();
   }
   return { output, results, warnings };
+}
+
+// セナの自前メッシュリグを実WebViewで動かし、連続パラメータと省モーション退避を検査する。
+async function validateMeshRig() {
+  const output = join(ROOT, "temp", "mesh-rig-qa");
+  mkdirSync(output, { recursive: true });
+  const page = await openScene({ characterId: "sena", layout: "stream", width: 1920, height: 1080 });
+  await page.waitForFunction(() => document.getElementById("character")?.dataset.renderKind === "mesh-rig", null, { timeout: 20000 });
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
+    meshRigController.app.ticker.stop();
+    meshRigController.setMouth(0);
+    meshRigController.setBlink(1, 0);
+    meshRigController.setGaze(0, 0);
+    meshRigController.gazeX = 0;
+    meshRigController.updateAlphas();
+    meshRigController.updateMesh(performance.now(), 1 / 60);
+    meshRigController.app.renderer.render(meshRigController.app.stage);
+  });
+  await page.screenshot({ path: join(output, "neutral.png"), omitBackground: true });
+  await page.evaluate(() => {
+    meshRigController.setMouth(1);
+    meshRigController.setBlink(0, 0);
+    meshRigController.setGaze(1, 0);
+    meshRigController.gazeX = 1;
+    meshRigController.updateAlphas();
+    meshRigController.updateMesh(performance.now(), 1 / 60);
+    meshRigController.app.renderer.render(meshRigController.app.stage);
+  });
+  const active = await page.evaluate(() => {
+    const plane = name => meshRigController.planes.get(name)?.plane;
+    const base = meshRigController.planes.get("base");
+    let vertexDelta = 0;
+    if (base) {
+      for (let index = 0; index < base.original.length; index += 1) {
+        vertexDelta = Math.max(vertexDelta, Math.abs(base.buffer.data[index] - base.original[index]));
+      }
+    }
+    return {
+      renderKind: document.getElementById("character")?.dataset.renderKind || "",
+      mouthAlpha: plane("mouth_open")?.alpha || 0,
+      blinkClosedAlpha: plane("blink_closed")?.alpha || 0,
+      gazeDrawable: Boolean(plane("gaze_right")),
+      angleX: meshRigController.angleX,
+      vertexDelta,
+      canvas: {
+        width: document.getElementById("meshRigCanvas")?.width || 0,
+        height: document.getElementById("meshRigCanvas")?.height || 0,
+      },
+    };
+  });
+  await page.screenshot({ path: join(output, "talk-blink.png"), omitBackground: true });
+  await page.evaluate(() => {
+    meshRigController.setBlink(1, 0);
+    meshRigController.updateAlphas();
+    meshRigController.app.renderer.render(meshRigController.app.stage);
+  });
+  await page.screenshot({ path: join(output, "gaze-right.png"), omitBackground: true });
+  await page.close();
+  if (active.renderKind !== "mesh-rig" || active.mouthAlpha < 0.99 || active.blinkClosedAlpha < 0.99
+      || active.gazeDrawable || Math.abs(active.angleX) < 0.01 || active.vertexDelta < 0.01
+      || active.canvas.height < 1400) {
+    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify(active)}`);
+  }
+  const reduced = await openScene({ characterId: "sena", layout: "pet", width: 900, height: 600, reducedMotion: true });
+  const reducedState = await reduced.evaluate(() => ({
+    renderKind: document.getElementById("character")?.dataset.renderKind || "",
+    imageVisible: getComputedStyle(document.getElementById("petSprite")).display !== "none",
+  }));
+  await reduced.close();
+  if (reducedState.renderKind !== "2d" || !reducedState.imageVisible) {
+    throw new Error(`省モーション時に差分絵へ退避できません: ${JSON.stringify(reducedState)}`);
+  }
+  const metrics = { generatedAt: new Date().toISOString(), active, reduced: reducedState };
+  await writeFile(join(output, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
+  return { output, metrics };
 }
 
 async function validateLayoutEditor() {
@@ -1690,6 +1781,15 @@ if (SITE_GALLERY && only.some(name => !SITE_GALLERY_FILES.has(name))) {
 }
 if (README_GALLERY && only.some(name => !README_GALLERY_FILES.has(name))) {
   throw new Error("README一覧にないキャラクターを書き出そうとしました。");
+}
+
+if (process.env.SHOOT_MESH_RIG) {
+  const result = await validateMeshRig();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`メッシュリグ検査完了: ${result.output}`);
+  process.exit(0);
 }
 
 if (process.env.SHOOT_CHARACTER_MATRIX) {

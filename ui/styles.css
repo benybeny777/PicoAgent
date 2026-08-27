@@ -214,10 +214,18 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
 .character img { position:relative; display:block; width:100%; height:100%; object-fit:contain; transform-origin:50% 82%; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; will-change:transform; }
 .character canvas { position:relative; display:block; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; }
 #live2dCanvas { background:transparent !important; filter:none; }
+#meshRigCanvas { background:transparent !important; }
 /* 2D立ち絵は透過輪郭を活かし、背景色を選ばず髪先と服の暗部が読めるようにする。
    Live2Dキャンバスには適用せず、PNGキャラだけを同じ質感へ揃える。 */
 .character[data-render-kind="2d"] .character-view::before { display:none; }
+.character[data-render-kind="mesh-rig"] .character-view::before { display:none; }
 .character[data-render-kind="2d"] img {
+  image-rendering:auto; backface-visibility:hidden;
+  filter:
+    drop-shadow(0 3px 2px var(--character-shadow))
+    var(--pet-tone,saturate(1)) saturate(1.045) contrast(1.025);
+}
+.character[data-render-kind="mesh-rig"] canvas {
   image-rendering:auto; backface-visibility:hidden;
   filter:
     drop-shadow(0 3px 2px var(--character-shadow))
@@ -227,6 +235,7 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
    まばたきと口パク、Live2Dのモデルモーションで伝える）。成功だけは反応が分かるよう
    1px級の一度きりの動きを残す。 */
 .character[data-motion="success"] #petSprite,.character[data-motion="pleased"] #petSprite { animation:pet-success .72s cubic-bezier(.2,.9,.3,1.25); }
+.character[data-motion="success"] #meshRigCanvas,.character[data-motion="pleased"] #meshRigCanvas { animation:pet-success .72s cubic-bezier(.2,.9,.3,1.25); }
 .character:hover img { filter:drop-shadow(0 9px 7px rgba(242,126,145,.22)) var(--pet-tone,saturate(1)) brightness(1.035); }
 .character[data-render-kind="2d"]:hover img {
   filter:
@@ -853,11 +862,19 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view {
   transform:translate(calc(var(--char-x,0px) + 25%),var(--char-y,0px));
 }
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view {
+  transform:translate(calc(var(--char-x,0px) + 25%),var(--char-y,0px));
+}
 /* 配信の2D立ち絵は2.6倍の表示面を上端基準に置き、右寄りの胸上構図にする。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
   inset:0 auto auto -80%; width:260%; height:260%;
   object-fit:contain; object-position:50% 0%;
+}
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view > canvas {
+  inset:0 auto auto -80%; left:-80%; bottom:auto;
+  width:260%!important; height:260%!important;
+  transform:none; transform-origin:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-motion {
   inset:0 auto auto -80%; width:260%; height:260%;
@@ -1008,6 +1025,12 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="pet"] .character[data-render-kind="2d"] .character-view,
 [data-layout="workspace"] .character[data-render-kind="2d"] .character-view,
 [data-layout="widget"] .character[data-render-kind="2d"] .character-view {
+  scale:1.32; transform-origin:50% 0%;
+}
+[data-layout="mascot"] .character[data-render-kind="mesh-rig"] .character-view,
+[data-layout="pet"] .character[data-render-kind="mesh-rig"] .character-view,
+[data-layout="workspace"] .character[data-render-kind="mesh-rig"] .character-view,
+[data-layout="widget"] .character[data-render-kind="mesh-rig"] .character-view {
   scale:1.32; transform-origin:50% 0%;
 }
 [data-layout="mascot"] .character-view > canvas {

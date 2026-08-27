@@ -1,0 +1,228 @@
+# メッシュ変形リグ（疑似Live2D v2）設計
+
+同梱の通常2Dキャラを、差分絵の差し替えではなく連続パラメータによるメッシュ変形で動かすための設計書。現行仕様は [SPEC.md](../SPEC.md)、素材の制作手順は [CHARACTER-ASSET-WORKFLOW.md](CHARACTER-ASSET-WORKFLOW.md)、未完了条件だけは [TASKS.md](TASKS.md) を正本とする。
+
+最初の対象はセナとする。`animationQualityMode=sharp-expression` の高精細正本（1780×3600、内容bbox 222,284-1567,3317）が揃っており、`secondaryMotion` も定義済みで比較しやすいためである。
+
+2026年8月27日に第1実装を完了した。PIXIの独立取得、同一格子上の高精細ベース、半目・閉眼・開口の局所補間、連続した頭部・呼吸・髪の遅れ、既存差分絵への安全な退避までをセナへ適用した。独立した瞳、前髪、後ろ髪、腕、胴のパーツ分離は隠れ領域つき原画が無いため未実装であり、現在の品質範囲を超えて対応済みとは扱わない。
+
+## なぜ差分絵では届かないか
+
+セナの `animations.idle` は `frames` 12・`fps` 3.2 で、`frameDurations` の大半が760ミリ秒の保持である。ユニークフレームは16枚しかない。これはパラパラ漫画であり、コマを増やしても素材容量と生成時間が増えるだけで滑らかさの上限は変わらない。
+
+一方、リップシンクの `rigMouthLevel` は適応しきい値と非対称包絡線を通した60fpsの連続値としてすでに算出されている（`ui/renderer.js` の `attachLipSync`）。Live2D経路へは連続値のまま渡しているが、差分絵経路は差し替え先が2枚しか無いため段階へ落とすしかない。**信号は既にあり、受け取れる描画先が無いことが制約になっている。**
+
+## Cubismを使わない理由と、この方式の上限
+
+`.moc3` は Cubism Editor でしか生成できず、AIでも自動でも作れない。`scripts/build-live2d-psd.py` は PSD の雛形までは作るが、パーツ整形とリギングは人手に残る。また Live2D 経路は [TASKS.md](TASKS.md) の販売ゲートにある拡張アプリ審査を必要とするが、自前メッシュは PIXI（MIT）だけで完結するためその判定に触れない。
+
+代償として、**頭の回転は横向きの描き起こしが無い範囲までしか振れない。** パーツごとの奥行き係数による視差とせん断で近似するため、可動域を左右±15度・上下±10度で固定する。これを超える演出は従来のフレームアニメ側で表現する。より広い可動域が要るキャラは Live2D 経路を選ぶ。
+
+## 既存9レイヤーをキーフォームとして再利用する
+
+この設計の要点。`layers/*.png` の9枚はすべて同じ1780×3600・同じ座標系で描かれた同一ポーズの差分であり、実差分がある部位をキーフォームとして使える。セナでは`gaze_left`と`gaze_right`が基準画像と画素単位で一致したため、第1実装の瞳差分には採用せず、視線入力を頭部メッシュの変形へ使う。
+
+| パラメータ | 値 | 使うクロップ |
+|---|---|---|
+| `ParamEyeLOpen` / `ParamEyeROpen` | 1.0 / 0.5 / 0.0 | `base` / `blink_half` / `blink_closed` の目領域 |
+| `ParamEyeBallX` | -1 / 0 / +1 | 独立した瞳素材を追加した段階で有効化。第1実装は頭部メッシュへ分配 |
+| `ParamMouthOpenY` | 0 / 1 | `mouth_closed` / `mouth_open` の口領域 |
+| `ParamMouthForm` | -1 / +1 | `expression_sad` / `expression_happy` の口・眉領域 |
+
+`gaze_left` / `gaze_right` は「頭と身体を固定した左右視線」として作られている（[CHARACTER-ASSET-WORKFLOW.md](CHARACTER-ASSET-WORKFLOW.md)）ため、差分は目領域に限られる。眼球だけのキーフォームとしてそのまま使える。
+
+部位ごとに手法を使い分ける。**まぶたが現れる目の開閉のように、形状変化がテクスチャ補間でしか表現できないものと、頭の向きのようにメッシュ変形でしか表現できないものを混ぜない。**
+
+| 部位 | 手法 | 理由 |
+|---|---|---|
+| 目の開閉 | テクスチャ補間（主） | まぶたが現れる変化は頂点移動では作れない |
+| 視線 | テクスチャ補間 | 眼球位置の差分がキーフォームとして存在する |
+| 口の開閉 | テクスチャ補間＋メッシュの縦変形 | 口内が現れる変化は補間、開き量の連続性は変形が担う |
+| 頭・首・身体の向き | メッシュ変形のみ | キーフォームが無い。視差とせん断で近似する |
+| 髪・胸元の揺れ | メッシュ変形＋物理 | 同上 |
+
+この切り分けにより、隠れ領域の描き足しが要るのは**パーツ同士が離れて動く箇所だけ**に限られる。顔の内部（目・口・眉）はその場で形が変わるだけなので、隠れ領域が発生しない。
+
+## 隠れ領域の原画
+
+前髪の裏の額、腕の裏の胴、横髪の裏の頬は、1枚絵に画素として存在しない。パーツを動かすと素抜けるため、**原則として原画を足して実画素から取る。**
+
+遮蔽物を描かない原画を、既存9レイヤーと同じ1780×3600・同じ座標系で用意し、`characters/<id>/mesh-rig/source/` へ置く。`layers/` へは混ぜない（`build_runtime_layers` は固定の名前リストだけを実行用WebPへ変換し `layers/` を glob しないため、置いても実行用には届かず死蔵になる）。
+
+素材の枚数は制約ではない。`motionProfile=full` の9レイヤーは同期時に検査される**必須の下限であって上限ではなく**、`rin-tha3` は既に21枚を持つ。ランタイムの `probeRigLayers` が必須にしているのは `base` / `mouth_open` / `mouth_closed` / `blink_half` / `blink_closed` の5枚で、視線2枚は任意である。
+
+AIのインペイントは、原画を足しても埋まらない細部の補助に限る。**インペイントで広い面積を作らない。** 隠れ無し原画を用意できないパーツは、そのパーツの可動域を狭めるか、メッシュリグの対象から外して従来の差分絵へ委ねる。
+
+## アセット構造
+
+```
+characters/<id>/
+├── layers/*.png              制作正本9枚（既存、上書き・削除しない。キーフォーム元）
+├── runtime-layers/*.webp     既存（差分絵フォールバック用）
+├── frames/<ハッシュ>/*.webp  既存（フレームアニメ用）
+└── mesh-rig/
+    ├── rig.json              パーツ、ノード木、パラメータ、束縛の定義
+    ├── parts/*.webp          bboxへ切り詰めた実行用パーツ（lossless WebP）
+    └── source/*.png          隠れ無し原画（制作正本。配信コピーから除外する）
+```
+
+パーツは `HIYORI_PARTS`（`scripts/build-live2d-psd.py`）の15パーツと描画順をそのまま採用する。後ろ髪→体→腕B→腕A→首→耳→顔→口→鼻→頬→目玉→目→まゆ毛→横髪→前髪の順で、Live2D側と対応付けられる状態を保つ。
+
+`scripts/build-mesh-rig.py` を正規入口とし、通常の原画と隠れ無し原画を突き合わせてパーツマスク・パーツWebP・`rig.json` を出力する。`HIYORI_PARTS` の比率は初期bboxの目安として使い、最終マスクは実画素から決める。
+
+## rig.json
+
+```json
+{
+  "version": 1,
+  "canvas": { "width": 1780, "height": 3600 },
+  "contentBox": [222, 284, 1567, 3317],
+  "runtimeScale": 0.5,
+  "nodes": [
+    { "id": "body", "pivot": [890, 2600] },
+    { "id": "neck", "parent": "body", "pivot": [890, 1520] },
+    { "id": "head", "parent": "neck", "pivot": [890, 1180] }
+  ],
+  "drawables": [
+    {
+      "id": "PartMouth",
+      "node": "head",
+      "texture": "parts/mouth.webp",
+      "offset": [612, 848],
+      "order": 80,
+      "depth": 0.35,
+      "grid": [6, 4],
+      "keyforms": [
+        { "param": "ParamMouthOpenY", "at": 0, "texture": "parts/mouth.webp" },
+        { "param": "ParamMouthOpenY", "at": 1, "texture": "parts/mouth-open.webp" }
+      ],
+      "occlusion": { "source": "source/no-hairfront.png", "inpaintRatio": 0.0 }
+    },
+    {
+      "id": "PartHairFront",
+      "node": "head",
+      "texture": "parts/hair-front.webp",
+      "offset": [210, 260],
+      "order": 140,
+      "depth": 0.85,
+      "grid": [8, 8],
+      "physics": { "stiffness": 18, "damping": 6, "follow": 0.6, "axis": [1, 0.3] },
+      "occlusion": { "source": "source/no-hairfront.png", "inpaintRatio": 0.02 }
+    }
+  ],
+  "parameters": [
+    { "id": "ParamAngleX", "min": -15, "max": 15, "default": 0 },
+    { "id": "ParamMouthOpenY", "min": 0, "max": 1, "default": 0 }
+  ],
+  "bindings": [
+    { "param": "ParamAngleX", "node": "head", "rotate": 0.35, "translateX": 2.4, "skewX": 0.12 },
+    { "param": "ParamAngleX", "node": "neck", "rotate": 0.12 },
+    { "param": "ParamBreath", "node": "body", "translateY": -3.0, "scaleY": 0.004 }
+  ]
+}
+```
+
+`offset` は原画座標系での左上位置。`depth` は頭の回転時に視差を掛ける強さで、手前ほど大きい（前髪0.85、目0.5、顔0.2、後ろ髪-0.6）。`order` は描画順で `HIYORI_PARTS` の並びに対応する。`grid` は格子メッシュの分割数で、変形が要らないパーツは `[1, 1]` にしてよい。`occlusion.inpaintRatio` は隠れ領域のうちインペイント由来の面積比で、QAで検査する。
+
+`keyforms` を持つ drawable は、パラメータ値に応じて隣接する2つのキーフォームをテクスチャ補間する。持たない drawable は単一テクスチャをメッシュ変形するだけになる。
+
+## パラメータ
+
+命名は Live2D の標準名に合わせる。ひよりとメッシュリグで駆動側のコードを共用し、キャラごとに別名を作らないためである。
+
+| ID | 範囲 | 既定 | 駆動元 |
+|---|---|---|---|
+| `ParamAngleX` / `Y` / `Z` | -15..15 / -10..10 / -8..8 度 | 0 | カーソル追従（`gazeTrackingEnabled` 有効時）、待機の自発動作 |
+| `ParamBodyAngleX` / `Y` / `Z` | -6..6 / -4..4 / -4..4 度 | 0 | `ParamAngle*` の遅れ追従 |
+| `ParamEyeLOpen` / `ParamEyeROpen` | 0..1 | 1 | `scheduleBlink` |
+| `ParamEyeBallX` / `Y` | -1..1 | 0 | カーソル追従 |
+| `ParamBrowLY` / `RY` | -1..1 | 0 | `character.dataset.motion` |
+| `ParamMouthOpenY` | 0..1 | 0 | `rigMouthLevel`（リップシンクの包絡線） |
+| `ParamMouthForm` | -1..1 | 0 | `character.dataset.motion` |
+| `ParamBreath` | 0..1 | 0 | 正弦（周期約3.8秒） |
+| `ParamHairFront` / `Side` / `Back` | -1..1 | 0 | 物理演算の出力 |
+
+可動域は `rig.json` の `parameters` で宣言し、駆動側は必ずクランプする。上限を超えると視差近似が破綻するため、可動域はキャラごとの調整値ではなく**この方式の制約**として扱う。
+
+## 変形モデル
+
+ノード変換は `translate(pivot) ∘ rotate ∘ scale ∘ skew ∘ translate(-pivot)` を親から子へ合成する。`body → neck → head` の木構造により、頭を動かすと目・口・前髪が連れて動く。差分絵経路にはこの連動が無く、差分ごとに独立して切り替わっている。
+
+頭の回転は、ノード回転だけでは平面が回るだけで立体に見えない。drawable ごとに `depth` に比例した水平移動とせん断を加え、手前のパーツほど大きく動かすことで奥行きを近似する。
+
+```
+offsetX += ParamAngleX * depth * k
+skewX   += ParamAngleX * depth * k2
+```
+
+これは Live2D が手描きのキーフォームで表現している擬似3Dの近似であり、**可動域の端では必ず不自然になる。** 上限値はその破綻が始まる手前に置く。
+
+## 描画経路の統合
+
+`ui/renderer.js` に、`rigActive`（差分絵）/ `live2dActive` と並ぶ第3経路を足す。`loadCharacter` で `mesh-rig/rig.json` の有無を判定して分岐する。
+
+描画キャンバスは Live2D と同じく `characterView` 内へ挿入する。位置決めは `.character-view > img` / `> canvas` の子セレクタが担っており、`#petSprite` を名指しするCSSは success/pleased のバウンス1本だけなので、既存の枠組みへそのまま乗る。
+
+フォールバックは既存の停止条件をすべて引き継ぐ。
+
+| 条件 | 挙動 |
+|---|---|
+| WebGL初期化の失敗 | 差分絵表示へ落とし、`logApp` へ理由を残す |
+| `prefers-reduced-motion` | 差分絵表示（現在バネ変形を止めているのと同じ扱い） |
+| `chat` / `bar` 表示 | 差分絵表示 |
+| `document.hidden` / `napping` / 起動中 | 描画を止める |
+| `rig.json` の検証失敗 | 差分絵表示へ落とす。無言で退行させない |
+
+セナは `animations.idle` を残し、フォールバックが常に成立する状態を保つ。
+
+## 入力の接続
+
+現在捨てている連続値をパラメータへ直結する。
+
+**口** — `rigMouthLevel` は60fpsの連続値として算出済みだが、差分絵経路では2値へ落としている。そのまま `ParamMouthOpenY` へ渡す。Live2D経路が既にこの形で受け取っているため、駆動側は共用できる。
+
+**視線** — `rigLookDirection` の -1 / 0 / 1 を、カーソル位置からの連続値にして `ParamAngleX` / `Y` と `ParamEyeBallX` / `Y` へ分配する。頭と眼球で追従の速さを変える。既定OFF（`gazeTrackingEnabled`）は維持する。
+
+**まばたき** — `scheduleBlink` の `blink_half` → `blink_closed` → `blink_half` を `ParamEyeLOpen` の連続イージングへ置き換える。閉じが速く開きが遅い非対称配分は差分絵経路で既に導入済みなので、その時間配分をそのまま連続値へ移す。
+
+**呼吸** — `ParamBreath` の正弦。差分絵経路には無い。
+
+## 物理演算
+
+`animateSpringMotion` のバネ積分（stiffness / damping による二階系）をそのまま流用する。現在は `Math.sin` の固定周期で駆動しているため、何も起きていなくても同じリズムで揺れ続け、見慣れると機械的になる。入力を `ParamAngleX` / `ParamBodyAngleX` の**速度**へ差し替え、頭を振ったときだけ髪が遅れて追随して収束する形にする。
+
+既存の `secondaryMotion` / `springPhysics` 定義は差分絵キャラ向けに残す。メッシュリグのパーツ物理は `rig.json` の `drawables[].physics` を使う。
+
+停止条件（`reduce-motion`、`document.hidden`、`napping`、`chat` / `bar` 表示）は現在の実装を維持する。
+
+## 解像度とテクスチャ容量
+
+パーツを全画面サイズのまま15枚持つと、1780×3600×4バイト×15で約384MBのテクスチャになり常駐マスコットとして成立しない。bboxへ切り詰めれば合計約60MBまで下がる。
+
+表示は `LIVE2D_RENDER_WIDTH` 285 × `LIVE2D_RENDER_HEIGHT` 315 のCSS画素だが、CSS拡大前に画素を失わないよう描画バッファは1283×1418にする。`runtimeScale` 0.5の実行テクスチャはベース890×1800、局所差分は実bboxへ切り詰める。現在の4枚は圧縮後合計約0.9MBで、透明な全画面テクスチャを局所差分ごとに常駐させない。
+
+**縮小は許可されるが、`AGENTS.md` のとおり引き伸ばし拡大は禁止する。** `runtimeScale` は 1.0 以下に限り、実行用パーツを原画より大きく書き出さない。
+
+1283×1418のWebGLを含む1920×1080配信形式の撮影検査は約5.0秒で、通常2D向け4.0秒基準を約1.0秒超えた。1103画素まで下げれば基準内になるが輪郭の粗さが見えたため、今回は画質を優先して1418画素を採用する。局所テクスチャは実bboxへ切り詰め、同じ画質で圧縮後合計を約0.9MBへ抑える。
+
+## 段階
+
+| 段階 | 実施内容 | 完了条件 |
+|---|---|---|
+| 1. PIXIの分離 | 完了 | PIXI 6.5.10を`ui/vendor/pixi/`へSHA-256固定で取得し、Cubism 4も固定した |
+| 2. 局所キーフォーム生成 | 第1実装完了 | 既存正本を変更せず、半目・閉眼・開口の羽根付きlossless WebPを生成する。隠れ領域原画を使う本格パーツ分離は未完了 |
+| 3. メッシュ描画 | 第1実装完了 | 同一9×15格子、WebGL失敗時の差分絵退避、既存配置との統合を実装した |
+| 4. 連続入力 | 第1実装完了 | 口、まばたき、頭部視線を連続入力へ接続した。独立した瞳と表情補間は素材待ち |
+| 5. 物理演算 | 第1実装完了 | 頭部速度で髪の遅れを駆動し、呼吸を連続変形へ接続した。独立した髪・胸元パーツ物理は素材待ち |
+| 6. 検証と登録 | 完了 | 同期・形式検証、実WebViewの動作検査、省モーションとchat/bar退避を追加した |
+
+次段階は隠れ領域つき原画を制作してから始める。前髪を外した額、腕を外した胴、横髪を外した頬を同じ座標系で用意し、仮の切り抜きや引き伸ばしで可動域を広げない。
+
+## 見送った選択肢
+
+| 項目 | 理由 |
+|---|---|
+| Cubism で本物の Live2D を作る | `.moc3` が Cubism Editor でしか生成できず、リギングが人手に残る。販売ゲートの拡張アプリ審査も必要になる |
+| THA3 のリアルタイム推論 | 1枚絵から連続パラメータで動かせるが、出力が512×512で高精細キャラの解像度に届かず、常駐マスコットがGPUを掴み続ける |
+| 口の中間レイヤー追加（`mouth_half` 等） | 差分絵経路の量子化を4段へ細かくできるが専用作画が要る。`AGENTS.md` が半目の透明度生成を禁じているのと同じ理由で、既存の開閉2枚から合成しない。メッシュリグへ進めばキーフォーム補間が置き換える |
+| 目・口のクロスフェード（差分絵経路） | `syncSpringMotionFrame` が `petSprite.currentSrc` を全バネ領域の `<img>` へ複製している。本体だけクロスフェードすると上に重なるバネ領域がハードカットのまま残り、差分が領域へ掛かるキャラで顔が二重に見える。バネ領域側も同時にクロスフェードするか、領域と顔の非重複をキャラごとに保証する必要がある |

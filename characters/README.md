@@ -33,6 +33,7 @@ characters/<id>/
 ```
 
 `runtime-layers/` と `frames/` は `scripts/build-character-animations.py` で生成する。手で直接直さない。
+`mesh-rig/`を持つキャラは`source/regions.json`を制作設定とし、`scripts/build-mesh-rig.py <id>`で`parts/*.webp`と`rig.json`を生成する。`source/`は配信しない。既存レイヤーだけの第1実装は顔の局所補間と一枚メッシュ変形までとし、髪・腕・胴を独立させる場合は隠れ領域つき原画を追加してから行う。
 `source.png` などの元画像は任意の制作素材。実行時に使わないPSD・確認用シート・生成途中画像は、必要がなくなったらリポジトリへ残さない。
 
 同梱通常2Dは `motionProfile=full` を持ち、`base`、半目／閉じ目、閉口／開口などの制作正本PNGからlossless WebPの単一世代を生成する。口パクは音声ありなら声量、ミュート中なら返答状態へ同期する。`springPhysics.regions` を持つキャラは同じフレームの局所領域を60fpsの減衰バネで重ね、髪・胸元・リボンなどに別々の遅れを付ける。`animationQualityMode=spring-high` は通常42枚の倍となる84フレームを生成する。矩形レイヤーや色面は合成せず、透明輪郭を維持する。利用者が追加済みのPNGパックは従来どおり読み込む。

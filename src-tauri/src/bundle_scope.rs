@@ -46,7 +46,7 @@ const ALLOWED_UI_EXTENSIONS: [&str; 12] = [
 ];
 
 /// `ui/` の中で走査しない Git 管理外の生成物・取得物。
-const UI_GENERATED_DIRS: [(&str, &str); 2] = [
+const UI_GENERATED_DIRS: [(&str, &str); 3] = [
     (
         "assets/characters",
         "cargo xtask sync-characters が characters/ から生成する配信コピー",
@@ -54,6 +54,10 @@ const UI_GENERATED_DIRS: [(&str, &str); 2] = [
     (
         "vendor/live2d",
         "cargo xtask setup live2d が取得する Live2D ランタイム（再配布条件があるため Git 管理外）",
+    ),
+    (
+        "vendor/pixi",
+        "cargo xtask setup pixi が固定ハッシュで取得する PIXI ランタイム（Git 管理外）",
     ),
 ];
 
@@ -273,7 +277,7 @@ mod guard {
         assert!(
             violations.is_empty(),
             "PicoAgent自身のJavaScriptでeval／Functionコンストラクタを使わないでください。\
-             CSPのunsafe-evalはGit管理外のLive2D用PIXIだけに限定します: {violations:?}"
+             CSPのunsafe-evalはGit管理外の固定PIXIランタイムだけに限定します: {violations:?}"
         );
     }
 
