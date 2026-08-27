@@ -1237,7 +1237,9 @@ function scheduleGaze() {
   }, 8000 + Math.random() * 6000);
 }
 
-// まばたき: half → closed → half を素早く挟み、1.4〜4.2秒間隔で繰り返す。
+// まばたき: half → closed → half を挟み、1.4〜4.2秒間隔で繰り返す。
+// 実際のまばたきは閉じが速く開きが遅い。3段を同じ長さにすると機械的な明滅に見えるため、
+// 閉じ側を詰めて開き側を伸ばした非対称の配分にする。
 function scheduleBlink() {
   clearTimeout(rigBlinkTimer);
   if (!rigActive) return;
@@ -1255,11 +1257,14 @@ function scheduleBlink() {
         resolve();
       }, ms);
     });
-    await step("blink_half", sleepy ? 160 : 100);
+    // 閉じ際は素早く通過させる。
+    await step("blink_half", sleepy ? 130 : 60);
     if (!rigActive) return;
-    await step("blink_closed", 140);
+    // 眠い時間帯は閉じたまま保つ長さで眠さを出す。
+    await step("blink_closed", sleepy ? 260 : 80);
     if (!rigActive) return;
-    await step("blink_half", sleepy ? 280 : 100);
+    // 開き際は閉じ際の倍以上かけて戻す。
+    await step("blink_half", sleepy ? 300 : 170);
     if (!rigActive) return;
     rigBlinkPhase = null;
     rigRefresh();
@@ -1390,7 +1395,9 @@ function attachLipSync(audio) {
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
     } else {
-      rigMouthOpen = rigMouthLevel > 0.3;
+      // 差分絵は開閉2枚しか無く、単一しきい値だと包絡線が境界付近に留まる音節で
+      // 開閉が細かく往復する。開く側を高く閉じる側を低くして、跳ねを止める。
+      rigMouthOpen = rigMouthLevel > (rigMouthOpen ? 0.22 : 0.34);
       rigRefresh();
     }
     rigVolFrame = requestAnimationFrame(analyserLoop);
