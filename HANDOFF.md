@@ -17,10 +17,10 @@
    - **前提ツールの不足** … Xcode Command Line Tools、Tauri CLI、`p7zip`（Aivisの分割書庫展開）。`docs/DEVELOPMENT.md`のコマンドで揃う
    - **一度もmac向けにコンパイルされていない自前コードの誤り** … `secret.rs`（今回追加）、`engine.rs`の`sysctlbyname`、`aivis.rs`のGPU判定、`engine_backend.rs`のMetal表示、`skills/trash_file`の`~/.Trash`、`skills/browser_control/cdp.rs`のブラウザ既定パス。読んだ限り問題は無いが、コンパイルで確定させる
    - **同梱物取得のmac経路** … llama.cpp・Whisperのmac資産、LibreOffice DMGのマウント、Aivisの`.7z.001`展開
-3. [docs/TASKS.md](docs/TASKS.md)の「macOS版の実機QA」を消化する。Apple SiliconとIntelは別バイナリなので機種ごとに確認する。
-4. Windows 10/11 で v1.0.3 のNSISを作る。配布Repo PR #31 はWindows版もv1.0.3にする前提で書いてある。
-5. `v1.0.3` Releaseへ両方の成果物を置き、`cargo xtask update-feed <各成果物>` で `latest.json` を生成して配布Repoへ取り込む。
-6. 配布Repo PR #31を完成させてマージし、Pagesを公開する。
+3. [docs/TASKS.md](docs/TASKS.md)の「macOS版の実機QA」を消化する。配布対象はApple Siliconだけで、Intel Macは対象外。
+4. `.dmg`を`v1.0.3`のプレリリースとして配布Repoへ上げる。**Windows版は待たない。** Windows版はv1.0.2のまま据え置き、macOS版だけをv1.0.3として公開する。版は揃えない。
+5. **`cargo xtask update-feed`を実行せず、`latest.json`も変更しない。** `latest.json`はWindows向けアプリ内更新の正本で現在1.0.2を指す。macOSはアプリ内更新に未対応（`install_supported = cfg!(windows) && cfg!(target_arch = "x86_64")`）のため登録が要らない。1.0.3へ書き換えると、Windows利用者に「新しいバージョンがありますが、このPC向けインストーラは準備中です」と表示される。
+6. 配布Repo PR #31（Draft）をReady化してマージし、Pagesを公開する。手順はそのPR本文の冒頭にある。
 
 **Windows環境ではmacOS向けの全体コンパイルができない。** `objc2-exception-helper`のビルドスクリプトがCコンパイラを要求し、Apple SDKはApple製ハードウェア上での利用に限られるため、クロス環境を用意しない。`secret.rs`と`security-framework`だけは切り出した検査用クレートで`aarch64-apple-darwin`向けの型検査を通してある。
 
