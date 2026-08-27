@@ -37,10 +37,12 @@ graph LR
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ）の取得 |
 | `cargo xtask setup whisper` | 同梱 Whisper の取得 |
 | `cargo xtask setup live2d` | Live2D ランタイム + サンプルモデルの取得 |
+| `cargo xtask setup pixi` | 自前メッシュリグとLive2Dが共有するPIXI 6.5.10の取得 |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice）の取得 |
 | `cargo xtask setup tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
+| `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
 
@@ -151,7 +153,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **Live2D ランタイムと利用者モデル**
 
-- `cargo xtask setup live2d` は Cubism Core / PIXI / pixi-live2d-display だけを `ui/vendor/live2d/` へ取得します。`dev` / `build` もサンプルモデルを自動取得しません
+- `cargo xtask setup pixi` はPIXI 6.5.10をSHA-256照合して`ui/vendor/pixi/`へ取得します。`cargo xtask setup live2d`はこれを共有し、Cubism Coreとpixi-live2d-displayを`ui/vendor/live2d/`へ取得します。`dev` / `build` もサンプルモデルを自動取得しません
 - 利用者は設定画面の「キャラ・音声」→「キャラクターを追加・作成」で、配布元から自分で取得したzip／フォルダを選びます。`.model3.json` が1個なら、同じフォルダの組み込み用データだけを安全検査してユーザー領域へコピーし、PicoAgent用 `character.json` を自動作成します
 - 開発者が既存サンプルの描画回帰を行う場合だけ `cargo xtask setup live2d-samples` を明示実行します。通常の`build`と販売版は、手元に取得済みでも配布許可リスト外のサンプルを同期しません
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)に従います。利用者モデルは配布元ごとに条件が違い、公式サンプルにも[個別の利用条件](https://www.live2d.com/learn/sample/model-terms/)があるため、取得・追加前に利用者自身が確認します

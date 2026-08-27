@@ -257,6 +257,7 @@ window.addEventListener("beforeunload", () => {
     logApp("warn", "終了時に音声解析を解放できませんでした", errorDetail(error));
   });
   stopLive2D();
+  destroyMeshRig();
   animationLoop?.stop();
   gazeFrameScheduler?.cancel();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
@@ -822,7 +823,7 @@ let activeBodyMotion = null;
 let springRenderingPaused = true;
 
 function syncSpringMotionFrame() {
-  if (!activeSpringMotion.length || live2dActive) return;
+  if (!activeSpringMotion.length || live2dActive || meshRigActive) return;
   const source = petSprite.currentSrc || petSprite.src;
   for (const spring of activeSpringMotion) {
     if (source && spring.sprite.src !== source) spring.sprite.src = source;
@@ -831,7 +832,7 @@ function syncSpringMotionFrame() {
 
 function updateSpringMotionVisibility() {
   if (!characterSpringMotion) return;
-  characterSpringMotion.hidden = !activeSpringMotion.length || live2dActive;
+  characterSpringMotion.hidden = !activeSpringMotion.length || live2dActive || meshRigActive;
   if (!characterSpringMotion.hidden) syncSpringMotionFrame();
 }
 
@@ -910,7 +911,7 @@ function configureSpringMotion(config, legacyConfig = null) {
 }
 
 function animateSpringMotion(now) {
-  if (!activeSpringMotion.length || live2dActive) return false;
+  if (!activeSpringMotion.length || live2dActive || meshRigActive) return false;
   const layout = petApp.dataset.layout || "pet";
   const shouldRender = !reduceMotion
     && !document.hidden
@@ -982,11 +983,14 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   animations = variant?.animations || manifest.animations || {};
   runtimeLayers = variant?.runtimeLayers || manifest.runtimeLayers || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
+  activeMeshRigConfig = variant?.meshRig || manifest.meshRig || null;
   configureSpringMotion(variant?.springPhysics ?? manifest.springPhysics, variant?.secondaryMotion ?? manifest.secondaryMotion);
   renderVariantPicker(variants, variant?.id || "default");
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
+  destroyMeshRig();
   if (hasLive2dDefinition(activeLive2dConfig)) {
+    activeMeshRigConfig = null; // 同一キャラで両方ある場合は審査済みLive2D定義を優先する
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
       await startLive2D(activeLive2dConfig);
@@ -1006,6 +1010,16 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     stopLive2D();
     preloadAnimations();
     await probeRigLayers(); // layers 素材があればリップシンク対応
+    if (activeMeshRigConfig?.rig) {
+      try {
+        await prepareMeshRig(activeMeshRigConfig);
+      } catch (error) {
+        destroyMeshRig();
+        activeMeshRigConfig = null;
+        logApp("error", "メッシュリグの初期化に失敗しました（差分絵表示で継続）", errorDetail(error));
+        setStatus("高品質リグを読み込めないので差分絵表示で続けるね");
+      }
+    }
   }
   applyCharacterFraming();
   frame = 0;
@@ -1078,6 +1092,15 @@ function setAnimation(name, force = false) {
   wakeAnimationLoop();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
   if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
+  const meshMotion = animationName === "idle" || animationName === "talking";
+  if (meshRigController && meshMotion && meshRigCanRender()) {
+    setMeshRigVisible(true);
+    character.dataset.motion = requestedMotion;
+    meshRigController.setMotion(requestedMotion);
+    startRig();
+    return;
+  }
+  setMeshRigVisible(false);
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
   // layers を持つキャラは待機・返答状態を常時リグ描画にする。
@@ -1223,6 +1246,12 @@ async function probeRigLayers() {
 // 横を向いている数百msの途中で一瞬だけ顔が正面へ戻って見える）。
 function rigRefresh() {
   if (!rigActive) return;
+  if (meshRigActive && meshRigController) {
+    meshRigController.setMouth(rigMouthLevel || (rigMouthOpen ? 0.58 : 0));
+    meshRigController.setGaze(rigLookDirection, 0);
+    meshRigController.setMotion(character.dataset.motion || animationName);
+    return;
+  }
   const gazing = rigGazeAvailable && !currentVoice && animationName === "idle" && rigLookDirection !== 0;
   const gaze = gazing ? (rigLookDirection < 0 ? "gaze_left" : "gaze_right") : "mouth_closed";
   const blink = gazing ? null : rigBlinkPhase;
@@ -1264,8 +1293,9 @@ function scheduleBlink() {
   const interval = sleepy ? 900 + Math.random() * 1600 : 1400 + Math.random() * 2800;
   rigBlinkTimer = setTimeout(async () => {
     if (!rigActive) return;
-    const step = (phase, ms) => new Promise(resolve => {
+    const step = (phase, ms, meshTarget) => new Promise(resolve => {
       rigBlinkPhase = phase;
+      if (meshRigActive) meshRigController?.setBlink(meshTarget, ms);
       rigRefresh();
       rigBlinkStepTimer = setTimeout(() => {
         rigBlinkStepTimer = 0;
@@ -1273,13 +1303,13 @@ function scheduleBlink() {
       }, ms);
     });
     // 閉じ際は素早く通過させる。
-    await step("blink_half", timings.closing);
+    await step("blink_half", timings.closing, 0.5);
     if (!rigActive) return;
     // 眠い時間帯は閉じたまま保つ長さで眠さを出す。
-    await step("blink_closed", timings.closed);
+    await step("blink_closed", timings.closed, 0);
     if (!rigActive) return;
     // 開き際は閉じ際の倍以上かけて戻す。
-    await step("blink_half", timings.opening);
+    await step("blink_half", timings.opening, 1);
     if (!rigActive) return;
     rigBlinkPhase = null;
     rigRefresh();
@@ -1427,6 +1457,7 @@ function startRig() {
   rigFace = "";
   rigMouthOpen = false;
   rigBlinkPhase = null;
+  if (meshRigActive) meshRigController?.setBlink(1, 0);
   rigLookDirection = 0;
   rigRefresh();
   scheduleBlink();
@@ -1459,6 +1490,68 @@ function stopLipSync() {
   const wasActive = rigActive;
   stopRig();
   if (wasActive && animations[animationName]) displayPreloadedFrame(animationName, frame);
+}
+
+// ── 自前メッシュリグ ──────────────────────────────────────────────
+let activeMeshRigConfig = null;
+let meshRigController = null;
+let meshRigCanvas = null;
+let meshRigActive = false;
+let pixiRuntimePromise = null;
+
+function meshRigCanRender() {
+  const layout = petApp.dataset.layout || "pet";
+  return Boolean(
+    meshRigController
+    && !reduceMotion
+    && !document.hidden
+    && !napping
+    && !petApp.classList.contains("is-booting")
+    && layout !== "chat"
+    && layout !== "bar"
+  );
+}
+
+function setMeshRigVisible(visible) {
+  const active = Boolean(visible && meshRigCanRender());
+  meshRigActive = active;
+  meshRigController?.setActive(active);
+  if (meshRigCanvas) meshRigCanvas.style.display = active ? "" : "none";
+  petSprite.style.display = active ? "none" : "";
+  character.dataset.renderKind = active ? "mesh-rig" : "2d";
+  updateSpringMotionVisibility();
+  return active;
+}
+
+function destroyMeshRig() {
+  meshRigActive = false;
+  meshRigController?.destroy();
+  meshRigController = null;
+  meshRigCanvas = null;
+  petSprite.style.display = "";
+  if (!live2dActive) character.dataset.renderKind = "2d";
+  updateSpringMotionVisibility();
+}
+
+async function prepareMeshRig(cfg) {
+  await ensurePixiRuntime();
+  if (!window.PicoMeshRig?.create) throw new Error("メッシュリグ描画モジュールがありません");
+  meshRigCanvas = document.createElement("canvas");
+  meshRigCanvas.id = "meshRigCanvas";
+  meshRigCanvas.setAttribute("aria-hidden", "true");
+  characterView.insertBefore(meshRigCanvas, petSprite);
+  const rigPath = String(cfg.rig || "").replace(/^\/+/, "");
+  const slash = rigPath.lastIndexOf("/");
+  const rigRoot = slash >= 0 ? rigPath.slice(0, slash) : ".";
+  meshRigController = await window.PicoMeshRig.create({
+    canvas: meshRigCanvas,
+    rigUrl: `${characterRoot}/${rigPath}`,
+    rootUrl: `${characterRoot}/${rigRoot}`,
+    assetVersion: characterAssetVersion,
+    width: LIVE2D_RENDER_WIDTH,
+    height: LIVE2D_RENDER_HEIGHT,
+  });
+  meshRigController.setActive(false);
 }
 
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
@@ -1515,6 +1608,17 @@ function loadScriptOnce(src) {
   });
 }
 
+async function ensurePixiRuntime() {
+  if (window.PIXI?.Application && window.PIXI?.SimplePlane) return;
+  if (!pixiRuntimePromise) {
+    pixiRuntimePromise = loadScriptOnce("vendor/pixi/pixi.min.js?v=6.5.10-pinned").catch(error => {
+      pixiRuntimePromise = null;
+      throw new Error(`PIXIランタイムを読み込めません（cargo xtask setup pixi を実行してください）: ${error.message}`);
+    });
+  }
+  await pixiRuntimePromise;
+}
+
 function destroyDetachedLive2DModel(model) {
   try { model?.destroy?.(); }
   catch (error) { logApp("warn", "遅れて完了したLive2Dモデルを破棄できませんでした", errorDetail(error)); }
@@ -1562,7 +1666,7 @@ async function ensureLive2DRuntime(sdk) {
         ? "vendor/live2d/live2dcubismcore-5.3.min.js?v=5.3-pinned"
         : "vendor/live2d/live2dcubismcore-compat.min.js?v=compat-pinned";
       await loadScriptOnce(core);
-      await loadScriptOnce("vendor/live2d/pixi.min.js");
+      await ensurePixiRuntime();
       await loadScriptOnce("vendor/live2d/cubism4.min.js");
       // モデル同梱のモーション音声（サンプルボイス）は TTS 読み上げと二重再生になるため無効化する。
       if (window.PIXI?.live2d?.config) PIXI.live2d.config.sound = false;
@@ -1751,6 +1855,7 @@ function resetLook() {
   character.style.setProperty("--look-rot", "0deg");
   rigLookDirection = 0;
   rigRefresh();
+  meshRigController?.setGaze(0, 0);
   // Live2DModel.focus()へcanvas外の座標を渡すと上下限へ張り付きやすい。
   // 内部の正規化済みコントローラを中央へ戻して、下向きが残らないようにする。
   live2dModel?.internalModel?.focusController?.focus(0, 0);
@@ -1783,6 +1888,12 @@ function applyGazePoint({ clientX, clientY }) {
       }
     }
     const dx = nearFace ? Math.max(-1, Math.min(1, normalizedX)) : 0;
+    if (meshRigActive) {
+      meshRigController?.setGaze(
+        nearFace && !deadZone ? dx : 0,
+        nearFace && !deadZone ? Math.max(-1, Math.min(1, -normalizedY)) : 0,
+      );
+    }
     character.style.setProperty("--look-rot", `${(dx * 1.15).toFixed(2)}deg`);
     // mousemove は毎ピクセル届くので、向きが変わったときと一定間隔でだけ反映する
     // （毎イベントで自動視線タイマーを張り直すとタイマーの作り直しだけが積み上がる）。
@@ -1838,6 +1949,7 @@ function onReduceMotionChange(event) {
       playLive2DMotion(animationName);
     }
   }
+  if (meshRigController) setAnimation(animationName, true);
   wakeAnimationLoop();
 }
 
@@ -4105,10 +4217,12 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     animationLoop?.stop();
     gazeFrameScheduler?.cancel();
+    setMeshRigVisible(false);
   } else {
     lastFrameAt = performance.now();
     springLastAt = 0;
     wakeAnimationLoop();
+    if (meshRigController) setAnimation(animationName, true);
   }
   if (!document.hidden || !continuousVoice) return;
   continuousVoice = false;
@@ -4340,6 +4454,7 @@ function fallAsleep() {
   const sleeping = characterManifest?.boot?.sleeping;
   if (!sleeping) return;
   napping = true;
+  setMeshRigVisible(false);
   stopRig();
   character.dataset.motion = "none";
   character.classList.add("napping");
@@ -4617,6 +4732,7 @@ function applyLayout(id) {
   gazeFrameScheduler?.cancel();
   resetLook();
   if (!reduceMotion && gazeTrackingEnabled) scheduleGaze();
+  if (meshRigController) setAnimation(animationName, true);
   wakeAnimationLoop();
 }
 
@@ -5045,6 +5161,9 @@ function startAlarmPolling() {
     try { applyLayout(info.layout); }
     catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
     petApp.classList.remove("is-booting");
+    // 起動中に準備したメッシュリグは is-booting の間だけ差分絵へ退避している。
+    // 保存形式へ戻して起動状態を解除した時点で、表示可否を必ず再評価する。
+    if (meshRigController) setAnimation(animationName, true);
     stopBootLogTicker();
   }
   startBackgroundStartupServices(info, startupGreeting);
@@ -5074,6 +5193,7 @@ function startAlarmPolling() {
     logApp("warn", "起動失敗後に保存中の表示形式へ戻せませんでした", errorDetail(layoutError));
   }).finally(() => {
     petApp.classList.remove("is-booting");
+    if (meshRigController) setAnimation(animationName, true);
     stopBootLogTicker();
     wakeAnimationLoop();
   });

@@ -47,6 +47,7 @@ ui-dist/
 ui/assets/characters/
 
 # Live2D ランタイムと公式サンプルモデル（cargo xtask setup live2d で取得。再配布条件があるため含めない）
+ui/vendor/pixi/
 ui/vendor/live2d/
 characters/*/live2d/
 # 自作のむぎモデルはPicoAgentの配布物として追跡する。

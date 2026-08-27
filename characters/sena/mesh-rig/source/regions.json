@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "runtimeScale": 0.5,
+  "grid": [9, 15],
+  "regions": {
+    "blink_half": { "source": "blink_half", "box": [690, 560, 1150, 780], "feather": 28 },
+    "blink_closed": { "source": "blink_closed", "box": [690, 560, 1150, 780], "feather": 28 },
+    "mouth_open": { "source": "mouth_open", "box": [800, 760, 1030, 940], "feather": 24 }
+  }
+}
