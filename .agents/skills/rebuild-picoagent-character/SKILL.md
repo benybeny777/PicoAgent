@@ -40,6 +40,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - 髪の物理マスクは外側の毛先だけに置き、ぼかし端も目、鼻、口、輪郭、頬へ入れない。顔の二重線、局所拡縮、サイズ変化が出たら不合格にする。
 - 物理演算は最終レイアウトの表示倍率で確認する。移動量が1描画ピクセル未満なら「見える物理演算」として採用せず、複数マスクの重なりで被写体が変形する設定も採用しない。
 - 通常、笑顔、考え中、悲しみ、会話は、顔全体を拡縮せず目元と口元で判別できる差を付ける。静止画1枚ではなく複数時点を比較する。
+- 実画面を見る前に`cargo xtask character-quality`で画素検査を通す。差分レイヤーが顔より下の非輪郭部を書き換えている、半目が閉じ目の透明度変更である、レイヤーが基準画像と一致する、といった不合格は目視より先にここで止める。新規キャラは`--strict`で注意も0件にする。不合格を素材の修正なしに`characters/quality-baseline.json`へ足して回避しない。
 - 高品質試作は84フレームを標準とし、待機24、考え中24、会話24、悲しみ12を基準にする。
 
 ## 外部サービスとレビュー
@@ -58,6 +59,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
 uv run --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
 cargo xtask sync-characters
+cargo xtask character-quality --character <id> --strict
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml
 cargo test --lib --manifest-path src-tauri/Cargo.toml

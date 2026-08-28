@@ -8,6 +8,7 @@
 mod assets;
 mod bundled;
 mod character_pack;
+mod character_quality;
 mod cli;
 mod license;
 mod office;
@@ -40,6 +41,8 @@ const USAGE: &str = "\
                       （不要な大容量取得を防ぐため対象指定は必須）
   sync-characters [--force] characters/ を ui/assets/characters/ へ差分同期（--force で全再構築）
   character-pack      2Dキャラクターパックを検証・導入
+  character-quality [--character <id>] [--json <出力先>] [--strict]
+                      通常2Dの制作正本を画素単位で検査（局所差分・半目・透過・原寸）
   build-ui [--release] [--beta] [--force] ui/ を ui-dist/ へ差分ビルド（--force で全再構築）
   verify              本体・xtask・JavaScript・Git差分の検証を最後まで実行
   stop                残存プロセスの停止
@@ -108,6 +111,7 @@ fn run(args: &[String]) -> Result<()> {
             assets::sync_characters_with_force(rest.iter().any(|a| a == "--force"))
         }
         "character-pack" => character_pack::run(rest),
+        "character-quality" => character_quality::run(rest),
         "build-ui" => {
             reject_unknown_flags(rest, &["--release", "--beta", "--force"])?;
             assets::build_ui_dist(

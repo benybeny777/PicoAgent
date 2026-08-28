@@ -62,6 +62,12 @@ const CHECKS: &[Check] = &[
         program: "cargo",
         args: &["test", "--manifest-path", "xtask/Cargo.toml"],
     },
+    // 制作正本の画素検査。生成物の採用可否を人の目視より先に機械で止める。
+    Check {
+        label: "キャラクター画素検査",
+        program: "cargo",
+        args: &["xtask", "character-quality"],
+    },
 ];
 
 #[derive(Debug, PartialEq, Eq)]
