@@ -28,7 +28,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - Pillow、ブラウザ、CSS等による単純なピクセル拡大を高精細化と呼ばない。
 - `characters/<id>/layers/*.png` は制作正本として残し、`scripts/build-character-animations.py` だけで `runtime-layers/*.webp` と `frames/<世代>/*.webp` へ変換する。変換後は寸法と復号RGBAを元画像と完全一致させ、1画素でも違えば採用しない。
 - 生成後に `cargo xtask sync-characters` を通し、配信コピーから制作正本の `layers/` が除外され、manifestの `runtimeLayers` と `framePaths` がlossless WebPだけを指すことを確認する。
-- 自前メッシュリグは`mesh-rig/source/regions.json`を制作設定とし、`scripts/build-mesh-rig.py <id>`だけで`parts/*.webp`と`rig.json`を再生成する。`runtimeScale`は1以下、`source/`は配信除外とする。独立した髪・腕・胴・瞳は隠れ領域つき同一座標原画が揃うまで実装済みと扱わない。
+- 自前メッシュリグは`mesh-rig/source/regions.json`を制作設定とする。同梱通常2Dは`build-separated-mesh-sources.py`で胴、後ろ髪、左右腕、顔、前髪の同一座標PNGを先に生成し、`build-mesh-rig.py`で`parts/*.webp`と`rig.json`を再生成する。中立合成が基準画像と画素一致しない場合は停止する。`runtimeScale`は1以下、`source/`は配信除外とし、広可動域へ広げる場合は隠れ領域を描き足した原画が揃うまで実装済みと扱わない。
 
 ## 表情差分と透過
 
@@ -56,7 +56,8 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 
 ```powershell
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
-uv run --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
+uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画
+uv run --python 3.12 --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
 cargo xtask sync-characters
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml

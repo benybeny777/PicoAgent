@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "mode": "single-sheet-grid-v1",
+  "mode": "layered-grid-v2",
   "sourceCanvas": [
     1780,
     3600
@@ -22,53 +22,172 @@
   ],
   "base": "parts/base.webp",
   "drawables": {
+    "body": {
+      "texture": "parts/body.webp",
+      "textureBox": [
+        294,
+        365,
+        717,
+        1661
+      ],
+      "z": 0,
+      "initialAlpha": 1,
+      "motion": "torso"
+    },
+    "hair-back": {
+      "texture": "parts/hair-back.webp",
+      "textureBox": [
+        301,
+        190,
+        659,
+        585
+      ],
+      "z": 5,
+      "initialAlpha": 1,
+      "motion": "hair-back"
+    },
+    "arm-left": {
+      "texture": "parts/arm-left.webp",
+      "textureBox": [
+        109,
+        552,
+        336,
+        1039
+      ],
+      "z": 10,
+      "initialAlpha": 1,
+      "motion": "arm-left"
+    },
+    "arm-right": {
+      "texture": "parts/arm-right.webp",
+      "textureBox": [
+        559,
+        549,
+        784,
+        1039
+      ],
+      "z": 11,
+      "initialAlpha": 1,
+      "motion": "arm-right"
+    },
+    "face": {
+      "texture": "parts/face.webp",
+      "textureBox": [
+        309,
+        140,
+        652,
+        585
+      ],
+      "z": 20,
+      "initialAlpha": 1,
+      "motion": "face"
+    },
+    "hair-front": {
+      "texture": "parts/hair-front.webp",
+      "textureBox": [
+        375,
+        140,
+        585,
+        400
+      ],
+      "z": 30,
+      "initialAlpha": 1,
+      "motion": "hair-front"
+    },
     "blink_half": {
       "texture": "parts/blink_half.webp",
       "box": [
-        345,
-        280,
-        575,
-        390
+        292,
+        132,
+        667,
+        592
       ],
       "textureBox": [
-        316,
-        244,
-        611,
-        426
+        296,
+        140,
+        666,
+        602
       ],
-      "feather": 14
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
     },
     "blink_closed": {
       "texture": "parts/blink_closed.webp",
       "box": [
-        345,
-        280,
-        575,
-        390
+        292,
+        132,
+        667,
+        592
       ],
       "textureBox": [
-        316,
-        244,
-        611,
-        426
+        296,
+        140,
+        666,
+        602
       ],
-      "feather": 14
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
     },
     "mouth_open": {
       "texture": "parts/mouth_open.webp",
       "box": [
-        400,
-        380,
-        515,
-        470
+        292,
+        132,
+        667,
+        592
       ],
       "textureBox": [
-        369,
-        349,
-        546,
-        501
+        296,
+        140,
+        666,
+        602
       ],
-      "feather": 12
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "expression_happy": {
+      "texture": "parts/expression_happy.webp",
+      "box": [
+        299,
+        138,
+        667,
+        592
+      ],
+      "textureBox": [
+        296,
+        140,
+        666,
+        602
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "expression_sad": {
+      "texture": "parts/expression_sad.webp",
+      "box": [
+        299,
+        138,
+        667,
+        592
+      ],
+      "textureBox": [
+        296,
+        140,
+        666,
+        602
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
     },
     "gaze_left": {
       "texture": "parts/gaze_left.webp",
@@ -84,7 +203,10 @@
         556,
         421
       ],
-      "feather": 12
+      "feather": 12,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
     },
     "gaze_right": {
       "texture": "parts/gaze_right.webp",
@@ -100,7 +222,10 @@
         556,
         421
       ],
-      "feather": 12
+      "feather": 12,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
     }
   },
   "parameters": {
@@ -136,9 +261,22 @@
     ]
   },
   "quality": {
-    "source": "existing-sharp-expression-layers",
-    "hiddenAreaSource": false,
+    "source": "同一座標原画の可視画素分離と関節境界の局所再構成",
+    "hiddenAreaSource": true,
+    "hiddenAreaParts": [
+      "body",
+      "hair-back",
+      "arm-left",
+      "arm-right",
+      "face",
+      "hair-front"
+    ],
+    "motionLimits": {
+      "range": "微細変形のみ",
+      "hairCoupledToHead": false,
+      "faceTranslationFixed": false
+    },
     "gazeSource": "高精細正本の瞳領域を同一座標で局所移動",
-    "limit": "顔内部の補間、局所視線、一枚メッシュの微細変形。大きなパーツ分離は隠れ無し原画の追加後に行う"
+    "limit": "分離原画で定義した部位の微細変形。大きな姿勢変更は対象外"
   }
 }

@@ -117,6 +117,10 @@
       const gazeVisibility = smoothstep(0.5, 1, this.eyeOpen);
       if (gazeLeft) gazeLeft.plane.alpha = Math.max(0, -this.gazeX) * gazeVisibility;
       if (gazeRight) gazeRight.plane.alpha = Math.max(0, this.gazeX) * gazeVisibility;
+      const happy = this.planes.get("expression_happy");
+      const sad = this.planes.get("expression_sad");
+      if (happy) happy.plane.alpha = /success|review/.test(this.motion) ? 1 : 0;
+      if (sad) sad.plane.alpha = /failed|error/.test(this.motion) ? 1 : 0;
       const half = this.planes.get("blink_half");
       const closed = this.planes.get("blink_closed");
       if (this.eyeOpen >= 0.5) {
@@ -157,9 +161,17 @@
           const head = 1 - smoothstep(0.43, 0.64, ny);
           const torso = smoothstep(0.34, 0.55, ny) * (1 - smoothstep(0.76, 0.93, ny));
           const hairEdge = head * smoothstep(0.18, 0.46, Math.abs(nx - 0.5));
-          const horizontal = head * this.angleX * (0.82 + (0.5 - nx) * 0.22)
-            + hairEdge * this.hairPosition * 18;
-          const vertical = head * this.angleY * 0.34 - torso * breath * 2.4;
+          const motion = entry.motion || "sheet";
+          const isHair = motion === "hair-back" || motion === "hair-front";
+          const isHead = isHair || motion === "head" || motion === "face" || motion === "sheet";
+          const isTorso = motion === "torso" || motion === "sheet";
+          const armDirection = motion === "arm-left" ? -1 : motion === "arm-right" ? 1 : 0;
+          const horizontal = (isHead ? head * this.angleX * (0.82 + (0.5 - nx) * 0.22) : 0)
+            + (isHair ? hairEdge * this.hairPosition * (motion === "hair-front" ? 13 : 18) : 0)
+            + armDirection * breath * 1.15;
+          const vertical = (isHead ? head * this.angleY * 0.34 : 0)
+            - (isTorso ? torso * breath * 2.4 : 0)
+            - (armDirection ? torso * breath * 1.2 : 0);
           data[index] = x + horizontal;
           data[index + 1] = y + vertical;
         }
@@ -191,7 +203,7 @@
     const response = await fetch(versioned(rigUrl, assetVersion));
     if (!response.ok) throw new Error(`rig.jsonを取得できません（HTTP ${response.status}）`);
     const rig = await response.json();
-    if (rig?.version !== 1 || rig?.mode !== "single-sheet-grid-v1") {
+    if (rig?.version !== 1 || !["single-sheet-grid-v1", "layered-grid-v2"].includes(rig?.mode)) {
       throw new Error("未対応のメッシュリグ形式です");
     }
     if (!Array.isArray(rig.canvas) || rig.canvas.some(value => !Number.isFinite(value) || value <= 0)) {
@@ -205,7 +217,14 @@
     if (!context) throw new Error("WebGLを初期化できません");
     // CSS上は既存キャラ枠の285x315へ合わせるが、描画バッファは制作素材を縮めない。
     // pet/stream形式でCSS拡大されても、890x1800の元画素を先に失わないための倍率。
-    const textureFit = Math.min(width / rig.canvas[0], height / rig.canvas[1]);
+    const contentBox = Array.isArray(rig.contentBox) && rig.contentBox.length === 4
+      ? rig.contentBox
+      : [0, 0, ...rig.canvas];
+    const contentWidth = contentBox[2] - contentBox[0];
+    const contentHeight = contentBox[3] - contentBox[1];
+    if (contentWidth <= 0 || contentHeight <= 0) throw new Error("メッシュリグの内容範囲が不正です");
+    // 透明余白や原画キャンバス比率が異なっても、見えるキャラクターの大きさを固定する。
+    const textureFit = Math.min(width / contentWidth, height / contentHeight) * 0.97;
     // 4.5倍（1283x1418）で1080p配信の横方向と高DPIのペット表示を覆う。原画相当の5.7倍を
     // 常時再描画すると1080p撮影の初期表示を遅らせるため、画面に出ない余剰だけを落とす。
     const renderResolution = Math.max(root.devicePixelRatio || 1, Math.min(4.5, 1 / textureFit));
@@ -222,24 +241,30 @@
       autoDensity: true,
     });
     const definitions = [
-      ["base", rig.base, [0, 0, ...rig.canvas]],
-      ...Object.entries(rig.drawables || {}).map(([name, item]) => [name, item.texture, item.textureBox || [0, 0, ...rig.canvas]]),
-    ];
-    const loaded = await Promise.all(definitions.map(async ([name, path, box]) => {
+      ["base", rig.base, [0, 0, ...rig.canvas], { z: -10000, initialAlpha: 1, motion: "sheet" }],
+      ...Object.entries(rig.drawables || {}).map(([name, item]) => [name, item.texture, item.textureBox || [0, 0, ...rig.canvas], item]),
+    ].sort((left, right) => Number(left[3]?.z || 0) - Number(right[3]?.z || 0));
+    const loaded = await Promise.all(definitions.map(async ([name, path, box, item]) => {
       const texture = PIXI.Texture.from(versioned(`${rootUrl}/${path}`, assetVersion));
       await waitTexture(texture);
-      return [name, texture, box];
+      return [name, texture, box, item];
     }));
     const planes = new Map();
-    const originX = (width - rig.canvas[0] * textureFit) / 2;
-    const originY = height - rig.canvas[1] * textureFit;
-    for (const [name, texture, box] of loaded) {
+    const originX = (width - contentWidth * textureFit) / 2 - contentBox[0] * textureFit;
+    const originY = height - contentBox[3] * textureFit;
+    for (const [name, texture, box, item] of loaded) {
       const plane = new PIXI.SimplePlane(texture, gridX, gridY);
       plane.scale.set(textureFit);
       plane.position.set(originX + box[0] * textureFit, originY + box[1] * textureFit);
-      if (name !== "base") plane.alpha = 0;
+      plane.alpha = Number(item?.initialAlpha ?? (name === "base" ? 1 : 0));
       const buffer = plane.geometry.getBuffer("aVertexPosition");
-      planes.set(name, { plane, buffer, original: new Float32Array(buffer.data), offset: [box[0], box[1]] });
+      planes.set(name, {
+        plane,
+        buffer,
+        original: new Float32Array(buffer.data),
+        offset: [box[0], box[1]],
+        motion: String(item?.motion || (name === "base" ? "sheet" : "face")),
+      });
       app.stage.addChild(plane);
     }
     canvas.style.background = "transparent";
