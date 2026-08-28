@@ -2,7 +2,7 @@
 
 <div align="center">
   <h1>🐾 PicoAgent</h1>
-  <p><strong>キャラクターとフキダシだけの透明デスクトップペット。<br />叩く AI もエージェント機能も、コネクタを足すだけで増やせる。</strong></p>
+  <p><strong>キャラクターとフキダシだけの透明デスクトップペット。<br />叩く AI もエージェント機能も、コネクタを足すだけで増やせる。<br />1 体で決めきれない依頼は、複数の AI に合議・分担させて 1 つの答えへまとめられる。</strong></p>
 
   ![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)
   ![Rust](https://img.shields.io/badge/Rust-only-000000?style=for-the-badge&logo=rust)
@@ -59,6 +59,8 @@
 
 <div align="center">
   <h3>同梱キャラクター</h3>
+  <details>
+    <summary><strong>同梱キャラクター8体の通常表示・配信表示を開く</strong></summary>
   <table>
     <tr>
       <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-stream.webp" alt="むぎの配信表示" width="150" /><br /><sub><b>むぎ</b><br />通常／配信</sub></td>
@@ -92,6 +94,7 @@
     このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・ライス・わんこ）があります。<br />
     Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
   </sub>
+  </details>
 </div>
 
 ### キャラクター別モーション対応
@@ -281,6 +284,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 - **Ollama 不要・ローカル完結** — 推論エンジン同梱。初回 DL のモデルだけでそのまま動く
 - **叩く AI を差し替え可能** — local / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral / 手元の CLI エージェント（Claude Code・Codex CLI）の 9 通り
 - **エージェント機能を追加可能** — ツールコネクタを足すと、モデルが function calling で呼べる
+- **叩く AI は 1 体に決めなくていい** — 2〜8 体へ同じ質問を送って統合する合議、仕事を割り振って統合・個別返却する分担を設定から選べる（[マルチAI合議・分担](#エージェント)）
 - **軽量な Tauri ネイティブ** — システム WebView + Rust バックエンド
 - 会話は選択中の叩く AI にだけ送られる。ローカルモデルなら外部送信なし
 
@@ -289,6 +293,17 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 - **スーパーエージェントモード** — 複雑な依頼を「計画 → 多段ツール実行 → 自己評価」まで自律的に回し、必要なら `subagent` スキルでサブタスクを分担。進捗はフキダシ上部のステータス行にリアルタイム表示
 - **マルチAI合議・分担** — 設定した複数のlocal／Ollama／各社API／Claude Code・Codex CLIへ同じ質問を送り、まとめ役がより良い回答へ統合できる。作業を自動分担して統合するモードと、分担結果を個別に返すモードにも対応。AIごとにモデルと「担当の希望」を指定でき、空欄なら自動で割り振る。統合結果は選択中キャラクターの口調で返し、停止ボタンでも止められる。既定は従来どおり単発で、単発以外は Pro 版の機能
 - **原則 Web 検索** — 通常の質問はローカルモデルの判断に頼らず検索してから、参照元リンク付きで回答（短い挨拶は例外扱いでキャラクター本人として返答）
+
+`PICOAGENT_MULTI_AI_MODE` で選べる回答の作り方は次の 4 つ。
+
+| 値 | 動き |
+|---|---|
+| `single`（既定） | 選んだ叩く AI が 1 体で答える。推論も外部 API 利用も最小 |
+| `consensus` | 同じ質問を参加 AI 全員へ送り、まとめ役が正確さ・具体性・抜けを比較して 1 つの回答へ統合する |
+| `collaborate` | まとめ役が仕事を割り振り、各 AI の結果を 1 つへ統合する |
+| `divide` | 割り振った結果を統合せず、AI ごとに並べて返す |
+
+参加 AI は 2〜8 件。同梱ローカル AI 同士は同梱モデルの取り合いを避けて直列、その他は `PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY` まで並行実行する。参加数に加えて統合 1 回分（分担時は計画 1 回分も）の推論が増えるため、応答時間と API 利用量は単発より増える。
 
 
 ### 表示形式（画面構成を選べる）
