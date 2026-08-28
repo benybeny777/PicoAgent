@@ -1,17 +1,83 @@
 {
-  "version": 1,
   "runtimeScale": 0.5,
-  "grid": [9, 15],
+  "grid": [
+    9,
+    15
+  ],
+  "autoFaceRegions": true,
+  "separatedParts": [
+    {
+      "name": "body",
+      "source": "body.png",
+      "z": 0,
+      "motion": "torso",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "hair-back",
+      "source": "hair-back.png",
+      "z": 5,
+      "motion": "hair-back",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "arm-left",
+      "source": "arm-left.png",
+      "z": 10,
+      "motion": "arm-left",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "arm-right",
+      "source": "arm-right.png",
+      "z": 11,
+      "motion": "arm-right",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "face",
+      "source": "face.png",
+      "z": 20,
+      "motion": "face",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "hair-front",
+      "source": "hair-front.png",
+      "z": 30,
+      "motion": "hair-front",
+      "hiddenAreaSource": true
+    }
+  ],
+  "sourceMethod": "同一座標原画の可視画素分離と関節境界の局所再構成",
+  "motionLimits": {
+    "range": "微細変形のみ",
+    "hairCoupledToHead": false,
+    "faceTranslationFixed": false
+  },
   "gaze": {
-    "irisBoxes": [[770, 630, 850, 735], [920, 610, 1010, 720]],
+    "irisBoxes": [
+      [
+        770,
+        630,
+        850,
+        735
+      ],
+      [
+        920,
+        610,
+        1010,
+        720
+      ]
+    ],
     "offset": 16,
     "maskFeather": 8,
-    "box": [700, 560, 1050, 780],
+    "box": [
+      700,
+      560,
+      1050,
+      780
+    ],
     "feather": 24
-  },
-  "regions": {
-    "blink_half": { "source": "blink_half", "box": [690, 560, 1150, 780], "feather": 28 },
-    "blink_closed": { "source": "blink_closed", "box": [690, 560, 1150, 780], "feather": 28 },
-    "mouth_open": { "source": "mouth_open", "box": [800, 760, 1030, 940], "feather": 24 }
   }
 }

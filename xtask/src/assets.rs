@@ -959,6 +959,18 @@ fn validate_character_asset_generation(
     character_dir: &Path,
     manifest: &serde_json::Value,
 ) -> Result<()> {
+    if manifest.get("live2d").is_none()
+        && manifest
+            .get("motionProfile")
+            .and_then(serde_json::Value::as_str)
+            == Some("full")
+    {
+        anyhow::ensure!(
+            manifest.pointer("/meshRig/rig").is_some(),
+            "{} の同梱フルモーション通常2DにmeshRig.rigがありません",
+            character_dir.display()
+        );
+    }
     validate_mesh_rig_pack(character_dir, manifest)?;
     if manifest.get("live2d").is_some() {
         return validate_character_runtime_generation(character_dir, manifest);
@@ -981,12 +993,36 @@ fn validate_mesh_rig_pack(character_dir: &Path, manifest: &serde_json::Value) ->
             .with_context(|| format!("{} のmeshRig.rigを読めません", character_dir.display()))?,
     )
     .with_context(|| format!("{} が不正なJSONです", rig_file.display()))?;
+    let mode = rig.get("mode").and_then(serde_json::Value::as_str);
     anyhow::ensure!(
         rig.get("version").and_then(serde_json::Value::as_u64) == Some(1)
-            && rig.get("mode").and_then(serde_json::Value::as_str) == Some("single-sheet-grid-v1"),
+            && matches!(mode, Some("single-sheet-grid-v1" | "layered-grid-v2")),
         "{} のメッシュリグ形式に対応していません",
         character_dir.display()
     );
+    if mode == Some("layered-grid-v2") {
+        anyhow::ensure!(
+            rig.pointer("/quality/hiddenAreaSource")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+            "{} の分離メッシュに隠れ領域つき原画の記録がありません",
+            character_dir.display()
+        );
+        let visible_parts = rig
+            .get("drawables")
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(_, item)| {
+                item.get("initialAlpha").and_then(serde_json::Value::as_u64) == Some(1)
+            })
+            .count();
+        anyhow::ensure!(
+            visible_parts >= 6,
+            "{} の分離メッシュは中立表示パーツが6個未満です",
+            character_dir.display()
+        );
+    }
     let root = rig_file
         .parent()
         .ok_or_else(|| anyhow::anyhow!("meshRig.rigの親フォルダがありません"))?;
