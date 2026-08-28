@@ -273,9 +273,17 @@ def canvas_placement(box):
     box_height = max(1, box[3] - box[1])
     scale = min((OUTPUT_SIZE[0] - margin_x * 2) / box_width, (OUTPUT_SIZE[1] - margin_y * 2) / box_height)
     if scale > 1.0:
+        # THA3の出力は512x512に固定されており、そのうち被写体が占めるのは入力配置の規約上
+        # さらに小さい範囲になる。OUTPUT_SIZEを既存キャラクターと同じ縦1800pxにしている限り、
+        # この条件は正当な入力でも必ず成立する。ここで止まるのは入力の不備ではなく、
+        # 「512x512の生成物から縦1800pxの高精細素材は作れない」という経路自体の限界である。
+        # 数値を出さないと利用者が入力を作り直そうとして解決しないため、必要倍率まで示す。
         raise RuntimeError(
-            "THA3の出力解像度では配置枠を満たせません。画像の引き伸ばし拡大は禁止されているため、"
-            "高解像度で直接生成できる経路かPhotoshop仕上げを用意してから再実行してください。"
+            f"THA3の出力から配置枠を満たすには{scale:.2f}倍の引き伸ばし拡大が必要です"
+            f"（被写体{box_width}x{box_height} → 枠{OUTPUT_SIZE[0] - margin_x * 2}x{OUTPUT_SIZE[1] - margin_y * 2}）。"
+            "拡大した画素は情報を増やさないため実行しません。"
+            "THA3の512x512出力は、既存の同梱キャラクターと同じ縦1800pxの高精細素材にはできません。"
+            "高解像度の原画から作る経路を用意するか、この経路の出力寸法を実解像度へ合わせてください。"
         )
     size = (max(1, round(box_width * scale)), max(1, round(box_height * scale)))
     return size, ((OUTPUT_SIZE[0] - size[0]) // 2, OUTPUT_SIZE[1] - margin_y - size[1])

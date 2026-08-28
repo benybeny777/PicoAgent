@@ -52,6 +52,36 @@
 
 実機PoCではFreeToken 0.1.2、Python 3.12.11、PyTorch 2.11.0、CUDA 13.0の組合せでWindowsネイティブAPIサーバー起動まで確認した。一方、Gemma 4 E4B Q4_0は公式既知対応一覧外で、GGUF設定パーサーが`attention.head_count_kv`の単一整数を層別配列として扱い、その後もMoEメタデータを要求するため推論開始前に停止した。さらに、Gemma 4 26B A4B Q4_0でも、Bartowski変換のGGUFはMoE重み結合時のテンソル寸法不一致（2310対2992）で停止した。同じモデル名とQ4_0表記でもGGUF変換元によってFreeToken互換性が異なるため、E4Bとこの26B GGUFは`llama-server`専用として扱う。FreeTokenを実装へ進める前に、上流が対応を確認した正確なGGUFまたはHF safetensors／FTWを固定し、通常会話まで完走させる。上流の未解決問題により起動または長文が停止する場合を成功扱いにせず、要求timeout、キャンセル、プロセスツリー回収まで合格条件に含める。
 
+## THA3経路の引き伸ばし拡大とrin-tha3の扱い
+
+`cargo xtask character-quality` が `rin-tha3` を不合格として落とす。**この1件だけはベースラインへ
+記録していないため、`cargo xtask verify` は現在赤になる。** 素材を直さずに記録して回避するのは
+[CHARACTER-ASSET-WORKFLOW.md](CHARACTER-ASSET-WORKFLOW.md) の禁止事項に当たるため、扱いを決めるまで
+落としたままにしてある。`characters/index.json` には載るが `distribution/release.json` の
+`includedCharacters` には無いので、販売ビルドには入らない。
+
+実測した事実は次のとおり。
+
+- `characters/rin-tha3/layers/*.png` の被写体は縦1644px。生成元 `source.png` の被写体は縦326px。
+  **5.04倍の引き伸ばし拡大**で作られている
+- 実効解像度（被写体を半分へ縮めて戻したRMSE）は1.32で、同梱2Dのなかで最も低い。
+  次に低い`noa`が3.38、`sena`が4.23、`mugi`が5.80
+- `scripts/build-tha3-layers.py` の `canvas_placement` は `scale > 1.0` で停止するため、
+  **現在のコードはこの拡大を行わない。** 逆に言うと、`OUTPUT_SIZE = (890, 1800)` のままでは
+  正当な512x512入力でも必ず停止するため、設定画面の「1枚絵からキャラクターを作成（THA3）」は
+  実行しても必ず失敗する。実測では被写体170x358に対し枠794x1648で、4.60倍が必要になる
+- つまり `rin-tha3` の素材は、この停止条件が入る前の経路で作られた
+
+| 決めること | 選択肢 |
+|---|---|
+| `rin-tha3` の素材 | (a) 試作の役目は終わったとして削除する（THA3経路が規約を満たす素材を作れないことは実証できた） / (b) `OUTPUT_SIZE` を実解像度へ下げて作り直す / (c) 販売対象外の例外としてベースラインへ記録する |
+| THA3経路の存続 | `OUTPUT_SIZE` を実解像度（被写体170x358前後）へ下げれば動くが、同梱キャラクターより大幅に低精細な素材しか作れない。設定画面の機能として残すか、高解像度原画を併せて受け取る経路へ作り替えるかを決める |
+
+高解像度原画を併せて受け取る案は、THA3を**動きの算出だけ**に使い、512で得たポーズ間の変位を
+高解像度原画へ転写して画素は原画から取る、という形になる。既存の局所パッチ方式
+（`scripts/build-local-expression-layers.py`）と同じ考え方の拡張で、拡大を伴わない。
+着手条件は、利用者が同一絵柄の高解像度原画を用意できることを確認すること。
+
 ## 画素検査ゲートが記録した既存素材の負債
 
 `cargo xtask character-quality` を導入した時点の指摘77件を `characters/quality-baseline.json` へ記録した。

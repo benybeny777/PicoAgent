@@ -193,7 +193,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
 | `xtask/src/verify.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |
-| `xtask/src/character_quality.rs` | **通常2D制作正本の画素検査（`cargo xtask character-quality`）**。`assets.rs`が寸法と形式しか見ないのに対し、こちらは差分レイヤーが顔の局所差分に収まっているか、半目が閉じ目の透明度変更でないか、輪郭が状態切替でずれないか、既定構図で原寸を割らないかを画素から判定する。既存素材の指摘は`characters/quality-baseline.json`へ記録し、**新規・悪化だけ**を失敗にする（`--update-baseline`で更新、`--strict`で注意も失敗扱い） |
+| `xtask/src/character_quality.rs` | **通常2D制作正本の画素検査（`cargo xtask character-quality`）**。`assets.rs`が寸法と形式しか見ないのに対し、こちらは差分レイヤーが顔の局所差分に収まっているか、半目が閉じ目の透明度変更でないか、輪郭が状態切替でずれないか、既定構図で原寸を割らないかを画素から判定する。`generator.source` を記録したパックは、その原画の被写体と完成レイヤーの被写体を実寸で比べ、引き伸ばし拡大を確実に落とす。既存素材の指摘は`characters/quality-baseline.json`へ記録し、**新規・悪化だけ**を失敗にする（`--update-baseline`で更新、`--strict`で注意も失敗扱い） |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |

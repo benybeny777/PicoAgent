@@ -89,6 +89,9 @@ const RECTANGLE_EDGE_RATIO: f64 = 0.35;
 /// 被写体が小さいときに、わずかな直線で誤検出しないための下限行数。
 const RECTANGLE_EDGE_MINIMUM_ROWS: u32 = 16;
 
+/// 生成元より大きい被写体を許す倍率。丸め誤差だけを吸収する。
+const GENERATOR_UPSCALE_TOLERANCE: f64 = 1.02;
+
 const BASELINE_FILE: &str = "characters/quality-baseline.json";
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -420,6 +423,7 @@ fn inspect(character: &CharacterInput) -> Result<(Vec<Finding>, Value)> {
     }
 
     let mut metrics = display_metrics(character, &base, &analysis);
+    findings.extend(check_generator_upscale(character, &analysis)?);
     findings.extend(check_native_scale(character, &metrics));
     metrics["layers"] = Value::Object(layer_metrics);
     Ok((findings, metrics))
@@ -720,11 +724,53 @@ fn display_metrics(character: &CharacterInput, base: &RgbaImage, analysis: &Base
         "deliveredHeight": delivered_height,
         "defaultZoom": default_zoom(&character.manifest),
         "maxNativeZoom": (max_zoom * 100.0).round() / 100.0,
+        "nativeDetail": (native_detail(base, analysis.content) * 100.0).round() / 100.0,
     })
 }
 
 /// 利用者が構図を保存していないときに実際に適用される倍率。
 /// `ui/renderer.js` の `applyCharacterFraming` と同じ優先順位で決める。
+/// 最細スケールにどれだけ実情報が入っているかの指標。
+///
+/// 被写体を半分へ縮めて戻し、元画像との二乗平均平方根誤差を測る。引き伸ばして作った
+/// 画像は最初から半分ぶんの情報しか持たないため往復してもほとんど変わらず、値が小さくなる。
+/// 絵柄によって水準が変わる（写実は線画よりはるかに大きい）ので合否には使わず、
+/// 同じ絵柄どうしを比べるための報告値として出す。
+fn native_detail(base: &RgbaImage, content: (u32, u32, u32, u32)) -> f64 {
+    let (x0, y0, x1, y1) = content;
+    let (width, height) = (x1 - x0 + 1, y1 - y0 + 1);
+    if width < 4 || height < 4 {
+        return 0.0;
+    }
+    let crop = image::imageops::crop_imm(base, x0, y0, width, height).to_image();
+    let small = image::imageops::resize(
+        &crop,
+        (width / 2).max(1),
+        (height / 2).max(1),
+        image::imageops::FilterType::Lanczos3,
+    );
+    let restored =
+        image::imageops::resize(&small, width, height, image::imageops::FilterType::Lanczos3);
+
+    let mut total = 0.0_f64;
+    let mut counted = 0_u64;
+    for (left, right) in crop.pixels().zip(restored.pixels()) {
+        // 透明部は往復の影響を受けないため、被写体の内側だけを測る。
+        if left.0[3] == 0 {
+            continue;
+        }
+        for channel in 0..3 {
+            let delta = f64::from(left.0[channel]) - f64::from(right.0[channel]);
+            total += delta * delta;
+        }
+        counted += 3;
+    }
+    if counted == 0 {
+        return 0.0;
+    }
+    (total / counted as f64).sqrt()
+}
+
 fn default_zoom(manifest: &Value) -> f64 {
     if let Some(zoom) = manifest
         .pointer("/defaultFraming/zoom")
@@ -737,6 +783,70 @@ fn default_zoom(manifest: &Value) -> f64 {
     } else {
         2.05
     }
+}
+
+/// 生成器が記録している入力画像より大きい被写体を宣言していないかを、実画素で突き合わせる。
+///
+/// THA3のように入力解像度が固定された経路では、既存キャラクターと同じ縦幅へ揃えようとして
+/// 引き伸ばし拡大が入り込みやすい。宣言だけを見ても分からないため、`generator.source` が
+/// 指す原画の被写体と、完成レイヤーの被写体を直接比べる。統計ではなく実寸の比なので、
+/// 絵柄によらず確実に判定できる。
+fn check_generator_upscale(
+    character: &CharacterInput,
+    analysis: &BaseAnalysis,
+) -> Result<Vec<Finding>> {
+    let Some(relative) = character
+        .manifest
+        .pointer("/generator/source")
+        .and_then(Value::as_str)
+    else {
+        return Ok(Vec::new());
+    };
+    let source_path = character.dir.join(relative);
+    if !source_path.is_file() {
+        return Ok(vec![Finding {
+            severity: Severity::Fail,
+            character: character.id.clone(),
+            check: "生成元",
+            layer: String::new(),
+            message: format!(
+                "generator.source が指す原画がありません: {}。生成元と突き合わせられないため、\
+                 引き伸ばし拡大の有無を確認できません",
+                source_path.display()
+            ),
+        }]);
+    }
+    let source = load(&source_path)?;
+    let Some(source_analysis) = analyze_base(&source) else {
+        return Ok(vec![Finding {
+            severity: Severity::Fail,
+            character: character.id.clone(),
+            check: "生成元",
+            layer: String::new(),
+            message: format!("{} に不透明な画素がありません", source_path.display()),
+        }]);
+    };
+
+    let (_, sy0, _, sy1) = source_analysis.content;
+    let (_, y0, _, y1) = analysis.content;
+    let source_height = f64::from(sy1 - sy0 + 1);
+    let layer_height = f64::from(y1 - y0 + 1);
+    let scale = layer_height / source_height;
+    if scale <= GENERATOR_UPSCALE_TOLERANCE {
+        return Ok(Vec::new());
+    }
+    Ok(vec![Finding {
+        severity: Severity::Fail,
+        character: character.id.clone(),
+        check: "引き伸ばし拡大",
+        layer: String::new(),
+        message: format!(
+            "完成レイヤーの被写体が縦{}pxで、生成元 {relative} の縦{}pxを{scale:.2}倍に引き伸ばしています。\
+             拡大した画素は情報を増やさないため、生成元と同じ倍率までに収めるか、\
+             高解像度の原画から作り直してください",
+            layer_height as u32, source_height as u32
+        ),
+    }])
 }
 
 fn check_native_scale(character: &CharacterInput, metrics: &Value) -> Vec<Finding> {
@@ -838,13 +948,14 @@ fn report(
                 .unwrap_or(0.0)
         };
         println!(
-            "  {:<20} 原画{}x{} / 配信縦{} / 既定{}倍 / 原寸維持{}倍まで",
+            "  {:<20} 原画{}x{} / 配信縦{} / 既定{}倍 / 原寸維持{}倍まで / 実効解像度{}",
             character.id,
             number("/sourceSize/0"),
             number("/sourceSize/1"),
             number("/deliveredHeight"),
             number("/defaultZoom"),
             number("/maxNativeZoom"),
+            number("/nativeDetail"),
         );
     }
 
@@ -1113,6 +1224,74 @@ mod tests {
         let findings = check_native_scale(&character, &metrics);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].check, "原寸");
+    }
+
+    /// 生成元と突き合わせる引き伸ばし検査。統計ではなく実寸の比で判定する。
+    #[test]
+    fn a_pack_larger_than_its_recorded_source_is_rejected() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-generator-upscale-{}",
+            std::process::id()
+        ));
+        let dir = root.join("sample");
+        fs::create_dir_all(&dir).unwrap();
+
+        // 生成元は小さな被写体、完成レイヤーはその5倍の被写体を持つ。
+        subject(100, 200).save(dir.join("source.png")).unwrap();
+        let layer = subject(500, 1000);
+        let analysis = analyze_base(&layer).unwrap();
+
+        let character = CharacterInput {
+            id: "sample".to_string(),
+            dir: dir.clone(),
+            manifest: json!({ "generator": { "source": "source.png" } }),
+        };
+        let findings = check_generator_upscale(&character, &analysis).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, Severity::Fail);
+        assert_eq!(findings[0].check, "引き伸ばし拡大");
+
+        // 生成元を宣言していないパックは対象外。
+        let plain = CharacterInput {
+            id: "sample".to_string(),
+            dir: dir.clone(),
+            manifest: json!({}),
+        };
+        assert!(check_generator_upscale(&plain, &analysis)
+            .unwrap()
+            .is_empty());
+
+        // 生成元と同じ大きさなら通る。
+        let same = analyze_base(&subject(100, 200)).unwrap();
+        assert!(check_generator_upscale(&character, &same)
+            .unwrap()
+            .is_empty());
+
+        // 宣言した生成元が無ければ、確認できないこと自体を不合格にする。
+        fs::remove_file(dir.join("source.png")).unwrap();
+        let missing = check_generator_upscale(&character, &analysis).unwrap();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].check, "生成元");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// 引き伸ばした画像は最細スケールに情報が無いため、実効解像度が下がる。
+    #[test]
+    fn native_detail_drops_for_an_upscaled_image() {
+        let original = subject(200, 400);
+        let content = content_box(&original).unwrap();
+        let small =
+            image::imageops::resize(&original, 50, 100, image::imageops::FilterType::Lanczos3);
+        let upscaled =
+            image::imageops::resize(&small, 200, 400, image::imageops::FilterType::Lanczos3);
+
+        let sharp = native_detail(&original, content);
+        let blurred = native_detail(&upscaled, content_box(&upscaled).unwrap());
+        assert!(
+            blurred < sharp,
+            "引き伸ばし後{blurred}が元画像{sharp}を下回らない"
+        );
     }
 
     /// 検証ツール自体が不正な入力で落ちないこと。
