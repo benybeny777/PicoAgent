@@ -622,14 +622,42 @@ async function validateMeshRig() {
     leftAlpha: meshRigController.planes.get("gaze_left")?.plane.alpha || 0,
   }));
   await page.screenshot({ path: join(output, "gaze-left.png"), omitBackground: true });
+  const successBefore = await page.locator("#meshRigCanvas").boundingBox();
+  await page.evaluate(() => setAnimation("success", true));
+  await page.waitForTimeout(50);
+  const successAfter = await page.locator("#meshRigCanvas").boundingBox();
+  await page.screenshot({ path: join(output, "success.png"), omitBackground: true });
+  const success = { before: successBefore, after: successAfter };
+  const thinking = await page.evaluate(() => {
+    const canvas = document.getElementById("meshRigCanvas");
+    const before = canvas?.getBoundingClientRect();
+    setAnimation("thinking", true);
+    const after = canvas?.getBoundingClientRect();
+    return {
+      renderKind: document.getElementById("character")?.dataset.renderKind || "",
+      canvasVisible: Boolean(canvas) && getComputedStyle(canvas).display !== "none",
+      before: before ? { width: before.width, height: before.height } : null,
+      after: after ? { width: after.width, height: after.height } : null,
+    };
+  });
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: join(output, "thinking.png"), omitBackground: true });
   await page.close();
   if (active.renderKind !== "mesh-rig" || active.mouthAlpha < 0.99 || active.blinkClosedAlpha < 0.99
       || !active.gazeDrawable || active.gazeRightClosedAlpha > 0.01
       || gazeRight.rightAlpha < 0.99 || gazeRight.leftAlpha > 0.01
       || gazeLeft.leftAlpha < 0.99 || gazeLeft.rightAlpha > 0.01
+      || !success.before || !success.after
+      || Math.abs(success.before.x - success.after.x) > 2
+      || Math.abs(success.before.width - success.after.width) > 0.5
+      || Math.abs(success.before.height - success.after.height) > 0.5
+      || thinking.renderKind !== "mesh-rig" || !thinking.canvasVisible
+      || !thinking.before || !thinking.after
+      || Math.abs(thinking.before.width - thinking.after.width) > 0.5
+      || Math.abs(thinking.before.height - thinking.after.height) > 0.5
       || Math.abs(active.angleX) < 0.01 || active.vertexDelta < 0.01
       || active.canvas.height < 1400) {
-    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify({ active, gazeRight, gazeLeft })}`);
+    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify({ active, gazeRight, gazeLeft, success, thinking })}`);
   }
   const reduced = await openScene({ characterId: "sena", layout: "pet", width: 900, height: 600, reducedMotion: true });
   const reducedState = await reduced.evaluate(() => ({
@@ -640,7 +668,7 @@ async function validateMeshRig() {
   if (reducedState.renderKind !== "2d" || !reducedState.imageVisible) {
     throw new Error(`省モーション時に差分絵へ退避できません: ${JSON.stringify(reducedState)}`);
   }
-  const metrics = { generatedAt: new Date().toISOString(), active, gazeRight, gazeLeft, reduced: reducedState };
+  const metrics = { generatedAt: new Date().toISOString(), active, gazeRight, gazeLeft, success, thinking, reduced: reducedState };
   await writeFile(join(output, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
   return { output, metrics };
 }
@@ -1674,9 +1702,21 @@ async function prepareGalleryLive2D(page) {
   await submit(page, GALLERY_ASK);
 }
 
-const galleryPrepare = kind => kind === "live2d"
+const galleryPrepare = (id, kind) => kind === "live2d"
   ? prepareGalleryLive2D
-  : startReply(GALLERY_ASK);
+  : async page => {
+    await submit(page, GALLERY_ASK);
+    // セナは初期化直後の2Dフォールバックを先頭コマへ混ぜず、最初から同じ表示寸法で撮る。
+    if (id === "sena") {
+      await page.waitForFunction(() => {
+        const canvas = document.getElementById("meshRigCanvas");
+        return document.getElementById("character")?.dataset.renderKind === "mesh-rig"
+          && canvas && canvas.width > 0 && canvas.height > 0 && getComputedStyle(canvas).display !== "none";
+      }, null, { timeout: 20000 });
+      // DOM切替だけでなく、PIXIの初回描画が透明WebGLへ合成されてから録画を始める。
+      await page.waitForTimeout(200);
+    }
+  };
 
 const galleryRequires = (id, kind) => kind === "live2d"
   ? [...LIVE2D_RUNTIME, `ui/assets/characters/${id}/live2d`]
@@ -1709,7 +1749,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"])
     characterId: id,
     characterFraming: id === "mugi" ? MUGI_PUBLIC_FRAMING : {},
     reply,
-    prepare: galleryPrepare(kind),
+    prepare: galleryPrepare(id, kind),
     step: galleryStep,
     siteQuality: kind === "live2d" ? 45 : 50,
     verifyLipSync: id !== "rice",
@@ -1730,7 +1770,7 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     characterId: id,
     characterFraming: id === "mugi" ? MUGI_PUBLIC_FRAMING : {},
     reply,
-    prepare: galleryPrepare(kind),
+    prepare: galleryPrepare(id, kind),
     step: galleryStep,
     siteQuality: kind === "live2d" ? 50 : 55,
     verifyLipSync: id !== "rice",

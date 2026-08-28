@@ -16,6 +16,8 @@
 # 既存履歴は書き換えず、この指定後に追加・更新するキャラクター画像からLFSへ載せる。
 characters/**/*.png  filter=lfs diff=lfs merge=lfs -text
 characters/**/*.webp filter=lfs diff=lfs merge=lfs -text
+docs/images/character-sena.webp        filter=lfs diff=lfs merge=lfs -text
+docs/images/character-sena-stream.webp filter=lfs diff=lfs merge=lfs -text
 *.dll  binary
 *.exe  binary
 *.pptx binary

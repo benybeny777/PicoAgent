@@ -61,7 +61,11 @@
     }
 
     setActive(active) {
-      this.active = Boolean(active);
+      const next = Boolean(active);
+      // 同じメッシュ内の状態遷移でtickerを再起動すると、WebGLの次回描画まで
+      // キャンバスが空になる瞬間がある。表示状態が変わるときだけ開始・停止する。
+      if (this.active === next) return;
+      this.active = next;
       this.canvas.style.display = this.active ? "" : "none";
       if (this.active) {
         this.lastAt = 0;
