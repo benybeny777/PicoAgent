@@ -1,136 +1,122 @@
 > **[PicoAgent 公式ページ・Windowsアルファ版ダウンロード](https://benybeny777.github.io/PicoAgent-Distribution/)**
 
 <div align="center">
-  <h1>🐾 PicoAgent</h1>
-  <p><strong>キャラクターとフキダシだけの透明デスクトップペット。<br />叩く AI もエージェント機能も、コネクタを足すだけで増やせる。<br />1 体で決めきれない依頼は、複数の AI に合議・分担させて 1 つの答えへまとめられる。</strong></p>
 
-  ![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)
-  ![Rust](https://img.shields.io/badge/Rust-only-000000?style=for-the-badge&logo=rust)
-  ![Local First](https://img.shields.io/badge/Ollama-不要-black?style=for-the-badge&logo=ollama)
+<h1>🐾 PicoAgent</h1>
+
+<p><strong>ローカルで完結する、キャラクター型 AI エージェント。</strong><br />
+透明ウィンドウに常駐するデスクトップペットへ、<b>70 種のスキル</b>と<b>9 系統の叩く AI</b> をぶら下げた Rust / Tauri 製の常駐アプリです。<br />
+叩く AI もエージェント機能もコネクタを足すだけで増え、1 体で決めきれない依頼は複数の AI へ合議・分担させられます。</p>
+
+![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)
+![Rust](https://img.shields.io/badge/backend-Rust-000000?style=for-the-badge&logo=rust)
+![Ollama 不要](https://img.shields.io/badge/Ollama-%E4%B8%8D%E8%A6%81-black?style=for-the-badge&logo=ollama)
+![Node.js 不要](https://img.shields.io/badge/Node.js-%E4%B8%8D%E8%A6%81-5FA04E?style=for-the-badge&logo=nodedotjs)
+![スキル 70 種](https://img.shields.io/badge/%E3%82%B9%E3%82%AD%E3%83%AB-70%E7%A8%AE-8b5cf6?style=for-the-badge)
+![MCP 双方向](https://img.shields.io/badge/MCP-%E5%85%AC%E9%96%8B%2F%E5%8F%96%E8%BE%BC-0ea5e9?style=for-the-badge)
+
+<table>
+  <tr>
+    <th width="50%">2D（連番フレーム）</th>
+    <th width="50%">Live2D</th>
+  </tr>
+  <tr>
+    <td><img src="docs/images/main-light.webp" alt="2D キャラクターのメイン画面" width="380" /></td>
+    <td><img src="docs/images/live2d-light.webp" alt="Live2D キャラクターのメイン画面" width="380" /></td>
+  </tr>
+</table>
+<sub>枠なしの透明ウィンドウ。デスクトップにフキダシとキャラクターだけが浮かびます。実際の動きです。<br />
+ダークテーマ、配信表示、同梱 8 体と Live2D 6 体のプレビューは <a href="#-キャラクター">キャラクター</a> にあります。</sub>
+
 </div>
-
-<br />
-
-透明な Tauri ウィンドウに常駐するデスクトップペットです。バックエンドは Rust、フロントは webview。
-
-**Ollama も Node.js も要りません。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安からローカルモデルを自動で選んで取得します。以後はオフラインで動きます。
 
 > [!WARNING]
 > 公開インストーラは現在、**PicoAgent v1.0.2 Alpha**です。アプリ画面の小型`ALPHA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
 > アルファ版は`beta-full`ビルドでPro対象を含む全機能を試用可能にし、正式リリースではこのfeatureを付けずFree／Pro制限を有効にします。
 
-<div align="center">
-  <table>
-    <tr>
-      <th width="50%">2D（連番フレーム）</th>
-      <th width="50%">Live2D</th>
-    </tr>
-    <tr>
-      <td><img src="docs/images/main-light.webp" alt="2D キャラクターのメイン画面（ライトテーマ）" width="380" /></td>
-      <td><img src="docs/images/live2d-light.webp" alt="Live2D キャラクターのメイン画面（ライトテーマ）" width="380" /></td>
-    </tr>
-    <tr>
-      <td><img src="docs/images/main-dark.webp" alt="2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
-      <td><img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
-    </tr>
-  </table>
-  <h3>Live2D動作例（非同梱）</h3>
-  <table>
-    <tr>
-      <td align="center"><img src="docs/images/character-hiyori.webp" alt="ひよりの通常表示" width="120" /><br /><img src="docs/images/character-hiyori-stream.webp" alt="ひよりの配信表示" width="120" /><br /><sub><b>ひより</b>（通常／配信）</sub></td>
-      <td align="center"><img src="docs/images/character-haru.webp" alt="はるの通常表示" width="120" /><br /><img src="docs/images/character-haru-stream.webp" alt="はるの配信表示" width="120" /><br /><sub><b>はる</b>（通常／配信）</sub></td>
-      <td align="center"><img src="docs/images/character-epsilon.webp" alt="イプシロンの通常表示" width="120" /><br /><img src="docs/images/character-epsilon-stream.webp" alt="イプシロンの配信表示" width="120" /><br /><sub><b>イプシロン</b>（通常／配信）</sub></td>
-      <td align="center"><img src="docs/images/character-mao.webp" alt="まおの通常表示" width="120" /><br /><img src="docs/images/character-mao-stream.webp" alt="まおの配信表示" width="120" /><br /><sub><b>まお</b>（通常／配信）</sub></td>
-    </tr>
-    <tr>
-      <td align="center"><img src="docs/images/character-rice.webp" alt="ライスの通常表示" width="120" /><br /><img src="docs/images/character-rice-stream.webp" alt="ライスの配信表示" width="120" /><br /><sub><b>ライス</b>（通常／配信）</sub></td>
-      <td align="center"><img src="docs/images/character-wanko.webp" alt="わんこの通常表示" width="120" /><br /><img src="docs/images/character-wanko-stream.webp" alt="わんこの配信表示" width="120" /><br /><sub><b>わんこ</b>（通常／配信）</sub></td>
-      <td></td>
-      <td></td>
-    </tr>
-  </table>
-  <sub>
-    ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（上：ライト／下：ダーク）。実際の動きです。<br />
-    左は 2D キャラ「むぎ」、右は Live2D キャラ「ひより」。Live2D はまばたき・モーション・口パクをモデル自身が行います。
-  </sub>
-</div>
-
-<br />
-
-<div align="center">
-  <h3>同梱キャラクター</h3>
-  <details>
-    <summary><strong>同梱キャラクター8体の通常表示・配信表示を開く</strong></summary>
-  <table>
-    <tr>
-      <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-stream.webp" alt="むぎの配信表示" width="150" /><br /><sub><b>むぎ</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-rin.webp" alt="りんの通常表示" width="150" /><br /><img src="docs/images/character-rin-stream.webp" alt="りんの配信表示" width="150" /><br /><sub><b>りん</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-mai.webp" alt="まいの通常表示" width="150" /><br /><img src="docs/images/character-mai-stream.webp" alt="まいの配信表示" width="150" /><br /><sub><b>まい</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）の通常表示" width="150" /><br /><img src="docs/images/character-rin-tha3-stream.webp" alt="りん（自作THA3）の配信表示" width="150" /><br /><sub><b>りん（自作THA3）</b><br />通常／配信・1枚絵から生成</sub></td>
-    </tr>
-    <tr>
-      <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />84フレーム／目・口7段階</sub></td>
-    </tr>
-  </table>
-  <details open>
-    <summary><strong>セナの高精細メッシュリグを拡大して確認</strong></summary>
-    <p>画像を選ぶと、GitHubの画像表示でさらに拡大できます。</p>
-    <p>
-      <a href="docs/images/character-sena-stream.webp"><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示を拡大して確認" width="480" /></a><br />
-      <sub>配信表示：左右視線・まばたき・口パク・頭部・呼吸。待機・思考中・会話で表示寸法を維持</sub>
-    </p>
-    <p>
-      <a href="docs/images/character-sena.webp"><img src="docs/images/character-sena.webp" alt="セナの通常表示を拡大して確認" width="480" /></a><br />
-      <sub>通常表示：実際のペット画面全体</sub>
-    </p>
-  </details>
-  <sub>
-    各キャラを標準ペット表示と配信表示の両方で、480px・16fps・6秒（96コマ）撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から、既存動画を再圧縮せず直接書き出しています。同じ「おはよう。今日もよろしくね」への返事から、<b>音声同期の口パク → 考え中 → 待機</b>を再生し、まばたきや物理演算もそのまま動かしています。<br />
-    人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
-    同梱通常2D 8体はすべて同じフルモーション仕様で、自然なまばたき、音声再生中の口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。セナは高精細メッシュリグで口・まばたき・左右視線・頭部・呼吸を連続描画し、待機・思考中・会話の切替でも表示寸法を維持します。WebGLを使えない環境や省モーション設定では従来の差分絵へ戻ります。ミュート中と音量0では口パクしません。<br />
-    このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・ライス・わんこ）があります。<br />
-    Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
-  </sub>
-  </details>
-</div>
-
-### キャラクター別モーション対応
-
-`◎` は専用素材またはモデルパラメータ、`○` は共通の状態モーションです。PNGのフル仕様は `motionProfile=full` で宣言し、必要な9レイヤーが1枚でも欠けると同期テストが失敗します。
-
-| キャラクター | 形式 | 状態動作 | まばたき | 口パク | 視線 | 感情表情 | 胸元二次動作 |
-|---|---|---:|---:|---:|---:|---:|---:|
-| むぎ / りん / まい / りん（自作THA3） | PNG | ○ | ◎ | ◎ | ◎ | ◎ | — |
-| こはる / ノア | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
-| セナ | 自前メッシュ＋PNG退避 | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
-| 実写・物理演算テスト | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎（8領域） |
-| ひより / はる / イプシロン / まお / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
-| ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
-
-通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。同梱通常2Dの実行フレームと差分レイヤーは、制作正本PNGと復号画素が完全一致するlossless WebPです。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
-
 ---
 
-## 📑 目次
+## 3 行で
+
+- **Ollama も Node.js も要らない。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安から Gemma 4 系を自動で選んで取得します。以後はオフラインで動きます。
+- **叩く AI は差し替え式。** `local` / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral / 手元の CLI エージェントの 9 系統。1 体に決めず、2〜8 体へ**合議・分担**させて 1 つの答えにまとめることもできます。
+- **外からも叩ける。** ローカル HTTP API（Ollama 風・OpenAI 互換）と MCP を「公開する」「取り込む」の双方向で持つため、キャラクター UI を使わずエージェント基盤としても使えます。
+
+## 60 秒で動かす
+
+```bash
+git lfs pull                              # clone 直後の 1 回だけ
+cargo install tauri-cli --version '^2'    # 初回だけ
+cargo xtask dev
+```
+
+Windows ならリポジトリ直下の **`PicoAgentを起動.bat`** をダブルクリックでも同じです。`dev` は残存プロセス停止・キャラクター同期・UI 生成だけを行う**最小の開発起動**で、数 GB の追加取得はしません。OS ごとの前提パッケージ、ローカル AI・読み上げ・Live2D・THA3 の個別取得は [🚀 まず動かす](#-まず動かす) を参照してください。
+
+```bash
+cargo xtask verify   # PR 前の一括ローカル検証（書式・静的解析・テスト・JS 構文・Git 差分）
+```
+
+## 設計のポイント
 
 | | |
 |---|---|
-| [🚀 まず動かす](#-まず動かす) | 2 コマンドで起動 |
-| [✨ できること](#-できること) | 機能の全体像 |
-| [🖱 使い方](#-使い方) | 操作とショートカット |
-| [⚙️ 設定](#️-設定) | 設定画面と主要な設定キー |
-| [📊 性能要件](#-性能要件) | 動作環境の目安・上限・計測 |
-| [🔌 ローカル API](#-ローカル-api) | 外部ツールから呼ぶ |
-| [🛠 開発・配布ガイド](docs/DEVELOPMENT.md) | コネクタ、xtask、ビルド、構成 |
+| **ローカル完結が既定** | 会話は選択中の叩く AI にだけ送られ、`local` なら外部送信なし。録音の文字起こしも端末内（Whisper）で行う。クラウド AI は選んだときだけ使う |
+| **コネクタで増える** | ツールコネクタを足すとモデルが function calling で呼べる。コネクタは `config_schema()` で自分の設定項目を申告し、設定画面へ自動で並ぶ |
+| **複数 AI の合議・分担** | 同じ質問を 2〜8 体へ送って統合、または仕事を割り振って統合・個別返却。参加 AI ごとにモデルと「担当の希望」を指定できる |
+| **安全側の既定** | 許可ルート制、削除は OS のゴミ箱、物理削除コマンドは拒否。PC 操作・ブラウザ操作・ローカル API・MCP は既定 OFF |
+| **常駐前提の性能要件** | 描画は単一 `requestAnimationFrame` ループへ合流。定期処理は目覚まし照合 20 秒と居眠り判定 30 秒だけ。上限とタイムアウトは固定値で明文化している |
+| **キャラクターは差し替え可能** | 連番 PNG パック、Cubism 4／5 の Live2D、1 枚絵から生成する THA3。人格・口調・関係性は `character.json` と設定画面で定義する |
+
+## アーキテクチャ
+
+```mermaid
+flowchart LR
+  IN["入力<br/>テキスト・音声・ファイル D&amp;D<br/>ローカル HTTP API"] --> LOOP
+  PERSONA["人格・関係性・長期メモリ"] --> LOOP
+  LOOP["エージェントループ<br/>計画 → 多段ツール実行 → 自己評価"] --> AI
+  AI["叩く AI 9 系統<br/>単一 / 合議 / 分担 + まとめ役"] --> LOOP
+  LOOP --> GUARD["ガード<br/>許可ルート・ゴミ箱・allowlist"]
+  GUARD --> SKILLS["スキル 70 種<br/>ツールコネクタ"]
+  SKILLS --> LOOP
+  MCPIN["外部 MCP サーバー"] --> SKILLS
+  LOOP --> OUT["回答 + 出典 + 読み上げ"]
+  SKILLS --> FILES["生成ファイル・レポート"]
+  SKILLS --> MCPOUT["MCP ツールとして公開"]
+```
+
+フロントは webview、バックエンドは Rust。アーキテクチャとコネクタ仕様の正本は [SPEC.md](SPEC.md) です。
+
+## 数字
+
+| | |
+|---|---|
+| スキル | **70 種**（会話の内容から自動選択） |
+| 叩く AI | **9 系統** ／ 回答の作り方 **4 モード**（単一・合議・分担＋統合・分担のみ） |
+| 表示形式 | **7 つ**（ミニ／ペット／チャット／バー／作業／配信／ウィジェット） |
+| 同梱キャラクター | 通常 2D **8 体**（ほかに Live2D 動作例 6 体・非同梱） |
+| ローカルモデル | Gemma 4 系 3 サイズを VRAM／RAM から自動選定（約 3.1 / 5.0 / 7.1 GB） |
+| 最小構成 | RAM 8 GB・GPU なしでも動作（通常推奨 RAM 16 GB・VRAM 4 GB） |
+| 外部依存 | Ollama 不要・Node.js 不要。Python が要るのは THA3 でキャラを作るときだけ |
+
+---
+
+## 📑 ドキュメント地図
+
+| | |
+|---|---|
+| [🚀 まず動かす](#-まず動かす) | 前提、2 コマンド起動、`setup` 対象、THA3、叩く AI の選択 |
+| [✨ できること](#-できること) | 土台・エージェント・表示形式・スキル一覧 |
+| [🎭 キャラクター](#-キャラクター) | 同梱 2D・Live2D のプレビューとモーション対応表 |
+| [🖱 使い方](#-使い方) | マウス・キーボード・ホットキー・ファイル受け渡し |
+| [⚙️ 設定](#️-設定) | 設定画面、会話の記憶、主要な設定キー |
+| [📊 性能要件](#-性能要件) | 動作環境の目安、GPU 対応境界、上限とタイムアウト |
+| [🔌 ローカル API](#-ローカル-api) | Ollama 風 / OpenAI 互換 / MCP エンドポイント |
 | [🛟 困ったとき](#-困ったとき) | 症状別の対処 |
+| [🛠 開発・配布ガイド](docs/DEVELOPMENT.md) | コネクタ、xtask、ビルド、リポジトリ構成 |
 
 > [!TIP]
 > **使いかたを一冊で読みたいなら [MANUAL.md](MANUAL.md)。** 導入から日常の使いかた、スキル活用、ローカル API までまとまっています。
 > アーキテクチャとコネクタ仕様は [SPEC.md](SPEC.md)、全設定キーは [docs/SETTINGS.md](docs/SETTINGS.md)、開発・配布手順は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、AI エージェント向けの作業ルールは [AGENTS.md](AGENTS.md) です。
-
 ---
 
 ## 🚀 まず動かす
@@ -331,7 +317,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
 - **通常2Dの局所二次動作** — `character.json` の `secondaryMotion` で胸元の範囲と強さをキャラ別に指定し、全身呼吸とは別の遅れた動きを付けられる。Live2Dは不要で、動きを減らすOS設定では停止する
-- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。Cubism Editor 5.3互換の公式CoreでCubism 4／5モデルを読み込み、まばたき・モーション・声量連動の口パクを行う。視線追従は既定OFFで、設定から有効にした場合だけ顔付近のマウスへ控えめに追従する。サンプルモデルは同梱・自動取得せず、利用者が配布元の条件を確認して取得したzip／フォルダを設定画面から追加する。**2D と Live2D の見た目は[冒頭のプレビュー](#-picoagent)で見比べられます**
+- **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。Cubism Editor 5.3互換の公式CoreでCubism 4／5モデルを読み込み、まばたき・モーション・声量連動の口パクを行う。視線追従は既定OFFで、設定から有効にした場合だけ顔付近のマウスへ控えめに追従する。サンプルモデルは同梱・自動取得せず、利用者が配布元の条件を確認して取得したzip／フォルダを設定画面から追加する。**2D と Live2D の見た目は[キャラクター](#-キャラクター)で見比べられます**
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 - **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
 - **関係性と共有記録** — キャラごとに会話・完了した作業・ふれあいを端末内へ保存。「出会ったばかり」から自然に距離感が変わる。作業記録は固定・個別削除・全消去でき、「続きをやる」で依頼を入力欄へ戻せる。保存自体も設定で停止可能
@@ -359,6 +345,103 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 > 頼み方の具体例は **[MANUAL.md 第5章「スキル活用ガイド」](MANUAL.md#5-スキル活用ガイド頼み方の例)** にまとまっています。設定画面の「使い方」タブからも同じ内容を見られます。
 >
 > 上の表は用途別です。「読むだけか、送信・削除まで行うか」という設計上の分類は **[SPEC.md「スキルの分類」](SPEC.md#スキルの分類エージェント設計としての位置づけ)** にあります。
+
+---
+
+## 🎭 キャラクター
+
+<div align="center">
+  <table>
+    <tr>
+      <th width="50%">2D（連番フレーム）</th>
+      <th width="50%">Live2D</th>
+    </tr>
+    <tr>
+      <td><img src="docs/images/main-light.webp" alt="2D キャラクターのメイン画面（ライトテーマ）" width="380" /></td>
+      <td><img src="docs/images/live2d-light.webp" alt="Live2D キャラクターのメイン画面（ライトテーマ）" width="380" /></td>
+    </tr>
+    <tr>
+      <td><img src="docs/images/main-dark.webp" alt="2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
+      <td><img src="docs/images/live2d-dark.webp" alt="Live2D キャラクターのメイン画面（ダークテーマ）" width="380" /></td>
+    </tr>
+  </table>
+  <h3>Live2D動作例（非同梱）</h3>
+  <table>
+    <tr>
+      <td align="center"><img src="docs/images/character-hiyori.webp" alt="ひよりの通常表示" width="120" /><br /><img src="docs/images/character-hiyori-stream.webp" alt="ひよりの配信表示" width="120" /><br /><sub><b>ひより</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-haru.webp" alt="はるの通常表示" width="120" /><br /><img src="docs/images/character-haru-stream.webp" alt="はるの配信表示" width="120" /><br /><sub><b>はる</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-epsilon.webp" alt="イプシロンの通常表示" width="120" /><br /><img src="docs/images/character-epsilon-stream.webp" alt="イプシロンの配信表示" width="120" /><br /><sub><b>イプシロン</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-mao.webp" alt="まおの通常表示" width="120" /><br /><img src="docs/images/character-mao-stream.webp" alt="まおの配信表示" width="120" /><br /><sub><b>まお</b>（通常／配信）</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="docs/images/character-rice.webp" alt="ライスの通常表示" width="120" /><br /><img src="docs/images/character-rice-stream.webp" alt="ライスの配信表示" width="120" /><br /><sub><b>ライス</b>（通常／配信）</sub></td>
+      <td align="center"><img src="docs/images/character-wanko.webp" alt="わんこの通常表示" width="120" /><br /><img src="docs/images/character-wanko-stream.webp" alt="わんこの配信表示" width="120" /><br /><sub><b>わんこ</b>（通常／配信）</sub></td>
+      <td></td>
+      <td></td>
+    </tr>
+  </table>
+  <sub>
+    ウィンドウは枠なしの透明。デスクトップにフキダシとキャラクターだけが浮かびます（上：ライト／下：ダーク）。実際の動きです。<br />
+    左は 2D キャラ「むぎ」、右は Live2D キャラ「ひより」。Live2D はまばたき・モーション・口パクをモデル自身が行います。
+  </sub>
+</div>
+
+<br />
+
+<div align="center">
+  <h3>同梱キャラクター</h3>
+  <details>
+    <summary><strong>同梱キャラクター8体の通常表示・配信表示を開く</strong></summary>
+  <table>
+    <tr>
+      <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-stream.webp" alt="むぎの配信表示" width="150" /><br /><sub><b>むぎ</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-rin.webp" alt="りんの通常表示" width="150" /><br /><img src="docs/images/character-rin-stream.webp" alt="りんの配信表示" width="150" /><br /><sub><b>りん</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-mai.webp" alt="まいの通常表示" width="150" /><br /><img src="docs/images/character-mai-stream.webp" alt="まいの配信表示" width="150" /><br /><sub><b>まい</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）の通常表示" width="150" /><br /><img src="docs/images/character-rin-tha3-stream.webp" alt="りん（自作THA3）の配信表示" width="150" /><br /><sub><b>りん（自作THA3）</b><br />通常／配信・1枚絵から生成</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />84フレーム／目・口7段階</sub></td>
+    </tr>
+  </table>
+  <details open>
+    <summary><strong>セナの高精細メッシュリグを拡大して確認</strong></summary>
+    <p>画像を選ぶと、GitHubの画像表示でさらに拡大できます。</p>
+    <p>
+      <a href="docs/images/character-sena-stream.webp"><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示を拡大して確認" width="480" /></a><br />
+      <sub>配信表示：左右視線・まばたき・口パク・頭部・呼吸。待機・思考中・会話で表示寸法を維持</sub>
+    </p>
+    <p>
+      <a href="docs/images/character-sena.webp"><img src="docs/images/character-sena.webp" alt="セナの通常表示を拡大して確認" width="480" /></a><br />
+      <sub>通常表示：実際のペット画面全体</sub>
+    </p>
+  </details>
+  <sub>
+    各キャラを標準ペット表示と配信表示の両方で、480px・16fps・6秒（96コマ）撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から、既存動画を再圧縮せず直接書き出しています。同じ「おはよう。今日もよろしくね」への返事から、<b>音声同期の口パク → 考え中 → 待機</b>を再生し、まばたきや物理演算もそのまま動かしています。<br />
+    人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
+    同梱通常2D 8体はすべて同じフルモーション仕様で、自然なまばたき、音声再生中の口パク、左右視線、喜び・悲しみの顔差分、状態モーションを持ちます。セナは高精細メッシュリグで口・まばたき・左右視線・頭部・呼吸を連続描画し、待機・思考中・会話の切替でも表示寸法を維持します。WebGLを使えない環境や省モーション設定では従来の差分絵へ戻ります。ミュート中と音量0では口パクしません。<br />
+    このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・ライス・わんこ）があります。<br />
+    Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
+  </sub>
+  </details>
+</div>
+
+### キャラクター別モーション対応
+
+`◎` は専用素材またはモデルパラメータ、`○` は共通の状態モーションです。PNGのフル仕様は `motionProfile=full` で宣言し、必要な9レイヤーが1枚でも欠けると同期テストが失敗します。
+
+| キャラクター | 形式 | 状態動作 | まばたき | 口パク | 視線 | 感情表情 | 胸元二次動作 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| むぎ / りん / まい / りん（自作THA3） | PNG | ○ | ◎ | ◎ | ◎ | ◎ | — |
+| こはる / ノア | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
+| セナ | 自前メッシュ＋PNG退避 | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
+| 実写・物理演算テスト | PNG | ○ | ◎ | ◎ | ◎ | ◎ | ◎（8領域） |
+| ひより / はる / イプシロン / まお / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
+| ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
+
+通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。同梱通常2Dの実行フレームと差分レイヤーは、制作正本PNGと復号画素が完全一致するlossless WebPです。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
 
 ---
 
