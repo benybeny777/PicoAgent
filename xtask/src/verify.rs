@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Result};
 
+use crate::agent_harness;
 use crate::util::repo_root;
 
 #[derive(Clone, Copy)]
@@ -118,6 +119,13 @@ impl Report {
 pub fn run() -> Result<()> {
     let root = repo_root();
     let mut report = execute_checks(CHECKS, |check| run_process(&root, check));
+    report.record(
+        "作業エージェント用スキル入口",
+        match agent_harness::check(&root) {
+            Ok(()) => Outcome::Passed,
+            Err(error) => Outcome::Failed(error.to_string()),
+        },
+    );
     check_javascript(&root, &mut report);
     report.record(
         "Git差分検査",

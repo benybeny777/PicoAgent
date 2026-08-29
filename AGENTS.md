@@ -24,7 +24,7 @@
 - **大きなファイル容量・配布容量・転送量は、一般的なMBまたはGBだけで見やすく書く。bytesを単独表示または併記せず、外部仕様がMiB／GiB表記の場合も10進のMB／GBへ換算する。**
 - **常に Codex / Claude（作業エージェント自身）の利用クレジット消費を最小化して作業する。** 不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
   - 検証コストの優先順位: まず `cargo check`（コンパイル）→ 必要なら `cargo test --lib`（ロジック）で済ませる。**GUI 起動（`cargo xtask dev`）・スクリーンショット・フルビルドは高コストなので最後の手段**とし、目視確認が本当に必要なときだけ、複数の確認をまとめて 1 回で行う。
-  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtaskの書式、全target静的解析、テスト、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
+  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtaskの書式、全target静的解析、テスト、作業エージェント用スキルの共通正本とClaude入口の同期、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
   - 編集はまとめて行い、**ビルド/テスト/起動は変更が出揃ってから最小回数**だけ実行する。同じ内容のビルド・テスト・起動・読み取りを繰り返さない。
   - `Cargo.toml` / `Cargo.lock` を変更したら `cargo audit --file <Cargo.lock>` で既知脆弱性を確認する。GitHub Actions は無料枠・請求制限による開始前失敗と通知の連発を避けるため使わない。依存更新時と販売前のローカル検証で監査し、保守終了などの情報警告と脆弱性を分けて評価して、対象OS・実行経路と見送り理由をPR本文へ残す。
   - **外部依存は原則として公式LTSまたは長期保守安定版を採用し、LTS相当が無ければ安定版latestを採用する。LLMモデルはLTS扱いにせず常に公式の最新安定版へ追従する。** Cargo・JavaScript・Python等のパッケージ、同梱アプリ、管理導入ツール、Webランタイム、音声・LLMモデルを毎月1日に`.agents/skills/audit-picoagent-dependencies/SKILL.md`の`all`で点検する。互換性、ライセンス、対象OS、再現可能なハッシュ固定の問題で旧版を維持する場合は理由と確認日をPR本文へ残し、未完了なら`docs/TASKS.md`へ移す。
@@ -55,7 +55,7 @@
   - スキル名は英小文字・数字・ハイフンだけの動詞始まりとし、`SKILL.md` のfrontmatterは `name` と「何をするか・どの依頼で使うか」を含む `description` だけにする。本文は日本語、命令形、500行未満を目安とし、一般論や作業日記を入れない。
   - 壊れやすい工程は、正規入口、入力条件、禁止経路、成果物の識別方法、失敗時の停止条件、検証、公開前照合まで書く。単なるコマンド一覧にせず、古い成果物や開発用資産を混ぜない条件を明示する。繰り返し組み直す処理は `scripts/` へ置き、説明を重複させない。
   - 新規スキルは `skill-creator` の初期化手順で作り、`quick_validate.py` を通す。Pythonが直接使えない環境では `uv run --python 3.12 python ...` を使う。作成後は今回の実タスクで手順どおりに実行して検証し、失敗から得た分岐を同じ作業内で反映する。
-  - Claude Code入口は共通正本を最後まで読む指示だけにし、同名フォルダへ手順・スクリプト・参照資料を複製しない。スキルの追加・更新時はCodex側とClaude側の名前一致、リンク先の存在、重複手順なしを確認する。
+  - Claude Code入口は共通正本を最後まで読む指示だけにし、同名フォルダへ手順・スクリプト・参照資料を複製しない。名前一致、リンク先、frontmatter、入口本文の肥大化は`cargo xtask verify`が機械検査する。
 - **修正・作業が完了したら、ユーザーからの個別指示がなくても `main` へのマージまで終わらせる。** 手順は「`git add -A` で全ステージ → コミット → 作業ブランチへプッシュ → PR 作成 → squash merge」。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含める（コミットメッセージは日本語。本ファイルの他ルールに従う）。**止めるのは、利用者が「マージしない」「PRだけ」と明示した場合と、破壊的・不可逆な操作を伴う場合だけ**。判断に迷って作業を宙ぶらりんにしない。
 - **すべての変更はPRで行い、`main`へ直接pushしない。** 作業開始時に`origin/main`から目的別ブランチを作り、同じ目的の変更だけを1つのPRへまとめる。無関係な修正は別ブランチ・別PRへ分ける。ユーザーが相互レビューを指定した場合も、その指示の有効範囲は指定された同一PR内だけとする。公開済みコミットの書き換えやforce pushはしない。
 - **PR のマージは squash merge を使う。** 1 PR = 1 コミットになり `main` の履歴が読みやすい、というだけの理由。なお API 経由のマージは、squash / 通常マージのいずれでも GitHub 側が committer を `noreply@github.com` にして署名するため、`git log` 上は Unverified に見える（GitHub の画面上は Verified）。これは避けられないので気にしない。すでに `origin` に載ったコミットを後から書き換えるのは共有履歴の破壊操作になるので行わない（上のルールのとおり）。
@@ -192,7 +192,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
-| `xtask/src/verify.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |
+| `xtask/src/verify.rs` / `agent_harness.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・作業エージェント用スキル入口・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
