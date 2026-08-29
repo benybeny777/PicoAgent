@@ -31,7 +31,7 @@
 PicoAgent は Tauri 製のデスクトップペット型 AI エージェントです。
 
 - **ローカルファースト**: 既定の叩く AI は同梱のローカル推論エンジン（llama-server + GGUF）。初回のモデル取得後はオフラインで動きます。読み上げ（Aivis）や文字起こし（Whisper）もローカルです。
-- **スキル（コネクタ）駆動**: 天気・Web検索から Gmail・Slack・GitHub、Office 文書編集、PDF、画像変換、コマンド実行まで 50 以上のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
+- **スキル（コネクタ）駆動**: 天気・Web検索からGmail・Slack・GitHub、Office文書編集、PDF、画像・動画生成、PC操作、コマンド実行まで70種のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
 - **キャラクターと暮らす**: クリックで話しかけ、なでると喜び、放っておくと居眠りします。Live2D にも対応。
 - **外から叩ける**: Ollama 風のローカル HTTP API と最小 CLI で、スクリプトや他ツールからもエージェントを呼べます。
 
@@ -232,7 +232,7 @@ cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qp
 | 画像ファイル変換 | 「この PSD を PNG に変換して」「HEIC を JPG にして」「画像の情報を見せて」 |
 | 音声文字起こし | 「この音声を文字起こしして」（mp3/m4a も自動前処理）「話者分類つきで」 |
 | 会議記録 | 「会議の録音を開始して」→「録音を止めて議事録にして」 |
-| 画像生成 | 「猫のイラストを描いて」（ComfyUI / OpenAI 画像） |
+| 画像・動画生成 | 「猫のイラストを描いて」（ComfyUIでStable Diffusion系モデルを利用／OpenAI画像生成）、「短い動画にして」（AnimateDiff等を導入したComfyUI） |
 
 ### 調査・資料生成
 
@@ -256,6 +256,8 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 | スキル | 頼み方の例 |
 |---|---|
 | アプリ操作 | 「PicoAgent を終了して」 |
+| ブラウザ操作 | 「このページを開いて内容を読んで」（Chrome／EdgeをCDPで操作。セキュリティのため既定OFF） |
+| PC操作 | 「画面を確認して、この位置をクリックして」（画面取得、マウス・キーボード操作。セキュリティのため既定OFF） |
 | タスクスケジューラ | 「毎朝9時に天気を教えて」「平日18時に git status」（→ [第11章](#11-スケジュールと自動化)） |
 | プロジェクト切り替え | 「このフォルダを仕事用として登録して」「仕事用へ切り替えて」 |
 | 保存ワークフロー | 「この手順を週報作成として覚えて」「週報作成を実行して」 |
@@ -290,10 +292,15 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 ## 7. 叩く AI（プロバイダとモデル）
 
 - **既定は `local`（同梱エンジン）**。初回起動時に PC の VRAM/RAM から Gemma 系の small / balanced / large を自動選択してダウンロードします。設定画面では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットを「種類 → サイズ」で選べ、推奨 VRAM・RAM・ダウンロード目安を表示します。
+- **GPUに応じた推論経路**: Windowsは対応NVIDIAでCUDA、AMDでROCm、IntelでSYCLを優先し、Vulkan、CPUへ切り替えます。UbuntuはVulkan、Apple Silicon MacはMetalを利用できます。
 - **クラウド**: OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral など。右クリック →「すべての設定…」→「AIモデル・連携」で API キーとモデルを設定します（費用が発生します）。
 - **Ollama**: `ollama serve` 起動後にプロバイダを切り替えると、ローカルのモデル一覧から選べます。
+- **手元のCLIエージェント**: ログイン済みのCodex CLI／Claude Codeを叩くAIとして選べます。各サービスの契約プランと利用上限が適用され、契約枠内なら別途APIキーを設定せず利用できます。
+- **マルチAI**: 2～8件のlocal／Ollama／各社API／Codex CLI／Claude Codeを組み合わせ、同じ質問への合議、仕事の分担と統合、分担結果の個別返却を選べます。
 - ダウンロード済み GGUF は「AIモデル・連携」タブの「ダウンロード済みモデル」で一覧・削除できます（使用中のモデルは削除不可）。
 - 会話は**キャラクターごと**に保存・復元されます。トークン使用量は「診断・修復」タブで確認できます。
+
+> **開発中:** FreeTokenを第2のローカル推論エンジンとして選べるよう対応を進めています。GPUのVRAM容量を超えるモデルの利用を目指していますが、現在の公開版には含まれません。
 
 ---
 
@@ -308,10 +315,12 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 
 ---
 
-## 9. キャラクター（切替・Live2D・PSD）
+## 9. キャラクター（通常2D・Live2D・THA3）
 
 - 設定「キャラ・音声」タブで切替と、性格・口調（人格プロンプト）のキャラ別編集ができます。
+- **通常2D**: lossless WebPの連番アニメーションと、PIXI.jsによる分離メッシュ描画に対応します。待機、傾聴、検索、作業、返答、成功、エラーの状態に合わせて動きます。
 - **Live2D**: `cargo xtask setup live2d` で Cubism ランタイムとサンプルモデル「ひより」を取得すると、対応キャラは Live2D で動きます（まばたき・リップシンク・タップモーション）。非対応キャラも差分絵ベースの疑似リグ（PNGTuber 式）で常時アニメーションします。
+- **THA3**: 設定画面の「1枚絵からキャラクターを作成」から、利用者が用意したTHA3環境と透過PNGを使って17キーポーズ・42フレームのキャラクターパックを生成できます。生成時だけ対応GPUとPython環境を使い、完成後の表示にはTHA3を使いません。
 - **自作キャラの Live2D 化**: `python scripts/build-live2d-psd.py` で `characters/<id>/layers/` からレイヤー分け PSD（ひより互換の 15 パーツ構成）を生成し、Live2D Cubism Editor で開いてモデル化できます。
 - キャラ画像・アニメーションの正本は `characters/` 配下です（`ui/assets/characters/` へ自動同期）。
 

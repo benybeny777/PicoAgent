@@ -11,7 +11,7 @@ PicoAgent は透明な **Tauri** ウィンドウに常駐する、キャラク�
 バックエンドは Rust（`src-tauri/`）、フロントは webview（`ui/`）。
 「叩く AI（LLM バックエンド）」と「エージェント機能（ツール）」をコネクタとして拡張できる。
 
-- **叩く AI** → プロバイダコネクタ（`src-tauri/src/providers/`）。**既定は `local`（同梱 llama-server、Ollama 不要）**、Ollama / OpenAI 互換も同梱。
+- **叩く AI** → プロバイダコネクタ（`src-tauri/src/providers/`）。**既定は `local`（同梱 llama-server）**で、Ollamaとは独立して動作する。Ollama / OpenAI 互換も同梱。
 - **エージェント機能** → スキル（ツール）コネクタ（連結ファイルはプロジェクト直下の `skills/<スキル名>/mod.rs`、トレイトは `src-tauri/src/tools/mod.rs`）。モデルが function calling で呼び出す。
 - **キャラクター** → 正本はプロジェクト直下の `characters/index.json` と各 `character.json`。`cargo xtask sync-characters` が `ui/assets/characters/` へ差分同期し webview が配信。見た目・アニメーション・人格を一体で切り替える。制作専用の `expression-patches/`、`live2d-src/`、通常2Dの正本 `layers/*.png`、`mesh-rig/source/` は配信コピーへ含めず、実行用lossless WebPだけを残す。`runtimeLayers`を持たない追加パックのPNGレイヤーは後方互換で配信する。
 - **関係性** → `relationship.rs` がキャラクター別の `app_data_dir/relationship-<キャラクターID>.json` に、会話・完了作業・ふれあい・共有した出来事を原子的に保存する。数値は内部更新だけに使い、UIとシステム文脈では段階名と最近の出来事だけを扱う。
@@ -155,7 +155,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 | id | 叩く先 | 接続条件 |
 |---|---|---|
-| `local`（既定） | 同梱 llama-server `/v1/chat/completions`（OpenAI 互換） | エンジン同梱＋モデル取得済（`engine.rs` が管理）。Ollama 不要 |
+| `local`（既定） | 同梱 llama-server `/v1/chat/completions`（OpenAI 互換） | エンジン同梱＋モデル取得済（`engine.rs` が管理）。Ollamaとは別系統 |
 | `ollama` | ローカル Ollama `/api/chat` | `ollama serve` 起動 |
 | `openai` | OpenAI 互換 `/chat/completions` | 公式URLは `OPENAI_API_KEY`、互換URLは `OPENAI_COMPAT_API_KEY`。未設定なら `is_up()=false` |
 | `anthropic` | Anthropic Messages API `/messages` | `PICOAGENT_ANTHROPIC_API_KEY` 設定（未設定なら `is_up()=false`） |
