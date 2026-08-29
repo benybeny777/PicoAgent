@@ -10,10 +10,9 @@
 
 ![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)
 ![Rust](https://img.shields.io/badge/backend-Rust-000000?style=for-the-badge&logo=rust)
-![Ollama 不要](https://img.shields.io/badge/Ollama-%E4%B8%8D%E8%A6%81-black?style=for-the-badge&logo=ollama)
-![Node.js 不要](https://img.shields.io/badge/Node.js-%E4%B8%8D%E8%A6%81-5FA04E?style=for-the-badge&logo=nodedotjs)
+![ローカル LLM](https://img.shields.io/badge/LLM-%E3%83%AD%E3%83%BC%E3%82%AB%E3%83%AB%E5%AE%8C%E7%B5%90-14b8a6?style=for-the-badge)
+![マルチ AI](https://img.shields.io/badge/AI-%E5%90%88%E8%AD%B0%EF%BC%8F%E5%88%86%E6%8B%85-f97316?style=for-the-badge)
 ![スキル 70 種](https://img.shields.io/badge/%E3%82%B9%E3%82%AD%E3%83%AB-70%E7%A8%AE-8b5cf6?style=for-the-badge)
-![MCP 双方向](https://img.shields.io/badge/MCP-%E5%85%AC%E9%96%8B%2F%E5%8F%96%E8%BE%BC-0ea5e9?style=for-the-badge)
 
 <table>
   <tr>
@@ -38,9 +37,9 @@
 
 ## 3 行で
 
-- **Ollama も Node.js も要らない。** 推論エンジンを同梱し、初回起動時に PC の VRAM / RAM 目安から Gemma 4 系を自動で選んで取得します。以後はオフラインで動きます。
+- **ローカルAIを同梱。** 初回起動時にPCのVRAM／RAM目安からモデルを自動で選んで取得し、以後はオフラインでも動きます。OllamaやOpenAI互換APIにも切り替えられます。
 - **叩く AI は差し替え式。** `local` / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral / 手元の CLI エージェントの 9 系統。1 体に決めず、2〜8 体へ**合議・分担**させて 1 つの答えにまとめることもできます。
-- **外からも叩ける。** ローカル HTTP API（Ollama 風・OpenAI 互換）と MCP を「公開する」「取り込む」の双方向で持つため、キャラクター UI を使わずエージェント基盤としても使えます。
+- **70種の機能を会話から実行。** Web検索、PC操作、画像・動画生成、文書処理、業務サービス連携まで、必要なツールをAIが選んで組み合わせます。
 
 ## 60 秒で動かす
 
@@ -96,7 +95,7 @@ flowchart LR
 | 同梱キャラクター | 通常 2D **8 体**（ほかに Live2D 動作例 6 体・非同梱） |
 | ローカルモデル | Gemma 4 系 3 サイズを VRAM／RAM から自動選定（約 3.1 / 5.0 / 7.1 GB） |
 | 最小構成 | RAM 8 GB・GPU なしでも動作（通常推奨 RAM 16 GB・VRAM 4 GB） |
-| 外部依存 | Ollama 不要・Node.js 不要。Python が要るのは THA3 でキャラを作るときだけ |
+| 実行構成 | 既定のローカルAIを同梱。追加機能と外部サービスは必要なものだけ選択して利用 |
 
 ---
 
@@ -267,7 +266,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 ### 土台
 
-- **Ollama 不要・ローカル完結** — 推論エンジン同梱。初回 DL のモデルだけでそのまま動く
+- **同梱ローカルAIで完結** — 推論エンジンと初回取得したモデルだけで動作し、必要に応じてOllamaやクラウドAIへ切り替え可能
 - **叩く AI を差し替え可能** — local / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral / 手元の CLI エージェント（Claude Code・Codex CLI）の 9 通り
 - **エージェント機能を追加可能** — ツールコネクタを足すと、モデルが function calling で呼べる
 - **叩く AI は 1 体に決めなくていい** — 2〜8 体へ同じ質問を送って統合する合議、仕事を割り振って統合・個別返却する分担を設定から選べる（[マルチAI合議・分担](#エージェント)）
@@ -330,12 +329,12 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 | 分野 | できること |
 |---|---|
-| 情報・検索 | Web 検索、天気、為替、株価指数、ニュース、RSS |
+| 情報・検索 | Web検索・ページ取得、ローカル文書検索、天気、為替、株価指数、ニュース、RSS、出典付き調査 |
 | ブラウザ | 実際の Chrome / Edge を開いてページを読む（JS 描画・ログインが要るページ向け。既定は無効） |
 | 日常補助 | リマインダー、集中タイマー、見守り通知、できたことメモ、おでかけ前チェック、クリップボード要約 |
-| 文書・画像・音声 | PDF 抽出・分割・結合、Office 変換、PSD/HEIC など画像変換、録音 → 文字起こし → 議事録 |
+| 文書・画像・音声 | PDF抽出・分割・結合、Office編集・変換、PSD/HEICなど画像変換、ComfyUI／Stable Diffusion系／OpenAIによる画像生成、AnimateDiff等の動画出力、録音 → 文字起こし → 議事録 |
 | 調査・資料 | 出典付き調査レポート、スライド下書き、HTML ダッシュボード、資料一式の生成 |
-| 外部連携 | Gmail、Slack、Google カレンダー / Docs / Sheets / Drive、GitHub、Notion、各種 SNS |
+| 外部連携 | Gmail、Slack、Discord、Google Workspace、Microsoft Graph、GitHub、Notion、Jira、Linear、Trello、Todoist、各種SNS、汎用HTTP API |
 | ローカル操作 | ファイル読み書き、コマンド実行、自力コード実行、cron 風スケジュール |
 | PC 操作 | マウス・キーボードの直接操作とウィンドウ一覧・前面化（シェルを介さない固定操作のみ。既定は無効。ウィンドウ一覧・前面化は現在Windowsのみ） |
 | プロジェクト管理 | 案件ごとの作業環境の切替、課題台帳（期限・優先度・タグ）、決定事項と進捗の記録、切替時の文脈復元 |
