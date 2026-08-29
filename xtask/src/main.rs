@@ -5,6 +5,7 @@
 //
 // 使い方: `cargo xtask <サブコマンド>`（エイリアスは リポジトリ直下の .cargo/config.toml）
 
+mod agent_harness;
 mod assets;
 mod bundled;
 mod character_pack;
