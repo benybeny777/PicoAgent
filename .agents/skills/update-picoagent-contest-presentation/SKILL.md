@@ -75,8 +75,11 @@ description: PicoAgentの社内AIコンテスト用PowerPointを、利用者が�
 
 - 技術スタックは情報量に応じて単独ページにしてよい。Rust、Tauri 2、llama.cpp、Ollama、Whisper、AivisSpeech、通常2D、Live2D、THA3、画面・PC・ブラウザ操作、FreeTokenの予定を役割別に整理する。
 - 技術スタックを図解するときは、技術名を枠で並べただけの一覧にしない。表示層、Agent Core、接続・実行層、推論基盤層など、各要素の責務と依存方向が読める層構造と矢印で示す。
-- `llama.cpp`、GGUF、OllamaなどのローカルLLM基盤はAgentより下の推論基盤層へ置く。API、CLI、音声、PC操作と同じ入力枠へ混在させない。
+- `llama.cpp`、GGUF、FreeTokenの予定などのローカルLLM基盤はAgentより下の推論基盤層へ置く。API、CLI、音声、PC操作と同じ入力枠へ混在させない。
 - 図解では主要技術を1つずつ独立した明るい枠へ入れる。複数技術を長文で1つの枠へ詰め込まない。
+- 一般的でない技術名は名称だけを書かず、用途を併記する。`PIXI.js／通常2D描画`、`画像駆動2D／THA3`のように、名称を知らない審査員にも役割が伝わる表現にする。
+- OpenAI互換対応をOllamaだけに限定して見せない。図では`OpenAI互換API`、`Ollama`、`各社API`を別の接続枠として扱う。
+- OllamaはPicoAgentが接続する外部プロバイダとして接続・実行層へ置き、同梱`llama.cpp`、GGUF、GPUバックエンドと同じ推論基盤の実装要素として混在させない。
 - 図解内に黒またはダークカラーの説明枠を使わない。表紙の背景色にはこの制約を広げない。
 - GPU経路を書く場合はVulkanやCPUだけを抜き出さず、CUDAを含め、実装対象のROCm、SYCL、Metal、Vulkan、CPUとの関係が分かるようにする。
 - AivisSpeechは`AivisSpeech（VOICEVOX互換API）`と表現する。任意の互換音声エンジンを公式対応しているとは断定しない。
