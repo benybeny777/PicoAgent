@@ -13,6 +13,10 @@ use crate::message::Message;
 use crate::providers::Provider;
 use crate::tools;
 
+// systemルールの合成と任意の評価処理は、実行ループから独立して検証する。
+mod feedback;
+pub(crate) mod prompt;
+
 tokio::task_local! {
     /// 現在の非同期タスクに属するエージェントループのネスト深さ。
     /// 並列エージェント同士をネストと誤認しないよう、プロセス全体ではなくFuture単位で保持する。
@@ -485,118 +489,6 @@ fn setup_guide_answer(text: &str) -> Option<String> {
     Some(out)
 }
 
-/// テキスト中に埋め込まれた JSON オブジェクトを抽出する（コードブロック・文中 JSON にも対応）。
-fn extract_json_object(content: &str) -> Option<serde_json::Value> {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(content.trim()) {
-        if v.is_object() {
-            return Some(v);
-        }
-    }
-    let start = content.find('{')?;
-    let end = content.rfind('}')?;
-    if start <= end {
-        serde_json::from_str::<serde_json::Value>(&content[start..=end]).ok()
-    } else {
-        None
-    }
-}
-
-/// 複数パート・長文クエリを「複雑」と判定する（計画ステップのトリガー用）。
-fn is_complex_query(text: &str) -> bool {
-    let count = text.chars().count();
-    if count < 60 {
-        return false;
-    }
-    let questions = text.matches('?').count() + text.matches('？').count();
-    count > 120
-        || questions >= 2
-        || text.contains("手順")
-        || text.contains("ステップ")
-        || text.contains("step")
-}
-
-/// 複雑なクエリを最大4サブタスクに分解して計画テキストを返す。
-/// PICOAGENT_PLANNING_ENABLED=true かつ複雑クエリ時のみ動作し、失敗時は None を返す。
-async fn planning_step(
-    provider: &dyn Provider,
-    cfg: &Config,
-    model: &str,
-    user_text: &str,
-) -> Option<String> {
-    // 明示フラグ、またはスーパーエージェントモードのどちらかで有効化する。
-    if !cfg.get_bool("PICOAGENT_PLANNING_ENABLED", false) && !super_agent_enabled(cfg) {
-        return None;
-    }
-    // サブエージェント内ではネストした計画ステップを行わない（コストとループ防止）。
-    if agent_depth() > 1 {
-        return None;
-    }
-    if !is_complex_query(user_text) {
-        return None;
-    }
-    let plan_messages = vec![
-        Message::new(
-            "system",
-            "あなたはタスク分解AIです。ユーザーの依頼を最大4つのサブタスクに分解して、必ず次のJSON形式だけで返してください。{\"steps\":[\"手順1\",\"手順2\",...]}",
-        ),
-        Message::new("user", user_text),
-    ];
-    let result = provider
-        .chat_with_options(cfg, model, &plan_messages, &[], true)
-        .await
-        .ok()?;
-    let plan = extract_json_object(&result.content)?;
-    let steps = plan.get("steps")?.as_array()?;
-    if steps.len() <= 1 {
-        return None;
-    }
-    let plan_lines: Vec<String> = steps
-        .iter()
-        .enumerate()
-        .filter_map(|(i, s)| s.as_str().map(|t| format!("{}. {}", i + 1, t)))
-        .collect();
-    Some(format!("【実行計画】\n{}", plan_lines.join("\n")))
-}
-
-/// 最終回答が明らかに不十分（極端に短い・明確な拒否）な場合に再生成を試みる。
-/// PICOAGENT_SELF_EVAL_ENABLED=true 時のみ動作し、失敗時は元の回答をそのまま返す。
-async fn self_improve(
-    provider: &dyn Provider,
-    cfg: &Config,
-    model: &str,
-    messages: &[Message],
-    answer: String,
-) -> String {
-    // 明示フラグ、またはスーパーエージェントモードのどちらかで有効化する。
-    if !cfg.get_bool("PICOAGENT_SELF_EVAL_ENABLED", false) && !super_agent_enabled(cfg) {
-        return answer;
-    }
-    // サブエージェント内では自己評価を行わない（呼び出し側で総括する）。
-    if agent_depth() > 1 {
-        return answer;
-    }
-    let too_short = answer.trim().chars().count() < 8;
-    let refusal = (answer.contains("申し訳") && answer.contains("できません"))
-        || answer.contains("お答えできません");
-    if !too_short && !refusal {
-        return answer;
-    }
-    let clean: Vec<Message> = messages
-        .iter()
-        .filter(|m| {
-            m.role == "system"
-                || m.role == "user"
-                || (m.role == "assistant" && m.tool_calls.is_none() && !m.content.is_empty())
-        })
-        .cloned()
-        .collect();
-    // フォールバック許可: 再生成失敗時は元の回答を返す（会話を止めない）。
-    match provider.chat(cfg, model, &clean, &[]).await {
-        Ok(msg) if !msg.content.is_empty() => msg.content,
-        _ => answer,
-    }
-}
-
 fn normalized_short_text(text: &str) -> String {
     text.trim()
         .trim_matches(|c: char| c.is_whitespace() || "、。,.！？!?：:".contains(c))
@@ -1014,7 +906,7 @@ async fn run_scoped(
         emit_status("計画を立てています…".to_string());
     }
     let plan = cancel_while(
-        planning_step(provider, cfg, model, &original_user_text),
+        feedback::planning_step(provider, cfg, model, &original_user_text),
         cancel,
     )
     .await
@@ -1236,9 +1128,11 @@ async fn run_scoped(
                 let answer = append_sources(remove_material_leaks(last), &sources);
                 // 混入の除去は self_improve の後に置く。自己評価は回答を作り直すことがあり、
                 // 先に消しても作り直した側が素通りしてしまうため。
-                let Some(improved) =
-                    cancel_while(self_improve(provider, cfg, model, messages, answer), cancel)
-                        .await
+                let Some(improved) = cancel_while(
+                    feedback::self_improve(provider, cfg, model, messages, answer),
+                    cancel,
+                )
+                .await
                 else {
                     return direct_answer(messages, CANCEL_MESSAGE.to_string());
                 };
@@ -1254,7 +1148,7 @@ async fn run_scoped(
     };
     let prompt = system_prompt_of(messages);
     let Some(improved) = cancel_while(
-        self_improve(
+        feedback::self_improve(
             provider,
             cfg,
             model,

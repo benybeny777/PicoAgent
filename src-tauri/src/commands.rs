@@ -17,33 +17,6 @@ use crate::message::Message;
 use crate::providers;
 use crate::tools;
 
-const LEGACY_DEFAULT_SYSTEM_PROMPT: &str = "あなたは小さなデスクトップペットです。日本語で、親しみやすく簡潔に話します。選択中キャラクターの人格設定を守り、ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-const PREVIOUS_DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-const PREVIOUS_DEFAULT_SYSTEM_PROMPT_2: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-const PREVIOUS_DEFAULT_SYSTEM_PROMPT_3: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。返答は必ず日本語で書いてください（ユーザーが他言語を明示的に求めたときだけ従ってください）。思考・推論の途中経過は出力せず、結論だけを話してください。いま選択されているキャラクター本人になりきり、他のキャラクターの名前・一人称・口調・性格を混ぜないでください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。返答は必ず日本語で書いてください（ユーザーが他言語を明示的に求めたときだけ従ってください）。思考・推論の途中経過は出力せず、結論だけを話してください。いま選択されている1キャラクター本人になりきり、他のキャラクターの名前・一人称・口調・性格を混ぜないでください。キャラ性は呼称で盛らず、反応の癖・言葉選び・得意な支え方で出してください。「お兄ちゃん」「お姉ちゃん」など、ユーザーを家族呼びして距離を詰める表現は禁止です。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-
-fn effective_system_prompt(config: &Config) -> String {
-    let configured = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-    let mut prompt = if configured == LEGACY_DEFAULT_SYSTEM_PROMPT
-        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT
-        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT_2
-        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT_3
-    {
-        DEFAULT_SYSTEM_PROMPT.to_string()
-    } else {
-        configured
-    };
-    // 使えるスキル一覧を添え、「何ができる？」に具体的に答えられるようにする。
-    let capabilities = crate::tools::capability_summary();
-    if !capabilities.is_empty() {
-        prompt.push_str("\n\n使えるスキル（必要なときに自動で実行できます）: ");
-        prompt.push_str(&capabilities);
-        prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
-    }
-    prompt
-}
-
 // 日本語文字は約2トークン、ASCII は約0.25トークン（÷4）で粗く見積もる。
 fn estimate_tokens(msg: &Message) -> usize {
     let japanese = msg.content.chars().filter(|c| *c as u32 > 0x7F).count();
@@ -190,28 +163,17 @@ impl AppState {
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
     /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
-        let mut prompt = effective_system_prompt(&self.config);
         let character_profile = self.character_profile.lock().unwrap().clone();
-        if !character_profile.is_empty() {
-            prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
-            prompt.push_str(&character_profile);
-            // 関係性は人格の後ろへ重ねる（人格の芯は保ったまま距離感だけを変える）。
-            let character_id = self.character_id.lock().unwrap().clone();
-            prompt.push_str(&crate::relationship_preset::profile_suffix(
-                &self.config,
-                &character_id,
-            ));
-        }
+        let character_id = self.character_id.lock().unwrap().clone();
         let memory_context = self.memory_context.lock().unwrap().clone();
-        if !memory_context.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&memory_context);
-        }
         let relationship_context = self.relationship_context.lock().unwrap().clone();
-        if !relationship_context.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&relationship_context);
-        }
+        let prompt = agent::prompt::compose(
+            &self.config,
+            &character_profile,
+            &character_id,
+            &memory_context,
+            &relationship_context,
+        );
         let mut messages = self.messages.lock().unwrap();
         let kept: Vec<Message> = messages
             .iter()
@@ -226,25 +188,17 @@ impl AppState {
 
     /// 会話を完全に初期化する（system のみに戻す）。「新しい会話」用。
     pub fn clear_conversation(&self) {
-        let prompt = {
-            let mut prompt = effective_system_prompt(&self.config);
-            let character_profile = self.character_profile.lock().unwrap().clone();
-            if !character_profile.is_empty() {
-                prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
-                prompt.push_str(&character_profile);
-            }
-            let memory_context = self.memory_context.lock().unwrap().clone();
-            if !memory_context.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&memory_context);
-            }
-            let relationship_context = self.relationship_context.lock().unwrap().clone();
-            if !relationship_context.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&relationship_context);
-            }
-            prompt
-        };
+        let character_profile = self.character_profile.lock().unwrap().clone();
+        let character_id = self.character_id.lock().unwrap().clone();
+        let memory_context = self.memory_context.lock().unwrap().clone();
+        let relationship_context = self.relationship_context.lock().unwrap().clone();
+        let prompt = agent::prompt::compose(
+            &self.config,
+            &character_profile,
+            &character_id,
+            &memory_context,
+            &relationship_context,
+        );
         *self.messages.lock().unwrap() = vec![Message::new("system", prompt)];
     }
 }
@@ -561,7 +515,7 @@ fn resolved_judge_model(
 /// 会話中の system には長期メモリやプロジェクト文脈も差し込まれるため、その全文を
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
 fn stable_persona_prompt(state: &AppState) -> String {
-    let mut persona = effective_system_prompt(&state.config);
+    let mut persona = agent::prompt::base(&state.config);
     let character_profile = state.character_profile.lock().unwrap().clone();
     if !character_profile.is_empty() {
         persona.push_str("\n\n選択中キャラクターの人格設定:\n");
@@ -2676,20 +2630,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             }
         }
     }
-    if values
-        .get("PICOAGENT_SYSTEM_PROMPT")
-        .and_then(Value::as_str)
-        == Some(LEGACY_DEFAULT_SYSTEM_PROMPT)
-        || values
-            .get("PICOAGENT_SYSTEM_PROMPT")
-            .and_then(Value::as_str)
-            == Some(PREVIOUS_DEFAULT_SYSTEM_PROMPT)
-    {
-        values.insert(
-            "PICOAGENT_SYSTEM_PROMPT".to_string(),
-            Value::String(DEFAULT_SYSTEM_PROMPT.to_string()),
-        );
-    }
+    agent::prompt::normalize_setting(&mut values);
 
     let provider_list: Vec<Value> = providers::all()
         .iter()
@@ -2726,7 +2667,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "values": values,
         "unavailableSecrets": unavailable_secrets,
         "active": { "providerId": provider_id, "model": model },
-        "defaults": { "systemPrompt": DEFAULT_SYSTEM_PROMPT },
+        "defaults": { "systemPrompt": agent::prompt::DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
         "localModelPresets": crate::providers::local::LOCAL_MODEL_PRESETS.iter().map(|preset| json!({
             "id": preset.id,

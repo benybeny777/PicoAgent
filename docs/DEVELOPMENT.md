@@ -238,7 +238,8 @@ PicoAgent/
     ├── build.rs      ← コネクタの自動 mod 生成
     ├── resources/bundled/tha3/ ← 通常の開発ビルド用THA3（販売用軽量版には含めない）
     └── src/
-        ├── agent.rs        ← エージェントループ
+        ├── agent.rs        ← エージェント実行ループ
+        ├── agent/          ← systemルールと文脈の合成（prompt）／計画・自己評価（feedback）
         ├── providers/      ← 叩く AI コネクタ（.rs を足すと自動登録）
         ├── tools/          ← Tool登録・意図語彙・HTTP・プロセス実行の共通層
         ├── mcp/            ← MCP クライアント / サーバ

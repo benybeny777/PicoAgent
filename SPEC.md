@@ -48,7 +48,10 @@ graph TD
     R -->|invoke pet_send| CMD[commands.rs]
     S[設定ウィンドウ<br/>ui/settings.js] -->|invoke settings_save| CMD
     CMD <-->|cfg.get / set_all| C[(config.json<br/>設定の正本)]
-    CMD --> A[agent.rs<br/>エージェントループ]
+    CMD --> RULE[agent/prompt.rs<br/>ルール・system文脈]
+    RULE --> A[agent.rs<br/>エージェントループ]
+    A --> FB[agent/feedback.rs<br/>計画・自己評価]
+    FB --> A
     A -->|chat| P[プロバイダコネクタ<br/>providers/*]
     P -->|reqwest| LLM[(叩く AI<br/>Ollama / OpenAI互換)]
     LLM -->|tool_calls| A
@@ -57,10 +60,22 @@ graph TD
     A -->|最終応答| CMD -->|return| R
 ```
 
+PicoAgent製品内部のエージェント構成は、名称だけで空の層を増やさず、状態の所有者と副作用で次の境界に分ける。
+
+| ハーネス上の責務 | 実装正本 | 境界 |
+|---|---|---|
+| ルール | `agent/prompt.rs` | 基本system prompt、キャラクター人格、利用者が選んだ関係、長期メモリ、関係性文脈を一定順序で合成する。通常の再構築と「新しい会話」は同じ関数を使う |
+| スキル | `src-tauri/src/tools/mod.rs` / `skills/<名前>/` | 候補選択、schema、許可判定、実行、副作用をスキル単位で持つ |
+| メモリ | `memory.rs` / `history.rs` / `relationship.rs` | 全キャラ共通の長期メモリ、キャラ別会話履歴、キャラ別関係性を別の保存単位で所有する |
+| フィードバックループ | `agent/feedback.rs` / `agent.rs` | 前者は任意の計画生成と自己評価、後者は`chat → tool_calls → 結果 → chat`の実行ループを持つ |
+| 実行中イベント | `agent.rs` / `commands.rs` | 進捗、ツール実行、承認待ち、画面通知を発生元から送る。外部拡張用の共通hook契約は無いため、実体のない`hooks`層は作らない |
+
+基本ルールは、利用者が設定画面で明示した関係プリセットを上書きしない。たとえば家族呼びは既定では禁止するが、利用者が「妹」「姉」を選んだ場合だけ、その関係差分を人格の後ろへ足す。「新しい会話」でも関係差分・長期メモリ・関係性文脈を落とさず、通常のsystem再構築と同じ`agent::prompt::compose()`を通す。
+
 - コネクタは **`inventory` でコンパイル時自動登録**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して
   `#[path] pub mod` を生成するため、**プロバイダは `.rs` を1枚、スキルは `<スキル名>/mod.rs` を1つ置くだけ**でコネクタ追加（中央 `mod.rs` 編集不要）。
 - 登録済みプロバイダ/スキルは `OnceLock` でプロセス内キャッシュされ、設定画面表示・ツール dispatch・プロバイダ取得のたびに `Box` を再生成しない。ツールスキーマも初回だけ生成して再利用する。会話時は全スキルを常にLLMへ渡さず、ユーザー発話のキーワードから候補スキーマを絞り込む（`get_time` / `web_search` / `web_fetch` は基本候補）。一致候補は `intent_priority`、一致語の長さ、スキル名の順で安定整列し、登録順に依存させない。
-- `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
+- `AppState`（`commands.rs`）が選択中プロバイダ・モデル・会話履歴・直近の自発雑談・**感情状態**（`emotion::EmotionState`）を保持。system文の合成規則は状態から分離した`agent/prompt.rs`が所有する。プロバイダとモデルは設定画面から切替。感情状態はユーザー発話と返答のキーワードから `emotion::update()` でルールベース更新し、`pet:emotion` イベントでフロントへ通知する（`renderer.js` はキャラの `dataset.emotion` / `dataset.energyLevel` へ反映）。
 - `hi` / `こんにちは` などの短い挨拶は `agent::simple_greeting_answer()` がプロバイダを呼ばず直接返す。小型モデルへ「AIとして説明しない」等の内部ガイドをユーザー本文に追記すると、禁止事項そのものを返答として説明・読み上げることがあるため、挨拶経路へ内部指示を混ぜない。履歴へはユーザーが入力した原文と自然な短文だけを残す。返す一言は全キャラ共通の定型文にせず、`pet_set_character_profile` が受け取った `character.json` の `greeting`（人格そのままの挨拶）を使う。時間帯は「おはよう」「こんばんは」のように挨拶自体が指していればそれに合わせ、`hi` / `やっほー` のように時間帯を含まない挨拶は実時刻（5〜10時=朝 / 11〜16時=昼 / それ以外=夜）で決める。朝・夜は先頭の挨拶語だけを差し替えて二重挨拶を避け、キャラクターの挨拶が無い場合だけ既定文へ落とす。
 - キャラの通常ドラッグはOS標準のウィンドウ移動とする。通常2Dは従来の上半身位置 `upper` を標準とし、長身・実写・Live2Dは長身でも腰まで入りすぎない胸上 `bust` を標準にする。Live2Dはモデル別の`live2d.scale` / `offsetY`で胸上へ調整済みなので、未保存時にPNG向け`bust`倍率を重ねず、中立の`upper=1.55`を基準倍率として扱う。立ち絵の構図は設定画面の「キャラごとの構図」で編集し、表示形式ごとにサイズスライダーとプレビュー上のドラッグ（数値入力も併設）で調整する。`PICOAGENT_CHARACTER_FRAMING` はキャラIDと表示形式ごとに `zoom` / `x` / `y` / `preset` を保存する。表示側は `#characterView` に `translate(--char-x, --char-y) scale(--char-zoom)` を当て、中の `img` が持つ待機モーションと干渉させない。
 - 設定画面には表示モニターの手動指定を置かない。新規作成時と再表示時に、メインウィンドウの `current_monitor()`（未確定時だけ主画面）を基準として同じディスプレイの中央へ配置する。
