@@ -13,7 +13,6 @@
 //   export_pdf  … OfficeCLI（soffice --headless --convert-to pdf）で PDF 出力する
 
 use std::io::{Read, Write};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -133,14 +132,18 @@ async fn export_pdf(
         .args(["--headless", "--convert-to", "pdf", "--outdir"])
         .arg(&out_dir)
         .arg(input);
-    let result = match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => {
-            return format!(
-                "エラー: OfficeCLI（{program}）を起動できません: {error}\n設定の「追加機能」からLibreOffice公式ページを開いて導入するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。"
-            );
-        }
-        Err(_) => return format!("エラー: PDF 変換が {timeout} 秒でタイムアウトしました。"),
+    // 共通層を通す。`soffice` は起動直後に `soffice.bin` を立て直して自身は終了するため、
+    // `tokio::time::timeout` で包むだけでは打ち切り時に本体が残る（`kill_on_drop` は直下にしか届かない）。
+    let result = match crate::tools::process::output_or_install_hint(
+        command,
+        timeout,
+        &format!("PDF 変換（OfficeCLI: {program}）"),
+        "設定の「追加機能」からLibreOffice公式ページを開いて導入するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。",
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) => return format!("エラー: {error}"),
     };
     if !result.status.success() {
         return format!(

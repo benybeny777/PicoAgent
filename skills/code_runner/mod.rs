@@ -6,7 +6,6 @@
 // 全スキル共通の permissions（許可ルート・保護パス）を参照する。物理削除系のコードは拒否する。
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -248,29 +247,34 @@ impl Tool for CodeRunnerTool {
         let mut command = crate::tools::process::command(&program);
         command.args(&interpreter_args).current_dir(&cwd);
 
-        let mut result =
-            match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {
-                Ok(Ok(output)) => {
-                    let mut out = format!(
-                        "終了コード: {}\n言語: {}\n作業ディレクトリ: {}\n",
-                        output
-                            .status
-                            .code()
-                            .map(|code| code.to_string())
-                            .unwrap_or_else(|| "シグナル終了".to_string()),
-                        language,
-                        cwd.display()
-                    );
-                    out.push_str(&trim_output("stdout", &output.stdout));
-                    out.push('\n');
-                    out.push_str(&trim_output("stderr", &output.stderr));
-                    out
-                }
-                Ok(Err(error)) => format!(
-                    "エラー: インタプリタ「{program}」の起動に失敗しました（{error}）。Python の場合は PICOAGENT_CODE_RUNNER_PYTHON に実行パスを設定してください。"
-                ),
-                Err(_) => format!("エラー: 実行が {timeout_secs} 秒でタイムアウトしました。"),
-            };
+        // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す。
+        // インタプリタが孫プロセスを産んだ場合、`kill_on_drop` は直下にしか届かない。
+        let mut result = match crate::tools::process::output_or_install_hint(
+            command,
+            timeout_secs,
+            &format!("コード実行（{program}）"),
+            "Python の場合は PICOAGENT_CODE_RUNNER_PYTHON に実行パスを設定してください。",
+        )
+        .await
+        {
+            Ok(output) => {
+                let mut out = format!(
+                    "終了コード: {}\n言語: {}\n作業ディレクトリ: {}\n",
+                    output
+                        .status
+                        .code()
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "シグナル終了".to_string()),
+                    language,
+                    cwd.display()
+                );
+                out.push_str(&trim_output("stdout", &output.stdout));
+                out.push('\n');
+                out.push_str(&trim_output("stderr", &output.stderr));
+                out
+            }
+            Err(error) => format!("エラー: {error}"),
+        };
 
         // 一時スクリプトを後片付けする（内部一時ファイルの掃除）。
         if let Err(error) = std::fs::remove_file(&script_path) {

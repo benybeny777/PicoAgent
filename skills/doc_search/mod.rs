@@ -4,7 +4,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -118,9 +117,10 @@ async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        let output = tokio::time::timeout(Duration::from_secs(20), command.output())
+        // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す。
+        // ripgrep が見つからない・失敗した場合は内蔵走査へ落ちるので None で返す。
+        let output = crate::tools::process::output(command, 20, "ファイル横断検索（ripgrep）")
             .await
-            .ok()?
             .ok()?;
         // rg の終了コード: 0=一致あり / 1=一致なし / 2=エラー（エラー時は内蔵走査へ）。
         if output.status.code() == Some(2) {

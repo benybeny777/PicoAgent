@@ -1,7 +1,5 @@
 // skills/pdf_tools/mod.rs - qpdf による PDF 編集スキル。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -164,8 +162,16 @@ impl Tool for PdfToolsTool {
             }
             _ => return "エラー: action は info/split_pages/merge/rotate/linearize/extract_text のいずれかを指定してください。".to_string(),
         }
-        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-            Ok(Ok(output)) => format!(
+        // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す。
+        match crate::tools::process::output_or_install_hint(
+            command,
+            timeout,
+            "PDF操作（qpdf）",
+            "cargo xtask setup tools か apt/brew で qpdf を導入してください。",
+        )
+        .await
+        {
+            Ok(output) => format!(
                 "終了コード: {}\nstdout:\n{}\nstderr:\n{}",
                 output
                     .status
@@ -175,8 +181,7 @@ impl Tool for PdfToolsTool {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             ),
-            Ok(Err(error)) => format!("エラー: qpdf の起動に失敗しました: {}", error),
-            Err(_) => format!("エラー: PDF操作が {} 秒でタイムアウトしました。", timeout),
+            Err(error) => format!("エラー: {error}"),
         }
     }
 }
@@ -222,12 +227,24 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
             command.arg("-");
         }
     }
-    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => {
+    // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す。
+    match crate::tools::process::output_or_install_hint(
+        command,
+        timeout,
+        "PDFテキスト抽出（pdftotext）",
+        "設定の「追加機能」で公式取得元を確認し、Popplerを導入してください。",
+    )
+    .await
+    {
+        Ok(output) => {
             if !output.status.success() {
                 return format!(
                     "エラー: pdftotext が失敗しました（終了コード {}）:\n{}",
-                    output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
+                    output
+                        .status
+                        .code()
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "シグナル終了".to_string()),
                     String::from_utf8_lossy(&output.stderr)
                 );
             }
@@ -237,18 +254,17 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
                     let text = String::from_utf8_lossy(&output.stdout);
                     let trimmed = text.trim();
                     if trimmed.is_empty() {
-                        format!("{} からテキストは抽出されませんでした（画像のみのPDFの可能性）。", input.display())
+                        format!(
+                            "{} からテキストは抽出されませんでした（画像のみのPDFの可能性）。",
+                            input.display()
+                        )
                     } else {
                         format!("{} の抽出テキスト:\n{}", input.display(), trimmed)
                     }
                 }
             }
         }
-        Ok(Err(error)) => format!(
-            "エラー: pdftotext の起動に失敗しました: {}。設定の「追加機能」で公式取得元を確認し、Popplerを導入してください。",
-            error
-        ),
-        Err(_) => format!("エラー: テキスト抽出が {} 秒でタイムアウトしました。", timeout),
+        Err(error) => format!("エラー: {error}"),
     }
 }
 
