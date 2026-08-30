@@ -81,6 +81,8 @@ window.picoagent = {
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
+  // 自動追記した AGENTS.md の作法を1行取り消す。
+  undoProjectRule: (rule) => call("pet_project_rule_undo", { rule }),
   // 永続ジョブ（AI Drive転送・成果物生成）の一覧と操作。
   durableJobs: () => call("pet_durable_jobs"),
   retryDurableJob: (id) => call("pet_durable_job_retry", { id }),

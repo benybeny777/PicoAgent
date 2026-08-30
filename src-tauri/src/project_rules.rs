@@ -108,6 +108,159 @@ pub fn save(cfg: &Config, body: &str) -> Result<SafePath, String> {
     Ok(path)
 }
 
+// ── 強く言われた作法の自動追記 ──────────────────────────────────────────
+//
+// 会話で強く言い渡された継続指示だけを AGENTS.md へ書き足す。判定を緩めると、
+// 雑談の強調（「絶対無理」「二度と行きたくない」）まで案件の作法として恒久化する。
+// そのため **強調の合図と、続けて守れる指示の形の両方**を必要とする。
+//
+// `memory.rs` の「継続指示」より狭い。あちらはアプリ内部の長期メモリ（`memory.json`）で
+// 消すのも簡単だが、こちらは利用者のフォルダにあり Git へ乗るファイルを書き換える。
+
+/// 自動追記が置かれる見出し。利用者が手で書いた部分と混ぜないための境界。
+const CAPTURED_HEADING: &str = "## PicoAgentが自動で追記した作法";
+
+/// 「今後ずっと守れ」という強さの合図。
+const EMPHASIS_MARKERS: &[&str] = &[
+    "必ず",
+    "絶対",
+    "二度と",
+    "今後は",
+    "これからは",
+    "毎回",
+    "常に",
+    "例外なく",
+    "徹底",
+    "禁止",
+    "ルールにして",
+    "ルールとして",
+];
+
+/// 作法として書ける「指示の形」。強調だけでは感情の強調と区別が付かない。
+const DIRECTIVE_MARKERS: &[&str] = &[
+    "して",
+    "してください",
+    "すること",
+    "ること",
+    "しないで",
+    "するな",
+    "禁止",
+    "にして",
+    "使って",
+    "使うな",
+    "書いて",
+    "残して",
+    "確認して",
+];
+
+/// 作法にしてはいけない形。疑問・伝聞・仮定は指示ではない。
+const NOT_DIRECTIVE: &[&str] = &[
+    "ですか",
+    "でしょうか",
+    "かな",
+    "かも",
+    "らしい",
+    "そうです",
+    "たら",
+    "なら",
+    "http://",
+    "https://",
+    "```",
+];
+
+fn contains_any(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
+}
+
+/// 突き合わせ用に表記ゆれを落とす。重複追記の判定に使う。
+fn normalize(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_whitespace() && !"、。，,.！!？?：:-・".contains(*ch))
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// 発話から、作法として書き留めるべき文を取り出す。
+///
+/// 文の割り方は `memory::split_sentences` と共有する。別に実装すると、
+/// 片方だけが箇条書きや改行の扱いを取りこぼす。
+pub fn emphasized_rules(text: &str) -> Vec<String> {
+    crate::memory::split_sentences(text)
+        .into_iter()
+        .filter(|sentence| {
+            contains_any(sentence, EMPHASIS_MARKERS)
+                && contains_any(sentence, DIRECTIVE_MARKERS)
+                && !contains_any(sentence, NOT_DIRECTIVE)
+        })
+        .collect()
+}
+
+/// 自動追記が有効か。既定は無効。
+///
+/// 利用者のフォルダにある、Gitへ乗ることの多いファイルを書き換える機能なので、
+/// 入れただけで勝手に変わらないようオプトインにする。
+pub fn auto_capture_enabled(cfg: &Config) -> bool {
+    cfg.get_bool("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", false)
+}
+
+/// 追記する1行。日付を添えて、あとから来歴を追えるようにする。
+fn captured_line(rule: &str) -> String {
+    format!("- {} {}", chrono::Local::now().format("%Y-%m-%d"), rule)
+}
+
+/// 強く言われた作法を AGENTS.md の専用見出しへ書き足す。
+///
+/// 既に同じ内容があれば `Ok(None)`。利用者が手で書いた部分には触らず、
+/// 見出しが無ければ末尾へ作る。
+pub fn append_captured(cfg: &Config, rule: &str) -> Result<Option<SafePath>, String> {
+    let rule = rule.trim();
+    if rule.is_empty() {
+        return Ok(None);
+    }
+    let existing = load_detail(cfg)?.unwrap_or_default();
+    let key = normalize(rule);
+    if existing.lines().any(|line| normalize(line).contains(&key)) {
+        return Ok(None);
+    }
+    let mut body = existing;
+    if !body.contains(CAPTURED_HEADING) {
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(CAPTURED_HEADING);
+        body.push_str("\n\n利用者が会話で強く言い渡した作法を、PicoAgentが書き足しています。不要な行は消してかまいません。\n");
+    }
+    // `save()` が末尾を trim するので、押し込んだ改行は次回まで残らない。
+    // 直前が行末かどうかを足す側で確かめないと、2件目が1件目の行へ繋がる。
+    if !body.is_empty() && !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push_str(&captured_line(rule));
+    save(cfg, &body).map(Some)
+}
+
+/// 追記した行を取り消す。通知の「取り消し」から呼ぶ。
+///
+/// 見出しごとは消さない。利用者が同じ見出しへ手で足した行まで巻き込むため。
+pub fn remove_captured(cfg: &Config, rule: &str) -> Result<bool, String> {
+    let Some(body) = load_detail(cfg)? else {
+        return Ok(false);
+    };
+    let key = normalize(rule);
+    if key.is_empty() {
+        return Ok(false);
+    }
+    let kept: Vec<&str> = body
+        .lines()
+        .filter(|line| !(line.trim_start().starts_with('-') && normalize(line).contains(&key)))
+        .collect();
+    if kept.len() == body.lines().count() {
+        return Ok(false);
+    }
+    save(cfg, &kept.join("\n"))?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +324,87 @@ mod tests {
         assert_eq!(body.chars().filter(|ch| *ch == 'あ').count(), MAX_CHARS);
         // 保存側は上限超過を受け付けない（読み取りの打ち切りと違い、書くのは防げる）。
         assert!(save(&cfg, &"い".repeat(MAX_CHARS + 1)).is_err());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn 強く言い渡された指示だけを作法として拾う() {
+        for text in [
+            "今後はコミットメッセージを必ず日本語で書いて",
+            "テストを通してからでないと絶対にpushしないで",
+            "毎回、変更前にバックアップを取ること",
+            "この案件では英語のコメントを禁止して",
+        ] {
+            assert_eq!(emphasized_rules(text).len(), 1, "{text}");
+        }
+    }
+
+    #[test]
+    fn 感情の強調や疑問を作法にしない() {
+        // ここを緩めると、雑談の強調が案件の作法として恒久化する。
+        for text in [
+            "この作業は絶対に無理だと思う",
+            "あの店には二度と行きたくない",
+            "今後はテストを先に書いたほうがいいですか",
+            "必ず日本語にするのはどうでしょうか",
+            "常に https://example.com を参照しているらしい",
+            "今日は疲れた",
+            "ファイルを消して",
+        ] {
+            assert!(emphasized_rules(text).is_empty(), "{text}");
+        }
+    }
+
+    #[test]
+    fn 追記は専用見出しへ足し手書き部分を残す() {
+        let (cfg, root) = 作業フォルダ("capture");
+        save(&cfg, "# 手で書いた作法\n- 既存の決まり").unwrap();
+
+        let path = append_captured(&cfg, "必ず日本語で書いて")
+            .unwrap()
+            .unwrap();
+        assert!(path.as_path().ends_with("AGENTS.md"));
+        let body = load(&cfg).unwrap();
+        assert!(body.contains("# 手で書いた作法"));
+        assert!(body.contains("- 既存の決まり"));
+        assert!(body.contains(CAPTURED_HEADING));
+        assert!(body.contains("必ず日本語で書いて"));
+
+        // 同じ作法を二度書かない（同じ通知を毎ターン出さないため）。
+        assert!(append_captured(&cfg, "必ず日本語で書いて")
+            .unwrap()
+            .is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn 取り消しは該当行だけを消す() {
+        let (cfg, root) = 作業フォルダ("undo");
+        save(&cfg, "# 手で書いた作法\n- 既存の決まり").unwrap();
+        append_captured(&cfg, "必ず日本語で書いて").unwrap();
+        append_captured(&cfg, "毎回テストを実行して").unwrap();
+
+        assert!(remove_captured(&cfg, "必ず日本語で書いて").unwrap());
+        let body = load(&cfg).unwrap();
+        assert!(!body.contains("必ず日本語で書いて"));
+        // 別の追記も、利用者が手で書いた行も残す。
+        assert!(body.contains("毎回テストを実行して"));
+        assert!(body.contains("- 既存の決まり"));
+        assert!(body.contains(CAPTURED_HEADING));
+
+        // 無い行の取り消しは失敗ではなく false。
+        assert!(!remove_captured(&cfg, "存在しない作法").unwrap());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn 自動追記は既定で無効() {
+        let (cfg, root) = 作業フォルダ("optin");
+        // 入れただけで利用者のフォルダが書き換わらないこと。
+        assert!(!auto_capture_enabled(&cfg));
+        cfg.set("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", "true");
+        assert!(auto_capture_enabled(&cfg));
         std::fs::remove_dir_all(&root).ok();
     }
 

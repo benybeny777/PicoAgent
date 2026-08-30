@@ -2586,6 +2586,7 @@ async function render() {
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
+  global.append(field("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", "強く言い渡した作法を作業フォルダのAGENTS.mdへ自動で追記する", "checkbox", v.PICOAGENT_PROJECT_RULES_AUTO_CAPTURE === true));
   global.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
   global.append(field("PICOAGENT_UPDATE_CHECK_ENABLED", "起動時に新しいバージョンを確認する", "checkbox", v.PICOAGENT_UPDATE_CHECK_ENABLED !== false));
   // 変更頻度の低い項目は閉じておき、基本画面を短く保つ。
