@@ -27,6 +27,8 @@ const WORKER_KEY: &str = "__picoagent_durable_worker";
 /// 大きな転送が何本も同時にメモリと回線を取り合わないようにするため。
 const MAX_CONCURRENT_JOBS: usize = 3;
 
+/// 進捗・状態を画面へ送るためのハンドル。`start()` で一度だけ入る。
+static APP: OnceLock<AppHandle> = OnceLock::new();
 static STORE_PATH: OnceLock<PathBuf> = OnceLock::new();
 static SENDER: OnceLock<tokio::sync::mpsc::Sender<String>> = OnceLock::new();
 static WORKER_TOKEN: OnceLock<String> = OnceLock::new();
@@ -53,6 +55,9 @@ pub struct DurableJob {
     pub args: Value,
     pub state: JobState,
     pub progress: u8,
+    /// いま何をしているか（「3/5 送信中」など）。旧データには無いので既定は空。
+    #[serde(default)]
+    pub step: String,
     pub attempts: u32,
     pub created_at: String,
     pub updated_at: String,
@@ -138,6 +143,7 @@ fn enqueue_inner(
         args,
         state: JobState::Queued,
         progress: 0,
+        step: String::new(),
         attempts: 0,
         created_at: stamp.clone(),
         updated_at: stamp,
@@ -213,18 +219,25 @@ fn requeue_for_retry(job: &mut DurableJob) -> Result<(), String> {
     job.attempts = 0;
     job.error.clear();
     job.result.clear();
+    job.step.clear();
     job.updated_at = now();
     Ok(())
 }
 
 pub fn retry(id: &str) -> Result<(), String> {
+    let mut requeued = None;
     update(|jobs| {
         let job = jobs
             .iter_mut()
             .find(|job| job.id == id)
             .ok_or_else(|| format!("ジョブが見つかりません: {id}"))?;
-        requeue_for_retry(job)
+        requeue_for_retry(job)?;
+        requeued = Some(job.clone());
+        Ok(())
     })?;
+    if let Some(job) = requeued {
+        notify(&job);
+    }
     if let Err(error) = SENDER
         .get()
         .ok_or_else(|| "永続ジョブの実行ワーカーが起動していません。".to_string())?
@@ -238,6 +251,7 @@ pub fn retry(id: &str) -> Result<(), String> {
 }
 
 pub fn cancel(id: &str) -> Result<(), String> {
+    let mut changed = None;
     update(|jobs| {
         let job = jobs
             .iter_mut()
@@ -250,9 +264,15 @@ pub fn cancel(id: &str) -> Result<(), String> {
             return Err("完了済みのジョブはキャンセルできません。".to_string());
         }
         job.state = JobState::Cancelled;
+        job.step = String::new();
         job.updated_at = now();
+        changed = Some(job.clone());
         Ok(())
-    })
+    })?;
+    if let Some(job) = changed {
+        notify(&job);
+    }
+    Ok(())
 }
 
 pub fn is_cancelled(id: &str) -> bool {
@@ -279,6 +299,93 @@ fn bounded(text: String) -> String {
     }
 }
 
+/// ジョブ1件の現在地を画面へ送る。
+///
+/// 通知は「完了時に1回」では足りない。同時に3件走るようになったので、いま何が
+/// どこまで進んでいるかが見えないと、利用者には無音のまま止まっているのと区別が付かない。
+/// 受け側（`renderer.js`）は `jobId` で既存の項目を上書きするため、何度送ってよい。
+fn notify(job: &DurableJob) {
+    let Some(app) = APP.get() else {
+        return;
+    };
+    let payload = json!({
+        "kind": "durable_job",
+        "jobId": job.id,
+        "title": job.label,
+        "body": job_body(job),
+        "ok": !matches!(job.state, JobState::Failed | JobState::WaitingAuth),
+        "state": job.state,
+        "progress": job.progress,
+        "at": job.updated_at,
+    });
+    if let Err(error) = app.emit("pet:notice", payload) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("永続ジョブの進捗を画面へ通知できません: {error}"),
+        );
+    }
+}
+
+/// 通知へ出す1行。エラーや結果があればその先頭行、無ければ工程名。
+fn job_body(job: &DurableJob) -> String {
+    for text in [&job.error, &job.result] {
+        if let Some(line) = text.lines().next().filter(|line| !line.is_empty()) {
+            return line.to_string();
+        }
+    }
+    match job.state {
+        JobState::Queued => "順番待ちです。".to_string(),
+        JobState::Cancelled => "キャンセルしました。".to_string(),
+        _ if !job.step.is_empty() => job.step.clone(),
+        _ => "処理中です。".to_string(),
+    }
+}
+
+/// スキルの実行中から現在地を知らせる。`percent` は 1〜99 に収める
+/// （0 は未着手、100 は完了の意味を持たせているため、途中経過で使わせない）。
+pub fn report_progress(job_id: &str, percent: u8, step: &str) {
+    let mut updated = None;
+    let outcome = update(|jobs| {
+        if let Some(job) = jobs.iter_mut().find(|job| job.id == job_id) {
+            if apply_progress(job, percent, step) {
+                updated = Some(job.clone());
+            }
+        }
+        Ok(())
+    });
+    match outcome {
+        Ok(()) => {
+            if let Some(job) = updated {
+                notify(&job);
+            }
+        }
+        // 進捗は補助情報。保存に失敗しても本処理は続ける（次の保存で書き直る）。
+        // フォールバック許可: 進捗の書き込み失敗で転送・生成そのものを止めない。
+        Err(error) => {
+            if let Some(app) = APP.get() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("永続ジョブの進捗を保存できません: {error}"),
+                );
+            }
+        }
+    }
+}
+
+/// 実行中のジョブにだけ進捗を反映する。反映したら true。
+///
+/// 終了済み・キャンセル済みを進捗で生き返らせない。転送ループは区切りごとに報告するので、
+/// 中止した直後の1回が遅れて届くことがある。
+fn apply_progress(job: &mut DurableJob, percent: u8, step: &str) -> bool {
+    if job.state != JobState::Running {
+        return false;
+    }
+    job.progress = percent.clamp(1, 99);
+    job.step = step.to_string();
+    job.updated_at = now();
+    true
+}
+
 fn mark_started(id: &str) -> Result<Option<DurableJob>, String> {
     let mut selected = None;
     update(|jobs| {
@@ -296,6 +403,7 @@ fn mark_started(id: &str) -> Result<Option<DurableJob>, String> {
         }
         job.state = JobState::Running;
         job.progress = 1;
+        job.step = "開始しました".to_string();
         job.attempts += 1;
         job.updated_at = now();
         selected = Some(job.clone());
@@ -304,7 +412,7 @@ fn mark_started(id: &str) -> Result<Option<DurableJob>, String> {
     Ok(selected)
 }
 
-fn mark_finished(id: &str, result: String) -> Result<JobState, String> {
+fn mark_finished(id: &str, result: String) -> Result<DurableJob, String> {
     let auth_error = result.starts_with("エラー:")
         && (result.contains("認証更新が必要") || result.contains("HTTP 401"));
     let failed = result.starts_with("エラー:");
@@ -315,29 +423,31 @@ fn mark_finished(id: &str, result: String) -> Result<JobState, String> {
     } else {
         JobState::Completed
     };
+    let mut finished = None;
     update(|jobs| {
         let job = jobs
             .iter_mut()
             .find(|job| job.id == id)
             .ok_or_else(|| format!("ジョブが見つかりません: {id}"))?;
-        if job.state == JobState::Cancelled {
-            return Ok(());
+        if job.state != JobState::Cancelled {
+            job.state = next.clone();
+            job.progress = if next == JobState::Completed {
+                100
+            } else {
+                job.progress
+            };
+            job.step = String::new();
+            if failed {
+                job.error = bounded(result);
+            } else {
+                job.result = bounded(result);
+            }
+            job.updated_at = now();
         }
-        job.state = next.clone();
-        job.progress = if next == JobState::Completed {
-            100
-        } else {
-            job.progress
-        };
-        if failed {
-            job.error = bounded(result);
-        } else {
-            job.result = bounded(result);
-        }
-        job.updated_at = now();
+        finished = Some(job.clone());
         Ok(())
     })?;
-    Ok(next)
+    finished.ok_or_else(|| format!("ジョブが見つかりません: {id}"))
 }
 
 fn recover_jobs(jobs: &mut [DurableJob]) -> Vec<String> {
@@ -375,6 +485,7 @@ pub fn start(app: AppHandle) {
             return;
         }
     };
+    let _ = APP.set(app.clone());
     let _ = STORE_PATH.set(path.clone());
     let token = format!(
         "{}-{}",
@@ -440,6 +551,8 @@ async fn run_job(app: &AppHandle, id: &str) {
     let Ok(Some(job)) = mark_started(id) else {
         return;
     };
+    // 完了まで無音にせず、走り始めた時点で画面へ出す。
+    notify(&job);
     let mut args = job.args.clone();
     if let Some(object) = args.as_object_mut() {
         object.insert(
@@ -466,27 +579,12 @@ async fn run_job(app: &AppHandle, id: &str) {
             format!("エラー: 永続ジョブが{}分でタイムアウトしました。", JOB_TIMEOUT_SECS / 60)
         }
     };
-    let job_state = mark_finished(id, result.clone()).unwrap_or(JobState::Failed);
-    let ok = job_state == JobState::Completed;
-    let body = if ok {
-        "バックグラウンド処理が完了しました。"
-    } else {
-        result
-            .lines()
-            .next()
-            .unwrap_or("バックグラウンド処理に失敗しました。")
-    };
-    if let Err(error) = app.emit(
-        "pet:notice",
-        json!({
-            "kind": "durable_job", "title": job.label, "body": body,
-            "ok": ok, "jobId": id, "at": now()
-        }),
-    ) {
-        crate::log_paths::append_app_log(
+    match mark_finished(id, result) {
+        Ok(finished) => notify(&finished),
+        Err(error) => crate::log_paths::append_app_log(
             app,
-            &format!("永続ジョブ結果を画面へ通知できません: {error}"),
-        );
+            &format!("永続ジョブの結果を保存できません: {error}"),
+        ),
     }
 }
 
@@ -504,6 +602,7 @@ mod tests {
             args: json!({}),
             state: JobState::Running,
             progress: 50,
+            step: String::new(),
             attempts: 1,
             created_at: now(),
             updated_at: now(),
@@ -531,6 +630,7 @@ mod tests {
             args: json!({}),
             state,
             progress: 40,
+            step: "送信中".into(),
             attempts,
             created_at: now(),
             updated_at: now(),
@@ -552,6 +652,51 @@ mod tests {
         for state in [JobState::Running, JobState::Queued] {
             assert!(requeue_for_retry(&mut 見本(state, 0)).is_err());
         }
+    }
+
+    #[test]
+    fn 進捗は実行中のジョブにだけ入り両端を避ける() {
+        let mut running = 見本(JobState::Running, 1);
+        assert!(apply_progress(&mut running, 55, "送信中 2/4"));
+        assert_eq!(running.progress, 55);
+        assert_eq!(running.step, "送信中 2/4");
+
+        // 0 は未着手、100 は完了の意味なので途中経過では使わせない。
+        assert!(apply_progress(&mut running, 0, "開始直後"));
+        assert_eq!(running.progress, 1);
+        assert!(apply_progress(&mut running, 100, "ほぼ完了"));
+        assert_eq!(running.progress, 99);
+
+        // 中止したジョブへ遅れて届いた進捗で実行中へ戻さない。
+        for state in [
+            JobState::Cancelled,
+            JobState::Completed,
+            JobState::Failed,
+            JobState::Queued,
+        ] {
+            let mut other = 見本(state.clone(), 1);
+            assert!(!apply_progress(&mut other, 50, "遅れて到着"), "{state:?}");
+            assert_eq!(other.state, state);
+        }
+    }
+
+    #[test]
+    fn 通知本文は結果と工程を優先して1行で出す() {
+        let mut job = 見本(JobState::Running, 1);
+        job.error.clear();
+        job.step = "PDFへ変換中".into();
+        assert_eq!(job_body(&job), "PDFへ変換中");
+
+        job.result = "成果物を生成しました: C:\\work\n- report.html".into();
+        assert_eq!(job_body(&job), "成果物を生成しました: C:\\work");
+
+        job.error = "エラー: 認証更新が必要です\n詳細".into();
+        assert_eq!(job_body(&job), "エラー: 認証更新が必要です");
+
+        let mut queued = 見本(JobState::Queued, 0);
+        queued.error.clear();
+        queued.step.clear();
+        assert_eq!(job_body(&queued), "順番待ちです。");
     }
 
     #[test]

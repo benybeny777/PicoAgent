@@ -172,6 +172,7 @@ cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qp
 - 「AI Driveの資料をGoogle Driveへ送って」「OneDriveのこのIDをAI Driveへ保存して」「MacのiCloud Driveへ送って」で転送ジョブを登録します。外部へのアップロードは、ファイルと送信先を表示した確認後だけ開始します。iCloudはmacOS上のiCloud Drive内に`PicoAgent`フォルダを作り、OSの同期機能へ委ねます。
 - 「このテーマを調査してPPTX・XLSX・DOCX・PDF・HTMLを一式作って」で、編集可能なOfficeファイルと閲覧用ファイルを生成します。PDFにはLibreOfficeが必要で、導入されていなければ他の4形式を残したうえで理由を表示します。
 - 転送と成果物生成はアプリ終了中には実行せず一時停止し、次回起動時に安全な工程の先頭から再開します。再開時も既存ファイルを無条件に上書きせず、同じ成果物ジョブの専用フォルダだけを再利用します。「ジョブ一覧を見せて」「このジョブを再試行／キャンセル」で状態を操作できます。
+- 実行中のジョブは**通知一覧に進捗つきで並びます**。「Google Driveへ送信中 2/4」「PDFへ変換中」のように、いま何をしているかが分かります。項目の**「中止」「再試行」ボタン**から、AIに頼まずその場で操作できます。アプリを再起動しても、残っているジョブは通知一覧へ戻ります。
 - Google Driveは`PICOAGENT_GOOGLE_DRIVE_ACCESS_TOKEN`、OneDriveは`PICOAGENT_MS_GRAPH_ACCESS_TOKEN`を設定画面の各コネクタで設定します。401になったジョブは認証待ちに移り、トークン更新後に再試行できます。iCloudはトークン不要ですが、macOSでiCloud Driveを有効にし、共通許可ルート外なら「安全・許可」の追加パスへiCloud Driveを追加してください。
 
 ### 情報・検索（設定不要）

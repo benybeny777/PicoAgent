@@ -81,6 +81,10 @@ window.picoagent = {
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
+  // 永続ジョブ（AI Drive転送・成果物生成）の一覧と操作。
+  durableJobs: () => call("pet_durable_jobs"),
+  retryDurableJob: (id) => call("pet_durable_job_retry", { id }),
+  cancelDurableJob: (id) => call("pet_durable_job_cancel", { id }),
   scheduleRuns: () => call("pet_schedule_runs"),
   rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
   openSettings: (tab = null) => call("pet_open_settings", { tab }),
