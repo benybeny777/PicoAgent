@@ -21,7 +21,10 @@ fn bounded_existing_path(cfg: &Config, path: &str) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|error| format!("対象が存在しないか確認できません（{}）: {}", error, path))?;
     if permissions::is_protected(cfg, &target) {
-        return Err(format!("保護された場所は操作できません: {}", target.display()));
+        return Err(format!(
+            "保護された場所は操作できません: {}",
+            target.display()
+        ));
     }
     for root in permissions::allowed_roots(cfg) {
         if let Ok(root) = root.canonicalize() {
@@ -43,7 +46,7 @@ fn bounded_existing_path(cfg: &Config, path: &str) -> Result<PathBuf, String> {
 pub(crate) fn move_to_trash(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{
-        SHFileOperationW, FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE,
         SHFILEOPSTRUCTW,
     };
 
@@ -66,7 +69,10 @@ pub(crate) fn move_to_trash(path: &Path) -> Result<(), String> {
     } else if op.fAnyOperationsAborted != 0 {
         Err("ゴミ箱への移動が中断されました。".to_string())
     } else {
-        Err(format!("ゴミ箱への移動に失敗しました。Shell error={}", result))
+        Err(format!(
+            "ゴミ箱への移動に失敗しました。Shell error={}",
+            result
+        ))
     }
 }
 
@@ -93,9 +99,12 @@ pub(crate) fn move_to_trash(path: &Path) -> Result<(), String> {
     let dest = unique_trash_path(&trash_files, path);
     let info_path = trash_info.join(format!(
         "{}.trashinfo",
-        dest.file_name().and_then(|name| name.to_str()).unwrap_or("trashed")
+        dest.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("trashed")
     ));
-    std::fs::rename(path, &dest).map_err(|error| format!("ゴミ箱への移動に失敗しました: {}", error))?;
+    std::fs::rename(path, &dest)
+        .map_err(|error| format!("ゴミ箱への移動に失敗しました: {}", error))?;
     let deletion_date = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
     let info = format!(
         "[Trash Info]\nPath={}\nDeletionDate={}\n",
@@ -135,7 +144,14 @@ impl Tool for TrashFileTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["削除", "消して", "ゴミ箱", "捨てて", "ファイル削除", "フォルダ削除"]
+        &[
+            "削除",
+            "消して",
+            "ゴミ箱",
+            "捨てて",
+            "ファイル削除",
+            "フォルダ削除",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -177,9 +193,19 @@ impl Tool for TrashFileTool {
             Ok(meta) if meta.is_dir() => "フォルダ",
             Ok(meta) if meta.is_file() => "ファイル",
             Ok(_) => "項目",
-            Err(error) => return format!("エラー: 対象情報を取得できません（{}）: {}", error, target.display()),
+            Err(error) => {
+                return format!(
+                    "エラー: 対象情報を取得できません（{}）: {}",
+                    error,
+                    target.display()
+                )
+            }
         };
-        if !args.get("confirm").and_then(Value::as_bool).unwrap_or(false) {
+        if !args
+            .get("confirm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             return format!(
                 "ゴミ箱移動 preview: {} をゴミ箱へ移動できます。実行するには confirm=true を指定してください: {}",
                 kind,

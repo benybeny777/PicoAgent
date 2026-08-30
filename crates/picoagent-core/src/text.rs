@@ -1,12 +1,20 @@
 // text.rs - UTF-8文字列とストリーミング受信を安全に扱う共通処理。
 
 /// 表示用に先頭 `max_chars` 文字まで切り詰め、切り詰めた場合だけ `…` を付ける。
+///
+/// 上限の直後にある文字境界を1回の走査で求める。文字数を数え直す実装だと、
+/// 切り詰めの要らない短い文字列でも全体を3度走査することになる（この関数は
+/// エージェントループのログ・引数プレビューなど、あらゆる経路から呼ばれる）。
 pub fn preview(text: &str, max_chars: usize) -> String {
-    let mut out: String = text.chars().take(max_chars).collect();
-    if out.chars().count() < text.chars().count() {
-        out.push('…');
+    match text.char_indices().nth(max_chars) {
+        Some((boundary, _)) => {
+            let mut out = String::with_capacity(boundary + '…'.len_utf8());
+            out.push_str(&text[..boundary]);
+            out.push('…');
+            out
+        }
+        None => text.to_string(),
     }
-    out
 }
 
 /// バイト上限で、UTF-8文字の途中を避けて切り詰める。

@@ -18,8 +18,8 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::message::Field;
+use crate::permissions::SafePath;
 
 const MAX_TRANSCRIPT_CHARS: usize = 80_000;
 const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
@@ -109,14 +109,20 @@ fn output_stem(cfg: &Config, audio_path: &SafePath) -> Result<SafePath, String> 
 }
 
 fn transcript_path(cfg: &Config, audio_path: &SafePath) -> Result<SafePath, String> {
-    audio_path.sibling(cfg, &format!("{}.transcript.txt", audio_path.file_stem_lossy()))
+    audio_path.sibling(
+        cfg,
+        &format!("{}.transcript.txt", audio_path.file_stem_lossy()),
+    )
 }
 
 fn minutes_path(cfg: &Config, audio_path: &SafePath) -> Result<SafePath, String> {
     audio_path.sibling(cfg, &format!("{}.minutes.md", audio_path.file_stem_lossy()))
 }
 
-fn minutes_path_from_transcript(cfg: &Config, transcript_path: &SafePath) -> Result<SafePath, String> {
+fn minutes_path_from_transcript(
+    cfg: &Config,
+    transcript_path: &SafePath,
+) -> Result<SafePath, String> {
     let name = transcript_path.file_name_lossy();
     let stem = name
         .strip_suffix(".transcript.txt")
@@ -244,7 +250,9 @@ fn write_input_f32(data: &[f32], writer: &SharedWriter) {
     let Some(wav) = guard.writer.as_mut() else {
         return;
     };
-    let write_error = data.iter().find_map(|sample| wav.write_sample(*sample).err());
+    let write_error = data
+        .iter()
+        .find_map(|sample| wav.write_sample(*sample).err());
     if let Some(error) = write_error {
         guard.error = Some(format!("録音データを書き込めません: {error}"));
         guard.writer = None;
@@ -583,10 +591,11 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             trim_output(&output.stderr)
         );
     }
-    let transcript = match output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy())) {
-        Ok(path) => path,
-        Err(error) => return format!("エラー: {error}"),
-    };
+    let transcript =
+        match output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy())) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        };
     let content = if transcript.exists() {
         match std::fs::read_to_string(&transcript) {
             Ok(content) => content,
@@ -946,7 +955,11 @@ mod tests {
         let transcript =
             crate::permissions::resolve(&cfg, "meetings/2026-06-30/a.transcript.txt").unwrap();
         let path = minutes_path_from_transcript(&cfg, &transcript).unwrap();
-        assert!(path.as_path().ends_with("meetings/2026-06-30/a.minutes.md"), "path: {}", path.display());
+        assert!(
+            path.as_path().ends_with("meetings/2026-06-30/a.minutes.md"),
+            "path: {}",
+            path.display()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

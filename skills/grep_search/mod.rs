@@ -230,7 +230,16 @@ impl Tool for GrepSearchTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["使っている箇所", "使われている", "呼んでいる", "含むファイル", "中身を検索", "文字列を検索", "grep", "todo"]
+        &[
+            "使っている箇所",
+            "使われている",
+            "呼んでいる",
+            "含むファイル",
+            "中身を検索",
+            "文字列を検索",
+            "grep",
+            "todo",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -276,7 +285,10 @@ impl Tool for GrepSearchTool {
     }
 
     fn examples(&self) -> Vec<&'static str> {
-        vec!["この関数を使っている箇所を探して", "TODO が残っているファイルを教えて"]
+        vec![
+            "この関数を使っている箇所を探して",
+            "TODO が残っているファイルを教えて",
+        ]
     }
 
     fn config_schema(&self) -> Vec<Field> {
@@ -353,7 +365,11 @@ impl Tool for GrepSearchTool {
         };
 
         if lines.is_empty() {
-            return format!("{note}一致はありませんでした（{} 配下 / {}）。", root.display(), query.pattern);
+            return format!(
+                "{note}一致はありませんでした（{} 配下 / {}）。",
+                root.display(),
+                query.pattern
+            );
         }
         let total = lines.len();
         let mut out = format!("{note}{} 配下の一致: {total} 行", root.display());

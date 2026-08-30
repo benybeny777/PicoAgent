@@ -1,6 +1,5 @@
 // genspark_suite/mod.rs - Genspark風の調査・資料・表・ページ・計画を一括生成する統合スキル。
 
-
 use async_trait::async_trait;
 use chrono::Local;
 use serde_json::{json, Value};
@@ -208,7 +207,20 @@ impl Tool for GensparkSuiteTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["genspark全部", "genspark風", "deep research", "ai slides", "ai sheets", "ai docs", "sparkpage", "autopilot", "meeting notes", "multi-agent", "ai browser", "全部やって"]
+        &[
+            "genspark全部",
+            "genspark風",
+            "deep research",
+            "ai slides",
+            "ai sheets",
+            "ai docs",
+            "sparkpage",
+            "autopilot",
+            "meeting notes",
+            "multi-agent",
+            "ai browser",
+            "全部やって",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {
@@ -262,7 +274,6 @@ impl Tool for GensparkSuiteTool {
             "required": ["topic"]
         })
     }
-
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let topic = match args

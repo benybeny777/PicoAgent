@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::message::Field;
+use crate::permissions::SafePath;
 
 pub struct PdfToolsTool;
 
@@ -60,9 +60,24 @@ impl Tool for PdfToolsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_QPDF_PATH", "qpdf 実行ファイルパス（空ならPicoAgent内→PATH）", "text", "qpdf"),
-            Field::new("PICOAGENT_PDFTOTEXT_PATH", "pdftotext 実行ファイルパス（空なら同梱→PATH）", "text", "pdftotext"),
-            Field::new("PICOAGENT_PDF_TIMEOUT_SECS", "PDF操作タイムアウト秒（5〜300）", "text", "120"),
+            Field::new(
+                "PICOAGENT_QPDF_PATH",
+                "qpdf 実行ファイルパス（空ならPicoAgent内→PATH）",
+                "text",
+                "qpdf",
+            ),
+            Field::new(
+                "PICOAGENT_PDFTOTEXT_PATH",
+                "pdftotext 実行ファイルパス（空なら同梱→PATH）",
+                "text",
+                "pdftotext",
+            ),
+            Field::new(
+                "PICOAGENT_PDF_TIMEOUT_SECS",
+                "PDF操作タイムアウト秒（5〜300）",
+                "text",
+                "120",
+            ),
         ]
     }
 
@@ -77,7 +92,12 @@ impl Tool for PdfToolsTool {
         if args.get("action").and_then(Value::as_str) == Some("extract_text") {
             return extract_text(cfg, &args, timeout).await;
         }
-        let mut command = crate::tools::process::command(super::resolve_cli_path(cfg, "PICOAGENT_QPDF_PATH", "qpdf", "qpdf"));
+        let mut command = crate::tools::process::command(super::resolve_cli_path(
+            cfg,
+            "PICOAGENT_QPDF_PATH",
+            "qpdf",
+            "qpdf",
+        ));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "info" => {
                 let input = match one_path(cfg, &args, "input_path") {
@@ -144,10 +164,14 @@ impl Tool for PdfToolsTool {
             }
             _ => return "エラー: action は info/split_pages/merge/rotate/linearize/extract_text のいずれかを指定してください。".to_string(),
         }
-                match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
+        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
             Ok(Ok(output)) => format!(
                 "終了コード: {}\nstdout:\n{}\nstderr:\n{}",
-                output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
+                output
+                    .status
+                    .code()
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "シグナル終了".to_string()),
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             ),
@@ -178,7 +202,12 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
         command.arg("-l").arg(last.to_string());
     }
     command.arg(&input);
-    let output_path = match args.get("output_path").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+    let output_path = match args
+        .get("output_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         Some(raw) => match crate::permissions::resolve(cfg, raw) {
             Ok(path) => Some(path),
             Err(error) => return format!("エラー: {}", error),
@@ -186,10 +215,14 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
         None => None,
     };
     match &output_path {
-        Some(path) => { command.arg(path); }
-        None => { command.arg("-"); }
+        Some(path) => {
+            command.arg(path);
+        }
+        None => {
+            command.arg("-");
+        }
     }
-        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
+    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
         Ok(Ok(output)) => {
             if !output.status.success() {
                 return format!(
@@ -224,7 +257,10 @@ mod tests {
     use serde_json::json;
 
     fn have(cmd: &str) -> bool {
-        std::process::Command::new(cmd).arg("--version").output().is_ok()
+        std::process::Command::new(cmd)
+            .arg("--version")
+            .output()
+            .is_ok()
     }
 
     // パス解決は共通の permissions::resolve に委ねる（許可ルート外・リンク実体の
@@ -237,12 +273,24 @@ mod tests {
         cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
 
         // ルート配下の相対パスは解決できる。
-        let inside = super::one_path(&cfg, &json!({ "input_path": "a.pdf" }), "input_path").unwrap();
-        assert!(inside.as_path().starts_with(&dir), "inside: {}", inside.display());
+        let inside =
+            super::one_path(&cfg, &json!({ "input_path": "a.pdf" }), "input_path").unwrap();
+        assert!(
+            inside.as_path().starts_with(&dir),
+            "inside: {}",
+            inside.display()
+        );
 
         // ルート外の絶対パスと親参照は拒否する。
-        assert!(super::one_path(&cfg, &json!({ "input_path": "/etc/passwd" }), "input_path").is_err());
-        assert!(super::one_path(&cfg, &json!({ "input_path": "../secret.pdf" }), "input_path").is_err());
+        assert!(
+            super::one_path(&cfg, &json!({ "input_path": "/etc/passwd" }), "input_path").is_err()
+        );
+        assert!(super::one_path(
+            &cfg,
+            &json!({ "input_path": "../secret.pdf" }),
+            "input_path"
+        )
+        .is_err());
         // 未指定はエラー。
         assert!(super::one_path(&cfg, &json!({}), "input_path").is_err());
         let _ = std::fs::remove_dir_all(&dir);
@@ -256,7 +304,8 @@ mod tests {
             eprintln!("pdftotext / soffice が無いためスキップ");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("picoagent-pdf-extract-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("picoagent-pdf-extract-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello.txt"), "PicoAgent PDF extraction test").unwrap();
         // 並行テスト（ms_office の soffice E2E）とプロファイルロックが競合しないよう、
@@ -280,7 +329,10 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let args = json!({ "action": "extract_text", "input_path": "hello.pdf" });
         let result = runtime.block_on(super::extract_text(&cfg, &args, 120));
-        assert!(result.contains("PicoAgent PDF extraction test"), "抽出結果: {result}");
+        assert!(
+            result.contains("PicoAgent PDF extraction test"),
+            "抽出結果: {result}"
+        );
 
         // output_path 指定時はファイルへ保存される。
         let args = json!({ "action": "extract_text", "input_path": "hello.pdf", "output_path": "hello.txt.out" });

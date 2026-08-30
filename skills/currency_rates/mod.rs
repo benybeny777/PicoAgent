@@ -39,11 +39,23 @@ fn parse_days(text: &str) -> Option<i64> {
 fn direct_query(text: &str) -> Option<Value> {
     let lower = text.to_lowercase();
     const NON_JPY: &[(&str, &str)] = &[
-        ("豪ドル", "AUD"), ("カナダドル", "CAD"), ("人民元", "CNY"),
-        ("ドル", "USD"), ("ユーロ", "EUR"), ("ポンド", "GBP"),
-        ("ウォン", "KRW"), ("フラン", "CHF"), ("元", "CNY"),
-        ("usd", "USD"), ("eur", "EUR"), ("gbp", "GBP"), ("aud", "AUD"),
-        ("cny", "CNY"), ("krw", "KRW"), ("chf", "CHF"), ("cad", "CAD"),
+        ("豪ドル", "AUD"),
+        ("カナダドル", "CAD"),
+        ("人民元", "CNY"),
+        ("ドル", "USD"),
+        ("ユーロ", "EUR"),
+        ("ポンド", "GBP"),
+        ("ウォン", "KRW"),
+        ("フラン", "CHF"),
+        ("元", "CNY"),
+        ("usd", "USD"),
+        ("eur", "EUR"),
+        ("gbp", "GBP"),
+        ("aud", "AUD"),
+        ("cny", "CNY"),
+        ("krw", "KRW"),
+        ("chf", "CHF"),
+        ("cad", "CAD"),
     ];
     let base = NON_JPY
         .iter()
@@ -136,9 +148,24 @@ impl Tool for CurrencyRatesTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_CURRENCY_DEFAULT_BASE", "為替の既定換算元", "text", "USD"),
-            Field::new("PICOAGENT_CURRENCY_DEFAULT_SYMBOLS", "為替の既定換算先", "text", "JPY"),
-            Field::new("PICOAGENT_CURRENCY_TIMEOUT_SECS", "為替API待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_CURRENCY_DEFAULT_BASE",
+                "為替の既定換算元",
+                "text",
+                "USD",
+            ),
+            Field::new(
+                "PICOAGENT_CURRENCY_DEFAULT_SYMBOLS",
+                "為替の既定換算先",
+                "text",
+                "JPY",
+            ),
+            Field::new(
+                "PICOAGENT_CURRENCY_TIMEOUT_SECS",
+                "為替API待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
@@ -149,14 +176,20 @@ impl Tool for CurrencyRatesTool {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(|value| value.to_ascii_uppercase())
-            .unwrap_or_else(|| cfg.get("PICOAGENT_CURRENCY_DEFAULT_BASE", "USD").to_ascii_uppercase());
+            .unwrap_or_else(|| {
+                cfg.get("PICOAGENT_CURRENCY_DEFAULT_BASE", "USD")
+                    .to_ascii_uppercase()
+            });
         let symbols = args
             .get("symbols")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(|value| value.to_ascii_uppercase())
-            .unwrap_or_else(|| cfg.get("PICOAGENT_CURRENCY_DEFAULT_SYMBOLS", "JPY").to_ascii_uppercase());
+            .unwrap_or_else(|| {
+                cfg.get("PICOAGENT_CURRENCY_DEFAULT_SYMBOLS", "JPY")
+                    .to_ascii_uppercase()
+            });
         let amount = args.get("amount").and_then(Value::as_f64).unwrap_or(1.0);
         let timeout = cfg
             .get("PICOAGENT_CURRENCY_TIMEOUT_SECS", "15")
@@ -216,7 +249,11 @@ impl Tool for CurrencyRatesTool {
         };
         let mut lines: Vec<String> = rates
             .iter()
-            .filter_map(|(sym, value)| value.as_f64().map(|rate| format!("{amount:.0} {base} = {rate:.3} {sym}")))
+            .filter_map(|(sym, value)| {
+                value
+                    .as_f64()
+                    .map(|rate| format!("{amount:.0} {base} = {rate:.3} {sym}"))
+            })
             .collect();
         lines.sort();
         format!("為替レート（{date}）\n{}", lines.join("\n"))
@@ -224,12 +261,7 @@ impl Tool for CurrencyRatesTool {
 }
 
 // Frankfurter の時系列を取得し、推移をスパークラインで返す。
-async fn currency_chart(
-    client: &reqwest::Client,
-    base: &str,
-    symbol: &str,
-    days: i64,
-) -> String {
+async fn currency_chart(client: &reqwest::Client, base: &str, symbol: &str, days: i64) -> String {
     use chrono::{Duration as ChronoDuration, Local};
     let end = Local::now().date_naive();
     let start = end - ChronoDuration::days(days);
@@ -244,7 +276,10 @@ async fn currency_chart(
         Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
     };
     if !response.status().is_success() {
-        return format!("エラー: 為替APIが HTTP {} を返しました。", response.status());
+        return format!(
+            "エラー: 為替APIが HTTP {} を返しました。",
+            response.status()
+        );
     }
     let data: Value = match response.json().await {
         Ok(data) => data,

@@ -130,7 +130,9 @@ impl Tool for ChitchatTool {
         if let Some(topic) = args.get("topic").and_then(Value::as_str) {
             let topic = topic.trim();
             if !topic.is_empty() {
-                prompt.push_str("\nいまの話題メモ（このメモをそのまま読まず、短い独り言の素材にだけ使う）:\n");
+                prompt.push_str(
+                    "\nいまの話題メモ（このメモをそのまま読まず、短い独り言の素材にだけ使う）:\n",
+                );
                 prompt.push_str(topic);
             }
         }
@@ -149,7 +151,9 @@ impl Tool for ChitchatTool {
             })
             .unwrap_or_default();
         if !avoid.is_empty() {
-            prompt.push_str("\n直前までに言った独り言（内容も言い回しも必ず変える。同じことを言わない）:");
+            prompt.push_str(
+                "\n直前までに言った独り言（内容も言い回しも必ず変える。同じことを言わない）:",
+            );
             for line in &avoid {
                 prompt.push_str("\n- ");
                 prompt.push_str(line);

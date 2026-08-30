@@ -49,7 +49,12 @@ impl Tool for RssFeedTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_RSS_DEFAULT_URL", "RSS既定URL", "text", ""),
-            Field::new("PICOAGENT_RSS_TIMEOUT_SECS", "RSS取得待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_RSS_TIMEOUT_SECS",
+                "RSS取得待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
@@ -62,7 +67,11 @@ impl Tool for RssFeedTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_RSS_DEFAULT_URL", ""));
         if url.is_empty() {
-            return super::config_guide("RSS取得", &["PICOAGENT_RSS_DEFAULT_URL"], "依頼で url を渡すか、既定のRSS/Atom URLを設定してください。");
+            return super::config_guide(
+                "RSS取得",
+                &["PICOAGENT_RSS_DEFAULT_URL"],
+                "依頼で url を渡すか、既定のRSS/Atom URLを設定してください。",
+            );
         }
         let max_items = args
             .get("max_items")
@@ -112,7 +121,9 @@ impl Tool for RssFeedTool {
             };
             current = match current.join(location) {
                 Ok(next) => next,
-                Err(error) => return format!("エラー: RSSのリダイレクト先を解析できません: {error}"),
+                Err(error) => {
+                    return format!("エラー: RSSのリダイレクト先を解析できません: {error}")
+                }
             };
             redirects += 1;
             if redirects > MAX_REDIRECTS {
@@ -128,7 +139,9 @@ impl Tool for RssFeedTool {
         loop {
             match response.chunk().await {
                 Ok(Some(chunk)) if bytes.len().saturating_add(chunk.len()) > MAX_FEED_BYTES => {
-                    return format!("エラー: RSS本文が大きすぎます（上限 {MAX_FEED_BYTES} バイト）。");
+                    return format!(
+                        "エラー: RSS本文が大きすぎます（上限 {MAX_FEED_BYTES} バイト）。"
+                    );
                 }
                 Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
                 Ok(None) => break,
@@ -139,7 +152,10 @@ impl Tool for RssFeedTool {
             Ok(feed) => feed,
             Err(error) => return format!("エラー: RSS/Atom の解析に失敗しました: {}", error),
         };
-        let title = feed.title.map(|text| text.content).unwrap_or_else(|| url.clone());
+        let title = feed
+            .title
+            .map(|text| text.content)
+            .unwrap_or_else(|| url.clone());
         let mut out = format!("フィード: {}\n", title);
         for entry in feed.entries.iter().take(max_items) {
             let entry_title = entry
@@ -147,7 +163,11 @@ impl Tool for RssFeedTool {
                 .as_ref()
                 .map(|text| text.content.as_str())
                 .unwrap_or("（無題）");
-            let link = entry.links.first().map(|link| link.href.as_str()).unwrap_or("");
+            let link = entry
+                .links
+                .first()
+                .map(|link| link.href.as_str())
+                .unwrap_or("");
             let updated = entry
                 .updated
                 .or(entry.published)

@@ -96,8 +96,12 @@ fn load(target: &SafePath) -> Result<(Value, Vec<Value>), String> {
             target.display()
         ));
     }
-    let notebook: Value = serde_json::from_str(&raw)
-        .map_err(|error| format!("ノートブックとして読めません（{error}）: {}", target.display()))?;
+    let notebook: Value = serde_json::from_str(&raw).map_err(|error| {
+        format!(
+            "ノートブックとして読めません（{error}）: {}",
+            target.display()
+        )
+    })?;
     let cells = notebook
         .get("cells")
         .and_then(Value::as_array)
@@ -165,7 +169,10 @@ impl Tool for NotebookEditTool {
     }
 
     fn examples(&self) -> Vec<&'static str> {
-        vec!["ノートブックのセルを一覧して", "3番目のセルをこの内容に差し替えて"]
+        vec![
+            "ノートブックのセルを一覧して",
+            "3番目のセルをこの内容に差し替えて",
+        ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -202,7 +209,9 @@ impl Tool for NotebookEditTool {
                 return "エラー: source が指定されていません。".to_string();
             }
             if source.len() > MAX_SOURCE_BYTES {
-                return format!("エラー: source は {MAX_SOURCE_BYTES} バイト以内で指定してください。");
+                return format!(
+                    "エラー: source は {MAX_SOURCE_BYTES} バイト以内で指定してください。"
+                );
             }
         }
 

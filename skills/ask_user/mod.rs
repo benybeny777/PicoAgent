@@ -146,7 +146,14 @@ impl Tool for AskUserTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["どっち", "どれがいい", "選んで", "決めて", "おまかせ", "確認して"]
+        &[
+            "どっち",
+            "どれがいい",
+            "選んで",
+            "決めて",
+            "おまかせ",
+            "確認して",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -233,7 +240,12 @@ mod tests {
         assert!(parse_options(&json!({ "options": ["A", "A"] })).is_err());
         assert!(parse_options(&json!({ "options": ["A", ""] })).is_err());
         // 文字列でもオブジェクトでも受け取れる。
-        assert_eq!(parse_options(&json!({ "options": ["A", "B"] })).unwrap().len(), 2);
+        assert_eq!(
+            parse_options(&json!({ "options": ["A", "B"] }))
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -246,7 +258,10 @@ mod tests {
     #[test]
     fn 質問文に番号つきの選択肢が並ぶ() {
         let text = prompt(&sample());
-        assert!(text.contains("1. そのまま — 既存の形を保つ"), "text: {text}");
+        assert!(
+            text.contains("1. そのまま — 既存の形を保つ"),
+            "text: {text}"
+        );
         assert!(text.contains("2. 作り直す"), "text: {text}");
     }
 
@@ -255,8 +270,14 @@ mod tests {
     fn 返答を選択肢へ寄せる() {
         let pending = sample();
         assert_eq!(resolve_answer(&pending, "2").as_deref(), Some("作り直す"));
-        assert_eq!(resolve_answer(&pending, "１。").as_deref(), Some("そのまま"));
-        assert_eq!(resolve_answer(&pending, " 作り直す ").as_deref(), Some("作り直す"));
+        assert_eq!(
+            resolve_answer(&pending, "１。").as_deref(),
+            Some("そのまま")
+        );
+        assert_eq!(
+            resolve_answer(&pending, " 作り直す ").as_deref(),
+            Some("作り直す")
+        );
         assert_eq!(resolve_answer(&pending, "9"), None);
         assert_eq!(resolve_answer(&pending, "どっちでもいい"), None);
         assert_eq!(resolve_answer(&pending, ""), None);

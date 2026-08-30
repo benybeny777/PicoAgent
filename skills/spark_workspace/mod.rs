@@ -1,6 +1,5 @@
 // spark_workspace/mod.rs - 資料・ページ・表・実行計画をまとめて作るワークスペース生成スキル。
 
-
 use async_trait::async_trait;
 use chrono::Local;
 use serde_json::{json, Value};
@@ -187,7 +186,17 @@ impl Tool for SparkWorkspaceTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["genspark", "資料一式", "ワークスペース", "スライドとサイト", "サイトとスライド", "ページと資料", "spark", "deck", "brief"]
+        &[
+            "genspark",
+            "資料一式",
+            "ワークスペース",
+            "スライドとサイト",
+            "サイトとスライド",
+            "ページと資料",
+            "spark",
+            "deck",
+            "brief",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {

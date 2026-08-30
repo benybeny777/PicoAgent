@@ -48,10 +48,30 @@ impl Tool for BlueskyTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_BLUESKY_BASE_URL", "Bluesky の PDS URL", "text", "https://bsky.social"),
-            Field::new("PICOAGENT_BLUESKY_IDENTIFIER", "Bluesky の識別子（ハンドルまたはメール）", "text", "user.bsky.social"),
-            Field::new("PICOAGENT_BLUESKY_APP_PASSWORD", "Bluesky のアプリパスワード", "password", ""),
-            Field::new("PICOAGENT_BLUESKY_TIMEOUT_SECS", "Bluesky API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_BLUESKY_BASE_URL",
+                "Bluesky の PDS URL",
+                "text",
+                "https://bsky.social",
+            ),
+            Field::new(
+                "PICOAGENT_BLUESKY_IDENTIFIER",
+                "Bluesky の識別子（ハンドルまたはメール）",
+                "text",
+                "user.bsky.social",
+            ),
+            Field::new(
+                "PICOAGENT_BLUESKY_APP_PASSWORD",
+                "Bluesky のアプリパスワード",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_BLUESKY_TIMEOUT_SECS",
+                "Bluesky API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
@@ -63,7 +83,14 @@ impl Tool for BlueskyTool {
         let identifier = cfg.get("PICOAGENT_BLUESKY_IDENTIFIER", "");
         let password = cfg.get("PICOAGENT_BLUESKY_APP_PASSWORD", "");
         if identifier.is_empty() || password.is_empty() {
-            return super::config_guide("Bluesky", &["PICOAGENT_BLUESKY_IDENTIFIER", "PICOAGENT_BLUESKY_APP_PASSWORD"], "Bluesky のハンドル/メールアドレスと app password を入れてください。");
+            return super::config_guide(
+                "Bluesky",
+                &[
+                    "PICOAGENT_BLUESKY_IDENTIFIER",
+                    "PICOAGENT_BLUESKY_APP_PASSWORD",
+                ],
+                "Bluesky のハンドル/メールアドレスと app password を入れてください。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_BLUESKY_TIMEOUT_SECS", "20")
@@ -149,7 +176,8 @@ impl Tool for BlueskyTool {
                 )
                 .await
             }
-            _ => "エラー: action は post/search_posts/get_profile のいずれかを指定してください。".to_string(),
+            _ => "エラー: action は post/search_posts/get_profile のいずれかを指定してください。"
+                .to_string(),
         }
     }
 }
@@ -174,9 +202,13 @@ async fn create_session(
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
-        return Err(format!("Bluesky セッション作成が HTTP {} を返しました。", status));
+        return Err(format!(
+            "Bluesky セッション作成が HTTP {} を返しました。",
+            status
+        ));
     }
-    let parsed: Value = serde_json::from_str(&body).map_err(|error| format!("Bluesky セッションを解析できません: {}", error))?;
+    let parsed: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Bluesky セッションを解析できません: {}", error))?;
     let access_jwt = parsed
         .get("accessJwt")
         .and_then(Value::as_str)
@@ -198,12 +230,18 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
     if text.chars().count() > max_chars {
-        return Err(format!("{} は {} 文字以内で指定してください。", key, max_chars));
+        return Err(format!(
+            "{} は {} 文字以内で指定してください。",
+            key, max_chars
+        ));
     }
     Ok(text)
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

@@ -115,10 +115,16 @@ fn source_allows_url(source_name: &str, url: &Url) -> bool {
     }
 }
 
-fn extract_items(source: &NewsSource, html: &str, max_items: usize) -> Result<Vec<(String, String)>, String> {
-    let base = Url::parse(source.url).map_err(|error| format!("ニュースURLの解析に失敗しました: {error}"))?;
+fn extract_items(
+    source: &NewsSource,
+    html: &str,
+    max_items: usize,
+) -> Result<Vec<(String, String)>, String> {
+    let base = Url::parse(source.url)
+        .map_err(|error| format!("ニュースURLの解析に失敗しました: {error}"))?;
     let document = Html::parse_document(html);
-    let selector = Selector::parse("a").map_err(|error| format!("ニュースHTMLの解析準備に失敗しました: {error}"))?;
+    let selector = Selector::parse("a")
+        .map_err(|error| format!("ニュースHTMLの解析準備に失敗しました: {error}"))?;
     let mut items: Vec<(String, String)> = Vec::new();
     for node in document.select(&selector) {
         let Some(href) = node.value().attr("href") else {
@@ -149,7 +155,15 @@ impl Tool for NewsScrapeTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["ニュース", "ニューす", "にゅーす", "news", "出来事", "時事", "ヘッドライン"]
+        &[
+            "ニュース",
+            "ニューす",
+            "にゅーす",
+            "news",
+            "出来事",
+            "時事",
+            "ヘッドライン",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {
@@ -191,8 +205,18 @@ impl Tool for NewsScrapeTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_NEWS_SCRAPE_MAX_ITEMS", "ニュース取得件数（1〜12）", "text", "8"),
-            Field::new("PICOAGENT_NEWS_SCRAPE_TIMEOUT_SECS", "ニュース取得待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_NEWS_SCRAPE_MAX_ITEMS",
+                "ニュース取得件数（1〜12）",
+                "text",
+                "8",
+            ),
+            Field::new(
+                "PICOAGENT_NEWS_SCRAPE_TIMEOUT_SECS",
+                "ニュース取得待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
@@ -243,12 +267,16 @@ impl Tool for NewsScrapeTool {
             let bytes = match response.bytes().await {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    output.push_str(&format!("- エラー: 本文の読み取りに失敗しました: {error}\n"));
+                    output.push_str(&format!(
+                        "- エラー: 本文の読み取りに失敗しました: {error}\n"
+                    ));
                     continue;
                 }
             };
             if bytes.len() > MAX_HTML_BYTES {
-                output.push_str(&format!("- エラー: HTMLが大きすぎます（上限 {MAX_HTML_BYTES} バイト）\n"));
+                output.push_str(&format!(
+                    "- エラー: HTMLが大きすぎます（上限 {MAX_HTML_BYTES} バイト）\n"
+                ));
                 continue;
             }
             let html = String::from_utf8_lossy(&bytes);

@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::permissions;
+use crate::permissions::SafePath;
 
 const MAX_READ_BYTES: usize = 128 * 1024;
 const MAX_WRITE_BYTES: usize = 128 * 1024;
@@ -51,7 +51,10 @@ pub fn snapshot_before_write(path: &SafePath) -> Result<UndoEntry, String> {
                 path.display()
             ));
         }
-        Some(permissions::fs::read(path).map_err(|error| format!("変更前データを保存できません: {error}"))?)
+        Some(
+            permissions::fs::read(path)
+                .map_err(|error| format!("変更前データを保存できません: {error}"))?,
+        )
     } else {
         None
     };
@@ -133,7 +136,13 @@ fn trim_to_bytes(content: &str, max_bytes: usize) -> String {
 fn list_dir(path: &SafePath) -> String {
     let entries = match permissions::fs::read_dir(path) {
         Ok(entries) => entries,
-        Err(error) => return format!("エラー: 一覧取得に失敗しました（{}）: {}", error, path.display()),
+        Err(error) => {
+            return format!(
+                "エラー: 一覧取得に失敗しました（{}）: {}",
+                error,
+                path.display()
+            )
+        }
     };
     let mut rows = Vec::new();
     for entry in entries.take(MAX_LIST_ENTRIES + 1) {
@@ -175,7 +184,10 @@ fn content_arg(args: &Value) -> Result<&str, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "content が指定されていません。".to_string())?;
     if content.len() > MAX_WRITE_BYTES {
-        return Err(format!("content は {} バイト以内で指定してください。", MAX_WRITE_BYTES));
+        return Err(format!(
+            "content は {} バイト以内で指定してください。",
+            MAX_WRITE_BYTES
+        ));
     }
     Ok(content)
 }
@@ -187,7 +199,14 @@ impl Tool for WorkspaceFilesTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["ファイル", "書いて", "保存", "追記", "フォルダ", "workspace"]
+        &[
+            "ファイル",
+            "書いて",
+            "保存",
+            "追記",
+            "フォルダ",
+            "workspace",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -233,7 +252,12 @@ impl Tool for WorkspaceFilesTool {
             None => return "エラー: action が指定されていません。".to_string(),
         };
         if action == "undo" {
-            return undo_last(cfg, args.get("confirm").and_then(Value::as_bool).unwrap_or(false));
+            return undo_last(
+                cfg,
+                args.get("confirm")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            );
         }
         let path = match args.get("path").and_then(Value::as_str) {
             Some(path) if !path.trim().is_empty() => path.trim(),
@@ -356,7 +380,11 @@ mod tests {
         });
         let result = undo_last(&cfg, true);
         assert!(result.starts_with("エラー:"), "result: {result}");
-        assert_eq!(std::fs::read(&target).unwrap(), b"original", "書き戻されている");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"original",
+            "書き戻されている"
+        );
 
         undo_history().lock().unwrap().clear();
         std::fs::remove_dir_all(&allowed).ok();

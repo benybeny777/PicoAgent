@@ -17,8 +17,8 @@ pub struct DocSearchTool;
 
 // 検索対象とみなすテキスト系拡張子。
 const TEXT_EXTS: [&str; 16] = [
-    "md", "txt", "csv", "tsv", "json", "yaml", "yml", "toml", "ini", "log", "rs", "py", "js",
-    "ts", "html", "css",
+    "md", "txt", "csv", "tsv", "json", "yaml", "yml", "toml", "ini", "log", "rs", "py", "js", "ts",
+    "html", "css",
 ];
 // 走査上限（ホームディレクトリ全体などでも暴走しないための安全弁）。
 const MAX_FILES: usize = 3000;
@@ -26,7 +26,14 @@ const MAX_DEPTH: usize = 8;
 const MAX_FILE_BYTES: u64 = 512 * 1024;
 // 走査から除外するディレクトリ名（巨大・生成物・隠し）。
 const SKIP_DIRS: [&str; 8] = [
-    "node_modules", "target", ".git", "dist", "build", "__pycache__", ".venv", "venv",
+    "node_modules",
+    "target",
+    ".git",
+    "dist",
+    "build",
+    "__pycache__",
+    ".venv",
+    "venv",
 ];
 
 fn is_text_file(path: &Path) -> bool {
@@ -106,7 +113,11 @@ async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option
         for root in roots {
             command.arg(root);
         }
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
         let output = tokio::time::timeout(Duration::from_secs(20), command.output())
             .await
             .ok()?
@@ -247,7 +258,8 @@ impl Tool for DocSearchTool {
             }
         }
         if files.is_empty() {
-            return "許可ルート配下に検索対象のテキストファイルが見つかりませんでした。".to_string();
+            return "許可ルート配下に検索対象のテキストファイルが見つかりませんでした。"
+                .to_string();
         }
 
         let mut hits: Vec<(usize, PathBuf, String)> = files
@@ -261,11 +273,19 @@ impl Tool for DocSearchTool {
         hits.truncate(max_results);
 
         if hits.is_empty() {
-            return format!("「{query}」に一致するローカル文書は見つかりませんでした（{}ファイルを走査）。", files.len());
+            return format!(
+                "「{query}」に一致するローカル文書は見つかりませんでした（{}ファイルを走査）。",
+                files.len()
+            );
         }
         let mut out = format!("「{query}」のローカル文書検索結果（{}件）:\n", hits.len());
         for (score, path, snippet) in hits {
-            out.push_str(&format!("\n### {} （一致度 {}）\n{}\n", path.display(), score, snippet));
+            out.push_str(&format!(
+                "\n### {} （一致度 {}）\n{}\n",
+                path.display(),
+                score,
+                snippet
+            ));
         }
         out
     }
@@ -278,7 +298,11 @@ mod tests {
     // rg がある環境だけで走る E2E（無ければ即成功で抜ける）。
     #[test]
     fn ripgrepで候補ファイルを収集できる() {
-        if std::process::Command::new("rg").arg("--version").output().is_err() {
+        if std::process::Command::new("rg")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             eprintln!("rg が無いためスキップ");
             return;
         }
@@ -292,7 +316,9 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let roots = vec![dir.clone()];
         let terms = vec!["予算".to_string()];
-        let found = runtime.block_on(rg_collect(&cfg, &roots, &terms)).expect("rg は実行できるはず");
+        let found = runtime
+            .block_on(rg_collect(&cfg, &roots, &terms))
+            .expect("rg は実行できるはず");
         assert_eq!(found.len(), 1, "found: {found:?}");
         assert!(found[0].ends_with("memo.md"));
         let _ = std::fs::remove_dir_all(&dir);

@@ -4030,7 +4030,11 @@ fn capture_primary_png_inner() -> Result<Vec<u8>, String> {
     use std::io::Cursor;
     use xcap::Monitor;
 
-    let monitors = Monitor::all().map_err(|error| format!("モニタを列挙できません: {error}"))?;
+    // ヘッドレスや表示サーバへ接続できない環境ではここで失敗する。利用者が読む文面なので、
+    // どの機能の失敗かが分かるよう他の経路と同じ前置きを付ける。
+    let monitors = Monitor::all().map_err(|error| {
+        format!("スクリーンショット取得に失敗しました: モニタを列挙できません: {error}")
+    })?;
     // 主モニタが分からない場合は先頭を使う（単一モニタ環境では同じものになる）。
     let monitor = monitors
         .iter()

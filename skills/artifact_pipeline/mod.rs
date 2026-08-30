@@ -4,7 +4,7 @@ use std::io::{Cursor, Write};
 
 use async_trait::async_trait;
 use chrono::Local;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -12,11 +12,23 @@ use crate::permissions::SafePath;
 
 pub struct ArtifactPipelineTool;
 
+/// XMLが禁じる制御文字を落としつつ、実体参照へ置き換える。
+/// 成果物1行ごとに呼ぶので、収集してから5回置換し直すのではなく1回の走査で組み立てる。
 fn xml_escape(text: &str) -> String {
-    text.chars()
-        .filter(|ch| matches!(*ch, '\u{9}' | '\u{A}' | '\u{D}') || *ch >= '\u{20}')
-        .collect::<String>()
-        .replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            '\u{9}' | '\u{A}' | '\u{D}' => out.push(ch),
+            _ if ch >= '\u{20}' => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn html_escape(text: &str) -> String {
@@ -24,23 +36,58 @@ fn html_escape(text: &str) -> String {
 }
 
 fn slug(text: &str) -> String {
-    let value: String = text.chars().take(40).map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' }).collect();
-    let compact = value.split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-");
-    if compact.is_empty() { "project".to_string() } else { compact }
+    let value: String = text
+        .chars()
+        .take(40)
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let compact = value
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if compact.is_empty() {
+        "project".to_string()
+    } else {
+        compact
+    }
 }
 
 fn zip_bytes(parts: &[(&str, String)]) -> Result<Vec<u8>, String> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
     for (name, content) in parts {
-        writer.start_file(*name, options).map_err(|error| format!("Officeファイルの構築に失敗しました: {error}"))?;
-        writer.write_all(content.as_bytes()).map_err(|error| format!("Officeファイルの書き込みに失敗しました: {error}"))?;
+        writer
+            .start_file(*name, options)
+            .map_err(|error| format!("Officeファイルの構築に失敗しました: {error}"))?;
+        writer
+            .write_all(content.as_bytes())
+            .map_err(|error| format!("Officeファイルの書き込みに失敗しました: {error}"))?;
     }
-    writer.finish().map(|cursor| cursor.into_inner()).map_err(|error| format!("Officeファイルを確定できません: {error}"))
+    writer
+        .finish()
+        .map(|cursor| cursor.into_inner())
+        .map_err(|error| format!("Officeファイルを確定できません: {error}"))
 }
 
 fn docx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
-    let paragraphs = body.lines().take(400).map(|line| format!("<w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>", xml_escape(line))).collect::<String>();
+    let paragraphs = body
+        .lines()
+        .take(400)
+        .map(|line| {
+            format!(
+                "<w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+                xml_escape(line)
+            )
+        })
+        .collect::<String>();
     zip_bytes(&[
         ("[Content_Types].xml", r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#.to_string()),
         ("_rels/.rels", r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#.to_string()),
@@ -49,10 +96,21 @@ fn docx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
 }
 
 fn xlsx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
-    let mut rows = format!("<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>{}</t></is></c></row>", xml_escape(title));
-    for (index, line) in body.lines().filter(|line| !line.trim().is_empty()).take(300).enumerate() {
+    let mut rows = format!(
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>{}</t></is></c></row>",
+        xml_escape(title)
+    );
+    for (index, line) in body
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(300)
+        .enumerate()
+    {
         let row = index + 2;
-        rows.push_str(&format!("<row r=\"{row}\"><c r=\"A{row}\" t=\"inlineStr\"><is><t>{}</t></is></c></row>", xml_escape(line)));
+        rows.push_str(&format!(
+            "<row r=\"{row}\"><c r=\"A{row}\" t=\"inlineStr\"><is><t>{}</t></is></c></row>",
+            xml_escape(line)
+        ));
     }
     zip_bytes(&[
         ("[Content_Types].xml", r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.to_string()),
@@ -65,9 +123,20 @@ fn xlsx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
 
 fn slide_xml(title: &str, body: &str) -> String {
     let title = xml_escape(title);
-    let lines = body.lines().filter(|line| !line.trim().is_empty()).take(12)
-        .map(|line| format!("<a:p><a:r><a:rPr lang=\"ja-JP\" sz=\"2200\"/><a:t>{}</a:t></a:r></a:p>", xml_escape(line.trim_matches(['#', '-', '*', ' '])))).collect::<String>();
-    format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="タイトル"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="600000" y="350000"/><a:ext cx="10900000" cy="900000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="ja-JP" sz="3200" b="1"/><a:t>{title}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="本文"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="850000" y="1500000"/><a:ext cx="10300000" cy="4700000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/>{lines}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#)
+    let lines = body
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+        .map(|line| {
+            format!(
+                "<a:p><a:r><a:rPr lang=\"ja-JP\" sz=\"2200\"/><a:t>{}</a:t></a:r></a:p>",
+                xml_escape(line.trim_matches(['#', '-', '*', ' ']))
+            )
+        })
+        .collect::<String>();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="タイトル"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="600000" y="350000"/><a:ext cx="10900000" cy="900000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="ja-JP" sz="3200" b="1"/><a:t>{title}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="本文"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="850000" y="1500000"/><a:ext cx="10300000" cy="4700000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/>{lines}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#
+    )
 }
 
 fn pptx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
@@ -86,7 +155,12 @@ fn pptx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
     ])
 }
 
-fn write_artifacts(cfg: &Config, dir: &SafePath, title: &str, body: &str) -> Result<Vec<SafePath>, String> {
+fn write_artifacts(
+    cfg: &Config,
+    dir: &SafePath,
+    title: &str,
+    body: &str,
+) -> Result<Vec<SafePath>, String> {
     crate::permissions::fs::create_dir_all(dir)?;
     let html = format!("<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><title>{}</title><style>body{{font-family:system-ui;max-width:900px;margin:40px auto;line-height:1.7}}pre{{white-space:pre-wrap}}</style><h1>{}</h1><pre>{}</pre></html>", html_escape(title), html_escape(title), html_escape(body));
     let files = [
@@ -104,49 +178,133 @@ fn write_artifacts(cfg: &Config, dir: &SafePath, title: &str, body: &str) -> Res
     Ok(paths)
 }
 
+/// 出力先が「このジョブが作ったフォルダ」であることを所有者マーカーで確かめる。
+/// 再起動をまたぐ再開でも、利用者の既存フォルダを上書きしないための境界。
 fn ensure_owned_output(cfg: &Config, dir: &SafePath, pipeline_id: &str) -> Result<(), String> {
     let marker = dir.join(cfg, ".picoagent-artifact-job")?;
     if dir.exists() {
-        let owner = crate::permissions::fs::read_to_string(&marker)
-            .map_err(|_| format!("既存フォルダは成果物ジョブ専用と確認できないため上書きしません: {}", dir.display()))?;
+        let owner = crate::permissions::fs::read_to_string(&marker).map_err(|_| {
+            format!(
+                "既存フォルダは成果物ジョブ専用と確認できないため上書きしません: {}",
+                dir.display()
+            )
+        })?;
         if owner.trim() != pipeline_id {
-            return Err(format!("別の成果物ジョブが所有するフォルダは上書きしません: {}", dir.display()));
+            return Err(format!(
+                "別の成果物ジョブが所有するフォルダは上書きしません: {}",
+                dir.display()
+            ));
         }
         return Ok(());
     }
     crate::permissions::fs::create_dir_all(dir)?;
+    // `permissions::fs::write()` ではなく `store::write_atomic()` を通す例外。
+    // 所有者マーカーは上書き可否の判定そのものなので、書き込み途中で落ちて
+    // 中身が空のマーカーが残ると、次の実行が別ジョブのフォルダを自分の物と誤認する。
     crate::store::write_atomic(marker.as_path(), pipeline_id.as_bytes())
         .map_err(|error| format!("成果物フォルダの所有情報を保存できません: {error:#}"))
 }
 
 async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
-    let topic = args.get("topic").and_then(Value::as_str).unwrap_or("").trim();
-    let requested = args.get("output_dir").and_then(Value::as_str).unwrap_or("").trim();
-    let relative = if requested.is_empty() { format!("PicoAgent-AI-Drive/projects/{}-{}", Local::now().format("%Y%m%d-%H%M%S"), slug(topic)) } else { requested.to_string() };
-    let dir = match crate::permissions::resolve(cfg, &relative) { Ok(value) => value, Err(error) => return format!("エラー: {error}") };
-    let pipeline_id = args.get("pipeline_id").and_then(Value::as_str).unwrap_or("");
-    if let Err(error) = ensure_owned_output(cfg, &dir, pipeline_id) { return format!("エラー: {error}"); }
-    let report_path = match dir.join(cfg, "research.md") { Ok(value) => value, Err(error) => return format!("エラー: {error}") };
-    let mut body = args.get("source_text").and_then(Value::as_str).unwrap_or("").to_string();
-    if crate::durable_jobs::is_cancelled(job_id) { return "エラー: ジョブはキャンセルされました。".to_string(); }
-    if args.get("research").and_then(Value::as_bool).unwrap_or(true) {
-        let result = crate::tools::dispatch_final(cfg, "research_report", json!({"topic":topic,"save":true,"artifact_bundle":true,"save_path":report_path.display().to_string()})).await;
-        if result.starts_with("エラー:") { return result; }
-        body = match crate::permissions::fs::read_to_string(&report_path) { Ok(value) => value, Err(error) => return format!("エラー: 調査レポートを再読込できません: {error}") };
+    let topic = args
+        .get("topic")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    // 出力先とジョブ所有者IDは登録時（run）に必ず埋める。ここで既定値を作り直すと、
+    // 決め方が2箇所へ分かれるうえ、所有者IDが空のまま既存フォルダの上書き検査を素通りする。
+    let requested = args
+        .get("output_dir")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let pipeline_id = args
+        .get("pipeline_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if requested.is_empty() || pipeline_id.is_empty() {
+        return "エラー: 永続ジョブの引数に出力先または所有者IDがありません。ジョブを登録し直してください。".to_string();
     }
-    if body.trim().is_empty() { return "エラー: source_text が空です。research=trueにするか本文を指定してください。".to_string(); }
-    if crate::durable_jobs::is_cancelled(job_id) { return "エラー: ジョブはキャンセルされました。".to_string(); }
-    let paths = match write_artifacts(cfg, &dir, topic, &body) { Ok(value) => value, Err(error) => return format!("エラー: 成果物生成に失敗しました: {error}") };
-    if crate::durable_jobs::is_cancelled(job_id) { return "エラー: ジョブはキャンセルされました。".to_string(); }
-    let docx = paths.iter().find(|path| path.extension_lossy() == "docx").expect("生成済みdocx");
-    let pdf_result = crate::tools::dispatch_final(cfg, "ms_office", json!({"action":"export_pdf","input_path":docx.display().to_string()})).await;
-    if pdf_result.starts_with("エラー:") { return format!("エラー: HTML/DOCX/XLSX/PPTXは生成しましたが、PDF生成に失敗しました。\n{pdf_result}\n出力先: {}", dir.display()); }
-    let provider = args.get("cloud_provider").and_then(Value::as_str).unwrap_or("");
+    let dir = match crate::permissions::resolve(cfg, requested) {
+        Ok(value) => value,
+        Err(error) => return format!("エラー: {error}"),
+    };
+    if let Err(error) = ensure_owned_output(cfg, &dir, pipeline_id) {
+        return format!("エラー: {error}");
+    }
+    let report_path = match dir.join(cfg, "research.md") {
+        Ok(value) => value,
+        Err(error) => return format!("エラー: {error}"),
+    };
+    let mut body = args
+        .get("source_text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if crate::durable_jobs::is_cancelled(job_id) {
+        return "エラー: ジョブはキャンセルされました。".to_string();
+    }
+    if args
+        .get("research")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        let result = crate::tools::dispatch_final(cfg, "research_report", json!({"topic":topic,"save":true,"artifact_bundle":true,"save_path":report_path.display().to_string()})).await;
+        if result.starts_with("エラー:") {
+            return result;
+        }
+        body = match crate::permissions::fs::read_to_string(&report_path) {
+            Ok(value) => value,
+            Err(error) => return format!("エラー: 調査レポートを再読込できません: {error}"),
+        };
+    }
+    if body.trim().is_empty() {
+        return "エラー: source_text が空です。research=trueにするか本文を指定してください。"
+            .to_string();
+    }
+    if crate::durable_jobs::is_cancelled(job_id) {
+        return "エラー: ジョブはキャンセルされました。".to_string();
+    }
+    let paths = match write_artifacts(cfg, &dir, topic, &body) {
+        Ok(value) => value,
+        Err(error) => return format!("エラー: 成果物生成に失敗しました: {error}"),
+    };
+    if crate::durable_jobs::is_cancelled(job_id) {
+        return "エラー: ジョブはキャンセルされました。".to_string();
+    }
+    let Some(docx) = paths.iter().find(|path| path.extension_lossy() == "docx") else {
+        return "エラー: PDF変換の元になるDOCXを生成できませんでした。".to_string();
+    };
+    let pdf_result = crate::tools::dispatch_final(
+        cfg,
+        "ms_office",
+        json!({"action":"export_pdf","input_path":docx.display().to_string()}),
+    )
+    .await;
+    if pdf_result.starts_with("エラー:") {
+        return format!("エラー: HTML/DOCX/XLSX/PPTXは生成しましたが、PDF生成に失敗しました。\n{pdf_result}\n出力先: {}", dir.display());
+    }
+    let provider = args
+        .get("cloud_provider")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     if !provider.is_empty() {
-        let folder_id = args.get("cloud_folder_id").and_then(Value::as_str).unwrap_or("");
+        let folder_id = args
+            .get("cloud_folder_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let ai_root = crate::permissions::primary_root(cfg).join("PicoAgent-AI-Drive");
-        for name in ["report.html", "report.docx", "data.xlsx", "deck.pptx", "report.pdf"] {
-            if crate::durable_jobs::is_cancelled(job_id) { return "エラー: ジョブはキャンセルされました。".to_string(); }
+        for name in [
+            "report.html",
+            "report.docx",
+            "data.xlsx",
+            "deck.pptx",
+            "report.pdf",
+        ] {
+            if crate::durable_jobs::is_cancelled(job_id) {
+                return "エラー: ジョブはキャンセルされました。".to_string();
+            }
             let generated = match dir.join(cfg, name) {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: クラウド転送対象を解決できません: {error}"),
@@ -157,8 +315,15 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
             };
             let transfer_key = format!("artifact:{pipeline_id}:{provider}:{folder_id}:{name}");
             let remote_name = format!("{}-{pipeline_id}-{name}", dir.file_name_lossy());
-            if let Err(error) = crate::durable_jobs::enqueue_unique("ai_drive", json!({"action":"upload_execute","provider":provider,"relative_path":relative_path,"folder_id":folder_id,"remote_name":remote_name,"idempotency_key":transfer_key.clone()}), format!("{provider}へアップロード: {name}"), transfer_key) {
-                return format!("エラー: 成果物は生成しましたが、クラウド転送ジョブを登録できません: {error}");
+            if let Err(error) = crate::durable_jobs::enqueue_unique(
+                "ai_drive",
+                json!({"action":"upload_execute","provider":provider,"relative_path":relative_path,"folder_id":folder_id,"remote_name":remote_name,"idempotency_key":transfer_key.clone()}),
+                format!("{provider}へアップロード: {name}"),
+                transfer_key,
+            ) {
+                return format!(
+                    "エラー: 成果物は生成しましたが、クラウド転送ジョブを登録できません: {error}"
+                );
             }
         }
     }
@@ -167,10 +332,18 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
 
 #[async_trait]
 impl Tool for ArtifactPipelineTool {
-    fn name(&self) -> &'static str { "artifact_pipeline" }
-    fn label(&self) -> &'static str { "成果物パイプライン" }
-    fn intent_keywords(&self) -> &'static [&'static str] { &["pptx", "xlsx", "docx", "成果物", "資料一式"] }
-    fn description(&self) -> String { "Web調査または指定本文から、編集可能なPPTX/XLSX/DOCX、HTML、PDFを実ファイルとして生成する。処理は再起動後も再開する。".to_string() }
+    fn name(&self) -> &'static str {
+        "artifact_pipeline"
+    }
+    fn label(&self) -> &'static str {
+        "成果物パイプライン"
+    }
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["pptx", "xlsx", "docx", "成果物", "資料一式"]
+    }
+    fn description(&self) -> String {
+        "Web調査または指定本文から、編集可能なPPTX/XLSX/DOCX、HTML、PDFを実ファイルとして生成する。処理は再起動後も再開する。".to_string()
+    }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{
             "topic":{"type":"string"},"source_text":{"type":"string"},
@@ -182,31 +355,79 @@ impl Tool for ArtifactPipelineTool {
         },"required":["topic"]})
     }
     async fn run(&self, _cfg: &Config, mut args: Value) -> String {
-        if let Some(job_id) = crate::durable_jobs::worker_job_id(&args).map(str::to_string) { return execute(_cfg, &args, &job_id).await; }
-        let topic = args.get("topic").and_then(Value::as_str).unwrap_or("").trim().to_string();
-        if topic.is_empty() { return "エラー: topic が指定されていません。".to_string(); }
-        if topic.chars().count() > 160 { return "エラー: topic は160文字以内で指定してください。".to_string(); }
-        if args.get("source_text").and_then(Value::as_str).is_some_and(|text| text.len() > 100_000) {
+        if let Some(job_id) = crate::durable_jobs::worker_job_id(&args).map(str::to_string) {
+            return execute(_cfg, &args, &job_id).await;
+        }
+        let topic = args
+            .get("topic")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if topic.is_empty() {
+            return "エラー: topic が指定されていません。".to_string();
+        }
+        if topic.chars().count() > 160 {
+            return "エラー: topic は160文字以内で指定してください。".to_string();
+        }
+        if args
+            .get("source_text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.len() > 100_000)
+        {
             return "エラー: source_text は100KB以内で指定してください。".to_string();
         }
-        let provider = args.get("cloud_provider").and_then(Value::as_str).unwrap_or("").to_string();
+        let provider = args
+            .get("cloud_provider")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         if !provider.is_empty() && !matches!(provider.as_str(), "google" | "onedrive" | "icloud") {
             return "エラー: cloud_provider は google、onedrive、icloud のいずれかを指定してください。".to_string();
         }
-        if !provider.is_empty() && !args.get("confirm_cloud").and_then(Value::as_bool).unwrap_or(false) {
+        if !provider.is_empty()
+            && !args
+                .get("confirm_cloud")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
             return format!("確認が必要です。生成するHTML/DOCX/XLSX/PPTX/PDFを {provider} へ送信します。内容と送信先を確認し、confirm_cloud=true で再実行してください。");
         }
         if let Some(object) = args.as_object_mut() {
             object.remove("confirm_cloud");
-            let missing_output = object.get("output_dir").and_then(Value::as_str).is_none_or(|value| value.trim().is_empty());
+            let missing_output = object
+                .get("output_dir")
+                .and_then(Value::as_str)
+                .is_none_or(|value| value.trim().is_empty());
             if missing_output {
-                object.insert("output_dir".into(), Value::String(format!("PicoAgent-AI-Drive/projects/{}-{}", Local::now().format("%Y%m%d-%H%M%S%3f"), slug(&topic))));
+                object.insert(
+                    "output_dir".into(),
+                    Value::String(format!(
+                        "PicoAgent-AI-Drive/projects/{}-{}",
+                        Local::now().format("%Y%m%d-%H%M%S%3f"),
+                        slug(&topic)
+                    )),
+                );
             }
-            object.insert("pipeline_id".into(), Value::String(format!("pipeline-{}", Local::now().timestamp_nanos_opt().unwrap_or_default())));
+            object.insert(
+                "pipeline_id".into(),
+                Value::String(format!(
+                    "pipeline-{}",
+                    Local::now().timestamp_nanos_opt().unwrap_or_default()
+                )),
+            );
         }
         let output = args.get("output_dir").and_then(Value::as_str).unwrap_or("");
-        let output_path = match crate::permissions::resolve(_cfg, output) { Ok(path) => path, Err(error) => return format!("エラー: {error}") };
-        if output_path.exists() { return format!("エラー: 既存フォルダは上書きしません。新しいoutput_dirを指定してください: {}", output_path.display()); }
+        let output_path = match crate::permissions::resolve(_cfg, output) {
+            Ok(path) => path,
+            Err(error) => return format!("エラー: {error}"),
+        };
+        if output_path.exists() {
+            return format!(
+                "エラー: 既存フォルダは上書きしません。新しいoutput_dirを指定してください: {}",
+                output_path.display()
+            );
+        }
         if !provider.is_empty() {
             let ai_root = crate::permissions::primary_root(_cfg).join("PicoAgent-AI-Drive");
             if !output_path.as_path().starts_with(&ai_root) {
@@ -226,7 +447,10 @@ mod tests {
     fn office成果物は必須部品を持つ() {
         for (bytes, required) in [
             (docx_bytes("題", "本文").unwrap(), "word/document.xml"),
-            (xlsx_bytes("題", "本文").unwrap(), "xl/worksheets/sheet1.xml"),
+            (
+                xlsx_bytes("題", "本文").unwrap(),
+                "xl/worksheets/sheet1.xml",
+            ),
             (pptx_bytes("題", "本文").unwrap(), "ppt/slides/slide1.xml"),
         ] {
             let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
@@ -238,7 +462,6 @@ mod tests {
     fn xmlで禁止された制御文字を成果物へ混ぜない() {
         assert_eq!(xml_escape("A\u{0}B\u{8}C\nD"), "ABC\nD");
     }
-
 }
 
 inventory::submit! { ToolReg { make: || Box::new(ArtifactPipelineTool) } }

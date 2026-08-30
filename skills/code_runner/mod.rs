@@ -82,7 +82,16 @@ impl Tool for CodeRunnerTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["スクリプト", "コードを書いて", "コード実行", "プログラムで", "自力で", "なんとかして", "script", "code"]
+        &[
+            "スクリプト",
+            "コードを書いて",
+            "コード実行",
+            "プログラムで",
+            "自力で",
+            "なんとかして",
+            "script",
+            "code",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -237,10 +246,7 @@ impl Tool for CodeRunnerTool {
         interpreter_args.push(script_path.to_string_lossy().to_string());
 
         let mut command = crate::tools::process::command(&program);
-        command
-            .args(&interpreter_args)
-            .current_dir(&cwd)
-            ;
+        command.args(&interpreter_args).current_dir(&cwd);
 
         let mut result =
             match tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await {

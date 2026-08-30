@@ -42,7 +42,11 @@ fn render(content: &str, offset: usize, limit: usize) -> String {
     let mut out = format!("{} 行中 {}〜{} 行目:\n", total, start + 1, end);
     let mut truncated_at = None;
     for (index, line) in lines[start..end].iter().enumerate() {
-        let row = format!("{}\t{}\n", start + index + 1, text::preview(line, MAX_LINE_CHARS));
+        let row = format!(
+            "{}\t{}\n",
+            start + index + 1,
+            text::preview(line, MAX_LINE_CHARS)
+        );
         if out.len() + row.len() > MAX_OUTPUT_BYTES {
             truncated_at = Some(start + index + 1);
             break;
@@ -126,7 +130,10 @@ impl Tool for ReadFileTool {
         let content = match permissions::fs::read_to_string(&target) {
             Ok(content) => content,
             Err(error) => {
-                return format!("エラー: 読み取りに失敗しました（{error}）: {}", target.display())
+                return format!(
+                    "エラー: 読み取りに失敗しました（{error}）: {}",
+                    target.display()
+                )
             }
         };
         if content.len() > MAX_FILE_BYTES {
@@ -161,7 +168,10 @@ mod tests {
     /// 途中から読めること、続きの読み方が案内されること。
     #[test]
     fn 範囲指定で一部だけ返す() {
-        let content = (1..=10).map(|n| n.to_string()).collect::<Vec<_>>().join("\n");
+        let content = (1..=10)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         let out = render(&content, 3, 2);
         assert!(out.contains("10 行中 3〜4 行目"), "out: {out}");
         assert!(out.contains("3\t3\n4\t4\n"), "out: {out}");

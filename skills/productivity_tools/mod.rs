@@ -411,7 +411,24 @@ impl Tool for ProductivityTools {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["文字数", "行数", "json", "base64", "urlエンコード", "urlデコード", "単位換算", "日付計算", "csv", "markdown表", "スラッグ", "slug", "チェックサム", "bmi", "rgb", "hex"]
+        &[
+            "文字数",
+            "行数",
+            "json",
+            "base64",
+            "urlエンコード",
+            "urlデコード",
+            "単位換算",
+            "日付計算",
+            "csv",
+            "markdown表",
+            "スラッグ",
+            "slug",
+            "チェックサム",
+            "bmi",
+            "rgb",
+            "hex",
+        ]
     }
 
     fn label(&self) -> &'static str {

@@ -24,7 +24,8 @@
 - **大きなファイル容量・配布容量・転送量は、一般的なMBまたはGBだけで見やすく書く。bytesを単独表示または併記せず、外部仕様がMiB／GiB表記の場合も10進のMB／GBへ換算する。**
 - **常に Codex / Claude（作業エージェント自身）の利用クレジット消費を最小化して作業する。** 不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
   - 検証コストの優先順位: まず `cargo check`（コンパイル）→ 必要なら `cargo test --lib`（ロジック）で済ませる。**GUI 起動（`cargo xtask dev`）・スクリーンショット・フルビルドは高コストなので最後の手段**とし、目視確認が本当に必要なときだけ、複数の確認をまとめて 1 回で行う。
-  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtaskの書式、全target静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
+  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtask・`skills/`の書式、全target静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
+  - **`skills/`の書式は`cargo fmt`では検査されない。** スキルは`build.rs`が生成する`#[path] pub mod`でしか繋がっておらず、`mod`宣言をたどるrustfmtからは見えないため、`cargo xtask verify`の「スキルの書式」が追跡中の`skills/**/*.rs`を直接rustfmtへ渡す。手元で直すときは`rustfmt --edition 2021 skills/**/*.rs`を使う。
   - 編集はまとめて行い、**ビルド/テスト/起動は変更が出揃ってから最小回数**だけ実行する。同じ内容のビルド・テスト・起動・読み取りを繰り返さない。
   - `Cargo.toml` / `Cargo.lock` を変更したら `cargo audit --file <Cargo.lock>` で既知脆弱性を確認する。GitHub Actions は無料枠・請求制限による開始前失敗と通知の連発を避けるため使わない。依存更新時と販売前のローカル検証で監査し、保守終了などの情報警告と脆弱性を分けて評価して、対象OS・実行経路と見送り理由をPR本文へ残す。
   - **外部依存は原則として公式LTSまたは長期保守安定版を採用し、LTS相当が無ければ安定版latestを採用する。LLMモデルはLTS扱いにせず常に公式の最新安定版へ追従する。** Cargo・JavaScript・Python等のパッケージ、同梱アプリ、管理導入ツール、Webランタイム、音声・LLMモデルを毎月1日に`.agents/skills/audit-picoagent-dependencies/SKILL.md`の`all`で点検する。互換性、ライセンス、対象OS、再現可能なハッシュ固定の問題で旧版を維持する場合は理由と確認日をPR本文へ残し、未完了なら`docs/TASKS.md`へ移す。
@@ -137,6 +138,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
 - 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`cargo xtask setup engine` で取得）。
 - **Claude Code on the web（Linux コンテナ）で作業する場合は `.claude/hooks/session-start.sh` が環境を用意する。** clone 直後は (1) Tauri / cpal / enigo が要求するシステムライブラリが無い、(2) `frontendDist` が指す `ui-dist/` が Git 管理外で存在せず `tauri::generate_context!` がコンパイル時に落ちる、の2点で `cargo check` すら通らない。フックが apt 導入と `sync-characters` → `build-ui` を済ませ、テストバイナリまで事前ビルドする。手で毎回入れ直さないこと。Windows / macOS のローカル環境では `CLAUDE_CODE_REMOTE` を見て何もしない。
+  - **git-lfs が無いコンテナでは `characters/**` の画像が実体ではなくポインタ文字列になる。** `sync-characters` はこれを検証で弾くため失敗するが、フックはそこで止まらず理由を出して `build-ui` へ進む（止めると `ui-dist/` が無いまま `cargo check` すら通らない）。この状態では画像の実体を検査する `xtask` の `assets::tests::同梱2dの実行画像はlossless_webp単一世代にする` と `cargo xtask verify` が失敗するので、キャラクター素材に関わる検証はローカル環境で行う。Rust コードの `cargo check` / `cargo clippy` / `cargo test --lib` は素材無しで通る。
 
 ## 製品化（配布）
 
@@ -193,7 +195,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
-| `xtask/src/verify.rs` / `agent_harness.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・共通スキル正本とClaude Code用自動認識ファイル・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |
+| `xtask/src/verify.rs` / `agent_harness.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・`skills/`の書式・共通スキル正本とClaude Code用自動認識ファイル・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする。検査対象の列挙は`tracked_files()`（`git ls-files -z`）に集約する |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
 | `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
@@ -201,7 +203,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
-| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。`sync-characters` は git-lfs 未導入で必ず失敗するため、理由を出して続行し `ui-dist/` の生成を止めない。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
 | `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |

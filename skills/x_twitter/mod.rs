@@ -48,9 +48,19 @@ impl Tool for XTwitterTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_X_BEARER_TOKEN", "X の OAuth2 bearer トークン", "password", ""),
+            Field::new(
+                "PICOAGENT_X_BEARER_TOKEN",
+                "X の OAuth2 bearer トークン",
+                "password",
+                "",
+            ),
             Field::new("PICOAGENT_X_USER_ID", "X 既定 user ID", "text", ""),
-            Field::new("PICOAGENT_X_TIMEOUT_SECS", "X API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_X_TIMEOUT_SECS",
+                "X API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
@@ -111,7 +121,11 @@ impl Tool for XTwitterTool {
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_X_USER_ID", ""));
                 if user_id.is_empty() {
-                    return super::config_guide("X連携", &["PICOAGENT_X_USER_ID"], "依頼で user_id を渡すか、既定のX user IDを設定してください。");
+                    return super::config_guide(
+                        "X連携",
+                        &["PICOAGENT_X_USER_ID"],
+                        "依頼で user_id を渡すか、既定のX user IDを設定してください。",
+                    );
                 }
                 let max_results = max_results(&args, 5, 100, 10).to_string();
                 handle_text_response(
@@ -125,7 +139,8 @@ impl Tool for XTwitterTool {
                 )
                 .await
             }
-            _ => "エラー: action は post/search_recent/user_tweets のいずれかを指定してください。".to_string(),
+            _ => "エラー: action は post/search_recent/user_tweets のいずれかを指定してください。"
+                .to_string(),
         }
     }
 }
@@ -146,7 +161,10 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
     if text.chars().count() > max_chars {
-        return Err(format!("{} は {} 文字以内で指定してください。", key, max_chars));
+        return Err(format!(
+            "{} は {} 文字以内で指定してください。",
+            key, max_chars
+        ));
     }
     Ok(text)
 }
@@ -158,7 +176,10 @@ fn max_results(args: &Value, min: u64, max: u64, fallback: u64) -> u64 {
         .unwrap_or(fallback)
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

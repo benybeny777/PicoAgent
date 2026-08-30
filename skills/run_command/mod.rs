@@ -62,8 +62,7 @@ fn normalize(base: &Path, input: &str) -> PathBuf {
 }
 
 pub fn bounded_cwd(cfg: &Config, cwd: Option<&str>) -> Result<PathBuf, String> {
-    crate::permissions::resolve(cfg, cwd.unwrap_or("."))
-        .map(|path| path.as_path().to_path_buf())
+    crate::permissions::resolve(cfg, cwd.unwrap_or(".")).map(|path| path.as_path().to_path_buf())
 }
 
 // Windows / Program Files などの保護領域は全スキル共通の permissions で判定する。
@@ -87,7 +86,10 @@ fn parse_args(args: &Value) -> Result<Vec<String>, String> {
             .as_str()
             .ok_or_else(|| "args は文字列配列で指定してください。".to_string())?;
         if arg.chars().count() > MAX_ARG_CHARS {
-            return Err(format!("各 arg は {} 文字以内で指定してください。", MAX_ARG_CHARS));
+            return Err(format!(
+                "各 arg は {} 文字以内で指定してください。",
+                MAX_ARG_CHARS
+            ));
         }
         out.push(arg.to_string());
     }
@@ -127,7 +129,6 @@ fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
     let tokens = command_tokens(program, args);
     allowlist_entries(cfg).iter().any(|entry| entry == &tokens)
 }
-
 
 fn approval_token() -> String {
     let nanos = std::time::SystemTime::now()
@@ -169,7 +170,12 @@ pub fn trim_output(label: &str, bytes: &[u8]) -> String {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}:\n{}\n…（{} バイトで打ち切り）", label, &text[..end], MAX_OUTPUT_BYTES)
+    format!(
+        "{}:\n{}\n…（{} バイトで打ち切り）",
+        label,
+        &text[..end],
+        MAX_OUTPUT_BYTES
+    )
 }
 
 #[async_trait]
@@ -179,7 +185,15 @@ impl Tool for RunCommandTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["コマンド", "実行", "テスト", "ビルド", "cargo", "npm", "git"]
+        &[
+            "コマンド",
+            "実行",
+            "テスト",
+            "ビルド",
+            "cargo",
+            "npm",
+            "git",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -225,14 +239,24 @@ impl Tool for RunCommandTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_COMMAND_ENABLED", "run_command を有効化（true/false）", "text", "false"),
+            Field::new(
+                "PICOAGENT_COMMAND_ENABLED",
+                "run_command を有効化（true/false）",
+                "text",
+                "false",
+            ),
             Field::new(
                 "PICOAGENT_COMMAND_ALLOWLIST",
                 "run_command の許可コマンド（カンマ区切り・完全一致）",
                 "textarea",
                 DEFAULT_ALLOWLIST,
             ),
-            Field::new("PICOAGENT_COMMAND_TIMEOUT_SECS", "run_command の既定タイムアウト秒（1〜120）", "text", "30"),
+            Field::new(
+                "PICOAGENT_COMMAND_TIMEOUT_SECS",
+                "run_command の既定タイムアウト秒（1〜120）",
+                "text",
+                "30",
+            ),
         ]
     }
 
@@ -372,10 +396,7 @@ pub async fn execute_with_persistent_approval(
             } else {
                 format!("{}\n{}", current.trim(), entry)
             };
-            patch.insert(
-                "PICOAGENT_ALLOWED_PATHS".to_string(),
-                Value::String(next),
-            );
+            patch.insert("PICOAGENT_ALLOWED_PATHS".to_string(), Value::String(next));
             saved.push(format!("追加許可パス `{entry}`"));
         }
     }
@@ -404,10 +425,7 @@ async fn execute_approved(
         return crate::tools::process::physical_delete_error();
     }
     let mut command = crate::tools::process::command(program);
-    command
-        .args(parsed_args)
-        .current_dir(cwd)
-        ;
+    command.args(parsed_args).current_dir(cwd);
 
     let output = match crate::tools::process::output(command, timeout_secs, "コマンド").await {
         Ok(output) => output,
@@ -471,10 +489,7 @@ mod tests {
 
     #[test]
     fn 実行cwdのルート外を拒否する_スラッシュ区切り() {
-        let base = std::env::temp_dir().join(format!(
-            "picoagent-cmd-test-{}",
-            std::process::id()
-        ));
+        let base = std::env::temp_dir().join(format!("picoagent-cmd-test-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
         let cfg = Config::new();
         cfg.set("PICOAGENT_ALLOWED_ROOT", base.to_string_lossy().as_ref());
@@ -493,7 +508,10 @@ mod tests {
             "cmd",
             &["/C".to_string(), "del target.txt".to_string()]
         ));
-        assert!(is_physical_delete("git", &["clean".to_string(), "-fd".to_string()]));
+        assert!(is_physical_delete(
+            "git",
+            &["clean".to_string(), "-fd".to_string()]
+        ));
         assert!(is_physical_delete(
             "cmd",
             &[

@@ -11,8 +11,8 @@ use url::Url;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::message::Field;
+use crate::permissions::SafePath;
 
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
 const MAX_TOPIC_CHARS: usize = 160;
@@ -606,7 +606,12 @@ fn build_reading_list(topic: &str, results: &[SearchResult]) -> String {
     out
 }
 
-fn sibling_path(cfg: &Config, path: &SafePath, suffix: &str, extension: &str) -> Result<SafePath, String> {
+fn sibling_path(
+    cfg: &Config,
+    path: &SafePath,
+    suffix: &str,
+    extension: &str,
+) -> Result<SafePath, String> {
     let stem = path.file_stem_lossy();
     if stem.is_empty() {
         return Err("保存先ファイル名を解釈できません。".to_string());
@@ -777,7 +782,19 @@ impl Tool for ResearchReportTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["調査", "リサーチ", "レポート", "出典", "競合比較", "市場調査", "まとめて調べ", "ダッシュボード", "html", "research", "report"]
+        &[
+            "調査",
+            "リサーチ",
+            "レポート",
+            "出典",
+            "競合比較",
+            "市場調査",
+            "まとめて調べ",
+            "ダッシュボード",
+            "html",
+            "research",
+            "report",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {

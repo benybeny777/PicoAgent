@@ -174,7 +174,10 @@ fn parse_multi_request(cfg: &Config, args: &Value) -> Result<Option<MultiRequest
         .enumerate()
         .map(|(index, value)| selection_from_value(value, &fallback_provider, index))
         .collect::<Vec<_>>();
-    if let Some(empty) = agents.iter().find(|selection| selection.provider.is_empty()) {
+    if let Some(empty) = agents
+        .iter()
+        .find(|selection| selection.provider.is_empty())
+    {
         return Err(format!("エラー: {} の provider が空です。", empty.name));
     }
 
@@ -370,9 +373,9 @@ async fn merge_candidates(
         provider_chat(provider, cfg, &model, &messages, judge_session),
         cancel.as_deref(),
     )
-        .await
-        .ok_or_else(|| agent::cancel_message().to_string())?
-        .map_err(|error| error.to_string())?;
+    .await
+    .ok_or_else(|| agent::cancel_message().to_string())?
+    .map_err(|error| error.to_string())?;
     let answer = response.content.trim().to_string();
     if answer.is_empty() {
         return Err("統合AIが空の回答を返しました。".to_string());
@@ -447,7 +450,11 @@ async fn assigned_tasks(
                 index + 1,
                 agent.name,
                 agent.provider,
-                if agent.model.is_empty() { "既定" } else { &agent.model },
+                if agent.model.is_empty() {
+                    "既定"
+                } else {
+                    &agent.model
+                },
                 if agent.focus.is_empty() {
                     String::new()
                 } else {
@@ -482,9 +489,9 @@ async fn assigned_tasks(
         provider_chat(provider, cfg, &model, &messages, judge_session),
         cancel.as_deref(),
     )
-        .await
-        .ok_or_else(|| agent::cancel_message().to_string())?
-        .map_err(|error| format!("分担計画AIの呼び出しに失敗しました: {error}"))?;
+    .await
+    .ok_or_else(|| agent::cancel_message().to_string())?
+    .map_err(|error| format!("分担計画AIの呼び出しに失敗しました: {error}"))?;
     parse_planned_tasks(&response.content, request.agents.len()).ok_or_else(|| {
         "分担計画AIの応答を指定件数のJSONタスクとして読めませんでした。候補AIは実行していません。"
             .to_string()
@@ -670,8 +677,8 @@ impl Tool for SubagentTool {
         }
         // 分担計画と最終統合が同じCLIなら、この1依頼の間だけ同じ明示セッションを使う。
         // 候補AIは別Sessionなので、計画・候補・別依頼の文脈は混ざらない。
-        let judge_session = (request.judge.provider == "agent_cli")
-            .then(crate::providers::agent_cli::Session::new);
+        let judge_session =
+            (request.judge.provider == "agent_cli").then(crate::providers::agent_cli::Session::new);
         let tasks = match assigned_tasks(cfg, &request, &cancel, judge_session.as_ref()).await {
             Ok(tasks) => tasks,
             Err(error) => return error,
@@ -732,14 +739,8 @@ impl Tool for SubagentTool {
                 successful
             );
         }
-        let merged = merge_candidates(
-            cfg,
-            &request,
-            &candidates,
-            &cancel,
-            judge_session.as_ref(),
-        )
-        .await;
+        let merged =
+            merge_candidates(cfg, &request, &candidates, &cancel, judge_session.as_ref()).await;
         if cancelled(&cancel) {
             return agent::cancel_message().to_string();
         }
@@ -827,7 +828,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(request.judge_persona, "あなたはむぎ。やわらかい口調で話す。");
+        assert_eq!(
+            request.judge_persona,
+            "あなたはむぎ。やわらかい口調で話す。"
+        );
 
         let candidates = vec![
             (
@@ -867,11 +871,8 @@ mod tests {
         let too_many = (0..9)
             .map(|_| json!({"provider": "local"}))
             .collect::<Vec<_>>();
-        let error = parse_multi_request(
-            &cfg,
-            &json!({"task": "質問", "agents": too_many}),
-        )
-        .unwrap_err();
+        let error =
+            parse_multi_request(&cfg, &json!({"task": "質問", "agents": too_many})).unwrap_err();
         assert!(error.contains("最大 8 件"));
     }
 
@@ -908,7 +909,11 @@ mod tests {
             focus: String::new(),
         };
         let candidates = vec![(selection, "担当".to_string(), Ok("回答".to_string()))];
-        let prompt = candidates_for_judge("3行にして", "[user]\n昨日の要約\n\n[assistant]\n長い要約", &candidates);
+        let prompt = candidates_for_judge(
+            "3行にして",
+            "[user]\n昨日の要約\n\n[assistant]\n長い要約",
+            &candidates,
+        );
         assert!(prompt.contains("直前までの会話:"));
         assert!(prompt.contains("昨日の要約"));
         // 文脈が無いときは見出しごと出さない。
