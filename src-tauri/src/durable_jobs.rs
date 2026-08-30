@@ -16,6 +16,16 @@ const MAX_RESULT_CHARS: usize = 12_000;
 const MAX_ATTEMPTS: u32 = 5;
 const JOB_TIMEOUT_SECS: u64 = 30 * 60;
 const WORKER_KEY: &str = "__picoagent_durable_worker";
+/// 同時に走らせるジョブの上限。
+///
+/// 1件ずつ順に処理すると、`JOB_TIMEOUT_SECS`（30分）いっぱい掛かりうる重いジョブ
+/// （Web調査＋Office生成＋PDF変換）の後ろに並んだ短い転送が、その間ずっと始まらない。
+/// 利用者には「ジョブへ登録しました」と返っているので、何も起きていないように見える。
+///
+/// 状態ファイルの更新は `update()` / `list()` がどちらも `store::lock_state` を取るため、
+/// 同時に走らせても一覧の書き戻しや `unique_key` の重複判定は壊れない。上限を設けるのは、
+/// 大きな転送が何本も同時にメモリと回線を取り合わないようにするため。
+const MAX_CONCURRENT_JOBS: usize = 3;
 
 static STORE_PATH: OnceLock<PathBuf> = OnceLock::new();
 static SENDER: OnceLock<tokio::sync::mpsc::Sender<String>> = OnceLock::new();
@@ -407,61 +417,77 @@ pub fn start(app: AppHandle) {
             crate::log_paths::append_app_log(&app, &message);
         }
     }
+    // 取り出しは1本のループで行い、実行だけを `MAX_CONCURRENT_JOBS` まで並べる。
+    // 上限に達している間は `acquire_owned()` で待つので、待ちのジョブはキューに残る。
     tauri::async_runtime::spawn(async move {
+        let limit = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JOBS));
         while let Some(id) = rx.recv().await {
-            let Ok(Some(job)) = mark_started(&id) else {
-                continue;
+            let Ok(permit) = limit.clone().acquire_owned().await else {
+                // セマフォが閉じるのは終了時だけ。取り出しを続ける意味が無いので抜ける。
+                break;
             };
-            let mut args = job.args.clone();
-            if let Some(object) = args.as_object_mut() {
-                object.insert(
-                    WORKER_KEY.to_string(),
-                    Value::String(WORKER_TOKEN.get().cloned().unwrap_or_default()),
-                );
-                object.insert("__job_id".to_string(), Value::String(id.clone()));
-            }
-            let child_app = app.clone();
-            let tool_name = job.tool_name.clone();
-            let mut execution = tauri::async_runtime::spawn(async move {
-                let Some(state) = child_app.try_state::<crate::commands::AppState>() else {
-                    return "エラー: アプリ状態を取得できません。".to_string();
-                };
-                crate::tools::dispatch_final(&state.config, &tool_name, args).await
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _permit = permit;
+                run_job(&app, &id).await;
             });
-            let result = tokio::select! {
-                joined = &mut execution => match joined {
-                    Ok(result) => result,
-                    Err(error) => format!("エラー: 永続ジョブの実行タスクが異常終了しました: {error}"),
-                },
-                _ = tokio::time::sleep(std::time::Duration::from_secs(JOB_TIMEOUT_SECS)) => {
-                    execution.abort();
-                    format!("エラー: 永続ジョブが{}分でタイムアウトしました。", JOB_TIMEOUT_SECS / 60)
-                }
-            };
-            let job_state = mark_finished(&id, result.clone()).unwrap_or(JobState::Failed);
-            let ok = job_state == JobState::Completed;
-            let body = if ok {
-                "バックグラウンド処理が完了しました。"
-            } else {
-                result
-                    .lines()
-                    .next()
-                    .unwrap_or("バックグラウンド処理に失敗しました。")
-            };
-            if let Err(error) = app.emit(
-                "pet:notice",
-                json!({
-                    "kind": "durable_job", "title": job.label, "body": body,
-                    "ok": ok, "jobId": id, "at": now()
-                }),
-            ) {
-                crate::log_paths::append_app_log(
-                    &app,
-                    &format!("永続ジョブ結果を画面へ通知できません: {error}"),
-                );
-            }
         }
     });
+}
+
+/// 1件のジョブを実行し、結果を保存して画面へ知らせる。
+async fn run_job(app: &AppHandle, id: &str) {
+    let Ok(Some(job)) = mark_started(id) else {
+        return;
+    };
+    let mut args = job.args.clone();
+    if let Some(object) = args.as_object_mut() {
+        object.insert(
+            WORKER_KEY.to_string(),
+            Value::String(WORKER_TOKEN.get().cloned().unwrap_or_default()),
+        );
+        object.insert("__job_id".to_string(), Value::String(id.to_string()));
+    }
+    let child_app = app.clone();
+    let tool_name = job.tool_name.clone();
+    let mut execution = tauri::async_runtime::spawn(async move {
+        let Some(state) = child_app.try_state::<crate::commands::AppState>() else {
+            return "エラー: アプリ状態を取得できません。".to_string();
+        };
+        crate::tools::dispatch_final(&state.config, &tool_name, args).await
+    });
+    let result = tokio::select! {
+        joined = &mut execution => match joined {
+            Ok(result) => result,
+            Err(error) => format!("エラー: 永続ジョブの実行タスクが異常終了しました: {error}"),
+        },
+        _ = tokio::time::sleep(std::time::Duration::from_secs(JOB_TIMEOUT_SECS)) => {
+            execution.abort();
+            format!("エラー: 永続ジョブが{}分でタイムアウトしました。", JOB_TIMEOUT_SECS / 60)
+        }
+    };
+    let job_state = mark_finished(id, result.clone()).unwrap_or(JobState::Failed);
+    let ok = job_state == JobState::Completed;
+    let body = if ok {
+        "バックグラウンド処理が完了しました。"
+    } else {
+        result
+            .lines()
+            .next()
+            .unwrap_or("バックグラウンド処理に失敗しました。")
+    };
+    if let Err(error) = app.emit(
+        "pet:notice",
+        json!({
+            "kind": "durable_job", "title": job.label, "body": body,
+            "ok": ok, "jobId": id, "at": now()
+        }),
+    ) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("永続ジョブ結果を画面へ通知できません: {error}"),
+        );
+    }
 }
 
 #[cfg(test)]

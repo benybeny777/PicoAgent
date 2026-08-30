@@ -155,27 +155,48 @@ fn pptx_bytes(title: &str, body: &str) -> Result<Vec<u8>, String> {
     ])
 }
 
-fn write_artifacts(
+/// このスキルが直接生成する成果物。並びは `build_artifacts()` の戻り値と対応させる。
+const GENERATED_NAMES: [&str; 4] = ["report.html", "report.docx", "data.xlsx", "deck.pptx"];
+/// 上の DOCX から OfficeCLI が変換して作る成果物。生成元が違うので別に持つ。
+const CONVERTED_NAME: &str = "report.pdf";
+
+fn build_artifacts(title: &str, body: &str) -> Result<Vec<Vec<u8>>, String> {
+    let html = format!("<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><title>{}</title><style>body{{font-family:system-ui;max-width:900px;margin:40px auto;line-height:1.7}}pre{{white-space:pre-wrap}}</style><h1>{}</h1><pre>{}</pre></html>", html_escape(title), html_escape(title), html_escape(body));
+    Ok(vec![
+        html.into_bytes(),
+        docx_bytes(title, body)?,
+        xlsx_bytes(title, body)?,
+        pptx_bytes(title, body)?,
+    ])
+}
+
+/// 成果物を生成して書き出す。
+///
+/// zip 圧縮と数MBのファイル出力は、そのまま `await` 中のタスクで回すと非同期ワーカーの
+/// スレッドを1本占有する。許可判定（`cfg` が要る）だけ先に済ませ、重い生成と書き込みは
+/// ブロッキング用スレッドへ渡す（`ai_drive` の読み書きと同じ扱いに揃える）。
+async fn write_artifacts(
     cfg: &Config,
     dir: &SafePath,
     title: &str,
     body: &str,
 ) -> Result<Vec<SafePath>, String> {
     crate::permissions::fs::create_dir_all(dir)?;
-    let html = format!("<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><title>{}</title><style>body{{font-family:system-ui;max-width:900px;margin:40px auto;line-height:1.7}}pre{{white-space:pre-wrap}}</style><h1>{}</h1><pre>{}</pre></html>", html_escape(title), html_escape(title), html_escape(body));
-    let files = [
-        ("report.html", html.into_bytes()),
-        ("report.docx", docx_bytes(title, body)?),
-        ("data.xlsx", xlsx_bytes(title, body)?),
-        ("deck.pptx", pptx_bytes(title, body)?),
-    ];
-    let mut paths = Vec::new();
-    for (name, bytes) in files {
-        let path = dir.join(cfg, name)?;
-        crate::permissions::fs::write(&path, bytes)?;
-        paths.push(path);
-    }
-    Ok(paths)
+    let paths = GENERATED_NAMES
+        .iter()
+        .map(|name| dir.join(cfg, name))
+        .collect::<Result<Vec<SafePath>, String>>()?;
+    let targets = paths.clone();
+    let (title, body) = (title.to_string(), body.to_string());
+    tokio::task::spawn_blocking(move || {
+        for (path, bytes) in targets.iter().zip(build_artifacts(&title, &body)?) {
+            crate::permissions::fs::write(path, bytes)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("成果物生成タスクが失敗しました: {error}"))?
+    .map(|()| paths)
 }
 
 /// 出力先が「このジョブが作ったフォルダ」であることを所有者マーカーで確かめる。
@@ -266,7 +287,7 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
     if crate::durable_jobs::is_cancelled(job_id) {
         return "エラー: ジョブはキャンセルされました。".to_string();
     }
-    let paths = match write_artifacts(cfg, &dir, topic, &body) {
+    let paths = match write_artifacts(cfg, &dir, topic, &body).await {
         Ok(value) => value,
         Err(error) => return format!("エラー: 成果物生成に失敗しました: {error}"),
     };
@@ -295,13 +316,7 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
             .and_then(Value::as_str)
             .unwrap_or("");
         let ai_root = crate::permissions::primary_root(cfg).join("PicoAgent-AI-Drive");
-        for name in [
-            "report.html",
-            "report.docx",
-            "data.xlsx",
-            "deck.pptx",
-            "report.pdf",
-        ] {
+        for name in GENERATED_NAMES.iter().copied().chain([CONVERTED_NAME]) {
             if crate::durable_jobs::is_cancelled(job_id) {
                 return "エラー: ジョブはキャンセルされました。".to_string();
             }
@@ -327,7 +342,13 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
             }
         }
     }
-    format!("成果物を生成しました: {}\n- report.html\n- report.docx\n- data.xlsx\n- deck.pptx\n- report.pdf", dir.display())
+    let listed = GENERATED_NAMES
+        .iter()
+        .copied()
+        .chain([CONVERTED_NAME])
+        .map(|name| format!("\n- {name}"))
+        .collect::<String>();
+    format!("成果物を生成しました: {}{listed}", dir.display())
 }
 
 #[async_trait]
@@ -455,6 +476,18 @@ mod tests {
         ] {
             let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
             assert!(archive.by_name(required).is_ok(), "{required}");
+        }
+    }
+
+    #[test]
+    fn 生成物の名前と中身の並びが揃っている() {
+        // 名前と生成順がずれると、report.docx の中身が xlsx になっても誰も気付かない。
+        let built = build_artifacts("題", "本文").unwrap();
+        assert_eq!(built.len(), GENERATED_NAMES.len());
+        for (name, bytes) in GENERATED_NAMES.iter().zip(&built) {
+            let office =
+                name.ends_with(".docx") || name.ends_with(".xlsx") || name.ends_with(".pptx");
+            assert_eq!(bytes.starts_with(b"PK\x03\x04"), office, "{name}");
         }
     }
 
