@@ -16,6 +16,7 @@ mod config;
 mod daily;
 #[cfg(test)]
 mod doc_sync;
+mod durable_jobs;
 mod emotion;
 mod engine;
 mod engine_backend;
@@ -381,6 +382,7 @@ pub fn run() {
             }
             // フロントの準備完了を見張り、時間内に来なければキャラクター付きの案内画面へ切り替える。
             boot_screen::watch(app.handle().clone());
+            durable_jobs::start(app.handle().clone());
             scheduler::start(app.handle().clone());
             // ローカル API サーバ（既定無効。PICOAGENT_API_ENABLED=true で 127.0.0.1 に開く）。
             api_server::start(app.handle().clone());
