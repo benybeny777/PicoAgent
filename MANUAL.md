@@ -31,7 +31,7 @@
 PicoAgent は Tauri 製のデスクトップペット型 AI エージェントです。
 
 - **ローカルファースト**: 既定の叩く AI は同梱のローカル推論エンジン（llama-server + GGUF）。初回のモデル取得後はオフラインで動きます。読み上げ（Aivis）や文字起こし（Whisper）もローカルです。
-- **スキル（コネクタ）駆動**: 天気・Web検索からGmail・Slack・GitHub、Office文書編集、PDF、画像・動画生成、PC操作、コマンド実行まで70種のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
+- **スキル（コネクタ）駆動**: 天気・Web検索からGmail・Slack・GitHub、Office文書編集、PDF、画像・動画生成、PC操作、コマンド実行まで71種のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
 - **キャラクターと暮らす**: クリックで話しかけ、なでると喜び、放っておくと居眠りします。Live2D にも対応。
 - **外から叩ける**: Ollama 風のローカル HTTP API と最小 CLI で、スクリプトや他ツールからもエージェントを呼べます。
 
@@ -262,6 +262,40 @@ SNS 投稿: X/Twitter、Mastodon、Bluesky、Reddit、LinkedIn、Misskey。
 | プロジェクト切り替え | 「このフォルダを仕事用として登録して」「仕事用へ切り替えて」 |
 | 保存ワークフロー | 「この手順を週報作成として覚えて」「週報作成を実行して」 |
 
+### Markdownで自分のAIスキルを追加
+
+普通の`SKILL.md`へ繰り返し使う指示を書き、再ビルドや再起動なしで追加できます。チャットから次のように頼めます。
+
+- 「週報を成果・課題・次の予定の3項目にまとめるAIスキルを作って」
+- 「利用者追加スキルの一覧を見せて」
+- 「weekly-reportスキルで、このメモを週報にして」
+- 「weekly-reportスキルは未確認事項を推測しないよう更新して」
+
+保存先は`app_config_dir/user-skills/<name>/SKILL.md`です。外部エディタでUTF-8のファイルを直接作成・編集した場合も、次の会話から一覧を読み直します。
+
+```markdown
+---
+name: weekly-report
+description: 作業メモを週報の三項目へ整理する
+when_to_use: 週報、進捗報告、今週の成果を頼まれたとき
+metadata:
+  tags: 週報, 進捗
+---
+
+成果、残った課題、次の予定の順に簡潔にまとめる。
+事実が足りない項目は推測せず「未確認」と書く。
+```
+
+制約は次のとおりです。
+
+- `name`は英小文字で始め、英小文字・数字・ハイフンだけの64文字以内
+- 必須frontmatterは`name`と`description`。用途は`when_to_use`、分類は`metadata.tags`へ書く。フォルダ名と`name`を一致させる
+- 自動候補へ出したくないスキルは`disable-model-invocation: true`にする。名前を指定した利用はできる
+- `license`、`compatibility`、`metadata`、`allowed-tools`も読み書き時に保持する。`allowed-tools`は使用ツールを絞る希望であり、PicoAgentの許可を増やさない
+- 最大32件、1ファイル約24KB、本文16,000文字まで
+- MarkdownはAIへの指示だけを持つ。任意コードを埋め込んだり、systemルール、ファイル許可、送信確認、ライセンスを上書きしたりできない
+- 実際の操作は既存スキルを通すため、コマンド実行などが無効ならSKILL.mdからも実行できない
+
 ---
 
 ## 6. 文書・PDF・画像・音声の変換（同梱 OSS ツール）
@@ -436,6 +470,7 @@ cargo xtask cli repl              # 対話モード（会話文脈を保持。ex
 | データ | 場所 |
 |---|---|
 | 設定 | `app_config_dir/config.json` |
+| 利用者追加AIスキル | `app_config_dir/user-skills/<name>/SKILL.md` |
 | 会話履歴（キャラ別） | `app_data_dir/history-<キャラID>.json` |
 | 長期メモリ（全キャラ共通） | `app_data_dir/memory.json` |
 | スケジュール実行結果 | `app_data_dir/schedule-runs.json` |

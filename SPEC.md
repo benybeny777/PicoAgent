@@ -65,7 +65,7 @@ PicoAgent製品内部のエージェント構成は、名称だけで空の層�
 | ハーネス上の責務 | 実装正本 | 境界 |
 |---|---|---|
 | ルール | `agent/prompt.rs` | 基本system prompt、キャラクター人格、利用者が選んだ関係、長期メモリ、関係性文脈を一定順序で合成する。通常の再構築と「新しい会話」は同じ関数を使う |
-| スキル | `src-tauri/src/tools/mod.rs` / `skills/<名前>/` | 候補選択、schema、許可判定、実行、副作用をスキル単位で持つ |
+| スキル | `src-tauri/src/tools/mod.rs` / `skills/<名前>/` / `user_skills.rs` | Rust Toolは候補選択、schema、許可判定、実行、副作用を持つ。利用者のSKILL.mdは指示だけを持ち、既存Toolの境界内で使う |
 | メモリ | `memory.rs` / `history.rs` / `relationship.rs` | 全キャラ共通の長期メモリ、キャラ別会話履歴、キャラ別関係性を別の保存単位で所有する |
 | フィードバックループ | `agent/feedback.rs` / `agent.rs` | 前者は任意の計画生成と自己評価、後者は`chat → tool_calls → 結果 → chat`の実行ループを持つ |
 | 実行中イベント | `agent.rs` / `commands.rs` | 進捗、ツール実行、承認待ち、画面通知を発生元から送る。外部拡張用の共通hook契約は無いため、実体のない`hooks`層は作らない |
@@ -281,9 +281,17 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 - 共有クライアントは接続確立に 10 秒の上限を持つ（応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない）。モデル一覧のような短い問い合わせは `tools::http::metadata_timeout()`（`PICOAGENT_HTTP_METADATA_TIMEOUT_SECS`）でリクエスト全体にも上限を付け、この値は基本設定の「詳細設定」から変更できる。
 - `build.rs` は `skills/<スキル名>/mod.rs` を自動登録し、さらに `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録する。これにより `skills/chitchat/trends.rs` や `skills/run_command/jobs.rs` のような補助ファイル変更もビルドに反映される。
 
+#### 利用者追加のMarkdownスキル
+
+`user_skill`は、`app_config_dir/user-skills/<name>/SKILL.md`を実行時に管理・適用するToolである。チャットから`list` / `show` / `create` / `update` / `use`を呼べる。利用者が外部エディタで追加・変更した場合も、`commands.rs`が各ターンのsystem文へ短い索引だけを入れ直し、必要な本文は`use`時だけ読む。初回systemを作る`agent/prompt.rs`も同じ索引を使うため、デスクトップ会話以外のエージェント入口でも利用できる。
+
+SKILL.mdの必須frontmatterは`name`と`description`、本文がAIへの手順である。Agent Skillsとの交換用に`license`、`compatibility`、`metadata`、`allowed-tools`を保持し、候補選択には`when_to_use`と`metadata.tags`を使う。`disable-model-invocation: true`は自動索引から外すが、利用者が名前を指定した`use`は許可する。`allowed-tools`は希望する最大範囲としてモデルへ示すだけで、Tool登録、設定、許可、確認を増やさない。`name`は英小文字開始の英小文字・数字・ハイフン、64文字以内。最大32件、タグ12個、1ファイル24KB、本文16,000文字までとし、UTF-8以外、シンボリックリンク、フォルダ名と`name`の不一致、未知・重複frontmatter、上限超過はエラーにする。作成・更新は`store::lock_state("user-skills")`で直列化し、`store::write_atomic()`で原子的に保存する。壊れた既存ファイルは更新で上書きせず、一覧へ読み込み警告を出す。
+
+Markdownスキルは実行コードでも動的Tool定義でもない。`user_skill`は本文をtool結果としてモデルへ返すだけで、別Toolを直接dispatchしない。本文に操作手順があっても、モデルが改めて登録済みToolを呼ぶため、ファイル許可、外部送信確認、コマンド承認、Proライセンス、出力上限、プロンプトインジェクション検査を迂回できない。任意名のスキルを静的キーワードだけでは選べないため、`user_skill`の小さなschemaは常時候補へ含める。
+
 ### スキルの分類（エージェント設計としての位置づけ）
 
-スキルの正体は **function calling のツール定義**（`name` / `description` / `parameters` の JSON Schema / `run()`）であり、MCP のツール定義と同じ層にある。README のスキル一覧はユーザー向けの**用途別**分類なので、設計上の位置づけはこちらで見る。
+実行能力を持つスキルの正体は **function calling のツール定義**（`name` / `description` / `parameters` の JSON Schema / `run()`）であり、MCP のツール定義と同じ層にある。利用者のSKILL.mdは`user_skill` Toolが読む指示データで、単独の実行能力は持たない。README のスキル一覧はユーザー向けの**用途別**分類なので、設計上の位置づけはこちらで見る。
 
 分類は2軸で捉える。**役割**（何をする道具か）と**副作用の強さ**（読むだけか、外部状態を変えるか）で、後者は MCP の `readOnlyHint` / `destructiveHint` に対応する概念である。副作用は「そのスキルが持つ最も強い操作」で判定する。
 
@@ -297,7 +305,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
 | **Action**（資料一式の生成） | write | 2 | `genspark_suite` `spark_workspace` |
 | **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
 | **Destructive / 高リスク** | destructive | 6 | `trash_file` `run_command` `command_job` `code_runner` `app_control` `desktop_control` |
-| **State**（アプリ内の永続状態） | write | 7 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `todo_plan` `project` |
+| **State**（アプリ内の永続状態） | write | 8 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `todo_plan` `project` `user_skill` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
 | **Orchestration**（多段実行・組み立て） | 呼び先に従う | 6 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` `ask_user` |
 
