@@ -565,6 +565,23 @@ async fn ensure_local_model_selection(app: &AppHandle) {
     }
 }
 
+/// 保存済みGPU名が候補バックエンドで使える場合だけ返す。
+/// llama.cppのデバイス名はバックエンド固有なので、たとえば`Vulkan1`をCUDA版へ
+/// 渡すと起動前に終了する。未知の名前は後方互換のためそのまま渡す。
+fn gpu_device_for_candidate<'a>(candidate_label: &str, configured: &'a str) -> Option<&'a str> {
+    let device = configured.trim();
+    if device.is_empty() || candidate_label.eq_ignore_ascii_case("CPU") {
+        return None;
+    }
+    let known_backend = ["CUDA", "Vulkan", "ROCm", "SYCL", "Metal"]
+        .into_iter()
+        .find(|backend| device.starts_with(backend));
+    match known_backend {
+        Some(backend) if !candidate_label.eq_ignore_ascii_case(backend) => None,
+        _ => Some(device),
+    }
+}
+
 // llama-server を起動する。
 fn spawn_server(
     app: &AppHandle,
@@ -582,6 +599,7 @@ fn spawn_server(
     // 使用 GPU の指定（複数 GPU 環境向け）。空なら llama-server の既定（先頭デバイス）。
     // 例: Vulkan ビルドで discrete GPU を使う場合は "Vulkan1" のように指定する。
     let gpu_device = state.config.get("PICOAGENT_LOCAL_GPU_DEVICE", "");
+    let candidate_gpu_device = gpu_device_for_candidate(candidate.label, &gpu_device);
 
     let mut cmd = crate::tools::process::command_sync(server);
     cmd.arg("-m")
@@ -607,9 +625,11 @@ fn spawn_server(
             .arg("--reasoning-budget")
             .arg("0");
     }
-    // CPUフォールバックでは、保存済みのVulkan/CUDAデバイス名を渡して起動を壊さない。
-    if ngl.trim() != "0" && !gpu_device.trim().is_empty() {
-        cmd.arg("--device").arg(gpu_device.trim());
+    // 候補と異なる方式の保存済みデバイス名を渡して、起動前に壊さない。
+    if ngl.trim() != "0" {
+        if let Some(device) = candidate_gpu_device {
+            cmd.arg("--device").arg(device);
+        }
     }
     let log_path = crate::log_paths::log_file(app, "engine.log");
     if let Some(parent) = log_path.parent() {
@@ -627,11 +647,7 @@ fn spawn_server(
         port,
         ctx,
         ngl,
-        if gpu_device.trim().is_empty() {
-            "(default)"
-        } else {
-            gpu_device.trim()
-        }
+        candidate_gpu_device.unwrap_or("(default)")
     )?;
     let err_log = log.try_clone()?;
     cmd.stdin(Stdio::null())
@@ -879,7 +895,10 @@ pub fn clear_stopping(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{migration_file_names, model_file_matches, remove_obsolete_model_files};
+    use super::{
+        gpu_device_for_candidate, migration_file_names, model_file_matches,
+        remove_obsolete_model_files,
+    };
     use crate::providers::local;
 
     #[test]
@@ -888,6 +907,22 @@ mod tests {
         let names = migration_file_names(preset.url);
         assert_eq!(names[0], preset.file_name);
         assert_eq!(names[1], "gemma-4-E2B-it-Q4_K_M.gguf");
+    }
+
+    #[test]
+    fn gpu名は対応するバックエンド候補だけへ渡す() {
+        assert_eq!(
+            gpu_device_for_candidate("Vulkan", "Vulkan1"),
+            Some("Vulkan1")
+        );
+        assert_eq!(gpu_device_for_candidate("CUDA", "Vulkan1"), None);
+        assert_eq!(gpu_device_for_candidate("CUDA", "CUDA0"), Some("CUDA0"));
+        assert_eq!(gpu_device_for_candidate("CPU", "CUDA0"), None);
+        assert_eq!(
+            gpu_device_for_candidate("CUDA", "  custom:0  "),
+            Some("custom:0")
+        );
+        assert_eq!(gpu_device_for_candidate("CUDA", "  "), None);
     }
 
     #[test]

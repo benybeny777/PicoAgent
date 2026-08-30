@@ -540,7 +540,9 @@ fn greeting_kind(text: &str, hour: u32) -> Option<GreetingKind> {
     match normalized_short_text(text).as_str() {
         "おはよう" | "おはようございます" => Some(GreetingKind::Morning),
         "こんばんは" | "こんばんわ" => Some(GreetingKind::Evening),
-        "こんにちは" | "こんにちわ" => Some(GreetingKind::Day),
+        "こんにちは" | "こんにちわ" | "こんちは" | "こんちわ" => {
+            Some(GreetingKind::Day)
+        }
         "やっほー" | "やっほ" | "やほ" | "hello" | "hi" => {
             Some(greeting_kind_for_hour(hour))
         }
@@ -555,6 +557,8 @@ fn strip_leading_salutation(greeting: &str) -> &str {
     const SALUTATIONS: &[&str] = &[
         "こんにちは",
         "こんにちわ",
+        "こんちは",
+        "こんちわ",
         "こんばんは",
         "こんばんわ",
         "おはようございます",
@@ -892,11 +896,6 @@ async fn run_scoped(
                     messages[user_index].content = renderer(&user_text, &result);
                 }
             }
-        } else {
-            // 雑談・感想・相談は検索せず、キャラ本人として自然に短く返す（速く自然に）。
-            messages[user_index].content = format!(
-                "{user_text}\n\nこれは雑談や相談です。Web検索は不要です。選択中キャラクター本人として、自然に短めに答えてください。最新情報・事実確認が必要なときだけ、その旨を伝えてください。"
-            );
         }
     }
 
@@ -1376,6 +1375,10 @@ mod tests {
         );
         assert_eq!(
             simple_greeting_answer("こんにちわ", 13, "").as_deref(),
+            Some("こんにちは！今日はなにする？")
+        );
+        assert_eq!(
+            simple_greeting_answer("こんちわ", 13, "").as_deref(),
             Some("こんにちは！今日はなにする？")
         );
         assert_eq!(
