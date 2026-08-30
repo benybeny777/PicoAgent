@@ -4,6 +4,21 @@
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
+## 作業エージェントのハーネス構成
+
+作業ルール、再利用手順、開始時処理、作業状態、最終検証は、更新理由が異なるため次の正本へ分けます。分類名ごとのファイルをさらに増やさず、各正本から別の正本へ手順を複製しません。
+
+| 責務 | 正本・関連ファイル | 保持する内容 |
+|---|---|---|
+| 恒久ルール | `AGENTS.md` | 全作業へ常時適用する方針と安全規則。`CLAUDE.md`はこの正本の場所だけを示す案内ファイル |
+| 再利用手順 | `.agents/skills/<名前>/SKILL.md` | 繰り返す作業の入力条件、工程、停止条件、検証。`.claude/skills/<名前>/SKILL.md`はClaude Codeが自動認識し、同名正本を読むよう案内するだけのファイル |
+| 開始時処理 | `.claude/hooks/` | Claude Code固有のセッション開始時処理。通常の検証手順を複製しない |
+| 作業状態 | `HANDOFF.md` / `docs/TASKS.md` | 前者は未マージ作業と直後の再開手順、後者は未完了・条件待ちだけ |
+| 最終検証 | `cargo xtask verify` | 書式、静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、JavaScript構文、Git差分 |
+| 完了記録 | PR本文とGit履歴 | 目的、採否と理由、検証結果、未確認事項 |
+
+ここでいう「作業状態」はPicoAgent製品の長期メモリ機能とは別物です。共通スキル正本とClaude Code用自動認識ファイルの名前・frontmatter・参照先・本文量は`cargo xtask verify`が機械検査します。
+
 ## 🧩 コネクタで拡張する
 
 ```mermaid
@@ -45,7 +60,7 @@ graph LR
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
-| `cargo xtask verify` | PR前の書式・静的解析・テスト・作業エージェント用スキル入口・JavaScript構文・Git差分の一括検証 |
+| `cargo xtask verify` | PR前の書式・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・Git差分の一括検証 |
 
 > `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
 > `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
