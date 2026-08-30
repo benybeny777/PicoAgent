@@ -13,4 +13,4 @@
 | `prepare-picoagent-release` | 配布前のコード、資産、文書、監査、ローカルテスト、Git確認 |
 | `update-picoagent-contest-presentation` | 社内AIコンテスト用PowerPointの構成、訴求、プレビュー、公開条件の更新 |
 
-Claude Codeが自動認識する`.claude/skills/<名前>/SKILL.md`には、同名の共通スキルを読む指示だけを置きます。手順を追加・修正するときは、このフォルダの正本だけを編集してください。名前一致、参照先、frontmatter、入口本文の肥大化は`cargo xtask verify`が検査します。
+Claude Codeが自動認識する`.claude/skills/<名前>/SKILL.md`には、同名の共通スキル正本を読む指示だけを置きます。実際の手順を追加・修正するときは、このフォルダの正本だけを編集してください。名前一致、参照先、frontmatter、自動認識ファイル本文の肥大化は`cargo xtask verify`が検査します。

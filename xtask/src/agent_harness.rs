@@ -82,7 +82,7 @@ fn validate_claude_entry(path: &Path, name: &str, issues: &mut Vec<String>) {
             .count();
         if body_lines > 2 {
             issues.push(format!(
-                "{} の本文が{body_lines}行あります。Claude入口へ手順を複製せず、見出しと参照指示だけにしてください",
+                "{} の本文が{body_lines}行あります。Claude Code用自動認識ファイルへ手順を複製せず、見出しと参照指示だけにしてください",
                 path.display()
             ));
         }
@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn 共通正本と薄い入口の対応を受理する() {
+    fn 共通正本と薄い自動認識ファイルの対応を受理する() {
         let root = temp_root("valid");
         write_skill(
             &root,
@@ -183,7 +183,7 @@ mod tests {
             &root,
             ".claude/skills",
             "sample-skill",
-            "---\nname: sample-skill\ndescription: 検証用。\n---\n\n# 共通スキルへの入口\n\n`.agents/skills/sample-skill/SKILL.md`を読み、手順を複製しない。\n",
+            "---\nname: sample-skill\ndescription: 検証用。\n---\n\n# 共通スキル正本の案内\n\n`.agents/skills/sample-skill/SKILL.md`を読み、手順を複製しない。\n",
         );
 
         let result = check(&root);
@@ -192,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn 名前ずれと入口への手順複製を拒否する() {
+    fn 名前ずれと自動認識ファイルへの手順複製を拒否する() {
         let root = temp_root("invalid");
         fs::create_dir_all(root.join(".claude/skills")).unwrap();
         write_skill(

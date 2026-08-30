@@ -120,7 +120,7 @@ pub fn run() -> Result<()> {
     let root = repo_root();
     let mut report = execute_checks(CHECKS, |check| run_process(&root, check));
     report.record(
-        "作業エージェント用スキル入口",
+        "共通スキル正本とClaude Code用自動認識ファイル",
         match agent_harness::check(&root) {
             Ok(()) => Outcome::Passed,
             Err(error) => Outcome::Failed(error.to_string()),
