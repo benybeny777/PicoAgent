@@ -533,3 +533,146 @@ impl Provider for OpenAI {
 }
 
 inventory::submit! { ProviderReg { make: || Box::new(OpenAI) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assistant_with_call(arguments: Value) -> Message {
+        Message {
+            role: "assistant".to_string(),
+            content: "呼びます".to_string(),
+            tool_calls: Some(vec![ToolCall {
+                id: "call_1".to_string(),
+                name: "time".to_string(),
+                arguments,
+            }]),
+            tool_call_id: None,
+            name: None,
+            images: None,
+            usage: None,
+        }
+    }
+
+    /// OpenAI は `arguments` を **JSON 文字列**で受け取る。
+    /// 正規形はオブジェクトなので、ここで文字列化を落とすと引数がそのまま壊れる。
+    #[test]
+    fn 引数をjson文字列にしてtool_callsを送る() {
+        let wire = to_wire(&[assistant_with_call(json!({"city": "東京"}))]);
+        let call = &wire[0]["tool_calls"][0];
+        assert_eq!(call["type"], "function");
+        assert_eq!(call["function"]["name"], "time");
+        assert_eq!(call["function"]["arguments"], json!(r#"{"city":"東京"}"#));
+    }
+
+    /// `tool_calls` が空配列の assistant を「ツール呼び出しあり」として送ると、
+    /// OpenAI は空配列を拒否する。素のテキストメッセージへ落とすこと。
+    #[test]
+    fn 空のtool_callsは素のメッセージへ落とす() {
+        let mut message = assistant_with_call(json!({}));
+        message.tool_calls = Some(Vec::new());
+        let wire = to_wire(&[message]);
+        assert!(wire[0].get("tool_calls").is_none());
+        assert_eq!(wire[0]["content"], "呼びます");
+    }
+
+    #[test]
+    fn toolロールはtool_call_idを添えて送る() {
+        let mut message = Message::new("tool", "12時です");
+        message.tool_call_id = Some("call_1".to_string());
+        let wire = to_wire(&[message]);
+        assert_eq!(wire[0]["role"], "tool");
+        assert_eq!(wire[0]["tool_call_id"], "call_1");
+        assert_eq!(wire[0]["content"], "12時です");
+    }
+
+    /// 画像付き user だけを content 配列にする。画像が無いのに配列化すると
+    /// 画像非対応の互換サーバーで弾かれる。
+    #[test]
+    fn 画像付きuserだけをcontent配列にする() {
+        let with_image = Message::user_with_images("これは？", vec!["data:image/png;base64,AA".to_string()]);
+        let wire = to_wire(&[with_image]);
+        assert_eq!(wire[0]["content"][0]["type"], "text");
+        assert_eq!(wire[0]["content"][1]["image_url"]["url"], "data:image/png;base64,AA");
+
+        let plain = to_wire(&[Message::new("user", "こんにちは")]);
+        assert_eq!(plain[0]["content"], "こんにちは");
+    }
+
+    #[test]
+    fn 応答のjson文字列引数をオブジェクトへ戻す() {
+        let message = from_wire(&json!({
+            "content": "はい",
+            "tool_calls": [{
+                "id": "call_9",
+                "function": { "name": "time", "arguments": "{\"city\":\"東京\"}" }
+            }]
+        }));
+        let calls = message.tool_calls.unwrap();
+        assert_eq!(calls[0].id, "call_9");
+        assert_eq!(calls[0].arguments, json!({"city": "東京"}));
+    }
+
+    /// 引数が壊れていても捨てない。`_raw` に残してエージェント側が理由を説明できるようにする。
+    /// id が無いモデルもあるので、その場合は位置から採番する。
+    #[test]
+    fn 壊れた引数は_rawへ残しid欠落は採番する() {
+        let message = from_wire(&json!({
+            "content": "",
+            "tool_calls": [{ "function": { "name": "time", "arguments": "{壊れ" } }]
+        }));
+        let calls = message.tool_calls.unwrap();
+        assert_eq!(calls[0].id, "call_0");
+        assert_eq!(calls[0].arguments, json!({"_raw": "{壊れ"}));
+    }
+
+    #[test]
+    fn tool_callsが無ければnoneで返す() {
+        let message = from_wire(&json!({ "content": "ただの返事" }));
+        assert_eq!(message.role, "assistant");
+        assert_eq!(message.content, "ただの返事");
+        assert!(message.tool_calls.is_none());
+    }
+
+    /// 正規形 → ワイヤ → 正規形で、ツール呼び出しが元に戻ること。
+    /// 5プロバイダ（openai / deepseek / xai / mistral / gemini）が共有する中核の契約。
+    #[test]
+    fn tool_callsは往復しても壊れない() {
+        let original = assistant_with_call(json!({"city": "東京", "unit": "c"}));
+        let restored = from_wire(&to_wire(std::slice::from_ref(&original))[0]);
+        let (before, after) = (original.tool_calls.unwrap(), restored.tool_calls.unwrap());
+        assert_eq!(before[0].id, after[0].id);
+        assert_eq!(before[0].name, after[0].name);
+        assert_eq!(before[0].arguments, after[0].arguments);
+    }
+
+    /// APIキー未設定の案内を出すかどうかの判定。ホスト名の部分一致で通すと、
+    /// 自前サーバー構成なのにキーを要求して使えなくなる（逆も同様）。
+    #[test]
+    fn 公式エンドポイントだけを厳密に判定する() {
+        assert!(is_official_origin("https://api.openai.com/v1"));
+        assert!(is_official_origin("https://api.openai.com:443/v1"));
+        for other in [
+            "http://api.openai.com/v1",
+            "https://api.openai.com.example.com/v1",
+            "https://proxy.example.com/v1",
+            "https://api.openai.com:8443/v1",
+            "not a url",
+        ] {
+            assert!(!is_official_origin(other), "{other}");
+        }
+    }
+
+    #[test]
+    fn 使用量が無い応答ではnoneを返す() {
+        assert!(extract_usage(&json!({ "choices": [] })).is_none());
+        let usage = extract_usage(&json!({
+            "usage": { "prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14 }
+        }))
+        .unwrap();
+        assert_eq!(
+            (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens),
+            (10, 4, 14)
+        );
+    }
+}
