@@ -47,9 +47,24 @@ impl Tool for TrelloTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_TRELLO_KEY", "Trello の API キー", "password", ""),
-            Field::new("PICOAGENT_TRELLO_TOKEN", "Trello のトークン", "password", ""),
-            Field::new("PICOAGENT_TRELLO_LIST_ID", "Trello 既定 list ID", "text", ""),
-            Field::new("PICOAGENT_TRELLO_TIMEOUT_SECS", "Trello API 待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_TRELLO_TOKEN",
+                "Trello のトークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_TRELLO_LIST_ID",
+                "Trello 既定 list ID",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_TRELLO_TIMEOUT_SECS",
+                "Trello API 待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
@@ -57,7 +72,11 @@ impl Tool for TrelloTool {
         let key = cfg.get("PICOAGENT_TRELLO_KEY", "");
         let token = cfg.get("PICOAGENT_TRELLO_TOKEN", "");
         if key.is_empty() || token.is_empty() {
-            return super::config_guide("Trello", &["PICOAGENT_TRELLO_KEY", "PICOAGENT_TRELLO_TOKEN"], "Trello API key と token が必要です。");
+            return super::config_guide(
+                "Trello",
+                &["PICOAGENT_TRELLO_KEY", "PICOAGENT_TRELLO_TOKEN"],
+                "Trello API key と token が必要です。",
+            );
         }
         let list_id = args
             .get("list_id")
@@ -67,7 +86,11 @@ impl Tool for TrelloTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_TRELLO_LIST_ID", ""));
         if list_id.is_empty() {
-            return super::config_guide("Trello", &["PICOAGENT_TRELLO_LIST_ID"], "依頼で list_id を渡すか、既定のリストIDを設定してください。");
+            return super::config_guide(
+                "Trello",
+                &["PICOAGENT_TRELLO_LIST_ID"],
+                "依頼で list_id を渡すか、既定のリストIDを設定してください。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_TRELLO_TIMEOUT_SECS", "15")
@@ -96,7 +119,12 @@ impl Tool for TrelloTool {
                 .await
             }
             "create_card" => {
-                let Some(name) = args.get("name").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                let Some(name) = args
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
                     return "エラー: name が指定されていません。".to_string();
                 };
                 let desc = args.get("desc").and_then(Value::as_str).unwrap_or("");
@@ -121,7 +149,10 @@ impl Tool for TrelloTool {
     }
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

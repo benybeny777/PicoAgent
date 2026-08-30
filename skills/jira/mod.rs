@@ -32,7 +32,8 @@ impl Tool for JiraTool {
     }
 
     fn description(&self) -> String {
-        "Jira Cloud REST API で課題検索・作成を行う。設定に base URL、email、API token が必要。".to_string()
+        "Jira Cloud REST API で課題検索・作成を行う。設定に base URL、email、API token が必要。"
+            .to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -52,20 +53,56 @@ impl Tool for JiraTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_JIRA_BASE_URL", "Jira のベース URL", "text", "https://example.atlassian.net"),
-            Field::new("PICOAGENT_JIRA_EMAIL", "Jira のアカウントメールアドレス", "text", ""),
-            Field::new("PICOAGENT_JIRA_API_TOKEN", "Jira の API トークン", "password", ""),
-            Field::new("PICOAGENT_JIRA_PROJECT_KEY", "Jira 既定 project key", "text", ""),
-            Field::new("PICOAGENT_JIRA_TIMEOUT_SECS", "Jira API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_JIRA_BASE_URL",
+                "Jira のベース URL",
+                "text",
+                "https://example.atlassian.net",
+            ),
+            Field::new(
+                "PICOAGENT_JIRA_EMAIL",
+                "Jira のアカウントメールアドレス",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_JIRA_API_TOKEN",
+                "Jira の API トークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_JIRA_PROJECT_KEY",
+                "Jira 既定 project key",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_JIRA_TIMEOUT_SECS",
+                "Jira API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let base = cfg.get("PICOAGENT_JIRA_BASE_URL", "").trim_end_matches('/').to_string();
+        let base = cfg
+            .get("PICOAGENT_JIRA_BASE_URL", "")
+            .trim_end_matches('/')
+            .to_string();
         let email = cfg.get("PICOAGENT_JIRA_EMAIL", "");
         let token = cfg.get("PICOAGENT_JIRA_API_TOKEN", "");
         if base.is_empty() || email.is_empty() || token.is_empty() {
-            return super::config_guide("Jira", &["PICOAGENT_JIRA_BASE_URL", "PICOAGENT_JIRA_EMAIL", "PICOAGENT_JIRA_API_TOKEN"], "Jira Cloud のサイトURL、メールアドレス、API token を入れてください。");
+            return super::config_guide(
+                "Jira",
+                &[
+                    "PICOAGENT_JIRA_BASE_URL",
+                    "PICOAGENT_JIRA_EMAIL",
+                    "PICOAGENT_JIRA_API_TOKEN",
+                ],
+                "Jira Cloud のサイトURL、メールアドレス、API token を入れてください。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_JIRA_TIMEOUT_SECS", "20")
@@ -83,7 +120,10 @@ impl Tool for JiraTool {
         };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "search" => {
-                let jql = args.get("jql").and_then(Value::as_str).unwrap_or("ORDER BY updated DESC");
+                let jql = args
+                    .get("jql")
+                    .and_then(Value::as_str)
+                    .unwrap_or("ORDER BY updated DESC");
                 handle_text_response(
                     client
                         .get(format!("{}/rest/api/3/search", base))
@@ -103,14 +143,29 @@ impl Tool for JiraTool {
                     .filter(|v| !v.is_empty())
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_JIRA_PROJECT_KEY", ""));
-                let Some(summary) = args.get("summary").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                let Some(summary) = args
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
                     return "エラー: summary が指定されていません。".to_string();
                 };
                 if project_key.is_empty() {
-                    return super::config_guide("Jira", &["PICOAGENT_JIRA_PROJECT_KEY"], "依頼で project_key を渡すか、既定のプロジェクトキーを設定してください。");
+                    return super::config_guide(
+                        "Jira",
+                        &["PICOAGENT_JIRA_PROJECT_KEY"],
+                        "依頼で project_key を渡すか、既定のプロジェクトキーを設定してください。",
+                    );
                 }
-                let issue_type = args.get("issue_type").and_then(Value::as_str).unwrap_or("Task");
-                let description = args.get("description").and_then(Value::as_str).unwrap_or("");
+                let issue_type = args
+                    .get("issue_type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Task");
+                let description = args
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 let payload = json!({
                     "fields": {
                         "project": { "key": project_key },
@@ -142,7 +197,10 @@ impl Tool for JiraTool {
     }
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

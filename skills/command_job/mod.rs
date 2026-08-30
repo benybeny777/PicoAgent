@@ -24,7 +24,15 @@ impl Tool for CommandJobTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["バックグラウンド", "ジョブ", "job", "実行中の", "起動したまま", "ログを見せ", "様子を見"]
+        &[
+            "バックグラウンド",
+            "ジョブ",
+            "job",
+            "実行中の",
+            "起動したまま",
+            "ログを見せ",
+            "様子を見",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -59,7 +67,10 @@ impl Tool for CommandJobTool {
     }
 
     fn examples(&self) -> Vec<&'static str> {
-        vec!["さっきのビルドの様子を見せて", "動かしっぱなしのサーバを止めて"]
+        vec![
+            "さっきのビルドの様子を見せて",
+            "動かしっぱなしのサーバを止めて",
+        ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -79,12 +90,7 @@ impl Tool for CommandJobTool {
         }
         let job_id = match args.get("job_id").and_then(Value::as_str).map(str::trim) {
             Some(job_id) if !job_id.is_empty() => job_id,
-            _ => {
-                return format!(
-                    "エラー: job_id が指定されていません。\n{}",
-                    jobs::list()
-                )
-            }
+            _ => return format!("エラー: job_id が指定されていません。\n{}", jobs::list()),
         };
         match action.as_str() {
             "output" => jobs::output(
@@ -94,9 +100,9 @@ impl Tool for CommandJobTool {
                     .unwrap_or(false),
             ),
             "stop" => jobs::stop(job_id),
-            other => format!(
-                "エラー: action は list/output/stop のいずれかを指定してください: {other}"
-            ),
+            other => {
+                format!("エラー: action は list/output/stop のいずれかを指定してください: {other}")
+            }
         }
     }
 }

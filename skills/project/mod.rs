@@ -122,7 +122,13 @@ impl Project {
 fn slug(value: &str) -> String {
     value
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|part| !part.is_empty())
@@ -219,7 +225,10 @@ fn enum_arg(args: &Value, key: &str, allowed: &[&str]) -> Result<Option<String>,
     if allowed.contains(&value.as_str()) {
         Ok(Some(value))
     } else {
-        Err(format!("{key} は {} のいずれかを指定してください。", allowed.join(" / ")))
+        Err(format!(
+            "{key} は {} のいずれかを指定してください。",
+            allowed.join(" / ")
+        ))
     }
 }
 
@@ -328,7 +337,11 @@ fn render_task(task: &Task, today: NaiveDate) -> String {
         line.push_str(&format!(
             "（期限 {}{}）",
             task.due,
-            if is_overdue(task, today) { "・期限切れ" } else { "" }
+            if is_overdue(task, today) {
+                "・期限切れ"
+            } else {
+                ""
+            }
         ));
     }
     if !task.tags.is_empty() {
@@ -348,7 +361,9 @@ fn render_tasks(tasks: &[Task], limit: usize) -> String {
         out.push_str(&render_task(task, today));
     }
     if tasks.len() > limit {
-        out.push_str(&format!("\n…（{limit} 件で表示を打ち切り。limit で増やせます）"));
+        out.push_str(&format!(
+            "\n…（{limit} 件で表示を打ち切り。limit で増やせます）"
+        ));
     }
     out
 }
@@ -368,7 +383,9 @@ fn render_notes(notes: &[Note], limit: usize) -> String {
         ));
     }
     if notes.len() > limit {
-        out.push_str(&format!("\n…（{limit} 件で表示を打ち切り。limit で増やせます）"));
+        out.push_str(&format!(
+            "\n…（{limit} 件で表示を打ち切り。limit で増やせます）"
+        ));
     }
     out
 }
@@ -436,7 +453,11 @@ pub fn project_context(cfg: &Config) -> String {
         return String::new();
     }
 
-    let mut out = format!("現在のプロジェクト: {} ({})", project.display_name(), project.id);
+    let mut out = format!(
+        "現在のプロジェクト: {} ({})",
+        project.display_name(),
+        project.id
+    );
     if !open.is_empty() {
         let overdue = open.iter().filter(|task| is_overdue(task, today)).count();
         out.push_str(&format!(
@@ -463,7 +484,9 @@ pub fn project_context(cfg: &Config) -> String {
             ));
         }
     }
-    out.push_str("\n（保存済みの台帳から自動で添えた情報。変更するときは project スキルを呼ぶこと）");
+    out.push_str(
+        "\n（保存済みの台帳から自動で添えた情報。変更するときは project スキルを呼ぶこと）",
+    );
     text::preview(&out, MAX_CONTEXT_CHARS)
 }
 
@@ -476,7 +499,21 @@ impl Tool for ProjectTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["プロジェクト", "案件", "ワークスペース", "課題", "タスク", "やること", "残り", "締切", "期限", "決定事項", "決めたこと", "進捗", "経緯"]
+        &[
+            "プロジェクト",
+            "案件",
+            "ワークスペース",
+            "課題",
+            "タスク",
+            "やること",
+            "残り",
+            "締切",
+            "期限",
+            "決定事項",
+            "決めたこと",
+            "進捗",
+            "経緯",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -668,7 +705,11 @@ impl Tool for ProjectTool {
                 let Some(index) = projects.iter().position(|project| project.id == id) else {
                     return format!("エラー: プロジェクトが見つかりません: {id}");
                 };
-                if !args.get("confirm").and_then(Value::as_bool).unwrap_or(false) {
+                if !args
+                    .get("confirm")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     let project = &projects[index];
                     return format!(
                         "プレビュー: プロジェクト {} ({id}) の登録を解除します。課題 {} 件と記録 {} 件も一緒に消えます（ファイルは削除しません）。\n実行するには confirm=true を指定してください。",
@@ -724,7 +765,10 @@ impl Tool for ProjectTool {
                     .trim()
                     .to_lowercase();
                 let tag = args.get("tag").and_then(Value::as_str).unwrap_or("").trim();
-                let overdue_only = args.get("overdue").and_then(Value::as_bool).unwrap_or(false);
+                let overdue_only = args
+                    .get("overdue")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 let today = today();
                 let mut tasks: Vec<Task> = scoped
                     .iter()
@@ -741,7 +785,11 @@ impl Tool for ProjectTool {
                 format!("対象: {header}\n{}", render_tasks(&tasks, limit))
             }
             "task_add" => {
-                let title = args.get("title").and_then(Value::as_str).unwrap_or("").trim();
+                let title = args
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 if title.is_empty() {
                     return "エラー: title が指定されていません。".to_string();
                 }
@@ -778,7 +826,10 @@ impl Tool for ProjectTool {
                     due,
                     tags,
                     note: text::preview(
-                        args.get("note").and_then(Value::as_str).unwrap_or("").trim(),
+                        args.get("note")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim(),
                         MAX_NOTE_CHARS,
                     ),
                     created_at: stamp(),
@@ -858,7 +909,11 @@ impl Tool for ProjectTool {
                 let Some(index) = project.tasks.iter().position(|task| task.id == task_id) else {
                     return format!("エラー: 課題 {task_id} は {id} にありません。");
                 };
-                if !args.get("confirm").and_then(Value::as_bool).unwrap_or(false) {
+                if !args
+                    .get("confirm")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     return format!(
                         "プレビュー: 次の課題を削除します。\n{}\n実行するには confirm=true を指定してください。",
                         render_task(&project.tasks[index], today())
@@ -871,7 +926,11 @@ impl Tool for ProjectTool {
                 }
             }
             "note_add" => {
-                let text_arg = args.get("text").and_then(Value::as_str).unwrap_or("").trim();
+                let text_arg = args
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 if text_arg.is_empty() {
                     return "エラー: text が指定されていません。".to_string();
                 }
@@ -914,7 +973,11 @@ impl Tool for ProjectTool {
                 let Some(index) = project.notes.iter().position(|note| note.id == note_id) else {
                     return format!("エラー: 記録 {note_id} は {id} にありません。");
                 };
-                if !args.get("confirm").and_then(Value::as_bool).unwrap_or(false) {
+                if !args
+                    .get("confirm")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     return format!(
                         "プレビュー: 次の記録を削除します。\n[{}] {}\n実行するには confirm=true を指定してください。",
                         note_kind_label(&project.notes[index].kind),
@@ -965,7 +1028,10 @@ mod tests {
 
     #[test]
     fn 期限は日付形式か相対日で指定する() {
-        assert_eq!(due_arg(&json!({ "due": "2026-08-10" })).unwrap().as_deref(), Some("2026-08-10"));
+        assert_eq!(
+            due_arg(&json!({ "due": "2026-08-10" })).unwrap().as_deref(),
+            Some("2026-08-10")
+        );
         assert_eq!(due_arg(&json!({ "due": "" })).unwrap().as_deref(), Some(""));
         assert!(due_arg(&json!({ "due": "8/10" })).is_err());
         assert_eq!(due_arg(&json!({})).unwrap(), None);
@@ -977,16 +1043,34 @@ mod tests {
 
     #[test]
     fn タグは配列でも区切り文字列でも受け取る() {
-        assert_eq!(tags_arg(&json!({ "tags": ["a", "b"] })).unwrap().unwrap().len(), 2);
-        assert_eq!(tags_arg(&json!({ "tags": "a, b、c" })).unwrap().unwrap().len(), 3);
+        assert_eq!(
+            tags_arg(&json!({ "tags": ["a", "b"] }))
+                .unwrap()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            tags_arg(&json!({ "tags": "a, b、c" }))
+                .unwrap()
+                .unwrap()
+                .len(),
+            3
+        );
         assert!(tags_arg(&json!({ "tags": ["1", "2", "3", "4", "5", "6"] })).is_err());
     }
 
     /// 完了済みと期限なしを期限切れに数えない（数えると「期限切れ」が常に膨らむ）。
     #[test]
     fn 期限切れの判定() {
-        assert!(is_overdue(&task("t1", "2000-01-01", "normal", "todo"), today()));
-        assert!(!is_overdue(&task("t2", "2000-01-01", "normal", "done"), today()));
+        assert!(is_overdue(
+            &task("t1", "2000-01-01", "normal", "todo"),
+            today()
+        ));
+        assert!(!is_overdue(
+            &task("t2", "2000-01-01", "normal", "done"),
+            today()
+        ));
         assert!(!is_overdue(&task("t3", "", "normal", "todo"), today()));
     }
 
@@ -1005,7 +1089,13 @@ mod tests {
 
     #[test]
     fn 連番idは既存の最大値の次を使う() {
-        assert_eq!(next_task_id(&[task("t1", "", "normal", "todo"), task("t9", "", "normal", "done")]), "t10");
+        assert_eq!(
+            next_task_id(&[
+                task("t1", "", "normal", "todo"),
+                task("t9", "", "normal", "done")
+            ]),
+            "t10"
+        );
         assert_eq!(next_task_id(&[]), "t1");
         assert_eq!(next_note_id(&[]), "n1");
     }
@@ -1037,7 +1127,11 @@ mod tests {
         let projects = super::load(&cfg).expect("読めない");
         assert_eq!(projects[0].id, "video");
         assert!(projects[0].tasks.is_empty());
-        assert_eq!(projects[0].display_name(), "video", "名前が空なら id を出す");
+        assert_eq!(
+            projects[0].display_name(),
+            "video",
+            "名前が空なら id を出す"
+        );
     }
 
     #[test]

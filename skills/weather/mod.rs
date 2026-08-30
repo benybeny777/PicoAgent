@@ -26,10 +26,40 @@ fn is_direct_query(text: &str) -> bool {
 fn extract_location(text: &str) -> Option<String> {
     let mut query = text.to_string();
     for word in [
-        "天気", "天候", "気象", "気温", "降水確率", "降水", "予報", "weather", "明後日",
-        "明日", "あした", "今日", "きょう", "現在", "いまの", "今の", "今", "この",
-        "教えて", "おしえて", "ですか", "を", "は", "の", "が", "って", "?", "？", "。",
-        "、", "!", "！", " ", "　",
+        "天気",
+        "天候",
+        "気象",
+        "気温",
+        "降水確率",
+        "降水",
+        "予報",
+        "weather",
+        "明後日",
+        "明日",
+        "あした",
+        "今日",
+        "きょう",
+        "現在",
+        "いまの",
+        "今の",
+        "今",
+        "この",
+        "教えて",
+        "おしえて",
+        "ですか",
+        "を",
+        "は",
+        "の",
+        "が",
+        "って",
+        "?",
+        "？",
+        "。",
+        "、",
+        "!",
+        "！",
+        " ",
+        "　",
     ] {
         query = query.replace(word, "");
     }
@@ -44,7 +74,9 @@ impl Tool for WeatherTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["天気", "天候", "気象", "気温", "雨", "降水", "予報", "weather"]
+        &[
+            "天気", "天候", "気象", "気温", "雨", "降水", "予報", "weather",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {
@@ -85,9 +117,24 @@ impl Tool for WeatherTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_WEATHER_DEFAULT_LOCATION", "天気の既定地点（自動取得に失敗した時に使用）", "text", "Tokyo"),
-            Field::new("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", "現在地の自動取得を無効にする（既定は自動取得ON）", "checkbox", ""),
-            Field::new("PICOAGENT_WEATHER_TIMEOUT_SECS", "天気API待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_WEATHER_DEFAULT_LOCATION",
+                "天気の既定地点（自動取得に失敗した時に使用）",
+                "text",
+                "Tokyo",
+            ),
+            Field::new(
+                "PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION",
+                "現在地の自動取得を無効にする（既定は自動取得ON）",
+                "checkbox",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_WEATHER_TIMEOUT_SECS",
+                "天気API待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
@@ -132,7 +179,11 @@ impl Tool for WeatherTool {
         } else {
             // 地名が無い／解決失敗時は、まず IP から現在地を推定（有効時）。最後は既定地点。
             let auto = !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false);
-            match if auto { ip_geolocate(&client).await } else { None } {
+            match if auto {
+                ip_geolocate(&client).await
+            } else {
+                None
+            } {
                 Some(found) => found,
                 None => {
                     let location = cfg.get("PICOAGENT_WEATHER_DEFAULT_LOCATION", "Tokyo");
@@ -173,7 +224,12 @@ impl Tool for WeatherTool {
 async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, String), String> {
     let response = client
         .get(GEOCODE_URL)
-        .query(&[("name", location), ("count", "1"), ("language", "ja"), ("format", "json")])
+        .query(&[
+            ("name", location),
+            ("count", "1"),
+            ("language", "ja"),
+            ("format", "json"),
+        ])
         .send()
         .await
         .map_err(|error| format!("地名検索に失敗しました: {}", error))?;
@@ -182,15 +238,26 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
     if !status.is_success() {
         return Err(format!("地名検索APIが HTTP {} を返しました。", status));
     }
-    let parsed: Value = serde_json::from_str(&body).map_err(|error| format!("地名検索結果を解析できません: {}", error))?;
+    let parsed: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("地名検索結果を解析できません: {}", error))?;
     let first = parsed
         .get("results")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
         .ok_or_else(|| format!("地点が見つかりません: {}", location))?;
-    let lat = first.get("latitude").and_then(Value::as_f64).ok_or_else(|| "緯度を取得できません。".to_string())?;
-    let lon = first.get("longitude").and_then(Value::as_f64).ok_or_else(|| "経度を取得できません。".to_string())?;
-    let name = first.get("name").and_then(Value::as_str).unwrap_or(location).to_string();
+    let lat = first
+        .get("latitude")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "緯度を取得できません。".to_string())?;
+    let lon = first
+        .get("longitude")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "経度を取得できません。".to_string())?;
+    let name = first
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(location)
+        .to_string();
     Ok((lat, lon, name))
 }
 
@@ -256,15 +323,25 @@ fn sparkline(values: &[f64]) -> String {
 
 fn summarize_weather(name: &str, parsed: &Value) -> String {
     let current = parsed.get("current").unwrap_or(&Value::Null);
-    let code = current.get("weather_code").and_then(Value::as_i64).unwrap_or(-1);
+    let code = current
+        .get("weather_code")
+        .and_then(Value::as_i64)
+        .unwrap_or(-1);
     let (icon, label) = weather_icon(code);
-    let num = |v: Option<f64>| v.map(|x| format!("{x:.0}")).unwrap_or_else(|| "-".to_string());
+    let num = |v: Option<f64>| {
+        v.map(|x| format!("{x:.0}"))
+            .unwrap_or_else(|| "-".to_string())
+    };
     let mut out = format!("天気: {name} {icon} {label}\n");
     out.push_str(&format!(
         "現在 {}°C（体感{}°C）湿度{}% 風{}km/h 降水{}mm\n",
         num(current.get("temperature_2m").and_then(Value::as_f64)),
         num(current.get("apparent_temperature").and_then(Value::as_f64)),
-        current.get("relative_humidity_2m").and_then(Value::as_u64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+        current
+            .get("relative_humidity_2m")
+            .and_then(Value::as_u64)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string()),
         num(current.get("wind_speed_10m").and_then(Value::as_f64)),
         num(current.get("precipitation").and_then(Value::as_f64)),
     ));
@@ -289,20 +366,44 @@ fn summarize_weather(name: &str, parsed: &Value) -> String {
     }
 
     if let Some(daily) = parsed.get("daily") {
-        let times = daily.get("time").and_then(Value::as_array).cloned().unwrap_or_default();
-        let codes = daily.get("weather_code").and_then(Value::as_array).cloned().unwrap_or_default();
-        let maxes = daily.get("temperature_2m_max").and_then(Value::as_array).cloned().unwrap_or_default();
-        let mins = daily.get("temperature_2m_min").and_then(Value::as_array).cloned().unwrap_or_default();
-        let pops = daily.get("precipitation_probability_max").and_then(Value::as_array).cloned().unwrap_or_default();
+        let times = daily
+            .get("time")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let codes = daily
+            .get("weather_code")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let maxes = daily
+            .get("temperature_2m_max")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mins = daily
+            .get("temperature_2m_min")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let pops = daily
+            .get("precipitation_probability_max")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         out.push_str("予報:\n");
         for index in 0..times.len().min(7) {
-            let (day_icon, day_label) = weather_icon(codes.get(index).and_then(Value::as_i64).unwrap_or(-1));
+            let (day_icon, day_label) =
+                weather_icon(codes.get(index).and_then(Value::as_i64).unwrap_or(-1));
             out.push_str(&format!(
                 "- {} {day_icon} {day_label} {}/{}°C ☔{}%\n",
                 times.get(index).and_then(Value::as_str).unwrap_or("-"),
                 num(maxes.get(index).and_then(Value::as_f64)),
                 num(mins.get(index).and_then(Value::as_f64)),
-                pops.get(index).and_then(Value::as_u64).map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())
+                pops.get(index)
+                    .and_then(Value::as_u64)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string())
             ));
         }
         // 日別の最高気温の推移をスパークラインで添える。

@@ -37,7 +37,10 @@ fn text_arg(args: &Value) -> Result<&str, String> {
         return Err("text が空です。".to_string());
     }
     if text.chars().count() > MAX_TEXT_CHARS {
-        return Err(format!("text は {} 文字以内で指定してください。", MAX_TEXT_CHARS));
+        return Err(format!(
+            "text は {} 文字以内で指定してください。",
+            MAX_TEXT_CHARS
+        ));
     }
     Ok(text)
 }
@@ -85,15 +88,39 @@ impl Tool for SlackTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_SLACK_BOT_TOKEN", "Slack の Bot トークン", "password", "xoxb-..."),
-            Field::new("PICOAGENT_SLACK_CHANNEL", "Slack 既定チャンネル", "text", "#general"),
-            Field::new("PICOAGENT_SLACK_WEBHOOK_URL", "Slack の Incoming Webhook URL", "password", "https://hooks.slack.com/services/..."),
-            Field::new("PICOAGENT_SLACK_TIMEOUT_SECS", "Slack API 待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_SLACK_BOT_TOKEN",
+                "Slack の Bot トークン",
+                "password",
+                "xoxb-...",
+            ),
+            Field::new(
+                "PICOAGENT_SLACK_CHANNEL",
+                "Slack 既定チャンネル",
+                "text",
+                "#general",
+            ),
+            Field::new(
+                "PICOAGENT_SLACK_WEBHOOK_URL",
+                "Slack の Incoming Webhook URL",
+                "password",
+                "https://hooks.slack.com/services/...",
+            ),
+            Field::new(
+                "PICOAGENT_SLACK_TIMEOUT_SECS",
+                "Slack API 待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let action = args.get("action").and_then(Value::as_str).unwrap_or("send").trim();
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("send")
+            .trim();
         let timeout_secs = parse_timeout(cfg);
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
@@ -108,9 +135,16 @@ impl Tool for SlackTool {
         let token = cfg.get("PICOAGENT_SLACK_BOT_TOKEN", "");
         if action == "test" {
             if !token.is_empty() {
-                let response = match client.get(SLACK_AUTH_TEST_URL).bearer_auth(&token).send().await {
+                let response = match client
+                    .get(SLACK_AUTH_TEST_URL)
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: Slack API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!("エラー: Slack API への接続に失敗しました: {}", error)
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);
@@ -121,19 +155,32 @@ impl Tool for SlackTool {
                 if parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                     return format!(
                         "OK: Slack Bot token は有効です。team={} user={}",
-                        parsed.get("team").and_then(Value::as_str).unwrap_or("unknown"),
-                        parsed.get("user").and_then(Value::as_str).unwrap_or("unknown")
+                        parsed
+                            .get("team")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown"),
+                        parsed
+                            .get("user")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
                     );
                 }
                 return format!(
                     "エラー: Slack API が失敗を返しました: {}",
-                    parsed.get("error").and_then(Value::as_str).unwrap_or("unknown_error")
+                    parsed
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown_error")
                 );
             }
             if !webhook_url.is_empty() {
                 return "OK: Slack Webhook URL は設定されています。Webhook は非送信の疎通確認 API がないため、実送信で確認してください。".to_string();
             }
-            return super::config_guide("Slack", &["PICOAGENT_SLACK_WEBHOOK_URL", "PICOAGENT_SLACK_BOT_TOKEN"], "接続テストには Incoming Webhook URL、または Bot token が必要です。");
+            return super::config_guide(
+                "Slack",
+                &["PICOAGENT_SLACK_WEBHOOK_URL", "PICOAGENT_SLACK_BOT_TOKEN"],
+                "接続テストには Incoming Webhook URL、または Bot token が必要です。",
+            );
         }
 
         let channel = args
@@ -148,7 +195,11 @@ impl Tool for SlackTool {
                 return super::config_guide("Slack履歴", &["PICOAGENT_SLACK_BOT_TOKEN"], "履歴取得には conversations.history 権限を持つ Bot token が必要です。Webhook では読み取りできません。");
             }
             if channel.is_empty() {
-                return super::config_guide("Slack履歴", &["PICOAGENT_SLACK_CHANNEL"], "履歴取得には channel を渡すか既定チャンネルを設定してください。");
+                return super::config_guide(
+                    "Slack履歴",
+                    &["PICOAGENT_SLACK_CHANNEL"],
+                    "履歴取得には channel を渡すか既定チャンネルを設定してください。",
+                );
             }
             let limit = args
                 .get("limit")
@@ -164,7 +215,9 @@ impl Tool for SlackTool {
                 .await
             {
                 Ok(response) => response,
-                Err(error) => return format!("エラー: Slack API への接続に失敗しました: {}", error),
+                Err(error) => {
+                    return format!("エラー: Slack API への接続に失敗しました: {}", error)
+                }
             };
             let status = response.status();
             let body = crate::tool_response_text!(response);
@@ -175,7 +228,10 @@ impl Tool for SlackTool {
             if !parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                 return format!(
                     "エラー: Slack API が失敗を返しました: {}",
-                    parsed.get("error").and_then(Value::as_str).unwrap_or("unknown_error")
+                    parsed
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown_error")
                 );
             }
             let mut out = format!("Slack履歴（{}）:", channel);
@@ -188,7 +244,10 @@ impl Tool for SlackTool {
                 out.push_str(&format!(
                     "\n- {} / {}: {}",
                     message.get("ts").and_then(Value::as_str).unwrap_or(""),
-                    message.get("user").and_then(Value::as_str).unwrap_or("unknown"),
+                    message
+                        .get("user")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown"),
                     message.get("text").and_then(Value::as_str).unwrap_or("")
                 ));
             }
@@ -203,10 +262,19 @@ impl Tool for SlackTool {
             Err(error) => return format!("エラー: {}", error),
         };
         if !webhook_url.is_empty() {
-            let response = client.post(&webhook_url).json(&json!({ "text": text })).send().await;
+            let response = client
+                .post(&webhook_url)
+                .json(&json!({ "text": text }))
+                .send()
+                .await;
             return match response {
-                Ok(response) if response.status().is_success() => "OK: Slack Webhook へ送信しました。".to_string(),
-                Ok(response) => format!("エラー: Slack Webhook が HTTP {} を返しました。", response.status()),
+                Ok(response) if response.status().is_success() => {
+                    "OK: Slack Webhook へ送信しました。".to_string()
+                }
+                Ok(response) => format!(
+                    "エラー: Slack Webhook が HTTP {} を返しました。",
+                    response.status()
+                ),
                 Err(error) => format!("エラー: Slack Webhook への接続に失敗しました: {}", error),
             };
         }

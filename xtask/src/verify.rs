@@ -119,6 +119,7 @@ impl Report {
 pub fn run() -> Result<()> {
     let root = repo_root();
     let mut report = execute_checks(CHECKS, |check| run_process(&root, check));
+    check_skill_format(&root, &mut report);
     report.record(
         "共通スキル正本とClaude Code用自動認識ファイル",
         match agent_harness::check(&root) {
@@ -165,6 +166,68 @@ fn run_process(root: &Path, check: &Check) -> Outcome {
     }
 }
 
+/// スキルコネクタの書式を検査する。
+///
+/// `cargo fmt` は `mod` 宣言をたどってファイルを集めるが、`skills/<名前>/mod.rs` は
+/// `build.rs` が生成した `#[path] pub mod` 経由でしか繋がっておらず、rustfmt からは
+/// 見えない。そのため**本体の書式検査はスキルを1ファイルも見ていなかった**。
+/// ここで追跡中のスキルソースを直接 rustfmt へ渡し、範囲の穴を塞ぐ。
+fn check_skill_format(root: &Path, report: &mut Report) {
+    const LABEL: &str = "スキルの書式";
+    let files = match tracked_files(root, &["skills/*.rs"]) {
+        Ok(files) => files,
+        Err(reason) => {
+            report.record(LABEL, Outcome::Failed(reason));
+            return;
+        }
+    };
+    if files.is_empty() {
+        report.record(
+            LABEL,
+            Outcome::Failed("スキルのソースが1件も見つかりません".to_string()),
+        );
+        return;
+    }
+    println!("\n[verify] 開始: {LABEL}（{}件）", files.len());
+    let outcome = match Command::new("rustfmt")
+        .args(["--edition", "2021", "--check"])
+        .args(&files)
+        .current_dir(root)
+        .status()
+    {
+        Ok(status) if status.success() => Outcome::Passed,
+        Ok(status) => Outcome::Failed(format!(
+            "終了コード {:?}（`rustfmt --edition 2021 skills/**/*.rs` で整形する）",
+            status.code()
+        )),
+        Err(error) => Outcome::Failed(format!("rustfmtを起動できません: {error}")),
+    };
+    report.record(LABEL, outcome);
+}
+
+/// Git が追跡しているパスを取得する。空白や日本語を含むパスも壊さないよう NUL 区切りで読む。
+fn tracked_files(root: &Path, patterns: &[&str]) -> Result<Vec<String>, String> {
+    let output = Command::new("git")
+        .args(["ls-files", "-z", "--"])
+        .args(patterns)
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("gitを起動できません: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            std::str::from_utf8(path)
+                .map(str::to_string)
+                .map_err(|error| format!("UTF-8でない追跡パスがあります: {error}"))
+        })
+        .collect()
+}
+
 fn check_javascript(root: &Path, report: &mut Report) {
     match node_availability(root) {
         Ok(NodeAvailability::Available) => {}
@@ -193,47 +256,19 @@ fn check_javascript(root: &Path, report: &mut Report) {
         }
     }
 
-    let output = match Command::new("git")
-        .args(["ls-files", "-z", "--", "*.js", "*.mjs"])
-        .current_dir(root)
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            report.record(
-                "JavaScript／MJS対象列挙",
-                Outcome::Failed(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-            );
-            return;
-        }
-        Err(error) => {
-            report.record(
-                "JavaScript／MJS対象列挙",
-                Outcome::Failed(format!("gitを起動できません: {error}")),
-            );
+    let files = match tracked_files(root, &["*.js", "*.mjs"]) {
+        Ok(files) => files,
+        Err(reason) => {
+            report.record("JavaScript／MJS対象列挙", Outcome::Failed(reason));
             return;
         }
     };
 
-    for encoded in output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|p| !p.is_empty())
-    {
-        let path = match std::str::from_utf8(encoded) {
-            Ok(path) => path,
-            Err(error) => {
-                report.record(
-                    "JavaScript／MJS対象列挙",
-                    Outcome::Failed(format!("UTF-8でない追跡パスがあります: {error}")),
-                );
-                continue;
-            }
-        };
+    for path in files {
         let label = format!("JavaScript構文: {path}");
         println!("\n[verify] 開始: {label}");
         let outcome = match Command::new("node")
-            .args(["--check", path])
+            .args(["--check", &path])
             .current_dir(root)
             .status()
         {

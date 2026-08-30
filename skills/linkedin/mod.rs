@@ -47,16 +47,35 @@ impl Tool for LinkedInTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LINKEDIN_ACCESS_TOKEN", "LinkedIn のアクセストークン", "password", ""),
-            Field::new("PICOAGENT_LINKEDIN_AUTHOR_URN", "LinkedIn の投稿者 URN", "text", "urn:li:person:..."),
-            Field::new("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "LinkedIn API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_LINKEDIN_ACCESS_TOKEN",
+                "LinkedIn のアクセストークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_LINKEDIN_AUTHOR_URN",
+                "LinkedIn の投稿者 URN",
+                "text",
+                "urn:li:person:...",
+            ),
+            Field::new(
+                "PICOAGENT_LINKEDIN_TIMEOUT_SECS",
+                "LinkedIn API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_LINKEDIN_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("LinkedIn", &["PICOAGENT_LINKEDIN_ACCESS_TOKEN"], "LinkedIn API の access token が必要です。");
+            return super::config_guide(
+                "LinkedIn",
+                &["PICOAGENT_LINKEDIN_ACCESS_TOKEN"],
+                "LinkedIn API の access token が必要です。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "20")
@@ -99,7 +118,10 @@ impl Tool for LinkedInTool {
                 if author.is_empty() {
                     return super::config_guide("LinkedIn", &["PICOAGENT_LINKEDIN_AUTHOR_URN"], "投稿時は依頼で author_urn を渡すか、既定の author URN を設定してください。");
                 }
-                let visibility = args.get("visibility").and_then(Value::as_str).unwrap_or("PUBLIC");
+                let visibility = args
+                    .get("visibility")
+                    .and_then(Value::as_str)
+                    .unwrap_or("PUBLIC");
                 let payload = json!({
                     "author": author,
                     "lifecycleState": "PUBLISHED",
@@ -138,12 +160,18 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
     if text.chars().count() > max_chars {
-        return Err(format!("{} は {} 文字以内で指定してください。", key, max_chars));
+        return Err(format!(
+            "{} は {} 文字以内で指定してください。",
+            key, max_chars
+        ));
     }
     Ok(text)
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

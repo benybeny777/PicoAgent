@@ -49,16 +49,35 @@ impl Tool for TodoistTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_TODOIST_TOKEN", "Todoist の API トークン", "password", ""),
-            Field::new("PICOAGENT_TODOIST_PROJECT_ID", "Todoist 既定 project ID", "text", ""),
-            Field::new("PICOAGENT_TODOIST_TIMEOUT_SECS", "Todoist API 待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_TODOIST_TOKEN",
+                "Todoist の API トークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_TODOIST_PROJECT_ID",
+                "Todoist 既定 project ID",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_TODOIST_TIMEOUT_SECS",
+                "Todoist API 待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_TODOIST_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Todoist", &["PICOAGENT_TODOIST_TOKEN"], "Todoist API token が必要です。");
+            return super::config_guide(
+                "Todoist",
+                &["PICOAGENT_TODOIST_TOKEN"],
+                "Todoist API token が必要です。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_TODOIST_TIMEOUT_SECS", "15")
@@ -76,7 +95,9 @@ impl Tool for TodoistTool {
         };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list" => {
-                let mut request = client.get(format!("{}/tasks", TODOIST_BASE)).bearer_auth(token);
+                let mut request = client
+                    .get(format!("{}/tasks", TODOIST_BASE))
+                    .bearer_auth(token);
                 let project_id = args
                     .get("project_id")
                     .and_then(Value::as_str)
@@ -90,15 +111,28 @@ impl Tool for TodoistTool {
                 handle_text_response(request.send().await, "Todoist API").await
             }
             "create" => {
-                let Some(content) = args.get("content").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                let Some(content) = args
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
                     return "エラー: content が指定されていません。".to_string();
                 };
                 if content.chars().count() > MAX_CONTENT_CHARS {
-                    return format!("エラー: content は {} 文字以内で指定してください。", MAX_CONTENT_CHARS);
+                    return format!(
+                        "エラー: content は {} 文字以内で指定してください。",
+                        MAX_CONTENT_CHARS
+                    );
                 }
                 let mut payload = json!({ "content": content });
                 for key in ["description", "due_string", "project_id"] {
-                    if let Some(value) = args.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+                    if let Some(value) = args
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                    {
                         payload[key] = json!(value);
                     }
                 }
@@ -120,7 +154,12 @@ impl Tool for TodoistTool {
                 .await
             }
             "close" => {
-                let Some(task_id) = args.get("task_id").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                let Some(task_id) = args
+                    .get("task_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
                     return "エラー: task_id が指定されていません。".to_string();
                 };
                 handle_text_response(
@@ -138,7 +177,10 @@ impl Tool for TodoistTool {
     }
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

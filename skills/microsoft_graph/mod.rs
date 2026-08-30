@@ -70,17 +70,41 @@ impl Tool for MicrosoftGraphTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MS_GRAPH_ACCESS_TOKEN", "Microsoft Graph の OAuth アクセストークン", "password", ""),
-            Field::new("PICOAGENT_MS_GRAPH_TEAM_ID", "Microsoft Teams 既定 team ID", "text", ""),
-            Field::new("PICOAGENT_MS_GRAPH_CHANNEL_ID", "Microsoft Teams 既定 channel ID", "text", ""),
-            Field::new("PICOAGENT_MS_GRAPH_TIMEOUT_SECS", "Microsoft Graph API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_MS_GRAPH_ACCESS_TOKEN",
+                "Microsoft Graph の OAuth アクセストークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_MS_GRAPH_TEAM_ID",
+                "Microsoft Teams 既定 team ID",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_MS_GRAPH_CHANNEL_ID",
+                "Microsoft Teams 既定 channel ID",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_MS_GRAPH_TIMEOUT_SECS",
+                "Microsoft Graph API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_MS_GRAPH_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Microsoft Graph", &["PICOAGENT_MS_GRAPH_ACCESS_TOKEN"], "Outlook/Teams/予定表にアクセスできる OAuth access token が必要です。");
+            return super::config_guide(
+                "Microsoft Graph",
+                &["PICOAGENT_MS_GRAPH_ACCESS_TOKEN"],
+                "Outlook/Teams/予定表にアクセスできる OAuth access token が必要です。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_MS_GRAPH_TIMEOUT_SECS", "20")
@@ -94,7 +118,12 @@ impl Tool for MicrosoftGraphTool {
             .build()
         {
             Ok(client) => client,
-            Err(error) => return format!("エラー: Microsoft Graph API の準備に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: Microsoft Graph API の準備に失敗しました: {}",
+                    error
+                )
+            }
         };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "send_mail" => {
@@ -199,7 +228,10 @@ impl Tool for MicrosoftGraphTool {
     }
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

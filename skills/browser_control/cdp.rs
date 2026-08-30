@@ -134,17 +134,13 @@ async fn debug_port_alive(port: u16) -> bool {
     if !response.status().is_success() {
         return false;
     }
-    response
-        .json::<Value>()
-        .await
-        .ok()
-        .is_some_and(|value| {
-            value.get("Browser").and_then(Value::as_str).is_some()
-                && value
-                    .get("webSocketDebuggerUrl")
-                    .and_then(Value::as_str)
-                    .is_some()
-        })
+    response.json::<Value>().await.ok().is_some_and(|value| {
+        value.get("Browser").and_then(Value::as_str).is_some()
+            && value
+                .get("webSocketDebuggerUrl")
+                .and_then(Value::as_str)
+                .is_some()
+    })
 }
 
 pub struct LaunchOptions {
@@ -411,8 +407,7 @@ pub async fn pages(port: u16) -> Result<Vec<Target>, String> {
 /// 新しいタブを開く。Chrome 111 以降の DevTools HTTP は `/json/new` に PUT を要求する。
 pub async fn new_page(port: u16) -> Result<Target, String> {
     let created = devtools_put(port, "/json/new?about:blank").await?;
-    parse_target(&created)
-        .ok_or_else(|| "エラー: 新しいタブを開けませんでした。".to_string())
+    parse_target(&created).ok_or_else(|| "エラー: 新しいタブを開けませんでした。".to_string())
 }
 
 /// 1つのページへ張った WebSocket 接続。ページ単位の接続なので、
@@ -467,7 +462,9 @@ impl PageConn {
             };
             let text = match message {
                 Message::Text(text) => text,
-                Message::Close(_) => return Err("エラー: ブラウザとの接続が切れました。".to_string()),
+                Message::Close(_) => {
+                    return Err("エラー: ブラウザとの接続が切れました。".to_string())
+                }
                 _ => continue,
             };
             let Ok(value) = serde_json::from_str::<Value>(&text) else {
@@ -554,8 +551,16 @@ mod tests {
     /// 重なると起動順によってどちらかが黙って使えなくなり、原因が非常に分かりにくい。
     #[test]
     fn 既定ポートは他の同梱プロセスと重ならない() {
-        for (port, owner) in [(11435, "同梱エンジン"), (11436, "同梱 Aivis"), (11500, "ローカル API")] {
-            assert_ne!(super::DEFAULT_PORT, port, "{owner} と同じポートを既定にしない");
+        for (port, owner) in [
+            (11435, "同梱エンジン"),
+            (11436, "同梱 Aivis"),
+            (11500, "ローカル API"),
+        ] {
+            assert_ne!(
+                super::DEFAULT_PORT,
+                port,
+                "{owner} と同じポートを既定にしない"
+            );
         }
     }
 

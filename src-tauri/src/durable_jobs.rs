@@ -189,21 +189,31 @@ fn fail_without_execution(id: &str, message: &str) -> Result<(), String> {
     })
 }
 
+/// 利用者が明示した再試行で、終了済みジョブを待機中へ戻す。
+fn requeue_for_retry(job: &mut DurableJob) -> Result<(), String> {
+    if matches!(job.state, JobState::Running | JobState::Queued) {
+        return Err("実行中または待機中のジョブは再試行できません。".to_string());
+    }
+    job.state = JobState::Queued;
+    job.progress = 0;
+    // 試行回数は「起動のたびに復旧して延々と再実行する」暴走を止めるための上限であって、
+    // 利用者が原因を直してから明示的に押した再試行まで塞ぐためのものではない。
+    // 数え直さないと、上限に達したジョブは再試行のたびに mark_started で即失敗し、
+    // ジョブセンターから二度と実行できなくなる。
+    job.attempts = 0;
+    job.error.clear();
+    job.result.clear();
+    job.updated_at = now();
+    Ok(())
+}
+
 pub fn retry(id: &str) -> Result<(), String> {
     update(|jobs| {
         let job = jobs
             .iter_mut()
             .find(|job| job.id == id)
             .ok_or_else(|| format!("ジョブが見つかりません: {id}"))?;
-        if matches!(job.state, JobState::Running | JobState::Queued) {
-            return Err("実行中または待機中のジョブは再試行できません。".to_string());
-        }
-        job.state = JobState::Queued;
-        job.progress = 0;
-        job.error.clear();
-        job.result.clear();
-        job.updated_at = now();
-        Ok(())
+        requeue_for_retry(job)
     })?;
     if let Err(error) = SENDER
         .get()
@@ -251,10 +261,12 @@ pub fn worker_job_id(args: &Value) -> Option<&str> {
 }
 
 fn bounded(text: String) -> String {
-    if text.chars().count() <= MAX_RESULT_CHARS {
-        return text;
+    // 上限までの文字境界を1回の走査で求める。文字数を数えてから作り直すと、
+    // 打ち切りの要らない普通の結果でも全文を2度走査することになる。
+    match text.char_indices().nth(MAX_RESULT_CHARS) {
+        Some((boundary, _)) => text[..boundary].to_string() + "\n…（保存上限で打ち切り）",
+        None => text,
     }
-    text.chars().take(MAX_RESULT_CHARS).collect::<String>() + "\n…（保存上限で打ち切り）"
 }
 
 fn mark_started(id: &str) -> Result<Option<DurableJob>, String> {
@@ -482,5 +494,50 @@ mod tests {
         assert_eq!(jobs[0].state, JobState::Queued);
         assert_eq!(jobs[0].progress, 0);
         assert_eq!(jobs[1].state, JobState::Completed);
+    }
+
+    fn 見本(state: JobState, attempts: u32) -> DurableJob {
+        DurableJob {
+            id: "x".into(),
+            label: "x".into(),
+            tool_name: "ai_drive".into(),
+            unique_key: String::new(),
+            args: json!({}),
+            state,
+            progress: 40,
+            attempts,
+            created_at: now(),
+            updated_at: now(),
+            result: String::new(),
+            error: "前回の失敗".into(),
+        }
+    }
+
+    #[test]
+    fn 明示した再試行は試行回数を数え直す() {
+        let mut job = 見本(JobState::Failed, MAX_ATTEMPTS);
+        requeue_for_retry(&mut job).unwrap();
+        assert_eq!(job.state, JobState::Queued);
+        // ここが 0 に戻らないと、mark_started が上限超過で即失敗させるため再試行できない。
+        assert_eq!(job.attempts, 0);
+        assert_eq!(job.progress, 0);
+        assert!(job.error.is_empty());
+
+        for state in [JobState::Running, JobState::Queued] {
+            assert!(requeue_for_retry(&mut 見本(state, 0)).is_err());
+        }
+    }
+
+    #[test]
+    fn 保存上限を超えた結果だけを文字境界で打ち切る() {
+        let short = "あ".repeat(10);
+        assert_eq!(bounded(short.clone()), short);
+        let long = "あ".repeat(MAX_RESULT_CHARS + 5);
+        let cut = bounded(long);
+        assert!(cut.ends_with("\n…（保存上限で打ち切り）"));
+        assert_eq!(
+            cut.chars().filter(|ch| *ch == 'あ').count(),
+            MAX_RESULT_CHARS
+        );
     }
 }

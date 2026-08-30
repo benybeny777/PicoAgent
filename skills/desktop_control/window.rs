@@ -60,7 +60,12 @@ pub fn list() -> Result<Vec<WindowInfo>, String> {
         if title.is_empty() {
             return TRUE;
         }
-        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         if unsafe { GetWindowRect(handle, &mut rect) } == 0 {
             return TRUE;
         }
@@ -82,12 +87,7 @@ pub fn list() -> Result<Vec<WindowInfo>, String> {
 
     let mut windows: Vec<WindowInfo> = Vec::new();
     // 安全性: コールバックは同じスレッドで同期に呼ばれ、ポインタは EnumWindows の間だけ有効。
-    let ok = unsafe {
-        EnumWindows(
-            Some(collect),
-            &mut windows as *mut Vec<WindowInfo> as isize,
-        )
-    };
+    let ok = unsafe { EnumWindows(Some(collect), &mut windows as *mut Vec<WindowInfo> as isize) };
     if ok == 0 && windows.is_empty() {
         return Err("エラー: ウィンドウ一覧を取得できませんでした。".to_string());
     }
@@ -155,18 +155,31 @@ mod tests {
     use super::{format, identifier, WindowInfo};
 
     fn sample(handle: isize, title: &str) -> WindowInfo {
-        WindowInfo { title: title.to_string(), x: 10, y: 20, width: 800, height: 600, handle }
+        WindowInfo {
+            title: title.to_string(),
+            x: 10,
+            y: 20,
+            width: 800,
+            height: 600,
+            handle,
+        }
     }
 
     #[test]
     fn 一覧は識別子と位置を並べる() {
         let text = format(&[sample(101, "メモ帳"), sample(202, "ブラウザ")]);
         assert!(
-            text.contains(&format!("id={} メモ帳 （10,20 800x600）", identifier(&sample(101, "メモ帳")))),
+            text.contains(&format!(
+                "id={} メモ帳 （10,20 800x600）",
+                identifier(&sample(101, "メモ帳"))
+            )),
             "text: {text}"
         );
         assert!(
-            text.contains(&format!("id={} ブラウザ", identifier(&sample(202, "ブラウザ")))),
+            text.contains(&format!(
+                "id={} ブラウザ",
+                identifier(&sample(202, "ブラウザ"))
+            )),
             "text: {text}"
         );
     }

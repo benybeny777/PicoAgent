@@ -215,7 +215,12 @@ impl Tool for EditFileTool {
         }
         let mut content = match permissions::fs::read_to_string(&target) {
             Ok(content) => content,
-            Err(error) => return format!("エラー: 読み取りに失敗しました（{error}）: {}", target.display()),
+            Err(error) => {
+                return format!(
+                    "エラー: 読み取りに失敗しました（{error}）: {}",
+                    target.display()
+                )
+            }
         };
         if content.len() > MAX_FILE_BYTES {
             return format!(
@@ -238,7 +243,11 @@ impl Tool for EditFileTool {
             }
         }
 
-        if args.get("preview").and_then(Value::as_bool).unwrap_or(false) {
+        if args
+            .get("preview")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             return format!(
                 "プレビュー: {} を {} 箇所編集します（未書き込み）。{}",
                 target.display(),
@@ -257,7 +266,10 @@ impl Tool for EditFileTool {
             Err(error) => return format!("エラー: {error}"),
         };
         if let Err(error) = permissions::fs::write(&target, content.as_bytes()) {
-            return format!("エラー: 書き込みに失敗しました（{error}）: {}", target.display());
+            return format!(
+                "エラー: 書き込みに失敗しました（{error}）: {}",
+                target.display()
+            );
         }
         match super::workspace_files::remember_change(snapshot) {
             Ok(()) => format!(

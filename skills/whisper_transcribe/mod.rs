@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 
 use super::{config_guide, Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::message::Field;
+use crate::permissions::SafePath;
 
 const MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
 
@@ -235,9 +235,7 @@ async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePat
     .map(ToString::to_string)
     .collect();
     match run_command(&ffmpeg_path(cfg), &args_list, 300).await {
-        Ok(output) if output.status.success() && out.exists() => {
-            Ok(Some(SafePath::app_owned(out)))
-        }
+        Ok(output) if output.status.success() && out.exists() => Ok(Some(SafePath::app_owned(out))),
         _ => {
             // フォールバック許可: 変換できなければ元ファイルを直接 Whisper へ渡す。
             remove_internal_file(&out)?;
@@ -478,10 +476,11 @@ impl Tool for WhisperTranscribeTool {
                 trim_output(&output.stderr)
             );
         }
-        let generated = match output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy())) {
-            Ok(path) => path,
-            Err(error) => return format!("エラー: {error}"),
-        };
+        let generated =
+            match output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy())) {
+                Ok(path) => path,
+                Err(error) => return format!("エラー: {error}"),
+            };
         let content = if generated.exists() {
             let content = match std::fs::read_to_string(&generated) {
                 Ok(content) => content,
@@ -535,7 +534,11 @@ mod tests {
     // sine 波の mp3 を生成し、16kHz WAV へ前処理できることを確認する。
     #[test]
     fn 非wav音声をffmpegでwavへ前処理する() {
-        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
             eprintln!("ffmpeg が無いためスキップ");
             return;
         }
@@ -587,15 +590,15 @@ mod tests {
         cfg.set("PICOAGENT_ALLOWED_ROOT", &root.to_string_lossy());
         cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "7200");
         let started = std::time::Instant::now();
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(
-            WhisperTranscribeTool.run(
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(WhisperTranscribeTool.run(
                 &cfg,
                 serde_json::json!({
                     "audio_path": audio,
                     "output_path": target,
                 }),
-            ),
-        );
+            ));
         assert!(result.contains("音声文字起こしが完了しました"), "{result}");
         let transcript = std::fs::read_to_string(&target).expect("文字起こし結果を読める");
         assert!(!transcript.trim().is_empty(), "文字起こし結果が空です");
