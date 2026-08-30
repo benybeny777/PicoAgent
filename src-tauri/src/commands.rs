@@ -210,14 +210,14 @@ impl AppState {
 const PROJECT_CONTEXT_BEGIN: &str = "[プロジェクト文脈]\n";
 const PROJECT_CONTEXT_END: &str = "\n[/プロジェクト文脈]";
 
-fn apply_project_context(convo: &mut [Message], block: &str) {
+fn apply_system_context(convo: &mut [Message], block: &str, begin: &str, end_marker: &str) {
     let Some(system) = convo.iter_mut().find(|message| message.role == "system") else {
         return;
     };
-    if let Some(start) = system.content.find(PROJECT_CONTEXT_BEGIN) {
+    if let Some(start) = system.content.find(begin) {
         // 終端が見つからない（手で編集された等）ときは触らない。消し過ぎるより残すほうが安全。
-        if let Some(offset) = system.content[start..].find(PROJECT_CONTEXT_END) {
-            let end = start + offset + PROJECT_CONTEXT_END.len();
+        if let Some(offset) = system.content[start..].find(end_marker) {
+            let end = start + offset + end_marker.len();
             system.content.replace_range(start..end, "");
             let trimmed = system.content.trim_end().to_string();
             system.content = trimmed;
@@ -227,9 +227,22 @@ fn apply_project_context(convo: &mut [Message], block: &str) {
         return;
     }
     system.content.push_str("\n\n");
-    system.content.push_str(PROJECT_CONTEXT_BEGIN);
+    system.content.push_str(begin);
     system.content.push_str(block);
-    system.content.push_str(PROJECT_CONTEXT_END);
+    system.content.push_str(end_marker);
+}
+
+fn apply_project_context(convo: &mut [Message], block: &str) {
+    apply_system_context(convo, block, PROJECT_CONTEXT_BEGIN, PROJECT_CONTEXT_END);
+}
+
+fn apply_user_skill_context(convo: &mut [Message], block: &str) {
+    apply_system_context(
+        convo,
+        block,
+        crate::user_skills::CONTEXT_BEGIN,
+        crate::user_skills::CONTEXT_END,
+    );
 }
 
 // 完了したターンから、文脈・履歴に残す「発話」だけを取り出す（user と、本文のある
@@ -1669,6 +1682,12 @@ pub async fn pet_send(
     apply_project_context(
         &mut convo,
         &crate::tools::project::project_context(&state.config),
+    );
+    // SKILL.mdは利用者が会話中や外部エディタから変更できるため、索引を毎ターン
+    // 入れ替える。本文は必要になったときだけuser_skillツールで読み、systemを肥大化させない。
+    apply_user_skill_context(
+        &mut convo,
+        &crate::user_skills::prompt_context(&state.config),
     );
     convo.push(Message::new("user", text));
 
@@ -4878,7 +4897,7 @@ mod tests {
 
 #[cfg(test)]
 mod project_context_tests {
-    use super::apply_project_context;
+    use super::{apply_project_context, apply_user_skill_context};
     use crate::message::Message;
 
     fn convo(system: &str) -> Vec<Message> {
@@ -4917,6 +4936,19 @@ mod project_context_tests {
         let mut messages = vec![Message::new("user", "やあ")];
         apply_project_context(&mut messages, "課題A");
         assert_eq!(messages[0].content, "やあ");
+    }
+
+    #[test]
+    fn プロジェクト文脈と利用者スキル索引は別々に更新する() {
+        let mut messages = convo("人格設定");
+        apply_project_context(&mut messages, "課題A");
+        apply_user_skill_context(&mut messages, "weekly-report: 週報を整える");
+        apply_user_skill_context(&mut messages, "meeting-note: 議事録を整える");
+        let system = &messages[0].content;
+        assert!(system.contains("課題A"), "system: {system}");
+        assert!(system.contains("meeting-note"), "system: {system}");
+        assert!(!system.contains("weekly-report"), "system: {system}");
+        assert_eq!(system.matches("[利用者追加スキル]").count(), 1);
     }
 }
 

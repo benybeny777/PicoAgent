@@ -50,6 +50,7 @@ pub fn base(config: &Config) -> String {
         prompt.push_str(&capabilities);
         prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
     }
+    crate::user_skills::append_prompt_context(&mut prompt, config);
     prompt
 }
 

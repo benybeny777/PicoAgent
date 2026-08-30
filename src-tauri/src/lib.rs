@@ -47,6 +47,7 @@ mod tools;
 mod tracer;
 mod usage;
 mod user_characters;
+mod user_skills;
 mod window_surface;
 
 use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
