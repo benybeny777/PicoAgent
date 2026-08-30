@@ -304,3 +304,131 @@ impl Provider for Anthropic {
 }
 
 inventory::submit! { ProviderReg { make: || Box::new(Anthropic) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assistant_with_call(arguments: Value) -> Message {
+        Message {
+            role: "assistant".to_string(),
+            content: "呼びます".to_string(),
+            tool_calls: Some(vec![ToolCall {
+                id: "toolu_1".to_string(),
+                name: "time".to_string(),
+                arguments,
+            }]),
+            tool_call_id: None,
+            name: None,
+            images: None,
+            usage: None,
+        }
+    }
+
+    /// Anthropic は system をメッセージ列ではなく専用フィールドで受け取る。
+    /// 複数の system をそのまま並べると無視されるので、分離して連結すること。
+    #[test]
+    fn systemは分離して連結する() {
+        let (system, messages) = to_anthropic_messages(&[
+            Message::new("system", "あなたはペットです"),
+            Message::new("system", "日本語で話す"),
+            Message::new("system", ""),
+            Message::new("user", "こんにちは"),
+        ]);
+        assert_eq!(system.unwrap(), "あなたはペットです\n\n日本語で話す");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+    }
+
+    /// Anthropic に `tool` ロールは無い。user の tool_result ブロックへ移す。
+    #[test]
+    fn toolロールはuserのtool_resultへ移す() {
+        let mut message = Message::new("tool", "12時です");
+        message.tool_call_id = Some("toolu_1".to_string());
+        let (_, messages) = to_anthropic_messages(&[message]);
+        assert_eq!(messages[0]["role"], "user");
+        let block = &messages[0]["content"][0];
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], "toolu_1");
+        assert_eq!(block["content"], "12時です");
+    }
+
+    /// OpenAI と違い、Anthropic の `input` は**オブジェクトのまま**渡す。
+    /// ここで文字列化すると、モデルが引数を読めない。
+    #[test]
+    fn 引数はオブジェクトのままtool_useへ載せる() {
+        let (_, messages) = to_anthropic_messages(&[assistant_with_call(json!({"city": "東京"}))]);
+        let blocks = messages[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert_eq!(blocks[1]["id"], "toolu_1");
+        assert_eq!(blocks[1]["input"], json!({"city": "東京"}));
+    }
+
+    /// 中身の無い assistant を空の content で送ると API がエラーを返す。空テキストで埋める。
+    #[test]
+    fn 空のassistantは空テキストブロックで埋める() {
+        let (_, messages) = to_anthropic_messages(&[Message::new("assistant", "")]);
+        let blocks = messages[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], json!({ "type": "text", "text": "" }));
+    }
+
+    /// base64 の data URL だけを image ブロックへ載せる。外部URLは載せられないので飛ばし、
+    /// 1枚も載らなければ本文だけを送る（画像を理由に発話ごと落とさない）。
+    #[test]
+    fn data_url以外の画像は飛ばす() {
+        let mixed = Message::user_with_images(
+            "これは？",
+            vec![
+                "https://example.com/a.png".to_string(),
+                "data:image/png;base64,AA".to_string(),
+            ],
+        );
+        let (_, messages) = to_anthropic_messages(&[mixed]);
+        let blocks = messages[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[0]["source"]["data"], "AA");
+        assert_eq!(blocks[1]["text"], "これは？");
+
+        let only_url =
+            Message::user_with_images("これは？", vec!["https://example.com/a.png".to_string()]);
+        let (_, plain) = to_anthropic_messages(&[only_url]);
+        assert_eq!(plain[0]["content"], "これは？");
+    }
+
+    #[test]
+    fn 応答のtool_useとテキストを正規形へ戻す() {
+        let message = from_anthropic_message(&json!({
+            "content": [
+                { "type": "text", "text": "調べます" },
+                { "type": "text", "text": "" },
+                { "type": "thinking", "thinking": "無視される種別" },
+                { "type": "tool_use", "name": "time", "input": { "city": "東京" } }
+            ]
+        }));
+        assert_eq!(message.role, "assistant");
+        assert_eq!(message.content, "調べます");
+        let calls = message.tool_calls.unwrap();
+        assert_eq!(calls[0].name, "time");
+        assert_eq!(calls[0].arguments, json!({"city": "東京"}));
+        // id を返さないブロックでも、後続の tool_result が対応づけられるよう位置から採番する。
+        assert_eq!(calls[0].id, "toolu_3");
+    }
+
+    #[test]
+    fn ツール定義はfunctionを持つものだけ変換する() {
+        let tools = to_anthropic_tools(&[
+            json!({ "type": "function", "function": { "name": "time", "description": "時刻", "parameters": { "type": "object" } } }),
+            json!({ "type": "function", "function": { "name": "bare" } }),
+            json!({ "type": "unknown" }),
+        ]);
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["name"], "time");
+        assert_eq!(tools[0]["input_schema"], json!({ "type": "object" }));
+        // parameters 欠落でも空スキーマを補う（欠けたまま送ると API が拒否する）。
+        assert_eq!(tools[1]["input_schema"], json!({ "type": "object" }));
+        assert_eq!(tools[1]["description"], "");
+    }
+}
