@@ -4974,33 +4974,28 @@ async function prepareSelectedVoiceModel() {
   }
 }
 
-// 同梱エンジン(local)のモデルDL・起動をバックグラウンドで監視する。
-// DLは数GBになりうるが、キャラと画面の起動完了はこの処理を待たない。
+// 同梱エンジン(local)のモデルDL・検証・起動を監視する。
+// localを選んでいる間は、利用可能になる前に送信画面を見せないため起動完了側で待つ。
 async function waitForEngineReady() {
-  for (let i = 0; i < 1800; i += 1) {
+  while (true) {
     let s;
     try { s = await window.picoagent.engineStatus(); }
     catch (error) {
       logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error));
-      return;
+      const failed = { phase: "error", message: "ローカルAIの準備状態を確認できませんでした" };
+      applyEngineStatus(failed);
+      return failed;
     }
-    applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
-    // 起動画面を抜けたあとは監視だけ続ける。ここで書くと、通常利用中の状態表示
-    // （読み上げ中・エラーなど）を1秒ごとに上書きしてしまう。
+    applyEngineStatus(s); // download/verify/starting はローディング画面に進捗表示。
     if ((!s || s.phase === "idle") && petApp.classList.contains("is-booting")) {
       setStatus("ローカルAIを確認中…");
     }
-    if (s && (s.phase === "ready" || s.phase === "error")) return;
+    if (s && (s.phase === "ready" || s.phase === "error")) return s;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
 
 function startBackgroundStartupServices(info, greeting) {
-  if ((info.providerId || "local") === "local") {
-    void waitForEngineReady().catch(error => {
-      logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error));
-    });
-  }
   if (!info.onboardingDone || !greeting) return;
   const requestRevision = conversationRevision;
   // 音声モデルの取得は数分かかることがあるため、待っている間に会話が1往復でも
@@ -5283,12 +5278,17 @@ function startAlarmPolling() {
       characterManifest.greeting = greeting;
       startupGreeting = greeting;
     }
+    // localはモデル取得中・検証中・起動中のまま会話画面へ移ると、送信できるように
+    // 見えるのに接続拒否になる。利用可能または明示的な準備失敗になるまで起動画面を保つ。
+    if ((info.providerId || "local") === "local") {
+      await waitForEngineReady();
+    }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
-    // キャラクターと履歴が読めた時点で画面を使える状態へ戻す。AIモデル・音声モデルの
-    // 取得はこの後のバックグラウンド処理へ分離し、外部サービス障害で起動を塞がない。
+    // キャラクターと履歴が読め、local選択時はローカルAIの準備も終わった時点で
+    // 画面を使える状態へ戻す。音声モデルだけは起動後のバックグラウンドで準備する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
     try { await window.picoagent.finishBoot(); }
     catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }

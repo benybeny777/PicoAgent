@@ -9,16 +9,18 @@ const startupEnd = renderer.indexOf("\n})().catch(error => {", startupStart);
 assert.ok(startupStart >= 0 && startupEnd > startupStart, "起動シーケンスを抽出できません");
 const startup = renderer.slice(startupStart, startupEnd);
 
-test("画面起動はローカルAIと音声モデルの準備を待たない", () => {
-  assert.doesNotMatch(startup, /await waitForEngineReady\(/);
+test("local選択時はローカルAIの準備完了まで起動画面を維持する", () => {
+  assert.match(startup, /if \(\(info\.providerId \|\| "local"\) === "local"\) \{\s*await waitForEngineReady\(\)/);
   assert.doesNotMatch(startup, /await prepareSelectedVoiceModel\(/);
   assert.match(startup, /startBackgroundStartupServices\(info, startupGreeting\)/);
 });
 
-test("保存形式への復帰後にバックグラウンド準備を始める", () => {
+test("ローカルAI待機後に保存形式へ復帰し音声準備を始める", () => {
+  const engine = startup.indexOf("await waitForEngineReady()");
   const finish = startup.indexOf("await window.picoagent.finishBoot()");
   const background = startup.indexOf("startBackgroundStartupServices(info, startupGreeting)");
-  assert.ok(finish >= 0 && background > finish, "起動完了より先に追加機能を待っています");
+  assert.ok(engine >= 0 && finish > engine, "ローカルAIの準備完了より先に起動画面を終了しています");
+  assert.ok(background > finish, "起動完了より先に音声モデルの準備を始めています");
 });
 
 test("任意キャラクターのI/O待ちはすべて有界化する", () => {

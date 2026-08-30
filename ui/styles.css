@@ -904,6 +904,13 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-spring-motion {
   inset:0 auto auto 0; width:100%; height:135%;
 }
+/* メッシュ描画へ切り替わってもnative-bust指定を維持する。
+   全身絵向けの260%クロップを適用すると、胸上原画が顔だけになる。 */
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"][data-source-framing="native-bust"] .character-view > canvas {
+  inset:0 auto auto 50%; left:50%; bottom:auto;
+  width:auto!important; height:135%!important;
+  transform:translateX(-50%); transform-origin:50% 0%;
+}
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0;
   width:calc(var(--char-frame-width) * var(--stream-canvas-scale))!important;
