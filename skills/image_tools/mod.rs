@@ -5,7 +5,6 @@
 
 use std::path::Path;
 use std::process::Stdio;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -74,19 +73,21 @@ async fn magick_program(cfg: &Config, legacy: &str) -> String {
     "magick".to_string()
 }
 
+/// ImageMagick を実行する。打ち切り時に子プロセスをツリーごと回収させるため、
+/// 自前で `tokio::time::timeout` を巻かず共通層を通す。
 async fn run_magick(
-    mut command: Command,
+    command: Command,
     timeout: u64,
     label: &str,
 ) -> Result<std::process::Output, String> {
-    match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(format!(
-            "エラー: ImageMagick の起動に失敗しました: {}。cargo xtask setup tools か apt/brew で ImageMagick を導入してください。",
-            error
-        )),
-        Err(_) => Err(format!("エラー: {} が {} 秒でタイムアウトしました。", label, timeout)),
-    }
+    crate::tools::process::output_or_install_hint(
+        command,
+        timeout,
+        label,
+        "cargo xtask setup tools か apt/brew で ImageMagick を導入してください。",
+    )
+    .await
+    .map_err(|error| format!("エラー: {error}"))
 }
 
 /// 画像を別形式へ変換する（PSD/XCF 等は統合ビューを使用。resize / quality 対応）。

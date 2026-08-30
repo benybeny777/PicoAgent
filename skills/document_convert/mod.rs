@@ -1,7 +1,6 @@
 // skills/document_convert/mod.rs - LibreOffice による Office/PDF 変換スキル。
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -227,26 +226,36 @@ impl Tool for DocumentConvertTool {
                 .arg(&output_dir)
                 .arg(&input);
         }
-        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-            Ok(Ok(output)) => {
+        // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す
+        // （`soffice` は起動直後に `soffice.bin` を立て直して自身は終了する）。
+        match crate::tools::process::output_or_install_hint(
+            command,
+            timeout,
+            &format!("文書変換（{engine_label}）"),
+            &format!(
+                "cargo xtask setup {} で同梱ツールを取得してください。",
+                if use_pandoc { "tools" } else { "office" }
+            ),
+        )
+        .await
+        {
+            Ok(output) => {
                 if use_pandoc && output.status.success() && pandoc_output.exists() {
                     return format!("Pandoc で変換しました: {}", pandoc_output.display());
                 }
                 format!(
                     "変換エンジン: {}\n終了コード: {}\nstdout:\n{}\nstderr:\n{}",
                     engine_label,
-                    output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
+                    output
+                        .status
+                        .code()
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "シグナル終了".to_string()),
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr)
                 )
             }
-            Ok(Err(error)) => format!(
-                "エラー: {} の起動に失敗しました: {}。cargo xtask setup {} で同梱ツールを取得してください。",
-                engine_label,
-                error,
-                if use_pandoc { "tools" } else { "office" }
-            ),
-            Err(_) => format!("エラー: 文書変換が {} 秒でタイムアウトしました。", timeout),
+            Err(error) => format!("エラー: {error}"),
         }
     }
 }
