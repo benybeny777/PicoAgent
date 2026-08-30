@@ -245,6 +245,7 @@ PicoAgent/
         ├── mcp/            ← MCP クライアント / サーバ
         ├── permissions.rs  ← 全スキル共通のファイル許可（SafePath）
         ├── store.rs        ← 状態ファイルの原子的な保存
+        ├── durable_jobs.rs ← 再起動後に再開するツールジョブの永続キュー
         ├── user_skills.rs  ← 利用者のSKILL.md検証・索引・原子的保存
         └── character_framing.rs / stream_profile.rs / config.rs / commands.rs / …
 ```

@@ -5,14 +5,14 @@
 <h1>🐾 PicoAgent</h1>
 
 <p><strong>ローカルで完結する、キャラクター型 AI エージェント。</strong><br />
-透明ウィンドウに常駐するデスクトップペットへ、<b>71 種のスキル</b>と<b>9 系統の叩く AI</b> をぶら下げた Rust / Tauri 製の常駐アプリです。<br />
+透明ウィンドウに常駐するデスクトップペットへ、<b>74 種のスキル</b>と<b>9 系統の叩く AI</b> をぶら下げた Rust / Tauri 製の常駐アプリです。<br />
 叩く AI もエージェント機能もコネクタを足すだけで増え、1 体で決めきれない依頼は複数の AI へ合議・分担させられます。</p>
 
 ![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)
 ![Rust](https://img.shields.io/badge/backend-Rust-000000?style=for-the-badge&logo=rust)
 ![ローカル LLM](https://img.shields.io/badge/LLM-%E3%83%AD%E3%83%BC%E3%82%AB%E3%83%AB%E5%AE%8C%E7%B5%90-14b8a6?style=for-the-badge)
 ![マルチ AI](https://img.shields.io/badge/AI-%E5%90%88%E8%AD%B0%EF%BC%8F%E5%88%86%E6%8B%85-f97316?style=for-the-badge)
-![スキル 71 種](https://img.shields.io/badge/%E3%82%B9%E3%82%AD%E3%83%AB-71%E7%A8%AE-8b5cf6?style=for-the-badge)
+![スキル 74 種](https://img.shields.io/badge/%E3%82%B9%E3%82%AD%E3%83%AB-74%E7%A8%AE-8b5cf6?style=for-the-badge)
 
 <table>
   <tr>
@@ -39,7 +39,7 @@
 
 - **ローカルAIを同梱。** 初回起動時にPCのVRAM／RAM目安からモデルを自動で選んで取得し、以後はオフラインでも動きます。OllamaやOpenAI互換APIにも切り替えられます。
 - **叩く AI は差し替え式。** `local` / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral / 手元の CLI エージェントの 9 系統。1 体に決めず、2〜8 体へ**合議・分担**させて 1 つの答えにまとめることもできます。
-- **71種の機能を会話から実行。** Web検索、PC操作、画像・動画生成、文書処理、業務サービス連携まで、必要なツールをAIが選んで組み合わせます。
+- **74種の機能を会話から実行。** Web検索、PC操作、画像・動画生成、文書処理、業務サービス連携まで、必要なツールをAIが選んで組み合わせます。
 
 ## 60 秒で動かす
 
@@ -75,7 +75,7 @@ flowchart LR
   LOOP["エージェントループ<br/>計画 → 多段ツール実行 → 自己評価"] --> AI
   AI["叩く AI 9 系統<br/>単一 / 合議 / 分担 + まとめ役"] --> LOOP
   LOOP --> GUARD["ガード<br/>許可ルート・ゴミ箱・allowlist"]
-  GUARD --> SKILLS["スキル 71 種<br/>ツールコネクタ"]
+  GUARD --> SKILLS["スキル 74 種<br/>ツールコネクタ"]
   SKILLS --> LOOP
   MCPIN["外部 MCP サーバー"] --> SKILLS
   LOOP --> OUT["回答 + 出典 + 読み上げ"]
@@ -89,7 +89,7 @@ flowchart LR
 
 | | |
 |---|---|
-| スキル | **71 種**（会話の内容から自動選択） |
+| スキル | **74 種**（会話の内容から自動選択） |
 | 叩く AI | **9 系統** ／ 回答の作り方 **4 モード**（単一・合議・分担＋統合・分担のみ） |
 | 表示形式 | **7 つ**（ミニ／ペット／チャット／バー／作業／配信／ウィジェット） |
 | 同梱キャラクター | 通常 2D **8 体**（ほかに Live2D 動作例 6 体・非同梱） |
@@ -363,7 +363,7 @@ metadata:
 事実が足りない項目は推測せず「未確認」と書く。
 ```
 
-Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや新しい権限を追加しません。ファイル操作・外部送信・コマンド実行が必要なら既存の71種のToolを使い、それぞれの許可、確認、ライセンス判定に従います。`name`と`description`に加え、用途を明確にする`when_to_use`、分類用の`metadata.tags`、自動候補へ出さない`disable-model-invocation`を使えます。Agent Skills互換の`license`、`compatibility`、`metadata`、`allowed-tools`も保持しますが、`allowed-tools`から新しい実行権限は得られません。最大32件です。
+Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや新しい権限を追加しません。ファイル操作・外部送信・コマンド実行が必要なら既存の74種のToolを使い、それぞれの許可、確認、ライセンス判定に従います。`name`と`description`に加え、用途を明確にする`when_to_use`、分類用の`metadata.tags`、自動候補へ出さない`disable-model-invocation`を使えます。Agent Skills互換の`license`、`compatibility`、`metadata`、`allowed-tools`も保持しますが、`allowed-tools`から新しい実行権限は得られません。最大32件です。
 
 ---
 

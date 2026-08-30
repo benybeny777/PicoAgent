@@ -219,13 +219,30 @@ impl SafePath {
 
     /// 配下の相対パスを足す。`..` で外へ出る指定を防ぐため必ず再検証する。
     pub fn join(&self, cfg: &Config, relative: &str) -> Result<SafePath, String> {
-        resolve(cfg, &self.0.join(relative).to_string_lossy())
+        if Path::new(relative).is_absolute() {
+            return Err(format!(
+                "配下へ追加するパスは相対パスで指定してください: {relative}"
+            ));
+        }
+        let joined = normalize(&self.0, relative);
+        if joined != self.0 && !joined.starts_with(&self.0) {
+            return Err(format!(
+                "基準フォルダの外へ出る相対パスは使えません: {relative}"
+            ));
+        }
+        resolve(cfg, &joined.to_string_lossy())
     }
 
     /// 同じ親ディレクトリ内の別ファイル（拡張子違いなど）。こちらも再検証する。
     pub fn sibling(&self, cfg: &Config, file_name: &str) -> Result<SafePath, String> {
         let parent = self.0.parent().unwrap_or(Path::new("."));
-        resolve(cfg, &parent.join(file_name).to_string_lossy())
+        let input = Path::new(file_name);
+        if input.is_absolute() || input.components().count() != 1 {
+            return Err(format!(
+                "同じフォルダ内のファイル名だけを指定してください: {file_name}"
+            ));
+        }
+        resolve(cfg, &parent.join(input).to_string_lossy())
     }
 
     /// 親ディレクトリ。ルート直下などで親が無い場合は主ルートを返す。
@@ -411,6 +428,25 @@ mod tests {
     fn 相対パスをルート基準に正規化する_共通() {
         let base = std::env::temp_dir().join("picoagent-perm-test");
         assert_eq!(normalize(&base, "a/../b"), base.join("b"));
+    }
+
+    #[test]
+    fn 配下結合と同階層名は基準フォルダから脱出しない() {
+        let base = std::env::temp_dir().join(format!("picoagent-join-test-{}", std::process::id()));
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", base.to_string_lossy().as_ref());
+        let root = super::SafePath::app_owned(base.clone());
+        assert_eq!(
+            root.join(&cfg, "child/file.txt").unwrap().as_path(),
+            base.join("child/file.txt")
+        );
+        assert!(root.join(&cfg, "../outside.txt").is_err());
+        assert!(root
+            .join(&cfg, &base.join("absolute.txt").to_string_lossy())
+            .is_err());
+        let file = super::SafePath::app_owned(base.join("file.txt"));
+        assert!(file.sibling(&cfg, "../outside.txt").is_err());
+        assert!(file.sibling(&cfg, "sub/file.txt").is_err());
     }
 
     #[cfg(windows)]
