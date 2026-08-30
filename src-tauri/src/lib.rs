@@ -34,6 +34,7 @@ mod menu;
 mod message;
 mod migration;
 mod permissions;
+mod project_rules;
 mod providers;
 mod relationship;
 mod relationship_preset;
