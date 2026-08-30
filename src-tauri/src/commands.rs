@@ -3094,6 +3094,25 @@ pub async fn pet_rerun_schedule_task(
         .map(|record| json!(record))
 }
 
+/// 永続ジョブの一覧。通知パネルが起動直後に「実行中・失敗のまま残っているもの」を
+/// 描き直すために使う（イベントは起動前の分を受け取れない）。
+#[tauri::command]
+pub fn pet_durable_jobs() -> Result<Value, String> {
+    crate::durable_jobs::list().map(|jobs| json!(jobs))
+}
+
+/// 通知パネルからの再試行。チャットでAIへ頼まなくても押せるようにする。
+#[tauri::command]
+pub fn pet_durable_job_retry(id: String) -> Result<(), String> {
+    crate::durable_jobs::retry(&id)
+}
+
+/// 通知パネルからのキャンセル。実行中のジョブは次の区切りで止まる。
+#[tauri::command]
+pub fn pet_durable_job_cancel(id: String) -> Result<(), String> {
+    crate::durable_jobs::cancel(&id)
+}
+
 #[tauri::command]
 pub fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
     open_settings_tab(&app, tab.as_deref());

@@ -349,7 +349,23 @@ function renderNoticePanel() {
       state.textContent = notice.status === "running" ? "実行中" : notice.status === "failed" ? "失敗" : notice.status === "cancelled" ? "中断" : "完了";
       title.append(state);
     }
-    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job") {
+    if (notice.kind === "durable_job") {
+      const state = document.createElement("span");
+      state.className = `notice-state notice-state-${durableStatus(notice.state)}`;
+      state.textContent = DURABLE_STATE_LABELS[notice.state] || "処理中";
+      title.append(state);
+      // 進行中だけ進捗を出す。終わったジョブに 100% の帯を残しても情報が増えない。
+      if (durableStatus(notice.state) === "running") {
+        const bar = document.createElement("div");
+        bar.className = "notice-progress";
+        const fill = document.createElement("div");
+        fill.className = "notice-progress-fill";
+        fill.style.width = `${Math.max(0, Math.min(100, Number(notice.progress) || 0))}%`;
+        bar.append(fill);
+        item.append(bar);
+      }
+    }
+    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job" || notice.kind === "durable_job") {
       const actions = document.createElement("div");
       actions.className = "notice-actions";
       if (notice.taskId) {
@@ -398,6 +414,26 @@ function renderNoticePanel() {
         });
         actions.append(retry);
       }
+      if (notice.kind === "durable_job" && notice.jobId) {
+        const running = durableStatus(notice.state) === "running";
+        const action = document.createElement("button");
+        action.type = "button";
+        action.textContent = running ? "中止" : "再試行";
+        action.addEventListener("click", async event => {
+          event.stopPropagation();
+          action.disabled = true;
+          try {
+            if (running) await window.picoagent.cancelDurableJob(notice.jobId);
+            else await window.picoagent.retryDurableJob(notice.jobId);
+            setStatus(running ? "ジョブを中止しました" : "ジョブを再試行します");
+          } catch (error) {
+            // 失敗を黙って飲まない（押したのに何も起きない状態を作らない）。
+            setStatus(`${running ? "中止" : "再試行"}できませんでした: ${error?.message || error}`);
+            action.disabled = false;
+          }
+        });
+        actions.append(action);
+      }
       const settings = document.createElement("button");
       settings.type = "button";
       settings.textContent = "設定";
@@ -415,7 +451,85 @@ function renderNoticePanel() {
   }
 }
 
+// 永続ジョブ（AI Drive転送・成果物生成）の状態表示。バックエンドの JobState と対応する。
+const DURABLE_STATE_LABELS = {
+  queued: "順番待ち",
+  running: "実行中",
+  completed: "完了",
+  failed: "失敗",
+  waiting_auth: "認証待ち",
+  cancelled: "中断",
+};
+
+// 中止ボタンを出すかどうかの判定。待機中もまだ止められる。
+function durableStatus(state) {
+  return state === "queued" || state === "running" ? "running" : String(state || "completed");
+}
+
+function durableEntry(notice) {
+  return {
+    kind: "durable_job",
+    jobId: String(notice?.jobId || ""),
+    title: String(notice?.title || "バックグラウンド処理"),
+    body: String(notice?.body || ""),
+    ok: notice?.ok !== false,
+    state: String(notice?.state || "running"),
+    progress: Number(notice?.progress) || 0,
+    at: notice?.at || new Date().toISOString(),
+  };
+}
+
+// 永続ジョブは同じ jobId で何度も届く（開始・進捗・完了）。行を増やさず上書きする。
+// 未読バッジも、状態が変わったときだけ増やす（進捗のたびに数えると数字が暴れる）。
+function upsertDurableJob(notice) {
+  const entry = durableEntry(notice);
+  if (!entry.jobId) return;
+  const index = noticeEntries.findIndex(item => item.kind === "durable_job" && item.jobId === entry.jobId);
+  const previousState = index >= 0 ? noticeEntries[index].state : "";
+  if (index >= 0) noticeEntries.splice(index, 1);
+  noticeEntries.unshift(entry);
+  while (noticeEntries.length > 50) noticeEntries.pop();
+  persistNotices();
+  if (previousState !== entry.state) {
+    unreadNoticeCount += 1;
+    setStatus(entry.ok ? entry.title : `${entry.title}: エラー`);
+  }
+  updateNoticeBadge();
+  renderNoticePanel();
+}
+
+// 起動直後に、前回から残っている永続ジョブを一覧へ戻す。
+// イベントは起動前に流れた分を受け取れないため、走ったままのジョブが消えてしまう。
+async function loadDurableJobNotices() {
+  try {
+    const jobs = await window.picoagent.durableJobs();
+    if (!Array.isArray(jobs)) return;
+    const others = noticeEntries.filter(entry => entry.kind !== "durable_job");
+    const restored = jobs.slice(0, 20).map(job => durableEntry({
+      jobId: job.id,
+      title: job.label,
+      body: (job.error || job.result || job.step || "").split("\n")[0],
+      ok: job.state !== "failed" && job.state !== "waiting_auth",
+      state: job.state,
+      progress: job.progress,
+      at: job.updated_at,
+    }));
+    noticeEntries.length = 0;
+    noticeEntries.push(...others, ...restored);
+    noticeEntries.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    persistNotices();
+    updateNoticeBadge();
+    renderNoticePanel();
+  } catch (error) {
+    logApp("warn", "永続ジョブ一覧を復元できませんでした", errorDetail(error));
+  }
+}
+
 function pushNotice(notice) {
+  if (String(notice?.kind || "") === "durable_job" && notice?.jobId) {
+    upsertDurableJob(notice);
+    return;
+  }
   const entry = {
     kind: String(notice?.kind || ""),
     title: String(notice?.title || "通知"),
@@ -5181,6 +5295,7 @@ function startAlarmPolling() {
   startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
   loadScheduleRunNotices(); // 前回までのスケジュール実行履歴を通知一覧へ復元。
+  loadDurableJobNotices(); // 再起動後も残る永続ジョブ（転送・成果物生成）を復元。
   if (!info.onboardingDone && onboarding) {
     onboarding.hidden = false;
     stopVoice();

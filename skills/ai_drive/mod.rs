@@ -65,11 +65,20 @@ async fn send_chunks(
     job_id: &str,
 ) -> Result<(), String> {
     let client = crate::tools::http::client();
+    let chunks = total.div_ceil(CHUNK_BYTES as u64);
     let mut offset = 0u64;
+    let mut sent = 0u64;
     while offset < total {
         if crate::durable_jobs::is_cancelled(job_id) {
             return Err("エラー: ジョブはキャンセルされました。".to_string());
         }
+        sent += 1;
+        // 送信は転送ジョブの大半を占めるので、送ったバイト数をそのまま進捗にする。
+        crate::durable_jobs::report_progress(
+            job_id,
+            (offset * 100 / total) as u8,
+            &format!("{service}へ送信中 {sent}/{chunks}"),
+        );
         let length = CHUNK_BYTES.min((total - offset) as usize);
         let chunk = read_chunk(path, offset, length)
             .await

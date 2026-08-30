@@ -415,6 +415,11 @@ button:disabled { opacity:.48; cursor:default; }
 .notice-state-completed { background:rgba(38,140,88,.16); color:#2f8b5d; }
 .notice-state-failed { background:rgba(185,58,80,.16); color:#b43d55; }
 .notice-state-cancelled { background:rgba(100,108,120,.16); color:#68717e; }
+.notice-state-queued { background:rgba(100,108,120,.16); color:#68717e; }
+.notice-state-waiting_auth { background:rgba(196,142,52,.18); color:#a97b22; }
+/* 永続ジョブ（AI Drive転送・成果物生成）の進捗。実行中の項目にだけ出す。 */
+.notice-progress { margin-top:6px; height:4px; border-radius:999px; background:rgba(120,128,140,.2); overflow:hidden; }
+.notice-progress-fill { height:100%; border-radius:999px; background:#3f75bd; transition:width .3s ease; }
 .notice-meta { margin-top:2px; color:var(--muted); font-size:10px; }
 .notice-body { max-height:120px; margin-top:5px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:var(--ink-soft); font-size:11px; line-height:1.5; user-select:text; }
 .notice-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:7px; }

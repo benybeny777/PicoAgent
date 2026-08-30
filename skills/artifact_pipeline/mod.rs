@@ -271,6 +271,7 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
         .and_then(Value::as_bool)
         .unwrap_or(true)
     {
+        crate::durable_jobs::report_progress(job_id, 10, "Web調査中");
         let result = crate::tools::dispatch_final(cfg, "research_report", json!({"topic":topic,"save":true,"artifact_bundle":true,"save_path":report_path.display().to_string()})).await;
         if result.starts_with("エラー:") {
             return result;
@@ -287,6 +288,7 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
     if crate::durable_jobs::is_cancelled(job_id) {
         return "エラー: ジョブはキャンセルされました。".to_string();
     }
+    crate::durable_jobs::report_progress(job_id, 45, "HTML/DOCX/XLSX/PPTXを生成中");
     let paths = match write_artifacts(cfg, &dir, topic, &body).await {
         Ok(value) => value,
         Err(error) => return format!("エラー: 成果物生成に失敗しました: {error}"),
@@ -297,6 +299,7 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
     let Some(docx) = paths.iter().find(|path| path.extension_lossy() == "docx") else {
         return "エラー: PDF変換の元になるDOCXを生成できませんでした。".to_string();
     };
+    crate::durable_jobs::report_progress(job_id, 70, "PDFへ変換中");
     let pdf_result = crate::tools::dispatch_final(
         cfg,
         "ms_office",
@@ -315,6 +318,7 @@ async fn execute(cfg: &Config, args: &Value, job_id: &str) -> String {
             .get("cloud_folder_id")
             .and_then(Value::as_str)
             .unwrap_or("");
+        crate::durable_jobs::report_progress(job_id, 90, "クラウド転送を登録中");
         let ai_root = crate::permissions::primary_root(cfg).join("PicoAgent-AI-Drive");
         for name in GENERATED_NAMES.iter().copied().chain([CONVERTED_NAME]) {
             if crate::durable_jobs::is_cancelled(job_id) {
