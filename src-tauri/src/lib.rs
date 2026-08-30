@@ -137,6 +137,7 @@ pub fn run() {
             commands::settings_list_models,
             commands::settings_test_tool,
             commands::settings_save,
+            commands::pet_project_rule_undo,
             commands::pet_durable_jobs,
             commands::pet_durable_job_retry,
             commands::pet_durable_job_cancel,

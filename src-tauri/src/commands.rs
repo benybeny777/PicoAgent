@@ -1769,6 +1769,7 @@ pub async fn pet_send(
                 ),
             }
         }
+        capture_project_rules(&app, &state.config, &user_text);
         if let Some(memory_context) =
             crate::memory::update_from_turn(&app, &state.config, &user_text)
         {
@@ -3092,6 +3093,49 @@ pub async fn pet_rerun_schedule_task(
     crate::scheduler::rerun_task(&app, &state.config, &task_id)
         .await
         .map(|record| json!(record))
+}
+
+/// 強く言い渡された作法を、作業フォルダの AGENTS.md へ書き足す。
+///
+/// 書いたことを黙らせない。利用者のフォルダにあるファイルを変えるので、
+/// 何を足したかと取り消し先を画面へ出す（`renderer.js` の通知パネル）。
+fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_text: &str) {
+    if !crate::project_rules::auto_capture_enabled(config) {
+        return;
+    }
+    for rule in crate::project_rules::emphasized_rules(user_text) {
+        match crate::project_rules::append_captured(config, &rule) {
+            // 既に書いてある作法は静かに飛ばす（同じ通知を毎回出さない）。
+            Ok(None) => {}
+            Ok(Some(path)) => {
+                let payload = json!({
+                    "kind": "project_rule",
+                    "title": "AGENTS.mdへ作法を追記しました",
+                    "body": rule,
+                    "ok": true,
+                    "rule": rule,
+                    "path": path.display().to_string(),
+                    "at": chrono::Local::now().to_rfc3339(),
+                });
+                if let Err(error) = app.emit("pet:notice", payload) {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("AGENTS.md追記を画面へ通知できません: {error}"),
+                    );
+                }
+            }
+            Err(error) => crate::log_paths::append_app_log(
+                app,
+                &format!("AGENTS.mdへ作法を追記できません: {error}"),
+            ),
+        }
+    }
+}
+
+/// 通知の「取り消し」から、自動追記した1行を消す。
+#[tauri::command]
+pub fn pet_project_rule_undo(state: State<'_, AppState>, rule: String) -> Result<bool, String> {
+    crate::project_rules::remove_captured(&state.config, &rule)
 }
 
 /// 永続ジョブの一覧。通知パネルが起動直後に「実行中・失敗のまま残っているもの」を

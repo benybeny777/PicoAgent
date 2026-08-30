@@ -365,7 +365,7 @@ function renderNoticePanel() {
         item.append(bar);
       }
     }
-    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job" || notice.kind === "durable_job") {
+    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job" || notice.kind === "durable_job" || notice.kind === "project_rule") {
       const actions = document.createElement("div");
       actions.className = "notice-actions";
       if (notice.taskId) {
@@ -433,6 +433,25 @@ function renderNoticePanel() {
           }
         });
         actions.append(action);
+      }
+      if (notice.kind === "project_rule" && notice.rule) {
+        const undo = document.createElement("button");
+        undo.type = "button";
+        undo.textContent = "取り消し";
+        undo.addEventListener("click", async event => {
+          event.stopPropagation();
+          undo.disabled = true;
+          try {
+            const removed = await window.picoagent.undoProjectRule(notice.rule);
+            setStatus(removed ? "AGENTS.mdから取り消しました" : "対象の行は見つかりませんでした");
+            if (removed) undo.textContent = "取り消し済み";
+            else undo.disabled = false;
+          } catch (error) {
+            setStatus(`取り消せませんでした: ${error?.message || error}`);
+            undo.disabled = false;
+          }
+        });
+        actions.append(undo);
       }
       const settings = document.createElement("button");
       settings.type = "button";
@@ -538,6 +557,7 @@ function pushNotice(notice) {
     taskId: notice?.taskId ? String(notice.taskId) : "",
     runId: notice?.runId ? String(notice.runId) : "",
     jobId: notice?.jobId ? String(notice.jobId) : "",
+    rule: notice?.rule ? String(notice.rule) : "",
     status: notice?.status ? String(notice.status) : "",
     prompt: notice?.prompt ? String(notice.prompt) : "",
     at: notice?.at || new Date().toISOString(),
