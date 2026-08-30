@@ -26,6 +26,84 @@ async fn read_local(path: &SafePath) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("ファイル読み取りタスクが失敗しました: {error}"))?
 }
 
+/// 送信前にファイルの大きさを確かめる。
+///
+/// 以前は先に全体を読んでから上限と突き合わせていたので、**2 GBのファイルを渡されると
+/// 2 GB確保してから「50 MBまで」と断っていた**。メタデータなら中身を読まずに判定できる。
+fn checked_size(path: &SafePath) -> Result<u64, String> {
+    let size = crate::permissions::fs::metadata(path)?.len();
+    if size > MAX_FILE_BYTES {
+        return Err("AI Drive転送は1ファイル50 MBまでです。".to_string());
+    }
+    Ok(size)
+}
+
+/// 送信するチャンクだけをディスクから読み直す。
+async fn read_chunk(path: &SafePath, offset: u64, length: usize) -> Result<Vec<u8>, String> {
+    let path = path.clone();
+    tokio::task::spawn_blocking(move || crate::permissions::fs::read_range(&path, offset, length))
+        .await
+        .map_err(|error| format!("ファイル読み取りタスクが失敗しました: {error}"))?
+}
+
+/// 再開可能アップロードのセッションURLへ、ファイルを分割して送る。
+///
+/// 以前は全体をメモリへ載せたうえ、チャンクごとに `to_vec()` で複製していた
+/// （50 MBのファイルで一時的に60 MB）。ここでは送る直前に必要な範囲だけ読み、
+/// 読んだ緩衝をそのまま本文へ渡すので、常駐するのは送信中のチャンク分だけになる。
+/// Google（`308 Resume Incomplete`）と OneDrive（`202 Accepted`）で
+/// 途中チャンクの応答が違うだけなので、受理条件をまとめて1本で扱う。
+///
+/// 失敗時の `Err` は、そのままモデルへ返せる完成した文面（`エラー: ` を含む）。
+async fn send_chunks(
+    cfg: &Config,
+    provider: &str,
+    service: &str,
+    session: &str,
+    path: &SafePath,
+    total: u64,
+    job_id: &str,
+) -> Result<(), String> {
+    let client = crate::tools::http::client();
+    let mut offset = 0u64;
+    while offset < total {
+        if crate::durable_jobs::is_cancelled(job_id) {
+            return Err("エラー: ジョブはキャンセルされました。".to_string());
+        }
+        let length = CHUNK_BYTES.min((total - offset) as usize);
+        let chunk = read_chunk(path, offset, length)
+            .await
+            .map_err(|error| format!("エラー: {error}"))?;
+        let end = offset + length as u64;
+        let response = client
+            .put(session)
+            .timeout(timeout(cfg, provider))
+            .header(header::CONTENT_LENGTH, length)
+            .header(
+                header::CONTENT_RANGE,
+                format!("bytes {offset}-{}/{total}", end - 1),
+            )
+            .body(chunk)
+            .send()
+            .await
+            .map_err(|_| {
+                format!("エラー: {service}への送信に失敗しました。通信状態を確認して再試行してください。")
+            })?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(auth_error(service));
+        }
+        // 308 は Google の「続きを送れ」。OneDrive の途中応答 202 は is_success() に含まれる。
+        if !(response.status().is_success() || response.status().as_u16() == 308) {
+            let status = response.status();
+            return Err(format!(
+                "エラー: {service}がアップロード中にHTTP {status}を返しました。"
+            ));
+        }
+        offset = end;
+    }
+    Ok(())
+}
+
 /// 許可判定済みパスへ原子的に書き出す。
 ///
 /// `permissions::fs::write()` ではなく `store::write_atomic()` を通す例外。
@@ -95,13 +173,13 @@ async fn icloud_upload(cfg: &Config, source: &SafePath, folder: &str, remote_nam
     if target.exists() {
         return format!("エラー: iCloud Driveの保存先が既に存在します。別名または別フォルダを指定してください: {}", target.display());
     }
+    if let Err(error) = checked_size(source) {
+        return format!("エラー: {error}");
+    }
     let bytes = match read_local(source).await {
         Ok(value) => value,
         Err(error) => return format!("エラー: {error}"),
     };
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return "エラー: AI Drive転送は1ファイル50 MBまでです。".to_string();
-    }
     write_local_atomic(&target, bytes)
         .await
         .map(|_| format!("iCloud Driveへ保存しました: {}", target.display()))
@@ -127,13 +205,13 @@ async fn icloud_download(cfg: &Config, cloud_relative: &str, local_relative: &st
             target.display()
         );
     }
+    if let Err(error) = checked_size(&source) {
+        return format!("エラー: {error}");
+    }
     let bytes = match read_local(&source).await {
         Ok(value) => value,
         Err(error) => return format!("エラー: {error}"),
     };
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return "エラー: AI Drive転送は1ファイル50 MBまでです。".to_string();
-    }
     write_local_atomic(&target, bytes)
         .await
         .map(|_| {
@@ -205,15 +283,12 @@ async fn google_upload(
         Ok(value) => value,
         Err(error) => return format!("エラー: {error}"),
     };
-    let bytes = match read_local(path).await {
+    let total = match checked_size(path) {
         Ok(value) => value,
         Err(error) => return format!("エラー: {error}"),
     };
-    if bytes.is_empty() {
+    if total == 0 {
         return "エラー: 空ファイルはGoogle Driveへアップロードできません。".to_string();
-    }
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return "エラー: AI Drive転送は1ファイル50 MBまでです。".to_string();
     }
     let client = crate::tools::http::client();
     let stable_key = if idempotency_key.is_empty() {
@@ -276,7 +351,7 @@ async fn google_upload(
         .post(format!("{GOOGLE_UPLOAD}/files?uploadType=resumable"))
         .timeout(timeout(cfg, "google"))
         .bearer_auth(&token)
-        .header("X-Upload-Content-Length", bytes.len())
+        .header("X-Upload-Content-Length", total)
         .json(&metadata)
         .send()
         .await
@@ -300,26 +375,10 @@ async fn google_upload(
     else {
         return "エラー: Google Driveからアップロード先が返りませんでした。".to_string();
     };
-    let mut offset = 0usize;
-    while offset < bytes.len() {
-        if crate::durable_jobs::is_cancelled(job_id) {
-            return "エラー: ジョブはキャンセルされました。".to_string();
-        }
-        let end = (offset + CHUNK_BYTES).min(bytes.len());
-        let response = match client.put(&session).timeout(timeout(cfg, "google"))
-            .header(header::CONTENT_LENGTH, end - offset)
-            .header(header::CONTENT_RANGE, format!("bytes {offset}-{}/{}", end - 1, bytes.len()))
-            .body(bytes[offset..end].to_vec()).send().await {
-                Ok(value) => value, Err(_) => return "エラー: Google Driveへの送信に失敗しました。通信状態を確認して再試行してください。".to_string()
-            };
-        if response.status() == StatusCode::UNAUTHORIZED {
-            return auth_error("Google Drive");
-        }
-        if !(response.status().is_success() || response.status().as_u16() == 308) {
-            let status = response.status();
-            return format!("エラー: Google Driveがアップロード中にHTTP {status}を返しました。");
-        }
-        offset = end;
+    if let Err(message) =
+        send_chunks(cfg, "google", "Google Drive", &session, path, total, job_id).await
+    {
+        return message;
     }
     format!(
         "Google Driveへアップロードしました: {}",
@@ -338,15 +397,12 @@ async fn onedrive_upload(
         Ok(value) => value,
         Err(error) => return format!("エラー: {error}"),
     };
-    let bytes = match read_local(path).await {
+    let total = match checked_size(path) {
         Ok(value) => value,
         Err(error) => return format!("エラー: {error}"),
     };
-    if bytes.is_empty() {
+    if total == 0 {
         return "エラー: 空ファイルはOneDriveへアップロードできません。".to_string();
-    }
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return "エラー: AI Drive転送は1ファイル50 MBまでです。".to_string();
     }
     let display_name = if remote_name.trim().is_empty() {
         path.file_name_lossy()
@@ -391,26 +447,10 @@ async fn onedrive_upload(
     }) else {
         return "エラー: OneDriveからアップロード先が返りませんでした。".to_string();
     };
-    let mut offset = 0usize;
-    while offset < bytes.len() {
-        if crate::durable_jobs::is_cancelled(job_id) {
-            return "エラー: ジョブはキャンセルされました。".to_string();
-        }
-        let end = (offset + CHUNK_BYTES).min(bytes.len());
-        let response = match client.put(&session).timeout(timeout(cfg, "onedrive"))
-            .header(header::CONTENT_LENGTH, end - offset)
-            .header(header::CONTENT_RANGE, format!("bytes {offset}-{}/{}", end - 1, bytes.len()))
-            .body(bytes[offset..end].to_vec()).send().await {
-                Ok(value) => value, Err(_) => return "エラー: OneDriveへの送信に失敗しました。通信状態を確認して再試行してください。".to_string()
-            };
-        if response.status() == StatusCode::UNAUTHORIZED {
-            return auth_error("OneDrive");
-        }
-        if !(response.status().is_success() || response.status() == StatusCode::ACCEPTED) {
-            let status = response.status();
-            return format!("エラー: OneDriveがアップロード中にHTTP {status}を返しました。");
-        }
-        offset = end;
+    if let Err(message) =
+        send_chunks(cfg, "onedrive", "OneDrive", &session, path, total, job_id).await
+    {
+        return message;
     }
     format!("OneDriveへアップロードしました: {}", path.file_name_lossy())
 }
@@ -609,13 +649,13 @@ impl Tool for AiDriveTool {
                     Ok(value) => value,
                     Err(error) => return format!("エラー: {error}"),
                 };
+                if let Err(error) = checked_size(&source) {
+                    return format!("エラー: {error}");
+                }
                 let bytes = match read_local(&source).await {
                     Ok(value) => value,
                     Err(error) => return format!("エラー: {error}"),
                 };
-                if bytes.len() as u64 > MAX_FILE_BYTES {
-                    return "エラー: AI Driveへの取り込みは1ファイル50 MBまでです。".to_string();
-                }
                 if target.exists() {
                     return format!(
                         "エラー: AI Driveの保存先が既に存在します。別名を指定してください: {}",

@@ -322,6 +322,26 @@ pub mod fs {
             .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))
     }
 
+    /// ファイルの一部だけを読む。分割送信のように、全体をメモリへ載せずに
+    /// 順に処理したい用途で使う（`read()` は上限の無い全体読み取り）。
+    pub fn read_range(path: &SafePath, offset: u64, length: usize) -> Result<Vec<u8>, String> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let mut file = std::fs::File::open(path.as_path())
+            .map_err(|error| format!("ファイルを開けません（{}）: {}", path.display(), error))?;
+        file.seek(SeekFrom::Start(offset)).map_err(|error| {
+            format!(
+                "ファイルの読み取り位置を移せません（{}）: {}",
+                path.display(),
+                error
+            )
+        })?;
+        let mut buffer = vec![0u8; length];
+        file.read_exact(&mut buffer)
+            .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))?;
+        Ok(buffer)
+    }
+
     pub fn write(path: &SafePath, contents: impl AsRef<[u8]>) -> Result<(), String> {
         if let Some(parent) = path.as_path().parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
@@ -447,6 +467,21 @@ mod tests {
         let file = super::SafePath::app_owned(base.join("file.txt"));
         assert!(file.sibling(&cfg, "../outside.txt").is_err());
         assert!(file.sibling(&cfg, "sub/file.txt").is_err());
+    }
+
+    #[test]
+    fn 範囲読み取りは指定した位置と長さだけを返す() {
+        let dir = std::env::temp_dir().join(format!("picoagent-range-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = super::SafePath::app_owned(dir.join("range.bin"));
+        std::fs::write(file.as_path(), b"0123456789").unwrap();
+
+        assert_eq!(super::fs::read_range(&file, 0, 4).unwrap(), b"0123");
+        assert_eq!(super::fs::read_range(&file, 6, 4).unwrap(), b"6789");
+        // 足りない分を0埋めで返すと、送信先へ壊れたデータを渡すことになる。必ず失敗させる。
+        assert!(super::fs::read_range(&file, 8, 4).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[cfg(windows)]
