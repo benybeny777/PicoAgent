@@ -51,6 +51,8 @@ pub fn base(config: &Config) -> String {
         prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
     }
     crate::user_skills::append_prompt_context(&mut prompt, config);
+    // 作業フォルダの AGENTS.md（この案件の作法）。許可ルートを切り替えると内容も入れ替わる。
+    crate::project_rules::append_prompt_context(&mut prompt, config);
     prompt
 }
 

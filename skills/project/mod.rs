@@ -521,7 +521,7 @@ impl Tool for ProjectTool {
     }
 
     fn description(&self) -> String {
-        "案件ごとに、作業環境（許可ルート・AI・モデル・キャラクター）の切り替えと、課題台帳・記録（決定事項・進捗）をまとめて扱う。切り替えると課題も記録も一緒に切り替わる。いま取りかかっている一連の手順は todo_plan を使う。"
+        "案件ごとに、作業環境（許可ルート・AI・モデル・キャラクター）の切り替えと、課題台帳・記録（決定事項・進捗）をまとめて扱う。切り替えると課題も記録も一緒に切り替わる。作業フォルダ直下の AGENTS.md をその案件の作法として読み書きできる（rules_show / rules_save）。いま取りかかっている一連の手順は todo_plan を使う。"
             .to_string()
     }
 
@@ -534,9 +534,10 @@ impl Tool for ProjectTool {
                     "enum": [
                         "list", "switch", "save", "forget", "summary",
                         "task_add", "task_list", "task_update", "task_done", "task_remove",
-                        "note_add", "note_list", "note_remove"
+                        "note_add", "note_list", "note_remove",
+                        "rules_show", "rules_save"
                     ],
-                    "description": "save はプロジェクトの登録・更新、switch は切り替え、forget は登録解除（課題と記録も消える）。"
+                    "description": "save はプロジェクトの登録・更新、switch は切り替え、forget は登録解除（課題と記録も消える）。rules_show / rules_save は作業フォルダ直下の AGENTS.md（この案件の作法）を読む・書く。"
                 },
                 "project": {
                     "type": "string",
@@ -550,6 +551,7 @@ impl Tool for ProjectTool {
                 "character": { "type": "string", "description": "save: 使うキャラクター。" },
                 "id": { "type": "string", "description": "task_* / note_* の対象ID（t1 / n1 など）。" },
                 "title": { "type": "string", "description": "課題の内容（task_add は必須）。" },
+                "rules": { "type": "string", "description": "rules_save で書き込む AGENTS.md の全文（追記ではなく置き換え）。" },
                 "status": {
                     "type": "string",
                     "enum": ["todo", "doing", "done", "all"],
@@ -616,6 +618,22 @@ impl Tool for ProjectTool {
         let id = target_id(cfg, &args);
 
         match action.as_str() {
+            // 作業フォルダの AGENTS.md。プロジェクトを切り替えると対象フォルダも変わる。
+            "rules_show" => match crate::project_rules::load_detail(cfg) {
+                Ok(Some(body)) => format!("現在の作業フォルダの AGENTS.md:\n\n{body}"),
+                Ok(None) => "現在の作業フォルダに AGENTS.md はありません。action=rules_save で作成できます。".to_string(),
+                Err(error) => format!("エラー: {error}"),
+            },
+            "rules_save" => {
+                let body = args.get("rules").and_then(Value::as_str).unwrap_or("");
+                match crate::project_rules::save(cfg, body) {
+                    Ok(path) => format!(
+                        "AGENTS.md を保存しました: {}\n次の発話から、この作法を読んだ状態で応答します。",
+                        path.display()
+                    ),
+                    Err(error) => format!("エラー: {error}"),
+                }
+            }
             "list" => render_projects(&projects, &active),
             "summary" => {
                 if projects.is_empty() {
