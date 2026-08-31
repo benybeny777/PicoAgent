@@ -64,7 +64,7 @@ cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qp
 ```
 
 - `cargo xtask setup *` はすべて**ベストエフォート**です。取得できないもの（例: macOS の qpdf など）は警告だけ出して起動を続行し、該当スキルは PATH 上のツールへフォールバックします。
-- 初回起動時はローカルモデル（Gemma 系）を PC の VRAM/RAM に合わせて自動選択・ダウンロードします。以後はオフラインで動作します。
+- 初回起動時は軽量な日本語対応ローカルモデル（LFM2.5 2.6B QAD Q4、約1.59GB）をダウンロードします。以後はオフラインで動作します。
 - 製品ビルド（配布物の作成）は `cargo xtask build`。詳細は README の「製品ビルド」を参照してください。
 
 ---
@@ -350,7 +350,7 @@ metadata:
 
 ## 7. 叩く AI（プロバイダとモデル）
 
-- **既定は `local`（同梱エンジン）**。初回起動時に PC の VRAM/RAM から Gemma 系の small / balanced / large を自動選択してダウンロードします。設定画面では Gemma / Qwen / Llama / Mistral / Phi 系の主要 GGUF プリセットを「種類 → サイズ」で選べ、推奨 VRAM・RAM・ダウンロード目安を表示します。
+- **既定は `local`（同梱エンジン）**。初回は連続ツール利用を検証済みの LFM2.5 2.6B QAD Q4（約1.59GB）をダウンロードします。「AIモデル・連携」には実PCのRAMと、取得できた場合だけ専用VRAMを表示し、日本語対応のLFM / Gemma / Qwen / OpenAI / Phi候補をカードと「種類 → サイズ」で選べます。既存のGemma 4選択は自動変更しません。
 - **GPUに応じた推論経路**: Windowsは対応NVIDIAでCUDA、AMDでROCm、IntelでSYCLを優先し、Vulkan、CPUへ切り替えます。UbuntuはVulkan、Apple Silicon MacはMetalを利用できます。
 - **クラウド**: OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral など。右クリック →「すべての設定…」→「AIモデル・連携」で API キーとモデルを設定します（費用が発生します）。
 - **Ollama**: `ollama serve` 起動後にプロバイダを切り替えると、ローカルのモデル一覧から選べます。

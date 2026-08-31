@@ -93,7 +93,7 @@ flowchart LR
 | 叩く AI | **9 系統** ／ 回答の作り方 **4 モード**（単一・合議・分担＋統合・分担のみ） |
 | 表示形式 | **7 つ**（ミニ／ペット／チャット／バー／作業／配信／ウィジェット） |
 | 同梱キャラクター | 通常 2D **8 体**（ほかに Live2D 動作例 6 体・非同梱） |
-| ローカルモデル | Gemma 4 系 3 サイズを VRAM／RAM から自動選定（約 3.1 / 5.0 / 7.1 GB） |
+| ローカルモデル | 既定は軽量な LFM2.5 2.6B QAD Q4（約 1.59 GB）。PCに合うLFM／Gemma／Qwen等を設定画面で選択 |
 | 最小構成 | RAM 8 GB・GPU なしでも動作（通常推奨 RAM 16 GB・VRAM 4 GB） |
 | 実行構成 | 既定のローカルAIを同梱。追加機能と外部サービスは必要なものだけ選択して利用 |
 
@@ -240,8 +240,8 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 既定は **`local`（同梱エンジン）** です。何も設定しなくても動きます。
 
-- **ローカルモデルと推論方式の自動選定** — `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM / RAM 目安から Gemma 4 系の `small` / `balanced` / `large` を選び、GGUF を自動ダウンロードします。手動なら最新世代の Qwen3.5、OpenAI gpt-oss、Phi-4 mini、LLM-jp-4 8B も選べます。Windowsは対応NVIDIAで`CUDA → Vulkan → CPU`、AMDで`ROCm → Vulkan → CPU`、Intelで`SYCL → Vulkan → CPU`の順に起動確認します。Ubuntu LinuxはVulkan、macOSはMetalをGPU経路に使います。
-- **設定画面での選択** — 「種類 → サイズ」で選べ、推奨 VRAM・推奨 RAM・ダウンロード目安を表示します。取得中はフキダシ下に「モデルを準備中… NN%」と出ます。
+- **軽量なローカルモデルを既定にする** — 初回は連続ツール利用を検証済みの LFM2.5 2.6B QAD Q4（約1.59GB）を選びます。既存利用者が選択済みのGemma 4等は変更しません。Windowsは対応NVIDIAで`CUDA → Vulkan → CPU`、AMDで`ROCm → Vulkan → CPU`、Intelで`SYCL → Vulkan → CPU`の順に起動確認します。Ubuntu LinuxはVulkan、macOSはMetalをGPU経路に使います。
+- **設定画面でPC向け候補を選ぶ** — 「AIモデル・連携」に実PCのRAMと、正確に取得できた場合だけ専用VRAMを表示し、日本語対応のLFM2.5、Gemma 4、Qwen3.5、gpt-oss、Phi-4 miniを複数候補として案内します。カードまたは「種類 → サイズ」で選択でき、推奨VRAM・RAM・ダウンロード目安も確認できます。取得中はフキダシ下に「モデルを準備中… NN%」と出ます。
 - **ディスク整理** — 「AIモデル・連携」タブの「ダウンロード済みモデル」から、取得済み GGUF の一覧・サイズ確認・削除ができます（使用中のモデルは削除不可）。削除は再ダウンロードが必要になることを画面内で案内し、同じボタンをもう一度押したときだけ実行します。
 - **クラウド AI を使う**（費用が発生します） — 右クリック →「設定を開く…」→「AIモデル・連携」でプロバイダ・API キー・モデルを設定。OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral に対応しています。
 - **外部 Ollama を使う** — `ollama serve` の後、設定画面でプロバイダを切り替えるとモデル一覧を読み込みます。
@@ -673,15 +673,16 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 
 ### 動作環境の目安（ローカルモデル）
 
-`PICOAGENT_LOCAL_MODEL_PRESET=auto` が VRAM / RAM の目安から自動選定します。設定画面にも同じ数値を表示します。
+初回は軽量で連続ツール利用を検証済みの `lfm25_2_6b` を選びます。設定画面ではPCのRAMと、正確に取得できた場合だけ専用VRAMを表示し、適合候補を複数案内します。判定は起動保証ではなく、CPU実行や共有メモリを含む選択の目安です。
 
 | プリセット | モデル | 推奨 VRAM | 推奨 RAM | ダウンロード目安 |
 |---|---|---|---|---|
+| `lfm25_2_6b`（既定） | LFM2.5 2.6B QAD Q4 | 4 GB | 8 GB | 約 1.59 GB |
 | `small` | Gemma 4 E2B Q4 | 不要（CPU 中心でも可） | 8 GB | 約 3.1 GB |
-| `balanced`（通常利用の推奨） | Gemma 4 E4B Q4 | 4 GB | 16 GB | 約 5.0 GB |
+| `balanced` | Gemma 4 E4B Q4 | 4 GB | 16 GB | 約 5.0 GB |
 | `large` | Gemma 4 12B Q4 | 8 GB | 24 GB | 約 7.1 GB |
 
-自動選定の既定は上のGemma 4系から変えません。設定画面では、次の追加モデルも手動で選べます。
+Gemma 4は既存選択を維持し、いつでも手動で選べます。ほかに次の日本語対応候補があります。
 
 | プリセット | モデル | 推奨 VRAM | 推奨 RAM | ダウンロード目安 |
 |---|---|---|---|---|
@@ -689,7 +690,8 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 | `qwen35_9b` | Qwen3.5 9B Q4 | 6 GB | 16 GB | 約 5.7 GB |
 | `gpt_oss_20b` | OpenAI gpt-oss-20b MXFP4 | 16 GB | 32 GB | 約 12.1 GB |
 | `phi4mini` | Phi-4 mini Instruct Q4 | 4 GB | 12 GB | 約 2.5 GB |
-| `llmjp4_8b` | LLM-jp-4 8B Thinking Q4（日本語推論向け） | 6 GB | 16 GB | 約 5.3 GB |
+
+`lfm25_1_2b_jp`は1ターン目のツール呼び出しには成功しましたが、2ターン目で別ツールへ切り替えられなかったため一般候補には表示しません。既存設定との互換用に`llmjp4_8b`も利用できますが、Thinking版の思考文非表示と連続ツール利用を実エンジンで確認できていないため、新規の画面候補には表示しません。
 
 旧版で選択したQwen 2.5／3、Llama 3.x、Mistral 7B、Phi 3.5のプリセットIDは、初回起動時に同等負荷帯の現行候補へ移行します。Claudeはモデル重みが公開されていないため、ローカルダウンロードではなくClaude APIプロバイダから利用します。
 
@@ -721,9 +723,9 @@ Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のA
 
 | 環境 | 最低目安 | 推奨 | モデルの目安 |
 |---|---|---|---|
-| Windows 10/11 x64＋Vulkan対応Radeon内蔵AMD APU | RAM 16 GB | RAM 32 GB以上（可能ならデュアルチャネル） | `small` / `balanced`。`large`は共有メモリ量・帯域・機種差の影響が大きいため標準推奨外 |
+| Windows 10/11 x64＋Vulkan対応Radeon内蔵AMD APU | RAM 16 GB | RAM 32 GB以上（可能ならデュアルチャネル） | 既定の`lfm25_2_6b`、または`small` / `balanced`。`large`は共有メモリ量・帯域・機種差の影響が大きいため標準推奨外 |
 
-- `auto` はWindowsが報告する `AdapterRAM` と総RAMを見ます。APUの共有メモリは専用VRAMとして正確に報告されない場合があるため、RAM 16 GB以上なら総RAM側の判定で通常は `balanced` を選びます
+- `auto` は軽量で連続ツール利用を検証済みの`lfm25_2_6b`を初回選択します。設定画面では総RAMから複数候補を案内しますが、APUの共有メモリを専用VRAMとして誤表示しません
 - RAM 16 GBではOS・GPU・モデルが同じメモリを使うため、他アプリとの併用時に余裕が少なくなります。応答が極端に遅い、またはメモリ不足になる場合は `small` を選ぶか、`PICOAGENT_LOCAL_NGL=0` でCPU固定にしてください
 - BIOS/UEFIのUMA Frame Buffer設定は機種ごとに異なるため必須値にはしません。変更する場合はPCメーカーの仕様を優先してください
 

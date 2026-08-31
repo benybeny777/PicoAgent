@@ -481,7 +481,13 @@ function groupedModelField(key, label, value, groups, options = {}) {
   let initialFamily = allGroups.findIndex(group => group.options.some(option => option.value === value));
   if (initialFamily < 0) initialFamily = value ? allGroups.length - 1 : 0;
 
-  function rebuildSize() {
+  function updateHidden(nextValue, notify) {
+    const changed = hidden.value !== nextValue;
+    hidden.value = nextValue;
+    if (notify && changed) hidden.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function rebuildSize(notify = false) {
     const group = allGroups[Number(family.value)] || allGroups[0];
     size.innerHTML = "";
     for (const option of group.options) {
@@ -495,12 +501,12 @@ function groupedModelField(key, label, value, groups, options = {}) {
     size.hidden = customMode;
     custom.hidden = !customMode;
     if (customMode) {
-      hidden.value = custom.value.trim();
+      updateHidden(custom.value.trim(), notify);
       hint.textContent = customGroup.options[0].hint;
       return;
     }
     if (!group.options.some(option => option.value === hidden.value)) {
-      hidden.value = group.options[0]?.value || "";
+      updateHidden(group.options[0]?.value || "", notify);
     }
     size.value = hidden.value;
     hint.textContent = group.options.find(option => option.value === hidden.value)?.hint || "";
@@ -513,13 +519,30 @@ function groupedModelField(key, label, value, groups, options = {}) {
       selected: index === initialFamily,
     }));
   }
-  family.addEventListener("change", rebuildSize);
+  family.addEventListener("change", () => rebuildSize(true));
   size.addEventListener("change", () => {
-    hidden.value = size.value;
+    updateHidden(size.value, true);
     const group = allGroups[Number(family.value)] || allGroups[0];
     hint.textContent = group.options.find(option => option.value === hidden.value)?.hint || "";
   });
-  custom.addEventListener("input", () => { hidden.value = custom.value.trim(); });
+  custom.addEventListener("input", () => { updateHidden(custom.value.trim(), true); });
+  wrapper.setValue = (nextValue) => {
+    const changed = hidden.value !== nextValue;
+    let groupIndex = allGroups.findIndex(group => group.options.some(option => option.value === nextValue));
+    if (groupIndex < 0) groupIndex = allGroups.indexOf(customGroup);
+    if (groupIndex < 0) return false;
+    family.value = String(groupIndex);
+    const group = allGroups[groupIndex];
+    if (group === customGroup) custom.value = nextValue;
+    updateHidden(nextValue, false);
+    rebuildSize(false);
+    if (group !== customGroup) size.value = nextValue;
+    if (changed) hidden.dispatchEvent(new Event("change", { bubbles: true }));
+    hint.textContent = group === customGroup
+      ? customGroup.options[0].hint
+      : (group.options.find(option => option.value === nextValue)?.hint || "");
+    return true;
+  };
   rebuildSize();
   return wrapper;
 }
@@ -730,7 +753,7 @@ function multiAiSettingsField(values) {
 function localModelPresetField(key, label, value) {
   const presets = data.localModelPresets || [];
   const localPresetLabel = (preset) => `${preset.localSize || preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize || "-"}`;
-  const modelFamilies = ["Gemma", "Qwen", "OpenAI", "Phi"];
+  const modelFamilies = [...new Set(presets.map(preset => preset.family).filter(Boolean))];
   const presetGroups = modelFamilies.map((family) => ({
     label: family,
     options: presets.filter(preset => preset.family === family).map(preset => ({
@@ -741,8 +764,8 @@ function localModelPresetField(key, label, value) {
   }));
   const groups = [
     {
-      label: "自動",
-      options: [{ value: "auto", label: "PC性能から自動選択", hint: localModelPresetHint("auto") }],
+      label: "初期設定",
+      options: [{ value: "auto", label: "軽量LFMを既定にする", hint: localModelPresetHint("auto") }],
     },
     ...presetGroups,
     {
@@ -750,11 +773,80 @@ function localModelPresetField(key, label, value) {
       options: [{ value: "custom", label: "URL指定", hint: localModelPresetHint("custom") }],
     },
   ];
-  return groupedModelField(key, label, value, groups.filter(group => group.options.length > 0), { allowCustom: false });
+  const picker = groupedModelField(key, label, value, groups.filter(group => group.options.length > 0), { allowCustom: false });
+  const hardware = data.localHardware || {};
+  const recommendation = markSearchable(
+    el("div", { className: "local-model-recommendation" }),
+    "このPC向け ローカルAI 日本語 モデル RAM VRAM Liquid LFM Gemma Qwen LLM-jp"
+  );
+  const ramKnown = Number.isFinite(hardware.ramGb);
+  const vramKnown = Number.isFinite(hardware.vramGb);
+  const memorySummary = hardware.unifiedMemory
+    ? `共有メモリ ${ramKnown ? `${hardware.ramGb}GB` : "取得できませんでした"}`
+    : `RAM ${ramKnown ? `${hardware.ramGb}GB` : "取得できませんでした"} / 専用VRAM ${vramKnown ? `${hardware.vramGb}GB` : "取得できませんでした"}`;
+  recommendation.append(
+    el("div", { className: "local-model-recommendation-heading" }, [
+      el("div", {}, [
+        el("strong", { textContent: "このPC向けの日本語モデル候補" }),
+        el("p", { textContent: `${memorySummary}。判定は起動保証ではなく、モデルを選ぶ目安です。` }),
+      ]),
+    ])
+  );
+
+  function suitability(preset) {
+    const ramFit = ramKnown && hardware.ramGb >= Number(preset.recommendedRamGb || 0);
+    const requiredVram = Number(preset.recommendedVramGb || 0);
+    const vramFit = requiredVram > 0 && vramKnown && hardware.vramGb >= requiredVram;
+    if (hardware.unifiedMemory && ramFit) return { rank: 0, kind: "fit", label: "共有メモリ向け" };
+    if (requiredVram === 0 && ramFit) return { rank: 0, kind: "fit", label: "軽量・CPU向け" };
+    if (vramFit) return { rank: 0, kind: "fit", label: "GPU向け" };
+    if (ramFit) return { rank: 1, kind: "fit", label: "CPU/RAM向け" };
+    if (!ramKnown || (requiredVram > 0 && !vramKnown)) return { rank: 2, kind: "unknown", label: "判定情報不足" };
+    return { rank: 3, kind: "avoid", label: "このPCでは非推奨" };
+  }
+
+  const cards = presets.map((preset, index) => ({ preset, index, fit: suitability(preset) }))
+    .sort((a, b) => a.fit.rank - b.fit.rank || a.index - b.index);
+  const cardGrid = el("div", { className: "local-model-card-grid" });
+  const buttons = new Map();
+  function refreshCards() {
+    const selected = inputs.get(key)?.value || "";
+    for (const [id, button] of buttons) {
+      const active = id === selected;
+      button.classList.toggle("selected", active);
+      button.textContent = active ? "選択中" : "このモデルを使う";
+      button.disabled = active;
+    }
+  }
+  for (const { preset, fit } of cards) {
+    const button = el("button", { type: "button", className: "btn local-model-select", textContent: "このモデルを使う" });
+    button.addEventListener("click", () => {
+      picker.setValue?.(preset.id);
+      refreshCards();
+    });
+    buttons.set(preset.id, button);
+    cardGrid.append(el("article", { className: `local-model-card ${fit.kind}` }, [
+      el("div", { className: "local-model-card-top" }, [
+        el("strong", { textContent: preset.localSize || preset.label }),
+        el("span", { className: `local-model-fit ${fit.kind}`, textContent: fit.label }),
+      ]),
+      el("p", { className: "local-model-japanese", textContent: preset.japaneseNote || "日本語対応" }),
+      el("p", { textContent: preset.note || "" }),
+      el("dl", {}, [
+        el("div", {}, [el("dt", { textContent: "目安" }), el("dd", { textContent: `VRAM ${preset.recommendedVramGb || 0}GB / RAM ${preset.recommendedRamGb || 0}GB` })]),
+        el("div", {}, [el("dt", { textContent: "取得" }), el("dd", { textContent: preset.downloadSize || "-" })]),
+      ]),
+      button,
+    ]));
+  }
+  recommendation.append(cardGrid);
+  inputs.get(key)?.addEventListener("change", refreshCards);
+  refreshCards();
+  return el("div", { className: "local-model-picker-block" }, [recommendation, picker]);
 }
 
 function localModelPresetHint(value) {
-  if (value === "auto") return "初回起動時にVRAM/RAM目安で small / balanced / large を選び、以後は選定結果を保存します。";
+  if (value === "auto") return "初回起動時に連続ツール利用を検証済みのLFM2.5 2.6Bを選び、以後は選定結果を保存します。上のPC向け候補からいつでも変更できます。";
   if (value === "custom") return "下のカスタムモデルURLを使います。GGUFファイルの直接URLを指定してください。";
   const preset = (data.localModelPresets || []).find(item => item.id === value);
   if (!preset) return "";
@@ -3441,8 +3533,9 @@ function providerDefaultModel(providerId) {
   if (providerId === "xai") return inputs.get("PICOAGENT_XAI_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "mistral") return inputs.get("PICOAGENT_MISTRAL_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "local") {
-    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || provider.defaultModel || "balanced";
-    return preset === "auto" ? (provider.defaultModel || "balanced") : preset;
+    const fallback = data.defaultLocalModelPreset || provider.defaultModel || "lfm25_2_6b";
+    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || fallback;
+    return preset === "auto" ? fallback : preset;
   }
   return provider.defaultModel || "";
 }

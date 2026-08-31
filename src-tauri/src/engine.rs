@@ -464,35 +464,55 @@ fn total_memory_bytes() -> Option<u64> {
         }
         Some(size)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|text| parse_meminfo_total_bytes(&text))
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         None
     }
 }
 
-/// GPU の VRAM 量（バイト）。ローカルモデルのプリセット自動選定にだけ使う。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_meminfo_total_bytes(text: &str) -> Option<u64> {
+    let kb = text.lines().find_map(|line| {
+        let rest = line.strip_prefix("MemTotal:")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })?;
+    // /proc/meminfo の kB は実質 KiB（1024バイト）として定義されている。
+    kb.checked_mul(1_024)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn parse_nvidia_memory_bytes(text: &str) -> Option<u64> {
+    text.lines()
+        .filter_map(|line| line.trim().parse::<u64>().ok())
+        .max()?
+        .checked_mul(1_048_576)
+}
+
+/// GPU の専用VRAM総量（バイト）。正確に取得できる場合だけ返す。
 ///
-/// Windows では WMI を短時間だけ呼ぶ。共通の非同期プロセス層を通すことで、
-/// 起動停止中や WMI 不調時にも10秒で打ち切り、子プロセスを残さない。
+/// `Win32_VideoController.AdapterRAM` はuint32で4GB超が飽和するため使わない。
+/// Windows NVIDIAはドライバ同梱のnvidia-smiを短時間だけ呼び、他GPUは不明として
+/// RAM側の候補判定へ回す。
 async fn gpu_vram_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
-        let mut command = crate::tools::process::command("powershell");
-        command.args([
-            "-NoProfile",
-            "-Command",
-            "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty AdapterRAM",
-        ]);
-        let output = crate::tools::process::output(command, 10, "GPUメモリ量の確認")
+        let mut command = crate::tools::process::command("nvidia-smi.exe");
+        command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
+        // フォールバック許可: nvidia-smi が無い、または3秒以内に応答しないPCでは
+        // 専用VRAMを不明としてRAMだけで候補を案内する。
+        let output = crate::tools::process::output(command, 3, "NVIDIA GPUメモリ量の確認")
             .await
             .ok()?;
         if !output.status.success() {
             return None;
         }
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| line.trim().parse::<u64>().ok())
-            .max()
+        parse_nvidia_memory_bytes(&String::from_utf8_lossy(&output.stdout))
     }
     #[cfg(not(windows))]
     {
@@ -500,37 +520,44 @@ async fn gpu_vram_bytes() -> Option<u64> {
     }
 }
 
-async fn auto_model_preset() -> &'static str {
-    let vram = gpu_vram_bytes().await.unwrap_or(0);
-    let ram = total_memory_bytes().unwrap_or(0);
-    let gib = 1024_u64.pow(3);
-    if vram >= 8 * gib && ram >= 24 * gib {
-        "large"
-    } else if vram >= 4 * gib || ram >= 16 * gib {
-        "balanced"
-    } else {
-        "small"
+fn decimal_gb(bytes: u64) -> f64 {
+    ((bytes as f64 / 1_000_000_000.0) * 10.0).round() / 10.0
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalHardwareProfile {
+    ram_gb: Option<f64>,
+    vram_gb: Option<f64>,
+    unified_memory: bool,
+}
+
+pub async fn local_hardware_profile() -> LocalHardwareProfile {
+    LocalHardwareProfile {
+        ram_gb: total_memory_bytes().map(decimal_gb),
+        vram_gb: gpu_vram_bytes().await.map(decimal_gb),
+        unified_memory: cfg!(target_os = "macos"),
     }
 }
 
-async fn ensure_local_model_selection(app: &AppHandle) {
+async fn ensure_local_model_selection(app: &AppHandle) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
     let requested = state.config.get("PICOAGENT_LOCAL_MODEL_PRESET", "auto");
     let should_auto = requested == "auto"
         || (!state.config.has_value("PICOAGENT_LOCAL_MODEL_PRESET")
             && !state.config.has_value("PICOAGENT_MODEL_URL"));
     let selected = if should_auto {
-        auto_model_preset().await
+        local::DEFAULT_LOCAL_MODEL_PRESET
     } else if local::preset(&requested).is_some() || requested == "custom" {
         local::canonical_preset_id(&requested)
     } else {
-        "balanced"
+        local::DEFAULT_LOCAL_MODEL_PRESET
     };
     if selected == "custom" {
-        return;
+        return Ok(());
     }
     let Some(preset) = local::preset(selected) else {
-        return;
+        anyhow::bail!("ローカルモデルの既定プリセットが見つかりません: {selected}");
     };
     let mut patch = Map::new();
     if requested != selected {
@@ -540,8 +567,7 @@ async fn ensure_local_model_selection(app: &AppHandle) {
         );
     }
     let configured_model = state.config.get("PICOAGENT_MODEL", "");
-    let canonical_model = local::canonical_preset_id(&configured_model);
-    if configured_model.is_empty() || configured_model != canonical_model {
+    if configured_model != preset.id {
         patch.insert(
             "PICOAGENT_MODEL".to_string(),
             Value::String(preset.id.to_string()),
@@ -554,15 +580,13 @@ async fn ensure_local_model_selection(app: &AppHandle) {
         );
     }
     if !patch.is_empty() {
-        if let Err(error) = state.config.set_all(patch) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("ローカルモデルの自動選択を保存できません: {error}"),
-            );
-            return;
-        }
+        state
+            .config
+            .set_all(patch)
+            .map_err(|error| anyhow::anyhow!("ローカルモデルの選択を保存できません: {error}"))?;
         *state.model.lock().unwrap() = preset.id.to_string();
     }
+    Ok(())
 }
 
 /// 保存済みGPU名が候補バックエンドで使える場合だけ返す。
@@ -673,7 +697,13 @@ fn spawn_server(
 
 // モデル取得→エンジン起動→ready 検知までを通しで行う（async タスクから呼ぶ）。
 pub async fn ensure_and_start(app: AppHandle) {
-    ensure_local_model_selection(&app).await;
+    if let Err(error) = ensure_local_model_selection(&app).await {
+        set_status(
+            &app,
+            json!({ "phase": "error", "message": error.to_string() }),
+        );
+        return;
+    }
     let model = model_path(&app);
     if let Err(e) = migrate_legacy_model(&app, &model).await {
         set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
@@ -896,8 +926,8 @@ pub fn clear_stopping(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        gpu_device_for_candidate, migration_file_names, model_file_matches,
-        remove_obsolete_model_files,
+        decimal_gb, gpu_device_for_candidate, migration_file_names, model_file_matches,
+        parse_meminfo_total_bytes, parse_nvidia_memory_bytes, remove_obsolete_model_files,
     };
     use crate::providers::local;
 
@@ -923,6 +953,25 @@ mod tests {
             Some("custom:0")
         );
         assert_eq!(gpu_device_for_candidate("CUDA", "  "), None);
+    }
+
+    #[test]
+    fn pcメモリ量を十進gbへ丸める() {
+        assert_eq!(decimal_gb(8_550_000_000), 8.6);
+        assert_eq!(decimal_gb(730_894_624), 0.7);
+    }
+
+    #[test]
+    fn linuxとnvidiaのメモリ出力を総量へ変換する() {
+        assert_eq!(
+            parse_meminfo_total_bytes("MemTotal:       16384000 kB\nMemFree: 10 kB"),
+            Some(16_777_216_000)
+        );
+        assert_eq!(
+            parse_nvidia_memory_bytes("4096\n8151\n"),
+            Some(8_546_942_976)
+        );
+        assert_eq!(parse_nvidia_memory_bytes("N/A\n"), None);
     }
 
     #[test]

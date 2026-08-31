@@ -141,7 +141,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 - Windows / macOS を想定。**Rust（cargo）と Tauri CLI**（`cargo install tauri-cli --version '^2'`）、WebView2（Windows ランタイム）。**Node.js も Ollama も不要**（開発タスクは `cargo xtask`）。
 - **Node.js は「アプリと開発タスクの依存」としては使わない。ただし作業用ツールとしては使ってよい**（例: `tools/screenshots/` の Playwright 撮影ツール）。判断基準は「アプリのビルド・起動・配布に Node が要るようになるかどうか」で、`package.json` を置いて依存を増やす形にはしない（グローバル導入のツールを環境変数で指す）。
 - 開発起動: `cargo xtask setup engine`（同梱エンジン取得）→ `cargo xtask dev`。製品ビルド: `cargo xtask build`（`src-tauri/target/release/bundle/`）。
-- **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM/RAM 目安から Gemma 4 系プリセットを選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL し、以後オフライン。Ollama / OpenAI 互換は任意プロバイダとして存続。
+- **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時は軽量かつ連続ツール利用を検証済みのLFM2.5 2.6B QAD版を選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL して以後オフラインで使う。設定画面は実PCのRAMと、正確に取得できる場合だけ専用VRAMを表示し、日本語対応モデルを複数候補として案内する。利用者が明示したGemma 4等の選択は自動変更しない。Ollama / OpenAI 互換は任意プロバイダとして存続。
 - **OpenAI 互換プロバイダ（`OPENAI_API_KEY` 利用）は費用が発生するため、ユーザー指示または運用上の明確な必要がある場合だけ実行する。** local / Ollama はコストがかからない。
 - **アプリがプリセットとして案内・取得するローカルモデルは、原則として量子化済みGGUFを使う。** 一般PCでの容量・メモリ・速度を優先し、非量子化重みをプリセットへ追加しない。モデル公式の量子化版が無い場合は、出所と形式を確認できるGGUFを使う。利用者が明示する`custom` URLはこの制限の対象外。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
