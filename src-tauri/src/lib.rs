@@ -52,7 +52,7 @@ mod user_characters;
 mod user_skills;
 mod window_surface;
 
-use tauri::{LogicalSize, Manager, PhysicalPosition, RunEvent};
+use tauri::{Manager, PhysicalPosition, RunEvent};
 
 use aivis::AivisState;
 use boot_screen::BootScreenState;
@@ -106,6 +106,7 @@ pub fn run() {
             commands::pet_set_bubble_size,
             commands::pet_set_character_offset,
             commands::pet_place_window,
+            commands::pet_start_window_drag,
             commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
             commands::pet_relationship_state,
@@ -431,6 +432,14 @@ const SNAP_THRESHOLD: i32 = 24;
 #[derive(Default)]
 pub(crate) struct WindowLayoutCache {
     inner: std::sync::Mutex<Option<CachedLayout>>,
+    boot_user_move: std::sync::atomic::AtomicBool,
+    boot_placement: std::sync::Mutex<Option<BootWindowPlacement>>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum BootWindowPlacement {
+    Position(i32, i32),
+    CenterOnMonitor(i32, i32),
 }
 
 #[derive(Clone, Copy)]
@@ -582,14 +591,42 @@ pub(crate) fn pull_back_on_screen(window: &tauri::WebviewWindow, win_w: u32, win
 }
 
 /// 起動画面を現在モニタの中央へ置く。通常画面の保存位置は変更せず、起動完了時に戻す。
-pub(crate) fn center_window_on_current_monitor(
+pub(crate) fn center_window_on_saved_monitor(
     window: &tauri::WebviewWindow,
-    win_w: u32,
-    win_h: u32,
+    config: &config::Config,
+    logical_width: f64,
+    logical_height: f64,
 ) {
-    let Some(monitor) = current_monitor_rect(window) else {
+    let saved = (
+        config.get("PICOAGENT_WINDOW_LEFT_PX", "").parse::<i32>(),
+        config.get("PICOAGENT_WINDOW_TOP_PX", "").parse::<i32>(),
+    );
+    let monitors = monitor_rects(window);
+    let saved_monitor = match saved {
+        (Ok(x), Ok(y)) => monitors.iter().copied().find(|monitor| {
+            x >= monitor.x
+                && x < monitor.x + monitor.width as i32
+                && y >= monitor.y
+                && y < monitor.y + monitor.height as i32
+        }),
+        _ => None,
+    };
+    let Some(monitor) = saved_monitor.or_else(|| current_monitor_rect(window)) else {
         return;
     };
+    let target_scale = window
+        .available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .find(|candidate| {
+            candidate.position().x == monitor.x && candidate.position().y == monitor.y
+        })
+        .map(|candidate| candidate.scale_factor())
+        .or_else(|| window.scale_factor().ok())
+        .unwrap_or(1.0)
+        .max(1.0);
+    let win_w = (logical_width * target_scale).round() as u32;
+    let win_h = (logical_height * target_scale).round() as u32;
     let x = monitor.x + monitor.width.saturating_sub(win_w) as i32 / 2;
     let y = monitor.y + monitor.height.saturating_sub(win_h) as i32 / 2;
     if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
@@ -598,6 +635,37 @@ pub(crate) fn center_window_on_current_monitor(
             &format!("起動画面を中央へ配置できませんでした: {error}"),
         );
     }
+}
+
+pub(crate) fn mark_boot_window_drag(app: &tauri::AppHandle) {
+    if layout::boot_size_active() {
+        let cache = app.state::<WindowLayoutCache>();
+        cache
+            .boot_user_move
+            .store(true, std::sync::atomic::Ordering::Release);
+        *cache.boot_placement.lock().unwrap() = None;
+    }
+}
+
+pub(crate) fn remember_boot_window_center(app: &tauri::AppHandle, monitor_x: i32, monitor_y: i32) {
+    if !layout::boot_size_active() {
+        return;
+    }
+    let cache = app.state::<WindowLayoutCache>();
+    cache
+        .boot_user_move
+        .store(false, std::sync::atomic::Ordering::Release);
+    *cache.boot_placement.lock().unwrap() =
+        Some(BootWindowPlacement::CenterOnMonitor(monitor_x, monitor_y));
+}
+
+pub(crate) fn take_boot_window_placement(app: &tauri::AppHandle) -> Option<BootWindowPlacement> {
+    let cache = app.state::<WindowLayoutCache>();
+    cache
+        .boot_user_move
+        .store(false, std::sync::atomic::Ordering::Release);
+    let placement = cache.boot_placement.lock().unwrap().take();
+    placement
 }
 
 /// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。
@@ -614,8 +682,30 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if matches!(window.is_fullscreen(), Ok(true)) {
         return;
     }
-    // 起動用680×430と中央位置は一時状態。通常画面の保存値へ混ぜない。
+    // Windowsは最小化したウィンドウを (-32000,-32000) へ退避する。通常の画面外判定へ
+    // 渡すと復元→最小化を繰り返し、位置移動不能と大量ログになるため保存も補正もしない。
+    if matches!(window.is_minimized(), Ok(true)) {
+        return;
+    }
+    if let tauri::WindowEvent::Moved(position) = event {
+        if position.x <= -30000 && position.y <= -30000 {
+            return;
+        }
+    }
+    // 起動用680×430は一時状態なのでサイズへ混ぜない。ただし利用者が明示的に
+    // ドラッグした位置は通常画面へ引き継ぐ。
     if layout::boot_size_active() {
+        let cache = window.state::<WindowLayoutCache>();
+        if matches!(event, tauri::WindowEvent::Moved(_))
+            && cache
+                .boot_user_move
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            if let Ok(position) = window.outer_position() {
+                *cache.boot_placement.lock().unwrap() =
+                    Some(BootWindowPlacement::Position(position.x, position.y));
+            }
+        }
         return;
     }
     let (Ok(Some(monitor)), Ok(pos), Ok(size)) = (
@@ -625,6 +715,9 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     ) else {
         return;
     };
+    if pos.x <= -30000 && pos.y <= -30000 {
+        return;
+    }
     let (w, h) = (size.width as i32, size.height as i32);
 
     // ディスプレイ構成の変更（モニタの抜き差し・主副の入れ替え・解像度変更）で
@@ -724,40 +817,11 @@ fn current_monitor_rect(window: &tauri::WebviewWindow) -> Option<MonitorRect> {
 /// 座標が現在のモニタ構成のどこにも載らない（ディスプレイを外した等）場合は、
 /// 既定の右下位置へ置き直す。
 pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &config::Config) {
-    let Some(monitor) = current_monitor_rect(window) else {
-        return;
-    };
-    let Ok(scale) = window.scale_factor() else {
-        return;
-    };
-    let scale = scale.max(1.0);
-    let Ok(current) = window.outer_size() else {
-        return;
-    };
-
-    // サイズ: 全画面時の汚染などでモニタを超える保存値が来てもモニタ内へ収める。
-    let (mut win_w, mut win_h) = (current.width, current.height);
-    if let (Ok(width), Ok(height)) = (
-        config.get("PICOAGENT_WINDOW_WIDTH_PX", "").parse::<f64>(),
-        config.get("PICOAGENT_WINDOW_HEIGHT_PX", "").parse::<f64>(),
-    ) {
-        let width = width.min(monitor.width as f64 / scale);
-        let height = height.min(monitor.height as f64 / scale);
-        // 下限はウィンドウの最小寸法と同じ。ここに別の数値を書くと、8方向リサイズで
-        // 小さくした寸法（最小寸法までは正当な操作）が復元時に丸ごと捨てられる。
-        if width >= layout::MIN_WIDTH && height >= layout::MIN_HEIGHT {
-            if let Err(error) = window.set_size(LogicalSize::new(width, height)) {
-                log_paths::append_app_log(
-                    &window.app_handle().clone(),
-                    &format!("保存済みウィンドウサイズを復元できませんでした: {error}"),
-                );
-            }
-            // 位置計算は適用後の物理サイズを使う（set_size の反映前に outer_size を読むと古い値になる）。
-            win_w = (width * scale).round() as u32;
-            win_h = (height * scale).round() as u32;
-        }
-    }
-
+    // サイズの正本は表示形式ごとの `PICOAGENT_WINDOW_LAYOUTS` だけ。
+    // 旧グローバル幅・高さで直前の形式を全形式へ上書きしない。
+    let app = window.app_handle().clone();
+    let id = layout::current(config);
+    let (win_w, win_h) = layout::applied_physical_size(window, &app, &id);
     restore_window_position(window, config, win_w, win_h);
 }
 
@@ -768,6 +832,9 @@ pub(crate) fn restore_window_position(
     win_w: u32,
     win_h: u32,
 ) {
+    let Some(monitor) = current_monitor_rect(window) else {
+        return;
+    };
     // 位置: 保存された絶対座標をそのまま使う（＝同じディスプレイの同じ場所へ戻る）。
     let saved = (
         config.get("PICOAGENT_WINDOW_LEFT_PX", "").parse::<i32>(),
@@ -818,14 +885,6 @@ fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
     let state = app_handle.state::<AppState>();
     let mut patch = serde_json::Map::new();
     patch.insert(
-        "PICOAGENT_WINDOW_WIDTH_PX".to_string(),
-        serde_json::json!(layout.width.round().to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_WINDOW_HEIGHT_PX".to_string(),
-        serde_json::json!(layout.height.round().to_string()),
-    );
-    patch.insert(
         "PICOAGENT_WINDOW_LEFT_PX".to_string(),
         serde_json::json!(layout.x.to_string()),
     );
@@ -838,6 +897,10 @@ fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
             app_handle,
             &format!("終了時のウィンドウ位置・サイズ保存に失敗しました: {error}"),
         );
+    }
+    let id = layout::current(&state.config);
+    if let Err(error) = layout::remember_size(app_handle, &id, layout.width, layout.height) {
+        log_paths::append_app_log(app_handle, &error);
     }
 }
 

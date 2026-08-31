@@ -7,13 +7,13 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
+  <main id="petApp" class="pet-app is-booting">
     <span class="beta-badge" aria-label="アルファ版" hidden>ALPHA</span>
-    <section id="bootScreen" class="boot-screen" aria-live="polite" data-tauri-drag-region>
-      <div class="boot-stage" data-tauri-drag-region>
+    <section id="bootScreen" class="boot-screen" aria-live="polite">
+      <div class="boot-stage">
         <div id="bootLog" class="boot-log" aria-label="起動ログ"></div>
-        <div class="boot-character" data-tauri-drag-region>
-          <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" data-tauri-drag-region />
+        <div class="boot-character">
+          <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" />
           <span class="boot-shadow" aria-hidden="true"></span>
         </div>
         <div class="boot-progress" aria-hidden="true"><span></span></div>
@@ -61,17 +61,17 @@
           <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
         </div>
       </form>
-      <div id="status" class="status"></div>
+      <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
       <button id="cancelVoice" class="cancel-voice" type="button" hidden>読み上げを中止</button>
       <button id="cancelSend" class="cancel-send" type="button" hidden>処理を止める</button>
       <button id="bubbleResize" class="bubble-resize" type="button" aria-label="フキダシのサイズを変更" title="ドラッグしてサイズ変更"></button>
     </section>
-    <section id="character" class="character" data-render-kind="2d" data-tauri-drag-region title="ドラッグで画面を移動／右クリックで設定" role="button" tabindex="0" aria-label="キャラクターに触れる。ドラッグで画面を移動、右クリックで設定">
+    <section id="character" class="character" data-render-kind="2d" title="ドラッグで画面を移動／右クリックで設定" role="button" tabindex="0" aria-label="キャラクターに触れる。ドラッグで画面を移動、右クリックで設定">
       <!-- 立ち絵の拡大・移動はこの枠にかける。待機モーションは中の img を動かすので、
            同じ要素に transform を重ねないよう1枚挟んでいる。 -->
-      <div id="characterView" class="character-view" data-tauri-drag-region>
-        <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" data-tauri-drag-region />
-        <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" data-tauri-drag-region hidden></div>
+      <div id="characterView" class="character-view">
+        <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" />
+        <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" hidden></div>
       </div>
       <span id="online" class="online"></span>
       <button id="relationshipButton" class="relationship-button" type="button" title="いっしょの記録を見る" aria-label="いっしょの記録を見る" aria-controls="relationshipCard" aria-expanded="false">♡</button>
@@ -130,12 +130,12 @@
       <div class="drop-overlay-inner">📎 ここにドロップして添付</div>
     </div>
     <nav id="topWindowMenu" class="top-window-menu" aria-label="PicoAgent メニュー">
-      <span class="top-window-menu-brand" data-tauri-drag-region>PicoAgent</span>
+      <span class="top-window-menu-brand">PicoAgent</span>
       <button type="button" data-settings-tab="display">表示</button>
       <button id="layoutEditToggle" class="layout-edit-toggle" type="button" aria-pressed="false" title="OBS風に画面を編集">配置</button>
       <button type="button" data-settings-tab="character">キャラ・音声</button>
       <button type="button" data-settings-tab="">設定</button>
-      <span class="top-window-menu-drag" data-tauri-drag-region aria-hidden="true"></span>
+      <span class="top-window-menu-drag" aria-hidden="true"></span>
       <section id="layoutEditorToolbar" class="layout-editor-toolbar" aria-label="レイアウト編集" hidden>
         <strong>レイアウト編集</strong>
         <label>対象

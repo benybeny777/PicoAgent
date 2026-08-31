@@ -198,6 +198,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 | `app.<日付>.log` | アプリ本体とフロントのエラー |
 | `aivis.<日付>.log` | Aivis の起動ログ |
 | `engine.<日付>.log` | 同梱 llama-server のログ |
+| `dev.<日付>.log` | `cargo xtask dev` の再ビルド警告・コンパイルエラー（監視継続中の失敗を含む） |
 
 **識別子とデータ**
 

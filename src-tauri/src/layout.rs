@@ -14,7 +14,7 @@ use std::sync::{
 };
 
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition};
 
 use crate::commands::AppState;
 
@@ -256,11 +256,53 @@ pub fn finish_boot(app: &AppHandle, id: &str) -> Result<(), String> {
     let _transition = BOOT_TRANSITION
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let user_placement = crate::take_boot_window_placement(app);
     BOOT_FINISHED.store(true, Ordering::Release);
     apply(app, id)?;
     if let Some(window) = app.get_webview_window("main") {
         let (width, height) = applied_physical_size(&window, app, id);
-        crate::restore_window_position(&window, &app.state::<AppState>().config, width, height);
+        match user_placement {
+            Some(crate::BootWindowPlacement::Position(x, y)) => {
+                window
+                    .set_position(PhysicalPosition::new(x, y))
+                    .map_err(|error| {
+                        format!("起動中に移動した位置を引き継げませんでした: {error}")
+                    })?;
+                crate::pull_back_on_screen(&window, width, height);
+            }
+            Some(crate::BootWindowPlacement::CenterOnMonitor(monitor_x, monitor_y)) => {
+                let monitors = window
+                    .available_monitors()
+                    .map_err(|error| error.to_string())?;
+                if let Some(monitor) = monitors
+                    .iter()
+                    .find(|monitor| {
+                        monitor.position().x == monitor_x && monitor.position().y == monitor_y
+                    })
+                    .or_else(|| monitors.first())
+                {
+                    let (x, y) = centered_physical_position(
+                        monitor.position().x,
+                        monitor.position().y,
+                        monitor.size().width,
+                        monitor.size().height,
+                        width,
+                        height,
+                    );
+                    window
+                        .set_position(PhysicalPosition::new(x, y))
+                        .map_err(|error| {
+                            format!("指定画面の中央へ配置できませんでした: {error}")
+                        })?;
+                }
+            }
+            None => crate::restore_window_position(
+                &window,
+                &app.state::<AppState>().config,
+                width,
+                height,
+            ),
+        }
     }
     Ok(())
 }
@@ -270,20 +312,48 @@ pub fn apply_boot(app: &AppHandle) -> Result<(), String> {
     let _transition = BOOT_TRANSITION
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    apply_boot_locked(app)
+}
+
+fn apply_boot_locked(app: &AppHandle) -> Result<(), String> {
     if BOOT_FINISHED.load(Ordering::Acquire) {
         return Ok(());
     }
     begin_boot_size();
     apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)?;
     if let Some(window) = app.get_webview_window("main") {
-        let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
-        crate::center_window_on_current_monitor(
+        crate::center_window_on_saved_monitor(
             &window,
-            (BOOT_WIDTH * scale).round() as u32,
-            (BOOT_HEIGHT * scale).round() as u32,
+            &app.state::<AppState>().config,
+            BOOT_WIDTH,
+            BOOT_HEIGHT,
         );
     }
     Ok(())
+}
+
+/// WebView再読込を含む新しい起動シーケンスを開始する。
+/// プロセス内staticの完了状態を前回から持ち越さず、共通起動寸法を再適用する。
+pub fn restart_boot(app: &AppHandle) -> Result<(), String> {
+    let _transition = BOOT_TRANSITION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    BOOT_FINISHED.store(false, Ordering::Release);
+    apply_boot_locked(app)
+}
+
+pub(crate) fn centered_physical_position(
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+    window_width: u32,
+    window_height: u32,
+) -> (i32, i32) {
+    (
+        monitor_x + (monitor_width.saturating_sub(window_width) / 2) as i32,
+        monitor_y + (monitor_height.saturating_sub(window_height) / 2) as i32,
+    )
 }
 
 /// 形式の変更を当てる。ただし起動準備中は当てずに共通の起動画面を保つ。
@@ -337,7 +407,7 @@ fn apply_window_size(
 
 /// 表示形式の要求寸法を現在モニタに収めた物理pxへ変換する。
 /// `set_size` 直後の `outer_size()` は古い値を返し得るため、位置復元にも同じ計算を使う。
-fn applied_physical_size(
+pub(crate) fn applied_physical_size(
     window: &tauri::WebviewWindow,
     app: &AppHandle,
     id: &str,
@@ -379,8 +449,8 @@ pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        begin_boot_size, boot_size_active, default_size, end_boot_size, is_known, BOOT_HEIGHT,
-        BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
+        begin_boot_size, boot_size_active, centered_physical_position, default_size, end_boot_size,
+        is_known, BOOT_HEIGHT, BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
     };
 
     /// 既定の表示形式が定義一覧に含まれていること（未知の値のフォールバック先が実在する）。
@@ -394,6 +464,14 @@ mod tests {
         assert_eq!((BOOT_WIDTH, BOOT_HEIGHT), (680.0, 430.0));
         assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("chat"));
         assert_ne!((BOOT_WIDTH, BOOT_HEIGHT), default_size("bar"));
+    }
+
+    #[test]
+    fn 右側の異なる原点を持つ画面でも最終寸法で中央を求める() {
+        assert_eq!(
+            centered_physical_position(2560, -120, 3840, 2160, 1800, 1200),
+            (3580, 360)
+        );
     }
 
     /// 起動準備中の共通寸法を、その表示形式の寸法として覚えないこと

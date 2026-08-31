@@ -21,7 +21,7 @@ const MAX_RESPONSE_BYTES: usize = 32 * 1024;
 pub struct WebSearchTool;
 
 const RESULT_MATERIAL_PROMPT: &str = include_str!("prompts/result-material.md");
-const WEB_SEARCH_REQUESTS: [&str; 8] = [
+const WEB_SEARCH_REQUESTS: [&str; 17] = [
     "WEB検索して",
     "Web検索して",
     "web検索して",
@@ -30,6 +30,15 @@ const WEB_SEARCH_REQUESTS: [&str; 8] = [
     "Webで検索して",
     "webで検索して",
     "ネットで調べて",
+    "サイトを探して",
+    "サイト探して",
+    "ページを探して",
+    "ページ探して",
+    "記事を探して",
+    "記事探して",
+    "リンクを探して",
+    "リンク探して",
+    "ウェブで探して",
 ];
 
 fn render_result_material(user_text: &str, tool_result: &str) -> String {
@@ -104,6 +113,14 @@ fn search_query(text: &str) -> String {
             character.is_whitespace() || "、。,.！？!?：:".contains(character)
         })
         .trim();
+    // 「天気の サイト探して」の命令部を除いた後に残る末尾の孤立助詞だけを落とす。
+    // 文中の助詞は検索語の意味を変えるため触らない。
+    let query = ["について", "とは", "の", "を"]
+        .iter()
+        .find_map(|suffix| query.strip_suffix(suffix))
+        .map(str::trim_end)
+        .filter(|trimmed| !trimmed.is_empty())
+        .unwrap_or(query);
     if query.is_empty() {
         text.trim().to_string()
     } else {
@@ -339,7 +356,16 @@ inventory::submit! { ToolReg { make: || Box::new(WebSearchTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{direct_url, extract_results, parse_setting_value, MAX_RESULTS_LIMIT};
+    use super::{
+        direct_url, extract_results, is_explicit_request, parse_setting_value, search_query,
+        MAX_RESULTS_LIMIT,
+    };
+
+    #[test]
+    fn サイトを探す要求を明示的なweb検索として扱う() {
+        assert!(is_explicit_request("天気のサイト探して"));
+        assert_eq!(search_query("天気のサイト探して"), "天気");
+    }
 
     #[test]
     fn duckduckgoの転送urlを直接urlへ戻す() {
