@@ -265,7 +265,9 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     let total: usize = turns.iter().map(estimate_tokens).sum();
     let system_tokens: usize = convo
         .iter()
-        .filter(|message| message.role == "system")
+        .filter(|message| {
+            message.role == "system" && message.name.as_deref() != Some("picoagent_private_context")
+        })
         .map(estimate_tokens)
         .sum();
     let turn_budget = budget.saturating_sub(system_tokens);
@@ -286,7 +288,9 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     }
     let mut next: Vec<Message> = convo
         .iter()
-        .filter(|m| m.role == "system")
+        // ツール結果は現在ターンの公開判定だけに使う。次ターンへsystemとして残すと、
+        // 外部資料と命令文が累積し、人格より強い文脈として再送され続けてしまう。
+        .filter(|m| m.role == "system" && m.name.as_deref() != Some("picoagent_private_context"))
         .cloned()
         .collect();
     next.extend(turns);
@@ -3431,11 +3435,11 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    // 起動完了の記録は寸法変更より先に行う。フロントはここまで到達できているので、
-    // ウィンドウ寸法の変更だけが失敗しても「起動できなかった」ことにはならない。
-    // あとにすると、動いている画面が監視のタイムアウトで案内画面へ差し替わる。
+    crate::layout::finish_boot(&app, &id)?;
+    // 通常寸法と位置へ戻せた後だけ完了扱いにする。失敗時はフロントから再試行でき、
+    // 680x430の起動画面を完了状態として固定しない。
     crate::boot_screen::mark_finished(&app);
-    crate::layout::finish_boot(&app, &id)
+    Ok(())
 }
 
 #[tauri::command]
@@ -4742,6 +4746,24 @@ mod tests {
         assert_eq!(compacted[0].role, "system");
         assert_eq!(compacted[1].content, "発話4");
         assert_eq!(compacted[2].content, "発話5");
+    }
+
+    #[test]
+    fn 会話圧縮はツール用の非公開systemを次ターンへ残さない() {
+        let mut private = Message::new("system", "検索結果");
+        private.name = Some("picoagent_private_context".to_string());
+        let messages = vec![
+            Message::new("system", "人格"),
+            private,
+            Message::new("user", "質問"),
+            Message::new("assistant", "回答"),
+        ];
+        let compacted = compacted_conversation(&messages, 100);
+        assert_eq!(compacted.len(), 3);
+        assert_eq!(compacted[0].content, "人格");
+        assert!(compacted
+            .iter()
+            .all(|message| message.name.as_deref() != Some("picoagent_private_context")));
     }
 
     #[test]

@@ -875,6 +875,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   transform:translate(calc(var(--char-x,0px) + 15%),var(--char-y,0px));
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view {
+  width:auto; height:auto;
   transform:translate(calc(var(--char-x,0px) + 25%),var(--char-y,0px));
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view {
@@ -884,6 +885,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
   inset:0 auto auto -80%; width:260%; height:260%;
+  max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view > canvas {
@@ -893,6 +895,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-motion {
   inset:0 auto auto -80%; width:260%; height:260%;
+  max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-region > img {
   object-position:50% 0%;

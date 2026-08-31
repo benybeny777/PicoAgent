@@ -5098,14 +5098,24 @@ function applyBubbleLayout(width, height, left, top) {
 }
 window.addEventListener("resize", refreshBubblePlacement);
 petSprite.addEventListener("load", () => {
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // 1つの原画画素を複数の表示画素へ引き伸ばさない。配信構図の260%指定は
+  // 原画に余裕がある範囲だけで効き、高DPIほどCSS上限を小さくする。
+  character.style.setProperty("--char-natural-css-width", `${petSprite.naturalWidth / dpr}px`);
+  character.style.setProperty("--char-natural-css-height", `${petSprite.naturalHeight / dpr}px`);
   refreshBubblePlacement();
   syncSpringMotionFrame();
   if (character.dataset.renderKind === "2d") {
     requestAnimationFrame(() => {
-      const view = petSprite.parentElement?.getBoundingClientRect();
+      const view = petSprite.getBoundingClientRect();
       logApp("info", "2D表示寸法", JSON.stringify({
         natural: [petSprite.naturalWidth, petSprite.naturalHeight],
         rendered: view ? [Math.round(view.width), Math.round(view.height)] : null,
+        devicePixelRatio: dpr,
+        sourcePixelsPerDisplayPixel: view ? [
+          petSprite.naturalWidth / Math.max(1, view.width * dpr),
+          petSprite.naturalHeight / Math.max(1, view.height * dpr),
+        ] : null,
         transform: getComputedStyle(petSprite.parentElement).transform,
       }));
     });
@@ -5413,11 +5423,21 @@ let startupUiDeadline = null;
 let startupLayout = null;
 let bootUiReleased = false;
 let bootBackendFinished = false;
+let bootBackendFinishPromise = null;
+
+async function finishBootBackend() {
+  if (bootBackendFinished) return;
+  if (!bootBackendFinishPromise) {
+    bootBackendFinishPromise = window.picoagent.finishBoot()
+      .then(() => { bootBackendFinished = true; })
+      .finally(() => { bootBackendFinishPromise = null; });
+  }
+  await bootBackendFinishPromise;
+}
 
 async function releaseBootUi(reason = "") {
   if (!bootBackendFinished) {
-    bootBackendFinished = true;
-    try { await window.picoagent.finishBoot(); }
+    try { await finishBootBackend(); }
     catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
   }
   bootUiReleased = true;

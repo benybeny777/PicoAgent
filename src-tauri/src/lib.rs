@@ -659,13 +659,18 @@ pub(crate) fn remember_boot_window_center(app: &tauri::AppHandle, monitor_x: i32
         Some(BootWindowPlacement::CenterOnMonitor(monitor_x, monitor_y));
 }
 
-pub(crate) fn take_boot_window_placement(app: &tauri::AppHandle) -> Option<BootWindowPlacement> {
+pub(crate) fn boot_window_placement(app: &tauri::AppHandle) -> Option<BootWindowPlacement> {
+    let cache = app.state::<WindowLayoutCache>();
+    let placement = *cache.boot_placement.lock().unwrap();
+    placement
+}
+
+pub(crate) fn clear_boot_window_placement(app: &tauri::AppHandle) {
     let cache = app.state::<WindowLayoutCache>();
     cache
         .boot_user_move
         .store(false, std::sync::atomic::Ordering::Release);
-    let placement = cache.boot_placement.lock().unwrap().take();
-    placement
+    *cache.boot_placement.lock().unwrap() = None;
 }
 
 /// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。
@@ -1158,5 +1163,20 @@ mod window_layout_tests {
         assert!(x >= main.x && y >= main.y);
         assert!(x + 560 <= main.x + main.width as i32);
         assert!(y + 430 <= main.y + main.height as i32);
+    }
+
+    #[test]
+    fn 四kの高dpiでも物理寸法で右下へ配置する() {
+        let monitor = MonitorRect {
+            x: 2560,
+            y: -120,
+            width: 3840,
+            height: 2160,
+        };
+        // 1920x1080論理pxを150%表示した物理寸法。
+        let (x, y) = default_window_position(monitor, 2880, 1620);
+        assert_eq!((x, y), (3508, 369));
+        assert_eq!(x + 2880 + DEFAULT_RIGHT_OFFSET, 6400);
+        assert_eq!(y + 1620 + DEFAULT_BOTTOM_OFFSET, 2040);
     }
 }

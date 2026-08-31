@@ -31,4 +31,9 @@ test("2Dキャラは小さい合成面をtransformで拡大しない", () => {
   const rule = styles.match(/\.character\[data-render-kind="2d"\] \.character-view \{([\s\S]*?)\}/)?.[1] || "";
   assert.doesNotMatch(rule, /scale\(/);
   assert.match(renderer, /character\.style\.setProperty\("--char-render-size", `\$\{viewZoom \* 100\}%`\)/);
+  assert.match(styles, /max-width:var\(--char-natural-css-width/);
+  assert.match(styles, /max-height:var\(--char-natural-css-height/);
+  assert.match(renderer, /petSprite\.naturalWidth \/ dpr/);
+  assert.match(renderer, /petSprite\.naturalHeight \/ dpr/);
+  assert.match(renderer, /petSprite\.getBoundingClientRect\(\)/);
 });

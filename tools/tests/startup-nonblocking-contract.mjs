@@ -26,8 +26,20 @@ test("15秒解除後に初期化が戻っても送信禁止と保存形式を正
   assert.match(startup, /frontendInitialized = true;[\s\S]*?updateComposerState\(\)/);
   assert.match(startup, /if \(bootUiReleased\) applyLayout\(startupLayout\);[\s\S]*?else applyLayout\("stream"\)/);
   assert.match(renderer, /let bootBackendFinished = false/);
-  assert.match(renderer, /if \(!bootBackendFinished\) \{[\s\S]*?window\.picoagent\.finishBoot\(\)/);
+  assert.match(renderer, /let bootBackendFinishPromise = null/);
+  assert.match(renderer, /bootBackendFinishPromise = window\.picoagent\.finishBoot\(\)[\s\S]*?bootBackendFinished = true/);
+  assert.match(renderer, /finally\(\(\) => \{ bootBackendFinishPromise = null; \}\)/);
   assert.doesNotMatch(renderer, /if \(bootUiReleased\) return/);
+});
+
+test("finishBoot失敗後も位置意図を保持して再試行できる", () => {
+  const finishStart = layout.indexOf("pub fn finish_boot");
+  const finishEnd = layout.indexOf("\n}\n\n/// 保存中", finishStart);
+  const finish = layout.slice(finishStart, finishEnd);
+  assert.match(finish, /boot_window_placement\(app\)/);
+  assert.ok(finish.indexOf("apply(app, id)?") < finish.indexOf("clear_boot_window_placement(app)"));
+  assert.ok(finish.indexOf("clear_boot_window_placement(app)") < finish.indexOf("BOOT_FINISHED.store(true"));
+  assert.doesNotMatch(finish, /take_boot_window_placement/);
 });
 
 test("WebView再読込の起動リセットは完了処理と同じロック内で直列化する", () => {

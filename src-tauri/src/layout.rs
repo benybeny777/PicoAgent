@@ -244,9 +244,10 @@ pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
         size_for(&state.config, id)
     };
 
-    // 保存中の形式の寸法へ戻した時点で、起動準備中の共通寸法は終わる。
+    apply_window_size(app, width, height, Some(id))?;
+    // 寸法の適用が成功した時点でだけ、起動準備中の共通寸法を終える。
     end_boot_size();
-    apply_window_size(app, width, height, Some(id))
+    Ok(())
 }
 
 /// 起動画面を終了し、保存中の表示形式へ確実に戻す。
@@ -256,8 +257,7 @@ pub fn finish_boot(app: &AppHandle, id: &str) -> Result<(), String> {
     let _transition = BOOT_TRANSITION
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let user_placement = crate::take_boot_window_placement(app);
-    BOOT_FINISHED.store(true, Ordering::Release);
+    let user_placement = crate::boot_window_placement(app);
     apply(app, id)?;
     if let Some(window) = app.get_webview_window("main") {
         let (width, height) = applied_physical_size(&window, app, id);
@@ -304,6 +304,8 @@ pub fn finish_boot(app: &AppHandle, id: &str) -> Result<(), String> {
             ),
         }
     }
+    crate::clear_boot_window_placement(app);
+    BOOT_FINISHED.store(true, Ordering::Release);
     Ok(())
 }
 
