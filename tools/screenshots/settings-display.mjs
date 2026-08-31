@@ -30,6 +30,8 @@ const settingsData = {
   product: { name: "PicoAgent", version: "1.0.0", identifier: "com.picoagent.desktop" },
   values: {
     PICOAGENT_PROVIDER: "local",
+    PICOAGENT_MODEL: "lfm25_2_6b",
+    PICOAGENT_LOCAL_MODEL_PRESET: "lfm25_2_6b",
     PICOAGENT_CHARACTER: "mugi",
     PICOAGENT_LAYOUT: "stream",
     PICOAGENT_THEME: "dark",
@@ -45,10 +47,12 @@ const settingsData = {
     PICOAGENT_MULTI_AI_JUDGE_MODEL: "gemma",
     PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY: "3",
   },
-  active: { providerId: "local", model: "gemma" },
+  active: { providerId: "local", model: "lfm25_2_6b" },
   defaults: { systemPrompt: "" },
   providers: [
-    { id: "local", label: "ローカル", defaultModel: "gemma", configSchema: [] },
+    { id: "local", label: "ローカル", defaultModel: "lfm25_2_6b", configSchema: [
+      { key: "PICOAGENT_LOCAL_MODEL_PRESET", label: "ローカルモデル", type: "text", placeholder: "auto" },
+    ] },
     { id: "ollama", label: "Ollama", defaultModel: "gemma3", configSchema: [] },
     { id: "openai", label: "OpenAI互換", defaultModel: "gpt-5", configSchema: [] },
     { id: "agent_cli", label: "手元のCLI", defaultModel: "claude", configSchema: [] },
@@ -80,7 +84,15 @@ const settingsData = {
     },
   ],
   relationships: [],
-  localModelPresets: [],
+  defaultLocalModelPreset: "lfm25_2_6b",
+  localHardware: { ramGb: 32, vramGb: 8.6, unifiedMemory: false },
+  localModelPresets: [
+    { id: "lfm25_2_6b", family: "Liquid AI", localSize: "LFM2.5 2.6B Agentic", label: "軽量LFM", recommendedVramGb: 4, recommendedRamGb: 8, downloadSize: "約1.59GB", japaneseNote: "日本語対応", note: "検証済みの既定モデル" },
+    { id: "small", family: "Gemma", localSize: "Gemma 4 E2B", label: "Gemma軽量", recommendedVramGb: 0, recommendedRamGb: 8, downloadSize: "約3.1GB", japaneseNote: "日本語対応", note: "Gemma 4を継続選択可能" },
+    { id: "qwen35_4b", family: "Qwen", localSize: "Qwen3.5 4B", label: "Qwen", recommendedVramGb: 4, recommendedRamGb: 12, downloadSize: "約2.7GB", japaneseNote: "日本語に強い", note: "日本語と指示追従" },
+    { id: "gpt_oss_20b", family: "OpenAI", localSize: "gpt-oss-20b", label: "gpt-oss", recommendedVramGb: 16, recommendedRamGb: 32, downloadSize: "約12.1GB", japaneseNote: "日本語対応", note: "高性能PC向け" },
+    { id: "phi4mini", family: "Phi", localSize: "Phi-4 mini", label: "Phi", recommendedVramGb: 4, recommendedRamGb: 12, downloadSize: "約2.5GB", japaneseNote: "日本語対応", note: "小型推論候補" },
+  ],
 };
 const mock = `
 window.__listeners = {};
@@ -228,6 +240,29 @@ try {
   await verifyLongSkillLabels(400);
   await page.setViewportSize({ width: 960, height: 760 });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
+  const localRecommendation = page.locator(".local-model-recommendation");
+  if (await page.locator(".local-model-card").count() !== 5) throw new Error("日本語ローカルモデル候補が5件表示されていません");
+  const localText = await localRecommendation.textContent();
+  for (const expected of ["RAM 32GB", "専用VRAM 8.6GB", "LFM2.5 2.6B Agentic", "Gemma 4 E2B", "Qwen3.5 4B"]) {
+    if (!localText?.includes(expected)) throw new Error(`PC向け候補に「${expected}」がありません`);
+  }
+  const familyLabels = await page.locator('[data-setting-key="PICOAGENT_LOCAL_MODEL_PRESET"] select').first().locator("option").allTextContents();
+  for (const family of ["Liquid AI", "Gemma", "Qwen", "OpenAI", "Phi"]) {
+    if (!familyLabels.includes(family)) throw new Error(`${family}系列がモデル選択にありません`);
+  }
+  await page.locator(".local-model-card").filter({ hasText: "Gemma 4 E2B" }).getByRole("button", { name: "このモデルを使う" }).click();
+  if (await page.locator('[data-setting-key="PICOAGENT_LOCAL_MODEL_PRESET"] input[type="hidden"]').inputValue() !== "small") throw new Error("カード選択がローカルモデル設定へ反映されません");
+  if (await page.locator('[data-setting-key="PICOAGENT_MODEL"] input').inputValue() !== "small") throw new Error("カード選択がAIモデルへ同期されません");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存"));
+  if (!(await page.locator("#dirtySummary").textContent())?.includes("未保存")) throw new Error("カード選択で未保存表示になりません");
+  await page.locator(".local-model-card").filter({ hasText: "LFM2.5 2.6B Agentic" }).getByRole("button", { name: "このモデルを使う" }).click();
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
+  await localRecommendation.scrollIntoViewIfNeeded();
+  await localRecommendation.screenshot({ path: join(OUT, "local-model-recommendations.png") });
+  await page.setViewportSize({ width: 400, height: 820 });
+  if (await localRecommendation.evaluate(node => node.scrollWidth > node.clientWidth)) throw new Error("400px幅でローカルモデル候補が横にはみ出しています");
+  await localRecommendation.screenshot({ path: join(OUT, "local-model-recommendations-400px.png") });
+  await page.setViewportSize({ width: 960, height: 760 });
   const multiAi = page.locator(".multi-ai-editor");
   if (await multiAi.count() !== 1) throw new Error("複数AI設定がありません");
   if (await page.locator(".multi-ai-row").count() !== 2) throw new Error("保存済みの参加AIが2件表示されていません");
@@ -283,6 +318,7 @@ try {
   if ((await framing.locator("select").nth(1).inputValue()) !== "custom") throw new Error("ドラッグ後に細かく調整へ切り替わりません");
   await page.screenshot({ path: join(OUT, "character-framing.png") });
   await framing.getByRole("button", { name: "この構図を初期値へ戻す", exact: true }).click();
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
   const framingResetDirty = await page.locator("#dirtySummary").textContent();
   if (framingResetDirty !== "保存済み") {
     const changed = await page.locator(".changed").evaluateAll(nodes => nodes.map(node => node.dataset.settingKey || `${node.className}:${node.textContent?.slice(0, 40)}`));

@@ -191,12 +191,12 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 `local` プロバイダのために、Ollama の代わりに llama.cpp の `llama-server` をアプリに同梱して使う。
 
-アプリがプリセットとして提供するモデルは一般PCでの容量・メモリ・速度を優先し、原則として量子化済みGGUFに限定する。現在はGemma 4／Qwen3.5／Phi-4 miniがQ4_K_M、gpt-oss-20bがMXFP4である。利用者が明示する`custom` URLにはこの制限を適用しない。
+アプリがプリセットとして提供するモデルは一般PCでの容量・メモリ・速度を優先し、原則として量子化済みGGUFに限定する。現在はLFM2.5 1.2B日本語／Gemma 4／Qwen3.5／Phi-4 miniがQ4_K_M、LFM2.5 2.6BがQAD Q4_0、gpt-oss-20bがMXFP4である。利用者が明示する`custom` URLにはこの制限を適用しない。
 
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`xtask`（`bundled::fetch_engine`）（`cargo xtask setup engine`）で
   `src-tauri/resources/bundled/engine/` に取得。llama.cpp安定版v0.2.0が配布用に対応付けた`b10566`を正本とし、WindowsはVulkan、Ubuntu LinuxはVulkan、macOSはMetal対応の対象OS別資産名と固定SHA-256をGitHub digest・ダウンロード実体の両方へ照合する。配置後は`picoagent-engine.json`へタグ・資産名・SHA-256を残し、3項目が一致しない既存配置は再取得する。`LLAMACPP_ASSET`で資産を明示変更する場合も対応する`LLAMACPP_SHA256`を必須にする。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
-  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、Windows では `Win32_VideoController.AdapterRAM`、共通でRAM総量を見て Gemma 4 系の `small` / `balanced` / `large` を初回自動選定し、`config.json` へ保存する。手動選択では Qwen3.5 4B／9B、OpenAI gpt-oss-20b、Phi-4 mini、LLM-jp-4 8B Thinking の GGUF も選べる。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom` の場合だけ `PICOAGENT_MODEL_URL` を直接使う。
+  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、軽量で連続ツール利用を検証済みのLFM2.5 2.6B QAD版を選び、`PICOAGENT_MODEL`と一緒に`config.json`へ保存する。保存できなければ画面へ理由を出してエンジン起動を止め、未保存の選定を黙って使わない。既にGemma 4、Qwen3.5、OpenAI gpt-oss-20b、Phi-4 mini、LFM2.5 1.2B、LLM-jp-4 8B Thinking、`custom`を明示保存している場合は変更しない。LFM2.5 1.2Bは連続2ターン目で別ツールへ切り替えられず、LLM-jp-4 Thinkingは思考文の非表示と連続ツール利用を実エンジンで未確認のため、いずれも互換用プリセットとして残すだけで設定画面の新規候補に出さない。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom`の場合だけ`PICOAGENT_MODEL_URL`を直接使う。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
   3. Windowsは実GPUを判定し、Turing以降かつドライバー580以上のNVIDIAは`CUDA 13.3 → Vulkan → CPU`、AMD公式HIP Runtime対応SKUは`ROCm 7.14 → Vulkan → CPU`、Intel Arc／Iris Xe／Core Ultra系の`Intel Graphics`／Data Center Flex・Max／Server GPUは`SYCL → Vulkan → CPU`の順に起動する。Intel SYCLは対応済みだが、想定利用者に占めるIntel GPUのシェアを踏まえて主要な訴求・優先対応の対象には置かず、推奨構成の案内はNVIDIA CUDAまたはAMD ROCmを主軸にする。旧Intel UHD／HD Graphics、公式表にないAMD、Maxwell／Pascal／Voltaまたは古いドライバーのNVIDIAは専用方式を取得せずVulkanから始める。追加配布物は対象GPUの確認後だけ取得し、固定サイズ・SHA-256・安全な展開・`--list-devices`の実認識を通ったステージングだけを原子的に有効化する。追加方式の準備または起動に失敗しても同梱Vulkanへ戻る。`PICOAGENT_LOCAL_NGL=0`は追加取得を行わずCPU固定を優先する。AMD／Intel対応境界はllama.cpp固定版または配布版の更新時に各社公式対応表を再確認する。
      移行判定と旧ファイル削除前の照合は数GBのSHA-256になるため、照合対象が実在するときだけ `engine:status {phase:"verify"}` を出す（無表示だと起動が固まったように見える）。
@@ -207,7 +207,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
      既定の同梱ビルドは Vulkan(GPU) 版で、`-ngl 999` により全レイヤを GPU へオフロードする（GPU 非対応環境では自動 CPU フォールバック）。
      `/health` が 200 になったら `engine:status {phase:"ready"}`。前回クラッシュなどで既存 `llama-server` が同じポートに残っている場合は、`/v1/models` のモデルIDが要求中の GGUF と一致する時だけ再利用する。別モデルなら誤用せずエラーにし、残存プロセス停止を促す。
 - 子プロセスは `RunEvent::Exit` で停止（`engine::stop`）。状態は `engine_status` command でも取得可能。
-- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Gemma / Qwen / OpenAI / Phi / LLM-jp / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
+- 設定画面の「モデル」欄（`PICOAGENT_MODEL`）でローカルプリセット（Liquid AI / Gemma / Qwen / OpenAI / Phi / custom）を選ぶと、`local::model_url` がその選択を取得URLへ反映する。「AIモデル・連携」は設定読込時だけPCのRAMを取得し、Windows NVIDIAでは`nvidia-smi`で正確な専用VRAM総量も取得する。WMI `AdapterRAM`はuint32飽和するため使わず、NVIDIA以外の専用VRAMは不明表示としてRAM側で候補判定する。macOSは統合メモリとしてRAMで判定し、Ubuntuは`/proc/meminfo`からRAMを得る。候補カードと系列／サイズ選択は`groupedModelField.setValue()`を共通入口にしてhidden入力、ヒント、`change`イベントを同期する。`settings_save` は `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` などローカル関連の変更を再起動対象とし、再起動後の起動シーケンスで `ensure_and_start`（未取得モデルは自動ダウンロードしてから起動）を行う。
 - 同梱 Aivis の状態は `aivis_status` command で取得する（フロントの起動時キャラ描画ゲートに使用）。選択中キャラクターの AivisHub 音声モデル導入は `pet_prepare_voice_model` command で起動シーケンス中に明示実行する。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）

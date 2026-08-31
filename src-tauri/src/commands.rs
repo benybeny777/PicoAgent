@@ -2651,6 +2651,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         }
     }
     agent::prompt::normalize_setting(&mut values);
+    let local_hardware = crate::engine::local_hardware_profile().await;
 
     let provider_list: Vec<Value> = providers::all()
         .iter()
@@ -2689,7 +2690,9 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "active": { "providerId": provider_id, "model": model },
         "defaults": { "systemPrompt": agent::prompt::DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
-        "localModelPresets": crate::providers::local::LOCAL_MODEL_PRESETS.iter().map(|preset| json!({
+        "defaultLocalModelPreset": crate::providers::local::DEFAULT_LOCAL_MODEL_PRESET,
+        "localHardware": local_hardware,
+        "localModelPresets": crate::providers::local::settings_candidate_presets().map(|preset| json!({
             "id": preset.id,
             "family": preset.family,
             "label": preset.label,
@@ -2699,6 +2702,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             "recommendedVramGb": preset.recommended_vram_gb,
             "recommendedRamGb": preset.recommended_ram_gb,
             "downloadSize": preset.download_size,
+            "japaneseNote": preset.japanese_note,
             "note": preset.note,
         })).collect::<Vec<Value>>(),
         "relationships": crate::relationship_preset::catalog(),
