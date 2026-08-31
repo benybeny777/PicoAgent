@@ -3399,7 +3399,7 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
     // ウィンドウ寸法の変更だけが失敗しても「起動できなかった」ことにはならない。
     // あとにすると、動いている画面が監視のタイムアウトで案内画面へ差し替わる。
     crate::boot_screen::mark_finished(&app);
-    crate::layout::apply(&app, &id)
+    crate::layout::finish_boot(&app, &id)
 }
 
 #[tauri::command]

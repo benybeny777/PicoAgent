@@ -8,7 +8,10 @@
 // フロントは `<main id="petApp" data-layout="…">` を見て CSS で配置を変えるだけ。
 // バックエンド側の仕事は「どれが選ばれているか」と「ウィンドウの寸法」の2つに絞る。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager};
@@ -59,6 +62,10 @@ pub const BOOT_HEIGHT: f64 = 430.0;
 /// が覚えてしまうと、モデル取得の待ち時間中に表示形式を切り替えたり設定を保存した
 /// だけで、chat / widget など小さい形式の記憶が 680×430 に置き換わる。
 static BOOT_SIZE_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// `setup` とフロント初期化は別スレッドで進み得るため、起動寸法の適用と終了を直列化する。
+/// 終了後に遅れて `apply_boot()` が走って680×430へ戻す競合もここで防ぐ。
+static BOOT_FINISHED: AtomicBool = AtomicBool::new(false);
+static BOOT_TRANSITION: Mutex<()> = Mutex::new(());
 
 fn begin_boot_size() {
     BOOT_SIZE_ACTIVE.store(true, Ordering::Relaxed);
@@ -70,7 +77,7 @@ fn end_boot_size() {
 
 /// 起動準備中の共通寸法を当てている最中か。
 /// この間は実寸を形式の記憶へ残さず、形式の切り替えも当てずに保留する。
-fn boot_size_active() -> bool {
+pub(crate) fn boot_size_active() -> bool {
     BOOT_SIZE_ACTIVE.load(Ordering::Relaxed)
 }
 
@@ -242,10 +249,41 @@ pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
     apply_window_size(app, width, height, Some(id))
 }
 
+/// 起動画面を終了し、保存中の表示形式へ確実に戻す。
+/// `apply_boot()` と同じロックで直列化し、フロント初期化が先に終わった場合も
+/// 遅れて起動寸法へ戻されないようにする。
+pub fn finish_boot(app: &AppHandle, id: &str) -> Result<(), String> {
+    let _transition = BOOT_TRANSITION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    BOOT_FINISHED.store(true, Ordering::Release);
+    apply(app, id)?;
+    if let Some(window) = app.get_webview_window("main") {
+        let (width, height) = applied_physical_size(&window, app, id);
+        crate::restore_window_position(&window, &app.state::<AppState>().config, width, height);
+    }
+    Ok(())
+}
+
 /// 保存中の表示形式にかかわらず、起動準備中は共通のVTuber画面へ広げる。
 pub fn apply_boot(app: &AppHandle) -> Result<(), String> {
+    let _transition = BOOT_TRANSITION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if BOOT_FINISHED.load(Ordering::Acquire) {
+        return Ok(());
+    }
     begin_boot_size();
-    apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)
+    apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)?;
+    if let Some(window) = app.get_webview_window("main") {
+        let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+        crate::center_window_on_current_monitor(
+            &window,
+            (BOOT_WIDTH * scale).round() as u32,
+            (BOOT_HEIGHT * scale).round() as u32,
+        );
+    }
+    Ok(())
 }
 
 /// 形式の変更を当てる。ただし起動準備中は当てずに共通の起動画面を保つ。
@@ -295,6 +333,26 @@ fn apply_window_size(
         }
     }
     Ok(())
+}
+
+/// 表示形式の要求寸法を現在モニタに収めた物理pxへ変換する。
+/// `set_size` 直後の `outer_size()` は古い値を返し得るため、位置復元にも同じ計算を使う。
+fn applied_physical_size(
+    window: &tauri::WebviewWindow,
+    app: &AppHandle,
+    id: &str,
+) -> (u32, u32) {
+    let state = app.state::<AppState>();
+    let (mut width, mut height) = size_for(&state.config, id);
+    let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        width = width.min(monitor.size().width as f64 / scale);
+        height = height.min(monitor.size().height as f64 / scale);
+    }
+    (
+        (width.max(MIN_WIDTH) * scale).round() as u32,
+        (height.max(MIN_HEIGHT) * scale).round() as u32,
+    )
 }
 
 /// 表示形式を切り替えて保存する（右クリックメニューの入口）。

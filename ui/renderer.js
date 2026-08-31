@@ -48,6 +48,8 @@ const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
+const bootScreen = document.getElementById("bootScreen");
+const topWindowMenu = document.getElementById("topWindowMenu");
 let busy = false;
 const { errorDetail, logApp, preview, twoStepAction } = window.PicoUI;
 
@@ -62,6 +64,25 @@ windowResizeHandles.forEach(handle => {
       logApp("warn", "ウィンドウのサイズ変更を開始できませんでした", errorDetail(error));
     });
   });
+});
+
+function beginWindowDrag(event) {
+  if (event.button !== 0) return;
+  if (event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[contenteditable]")) return;
+  event.preventDefault();
+  window.picoagent.startWindowDrag().catch(error => {
+    logApp("warn", "ウィンドウの移動を開始できませんでした", errorDetail(error));
+    showToast("画面を移動できませんでした。右クリックの「画面位置を初期化」も試してください", "error");
+  });
+}
+
+// `data-tauri-drag-region` だけに依存すると、透明WebViewや子要素の構成によって
+// Windowsでドラッグ開始が届かないことがある。起動画面と常設上部バーは明示的に渡す。
+bootScreen?.addEventListener("pointerdown", beginWindowDrag);
+topWindowMenu?.addEventListener("pointerdown", event => {
+  if (!(event.target instanceof Element)) return;
+  if (!event.target.closest("[data-tauri-drag-region]")) return;
+  beginWindowDrag(event);
 });
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
@@ -4525,7 +4546,10 @@ character.addEventListener("pointerdown", event => {
   if (event.target instanceof Element && event.target.closest("button")) return;
   event.preventDefault();
   markActivity();
-  window.picoagent.startWindowDrag();
+  window.picoagent.startWindowDrag().catch(error => {
+    logApp("warn", "キャラクターからウィンドウを移動できませんでした", errorDetail(error));
+    showToast("画面を移動できませんでした。上部のPicoAgent部分からも移動できます", "error");
+  });
 });
 
 // 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、

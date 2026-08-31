@@ -139,7 +139,7 @@ window.picoagent = {
   // キャラ上の通常ドラッグをOS標準のウィンドウ移動へ渡す。
   startWindowDrag: async () => {
     try { return await getCurrentWindow().startDragging(); }
-    catch (error) { logInvokeError("startDragging", error); }
+    catch (error) { logInvokeError("startDragging", error); throw error; }
   },
   // 枠なしウィンドウの各辺・四隅から、OS標準の縦横リサイズを開始する。
   startWindowResize: async (direction) => {
