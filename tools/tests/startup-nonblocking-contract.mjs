@@ -29,6 +29,10 @@ test("15秒解除後に初期化が戻っても送信禁止と保存形式を正
   assert.match(renderer, /let bootBackendFinishPromise = null/);
   assert.match(renderer, /bootBackendFinishPromise = window\.picoagent\.finishBoot\(\)[\s\S]*?bootBackendFinished = true/);
   assert.match(renderer, /finally\(\(\) => \{ bootBackendFinishPromise = null; \}\)/);
+  assert.match(renderer, /function scheduleBootBackendRetry\(\)/);
+  assert.match(renderer, /bootBackendRetryDelayMs = Math\.min\(bootBackendRetryDelayMs \* 2, BOOT_BACKEND_RETRY_MAX_MS\)/);
+  assert.match(renderer, /位置・寸法の復旧中/);
+  assert.match(renderer, /catch \(error\) \{[\s\S]*?scheduleBootBackendRetry\(\)/);
   assert.doesNotMatch(renderer, /if \(bootUiReleased\) return/);
 });
 

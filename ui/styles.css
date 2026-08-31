@@ -884,7 +884,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 /* 配信の2D立ち絵は2.6倍の表示面を上端基準に置き、右寄りの胸上構図にする。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
-  inset:0 auto auto -80%; width:260%; height:260%;
+  inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0;
   max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
   object-fit:contain; object-position:50% 0%;
 }
@@ -894,7 +894,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   transform:none; transform-origin:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-motion {
-  inset:0 auto auto -80%; width:260%; height:260%;
+  inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0;
   max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-region > img {
@@ -903,18 +903,18 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 /* 低頭身2Dは配信形式でも上半身構図にする。
    長身向けの260%切り出しは低頭身だと顔だけになるため適用しない。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-view > img {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto 50%; width:165%; height:165%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-spring-motion {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto 50%; width:165%; height:165%;
 }
 /* ネイティブ胸上原画は全身絵向けの260%クロップを重ねず、胸全体までをそのまま使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-view > img {
-  inset:0 auto auto 0; width:100%; height:135%;
+  inset:0 auto auto 50%; width:100%; height:135%;
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-spring-motion {
-  inset:0 auto auto 0; width:100%; height:135%;
+  inset:0 auto auto 50%; width:100%; height:135%;
 }
 /* メッシュ描画へ切り替わってもnative-bust指定を維持する。
    全身絵向けの260%クロップを適用すると、胸上原画が顔だけになる。 */

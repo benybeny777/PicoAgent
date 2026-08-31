@@ -276,6 +276,7 @@ fn dev_log_path() -> std::path::PathBuf {
     } else {
         std::env::var_os("XDG_DATA_HOME")
             .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
             .or_else(|| {
                 std::env::var_os("HOME")
                     .map(std::path::PathBuf::from)

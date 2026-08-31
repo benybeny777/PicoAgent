@@ -4725,6 +4725,7 @@ character.addEventListener("pointerdown", event => {
 window.addEventListener("resize", () => {
   applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
   syncLive2DResolution();
+  syncPngNaturalResolution();
 });
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
@@ -5097,12 +5098,17 @@ function applyBubbleLayout(width, height, left, top) {
   refreshBubblePlacement();
 }
 window.addEventListener("resize", refreshBubblePlacement);
-petSprite.addEventListener("load", () => {
+function syncPngNaturalResolution() {
+  if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   // 1つの原画画素を複数の表示画素へ引き伸ばさない。配信構図の260%指定は
   // 原画に余裕がある範囲だけで効き、高DPIほどCSS上限を小さくする。
   character.style.setProperty("--char-natural-css-width", `${petSprite.naturalWidth / dpr}px`);
   character.style.setProperty("--char-natural-css-height", `${petSprite.naturalHeight / dpr}px`);
+}
+petSprite.addEventListener("load", () => {
+  syncPngNaturalResolution();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
   refreshBubblePlacement();
   syncSpringMotionFrame();
   if (character.dataset.renderKind === "2d") {
@@ -5424,6 +5430,9 @@ let startupLayout = null;
 let bootUiReleased = false;
 let bootBackendFinished = false;
 let bootBackendFinishPromise = null;
+let bootBackendRetryTimer = null;
+let bootBackendRetryDelayMs = 1500;
+const BOOT_BACKEND_RETRY_MAX_MS = 30000;
 
 async function finishBootBackend() {
   if (bootBackendFinished) return;
@@ -5435,10 +5444,32 @@ async function finishBootBackend() {
   await bootBackendFinishPromise;
 }
 
+function scheduleBootBackendRetry() {
+  if (bootBackendFinished || bootBackendRetryTimer) return;
+  setStatus("位置・寸法の復旧中…");
+  status.classList.add("engine-pending");
+  bootBackendRetryTimer = setTimeout(async () => {
+    bootBackendRetryTimer = null;
+    try {
+      await finishBootBackend();
+      bootBackendRetryDelayMs = 1500;
+      status.classList.remove("engine-pending");
+      if (status.textContent === "位置・寸法の復旧中…") setStatus("");
+    } catch (error) {
+      logApp("warn", "起動後の位置・寸法を再試行できませんでした", errorDetail(error));
+      bootBackendRetryDelayMs = Math.min(bootBackendRetryDelayMs * 2, BOOT_BACKEND_RETRY_MAX_MS);
+      scheduleBootBackendRetry();
+    }
+  }, bootBackendRetryDelayMs);
+}
+
 async function releaseBootUi(reason = "") {
   if (!bootBackendFinished) {
     try { await finishBootBackend(); }
-    catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
+    catch (error) {
+      logApp("warn", "起動完了を通知できませんでした", errorDetail(error));
+      scheduleBootBackendRetry();
+    }
   }
   bootUiReleased = true;
   if (startupLayout) {
