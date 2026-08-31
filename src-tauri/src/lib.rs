@@ -581,6 +581,25 @@ pub(crate) fn pull_back_on_screen(window: &tauri::WebviewWindow, win_w: u32, win
     }
 }
 
+/// 起動画面を現在モニタの中央へ置く。通常画面の保存位置は変更せず、起動完了時に戻す。
+pub(crate) fn center_window_on_current_monitor(
+    window: &tauri::WebviewWindow,
+    win_w: u32,
+    win_h: u32,
+) {
+    let Some(monitor) = current_monitor_rect(window) else {
+        return;
+    };
+    let x = monitor.x + monitor.width.saturating_sub(win_w) as i32 / 2;
+    let y = monitor.y + monitor.height.saturating_sub(win_h) as i32 / 2;
+    if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+        log_paths::append_app_log(
+            &window.app_handle().clone(),
+            &format!("起動画面を中央へ配置できませんでした: {error}"),
+        );
+    }
+}
+
 /// メインウィンドウの移動／リサイズ時に、画面端スナップと位置オフセットのキャッシュを行う。
 fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if window.label() != "main" {
@@ -593,6 +612,10 @@ fn on_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
         return;
     }
     if matches!(window.is_fullscreen(), Ok(true)) {
+        return;
+    }
+    // 起動用680×430と中央位置は一時状態。通常画面の保存値へ混ぜない。
+    if layout::boot_size_active() {
         return;
     }
     let (Ok(Some(monitor)), Ok(pos), Ok(size)) = (
@@ -735,6 +758,16 @@ pub(crate) fn restore_window_layout(window: &tauri::WebviewWindow, config: &conf
         }
     }
 
+    restore_window_position(window, config, win_w, win_h);
+}
+
+/// 保存された絶対座標だけを復元する。起動画面を中央表示した後、通常寸法へ戻す経路でも使う。
+pub(crate) fn restore_window_position(
+    window: &tauri::WebviewWindow,
+    config: &config::Config,
+    win_w: u32,
+    win_h: u32,
+) {
     // 位置: 保存された絶対座標をそのまま使う（＝同じディスプレイの同じ場所へ戻る）。
     let saved = (
         config.get("PICOAGENT_WINDOW_LEFT_PX", "").parse::<i32>(),
