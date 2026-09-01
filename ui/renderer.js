@@ -5492,11 +5492,20 @@ function startAlarmPolling() {
 
 let startupLayout = null;
 let bootUiReleased = false;
-const bootProgressTimer = setInterval(() => {
-  window.picoagent.bootProgress().catch(error => {
-    logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
-  });
-}, 10000);
+// 生存通知の間隔はバックエンドが監視しきい値から決める。届く前は既定の10秒で始め、
+// `pet_init` の値が来た時点で張り替える（固定値のままだと短いしきい値に間に合わない）。
+const DEFAULT_BOOT_PROGRESS_INTERVAL_MS = 10000;
+let bootProgressTimer = null;
+function startBootProgressTicker(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS) {
+  const interval = Number(intervalMs) > 0 ? Number(intervalMs) : DEFAULT_BOOT_PROGRESS_INTERVAL_MS;
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = setInterval(() => {
+    window.picoagent.bootProgress().catch(error => {
+      logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
+    });
+  }, interval);
+}
+startBootProgressTicker();
 let bootBackendFinished = false;
 let bootBackendFinishPromise = null;
 let bootBackendRetryTimer = null;
@@ -5533,7 +5542,8 @@ function scheduleBootBackendRetry() {
 }
 
 async function releaseBootUi() {
-  clearInterval(bootProgressTimer);
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = null;
   if (!bootBackendFinished) {
     try { await finishBootBackend(); }
     catch (error) {
@@ -5582,6 +5592,7 @@ async function releaseBootUi() {
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
+  startBootProgressTicker(info.bootProgressIntervalMs);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;

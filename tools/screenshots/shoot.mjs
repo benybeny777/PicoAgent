@@ -130,6 +130,7 @@ window.__TAURI__ = {
       quickActions: "", napMinutes: "0",
       onboardingDone: ${JSON.stringify(onboardingDone)}, relationshipMemoryEnabled: false,
       gazeTrackingEnabled: ${JSON.stringify(gazeTrackingEnabled)},
+      bootProgressIntervalMs: 10000,
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
     }), ${JSON.stringify(initDelayMs)}));
     if (name === "engine_status") {
