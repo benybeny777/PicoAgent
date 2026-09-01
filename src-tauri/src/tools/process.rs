@@ -560,6 +560,26 @@ mod tests {
         });
     }
 
+    /// 検査ファイルから親子PIDを読む。書き込み途中・共有違反は「まだ」として扱う。
+    #[cfg(windows)]
+    fn read_marker_ids(marker: &std::path::Path) -> Result<Vec<u32>, String> {
+        let text = std::fs::read_to_string(marker).map_err(|error| error.to_string())?;
+        let values = text
+            .trim()
+            .split(',')
+            .map(|value| {
+                value
+                    .trim()
+                    .parse::<u32>()
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if values.len() != 2 {
+            return Err(format!("PIDが2個そろっていません: {:?}", text.trim()));
+        }
+        Ok(values)
+    }
+
     #[cfg(windows)]
     #[test]
     fn 呼び出しfutureを破棄しても孫プロセスまで回収する() {
@@ -581,20 +601,26 @@ mod tests {
             cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
             let running = tokio::spawn(output(cmd, 30, "破棄検査"));
 
+            // 存在を待つだけでは足りない。書き手（PowerShell の Set-Content）は作った直後も
+            // ハンドルを持っていて、その一瞬は共有違反で読めず、読めても内容が途中のことがある。
+            // 「期待する形へ読み切れる」までを待機条件にする。
+            let mut last_error = "まだ作られていません".to_string();
+            let mut ids = Vec::new();
             for _ in 0..100 {
-                if marker.exists() {
-                    break;
+                match read_marker_ids(&marker) {
+                    Ok(values) => {
+                        ids = values;
+                        break;
+                    }
+                    Err(reason) => last_error = reason,
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             }
-            let ids = std::fs::read_to_string(&marker)
-                .expect("親子PIDを書いた検査ファイルが作られること");
-            let ids = ids
-                .trim()
-                .split(',')
-                .map(|value| value.parse::<u32>().unwrap())
-                .collect::<Vec<_>>();
-            assert_eq!(ids.len(), 2);
+            assert_eq!(
+                ids.len(),
+                2,
+                "親子PIDを書いた検査ファイルを読み切れませんでした: {last_error}"
+            );
 
             running.abort();
             let _ = running.await;
