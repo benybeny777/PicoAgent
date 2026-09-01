@@ -1473,9 +1473,13 @@ async function validateThinkingIndicator() {
       dots: document.querySelectorAll(".history-thinking .typing-dots i").length,
       label: document.querySelector(".history-thinking .typing-indicator")?.getAttribute("aria-label") || "",
       statusSpinner: getComputedStyle(document.getElementById("status"), "::before").content,
+      // 文言が無いのに丸い枠だけ浮かせない（配信形式は絶対配置の枠を持つ）。
+      emptyStatusBox: !document.getElementById("status").textContent.trim()
+        && getComputedStyle(document.getElementById("status")).display !== "none",
       captionLabel: getComputedStyle(document.getElementById("reply"), "::before").content,
     }));
-    if (pending.dots !== 3 || !pending.label || (pending.statusSpinner && pending.statusSpinner !== "none")
+    if (pending.dots !== 3 || !pending.label || pending.emptyStatusBox
+        || (pending.statusSpinner && pending.statusSpinner !== "none")
         || (pending.captionLabel && pending.captionLabel !== "none")) {
       throw new Error(`考え中の3点表示が不正です: ${JSON.stringify(pending)}`);
     }

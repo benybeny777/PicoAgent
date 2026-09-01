@@ -970,6 +970,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   margin:0; padding:6px 10px; border-radius:999px; color:var(--ink);
   background:rgba(255,253,248,.94); border:1px solid var(--panel-border); box-shadow:0 4px 14px rgba(70,45,58,.16);
 }
+/* 送信直後は文言が無い（待機表示は回答欄の3点側）。空の丸枠だけを画面へ浮かせない。 */
+[data-layout="stream"] .status.busy:empty { display:none; }
 [data-layout="stream"] .reply-actions {
   position:absolute; z-index:4; left:auto; right:calc(var(--stream-chat-width) + 20px); top:12px;
   width:max-content; max-width:calc(100% - var(--stream-chat-width) - 118px); margin:0;
