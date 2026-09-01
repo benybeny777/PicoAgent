@@ -137,10 +137,7 @@ window.picoagent = {
   setCharacterOffset: (x, y, characterId, layout, zoom) => call("pet_set_character_offset", { x, y, characterId, layout, zoom }),
   placeWindow: (position) => call("pet_place_window", { position }),
   // キャラ上の通常ドラッグをOS標準のウィンドウ移動へ渡す。
-  startWindowDrag: async () => {
-    try { return await getCurrentWindow().startDragging(); }
-    catch (error) { logInvokeError("startDragging", error); }
-  },
+  startWindowDrag: () => call("pet_start_window_drag"),
   // 枠なしウィンドウの各辺・四隅から、OS標準の縦横リサイズを開始する。
   startWindowResize: async (direction) => {
     try { return await getCurrentWindow().startResizeDragging(direction); }

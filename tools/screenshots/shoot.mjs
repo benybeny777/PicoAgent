@@ -779,12 +779,11 @@ async function validateInteractionMatrix() {
         if (loopPending !== loopExpected) {
           throw new Error(`${target.id}/${layout}: アニメーションループの休止状態が不正です ${JSON.stringify({ loopPending, loopExpected })}`);
         }
+        const dragCallsBefore = await page.evaluate(() => window.__startDraggingCalls || 0);
         await page.locator("#character").dispatchEvent("pointerdown", { button: 0, pointerType: "mouse" });
-        if (await page.evaluate(() => window.__startDraggingCalls) < 1) {
-          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグがウィンドウ移動へ渡りません`);
-        }
-        if (!await page.locator("#petSprite").evaluate((node) => node.hasAttribute("data-tauri-drag-region"))) {
-          throw new Error(`${target.id}/${layout}: キャラ画像にTauriドラッグ領域がありません`);
+        const dragCallsAfter = await page.evaluate(() => window.__startDraggingCalls || 0);
+        if (dragCallsAfter - dragCallsBefore !== 1) {
+          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグ開始が一重に渡りません ${JSON.stringify({ dragCallsBefore, dragCallsAfter })}`);
         }
         await page.evaluate(() => {
           if (typeof openComposer === "function") openComposer();

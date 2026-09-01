@@ -138,6 +138,14 @@ html,body { width:100%; height:100%; margin:0; overflow:hidden; background:trans
   translate:0 var(--body-breathe-y,0px);
   transform-origin:50% 0%; will-change:transform;
 }
+/* 2D画像は小さい合成面をtransformで引き伸ばさない。高解像度の原画を最終表示寸法へ
+   直接縮小描画し、拡大補間によるぼけを避ける。構図倍率は要素の実寸へ反映する。 */
+.character[data-render-kind="2d"] .character-view {
+  inset:0 auto auto calc((100% - var(--char-render-size,155%)) / 2);
+  width:var(--char-render-size,155%);
+  height:var(--char-render-size,155%);
+  transform:translate(var(--char-x,0px), var(--char-y,0px));
+}
 .character-view > img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; object-position:50% 100%; }
 .character-view > canvas { position:absolute; left:50%; bottom:0; transform:translateX(-50%); }
 .character-spring-motion {
@@ -493,8 +501,9 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 @keyframes bubble-in { from { opacity:0; transform:translateY(6px) scale(.98); } to { opacity:1; transform:none; } }
 .pet-app:not(.is-booting) .bubble { animation:bubble-in .32s cubic-bezier(.2,.8,.3,1.08); }
 /* 処理中はステータス行の先頭に小さなスピナーを出す（テキストは JS が随時更新）。 */
-.status.busy { display:flex; align-items:center; gap:5px; }
-.status.busy::before { content:""; flex:0 0 auto; width:9px; height:9px; border-radius:50%; border:2px solid var(--accent); border-top-color:transparent; animation:status-spin .8s linear infinite; }
+.status.busy,.status.engine-pending { display:flex; align-items:center; gap:5px; }
+.status.busy::before,.status.engine-pending::before { content:""; flex:0 0 auto; width:9px; height:9px; border-radius:50%; border:2px solid var(--accent); border-top-color:transparent; animation:status-spin .8s linear infinite; }
+.status.engine-error { display:flex; color:#b43d57; font-weight:800; }
 @keyframes status-spin { to { transform:rotate(360deg); } }
 /* 通知パネルはふわっと開く。 */
 .notice-panel:not([hidden]) { animation:panel-in .18s ease; }
@@ -866,6 +875,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   transform:translate(calc(var(--char-x,0px) + 15%),var(--char-y,0px));
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view {
+  width:auto; height:auto;
   transform:translate(calc(var(--char-x,0px) + 25%),var(--char-y,0px));
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view {
@@ -874,7 +884,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 /* 配信の2D立ち絵は2.6倍の表示面を上端基準に置き、右寄りの胸上構図にする。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
-  inset:0 auto auto -80%; width:260%; height:260%;
+  inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0;
+  max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view > canvas {
@@ -883,7 +894,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   transform:none; transform-origin:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-motion {
-  inset:0 auto auto -80%; width:260%; height:260%;
+  inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0;
+  max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-region > img {
   object-position:50% 0%;
@@ -891,18 +903,18 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 /* 低頭身2Dは配信形式でも上半身構図にする。
    長身向けの260%切り出しは低頭身だと顔だけになるため適用しない。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-view > img {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto 50%; width:165%; height:165%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-spring-motion {
-  inset:0 auto auto -32.5%; width:165%; height:165%;
+  inset:0 auto auto 50%; width:165%; height:165%;
 }
 /* ネイティブ胸上原画は全身絵向けの260%クロップを重ねず、胸全体までをそのまま使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-view > img {
-  inset:0 auto auto 0; width:100%; height:135%;
+  inset:0 auto auto 50%; width:100%; height:135%;
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-spring-motion {
-  inset:0 auto auto 0; width:100%; height:135%;
+  inset:0 auto auto 50%; width:100%; height:135%;
 }
 /* メッシュ描画へ切り替わってもnative-bust指定を維持する。
    全身絵向けの260%クロップを適用すると、胸上原画が顔だけになる。 */
@@ -920,11 +932,11 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="stream"] .reply {
   position:relative; z-index:3; grid-column:1; grid-row:2 / span 2; min-height:88px; align-self:end;
   margin:0 12px 4px; padding:20px 22px 11px; max-height:clamp(110px,18vh,170px);
-  display:flex; align-items:center; justify-content:flex-start; text-align:left;
+  display:flex; align-items:flex-start; justify-content:flex-start; text-align:left;
   font-size:clamp(24px,1.8vw,30px); line-height:1.5;
   border:1px solid rgba(213,156,172,.56); border-left:6px solid var(--accent); border-radius:15px;
   background:linear-gradient(135deg,rgba(255,253,248,.97),rgba(255,238,244,.96)); color:var(--stream-caption-color);
-  box-shadow:0 7px 20px rgba(112,72,91,.2),inset 0 0 0 1px rgba(255,255,255,.72); overflow:auto;
+  box-shadow:0 7px 20px rgba(112,72,91,.2),inset 0 0 0 1px rgba(255,255,255,.72); overflow:hidden;
 }
 [data-layout="stream"] .reply::before { content:"字幕"; position:absolute; left:14px; top:6px; color:#c65f78; font-size:10px; font-weight:900; letter-spacing:.14em; }
 [data-layout="stream"] .reply.compact { font-size:clamp(24px,1.8vw,30px); }
@@ -944,6 +956,14 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 }
 [data-layout="stream"] .composer textarea { min-height:96px; max-height:180px; font-size:15px; }
 [data-layout="stream"] .status { display:none; }
+[data-layout="stream"] .status.busy,
+[data-layout="stream"] .status.engine-pending,
+[data-layout="stream"] .status.engine-error {
+  display:flex; position:absolute; z-index:6; left:24px; bottom:clamp(122px,20vh,184px);
+  width:max-content; max-width:calc(100% - var(--stream-chat-width) - 48px); min-height:30px;
+  margin:0; padding:6px 10px; border-radius:999px; color:var(--ink);
+  background:rgba(255,253,248,.94); border:1px solid var(--panel-border); box-shadow:0 4px 14px rgba(70,45,58,.16);
+}
 [data-layout="stream"] .reply-actions {
   position:absolute; z-index:4; left:auto; right:calc(var(--stream-chat-width) + 20px); top:12px;
   width:max-content; max-width:calc(100% - var(--stream-chat-width) - 118px); margin:0;

@@ -17,7 +17,9 @@ mod tools;
 mod util;
 mod verify;
 
-use std::process::Command;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
 
@@ -247,12 +249,14 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     if build.beta {
         command.args(["--features", "beta-full"]);
     }
-    let status = command
-        .current_dir(repo_root())
-        .status()
-        .context(
+    command.current_dir(repo_root());
+    let status = if mode == "dev" {
+        run_dev_with_persistent_stderr(&mut command)?
+    } else {
+        command.status().context(
             "cargo tauri を起動できません。未インストールなら `cargo install tauri-cli --version '^2'` を実行してください。",
-        )?;
+        )?
+    };
     if !status.success() {
         bail!(
             "cargo tauri {mode} が失敗しました（終了コード {:?}）",
@@ -260,6 +264,86 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn dev_log_path() -> std::path::PathBuf {
+    let base = if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|home| home.join("Library").join("Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .map(|home| home.join(".local").join("share"))
+            })
+    }
+    .unwrap_or_else(std::env::temp_dir);
+    base.join("PicoAgent").join("log").join(format!(
+        "dev.{}.log",
+        chrono::Local::now().format("%Y-%m-%d")
+    ))
+}
+
+/// `tauri dev` はコンパイル失敗後も監視を続けるため、親プロセスの終了コードだけでは
+/// 途中のE0425等を記録できない。stdout/stderrを端末へそのまま流しつつ日付別DEVログにも残す。
+fn run_dev_with_persistent_stderr(command: &mut Command) -> Result<ExitStatus> {
+    let path = dev_log_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("DEVログを開けません: {}", path.display()))?;
+    let log = Arc::new(Mutex::new(file));
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("cargo tauri dev を起動できません")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("cargo tauri dev のstdoutを取得できません")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("cargo tauri dev のstderrを取得できません")?;
+    let stdout_writer = Arc::clone(&log);
+    let stdout_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            println!("{line}");
+            if let Ok(mut file) = stdout_writer.lock() {
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(file, "[{now}] [stdout] {line}");
+            }
+        }
+    });
+    let stderr_writer = Arc::clone(&log);
+    let stderr_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            eprintln!("{line}");
+            if let Ok(mut file) = stderr_writer.lock() {
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(file, "[{now}] [stderr] {line}");
+            }
+        }
+    });
+    let status = child
+        .wait()
+        .context("cargo tauri dev の終了待ちに失敗しました")?;
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+    Ok(status)
 }
 
 fn product_characters_for_build(release_build: bool) -> Result<Option<Vec<String>>> {

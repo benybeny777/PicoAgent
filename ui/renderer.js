@@ -48,6 +48,8 @@ const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
+const bootScreen = document.getElementById("bootScreen");
+const topWindowMenu = document.getElementById("topWindowMenu");
 let busy = false;
 const { errorDetail, logApp, preview, twoStepAction } = window.PicoUI;
 
@@ -63,6 +65,26 @@ windowResizeHandles.forEach(handle => {
     });
   });
 });
+
+function beginWindowDrag(event) {
+  if (event.button !== 0) return;
+  if (event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[contenteditable]")) return;
+  event.preventDefault();
+  window.picoagent.startWindowDrag().catch(error => {
+    logApp("warn", "ウィンドウの移動を開始できませんでした", errorDetail(error));
+    showToast("画面を移動できませんでした。右クリックの「画面位置を初期化」も試してください", "error");
+  });
+}
+
+// `data-tauri-drag-region` だけに依存すると、透明WebViewや子要素の構成によって
+// Windowsでドラッグ開始が届かないことがある。起動画面と常設上部バーは明示的に渡す。
+bootScreen?.addEventListener("pointerdown", beginWindowDrag);
+topWindowMenu?.addEventListener("pointerdown", event => {
+  beginWindowDrag(event);
+});
+petApp?.addEventListener("pointerdown", event => {
+  if (event.target === petApp) beginWindowDrag(event);
+});
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
 // 添付中のドキュメントファイル（{name, dataUrl} の配列）。送信後にリセットする。
@@ -77,6 +99,12 @@ let streamBuffer = "";
 let unlistenStream = null;
 let unlistenStreamReset = null;
 let streamRenderFrame = null;
+let subtitlePageToken = 0;
+let subtitlePageTimer = null;
+let localEngineRequired = false;
+let localEngineReady = true;
+let localEnginePhase = "ready";
+let frontendInitialized = false;
 const conversationHistory = [];
 let historyQuery = "";
 let conversationRevision = 0;
@@ -1016,7 +1044,6 @@ function configureSpringMotion(config, legacyConfig = null) {
     const sprite = document.createElement("img");
     sprite.alt = "";
     sprite.draggable = false;
-    sprite.setAttribute("data-tauri-drag-region", "");
     sprite.style.left = `${-((centerX - radiusX) / (radiusX * 2)) * 100}%`;
     sprite.style.top = `${-((centerY - radiusY) / (radiusY * 2)) * 100}%`;
     sprite.style.width = `${10000 / (radiusX * 2)}%`;
@@ -1713,6 +1740,26 @@ let live2dCoreSdk = "";
 // Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
 const LIVE2D_RENDER_WIDTH = 285;
 const LIVE2D_RENDER_HEIGHT = 315;
+// 配信形式では基準キャンバスを最大2.75倍で表示する。CSSだけを拡大すると285x315の
+// 描画結果を引き伸ばして全Live2Dがぼけるため、最初から表示倍率とDPIを含むバッファを持つ。
+const LIVE2D_MAX_DISPLAY_SCALE = 2.75;
+
+function desiredLive2DResolution() {
+  return Math.max(1, (window.devicePixelRatio || 1) * LIVE2D_MAX_DISPLAY_SCALE);
+}
+
+function syncLive2DResolution() {
+  const renderer = live2dApp?.renderer;
+  if (!renderer) return;
+  const resolution = desiredLive2DResolution();
+  if (Math.abs(renderer.resolution - resolution) < 0.01) return;
+  renderer.resolution = resolution;
+  renderer.resize(LIVE2D_RENDER_WIDTH, LIVE2D_RENDER_HEIGHT);
+  logApp("info", "Live2D描画密度をモニターへ追従", JSON.stringify({
+    resolution,
+    backing: [live2dCanvas?.width || 0, live2dCanvas?.height || 0],
+  }));
+}
 // CSS の立ち絵枠と配信形式のキャンバス拡大は、この基準寸法から計算する。
 // styles.css の :root にも同じ既定値を書いてあるが、正本はここ1箇所にする。
 document.documentElement.style.setProperty("--char-frame-width", `${LIVE2D_RENDER_WIDTH}px`);
@@ -1865,7 +1912,7 @@ async function startLive2D(cfg) {
       useContextAlpha: true,
       backgroundAlpha: 0,
       antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      resolution: desiredLive2DResolution(),
       autoDensity: true,
     });
     live2dCanvas.style.background = "transparent";
@@ -1890,6 +1937,8 @@ async function startLive2D(cfg) {
   if (!model) throw modelError || new Error("利用可能なLive2D互換モデルがありません");
   logApp("info", "Live2D表示寸法", JSON.stringify({
     canvas: [width, height],
+    backing: [live2dCanvas.width, live2dCanvas.height],
+    resolution: live2dApp.renderer.resolution,
     original: [model.internalModel.originalWidth, model.internalModel.originalHeight],
     bounds: [model.width, model.height],
     scale: Number(cfg.scale) || 1,
@@ -2098,8 +2147,14 @@ function autosizeInput() {
   input.style.height = `${Math.min(180, Math.max(62, input.scrollHeight))}px`;
 }
 function updateComposerState() {
-  if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
-  quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+  const engineBlocked = !frontendInitialized || (localEngineRequired && !localEngineReady);
+  if (sendButton) {
+    sendButton.disabled = busy || engineBlocked || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
+    sendButton.title = engineBlocked
+      ? (frontendInitialized ? "ローカルAIの準備完了後に送信できます" : "初期化完了後に送信できます")
+      : "Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴";
+  }
+  quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy || engineBlocked; });
 }
 function setInputValue(value) {
   input.value = String(value ?? "");
@@ -2439,10 +2494,115 @@ function renderReply(text) {
 
 function setAssistantReply(text, options = {}) {
   const source = String(text ?? "");
+  if (currentLayout === "stream" && options.singlePage !== true && options.paginate !== false && source.trim()) {
+    if (options.remember !== false) lastAssistantText = source;
+    startTimedSubtitlePages(source);
+    return;
+  }
   renderReply(source);
+  reply.scrollTop = 0;
   if (options.remember !== false && source.trim()) {
     lastAssistantText = source;
   }
+}
+
+function cancelSubtitlePages() {
+  subtitlePageToken += 1;
+  if (subtitlePageTimer) clearTimeout(subtitlePageTimer);
+  subtitlePageTimer = null;
+}
+
+function subtitleUnits(text) {
+  const source = String(text ?? "");
+  const units = source.match(/[^。．.!?！？\n]+[。．.!?！？]?\s*|\n+/g) || [source];
+  const out = [];
+  for (const unit of units) {
+    const chars = [...unit];
+    for (let index = 0; index < chars.length; index += 54) {
+      out.push(chars.slice(index, index + 54).join(""));
+    }
+  }
+  return out.filter(Boolean);
+}
+
+function subtitlePlainText(text) {
+  return sanitizeSpeechText(text)
+    .replace(/^\s*```[^\n]*$/gm, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/[*_~]{1,3}/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// 実際の字幕DOMへ仮描画し、現在の画面幅・文字サイズで収まる単位に分ける。
+// 固定文字数だけではモニターや日本語/英数字の幅で再び欠けるため、scrollHeightを合否に使う。
+function buildSubtitlePages(text) {
+  const source = subtitlePlainText(text);
+  if (currentLayout !== "stream" || !source.trim()) return source ? [source] : [];
+  const pages = [];
+  let page = "";
+  const fits = candidate => {
+    renderMarkdown(reply, candidate);
+    reply.scrollTop = 0;
+    return reply.scrollHeight <= reply.clientHeight + 1;
+  };
+  for (const unit of subtitleUnits(source)) {
+    const candidate = page + unit;
+    if (!page && fits(candidate)) {
+      page = candidate;
+      continue;
+    }
+    if (page && fits(candidate)) {
+      page = candidate;
+      continue;
+    }
+    if (page) pages.push(page);
+    page = unit;
+    if (!fits(page)) {
+      // 54文字でも収まらない極端な狭幅では、実測で収まる最大長を二分探索する。
+      let remaining = [...page];
+      while (remaining.length && !fits(remaining.join(""))) {
+        let low = 1;
+        let high = remaining.length;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (fits(remaining.slice(0, middle).join(""))) low = middle;
+          else high = middle - 1;
+        }
+        pages.push(remaining.slice(0, low).join(""));
+        remaining = remaining.slice(low);
+      }
+      page = remaining.join("");
+    }
+  }
+  if (page) pages.push(page);
+  if (pages.length) setAssistantReply(pages[0], { remember: false, singlePage: true });
+  return pages;
+}
+
+function showSubtitlePage(text) {
+  if (currentLayout === "stream") setAssistantReply(text, { remember: false, singlePage: true });
+}
+
+function startTimedSubtitlePages(text) {
+  cancelSubtitlePages();
+  const pages = buildSubtitlePages(text);
+  if (pages.length <= 1) {
+    if (pages[0]) showSubtitlePage(pages[0]);
+    return;
+  }
+  const token = subtitlePageToken;
+  let index = 0;
+  const advance = () => {
+    if (token !== subtitlePageToken) return;
+    showSubtitlePage(pages[index]);
+    if (++index >= pages.length) return;
+    const visibleChars = [...pages[index - 1]].length;
+    const delay = Math.max(1800, Math.min(6000, 900 + visibleChars * 55));
+    subtitlePageTimer = setTimeout(advance, delay);
+  };
+  advance();
 }
 
 async function copyText(text) {
@@ -2466,7 +2626,8 @@ async function copyText(text) {
 
 function renderAlarmReply(text) {
   markActivity(); // 居眠り中でも目覚ましでは起きる
-  setAssistantReply(text);
+  // 操作ボタンをページ切替で消さない。目覚まし本文は短文契約で、操作を最優先する。
+  setAssistantReply(text, { paginate: false });
   const actions = document.createElement("div");
   actions.className = "alarm-actions";
   const awake = document.createElement("button");
@@ -2630,6 +2791,7 @@ function finishVoice(toIdle = true, expectedVoice = currentVoice) {
 }
 function stopVoice(toIdle = true) {
   voiceSession++; // 進行中のパイプライン読み上げ（合成待ち・連続再生）を打ち切る。
+  cancelSubtitlePages();
   stopLipSync();
   setVoiceCancelVisible(false);
   if (!currentVoice) return;
@@ -2812,7 +2974,7 @@ function playChunkAndWait(result, session) {
   });
 }
 async function speakReply(text) {
-  const chunks = splitSpeechChunks(text);
+  const chunks = currentLayout === "stream" ? buildSubtitlePages(text) : splitSpeechChunks(text);
   stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
   const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
   if (chunks.length === 0) { status.textContent = ""; return; }
@@ -2838,7 +3000,13 @@ async function speakReply(text) {
         return;
       }
       nextSynth = i + 1 < chunks.length ? prepareSpeech(chunks[i + 1]) : null;
-      if (!result) continue;
+      showSubtitlePage(chunks[i]);
+      if (!result) {
+        // 合成失敗でも字幕を飛ばさず、読める時間だけ表示して次ページへ進む。
+        const delay = Math.max(1800, Math.min(6000, 900 + [...chunks[i]].length * 55));
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
       if (!played) { clearInterval(prepareTimer); prepareTimer = null; played = true; }
       await playChunkAndWait(result, session);
       if (session !== voiceSession) {
@@ -3789,6 +3957,18 @@ function isScreenshotQuery(text) {
 composer.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();
+  if (!frontendInitialized) {
+    setStatus("初期化を続けています。完了すると送信できます");
+    status.classList.add("engine-pending");
+    return;
+  }
+  if (localEngineRequired && !localEngineReady) {
+    setStatus(localEnginePhase === "error"
+      ? "ローカルAIの準備に失敗しています。設定の「診断・修復」を確認してください"
+      : "ローカルAIを準備中です。完了すると送信できます");
+    status.classList.add(localEnginePhase === "error" ? "engine-error" : "engine-pending");
+    return;
+  }
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   const requestRevision = conversationRevision;
   const jobId = `chat-${Date.now()}-${requestRevision}`;
@@ -3800,6 +3980,7 @@ composer.addEventListener("submit", async event => {
   markActivity();
   lastUserText = text; // エラーリトライ用に保持
   busy = true;
+  cancelSubtitlePages();
   ++speakingToken;
   stopVoice(false);
   updateComposerState();
@@ -3878,8 +4059,9 @@ composer.addEventListener("submit", async event => {
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         if (!busy || requestRevision !== conversationRevision) return;
         streamBuffer += chunk;
-        feedStreamSpeech(streamBuffer); // 確定した文から先に話し始める
+        if (currentLayout !== "stream") feedStreamSpeech(streamBuffer); // 配信字幕は検査済み全文をページ表示する
         reply.classList.add("streaming"); // 文末の点滅カーソル表示
+        if (currentLayout === "stream") return;
         if (!streamRenderFrame) {
           streamRenderFrame = requestAnimationFrame(() => {
             streamRenderFrame = null;
@@ -3962,11 +4144,17 @@ composer.addEventListener("submit", async event => {
       // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
       if (String(result.reply ?? "").trim() !== text) {
         // ストリーミング中に先行読み上げが走っていれば残りを読み切り、無ければ全文読み上げ。
-        if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
+        if (currentLayout === "stream") {
+          cancelStreamSpeech();
+          if (ttsEnabledCache === false || voiceVolume <= 0.001) startTimedSubtitlePages(result.reply);
+          else speakReply(result.reply);
+        } else if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
       } else {
         cancelStreamSpeech();
       }
-      if (streamBuffer.trim()) {
+      if (currentLayout === "stream") {
+        // 字幕ページャーまたはページ同期読み上げが表示を所有する。
+      } else if (streamBuffer.trim()) {
         // ストリーミングで本文は表示済み。消してタイプライターで打ち直さず、最終形を確定描画する。
         setAssistantReply(result.reply);
         if (!currentVoice) setAnimation("idle");
@@ -4467,6 +4655,7 @@ function applyCharacterZoom(zoom) {
   // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
   const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
+  character.style.setProperty("--char-render-size", `${viewZoom * 100}%`);
 }
 
 const FRAMING_PRESETS = {
@@ -4525,12 +4714,19 @@ character.addEventListener("pointerdown", event => {
   if (event.target instanceof Element && event.target.closest("button")) return;
   event.preventDefault();
   markActivity();
-  window.picoagent.startWindowDrag();
+  window.picoagent.startWindowDrag().catch(error => {
+    logApp("warn", "キャラクターからウィンドウを移動できませんでした", errorDetail(error));
+    showToast("画面を移動できませんでした。上部のPicoAgent部分からも移動できます", "error");
+  });
 });
 
 // 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
 // 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
-window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false }));
+window.addEventListener("resize", () => {
+  applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
+  syncLive2DResolution();
+  syncPngNaturalResolution();
+});
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];
@@ -4733,24 +4929,28 @@ renderQuickActions();
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
   if (!s || !s.phase) return;
-  // モデル DL・起動中の表示は起動シーケンス（ローディング画面）の間だけ出し、
-  // 通常時はフキダシに「準備中…」を出さない（重い反映は再起動側で行う方針のため）。
+  if (!localEngineRequired) return;
+  localEnginePhase = s.phase;
+  localEngineReady = s.phase === "ready";
   const booting = petApp.classList.contains("is-booting");
+  status.classList.toggle("engine-pending", ["idle", "download", "verify", "starting"].includes(s.phase));
+  status.classList.toggle("engine-error", s.phase === "error");
   if (s.phase === "download") {
     // 初回だけ数GBを取る。割合しか出さないと、待ち時間の見当が付かず固まって見える。
     const gb = bytes => (Number(bytes) / (1024 ** 3)).toFixed(1);
     const size = Number(s.totalBytes) > 0 ? `（${gb(s.receivedBytes)} / ${gb(s.totalBytes)}GB）` : "";
-    if (booting) setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
+    setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
     online.dataset.up = false;
   } else if (s.phase === "verify") {
     // 数GBのモデル照合は分単位かかる。無表示だと起動が固まったように見える。
-    if (booting) setStatus("ローカルモデルを確認中… ※数分かかることがあります");
+    setStatus("ローカルモデルを確認中… ※数分かかることがあります");
     online.dataset.up = false;
   } else if (s.phase === "starting") {
-    if (booting) setStatus("ローカルAIを起動中…");
+    setStatus("ローカルAIを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
+    status.classList.remove("engine-pending", "engine-error");
     if (petApp.classList.contains("is-booting")) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
@@ -4760,7 +4960,11 @@ function applyEngineStatus(s) {
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
     online.dataset.up = false;
+  } else if (s.phase === "idle") {
+    setStatus("ローカルAIの起動を待っています…");
+    online.dataset.up = false;
   }
+  updateComposerState();
 }
 window.picoagent.on("engine:status", applyEngineStatus);
 // 設定反映（再起動相当）の合図。webview を読み込み直して起動シーケンスを再実行する。
@@ -4894,9 +5098,34 @@ function applyBubbleLayout(width, height, left, top) {
   refreshBubblePlacement();
 }
 window.addEventListener("resize", refreshBubblePlacement);
+function syncPngNaturalResolution() {
+  if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // 1つの原画画素を複数の表示画素へ引き伸ばさない。配信構図の260%指定は
+  // 原画に余裕がある範囲だけで効き、高DPIほどCSS上限を小さくする。
+  character.style.setProperty("--char-natural-css-width", `${petSprite.naturalWidth / dpr}px`);
+  character.style.setProperty("--char-natural-css-height", `${petSprite.naturalHeight / dpr}px`);
+}
 petSprite.addEventListener("load", () => {
+  syncPngNaturalResolution();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
   refreshBubblePlacement();
   syncSpringMotionFrame();
+  if (character.dataset.renderKind === "2d") {
+    requestAnimationFrame(() => {
+      const view = petSprite.getBoundingClientRect();
+      logApp("info", "2D表示寸法", JSON.stringify({
+        natural: [petSprite.naturalWidth, petSprite.naturalHeight],
+        rendered: view ? [Math.round(view.width), Math.round(view.height)] : null,
+        devicePixelRatio: dpr,
+        sourcePixelsPerDisplayPixel: view ? [
+          petSprite.naturalWidth / Math.max(1, view.width * dpr),
+          petSprite.naturalHeight / Math.max(1, view.height * dpr),
+        ] : null,
+        transform: getComputedStyle(petSprite.parentElement).transform,
+      }));
+    });
+  }
 });
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
@@ -4975,7 +5204,7 @@ async function prepareSelectedVoiceModel() {
 }
 
 // 同梱エンジン(local)のモデルDL・検証・起動を監視する。
-// localを選んでいる間は、利用可能になる前に送信画面を見せないため起動完了側で待つ。
+// localのモデル取得・検証・起動を通常画面の状態表示へ反映する。
 async function waitForEngineReady() {
   while (true) {
     let s;
@@ -5195,10 +5424,80 @@ function startAlarmPolling() {
   checkAlarms();
 }
 
+const STARTUP_UI_DEADLINE_MS = 15000;
+let startupUiDeadline = null;
+let startupLayout = null;
+let bootUiReleased = false;
+let bootBackendFinished = false;
+let bootBackendFinishPromise = null;
+let bootBackendRetryTimer = null;
+let bootBackendRetryDelayMs = 1500;
+const BOOT_BACKEND_RETRY_MAX_MS = 30000;
+
+async function finishBootBackend() {
+  if (bootBackendFinished) return;
+  if (!bootBackendFinishPromise) {
+    bootBackendFinishPromise = window.picoagent.finishBoot()
+      .then(() => { bootBackendFinished = true; })
+      .finally(() => { bootBackendFinishPromise = null; });
+  }
+  await bootBackendFinishPromise;
+}
+
+function scheduleBootBackendRetry() {
+  if (bootBackendFinished || bootBackendRetryTimer) return;
+  setStatus("位置・寸法の復旧中…");
+  status.classList.add("engine-pending");
+  bootBackendRetryTimer = setTimeout(async () => {
+    bootBackendRetryTimer = null;
+    try {
+      await finishBootBackend();
+      bootBackendRetryDelayMs = 1500;
+      status.classList.remove("engine-pending");
+      if (status.textContent === "位置・寸法の復旧中…") setStatus("");
+    } catch (error) {
+      logApp("warn", "起動後の位置・寸法を再試行できませんでした", errorDetail(error));
+      bootBackendRetryDelayMs = Math.min(bootBackendRetryDelayMs * 2, BOOT_BACKEND_RETRY_MAX_MS);
+      scheduleBootBackendRetry();
+    }
+  }, bootBackendRetryDelayMs);
+}
+
+async function releaseBootUi(reason = "") {
+  if (!bootBackendFinished) {
+    try { await finishBootBackend(); }
+    catch (error) {
+      logApp("warn", "起動完了を通知できませんでした", errorDetail(error));
+      scheduleBootBackendRetry();
+    }
+  }
+  bootUiReleased = true;
+  if (startupLayout) {
+    try { applyLayout(startupLayout); }
+    catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
+  }
+  petApp.classList.remove("is-booting");
+  if (meshRigController) setAnimation(animationName, true);
+  stopBootLogTicker();
+  if (reason) {
+    setStatus(reason);
+    status.classList.add("engine-error");
+  }
+}
+
 (async () => {
   startBootLogTicker();
+  startupUiDeadline = setTimeout(() => {
+    void releaseBootUi("起動準備に時間がかかっています。画面は使えますが、未準備の機能を確認してください");
+  }, STARTUP_UI_DEADLINE_MS);
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
+  startupLayout = info.layout;
+  localEngineRequired = (info.providerId || "local") === "local";
+  localEngineReady = !localEngineRequired || info.up === true;
+  localEnginePhase = localEngineReady ? "ready" : "idle";
+  frontendInitialized = true;
+  updateComposerState();
   if (betaBadge) betaBadge.hidden = info.betaBuild !== true;
   relationshipMemoryEnabled = info.relationshipMemoryEnabled !== false;
   renderRelationship({ relationship: info.relationship, bondLabel: info.bondLabel });
@@ -5227,7 +5526,8 @@ function startAlarmPolling() {
   savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };
   // 起動準備中だけは保存中の形式に関係なく、小型の配信レイアウトを見せる。
   // finishBoot 後にバックエンドの pet:layout イベントで保存形式へ戻る。
-  applyLayout("stream");
+  if (bootUiReleased) applyLayout(startupLayout);
+  else applyLayout("stream");
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
@@ -5278,29 +5578,22 @@ function startAlarmPolling() {
       characterManifest.greeting = greeting;
       startupGreeting = greeting;
     }
-    // localはモデル取得中・検証中・起動中のまま会話画面へ移ると、送信できるように
-    // 見えるのに接続拒否になる。利用可能または明示的な準備失敗になるまで起動画面を保つ。
-    if ((info.providerId || "local") === "local") {
-      await waitForEngineReady();
+    if (localEngineRequired) {
+      // AI準備は通常画面への復帰を塞がない。未準備中はengine:statusと送信制御で理由を見せる。
+      waitForEngineReady().catch(error => {
+        logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
+        setStatus(`ローカルAIの準備に失敗: ${error?.message || error}`);
+      });
     }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
-    // キャラクターと履歴が読め、local選択時はローカルAIの準備も終わった時点で
-    // 画面を使える状態へ戻す。音声モデルだけは起動後のバックグラウンドで準備する。
+    // キャラクターと履歴が読めたら通常画面へ戻す。AIと音声の準備は状態表示付きで継続する。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    try { await window.picoagent.finishBoot(); }
-    catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
-    // 実アプリはpet:layoutイベントでも戻るが、イベント配送の遅延や撮影モックに依存せず、
-    // 起動用streamを確実に終了させる。finishBoot が失敗しても起動用の形式のままにはしない。
-    try { applyLayout(info.layout); }
-    catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
-    petApp.classList.remove("is-booting");
-    // 起動中に準備したメッシュリグは is-booting の間だけ差分絵へ退避している。
-    // 保存形式へ戻して起動状態を解除した時点で、表示可否を必ず再評価する。
-    if (meshRigController) setAnimation(animationName, true);
-    stopBootLogTicker();
+    if (startupUiDeadline) clearTimeout(startupUiDeadline);
+    startupUiDeadline = null;
+    await releaseBootUi();
   }
   startBackgroundStartupServices(info, startupGreeting);
   if (!info.up && !status.textContent) status.textContent = "起動中…";
@@ -5326,14 +5619,9 @@ function startAlarmPolling() {
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
-  window.picoagent.finishBoot().catch(layoutError => {
-    logApp("warn", "起動失敗後に保存中の表示形式へ戻せませんでした", errorDetail(layoutError));
-  }).finally(() => {
-    petApp.classList.remove("is-booting");
-    if (meshRigController) setAnimation(animationName, true);
-    stopBootLogTicker();
-    wakeAnimationLoop();
-  });
+  if (startupUiDeadline) clearTimeout(startupUiDeadline);
+  startupUiDeadline = null;
+  releaseBootUi().finally(() => wakeAnimationLoop());
 });
 
 function showOnboardingStep(step) {

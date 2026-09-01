@@ -21,6 +21,29 @@ fn is_direct_query(text: &str) -> bool {
     DIRECT_WEATHER_WORDS
         .iter()
         .any(|word| lower.contains(&word.to_lowercase()))
+        && !is_weather_source_search(&lower)
+}
+
+/// 天気そのものではなく、天気を掲載するWebページを探している要求。
+/// weatherを先に実行すると検索要求を横取りするため、ここでは明示的に辞退する。
+fn is_weather_source_search(text: &str) -> bool {
+    const SOURCE_WORDS: &[&str] = &[
+        "サイト",
+        "ページ",
+        "記事",
+        "リンク",
+        "web",
+        "ウェブ",
+        "ネット",
+    ];
+    const SEARCH_WORDS: &[&str] = &["探して", "検索", "調べて"];
+    SOURCE_WORDS.iter().any(|word| text.contains(word))
+        && SEARCH_WORDS.iter().any(|word| text.contains(word))
+}
+
+fn configured_location(value: &str) -> Option<&str> {
+    let location = value.trim();
+    (!location.is_empty() && !location.eq_ignore_ascii_case("Tokyo")).then_some(location)
 }
 
 fn extract_location(text: &str) -> Option<String> {
@@ -119,9 +142,9 @@ impl Tool for WeatherTool {
         vec![
             Field::new(
                 "PICOAGENT_WEATHER_DEFAULT_LOCATION",
-                "天気の既定地点（自動取得に失敗した時に使用）",
+                "天気の地点（市区町村・都道府県。空欄なら現在地を自動取得）",
                 "text",
-                "Tokyo",
+                "",
             ),
             Field::new(
                 "PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION",
@@ -170,28 +193,30 @@ impl Tool for WeatherTool {
             args.get("longitude").and_then(Value::as_f64),
         ) {
             (lat, lon, format!("{},{}", lat, lon))
-        } else if let Some(found) = match &explicit_location {
-            // 地名が明示された場合はそれを優先（解決できなければ下のフォールバックへ）。
-            Some(location) => geocode(&client, location).await.ok(),
-            None => None,
-        } {
-            found
+        } else if let Some(location) = &explicit_location {
+            // 利用者が明示した地点を別地点へ黙って置き換えない。
+            match geocode(&client, location).await {
+                Ok(found) => found,
+                Err(error) => return format!("エラー: {}", error),
+            }
         } else {
-            // 地名が無い／解決失敗時は、まず IP から現在地を推定（有効時）。最後は既定地点。
-            let auto = !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false);
-            match if auto {
-                ip_geolocate(&client).await
-            } else {
-                None
-            } {
-                Some(found) => found,
-                None => {
-                    let location = cfg.get("PICOAGENT_WEATHER_DEFAULT_LOCATION", "Tokyo");
-                    match geocode(&client, &location).await {
-                        Ok(found) => found,
-                        Err(error) => return format!("エラー: {}", error),
-                    }
+            // 保存済み地点を正本にする。未設定の場合だけIP現在地を初期候補として使う。
+            let saved_location = cfg.get("PICOAGENT_WEATHER_DEFAULT_LOCATION", "");
+            // 旧版のスキーマ既定値 `Tokyo` は利用者が選んだ地点と区別できないため、
+            // 新版では未設定として一度だけ現在地推定へ戻す。東京を固定したい場合は
+            // 日本語の「東京都」等を保存すれば正本として扱われる。
+            if let Some(saved_location) = configured_location(&saved_location) {
+                match geocode(&client, saved_location).await {
+                    Ok(found) => found,
+                    Err(error) => return format!("エラー: {}", error),
                 }
+            } else if !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false) {
+                match ip_geolocate(&client).await {
+                    Some(found) => found,
+                    None => return "エラー: 現在地を取得できませんでした。設定で天気の地点を入力してください。".to_string(),
+                }
+            } else {
+                return "エラー: 天気の地点が未設定です。設定で市区町村または都道府県を入力してください。".to_string();
             }
         };
         let response = match client
@@ -261,28 +286,31 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
     Ok((lat, lon, name))
 }
 
-// IP から現在地（緯度経度・市名）を推定する。失敗時は None（既定地点へフォールバック）。
+// IP から現在地（緯度経度・市名）をHTTPSで推定する。失敗時は None。
 async fn ip_geolocate(client: &reqwest::Client) -> Option<(f64, f64, String)> {
-    let response = client
-        .get("http://ip-api.com/json/?fields=status,lat,lon,city,country")
-        .send()
-        .await
-        .ok()?;
+    let response = client.get("https://ipconfig.io/json").send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
     let data: Value = response.json().await.ok()?;
-    if data.get("status").and_then(Value::as_str) != Some("success") {
-        return None;
-    }
-    let lat = data.get("lat").and_then(Value::as_f64)?;
-    let lon = data.get("lon").and_then(Value::as_f64)?;
+    parse_ip_location(&data)
+}
+
+fn parse_ip_location(data: &Value) -> Option<(f64, f64, String)> {
+    let lat = data.get("latitude").and_then(Value::as_f64)?;
+    let lon = data.get("longitude").and_then(Value::as_f64)?;
     let name = data
         .get("city")
         .and_then(Value::as_str)
         .filter(|c| !c.is_empty())
         .map(ToString::to_string)
-        .unwrap_or_else(|| format!("{:.2},{:.2}", lat, lon));
+        .or_else(|| {
+            data.get("region_name")
+                .and_then(Value::as_str)
+                .filter(|region| !region.is_empty())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| format!("{lat:.2},{lon:.2}"));
     Some((lat, lon, name))
 }
 
@@ -416,3 +444,54 @@ fn summarize_weather(name: &str, parsed: &Value) -> String {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(WeatherTool) } }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        configured_location, extract_location, is_direct_query, is_weather_source_search,
+        parse_ip_location,
+    };
+
+    #[test]
+    fn 天気そのものの質問だけを直接実行する() {
+        assert!(is_direct_query("神奈川県の天気を教えて"));
+        assert_eq!(
+            extract_location("神奈川県の天気を教えて").as_deref(),
+            Some("神奈川県")
+        );
+    }
+
+    #[test]
+    fn 天気サイト検索はweatherが横取りしない() {
+        for text in [
+            "天気のサイト探して",
+            "天気予報のページを検索して",
+            "気象の記事をWebで調べて",
+        ] {
+            assert!(is_weather_source_search(&text.to_lowercase()));
+            assert!(!is_direct_query(text));
+        }
+    }
+
+    #[test]
+    fn 旧tokyo既定値は未設定へ移し日本語の東京都は保持する() {
+        assert_eq!(configured_location("Tokyo"), None);
+        assert_eq!(configured_location(" tokyo "), None);
+        assert_eq!(configured_location("東京都"), Some("東京都"));
+        assert_eq!(configured_location("神奈川県"), Some("神奈川県"));
+    }
+
+    #[test]
+    fn https位置情報の緯度経度と表示名を読む() {
+        let value = serde_json::json!({
+            "latitude": 35.44,
+            "longitude": 139.64,
+            "city": "Yokohama",
+            "region_name": "Kanagawa"
+        });
+        assert_eq!(
+            parse_ip_location(&value),
+            Some((35.44, 139.64, "Yokohama".to_string()))
+        );
+    }
+}

@@ -265,7 +265,9 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     let total: usize = turns.iter().map(estimate_tokens).sum();
     let system_tokens: usize = convo
         .iter()
-        .filter(|message| message.role == "system")
+        .filter(|message| {
+            message.role == "system" && message.name.as_deref() != Some("picoagent_private_context")
+        })
         .map(estimate_tokens)
         .sum();
     let turn_budget = budget.saturating_sub(system_tokens);
@@ -286,7 +288,9 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     }
     let mut next: Vec<Message> = convo
         .iter()
-        .filter(|m| m.role == "system")
+        // ツール結果は現在ターンの公開判定だけに使う。次ターンへsystemとして残すと、
+        // 外部資料と命令文が累積し、人格より強い文脈として再送され続けてしまう。
+        .filter(|m| m.role == "system" && m.name.as_deref() != Some("picoagent_private_context"))
         .cloned()
         .collect();
     next.extend(turns);
@@ -611,11 +615,13 @@ async fn run_multi_ai_and_persist(
     // 始まり、チャット経由より1段深く委譲できてしまう。深さ1のスコープを張って
     // 上限判定をチャット経由とそろえる。中断フラグも配下の候補AIへ伝播させる。
     // 戻り値はツール出力ではなく利用者への最終返信なので、ツール出力上限で打ち切らない。
-    let reply = agent::with_cancel(
+    let raw_reply = agent::with_cancel(
         Arc::clone(&state.cancel_requested),
         agent::with_agent_depth(1, tools::dispatch_final(&state.config, "subagent", args)),
     )
     .await;
+    let private_context = stable_persona_prompt(state);
+    let reply = agent::safe_public_answer_or_fallback(raw_reply, &private_context);
     convo.push(Message::new("assistant", reply.clone()));
     let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
     if conversation_is_current(state, character_id, epoch) {
@@ -1285,11 +1291,30 @@ pub fn pet_place_window(position: String, app: AppHandle) -> Result<(), String> 
     .or_else(|| monitors.first())
     .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
     let size = window.outer_size().map_err(|error| error.to_string())?;
-    let x = selected.position().x + (selected.size().width.saturating_sub(size.width) / 2) as i32;
-    let y = selected.position().y + (selected.size().height.saturating_sub(size.height) / 2) as i32;
+    let (x, y) = crate::layout::centered_physical_position(
+        selected.position().x,
+        selected.position().y,
+        selected.size().width,
+        selected.size().height,
+        size.width,
+        size.height,
+    );
     window
         .set_position(tauri::PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::remember_boot_window_center(&app, selected.position().x, selected.position().y);
+    Ok(())
+}
+
+/// 枠なしウィンドウのドラッグ開始をバックエンドへ集約する。
+/// 起動中だけは利用者が決めた位置を通常画面へ引き継ぐため、開始印を先に記録する。
+#[tauri::command]
+pub fn pet_start_window_drag(app: AppHandle) -> Result<(), String> {
+    crate::mark_boot_window_drag(&app);
+    app.get_webview_window("main")
+        .ok_or_else(|| "メインウィンドウがありません。".to_string())?
+        .start_dragging()
+        .map_err(|error| format!("ウィンドウの移動を開始できませんでした: {error}"))
 }
 
 /// ドラッグで確定したフキダシサイズを設定の正本へ保存する。
@@ -1957,8 +1982,19 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
             // 雑談は「人格(system)＋指示」だけを文脈にするぶん、小型モデルが人格設定を
             // そのまま返しやすい。エージェント経路を通らないのでここで落とす。
             let prompt = crate::agent::system_prompt_of(&convo);
-            let reply =
-                crate::agent::remove_prompt_leak(message.content.trim().to_string(), &prompt);
+            let reply = match crate::agent::guard_public_answer(
+                message.content.trim().to_string(),
+                &prompt,
+            ) {
+                Ok(reply) => reply,
+                Err(reason) => {
+                    crate::log_paths::append_app_log(
+                        &app,
+                        &format!("自発雑談の非公開文脈を公開前に破棄しました: {reason}"),
+                    );
+                    String::new()
+                }
+            };
             if !conversation_is_current(&state, &request_character_id, request_epoch) {
                 crate::log_paths::append_app_log(
                     &app,
@@ -2042,6 +2078,10 @@ fn default_wake_message(label: &str) -> String {
     }
 }
 
+fn safe_wake_message(content: &str, prompt: &str) -> Option<String> {
+    crate::agent::guard_public_answer(content.trim().to_string(), prompt).ok()
+}
+
 // 選択中キャラの口調で、やさしい起こし文を生成する（失敗時は None）。
 async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> {
     let id = state.provider_id.lock().unwrap().clone();
@@ -2061,15 +2101,9 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
         .chat(&state.config, &model, &convo, &[])
         .await
         .ok()?;
-    // エージェント経路を通らないので、人格プロンプトの混入はここで落とす
-    // （起こし文はそのまま表示・読み上げへ回る）。
+    // エージェント経路を通らないので、表示・読み上げへ渡す前に統一公開ガードを通す。
     let prompt = crate::agent::system_prompt_of(&convo);
-    let reply = crate::agent::remove_prompt_leak(message.content.trim().to_string(), &prompt);
-    if reply.is_empty() {
-        None
-    } else {
-        Some(reply)
-    }
+    safe_wake_message(&message.content, &prompt)
 }
 
 // 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。
@@ -3386,6 +3420,12 @@ pub fn pet_reset_layout(app: AppHandle) {
 #[tauri::command]
 pub fn pet_frontend_ready(app: AppHandle) {
     crate::boot_screen::mark_started(&app);
+    if let Err(error) = crate::layout::restart_boot(&app) {
+        crate::log_paths::append_app_log(
+            &app,
+            &format!("起動画面の寸法を適用できませんでした: {error}"),
+        );
+    }
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
@@ -3395,11 +3435,11 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    // 起動完了の記録は寸法変更より先に行う。フロントはここまで到達できているので、
-    // ウィンドウ寸法の変更だけが失敗しても「起動できなかった」ことにはならない。
-    // あとにすると、動いている画面が監視のタイムアウトで案内画面へ差し替わる。
+    crate::layout::finish_boot(&app, &id)?;
+    // 通常寸法と位置へ戻せた後だけ完了扱いにする。失敗時はフロントから再試行でき、
+    // 680x430の起動画面を完了状態として固定しない。
     crate::boot_screen::mark_finished(&app);
-    crate::layout::apply(&app, &id)
+    Ok(())
 }
 
 #[tauri::command]
@@ -4613,13 +4653,27 @@ mod tests {
         centered_window_position, compacted_conversation, default_character_tts_voice,
         enable_tts_after_component_install, multi_ai_context, parse_update_feed,
         preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
-        resolved_judge_model, settings_tab, speech_text, stable_persona_prompt,
+        resolved_judge_model, safe_wake_message, settings_tab, speech_text, stable_persona_prompt,
         update_series_is_newer, update_status, validate_multi_ai_settings,
         verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
         MAX_UPDATE_FEED_BYTES,
     };
     use crate::config::Config;
     use crate::message::Message;
+
+    #[test]
+    fn 目覚まし文は内部指示の言い換えを公開しない() {
+        let prompt = "あなたはひよりです。親しみやすい短い口調で答えてください。";
+        assert!(safe_wake_message(
+            "受け取った設定は親しみやすく短く返答するものなので、その口調で返します。",
+            prompt,
+        )
+        .is_none());
+        assert_eq!(
+            safe_wake_message("おはよう。朝だよ、ゆっくり起きようね。", prompt).as_deref(),
+            Some("おはよう。朝だよ、ゆっくり起きようね。")
+        );
+    }
 
     #[test]
     fn 復号不能シークレットは未編集保存で暗号文を保持する() {
@@ -4692,6 +4746,24 @@ mod tests {
         assert_eq!(compacted[0].role, "system");
         assert_eq!(compacted[1].content, "発話4");
         assert_eq!(compacted[2].content, "発話5");
+    }
+
+    #[test]
+    fn 会話圧縮はツール用の非公開systemを次ターンへ残さない() {
+        let mut private = Message::new("system", "検索結果");
+        private.name = Some("picoagent_private_context".to_string());
+        let messages = vec![
+            Message::new("system", "人格"),
+            private,
+            Message::new("user", "質問"),
+            Message::new("assistant", "回答"),
+        ];
+        let compacted = compacted_conversation(&messages, 100);
+        assert_eq!(compacted.len(), 3);
+        assert_eq!(compacted[0].content, "人格");
+        assert!(compacted
+            .iter()
+            .all(|message| message.name.as_deref() != Some("picoagent_private_context")));
     }
 
     #[test]
