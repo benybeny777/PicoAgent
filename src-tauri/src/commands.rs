@@ -3448,6 +3448,12 @@ pub fn pet_frontend_ready(app: AppHandle) {
     }
 }
 
+/// 起動準備が進行中であることをバックエンドの停止監視へ伝える。
+#[tauri::command]
+pub fn pet_boot_progress(app: AppHandle) {
+    crate::boot_screen::mark_progress(&app);
+}
+
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
 #[tauri::command]
 pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {

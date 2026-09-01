@@ -163,6 +163,7 @@ pub fn run() {
             commands::pet_read_file_content,
             commands::pet_read_dropped_path,
             commands::pet_frontend_ready,
+            commands::pet_boot_progress,
             commands::pet_finish_boot,
             commands::pet_reset_layout,
             menu::pet_menu,
