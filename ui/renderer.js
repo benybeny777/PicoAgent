@@ -757,12 +757,24 @@ async function loadCharacterManifest(characterId) {
   return { entry, manifest, root };
 }
 
+const STARTUP_SLEEPING_CHARACTER_IDS = Object.freeze(["mugi", "rin", "mai"]);
+
+function chooseStartupSleepingCharacter(randomValue = Math.random()) {
+  const value = Number.isFinite(Number(randomValue)) ? Number(randomValue) : 0;
+  const index = Math.min(
+    STARTUP_SLEEPING_CHARACTER_IDS.length - 1,
+    Math.max(0, Math.floor(value * STARTUP_SLEEPING_CHARACTER_IDS.length)),
+  );
+  return STARTUP_SLEEPING_CHARACTER_IDS[index];
+}
+
 async function prepareBootCharacter(characterId) {
   if (!bootPetImage) return;
   const { manifest, root } = await loadCharacterManifest(characterId);
   const version = String(manifest.assetVersion || "");
   bootCharacterName = manifest.name || "キャラクター";
   bootPetImage.alt = `起動を待つ${bootCharacterName}`;
+  petApp.dataset.bootCharacterId = manifest.id || characterId;
   const dedicatedSleeping = manifest.boot?.useSleepingOnStartup === true
     ? manifest.boot?.sleeping
     : "";
@@ -5235,14 +5247,17 @@ bubble?.addEventListener("click", event => {
 renderNoticePanel();
 updateNoticeBadge();
 
-// 選択中キャラの AivisHub 音声モデルを準備する。画面を先に使える状態へ戻してから
-// バックグラウンドで呼ぶため、音声配布元の障害で本体起動を塞がない。
-// 画面はすでに利用者のものなので、待ち時間も失敗も状態表示へは出さずログだけに残す。
+// 選択中キャラの AivisHub 音声モデルを準備する。読み上げが有効な場合は、通常画面へ
+// 移る前にモデル導入・エンジン起動まで終えて、最初の発話から待たずに話せるようにする。
 async function prepareSelectedVoiceModel() {
   let statusInfo;
   try { statusInfo = await window.picoagent.aivisStatus(); }
-  catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
+  catch (error) {
+    logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error));
+    return false;
+  }
   if (!statusInfo?.enabled) return null;
+  setStatus("声を準備中…");
   try {
     await window.picoagent.prepareVoiceModel();
     return true;
@@ -5271,29 +5286,6 @@ async function waitForEngineReady() {
     if (s && (s.phase === "ready" || s.phase === "error")) return s;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-}
-
-function startBackgroundStartupServices(info, greeting) {
-  if (!info.onboardingDone || !greeting) return;
-  const requestRevision = conversationRevision;
-  // 音声モデルの取得は数分かかることがあるため、待っている間に会話が1往復でも
-  // 進んでいたら起動時の挨拶はもう読み上げない。`conversationRevision` は会話リセット
-  // でしか変わらず「利用者が話しかけた」を捕まえられないので、履歴の増減も見る。
-  const startupHistoryLength = conversationHistory.length;
-  const conversationMovedOn = () => requestRevision !== conversationRevision
-    || conversationHistory.length !== startupHistoryLength
-    || busy
-    || currentVoice;
-  void (async () => {
-    const voiceReady = await prepareSelectedVoiceModel();
-    if (!voiceReady || conversationMovedOn()) return;
-    const prepared = await prepareSpeech(greeting);
-    if (prepared && !conversationMovedOn()) {
-      playPreparedSpeech(prepared);
-    }
-  })().catch(error => {
-    logApp("warn", "起動後の読み上げ準備に失敗しました", errorDetail(error));
-  });
 }
 
 // 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
@@ -5473,8 +5465,6 @@ function startAlarmPolling() {
   checkAlarms();
 }
 
-const STARTUP_UI_DEADLINE_MS = 15000;
-let startupUiDeadline = null;
 let startupLayout = null;
 let bootUiReleased = false;
 let bootBackendFinished = false;
@@ -5536,9 +5526,6 @@ async function releaseBootUi(reason = "") {
 
 (async () => {
   startBootLogTicker();
-  startupUiDeadline = setTimeout(() => {
-    void releaseBootUi("起動準備に時間がかかっています。画面は使えますが、未準備の機能を確認してください");
-  }, STARTUP_UI_DEADLINE_MS);
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
   startupLayout = info.layout;
@@ -5580,14 +5567,14 @@ async function releaseBootUi(reason = "") {
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
-    await prepareBootCharacter(info.characterId || "mugi");
+    await prepareBootCharacter(chooseStartupSleepingCharacter());
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
   // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
   // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンは待たない。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
-  setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
+  setStatus("選択中のキャラクターを読み込み中…");
   const requestedCharacterId = info.characterId || "mugi";
   const loadOptions = { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} };
   const loadStartupCharacter = async () => {
@@ -5610,9 +5597,11 @@ async function releaseBootUi(reason = "") {
     error => ({ ok: false, error }),
   );
   let startupGreeting = "";
+  let startupPreparedSpeech = null;
   try {
     const characterLoad = await characterLoadPromise;
     if (!characterLoad.ok) throw characterLoad.error;
+    bootCharacterName = characterManifest?.name || bootCharacterName;
     setStatus("会話履歴を画面へ復元中…");
     hydrateHistory(info.history);
     let greeting = characterManifest?.greeting || "";
@@ -5628,23 +5617,27 @@ async function releaseBootUi(reason = "") {
       startupGreeting = greeting;
     }
     if (localEngineRequired) {
-      // AI準備は通常画面への復帰を塞がない。未準備中はengine:statusと送信制御で理由を見せる。
-      waitForEngineReady().catch(error => {
-        logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
-        setStatus(`ローカルAIの準備に失敗: ${error?.message || error}`);
-      });
+      // 送信できない通常画面を先に見せず、利用可能または明示的な失敗になるまで
+      // 寝姿の起動画面で進捗を伝える。
+      await waitForEngineReady();
+    }
+    if (info.onboardingDone && startupGreeting) {
+      const voiceReady = await prepareSelectedVoiceModel();
+      if (voiceReady) startupPreparedSpeech = await prepareSpeech(startupGreeting);
+      else if (voiceReady === false) {
+        setStatus("音声を準備できませんでした。設定の診断を確認してください");
+        status.classList.add("engine-error");
+      }
     }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
-    // キャラクターと履歴が読めたら通常画面へ戻す。AIと音声の準備は状態表示付きで継続する。
+    // キャラクター・履歴・必要なAIと音声が揃ってから通常画面へ戻す。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    if (startupUiDeadline) clearTimeout(startupUiDeadline);
-    startupUiDeadline = null;
     await releaseBootUi();
   }
-  startBackgroundStartupServices(info, startupGreeting);
+  if (startupPreparedSpeech) playPreparedSpeech(startupPreparedSpeech);
   if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); }
@@ -5668,8 +5661,6 @@ async function releaseBootUi(reason = "") {
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
-  if (startupUiDeadline) clearTimeout(startupUiDeadline);
-  startupUiDeadline = null;
   releaseBootUi().finally(() => wakeAnimationLoop());
 });
 
