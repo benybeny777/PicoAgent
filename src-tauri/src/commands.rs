@@ -4663,11 +4663,12 @@ fn place_settings_with_main(
 
 fn settings_tab(tab: Option<&str>) -> Option<&str> {
     match tab {
-        // 旧「音声」入口は統合後のキャラクター・音声タブへ送る。
-        Some("voice") => Some("character"),
+        // 旧「キャラクター追加」入口は独立したキャラ登録タブへ送る。
+        Some("character-add") => Some("character-register"),
         Some(
-            value @ ("basic" | "display" | "character" | "character-add" | "components"
-            | "providers" | "tools" | "permissions" | "skillguide" | "diagnostics"),
+            value @ ("basic" | "display" | "character-register" | "character" | "voice"
+            | "components" | "providers" | "tools" | "permissions" | "skillguide"
+            | "diagnostics"),
         ) => Some(value),
         _ => None,
     }
@@ -4920,8 +4921,15 @@ mod tests {
     fn 設定画面は既知のタブだけを受け付ける() {
         assert_eq!(settings_tab(Some("permissions")), Some("permissions"));
         assert_eq!(settings_tab(Some("display")), Some("display"));
-        assert_eq!(settings_tab(Some("voice")), Some("character"));
-        assert_eq!(settings_tab(Some("character-add")), Some("character-add"));
+        assert_eq!(settings_tab(Some("voice")), Some("voice"));
+        assert_eq!(
+            settings_tab(Some("character-add")),
+            Some("character-register")
+        );
+        assert_eq!(
+            settings_tab(Some("character-register")),
+            Some("character-register")
+        );
         assert_eq!(settings_tab(Some("components")), Some("components"));
         assert_eq!(settings_tab(Some("../index")), None);
         assert_eq!(settings_tab(None), None);
