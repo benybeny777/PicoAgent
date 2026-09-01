@@ -6,16 +6,16 @@
     3600
   ],
   "canvas": [
-    890,
-    1800
+    1780,
+    3600
   ],
   "contentBox": [
-    132,
-    142,
-    758,
-    1658
+    263,
+    285,
+    1517,
+    3317
   ],
-  "runtimeScale": 0.5,
+  "runtimeScale": 1.0,
   "grid": [
     9,
     15
@@ -25,10 +25,10 @@
     "body": {
       "texture": "parts/body.webp",
       "textureBox": [
-        143,
-        400,
-        677,
-        1660
+        291,
+        800,
+        1349,
+        3317
       ],
       "z": 0,
       "initialAlpha": 1,
@@ -37,10 +37,10 @@
     "hair-back": {
       "texture": "parts/hair-back.webp",
       "textureBox": [
-        255,
-        188,
-        617,
-        600
+        514,
+        380,
+        1230,
+        1195
       ],
       "z": 5,
       "initialAlpha": 1,
@@ -49,10 +49,10 @@
     "arm-left": {
       "texture": "parts/arm-left.webp",
       "textureBox": [
-        130,
-        549,
-        335,
-        1040
+        263,
+        1104,
+        665,
+        2074
       ],
       "z": 10,
       "initialAlpha": 1,
@@ -61,10 +61,10 @@
     "arm-right": {
       "texture": "parts/arm-right.webp",
       "textureBox": [
-        555,
-        549,
-        761,
-        1040
+        1116,
+        1104,
+        1517,
+        2074
       ],
       "z": 11,
       "initialAlpha": 1,
@@ -73,10 +73,10 @@
     "face": {
       "texture": "parts/face.webp",
       "textureBox": [
-        335,
-        371,
-        541,
-        600
+        676,
+        748,
+        1077,
+        1195
       ],
       "z": 20,
       "initialAlpha": 1,
@@ -85,10 +85,10 @@
     "hair-front": {
       "texture": "parts/hair-front.webp",
       "textureBox": [
-        330,
-        140,
-        543,
-        409
+        665,
+        285,
+        1080,
+        813
       ],
       "z": 30,
       "initialAlpha": 1,
@@ -97,18 +97,18 @@
     "blink_half": {
       "texture": "parts/blink_half.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        142,
-        635,
-        618
+        475,
+        285,
+        1268,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"
@@ -116,18 +116,18 @@
     "blink_closed": {
       "texture": "parts/blink_closed.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        142,
-        635,
-        618
+        475,
+        285,
+        1268,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"
@@ -135,18 +135,18 @@
     "mouth_open": {
       "texture": "parts/mouth_open.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        142,
-        635,
-        618
+        475,
+        285,
+        1268,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"
@@ -154,18 +154,18 @@
     "gaze_left": {
       "texture": "parts/gaze_left.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        140,
-        634,
-        618
+        475,
+        285,
+        1267,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"
@@ -173,18 +173,18 @@
     "gaze_right": {
       "texture": "parts/gaze_right.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        140,
-        634,
-        618
+        475,
+        285,
+        1267,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"
@@ -192,18 +192,18 @@
     "expression_happy": {
       "texture": "parts/expression_happy.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        140,
-        634,
-        618
+        475,
+        285,
+        1267,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"
@@ -211,18 +211,18 @@
     "expression_sad": {
       "texture": "parts/expression_sad.webp",
       "box": [
-        246,
-        132,
-        626,
-        608
+        493,
+        264,
+        1251,
+        1216
       ],
       "textureBox": [
-        236,
-        140,
-        634,
-        618
+        475,
+        285,
+        1267,
+        1234
       ],
-      "feather": 4,
+      "feather": 7,
       "z": 1000,
       "initialAlpha": 0,
       "motion": "face"

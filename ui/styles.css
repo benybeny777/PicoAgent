@@ -696,8 +696,8 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 }
 [data-layout="chat"] .character canvas,
 [data-layout="bar"] .character canvas {
-  width:100%!important; height:100%!important;
-  transform:translateX(-50%) scale(2.15); transform-origin:50% 8%;
+  width:auto!important; height:100%!important;
+  transform:translateX(-50%); transform-origin:50% 50%;
 }
 [data-layout="chat"] .online { right:auto; bottom:auto; left:70px; top:68px; width:9px; height:9px; border-width:2px; }
 [data-layout="chat"] .relationship-button { right:auto; bottom:auto; left:88px; top:35px; width:24px; height:24px; font-size:12px; }
@@ -884,14 +884,14 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 /* 配信の2D立ち絵は2.6倍の表示面を上端基準に置き、右寄りの胸上構図にする。
    背景は画像へ合成せず、配信ステージ側の独立レイヤーだけを使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-view > img {
-  inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0;
+  inset:0 auto auto 50%; width:var(--stream-render-size,260%); height:var(--stream-render-size,260%); translate:-50% 0;
   max-width:var(--char-natural-css-width,100%); max-height:var(--char-natural-css-height,100%);
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"] .character-view > canvas {
-  inset:0 auto auto -80%; left:-80%; bottom:auto;
-  width:260%!important; height:260%!important;
-  transform:none; transform-origin:50% 0%;
+  inset:0 auto auto 50%; left:50%; bottom:auto;
+  width:auto!important; height:min(calc(76vh * var(--stream-mesh-scale,2.6) / 2.6),var(--mesh-source-css-height,9999px))!important;
+  transform:translateX(-50%); transform-origin:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"] .character-spring-motion {
   inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0;
@@ -903,14 +903,21 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 /* 低頭身2Dは配信形式でも上半身構図にする。
    長身向けの260%切り出しは低頭身だと顔だけになるため適用しない。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-view > img {
-  inset:0 auto auto 50%; width:165%; height:165%;
+  inset:0 auto auto 50%; width:var(--stream-render-size,165%); height:var(--stream-render-size,165%);
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-body-proportion="compact"] .character-spring-motion {
   inset:0 auto auto 50%; width:165%; height:165%;
 }
+/* メッシュ化は同じ低頭身原画の描画方式を替えるだけなので、2D画像と同じ胸上構図にする。
+   render-kindだけで長身向け260%へ戻すと、顔だけが画面を覆ってしまう。 */
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"][data-body-proportion="compact"] .character-view > canvas {
+  inset:0 auto auto 50%; left:50%; bottom:auto;
+  width:auto!important; height:min(calc(76vh * var(--stream-mesh-scale,2.6) / 2.6),var(--mesh-source-css-height,9999px))!important;
+  transform:translateX(-50%); transform-origin:50% 0%;
+}
 /* ネイティブ胸上原画は全身絵向けの260%クロップを重ねず、胸全体までをそのまま使う。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-view > img {
-  inset:0 auto auto 50%; width:100%; height:135%;
+  inset:0 auto auto 50%; width:100%; height:var(--stream-render-size,135%);
   object-fit:contain; object-position:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="2d"][data-source-framing="native-bust"] .character-spring-motion {
@@ -920,7 +927,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
    全身絵向けの260%クロップを適用すると、胸上原画が顔だけになる。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"][data-source-framing="native-bust"] .character-view > canvas {
   inset:0 auto auto 50%; left:50%; bottom:auto;
-  width:auto!important; height:135%!important;
+  width:auto!important; height:min(calc(76vh * var(--stream-mesh-scale,2.6) / 2.6),var(--mesh-source-css-height,9999px))!important;
   transform:translateX(-50%); transform-origin:50% 0%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view > canvas {
@@ -1094,7 +1101,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   width:auto; margin:0; align-self:auto;
 }
 [data-layout="chat"] .reply-actions button { flex:1 1 0; min-width:0; width:auto; height:34px; }
-[data-layout="chat"] .character canvas { width:100%!important; height:100%!important; transform:translateX(-50%) scale(2.55); transform-origin:50% 9%; }
+[data-layout="chat"] .character canvas { width:auto!important; height:100%!important; transform:translateX(-50%); transform-origin:50% 50%; }
 [data-layout="chat"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
 [data-layout="chat"] .reply { font-size:14px; line-height:1.65; }
 [data-layout="chat"] .composer textarea { min-height:82px; }
@@ -1123,5 +1130,9 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="widget"] .reply { max-height:32%; font-size:14px; line-height:1.65; }
 [data-layout="widget"] .composer textarea { min-height:82px; }
 [data-layout="widget"] .character { right:16px; bottom:100px; width:112px; height:138px; }
+[data-layout="widget"] .character[data-render-kind="live2d"] .character-view > canvas {
+  width:auto!important; height:100%!important;
+  object-fit:contain; object-position:50% 100%;
+}
 [data-layout="widget"] .online { right:18px; bottom:238px; }
 [data-layout="widget"] .relationship-button { right:42px; bottom:232px; width:26px; height:26px; }

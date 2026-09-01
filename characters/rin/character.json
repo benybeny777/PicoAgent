@@ -5,6 +5,7 @@
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "motionProfile": "full",
   "bodyProportion": "compact",
+  "streamFraming": { "zoom": 1.3, "x": 0, "y": 18 },
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
     "sleeping": "boot/sleeping.png",

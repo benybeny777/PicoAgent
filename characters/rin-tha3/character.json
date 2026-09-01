@@ -5,6 +5,7 @@
   "description": "自作（THA3）版。既存のりんとは別キャラクターとして扱われる、17キーポーズ／42フレームの試作モデル。人格・声・挨拶は既存のりんと同じ。",
   "motionProfile": "full",
   "bodyProportion": "compact",
+  "streamFraming": { "zoom": 1.3, "x": 0, "y": 18 },
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
   "boot": {
     "sleeping": "boot/sleeping.png"

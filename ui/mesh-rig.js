@@ -34,7 +34,7 @@
   }
 
   class MeshRigController {
-    constructor(app, canvas, rig, planes) {
+    constructor(app, canvas, rig, planes, textureFit) {
       this.app = app;
       this.canvas = canvas;
       this.rig = rig;
@@ -53,11 +53,15 @@
       this.hairPosition = 0;
       this.hairVelocity = 0;
       this.motion = "idle";
+      this.textureFit = textureFit;
+      this.framingScale = 1;
       this.startedAt = performance.now();
       this.lastAt = 0;
       this.tick = this.tick.bind(this);
+      this.refreshSourceLimit = this.refreshSourceLimit.bind(this);
       this.app.ticker.add(this.tick);
       this.app.ticker.stop();
+      root.addEventListener("resize", this.refreshSourceLimit);
     }
 
     setActive(active) {
@@ -99,6 +103,21 @@
     }
 
     setMotion(name) { this.motion = String(name || "idle"); }
+
+    setFraming(scale = 1) {
+      const next = clamp(scale, 1, 4);
+      this.framingScale = next;
+      this.app.stage.pivot.set(this.app.screen.width / 2, 0);
+      this.app.stage.position.set(this.app.screen.width / 2, 0);
+      this.app.stage.scale.set(next);
+      this.refreshSourceLimit();
+    }
+
+    refreshSourceLimit() {
+      const dpr = Math.max(1, root.devicePixelRatio || 1);
+      const visibleSourceHeight = this.app.screen.height / this.textureFit / this.framingScale;
+      this.canvas.style.setProperty("--mesh-source-css-height", `${visibleSourceHeight / dpr}px`);
+    }
 
     updateBlink(now) {
       if (!this.blinkTween) return;
@@ -190,6 +209,7 @@
     }
 
     destroy() {
+      root.removeEventListener("resize", this.refreshSourceLimit);
       this.app.ticker.remove(this.tick);
       this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       this.canvas.remove();
@@ -225,8 +245,8 @@
     if (contentWidth <= 0 || contentHeight <= 0) throw new Error("メッシュリグの内容範囲が不正です");
     // 透明余白や原画キャンバス比率が異なっても、見えるキャラクターの大きさを固定する。
     const textureFit = Math.min(width / contentWidth, height / contentHeight) * 0.97;
-    // 4.5倍（1283x1418）で1080p配信の横方向と高DPIのペット表示を覆う。原画相当の5.7倍を
-    // 常時再描画すると1080p撮影の初期表示を遅らせるため、画面に出ない余剰だけを落とす。
+    // 制作素材の内容解像度まで描画バッファを確保する。配信の胸上化はCSSでキャンバスを
+    // 巨大化せず、後段のstage変換で内部構図を切り替える。
     const renderResolution = Math.max(root.devicePixelRatio || 1, Math.min(4.5, 1 / textureFit));
     const app = new PIXI.Application({
       view: canvas,
@@ -269,7 +289,7 @@
     }
     canvas.style.background = "transparent";
     canvas.dataset.meshRig = "ready";
-    return new MeshRigController(app, canvas, rig, planes);
+    return new MeshRigController(app, canvas, rig, planes, textureFit);
   }
 
   root.PicoMeshRig = Object.freeze({ create });
