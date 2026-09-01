@@ -98,6 +98,8 @@ window.picoagent = {
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
   // フロントを読み込めたことの通知（届かないと案内画面へ切り替わる）。
   frontendReady: () => call("pet_frontend_ready"),
+  // モデル・音声の取得中も起動処理が進行中であることを監視側へ伝える。
+  bootProgress: () => call("pet_boot_progress"),
   // 共通VTuber起動画面から、保存中の表示形式と寸法へ戻す。
   finishBoot: () => call("pet_finish_boot"),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。

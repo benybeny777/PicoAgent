@@ -42,6 +42,12 @@ test("準備完了後に保存形式へ戻し起動音声を再生する", () =>
   assert.doesNotMatch(renderer, /if \(bootUiReleased\) return/);
 });
 
+test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
+  assert.match(renderer, /bootProgressTimer = setInterval\([\s\S]*?window\.picoagent\.bootProgress\(\)[\s\S]*?10000\)/);
+  assert.match(renderer, /async function releaseBootUi[\s\S]*?clearInterval\(bootProgressTimer\)/);
+  assert.match(commands, /pub fn pet_boot_progress[\s\S]*?boot_screen::mark_progress/);
+});
+
 test("起動画面は初期3キャラの寝姿だけをランダム選択する", () => {
   assert.match(renderer, /STARTUP_SLEEPING_CHARACTER_IDS = Object\.freeze\(\["mugi", "rin", "mai"\]\)/);
   assert.match(renderer, /function chooseStartupSleepingCharacter\(randomValue = Math\.random\(\)\)/);

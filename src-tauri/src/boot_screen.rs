@@ -9,16 +9,16 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
 /// 案内ページを返す専用 URI スキーム。
 pub const SCHEME: &str = "picoboot";
 
-/// フロントから準備完了が来るまでの既定待ち時間（ミリ秒）。
-/// 初回起動は webview の初期化とアセット読み込みで数秒かかるため、余裕を持たせる。
-const DEFAULT_TIMEOUT_MS: u64 = 12_000;
+/// フロントの開始通知、または開始後の進捗通知が途絶えてから失敗とする時間（ミリ秒）。
+/// 初回はモデルや音声の取得とウイルス検査で長くなるため、2分の無通信だけを停止扱いにする。
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 /// 待ち時間の下限・上限（設定値が極端でも実用範囲へ収める）。
 const MIN_TIMEOUT_MS: u64 = 3_000;
 const MAX_TIMEOUT_MS: u64 = 120_000;
@@ -33,6 +33,8 @@ pub struct BootScreenState {
     started: AtomicBool,
     /// フロントが `pet_finish_boot` まで到達し、起動画面を終了したか。
     finished: AtomicBool,
+    /// 起動準備中のフロントから最後に生存通知が届いた時刻。
+    last_progress: Mutex<Option<Instant>>,
     /// 案内ページへ切り替え済みか（多重 navigate を避ける）。
     shown: AtomicBool,
     /// 本来表示するはずだったアプリの URL（「もう一度読み込む」の遷移先）。
@@ -51,6 +53,13 @@ impl BootScreenState {
 pub fn mark_started(app: &AppHandle) {
     let state = app.state::<BootScreenState>();
     state.started.store(true, Ordering::SeqCst);
+    *state.last_progress.lock().unwrap() = Some(Instant::now());
+}
+
+/// フロントが起動準備を継続できていることを記録する。
+pub fn mark_progress(app: &AppHandle) {
+    let state = app.state::<BootScreenState>();
+    *state.last_progress.lock().unwrap() = Some(Instant::now());
 }
 
 /// フロントが起動画面を終了したことを記録する。
@@ -145,7 +154,11 @@ fn escape(raw: &str) -> String {
     out
 }
 
-/// フロントの読込開始と起動完了を別々に待ち、時間内に来なければ案内ページへ切り替える。
+fn progress_stalled(last_progress: Option<Instant>, timeout: Duration) -> bool {
+    last_progress.is_none_or(|last| last.elapsed() >= timeout)
+}
+
+/// フロントの読込開始を待ち、開始後は進捗通知が途絶えた場合だけ案内ページへ切り替える。
 pub fn watch(app: AppHandle) {
     let timeout_ms = {
         let config = &app.state::<crate::commands::AppState>().config;
@@ -170,20 +183,24 @@ pub fn watch(app: AppHandle) {
             );
             return;
         }
-        // JavaScript先頭の通知だけで監視を解除しない。その後のトップレベル例外や
-        // 初期化停止も検出できるよう、起動完了通知をもう1区間待つ。
-        tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
-        if app
-            .state::<BootScreenState>()
-            .finished
-            .load(Ordering::SeqCst)
-        {
-            return;
+        // モデル・音声の取得は2分を超えることがある。完了までの総時間ではなく、
+        // JavaScriptからの生存通知が1区間途絶えた場合だけ停止と判定する。
+        let timeout = Duration::from_millis(timeout_ms);
+        loop {
+            tokio::time::sleep(timeout).await;
+            let state = app.state::<BootScreenState>();
+            if state.finished.load(Ordering::SeqCst) {
+                return;
+            }
+            if !progress_stalled(*state.last_progress.lock().unwrap(), timeout) {
+                continue;
+            }
+            break;
         }
         show_failure(
             &app,
             timeout_ms,
-            format!("フロントエンドの読込開始後、{timeout_ms} ミリ秒以内に起動完了通知が届きませんでした"),
+            format!("フロントエンドの起動進捗通知が{timeout_ms} ミリ秒以上届きませんでした"),
         );
     });
 }
@@ -279,5 +296,17 @@ mod tests {
             !state.finished.load(Ordering::SeqCst),
             "JavaScript開始後の例外も監視するため、完了通知は別に必要"
         );
+    }
+
+    #[test]
+    fn 進捗が続く間は長い起動準備を失敗にしない() {
+        let now = Instant::now();
+        let timeout = Duration::from_secs(120);
+        assert!(!progress_stalled(Some(now), timeout));
+        assert!(progress_stalled(None, timeout));
+        assert!(progress_stalled(
+            Some(now - Duration::from_secs(121)),
+            timeout
+        ));
     }
 }

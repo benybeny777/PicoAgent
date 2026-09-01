@@ -5467,6 +5467,11 @@ function startAlarmPolling() {
 
 let startupLayout = null;
 let bootUiReleased = false;
+const bootProgressTimer = setInterval(() => {
+  window.picoagent.bootProgress().catch(error => {
+    console.warn("起動進捗を通知できませんでした", error);
+  });
+}, 10000);
 let bootBackendFinished = false;
 let bootBackendFinishPromise = null;
 let bootBackendRetryTimer = null;
@@ -5503,6 +5508,7 @@ function scheduleBootBackendRetry() {
 }
 
 async function releaseBootUi(reason = "") {
+  clearInterval(bootProgressTimer);
   if (!bootBackendFinished) {
     try { await finishBootBackend(); }
     catch (error) {
