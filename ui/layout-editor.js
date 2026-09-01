@@ -68,10 +68,15 @@
     translate: source?.style.translate || "",
     scale: source?.style.scale || "",
   }]));
-  const parsePair = (value, fallback) => {
-    const numbers = String(value || "").match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
-    if (!numbers.length) return [...fallback];
-    return [numbers[0], numbers[1] ?? numbers[0]];
+  const parseNumbers = value => String(value || "").match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+  // CSS の既定に合わせる。`translate` は2値目を省くとY=0、`scale` は省くとXと同じ倍率になる。
+  const parseTranslate = value => {
+    const numbers = parseNumbers(value);
+    return numbers.length ? [numbers[0], numbers[1] ?? 0] : [0, 0];
+  };
+  const parseScale = value => {
+    const numbers = parseNumbers(value);
+    return numbers.length ? [numbers[0], numbers[1] ?? numbers[0]] : [1, 1];
   };
   const safeScale = scale => scale.map(value => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value) || 1)));
   const visibleCharacterRect = () => {
@@ -83,14 +88,16 @@
     }
     return sources.character?.getBoundingClientRect();
   };
+  const roundBack = (value, correction) =>
+    correction > 0 ? Math.ceil(value) : correction < 0 ? Math.floor(value) : Math.round(value);
   const constrainSource = source => {
     if (!source) return;
     const hasTranslate = Boolean(source.style.translate);
     const hasScale = Boolean(source.style.scale);
     // CSSだけで決まる既定配置は変更しない。利用者または保存値が変形した対象だけを守る。
     if (!hasTranslate && !hasScale) return;
-    let [x, y] = parsePair(source.style.translate, [0, 0]);
-    const scale = safeScale(parsePair(source.style.scale, [1, 1]));
+    let [x, y] = parseTranslate(source.style.translate);
+    const scale = safeScale(parseScale(source.style.scale));
     if (hasScale) source.style.scale = `${scale[0]} ${scale[1]}`;
     if (hasTranslate) source.style.translate = `${x}px ${y}px`;
     const rect = source === sources.character ? visibleCharacterRect() : source.getBoundingClientRect();
@@ -116,7 +123,9 @@
       if (rect.top > innerHeight - KEEP_VISIBLE) y -= rect.top - (innerHeight - KEEP_VISIBLE);
     }
     if (hasTranslate || x !== beforeX || y !== beforeY) {
-      source.style.translate = `${Math.round(x)}px ${Math.round(y)}px`;
+      // 補正した軸は端数を安全側（押し戻した向き）へ丸める。四捨五入だと最大0.5pxだけ
+      // 戻し足りず、残すはずの余白を割ったままになる。
+      source.style.translate = `${roundBack(x, x - beforeX)}px ${roundBack(y, y - beforeY)}px`;
     }
   };
   const applyState = state => {
@@ -195,12 +204,12 @@
     toolbar.hidden = true;
     moveable.target = null;
   };
-  const save = () => {
-    const layout = layoutId();
+  // 表示形式やキャラクターが切り替わった直後にも呼ばれるため、保存先は明示で受け取る
+  // （切替後の枠へ、切替前に編集した位置・倍率を書き込まないため）。
+  const save = (layout = layoutId(), id = characterId()) => {
     const state = snapshot();
     const { character: characterState, ...sharedState } = state;
     store[layout] = sharedState;
-    const id = characterId();
     if (id) {
       store.characters ||= {};
       store.characters[id] ||= {};
@@ -211,8 +220,8 @@
     undoStack = [];
     undoButton.disabled = true;
   };
-  const saveAndLeave = () => {
-    save();
+  const saveAndLeave = (layout, id) => {
+    save(layout, id);
     leave({ keepWorking: true });
   };
   const reset = () => {
@@ -238,8 +247,8 @@
     enter();
     selectTarget(selectedKey);
   });
-  closeButton.addEventListener("click", saveAndLeave);
-  saveButton.addEventListener("click", save);
+  closeButton.addEventListener("click", () => saveAndLeave());
+  saveButton.addEventListener("click", () => save());
   resetButton.addEventListener("click", reset);
   undoButton.addEventListener("click", () => {
     const state = undoStack.pop();
@@ -267,8 +276,12 @@
     Object.values(sources).forEach(constrainSource);
     requestAnimationFrame(() => moveable?.updateRect());
   });
+  // 監視コールバックは属性が変わった後に走るので、切替前の保存先を覚えておく。
+  let editingLayout = layoutId();
+  let editingCharacter = characterId();
   const layoutObserver = new MutationObserver(() => {
-    if (editing) saveAndLeave();
+    if (editing) saveAndLeave(editingLayout, editingCharacter);
+    editingLayout = layoutId();
     applySavedLayout();
   });
   layoutObserver.observe(app, { attributes: true, attributeFilter: ["data-layout"] });
@@ -287,12 +300,16 @@
     if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   };
   const characterObserver = new MutationObserver(() => {
-    // 切替途中の旧キャラ配置を新キャラへ保存しない。キャラ変更は編集を取り消して閉じる。
-    if (editing) leave();
+    // 切替途中の配置は切替前のキャラクターへ保存する（新しいキャラへ漏らさない）。
+    if (editing) saveAndLeave(editingLayout, editingCharacter);
+    editingCharacter = characterId();
     migrateLegacyCharacterState();
     applySavedLayout();
   });
-  characterObserver.observe(sources.character, { attributes: true, attributeFilter: ["data-character-id"] });
+  // キャラ要素が無い画面でも他の対象の編集は続けられるよう、監視だけを見送る。
+  if (sources.character) {
+    characterObserver.observe(sources.character, { attributes: true, attributeFilter: ["data-character-id"] });
+  }
   // Moveable は document へ独自のリスナを張るので、離脱時に明示的に解放する。
   window.addEventListener("pagehide", () => {
     layoutObserver.disconnect();

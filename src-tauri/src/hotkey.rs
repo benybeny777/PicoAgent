@@ -6,7 +6,7 @@
 
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 use crate::commands::AppState;
 
@@ -96,12 +96,19 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
             if combo.is_empty() || combo.eq_ignore_ascii_case(DISABLED) {
                 continue;
             }
-            match manager.on_shortcut(combo, move |app, _shortcut, event| {
-                // 押した瞬間だけ反応する（離したときにもイベントが来る）。
-                if event.state == ShortcutState::Pressed {
-                    run(app, action);
+            // 解除がOSへ反映される前に同じキーを張り直すと「already registered」で失敗する
+            // ことがある。明示解除を挟んで1度だけやり直し、単発の取りこぼしを
+            // 「設定したのに効かない」で終わらせない。
+            let registered = match manager.on_shortcut(combo, shortcut_handler(action)) {
+                Ok(()) => Ok(()),
+                Err(first) => {
+                    let _ = manager.unregister(combo);
+                    manager
+                        .on_shortcut(combo, shortcut_handler(action))
+                        .map_err(|retry| format!("{first}（解除して再試行しても失敗: {retry}）"))
                 }
-            }) {
+            };
+            match registered {
                 Ok(()) => {
                     if action == Action::Summon {
                         summon_ready = true;
@@ -151,6 +158,18 @@ pub fn release(app: &AppHandle) {
     }
     if let Ok(mut applied) = APPLIED_SETTINGS.lock() {
         *applied = None;
+    }
+}
+
+/// ホットキーの処理を作る（登録の再試行で同じ処理をもう一度渡すため関数にする）。
+fn shortcut_handler(
+    action: Action,
+) -> impl Fn(&AppHandle, &Shortcut, ShortcutEvent) + Send + Sync + 'static {
+    move |app, _shortcut, event| {
+        // 押した瞬間だけ反応する（離したときにもイベントが来る）。
+        if event.state == ShortcutState::Pressed {
+            run(app, action);
+        }
     }
 }
 

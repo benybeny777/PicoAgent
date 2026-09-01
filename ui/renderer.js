@@ -2503,7 +2503,6 @@ function renderQuickActions() {
 function renderReply(text) {
   // 直前のエラー表示を引き継がない（エラー分岐は描画後に reply-error を付け直す）。
   reply.classList.remove("reply-error", "reply-thinking");
-  reply.removeAttribute("aria-label");
   renderMarkdown(reply, text);
 }
 
@@ -2524,14 +2523,29 @@ function createTypingIndicator(label = "考え中") {
   return indicator;
 }
 function setThinkingUi(active, label = "考え中") {
+  // 進捗の文言は数秒おきに変わる。文言だけの更新で履歴全件をMarkdownから作り直さない。
+  const showing = active && historyThinking ? historyLog?.querySelector(".history-thinking") : null;
   historyThinking = active;
   historyThinkingText = String(label || "考え中").replace(/…+$/, "");
-  renderHistory();
+  if (showing) {
+    showing.querySelector(".typing-indicator")?.setAttribute("aria-label", historyThinkingText);
+    const labelNode = showing.querySelector(".typing-label");
+    if (labelNode) labelNode.textContent = historyThinkingText;
+  } else {
+    renderHistory();
+  }
   if (active && !layoutShowsHistory()) {
     reply.classList.remove("reply-error", "streaming");
     reply.classList.add("reply-thinking");
     reply.replaceChildren(createTypingIndicator(historyThinkingText));
   }
+}
+
+// 回答を描画しないまま終わる中断・停止でも、回答欄の3点表示を残さない。
+function clearThinkingReply() {
+  if (!reply.classList.contains("reply-thinking")) return;
+  reply.classList.remove("reply-thinking");
+  reply.replaceChildren();
 }
 
 function setAssistantReply(text, options = {}) {
@@ -2745,6 +2759,9 @@ function renderHistory() {
   // 履歴ログが見えていないときに毎メッセージ全件を Markdown 再構築するのは無駄なので
   // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
   if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) return;
+  // 「考え中」の文言更新でも作り直すため、読み返している最中に最下部へ引き戻さない。
+  // 既に最下部付近にいるときだけ追従する（新しい発言は今までどおり見える）。
+  const stickToBottom = historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
   historyLog.replaceChildren();
   if (!conversationHistory.length && !historyThinking) {
     historyLog.append(document.createElement("div"));
@@ -2800,16 +2817,20 @@ function renderHistory() {
   if (historyThinking && !query) {
     const row = document.createElement("div");
     row.className = "history-item assistant history-thinking";
+    // 名前行は他の発言と同じ `history-meta` に入れる（表示形式ごとの並び・余白を共有する）。
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
     const label = document.createElement("div");
     label.className = "history-role";
     label.textContent = characterManifest?.name || "むぎ";
+    meta.append(label);
     const body = document.createElement("div");
     body.className = "history-body";
     body.append(createTypingIndicator(historyThinkingText));
-    row.append(label, body);
+    row.append(meta, body);
     historyLog.append(row);
   }
-  historyLog.scrollTop = historyLog.scrollHeight;
+  if (stickToBottom) historyLog.scrollTop = historyLog.scrollHeight;
 }
 
 function scheduleAppQuit() {
@@ -4175,6 +4196,7 @@ composer.addEventListener("submit", async event => {
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";
       setThinkingUi(false);
+      clearThinkingReply();
       cancelStreamSpeech();
       status.textContent = "";
       return;
@@ -4240,6 +4262,7 @@ composer.addEventListener("submit", async event => {
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
     setThinkingUi(false);
+    clearThinkingReply();
     status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
     reply.classList.remove("streaming");
@@ -5253,8 +5276,10 @@ async function prepareSelectedVoiceModel() {
   let statusInfo;
   try { statusInfo = await window.picoagent.aivisStatus(); }
   catch (error) {
+    // 読み上げが有効かどうかを確認できない状態で「音声を準備できません」とは出さない
+    // （ミュート中の利用者へ無関係な失敗を見せない）。理由はログへ残す。
     logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error));
-    return false;
+    return null;
   }
   if (!statusInfo?.enabled) return null;
   setStatus("声を準備中…");
@@ -5469,7 +5494,7 @@ let startupLayout = null;
 let bootUiReleased = false;
 const bootProgressTimer = setInterval(() => {
   window.picoagent.bootProgress().catch(error => {
-    console.warn("起動進捗を通知できませんでした", error);
+    logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
   });
 }, 10000);
 let bootBackendFinished = false;
@@ -5507,7 +5532,7 @@ function scheduleBootBackendRetry() {
   }, bootBackendRetryDelayMs);
 }
 
-async function releaseBootUi(reason = "") {
+async function releaseBootUi() {
   clearInterval(bootProgressTimer);
   if (!bootBackendFinished) {
     try { await finishBootBackend(); }
@@ -5524,10 +5549,6 @@ async function releaseBootUi(reason = "") {
   petApp.classList.remove("is-booting");
   if (meshRigController) setAnimation(animationName, true);
   stopBootLogTicker();
-  if (reason) {
-    setStatus(reason);
-    status.classList.add("engine-error");
-  }
 }
 
 (async () => {
@@ -5578,7 +5599,8 @@ async function releaseBootUi(reason = "") {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
   // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
-  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンは待たない。
+  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンの準備は
+  // このあと起動画面のまま待つ（送信できない通常画面を先に見せない）。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus("選択中のキャラクターを読み込み中…");
   const requestedCharacterId = info.characterId || "mugi";
@@ -5604,6 +5626,7 @@ async function releaseBootUi(reason = "") {
   );
   let startupGreeting = "";
   let startupPreparedSpeech = null;
+  let startupVoiceError = "";
   try {
     const characterLoad = await characterLoadPromise;
     if (!characterLoad.ok) throw characterLoad.error;
@@ -5631,7 +5654,8 @@ async function releaseBootUi(reason = "") {
       const voiceReady = await prepareSelectedVoiceModel();
       if (voiceReady) startupPreparedSpeech = await prepareSpeech(startupGreeting);
       else if (voiceReady === false) {
-        setStatus("音声を準備できませんでした。設定の診断を確認してください");
+        startupVoiceError = "音声を準備できませんでした。設定の診断を確認してください";
+        setStatus(startupVoiceError);
         status.classList.add("engine-error");
       }
     }
@@ -5648,6 +5672,12 @@ async function releaseBootUi(reason = "") {
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); }
   catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
+  // ローカルAIが ready になると engine-error を落とすため、音声準備の失敗はここで出し直す。
+  // 配信形式はこの印が無いとステータス行ごと隠れ、失敗に気づけない。
+  if (startupVoiceError) {
+    setStatus(startupVoiceError);
+    status.classList.add("engine-error");
+  }
   quickActionItems = parseQuickActions(info.quickActions);
   renderQuickActions();
   napMinutes = Number(info.napMinutes) > 0 ? Number(info.napMinutes) : 0;
