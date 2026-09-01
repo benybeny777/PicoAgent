@@ -4,6 +4,7 @@
 // クリックで呼び出せない。キーボードから直接「呼び出して入力欄を開く」「隠す／戻す」
 // を行えるようにして、作業を中断せずに話しかけられるようにする。
 
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -16,6 +17,22 @@ pub const HIDE_DEFAULT: &str = "CommandOrControl+Alt+H";
 /// そのホットキーだけを無効にする指定値。空欄は他の設定欄と同じく「既定値を使う」意味に
 /// なるため（`config.get` が既定へフォールバックする）、無効化は明示の値で表す。
 pub const DISABLED: &str = "off";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RegistrationSettings {
+    enabled: bool,
+    summon: String,
+    hide: String,
+}
+
+static APPLIED_SETTINGS: Mutex<Option<RegistrationSettings>> = Mutex::new(None);
+
+fn needs_registration_refresh(
+    applied: Option<&RegistrationSettings>,
+    desired: &RegistrationSettings,
+) -> bool {
+    applied != Some(desired)
+}
 
 /// ホットキーで行う動作。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -32,14 +49,32 @@ enum Action {
 /// 出すことで、「設定したのに効かない」を黙って放置しない。
 pub fn apply(app: &AppHandle) -> Result<(), String> {
     // 設定値は先に取り出す（`State` の借用をホットキー登録の間まで持ち越さない）。
-    let (enabled, summon, hide) = {
+    let desired = {
         let state = app.state::<AppState>();
-        (
-            state.config.get_bool("PICOAGENT_HOTKEY_ENABLED", true),
-            state.config.get("PICOAGENT_HOTKEY_SUMMON", SUMMON_DEFAULT),
-            state.config.get("PICOAGENT_HOTKEY_HIDE", HIDE_DEFAULT),
-        )
+        RegistrationSettings {
+            enabled: state.config.get_bool("PICOAGENT_HOTKEY_ENABLED", true),
+            summon: state
+                .config
+                .get("PICOAGENT_HOTKEY_SUMMON", SUMMON_DEFAULT)
+                .trim()
+                .to_string(),
+            hide: state
+                .config
+                .get("PICOAGENT_HOTKEY_HIDE", HIDE_DEFAULT)
+                .trim()
+                .to_string(),
+        }
     };
+
+    // 設定画面はホットキー以外の保存でも apply を呼ぶ。同じキーを一度解除して直後に
+    // 張り直すと、Windows側の解除反映前に「HotKey already registered」になることがある。
+    // 実際の指定が変わらない限り、正常に保持中の登録を触らない。
+    let mut applied = APPLIED_SETTINGS
+        .lock()
+        .map_err(|_| "ホットキー登録状態のロックが壊れています".to_string())?;
+    if !needs_registration_refresh(applied.as_ref(), &desired) {
+        return Ok(());
+    }
 
     let manager = app.global_shortcut();
     // 前回の登録は毎回全部外してから張り直す（キーを変えたときに旧キーが残らない）。
@@ -50,9 +85,12 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
     let mut failures: Vec<String> = Vec::new();
     let mut summon_ready = false;
 
-    if enabled {
-        for (combo, action) in [(&summon, Action::Summon), (&hide, Action::ToggleHide)] {
-            let combo = combo.trim();
+    if desired.enabled {
+        for (combo, action) in [
+            (&desired.summon, Action::Summon),
+            (&desired.hide, Action::ToggleHide),
+        ] {
+            let combo = combo.as_str();
             // 空欄は他の設定欄と同じく「既定値を使う」意味（`config.get` が既定を返す）。
             // 片方だけ使いたいときのために、`off` を無効化の明示指定として受け付ける。
             if combo.is_empty() || combo.eq_ignore_ascii_case(DISABLED) {
@@ -92,8 +130,10 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
     }
 
     if failures.is_empty() {
+        *applied = Some(desired);
         Ok(())
     } else {
+        *applied = None;
         Err(format!(
             "ホットキーを登録できませんでした: {}",
             failures.join(" / ")
@@ -108,6 +148,9 @@ pub fn release(app: &AppHandle) {
             app,
             &format!("終了時のホットキー解除に失敗しました: {error}"),
         );
+    }
+    if let Ok(mut applied) = APPLIED_SETTINGS.lock() {
+        *applied = None;
     }
 }
 
@@ -139,7 +182,9 @@ fn run(app: &AppHandle, action: Action) {
 
 #[cfg(test)]
 mod tests {
-    use super::{DISABLED, HIDE_DEFAULT, SUMMON_DEFAULT};
+    use super::{
+        needs_registration_refresh, RegistrationSettings, DISABLED, HIDE_DEFAULT, SUMMON_DEFAULT,
+    };
     use tauri_plugin_global_shortcut::Shortcut;
 
     /// 既定のキー文字列が実際に解釈できること（打ち間違いのまま配布しない）。
@@ -164,5 +209,22 @@ mod tests {
     #[test]
     fn 無効化の指定値はキーとして解釈できない() {
         assert!(DISABLED.parse::<Shortcut>().is_err());
+    }
+
+    #[test]
+    fn 同じ設定の保存では登録をやり直さない() {
+        let settings = RegistrationSettings {
+            enabled: true,
+            summon: SUMMON_DEFAULT.to_string(),
+            hide: HIDE_DEFAULT.to_string(),
+        };
+        assert!(!needs_registration_refresh(Some(&settings), &settings));
+
+        let changed = RegistrationSettings {
+            hide: DISABLED.to_string(),
+            ..settings.clone()
+        };
+        assert!(needs_registration_refresh(Some(&settings), &changed));
+        assert!(needs_registration_refresh(None, &settings));
     }
 }
