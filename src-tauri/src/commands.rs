@@ -1501,6 +1501,26 @@ pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, St
     }))
 }
 
+/// 追加キャラクターの表示名だけを変更する。内部IDは維持する。
+#[tauri::command]
+pub fn settings_character_rename(
+    app: AppHandle,
+    id: String,
+    name: String,
+) -> Result<Value, String> {
+    let id = id.trim();
+    match crate::user_characters::rename(&app, id, &name) {
+        Ok(name) => {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("追加キャラクター {id} の表示名を {name} へ変更しました。"),
+            );
+            Ok(json!({ "ok": true, "id": id, "name": name }))
+        }
+        Err(error) => Err(format!("表示名を変更できませんでした: {error:#}")),
+    }
+}
+
 /// THA3制作ツールと学習済みモデルがGUI生成に使える状態か返す。
 #[tauri::command]
 pub fn settings_tha3_status(

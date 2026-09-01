@@ -127,6 +127,7 @@ pub fn run() {
             commands::settings_character_pick,
             commands::settings_character_install,
             commands::settings_character_install_live2d,
+            commands::settings_character_rename,
             commands::settings_character_remove,
             commands::settings_pick_stream_image,
             commands::settings_tha3_status,

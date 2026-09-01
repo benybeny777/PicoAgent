@@ -20,6 +20,7 @@ use crate::character_pack;
 /// zip の展開上限（ZIP 爆弾で保存領域を埋めないための安全弁）。
 const MAX_ENTRIES: usize = character_pack::MAX_FILES;
 const MAX_TOTAL_BYTES: u64 = character_pack::MAX_TOTAL_BYTES;
+const MAX_NAME_CHARS: usize = 80;
 
 #[derive(Serialize)]
 pub struct UserCharacter {
@@ -361,7 +362,10 @@ fn build_live2d_pack(extracted: &Path, pack: &Path, id: &str, name: &str) -> Res
         },
         "live2d": {
             "model": format!("live2d/{model_name}"),
-            "scale": 1.8
+            // モデル固有の顔・胸位置は model3.json から共通には判定できない。
+            // まず全身が枠へ収まる安全な倍率で導入し、利用者の配置調整で寄せる。
+            "scale": 1.0,
+            "offsetY": 0
         }
     });
     crate::store::write_json_atomic(&pack.join("character.json"), &manifest)?;
@@ -481,6 +485,59 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("ゴミ箱へ移動できません: {error}"))
 }
 
+fn rename_manifest(manifest: &mut Value, name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+        bail!("表示名は1〜{MAX_NAME_CHARS}文字にしてください");
+    }
+    let old_name = character_pack::required_text(manifest, "name")?.to_string();
+    let object = manifest
+        .as_object_mut()
+        .context("character.json の形式が不正です")?;
+    object.insert("name".to_string(), Value::String(name.to_string()));
+
+    // PicoAgentが自動生成した定型文だけは新しい名前へ追従させる。
+    // 利用者が書き換えた挨拶・人格は文字列が一致しないので上書きしない。
+    let old_greeting = format!("こんにちは、{old_name}です。よろしくね。");
+    if object.get("greeting").and_then(Value::as_str) == Some(old_greeting.as_str()) {
+        object.insert(
+            "greeting".to_string(),
+            Value::String(format!("こんにちは、{name}です。よろしくね。")),
+        );
+    }
+    if let Some(persona) = object.get_mut("persona").and_then(Value::as_object_mut) {
+        if persona.get("firstPerson").and_then(Value::as_str) == Some(old_name.as_str()) {
+            persona.insert("firstPerson".to_string(), Value::String(name.to_string()));
+        }
+        let old_prompt = format!("{old_name}として振る舞い、利用者の依頼を丁寧に手伝う。");
+        if persona.get("systemPrompt").and_then(Value::as_str) == Some(old_prompt.as_str()) {
+            persona.insert(
+                "systemPrompt".to_string(),
+                Value::String(format!(
+                    "{name}として振る舞い、利用者の依頼を丁寧に手伝う。"
+                )),
+            );
+        }
+    }
+    Ok(name.to_string())
+}
+
+/// 追加キャラクターの表示名を変更する。内部IDとフォルダ名は参照に使うため変更しない。
+pub fn rename(app: &AppHandle, id: &str, name: &str) -> Result<String> {
+    let _state_lock = crate::store::lock_state("user-characters");
+    if !character_pack::is_valid_id(id) {
+        bail!("不正なidです: {id}");
+    }
+    let target = root(app)?.join(id);
+    if !target.is_dir() {
+        bail!("追加キャラクターが見つかりません: {id}");
+    }
+    let mut manifest = character_pack::validate(&target)?;
+    let name = rename_manifest(&mut manifest, name)?;
+    crate::store::write_json_atomic(&target.join("character.json"), &manifest)?;
+    Ok(name)
+}
+
 /// 検証規則が CLI 側へ再実装されていないことを固定する設計ガード。
 ///
 /// 以前は `xtask/src/character_pack.rs` が同じ規則のコピーを持っていた。片方だけを直すと
@@ -585,7 +642,8 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_live2d_pack, extract_zip, find_live2d_model, pack_root};
+    use super::{build_live2d_pack, extract_zip, find_live2d_model, pack_root, rename_manifest};
+    use serde_json::json;
     use std::io::Write;
     use std::path::PathBuf;
 
@@ -716,7 +774,27 @@ mod tests {
         let manifest = crate::character_pack::validate(&pack).unwrap();
         assert_eq!(manifest["id"], "my-live2d");
         assert_eq!(manifest["live2d"]["model"], "live2d/Model.model3.json");
-        assert_eq!(manifest["live2d"]["scale"], 1.8);
+        assert_eq!(manifest["live2d"]["scale"], 1.0);
+        assert_eq!(manifest["live2d"]["offsetY"], 0);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 追加キャラの名前変更は定型人格だけ追従する() {
+        let mut manifest = json!({
+            "id": "my-live2d",
+            "name": "旧名",
+            "greeting": "こんにちは、旧名です。よろしくね。",
+            "persona": {
+                "firstPerson": "旧名",
+                "systemPrompt": "旧名として振る舞い、利用者の依頼を丁寧に手伝う。",
+                "speechStyle": "独自の口調"
+            }
+        });
+        assert_eq!(rename_manifest(&mut manifest, " 新名 ").unwrap(), "新名");
+        assert_eq!(manifest["name"], "新名");
+        assert_eq!(manifest["greeting"], "こんにちは、新名です。よろしくね。");
+        assert_eq!(manifest["persona"]["firstPerson"], "新名");
+        assert_eq!(manifest["persona"]["speechStyle"], "独自の口調");
     }
 }

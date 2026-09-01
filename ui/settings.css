@@ -714,6 +714,9 @@ body.searching .tab-panel {
   flex: 1;
   min-width: 0;
 }
+.character-rename-row { display:flex; gap:6px; margin-top:7px; }
+.character-rename-row input { min-width:0; height:30px; }
+.character-rename-row button { position:static; flex:0 0 auto; height:30px; padding:0 9px; }
 .character-browser-controls {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;
