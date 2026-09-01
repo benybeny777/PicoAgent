@@ -88,7 +88,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
+const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -114,6 +114,8 @@ window.__previewVoice = (() => {
 window.__listeners = {};
 window.__startDraggingCalls = 0;
 window.__bootReadyAt = Date.now() + ${JSON.stringify(bootHoldMs)};
+window.__engineReadyAt = Date.now() + ${JSON.stringify(engineReadyDelayMs)};
+window.__startupMarks = {};
 window.__TAURI__ = {
   core: { invoke: (name) => {
     if (name === "pet_init") return new Promise(resolve => setTimeout(() => resolve({
@@ -130,16 +132,28 @@ window.__TAURI__ = {
       gazeTrackingEnabled: ${JSON.stringify(gazeTrackingEnabled)},
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
     }), ${JSON.stringify(initDelayMs)}));
-    if (name === "engine_status") return Promise.resolve({ phase: "ready" });
+    if (name === "engine_status") {
+      const ready = Date.now() >= window.__engineReadyAt;
+      if (ready && !window.__startupMarks.engineReadyAt) window.__startupMarks.engineReadyAt = Date.now();
+      return Promise.resolve({ phase: ready ? "ready" : "starting" });
+    }
     if (name === "aivis_status") return Promise.resolve({ enabled: true, up: Date.now() >= window.__bootReadyAt });
+    if (name === "pet_prepare_voice_model") return new Promise(resolve => setTimeout(() => {
+      window.__startupMarks.voiceReadyAt = Date.now();
+      resolve({ enabled: true, ready: true });
+    }, ${JSON.stringify(voiceReadyDelayMs)}));
     // 起動画面の撮影は外部コンポーネント待ちに依存させない。画面起動が非ブロック化されても、
     // 完了通知だけを明示的に遅らせれば同じ起動中DOMを確実に検査できる。
-    if (name === "pet_finish_boot") return new Promise(resolve => setTimeout(() => resolve({}), ${JSON.stringify(bootHoldMs)}));
-    if (name === "pet_speak") return Promise.resolve(
-      ${JSON.stringify(Boolean(voice))} || ${JSON.stringify(characterId)} === "hiyori"
+    if (name === "pet_finish_boot") {
+      window.__startupMarks.finishBootCalledAt = Date.now();
+      return new Promise(resolve => setTimeout(() => resolve({}), ${JSON.stringify(bootHoldMs)}));
+    }
+    if (name === "pet_speak") return new Promise(resolve => setTimeout(() => {
+      window.__startupMarks.speechReadyAt = Date.now();
+      resolve(${JSON.stringify(Boolean(voice))} || ${JSON.stringify(characterId)} === "hiyori"
         ? { enabled: true, mime: "audio/wav", audio: window.__previewVoice }
-        : { enabled: false },
-    );
+        : { enabled: false });
+    }, ${JSON.stringify(speechDelayMs)}));
     if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), ${JSON.stringify(sendDelayMs)}));
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
@@ -308,7 +322,8 @@ async function openScene({
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   characterFraming = {},
   bootHoldMs = 0, sendDelayMs = 80, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
-  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
+  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "", bootRandomValue = null,
+  engineReadyDelayMs = 0, voiceReadyDelayMs = 0, speechDelayMs = 0,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -316,7 +331,20 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }));
+  if (Number.isFinite(bootRandomValue)) {
+    await page.route("**/renderer.js*", async route => {
+      const response = await route.fetch();
+      const source = await response.text();
+      const marker = "prepareBootCharacter(chooseStartupSleepingCharacter())";
+      if (!source.includes(marker)) throw new Error("起動寝姿のランダム選択箇所を差し替えられません");
+      await route.fulfill({
+        response,
+        contentType: "text/javascript",
+        body: source.replace(marker, `prepareBootCharacter(chooseStartupSleepingCharacter(${JSON.stringify(bootRandomValue)}))`),
+      });
+    });
+  }
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -2067,6 +2095,78 @@ if (process.env.SHOOT_THINKING_INDICATOR) {
   await browser.close();
   server.close();
   console.log(`考え中表示検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_BOOT_RANDOM) {
+  const output = join(ROOT, "temp", "boot-random-qa");
+  mkdirSync(output, { recursive: true });
+  const cases = [
+    { value: 0.05, expected: "mugi" },
+    { value: 0.45, expected: "rin" },
+    { value: 0.85, expected: "mai" },
+  ];
+  const results = [];
+  for (const item of cases) {
+    // 選択中キャラを寝姿3体以外にして、起動用の絵が選択キャラへ引きずられないことも確認する。
+    const page = await openScene({ characterId: "hiyori", layout: "pet", bootHoldMs: 4000, waitForReady: false, bootRandomValue: item.value });
+    await page.waitForFunction(expected => {
+      const app = document.getElementById("petApp");
+      const image = document.getElementById("bootPetImage");
+      return app?.classList.contains("is-booting") && app?.dataset.bootCharacterId === expected
+        && image?.complete && image.naturalWidth > 0 && image.src.includes(`/assets/characters/${expected}/boot/sleeping.png`);
+    }, item.expected, { timeout: 10000 });
+    const state = await page.evaluate(() => ({
+      selectedCharacterId: typeof characterManifest === "object" ? characterManifest?.id || "" : "",
+      bootCharacterId: document.getElementById("petApp")?.dataset.bootCharacterId || "",
+      bootImage: document.getElementById("bootPetImage")?.src || "",
+    }));
+    const file = join(output, `${item.expected}.png`);
+    await page.screenshot({ path: file, omitBackground: true });
+    results.push({ ...item, ...state, file });
+    await page.close();
+  }
+  await writeFile(join(output, "result.json"), `${JSON.stringify({ results }, null, 2)}\n`);
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`起動寝姿ランダム検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_STARTUP_READINESS) {
+  const page = await openScene({
+    characterId: "mugi",
+    layout: "pet",
+    voice: true,
+    waitForReady: false,
+    engineReadyDelayMs: 700,
+    voiceReadyDelayMs: 600,
+    speechDelayMs: 500,
+  });
+  await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("is-booting"));
+  await page.waitForTimeout(900);
+  const releasedTooEarly = await page.evaluate(() => !document.getElementById("petApp")?.classList.contains("is-booting"));
+  if (releasedTooEarly) throw new Error("AIまたは音声の準備中に起動画面を終了しました");
+  await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 10000 });
+  const result = await page.evaluate(() => ({
+    marks: window.__startupMarks,
+    booting: document.getElementById("petApp")?.classList.contains("is-booting"),
+    status: document.getElementById("status")?.textContent || "",
+  }));
+  const { engineReadyAt, voiceReadyAt, speechReadyAt, finishBootCalledAt } = result.marks;
+  if (!(engineReadyAt <= voiceReadyAt && voiceReadyAt <= speechReadyAt && speechReadyAt <= finishBootCalledAt)) {
+    throw new Error(`起動準備の順序が不正です: ${JSON.stringify(result)}`);
+  }
+  const output = join(ROOT, "temp", "startup-readiness-qa");
+  mkdirSync(output, { recursive: true });
+  await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
+  await page.screenshot({ path: join(output, "ready.png"), omitBackground: true });
+  await page.close();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`起動準備順序検査完了: ${output}`);
   process.exit(0);
 }
 

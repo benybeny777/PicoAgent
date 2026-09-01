@@ -10,21 +10,27 @@ const startupEnd = renderer.indexOf("\n})().catch(error => {", startupStart);
 assert.ok(startupStart >= 0 && startupEnd > startupStart, "起動シーケンスを抽出できません");
 const startup = renderer.slice(startupStart, startupEnd);
 
-test("local選択時もローカルAIの準備待ちで起動画面を塞がない", () => {
+test("local選択時はAIと音声の準備完了まで起動画面を維持する", () => {
   assert.match(startup, /localEngineRequired = \(info\.providerId \|\| "local"\) === "local"/);
-  assert.match(startup, /if \(localEngineRequired\) \{[\s\S]*?waitForEngineReady\(\)\.catch/);
-  assert.doesNotMatch(startup, /await waitForEngineReady\(\)/);
-  assert.doesNotMatch(startup, /await prepareSelectedVoiceModel\(/);
-  assert.match(startup, /startBackgroundStartupServices\(info, startupGreeting\)/);
-  assert.match(renderer, /const STARTUP_UI_DEADLINE_MS = 15000/);
+  assert.match(startup, /if \(localEngineRequired\) \{[\s\S]*?await waitForEngineReady\(\)/);
+  assert.match(renderer, /prepareSelectedVoiceModel\(\)[\s\S]*?setStatus\("声を準備中…"\)/);
+  assert.match(startup, /await prepareSelectedVoiceModel\(\)[\s\S]*?await prepareSpeech\(startupGreeting\)/);
+  assert.doesNotMatch(renderer, /STARTUP_UI_DEADLINE_MS/);
   assert.match(renderer, /!frontendInitialized \|\| \(localEngineRequired && !localEngineReady\)/);
 });
 
-test("15秒解除後に初期化が戻っても送信禁止と保存形式を正しく同期する", () => {
+test("準備完了後に保存形式へ戻し起動音声を再生する", () => {
   assert.match(renderer, /let frontendInitialized = false/);
   assert.match(renderer, /if \(!frontendInitialized\) \{[\s\S]*?完了すると送信できます/);
   assert.match(startup, /frontendInitialized = true;[\s\S]*?updateComposerState\(\)/);
   assert.match(startup, /if \(bootUiReleased\) applyLayout\(startupLayout\);[\s\S]*?else applyLayout\("stream"\)/);
+  const engine = startup.indexOf("await waitForEngineReady()");
+  const voice = startup.indexOf("await prepareSelectedVoiceModel()");
+  const speech = startup.indexOf("await prepareSpeech(startupGreeting)");
+  const finish = startup.indexOf("await releaseBootUi()");
+  const play = startup.indexOf("playPreparedSpeech(startupPreparedSpeech)");
+  assert.ok(engine >= 0 && voice > engine && speech > voice && finish > speech && play > finish,
+    "AI・音声準備・画面復帰・再生の順序が崩れています");
   assert.match(renderer, /let bootBackendFinished = false/);
   assert.match(renderer, /let bootBackendFinishPromise = null/);
   assert.match(renderer, /bootBackendFinishPromise = window\.picoagent\.finishBoot\(\)[\s\S]*?bootBackendFinished = true/);
@@ -34,6 +40,15 @@ test("15秒解除後に初期化が戻っても送信禁止と保存形式を正
   assert.match(renderer, /位置・寸法の復旧中/);
   assert.match(renderer, /catch \(error\) \{[\s\S]*?scheduleBootBackendRetry\(\)/);
   assert.doesNotMatch(renderer, /if \(bootUiReleased\) return/);
+});
+
+test("起動画面は初期3キャラの寝姿だけをランダム選択する", () => {
+  assert.match(renderer, /STARTUP_SLEEPING_CHARACTER_IDS = Object\.freeze\(\["mugi", "rin", "mai"\]\)/);
+  assert.match(renderer, /function chooseStartupSleepingCharacter\(randomValue = Math\.random\(\)\)/);
+  assert.match(startup, /await prepareBootCharacter\(chooseStartupSleepingCharacter\(\)\)/);
+  assert.ok(startup.indexOf("chooseStartupSleepingCharacter()") < startup.indexOf("loadStartupCharacter()"),
+    "寝姿を通常キャラクターより先に読み込んでいません");
+  assert.doesNotMatch(startup, /prepareBootCharacter\(info\.characterId/);
 });
 
 test("finishBoot失敗後も位置意図を保持して再試行できる", () => {
@@ -54,14 +69,6 @@ test("WebView再読込の起動リセットは完了処理と同じロック内�
   assert.ok(restart.indexOf("BOOT_TRANSITION") < restart.indexOf("BOOT_FINISHED.store(false"));
   assert.match(restart, /apply_boot_locked\(app\)/);
   assert.doesNotMatch(restart, /apply_boot\(app\)/);
-});
-
-test("ローカルAI監視開始後すぐ保存形式へ復帰し音声準備を始める", () => {
-  const engine = startup.indexOf("waitForEngineReady().catch");
-  const finish = startup.indexOf("await releaseBootUi()");
-  const background = startup.indexOf("startBackgroundStartupServices(info, startupGreeting)");
-  assert.ok(engine >= 0 && finish > engine, "ローカルAIの状態監視を始めずに起動画面を終了しています");
-  assert.ok(background > finish, "起動完了より先に音声モデルの準備を始めています");
 });
 
 test("任意キャラクターのI/O待ちはすべて有界化する", () => {
