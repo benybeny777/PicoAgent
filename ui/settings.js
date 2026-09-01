@@ -3033,7 +3033,7 @@ async function render() {
     });
   };
   characterSelect.addEventListener("change", refreshCharacterCards);
-  for (const character of characterCatalog.characters) {
+  const appendCharacterCard = (character) => {
     // 先頭1文字。`slice(0, 1)` は絵文字始まりの名前を半分で切って壊すため、
     // コードポイント単位で取る。
     const initial = Array.from(String(character.name || character.id || "?"))[0] || "?";
@@ -3052,9 +3052,10 @@ async function render() {
       characterSelect.dispatchEvent(new Event("change"));
       statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
     });
+    const nameText = el("span", { textContent: character.name });
     const texts = [
       el("div", { className: "card-name" }, [
-        document.createTextNode(character.name),
+        nameText,
         el("span", { className: "config-badge ok", textContent: character.renderType }),
       ]),
       el("div", { className: "card-desc character-id", textContent: `ID: ${character.id}` }),
@@ -3063,6 +3064,51 @@ async function render() {
     ];
     // 削除できるのは自分で追加したものだけ（同梱キャラは実行ファイル側にあるため消せない）。
     if (character.user) {
+      const renameInput = el("input", {
+        type: "text",
+        value: character.name,
+        maxLength: 80,
+        ariaLabel: `${character.name}の表示名`,
+      });
+      const renameButton = el("button", { className: "secondary", type: "button", textContent: "名前を変更" });
+      const renameStatus = el("div", { className: "card-desc" });
+      renameButton.addEventListener("click", async () => {
+        const nextName = renameInput.value.trim();
+        if (!nextName || nextName === character.name) {
+          renameStatus.textContent = nextName ? "表示名は変更されていません。" : "表示名を入力してください。";
+          return;
+        }
+        setSettingsMutationBusy(true);
+        renameButton.disabled = true;
+        try {
+          const result = await window.picoagent.settings.renameCharacter(character.id, nextName);
+          character.name = result.name;
+          renameInput.value = result.name;
+          nameText.textContent = result.name;
+          icon.alt = `${result.name}のアイコン`;
+          const option = [...characterSelect.options].find(item => item.value === character.id);
+          if (option) option.textContent = `${result.name} — ${character.renderType} [${character.id}]`;
+          card.dataset.search = searchText(character.id, result.name, character.description, character.renderType, "追加キャラ");
+          characterManifestCache.delete(character.id);
+          delete characterDefaultPersonas[character.id];
+          if (characterSelect.value === character.id) await queueCharacterSwitch(character.id);
+          renameStatus.textContent = `${result.name}へ変更しました。内部IDは ${character.id} のままです。`;
+          statusEl.textContent = renameStatus.textContent;
+          applyCharacterFilters();
+        } catch (error) {
+          renameStatus.textContent = `名前を変更できませんでした: ${error?.message || error}`;
+        } finally {
+          renameButton.disabled = false;
+          setSettingsMutationBusy(false);
+        }
+      });
+      renameInput.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          renameButton.click();
+        }
+      });
+      texts.push(el("div", { className: "character-rename-row" }, [renameInput, renameButton]), renameStatus);
       const removeStatus = el("div", { className: "card-desc" });
       const removeButton = el("button", { className: "secondary", type: "button", textContent: "削除" });
       const removeMessage = "OS のゴミ箱へ移動します。設定・会話履歴は削除しません。";
@@ -3117,11 +3163,37 @@ async function render() {
     card.dataset.characterRender = character.renderKind;
     card.dataset.characterOrigin = character.user ? "user" : "bundled";
     charList.append(card);
-  }
+  };
+  for (const character of characterCatalog.characters) appendCharacterCard(character);
   refreshCharacterCards();
   const empty = el("p", { className: "hint character-browser-empty", textContent: "条件に合うキャラクターが見つかりません。" });
   charSec.append(charList, empty);
   applyCharacterFilters();
+
+  // 追加コマンドが成功した時点でユーザー領域には検証済みパックが確定している。
+  // 設定ウィンドウは閉じても同じWebViewを再表示するため、「開き直す」だけでは一覧が
+  // 再構築されない。追加した1体をバックエンドの正本から読み直し、その場で一覧と選択欄へ足す。
+  async function registerInstalledCharacter(id) {
+    const added = (await loadUserCharacters(characterCatalog.characters))
+      .find(character => character.id === id);
+    if (!added) throw new Error(`追加したキャラクター ${id} を一覧から読み直せませんでした。`);
+    const manifest = await loadCharacterManifestForSettings(added);
+    added.renderType = characterRenderType(added, manifest);
+    added.renderKind = characterRenderKind(manifest);
+    characterCatalog.characters.push(added);
+    characterSelect.append(el("option", {
+      value: added.id,
+      textContent: `${added.name} — ${added.renderType} [${added.id}]`,
+    }));
+    appendCharacterCard(added);
+    characterTypeFilter = "user";
+    refreshFilterButtons();
+    applyCharacterFilters();
+    characterSelect.value = added.id;
+    await queueCharacterSwitch(added.id);
+    refreshCharacterCards();
+    return added;
+  }
 
   // --- 1枚絵からTHA3自作キャラクターを生成する ---
   // 生成物は一時パックとして検証してから app_data_dir/characters へ導入する。
@@ -3378,7 +3450,8 @@ async function render() {
       }
       addStatus.textContent = "Live2Dモデルを確認し、キャラクターパックを作成しています…";
       const result = await window.picoagent.settings.installLive2dCharacter(picked.path, id, name);
-      addStatus.textContent = `${result.name}（${result.id}）を追加しました。「設定」を開き直すと一覧に出ます。`;
+      const added = await registerInstalledCharacter(result.id);
+      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
     }
@@ -3403,7 +3476,8 @@ async function render() {
       }
       addStatus.textContent = "確認しています…";
       const result = await window.picoagent.settings.installCharacter(picked.path);
-      addStatus.textContent = `${result.name}（${result.id}）を追加しました。「設定」を開き直すと一覧に出ます。`;
+      const added = await registerInstalledCharacter(result.id);
+      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       // 検証で弾いた理由をそのまま見せる（何を直せばよいか分かるようにする）。
       addStatus.textContent = `追加できませんでした: ${error?.message || error}`;

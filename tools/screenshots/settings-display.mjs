@@ -111,6 +111,7 @@ window.__TAURI__ = {
       return { items: window.__memoryItems };
     }
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
+    if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
     if (name === "settings_components_status") return [
@@ -239,6 +240,21 @@ try {
   await verifyLongSkillLabels(600);
   await verifyLongSkillLabels(400);
   await page.setViewportSize({ width: 960, height: 760 });
+  await page.getByRole("tab", { name: "キャラ・音声", exact: true }).click();
+  const userCard = page.locator(".character-card").filter({ hasText: "ID: user-test" });
+  await userCard.waitFor();
+  const renameInput = userCard.getByRole("textbox", { name: "追加テストの表示名" });
+  await renameInput.fill("Nicole");
+  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
+    .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
+  if (!(await userCard.textContent())?.includes("Nicole")) throw new Error("追加キャラの表示名がカードへ反映されません");
+  const renamedOption = await page.locator('select option[value="user-test"]').textContent();
+  if (!renamedOption?.includes("Nicole") || !renamedOption.includes("user-test")) {
+    throw new Error(`追加キャラの表示名または内部IDが選択肢へ反映されません: ${renamedOption}`);
+  }
+  await userCard.screenshot({ path: join(OUT, "character-rename.png") });
+  await page.setViewportSize({ width: 960, height: 760 });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
   const localRecommendation = page.locator(".local-model-recommendation");
   if (await page.locator(".local-model-card").count() !== 5) throw new Error("日本語ローカルモデル候補が5件表示されていません");
@@ -324,7 +340,7 @@ try {
     const changed = await page.locator(".changed").evaluateAll(nodes => nodes.map(node => node.dataset.settingKey || `${node.className}:${node.textContent?.slice(0, 40)}`));
     throw new Error(`構図を初期値へ戻しても未保存状態が解消されません: ${framingResetDirty} / ${changed.join(",")}`);
   }
-  const addedCharacter = page.locator(".character-card").filter({ hasText: "追加テスト" });
+  const addedCharacter = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await addedCharacter.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "もう一度押して削除", exact: true }).click();

@@ -155,7 +155,7 @@ window.picoagent = {
   showOnboarding: () => call("pet_show_onboarding"),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
+    if (!["pet:model", "pet:reset", "pet:layout-reset", "pet:layout-edit", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     return managedListen(channel, callback).catch(error => {
       logBridgeError(`event ${channel} subscribe`, error);
@@ -196,6 +196,7 @@ window.picoagent = {
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
+    renameCharacter: (id, name) => call("settings_character_rename", { id, name }),
     componentStatus: () => call("settings_components_status"),
     installComponents: (ids, enableTts = false) => call("settings_components_install", { ids, enableTts }),
     removeComponent: (id) => call("settings_components_remove", { id }),

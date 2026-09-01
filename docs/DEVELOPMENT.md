@@ -170,7 +170,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 **Live2D ランタイムと利用者モデル**
 
 - `cargo xtask setup pixi` はPIXI 6.5.10をSHA-256照合して`ui/vendor/pixi/`へ取得します。`cargo xtask setup live2d`はこれを共有し、Cubism Coreとpixi-live2d-displayを`ui/vendor/live2d/`へ取得します。`dev` / `build` もサンプルモデルを自動取得しません
-- 利用者は設定画面の「キャラ・音声」→「キャラクターを追加・作成」で、配布元から自分で取得したzip／フォルダを選びます。`.model3.json` が1個なら、同じフォルダの組み込み用データだけを安全検査してユーザー領域へコピーし、PicoAgent用 `character.json` を自動作成します
+- 利用者は設定画面の「キャラ・音声」→「キャラクターを追加・作成」で、配布元から自分で取得したzip／フォルダを選びます。`.model3.json` が1個なら、同じフォルダの組み込み用データだけを安全検査してユーザー領域へコピーし、PicoAgent用 `character.json` を自動作成します。モデル固有の顔位置を推測して切り取らず、初期倍率は全身が欠けない1倍にして、追加直後の一覧選択と配置編集へつなぎます
 - 開発者が既存サンプルの描画回帰を行う場合だけ `cargo xtask setup live2d-samples` を明示実行します。通常の`build`と販売版は、手元に取得済みでも配布許可リスト外のサンプルを同期しません
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)に従います。利用者モデルは配布元ごとに条件が違い、公式サンプルにも[個別の利用条件](https://www.live2d.com/learn/sample/model-terms/)があるため、取得・追加前に利用者自身が確認します
 

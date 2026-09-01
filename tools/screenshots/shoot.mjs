@@ -88,7 +88,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
+const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -140,7 +140,7 @@ window.__TAURI__ = {
         ? { enabled: true, mime: "audio/wav", audio: window.__previewVoice }
         : { enabled: false },
     );
-    if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), 80));
+    if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), ${JSON.stringify(sendDelayMs)}));
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
     if (name === "settings_components_status") return Promise.resolve([
@@ -307,7 +307,7 @@ async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   characterFraming = {},
-  bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
+  bootHoldMs = 0, sendDelayMs = 80, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
   gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
@@ -316,7 +316,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -678,6 +678,10 @@ async function validateLayoutEditor() {
   mkdirSync(output, { recursive: true });
   const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true });
   try {
+    // 前回の失敗で検査用ブラウザに残った極端な配置を次回へ持ち越さない。
+    await page.evaluate(() => localStorage.removeItem("picoagent.layoutEditor.v1"));
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
   // 上端へカーソルを置いた時だけ現れる実UIを通す。直接clickすると、収納中の5px部分を
   // ウィンドウリサイズ領域が覆う退行を見逃すため、hover → 展開確認 → click の順にする。
   await page.mouse.move(220, 7);
@@ -703,23 +707,84 @@ async function validateLayoutEditor() {
     }
     if (state.framingTransform === "none") throw new Error("Moveableのドラッグで既定のキャラ構図が失われました");
     if (state.dragCalls !== 0) throw new Error("編集モード中にウィンドウドラッグが開始されました");
-    const scaleHandle = page.locator(".moveable-control.moveable-ne");
+    // キャラの見える中心を守る補正後も画面内へ残る右下ハンドルを使う。
+    const scaleHandle = page.locator(".moveable-control.moveable-se");
     const scaleBox = await scaleHandle.boundingBox();
     if (!scaleBox) throw new Error("Moveableの拡大縮小ハンドルが見つかりません");
     await page.mouse.move(scaleBox.x + scaleBox.width / 2, scaleBox.y + scaleBox.height / 2);
     await page.mouse.down();
-    await page.mouse.move(scaleBox.x + scaleBox.width / 2 - 60, scaleBox.y + scaleBox.height / 2 + 60, { steps: 8 });
+    await page.mouse.move(scaleBox.x + scaleBox.width / 2 - 60, scaleBox.y + scaleBox.height / 2 - 60, { steps: 8 });
     await page.mouse.up();
     const scaled = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
     if (!scaled.scale) throw new Error(`Moveableの拡大縮小が反映されませんでした: ${JSON.stringify(scaled)}`);
     await page.locator("#layoutEditorSave").click();
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"));
-    if (!saved.stream?.character?.translate || !saved.stream?.character?.scale) throw new Error("表示形式ごとの編集値が保存されませんでした");
+    if (!saved.characters?.mugi?.stream?.translate || !saved.characters?.mugi?.stream?.scale) {
+      throw new Error("キャラごと・表示形式ごとの編集値が保存されませんでした");
+    }
     await page.reload();
     await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
     const restored = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
-    if (restored.translate !== saved.stream.character.translate || restored.scale !== saved.stream.character.scale) {
+    if (restored.translate !== saved.characters.mugi.stream.translate || restored.scale !== saved.characters.mugi.stream.scale) {
       throw new Error("保存した配置が再読み込み後に復元されませんでした");
+    }
+    // 「閉じる」は編集を取り消す操作ではない。保存ボタンを押さなくても変更を記憶する。
+    await page.mouse.move(220, 7);
+    await page.waitForFunction(() => document.getElementById("topWindowMenu").getBoundingClientRect().top > -1);
+    await page.locator("#layoutEditToggle").click();
+    await page.waitForSelector("#layoutEditorToolbar:not([hidden])");
+    const closedEdited = await page.locator("#character").evaluate(node => {
+      node.style.translate = "32px 24px";
+      window.dispatchEvent(new Event("resize"));
+      return node.style.translate;
+    });
+    await page.locator("#layoutEditorClose").click();
+    const closedSaved = await page.evaluate(() => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"));
+    if (closedSaved.characters?.mugi?.stream?.translate !== closedEdited) {
+      throw new Error("配置編集を閉じたときにキャラ位置を記憶できませんでした");
+    }
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+    const closedRestored = await page.locator("#character").evaluate(node => node.style.translate);
+    if (closedRestored !== closedSaved.characters.mugi.stream.translate) {
+      throw new Error(`閉じる時に記憶したキャラ位置を再起動相当で復元できませんでした: ${JSON.stringify({ closedRestored, closedSaved })}`);
+    }
+    // 同じ表示形式でも別キャラへ位置・倍率を漏らさず、戻したキャラでは元の値を復元する。
+    await page.evaluate(() => { document.getElementById("character").dataset.characterId = "rin"; });
+    await page.waitForTimeout(50);
+    const rinInitial = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+    if (rinInitial.translate || rinInitial.scale) throw new Error(`別キャラへ配置が漏れました: ${JSON.stringify(rinInitial)}`);
+    await page.evaluate(() => { document.getElementById("character").dataset.characterId = "mugi"; });
+    await page.waitForTimeout(50);
+    const mugiRestored = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+    if (mugiRestored.translate !== closedSaved.characters.mugi.stream.translate
+        || mugiRestored.scale !== closedSaved.characters.mugi.stream.scale) {
+      throw new Error(`キャラを戻したときに固有配置を復元できませんでした: ${JSON.stringify(mugiRestored)}`);
+    }
+    // 旧版や極端なドラッグで壊れた値が残っても、縮小しすぎず掴み直せる範囲へ戻す。
+    const constrained = await page.locator("#character").evaluate(node => {
+      node.style.translate = "-9999px -9999px";
+      node.style.scale = "0.01 0.01";
+      window.dispatchEvent(new Event("resize"));
+      const visible = [...node.querySelectorAll(".character-view > canvas, .character-view > img")]
+        .find(candidate => getComputedStyle(candidate).display !== "none" && candidate.getBoundingClientRect().width > 1);
+      const rect = (visible || node).getBoundingClientRect();
+      const history = document.getElementById("historyLog")?.getBoundingClientRect();
+      return {
+        translate: node.style.translate,
+        scale: node.style.scale,
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+        historyLeft: history?.left,
+        viewport: { width: innerWidth, height: innerHeight },
+      };
+    });
+    const minScale = Math.min(...constrained.scale.split(/\s+/).map(Number));
+    const centerX = (constrained.rect.left + constrained.rect.right) / 2;
+    const centerY = (constrained.rect.top + constrained.rect.bottom) / 2;
+    const visible = centerX >= 48 && centerX <= constrained.historyLeft - 48
+      && centerY >= 48 && centerY <= constrained.viewport.height - 48;
+    if (minScale < 0.25 || !visible) {
+      throw new Error(`キャラが縮小または移動で画面外へ消えました: ${JSON.stringify(constrained)}`);
     }
     await page.mouse.move(220, 7);
     await page.waitForFunction(() => document.getElementById("topWindowMenu").getBoundingClientRect().top > -1);
@@ -732,6 +797,39 @@ async function validateLayoutEditor() {
     }));
     if (reset.translate || reset.scale || reset.saved.stream) throw new Error("既定配置へ戻せませんでした");
     await page.screenshot({ path: join(output, "stream-editor.png"), omitBackground: true });
+    const restoredLayouts = [];
+    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      const layoutPage = await openScene({ characterId: "mugi", layout, width, height, forcePng: true });
+      try {
+        await layoutPage.evaluate(() => localStorage.removeItem("picoagent.layoutEditor.v1"));
+        await layoutPage.reload();
+        await layoutPage.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+        const edited = await layoutPage.evaluate(() => {
+          document.getElementById("layoutEditToggle")?.click();
+          const node = document.getElementById("character");
+          node.style.translate = "18px 12px";
+          node.style.scale = "0.9 0.9";
+          window.dispatchEvent(new Event("resize"));
+          const value = { translate: node.style.translate, scale: node.style.scale };
+          document.getElementById("layoutEditorClose")?.click();
+          return value;
+        });
+        const savedLayout = await layoutPage.evaluate(id => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}").characters?.mugi?.[id], layout);
+        if (savedLayout?.translate !== edited.translate || savedLayout?.scale !== edited.scale) {
+          throw new Error(`${layout}: 閉じる時にキャラ位置・倍率を記憶できませんでした`);
+        }
+        await layoutPage.reload();
+        await layoutPage.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+        const restoredLayout = await layoutPage.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+        if (restoredLayout.translate !== savedLayout.translate || restoredLayout.scale !== savedLayout.scale) {
+          throw new Error(`${layout}: 再読み込み後にキャラ位置・倍率を復元できませんでした`);
+        }
+        restoredLayouts.push(layout);
+      } finally {
+        await layoutPage.close();
+      }
+    }
+    await writeFile(join(output, "persistence.json"), `${JSON.stringify({ restoredLayouts }, null, 2)}\n`);
     return output;
   } finally {
     await page.close();
@@ -1320,6 +1418,39 @@ const clearStatus = (page) => page.evaluate(() => {
   const status = document.getElementById("status");
   if (status) status.textContent = "";
 });
+
+async function validateThinkingIndicator() {
+  const output = join(ROOT, "temp", "thinking-indicator-qa");
+  mkdirSync(output, { recursive: true });
+  const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true, sendDelayMs: 1200 });
+  try {
+    await submit(page, "考え中表示の確認");
+    await page.waitForSelector(".history-thinking .typing-indicator");
+    const pending = await page.evaluate(() => ({
+      dots: document.querySelectorAll(".history-thinking .typing-dots i").length,
+      label: document.querySelector(".history-thinking .typing-indicator")?.getAttribute("aria-label") || "",
+      statusSpinner: getComputedStyle(document.getElementById("status"), "::before").content,
+      captionLabel: getComputedStyle(document.getElementById("reply"), "::before").content,
+    }));
+    if (pending.dots !== 3 || !pending.label || (pending.statusSpinner && pending.statusSpinner !== "none")
+        || (pending.captionLabel && pending.captionLabel !== "none")) {
+      throw new Error(`考え中の3点表示が不正です: ${JSON.stringify(pending)}`);
+    }
+    await page.screenshot({ path: join(output, "stream-thinking.png"), omitBackground: true });
+    await page.waitForFunction(() => !document.querySelector(".history-thinking"), null, { timeout: 20000 });
+    const finished = await page.evaluate(() => ({
+      thinkingRows: document.querySelectorAll(".history-thinking").length,
+      typingDots: document.querySelectorAll(".typing-dots i").length,
+    }));
+    if (finished.thinkingRows || finished.typingDots) {
+      throw new Error(`回答後に考え中表示が残りました: ${JSON.stringify(finished)}`);
+    }
+    await writeFile(join(output, "result.json"), `${JSON.stringify({ pending, finished }, null, 2)}\n`);
+    return output;
+  } finally {
+    await page.close();
+  }
+}
 
 // ---------------------------------------------------------------- 録画と書き出し
 
@@ -1927,6 +2058,15 @@ if (process.env.SHOOT_STARTUP_FAILURES) {
   await browser.close();
   server.close();
   console.log(`起動フォールバック検査完了: ${output} / ${JSON.stringify(state)}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_THINKING_INDICATOR) {
+  const output = await validateThinkingIndicator();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`考え中表示検査完了: ${output}`);
   process.exit(0);
 }
 

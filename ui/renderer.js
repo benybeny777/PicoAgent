@@ -1134,6 +1134,8 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterRoot = root;
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
+  // 配置編集のキャラ位置・倍率は、表示形式だけでなくキャラクターごとに分離する。
+  character.dataset.characterId = manifest.id;
   characterAssetVersion = assetVersion;
   character.dataset.bodyProportion = manifest.bodyProportion === "compact" ? "compact" : "standard";
   character.dataset.sourceFraming = manifest.sourceFraming === "native-bust" ? "native-bust" : "default";
@@ -2488,8 +2490,36 @@ function renderQuickActions() {
 
 function renderReply(text) {
   // 直前のエラー表示を引き継がない（エラー分岐は描画後に reply-error を付け直す）。
-  reply.classList.remove("reply-error");
+  reply.classList.remove("reply-error", "reply-thinking");
+  reply.removeAttribute("aria-label");
   renderMarkdown(reply, text);
+}
+
+let historyThinking = false;
+let historyThinkingText = "考え中";
+function createTypingIndicator(label = "考え中") {
+  const indicator = document.createElement("div");
+  indicator.className = "typing-indicator";
+  indicator.setAttribute("aria-label", label);
+  const text = document.createElement("span");
+  text.className = "typing-label";
+  text.textContent = label;
+  const dots = document.createElement("span");
+  dots.className = "typing-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) dots.append(document.createElement("i"));
+  indicator.append(text, dots);
+  return indicator;
+}
+function setThinkingUi(active, label = "考え中") {
+  historyThinking = active;
+  historyThinkingText = String(label || "考え中").replace(/…+$/, "");
+  renderHistory();
+  if (active && !layoutShowsHistory()) {
+    reply.classList.remove("reply-error", "streaming");
+    reply.classList.add("reply-thinking");
+    reply.replaceChildren(createTypingIndicator(historyThinkingText));
+  }
 }
 
 function setAssistantReply(text, options = {}) {
@@ -2704,7 +2734,7 @@ function renderHistory() {
   // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
   if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) return;
   historyLog.replaceChildren();
-  if (!conversationHistory.length) {
+  if (!conversationHistory.length && !historyThinking) {
     historyLog.append(document.createElement("div"));
     return;
   }
@@ -2753,6 +2783,18 @@ function renderHistory() {
     body.className = "history-body";
     renderMarkdown(body, item.content);
     row.append(meta, body);
+    historyLog.append(row);
+  }
+  if (historyThinking && !query) {
+    const row = document.createElement("div");
+    row.className = "history-item assistant history-thinking";
+    const label = document.createElement("div");
+    label.className = "history-role";
+    label.textContent = characterManifest?.name || "むぎ";
+    const body = document.createElement("div");
+    body.className = "history-body";
+    body.append(createTypingIndicator(historyThinkingText));
+    row.append(label, body);
     historyLog.append(row);
   }
   historyLog.scrollTop = historyLog.scrollHeight;
@@ -3993,14 +4035,14 @@ composer.addEventListener("submit", async event => {
   renderAttachmentPreview();
   setInputValue("");
   resetPromptHistoryNavigation();
-  status.textContent = "考え中…";
+  status.textContent = "";
   reply.classList.remove("reply-error"); // 前回のエラー表示をリセット
-  status.classList.add("busy"); // 処理中スピナーを表示する
+  status.classList.add("busy"); // 送信中状態。会話の待機表示はチャット欄の3点UIへ出す。
   setAnimation("thinking");
   // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
   if (cancelSendButton) { cancelSendButton.hidden = false; cancelSendButton.disabled = false; }
-  reply.textContent = text;
   addHistory("user", text);
+  setThinkingUi(true);
   upsertJob(jobId, { title: text || "添付ファイルの処理", body: "考え中…", status: "running", prompt: text, at: new Date().toISOString() });
 
   // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
@@ -4011,6 +4053,7 @@ composer.addEventListener("submit", async event => {
         if (busy && typeof progress === "string" && progress) {
           // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
+          setThinkingUi(true, status.textContent);
           upsertJob(jobId, { body: status.textContent, status: "running" });
           if (/検索|search|web|ブラウザ/i.test(progress)) setAnimation("searching", true);
           else if (/ツールを実行中|ステップ/.test(progress)) setAnimation("working", true);
@@ -4054,11 +4097,13 @@ composer.addEventListener("submit", async event => {
         // 表示にも残さない（最終回答に含まれない途中テキストを見せ続けない）。
         if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
         renderMarkdown(reply, "");
+        setThinkingUi(true, status.textContent || "考え中");
         resetStreamSpeech();
       });
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         if (!busy || requestRevision !== conversationRevision) return;
         streamBuffer += chunk;
+        if (historyThinking) setThinkingUi(false);
         if (currentLayout !== "stream") feedStreamSpeech(streamBuffer); // 配信字幕は検査済み全文をページ表示する
         reply.classList.add("streaming"); // 文末の点滅カーソル表示
         if (currentLayout === "stream") return;
@@ -4117,11 +4162,13 @@ composer.addEventListener("submit", async event => {
     if (!result) result = await window.picoagent.send(fullText);
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";
+      setThinkingUi(false);
       cancelStreamSpeech();
       status.textContent = "";
       return;
     }
     if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
+    setThinkingUi(false);
     status.textContent = result.error ? "接続を確認してね" : "";
     // 質問カードの選択肢を反映する（choices が無い応答で通常のクイック操作へ戻る）。
     setPendingChoices(result.error ? null : result.choices);
@@ -4166,6 +4213,7 @@ composer.addEventListener("submit", async event => {
     }
   } catch (error) {
     jobState = "failed";
+    setThinkingUi(false);
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
     ++speakingToken;
     cancelStreamSpeech();
@@ -4179,6 +4227,7 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    setThinkingUi(false);
     status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
     reply.classList.remove("streaming");
