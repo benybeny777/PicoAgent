@@ -27,6 +27,12 @@ playwright はグローバル導入したものを環境変数で指すだけに
 ```bash
 npm i -g playwright && npx playwright install chromium
 
+# 配信物（ui-dist/）を作ってから撮る。新しいワークツリーやclone直後は
+# キャラクター資材が ui/assets/characters/ に無く、設定画面の一覧描画が途中で
+# 失敗する（「スキル」タブのカードが見つからない等、原因の分かりにくい失敗になる）。
+cargo xtask sync-characters
+cargo xtask build-ui
+
 PLAYWRIGHT_MODULE=$(npm root -g)/playwright/index.mjs \
   node tools/screenshots/shoot.mjs
 ```

@@ -26,10 +26,9 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     let edit_layout = MenuItemBuilder::with_id("edit_layout", "配置を直接調整")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let character_settings =
-        MenuItemBuilder::with_id("character_settings", "キャラクター・音声の設定…")
-            .build(&app)
-            .map_err(|e| e.to_string())?;
+    let character_settings = MenuItemBuilder::with_id("character_settings", "キャラクターの設定…")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
     let is_always_on_top = window.is_always_on_top().map_err(|e| e.to_string())?;
     let ontop = CheckMenuItemBuilder::with_id("ontop", "常に手前に表示")
         .checked(is_always_on_top)

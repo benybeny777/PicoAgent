@@ -19,9 +19,14 @@ pub const SCHEME: &str = "picoboot";
 /// フロントの開始通知、または開始後の進捗通知が途絶えてから失敗とする時間（ミリ秒）。
 /// 初回はモデルや音声の取得とウイルス検査で長くなるため、2分の無通信だけを停止扱いにする。
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+/// 読込開始通知（`pet_frontend_ready`）だけを待つ時間（ミリ秒）。
+/// webview がページを出せない障害は起動準備の長さと無関係なので、進捗監視と同じだけ待たせない。
+const START_TIMEOUT_MS: u64 = 12_000;
 /// 待ち時間の下限・上限（設定値が極端でも実用範囲へ収める）。
 const MIN_TIMEOUT_MS: u64 = 3_000;
 const MAX_TIMEOUT_MS: u64 = 120_000;
+// 画面を出せない障害の案内を、長い準備の監視と同じだけ待たせない（実用範囲にも収める）。
+const _: () = assert!(START_TIMEOUT_MS < DEFAULT_TIMEOUT_MS && START_TIMEOUT_MS >= MIN_TIMEOUT_MS);
 
 const PAGE_HTML: &str = include_str!("../assets/boot_screen/page.html");
 const CHARACTER_PNG: &[u8] = include_bytes!("../assets/boot_screen/character.png");
@@ -154,8 +159,10 @@ fn escape(raw: &str) -> String {
     out
 }
 
-fn progress_stalled(last_progress: Option<Instant>, timeout: Duration) -> bool {
-    last_progress.is_none_or(|last| last.elapsed() >= timeout)
+/// 進捗通知が途絶えたと判定するまでの残り時間。`None` は停止扱い。
+fn progress_remaining(last_progress: Option<Instant>, timeout: Duration) -> Option<Duration> {
+    let elapsed = last_progress?.elapsed();
+    timeout.checked_sub(elapsed).filter(|rest| !rest.is_zero())
 }
 
 /// フロントの読込開始を待ち、開始後は進捗通知が途絶えた場合だけ案内ページへ切り替える。
@@ -169,8 +176,12 @@ pub fn watch(app: AppHandle) {
             .clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
     };
 
+    // 読込開始が来ない障害（配信元の停止・スクリプトの構文エラー）は準備の長さと無関係なので、
+    // 案内ページまで2分待たせない。設定で待ち時間を短くした場合はそちらへ合わせる。
+    let start_timeout_ms = timeout_ms.min(START_TIMEOUT_MS);
+
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+        tokio::time::sleep(Duration::from_millis(start_timeout_ms)).await;
         let started = app
             .state::<BootScreenState>()
             .started
@@ -178,8 +189,10 @@ pub fn watch(app: AppHandle) {
         if !started {
             show_failure(
                 &app,
-                timeout_ms,
-                format!("{timeout_ms} ミリ秒以内にフロントエンドの読込開始通知が届きませんでした"),
+                start_timeout_ms,
+                format!(
+                    "{start_timeout_ms} ミリ秒以内にフロントエンドの読込開始通知が届きませんでした"
+                ),
             );
             return;
         }
@@ -187,15 +200,17 @@ pub fn watch(app: AppHandle) {
         // JavaScriptからの生存通知が1区間途絶えた場合だけ停止と判定する。
         let timeout = Duration::from_millis(timeout_ms);
         loop {
-            tokio::time::sleep(timeout).await;
-            let state = app.state::<BootScreenState>();
-            if state.finished.load(Ordering::SeqCst) {
-                return;
-            }
-            if !progress_stalled(*state.last_progress.lock().unwrap(), timeout) {
-                continue;
-            }
-            break;
+            let remaining = {
+                let state = app.state::<BootScreenState>();
+                if state.finished.load(Ordering::SeqCst) {
+                    return;
+                }
+                // 最後の通知からの経過分を差し引き、停止の検出を1区間ぶん遅らせない。
+                let last_progress = *state.last_progress.lock().unwrap();
+                progress_remaining(last_progress, timeout)
+            };
+            let Some(rest) = remaining else { break };
+            tokio::time::sleep(rest).await;
         }
         show_failure(
             &app,
@@ -302,11 +317,11 @@ mod tests {
     fn 進捗が続く間は長い起動準備を失敗にしない() {
         let now = Instant::now();
         let timeout = Duration::from_secs(120);
-        assert!(!progress_stalled(Some(now), timeout));
-        assert!(progress_stalled(None, timeout));
-        assert!(progress_stalled(
-            Some(now - Duration::from_secs(121)),
-            timeout
-        ));
+        assert!(progress_remaining(Some(now), timeout).is_some());
+        assert!(progress_remaining(None, timeout).is_none());
+        assert!(progress_remaining(Some(now - Duration::from_secs(121)), timeout).is_none());
+        // 最後の通知からの経過分だけを待ち直す（1区間ぶん余計に待たない）。
+        let rest = progress_remaining(Some(now - Duration::from_secs(100)), timeout).unwrap();
+        assert!(rest <= Duration::from_secs(20));
     }
 }

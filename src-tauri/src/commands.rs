@@ -4555,7 +4555,7 @@ pub fn open_display_settings(app: &tauri::AppHandle) {
     open_settings_tab(app, Some("display"));
 }
 
-/// キャラクターと音声をまとめたタブを直接開く。
+/// キャラクターの選択・人格・構図タブを直接開く（音声は「キャラの音声」タブ）。
 pub fn open_character_settings(app: &tauri::AppHandle) {
     open_settings_tab(app, Some("character"));
 }

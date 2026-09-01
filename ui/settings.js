@@ -3105,8 +3105,10 @@ async function render() {
           const option = [...characterSelect.options].find(item => item.value === character.id);
           if (option) option.textContent = `${result.name} — ${character.renderType} [${character.id}]`;
           card.dataset.search = searchText(character.id, result.name, character.description, character.renderType, "追加キャラ");
+          // 既定人格の照合値は捨てない。先に消すと切替時の保存で「旧名の既定文」が
+          // ユーザー上書きとして固定され、名前変更に追従しないまま未保存扱いになる。
+          // マニフェストのキャッシュだけ捨て、`loadCharacterPersona` が新しい既定値を入れ直す。
           characterManifestCache.delete(character.id);
-          delete characterDefaultPersonas[character.id];
           if (characterSelect.value === character.id) await queueCharacterSwitch(character.id);
           renameStatus.textContent = `${result.name}へ変更しました。内部IDは ${character.id} のままです。`;
           statusEl.textContent = renameStatus.textContent;
@@ -3192,7 +3194,14 @@ async function render() {
   async function registerInstalledCharacter(id) {
     const added = (await loadUserCharacters(characterCatalog.characters))
       .find(character => character.id === id);
-    if (!added) throw new Error(`追加したキャラクター ${id} を一覧から読み直せませんでした。`);
+    if (!added) {
+      // 同梱キャラと同じidのパックは一覧で同梱側だけが残るため、追加しても選べない。
+      // 「追加できたのに出てこない」で終わらせず、直しかたまで伝える。
+      const conflict = characterCatalog.characters.some(character => character.id === id && !character.user);
+      throw new Error(conflict
+        ? `同梱キャラクターと同じID（${id}）のため一覧へ出せません。パックの id を変えて追加し直してください。`
+        : `追加したキャラクター ${id} を一覧から読み直せませんでした。`);
+    }
     const manifest = await loadCharacterManifestForSettings(added);
     added.renderType = characterRenderType(added, manifest);
     added.renderKind = characterRenderKind(manifest);
@@ -3459,6 +3468,10 @@ async function render() {
       const id = live2dIdInput.value.trim();
       const name = live2dNameInput.value.trim();
       if (!id || !name) throw new Error("キャラクターIDと表示名を入力してください。");
+      // 同梱・追加済みと同じidは一覧で衝突する。ファイルを書く前に断る。
+      if (characterCatalog.characters.some(character => character.id === id)) {
+        throw new Error(`キャラクターID ${id} は既に使われています。別のIDにしてください。`);
+      }
       const picked = await window.picoagent.settings.pickCharacterPack(folder);
       if (!picked?.path) {
         addStatus.textContent = "選択をキャンセルしました。";

@@ -256,6 +256,46 @@ try {
   if (!renamedOption?.includes("Nicole") || !renamedOption.includes("user-test")) {
     throw new Error(`追加キャラの表示名または内部IDが選択肢へ反映されません: ${renamedOption}`);
   }
+  // 選択中キャラの名前を変えても、旧・既定人格が「利用者の上書き」として固定されないこと。
+  // 固定されると名前変更に人格が追従せず、旧名の文が未保存の上書きとして残る。
+  // 実機の名前変更は character.json の定型人格も書き換えるので、再取得分だけ差し替える。
+  let renamedPersonaName = "";
+  await page.route("**/assets/characters/mugi/character.json*", async route => {
+    const response = await route.fetch();
+    const manifest = JSON.parse(await response.text());
+    if (renamedPersonaName) {
+      manifest.name = renamedPersonaName;
+      manifest.persona = {
+        ...manifest.persona,
+        systemPrompt: `${renamedPersonaName}として振る舞い、利用者の依頼を丁寧に手伝う。`,
+      };
+    }
+    await route.fulfill({ response, contentType: "application/json", body: JSON.stringify(manifest) });
+  });
+  await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
+  // 切替は非同期。選択1件だけが未保存になった状態を基準にする。
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "未保存 1件");
+  const dirtyAfterSelect = await page.locator("#dirtySummary").textContent();
+  await renameInput.fill("Nicole改");
+  renamedPersonaName = "Nicole改";
+  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
+    .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicole改へ変更しました")));
+  const personaAfterRename = await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue();
+  if (!personaAfterRename.includes("Nicole改として振る舞い")) {
+    throw new Error("名前変更後の人格欄が新しい既定文へ追従していません");
+  }
+  const dirtyAfterRename = await page.locator("#dirtySummary").textContent();
+  if (dirtyAfterRename !== dirtyAfterSelect) {
+    throw new Error(`選択中キャラの名前変更で未保存項目が増えました: ${dirtyAfterSelect} -> ${dirtyAfterRename}`);
+  }
+  await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').selectOption("mugi");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
+  renamedPersonaName = "";
+  await renameInput.fill("Nicole");
+  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
+    .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
   await userCard.screenshot({ path: join(OUT, "character-rename.png") });
   await page.setViewportSize({ width: 960, height: 760 });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
@@ -387,7 +427,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口7件 / キャラ登録・選択・音声の3分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口7件 / キャラ登録・選択・音声の3分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

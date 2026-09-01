@@ -735,13 +735,28 @@ async function validateLayoutEditor() {
     }
     if (state.framingTransform === "none") throw new Error("Moveableのドラッグで既定のキャラ構図が失われました");
     if (state.dragCalls !== 0) throw new Error("編集モード中にウィンドウドラッグが開始されました");
-    // キャラの見える中心を守る補正後も画面内へ残る右下ハンドルを使う。
-    const scaleHandle = page.locator(".moveable-control.moveable-se");
-    const scaleBox = await scaleHandle.boundingBox();
-    if (!scaleBox) throw new Error("Moveableの拡大縮小ハンドルが見つかりません");
-    await page.mouse.move(scaleBox.x + scaleBox.width / 2, scaleBox.y + scaleBox.height / 2);
+    // 配信形式のキャラ枠は画面より大きく、四隅のハンドルは画面外へ出ることがある
+    // （右下は viewport 下端の外）。掴めるのは画面内に収まっているハンドルだけなので、
+    // 位置を決め打ちせず実際に見えているものを選び、枠の中心へ向けて縮める。
+    const scaleDrag = await page.evaluate(() => {
+      const control = [...document.querySelectorAll(".moveable-control")]
+        .map(node => node.getBoundingClientRect())
+        .find(rect => rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight);
+      if (!control) return null;
+      const frame = document.getElementById("character").getBoundingClientRect();
+      const from = { x: control.x + control.width / 2, y: control.y + control.height / 2 };
+      return {
+        from,
+        to: {
+          x: from.x + Math.sign(frame.x + frame.width / 2 - from.x) * 60,
+          y: from.y + Math.sign(frame.y + frame.height / 2 - from.y) * 60,
+        },
+      };
+    });
+    if (!scaleDrag) throw new Error("画面内に掴めるMoveableの拡大縮小ハンドルがありません");
+    await page.mouse.move(scaleDrag.from.x, scaleDrag.from.y);
     await page.mouse.down();
-    await page.mouse.move(scaleBox.x + scaleBox.width / 2 - 60, scaleBox.y + scaleBox.height / 2 - 60, { steps: 8 });
+    await page.mouse.move(scaleDrag.to.x, scaleDrag.to.y, { steps: 8 });
     await page.mouse.up();
     const scaled = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
     if (!scaled.scale) throw new Error(`Moveableの拡大縮小が反映されませんでした: ${JSON.stringify(scaled)}`);
@@ -1458,9 +1473,13 @@ async function validateThinkingIndicator() {
       dots: document.querySelectorAll(".history-thinking .typing-dots i").length,
       label: document.querySelector(".history-thinking .typing-indicator")?.getAttribute("aria-label") || "",
       statusSpinner: getComputedStyle(document.getElementById("status"), "::before").content,
+      // 文言が無いのに丸い枠だけ浮かせない（配信形式は絶対配置の枠を持つ）。
+      emptyStatusBox: !document.getElementById("status").textContent.trim()
+        && getComputedStyle(document.getElementById("status")).display !== "none",
       captionLabel: getComputedStyle(document.getElementById("reply"), "::before").content,
     }));
-    if (pending.dots !== 3 || !pending.label || (pending.statusSpinner && pending.statusSpinner !== "none")
+    if (pending.dots !== 3 || !pending.label || pending.emptyStatusBox
+        || (pending.statusSpinner && pending.statusSpinner !== "none")
         || (pending.captionLabel && pending.captionLabel !== "none")) {
       throw new Error(`考え中の3点表示が不正です: ${JSON.stringify(pending)}`);
     }
