@@ -29,7 +29,9 @@ tauri-plugin-global-shortcut = "2"
 # 多重起動の防止。2つ目の起動は既存ウィンドウを前面へ出して終了する。
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: JSONを読み書きするときにキーの並びを保つ（`character.json` の名前変更など、
+# 利用者が作ったファイルを再保存しても並べ替えで差分を出さないため）。
+serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "query", "form", "rustls", "stream"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net", "io-util"] }
 # ブラウザ操作（browser_control）の CDP は WebSocket。接続先は 127.0.0.1 の ws:// 固定なので TLS 機能は入れない。

@@ -374,6 +374,44 @@ fn build_live2d_pack(extracted: &Path, pack: &Path, id: &str, name: &str) -> Res
 }
 
 /// フォルダまたは zip を導入する。導入したキャラクターの id と名前を返す。
+/// 配信物の一覧から同梱キャラクターのidを取り出す（`characters` 配列の `id`）。
+fn parse_bundled_ids(index_json: &str) -> Vec<String> {
+    let Ok(index) = serde_json::from_str::<Value>(index_json) else {
+        return Vec::new();
+    };
+    index
+        .get("characters")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 同梱キャラクターと同じidのパックは、一覧で同梱側が優先されるため追加しても選べない。
+/// 一覧（`assets/characters/index.json`）はビルド時に実行ファイルへ焼き込まれるので、
+/// ファイルではなく配信アセットとして読む（開発時は `frontendDist` から読まれる）。
+fn ensure_id_not_bundled(app: &AppHandle, id: &str) -> Result<()> {
+    let Some(asset) = app
+        .asset_resolver()
+        .get("assets/characters/index.json".to_string())
+    else {
+        // 一覧を読めない構成では判定しない（設定画面側でも同じ衝突を弾いている）。
+        return Ok(());
+    };
+    let Ok(text) = String::from_utf8(asset.bytes) else {
+        return Ok(());
+    };
+    if parse_bundled_ids(&text).iter().any(|bundled| bundled == id) {
+        bail!("同梱キャラクターと同じidです: {id}（パックのidを変えてください）");
+    }
+    Ok(())
+}
+
 pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
     let _state_lock = crate::store::lock_state("user-characters");
     if !source.exists() {
@@ -399,6 +437,7 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
         let manifest = character_pack::validate(&pack)?;
         let id = character_pack::required_text(&manifest, "id")?.to_string();
         let name = character_pack::required_text(&manifest, "name")?.to_string();
+        ensure_id_not_bundled(app, &id)?;
         let destination = root.join(&id);
         if destination.exists() {
             bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
@@ -438,6 +477,7 @@ pub fn install_live2d(
     if name.is_empty() {
         bail!("表示名を入力してください");
     }
+    ensure_id_not_bundled(app, id)?;
     let root = root(app)?;
     std::fs::create_dir_all(&root)
         .with_context(|| format!("置き場を作れません: {}", root.display()))?;
@@ -672,7 +712,10 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_live2d_pack, extract_zip, find_live2d_model, pack_root, rename_manifest};
+    use super::{
+        build_live2d_pack, extract_zip, find_live2d_model, pack_root, parse_bundled_ids,
+        rename_manifest,
+    };
     use serde_json::json;
     use std::io::Write;
     use std::path::PathBuf;
@@ -807,6 +850,17 @@ mod tests {
         assert_eq!(manifest["live2d"]["scale"], 1.0);
         assert_eq!(manifest["live2d"]["offsetY"], 0);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 配信物の一覧から同梱キャラのidだけを取り出す() {
+        let ids = parse_bundled_ids(
+            r#"{"default":"mugi","characters":[{"id":"mugi","name":"むぎ"},{"name":"id無し"},{"id":"rin"}]}"#,
+        );
+        assert_eq!(ids, vec!["mugi".to_string(), "rin".to_string()]);
+        // 読めない一覧では判定材料を持たない（呼び出し側は素通しする）。
+        assert!(parse_bundled_ids("{").is_empty());
+        assert!(parse_bundled_ids(r#"{"characters":{}}"#).is_empty());
     }
 
     #[test]

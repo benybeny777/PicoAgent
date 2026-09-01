@@ -5645,10 +5645,17 @@ async function releaseBootUi() {
       characterManifest.greeting = greeting;
       startupGreeting = greeting;
     }
-    if (localEngineRequired) {
+    if (localEngineRequired && info.onboardingDone) {
       // 送信できない通常画面を先に見せず、利用可能または明示的な失敗になるまで
       // 寝姿の起動画面で進捗を伝える。
       await waitForEngineReady();
+    } else if (localEngineRequired) {
+      // 初回セットアップ（追加機能の選択・Live2D追加）はローカルAIを使わない。
+      // 数GBのモデル取得が終わるまで案内を出さないと、初回だけ何分も待たせることになる。
+      // 監視は続け、準備できるまでは送信ボタン側が理由を出して止める。
+      waitForEngineReady().catch(error => {
+        logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
+      });
     }
     if (info.onboardingDone && startupGreeting) {
       const voiceReady = await prepareSelectedVoiceModel();
