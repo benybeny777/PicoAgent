@@ -2182,10 +2182,35 @@ if (process.env.SHOOT_STARTUP_READINESS) {
   await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   await page.screenshot({ path: join(output, "ready.png"), omitBackground: true });
   await page.close();
+
+  // 初回セットアップはローカルAIを使わない。数GBの取得を待たずに案内まで進むこと。
+  const firstRun = await openScene({
+    characterId: "mugi",
+    layout: "pet",
+    waitForReady: false,
+    onboardingDone: false,
+    engineReadyDelayMs: 8000,
+  });
+  await firstRun.waitForFunction(
+    () => !document.getElementById("petApp")?.classList.contains("is-booting"),
+    null,
+    { timeout: 6000 },
+  );
+  const firstRunState = await firstRun.evaluate(() => ({
+    engineReady: Date.now() >= window.__engineReadyAt,
+    onboardingVisible: document.getElementById("onboarding")?.hidden === false,
+    sendDisabled: document.getElementById("sendButton")?.disabled === true,
+  }));
+  if (firstRunState.engineReady || !firstRunState.onboardingVisible || !firstRunState.sendDisabled) {
+    throw new Error(`初回セットアップの案内条件が崩れています: ${JSON.stringify(firstRunState)}`);
+  }
+  await firstRun.screenshot({ path: join(output, "first-run.png"), omitBackground: true });
+  await writeFile(join(output, "first-run.json"), `${JSON.stringify(firstRunState, null, 2)}\n`);
+  await firstRun.close();
   await trimmer.close();
   await browser.close();
   server.close();
-  console.log(`起動準備順序検査完了: ${output}`);
+  console.log(`起動準備順序検査完了（初回セットアップの非待機を含む）: ${output}`);
   process.exit(0);
 }
 
