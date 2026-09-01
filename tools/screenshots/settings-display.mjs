@@ -173,7 +173,7 @@ try {
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   await page.getByRole("tab", { name: "基本設定" }).click();
-  if (await page.locator(".quick-settings-card").count() !== 5) throw new Error("よく使う設定への入口が5件ではありません");
+  if (await page.locator(".quick-settings-card").count() !== 7) throw new Error("よく使う設定への入口が7件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
   await page.waitForSelector(".memory-item");
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
@@ -240,7 +240,10 @@ try {
   await verifyLongSkillLabels(600);
   await verifyLongSkillLabels(400);
   await page.setViewportSize({ width: 960, height: 760 });
-  await page.getByRole("tab", { name: "キャラ・音声", exact: true }).click();
+  for (const tabName of ["キャラ登録", "キャラ選択", "キャラの音声"]) {
+    if (await page.getByRole("tab", { name: tabName, exact: true }).count() !== 1) throw new Error(`${tabName}タブが独立していません`);
+  }
+  await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
   const userCard = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await userCard.waitFor();
   const renameInput = userCard.getByRole("textbox", { name: "追加テストの表示名" });
@@ -307,14 +310,12 @@ try {
   if (await page.locator('.searchable:not([hidden])').count() < 1) throw new Error("音声の検索候補が表示されません");
   await page.locator("#clearSettingsSearch").click();
   if (await page.locator("#settingsSearch").inputValue() !== "") throw new Error("検索を解除できません");
-  await page.getByRole("tab", { name: "キャラ・音声" }).click();
+  await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
   await page.waitForSelector(".framing-editor");
   await page.waitForSelector(".stream-profile-editor");
   const streamEnabled = await page.locator('.stream-profile-editor input[type="checkbox"]').isChecked();
   if (!streamEnabled) throw new Error("むぎのキャラ別配信設定が読み込まれていません");
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
-  const muteStatus = await page.locator(".tts-master-status").textContent();
-  if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
   const framing = page.locator(".framing-editor");
   if (!(await framing.textContent())?.includes("キャラサイズ")) throw new Error("構図にキャラサイズのスライダーがありません");
   const zoom = framing.locator('input[type="range"]');
@@ -348,6 +349,25 @@ try {
   if (await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').inputValue() !== "mugi") throw new Error("未保存選択の削除後に保存中キャラへ戻りません");
   if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("年下っぽく")) throw new Error("削除後の選択と人格表示が一致しません");
   if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("既定人格だけで未保存扱いになっています");
+  await page.getByRole("tab", { name: "キャラの音声", exact: true }).click();
+  const voiceHeadingBox = await page.getByRole("heading", { name: "キャラの音声設定", exact: true }).boundingBox();
+  if (!voiceHeadingBox || voiceHeadingBox.y < 0 || voiceHeadingBox.y > 260) throw new Error("音声タブが先頭から表示されません");
+  const muteStatus = await page.locator(".tts-master-status").textContent();
+  if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
+  if (!(await page.locator(".character-voice-context").textContent())?.includes("むぎ")) throw new Error("音声タブに選択中キャラが表示されません");
+  const speakerInput = page.getByLabel("このキャラの Aivis Style ID", { exact: true });
+  await speakerInput.fill("123456");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存"));
+  await speakerInput.fill("");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
+  await page.screenshot({ path: join(OUT, "character-voice-tab.png") });
+  await page.getByRole("tab", { name: "キャラ登録", exact: true }).click();
+  const registerHeadingBox = await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).boundingBox();
+  if (!registerHeadingBox || registerHeadingBox.y < 0 || registerHeadingBox.y > 260) throw new Error("登録タブが先頭から表示されません");
+  if (await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).count() !== 1) throw new Error("キャラ登録タブに追加操作がありません");
+  if (await page.locator(".character-browser-list:visible").count()) throw new Error("キャラ登録タブに選択一覧が混ざっています");
+  if (await page.locator(".tts-master-status:visible").count()) throw new Error("キャラ登録タブに音声設定が混ざっています");
+  await page.screenshot({ path: join(OUT, "character-register-tab.png") });
   await page.getByRole("tab", { name: "診断・修復" }).click();
   if (await page.locator(".product-info-card").count() !== 5) throw new Error("製品情報カードが5件ではありません");
   if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
@@ -367,7 +387,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口7件 / キャラ登録・選択・音声の3分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

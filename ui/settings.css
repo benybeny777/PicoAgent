@@ -1177,6 +1177,23 @@ button.tab:active {
 
 /* キャラクター追加の操作ボタン列（zip / フォルダを選ぶ）。 */
 .character-add-actions { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+.character-voice-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+.character-voice-context > div { min-width: 0; }
+.character-voice-context span { color: var(--muted); }
+
+@media (max-width: 520px) {
+  .character-voice-context { align-items: stretch; flex-direction: column; }
+}
 .component-manager { max-width:980px; }
 .component-list { display:grid; gap:10px; margin-top:12px; }
 .component-card { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:14px 16px; border:1px solid var(--line); border-radius:14px; background:var(--surface); }

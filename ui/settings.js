@@ -38,7 +38,6 @@ let characterLive2dSdkSelect;
 let characterLive2dSdkField;
 let characterLive2dSdkHint;
 let characterCatalog;
-let characterAddGroup;
 const characterManifestCache = new Map();
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
@@ -46,7 +45,7 @@ let scheduleEditorState = null; // スケジュールタスクエディタ（保
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const PRESERVE_UNREADABLE_SECRET = "__PRESERVE_UNREADABLE_SECRET__";
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
@@ -58,27 +57,18 @@ const LAYOUT_CHOICES = [
   { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
-let activeSettingsTab = requestedSettingsTab === "voice" || requestedSettingsTab === "character-add"
-  ? "character"
+let activeSettingsTab = requestedSettingsTab === "character-add"
+  ? "character-register"
   : (SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic");
 
 function activateSettingsTab(tabId) {
-  const focusCharacterAdd = tabId === "character-add";
-  if (focusCharacterAdd) tabId = "character";
-  if (tabId === "voice") tabId = "character";
+  if (tabId === "character-add") tabId = "character-register";
   if (!SETTINGS_TAB_IDS.has(tabId)) return false;
   activeSettingsTab = tabId;
   const button = document.getElementById(`tab-${tabId}`);
   if (button) {
     button.click();
     form.scrollTop = 0;
-    if (focusCharacterAdd) {
-      requestAnimationFrame(() => {
-        if (!characterAddGroup) return;
-        characterAddGroup.open = true;
-        characterAddGroup.scrollIntoView({ block: "start" });
-      });
-    }
   }
   return true;
 }
@@ -935,7 +925,9 @@ function quickSettingsGuide(v) {
   const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
-    { tab: "character", title: "キャラと声", summary: `${v.PICOAGENT_CHARACTER || "既定キャラ"}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}` },
+    { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック・THA3" },
+    { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
+    { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
     { tab: "providers", title: "使うAI", summary: provider?.label || v.PICOAGENT_PROVIDER || "ローカル" },
     { tab: "components", title: "追加機能", summary: "音声・文字起こし・文書ツール" },
@@ -955,10 +947,10 @@ function quickSettingsGuide(v) {
   return markSearchable(el("section", { className: "quick-settings" }, [
     el("div", { className: "quick-settings-heading" }, [
       el("h2", { textContent: "まずはここから" }),
-      el("p", { textContent: "普段はこの5つを入口にすれば大丈夫です。" }),
+      el("p", { textContent: "よく使う設定を目的別に開けます。" }),
     ]),
     grid,
-  ]), "よく使う 設定 キャラクター 音声 画面 レイアウト AI モデル 追加機能 診断 修復");
+  ]), "よく使う 設定 キャラクター 登録 選択 音声 画面 レイアウト AI モデル 追加機能 診断 修復");
 }
 
 function setQuickSettingsSummary(tabId, summary) {
@@ -1228,6 +1220,7 @@ function createTabs(items) {
         current.classList.toggle("active", active);
         current.hidden = !active;
       }
+      form.scrollTop = 0;
       applySettingsSearch();
     });
     tabs.append(button);
@@ -1962,25 +1955,22 @@ function saveCurrentCharacterVoice(id) {
   const current = characterVoiceOverrides[id] || {};
   const defaultVoice = characterDefaultVoices[id] || {};
   const speaker = characterSpeaker.value.trim();
-  const next = { ...current, speaker };
+  // 空欄またはパック既定値は上書きではない。初期表示しただけでメタデータを生成して
+  // 「未保存」にしない。既存のメタデータだけの指定は、そのまま維持する。
   if (!speaker || speaker === String(defaultVoice.styleId || "")) {
-    if (defaultVoice.modelUuid && !next.modelUuid) next.modelUuid = defaultVoice.modelUuid;
-    if (defaultVoice.modelName && !next.modelName) next.modelName = defaultVoice.modelName;
-    if (defaultVoice.speakerUuid && !next.speakerUuid) next.speakerUuid = defaultVoice.speakerUuid;
-    if (defaultVoice.styleName && !next.styleName) next.styleName = defaultVoice.styleName;
-    if (defaultVoice.sourceUrl && !next.sourceUrl) next.sourceUrl = defaultVoice.sourceUrl;
-  } else {
-    delete next.modelUuid;
-    delete next.modelName;
-    delete next.speakerUuid;
-    delete next.styleName;
-    delete next.sourceUrl;
+    if (current.speaker) delete characterVoiceOverrides[id];
+    return;
   }
+  const next = { ...current, speaker };
+  delete next.modelUuid;
+  delete next.modelName;
+  delete next.speakerUuid;
+  delete next.styleName;
+  delete next.sourceUrl;
   characterVoiceOverrides[id] = next;
 }
 
 function loadCharacterVoice(id) {
-  // 音声タブ簡素化でキャラ別 speaker 入力欄は非表示（未生成）になったため、無い場合は何もしない。
   if (!characterSpeaker) return;
   const current = characterVoiceOverrides[id] || {};
   const defaultVoice = characterDefaultVoices[id] || {};
@@ -2626,7 +2616,9 @@ async function render() {
   const panels = createTabs([
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
-    { id: "character", label: "キャラ・音声" },
+    { id: "character-register", label: "キャラ登録" },
+    { id: "character", label: "キャラ選択" },
+    { id: "voice", label: "キャラの音声" },
     { id: "components", label: "追加機能・更新" },
     { id: "providers", label: "AIモデル・連携" },
     { id: "tools", label: "スキル" },
@@ -2707,7 +2699,7 @@ async function render() {
     v.PICOAGENT_MCP_SERVERS ?? "",
     "memory|npx -y @modelcontextprotocol/server-memory"
   ));
-  const voiceSec = section("読み上げ");
+  const voiceSec = section("キャラの音声設定");
   const ttsMasterStatus = el("div", {
     className: v.PICOAGENT_TTS_ENABLED === true ? "tts-master-status enabled" : "tts-master-status muted",
     textContent: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）",
@@ -2715,15 +2707,14 @@ async function render() {
   voiceSec.append(ttsMasterStatus);
   voiceSec.append(el("p", {
     className: "hint",
-    textContent: "読み上げは必要な時だけ有効にできます。キャラごとの声は上のキャラクター選択に連動します。",
+    textContent: "読み上げ全体の有効・無効と、選択中キャラの声を設定します。キャラを変える場合は「キャラ選択」を開いてください。",
   }));
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   inputs.get("PICOAGENT_TTS_ENABLED")?.addEventListener("change", event => {
     const enabled = event.target.checked;
     ttsMasterStatus.className = `tts-master-status ${enabled ? "enabled" : "muted"}`;
     ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
-    const selectedEntry = characterCatalog?.characters?.find(character => character.id === characterSelect?.value);
-    setQuickSettingsSummary("character", `${selectedEntry?.name || characterSelect?.value || v.PICOAGENT_CHARACTER || "既定キャラ"}・${enabled ? "読み上げ有効" : "ミュート中"}`);
+    setQuickSettingsSummary("voice", enabled ? "読み上げ有効" : "ミュート中");
   });
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値50）", "number", v.PICOAGENT_TTS_VOLUME ?? "50", "50"));
   const memoryManager = window.PicoMemorySettings.buildMemoryManager({
@@ -2786,7 +2777,7 @@ async function render() {
     ? requestedCharacter
     : characterCatalog.default;
   const selectedCharacterEntry = characterCatalog.characters.find(character => character.id === selectedCharacter);
-  setQuickSettingsSummary("character", `${selectedCharacterEntry?.name || selectedCharacter}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}`);
+  setQuickSettingsSummary("character", selectedCharacterEntry?.name || selectedCharacter);
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", {
       value: character.id,
@@ -2799,6 +2790,32 @@ async function render() {
     characterSelect,
     markSearchable(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]), "PICOAGENT_CHARACTER", "キャラクター")
   ));
+  const characterVoiceName = el("strong", { textContent: selectedCharacterEntry?.name || selectedCharacter });
+  const characterVoiceDefault = el("span");
+  const chooseCharacterButton = el("button", { className: "secondary", type: "button", textContent: "キャラを選び直す" });
+  chooseCharacterButton.addEventListener("click", () => activateSettingsTab("character"));
+  const characterVoiceContext = markSearchable(el("div", { className: "character-voice-context" }, [
+    el("div", {}, [el("span", { textContent: "選択中: " }), characterVoiceName, characterVoiceDefault]),
+    chooseCharacterButton,
+  ]), "選択中 キャラクター 声 Aivis Style ID");
+  characterSpeaker = el("input", { type: "text", inputMode: "numeric", ariaLabel: "このキャラの Aivis Style ID" });
+  characterSpeaker.addEventListener("input", updateDirtyState);
+  const characterSpeakerField = markSearchable(el("div", { className: "field" }, [
+    el("label", { textContent: "このキャラの Aivis Style ID" }),
+    characterSpeaker,
+    el("p", { className: "hint", textContent: "空欄にするとキャラクターパックの既定の声へ戻ります。Aivisの音声スタイルIDを入力してください。" }),
+  ]), "キャラ 音声 Aivis speaker style ID 声を変える");
+  const updateCharacterVoiceContext = id => {
+    const entry = characterCatalog.characters.find(character => character.id === id);
+    const voice = characterDefaultVoices[id] || {};
+    const details = [voice.modelName, voice.styleName].filter(Boolean).join(" / ");
+    const styleId = voice.styleId != null ? `ID ${voice.styleId}` : "";
+    characterVoiceName.textContent = entry?.name || id;
+    characterVoiceDefault.textContent = [details, styleId].filter(Boolean).length
+      ? `（既定: ${[details, styleId].filter(Boolean).join(" / ")}）`
+      : "（既定の声）";
+  };
+  voiceSec.append(characterVoiceContext, characterSpeakerField);
   characterSec.append(selectField("PICOAGENT_COMPANION_MODE", "相棒の役割", v.PICOAGENT_COMPANION_MODE || "both", [
     { value: "life", label: "いっしょに暮らす" },
     { value: "work", label: "いっしょに働く" },
@@ -2835,6 +2852,7 @@ async function render() {
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
+  updateCharacterVoiceContext(selectedCharacter);
   await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
@@ -2860,7 +2878,8 @@ async function render() {
         previousCharacter = requestedCharacter;
         characterSelect.value = requestedCharacter;
         const selectedEntry = characterCatalog.characters.find(character => character.id === requestedCharacter);
-        setQuickSettingsSummary("character", `${selectedEntry?.name || requestedCharacter}・${inputs.get("PICOAGENT_TTS_ENABLED")?.checked ? "読み上げ有効" : "ミュート中"}`);
+        setQuickSettingsSummary("character", selectedEntry?.name || requestedCharacter);
+        updateCharacterVoiceContext(requestedCharacter);
       } catch (error) {
         characterSelect.value = previousCharacter;
         logApp("warn", "キャラクター設定の切替に失敗しました", errorDetail(error));
@@ -2925,9 +2944,6 @@ async function render() {
   ));
   characterSec.append(registerInput("PICOAGENT_RELATIONSHIP_CUSTOM", relationshipCustom, relationshipCustomField));
   describeRelationship();
-  panels.character.append(characterSec);
-  panels.character.append(voiceSec);
-
   // --- スキル設定（⚙ のあるスキルはクリックでその場に開く）。活用ガイドとは別タブに分ける ---
   const skillSec = section("スキル設定");
   if (!data.tools.length) {
@@ -3510,15 +3526,9 @@ async function render() {
   if (userCharacterRoot) {
     addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
   }
-  panels.character.append(charSec);
-  characterAddGroup = advancedGroup(
-    "キャラクターを追加・作成",
-    "新しいキャラクターパックを導入したい時だけ開いてください。",
-    [addSec, tha3Sec],
-  );
-  characterAddGroup.id = "character-add-group";
-  if (requestedSettingsTab === "character-add") characterAddGroup.open = true;
-  panels.character.append(characterAddGroup);
+  panels.character.append(charSec, characterSec);
+  panels.voice.append(voiceSec);
+  panels["character-register"].append(addSec, tha3Sec);
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("AIサービスごとの設定");
@@ -3593,7 +3603,7 @@ async function render() {
   applySettingsSearch();
   renderingSettings = false;
   updateDirtyState();
-  if (requestedSettingsTab === "character-add") activateSettingsTab("character-add");
+  if (requestedSettingsTab === "character-add") activateSettingsTab("character-register");
 }
 
 function providerDefaultModel(providerId) {
