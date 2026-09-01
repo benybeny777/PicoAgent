@@ -5674,7 +5674,8 @@ async function releaseBootUi() {
   catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
   // ローカルAIが ready になると engine-error を落とすため、音声準備の失敗はここで出し直す。
   // 配信形式はこの印が無いとステータス行ごと隠れ、失敗に気づけない。
-  if (startupVoiceError) {
+  // ただし送信そのものを塞ぐローカルAIの失敗表示は上書きしない（そちらが先に要る）。
+  if (startupVoiceError && localEnginePhase !== "error") {
     setStatus(startupVoiceError);
     status.classList.add("engine-error");
   }
