@@ -729,11 +729,24 @@ async function fetchJsonWithTimeout(url, label, timeoutMs = STARTUP_RESOURCE_TIM
   }
 }
 
+// 同梱キャラの一覧は配布物へ焼き込まれ、実行中に増減しない。起動経路で何度も
+// 取りに行かないよう、最初の1回だけ読んで使い回す。
+let characterCatalogPromise = null;
+function loadCharacterCatalog() {
+  if (!characterCatalogPromise) {
+    characterCatalogPromise = fetchJsonWithTimeout(
+      `assets/characters/index.json?v=${characterManifestCacheKey}`,
+      "キャラクター一覧",
+    ).catch(error => {
+      characterCatalogPromise = null;
+      throw error;
+    });
+  }
+  return characterCatalogPromise;
+}
+
 async function loadCharacterManifest(characterId) {
-  const catalog = await fetchJsonWithTimeout(
-    `assets/characters/index.json?v=${characterManifestCacheKey}`,
-    "キャラクター一覧",
-  );
+  const catalog = await loadCharacterCatalog();
   const bundled = catalog.characters.map(character => ({
     id: character.id,
     name: character.name,
@@ -757,15 +770,22 @@ async function loadCharacterManifest(characterId) {
   return { entry, manifest, root };
 }
 
-const STARTUP_SLEEPING_CHARACTER_IDS = Object.freeze(["mugi", "rin", "mai"]);
+// 起動画面へ寝姿で出せるのは、専用原画を持つ（`boot.useSleepingOnStartup`）同梱キャラだけ。
+// IDを直書きすると、キャラを足したときの更新漏れが黙って起きるため一覧から取る。
+function startupSleepingCandidates(catalog) {
+  return (catalog?.characters || [])
+    .filter(character => character.bootSleeping === true && character.id)
+    .map(character => character.id);
+}
 
-function chooseStartupSleepingCharacter(randomValue = Math.random()) {
+function chooseStartupSleepingCharacter(candidates, randomValue = Math.random()) {
+  if (!candidates.length) return "";
   const value = Number.isFinite(Number(randomValue)) ? Number(randomValue) : 0;
   const index = Math.min(
-    STARTUP_SLEEPING_CHARACTER_IDS.length - 1,
-    Math.max(0, Math.floor(value * STARTUP_SLEEPING_CHARACTER_IDS.length)),
+    candidates.length - 1,
+    Math.max(0, Math.floor(value * candidates.length)),
   );
-  return STARTUP_SLEEPING_CHARACTER_IDS[index];
+  return candidates[index];
 }
 
 async function prepareBootCharacter(characterId) {
@@ -5409,7 +5429,6 @@ function startDailyPolling() {
 
 // 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
 function pad2(n) { return String(n).padStart(2, "0"); }
-function weekdayCode(date) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()]; }
 function alarmSnoozeMinutes(a) {
   const value = Number(a?.snooze_minutes ?? a?.snoozeMinutes ?? 5);
   if (!Number.isFinite(value)) return 5;
@@ -5455,23 +5474,21 @@ async function checkAlarms() {
   clearBackgroundFailure("alarms");
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
-  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-  const today = weekdayCode(now);
-  const minuteKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${hhmm}`;
-  for (const a of alarms) {
-    if (!a || a.enabled === false || a.time !== hhmm) continue;
-    const days = Array.isArray(a.days) ? a.days : [];
-    if (days.length && !days.includes(today)) continue;
-    const key = `${a.id}@${minuteKey}`;
+  // 分ちょうどだけを見ると、スリープ復帰・起動直後・直前の発火が長引いた場合に
+  // その日の目覚ましが黙って鳴らない。直近5分以内に来た予定まで拾う。
+  const dueItems = window.PicoAlarmRuntime.dueAlarms(alarms, now);
+  for (const due of dueItems) {
+    const key = `${due.alarm.id}@${due.scheduledKey}`;
+    // 1ティックにつき1件だけ鳴らす（発火記録で二重には鳴らない）。
     if (!window.PicoAlarmRuntime.markFired(firedAlarms, key)) continue;
-    await fireAlarm(a);
-    break; // 1ティックにつき1件だけ鳴らす。
+    await fireAlarm(due.alarm, null, due);
+    break;
   }
   } finally {
     alarmCheckInFlight = false;
   }
 }
-async function fireAlarm(a, snoozeState = null) {
+async function fireAlarm(a, snoozeState = null, due = null) {
   let line = "";
   try {
     const res = await window.picoagent.alarmWake(a.id);
@@ -5480,6 +5497,8 @@ async function fireAlarm(a, snoozeState = null) {
     logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
   }
   if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
+  // 遅れて鳴らす場合は予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
+  if (due && due.lateMinutes >= 1) line = `（${due.scheduledTime}の目覚ましだよ）${line}`;
   // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
   const prepared = await prepareSpeech(line);
   renderAlarmReply(line);
@@ -5497,11 +5516,21 @@ function startAlarmPolling() {
 
 let startupLayout = null;
 let bootUiReleased = false;
-const bootProgressTimer = setInterval(() => {
-  window.picoagent.bootProgress().catch(error => {
-    logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
-  });
-}, 10000);
+// 生存通知の間隔はバックエンドが監視しきい値から決める。設定が届く前は、許可される
+// 最短しきい値3秒にも間に合う1秒で始め、`pet_init` 後に計算済みの間隔へ張り替える。
+const DEFAULT_BOOT_PROGRESS_INTERVAL_MS = 10000;
+const INITIAL_BOOT_PROGRESS_INTERVAL_MS = 1000;
+let bootProgressTimer = null;
+function startBootProgressTicker(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS) {
+  const interval = Number(intervalMs) > 0 ? Number(intervalMs) : DEFAULT_BOOT_PROGRESS_INTERVAL_MS;
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = setInterval(() => {
+    window.picoagent.bootProgress().catch(error => {
+      logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
+    });
+  }, interval);
+}
+startBootProgressTicker(INITIAL_BOOT_PROGRESS_INTERVAL_MS);
 let bootBackendFinished = false;
 let bootBackendFinishPromise = null;
 let bootBackendRetryTimer = null;
@@ -5538,7 +5567,8 @@ function scheduleBootBackendRetry() {
 }
 
 async function releaseBootUi() {
-  clearInterval(bootProgressTimer);
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = null;
   if (!bootBackendFinished) {
     try { await finishBootBackend(); }
     catch (error) {
@@ -5587,6 +5617,10 @@ async function releaseBootUi() {
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
+  startBootProgressTicker(info.bootProgressIntervalMs);
+  // 配置編集の保存先は設定側。読み込み順に関係なく届くよう、値も残してから渡す。
+  window.__picoLayoutPlacements = info.layoutPlacements || {};
+  window.PicoLayoutEditor?.hydrate(window.__picoLayoutPlacements);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;
@@ -5599,7 +5633,10 @@ async function releaseBootUi() {
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
-    await prepareBootCharacter(chooseStartupSleepingCharacter());
+    // 候補が無い一覧（寝姿を持つキャラを外した等）でも起動画面は出す。既定キャラへ落とす。
+    const catalog = await loadCharacterCatalog();
+    const sleeping = chooseStartupSleepingCharacter(startupSleepingCandidates(catalog));
+    await prepareBootCharacter(sleeping || catalog.default || info.characterId || "mugi");
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }

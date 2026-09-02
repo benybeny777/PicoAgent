@@ -497,6 +497,67 @@ pub fn validate_interactions(manifest: &Value) -> Result<()> {
     Ok(())
 }
 
+/// 同梱キャラクター一覧（`characters/index.json`）と各 `character.json` のズレを検出する。
+///
+/// 起動画面の寝姿は一覧の `bootSleeping` だけを見て選ぶ（起動経路で全キャラの定義を
+/// 読みに行かないため）。正本は各キャラの `boot.useSleepingOnStartup` なので、
+/// 写し忘れ・消し忘れをここで落とす。
+#[cfg(test)]
+mod bundled_index_guard {
+    use serde_json::Value;
+
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("リポジトリルートを取得できない")
+            .to_path_buf()
+    }
+
+    fn read_json(path: &std::path::Path) -> Value {
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("{} を読めません: {error}", path.display()));
+        serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("{} が不正なJSONです: {error}", path.display()))
+    }
+
+    #[test]
+    fn 起動寝姿の印は一覧とキャラクター定義で一致する() {
+        let root = repo_root().join("characters");
+        let index = read_json(&root.join("index.json"));
+        let characters = index["characters"]
+            .as_array()
+            .expect("characters/index.json に characters 配列がありません");
+
+        let mut mismatched = Vec::new();
+        for entry in characters {
+            let id = entry["id"].as_str().unwrap_or_default();
+            let manifest_path = entry["manifest"].as_str().unwrap_or_default();
+            if id.is_empty() || manifest_path.is_empty() {
+                continue;
+            }
+            let manifest = read_json(&root.join(manifest_path));
+            let declared = entry
+                .get("bootSleeping")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let actual = manifest
+                .pointer("/boot/useSleepingOnStartup")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if declared != actual {
+                mismatched.push(format!(
+                    "{id}: index.json={declared} / character.json={actual}"
+                ));
+            }
+        }
+        assert!(
+            mismatched.is_empty(),
+            "起動画面の寝姿の印がずれています（一覧は character.json の写し）: {}",
+            mismatched.join(" / ")
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
