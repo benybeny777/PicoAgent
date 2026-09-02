@@ -2547,7 +2547,6 @@ function createTypingIndicator(label = "考え中") {
 function setThinkingUi(active, label = "考え中") {
   // 生成中は回答欄が何度も書き変わる。書き変わるたびに読み上げられないよう保留する。
   if (active) reply.setAttribute("aria-busy", "true");
-  else reply.removeAttribute("aria-busy");
   // 進捗の文言は数秒おきに変わる。文言だけの更新で履歴全件をMarkdownから作り直さない。
   const showing = active && historyThinking ? historyLog?.querySelector(".history-thinking") : null;
   historyThinking = active;
@@ -2568,6 +2567,8 @@ function setThinkingUi(active, label = "考え中") {
 
 // 回答を描画しないまま終わる中断・停止でも、回答欄の3点表示を残さない。
 function clearThinkingReply() {
+  // 確定描画へ到達しない中断・停止でも、live regionを保留したまま残さない。
+  reply.removeAttribute("aria-busy");
   if (!reply.classList.contains("reply-thinking")) return;
   reply.classList.remove("reply-thinking");
   reply.replaceChildren();

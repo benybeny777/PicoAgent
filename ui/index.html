@@ -20,8 +20,8 @@
         <div id="bootStatus" class="boot-status"></div>
       </div>
     </section>
-    <!-- 生きた領域はフキダシ全体ではなく、回答欄（#reply）と会話履歴（#historyLog）だけに絞る。
-         全体に付けると、履歴の追加・クイック操作の差し替え・通知パネルの開閉まで読み上げられる。 -->
+    <!-- 生きた領域は回答欄（#reply）だけに絞る。フキダシ全体や、全件を再構築する履歴へ
+         付けると、クイック操作や通知の変更、過去の会話まで繰り返し読み上げられる。 -->
     <section id="bubble" class="bubble">
       <div id="replyActions" class="reply-actions" aria-label="回答操作">
         <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">通知</button>
@@ -42,7 +42,7 @@
         <input id="historySearch" type="search" autocomplete="off" placeholder="履歴を検索" />
         <button id="exportHistory" type="button" title="会話をMarkdownで書き出し">書き出し</button>
       </div>
-      <div id="historyLog" class="history-log" role="log" aria-label="会話履歴"></div>
+      <div id="historyLog" class="history-log" aria-label="会話履歴"></div>
       <!-- ウィジェット表示のときだけ出す時計。他の表示形式では CSS で隠す。 -->
       <div id="widgetClock" class="widget-clock" aria-hidden="true"><strong></strong><span></span></div>
       <div id="streamInfo" class="stream-info" aria-label="配信情報">
