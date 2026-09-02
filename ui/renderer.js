@@ -5404,7 +5404,6 @@ function startDailyPolling() {
 
 // 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
 function pad2(n) { return String(n).padStart(2, "0"); }
-function weekdayCode(date) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()]; }
 function alarmSnoozeMinutes(a) {
   const value = Number(a?.snooze_minutes ?? a?.snoozeMinutes ?? 5);
   if (!Number.isFinite(value)) return 5;
@@ -5450,23 +5449,21 @@ async function checkAlarms() {
   clearBackgroundFailure("alarms");
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
-  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-  const today = weekdayCode(now);
-  const minuteKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${hhmm}`;
-  for (const a of alarms) {
-    if (!a || a.enabled === false || a.time !== hhmm) continue;
-    const days = Array.isArray(a.days) ? a.days : [];
-    if (days.length && !days.includes(today)) continue;
-    const key = `${a.id}@${minuteKey}`;
+  // 分ちょうどだけを見ると、スリープ復帰・起動直後・直前の発火が長引いた場合に
+  // その日の目覚ましが黙って鳴らない。直近5分以内に来た予定まで拾う。
+  const dueItems = window.PicoAlarmRuntime.dueAlarms(alarms, now);
+  for (const due of dueItems) {
+    const key = `${due.alarm.id}@${due.scheduledKey}`;
+    // 1ティックにつき1件だけ鳴らす（発火記録で二重には鳴らない）。
     if (!window.PicoAlarmRuntime.markFired(firedAlarms, key)) continue;
-    await fireAlarm(a);
-    break; // 1ティックにつき1件だけ鳴らす。
+    await fireAlarm(due.alarm, null, due);
+    break;
   }
   } finally {
     alarmCheckInFlight = false;
   }
 }
-async function fireAlarm(a, snoozeState = null) {
+async function fireAlarm(a, snoozeState = null, due = null) {
   let line = "";
   try {
     const res = await window.picoagent.alarmWake(a.id);
@@ -5475,6 +5472,8 @@ async function fireAlarm(a, snoozeState = null) {
     logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
   }
   if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
+  // 遅れて鳴らす場合は予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
+  if (due && due.lateMinutes >= 1) line = `（${due.scheduledTime}の目覚ましだよ）${line}`;
   // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
   const prepared = await prepareSpeech(line);
   renderAlarmReply(line);
