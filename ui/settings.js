@@ -2353,9 +2353,28 @@ function buildDiagnosticsSection() {
   const toolbar = el("div", { className: "diagnostics-toolbar" });
   const refresh = el("button", { type: "button", textContent: "更新" });
   const note = el("div", { className: "hint", textContent: "実行状態を確認し、停止している同梱機能はここから再起動できます。" });
-  toolbar.append(refresh, note);
+  // 不具合の連絡へ添える情報を1ファイルにまとめる。版・環境・設定・直近のログを入れ、
+  // APIキー等の秘密値は「設定済み／未設定」だけにする。
+  const exportDiagnostics = el("button", { type: "button", textContent: "診断情報を書き出す" });
+  const exportStatus = markSearchable(
+    el("div", { className: "hint diagnostics-export-status" }),
+    "診断情報 書き出し ログ 問い合わせ サポート",
+  );
+  exportDiagnostics.addEventListener("click", async () => {
+    exportDiagnostics.disabled = true;
+    exportStatus.textContent = "書き出しています…";
+    try {
+      const result = await window.picoagent.settings.exportDiagnostics();
+      exportStatus.textContent = `保存しました（APIキー等は含みません）: ${result?.path || ""}`;
+    } catch (error) {
+      exportStatus.textContent = `書き出せませんでした: ${error?.message || error}`;
+    } finally {
+      exportDiagnostics.disabled = false;
+    }
+  });
+  toolbar.append(refresh, exportDiagnostics, note);
   const grid = el("div", { className: "diagnostic-grid" });
-  diagnosticsSec.append(toolbar, grid);
+  diagnosticsSec.append(toolbar, exportStatus, grid);
 
   async function refreshDiagnostics() {
     refresh.disabled = true;

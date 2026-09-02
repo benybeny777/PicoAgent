@@ -1535,6 +1535,67 @@ pub fn settings_character_rename(
     }
 }
 
+/// 不具合の連絡へ添える診断情報を1ファイルへ書き出し、保存先を返す。
+///
+/// 保存先はログと同じ置き場にする（新しい保存先やダイアログの権限を増やさない）。
+/// APIキー等の秘密値は本文へ入れない（`diagnostics` 側で伏せる）。
+#[tauri::command]
+pub fn settings_export_diagnostics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let dir = crate::log_paths::ensure_log_dir(&app)
+        .map_err(|error| format!("保存先を作れませんでした: {error}"))?;
+    let now = chrono::Local::now();
+    let path = dir.join(format!("diagnostics-{}.txt", now.format("%Y-%m-%d-%H%M%S")));
+    let config = state.config.get_all();
+    let schema_keys = secret_keys();
+    let mut secret_values = Vec::new();
+    for (key, value) in &config {
+        if !is_secret_setting(&schema_keys, key) {
+            continue;
+        }
+        if let Some(raw) = value.as_str().filter(|raw| !raw.trim().is_empty()) {
+            secret_values.push(raw.to_string());
+        }
+        let resolved = state.config.get(key, "");
+        if !resolved.trim().is_empty() {
+            secret_values.push(resolved);
+        }
+    }
+    for (key, value) in std::env::vars() {
+        if is_secret_setting(&schema_keys, &key) && !value.is_empty() {
+            secret_values.push(value);
+        }
+    }
+    secret_values.sort();
+    secret_values.dedup();
+    let log_tail = crate::log_paths::read_tail(
+        &app,
+        "app.log",
+        crate::diagnostics::LOG_TAIL_LINES,
+        crate::diagnostics::LOG_TAIL_BYTES,
+    );
+    let body = crate::diagnostics::build_report(&crate::diagnostics::Report {
+        generated_at: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        beta_build: cfg!(feature = "beta-full"),
+        config: &config,
+        secret_keys: &schema_keys,
+        log_tail: &log_tail,
+        secret_values: &secret_values,
+    });
+    crate::store::write_atomic(&path, body.as_bytes())
+        .map_err(|error| format!("書き出しに失敗しました: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("診断情報を書き出しました: {}", path.display()),
+    );
+    Ok(json!({ "path": path.to_string_lossy() }))
+}
+
 /// THA3制作ツールと学習済みモデルがGUI生成に使える状態か返す。
 #[tauri::command]
 pub fn settings_tha3_status(
