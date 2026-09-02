@@ -807,6 +807,20 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
+        // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
+        "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
+            crate::boot_screen::timeout_ms(&app),
+        ),
+        // 配置編集の位置・倍率。以前は webview の localStorage にしか無く、
+        // WebViewデータの初期化や再インストールで消えていた。
+        "layoutPlacements": crate::layout_placements::normalize(
+            &state
+                .config
+                .get_all()
+                .get("PICOAGENT_LAYOUT_PLACEMENTS")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        ),
         "streamBackground": stream.background,
         "streamBackgroundImage": stream.background_image,
         "streamDisplay": stream.display,
@@ -3452,6 +3466,26 @@ pub fn pet_frontend_ready(app: AppHandle) {
 #[tauri::command]
 pub fn pet_boot_progress(app: AppHandle) {
     crate::boot_screen::mark_progress(&app);
+}
+
+/// 配置編集（OBS風）で決めた位置・倍率を設定へ保存する。
+///
+/// 編集中は書かず、「保存」「閉じる」「表示形式・キャラ切替」「リセット」の確定時だけ呼ぶ。
+/// 保存値は `layout_placements::normalize_checked` を通し、壊れた入力で既存の配置を
+/// まとめて失わないようにする。
+#[tauri::command]
+pub fn pet_save_layout_placements(
+    state: State<'_, AppState>,
+    placements: Value,
+) -> Result<(), String> {
+    let _guard = crate::store::lock_state("PICOAGENT_LAYOUT_PLACEMENTS");
+    let normalized = crate::layout_placements::normalize_checked(&placements)?;
+    let mut patch = Map::new();
+    patch.insert("PICOAGENT_LAYOUT_PLACEMENTS".to_string(), normalized);
+    state
+        .config
+        .set_all(patch)
+        .map_err(|error| format!("配置の保存に失敗しました: {error}"))
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
