@@ -37,6 +37,17 @@
     -webkit-user-select: text; user-select: text;
   }
   .detail b { color: #efe8f4; font-weight: 600; }
+  .log {
+    margin-top: 10px; padding: 8px 10px;
+    max-height: 132px; overflow: auto;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.30);
+    font-family: "Consolas", "SFMono-Regular", "Menlo", monospace;
+    font-size: 10.5px; line-height: 1.55; color: #c3b8cf;
+    white-space: pre-wrap; word-break: break-all;
+    -webkit-user-select: text; user-select: text;
+  }
+  .log b { display: block; margin-bottom: 4px; color: #efe8f4; font-weight: 600; }
   .actions { margin-top: 14px; display: flex; align-items: center; gap: 10px; }
   .btn {
     display: inline-block; padding: 8px 18px;
@@ -58,6 +69,7 @@
       </div>
     </div>
     <div class="detail">__DETAIL__</div>
+    <div class="log">__LOG__</div>
     <div class="actions">__ACTIONS__</div>
   </div>
 </body>

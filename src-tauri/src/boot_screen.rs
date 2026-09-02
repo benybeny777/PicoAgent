@@ -7,6 +7,7 @@
 // 案内ページは配信元（dev サーバ / `ui-dist`）が死んでいるときにこそ出る画面なので、
 // HTML もキャラクター画像もバイナリへ埋め込み、専用 URI スキームから返す。配信経路には依存しない。
 
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -113,6 +114,8 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
         )
     };
 
+    let log_html = format!("<b>直近のログ</b>{}", escape(&recent_log(app)));
+
     let body = PAGE_HTML
         .replace("__CHARACTER__", &character_data_uri())
         .replace("__HEADLINE__", "あれ…？ うまく起きられなかったみたい")
@@ -121,7 +124,8 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
             "画面の中身を読み込めませんでした。少し待ってからもう一度読み込んでみてね。",
         )
         .replace("__DETAIL__", &detail_html)
-        .replace("__ACTIONS__", &actions_html);
+        .replace("__ACTIONS__", &actions_html)
+        .replace("__LOG__", &log_html);
 
     tauri::http::Response::builder()
         .status(tauri::http::StatusCode::OK)
@@ -144,6 +148,44 @@ fn character_data_uri() -> String {
 }
 
 /// HTML のテキスト・属性値へ埋めるためのエスケープ。
+/// 案内画面へ出すログの行数と読み取り上限。巨大ログでも一定時間で表示する。
+const LOG_TAIL_LINES: usize = 12;
+const LOG_TAIL_BYTES: u64 = 8 * 1024;
+
+/// 末尾から `max_lines` 行を取り出す。`partial_head` のときは、切り出しで
+/// 途中から始まった先頭行を捨てる（読みかけの行を原因のように見せない）。
+fn tail_lines(text: &str, max_lines: usize, partial_head: bool) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if partial_head && lines.len() > 1 {
+        lines.remove(0);
+    }
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
+}
+
+/// 当日の `app.log` の末尾を読む。読めない場合も案内画面自体は必ず出す。
+fn recent_log(app: &AppHandle) -> String {
+    let path = crate::log_paths::log_file(app, "app.log");
+    let Ok(mut file) = std::fs::File::open(&path) else {
+        return "まだ記録がありません。".to_string();
+    };
+    let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let partial_head = size > LOG_TAIL_BYTES;
+    if partial_head && file.seek(SeekFrom::End(-(LOG_TAIL_BYTES as i64))).is_err() {
+        return "ログを読み取れませんでした。".to_string();
+    }
+    let mut buffer = Vec::new();
+    if file.take(LOG_TAIL_BYTES).read_to_end(&mut buffer).is_err() {
+        return "ログを読み取れませんでした。".to_string();
+    }
+    let text = String::from_utf8_lossy(&buffer);
+    let tail = tail_lines(&text, LOG_TAIL_LINES, partial_head);
+    if tail.trim().is_empty() {
+        return "まだ記録がありません。".to_string();
+    }
+    tail
+}
+
 fn escape(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
@@ -286,11 +328,25 @@ mod tests {
             .replace("__HEADLINE__", "")
             .replace("__MESSAGE__", "")
             .replace("__DETAIL__", "")
-            .replace("__ACTIONS__", "");
+            .replace("__ACTIONS__", "")
+            .replace("__LOG__", "");
         assert!(
             !filled.contains("__"),
             "置換されていないプレースホルダが残っています"
         );
+    }
+
+    #[test]
+    fn 直近ログは末尾だけを出す() {
+        let text = "1行目\n2行目\n3行目\n4行目\n";
+        assert_eq!(tail_lines(text, 2, false), "3行目\n4行目");
+        assert_eq!(tail_lines(text, 9, false), "1行目\n2行目\n3行目\n4行目");
+        // 途中から始まった先頭行は捨てる（読みかけを原因のように見せない）。
+        assert_eq!(tail_lines(text, 9, true), "2行目\n3行目\n4行目");
+        // 1行しか無いときは捨てない（何も出せなくなるため）。
+        assert_eq!(tail_lines("だけ", 9, true), "だけ");
+        assert_eq!(tail_lines("", 9, false), "");
+        assert_eq!(tail_lines("\n\n", 9, false), "\n");
     }
 
     #[test]
