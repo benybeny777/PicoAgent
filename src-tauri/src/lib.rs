@@ -14,6 +14,7 @@ mod commands;
 mod components;
 mod config;
 mod daily;
+mod diagnostics;
 #[cfg(test)]
 mod doc_sync;
 mod durable_jobs;
@@ -26,6 +27,7 @@ mod guard_scan;
 mod history;
 mod hotkey;
 mod layout;
+mod layout_placements;
 mod license;
 mod log_paths;
 mod mcp;
@@ -130,6 +132,7 @@ pub fn run() {
             commands::settings_character_rename,
             commands::settings_character_remove,
             commands::settings_pick_stream_image,
+            commands::settings_export_diagnostics,
             commands::settings_tha3_status,
             commands::settings_tha3_pick_source,
             commands::settings_tha3_pick_root,
@@ -166,6 +169,7 @@ pub fn run() {
             commands::pet_boot_progress,
             commands::pet_finish_boot,
             commands::pet_reset_layout,
+            commands::pet_save_layout_placements,
             menu::pet_menu,
         ])
         .on_menu_event(|app, event| {

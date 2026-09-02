@@ -807,6 +807,20 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
+        // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
+        "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
+            crate::boot_screen::timeout_ms(&app),
+        ),
+        // 配置編集の位置・倍率。以前は webview の localStorage にしか無く、
+        // WebViewデータの初期化や再インストールで消えていた。
+        "layoutPlacements": crate::layout_placements::normalize(
+            &state
+                .config
+                .get_all()
+                .get("PICOAGENT_LAYOUT_PLACEMENTS")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        ),
         "streamBackground": stream.background,
         "streamBackgroundImage": stream.background_image,
         "streamDisplay": stream.display,
@@ -1519,6 +1533,67 @@ pub fn settings_character_rename(
         }
         Err(error) => Err(format!("表示名を変更できませんでした: {error:#}")),
     }
+}
+
+/// 不具合の連絡へ添える診断情報を1ファイルへ書き出し、保存先を返す。
+///
+/// 保存先はログと同じ置き場にする（新しい保存先やダイアログの権限を増やさない）。
+/// APIキー等の秘密値は本文へ入れない（`diagnostics` 側で伏せる）。
+#[tauri::command]
+pub fn settings_export_diagnostics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let dir = crate::log_paths::ensure_log_dir(&app)
+        .map_err(|error| format!("保存先を作れませんでした: {error}"))?;
+    let now = chrono::Local::now();
+    let path = dir.join(format!("diagnostics-{}.txt", now.format("%Y-%m-%d-%H%M%S")));
+    let config = state.config.get_all();
+    let schema_keys = secret_keys();
+    let mut secret_values = Vec::new();
+    for (key, value) in &config {
+        if !is_secret_setting(&schema_keys, key) {
+            continue;
+        }
+        if let Some(raw) = value.as_str().filter(|raw| !raw.trim().is_empty()) {
+            secret_values.push(raw.to_string());
+        }
+        let resolved = state.config.get(key, "");
+        if !resolved.trim().is_empty() {
+            secret_values.push(resolved);
+        }
+    }
+    for (key, value) in std::env::vars() {
+        if is_secret_setting(&schema_keys, &key) && !value.is_empty() {
+            secret_values.push(value);
+        }
+    }
+    secret_values.sort();
+    secret_values.dedup();
+    let log_tail = crate::log_paths::read_tail(
+        &app,
+        "app.log",
+        crate::diagnostics::LOG_TAIL_LINES,
+        crate::diagnostics::LOG_TAIL_BYTES,
+    );
+    let body = crate::diagnostics::build_report(&crate::diagnostics::Report {
+        generated_at: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        beta_build: cfg!(feature = "beta-full"),
+        config: &config,
+        secret_keys: &schema_keys,
+        log_tail: &log_tail,
+        secret_values: &secret_values,
+    });
+    crate::store::write_atomic(&path, body.as_bytes())
+        .map_err(|error| format!("書き出しに失敗しました: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("診断情報を書き出しました: {}", path.display()),
+    );
+    Ok(json!({ "path": path.to_string_lossy() }))
 }
 
 /// THA3制作ツールと学習済みモデルがGUI生成に使える状態か返す。
@@ -3452,6 +3527,26 @@ pub fn pet_frontend_ready(app: AppHandle) {
 #[tauri::command]
 pub fn pet_boot_progress(app: AppHandle) {
     crate::boot_screen::mark_progress(&app);
+}
+
+/// 配置編集（OBS風）で決めた位置・倍率を設定へ保存する。
+///
+/// 編集中は書かず、「保存」「閉じる」「表示形式・キャラ切替」「リセット」の確定時だけ呼ぶ。
+/// 保存値は `layout_placements::normalize_checked` を通し、壊れた入力で既存の配置を
+/// まとめて失わないようにする。
+#[tauri::command]
+pub fn pet_save_layout_placements(
+    state: State<'_, AppState>,
+    placements: Value,
+) -> Result<(), String> {
+    let _guard = crate::store::lock_state("PICOAGENT_LAYOUT_PLACEMENTS");
+    let normalized = crate::layout_placements::normalize_checked(&placements)?;
+    let mut patch = Map::new();
+    patch.insert("PICOAGENT_LAYOUT_PLACEMENTS".to_string(), normalized);
+    state
+        .config
+        .set_all(patch)
+        .map_err(|error| format!("配置の保存に失敗しました: {error}"))
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。

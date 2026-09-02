@@ -102,6 +102,8 @@ window.picoagent = {
   bootProgress: () => call("pet_boot_progress"),
   // 共通VTuber起動画面から、保存中の表示形式と寸法へ戻す。
   finishBoot: () => call("pet_finish_boot"),
+  // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
+  saveLayoutPlacements: (placements) => call("pet_save_layout_placements", { placements }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
@@ -199,6 +201,8 @@ window.picoagent = {
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
     renameCharacter: (id, name) => call("settings_character_rename", { id, name }),
+    // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
+    exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
     installComponents: (ids, enableTts = false) => call("settings_components_install", { ids, enableTts }),
     removeComponent: (id) => call("settings_components_remove", { id }),
