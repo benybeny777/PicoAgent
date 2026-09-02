@@ -1,7 +1,10 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "picoagent.layoutEditor.v1";
+  // 旧保存先（webviewのlocalStorage）。正本は設定の `PICOAGENT_LAYOUT_PLACEMENTS` へ移した。
+  // 初回だけここから読み出して設定へ移し、以後は読み書きしない。
+  const LEGACY_STORAGE_KEY = "picoagent.layoutEditor.v1";
+  const LEGACY_MIGRATED_KEY = "picoagent.layoutEditor.migrated";
   const app = document.getElementById("petApp");
   const toggle = document.getElementById("layoutEditToggle");
   const toolbar = document.getElementById("layoutEditorToolbar");
@@ -28,24 +31,44 @@
   };
   for (const source of Object.values(sources)) source?.setAttribute("data-layout-editor-source", "true");
 
-  // 読めない保存値をそのまま空で上書きすると、他の表示形式へ作った配置まで消える。
+  // 読めない旧保存値をそのまま空で上書きすると、他の表示形式へ作った配置まで消える。
   // Rust 側の `store::quarantine_corrupt()` と同じく、退避してから空で続ける。
-  const readStore = () => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
+  const readLegacyStore = () => {
+    let raw = null;
+    try { raw = localStorage.getItem(LEGACY_STORAGE_KEY); }
+    catch (error) { window.PicoUI?.logApp?.("warn", "旧配置設定を読めません", error); }
+    if (!raw) return null;
     try {
       const value = JSON.parse(raw);
       if (value && typeof value === "object" && !Array.isArray(value)) return value;
       throw new Error("配置の保存値がオブジェクトではありません");
     } catch (error) {
-      const backup = `${STORAGE_KEY}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      const backup = `${LEGACY_STORAGE_KEY}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
       try { localStorage.setItem(backup, raw); }
       catch (saveError) { window.PicoUI?.logApp?.("error", "壊れた配置設定を退避できませんでした", saveError); }
       window.PicoUI?.logApp?.("warn", `配置設定を読めないため空で続けます（退避先: ${backup}）`, error);
-      return {};
+      return null;
     }
   };
-  let store = readStore();
+  const isPlacementObject = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  // 正本は設定側。ここは編集中の作業用の写しで、確定時にまとめて保存する。
+  let store = {};
+  let persistQueue = Promise.resolve();
+  // 設定への保存は確定時だけ（ドラッグのたびに設定ファイルを書かない）。
+  const persist = () => {
+    const save = window.picoagent?.saveLayoutPlacements;
+    if (!save) return Promise.resolve(false);
+    // 後の確定操作が先に保存されると古い配置へ巻き戻るため、呼び出し順に直列化する。
+    // 保存開始後の編集で引数が変わらないよう、渡す値もその時点の写しにする。
+    const placements = JSON.parse(JSON.stringify(store));
+    const operation = persistQueue.catch(() => undefined).then(() => save(placements));
+    persistQueue = operation;
+    return operation.then(() => true).catch(error => {
+      // 保存できなくても編集中の見た目は保つ。理由はアプリログへ残す。
+      window.PicoUI?.logApp?.("error", "配置を保存できませんでした", error);
+      return false;
+    });
+  };
   let editing = false;
   let selectedKey = "character";
   let undoStack = [];
@@ -215,7 +238,7 @@
       store.characters[id] ||= {};
       store.characters[id][layout] = characterState;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    persist();
     savedAtOpen = cloneLayoutState();
     undoStack = [];
     undoButton.disabled = true;
@@ -235,7 +258,7 @@
       if (!Object.keys(store.characters[id]).length) delete store.characters[id];
       if (!Object.keys(store.characters).length) delete store.characters;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    persist();
     savedAtOpen = {};
     moveable.updateRect();
   };
@@ -285,9 +308,9 @@
     applySavedLayout();
   });
   layoutObserver.observe(app, { attributes: true, attributeFilter: ["data-layout"] });
-  const migrateLegacyCharacterState = () => {
+  const migrateLegacyCharacterState = ({ save = true } = {}) => {
     const id = characterId();
-    if (!id) return;
+    if (!id) return false;
     let changed = false;
     for (const [layout, state] of Object.entries(store)) {
       if (layout === "characters" || !state?.character) continue;
@@ -297,7 +320,8 @@
       delete state.character;
       changed = true;
     }
-    if (changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    if (changed && save) persist();
+    return changed;
   };
   const characterObserver = new MutationObserver(() => {
     // 切替途中の配置は切替前のキャラクターへ保存する（新しいキャラへ漏らさない）。
@@ -316,6 +340,37 @@
     characterObserver.disconnect();
     moveable.destroy();
   }, { once: true });
-  migrateLegacyCharacterState();
-  applySavedLayout();
+  // 設定から配置を受け取って反映する。`renderer.js` が `pet_init` の値で1度呼ぶ。
+  const hydrate = async placements => {
+    store = isPlacementObject(placements) ? placements : {};
+    let migrated = false;
+    let migrationSaveFailed = false;
+    try { migrated = localStorage.getItem(LEGACY_MIGRATED_KEY) === "1"; }
+    catch (error) { window.PicoUI?.logApp?.("warn", "配置設定の移行状態を読めません", error); }
+    // 設定側が空のときだけ、旧localStorageの値を1度だけ引き継ぐ。
+    if (!migrated && !Object.keys(store).length) {
+      const legacy = readLegacyStore();
+      if (legacy && Object.keys(legacy).length) {
+        store = legacy;
+        migrateLegacyCharacterState({ save: false });
+        // 保存に成功した後だけ移行済みにする。失敗時は次回起動で再試行できる。
+        if (await persist()) {
+          try { localStorage.setItem(LEGACY_MIGRATED_KEY, "1"); migrated = true; }
+          catch (error) { window.PicoUI?.logApp?.("warn", "配置設定の移行状態を保存できません", error); }
+          window.PicoUI?.logApp?.("info", "配置編集の保存先を設定へ移しました");
+        } else migrationSaveFailed = true;
+      }
+    }
+    // 旧値が無い場合も再確認を繰り返さない。旧値がある保存失敗時だけ印を付けない。
+    if (!migrated && !migrationSaveFailed) {
+      try { localStorage.setItem(LEGACY_MIGRATED_KEY, "1"); }
+      catch (error) { window.PicoUI?.logApp?.("warn", "配置設定の移行状態を保存できません", error); }
+    }
+    migrateLegacyCharacterState();
+    applySavedLayout();
+  };
+  window.PicoLayoutEditor = { hydrate };
+  // 読み込み順に関係なく受け取れるよう、先に置かれた値があればその場で使う。
+  if (window.__picoLayoutPlacements) hydrate(window.__picoLayoutPlacements);
+  else applySavedLayout();
 })();

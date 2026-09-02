@@ -102,6 +102,8 @@ window.picoagent = {
   bootProgress: () => call("pet_boot_progress"),
   // 共通VTuber起動画面から、保存中の表示形式と寸法へ戻す。
   finishBoot: () => call("pet_finish_boot"),
+  // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
+  saveLayoutPlacements: (placements) => call("pet_save_layout_placements", { placements }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),

@@ -51,18 +51,26 @@ test("準備完了後に保存形式へ戻し起動音声を再生する", () =>
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
-  assert.match(renderer, /bootProgressTimer = setInterval\([\s\S]*?window\.picoagent\.bootProgress\(\)[\s\S]*?10000\)/);
+  assert.match(renderer, /function startBootProgressTicker\(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS\)/);
+  assert.match(renderer, /startBootProgressTicker\(INITIAL_BOOT_PROGRESS_INTERVAL_MS\)/);
+  // 固定値ではなく監視しきい値から決めた間隔を使う（短いしきい値でも通知が間に合う）。
+  assert.match(startup, /startBootProgressTicker\(info\.bootProgressIntervalMs\)/);
+  assert.match(commands, /"bootProgressIntervalMs": crate::boot_screen::progress_interval_ms/);
   assert.match(renderer, /async function releaseBootUi[\s\S]*?clearInterval\(bootProgressTimer\)/);
   assert.match(commands, /pub fn pet_boot_progress[\s\S]*?boot_screen::mark_progress/);
 });
 
-test("起動画面は初期3キャラの寝姿だけをランダム選択する", () => {
-  assert.match(renderer, /STARTUP_SLEEPING_CHARACTER_IDS = Object\.freeze\(\["mugi", "rin", "mai"\]\)/);
-  assert.match(renderer, /function chooseStartupSleepingCharacter\(randomValue = Math\.random\(\)\)/);
-  assert.match(startup, /await prepareBootCharacter\(chooseStartupSleepingCharacter\(\)\)/);
-  assert.ok(startup.indexOf("chooseStartupSleepingCharacter()") < startup.indexOf("loadStartupCharacter()"),
+test("起動画面の寝姿は一覧の印から選ぶ", () => {
+  // IDを直書きすると、寝姿を持つキャラを足したときの更新漏れが黙って起きる。
+  assert.doesNotMatch(renderer, /STARTUP_SLEEPING_CHARACTER_IDS/);
+  assert.match(renderer, /character\.bootSleeping === true/);
+  assert.match(renderer, /function chooseStartupSleepingCharacter\(candidates, randomValue = Math\.random\(\)\)/);
+  assert.match(startup, /chooseStartupSleepingCharacter\(startupSleepingCandidates\(catalog\)\)/);
+  // 候補が無くても起動画面は出す（既定キャラへ落とす）。
+  assert.match(startup, /prepareBootCharacter\(sleeping \|\| catalog\.default/);
+  assert.ok(startup.indexOf("startupSleepingCandidates(catalog)") < startup.indexOf("loadStartupCharacter()"),
     "寝姿を通常キャラクターより先に読み込んでいません");
-  assert.doesNotMatch(startup, /prepareBootCharacter\(info\.characterId/);
+  assert.doesNotMatch(startup, /prepareBootCharacter\(info\.characterId\)/);
 });
 
 test("finishBoot失敗後も位置意図を保持して再試行できる", () => {
