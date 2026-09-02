@@ -5466,23 +5466,55 @@ async function checkAlarms() {
     alarmCheckInFlight = false;
   }
 }
-async function fireAlarm(a, snoozeState = null) {
-  let line = "";
+// 目覚ましの起こし文の生成（モデル呼び出し）と音声合成は、どちらも遅れることがある
+// （ローカルAIの起動直後、Aivisの初回合成はHTTPタイムアウトが180秒）。目覚ましは
+// 「鳴らなかった」がいちばん困るので、待つ上限を決めて文字を先に出す。
+const ALARM_WAKE_TIMEOUT_MS = 20000;
+const ALARM_SPEECH_TIMEOUT_MS = 20000;
+const ALARM_FALLBACK_LINE = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
+const ALARM_RACE_TIMEOUT = Symbol("alarm-timeout");
+
+// 上限まで待ち、間に合わなければ `timedOut` を返す（遅れて届いた結果は使わない）。
+async function waitWithLimit(promise, timeoutMs) {
+  let timer = null;
+  const limit = new Promise(resolve => {
+    timer = setTimeout(() => resolve(ALARM_RACE_TIMEOUT), timeoutMs);
+  });
   try {
-    const res = await window.picoagent.alarmWake(a.id);
-    line = (res?.reply || "").trim();
-  } catch (error) {
-    logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
+    const result = await Promise.race([promise, limit]);
+    return result === ALARM_RACE_TIMEOUT ? { timedOut: true, value: null } : { timedOut: false, value: result };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
-  // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
-  const prepared = await prepareSpeech(line);
+}
+
+async function fireAlarm(a, snoozeState = null) {
+  const wakeRequest = window.picoagent.alarmWake(a.id).catch(error => {
+    logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
+    return null;
+  });
+  const wake = await waitWithLimit(wakeRequest, ALARM_WAKE_TIMEOUT_MS);
+  if (wake.timedOut) {
+    logApp("warn", "目覚ましの起こし文が時間内に届きませんでした", `${ALARM_WAKE_TIMEOUT_MS}ms`);
+  }
+  const line = (wake.value?.reply || "").trim() || ALARM_FALLBACK_LINE;
+  // 声より先に文字を出す。合成が詰まっても目覚ましが黙って消えないようにする。
   renderAlarmReply(line);
   addHistory("assistant", line);
-  if (prepared) playPreparedSpeech(prepared);
-  else if (animationName === "talking") setAnimation("idle");
+  // 再通知の起点も合成待ちで遅らせない。
   // 生成中に「おきたよ！」で解除された場合は、完了後にスヌーズを復活させない。
   if (!snoozeState || activeAlarmSnooze === snoozeState) armAlarmSnooze(a);
+  const speechRequest = prepareSpeech(line).catch(error => {
+    logApp("warn", "目覚ましの音声合成に失敗しました", errorDetail(error));
+    return null;
+  });
+  const speech = await waitWithLimit(speechRequest, ALARM_SPEECH_TIMEOUT_MS);
+  if (speech.timedOut) {
+    // 数分後に突然鳴るほうが困るため、遅れて届いた音声は鳴らさない。
+    logApp("warn", "目覚ましの音声が時間内に用意できませんでした", `${ALARM_SPEECH_TIMEOUT_MS}ms`);
+  }
+  if (!speech.timedOut && speech.value) playPreparedSpeech(speech.value);
+  else if (animationName === "talking") setAnimation("idle");
 }
 function startAlarmPolling() {
   if (alarmTimer) clearInterval(alarmTimer);
