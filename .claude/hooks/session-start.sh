@@ -70,8 +70,16 @@ fi
 # ── 2. 配信フロント（ui-dist）の生成 ─────────────────────────────────
 # `characters/` を `ui/assets/characters/` へ写してから `ui/` を `ui-dist/` へ配信ビルドする。
 # どちらも Git 管理外なので clone 直後は必ず作り直す（dev / build 前の自動実行と同じ手順）。
+# キャラクター同期の失敗でセッション準備を止めない。`characters/**/*.webp` と `*.png` は
+# Git LFS 管理で、git-lfs の無いコンテナでは実体ではなくポインタ文字列が置かれる。
+# そのまま `set -e` で落とすと **ui-dist/ が作られず `cargo check` すら通らない**
+# （実際にこの経路で web セッションの環境準備が丸ごと失敗していた）。
+# コンパイルにキャラクター画像の実体は要らないので、理由を出して先へ進む。
+# 画像の実表示が要る作業は素材が本物か確認すること。
 log "キャラクター素材を ui/assets/characters/ へ同期"
-cargo xtask sync-characters
+if ! cargo xtask sync-characters; then
+  log "キャラクター素材の同期に失敗（Git LFS 未取得の可能性）。画像を伴わない検証だけ続行する"
+fi
 log "ui/ を ui-dist/ へ配信ビルド"
 cargo xtask build-ui
 

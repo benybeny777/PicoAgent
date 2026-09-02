@@ -44,7 +44,11 @@ fn days_arg(args: &Value) -> Vec<String> {
 }
 
 fn format_alarm(a: &Alarm) -> String {
-    let repeat = if a.repeat { "繰り返し" } else { "一度きり" };
+    let repeat = if a.repeat {
+        "繰り返し"
+    } else {
+        "一度きり"
+    };
     let state = if a.enabled { "" } else { "（無効）" };
     let snooze = a.snooze_minutes.clamp(1, 60);
     let label = if a.label.is_empty() {
@@ -84,7 +88,16 @@ impl Tool for AlarmTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["アラーム", "目覚まし", "めざまし", "起こして", "起こし", "alarm", "wake", "何時に"]
+        &[
+            "アラーム",
+            "目覚まし",
+            "めざまし",
+            "起こして",
+            "起こし",
+            "alarm",
+            "wake",
+            "何時に",
+        ]
     }
 
     fn label(&self) -> &'static str {

@@ -1,0 +1,282 @@
+{
+  "version": 1,
+  "mode": "layered-grid-v2",
+  "sourceCanvas": [
+    880,
+    1800
+  ],
+  "canvas": [
+    880,
+    1800
+  ],
+  "contentBox": [
+    15,
+    15,
+    867,
+    1785
+  ],
+  "runtimeScale": 1.0,
+  "grid": [
+    9,
+    15
+  ],
+  "base": "parts/base.webp",
+  "drawables": {
+    "body": {
+      "texture": "parts/body.webp",
+      "textureBox": [
+        65,
+        211,
+        829,
+        1785
+      ],
+      "z": 0,
+      "initialAlpha": 1,
+      "motion": "torso"
+    },
+    "hair-back": {
+      "texture": "parts/hair-back.webp",
+      "textureBox": [
+        136,
+        66,
+        709,
+        634
+      ],
+      "z": 5,
+      "initialAlpha": 1,
+      "motion": "hair-back"
+    },
+    "arm-left": {
+      "texture": "parts/arm-left.webp",
+      "textureBox": [
+        15,
+        617,
+        288,
+        1183
+      ],
+      "z": 10,
+      "initialAlpha": 1,
+      "motion": "arm-left"
+    },
+    "arm-right": {
+      "texture": "parts/arm-right.webp",
+      "textureBox": [
+        595,
+        617,
+        867,
+        1015
+      ],
+      "z": 11,
+      "initialAlpha": 1,
+      "motion": "arm-right"
+    },
+    "face": {
+      "texture": "parts/face.webp",
+      "textureBox": [
+        153,
+        17,
+        695,
+        652
+      ],
+      "z": 20,
+      "initialAlpha": 1,
+      "motion": "fixed"
+    },
+    "hair-front": {
+      "texture": "parts/hair-front.webp",
+      "textureBox": [
+        257,
+        15,
+        589,
+        385
+      ],
+      "z": 30,
+      "initialAlpha": 1,
+      "motion": "hair-front"
+    },
+    "blink_half": {
+      "texture": "parts/blink_half.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        0,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "blink_closed": {
+      "texture": "parts/blink_closed.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        0,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "mouth_open": {
+      "texture": "parts/mouth_open.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        0,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "gaze_left": {
+      "texture": "parts/gaze_left.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        15,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "gaze_right": {
+      "texture": "parts/gaze_right.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        15,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "expression_happy": {
+      "texture": "parts/expression_happy.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        15,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "expression_sad": {
+      "texture": "parts/expression_sad.webp",
+      "box": [
+        125,
+        4,
+        720,
+        663
+      ],
+      "textureBox": [
+        117,
+        15,
+        728,
+        671
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    }
+  },
+  "parameters": {
+    "ParamAngleX": [
+      -6,
+      6,
+      0
+    ],
+    "ParamAngleY": [
+      -4,
+      4,
+      0
+    ],
+    "ParamEyeLOpen": [
+      0,
+      1,
+      1
+    ],
+    "ParamEyeBallX": [
+      -1,
+      1,
+      0
+    ],
+    "ParamMouthOpenY": [
+      0,
+      1,
+      0
+    ],
+    "ParamBreath": [
+      0,
+      1,
+      0
+    ]
+  },
+  "quality": {
+    "source": "同一座標原画の可視画素分離と関節境界の局所再構成",
+    "hiddenAreaSource": true,
+    "hiddenAreaParts": [
+      "body",
+      "hair-back",
+      "arm-left",
+      "arm-right",
+      "face",
+      "hair-front"
+    ],
+    "motionLimits": {
+      "range": "微細変形のみ",
+      "hairCoupledToHead": false,
+      "faceTranslationFixed": true
+    },
+    "gazeSource": "高精細正本の瞳領域を同一座標で局所移動",
+    "limit": "分離原画で定義した部位の微細変形。大きな姿勢変更は対象外"
+  }
+}

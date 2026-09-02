@@ -89,15 +89,29 @@ impl Tool for GoogleDocsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN", "Google ドキュメントの OAuth アクセストークン", "password", "ya29..."),
-            Field::new("PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS", "Google Docs API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN",
+                "Google ドキュメントの OAuth アクセストークン",
+                "password",
+                "ya29...",
+            ),
+            Field::new(
+                "PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS",
+                "Google Docs API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Google Docs", &["PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN"], "Google Docs API を使える OAuth access token が必要です。");
+            return super::config_guide(
+                "Google Docs",
+                &["PICOAGENT_GOOGLE_DOCS_ACCESS_TOKEN"],
+                "Google Docs API を使える OAuth access token が必要です。",
+            );
         }
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs(cfg)))
@@ -105,7 +119,9 @@ impl Tool for GoogleDocsTool {
             .build()
         {
             Ok(client) => client,
-            Err(error) => return format!("エラー: Google Docs API の準備に失敗しました: {}", error),
+            Err(error) => {
+                return format!("エラー: Google Docs API の準備に失敗しました: {}", error)
+            }
         };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "create" => {
@@ -220,7 +236,11 @@ fn document_id(args: &Value) -> Result<&str, String> {
         .ok_or_else(|| "document_id が指定されていません。".to_string())
 }
 
-async fn fetch_end_index(client: &reqwest::Client, token: &str, document_id: &str) -> Result<u64, String> {
+async fn fetch_end_index(
+    client: &reqwest::Client,
+    token: &str,
+    document_id: &str,
+) -> Result<u64, String> {
     let response = client
         .get(format!("{}/{}", DOCS_BASE, document_id))
         .bearer_auth(token)
@@ -233,7 +253,8 @@ async fn fetch_end_index(client: &reqwest::Client, token: &str, document_id: &st
     if !status.is_success() {
         return Err(format!("Google Docs API が HTTP {} を返しました。", status));
     }
-    let parsed: Value = serde_json::from_str(&body).map_err(|error| format!("Docs構造の解析に失敗しました: {}", error))?;
+    let parsed: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Docs構造の解析に失敗しました: {}", error))?;
     parsed
         .get("body")
         .and_then(|body| body.get("content"))
@@ -244,7 +265,10 @@ async fn fetch_end_index(client: &reqwest::Client, token: &str, document_id: &st
         .ok_or_else(|| "文書末尾位置を取得できませんでした。".to_string())
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

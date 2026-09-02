@@ -50,17 +50,41 @@ impl Tool for RedditTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_REDDIT_BEARER_TOKEN", "Reddit の OAuth bearer トークン", "password", ""),
-            Field::new("PICOAGENT_REDDIT_USER_AGENT", "Reddit の User-Agent", "text", "PicoAgent/1.0"),
-            Field::new("PICOAGENT_REDDIT_SUBREDDIT", "Reddit 既定 subreddit", "text", ""),
-            Field::new("PICOAGENT_REDDIT_TIMEOUT_SECS", "Reddit API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_REDDIT_BEARER_TOKEN",
+                "Reddit の OAuth bearer トークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_REDDIT_USER_AGENT",
+                "Reddit の User-Agent",
+                "text",
+                "PicoAgent/1.0",
+            ),
+            Field::new(
+                "PICOAGENT_REDDIT_SUBREDDIT",
+                "Reddit 既定 subreddit",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_REDDIT_TIMEOUT_SECS",
+                "Reddit API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_REDDIT_BEARER_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Reddit", &["PICOAGENT_REDDIT_BEARER_TOKEN"], "Reddit OAuth bearer token が必要です。");
+            return super::config_guide(
+                "Reddit",
+                &["PICOAGENT_REDDIT_BEARER_TOKEN"],
+                "Reddit OAuth bearer token が必要です。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_REDDIT_TIMEOUT_SECS", "20")
@@ -80,7 +104,11 @@ impl Tool for RedditTool {
             "submit_text" => {
                 let subreddit = subreddit(cfg, &args);
                 if subreddit.is_empty() {
-                    return super::config_guide("Reddit", &["PICOAGENT_REDDIT_SUBREDDIT"], "依頼で subreddit を渡すか、既定の subreddit を設定してください。");
+                    return super::config_guide(
+                        "Reddit",
+                        &["PICOAGENT_REDDIT_SUBREDDIT"],
+                        "依頼で subreddit を渡すか、既定の subreddit を設定してください。",
+                    );
                 }
                 let title = match text_arg(&args, "title", MAX_TITLE_CHARS) {
                     Ok(title) => title,
@@ -110,7 +138,11 @@ impl Tool for RedditTool {
             "subreddit_hot" => {
                 let subreddit = subreddit(cfg, &args);
                 if subreddit.is_empty() {
-                    return super::config_guide("Reddit", &["PICOAGENT_REDDIT_SUBREDDIT"], "依頼で subreddit を渡すか、既定の subreddit を設定してください。");
+                    return super::config_guide(
+                        "Reddit",
+                        &["PICOAGENT_REDDIT_SUBREDDIT"],
+                        "依頼で subreddit を渡すか、既定の subreddit を設定してください。",
+                    );
                 }
                 let limit = args
                     .get("limit")
@@ -149,7 +181,10 @@ impl Tool for RedditTool {
                 )
                 .await
             }
-            _ => "エラー: action は submit_text/subreddit_hot/comment のいずれかを指定してください。".to_string(),
+            _ => {
+                "エラー: action は submit_text/subreddit_hot/comment のいずれかを指定してください。"
+                    .to_string()
+            }
         }
     }
 }
@@ -171,12 +206,18 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
     if text.chars().count() > max_chars {
-        return Err(format!("{} は {} 文字以内で指定してください。", key, max_chars));
+        return Err(format!(
+            "{} は {} 文字以内で指定してください。",
+            key, max_chars
+        ));
     }
     Ok(text)
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

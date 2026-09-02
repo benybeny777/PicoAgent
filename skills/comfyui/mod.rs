@@ -128,7 +128,17 @@ impl Tool for ComfyuiTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["画像", "絵", "イラスト", "描いて", "生成して", "comfyui", "image", "写真", "動画"]
+        &[
+            "画像",
+            "絵",
+            "イラスト",
+            "描いて",
+            "生成して",
+            "comfyui",
+            "image",
+            "写真",
+            "動画",
+        ]
     }
     fn label(&self) -> &'static str {
         "ComfyUI 画像生成"
@@ -241,15 +251,8 @@ impl Tool for ComfyuiTool {
             .and_then(|v| v.as_f64())
             .unwrap_or(7.0)
             .clamp(1.0, 30.0);
-        let seed_raw = args
-            .get("seed")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(-1);
-        let seed = if seed_raw < 0 {
-            rand_seed()
-        } else {
-            seed_raw
-        };
+        let seed_raw = args.get("seed").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let seed = if seed_raw < 0 { rand_seed() } else { seed_raw };
 
         let workflow = build_txt2img_workflow(&Txt2ImgParams {
             prompt: &prompt,
@@ -299,10 +302,7 @@ impl Tool for ComfyuiTool {
             Ok(d) => d,
             Err(e) => return format!("エラー: ComfyUI レスポンスの解析に失敗しました: {e}"),
         };
-        let prompt_id = match queue_data
-            .get("prompt_id")
-            .and_then(|v| v.as_str())
-        {
+        let prompt_id = match queue_data.get("prompt_id").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => return format!("エラー: prompt_id が取得できませんでした: {queue_data}"),
         };
@@ -351,13 +351,15 @@ impl Tool for ComfyuiTool {
             percent_encode_component(&file_type)
         );
         if !subfolder.is_empty() {
-            view_url.push_str(&format!("&subfolder={}", percent_encode_component(&subfolder)));
+            view_url.push_str(&format!(
+                "&subfolder={}",
+                percent_encode_component(&subfolder)
+            ));
         }
 
         let alt: String = prompt.chars().take(40).collect();
-        let is_video = filename.ends_with(".gif")
-            || filename.ends_with(".mp4")
-            || filename.ends_with(".webm");
+        let is_video =
+            filename.ends_with(".gif") || filename.ends_with(".mp4") || filename.ends_with(".webm");
         if is_video {
             format!(
                 "動画を生成しました: [{filename}]({view_url})\n\
@@ -395,9 +397,7 @@ fn percent_encode_component(s: &str) -> String {
                 let bytes = c.encode_utf8(&mut buf).as_bytes().to_vec();
                 bytes
                     .into_iter()
-                    .flat_map(|b| {
-                        format!("%{b:02X}").chars().collect::<Vec<_>>()
-                    })
+                    .flat_map(|b| format!("%{b:02X}").chars().collect::<Vec<_>>())
                     .collect()
             }
         })

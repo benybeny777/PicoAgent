@@ -23,10 +23,12 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト・位置…")
         .build(&app)
         .map_err(|e| e.to_string())?;
-    let character_settings =
-        MenuItemBuilder::with_id("character_settings", "キャラクター・音声の設定…")
-            .build(&app)
-            .map_err(|e| e.to_string())?;
+    let edit_layout = MenuItemBuilder::with_id("edit_layout", "配置を直接調整")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
+    let character_settings = MenuItemBuilder::with_id("character_settings", "キャラクターの設定…")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
     let is_always_on_top = window.is_always_on_top().map_err(|e| e.to_string())?;
     let ontop = CheckMenuItemBuilder::with_id("ontop", "常に手前に表示")
         .checked(is_always_on_top)
@@ -128,6 +130,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .separator()
         .item(&layout_menu)
         .item(&placement_menu)
+        .item(&edit_layout)
         .item(&ontop)
         .item(&tts)
         .separator()
@@ -185,6 +188,16 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
         "settings" => open_settings(app),
         "display_settings" => open_display_settings(app),
         "character_settings" => open_character_settings(app),
+        "edit_layout" => {
+            if let Some(win) = app.get_webview_window("main") {
+                if let Err(error) = win.emit("pet:layout-edit", "character") {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("配置編集を画面へ開始できません: {error}"),
+                    );
+                }
+            }
+        }
         "ontop" => {
             if let Some(win) = app.get_webview_window("main") {
                 let now = match win.is_always_on_top() {

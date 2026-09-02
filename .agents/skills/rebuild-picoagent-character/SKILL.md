@@ -13,7 +13,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 
 ## 対応形式と構図
 
-- 対応ランタイムは通常2D画像とLive2D。同梱通常2Dの制作正本はPNG、実行フレームと差分レイヤーはlossless WebPとする。利用者が追加済みのPNGパックは後方互換で読み続ける。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
+- 対応ランタイムは通常2D画像、自前メッシュリグ、Live2D。同梱通常2Dの制作正本はPNG、実行フレームと差分レイヤーはlossless WebPとする。利用者が追加済みのPNGパックは後方互換で読み続ける。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
 - 低頭身2Dは従来の上半身位置、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にする。
 - チャット／バーの小型アイコンは首上にする。保存済みの利用者構図は初期値より優先する。
 - 画面位置の手動調整は別作業。依頼がなければ原画やmanifestへ焼き込まない。
@@ -28,6 +28,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - Pillow、ブラウザ、CSS等による単純なピクセル拡大を高精細化と呼ばない。
 - `characters/<id>/layers/*.png` は制作正本として残し、`scripts/build-character-animations.py` だけで `runtime-layers/*.webp` と `frames/<世代>/*.webp` へ変換する。変換後は寸法と復号RGBAを元画像と完全一致させ、1画素でも違えば採用しない。
 - 生成後に `cargo xtask sync-characters` を通し、配信コピーから制作正本の `layers/` が除外され、manifestの `runtimeLayers` と `framePaths` がlossless WebPだけを指すことを確認する。
+- 自前メッシュリグは`mesh-rig/source/regions.json`を制作設定とする。同梱通常2Dは`build-separated-mesh-sources.py`で胴、後ろ髪、左右腕、顔、前髪の同一座標PNGを先に生成し、`build-mesh-rig.py`で`parts/*.webp`と`rig.json`を再生成する。中立合成が基準画像と画素一致しない場合は停止する。`runtimeScale`は1以下、`source/`は配信除外とし、広可動域へ広げる場合は隠れ領域を描き足した原画が揃うまで実装済みと扱わない。
 
 ## 表情差分と透過
 
@@ -55,6 +56,8 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 
 ```powershell
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
+uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画
+uv run --python 3.12 --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
 cargo xtask sync-characters
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml

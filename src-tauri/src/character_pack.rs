@@ -93,7 +93,7 @@ pub fn validate(source: &Path) -> Result<Value> {
     if live2d_model.is_none() && !idle_has_frames {
         bail!("live2d.model または animations.idle の path / framePaths が必要です");
     }
-    for pointer in ["/boot/sleeping", "/live2d/model"] {
+    for pointer in ["/boot/sleeping", "/live2d/model", "/meshRig/rig"] {
         if let Some(relative) = manifest.pointer(pointer).and_then(Value::as_str) {
             ensure_asset(source, relative)
                 .with_context(|| format!("{pointer} が指すファイルがありません"))?;
@@ -102,12 +102,53 @@ pub fn validate(source: &Path) -> Result<Value> {
     if let Some(model) = live2d_model {
         validate_live2d_model(source, model)?;
     }
+    validate_mesh_rig(source, &manifest)?;
     validate_animations(source, &manifest)?;
     validate_variants(source, &manifest)?;
     validate_secondary_motion(&manifest, "secondaryMotion")?;
     validate_spring_physics(&manifest, "springPhysics")?;
     validate_interactions(&manifest)?;
     Ok(manifest)
+}
+
+fn validate_mesh_rig(source: &Path, manifest: &Value) -> Result<()> {
+    let Some(relative) = manifest.pointer("/meshRig/rig").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let rig_path = source.join(relative);
+    let rig: Value = serde_json::from_str(
+        &std::fs::read_to_string(&rig_path)
+            .with_context(|| format!("{} を読めません", rig_path.display()))?,
+    )
+    .context("meshRig.rig が不正なJSONです")?;
+    if rig.get("version").and_then(Value::as_u64) != Some(1)
+        || rig.get("mode").and_then(Value::as_str) != Some("single-sheet-grid-v1")
+    {
+        bail!("meshRig.rig の形式に対応していません");
+    }
+    let root = rig_path
+        .parent()
+        .context("meshRig.rig の親フォルダがありません")?;
+    let mut textures = vec![rig.get("base").and_then(Value::as_str).unwrap_or("")];
+    if let Some(drawables) = rig.get("drawables").and_then(Value::as_object) {
+        textures.extend(
+            drawables
+                .values()
+                .filter_map(|item| item.get("texture").and_then(Value::as_str)),
+        );
+    }
+    for texture in textures {
+        if texture.is_empty()
+            || texture.replace('\\', "/").contains("../")
+            || texture.contains("source/")
+        {
+            bail!("meshRigの実行テクスチャパスが不正です: {texture}");
+        }
+        if !root.join(texture).is_file() {
+            bail!("meshRigのテクスチャがありません: {texture}");
+        }
+    }
+    Ok(())
 }
 
 fn animation_has_frames(animation: &Value) -> bool {
@@ -456,6 +497,67 @@ pub fn validate_interactions(manifest: &Value) -> Result<()> {
     Ok(())
 }
 
+/// 同梱キャラクター一覧（`characters/index.json`）と各 `character.json` のズレを検出する。
+///
+/// 起動画面の寝姿は一覧の `bootSleeping` だけを見て選ぶ（起動経路で全キャラの定義を
+/// 読みに行かないため）。正本は各キャラの `boot.useSleepingOnStartup` なので、
+/// 写し忘れ・消し忘れをここで落とす。
+#[cfg(test)]
+mod bundled_index_guard {
+    use serde_json::Value;
+
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("リポジトリルートを取得できない")
+            .to_path_buf()
+    }
+
+    fn read_json(path: &std::path::Path) -> Value {
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("{} を読めません: {error}", path.display()));
+        serde_json::from_str(&text)
+            .unwrap_or_else(|error| panic!("{} が不正なJSONです: {error}", path.display()))
+    }
+
+    #[test]
+    fn 起動寝姿の印は一覧とキャラクター定義で一致する() {
+        let root = repo_root().join("characters");
+        let index = read_json(&root.join("index.json"));
+        let characters = index["characters"]
+            .as_array()
+            .expect("characters/index.json に characters 配列がありません");
+
+        let mut mismatched = Vec::new();
+        for entry in characters {
+            let id = entry["id"].as_str().unwrap_or_default();
+            let manifest_path = entry["manifest"].as_str().unwrap_or_default();
+            if id.is_empty() || manifest_path.is_empty() {
+                continue;
+            }
+            let manifest = read_json(&root.join(manifest_path));
+            let declared = entry
+                .get("bootSleeping")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let actual = manifest
+                .pointer("/boot/useSleepingOnStartup")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if declared != actual {
+                mismatched.push(format!(
+                    "{id}: index.json={declared} / character.json={actual}"
+                ));
+            }
+        }
+        assert!(
+            mismatched.is_empty(),
+            "起動画面の寝姿の印がずれています（一覧は character.json の写し）: {}",
+            mismatched.join(" / ")
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +665,51 @@ mod tests {
         )
         .unwrap();
         validate(&dir).expect("WebP共有フレーム参照を検証できない");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn メッシュリグの実行資産を検証する() {
+        let dir = temp_dir("mesh-rig");
+        std::fs::create_dir_all(dir.join("frames")).unwrap();
+        std::fs::create_dir_all(dir.join("mesh-rig/parts")).unwrap();
+        std::fs::write(dir.join("frames/a.webp"), b"RIFF\0\0\0\0WEBP").unwrap();
+        std::fs::write(dir.join("mesh-rig/parts/base.webp"), b"RIFF\0\0\0\0WEBP").unwrap();
+        std::fs::write(dir.join("mesh-rig/parts/blink.webp"), b"RIFF\0\0\0\0WEBP").unwrap();
+        std::fs::write(
+            dir.join("mesh-rig/rig.json"),
+            serde_json::to_string(&json!({
+                "version": 1,
+                "mode": "single-sheet-grid-v1",
+                "base": "parts/base.webp",
+                "drawables": { "blink_closed": { "texture": "parts/blink.webp" } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "mesh-rig", "name": "メッシュリグ",
+                "animations": { "idle": { "frames": 1, "framePaths": ["frames/a.webp"] } },
+                "meshRig": { "rig": "mesh-rig/rig.json" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        validate(&dir).expect("正しいメッシュリグを拒否した");
+
+        std::fs::write(
+            dir.join("mesh-rig/rig.json"),
+            serde_json::to_string(&json!({
+                "version": 1, "mode": "single-sheet-grid-v1",
+                "base": "source/regions.json"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let error = validate(&dir).unwrap_err().to_string();
+        assert!(error.contains("パスが不正"), "error: {error}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

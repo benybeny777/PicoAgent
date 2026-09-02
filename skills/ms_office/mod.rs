@@ -13,15 +13,14 @@
 //   export_pdf  … OfficeCLI（soffice --headless --convert-to pdf）で PDF 出力する
 
 use std::io::{Read, Write};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::message::Field;
+use crate::permissions::SafePath;
 
 pub struct MsOfficeTool;
 
@@ -50,7 +49,12 @@ fn xml_escape(text: &str) -> String {
 
 /// OOXML（docx/xlsx/pptx）を ZIP として開き、XML エントリ内の文字列を置換して書き出す。
 /// XML 以外のエントリ（画像など）はそのままコピーする。置換した総数を返す。
-fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replacement: &str) -> Result<usize, String> {
+fn replace_in_ooxml(
+    input: &SafePath,
+    output: &SafePath,
+    needle: &str,
+    replacement: &str,
+) -> Result<usize, String> {
     let file = std::fs::File::open(input).map_err(|e| format!("入力を開けません: {e}"))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| format!("Office ファイルとして開けません（docx/xlsx/pptx のみ対応）: {e}"))?;
@@ -67,7 +71,9 @@ fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replaceme
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
         if name.ends_with('/') {
-            writer.add_directory(&name, options).map_err(|e| e.to_string())?;
+            writer
+                .add_directory(&name, options)
+                .map_err(|e| e.to_string())?;
             continue;
         }
         let mut data = Vec::new();
@@ -81,11 +87,15 @@ fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replaceme
                 let count = text.matches(&escaped_needle).count();
                 if count > 0 {
                     total += count;
-                    data = text.replace(&escaped_needle, &escaped_replacement).into_bytes();
+                    data = text
+                        .replace(&escaped_needle, &escaped_replacement)
+                        .into_bytes();
                 }
             }
         }
-        writer.start_file(&name, options).map_err(|e| e.to_string())?;
+        writer
+            .start_file(&name, options)
+            .map_err(|e| e.to_string())?;
         writer.write_all(&data).map_err(|e| e.to_string())?;
     }
     let buffer = writer.finish().map_err(|e| e.to_string())?.into_inner();
@@ -106,7 +116,12 @@ fn replace_in_ooxml(input: &SafePath, output: &SafePath, needle: &str, replaceme
 }
 
 /// OfficeCLI で PDF へ変換する。出力は入力と同名の .pdf（output_path 指定時はリネーム）。
-async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, timeout: u64) -> String {
+async fn export_pdf(
+    cfg: &Config,
+    input: &SafePath,
+    output: Option<&SafePath>,
+    timeout: u64,
+) -> String {
     let program = crate::tools::document_convert::office_cli_path(cfg);
     let out_dir = output.unwrap_or(input).parent_or_root(cfg);
     if let Err(error) = crate::permissions::fs::create_dir_all(&out_dir) {
@@ -116,16 +131,19 @@ async fn export_pdf(cfg: &Config, input: &SafePath, output: Option<&SafePath>, t
     command
         .args(["--headless", "--convert-to", "pdf", "--outdir"])
         .arg(&out_dir)
-        .arg(input)
-        ;
-    let result = match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => {
-            return format!(
-                "エラー: OfficeCLI（{program}）を起動できません: {error}\n設定の「追加機能」からLibreOffice公式ページを開いて導入するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。"
-            );
-        }
-        Err(_) => return format!("エラー: PDF 変換が {timeout} 秒でタイムアウトしました。"),
+        .arg(input);
+    // 共通層を通す。`soffice` は起動直後に `soffice.bin` を立て直して自身は終了するため、
+    // `tokio::time::timeout` で包むだけでは打ち切り時に本体が残る（`kill_on_drop` は直下にしか届かない）。
+    let result = match crate::tools::process::output_or_install_hint(
+        command,
+        timeout,
+        &format!("PDF 変換（OfficeCLI: {program}）"),
+        "設定の「追加機能」からLibreOffice公式ページを開いて導入するか、PICOAGENT_LIBREOFFICE_PATH を設定してください。",
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) => return format!("エラー: {error}"),
     };
     if !result.status.success() {
         return format!(
@@ -248,7 +266,10 @@ impl Tool for MsOfficeTool {
                 if needle.is_empty() {
                     return "エラー: needle が指定されていません。".to_string();
                 }
-                let replacement = args.get("replacement").and_then(Value::as_str).unwrap_or("");
+                let replacement = args
+                    .get("replacement")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 let target = output.unwrap_or_else(|| input.clone());
                 match replace_in_ooxml(&input, &target, needle, replacement) {
                     Ok(0) => format!(
@@ -260,7 +281,9 @@ impl Tool for MsOfficeTool {
                 }
             }
             "export_pdf" => export_pdf(cfg, &input, output.as_ref(), timeout).await,
-            _ => "エラー: action は replace_text または export_pdf を指定してください。".to_string(),
+            _ => {
+                "エラー: action は replace_text または export_pdf を指定してください。".to_string()
+            }
         }
     }
 }
@@ -278,7 +301,9 @@ mod tests {
         let options = zip::write::SimpleFileOptions::default();
         writer.start_file("word/document.xml", options).unwrap();
         writer
-            .write_all(format!("<w:document><w:t>{}</w:t></w:document>", xml_escape(body)).as_bytes())
+            .write_all(
+                format!("<w:document><w:t>{}</w:t></w:document>", xml_escape(body)).as_bytes(),
+            )
             .unwrap();
         writer.start_file("word/media/img.bin", options).unwrap();
         writer.write_all(&[0u8, 159, 146, 150]).unwrap(); // XML でないバイナリはそのまま残る
@@ -288,11 +313,18 @@ mod tests {
 
     #[test]
     fn ooxml内の文字列を置換する() {
-        let dir = std::env::temp_dir().join(format!("picoagent-office-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("picoagent-office-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let input = make_docx(&dir, "旧社名<A&B>のご案内と旧社名の住所");
         let output = dir.join("out.docx");
-        let count = replace_in_ooxml(&SafePath::app_owned(input.clone()), &SafePath::app_owned(output.clone()), "旧社名", "新社名").unwrap();
+        let count = replace_in_ooxml(
+            &SafePath::app_owned(input.clone()),
+            &SafePath::app_owned(output.clone()),
+            "旧社名",
+            "新社名",
+        )
+        .unwrap();
         assert_eq!(count, 2);
 
         let file = std::fs::File::open(&output).unwrap();
@@ -313,7 +345,8 @@ mod tests {
     /// 欠けた導入では終了コード 0 のまま何も出力しない。存在確認だけをスキップ条件に
     /// すると、そういう環境で毎回落ちるテストになってしまう。
     fn soffice_can_convert() -> bool {
-        let dir = std::env::temp_dir().join(format!("picoagent-office-probe-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("picoagent-office-probe-{}", std::process::id()));
         if std::fs::create_dir_all(&dir).is_err() {
             return false;
         }
@@ -358,7 +391,12 @@ mod tests {
         let cfg = crate::config::Config::new();
         std::env::set_var("PICOAGENT_ALLOWED_ROOT", dir.to_string_lossy().to_string());
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let result = runtime.block_on(super::export_pdf(&cfg, &SafePath::app_owned(docx.clone()), None, 120));
+        let result = runtime.block_on(super::export_pdf(
+            &cfg,
+            &SafePath::app_owned(docx.clone()),
+            None,
+            120,
+        ));
         std::env::remove_var("PICOAGENT_ALLOWED_ROOT");
         assert!(result.contains("PDF を出力しました"), "結果: {result}");
         assert!(dir.join("hello.pdf").exists());
@@ -372,7 +410,13 @@ mod tests {
         let input = make_docx(&dir, "A&B社 と A&B社");
         let output = dir.join("out.docx");
         // 検索語に & を含む場合も、格納形（&amp;）へ揃えて一致する。
-        let count = replace_in_ooxml(&SafePath::app_owned(input.clone()), &SafePath::app_owned(output.clone()), "A&B社", "C&D社").unwrap();
+        let count = replace_in_ooxml(
+            &SafePath::app_owned(input.clone()),
+            &SafePath::app_owned(output.clone()),
+            "A&B社",
+            "C&D社",
+        )
+        .unwrap();
         assert_eq!(count, 2);
         let _ = std::fs::remove_dir_all(&dir);
     }

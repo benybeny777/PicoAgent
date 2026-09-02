@@ -9,19 +9,27 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
 /// 案内ページを返す専用 URI スキーム。
 pub const SCHEME: &str = "picoboot";
 
-/// フロントから準備完了が来るまでの既定待ち時間（ミリ秒）。
-/// 初回起動は webview の初期化とアセット読み込みで数秒かかるため、余裕を持たせる。
-const DEFAULT_TIMEOUT_MS: u64 = 12_000;
+/// フロントの開始通知、または開始後の進捗通知が途絶えてから失敗とする時間（ミリ秒）。
+/// 初回はモデルや音声の取得とウイルス検査で長くなるため、2分の無通信だけを停止扱いにする。
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+/// 読込開始通知（`pet_frontend_ready`）だけを待つ時間（ミリ秒）。
+/// webview がページを出せない障害は起動準備の長さと無関係なので、進捗監視と同じだけ待たせない。
+const START_TIMEOUT_MS: u64 = 12_000;
 /// 待ち時間の下限・上限（設定値が極端でも実用範囲へ収める）。
 const MIN_TIMEOUT_MS: u64 = 3_000;
 const MAX_TIMEOUT_MS: u64 = 120_000;
+/// 生存通知の間隔の下限・上限（詰まりすぎず、しきい値より十分に短く保つ）。
+const MIN_PROGRESS_INTERVAL_MS: u64 = 1_000;
+const MAX_PROGRESS_INTERVAL_MS: u64 = 10_000;
+// 画面を出せない障害の案内を、長い準備の監視と同じだけ待たせない（実用範囲にも収める）。
+const _: () = assert!(START_TIMEOUT_MS < DEFAULT_TIMEOUT_MS && START_TIMEOUT_MS >= MIN_TIMEOUT_MS);
 
 const PAGE_HTML: &str = include_str!("../assets/boot_screen/page.html");
 const CHARACTER_PNG: &[u8] = include_bytes!("../assets/boot_screen/character.png");
@@ -33,6 +41,8 @@ pub struct BootScreenState {
     started: AtomicBool,
     /// フロントが `pet_finish_boot` まで到達し、起動画面を終了したか。
     finished: AtomicBool,
+    /// 起動準備中のフロントから最後に生存通知が届いた時刻。
+    last_progress: Mutex<Option<Instant>>,
     /// 案内ページへ切り替え済みか（多重 navigate を避ける）。
     shown: AtomicBool,
     /// 本来表示するはずだったアプリの URL（「もう一度読み込む」の遷移先）。
@@ -51,6 +61,13 @@ impl BootScreenState {
 pub fn mark_started(app: &AppHandle) {
     let state = app.state::<BootScreenState>();
     state.started.store(true, Ordering::SeqCst);
+    *state.last_progress.lock().unwrap() = Some(Instant::now());
+}
+
+/// フロントが起動準備を継続できていることを記録する。
+pub fn mark_progress(app: &AppHandle) {
+    let state = app.state::<BootScreenState>();
+    *state.last_progress.lock().unwrap() = Some(Instant::now());
 }
 
 /// フロントが起動画面を終了したことを記録する。
@@ -99,6 +116,8 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
         )
     };
 
+    let log_html = format!("<b>直近のログ</b>{}", escape(&recent_log(app)));
+
     let body = PAGE_HTML
         .replace("__CHARACTER__", &character_data_uri())
         .replace("__HEADLINE__", "あれ…？ うまく起きられなかったみたい")
@@ -107,7 +126,8 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
             "画面の中身を読み込めませんでした。少し待ってからもう一度読み込んでみてね。",
         )
         .replace("__DETAIL__", &detail_html)
-        .replace("__ACTIONS__", &actions_html);
+        .replace("__ACTIONS__", &actions_html)
+        .replace("__LOG__", &log_html);
 
     tauri::http::Response::builder()
         .status(tauri::http::StatusCode::OK)
@@ -130,6 +150,19 @@ fn character_data_uri() -> String {
 }
 
 /// HTML のテキスト・属性値へ埋めるためのエスケープ。
+/// 案内画面へ出すログの行数と読み取り上限。巨大ログでも一定時間で表示する。
+const LOG_TAIL_LINES: usize = 12;
+const LOG_TAIL_BYTES: u64 = 8 * 1024;
+
+/// 当日の `app.log` の末尾を読む。読めない場合も案内画面自体は必ず出す。
+fn recent_log(app: &AppHandle) -> String {
+    let tail = crate::log_paths::read_tail(app, "app.log", LOG_TAIL_LINES, LOG_TAIL_BYTES);
+    if tail.trim().is_empty() {
+        return "まだ記録がありません。".to_string();
+    }
+    tail
+}
+
 fn escape(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
@@ -145,19 +178,39 @@ fn escape(raw: &str) -> String {
     out
 }
 
-/// フロントの読込開始と起動完了を別々に待ち、時間内に来なければ案内ページへ切り替える。
+/// 進捗通知が途絶えたと判定するまでの残り時間。`None` は停止扱い。
+fn progress_remaining(last_progress: Option<Instant>, timeout: Duration) -> Option<Duration> {
+    let elapsed = last_progress?.elapsed();
+    timeout.checked_sub(elapsed).filter(|rest| !rest.is_zero())
+}
+
+/// フロントの読込開始を待ち、開始後は進捗通知が途絶えた場合だけ案内ページへ切り替える。
+/// 進捗が途絶えたと判定するまでの時間（設定値を実用範囲へ収めたもの）。
+pub fn timeout_ms(app: &AppHandle) -> u64 {
+    let config = &app.state::<crate::commands::AppState>().config;
+    config
+        .get("PICOAGENT_BOOT_TIMEOUT_MS", "")
+        .parse::<u64>()
+        .unwrap_or(DEFAULT_TIMEOUT_MS)
+        .clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
+}
+
+/// フロントが生存通知を送る間隔。しきい値から決めるため、設定を短くしても
+/// 「正常な起動なのに通知が間に合わず案内画面へ落ちる」が起きない。
+/// 4分割にするのは、通知が1回落ちてもすぐには停止扱いにしないため。
+pub fn progress_interval_ms(timeout_ms: u64) -> u64 {
+    (timeout_ms / 4).clamp(MIN_PROGRESS_INTERVAL_MS, MAX_PROGRESS_INTERVAL_MS)
+}
+
 pub fn watch(app: AppHandle) {
-    let timeout_ms = {
-        let config = &app.state::<crate::commands::AppState>().config;
-        config
-            .get("PICOAGENT_BOOT_TIMEOUT_MS", "")
-            .parse::<u64>()
-            .unwrap_or(DEFAULT_TIMEOUT_MS)
-            .clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
-    };
+    let timeout_ms = timeout_ms(&app);
+
+    // 読込開始が来ない障害（配信元の停止・スクリプトの構文エラー）は準備の長さと無関係なので、
+    // 案内ページまで2分待たせない。設定で待ち時間を短くした場合はそちらへ合わせる。
+    let start_timeout_ms = timeout_ms.min(START_TIMEOUT_MS);
 
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+        tokio::time::sleep(Duration::from_millis(start_timeout_ms)).await;
         let started = app
             .state::<BootScreenState>()
             .started
@@ -165,25 +218,33 @@ pub fn watch(app: AppHandle) {
         if !started {
             show_failure(
                 &app,
-                timeout_ms,
-                format!("{timeout_ms} ミリ秒以内にフロントエンドの読込開始通知が届きませんでした"),
+                start_timeout_ms,
+                format!(
+                    "{start_timeout_ms} ミリ秒以内にフロントエンドの読込開始通知が届きませんでした"
+                ),
             );
             return;
         }
-        // JavaScript先頭の通知だけで監視を解除しない。その後のトップレベル例外や
-        // 初期化停止も検出できるよう、起動完了通知をもう1区間待つ。
-        tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
-        if app
-            .state::<BootScreenState>()
-            .finished
-            .load(Ordering::SeqCst)
-        {
-            return;
+        // モデル・音声の取得は2分を超えることがある。完了までの総時間ではなく、
+        // JavaScriptからの生存通知が1区間途絶えた場合だけ停止と判定する。
+        let timeout = Duration::from_millis(timeout_ms);
+        loop {
+            let remaining = {
+                let state = app.state::<BootScreenState>();
+                if state.finished.load(Ordering::SeqCst) {
+                    return;
+                }
+                // 最後の通知からの経過分を差し引き、停止の検出を1区間ぶん遅らせない。
+                let last_progress = *state.last_progress.lock().unwrap();
+                progress_remaining(last_progress, timeout)
+            };
+            let Some(rest) = remaining else { break };
+            tokio::time::sleep(rest).await;
         }
         show_failure(
             &app,
             timeout_ms,
-            format!("フロントエンドの読込開始後、{timeout_ms} ミリ秒以内に起動完了通知が届きませんでした"),
+            format!("フロントエンドの起動進捗通知が{timeout_ms} ミリ秒以上届きませんでした"),
         );
     });
 }
@@ -254,7 +315,8 @@ mod tests {
             .replace("__HEADLINE__", "")
             .replace("__MESSAGE__", "")
             .replace("__DETAIL__", "")
-            .replace("__ACTIONS__", "");
+            .replace("__ACTIONS__", "")
+            .replace("__LOG__", "");
         assert!(
             !filled.contains("__"),
             "置換されていないプレースホルダが残っています"
@@ -279,5 +341,35 @@ mod tests {
             !state.finished.load(Ordering::SeqCst),
             "JavaScript開始後の例外も監視するため、完了通知は別に必要"
         );
+    }
+
+    #[test]
+    fn 生存通知の間隔はしきい値から決める() {
+        // 既定（2分）はこれまでと同じ10秒。
+        assert_eq!(progress_interval_ms(DEFAULT_TIMEOUT_MS), 10_000);
+        // しきい値を縮めても通知が間に合う（1区間に4回送れる）。
+        assert_eq!(progress_interval_ms(MIN_TIMEOUT_MS), 1_000);
+        assert_eq!(progress_interval_ms(20_000), 5_000);
+        // 上限・下限を超えない。
+        assert_eq!(progress_interval_ms(MAX_TIMEOUT_MS), 10_000);
+        assert_eq!(progress_interval_ms(0), MIN_PROGRESS_INTERVAL_MS);
+        for timeout in [MIN_TIMEOUT_MS, 20_000, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS] {
+            assert!(
+                progress_interval_ms(timeout) < timeout,
+                "通知間隔がしきい値以上だと正常な起動でも失敗になる: {timeout}"
+            );
+        }
+    }
+
+    #[test]
+    fn 進捗が続く間は長い起動準備を失敗にしない() {
+        let now = Instant::now();
+        let timeout = Duration::from_secs(120);
+        assert!(progress_remaining(Some(now), timeout).is_some());
+        assert!(progress_remaining(None, timeout).is_none());
+        assert!(progress_remaining(Some(now - Duration::from_secs(121)), timeout).is_none());
+        // 最後の通知からの経過分だけを待ち直す（1区間ぶん余計に待たない）。
+        let rest = progress_remaining(Some(now - Duration::from_secs(100)), timeout).unwrap();
+        assert!(rest <= Duration::from_secs(20));
     }
 }

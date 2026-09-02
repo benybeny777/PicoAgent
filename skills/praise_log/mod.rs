@@ -10,7 +10,11 @@ use crate::daily::{self, PraiseEntry};
 pub struct PraiseLogTool;
 
 fn str_arg(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn list_text(entries: &[PraiseEntry]) -> String {
@@ -31,7 +35,16 @@ impl Tool for PraiseLogTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["できた", "書けた", "終わった", "やったこと", "がんばった", "褒め", "ほめ", "praise"]
+        &[
+            "できた",
+            "書けた",
+            "終わった",
+            "やったこと",
+            "がんばった",
+            "褒め",
+            "ほめ",
+            "praise",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {
@@ -58,7 +71,8 @@ impl Tool for PraiseLogTool {
     }
 
     fn description(&self) -> String {
-        "ユーザーのできたこと・進捗・がんばったことを保存し、あとで振り返れるようにする。".to_string()
+        "ユーザーのできたこと・進捗・がんばったことを保存し、あとで振り返れるようにする。"
+            .to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -107,7 +121,9 @@ impl Tool for PraiseLogTool {
                     Err(error) => format!("エラー: できたことメモの保存に失敗しました: {error}"),
                 }
             }
-            other => format!("エラー: 未知の action \"{other}\" です。add/list/clear を指定してね。"),
+            other => {
+                format!("エラー: 未知の action \"{other}\" です。add/list/clear を指定してね。")
+            }
         }
     }
 }

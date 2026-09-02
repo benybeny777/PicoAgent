@@ -24,10 +24,46 @@ pub struct LocalModelPreset {
     pub recommended_vram_gb: u64,
     pub recommended_ram_gb: u64,
     pub download_size: &'static str,
+    pub japanese_note: &'static str,
     pub note: &'static str,
 }
 
+pub const DEFAULT_LOCAL_MODEL_PRESET: &str = "lfm25_2_6b";
+const DEFAULT_LOCAL_MODEL_URL: &str = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/84022ce711b28455e8c4fc364ce68c00cf995875/LFM2.5-2.6B-QAD-Q4_0.gguf";
+
 pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
+    LocalModelPreset {
+        id: "lfm25_1_2b_jp",
+        family: "Liquid AI",
+        size: "LFM2.5 1.2B 日本語",
+        label: "互換: LFM2.5 1.2B 日本語 Q4（会話向け）",
+        url: "https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF/resolve/8c74801fdfe71394c59d3f519b86de305ff49f00/LFM2.5-1.2B-JP-202606-Q4_K_M.gguf",
+        file_name: "LFM2.5-1.2B-JP-202606-Q4_K_M-8c74801f.gguf",
+        size_bytes: 730_894_624,
+        sha256: "23d4d4060cb06463563f6e8644bbbc7d1cb0bfe4cf21d5edf3ccc6f515fd44bb",
+        ctx: "8192",
+        recommended_vram_gb: 0,
+        recommended_ram_gb: 8,
+        download_size: "約0.73GB",
+        japanese_note: "日本語特化",
+        note: "軽い日本語会話向け。連続ツール利用に失敗するため、一般候補には表示しない。",
+    },
+    LocalModelPreset {
+        id: DEFAULT_LOCAL_MODEL_PRESET,
+        family: "Liquid AI",
+        size: "LFM2.5 2.6B Agentic",
+        label: "軽量: LFM2.5 2.6B QAD Q4（既定）",
+        url: DEFAULT_LOCAL_MODEL_URL,
+        file_name: "LFM2.5-2.6B-QAD-Q4_0-84022ce7.gguf",
+        size_bytes: 1_593_894_944,
+        sha256: "a247afd6414918eac8e520a9e6137dc271235461ecbe1180462221d5b8d40b03",
+        ctx: "8192",
+        recommended_vram_gb: 4,
+        recommended_ram_gb: 8,
+        download_size: "約1.59GB",
+        japanese_note: "日本語対応",
+        note: "量子化学習済みQAD版。軽さを保ちながら複数手順の指示とツール利用を優先する候補。",
+    },
     LocalModelPreset {
         id: "small",
         family: "Gemma",
@@ -41,6 +77,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
         download_size: "約3.1GB",
+        japanese_note: "日本語対応",
         note: "VRAMが少ないPCやCPU中心の環境向け。",
     },
     LocalModelPreset {
@@ -56,6 +93,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 4,
         recommended_ram_gb: 16,
         download_size: "約5.0GB",
+        japanese_note: "日本語対応",
         note: "通常利用の推奨。4GB級VRAMまたは十分なRAMがあるPC向け。",
     },
     LocalModelPreset {
@@ -71,6 +109,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 8,
         recommended_ram_gb: 24,
         download_size: "約7.1GB",
+        japanese_note: "日本語対応",
         note: "品質優先。起動や応答は重くなる。",
     },
     LocalModelPreset {
@@ -86,6 +125,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.7GB",
+        japanese_note: "日本語に強い",
         note: "軽さ、日本語、指示追従のバランスを重視する場合の候補。",
     },
     LocalModelPreset {
@@ -101,6 +141,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
         download_size: "約5.7GB",
+        japanese_note: "日本語に強い",
         note: "日本語、指示追従、ツール利用の品質を優先する場合の候補。",
     },
     LocalModelPreset {
@@ -116,6 +157,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 16,
         recommended_ram_gb: 32,
         download_size: "約12.1GB",
+        japanese_note: "日本語対応",
         note: "OpenAIの公開モデル。推論とツール利用を重視する高性能PC向け。",
     },
     LocalModelPreset {
@@ -131,6 +173,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.5GB",
+        japanese_note: "日本語対応",
         note: "小型モデルで推論と指示追従を重視する場合の候補。",
     },
     LocalModelPreset {
@@ -146,6 +189,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
         download_size: "約5.3GB",
+        japanese_note: "日本語特化・Thinking",
         note: "国立情報学研究所LLM-jpの日本語推論モデル。応答品質を優先する場合の候補。",
     },
 ];
@@ -196,6 +240,15 @@ pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
     LOCAL_MODEL_PRESETS.iter().find(|preset| preset.id == id)
 }
 
+/// 設定画面で一般利用者へ候補として案内してよいプリセットだけを返す。
+/// LFM2.5 1.2BとLLM-jp-4 Thinkingは既存設定との互換用に残すが、連続ツール利用を
+/// 実エンジンで確認できないため新規候補へ出さない。
+pub fn settings_candidate_presets() -> impl Iterator<Item = &'static LocalModelPreset> {
+    LOCAL_MODEL_PRESETS
+        .iter()
+        .filter(|preset| !matches!(preset.id, "lfm25_1_2b_jp" | "llmjp4_8b"))
+}
+
 pub fn preset_url(id: &str) -> Option<&'static str> {
     preset(id).map(|preset| preset.url)
 }
@@ -214,9 +267,9 @@ pub fn label_for_filename(file_name: &str) -> Option<&'static str> {
 }
 
 pub fn model_url(cfg: &Config) -> String {
-    let preset_id = cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", "balanced");
+    let preset_id = cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", DEFAULT_LOCAL_MODEL_PRESET);
     if preset_id == "custom" {
-        return cfg.get("PICOAGENT_MODEL_URL", LOCAL_MODEL_PRESETS[1].url);
+        return cfg.get("PICOAGENT_MODEL_URL", DEFAULT_LOCAL_MODEL_URL);
     }
     // 設定画面「モデル」欄（PICOAGENT_MODEL）がプリセットIDなら、その選択を優先する。
     // （モデル欄での切り替えをそのまま取得URLへ反映し、未取得なら自動DLされる）
@@ -227,7 +280,7 @@ pub fn model_url(cfg: &Config) -> String {
     if let Some(url) = preset_url(&preset_id) {
         return url.to_string();
     }
-    cfg.get("PICOAGENT_MODEL_URL", LOCAL_MODEL_PRESETS[1].url)
+    cfg.get("PICOAGENT_MODEL_URL", DEFAULT_LOCAL_MODEL_URL)
 }
 
 // Gemma などのチャットテンプレートは user/assistant の厳密な交互（かつ user 始まり）を要求し、
@@ -304,7 +357,7 @@ impl Provider for Local {
         vec![
             Field::new(
                 "PICOAGENT_LOCAL_MODEL_PRESET",
-                "ローカルモデル（auto/Gemma/Qwen/OpenAI/Phi/custom）",
+                "ローカルモデル（PC向け候補/Liquid AI/Gemma/Qwen/OpenAI/Phi/LLM-jp/custom）",
                 "text",
                 "auto",
             ),
@@ -312,7 +365,7 @@ impl Provider for Local {
                 "PICOAGENT_MODEL_URL",
                 "カスタムモデル GGUF の取得元 URL",
                 "text",
-                LOCAL_MODEL_PRESETS[1].url,
+                DEFAULT_LOCAL_MODEL_URL,
             ),
             Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
             Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "8192"),
@@ -331,7 +384,10 @@ impl Provider for Local {
         ]
     }
     fn default_model(&self, cfg: &Config) -> String {
-        cfg.get("PICOAGENT_MODEL", &cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", "balanced"))
+        cfg.get(
+            "PICOAGENT_MODEL",
+            &cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", DEFAULT_LOCAL_MODEL_PRESET),
+        )
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
@@ -479,7 +535,8 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 mod tests {
     use super::{
         canonical_preset_id, normalize_for_local, obsolete_model_file_names, preset,
-        LOCAL_MODEL_PRESETS, RETIRED_MODEL_FILES,
+        settings_candidate_presets, DEFAULT_LOCAL_MODEL_PRESET, LOCAL_MODEL_PRESETS,
+        RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
 
@@ -489,6 +546,8 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "lfm25_1_2b_jp",
+                "lfm25_2_6b",
                 "small",
                 "balanced",
                 "large",
@@ -499,12 +558,29 @@ mod tests {
                 "llmjp4_8b",
             ]
         );
+        assert_eq!(DEFAULT_LOCAL_MODEL_PRESET, "lfm25_2_6b");
+        assert_eq!(
+            settings_candidate_presets()
+                .map(|preset| preset.id)
+                .collect::<Vec<_>>(),
+            [
+                "lfm25_2_6b",
+                "small",
+                "balanced",
+                "large",
+                "qwen35_4b",
+                "qwen35_9b",
+                "gpt_oss_20b",
+                "phi4mini",
+            ]
+        );
         for preset in LOCAL_MODEL_PRESETS {
             assert!(preset.url.ends_with(".gguf"));
             assert!(preset.file_name.ends_with(".gguf"));
             assert!(preset.url.contains("/resolve/") && !preset.url.contains("/resolve/main/"));
             assert!(preset.size_bytes > 0);
             assert_eq!(preset.sha256.len(), 64);
+            assert!(!preset.japanese_note.is_empty());
             let file_name = preset.url.rsplit('/').next().unwrap_or("");
             let quantized = ["-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-"]
                 .iter()

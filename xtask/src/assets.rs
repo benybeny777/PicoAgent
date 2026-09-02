@@ -728,14 +728,21 @@ pub fn sync_distribution_characters(included: &[String]) -> Result<()> {
 }
 
 fn is_character_source_only(path: &Path) -> bool {
-    path.components().any(|component| {
-        component.as_os_str().to_str().is_some_and(|name| {
-            matches!(
-                name,
-                "live2d-src" | "expression-patches" | "runtime-layers.part"
-            ) || (name.starts_with("frames-") && name.ends_with(".part"))
+    let components = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    components
+        .windows(2)
+        .any(|pair| pair == ["mesh-rig", "source"])
+        || path.components().any(|component| {
+            component.as_os_str().to_str().is_some_and(|name| {
+                matches!(
+                    name,
+                    "live2d-src" | "expression-patches" | "runtime-layers.part"
+                ) || (name.starts_with("frames-") && name.ends_with(".part"))
+            })
         })
-    })
 }
 
 /// 同期済みキャラの全内容から自動版を作り、manifestへ書き込む。
@@ -952,12 +959,96 @@ fn validate_character_asset_generation(
     character_dir: &Path,
     manifest: &serde_json::Value,
 ) -> Result<()> {
+    if manifest.get("live2d").is_none()
+        && manifest
+            .get("motionProfile")
+            .and_then(serde_json::Value::as_str)
+            == Some("full")
+    {
+        anyhow::ensure!(
+            manifest.pointer("/meshRig/rig").is_some(),
+            "{} の同梱フルモーション通常2DにmeshRig.rigがありません",
+            character_dir.display()
+        );
+    }
+    validate_mesh_rig_pack(character_dir, manifest)?;
     if manifest.get("live2d").is_some() {
         return validate_character_runtime_generation(character_dir, manifest);
     }
     validate_sharp_expression_pack(character_dir, manifest)?;
     validate_full_motion_pack(character_dir, manifest)?;
     validate_character_runtime_generation(character_dir, manifest)
+}
+
+fn validate_mesh_rig_pack(character_dir: &Path, manifest: &serde_json::Value) -> Result<()> {
+    let Some(rig_path) = manifest
+        .pointer("/meshRig/rig")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(());
+    };
+    let rig_file = character_dir.join(rig_path);
+    let rig: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&rig_file)
+            .with_context(|| format!("{} のmeshRig.rigを読めません", character_dir.display()))?,
+    )
+    .with_context(|| format!("{} が不正なJSONです", rig_file.display()))?;
+    let mode = rig.get("mode").and_then(serde_json::Value::as_str);
+    anyhow::ensure!(
+        rig.get("version").and_then(serde_json::Value::as_u64) == Some(1)
+            && matches!(mode, Some("single-sheet-grid-v1" | "layered-grid-v2")),
+        "{} のメッシュリグ形式に対応していません",
+        character_dir.display()
+    );
+    if mode == Some("layered-grid-v2") {
+        anyhow::ensure!(
+            rig.pointer("/quality/hiddenAreaSource")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+            "{} の分離メッシュに隠れ領域つき原画の記録がありません",
+            character_dir.display()
+        );
+        let visible_parts = rig
+            .get("drawables")
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(_, item)| {
+                item.get("initialAlpha").and_then(serde_json::Value::as_u64) == Some(1)
+            })
+            .count();
+        anyhow::ensure!(
+            visible_parts >= 6,
+            "{} の分離メッシュは中立表示パーツが6個未満です",
+            character_dir.display()
+        );
+    }
+    let root = rig_file
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("meshRig.rigの親フォルダがありません"))?;
+    let mut textures = vec![rig
+        .get("base")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")];
+    if let Some(drawables) = rig.get("drawables").and_then(serde_json::Value::as_object) {
+        textures.extend(
+            drawables
+                .values()
+                .filter_map(|item| item.get("texture").and_then(serde_json::Value::as_str)),
+        );
+    }
+    for texture in textures {
+        anyhow::ensure!(!texture.is_empty(), "meshRigのテクスチャパスが空です");
+        anyhow::ensure!(
+            !texture.replace('\\', "/").contains("../") && !texture.contains("source/"),
+            "meshRigの実行テクスチャへ制作素材または親参照を指定できません: {texture}"
+        );
+        anyhow::ensure!(
+            root.join(texture).is_file(),
+            "meshRigのテクスチャがありません: {texture}"
+        );
+    }
+    Ok(())
 }
 
 /// 配信用コピーだけで確認できるフレーム・Live2D・世代整合性を検証する。
@@ -1592,6 +1683,12 @@ mod tests {
         )));
         assert!(is_character_source_only(std::path::Path::new(
             "characters/mugi/frames-deadbeef.part/base.webp"
+        )));
+        assert!(is_character_source_only(std::path::Path::new(
+            "characters/sena/mesh-rig/source/regions.json"
+        )));
+        assert!(!is_character_source_only(std::path::Path::new(
+            "characters/sena/mesh-rig/parts/base.webp"
         )));
         assert!(!is_character_source_only(std::path::Path::new(
             "characters/mugi/frames/idle.png"

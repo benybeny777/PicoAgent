@@ -53,8 +53,7 @@ pub fn match_name(pattern: &str, name: &str) -> bool {
             }
         } else {
             for index in 1..=name.len() {
-                if reachable[index - 1]
-                    && (pattern_char == '?' || pattern_char == name[index - 1])
+                if reachable[index - 1] && (pattern_char == '?' || pattern_char == name[index - 1])
                 {
                     next[index] = true;
                 }
@@ -178,7 +177,15 @@ impl Tool for GlobFilesTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["ファイルを探", "ファイルはどこ", "どこにある", "ファイル名", "拡張子", "一覧して", "glob"]
+        &[
+            "ファイルを探",
+            "ファイルはどこ",
+            "どこにある",
+            "ファイル名",
+            "拡張子",
+            "一覧して",
+            "glob",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -217,7 +224,10 @@ impl Tool for GlobFilesTool {
     }
 
     fn examples(&self) -> Vec<&'static str> {
-        vec!["プロジェクトの .rs ファイルを一覧して", "設定ファイルがどこにあるか探して"]
+        vec![
+            "プロジェクトの .rs ファイルを一覧して",
+            "設定ファイルがどこにあるか探して",
+        ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -271,7 +281,9 @@ impl Tool for GlobFilesTool {
         let total = hits.len();
         let mut out = format!("{} 配下の一致: {} 件", root.display(), total);
         if truncated {
-            out.push_str(&format!("（走査上限 {MAX_SCAN_FILES} 件で打ち切ったため、これ以上ある可能性があります）"));
+            out.push_str(&format!(
+                "（走査上限 {MAX_SCAN_FILES} 件で打ち切ったため、これ以上ある可能性があります）"
+            ));
         }
         for hit in hits.iter().take(limit) {
             out.push_str(&format!(
@@ -281,7 +293,9 @@ impl Tool for GlobFilesTool {
             ));
         }
         if total > limit {
-            out.push_str(&format!("\n…（{limit} 件で表示を打ち切り。limit で増やせます）"));
+            out.push_str(&format!(
+                "\n…（{limit} 件で表示を打ち切り。limit で増やせます）"
+            ));
         }
         out
     }

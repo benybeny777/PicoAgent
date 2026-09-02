@@ -4,6 +4,21 @@
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
+## 作業エージェントのハーネス構成
+
+作業ルール、再利用手順、開始時処理、作業状態、最終検証は、更新理由が異なるため次の正本へ分けます。分類名ごとのファイルをさらに増やさず、各正本から別の正本へ手順を複製しません。
+
+| 責務 | 正本・関連ファイル | 保持する内容 |
+|---|---|---|
+| 恒久ルール | `AGENTS.md` | 全作業へ常時適用する方針と安全規則。`CLAUDE.md`はこの正本の場所だけを示す案内ファイル |
+| 再利用手順 | `.agents/skills/<名前>/SKILL.md` | 繰り返す作業の入力条件、工程、停止条件、検証。`.claude/skills/<名前>/SKILL.md`はClaude Codeが自動認識し、同名正本を読むよう案内するだけのファイル |
+| 開始時処理 | `.claude/hooks/` | Claude Code固有のセッション開始時処理。通常の検証手順を複製しない |
+| 作業状態 | `HANDOFF.md` / `docs/TASKS.md` | 前者は未マージ作業と直後の再開手順、後者は未完了・条件待ちだけ |
+| 最終検証 | `cargo xtask verify` | 書式（本体・xtask・`skills/`）、静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、JavaScript構文、Git差分 |
+| 完了記録 | PR本文とGit履歴 | 目的、採否と理由、検証結果、未確認事項 |
+
+ここでいう「作業状態」はPicoAgent製品の長期メモリ機能とは別物です。共通スキル正本とClaude Code用自動認識ファイルの名前・frontmatter・参照先・本文量は`cargo xtask verify`が機械検査します。
+
 ## 🧩 コネクタで拡張する
 
 ```mermaid
@@ -37,12 +52,15 @@ graph LR
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ）の取得 |
 | `cargo xtask setup whisper` | 同梱 Whisper の取得 |
 | `cargo xtask setup live2d` | Live2D ランタイム + サンプルモデルの取得 |
+| `cargo xtask setup pixi` | 自前メッシュリグとLive2Dが共有するPIXI 6.5.10の取得 |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice）の取得 |
 | `cargo xtask setup tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
+| `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
+| `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・Git差分の一括検証 |
 
 > `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
 > `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
@@ -151,8 +169,8 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **Live2D ランタイムと利用者モデル**
 
-- `cargo xtask setup live2d` は Cubism Core / PIXI / pixi-live2d-display だけを `ui/vendor/live2d/` へ取得します。`dev` / `build` もサンプルモデルを自動取得しません
-- 利用者は設定画面の「キャラ・音声」→「キャラクターを追加・作成」で、配布元から自分で取得したzip／フォルダを選びます。`.model3.json` が1個なら、同じフォルダの組み込み用データだけを安全検査してユーザー領域へコピーし、PicoAgent用 `character.json` を自動作成します
+- `cargo xtask setup pixi` はPIXI 6.5.10をSHA-256照合して`ui/vendor/pixi/`へ取得します。`cargo xtask setup live2d`はこれを共有し、Cubism Coreとpixi-live2d-displayを`ui/vendor/live2d/`へ取得します。`dev` / `build` もサンプルモデルを自動取得しません
+- 利用者は設定画面の「キャラ登録」で、配布元から自分で取得したzip／フォルダを選びます。`.model3.json` が1個なら、同じフォルダの組み込み用データだけを安全検査してユーザー領域へコピーし、PicoAgent用 `character.json` を自動作成します。モデル固有の顔位置を推測して切り取らず、初期倍率は全身が欠けない1倍にして、追加直後の一覧選択と配置編集へつなぎます
 - 開発者が既存サンプルの描画回帰を行う場合だけ `cargo xtask setup live2d-samples` を明示実行します。通常の`build`と販売版は、手元に取得済みでも配布許可リスト外のサンプルを同期しません
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)に従います。利用者モデルは配布元ごとに条件が違い、公式サンプルにも[個別の利用条件](https://www.live2d.com/learn/sample/model-terms/)があるため、取得・追加前に利用者自身が確認します
 
@@ -180,6 +198,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 | `app.<日付>.log` | アプリ本体とフロントのエラー |
 | `aivis.<日付>.log` | Aivis の起動ログ |
 | `engine.<日付>.log` | 同梱 llama-server のログ |
+| `dev.<日付>.log` | `cargo xtask dev` の再ビルド警告・コンパイルエラー（監視継続中の失敗を含む） |
 
 **識別子とデータ**
 
@@ -220,12 +239,15 @@ PicoAgent/
     ├── build.rs      ← コネクタの自動 mod 生成
     ├── resources/bundled/tha3/ ← 通常の開発ビルド用THA3（販売用軽量版には含めない）
     └── src/
-        ├── agent.rs        ← エージェントループ
+        ├── agent.rs        ← エージェント実行ループ
+        ├── agent/          ← systemルールと文脈の合成（prompt）／計画・自己評価（feedback）
         ├── providers/      ← 叩く AI コネクタ（.rs を足すと自動登録）
         ├── tools/          ← Tool登録・意図語彙・HTTP・プロセス実行の共通層
         ├── mcp/            ← MCP クライアント / サーバ
         ├── permissions.rs  ← 全スキル共通のファイル許可（SafePath）
         ├── store.rs        ← 状態ファイルの原子的な保存
+        ├── durable_jobs.rs ← 再起動後に再開するツールジョブの永続キュー
+        ├── user_skills.rs  ← 利用者のSKILL.md検証・索引・原子的保存
         └── character_framing.rs / stream_profile.rs / config.rs / commands.rs / …
 ```
 

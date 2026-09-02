@@ -99,7 +99,14 @@ impl Tool for ViewImageTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["画像を見", "スクリーンショット", "写真を見", "何が写", "この図", "画面の内容"]
+        &[
+            "画像を見",
+            "スクリーンショット",
+            "写真を見",
+            "何が写",
+            "この図",
+            "画面の内容",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -155,7 +162,10 @@ impl Tool for ViewImageTool {
             let size = match permissions::fs::metadata(&target) {
                 Ok(meta) => meta.len(),
                 Err(error) => {
-                    return format!("エラー: 情報を取得できません（{error}）: {}", target.display())
+                    return format!(
+                        "エラー: 情報を取得できません（{error}）: {}",
+                        target.display()
+                    )
                 }
             };
             if size > MAX_IMAGE_BYTES {
@@ -167,7 +177,10 @@ impl Tool for ViewImageTool {
             let bytes = match permissions::fs::read(&target) {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    return format!("エラー: 読み取りに失敗しました（{error}）: {}", target.display())
+                    return format!(
+                        "エラー: 読み取りに失敗しました（{error}）: {}",
+                        target.display()
+                    )
                 }
             };
             images.push(PendingImage {
@@ -205,9 +218,14 @@ mod tests {
 
     #[test]
     fn 単数と複数のパス指定を受け取る() {
-        assert_eq!(paths_arg(&json!({ "path": "a.png" })).unwrap(), vec!["a.png"]);
         assert_eq!(
-            paths_arg(&json!({ "paths": ["a.png", "b.png"] })).unwrap().len(),
+            paths_arg(&json!({ "path": "a.png" })).unwrap(),
+            vec!["a.png"]
+        );
+        assert_eq!(
+            paths_arg(&json!({ "paths": ["a.png", "b.png"] }))
+                .unwrap()
+                .len(),
             2
         );
         assert!(paths_arg(&json!({ "paths": [] })).is_err());

@@ -39,8 +39,21 @@ fn parse_days(text: &str) -> Option<i64> {
 fn direct_query(text: &str) -> Option<Value> {
     let lower = text.to_lowercase();
     let market_words = [
-        "日経平均", "日系平均", "nikkei", "n225", "topix", "トピックス", "ダウ", "dow",
-        "nasdaq", "ナスダック", "s&p", "sp500", "s&p500", "株価指数", "市場",
+        "日経平均",
+        "日系平均",
+        "nikkei",
+        "n225",
+        "topix",
+        "トピックス",
+        "ダウ",
+        "dow",
+        "nasdaq",
+        "ナスダック",
+        "s&p",
+        "sp500",
+        "s&p500",
+        "株価指数",
+        "市場",
     ];
     if !market_words
         .iter()
@@ -136,7 +149,18 @@ impl Tool for MarketIndicesTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["日経平均", "日系平均", "nikkei", "topix", "トピックス", "ダウ", "nasdaq", "ナスダック", "s&p", "株価指数"]
+        &[
+            "日経平均",
+            "日系平均",
+            "nikkei",
+            "topix",
+            "トピックス",
+            "ダウ",
+            "nasdaq",
+            "ナスダック",
+            "s&p",
+            "株価指数",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {

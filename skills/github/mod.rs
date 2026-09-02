@@ -30,7 +30,8 @@ impl Tool for GitHubTool {
     }
 
     fn description(&self) -> String {
-        "GitHub API で Issue を一覧取得または作成する。private repository や作成には token が必要。".to_string()
+        "GitHub API で Issue を一覧取得または作成する。private repository や作成には token が必要。"
+            .to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -50,10 +51,30 @@ impl Tool for GitHubTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GITHUB_TOKEN", "GitHub のアクセストークン", "password", "github_pat_..."),
-            Field::new("PICOAGENT_GITHUB_OWNER", "GitHub 既定 owner", "text", "owner"),
-            Field::new("PICOAGENT_GITHUB_REPO", "GitHub 既定 repository", "text", "repo"),
-            Field::new("PICOAGENT_GITHUB_TIMEOUT_SECS", "GitHub API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_GITHUB_TOKEN",
+                "GitHub のアクセストークン",
+                "password",
+                "github_pat_...",
+            ),
+            Field::new(
+                "PICOAGENT_GITHUB_OWNER",
+                "GitHub 既定 owner",
+                "text",
+                "owner",
+            ),
+            Field::new(
+                "PICOAGENT_GITHUB_REPO",
+                "GitHub 既定 repository",
+                "text",
+                "repo",
+            ),
+            Field::new(
+                "PICOAGENT_GITHUB_TIMEOUT_SECS",
+                "GitHub API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
@@ -74,7 +95,11 @@ impl Tool for GitHubTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_GITHUB_REPO", ""));
         if owner.is_empty() || repo.is_empty() {
-            return super::config_guide("GitHub Issue", &["PICOAGENT_GITHUB_OWNER", "PICOAGENT_GITHUB_REPO"], "依頼で owner/repo を渡すか、既定のリポジトリを設定してください。");
+            return super::config_guide(
+                "GitHub Issue",
+                &["PICOAGENT_GITHUB_OWNER", "PICOAGENT_GITHUB_REPO"],
+                "依頼で owner/repo を渡すか、既定のリポジトリを設定してください。",
+            );
         }
         let timeout_secs = cfg
             .get("PICOAGENT_GITHUB_TIMEOUT_SECS", "20")
@@ -95,14 +120,19 @@ impl Tool for GitHubTool {
             "list" => {
                 let state = args.get("state").and_then(Value::as_str).unwrap_or("open");
                 let mut request = client
-                    .get(format!("{}/repos/{}/{}/issues", GITHUB_API_BASE, owner, repo))
+                    .get(format!(
+                        "{}/repos/{}/{}/issues",
+                        GITHUB_API_BASE, owner, repo
+                    ))
                     .query(&[("state", state), ("per_page", "10")]);
                 if !token.is_empty() {
                     request = request.bearer_auth(token);
                 }
                 let response = match request.send().await {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: GitHub API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!("エラー: GitHub API への接続に失敗しました: {}", error)
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);
@@ -118,7 +148,10 @@ impl Tool for GitHubTool {
                     out.push_str(&format!(
                         "- #{} {} ({})\n",
                         issue.get("number").and_then(Value::as_u64).unwrap_or(0),
-                        issue.get("title").and_then(Value::as_str).unwrap_or("（無題）"),
+                        issue
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .unwrap_or("（無題）"),
                         issue.get("html_url").and_then(Value::as_str).unwrap_or("")
                     ));
                 }
@@ -126,28 +159,43 @@ impl Tool for GitHubTool {
             }
             "create" => {
                 if token.is_empty() {
-                    return super::config_guide("GitHub Issue", &["PICOAGENT_GITHUB_TOKEN"], "Issue 作成や private repo 操作には GitHub token が必要です。");
+                    return super::config_guide(
+                        "GitHub Issue",
+                        &["PICOAGENT_GITHUB_TOKEN"],
+                        "Issue 作成や private repo 操作には GitHub token が必要です。",
+                    );
                 }
                 let title = match args.get("title").and_then(Value::as_str).map(str::trim) {
                     Some(title) if !title.is_empty() => title,
                     _ => return "エラー: title が指定されていません。".to_string(),
                 };
                 if title.chars().count() > MAX_TITLE_CHARS {
-                    return format!("エラー: title は {} 文字以内で指定してください。", MAX_TITLE_CHARS);
+                    return format!(
+                        "エラー: title は {} 文字以内で指定してください。",
+                        MAX_TITLE_CHARS
+                    );
                 }
                 let body = args.get("body").and_then(Value::as_str).unwrap_or("");
                 if body.chars().count() > MAX_BODY_CHARS {
-                    return format!("エラー: body は {} 文字以内で指定してください。", MAX_BODY_CHARS);
+                    return format!(
+                        "エラー: body は {} 文字以内で指定してください。",
+                        MAX_BODY_CHARS
+                    );
                 }
                 let response = match client
-                    .post(format!("{}/repos/{}/{}/issues", GITHUB_API_BASE, owner, repo))
+                    .post(format!(
+                        "{}/repos/{}/{}/issues",
+                        GITHUB_API_BASE, owner, repo
+                    ))
                     .bearer_auth(token)
                     .json(&json!({ "title": title, "body": body }))
                     .send()
                     .await
                 {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: GitHub API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!("エラー: GitHub API への接続に失敗しました: {}", error)
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);

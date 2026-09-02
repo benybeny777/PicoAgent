@@ -48,16 +48,35 @@ impl Tool for GoogleTasksTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN", "Google ToDo リストの OAuth アクセストークン", "password", "ya29..."),
-            Field::new("PICOAGENT_GOOGLE_TASKS_LIST_ID", "Google Tasks 既定 tasklist ID", "text", "@default"),
-            Field::new("PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS", "Google Tasks API 待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN",
+                "Google ToDo リストの OAuth アクセストークン",
+                "password",
+                "ya29...",
+            ),
+            Field::new(
+                "PICOAGENT_GOOGLE_TASKS_LIST_ID",
+                "Google Tasks 既定 tasklist ID",
+                "text",
+                "@default",
+            ),
+            Field::new(
+                "PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS",
+                "Google Tasks API 待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Google Tasks", &["PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN"], "Google Tasks API を使える OAuth access token が必要です。");
+            return super::config_guide(
+                "Google Tasks",
+                &["PICOAGENT_GOOGLE_TASKS_ACCESS_TOKEN"],
+                "Google Tasks API を使える OAuth access token が必要です。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS", "15")
@@ -71,7 +90,9 @@ impl Tool for GoogleTasksTool {
             .build()
         {
             Ok(client) => client,
-            Err(error) => return format!("エラー: Google Tasks API の準備に失敗しました: {}", error),
+            Err(error) => {
+                return format!("エラー: Google Tasks API の準備に失敗しました: {}", error)
+            }
         };
         let tasklist_id = args
             .get("tasklist_id")
@@ -147,7 +168,10 @@ impl Tool for GoogleTasksTool {
     }
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

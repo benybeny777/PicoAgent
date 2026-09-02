@@ -42,7 +42,8 @@ impl Tool for GoogleCalendarTool {
     }
 
     fn description(&self) -> String {
-        "Google Calendar API で予定を一覧取得または作成する。設定に OAuth access token が必要。".to_string()
+        "Google Calendar API で予定を一覧取得または作成する。設定に OAuth access token が必要。"
+            .to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -67,16 +68,35 @@ impl Tool for GoogleCalendarTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN", "Google カレンダーの OAuth アクセストークン", "password", "ya29..."),
-            Field::new("PICOAGENT_GOOGLE_CALENDAR_ID", "Google Calendar 既定カレンダーID", "text", "primary"),
-            Field::new("PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS", "Google Calendar API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN",
+                "Google カレンダーの OAuth アクセストークン",
+                "password",
+                "ya29...",
+            ),
+            Field::new(
+                "PICOAGENT_GOOGLE_CALENDAR_ID",
+                "Google Calendar 既定カレンダーID",
+                "text",
+                "primary",
+            ),
+            Field::new(
+                "PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS",
+                "Google Calendar API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Google Calendar", &["PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN"], "Google Calendar API を使える OAuth access token が必要です。");
+            return super::config_guide(
+                "Google Calendar",
+                &["PICOAGENT_GOOGLE_CALENDAR_ACCESS_TOKEN"],
+                "Google Calendar API を使える OAuth access token が必要です。",
+            );
         }
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
         let calendar_id = args
@@ -92,12 +112,21 @@ impl Tool for GoogleCalendarTool {
             .build()
         {
             Ok(client) => client,
-            Err(error) => return format!("エラー: Google Calendar API の準備に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: Google Calendar API の準備に失敗しました: {}",
+                    error
+                )
+            }
         };
         match action {
             "list" => {
                 let mut request = client
-                    .get(format!("{}/calendars/{}/events", CALENDAR_BASE, encode_path(&calendar_id)))
+                    .get(format!(
+                        "{}/calendars/{}/events",
+                        CALENDAR_BASE,
+                        encode_path(&calendar_id)
+                    ))
                     .bearer_auth(token)
                     .query(&[
                         ("singleEvents", "true".to_string()),
@@ -119,17 +148,33 @@ impl Tool for GoogleCalendarTool {
                 }
                 let response = match request.send().await {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: Google Calendar API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!(
+                            "エラー: Google Calendar API への接続に失敗しました: {}",
+                            error
+                        )
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
-                    return format!("エラー: Google Calendar API が HTTP {} を返しました。", status);
+                    return format!(
+                        "エラー: Google Calendar API が HTTP {} を返しました。",
+                        status
+                    );
                 }
                 let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("予定一覧:\n");
-                for item in parsed.get("items").and_then(Value::as_array).into_iter().flatten() {
-                    let summary = item.get("summary").and_then(Value::as_str).unwrap_or("（無題）");
+                for item in parsed
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let summary = item
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .unwrap_or("（無題）");
                     let start = item
                         .get("start")
                         .and_then(|s| s.get("dateTime").or_else(|| s.get("date")))
@@ -145,7 +190,10 @@ impl Tool for GoogleCalendarTool {
                     _ => return "エラー: summary が指定されていません。".to_string(),
                 };
                 if summary.chars().count() > MAX_SUMMARY_CHARS {
-                    return format!("エラー: summary は {} 文字以内で指定してください。", MAX_SUMMARY_CHARS);
+                    return format!(
+                        "エラー: summary は {} 文字以内で指定してください。",
+                        MAX_SUMMARY_CHARS
+                    );
                 }
                 let start = match args.get("start").and_then(Value::as_str).map(str::trim) {
                     Some(start) if !start.is_empty() => start,
@@ -155,7 +203,10 @@ impl Tool for GoogleCalendarTool {
                     Some(end) if !end.is_empty() => end,
                     _ => return "エラー: end が指定されていません。".to_string(),
                 };
-                let timezone = args.get("timezone").and_then(Value::as_str).unwrap_or("Asia/Tokyo");
+                let timezone = args
+                    .get("timezone")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Asia/Tokyo");
                 let mut payload = json!({
                     "summary": summary,
                     "start": { "dateTime": start, "timeZone": timezone },
@@ -163,7 +214,10 @@ impl Tool for GoogleCalendarTool {
                 });
                 if let Some(description) = args.get("description").and_then(Value::as_str) {
                     if description.chars().count() > MAX_DESCRIPTION_CHARS {
-                        return format!("エラー: description は {} 文字以内で指定してください。", MAX_DESCRIPTION_CHARS);
+                        return format!(
+                            "エラー: description は {} 文字以内で指定してください。",
+                            MAX_DESCRIPTION_CHARS
+                        );
                     }
                     payload["description"] = json!(description);
                 }
@@ -171,24 +225,39 @@ impl Tool for GoogleCalendarTool {
                     payload["location"] = json!(location);
                 }
                 let response = match client
-                    .post(format!("{}/calendars/{}/events", CALENDAR_BASE, encode_path(&calendar_id)))
+                    .post(format!(
+                        "{}/calendars/{}/events",
+                        CALENDAR_BASE,
+                        encode_path(&calendar_id)
+                    ))
                     .bearer_auth(token)
                     .json(&payload)
                     .send()
                     .await
                 {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: Google Calendar API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!(
+                            "エラー: Google Calendar API への接続に失敗しました: {}",
+                            error
+                        )
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
-                    return format!("エラー: Google Calendar API が HTTP {} を返しました。", status);
+                    return format!(
+                        "エラー: Google Calendar API が HTTP {} を返しました。",
+                        status
+                    );
                 }
                 let parsed: Value = crate::tool_response_json!(&body);
                 format!(
                     "OK: 予定を作成しました。id={}",
-                    parsed.get("id").and_then(Value::as_str).unwrap_or("unknown")
+                    parsed
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
                 )
             }
             _ => "エラー: action は list または create を指定してください。".to_string(),

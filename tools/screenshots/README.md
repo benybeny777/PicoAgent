@@ -13,6 +13,7 @@
 - キャラクター一覧（`character-*.webp`）は標準ペット表示、`character-*-stream.webp`は配信表示です。README公開用は`SHOOT_README_GALLERY=1`で6秒・480px・16fpsとして`docs/images/`へ直接書き出します。通常版は900px画面を2倍ピクセル密度で描画し、配信版はフルHD 1920×1080のネイティブ画面から縮小します
 - LP配信用は`SHOOT_SITE_GALLERY=1`で、同じ撮影経路の生PNGから`distribution/site/assets/`へ6秒・480px・16fpsで直接書き出します。既存WebPを入力にした縮小・再エンコードは行いません。全件実行時はキャラ一覧15MB、トップ4本5MBの上限も検査します
 - **公開用キャラクター一覧は口パクを先に十分見せてから、考え中 → 待機へ戻ります。** まばたき、Live2D固有モーション／物理、対応キャラの局所二次動作はそのまま動きます
+  - 自前メッシュリグは`data-render-kind=mesh-rig`、キャンバス表示、描画バッファ寸法、初回合成の安定を確認してから録画を始め、先頭コマへ初期化中の2Dフォールバックを混ぜません
   - 考え中を明示的に入れているのは、`record()` が録画前に時計を進めるため、送信直後の考え中が録画開始時点で終わっているからです
 - 12秒・30fps・960pxの高解像度版は、個別の比較・保管を明示された場合だけ環境変数なしで生成します。READMEやLPの公開埋め込みには使いません
 - **口パクは実際の音声再生開始後だけ動きます。** 読み上げ無効（ミュート）または音量0では、2D／Live2Dとも口を閉じたままです。キャラクター一覧と Live2D の絵は `voice: true`（`openScene` のオプション）で音節風の振幅を持つ WAV を返させ、実アプリと同じ音声解析経路を確認します。まばたきは音声と無関係に常時動きます（`layers/` を持つキャラのみ）
@@ -25,6 +26,12 @@ playwright はグローバル導入したものを環境変数で指すだけに
 
 ```bash
 npm i -g playwright && npx playwright install chromium
+
+# 配信物（ui-dist/）を作ってから撮る。新しいワークツリーやclone直後は
+# キャラクター資材が ui/assets/characters/ に無く、設定画面の一覧描画が途中で
+# 失敗する（「スキル」タブのカードが見つからない等、原因の分かりにくい失敗になる）。
+cargo xtask sync-characters
+cargo xtask build-ui
 
 PLAYWRIGHT_MODULE=$(npm root -g)/playwright/index.mjs \
   node tools/screenshots/shoot.mjs
@@ -47,7 +54,8 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_OUTPUT_DIR` | 撮影結果を既定の公開先へ書かず、指定した絶対パスへ出す。公開前の構図比較や別リポジトリへ取り込む成果物の確認に使う |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
 | `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
-| `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`koharu,sena,noa` のように撮影対象だけを絞る |
+| `SHOOT_MESH_RIG` | `1`ならセナの実WebViewで中立、閉眼＋開口、左右視線、頭部入力、成功、思考中を撮影し、閉眼中の視線非表示、連続パラメータ、メッシュ変形、成功・思考中も位置と表示寸法を保つこと、縦1400画素以上の描画バッファ、省モーション時の差分絵退避を`temp/mesh-rig-qa/`へ検査する。ffmpeg不要 |
+| `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1`または`SHOOT_INTERACTION_MATRIX=1`と併用し、`koharu,sena,noa`のように撮影対象だけを絞る。操作検査の対象は`mugi,hiyori` |
 | `SHOOT_LAYOUT_IDS` | `SHOOT_CHARACTER_MATRIX=1` または `SHOOT_LIVE2D_MATRIX=1` と併用し、`stream,pet` のように撮影する表示形式だけを絞る |
 | `SHOOT_BUBBLE_BLUR` | `1` ならフキダシの`backdrop-filter`有無を、立ち絵を動かした状態でペット／ミニ／配信×重なり有無×負荷有無の12条件、各3試行ずつ交互に測り `temp/bubble-blur/metrics.json` へ書く。ffmpeg不要 |
 | `SHOOT_LAYOUT_SIZE` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`pet=520x430,mascot=300x480` のように形式ごとの撮影寸法を上書きする。窓を狭めたときも回答操作が1段のままか、フキダシが潰れていないかを確認する用 |
@@ -118,7 +126,7 @@ Live2D の絵は、ランタイムとモデルが未取得だと**スキップ�
 cargo xtask setup live2d   # 先にこれを実行する
 ```
 
-必要なのは `ui/vendor/live2d/{live2dcubismcore-5.3.min.js,live2dcubismcore-compat.min.js,pixi.min.js,cubism4.min.js}` と
+必要なのは `ui/vendor/pixi/pixi.min.js`、`ui/vendor/live2d/{live2dcubismcore-5.3.min.js,live2dcubismcore-compat.min.js,cubism4.min.js}` と
 `ui/assets/characters/hiyori/live2d/` です。いずれも再配布条件があるためリポジトリには含めていません
 （`.gitignore` 済み）。
 

@@ -1,0 +1,58 @@
+{
+  "runtimeScale": 1.0,
+  "grid": [
+    9,
+    15
+  ],
+  "autoFaceRegions": true,
+  "separatedParts": [
+    {
+      "name": "body",
+      "source": "body.png",
+      "z": 0,
+      "motion": "torso",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "hair-back",
+      "source": "hair-back.png",
+      "z": 5,
+      "motion": "hair-back",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "arm-left",
+      "source": "arm-left.png",
+      "z": 10,
+      "motion": "arm-left",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "arm-right",
+      "source": "arm-right.png",
+      "z": 11,
+      "motion": "arm-right",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "face",
+      "source": "face.png",
+      "z": 20,
+      "motion": "fixed",
+      "hiddenAreaSource": true
+    },
+    {
+      "name": "hair-front",
+      "source": "hair-front.png",
+      "z": 30,
+      "motion": "hair-front",
+      "hiddenAreaSource": true
+    }
+  ],
+  "sourceMethod": "同一座標原画の可視画素分離と関節境界の局所再構成",
+  "motionLimits": {
+    "range": "微細変形のみ",
+    "hairCoupledToHead": false,
+    "faceTranslationFixed": true
+  }
+}

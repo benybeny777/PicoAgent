@@ -7,20 +7,22 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main id="petApp" class="pet-app is-booting" data-tauri-drag-region>
+  <main id="petApp" class="pet-app is-booting">
     <span class="beta-badge" aria-label="アルファ版" hidden>ALPHA</span>
-    <section id="bootScreen" class="boot-screen" aria-live="polite" data-tauri-drag-region>
-      <div class="boot-stage" data-tauri-drag-region>
+    <section id="bootScreen" class="boot-screen" aria-live="polite">
+      <div class="boot-stage">
         <div id="bootLog" class="boot-log" aria-label="起動ログ"></div>
-        <div class="boot-character" data-tauri-drag-region>
-          <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" data-tauri-drag-region />
+        <div class="boot-character">
+          <img id="bootPetImage" alt="起動を待つキャラクター" draggable="false" />
           <span class="boot-shadow" aria-hidden="true"></span>
         </div>
         <div class="boot-progress" aria-hidden="true"><span></span></div>
         <div id="bootStatus" class="boot-status"></div>
       </div>
     </section>
-    <section id="bubble" class="bubble" aria-live="polite">
+    <!-- 生きた領域は回答欄（#reply）だけに絞る。フキダシ全体や、全件を再構築する履歴へ
+         付けると、クイック操作や通知の変更、過去の会話まで繰り返し読み上げられる。 -->
+    <section id="bubble" class="bubble">
       <div id="replyActions" class="reply-actions" aria-label="回答操作">
         <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">通知</button>
         <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">コピー</button>
@@ -49,7 +51,7 @@
       <div id="streamDisplay" class="stream-display" aria-label="配信画面内ディスプレイ">
         <strong>PICO STUDIO</strong><span>CHAT &amp; CHARACTER</span>
       </div>
-      <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>
+      <div id="reply" class="reply" aria-live="polite" aria-atomic="true">こんにちは。クリックして話しかけてね。</div>
       <form id="composer" class="composer" hidden>
         <div id="imagePreview" class="image-preview" hidden></div>
         <div id="attachmentSuggestions" class="attachment-suggestions" hidden aria-label="添付ファイルのおすすめ操作"></div>
@@ -61,17 +63,17 @@
           <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
         </div>
       </form>
-      <div id="status" class="status"></div>
+      <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
       <button id="cancelVoice" class="cancel-voice" type="button" hidden>読み上げを中止</button>
       <button id="cancelSend" class="cancel-send" type="button" hidden>処理を止める</button>
       <button id="bubbleResize" class="bubble-resize" type="button" aria-label="フキダシのサイズを変更" title="ドラッグしてサイズ変更"></button>
     </section>
-    <section id="character" class="character" data-render-kind="2d" data-tauri-drag-region title="ドラッグで画面を移動／右クリックで設定" role="button" tabindex="0" aria-label="キャラクターに触れる。ドラッグで画面を移動、右クリックで設定">
+    <section id="character" class="character" data-render-kind="2d" title="ドラッグで画面を移動／右クリックで設定" role="button" tabindex="0" aria-label="キャラクターに触れる。ドラッグで画面を移動、右クリックで設定">
       <!-- 立ち絵の拡大・移動はこの枠にかける。待機モーションは中の img を動かすので、
            同じ要素に transform を重ねないよう1枚挟んでいる。 -->
-      <div id="characterView" class="character-view" data-tauri-drag-region>
-        <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" data-tauri-drag-region />
-        <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" data-tauri-drag-region hidden></div>
+      <div id="characterView" class="character-view">
+        <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" />
+        <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" hidden></div>
       </div>
       <span id="online" class="online"></span>
       <button id="relationshipButton" class="relationship-button" type="button" title="いっしょの記録を見る" aria-label="いっしょの記録を見る" aria-controls="relationshipCard" aria-expanded="false">♡</button>
@@ -110,7 +112,7 @@
           <div class="onboarding-choices">
             <a class="onboarding-link" href="https://www.live2d.com/learn/sample/" target="_blank" rel="noreferrer"><b>無料モデルを公式サイトから取得</b><span>利用条件を確認し、モデルデータをダウンロード</span></a>
             <button type="button" data-onboarding-action="add-character"><b>取得したLive2DをPicoAgentへ追加</b><span>zip／フォルダを選ぶ画面へ進む</span></button>
-            <button type="button" data-onboarding-action="skip-character"><b>今はしない</b><span>いつでも「キャラ・音声」から追加できます</span></button>
+            <button type="button" data-onboarding-action="skip-character"><b>今はしない</b><span>いつでも「キャラ登録」から追加できます</span></button>
           </div>
           <button class="onboarding-back" type="button" data-onboarding-action="back-components">← 追加機能へ戻る</button>
         </div>
@@ -130,12 +132,12 @@
       <div class="drop-overlay-inner">📎 ここにドロップして添付</div>
     </div>
     <nav id="topWindowMenu" class="top-window-menu" aria-label="PicoAgent メニュー">
-      <span class="top-window-menu-brand" data-tauri-drag-region>PicoAgent</span>
+      <span class="top-window-menu-brand">PicoAgent</span>
       <button type="button" data-settings-tab="display">表示</button>
       <button id="layoutEditToggle" class="layout-edit-toggle" type="button" aria-pressed="false" title="OBS風に画面を編集">配置</button>
-      <button type="button" data-settings-tab="character">キャラ・音声</button>
+      <button type="button" data-settings-tab="character">キャラ選択</button>
       <button type="button" data-settings-tab="">設定</button>
-      <span class="top-window-menu-drag" data-tauri-drag-region aria-hidden="true"></span>
+      <span class="top-window-menu-drag" aria-hidden="true"></span>
       <section id="layoutEditorToolbar" class="layout-editor-toolbar" aria-label="レイアウト編集" hidden>
         <strong>レイアウト編集</strong>
         <label>対象
@@ -158,6 +160,7 @@
   <script src="picoagent.js"></script>
   <script src="common.js"></script>
   <script src="frame-scheduler.js?v=20260819-renderer-scheduler"></script>
+  <script src="mesh-rig.js?v=20260827-grid-v1"></script>
   <script src="alarm-runtime.js"></script>
   <script src="renderer.js"></script>
   <script src="top-menu.js"></script>

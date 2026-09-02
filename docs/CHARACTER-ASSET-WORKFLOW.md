@@ -27,6 +27,8 @@ PicoAgentは、低頭身2Dを従来の上半身位置 `upper`、長身・実写�
 - `frames/<内容ハッシュ>/*.webp`: 状態フレームを重複除外した実行用lossless WebP単一世代
 - `expression-patches/`: 元立ち絵と同じ座標へ局所合成する透過パッチ
 - `character.json`: 同梱通常2Dは `motionProfile=full`、高精細優先なら `animationQualityMode=sharp-expression`、生成後は `frameGeneration`、`frameEncoding=webp-lossless-v1`、`runtimeLayers`
+- `mesh-rig/source/regions.json`: メッシュリグ用の局所領域、羽根幅、格子数。制作専用で配信しない
+- `mesh-rig/parts/*.webp`、`mesh-rig/rig.json`: `scripts/build-mesh-rig.py`が生成する実行資産。手で直さない
 
 ## 1. 元立ち絵
 
@@ -64,6 +66,16 @@ uv run --with pillow python scripts/build-character-animations.py --character-di
 cargo xtask sync-characters
 ```
 
+メッシュリグを持つキャラは、通常2D世代を完成させてから次も実行します。
+
+```powershell
+uv run --with pillow --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id>
+uv run --with pillow python scripts/build-mesh-rig.py <id>
+cargo xtask setup pixi
+```
+
+分離生成器は基準画像の可視画素を胴、後ろ髪、左右腕、顔、前髪へ分け、関節境界の数画素だけを同一座標で局所再構成します。6原画の中立合成が基準画像と完全一致しない場合は停止します。`runtimeScale`は1以下に限定し、制作正本を拡大しません。生成したlossless WebPは直後に復号してRGBA完全一致を検査し、設定から外した旧パーツは成功時に回収します。広い頭部回転や大きな腕移動へ可動域を広げる場合は、遮蔽物を外して描き足した同一座標原画を用意し、仮の引き伸ばしで代用しません。
+
 制作正本の `layers/*.png` は上書き・削除せず、実行用の9レイヤーを `runtime-layers/*.webp`、状態フレームを `frames/<内容ハッシュ>/*.webp` へlossless変換します。各WebPは保存直後に再読込し、元画像と寸法・RGBAが完全一致しなければ生成を停止します。新世代を完成しmanifestを原子的に保存した後だけ旧世代を除去します。複数世代または世代外参照は同期時に拒否します。Live2Dは別管理とし、通常2D世代へ混ぜません。
 
 `cargo xtask sync-characters` は制作正本を検証したあと、配信用コピーからだけ `layers/` を除外し、`runtimeLayers` が指すWebPを残します。利用者が追加済みの `layers/*.png` パックはmanifestに `runtimeLayers` がないため従来どおり読み込めます。lossy WebPは別判断とし、この工程へ混ぜません。
@@ -82,6 +94,7 @@ cargo xtask sync-characters
 - 胸元二次動作は広いフェザーと小さい縦変形で境界が見えない
 - 配信ではPICO STUDIOの後ろ、背景の前に描画される
 - `SHOOT_CHARACTER_MATRIX=1` の全キャラ×7形式で描画欠け・速度警告が0件
+- メッシュリグは`SHOOT_MESH_RIG=1`で閉眼、開口、頭部メッシュ、省モーション退避、縦1400画素以上の描画バッファが合格する
 
 最後に `cargo test --manifest-path xtask/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、必要なら `cargo test --manifest-path src-tauri/Cargo.toml --lib`、`git diff --check` を実行します。
 

@@ -172,11 +172,7 @@ fn refresh(jobs: &mut Vec<Job>) {
         .map(|(index, _)| index)
         .collect();
     if finished.len() > MAX_RETAINED {
-        for index in finished
-            .into_iter()
-            .take(jobs.len() - MAX_RETAINED)
-            .rev()
-        {
+        for index in finished.into_iter().take(jobs.len() - MAX_RETAINED).rev() {
             jobs.remove(index);
         }
     }
@@ -271,7 +267,9 @@ pub fn output(id: &str, from_start: bool) -> String {
     };
     let mut out = format!("{} [{}] {}", job.id, job.status.label(), job.command);
     if dropped > 0 {
-        out.push_str(&format!("\n（古い出力 {dropped} バイトは上限超過で破棄しました）"));
+        out.push_str(&format!(
+            "\n（古い出力 {dropped} バイトは上限超過で破棄しました）"
+        ));
     }
     if text.is_empty() {
         out.push_str("\n（新しい出力はありません）");
@@ -396,7 +394,11 @@ mod tests {
         for _ in 0..(MAX_BUFFER_BYTES / 3 + 100) {
             buffer.append("あ");
         }
-        assert!(buffer.text.len() <= MAX_BUFFER_BYTES, "len: {}", buffer.text.len());
+        assert!(
+            buffer.text.len() <= MAX_BUFFER_BYTES,
+            "len: {}",
+            buffer.text.len()
+        );
         assert!(buffer.dropped > 0);
         // 文字境界で切れていれば、そのまま文字列として扱える。
         assert!(buffer.text.chars().all(|c| c == 'あ'));

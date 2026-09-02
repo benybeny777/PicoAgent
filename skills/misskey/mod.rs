@@ -47,16 +47,35 @@ impl Tool for MisskeyTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MISSKEY_BASE_URL", "Misskey のインスタンス URL", "text", "https://misskey.io"),
-            Field::new("PICOAGENT_MISSKEY_TOKEN", "Misskey の API トークン", "password", ""),
-            Field::new("PICOAGENT_MISSKEY_TIMEOUT_SECS", "Misskey API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_MISSKEY_BASE_URL",
+                "Misskey のインスタンス URL",
+                "text",
+                "https://misskey.io",
+            ),
+            Field::new(
+                "PICOAGENT_MISSKEY_TOKEN",
+                "Misskey の API トークン",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_MISSKEY_TIMEOUT_SECS",
+                "Misskey API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_MISSKEY_TOKEN", "");
         if token.is_empty() {
-            return super::config_guide("Misskey", &["PICOAGENT_MISSKEY_TOKEN"], "Misskey API token が必要です。");
+            return super::config_guide(
+                "Misskey",
+                &["PICOAGENT_MISSKEY_TOKEN"],
+                "Misskey API token が必要です。",
+            );
         }
         let base = cfg
             .get("PICOAGENT_MISSKEY_BASE_URL", "https://misskey.io")
@@ -82,7 +101,10 @@ impl Tool for MisskeyTool {
                     Ok(text) => text,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                let visibility = args.get("visibility").and_then(Value::as_str).unwrap_or("public");
+                let visibility = args
+                    .get("visibility")
+                    .and_then(Value::as_str)
+                    .unwrap_or("public");
                 handle_text_response(
                     client
                         .post(format!("{}/api/notes/create", base))
@@ -129,7 +151,10 @@ impl Tool for MisskeyTool {
                 )
                 .await
             }
-            _ => "エラー: action は create_note/timeline/search_users のいずれかを指定してください。".to_string(),
+            _ => {
+                "エラー: action は create_note/timeline/search_users のいずれかを指定してください。"
+                    .to_string()
+            }
         }
     }
 }
@@ -142,12 +167,18 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{} が指定されていません。", key))?;
     if text.chars().count() > max_chars {
-        return Err(format!("{} は {} 文字以内で指定してください。", key, max_chars));
+        return Err(format!(
+            "{} は {} 文字以内で指定してください。",
+            key, max_chars
+        ));
     }
     Ok(text)
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

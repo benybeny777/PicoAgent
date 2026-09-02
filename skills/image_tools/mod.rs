@@ -5,7 +5,6 @@
 
 use std::path::Path;
 use std::process::Stdio;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -13,8 +12,8 @@ use tokio::process::Command;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::permissions::SafePath;
 use crate::message::Field;
+use crate::permissions::SafePath;
 
 pub struct ImageToolsTool;
 
@@ -56,7 +55,8 @@ async fn is_imagemagick(program: &str) -> bool {
 }
 
 async fn magick_program(cfg: &Config, legacy: &str) -> String {
-    let resolved = crate::tools::resolve_cli_path(cfg, "PICOAGENT_MAGICK_PATH", "imagemagick", "magick");
+    let resolved =
+        crate::tools::resolve_cli_path(cfg, "PICOAGENT_MAGICK_PATH", "imagemagick", "magick");
     if resolved != "magick" {
         return resolved;
     }
@@ -73,15 +73,21 @@ async fn magick_program(cfg: &Config, legacy: &str) -> String {
     "magick".to_string()
 }
 
-async fn run_magick(mut command: Command, timeout: u64, label: &str) -> Result<std::process::Output, String> {
-        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(format!(
-            "エラー: ImageMagick の起動に失敗しました: {}。cargo xtask setup tools か apt/brew で ImageMagick を導入してください。",
-            error
-        )),
-        Err(_) => Err(format!("エラー: {} が {} 秒でタイムアウトしました。", label, timeout)),
-    }
+/// ImageMagick を実行する。打ち切り時に子プロセスをツリーごと回収させるため、
+/// 自前で `tokio::time::timeout` を巻かず共通層を通す。
+async fn run_magick(
+    command: Command,
+    timeout: u64,
+    label: &str,
+) -> Result<std::process::Output, String> {
+    crate::tools::process::output_or_install_hint(
+        command,
+        timeout,
+        label,
+        "cargo xtask setup tools か apt/brew で ImageMagick を導入してください。",
+    )
+    .await
+    .map_err(|error| format!("エラー: {error}"))
 }
 
 /// 画像を別形式へ変換する（PSD/XCF 等は統合ビューを使用。resize / quality 対応）。
@@ -110,15 +116,28 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
         input_display
     };
     command.arg(&input_arg);
-    if let Some(resize) = args.get("resize").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(resize) = args
+        .get("resize")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         command.arg("-resize").arg(resize);
     }
-    if let Some(quality) = args.get("quality").and_then(Value::as_u64).filter(|v| (1..=100).contains(v)) {
+    if let Some(quality) = args
+        .get("quality")
+        .and_then(Value::as_u64)
+        .filter(|v| (1..=100).contains(v))
+    {
         command.arg("-quality").arg(quality.to_string());
     }
     // 透過を持てない形式（jpg 等）へ変換する際に背景が黒くならないよう白で敷く。
     if matches!(output.extension_lossy().as_str(), "jpg" | "jpeg" | "bmp") {
-        command.arg("-background").arg("white").arg("-alpha").arg("remove");
+        command
+            .arg("-background")
+            .arg("white")
+            .arg("-alpha")
+            .arg("remove");
     }
     command.arg(&output);
     let result = match run_magick(command, timeout, "画像変換").await {
@@ -128,11 +147,19 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
     if !result.status.success() || !output.exists() {
         return format!(
             "エラー: 画像変換に失敗しました（終了コード {}）:\n{}",
-            result.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
+            result
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "シグナル終了".to_string()),
             String::from_utf8_lossy(&result.stderr)
         );
     }
-    format!("画像を変換しました: {} → {}", input.display(), output.display())
+    format!(
+        "画像を変換しました: {} → {}",
+        input.display(),
+        output.display()
+    )
 }
 
 /// 画像の情報（形式・寸法・レイヤー数など）を identify で取得する。
@@ -184,7 +211,24 @@ impl Tool for ImageToolsTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["psd", "xcf", "heic", "heif", "tiff", "webp", "avif", "画像変換", "pngに", "png化", "jpgに", "jpegに", "リサイズ", "縮小して", "画像情報", "レイヤー"]
+        &[
+            "psd",
+            "xcf",
+            "heic",
+            "heif",
+            "tiff",
+            "webp",
+            "avif",
+            "画像変換",
+            "pngに",
+            "png化",
+            "jpgに",
+            "jpegに",
+            "リサイズ",
+            "縮小して",
+            "画像情報",
+            "レイヤー",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -219,8 +263,18 @@ impl Tool for ImageToolsTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MAGICK_PATH", "ImageMagick 実行ファイルパス（空ならPicoAgent内→PATH の magick/convert）", "text", ""),
-            Field::new("PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS", "画像操作タイムアウト秒（5〜300）", "text", "120"),
+            Field::new(
+                "PICOAGENT_MAGICK_PATH",
+                "ImageMagick 実行ファイルパス（空ならPicoAgent内→PATH の magick/convert）",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS",
+                "画像操作タイムアウト秒（5〜300）",
+                "text",
+                "120",
+            ),
         ]
     }
 
@@ -261,7 +315,8 @@ mod tests {
     // PSD を生成 → PNG へ変換 → 情報取得まで一連の流れを確認する。
     #[test]
     fn psdをpngへ変換して情報取得できる() {
-        let dir = std::env::temp_dir().join(format!("picoagent-image-tools-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("picoagent-image-tools-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = crate::config::Config::new();
         cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());

@@ -40,7 +40,11 @@ fn relative_minutes(text: &str) -> Option<i64> {
 }
 
 fn str_arg(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn due_arg(args: &Value) -> Option<String> {
@@ -62,7 +66,10 @@ fn list_text(events: &[DailyEvent]) -> String {
     }
     let mut out = String::from("登録中のリマインダー:");
     for event in reminders {
-        out.push_str(&format!("\n- {} {}（id:{}）", event.due_at, event.text, event.id));
+        out.push_str(&format!(
+            "\n- {} {}（id:{}）",
+            event.due_at, event.text, event.id
+        ));
     }
     out
 }
@@ -74,7 +81,13 @@ impl Tool for ReminderTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["リマインダー", "思い出させて", "通知して", "あとで教えて", "reminder"]
+        &[
+            "リマインダー",
+            "思い出させて",
+            "通知して",
+            "あとで教えて",
+            "reminder",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {
@@ -103,7 +116,8 @@ impl Tool for ReminderTool {
     }
 
     fn description(&self) -> String {
-        "指定時刻や数分後に声で知らせる日常リマインダー。追加・一覧・削除・全削除ができる。".to_string()
+        "指定時刻や数分後に声で知らせる日常リマインダー。追加・一覧・削除・全削除ができる。"
+            .to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -143,7 +157,8 @@ impl Tool for ReminderTool {
                     return "エラー: 何を知らせるか指定してね。".to_string();
                 }
                 let Some(due_at) = due_arg(&args) else {
-                    return "エラー: due_at（YYYY-MM-DDTHH:MM）か minutes_from_now を指定してね。".to_string();
+                    return "エラー: due_at（YYYY-MM-DDTHH:MM）か minutes_from_now を指定してね。"
+                        .to_string();
                 };
                 let event = DailyEvent {
                     id: daily::new_id("rm"),
@@ -166,14 +181,19 @@ impl Tool for ReminderTool {
                 let before = events.len();
                 events.retain(|event| !(event.kind == "reminder" && event.id == id));
                 if events.len() == before {
-                    return format!("その id のリマインダーは見つからなかったよ。\n{}", list_text(&events));
+                    return format!(
+                        "その id のリマインダーは見つからなかったよ。\n{}",
+                        list_text(&events)
+                    );
                 }
                 match daily::save_events(cfg, &events) {
                     Ok(()) => "リマインダーを削除したよ。".to_string(),
                     Err(error) => format!("エラー: リマインダーの保存に失敗しました: {error}"),
                 }
             }
-            other => format!("エラー: 未知の action \"{other}\" です。add/list/remove/clear を指定してね。"),
+            other => format!(
+                "エラー: 未知の action \"{other}\" です。add/list/remove/clear を指定してね。"
+            ),
         }
     }
 }

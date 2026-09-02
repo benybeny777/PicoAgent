@@ -158,10 +158,7 @@ pub fn format_elements(elements: &[Element], limit: usize) -> String {
         ));
     }
     if elements.len() > limit {
-        out.push_str(&format!(
-            "  …ほか {} 件\n",
-            elements.len() - limit
-        ));
+        out.push_str(&format!("  …ほか {} 件\n", elements.len() - limit));
     }
     out
 }

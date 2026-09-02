@@ -19,9 +19,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use enigo::{
-    Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings,
-};
+use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
@@ -71,9 +69,8 @@ fn check_rate(limit: usize) -> Result<(), String> {
 }
 
 fn make_enigo() -> Result<Enigo, String> {
-    Enigo::new(&Settings::default()).map_err(|error| {
-        format!("エラー: デスクトップ操作を初期化できません: {error}")
-    })
+    Enigo::new(&Settings::default())
+        .map_err(|error| format!("エラー: デスクトップ操作を初期化できません: {error}"))
 }
 
 /// キー名を enigo のキーへ写す。生のキーコードはモデルに書かせない。
@@ -188,7 +185,18 @@ impl Tool for DesktopControlTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["クリックして", "クリックし", "マウス", "キーボード", "キーを押", "入力して", "画面を操作", "pc操作", "デスクトップ操作", "ドラッグ"]
+        &[
+            "クリックして",
+            "クリックし",
+            "マウス",
+            "キーボード",
+            "キーを押",
+            "入力して",
+            "画面を操作",
+            "pc操作",
+            "デスクトップ操作",
+            "ドラッグ",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -235,8 +243,18 @@ impl Tool for DesktopControlTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_DESKTOP_ENABLED", "デスクトップ操作を有効にする（既定は無効）", "checkbox", "false"),
-            Field::new("PICOAGENT_DESKTOP_MAX_OPS_PER_MIN", "1分あたりの操作回数の上限（1〜600）", "text", "60"),
+            Field::new(
+                "PICOAGENT_DESKTOP_ENABLED",
+                "デスクトップ操作を有効にする（既定は無効）",
+                "checkbox",
+                "false",
+            ),
+            Field::new(
+                "PICOAGENT_DESKTOP_MAX_OPS_PER_MIN",
+                "1分あたりの操作回数の上限（1〜600）",
+                "text",
+                "60",
+            ),
         ]
     }
 
@@ -471,7 +489,9 @@ inventory::submit! { ToolReg { make: || Box::new(DesktopControlTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{button_of, check_rate, coord, enabled, max_ops_per_min, parse_combo, parse_key, recent_ops};
+    use super::{
+        button_of, check_rate, coord, enabled, max_ops_per_min, parse_combo, parse_key, recent_ops,
+    };
     use crate::config::Config;
     use enigo::{Button, Key};
 
@@ -489,7 +509,10 @@ mod tests {
         assert!(matches!(parse_key("esc"), Some(Key::Escape)));
         assert!(matches!(parse_key("F5"), Some(Key::F5)));
         assert!(matches!(parse_key("a"), Some(Key::Unicode('a'))));
-        assert!(parse_key("そんなキーはない").is_none(), "複数文字の未知名は拒否する");
+        assert!(
+            parse_key("そんなキーはない").is_none(),
+            "複数文字の未知名は拒否する"
+        );
     }
 
     #[test]

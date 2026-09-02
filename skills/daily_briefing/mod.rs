@@ -10,7 +10,11 @@ use crate::daily;
 pub struct DailyBriefingTool;
 
 fn str_arg(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 #[async_trait]
@@ -20,7 +24,14 @@ impl Tool for DailyBriefingTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["おでかけ", "出かける", "外出", "持っていく", "出る前", "briefing"]
+        &[
+            "おでかけ",
+            "出かける",
+            "外出",
+            "持っていく",
+            "出る前",
+            "briefing",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {

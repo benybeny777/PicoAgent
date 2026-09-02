@@ -113,7 +113,9 @@ fn text_budget(cfg: &Config) -> usize {
 async fn pick_target(port: u16) -> Result<cdp::Target, String> {
     let pages = cdp::pages(port).await?;
     if pages.is_empty() {
-        return Err("エラー: 開いているタブがありません。先に open でページを開いてください。".to_string());
+        return Err(
+            "エラー: 開いているタブがありません。先に open でページを開いてください。".to_string(),
+        );
     }
     let remembered = current_target().lock().ok().and_then(|slot| slot.clone());
     if let Some(id) = remembered {
@@ -151,7 +153,9 @@ async fn render_page(
     let (body, next) = extract::slice_text(&page.text, offset, budget);
     let mut out = format!("ページ: {}\nURL: {}\n", page.title, page.url);
     if page.text.is_empty() {
-        out.push_str("\n（本文が空でした。読み込み中か、描画に時間がかかっている可能性があります）\n");
+        out.push_str(
+            "\n（本文が空でした。読み込み中か、描画に時間がかかっている可能性があります）\n",
+        );
     } else {
         out.push_str("\n--- 本文 ---\n");
         out.push_str(&body);
@@ -167,7 +171,10 @@ async fn render_page(
         }
     }
     out.push_str("\n--- 操作できる要素 ---\n");
-    out.push_str(&extract::format_elements(&page.elements, MAX_LISTED_ELEMENTS));
+    out.push_str(&extract::format_elements(
+        &page.elements,
+        MAX_LISTED_ELEMENTS,
+    ));
     Ok(out)
 }
 
@@ -189,7 +196,16 @@ impl Tool for BrowserControlTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["ブラウザ", "browser", "chrome", "edge", "ログインが必要", "ログインして", "開いて読", "画面を開いて"]
+        &[
+            "ブラウザ",
+            "browser",
+            "chrome",
+            "edge",
+            "ログインが必要",
+            "ログインして",
+            "開いて読",
+            "画面を開いて",
+        ]
     }
 
     fn label(&self) -> &'static str {
@@ -226,19 +242,54 @@ impl Tool for BrowserControlTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_BROWSER_ENABLED", "ブラウザ操作を有効にする（既定は無効）", "checkbox", "false"),
-            Field::new("PICOAGENT_BROWSER_PATH", "Chrome / Edge の実行パス（空なら自動検出）", "text", ""),
+            Field::new(
+                "PICOAGENT_BROWSER_ENABLED",
+                "ブラウザ操作を有効にする（既定は無効）",
+                "checkbox",
+                "false",
+            ),
+            Field::new(
+                "PICOAGENT_BROWSER_PATH",
+                "Chrome / Edge の実行パス（空なら自動検出）",
+                "text",
+                "",
+            ),
             Field::new(
                 "PICOAGENT_BROWSER_ALLOWED_DOMAINS",
                 "開いてよいドメイン（必須。例: example.com,docs.example.com）",
                 "textarea",
                 "",
             ),
-            Field::new("PICOAGENT_BROWSER_PROFILE", "プロファイル（isolated=専用 / default=ブラウザの既定プロファイル）", "text", "isolated"),
-            Field::new("PICOAGENT_BROWSER_HEADLESS", "画面を出さずに操作する", "checkbox", "false"),
-            Field::new("PICOAGENT_BROWSER_PORT", "CDP のデバッグポート", "text", "11437"),
-            Field::new("PICOAGENT_BROWSER_TIMEOUT_SECS", "1操作の待ち時間（秒、5〜180）", "text", "30"),
-            Field::new("PICOAGENT_BROWSER_MAX_CHARS", "1回に読む本文の最大文字数（auto=モデルのコンテキスト長に合わせる）", "text", "auto"),
+            Field::new(
+                "PICOAGENT_BROWSER_PROFILE",
+                "プロファイル（isolated=専用 / default=ブラウザの既定プロファイル）",
+                "text",
+                "isolated",
+            ),
+            Field::new(
+                "PICOAGENT_BROWSER_HEADLESS",
+                "画面を出さずに操作する",
+                "checkbox",
+                "false",
+            ),
+            Field::new(
+                "PICOAGENT_BROWSER_PORT",
+                "CDP のデバッグポート",
+                "text",
+                "11437",
+            ),
+            Field::new(
+                "PICOAGENT_BROWSER_TIMEOUT_SECS",
+                "1操作の待ち時間（秒、5〜180）",
+                "text",
+                "30",
+            ),
+            Field::new(
+                "PICOAGENT_BROWSER_MAX_CHARS",
+                "1回に読む本文の最大文字数（auto=モデルのコンテキスト長に合わせる）",
+                "text",
+                "auto",
+            ),
         ]
     }
 
@@ -402,8 +453,14 @@ mod tests {
     #[test]
     fn 許可ドメインはサブドメインまで許す() {
         let cfg = config(&[("PICOAGENT_BROWSER_ALLOWED_DOMAINS", "example.com")]);
-        assert!(allowed_domain(&cfg, &Url::parse("https://example.com/").unwrap()));
-        assert!(allowed_domain(&cfg, &Url::parse("https://docs.example.com/").unwrap()));
+        assert!(allowed_domain(
+            &cfg,
+            &Url::parse("https://example.com/").unwrap()
+        ));
+        assert!(allowed_domain(
+            &cfg,
+            &Url::parse("https://docs.example.com/").unwrap()
+        ));
         assert!(
             !allowed_domain(&cfg, &Url::parse("https://notexample.com/").unwrap()),
             "接尾辞が一致するだけの別ドメインは許可しない"
@@ -413,7 +470,10 @@ mod tests {
     #[test]
     fn 待ち時間は範囲外なら既定へ戻す() {
         assert_eq!(timeout_secs(&config(&[])), 30);
-        assert_eq!(timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "60")])), 60);
+        assert_eq!(
+            timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "60")])),
+            60
+        );
         assert_eq!(
             timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "9999")])),
             30,
@@ -425,7 +485,10 @@ mod tests {
     fn 本文予算はコンテキスト長に追随する() {
         let narrow = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "8192")]));
         let wide = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "32768")]));
-        assert!(wide > narrow, "コンテキストを広げたら本文予算も増える: {narrow} -> {wide}");
+        assert!(
+            wide > narrow,
+            "コンテキストを広げたら本文予算も増える: {narrow} -> {wide}"
+        );
     }
 
     #[test]

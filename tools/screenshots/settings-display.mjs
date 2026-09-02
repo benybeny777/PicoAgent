@@ -30,6 +30,8 @@ const settingsData = {
   product: { name: "PicoAgent", version: "1.0.0", identifier: "com.picoagent.desktop" },
   values: {
     PICOAGENT_PROVIDER: "local",
+    PICOAGENT_MODEL: "lfm25_2_6b",
+    PICOAGENT_LOCAL_MODEL_PRESET: "lfm25_2_6b",
     PICOAGENT_CHARACTER: "mugi",
     PICOAGENT_LAYOUT: "stream",
     PICOAGENT_THEME: "dark",
@@ -45,10 +47,12 @@ const settingsData = {
     PICOAGENT_MULTI_AI_JUDGE_MODEL: "gemma",
     PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY: "3",
   },
-  active: { providerId: "local", model: "gemma" },
+  active: { providerId: "local", model: "lfm25_2_6b" },
   defaults: { systemPrompt: "" },
   providers: [
-    { id: "local", label: "ローカル", defaultModel: "gemma", configSchema: [] },
+    { id: "local", label: "ローカル", defaultModel: "lfm25_2_6b", configSchema: [
+      { key: "PICOAGENT_LOCAL_MODEL_PRESET", label: "ローカルモデル", type: "text", placeholder: "auto" },
+    ] },
     { id: "ollama", label: "Ollama", defaultModel: "gemma3", configSchema: [] },
     { id: "openai", label: "OpenAI互換", defaultModel: "gpt-5", configSchema: [] },
     { id: "agent_cli", label: "手元のCLI", defaultModel: "claude", configSchema: [] },
@@ -80,7 +84,15 @@ const settingsData = {
     },
   ],
   relationships: [],
-  localModelPresets: [],
+  defaultLocalModelPreset: "lfm25_2_6b",
+  localHardware: { ramGb: 32, vramGb: 8.6, unifiedMemory: false },
+  localModelPresets: [
+    { id: "lfm25_2_6b", family: "Liquid AI", localSize: "LFM2.5 2.6B Agentic", label: "軽量LFM", recommendedVramGb: 4, recommendedRamGb: 8, downloadSize: "約1.59GB", japaneseNote: "日本語対応", note: "検証済みの既定モデル" },
+    { id: "small", family: "Gemma", localSize: "Gemma 4 E2B", label: "Gemma軽量", recommendedVramGb: 0, recommendedRamGb: 8, downloadSize: "約3.1GB", japaneseNote: "日本語対応", note: "Gemma 4を継続選択可能" },
+    { id: "qwen35_4b", family: "Qwen", localSize: "Qwen3.5 4B", label: "Qwen", recommendedVramGb: 4, recommendedRamGb: 12, downloadSize: "約2.7GB", japaneseNote: "日本語に強い", note: "日本語と指示追従" },
+    { id: "gpt_oss_20b", family: "OpenAI", localSize: "gpt-oss-20b", label: "gpt-oss", recommendedVramGb: 16, recommendedRamGb: 32, downloadSize: "約12.1GB", japaneseNote: "日本語対応", note: "高性能PC向け" },
+    { id: "phi4mini", family: "Phi", localSize: "Phi-4 mini", label: "Phi", recommendedVramGb: 4, recommendedRamGb: 12, downloadSize: "約2.5GB", japaneseNote: "日本語対応", note: "小型推論候補" },
+  ],
 };
 const mock = `
 window.__listeners = {};
@@ -99,7 +111,9 @@ window.__TAURI__ = {
       return { items: window.__memoryItems };
     }
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
+    if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
+    if (name === "settings_export_diagnostics") return { path: "C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\log\\diagnostics-2026-09-02-080000.txt" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
@@ -160,7 +174,7 @@ try {
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   await page.getByRole("tab", { name: "基本設定" }).click();
-  if (await page.locator(".quick-settings-card").count() !== 5) throw new Error("よく使う設定への入口が5件ではありません");
+  if (await page.locator(".quick-settings-card").count() !== 7) throw new Error("よく使う設定への入口が7件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
   await page.waitForSelector(".memory-item");
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
@@ -227,7 +241,88 @@ try {
   await verifyLongSkillLabels(600);
   await verifyLongSkillLabels(400);
   await page.setViewportSize({ width: 960, height: 760 });
+  for (const tabName of ["キャラ登録", "キャラ選択", "キャラの音声"]) {
+    if (await page.getByRole("tab", { name: tabName, exact: true }).count() !== 1) throw new Error(`${tabName}タブが独立していません`);
+  }
+  await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
+  const userCard = page.locator(".character-card").filter({ hasText: "ID: user-test" });
+  await userCard.waitFor();
+  const renameInput = userCard.getByRole("textbox", { name: "追加テストの表示名" });
+  await renameInput.fill("Nicole");
+  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
+    .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
+  if (!(await userCard.textContent())?.includes("Nicole")) throw new Error("追加キャラの表示名がカードへ反映されません");
+  const renamedOption = await page.locator('select option[value="user-test"]').textContent();
+  if (!renamedOption?.includes("Nicole") || !renamedOption.includes("user-test")) {
+    throw new Error(`追加キャラの表示名または内部IDが選択肢へ反映されません: ${renamedOption}`);
+  }
+  // 選択中キャラの名前を変えても、旧・既定人格が「利用者の上書き」として固定されないこと。
+  // 固定されると名前変更に人格が追従せず、旧名の文が未保存の上書きとして残る。
+  // 実機の名前変更は character.json の定型人格も書き換えるので、再取得分だけ差し替える。
+  let renamedPersonaName = "";
+  await page.route("**/assets/characters/mugi/character.json*", async route => {
+    const response = await route.fetch();
+    const manifest = JSON.parse(await response.text());
+    if (renamedPersonaName) {
+      manifest.name = renamedPersonaName;
+      manifest.persona = {
+        ...manifest.persona,
+        systemPrompt: `${renamedPersonaName}として振る舞い、利用者の依頼を丁寧に手伝う。`,
+      };
+    }
+    await route.fulfill({ response, contentType: "application/json", body: JSON.stringify(manifest) });
+  });
+  await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
+  // 切替は非同期。選択1件だけが未保存になった状態を基準にする。
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "未保存 1件");
+  const dirtyAfterSelect = await page.locator("#dirtySummary").textContent();
+  await renameInput.fill("Nicole改");
+  renamedPersonaName = "Nicole改";
+  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
+    .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicole改へ変更しました")));
+  const personaAfterRename = await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue();
+  if (!personaAfterRename.includes("Nicole改として振る舞い")) {
+    throw new Error("名前変更後の人格欄が新しい既定文へ追従していません");
+  }
+  const dirtyAfterRename = await page.locator("#dirtySummary").textContent();
+  if (dirtyAfterRename !== dirtyAfterSelect) {
+    throw new Error(`選択中キャラの名前変更で未保存項目が増えました: ${dirtyAfterSelect} -> ${dirtyAfterRename}`);
+  }
+  await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').selectOption("mugi");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
+  renamedPersonaName = "";
+  await renameInput.fill("Nicole");
+  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
+    .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
+  await userCard.screenshot({ path: join(OUT, "character-rename.png") });
+  await page.setViewportSize({ width: 960, height: 760 });
   await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
+  const localRecommendation = page.locator(".local-model-recommendation");
+  if (await page.locator(".local-model-card").count() !== 5) throw new Error("日本語ローカルモデル候補が5件表示されていません");
+  const localText = await localRecommendation.textContent();
+  for (const expected of ["RAM 32GB", "専用VRAM 8.6GB", "LFM2.5 2.6B Agentic", "Gemma 4 E2B", "Qwen3.5 4B"]) {
+    if (!localText?.includes(expected)) throw new Error(`PC向け候補に「${expected}」がありません`);
+  }
+  const familyLabels = await page.locator('[data-setting-key="PICOAGENT_LOCAL_MODEL_PRESET"] select').first().locator("option").allTextContents();
+  for (const family of ["Liquid AI", "Gemma", "Qwen", "OpenAI", "Phi"]) {
+    if (!familyLabels.includes(family)) throw new Error(`${family}系列がモデル選択にありません`);
+  }
+  await page.locator(".local-model-card").filter({ hasText: "Gemma 4 E2B" }).getByRole("button", { name: "このモデルを使う" }).click();
+  if (await page.locator('[data-setting-key="PICOAGENT_LOCAL_MODEL_PRESET"] input[type="hidden"]').inputValue() !== "small") throw new Error("カード選択がローカルモデル設定へ反映されません");
+  if (await page.locator('[data-setting-key="PICOAGENT_MODEL"] input').inputValue() !== "small") throw new Error("カード選択がAIモデルへ同期されません");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存"));
+  if (!(await page.locator("#dirtySummary").textContent())?.includes("未保存")) throw new Error("カード選択で未保存表示になりません");
+  await page.locator(".local-model-card").filter({ hasText: "LFM2.5 2.6B Agentic" }).getByRole("button", { name: "このモデルを使う" }).click();
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
+  await localRecommendation.scrollIntoViewIfNeeded();
+  await localRecommendation.screenshot({ path: join(OUT, "local-model-recommendations.png") });
+  await page.setViewportSize({ width: 400, height: 820 });
+  if (await localRecommendation.evaluate(node => node.scrollWidth > node.clientWidth)) throw new Error("400px幅でローカルモデル候補が横にはみ出しています");
+  await localRecommendation.screenshot({ path: join(OUT, "local-model-recommendations-400px.png") });
+  await page.setViewportSize({ width: 960, height: 760 });
   const multiAi = page.locator(".multi-ai-editor");
   if (await multiAi.count() !== 1) throw new Error("複数AI設定がありません");
   if (await page.locator(".multi-ai-row").count() !== 2) throw new Error("保存済みの参加AIが2件表示されていません");
@@ -256,14 +351,12 @@ try {
   if (await page.locator('.searchable:not([hidden])').count() < 1) throw new Error("音声の検索候補が表示されません");
   await page.locator("#clearSettingsSearch").click();
   if (await page.locator("#settingsSearch").inputValue() !== "") throw new Error("検索を解除できません");
-  await page.getByRole("tab", { name: "キャラ・音声" }).click();
+  await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
   await page.waitForSelector(".framing-editor");
   await page.waitForSelector(".stream-profile-editor");
   const streamEnabled = await page.locator('.stream-profile-editor input[type="checkbox"]').isChecked();
   if (!streamEnabled) throw new Error("むぎのキャラ別配信設定が読み込まれていません");
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
-  const muteStatus = await page.locator(".tts-master-status").textContent();
-  if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
   const framing = page.locator(".framing-editor");
   if (!(await framing.textContent())?.includes("キャラサイズ")) throw new Error("構図にキャラサイズのスライダーがありません");
   const zoom = framing.locator('input[type="range"]');
@@ -283,12 +376,13 @@ try {
   if ((await framing.locator("select").nth(1).inputValue()) !== "custom") throw new Error("ドラッグ後に細かく調整へ切り替わりません");
   await page.screenshot({ path: join(OUT, "character-framing.png") });
   await framing.getByRole("button", { name: "この構図を初期値へ戻す", exact: true }).click();
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
   const framingResetDirty = await page.locator("#dirtySummary").textContent();
   if (framingResetDirty !== "保存済み") {
     const changed = await page.locator(".changed").evaluateAll(nodes => nodes.map(node => node.dataset.settingKey || `${node.className}:${node.textContent?.slice(0, 40)}`));
     throw new Error(`構図を初期値へ戻しても未保存状態が解消されません: ${framingResetDirty} / ${changed.join(",")}`);
   }
-  const addedCharacter = page.locator(".character-card").filter({ hasText: "追加テスト" });
+  const addedCharacter = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await addedCharacter.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "もう一度押して削除", exact: true }).click();
@@ -296,7 +390,31 @@ try {
   if (await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').inputValue() !== "mugi") throw new Error("未保存選択の削除後に保存中キャラへ戻りません");
   if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("年下っぽく")) throw new Error("削除後の選択と人格表示が一致しません");
   if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("既定人格だけで未保存扱いになっています");
+  await page.getByRole("tab", { name: "キャラの音声", exact: true }).click();
+  const voiceHeadingBox = await page.getByRole("heading", { name: "キャラの音声設定", exact: true }).boundingBox();
+  if (!voiceHeadingBox || voiceHeadingBox.y < 0 || voiceHeadingBox.y > 260) throw new Error("音声タブが先頭から表示されません");
+  const muteStatus = await page.locator(".tts-master-status").textContent();
+  if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
+  if (!(await page.locator(".character-voice-context").textContent())?.includes("むぎ")) throw new Error("音声タブに選択中キャラが表示されません");
+  const speakerInput = page.getByLabel("このキャラの Aivis Style ID", { exact: true });
+  await speakerInput.fill("123456");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存"));
+  await speakerInput.fill("");
+  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
+  await page.screenshot({ path: join(OUT, "character-voice-tab.png") });
+  await page.getByRole("tab", { name: "キャラ登録", exact: true }).click();
+  const registerHeadingBox = await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).boundingBox();
+  if (!registerHeadingBox || registerHeadingBox.y < 0 || registerHeadingBox.y > 260) throw new Error("登録タブが先頭から表示されません");
+  if (await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).count() !== 1) throw new Error("キャラ登録タブに追加操作がありません");
+  if (await page.locator(".character-browser-list:visible").count()) throw new Error("キャラ登録タブに選択一覧が混ざっています");
+  if (await page.locator(".tts-master-status:visible").count()) throw new Error("キャラ登録タブに音声設定が混ざっています");
+  await page.screenshot({ path: join(OUT, "character-register-tab.png") });
   await page.getByRole("tab", { name: "診断・修復" }).click();
+  // 不具合連絡用の書き出し。保存先をその場に出す（秘密値を含めないことも明示する）。
+  await page.getByRole("button", { name: "診断情報を書き出す", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".diagnostics-export-status")?.textContent?.includes("diagnostics-2026-09-02-080000.txt"));
+  const exportNote = await page.locator(".diagnostics-export-status").textContent();
+  if (!exportNote?.includes("APIキー等は含みません")) throw new Error(`診断書き出しの案内が不足しています: ${exportNote}`);
   if (await page.locator(".product-info-card").count() !== 5) throw new Error("製品情報カードが5件ではありません");
   if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
   if (!(await page.locator(".product-update-card").textContent())?.includes("再ダウンロードしません")) throw new Error("アプリ更新で維持されるデータが案内されません");
@@ -315,7 +433,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口5件 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口7件 / キャラ登録・選択・音声の3分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));
