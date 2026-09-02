@@ -5451,11 +5451,13 @@ async function checkAlarms() {
   if (!Array.isArray(alarms) || !alarms.length) return;
   // 分ちょうどだけを見ると、スリープ復帰・起動直後・直前の発火が長引いた場合に
   // その日の目覚ましが黙って鳴らない。直近5分以内に来た予定まで拾う。
-  const due = window.PicoAlarmRuntime.dueAlarm(alarms, now);
-  if (due) {
+  const dueItems = window.PicoAlarmRuntime.dueAlarms(alarms, now);
+  for (const due of dueItems) {
     const key = `${due.alarm.id}@${due.scheduledKey}`;
     // 1ティックにつき1件だけ鳴らす（発火記録で二重には鳴らない）。
-    if (window.PicoAlarmRuntime.markFired(firedAlarms, key)) await fireAlarm(due.alarm, null, due);
+    if (!window.PicoAlarmRuntime.markFired(firedAlarms, key)) continue;
+    await fireAlarm(due.alarm, null, due);
+    break;
   }
   } finally {
     alarmCheckInFlight = false;

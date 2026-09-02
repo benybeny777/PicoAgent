@@ -76,8 +76,21 @@ test("同じ予定は発火記録で二重に鳴らない", () => {
   assert.equal(globalThis.PicoAlarmRuntime.markFired(fired, `${second.alarm.id}@${second.scheduledKey}`), false);
 });
 
+test("同時刻の先頭が発火済みでも次の目覚ましを選べる", () => {
+  const alarms = [
+    { id: "first", time: "07:00", enabled: true, days: [] },
+    { id: "second", time: "07:00", enabled: true, days: [] },
+  ];
+  const dueItems = globalThis.PicoAlarmRuntime.dueAlarms(alarms, at("2026-09-02T07:01:00"));
+  assert.deepEqual(dueItems.map((item) => item.alarm.id), ["first", "second"]);
+
+  const fired = new Set([`${dueItems[0].alarm.id}@${dueItems[0].scheduledKey}`]);
+  const next = dueItems.find((item) => !fired.has(`${item.alarm.id}@${item.scheduledKey}`));
+  assert.equal(next?.alarm.id, "second");
+});
+
 test("実画面は共通の判定と発火記録を使う", () => {
-  assert.match(renderer, /PicoAlarmRuntime\.dueAlarm\(alarms, now\)/);
+  assert.match(renderer, /PicoAlarmRuntime\.dueAlarms\(alarms, now\)/);
   assert.match(renderer, /PicoAlarmRuntime\.markFired\(firedAlarms, key\)/);
   // 遅れて鳴らすときは予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
   assert.match(renderer, /due\.lateMinutes >= 1/);
