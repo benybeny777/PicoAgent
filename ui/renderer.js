@@ -729,11 +729,24 @@ async function fetchJsonWithTimeout(url, label, timeoutMs = STARTUP_RESOURCE_TIM
   }
 }
 
+// 同梱キャラの一覧は配布物へ焼き込まれ、実行中に増減しない。起動経路で何度も
+// 取りに行かないよう、最初の1回だけ読んで使い回す。
+let characterCatalogPromise = null;
+function loadCharacterCatalog() {
+  if (!characterCatalogPromise) {
+    characterCatalogPromise = fetchJsonWithTimeout(
+      `assets/characters/index.json?v=${characterManifestCacheKey}`,
+      "キャラクター一覧",
+    ).catch(error => {
+      characterCatalogPromise = null;
+      throw error;
+    });
+  }
+  return characterCatalogPromise;
+}
+
 async function loadCharacterManifest(characterId) {
-  const catalog = await fetchJsonWithTimeout(
-    `assets/characters/index.json?v=${characterManifestCacheKey}`,
-    "キャラクター一覧",
-  );
+  const catalog = await loadCharacterCatalog();
   const bundled = catalog.characters.map(character => ({
     id: character.id,
     name: character.name,
@@ -757,15 +770,22 @@ async function loadCharacterManifest(characterId) {
   return { entry, manifest, root };
 }
 
-const STARTUP_SLEEPING_CHARACTER_IDS = Object.freeze(["mugi", "rin", "mai"]);
+// 起動画面へ寝姿で出せるのは、専用原画を持つ（`boot.useSleepingOnStartup`）同梱キャラだけ。
+// IDを直書きすると、キャラを足したときの更新漏れが黙って起きるため一覧から取る。
+function startupSleepingCandidates(catalog) {
+  return (catalog?.characters || [])
+    .filter(character => character.bootSleeping === true && character.id)
+    .map(character => character.id);
+}
 
-function chooseStartupSleepingCharacter(randomValue = Math.random()) {
+function chooseStartupSleepingCharacter(candidates, randomValue = Math.random()) {
+  if (!candidates.length) return "";
   const value = Number.isFinite(Number(randomValue)) ? Number(randomValue) : 0;
   const index = Math.min(
-    STARTUP_SLEEPING_CHARACTER_IDS.length - 1,
-    Math.max(0, Math.floor(value * STARTUP_SLEEPING_CHARACTER_IDS.length)),
+    candidates.length - 1,
+    Math.max(0, Math.floor(value * candidates.length)),
   );
-  return STARTUP_SLEEPING_CHARACTER_IDS[index];
+  return candidates[index];
 }
 
 async function prepareBootCharacter(characterId) {
@@ -5608,7 +5628,10 @@ async function releaseBootUi() {
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
-    await prepareBootCharacter(chooseStartupSleepingCharacter());
+    // 候補が無い一覧（寝姿を持つキャラを外した等）でも起動画面は出す。既定キャラへ落とす。
+    const catalog = await loadCharacterCatalog();
+    const sleeping = chooseStartupSleepingCharacter(startupSleepingCandidates(catalog));
+    await prepareBootCharacter(sleeping || catalog.default || info.characterId || "mugi");
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }

@@ -349,12 +349,17 @@ async function openScene({
     await page.route("**/renderer.js*", async route => {
       const response = await route.fetch();
       const source = await response.text();
-      const marker = "prepareBootCharacter(chooseStartupSleepingCharacter())";
+      // 乱数を固定して寝姿の選択を検査する。呼び出しの形を変えたらここで気づけるよう、
+      // 見つからなければ差し替えずに失敗させる。
+      const marker = "chooseStartupSleepingCharacter(startupSleepingCandidates(catalog))";
       if (!source.includes(marker)) throw new Error("起動寝姿のランダム選択箇所を差し替えられません");
       await route.fulfill({
         response,
         contentType: "text/javascript",
-        body: source.replace(marker, `prepareBootCharacter(chooseStartupSleepingCharacter(${JSON.stringify(bootRandomValue)}))`),
+        body: source.replace(
+          marker,
+          `chooseStartupSleepingCharacter(startupSleepingCandidates(catalog), ${JSON.stringify(bootRandomValue)})`,
+        ),
       });
     });
   }
@@ -2141,11 +2146,14 @@ if (process.env.SHOOT_THINKING_INDICATOR) {
 if (process.env.SHOOT_BOOT_RANDOM) {
   const output = join(ROOT, "temp", "boot-random-qa");
   mkdirSync(output, { recursive: true });
-  const cases = [
-    { value: 0.05, expected: "mugi" },
-    { value: 0.45, expected: "rin" },
-    { value: 0.85, expected: "mai" },
-  ];
+  // 期待値は一覧（characters/index.json）から導く。キャラを足しても検査が追従する。
+  const bootIndex = JSON.parse(await readFile(join(ROOT, "characters", "index.json"), "utf8"));
+  const sleepingIds = (bootIndex.characters || [])
+    .filter(entry => entry.bootSleeping === true)
+    .map(entry => entry.id);
+  if (sleepingIds.length < 2) throw new Error(`寝姿を持つキャラが足りません: ${sleepingIds.join(",")}`);
+  const pick = value => sleepingIds[Math.min(sleepingIds.length - 1, Math.floor(value * sleepingIds.length))];
+  const cases = [0.05, 0.45, 0.85].map(value => ({ value, expected: pick(value) }));
   const results = [];
   for (const item of cases) {
     // 選択中キャラを寝姿3体以外にして、起動用の絵が選択キャラへ引きずられないことも確認する。
