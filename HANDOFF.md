@@ -6,7 +6,7 @@
 
 - 最終確認日: 2026-09-02
 - 進行中作業: macOS版アルファの公開。**残りはmac実機での`.dmg`生成とRelease公開だけ。** 本体 PR #179 と配布Repo `PicoAgent-Distribution` PR #31 はどちらもマージ済み。
-- 公開LPは現在macOS版を「最終調整中」と案内し、ダウンロードリンクをまだ出していない。v1.0.4のRelease作成後、同じ公開作業内で配布RepoのLPへmacOS版ボタンを追加し、Releaseページが200を返すことまで確認する。
+- 公開LPには配布Repo PR #1で`v1.0.4`のmacOS版公開準備中ボタンを追加済み。Release作成まではリンク先の404を許容し、公開後に同じURLが200を返すことを確認する。
 - 次に着手できる内容: [docs/TASKS.md](docs/TASKS.md)のうち、着手条件を満たした項目
 
 ### macOS版アルファの再開手順
@@ -23,7 +23,7 @@
 3. [docs/TASKS.md](docs/TASKS.md)の「macOS版の実機QA」を消化する。配布対象はApple Siliconだけで、Intel Macは対象外。
 4. `.dmg`を`v1.0.4`のプレリリースとして配布Repoへ上げる。成果物は`src-tauri/target/release/bundle/dmg/PicoAgent_1.0.4_aarch64.dmg`を使う。**Windows版は待たない。** Windows版は公開中のv1.0.2のまま据え置き、macOS版だけを現行ソース版のv1.0.4として公開する。
 5. **`cargo xtask update-feed`を実行せず、`latest.json`も変更しない。** `latest.json`はWindows向けアプリ内更新の正本で現在1.0.2を指す。macOSはアプリ内更新に未対応（`install_supported = cfg!(windows) && cfg!(target_arch = "x86_64")`）のため登録が要らない。1.0.4へ書き換えると、Windows利用者に「新しいバージョンがありますが、このPC向けインストーラは準備中です」と表示される。
-6. 配布Repo PR #31（Draft）をReady化してマージし、Pagesを公開する。手順はそのPR本文の冒頭にある。
+6. 配布Repo PR #1で追加済みのmacOS版ボタンが`v1.0.4`を指すことと、Pages反映後にReleaseページが200を返すことを確認する。Release作成前の404は許容する。
 
 **Windows環境ではmacOS向けの全体コンパイルができない。** `objc2-exception-helper`のビルドスクリプトがCコンパイラを要求し、Apple SDKはApple製ハードウェア上での利用に限られるため、クロス環境を用意しない。`secret.rs`と`security-framework`だけは切り出した検査用クレートで`aarch64-apple-darwin`向けの型検査を通してある。
 
