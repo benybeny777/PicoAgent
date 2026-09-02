@@ -2523,6 +2523,8 @@ function renderQuickActions() {
 function renderReply(text) {
   // 直前のエラー表示を引き継がない（エラー分岐は描画後に reply-error を付け直す）。
   reply.classList.remove("reply-error", "reply-thinking");
+  // 確定した本文なので、読み上げの保留を解いてここで1回だけ知らせる。
+  reply.removeAttribute("aria-busy");
   renderMarkdown(reply, text);
 }
 
@@ -2543,6 +2545,8 @@ function createTypingIndicator(label = "考え中") {
   return indicator;
 }
 function setThinkingUi(active, label = "考え中") {
+  // 生成中は回答欄が何度も書き変わる。書き変わるたびに読み上げられないよう保留する。
+  if (active) reply.setAttribute("aria-busy", "true");
   // 進捗の文言は数秒おきに変わる。文言だけの更新で履歴全件をMarkdownから作り直さない。
   const showing = active && historyThinking ? historyLog?.querySelector(".history-thinking") : null;
   historyThinking = active;
@@ -2563,6 +2567,8 @@ function setThinkingUi(active, label = "考え中") {
 
 // 回答を描画しないまま終わる中断・停止でも、回答欄の3点表示を残さない。
 function clearThinkingReply() {
+  // 確定描画へ到達しない中断・停止でも、live regionを保留したまま残さない。
+  reply.removeAttribute("aria-busy");
   if (!reply.classList.contains("reply-thinking")) return;
   reply.classList.remove("reply-thinking");
   reply.replaceChildren();

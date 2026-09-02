@@ -20,7 +20,9 @@
         <div id="bootStatus" class="boot-status"></div>
       </div>
     </section>
-    <section id="bubble" class="bubble" aria-live="polite">
+    <!-- 生きた領域は回答欄（#reply）だけに絞る。フキダシ全体や、全件を再構築する履歴へ
+         付けると、クイック操作や通知の変更、過去の会話まで繰り返し読み上げられる。 -->
+    <section id="bubble" class="bubble">
       <div id="replyActions" class="reply-actions" aria-label="回答操作">
         <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">通知</button>
         <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">コピー</button>
@@ -49,7 +51,7 @@
       <div id="streamDisplay" class="stream-display" aria-label="配信画面内ディスプレイ">
         <strong>PICO STUDIO</strong><span>CHAT &amp; CHARACTER</span>
       </div>
-      <div id="reply" class="reply">こんにちは。クリックして話しかけてね。</div>
+      <div id="reply" class="reply" aria-live="polite" aria-atomic="true">こんにちは。クリックして話しかけてね。</div>
       <form id="composer" class="composer" hidden>
         <div id="imagePreview" class="image-preview" hidden></div>
         <div id="attachmentSuggestions" class="attachment-suggestions" hidden aria-label="添付ファイルのおすすめ操作"></div>

@@ -1503,8 +1503,10 @@ async function validateThinkingIndicator() {
       emptyStatusBox: !document.getElementById("status").textContent.trim()
         && getComputedStyle(document.getElementById("status")).display !== "none",
       captionLabel: getComputedStyle(document.getElementById("reply"), "::before").content,
+      // 生成中は回答欄の読み上げを保留する（書き変わるたびに読み上げさせない）。
+      replyBusy: document.getElementById("reply")?.getAttribute("aria-busy"),
     }));
-    if (pending.dots !== 3 || !pending.label || pending.emptyStatusBox
+    if (pending.replyBusy !== "true" || pending.dots !== 3 || !pending.label || pending.emptyStatusBox
         || (pending.statusSpinner && pending.statusSpinner !== "none")
         || (pending.captionLabel && pending.captionLabel !== "none")) {
       throw new Error(`考え中の3点表示が不正です: ${JSON.stringify(pending)}`);
@@ -1514,8 +1516,10 @@ async function validateThinkingIndicator() {
     const finished = await page.evaluate(() => ({
       thinkingRows: document.querySelectorAll(".history-thinking").length,
       typingDots: document.querySelectorAll(".typing-dots i").length,
+      // 回答が出そろったら保留を解く（ここで1回だけ読み上げられる）。
+      replyBusy: document.getElementById("reply")?.getAttribute("aria-busy"),
     }));
-    if (finished.thinkingRows || finished.typingDots) {
+    if (finished.thinkingRows || finished.typingDots || finished.replyBusy) {
       throw new Error(`回答後に考え中表示が残りました: ${JSON.stringify(finished)}`);
     }
     await writeFile(join(output, "result.json"), `${JSON.stringify({ pending, finished }, null, 2)}\n`);
