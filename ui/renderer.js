@@ -5404,7 +5404,6 @@ function startDailyPolling() {
 
 // 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
 function pad2(n) { return String(n).padStart(2, "0"); }
-function weekdayCode(date) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()]; }
 function alarmSnoozeMinutes(a) {
   const value = Number(a?.snooze_minutes ?? a?.snoozeMinutes ?? 5);
   if (!Number.isFinite(value)) return 5;
@@ -5450,23 +5449,21 @@ async function checkAlarms() {
   clearBackgroundFailure("alarms");
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
-  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-  const today = weekdayCode(now);
-  const minuteKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${hhmm}`;
-  for (const a of alarms) {
-    if (!a || a.enabled === false || a.time !== hhmm) continue;
-    const days = Array.isArray(a.days) ? a.days : [];
-    if (days.length && !days.includes(today)) continue;
-    const key = `${a.id}@${minuteKey}`;
+  // 分ちょうどだけを見ると、スリープ復帰・起動直後・直前の発火が長引いた場合に
+  // その日の目覚ましが黙って鳴らない。直近5分以内に来た予定まで拾う。
+  const dueItems = window.PicoAlarmRuntime.dueAlarms(alarms, now);
+  for (const due of dueItems) {
+    const key = `${due.alarm.id}@${due.scheduledKey}`;
+    // 1ティックにつき1件だけ鳴らす（発火記録で二重には鳴らない）。
     if (!window.PicoAlarmRuntime.markFired(firedAlarms, key)) continue;
-    await fireAlarm(a);
-    break; // 1ティックにつき1件だけ鳴らす。
+    await fireAlarm(due.alarm, null, due);
+    break;
   }
   } finally {
     alarmCheckInFlight = false;
   }
 }
-async function fireAlarm(a, snoozeState = null) {
+async function fireAlarm(a, snoozeState = null, due = null) {
   let line = "";
   try {
     const res = await window.picoagent.alarmWake(a.id);
@@ -5475,6 +5472,8 @@ async function fireAlarm(a, snoozeState = null) {
     logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
   }
   if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
+  // 遅れて鳴らす場合は予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
+  if (due && due.lateMinutes >= 1) line = `（${due.scheduledTime}の目覚ましだよ）${line}`;
   // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
   const prepared = await prepareSpeech(line);
   renderAlarmReply(line);
@@ -5492,9 +5491,10 @@ function startAlarmPolling() {
 
 let startupLayout = null;
 let bootUiReleased = false;
-// 生存通知の間隔はバックエンドが監視しきい値から決める。届く前は既定の10秒で始め、
-// `pet_init` の値が来た時点で張り替える（固定値のままだと短いしきい値に間に合わない）。
+// 生存通知の間隔はバックエンドが監視しきい値から決める。設定が届く前は、許可される
+// 最短しきい値3秒にも間に合う1秒で始め、`pet_init` 後に計算済みの間隔へ張り替える。
 const DEFAULT_BOOT_PROGRESS_INTERVAL_MS = 10000;
+const INITIAL_BOOT_PROGRESS_INTERVAL_MS = 1000;
 let bootProgressTimer = null;
 function startBootProgressTicker(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS) {
   const interval = Number(intervalMs) > 0 ? Number(intervalMs) : DEFAULT_BOOT_PROGRESS_INTERVAL_MS;
@@ -5505,7 +5505,7 @@ function startBootProgressTicker(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS)
     });
   }, interval);
 }
-startBootProgressTicker();
+startBootProgressTicker(INITIAL_BOOT_PROGRESS_INTERVAL_MS);
 let bootBackendFinished = false;
 let bootBackendFinishPromise = null;
 let bootBackendRetryTimer = null;
@@ -5593,6 +5593,9 @@ async function releaseBootUi() {
   window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
   startBootProgressTicker(info.bootProgressIntervalMs);
+  // 配置編集の保存先は設定側。読み込み順に関係なく届くよう、値も残してから渡す。
+  window.__picoLayoutPlacements = info.layoutPlacements || {};
+  window.PicoLayoutEditor?.hydrate(window.__picoLayoutPlacements);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;

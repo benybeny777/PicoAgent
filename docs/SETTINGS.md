@@ -25,6 +25,7 @@
 | `PICOAGENT_GAZE_TRACKING_ENABLED` | `false` | キャラクター | 視線追従。OFFではPNGの自動よそ見・マウス方向の顔差分と傾き・Live2Dのマウス追従を止め、常に正面へ戻す。ONでは顔付近のカーソルだけへ控えめに追従し、画面下など顔から離れた位置では追従しない。`pet:ui` で即反映 |
 | `PICOAGENT_CHARACTER_ZOOM` | `1.55` | 内部UI | 構図未設定時に使う互換用の共通拡大率。新しい調整は `PICOAGENT_CHARACTER_FRAMING` を使う |
 | `PICOAGENT_CHARACTER_FRAMING` | `{}` | 画面 | キャラクターID×表示形式ごとの構図。`preset`（`bust` / `upper` / `full` / `custom`）、`zoom`、`x`、`y`を保持する。未設定時は通常2Dが従来の上半身 `upper`、長身・実写・Live2Dが胸上 `bust` を使う。旧 `talk` の保存値は `chat` へ移す |
+| `PICOAGENT_LAYOUT_PLACEMENTS` | `{}` | 内部UI | 配置編集（上部メニューの「配置」・右クリックの「配置を直接調整」）で決めた位置と倍率。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、キャラクターの立ち絵は `characters` の下にキャラクターID×表示形式で持つ。値は CSS の `translate`（`Xpx Ypx`）と `scale`（`sx sy`、0.25〜4.0）。設定画面には出さず、編集画面の「保存」「閉じる」「表示形式・キャラ切替」「リセット」で保存する |
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 旧版の立ち絵横移動量（px）。通常ドラッグはウィンドウ移動へ戻したため新規には書き込まず、既存値の互換表示と位置リセットだけに使う |
 | `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 旧版の立ち絵縦移動量（px）。同上 |
 | `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget`。旧 `talk` はLINE風の `chat` へ移行し、未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |

@@ -52,6 +52,7 @@ test("準備完了後に保存形式へ戻し起動音声を再生する", () =>
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
   assert.match(renderer, /function startBootProgressTicker\(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS\)/);
+  assert.match(renderer, /startBootProgressTicker\(INITIAL_BOOT_PROGRESS_INTERVAL_MS\)/);
   // 固定値ではなく監視しきい値から決めた間隔を使う（短いしきい値でも通知が間に合う）。
   assert.match(startup, /startBootProgressTicker\(info\.bootProgressIntervalMs\)/);
   assert.match(commands, /"bootProgressIntervalMs": crate::boot_screen::progress_interval_ms/);

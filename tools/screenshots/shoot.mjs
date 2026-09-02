@@ -113,11 +113,22 @@ window.__previewVoice = (() => {
 })();
 window.__listeners = {};
 window.__startDraggingCalls = 0;
+// 配置編集の保存先は設定（バックエンド）。撮影用モックでは再読み込みをまたぐ必要があるので、
+// アプリが触らないキーの localStorage を「設定ファイルの代わり」に使う。
+window.__placementsKey = "picoagent.mock.layoutPlacements";
+window.__readPlacements = () => {
+  try { return JSON.parse(localStorage.getItem(window.__placementsKey) || "{}"); }
+  catch { return {}; }
+};
 window.__bootReadyAt = Date.now() + ${JSON.stringify(bootHoldMs)};
 window.__engineReadyAt = Date.now() + ${JSON.stringify(engineReadyDelayMs)};
 window.__startupMarks = {};
 window.__TAURI__ = {
-  core: { invoke: (name) => {
+  core: { invoke: (name, args = {}) => {
+    if (name === "pet_save_layout_placements") {
+      localStorage.setItem(window.__placementsKey, JSON.stringify(args.placements || {}));
+      return Promise.resolve();
+    }
     if (name === "pet_init") return new Promise(resolve => setTimeout(() => resolve({
       up: true, providerId: "local", model: "gemma-3-4b-it-Q4_K_M",
       theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "100",
@@ -131,6 +142,7 @@ window.__TAURI__ = {
       onboardingDone: ${JSON.stringify(onboardingDone)}, relationshipMemoryEnabled: false,
       gazeTrackingEnabled: ${JSON.stringify(gazeTrackingEnabled)},
       bootProgressIntervalMs: 10000,
+      layoutPlacements: window.__readPlacements(),
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
     }), ${JSON.stringify(initDelayMs)}));
     if (name === "engine_status") {
@@ -708,7 +720,11 @@ async function validateLayoutEditor() {
   const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true });
   try {
     // 前回の失敗で検査用ブラウザに残った極端な配置を次回へ持ち越さない。
-    await page.evaluate(() => localStorage.removeItem("picoagent.layoutEditor.v1"));
+    await page.evaluate(() => {
+      localStorage.removeItem(window.__placementsKey);
+      localStorage.removeItem("picoagent.layoutEditor.v1");
+      localStorage.removeItem("picoagent.layoutEditor.migrated");
+    });
     await page.reload();
     await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
   // 上端へカーソルを置いた時だけ現れる実UIを通す。直接clickすると、収納中の5px部分を
@@ -762,7 +778,7 @@ async function validateLayoutEditor() {
     const scaled = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
     if (!scaled.scale) throw new Error(`Moveableの拡大縮小が反映されませんでした: ${JSON.stringify(scaled)}`);
     await page.locator("#layoutEditorSave").click();
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"));
+    const saved = await page.evaluate(() => window.__readPlacements());
     if (!saved.characters?.mugi?.stream?.translate || !saved.characters?.mugi?.stream?.scale) {
       throw new Error("キャラごと・表示形式ごとの編集値が保存されませんでした");
     }
@@ -783,7 +799,7 @@ async function validateLayoutEditor() {
       return node.style.translate;
     });
     await page.locator("#layoutEditorClose").click();
-    const closedSaved = await page.evaluate(() => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"));
+    const closedSaved = await page.evaluate(() => window.__readPlacements());
     if (closedSaved.characters?.mugi?.stream?.translate !== closedEdited) {
       throw new Error("配置編集を閉じたときにキャラ位置を記憶できませんでした");
     }
@@ -837,7 +853,7 @@ async function validateLayoutEditor() {
     const reset = await page.evaluate(() => ({
       translate: document.getElementById("character")?.style.translate || "",
       scale: document.getElementById("character")?.style.scale || "",
-      saved: JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"),
+      saved: window.__readPlacements(),
     }));
     if (reset.translate || reset.scale || reset.saved.stream) throw new Error("既定配置へ戻せませんでした");
     await page.screenshot({ path: join(output, "stream-editor.png"), omitBackground: true });
@@ -845,7 +861,11 @@ async function validateLayoutEditor() {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
       const layoutPage = await openScene({ characterId: "mugi", layout, width, height, forcePng: true });
       try {
-        await layoutPage.evaluate(() => localStorage.removeItem("picoagent.layoutEditor.v1"));
+        await layoutPage.evaluate(() => {
+          localStorage.removeItem(window.__placementsKey);
+          localStorage.removeItem("picoagent.layoutEditor.v1");
+          localStorage.removeItem("picoagent.layoutEditor.migrated");
+        });
         await layoutPage.reload();
         await layoutPage.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
         const edited = await layoutPage.evaluate(() => {
@@ -858,7 +878,7 @@ async function validateLayoutEditor() {
           document.getElementById("layoutEditorClose")?.click();
           return value;
         });
-        const savedLayout = await layoutPage.evaluate(id => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}").characters?.mugi?.[id], layout);
+        const savedLayout = await layoutPage.evaluate(id => window.__readPlacements().characters?.mugi?.[id], layout);
         if (savedLayout?.translate !== edited.translate || savedLayout?.scale !== edited.scale) {
           throw new Error(`${layout}: 閉じる時にキャラ位置・倍率を記憶できませんでした`);
         }
