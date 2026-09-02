@@ -98,6 +98,35 @@ pub fn append_log(app: &AppHandle, name: &str, message: &str) -> anyhow::Result<
     Ok(())
 }
 
+/// ログファイルの末尾を読む。`max_bytes` だけ読み、切り出しで途中から始まった
+/// 先頭行は捨てる（読みかけの行を原因のように見せない）。読めない場合は空を返す。
+pub fn read_tail(app: &AppHandle, name: &str, max_lines: usize, max_bytes: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let path = log_file(app, name);
+    let Ok(mut file) = std::fs::File::open(&path) else {
+        return String::new();
+    };
+    let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let partial_head = size > max_bytes;
+    if partial_head && file.seek(SeekFrom::End(-(max_bytes as i64))).is_err() {
+        return String::new();
+    }
+    let mut buffer = Vec::new();
+    if file.take(max_bytes).read_to_end(&mut buffer).is_err() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(&buffer);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if partial_head && lines.len() > 1 {
+        lines.remove(0);
+    }
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join(
+        "
+",
+    )
+}
+
 pub fn append_app_log(app: &AppHandle, message: &str) {
     // フォールバック許可: ログ書き込み失敗時もアプリ動作を止めない。
     if let Err(error) = append_log(app, "app.log", message) {

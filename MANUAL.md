@@ -506,7 +506,7 @@ cargo xtask cli repl              # 対話モード（会話文脈を保持。ex
 | 会話履歴（キャラ別） | `app_data_dir/history-<キャラID>.json` |
 | 長期メモリ（全キャラ共通） | `app_data_dir/memory.json` |
 | スケジュール実行結果 | `app_data_dir/schedule-runs.json` |
-| ログ（1 週間で自動削除） | `app_data_dir` 配下の logs（診断タブから場所を確認可能） |
+| ログ（1 週間で自動削除） | `app_data_dir` 配下の logs（診断タブから場所を確認可能。「診断情報を書き出す」で版・設定・直近ログを1ファイルにまとめられます。APIキーの値は含みません） |
 | 同梱ツール・モデル | `src-tauri/resources/bundled/`（Git 管理外） |
 | 会議録音・議事録 | 共通ワークスペース配下 `meetings/YYYY-MM-DD/` |
 | 履歴の書き出し | ダウンロードフォルダ（Markdown） |

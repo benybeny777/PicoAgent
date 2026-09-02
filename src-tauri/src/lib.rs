@@ -14,6 +14,7 @@ mod commands;
 mod components;
 mod config;
 mod daily;
+mod diagnostics;
 #[cfg(test)]
 mod doc_sync;
 mod durable_jobs;
@@ -130,6 +131,7 @@ pub fn run() {
             commands::settings_character_rename,
             commands::settings_character_remove,
             commands::settings_pick_stream_image,
+            commands::settings_export_diagnostics,
             commands::settings_tha3_status,
             commands::settings_tha3_pick_source,
             commands::settings_tha3_pick_root,
