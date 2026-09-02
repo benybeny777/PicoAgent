@@ -26,6 +26,9 @@ const START_TIMEOUT_MS: u64 = 12_000;
 /// 待ち時間の下限・上限（設定値が極端でも実用範囲へ収める）。
 const MIN_TIMEOUT_MS: u64 = 3_000;
 const MAX_TIMEOUT_MS: u64 = 120_000;
+/// 生存通知の間隔の下限・上限（詰まりすぎず、しきい値より十分に短く保つ）。
+const MIN_PROGRESS_INTERVAL_MS: u64 = 1_000;
+const MAX_PROGRESS_INTERVAL_MS: u64 = 10_000;
 // 画面を出せない障害の案内を、長い準備の監視と同じだけ待たせない（実用範囲にも収める）。
 const _: () = assert!(START_TIMEOUT_MS < DEFAULT_TIMEOUT_MS && START_TIMEOUT_MS >= MIN_TIMEOUT_MS);
 
@@ -208,15 +211,25 @@ fn progress_remaining(last_progress: Option<Instant>, timeout: Duration) -> Opti
 }
 
 /// フロントの読込開始を待ち、開始後は進捗通知が途絶えた場合だけ案内ページへ切り替える。
+/// 進捗が途絶えたと判定するまでの時間（設定値を実用範囲へ収めたもの）。
+pub fn timeout_ms(app: &AppHandle) -> u64 {
+    let config = &app.state::<crate::commands::AppState>().config;
+    config
+        .get("PICOAGENT_BOOT_TIMEOUT_MS", "")
+        .parse::<u64>()
+        .unwrap_or(DEFAULT_TIMEOUT_MS)
+        .clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
+}
+
+/// フロントが生存通知を送る間隔。しきい値から決めるため、設定を短くしても
+/// 「正常な起動なのに通知が間に合わず案内画面へ落ちる」が起きない。
+/// 4分割にするのは、通知が1回落ちてもすぐには停止扱いにしないため。
+pub fn progress_interval_ms(timeout_ms: u64) -> u64 {
+    (timeout_ms / 4).clamp(MIN_PROGRESS_INTERVAL_MS, MAX_PROGRESS_INTERVAL_MS)
+}
+
 pub fn watch(app: AppHandle) {
-    let timeout_ms = {
-        let config = &app.state::<crate::commands::AppState>().config;
-        config
-            .get("PICOAGENT_BOOT_TIMEOUT_MS", "")
-            .parse::<u64>()
-            .unwrap_or(DEFAULT_TIMEOUT_MS)
-            .clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
-    };
+    let timeout_ms = timeout_ms(&app);
 
     // 読込開始が来ない障害（配信元の停止・スクリプトの構文エラー）は準備の長さと無関係なので、
     // 案内ページまで2分待たせない。設定で待ち時間を短くした場合はそちらへ合わせる。
@@ -367,6 +380,24 @@ mod tests {
             !state.finished.load(Ordering::SeqCst),
             "JavaScript開始後の例外も監視するため、完了通知は別に必要"
         );
+    }
+
+    #[test]
+    fn 生存通知の間隔はしきい値から決める() {
+        // 既定（2分）はこれまでと同じ10秒。
+        assert_eq!(progress_interval_ms(DEFAULT_TIMEOUT_MS), 10_000);
+        // しきい値を縮めても通知が間に合う（1区間に4回送れる）。
+        assert_eq!(progress_interval_ms(MIN_TIMEOUT_MS), 1_000);
+        assert_eq!(progress_interval_ms(20_000), 5_000);
+        // 上限・下限を超えない。
+        assert_eq!(progress_interval_ms(MAX_TIMEOUT_MS), 10_000);
+        assert_eq!(progress_interval_ms(0), MIN_PROGRESS_INTERVAL_MS);
+        for timeout in [MIN_TIMEOUT_MS, 20_000, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS] {
+            assert!(
+                progress_interval_ms(timeout) < timeout,
+                "通知間隔がしきい値以上だと正常な起動でも失敗になる: {timeout}"
+            );
+        }
     }
 
     #[test]

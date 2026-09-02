@@ -807,6 +807,10 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
+        // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
+        "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
+            crate::boot_screen::timeout_ms(&app),
+        ),
         // 配置編集の位置・倍率。以前は webview の localStorage にしか無く、
         // WebViewデータの初期化や再インストールで消えていた。
         "layoutPlacements": crate::layout_placements::normalize(

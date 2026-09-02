@@ -5491,11 +5491,21 @@ function startAlarmPolling() {
 
 let startupLayout = null;
 let bootUiReleased = false;
-const bootProgressTimer = setInterval(() => {
-  window.picoagent.bootProgress().catch(error => {
-    logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
-  });
-}, 10000);
+// 生存通知の間隔はバックエンドが監視しきい値から決める。設定が届く前は、許可される
+// 最短しきい値3秒にも間に合う1秒で始め、`pet_init` 後に計算済みの間隔へ張り替える。
+const DEFAULT_BOOT_PROGRESS_INTERVAL_MS = 10000;
+const INITIAL_BOOT_PROGRESS_INTERVAL_MS = 1000;
+let bootProgressTimer = null;
+function startBootProgressTicker(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS) {
+  const interval = Number(intervalMs) > 0 ? Number(intervalMs) : DEFAULT_BOOT_PROGRESS_INTERVAL_MS;
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = setInterval(() => {
+    window.picoagent.bootProgress().catch(error => {
+      logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
+    });
+  }, interval);
+}
+startBootProgressTicker(INITIAL_BOOT_PROGRESS_INTERVAL_MS);
 let bootBackendFinished = false;
 let bootBackendFinishPromise = null;
 let bootBackendRetryTimer = null;
@@ -5532,7 +5542,8 @@ function scheduleBootBackendRetry() {
 }
 
 async function releaseBootUi() {
-  clearInterval(bootProgressTimer);
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = null;
   if (!bootBackendFinished) {
     try { await finishBootBackend(); }
     catch (error) {
@@ -5581,6 +5592,7 @@ async function releaseBootUi() {
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
+  startBootProgressTicker(info.bootProgressIntervalMs);
   // 配置編集の保存先は設定側。読み込み順に関係なく届くよう、値も残してから渡す。
   window.__picoLayoutPlacements = info.layoutPlacements || {};
   window.PicoLayoutEditor?.hydrate(window.__picoLayoutPlacements);
