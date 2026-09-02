@@ -53,13 +53,20 @@
   const isPlacementObject = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   // 正本は設定側。ここは編集中の作業用の写しで、確定時にまとめて保存する。
   let store = {};
+  let persistQueue = Promise.resolve();
   // 設定への保存は確定時だけ（ドラッグのたびに設定ファイルを書かない）。
   const persist = () => {
     const save = window.picoagent?.saveLayoutPlacements;
-    if (!save) return;
-    Promise.resolve(save(store)).catch(error => {
+    if (!save) return Promise.resolve(false);
+    // 後の確定操作が先に保存されると古い配置へ巻き戻るため、呼び出し順に直列化する。
+    // 保存開始後の編集で引数が変わらないよう、渡す値もその時点の写しにする。
+    const placements = JSON.parse(JSON.stringify(store));
+    const operation = persistQueue.catch(() => undefined).then(() => save(placements));
+    persistQueue = operation;
+    return operation.then(() => true).catch(error => {
       // 保存できなくても編集中の見た目は保つ。理由はアプリログへ残す。
       window.PicoUI?.logApp?.("error", "配置を保存できませんでした", error);
+      return false;
     });
   };
   let editing = false;
@@ -301,9 +308,9 @@
     applySavedLayout();
   });
   layoutObserver.observe(app, { attributes: true, attributeFilter: ["data-layout"] });
-  const migrateLegacyCharacterState = () => {
+  const migrateLegacyCharacterState = ({ save = true } = {}) => {
     const id = characterId();
-    if (!id) return;
+    if (!id) return false;
     let changed = false;
     for (const [layout, state] of Object.entries(store)) {
       if (layout === "characters" || !state?.character) continue;
@@ -313,7 +320,8 @@
       delete state.character;
       changed = true;
     }
-    if (changed) persist();
+    if (changed && save) persist();
+    return changed;
   };
   const characterObserver = new MutationObserver(() => {
     // 切替途中の配置は切替前のキャラクターへ保存する（新しいキャラへ漏らさない）。
@@ -333,9 +341,10 @@
     moveable.destroy();
   }, { once: true });
   // 設定から配置を受け取って反映する。`renderer.js` が `pet_init` の値で1度呼ぶ。
-  const hydrate = placements => {
+  const hydrate = async placements => {
     store = isPlacementObject(placements) ? placements : {};
     let migrated = false;
+    let migrationSaveFailed = false;
     try { migrated = localStorage.getItem(LEGACY_MIGRATED_KEY) === "1"; }
     catch (error) { window.PicoUI?.logApp?.("warn", "配置設定の移行状態を読めません", error); }
     // 設定側が空のときだけ、旧localStorageの値を1度だけ引き継ぐ。
@@ -343,12 +352,17 @@
       const legacy = readLegacyStore();
       if (legacy && Object.keys(legacy).length) {
         store = legacy;
-        migrateLegacyCharacterState();
-        persist();
-        window.PicoUI?.logApp?.("info", "配置編集の保存先を設定へ移しました");
+        migrateLegacyCharacterState({ save: false });
+        // 保存に成功した後だけ移行済みにする。失敗時は次回起動で再試行できる。
+        if (await persist()) {
+          try { localStorage.setItem(LEGACY_MIGRATED_KEY, "1"); migrated = true; }
+          catch (error) { window.PicoUI?.logApp?.("warn", "配置設定の移行状態を保存できません", error); }
+          window.PicoUI?.logApp?.("info", "配置編集の保存先を設定へ移しました");
+        } else migrationSaveFailed = true;
       }
     }
-    if (!migrated) {
+    // 旧値が無い場合も再確認を繰り返さない。旧値がある保存失敗時だけ印を付けない。
+    if (!migrated && !migrationSaveFailed) {
       try { localStorage.setItem(LEGACY_MIGRATED_KEY, "1"); }
       catch (error) { window.PicoUI?.logApp?.("warn", "配置設定の移行状態を保存できません", error); }
     }

@@ -18,7 +18,9 @@ test("配置は設定へ保存し、旧localStorageからは1度だけ移行す�
   assert.match(bridge, /saveLayoutPlacements: \(placements\) => call\("pet_save_layout_placements", \{ placements \}\)/);
   assert.match(renderer, /window\.PicoLayoutEditor\?\.hydrate\(window\.__picoLayoutPlacements\)/);
   assert.match(editor, /const persist = \(\) => \{[\s\S]*?saveLayoutPlacements/);
+  assert.match(editor, /persistQueue[\s\S]*?save\(placements\)/);
   assert.match(editor, /LEGACY_MIGRATED_KEY/);
+  assert.match(editor, /if \(await persist\(\)\) \{[\s\S]*?localStorage\.setItem\(LEGACY_MIGRATED_KEY/);
   // 確定時だけ保存する（ドラッグのたびに設定ファイルを書かない）。
   const dragHandler = editor.slice(editor.indexOf('moveable.on("drag"'), editor.indexOf('moveable.on("dragEnd"'));
   const scaleHandler = editor.slice(editor.indexOf('moveable.on("scale"'), editor.indexOf('moveable.on("scaleEnd"'));

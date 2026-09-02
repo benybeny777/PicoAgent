@@ -29,6 +29,8 @@ const MAX_SCALE: f64 = 4.0;
 const MAX_TRANSLATE_PX: f64 = 20_000.0;
 /// 覚えるキャラクターの上限（設定ファイルの肥大を防ぐ）。
 const MAX_CHARACTERS: usize = 64;
+/// 設定ファイルへ保存する配置JSONの上限。
+const MAX_SERIALIZED_BYTES: usize = 32 * 1024;
 
 fn is_known_layout(layout: &str) -> bool {
     crate::layout::LAYOUTS
@@ -184,7 +186,28 @@ pub fn normalize_checked(value: &Value) -> Result<Value, String> {
                 .to_string(),
         );
     }
-    Ok(normalize(value))
+    let character_count = value
+        .get(CHARACTERS_KEY)
+        .and_then(Value::as_object)
+        .map_or(0, Map::len);
+    if character_count > MAX_CHARACTERS {
+        return Err(format!(
+            "配置を保存できるキャラクターは{MAX_CHARACTERS}件までです（現在{character_count}件）。"
+        ));
+    }
+    let normalized = normalize(value);
+    ensure_serialized_limit(&normalized, MAX_SERIALIZED_BYTES)?;
+    Ok(normalized)
+}
+
+fn ensure_serialized_limit(value: &Value, max_bytes: usize) -> Result<(), String> {
+    let serialized_len = serde_json::to_vec(value)
+        .map_err(|error| format!("配置設定を検査できませんでした: {error}"))?
+        .len();
+    if serialized_len > max_bytes {
+        return Err("配置設定が32KBを超えています。不要な配置をリセットしてください。".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -267,5 +290,32 @@ mod tests {
     fn 壊れた保存値は空で上書きしない() {
         assert!(normalize_checked(&json!("こわれている")).is_err());
         assert!(normalize_checked(&json!({})).is_ok());
+    }
+
+    #[test]
+    fn 上限を超える配置は黙って切り捨てず保存を拒否する() {
+        let characters = (0..=MAX_CHARACTERS)
+            .map(|index| {
+                (
+                    format!("character-{index}"),
+                    json!({ "pet": { "translate": "1px 1px", "scale": "1 1" } }),
+                )
+            })
+            .collect::<Map<_, _>>();
+        let error = normalize_checked(&json!({ "characters": characters })).unwrap_err();
+        assert!(error.contains("64件まで"), "error: {error}");
+
+        let long_id = "a".repeat(128);
+        let oversized = json!({
+            "characters": {
+                long_id: { "pet": { "translate": "1px 1px", "scale": "1 1" } }
+            }
+        });
+        // 不正IDは正規化で落ちるため、入力の長さだけで誤って拒否しない。
+        assert_eq!(normalize_checked(&oversized).unwrap(), json!({}));
+
+        let error =
+            ensure_serialized_limit(&json!({ "pet": { "bubble": "long" } }), 8).unwrap_err();
+        assert!(error.contains("32KB"), "error: {error}");
     }
 }
