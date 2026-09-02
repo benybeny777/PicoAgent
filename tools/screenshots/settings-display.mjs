@@ -113,7 +113,7 @@ window.__TAURI__ = {
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
     if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
-    if (name === "settings_export_diagnostics") return { path: "C:\Users\me\AppData\Roaming\PicoAgent\log\diagnostics-2026-09-02-080000.txt" };
+    if (name === "settings_export_diagnostics") return { path: "C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\log\\diagnostics-2026-09-02-080000.txt" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },

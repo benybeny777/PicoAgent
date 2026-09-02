@@ -116,15 +116,18 @@ pub fn read_tail(app: &AppHandle, name: &str, max_lines: usize, max_bytes: u64) 
         return String::new();
     }
     let text = String::from_utf8_lossy(&buffer);
+    tail_lines(&text, max_lines, partial_head)
+}
+
+/// 末尾から `max_lines` 行を取り出す。`partial_head` のときは、切り出しで
+/// 途中から始まった先頭行を捨てる（読みかけの行を原因のように見せない）。
+fn tail_lines(text: &str, max_lines: usize, partial_head: bool) -> String {
     let mut lines: Vec<&str> = text.lines().collect();
     if partial_head && lines.len() > 1 {
         lines.remove(0);
     }
     let start = lines.len().saturating_sub(max_lines);
-    lines[start..].join(
-        "
-",
-    )
+    lines[start..].join("\n")
 }
 
 pub fn append_app_log(app: &AppHandle, message: &str) {
@@ -193,5 +196,23 @@ mod guard {
             "画面操作と通知の失敗は診断ログへ残してください:\n{}",
             violations.join("\n")
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tail_lines;
+
+    #[test]
+    fn 直近ログは末尾だけを出す() {
+        let text = "1行目\n2行目\n3行目\n4行目\n";
+        assert_eq!(tail_lines(text, 2, false), "3行目\n4行目");
+        assert_eq!(tail_lines(text, 9, false), "1行目\n2行目\n3行目\n4行目");
+        // 途中から始まった先頭行は捨てる（読みかけを原因のように見せない）。
+        assert_eq!(tail_lines(text, 9, true), "2行目\n3行目\n4行目");
+        // 1行しか無いときは捨てない（何も出せなくなるため）。
+        assert_eq!(tail_lines("だけ", 9, true), "だけ");
+        assert_eq!(tail_lines("", 9, false), "");
+        assert_eq!(tail_lines("\n\n", 9, false), "\n");
     }
 }

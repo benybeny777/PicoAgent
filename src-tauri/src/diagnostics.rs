@@ -7,6 +7,8 @@
 // 設定済みかどうかだけを出す（保護保存された文字列もそのままでは意味を持たないが、
 // 送り先が増える経路には載せない）。
 
+use std::collections::HashSet;
+
 use serde_json::{Map, Value};
 
 /// ログ末尾として載せる行数と、読み取るバイト数の上限。
@@ -21,11 +23,28 @@ pub struct Report<'a> {
     pub arch: &'a str,
     pub beta_build: bool,
     pub config: &'a Map<String, Value>,
+    pub secret_keys: &'a HashSet<String>,
     pub log_tail: &'a str,
+    pub secret_values: &'a [String],
 }
 
-fn display_value(key: &str, value: &Value) -> String {
-    if crate::secret::is_secret_key(key) {
+fn redact_secrets(text: &str, secret_values: &[String]) -> String {
+    let mut redacted = text.to_string();
+    let mut values: Vec<&String> = secret_values
+        .iter()
+        .filter(|value| !value.is_empty())
+        .collect();
+    // 一方の秘密値が他方を含む場合、長い方から伏せないと一部が残る。
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    for value in values {
+        redacted = redacted.replace(value, "（秘密値を伏せました）");
+    }
+    redacted
+}
+
+fn display_value(key: &str, value: &Value, secret_keys: &HashSet<String>) -> String {
+    if secret_keys.contains(key) || crate::secret::is_secret_key(key) {
         // 値そのものは出さない。設定済みかどうかだけ分かれば、こちらの切り分けには足りる。
         let filled = match value {
             Value::String(text) => !text.trim().is_empty(),
@@ -96,15 +115,19 @@ pub fn build_report(report: &Report) -> String {
     keys.sort();
     for key in keys {
         let value = report.config.get(key).unwrap_or(&Value::Null);
-        out.push_str(&format!("{key} = {}\n", display_value(key, value)));
+        out.push_str(&format!(
+            "{key} = {}\n",
+            display_value(key, value, report.secret_keys)
+        ));
     }
 
     out.push_str(&format!("\n## ログ（app.log の末尾{LOG_TAIL_LINES}行）\n"));
     if report.log_tail.trim().is_empty() {
         out.push_str("（まだ記録がありません）\n");
     } else {
-        out.push_str(report.log_tail);
-        if !report.log_tail.ends_with('\n') {
+        let log_tail = redact_secrets(report.log_tail, report.secret_values);
+        out.push_str(&log_tail);
+        if !log_tail.ends_with('\n') {
             out.push('\n');
         }
     }
@@ -124,6 +147,7 @@ mod tests {
             "PICOAGENT_OPENAI_API_KEY": "sk-live-should-never-appear",
             "PICOAGENT_BLUESKY_APP_PASSWORD": "dpapi:v1:should-never-appear",
             "PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN": "",
+            "CUSTOM_LOGIN": "schema-secret-should-never-appear",
             "PICOAGENT_TTS_ENABLED": true
         })
         .as_object()
@@ -131,7 +155,12 @@ mod tests {
         .unwrap()
     }
 
-    fn sample_report<'a>(config: &'a Map<String, Value>, log: &'a str) -> Report<'a> {
+    fn sample_report<'a>(
+        config: &'a Map<String, Value>,
+        log: &'a str,
+        secret_keys: &'a HashSet<String>,
+        secret_values: &'a [String],
+    ) -> Report<'a> {
         Report {
             generated_at: "2026-09-02 08:00:00".to_string(),
             version: "1.0.4",
@@ -139,26 +168,45 @@ mod tests {
             arch: "x86_64",
             beta_build: true,
             config,
+            secret_keys,
             log_tail: log,
+            secret_values,
         }
     }
 
     #[test]
     fn 秘密値は本文へ出さない() {
         let config = sample_config();
-        let text = build_report(&sample_report(&config, "[08:00:00] 起動しました\n"));
+        let secret_keys = HashSet::from(["CUSTOM_LOGIN".to_string()]);
+        let secret_values = vec![
+            "sk-live-should-never-appear".to_string(),
+            "dpapi:v1:should-never-appear".to_string(),
+            "schema-secret-should-never-appear".to_string(),
+            "decrypted-secret-value".to_string(),
+        ];
+        let text = build_report(&sample_report(
+            &config,
+            "[08:00:00] API応答: decrypted-secret-value\n",
+            &secret_keys,
+            &secret_values,
+        ));
         assert!(!text.contains("sk-live-should-never-appear"));
         assert!(!text.contains("dpapi:v1:should-never-appear"));
+        assert!(!text.contains("schema-secret-should-never-appear"));
+        assert!(!text.contains("decrypted-secret-value"));
+        assert!(text.contains("API応答: （秘密値を伏せました）"));
         // 設定済みかどうかだけは分かるようにする（切り分けに要るため）。
         assert!(text.contains("PICOAGENT_OPENAI_API_KEY = （設定済み）"));
         assert!(text.contains("PICOAGENT_BLUESKY_APP_PASSWORD = （設定済み）"));
         assert!(text.contains("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN = （未設定）"));
+        assert!(text.contains("CUSTOM_LOGIN = （設定済み）"));
     }
 
     #[test]
     fn 版と環境と選択中のプロバイダを載せる() {
         let config = sample_config();
-        let text = build_report(&sample_report(&config, ""));
+        let secret_keys = HashSet::new();
+        let text = build_report(&sample_report(&config, "", &secret_keys, &[]));
         assert!(text.contains("版: 1.0.4"));
         assert!(text.contains("環境: windows / x86_64"));
         assert!(text.contains("ビルド: アルファ版"));
@@ -174,7 +222,8 @@ mod tests {
     #[test]
     fn 未設定の選択は既定を書く() {
         let config = Map::new();
-        let text = build_report(&sample_report(&config, "行"));
+        let secret_keys = HashSet::new();
+        let text = build_report(&sample_report(&config, "行", &secret_keys, &[]));
         assert!(text.contains("AI: local"));
         assert!(text.contains("表示形式: pet"));
         assert!(text.contains("キャラクター: mugi"));

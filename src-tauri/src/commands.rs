@@ -1549,6 +1549,27 @@ pub fn settings_export_diagnostics(
     let now = chrono::Local::now();
     let path = dir.join(format!("diagnostics-{}.txt", now.format("%Y-%m-%d-%H%M%S")));
     let config = state.config.get_all();
+    let schema_keys = secret_keys();
+    let mut secret_values = Vec::new();
+    for (key, value) in &config {
+        if !is_secret_setting(&schema_keys, key) {
+            continue;
+        }
+        if let Some(raw) = value.as_str().filter(|raw| !raw.trim().is_empty()) {
+            secret_values.push(raw.to_string());
+        }
+        let resolved = state.config.get(key, "");
+        if !resolved.trim().is_empty() {
+            secret_values.push(resolved);
+        }
+    }
+    for (key, value) in std::env::vars() {
+        if is_secret_setting(&schema_keys, &key) && !value.is_empty() {
+            secret_values.push(value);
+        }
+    }
+    secret_values.sort();
+    secret_values.dedup();
     let log_tail = crate::log_paths::read_tail(
         &app,
         "app.log",
@@ -1562,9 +1583,12 @@ pub fn settings_export_diagnostics(
         arch: std::env::consts::ARCH,
         beta_build: cfg!(feature = "beta-full"),
         config: &config,
+        secret_keys: &schema_keys,
         log_tail: &log_tail,
+        secret_values: &secret_values,
     });
-    std::fs::write(&path, body).map_err(|error| format!("書き出しに失敗しました: {error}"))?;
+    crate::store::write_atomic(&path, body.as_bytes())
+        .map_err(|error| format!("書き出しに失敗しました: {error}"))?;
     crate::log_paths::append_app_log(
         &app,
         &format!("診断情報を書き出しました: {}", path.display()),
