@@ -5581,6 +5581,9 @@ async function releaseBootUi() {
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
+  // 配置編集の保存先は設定側。読み込み順に関係なく届くよう、値も残してから渡す。
+  window.__picoLayoutPlacements = info.layoutPlacements || {};
+  window.PicoLayoutEditor?.hydrate(window.__picoLayoutPlacements);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;

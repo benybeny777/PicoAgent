@@ -26,6 +26,7 @@ mod guard_scan;
 mod history;
 mod hotkey;
 mod layout;
+mod layout_placements;
 mod license;
 mod log_paths;
 mod mcp;
@@ -166,6 +167,7 @@ pub fn run() {
             commands::pet_boot_progress,
             commands::pet_finish_boot,
             commands::pet_reset_layout,
+            commands::pet_save_layout_placements,
             menu::pet_menu,
         ])
         .on_menu_event(|app, event| {
