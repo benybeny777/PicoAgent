@@ -113,7 +113,7 @@ window.__TAURI__ = {
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
     if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
-    if (name === "settings_export_diagnostics") return { path: "C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\log\\diagnostics-2026-09-02-080000.txt" };
+    if (name === "settings_export_diagnostics") return { path: "C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\log\\diagnostics.2026-09-02.080000.txt" };
     if (name === "settings_tha3_status") return { ready: false, root: "未設定", installHint: "任意", sourceReady: false, modelReady: false, runtimeReady: false };
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
@@ -412,7 +412,7 @@ try {
   await page.getByRole("tab", { name: "診断・修復" }).click();
   // 不具合連絡用の書き出し。保存先をその場に出す（秘密値を含めないことも明示する）。
   await page.getByRole("button", { name: "診断情報を書き出す", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector(".diagnostics-export-status")?.textContent?.includes("diagnostics-2026-09-02-080000.txt"));
+  await page.waitForFunction(() => document.querySelector(".diagnostics-export-status")?.textContent?.includes("diagnostics.2026-09-02.080000.txt"));
   const exportNote = await page.locator(".diagnostics-export-status").textContent();
   if (!exportNote?.includes("APIキー等は含みません")) throw new Error(`診断書き出しの案内が不足しています: ${exportNote}`);
   if (await page.locator(".product-info-card").count() !== 5) throw new Error("製品情報カードが5件ではありません");

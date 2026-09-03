@@ -10,7 +10,8 @@
 // 中断時には子プロセスが残る。`tools::process::guard` のテストが直接 `Command::new` を
 // 使っているスキルを検出して失敗させる。
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::time::Duration;
 
@@ -152,6 +153,77 @@ fn apply_no_window(command: &mut Command) {
 
 #[cfg(not(windows))]
 fn apply_no_window(_command: &mut Command) {}
+
+/// macOS の GUI アプリが継承しない、Homebrew の既定設置先。
+///
+/// Finder / Dock から起動したアプリの PATH は `launchd` の素の値で、`/opt/homebrew/bin` を
+/// 含まない。ターミナルから起動したときだけ動く、という食い違いの原因になるためここも見る。
+#[cfg(target_os = "macos")]
+const EXTRA_EXECUTABLE_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
+#[cfg(not(target_os = "macos"))]
+const EXTRA_EXECUTABLE_DIRS: &[&str] = &[];
+
+/// 外部コマンドの実行ファイルを絶対パスで解決する。見つからなければ `None`。
+///
+/// **存在確認を `sh -lc "command -v ..."`（ログインシェル）で行ってはいけない。**
+/// ログインシェルは `/etc/paths.d` から PATH を組み直すため「ある」と判定されるのに、
+/// 実際に spawn する側は GUI アプリが継承した素の PATH しか見ない。この食い違いで、
+/// p7zip を導入済みの macOS でも Aivis の分割書庫展開が実行時に
+/// `No such file or directory` で失敗していた。判定と実行を同じ探索で揃えるため、
+/// 存在確認も起動も**この関数が返した絶対パス**を使う。
+pub fn resolve_executable(name: &str) -> Option<PathBuf> {
+    resolve_executable_in(
+        name,
+        std::env::var_os("PATH").as_deref(),
+        EXTRA_EXECUTABLE_DIRS,
+    )
+}
+
+/// 実行ファイルが見つかるかどうかだけを見る。
+pub fn has_executable(name: &str) -> bool {
+    resolve_executable(name).is_some()
+}
+
+/// 探索先を明示する本体（テストから実ディレクトリを渡せるように分けている）。
+fn resolve_executable_in(
+    name: &str,
+    path_env: Option<&OsStr>,
+    extra_dirs: &[&str],
+) -> Option<PathBuf> {
+    let names = executable_candidates(name);
+    let from_path = path_env
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(paths).collect::<Vec<_>>());
+    let from_extra = extra_dirs.iter().map(PathBuf::from);
+    for dir in from_path.chain(from_extra) {
+        for candidate in &names {
+            let path = dir.join(candidate);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// 探すファイル名の候補。Windows は `where.exe` と同じく PATHEXT の拡張子まで見る
+/// （`pandoc.cmd` のようなラッパーを取りこぼさない）。拡張子付きで渡された名前はそのまま。
+fn executable_candidates(name: &str) -> Vec<OsString> {
+    if !cfg!(windows) || Path::new(name).extension().is_some() {
+        return vec![OsString::from(name)];
+    }
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let mut candidates: Vec<OsString> = pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| OsString::from(format!("{name}{ext}")))
+        .collect();
+    if candidates.is_empty() {
+        candidates.push(OsString::from(format!("{name}.exe")));
+    }
+    candidates
+}
 
 /// 同期版（`std::process::Command`）に安全な既定を適用して作る。
 ///
@@ -473,6 +545,63 @@ mod tests {
             let text = String::from_utf8_lossy(&result.stdout).to_string();
             assert!(text.contains("picoagent"), "text: {text}");
         });
+    }
+
+    #[test]
+    fn 実行ファイルは環境変数と既知の設置先から解決する() {
+        // GUI アプリが継承する PATH に無くても、既知の設置先にあれば見つける
+        // （macOS の Homebrew 経路。判定と実行を同じ探索へ揃えるための性質）。
+        let dir = std::env::temp_dir().join(format!(
+            "picoagent-resolve-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "picoagent-fake-tool";
+        let file = dir.join(super::executable_candidates(name).first().unwrap());
+        std::fs::write(&file, b"").unwrap();
+        let dir_text = dir.to_string_lossy().to_string();
+
+        // PATH にも既知の設置先にも無ければ見つからない。
+        assert_eq!(super::resolve_executable_in(name, None, &[]), None);
+        // 既知の設置先だけにあっても見つける。
+        assert_eq!(
+            super::resolve_executable_in(name, None, &[dir_text.as_str()]),
+            Some(file.clone())
+        );
+        // PATH にあれば見つける。
+        let path_env = std::ffi::OsString::from(&dir_text);
+        assert_eq!(
+            super::resolve_executable_in(name, Some(&path_env), &[]),
+            Some(file.clone())
+        );
+        // ディレクトリを実行ファイルと取り違えない。
+        assert_eq!(
+            super::resolve_executable_in(
+                dir.file_name().unwrap().to_str().unwrap(),
+                None,
+                &[std::env::temp_dir().to_string_lossy().as_ref()],
+            ),
+            None
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 拡張子付きで渡した名前へ拡張子を重ねない() {
+        let candidates = super::executable_candidates("soffice.exe");
+        assert_eq!(candidates, vec![std::ffi::OsString::from("soffice.exe")]);
+        // 拡張子なしは、Windows だけ PATHEXT の候補へ広がる。
+        let plain = super::executable_candidates("7z");
+        if cfg!(windows) {
+            assert!(plain.len() > 1, "candidates: {plain:?}");
+            assert!(
+                plain.contains(&std::ffi::OsString::from("7z.EXE"))
+                    || plain.contains(&std::ffi::OsString::from("7z.exe"))
+            );
+        } else {
+            assert_eq!(plain, vec![std::ffi::OsString::from("7z")]);
+        }
     }
 
     #[test]

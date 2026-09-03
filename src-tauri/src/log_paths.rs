@@ -57,8 +57,18 @@ pub fn ensure_log_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
+/// 保持期間の対象にするファイル名か。
+///
+/// `.log` に加えて、診断情報の書き出し（`diagnostics.<日付>.<時刻>.txt`）も対象にする。
+/// ログと同じ置き場へ、押すたびに版・設定・直近ログを丸ごと書き出すため、対象から外すと
+/// 「ログは1週間で自動削除」と案内しているのに、中身の濃いファイルだけが残り続ける。
+/// 履歴 JSON など、それ以外のファイルは触らない。
+fn is_prunable_log(name: &str) -> bool {
+    name.ends_with(".log") || (name.starts_with("diagnostics.") && name.ends_with(".txt"))
+}
+
 /// 保持期間（`LOG_RETAIN_DAYS` 日）より古い日付のログファイルを削除する。
-/// 当日を含めて直近 `LOG_RETAIN_DAYS` 日分だけ残す。`.log` 以外（履歴 JSON 等）は触らない。
+/// 当日を含めて直近 `LOG_RETAIN_DAYS` 日分だけ残す。
 pub fn prune_old_logs(app: &AppHandle) {
     let dir = log_dir(app);
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -67,7 +77,7 @@ pub fn prune_old_logs(app: &AppHandle) {
     let cutoff = Local::now().date_naive() - Duration::days(LOG_RETAIN_DAYS - 1);
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if !name.ends_with(".log") {
+        if !is_prunable_log(&name) {
             continue;
         }
         let Some(date) = date_in_name(&name) else {
@@ -201,7 +211,21 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::tail_lines;
+    use super::{date_in_name, is_prunable_log, tail_lines};
+
+    #[test]
+    fn 診断情報の書き出しも保持期間の対象にする() {
+        // 「ログは1週間で自動削除」と案内している置き場なので、同じ規則で消える名前にする。
+        assert!(is_prunable_log("diagnostics.2026-09-03.080000.txt"));
+        assert_eq!(
+            date_in_name("diagnostics.2026-09-03.080000.txt"),
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 3)
+        );
+        assert!(is_prunable_log("app.2026-09-03.log"));
+        // 対話データは触らない。
+        assert!(!is_prunable_log("history-mugi.json"));
+        assert!(!is_prunable_log("メモ.txt"));
+    }
 
     #[test]
     fn 直近ログは末尾だけを出す() {
