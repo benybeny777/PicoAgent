@@ -566,26 +566,37 @@ fn verify_archive_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn command_exists(command: &str) -> bool {
-    let checker = if cfg!(windows) { "where.exe" } else { "sh" };
-    let mut cmd = crate::tools::process::command_sync(checker);
-    if cfg!(windows) {
-        cmd.arg(command);
+/// 実行ファイルの絶対パスを解決する。PATH上に見つからなくても、macOSのGUIアプリは
+/// Homebrewの設置先（`/opt/homebrew/bin`・`/usr/local/bin`）を継承したPATHに持たないことが
+/// 多いため、既知の設置先も直接確かめる。
+///
+/// 以前は`sh -lc "command -v ..."`（ログインシェル）で存在確認していたが、ログインシェルは
+/// `/etc/paths.d`経由でPATHを再構成するため「存在する」と判定されるのに対し、実際にspawnする
+/// 側はGUIアプリが継承した素のPATH（Homebrewを含まない）しか見ないという食い違いがあった。
+/// その結果、p7zipを導入済みでも実行時に`No such file or directory`で失敗していた。
+fn resolve_executable(name: &str) -> Option<PathBuf> {
+    let exe_name = if cfg!(windows) {
+        format!("{name}.exe")
     } else {
-        cmd.args(["-lc", &format!("command -v {command}")]);
-    }
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+        name.to_string()
+    };
+    let from_path = std::env::var_os("PATH").into_iter().flat_map(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(&exe_name))
+            .collect::<Vec<_>>()
+    });
+    #[cfg(target_os = "macos")]
+    let extra_dirs: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
+    #[cfg(not(target_os = "macos"))]
+    let extra_dirs: &[&str] = &[];
+    let from_extra = extra_dirs.iter().map(|dir| Path::new(dir).join(&exe_name));
+    from_path.chain(from_extra).find(|path| path.is_file())
 }
 
 fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(out_dir)?;
-    let mut command = if command_exists("7z") {
-        let mut cmd = crate::tools::process::command_sync("7z");
+    let mut command = if let Some(path) = resolve_executable("7z") {
+        let mut cmd = crate::tools::process::command_sync(&path);
         cmd.args([
             "x",
             archive.to_string_lossy().as_ref(),
@@ -593,8 +604,8 @@ fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
             "-y",
         ]);
         cmd
-    } else if command_exists("7za") {
-        let mut cmd = crate::tools::process::command_sync("7za");
+    } else if let Some(path) = resolve_executable("7za") {
+        let mut cmd = crate::tools::process::command_sync(&path);
         cmd.args([
             "x",
             archive.to_string_lossy().as_ref(),

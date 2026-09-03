@@ -119,8 +119,10 @@ cargo xtask update-feed src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarc
 macOS固有の注意点は次のとおりです。
 
 - **未署名アルファはGatekeeperに止められます。** 初回は Finder で右クリック →「開く」、または `xattr -dr com.apple.quarantine /Applications/PicoAgent.app` が必要です。取得ページで事前に案内します。署名・公証は販売対象へ追加する時点で行います
+- **`tauri.conf.json`の`bundle.macOS.signingIdentity`は`"-"`（ad-hoc署名）を維持します。** これが無いと、Rustツールチェーンが実行バイナリ単体には自動でad-hoc署名を付けるのに対し、tauri-bundlerが`Contents/Resources`追加後の`.app`全体を再署名しないため、「バイナリの署名はリソースがシールされていると主張するのに実体が無い」という矛盾状態になります。この状態のDMGをGatekeeperがある環境（ダウンロード相当のquarantine属性付き）で開くと、「開発元を確認できません」ではなく**「壊れているため開けません」という回復不能な表示**になり、右クリック→「開く」でも回避できません（PR #186で実機確認）。
 - **マイク・画面収録・アクセシビリティはOSの許可が要ります。** マイクの用途説明は `src-tauri/Info.plist` に入れてあります（無いとマイク取得の瞬間にOSがアプリを終了します）。画面収録と入力操作は「システム設定 → プライバシーとセキュリティ」で許可します
 - **APIキー等はログインキーチェーンへ預けます。** `config.json` には項目名だけが残ります。未署名アプリは再ビルドのたびに署名が変わるため、キーチェーンの許可ダイアログが繰り返し出ます。署名を入れるまでの既知の使い勝手の劣化です
+- **GUIアプリが継承するPATHにはHomebrewの設置先（`/opt/homebrew/bin`等）が含まれません。** ターミナルの`sh -lc "command -v ..."`はログインシェルがPATHを再構成するため「ある」と判定できても、Finderから起動したアプリが実際に`Command::new("名前")`でspawnすると見つからず`No such file or directory`になります（Aivis展開用`7z`で実際に発生。`aivis.rs`の`resolve_executable()`で対処済み）。macOSで外部コマンドをPATH経由に頼る実装を足す場合は、この二重基準に注意してください
 - **対応OS版は macOS 11 以上のApple Silicon機**（`src-tauri/tauri.macos.conf.json`）。同梱ローカルAIエンジンのmacOS資産に合わせた下限で、実機QAで確定します
 
 版番号はSemVerで管理します。通常の更新は同じ`major.minor`系列の`patch`を自動加算し、`minor`と`major`は製品管理者の明示指示がある場合だけ上げます。公開中の`latest.json`を起点に`cargo xtask bump-version <種別>`が3か所の版を同期するため、個別ファイルへ版番号を手入力しません。同じ版のRelease資産も上書きしません。patch番号もLP、アプリ、ファイル名、Releaseへ正確に表示します。起動時の自動確認はpatchだけなら通知せず、利用者が設定から「更新を確認」を実行した場合はpatchも案内し、手動でダウンロード・適用できます。`major.minor`が上がった場合は起動時にも通知します。アルファ期間中は表示名と更新説明へ`Alpha`を付けます。
