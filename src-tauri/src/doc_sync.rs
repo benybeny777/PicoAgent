@@ -196,8 +196,8 @@ mod guard {
         }
 
         let actual: std::collections::BTreeSet<String> = crate::guard_scan::skill_sources()
-            .into_iter()
-            .map(|source| source.name)
+            .iter()
+            .map(|source| source.name.clone())
             .collect();
 
         let missing: Vec<&String> = actual.difference(&listed).collect();

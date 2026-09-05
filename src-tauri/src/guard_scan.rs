@@ -10,6 +10,7 @@
 // `guard_scan::guard` のメタガードが検出する。
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// 走査対象のソース1件。
 pub struct Source {
@@ -46,8 +47,8 @@ pub fn repo_root() -> PathBuf {
 }
 
 /// スキル、バックエンド、再利用コアのソース全部。ガードはこれを使うこと。
-pub fn all_sources() -> Vec<Source> {
-    let mut out = skill_sources();
+pub fn all_sources() -> Vec<&'static Source> {
+    let mut out: Vec<_> = skill_sources().iter().collect();
     out.extend(backend_sources());
     out.extend(core_sources());
     out
@@ -55,7 +56,12 @@ pub fn all_sources() -> Vec<Source> {
 
 /// `crates/picoagent-core/src/**/*.rs` 一式。
 /// コアへ切り出したコードも、アプリ内コードと同じ設計ガードから外さない。
-pub fn core_sources() -> Vec<Source> {
+pub fn core_sources() -> &'static [Source] {
+    static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
+    SOURCES.get_or_init(load_core_sources)
+}
+
+fn load_core_sources() -> Vec<Source> {
     let root = repo_root();
     let mut out = Vec::new();
     collect_rs(&root, &root.join("crates/picoagent-core/src"), &mut out);
@@ -73,37 +79,31 @@ pub fn core_sources() -> Vec<Source> {
 /// 書かれるので、`mod.rs` だけを見ると外部プロセス起動や `fs::write` の違反を
 /// そこへ書いた瞬間に見逃す。`name` はどちらもスキル名（ディレクトリ名）にして、
 /// スキル単位で例外を指定するガード（`OWN_CHECK_ALLOWED` など）がそのまま効くようにする。
-pub fn skill_sources() -> Vec<Source> {
+pub fn skill_sources() -> &'static [Source] {
+    static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
+    SOURCES.get_or_init(load_skill_sources)
+}
+
+fn load_skill_sources() -> Vec<Source> {
     let root = repo_root();
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(root.join("skills"))
-        .expect("skills ディレクトリ")
-        .flatten()
-    {
+    for entry in sorted_entries(&root.join("skills")) {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Ok(files) = std::fs::read_dir(entry.path()) else {
+        if !entry
+            .file_type()
+            .expect("スキルの種類を取得できません")
+            .is_dir()
+        {
             continue;
-        };
-        let mut paths: Vec<PathBuf> = files
-            .flatten()
-            .map(|file| file.path())
-            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
-            .collect();
+        }
+        let mut sources = Vec::new();
+        collect_rs(&root, &entry.path(), &mut sources);
         // mod.rs を先頭にして、既存の表示順（スキル本体が先）を保つ。
-        paths.sort_by_key(|path| {
-            (
-                path.file_name().and_then(|file| file.to_str()) != Some("mod.rs"),
-                path.clone(),
-            )
-        });
-        for path in paths {
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                out.push(Source {
-                    name: name.clone(),
-                    path: path.strip_prefix(&root).unwrap_or(&path).to_path_buf(),
-                    text,
-                });
-            }
+        let primary = Path::new("skills").join(&name).join("mod.rs");
+        sources.sort_by(|a, b| (a.path != primary, &a.path).cmp(&(b.path != primary, &b.path)));
+        for mut source in sources {
+            source.name = name.clone();
+            out.push(source);
         }
     }
     assert!(
@@ -115,7 +115,12 @@ pub fn skill_sources() -> Vec<Source> {
 }
 
 /// `src-tauri/src/**/*.rs` 一式。
-pub fn backend_sources() -> Vec<Source> {
+pub fn backend_sources() -> &'static [Source] {
+    static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
+    SOURCES.get_or_init(load_backend_sources)
+}
+
+fn load_backend_sources() -> Vec<Source> {
     let root = repo_root();
     let mut out = Vec::new();
     collect_rs(&root, &root.join("src-tauri/src"), &mut out);
@@ -128,17 +133,20 @@ pub fn backend_sources() -> Vec<Source> {
 }
 
 fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<Source>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
+    for entry in sorted_entries(dir) {
         let path = entry.path();
-        if path.is_dir() {
+        let kind = entry.file_type().unwrap_or_else(|error| {
+            panic!(
+                "検査対象の種類を取得できません: {} ({error})",
+                path.display()
+            )
+        });
+        if kind.is_dir() {
             collect_rs(root, &path, out);
         } else if path.extension().is_some_and(|e| e == "rs") {
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue;
-            };
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("検査対象を読み込めません: {} ({error})", path.display())
+            });
             out.push(Source {
                 name: path
                     .file_name()
@@ -151,8 +159,54 @@ fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<Source>) {
     }
 }
 
+// 読めない項目を除外すると検査が成功してしまうため、対象と理由を示して失敗する。
+fn sorted_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
+    let mut entries = std::fs::read_dir(dir)
+        .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>())
+        .unwrap_or_else(|error| panic!("検査対象を列挙できません: {} ({error})", dir.display()));
+    entries.sort_by_key(|entry| entry.file_name());
+    entries
+}
+
 /// メタガード: 各ガードが走査範囲を自前で決めていないこと。
+#[cfg(test)]
 mod guard {
+    #[test]
+    fn 同じ実行内の走査はソース本文を共有する() {
+        let first = super::all_sources();
+        let second = super::all_sources();
+        assert_eq!(first.len(), second.len());
+        assert!(first.iter().zip(&second).all(|(a, b)| std::ptr::eq(*a, *b)));
+    }
+
+    #[test]
+    fn 入れ子のソースを読み不正なutf8を見逃さない() {
+        let root = super::repo_root().join("temp").join(format!(
+            "guard-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("nested/deeper")).unwrap();
+        std::fs::write(root.join("nested/deeper/source.rs"), "fn example() {}").unwrap();
+        let mut sources = Vec::new();
+        super::collect_rs(&root, &root, &mut sources);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(
+            sources[0].path,
+            std::path::Path::new("nested/deeper/source.rs")
+        );
+        std::fs::write(root.join("invalid.rs"), [0xff]).unwrap();
+        let invalid = std::panic::catch_unwind(|| {
+            super::collect_rs(&root, &root, &mut Vec::new());
+        });
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(invalid.is_err(), "読み取れないソースを除外して成功させない");
+        assert!(std::panic::catch_unwind(|| super::sorted_entries(&root)).is_err());
+    }
+
     #[test]
     fn 再利用コアへ製品依存を持ち込まない() {
         const FORBIDDEN: &[&str] = &["tauri", "PICOAGENT_", "crate::config"];
