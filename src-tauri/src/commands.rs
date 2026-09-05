@@ -5243,8 +5243,8 @@ mod guard {
     /// ファイル走査・展開・書き込みを行うcommandを同期IPCへ戻すと、処理中にWebViewが固まる。
     #[test]
     fn 重いio_commandはtauriの非同期実行枠を使う() {
-        let source = crate::guard_scan::backend_sources()
-            .into_iter()
+        let source = &crate::guard_scan::backend_sources()
+            .iter()
             .find(|source| source.path.ends_with("src-tauri/src/commands.rs"))
             .expect("commands.rsを読み込める")
             .text;
