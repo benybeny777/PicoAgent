@@ -40,31 +40,34 @@ impl Utf8Stream {
     pub fn push(&mut self, bytes: &[u8]) -> String {
         self.tail.extend_from_slice(bytes);
         let mut out = String::new();
+        let mut consumed = 0;
         loop {
-            match std::str::from_utf8(&self.tail) {
+            match std::str::from_utf8(&self.tail[consumed..]) {
                 Ok(text) => {
                     out.push_str(text);
-                    self.tail.clear();
+                    consumed = self.tail.len();
                     break;
                 }
                 Err(error) => {
                     let valid = error.valid_up_to();
-                    if let Ok(text) = std::str::from_utf8(&self.tail[..valid]) {
+                    if let Ok(text) = std::str::from_utf8(&self.tail[consumed..consumed + valid]) {
                         out.push_str(text);
                     }
+                    consumed += valid;
                     match error.error_len() {
                         Some(len) => {
                             out.push('\u{FFFD}');
-                            self.tail.drain(..valid + len);
+                            consumed += len;
                         }
                         None => {
-                            self.tail.drain(..valid);
                             break;
                         }
                     }
                 }
             }
         }
+        // 不正バイトごとに残りを移動せず、次チャンクへ持ち越す末尾だけを一度で残す。
+        self.tail.drain(..consumed);
         out
     }
 }
@@ -96,5 +99,30 @@ mod tests {
     fn 壊れたバイト列を置換して先へ進む() {
         let mut stream = Utf8Stream::default();
         assert_eq!(stream.push(&[b'a', 0xFF, b'b']), "a\u{FFFD}b");
+    }
+
+    #[test]
+    fn 不正バイトと分断された多バイト文字を混ぜても復元する() {
+        let mut bytes = vec![0xff; 16_384];
+        bytes.extend_from_slice("日本語😀".as_bytes());
+        bytes.extend_from_slice(&[0xf0, 0x80, b'x', 0xe3, 0x81, 0x82]);
+        let expected = String::from_utf8_lossy(&bytes);
+        for chunk_size in [1, 2, 3, 7, 1024, bytes.len()] {
+            let mut stream = Utf8Stream::default();
+            let actual: String = bytes
+                .chunks(chunk_size)
+                .map(|chunk| stream.push(chunk))
+                .collect();
+            assert_eq!(actual, expected, "チャンク幅: {chunk_size}");
+        }
+    }
+
+    #[test]
+    fn 不完全な末尾を空チャンクで失わず次の入力へ残す() {
+        let mut stream = Utf8Stream::default();
+        assert_eq!(stream.push(&[0xff, 0xe3, 0x81]), "\u{FFFD}");
+        assert_eq!(stream.push(&[]), "");
+        assert_eq!(stream.push(&[0x82, b'z']), "あz");
+        assert_eq!(stream.push(&[]), "");
     }
 }
