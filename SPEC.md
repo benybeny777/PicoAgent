@@ -515,7 +515,7 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 ### ローカル HTTP API（`api_server.rs`）
 
 - 既定で無効（`PICOAGENT_API_ENABLED`）。有効時のみ `127.0.0.1:<PICOAGENT_API_PORT>` にバインドし、LAN へは公開しない。`PICOAGENT_API_KEY` を設定すると全エンドポイントで `Authorization: Bearer` を必須にする。**127.0.0.1 限定だけではブラウザ経由の攻撃を防げない**（ユーザーが開いた悪意あるページが fetch でこの API を叩ける。`Content-Type: text/plain` なら CORS プリフライトも回避でき、応答は読めなくても「エージェントを実行させる」副作用だけを起こせる）。そのため **`Origin` ヘッダ付きのリクエストは既定で 403**（ブラウザは横断 fetch に必ず Origin を付けるが、CLI / MCP クライアントは付けない。MCP 仕様も Origin 検証をサーバ要件としている）、**ボディ付きは `Content-Type: application/json` 限定で 415**（単純リクエストによる迂回を防ぐ）。例外が要る場合だけ `PICOAGENT_API_ALLOWED_ORIGINS` に列挙する。
-- 依存追加なしの最小 HTTP/1.1 実装（tokio `TcpListener`）。ボディ 1MB 上限・リクエストタイムアウト 300 秒・ヘッダ 16KB 上限。不正 JSON は接続を閉じずに HTTP 400（`/mcp` は JSON-RPC parse error `-32700`）を返す。
+- 依存追加なしの最小 HTTP/1.1 実装（tokio `TcpListener`）。ボディ 1MB 上限・リクエストタイムアウト 300 秒・ヘッダ 16KB 上限。ヘッダ終端と同時に到着した上限超過も拒否し、宣言された `Content-Length` まで本文が届く前に接続が閉じた場合はリクエストを実行しない。不正 JSON は接続を閉じずに HTTP 400（`/mcp` は JSON-RPC parse error `-32700`）を返す。
 - エンドポイント: `GET /api/version`・`GET /api/tags`（Ollama 風）、`POST /api/chat`・`POST /api/generate`、`POST /v1/chat/completions`（OpenAI Chat Completions 互換。`stream` 要求には全文単一チャンクの SSE）、`POST /mcp`（下記）。
 - 会話はリクエスト内で完結する**ステートレス**設計で、デスクトップの会話履歴・キャラ文脈とは混ざらない。スキルは通常どおり使える。
 - 付属 CLI: `xtask`（`cli`）（`cargo xtask cli status/models/chat/ask/repl`）。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY` 環境変数。
