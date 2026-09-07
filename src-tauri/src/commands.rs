@@ -2608,7 +2608,86 @@ pub async fn pet_speak(
         .bytes()
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声データを読めませんでした", error))?;
-    Ok(json!({ "enabled": true, "mime": "audio/wav", "audio": bytes.to_vec() }))
+    let lip_sync = aivis_lip_sync_timeline(&audio_query);
+    Ok(json!({
+        "enabled": true,
+        "mime": "audio/wav",
+        "audio": bytes.to_vec(),
+        "lipSync": lip_sync
+    }))
+}
+
+/// AivisのAudioQueryから、合成音声と同じ時間軸の日本語母音列を作る。
+/// 未知の音素は閉口へ寄せ、音量包絡線だけで口形を推測しない。
+fn aivis_lip_sync_timeline(query: &Value) -> Vec<Value> {
+    let speed = query
+        .get("speedScale")
+        .and_then(Value::as_f64)
+        .filter(|value| *value > 0.0)
+        .unwrap_or(1.0);
+    let mut at = query
+        .get("prePhonemeLength")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        / speed;
+    let mut timeline = Vec::new();
+    let phrases = query
+        .get("accent_phrases")
+        .and_then(Value::as_array)
+        .or_else(|| query.get("accentPhrases").and_then(Value::as_array));
+    for phrase in phrases.into_iter().flatten() {
+        let moras = phrase.get("moras").and_then(Value::as_array);
+        for mora in moras.into_iter().flatten() {
+            at += mora
+                .get("consonant_length")
+                .or_else(|| mora.get("consonantLength"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / speed;
+            let length = mora
+                .get("vowel_length")
+                .or_else(|| mora.get("vowelLength"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / speed;
+            let vowel = mora.get("vowel").and_then(Value::as_str).unwrap_or("");
+            let code = vowel.to_ascii_uppercase();
+            let form = match code.as_str() {
+                "I" => 0.95,
+                "U" => -0.95,
+                "E" => 0.70,
+                "O" => -0.75,
+                _ => 0.0,
+            };
+            let open = match code.as_str() {
+                "A" => 1.0,
+                "I" => 0.38,
+                "U" => 0.55,
+                "E" => 0.62,
+                "O" => 0.90,
+                _ => 0.0,
+            };
+            if length > 0.0 {
+                timeline.push(json!({
+                    "start": at,
+                    "end": at + length,
+                    "vowel": code,
+                    "open": open,
+                    "form": form
+                }));
+            }
+            at += length;
+        }
+        if let Some(pause) = phrase.get("pause_mora").or_else(|| phrase.get("pauseMora")) {
+            at += pause
+                .get("vowel_length")
+                .or_else(|| pause.get("vowelLength"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / speed;
+        }
+    }
+    timeline
 }
 
 /// 設定スキーマ上で type="password" になっている＝シークレット扱いのキー集合。
@@ -4786,9 +4865,9 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        centered_window_position, compacted_conversation, default_character_tts_voice,
-        enable_tts_after_component_install, multi_ai_context, parse_update_feed,
-        preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
+        aivis_lip_sync_timeline, centered_window_position, compacted_conversation,
+        default_character_tts_voice, enable_tts_after_component_install, multi_ai_context,
+        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
         resolved_judge_model, safe_wake_message, settings_tab, speech_text, stable_persona_prompt,
         update_series_is_newer, update_status, validate_multi_ai_settings,
         verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
@@ -4796,6 +4875,28 @@ mod tests {
     };
     use crate::config::Config;
     use crate::message::Message;
+
+    #[test]
+    fn aivisの母音長を口形タイムラインへ変換する() {
+        let query = serde_json::json!({
+            "speedScale": 2.0,
+            "prePhonemeLength": 0.2,
+            "accent_phrases": [{
+                "moras": [
+                    {"consonant_length": 0.1, "vowel": "a", "vowel_length": 0.4},
+                    {"consonant_length": 0.0, "vowel": "I", "vowel_length": 0.2}
+                ]
+            }]
+        });
+        let timeline = aivis_lip_sync_timeline(&query);
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0]["vowel"], "A");
+        let start = timeline[0]["start"].as_f64().unwrap();
+        let end = timeline[0]["end"].as_f64().unwrap();
+        assert!((start - 0.15).abs() < 1e-9);
+        assert!((end - 0.35).abs() < 1e-9);
+        assert_eq!(timeline[1]["form"], 0.95);
+    }
 
     #[test]
     fn 目覚まし文は内部指示の言い換えを公開しない() {

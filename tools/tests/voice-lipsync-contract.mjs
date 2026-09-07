@@ -8,6 +8,8 @@ const settings = await readFile(new URL("../../ui/settings.js", import.meta.url)
 
 const functionSource = renderer.match(/function shouldLipSync\(audio\) \{[\s\S]*?\n\}/)?.[0];
 assert.ok(functionSource, "shouldLipSync の正本が見つかりません");
+const mouthFormSource = renderer.match(/function mouthFormAt\(currentTime, timeline\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(mouthFormSource, "母音口形の正本が見つかりません");
 
 function makePredicate({ currentVoice, ttsEnabledCache, voiceVolume }) {
   return Function(
@@ -42,4 +44,17 @@ test("すべてのリップシンク入口が共通判定を使う", () => {
 test("読み上げ音量の未保存時初期値は50", () => {
   assert.equal((commands.match(/PICOAGENT_TTS_VOLUME", "50"/g) ?? []).length, 2);
   assert.match(settings, /PICOAGENT_TTS_VOLUME \?\? "50"/);
+});
+
+test("Aivisの時間軸から母音口形を選ぶ", () => {
+  const mouthFormAt = Function(`"use strict"; ${mouthFormSource}; return mouthFormAt;`)();
+  const timeline = [
+    { start: 0.10, end: 0.30, form: 0 },
+    { start: 0.30, end: 0.50, form: 0.95 },
+    { start: 0.50, end: 0.70, form: -0.95 },
+  ];
+  assert.equal(mouthFormAt(0.20, timeline), 0);
+  assert.equal(mouthFormAt(0.35, timeline), 0.95);
+  assert.equal(mouthFormAt(0.55, timeline), -0.95);
+  assert.equal(mouthFormAt(0.80, timeline), 0, "母音外は中立へ戻す");
 });

@@ -1,6 +1,6 @@
 ---
 name: rebuild-picoagent-character
-description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、ローカル物理演算、実画面QAまで再現する。実写テスト、Photoshopでの有効な高精細化、ユーザー指定時のClaude CLIレビュー、旧3D実験の撤去にも使う。
+description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2Dキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、ローカル物理演算、実画面QAまで再現する。実写テスト、Photoshopでの有効な高精細化、ユーザー指定時のClaude CLIレビュー、旧3D実験の撤去にも使う。
 ---
 
 # PicoAgentキャラクター再構築
@@ -14,6 +14,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 ## 対応形式と構図
 
 - 対応ランタイムは通常2D画像、自前メッシュリグ、Live2D。同梱通常2Dの制作正本はPNG、実行フレームと差分レイヤーはlossless WebPとする。利用者が追加済みのPNGパックは後方互換で読み続ける。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
+- LocalVTuberStudioの現行出力は`rig2d/rig.json`の`schema_version: 3`、`profile: lvs-anime25d-v1`を正規形式とする。Pico用の別リグへ変換せず、`rig2d/`をそのままキャラクターパックへ置き、`meshRig.rig`から直接読む。旧`anime25d-v1` version 2は互換確認に限る。
 - 低頭身2Dは従来の上半身位置、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にする。
 - チャット／バーの小型アイコンは首上にする。保存済みの利用者構図は初期値より優先する。
 - 画面位置の手動調整は別作業。依頼がなければ原画やmanifestへ焼き込まない。
@@ -59,11 +60,16 @@ uv run --with pillow python scripts/build-character-animations.py --character-di
 uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画
 uv run --python 3.12 --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
 cargo xtask sync-characters
+uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
+$env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'
+node tools/check-lvs-character.mjs temp/pico-lvs-check # LocalVTuberStudio形式の場合
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml
 cargo test --lib --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
+
+PlaywrightのパスはCodex Desktopの`load_workspace_dependencies`で現行値を取得し、上記に存在しなければ推測しない。`check-lvs-character.mjs`の固有ハッシュ数は動作停止の検出に使うだけで、画質合格の根拠にしない。続けてChromeの`tools/mesh-rig-preview/`で原画と並べ、閉口と5母音、650ミリ秒のまばたき、首・胴を裂かない控えめな待機動作、白・黒・市松背景を目視する。
 
 画像を追加・更新したコミットでは `git lfs ls-files` に対象PNG／WebPが載ることも確認する。READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。通常2Dの実行画像を変えた場合は `SHOOT_CHARACTER_MATRIX=1` で全キャラ・全7形式を撮影し、速度警告0件と実画像の欠け・矩形・輪郭劣化なしを確認する。実画面の確認後にREADME、配布README、LP、`SPEC.md`を同期し、採否と検証結果をPR本文へ書く。未確認項目だけを`docs/TASKS.md`へ残す。
