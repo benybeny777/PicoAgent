@@ -24,7 +24,11 @@ test("LocalVTuberStudio schema 3を中間形式へ書き換えず読む", () => 
   assert.match(renderer, /sourceRig\.scene_graph/);
   assert.match(renderer, /sourceRig\.layers\.mouth_closed/);
   assert.match(renderer, /eyeAperture\(sourceRig\.layers\.left_eye_base/);
+  assert.match(renderer, /openBoost = 1 \+ smoothstep\(0\.62, 1, open\) \* 0\.18/);
+  assert.doesNotMatch(renderer, /if \(openness >= 1[^\n]+return/);
   assert.match(renderer, /images\.has\(`\$\{side\}_eye_closed`\)/);
+  assert.match(renderer, /ctx\.clearRect\(left, top, right - left, bottom - top\)/);
+  assert.doesNotMatch(renderer, /globalCompositeOperation = "copy"/);
   assert.match(renderer, /rootUrl\}\/\$\{lvsPartPath\(name\)\}/);
 });
 
@@ -54,4 +58,8 @@ test("独自2.5Dは首境界を開く局所頭部変形をせず一体で呼吸�
   assert.doesNotMatch(renderer, /const isNeck = name === "neck"/);
   assert.doesNotMatch(renderer, /motionPose\.headX \* headWeight/);
   assert.match(renderer, /y -= breath \* 2 \* faceScale/);
+  assert.match(renderer, /if \(item\.role === "torso"\)/);
+  assert.match(renderer, /torso: \{ x0: torso\[0\], y0: torso\[1\], x1: torso\[2\], y1: torso\[3\] \}/);
+  assert.match(renderer, /chestPulse \* 2\.4 \* chestWeight/);
+  assert.match(renderer, /verticalPosition < 0\.58/);
 });

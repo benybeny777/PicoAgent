@@ -12,9 +12,9 @@
 
 正規入力はLocalVTuberStudioが出力した`schema_version: 3`、`profile: "lvs-anime25d-v1"`の`rig2d/rig.json`と`rig2d/parts/*.png`である。PicoAgent側で中間リグへ変換せず、`scene_graph`、実測した`eye_aperture`、`lip_seam`、`texture_box`を直接検証・描画する。PSDを実行時に解析せず、生成時に原寸で切り詰めたPNGパーツだけを読む。
 
-同梱例`female-a-lvs`は、LocalVTuberStudioで利用者が合格とした女性Aの`rig2d/`をそのまま保持する。キャラクターパックへ追加するときは`character.json`の`meshRig.rig`を`rig2d/rig.json`へ向ける。素材URLはLocalVTuberStudio正規形`/assets/rig2d/parts/<名前>.png`のまま保持し、PicoAgentはパック内の`rig2d/parts/`へ安全に解決する。
+同梱例`female-a-lvs`は、LocalVTuberStudioで利用者が合格とした女性Aの`rig2d/`をそのまま保持する。LocalVTuberStudio側は`character.json`と`rig2d/`を1つの自己完結パックとして出力し、PicoAgent側はそのフォルダまたはzipをキャラ登録から取り込むだけとする。キャラIDごとの座標変換・描画分岐・素材変換は追加しない。`character.json`の`meshRig.rig`を`rig2d/rig.json`へ向け、素材URLはLocalVTuberStudio正規形`/assets/rig2d/parts/<名前>.png`のまま保持する。PicoAgentはパック内の`rig2d/parts/`へ安全に解決する。
 
-口はAivisの`audio_query`が返す各モーラの母音と長さを音声と同じ時間軸へ変換し、声量包絡線の`ParamMouthOpenY`と母音別の`ParamMouthForm`を同時に渡す。タイムラインが得られない音声だけは従来どおり声量連動の中立口形へ戻る。瞬き、呼吸、小角度、髪の遅れは従来のメッシュリグと同じ描画ループで処理する。待機に加え、会話は小刻みな上下動、考え中は首傾げ、よろこびは弾む全身動作、困りは頭と体を沈める動作を使う。全身を足元支点で動かしてパーツ間の継ぎ目を保つ。`ParamArmClose`は左右の腕を肩支点から体へ寄せる比較調整だが、残余レイヤーに元の腕境界がある素材では残像になるため、LocalVTuberStudio形式の既定は原画保持の0とする。
+口はAivisの`audio_query`が返す各モーラの母音と長さを音声と同じ時間軸へ変換し、声量包絡線の`ParamMouthOpenY`と母音別の`ParamMouthForm`を同時に渡す。タイムラインが得られない音声だけは従来どおり声量連動の中立口形へ戻る。開眼は解析された原画の上下まぶた曲線を中央から18%広げ、細目の原画でも待機時を半目にしない。閉眼曲線と左右別の補間は維持する。瞬き、呼吸、小角度、髪の遅れは従来のメッシュリグと同じ描画ループで処理する。呼吸は全レイヤーの一体移動に加え、胴レイヤーの上胸部だけを端で0になる重みで約2.4原画px上下させ、首・袖・下腹の境界を保ったまま胸元の動きを読めるようにする。待機に加え、会話は小刻みな上下動、考え中は首傾げ、よろこびは弾む全身動作、困りは頭と体を沈める動作を使う。全身を足元支点で動かしてパーツ間の継ぎ目を保つ。`ParamArmClose`は左右の腕を肩支点から体へ寄せる比較調整だが、残余レイヤーに元の腕境界がある素材では残像になるため、LocalVTuberStudio形式の既定は原画保持の0とする。
 
 開発中のパックはリポジトリ直下をHTTP配信し、次でPicoAgent本番と同じ描画を確認できる。
 
