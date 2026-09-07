@@ -52,22 +52,30 @@
       if (!Array.isArray(point) || point.length !== 4 || !point.every(Number.isFinite)) throw new Error("まぶたの実測境界が不正です");
       const [x, top, bottom, closed] = point;
       const target = curve?.[index] ?? closed;
-      return [x, target + (top - target) * open, target + (bottom - target) * open, closed];
+      // 解析された原画の開眼幅をそのまま上限にすると、細目の原画では待機時まで
+      // 半目に見える。閉眼曲線は変えず、開眼側だけ中央から18%広げる。
+      const center = (top + bottom) / 2;
+      const openBoost = 1 + smoothstep(0.62, 1, open) * 0.18;
+      const openTop = center + (top - center) * openBoost;
+      const openBottom = center + (bottom - center) * openBoost;
+      return [x, target + (openTop - target) * open, target + (openBottom - target) * open, closed];
     });
   }
 
   function drawBlink(ctx, images, rig, side, openness, gazeX = 0, gazeY = 0) {
-    if (openness >= 1 && Math.abs(gazeX) < 0.001 && Math.abs(gazeY) < 0.001) return;
     const base = rig.layers[`${side}_eye_base`];
     const upper = rig.layers[`${side}_eyelid_upper`];
     const points = eyeAperture(base, openness);
     const draw = (name, layer) => ctx.drawImage(images.get(name), layer.texture_box[0], layer.texture_box[1]);
     ctx.save();
     if (openness <= 0.001 && images.has(`${side}_eye_closed`)) {
-      // 閉眼素材は矩形全体に補完色を持つ。source-overでは元の虹彩が透けるため、
-      // この局所矩形だけを置換する。顔全体のalphaは後段で原画値へ戻す。
-      ctx.globalCompositeOperation = "copy";
-      draw(`${side}_eye_closed`, rig.layers[`${side}_eye_closed`]);
+      // copy合成で局所画像を描くと、ブラウザ実装によっては描画矩形外の顔Canvasまで
+      // 透明黒へ置換される。後段のalpha復元でそのRGBが黒い顔ノイズになるため、
+      // 閉眼素材の範囲だけを明示的に消してから通常合成で置換する。
+      const closed = rig.layers[`${side}_eye_closed`];
+      const [left, top, right, bottom] = closed.texture_box;
+      ctx.clearRect(left, top, right - left, bottom - top);
+      draw(`${side}_eye_closed`, closed);
       ctx.restore();
       return;
     }
@@ -502,6 +510,7 @@
       const mouthOpen = Math.max(this.mouth, expression.mouthOpen);
       const mouthForm = this.mouth > 0.05 ? this.mouthForm : expression.mouthForm;
       const bodyPivot = anchors.bodyPivot || { cx: neck.cx, cy: this.rig.canvas[1] };
+      const torso = anchors.torso || { x0: 0, y0: neck.cy, x1: this.rig.canvas[0], y1: this.rig.canvas[1] };
       this.gazeX += (this.gazeTargetX - this.gazeX) * Math.min(1, dt * 8);
       this.gazeY += (this.gazeTargetY - this.gazeY) * Math.min(1, dt * 8);
       const targetAngleX = clamp(
@@ -514,6 +523,7 @@
       this.angleX += (targetAngleX - this.angleX) * Math.min(1, dt * 4.5);
       this.angleY += (targetAngleY - this.angleY) * Math.min(1, dt * 4.5);
       const breath = 0.5 + 0.5 * Math.sin(elapsed * Math.PI * 2 / 3.4);
+      const chestPulse = Math.sin(elapsed * Math.PI * 2 / 3.4);
       this.hairVelocity += (-this.hairPosition * 17 - this.hairVelocity * 5.4
         - (this.angleX - this.previousAngleX) * 7.5) * dt;
       this.hairPosition += this.hairVelocity * dt;
@@ -570,6 +580,21 @@
           }
           // 顔・首・襟・胴へ同じ呼吸移動を適用し、境界を開かせない。
           y -= breath * 2 * faceScale;
+
+          // 全身の横揺れを増やさず、上胸部だけに小さな吸気変形を加える。
+          // torso矩形の四辺では重みを0へ戻し、首・袖・下腹との継ぎ目を開かせない。
+          if (item.role === "torso") {
+            const torsoWidth = Math.max(1, torso.x1 - torso.x0);
+            const torsoHeight = Math.max(1, torso.y1 - torso.y0);
+            const horizontalWeight = Math.sin(Math.PI * clamp((originalX - torso.x0) / torsoWidth, 0, 1));
+            const verticalPosition = clamp((originalY - torso.y0) / torsoHeight, 0, 1);
+            const verticalWeight = verticalPosition < 0.58
+              ? Math.sin(Math.PI * verticalPosition / 0.58)
+              : 0;
+            const chestWeight = horizontalWeight * verticalWeight;
+            x = neck.cx + (x - neck.cx) * (1 + chestPulse * 0.004 * chestWeight);
+            y -= chestPulse * 2.4 * chestWeight;
+          }
 
           if (isHair) {
             const itemBox = item.textureBox || [item.x, item.y, item.w, item.h];
@@ -761,6 +786,7 @@
         eyeL: eyeAnchor("left"), eyeR: eyeAnchor("right"),
         mouth: { x0: mouth[0], y0: mouth[1], x1: mouth[2], y1: mouth[3], cx: (mouth[0] + mouth[2]) / 2, cy: (mouth[1] + mouth[3]) / 2 },
         neckPivot: { cx: (neck[0] + neck[2]) / 2, cy: neck[3] },
+        torso: { x0: torso[0], y0: torso[1], x1: torso[2], y1: torso[3] },
         bodyPivot: { cx: (torso[0] + torso[2]) / 2, cy: height },
         faceScale: Math.max(0.25, (face[2] - face[0]) / 300),
       },

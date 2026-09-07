@@ -1174,7 +1174,9 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   character.dataset.characterId = manifest.id;
   characterAssetVersion = assetVersion;
   character.dataset.bodyProportion = manifest.bodyProportion === "compact" ? "compact" : "standard";
-  character.dataset.sourceFraming = manifest.sourceFraming === "native-bust" ? "native-bust" : "default";
+  character.dataset.sourceFraming = ["native-bust", "native-full"].includes(manifest.sourceFraming)
+    ? manifest.sourceFraming
+    : "default";
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";

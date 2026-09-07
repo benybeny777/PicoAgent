@@ -936,6 +936,13 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   height:calc(var(--char-frame-height) * var(--stream-canvas-scale))!important;
   transform:translateX(-50%); transform-origin:50% 100%;
 }
+/* 全身原画の独自2.5Dは、全身絵向けの260%クロップを重ねない。原画の顔を
+   数倍へ引き伸ばすとぼけるため、Canvasを配信ステージの高さへ等倍で収める。 */
+.pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"][data-source-framing="native-full"] .character-view > canvas {
+  inset:0 auto auto 50%; left:50%; bottom:auto;
+  width:auto!important; height:100%!important;
+  transform:translateX(-50%); transform-origin:50% 0%;
+}
 [data-layout="stream"] .reply {
   position:relative; z-index:3; grid-column:1; grid-row:2 / span 2; min-height:88px; align-self:end;
   margin:0 12px 4px; padding:11px 22px; max-height:clamp(110px,18vh,170px);
