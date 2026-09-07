@@ -86,6 +86,12 @@
       "id": "photoreal-prototype",
       "manifest": "photoreal-prototype/character.json",
       "name": "実写・物理演算テスト"
+    },
+    {
+      "description": "LocalVTuberStudioで生成した独自2.5D形式の作業相棒。",
+      "id": "female-a-lvs",
+      "manifest": "female-a-lvs/character.json",
+      "name": "女性A"
     }
   ],
   "default": "mugi"

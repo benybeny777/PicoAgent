@@ -87,11 +87,12 @@ pub fn validate(source: &Path) -> Result<Value> {
     required_text(&manifest, "name")?;
 
     let live2d_model = manifest.pointer("/live2d/model").and_then(Value::as_str);
+    let mesh_rig = manifest.pointer("/meshRig/rig").and_then(Value::as_str);
     let idle_has_frames = manifest
         .pointer("/animations/idle")
         .is_some_and(animation_has_frames);
-    if live2d_model.is_none() && !idle_has_frames {
-        bail!("live2d.model または animations.idle の path / framePaths が必要です");
+    if live2d_model.is_none() && mesh_rig.is_none() && !idle_has_frames {
+        bail!("live2d.model、meshRig.rig、animations.idle のいずれかが必要です");
     }
     for pointer in ["/boot/sleeping", "/live2d/model", "/meshRig/rig"] {
         if let Some(relative) = manifest.pointer(pointer).and_then(Value::as_str) {
@@ -121,21 +122,107 @@ fn validate_mesh_rig(source: &Path, manifest: &Value) -> Result<()> {
             .with_context(|| format!("{} を読めません", rig_path.display()))?,
     )
     .context("meshRig.rig が不正なJSONです")?;
-    if rig.get("version").and_then(Value::as_u64) != Some(1)
-        || rig.get("mode").and_then(Value::as_str) != Some("single-sheet-grid-v1")
-    {
+    let version = rig.get("version").and_then(Value::as_u64);
+    let mode = rig.get("mode").and_then(Value::as_str);
+    let legacy =
+        version == Some(1) && matches!(mode, Some("single-sheet-grid-v1" | "layered-grid-v2"));
+    let anime25d = version == Some(2) && mode == Some("anime25d-v1");
+    let lvs_anime25d = rig.get("schema_version").and_then(Value::as_u64) == Some(3)
+        && rig.get("profile").and_then(Value::as_str) == Some("lvs-anime25d-v1")
+        && rig.get("eye_rig_version").and_then(Value::as_u64) == Some(3)
+        && rig.get("lip_rig_version").and_then(Value::as_u64) == Some(1)
+        && rig.get("scene_graph_version").and_then(Value::as_u64) == Some(1);
+    if !legacy && !anime25d && !lvs_anime25d {
         bail!("meshRig.rig の形式に対応していません");
     }
     let root = rig_path
         .parent()
         .context("meshRig.rig の親フォルダがありません")?;
-    let mut textures = vec![rig.get("base").and_then(Value::as_str).unwrap_or("")];
-    if let Some(drawables) = rig.get("drawables").and_then(Value::as_object) {
+    if lvs_anime25d {
+        let layers = rig
+            .get("layers")
+            .and_then(Value::as_object)
+            .context("lvs-anime25d-v1 の layers が不正です")?;
+        let graph = rig
+            .get("scene_graph")
+            .and_then(Value::as_array)
+            .filter(|items| items.len() >= 6)
+            .context("lvs-anime25d-v1 の scene_graph は6件以上必要です")?;
+        let mut names = graph
+            .iter()
+            .map(|item| {
+                item.get("layer")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .context("scene_graph.layer が不正です")
+            })
+            .collect::<Result<Vec<_>>>()?;
+        names.extend(
+            ["scene_face", "mouth_open", "mouth_closed"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        for side in ["left", "right"] {
+            names.extend(
+                [
+                    "eye_base",
+                    "eye_closed",
+                    "eyelid_upper",
+                    "eye_backplate",
+                    "eye_iris",
+                ]
+                .into_iter()
+                .map(|part| format!("{side}_{part}")),
+            );
+        }
+        names.sort();
+        names.dedup();
+        for name in names {
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+            {
+                bail!("lvs-anime25d-v1 の素材名が不正です: {name}");
+            }
+            let layer = layers
+                .get(&name)
+                .with_context(|| format!("lvs-anime25d-v1 の必須素材がありません: {name}"))?;
+            let expected_url = format!("/assets/rig2d/parts/{name}.png");
+            if layer.get("url").and_then(Value::as_str) != Some(expected_url.as_str()) {
+                bail!("lvs-anime25d-v1 の素材URLが不正です: {name}");
+            }
+            if !root.join("parts").join(format!("{name}.png")).is_file() {
+                bail!("meshRigのテクスチャがありません: parts/{name}.png");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut textures = Vec::new();
+    if legacy {
+        textures.push(rig.get("base").and_then(Value::as_str).unwrap_or(""));
+        if let Some(drawables) = rig.get("drawables").and_then(Value::as_object) {
+            textures.extend(
+                drawables
+                    .values()
+                    .filter_map(|item| item.get("texture").and_then(Value::as_str)),
+            );
+        }
+    } else {
+        let layers = rig
+            .get("layers")
+            .and_then(Value::as_array)
+            .filter(|layers| !layers.is_empty())
+            .context("anime25d-v1 の layers は1件以上必要です")?;
         textures.extend(
-            drawables
-                .values()
+            layers
+                .iter()
                 .filter_map(|item| item.get("texture").and_then(Value::as_str)),
         );
+        if textures.len() != layers.len() {
+            bail!("anime25d-v1 の全レイヤーに texture が必要です");
+        }
     }
     for texture in textures {
         if texture.is_empty()
@@ -710,6 +797,128 @@ mod tests {
         .unwrap();
         let error = validate(&dir).unwrap_err().to_string();
         assert!(error.contains("パスが不正"), "error: {error}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn anime25d単独パックとlayered_grid_v2を検証する() {
+        let dir = temp_dir("anime25d-rig");
+        std::fs::create_dir_all(dir.join("mesh-rig/parts")).unwrap();
+        std::fs::write(dir.join("mesh-rig/parts/face.png"), [0u8; 8]).unwrap();
+        std::fs::write(
+            dir.join("mesh-rig/rig.json"),
+            serde_json::to_string(&json!({
+                "version": 2,
+                "mode": "anime25d-v1",
+                "canvas": [1280, 1280],
+                "anchors": { "face": { "cx": 640, "cy": 180 } },
+                "layers": [{
+                    "name": "face", "texture": "parts/face.png",
+                    "textureBox": [570, 88, 136, 161]
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "anime25d", "name": "独自2.5D",
+                "meshRig": { "rig": "mesh-rig/rig.json" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        validate(&dir).expect("anime25d単独パックを拒否した");
+
+        std::fs::write(
+            dir.join("mesh-rig/rig.json"),
+            serde_json::to_string(&json!({
+                "version": 1,
+                "mode": "layered-grid-v2",
+                "base": "parts/face.png",
+                "drawables": {}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        validate(&dir).expect("UIが対応済みのlayered-grid-v2を拒否した");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn local_vtuber_studio_schema3を変換せず検証する() {
+        let dir = temp_dir("lvs-anime25d-rig");
+        std::fs::create_dir_all(dir.join("rig2d/parts")).unwrap();
+        let graph = [
+            ("scene_residual", "residual"),
+            ("scene_torso", "torso"),
+            ("scene_left_arm", "left_arm"),
+            ("scene_right_arm", "right_arm"),
+            ("scene_neck", "neck"),
+            ("scene_face", "face"),
+            ("scene_hair", "hair"),
+        ];
+        let mut names = graph
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect::<Vec<_>>();
+        names.extend(
+            ["mouth_open", "mouth_closed"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        for side in ["left", "right"] {
+            names.extend(
+                [
+                    "eye_base",
+                    "eye_closed",
+                    "eyelid_upper",
+                    "eye_backplate",
+                    "eye_iris",
+                ]
+                .into_iter()
+                .map(|part| format!("{side}_{part}")),
+            );
+        }
+        let mut layers = serde_json::Map::new();
+        for name in names {
+            std::fs::write(
+                dir.join("rig2d/parts").join(format!("{name}.png")),
+                [0u8; 8],
+            )
+            .unwrap();
+            layers.insert(
+                name.clone(),
+                json!({ "url": format!("/assets/rig2d/parts/{name}.png") }),
+            );
+        }
+        std::fs::write(
+            dir.join("rig2d/rig.json"),
+            serde_json::to_string(&json!({
+                "schema_version": 3,
+                "profile": "lvs-anime25d-v1",
+                "eye_rig_version": 3,
+                "lip_rig_version": 1,
+                "scene_graph_version": 1,
+                "scene_graph": graph.iter().map(|(layer, role)| json!({ "layer": layer, "role": role })).collect::<Vec<_>>(),
+                "layers": layers
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            serde_json::to_string(&json!({
+                "id": "lvs-anime25d", "name": "LocalVTuberStudio直接取込",
+                "meshRig": { "rig": "rig2d/rig.json" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        validate(&dir).expect("LocalVTuberStudio schema 3を拒否した");
         std::fs::remove_dir_all(&dir).ok();
     }
 

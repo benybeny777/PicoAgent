@@ -13,6 +13,8 @@ PicoAgent のキャラクター画像は、各キャラフォルダを同じ構�
 Live2D キャラ（`character.json` に `live2d` を持つキャラ）は本ページの連番フレーム構成を使わない。
 末尾の「Live2D キャラクター」を参照。
 
+LocalVTuberStudioの独自2.5Dキャラは、同製品が出力した`rig2d/rig.json`（`schema_version: 3`、`profile: lvs-anime25d-v1`）と`rig2d/parts/*.png`を変換せず配置し、`character.json`の`meshRig.rig`を`rig2d/rig.json`へ向ける。PicoAgentは`scene_graph`、目の実測開口、唇の分割境界を直接読み、PIXIで描画する。`preview.png`は一覧とリグを使えない表示形式の静止画に使う。Live2D定義は併存でき、削除しない。
+
 
 ## 必須ファイル
 

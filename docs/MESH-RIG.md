@@ -1,10 +1,30 @@
-# メッシュ変形リグ（疑似Live2D v2）設計
+# メッシュ変形リグ（独自2.5D）設計
 
 同梱の通常2Dキャラを、差分絵の差し替えではなく連続パラメータによるメッシュ変形で動かすための設計書。現行仕様は [SPEC.md](../SPEC.md)、素材の制作手順は [CHARACTER-ASSET-WORKFLOW.md](CHARACTER-ASSET-WORKFLOW.md)、未完了条件だけは [TASKS.md](TASKS.md) を正本とする。
 
 最初の対象はセナとして検証し、その後にLive2D以外の同梱通常2D 8体へ適用した。各体は原画座標の胴、後ろ髪、左右腕、顔、前髪を制作正本として持つ。
 
 2026年8月27日に第1実装、2026年8月28日に左右視線と`layered-grid-v2`を完成した。PIXIの独立取得、半目・閉眼・開口・左右視線・感情の局所補間、連続した頭部・左右腕・呼吸・髪の遅れ、既存差分絵への安全な退避を8体へ適用している。むぎと実写は1画素の相対移動でも髪の分離線が見えるため髪を頭部へ追従させ、まいは手が顔境界へ重なるため顔の平行移動だけを固定する。
+
+2026年9月7日に、LocalVTuberStudioの現行`lvs-anime25d-v1` schema 3を変換せず直接読む経路を追加した。これはLive2D対応を置き換えず、同じキャラクター選択・音声・描画枠へ並行して載る独自2.5D形式である。Cubism SDK・`.moc3`・Editorは不要で、PicoAgent既存のPIXI 6.5.10描画層を使う。旧PoCの`anime25d-v1` version 2も互換用に残す。
+
+## LocalVTuberStudioの独自2.5D形式
+
+正規入力はLocalVTuberStudioが出力した`schema_version: 3`、`profile: "lvs-anime25d-v1"`の`rig2d/rig.json`と`rig2d/parts/*.png`である。PicoAgent側で中間リグへ変換せず、`scene_graph`、実測した`eye_aperture`、`lip_seam`、`texture_box`を直接検証・描画する。PSDを実行時に解析せず、生成時に原寸で切り詰めたPNGパーツだけを読む。
+
+同梱例`female-a-lvs`は、LocalVTuberStudioで利用者が合格とした女性Aの`rig2d/`をそのまま保持する。キャラクターパックへ追加するときは`character.json`の`meshRig.rig`を`rig2d/rig.json`へ向ける。素材URLはLocalVTuberStudio正規形`/assets/rig2d/parts/<名前>.png`のまま保持し、PicoAgentはパック内の`rig2d/parts/`へ安全に解決する。
+
+口はAivisの`audio_query`が返す各モーラの母音と長さを音声と同じ時間軸へ変換し、声量包絡線の`ParamMouthOpenY`と母音別の`ParamMouthForm`を同時に渡す。タイムラインが得られない音声だけは従来どおり声量連動の中立口形へ戻る。瞬き、呼吸、小角度、髪の遅れは従来のメッシュリグと同じ描画ループで処理する。待機に加え、会話は小刻みな上下動、考え中は首傾げ、よろこびは弾む全身動作、困りは頭と体を沈める動作を使う。全身を足元支点で動かしてパーツ間の継ぎ目を保つ。`ParamArmClose`は左右の腕を肩支点から体へ寄せる比較調整だが、残余レイヤーに元の腕境界がある素材では残像になるため、LocalVTuberStudio形式の既定は原画保持の0とする。
+
+開発中のパックはリポジトリ直下をHTTP配信し、次でPicoAgent本番と同じ描画を確認できる。
+
+```powershell
+uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
+```
+
+`http://127.0.0.1:8776/tools/mesh-rig-preview/?character=female-a`を開く。画面は女性A、むぎ、実写テストを選択でき、立ち絵原画と実描画を並べる。独自2.5Dでは左右別閉眼、視線の上下左右、閉口と5母音、通常・笑顔・困り顔・考え顔・寝顔、待機・会話・考え中・よろこび・困り・聞く・起きる・眠る、腕寄せを個別または自動で確認できる。首境界を保つため、頭・首・襟を別々に平行移動・回転させず、全レイヤーへ同じ呼吸と全身動作を適用する。目・口を表情に応じて局所変形する。旧`layered-grid-v2`の実写テストでは両目共通の瞬きと視線、既存の表情差分を確認し、非対応の左右別閉眼と腕寄せは無効表示にする。`view=full`を付けると腕の全身確認になる。市松・黒・白背景を切り替えられ、幅760 px以下では原画と実描画を縦並びにする。同じLANのスマートフォンからは`127.0.0.1`をこのPCのIPv4アドレスへ置き換える。`temp/`のパックと証跡はGitへ含めない。
+
+女性Aは2026年9月7日にLocalVTuberStudio側でまばたき、口形、首・胴の接続、控えめな待機動作を再確認し、利用者が今回の品質として合格にした世代を採用した。旧Anime2.5DRig向けPoCパックは確認画面と同梱対象から外した。
 
 ## 分離原画形式
 
@@ -146,7 +166,8 @@ characters/<id>/
 | `ParamEyeBallX` / `Y` | -1..1 | 0 | カーソル追従 |
 | `ParamBrowLY` / `RY` | -1..1 | 0 | `character.dataset.motion` |
 | `ParamMouthOpenY` | 0..1 | 0 | `rigMouthLevel`（リップシンクの包絡線） |
-| `ParamMouthForm` | -1..1 | 0 | `character.dataset.motion` |
+| `ParamMouthForm` | -1..1 | 0 | Aivis母音タイムライン（無い場合は0） |
+| `ParamArmClose` | 0..1 | リグ既定値（旧`anime25d-v1`は0.72） | 生成時の既定姿勢 |
 | `ParamBreath` | 0..1 | 0 | 正弦（周期約3.8秒） |
 | `ParamHairFront` / `Side` / `Back` | -1..1 | 0 | 物理演算の出力 |
 

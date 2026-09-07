@@ -1153,7 +1153,11 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
-  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("Live2D、idleアニメーションのいずれも定義されていません");
+  const hasAnyMeshRig = Boolean(manifest.meshRig?.rig)
+    || (Array.isArray(manifest.variants) && manifest.variants.some(item => item?.meshRig?.rig));
+  if (!hasAnyLive2d && !hasAnyMeshRig && !manifest.animations?.idle) {
+    throw new Error("Live2D、メッシュリグ、idleアニメーションのいずれも定義されていません");
+  }
   const profile = personaText(manifest, overrides[manifest.id]);
   // 同じキャラの再読込で早期 return する場合も含め、照合表は必ず現在の人格へ合わせる。
   setPersonaSpeechBlocklist(profile);
@@ -1204,10 +1208,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   } else {
     stopLive2D();
     preloadAnimations();
-    await probeRigLayers(); // layers 素材があればリップシンク対応
     if (activeMeshRigConfig?.rig) {
       try {
         await prepareMeshRig(activeMeshRigConfig);
+        rigAvailable = true;
       } catch (error) {
         destroyMeshRig();
         activeMeshRigConfig = null;
@@ -1215,6 +1219,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
         setStatus("高品質リグを読み込めないので差分絵表示で続けるね");
       }
     }
+    if (!meshRigController) await probeRigLayers(); // layers 素材があればリップシンク対応
   }
   applyCharacterFraming();
   frame = 0;
@@ -1286,10 +1291,9 @@ function setAnimation(name, force = false) {
   animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   wakeAnimationLoop();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
-  if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   // 待機・会話・思考中は同じキャンバスを保つ。thinkingだけ差分絵へ切り替えると、
   // 配信表示のフレーミング差でキャラクター全体が拡縮して見える。
-  const meshMotion = animationName === "idle" || animationName === "thinking" || animationName === "talking";
+  const meshMotion = Boolean(meshRigController);
   if (meshRigController && meshMotion && meshRigCanRender()) {
     setMeshRigVisible(true);
     character.dataset.motion = requestedMotion;
@@ -1297,6 +1301,7 @@ function setAnimation(name, force = false) {
     startRig();
     return;
   }
+  if (!animations[animationName]) return; // 単独メッシュリグやLive2D初期化失敗後はフレーム定義が無い
   setMeshRigVisible(false);
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
@@ -1381,11 +1386,13 @@ let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
+let rigMouthForm = 0; // Aivisの母音タイムラインから得る横幅・丸み（-1〜1）
 const RIG_MOUTH_OPEN_THRESHOLD = 0.34;
 const RIG_MOUTH_CLOSE_THRESHOLD = 0.22;
 const RIG_BLINK_TIMINGS = Object.freeze({
-  normal: Object.freeze({ closing: 60, closed: 80, opening: 170 }),
-  sleepy: Object.freeze({ closing: 130, closed: 260, opening: 300 }),
+  // LocalVTuberStudioの合格画面と同じ650ms。閉眼を220ms保持し、低fpsでも必ず見せる。
+  normal: Object.freeze({ closing: 180, closed: 220, opening: 250 }),
+  sleepy: Object.freeze({ closing: 220, closed: 360, opening: 320 }),
 });
 
 function quantizeRigMouthOpen(level, wasOpen) {
@@ -1444,7 +1451,7 @@ async function probeRigLayers() {
 function rigRefresh() {
   if (!rigActive) return;
   if (meshRigActive && meshRigController) {
-    meshRigController.setMouth(rigMouthLevel || (rigMouthOpen ? 0.58 : 0));
+    meshRigController.setMouth(rigMouthLevel || (rigMouthOpen ? 0.58 : 0), rigMouthForm);
     meshRigController.setGaze(rigLookDirection, 0);
     meshRigController.setMotion(character.dataset.motion || animationName);
     return;
@@ -1492,7 +1499,10 @@ function scheduleBlink() {
     if (!rigActive) return;
     const step = (phase, ms, meshTarget) => new Promise(resolve => {
       rigBlinkPhase = phase;
-      if (meshRigActive) meshRigController?.setBlink(meshTarget, ms);
+      if (meshRigActive) {
+        if (phase === "blink_closed") meshRigController?.setEyeOpen(0, 0);
+        else meshRigController?.setBlink(meshTarget, ms);
+      }
       rigRefresh();
       rigBlinkStepTimer = setTimeout(() => {
         rigBlinkStepTimer = 0;
@@ -1526,6 +1536,7 @@ function detachLipSyncAudio() {
   rigSource = null;
   rigAnalyser = null;
   rigMouthLevel = 0;
+  rigMouthForm = 0;
   rigMouthOpen = false;
   live2dMouth = -1;
   rigRefresh();
@@ -1600,6 +1611,7 @@ function attachLipSync(audio) {
         return;
       }
       rigMouthOpen = !rigMouthOpen;
+      rigMouthForm = mouthFormAt(audio.currentTime, audio.picoLipSync);
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
       if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
@@ -1634,6 +1646,8 @@ function attachLipSync(audio) {
     const smoothing = desired > rigMouthLevel ? 0.34 : 0.16;
     rigMouthLevel += (desired - rigMouthLevel) * smoothing;
     if (rigMouthLevel < 0.015) rigMouthLevel = 0;
+    const formTarget = mouthFormAt(audio.currentTime, audio.picoLipSync);
+    rigMouthForm += (formTarget - rigMouthForm) * Math.min(1, 0.42 + target * 0.25);
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
     } else {
@@ -1645,6 +1659,13 @@ function attachLipSync(audio) {
     rigVolFrame = requestAnimationFrame(analyserLoop);
   };
   rigVolFrame = requestAnimationFrame(analyserLoop);
+}
+
+function mouthFormAt(currentTime, timeline) {
+  if (!Array.isArray(timeline) || timeline.length === 0) return 0;
+  const time = Number(currentTime) || 0;
+  const segment = timeline.find(item => time >= Number(item.start) && time < Number(item.end));
+  return Math.max(-1, Math.min(1, Number(segment?.form) || 0));
 }
 
 // リグ描画を開始する（既に動作中なら何もしない。口は閉じ・まばたき開始）。
@@ -2944,6 +2965,7 @@ function playPreparedSpeech(result) {
   const bytes = new Uint8Array(result.audio);
   const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
   const audio = new Audio(url);
+  audio.picoLipSync = result.lipSync || [];
   currentVoice = audio;
   audio.volume = voiceVolume;
   audio.addEventListener("ended", () => {
@@ -3041,6 +3063,7 @@ function playChunkAndWait(result, session) {
     const bytes = new Uint8Array(result.audio);
     const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
     const audio = new Audio(url);
+    audio.picoLipSync = result.lipSync || [];
     currentVoice = audio;
     audio.volume = voiceVolume;
     let settled = false;
@@ -5096,6 +5119,7 @@ function applyVoiceVolume(value) {
   if (currentVoice) currentVoice.volume = voiceVolume;
   if (voiceVolume <= 0.001) {
     rigMouthLevel = 0;
+    rigMouthForm = 0;
     rigMouthOpen = false;
     live2dMouth = 0;
     rigRefresh();
