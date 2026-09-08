@@ -7,12 +7,17 @@ const preview = readFileSync(
   "utf8",
 );
 const renderer = readFileSync(new URL("../../ui/mesh-rig.js", import.meta.url), "utf8");
+const appRenderer = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
 
-test("確認画面はA・むぎ・実写を本番メッシュ描画で切り替える", () => {
+test("確認画面はA・むぎ2種・実写を本番メッシュ描画で切り替える", () => {
   assert.match(preview, /value="female-a"/);
   assert.match(preview, /value="mugi"/);
+  assert.match(preview, /value="mugi">むぎ（SD）<\/option>/);
+  assert.match(preview, /value="mugi-normal">むぎ（通常頭身）<\/option>/);
   assert.match(preview, /value="photoreal"/);
   assert.match(preview, /characters\/female-a-lvs/);
+  assert.match(preview, /characters\/mugi/);
+  assert.match(preview, /characters\/mugi-normal-lvs/);
   assert.match(preview, /characters\/photoreal-prototype/);
   assert.doesNotMatch(preview, /品質NG: 現在の生成PSD/);
   assert.match(preview, /window\.PicoMeshRig\.create/);
@@ -43,14 +48,41 @@ test("確認画面は目・視線・5母音・表情・全動作・腕の操作�
   assert.match(preview, /data-wink="R"/);
   assert.match(preview, /id="gazeX"/);
   assert.match(preview, /id="gazeY"/);
-  for (const label of ["あ", "い", "う", "え", "お", "笑顔", "困り顔", "考え顔", "寝顔", "聞く", "起きる", "眠る"]) {
+  for (const label of ["あ", "い", "う", "え", "お", "笑顔", "困り顔", "考え顔", "照れ", "聞く", "起きる", "眠る"]) {
     assert.ok(preview.includes(`>${label}<`), `${label}の確認操作が必要です`);
   }
   assert.match(preview, /id="arm"/);
   assert.match(renderer, /setEyeOpen\(left, right = left\)/);
   assert.match(renderer, /apertureWidth \* 0\.08/);
   assert.match(renderer, /setExpression\(name\)/);
+  for (const expression of ["happy", "concern", "thinking"]) {
+    assert.match(
+      renderer,
+      new RegExp(`this\\.expression === "${expression}"[\\s\\S]{0,120}return \\{ eye: 1,`),
+      `${expression}は表情選択だけで半目にしない`,
+    );
+  }
+  assert.match(renderer, /this\.expression === "sleep"[\s\S]{0,120}return \{ eye: 0\.04,/, "寝顔だけは閉眼を保つ");
+  assert.match(renderer, /this\.expression === "shy"[\s\S]{0,160}blush: 1/, "照れ表情は開眼と頬染めを使う");
+  assert.match(renderer, /const eyeOpen = this\.eyeOpen \* expression\.eye;/, "旧2.5Dでも寝顔の閉眼係数を適用する");
+  assert.match(renderer, /this\.rig\.expressionSadMode !== "disabled"/, "不自然な旧悲しみ差分をパック設定で無効化できる");
   assert.match(preview, /controller\.setEyeOpen\(0, 0\); await wait\(220\)/, "完全閉眼を保持する");
+});
+
+test("実画面検査は全表情と全動作を記録する", () => {
+  const checker = readFileSync(new URL("../check-lvs-character.mjs", import.meta.url), "utf8");
+  assert.match(checker, /expressions: \[\]/);
+  assert.match(checker, /motions: \[\]/);
+  assert.match(checker, /captureUrl\.searchParams\.set\("autoBlink", "off"\)/);
+  assert.match(preview, /query\.get\("autoBlink"\) !== "off"/);
+  assert.match(preview, /manifest\.meshRig\.assetVersion \|\| manifest\.assetVersion/);
+  assert.match(appRenderer, /assetVersion: cfg\.assetVersion \|\| characterAssetVersion/);
+  assert.match(renderer, /createBlushOverlay\(app, rig, originX, originY, textureFit\)/);
+  for (const label of ["通常", "笑顔", "困り顔", "考え顔", "照れ", "待機", "会話", "考え中", "よろこび", "困り", "聞く", "起きる", "眠る"]) {
+    assert.ok(checker.includes(`"${label}"`), `${label}を実画面検査へ含める`);
+  }
+  assert.match(checker, /report\.unique\.expressions < 5/);
+  assert.match(checker, /report\.unique\.motions < 6/);
 });
 
 test("キャラクター切替では破棄されたcanvasを再利用しない", () => {

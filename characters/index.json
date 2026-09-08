@@ -92,6 +92,12 @@
       "id": "female-a-lvs",
       "manifest": "female-a-lvs/character.json",
       "name": "女性A"
+    },
+    {
+      "description": "むぎの通常頭身立ち絵をLocalVTuberStudioで生成した独自2.5D作業相棒。",
+      "id": "mugi-normal-lvs",
+      "manifest": "mugi-normal-lvs/character.json",
+      "name": "むぎ（通常頭身）"
     }
   ],
   "default": "mugi"

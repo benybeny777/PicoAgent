@@ -55,6 +55,12 @@ uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
 | `ParamMouthOpenY` | 0 / 1 | `mouth_closed` / `mouth_open` の口領域 |
 | `ParamMouthForm` | -1 / +1 | `expression_sad` / `expression_happy` の口・眉領域 |
 
+旧2D素材の悲しみ差分が半目だけで困り顔として成立しない場合は、`mesh-rig/source/regions.json`へ
+`expressionSadMode: "disabled"`を指定する。生成された`rig.json`へ同値を引き継ぎ、通常の開眼を保つ。
+未指定時は既存互換の`layer`とし、寝顔の閉眼は悲しみ差分ではなく`blink_closed`で描画する。
+生成時はリグJSONと全パーツの内容から`meshRig.assetVersion`を作り、通常2Dフレームとは独立して
+ブラウザキャッシュを更新する。リグだけを更新して旧描画が残る状態を許可しない。
+
 生成した`gaze_left` / `gaze_right`は目領域だけを含む局所テクスチャで、頭と身体を固定したまま連続補間する。閉眼中は重ねず、半目から開眼へ戻る区間でだけ滑らかに復帰する。
 
 部位ごとに手法を使い分ける。**まぶたが現れる目の開閉のように、形状変化がテクスチャ補間でしか表現できないものと、頭の向きのようにメッシュ変形でしか表現できないものを混ぜない。**

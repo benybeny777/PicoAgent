@@ -1767,7 +1767,7 @@ async function prepareMeshRig(cfg) {
     canvas: meshRigCanvas,
     rigUrl: `${characterRoot}/${rigPath}`,
     rootUrl: `${characterRoot}/${rigRoot}`,
-    assetVersion: characterAssetVersion,
+    assetVersion: cfg.assetVersion || characterAssetVersion,
     width: LIVE2D_RENDER_WIDTH,
     height: LIVE2D_RENDER_HEIGHT,
   });

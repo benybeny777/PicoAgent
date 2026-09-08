@@ -9,6 +9,8 @@ if (!playwrightModule) throw new Error("PICO_PLAYWRIGHT_MODULE にPlaywrightのi
 const { chromium } = await import(pathToFileURL(playwrightModule).href);
 const output = path.resolve(process.argv[2] || "temp/pico-lvs-check");
 const url = process.argv[3] || "http://127.0.0.1:8776/tools/mesh-rig-preview/?character=female-a";
+const captureUrl = new URL(url);
+captureUrl.searchParams.set("autoBlink", "off");
 await mkdir(output, { recursive: true });
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -24,9 +26,9 @@ const capture = async name => {
   return { name, bytes: bytes.length, sha256: sha256(bytes) };
 };
 
-const report = { url, mouth: [], blink: [], gaze: [], idle: [], errors };
+const report = { url: captureUrl.href, mouth: [], blink: [], gaze: [], expressions: [], motions: [], idle: [], errors };
 try {
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(captureUrl.href, { waitUntil: "networkidle" });
   await page.waitForFunction(() => document.querySelector("#runtime")?.dataset.meshRig === "ready");
   const status = await page.locator("#status").textContent();
   if (status?.includes("失敗")) throw new Error(status);
@@ -63,7 +65,20 @@ try {
     await page.waitForTimeout(420);
     report.gaze.push(await capture(`gaze-${name}`));
   }
+  await page.getByRole("button", { name: "視線を中央へ", exact: true }).click();
+  for (const [name, label] of [["neutral", "通常"], ["happy", "笑顔"], ["concern", "困り顔"], ["thinking", "考え顔"], ["shy", "照れ"]]) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await page.waitForTimeout(220);
+    report.expressions.push(await capture(`expression-${name}`));
+  }
+  await page.getByRole("button", { name: "通常", exact: true }).click();
+  for (const [name, label] of [["idle", "待機"], ["talking", "会話"], ["thinking", "考え中"], ["success", "よろこび"], ["concern", "困り"], ["listen", "聞く"], ["wake", "起きる"], ["sleep", "眠る"]]) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await page.waitForTimeout(420);
+    report.motions.push(await capture(`motion-${name}`));
+  }
   await page.getByRole("button", { name: "閉口", exact: true }).click();
+  await page.getByRole("button", { name: "通常", exact: true }).click();
   await page.getByRole("button", { name: "待機", exact: true }).click();
   for (let index = 0; index < 5; index += 1) {
     await page.waitForTimeout(260);
@@ -74,11 +89,19 @@ try {
     mouth: unique(report.mouth),
     blink: unique(report.blink),
     gaze: unique(report.gaze),
+    expressions: unique(report.expressions),
+    motions: unique(report.motions),
     idle: unique(report.idle),
   };
   if (report.unique.mouth < 5) throw new Error(`母音の描画差分が不足しています: ${report.unique.mouth}`);
   if (report.unique.blink < 3) throw new Error(`まばたきの描画差分が不足しています: ${report.unique.blink}`);
   if (report.unique.gaze < 4) throw new Error(`視線の描画差分が不足しています: ${report.unique.gaze}`);
+  if (/[?&]character=(?:female-a|mugi|mugi-normal)(?:&|$)/.test(captureUrl.href) && report.unique.expressions < 5) {
+    throw new Error(`表情の描画差分が不足しています: ${report.unique.expressions}`);
+  }
+  if (/[?&]character=(?:female-a|mugi|mugi-normal)(?:&|$)/.test(captureUrl.href) && report.unique.motions < 6) {
+    throw new Error(`動作の描画差分が不足しています: ${report.unique.motions}`);
+  }
   if (report.unique.idle < 3) throw new Error(`待機動作の描画差分が不足しています: ${report.unique.idle}`);
   if (errors.length) throw new Error(errors.join("\n"));
 } finally {
