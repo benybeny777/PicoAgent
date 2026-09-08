@@ -316,7 +316,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
 - **通常2Dの局所二次動作** — `character.json` の `secondaryMotion` で胸元の範囲と強さをキャラ別に指定し、全身呼吸とは別の遅れた動きを付けられる。Live2Dは不要で、動きを減らすOS設定では停止する
-- **LocalVTuberStudio独自2.5D** — 現行`lvs-anime25d-v1` schema 3を変換せず読み、原寸の分離パーツをPIXIで瞬き・呼吸・小角度・髪揺れ・腕寄せへ連続描画する。待機・会話・考え中・よろこび・困りでは、頭と全身を小さく連動させる。Aivisの母音時間から`MouthOpenY × MouthForm`を駆動し「あ・い・う・え・お」を分ける。Live2D対応は従来どおり残り、キャラクターごとに選べる
+- **LocalVTuberStudio独自2.5D** — 現行`lvs-anime25d-v1` schema 3を変換せず読み、原寸の分離パーツをPIXIで瞬き・呼吸・小角度・髪揺れ・腕寄せへ連続描画する。待機・会話・考え中・よろこび・困りでは、頭と全身を小さく連動させる。Aivisの母音時間から`MouthOpenY × MouthForm`を駆動し「あ・い・う・え・お」を分ける。同梱むぎは`characters/mugi/rig2d/`へ同形式の成果物をそのまま配置しており、キャラ固有の変換コードを持たない。Live2D対応は従来どおり残り、キャラクターごとに選べる
 - **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。Cubism Editor 5.3互換の公式CoreでCubism 4／5モデルを読み込み、まばたき・モーション・声量連動の口パクを行う。視線追従は既定OFFで、設定から有効にした場合だけ顔付近のマウスへ控えめに追従する。サンプルモデルは同梱・自動取得せず、利用者が配布元の条件を確認して取得したzip／フォルダを設定画面から追加する。**2D と Live2D の見た目は[キャラクター](#-キャラクター)で見比べられます**
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 - **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
@@ -338,7 +338,7 @@ uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
 - 同じLANのスマホ: `http://<このPCのIPv4アドレス>:8776/tools/mesh-rig-preview/`
 - IPv4確認: `Get-NetIPAddress -AddressFamily IPv4 | Where-Object IPAddress -NotLike '127.*'`
 
-確認用スクリーンショットは`temp/`だけに置き、Gitへ含めない。女性AはLocalVTuberStudioで合格にした現行schema 3の同梱パック`characters/female-a-lvs`を読み、PicoAgent側の変換済みコピーを作らない。実写テストは`characters/photoreal-prototype`、むぎは互換確認用の旧PoCパックを読む。旧形式では左右別閉眼と腕寄せを無効表示にする。
+確認用スクリーンショットは`temp/`だけに置き、Gitへ含めない。女性AはLocalVTuberStudioで合格にした現行schema 3の同梱パック`characters/female-a-lvs`、実写テストは`characters/photoreal-prototype`を読む。むぎは同梱パック`characters/mugi/rig2d/`の現行schema 3を読み、人格・音声・従来の通常2D素材を保ったまま独自2.5D描画を優先する。別キャラも`rig.json`と参照先PNGを同じ配置規則で持ち込めばよく、PicoAgent専用の画像変換は行わない。旧形式では左右別閉眼と腕寄せを無効表示にする。
 
 ### スキル（一部）
 
