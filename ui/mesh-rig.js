@@ -43,6 +43,32 @@
     });
   }
 
+  function validateLvsSecondaryMotion(sourceRig) {
+    const version = sourceRig.secondary_motion_version;
+    const profile = sourceRig.secondary_motion;
+    if (version === undefined && profile === undefined) return null;
+    const hair = profile?.hair;
+    if (version !== 1 || hair?.role !== "hair"
+      || !Number.isFinite(hair.frequency_hz) || hair.frequency_hz < 0.2 || hair.frequency_hz > 8
+      || !Number.isFinite(hair.damping_ratio) || hair.damping_ratio < 0.2 || hair.damping_ratio > 2
+      || !Number.isFinite(hair.strength) || hair.strength < 0 || hair.strength > 2) {
+      throw new Error("LocalVTuberStudioの髪物理定義が不正です");
+    }
+    return hair;
+  }
+
+  function springStep(current, target, elapsedSeconds, frequencyHz, dampingRatio) {
+    let value = current.value, velocity = current.velocity, remaining = Math.min(elapsedSeconds, 0.1);
+    const omega = 2 * Math.PI * frequencyHz;
+    while (remaining > 0) {
+      const dt = Math.min(remaining, 0.01);
+      velocity += ((target - value) * omega * omega - 2 * dampingRatio * omega * velocity) * dt;
+      value += velocity * dt;
+      remaining -= dt;
+    }
+    return { value, velocity };
+  }
+
   function eyeAperture(layer, openness) {
     const aperture = layer?.eye_aperture;
     if (!Array.isArray(aperture) || aperture.length < 2) throw new Error("まぶたの実測境界がありません");
@@ -68,17 +94,6 @@
     const points = eyeAperture(base, openness);
     const draw = (name, layer) => ctx.drawImage(images.get(name), layer.texture_box[0], layer.texture_box[1]);
     ctx.save();
-    if (openness <= 0.001 && images.has(`${side}_eye_closed`)) {
-      // copy合成で局所画像を描くと、ブラウザ実装によっては描画矩形外の顔Canvasまで
-      // 透明黒へ置換される。後段のalpha復元でそのRGBが黒い顔ノイズになるため、
-      // 閉眼素材の範囲だけを明示的に消してから通常合成で置換する。
-      const closed = rig.layers[`${side}_eye_closed`];
-      const [left, top, right, bottom] = closed.texture_box;
-      ctx.clearRect(left, top, right - left, bottom - top);
-      draw(`${side}_eye_closed`, closed);
-      ctx.restore();
-      return;
-    }
     draw(`${side}_eye_base`, base);
     if (openness > 0) {
       ctx.save();
@@ -275,6 +290,7 @@
       this.previousAngleX = 0;
       this.hairPosition = 0;
       this.hairVelocity = 0;
+      this.secondaryHair = rig.secondaryMotion?.hair || null;
       this.motion = "idle";
       this.expression = "neutral";
       this.motionStartedAt = performance.now();
@@ -524,9 +540,22 @@
       this.angleY += (targetAngleY - this.angleY) * Math.min(1, dt * 4.5);
       const breath = 0.5 + 0.5 * Math.sin(elapsed * Math.PI * 2 / 3.4);
       const chestPulse = Math.sin(elapsed * Math.PI * 2 / 3.4);
-      this.hairVelocity += (-this.hairPosition * 17 - this.hairVelocity * 5.4
-        - (this.angleX - this.previousAngleX) * 7.5) * dt;
-      this.hairPosition += this.hairVelocity * dt;
+      if (this.secondaryHair) {
+        const next = springStep(
+          { value: this.hairPosition, velocity: this.hairVelocity },
+          this.angleX,
+          dt,
+          this.secondaryHair.frequency_hz,
+          this.secondaryHair.damping_ratio,
+        );
+        this.hairPosition = next.value;
+        this.hairVelocity = next.velocity;
+      } else {
+        // フォールバック許可: 物理定義を持たない既存リグは従来の髪追従を保つ。
+        this.hairVelocity += (-this.hairPosition * 17 - this.hairVelocity * 5.4
+          - (this.angleX - this.previousAngleX) * 7.5) * dt;
+        this.hairPosition += this.hairVelocity * dt;
+      }
       const mouthHalfWidth = Math.max(4, (mouth.x1 - mouth.x0) / 2);
 
       for (const entry of this.planes.values()) {
@@ -601,8 +630,13 @@
             const rootY = Math.min(...(item.strands || []).map(strand => strand.rootY), itemBox[1]);
             const tipY = Math.max(...(item.strands || []).map(strand => strand.tipY), itemBox[1] + itemBox[3]);
             const weight = Math.pow(clamp((originalY - rootY) / Math.max(1, tipY - rootY), 0, 1), 1.8);
-            x += this.hairPosition * weight * (name === "front hair" ? 3.2 : 4.4);
-            y += Math.abs(this.hairPosition) * weight * 0.28;
+            if (this.secondaryHair) {
+              x += this.hairPosition * this.secondaryHair.strength * this.rig.canvas[0] * 0.0022 * weight;
+              y += Math.abs(this.hairPosition) * this.secondaryHair.strength * this.rig.canvas[1] * 0.00035 * weight;
+            } else {
+              x += this.hairPosition * weight * (name === "front hair" ? 3.2 : 4.4);
+              y += Math.abs(this.hairPosition) * weight * 0.28;
+            }
           }
 
           if (isArm && this.armClose > 0) {
@@ -732,6 +766,7 @@
     const width = Number(sourceRig.canvas?.width), height = Number(sourceRig.canvas?.height);
     if (!(width > 0 && height > 0)) throw new Error("LocalVTuberStudioリグのキャンバス寸法が不正です");
     const graph = sourceRig.scene_graph;
+    const secondaryHair = validateLvsSecondaryMotion(sourceRig);
     if (!Array.isArray(graph) || graph.length < 6 || !graph.some(item => item.role === "face")) {
       throw new Error("LocalVTuberStudioリグの独立部位構造が不正です");
     }
@@ -781,6 +816,7 @@
       canvas: [width, height],
       contentBox: sourceRig.layers.neutral?.bbox || [0, 0, width, height],
       sourceRig,
+      secondaryMotion: secondaryHair ? { hair: secondaryHair } : null,
       anchors: {
         face: { x0: face[0], y0: face[1], x1: face[2], y1: face[3], cx: (face[0] + face[2]) / 2, cy: (face[1] + face[3]) / 2 },
         eyeL: eyeAnchor("left"), eyeR: eyeAnchor("right"),

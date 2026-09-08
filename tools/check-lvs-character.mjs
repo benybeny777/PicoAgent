@@ -40,11 +40,17 @@ try {
     await page.waitForTimeout(180);
     report.mouth.push(await capture(`mouth-${label}`));
   }
-  await page.getByRole("button", { name: "両目まばたき", exact: true }).click();
-  for (const [name, delay] of [["closing", 90], ["closed-hold", 80], ["opening", 250], ["open", 300]]) {
-    await page.waitForTimeout(delay);
-    report.blink.push(await capture(`blink-${name}`));
-  }
+  const blinkButton = page.getByRole("button", { name: "両目まばたき", exact: true });
+  // スクリーンショット処理でページ側の時刻を進めない。各位相は独立したまばたきから撮る。
+  await blinkButton.click(); await page.waitForTimeout(230);
+  report.blink.push(await capture("blink-closed-hold"));
+  await page.waitForTimeout(500);
+  report.blink.push(await capture("blink-open"));
+  await blinkButton.click(); await page.waitForTimeout(90);
+  report.blink.push(await capture("blink-closing"));
+  await page.waitForTimeout(600);
+  await blinkButton.click(); await page.waitForTimeout(430);
+  report.blink.push(await capture("blink-opening"));
   for (const [name, x, y] of [["center", 0, 0], ["left", -1, 0], ["right", 1, 0], ["up", 0, -1]]) {
     await page.locator("#gazeX").evaluate((input, value) => {
       input.value = String(value);
