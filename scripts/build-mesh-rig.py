@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -198,6 +199,9 @@ def build(character_id: str) -> None:
     scale = float(config.get("runtimeScale", 0.5))
     if not 0 < scale <= 1:
         raise ValueError(f"runtimeScaleは0より大きく1以下にしてください: {scale}")
+    expression_sad_mode = str(config.get("expressionSadMode", "layer"))
+    if expression_sad_mode not in {"layer", "disabled"}:
+        raise ValueError(f"expressionSadModeが不正です: {expression_sad_mode}")
 
     layers_dir = character_dir / "layers"
     base_path = layers_dir / "mouth_closed.png"
@@ -320,6 +324,7 @@ def build(character_id: str) -> None:
         "canvas": list(runtime_size),
         "contentBox": list(scaled_box(list(content_box), scale)),
         "runtimeScale": scale,
+        "expressionSadMode": expression_sad_mode,
         "grid": list(config.get("grid", [9, 15])),
         "base": "parts/base.webp",
         "drawables": drawables,
@@ -346,12 +351,19 @@ def build(character_id: str) -> None:
     }
     rig_path = character_dir / "mesh-rig" / "rig.json"
     temporary_rig = rig_path.with_suffix(".json.part")
-    temporary_rig.write_text(json.dumps(rig, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    rig_text = json.dumps(rig, ensure_ascii=False, indent=2) + "\n"
+    temporary_rig.write_text(rig_text, encoding="utf-8")
     temporary_rig.replace(rig_path)
+
+    asset_digest = hashlib.sha256(rig_text.encode("utf-8"))
+    for part_path in sorted(parts_dir.glob("*.webp")):
+        asset_digest.update(part_path.name.encode("utf-8"))
+        asset_digest.update(part_path.read_bytes())
+    mesh_asset_version = asset_digest.hexdigest()[:16]
 
     manifest_path = character_dir / "character.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["meshRig"] = {"rig": "mesh-rig/rig.json"}
+    manifest["meshRig"] = {"rig": "mesh-rig/rig.json", "assetVersion": mesh_asset_version}
     temporary_manifest = manifest_path.with_suffix(".json.part")
     temporary_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary_manifest.replace(manifest_path)

@@ -266,13 +266,40 @@
     }
   }
 
+  function createBlushOverlay(app, rig, originX, originY, textureFit) {
+    const anchor = rig.anchors?.face;
+    const legacyBox = rig.drawables?.face?.textureBox;
+    const face = anchor || (Array.isArray(legacyBox) && legacyBox.length === 4 ? {
+      x0: legacyBox[0], y0: legacyBox[1], x1: legacyBox[2], y1: legacyBox[3],
+    } : null);
+    if (!face) return null;
+    const anime = ["anime25d-v1", "lvs-anime25d-v1"].includes(rig.mode);
+    const width = face.x1 - face.x0;
+    const height = face.y1 - face.y0;
+    const cheeks = new PIXI.Graphics();
+    cheeks.beginFill(anime ? 0xf582a2 : 0xe77d91, anime ? 0.22 : 0.09);
+    for (const ratio of [0.30, 0.70]) {
+      cheeks.drawEllipse(
+        originX + (face.x0 + width * ratio) * textureFit,
+        originY + (face.y0 + height * 0.59) * textureFit,
+        width * 0.105 * textureFit,
+        height * 0.025 * textureFit,
+      );
+    }
+    cheeks.endFill();
+    cheeks.alpha = 0;
+    app.stage.addChild(cheeks);
+    return cheeks;
+  }
+
   class MeshRigController {
-    constructor(app, canvas, rig, planes, lvsFace = null) {
+    constructor(app, canvas, rig, planes, lvsFace = null, blush = null) {
       this.app = app;
       this.canvas = canvas;
       this.rig = rig;
       this.planes = planes;
       this.lvsFace = lvsFace;
+      this.blush = blush;
       this.active = false;
       this.mouth = 0;
       this.mouthForm = 0;
@@ -358,7 +385,8 @@
 
     setMotion(name) {
       const next = String(name || "idle");
-      if (/success|pleased|happy|shy/.test(next)) this.expression = "happy";
+      if (/shy/.test(next)) this.expression = "shy";
+      else if (/success|pleased|happy/.test(next)) this.expression = "happy";
       else if (/sad|concern|fail|error/.test(next)) this.expression = "concern";
       else if (/think|search|work/.test(next)) this.expression = "thinking";
       else if (/sleep/.test(next)) this.expression = "sleep";
@@ -369,19 +397,22 @@
     }
 
     expressionPose() {
+      if (this.expression === "shy") {
+        return { eye: 1, mouthOpen: 0.08, mouthForm: 0.65, browY: -2, browInnerY: 0, blush: 1 };
+      }
       if (this.expression === "happy") {
-        return { eye: 0.58, mouthOpen: 0.24, mouthForm: 0.9, browY: -7, browInnerY: 0 };
+        return { eye: 1, mouthOpen: 0.24, mouthForm: 0.9, browY: -7, browInnerY: 0, blush: 0 };
       }
       if (this.expression === "concern") {
-        return { eye: 0.68, mouthOpen: 0, mouthForm: -0.9, browY: 3, browInnerY: -13 };
+        return { eye: 1, mouthOpen: 0, mouthForm: -0.9, browY: 3, browInnerY: -13, blush: 0 };
       }
       if (this.expression === "thinking") {
-        return { eye: 0.74, mouthOpen: 0, mouthForm: -0.35, browY: -1, browInnerY: -7 };
+        return { eye: 1, mouthOpen: 0, mouthForm: -0.35, browY: -1, browInnerY: -7, blush: 0 };
       }
       if (this.expression === "sleep") {
-        return { eye: 0.04, mouthOpen: 0, mouthForm: 0, browY: 1, browInnerY: 0 };
+        return { eye: 0.04, mouthOpen: 0, mouthForm: 0, browY: 1, browInnerY: 0, blush: 0 };
       }
-      return { eye: 1, mouthOpen: 0, mouthForm: 0, browY: 0, browInnerY: 0 };
+      return { eye: 1, mouthOpen: 0, mouthForm: 0, browY: 0, browInnerY: 0, blush: 0 };
     }
 
     anime25dMotionPose(now) {
@@ -459,24 +490,25 @@
       }
       const mouth = this.planes.get("mouth_open");
       if (mouth) mouth.plane.alpha = mouthOpen;
+      const eyeOpen = this.eyeOpen * expression.eye;
       const gazeLeft = this.planes.get("gaze_left");
       const gazeRight = this.planes.get("gaze_right");
       // 閉眼中に開いた瞳の視線差分を重ねない。半目から開眼までだけ滑らかに戻す。
-      const gazeVisibility = smoothstep(0.5, 1, this.eyeOpen);
+      const gazeVisibility = smoothstep(0.5, 1, eyeOpen);
       if (gazeLeft) gazeLeft.plane.alpha = Math.max(0, -this.gazeX) * gazeVisibility;
       if (gazeRight) gazeRight.plane.alpha = Math.max(0, this.gazeX) * gazeVisibility;
       const happy = this.planes.get("expression_happy");
       const sad = this.planes.get("expression_sad");
       if (happy) happy.plane.alpha = this.expression === "happy" ? 1 : 0;
-      if (sad) sad.plane.alpha = this.expression === "concern" ? 1 : 0;
+      if (sad) sad.plane.alpha = this.expression === "concern" && this.rig.expressionSadMode !== "disabled" ? 1 : 0;
       const half = this.planes.get("blink_half");
       const closed = this.planes.get("blink_closed");
-      if (this.eyeOpen >= 0.5) {
-        if (half) half.plane.alpha = (1 - this.eyeOpen) * 2;
+      if (eyeOpen >= 0.5) {
+        if (half) half.plane.alpha = (1 - eyeOpen) * 2;
         if (closed) closed.plane.alpha = 0;
       } else {
         if (half) half.plane.alpha = 1;
-        if (closed) closed.plane.alpha = 1 - this.eyeOpen * 2;
+        if (closed) closed.plane.alpha = 1 - eyeOpen * 2;
       }
     }
 
@@ -722,6 +754,12 @@
       }
     }
 
+    updateBlush() {
+      if (!this.blush) return;
+      this.blush.alpha = this.expressionPose().blush;
+      this.blush.position.set(this.angleX * 0.45, this.angleY * 0.20);
+    }
+
     tick() {
       if (!this.active) return;
       const now = performance.now();
@@ -731,6 +769,7 @@
       this.updateLvsAppearance();
       this.updateAlphas();
       this.updateMesh(now, dt);
+      this.updateBlush();
     }
 
     destroy() {
@@ -938,9 +977,10 @@
       });
       app.stage.addChild(plane);
     }
+    const blush = createBlushOverlay(app, rig, originX, originY, textureFit);
     canvas.style.background = "transparent";
     canvas.dataset.meshRig = "ready";
-    return new MeshRigController(app, canvas, rig, planes, lvs?.face || null);
+    return new MeshRigController(app, canvas, rig, planes, lvs?.face || null, blush);
   }
 
   root.PicoMeshRig = Object.freeze({ create });

@@ -59,7 +59,8 @@
       <label>キャラクター
         <select id="character">
           <option value="female-a">女性A</option>
-          <option value="mugi">むぎ</option>
+          <option value="mugi">むぎ（SD）</option>
+          <option value="mugi-normal">むぎ（通常頭身）</option>
           <option value="photoreal">実写テスト</option>
         </select>
       </label>
@@ -90,7 +91,7 @@
       <button data-expression="happy">笑顔</button>
       <button data-expression="concern">困り顔</button>
       <button data-expression="thinking">考え顔</button>
-      <button data-expression="sleep">寝顔</button>
+      <button data-expression="shy">照れ</button>
     </div>
     <div class="control-group">
       <h2>動作</h2>
@@ -112,7 +113,7 @@
   <div id="quality" role="status"></div>
   <div id="status">読込中…</div>
   <script src="../../ui/vendor/pixi/pixi.min.js"></script>
-  <script src="../../ui/mesh-rig.js?v=20260907-lvs-schema3-1"></script>
+  <script src="../../ui/mesh-rig.js?v=20260908-expression-2"></script>
   <script>
     "use strict";
     const query = new URLSearchParams(location.search);
@@ -121,7 +122,8 @@
         root: "/characters/female-a-lvs",
         source: "preview.png",
       },
-      mugi: { root: "/temp/pico-preview/mugi", source: "source.png" },
+      mugi: { root: "/characters/mugi", source: "preview.png" },
+      "mugi-normal": { root: "/characters/mugi-normal-lvs", source: "source.png" },
       photoreal: { root: "/characters/photoreal-prototype", source: "preview.png" },
     };
     const initialCharacter = query.get("character") || "female-a";
@@ -231,7 +233,7 @@
         canvas,
         rigUrl: `${packRoot}/${manifest.meshRig.rig}`,
         rootUrl: `${packRoot}/${rigRoot}`,
-        assetVersion: manifest.assetVersion,
+        assetVersion: manifest.meshRig.assetVersion || manifest.assetVersion,
         width: 540,
         height: 760,
         contentBox: query.get("view") === "full" ? [0, 0, rigWidth, rigHeight] : undefined,
@@ -246,7 +248,9 @@
       });
       document.getElementById("arm").disabled = !independentEyes;
       status.textContent = `${manifest.name} — ${rigWidth}×${rigHeight}座標を本番と同じ経路で描画中。${independentEyes ? "左右目・5母音・表情・腕・全動作を個別確認できます" : "旧パックのため目は両目共通、腕寄せは対象外です"}`;
-      blinkTimer = window.setInterval(() => { if (document.visibilityState === "visible") blink(); }, 4200);
+      if (query.get("autoBlink") !== "off") {
+        blinkTimer = window.setInterval(() => { if (document.visibilityState === "visible") blink(); }, 4200);
+      }
     }
     async function main() {
       const selector = document.getElementById("character");
