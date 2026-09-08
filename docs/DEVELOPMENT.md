@@ -75,7 +75,7 @@ $env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-
 node tools/check-lvs-character.mjs temp/pico-lvs-check
 ```
 
-出力は`temp/pico-lvs-check/`の閉口・5母音、まばたき各時点、視線4方向、通常・笑顔・困り・考え・照れの全5表情、全8動作、待機5時点のPNGと`report.json`である。LocalVTuberStudio形式は5表情と6種類以上の動作差分が無ければ失敗する。固有ハッシュ数だけを見た目の合格根拠にせず、Chromeの`tools/mesh-rig-preview/`でも原画との輪郭、透過、目口、首・胴の境界を確認する。
+出力は`temp/pico-lvs-check/`の閉口・5母音、まばたき各時点、視線4方向、通常・笑顔・困り・考え・照れの全5表情、全8動作、腕寄せ0／0.5／1、待機5時点のPNGと`report.json`である。腕寄せ非対応パックは`armSupported: false`として撮影を省く。LocalVTuberStudio形式は5表情と6種類以上の動作差分が無ければ失敗する。固有ハッシュ数だけを見た目の合格根拠にせず、Chromeの`tools/mesh-rig-preview/`でも原画との輪郭、透過、目口、首・胴の境界を確認する。腕寄せでは、残余レイヤーに元位置の輪郭や色面が残らないことも3段階すべてで見る。
 ---
 
 ## 📦 配布ビルド

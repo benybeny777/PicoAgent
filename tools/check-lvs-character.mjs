@@ -26,7 +26,10 @@ const capture = async name => {
   return { name, bytes: bytes.length, sha256: sha256(bytes) };
 };
 
-const report = { url: captureUrl.href, mouth: [], blink: [], gaze: [], expressions: [], motions: [], idle: [], errors };
+const report = {
+  url: captureUrl.href, mouth: [], blink: [], gaze: [], expressions: [], motions: [],
+  arms: [], armSupported: false, idle: [], errors,
+};
 try {
   await page.goto(captureUrl.href, { waitUntil: "networkidle" });
   await page.waitForFunction(() => document.querySelector("#runtime")?.dataset.meshRig === "ready");
@@ -80,6 +83,22 @@ try {
   await page.getByRole("button", { name: "閉口", exact: true }).click();
   await page.getByRole("button", { name: "通常", exact: true }).click();
   await page.getByRole("button", { name: "待機", exact: true }).click();
+  const armControl = page.locator("#arm");
+  report.armSupported = !(await armControl.isDisabled());
+  if (report.armSupported) {
+    for (const [name, value] of [["open", 0], ["half", 0.5], ["closed", 1]]) {
+      await armControl.evaluate((input, next) => {
+        input.value = String(next);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }, value);
+      await page.waitForTimeout(350);
+      report.arms.push(await capture(`arm-${name}`));
+    }
+    await armControl.evaluate(input => {
+      input.value = "0";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
   for (let index = 0; index < 5; index += 1) {
     await page.waitForTimeout(260);
     report.idle.push(await capture(`idle-${index}`));
@@ -91,6 +110,7 @@ try {
     gaze: unique(report.gaze),
     expressions: unique(report.expressions),
     motions: unique(report.motions),
+    arms: unique(report.arms),
     idle: unique(report.idle),
   };
   if (report.unique.mouth < 5) throw new Error(`母音の描画差分が不足しています: ${report.unique.mouth}`);

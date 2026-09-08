@@ -779,6 +779,10 @@
         this.lvsFace.images.clear();
         this.lvsFace.canvas.width = 0;
         this.lvsFace.canvas.height = 0;
+        if (this.lvsFace.residualCanvas) {
+          this.lvsFace.residualCanvas.width = 0;
+          this.lvsFace.residualCanvas.height = 0;
+        }
       }
       this.canvas.remove();
     }
@@ -841,6 +845,39 @@
     const faceTexture = PIXI.Texture.from(faceCanvas);
     await waitTexture(faceTexture);
 
+    // 境界の隙間防止用scene_residualには、意味分離で共有した腕の輪郭画素も残る。
+    // 腕を動かすと元位置の輪郭だけが残像になるため、可動腕の原位置を同じRGBAで抜く。
+    const residualLayer = sourceRig.layers.scene_residual;
+    const armNodes = graph.filter(node => node.role === "left_arm" || node.role === "right_arm");
+    let residualCanvas = null;
+    let residualTexture = null;
+    if (residualLayer && armNodes.length) {
+      const [residualX, residualY, residualWidth, residualHeight] = lvsBox(residualLayer);
+      residualCanvas = document.createElement("canvas");
+      residualCanvas.width = residualWidth;
+      residualCanvas.height = residualHeight;
+      const residualContext = residualCanvas.getContext("2d");
+      if (!residualContext) throw new Error("LocalVTuberStudioの残余Canvasを初期化できません");
+      residualContext.drawImage(images.get("scene_residual"), 0, 0);
+      residualContext.globalCompositeOperation = "destination-out";
+      const armClearance = Math.max(2, Math.round(Math.min(width, height) * 0.004));
+      for (const node of armNodes) {
+        const [armX, armY] = lvsBox(sourceRig.layers[node.layer]);
+        for (const offsetX of [-armClearance, 0, armClearance]) {
+          for (const offsetY of [-armClearance, 0, armClearance]) {
+            residualContext.drawImage(
+              images.get(node.layer),
+              armX - residualX + offsetX,
+              armY - residualY + offsetY,
+            );
+          }
+        }
+      }
+      residualContext.globalCompositeOperation = "source-over";
+      residualTexture = PIXI.Texture.from(residualCanvas);
+      await waitTexture(residualTexture);
+    }
+
     const face = sourceRig.layers.face.bbox;
     const neck = sourceRig.layers.scene_neck.bbox;
     const torso = sourceRig.layers.scene_torso.bbox;
@@ -876,11 +913,15 @@
           motion: node.role,
           phys: node.role === "hair" ? "hair" : null,
           role: node.role,
-          dynamicTexture: node.role === "face" ? faceTexture : null,
+          dynamicTexture: node.role === "face" ? faceTexture
+            : node.role === "residual" ? residualTexture : null,
         };
       }),
     };
-    return { rig: normalized, face: { canvas: faceCanvas, ctx: faceContext, images, sourceAlpha, texture: faceTexture, lastKey: "" } };
+    return { rig: normalized, face: {
+      canvas: faceCanvas, ctx: faceContext, images, sourceAlpha, texture: faceTexture,
+      residualCanvas, lastKey: "",
+    } };
   }
 
   async function create({ canvas, rigUrl, rootUrl, assetVersion, width, height, contentBox: requestedContentBox }) {

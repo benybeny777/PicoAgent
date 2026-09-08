@@ -73,11 +73,15 @@ test("実画面検査は全表情と全動作を記録する", () => {
   const checker = readFileSync(new URL("../check-lvs-character.mjs", import.meta.url), "utf8");
   assert.match(checker, /expressions: \[\]/);
   assert.match(checker, /motions: \[\]/);
+  assert.match(checker, /arms: \[\]/);
+  assert.match(checker, /\[\["open", 0\], \["half", 0\.5\], \["closed", 1\]\]/);
   assert.match(checker, /captureUrl\.searchParams\.set\("autoBlink", "off"\)/);
   assert.match(preview, /query\.get\("autoBlink"\) !== "off"/);
   assert.match(preview, /manifest\.meshRig\.assetVersion \|\| manifest\.assetVersion/);
   assert.match(appRenderer, /assetVersion: cfg\.assetVersion \|\| characterAssetVersion/);
   assert.match(renderer, /createBlushOverlay\(app, rig, originX, originY, textureFit\)/);
+  assert.match(renderer, /globalCompositeOperation = "destination-out"/);
+  assert.match(renderer, /armClearance = Math\.max\(2,/);
   for (const label of ["通常", "笑顔", "困り顔", "考え顔", "照れ", "待機", "会話", "考え中", "よろこび", "困り", "聞く", "起きる", "眠る"]) {
     assert.ok(checker.includes(`"${label}"`), `${label}を実画面検査へ含める`);
   }
