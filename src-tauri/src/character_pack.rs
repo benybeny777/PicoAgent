@@ -139,6 +139,7 @@ fn validate_mesh_rig(source: &Path, manifest: &Value) -> Result<()> {
         .parent()
         .context("meshRig.rig の親フォルダがありません")?;
     if lvs_anime25d {
+        validate_lvs_secondary_motion(&rig)?;
         let layers = rig
             .get("layers")
             .and_then(Value::as_object)
@@ -233,6 +234,37 @@ fn validate_mesh_rig(source: &Path, manifest: &Value) -> Result<()> {
         }
         if !root.join(texture).is_file() {
             bail!("meshRigのテクスチャがありません: {texture}");
+        }
+    }
+    Ok(())
+}
+
+fn validate_lvs_secondary_motion(rig: &Value) -> Result<()> {
+    let version = rig.get("secondary_motion_version");
+    let profile = rig.get("secondary_motion");
+    if version.is_none() && profile.is_none() {
+        return Ok(());
+    }
+    if version.and_then(Value::as_u64) != Some(1) {
+        bail!("lvs-anime25d-v1 のsecondary_motion_versionが不正です");
+    }
+    let hair = profile
+        .and_then(|value| value.get("hair"))
+        .context("lvs-anime25d-v1 の髪物理定義がありません")?;
+    if hair.get("role").and_then(Value::as_str) != Some("hair") {
+        bail!("lvs-anime25d-v1 の髪物理対象が不正です");
+    }
+    for (name, min, max) in [
+        ("frequency_hz", 0.2, 8.0),
+        ("damping_ratio", 0.2, 2.0),
+        ("strength", 0.0, 2.0),
+    ] {
+        let value = hair
+            .get(name)
+            .and_then(Value::as_f64)
+            .with_context(|| format!("lvs-anime25d-v1 の髪物理{name}が不正です"))?;
+        if !value.is_finite() || value < min || value > max {
+            bail!("lvs-anime25d-v1 の髪物理{name}が範囲外です");
         }
     }
     Ok(())
@@ -902,6 +934,11 @@ mod tests {
                 "eye_rig_version": 3,
                 "lip_rig_version": 1,
                 "scene_graph_version": 1,
+                "secondary_motion_version": 1,
+                "secondary_motion": { "hair": {
+                    "role": "hair", "frequency_hz": 1.8,
+                    "damping_ratio": 0.72, "strength": 1.0
+                }},
                 "scene_graph": graph.iter().map(|(layer, role)| json!({ "layer": layer, "role": role })).collect::<Vec<_>>(),
                 "layers": layers
             }))
@@ -919,6 +956,15 @@ mod tests {
         .unwrap();
 
         validate(&dir).expect("LocalVTuberStudio schema 3を拒否した");
+        let rig_path = dir.join("rig2d/rig.json");
+        let mut invalid: Value =
+            serde_json::from_str(&std::fs::read_to_string(&rig_path).unwrap()).unwrap();
+        invalid["secondary_motion"]["hair"]["strength"] = json!(3.0);
+        std::fs::write(&rig_path, serde_json::to_string(&invalid).unwrap()).unwrap();
+        assert!(validate(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("髪物理strengthが範囲外"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

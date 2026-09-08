@@ -1051,6 +1051,36 @@ fn validate_mesh_rig_pack(character_dir: &Path, manifest: &serde_json::Value) ->
         .parent()
         .ok_or_else(|| anyhow::anyhow!("meshRig.rigの親フォルダがありません"))?;
     if lvs_anime25d {
+        let motion_version = rig.get("secondary_motion_version");
+        let motion = rig.get("secondary_motion");
+        if motion_version.is_some() || motion.is_some() {
+            anyhow::ensure!(
+                motion_version.and_then(serde_json::Value::as_u64) == Some(1),
+                "{} の髪物理バージョンが不正です",
+                character_dir.display()
+            );
+            let hair = motion.and_then(|value| value.get("hair")).ok_or_else(|| {
+                anyhow::anyhow!("{} の髪物理定義がありません", character_dir.display())
+            })?;
+            anyhow::ensure!(
+                hair.get("role").and_then(serde_json::Value::as_str) == Some("hair"),
+                "{} の髪物理対象が不正です",
+                character_dir.display()
+            );
+            for (name, min, max) in [
+                ("frequency_hz", 0.2, 8.0),
+                ("damping_ratio", 0.2, 2.0),
+                ("strength", 0.0, 2.0),
+            ] {
+                let value = hair.get(name).and_then(serde_json::Value::as_f64);
+                anyhow::ensure!(
+                    value
+                        .is_some_and(|number| number.is_finite() && number >= min && number <= max),
+                    "{} の髪物理{name}が不正です",
+                    character_dir.display()
+                );
+            }
+        }
         let layers = rig
             .get("layers")
             .and_then(serde_json::Value::as_object)

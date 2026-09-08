@@ -26,10 +26,16 @@ test("LocalVTuberStudio schema 3を中間形式へ書き換えず読む", () => 
   assert.match(renderer, /eyeAperture\(sourceRig\.layers\.left_eye_base/);
   assert.match(renderer, /openBoost = 1 \+ smoothstep\(0\.62, 1, open\) \* 0\.18/);
   assert.doesNotMatch(renderer, /if \(openness >= 1[^\n]+return/);
-  assert.match(renderer, /images\.has\(`\$\{side\}_eye_closed`\)/);
-  assert.match(renderer, /ctx\.clearRect\(left, top, right - left, bottom - top\)/);
+  assert.doesNotMatch(renderer, /images\.has\(`\$\{side\}_eye_closed`\)/);
+  assert.match(renderer, /draw\(`\$\{side\}_eye_base`, base\)/);
   assert.doesNotMatch(renderer, /globalCompositeOperation = "copy"/);
   assert.match(renderer, /rootUrl\}\/\$\{lvsPartPath\(name\)\}/);
+  assert.match(renderer, /validateLvsSecondaryMotion\(sourceRig\)/);
+  assert.match(renderer, /secondaryMotion: secondaryHair \? \{ hair: secondaryHair \} : null/);
+  assert.match(renderer, /springStep\(/);
+  assert.match(renderer, /this\.secondaryHair\.frequency_hz/);
+  assert.match(renderer, /this\.secondaryHair\.damping_ratio/);
+  assert.match(renderer, /this\.secondaryHair\.strength/);
 });
 
 test("確認画面は目・視線・5母音・表情・全動作・腕の操作を保つ", () => {

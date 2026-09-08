@@ -139,6 +139,15 @@
       "motion": "shared"
     }
   ],
+  "secondary_motion_version": 1,
+  "secondary_motion": {
+    "hair": {
+      "role": "hair",
+      "frequency_hz": 1.8,
+      "damping_ratio": 0.72,
+      "strength": 1.0
+    }
+  },
   "material_status": {
     "optional_limbs": {
       "candidates": [
