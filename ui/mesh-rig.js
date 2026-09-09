@@ -408,7 +408,6 @@
       else if (/success|pleased|happy/.test(next)) this.expression = "happy";
       else if (/sad|concern|fail|error/.test(next)) this.expression = "concern";
       else if (/think|search|work/.test(next)) this.expression = "thinking";
-      else if (/sleep/.test(next)) this.expression = "sleep";
       else this.expression = "neutral";
       if (this.motion === next) return;
       this.motion = next;
@@ -427,9 +426,6 @@
       }
       if (this.expression === "thinking") {
         return { eye: 1, mouthOpen: 0, mouthForm: -0.35, browY: -1, browInnerY: -7, blush: 0 };
-      }
-      if (this.expression === "sleep") {
-        return { eye: 0.04, mouthOpen: 0, mouthForm: 0, browY: 1, browInnerY: 0, blush: 0 };
       }
       return { eye: 1, mouthOpen: 0, mouthForm: 0, browY: 0, browInnerY: 0, blush: 0 };
     }
@@ -462,16 +458,11 @@
         pose.bodyAngle = -0.7 + Math.sin(elapsed * 0.8) * 0.35;
         pose.headY = 4.2 + Math.sin(elapsed * 1.1) * 0.8;
         pose.headAngle = -2.8 + Math.sin(elapsed * 0.9) * 0.7;
-      } else if (/listen|wake/.test(motion)) {
+      } else if (/listen/.test(motion)) {
         pose.bodyY = -Math.abs(Math.sin(elapsed * 2.2)) * 2.4;
         pose.headX = Math.sin(elapsed * 1.9) * 1.2;
         pose.headY = -1.8 + Math.sin(elapsed * 2.1) * 0.8;
         pose.headAngle = Math.sin(elapsed * 1.7) * 1.5;
-      } else if (/sleep/.test(motion)) {
-        pose.bodyY = 2.5 + Math.sin(elapsed * 0.8) * 1.1;
-        pose.bodyAngle = 1.0 + Math.sin(elapsed * 0.6) * 0.4;
-        pose.headY = 2.8 + Math.sin(elapsed * 0.8) * 1.0;
-        pose.headAngle = 3.6 + Math.sin(elapsed * 0.7) * 0.9;
       }
       return pose;
     }
