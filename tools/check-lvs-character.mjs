@@ -69,7 +69,7 @@ try {
     report.gaze.push(await capture(`gaze-${name}`));
   }
   await page.getByRole("button", { name: "視線を中央へ", exact: true }).click();
-  for (const [name, label] of [["neutral", "通常"], ["happy", "笑顔"], ["concern", "困り顔"], ["thinking", "考え顔"], ["shy", "照れ"]]) {
+  for (const [name, label] of [["neutral", "通常"], ["happy", "笑顔"], ["concern", "困り顔"], ["thinking", "考え顔"], ["shy", "照れ"], ["angry", "怒り"]]) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await page.waitForTimeout(220);
     report.expressions.push(await capture(`expression-${name}`));
