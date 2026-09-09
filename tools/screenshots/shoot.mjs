@@ -173,7 +173,6 @@ window.__TAURI__ = {
     if (name === "settings_components_status") return Promise.resolve([
       { id: "aivis", ready: true, available: true },
       { id: "whisper", ready: false, available: true },
-      { id: "tha3", ready: false, available: true },
       { id: "office", ready: false, available: false },
       { id: "tools", ready: false, available: true },
     ]);
@@ -417,7 +416,7 @@ async function shootCharacterMatrix() {
   const warnings = [];
   const selectedCharacters = process.env.SHOOT_CHARACTER_IDS
     ? process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean)
-    : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa", "photoreal-prototype"];
+    : ["mugi", "mugi-normal-lvs", "rin", "mai", "sena", "aoi", "photoreal-prototype"];
   const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
     ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
@@ -1936,10 +1935,9 @@ const GALLERY = [
   ["mugi", "おはよう！えへへ、今日もそばで見てるね。まずはやること、3つに絞ろっか。"],
   ["rin", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
   ["mai", "おはよう。あせらなくて大丈夫よ、ゆっくり一緒に進めましょう。"],
-  ["koharu", "おはよう。今日のこと、気軽に話してね。"],
   ["sena", "おはよう。今日のステージも、きれいに仕上げようか。"],
-  ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
-  ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
+  ["aoi", "こんにちは。気になることを、一緒に丁寧に確かめましょう。"],
+  ["mugi-normal-lvs", "こんにちは。今日もいっしょに、のんびり進めようね。"],
   ["photoreal-prototype", "こんにちは。焦らず、今日やることから一緒に整理しましょう。"],
   ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", "live2d"],
   ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", "live2d"],
@@ -1986,7 +1984,7 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
 ]));
 
 // LPへ出す自前キャラはrelease.jsonを正本にし、公式Live2Dサンプルだけを動作例として加える。
-// README専用のrin-tha3など、販売対象外の試作をLP資産へ混ぜない。
+// 販売対象外の試作をLP資産へ混ぜない。
 const RELEASE = JSON.parse(await readFile(join(ROOT, "distribution", "release.json"), "utf8"));
 const SITE_GALLERY_IDS = new Set([
   ...(RELEASE.includedCharacters || []),
@@ -2324,7 +2322,7 @@ if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
   // 今回書いていない古いファイルを検査するか、未生成でENOENTになる。
   const bytes = (await Promise.all(galleryFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
-  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-noa.webp", "character-photoreal-prototype.webp"];
+  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-aoi.webp", "character-photoreal-prototype.webp"];
   const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
   if (bytes > 15_000_000 || indexBytes > 5_000_000) {

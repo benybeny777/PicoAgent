@@ -15,12 +15,6 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = {
     "mugi": (0.40, 0.36, 0.70, 0.16),
-    "rin": (0.40, 0.38, 0.69, 0.17),
-    "mai": (0.36, 0.34, 0.66, 0.18),
-    "koharu": (0.25, 0.24, 0.59, 0.18),
-    "sena": (0.29, 0.27, 0.59, 0.17),
-    "noa": (0.30, 0.27, 0.59, 0.18),
-    "rin-tha3": (0.40, 0.37, 0.70, 0.17),
     "photoreal-prototype": (0.37, 0.34, 1.00, 0.20),
 }
 COUPLED_HAIR_IDS = {"mugi", "photoreal-prototype"}

@@ -1,6 +1,6 @@
 ---
 name: audit-picoagent-dependencies
-description: PicoAgentのCargo依存、JavaScript・Python等のパッケージ、同梱または管理導入するAivis・Whisper・llama.cpp・Live2D・THA3・Office・外部CLI・モデル・ランタイムを、all／packages／apps等の指定範囲で棚卸しし、公式最新版・互換性・ハッシュ・ライセンス・文書・配布実体まで更新検証する依頼で使う。
+description: PicoAgentのCargo依存、JavaScript・Python等のパッケージ、同梱または管理導入するAivis・Whisper・llama.cpp・Live2D・Office・外部CLI・モデル・ランタイムを、all／packages／apps等の指定範囲で棚卸し、公式最新版・互換性・ハッシュ・ライセンス・文書・配布実体まで更新検証する依頼で使う。
 ---
 
 # PicoAgentの外部依存を監査する
@@ -10,7 +10,7 @@ description: PicoAgentのCargo依存、JavaScript・Python等のパッケージ�
 1. 引数を `all`、`packages`、`apps`、または個別カテゴリとして扱う。省略時は `all` にする。
 2. `packages` はCargo、npm、Python、その他のパッケージマネージャー管理物を対象にする。
 3. `apps` は同梱・管理導入・開発用取得する実行ファイル、モデル、Webランタイム、外部CLIを対象にする。
-4. 個別指定では `cargo`、`web`、`python`、`aivis`、`whisper`、`engine`、`models`、`live2d`、`tha3`、`office`、`tools`を受け付ける。
+4. 個別指定では `cargo`、`web`、`python`、`aivis`、`whisper`、`engine`、`models`、`live2d`、`office`、`tools`を受け付ける。
 
 ## 棚卸しする
 

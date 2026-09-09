@@ -8,7 +8,7 @@ const playwrightModule = process.env.PICO_PLAYWRIGHT_MODULE;
 if (!playwrightModule) throw new Error("PICO_PLAYWRIGHT_MODULE にPlaywrightのindex.mjsを指定してください");
 const { chromium } = await import(pathToFileURL(playwrightModule).href);
 const output = path.resolve(process.argv[2] || "temp/pico-lvs-check");
-const url = process.argv[3] || "http://127.0.0.1:8776/tools/mesh-rig-preview/?character=female-a";
+const url = process.argv[3] || "http://127.0.0.1:8776/tools/mesh-rig-preview/?character=aoi";
 const captureUrl = new URL(url);
 captureUrl.searchParams.set("autoBlink", "off");
 await mkdir(output, { recursive: true });
@@ -116,7 +116,7 @@ try {
   if (report.unique.mouth < 5) throw new Error(`母音の描画差分が不足しています: ${report.unique.mouth}`);
   if (report.unique.blink < 3) throw new Error(`まばたきの描画差分が不足しています: ${report.unique.blink}`);
   if (report.unique.gaze < 4) throw new Error(`視線の描画差分が不足しています: ${report.unique.gaze}`);
-  if (/[?&]character=(?:female-a|mugi|mugi-normal)(?:&|$)/.test(captureUrl.href) && report.unique.expressions < 5) {
+  if (/[?&]character=(?:aoi|mugi|mugi-normal|rin|mai|sena|photoreal)(?:&|$)/.test(captureUrl.href) && report.unique.expressions < 5) {
     throw new Error(`表情の描画差分が不足しています: ${report.unique.expressions}`);
   }
   if (/[?&]character=(?:female-a|mugi|mugi-normal)(?:&|$)/.test(captureUrl.href) && report.unique.motions < 6) {

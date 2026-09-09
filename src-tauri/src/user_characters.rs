@@ -525,22 +525,13 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("ゴミ箱へ移動できません: {error}"))
 }
 
-/// THA3作成分の表示名は「◯◯（自作）」で、挨拶・人格の定型文は接尾辞の無い素の名前を使う。
-fn base_name(name: &str) -> &str {
-    name.strip_suffix("（自作）").unwrap_or(name)
-}
+/// PicoAgentがLive2D導入時に生成する挨拶の型。
+const GREETING_TEMPLATES: [fn(&str) -> String; 1] =
+    [|base| format!("こんにちは、{base}です。よろしくね。")];
 
-/// PicoAgentが生成する挨拶の型（Live2D導入 / THA3作成）。
-const GREETING_TEMPLATES: [fn(&str) -> String; 2] = [
-    |base| format!("こんにちは、{base}です。よろしくね。"),
-    |base| format!("こんにちは、{base}です。今日も一緒に作業しましょう。"),
-];
-
-/// PicoAgentが生成する人格プロンプトの型（Live2D導入 / THA3作成）。
-const PROMPT_TEMPLATES: [fn(&str) -> String; 2] = [
-    |base| format!("{base}として振る舞い、利用者の依頼を丁寧に手伝う。"),
-    |base| format!("{base}として振る舞う。ユーザーの作業を安全かつ現実的に前へ進める。"),
-];
+/// PicoAgentがLive2D導入時に生成する人格プロンプトの型。
+const PROMPT_TEMPLATES: [fn(&str) -> String; 1] =
+    [|base| format!("{base}として振る舞い、利用者の依頼を丁寧に手伝う。")];
 
 fn rename_manifest(manifest: &mut Value, name: &str) -> Result<String> {
     let name = name.trim();
@@ -555,9 +546,8 @@ fn rename_manifest(manifest: &mut Value, name: &str) -> Result<String> {
 
     // PicoAgentが自動生成した定型文だけは新しい名前へ追従させる。
     // 利用者が書き換えた挨拶・人格は文字列が一致しないので上書きしない。
-    // 生成経路（Live2D導入 / THA3作成）で文面が違うため、両方の型と突き合わせる。
-    let old_base = base_name(&old_name);
-    let new_base = base_name(name);
+    let old_base = old_name.as_str();
+    let new_base = name;
     if let Some(current) = object.get("greeting").and_then(Value::as_str) {
         if let Some(make) = GREETING_TEMPLATES
             .iter()
@@ -567,7 +557,7 @@ fn rename_manifest(manifest: &mut Value, name: &str) -> Result<String> {
         }
     }
     if let Some(persona) = object.get_mut("persona").and_then(Value::as_object_mut) {
-        // 一人称は表示名そのままのことがある（THA3作成分は「わたし」なので一致しない）。
+        // 一人称が表示名そのままの場合だけ追従させる。
         match persona.get("firstPerson").and_then(Value::as_str) {
             Some(value) if value == old_name => {
                 persona.insert("firstPerson".to_string(), Value::String(name.to_string()));
@@ -880,34 +870,5 @@ mod tests {
         assert_eq!(manifest["greeting"], "こんにちは、新名です。よろしくね。");
         assert_eq!(manifest["persona"]["firstPerson"], "新名");
         assert_eq!(manifest["persona"]["speechStyle"], "独自の口調");
-    }
-
-    #[test]
-    // THA3作成分は挨拶・人格の型が違い、表示名だけ「（自作）」が付く。
-    fn 自作キャラの挨拶と人格も名前変更へ追従する() {
-        let mut manifest = json!({
-            "id": "my-tha3",
-            "name": "旧名（自作）",
-            "greeting": "こんにちは、旧名です。今日も一緒に作業しましょう。",
-            "persona": {
-                "firstPerson": "わたし",
-                "systemPrompt": "旧名として振る舞う。ユーザーの作業を安全かつ現実的に前へ進める。"
-            }
-        });
-        assert_eq!(
-            rename_manifest(&mut manifest, "新名（自作）").unwrap(),
-            "新名（自作）"
-        );
-        assert_eq!(manifest["name"], "新名（自作）");
-        assert_eq!(
-            manifest["greeting"],
-            "こんにちは、新名です。今日も一緒に作業しましょう。"
-        );
-        assert_eq!(
-            manifest["persona"]["systemPrompt"],
-            "新名として振る舞う。ユーザーの作業を安全かつ現実的に前へ進める。"
-        );
-        // 表示名に由来しない一人称は触らない。
-        assert_eq!(manifest["persona"]["firstPerson"], "わたし");
     }
 }

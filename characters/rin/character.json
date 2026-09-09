@@ -1,15 +1,10 @@
 {
   "id": "rin",
   "name": "りん",
-  "assetVersion": "lossless-webp-d121335e7267df24",
   "description": "黒髪ツインテールと赤いリボンが目印の、口は強いけれど面倒見がいいツンデレ作業相棒。",
   "motionProfile": "full",
   "bodyProportion": "compact",
   "greeting": "ふ、ふん。来たのね。別に待ってたわけじゃないけど、今日の作業くらい見ててあげる。",
-  "boot": {
-    "sleeping": "boot/sleeping.png",
-    "useSleepingOnStartup": true
-  },
   "voice": {
     "provider": "aivis",
     "modelName": "るな",
@@ -49,143 +44,9 @@
       "name": "集中オーラ"
     }
   ],
-  "animations": {
-    "idle": {
-      "frames": 12,
-      "fps": 3.2,
-      "frameDurations": [
-        760,
-        760,
-        760,
-        520,
-        70,
-        90,
-        70,
-        760,
-        760,
-        760,
-        760,
-        1100
-      ],
-      "motion": "live2d-idle",
-      "framePaths": [
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/001e9eb78bd09e0b9979.webp",
-        "frames/d121335e7267df24/001e9eb78bd09e0b9979.webp",
-        "frames/d121335e7267df24/944cc0fb8bbda653354b.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp"
-      ]
-    },
-    "thinking": {
-      "frames": 12,
-      "fps": 7.0,
-      "frameDurations": [
-        180,
-        150,
-        120,
-        170,
-        150,
-        170,
-        120,
-        120,
-        170,
-        150,
-        170,
-        150
-      ],
-      "motion": "live2d-thinking",
-      "framePaths": [
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/5d00744f5791941ff530.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
-        "frames/d121335e7267df24/944cc0fb8bbda653354b.webp",
-        "frames/d121335e7267df24/5d00744f5791941ff530.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp"
-      ]
-    },
-    "talking": {
-      "frames": 12,
-      "fps": 8.0,
-      "frameDurations": [
-        120,
-        90,
-        75,
-        120,
-        120,
-        120,
-        75,
-        120,
-        90,
-        120,
-        75,
-        140
-      ],
-      "motion": "live2d-talking",
-      "framePaths": [
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/0c83606165c277221487.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp",
-        "frames/d121335e7267df24/0c83606165c277221487.webp",
-        "frames/d121335e7267df24/98184f833d964f24d183.webp",
-        "frames/d121335e7267df24/5d00744f5791941ff530.webp",
-        "frames/d121335e7267df24/b6c456105a524787493a.webp",
-        "frames/d121335e7267df24/2bbaab84f8116cdd47f3.webp",
-        "frames/d121335e7267df24/1ff402f151a0227c36fe.webp"
-      ]
-    },
-    "sad": {
-      "frames": 6,
-      "fps": 4.2,
-      "frameDurations": [
-        320,
-        110,
-        150,
-        120,
-        420,
-        560
-      ],
-      "motion": "live2d-sad",
-      "framePaths": [
-        "frames/d121335e7267df24/b666b40d65a227bc4c23.webp",
-        "frames/d121335e7267df24/d129942888a7d0f4cec0.webp",
-        "frames/d121335e7267df24/001e9eb78bd09e0b9979.webp",
-        "frames/d121335e7267df24/b666b40d65a227bc4c23.webp",
-        "frames/d121335e7267df24/f06a564841d9d1c242fa.webp",
-        "frames/d121335e7267df24/b666b40d65a227bc4c23.webp"
-      ]
-    }
-  },
-  "frameGeneration": "d121335e7267df24",
-  "runtimeLayers": {
-    "base": "runtime-layers/base.webp",
-    "blink_half": "runtime-layers/blink_half.webp",
-    "blink_closed": "runtime-layers/blink_closed.webp",
-    "mouth_closed": "runtime-layers/mouth_closed.webp",
-    "mouth_open": "runtime-layers/mouth_open.webp",
-    "gaze_left": "runtime-layers/gaze_left.webp",
-    "gaze_right": "runtime-layers/gaze_right.webp",
-    "expression_happy": "runtime-layers/expression_happy.webp",
-    "expression_sad": "runtime-layers/expression_sad.webp"
-  },
-  "runtimeLayerEncoding": "webp-lossless-v1",
-  "frameEncoding": "webp-lossless-v1",
+  "sourceFraming": "native-full",
   "meshRig": {
-    "rig": "mesh-rig/rig.json"
-  }
+    "rig": "rig2d/rig.json"
+  },
+  "assetVersion": "lvs-schema3-2649ab242aae41aa"
 }

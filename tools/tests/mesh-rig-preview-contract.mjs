@@ -9,13 +9,14 @@ const preview = readFileSync(
 const renderer = readFileSync(new URL("../../ui/mesh-rig.js", import.meta.url), "utf8");
 const appRenderer = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
 
-test("確認画面はA・むぎ2種・実写を本番メッシュ描画で切り替える", () => {
-  assert.match(preview, /value="female-a"/);
+test("確認画面はあおい・むぎ2種・りん・まい・セナ・実写を本番メッシュ描画で切り替える", () => {
+  assert.match(preview, /value="aoi"/);
   assert.match(preview, /value="mugi"/);
   assert.match(preview, /value="mugi">むぎ（SD）<\/option>/);
   assert.match(preview, /value="mugi-normal">むぎ（通常頭身）<\/option>/);
   assert.match(preview, /value="photoreal"/);
-  assert.match(preview, /characters\/female-a-lvs/);
+  for (const id of ["rin", "mai", "sena"]) assert.match(preview, new RegExp(`value="${id}"`));
+  assert.match(preview, /characters\/aoi/);
   assert.match(preview, /characters\/mugi/);
   assert.match(preview, /characters\/mugi-normal-lvs/);
   assert.match(preview, /characters\/photoreal-prototype/);
@@ -30,9 +31,11 @@ test("LocalVTuberStudio schema 3を中間形式へ書き換えず読む", () => 
   assert.match(renderer, /sourceRig\.layers\.mouth_closed/);
   assert.match(renderer, /eyeAperture\(sourceRig\.layers\.left_eye_base/);
   assert.match(renderer, /openBoost = 1 \+ smoothstep\(0\.62, 1, open\) \* 0\.18/);
-  assert.doesNotMatch(renderer, /if \(openness >= 1[^\n]+return/);
+  assert.match(renderer, /if \(openness >= 1[^\n]+return/);
   assert.doesNotMatch(renderer, /images\.has\(`\$\{side\}_eye_closed`\)/);
   assert.match(renderer, /draw\(`\$\{side\}_eye_base`, base\)/);
+  assert.match(renderer, /const aperture = base\.eye_aperture/);
+  assert.match(renderer, /ctx\.clip\(\);\s*draw\(`\$\{side\}_eye_base`/);
   assert.doesNotMatch(renderer, /globalCompositeOperation = "copy"/);
   assert.match(renderer, /rootUrl\}\/\$\{lvsPartPath\(name\)\}/);
   assert.match(renderer, /validateLvsSecondaryMotion\(sourceRig\)/);

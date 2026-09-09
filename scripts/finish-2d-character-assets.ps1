@@ -1,5 +1,5 @@
 param(
-    [string[]]$CharacterIds = @('mugi', 'rin', 'mai', 'rin-tha3'),
+    [string[]]$CharacterIds = @('mugi'),
     [int]$Scale = 2,
     [string]$SourceRoot = ''
 )
@@ -262,7 +262,7 @@ foreach ($characterId in $CharacterIds) {
             UpscaledOutput = Join-Path $processedRoot "$prefix-upscaled.png"
             FinalOutput = Join-Path $processedRoot "$prefix-final.png"
             ResizeScale = if ($representative.Relative.StartsWith('boot\', [System.StringComparison]::OrdinalIgnoreCase)) { 1 } else { $Scale }
-            AlphaThreshold = if ($characterId -eq 'rin-tha3') { 32 } else { 8 }
+            AlphaThreshold = 8
             Destinations = @($group.Group)
         }
         $allJobs += $job

@@ -840,7 +840,7 @@ fn remove_source_layers_from_runtime_copy(
     Ok(())
 }
 
-const THA3_MOTION_LAYERS: [&str; 12] = [
+const LEGACY_FULL_BODY_MOTION_LAYERS: [&str; 12] = [
     "idle_breathe",
     "idle_left",
     "idle_right",
@@ -880,7 +880,7 @@ fn validate_sharp_expression_pack(
     {
         return Ok(());
     }
-    let stale = THA3_MOTION_LAYERS
+    let stale = LEGACY_FULL_BODY_MOTION_LAYERS
         .iter()
         .filter(|name| {
             character_dir
@@ -892,7 +892,7 @@ fn validate_sharp_expression_pack(
         .collect::<Vec<_>>();
     if !stale.is_empty() {
         bail!(
-            "{} はsharp-expressionですが旧THA3全身レイヤーが残っています: {}",
+            "{} はsharp-expressionですが旧全身モーションレイヤーが残っています: {}",
             character_dir.display(),
             stale.join(", ")
         );
