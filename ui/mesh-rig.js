@@ -89,11 +89,23 @@
   }
 
   function drawBlink(ctx, images, rig, side, openness, gazeX = 0, gazeY = 0) {
+    if (openness >= 1) return;
     const base = rig.layers[`${side}_eye_base`];
     const upper = rig.layers[`${side}_eyelid_upper`];
     const points = eyeAperture(base, openness);
     const draw = (name, layer) => ctx.drawImage(images.get(name), layer.texture_box[0], layer.texture_box[1]);
+    // 閉眼下地PNGの周辺肌まで重ねると、半閉眼で矩形の色面になる。
+    // 原画で測定した目の開口内だけへ限定し、その内側を現在の開口で描き戻す。
+    const aperture = base.eye_aperture;
     ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(aperture[0][0] - 0.5, aperture[0][1]);
+    for (const [x, top] of aperture) ctx.lineTo(x, top);
+    ctx.lineTo(aperture.at(-1)[0] + 0.5, aperture.at(-1)[1]);
+    ctx.lineTo(aperture.at(-1)[0] + 0.5, aperture.at(-1)[2]);
+    for (const [x, , bottom] of [...aperture].reverse()) ctx.lineTo(x, bottom);
+    ctx.closePath();
+    ctx.clip();
     draw(`${side}_eye_base`, base);
     if (openness > 0) {
       ctx.save();
@@ -117,6 +129,7 @@
       );
       ctx.restore();
     }
+    ctx.restore();
     const image = images.get(`${side}_eyelid_upper`);
     const [left, top] = upper.texture_box;
     for (const [x, y, , closed] of points) {
@@ -125,7 +138,6 @@
         ctx.drawImage(image, column, 0, 1, image.naturalHeight, left + column, top + y - closed, 1, image.naturalHeight);
       }
     }
-    ctx.restore();
   }
 
   function lipMesh(layer, opening, form) {

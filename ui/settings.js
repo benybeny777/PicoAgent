@@ -31,7 +31,6 @@ let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表�
 let modalOpen = false; // 確認ダイアログ表示中は全体ショートカットを止める
 let settingsMutationBusy = false;
 const settingsListeners = new Map();
-let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
 let characterLive2dSdkSelect;
@@ -103,12 +102,6 @@ window.addEventListener("beforeunload", () => {
   dirtyStateScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
-  // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
-  if (tha3GenerationRunning) {
-    window.picoagent.settings.cancelTha3Generation().catch(error => {
-      window.PicoUI?.logApp?.("warn", "終了時にキャラ生成を中断できませんでした", window.PicoUI?.errorDetail?.(error) || String(error));
-    });
-  }
 });
 
 function el(tag, props = {}, children = []) {
@@ -925,7 +918,7 @@ function quickSettingsGuide(v) {
   const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
-    { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック・THA3" },
+    { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック" },
     { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
     { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
@@ -1917,7 +1910,6 @@ async function characterIconUrl(character) {
 function characterRenderType(character, manifest) {
   const kind = characterRenderKind(manifest);
   if (kind === "live2d") return "Live2D";
-  if (kind === "tha3") return "自作THA3";
   if (character.user) return "追加PNG";
   return "PNGアニメ";
 }
@@ -1926,7 +1918,6 @@ function characterRenderKind(manifest) {
   const hasLive2d = !!manifest.live2d
     || (Array.isArray(manifest.variants) && manifest.variants.some(variant => variant?.live2d));
   if (hasLive2d) return "live2d";
-  if (manifest.generator?.type === "tha3") return "tha3";
   return "png";
 }
 
@@ -3030,7 +3021,6 @@ async function render() {
     { id: "all", label: "すべて" },
     { id: "live2d", label: "Live2D" },
     { id: "png", label: "PNGアニメ" },
-    { id: "tha3", label: "自作THA3" },
     { id: "user", label: "追加キャラ" },
   ];
   const filterBar = el("div", { className: "genre-filter character-type-filter" });
@@ -3239,218 +3229,6 @@ async function render() {
     return added;
   }
 
-  // --- 1枚絵からTHA3自作キャラクターを生成する ---
-  // 生成物は一時パックとして検証してから app_data_dir/characters へ導入する。
-  // Pythonプロセスはバックエンドで管理し、設定画面を閉じた場合もキャンセルして回収する。
-  const tha3Sec = section("1枚絵からキャラクターを作成（THA3）");
-  const tha3Hint = el("p", {
-    className: "hint",
-    textContent: "512×512の透過PNGから、待機・呼吸・左右揺れ・まばたき・口パクなど17キーポーズ／42フレームを生成します。WindowsはVRAMに合わせてモデルを自動調整し、Apple Silicon MacはMPSを使います。",
-  });
-  const tha3Credit = el("p", {
-    className: "hint",
-    textContent: "THA3: © Pramook Khungurn (pkhungurn)。コード MIT License、学習済みモデル CC BY 4.0。",
-  });
-  const tha3ToolStatus = el("div", { className: "tha3-tool-status", textContent: "制作ツールを確認中…" });
-  const tha3RootField = field("PICOAGENT_THA3_ROOT", "使用するTHA3フォルダ", "text", v.PICOAGENT_THA3_ROOT ?? "", "作者配布から用意したTHA3フォルダを選択");
-  const tha3RootInput = inputs.get("PICOAGENT_THA3_ROOT");
-  tha3RootInput.readOnly = true;
-  const pickTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "THA3フォルダを選ぶ" });
-  const clearTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "選択解除" });
-  const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "透過PNGを選んでください" });
-  const sourcePreview = el("img", { className: "tha3-source-preview", alt: "選択した立ち絵のプレビュー" });
-  sourcePreview.hidden = true;
-  const pickSourceButton = el("button", { className: "secondary", type: "button", textContent: "画像を選ぶ" });
-  const sourceActions = el("div", { className: "character-add-actions" }, [pickSourceButton]);
-  const idInput = el("input", {
-    type: "text",
-    value: `custom-${Date.now().toString(36)}`,
-    placeholder: "例: my-character",
-    maxLength: 64,
-  });
-  const nameInput = el("input", { type: "text", value: "マイキャラ", maxLength: 80 });
-  const createButton = el("button", { className: "primary", type: "button", textContent: "キャラクターを作成" });
-  const cancelButton = el("button", { className: "secondary", type: "button", textContent: "生成をキャンセル" });
-  cancelButton.hidden = true;
-  const progress = el("pre", { className: "tha3-progress", textContent: "" });
-  progress.hidden = true;
-  const createStatus = el("p", { className: "hint" });
-  let selectedSource = "";
-  let selectedTha3Root = tha3RootInput.value.trim();
-  let toolReady = false;
-  let tha3ControlBusy = false;
-
-  function updateCreateEnabled() {
-    createButton.disabled = tha3GenerationRunning || !toolReady || !selectedSource || !idInput.value.trim() || !nameInput.value.trim();
-    pickSourceButton.disabled = tha3GenerationRunning || tha3ControlBusy;
-    pickTha3RootButton.disabled = tha3GenerationRunning || tha3ControlBusy;
-    clearTha3RootButton.disabled = tha3GenerationRunning || tha3ControlBusy;
-    idInput.disabled = tha3GenerationRunning;
-    nameInput.disabled = tha3GenerationRunning;
-    cancelButton.hidden = !tha3GenerationRunning;
-  }
-
-  async function withTha3ControlsLocked(task) {
-    if (tha3GenerationRunning || tha3ControlBusy) return;
-    tha3ControlBusy = true;
-    updateCreateEnabled();
-    try {
-      await task();
-    } finally {
-      tha3ControlBusy = false;
-      updateCreateEnabled();
-    }
-  }
-
-  pickSourceButton.addEventListener("click", async () => {
-    await withTha3ControlsLocked(async () => {
-      createStatus.textContent = "画像を選択中…";
-      try {
-        const picked = await window.picoagent.settings.pickTha3Source();
-        if (!picked?.path) {
-          createStatus.textContent = "画像選択をキャンセルしました。";
-          return;
-        }
-        selectedSource = picked.path;
-        sourceInput.value = picked.path;
-        sourcePreview.src = picked.dataUrl;
-        sourcePreview.onerror = () => { sourcePreview.hidden = true; };
-        sourcePreview.hidden = false;
-        createStatus.textContent = "画像を選びました。512×512・背景透過・正面向きか確認してください。";
-      } catch (error) {
-        createStatus.textContent = `画像を選べませんでした: ${error?.message || error}`;
-        logApp("warn", "THA3入力画像を選べませんでした", errorDetail(error));
-      }
-    });
-  });
-  idInput.addEventListener("input", updateCreateEnabled);
-  nameInput.addEventListener("input", updateCreateEnabled);
-
-  async function refreshTha3Status(rootPath = null) {
-    const tha3Status = await window.picoagent.settings.tha3Status(rootPath);
-    toolReady = Boolean(tha3Status.ready);
-    // 自動検出パスは保存せず、ユーザーが選んだパスだけを保存して次回も確認する。
-    selectedTha3Root = rootPath ? tha3Status.root : "";
-    if (rootPath && tha3Status.root && tha3RootInput.value !== tha3Status.root) {
-      tha3RootInput.value = tha3Status.root;
-      tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    tha3ToolStatus.textContent = toolReady
-      ? `制作ツール準備済み: ${tha3Status.root}`
-      : `${tha3Status.installHint} 本体=${tha3Status.sourceReady ? "OK" : "不足"}、モデル=${tha3Status.modelReady ? "OK" : "不足"}、Python=${tha3Status.runtimeReady ? "OK" : "不足"}。確認先: ${tha3Status.root}`;
-    tha3ToolStatus.classList.toggle("ready", toolReady);
-    updateCreateEnabled();
-  }
-
-  pickTha3RootButton.addEventListener("click", async () => {
-    await withTha3ControlsLocked(async () => {
-      createStatus.textContent = "THA3フォルダを選択中…";
-      try {
-        const picked = await window.picoagent.settings.pickTha3Root();
-        if (!picked?.path) {
-          createStatus.textContent = "フォルダ選択をキャンセルしました。";
-          return;
-        }
-        await refreshTha3Status(picked.path);
-        createStatus.textContent = toolReady ? "THA3制作ツールを確認しました。" : "必要な本体またはモデルが不足しています。";
-      } catch (error) {
-        toolReady = false;
-        selectedTha3Root = "";
-        tha3ToolStatus.classList.remove("ready");
-        tha3ToolStatus.textContent = `選択したフォルダを使えません: ${error?.message || error}`;
-        createStatus.textContent = "THA3フォルダを確認できませんでした。";
-        logApp("warn", "THA3フォルダを確認できませんでした", errorDetail(error));
-      }
-    });
-  });
-  clearTha3RootButton.addEventListener("click", async () => {
-    await withTha3ControlsLocked(async () => {
-      tha3RootInput.value = "";
-      tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
-      selectedTha3Root = "";
-      createStatus.textContent = "保存するとTHA3フォルダの選択を解除します。";
-      try {
-        await refreshTha3Status("");
-      } catch (error) {
-        toolReady = false;
-        tha3ToolStatus.classList.remove("ready");
-        tha3ToolStatus.textContent = `自動検出先を確認できませんでした: ${error?.message || error}`;
-        logApp("warn", "THA3フォルダの選択解除後に自動検出先を確認できませんでした", errorDetail(error));
-      }
-    });
-  });
-
-  await replaceSettingsListener("tha3-progress", "tha3:progress", event => {
-    const line = String(event?.message || "").trim();
-    if (!line) return;
-    progress.hidden = false;
-    progress.textContent = tail(`${progress.textContent}${progress.textContent ? "\n" : ""}${line}`, 6000);
-    progress.scrollTop = progress.scrollHeight;
-  });
-
-  cancelButton.addEventListener("click", async () => {
-    cancelButton.disabled = true;
-    createStatus.textContent = "生成を停止し、GPUと一時ファイルを解放しています…";
-    try {
-      await window.picoagent.settings.cancelTha3Generation();
-    } catch (error) {
-      createStatus.textContent = `キャンセル要求に失敗しました: ${error?.message || error}`;
-      logApp("warn", "THA3生成のキャンセル要求に失敗しました", errorDetail(error));
-      cancelButton.disabled = false;
-    }
-  });
-
-  createButton.addEventListener("click", async () => {
-    tha3GenerationRunning = true;
-    progress.textContent = "";
-    progress.hidden = false;
-    createStatus.textContent = "生成中です。初回はモデル読込を含め数分かかることがあります…";
-    updateCreateEnabled();
-    try {
-      const result = await window.picoagent.settings.generateTha3Character(
-        selectedSource,
-        selectedTha3Root,
-        idInput.value.trim(),
-        nameInput.value.trim(),
-      );
-      createStatus.textContent = `${result.name}（${result.id}）を作成しました。`;
-      statusEl.textContent = `${result.name}を追加しました。キャラクター一覧を更新します。`;
-      data.values = collect();
-      tha3GenerationRunning = false;
-      await render();
-      activateSettingsTab("character");
-    } catch (error) {
-      createStatus.textContent = `作成できませんでした: ${error?.message || error}`;
-      logApp("error", "THA3キャラクター生成に失敗しました", errorDetail(error));
-    } finally {
-      tha3GenerationRunning = false;
-      cancelButton.disabled = false;
-      updateCreateEnabled();
-    }
-  });
-
-  try {
-    await refreshTha3Status(selectedTha3Root || null);
-  } catch (error) {
-    tha3ToolStatus.textContent = `制作ツールを確認できませんでした: ${error?.message || error}`;
-    logApp("warn", "THA3制作ツールの状態を確認できませんでした", errorDetail(error));
-  }
-  updateCreateEnabled();
-  tha3Sec.append(
-    tha3Hint,
-    tha3Credit,
-    tha3ToolStatus,
-    tha3RootField,
-    el("div", { className: "character-add-actions" }, [pickTha3RootButton, clearTha3RootButton]),
-    el("div", { className: "field" }, [el("label", { textContent: "元画像" }), sourceInput, sourceActions]),
-    sourcePreview,
-    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), idInput]),
-    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), nameInput]),
-    el("div", { className: "character-add-actions" }, [createButton, cancelButton]),
-    progress,
-    createStatus,
-  );
-
   // --- キャラクターを自分で追加する ---
   // 同梱キャラは実行ファイルへ焼き込まれているため増減できない。追加分はユーザー領域
   // （app_data_dir/characters）へ入れる。導入は検証を通ってから確定するので、
@@ -3560,7 +3338,7 @@ async function render() {
   }
   panels.character.append(charSec, characterSec);
   panels.voice.append(voiceSec);
-  panels["character-register"].append(addSec, tha3Sec);
+  panels["character-register"].append(addSec);
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("AIサービスごとの設定");

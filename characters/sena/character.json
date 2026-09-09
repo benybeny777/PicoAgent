@@ -1,7 +1,6 @@
 {
   "id": "sena",
   "name": "セナ",
-  "assetVersion": "lossless-webp-8f5f3f11d7b22fa3",
   "description": "銀青色のハイポニーと星空色の衣装が印象的な、凛とした18歳の歌姫系作業相棒。",
   "motionProfile": "full",
   "defaultFraming": {
@@ -10,9 +9,6 @@
     "y": 20
   },
   "greeting": "セナだよ。今日のステージも、きれいに仕上げようか。",
-  "boot": {
-    "sleeping": "preview.png"
-  },
   "persona": {
     "personality": "18歳の、涼やかで芯の強い歌姫系の作業相棒。落ち着いて状況を整理し、難しい作業にも前向きに伴走する。自信はあるが高圧的にはならない",
     "speechStyle": "端的で歯切れのよい自然な日本語。結論、重要な理由、次の一手の順で話す。時々ステージや星にたとえるが、毎回は使わない",
@@ -43,144 +39,9 @@
     "strength": 0.4,
     "duration": 4.0
   },
-  "animations": {
-    "idle": {
-      "frames": 12,
-      "fps": 3.2,
-      "frameDurations": [
-        760,
-        760,
-        760,
-        520,
-        70,
-        90,
-        70,
-        760,
-        760,
-        760,
-        760,
-        1100
-      ],
-      "motion": "live2d-idle",
-      "framePaths": [
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp",
-        "frames/8f5f3f11d7b22fa3/db13fd70ff9d0ea3be49.webp",
-        "frames/8f5f3f11d7b22fa3/db13fd70ff9d0ea3be49.webp",
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp",
-        "frames/8f5f3f11d7b22fa3/d7a9e4a4b53e6d17816c.webp",
-        "frames/8f5f3f11d7b22fa3/d1749269cddb5ecae20b.webp",
-        "frames/8f5f3f11d7b22fa3/3d66f52075965318867d.webp",
-        "frames/8f5f3f11d7b22fa3/db13fd70ff9d0ea3be49.webp",
-        "frames/8f5f3f11d7b22fa3/db13fd70ff9d0ea3be49.webp",
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp",
-        "frames/8f5f3f11d7b22fa3/4f7ab001d47f216ff66b.webp",
-        "frames/8f5f3f11d7b22fa3/4f7ab001d47f216ff66b.webp"
-      ]
-    },
-    "thinking": {
-      "frames": 12,
-      "fps": 7.0,
-      "frameDurations": [
-        180,
-        150,
-        120,
-        170,
-        150,
-        170,
-        120,
-        120,
-        170,
-        150,
-        170,
-        150
-      ],
-      "motion": "live2d-thinking",
-      "framePaths": [
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp",
-        "frames/8f5f3f11d7b22fa3/db13fd70ff9d0ea3be49.webp",
-        "frames/8f5f3f11d7b22fa3/734f2924e62dac4b382a.webp",
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp",
-        "frames/8f5f3f11d7b22fa3/4f7ab001d47f216ff66b.webp",
-        "frames/8f5f3f11d7b22fa3/4f7ab001d47f216ff66b.webp",
-        "frames/8f5f3f11d7b22fa3/435f72197a8174837daa.webp",
-        "frames/8f5f3f11d7b22fa3/734f2924e62dac4b382a.webp",
-        "frames/8f5f3f11d7b22fa3/db13fd70ff9d0ea3be49.webp",
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp",
-        "frames/8f5f3f11d7b22fa3/4f7ab001d47f216ff66b.webp",
-        "frames/8f5f3f11d7b22fa3/dde70c40ec92fe51819d.webp"
-      ]
-    },
-    "talking": {
-      "frames": 12,
-      "fps": 8.0,
-      "frameDurations": [
-        120,
-        90,
-        75,
-        120,
-        120,
-        120,
-        75,
-        120,
-        90,
-        120,
-        75,
-        140
-      ],
-      "motion": "live2d-talking",
-      "framePaths": [
-        "frames/8f5f3f11d7b22fa3/52bc52aab213ea2a80ee.webp",
-        "frames/8f5f3f11d7b22fa3/cb16e123a6a92dd42666.webp",
-        "frames/8f5f3f11d7b22fa3/9b96e10263c596c6f734.webp",
-        "frames/8f5f3f11d7b22fa3/52bc52aab213ea2a80ee.webp",
-        "frames/8f5f3f11d7b22fa3/0728631cccca0f9737fd.webp",
-        "frames/8f5f3f11d7b22fa3/0728631cccca0f9737fd.webp",
-        "frames/8f5f3f11d7b22fa3/9b96e10263c596c6f734.webp",
-        "frames/8f5f3f11d7b22fa3/cb16e123a6a92dd42666.webp",
-        "frames/8f5f3f11d7b22fa3/734f2924e62dac4b382a.webp",
-        "frames/8f5f3f11d7b22fa3/52bc52aab213ea2a80ee.webp",
-        "frames/8f5f3f11d7b22fa3/fd91a0d7d74d3dfe4215.webp",
-        "frames/8f5f3f11d7b22fa3/0728631cccca0f9737fd.webp"
-      ]
-    },
-    "sad": {
-      "frames": 6,
-      "fps": 4.2,
-      "frameDurations": [
-        320,
-        110,
-        150,
-        120,
-        420,
-        560
-      ],
-      "motion": "live2d-sad",
-      "framePaths": [
-        "frames/8f5f3f11d7b22fa3/333bc29c7e887353a38b.webp",
-        "frames/8f5f3f11d7b22fa3/4529209c5d0014460a00.webp",
-        "frames/8f5f3f11d7b22fa3/d1749269cddb5ecae20b.webp",
-        "frames/8f5f3f11d7b22fa3/333bc29c7e887353a38b.webp",
-        "frames/8f5f3f11d7b22fa3/66eebf6e230ec02c4abb.webp",
-        "frames/8f5f3f11d7b22fa3/333bc29c7e887353a38b.webp"
-      ]
-    }
-  },
-  "animationQualityMode": "sharp-expression",
-  "frameGeneration": "8f5f3f11d7b22fa3",
-  "runtimeLayers": {
-    "base": "runtime-layers/base.webp",
-    "blink_half": "runtime-layers/blink_half.webp",
-    "blink_closed": "runtime-layers/blink_closed.webp",
-    "mouth_closed": "runtime-layers/mouth_closed.webp",
-    "mouth_open": "runtime-layers/mouth_open.webp",
-    "gaze_left": "runtime-layers/gaze_left.webp",
-    "gaze_right": "runtime-layers/gaze_right.webp",
-    "expression_happy": "runtime-layers/expression_happy.webp",
-    "expression_sad": "runtime-layers/expression_sad.webp"
-  },
-  "runtimeLayerEncoding": "webp-lossless-v1",
-  "frameEncoding": "webp-lossless-v1",
+  "sourceFraming": "native-full",
   "meshRig": {
-    "rig": "mesh-rig/rig.json"
-  }
+    "rig": "rig2d/rig.json"
+  },
+  "assetVersion": "lvs-schema3-7c5be219181b5e45"
 }

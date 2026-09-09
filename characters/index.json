@@ -8,36 +8,22 @@
       "name": "むぎ"
     },
     {
-      "bootSleeping": true,
       "description": "口は強いけれど面倒見がいいツンデレ作業相棒。",
       "id": "rin",
       "manifest": "rin/character.json",
       "name": "りん"
     },
     {
-      "bootSleeping": true,
       "description": "おっとりして優しいお姉さん作業相棒。",
       "id": "mai",
       "manifest": "mai/character.json",
       "name": "まい"
     },
     {
-      "description": "親しみやすく穏やかな18歳の通常2D作業相棒。",
-      "id": "koharu",
-      "manifest": "koharu/character.json",
-      "name": "こはる"
-    },
-    {
       "description": "凛とした18歳の歌姫系通常2D作業相棒。",
       "id": "sena",
       "manifest": "sena/character.json",
       "name": "セナ"
-    },
-    {
-      "description": "上品で面倒見のよい18歳のツンデレ通常2D作業相棒。",
-      "id": "noa",
-      "manifest": "noa/character.json",
-      "name": "ノア"
     },
     {
       "description": "Live2Dで動く元気いっぱいの作業相棒。",
@@ -76,22 +62,16 @@
       "name": "わんこ"
     },
     {
-      "description": "自作（THA3）版。既存のりんとは別キャラクターとして扱われる、17キーポーズ／42フレームの試作モデル。人格・声・挨拶は既存のりんと同じ。",
-      "id": "rin-tha3",
-      "manifest": "rin-tha3/character.json",
-      "name": "りん"
-    },
-    {
       "description": "ピンクのショートヘアと地雷系衣装の、実写調バネ物理テストキャラクター。",
       "id": "photoreal-prototype",
       "manifest": "photoreal-prototype/character.json",
       "name": "実写・物理演算テスト"
     },
     {
-      "description": "LocalVTuberStudioで生成した独自2.5D形式の作業相棒。",
-      "id": "female-a-lvs",
-      "manifest": "female-a-lvs/character.json",
-      "name": "女性A"
+      "description": "紺色のボブと星の髪飾りが目印の、冷静で好奇心旺盛な作業相棒。",
+      "id": "aoi",
+      "manifest": "aoi/character.json",
+      "name": "あおい"
     },
     {
       "description": "むぎの通常頭身立ち絵をLocalVTuberStudioで生成した独自2.5D作業相棒。",

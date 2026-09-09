@@ -232,7 +232,6 @@
 | `PICOAGENT_AGENT_CLI_PATH` | （空=種類から自動） | agent_cli | CLI の実行パス |
 | `PICOAGENT_AGENT_CLI_ARGS` | （空） | agent_cli | CLI へ追加する引数。Claude / Codex の安全な非対話引数は常に別途付加 |
 | `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | agent_cli | 1回の応答を待つ秒数（10〜600） |
-| `PICOAGENT_THA3_ROOT` | 空 | THA3キャラクター制作 | 作者配布から利用者が用意したTHA3本体・モデル・Python環境のフォルダ。設定画面で選択して保存し、共通許可ルートで検証する |
 | `PICOAGENT_DESKTOP_ENABLED` | `false` | desktop_control | デスクトップ操作（マウス・キーボード）の有効化（既定は無効） |
 | `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | desktop_control | 1分あたりの操作回数の上限（1〜600）。暴走時の歯止め |
 | `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |

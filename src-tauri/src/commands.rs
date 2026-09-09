@@ -1596,115 +1596,6 @@ pub fn settings_export_diagnostics(
     Ok(json!({ "path": path.to_string_lossy() }))
 }
 
-/// THA3制作ツールと学習済みモデルがGUI生成に使える状態か返す。
-#[tauri::command]
-pub fn settings_tha3_status(
-    app: AppHandle,
-    root_path: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    crate::tha3_creator::status(&app, &state.config, root_path.as_deref())
-        .map(|status| json!(status))
-        .map_err(|error| format!("{error:#}"))
-}
-
-/// 自動検出できない場合にTHA3本体のフォルダを選ぶ。
-#[tauri::command]
-pub async fn settings_tha3_pick_root(app: AppHandle) -> Result<Value, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.dialog().clone().file().pick_folder(move |picked| {
-        let _ = sender.send(picked.map(|path| path.to_string()));
-    });
-    let picked = receiver
-        .await
-        .map_err(|_| "THA3フォルダ選択の結果を受け取れませんでした。".to_string())?;
-    Ok(json!({ "path": picked }))
-}
-
-/// THA3へ渡す透過PNGをネイティブダイアログで選ぶ。
-#[tauri::command]
-pub async fn settings_tha3_pick_source(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    use base64::Engine;
-    use tauri_plugin_dialog::DialogExt;
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .clone()
-        .file()
-        .add_filter("THA3入力画像", &["png"])
-        .pick_file(move |picked| {
-            let _ = sender.send(picked.map(|path| path.to_string()));
-        });
-    let picked = receiver
-        .await
-        .map_err(|_| "画像選択の結果を受け取れませんでした。".to_string())?;
-    let Some(path) = picked else {
-        return Ok(json!({ "path": Value::Null, "dataUrl": Value::Null }));
-    };
-    let safe = crate::permissions::resolve(&state.config, &path)?;
-    if safe.extension_lossy() != "png" {
-        return Err("入力画像はPNGを選んでください。".to_string());
-    }
-    let metadata = crate::permissions::fs::metadata(&safe)?;
-    if metadata.len() > 20 * 1024 * 1024 {
-        return Err("入力画像は20MB以内にしてください。".to_string());
-    }
-    let bytes = crate::permissions::fs::read(&safe)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(json!({
-        "path": path,
-        "dataUrl": format!("data:image/png;base64,{encoded}"),
-    }))
-}
-
-/// 1枚絵からTHA3自作キャラクターを生成し、追加キャラクター領域へ導入する。
-#[tauri::command]
-pub async fn settings_tha3_generate(
-    app: AppHandle,
-    source_path: String,
-    tha3_root_path: Option<String>,
-    id: String,
-    name: String,
-    app_state: State<'_, AppState>,
-    creator_state: State<'_, crate::tha3_creator::Tha3CreatorState>,
-) -> Result<Value, String> {
-    match crate::tha3_creator::generate(
-        app.clone(),
-        &creator_state,
-        &app_state.config,
-        &source_path,
-        tha3_root_path.as_deref(),
-        &id,
-        &name,
-    )
-    .await
-    {
-        Ok((generated_id, generated_name)) => {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("THA3でキャラクター {generated_name} ({generated_id}) を生成しました。"),
-            );
-            Ok(json!({ "ok": true, "id": generated_id, "name": generated_name }))
-        }
-        Err(error) => {
-            let message = format!("THA3キャラクター生成に失敗しました: {error:#}");
-            crate::log_paths::append_app_log(&app, &message);
-            Err(message)
-        }
-    }
-}
-
-/// 実行中のTHA3生成を中断する。子プロセスはkill後にwaitして回収する。
-#[tauri::command]
-pub fn settings_tha3_cancel(
-    creator_state: State<'_, crate::tha3_creator::Tha3CreatorState>,
-) -> Value {
-    json!({ "cancelled": crate::tha3_creator::cancel(&creator_state) })
-}
-
 #[tauri::command]
 pub async fn pet_send(
     text: String,
@@ -2426,7 +2317,7 @@ fn aivis_voice(model_uuid: &str, speaker_uuid: &str, style_name: &str) -> TtsVoi
 
 fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
     match character_id {
-        "rin" | "rin-tha3" => Some(TtsVoice {
+        "rin" => Some(TtsVoice {
             speaker: RIN_AIVIS_SPEAKER.to_string(),
             model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
             speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
@@ -2442,6 +2333,11 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             HIYORI_AIVIS_MODEL_UUID,
             HIYORI_AIVIS_SPEAKER_UUID,
             "あまあま",
+        )),
+        "aoi" => Some(aivis_voice(
+            HIYORI_AIVIS_MODEL_UUID,
+            HIYORI_AIVIS_SPEAKER_UUID,
+            "おちつき",
         )),
         "hiyori" => Some(aivis_voice(
             HIYORI_AIVIS_MODEL_UUID,
@@ -5105,7 +5001,6 @@ mod tests {
         let expected = [
             ("mugi", "あまあま"),
             ("rin", "ノーマル"),
-            ("rin-tha3", "ノーマル"),
             ("mai", "ノーマル"),
             ("hiyori", "ふつー"),
             ("haru", "ノーマル"),

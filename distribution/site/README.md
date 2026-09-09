@@ -33,14 +33,14 @@ Live2Dの「ひより」は動作例です。ほかのモデルは下の一覧�
 | キャラクター | 通常表示 | 配信表示 |
 |---|---|---|
 | **むぎ** — 明るく寄り添う作業相棒 | ![むぎ通常](assets/character-mugi.webp) | ![むぎ配信](assets/character-mugi-stream.webp) |
+| **むぎ（通常頭身）** — 同じ人格の通常頭身2.5D | ![通常頭身むぎ通常](assets/character-mugi-normal-lvs.webp) | ![通常頭身むぎ配信](assets/character-mugi-normal-lvs-stream.webp) |
 | **りん** — 面倒見がいいツンデレ作業相棒 | ![りん通常](assets/character-rin.webp) | ![りん配信](assets/character-rin-stream.webp) |
 | **まい** — 包容力のあるやさしいお姉さん | ![まい通常](assets/character-mai.webp) | ![まい配信](assets/character-mai-stream.webp) |
-| **こはる** — 親しみやすい作業相棒 | ![こはる通常](assets/character-koharu.webp) | ![こはる配信](assets/character-koharu-stream.webp) |
 | **セナ** — 凛とした歌姫系作業相棒 | ![セナ通常](assets/character-sena.webp) | ![セナ配信](assets/character-sena-stream.webp) |
-| **ノア** — 上品な吸血姫風メイド | ![ノア通常](assets/character-noa.webp) | ![ノア配信](assets/character-noa-stream.webp) |
-| **実写2Dテスト** — 84フレームと目・口7段階を持つ成人キャラクター | ![実写通常](assets/character-photoreal-prototype.webp) | ![実写配信](assets/character-photoreal-prototype-stream.webp) |
+| **あおい** — 冷静で好奇心旺盛な作業相棒 | ![あおい通常](assets/character-aoi.webp) | ![あおい配信](assets/character-aoi-stream.webp) |
+| **実写2Dテスト** — 同じ描画経路を検証する成人キャラクター | ![実写通常](assets/character-photoreal-prototype.webp) | ![実写配信](assets/character-photoreal-prototype-stream.webp) |
 
-全7体が、目7段階のまばたき、口7段階の口パク、視線、喜び／悲しみ、待機モーションに対応します。6体は各42フレーム、実写2Dテストは84フレームです。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。
+全7体が、独立PNGパーツによる連続まばたき、母音に応じた2軸口パク、視線、表情、待機モーションに対応します。表示中は画像生成モデルを動かさず、PicoAgentの共通2.5D描画だけを使います。
 
 低頭身2Dは上半身、長身・実写・Live2Dは胸全体がぎりぎり入る胸上、チャット／バーの小型アイコンは首上を初期構図にします。利用者が保存したキャラ別構図は初期値より優先します。
 

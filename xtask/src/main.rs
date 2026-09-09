@@ -39,7 +39,7 @@ const USAGE: &str = "\
   update-feed <配布物> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
-  setup <対象…>        取得対象は all / engine / aivis / whisper / pixi / live2d / live2d-samples / tha3 / office / tools
+  setup <対象…>        取得対象は all / engine / aivis / whisper / pixi / live2d / live2d-samples / office / tools
                       （不要な大容量取得を防ぐため対象指定は必須）
   sync-characters [--force] characters/ を ui/assets/characters/ へ差分同期（--force で全再構築）
   character-pack      2Dキャラクターパックを検証・導入
@@ -51,7 +51,6 @@ const USAGE: &str = "\
 例:
   cargo xtask dev
   cargo xtask setup tools
-  cargo xtask setup tha3
   cargo xtask setup live2d-samples
   TOOLS_FORCE=1 cargo xtask setup tools
   cargo xtask cli chat 今日の天気は？";
@@ -161,10 +160,8 @@ struct Build {
 ///
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
-    // THA3も開発環境で制作機能をすぐ確認できるよう一括取得へ含める。
-    // 販売用軽量版には再配布せず、利用者が作者配布物を用意して設定する。
     let all = [
-        "pixi", "live2d", "engine", "aivis", "whisper", "tha3", "office", "tools",
+        "pixi", "live2d", "engine", "aivis", "whisper", "office", "tools",
     ];
     anyhow::ensure!(
         !targets.is_empty(),
@@ -184,12 +181,11 @@ fn setup(targets: &[String]) -> Result<()> {
             "pixi" => bundled::fetch_pixi_runtime()?,
             "live2d" => bundled::fetch_live2d_runtime()?,
             "live2d-samples" => bundled::fetch_live2d_samples()?,
-            "tha3" => bundled::fetch_tha3()?,
             "aivis" => office::fetch_aivis()?,
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / live2d-samples / tha3 / office / tools）"
+                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / live2d-samples / office / tools）"
             ),
         }
     }
@@ -235,7 +231,6 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
                 bail!("同梱 Whisper を取得できませんでした");
             }
         }
-        bundled::fetch_tha3()?;
         office::fetch_office()?;
         tools::fetch_all()?;
     }
@@ -365,11 +360,11 @@ mod tests {
             super::product_characters_for_build(true).unwrap().unwrap(),
             [
                 "mugi",
+                "mugi-normal-lvs",
                 "rin",
                 "mai",
-                "koharu",
                 "sena",
-                "noa",
+                "aoi",
                 "photoreal-prototype"
             ]
         );

@@ -58,9 +58,12 @@
       <h2>表示</h2>
       <label>キャラクター
         <select id="character">
-          <option value="female-a">女性A</option>
+          <option value="aoi">あおい</option>
           <option value="mugi">むぎ（SD）</option>
           <option value="mugi-normal">むぎ（通常頭身）</option>
+          <option value="rin">りん</option>
+          <option value="mai">まい</option>
+          <option value="sena">セナ</option>
           <option value="photoreal">実写テスト</option>
         </select>
       </label>
@@ -118,15 +121,18 @@
     "use strict";
     const query = new URLSearchParams(location.search);
     const packs = {
-      "female-a": {
-        root: "/characters/female-a-lvs",
+      "aoi": {
+        root: "/characters/aoi",
         source: "preview.png",
       },
       mugi: { root: "/characters/mugi", source: "preview.png" },
       "mugi-normal": { root: "/characters/mugi-normal-lvs", source: "source.png" },
+      rin: { root: "/characters/rin", source: "preview.png" },
+      mai: { root: "/characters/mai", source: "preview.png" },
+      sena: { root: "/characters/sena", source: "preview.png" },
       photoreal: { root: "/characters/photoreal-prototype", source: "preview.png" },
     };
-    const initialCharacter = query.get("character") || "female-a";
+    const initialCharacter = query.get("character") || "aoi";
     const status = document.getElementById("status");
     let controller = null;
     let demoGeneration = 0;
@@ -203,7 +209,7 @@
       controller?.setMouth(0, 0);
     }
     async function loadCharacter(characterId) {
-      const pack = packs[characterId] || packs["female-a"];
+      const pack = packs[characterId] || packs.aoi;
       const packRoot = pack.root;
       demoGeneration += 1;
       motionGeneration += 1;
@@ -254,7 +260,7 @@
     }
     async function main() {
       const selector = document.getElementById("character");
-      selector.value = packs[initialCharacter] ? initialCharacter : "female-a";
+      selector.value = packs[initialCharacter] ? initialCharacter : "aoi";
       await loadCharacter(selector.value);
     }
     document.querySelectorAll("[data-mouth]").forEach(button => button.addEventListener("click", () => {

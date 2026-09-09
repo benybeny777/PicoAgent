@@ -48,31 +48,6 @@ characters/<id>/
 - `boot/sleeping.png` は横向きに寝ている構図にし、むぎ・りん・まいで同じローディング画面に見える比率にする。
 - 背景は透過 PNG にする。AI 生成で緑背景を使った場合は chroma key 除去後の PNG だけを `boot/` や `layers/` に置く。
 
-## THA3で1枚絵から自作キャラを追加する
-
-[Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使う経路では、1枚の立ち絵から必須5差分だけでなく、待機・呼吸・左右揺れ・思考・会話・落胆を含む**17キーポーズ**を作る。続けて既存の `build-character-animations.py` が42枚の実行用連番へ変換し、キャラ一覧と配信コピーにも登録する。
-
-```powershell
-cargo xtask setup tha3
-python scripts/build-tha3-layers.py my-character --input C:\images\source.png --name "マイキャラ"
-```
-
-GUIでは右クリック →「設定…」→「キャラクター」→「1枚絵からキャラクターを作成（THA3）」を使う。画像選択、ID・表示名、進捗、キャンセルを画面内で扱い、生成後は共通のキャラクターパック検証を通ったものだけが追加一覧へ入る。コマンド版はリポジトリ正本へ追加する制作経路として引き続き利用できる。
-
-- 入力は512x512のRGBA PNG。背景はalpha=0、1人の人型キャラを正面直立で全身配置し、頭は上半分中央の128x128付近、手は頭から離す。機械検査できない正面向き・人数・手の位置は実行前に目視確認する。
-- Python・PyTorch・モデルはPicoAgent専用領域へ準備され、グローバルPythonや既存環境へ干渉しない。WindowsはCUDA対応NVIDIA GPU（VRAM 4GB以上）を使い、VRAM量に合わせて3モデルから自動選択する。Apple Silicon MacはMPS、Intel Macは対象外。これらを読み込むのは制作時だけで、通常動作と生成済みキャラ表示には使わない。
-- 口は `aaa` / `iii` / `uuu` / `eee` / `ooo` / `delta` の候補から、顔の口元だけを見比べて閉じ口との差が最大のものを自動選択する。差が見えない小さなデフォルメ口だけ、同じ比較窓の差分重心（差分が無ければ窓の中心）へ小さな口を合成して補正する。
-- 全レイヤーは基準ポーズの被写体範囲（頭・身体の振れ幅ぶん少し広げた箱）で切り出し、縦横比を保ったまま890×1800の下端中央へ揃える。位置合わせは常に基準ポーズ基準なので、一部レイヤーだけ作り直しても他とずれない。
-- THA3の元出力は512×512で、全身の実画素数には限界がある。890×1800へ拡大しただけでは詳細は増えないため、同梱の `koharu` / `sena` / `noa` は高精細な `preview.png` と局所的な半目・閉眼・口差分を正本にし、`animationQualityMode=sharp-expression` でぼけたTHA3全身ポーズへ切り替えない。半目は閉眼の透明度変更ではなく専用作画を使う。`scripts/build-sharp-expression-layers.py` が基本5レイヤーと連番を再生成し、`scripts/finish-sharp-expression-assets.ps1` がPhotoshop「ディテールを保持 2.0」で1780×3600へ仕上げて元アルファを再適用する。胸元の二次動作は広いフェザーと小さい縦変形だけを使い、本体との境界を見せない。一般のTHA3自作キャラは従来どおり890×1800へ正規化する。
-- 生成済みの左右思考レイヤーは、待機中のランダム視線とカーソル追従にも使う。読み上げ中は音量連動の口パク、待機中はまばたきと視線を優先する（よそ見中はまばたきを見送り、正面顔へ一瞬戻らないようにする）。
-- `--force`なしでは既存の `layers/*.png` を上書きしない。ただし残す既存レイヤーの寸法が現在の出力寸法と違う場合は、混ざったまま連番アニメが破綻するのを避けるため停止して `--force` での作り直しを促す。生成途中はリポジトリ直下の `temp/` だけを使う。
-- 新規IDでは `source.png`、`preview.png`、`character.json`、連番、一覧登録まで作る。通常は表示名に「（自作）」、マニフェストには `generator.type=tha3` を記録する。同じ表示名でもIDが異なれば履歴・関係性を含めて別キャラクターになり、説明と生成元情報で識別できる。人格・挨拶・声は生成後に `character.json` で調整する。
-- THA3自作キャラを消す場合は `python scripts/build-tha3-layers.py my-character --remove`。組み込み・手動管理キャラは拒否し、対象フォルダは物理削除せずOSのゴミ箱へ移す。
-- ひよりのLive2Dは毎フレーム連続変形するため、PNG連番で完全に同じにはならない。この経路は既存5枚構成より頭・身体・呼吸の動きを増やす経路で、本物のLive2D化は後半の手順を使う。
-- 既存PNGキャラの比較試作は元IDを上書きせず別IDで作る。りん・まいは動きが増える可能性がある一方、再生成で顔や輪郭が変わる場合がある。Live2Dキャラと既知のむぎ素材は自動変換しない。
-
-THA3コードはMIT License、学習済みモデルはCC BY 4.0。作者Pramook Khungurn（pkhungurn）とTHA3プロジェクトへの帰属表示が必要。コードと3モデルは `src-tauri/resources/bundled/tha3/` へ取得して製品に含める（実体はGit管理外）。WindowsのPython／CUDA版PyTorchはインストール時に同じ専用領域へ取得し、Apple Silicon MacではOS別ランタイムを同梱する。
-
 ## アニメーション生成
 
 全キャラを生成する:
@@ -105,7 +80,7 @@ cargo xtask sync-characters
 既存の連番だけを共有化する場合は `--compact-only` を使う。
 
 ```powershell
-uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only
+uv run --with pillow python scripts/build-character-animations.py mugi --compact-only
 ```
 
 ## ローディング画像の確認

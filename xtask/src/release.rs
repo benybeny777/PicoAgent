@@ -616,11 +616,11 @@ mod tests {
             characters,
             [
                 "mugi",
+                "mugi-normal-lvs",
                 "rin",
                 "mai",
-                "koharu",
                 "sena",
-                "noa",
+                "aoi",
                 "photoreal-prototype"
             ]
         );
@@ -766,8 +766,6 @@ mod tests {
                 ("llama-server.exe", "engine"),
                 ("run.exe", "aivis"),
                 ("whisper-cli.exe", "whisper"),
-                ("python.exe", "tha3"),
-                ("uv.exe", "tha3-bootstrap"),
             ] {
                 assert!(
                     script.contains(&format!(
@@ -889,7 +887,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(joined.contains("bundled/engine"));
-        for optional in ["aivis", "whisper", "tha3", "office", "tools"] {
+        for optional in ["aivis", "whisper", "office", "tools"] {
             assert!(
                 !joined.contains(optional),
                 "{optional} を軽量配布へ入れない"
