@@ -12,12 +12,38 @@ const pose = name => api.MeshRigController.prototype.expressionPose.call({ expre
 const rig = { drawables: { face: { textureBox: [0, 0, 300, 500] } } };
 
 test("中立と顔領域外の頂点は表情で動かさない", () => {
-  for (const name of ["neutral", "happy", "concern", "thinking", "shy"]) {
+  for (const name of ["neutral", "happy", "concern", "thinking", "shy", "angry"]) {
     assert.deepEqual(Array.from(api.expressionDisplacement(rig, 700, 900, pose(name), true)), [0, 0]);
   }
   for (const point of [[90, 180], [190, 200], [110, 340]]) {
     assert.deepEqual(Array.from(api.expressionDisplacement(rig, ...point, pose("neutral"), true)), [0, 0]);
   }
+});
+
+test("怒りと困りは眉頭を逆方向へ動かし赤塗りにしない", () => {
+  assert.ok(pose("angry").browInnerY > 0);
+  assert.ok(pose("concern").browInnerY < 0);
+  assert.equal(pose("angry").blush, 0);
+});
+
+test("発話で上体を駆動し胸は遅れて追従して無音後に収束する", () => {
+  const controller = {
+    rig: { mode: "lvs-anime25d-v1" }, mouth: 0, speechEnvelope: 0,
+    speechBody: { value: 0, velocity: 0 }, chestFollow: { value: 0, velocity: 0 },
+    angleX: 0, updateAnime25dMesh() {},
+  };
+  const tick = () => api.MeshRigController.prototype.updateMesh.call(controller, 0, 1 / 60);
+  for (let i = 0; i < 120; i++) tick();
+  assert.equal(controller.speechBody.value, 0);
+  assert.equal(controller.chestFollow.value, 0);
+  controller.mouth = 0.8;
+  for (let i = 0; i < 20; i++) tick();
+  assert.ok(controller.speechBody.value > 0.1);
+  assert.ok(Math.abs(controller.chestFollow.value - controller.speechBody.value) > 0.01);
+  controller.mouth = 0;
+  for (let i = 0; i < 600; i++) tick();
+  assert.ok(Math.abs(controller.chestFollow.value) < 0.0001);
+  assert.ok(Math.abs(controller.speechBody.value) < 0.0001);
 });
 
 test("実写の笑顔と困り顔は口角を逆方向へ動かす", () => {

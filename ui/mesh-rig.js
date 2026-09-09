@@ -161,7 +161,7 @@
       const envelope = interior ? 1 : x < mouthLeft ? (x - left) / Math.max(1, mouthLeft - left) : (right - x) / Math.max(1, right - mouthRight);
       const bulge = interior ? Math.pow(Math.max(0, Math.sin(Math.PI * u)), 0.8 - 0.3 * roundness) : 0;
       const openBoost = 0.16 * Math.pow(Math.max(0, 1 - Math.pow(shape / 0.65, 2)), 2);
-      const gap = width * (0.42 + 0.12 * roundness + openBoost) * 0.4 * open * (1 - 0.2 * shape) * bulge;
+      const gap = width * (0.42 + 0.12 * roundness + openBoost) * 0.62 * open * (1 - 0.2 * shape) * bulge;
       const dx = (x - centerX) * shape * (0.30 + 0.25 * roundness) * envelope;
       const bend = (shape * 0.055 * (1 - roundness) * (bulge - 0.65)
         + curvature * 0.16 * (bulge - 0.4)) * width * envelope;
@@ -294,7 +294,7 @@
     // 見えるため、外側から中心へ薄い層を重ね、輪郭を弱く中心だけ濃くする。
     const color = anime ? 0xf36f98 : 0xe56f87;
     const scales = Array.from({ length: 12 }, (_, index) => 1 - index * 0.075);
-    const alphas = scales.map((_, index) => (anime ? 0.065 : 0.045) * Math.sin((index + 1) / 13 * Math.PI));
+    const alphas = scales.map((_, index) => (anime ? 0.025 : 0.012) * Math.sin((index + 1) / 13 * Math.PI));
     for (const [ratio, side] of [[0.24, "L"], [0.76, "R"]]) {
       const eye = rig.anchors?.[`eye${side}`];
       const mouth = rig.anchors?.mouth;
@@ -319,7 +319,7 @@
         cheeks.endFill();
       }
       if (anime) {
-        cheeks.lineStyle(Math.max(1, width * 0.006 * textureFit), 0xcf466b, 0.72);
+        cheeks.lineStyle(Math.max(1, width * 0.010 * textureFit), 0xcf7180, 0.32);
         for (const offset of [-0.045, 0, 0.045]) {
           const x = originX + (cheekX + width * offset) * textureFit;
           const y = originY + cheekY * textureFit;
@@ -403,6 +403,9 @@
       this.previousAngleX = 0;
       this.hairPosition = 0;
       this.hairVelocity = 0;
+      this.speechEnvelope = 0;
+      this.speechBody = { value: 0, velocity: 0 };
+      this.chestFollow = { value: 0, velocity: 0 };
       this.secondaryHair = rig.secondaryMotion?.hair || null;
       this.motion = "idle";
       this.expression = "neutral";
@@ -472,6 +475,7 @@
     setMotion(name) {
       const next = String(name || "idle");
       if (/shy/.test(next)) this.expression = "shy";
+      else if (/angry|anger/.test(next)) this.expression = "angry";
       else if (/success|pleased|happy/.test(next)) this.expression = "happy";
       else if (/sad|concern|fail|error/.test(next)) this.expression = "concern";
       else if (/think|search|work/.test(next)) this.expression = "thinking";
@@ -482,11 +486,14 @@
     }
 
     expressionPose() {
+      if (this.expression === "angry") {
+        return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -0.8, browY: -6, browInnerY: 24, blush: 0 };
+      }
       if (this.expression === "shy") {
         return { eye: 1, mouthOpen: 0.04, mouthForm: 0.5, mouthCurve: 0.65, browY: 2, browInnerY: -12, blush: 1 };
       }
       if (this.expression === "happy") {
-        return { eye: 1, mouthOpen: 0.30, mouthForm: 1, mouthCurve: 1, browY: -12, browInnerY: 0, blush: 0 };
+        return { eye: 1, mouthOpen: 0.38, mouthForm: 0.65, mouthCurve: 0.6, browY: -8, browInnerY: 0, blush: 0 };
       }
       if (this.expression === "concern") {
         return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -1.6, browY: 8, browInnerY: -28, blush: 0 };
@@ -736,7 +743,7 @@
               : 0;
             const chestWeight = horizontalWeight * verticalWeight;
             x = neck.cx + (x - neck.cx) * (1 + chestPulse * 0.004 * chestWeight);
-            y -= chestPulse * 2.4 * chestWeight;
+            y -= (chestPulse * 0.7 + (this.chestFollow.value - this.speechBody.value) * torsoHeight * 0.025) * chestWeight;
           }
 
           if (isHair) {
@@ -772,7 +779,8 @@
           const bodyRelativeX = x - bodyPivot.cx;
           const bodyRelativeY = y - bodyPivot.cy;
           x = bodyPivot.cx + bodyRelativeX * bodyCosine - bodyRelativeY * bodySine + motionPose.bodyX;
-          y = bodyPivot.cy + bodyRelativeX * bodySine + bodyRelativeY * bodyCosine + motionPose.bodyY;
+          y = bodyPivot.cy + bodyRelativeX * bodySine + bodyRelativeY * bodyCosine + motionPose.bodyY
+            - this.speechBody.value * this.rig.canvas[1] * 0.002;
           data[index] = x - entry.offset[0];
           data[index + 1] = y - entry.offset[1];
           if (!Number.isFinite(data[index]) || !Number.isFinite(data[index + 1])) {
@@ -785,6 +793,13 @@
     }
 
     updateMesh(now, dt) {
+      // 発話入力を平滑化して上体を駆動し、胸は上体に遅れて追従させる。
+      // 表情の固定開口は発話入力ではないため、ここへ混ぜない。
+      const step = Math.min(Math.max(dt, 0), 0.1);
+      const response = this.mouth > this.speechEnvelope ? 5 : 2.5;
+      this.speechEnvelope += (this.mouth - this.speechEnvelope) * (1 - Math.exp(-response * step));
+      this.speechBody = springStep(this.speechBody, this.speechEnvelope, step, 1.2, 0.9);
+      this.chestFollow = springStep(this.chestFollow, this.speechBody.value, step, 1.8, 0.6);
       if (["anime25d-v1", "lvs-anime25d-v1"].includes(this.rig.mode)) {
         this.updateAnime25dMesh(now, dt);
         this.previousAngleX = this.angleX;
@@ -829,7 +844,9 @@
             + armDirection * breath * 1.15;
           const vertical = (isHead ? head * this.angleY * 0.34 : 0)
             - (isTorso ? torso * breath * 2.4 : 0)
-            - (armDirection ? torso * breath * 1.2 : 0);
+            - (armDirection ? torso * breath * 1.2 : 0)
+            - this.speechBody.value * this.rig.canvas[1] * 0.002
+            - (isTorso ? torso * (this.chestFollow.value - this.speechBody.value) * this.rig.canvas[1] * 0.012 : 0);
           const facial = motion === "face" || motion === "sheet"
             ? expressionDisplacement(this.rig, globalX, globalY, expression, true) : [0, 0];
           data[index] = x + horizontal + facial[0];

@@ -109,6 +109,6 @@ test("独自2.5Dは首境界を開く局所頭部変形をせず一体で呼吸�
   assert.match(renderer, /y -= breath \* 2 \* faceScale/);
   assert.match(renderer, /if \(item\.role === "torso"\)/);
   assert.match(renderer, /torso: \{ x0: torso\[0\], y0: torso\[1\], x1: torso\[2\], y1: torso\[3\] \}/);
-  assert.match(renderer, /chestPulse \* 2\.4 \* chestWeight/);
+  assert.match(renderer, /this\.chestFollow\.value - this\.speechBody\.value/);
   assert.match(renderer, /verticalPosition < 0\.58/);
 });
