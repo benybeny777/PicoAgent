@@ -383,12 +383,19 @@ mod tests {
             sales.contains(&format!("実務スキル {skill_count} 種")),
             "docs/SALES.md のスキル数が実装（{skill_count}種）と一致しません"
         );
-        // 本体リポジトリで正本として保守する利用者向け文書も照合する。
-        // 公開LPは別リポジトリのmainが正本なので、ここに残る旧コピーを検査しない。
+        // 本体リポジトリで正本として保守する利用者向け文書と公開LPを照合する。
         for (path, expected) in [
             ("README.md", format!("{skill_count} 種のスキル")),
             ("README.md", format!("スキル {skill_count} 種")),
             ("MANUAL.md", format!("{skill_count}種のスキルを内蔵")),
+            (
+                "distribution/site/README.md",
+                format!("実務スキル{skill_count}種"),
+            ),
+            (
+                "distribution/site/index.html",
+                format!("{skill_count}種のスキル"),
+            ),
         ] {
             let text = std::fs::read_to_string(root.join(path)).unwrap();
             assert!(

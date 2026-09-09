@@ -489,16 +489,7 @@ impl VersionBump {
 }
 
 fn next_version(current: &str, bump: VersionBump) -> Result<String> {
-    let parts = current
-        .split('.')
-        .map(str::parse::<u64>)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("現在の版がSemVer形式ではありません: {current}"))?;
-    anyhow::ensure!(
-        parts.len() == 3,
-        "現在の版がSemVer形式ではありません: {current}"
-    );
-    let (major, minor, patch) = (parts[0], parts[1], parts[2]);
+    let (major, minor, patch) = parse_semver(current)?;
     let next = match bump {
         VersionBump::Major => (major.checked_add(1), Some(0), Some(0)),
         VersionBump::Minor => (Some(major), minor.checked_add(1), Some(0)),
@@ -510,6 +501,16 @@ fn next_version(current: &str, bump: VersionBump) -> Result<String> {
     Ok(format!("{major}.{minor}.{patch}"))
 }
 
+fn parse_semver(version: &str) -> Result<(u64, u64, u64)> {
+    let parts = version
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("版がSemVer形式ではありません: {version}"))?;
+    anyhow::ensure!(parts.len() == 3, "版がSemVer形式ではありません: {version}");
+    Ok((parts[0], parts[1], parts[2]))
+}
+
 fn replace_once(text: &str, before: &str, after: &str, label: &str) -> Result<String> {
     anyhow::ensure!(
         text.matches(before).count() == 1,
@@ -518,7 +519,8 @@ fn replace_once(text: &str, before: &str, after: &str, label: &str) -> Result<St
     Ok(text.replacen(before, after, 1))
 }
 
-/// 公開中の版を起点にSemVerを1段上げ、アプリ・xtask・Tauri設定を一括同期する。
+/// ソースの版を起点にSemVerを1段上げ、アプリ・xtask・Tauri設定を一括同期する。
+/// OS別の公開版が遅れている場合は許容し、公開版がソースより新しい場合だけ停止する。
 pub fn bump_version(args: &[String]) -> Result<()> {
     anyhow::ensure!(
         args.len() == 1,
@@ -540,9 +542,13 @@ pub fn bump_version(args: &[String]) -> Result<()> {
             .with_context(|| format!("公開版情報を読めません: {}", feed_path.display()))?,
     )
     .context("latest.jsonが不正です")?;
+    let published = feed
+        .get("version")
+        .and_then(Value::as_str)
+        .context("latest.jsonにversionがありません")?;
     anyhow::ensure!(
-        feed.get("version").and_then(Value::as_str) == Some(current.as_str()),
-        "公開中の版とソースの版が一致しません。二重採番を防ぐため停止しました"
+        parse_semver(published)? <= parse_semver(&current)?,
+        "公開中の版がソースより新しいため、二重採番を防ぐため停止しました"
     );
     let tauri_text = fs::read_to_string(&tauri_path)?;
     let tauri: Value = serde_json::from_str(&tauri_text).context("tauri.conf.jsonが不正です")?;
@@ -604,8 +610,8 @@ fn bundled_engine_pinned(root: &Path) -> Result<bool> {
 mod tests {
     use super::{
         check, classify_artifact, empty_feed, included_characters, next_version, package_version,
-        replace_once, same_version_feed, verify_macos_dmg, verify_windows_pe, write_atomic,
-        VersionBump,
+        parse_semver, replace_once, same_version_feed, verify_macos_dmg, verify_windows_pe,
+        write_atomic, VersionBump,
     };
 
     #[test]
@@ -680,6 +686,7 @@ mod tests {
         assert_eq!(next_version("1.2.3", VersionBump::Patch).unwrap(), "1.2.4");
         assert_eq!(next_version("1.2.3", VersionBump::Minor).unwrap(), "1.3.0");
         assert_eq!(next_version("1.2.3", VersionBump::Major).unwrap(), "2.0.0");
+        assert!(parse_semver("1.0.2").unwrap() < parse_semver("1.0.4").unwrap());
         assert!(next_version("1.2", VersionBump::Patch).is_err());
         assert!(VersionBump::parse("beta").is_err());
     }
