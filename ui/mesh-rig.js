@@ -668,9 +668,19 @@
       drawBlink(ctx, images, this.rig.sourceRig, "left", eyeL, this.gazeX, this.gazeY);
       drawBlink(ctx, images, this.rig.sourceRig, "right", eyeR, this.gazeX, this.gazeY);
       if (mouthOpen > 0 || mouthForm !== 0 || expression.mouthCurve !== 0) {
+        // 口素材の余白や三角形の補間が、傾いた顔の目領域へ届かないよう所有を分離する。
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(box[0], box[1], canvas.width, canvas.height);
+        for (const side of ["left", "right"]) {
+          const eye = this.rig.sourceRig.layers[`${side}_eye_base`].feature_box;
+          ctx.rect(Math.floor(eye[0]), Math.floor(eye[1]), Math.ceil(eye[2]) - Math.floor(eye[0]), Math.ceil(eye[3]) - Math.floor(eye[1]));
+        }
+        ctx.clip("evenodd");
         const mouthBox = this.rig.sourceRig.layers.mouth_open.texture_box;
         ctx.drawImage(images.get("mouth_open"), mouthBox[0], mouthBox[1]);
         drawTexturedMouth(ctx, images.get("mouth_closed"), this.rig.sourceRig.layers.mouth_closed, mouthOpen, mouthForm, this.rig.sourceRig.layers.mouth_open.line_color, expression.mouthCurve);
+        ctx.restore();
       }
       ctx.restore();
       const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);

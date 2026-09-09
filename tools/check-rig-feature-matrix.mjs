@@ -2,6 +2,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 const modulePath = process.env.PICO_PLAYWRIGHT_MODULE;
 if (!modulePath) throw new Error('PICO_PLAYWRIGHT_MODULEが必要です');
 const { chromium } = await import(pathToFileURL(modulePath).href);
@@ -47,13 +48,51 @@ try {
         const sx=rect.width/controller.app.screen.width,sy=rect.height/controller.app.screen.height;
         const clip=face && !state.name.startsWith('speech') ? {x:rect.x+(ox+face.x0*scale)*sx,y:rect.y+(oy+face.y0*scale)*sy,width:(face.x1-face.x0)*scale*sx,height:(face.y1-face.y0)*scale*sy} : {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
         const torso=[...controller.planes.values()].find(e=>e.item?.role==='torso'||e.motion==='torso');
+        const eyePixels = [], sourceEyes = [];
+        const eyes = ['eyeL','eyeR'].map(side=>{
+          const eye=controller.rig.anchors?.[side];
+          if(!eye) throw new Error('目の実測座標がないため開口の混入を検査できません');
+          const resolution=controller.canvas.width/controller.app.screen.width;
+          const x=Math.floor((ox+eye.x0*scale)*resolution),y=Math.floor((oy+eye.y0*scale)*resolution);
+          const width=Math.ceil((eye.x1-eye.x0)*scale*resolution),height=Math.ceil((eye.y1-eye.y0)*scale*resolution);
+          const crop=document.createElement('canvas');crop.width=width;crop.height=height;
+          crop.getContext('2d').drawImage(controller.canvas,x,y,width,height,0,0,width,height);
+          eyePixels.push(Array.from(crop.getContext('2d').getImageData(0,0,width,height).data));
+          if(controller.lvsFace) {
+            const box=controller.rig.sourceRig.layers.scene_face.texture_box;
+            const data=controller.lvsFace.ctx.getImageData(Math.floor(eye.x0-box[0]),Math.floor(eye.y0-box[1]),Math.ceil(eye.x1-eye.x0),Math.ceil(eye.y1-eye.y0));
+            sourceEyes.push(Array.from(data.data));
+          }
+          return crop.toDataURL();
+        });
         return {clip,body:controller.speechBody.value,follow:controller.chestFollow.value,
-          torsoVertices:torso?Array.from(torso.buffer.data):null,displayScale:scale*sy};
+          torsoVertices:torso?Array.from(torso.buffer.data):null,displayScale:scale*sy,eyes,eyePixels,sourceEyes};
       },state);
+      for (const [side,value] of result.eyes.entries()) {
+        await writeFile(path.join(out,`${id}-${state.name}-eye${side}.png`),Buffer.from(value.split(',')[1],'base64'));
+      }
+      result.eyes=result.eyes.map(value=>createHash('sha256').update(value).digest('hex'));
+      result.sourceEyes=result.sourceEyes.map(value=>createHash('sha256').update(Buffer.from(value)).digest('hex'));
       await page.screenshot({path:path.join(out,`${id}-${state.name}.png`),clip:result.clip});
       report[id].push({name:state.name,...result});
     }
     const on=report[id].find(x=>x.name==='speech-on'),off=report[id].find(x=>x.name==='speech-off');
+    for(let side=0;side<2;side++) {
+      const mouthFrames=report[id].filter(x=>x.name.startsWith('mouth-'));
+      if(mouthFrames[0].sourceEyes.length && new Set(mouthFrames.map(x=>x.sourceEyes[side])).size!==1) throw new Error(`${id}: 開口操作で原寸の目素材が変わっています`);
+      const base=mouthFrames[0].eyePixels[side];
+      for(const frame of mouthFrames) {
+        const pixels=frame.eyePixels[side];let maximum=0,changed=0;
+        for(let i=0;i<base.length;i+=4) {
+          let delta=0;
+          for(let j=0;j<4;j++)delta=Math.max(delta,Math.abs(base[i+j]-pixels[i+j]));
+          maximum=Math.max(maximum,delta);if(delta)changed++;
+        }
+        // 原寸は完全一致を要求し、GPU縮小描画だけ量子化差を厳しく制限する。
+        (frame.eyeDifferences??=[])[side]={maximum,changed,pixels:base.length/4};
+        if(maximum>2||changed/(base.length/4)>0.001) throw new Error(`${id}: 開口操作で目の描画が変わっています (${maximum}, ${changed})`);
+      }
+    }
     if(!on.torsoVertices || !off.torsoVertices) throw new Error(`${id}: 胴体の検証対象がありません`);
     const delta=on.torsoVertices.filter((_,i)=>i%2===1).map((v,i)=>(v-off.torsoVertices[i*2+1])*on.displayScale);
     const localSpan=Math.max(...delta)-Math.min(...delta);
@@ -63,7 +102,11 @@ try {
     console.log(`${id}: 単独機能撮影完了・胸の局所変位 ${localSpan.toFixed(2)}px（目視は別途）`);
   }
   if(errors.length) throw new Error(errors.join('\n'));
+} catch (error) {
+  errors.push(error.message);
+  throw error;
 } finally {
+  for(const frames of Object.values(report))for(const frame of frames)delete frame.eyePixels;
   await writeFile(path.join(out,'report.json'),JSON.stringify({report,errors},null,2));
   await browser.close();
 }
