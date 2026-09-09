@@ -75,7 +75,7 @@ try {
     report.expressions.push(await capture(`expression-${name}`));
   }
   await page.getByRole("button", { name: "通常", exact: true }).click();
-  for (const [name, label] of [["idle", "待機"], ["talking", "会話"], ["thinking", "考え中"], ["success", "よろこび"], ["concern", "困り"], ["listen", "聞く"], ["wake", "起きる"], ["sleep", "眠る"]]) {
+  for (const [name, label] of [["idle", "待機"], ["talking", "会話"], ["thinking", "考え中"], ["success", "よろこび"], ["concern", "困り"], ["listen", "聞く"]]) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await page.waitForTimeout(420);
     report.motions.push(await capture(`motion-${name}`));

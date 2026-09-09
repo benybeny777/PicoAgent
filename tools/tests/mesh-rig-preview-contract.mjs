@@ -51,7 +51,7 @@ test("確認画面は目・視線・5母音・表情・全動作・腕の操作�
   assert.match(preview, /data-wink="R"/);
   assert.match(preview, /id="gazeX"/);
   assert.match(preview, /id="gazeY"/);
-  for (const label of ["あ", "い", "う", "え", "お", "笑顔", "困り顔", "考え顔", "照れ", "聞く", "起きる", "眠る"]) {
+  for (const label of ["あ", "い", "う", "え", "お", "笑顔", "困り顔", "考え顔", "照れ", "聞く"]) {
     assert.ok(preview.includes(`>${label}<`), `${label}の確認操作が必要です`);
   }
   assert.match(preview, /id="arm"/);
@@ -65,7 +65,8 @@ test("確認画面は目・視線・5母音・表情・全動作・腕の操作�
       `${expression}は表情選択だけで半目にしない`,
     );
   }
-  assert.match(renderer, /this\.expression === "sleep"[\s\S]{0,120}return \{ eye: 0\.04,/, "寝顔だけは閉眼を保つ");
+  assert.doesNotMatch(preview, /data-motion="(?:wake|sleep)"/, "不要な起床・睡眠動作を確認画面へ戻さない");
+  assert.doesNotMatch(renderer, /this\.expression === "sleep"|\/sleep\//, "独自2.5Dへ寝顔専用分岐を戻さない");
   assert.match(renderer, /this\.expression === "shy"[\s\S]{0,160}blush: 1/, "照れ表情は開眼と頬染めを使う");
   assert.match(renderer, /const eyeOpen = this\.eyeOpen \* expression\.eye;/, "旧2.5Dでも寝顔の閉眼係数を適用する");
   assert.match(renderer, /this\.rig\.expressionSadMode !== "disabled"/, "不自然な旧悲しみ差分をパック設定で無効化できる");
@@ -87,7 +88,7 @@ test("実画面検査は全表情と全動作を記録する", () => {
   assert.match(renderer, /createBlushOverlay\(app, rig, originX, originY, textureFit\)/);
   assert.match(renderer, /globalCompositeOperation = "destination-out"/);
   assert.match(renderer, /armClearance = Math\.max\(2,/);
-  for (const label of ["通常", "笑顔", "困り顔", "考え顔", "照れ", "待機", "会話", "考え中", "よろこび", "困り", "聞く", "起きる", "眠る"]) {
+  for (const label of ["通常", "笑顔", "困り顔", "考え顔", "照れ", "待機", "会話", "考え中", "よろこび", "困り", "聞く"]) {
     assert.ok(checker.includes(`"${label}"`), `${label}を実画面検査へ含める`);
   }
   assert.match(checker, /report\.unique\.expressions < 5/);
