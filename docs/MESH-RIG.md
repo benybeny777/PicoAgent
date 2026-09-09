@@ -55,8 +55,7 @@ uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
 | `ParamMouthOpenY` | 0 / 1 | `mouth_closed` / `mouth_open` の口領域 |
 | `ParamMouthForm` | -1 / +1 | `expression_sad` / `expression_happy` の口・眉領域 |
 
-旧2D素材の悲しみ差分が半目だけで困り顔として成立しない場合は、`mesh-rig/source/regions.json`へ
-`expressionSadMode: "disabled"`を指定する。生成された`rig.json`へ同値を引き継ぎ、通常の開眼を保つ。
+旧2D素材の生成表情レイヤーが目の開き・虹彩色を不自然に変える入力では、元の開眼を保ったまま口形と眉変形だけを使うため、`mesh-rig/source/regions.json`へ`expressionHappyMode: "disabled"`または`expressionSadMode: "disabled"`を指定する。生成された`rig.json`へ同値を引き継ぐ。照れは全キャラ共通の頬染めを使い、アニメ調と実写調で濃度を分けつつ通常表情と明確に区別する。
 未指定時は既存互換の`layer`とし、寝顔の閉眼は悲しみ差分ではなく`blink_closed`で描画する。
 生成時はリグJSONと全パーツの内容から`meshRig.assetVersion`を作り、通常2Dフレームとは独立して
 ブラウザキャッシュを更新する。リグだけを更新して旧描画が残る状態を許可しない。

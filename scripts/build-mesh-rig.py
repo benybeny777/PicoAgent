@@ -202,6 +202,9 @@ def build(character_id: str) -> None:
     expression_sad_mode = str(config.get("expressionSadMode", "layer"))
     if expression_sad_mode not in {"layer", "disabled"}:
         raise ValueError(f"expressionSadModeが不正です: {expression_sad_mode}")
+    expression_happy_mode = str(config.get("expressionHappyMode", "layer"))
+    if expression_happy_mode not in {"layer", "disabled"}:
+        raise ValueError(f"expressionHappyModeが不正です: {expression_happy_mode}")
 
     layers_dir = character_dir / "layers"
     base_path = layers_dir / "mouth_closed.png"
@@ -324,6 +327,7 @@ def build(character_id: str) -> None:
         "canvas": list(runtime_size),
         "contentBox": list(scaled_box(list(content_box), scale)),
         "runtimeScale": scale,
+        "expressionHappyMode": expression_happy_mode,
         "expressionSadMode": expression_sad_mode,
         "grid": list(config.get("grid", [9, 15])),
         "base": "parts/base.webp",

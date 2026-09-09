@@ -69,6 +69,8 @@ test("確認画面は目・視線・5母音・表情・全動作・腕の操作�
   assert.match(renderer, /this\.expression === "shy"[\s\S]{0,160}blush: 1/, "照れ表情は開眼と頬染めを使う");
   assert.match(renderer, /const eyeOpen = this\.eyeOpen \* expression\.eye;/, "旧2.5Dでも寝顔の閉眼係数を適用する");
   assert.match(renderer, /this\.rig\.expressionSadMode !== "disabled"/, "不自然な旧悲しみ差分をパック設定で無効化できる");
+  assert.match(renderer, /this\.rig\.expressionHappyMode !== "disabled"/, "不自然な旧笑顔差分をパック設定で無効化できる");
+  assert.match(renderer, /anime \? \[0\.12, 0\.10, 0\.08\] : \[0\.07, 0\.06, 0\.045\]/, "照れの頬染めは実写でも識別できる多層濃度にする");
   assert.match(preview, /controller\.setEyeOpen\(0, 0\); await wait\(220\)/, "完全閉眼を保持する");
 });
 
