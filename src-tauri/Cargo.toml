@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 picoagent-core = { version = "0.1.0", path = "../crates/picoagent-core" }
+picoagent-character-maker = { version = "0.1.0", path = "../character-maker" }
 # protocol-asset: 追加キャラクター（app_data_dir 配下）を webview から読ませる asset プロトコル。
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "protocol-asset"] }
 # 設定画面から「キャラクターパックを選ぶ」ためのネイティブダイアログ（Rust API のみ利用）。
@@ -56,6 +57,7 @@ cpal = "0.18"
 hound = "3.5"
 enigo = "0.6"
 arboard = { version = "3.6.1", default-features = false }
+tempfile = "3"
 
 # 画面取得。Windows / macOS / Linux で外部コマンドを介さず取得する。
 # Linux のビルドには X11 / Wayland / PipeWire の開発ヘッダが必要。

@@ -9,6 +9,7 @@ mod boot_screen;
 #[cfg(test)]
 mod bundle_scope;
 mod character_framing;
+mod character_maker;
 mod character_pack;
 mod commands;
 mod components;
@@ -85,6 +86,7 @@ pub fn run() {
         .manage(EngineState::new())
         .manage(AivisState::new())
         .manage(BootScreenState::new())
+        .manage(character_maker::CharacterMakerState::new())
         .manage(WindowLayoutCache::default())
         .manage(tracer::Tracer::new(200))
         // フロントを読み込めなかったときの案内画面（配信経路に依存しないよう埋め込みを返す）。
@@ -129,6 +131,12 @@ pub fn run() {
             commands::settings_character_install_live2d,
             commands::settings_character_rename,
             commands::settings_character_remove,
+            character_maker::settings_character_maker_pick_source,
+            character_maker::settings_character_maker_list,
+            character_maker::settings_character_maker_create,
+            character_maker::settings_character_maker_run,
+            character_maker::settings_character_maker_cancel,
+            character_maker::settings_character_maker_install,
             commands::settings_pick_stream_image,
             commands::settings_export_diagnostics,
             commands::pet_user_characters,

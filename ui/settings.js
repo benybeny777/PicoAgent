@@ -44,7 +44,7 @@ let scheduleEditorState = null; // スケジュールタスクエディタ（保
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const PRESERVE_UNREADABLE_SECRET = "__PRESERVE_UNREADABLE_SECRET__";
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
@@ -919,6 +919,7 @@ function quickSettingsGuide(v) {
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
     { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック" },
+    { tab: "character-maker", title: "キャラ作成", summary: "原画からローカル生成" },
     { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
     { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
@@ -2615,6 +2616,139 @@ function buildDownloadedModelsSection() {
   return sec;
 }
 
+function buildCharacterMaker(registerInstalledCharacter) {
+  const maker = section("原画からキャラクターを作成");
+  maker.append(el("p", {
+    className: "settings-intro",
+    textContent: "1枚の原画から、背景除去・部位分解・2.5Dリグ・局所補完をPC内だけで実行します。元画像は上書きしません。",
+  }));
+  const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "PNG / JPEGを選択" });
+  const nameInput = el("input", { type: "text", placeholder: "表示名" });
+  const personaInput = el("textarea", { placeholder: "性格や話し方（任意）" });
+  const tagsInput = el("input", { type: "text", placeholder: "例: 青髪、正面、笑顔" });
+  const pickButton = el("button", { className: "secondary", type: "button", textContent: "原画を選ぶ" });
+  const createButton = el("button", { className: "primary", type: "button", textContent: "作成を開始" });
+  const status = el("div", { className: "hint" });
+  const list = el("div", { className: "card-list" });
+  let runtimeInstalled = false;
+
+  pickButton.addEventListener("click", async () => {
+    try {
+      const picked = await window.picoagent.settings.characterMakerPickSource();
+      if (picked?.path) sourceInput.value = picked.path;
+    } catch (error) {
+      status.textContent = `原画を選べませんでした: ${error?.message || error}`;
+    }
+  });
+
+  async function run(character, fromStage) {
+    status.textContent = `${character.displayName}を生成しています…`;
+    try {
+      await window.picoagent.settings.characterMakerRun(character.characterId, fromStage);
+      status.textContent = `${character.displayName}の生成が完了しました。`;
+    } catch (error) {
+      status.textContent = `生成を完了できませんでした: ${error?.message || error}`;
+    } finally {
+      await refresh();
+    }
+  }
+
+  function renderCharacter(character) {
+    const stageLabels = { isolate: "背景除去", decompose: "部位分解", rig2d: "2.5Dリグ", complete: "局所補完" };
+    const stages = Object.entries(stageLabels).map(([id, label]) => {
+      const state = character.stages?.[id] || { status: "pending" };
+      return `${label}: ${state.status === "complete" ? "完了" : state.status === "running" ? "実行中" : state.status === "failed" ? "失敗" : "未実行"}`;
+    }).join(" / ");
+    const firstPending = Object.keys(stageLabels).find(id => character.stages?.[id]?.status !== "complete");
+    const runButton = el("button", {
+      className: "primary",
+      type: "button",
+      textContent: firstPending ? "続きから生成" : "最初から再生成",
+      disabled: !runtimeInstalled,
+    });
+    runButton.addEventListener("click", () => run(character, firstPending || "isolate"));
+    const installButton = el("button", {
+      className: "secondary",
+      type: "button",
+      textContent: "PicoAgentへ反映",
+      disabled: character.stages?.complete?.status !== "complete",
+    });
+    installButton.addEventListener("click", async () => {
+      try {
+        const result = await window.picoagent.settings.characterMakerInstall(character.characterId);
+        if (!result.updated) await registerInstalledCharacter(result.id);
+        status.textContent = result.updated
+          ? `${result.name}を新しい生成結果へ更新しました。キャラを選び直すと反映されます。`
+          : `${result.name}を追加して選びました。「保存」で反映します。`;
+      } catch (error) {
+        status.textContent = `PicoAgentへ反映できませんでした: ${error?.message || error}`;
+      }
+    });
+    return markSearchable(el("div", { className: "card-item" }, [
+      el("div", { className: "card-title", textContent: character.displayName }),
+      el("div", { className: "card-desc character-id", textContent: character.characterId }),
+      el("div", { className: "card-desc", textContent: stages }),
+      el("div", { className: "character-add-actions" }, [runButton, installButton]),
+    ]), character.displayName, character.characterId, stages);
+  }
+
+  async function refresh() {
+    try {
+      const result = await window.picoagent.settings.characterMakerList();
+      runtimeInstalled = result.runtimeInstalled === true;
+      list.replaceChildren(...(result.characters || []).map(renderCharacter));
+      if (!result.supported) status.textContent = "キャラ作成は現在Windows 10/11 x64専用です。";
+      else if (!runtimeInstalled) status.textContent = "キャラ作成用のローカル実行環境が未導入です。追加機能・更新から導入してください。";
+      else if (!(result.characters || []).length) status.textContent = "原画を選び、最初のキャラクターを作成できます。";
+      applySettingsSearch();
+    } catch (error) {
+      status.textContent = `キャラ作成の状態を取得できませんでした: ${error?.message || error}`;
+    }
+  }
+
+  createButton.addEventListener("click", async () => {
+    if (!sourceInput.value || !nameInput.value.trim()) {
+      status.textContent = "原画と表示名を入力してください。";
+      return;
+    }
+    createButton.disabled = true;
+    try {
+      const character = await window.picoagent.settings.characterMakerCreate({
+        displayName: nameInput.value.trim(),
+        sourcePath: sourceInput.value,
+        personaPrompt: personaInput.value.trim(),
+        identityTags: tagsInput.value.trim(),
+      });
+      await refresh();
+      if (runtimeInstalled) await run(character, "isolate");
+    } catch (error) {
+      status.textContent = `作成を開始できませんでした: ${error?.message || error}`;
+    } finally {
+      createButton.disabled = false;
+    }
+  });
+  replaceSettingsListener("character-maker-progress", "character-maker:progress", progress => {
+    status.textContent = progress?.message || "キャラクターを生成しています…";
+  });
+  replaceSettingsListener("character-maker-state", "character-maker:state", refresh);
+  const cancelButton = el("button", { className: "secondary", type: "button", textContent: "生成を中断" });
+  cancelButton.addEventListener("click", async () => {
+    await window.picoagent.settings.characterMakerCancel();
+    status.textContent = "工程の停止を要求しました。";
+  });
+  maker.append(
+    el("div", { className: "field" }, [el("label", { textContent: "原画" }), sourceInput, pickButton]),
+    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), nameInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "性格・話し方" }), personaInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "見た目の特徴" }), tagsInput]),
+    el("div", { className: "character-add-actions" }, [createButton, cancelButton]),
+    status,
+    list,
+  );
+  refresh();
+  return maker;
+}
+
 async function render() {
   renderingSettings = true;
   form.innerHTML = "";
@@ -2626,6 +2760,7 @@ async function render() {
   const panels = createTabs([
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
+    { id: "character-maker", label: "キャラ作成" },
     { id: "character-register", label: "キャラ登録" },
     { id: "character", label: "キャラ選択" },
     { id: "voice", label: "キャラの音声" },
@@ -2637,6 +2772,7 @@ async function render() {
     { id: "diagnostics", label: "診断・修復" },
   ]);
   panels.components.append(buildComponentManager());
+  panels["character-maker"].append(buildCharacterMaker(registerInstalledCharacter));
 
   // --- グローバル設定 ---
   const global = section("基本");

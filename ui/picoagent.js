@@ -201,6 +201,12 @@ window.picoagent = {
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
     renameCharacter: (id, name) => call("settings_character_rename", { id, name }),
+    characterMakerList: () => call("settings_character_maker_list"),
+    characterMakerPickSource: () => call("settings_character_maker_pick_source"),
+    characterMakerCreate: (input) => call("settings_character_maker_create", { input }),
+    characterMakerRun: (characterId, fromStage) => call("settings_character_maker_run", { characterId, fromStage }),
+    characterMakerCancel: () => call("settings_character_maker_cancel"),
+    characterMakerInstall: (characterId) => call("settings_character_maker_install", { characterId }),
     // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
