@@ -264,6 +264,11 @@ fn check_javascript(root: &Path, report: &mut Report) {
         }
     };
 
+    let tests: Vec<_> = files
+        .iter()
+        .filter(|path| path.starts_with("tools/tests/") && path.ends_with(".mjs"))
+        .cloned()
+        .collect();
     for path in files {
         let label = format!("JavaScript構文: {path}");
         println!("\n[verify] 開始: {label}");
@@ -278,6 +283,22 @@ fn check_javascript(root: &Path, report: &mut Report) {
         };
         report.record(label, outcome);
     }
+    // 構文検査だけでは、表情や物理の接続が消えたデグレを検出できない。
+    let outcome = if tests.is_empty() {
+        Outcome::Failed("JavaScriptの回帰テストがありません".to_string())
+    } else {
+        match Command::new("node")
+            .arg("--test")
+            .args(tests)
+            .current_dir(root)
+            .status()
+        {
+            Ok(status) if status.success() => Outcome::Passed,
+            Ok(status) => Outcome::Failed(format!("終了コード {:?}", status.code())),
+            Err(error) => Outcome::Failed(format!("nodeを起動できません: {error}")),
+        }
+    };
+    report.record("JavaScript回帰テスト", outcome);
 }
 
 fn node_availability(root: &Path) -> io::Result<NodeAvailability> {

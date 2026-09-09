@@ -192,6 +192,17 @@ def automatic_face_regions(
     return regions
 
 
+def measured_mouth_region(anchors, size):
+    """開口差分の所有を測定された口と接続余白へ制限する。"""
+    mouth = anchors["mouth"]
+    margin = (mouth["x1"] - mouth["x0"]) * 0.22
+    return {
+        "box": [max(0, round(mouth["x0"] - margin)), max(0, round(mouth["y0"] - margin)),
+                min(size[0], round(mouth["x1"] + margin)), min(size[1], round(mouth["y1"] + margin))],
+        "feather": max(1, round(margin * 0.15)),
+    }
+
+
 def build(character_id: str) -> None:
     character_dir = ROOT / "characters" / character_id
     source_config_path = character_dir / "mesh-rig" / "source" / "regions.json"
@@ -208,6 +219,12 @@ def build(character_id: str) -> None:
 
     layers_dir = character_dir / "layers"
     base_path = layers_dir / "mouth_closed.png"
+    landmarks_path = source_config_path.parent / "face-landmarks.json"
+    landmarks = None
+    if landmarks_path.exists():
+        landmarks = json.loads(landmarks_path.read_text(encoding="utf-8"))
+        if landmarks.get("version") != 1 or landmarks.get("source_sha256") != hashlib.sha256(base_path.read_bytes()).hexdigest():
+            raise ValueError("顔特徴点の解析元が現在の正本と一致しません")
     with Image.open(base_path) as opened:
         base = canonicalize_transparent_rgb(opened)
     if base.getchannel("A").getbbox() is None:
@@ -296,6 +313,10 @@ def build(character_id: str) -> None:
                 source = opened.convert("RGBA")
         if source.size != base.size:
             raise ValueError(f"レイヤー寸法が一致しません: {source_name} {source.size} != {base.size}")
+        if landmarks and name == "mouth_open":
+            # 開口差分の画像全体には生成時に変わった目・肌も含まれ得る。
+            # 差分の外接矩形ではなく、原画で測定した口だけを所有させる。
+            region = {**region, **measured_mouth_region(landmarks["anchors"], base.size)}
         runtime = source.resize(runtime_size, Image.Resampling.LANCZOS)
         box = scaled_box(list(region["box"]), scale)
         feather = max(0, round(float(region.get("feather", 0)) * scale))
@@ -353,6 +374,12 @@ def build(character_id: str) -> None:
             ),
         },
     }
+    if landmarks:
+        rig["anchors"] = {
+            name: {key: value * scale for key, value in anchor.items()}
+            for name, anchor in landmarks["anchors"].items()
+        }
+        rig["facialLandmarksSource"] = {key: landmarks[key] for key in ("version", "source_sha256", "analysis_sha256")}
     rig_path = character_dir / "mesh-rig" / "rig.json"
     temporary_rig = rig_path.with_suffix(".json.part")
     rig_text = json.dumps(rig, ensure_ascii=False, indent=2) + "\n"

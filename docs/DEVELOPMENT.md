@@ -1,5 +1,7 @@
 # PicoAgent 開発・配布ガイド
 
+`cargo xtask verify`はNodeが使える環境でJavaScriptの構文だけでなく、追跡中の`tools/tests/*.mjs`の回帰テストも実行する。キャラクター修正時は追加で`python scripts/test-face-landmarks.py`（Pillowが必要）と`node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`を実行し、全7体の実画像を確認する。後者のPlaywrightは`PICO_PLAYWRIGHT_MODULE`で作業用モジュールの絶対パスを指定する。生成成功やCPU検査だけで見た目合格にしない。
+
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。

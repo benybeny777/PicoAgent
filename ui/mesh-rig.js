@@ -154,6 +154,11 @@
     const knots = [[left, seam[0][1]], ...seam, [right, seam.at(-1)[1]]];
     const roundness = Math.max(0, -shape);
     const centerY = (feature[1] + feature[3]) / 2;
+    // 縦長のすぼめ口は、閉口の狭い横幅を発話中の上限にしない。
+    // 原画の縦横比と素材余白から解放量を求め、中立では必ず0にする。
+    const poutRelease = open * Math.min(0.45,
+      Math.max(0, (feature[3] - feature[1]) / width - 0.35),
+      Math.max(0, Math.min(mouthLeft - left, right - mouthRight) / width));
     const source = [], upper = [], lower = [];
     for (const [x, y] of knots) {
       const u = clamp((x - mouthLeft) / width, 0, 1);
@@ -161,11 +166,11 @@
       const envelope = interior ? 1 : x < mouthLeft ? (x - left) / Math.max(1, mouthLeft - left) : (right - x) / Math.max(1, right - mouthRight);
       const bulge = interior ? Math.pow(Math.max(0, Math.sin(Math.PI * u)), 0.8 - 0.3 * roundness) : 0;
       const openBoost = 0.16 * Math.pow(Math.max(0, 1 - Math.pow(shape / 0.65, 2)), 2);
-      const gap = width * (0.42 + 0.12 * roundness + openBoost) * 0.4 * open * (1 - 0.2 * shape) * bulge;
-      const dx = (x - centerX) * shape * (0.30 + 0.25 * roundness) * envelope;
+      const gap = width * (1 + poutRelease) * (0.42 + 0.12 * roundness + openBoost) * 0.62 * open * (1 - 0.2 * shape) * bulge;
+      const dx = (x - centerX) * (shape * (0.30 + 0.25 * roundness) + poutRelease * (1 - roundness)) * envelope;
       const bend = (shape * 0.055 * (1 - roundness) * (bulge - 0.65)
         + curvature * 0.16 * (bulge - 0.4)) * width * envelope;
-      const roundingShift = (centerY - y) * roundness * envelope;
+      const roundingShift = (centerY - y) * Math.max(roundness, poutRelease) * envelope;
       source.push([[x, top], [x, y], [x, bottom]]);
       upper.push([[x, top], [x + dx, y + roundingShift + bend - gap * 0.36]]);
       lower.push([[x + dx, y + roundingShift + bend + gap * 0.64], [x, bottom]]);
@@ -279,6 +284,24 @@
     }
   }
 
+  function cheekLayout(anchors) {
+    const left = anchors?.eyeL, right = anchors?.eyeR, mouth = anchors?.mouth;
+    if (!left || !right || !mouth) return null;
+    const a = [(left.x0 + left.x1) / 2, (left.y0 + left.y1) / 2];
+    const b = [(right.x0 + right.x1) / 2, (right.y0 + right.y1) / 2];
+    const distance = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (!(distance > 0)) throw new Error("左右の目の座標が一致しています");
+    const axis = [(b[0] - a[0]) / distance, (b[1] - a[1]) / distance];
+    const down = [-axis[1], axis[0]];
+    const middle = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const gap = (mouth.cx - middle[0]) * down[0] + (mouth.cy - middle[1]) * down[1];
+    const eyeHeight = Math.max(left.y1 - left.y0, right.y1 - right.y0);
+    const radiusY = Math.max(1, (gap - eyeHeight * 0.65) * 0.22);
+    const offset = eyeHeight * 0.65 + radiusY + distance * 0.025;
+    return { axis, down, radiusX: distance * 0.28, radiusY,
+      centers: [a, b].map(p => [p[0] + down[0] * offset, p[1] + down[1] * offset]) };
+  }
+
   function createBlushOverlay(app, rig, originX, originY, textureFit) {
     const anchor = rig.anchors?.face;
     const legacyBox = rig.drawables?.face?.textureBox;
@@ -289,16 +312,17 @@
     const anime = ["anime25d-v1", "lvs-anime25d-v1"].includes(rig.mode);
     const width = face.x1 - face.x0;
     const height = face.y1 - face.y0;
+    const measured = cheekLayout(rig.anchors);
     const cheeks = new PIXI.Graphics();
     // 照れは表情として一目で区別できる濃さにする。単色の楕円は実写で貼り物に
     // 見えるため、外側から中心へ薄い層を重ね、輪郭を弱く中心だけ濃くする。
     const color = anime ? 0xf36f98 : 0xe56f87;
     const scales = Array.from({ length: 12 }, (_, index) => 1 - index * 0.075);
-    const alphas = scales.map((_, index) => (anime ? 0.065 : 0.045) * Math.sin((index + 1) / 13 * Math.PI));
-    for (const [ratio, side] of [[0.24, "L"], [0.76, "R"]]) {
+    const alphas = scales.map((_, index) => (anime ? 0.025 : 0.012) * Math.sin((index + 1) / 13 * Math.PI));
+    for (const [ratio, side, sideIndex] of [[0.24, "L", 0], [0.76, "R", 1]]) {
       const eye = rig.anchors?.[`eye${side}`];
       const mouth = rig.anchors?.mouth;
-      const cheekX = eye ? (eye.x0 + eye.x1) / 2 : face.x0 + width * ratio;
+      const cheekX = measured ? measured.centers[sideIndex][0] : eye ? (eye.x0 + eye.x1) / 2 : face.x0 + width * ratio;
       // 赤みの上端を下まぶたより下へ固定する。旧実写では視線差分の下端を
       // 目元の保護境界に使い、顔全体の比率だけで赤みを置かない。
       const gazeBox = rig.drawables?.gaze_left?.box;
@@ -306,25 +330,25 @@
       const eyeHeight = eye ? eye.y1 - eye.y0 : height * 0.055;
       const mouthY = mouth ? mouth.cy : face.y0 + height * 0.685;
       const safeTop = eyeBottom + Math.max(3, eyeHeight * 0.22);
-      const cheekHeight = Math.max(2, mouthY - safeTop) * 0.24;
-      const cheekY = safeTop + cheekHeight;
+      const cheekHeight = measured?.radiusY ?? Math.max(2, mouthY - safeTop) * 0.24;
+      const cheekY = measured ? measured.centers[sideIndex][1] : safeTop + cheekHeight;
+      const cheekWidth = measured?.radiusX ?? width * (anime ? 0.14 : 0.12);
+      const axis = measured?.axis || [1, 0], down = measured?.down || [0, 1];
+      const point = (x, y) => [originX + (cheekX + axis[0] * x + down[0] * y) * textureFit,
+        originY + (cheekY + axis[1] * x + down[1] * y) * textureFit];
       for (let index = 0; index < scales.length; index += 1) {
         cheeks.beginFill(color, alphas[index]);
-        cheeks.drawEllipse(
-          originX + cheekX * textureFit,
-          originY + cheekY * textureFit,
-          width * (anime ? 0.14 : 0.12) * scales[index] * textureFit,
-          cheekHeight * scales[index] * textureFit,
-        );
+        cheeks.drawPolygon(Array.from({ length: 48 }, (_, sample) => {
+          const angle = sample * Math.PI * 2 / 48;
+          return point(Math.cos(angle) * cheekWidth * scales[index], Math.sin(angle) * cheekHeight * scales[index]);
+        }).flat());
         cheeks.endFill();
       }
       if (anime) {
-        cheeks.lineStyle(Math.max(1, width * 0.006 * textureFit), 0xcf466b, 0.72);
+        cheeks.lineStyle(Math.max(1, width * 0.010 * textureFit), 0xcf7180, 0.32);
         for (const offset of [-0.045, 0, 0.045]) {
-          const x = originX + (cheekX + width * offset) * textureFit;
-          const y = originY + cheekY * textureFit;
-          cheeks.moveTo(x - width * 0.012 * textureFit, y - cheekHeight * 0.6 * textureFit);
-          cheeks.lineTo(x + width * 0.012 * textureFit, y + cheekHeight * 0.6 * textureFit);
+          cheeks.moveTo(...point(width * offset - width * 0.012, -cheekHeight * 0.6));
+          cheeks.lineTo(...point(width * offset + width * 0.012, cheekHeight * 0.6));
         }
         cheeks.lineStyle(0);
       }
@@ -368,14 +392,40 @@
       }
     }
     if (includeMouth) {
-      const mx = cx, my = face.y0 + h * 0.685;
+      const measuredMouth = rig.anchors?.mouth;
+      const mx = measuredMouth?.cx ?? cx, my = measuredMouth?.cy ?? face.y0 + h * 0.685;
+      const halfWidth = measuredMouth ? (measuredMouth.x1 - measuredMouth.x0) * 0.46 : w * 0.14;
       for (const direction of [-1, 1]) {
-        const corner = weight(mx + direction * w * 0.14, my, w * 0.16, h * 0.09);
-        dx += direction * expression.mouthForm * w * 0.020 * corner;
-        dy -= expression.mouthCurve * h * (expression.mouthCurve < 0 ? 0.022 : 0.035) * corner;
+        const corner = weight(mx + direction * halfWidth, my, halfWidth, h * 0.065);
+        dx += direction * expression.mouthForm * w * 0.006 * corner;
+        dy -= expression.mouthCurve * h * (expression.mouthCurve < 0 ? 0.006 : 0.009) * corner;
       }
     }
     return [dx, dy];
+  }
+
+  function faceSupportWeight(face, box, x, y) {
+    if (!face) return 1;
+    const width = box[2] - box[0], height = box[3] - box[1];
+    // 不変な原画アルファから距離場を一度だけ計算する。二値の境界判定を
+    // 頂点ごとに切り替えると、眉線が折れるため滑らかな支持重みへ変換する。
+    if (!face.supportDistance) {
+      const distance = Float32Array.from(face.sourceAlpha, (alpha, i) =>
+        alpha < 250 || i % width === 0 || i % width === width - 1 || i < width || i >= width * (height - 1) ? 0 : width + height);
+      for (let py = 1; py < height; py++) for (let px = 1; px < width; px++) {
+        const i = py * width + px;
+        distance[i] = Math.min(distance[i], distance[i - 1] + 1, distance[i - width] + 1);
+      }
+      for (let py = height - 2; py >= 0; py--) for (let px = width - 2; px >= 0; px--) {
+        const i = py * width + px;
+        distance[i] = Math.min(distance[i], distance[i + 1] + 1, distance[i + width] + 1);
+      }
+      face.supportDistance = distance;
+    }
+    const px = Math.floor(x - box[0]), py = Math.floor(y - box[1]);
+    if (px < 0 || py < 0 || px >= width || py >= height) return 0;
+    const radius = Math.max(width / 48, height / 64);
+    return smoothstep(radius, radius * 3, face.supportDistance[py * width + px]);
   }
 
   class MeshRigController {
@@ -403,6 +453,9 @@
       this.previousAngleX = 0;
       this.hairPosition = 0;
       this.hairVelocity = 0;
+      this.speechEnvelope = 0;
+      this.speechBody = { value: 0, velocity: 0 };
+      this.chestFollow = { value: 0, velocity: 0 };
       this.secondaryHair = rig.secondaryMotion?.hair || null;
       this.motion = "idle";
       this.expression = "neutral";
@@ -472,6 +525,7 @@
     setMotion(name) {
       const next = String(name || "idle");
       if (/shy/.test(next)) this.expression = "shy";
+      else if (/angry|anger/.test(next)) this.expression = "angry";
       else if (/success|pleased|happy/.test(next)) this.expression = "happy";
       else if (/sad|concern|fail|error/.test(next)) this.expression = "concern";
       else if (/think|search|work/.test(next)) this.expression = "thinking";
@@ -482,11 +536,14 @@
     }
 
     expressionPose() {
+      if (this.expression === "angry") {
+        return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -0.8, browY: -6, browInnerY: 24, blush: 0 };
+      }
       if (this.expression === "shy") {
         return { eye: 1, mouthOpen: 0.04, mouthForm: 0.5, mouthCurve: 0.65, browY: 2, browInnerY: -12, blush: 1 };
       }
       if (this.expression === "happy") {
-        return { eye: 1, mouthOpen: 0.30, mouthForm: 1, mouthCurve: 1, browY: -12, browInnerY: 0, blush: 0 };
+        return { eye: 1, mouthOpen: 0.38, mouthForm: 0.65, mouthCurve: 0.6, browY: -8, browInnerY: 0, blush: 0 };
       }
       if (this.expression === "concern") {
         return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -1.6, browY: 8, browInnerY: -28, blush: 0 };
@@ -611,9 +668,19 @@
       drawBlink(ctx, images, this.rig.sourceRig, "left", eyeL, this.gazeX, this.gazeY);
       drawBlink(ctx, images, this.rig.sourceRig, "right", eyeR, this.gazeX, this.gazeY);
       if (mouthOpen > 0 || mouthForm !== 0 || expression.mouthCurve !== 0) {
+        // 口素材の余白や三角形の補間が、傾いた顔の目領域へ届かないよう所有を分離する。
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(box[0], box[1], canvas.width, canvas.height);
+        for (const side of ["left", "right"]) {
+          const eye = this.rig.sourceRig.layers[`${side}_eye_base`].feature_box;
+          ctx.rect(Math.floor(eye[0]), Math.floor(eye[1]), Math.ceil(eye[2]) - Math.floor(eye[0]), Math.ceil(eye[3]) - Math.floor(eye[1]));
+        }
+        ctx.clip("evenodd");
         const mouthBox = this.rig.sourceRig.layers.mouth_open.texture_box;
         ctx.drawImage(images.get("mouth_open"), mouthBox[0], mouthBox[1]);
         drawTexturedMouth(ctx, images.get("mouth_closed"), this.rig.sourceRig.layers.mouth_closed, mouthOpen, mouthForm, this.rig.sourceRig.layers.mouth_open.line_color, expression.mouthCurve);
+        ctx.restore();
       }
       ctx.restore();
       const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -685,7 +752,10 @@
           const originalY = y;
           if (item.role === "face" || item.role === "residual") {
             const displacement = expressionDisplacement(this.rig, x, y, expression, false);
-            x += displacement[0]; y += displacement[1];
+            // 顔の透明境界は固定し、眉を動かしたとき髪際に市松の穴を開けない。
+            const support = this.lvsFace ? faceSupportWeight(this.lvsFace,
+              this.rig.sourceRig.layers.scene_face.texture_box, x, y) : 1;
+            x += displacement[0] * support; y += displacement[1] * support;
           }
 
           if (item.fade === "eyeOpen" && eye) {
@@ -736,7 +806,7 @@
               : 0;
             const chestWeight = horizontalWeight * verticalWeight;
             x = neck.cx + (x - neck.cx) * (1 + chestPulse * 0.004 * chestWeight);
-            y -= chestPulse * 2.4 * chestWeight;
+            y -= (chestPulse * 0.7 + (this.chestFollow.value - this.speechBody.value) * torsoHeight * 0.025) * chestWeight;
           }
 
           if (isHair) {
@@ -772,7 +842,8 @@
           const bodyRelativeX = x - bodyPivot.cx;
           const bodyRelativeY = y - bodyPivot.cy;
           x = bodyPivot.cx + bodyRelativeX * bodyCosine - bodyRelativeY * bodySine + motionPose.bodyX;
-          y = bodyPivot.cy + bodyRelativeX * bodySine + bodyRelativeY * bodyCosine + motionPose.bodyY;
+          y = bodyPivot.cy + bodyRelativeX * bodySine + bodyRelativeY * bodyCosine + motionPose.bodyY
+            - this.speechBody.value * this.rig.canvas[1] * 0.002;
           data[index] = x - entry.offset[0];
           data[index + 1] = y - entry.offset[1];
           if (!Number.isFinite(data[index]) || !Number.isFinite(data[index + 1])) {
@@ -785,6 +856,13 @@
     }
 
     updateMesh(now, dt) {
+      // 発話入力を平滑化して上体を駆動し、胸は上体に遅れて追従させる。
+      // 表情の固定開口は発話入力ではないため、ここへ混ぜない。
+      const step = Math.min(Math.max(dt, 0), 0.1);
+      const response = this.mouth > this.speechEnvelope ? 5 : 2.5;
+      this.speechEnvelope += (this.mouth - this.speechEnvelope) * (1 - Math.exp(-response * step));
+      this.speechBody = springStep(this.speechBody, this.speechEnvelope, step, 1.2, 0.9);
+      this.chestFollow = springStep(this.chestFollow, this.speechBody.value, step, 1.8, 0.6);
       if (["anime25d-v1", "lvs-anime25d-v1"].includes(this.rig.mode)) {
         this.updateAnime25dMesh(now, dt);
         this.previousAngleX = this.angleX;
@@ -829,7 +907,9 @@
             + armDirection * breath * 1.15;
           const vertical = (isHead ? head * this.angleY * 0.34 : 0)
             - (isTorso ? torso * breath * 2.4 : 0)
-            - (armDirection ? torso * breath * 1.2 : 0);
+            - (armDirection ? torso * breath * 1.2 : 0)
+            - this.speechBody.value * this.rig.canvas[1] * 0.002
+            - (isTorso ? torso * (this.chestFollow.value - this.speechBody.value) * this.rig.canvas[1] * 0.012 : 0);
           const facial = motion === "face" || motion === "sheet"
             ? expressionDisplacement(this.rig, globalX, globalY, expression, true) : [0, 0];
           data[index] = x + horizontal + facial[0];
@@ -862,6 +942,8 @@
       this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       if (this.lvsFace) {
         this.lvsFace.images.clear();
+        this.lvsFace.supportDistance = null;
+        this.lvsFace.sourceAlpha = new Uint8Array(0);
         this.lvsFace.canvas.width = 0;
         this.lvsFace.canvas.height = 0;
         if (this.lvsFace.residualCanvas) {

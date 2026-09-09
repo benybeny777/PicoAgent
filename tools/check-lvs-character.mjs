@@ -69,7 +69,7 @@ try {
     report.gaze.push(await capture(`gaze-${name}`));
   }
   await page.getByRole("button", { name: "視線を中央へ", exact: true }).click();
-  for (const [name, label] of [["neutral", "通常"], ["happy", "笑顔"], ["concern", "困り顔"], ["thinking", "考え顔"], ["shy", "照れ"]]) {
+  for (const [name, label] of [["neutral", "通常"], ["happy", "笑顔"], ["concern", "困り顔"], ["thinking", "考え顔"], ["shy", "照れ"], ["angry", "怒り"]]) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await page.waitForTimeout(220);
     report.expressions.push(await capture(`expression-${name}`));
@@ -116,7 +116,7 @@ try {
   if (report.unique.mouth < 5) throw new Error(`母音の描画差分が不足しています: ${report.unique.mouth}`);
   if (report.unique.blink < 3) throw new Error(`まばたきの描画差分が不足しています: ${report.unique.blink}`);
   if (report.unique.gaze < 4) throw new Error(`視線の描画差分が不足しています: ${report.unique.gaze}`);
-  if (/[?&]character=(?:aoi|mugi|mugi-normal|rin|mai|sena|photoreal)(?:&|$)/.test(captureUrl.href) && report.unique.expressions < 5) {
+  if (/[?&]character=(?:aoi|mugi|mugi-normal|rin|mai|sena|photoreal)(?:&|$)/.test(captureUrl.href) && report.unique.expressions < 6) {
     throw new Error(`表情の描画差分が不足しています: ${report.unique.expressions}`);
   }
   if (/[?&]character=(?:female-a|mugi|mugi-normal)(?:&|$)/.test(captureUrl.href) && report.unique.motions < 6) {
