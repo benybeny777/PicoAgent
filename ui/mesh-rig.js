@@ -289,16 +289,23 @@
     const width = face.x1 - face.x0;
     const height = face.y1 - face.y0;
     const cheeks = new PIXI.Graphics();
-    cheeks.beginFill(anime ? 0xf582a2 : 0xe77d91, anime ? 0.22 : 0.09);
-    for (const ratio of [0.30, 0.70]) {
-      cheeks.drawEllipse(
-        originX + (face.x0 + width * ratio) * textureFit,
-        originY + (face.y0 + height * 0.59) * textureFit,
-        width * 0.105 * textureFit,
-        height * 0.025 * textureFit,
-      );
+    // 照れは表情として一目で区別できる濃さにする。単色の楕円は実写で貼り物に
+    // 見えるため、外側から中心へ三層を重ね、輪郭を弱く中心だけ濃くする。
+    const color = anime ? 0xf36f98 : 0xe56f87;
+    const alphas = anime ? [0.12, 0.10, 0.08] : [0.07, 0.06, 0.045];
+    const scales = [1, 0.70, 0.42];
+    for (const ratio of [0.24, 0.76]) {
+      for (let index = 0; index < scales.length; index += 1) {
+        cheeks.beginFill(color, alphas[index]);
+        cheeks.drawEllipse(
+          originX + (face.x0 + width * ratio) * textureFit,
+          originY + (face.y0 + height * 0.59) * textureFit,
+          width * (anime ? 0.14 : 0.12) * scales[index] * textureFit,
+          height * (anime ? 0.040 : 0.035) * scales[index] * textureFit,
+        );
+        cheeks.endFill();
+      }
     }
-    cheeks.endFill();
     cheeks.alpha = 0;
     app.stage.addChild(cheeks);
     return cheeks;
@@ -511,7 +518,8 @@
       if (gazeRight) gazeRight.plane.alpha = Math.max(0, this.gazeX) * gazeVisibility;
       const happy = this.planes.get("expression_happy");
       const sad = this.planes.get("expression_sad");
-      if (happy) happy.plane.alpha = this.expression === "happy" ? 1 : 0;
+      if (happy) happy.plane.alpha = this.expression === "happy"
+        && this.rig.expressionHappyMode !== "disabled" ? 1 : 0;
       if (sad) sad.plane.alpha = this.expression === "concern" && this.rig.expressionSadMode !== "disabled" ? 1 : 0;
       const half = this.planes.get("blink_half");
       const closed = this.planes.get("blink_closed");
