@@ -24,7 +24,11 @@ fn number_before(text: &str, marker: &str) -> Option<i64> {
 }
 
 fn str_arg(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn minutes_arg(args: &Value, key: &str, default: i64, min: i64, max: i64) -> i64 {
@@ -44,7 +48,10 @@ fn list_text(events: &[DailyEvent]) -> String {
     }
     let mut out = String::from("動いているタイマー:");
     for event in items {
-        out.push_str(&format!("\n- {} {} {}（id:{}）", event.kind, event.due_at, event.text, event.id));
+        out.push_str(&format!(
+            "\n- {} {} {}（id:{}）",
+            event.kind, event.due_at, event.text, event.id
+        ));
     }
     out
 }
@@ -56,7 +63,15 @@ impl Tool for FocusTimerTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["集中", "ポモドーロ", "タイマー", "見守り", "作業を見て", "focus", "pomodoro"]
+        &[
+            "集中",
+            "ポモドーロ",
+            "タイマー",
+            "見守り",
+            "作業を見て",
+            "focus",
+            "pomodoro",
+        ]
     }
 
     fn intent_priority(&self) -> i32 {
@@ -68,9 +83,15 @@ impl Tool for FocusTimerTool {
             return None;
         }
         let (action, minutes) = if text.contains("見守") {
-            ("watch", number_before(text, "分").unwrap_or(60).clamp(5, 240))
+            (
+                "watch",
+                number_before(text, "分").unwrap_or(60).clamp(5, 240),
+            )
         } else {
-            ("start", number_before(text, "分").unwrap_or(25).clamp(1, 240))
+            (
+                "start",
+                number_before(text, "分").unwrap_or(25).clamp(1, 240),
+            )
         };
         Some(crate::tools::IntentInvocation::direct(json!({
             "action": action,

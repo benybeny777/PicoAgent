@@ -333,5 +333,9 @@
     "expression_sad": "runtime-layers/expression_sad.webp"
   },
   "runtimeLayerEncoding": "webp-lossless-v1",
-  "frameEncoding": "webp-lossless-v1"
+  "frameEncoding": "webp-lossless-v1",
+  "meshRig": {
+    "rig": "mesh-rig/rig.json",
+    "assetVersion": "4baa0b97852120a3"
+  }
 }

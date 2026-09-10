@@ -31,14 +31,12 @@ let userCharacterRoot = ""; // 追加キャラクターの置き場（案内表�
 let modalOpen = false; // 確認ダイアログ表示中は全体ショートカットを止める
 let settingsMutationBusy = false;
 const settingsListeners = new Map();
-let tha3GenerationRunning = false;
 let characterPersona;
 let characterSpeaker;
 let characterLive2dSdkSelect;
 let characterLive2dSdkField;
 let characterLive2dSdkHint;
 let characterCatalog;
-let characterAddGroup;
 const characterManifestCache = new Map();
 let modelInput;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
@@ -46,7 +44,7 @@ let scheduleEditorState = null; // スケジュールタスクエディタ（保
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "display", "character", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const PRESERVE_UNREADABLE_SECRET = "__PRESERVE_UNREADABLE_SECRET__";
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
@@ -58,27 +56,18 @@ const LAYOUT_CHOICES = [
   { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
-let activeSettingsTab = requestedSettingsTab === "voice" || requestedSettingsTab === "character-add"
-  ? "character"
+let activeSettingsTab = requestedSettingsTab === "character-add"
+  ? "character-register"
   : (SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic");
 
 function activateSettingsTab(tabId) {
-  const focusCharacterAdd = tabId === "character-add";
-  if (focusCharacterAdd) tabId = "character";
-  if (tabId === "voice") tabId = "character";
+  if (tabId === "character-add") tabId = "character-register";
   if (!SETTINGS_TAB_IDS.has(tabId)) return false;
   activeSettingsTab = tabId;
   const button = document.getElementById(`tab-${tabId}`);
   if (button) {
     button.click();
     form.scrollTop = 0;
-    if (focusCharacterAdd) {
-      requestAnimationFrame(() => {
-        if (!characterAddGroup) return;
-        characterAddGroup.open = true;
-        characterAddGroup.scrollIntoView({ block: "start" });
-      });
-    }
   }
   return true;
 }
@@ -113,12 +102,6 @@ window.addEventListener("beforeunload", () => {
   dirtyStateScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
-  // フォールバック許可: ウィンドウ破棄中は応答を表示できない。バックエンド側のkill_on_dropも最終防壁になる。
-  if (tha3GenerationRunning) {
-    window.picoagent.settings.cancelTha3Generation().catch(error => {
-      window.PicoUI?.logApp?.("warn", "終了時にキャラ生成を中断できませんでした", window.PicoUI?.errorDetail?.(error) || String(error));
-    });
-  }
 });
 
 function el(tag, props = {}, children = []) {
@@ -481,7 +464,13 @@ function groupedModelField(key, label, value, groups, options = {}) {
   let initialFamily = allGroups.findIndex(group => group.options.some(option => option.value === value));
   if (initialFamily < 0) initialFamily = value ? allGroups.length - 1 : 0;
 
-  function rebuildSize() {
+  function updateHidden(nextValue, notify) {
+    const changed = hidden.value !== nextValue;
+    hidden.value = nextValue;
+    if (notify && changed) hidden.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function rebuildSize(notify = false) {
     const group = allGroups[Number(family.value)] || allGroups[0];
     size.innerHTML = "";
     for (const option of group.options) {
@@ -495,12 +484,12 @@ function groupedModelField(key, label, value, groups, options = {}) {
     size.hidden = customMode;
     custom.hidden = !customMode;
     if (customMode) {
-      hidden.value = custom.value.trim();
+      updateHidden(custom.value.trim(), notify);
       hint.textContent = customGroup.options[0].hint;
       return;
     }
     if (!group.options.some(option => option.value === hidden.value)) {
-      hidden.value = group.options[0]?.value || "";
+      updateHidden(group.options[0]?.value || "", notify);
     }
     size.value = hidden.value;
     hint.textContent = group.options.find(option => option.value === hidden.value)?.hint || "";
@@ -513,13 +502,30 @@ function groupedModelField(key, label, value, groups, options = {}) {
       selected: index === initialFamily,
     }));
   }
-  family.addEventListener("change", rebuildSize);
+  family.addEventListener("change", () => rebuildSize(true));
   size.addEventListener("change", () => {
-    hidden.value = size.value;
+    updateHidden(size.value, true);
     const group = allGroups[Number(family.value)] || allGroups[0];
     hint.textContent = group.options.find(option => option.value === hidden.value)?.hint || "";
   });
-  custom.addEventListener("input", () => { hidden.value = custom.value.trim(); });
+  custom.addEventListener("input", () => { updateHidden(custom.value.trim(), true); });
+  wrapper.setValue = (nextValue) => {
+    const changed = hidden.value !== nextValue;
+    let groupIndex = allGroups.findIndex(group => group.options.some(option => option.value === nextValue));
+    if (groupIndex < 0) groupIndex = allGroups.indexOf(customGroup);
+    if (groupIndex < 0) return false;
+    family.value = String(groupIndex);
+    const group = allGroups[groupIndex];
+    if (group === customGroup) custom.value = nextValue;
+    updateHidden(nextValue, false);
+    rebuildSize(false);
+    if (group !== customGroup) size.value = nextValue;
+    if (changed) hidden.dispatchEvent(new Event("change", { bubbles: true }));
+    hint.textContent = group === customGroup
+      ? customGroup.options[0].hint
+      : (group.options.find(option => option.value === nextValue)?.hint || "");
+    return true;
+  };
   rebuildSize();
   return wrapper;
 }
@@ -730,7 +736,7 @@ function multiAiSettingsField(values) {
 function localModelPresetField(key, label, value) {
   const presets = data.localModelPresets || [];
   const localPresetLabel = (preset) => `${preset.localSize || preset.label} / 推奨VRAM ${preset.recommendedVramGb || 0}GB以上 / RAM ${preset.recommendedRamGb || 0}GB以上 / DL ${preset.downloadSize || "-"}`;
-  const modelFamilies = ["Gemma", "Qwen", "OpenAI", "Phi"];
+  const modelFamilies = [...new Set(presets.map(preset => preset.family).filter(Boolean))];
   const presetGroups = modelFamilies.map((family) => ({
     label: family,
     options: presets.filter(preset => preset.family === family).map(preset => ({
@@ -741,8 +747,8 @@ function localModelPresetField(key, label, value) {
   }));
   const groups = [
     {
-      label: "自動",
-      options: [{ value: "auto", label: "PC性能から自動選択", hint: localModelPresetHint("auto") }],
+      label: "初期設定",
+      options: [{ value: "auto", label: "軽量LFMを既定にする", hint: localModelPresetHint("auto") }],
     },
     ...presetGroups,
     {
@@ -750,11 +756,80 @@ function localModelPresetField(key, label, value) {
       options: [{ value: "custom", label: "URL指定", hint: localModelPresetHint("custom") }],
     },
   ];
-  return groupedModelField(key, label, value, groups.filter(group => group.options.length > 0), { allowCustom: false });
+  const picker = groupedModelField(key, label, value, groups.filter(group => group.options.length > 0), { allowCustom: false });
+  const hardware = data.localHardware || {};
+  const recommendation = markSearchable(
+    el("div", { className: "local-model-recommendation" }),
+    "このPC向け ローカルAI 日本語 モデル RAM VRAM Liquid LFM Gemma Qwen LLM-jp"
+  );
+  const ramKnown = Number.isFinite(hardware.ramGb);
+  const vramKnown = Number.isFinite(hardware.vramGb);
+  const memorySummary = hardware.unifiedMemory
+    ? `共有メモリ ${ramKnown ? `${hardware.ramGb}GB` : "取得できませんでした"}`
+    : `RAM ${ramKnown ? `${hardware.ramGb}GB` : "取得できませんでした"} / 専用VRAM ${vramKnown ? `${hardware.vramGb}GB` : "取得できませんでした"}`;
+  recommendation.append(
+    el("div", { className: "local-model-recommendation-heading" }, [
+      el("div", {}, [
+        el("strong", { textContent: "このPC向けの日本語モデル候補" }),
+        el("p", { textContent: `${memorySummary}。判定は起動保証ではなく、モデルを選ぶ目安です。` }),
+      ]),
+    ])
+  );
+
+  function suitability(preset) {
+    const ramFit = ramKnown && hardware.ramGb >= Number(preset.recommendedRamGb || 0);
+    const requiredVram = Number(preset.recommendedVramGb || 0);
+    const vramFit = requiredVram > 0 && vramKnown && hardware.vramGb >= requiredVram;
+    if (hardware.unifiedMemory && ramFit) return { rank: 0, kind: "fit", label: "共有メモリ向け" };
+    if (requiredVram === 0 && ramFit) return { rank: 0, kind: "fit", label: "軽量・CPU向け" };
+    if (vramFit) return { rank: 0, kind: "fit", label: "GPU向け" };
+    if (ramFit) return { rank: 1, kind: "fit", label: "CPU/RAM向け" };
+    if (!ramKnown || (requiredVram > 0 && !vramKnown)) return { rank: 2, kind: "unknown", label: "判定情報不足" };
+    return { rank: 3, kind: "avoid", label: "このPCでは非推奨" };
+  }
+
+  const cards = presets.map((preset, index) => ({ preset, index, fit: suitability(preset) }))
+    .sort((a, b) => a.fit.rank - b.fit.rank || a.index - b.index);
+  const cardGrid = el("div", { className: "local-model-card-grid" });
+  const buttons = new Map();
+  function refreshCards() {
+    const selected = inputs.get(key)?.value || "";
+    for (const [id, button] of buttons) {
+      const active = id === selected;
+      button.classList.toggle("selected", active);
+      button.textContent = active ? "選択中" : "このモデルを使う";
+      button.disabled = active;
+    }
+  }
+  for (const { preset, fit } of cards) {
+    const button = el("button", { type: "button", className: "btn local-model-select", textContent: "このモデルを使う" });
+    button.addEventListener("click", () => {
+      picker.setValue?.(preset.id);
+      refreshCards();
+    });
+    buttons.set(preset.id, button);
+    cardGrid.append(el("article", { className: `local-model-card ${fit.kind}` }, [
+      el("div", { className: "local-model-card-top" }, [
+        el("strong", { textContent: preset.localSize || preset.label }),
+        el("span", { className: `local-model-fit ${fit.kind}`, textContent: fit.label }),
+      ]),
+      el("p", { className: "local-model-japanese", textContent: preset.japaneseNote || "日本語対応" }),
+      el("p", { textContent: preset.note || "" }),
+      el("dl", {}, [
+        el("div", {}, [el("dt", { textContent: "目安" }), el("dd", { textContent: `VRAM ${preset.recommendedVramGb || 0}GB / RAM ${preset.recommendedRamGb || 0}GB` })]),
+        el("div", {}, [el("dt", { textContent: "取得" }), el("dd", { textContent: preset.downloadSize || "-" })]),
+      ]),
+      button,
+    ]));
+  }
+  recommendation.append(cardGrid);
+  inputs.get(key)?.addEventListener("change", refreshCards);
+  refreshCards();
+  return el("div", { className: "local-model-picker-block" }, [recommendation, picker]);
 }
 
 function localModelPresetHint(value) {
-  if (value === "auto") return "初回起動時にVRAM/RAM目安で small / balanced / large を選び、以後は選定結果を保存します。";
+  if (value === "auto") return "初回起動時に連続ツール利用を検証済みのLFM2.5 2.6Bを選び、以後は選定結果を保存します。上のPC向け候補からいつでも変更できます。";
   if (value === "custom") return "下のカスタムモデルURLを使います。GGUFファイルの直接URLを指定してください。";
   const preset = (data.localModelPresets || []).find(item => item.id === value);
   if (!preset) return "";
@@ -843,7 +918,9 @@ function quickSettingsGuide(v) {
   const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
-    { tab: "character", title: "キャラと声", summary: `${v.PICOAGENT_CHARACTER || "既定キャラ"}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}` },
+    { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック" },
+    { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
+    { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
     { tab: "providers", title: "使うAI", summary: provider?.label || v.PICOAGENT_PROVIDER || "ローカル" },
     { tab: "components", title: "追加機能", summary: "音声・文字起こし・文書ツール" },
@@ -863,10 +940,10 @@ function quickSettingsGuide(v) {
   return markSearchable(el("section", { className: "quick-settings" }, [
     el("div", { className: "quick-settings-heading" }, [
       el("h2", { textContent: "まずはここから" }),
-      el("p", { textContent: "普段はこの5つを入口にすれば大丈夫です。" }),
+      el("p", { textContent: "よく使う設定を目的別に開けます。" }),
     ]),
     grid,
-  ]), "よく使う 設定 キャラクター 音声 画面 レイアウト AI モデル 追加機能 診断 修復");
+  ]), "よく使う 設定 キャラクター 登録 選択 音声 画面 レイアウト AI モデル 追加機能 診断 修復");
 }
 
 function setQuickSettingsSummary(tabId, summary) {
@@ -1136,6 +1213,7 @@ function createTabs(items) {
         current.classList.toggle("active", active);
         current.hidden = !active;
       }
+      form.scrollTop = 0;
       applySettingsSearch();
     });
     tabs.append(button);
@@ -1832,7 +1910,6 @@ async function characterIconUrl(character) {
 function characterRenderType(character, manifest) {
   const kind = characterRenderKind(manifest);
   if (kind === "live2d") return "Live2D";
-  if (kind === "tha3") return "自作THA3";
   if (character.user) return "追加PNG";
   return "PNGアニメ";
 }
@@ -1841,7 +1918,6 @@ function characterRenderKind(manifest) {
   const hasLive2d = !!manifest.live2d
     || (Array.isArray(manifest.variants) && manifest.variants.some(variant => variant?.live2d));
   if (hasLive2d) return "live2d";
-  if (manifest.generator?.type === "tha3") return "tha3";
   return "png";
 }
 
@@ -1870,25 +1946,22 @@ function saveCurrentCharacterVoice(id) {
   const current = characterVoiceOverrides[id] || {};
   const defaultVoice = characterDefaultVoices[id] || {};
   const speaker = characterSpeaker.value.trim();
-  const next = { ...current, speaker };
+  // 空欄またはパック既定値は上書きではない。初期表示しただけでメタデータを生成して
+  // 「未保存」にしない。既存のメタデータだけの指定は、そのまま維持する。
   if (!speaker || speaker === String(defaultVoice.styleId || "")) {
-    if (defaultVoice.modelUuid && !next.modelUuid) next.modelUuid = defaultVoice.modelUuid;
-    if (defaultVoice.modelName && !next.modelName) next.modelName = defaultVoice.modelName;
-    if (defaultVoice.speakerUuid && !next.speakerUuid) next.speakerUuid = defaultVoice.speakerUuid;
-    if (defaultVoice.styleName && !next.styleName) next.styleName = defaultVoice.styleName;
-    if (defaultVoice.sourceUrl && !next.sourceUrl) next.sourceUrl = defaultVoice.sourceUrl;
-  } else {
-    delete next.modelUuid;
-    delete next.modelName;
-    delete next.speakerUuid;
-    delete next.styleName;
-    delete next.sourceUrl;
+    if (current.speaker) delete characterVoiceOverrides[id];
+    return;
   }
+  const next = { ...current, speaker };
+  delete next.modelUuid;
+  delete next.modelName;
+  delete next.speakerUuid;
+  delete next.styleName;
+  delete next.sourceUrl;
   characterVoiceOverrides[id] = next;
 }
 
 function loadCharacterVoice(id) {
-  // 音声タブ簡素化でキャラ別 speaker 入力欄は非表示（未生成）になったため、無い場合は何もしない。
   if (!characterSpeaker) return;
   const current = characterVoiceOverrides[id] || {};
   const defaultVoice = characterDefaultVoices[id] || {};
@@ -2271,9 +2344,28 @@ function buildDiagnosticsSection() {
   const toolbar = el("div", { className: "diagnostics-toolbar" });
   const refresh = el("button", { type: "button", textContent: "更新" });
   const note = el("div", { className: "hint", textContent: "実行状態を確認し、停止している同梱機能はここから再起動できます。" });
-  toolbar.append(refresh, note);
+  // 不具合の連絡へ添える情報を1ファイルにまとめる。版・環境・設定・直近のログを入れ、
+  // APIキー等の秘密値は「設定済み／未設定」だけにする。
+  const exportDiagnostics = el("button", { type: "button", textContent: "診断情報を書き出す" });
+  const exportStatus = markSearchable(
+    el("div", { className: "hint diagnostics-export-status" }),
+    "診断情報 書き出し ログ 問い合わせ サポート",
+  );
+  exportDiagnostics.addEventListener("click", async () => {
+    exportDiagnostics.disabled = true;
+    exportStatus.textContent = "書き出しています…";
+    try {
+      const result = await window.picoagent.settings.exportDiagnostics();
+      exportStatus.textContent = `保存しました（APIキー等は含みません）: ${result?.path || ""}`;
+    } catch (error) {
+      exportStatus.textContent = `書き出せませんでした: ${error?.message || error}`;
+    } finally {
+      exportDiagnostics.disabled = false;
+    }
+  });
+  toolbar.append(refresh, exportDiagnostics, note);
   const grid = el("div", { className: "diagnostic-grid" });
-  diagnosticsSec.append(toolbar, grid);
+  diagnosticsSec.append(toolbar, exportStatus, grid);
 
   async function refreshDiagnostics() {
     refresh.disabled = true;
@@ -2534,7 +2626,9 @@ async function render() {
   const panels = createTabs([
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
-    { id: "character", label: "キャラ・音声" },
+    { id: "character-register", label: "キャラ登録" },
+    { id: "character", label: "キャラ選択" },
+    { id: "voice", label: "キャラの音声" },
     { id: "components", label: "追加機能・更新" },
     { id: "providers", label: "AIモデル・連携" },
     { id: "tools", label: "スキル" },
@@ -2586,6 +2680,7 @@ async function render() {
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
+  global.append(field("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", "強く言い渡した作法を作業フォルダのAGENTS.mdへ自動で追記する", "checkbox", v.PICOAGENT_PROJECT_RULES_AUTO_CAPTURE === true));
   global.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
   global.append(field("PICOAGENT_UPDATE_CHECK_ENABLED", "起動時に新しいバージョンを確認する", "checkbox", v.PICOAGENT_UPDATE_CHECK_ENABLED !== false));
   // 変更頻度の低い項目は閉じておき、基本画面を短く保つ。
@@ -2614,7 +2709,7 @@ async function render() {
     v.PICOAGENT_MCP_SERVERS ?? "",
     "memory|npx -y @modelcontextprotocol/server-memory"
   ));
-  const voiceSec = section("読み上げ");
+  const voiceSec = section("キャラの音声設定");
   const ttsMasterStatus = el("div", {
     className: v.PICOAGENT_TTS_ENABLED === true ? "tts-master-status enabled" : "tts-master-status muted",
     textContent: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）",
@@ -2622,15 +2717,14 @@ async function render() {
   voiceSec.append(ttsMasterStatus);
   voiceSec.append(el("p", {
     className: "hint",
-    textContent: "読み上げは必要な時だけ有効にできます。キャラごとの声は上のキャラクター選択に連動します。",
+    textContent: "読み上げ全体の有効・無効と、選択中キャラの声を設定します。キャラを変える場合は「キャラ選択」を開いてください。",
   }));
   voiceSec.append(field("PICOAGENT_TTS_ENABLED", "Aivis で回答を読み上げる", "checkbox", v.PICOAGENT_TTS_ENABLED === true));
   inputs.get("PICOAGENT_TTS_ENABLED")?.addEventListener("change", event => {
     const enabled = event.target.checked;
     ttsMasterStatus.className = `tts-master-status ${enabled ? "enabled" : "muted"}`;
     ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
-    const selectedEntry = characterCatalog?.characters?.find(character => character.id === characterSelect?.value);
-    setQuickSettingsSummary("character", `${selectedEntry?.name || characterSelect?.value || v.PICOAGENT_CHARACTER || "既定キャラ"}・${enabled ? "読み上げ有効" : "ミュート中"}`);
+    setQuickSettingsSummary("voice", enabled ? "読み上げ有効" : "ミュート中");
   });
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値50）", "number", v.PICOAGENT_TTS_VOLUME ?? "50", "50"));
   const memoryManager = window.PicoMemorySettings.buildMemoryManager({
@@ -2693,7 +2787,7 @@ async function render() {
     ? requestedCharacter
     : characterCatalog.default;
   const selectedCharacterEntry = characterCatalog.characters.find(character => character.id === selectedCharacter);
-  setQuickSettingsSummary("character", `${selectedCharacterEntry?.name || selectedCharacter}・${v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中"}`);
+  setQuickSettingsSummary("character", selectedCharacterEntry?.name || selectedCharacter);
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", {
       value: character.id,
@@ -2706,6 +2800,32 @@ async function render() {
     characterSelect,
     markSearchable(el("div", { className: "field" }, [el("label", { textContent: "キャラクター" }), characterSelect]), "PICOAGENT_CHARACTER", "キャラクター")
   ));
+  const characterVoiceName = el("strong", { textContent: selectedCharacterEntry?.name || selectedCharacter });
+  const characterVoiceDefault = el("span");
+  const chooseCharacterButton = el("button", { className: "secondary", type: "button", textContent: "キャラを選び直す" });
+  chooseCharacterButton.addEventListener("click", () => activateSettingsTab("character"));
+  const characterVoiceContext = markSearchable(el("div", { className: "character-voice-context" }, [
+    el("div", {}, [el("span", { textContent: "選択中: " }), characterVoiceName, characterVoiceDefault]),
+    chooseCharacterButton,
+  ]), "選択中 キャラクター 声 Aivis Style ID");
+  characterSpeaker = el("input", { type: "text", inputMode: "numeric", ariaLabel: "このキャラの Aivis Style ID" });
+  characterSpeaker.addEventListener("input", updateDirtyState);
+  const characterSpeakerField = markSearchable(el("div", { className: "field" }, [
+    el("label", { textContent: "このキャラの Aivis Style ID" }),
+    characterSpeaker,
+    el("p", { className: "hint", textContent: "空欄にするとキャラクターパックの既定の声へ戻ります。Aivisの音声スタイルIDを入力してください。" }),
+  ]), "キャラ 音声 Aivis speaker style ID 声を変える");
+  const updateCharacterVoiceContext = id => {
+    const entry = characterCatalog.characters.find(character => character.id === id);
+    const voice = characterDefaultVoices[id] || {};
+    const details = [voice.modelName, voice.styleName].filter(Boolean).join(" / ");
+    const styleId = voice.styleId != null ? `ID ${voice.styleId}` : "";
+    characterVoiceName.textContent = entry?.name || id;
+    characterVoiceDefault.textContent = [details, styleId].filter(Boolean).length
+      ? `（既定: ${[details, styleId].filter(Boolean).join(" / ")}）`
+      : "（既定の声）";
+  };
+  voiceSec.append(characterVoiceContext, characterSpeakerField);
   characterSec.append(selectField("PICOAGENT_COMPANION_MODE", "相棒の役割", v.PICOAGENT_COMPANION_MODE || "both", [
     { value: "life", label: "いっしょに暮らす" },
     { value: "work", label: "いっしょに働く" },
@@ -2742,6 +2862,7 @@ async function render() {
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
+  updateCharacterVoiceContext(selectedCharacter);
   await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
@@ -2767,7 +2888,8 @@ async function render() {
         previousCharacter = requestedCharacter;
         characterSelect.value = requestedCharacter;
         const selectedEntry = characterCatalog.characters.find(character => character.id === requestedCharacter);
-        setQuickSettingsSummary("character", `${selectedEntry?.name || requestedCharacter}・${inputs.get("PICOAGENT_TTS_ENABLED")?.checked ? "読み上げ有効" : "ミュート中"}`);
+        setQuickSettingsSummary("character", selectedEntry?.name || requestedCharacter);
+        updateCharacterVoiceContext(requestedCharacter);
       } catch (error) {
         characterSelect.value = previousCharacter;
         logApp("warn", "キャラクター設定の切替に失敗しました", errorDetail(error));
@@ -2832,9 +2954,6 @@ async function render() {
   ));
   characterSec.append(registerInput("PICOAGENT_RELATIONSHIP_CUSTOM", relationshipCustom, relationshipCustomField));
   describeRelationship();
-  panels.character.append(characterSec);
-  panels.character.append(voiceSec);
-
   // --- スキル設定（⚙ のあるスキルはクリックでその場に開く）。活用ガイドとは別タブに分ける ---
   const skillSec = section("スキル設定");
   if (!data.tools.length) {
@@ -2902,7 +3021,6 @@ async function render() {
     { id: "all", label: "すべて" },
     { id: "live2d", label: "Live2D" },
     { id: "png", label: "PNGアニメ" },
-    { id: "tha3", label: "自作THA3" },
     { id: "user", label: "追加キャラ" },
   ];
   const filterBar = el("div", { className: "genre-filter character-type-filter" });
@@ -2940,7 +3058,7 @@ async function render() {
     });
   };
   characterSelect.addEventListener("change", refreshCharacterCards);
-  for (const character of characterCatalog.characters) {
+  const appendCharacterCard = (character) => {
     // 先頭1文字。`slice(0, 1)` は絵文字始まりの名前を半分で切って壊すため、
     // コードポイント単位で取る。
     const initial = Array.from(String(character.name || character.id || "?"))[0] || "?";
@@ -2959,9 +3077,10 @@ async function render() {
       characterSelect.dispatchEvent(new Event("change"));
       statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
     });
+    const nameText = el("span", { textContent: character.name });
     const texts = [
       el("div", { className: "card-name" }, [
-        document.createTextNode(character.name),
+        nameText,
         el("span", { className: "config-badge ok", textContent: character.renderType }),
       ]),
       el("div", { className: "card-desc character-id", textContent: `ID: ${character.id}` }),
@@ -2970,6 +3089,53 @@ async function render() {
     ];
     // 削除できるのは自分で追加したものだけ（同梱キャラは実行ファイル側にあるため消せない）。
     if (character.user) {
+      const renameInput = el("input", {
+        type: "text",
+        value: character.name,
+        maxLength: 80,
+        ariaLabel: `${character.name}の表示名`,
+      });
+      const renameButton = el("button", { className: "secondary", type: "button", textContent: "名前を変更" });
+      const renameStatus = el("div", { className: "card-desc" });
+      renameButton.addEventListener("click", async () => {
+        const nextName = renameInput.value.trim();
+        if (!nextName || nextName === character.name) {
+          renameStatus.textContent = nextName ? "表示名は変更されていません。" : "表示名を入力してください。";
+          return;
+        }
+        setSettingsMutationBusy(true);
+        renameButton.disabled = true;
+        try {
+          const result = await window.picoagent.settings.renameCharacter(character.id, nextName);
+          character.name = result.name;
+          renameInput.value = result.name;
+          nameText.textContent = result.name;
+          icon.alt = `${result.name}のアイコン`;
+          const option = [...characterSelect.options].find(item => item.value === character.id);
+          if (option) option.textContent = `${result.name} — ${character.renderType} [${character.id}]`;
+          card.dataset.search = searchText(character.id, result.name, character.description, character.renderType, "追加キャラ");
+          // 既定人格の照合値は捨てない。先に消すと切替時の保存で「旧名の既定文」が
+          // ユーザー上書きとして固定され、名前変更に追従しないまま未保存扱いになる。
+          // マニフェストのキャッシュだけ捨て、`loadCharacterPersona` が新しい既定値を入れ直す。
+          characterManifestCache.delete(character.id);
+          if (characterSelect.value === character.id) await queueCharacterSwitch(character.id);
+          renameStatus.textContent = `${result.name}へ変更しました。内部IDは ${character.id} のままです。`;
+          statusEl.textContent = renameStatus.textContent;
+          applyCharacterFilters();
+        } catch (error) {
+          renameStatus.textContent = `名前を変更できませんでした: ${error?.message || error}`;
+        } finally {
+          renameButton.disabled = false;
+          setSettingsMutationBusy(false);
+        }
+      });
+      renameInput.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          renameButton.click();
+        }
+      });
+      texts.push(el("div", { className: "character-rename-row" }, [renameInput, renameButton]), renameStatus);
       const removeStatus = el("div", { className: "card-desc" });
       const removeButton = el("button", { className: "secondary", type: "button", textContent: "削除" });
       const removeMessage = "OS のゴミ箱へ移動します。設定・会話履歴は削除しません。";
@@ -3024,223 +3190,44 @@ async function render() {
     card.dataset.characterRender = character.renderKind;
     card.dataset.characterOrigin = character.user ? "user" : "bundled";
     charList.append(card);
-  }
+  };
+  for (const character of characterCatalog.characters) appendCharacterCard(character);
   refreshCharacterCards();
   const empty = el("p", { className: "hint character-browser-empty", textContent: "条件に合うキャラクターが見つかりません。" });
   charSec.append(charList, empty);
   applyCharacterFilters();
 
-  // --- 1枚絵からTHA3自作キャラクターを生成する ---
-  // 生成物は一時パックとして検証してから app_data_dir/characters へ導入する。
-  // Pythonプロセスはバックエンドで管理し、設定画面を閉じた場合もキャンセルして回収する。
-  const tha3Sec = section("1枚絵からキャラクターを作成（THA3）");
-  const tha3Hint = el("p", {
-    className: "hint",
-    textContent: "512×512の透過PNGから、待機・呼吸・左右揺れ・まばたき・口パクなど17キーポーズ／42フレームを生成します。WindowsはVRAMに合わせてモデルを自動調整し、Apple Silicon MacはMPSを使います。",
-  });
-  const tha3Credit = el("p", {
-    className: "hint",
-    textContent: "THA3: © Pramook Khungurn (pkhungurn)。コード MIT License、学習済みモデル CC BY 4.0。",
-  });
-  const tha3ToolStatus = el("div", { className: "tha3-tool-status", textContent: "制作ツールを確認中…" });
-  const tha3RootField = field("PICOAGENT_THA3_ROOT", "使用するTHA3フォルダ", "text", v.PICOAGENT_THA3_ROOT ?? "", "作者配布から用意したTHA3フォルダを選択");
-  const tha3RootInput = inputs.get("PICOAGENT_THA3_ROOT");
-  tha3RootInput.readOnly = true;
-  const pickTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "THA3フォルダを選ぶ" });
-  const clearTha3RootButton = el("button", { className: "secondary", type: "button", textContent: "選択解除" });
-  const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "透過PNGを選んでください" });
-  const sourcePreview = el("img", { className: "tha3-source-preview", alt: "選択した立ち絵のプレビュー" });
-  sourcePreview.hidden = true;
-  const pickSourceButton = el("button", { className: "secondary", type: "button", textContent: "画像を選ぶ" });
-  const sourceActions = el("div", { className: "character-add-actions" }, [pickSourceButton]);
-  const idInput = el("input", {
-    type: "text",
-    value: `custom-${Date.now().toString(36)}`,
-    placeholder: "例: my-character",
-    maxLength: 64,
-  });
-  const nameInput = el("input", { type: "text", value: "マイキャラ", maxLength: 80 });
-  const createButton = el("button", { className: "primary", type: "button", textContent: "キャラクターを作成" });
-  const cancelButton = el("button", { className: "secondary", type: "button", textContent: "生成をキャンセル" });
-  cancelButton.hidden = true;
-  const progress = el("pre", { className: "tha3-progress", textContent: "" });
-  progress.hidden = true;
-  const createStatus = el("p", { className: "hint" });
-  let selectedSource = "";
-  let selectedTha3Root = tha3RootInput.value.trim();
-  let toolReady = false;
-  let tha3ControlBusy = false;
-
-  function updateCreateEnabled() {
-    createButton.disabled = tha3GenerationRunning || !toolReady || !selectedSource || !idInput.value.trim() || !nameInput.value.trim();
-    pickSourceButton.disabled = tha3GenerationRunning || tha3ControlBusy;
-    pickTha3RootButton.disabled = tha3GenerationRunning || tha3ControlBusy;
-    clearTha3RootButton.disabled = tha3GenerationRunning || tha3ControlBusy;
-    idInput.disabled = tha3GenerationRunning;
-    nameInput.disabled = tha3GenerationRunning;
-    cancelButton.hidden = !tha3GenerationRunning;
-  }
-
-  async function withTha3ControlsLocked(task) {
-    if (tha3GenerationRunning || tha3ControlBusy) return;
-    tha3ControlBusy = true;
-    updateCreateEnabled();
-    try {
-      await task();
-    } finally {
-      tha3ControlBusy = false;
-      updateCreateEnabled();
+  // 追加コマンドが成功した時点でユーザー領域には検証済みパックが確定している。
+  // 設定ウィンドウは閉じても同じWebViewを再表示するため、「開き直す」だけでは一覧が
+  // 再構築されない。追加した1体をバックエンドの正本から読み直し、その場で一覧と選択欄へ足す。
+  async function registerInstalledCharacter(id) {
+    const added = (await loadUserCharacters(characterCatalog.characters))
+      .find(character => character.id === id);
+    if (!added) {
+      // 同梱キャラと同じidのパックは一覧で同梱側だけが残るため、追加しても選べない。
+      // 「追加できたのに出てこない」で終わらせず、直しかたまで伝える。
+      const conflict = characterCatalog.characters.some(character => character.id === id && !character.user);
+      throw new Error(conflict
+        ? `同梱キャラクターと同じID（${id}）のため一覧へ出せません。パックの id を変えて追加し直してください。`
+        : `追加したキャラクター ${id} を一覧から読み直せませんでした。`);
     }
+    const manifest = await loadCharacterManifestForSettings(added);
+    added.renderType = characterRenderType(added, manifest);
+    added.renderKind = characterRenderKind(manifest);
+    characterCatalog.characters.push(added);
+    characterSelect.append(el("option", {
+      value: added.id,
+      textContent: `${added.name} — ${added.renderType} [${added.id}]`,
+    }));
+    appendCharacterCard(added);
+    characterTypeFilter = "user";
+    refreshFilterButtons();
+    applyCharacterFilters();
+    characterSelect.value = added.id;
+    await queueCharacterSwitch(added.id);
+    refreshCharacterCards();
+    return added;
   }
-
-  pickSourceButton.addEventListener("click", async () => {
-    await withTha3ControlsLocked(async () => {
-      createStatus.textContent = "画像を選択中…";
-      try {
-        const picked = await window.picoagent.settings.pickTha3Source();
-        if (!picked?.path) {
-          createStatus.textContent = "画像選択をキャンセルしました。";
-          return;
-        }
-        selectedSource = picked.path;
-        sourceInput.value = picked.path;
-        sourcePreview.src = picked.dataUrl;
-        sourcePreview.onerror = () => { sourcePreview.hidden = true; };
-        sourcePreview.hidden = false;
-        createStatus.textContent = "画像を選びました。512×512・背景透過・正面向きか確認してください。";
-      } catch (error) {
-        createStatus.textContent = `画像を選べませんでした: ${error?.message || error}`;
-        logApp("warn", "THA3入力画像を選べませんでした", errorDetail(error));
-      }
-    });
-  });
-  idInput.addEventListener("input", updateCreateEnabled);
-  nameInput.addEventListener("input", updateCreateEnabled);
-
-  async function refreshTha3Status(rootPath = null) {
-    const tha3Status = await window.picoagent.settings.tha3Status(rootPath);
-    toolReady = Boolean(tha3Status.ready);
-    // 自動検出パスは保存せず、ユーザーが選んだパスだけを保存して次回も確認する。
-    selectedTha3Root = rootPath ? tha3Status.root : "";
-    if (rootPath && tha3Status.root && tha3RootInput.value !== tha3Status.root) {
-      tha3RootInput.value = tha3Status.root;
-      tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    tha3ToolStatus.textContent = toolReady
-      ? `制作ツール準備済み: ${tha3Status.root}`
-      : `${tha3Status.installHint} 本体=${tha3Status.sourceReady ? "OK" : "不足"}、モデル=${tha3Status.modelReady ? "OK" : "不足"}、Python=${tha3Status.runtimeReady ? "OK" : "不足"}。確認先: ${tha3Status.root}`;
-    tha3ToolStatus.classList.toggle("ready", toolReady);
-    updateCreateEnabled();
-  }
-
-  pickTha3RootButton.addEventListener("click", async () => {
-    await withTha3ControlsLocked(async () => {
-      createStatus.textContent = "THA3フォルダを選択中…";
-      try {
-        const picked = await window.picoagent.settings.pickTha3Root();
-        if (!picked?.path) {
-          createStatus.textContent = "フォルダ選択をキャンセルしました。";
-          return;
-        }
-        await refreshTha3Status(picked.path);
-        createStatus.textContent = toolReady ? "THA3制作ツールを確認しました。" : "必要な本体またはモデルが不足しています。";
-      } catch (error) {
-        toolReady = false;
-        selectedTha3Root = "";
-        tha3ToolStatus.classList.remove("ready");
-        tha3ToolStatus.textContent = `選択したフォルダを使えません: ${error?.message || error}`;
-        createStatus.textContent = "THA3フォルダを確認できませんでした。";
-        logApp("warn", "THA3フォルダを確認できませんでした", errorDetail(error));
-      }
-    });
-  });
-  clearTha3RootButton.addEventListener("click", async () => {
-    await withTha3ControlsLocked(async () => {
-      tha3RootInput.value = "";
-      tha3RootInput.dispatchEvent(new Event("input", { bubbles: true }));
-      selectedTha3Root = "";
-      createStatus.textContent = "保存するとTHA3フォルダの選択を解除します。";
-      try {
-        await refreshTha3Status("");
-      } catch (error) {
-        toolReady = false;
-        tha3ToolStatus.classList.remove("ready");
-        tha3ToolStatus.textContent = `自動検出先を確認できませんでした: ${error?.message || error}`;
-        logApp("warn", "THA3フォルダの選択解除後に自動検出先を確認できませんでした", errorDetail(error));
-      }
-    });
-  });
-
-  await replaceSettingsListener("tha3-progress", "tha3:progress", event => {
-    const line = String(event?.message || "").trim();
-    if (!line) return;
-    progress.hidden = false;
-    progress.textContent = tail(`${progress.textContent}${progress.textContent ? "\n" : ""}${line}`, 6000);
-    progress.scrollTop = progress.scrollHeight;
-  });
-
-  cancelButton.addEventListener("click", async () => {
-    cancelButton.disabled = true;
-    createStatus.textContent = "生成を停止し、GPUと一時ファイルを解放しています…";
-    try {
-      await window.picoagent.settings.cancelTha3Generation();
-    } catch (error) {
-      createStatus.textContent = `キャンセル要求に失敗しました: ${error?.message || error}`;
-      logApp("warn", "THA3生成のキャンセル要求に失敗しました", errorDetail(error));
-      cancelButton.disabled = false;
-    }
-  });
-
-  createButton.addEventListener("click", async () => {
-    tha3GenerationRunning = true;
-    progress.textContent = "";
-    progress.hidden = false;
-    createStatus.textContent = "生成中です。初回はモデル読込を含め数分かかることがあります…";
-    updateCreateEnabled();
-    try {
-      const result = await window.picoagent.settings.generateTha3Character(
-        selectedSource,
-        selectedTha3Root,
-        idInput.value.trim(),
-        nameInput.value.trim(),
-      );
-      createStatus.textContent = `${result.name}（${result.id}）を作成しました。`;
-      statusEl.textContent = `${result.name}を追加しました。キャラクター一覧を更新します。`;
-      data.values = collect();
-      tha3GenerationRunning = false;
-      await render();
-      activateSettingsTab("character");
-    } catch (error) {
-      createStatus.textContent = `作成できませんでした: ${error?.message || error}`;
-      logApp("error", "THA3キャラクター生成に失敗しました", errorDetail(error));
-    } finally {
-      tha3GenerationRunning = false;
-      cancelButton.disabled = false;
-      updateCreateEnabled();
-    }
-  });
-
-  try {
-    await refreshTha3Status(selectedTha3Root || null);
-  } catch (error) {
-    tha3ToolStatus.textContent = `制作ツールを確認できませんでした: ${error?.message || error}`;
-    logApp("warn", "THA3制作ツールの状態を確認できませんでした", errorDetail(error));
-  }
-  updateCreateEnabled();
-  tha3Sec.append(
-    tha3Hint,
-    tha3Credit,
-    tha3ToolStatus,
-    tha3RootField,
-    el("div", { className: "character-add-actions" }, [pickTha3RootButton, clearTha3RootButton]),
-    el("div", { className: "field" }, [el("label", { textContent: "元画像" }), sourceInput, sourceActions]),
-    sourcePreview,
-    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), idInput]),
-    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), nameInput]),
-    el("div", { className: "character-add-actions" }, [createButton, cancelButton]),
-    progress,
-    createStatus,
-  );
 
   // --- キャラクターを自分で追加する ---
   // 同梱キャラは実行ファイルへ焼き込まれているため増減できない。追加分はユーザー領域
@@ -3278,6 +3265,10 @@ async function render() {
       const id = live2dIdInput.value.trim();
       const name = live2dNameInput.value.trim();
       if (!id || !name) throw new Error("キャラクターIDと表示名を入力してください。");
+      // 同梱・追加済みと同じidは一覧で衝突する。ファイルを書く前に断る。
+      if (characterCatalog.characters.some(character => character.id === id)) {
+        throw new Error(`キャラクターID ${id} は既に使われています。別のIDにしてください。`);
+      }
       const picked = await window.picoagent.settings.pickCharacterPack(folder);
       if (!picked?.path) {
         addStatus.textContent = "選択をキャンセルしました。";
@@ -3285,7 +3276,8 @@ async function render() {
       }
       addStatus.textContent = "Live2Dモデルを確認し、キャラクターパックを作成しています…";
       const result = await window.picoagent.settings.installLive2dCharacter(picked.path, id, name);
-      addStatus.textContent = `${result.name}（${result.id}）を追加しました。「設定」を開き直すと一覧に出ます。`;
+      const added = await registerInstalledCharacter(result.id);
+      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
     }
@@ -3310,7 +3302,8 @@ async function render() {
       }
       addStatus.textContent = "確認しています…";
       const result = await window.picoagent.settings.installCharacter(picked.path);
-      addStatus.textContent = `${result.name}（${result.id}）を追加しました。「設定」を開き直すと一覧に出ます。`;
+      const added = await registerInstalledCharacter(result.id);
+      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       // 検証で弾いた理由をそのまま見せる（何を直せばよいか分かるようにする）。
       addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
@@ -3343,15 +3336,9 @@ async function render() {
   if (userCharacterRoot) {
     addSec.append(el("p", { className: "hint", textContent: `置き場: ${userCharacterRoot}` }));
   }
-  panels.character.append(charSec);
-  characterAddGroup = advancedGroup(
-    "キャラクターを追加・作成",
-    "新しいキャラクターパックを導入したい時だけ開いてください。",
-    [addSec, tha3Sec],
-  );
-  characterAddGroup.id = "character-add-group";
-  if (requestedSettingsTab === "character-add") characterAddGroup.open = true;
-  panels.character.append(characterAddGroup);
+  panels.character.append(charSec, characterSec);
+  panels.voice.append(voiceSec);
+  panels["character-register"].append(addSec);
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("AIサービスごとの設定");
@@ -3426,7 +3413,7 @@ async function render() {
   applySettingsSearch();
   renderingSettings = false;
   updateDirtyState();
-  if (requestedSettingsTab === "character-add") activateSettingsTab("character-add");
+  if (requestedSettingsTab === "character-add") activateSettingsTab("character-register");
 }
 
 function providerDefaultModel(providerId) {
@@ -3440,8 +3427,9 @@ function providerDefaultModel(providerId) {
   if (providerId === "xai") return inputs.get("PICOAGENT_XAI_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "mistral") return inputs.get("PICOAGENT_MISTRAL_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "local") {
-    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || provider.defaultModel || "balanced";
-    return preset === "auto" ? (provider.defaultModel || "balanced") : preset;
+    const fallback = data.defaultLocalModelPreset || provider.defaultModel || "lfm25_2_6b";
+    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || fallback;
+    return preset === "auto" ? fallback : preset;
   }
   return provider.defaultModel || "";
 }

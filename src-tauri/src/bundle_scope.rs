@@ -26,7 +26,7 @@ const ALLOWED_RESOURCES: [(&str, &str); 2] = [
 /// 販売版（`tauri.distribution.conf.json`）の `bundle.resources` に書いてよいもの。
 ///
 /// 販売版は**第三者ソフトを再配布しない**方針なので、通常ビルドより狭い。ここを広げると
-/// LibreOffice・AivisSpeech・Whisper・THA3 のような取得物がそのまま販売物へ入る。
+/// LibreOffice・AivisSpeech・Whisper のような取得物がそのまま販売物へ入る。
 /// 通常ビルド側（`ALLOWED_RESOURCES`）は `resources/bundled/**/*` を許しているため、
 /// 販売用の上書き設定を見ていないと、この違いが誰にも検出されないまま消える。
 const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 2] = [

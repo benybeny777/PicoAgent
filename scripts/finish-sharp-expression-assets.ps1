@@ -1,5 +1,5 @@
 param(
-    [string[]]$CharacterIds = @('koharu', 'sena', 'noa'),
+    [string[]]$CharacterIds = @(),
     [string[]]$LayerNames = @('base', 'blink_half', 'blink_closed', 'mouth_closed', 'mouth_open', 'gaze_left', 'gaze_right', 'expression_happy', 'expression_sad'),
     [int]$Scale = 2
 )

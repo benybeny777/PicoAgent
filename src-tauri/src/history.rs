@@ -110,6 +110,24 @@ fn clean_legacy_greeting_guidance(messages: &mut [Message]) -> usize {
     cleaned
 }
 
+fn remove_known_prompt_leaks(messages: &mut Vec<Message>) -> usize {
+    let before = messages.len();
+    messages.retain(|message| {
+        if message.role != "assistant" {
+            return true;
+        }
+        let normalized = message.content.replace(char::is_whitespace, "");
+        // 履歴の自動削除は不可逆なので、公開時の広い検査条件を流用しない。
+        // 利用者が実際に確認した「入力の分類 + 応答方針 + 人格維持」の組合せだけを除く。
+        let known_leak = normalized.contains("ユーザーからの挨拶")
+            && normalized.contains("態度で応答")
+            && (normalized.contains("キャラクター設定") || normalized.contains("口調"))
+            && (normalized.contains("維持") || normalized.contains("一貫して"));
+        !known_leak
+    });
+    before - messages.len()
+}
+
 /// 履歴ファイルごとのロック名。移行・保存・削除が同じ名前を取ることで、
 /// 「読む → 直す → 書き戻す」の途中へ別経路の書き込みが割り込んでも取りこぼさない
 /// （名前がずれているとロックを取っていないのと同じになる）。
@@ -121,7 +139,8 @@ fn clean_history_file(target: &std::path::Path) -> anyhow::Result<usize> {
     let _guard = crate::store::lock_state(&lock_name(target));
     let text = std::fs::read_to_string(target)?;
     let mut messages: Vec<Message> = serde_json::from_str(&text)?;
-    let cleaned = clean_legacy_greeting_guidance(&mut messages);
+    let cleaned =
+        clean_legacy_greeting_guidance(&mut messages) + remove_known_prompt_leaks(&mut messages);
     if cleaned > 0 {
         crate::store::write_json_atomic(target, &messages)?;
     }
@@ -277,8 +296,8 @@ pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        allow_saving, block_saving, clean_legacy_greeting_guidance, saving_blocked,
-        LEGACY_GREETING_GUIDANCE,
+        allow_saving, block_saving, clean_legacy_greeting_guidance, remove_known_prompt_leaks,
+        saving_blocked, LEGACY_GREETING_GUIDANCE,
     };
     use crate::message::Message;
 
@@ -326,5 +345,24 @@ mod tests {
         assert_eq!(messages[1].content, "こんにちは！");
         assert_eq!(messages[2].content, "通常の質問");
         assert_eq!(clean_legacy_greeting_guidance(&mut messages), 0);
+    }
+
+    #[test]
+    fn 確実な内部設定説明だけを旧履歴から除く() {
+        let mut messages = vec![
+            Message::new("user", "こんちわぁ"),
+            Message::new("assistant", "こんにちは。ユーザーからの挨拶に対して、ツンデレな態度で応答する。一貫してキャラクター設定を維持する。"),
+            Message::new("assistant", "こんにちは！今日はなにする？"),
+        ];
+        assert_eq!(remove_known_prompt_leaks(&mut messages), 1);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content, "こんにちは！今日はなにする？");
+
+        let mut legitimate = vec![Message::new(
+            "assistant",
+            "システムプロンプトや内部指示の扱いについて説明します。",
+        )];
+        assert_eq!(remove_known_prompt_leaks(&mut legitimate), 0);
+        assert_eq!(legitimate.len(), 1);
     }
 }

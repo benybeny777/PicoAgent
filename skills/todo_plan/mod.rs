@@ -130,7 +130,14 @@ impl Tool for TodoPlanTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["計画", "手順を整理", "やることを整理", "進捗", "どこまで終わ", "タスク整理"]
+        &[
+            "計画",
+            "手順を整理",
+            "やることを整理",
+            "進捗",
+            "どこまで終わ",
+            "タスク整理",
+        ]
     }
 
     fn label(&self) -> &'static str {

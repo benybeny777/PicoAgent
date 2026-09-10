@@ -219,7 +219,46 @@ pub fn terminate_tree_sync(child: &mut std::process::Child, label: &str) -> Resu
 
 /// `command()` で作ったコマンドをタイムアウト付きで実行する。
 /// `label` は失敗時のメッセージに使う日本語の処理名（例: 「画像変換」）。
+/// 実行が失敗した理由。**起動できなかった場合だけ**呼び出し側が導入案内を足せるよう区別する。
+/// タイムアウトにも同じ案内を付けると、入っているのに「導入してください」と言うことになる。
+enum RunFailure {
+    /// 実行ファイルを起動できなかった（未導入・パス誤りなど）。
+    NotStarted(String),
+    /// 起動はしたが、上限時間・終了待ち・出力回収のいずれかで失敗した。
+    Interrupted(String),
+}
+
+impl RunFailure {
+    fn into_message(self) -> String {
+        match self {
+            Self::NotStarted(message) | Self::Interrupted(message) => message,
+        }
+    }
+}
+
+/// 未導入がありうる外部CLI（LibreOffice・ImageMagick など）を実行する。
+/// 起動できなかったときだけ `hint` を続けて返す。
+pub async fn output_or_install_hint(
+    command: Command,
+    timeout_secs: u64,
+    label: &str,
+    hint: &str,
+) -> Result<Output, String> {
+    run(command, timeout_secs, label)
+        .await
+        .map_err(|failure| match failure {
+            RunFailure::NotStarted(message) => format!("{message}\n{hint}"),
+            RunFailure::Interrupted(message) => message,
+        })
+}
+
 pub async fn output(command: Command, timeout_secs: u64, label: &str) -> Result<Output, String> {
+    run(command, timeout_secs, label)
+        .await
+        .map_err(RunFailure::into_message)
+}
+
+async fn run(command: Command, timeout_secs: u64, label: &str) -> Result<Output, RunFailure> {
     // 呼び出し元が停止要求との `select!` でこのfutureを破棄しても、実行本体は専用タスクに
     // 残して中断通知を受け取らせる。`kill_on_drop` だけでは直下のラッパーしか止まらず、
     // Codex／Claude CLIなどが起動した孫プロセスを残すため、必ず共通のツリー回収へ通す。
@@ -229,9 +268,9 @@ pub async fn output(command: Command, timeout_secs: u64, label: &str) -> Result<
         output_worker(command, timeout_secs, &label_owned, abandon_rx).await
     });
     let mut abandon = AbandonOutput(Some(abandon_tx));
-    let result = worker
-        .await
-        .map_err(|error| format!("{label}の実行タスクを回収できません: {error}"))?;
+    let result = worker.await.map_err(|error| {
+        RunFailure::Interrupted(format!("{label}の実行タスクを回収できません: {error}"))
+    })?;
     abandon.0.take();
     result
 }
@@ -252,11 +291,11 @@ async fn output_worker(
     timeout_secs: u64,
     label: &str,
     mut abandon: tokio::sync::oneshot::Receiver<()>,
-) -> Result<Output, String> {
+) -> Result<Output, RunFailure> {
     let timeout = timeout_secs.clamp(1, MAX_TIMEOUT_SECS);
     let mut child = command
         .spawn()
-        .map_err(|error| format!("{label}を起動できません: {error}"))?;
+        .map_err(|error| RunFailure::NotStarted(format!("{label}を起動できません: {error}")))?;
     let stdout_task = tokio::spawn(read_capture(child.stdout.take()));
     let stderr_task = tokio::spawn(read_capture(child.stderr.take()));
     let waited = tokio::select! {
@@ -265,16 +304,20 @@ async fn output_worker(
             let cleanup_error = terminate_process_tree(&mut child, label).await.err();
             stdout_task.abort();
             stderr_task.abort();
-            return Err(match cleanup_error {
+            return Err(RunFailure::Interrupted(match cleanup_error {
                 Some(error) => format!("{label}の中断後に子プロセスを回収できません: {error}"),
                 None => format!("{label}を中断しました。"),
-            });
+            }));
         }
         waited = tokio::time::timeout(Duration::from_secs(timeout), child.wait()) => waited,
     };
     let status = match waited {
         Ok(Ok(status)) => status,
-        Ok(Err(error)) => return Err(format!("{label}の終了を待てません: {error}")),
+        Ok(Err(error)) => {
+            return Err(RunFailure::Interrupted(format!(
+                "{label}の終了を待てません: {error}"
+            )))
+        }
         Err(_) => {
             let cleanup_error = terminate_process_tree(&mut child, label).await.err();
             // 出力の回収を待たずに打ち切る。`sh -c` / `powershell -Command` のように
@@ -283,18 +326,22 @@ async fn output_worker(
             // タイムアウトを設けた意味がなくなる（実際に1秒指定が30秒待ちになっていた）。
             stdout_task.abort();
             stderr_task.abort();
-            return Err(match cleanup_error {
+            return Err(RunFailure::Interrupted(match cleanup_error {
                 Some(error) => format!(
                     "{label}が {timeout} 秒でタイムアウトし、子プロセスの回収にも失敗しました: {error}"
                 ),
                 None => format!("{label}が {timeout} 秒でタイムアウトしました。"),
-            });
+            }));
         }
     };
     // 子が正常終了しても、孫がパイプを握っていれば同じ理由で終端が来ない。
     // 終了後の回収にも上限を置き、待ち続けずエラーとして返す。
-    let stdout = collect(stdout_task, label, "標準出力").await?;
-    let stderr = collect(stderr_task, label, "標準エラー").await?;
+    let stdout = collect(stdout_task, label, "標準出力")
+        .await
+        .map_err(RunFailure::Interrupted)?;
+    let stderr = collect(stderr_task, label, "標準エラー")
+        .await
+        .map_err(RunFailure::Interrupted)?;
     Ok(Output {
         status,
         stdout,
@@ -409,7 +456,8 @@ async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
 
 #[cfg(test)]
 mod tests {
-    use super::{command, output};
+    use super::{command, output, output_or_install_hint};
+    use std::process::Stdio;
 
     #[test]
     fn 既定設定で実行し出力を取れる() {
@@ -434,6 +482,44 @@ mod tests {
             let cmd = command("picoagent-not-a-real-command");
             let error = output(cmd, 10, "存在しない実行").await.unwrap_err();
             assert!(error.contains("起動できません"), "error: {error}");
+        });
+    }
+
+    /// 導入案内は「起動できなかったとき」だけ足す。
+    /// タイムアウトにも付けると、入っているのに「導入してください」と言うことになる。
+    #[test]
+    fn 導入案内は起動できなかったときだけ足す() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let missing = output_or_install_hint(
+                command("picoagent-not-a-real-command"),
+                10,
+                "存在しない実行",
+                "導入手順はこちら。",
+            )
+            .await
+            .unwrap_err();
+            assert!(missing.contains("起動できません"), "error: {missing}");
+            assert!(missing.contains("導入手順はこちら。"), "error: {missing}");
+
+            let mut slow = if cfg!(windows) {
+                let mut cmd = command("cmd");
+                cmd.args(["/c", "ping -n 31 127.0.0.1"]);
+                cmd
+            } else {
+                let mut cmd = command("sh");
+                cmd.args(["-c", "sleep 30"]);
+                cmd
+            };
+            slow.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let timed_out = output_or_install_hint(slow, 1, "遅い実行", "導入手順はこちら。")
+                .await
+                .unwrap_err();
+            assert!(timed_out.contains("タイムアウト"), "error: {timed_out}");
+            assert!(
+                !timed_out.contains("導入手順はこちら。"),
+                "error: {timed_out}"
+            );
         });
     }
 
@@ -474,6 +560,26 @@ mod tests {
         });
     }
 
+    /// 検査ファイルから親子PIDを読む。書き込み途中・共有違反は「まだ」として扱う。
+    #[cfg(windows)]
+    fn read_marker_ids(marker: &std::path::Path) -> Result<Vec<u32>, String> {
+        let text = std::fs::read_to_string(marker).map_err(|error| error.to_string())?;
+        let values = text
+            .trim()
+            .split(',')
+            .map(|value| {
+                value
+                    .trim()
+                    .parse::<u32>()
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if values.len() != 2 {
+            return Err(format!("PIDが2個そろっていません: {:?}", text.trim()));
+        }
+        Ok(values)
+    }
+
     #[cfg(windows)]
     #[test]
     fn 呼び出しfutureを破棄しても孫プロセスまで回収する() {
@@ -495,20 +601,26 @@ mod tests {
             cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
             let running = tokio::spawn(output(cmd, 30, "破棄検査"));
 
+            // 存在を待つだけでは足りない。書き手（PowerShell の Set-Content）は作った直後も
+            // ハンドルを持っていて、その一瞬は共有違反で読めず、読めても内容が途中のことがある。
+            // 「期待する形へ読み切れる」までを待機条件にする。
+            let mut last_error = "まだ作られていません".to_string();
+            let mut ids = Vec::new();
             for _ in 0..100 {
-                if marker.exists() {
-                    break;
+                match read_marker_ids(&marker) {
+                    Ok(values) => {
+                        ids = values;
+                        break;
+                    }
+                    Err(reason) => last_error = reason,
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             }
-            let ids = std::fs::read_to_string(&marker)
-                .expect("親子PIDを書いた検査ファイルが作られること");
-            let ids = ids
-                .trim()
-                .split(',')
-                .map(|value| value.parse::<u32>().unwrap())
-                .collect::<Vec<_>>();
-            assert_eq!(ids.len(), 2);
+            assert_eq!(
+                ids.len(),
+                2,
+                "親子PIDを書いた検査ファイルを読み切れませんでした: {last_error}"
+            );
 
             running.abort();
             let _ = running.await;
@@ -598,10 +710,13 @@ mod guard {
     /// 子プロセスの完了待ちに上限を付けること。
     ///
     /// `command.output().await` をそのまま呼ぶと**待ち時間の上限が無くなる**。
-    /// `tokio::time::timeout(..., command.output())` で包むか、共通層の
-    /// `process::output()` を使えばこの形にはならない。実際に `image_tools` の
-    /// ImageMagick 名乗り確認だけが素の `.output().await` で残っており、壊れた
-    /// 実行ファイルを掴むと画像変換が永久に止まる状態だった。
+    /// 共通層の `process::output()` / `output_or_install_hint()` を使えばこの形にはならない。
+    /// 実際に `image_tools` の ImageMagick 名乗り確認だけが素の `.output().await` で残っており、
+    /// 壊れた実行ファイルを掴むと画像変換が永久に止まる状態だった。
+    ///
+    /// なお `tokio::time::timeout(..., command.output())` で包むのも不可（下の
+    /// `一度きりの実行は共通層を通す` が別途検出する）。上限は付くが、打ち切り時に
+    /// 回収されるのは直下の子だけで孫が残る。
     #[test]
     fn 子プロセスの完了待ちに上限を付ける() {
         let mut violations = Vec::new();
@@ -633,6 +748,12 @@ mod guard {
     /// 握っていると終端が来ないため、上限を付けた意味が消える）。常駐プロセスや
     /// 進捗つき長時間処理は `child` を自分で持ってよいが、その場合も回収の待ちは
     /// `process::join_capture()` を使う。
+    ///
+    /// `tokio::time::timeout(..., command.output())` も同じ理由で検出する。上限は付くが、
+    /// 打ち切りで `output()` のfutureを捨てても `kill_on_drop` が届くのは**直下の子だけ**で、
+    /// 起動直後に本体を立て直す実行ファイル（LibreOffice の `soffice` → `soffice.bin` など）は
+    /// 残り続ける。共通層は `terminate_process_tree()` でツリーごと回収する。
+    /// 実際に `ms_office` / `image_tools` / `pdf_tools` の4箇所がこの形で残っていた。
     #[test]
     fn 一度きりの実行は共通層を通す() {
         let mut violations = Vec::new();
@@ -645,7 +766,9 @@ mod guard {
                 if trimmed.starts_with("//") {
                     continue;
                 }
-                if line.contains("tokio::time::timeout") && line.contains(".wait()") {
+                if line.contains("tokio::time::timeout")
+                    && (line.contains(".wait()") || line.contains(".output()"))
+                {
                     violations.push(format!("{}:{}", source.path.display(), number + 1));
                 }
             }

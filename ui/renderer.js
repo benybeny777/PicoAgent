@@ -48,6 +48,8 @@ const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
 const quickActions = document.getElementById("quickActions");
 const windowResizeHandles = document.querySelectorAll("[data-resize-direction]");
+const bootScreen = document.getElementById("bootScreen");
+const topWindowMenu = document.getElementById("topWindowMenu");
 let busy = false;
 const { errorDetail, logApp, preview, twoStepAction } = window.PicoUI;
 
@@ -63,6 +65,26 @@ windowResizeHandles.forEach(handle => {
     });
   });
 });
+
+function beginWindowDrag(event) {
+  if (event.button !== 0) return;
+  if (event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[contenteditable]")) return;
+  event.preventDefault();
+  window.picoagent.startWindowDrag().catch(error => {
+    logApp("warn", "ウィンドウの移動を開始できませんでした", errorDetail(error));
+    showToast("画面を移動できませんでした。右クリックの「画面位置を初期化」も試してください", "error");
+  });
+}
+
+// `data-tauri-drag-region` だけに依存すると、透明WebViewや子要素の構成によって
+// Windowsでドラッグ開始が届かないことがある。起動画面と常設上部バーは明示的に渡す。
+bootScreen?.addEventListener("pointerdown", beginWindowDrag);
+topWindowMenu?.addEventListener("pointerdown", event => {
+  beginWindowDrag(event);
+});
+petApp?.addEventListener("pointerdown", event => {
+  if (event.target === petApp) beginWindowDrag(event);
+});
 // 添付中の画像（data URL の配列）。送信後にリセットする。
 let attachedImages = [];
 // 添付中のドキュメントファイル（{name, dataUrl} の配列）。送信後にリセットする。
@@ -77,6 +99,12 @@ let streamBuffer = "";
 let unlistenStream = null;
 let unlistenStreamReset = null;
 let streamRenderFrame = null;
+let subtitlePageToken = 0;
+let subtitlePageTimer = null;
+let localEngineRequired = false;
+let localEngineReady = true;
+let localEnginePhase = "ready";
+let frontendInitialized = false;
 const conversationHistory = [];
 let historyQuery = "";
 let conversationRevision = 0;
@@ -349,7 +377,23 @@ function renderNoticePanel() {
       state.textContent = notice.status === "running" ? "実行中" : notice.status === "failed" ? "失敗" : notice.status === "cancelled" ? "中断" : "完了";
       title.append(state);
     }
-    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job") {
+    if (notice.kind === "durable_job") {
+      const state = document.createElement("span");
+      state.className = `notice-state notice-state-${durableStatus(notice.state)}`;
+      state.textContent = DURABLE_STATE_LABELS[notice.state] || "処理中";
+      title.append(state);
+      // 進行中だけ進捗を出す。終わったジョブに 100% の帯を残しても情報が増えない。
+      if (durableStatus(notice.state) === "running") {
+        const bar = document.createElement("div");
+        bar.className = "notice-progress";
+        const fill = document.createElement("div");
+        fill.className = "notice-progress-fill";
+        fill.style.width = `${Math.max(0, Math.min(100, Number(notice.progress) || 0))}%`;
+        bar.append(fill);
+        item.append(bar);
+      }
+    }
+    if (notice.kind === "schedule" || notice.taskId || notice.kind === "job" || notice.kind === "durable_job" || notice.kind === "project_rule") {
       const actions = document.createElement("div");
       actions.className = "notice-actions";
       if (notice.taskId) {
@@ -398,6 +442,45 @@ function renderNoticePanel() {
         });
         actions.append(retry);
       }
+      if (notice.kind === "durable_job" && notice.jobId) {
+        const running = durableStatus(notice.state) === "running";
+        const action = document.createElement("button");
+        action.type = "button";
+        action.textContent = running ? "中止" : "再試行";
+        action.addEventListener("click", async event => {
+          event.stopPropagation();
+          action.disabled = true;
+          try {
+            if (running) await window.picoagent.cancelDurableJob(notice.jobId);
+            else await window.picoagent.retryDurableJob(notice.jobId);
+            setStatus(running ? "ジョブを中止しました" : "ジョブを再試行します");
+          } catch (error) {
+            // 失敗を黙って飲まない（押したのに何も起きない状態を作らない）。
+            setStatus(`${running ? "中止" : "再試行"}できませんでした: ${error?.message || error}`);
+            action.disabled = false;
+          }
+        });
+        actions.append(action);
+      }
+      if (notice.kind === "project_rule" && notice.rule) {
+        const undo = document.createElement("button");
+        undo.type = "button";
+        undo.textContent = "取り消し";
+        undo.addEventListener("click", async event => {
+          event.stopPropagation();
+          undo.disabled = true;
+          try {
+            const removed = await window.picoagent.undoProjectRule(notice.rule);
+            setStatus(removed ? "AGENTS.mdから取り消しました" : "対象の行は見つかりませんでした");
+            if (removed) undo.textContent = "取り消し済み";
+            else undo.disabled = false;
+          } catch (error) {
+            setStatus(`取り消せませんでした: ${error?.message || error}`);
+            undo.disabled = false;
+          }
+        });
+        actions.append(undo);
+      }
       const settings = document.createElement("button");
       settings.type = "button";
       settings.textContent = "設定";
@@ -415,7 +498,85 @@ function renderNoticePanel() {
   }
 }
 
+// 永続ジョブ（AI Drive転送・成果物生成）の状態表示。バックエンドの JobState と対応する。
+const DURABLE_STATE_LABELS = {
+  queued: "順番待ち",
+  running: "実行中",
+  completed: "完了",
+  failed: "失敗",
+  waiting_auth: "認証待ち",
+  cancelled: "中断",
+};
+
+// 中止ボタンを出すかどうかの判定。待機中もまだ止められる。
+function durableStatus(state) {
+  return state === "queued" || state === "running" ? "running" : String(state || "completed");
+}
+
+function durableEntry(notice) {
+  return {
+    kind: "durable_job",
+    jobId: String(notice?.jobId || ""),
+    title: String(notice?.title || "バックグラウンド処理"),
+    body: String(notice?.body || ""),
+    ok: notice?.ok !== false,
+    state: String(notice?.state || "running"),
+    progress: Number(notice?.progress) || 0,
+    at: notice?.at || new Date().toISOString(),
+  };
+}
+
+// 永続ジョブは同じ jobId で何度も届く（開始・進捗・完了）。行を増やさず上書きする。
+// 未読バッジも、状態が変わったときだけ増やす（進捗のたびに数えると数字が暴れる）。
+function upsertDurableJob(notice) {
+  const entry = durableEntry(notice);
+  if (!entry.jobId) return;
+  const index = noticeEntries.findIndex(item => item.kind === "durable_job" && item.jobId === entry.jobId);
+  const previousState = index >= 0 ? noticeEntries[index].state : "";
+  if (index >= 0) noticeEntries.splice(index, 1);
+  noticeEntries.unshift(entry);
+  while (noticeEntries.length > 50) noticeEntries.pop();
+  persistNotices();
+  if (previousState !== entry.state) {
+    unreadNoticeCount += 1;
+    setStatus(entry.ok ? entry.title : `${entry.title}: エラー`);
+  }
+  updateNoticeBadge();
+  renderNoticePanel();
+}
+
+// 起動直後に、前回から残っている永続ジョブを一覧へ戻す。
+// イベントは起動前に流れた分を受け取れないため、走ったままのジョブが消えてしまう。
+async function loadDurableJobNotices() {
+  try {
+    const jobs = await window.picoagent.durableJobs();
+    if (!Array.isArray(jobs)) return;
+    const others = noticeEntries.filter(entry => entry.kind !== "durable_job");
+    const restored = jobs.slice(0, 20).map(job => durableEntry({
+      jobId: job.id,
+      title: job.label,
+      body: (job.error || job.result || job.step || "").split("\n")[0],
+      ok: job.state !== "failed" && job.state !== "waiting_auth",
+      state: job.state,
+      progress: job.progress,
+      at: job.updated_at,
+    }));
+    noticeEntries.length = 0;
+    noticeEntries.push(...others, ...restored);
+    noticeEntries.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    persistNotices();
+    updateNoticeBadge();
+    renderNoticePanel();
+  } catch (error) {
+    logApp("warn", "永続ジョブ一覧を復元できませんでした", errorDetail(error));
+  }
+}
+
 function pushNotice(notice) {
+  if (String(notice?.kind || "") === "durable_job" && notice?.jobId) {
+    upsertDurableJob(notice);
+    return;
+  }
   const entry = {
     kind: String(notice?.kind || ""),
     title: String(notice?.title || "通知"),
@@ -424,6 +585,7 @@ function pushNotice(notice) {
     taskId: notice?.taskId ? String(notice.taskId) : "",
     runId: notice?.runId ? String(notice.runId) : "",
     jobId: notice?.jobId ? String(notice.jobId) : "",
+    rule: notice?.rule ? String(notice.rule) : "",
     status: notice?.status ? String(notice.status) : "",
     prompt: notice?.prompt ? String(notice.prompt) : "",
     at: notice?.at || new Date().toISOString(),
@@ -567,11 +729,24 @@ async function fetchJsonWithTimeout(url, label, timeoutMs = STARTUP_RESOURCE_TIM
   }
 }
 
+// 同梱キャラの一覧は配布物へ焼き込まれ、実行中に増減しない。起動経路で何度も
+// 取りに行かないよう、最初の1回だけ読んで使い回す。
+let characterCatalogPromise = null;
+function loadCharacterCatalog() {
+  if (!characterCatalogPromise) {
+    characterCatalogPromise = fetchJsonWithTimeout(
+      `assets/characters/index.json?v=${characterManifestCacheKey}`,
+      "キャラクター一覧",
+    ).catch(error => {
+      characterCatalogPromise = null;
+      throw error;
+    });
+  }
+  return characterCatalogPromise;
+}
+
 async function loadCharacterManifest(characterId) {
-  const catalog = await fetchJsonWithTimeout(
-    `assets/characters/index.json?v=${characterManifestCacheKey}`,
-    "キャラクター一覧",
-  );
+  const catalog = await loadCharacterCatalog();
   const bundled = catalog.characters.map(character => ({
     id: character.id,
     name: character.name,
@@ -595,12 +770,31 @@ async function loadCharacterManifest(characterId) {
   return { entry, manifest, root };
 }
 
+// 起動画面へ寝姿で出せるのは、専用原画を持つ（`boot.useSleepingOnStartup`）同梱キャラだけ。
+// IDを直書きすると、キャラを足したときの更新漏れが黙って起きるため一覧から取る。
+function startupSleepingCandidates(catalog) {
+  return (catalog?.characters || [])
+    .filter(character => character.bootSleeping === true && character.id)
+    .map(character => character.id);
+}
+
+function chooseStartupSleepingCharacter(candidates, randomValue = Math.random()) {
+  if (!candidates.length) return "";
+  const value = Number.isFinite(Number(randomValue)) ? Number(randomValue) : 0;
+  const index = Math.min(
+    candidates.length - 1,
+    Math.max(0, Math.floor(value * candidates.length)),
+  );
+  return candidates[index];
+}
+
 async function prepareBootCharacter(characterId) {
   if (!bootPetImage) return;
   const { manifest, root } = await loadCharacterManifest(characterId);
   const version = String(manifest.assetVersion || "");
   bootCharacterName = manifest.name || "キャラクター";
   bootPetImage.alt = `起動を待つ${bootCharacterName}`;
+  petApp.dataset.bootCharacterId = manifest.id || characterId;
   const dedicatedSleeping = manifest.boot?.useSleepingOnStartup === true
     ? manifest.boot?.sleeping
     : "";
@@ -882,7 +1076,6 @@ function configureSpringMotion(config, legacyConfig = null) {
     const sprite = document.createElement("img");
     sprite.alt = "";
     sprite.draggable = false;
-    sprite.setAttribute("data-tauri-drag-region", "");
     sprite.style.left = `${-((centerX - radiusX) / (radiusX * 2)) * 100}%`;
     sprite.style.top = `${-((centerY - radiusY) / (radiusY * 2)) * 100}%`;
     sprite.style.width = `${10000 / (radiusX * 2)}%`;
@@ -960,7 +1153,11 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
-  if (!hasAnyLive2d && !manifest.animations?.idle) throw new Error("Live2D、idleアニメーションのいずれも定義されていません");
+  const hasAnyMeshRig = Boolean(manifest.meshRig?.rig)
+    || (Array.isArray(manifest.variants) && manifest.variants.some(item => item?.meshRig?.rig));
+  if (!hasAnyLive2d && !hasAnyMeshRig && !manifest.animations?.idle) {
+    throw new Error("Live2D、メッシュリグ、idleアニメーションのいずれも定義されていません");
+  }
   const profile = personaText(manifest, overrides[manifest.id]);
   // 同じキャラの再読込で早期 return する場合も含め、照合表は必ず現在の人格へ合わせる。
   setPersonaSpeechBlocklist(profile);
@@ -973,9 +1170,13 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterRoot = root;
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
+  // 配置編集のキャラ位置・倍率は、表示形式だけでなくキャラクターごとに分離する。
+  character.dataset.characterId = manifest.id;
   characterAssetVersion = assetVersion;
   character.dataset.bodyProportion = manifest.bodyProportion === "compact" ? "compact" : "standard";
-  character.dataset.sourceFraming = manifest.sourceFraming === "native-bust" ? "native-bust" : "default";
+  character.dataset.sourceFraming = ["native-bust", "native-full"].includes(manifest.sourceFraming)
+    ? manifest.sourceFraming
+    : "default";
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";
@@ -1009,10 +1210,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   } else {
     stopLive2D();
     preloadAnimations();
-    await probeRigLayers(); // layers 素材があればリップシンク対応
     if (activeMeshRigConfig?.rig) {
       try {
         await prepareMeshRig(activeMeshRigConfig);
+        rigAvailable = true;
       } catch (error) {
         destroyMeshRig();
         activeMeshRigConfig = null;
@@ -1020,6 +1221,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
         setStatus("高品質リグを読み込めないので差分絵表示で続けるね");
       }
     }
+    if (!meshRigController) await probeRigLayers(); // layers 素材があればリップシンク対応
   }
   applyCharacterFraming();
   frame = 0;
@@ -1091,10 +1293,9 @@ function setAnimation(name, force = false) {
   animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   wakeAnimationLoop();
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
-  if (!animations[animationName]) return; // Live2D 初期化失敗直後などフレーム定義が無い場合は何もしない
   // 待機・会話・思考中は同じキャンバスを保つ。thinkingだけ差分絵へ切り替えると、
   // 配信表示のフレーミング差でキャラクター全体が拡縮して見える。
-  const meshMotion = animationName === "idle" || animationName === "thinking" || animationName === "talking";
+  const meshMotion = Boolean(meshRigController);
   if (meshRigController && meshMotion && meshRigCanRender()) {
     setMeshRigVisible(true);
     character.dataset.motion = requestedMotion;
@@ -1102,6 +1303,7 @@ function setAnimation(name, force = false) {
     startRig();
     return;
   }
+  if (!animations[animationName]) return; // 単独メッシュリグやLive2D初期化失敗後はフレーム定義が無い
   setMeshRigVisible(false);
   preloadAnimation(animationName);
   character.dataset.motion = requestedMotion;
@@ -1186,11 +1388,13 @@ let audioCtx = null;
 let rigSource = null;
 let rigAnalyser = null;
 let rigMouthLevel = 0; // 音量の瞬間値をそのまま口へ入れず、開閉を滑らかにする包絡線
+let rigMouthForm = 0; // Aivisの母音タイムラインから得る横幅・丸み（-1〜1）
 const RIG_MOUTH_OPEN_THRESHOLD = 0.34;
 const RIG_MOUTH_CLOSE_THRESHOLD = 0.22;
 const RIG_BLINK_TIMINGS = Object.freeze({
-  normal: Object.freeze({ closing: 60, closed: 80, opening: 170 }),
-  sleepy: Object.freeze({ closing: 130, closed: 260, opening: 300 }),
+  // LocalVTuberStudioの合格画面と同じ650ms。閉眼を220ms保持し、低fpsでも必ず見せる。
+  normal: Object.freeze({ closing: 180, closed: 220, opening: 250 }),
+  sleepy: Object.freeze({ closing: 220, closed: 360, opening: 320 }),
 });
 
 function quantizeRigMouthOpen(level, wasOpen) {
@@ -1249,7 +1453,7 @@ async function probeRigLayers() {
 function rigRefresh() {
   if (!rigActive) return;
   if (meshRigActive && meshRigController) {
-    meshRigController.setMouth(rigMouthLevel || (rigMouthOpen ? 0.58 : 0));
+    meshRigController.setMouth(rigMouthLevel || (rigMouthOpen ? 0.58 : 0), rigMouthForm);
     meshRigController.setGaze(rigLookDirection, 0);
     meshRigController.setMotion(character.dataset.motion || animationName);
     return;
@@ -1297,7 +1501,10 @@ function scheduleBlink() {
     if (!rigActive) return;
     const step = (phase, ms, meshTarget) => new Promise(resolve => {
       rigBlinkPhase = phase;
-      if (meshRigActive) meshRigController?.setBlink(meshTarget, ms);
+      if (meshRigActive) {
+        if (phase === "blink_closed") meshRigController?.setEyeOpen(0, 0);
+        else meshRigController?.setBlink(meshTarget, ms);
+      }
       rigRefresh();
       rigBlinkStepTimer = setTimeout(() => {
         rigBlinkStepTimer = 0;
@@ -1331,6 +1538,7 @@ function detachLipSyncAudio() {
   rigSource = null;
   rigAnalyser = null;
   rigMouthLevel = 0;
+  rigMouthForm = 0;
   rigMouthOpen = false;
   live2dMouth = -1;
   rigRefresh();
@@ -1405,6 +1613,7 @@ function attachLipSync(audio) {
         return;
       }
       rigMouthOpen = !rigMouthOpen;
+      rigMouthForm = mouthFormAt(audio.currentTime, audio.picoLipSync);
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
       if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
@@ -1439,6 +1648,8 @@ function attachLipSync(audio) {
     const smoothing = desired > rigMouthLevel ? 0.34 : 0.16;
     rigMouthLevel += (desired - rigMouthLevel) * smoothing;
     if (rigMouthLevel < 0.015) rigMouthLevel = 0;
+    const formTarget = mouthFormAt(audio.currentTime, audio.picoLipSync);
+    rigMouthForm += (formTarget - rigMouthForm) * Math.min(1, 0.42 + target * 0.25);
     if (live2dActive) {
       live2dMouth = rigMouthLevel;
     } else {
@@ -1450,6 +1661,13 @@ function attachLipSync(audio) {
     rigVolFrame = requestAnimationFrame(analyserLoop);
   };
   rigVolFrame = requestAnimationFrame(analyserLoop);
+}
+
+function mouthFormAt(currentTime, timeline) {
+  if (!Array.isArray(timeline) || timeline.length === 0) return 0;
+  const time = Number(currentTime) || 0;
+  const segment = timeline.find(item => time >= Number(item.start) && time < Number(item.end));
+  return Math.max(-1, Math.min(1, Number(segment?.form) || 0));
 }
 
 // リグ描画を開始する（既に動作中なら何もしない。口は閉じ・まばたき開始）。
@@ -1549,7 +1767,7 @@ async function prepareMeshRig(cfg) {
     canvas: meshRigCanvas,
     rigUrl: `${characterRoot}/${rigPath}`,
     rootUrl: `${characterRoot}/${rigRoot}`,
-    assetVersion: characterAssetVersion,
+    assetVersion: cfg.assetVersion || characterAssetVersion,
     width: LIVE2D_RENDER_WIDTH,
     height: LIVE2D_RENDER_HEIGHT,
   });
@@ -1579,6 +1797,26 @@ let live2dCoreSdk = "";
 // Live2D 自体は常にペット表示の基準寸法で描き、各形式では CSS で縮小・切り出す。
 const LIVE2D_RENDER_WIDTH = 285;
 const LIVE2D_RENDER_HEIGHT = 315;
+// 配信形式では基準キャンバスを最大2.75倍で表示する。CSSだけを拡大すると285x315の
+// 描画結果を引き伸ばして全Live2Dがぼけるため、最初から表示倍率とDPIを含むバッファを持つ。
+const LIVE2D_MAX_DISPLAY_SCALE = 2.75;
+
+function desiredLive2DResolution() {
+  return Math.max(1, (window.devicePixelRatio || 1) * LIVE2D_MAX_DISPLAY_SCALE);
+}
+
+function syncLive2DResolution() {
+  const renderer = live2dApp?.renderer;
+  if (!renderer) return;
+  const resolution = desiredLive2DResolution();
+  if (Math.abs(renderer.resolution - resolution) < 0.01) return;
+  renderer.resolution = resolution;
+  renderer.resize(LIVE2D_RENDER_WIDTH, LIVE2D_RENDER_HEIGHT);
+  logApp("info", "Live2D描画密度をモニターへ追従", JSON.stringify({
+    resolution,
+    backing: [live2dCanvas?.width || 0, live2dCanvas?.height || 0],
+  }));
+}
 // CSS の立ち絵枠と配信形式のキャンバス拡大は、この基準寸法から計算する。
 // styles.css の :root にも同じ既定値を書いてあるが、正本はここ1箇所にする。
 document.documentElement.style.setProperty("--char-frame-width", `${LIVE2D_RENDER_WIDTH}px`);
@@ -1731,7 +1969,7 @@ async function startLive2D(cfg) {
       useContextAlpha: true,
       backgroundAlpha: 0,
       antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      resolution: desiredLive2DResolution(),
       autoDensity: true,
     });
     live2dCanvas.style.background = "transparent";
@@ -1756,6 +1994,8 @@ async function startLive2D(cfg) {
   if (!model) throw modelError || new Error("利用可能なLive2D互換モデルがありません");
   logApp("info", "Live2D表示寸法", JSON.stringify({
     canvas: [width, height],
+    backing: [live2dCanvas.width, live2dCanvas.height],
+    resolution: live2dApp.renderer.resolution,
     original: [model.internalModel.originalWidth, model.internalModel.originalHeight],
     bounds: [model.width, model.height],
     scale: Number(cfg.scale) || 1,
@@ -1964,8 +2204,14 @@ function autosizeInput() {
   input.style.height = `${Math.min(180, Math.max(62, input.scrollHeight))}px`;
 }
 function updateComposerState() {
-  if (sendButton) sendButton.disabled = busy || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
-  quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+  const engineBlocked = !frontendInitialized || (localEngineRequired && !localEngineReady);
+  if (sendButton) {
+    sendButton.disabled = busy || engineBlocked || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
+    sendButton.title = engineBlocked
+      ? (frontendInitialized ? "ローカルAIの準備完了後に送信できます" : "初期化完了後に送信できます")
+      : "Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴";
+  }
+  quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy || engineBlocked; });
 }
 function setInputValue(value) {
   input.value = String(value ?? "");
@@ -2299,16 +2545,169 @@ function renderQuickActions() {
 
 function renderReply(text) {
   // 直前のエラー表示を引き継がない（エラー分岐は描画後に reply-error を付け直す）。
-  reply.classList.remove("reply-error");
+  reply.classList.remove("reply-error", "reply-thinking");
+  // 確定した本文なので、読み上げの保留を解いてここで1回だけ知らせる。
+  reply.removeAttribute("aria-busy");
   renderMarkdown(reply, text);
+}
+
+let historyThinking = false;
+let historyThinkingText = "考え中";
+function createTypingIndicator(label = "考え中") {
+  const indicator = document.createElement("div");
+  indicator.className = "typing-indicator";
+  indicator.setAttribute("aria-label", label);
+  const text = document.createElement("span");
+  text.className = "typing-label";
+  text.textContent = label;
+  const dots = document.createElement("span");
+  dots.className = "typing-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) dots.append(document.createElement("i"));
+  indicator.append(text, dots);
+  return indicator;
+}
+function setThinkingUi(active, label = "考え中") {
+  // 生成中は回答欄が何度も書き変わる。書き変わるたびに読み上げられないよう保留する。
+  if (active) reply.setAttribute("aria-busy", "true");
+  // 進捗の文言は数秒おきに変わる。文言だけの更新で履歴全件をMarkdownから作り直さない。
+  const showing = active && historyThinking ? historyLog?.querySelector(".history-thinking") : null;
+  historyThinking = active;
+  historyThinkingText = String(label || "考え中").replace(/…+$/, "");
+  if (showing) {
+    showing.querySelector(".typing-indicator")?.setAttribute("aria-label", historyThinkingText);
+    const labelNode = showing.querySelector(".typing-label");
+    if (labelNode) labelNode.textContent = historyThinkingText;
+  } else {
+    renderHistory();
+  }
+  if (active && !layoutShowsHistory()) {
+    reply.classList.remove("reply-error", "streaming");
+    reply.classList.add("reply-thinking");
+    reply.replaceChildren(createTypingIndicator(historyThinkingText));
+  }
+}
+
+// 回答を描画しないまま終わる中断・停止でも、回答欄の3点表示を残さない。
+function clearThinkingReply() {
+  // 確定描画へ到達しない中断・停止でも、live regionを保留したまま残さない。
+  reply.removeAttribute("aria-busy");
+  if (!reply.classList.contains("reply-thinking")) return;
+  reply.classList.remove("reply-thinking");
+  reply.replaceChildren();
 }
 
 function setAssistantReply(text, options = {}) {
   const source = String(text ?? "");
+  if (currentLayout === "stream" && options.singlePage !== true && options.paginate !== false && source.trim()) {
+    if (options.remember !== false) lastAssistantText = source;
+    startTimedSubtitlePages(source);
+    return;
+  }
   renderReply(source);
+  reply.scrollTop = 0;
   if (options.remember !== false && source.trim()) {
     lastAssistantText = source;
   }
+}
+
+function cancelSubtitlePages() {
+  subtitlePageToken += 1;
+  if (subtitlePageTimer) clearTimeout(subtitlePageTimer);
+  subtitlePageTimer = null;
+}
+
+function subtitleUnits(text) {
+  const source = String(text ?? "");
+  const units = source.match(/[^。．.!?！？\n]+[。．.!?！？]?\s*|\n+/g) || [source];
+  const out = [];
+  for (const unit of units) {
+    const chars = [...unit];
+    for (let index = 0; index < chars.length; index += 54) {
+      out.push(chars.slice(index, index + 54).join(""));
+    }
+  }
+  return out.filter(Boolean);
+}
+
+function subtitlePlainText(text) {
+  return sanitizeSpeechText(text)
+    .replace(/^\s*```[^\n]*$/gm, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/[*_~]{1,3}/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// 実際の字幕DOMへ仮描画し、現在の画面幅・文字サイズで収まる単位に分ける。
+// 固定文字数だけではモニターや日本語/英数字の幅で再び欠けるため、scrollHeightを合否に使う。
+function buildSubtitlePages(text) {
+  const source = subtitlePlainText(text);
+  if (currentLayout !== "stream" || !source.trim()) return source ? [source] : [];
+  const pages = [];
+  let page = "";
+  const fits = candidate => {
+    renderMarkdown(reply, candidate);
+    reply.scrollTop = 0;
+    return reply.scrollHeight <= reply.clientHeight + 1;
+  };
+  for (const unit of subtitleUnits(source)) {
+    const candidate = page + unit;
+    if (!page && fits(candidate)) {
+      page = candidate;
+      continue;
+    }
+    if (page && fits(candidate)) {
+      page = candidate;
+      continue;
+    }
+    if (page) pages.push(page);
+    page = unit;
+    if (!fits(page)) {
+      // 54文字でも収まらない極端な狭幅では、実測で収まる最大長を二分探索する。
+      let remaining = [...page];
+      while (remaining.length && !fits(remaining.join(""))) {
+        let low = 1;
+        let high = remaining.length;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (fits(remaining.slice(0, middle).join(""))) low = middle;
+          else high = middle - 1;
+        }
+        pages.push(remaining.slice(0, low).join(""));
+        remaining = remaining.slice(low);
+      }
+      page = remaining.join("");
+    }
+  }
+  if (page) pages.push(page);
+  if (pages.length) setAssistantReply(pages[0], { remember: false, singlePage: true });
+  return pages;
+}
+
+function showSubtitlePage(text) {
+  if (currentLayout === "stream") setAssistantReply(text, { remember: false, singlePage: true });
+}
+
+function startTimedSubtitlePages(text) {
+  cancelSubtitlePages();
+  const pages = buildSubtitlePages(text);
+  if (pages.length <= 1) {
+    if (pages[0]) showSubtitlePage(pages[0]);
+    return;
+  }
+  const token = subtitlePageToken;
+  let index = 0;
+  const advance = () => {
+    if (token !== subtitlePageToken) return;
+    showSubtitlePage(pages[index]);
+    if (++index >= pages.length) return;
+    const visibleChars = [...pages[index - 1]].length;
+    const delay = Math.max(1800, Math.min(6000, 900 + visibleChars * 55));
+    subtitlePageTimer = setTimeout(advance, delay);
+  };
+  advance();
 }
 
 async function copyText(text) {
@@ -2332,7 +2731,8 @@ async function copyText(text) {
 
 function renderAlarmReply(text) {
   markActivity(); // 居眠り中でも目覚ましでは起きる
-  setAssistantReply(text);
+  // 操作ボタンをページ切替で消さない。目覚まし本文は短文契約で、操作を最優先する。
+  setAssistantReply(text, { paginate: false });
   const actions = document.createElement("div");
   actions.className = "alarm-actions";
   const awake = document.createElement("button");
@@ -2408,8 +2808,11 @@ function renderHistory() {
   // 履歴ログが見えていないときに毎メッセージ全件を Markdown 再構築するのは無駄なので
   // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
   if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) return;
+  // 「考え中」の文言更新でも作り直すため、読み返している最中に最下部へ引き戻さない。
+  // 既に最下部付近にいるときだけ追従する（新しい発言は今までどおり見える）。
+  const stickToBottom = historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
   historyLog.replaceChildren();
-  if (!conversationHistory.length) {
+  if (!conversationHistory.length && !historyThinking) {
     historyLog.append(document.createElement("div"));
     return;
   }
@@ -2460,7 +2863,23 @@ function renderHistory() {
     row.append(meta, body);
     historyLog.append(row);
   }
-  historyLog.scrollTop = historyLog.scrollHeight;
+  if (historyThinking && !query) {
+    const row = document.createElement("div");
+    row.className = "history-item assistant history-thinking";
+    // 名前行は他の発言と同じ `history-meta` に入れる（表示形式ごとの並び・余白を共有する）。
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
+    const label = document.createElement("div");
+    label.className = "history-role";
+    label.textContent = characterManifest?.name || "むぎ";
+    meta.append(label);
+    const body = document.createElement("div");
+    body.className = "history-body";
+    body.append(createTypingIndicator(historyThinkingText));
+    row.append(meta, body);
+    historyLog.append(row);
+  }
+  if (stickToBottom) historyLog.scrollTop = historyLog.scrollHeight;
 }
 
 function scheduleAppQuit() {
@@ -2496,6 +2915,7 @@ function finishVoice(toIdle = true, expectedVoice = currentVoice) {
 }
 function stopVoice(toIdle = true) {
   voiceSession++; // 進行中のパイプライン読み上げ（合成待ち・連続再生）を打ち切る。
+  cancelSubtitlePages();
   stopLipSync();
   setVoiceCancelVisible(false);
   if (!currentVoice) return;
@@ -2547,6 +2967,7 @@ function playPreparedSpeech(result) {
   const bytes = new Uint8Array(result.audio);
   const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
   const audio = new Audio(url);
+  audio.picoLipSync = result.lipSync || [];
   currentVoice = audio;
   audio.volume = voiceVolume;
   audio.addEventListener("ended", () => {
@@ -2644,6 +3065,7 @@ function playChunkAndWait(result, session) {
     const bytes = new Uint8Array(result.audio);
     const url = URL.createObjectURL(new Blob([bytes], { type: result.mime || "audio/wav" }));
     const audio = new Audio(url);
+    audio.picoLipSync = result.lipSync || [];
     currentVoice = audio;
     audio.volume = voiceVolume;
     let settled = false;
@@ -2678,7 +3100,7 @@ function playChunkAndWait(result, session) {
   });
 }
 async function speakReply(text) {
-  const chunks = splitSpeechChunks(text);
+  const chunks = currentLayout === "stream" ? buildSubtitlePages(text) : splitSpeechChunks(text);
   stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
   const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
   if (chunks.length === 0) { status.textContent = ""; return; }
@@ -2704,7 +3126,13 @@ async function speakReply(text) {
         return;
       }
       nextSynth = i + 1 < chunks.length ? prepareSpeech(chunks[i + 1]) : null;
-      if (!result) continue;
+      showSubtitlePage(chunks[i]);
+      if (!result) {
+        // 合成失敗でも字幕を飛ばさず、読める時間だけ表示して次ページへ進む。
+        const delay = Math.max(1800, Math.min(6000, 900 + [...chunks[i]].length * 55));
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
       if (!played) { clearInterval(prepareTimer); prepareTimer = null; played = true; }
       await playChunkAndWait(result, session);
       if (session !== voiceSession) {
@@ -3655,6 +4083,18 @@ function isScreenshotQuery(text) {
 composer.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();
+  if (!frontendInitialized) {
+    setStatus("初期化を続けています。完了すると送信できます");
+    status.classList.add("engine-pending");
+    return;
+  }
+  if (localEngineRequired && !localEngineReady) {
+    setStatus(localEnginePhase === "error"
+      ? "ローカルAIの準備に失敗しています。設定の「診断・修復」を確認してください"
+      : "ローカルAIを準備中です。完了すると送信できます");
+    status.classList.add(localEnginePhase === "error" ? "engine-error" : "engine-pending");
+    return;
+  }
   if ((!text && attachedImages.length === 0 && attachedFiles.length === 0) || busy) return;
   const requestRevision = conversationRevision;
   const jobId = `chat-${Date.now()}-${requestRevision}`;
@@ -3666,6 +4106,7 @@ composer.addEventListener("submit", async event => {
   markActivity();
   lastUserText = text; // エラーリトライ用に保持
   busy = true;
+  cancelSubtitlePages();
   ++speakingToken;
   stopVoice(false);
   updateComposerState();
@@ -3678,14 +4119,14 @@ composer.addEventListener("submit", async event => {
   renderAttachmentPreview();
   setInputValue("");
   resetPromptHistoryNavigation();
-  status.textContent = "考え中…";
+  status.textContent = "";
   reply.classList.remove("reply-error"); // 前回のエラー表示をリセット
-  status.classList.add("busy"); // 処理中スピナーを表示する
+  status.classList.add("busy"); // 送信中状態。会話の待機表示はチャット欄の3点UIへ出す。
   setAnimation("thinking");
   // 処理中は停止ボタンを出す（長いエージェント実行を途中でやめられるように）。
   if (cancelSendButton) { cancelSendButton.hidden = false; cancelSendButton.disabled = false; }
-  reply.textContent = text;
   addHistory("user", text);
+  setThinkingUi(true);
   upsertJob(jobId, { title: text || "添付ファイルの処理", body: "考え中…", status: "running", prompt: text, at: new Date().toISOString() });
 
   // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
@@ -3696,6 +4137,7 @@ composer.addEventListener("submit", async event => {
         if (busy && typeof progress === "string" && progress) {
           // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
+          setThinkingUi(true, status.textContent);
           upsertJob(jobId, { body: status.textContent, status: "running" });
           if (/検索|search|web|ブラウザ/i.test(progress)) setAnimation("searching", true);
           else if (/ツールを実行中|ステップ/.test(progress)) setAnimation("working", true);
@@ -3739,13 +4181,16 @@ composer.addEventListener("submit", async event => {
         // 表示にも残さない（最終回答に含まれない途中テキストを見せ続けない）。
         if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
         renderMarkdown(reply, "");
+        setThinkingUi(true, status.textContent || "考え中");
         resetStreamSpeech();
       });
       unlistenStream = await window.picoagent.listen("pet:stream_chunk", (chunk) => {
         if (!busy || requestRevision !== conversationRevision) return;
         streamBuffer += chunk;
-        feedStreamSpeech(streamBuffer); // 確定した文から先に話し始める
+        if (historyThinking) setThinkingUi(false);
+        if (currentLayout !== "stream") feedStreamSpeech(streamBuffer); // 配信字幕は検査済み全文をページ表示する
         reply.classList.add("streaming"); // 文末の点滅カーソル表示
+        if (currentLayout === "stream") return;
         if (!streamRenderFrame) {
           streamRenderFrame = requestAnimationFrame(() => {
             streamRenderFrame = null;
@@ -3801,11 +4246,14 @@ composer.addEventListener("submit", async event => {
     if (!result) result = await window.picoagent.send(fullText);
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";
+      setThinkingUi(false);
+      clearThinkingReply();
       cancelStreamSpeech();
       status.textContent = "";
       return;
     }
     if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
+    setThinkingUi(false);
     status.textContent = result.error ? "接続を確認してね" : "";
     // 質問カードの選択肢を反映する（choices が無い応答で通常のクイック操作へ戻る）。
     setPendingChoices(result.error ? null : result.choices);
@@ -3828,11 +4276,17 @@ composer.addEventListener("submit", async event => {
       // 返信がユーザー入力のオウム返しのときは読み上げない（入力は声に出さない）。
       if (String(result.reply ?? "").trim() !== text) {
         // ストリーミング中に先行読み上げが走っていれば残りを読み切り、無ければ全文読み上げ。
-        if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
+        if (currentLayout === "stream") {
+          cancelStreamSpeech();
+          if (ttsEnabledCache === false || voiceVolume <= 0.001) startTimedSubtitlePages(result.reply);
+          else speakReply(result.reply);
+        } else if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
       } else {
         cancelStreamSpeech();
       }
-      if (streamBuffer.trim()) {
+      if (currentLayout === "stream") {
+        // 字幕ページャーまたはページ同期読み上げが表示を所有する。
+      } else if (streamBuffer.trim()) {
         // ストリーミングで本文は表示済み。消してタイプライターで打ち直さず、最終形を確定描画する。
         setAssistantReply(result.reply);
         if (!currentVoice) setAnimation("idle");
@@ -3844,6 +4298,7 @@ composer.addEventListener("submit", async event => {
     }
   } catch (error) {
     jobState = "failed";
+    setThinkingUi(false);
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
     ++speakingToken;
     cancelStreamSpeech();
@@ -3857,6 +4312,8 @@ composer.addEventListener("submit", async event => {
     setAnimation("sad");
     setTimeout(() => setAnimation("idle"), 2200);
   } finally {
+    setThinkingUi(false);
+    clearThinkingReply();
     status.classList.remove("busy");
     if (cancelSendButton) cancelSendButton.hidden = true;
     reply.classList.remove("streaming");
@@ -4333,6 +4790,7 @@ function applyCharacterZoom(zoom) {
   // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
   const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
+  character.style.setProperty("--char-render-size", `${viewZoom * 100}%`);
 }
 
 const FRAMING_PRESETS = {
@@ -4391,12 +4849,19 @@ character.addEventListener("pointerdown", event => {
   if (event.target instanceof Element && event.target.closest("button")) return;
   event.preventDefault();
   markActivity();
-  window.picoagent.startWindowDrag();
+  window.picoagent.startWindowDrag().catch(error => {
+    logApp("warn", "キャラクターからウィンドウを移動できませんでした", errorDetail(error));
+    showToast("画面を移動できませんでした。上部のPicoAgent部分からも移動できます", "error");
+  });
 });
 
 // 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
 // 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
-window.addEventListener("resize", () => applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false }));
+window.addEventListener("resize", () => {
+  applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
+  syncLive2DResolution();
+  syncPngNaturalResolution();
+});
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];
@@ -4599,24 +5064,28 @@ renderQuickActions();
 // 同梱エンジン（local）の準備状況を表示する。
 function applyEngineStatus(s) {
   if (!s || !s.phase) return;
-  // モデル DL・起動中の表示は起動シーケンス（ローディング画面）の間だけ出し、
-  // 通常時はフキダシに「準備中…」を出さない（重い反映は再起動側で行う方針のため）。
+  if (!localEngineRequired) return;
+  localEnginePhase = s.phase;
+  localEngineReady = s.phase === "ready";
   const booting = petApp.classList.contains("is-booting");
+  status.classList.toggle("engine-pending", ["idle", "download", "verify", "starting"].includes(s.phase));
+  status.classList.toggle("engine-error", s.phase === "error");
   if (s.phase === "download") {
     // 初回だけ数GBを取る。割合しか出さないと、待ち時間の見当が付かず固まって見える。
     const gb = bytes => (Number(bytes) / (1024 ** 3)).toFixed(1);
     const size = Number(s.totalBytes) > 0 ? `（${gb(s.receivedBytes)} / ${gb(s.totalBytes)}GB）` : "";
-    if (booting) setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
+    setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
     online.dataset.up = false;
   } else if (s.phase === "verify") {
     // 数GBのモデル照合は分単位かかる。無表示だと起動が固まったように見える。
-    if (booting) setStatus("ローカルモデルを確認中… ※数分かかることがあります");
+    setStatus("ローカルモデルを確認中… ※数分かかることがあります");
     online.dataset.up = false;
   } else if (s.phase === "starting") {
-    if (booting) setStatus("ローカルAIを起動中…");
+    setStatus("ローカルAIを起動中…");
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
+    status.classList.remove("engine-pending", "engine-error");
     if (petApp.classList.contains("is-booting")) {
       status.textContent = "";
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
@@ -4626,7 +5095,11 @@ function applyEngineStatus(s) {
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
     online.dataset.up = false;
+  } else if (s.phase === "idle") {
+    setStatus("ローカルAIの起動を待っています…");
+    online.dataset.up = false;
   }
+  updateComposerState();
 }
 window.picoagent.on("engine:status", applyEngineStatus);
 // 設定反映（再起動相当）の合図。webview を読み込み直して起動シーケンスを再実行する。
@@ -4648,6 +5121,7 @@ function applyVoiceVolume(value) {
   if (currentVoice) currentVoice.volume = voiceVolume;
   if (voiceVolume <= 0.001) {
     rigMouthLevel = 0;
+    rigMouthForm = 0;
     rigMouthOpen = false;
     live2dMouth = 0;
     rigRefresh();
@@ -4760,9 +5234,34 @@ function applyBubbleLayout(width, height, left, top) {
   refreshBubblePlacement();
 }
 window.addEventListener("resize", refreshBubblePlacement);
+function syncPngNaturalResolution() {
+  if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // 1つの原画画素を複数の表示画素へ引き伸ばさない。配信構図の260%指定は
+  // 原画に余裕がある範囲だけで効き、高DPIほどCSS上限を小さくする。
+  character.style.setProperty("--char-natural-css-width", `${petSprite.naturalWidth / dpr}px`);
+  character.style.setProperty("--char-natural-css-height", `${petSprite.naturalHeight / dpr}px`);
+}
 petSprite.addEventListener("load", () => {
+  syncPngNaturalResolution();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
   refreshBubblePlacement();
   syncSpringMotionFrame();
+  if (character.dataset.renderKind === "2d") {
+    requestAnimationFrame(() => {
+      const view = petSprite.getBoundingClientRect();
+      logApp("info", "2D表示寸法", JSON.stringify({
+        natural: [petSprite.naturalWidth, petSprite.naturalHeight],
+        rendered: view ? [Math.round(view.width), Math.round(view.height)] : null,
+        devicePixelRatio: dpr,
+        sourcePixelsPerDisplayPixel: view ? [
+          petSprite.naturalWidth / Math.max(1, view.width * dpr),
+          petSprite.naturalHeight / Math.max(1, view.height * dpr),
+        ] : null,
+        transform: getComputedStyle(petSprite.parentElement).transform,
+      }));
+    });
+  }
 });
 window.picoagent.on("pet:ui", (ui) => {
   if (!ui) return;
@@ -4823,14 +5322,19 @@ bubble?.addEventListener("click", event => {
 renderNoticePanel();
 updateNoticeBadge();
 
-// 選択中キャラの AivisHub 音声モデルを準備する。画面を先に使える状態へ戻してから
-// バックグラウンドで呼ぶため、音声配布元の障害で本体起動を塞がない。
-// 画面はすでに利用者のものなので、待ち時間も失敗も状態表示へは出さずログだけに残す。
+// 選択中キャラの AivisHub 音声モデルを準備する。読み上げが有効な場合は、通常画面へ
+// 移る前にモデル導入・エンジン起動まで終えて、最初の発話から待たずに話せるようにする。
 async function prepareSelectedVoiceModel() {
   let statusInfo;
   try { statusInfo = await window.picoagent.aivisStatus(); }
-  catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
+  catch (error) {
+    // 読み上げが有効かどうかを確認できない状態で「音声を準備できません」とは出さない
+    // （ミュート中の利用者へ無関係な失敗を見せない）。理由はログへ残す。
+    logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error));
+    return null;
+  }
   if (!statusInfo?.enabled) return null;
+  setStatus("声を準備中…");
   try {
     await window.picoagent.prepareVoiceModel();
     return true;
@@ -4840,53 +5344,25 @@ async function prepareSelectedVoiceModel() {
   }
 }
 
-// 同梱エンジン(local)のモデルDL・起動をバックグラウンドで監視する。
-// DLは数GBになりうるが、キャラと画面の起動完了はこの処理を待たない。
+// 同梱エンジン(local)のモデルDL・検証・起動を監視する。
+// localのモデル取得・検証・起動を通常画面の状態表示へ反映する。
 async function waitForEngineReady() {
-  for (let i = 0; i < 1800; i += 1) {
+  while (true) {
     let s;
     try { s = await window.picoagent.engineStatus(); }
     catch (error) {
       logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error));
-      return;
+      const failed = { phase: "error", message: "ローカルAIの準備状態を確認できませんでした" };
+      applyEngineStatus(failed);
+      return failed;
     }
-    applyEngineStatus(s); // download/starting はローディング画面に進捗表示。
-    // 起動画面を抜けたあとは監視だけ続ける。ここで書くと、通常利用中の状態表示
-    // （読み上げ中・エラーなど）を1秒ごとに上書きしてしまう。
+    applyEngineStatus(s); // download/verify/starting はローディング画面に進捗表示。
     if ((!s || s.phase === "idle") && petApp.classList.contains("is-booting")) {
       setStatus("ローカルAIを確認中…");
     }
-    if (s && (s.phase === "ready" || s.phase === "error")) return;
+    if (s && (s.phase === "ready" || s.phase === "error")) return s;
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-}
-
-function startBackgroundStartupServices(info, greeting) {
-  if ((info.providerId || "local") === "local") {
-    void waitForEngineReady().catch(error => {
-      logApp("warn", "エンジン起動待ちに失敗しました", errorDetail(error));
-    });
-  }
-  if (!info.onboardingDone || !greeting) return;
-  const requestRevision = conversationRevision;
-  // 音声モデルの取得は数分かかることがあるため、待っている間に会話が1往復でも
-  // 進んでいたら起動時の挨拶はもう読み上げない。`conversationRevision` は会話リセット
-  // でしか変わらず「利用者が話しかけた」を捕まえられないので、履歴の増減も見る。
-  const startupHistoryLength = conversationHistory.length;
-  const conversationMovedOn = () => requestRevision !== conversationRevision
-    || conversationHistory.length !== startupHistoryLength
-    || busy
-    || currentVoice;
-  void (async () => {
-    const voiceReady = await prepareSelectedVoiceModel();
-    if (!voiceReady || conversationMovedOn()) return;
-    const prepared = await prepareSpeech(greeting);
-    if (prepared && !conversationMovedOn()) {
-      playPreparedSpeech(prepared);
-    }
-  })().catch(error => {
-    logApp("warn", "起動後の読み上げ準備に失敗しました", errorDetail(error));
-  });
 }
 
 // 自発雑談の設定を反映し、タイマーを張り直す（無効なら止める）。
@@ -4980,7 +5456,6 @@ function startDailyPolling() {
 
 // 目覚まし時計: 一定間隔で現在時刻と登録アラームを照合し、一致したら声でやさしく起こす。
 function pad2(n) { return String(n).padStart(2, "0"); }
-function weekdayCode(date) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()]; }
 function alarmSnoozeMinutes(a) {
   const value = Number(a?.snooze_minutes ?? a?.snoozeMinutes ?? 5);
   if (!Number.isFinite(value)) return 5;
@@ -5026,39 +5501,75 @@ async function checkAlarms() {
   clearBackgroundFailure("alarms");
   const alarms = res?.alarms;
   if (!Array.isArray(alarms) || !alarms.length) return;
-  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
-  const today = weekdayCode(now);
-  const minuteKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${hhmm}`;
-  for (const a of alarms) {
-    if (!a || a.enabled === false || a.time !== hhmm) continue;
-    const days = Array.isArray(a.days) ? a.days : [];
-    if (days.length && !days.includes(today)) continue;
-    const key = `${a.id}@${minuteKey}`;
+  // 分ちょうどだけを見ると、スリープ復帰・起動直後・直前の発火が長引いた場合に
+  // その日の目覚ましが黙って鳴らない。直近5分以内に来た予定まで拾う。
+  const dueItems = window.PicoAlarmRuntime.dueAlarms(alarms, now);
+  for (const due of dueItems) {
+    const key = `${due.alarm.id}@${due.scheduledKey}`;
+    // 1ティックにつき1件だけ鳴らす（発火記録で二重には鳴らない）。
     if (!window.PicoAlarmRuntime.markFired(firedAlarms, key)) continue;
-    await fireAlarm(a);
-    break; // 1ティックにつき1件だけ鳴らす。
+    await fireAlarm(due.alarm, null, due);
+    break;
   }
   } finally {
     alarmCheckInFlight = false;
   }
 }
-async function fireAlarm(a, snoozeState = null) {
-  let line = "";
+// 目覚ましの起こし文の生成（モデル呼び出し）と音声合成は、どちらも遅れることがある
+// （ローカルAIの起動直後、Aivisの初回合成はHTTPタイムアウトが180秒）。目覚ましは
+// 「鳴らなかった」がいちばん困るので、待つ上限を決めて文字を先に出す。
+const ALARM_WAKE_TIMEOUT_MS = 20000;
+const ALARM_SPEECH_TIMEOUT_MS = 20000;
+const ALARM_FALLBACK_LINE = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
+const ALARM_RACE_TIMEOUT = Symbol("alarm-timeout");
+
+// 上限まで待ち、間に合わなければ `timedOut` を返す（遅れて届いた結果は使わない）。
+async function waitWithLimit(promise, timeoutMs) {
+  let timer = null;
+  const limit = new Promise(resolve => {
+    timer = setTimeout(() => resolve(ALARM_RACE_TIMEOUT), timeoutMs);
+  });
   try {
-    const res = await window.picoagent.alarmWake(a.id);
-    line = (res?.reply || "").trim();
-  } catch (error) {
-    logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
+    const result = await Promise.race([promise, limit]);
+    return result === ALARM_RACE_TIMEOUT ? { timedOut: true, value: null } : { timedOut: false, value: result };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  if (!line) line = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
-  // 起こすときは読み上げ中でも割り込む。音声合成→表示→即時再生（挨拶と同じ同期再生）。
-  const prepared = await prepareSpeech(line);
+}
+
+async function fireAlarm(a, snoozeState = null, due = null) {
+  const wakeRequest = window.picoagent.alarmWake(a.id).catch(error => {
+    logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
+    return null;
+  });
+  const wake = await waitWithLimit(wakeRequest, ALARM_WAKE_TIMEOUT_MS);
+  if (wake.timedOut) {
+    logApp("warn", "目覚ましの起こし文が時間内に届きませんでした", `${ALARM_WAKE_TIMEOUT_MS}ms`);
+  }
+  let line = (wake.value?.reply || "").trim() || ALARM_FALLBACK_LINE;
+  // 遅れて鳴らす場合は予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
+  if (due && due.lateMinutes >= 1) line = `（${due.scheduledTime}の目覚ましだよ）${line}`;
+  // 声より先に文字を出す。合成が詰まっても目覚ましが黙って消えないようにする。
   renderAlarmReply(line);
   addHistory("assistant", line);
-  if (prepared) playPreparedSpeech(prepared);
-  else if (animationName === "talking") setAnimation("idle");
+  // 再通知の起点も合成待ちで遅らせない。
   // 生成中に「おきたよ！」で解除された場合は、完了後にスヌーズを復活させない。
-  if (!snoozeState || activeAlarmSnooze === snoozeState) armAlarmSnooze(a);
+  const shouldArmSnooze = !snoozeState || activeAlarmSnooze === snoozeState;
+  if (shouldArmSnooze) armAlarmSnooze(a);
+  const armedSnoozeState = shouldArmSnooze ? activeAlarmSnooze : null;
+  const speechRequest = prepareSpeech(line).catch(error => {
+    logApp("warn", "目覚ましの音声合成に失敗しました", errorDetail(error));
+    return null;
+  });
+  const speech = await waitWithLimit(speechRequest, ALARM_SPEECH_TIMEOUT_MS);
+  if (speech.timedOut) {
+    // 数分後に突然鳴るほうが困るため、遅れて届いた音声は鳴らさない。
+    logApp("warn", "目覚ましの音声が時間内に用意できませんでした", `${ALARM_SPEECH_TIMEOUT_MS}ms`);
+  }
+  if (armedSnoozeState && !speech.timedOut && speech.value && activeAlarmSnooze === armedSnoozeState) {
+    playPreparedSpeech(speech.value);
+  }
+  else if (animationName === "talking") setAnimation("idle");
 }
 function startAlarmPolling() {
   if (alarmTimer) clearInterval(alarmTimer);
@@ -5066,10 +5577,88 @@ function startAlarmPolling() {
   checkAlarms();
 }
 
+let startupLayout = null;
+let bootUiReleased = false;
+// 生存通知の間隔はバックエンドが監視しきい値から決める。設定が届く前は、許可される
+// 最短しきい値3秒にも間に合う1秒で始め、`pet_init` 後に計算済みの間隔へ張り替える。
+const DEFAULT_BOOT_PROGRESS_INTERVAL_MS = 10000;
+const INITIAL_BOOT_PROGRESS_INTERVAL_MS = 1000;
+let bootProgressTimer = null;
+function startBootProgressTicker(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS) {
+  const interval = Number(intervalMs) > 0 ? Number(intervalMs) : DEFAULT_BOOT_PROGRESS_INTERVAL_MS;
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = setInterval(() => {
+    window.picoagent.bootProgress().catch(error => {
+      logApp("warn", "起動進捗を通知できませんでした", errorDetail(error));
+    });
+  }, interval);
+}
+startBootProgressTicker(INITIAL_BOOT_PROGRESS_INTERVAL_MS);
+let bootBackendFinished = false;
+let bootBackendFinishPromise = null;
+let bootBackendRetryTimer = null;
+let bootBackendRetryDelayMs = 1500;
+const BOOT_BACKEND_RETRY_MAX_MS = 30000;
+
+async function finishBootBackend() {
+  if (bootBackendFinished) return;
+  if (!bootBackendFinishPromise) {
+    bootBackendFinishPromise = window.picoagent.finishBoot()
+      .then(() => { bootBackendFinished = true; })
+      .finally(() => { bootBackendFinishPromise = null; });
+  }
+  await bootBackendFinishPromise;
+}
+
+function scheduleBootBackendRetry() {
+  if (bootBackendFinished || bootBackendRetryTimer) return;
+  setStatus("位置・寸法の復旧中…");
+  status.classList.add("engine-pending");
+  bootBackendRetryTimer = setTimeout(async () => {
+    bootBackendRetryTimer = null;
+    try {
+      await finishBootBackend();
+      bootBackendRetryDelayMs = 1500;
+      status.classList.remove("engine-pending");
+      if (status.textContent === "位置・寸法の復旧中…") setStatus("");
+    } catch (error) {
+      logApp("warn", "起動後の位置・寸法を再試行できませんでした", errorDetail(error));
+      bootBackendRetryDelayMs = Math.min(bootBackendRetryDelayMs * 2, BOOT_BACKEND_RETRY_MAX_MS);
+      scheduleBootBackendRetry();
+    }
+  }, bootBackendRetryDelayMs);
+}
+
+async function releaseBootUi() {
+  if (bootProgressTimer) clearInterval(bootProgressTimer);
+  bootProgressTimer = null;
+  if (!bootBackendFinished) {
+    try { await finishBootBackend(); }
+    catch (error) {
+      logApp("warn", "起動完了を通知できませんでした", errorDetail(error));
+      scheduleBootBackendRetry();
+    }
+  }
+  bootUiReleased = true;
+  if (startupLayout) {
+    try { applyLayout(startupLayout); }
+    catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
+  }
+  petApp.classList.remove("is-booting");
+  if (meshRigController) setAnimation(animationName, true);
+  stopBootLogTicker();
+}
+
 (async () => {
   startBootLogTicker();
   setStatus("設定と履歴を読み込み中…");
   const info = await window.picoagent.init();
+  startupLayout = info.layout;
+  localEngineRequired = (info.providerId || "local") === "local";
+  localEngineReady = !localEngineRequired || info.up === true;
+  localEnginePhase = localEngineReady ? "ready" : "idle";
+  frontendInitialized = true;
+  updateComposerState();
   if (betaBadge) betaBadge.hidden = info.betaBuild !== true;
   relationshipMemoryEnabled = info.relationshipMemoryEnabled !== false;
   renderRelationship({ relationship: info.relationship, bondLabel: info.bondLabel });
@@ -5091,6 +5680,10 @@ function startAlarmPolling() {
   if (info.voiceVolume != null) applyVoiceVolume(info.voiceVolume);
   window.applyGazeTrackingSetting?.(info.gazeTrackingEnabled === true);
   applyCharacterZoom(info.characterZoom);
+  startBootProgressTicker(info.bootProgressIntervalMs);
+  // 配置編集の保存先は設定側。読み込み順に関係なく届くよう、値も残してから渡す。
+  window.__picoLayoutPlacements = info.layoutPlacements || {};
+  window.PicoLayoutEditor?.hydrate(window.__picoLayoutPlacements);
   characterFraming = info.characterFraming || {};
   applyStreamAppearance(info.streamBackground, info.streamBackgroundImage, info.streamDisplay, info.streamDisplayImage, info.streamCaptionColor);
   ttsEnabledCache = info.ttsEnabled !== false;
@@ -5098,18 +5691,23 @@ function startAlarmPolling() {
   savedBubbleLayout = { width: info.bubbleWidth, height: info.bubbleHeight, left: info.bubbleLeft, top: info.bubbleTop };
   // 起動準備中だけは保存中の形式に関係なく、小型の配信レイアウトを見せる。
   // finishBoot 後にバックエンドの pet:layout イベントで保存形式へ戻る。
-  applyLayout("stream");
+  if (bootUiReleased) applyLayout(startupLayout);
+  else applyLayout("stream");
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
   try {
     setStatus("起動画面のキャラクター画像を読み込み中…");
-    await prepareBootCharacter(info.characterId || "mugi");
+    // 候補が無い一覧（寝姿を持つキャラを外した等）でも起動画面は出す。既定キャラへ落とす。
+    const catalog = await loadCharacterCatalog();
+    const sleeping = chooseStartupSleepingCharacter(startupSleepingCandidates(catalog));
+    await prepareBootCharacter(sleeping || catalog.default || info.characterId || "mugi");
   } catch (error) {
     logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
   }
   // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
-  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンは待たない。
+  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンの準備は
+  // このあと起動画面のまま待つ（送信できない通常画面を先に見せない）。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
-  setStatus(`${bootCharacterName}の通常表示を読み込み中…`);
+  setStatus("選択中のキャラクターを読み込み中…");
   const requestedCharacterId = info.characterId || "mugi";
   const loadOptions = { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} };
   const loadStartupCharacter = async () => {
@@ -5132,9 +5730,12 @@ function startAlarmPolling() {
     error => ({ ok: false, error }),
   );
   let startupGreeting = "";
+  let startupPreparedSpeech = null;
+  let startupVoiceError = "";
   try {
     const characterLoad = await characterLoadPromise;
     if (!characterLoad.ok) throw characterLoad.error;
+    bootCharacterName = characterManifest?.name || bootCharacterName;
     setStatus("会話履歴を画面へ復元中…");
     hydrateHistory(info.history);
     let greeting = characterManifest?.greeting || "";
@@ -5149,30 +5750,47 @@ function startAlarmPolling() {
       characterManifest.greeting = greeting;
       startupGreeting = greeting;
     }
+    if (localEngineRequired && info.onboardingDone) {
+      // 送信できない通常画面を先に見せず、利用可能または明示的な失敗になるまで
+      // 寝姿の起動画面で進捗を伝える。
+      await waitForEngineReady();
+    } else if (localEngineRequired) {
+      // 初回セットアップ（追加機能の選択・Live2D追加）はローカルAIを使わない。
+      // 数GBのモデル取得が終わるまで案内を出さないと、初回だけ何分も待たせることになる。
+      // 監視は続け、準備できるまでは送信ボタン側が理由を出して止める。
+      waitForEngineReady().catch(error => {
+        logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
+      });
+    }
+    if (info.onboardingDone && startupGreeting) {
+      const voiceReady = await prepareSelectedVoiceModel();
+      if (voiceReady) startupPreparedSpeech = await prepareSpeech(startupGreeting);
+      else if (voiceReady === false) {
+        startupVoiceError = "音声を準備できませんでした。設定の診断を確認してください";
+        setStatus(startupVoiceError);
+        status.classList.add("engine-error");
+      }
+    }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     setStatus(`キャラクター読込に失敗: ${error.message}`);
   } finally {
-    // キャラクターと履歴が読めた時点で画面を使える状態へ戻す。AIモデル・音声モデルの
-    // 取得はこの後のバックグラウンド処理へ分離し、外部サービス障害で起動を塞がない。
+    // キャラクター・履歴・必要なAIと音声が揃ってから通常画面へ戻す。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
-    try { await window.picoagent.finishBoot(); }
-    catch (error) { logApp("warn", "起動完了を通知できませんでした", errorDetail(error)); }
-    // 実アプリはpet:layoutイベントでも戻るが、イベント配送の遅延や撮影モックに依存せず、
-    // 起動用streamを確実に終了させる。finishBoot が失敗しても起動用の形式のままにはしない。
-    try { applyLayout(info.layout); }
-    catch (error) { logApp("warn", "保存中の表示形式へ戻せませんでした", errorDetail(error)); }
-    petApp.classList.remove("is-booting");
-    // 起動中に準備したメッシュリグは is-booting の間だけ差分絵へ退避している。
-    // 保存形式へ戻して起動状態を解除した時点で、表示可否を必ず再評価する。
-    if (meshRigController) setAnimation(animationName, true);
-    stopBootLogTicker();
+    await releaseBootUi();
   }
-  startBackgroundStartupServices(info, startupGreeting);
+  if (startupPreparedSpeech) playPreparedSpeech(startupPreparedSpeech);
   if (!info.up && !status.textContent) status.textContent = "起動中…";
   // 取りこぼし対策で現在のエンジン状態も反映。
   try { applyEngineStatus(await window.picoagent.engineStatus()); }
   catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
+  // ローカルAIが ready になると engine-error を落とすため、音声準備の失敗はここで出し直す。
+  // 配信形式はこの印が無いとステータス行ごと隠れ、失敗に気づけない。
+  // ただし送信そのものを塞ぐローカルAIの失敗表示は上書きしない（そちらが先に要る）。
+  if (startupVoiceError && localEnginePhase !== "error") {
+    setStatus(startupVoiceError);
+    status.classList.add("engine-error");
+  }
   quickActionItems = parseQuickActions(info.quickActions);
   renderQuickActions();
   napMinutes = Number(info.napMinutes) > 0 ? Number(info.napMinutes) : 0;
@@ -5181,6 +5799,7 @@ function startAlarmPolling() {
   startDailyPolling(); // リマインダー・集中・見守りの通知を開始。
   startAlarmPolling(); // 目覚まし時計の時刻監視を開始。
   loadScheduleRunNotices(); // 前回までのスケジュール実行履歴を通知一覧へ復元。
+  loadDurableJobNotices(); // 再起動後も残る永続ジョブ（転送・成果物生成）を復元。
   if (!info.onboardingDone && onboarding) {
     onboarding.hidden = false;
     stopVoice();
@@ -5191,14 +5810,7 @@ function startAlarmPolling() {
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
-  window.picoagent.finishBoot().catch(layoutError => {
-    logApp("warn", "起動失敗後に保存中の表示形式へ戻せませんでした", errorDetail(layoutError));
-  }).finally(() => {
-    petApp.classList.remove("is-booting");
-    if (meshRigController) setAnimation(animationName, true);
-    stopBootLogTicker();
-    wakeAnimationLoop();
-  });
+  releaseBootUi().finally(() => wakeAnimationLoop());
 });
 
 function showOnboardingStep(step) {

@@ -1,5 +1,5 @@
 ; PicoAgent管理下の常駐プロセス1種を、実体パス一致だけで停止する。
-; NAME は実行ファイル名、SUBDIR は同梱ディレクトリ名（engine / aivis / whisper / tha3）。
+; NAME は実行ファイル名、SUBDIR は同梱ディレクトリ名（engine / aivis / whisper）。
 ; インストール先と実行時ディレクトリ（%APPDATA%\PicoAgent\bundled\）の両方を見る。
 !macro PICOAGENT_STOP_BUNDLED_PROCESS NAME SUBDIR
   nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq '${NAME}' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\${SUBDIR}\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\${SUBDIR}\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
@@ -17,10 +17,6 @@
   !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "llama-server.exe" "engine"
   !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "run.exe" "aivis"
   !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "whisper-cli.exe" "whisper"
-  ; THA3のPythonは `<tha3>/runtime/venv/Scripts/python.exe` などから動く。
-  ; 導入用uvも含め、生成・導入中に同梱ディレクトリを掴んだまま残る実体を止める。
-  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "python.exe" "tha3"
-  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "uv.exe" "tha3-bootstrap"
   ; 停止直後はまだファイルハンドルが返っていないことがある。上書き導入と削除が
   ; 「使用中」で失敗しないよう、ハンドルが閉じるまでの猶予を取る。
   Sleep 1000

@@ -59,14 +59,21 @@ fn format_task(task: &ScheduledTask) -> String {
     } else {
         format!("コマンド {} {}", task.program, task.args.join(" "))
     };
-    let repeat = if task.repeat { "繰り返し" } else { "一度だけ" };
+    let repeat = if task.repeat {
+        "繰り返し"
+    } else {
+        "一度だけ"
+    };
     let state = if task.enabled { "" } else { "（無効）" };
     let label = if task.label.trim().is_empty() {
         String::new()
     } else {
         format!(" 〔{}〕", task.label)
     };
-    format!("{schedule} / {target} / {repeat}{label}{state}（id:{}）", task.id)
+    format!(
+        "{schedule} / {target} / {repeat}{label}{state}（id:{}）",
+        task.id
+    )
 }
 
 fn list_text(tasks: &[ScheduledTask]) -> String {
@@ -130,7 +137,16 @@ impl Tool for TaskSchedulerTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["スケジュール", "スケジューラ", "cron", "定期実行", "指定時刻", "毎朝", "毎日", "毎週"]
+        &[
+            "スケジュール",
+            "スケジューラ",
+            "cron",
+            "定期実行",
+            "指定時刻",
+            "毎朝",
+            "毎日",
+            "毎週",
+        ]
     }
 
     fn label(&self) -> &'static str {

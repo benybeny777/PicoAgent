@@ -65,9 +65,24 @@ impl Tool for NotionTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_NOTION_TOKEN", "Notion のインテグレーショントークン", "password", "secret_..."),
-            Field::new("PICOAGENT_NOTION_DATABASE_ID", "Notion 既定 database ID", "text", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
-            Field::new("PICOAGENT_NOTION_TIMEOUT_SECS", "Notion API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_NOTION_TOKEN",
+                "Notion のインテグレーショントークン",
+                "password",
+                "secret_...",
+            ),
+            Field::new(
+                "PICOAGENT_NOTION_DATABASE_ID",
+                "Notion 既定 database ID",
+                "text",
+                "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            ),
+            Field::new(
+                "PICOAGENT_NOTION_TIMEOUT_SECS",
+                "Notion API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
@@ -87,14 +102,20 @@ impl Tool for NotionTool {
         };
         match action {
             "search" => {
-                let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
                 let response = match notion_post(&client, token, format!("{}/search", NOTION_BASE))
                     .json(&json!({ "query": query, "page_size": 10 }))
                     .send()
                     .await
                 {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: Notion API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!("エラー: Notion API への接続に失敗しました: {}", error)
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);
@@ -103,7 +124,12 @@ impl Tool for NotionTool {
                 }
                 let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Notion検索結果:\n");
-                for item in parsed.get("results").and_then(Value::as_array).into_iter().flatten() {
+                for item in parsed
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
                     let title = item
                         .get("properties")
                         .and_then(Value::as_object)
@@ -137,11 +163,17 @@ impl Tool for NotionTool {
                     _ => return "エラー: title が指定されていません。".to_string(),
                 };
                 if title.chars().count() > MAX_TITLE_CHARS {
-                    return format!("エラー: title は {} 文字以内で指定してください。", MAX_TITLE_CHARS);
+                    return format!(
+                        "エラー: title は {} 文字以内で指定してください。",
+                        MAX_TITLE_CHARS
+                    );
                 }
                 let content = args.get("content").and_then(Value::as_str).unwrap_or("");
                 if content.chars().count() > MAX_CONTENT_CHARS {
-                    return format!("エラー: content は {} 文字以内で指定してください。", MAX_CONTENT_CHARS);
+                    return format!(
+                        "エラー: content は {} 文字以内で指定してください。",
+                        MAX_CONTENT_CHARS
+                    );
                 }
                 let payload = json!({
                     "parent": { "database_id": database_id },
@@ -164,7 +196,9 @@ impl Tool for NotionTool {
                     .await
                 {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: Notion API への接続に失敗しました: {}", error),
+                    Err(error) => {
+                        return format!("エラー: Notion API への接続に失敗しました: {}", error)
+                    }
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);

@@ -124,9 +124,9 @@ def doubled_animations() -> dict[str, dict]:
         animation["fps"] *= 2
     return result
 
-# THA3で追加キーポーズが揃っているキャラだけが使う42フレーム構成。
+# 追加キーポーズが揃っているパックだけが使う42フレーム構成。
 # 通常キャラは従来のSEQUENCESをそのまま使うため、既存素材の見た目は変わらない。
-THA3_SEQUENCES = {
+EXTENDED_SEQUENCES = {
     "idle": [
         ("base", 0),
         ("idle_left", 0),
@@ -179,23 +179,23 @@ THA3_SEQUENCES = {
     ],
 }
 
-THA3_LAYER_NAMES = {
+EXTENDED_LAYER_NAMES = {
     layer_name
-    for frames in THA3_SEQUENCES.values()
+    for frames in EXTENDED_SEQUENCES.values()
     for layer_name, _sway in frames
     if layer_name not in {"base", "blink_half", "blink_closed", "mouth_closed", "mouth_open"}
 }
 
 
 def reject_mixed_sharp_assets(character_dir: Path, manifest: dict) -> None:
-    """高精細表情パックへ旧THA3全身ポーズが混ざる状態を構造的に拒否する。"""
+    """高精細表情パックへ旧全身ポーズが混ざる状態を構造的に拒否する。"""
     if manifest.get("animationQualityMode") != "sharp-expression":
         return
     layers_dir = character_dir / "layers"
-    stale = sorted(name for name in THA3_LAYER_NAMES if (layers_dir / f"{name}.png").is_file())
+    stale = sorted(name for name in EXTENDED_LAYER_NAMES if (layers_dir / f"{name}.png").is_file())
     if stale:
         raise ValueError(
-            f"{character_dir.name} はsharp-expressionですが旧THA3全身レイヤーが残っています: "
+            f"{character_dir.name} はsharp-expressionですが旧全身レイヤーが残っています: "
             f"{', '.join(stale)}。新旧画像の混在を避けるため削除してください。"
         )
 
@@ -533,20 +533,20 @@ def build_frames(
     quality_mode: str | None,
 ) -> None:
     layers_dir = character_dir / "layers"
-    # 高精細立ち絵を正本にするパックは、512pxのTHA3全身ポーズへ切り替えると再びぼける。
+    # 高精細立ち絵を正本にするパックは、低解像度の旧全身ポーズへ切り替えると再びぼける。
     # 顔差分とCSS側の二次動作を組み合わせ、精細さを優先する。
-    use_tha3_motion = quality_mode != "sharp-expression" and all(
-        (layers_dir / f"{name}.png").is_file() for name in THA3_LAYER_NAMES
+    use_extended_motion = quality_mode != "sharp-expression" and all(
+        (layers_dir / f"{name}.png").is_file() for name in EXTENDED_LAYER_NAMES
     )
     sequences = (
-        THA3_SEQUENCES
-        if use_tha3_motion
+        EXTENDED_SEQUENCES
+        if use_extended_motion
         else doubled_sequences() if quality_mode == "spring-high" else SEQUENCES
     )
-    if use_tha3_motion:
-        for name in THA3_LAYER_NAMES:
+    if use_extended_motion:
+        for name in EXTENDED_LAYER_NAMES:
             layer_paths[name] = layers_dir / f"{name}.png"
-        print(f"[build-character-animations] {character_dir.name} はTHA3の42フレーム構成を使います")
+        print(f"[build-character-animations] {character_dir.name} は拡張42フレーム構成を使います")
     rendered_frames: dict[tuple[str, int], Path] = {}
     for manifest_name, frames in sequences.items():
         animation_dir = character_dir / "animations" / ANIMATION_NAMES[manifest_name]

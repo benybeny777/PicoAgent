@@ -1,3 +1,14 @@
+# GPT-6 Astra 向け作業指針
+
+- 利用者の依頼、会話、プロジェクトの現状から目的と作業範囲を判断し、必要な修正・検証・引き継ぎまで完了する。
+- 日常的で取り消せる判断は自律的に進める。結果が大きく変わる判断や新しい権限が必要な場合だけ、許可済みの準備を終えてから確認する。
+- 利用者の明示指示を優先し、読み取り専用・編集・テスト・公開・マージ・削除の境界を守る。途中の修正指示は直ちに反映する。
+- 指示やスキルが停止・確認を要求する場合は、対象ファイルと該当規則を具体的に説明する。
+- 結果を先に、根拠と未確認事項を短い日本語で伝える。比較や手順に必要な場合だけ表や箇条書きを使う。
+- 独立した範囲で並行作業が可能かつ許可される場合は子エージェントへ委任し、目的・対象・根拠・報告形式を指定する。統合と最終判断は主担当が行う。
+- 変更の影響に合う検証を行い、同じ確認の繰り返しや実装の言い換えだけのテストを増やさない。追加検証は新しい変更・失敗・未解決の懸念がある場合に限る。
+
+出典: https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices
 # AGENTS.md — Claude Code / AI エージェント向け作業ガイド（ルール正本）
 
 このファイルが唯一のルール正本です。`CLAUDE.md` はこのファイルへのリダイレクトのみです。ルールを追加・変更する場合はこのファイルだけを編集してください。
@@ -6,6 +17,7 @@
 
 ## 最重要運用ルール
 
+- **進行中の作業への質問・指摘・部分的な了承は、中断指示ではない。** 状況の回答は進捗メッセージで行い、そのまま次の実作業へ戻る。「続けます」と言うだけで最終回答を送らない。最終回答前に残作業を点検し、依頼が完了した場合、利用者が停止を明示した場合、または利用者の判断・新しい権限が不可欠で安全に進められる作業が残っていない場合だけ区切る。実行基盤の切断・クレジット切れは保証できないため、復帰時は既存成果物と実行状態から再開する。
 - `AGENTS.md` はすべて日本語で記述する。英語セクション・英語コメントは追加しない。既存の英語記述を見つけたら日本語に置き換える。
 - ルールに反する記述・命名・コメント・dead code を発見した場合は、その場で修正して作業完了後に事後報告する。都度確認を求めない。
 - ルール正本は `AGENTS.md` 1本。`CLAUDE.md` はリダイレクトのみなので編集しない。恒久ルールはすべてこのファイルに追記する。
@@ -17,14 +29,23 @@
 - ドキュメント更新が本当に不要な軽微修正の場合のみ、不要と判断した理由を作業完了時に明記する。
 - **利用者が「読み取り専用」「編集禁止」と明示していない限り、「レビューして」は修正までの依頼である。指摘を並べて終わりにしない。** 見つけた問題はその作業内で直し、テストまで済ませる。方針判断が要るものも妥当な既定を選び、採否、理由、代替案、検証境界をPR本文へ書く。直さずに残すのは、実機や外部資産が無くてコードでは解消できない場合だけで、再現条件と着手条件を`docs/TASKS.md`へ残す。
 - **PR本文を変更記録とレビュー記録の正本にする。** 目的、主な変更、採否と理由、実施した検証、未確認事項をそのPRへ書く。完了した作業を別のMarkdown台帳へ複写しない。恒久ルールは`AGENTS.md`、現行仕様は`SPEC.md`、利用手順は`README.md`または`MANUAL.md`、未完了だけは`docs/TASKS.md`へ移す。
+- **PR本文には、別のエージェントが会話履歴なしで引き継げる改修設計を書く。** 利用クレジットの枯渇、セッション切断、担当交代はいつでも起きる。そのとき残るのはPR本文とコードだけで、会話は残らない。**「続きをやって」と言われた別AIが、PR本文だけを読んで同じ判断へ到達できること**を書けたかどうかの判定基準にする。次を必ず含める。
+  - **背景と原因**: 何が問題で、なぜそうなっていたか。「直した」ではなく「何が壊れていて、どの経路で起きるか」を書く。再現条件が要るものは条件も書く。
+  - **設計判断と却下案**: 採った方式、**採らなかった方式とその理由**。理由が消えると、引き継いだ側が同じ検討をやり直すか、却下済みの案へ戻る。
+  - **未完了の作業**: このPRで終わらなかった部分、次にやること、着手条件。条件待ちなら`docs/TASKS.md`へも書く。
+  - **検証の状態**: 実行した検証と結果、**この環境では確認できなかったこと**（実機・GUI・外部サービス・資格情報が要るもの）を分けて書く。引き継いだ側が「確認済み」と誤解しないようにする。
+  - **触ってはいけない前提**: その変更が依存している不変条件（ロックの取り方、工程順、他モジュールとの約束など）。知らずに壊されやすいものを名指しする。
+  - 作業を途中で終える場合は、PR本文の冒頭へ「未完了。次にやること」を置き、Draftのままにする。ブランチと変更は必ずpushしてから終える。**ローカルにしか無い作業は引き継げない。**
 - **実装・配布・検証を簡単にする選択によって、速度、画質、機能、対応機種、互換性、保守性のいずれかを犠牲にする場合は、採用前または判明した時点で利用者へ具体的に伝える。** 「安全」「簡単」「公式資産がある」だけを理由に欠点を隠さず、何がどの環境で劣るか、改善に何が必要か、今回実施するか保留するかをPR本文へ残す。未完了なら`docs/TASKS.md`にも着手条件を書く。簡単な経路を実装しただけで、犠牲にした高速経路や高品質経路まで対応済みと扱わない。
 - **CodexとClaudeは互いを自動起動しない。相互レビューはユーザー操作だけをトリガーとする。** CodexからClaude CLIを呼ぶことも、ClaudeからCodex CLIを呼ぶことも禁止する。ユーザーが対象成果物、レビュー担当、レビューしながら開発する範囲を明示した場合だけ実行し、その指示は指定された同一PR内だけで有効とする。別PR・別作業へ過去の個別指示を持ち越さない。通常の実装・レビューは作業中のエージェント自身が完結させ、別エージェントの応答を完了条件にしない。レビュー結果は同じPR本文へ残す。
+- **利用者がClaudeまたはCodexによる設計レビューを行う作業は、実装より先にDraft PRを作る。** 作業エージェントはコードへ着手せず、PR本文へ背景と原因、要件、採用案、却下案と理由、変更対象と不変条件、互換性、検証計画、未確認事項、レビューで判断してほしい論点を書いて作業ブランチをpushする。利用者が作業エージェントへレビュー担当の起動まで明示的に依頼した場合は、Draft PRの作成とpushを終えた後に限り、そのPRを対象として指定された担当を起動してよい。起動依頼が無ければ利用者がレビュー担当へ指示する。いずれもレビュー完了または実装再開の明示があるまで、そのPRのコード実装を進めない。
 - コミットメッセージ・ソースコードのコメント（Rust / JS とも）は基本的に日本語で書く（コミットは英語だけの件名にしない）。`feat` / `fix` / `docs` / `chore` などの短い英語プレフィックスや、API / JSON / trait / 識別子・関数名など技術用語の英語はそのまま使ってよい（無理に和訳しない）。
 - 公開版の利用者向け変更点は`C:\00_PG\21_PicoAgent-LP`のRelease notesへ版単位で書く。本体RepoではPR本文とGit履歴を変更履歴とする。
 - **大きなファイル容量・配布容量・転送量は、一般的なMBまたはGBだけで見やすく書く。bytesを単独表示または併記せず、外部仕様がMiB／GiB表記の場合も10進のMB／GBへ換算する。**
 - **常に Codex / Claude（作業エージェント自身）の利用クレジット消費を最小化して作業する。** 不要な長文出力、重複調査、過剰なファイル読み込み、不要な並列探索、同じ確認のやり直しを避ける。まず検索・差分確認・必要最小限のファイル読み取りで判断する。
   - 検証コストの優先順位: まず `cargo check`（コンパイル）→ 必要なら `cargo test --lib`（ロジック）で済ませる。**GUI 起動（`cargo xtask dev`）・スクリーンショット・フルビルドは高コストなので最後の手段**とし、目視確認が本当に必要なときだけ、複数の確認をまとめて 1 回で行う。
-  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtaskの書式、全target静的解析、テスト、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
+  - 目的別PRの最終ローカル検証をまとめるときは`cargo xtask verify`を使う。本体・xtask・`skills/`の書式、全target静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、追跡JavaScript／MJS構文、Git差分を途中失敗後も最後まで実行し、失敗とスキップを末尾で確認する。日常の小修正で毎回フル検証を回す意味ではない。
+  - **`skills/`の書式は`cargo fmt`では検査されない。** スキルは`build.rs`が生成する`#[path] pub mod`でしか繋がっておらず、`mod`宣言をたどるrustfmtからは見えないため、`cargo xtask verify`の「スキルの書式」が追跡中の`skills/**/*.rs`を直接rustfmtへ渡す。手元で直すときは`rustfmt --edition 2021 skills/**/*.rs`を使う。
   - 編集はまとめて行い、**ビルド/テスト/起動は変更が出揃ってから最小回数**だけ実行する。同じ内容のビルド・テスト・起動・読み取りを繰り返さない。
   - `Cargo.toml` / `Cargo.lock` を変更したら `cargo audit --file <Cargo.lock>` で既知脆弱性を確認する。GitHub Actions は無料枠・請求制限による開始前失敗と通知の連発を避けるため使わない。依存更新時と販売前のローカル検証で監査し、保守終了などの情報警告と脆弱性を分けて評価して、対象OS・実行経路と見送り理由をPR本文へ残す。
   - **外部依存は原則として公式LTSまたは長期保守安定版を採用し、LTS相当が無ければ安定版latestを採用する。LLMモデルはLTS扱いにせず常に公式の最新安定版へ追従する。** Cargo・JavaScript・Python等のパッケージ、同梱アプリ、管理導入ツール、Webランタイム、音声・LLMモデルを毎月1日に`.agents/skills/audit-picoagent-dependencies/SKILL.md`の`all`で点検する。互換性、ライセンス、対象OS、再現可能なハッシュ固定の問題で旧版を維持する場合は理由と確認日をPR本文へ残し、未完了なら`docs/TASKS.md`へ移す。
@@ -55,7 +76,7 @@
   - スキル名は英小文字・数字・ハイフンだけの動詞始まりとし、`SKILL.md` のfrontmatterは `name` と「何をするか・どの依頼で使うか」を含む `description` だけにする。本文は日本語、命令形、500行未満を目安とし、一般論や作業日記を入れない。
   - 壊れやすい工程は、正規入口、入力条件、禁止経路、成果物の識別方法、失敗時の停止条件、検証、公開前照合まで書く。単なるコマンド一覧にせず、古い成果物や開発用資産を混ぜない条件を明示する。繰り返し組み直す処理は `scripts/` へ置き、説明を重複させない。
   - 新規スキルは `skill-creator` の初期化手順で作り、`quick_validate.py` を通す。Pythonが直接使えない環境では `uv run --python 3.12 python ...` を使う。作成後は今回の実タスクで手順どおりに実行して検証し、失敗から得た分岐を同じ作業内で反映する。
-  - Claude Code入口は共通正本を最後まで読む指示だけにし、同名フォルダへ手順・スクリプト・参照資料を複製しない。スキルの追加・更新時はCodex側とClaude側の名前一致、リンク先の存在、重複手順なしを確認する。
+  - Claude Code用自動認識ファイルは共通正本を最後まで読む指示だけにし、同名フォルダへ手順・スクリプト・参照資料を複製しない。名前一致、リンク先、frontmatter、自動認識ファイル本文の肥大化は`cargo xtask verify`が機械検査する。
 - **修正・作業が完了したら、ユーザーからの個別指示がなくても `main` へのマージまで終わらせる。** 手順は「`git add -A` で全ステージ → コミット → 作業ブランチへプッシュ → PR 作成 → squash merge」。自分が編集したファイルだけでなく、既に存在していた未コミット変更も同じコミットに含める（コミットメッセージは日本語。本ファイルの他ルールに従う）。**止めるのは、利用者が「マージしない」「PRだけ」と明示した場合と、破壊的・不可逆な操作を伴う場合だけ**。判断に迷って作業を宙ぶらりんにしない。
 - **すべての変更はPRで行い、`main`へ直接pushしない。** 作業開始時に`origin/main`から目的別ブランチを作り、同じ目的の変更だけを1つのPRへまとめる。無関係な修正は別ブランチ・別PRへ分ける。ユーザーが相互レビューを指定した場合も、その指示の有効範囲は指定された同一PR内だけとする。公開済みコミットの書き換えやforce pushはしない。
 - **PR のマージは squash merge を使う。** 1 PR = 1 コミットになり `main` の履歴が読みやすい、というだけの理由。なお API 経由のマージは、squash / 通常マージのいずれでも GitHub 側が committer を `noreply@github.com` にして署名するため、`git log` 上は Unverified に見える（GitHub の画面上は Verified）。これは避けられないので気にしない。すでに `origin` に載ったコミットを後から書き換えるのは共有履歴の破壊操作になるので行わない（上のルールのとおり）。
@@ -66,6 +87,8 @@
 - **製品版番号はSemVerで管理し、手作業で3か所を書き換えない。** 通常の修正・依存／モデル／同梱物更新・文書／LP・既存ベータ再配布は同じ`major.minor`系列の`patch`を自動加算する。`minor`と`major`はユーザーから版を上げる明示指示があった場合だけ変更し、エージェントが機能内容から独断で上げない。`cargo xtask bump-version <major|minor|patch>`を正規入口にし、公開中の`latest.json`を起点としてアプリCargo・xtask Cargo・Tauri設定を同期する。同じ版のRelease資産は上書きしない。`patch`差分は正確な版を公開表示して新規配布へ反映するが、起動時には通知しない。利用者が設定から手動確認した場合はpatchも案内・ダウンロードできるようにする。`major.minor`が上がった場合は起動時にも通知する。判定した種別と理由をPR本文へ残す。
 
 ## エラー処理・リソース
+
+- **キャラクターの見た目に不具合を1体でも見つけたら、現行の全キャラクターで同じ箇所を確認する。** 原因を特定キャラ固有と判断する前に比較し、共通描画・生成処理を修正した後は全員で再確認する。実写、SD、通常頭身など形式の違いを確認省略の理由にしない。対象と未確認の有無を報告する。
 
 - **実害のあるバグは見つけ次第その場で直す。** 別の作業中に見つけた場合も「今回の目的外」で保留にしない。実害とは、利用者のデータが消える・機能が黙って動かなくなる・誤った内容を見せる・費用や時間を無駄にさせる、のいずれかを指す。目的が違うなら別ブランチ・別PRへ分けてよいが、**分けることと後回しにすることは違う**。同じ作業内で直しきり、判定をPR本文へ残す。すぐ直せない場合だけ、再現条件、影響範囲、着手条件を`docs/TASKS.md`へ積む。
 - **利用者から見える失敗を、ログだけで済ませない。** ログは利用者が見る場所ではない。目覚まし・リマインダーのように裏で繰り返し確認している機能や、会話履歴の保存のように利用者が「できている」と思い込む機能が失敗したら、画面へ理由を出す（`renderer.js` の `notifyBackgroundFailure`）。うるさくならないよう原因ごとに1度だけ知らせ、復旧したら次の失敗はまた知らせる。
@@ -100,12 +123,13 @@
 PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント機能（スキル/ツール）」をコネクタとして拡張する。**どちらも決まった場所へファイルを置けば自動登録される**。`build.rs` が `src/providers/*.rs`・ルートの `skills/<スキル名>/mod.rs` を走査して `#[path] pub mod` を生成し、各ファイルの `inventory::submit!` で登録されるため、中央の `mod.rs` 編集は不要。スキルは扱いやすいようプロジェクト直下の `skills/<スキル名>/mod.rs` に置く（トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`）。スキル専用の補助モジュール、スクリプト、テンプレート、少量の静的アセットは同じ `skills/<スキル名>/` 配下へ同梱する（例: `skills/chitchat/trends.rs`、`skills/run_command/jobs.rs`、`skills/browser_control/cdp.rs`）。
 
 - **プロバイダコネクタ** は `src-tauri/src/providers/` に置き、`Provider` トレイトを実装して `inventory::submit! { ProviderReg { make: || Box::new(<型>) } }` で登録する。`chat()` は正規形メッセージ（`message.rs`）を受け取り正規形 assistant を返す。プロバイダ固有のワイヤ形式変換は各コネクタ内に閉じ込め、`agent.rs` に漏らさない。
+- **独自のワイヤ形式変換を書いたら、正規形との対応を単体テストで固定する。** 少なくとも「ツール呼び出しの往復で `id` / `name` / `arguments` が保たれる」「引数の入れ物がそのプロバイダの形式（OpenAI互換はJSON文字列、AnthropicはオブジェクトのままのInput）になる」「壊れた引数を捨てない」の3点を押さえる。変換は外部APIを叩かずに検証できるうえ、壊れても例外にならず**モデルが引数を読めないという分かりにくい形**で出るため。既存の変換を再利用するだけのコネクタ（`deepseek` / `xai` / `mistral` / `gemini` は `openai::{to_wire, from_wire}` を共有）へ同じテストを写さない。
 - **スキル（ツール）コネクタ** はプロジェクト直下の `skills/<スキル名>/mod.rs` に置き、`Tool` トレイトを実装して `inventory::submit! { ToolReg { ... } }` で登録する。`run()` は `String` を返す（失敗もエラー文字列で返す）。トレイト・レジストリ本体は `src-tauri/src/tools/mod.rs`。
 - **発話からスキルを候補へ出す語彙、優先度、先回り実行の引数組み立ては、各`Tool`の`intent_keywords()`／`intent_priority()`／`intent_invocation()`へ置く。** `agent.rs`へスキル名の分岐を足さない。整形済み出力を直接返すか、内部資料としてモデルへ渡すかも`IntentInvocation`でスキル側が申告する。長文の内部資料プロンプトは`skills/<名前>/prompts/*.md`へ置いて`include_str!`で同梱し、ループ本体へ直書きしない。
 - スキル固有の Rust 補助モジュールは `skills/<スキル名>/*.rs` に置いて `mod xxx;` で読み込む。PowerShell / Python / テンプレート等は `skills/<スキル名>/scripts/` や `skills/<スキル名>/templates/` に置き、必要なら `include_str!` でバイナリへ同梱する。複数スキルで本当に共有するトレイト・型だけを `src-tauri/src/tools/mod.rs` 等の共通層に置く。
 - アプリとスキルが使う外部依存クレートは `src-tauri/Cargo.toml` に集約する。Rust はスキルごとの独立 `Cargo.toml` を持たないため、依存クレート自体を各スキルフォルダに複製しない。例外は、Tauriや製品設定から独立した内部共通部品の `crates/picoagent-core/` だけで、このcrate自身が必要最小限の依存を申告する。外部公開は行わず `publish = false` を維持する。
 - **標準的な外向きHTTPは`tools::http::client()`の接続プールを共有する。専用User-Agent、Cookie、プロキシ、DNS固定・リダイレクト制御、長時間ストリームなどコネクタ固有の構築が必要なら`Client::builder()`を使ってよいが、要求全体の`.timeout()`、または長時間処理向けの`.connect_timeout()`＋`.read_timeout()`を必ず設定する。** `Client::new()`と`reqwest::get()`は禁止する。`tools::http::guard`がスキルとバックエンドを走査し、上限なしの個別builderも検出する。
-- **外部プロセスの起動は `tools::process::command()` を使う**（`Command::new` を直接使わない）。Windows のコンソール窓抑止（CREATE_NO_WINDOW）・中断時の子プロセス回収（kill_on_drop）・stdio の既定を1箇所に集約している。実行は `process::output()` / `output_text()` でタイムアウト付きにする。常駐プロセス（同梱エンジン・AivisSpeech）のように future の終了後も動かし続けるものは同期版の `process::command_sync()` を使う（窓抑止だけを共通化し、stdio と待ち方は用途ごとに指定する）。以前は `hide_window` を各所へコピーする運用で散らばり、抜けたファイルでは Windows で窓が明滅し子プロセスが残った。`tools::process::guard` のテストが**スキルとバックエンド `src-tauri/src/` の両方を走査して**直接起動と自前 `hide_window` を検出する。
+- **外部プロセスの起動は `tools::process::command()` を使う**（`Command::new` を直接使わない）。Windows のコンソール窓抑止（CREATE_NO_WINDOW）・中断時の子プロセス回収（kill_on_drop）・stdio の既定を1箇所に集約している。実行は `process::output()` / `output_text()` でタイムアウト付きにする（未導入がありうる外部CLIは `output_or_install_hint()` を使うと、起動できなかったときだけ導入案内を足せる）。**`tokio::time::timeout(..., command.output())` で自前に包むのは禁止**。上限は付くが、打ち切りで届くのは `kill_on_drop` による直下の子までで、起動直後に本体を立て直す実行ファイル（LibreOffice の `soffice` → `soffice.bin` など）が残る。共通層は `terminate_process_tree()` でツリーごと回収する。常駐プロセス（同梱エンジン・AivisSpeech）のように future の終了後も動かし続けるものは同期版の `process::command_sync()` を使う（窓抑止だけを共通化し、stdio と待ち方は用途ごとに指定する）。以前は `hide_window` を各所へコピーする運用で散らばり、抜けたファイルでは Windows で窓が明滅し子プロセスが残った。`tools::process::guard` のテストが**スキルとバックエンド `src-tauri/src/` の両方を走査して**直接起動と自前 `hide_window` を検出する。
   - **一度きりの実行（起動 → 出力回収 → 終了待ち）を自前で組み立てない。** 同じ処理を書き直すと出力回収の待ち方だけが抜ける。実際に共通層・`whisper_transcribe`・`meeting_recorder` の3箇所が同型の実装を持ち、**どれもタイムアウト後に回収タスクを待ち切っていた**。`sh -c` / `powershell -Command` のように子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を握ったままで終端（EOF）が来ないため、1秒指定が孫の寿命（30秒）まで戻らなかった。進捗表示や中断が要る長時間処理で `child` を自分で持つ場合も、**出力回収の待ちは `process::join_capture()` を通す**（上限を超えたら中断して戻る）。`tools::process::guard` が `timeout(..., wait())` の自前実装を検出する。
 - **`PICOAGENT_COMMAND_ALLOWLIST` でユーザー / AI 指定のコマンドを実行する経路は、`process::is_physical_delete()` による物理削除の拒否も必ず通す。** この判定は以前 `run_command` だけが持っており、同じ allowlist で動くスケジューラには無かった（許可コマンドに `powershell` があれば予約実行から `Remove-Item` を通せた）。`tools::process::guard` のテストが、この設定キーを読むのに判定を通していないファイルを検出して失敗させる。
 - **ストリーミング受信のバイト列は `text::Utf8Stream` を通してデコードする**（チャンクごとに `String::from_utf8_lossy` しない）。HTTP のチャンク境界は文字の途中に落ちるため、直接 lossy 変換すると「まだ続きが来ていないだけ」の末尾バイトが `\u{FFFD}` に置き換わって確定し、日本語の応答に文字化けが混ざる。`text::guard` のテストが `bytes_stream()` を使うファイルでの `from_utf8_lossy` を検出して失敗させる。
@@ -114,7 +138,7 @@ PicoAgent は「叩く AI（LLM バックエンド）」と「エージェント
 - **取り消し・再実行など「あとから同じパスを操作する」機能は、記憶した許可を再利用せず実行時点の設定で判定し直す。** `workspace_files` の undo は履歴の生パスへ再検証なしに書き戻しており、許可ルートを狭めたあとでも古い許可のまま操作できていた。
 - **文字列の切り詰めは `text::preview()` / `text::truncate_bytes()` を使う**（`&s[..120]` のようなバイト添字で切らない）。Rust の文字列は UTF-8 バイト列なので、位置が文字の途中だと **panic** する。日本語は 1 文字 3 バイトのため固定長で切ればほぼ必ず境界を外す（実際にエージェントループで、モデルが返した不正な引数 JSON のプレビュー生成が日本語入力で panic していた）。`text::guard` のテストが固定長のバイト添字を検出して失敗させる。
 - **アプリの状態ファイル（設定・記憶・履歴・集計など）の書き込みは `store::write_atomic()` / `store::write_json_atomic()` を使う**（`fs::write` で直接上書きしない）。状態ファイルは「全体を読んで全体を書き戻す」更新なので、直接上書きすると書き込み中の異常終了で中身が途中までのファイルが残る。各ストアは破損時に空で継続するため、次の保存でその空の状態が書き戻され**設定や記憶が恒久的に消える**。共通層は「一時ファイル → `sync_all` → `rename`」で更新するので、どの瞬間に落ちても完全な旧版か新版のどちらかしか残らない。読めなかったファイルは `store::quarantine_corrupt()` で退避してから空で継続する。`store::guard` のテストが `fs::write` の直接使用を検出して失敗させる（例外は理由付きの allowlist のみ）。
-- システムに副作用を持つツール（ファイル・ネットワーク・プロセス等）は、必ず境界（許可ルート・サイズ上限・確認など）を設ける。**ユーザー由来のパスは必ず `permissions::resolve(cfg, input)` で `SafePath` に変換してから使う**。`SafePath` は許可判定を通過したパスを表す型で、生成経路が `resolve` / `SafePath::join` / `SafePath::sibling` に限られている（派生パスも `..` による脱出を防ぐため再検証される）。ファイル操作は `permissions::fs`（`read_to_string` / `write` / `create_dir_all`）を使う。アプリ自身が決めた内部パス（一時ファイル等、ユーザー入力を含まないもの）だけ `SafePath::app_owned` を使ってよい。**許可判定を各スキルで再実装しない**（リンク実体検査・追加許可ルート・拒否パス判定が抜ける。過去に7スキルで同じ抜けが発生した）。`permissions::guard` のテストがスキルを走査して、自前の許可判定とパス引数の `resolve` 漏れを検出し失敗させる。新しいスキルで独自のルート設定キー（`PICOAGENT_*_ROOT` 等）を作らず、`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` を使う。`C:\Windows` / `Program Files` は permissions が常に拒否する。例: `skills/read_file/mod.rs` は `permissions::resolve` で許可ルート外・保護パス・トラバーサルを拒否する。
+- システムに副作用を持つツール（ファイル・ネットワーク・プロセス等）は、必ず境界（許可ルート・サイズ上限・確認など）を設ける。**ユーザー由来のパスは必ず `permissions::resolve(cfg, input)` で `SafePath` に変換してから使う**。`SafePath` は許可判定を通過したパスを表す型で、生成経路が `resolve` / `SafePath::join` / `SafePath::sibling` に限られている（派生パスも `..` による脱出を防ぐため再検証される）。ファイル操作は `permissions::fs`（`read_to_string` / `read` / `read_range` / `write` / `create_dir_all` など）を使う。アプリ自身が決めた内部パス（一時ファイル等、ユーザー入力を含まないもの）だけ `SafePath::app_owned` を使ってよい。**許可判定を各スキルで再実装しない**（リンク実体検査・追加許可ルート・拒否パス判定が抜ける。過去に7スキルで同じ抜けが発生した）。`permissions::guard` のテストがスキルを走査して、自前の許可判定とパス引数の `resolve` 漏れを検出し失敗させる。新しいスキルで独自のルート設定キー（`PICOAGENT_*_ROOT` 等）を作らず、`PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` を使う。`C:\Windows` / `Program Files` は permissions が常に拒否する。例: `skills/read_file/mod.rs` は `permissions::resolve` で許可ルート外・保護パス・トラバーサルを拒否する。
 - スキル経由でユーザーファイルを削除相当の扱いにする場合、物理削除は禁止し、必ず OS のゴミ箱へ移動する。`workspace_files` などに削除機能を追加するときも `delete` ではなく `trash` / `move_to_trash` として実装し、`remove_file` / `remove_dir_all` でユーザー指定ファイルを消さない。`run_command` でも `rm` / `del` / `Remove-Item` / `git clean` などの物理削除コマンドは拒否する。内部一時ファイル、ログローテーション、ビルド生成物、同梱物アンインストールなど PicoAgent 管理下の掃除はこの限りではない。
 - コネクタが設定値を必要とするなら `config_schema()` で申告する。値はフィールドに固定せず**メソッド内で `cfg.get()` から都度読む**（設定画面での変更を再起動なしに反映するため）。
 - コネクタを追加・変更したら `SPEC.md` のインターフェース定義と一覧、`docs/SETTINGS.md` の設定キー、必要なら `README.md` と `MANUAL.md` の利用手順を更新する。
@@ -131,12 +155,13 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 - Windows / macOS を想定。**Rust（cargo）と Tauri CLI**（`cargo install tauri-cli --version '^2'`）、WebView2（Windows ランタイム）。**Node.js も Ollama も不要**（開発タスクは `cargo xtask`）。
 - **Node.js は「アプリと開発タスクの依存」としては使わない。ただし作業用ツールとしては使ってよい**（例: `tools/screenshots/` の Playwright 撮影ツール）。判断基準は「アプリのビルド・起動・配布に Node が要るようになるかどうか」で、`package.json` を置いて依存を増やす形にはしない（グローバル導入のツールを環境変数で指す）。
 - 開発起動: `cargo xtask setup engine`（同梱エンジン取得）→ `cargo xtask dev`。製品ビルド: `cargo xtask build`（`src-tauri/target/release/bundle/`）。
-- **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時に `PICOAGENT_LOCAL_MODEL_PRESET=auto` が PC の VRAM/RAM 目安から Gemma 4 系プリセットを選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL し、以後オフライン。Ollama / OpenAI 互換は任意プロバイダとして存続。
+- **既定の叩く AI は `local`（同梱 llama-server）**。初回起動時は軽量かつ連続ツール利用を検証済みのLFM2.5 2.6B QAD版を選び、モデル GGUF をユーザーデータ配下の `PicoAgent/bundled/models/` へ DL して以後オフラインで使う。設定画面は実PCのRAMと、正確に取得できる場合だけ専用VRAMを表示し、日本語対応モデルを複数候補として案内する。利用者が明示したGemma 4等の選択は自動変更しない。Ollama / OpenAI 互換は任意プロバイダとして存続。
 - **OpenAI 互換プロバイダ（`OPENAI_API_KEY` 利用）は費用が発生するため、ユーザー指示または運用上の明確な必要がある場合だけ実行する。** local / Ollama はコストがかからない。
 - **アプリがプリセットとして案内・取得するローカルモデルは、原則として量子化済みGGUFを使う。** 一般PCでの容量・メモリ・速度を優先し、非量子化重みをプリセットへ追加しない。モデル公式の量子化版が無い場合は、出所と形式を確認できるGGUFを使う。利用者が明示する`custom` URLはこの制限の対象外。
 - 初回 `cargo build` / `tauri build` / モデル DL は時間がかかり、ネットワークが必要。
 - 推論エンジン本体（`llama-server` + DLL）と `*.gguf` はリポジトリに含めない（`.gitignore` 済、`cargo xtask setup engine` で取得）。
 - **Claude Code on the web（Linux コンテナ）で作業する場合は `.claude/hooks/session-start.sh` が環境を用意する。** clone 直後は (1) Tauri / cpal / enigo が要求するシステムライブラリが無い、(2) `frontendDist` が指す `ui-dist/` が Git 管理外で存在せず `tauri::generate_context!` がコンパイル時に落ちる、の2点で `cargo check` すら通らない。フックが apt 導入と `sync-characters` → `build-ui` を済ませ、テストバイナリまで事前ビルドする。手で毎回入れ直さないこと。Windows / macOS のローカル環境では `CLAUDE_CODE_REMOTE` を見て何もしない。
+  - **git-lfs が無いコンテナでは `characters/**` の画像が実体ではなくポインタ文字列になる。** `sync-characters` はこれを検証で弾くため失敗するが、フックはそこで止まらず理由を出して `build-ui` へ進む（止めると `ui-dist/` が無いまま `cargo check` すら通らない）。この状態では画像の実体を検査する `xtask` の `assets::tests::同梱2dの実行画像はlossless_webp単一世代にする` と `cargo xtask verify` が失敗するので、キャラクター素材に関わる検証はローカル環境で行う。Rust コードの `cargo check` / `cargo clippy` / `cargo test --lib` は素材無しで通る。
 
 ## 製品化（配布）
 
@@ -159,26 +184,28 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |
 | `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |
-| `src-tauri/src/agent.rs` | エージェントループ（chat → tool_calls 実行 → 再 chat） |
+| `src-tauri/src/agent.rs` / `agent/{prompt,feedback}.rs` | エージェント実行ループ／systemルールと文脈の合成／任意の計画・自己評価。スキルとメモリは既存の各正本を使い、実体のないhooks層は作らない |
 | `src-tauri/src/api_server.rs` | Ollama 風ローカル HTTP API（既定無効・127.0.0.1 のみ・`PICOAGENT_API_KEY` で Bearer 認証。`/api/chat` `/api/generate` `/v1/chat/completions` `/mcp` ほか） |
 | `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_text からフォールバック参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
 | `src-tauri/src/permissions.rs` | **全スキル共通のファイル許可の正本**。`resolve()` が許可判定を通した `SafePath` を返し（生成経路は resolve / join / sibling のみ）、`permissions::fs` が `SafePath` 専用のファイル操作を提供する。`permissions::guard` のテストがスキルの自前実装・`resolve` 漏れを検出 |
 | `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
 | `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `docs/SETTINGS.md` に載っているか、逆に一覧だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
 | `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる。**キャラクターIDの判定 `is_valid_id()` もここが唯一の定義元**（IDはフォルダ名と設定キーの一部になる。以前は9箇所へ写され、うち4箇所で長さ制限が抜けていた） |
-| `src-tauri/src/components.rs` | **初回追加機能の公式取得元・検証・導入境界**。Aivis／Whisperは各公式配布元からPicoAgent管理領域へ直接取得し、THA3／LibreOffice／文書ツールは公式ページと手動設定を案内する。第三者ソフトをPicoAgentのReleaseへ再配布しない |
+| `src-tauri/src/components.rs` | **初回追加機能の公式取得元・検証・導入境界**。Aivis／Whisperは各公式配布元からPicoAgent管理領域へ直接取得し、LibreOffice／文書ツールは公式ページと手動設定を案内する。第三者ソフトをPicoAgentのReleaseへ再配布しない |
 | `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないか、キャラクターID判定の写しが増えていないか、`character_pack.rs` が `crate::` のアプリ内部へ依存していないか（xtask のビルドが壊れる）を検出する |
-| `src-tauri/src/tha3_creator.rs` | 設定画面の1枚絵THA3生成。同梱／開発用の専用Python子プロセス・進捗・キャンセル・一時パックを管理し、共通検証後に追加キャラクター領域へ導入する |
+| `src-tauri/src/project_rules.rs` | **作業フォルダの`AGENTS.md`を案件の作法としてsystem文へ載せる**（許可ルート直下1枚。`project`スキルがルートを切り替えると作法も入れ替わる）。本文は利用者の指示ではなく「フォルダに置かれていた文章」として扱い、上位ルール・確認・許可・外部送信制限を上書きできないことを毎回明示する。読み書きは`project`の`rules_show` / `rules_save`。`PICOAGENT_PROJECT_RULES_AUTO_CAPTURE=true`のとき、強く言い渡された作法を専用見出しへ自動追記し、通知から取り消せる（既定は無効。利用者のフォルダを書き換えるため） |
+| `src-tauri/src/user_skills.rs` / `skills/user_skill/mod.rs` | 利用者追加の`SKILL.md`を検証・原子的保存し、チャットから作成・更新・適用する。Markdownは指示だけを持ち、実操作は既存Toolの許可・確認境界を通す |
 | `src-tauri/src/bundle_scope.rs` | **配布物の範囲を固定する設計ガード**（テスト専用）。製品に入るのは `ui/` を写した `ui-dist/` と `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・撮影用画像（`tools/` `docs/` `scripts/` `xtask/`）が混ざらないよう、リソース指定・配信元・`ui/` に置ける拡張子を allowlist で固定する。CSPの`unsafe-eval`へ依存できるのはGit管理外のLive2D用PIXIだけとし、追跡JavaScriptの`eval`／`Function`コンストラクタも拒否する |
 | `src-tauri/src/guard_scan.rs` | **設計ガードの走査範囲の正本**（テスト専用）。`all_sources()` がスキルとバックエンド `src-tauri/src/` の全ソースを返す。スキル側は `mod.rs` だけでなく `skills/<スキル名>/*.rs` の補助モジュール（`run_command/jobs.rs` など）も含める（`mod.rs` だけ見ると、補助モジュールへ書いた違反を見逃す）。各ガードが自前でディレクトリを歩くと範囲がずれて違反を見逃すため、`guard_scan::guard` のメタガードが自前走査を検出 |
 | `src-tauri/src/store.rs` | **アプリ状態ファイル永続化の共通層**。`write_atomic()` / `write_json_atomic()` が「一時ファイル → `sync_all` → `rename`」で原子的に書き換え、途中で落ちても既存データを壊さない。`quarantine_corrupt()` は読めなかったファイルを `.corrupt-<日時>` へ退避する。`store::guard` のテストが `fs::write` の直接使用を検出 |
-| `src-tauri/src/tools/process.rs` | **外部プロセス実行の共通層**。`command()` が Windows のコンソール窓抑止・`kill_on_drop`・stdio 既定を適用し、`output()` / `output_text()` がタイムアウト付きで実行する。`tools::process::guard` のテストが `Command::new` の直接使用を検出 |
+| `src-tauri/src/tools/process.rs` | **外部プロセス実行の共通層**。`command()` が Windows のコンソール窓抑止・`kill_on_drop`・stdio 既定を適用し、`output()` / `output_text()` / `output_or_install_hint()` がタイムアウト付きで実行し、打ち切り時はプロセスツリーごと回収する。`tools::process::guard` のテストが `Command::new` の直接使用と、自前の `tokio::time::timeout(..., .output()/.wait())` を検出 |
+| `src-tauri/src/durable_jobs.rs` | **アプリ再起動後も再開するツール単位の永続ジョブ**（`app_data_dir/durable-jobs.json`）。対象は`ai_drive`と`artifact_pipeline`だけ。取り出しは1本のループ、実行は最大3件同時。スキルは`report_progress()`で現在地を報告し、開始・進捗・完了・中止・再試行を`pet:notice`（`kind=durable_job`）で画面へ送る。自動復旧の試行上限は通算5回で、利用者が明示した再試行では数え直す |
 | `src-tauri/src/scheduler.rs` | cron 風スケジュールタスクの常駐実行と実行履歴（`app_data_dir/schedule-runs.json`）。日と曜日を両方制限した場合は標準cron互換のOR条件。**検出（同期）と実行（単一ワーカー）はキューで分離**し、長時間タスク中も検出が止まらないようにしている（`scheduler::tests` の設計ガードが検出関数の `async` 化を検出） |
 | `src-tauri/src/memory.rs` / `emotion.rs` | 暗黙的な長期メモリ（`app_data_dir/memory.json`）／ルールベースの感情状態推定 |
 | `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
 | `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |
 | `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
-| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。読込開始（`pet_frontend_ready`）と起動完了（`pet_finish_boot`）を別々に監視し、`PICOAGENT_BOOT_TIMEOUT_MS` の区間内にどちらかが届かなければ、webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する（監視は2区間なので案内までの最長はその2倍）。**起動完了の記録はウィンドウ寸法の復元より先に行う**（寸法変更の失敗で、動いている画面を案内画面へ差し替えないため）。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
+| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。読込開始（`pet_frontend_ready`）は12秒（`PICOAGENT_BOOT_TIMEOUT_MS` がそれより小さければその値）、開始後は進捗通知（`pet_boot_progress`。初期化中は1秒、設定取得後は `PICOAGENT_BOOT_TIMEOUT_MS` の1/4を1〜10秒へ収めた間隔）が `PICOAGENT_BOOT_TIMEOUT_MS` だけ途絶えたことを監視し、届かなければ webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する（起動完了 `pet_finish_boot` が来れば監視を終える。モデル取得などで準備が長引いても、進捗が続く限り案内画面へ落とさない）。**起動完了の記録はウィンドウ寸法の復元より先に行う**（寸法変更の失敗で、動いている画面を案内画面へ差し替えないため）。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。案内画面には状況・読み込み先・ログの置き場所に加えて**当日 `app.log` の末尾12行**を出す（読み取りは末尾8KBまで）。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |
 | `xtask/src/util.rs` | **同梱物取得と差分同期の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。`sync_dir()`はサイズと更新日時が同じファイルを飛ばし、同期元にない生成先だけを削除する。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
@@ -188,20 +215,17 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d_runtime`） | Live2D ランタイムを `ui/vendor/live2d/` へ取得（`cargo xtask setup live2d`）。公式サンプルは自動取得せず、開発者が条件確認後に `cargo xtask setup live2d-samples` を明示実行する。いずれも git 管理外 |
-| `xtask`（`bundled::fetch_tha3`） | THA3コード・VRAM別モデル・OS別Pythonを準備する（`cargo xtask setup tha3`）。コードとモデルは `resources/bundled/tha3/` へ、Windows開発用Pythonは製品外の `tools/tha3-runtime/` へ置き、製品PythonはNSISインストール時に専用領域へ取得する |
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |
 | `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
 | `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
-| `xtask/src/verify.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする |
-| `xtask/src/character_quality.rs` | **通常2D制作正本の画素検査（`cargo xtask character-quality`）**。`assets.rs`が寸法と形式しか見ないのに対し、こちらは差分レイヤーが顔の局所差分に収まっているか、半目が閉じ目の透明度変更でないか、輪郭が状態切替でずれないか、既定構図で原寸を割らないかを画素から判定する。`generator.source` を記録したパックは、その原画の被写体と完成レイヤーの被写体を実寸で比べ、引き伸ばし拡大を確実に落とす。既存素材の指摘は`characters/quality-baseline.json`へ記録し、**新規・悪化だけ**を失敗にする（`--update-baseline`で更新、`--strict`で注意も失敗扱い） |
+| `xtask/src/verify.rs` / `agent_harness.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・`skills/`の書式・共通スキル正本とClaude Code用自動認識ファイル・追跡JavaScript／MJS・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする。検査対象の列挙は`tracked_files()`（`git ls-files -z`）に集約する |
 | `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
 | `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
-| `scripts/build-tha3-layers.py` | 512x512透過立ち絵からTHA3キーポーズ17枚と連番42枚を生成する。CLIでは正本へ登録し、GUI連携では一時キャラクターパックを出力する。削除はTHA3自作キャラだけをOSのゴミ箱へ移す |
 | `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
-| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。`sync-characters` は git-lfs 未導入で必ず失敗するため、理由を出して続行し `ui-dist/` の生成を止めない。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
 | `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
@@ -232,7 +256,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │   ├── Cargo.toml / build.rs / tauri.conf.json
 │   ├── capabilities/default.json   ← 権限（ACL）
 │   ├── icons/                      ← 生成アイコン一式
-│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper/tha3。git 管理外、cargo xtask setup で取得）
+│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper。git 管理外、cargo xtask setup で取得）
 │   └── src/
 │       ├── main.rs / lib.rs / commands.rs / menu.rs
 │       ├── config.rs / agent.rs / message.rs / engine.rs
@@ -240,9 +264,8 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/                    ← キャラクター画像の生成・高精細化（*.py と Windows 専用の *.ps1 / *.cs）
-├── tools/tha3-runtime/         ← Windows開発用THA3 Python環境（git管理外、製品には含めない）
 ├── .agents/skills/             ← 複数の作業エージェントで共有する手順スキルの正本
-├── .claude/                    ← Claude Code の設定、共通スキルへの入口、セッション開始フック
+├── .claude/                    ← Claude Code の設定、共通スキル自動認識ファイル、セッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
 ├── README.md / MANUAL.md / SPEC.md
 ├── docs/SETTINGS.md             ← 全設定キーの唯一の一覧

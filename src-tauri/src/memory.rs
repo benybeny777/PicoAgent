@@ -309,7 +309,9 @@ fn extract_candidates(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn split_sentences(text: &str) -> Vec<String> {
+/// 会話文を1文ずつに割る。`project_rules` の強調検出も同じ割り方を使う
+/// （別に実装すると、片方だけが箇条書きや改行の扱いを取りこぼす）。
+pub(crate) fn split_sentences(text: &str) -> Vec<String> {
     let normalized = text.replace('\r', "\n");
     let mut out = Vec::new();
     for chunk in normalized.split(['\n', '。', '！', '？', '!', '?']) {

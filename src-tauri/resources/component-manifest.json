@@ -25,19 +25,6 @@
         }
       ]
     },
-    "tha3": {
-      "installMode": "external",
-      "sources": [
-        {
-          "name": "THA3 公式GitHub",
-          "url": "https://github.com/pkhungurn/talking-head-anime-3-demo"
-        },
-        {
-          "name": "作者配布モデル（Dropbox）",
-          "url": "https://www.dropbox.com/s/y7b8jl4n2euv8xe/talking-head-anime-3-models.zip?dl=0"
-        }
-      ]
-    },
     "office": {
       "installMode": "external",
       "sources": [

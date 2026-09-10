@@ -1,7 +1,6 @@
 // skills/document_convert/mod.rs - LibreOffice による Office/PDF 変換スキル。
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -33,7 +32,11 @@ fn bundled_office_dirs() -> Vec<PathBuf> {
 }
 
 fn soffice_name() -> &'static str {
-    if cfg!(windows) { "soffice.exe" } else { "soffice" }
+    if cfg!(windows) {
+        "soffice.exe"
+    } else {
+        "soffice"
+    }
 }
 
 /// ディレクトリ配下から soffice を再帰探索する（MSI 展開・.app などレイアウト差異に強くする）。
@@ -52,7 +55,9 @@ fn find_soffice(dir: &Path, depth: usize) -> Option<PathBuf> {
             subdirs.push(path);
         }
     }
-    subdirs.into_iter().find_map(|sub| find_soffice(&sub, depth + 1))
+    subdirs
+        .into_iter()
+        .find_map(|sub| find_soffice(&sub, depth + 1))
 }
 
 /// OfficeCLI の実行パスを解決する。
@@ -124,25 +129,55 @@ impl Tool for DocumentConvertTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LIBREOFFICE_PATH", "OfficeCLI 実行ファイルパス（空ならPicoAgent内→PATHの soffice）", "text", ""),
-            Field::new("PICOAGENT_PANDOC_PATH", "Pandoc 実行ファイルパス（空ならPicoAgent内→PATH）", "text", "pandoc"),
-            Field::new("PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS", "文書変換タイムアウト秒（5〜300）", "text", "120"),
+            Field::new(
+                "PICOAGENT_LIBREOFFICE_PATH",
+                "OfficeCLI 実行ファイルパス（空ならPicoAgent内→PATHの soffice）",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_PANDOC_PATH",
+                "Pandoc 実行ファイルパス（空ならPicoAgent内→PATH）",
+                "text",
+                "pandoc",
+            ),
+            Field::new(
+                "PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS",
+                "文書変換タイムアウト秒（5〜300）",
+                "text",
+                "120",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let Some(input_raw) = args.get("input_path").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+        let Some(input_raw) = args
+            .get("input_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        else {
             return "エラー: input_path が指定されていません。".to_string();
         };
         let input = match crate::permissions::resolve(cfg, input_raw) {
             Ok(path) => path,
             Err(error) => return format!("エラー: {}", error),
         };
-        let format = match args.get("format").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        let format = match args
+            .get("format")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             Some(format) => format,
             None => return "エラー: format が指定されていません。".to_string(),
         };
-        let output_dir = match args.get("output_dir").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        let output_dir = match args
+            .get("output_dir")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             Some(path) => match crate::permissions::resolve(cfg, path) {
                 Ok(path) => path,
                 Err(error) => return format!("エラー: {}", error),
@@ -158,13 +193,20 @@ impl Tool for DocumentConvertTool {
             .ok()
             .filter(|value| (5..=300).contains(value))
             .unwrap_or(120);
-        let engine = args.get("engine").and_then(Value::as_str).map(str::trim).unwrap_or("auto");
+        let engine = args
+            .get("engine")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("auto");
         let input_ext = input.extension_lossy();
         let format_lower = format.to_ascii_lowercase();
         let use_pandoc = should_use_pandoc(engine, &input_ext, &format_lower);
         let engine_label = if use_pandoc { "Pandoc" } else { "OfficeCLI" };
         // 出力先も許可判定を通す（output_dir 配下の相対名として再検証される）。
-        let pandoc_output = match output_dir.join(cfg, &format!("{}.{}", input.file_stem_lossy(), format_lower)) {
+        let pandoc_output = match output_dir.join(
+            cfg,
+            &format!("{}.{}", input.file_stem_lossy(), format_lower),
+        ) {
             Ok(path) => path,
             Err(error) => return format!("エラー: {}", error),
         };
@@ -172,7 +214,11 @@ impl Tool for DocumentConvertTool {
         if use_pandoc {
             command = crate::tools::process::command(pandoc_path(cfg));
             // --standalone で単体で開ける完結した文書（html のヘッダ等）を出力する。
-            command.arg(&input).arg("--standalone").arg("-o").arg(&pandoc_output);
+            command
+                .arg(&input)
+                .arg("--standalone")
+                .arg("-o")
+                .arg(&pandoc_output);
         } else {
             command = crate::tools::process::command(office_cli_path(cfg));
             command
@@ -180,26 +226,36 @@ impl Tool for DocumentConvertTool {
                 .arg(&output_dir)
                 .arg(&input);
         }
-        match tokio::time::timeout(Duration::from_secs(timeout), command.output()).await {
-            Ok(Ok(output)) => {
+        // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す
+        // （`soffice` は起動直後に `soffice.bin` を立て直して自身は終了する）。
+        match crate::tools::process::output_or_install_hint(
+            command,
+            timeout,
+            &format!("文書変換（{engine_label}）"),
+            &format!(
+                "cargo xtask setup {} で同梱ツールを取得してください。",
+                if use_pandoc { "tools" } else { "office" }
+            ),
+        )
+        .await
+        {
+            Ok(output) => {
                 if use_pandoc && output.status.success() && pandoc_output.exists() {
                     return format!("Pandoc で変換しました: {}", pandoc_output.display());
                 }
                 format!(
                     "変換エンジン: {}\n終了コード: {}\nstdout:\n{}\nstderr:\n{}",
                     engine_label,
-                    output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "シグナル終了".to_string()),
+                    output
+                        .status
+                        .code()
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "シグナル終了".to_string()),
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr)
                 )
             }
-            Ok(Err(error)) => format!(
-                "エラー: {} の起動に失敗しました: {}。cargo xtask setup {} で同梱ツールを取得してください。",
-                engine_label,
-                error,
-                if use_pandoc { "tools" } else { "office" }
-            ),
-            Err(_) => format!("エラー: 文書変換が {} 秒でタイムアウトしました。", timeout),
+            Err(error) => format!("エラー: {error}"),
         }
     }
 }
@@ -225,7 +281,11 @@ mod tests {
     // pandoc がある環境だけで走る E2E（無ければ即成功で抜ける）。
     #[test]
     fn pandocでmarkdownをhtmlへ変換できる() {
-        if std::process::Command::new("pandoc").arg("--version").output().is_err() {
+        if std::process::Command::new("pandoc")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             eprintln!("pandoc が無いためスキップ");
             return;
         }

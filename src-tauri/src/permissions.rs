@@ -219,13 +219,30 @@ impl SafePath {
 
     /// 配下の相対パスを足す。`..` で外へ出る指定を防ぐため必ず再検証する。
     pub fn join(&self, cfg: &Config, relative: &str) -> Result<SafePath, String> {
-        resolve(cfg, &self.0.join(relative).to_string_lossy())
+        if Path::new(relative).is_absolute() {
+            return Err(format!(
+                "配下へ追加するパスは相対パスで指定してください: {relative}"
+            ));
+        }
+        let joined = normalize(&self.0, relative);
+        if joined != self.0 && !joined.starts_with(&self.0) {
+            return Err(format!(
+                "基準フォルダの外へ出る相対パスは使えません: {relative}"
+            ));
+        }
+        resolve(cfg, &joined.to_string_lossy())
     }
 
     /// 同じ親ディレクトリ内の別ファイル（拡張子違いなど）。こちらも再検証する。
     pub fn sibling(&self, cfg: &Config, file_name: &str) -> Result<SafePath, String> {
         let parent = self.0.parent().unwrap_or(Path::new("."));
-        resolve(cfg, &parent.join(file_name).to_string_lossy())
+        let input = Path::new(file_name);
+        if input.is_absolute() || input.components().count() != 1 {
+            return Err(format!(
+                "同じフォルダ内のファイル名だけを指定してください: {file_name}"
+            ));
+        }
+        resolve(cfg, &parent.join(input).to_string_lossy())
     }
 
     /// 親ディレクトリ。ルート直下などで親が無い場合は主ルートを返す。
@@ -303,6 +320,26 @@ pub mod fs {
     pub fn read(path: &SafePath) -> Result<Vec<u8>, String> {
         std::fs::read(path.as_path())
             .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))
+    }
+
+    /// ファイルの一部だけを読む。分割送信のように、全体をメモリへ載せずに
+    /// 順に処理したい用途で使う（`read()` は上限の無い全体読み取り）。
+    pub fn read_range(path: &SafePath, offset: u64, length: usize) -> Result<Vec<u8>, String> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let mut file = std::fs::File::open(path.as_path())
+            .map_err(|error| format!("ファイルを開けません（{}）: {}", path.display(), error))?;
+        file.seek(SeekFrom::Start(offset)).map_err(|error| {
+            format!(
+                "ファイルの読み取り位置を移せません（{}）: {}",
+                path.display(),
+                error
+            )
+        })?;
+        let mut buffer = vec![0u8; length];
+        file.read_exact(&mut buffer)
+            .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))?;
+        Ok(buffer)
     }
 
     pub fn write(path: &SafePath, contents: impl AsRef<[u8]>) -> Result<(), String> {
@@ -411,6 +448,40 @@ mod tests {
     fn 相対パスをルート基準に正規化する_共通() {
         let base = std::env::temp_dir().join("picoagent-perm-test");
         assert_eq!(normalize(&base, "a/../b"), base.join("b"));
+    }
+
+    #[test]
+    fn 配下結合と同階層名は基準フォルダから脱出しない() {
+        let base = std::env::temp_dir().join(format!("picoagent-join-test-{}", std::process::id()));
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", base.to_string_lossy().as_ref());
+        let root = super::SafePath::app_owned(base.clone());
+        assert_eq!(
+            root.join(&cfg, "child/file.txt").unwrap().as_path(),
+            base.join("child/file.txt")
+        );
+        assert!(root.join(&cfg, "../outside.txt").is_err());
+        assert!(root
+            .join(&cfg, &base.join("absolute.txt").to_string_lossy())
+            .is_err());
+        let file = super::SafePath::app_owned(base.join("file.txt"));
+        assert!(file.sibling(&cfg, "../outside.txt").is_err());
+        assert!(file.sibling(&cfg, "sub/file.txt").is_err());
+    }
+
+    #[test]
+    fn 範囲読み取りは指定した位置と長さだけを返す() {
+        let dir = std::env::temp_dir().join(format!("picoagent-range-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = super::SafePath::app_owned(dir.join("range.bin"));
+        std::fs::write(file.as_path(), b"0123456789").unwrap();
+
+        assert_eq!(super::fs::read_range(&file, 0, 4).unwrap(), b"0123");
+        assert_eq!(super::fs::read_range(&file, 6, 4).unwrap(), b"6789");
+        // 足りない分を0埋めで返すと、送信先へ壊れたデータを渡すことになる。必ず失敗させる。
+        assert!(super::fs::read_range(&file, 8, 4).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[cfg(windows)]

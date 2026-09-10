@@ -7,7 +7,6 @@
 // 取得のためにシェルを持ち出す必要がない、という理由でネイティブへ置き換えた。
 // 取得した本文はサイズ上限で切り、モデルに要約・整形させるための素材として返す。
 
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -74,7 +73,8 @@ impl Tool for ClipboardTextTool {
     }
 
     fn description(&self) -> String {
-        "現在のクリップボードのテキストを取得し、要約・返信文・TODO化などに使える形で返す。".to_string()
+        "現在のクリップボードのテキストを取得し、要約・返信文・TODO化などに使える形で返す。"
+            .to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -115,11 +115,12 @@ impl Tool for ClipboardTextTool {
         };
         let clipped: String = text.chars().take(max_chars).collect();
         let omitted = text.chars().count().saturating_sub(clipped.chars().count());
-        let mut out = format!(
-            "クリップボード本文（mode={mode}、最大{max_chars}文字）:\n---\n{clipped}\n---"
-        );
+        let mut out =
+            format!("クリップボード本文（mode={mode}、最大{max_chars}文字）:\n---\n{clipped}\n---");
         if omitted > 0 {
-            out.push_str(&format!("\n注: 長いため末尾 {omitted} 文字を省略しました。"));
+            out.push_str(&format!(
+                "\n注: 長いため末尾 {omitted} 文字を省略しました。"
+            ));
         }
         out
     }

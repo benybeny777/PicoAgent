@@ -23,7 +23,7 @@
 //
 // 既存キャラクターには、この検査を導入する前に作られた素材が含まれる。それらを
 // いきなり不合格にすると誰もビルドできないため、導入時点の指摘を
-// `characters/quality-baseline.json` へ記録し、**新規または悪化した指摘だけ**を
+// `characters/quality-baseline.json` へ記録し、**新しい種類またはレイヤーの指摘だけ**を
 // 失敗として扱う。既知の負債は毎回一覧に出して、解消したらベースラインから外す。
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -185,6 +185,13 @@ pub fn run(args: &[String]) -> Result<()> {
 
     let baseline_path = root.join(BASELINE_FILE);
     if update_baseline {
+        let baseline = read_baseline(&baseline_path)?;
+        if findings
+            .iter()
+            .any(|finding| !baseline.contains(&finding.key()))
+        {
+            bail!("新しい指摘はベースラインへ追加できません。素材を修正してから再検査してください");
+        }
         write_baseline(&baseline_path, &findings)?;
         log(
             "character-quality",
@@ -224,10 +231,10 @@ pub fn run(args: &[String]) -> Result<()> {
     if blocking > 0 {
         bail!("ベースラインに無い不合格が{blocking}件あります");
     }
-    if strict && !fresh.is_empty() {
+    if strict && !findings.is_empty() {
         bail!(
-            "--strict のため、ベースラインに無い指摘{}件を不合格として扱います",
-            fresh.len()
+            "--strict のため、既知を含む指摘{}件を不合格として扱います",
+            findings.len()
         );
     }
     Ok(())
@@ -240,7 +247,8 @@ fn collect_characters(src: &Path, only: Option<&str>) -> Result<Vec<CharacterInp
         bail!("キャラクターの正本が見つかりません: {}", src.display());
     }
     let mut dirs = fs::read_dir(src)?
-        .flatten()
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
         .map(|entry| entry.path())
         .filter(|path| path.is_dir() && path.join("character.json").is_file())
         .collect::<Vec<_>>();
@@ -257,9 +265,7 @@ fn collect_characters(src: &Path, only: Option<&str>) -> Result<Vec<CharacterInp
         let manifest: Value =
             serde_json::from_str(&fs::read_to_string(dir.join("character.json"))?)
                 .with_context(|| format!("{id} のcharacter.jsonを解析できません"))?;
-        if manifest.get("live2d").is_some()
-            || manifest.get("motionProfile").and_then(Value::as_str) != Some("full")
-        {
+        if !uses_layer_sources(&manifest) {
             continue;
         }
         characters.push(CharacterInput {
@@ -272,6 +278,13 @@ fn collect_characters(src: &Path, only: Option<&str>) -> Result<Vec<CharacterInp
         bail!("{} は通常2Dの検査対象ではありません", only.unwrap_or(""));
     }
     Ok(characters)
+}
+
+fn uses_layer_sources(manifest: &Value) -> bool {
+    // 制作正本の欠落を対象外として隠さないため、ファイルの有無で判定しない。
+    manifest.get("live2d").is_none()
+        && manifest.get("motionProfile").and_then(Value::as_str) == Some("full")
+        && (manifest.get("runtimeLayers").is_some() || manifest.get("meshRig").is_none())
 }
 
 /// 基準画像から一度だけ作る、レイヤー共通の判定材料。
@@ -921,7 +934,7 @@ fn write_baseline(path: &Path, findings: &[Finding]) -> Result<()> {
         .into_iter()
         .collect::<Vec<_>>();
     let document = json!({
-        "note": "cargo xtask character-quality の既知の指摘。新規・悪化だけを失敗にするための基準で、\
+        "note": "cargo xtask character-quality の既知の指摘。未記録の種類・レイヤーを失敗にするための基準で、\
                  解消したら --update-baseline で減らす。増やすのは既存素材を作り直せない場合だけにする。",
         "known": known,
     });
@@ -1029,6 +1042,20 @@ fn write_report(
 mod tests {
     use super::*;
     use image::Rgba;
+
+    #[test]
+    fn 制作正本の対象はファイルの有無ではなく実行形式で判定する() {
+        assert!(uses_layer_sources(&json!({"motionProfile":"full"})));
+        assert!(uses_layer_sources(
+            &json!({"motionProfile":"full", "meshRig":{}, "runtimeLayers":{}})
+        ));
+        assert!(!uses_layer_sources(
+            &json!({"motionProfile":"full", "meshRig":{"rig":"rig2d/rig.json"}})
+        ));
+        assert!(!uses_layer_sources(
+            &json!({"motionProfile":"full", "live2d":{}})
+        ));
+    }
 
     fn canvas(width: u32, height: u32) -> RgbaImage {
         RgbaImage::from_pixel(width, height, Rgba([0, 0, 0, 0]))

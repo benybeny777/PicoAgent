@@ -157,9 +157,7 @@ impl Tool for ImageGenerateTool {
         if revised.is_empty() {
             format!("![{alt}]({image_url})\n[画像を開く]({image_url})")
         } else {
-            format!(
-                "![{alt}]({image_url})\n[画像を開く]({image_url})\n※ プロンプト調整: {revised}"
-            )
+            format!("![{alt}]({image_url})\n[画像を開く]({image_url})\n※ プロンプト調整: {revised}")
         }
     }
 }

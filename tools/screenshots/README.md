@@ -10,8 +10,8 @@
 - ウィンドウサイズは各表示形式の既定値に合わせています（ペット形式は 900×600）
 - `transparent: true` の実物どおり背景なしで撮影し、不透明領域だけを切り出します
 - 通常の動画は1本あたり6秒・30fps・180コマ。文字送りとキャラクターのモーションがそのまま入ります
-- キャラクター一覧（`character-*.webp`）は標準ペット表示、`character-*-stream.webp`は配信表示です。README公開用は`SHOOT_README_GALLERY=1`で6秒・480px・16fpsとして`docs/images/`へ直接書き出します。通常版は900px画面を2倍ピクセル密度で描画し、配信版はフルHD 1920×1080のネイティブ画面から縮小します
-- LP配信用は`SHOOT_SITE_GALLERY=1`で、同じ撮影経路の生PNGから`distribution/site/assets/`へ6秒・480px・16fpsで直接書き出します。既存WebPを入力にした縮小・再エンコードは行いません。全件実行時はキャラ一覧15MB、トップ4本5MBの上限も検査します
+- キャラクター一覧（`character-*.webp`）は標準ペット表示、`character-*-stream.webp`は配信表示です。README公開用は`SHOOT_README_GALLERY=1`で6秒・960px・16fpsとして`docs/images/`へ直接書き出します。通常版は900px画面を2倍ピクセル密度で描画し、配信版はフルHD 1920×1080のネイティブ画面から縮小します
+- LP配信用は`SHOOT_SITE_GALLERY=1`で、同じ撮影経路の生PNGから`distribution/site/assets/`へ6秒・960px・16fpsで直接書き出します。既存WebPを入力にした縮小・再エンコードは行いません。全件実行時はキャラ一覧80MB、トップ4本20MBの上限も検査します
 - **公開用キャラクター一覧は口パクを先に十分見せてから、考え中 → 待機へ戻ります。** まばたき、Live2D固有モーション／物理、対応キャラの局所二次動作はそのまま動きます
   - 自前メッシュリグは`data-render-kind=mesh-rig`、キャンバス表示、描画バッファ寸法、初回合成の安定を確認してから録画を始め、先頭コマへ初期化中の2Dフォールバックを混ぜません
   - 考え中を明示的に入れているのは、`record()` が録画前に時計を進めるため、送信直後の考え中が録画開始時点で終わっているからです
@@ -26,6 +26,12 @@ playwright はグローバル導入したものを環境変数で指すだけに
 
 ```bash
 npm i -g playwright && npx playwright install chromium
+
+# 配信物（ui-dist/）を作ってから撮る。新しいワークツリーやclone直後は
+# キャラクター資材が ui/assets/characters/ に無く、設定画面の一覧描画が途中で
+# 失敗する（「スキル」タブのカードが見つからない等、原因の分かりにくい失敗になる）。
+cargo xtask sync-characters
+cargo xtask build-ui
 
 PLAYWRIGHT_MODULE=$(npm root -g)/playwright/index.mjs \
   node tools/screenshots/shoot.mjs
@@ -43,13 +49,13 @@ node tools/screenshots/shoot.mjs
 | `PLAYWRIGHT_MODULE` | playwright の `index.mjs` の絶対パス（未指定なら `playwright` を通常解決）。Windows の `C:\...` 形式もそのまま渡せます |
 | `PLAYWRIGHT_CHROMIUM` | Chromium の実行ファイルパス（未指定なら playwright の既定） |
 | `SHOOT_FFMPEG` | ffmpeg の実行ファイルパス（未指定なら PATH の `ffmpeg`） |
-| `SHOOT_README_GALLERY` | `1`ならキャラクター一覧を同じ撮影経路の生PNGからREADME用6秒・480px・16fpsとして`docs/images/`へ直接書き出す。引数なしの全件実行では合計20MB、最大2MBの上限も検査する |
-| `SHOOT_SITE_GALLERY` | `1`ならキャラクター一覧を同じ撮影経路の生PNGからLP用6秒・480px・16fpsとして`distribution/site/assets/`へ直接書き出す。引数なしの全件実行では容量上限も検査する |
+| `SHOOT_README_GALLERY` | `1`ならキャラクター一覧を同じ撮影経路の生PNGからREADME用6秒・960px・16fpsとして`docs/images/`へ直接書き出す。引数なしの全件実行では合計80MB、最大8MBの上限も検査する |
+| `SHOOT_SITE_GALLERY` | `1`ならキャラクター一覧を同じ撮影経路の生PNGからLP用6秒・960px・16fpsとして`distribution/site/assets/`へ直接書き出す。引数なしの全件実行では容量上限も検査する |
 | `SHOOT_OUTPUT_DIR` | 撮影結果を既定の公開先へ書かず、指定した絶対パスへ出す。公開前の構図比較や別リポジトリへ取り込む成果物の確認に使う |
 | `SHOOT_DEBUG_MOTION` | `1` でキャラクター一覧の撮影中、コマごとに実際に適用された `data-motion` を出力する。モーション巡回を足したのに切り替わっていない、という取り違えを防ぐ |
 | `SHOOT_CHARACTER_MATRIX` | `1` ならPNG系8キャラ×7表示形式を `temp/character-layout-matrix/` へ撮影し、初回表示・manifest・待機／全件プリロード時刻、描画範囲、局所二次動作、一覧画像を作る。閾値は `performance-baseline.json`、`SHOOT_PERF_STRICT=1` なら超過を失敗扱いにする。ffmpeg不要 |
 | `SHOOT_MESH_RIG` | `1`ならセナの実WebViewで中立、閉眼＋開口、左右視線、頭部入力、成功、思考中を撮影し、閉眼中の視線非表示、連続パラメータ、メッシュ変形、成功・思考中も位置と表示寸法を保つこと、縦1400画素以上の描画バッファ、省モーション時の差分絵退避を`temp/mesh-rig-qa/`へ検査する。ffmpeg不要 |
-| `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1`または`SHOOT_INTERACTION_MATRIX=1`と併用し、`koharu,sena,noa`のように撮影対象だけを絞る。操作検査の対象は`mugi,hiyori` |
+| `SHOOT_CHARACTER_IDS` | `SHOOT_CHARACTER_MATRIX=1`または`SHOOT_INTERACTION_MATRIX=1`と併用し、`rin,mai,sena`のように撮影対象だけを絞る。操作検査の対象は`mugi,hiyori` |
 | `SHOOT_LAYOUT_IDS` | `SHOOT_CHARACTER_MATRIX=1` または `SHOOT_LIVE2D_MATRIX=1` と併用し、`stream,pet` のように撮影する表示形式だけを絞る |
 | `SHOOT_BUBBLE_BLUR` | `1` ならフキダシの`backdrop-filter`有無を、立ち絵を動かした状態でペット／ミニ／配信×重なり有無×負荷有無の12条件、各3試行ずつ交互に測り `temp/bubble-blur/metrics.json` へ書く。ffmpeg不要 |
 | `SHOOT_LAYOUT_SIZE` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`pet=520x430,mascot=300x480` のように形式ごとの撮影寸法を上書きする。窓を狭めたときも回答操作が1段のままか、フキダシが潰れていないかを確認する用 |
@@ -91,9 +97,10 @@ Remove-Item Env:SHOOT_SITE_GALLERY
 | `composer-light.webp` | 入力欄とクイック操作 | 次の依頼を 1 文字ずつ打ち込むところ |
 | `fullscreen-light.webp` | 全画面フキダシ（履歴の検索・コピー・再利用・書き出し） | 返答が履歴へ積まれて末尾までスクロールするところ |
 | `live2d-light.webp` / `live2d-dark.webp` | Live2D 描画（ひより、ライト / ダーク） | Cubism ランタイムのまばたき・モーション・口パク |
-| `character-<キャラID>.webp` | README の通常表示一覧（標準ペット形式900×600、胸上構図、2倍密度描画、6秒・16fps・480px幅） | 音声同期の口パク → 考え中 → 待機。対応キャラは録画中の口開閉も自動検査する |
-| `character-<キャラID>-stream.webp` | README の配信表示一覧（フルHD 1920×1080、ネイティブ描画、6秒・16fps・480px幅） | 通常表示と同じ巡回を、背景 → PICO STUDIO → キャラ → 字幕・操作UIの実レイヤー順で撮る |
-| `distribution/site/assets/character-*.webp` | LP用一覧（上記と同じ撮影経路から6秒・480px・16fpsで直接生成） | 音声同期の口パクを十分見せてから、考え中 → 待機へ戻る。表示スロット向けに尺・解像度・フレームレートを分ける |
+| `character-<キャラID>.webp` | README の通常表示一覧（標準ペット形式900×600、胸上構図、2倍密度描画、6秒・16fps・960px幅） | 音声同期の口パク → 考え中 → 待機。対応キャラは録画中の口開閉も自動検査する |
+| `character-<キャラID>-stream.webp` | README の配信表示一覧（フルHD 1920×1080、ネイティブ描画、6秒・16fps・960px幅） | 通常表示と同じ巡回を、背景 → PICO STUDIO → キャラ → 字幕・操作UIの実レイヤー順で撮る |
+| `distribution/site/assets/character-*.webp` | LP用一覧（上記と同じ撮影経路から6秒・960px・16fpsで直接生成） | 音声同期の口パクを十分見せてから、考え中 → 待機へ戻る。表示スロット向けに尺・解像度・フレームレートを分ける |
+| `main-light.webp` / `live2d-motion.webp` | 公開README先頭の2D・Live2D動画（900×600の本番ペット表示から960px幅で生成） | 7秒・30fpsで口パク、考え中、成功、待機を撮り直す。旧動画を入力へ使わない |
 | `layout-shot-*.webp` | 7種類の表示形式（設定プレビュー兼用） | 各形式の実際の既定寸法から1フレームを生成 |
 
 ## 撮り方（なぜ遠回りをしているか）

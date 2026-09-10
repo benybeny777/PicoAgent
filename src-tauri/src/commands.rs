@@ -17,33 +17,6 @@ use crate::message::Message;
 use crate::providers;
 use crate::tools;
 
-const LEGACY_DEFAULT_SYSTEM_PROMPT: &str = "あなたは小さなデスクトップペットです。日本語で、親しみやすく簡潔に話します。選択中キャラクターの人格設定を守り、ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-const PREVIOUS_DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-const PREVIOUS_DEFAULT_SYSTEM_PROMPT_2: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-const PREVIOUS_DEFAULT_SYSTEM_PROMPT_3: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。返答は必ず日本語で書いてください（ユーザーが他言語を明示的に求めたときだけ従ってください）。思考・推論の途中経過は出力せず、結論だけを話してください。いま選択されているキャラクター本人になりきり、他のキャラクターの名前・一人称・口調・性格を混ぜないでください。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-pub const DEFAULT_SYSTEM_PROMPT: &str = "選択中キャラクター本人として、日本語で親しみやすく簡潔に話してください。返答は必ず日本語で書いてください（ユーザーが他言語を明示的に求めたときだけ従ってください）。思考・推論の途中経過は出力せず、結論だけを話してください。いま選択されている1キャラクター本人になりきり、他のキャラクターの名前・一人称・口調・性格を混ぜないでください。キャラ性は呼称で盛らず、反応の癖・言葉選び・得意な支え方で出してください。「お兄ちゃん」「お姉ちゃん」など、ユーザーを家族呼びして距離を詰める表現は禁止です。挨拶や自己紹介ではアプリやデスクトップペットの説明をせず、キャラクターの名前・性格・できることをそのキャラの口調で短く伝えてください。「こんにちは」「こんにちわ」などの短い挨拶には表記の正誤を説明せず、自然に挨拶を返してください。ユーザーの作業を邪魔せず、必要なときだけ役に立つ相棒として応答してください。";
-
-fn effective_system_prompt(config: &Config) -> String {
-    let configured = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-    let mut prompt = if configured == LEGACY_DEFAULT_SYSTEM_PROMPT
-        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT
-        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT_2
-        || configured == PREVIOUS_DEFAULT_SYSTEM_PROMPT_3
-    {
-        DEFAULT_SYSTEM_PROMPT.to_string()
-    } else {
-        configured
-    };
-    // 使えるスキル一覧を添え、「何ができる？」に具体的に答えられるようにする。
-    let capabilities = crate::tools::capability_summary();
-    if !capabilities.is_empty() {
-        prompt.push_str("\n\n使えるスキル（必要なときに自動で実行できます）: ");
-        prompt.push_str(&capabilities);
-        prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
-    }
-    prompt
-}
-
 // 日本語文字は約2トークン、ASCII は約0.25トークン（÷4）で粗く見積もる。
 fn estimate_tokens(msg: &Message) -> usize {
     let japanese = msg.content.chars().filter(|c| *c as u32 > 0x7F).count();
@@ -190,28 +163,17 @@ impl AppState {
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
     /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
-        let mut prompt = effective_system_prompt(&self.config);
         let character_profile = self.character_profile.lock().unwrap().clone();
-        if !character_profile.is_empty() {
-            prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
-            prompt.push_str(&character_profile);
-            // 関係性は人格の後ろへ重ねる（人格の芯は保ったまま距離感だけを変える）。
-            let character_id = self.character_id.lock().unwrap().clone();
-            prompt.push_str(&crate::relationship_preset::profile_suffix(
-                &self.config,
-                &character_id,
-            ));
-        }
+        let character_id = self.character_id.lock().unwrap().clone();
         let memory_context = self.memory_context.lock().unwrap().clone();
-        if !memory_context.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&memory_context);
-        }
         let relationship_context = self.relationship_context.lock().unwrap().clone();
-        if !relationship_context.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&relationship_context);
-        }
+        let prompt = agent::prompt::compose(
+            &self.config,
+            &character_profile,
+            &character_id,
+            &memory_context,
+            &relationship_context,
+        );
         let mut messages = self.messages.lock().unwrap();
         let kept: Vec<Message> = messages
             .iter()
@@ -226,25 +188,17 @@ impl AppState {
 
     /// 会話を完全に初期化する（system のみに戻す）。「新しい会話」用。
     pub fn clear_conversation(&self) {
-        let prompt = {
-            let mut prompt = effective_system_prompt(&self.config);
-            let character_profile = self.character_profile.lock().unwrap().clone();
-            if !character_profile.is_empty() {
-                prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
-                prompt.push_str(&character_profile);
-            }
-            let memory_context = self.memory_context.lock().unwrap().clone();
-            if !memory_context.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&memory_context);
-            }
-            let relationship_context = self.relationship_context.lock().unwrap().clone();
-            if !relationship_context.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&relationship_context);
-            }
-            prompt
-        };
+        let character_profile = self.character_profile.lock().unwrap().clone();
+        let character_id = self.character_id.lock().unwrap().clone();
+        let memory_context = self.memory_context.lock().unwrap().clone();
+        let relationship_context = self.relationship_context.lock().unwrap().clone();
+        let prompt = agent::prompt::compose(
+            &self.config,
+            &character_profile,
+            &character_id,
+            &memory_context,
+            &relationship_context,
+        );
         *self.messages.lock().unwrap() = vec![Message::new("system", prompt)];
     }
 }
@@ -256,14 +210,14 @@ impl AppState {
 const PROJECT_CONTEXT_BEGIN: &str = "[プロジェクト文脈]\n";
 const PROJECT_CONTEXT_END: &str = "\n[/プロジェクト文脈]";
 
-fn apply_project_context(convo: &mut [Message], block: &str) {
+fn apply_system_context(convo: &mut [Message], block: &str, begin: &str, end_marker: &str) {
     let Some(system) = convo.iter_mut().find(|message| message.role == "system") else {
         return;
     };
-    if let Some(start) = system.content.find(PROJECT_CONTEXT_BEGIN) {
+    if let Some(start) = system.content.find(begin) {
         // 終端が見つからない（手で編集された等）ときは触らない。消し過ぎるより残すほうが安全。
-        if let Some(offset) = system.content[start..].find(PROJECT_CONTEXT_END) {
-            let end = start + offset + PROJECT_CONTEXT_END.len();
+        if let Some(offset) = system.content[start..].find(end_marker) {
+            let end = start + offset + end_marker.len();
             system.content.replace_range(start..end, "");
             let trimmed = system.content.trim_end().to_string();
             system.content = trimmed;
@@ -273,9 +227,22 @@ fn apply_project_context(convo: &mut [Message], block: &str) {
         return;
     }
     system.content.push_str("\n\n");
-    system.content.push_str(PROJECT_CONTEXT_BEGIN);
+    system.content.push_str(begin);
     system.content.push_str(block);
-    system.content.push_str(PROJECT_CONTEXT_END);
+    system.content.push_str(end_marker);
+}
+
+fn apply_project_context(convo: &mut [Message], block: &str) {
+    apply_system_context(convo, block, PROJECT_CONTEXT_BEGIN, PROJECT_CONTEXT_END);
+}
+
+fn apply_user_skill_context(convo: &mut [Message], block: &str) {
+    apply_system_context(
+        convo,
+        block,
+        crate::user_skills::CONTEXT_BEGIN,
+        crate::user_skills::CONTEXT_END,
+    );
 }
 
 // 完了したターンから、文脈・履歴に残す「発話」だけを取り出す（user と、本文のある
@@ -298,7 +265,9 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     let total: usize = turns.iter().map(estimate_tokens).sum();
     let system_tokens: usize = convo
         .iter()
-        .filter(|message| message.role == "system")
+        .filter(|message| {
+            message.role == "system" && message.name.as_deref() != Some("picoagent_private_context")
+        })
         .map(estimate_tokens)
         .sum();
     let turn_budget = budget.saturating_sub(system_tokens);
@@ -319,7 +288,9 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
     }
     let mut next: Vec<Message> = convo
         .iter()
-        .filter(|m| m.role == "system")
+        // ツール結果は現在ターンの公開判定だけに使う。次ターンへsystemとして残すと、
+        // 外部資料と命令文が累積し、人格より強い文脈として再送され続けてしまう。
+        .filter(|m| m.role == "system" && m.name.as_deref() != Some("picoagent_private_context"))
         .cloned()
         .collect();
     next.extend(turns);
@@ -561,7 +532,7 @@ fn resolved_judge_model(
 /// 会話中の system には長期メモリやプロジェクト文脈も差し込まれるため、その全文を
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
 fn stable_persona_prompt(state: &AppState) -> String {
-    let mut persona = effective_system_prompt(&state.config);
+    let mut persona = agent::prompt::base(&state.config);
     let character_profile = state.character_profile.lock().unwrap().clone();
     if !character_profile.is_empty() {
         persona.push_str("\n\n選択中キャラクターの人格設定:\n");
@@ -644,11 +615,13 @@ async fn run_multi_ai_and_persist(
     // 始まり、チャット経由より1段深く委譲できてしまう。深さ1のスコープを張って
     // 上限判定をチャット経由とそろえる。中断フラグも配下の候補AIへ伝播させる。
     // 戻り値はツール出力ではなく利用者への最終返信なので、ツール出力上限で打ち切らない。
-    let reply = agent::with_cancel(
+    let raw_reply = agent::with_cancel(
         Arc::clone(&state.cancel_requested),
         agent::with_agent_depth(1, tools::dispatch_final(&state.config, "subagent", args)),
     )
     .await;
+    let private_context = stable_persona_prompt(state);
+    let reply = agent::safe_public_answer_or_fallback(raw_reply, &private_context);
     convo.push(Message::new("assistant", reply.clone()));
     let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
     if conversation_is_current(state, character_id, epoch) {
@@ -834,6 +807,20 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
         "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
+        // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
+        "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
+            crate::boot_screen::timeout_ms(&app),
+        ),
+        // 配置編集の位置・倍率。以前は webview の localStorage にしか無く、
+        // WebViewデータの初期化や再インストールで消えていた。
+        "layoutPlacements": crate::layout_placements::normalize(
+            &state
+                .config
+                .get_all()
+                .get("PICOAGENT_LAYOUT_PLACEMENTS")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        ),
         "streamBackground": stream.background,
         "streamBackgroundImage": stream.background_image,
         "streamDisplay": stream.display,
@@ -1318,11 +1305,30 @@ pub fn pet_place_window(position: String, app: AppHandle) -> Result<(), String> 
     .or_else(|| monitors.first())
     .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
     let size = window.outer_size().map_err(|error| error.to_string())?;
-    let x = selected.position().x + (selected.size().width.saturating_sub(size.width) / 2) as i32;
-    let y = selected.position().y + (selected.size().height.saturating_sub(size.height) / 2) as i32;
+    let (x, y) = crate::layout::centered_physical_position(
+        selected.position().x,
+        selected.position().y,
+        selected.size().width,
+        selected.size().height,
+        size.width,
+        size.height,
+    );
     window
         .set_position(tauri::PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::remember_boot_window_center(&app, selected.position().x, selected.position().y);
+    Ok(())
+}
+
+/// 枠なしウィンドウのドラッグ開始をバックエンドへ集約する。
+/// 起動中だけは利用者が決めた位置を通常画面へ引き継ぐため、開始印を先に記録する。
+#[tauri::command]
+pub fn pet_start_window_drag(app: AppHandle) -> Result<(), String> {
+    crate::mark_boot_window_drag(&app);
+    app.get_webview_window("main")
+        .ok_or_else(|| "メインウィンドウがありません。".to_string())?
+        .start_dragging()
+        .map_err(|error| format!("ウィンドウの移動を開始できませんでした: {error}"))
 }
 
 /// ドラッグで確定したフキダシサイズを設定の正本へ保存する。
@@ -1509,113 +1515,85 @@ pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, St
     }))
 }
 
-/// THA3制作ツールと学習済みモデルがGUI生成に使える状態か返す。
+/// 追加キャラクターの表示名だけを変更する。内部IDは維持する。
 #[tauri::command]
-pub fn settings_tha3_status(
+pub fn settings_character_rename(
     app: AppHandle,
-    root_path: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    crate::tha3_creator::status(&app, &state.config, root_path.as_deref())
-        .map(|status| json!(status))
-        .map_err(|error| format!("{error:#}"))
-}
-
-/// 自動検出できない場合にTHA3本体のフォルダを選ぶ。
-#[tauri::command]
-pub async fn settings_tha3_pick_root(app: AppHandle) -> Result<Value, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.dialog().clone().file().pick_folder(move |picked| {
-        let _ = sender.send(picked.map(|path| path.to_string()));
-    });
-    let picked = receiver
-        .await
-        .map_err(|_| "THA3フォルダ選択の結果を受け取れませんでした。".to_string())?;
-    Ok(json!({ "path": picked }))
-}
-
-/// THA3へ渡す透過PNGをネイティブダイアログで選ぶ。
-#[tauri::command]
-pub async fn settings_tha3_pick_source(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    use base64::Engine;
-    use tauri_plugin_dialog::DialogExt;
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .clone()
-        .file()
-        .add_filter("THA3入力画像", &["png"])
-        .pick_file(move |picked| {
-            let _ = sender.send(picked.map(|path| path.to_string()));
-        });
-    let picked = receiver
-        .await
-        .map_err(|_| "画像選択の結果を受け取れませんでした。".to_string())?;
-    let Some(path) = picked else {
-        return Ok(json!({ "path": Value::Null, "dataUrl": Value::Null }));
-    };
-    let safe = crate::permissions::resolve(&state.config, &path)?;
-    if safe.extension_lossy() != "png" {
-        return Err("入力画像はPNGを選んでください。".to_string());
-    }
-    let metadata = crate::permissions::fs::metadata(&safe)?;
-    if metadata.len() > 20 * 1024 * 1024 {
-        return Err("入力画像は20MB以内にしてください。".to_string());
-    }
-    let bytes = crate::permissions::fs::read(&safe)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(json!({
-        "path": path,
-        "dataUrl": format!("data:image/png;base64,{encoded}"),
-    }))
-}
-
-/// 1枚絵からTHA3自作キャラクターを生成し、追加キャラクター領域へ導入する。
-#[tauri::command]
-pub async fn settings_tha3_generate(
-    app: AppHandle,
-    source_path: String,
-    tha3_root_path: Option<String>,
     id: String,
     name: String,
-    app_state: State<'_, AppState>,
-    creator_state: State<'_, crate::tha3_creator::Tha3CreatorState>,
 ) -> Result<Value, String> {
-    match crate::tha3_creator::generate(
-        app.clone(),
-        &creator_state,
-        &app_state.config,
-        &source_path,
-        tha3_root_path.as_deref(),
-        &id,
-        &name,
-    )
-    .await
-    {
-        Ok((generated_id, generated_name)) => {
+    let id = id.trim();
+    match crate::user_characters::rename(&app, id, &name) {
+        Ok(name) => {
             crate::log_paths::append_app_log(
                 &app,
-                &format!("THA3でキャラクター {generated_name} ({generated_id}) を生成しました。"),
+                &format!("追加キャラクター {id} の表示名を {name} へ変更しました。"),
             );
-            Ok(json!({ "ok": true, "id": generated_id, "name": generated_name }))
+            Ok(json!({ "ok": true, "id": id, "name": name }))
         }
-        Err(error) => {
-            let message = format!("THA3キャラクター生成に失敗しました: {error:#}");
-            crate::log_paths::append_app_log(&app, &message);
-            Err(message)
-        }
+        Err(error) => Err(format!("表示名を変更できませんでした: {error:#}")),
     }
 }
 
-/// 実行中のTHA3生成を中断する。子プロセスはkill後にwaitして回収する。
+/// 不具合の連絡へ添える診断情報を1ファイルへ書き出し、保存先を返す。
+///
+/// 保存先はログと同じ置き場にする（新しい保存先やダイアログの権限を増やさない）。
+/// APIキー等の秘密値は本文へ入れない（`diagnostics` 側で伏せる）。
 #[tauri::command]
-pub fn settings_tha3_cancel(
-    creator_state: State<'_, crate::tha3_creator::Tha3CreatorState>,
-) -> Value {
-    json!({ "cancelled": crate::tha3_creator::cancel(&creator_state) })
+pub fn settings_export_diagnostics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let dir = crate::log_paths::ensure_log_dir(&app)
+        .map_err(|error| format!("保存先を作れませんでした: {error}"))?;
+    let now = chrono::Local::now();
+    let path = dir.join(format!("diagnostics-{}.txt", now.format("%Y-%m-%d-%H%M%S")));
+    let config = state.config.get_all();
+    let schema_keys = secret_keys();
+    let mut secret_values = Vec::new();
+    for (key, value) in &config {
+        if !is_secret_setting(&schema_keys, key) {
+            continue;
+        }
+        if let Some(raw) = value.as_str().filter(|raw| !raw.trim().is_empty()) {
+            secret_values.push(raw.to_string());
+        }
+        let resolved = state.config.get(key, "");
+        if !resolved.trim().is_empty() {
+            secret_values.push(resolved);
+        }
+    }
+    for (key, value) in std::env::vars() {
+        if is_secret_setting(&schema_keys, &key) && !value.is_empty() {
+            secret_values.push(value);
+        }
+    }
+    secret_values.sort();
+    secret_values.dedup();
+    let log_tail = crate::log_paths::read_tail(
+        &app,
+        "app.log",
+        crate::diagnostics::LOG_TAIL_LINES,
+        crate::diagnostics::LOG_TAIL_BYTES,
+    );
+    let body = crate::diagnostics::build_report(&crate::diagnostics::Report {
+        generated_at: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        beta_build: cfg!(feature = "beta-full"),
+        config: &config,
+        secret_keys: &schema_keys,
+        log_tail: &log_tail,
+        secret_values: &secret_values,
+    });
+    crate::store::write_atomic(&path, body.as_bytes())
+        .map_err(|error| format!("書き出しに失敗しました: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!("診断情報を書き出しました: {}", path.display()),
+    );
+    Ok(json!({ "path": path.to_string_lossy() }))
 }
 
 #[tauri::command]
@@ -1716,6 +1694,12 @@ pub async fn pet_send(
         &mut convo,
         &crate::tools::project::project_context(&state.config),
     );
+    // SKILL.mdは利用者が会話中や外部エディタから変更できるため、索引を毎ターン
+    // 入れ替える。本文は必要になったときだけuser_skillツールで読み、systemを肥大化させない。
+    apply_user_skill_context(
+        &mut convo,
+        &crate::user_skills::prompt_context(&state.config),
+    );
     convo.push(Message::new("user", text));
 
     let multi_ai_args = match configured_multi_ai_args(&app, &state, &user_text, &convo) {
@@ -1796,6 +1780,7 @@ pub async fn pet_send(
                 ),
             }
         }
+        capture_project_rules(&app, &state.config, &user_text);
         if let Some(memory_context) =
             crate::memory::update_from_turn(&app, &state.config, &user_text)
         {
@@ -1983,8 +1968,19 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
             // 雑談は「人格(system)＋指示」だけを文脈にするぶん、小型モデルが人格設定を
             // そのまま返しやすい。エージェント経路を通らないのでここで落とす。
             let prompt = crate::agent::system_prompt_of(&convo);
-            let reply =
-                crate::agent::remove_prompt_leak(message.content.trim().to_string(), &prompt);
+            let reply = match crate::agent::guard_public_answer(
+                message.content.trim().to_string(),
+                &prompt,
+            ) {
+                Ok(reply) => reply,
+                Err(reason) => {
+                    crate::log_paths::append_app_log(
+                        &app,
+                        &format!("自発雑談の非公開文脈を公開前に破棄しました: {reason}"),
+                    );
+                    String::new()
+                }
+            };
             if !conversation_is_current(&state, &request_character_id, request_epoch) {
                 crate::log_paths::append_app_log(
                     &app,
@@ -2068,6 +2064,10 @@ fn default_wake_message(label: &str) -> String {
     }
 }
 
+fn safe_wake_message(content: &str, prompt: &str) -> Option<String> {
+    crate::agent::guard_public_answer(content.trim().to_string(), prompt).ok()
+}
+
 // 選択中キャラの口調で、やさしい起こし文を生成する（失敗時は None）。
 async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> {
     let id = state.provider_id.lock().unwrap().clone();
@@ -2087,15 +2087,9 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
         .chat(&state.config, &model, &convo, &[])
         .await
         .ok()?;
-    // エージェント経路を通らないので、人格プロンプトの混入はここで落とす
-    // （起こし文はそのまま表示・読み上げへ回る）。
+    // エージェント経路を通らないので、表示・読み上げへ渡す前に統一公開ガードを通す。
     let prompt = crate::agent::system_prompt_of(&convo);
-    let reply = crate::agent::remove_prompt_leak(message.content.trim().to_string(), &prompt);
-    if reply.is_empty() {
-        None
-    } else {
-        Some(reply)
-    }
+    safe_wake_message(&message.content, &prompt)
 }
 
 // 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。
@@ -2323,7 +2317,7 @@ fn aivis_voice(model_uuid: &str, speaker_uuid: &str, style_name: &str) -> TtsVoi
 
 fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
     match character_id {
-        "rin" | "rin-tha3" => Some(TtsVoice {
+        "rin" => Some(TtsVoice {
             speaker: RIN_AIVIS_SPEAKER.to_string(),
             model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
             speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
@@ -2339,6 +2333,11 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
             HIYORI_AIVIS_MODEL_UUID,
             HIYORI_AIVIS_SPEAKER_UUID,
             "あまあま",
+        )),
+        "aoi" => Some(aivis_voice(
+            HIYORI_AIVIS_MODEL_UUID,
+            HIYORI_AIVIS_SPEAKER_UUID,
+            "おちつき",
         )),
         "hiyori" => Some(aivis_voice(
             HIYORI_AIVIS_MODEL_UUID,
@@ -2505,7 +2504,86 @@ pub async fn pet_speak(
         .bytes()
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声データを読めませんでした", error))?;
-    Ok(json!({ "enabled": true, "mime": "audio/wav", "audio": bytes.to_vec() }))
+    let lip_sync = aivis_lip_sync_timeline(&audio_query);
+    Ok(json!({
+        "enabled": true,
+        "mime": "audio/wav",
+        "audio": bytes.to_vec(),
+        "lipSync": lip_sync
+    }))
+}
+
+/// AivisのAudioQueryから、合成音声と同じ時間軸の日本語母音列を作る。
+/// 未知の音素は閉口へ寄せ、音量包絡線だけで口形を推測しない。
+fn aivis_lip_sync_timeline(query: &Value) -> Vec<Value> {
+    let speed = query
+        .get("speedScale")
+        .and_then(Value::as_f64)
+        .filter(|value| *value > 0.0)
+        .unwrap_or(1.0);
+    let mut at = query
+        .get("prePhonemeLength")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        / speed;
+    let mut timeline = Vec::new();
+    let phrases = query
+        .get("accent_phrases")
+        .and_then(Value::as_array)
+        .or_else(|| query.get("accentPhrases").and_then(Value::as_array));
+    for phrase in phrases.into_iter().flatten() {
+        let moras = phrase.get("moras").and_then(Value::as_array);
+        for mora in moras.into_iter().flatten() {
+            at += mora
+                .get("consonant_length")
+                .or_else(|| mora.get("consonantLength"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / speed;
+            let length = mora
+                .get("vowel_length")
+                .or_else(|| mora.get("vowelLength"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / speed;
+            let vowel = mora.get("vowel").and_then(Value::as_str).unwrap_or("");
+            let code = vowel.to_ascii_uppercase();
+            let form = match code.as_str() {
+                "I" => 0.95,
+                "U" => -0.95,
+                "E" => 0.70,
+                "O" => -0.75,
+                _ => 0.0,
+            };
+            let open = match code.as_str() {
+                "A" => 1.0,
+                "I" => 0.38,
+                "U" => 0.55,
+                "E" => 0.62,
+                "O" => 0.90,
+                _ => 0.0,
+            };
+            if length > 0.0 {
+                timeline.push(json!({
+                    "start": at,
+                    "end": at + length,
+                    "vowel": code,
+                    "open": open,
+                    "form": form
+                }));
+            }
+            at += length;
+        }
+        if let Some(pause) = phrase.get("pause_mora").or_else(|| phrase.get("pauseMora")) {
+            at += pause
+                .get("vowel_length")
+                .or_else(|| pause.get("vowelLength"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                / speed;
+        }
+    }
+    timeline
 }
 
 /// 設定スキーマ上で type="password" になっている＝シークレット扱いのキー集合。
@@ -2676,20 +2754,8 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             }
         }
     }
-    if values
-        .get("PICOAGENT_SYSTEM_PROMPT")
-        .and_then(Value::as_str)
-        == Some(LEGACY_DEFAULT_SYSTEM_PROMPT)
-        || values
-            .get("PICOAGENT_SYSTEM_PROMPT")
-            .and_then(Value::as_str)
-            == Some(PREVIOUS_DEFAULT_SYSTEM_PROMPT)
-    {
-        values.insert(
-            "PICOAGENT_SYSTEM_PROMPT".to_string(),
-            Value::String(DEFAULT_SYSTEM_PROMPT.to_string()),
-        );
-    }
+    agent::prompt::normalize_setting(&mut values);
+    let local_hardware = crate::engine::local_hardware_profile().await;
 
     let provider_list: Vec<Value> = providers::all()
         .iter()
@@ -2726,9 +2792,11 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "values": values,
         "unavailableSecrets": unavailable_secrets,
         "active": { "providerId": provider_id, "model": model },
-        "defaults": { "systemPrompt": DEFAULT_SYSTEM_PROMPT },
+        "defaults": { "systemPrompt": agent::prompt::DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
-        "localModelPresets": crate::providers::local::LOCAL_MODEL_PRESETS.iter().map(|preset| json!({
+        "defaultLocalModelPreset": crate::providers::local::DEFAULT_LOCAL_MODEL_PRESET,
+        "localHardware": local_hardware,
+        "localModelPresets": crate::providers::local::settings_candidate_presets().map(|preset| json!({
             "id": preset.id,
             "family": preset.family,
             "label": preset.label,
@@ -2738,6 +2806,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
             "recommendedVramGb": preset.recommended_vram_gb,
             "recommendedRamGb": preset.recommended_ram_gb,
             "downloadSize": preset.download_size,
+            "japaneseNote": preset.japanese_note,
             "note": preset.note,
         })).collect::<Vec<Value>>(),
         "relationships": crate::relationship_preset::catalog(),
@@ -3134,6 +3203,68 @@ pub async fn pet_rerun_schedule_task(
         .map(|record| json!(record))
 }
 
+/// 強く言い渡された作法を、作業フォルダの AGENTS.md へ書き足す。
+///
+/// 書いたことを黙らせない。利用者のフォルダにあるファイルを変えるので、
+/// 何を足したかと取り消し先を画面へ出す（`renderer.js` の通知パネル）。
+fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_text: &str) {
+    if !crate::project_rules::auto_capture_enabled(config) {
+        return;
+    }
+    for rule in crate::project_rules::emphasized_rules(user_text) {
+        match crate::project_rules::append_captured(config, &rule) {
+            // 既に書いてある作法は静かに飛ばす（同じ通知を毎回出さない）。
+            Ok(None) => {}
+            Ok(Some(path)) => {
+                let payload = json!({
+                    "kind": "project_rule",
+                    "title": "AGENTS.mdへ作法を追記しました",
+                    "body": rule,
+                    "ok": true,
+                    "rule": rule,
+                    "path": path.display().to_string(),
+                    "at": chrono::Local::now().to_rfc3339(),
+                });
+                if let Err(error) = app.emit("pet:notice", payload) {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("AGENTS.md追記を画面へ通知できません: {error}"),
+                    );
+                }
+            }
+            Err(error) => crate::log_paths::append_app_log(
+                app,
+                &format!("AGENTS.mdへ作法を追記できません: {error}"),
+            ),
+        }
+    }
+}
+
+/// 通知の「取り消し」から、自動追記した1行を消す。
+#[tauri::command]
+pub fn pet_project_rule_undo(state: State<'_, AppState>, rule: String) -> Result<bool, String> {
+    crate::project_rules::remove_captured(&state.config, &rule)
+}
+
+/// 永続ジョブの一覧。通知パネルが起動直後に「実行中・失敗のまま残っているもの」を
+/// 描き直すために使う（イベントは起動前の分を受け取れない）。
+#[tauri::command]
+pub fn pet_durable_jobs() -> Result<Value, String> {
+    crate::durable_jobs::list().map(|jobs| json!(jobs))
+}
+
+/// 通知パネルからの再試行。チャットでAIへ頼まなくても押せるようにする。
+#[tauri::command]
+pub fn pet_durable_job_retry(id: String) -> Result<(), String> {
+    crate::durable_jobs::retry(&id)
+}
+
+/// 通知パネルからのキャンセル。実行中のジョブは次の区切りで止まる。
+#[tauri::command]
+pub fn pet_durable_job_cancel(id: String) -> Result<(), String> {
+    crate::durable_jobs::cancel(&id)
+}
+
 #[tauri::command]
 pub fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
     open_settings_tab(&app, tab.as_deref());
@@ -3359,6 +3490,38 @@ pub fn pet_reset_layout(app: AppHandle) {
 #[tauri::command]
 pub fn pet_frontend_ready(app: AppHandle) {
     crate::boot_screen::mark_started(&app);
+    if let Err(error) = crate::layout::restart_boot(&app) {
+        crate::log_paths::append_app_log(
+            &app,
+            &format!("起動画面の寸法を適用できませんでした: {error}"),
+        );
+    }
+}
+
+/// 起動準備が進行中であることをバックエンドの停止監視へ伝える。
+#[tauri::command]
+pub fn pet_boot_progress(app: AppHandle) {
+    crate::boot_screen::mark_progress(&app);
+}
+
+/// 配置編集（OBS風）で決めた位置・倍率を設定へ保存する。
+///
+/// 編集中は書かず、「保存」「閉じる」「表示形式・キャラ切替」「リセット」の確定時だけ呼ぶ。
+/// 保存値は `layout_placements::normalize_checked` を通し、壊れた入力で既存の配置を
+/// まとめて失わないようにする。
+#[tauri::command]
+pub fn pet_save_layout_placements(
+    state: State<'_, AppState>,
+    placements: Value,
+) -> Result<(), String> {
+    let _guard = crate::store::lock_state("PICOAGENT_LAYOUT_PLACEMENTS");
+    let normalized = crate::layout_placements::normalize_checked(&placements)?;
+    let mut patch = Map::new();
+    patch.insert("PICOAGENT_LAYOUT_PLACEMENTS".to_string(), normalized);
+    state
+        .config
+        .set_all(patch)
+        .map_err(|error| format!("配置の保存に失敗しました: {error}"))
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
@@ -3368,11 +3531,11 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    // 起動完了の記録は寸法変更より先に行う。フロントはここまで到達できているので、
-    // ウィンドウ寸法の変更だけが失敗しても「起動できなかった」ことにはならない。
-    // あとにすると、動いている画面が監視のタイムアウトで案内画面へ差し替わる。
+    crate::layout::finish_boot(&app, &id)?;
+    // 通常寸法と位置へ戻せた後だけ完了扱いにする。失敗時はフロントから再試行でき、
+    // 680x430の起動画面を完了状態として固定しない。
     crate::boot_screen::mark_finished(&app);
-    crate::layout::apply(&app, &id)
+    Ok(())
 }
 
 #[tauri::command]
@@ -4070,7 +4233,11 @@ fn capture_primary_png_inner() -> Result<Vec<u8>, String> {
     use std::io::Cursor;
     use xcap::Monitor;
 
-    let monitors = Monitor::all().map_err(|error| format!("モニタを列挙できません: {error}"))?;
+    // ヘッドレスや表示サーバへ接続できない環境ではここで失敗する。利用者が読む文面なので、
+    // どの機能の失敗かが分かるよう他の経路と同じ前置きを付ける。
+    let monitors = Monitor::all().map_err(|error| {
+        format!("スクリーンショット取得に失敗しました: モニタを列挙できません: {error}")
+    })?;
     // 主モニタが分からない場合は先頭を使う（単一モニタ環境では同じものになる）。
     let monitor = monitors
         .iter()
@@ -4458,7 +4625,7 @@ pub fn open_display_settings(app: &tauri::AppHandle) {
     open_settings_tab(app, Some("display"));
 }
 
-/// キャラクターと音声をまとめたタブを直接開く。
+/// キャラクターの選択・人格・構図タブを直接開く（音声は「キャラの音声」タブ）。
 pub fn open_character_settings(app: &tauri::AppHandle) {
     open_settings_tab(app, Some("character"));
 }
@@ -4466,7 +4633,20 @@ pub fn open_character_settings(app: &tauri::AppHandle) {
 /// 設定ウィンドウを指定タブで開く。既存ウィンドウには遷移イベントを送る。
 fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     let tab = settings_tab(tab);
+    // メインのペットウィンドウはmacOSで常に最前面のウィンドウレベルを持つため、
+    // 設定ウィンドウを通常レベルのまま出すと背後に回り込み、選択も保存ボタンの
+    // クリックも背後のメインウィンドウへ吸われてしまう。同じ最前面状態を揃える。
+    let main_always_on_top = app
+        .get_webview_window("main")
+        .and_then(|main| main.is_always_on_top().ok())
+        .unwrap_or(false);
     if let Some(win) = app.get_webview_window("settings") {
+        if let Err(error) = win.set_always_on_top(main_always_on_top) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("設定画面の最前面表示を揃えられません: {error}"),
+            );
+        }
         if let Err(error) = place_settings_with_main(app, &win) {
             crate::log_paths::append_app_log(
                 app,
@@ -4500,6 +4680,7 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
         .inner_size(960.0, 760.0)
         .min_inner_size(720.0, 560.0)
         .visible(false)
+        .always_on_top(main_always_on_top)
         .build()
     {
         Ok(win) => {
@@ -4566,11 +4747,12 @@ fn place_settings_with_main(
 
 fn settings_tab(tab: Option<&str>) -> Option<&str> {
     match tab {
-        // 旧「音声」入口は統合後のキャラクター・音声タブへ送る。
-        Some("voice") => Some("character"),
+        // 旧「キャラクター追加」入口は独立したキャラ登録タブへ送る。
+        Some("character-add") => Some("character-register"),
         Some(
-            value @ ("basic" | "display" | "character" | "character-add" | "components"
-            | "providers" | "tools" | "permissions" | "skillguide" | "diagnostics"),
+            value @ ("basic" | "display" | "character-register" | "character" | "voice"
+            | "components" | "providers" | "tools" | "permissions" | "skillguide"
+            | "diagnostics"),
         ) => Some(value),
         _ => None,
     }
@@ -4579,16 +4761,52 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        centered_window_position, compacted_conversation, default_character_tts_voice,
-        enable_tts_after_component_install, multi_ai_context, parse_update_feed,
-        preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
-        resolved_judge_model, settings_tab, speech_text, stable_persona_prompt,
+        aivis_lip_sync_timeline, centered_window_position, compacted_conversation,
+        default_character_tts_voice, enable_tts_after_component_install, multi_ai_context,
+        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
+        resolved_judge_model, safe_wake_message, settings_tab, speech_text, stable_persona_prompt,
         update_series_is_newer, update_status, validate_multi_ai_settings,
         verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
         MAX_UPDATE_FEED_BYTES,
     };
     use crate::config::Config;
     use crate::message::Message;
+
+    #[test]
+    fn aivisの母音長を口形タイムラインへ変換する() {
+        let query = serde_json::json!({
+            "speedScale": 2.0,
+            "prePhonemeLength": 0.2,
+            "accent_phrases": [{
+                "moras": [
+                    {"consonant_length": 0.1, "vowel": "a", "vowel_length": 0.4},
+                    {"consonant_length": 0.0, "vowel": "I", "vowel_length": 0.2}
+                ]
+            }]
+        });
+        let timeline = aivis_lip_sync_timeline(&query);
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0]["vowel"], "A");
+        let start = timeline[0]["start"].as_f64().unwrap();
+        let end = timeline[0]["end"].as_f64().unwrap();
+        assert!((start - 0.15).abs() < 1e-9);
+        assert!((end - 0.35).abs() < 1e-9);
+        assert_eq!(timeline[1]["form"], 0.95);
+    }
+
+    #[test]
+    fn 目覚まし文は内部指示の言い換えを公開しない() {
+        let prompt = "あなたはひよりです。親しみやすい短い口調で答えてください。";
+        assert!(safe_wake_message(
+            "受け取った設定は親しみやすく短く返答するものなので、その口調で返します。",
+            prompt,
+        )
+        .is_none());
+        assert_eq!(
+            safe_wake_message("おはよう。朝だよ、ゆっくり起きようね。", prompt).as_deref(),
+            Some("おはよう。朝だよ、ゆっくり起きようね。")
+        );
+    }
 
     #[test]
     fn 復号不能シークレットは未編集保存で暗号文を保持する() {
@@ -4661,6 +4879,24 @@ mod tests {
         assert_eq!(compacted[0].role, "system");
         assert_eq!(compacted[1].content, "発話4");
         assert_eq!(compacted[2].content, "発話5");
+    }
+
+    #[test]
+    fn 会話圧縮はツール用の非公開systemを次ターンへ残さない() {
+        let mut private = Message::new("system", "検索結果");
+        private.name = Some("picoagent_private_context".to_string());
+        let messages = vec![
+            Message::new("system", "人格"),
+            private,
+            Message::new("user", "質問"),
+            Message::new("assistant", "回答"),
+        ];
+        let compacted = compacted_conversation(&messages, 100);
+        assert_eq!(compacted.len(), 3);
+        assert_eq!(compacted[0].content, "人格");
+        assert!(compacted
+            .iter()
+            .all(|message| message.name.as_deref() != Some("picoagent_private_context")));
     }
 
     #[test]
@@ -4765,7 +5001,6 @@ mod tests {
         let expected = [
             ("mugi", "あまあま"),
             ("rin", "ノーマル"),
-            ("rin-tha3", "ノーマル"),
             ("mai", "ノーマル"),
             ("hiyori", "ふつー"),
             ("haru", "ノーマル"),
@@ -4791,8 +5026,15 @@ mod tests {
     fn 設定画面は既知のタブだけを受け付ける() {
         assert_eq!(settings_tab(Some("permissions")), Some("permissions"));
         assert_eq!(settings_tab(Some("display")), Some("display"));
-        assert_eq!(settings_tab(Some("voice")), Some("character"));
-        assert_eq!(settings_tab(Some("character-add")), Some("character-add"));
+        assert_eq!(settings_tab(Some("voice")), Some("voice"));
+        assert_eq!(
+            settings_tab(Some("character-add")),
+            Some("character-register")
+        );
+        assert_eq!(
+            settings_tab(Some("character-register")),
+            Some("character-register")
+        );
         assert_eq!(settings_tab(Some("components")), Some("components"));
         assert_eq!(settings_tab(Some("../index")), None);
         assert_eq!(settings_tab(None), None);
@@ -4937,7 +5179,7 @@ mod tests {
 
 #[cfg(test)]
 mod project_context_tests {
-    use super::apply_project_context;
+    use super::{apply_project_context, apply_user_skill_context};
     use crate::message::Message;
 
     fn convo(system: &str) -> Vec<Message> {
@@ -4977,6 +5219,19 @@ mod project_context_tests {
         apply_project_context(&mut messages, "課題A");
         assert_eq!(messages[0].content, "やあ");
     }
+
+    #[test]
+    fn プロジェクト文脈と利用者スキル索引は別々に更新する() {
+        let mut messages = convo("人格設定");
+        apply_project_context(&mut messages, "課題A");
+        apply_user_skill_context(&mut messages, "weekly-report: 週報を整える");
+        apply_user_skill_context(&mut messages, "meeting-note: 議事録を整える");
+        let system = &messages[0].content;
+        assert!(system.contains("課題A"), "system: {system}");
+        assert!(system.contains("meeting-note"), "system: {system}");
+        assert!(!system.contains("weekly-report"), "system: {system}");
+        assert_eq!(system.matches("[利用者追加スキル]").count(), 1);
+    }
 }
 
 #[cfg(test)]
@@ -4984,8 +5239,8 @@ mod guard {
     /// ファイル走査・展開・書き込みを行うcommandを同期IPCへ戻すと、処理中にWebViewが固まる。
     #[test]
     fn 重いio_commandはtauriの非同期実行枠を使う() {
-        let source = crate::guard_scan::backend_sources()
-            .into_iter()
+        let source = &crate::guard_scan::backend_sources()
+            .iter()
             .find(|source| source.path.ends_with("src-tauri/src/commands.rs"))
             .expect("commands.rsを読み込める")
             .text;

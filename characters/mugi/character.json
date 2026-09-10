@@ -1,10 +1,11 @@
 {
   "id": "mugi",
   "name": "むぎ",
-  "assetVersion": "lossless-webp-05a3635fdbb475b5",
+  "assetVersion": "lvs-schema3-hair1-9988b9cafdc0fe8c",
   "description": "星のヘアピンと緑の瞳が印象的な、年下っぽく明るく寄り添う作業相棒。",
   "motionProfile": "full",
   "bodyProportion": "compact",
+  "sourceFraming": "native-full",
   "greeting": "こんにちは、むぎだよ。えへへ、今日もそばで見てるね。いっしょにがんばろ？",
   "voice": {
     "provider": "aivis",
@@ -184,5 +185,8 @@
     "expression_sad": "runtime-layers/expression_sad.webp"
   },
   "runtimeLayerEncoding": "webp-lossless-v1",
-  "frameEncoding": "webp-lossless-v1"
+  "frameEncoding": "webp-lossless-v1",
+  "meshRig": {
+    "rig": "rig2d/rig.json"
+  }
 }

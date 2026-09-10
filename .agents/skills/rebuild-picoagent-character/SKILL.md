@@ -1,6 +1,6 @@
 ---
 name: rebuild-picoagent-character
-description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、ローカル物理演算、実画面QAまで再現する。実写テスト、Photoshopでの有効な高精細化、ユーザー指定時のClaude CLIレビュー、旧3D実験の撤去にも使う。
+description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2Dキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、ローカル物理演算、実画面QAまで再現する。実写テスト、Photoshopでの有効な高精細化、ユーザー指定時のClaude CLIレビュー、旧3D実験の撤去にも使う。
 ---
 
 # PicoAgentキャラクター再構築
@@ -14,6 +14,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 ## 対応形式と構図
 
 - 対応ランタイムは通常2D画像、自前メッシュリグ、Live2D。同梱通常2Dの制作正本はPNG、実行フレームと差分レイヤーはlossless WebPとする。利用者が追加済みのPNGパックは後方互換で読み続ける。旧3D実験は廃止済みなので、モデル、依存、セットアップ、描画経路を復活させない。
+- LocalVTuberStudioの現行出力は`rig2d/rig.json`の`schema_version: 3`、`profile: lvs-anime25d-v1`を正規形式とする。Pico用の別リグへ変換せず、`rig2d/`をそのままキャラクターパックへ置き、`meshRig.rig`から直接読む。旧`anime25d-v1` version 2は互換確認に限る。
 - 低頭身2Dは従来の上半身位置、長身・実写・Live2Dは胸全体がぎりぎり入る胸上を初期構図にする。
 - チャット／バーの小型アイコンは首上にする。保存済みの利用者構図は初期値より優先する。
 - 画面位置の手動調整は別作業。依頼がなければ原画やmanifestへ焼き込まない。
@@ -28,7 +29,7 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - Pillow、ブラウザ、CSS等による単純なピクセル拡大を高精細化と呼ばない。
 - `characters/<id>/layers/*.png` は制作正本として残し、`scripts/build-character-animations.py` だけで `runtime-layers/*.webp` と `frames/<世代>/*.webp` へ変換する。変換後は寸法と復号RGBAを元画像と完全一致させ、1画素でも違えば採用しない。
 - 生成後に `cargo xtask sync-characters` を通し、配信コピーから制作正本の `layers/` が除外され、manifestの `runtimeLayers` と `framePaths` がlossless WebPだけを指すことを確認する。
-- 自前メッシュリグは`mesh-rig/source/regions.json`を制作設定とし、`scripts/build-mesh-rig.py <id>`だけで`parts/*.webp`と`rig.json`を再生成する。`runtimeScale`は1以下、`source/`は配信除外とする。独立した髪・腕・胴・瞳は隠れ領域つき同一座標原画が揃うまで実装済みと扱わない。
+- 自前メッシュリグは`mesh-rig/source/regions.json`を制作設定とする。同梱通常2Dは`build-separated-mesh-sources.py`で胴、後ろ髪、左右腕、顔、前髪の同一座標PNGを先に生成し、`build-mesh-rig.py`で`parts/*.webp`と`rig.json`を再生成する。中立合成が基準画像と画素一致しない場合は停止する。`runtimeScale`は1以下、`source/`は配信除外とし、広可動域へ広げる場合は隠れ領域を描き足した原画が揃うまで実装済みと扱わない。
 
 ## 表情差分と透過
 
@@ -41,6 +42,11 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - 物理演算は最終レイアウトの表示倍率で確認する。移動量が1描画ピクセル未満なら「見える物理演算」として採用せず、複数マスクの重なりで被写体が変形する設定も採用しない。
 - 通常、笑顔、考え中、悲しみ、会話は、顔全体を拡縮せず目元と口元で判別できる差を付ける。静止画1枚ではなく複数時点を比較する。
 - 実画面を見る前に`cargo xtask character-quality`で画素検査を通す。差分レイヤーが顔より下の非輪郭部を書き換えている、半目が閉じ目の透明度変更である、レイヤーが基準画像と一致する、といった不合格は目視より先にここで止める。新規キャラは`--strict`で注意も0件にする。不合格を素材の修正なしに`characters/quality-baseline.json`へ足して回避しない。
+- 表情を比較するときは待機動作・自動まばたき・視線を固定した顔の並列画像も確認する。全身の揺れによるハッシュ差を表情成功と扱わない。旧実写リグと統合顔レイヤーへ眉・口角の計算が届くこと、照れの赤みと頬線が目へ重ならないことを確認する。
+- 1体で見つかった見た目の不具合は、現行の全キャラクターで同じ箇所を確認する。修正後も全員の同条件画像を比較し、確認した対象と未確認の有無を報告する。代表3体だけの合格で共通修正を完了扱いにしない。
+- `node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`で全7体の6表情・6口形・閉眼・発話/停止を単独撮影する。胴体の一様平行移動を除いた局所変位と停止後の収束を検査するが、全画像の目視を省略しない。`scripts/test-face-landmarks.py`で別原画の解析拒否と口差分の目への混入禁止も検査する。
+- 口操作の検査は全員の完走とreport.errorsが空であることを確認する。途中で保存されたreportを全体成功と扱わない。原寸の目素材は完全一致、GPU縮小描画は色差2以下かつ変化画素0.1%以下を許容上限とし、二重の目や輪郭変化を丸め誤差として通さない。
+- 旧パックへ実測座標を追加する場合は`python scripts/import-face-landmarks.py <正規パイプラインのキャラフォルダ> characters/<ID>`を使う。原画SHA一致が条件であり、手書き座標や同じ表示名の別原画で代用しない。続けて通常の`build-mesh-rig.py`を実行し、正本の特徴点がリグと開口素材へ再反映されることを確認する。
 - 高品質試作は84フレームを標準とし、待機24、考え中24、会話24、悲しみ12を基準にする。
 
 ## 外部サービスとレビュー
@@ -50,21 +56,27 @@ description: PicoAgentの通常2DまたはLive2Dキャラクターを追加・�
 - ユーザー指定でClaudeへ渡す7形式一覧は、対象を絞った直前の撮影で一覧が上書きされていないことを確認する。チャット／バー／配信は個別画像も渡す。
 - 透過PNGをビューアーの緑や黒の背景色だけで未透過と判定しない。四隅alpha、透明／半透明／不透明ピクセル数、最上段の不透明数を数値で添え、実合成画面の縁と一緒に判定する。
 - Claudeの判定だけで合格にしない。PicoAgentの実レンダラーで通常、配信、チャット、バー、作業、ウィジェットを撮影する。
-- README／LPの通常・配信公開動画は、`SHOOT_README_GALLERY=1`／`SHOOT_SITE_GALLERY=1`を正規入口にし、実画面の生PNGから6秒・16fps・480px幅へ直接書き出す。既存WebPの再圧縮や引き伸ばしをしない。実音声の再生開始後だけ口パクを見せ、考え中から待機へ戻す。対応キャラは撮影中に口開閉値が実際に発生したことを自動検査する。12秒・30fps・960pxの高解像度版は個別の比較・保管を明示された場合だけ作り、公開埋め込みへ採用しない。
+- README／LPの通常・配信公開動画は、`SHOOT_README_GALLERY=1`／`SHOOT_SITE_GALLERY=1`を正規入口にし、実画面の生PNGから6秒・16fps・960px幅へ直接書き出す。既存WebPの再圧縮や引き伸ばしをしない。実音声の再生開始後だけ口パクを見せ、考え中から待機へ戻す。対応キャラは撮影中に口開閉値が実際に発生したことを自動検査する。12秒・30fps・960pxの高解像度版は個別の比較・保管を明示された場合だけ作り、公開埋め込みへ採用しない。
 - 動画は先頭、中間、終端を確認し、瞬き、音声同期の口パク、透過、継ぎ目、胸上構図、物理演算、背景サイズを検査する。元モデルに口パラメータがない例外は明記し、別の身体モーションを口パク成功として扱わない。
 
 ## 再構築と検証
 
 ```powershell
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
-uv run --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
+uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画
+uv run --python 3.12 --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
 cargo xtask sync-characters
 cargo xtask character-quality --character <id> --strict
+uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
+$env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'
+node tools/check-lvs-character.mjs temp/pico-lvs-check # LocalVTuberStudio形式の場合
 node --check ui/renderer.js
 cargo test --manifest-path xtask/Cargo.toml
 cargo test --lib --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
+
+PlaywrightのパスはCodex Desktopの`load_workspace_dependencies`で現行値を取得し、上記に存在しなければ推測しない。`check-lvs-character.mjs`の固有ハッシュ数は動作停止の検出に使うだけで、画質合格の根拠にしない。続けてChromeの`tools/mesh-rig-preview/`で原画と並べ、閉口と5母音、650ミリ秒のまばたき、首・胴を裂かない控えめな待機動作、白・黒・市松背景を目視する。
 
 画像を追加・更新したコミットでは `git lfs ls-files` に対象PNG／WebPが載ることも確認する。READMEやLPのプレビューを変更した場合は `tools/screenshots/shoot.mjs` で正本から撮り直す。通常2Dの実行画像を変えた場合は `SHOOT_CHARACTER_MATRIX=1` で全キャラ・全7形式を撮影し、速度警告0件と実画像の欠け・矩形・輪郭劣化なしを確認する。実画面の確認後にREADME、配布README、LP、`SPEC.md`を同期し、採否と検証結果をPR本文へ書く。未確認項目だけを`docs/TASKS.md`へ残す。

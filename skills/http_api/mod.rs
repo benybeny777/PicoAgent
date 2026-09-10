@@ -38,7 +38,11 @@ fn trim_response(text: &str) -> String {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}\n…（{} バイトで打ち切り）", &text[..end], MAX_RESPONSE_BYTES)
+    format!(
+        "{}\n…（{} バイトで打ち切り）",
+        &text[..end],
+        MAX_RESPONSE_BYTES
+    )
 }
 
 #[async_trait]
@@ -75,11 +79,36 @@ impl Tool for HttpApiTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_HTTP_ALLOWED_DOMAINS", "http_api 許可ドメイン（必須、カンマ区切り）", "textarea", "api.example.com,hooks.example.com"),
-            Field::new("PICOAGENT_HTTP_BEARER_TOKEN", "http_api Bearer token（任意）", "password", ""),
-            Field::new("PICOAGENT_HTTP_API_KEY_HEADER", "http_api API key ヘッダー名（任意）", "text", "X-API-Key"),
-            Field::new("PICOAGENT_HTTP_API_KEY_VALUE", "http_api API key 値（任意）", "password", ""),
-            Field::new("PICOAGENT_HTTP_TIMEOUT_SECS", "http_api 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_HTTP_ALLOWED_DOMAINS",
+                "http_api 許可ドメイン（必須、カンマ区切り）",
+                "textarea",
+                "api.example.com,hooks.example.com",
+            ),
+            Field::new(
+                "PICOAGENT_HTTP_BEARER_TOKEN",
+                "http_api Bearer token（任意）",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_HTTP_API_KEY_HEADER",
+                "http_api API key ヘッダー名（任意）",
+                "text",
+                "X-API-Key",
+            ),
+            Field::new(
+                "PICOAGENT_HTTP_API_KEY_VALUE",
+                "http_api API key 値（任意）",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_HTTP_TIMEOUT_SECS",
+                "http_api 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
@@ -94,15 +123,10 @@ impl Tool for HttpApiTool {
             Err(error) => return format!("エラー: url の解析に失敗しました: {}", error),
         };
         if !allowed_domain(cfg, &url) {
-            return "エラー: PICOAGENT_HTTP_ALLOWED_DOMAINS で許可されていないドメインです。".to_string();
+            return "エラー: PICOAGENT_HTTP_ALLOWED_DOMAINS で許可されていないドメインです。"
+                .to_string();
         }
-        let timeout = crate::tools::http::timeout(
-            cfg,
-            "PICOAGENT_HTTP_TIMEOUT_SECS",
-            20,
-            3,
-            60,
-        );
+        let timeout = crate::tools::http::timeout(cfg, "PICOAGENT_HTTP_TIMEOUT_SECS", 20, 3, 60);
         let client = match reqwest::Client::builder()
             .timeout(timeout)
             .user_agent("PicoAgent/1.0 (HTTP API tool)")
@@ -118,7 +142,10 @@ impl Tool for HttpApiTool {
             "PUT" => client.put(url),
             "PATCH" => client.patch(url),
             "DELETE" => client.delete(url),
-            _ => return "エラー: method は GET/POST/PUT/PATCH/DELETE のいずれかを指定してください。".to_string(),
+            _ => {
+                return "エラー: method は GET/POST/PUT/PATCH/DELETE のいずれかを指定してください。"
+                    .to_string()
+            }
         };
         let bearer = cfg.get("PICOAGENT_HTTP_BEARER_TOKEN", "");
         if !bearer.is_empty() {
@@ -133,10 +160,18 @@ impl Tool for HttpApiTool {
             request = request.json(body);
         } else if let Some(text) = args.get("text_body").and_then(Value::as_str) {
             if text.len() > MAX_BODY_BYTES {
-                return format!("エラー: text_body は {} バイト以内で指定してください。", MAX_BODY_BYTES);
+                return format!(
+                    "エラー: text_body は {} バイト以内で指定してください。",
+                    MAX_BODY_BYTES
+                );
             }
             request = request
-                .header("Content-Type", args.get("content_type").and_then(Value::as_str).unwrap_or("text/plain"))
+                .header(
+                    "Content-Type",
+                    args.get("content_type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("text/plain"),
+                )
                 .body(text.to_string());
         }
         let response = match request.send().await {

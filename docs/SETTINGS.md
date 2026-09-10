@@ -17,14 +17,15 @@
 | `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する高さ(px)。設定画面には出さない |
 | `PICOAGENT_BUBBLE_LEFT_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する left(px)。設定画面には出さない |
 | `PICOAGENT_BUBBLE_TOP_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する top(px)。設定画面には出さない |
-| `PICOAGENT_WINDOW_WIDTH_PX` | 自動 | 内部UI | 透明ウィンドウの幅(px)。アプリ終了時に保存し、起動時に復元する |
-| `PICOAGENT_WINDOW_HEIGHT_PX` | 自動 | 内部UI | 透明ウィンドウの高さ(px)。アプリ終了時に保存し、起動時に復元する |
+| `PICOAGENT_WINDOW_WIDTH_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ幅。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
+| `PICOAGENT_WINDOW_HEIGHT_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ高さ。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `PICOAGENT_GAZE_TRACKING_ENABLED` | `false` | キャラクター | 視線追従。OFFではPNGの自動よそ見・マウス方向の顔差分と傾き・Live2Dのマウス追従を止め、常に正面へ戻す。ONでは顔付近のカーソルだけへ控えめに追従し、画面下など顔から離れた位置では追従しない。`pet:ui` で即反映 |
 | `PICOAGENT_CHARACTER_ZOOM` | `1.55` | 内部UI | 構図未設定時に使う互換用の共通拡大率。新しい調整は `PICOAGENT_CHARACTER_FRAMING` を使う |
 | `PICOAGENT_CHARACTER_FRAMING` | `{}` | 画面 | キャラクターID×表示形式ごとの構図。`preset`（`bust` / `upper` / `full` / `custom`）、`zoom`、`x`、`y`を保持する。未設定時は通常2Dが従来の上半身 `upper`、長身・実写・Live2Dが胸上 `bust` を使う。旧 `talk` の保存値は `chat` へ移す |
+| `PICOAGENT_LAYOUT_PLACEMENTS` | `{}` | 内部UI | 配置編集（上部メニューの「配置」・右クリックの「配置を直接調整」）で決めた位置と倍率。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、キャラクターの立ち絵は `characters` の下にキャラクターID×表示形式で持つ。値は CSS の `translate`（`Xpx Ypx`）と `scale`（`sx sy`、0.25〜4.0）。設定画面には出さず、編集画面の「保存」「閉じる」「表示形式・キャラ切替」「リセット」で保存する |
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 旧版の立ち絵横移動量（px）。通常ドラッグはウィンドウ移動へ戻したため新規には書き込まず、既存値の互換表示と位置リセットだけに使う |
 | `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 旧版の立ち絵縦移動量（px）。同上 |
 | `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget`。旧 `talk` はLINE風の `chat` へ移行し、未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
@@ -37,11 +38,12 @@
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 基本 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
 | `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 基本 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
 | `PICOAGENT_HOTKEY_HIDE` | `CommandOrControl+Alt+H` | 基本 | 隠す／戻すキー。表示中は `hide()`、隠れているときは呼び出しと同じ動作。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
-| `PICOAGENT_BOOT_TIMEOUT_MS` | `12000` | 内部UI | 起動監視1区間の長さ。フロントの読込開始（`pet_frontend_ready`）をこのミリ秒だけ待ち、届いたらさらに同じ長さだけ起動完了（`pet_finish_boot`）を待つ。どちらかが届かなければキャラクター付きの案内画面へ切り替える（案内までの最長は2区間＝既定24秒）。設定画面には出さない（`3000`〜`120000` に丸める） |
+| `PICOAGENT_BOOT_TIMEOUT_MS` | `120000` | 内部UI | 開始後の起動進捗通知がこの時間だけ途絶えた場合に、キャラクター付きの案内画面へ切り替える。モデル・音声のダウンロード中もフロントが生存通知を送るため、準備の総時間が2分を超えても停止扱いにしない。通知の間隔はこの値の1/4（1〜10秒へ収める）で、値を短くしても正常な起動が案内画面へ落ちない。読込開始（`pet_frontend_ready`）だけは12秒（この値が小さい場合はその値）で判定し、画面を出せない障害の案内を待たせない。設定画面には出さない（`3000`〜`120000` に丸める） |
 | `PICOAGENT_NAP_MINUTES` | `15` | 基本 | 無操作でキャラが居眠りするまでの分数（`0` で居眠りしない） |
 | `PICOAGENT_QUICK_ACTIONS` | 空 | 基本 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |
 | `PICOAGENT_UPDATE_CHECK_ENABLED` | `true` | 基本 | 起動時に公開配布Gitの `latest.json` を確認し、新しければ通知する。オフライン時は通知しない |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
+| `PICOAGENT_PROJECT_RULES_AUTO_CAPTURE` | `false` | 基本 | 強く言い渡された作法を作業フォルダの `AGENTS.md` へ自動で追記する（既定は無効。利用者のフォルダにあるファイルを書き換えるため） |
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
 | `PICOAGENT_SUPER_AGENT` | `false` | 基本 | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
@@ -67,13 +69,13 @@
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（内部設定。通常UIでは非表示。旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_VOLUME` | `50` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映。ミュートまたは0では全キャラの口パクも停止 |
-| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker ID 上書き（内部設定。通常UIでは非表示。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
-| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto` | local | ローカルモデルプリセット（`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、`llmjp4_8b`: LLM-jp-4 8B Thinking/約5.3GB、`custom`）。旧プリセットIDは現行候補へ自動移行する |
-| `PICOAGENT_MODEL_URL` | Gemma 4 E4B Q4_K_M GGUF | local | 同梱エンジンが取得するモデル URL |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker/style ID 上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
+| `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
+| `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_CTX` | `8192` | local | コンテキスト長 |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
-| `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`） |
+| `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`）。保存名は同じバックエンド候補だけへ渡し、CUDA等の別候補は各方式の既定先頭デバイスで起動する |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
 | `OLLAMA_MODEL` | `qwen3:8b` | ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | openai | OpenAI 互換エンドポイント |
@@ -132,7 +134,7 @@
 | `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder / whisper_transcribe | 文字起こし実行時の引数テンプレート |
 | `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder / whisper_transcribe | `diarize=true` 時に追加するローカル話者分類引数 |
 | `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200） |
-| `PICOAGENT_WEATHER_DEFAULT_LOCATION` | `Tokyo` | weather | 天気の既定地点（自動取得失敗時のフォールバック） |
+| `PICOAGENT_WEATHER_DEFAULT_LOCATION` | （なし） | weather | 天気の地点。保存済み地点を正本とし、空欄の場合だけHTTPSのIP位置情報から現在地を概算する。旧版が自動保存した `Tokyo` は未設定へ移行し、東京を固定する場合は「東京都」等を保存する |
 | `PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION` | `false` | weather | 地名未指定時の現在地IP自動取得を無効化 |
 | `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |
 | `PICOAGENT_CURRENCY_DEFAULT_BASE` | `USD` | currency_rates | 為替の既定換算元 |
@@ -230,7 +232,6 @@
 | `PICOAGENT_AGENT_CLI_PATH` | （空=種類から自動） | agent_cli | CLI の実行パス |
 | `PICOAGENT_AGENT_CLI_ARGS` | （空） | agent_cli | CLI へ追加する引数。Claude / Codex の安全な非対話引数は常に別途付加 |
 | `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | agent_cli | 1回の応答を待つ秒数（10〜600） |
-| `PICOAGENT_THA3_ROOT` | 空 | THA3キャラクター制作 | 作者配布から利用者が用意したTHA3本体・モデル・Python環境のフォルダ。設定画面で選択して保存し、共通許可ルートで検証する |
 | `PICOAGENT_DESKTOP_ENABLED` | `false` | desktop_control | デスクトップ操作（マウス・キーボード）の有効化（既定は無効） |
 | `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | desktop_control | 1分あたりの操作回数の上限（1〜600）。暴走時の歯止め |
 | `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |

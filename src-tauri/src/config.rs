@@ -79,6 +79,23 @@ impl Config {
         reason
     }
 
+    /// PicoAgentが管理する設定ディレクトリを返す。
+    ///
+    /// 利用者が追加した指示スキルのように、config.jsonと同じ寿命で管理するファイルは
+    /// カレントディレクトリへ降格せず、この場所だけへ保存する。
+    pub fn config_dir(&self) -> Result<PathBuf, String> {
+        let path = self.path.lock().unwrap();
+        let Some(file) = path.as_ref() else {
+            let reason = self.read_only_reason.lock().unwrap().clone();
+            return Err(reason.unwrap_or_else(|| {
+                "PicoAgentの設定保存先がまだ初期化されていません。".to_string()
+            }));
+        };
+        file.parent()
+            .map(PathBuf::from)
+            .ok_or_else(|| "PicoAgentの設定ディレクトリを特定できません。".to_string())
+    }
+
     /// 文字列設定を取得。空文字は未設定とみなし env → 既定値へフォールバック。
     pub fn get(&self, key: &str, fallback: &str) -> String {
         if let Some(v) = self.values.lock().unwrap().get(key) {

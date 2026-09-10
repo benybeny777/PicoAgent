@@ -1,12 +1,20 @@
 // text.rs - UTF-8文字列とストリーミング受信を安全に扱う共通処理。
 
 /// 表示用に先頭 `max_chars` 文字まで切り詰め、切り詰めた場合だけ `…` を付ける。
+///
+/// 上限の直後にある文字境界を1回の走査で求める。文字数を数え直す実装だと、
+/// 切り詰めの要らない短い文字列でも全体を3度走査することになる（この関数は
+/// エージェントループのログ・引数プレビューなど、あらゆる経路から呼ばれる）。
 pub fn preview(text: &str, max_chars: usize) -> String {
-    let mut out: String = text.chars().take(max_chars).collect();
-    if out.chars().count() < text.chars().count() {
-        out.push('…');
+    match text.char_indices().nth(max_chars) {
+        Some((boundary, _)) => {
+            let mut out = String::with_capacity(boundary + '…'.len_utf8());
+            out.push_str(&text[..boundary]);
+            out.push('…');
+            out
+        }
+        None => text.to_string(),
     }
-    out
 }
 
 /// バイト上限で、UTF-8文字の途中を避けて切り詰める。
@@ -32,31 +40,34 @@ impl Utf8Stream {
     pub fn push(&mut self, bytes: &[u8]) -> String {
         self.tail.extend_from_slice(bytes);
         let mut out = String::new();
+        let mut consumed = 0;
         loop {
-            match std::str::from_utf8(&self.tail) {
+            match std::str::from_utf8(&self.tail[consumed..]) {
                 Ok(text) => {
                     out.push_str(text);
-                    self.tail.clear();
+                    consumed = self.tail.len();
                     break;
                 }
                 Err(error) => {
                     let valid = error.valid_up_to();
-                    if let Ok(text) = std::str::from_utf8(&self.tail[..valid]) {
+                    if let Ok(text) = std::str::from_utf8(&self.tail[consumed..consumed + valid]) {
                         out.push_str(text);
                     }
+                    consumed += valid;
                     match error.error_len() {
                         Some(len) => {
                             out.push('\u{FFFD}');
-                            self.tail.drain(..valid + len);
+                            consumed += len;
                         }
                         None => {
-                            self.tail.drain(..valid);
                             break;
                         }
                     }
                 }
             }
         }
+        // 不正バイトごとに残りを移動せず、次チャンクへ持ち越す末尾だけを一度で残す。
+        self.tail.drain(..consumed);
         out
     }
 }
@@ -88,5 +99,30 @@ mod tests {
     fn 壊れたバイト列を置換して先へ進む() {
         let mut stream = Utf8Stream::default();
         assert_eq!(stream.push(&[b'a', 0xFF, b'b']), "a\u{FFFD}b");
+    }
+
+    #[test]
+    fn 不正バイトと分断された多バイト文字を混ぜても復元する() {
+        let mut bytes = vec![0xff; 16_384];
+        bytes.extend_from_slice("日本語😀".as_bytes());
+        bytes.extend_from_slice(&[0xf0, 0x80, b'x', 0xe3, 0x81, 0x82]);
+        let expected = String::from_utf8_lossy(&bytes);
+        for chunk_size in [1, 2, 3, 7, 1024, bytes.len()] {
+            let mut stream = Utf8Stream::default();
+            let actual: String = bytes
+                .chunks(chunk_size)
+                .map(|chunk| stream.push(chunk))
+                .collect();
+            assert_eq!(actual, expected, "チャンク幅: {chunk_size}");
+        }
+    }
+
+    #[test]
+    fn 不完全な末尾を空チャンクで失わず次の入力へ残す() {
+        let mut stream = Utf8Stream::default();
+        assert_eq!(stream.push(&[0xff, 0xe3, 0x81]), "\u{FFFD}");
+        assert_eq!(stream.push(&[]), "");
+        assert_eq!(stream.push(&[0x82, b'z']), "あz");
+        assert_eq!(stream.push(&[]), "");
     }
 }

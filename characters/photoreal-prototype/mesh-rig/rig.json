@@ -1,0 +1,323 @@
+{
+  "version": 1,
+  "mode": "layered-grid-v2",
+  "sourceCanvas": [
+    1024,
+    1536
+  ],
+  "canvas": [
+    1024,
+    1536
+  ],
+  "contentBox": [
+    131,
+    115,
+    915,
+    1536
+  ],
+  "runtimeScale": 1.0,
+  "expressionHappyMode": "disabled",
+  "expressionSadMode": "disabled",
+  "grid": [
+    9,
+    15
+  ],
+  "base": "parts/base.webp",
+  "drawables": {
+    "body": {
+      "texture": "parts/body.webp",
+      "textureBox": [
+        276,
+        390,
+        786,
+        1536
+      ],
+      "z": 0,
+      "initialAlpha": 1,
+      "motion": "torso"
+    },
+    "hair-back": {
+      "texture": "parts/hair-back.webp",
+      "textureBox": [
+        307,
+        159,
+        766,
+        641
+      ],
+      "z": 5,
+      "initialAlpha": 1,
+      "motion": "head"
+    },
+    "arm-left": {
+      "texture": "parts/arm-left.webp",
+      "textureBox": [
+        131,
+        646,
+        367,
+        1536
+      ],
+      "z": 10,
+      "initialAlpha": 1,
+      "motion": "arm-left"
+    },
+    "arm-right": {
+      "texture": "parts/arm-right.webp",
+      "textureBox": [
+        680,
+        634,
+        915,
+        1536
+      ],
+      "z": 11,
+      "initialAlpha": 1,
+      "motion": "arm-right"
+    },
+    "face": {
+      "texture": "parts/face.webp",
+      "textureBox": [
+        352,
+        131,
+        690,
+        641
+      ],
+      "z": 20,
+      "initialAlpha": 1,
+      "motion": "face"
+    },
+    "hair-front": {
+      "texture": "parts/hair-front.webp",
+      "textureBox": [
+        404,
+        115,
+        670,
+        421
+      ],
+      "z": 30,
+      "initialAlpha": 1,
+      "motion": "head"
+    },
+    "blink_half": {
+      "texture": "parts/blink_half.webp",
+      "box": [
+        298,
+        300,
+        771,
+        556
+      ],
+      "textureBox": [
+        288,
+        290,
+        781,
+        566
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "blink_closed": {
+      "texture": "parts/blink_closed.webp",
+      "box": [
+        298,
+        299,
+        771,
+        556
+      ],
+      "textureBox": [
+        288,
+        289,
+        781,
+        566
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "mouth_open": {
+      "texture": "parts/mouth_open.webp",
+      "box": [
+        463,
+        451,
+        597,
+        536
+      ],
+      "textureBox": [
+        455,
+        443,
+        605,
+        544
+      ],
+      "feather": 3,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "gaze_left": {
+      "texture": "parts/gaze_left.webp",
+      "box": [
+        392,
+        307,
+        631,
+        426
+      ],
+      "textureBox": [
+        382,
+        297,
+        641,
+        436
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "gaze_right": {
+      "texture": "parts/gaze_right.webp",
+      "box": [
+        393,
+        307,
+        629,
+        426
+      ],
+      "textureBox": [
+        383,
+        297,
+        639,
+        436
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "expression_happy": {
+      "texture": "parts/expression_happy.webp",
+      "box": [
+        366,
+        302,
+        659,
+        578
+      ],
+      "textureBox": [
+        356,
+        292,
+        669,
+        588
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    },
+    "expression_sad": {
+      "texture": "parts/expression_sad.webp",
+      "box": [
+        365,
+        300,
+        664,
+        431
+      ],
+      "textureBox": [
+        355,
+        290,
+        674,
+        441
+      ],
+      "feather": 4,
+      "z": 1000,
+      "initialAlpha": 0,
+      "motion": "face"
+    }
+  },
+  "parameters": {
+    "ParamAngleX": [
+      -6,
+      6,
+      0
+    ],
+    "ParamAngleY": [
+      -4,
+      4,
+      0
+    ],
+    "ParamEyeLOpen": [
+      0,
+      1,
+      1
+    ],
+    "ParamEyeBallX": [
+      -1,
+      1,
+      0
+    ],
+    "ParamMouthOpenY": [
+      0,
+      1,
+      0
+    ],
+    "ParamBreath": [
+      0,
+      1,
+      0
+    ]
+  },
+  "quality": {
+    "source": "同一座標原画の可視画素分離と関節境界の局所再構成",
+    "hiddenAreaSource": true,
+    "hiddenAreaParts": [
+      "body",
+      "hair-back",
+      "arm-left",
+      "arm-right",
+      "face",
+      "hair-front"
+    ],
+    "motionLimits": {
+      "range": "微細変形のみ",
+      "hairCoupledToHead": true,
+      "faceTranslationFixed": false
+    },
+    "gazeSource": "高精細正本の瞳領域を同一座標で局所移動",
+    "limit": "分離原画で定義した部位の微細変形。大きな姿勢変更は対象外"
+  },
+  "anchors": {
+    "face": {
+      "x0": 401.5328674316406,
+      "y0": 237.6929168701172,
+      "x1": 647.3524169921875,
+      "y1": 562.8760375976562,
+      "cx": 524.4426422119141,
+      "cy": 400.2844772338867
+    },
+    "eyeL": {
+      "x0": 411.9334716796875,
+      "y0": 370.00970458984375,
+      "x1": 472.5868835449219,
+      "y1": 405.0322570800781,
+      "cx": 442.2601776123047,
+      "cy": 387.52098083496094
+    },
+    "eyeR": {
+      "x0": 533.4914855957031,
+      "y0": 339.6675720214844,
+      "x1": 595.3349914550781,
+      "y1": 377.2726745605469,
+      "cx": 564.4132385253906,
+      "cy": 358.4701232910156
+    },
+    "mouth": {
+      "x0": 483.7603454589844,
+      "y0": 471.391845703125,
+      "x1": 576.8396301269531,
+      "y1": 515.9727783203125,
+      "cx": 530.2999877929688,
+      "cy": 493.68231201171875
+    }
+  },
+  "facialLandmarksSource": {
+    "version": 1,
+    "source_sha256": "cf335db7deba7936f3b44ac723542943252d4f9d69190272a0bd7ed93552765e",
+    "analysis_sha256": "97552800f2c81fb1dc6023784e10dc8a7f8246c13553ff039b52919d341facb4"
+  }
+}

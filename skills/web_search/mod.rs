@@ -21,7 +21,7 @@ const MAX_RESPONSE_BYTES: usize = 32 * 1024;
 pub struct WebSearchTool;
 
 const RESULT_MATERIAL_PROMPT: &str = include_str!("prompts/result-material.md");
-const WEB_SEARCH_REQUESTS: [&str; 8] = [
+const WEB_SEARCH_REQUESTS: [&str; 17] = [
     "WEB検索して",
     "Web検索して",
     "web検索して",
@@ -30,6 +30,15 @@ const WEB_SEARCH_REQUESTS: [&str; 8] = [
     "Webで検索して",
     "webで検索して",
     "ネットで調べて",
+    "サイトを探して",
+    "サイト探して",
+    "ページを探して",
+    "ページ探して",
+    "記事を探して",
+    "記事探して",
+    "リンクを探して",
+    "リンク探して",
+    "ウェブで探して",
 ];
 
 fn render_result_material(user_text: &str, tool_result: &str) -> String {
@@ -48,11 +57,48 @@ fn should_search(text: &str) -> bool {
     }
     let lower = text.to_lowercase();
     const INFO_MARKERS: &[&str] = &[
-        "最新", "ニュース", "今日", "昨日", "今週", "今月", "今年", "現在", "価格", "値段",
-        "いくら", "相場", "株価", "ランキング", "発売", "リリース", "結果", "スコア", "順位",
-        "誰", "だれ", "いつ", "どこ", "なぜ", "方法", "やり方", "調べ", "検索", "スペック",
-        "比較", "おすすめ", "レビュー", "評判", "何年", "何月", "何時", "とは", "意味",
-        "とは何", "history", "news", "price",
+        "最新",
+        "ニュース",
+        "今日",
+        "昨日",
+        "今週",
+        "今月",
+        "今年",
+        "現在",
+        "価格",
+        "値段",
+        "いくら",
+        "相場",
+        "株価",
+        "ランキング",
+        "発売",
+        "リリース",
+        "結果",
+        "スコア",
+        "順位",
+        "誰",
+        "だれ",
+        "いつ",
+        "どこ",
+        "なぜ",
+        "方法",
+        "やり方",
+        "調べ",
+        "検索",
+        "スペック",
+        "比較",
+        "おすすめ",
+        "レビュー",
+        "評判",
+        "何年",
+        "何月",
+        "何時",
+        "とは",
+        "意味",
+        "とは何",
+        "history",
+        "news",
+        "price",
     ];
     INFO_MARKERS.iter().any(|marker| lower.contains(marker))
 }
@@ -63,8 +109,18 @@ fn search_query(text: &str) -> String {
         query = query.replace(marker, " ");
     }
     let query = query
-        .trim_matches(|character: char| character.is_whitespace() || "、。,.！？!?：:".contains(character))
+        .trim_matches(|character: char| {
+            character.is_whitespace() || "、。,.！？!?：:".contains(character)
+        })
         .trim();
+    // 「天気の サイト探して」の命令部を除いた後に残る末尾の孤立助詞だけを落とす。
+    // 文中の助詞は検索語の意味を変えるため触らない。
+    let query = ["について", "とは", "の", "を"]
+        .iter()
+        .find_map(|suffix| query.strip_suffix(suffix))
+        .map(str::trim_end)
+        .filter(|trimmed| !trimmed.is_empty())
+        .unwrap_or(query);
     if query.is_empty() {
         text.trim().to_string()
     } else {
@@ -114,9 +170,12 @@ fn trim_to_bytes(text: &mut String, max_bytes: usize) {
 
 fn extract_results(html: &str, query: &str, max_results: usize) -> Result<String, String> {
     let document = Html::parse_document(html);
-    let result_selector = Selector::parse(".result").map_err(|e| format!("検索結果の解析準備に失敗しました: {}", e))?;
-    let title_selector = Selector::parse(".result__a").map_err(|e| format!("検索結果の解析準備に失敗しました: {}", e))?;
-    let snippet_selector = Selector::parse(".result__snippet").map_err(|e| format!("検索結果の解析準備に失敗しました: {}", e))?;
+    let result_selector = Selector::parse(".result")
+        .map_err(|e| format!("検索結果の解析準備に失敗しました: {}", e))?;
+    let title_selector = Selector::parse(".result__a")
+        .map_err(|e| format!("検索結果の解析準備に失敗しました: {}", e))?;
+    let snippet_selector = Selector::parse(".result__snippet")
+        .map_err(|e| format!("検索結果の解析準備に失敗しました: {}", e))?;
 
     let mut output = format!("Web検索結果（検索語: {}）\n", query);
     let mut count = 0;
@@ -127,7 +186,12 @@ fn extract_results(html: &str, query: &str, max_results: usize) -> Result<String
         let Some(href) = title_node.value().attr("href") else {
             continue;
         };
-        let title = title_node.text().collect::<Vec<_>>().join("").trim().to_string();
+        let title = title_node
+            .text()
+            .collect::<Vec<_>>()
+            .join("")
+            .trim()
+            .to_string();
         if title.is_empty() {
             continue;
         }
@@ -150,7 +214,9 @@ fn extract_results(html: &str, query: &str, max_results: usize) -> Result<String
     }
 
     if count == 0 {
-        return Err("検索結果を取得できませんでした。検索語を変えて再試行してください。".to_string());
+        return Err(
+            "検索結果を取得できませんでした。検索語を変えて再試行してください。".to_string(),
+        );
     }
     trim_to_bytes(&mut output, MAX_RESPONSE_BYTES);
     Ok(output)
@@ -205,8 +271,18 @@ impl Tool for WebSearchTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_WEB_SEARCH_MAX_RESULTS", "Web検索の結果件数（1〜8）", "text", "5"),
-            Field::new("PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "Web検索の待ち時間（秒、3〜60）", "text", "15"),
+            Field::new(
+                "PICOAGENT_WEB_SEARCH_MAX_RESULTS",
+                "Web検索の結果件数（1〜8）",
+                "text",
+                "5",
+            ),
+            Field::new(
+                "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS",
+                "Web検索の待ち時間（秒、3〜60）",
+                "text",
+                "15",
+            ),
         ]
     }
 
@@ -216,15 +292,32 @@ impl Tool for WebSearchTool {
             _ => return "エラー: query が指定されていません。".to_string(),
         };
         if query.chars().count() > MAX_QUERY_CHARS {
-            return format!("エラー: query は {} 文字以内で指定してください。", MAX_QUERY_CHARS);
+            return format!(
+                "エラー: query は {} 文字以内で指定してください。",
+                MAX_QUERY_CHARS
+            );
         }
 
-        let configured_results = parse_setting(cfg, "PICOAGENT_WEB_SEARCH_MAX_RESULTS", "5", 1, MAX_RESULTS_LIMIT);
+        let configured_results = parse_setting(
+            cfg,
+            "PICOAGENT_WEB_SEARCH_MAX_RESULTS",
+            "5",
+            1,
+            MAX_RESULTS_LIMIT,
+        );
         let max_results = match args.get("max_results") {
             None => configured_results,
-            Some(value) => match value.as_u64().and_then(|number| usize::try_from(number).ok()) {
+            Some(value) => match value
+                .as_u64()
+                .and_then(|number| usize::try_from(number).ok())
+            {
                 Some(number) if (1..=MAX_RESULTS_LIMIT).contains(&number) => number,
-                _ => return format!("エラー: max_results は 1〜{} の整数で指定してください。", MAX_RESULTS_LIMIT),
+                _ => {
+                    return format!(
+                        "エラー: max_results は 1〜{} の整数で指定してください。",
+                        MAX_RESULTS_LIMIT
+                    )
+                }
             },
         };
         let timeout_secs = parse_setting(cfg, "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "15", 3, 60);
@@ -243,7 +336,10 @@ impl Tool for WebSearchTool {
         };
         let status = response.status();
         if !status.is_success() {
-            return format!("エラー: Web検索が HTTP {} を返しました。時間を置いて再試行してください。", status);
+            return format!(
+                "エラー: Web検索が HTTP {} を返しました。時間を置いて再試行してください。",
+                status
+            );
         }
         let body = match response.text().await {
             Ok(body) => body,
@@ -260,11 +356,21 @@ inventory::submit! { ToolReg { make: || Box::new(WebSearchTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{direct_url, extract_results, parse_setting_value, MAX_RESULTS_LIMIT};
+    use super::{
+        direct_url, extract_results, is_explicit_request, parse_setting_value, search_query,
+        MAX_RESULTS_LIMIT,
+    };
+
+    #[test]
+    fn サイトを探す要求を明示的なweb検索として扱う() {
+        assert!(is_explicit_request("天気のサイト探して"));
+        assert_eq!(search_query("天気のサイト探して"), "天気");
+    }
 
     #[test]
     fn duckduckgoの転送urlを直接urlへ戻す() {
-        let url = direct_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%3Fx%3D1&rut=abc");
+        let url =
+            direct_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%3Fx%3D1&rut=abc");
         assert_eq!(url, "https://example.com/a?x=1");
     }
 

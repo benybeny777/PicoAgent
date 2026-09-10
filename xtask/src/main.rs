@@ -5,6 +5,7 @@
 //
 // 使い方: `cargo xtask <サブコマンド>`（エイリアスは リポジトリ直下の .cargo/config.toml）
 
+mod agent_harness;
 mod assets;
 mod bundled;
 mod character_pack;
@@ -17,7 +18,9 @@ mod tools;
 mod util;
 mod verify;
 
-use std::process::Command;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
 
@@ -37,7 +40,7 @@ const USAGE: &str = "\
   update-feed <配布物> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
-  setup <対象…>        取得対象は all / engine / aivis / whisper / pixi / live2d / live2d-samples / tha3 / office / tools
+  setup <対象…>        取得対象は all / engine / aivis / whisper / pixi / live2d / live2d-samples / office / tools
                       （不要な大容量取得を防ぐため対象指定は必須）
   sync-characters [--force] characters/ を ui/assets/characters/ へ差分同期（--force で全再構築）
   character-pack      2Dキャラクターパックを検証・導入
@@ -51,7 +54,6 @@ const USAGE: &str = "\
 例:
   cargo xtask dev
   cargo xtask setup tools
-  cargo xtask setup tha3
   cargo xtask setup live2d-samples
   TOOLS_FORCE=1 cargo xtask setup tools
   cargo xtask cli chat 今日の天気は？";
@@ -162,10 +164,8 @@ struct Build {
 ///
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
-    // THA3も開発環境で制作機能をすぐ確認できるよう一括取得へ含める。
-    // 販売用軽量版には再配布せず、利用者が作者配布物を用意して設定する。
     let all = [
-        "pixi", "live2d", "engine", "aivis", "whisper", "tha3", "office", "tools",
+        "pixi", "live2d", "engine", "aivis", "whisper", "office", "tools",
     ];
     anyhow::ensure!(
         !targets.is_empty(),
@@ -185,12 +185,11 @@ fn setup(targets: &[String]) -> Result<()> {
             "pixi" => bundled::fetch_pixi_runtime()?,
             "live2d" => bundled::fetch_live2d_runtime()?,
             "live2d-samples" => bundled::fetch_live2d_samples()?,
-            "tha3" => bundled::fetch_tha3()?,
             "aivis" => office::fetch_aivis()?,
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / live2d-samples / tha3 / office / tools）"
+                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / live2d-samples / office / tools）"
             ),
         }
     }
@@ -236,7 +235,6 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
                 bail!("同梱 Whisper を取得できませんでした");
             }
         }
-        bundled::fetch_tha3()?;
         office::fetch_office()?;
         tools::fetch_all()?;
     }
@@ -250,12 +248,14 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     if build.beta {
         command.args(["--features", "beta-full"]);
     }
-    let status = command
-        .current_dir(repo_root())
-        .status()
-        .context(
+    command.current_dir(repo_root());
+    let status = if mode == "dev" {
+        run_dev_with_persistent_stderr(&mut command)?
+    } else {
+        command.status().context(
             "cargo tauri を起動できません。未インストールなら `cargo install tauri-cli --version '^2'` を実行してください。",
-        )?;
+        )?
+    };
     if !status.success() {
         bail!(
             "cargo tauri {mode} が失敗しました（終了コード {:?}）",
@@ -263,6 +263,86 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn dev_log_path() -> std::path::PathBuf {
+    let base = if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|home| home.join("Library").join("Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(std::path::PathBuf::from)
+                    .map(|home| home.join(".local").join("share"))
+            })
+    }
+    .unwrap_or_else(std::env::temp_dir);
+    base.join("PicoAgent").join("log").join(format!(
+        "dev.{}.log",
+        chrono::Local::now().format("%Y-%m-%d")
+    ))
+}
+
+/// `tauri dev` はコンパイル失敗後も監視を続けるため、親プロセスの終了コードだけでは
+/// 途中のE0425等を記録できない。stdout/stderrを端末へそのまま流しつつ日付別DEVログにも残す。
+fn run_dev_with_persistent_stderr(command: &mut Command) -> Result<ExitStatus> {
+    let path = dev_log_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("DEVログを開けません: {}", path.display()))?;
+    let log = Arc::new(Mutex::new(file));
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("cargo tauri dev を起動できません")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("cargo tauri dev のstdoutを取得できません")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("cargo tauri dev のstderrを取得できません")?;
+    let stdout_writer = Arc::clone(&log);
+    let stdout_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            println!("{line}");
+            if let Ok(mut file) = stdout_writer.lock() {
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(file, "[{now}] [stdout] {line}");
+            }
+        }
+    });
+    let stderr_writer = Arc::clone(&log);
+    let stderr_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            eprintln!("{line}");
+            if let Ok(mut file) = stderr_writer.lock() {
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(file, "[{now}] [stderr] {line}");
+            }
+        }
+    });
+    let status = child
+        .wait()
+        .context("cargo tauri dev の終了待ちに失敗しました")?;
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+    Ok(status)
 }
 
 fn product_characters_for_build(release_build: bool) -> Result<Option<Vec<String>>> {
@@ -284,11 +364,11 @@ mod tests {
             super::product_characters_for_build(true).unwrap().unwrap(),
             [
                 "mugi",
+                "mugi-normal-lvs",
                 "rin",
                 "mai",
-                "koharu",
                 "sena",
-                "noa",
+                "aoi",
                 "photoreal-prototype"
             ]
         );
@@ -307,23 +387,18 @@ mod tests {
             sales.contains(&format!("実務スキル {skill_count} 種")),
             "docs/SALES.md のスキル数が実装（{skill_count}種）と一致しません"
         );
-        // 公開資料も同じ数を載せている。実装が増減したまま文言だけ古くならないようにする。
+        // 本体リポジトリで正本として保守する利用者向け文書と公開LPを照合する。
         for (path, expected) in [
-            (
-                "distribution/site/index.html",
-                format!("{skill_count} SKILLS"),
-            ),
-            (
-                "distribution/site/index.html",
-                format!("{skill_count}種のスキル"),
-            ),
+            ("README.md", format!("{skill_count} 種のスキル")),
+            ("README.md", format!("スキル {skill_count} 種")),
+            ("MANUAL.md", format!("{skill_count}種のスキルを内蔵")),
             (
                 "distribution/site/README.md",
                 format!("実務スキル{skill_count}種"),
             ),
             (
-                "distribution/site/README.md",
-                format!("スキル{skill_count}種）"),
+                "distribution/site/index.html",
+                format!("{skill_count}種のスキル"),
             ),
         ] {
             let text = std::fs::read_to_string(root.join(path)).unwrap();

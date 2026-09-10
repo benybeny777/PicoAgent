@@ -81,6 +81,12 @@ window.picoagent = {
   idleChatter: () => call("pet_idle_chatter"),
   dailyGreeting: () => call("pet_daily_greeting"),
   dailyEvents: () => call("pet_daily_events"),
+  // 自動追記した AGENTS.md の作法を1行取り消す。
+  undoProjectRule: (rule) => call("pet_project_rule_undo", { rule }),
+  // 永続ジョブ（AI Drive転送・成果物生成）の一覧と操作。
+  durableJobs: () => call("pet_durable_jobs"),
+  retryDurableJob: (id) => call("pet_durable_job_retry", { id }),
+  cancelDurableJob: (id) => call("pet_durable_job_cancel", { id }),
   scheduleRuns: () => call("pet_schedule_runs"),
   rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
   openSettings: (tab = null) => call("pet_open_settings", { tab }),
@@ -92,8 +98,12 @@ window.picoagent = {
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
   // フロントを読み込めたことの通知（届かないと案内画面へ切り替わる）。
   frontendReady: () => call("pet_frontend_ready"),
+  // モデル・音声の取得中も起動処理が進行中であることを監視側へ伝える。
+  bootProgress: () => call("pet_boot_progress"),
   // 共通VTuber起動画面から、保存中の表示形式と寸法へ戻す。
   finishBoot: () => call("pet_finish_boot"),
+  // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
+  saveLayoutPlacements: (placements) => call("pet_save_layout_placements", { placements }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
@@ -131,10 +141,7 @@ window.picoagent = {
   setCharacterOffset: (x, y, characterId, layout, zoom) => call("pet_set_character_offset", { x, y, characterId, layout, zoom }),
   placeWindow: (position) => call("pet_place_window", { position }),
   // キャラ上の通常ドラッグをOS標準のウィンドウ移動へ渡す。
-  startWindowDrag: async () => {
-    try { return await getCurrentWindow().startDragging(); }
-    catch (error) { logInvokeError("startDragging", error); }
-  },
+  startWindowDrag: () => call("pet_start_window_drag"),
   // 枠なしウィンドウの各辺・四隅から、OS標準の縦横リサイズを開始する。
   startWindowResize: async (direction) => {
     try { return await getCurrentWindow().startResizeDragging(direction); }
@@ -152,7 +159,7 @@ window.picoagent = {
   showOnboarding: () => call("pet_show_onboarding"),
   menu: () => call("pet_menu"),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
+    if (!["pet:model", "pet:reset", "pet:layout-reset", "pet:layout-edit", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     return managedListen(channel, callback).catch(error => {
       logBridgeError(`event ${channel} subscribe`, error);
@@ -193,6 +200,9 @@ window.picoagent = {
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
+    renameCharacter: (id, name) => call("settings_character_rename", { id, name }),
+    // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
+    exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
     installComponents: (ids, enableTts = false) => call("settings_components_install", { ids, enableTts }),
     removeComponent: (id) => call("settings_components_remove", { id }),
@@ -200,10 +210,5 @@ window.picoagent = {
     installUpdate: () => call("settings_install_update"),
     removeCharacter: (id) => call("settings_character_remove", { id }),
     pickStreamImage: (kind) => call("settings_pick_stream_image", { kind }),
-    tha3Status: (rootPath = null) => call("settings_tha3_status", { rootPath }),
-    pickTha3Source: () => call("settings_tha3_pick_source"),
-    pickTha3Root: () => call("settings_tha3_pick_root"),
-    generateTha3Character: (sourcePath, tha3RootPath, id, name) => call("settings_tha3_generate", { sourcePath, tha3RootPath, id, name }),
-    cancelTha3Generation: () => call("settings_tha3_cancel"),
   },
 };

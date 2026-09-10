@@ -46,16 +46,35 @@ impl Tool for LinearTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_LINEAR_API_KEY", "Linear の API キー", "password", ""),
-            Field::new("PICOAGENT_LINEAR_TEAM_ID", "Linear 既定 team ID", "text", ""),
-            Field::new("PICOAGENT_LINEAR_TIMEOUT_SECS", "Linear API 待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_LINEAR_API_KEY",
+                "Linear の API キー",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_LINEAR_TEAM_ID",
+                "Linear 既定 team ID",
+                "text",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_LINEAR_TIMEOUT_SECS",
+                "Linear API 待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let token = cfg.get("PICOAGENT_LINEAR_API_KEY", "");
         if token.is_empty() {
-            return super::config_guide("Linear", &["PICOAGENT_LINEAR_API_KEY"], "Linear の API key を入れてください。");
+            return super::config_guide(
+                "Linear",
+                &["PICOAGENT_LINEAR_API_KEY"],
+                "Linear の API key を入れてください。",
+            );
         }
         let timeout = cfg
             .get("PICOAGENT_LINEAR_TIMEOUT_SECS", "20")
@@ -83,11 +102,20 @@ impl Tool for LinearTool {
                     .filter(|v| !v.is_empty())
                     .map(ToString::to_string)
                     .unwrap_or_else(|| cfg.get("PICOAGENT_LINEAR_TEAM_ID", ""));
-                let Some(title) = args.get("title").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                let Some(title) = args
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
                     return "エラー: title が指定されていません。".to_string();
                 };
                 if team_id.is_empty() {
-                    return super::config_guide("Linear", &["PICOAGENT_LINEAR_TEAM_ID"], "依頼で team_id を渡すか、既定の team ID を設定してください。");
+                    return super::config_guide(
+                        "Linear",
+                        &["PICOAGENT_LINEAR_TEAM_ID"],
+                        "依頼で team_id を渡すか、既定の team ID を設定してください。",
+                    );
                 }
                 json!({
                     "query": "mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier title url } } }",
@@ -100,17 +128,28 @@ impl Tool for LinearTool {
                     }
                 })
             }
-            _ => return "エラー: action は list_issues または create_issue を指定してください。".to_string(),
+            _ => {
+                return "エラー: action は list_issues または create_issue を指定してください。"
+                    .to_string()
+            }
         };
         handle_text_response(
-            client.post(LINEAR_URL).bearer_auth(token).json(&payload).send().await,
+            client
+                .post(LINEAR_URL)
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .await,
             "Linear API",
         )
         .await
     }
 }
 
-async fn handle_text_response(response: Result<reqwest::Response, reqwest::Error>, label: &str) -> String {
+async fn handle_text_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
     let response = match response {
         Ok(response) => response,
         Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),

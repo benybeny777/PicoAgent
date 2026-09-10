@@ -239,7 +239,10 @@ static TOOL_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
 static TOOL_SCHEMAS: OnceLock<Vec<Value>> = OnceLock::new();
 static TOOL_SCHEMA_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
 
-const CORE_AGENT_TOOLS: [&str; 3] = ["get_time", "web_search", "web_fetch"];
+// 利用者追加スキルは名前が任意で、発話だけから静的な語彙一致を作れない。
+// `user_skill` の小さな管理schemaだけは常に提示し、毎ターン差し込む一覧から必要な
+// SKILL.mdを読み出せるようにする。
+const CORE_AGENT_TOOLS: [&str; 4] = ["get_time", "web_search", "web_fetch", "user_skill"];
 const MAX_SELECTED_SCHEMAS: usize = 12;
 const TOOL_ROUTES: &[(&str, &[&str])] = &[];
 

@@ -88,7 +88,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }) => `
+const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -113,9 +113,22 @@ window.__previewVoice = (() => {
 })();
 window.__listeners = {};
 window.__startDraggingCalls = 0;
+// 配置編集の保存先は設定（バックエンド）。撮影用モックでは再読み込みをまたぐ必要があるので、
+// アプリが触らないキーの localStorage を「設定ファイルの代わり」に使う。
+window.__placementsKey = "picoagent.mock.layoutPlacements";
+window.__readPlacements = () => {
+  try { return JSON.parse(localStorage.getItem(window.__placementsKey) || "{}"); }
+  catch { return {}; }
+};
 window.__bootReadyAt = Date.now() + ${JSON.stringify(bootHoldMs)};
+window.__engineReadyAt = Date.now() + ${JSON.stringify(engineReadyDelayMs)};
+window.__startupMarks = {};
 window.__TAURI__ = {
-  core: { invoke: (name) => {
+  core: { invoke: (name, args = {}) => {
+    if (name === "pet_save_layout_placements") {
+      localStorage.setItem(window.__placementsKey, JSON.stringify(args.placements || {}));
+      return Promise.resolve();
+    }
     if (name === "pet_init") return new Promise(resolve => setTimeout(() => resolve({
       up: true, providerId: "local", model: "gemma-3-4b-it-Q4_K_M",
       theme: ${JSON.stringify(theme)}, fontPx: "13", voiceVolume: "100",
@@ -128,25 +141,38 @@ window.__TAURI__ = {
       quickActions: "", napMinutes: "0",
       onboardingDone: ${JSON.stringify(onboardingDone)}, relationshipMemoryEnabled: false,
       gazeTrackingEnabled: ${JSON.stringify(gazeTrackingEnabled)},
+      bootProgressIntervalMs: 10000,
+      layoutPlacements: window.__readPlacements(),
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999",
     }), ${JSON.stringify(initDelayMs)}));
-    if (name === "engine_status") return Promise.resolve({ phase: "ready" });
+    if (name === "engine_status") {
+      const ready = Date.now() >= window.__engineReadyAt;
+      if (ready && !window.__startupMarks.engineReadyAt) window.__startupMarks.engineReadyAt = Date.now();
+      return Promise.resolve({ phase: ready ? "ready" : "starting" });
+    }
     if (name === "aivis_status") return Promise.resolve({ enabled: true, up: Date.now() >= window.__bootReadyAt });
+    if (name === "pet_prepare_voice_model") return new Promise(resolve => setTimeout(() => {
+      window.__startupMarks.voiceReadyAt = Date.now();
+      resolve({ enabled: true, ready: true });
+    }, ${JSON.stringify(voiceReadyDelayMs)}));
     // 起動画面の撮影は外部コンポーネント待ちに依存させない。画面起動が非ブロック化されても、
     // 完了通知だけを明示的に遅らせれば同じ起動中DOMを確実に検査できる。
-    if (name === "pet_finish_boot") return new Promise(resolve => setTimeout(() => resolve({}), ${JSON.stringify(bootHoldMs)}));
-    if (name === "pet_speak") return Promise.resolve(
-      ${JSON.stringify(Boolean(voice))} || ${JSON.stringify(characterId)} === "hiyori"
+    if (name === "pet_finish_boot") {
+      window.__startupMarks.finishBootCalledAt = Date.now();
+      return new Promise(resolve => setTimeout(() => resolve({}), ${JSON.stringify(bootHoldMs)}));
+    }
+    if (name === "pet_speak") return new Promise(resolve => setTimeout(() => {
+      window.__startupMarks.speechReadyAt = Date.now();
+      resolve(${JSON.stringify(Boolean(voice))} || ${JSON.stringify(characterId)} === "hiyori"
         ? { enabled: true, mime: "audio/wav", audio: window.__previewVoice }
-        : { enabled: false },
-    );
-    if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), 80));
+        : { enabled: false });
+    }, ${JSON.stringify(speechDelayMs)}));
+    if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), ${JSON.stringify(sendDelayMs)}));
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
     if (name === "settings_components_status") return Promise.resolve([
       { id: "aivis", ready: true, available: true },
       { id: "whisper", ready: false, available: true },
-      { id: "tha3", ready: false, available: true },
       { id: "office", ready: false, available: false },
       { id: "tools", ready: false, available: true },
     ]);
@@ -307,8 +333,9 @@ async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   characterFraming = {},
-  bootHoldMs = 0, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
-  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
+  bootHoldMs = 0, sendDelayMs = 80, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
+  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "", bootRandomValue = null,
+  engineReadyDelayMs = 0, voiceReadyDelayMs = 0, speechDelayMs = 0,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -316,7 +343,25 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }));
+  if (Number.isFinite(bootRandomValue)) {
+    await page.route("**/renderer.js*", async route => {
+      const response = await route.fetch();
+      const source = await response.text();
+      // 乱数を固定して寝姿の選択を検査する。呼び出しの形を変えたらここで気づけるよう、
+      // 見つからなければ差し替えずに失敗させる。
+      const marker = "chooseStartupSleepingCharacter(startupSleepingCandidates(catalog))";
+      if (!source.includes(marker)) throw new Error("起動寝姿のランダム選択箇所を差し替えられません");
+      await route.fulfill({
+        response,
+        contentType: "text/javascript",
+        body: source.replace(
+          marker,
+          `chooseStartupSleepingCharacter(startupSleepingCandidates(catalog), ${JSON.stringify(bootRandomValue)})`,
+        ),
+      });
+    });
+  }
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -371,7 +416,7 @@ async function shootCharacterMatrix() {
   const warnings = [];
   const selectedCharacters = process.env.SHOOT_CHARACTER_IDS
     ? process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean)
-    : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa", "photoreal-prototype"];
+    : ["mugi", "mugi-normal-lvs", "rin", "mai", "sena", "aoi", "photoreal-prototype"];
   const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
     ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
@@ -678,6 +723,14 @@ async function validateLayoutEditor() {
   mkdirSync(output, { recursive: true });
   const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true });
   try {
+    // 前回の失敗で検査用ブラウザに残った極端な配置を次回へ持ち越さない。
+    await page.evaluate(() => {
+      localStorage.removeItem(window.__placementsKey);
+      localStorage.removeItem("picoagent.layoutEditor.v1");
+      localStorage.removeItem("picoagent.layoutEditor.migrated");
+    });
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
   // 上端へカーソルを置いた時だけ現れる実UIを通す。直接clickすると、収納中の5px部分を
   // ウィンドウリサイズ領域が覆う退行を見逃すため、hover → 展開確認 → click の順にする。
   await page.mouse.move(220, 7);
@@ -703,23 +756,99 @@ async function validateLayoutEditor() {
     }
     if (state.framingTransform === "none") throw new Error("Moveableのドラッグで既定のキャラ構図が失われました");
     if (state.dragCalls !== 0) throw new Error("編集モード中にウィンドウドラッグが開始されました");
-    const scaleHandle = page.locator(".moveable-control.moveable-ne");
-    const scaleBox = await scaleHandle.boundingBox();
-    if (!scaleBox) throw new Error("Moveableの拡大縮小ハンドルが見つかりません");
-    await page.mouse.move(scaleBox.x + scaleBox.width / 2, scaleBox.y + scaleBox.height / 2);
+    // 配信形式のキャラ枠は画面より大きく、四隅のハンドルは画面外へ出ることがある
+    // （右下は viewport 下端の外）。掴めるのは画面内に収まっているハンドルだけなので、
+    // 位置を決め打ちせず実際に見えているものを選び、枠の中心へ向けて縮める。
+    const scaleDrag = await page.evaluate(() => {
+      const control = [...document.querySelectorAll(".moveable-control")]
+        .map(node => node.getBoundingClientRect())
+        .find(rect => rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight);
+      if (!control) return null;
+      const frame = document.getElementById("character").getBoundingClientRect();
+      const from = { x: control.x + control.width / 2, y: control.y + control.height / 2 };
+      return {
+        from,
+        to: {
+          x: from.x + Math.sign(frame.x + frame.width / 2 - from.x) * 60,
+          y: from.y + Math.sign(frame.y + frame.height / 2 - from.y) * 60,
+        },
+      };
+    });
+    if (!scaleDrag) throw new Error("画面内に掴めるMoveableの拡大縮小ハンドルがありません");
+    await page.mouse.move(scaleDrag.from.x, scaleDrag.from.y);
     await page.mouse.down();
-    await page.mouse.move(scaleBox.x + scaleBox.width / 2 - 60, scaleBox.y + scaleBox.height / 2 + 60, { steps: 8 });
+    await page.mouse.move(scaleDrag.to.x, scaleDrag.to.y, { steps: 8 });
     await page.mouse.up();
     const scaled = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
     if (!scaled.scale) throw new Error(`Moveableの拡大縮小が反映されませんでした: ${JSON.stringify(scaled)}`);
     await page.locator("#layoutEditorSave").click();
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"));
-    if (!saved.stream?.character?.translate || !saved.stream?.character?.scale) throw new Error("表示形式ごとの編集値が保存されませんでした");
+    const saved = await page.evaluate(() => window.__readPlacements());
+    if (!saved.characters?.mugi?.stream?.translate || !saved.characters?.mugi?.stream?.scale) {
+      throw new Error("キャラごと・表示形式ごとの編集値が保存されませんでした");
+    }
     await page.reload();
     await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
     const restored = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
-    if (restored.translate !== saved.stream.character.translate || restored.scale !== saved.stream.character.scale) {
+    if (restored.translate !== saved.characters.mugi.stream.translate || restored.scale !== saved.characters.mugi.stream.scale) {
       throw new Error("保存した配置が再読み込み後に復元されませんでした");
+    }
+    // 「閉じる」は編集を取り消す操作ではない。保存ボタンを押さなくても変更を記憶する。
+    await page.mouse.move(220, 7);
+    await page.waitForFunction(() => document.getElementById("topWindowMenu").getBoundingClientRect().top > -1);
+    await page.locator("#layoutEditToggle").click();
+    await page.waitForSelector("#layoutEditorToolbar:not([hidden])");
+    const closedEdited = await page.locator("#character").evaluate(node => {
+      node.style.translate = "32px 24px";
+      window.dispatchEvent(new Event("resize"));
+      return node.style.translate;
+    });
+    await page.locator("#layoutEditorClose").click();
+    const closedSaved = await page.evaluate(() => window.__readPlacements());
+    if (closedSaved.characters?.mugi?.stream?.translate !== closedEdited) {
+      throw new Error("配置編集を閉じたときにキャラ位置を記憶できませんでした");
+    }
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+    const closedRestored = await page.locator("#character").evaluate(node => node.style.translate);
+    if (closedRestored !== closedSaved.characters.mugi.stream.translate) {
+      throw new Error(`閉じる時に記憶したキャラ位置を再起動相当で復元できませんでした: ${JSON.stringify({ closedRestored, closedSaved })}`);
+    }
+    // 同じ表示形式でも別キャラへ位置・倍率を漏らさず、戻したキャラでは元の値を復元する。
+    await page.evaluate(() => { document.getElementById("character").dataset.characterId = "rin"; });
+    await page.waitForTimeout(50);
+    const rinInitial = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+    if (rinInitial.translate || rinInitial.scale) throw new Error(`別キャラへ配置が漏れました: ${JSON.stringify(rinInitial)}`);
+    await page.evaluate(() => { document.getElementById("character").dataset.characterId = "mugi"; });
+    await page.waitForTimeout(50);
+    const mugiRestored = await page.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+    if (mugiRestored.translate !== closedSaved.characters.mugi.stream.translate
+        || mugiRestored.scale !== closedSaved.characters.mugi.stream.scale) {
+      throw new Error(`キャラを戻したときに固有配置を復元できませんでした: ${JSON.stringify(mugiRestored)}`);
+    }
+    // 旧版や極端なドラッグで壊れた値が残っても、縮小しすぎず掴み直せる範囲へ戻す。
+    const constrained = await page.locator("#character").evaluate(node => {
+      node.style.translate = "-9999px -9999px";
+      node.style.scale = "0.01 0.01";
+      window.dispatchEvent(new Event("resize"));
+      const visible = [...node.querySelectorAll(".character-view > canvas, .character-view > img")]
+        .find(candidate => getComputedStyle(candidate).display !== "none" && candidate.getBoundingClientRect().width > 1);
+      const rect = (visible || node).getBoundingClientRect();
+      const history = document.getElementById("historyLog")?.getBoundingClientRect();
+      return {
+        translate: node.style.translate,
+        scale: node.style.scale,
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+        historyLeft: history?.left,
+        viewport: { width: innerWidth, height: innerHeight },
+      };
+    });
+    const minScale = Math.min(...constrained.scale.split(/\s+/).map(Number));
+    const centerX = (constrained.rect.left + constrained.rect.right) / 2;
+    const centerY = (constrained.rect.top + constrained.rect.bottom) / 2;
+    const visible = centerX >= 48 && centerX <= constrained.historyLeft - 48
+      && centerY >= 48 && centerY <= constrained.viewport.height - 48;
+    if (minScale < 0.25 || !visible) {
+      throw new Error(`キャラが縮小または移動で画面外へ消えました: ${JSON.stringify(constrained)}`);
     }
     await page.mouse.move(220, 7);
     await page.waitForFunction(() => document.getElementById("topWindowMenu").getBoundingClientRect().top > -1);
@@ -728,10 +857,47 @@ async function validateLayoutEditor() {
     const reset = await page.evaluate(() => ({
       translate: document.getElementById("character")?.style.translate || "",
       scale: document.getElementById("character")?.style.scale || "",
-      saved: JSON.parse(localStorage.getItem("picoagent.layoutEditor.v1") || "{}"),
+      saved: window.__readPlacements(),
     }));
     if (reset.translate || reset.scale || reset.saved.stream) throw new Error("既定配置へ戻せませんでした");
     await page.screenshot({ path: join(output, "stream-editor.png"), omitBackground: true });
+    const restoredLayouts = [];
+    for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      const layoutPage = await openScene({ characterId: "mugi", layout, width, height, forcePng: true });
+      try {
+        await layoutPage.evaluate(() => {
+          localStorage.removeItem(window.__placementsKey);
+          localStorage.removeItem("picoagent.layoutEditor.v1");
+          localStorage.removeItem("picoagent.layoutEditor.migrated");
+        });
+        await layoutPage.reload();
+        await layoutPage.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+        const edited = await layoutPage.evaluate(() => {
+          document.getElementById("layoutEditToggle")?.click();
+          const node = document.getElementById("character");
+          node.style.translate = "18px 12px";
+          node.style.scale = "0.9 0.9";
+          window.dispatchEvent(new Event("resize"));
+          const value = { translate: node.style.translate, scale: node.style.scale };
+          document.getElementById("layoutEditorClose")?.click();
+          return value;
+        });
+        const savedLayout = await layoutPage.evaluate(id => window.__readPlacements().characters?.mugi?.[id], layout);
+        if (savedLayout?.translate !== edited.translate || savedLayout?.scale !== edited.scale) {
+          throw new Error(`${layout}: 閉じる時にキャラ位置・倍率を記憶できませんでした`);
+        }
+        await layoutPage.reload();
+        await layoutPage.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 20000 });
+        const restoredLayout = await layoutPage.locator("#character").evaluate(node => ({ translate: node.style.translate, scale: node.style.scale }));
+        if (restoredLayout.translate !== savedLayout.translate || restoredLayout.scale !== savedLayout.scale) {
+          throw new Error(`${layout}: 再読み込み後にキャラ位置・倍率を復元できませんでした`);
+        }
+        restoredLayouts.push(layout);
+      } finally {
+        await layoutPage.close();
+      }
+    }
+    await writeFile(join(output, "persistence.json"), `${JSON.stringify({ restoredLayouts }, null, 2)}\n`);
     return output;
   } finally {
     await page.close();
@@ -779,12 +945,11 @@ async function validateInteractionMatrix() {
         if (loopPending !== loopExpected) {
           throw new Error(`${target.id}/${layout}: アニメーションループの休止状態が不正です ${JSON.stringify({ loopPending, loopExpected })}`);
         }
+        const dragCallsBefore = await page.evaluate(() => window.__startDraggingCalls || 0);
         await page.locator("#character").dispatchEvent("pointerdown", { button: 0, pointerType: "mouse" });
-        if (await page.evaluate(() => window.__startDraggingCalls) < 1) {
-          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグがウィンドウ移動へ渡りません`);
-        }
-        if (!await page.locator("#petSprite").evaluate((node) => node.hasAttribute("data-tauri-drag-region"))) {
-          throw new Error(`${target.id}/${layout}: キャラ画像にTauriドラッグ領域がありません`);
+        const dragCallsAfter = await page.evaluate(() => window.__startDraggingCalls || 0);
+        if (dragCallsAfter - dragCallsBefore !== 1) {
+          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグ開始が一重に渡りません ${JSON.stringify({ dragCallsBefore, dragCallsAfter })}`);
         }
         await page.evaluate(() => {
           if (typeof openComposer === "function") openComposer();
@@ -1322,6 +1487,47 @@ const clearStatus = (page) => page.evaluate(() => {
   if (status) status.textContent = "";
 });
 
+async function validateThinkingIndicator() {
+  const output = join(ROOT, "temp", "thinking-indicator-qa");
+  mkdirSync(output, { recursive: true });
+  const page = await openScene({ characterId: "mugi", layout: "stream", width: 1280, height: 720, forcePng: true, sendDelayMs: 1200 });
+  try {
+    await submit(page, "考え中表示の確認");
+    await page.waitForSelector(".history-thinking .typing-indicator");
+    const pending = await page.evaluate(() => ({
+      dots: document.querySelectorAll(".history-thinking .typing-dots i").length,
+      label: document.querySelector(".history-thinking .typing-indicator")?.getAttribute("aria-label") || "",
+      statusSpinner: getComputedStyle(document.getElementById("status"), "::before").content,
+      // 文言が無いのに丸い枠だけ浮かせない（配信形式は絶対配置の枠を持つ）。
+      emptyStatusBox: !document.getElementById("status").textContent.trim()
+        && getComputedStyle(document.getElementById("status")).display !== "none",
+      captionLabel: getComputedStyle(document.getElementById("reply"), "::before").content,
+      // 生成中は回答欄の読み上げを保留する（書き変わるたびに読み上げさせない）。
+      replyBusy: document.getElementById("reply")?.getAttribute("aria-busy"),
+    }));
+    if (pending.replyBusy !== "true" || pending.dots !== 3 || !pending.label || pending.emptyStatusBox
+        || (pending.statusSpinner && pending.statusSpinner !== "none")
+        || (pending.captionLabel && pending.captionLabel !== "none")) {
+      throw new Error(`考え中の3点表示が不正です: ${JSON.stringify(pending)}`);
+    }
+    await page.screenshot({ path: join(output, "stream-thinking.png"), omitBackground: true });
+    await page.waitForFunction(() => !document.querySelector(".history-thinking"), null, { timeout: 20000 });
+    const finished = await page.evaluate(() => ({
+      thinkingRows: document.querySelectorAll(".history-thinking").length,
+      typingDots: document.querySelectorAll(".typing-dots i").length,
+      // 回答が出そろったら保留を解く（ここで1回だけ読み上げられる）。
+      replyBusy: document.getElementById("reply")?.getAttribute("aria-busy"),
+    }));
+    if (finished.thinkingRows || finished.typingDots || finished.replyBusy) {
+      throw new Error(`回答後に考え中表示が残りました: ${JSON.stringify(finished)}`);
+    }
+    await writeFile(join(output, "result.json"), `${JSON.stringify({ pending, finished }, null, 2)}\n`);
+    return output;
+  } finally {
+    await page.close();
+  }
+}
+
 // ---------------------------------------------------------------- 録画と書き出し
 
 const FFMPEG = process.env.SHOOT_FFMPEG || "ffmpeg";
@@ -1491,7 +1697,7 @@ const LIVE2D_CHARACTER = "hiyori";
 const LIVE2D_RUNTIME = [
   "ui/vendor/live2d/live2dcubismcore-5.3.min.js",
   "ui/vendor/live2d/live2dcubismcore-compat.min.js",
-  "ui/vendor/live2d/pixi.min.js",
+  "ui/vendor/pixi/pixi.min.js",
   "ui/vendor/live2d/cubism4.min.js",
 ];
 const LIVE2D_REQUIRED = [...LIVE2D_RUNTIME, `ui/assets/characters/${LIVE2D_CHARACTER}/live2d`];
@@ -1617,12 +1823,12 @@ const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // 対応キャラは録画中に実際の口開閉が1回以上起きたことまで検査する。
 // 高解像度の比較・保管を明示した場合は、実画面を2倍密度で描画してから960pxへ縮小する。
-// README／LP公開用はこの生描画から480pxへ直接書き出し、既存WebPを再圧縮しない。
+// README／LP公開用はこの生描画から960pxへ直接書き出し、既存WebPを再圧縮しない。
 const GALLERY_SCENE = {
   layout: "pet", width: 900, height: 600, deviceScaleFactor: 2,
   seconds: 12, fps: 30, outputWidth: 960,
-  // README／LPは同じ生PNGから480px・16fpsへ直接書き出す。既存WebPの再エンコードは禁止。
-  siteSeconds: 6, siteOutputWidth: 480, siteOutputFps: 16, siteQuality: 50, voice: true,
+  // README／LPは同じ生PNGから960px・16fpsへ直接書き出す。既存WebPの再エンコードは禁止。
+  siteSeconds: 6, siteOutputWidth: 960, siteOutputFps: 16, siteQuality: 85, voice: true,
 };
 
 // 低頭身のむぎはアプリ既定の上半身構図だと、小さいLP／README枠で顔だけが
@@ -1729,10 +1935,9 @@ const GALLERY = [
   ["mugi", "おはよう！えへへ、今日もそばで見てるね。まずはやること、3つに絞ろっか。"],
   ["rin", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
   ["mai", "おはよう。あせらなくて大丈夫よ、ゆっくり一緒に進めましょう。"],
-  ["koharu", "おはよう。今日のこと、気軽に話してね。"],
   ["sena", "おはよう。今日のステージも、きれいに仕上げようか。"],
-  ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
-  ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
+  ["aoi", "こんにちは。気になることを、一緒に丁寧に確かめましょう。"],
+  ["mugi-normal-lvs", "こんにちは。今日もいっしょに、のんびり進めようね。"],
   ["photoreal-prototype", "こんにちは。焦らず、今日やることから一緒に整理しましょう。"],
   ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", "live2d"],
   ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", "live2d"],
@@ -1751,7 +1956,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"])
     reply,
     prepare: galleryPrepare(id, kind),
     step: galleryStep,
-    siteQuality: kind === "live2d" ? 45 : 50,
+    siteQuality: 85,
     verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
@@ -1772,14 +1977,14 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     reply,
     prepare: galleryPrepare(id, kind),
     step: galleryStep,
-    siteQuality: kind === "live2d" ? 50 : 55,
+    siteQuality: 85,
     verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
 ]));
 
 // LPへ出す自前キャラはrelease.jsonを正本にし、公式Live2Dサンプルだけを動作例として加える。
-// README専用のrin-tha3など、販売対象外の試作をLP資産へ混ぜない。
+// 販売対象外の試作をLP資産へ混ぜない。
 const RELEASE = JSON.parse(await readFile(join(ROOT, "distribution", "release.json"), "utf8"));
 const SITE_GALLERY_IDS = new Set([
   ...(RELEASE.includedCharacters || []),
@@ -1799,7 +2004,7 @@ const README_GALLERY_FILES = new Set([
 const SHOTS = {
   ...GALLERY_SHOTS,
   ...GALLERY_STREAM_SHOTS,
-  "main-light.webp": { prepare: startReply() },
+  "main-light.webp": { width: 900, height: 600, layout: "pet", deviceScaleFactor: 2, characterFraming: MUGI_PUBLIC_FRAMING, ...DISTRIBUTION_SCENE, outputWidth: 960, voice: true, prepare: prepareDistribution2D, step: distributionStep },
   "main-dark.webp": { theme: "dark", prepare: startReply() },
   "composer-light.webp": {
     reply: COMPOSER_REPLY,
@@ -1809,6 +2014,7 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
+  "live2d-motion.webp": { width: 900, height: 600, layout: "pet", deviceScaleFactor: 2, ...DISTRIBUTION_SCENE, outputWidth: 960, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   "distribution-main.webp": { width: 900, height: 600, layout: "pet", characterFraming: MUGI_PUBLIC_FRAMING, ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
   "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
@@ -1931,6 +2137,115 @@ if (process.env.SHOOT_STARTUP_FAILURES) {
   process.exit(0);
 }
 
+if (process.env.SHOOT_THINKING_INDICATOR) {
+  const output = await validateThinkingIndicator();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`考え中表示検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_BOOT_RANDOM) {
+  const output = join(ROOT, "temp", "boot-random-qa");
+  mkdirSync(output, { recursive: true });
+  // 期待値は一覧（characters/index.json）から導く。キャラを足しても検査が追従する。
+  const bootIndex = JSON.parse(await readFile(join(ROOT, "characters", "index.json"), "utf8"));
+  const sleepingIds = (bootIndex.characters || [])
+    .filter(entry => entry.bootSleeping === true)
+    .map(entry => entry.id);
+  if (sleepingIds.length < 2) throw new Error(`寝姿を持つキャラが足りません: ${sleepingIds.join(",")}`);
+  const pick = value => sleepingIds[Math.min(sleepingIds.length - 1, Math.floor(value * sleepingIds.length))];
+  const cases = [0.05, 0.45, 0.85].map(value => ({ value, expected: pick(value) }));
+  const results = [];
+  for (const item of cases) {
+    // 選択中キャラを寝姿3体以外にして、起動用の絵が選択キャラへ引きずられないことも確認する。
+    const page = await openScene({ characterId: "hiyori", layout: "pet", bootHoldMs: 4000, waitForReady: false, bootRandomValue: item.value });
+    await page.waitForFunction(expected => {
+      const app = document.getElementById("petApp");
+      const image = document.getElementById("bootPetImage");
+      return app?.classList.contains("is-booting") && app?.dataset.bootCharacterId === expected
+        && image?.complete && image.naturalWidth > 0 && image.src.includes(`/assets/characters/${expected}/boot/sleeping.png`);
+    }, item.expected, { timeout: 10000 });
+    const state = await page.evaluate(() => ({
+      selectedCharacterId: typeof characterManifest === "object" ? characterManifest?.id || "" : "",
+      bootCharacterId: document.getElementById("petApp")?.dataset.bootCharacterId || "",
+      bootImage: document.getElementById("bootPetImage")?.src || "",
+    }));
+    const file = join(output, `${item.expected}.png`);
+    await page.screenshot({ path: file, omitBackground: true });
+    results.push({ ...item, ...state, file });
+    await page.close();
+  }
+  await writeFile(join(output, "result.json"), `${JSON.stringify({ results }, null, 2)}\n`);
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`起動寝姿ランダム検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_STARTUP_READINESS) {
+  const page = await openScene({
+    characterId: "mugi",
+    layout: "pet",
+    voice: true,
+    waitForReady: false,
+    engineReadyDelayMs: 700,
+    voiceReadyDelayMs: 600,
+    speechDelayMs: 500,
+  });
+  await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("is-booting"));
+  await page.waitForTimeout(900);
+  const releasedTooEarly = await page.evaluate(() => !document.getElementById("petApp")?.classList.contains("is-booting"));
+  if (releasedTooEarly) throw new Error("AIまたは音声の準備中に起動画面を終了しました");
+  await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 10000 });
+  const result = await page.evaluate(() => ({
+    marks: window.__startupMarks,
+    booting: document.getElementById("petApp")?.classList.contains("is-booting"),
+    status: document.getElementById("status")?.textContent || "",
+  }));
+  const { engineReadyAt, voiceReadyAt, speechReadyAt, finishBootCalledAt } = result.marks;
+  if (!(engineReadyAt <= voiceReadyAt && voiceReadyAt <= speechReadyAt && speechReadyAt <= finishBootCalledAt)) {
+    throw new Error(`起動準備の順序が不正です: ${JSON.stringify(result)}`);
+  }
+  const output = join(ROOT, "temp", "startup-readiness-qa");
+  mkdirSync(output, { recursive: true });
+  await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
+  await page.screenshot({ path: join(output, "ready.png"), omitBackground: true });
+  await page.close();
+
+  // 初回セットアップはローカルAIを使わない。数GBの取得を待たずに案内まで進むこと。
+  const firstRun = await openScene({
+    characterId: "mugi",
+    layout: "pet",
+    waitForReady: false,
+    onboardingDone: false,
+    engineReadyDelayMs: 8000,
+  });
+  await firstRun.waitForFunction(
+    () => !document.getElementById("petApp")?.classList.contains("is-booting"),
+    null,
+    { timeout: 6000 },
+  );
+  const firstRunState = await firstRun.evaluate(() => ({
+    engineReady: Date.now() >= window.__engineReadyAt,
+    onboardingVisible: document.getElementById("onboarding")?.hidden === false,
+    sendDisabled: document.getElementById("sendButton")?.disabled === true,
+  }));
+  if (firstRunState.engineReady || !firstRunState.onboardingVisible || !firstRunState.sendDisabled) {
+    throw new Error(`初回セットアップの案内条件が崩れています: ${JSON.stringify(firstRunState)}`);
+  }
+  await firstRun.screenshot({ path: join(output, "first-run.png"), omitBackground: true });
+  await writeFile(join(output, "first-run.json"), `${JSON.stringify(firstRunState, null, 2)}\n`);
+  await firstRun.close();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`起動準備順序検査完了（初回セットアップの非待機を含む）: ${output}`);
+  process.exit(0);
+}
+
 if (!ffmpegAvailable) {
   throw new Error(
     `${FFMPEG} を実行できません。動く絵の書き出しに使います。` +
@@ -2008,10 +2323,10 @@ if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
   // 今回書いていない古いファイルを検査するか、未生成でENOENTになる。
   const bytes = (await Promise.all(galleryFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
-  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-noa.webp", "character-photoreal-prototype.webp"];
+  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-aoi.webp", "character-photoreal-prototype.webp"];
   const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
-  if (bytes > 15_000_000 || indexBytes > 5_000_000) {
+  if (bytes > 80_000_000 || indexBytes > 20_000_000) {
     throw new Error(`LP画像容量が上限を超えています: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
   }
   console.log(`LP画像容量: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
@@ -2023,7 +2338,7 @@ if (README_GALLERY && !only.length && !failed && !skipped.length) {
   })));
   const total = sizes.reduce((sum, item) => sum + item.size, 0);
   const largest = sizes.reduce((left, right) => left.size >= right.size ? left : right);
-  if (total > 20_000_000 || largest.size > 2_000_000) {
+  if (total > 80_000_000 || largest.size > 8_000_000) {
     throw new Error(`README画像容量が上限を超えています: 合計${(total / 1_000_000).toFixed(2)}MB / 最大${(largest.size / 1_000_000).toFixed(2)}MB（${largest.name}）`);
   }
   console.log(`README画像容量: 合計${(total / 1_000_000).toFixed(2)}MB / 最大${(largest.size / 1_000_000).toFixed(2)}MB（${largest.name}）`);

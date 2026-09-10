@@ -58,8 +58,18 @@ impl Tool for WebFetchTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS", "web_fetch の許可ドメイン（空なら制限なし）", "textarea", "example.com,docs.example.com"),
-            Field::new("PICOAGENT_WEB_FETCH_TIMEOUT_SECS", "web_fetch の待ち時間（秒、3〜60）", "text", "20"),
+            Field::new(
+                "PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS",
+                "web_fetch の許可ドメイン（空なら制限なし）",
+                "textarea",
+                "example.com,docs.example.com",
+            ),
+            Field::new(
+                "PICOAGENT_WEB_FETCH_TIMEOUT_SECS",
+                "web_fetch の待ち時間（秒、3〜60）",
+                "text",
+                "20",
+            ),
         ]
     }
 
@@ -74,7 +84,10 @@ impl Tool for WebFetchTool {
             Err(error) => return format!("エラー: url の解析に失敗しました: {}", error),
         };
         if !allowed_domain(cfg, &url) {
-            return format!("エラー: 許可されていないドメインです: {}", url.host_str().unwrap_or(""));
+            return format!(
+                "エラー: 許可されていないドメインです: {}",
+                url.host_str().unwrap_or("")
+            );
         }
         let timeout_secs = cfg
             .get("PICOAGENT_WEB_FETCH_TIMEOUT_SECS", "20")
@@ -90,7 +103,10 @@ impl Tool for WebFetchTool {
                 Err(error) => return format!("エラー: URL取得先を拒否しました: {error}"),
             };
             if !allowed_domain(cfg, &current) {
-                return format!("エラー: 許可されていないドメインです: {}", current.host_str().unwrap_or(""));
+                return format!(
+                    "エラー: 許可されていないドメインです: {}",
+                    current.host_str().unwrap_or("")
+                );
             }
             let host = current.host_str().unwrap_or_default();
             let client = match reqwest::Client::builder()
