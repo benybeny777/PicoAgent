@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct MakerConfig {
-    pub runtime_root: PathBuf,
+    pub component_root: PathBuf,
+    pub python_root: PathBuf,
     pub models_root: PathBuf,
     pub completion_steps: u32,
     pub completion_seed: u32,
@@ -29,10 +30,11 @@ pub struct MakerConfig {
 }
 
 impl MakerConfig {
-    pub fn managed(runtime_root: PathBuf) -> Self {
-        let models_root = runtime_root.join("models");
+    pub fn managed(component_root: PathBuf, python_root: PathBuf) -> Self {
+        let models_root = component_root.join("models");
         Self {
-            runtime_root,
+            component_root,
+            python_root,
             models_root,
             completion_steps: 50,
             completion_seed: 777,
@@ -60,10 +62,10 @@ impl MakerConfig {
     }
 
     pub fn python(&self) -> PathBuf {
-        self.runtime_root.join("python/Scripts/python.exe")
+        self.python_root.join("Scripts/python.exe")
     }
 
     pub fn comfy(&self) -> PathBuf {
-        self.runtime_root.join("ComfyUI")
+        self.component_root.join("ComfyUI")
     }
 }

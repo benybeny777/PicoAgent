@@ -1,16 +1,19 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use picoagent_character_maker::{
     config::MakerConfig,
     generation_reference::Reader,
     pipeline::{CharacterManifest, NewCharacter, PipelineContext, STAGES},
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -26,11 +29,19 @@ impl CharacterMakerState {
             cancellation: std::sync::Mutex::new(None),
         }
     }
+
+    pub fn is_running(&self) -> bool {
+        self.cancellation
+            .lock()
+            .map(|active| active.is_some())
+            .unwrap_or(true)
+    }
 }
 
 fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
     let data = crate::log_paths::data_dir(app);
-    let managed = crate::log_paths::bundled_dir(app).join("character-maker");
+    let bundled = crate::log_paths::bundled_dir(app);
+    let managed = bundled.join("character-maker");
     let installed_assets = app
         .path()
         .resource_dir()
@@ -50,7 +61,7 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
             characters_root: data.join("character-maker/characters"),
             assets_root,
         },
-        MakerConfig::managed(managed),
+        MakerConfig::managed(managed, bundled.join("python")),
     ))
 }
 
@@ -127,10 +138,20 @@ pub async fn settings_character_maker_run(
                 stage,
                 cancelled.clone(),
                 move |progress| {
-                    let _ = event_app.emit("character-maker:progress", progress);
+                    if let Err(error) = event_app.emit("character-maker:progress", progress) {
+                        crate::log_paths::append_app_log(
+                            &event_app,
+                            &format!("キャラ作成の進捗通知に失敗しました: {error}"),
+                        );
+                    }
                 },
             )?;
-            let _ = task_app.emit("character-maker:state", &manifest);
+            if let Err(error) = task_app.emit("character-maker:state", &manifest) {
+                crate::log_paths::append_app_log(
+                    &task_app,
+                    &format!("キャラ作成の状態通知に失敗しました: {error}"),
+                );
+            }
         }
         Ok::<_, picoagent_character_maker::pipeline::PipelineError>(manifest)
     })
@@ -169,7 +190,12 @@ pub fn settings_character_maker_install(
 fn install_completed(app: &AppHandle, character_id: &str) -> Result<Value> {
     let (pipeline, config) = paths(app)?;
     let manifest = pipeline.load_character(character_id)?;
-    if manifest.stages.get("complete").map(|stage| stage.status.as_str()) != Some("complete") {
+    if manifest
+        .stages
+        .get("complete")
+        .map(|stage| stage.status.as_str())
+        != Some("complete")
+    {
         bail!("complete工程が完了していません");
     }
     let source = pipeline.character_dir(character_id)?;
@@ -181,7 +207,10 @@ fn install_completed(app: &AppHandle, character_id: &str) -> Result<Value> {
         .tempdir_in(staging_parent)?;
     let pack = staging.path();
     fs::create_dir_all(pack.join("rig2d/parts"))?;
-    fs::copy(reader.directory.join("rig.json"), pack.join("rig2d/rig.json"))?;
+    fs::copy(
+        reader.directory.join("rig.json"),
+        pack.join("rig2d/rig.json"),
+    )?;
     for entry in fs::read_dir(reader.directory.join("parts"))? {
         let entry = entry?;
         let name = entry.file_name();
@@ -193,7 +222,9 @@ fn install_completed(app: &AppHandle, character_id: &str) -> Result<Value> {
     }
     fs::copy(source.join("source/input.png"), pack.join("preview.png"))?;
     let rig_bytes = fs::read(pack.join("rig2d/rig.json"))?;
-    let version = format!("lvs-schema3-{}", &hex::encode(Sha256::digest(&rig_bytes))[..16]);
+    let rig_digest = hex::encode(Sha256::digest(&rig_bytes));
+    let short_digest = rig_digest.chars().take(16).collect::<String>();
+    let version = format!("lvs-schema3-{short_digest}");
     crate::store::write_json_atomic(
         &pack.join("character.json"),
         &json!({
@@ -211,11 +242,8 @@ fn install_completed(app: &AppHandle, character_id: &str) -> Result<Value> {
         }),
     )?;
     reader.finish()?;
-    let (id, name, updated) = crate::user_characters::install_or_update_generated(
-        app,
-        pack,
-        &manifest.character_id,
-    )?;
+    let (id, name, updated) =
+        crate::user_characters::install_or_update_generated(app, pack, &manifest.character_id)?;
     Ok(json!({ "ok": true, "id": id, "name": name, "updated": updated }))
 }
 
@@ -234,8 +262,13 @@ mod tests {
 
     #[test]
     fn source_does_not_reference_the_retired_product_paths() {
-        let source = include_str!("character_maker.rs");
-        for retired in ["mesh/generate.py", "rigging/generate.py", "facepatch", "obs"] {
+        let source = include_str!("../../character-maker/src/pipeline.rs");
+        for retired in [
+            "mesh/generate.py",
+            "rigging/generate.py",
+            "facepatch",
+            "obs",
+        ] {
             assert!(!source.contains(retired), "旧経路が残っています: {retired}");
         }
     }

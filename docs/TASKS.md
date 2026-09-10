@@ -67,12 +67,12 @@
 
 LocalVTuberStudioの現行4工程 `isolate → decompose → rig2d → complete` を、PicoAgentの「キャラ作成」から実行できるようにする。完成済みパックの登録とは入口を分けるが、出力は既存の `lvs-anime25d-v1` schema 3とし、描画器やキャラ固有の変換処理を増やさない。
 
-この機能は初期状態では未導入とする。Windows 10/11 x64かつCUDA対応NVIDIA GPUを確認し、利用者が「追加機能・更新」で必要容量・所要時間・ライセンス表示を読んで明示選択した場合だけ、PicoAgent管理領域へPython 3.12、ComfyUI、固定モデルを取得する。既存のComfyUI、Python、Hugging Faceキャッシュ、ポートを利用・変更せず、macOS／Linux／AMD／Intel環境では大容量ファイルを取得しない。
+この機能は初期状態では未導入とする。Windows 10/11 x64かつCUDA対応NVIDIA GPUと85GB以上の空きを確認し、利用者が「追加機能・更新」で実測約77GB・所要時間・ライセンス表示を読んで明示選択した場合だけ、PicoAgent管理領域へ共通Python 3.12を1環境、ComfyUI、固定モデルを取得する。THA3は廃止済みで復活させない。既存のComfyUI、システムPython、Hugging Faceキャッシュ、ポートを利用・変更せず、macOS／Linux／AMD／Intel環境では大容量ファイルを取得しない。
 
 | 段階 | 実施内容 | 完了条件 |
 |---|---|---|
 | 1. コア移植 | `00_test`の現行生成コードから、4工程、原子的状態保存、不変公開世代、Windowsプロセスツリー回収だけをPicoAgent管理モジュールへ移す。旧3D、OBS、背景、会話、音声は持ち込まない | 同じ入力と固定設定でLocalVTuberStudio単体と同じschema 3、素材SHA、失敗理由を得る。上流工程の再実行で下流だけを失効し、途中成果物から再開できる |
-| 2. 管理導入 | 追加機能管理へキャラ作成ランタイムを追加し、Python 3.12/CUDA/PyTorch、ComfyUI、rembg、Grounding DINO、SAM 2.1、Qwen-Image-Edit-2511を固定版・SHA-256・ライセンス・取得前の十進GB表示付きで導入する | 対応GPUと利用意思の確認前は取得0件。中断再開、SHA不一致拒否、更新失敗時の旧版維持、正常終了後の`.part`／staging回収、削除時の生成済みキャラ保持を実ファイルで確認する |
+| 2. 管理導入 | 追加機能管理へキャラ作成ランタイムを追加し、共通Python 3.12/CUDA/PyTorch、ComfyUI、rembg、Grounding DINO、SAM 2.1、Qwen-Image-Edit-2511を固定版・SHA-256・ライセンス・取得前の約77GB表示付きで導入する | 対応GPU、85GB以上の空き、利用意思の確認前は取得0件。中断再開、SHA不一致拒否、更新失敗時の旧版維持、正常終了後の`.part`／staging回収、削除時の生成済みキャラ保持を実ファイルで確認する |
 | 3. 作成画面 | 「キャラ作成」タブへ原画、表示名、人格、同一性タグ、全工程／失敗工程から再開、停止、工程別進捗を追加する。原画は`source/input.png`へ一度だけ保存し上書きしない | 数分以上の実行でも画面に`pending / running / complete / failed`と理由を表示し、停止後に所有プロセスだけを回収する。PicoAgentを再起動しても状態と直前の公開済み世代を復元する |
 | 4. 登録と更新 | 完成世代を既存`character_pack.rs`で再検証し、`app_data_dir/characters/<id>/`へstagingから原子的に登録する。既存キャラの更新では、同じ生成元IDと入力SHAが一致する場合だけ置換候補にし、人格、音声上書き、構図、会話履歴を保持する | 新規作成は生成成功後だけ一覧へ現れる。更新失敗時は旧キャラを表示し続ける。同梱キャラは開発時の明示取込だけで更新し、利用者データ領域から製品同梱資産を上書きしない |
 | 5. 実機・配布検証 | RTX 5060 Laptop GPUで未知原画を完走し、PicoAgentの通常／配信／チャット／バー／作業／ウィジェットで原画、透過、閉眼、口2軸、表情、待機動作を確認する | CPUテスト、`cargo xtask verify`、オフライン生成、外向き通信ガード、実GPU完走、実画面目視を分けて記録する。既知実測のRSS約16.3 GB・GPU約7.6 GBを再測定し、初回取得容量と1体の全工程時間を画面・README・PR本文へ反映する |

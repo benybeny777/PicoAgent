@@ -984,7 +984,11 @@ pub async fn settings_components_install(
     ids: Vec<String>,
     enable_tts: Option<bool>,
     state: State<'_, AppState>,
+    maker: State<'_, crate::character_maker::CharacterMakerState>,
 ) -> Result<Value, String> {
+    if ids.iter().any(|id| id == "character-maker") && maker.is_running() {
+        return Err("キャラクター生成中は管理ランタイムを更新できません".into());
+    }
     let installed = crate::components::install(&app, &ids)
         .await
         .map_err(|error| {
@@ -1024,7 +1028,14 @@ fn enable_tts_after_component_install(ids: &[String], requested: Option<bool>) -
 
 /// 利用者が選んだ追加コンポーネントだけをPicoAgent専用領域から削除する。
 #[tauri::command]
-pub async fn settings_components_remove(app: AppHandle, id: String) -> Result<Value, String> {
+pub async fn settings_components_remove(
+    app: AppHandle,
+    id: String,
+    maker: State<'_, crate::character_maker::CharacterMakerState>,
+) -> Result<Value, String> {
+    if id == "character-maker" && maker.is_running() {
+        return Err("キャラクター生成中は管理ランタイムを削除できません".into());
+    }
     crate::components::remove(&app, &id)
         .await
         .and_then(|items| serde_json::to_value(items).map_err(Into::into))

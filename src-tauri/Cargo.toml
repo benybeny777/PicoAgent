@@ -78,6 +78,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_UI_Shell",
+    "Win32_Storage_FileSystem",
     # 総メモリ量・GPU 名の取得（PowerShell 経由の WMI 問い合わせを置き換える）。
     "Win32_System_SystemInformation",
     "Win32_Graphics_Gdi",

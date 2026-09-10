@@ -25,6 +25,24 @@
         }
       ]
     },
+    "character-maker": {
+      "installMode": "managed",
+      "targetVersion": "2026.09.10",
+      "sources": [
+        {
+          "name": "Python公式配布",
+          "url": "https://www.python.org/downloads/release/python-31213/"
+        },
+        {
+          "name": "ComfyUI v0.34.0 公式GitHub",
+          "url": "https://github.com/Comfy-Org/ComfyUI/tree/v0.34.0"
+        },
+        {
+          "name": "採用モデルの公式配布元と固定値",
+          "url": "https://github.com/benybeny777/PicoAgent/blob/main/docs/models.md"
+        }
+      ]
+    },
     "office": {
       "installMode": "external",
       "sources": [

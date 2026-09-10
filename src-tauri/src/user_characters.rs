@@ -464,7 +464,9 @@ pub fn install_or_update_generated(
     let staging = root.join(format!(".updating-{}", std::process::id()));
     let backup = root.join(format!(".update-backup-{}", std::process::id()));
     if staging.exists() || backup.exists() {
-        bail!("以前のキャラクター更新が完了していません。PicoAgentを再起動してから再試行してください");
+        bail!(
+            "以前のキャラクター更新が完了していません。PicoAgentを再起動してから再試行してください"
+        );
     }
     copy_dir(source, &staging)?;
     let result = (|| -> Result<(String, String, bool)> {
@@ -481,7 +483,8 @@ pub fn install_or_update_generated(
         let destination = root.join(&id);
         let updated = destination.exists();
         if updated {
-            let current: Value = serde_json::from_slice(&std::fs::read(destination.join("character.json"))?)?;
+            let current: Value =
+                serde_json::from_slice(&std::fs::read(destination.join("character.json"))?)?;
             let current_source = current
                 .pointer("/characterMaker/sourceCharacterId")
                 .and_then(Value::as_str);

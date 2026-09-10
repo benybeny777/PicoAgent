@@ -12,14 +12,31 @@
 // 追加すること。
 
 /// `bundle.resources` に書いてよいもの。追加するときは、なぜ製品へ同梱するのかを書き添える。
-const ALLOWED_RESOURCES: [(&str, &str); 2] = [
+const ALLOWED_RESOURCES: [(&str, &str, &str); 5] = [
     (
         "resources/bundled/**/*",
+        "resources/bundled/",
         "通常ビルド用の同梱エンジン・追加機能実行ファイル",
     ),
     (
         "resources/component-manifest.json",
+        "resources/component-manifest.json",
         "軽量配布版が第三者追加機能の公式取得元と導入方式を表示・検証するためのマニフェスト",
+    ),
+    (
+        "../character-maker/sidecar/**/*",
+        "character-maker/sidecar/",
+        "キャラ作成の4工程をローカル実行するPythonサイドカー",
+    ),
+    (
+        "../character-maker/installer/setup-runtime-models.py",
+        "character-maker/installer/setup-runtime-models.py",
+        "固定ハッシュのローカルモデルを導入する実行時インストーラー",
+    ),
+    (
+        "../character-maker/workflows/**/*",
+        "character-maker/workflows/",
+        "標準ノードだけで動かす固定ComfyUIワークフロー",
     ),
 ];
 
@@ -123,23 +140,32 @@ mod guard {
     fn 製品へ同梱するリソースは許可したものだけ() {
         let conf = tauri_conf();
         let resources = conf["bundle"]["resources"]
-            .as_array()
-            .expect("bundle.resources が配列でない");
+            .as_object()
+            .expect("bundle.resources が配置先付きオブジェクトでない");
         let mut violations = Vec::new();
-        for value in resources {
-            let pattern = value.as_str().unwrap_or_default();
+        for (pattern, destination) in resources {
+            let destination = destination.as_str().unwrap_or_default();
             if !ALLOWED_RESOURCES
                 .iter()
-                .any(|(allowed, _)| *allowed == pattern)
+                .any(|(allowed, expected, _)| *allowed == pattern && *expected == destination)
             {
-                violations.push(pattern.to_string());
+                violations.push(format!("{pattern} -> {destination}"));
             }
         }
+        let missing: Vec<&str> = ALLOWED_RESOURCES
+            .iter()
+            .map(|(allowed, _, _)| *allowed)
+            .filter(|allowed| !resources.contains_key(*allowed))
+            .collect();
         assert!(
             violations.is_empty(),
             "製品へ同梱するリソースが増えています。開発用のツール・ドキュメント・画像を\
              配布物へ入れないでください。本当に必要なら bundle_scope::ALLOWED_RESOURCES へ\
              理由付きで追加してください: {violations:?}"
+        );
+        assert!(
+            missing.is_empty(),
+            "製品に必要なリソース指定が欠けています: {missing:?}"
         );
 
         // 配信元がすり替わると ui/ 以外が製品へ入りうるので、ここも固定する。

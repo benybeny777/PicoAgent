@@ -530,6 +530,8 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 
 ### キャラクターパック
 
+設定の「キャラ作成」は`isolate → decompose → rig2d → complete`を順に実行し、完成検査済みの`lvs-anime25d-v1` schema 3だけを追加キャラクターへ反映する。管理ランタイムはWindows 10/11 x64・CUDA対応NVIDIA GPU専用で、初回導入前に85GB以上の空きを要求する。実測配置量は約77GBである。Python 3.12は`bundled/python`の共通1環境だけを使い、廃止済みTHA3は復活させない。ComfyUIとモデルは`bundled/character-maker`へ置き、利用者の既存環境を参照しない。
+
 独自メッシュの表情・口・発話連動の二次動作の正規描画は`ui/mesh-rig.js`とする。両形式が共通の発話状態を更新し、固定表情の開口は胸の駆動へ混ぜない。旧リグの任意`anchors`は原画SHAを照合したDINO/SAM解析から生成し、`facialLandmarksSource`へ出自を記録する。測定した口以外を開口差分へ含めない。詳細は[メッシュリグ設計](docs/MESH-RIG.md)を参照。
 
 通常2Dの構図倍率は285×315pxの小さい合成面を`transform: scale()`で引き伸ばさず、要素の実寸へ反映して高解像度の原画を最終表示寸法へ直接縮小描画する。Live2Dは表示倍率とモニターDPIに応じたbacking bufferを確保し、低解像度キャンバスを拡大しない。

@@ -20,7 +20,7 @@ use tauri::{AppHandle, Emitter, Manager};
 const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
-const COMPONENT_IDS: [&str; 4] = ["aivis", "whisper", "office", "tools"];
+const COMPONENT_IDS: [&str; 5] = ["aivis", "whisper", "character-maker", "office", "tools"];
 const WHISPER_RELEASE_API: &str =
     "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest";
 const WHISPER_MODEL_URL: &str =
@@ -127,6 +127,11 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
             "音声入力・文字起こし",
             "whisper.cpp本体とsmallモデルを各公式配布元から直接取得します。",
             "約0.5GB",
+        )),
+        "character-maker" => Some((
+            "キャラクター作成",
+            "Python 3.12、ComfyUI、背景除去・部位分解・局所補完モデルをPicoAgent専用領域へ導入します。CUDA対応NVIDIA GPU専用です。",
+            "約77GB（導入後、作業領域は別。空き85GB以上が必要）",
         )),
         "office" => Some((
             "Office変換",
@@ -243,6 +248,7 @@ fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
 fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
     let manifest_name = match id {
         "aivis" => "engine_manifest.json",
+        "character-maker" => "install.json",
         _ => return Ok(None),
     };
     let path = root.join(manifest_name);
@@ -329,7 +335,15 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 .get(id)
                 .with_context(|| format!("{id} の取得元情報がありません"))?
                 .clone();
-            let installed = installed_dir(app, id).is_dir();
+            let installed = if id == "character-maker" {
+                installed_dir(app, id).join("install.json").is_file()
+                    && crate::log_paths::bundled_dir(app)
+                        .join("python/Scripts/python.exe")
+                        .is_file()
+                    && installed_dir(app, id).join("ComfyUI/main.py").is_file()
+            } else {
+                installed_dir(app, id).is_dir()
+            };
             let packaged_root = packaged_dir(app, id).or_else(|| development_dir(id));
             let packaged = packaged_root.is_some();
             let system = external_ready(id);
@@ -421,6 +435,8 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
         crate::aivis::stop(app);
     }
     let target = installed_dir(app, id);
+    let shared_python =
+        (id == "character-maker").then(|| crate::log_paths::bundled_dir(app).join("python"));
     let label = definitions(id).map(|item| item.0).unwrap_or(id).to_string();
     emit_progress(app, id, "remove", "削除中…", 0, 0);
     tokio::task::spawn_blocking(move || {
@@ -428,6 +444,13 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
             std::fs::remove_dir_all(&target).with_context(|| {
                 format!("{label} を削除できません。使用中の機能を終了して再試行してください")
             })?;
+        }
+        if let Some(shared_python) = shared_python {
+            if shared_python.exists() {
+                std::fs::remove_dir_all(&shared_python).with_context(|| {
+                    format!("共通Pythonを削除できません: {}", shared_python.display())
+                })?;
+            }
         }
         Ok::<_, anyhow::Error>(())
     })
@@ -486,10 +509,263 @@ pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentSta
                 emit_progress(app, id, "ready", "Aivisを導入しました", 0, 0);
             }
             "whisper" => install_whisper(app).await?,
+            "character-maker" => install_character_maker(app).await?,
             _ => anyhow::bail!("{id} は自動導入の対象ではありません"),
         }
     }
     statuses(app)
+}
+
+async fn install_character_maker(app: &AppHandle) -> Result<()> {
+    anyhow::ensure!(
+        cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "キャラクター作成はWindows x64専用です"
+    );
+    let gpu = tokio::task::spawn_blocking(|| {
+        crate::tools::process::command_sync("nvidia-smi.exe")
+            .args(["--query-gpu=name", "--format=csv,noheader"])
+            .stdin(Stdio::null())
+            .output()
+    })
+    .await??;
+    anyhow::ensure!(
+        gpu.status.success() && !gpu.stdout.is_empty(),
+        "CUDA対応NVIDIA GPUを確認できません。何も取得していません"
+    );
+    let bundled = crate::log_paths::bundled_dir(app);
+    std::fs::create_dir_all(&bundled)?;
+    anyhow::ensure!(
+        free_disk_bytes(&bundled)? >= 85_000_000_000,
+        "キャラクター作成の導入には85GB以上の空き容量が必要です。何も取得していません"
+    );
+
+    const UV_URL: &str =
+        "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip";
+    const UV_SHA: &str = "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9";
+    const COMFY_URL: &str =
+        "https://github.com/Comfy-Org/ComfyUI/archive/12d5279438bfefc058a269eae805ceab6047777f.zip";
+    const COMFY_SHA: &str = "a3c51a42bc7568d4b57267af3a1aa86a6cb379a199f95a90e8e3679c52651241";
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .user_agent("PicoAgent/1.0 character maker installer")
+        .build()?;
+    let cache = app
+        .path()
+        .app_cache_dir()?
+        .join("character-maker-installer");
+    let stage = installed_dir(app, "character-maker").with_file_name(format!(
+        ".installing-character-maker-{}",
+        std::process::id()
+    ));
+    let python_stage = crate::log_paths::bundled_dir(app)
+        .join(format!(".installing-python-{}", std::process::id()));
+    cleanup_dir(app, "古いキャラ作成導入途中フォルダ", &stage).await;
+    cleanup_dir(app, "古い共通Python導入途中フォルダ", &python_stage).await;
+    tokio::fs::create_dir_all(&cache).await?;
+    tokio::fs::create_dir_all(&stage).await?;
+    let result = async {
+        let uv_zip = cache.join("uv.zip.part");
+        download_to(
+            app,
+            &client,
+            DownloadSpec {
+                id: "character-maker",
+                url: UV_URL,
+                destination: &uv_zip,
+                expected_size: 16_996_332,
+                max_size: 30_000_000,
+                message: "Python管理ツールを取得中…",
+            },
+        )
+        .await?;
+        verify_sha256(&uv_zip, UV_SHA)?;
+        let uv_dir = cache.join("uv");
+        cleanup_dir(app, "uv展開途中フォルダ", &uv_dir).await;
+        let uv_zip_copy = uv_zip.clone();
+        let uv_dir_copy = uv_dir.clone();
+        tokio::task::spawn_blocking(move || extract_zip(&uv_zip_copy, &uv_dir_copy)).await??;
+        let uv = find_named_file(&uv_dir, "uv.exe", 0).context("uv.exeが配布物にありません")?;
+        let python_store = cache.join("python-runtime");
+        run_component_command(
+            &uv,
+            &[
+                "python",
+                "install",
+                "3.12.13",
+                "--install-dir",
+                &python_store.to_string_lossy(),
+            ],
+        )
+        .await?;
+        let base_python = find_named_file(&python_store, "python.exe", 0)
+            .context("Python 3.12.13を導入できません")?;
+        let python = python_stage.clone();
+        run_component_command(
+            &uv,
+            &[
+                "venv",
+                &python.to_string_lossy(),
+                "--python",
+                &base_python.to_string_lossy(),
+            ],
+        )
+        .await?;
+        let assets = character_maker_assets(app)?;
+        run_component_command(
+            &uv,
+            &[
+                "pip",
+                "sync",
+                "--python",
+                &python.join("Scripts/python.exe").to_string_lossy(),
+                &assets
+                    .join("sidecar/requirements-comfy.lock")
+                    .to_string_lossy(),
+                "--extra-index-url",
+                "https://download.pytorch.org/whl/cu128",
+                "--index-strategy",
+                "unsafe-best-match",
+                "--require-hashes",
+            ],
+        )
+        .await?;
+        let comfy_zip = cache.join("comfy.zip.part");
+        download_to(
+            app,
+            &client,
+            DownloadSpec {
+                id: "character-maker",
+                url: COMFY_URL,
+                destination: &comfy_zip,
+                expected_size: 12_698_942,
+                max_size: 30_000_000,
+                message: "ComfyUI v0.34.0を取得中…",
+            },
+        )
+        .await?;
+        verify_sha256(&comfy_zip, COMFY_SHA)?;
+        let comfy_unpack = cache.join("comfy");
+        cleanup_dir(app, "ComfyUI展開途中フォルダ", &comfy_unpack).await;
+        let archive = comfy_zip.clone();
+        let unpack = comfy_unpack.clone();
+        tokio::task::spawn_blocking(move || extract_zip(&archive, &unpack)).await??;
+        let main =
+            find_named_file(&comfy_unpack, "main.py", 0).context("ComfyUI main.pyがありません")?;
+        let comfy_root = main
+            .parent()
+            .context("ComfyUIの親フォルダがありません")?
+            .to_path_buf();
+        let destination = stage.join("ComfyUI");
+        tokio::task::spawn_blocking(move || copy_dir_all(&comfy_root, &destination)).await??;
+        run_component_command(
+            &python.join("Scripts/python.exe"),
+            &[
+                &assets
+                    .join("installer/setup-runtime-models.py")
+                    .to_string_lossy(),
+                "--runtime",
+                &stage.to_string_lossy(),
+                "--cache",
+                &cache.join("model-download").to_string_lossy(),
+            ],
+        )
+        .await?;
+        crate::store::write_json_atomic(
+            &stage.join("install.json"),
+            &serde_json::json!({"version":"2026.09.10","python":"3.12.13","comfy":"v0.34.0"}),
+        )?;
+        replace_installed_pair(
+            (
+                &python_stage,
+                &crate::log_paths::bundled_dir(app).join("python"),
+                "python",
+            ),
+            (
+                &stage,
+                &installed_dir(app, "character-maker"),
+                "character-maker",
+            ),
+        )?;
+        cleanup_file(app, "uv取得ファイル", &uv_zip).await;
+        cleanup_file(app, "ComfyUI取得ファイル", &comfy_zip).await;
+        cleanup_dir(app, "uv展開フォルダ", &uv_dir).await;
+        cleanup_dir(app, "ComfyUI展開フォルダ", &comfy_unpack).await;
+        cleanup_dir(app, "Python取得キャッシュ", &python_store).await;
+        cleanup_dir(app, "モデル取得キャッシュ", &cache.join("model-download")).await;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    if result.is_err() {
+        cleanup_dir(app, "キャラ作成導入途中フォルダ", &stage).await;
+        cleanup_dir(app, "共通Python導入途中フォルダ", &python_stage).await;
+    }
+    result
+}
+
+fn character_maker_assets(app: &AppHandle) -> Result<PathBuf> {
+    let installed = app.path().resource_dir()?.join("character-maker");
+    if installed.join("sidecar").is_dir() {
+        return Ok(installed);
+    }
+    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("リポジトリルートがありません")?
+        .join("character-maker"))
+}
+
+async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
+    let mut command = crate::tools::process::command(program);
+    command.args(args).env(
+        "UV_CACHE_DIR",
+        program.parent().unwrap_or(Path::new(".")).join("cache"),
+    );
+    let output = crate::tools::process::output(command, 7_200, "キャラクター作成ランタイム導入")
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let stderr = String::from_utf8(output.stderr).unwrap_or_else(|error| {
+        format!(
+            "標準エラーがUTF-8ではありません（{}バイト）",
+            error.as_bytes().len()
+        )
+    });
+    anyhow::ensure!(
+        output.status.success(),
+        "{} の実行に失敗しました: {stderr}",
+        program.display()
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+fn free_disk_bytes(path: &Path) -> Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut available = 0_u64;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    anyhow::ensure!(
+        ok != 0,
+        "保存先の空き容量を確認できません: {}",
+        path.display()
+    );
+    Ok(available)
+}
+
+#[cfg(not(windows))]
+fn free_disk_bytes(_path: &Path) -> Result<u64> {
+    Ok(0)
 }
 
 async fn install_whisper(app: &AppHandle) -> Result<()> {
@@ -817,6 +1093,65 @@ fn replace_installed(stage: &Path, destination: &Path, id: &str) -> Result<()> {
         std::fs::remove_dir_all(backup)?;
     } else {
         std::fs::rename(stage, destination)?;
+    }
+    Ok(())
+}
+
+fn replace_installed_pair(first: (&Path, &Path, &str), second: (&Path, &Path, &str)) -> Result<()> {
+    let pairs = [first, second];
+    let backups = pairs.map(|(_, destination, id)| {
+        destination.with_file_name(format!(".backup-{id}-{}", std::process::id()))
+    });
+    for backup in &backups {
+        if backup.exists() {
+            std::fs::remove_dir_all(backup)?;
+        }
+    }
+    let mut backed_up = 0_usize;
+    for (index, (_, destination, _)) in pairs.iter().enumerate() {
+        if destination.exists() {
+            if let Err(error) = std::fs::rename(destination, &backups[index]) {
+                for restore in (0..backed_up).rev() {
+                    if backups[restore].exists() {
+                        std::fs::rename(&backups[restore], pairs[restore].1)?;
+                    }
+                }
+                return Err(error.into());
+            }
+        }
+        backed_up = index + 1;
+    }
+    let mut published = 0_usize;
+    for (index, (stage, destination, _)) in pairs.iter().enumerate() {
+        if let Err(error) = std::fs::rename(stage, destination) {
+            let mut restore_errors = Vec::new();
+            for rollback in (0..published).rev() {
+                if let Err(rollback_error) = std::fs::rename(pairs[rollback].1, pairs[rollback].0) {
+                    restore_errors.push(rollback_error.to_string());
+                }
+            }
+            for restore in (0..backed_up).rev() {
+                if backups[restore].exists() {
+                    if let Err(restore_error) = std::fs::rename(&backups[restore], pairs[restore].1)
+                    {
+                        restore_errors.push(restore_error.to_string());
+                    }
+                }
+            }
+            if !restore_errors.is_empty() {
+                anyhow::bail!(
+                    "キャラ作成ランタイムの入れ替えと旧版復元に失敗しました: 入れ替え={error} / 復元={}",
+                    restore_errors.join(" / ")
+                );
+            }
+            return Err(error.into());
+        }
+        published = index + 1;
+    }
+    for backup in backups {
+        if backup.exists() {
+            std::fs::remove_dir_all(backup)?;
+        }
     }
     Ok(())
 }
