@@ -9,11 +9,11 @@
 | 種別 | 生成内容 | 初期の利用範囲 |
 |---|---|---|
 | 手順型 | SKILL.md、用途、入力例、試験例、既存Toolの呼出計画 | 既存機能の組合せ。従来の利用者スキル互換を維持し、開発機能経由の新規候補には試行・版管理を追加 |
-| コード型 | Rustソース、固定SDKを使う入出力処理、試験例、Wasm成果物 | JSON入力からJSON出力への計算・検査・集計・整形。ユーザーファイルを直接操作しない。既存Toolが読み取ったデータを渡し、生成結果の保存や送信もホスト側の既存Toolを使う |
+| コード型 | 固定SDK/固定APIに沿った処理本体、入出力schema、試験例、実行物（インタプリタへ渡すプログラム、またはビルド済みWasm） | JSON入力からJSON出力への計算・検査・集計・整形。ユーザーファイルを直接操作しない。既存Toolが読み取ったデータを渡し、生成結果の保存や送信もホスト側の既存Toolを使う |
 
 たとえばCSV集計では、既存の読取りToolで入力を取得し、コード型で列検査・集計、結果プレビュー後に既存の保存Toolで書く。ファイル形式の解析は既存Toolか固定SDKの対応範囲に限る。未対応Excel書式、画像モデルの追加、GPU処理、任意Pythonパッケージ、PowerShellによるPC操作、新しいSaaS認証処理を初期コード型で作れるとは案内しない。
 
-**代償:** Wasm実行器と生成コード用の固定コンパイラが追加になる。生成時の準備容量・初回待ち・コンパイル時間が増え、任意Pythonより使えるライブラリは少ない。通常会話と手順型には追加取得を要求せず、コード型を利用するときだけ必要容量と対応OSを提示して導入する。実容量・性能・対応OSはS0の実測まで未確定で、暗黙のクラウドビルドやホストPython実行で穴埋めしない。
+**代償:** どちらの実行方式でもWasm実行器が追加になる。方式B（生成Rustのビルド）を採る場合はコンパイラ配布・初回待ち・OS別の隔離Builderがさらに乗る。任意Pythonより使えるライブラリは少ない。通常会話と手順型には追加取得を要求せず、コード型を利用するときだけ必要容量と対応OSを提示して導入する。同梱物は`src-tauri/resources/bundled/<機能名>/`へ置き、取得は`cargo xtask setup`相当の明示操作に限る（AGENTS.mdの大容量取得ルール）。実容量・性能・対応OSはS0の実測まで未確定で、暗黙のクラウドビルドやホストPython実行で穴埋めしない。
 
 
 ## どこまで自動化できるかと拡張条件
@@ -68,7 +68,7 @@ graph TD
 |---|---|
 | SkillDeveloper | 要件、種別選択、生成・修正の状態機械。`start(requirement, examples, providerRef, budget)`、`cancel(jobId)`。LLMは候補だけを書き、環境設定・registry・テスト結果を編集できない |
 | CandidateStore | scope/developmentId/versionHash単位の不変候補、生成由来、診断。`saveCandidate(expectedRevision, files)`。active領域と分離し、名前だけで既存スキルを上書きしない |
-| Validator / Builder | manifest/schema・ファイル一覧・import検査、固定ビルド。`build(candidateHash, sdkRef, toolchainRef)` → moduleHashとattestation。manifestやビルドコマンドは信頼するホストが生成する |
+| Validator / Builder | manifest/schema・ファイル一覧・import検査、固定ビルド。`build(candidateHash, sdkRef, toolchainRef)` → moduleHashとattestation。manifestやビルドコマンドは信頼するホストが生成する。方式A（固定インタプリタ）ではビルド工程が無く、Validatorがプログラムの構文・サイズ・禁止API参照を検査して実行物hashを同梱インタプリタのhashに固定する |
 | TestRunner | 信頼済み受入試験・権限拒否試験・資源上限・比較。`test(moduleHash, testSuiteHash, limits)` → 完了/失敗/未確認。モデルの「合格」本文を結果として採用しない |
 | SkillRegistry | 承認対象hash、activeRevision、履歴、停止。`activate(candidateHash, expectedActiveRevision, approval)`、`disable`、`rollback(targetHash)`。生成モデルとguestには書込み権限を与えない |
 | GeneratedSkillExecutor | `execute(scope, skillId, versionHash, input, cancellation)` → 構造化結果。登録済みの1つの橋渡しToolから呼び、Tool traitのバイナリ登録と動的データを分離する |
@@ -78,7 +78,16 @@ PR #256のExecutionContext/EventSink/Storage/JobManager/ToolExecutorへ対応付
 
 ## コード型の採用方式
 
-採用設計は **固定SDK付きRustソースを `wasm32-unknown-unknown` へビルドし、Wasmtimeを候補実行器とするWasm sandboxで動かす方式**。PoC未実施であり、本番採用はS0の成立確認後とする。型・ランタイム・コンパイラの版は同段階で公式安定版、対応CPU/OS、保守・配布条件を監査して固定する。
+実行境界は両案ともWasmtimeのWasm sandboxで固定し、**生成物をコンパイルするかどうかだけが違う2案をS0で比較する**。PoC未実施であり、本番採用はS0の成立確認後とする。ランタイム・SDK・（方式Bなら）コンパイラの版は同段階で公式安定版、対応CPU/OS、保守・配布条件を監査して固定する。
+
+| 方式 | 生成物と実行 | 得るもの | 失うもの |
+|---|---|---|---|
+| **A: 固定インタプリタ（第1候補）** | PicoAgentが同梱する監査済みインタプリタWasm（QuickJS/Rhai/Starlark等の候補から1つ）を実行物として固定し、LLMは**そこへ渡すプログラム文字列だけ**を書く。ホストはプログラムと入力JSONを同じguestへ渡す | コンパイラ配布・OS別の隔離Builder・ビルド待ちが**すべて不要**。生成→試行が秒単位。実行物のhashは全利用者で同一なので検証も容易。小型ローカルモデルはRustより素直に書ける | 実行速度はネイティブWasmより遅い。使える標準ライブラリはインタプリタの範囲に限られる。インタプリタ自身の脆弱性は別の攻撃面になる（版固定と更新経路が要る） |
+| B: 生成Rustのビルド | 固定SDK付きRustソースを `wasm32-unknown-unknown` へビルドし、成果物Wasmを実行する | 実行が速い。型で入出力を縛れる | Rustツールチェーンと標準ライブラリの配布（既定モデル本体より大きくなりうる）、初回待ちとビルド時間、そして**下記のOS別隔離Builder**が必須になる |
+
+**S0では方式Aを先に評価する。** 理由は3つ。(1) 本設計の最難関である「コンパイル工程の隔離」と「3OSでのBuilder配布」が方式Aでは発生しない。(2) 既定の叩くAIはLFM2.5 2.6B QAD Q4のローカルモデルで、固定SDK付きRustを予算内で書き切れる保証がない。同じ課題ならスクリプト言語の方が生成成功率は高いと見込まれる。(3) 追加取得容量が小さく、コード型を使わない利用者への影響を最小にできる。方式Aが固定20課題の目標に届かない、または性能が業務に足りないと実測で分かった場合にだけ方式Bへ進み、**方式Bは「速度が必要になった場合の後段最適化」として扱う**。どちらも成立しない場合は手順型だけを提供する。
+
+以下のsandbox契約・ABI・上限は両方式に共通で適用する。方式Aではプログラム文字列も入力と同じ「信頼しないデータ」として扱い、ホストのABI glueとインタプリタ本体だけを信頼する。
 
 Wasm側にはWASI、ファイル、ネットワーク、環境変数、時計、乱数、プロセス、Tauri、動的ライブラリ、他スキルを呼ぶimportを一切登録しない。初期guestは純粋な入力→出力だけ。時刻や乱数が必要ならホストが固定値/seedを入力に含める。永続状態はguest内に持たず、毎実行新しいStore/instanceを作る。将来hostcallを足す場合は別設計と権限試験が必要で、汎用dispatchを1本追加して済ませない。
 
@@ -88,17 +97,21 @@ ABI v1は固定SDKが所有する。ホストがmoduleの公開memoryと `alloc(
 
 公式資料の確認日: 2026-09-11。WasmtimeはWasm sandboxとWASIの能力ベースのアクセスを説明している。本設計ではWASIを接続しない。[Wasmtime Security](https://docs.wasmtime.dev/security.html) を根拠とするが、ホスト実装の誤りや依存脆弱性が消える保証ではない。fuel/epochによる中断は [Interrupting Execution](https://docs.wasmtime.dev/examples-interrupting-wasm.html) を参照。Rust側のtargetと標準ライブラリの制約は [rustc target documentation](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html) を確認し、全std機能が動くとは扱わない。
 
-### コンパイル工程も隔離する
+### コンパイル工程も隔離する（方式Bを採る場合だけ）
+
+以下は方式B（生成Rustのビルド）に固有の要件で、方式Aではコンパイル工程自体が無いため丸ごと不要になる。この節の重さが、S0で方式Aを先に評価する理由そのものである。
 
 LLMが書いたRustソースは、コンパイル前から信頼しない。`include_str!`等によるコンパイル時のファイル読取りやコンパイラの不具合を考慮し、アプリと同じ資格情報・ホーム・ネットワークを見られる通常プロセスでビルドしない。ソース文字列のブラックリストだけを安全境界にしない。
 
 Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock・ビルド引数を使う。生成側からCargo.toml、build.rs、proc macro、依存追加、任意リンクフラグ、環境変数、コマンド列を受け付けない。承認済みtoolchain/SDKを読取専用、候補と出力だけを書込み可能にし、HOME・資格情報・一般workspaceをマウントせず、ネットワークを無効化したOS隔離環境でoffline buildする。依存取得は別の管理工程で版・hashを固定する。
 
-ビルドのOS隔離backendと3OS対応はS0の必須判断事項。Windows、macOS、Ubuntuそれぞれで上記境界を強制できる実装・配布手段と回収を実証するまで、そのOSのコード型生成は無効にする。対応手段が無い場合は手順型だけ提供し、理由をUIへ表示する。法人ビルドworkerも同じ契約を満たす。ソースを外部へ送るクラウドビルドは接続先・送信内容への明示同意がある場合だけで、ローカルの代替として自動使用しない。
+ビルドのOS隔離backendと3OS対応は方式Bの必須判断事項。Windows、macOS、Ubuntuそれぞれで上記境界を強制できる実装・配布手段と回収を実証するまで、そのOSのコード型生成は無効にする。対応手段が無い場合は手順型だけ提供し、理由をUIへ表示する。法人ビルドworkerも同じ契約を満たす。ソースを外部へ送るクラウドビルドは接続先・送信内容への明示同意がある場合だけで、ローカルの代替として自動使用しない。
 
 ## パッケージと版管理
 
 `app_data_dir`配下の専用スキル開発領域を将来追加する。候補、検証済み不変version、active参照、試験結果を分ける。既存 `app_config_dir/user-skills` は互換形式のまま扱う。実際のパスと設定キーは実装PRでSETTINGS/DEVELOPMENTへ同期する。
+
+**保存機構は新規に作らず既存の正本を使う。** 「読む→直す→書き戻す」は`store::lock_state(名前)`を取ってから行い（既存の利用者スキルも`store::lock_state("user-skills")`で直列化している）、書き込みは`store::write_atomic()`／`store::write_json_atomic()`、読めなかったファイルは空で置き換えず`store::quarantine_corrupt()`で退避する。パスは`permissions::resolve`／`SafePath`を通し、独自の許可判定やルート設定キーを増やさない。PicoAgentは単一インスタンス前提なので、プロセス間排他を必要とする設計にしない。`store::guard`と`permissions::guard`のテストがこれらの迂回を検出して失敗させるため、別実装のCASやロックを持ち込むと実装段階で必ず落ちる。新しい設定キーは`docs/SETTINGS.md`へ同時に記載する（`doc_sync::guard`が実装と双方向で検出する）。
 
 | パッケージ項目 | 内容 |
 |---|---|
@@ -106,7 +119,7 @@ Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock�
 | versionHash / sourceHash / moduleHash | manifestと全入力ファイルの正規化hash、ソース、実行物。ファイル順・文字コードを正規化。active判定は名前やmtimeに依存しない |
 | requirement / schemas / examples | 目的、非対象、入出力JSON schema、利用者の期待例。schema参照は同梱だけ、外部URL解決を禁止 |
 | capabilities / effects / executionClass | 手順が要求する読取/保存/送信先と上限、実行場所。code guest自体は純粋処理。要求metadataは権限の付与ではない |
-| SDK / compiler / runtime / platform | 固定版とhash、実行可能契約。生成したネイティブ実行ファイルや外部取得バイナリを混ぜない |
+| SDK / interpreter / compiler / runtime / platform | 固定版とhash、実行可能契約。方式Aは同梱インタプリタWasmのhashとプログラムのhash、方式Bはtoolchain/SDKのhashとmoduleHash。生成したネイティブ実行ファイルや外部取得バイナリを混ぜない |
 | tests / report / provenance | 信頼済み試験セットhash、各結果、未確認、生成provider/model、prompt template版、生成試行数。秘密や実データ全文を記録しない |
 | approval / activeRevision | 有効化した利用者の参照、対象hash、能力hash、試験hash、時刻。モデルはこれを生成・変更できない |
 
@@ -122,7 +135,7 @@ Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock�
 
 要求は `developmentId?, idempotencyKey, requirement, kindPreference, inputSchema, outputSchema, examples, selectedProvider, budget`。応答はjobId、revision、state、progress、candidateHash、検証結果と未確認事項。進捗イベントはjobId/attempt/seq付き、再接続時は状態取得が正本。cancelは受付と停止完了を分け、再起動時は最後の確定candidate/検証から再開する。生成中tokenの途中断片を有効版へ保存しない。
 
-予算の初期案は生成1回＋修正2回、開発全体10分、入出力合計24,000tokenを上限とする。各呼出のcontext/window/最大出力制約を先に検査し、長いテストログは必要箇所だけ渡す。全工程をLLM呼出前に予約できるtoken枠で管理し、usageが不明でも無制限に続けない。時間・回数・tokenのいずれか到達で停止する。外部providerでは利用者が金額上限も指定し、料金を確定できなければ追加費用の上限を保証せず開始前に条件確認する。既定の通常会話モデルを変更せず、別モデル提案は選択操作にする。
+予算の初期案は生成1回＋修正2回、開発全体10分、入出力合計24,000tokenを上限とする。これは開発job全体の合計であって1回の呼出ではない。**現行の既定ローカルモデル（LFM2.5 2.6B QAD Q4）のプリセットctxは8,192で、`large`と`gpt_oss_20b`だけが16,384**（`src-tauri/src/providers/local.rs`、設定キーは`PICOAGENT_LOCAL_CTX`で利用者が変更可能）。SDK説明・入出力schema・入力例・失敗テストログを1回の呼出へ詰めるとこの幅に収まらないため、**コード型生成には最低ctx要件を設ける**。S0で「1呼出あたりに必要な実測token数」を測り、満たさない構成ではコード型を提示せず、理由（必要ctxと現在値、変更方法）を画面に出して手順型で続ける。非対応OSと同じ扱いにする。各呼出のcontext/window/最大出力制約を先に検査し、長いテストログは必要箇所だけ渡す。全工程をLLM呼出前に予約できるtoken枠で管理し、usageが不明でも無制限に続けない。時間・回数・tokenのいずれか到達で停止する。外部providerでは利用者が金額上限も指定し、料金を確定できなければ追加費用の上限を保証せず開始前に条件確認する。既定の通常会話モデルを変更せず、別モデル提案は選択操作にする。
 
 生成用LLMには入力例、公開SDK、許可されたToolのschemaと安全な診断だけを渡す。一般agent loopのtools一覧を丸ごと渡さず、出力を候補データとして受け取る専用経路にする。修正ループが別のskill-developを起動する再帰、追加モデルの自動導入、課金providerへの自動切替を禁止する。外部providerへのコード/入力例送信範囲を明示し、既定は合成データ、実業務データは利用者が指定したものだけを使う。
 
@@ -140,6 +153,16 @@ Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock�
 
 初期の呼出入口は固定Toolの `generated_skill.execute(skillId, input)` 相当とし、候補索引に公開するのは有効版の名前・説明・schemaだけ。任意の名前でネイティブTool登録を上書きできない。指示型の本文は必要時だけ読む既存方式を保ち、無制限にsystem promptへ詰めない。disabledな版は明示名指定でも実行不可とし、現行disable-model-invocation（自動選択だけを止める）とは区別する。
 
+### ライセンス境界
+
+現行の`license::tool_requires_pro`は**Tool名の一致**でPro判定しており、`code_runner`と`browser_control`はPro扱いである。橋渡しToolを1本にすると全生成スキルが同じ判定を共有するため、**生成スキル単位のライセンス制御はできない**。実装前に次を決める。
+
+- コード型実行（`generated_skill.execute`）とブラウザセッションToolをPro限定にするか、無償で提供するか。
+- 生成スキルごとに分けたい場合は、Tool名一致ではなくskillIdまで見る判定へ拡張するか、名前空間付きTool名を割り当てるか。
+- 判定を変える場合、既存の`code_runner`／`browser_control`のPro扱いを退行させないこと。
+
+この決定は販売条件に直結するため、S1着手前に利用者の判断を得る。
+
 
 ## 利用者の操作を妨げないブラウザ機能（追加要件・未実装）
 
@@ -154,6 +177,12 @@ Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock�
 採用は既存CDP資産を活かした `BrowserSessionService`。新しい管理セッションは常に専用プロファイル・headlessを既定にし、通常Chrome/Edgeのプロファイル・タブ・Cookieをコピーせず、既存デバッグポートにも接続しない。旧browser_controlの設定互換は保つが、新しい管理セッションにdefault profile設定を引き継がない。ブラウザ本体は検証済み導入済みChrome/Edgeを検出し、無ければ明示導入を案内する。管理版ブラウザの配布はライセンス・容量・更新経路の別検証を要し、自動取得を前提にしない。
 
 scope/device/accountProfile単位の所有者とprofile lockを持ち、run/sessionごとのtargetId、snapshotRevision、action列、cancel、receiptを保存する。異なる利用者はプロセス/プロファイルも分ける。同じaccountProfileの操作は最初は直列化し、セッションを混ぜない。不変の接続実装以外を可変staticにしない。CDPの接続先情報・Cookie・storage・ログイン秘密をLLMやguestへ返さない。
+
+**プロファイルの置き場所とポートは、既存の回収機構に合わせる（守らないと実害が出る）。** 現行`cdp.rs`はプロファイルが`<data_dir>/PicoAgent/browser-profile`の1つ、デバッグポートが`11437`固定、子プロセスもプロセス全体で1つ（`child_slot`）である。セッション別に分けるときは次を必須にする。
+
+- 新しいプロファイルは必ず`PicoAgent/browser-profile`配下（例: `PicoAgent/browser-profile/<scope>`）に置く。`cargo xtask stop`は`--user-data-dir`にこの文字列を含むブラウザだけを回収し、目印は`xtask/src/assets.rs`の定数と回帰テストで固定されている。配下から外すと残留ブラウザを回収できず、「PicoAgentが管理していないブラウザに使われています」で次回起動が必ず失敗する既知の実害へ戻る。
+- ポートはセッションごとに割り当て、使用中ポートの検出（現行は他ブラウザが使っていれば起動を止める）を同時セッション前提で作り直す。空きポート探索と所有確認をセットにし、他人のブラウザへ接続しない現行の安全側動作は維持する。
+- 目印や既定ポートを変える場合は`xtask`の回収実装と回帰テストを同じPRで更新する。
 
 ブラウザ機能は固定Toolとして手順型から使い、純粋Wasm guestにCDPや任意JavaScriptを渡さない。コード型はブラウザで取得したデータの集計や入力候補の整形を担当する。ブラウザ制御の実装はWasm/コンパイラに依存せず、ブラウザ自身のB段階が合格すれば先行提供できる。
 
@@ -219,6 +248,8 @@ headlessはChromeの公式機能であることを [Chrome Headless mode](https:
 | 案 | 判断 |
 |---|---|
 | 手順型優先＋純粋Wasmコード型 | 採用設計。既存Toolとコードを分担できる。初期の機能範囲と追加導入コストは上記のとおり制限がある |
+| コード型を固定インタプリタWasmで動かす（方式A） | **第1候補。S0で先に評価する。** コンパイラ配布・OS別隔離Builder・ビルド待ちが不要になり、既定の小型ローカルモデルでも書きやすい。代償は実行速度と標準ライブラリの幅、インタプリタ自身の版管理 |
+| コード型を生成Rustのビルドで動かす（方式B） | 条件付き採用。方式Aで性能または表現力が足りないと実測で分かった場合の後段最適化として残す。単独の初期案としては、ツールチェーン配布と3OSの隔離Builderが前提条件になり過大 |
 | LLM生成Rustを本体skillsへ直接追加して再ビルド | 却下。製品バイナリ・依存・署名・更新・全利用者の可用性へ影響する。生成スキルをデータとして追加する境界を失う |
 | Python/PowerShellをcode_runnerで保存して再実行 | 却下。cwdやパターン検査は隔離を提供しない。既存ツール非公開理由を解消できない |
 | コンテナを全端末の必須条件にする | 初期案として却下。Windows/macOSの導入・管理・容量が増え、単にコンテナを起動しても適切なmount/権限なしには隔離を保証しない。法人Builderの実装候補としてはS0で検証可 |
@@ -226,7 +257,7 @@ headlessはChromeの公式機能であることを [Chrome Headless mode](https:
 | 新たな任意SaaS連携をコード型へ一括開放 | 初期範囲外。秘密・egress・副作用を汎用guest呼出へ流すため、認証済み既存Toolか別のコネクタ設計で扱う |
 | 手順型だけで完了扱い | 却下。既存にない処理の追加という目的を満たさない。コード型の検証が未完了なら別段階の未完了として残す |
 
-最大リスクは、Wasmの外側にあるBuilder、既存Tool、registry更新が迂回路になること。LLM生成物を信頼しないだけでなく、compile-timeの読取り、nested Tool呼出、候補差替え、承認の再利用を実際に拒否できることが完了条件になる。もう一つの製品リスクは、ローカルモデルが予算内に正しいコードを作れないこと。成功例だけを選ばず固定課題の成功率・修正回数・待ち時間を評価する。
+最大リスクは、Wasmの外側にある実行前工程（方式BのBuilder）、既存Tool、registry更新が迂回路になること。LLM生成物を信頼しないだけでなく、compile-timeの読取り、nested Tool呼出、候補差替え、承認の再利用を実際に拒否できることが完了条件になる。もう一つの製品リスクは、ローカルモデルが予算内に正しいコードを作れないこと。成功例だけを選ばず固定課題の成功率・修正回数・待ち時間を評価する。
 
 ## 分割と実装ゲート
 
@@ -234,4 +265,6 @@ headlessはChromeの公式機能であることを [Chrome Headless mode](https:
 
 SPECの現行スキル説明を増殖させず、本書へ未実装契約を分けた。読者は生成機能の実装担当で、更新理由はパッケージ/隔離/承認契約の変更。SPECは現行挙動と本書の入口、TASKSは未完了、PRは採否・検証・引継ぎ記録を所有する。PR #256とは同じ文書の別節なので、統合時は双方の節を保持し一方で上書きしない。
 
-実装は [段階別タスク](TASKS.md#llm-skill-development-tasks) に従う。各段階を別の目的別PRにし、設計承認と実装開始の明示まで着手しない。コード型はS0の隔離Builder成立・OS配布条件・モデル評価の合格が必須。依存、設定、Tool追加時は既存共通スキルとガードを同期する。
+実装は [段階別タスク](TASKS.md#llm-skill-development-tasks) に従う。各段階を別の目的別PRにし、設計承認と実装開始の明示まで着手しない。コード型はS0の方式比較（方式Aの成立、または方式Bの隔離Builder成立・OS配布条件）とモデル評価の合格が必須。依存、設定、Tool追加時は既存共通スキルとガードを同期する。
+
+実装PRで必ず通す機械検査を、着手前に把握しておく。新しいToolは`SPEC.md`の分類表へ載せる（`doc_sync::guard::スキルはspecの分類表に載せる`）。新しい設定キーは`docs/SETTINGS.md`へ載せる（`doc_sync::guard`の双方向検査）。状態保存とパスは`store::guard`／`permissions::guard`、外部プロセス起動は`tools::process::guard`、HTTPは`tools::http::guard`が違反を検出する。同梱するランタイム・インタプリタ・SDKは`src-tauri/resources/bundled/<機能名>/`へ置き、取得は`cargo xtask setup`相当の明示操作に限る。最終確認は`cargo xtask verify`。
