@@ -1487,8 +1487,8 @@ function scheduleGaze() {
   }, 8000 + Math.random() * 6000);
 }
 
-// まばたき: half → closed → half を挟み、1.4〜4.2秒間隔で繰り返す。
-// 実際のまばたきは閉じが速く開きが遅い。3段を同じ長さにすると機械的な明滅に見えるため、
+// まばたき: メッシュリグは確認ツールと同じく全閉まで連続補間し、閉眼保持後に開く。
+// 通常2Dの互換フレームだけは half → closed → half の段階表示を維持する。
 // 閉じ側を詰めて開き側を伸ばした非対称の配分にする。
 function scheduleBlink() {
   clearTimeout(rigBlinkTimer);
@@ -1512,8 +1512,9 @@ function scheduleBlink() {
         resolve();
       }, ms);
     });
-    // 閉じ際は素早く通過させる。
-    await step("blink_half", timings.closing, 0.5);
+    // メッシュリグは全閉まで滑らかに動かす。0.5で止めてから全閉へ飛ばすと、
+    // 確認ツールでは起きない不自然な半目の引っ掛かりになる。
+    await step("blink_half", timings.closing, 0);
     if (!rigActive) return;
     // 眠い時間帯は閉じたまま保つ長さで眠さを出す。
     await step("blink_closed", timings.closed, 0);
@@ -1724,7 +1725,6 @@ function meshRigCanRender() {
   const layout = petApp.dataset.layout || "pet";
   return Boolean(
     meshRigController
-    && !reduceMotion
     && !document.hidden
     && !napping
     && !petApp.classList.contains("is-booting")
@@ -1772,6 +1772,7 @@ async function prepareMeshRig(cfg) {
     width: LIVE2D_RENDER_WIDTH,
     height: LIVE2D_RENDER_HEIGHT,
   });
+  meshRigController.setReducedMotion(reduceMotion);
   meshRigController.setActive(false);
 }
 
@@ -2192,7 +2193,13 @@ function onReduceMotionChange(event) {
       playLive2DMotion(animationName);
     }
   }
-  if (meshRigController) setAnimation(animationName, true);
+  meshRigController?.setReducedMotion(reduceMotion);
+  if (meshRigController) {
+    setAnimation(animationName, true);
+    // setAnimation中に非同期の状態更新が重なっても、最終的な表示形式を正本にして
+    // chat/barではPIXI tickerごと止め、キャラを出す形式へ戻した時だけ再開する。
+    setMeshRigVisible(true);
+  }
   wakeAnimationLoop();
 }
 
@@ -2286,6 +2293,25 @@ function isSafeImageUrl(url) {
     /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url);
 }
 
+function openExternalUrl(url) {
+  return window.picoagent.openExternalUrl(url).catch(error => {
+    logApp("error", "リンクを開けませんでした", errorDetail(error));
+    showToast("既定ブラウザでリンクを開けませんでした", "error");
+  });
+}
+
+function externalLink(url, text) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.textContent = text;
+  anchor.rel = "noopener noreferrer";
+  anchor.addEventListener("click", event => {
+    event.preventDefault();
+    openExternalUrl(url);
+  });
+  return anchor;
+}
+
 // インライン Markdown（**bold** / *italic* / `code` / リンク / 画像）を DOM へ追加する。
 function appendInline(parent, raw) {
   // bold → italic → code → 画像 → リンク → 裸URL の優先順でマッチ。
@@ -2306,18 +2332,15 @@ function appendInline(parent, raw) {
         img.src = m[5]; img.alt = m[4] || "画像";
         img.style.cssText = "max-width:100%;border-radius:6px;display:block;margin:4px 0;cursor:pointer";
         img.title = "クリックして開く";
-        img.addEventListener("click", () => window.open(m[5], "_blank", "noopener,noreferrer"));
+        img.addEventListener("click", () => openExternalUrl(m[5]));
         parent.append(img);
       } else {
-        const a = document.createElement("a"); a.href = m[5]; a.textContent = m[4] || m[5];
-        a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a);
+        parent.append(externalLink(m[5], m[4] || m[5]));
       }
     } else if (m[6] !== undefined) {
-      const a = document.createElement("a"); a.href = m[7]; a.textContent = m[6];
-      a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a);
+      parent.append(externalLink(m[7], m[6]));
     } else {
-      const a = document.createElement("a"); a.href = m[0]; a.textContent = m[0];
-      a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a);
+      parent.append(externalLink(m[0], m[0]));
     }
     off = m.index + m[0].length;
   }
@@ -5209,7 +5232,10 @@ function applyLayout(id) {
   gazeFrameScheduler?.cancel();
   resetLook();
   if (!reduceMotion && gazeTrackingEnabled) scheduleGaze();
-  if (meshRigController) setAnimation(animationName, true);
+  if (meshRigController) {
+    setAnimation(animationName, true);
+    setMeshRigVisible(true);
+  }
   wakeAnimationLoop();
 }
 

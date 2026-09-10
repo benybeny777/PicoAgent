@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     path::PathBuf,
     sync::{
@@ -15,11 +16,18 @@ use picoagent_character_maker::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+struct CharacterPreviewSession {
+    reader: Reader,
+    source_path: PathBuf,
+    display_name: String,
+}
 
 pub struct CharacterMakerState {
     execution: tokio::sync::Mutex<()>,
     cancellation: std::sync::Mutex<Option<Arc<AtomicBool>>>,
+    previews: std::sync::Mutex<BTreeMap<String, CharacterPreviewSession>>,
 }
 
 impl CharacterMakerState {
@@ -27,6 +35,7 @@ impl CharacterMakerState {
         Self {
             execution: tokio::sync::Mutex::new(()),
             cancellation: std::sync::Mutex::new(None),
+            previews: std::sync::Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -36,6 +45,119 @@ impl CharacterMakerState {
             .map(|active| active.is_some())
             .unwrap_or(true)
     }
+}
+
+#[tauri::command]
+pub fn settings_character_maker_preview(
+    app: AppHandle,
+    character_id: String,
+    state: State<'_, CharacterMakerState>,
+) -> Result<Value, String> {
+    let label = format!("character-preview-{character_id}");
+    if let Some(window) = app.get_webview_window(&label) {
+        window.show().map_err(error_text)?;
+        window.set_focus().map_err(error_text)?;
+        return Ok(json!({ "ok": true, "existing": true }));
+    }
+
+    let (pipeline, config) = paths(&app).map_err(error_text)?;
+    let manifest = pipeline.load_character(&character_id).map_err(error_text)?;
+    if manifest
+        .stages
+        .get("complete")
+        .map(|stage| stage.status.as_str())
+        != Some("complete")
+    {
+        return Err("complete工程が完了していないため確認できません".into());
+    }
+    let source_path = pipeline
+        .character_dir(&character_id)
+        .map_err(error_text)?
+        .join("source/input.png");
+    let reader = Reader::acquire(
+        source_path
+            .parent()
+            .and_then(|path| path.parent())
+            .ok_or_else(|| "キャラクターの保存先が不正です".to_string())?,
+        config.snapshot_part_bytes,
+    )
+    .map_err(error_text)?;
+    let session = CharacterPreviewSession {
+        reader,
+        source_path,
+        display_name: manifest.display_name.clone(),
+    };
+    {
+        let mut previews = state
+            .previews
+            .lock()
+            .map_err(|_| "キャラ確認画面の状態が壊れました".to_string())?;
+        if let Some(stale) = previews.insert(character_id.clone(), session) {
+            let _ = stale.reader.finish();
+        }
+    }
+
+    let title = format!("{} - PicoAgent キャラ確認", manifest.display_name);
+    let url = format!("character-preview.html?characterId={character_id}");
+    let window = match WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+        .title(title)
+        .inner_size(1180.0, 820.0)
+        .min_inner_size(720.0, 560.0)
+        .build()
+    {
+        Ok(window) => window,
+        Err(error) => {
+            if let Ok(mut previews) = state.previews.lock() {
+                if let Some(session) = previews.remove(&character_id) {
+                    let _ = session.reader.finish();
+                }
+            }
+            return Err(error_text(error));
+        }
+    };
+    let event_app = app.clone();
+    window.on_window_event(move |event| {
+        if !matches!(event, WindowEvent::Destroyed) {
+            return;
+        }
+        let preview_state = event_app.state::<CharacterMakerState>();
+        let session = preview_state
+            .previews
+            .lock()
+            .ok()
+            .and_then(|mut previews| previews.remove(&character_id));
+        if let Some(session) = session {
+            if let Err(error) = session.reader.finish() {
+                crate::log_paths::append_app_log(
+                    &event_app,
+                    &format!("キャラ確認画面の世代保持を終了できませんでした: {error}"),
+                );
+            }
+        }
+    });
+    Ok(json!({ "ok": true, "existing": false }))
+}
+
+#[tauri::command]
+pub fn settings_character_maker_preview_data(
+    character_id: String,
+    state: State<'_, CharacterMakerState>,
+) -> Result<Value, String> {
+    let previews = state
+        .previews
+        .lock()
+        .map_err(|_| "キャラ確認画面の状態が壊れました".to_string())?;
+    let session = previews
+        .get(&character_id)
+        .ok_or_else(|| "キャラ確認用の公開世代がありません".to_string())?;
+    Ok(json!({
+        "characterId": character_id,
+        "displayName": session.display_name,
+        "sourcePath": session.source_path.to_string_lossy(),
+        "rigPath": session.reader.directory.join("rig.json").to_string_lossy(),
+        "rigRootPath": session.reader.directory.to_string_lossy(),
+        "assetVersion": session.reader.generation,
+    }))
 }
 
 fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
@@ -63,6 +185,146 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
         },
         MakerConfig::managed(managed, crate::components::shared_python_dir(app)),
     ))
+}
+
+/// キャラ作成の再生成可能な中間物と旧公開世代を、起動時に必ず回収する。
+/// 原画、manifest、現行の公開世代、導入済みキャラは削除しない。
+pub fn cleanup_startup(app: &AppHandle) {
+    let (pipeline, _) = match paths(app) {
+        Ok(value) => value,
+        Err(error) => {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("キャラ作成の起動時清掃を準備できませんでした: {error}"),
+            );
+            return;
+        }
+    };
+    for warning in
+        picoagent_character_maker::recovery::recover_final_rigs(&pipeline.characters_root)
+    {
+        crate::log_paths::append_app_log(app, &warning);
+    }
+    let _cleanup_guard =
+        match picoagent_character_maker::recovery::startup_cleanup_guard(&pipeline.characters_root)
+        {
+            Ok(guard) => guard,
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("キャラ作成処理が使用中のため起動時清掃を見送りました: {error}"),
+                );
+                return;
+            }
+        };
+    if let Err(error) = remove_regenerable_path(&pipeline.characters_root.join("staging")) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("キャラ導入の一時領域を清掃できませんでした: {error}"),
+        );
+    }
+    let mut characters = match pipeline.list_characters() {
+        Ok(characters) => characters,
+        Err(error) => {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("キャラ作成の一覧を清掃できませんでした: {error}"),
+            );
+            return;
+        }
+    };
+    for manifest in &mut characters {
+        let directory = match pipeline.character_dir(&manifest.character_id) {
+            Ok(directory) => directory,
+            Err(error) => {
+                crate::log_paths::append_app_log(app, &error.to_string());
+                continue;
+            }
+        };
+        let has_publication =
+            picoagent_character_maker::generation_reference::present(&directory).unwrap_or(false);
+        let published = if has_publication {
+            if let Err(error) =
+                picoagent_character_maker::generation_reference::collect_startup(&directory)
+            {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "{}の旧公開世代を清掃できませんでした: {error}",
+                        manifest.display_name
+                    ),
+                );
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+        for relative in [
+            "source/isolated.png",
+            "analysis",
+            "layers",
+            "rig2d-base",
+            "rig2d",
+            "completion-source",
+            "completion-hidden-source",
+            "completion-side-source",
+            "completion-original-ears",
+            "completion-generated-ears",
+            "temp",
+        ] {
+            if let Err(error) = remove_regenerable_path(&directory.join(relative)) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "{}の再生成キャッシュを清掃できませんでした: {error}",
+                        manifest.display_name
+                    ),
+                );
+            }
+        }
+        manifest.model.remove("rig2d_base");
+        let complete = manifest
+            .stages
+            .get("complete")
+            .map(|stage| stage.status.as_str())
+            == Some("complete");
+        if !published || !complete {
+            let now = chrono::Utc::now().to_rfc3339();
+            for stage in STAGES {
+                manifest.stages.insert(
+                    stage.to_string(),
+                    picoagent_character_maker::pipeline::StageState {
+                        status: "pending".into(),
+                        message: "起動時に中間キャッシュを清掃したため最初から再生成します".into(),
+                        updated_at_iso: now.clone(),
+                    },
+                );
+            }
+            manifest.model.remove("published_rig_reference");
+            manifest.updated_at_iso = now;
+        }
+        if let Err(error) = pipeline.save_character(manifest) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "{}の清掃後状態を保存できませんでした: {error}",
+                    manifest.display_name
+                ),
+            );
+        }
+    }
+}
+
+fn remove_regenerable_path(path: &std::path::Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::remove_file(path),
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 #[tauri::command]

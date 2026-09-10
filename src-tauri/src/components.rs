@@ -663,7 +663,9 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
             .to_path_buf();
         let destination = stage.join("ComfyUI");
         tokio::task::spawn_blocking(move || copy_dir_all(&comfy_root, &destination)).await??;
-        run_component_command(
+        let model_progress = cache.join("model-progress.json");
+        run_component_command_with_progress(
+            app,
             &python.join("Scripts/python.exe"),
             &[
                 &assets
@@ -673,7 +675,10 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
                 &stage.to_string_lossy(),
                 "--cache",
                 &cache.join("model-download").to_string_lossy(),
+                "--progress",
+                &model_progress.to_string_lossy(),
             ],
+            &model_progress,
         )
         .await?;
         crate::store::write_json_atomic(
@@ -782,6 +787,48 @@ async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
     });
     anyhow::ensure!(
         output.status.success(),
+        "{} の実行に失敗しました: {stderr}",
+        program.display()
+    );
+    Ok(())
+}
+
+async fn run_component_command_with_progress(
+    app: &AppHandle,
+    program: &Path,
+    args: &[&str],
+    progress_path: &Path,
+) -> Result<()> {
+    let mut command = crate::tools::process::command(program);
+    command.args(args).env(
+        "UV_CACHE_DIR",
+        program.parent().unwrap_or(Path::new(".")).join("cache"),
+    );
+    let output = crate::tools::process::output(command, 7_200, "キャラクター作成モデル導入");
+    tokio::pin!(output);
+    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(250));
+    let result = loop {
+        tokio::select! {
+            result = &mut output => break result.map_err(anyhow::Error::msg)?,
+            _ = ticker.tick() => {
+                let Ok(bytes) = tokio::fs::read(progress_path).await else { continue; };
+                let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue; };
+                let message = value.get("message").and_then(serde_json::Value::as_str).unwrap_or("モデルを取得中…");
+                let downloaded = value.get("downloaded").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                let total = value.get("total").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                emit_progress(app, "character-maker", "download", message, downloaded, total);
+            }
+        }
+    };
+    cleanup_file(app, "モデル取得進捗ファイル", progress_path).await;
+    let stderr = String::from_utf8(result.stderr).unwrap_or_else(|error| {
+        format!(
+            "標準エラーがUTF-8ではありません（{}バイト）",
+            error.as_bytes().len()
+        )
+    });
+    anyhow::ensure!(
+        result.status.success(),
         "{} の実行に失敗しました: {stderr}",
         program.display()
     );

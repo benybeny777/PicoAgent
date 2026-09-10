@@ -969,17 +969,26 @@ function createOperationProgress(label = "処理の進捗") {
   const message = el("span", { className: "operation-progress-message" });
   message.setAttribute("role", "status");
   message.setAttribute("aria-live", "polite");
+  const detail = el("span", { className: "operation-progress-detail" });
   const elapsed = el("span", { className: "operation-progress-elapsed" });
   const fill = el("span", { className: "operation-progress-fill" });
   const track = el("div", { className: "operation-progress-track is-indeterminate" }, [fill]);
   track.setAttribute("role", "progressbar");
   track.setAttribute("aria-label", label);
   const root = el("div", { className: "operation-progress" }, [
-    el("div", { className: "operation-progress-copy" }, [message, elapsed]),
+    el("div", { className: "operation-progress-copy" }, [message, detail, elapsed]),
     track,
   ]);
   let startedAt = 0;
   let elapsedTimer = null;
+
+  function formatSize(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)}GB`;
+    if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}MB`;
+    if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)}KB`;
+    return `${Math.round(bytes)}B`;
+  }
 
   function updateElapsed() {
     if (!startedAt) return;
@@ -997,6 +1006,7 @@ function createOperationProgress(label = "処理の進捗") {
     track.classList.add("is-indeterminate");
     track.removeAttribute("aria-valuenow");
     fill.style.width = "35%";
+    detail.textContent = "算出中";
     updateElapsed();
   }
 
@@ -1010,10 +1020,12 @@ function createOperationProgress(label = "処理の進捗") {
       track.classList.remove("is-indeterminate");
       track.setAttribute("aria-valuenow", String(percent));
       fill.style.width = `${percent}%`;
+      detail.textContent = `${percent}% ・ ${formatSize(downloaded)} / ${formatSize(total)}`;
     } else {
       track.classList.add("is-indeterminate");
       track.removeAttribute("aria-valuenow");
       fill.style.width = "35%";
+      detail.textContent = downloaded > 0 ? formatSize(downloaded) : "算出中";
     }
   }
 
@@ -1025,6 +1037,7 @@ function createOperationProgress(label = "処理の進捗") {
     track.classList.add("is-indeterminate");
     track.removeAttribute("aria-valuenow");
     fill.style.width = "35%";
+    detail.textContent = "";
     elapsed.textContent = "";
     if (finalMessage) message.textContent = finalMessage;
   }
@@ -2754,11 +2767,28 @@ function buildCharacterMaker(registerInstalledCharacter) {
         status.textContent = `PicoAgentへ反映できませんでした: ${error?.message || error}`;
       }
     });
+    const previewButton = el("button", {
+      className: "secondary",
+      type: "button",
+      textContent: "動作を確認",
+      disabled: character.stages?.complete?.status !== "complete",
+    });
+    previewButton.addEventListener("click", async () => {
+      previewButton.disabled = true;
+      try {
+        await window.picoagent.settings.characterMakerPreview(character.characterId);
+        status.textContent = `${character.displayName}の確認画面を開きました。`;
+      } catch (error) {
+        status.textContent = `確認画面を開けませんでした: ${error?.message || error}`;
+      } finally {
+        previewButton.disabled = character.stages?.complete?.status !== "complete";
+      }
+    });
     return markSearchable(el("div", { className: "card-item" }, [
       el("div", { className: "card-title", textContent: character.displayName }),
       el("div", { className: "card-desc character-id", textContent: character.characterId }),
       el("div", { className: "card-desc", textContent: stages }),
-      el("div", { className: "character-add-actions" }, [runButton, installButton]),
+      el("div", { className: "character-add-actions" }, [runButton, previewButton, installButton]),
     ]), character.displayName, character.characterId, stages);
   }
 

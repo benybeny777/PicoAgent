@@ -51,6 +51,16 @@ pub(crate) fn lock_byte(path: &Path) -> io::Result<fs::File> {
     Ok(file)
 }
 
+/// 起動時清掃と補完処理が同時に素材を触らないための共通ロックを取得する。
+pub fn startup_cleanup_guard(root: &Path) -> io::Result<fs::File> {
+    fs::create_dir_all(root)?;
+    plain(root)?;
+    let workspace = root.join("temp");
+    fs::create_dir_all(&workspace)?;
+    plain(&workspace)?;
+    lock_byte(&workspace.join("completion-gpu.lock"))
+}
+
 #[cfg(not(windows))]
 pub(crate) fn lock_byte(_path: &Path) -> io::Result<fs::File> {
     Err(io::Error::other("この環境の起動復旧ロックは未対応です"))

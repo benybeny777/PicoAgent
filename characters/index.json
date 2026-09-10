@@ -1,7 +1,6 @@
 {
   "characters": [
     {
-      "bootSleeping": true,
       "description": "明るく観察上手な小さな作業相棒。",
       "id": "mugi",
       "manifest": "mugi/character.json",

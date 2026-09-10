@@ -437,6 +437,7 @@
       this.lvsFace = lvsFace;
       this.blush = blush;
       this.active = false;
+      this.reducedMotion = false;
       this.mouth = 0;
       this.mouthForm = 0;
       this.armClose = clamp(rig.parameters?.ParamArmClose?.[2] ?? 0, 0, 1);
@@ -481,6 +482,11 @@
       } else {
         this.app.ticker.stop();
       }
+    }
+
+    setReducedMotion(reduced) {
+      this.reducedMotion = Boolean(reduced);
+      this.lastAt = 0;
     }
 
     setMouth(value, form = this.mouthForm) {
@@ -933,7 +939,10 @@
       this.updateBlink(now);
       this.updateLvsAppearance();
       this.updateAlphas();
-      this.updateMesh(now, dt);
+      // OSの「アニメーションを減らす」ではキャラ自体を旧2Dへ戻さず、受動的な
+      // 呼吸・揺れ・待機モーションだけを初期姿勢へ固定する。口・表情・まばたきは
+      // 会話状態を伝えるため、同じメッシュ上で引き続き更新する。
+      this.updateMesh(this.reducedMotion ? this.startedAt : now, dt);
       this.updateBlush();
     }
 

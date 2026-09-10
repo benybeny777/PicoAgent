@@ -1,5 +1,5 @@
 //! 公開済みの不変リグ世代を、読了まで Windows の byte 0 lease で保持する。
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Reference {
     schema_version: u32,
     generation: String,
@@ -177,11 +177,26 @@ impl Drop for Reader {
 }
 
 pub fn collect(root: &Path) -> io::Result<()> {
+    collect_generations(root, true)
+}
+
+/// 起動時はロールバック用の旧1世代もキャッシュとして回収する。
+/// 表示中のReaderがあればleaseで保護されるため、その世代だけは削除しない。
+pub fn collect_startup(root: &Path) -> io::Result<()> {
+    collect_generations(root, false)
+}
+
+fn collect_generations(root: &Path, keep_previous: bool) -> io::Result<()> {
     use std::io::{Seek, SeekFrom};
     let _catalog = catalog(root)?;
-    let selected = reference(root)?;
+    let mut selected = reference(root)?;
+    if !keep_previous && selected.previous.take().is_some() {
+        crate::store::write_json_atomic(&root.join("rig-current.json"), &selected)?;
+    }
     let mut protected = std::collections::BTreeSet::from([selected.generation]);
-    protected.extend(selected.previous);
+    if keep_previous {
+        protected.extend(selected.previous);
+    }
     let leases = root.join("rig-leases");
     if leases.exists() {
         crate::recovery::plain(&leases)?;
@@ -290,6 +305,37 @@ mod tests {
         assert_eq!(
             fs::read_dir(root.join("rig-generations")).unwrap().count(),
             2
+        );
+    }
+
+    #[test]
+    fn startup_collection_removes_rollback_generation_but_keeps_active_reader() {
+        let temp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../temp/generation-reference");
+        fs::create_dir_all(&temp).unwrap();
+        let fixture = tempfile::tempdir_in(temp).unwrap();
+        let root = fixture.path();
+        let publish = |n: u32, previous: Option<String>| {
+            let generation = format!("g_{n:032x}");
+            let dir = root.join("rig-generations").join(&generation);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("rig.json"), b"{}").unwrap();
+            fs::write(dir.join("completion.json"), b"{\"outputs\":{}}").unwrap();
+            fs::write(root.join("rig-current.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"generation":generation,"previous":previous,"rig_sha256":format!("{:x}",Sha256::digest(b"{}")),"completion_sha256":format!("{:x}",Sha256::digest(b"{\"outputs\":{}}"))})).unwrap()).unwrap();
+            generation
+        };
+        let first = publish(1, None);
+        fs::create_dir_all(root.join("rig-leases")).unwrap();
+        let reader = Reader::acquire(root, 1024).unwrap();
+        let second = publish(2, Some(first));
+        publish(3, Some(second.clone()));
+        collect_startup(root).unwrap();
+        assert!(reader.directory.exists());
+        assert!(!root.join("rig-generations").join(second).exists());
+        assert!(reference(root).unwrap().previous.is_none());
+        reader.finish().unwrap();
+        assert_eq!(
+            fs::read_dir(root.join("rig-generations")).unwrap().count(),
+            1
         );
     }
 }

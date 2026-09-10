@@ -103,6 +103,14 @@ test("キャラクター切替では破棄されたcanvasを再利用しない",
   assert.ok(destroy >= 0 && create > destroy && render > create);
 });
 
+test("省モーションでもメッシュを消さず受動動作だけを固定する", () => {
+  assert.match(renderer, /setReducedMotion\(reduced\)/);
+  assert.match(renderer, /this\.updateMesh\(this\.reducedMotion \? this\.startedAt : now, dt\)/);
+  assert.doesNotMatch(appRenderer, /meshRigController\s*&&\s*!reduceMotion/);
+  assert.match(appRenderer, /meshRigController\.setReducedMotion\(reduceMotion\)/);
+  assert.match(appRenderer, /meshRigController\?\.setReducedMotion\(reduceMotion\)/);
+});
+
 test("独自2.5Dは首境界を開く局所頭部変形をせず一体で呼吸する", () => {
   assert.doesNotMatch(renderer, /const isNeck = name === "neck"/);
   assert.doesNotMatch(renderer, /motionPose\.headX \* headWeight/);

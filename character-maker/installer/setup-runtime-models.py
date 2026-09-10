@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 import urllib.request
 
 SPECS = [
@@ -39,7 +40,28 @@ def sha256(path):
     with path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
-def download(root, cache, relative, url, expected):
+def write_progress(path, *, message, downloaded, total):
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps({
+        "message": message,
+        "downloaded": downloaded,
+        "total": total,
+    }, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(path)
+
+def response_total(response, offset):
+    content_range = response.headers.get("Content-Range", "")
+    if "/" in content_range:
+        tail = content_range.rsplit("/", 1)[-1]
+        if tail.isdigit():
+            return int(tail)
+    length = response.headers.get("Content-Length", "")
+    return offset + int(length) if length.isdigit() else 0
+
+def download(root, cache, relative, url, expected, progress, index, count):
     destination = root / relative
     pending = cache / (relative.replace("/", "_") + ".part")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +70,7 @@ def download(root, cache, relative, url, expected):
         if path.is_symlink() or path.absolute() != path.resolve():
             raise ValueError(f"モデル保存先にリンクを使用できません: {path}")
     if destination.is_file() and sha256(destination) == expected:
+        write_progress(progress, message=f"モデル {index}/{count} を確認済み: {relative}", downloaded=1, total=1)
         print(json.dumps({"event":"verified", "file":relative}), flush=True)
         return
     if destination.exists():
@@ -58,25 +81,36 @@ def download(root, cache, relative, url, expected):
         status = getattr(response, "status", 200)
         if offset and status != 206:
             raise ValueError(f"モデル取得の再開に対応しない応答です: {relative}")
+        total = response_total(response, offset)
+        downloaded = offset
+        last_progress = 0.0
+        write_progress(progress, message=f"モデル {index}/{count} を取得中: {relative}", downloaded=downloaded, total=total)
         with pending.open("ab" if offset else "wb") as output:
             while block := response.read(1024 * 1024):
                 output.write(block)
+                downloaded += len(block)
+                now = time.monotonic()
+                if now - last_progress >= 0.2:
+                    write_progress(progress, message=f"モデル {index}/{count} を取得中: {relative}", downloaded=downloaded, total=total)
+                    last_progress = now
             output.flush(); os.fsync(output.fileno())
     if sha256(pending) != expected:
         raise ValueError(f"モデルのSHA-256検査に失敗しました: {relative}")
     pending.replace(destination)
+    write_progress(progress, message=f"モデル {index}/{count} を取得完了: {relative}", downloaded=downloaded, total=total or downloaded)
     print(json.dumps({"event":"complete", "file":relative}), flush=True)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--progress", type=Path)
     args = parser.parse_args()
     root = args.runtime.resolve()
     cache = args.cache.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    for relative, url, digest in SPECS:
-        download(root, cache, relative, url, digest)
+    for index, (relative, url, digest) in enumerate(SPECS, 1):
+        download(root, cache, relative, url, digest, args.progress, index, len(SPECS))
 
 if __name__ == "__main__":
     main()

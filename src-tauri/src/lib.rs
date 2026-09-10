@@ -44,6 +44,7 @@ mod relationship_preset;
 mod scheduler;
 mod secret;
 mod settings_memory;
+mod startup_cleanup;
 mod store;
 mod stream_profile;
 mod text;
@@ -109,6 +110,7 @@ pub fn run() {
             commands::pet_set_character_offset,
             commands::pet_place_window,
             commands::pet_start_window_drag,
+            commands::pet_open_external_url,
             commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
             commands::pet_relationship_state,
@@ -137,6 +139,8 @@ pub fn run() {
             character_maker::settings_character_maker_run,
             character_maker::settings_character_maker_cancel,
             character_maker::settings_character_maker_install,
+            character_maker::settings_character_maker_preview,
+            character_maker::settings_character_maker_preview_data,
             commands::settings_pick_stream_image,
             commands::settings_export_diagnostics,
             commands::pet_user_characters,
@@ -177,6 +181,10 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
+            // WebViewの描画キャッシュと中断した取得途中だけを毎回回収する。
+            // 設定・会話・完成キャラ・導入済みモデルはapp data/bundled側なので保持する。
+            startup_cleanup::run(app.handle());
+            character_maker::cleanup_startup(app.handle());
             components::init(app.handle());
             // 設定の正本を読み込み、選択中プロバイダ・モデル・会話を初期化する。
             let state = app.state::<AppState>();

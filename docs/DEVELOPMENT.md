@@ -4,7 +4,7 @@
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
-キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、Python取得キャッシュ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
+キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、Python取得キャッシュ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
