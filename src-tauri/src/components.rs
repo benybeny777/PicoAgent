@@ -829,7 +829,9 @@ async fn install_media_model(
             .output()
     })
     .await??;
-    let memory_mb = String::from_utf8_lossy(&gpu.stdout)
+    let gpu_text =
+        std::str::from_utf8(&gpu.stdout).context("nvidia-smiの出力をUTF-8として読めません")?;
+    let memory_mb = gpu_text
         .lines()
         .filter_map(|line| line.trim().parse::<u64>().ok())
         .max()

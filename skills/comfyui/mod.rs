@@ -129,7 +129,15 @@ impl Tool for ComfyuiTool {
     }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
-        &["画像編集", "画像生成", "動画生成", "comfyui", "wan", "ltx"]
+        &[
+            "画像編集",
+            "画像生成",
+            "動画生成",
+            "画像",
+            "comfyui",
+            "wan",
+            "ltx",
+        ]
     }
 
     fn label(&self) -> &'static str {
