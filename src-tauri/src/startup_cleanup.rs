@@ -11,6 +11,7 @@ fn cache_targets(cache_root: &Path) -> Vec<PathBuf> {
     let default = webview.join("Default");
     vec![
         cache_root.join("character-maker-installer"),
+        cache_root.join("media-model-installer"),
         cache_root.join("component-installer"),
         webview.join("component_crx_cache"),
         webview.join("extensions_crx_cache"),
@@ -55,6 +56,23 @@ pub fn run(app: &AppHandle) {
             );
         }
     }
+    let generated = crate::log_paths::data_dir(app).join("generated-media");
+    if let Ok(entries) = std::fs::read_dir(&generated) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if (name.starts_with(".generating-") || name.ends_with(".incoming"))
+                && remove_target(&entry.path()).is_err()
+            {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "生成途中ファイルを削除できません。次回再試行します: {}",
+                        entry.path().display()
+                    ),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -66,6 +84,7 @@ mod tests {
         let root = Path::new("cache-root");
         let targets = cache_targets(root);
         assert!(targets.contains(&root.join("character-maker-installer")));
+        assert!(targets.contains(&root.join("media-model-installer")));
         assert!(targets.contains(&root.join("EBWebView/Default/Cache")));
         for preserved in [
             "config.json",

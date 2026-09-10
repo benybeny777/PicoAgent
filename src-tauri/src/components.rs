@@ -20,7 +20,15 @@ use tauri::{AppHandle, Emitter, Manager};
 const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
-const COMPONENT_IDS: [&str; 5] = ["aivis", "whisper", "character-maker", "office", "tools"];
+const COMPONENT_IDS: [&str; 7] = [
+    "aivis",
+    "whisper",
+    "character-maker",
+    "video-wan",
+    "video-ltx",
+    "office",
+    "tools",
+];
 const WHISPER_RELEASE_API: &str =
     "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest";
 const WHISPER_MODEL_URL: &str =
@@ -28,6 +36,7 @@ const WHISPER_MODEL_URL: &str =
 const WHISPER_MODEL_SHA256: &str =
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
 static RUNTIME_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static CHARACTER_MAKER_ASSETS: OnceLock<PathBuf> = OnceLock::new();
 static COMPONENT_OPERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Deserialize)]
@@ -88,10 +97,26 @@ pub fn init(app: &AppHandle) {
     // フォールバック許可: `OnceLock::set` は2回目以降 Err を返すだけで、
     // 先に入っている同じ値がそのまま残る（起動時に一度だけ呼ぶ初期化）。
     let _ = RUNTIME_ROOT.set(crate::log_paths::bundled_dir(app));
+    let packaged = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|root| root.join("character-maker"))
+        .filter(|root| root.join("sidecar").is_dir());
+    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|root| root.join("character-maker"));
+    if let Some(root) = packaged.or(development) {
+        let _ = CHARACTER_MAKER_ASSETS.set(root);
+    }
 }
 
 pub fn runtime_root() -> Option<&'static Path> {
     RUNTIME_ROOT.get().map(PathBuf::as_path)
+}
+
+pub(crate) fn character_maker_assets() -> Option<PathBuf> {
+    CHARACTER_MAKER_ASSETS.get().cloned()
 }
 
 async fn cleanup_file(app: &AppHandle, label: &str, path: &Path) {
@@ -129,9 +154,19 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
             "約0.5GB",
         )),
         "character-maker" => Some((
-            "キャラクター作成（テスト）",
-            "Python 3.12、ComfyUI、背景除去・部位分解・局所補完モデルをPicoAgent専用領域へ導入します。CUDA対応NVIDIA GPU専用です。",
+            "画像編集・キャラクター作成基盤",
+            "Python 3.12、ComfyUI、Qwen画像編集、背景除去・部位分解モデルをPicoAgent専用領域へ導入します。CUDA対応NVIDIA GPU専用です。",
             "約77GB（導入後、作業領域は別。空き85GB以上が必要）",
+        )),
+        "video-wan" => Some((
+            "Wan 2.2動画生成",
+            "8GB VRAM向けの標準候補Wan 2.2 TI2V 5Bです。テキストまたは画像から動画を生成します。選択時だけ取得します。",
+            "約18.1GB（空き22GB以上が必要）",
+        )),
+        "video-ltx" => Some((
+            "LTX軽量動画生成",
+            "8GB VRAM向けのLTX-Video 0.9.8 2B FP8です。最新LTX 2.5は公式基準16GB以上のため取得しません。",
+            "約14.3GB（空き18GB以上が必要）",
         )),
         "office" => Some((
             "Office変換",
@@ -253,7 +288,7 @@ pub(crate) fn shared_python_dir(app: &AppHandle) -> PathBuf {
 fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
     let manifest_name = match id {
         "aivis" => "engine_manifest.json",
-        "character-maker" => "install.json",
+        "character-maker" | "video-wan" | "video-ltx" => "install.json",
         _ => return Ok(None),
     };
     let path = root.join(manifest_name);
@@ -512,6 +547,12 @@ pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentSta
             }
             "whisper" => install_whisper(app).await?,
             "character-maker" => install_character_maker(app).await?,
+            "video-wan" => {
+                install_media_model(app, "video-wan", "wan-2.2-5b", 22_000_000_000).await?
+            }
+            "video-ltx" => {
+                install_media_model(app, "video-ltx", "ltx-0.9.8-2b-fp8", 18_000_000_000).await?
+            }
             _ => anyhow::bail!("{id} は自動導入の対象ではありません"),
         }
     }
@@ -623,7 +664,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         tokio::task::spawn_blocking(move || copy_dir_all(&venv_stage_copy, &python_stage_copy))
             .await??;
         let python = python_stage.clone();
-        let assets = character_maker_assets(app)?;
+        let assets = character_maker_assets().context("キャラ作成資源がありません")?;
         run_component_command(
             &uv,
             &[
@@ -673,6 +714,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         let model_progress = cache.join("model-progress.json");
         run_component_command_with_progress(
             app,
+            "character-maker",
             &python.join("Scripts/python.exe"),
             &[
                 &assets
@@ -716,11 +758,106 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     result
 }
 
+async fn install_media_model(
+    app: &AppHandle,
+    id: &'static str,
+    model: &'static str,
+    required_free: u64,
+) -> Result<()> {
+    anyhow::ensure!(
+        cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "ローカル動画生成はWindows x64専用です"
+    );
+    let python = shared_python_dir(app).join("Scripts/python.exe");
+    anyhow::ensure!(
+        installed_dir(app, "character-maker")
+            .join("ComfyUI/main.py")
+            .is_file()
+            && python.is_file(),
+        "先に「画像編集・キャラクター作成基盤」を導入してください。動画モデルはまだ取得していません"
+    );
+    let gpu = tokio::task::spawn_blocking(|| {
+        crate::tools::process::command_sync("nvidia-smi.exe")
+            .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+            .stdin(Stdio::null())
+            .output()
+    })
+    .await??;
+    let memory_mb = String::from_utf8_lossy(&gpu.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u64>().ok())
+        .max()
+        .unwrap_or(0);
+    anyhow::ensure!(
+        gpu.status.success() && memory_mb >= 7_500,
+        "8GB以上のCUDA対応NVIDIA GPUを確認できません。動画モデルは取得していません"
+    );
+    let bundled = crate::log_paths::bundled_dir(app);
+    std::fs::create_dir_all(&bundled)?;
+    anyhow::ensure!(
+        free_disk_bytes(&bundled)? >= required_free,
+        "{}の導入に必要な空き容量がありません。動画モデルは取得していません",
+        definitions(id).map(|value| value.0).unwrap_or(id)
+    );
+    let stage =
+        installed_dir(app, id).with_file_name(format!(".installing-{id}-{}", std::process::id()));
+    let cache = app
+        .path()
+        .app_cache_dir()?
+        .join("media-model-installer")
+        .join(id);
+    cleanup_dir(app, "古い動画モデル導入途中フォルダ", &stage).await;
+    tokio::fs::create_dir_all(&stage).await?;
+    tokio::fs::create_dir_all(&cache).await?;
+    let progress = cache.join("progress.json");
+    let assets = character_maker_assets().context("画像・動画生成資源がありません")?;
+    let script = assets.join("sidecar/media/setup_models.py");
+    let download_cache = cache.join("download");
+    let result = run_component_command_with_progress(
+        app,
+        id,
+        &python,
+        &[
+            &script.to_string_lossy(),
+            "--model",
+            model,
+            "--runtime",
+            &stage.to_string_lossy(),
+            "--cache",
+            &download_cache.to_string_lossy(),
+            "--progress",
+            &progress.to_string_lossy(),
+        ],
+        &progress,
+    )
+    .await;
+    if let Err(error) = result {
+        cleanup_dir(app, "動画モデル導入途中フォルダ", &stage).await;
+        return Err(error);
+    }
+    replace_installed(&stage, &installed_dir(app, id), id)?;
+    cleanup_dir(app, "動画モデル取得キャッシュ", &cache).await;
+    emit_progress(
+        app,
+        id,
+        "ready",
+        format!(
+            "{}を導入しました",
+            definitions(id).map(|value| value.0).unwrap_or(id)
+        ),
+        1,
+        1,
+    );
+    Ok(())
+}
+
 fn stale_install_pid(name: &str, current_pid: &str) -> Option<u32> {
     [
         ".installing-character-maker-",
         ".installing-python-",
         ".installing-whisper-",
+        ".installing-video-wan-",
+        ".installing-video-ltx-",
     ]
     .iter()
     .find_map(|prefix| name.strip_prefix(prefix))
@@ -766,17 +903,6 @@ fn process_exists(_pid: u32) -> bool {
     true
 }
 
-fn character_maker_assets(app: &AppHandle) -> Result<PathBuf> {
-    let installed = app.path().resource_dir()?.join("character-maker");
-    if installed.join("sidecar").is_dir() {
-        return Ok(installed);
-    }
-    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .context("リポジトリルートがありません")?
-        .join("character-maker"))
-}
-
 async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
     let mut command = crate::tools::process::command(program);
     command.args(args).env(
@@ -802,6 +928,7 @@ async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
 
 async fn run_component_command_with_progress(
     app: &AppHandle,
+    id: &str,
     program: &Path,
     args: &[&str],
     progress_path: &Path,
@@ -823,7 +950,7 @@ async fn run_component_command_with_progress(
                 let message = value.get("message").and_then(serde_json::Value::as_str).unwrap_or("モデルを取得中…");
                 let downloaded = value.get("downloaded").and_then(serde_json::Value::as_u64).unwrap_or(0);
                 let total = value.get("total").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                emit_progress(app, "character-maker", "download", message, downloaded, total);
+                emit_progress(app, id, "download", message, downloaded, total);
             }
         }
     };
