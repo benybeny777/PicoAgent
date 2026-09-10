@@ -61,7 +61,7 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
             characters_root: data.join("character-maker/characters"),
             assets_root,
         },
-        MakerConfig::managed(managed, bundled.join("python")),
+        MakerConfig::managed(managed, crate::components::shared_python_dir(app)),
     ))
 }
 

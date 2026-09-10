@@ -52,7 +52,7 @@ pub(crate) fn set_status(app: &AppHandle, value: Value) {
 }
 
 // 同梱した llama-server 実行ファイルを解決する（バンドル時と dev で場所が異なるため候補を探す）。
-fn server_path(app: &AppHandle) -> Option<PathBuf> {
+fn server_path(app: &AppHandle) -> PathBuf {
     let exe = if cfg!(windows) {
         "llama-server.exe"
     } else {
@@ -73,7 +73,22 @@ fn server_path(app: &AppHandle) -> Option<PathBuf> {
         candidates.push(cwd.join("resources/engine").join(exe));
         candidates.push(cwd.join("src-tauri/resources/engine").join(exe));
     }
-    candidates.into_iter().find(|p| p.exists())
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        // WindowsのCUDA/ROCm/SYCL管理版は、この共通版が未配置でも候補解決側で
+        // 先に検査・準備できる。存在しない既定パスはフォールバック候補として渡し、
+        // 実在候補が1件も無い場合だけ呼び出し側で未導入エラーにする。
+        .unwrap_or_else(|| crate::log_paths::bundled_dir(app).join("engine").join(exe))
+}
+
+fn existing_backend_candidates(
+    candidates: Vec<crate::engine_backend::BackendCandidate>,
+) -> Vec<crate::engine_backend::BackendCandidate> {
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.server.is_file())
+        .collect()
 }
 
 #[cfg(unix)]
@@ -754,18 +769,21 @@ pub async fn ensure_and_start(app: AppHandle) {
             return;
         }
     }
-    let Some(bundled_server) = server_path(&app) else {
+    let bundled_server = server_path(&app);
+    let configured_ngl = app
+        .state::<AppState>()
+        .config
+        .get("PICOAGENT_LOCAL_NGL", "999");
+    let candidates = existing_backend_candidates(
+        crate::engine_backend::candidates(&app, bundled_server, configured_ngl).await,
+    );
+    if candidates.is_empty() {
         set_status(
             &app,
             json!({ "phase": "error", "message": "ローカルAIエンジンの実行ファイルが見つかりません。設定の「診断・修復」から再インストールを試してください" }),
         );
         return;
-    };
-    let configured_ngl = app
-        .state::<AppState>()
-        .config
-        .get("PICOAGENT_LOCAL_NGL", "999");
-    let candidates = crate::engine_backend::candidates(&app, bundled_server, configured_ngl).await;
+    }
 
     // /health が 200 を返すまで待つ。CUDAが起動失敗した場合はVulkan、最後にCPUへ切り替える。
     let state = app.state::<AppState>();
@@ -926,8 +944,9 @@ pub fn clear_stopping(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        decimal_gb, gpu_device_for_candidate, migration_file_names, model_file_matches,
-        parse_meminfo_total_bytes, parse_nvidia_memory_bytes, remove_obsolete_model_files,
+        decimal_gb, existing_backend_candidates, gpu_device_for_candidate, migration_file_names,
+        model_file_matches, parse_meminfo_total_bytes, parse_nvidia_memory_bytes,
+        remove_obsolete_model_files,
     };
     use crate::providers::local;
 
@@ -953,6 +972,61 @@ mod tests {
             Some("custom:0")
         );
         assert_eq!(gpu_device_for_candidate("CUDA", "  "), None);
+    }
+
+    #[test]
+    fn 実在する管理バックエンドだけを起動候補に残す() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-backend-candidates-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let cuda = root.join("engine-cuda").join("llama-server.exe");
+        std::fs::create_dir_all(cuda.parent().unwrap()).unwrap();
+        std::fs::write(&cuda, b"test").unwrap();
+        let candidates = vec![
+            crate::engine_backend::BackendCandidate {
+                label: "CUDA",
+                server: cuda.clone(),
+                ngl: "999".to_string(),
+            },
+            crate::engine_backend::BackendCandidate {
+                label: "Vulkan",
+                server: root.join("engine").join("llama-server.exe"),
+                ngl: "999".to_string(),
+            },
+        ];
+        let existing = existing_backend_candidates(candidates);
+        assert_eq!(existing.len(), 1);
+        assert_eq!(existing[0].label, "CUDA");
+        assert_eq!(existing[0].server, cuda);
+
+        let generic = root.join("engine").join("llama-server.exe");
+        std::fs::create_dir_all(generic.parent().unwrap()).unwrap();
+        std::fs::write(&generic, b"test").unwrap();
+        let fallback_only = existing_backend_candidates(vec![
+            crate::engine_backend::BackendCandidate {
+                label: "CUDA",
+                server: root.join("engine-cuda-missing").join("llama-server.exe"),
+                ngl: "999".to_string(),
+            },
+            crate::engine_backend::BackendCandidate {
+                label: "Vulkan",
+                server: generic.clone(),
+                ngl: "999".to_string(),
+            },
+        ]);
+        assert_eq!(fallback_only.len(), 1);
+        assert_eq!(fallback_only[0].label, "Vulkan");
+        assert_eq!(fallback_only[0].server, generic);
+
+        let none = existing_backend_candidates(vec![crate::engine_backend::BackendCandidate {
+            label: "CUDA",
+            server: root.join("missing").join("llama-server.exe"),
+            ngl: "999".to_string(),
+        }]);
+        assert!(none.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -12,7 +12,7 @@ use image::ImageFormat;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
     config::MakerConfig,
@@ -82,7 +82,10 @@ impl PipelineContext {
         Ok(self.characters_root.join(id))
     }
 
-    pub fn create_character(&self, input: NewCharacter) -> Result<CharacterManifest, PipelineError> {
+    pub fn create_character(
+        &self,
+        input: NewCharacter,
+    ) -> Result<CharacterManifest, PipelineError> {
         if input.display_name.trim().is_empty() {
             return Err(PipelineError::Invalid("表示名を入力してください".into()));
         }
@@ -189,7 +192,11 @@ impl PipelineContext {
         let mut manifest = self.load_character(id)?;
         if stage_index > 0 {
             let previous = STAGES[stage_index - 1];
-            if manifest.stages.get(previous).map(|value| value.status.as_str()) != Some("complete")
+            if manifest
+                .stages
+                .get(previous)
+                .map(|value| value.status.as_str())
+                != Some("complete")
             {
                 return Err(PipelineError::Invalid(format!(
                     "先に{previous}工程を完了してください"
@@ -242,7 +249,12 @@ impl PipelineContext {
     ) -> Result<(), PipelineError> {
         let directory = self.character_dir(&manifest.character_id)?;
         for stage in &STAGES[start..] {
-            set_stage(manifest, stage, "pending", "上流工程の再実行により未実行へ戻しました");
+            set_stage(
+                manifest,
+                stage,
+                "pending",
+                "上流工程の再実行により未実行へ戻しました",
+            );
         }
         for relative in match STAGES[start] {
             "isolate" => &["source/isolated.png", "analysis", "layers", "rig2d-base"] as &[&str],
@@ -273,13 +285,18 @@ impl PipelineContext {
         self.run_sidecar(
             config,
             vec![
-                self.assets_root.join("sidecar/isolate/generate.py").into_os_string(),
+                self.assets_root
+                    .join("sidecar/isolate/generate.py")
+                    .into_os_string(),
                 "--input".into(),
                 directory.join("source/input.png").into_os_string(),
                 "--output".into(),
                 directory.join("source/isolated.png").into_os_string(),
                 "--model".into(),
-                config.models_root.join("rembg/isnetis.onnx").into_os_string(),
+                config
+                    .models_root
+                    .join("rembg/isnetis.onnx")
+                    .into_os_string(),
             ],
             cancelled,
             relay,
@@ -298,9 +315,14 @@ impl PipelineContext {
         self.run_sidecar(
             config,
             vec![
-                self.assets_root.join("sidecar/decompose/generate.py").into_os_string(),
+                self.assets_root
+                    .join("sidecar/decompose/generate.py")
+                    .into_os_string(),
                 "--grounding-model".into(),
-                config.models_root.join("grounding-dino-base").into_os_string(),
+                config
+                    .models_root
+                    .join("grounding-dino-base")
+                    .into_os_string(),
                 "--grounding-threshold".into(),
                 config.grounding_threshold.to_string().into(),
                 "--eye-context-margin".into(),
@@ -317,7 +339,10 @@ impl PipelineContext {
                 "--stability-threshold".into(),
                 config.sam2_stability_threshold.to_string().into(),
                 "--model".into(),
-                config.models_root.join("sam2.1-hiera-tiny").into_os_string(),
+                config
+                    .models_root
+                    .join("sam2.1-hiera-tiny")
+                    .into_os_string(),
             ],
             cancelled,
             relay,
@@ -336,7 +361,9 @@ impl PipelineContext {
         self.run_sidecar(
             config,
             vec![
-                self.assets_root.join("sidecar/rig2d/generate.py").into_os_string(),
+                self.assets_root
+                    .join("sidecar/rig2d/generate.py")
+                    .into_os_string(),
                 "--manifest".into(),
                 directory.join("layers/manifest.json").into_os_string(),
                 "--output".into(),
@@ -357,22 +384,43 @@ impl PipelineContext {
     ) -> Result<String, PipelineError> {
         let directory = self.character_dir(&manifest.character_id)?;
         let mut args: Vec<OsString> = vec![
-            self.assets_root.join("sidecar/completion/generate.py").into_os_string(),
-            "--character".into(), directory.clone().into_os_string(),
-            "--base-rig".into(), directory.join("rig2d-base/rig.json").into_os_string(),
-            "--output".into(), directory.join("rig2d").into_os_string(),
-            "--comfy".into(), config.comfy().into_os_string(),
-            "--models".into(), config.models_root.join("qwen-eval").into_os_string(),
-            "--workflow".into(), self.assets_root.join("workflows/qwen-edit-api.json").into_os_string(),
-            "--overlay".into(), self.assets_root.join("workflows/qwen-edit-eyes-overlay.json").into_os_string(),
-            "--steps".into(), config.completion_steps.to_string().into(),
-            "--seed".into(), config.completion_seed.to_string().into(),
-            "--resolution".into(), config.completion_resolution.to_string().into(),
-            "--mask-margin-ratio".into(), config.completion_mask_margin.to_string().into(),
-            "--mask-core-ratio".into(), config.completion_mask_core_ratio.to_string().into(),
-            "--port".into(), config.comfy_port.to_string().into(),
-            "--startup-timeout".into(), config.comfy_startup_timeout_seconds.to_string().into(),
-            "--generation-timeout".into(), config.completion_timeout_seconds.to_string().into(),
+            self.assets_root
+                .join("sidecar/completion/generate.py")
+                .into_os_string(),
+            "--character".into(),
+            directory.clone().into_os_string(),
+            "--base-rig".into(),
+            directory.join("rig2d-base/rig.json").into_os_string(),
+            "--output".into(),
+            directory.join("rig2d").into_os_string(),
+            "--comfy".into(),
+            config.comfy().into_os_string(),
+            "--models".into(),
+            config.models_root.join("qwen-eval").into_os_string(),
+            "--workflow".into(),
+            self.assets_root
+                .join("workflows/qwen-edit-api.json")
+                .into_os_string(),
+            "--overlay".into(),
+            self.assets_root
+                .join("workflows/qwen-edit-eyes-overlay.json")
+                .into_os_string(),
+            "--steps".into(),
+            config.completion_steps.to_string().into(),
+            "--seed".into(),
+            config.completion_seed.to_string().into(),
+            "--resolution".into(),
+            config.completion_resolution.to_string().into(),
+            "--mask-margin-ratio".into(),
+            config.completion_mask_margin.to_string().into(),
+            "--mask-core-ratio".into(),
+            config.completion_mask_core_ratio.to_string().into(),
+            "--port".into(),
+            config.comfy_port.to_string().into(),
+            "--startup-timeout".into(),
+            config.comfy_startup_timeout_seconds.to_string().into(),
+            "--generation-timeout".into(),
+            config.completion_timeout_seconds.to_string().into(),
         ];
         if config.completion_fast_disk {
             args.push("--fast-disk".into());
@@ -380,30 +428,48 @@ impl PipelineContext {
         for (flag, value) in [
             ("--hidden-prompt", config.completion_hidden_prompt.clone()),
             ("--side-prompt", config.completion_side_prompt.clone()),
-            ("--hidden-band-ratio", config.completion_hidden_band_ratio.to_string()),
-            ("--hidden-motion-ratio", config.completion_hidden_motion_ratio.to_string()),
-            ("--hair-edge-band-ratio", config.completion_hair_edge_band_ratio.to_string()),
-            ("--hair-edge-gain", config.completion_hair_edge_gain.to_string()),
+            (
+                "--hidden-band-ratio",
+                config.completion_hidden_band_ratio.to_string(),
+            ),
+            (
+                "--hidden-motion-ratio",
+                config.completion_hidden_motion_ratio.to_string(),
+            ),
+            (
+                "--hair-edge-band-ratio",
+                config.completion_hair_edge_band_ratio.to_string(),
+            ),
+            (
+                "--hair-edge-gain",
+                config.completion_hair_edge_gain.to_string(),
+            ),
             ("--ear-context", config.completion_ear_context.to_string()),
-            ("--grounding-threshold", config.grounding_threshold.to_string()),
+            (
+                "--grounding-threshold",
+                config.grounding_threshold.to_string(),
+            ),
         ] {
             args.push(flag.into());
             args.push(value.into());
         }
         args.extend([
             "--grounding-model".into(),
-            config.models_root.join("grounding-dino-base").into_os_string(),
+            config
+                .models_root
+                .join("grounding-dino-base")
+                .into_os_string(),
             "--sam-model".into(),
-            config.models_root.join("sam2.1-hiera-tiny").into_os_string(),
+            config
+                .models_root
+                .join("sam2.1-hiera-tiny")
+                .into_os_string(),
         ]);
         self.run_sidecar(config, args, cancelled, relay)?;
-        let reader = crate::generation_reference::Reader::acquire(
-            &directory,
-            config.snapshot_part_bytes,
-        )?;
-        let rig: serde_json::Value = serde_json::from_reader(fs::File::open(
-            reader.directory.join("rig.json"),
-        )?)?;
+        let reader =
+            crate::generation_reference::Reader::acquire(&directory, config.snapshot_part_bytes)?;
+        let rig: serde_json::Value =
+            serde_json::from_reader(fs::File::open(reader.directory.join("rig.json"))?)?;
         reader.finish()?;
         if rig["schema_version"].as_u64() != Some(3)
             || rig["profile"].as_str() != Some("lvs-anime25d-v1")
@@ -453,7 +519,9 @@ fn validate_id(id: &str) -> Result<(), PipelineError> {
             .bytes()
             .all(|value| value.is_ascii_alphanumeric() || value == b'-' || value == b'_')
     {
-        return Err(PipelineError::Invalid(format!("キャラクターIDが不正です: {id}")));
+        return Err(PipelineError::Invalid(format!(
+            "キャラクターIDが不正です: {id}"
+        )));
     }
     Ok(())
 }
@@ -499,8 +567,14 @@ mod tests {
             })
             .unwrap();
         assert_eq!(character.stages.len(), 4);
-        assert!(character.stages.values().all(|state| state.status == "pending"));
-        let input = context.character_dir(&character.character_id).unwrap().join("source/input.png");
+        assert!(character
+            .stages
+            .values()
+            .all(|state| state.status == "pending"));
+        let input = context
+            .character_dir(&character.character_id)
+            .unwrap()
+            .join("source/input.png");
         assert_eq!(image::open(input).unwrap().dimensions(), (8, 8));
     }
 }

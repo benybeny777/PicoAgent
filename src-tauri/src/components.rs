@@ -245,6 +245,11 @@ fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
     crate::log_paths::bundled_dir(app).join(id)
 }
 
+/// CUDA対応Python機能は、機能ごとにPythonと同一wheelを複製せず、この1環境を共有する。
+pub(crate) fn shared_python_dir(app: &AppHandle) -> PathBuf {
+    crate::log_paths::bundled_dir(app).join("python")
+}
+
 fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
     let manifest_name = match id {
         "aivis" => "engine_manifest.json",
@@ -435,8 +440,7 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
         crate::aivis::stop(app);
     }
     let target = installed_dir(app, id);
-    let shared_python =
-        (id == "character-maker").then(|| crate::log_paths::bundled_dir(app).join("python"));
+    let shared_python = (id == "character-maker").then(|| shared_python_dir(app));
     let label = definitions(id).map(|item| item.0).unwrap_or(id).to_string();
     emit_progress(app, id, "remove", "削除中…", 0, 0);
     tokio::task::spawn_blocking(move || {
@@ -560,7 +564,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     ));
     let python_stage = crate::log_paths::bundled_dir(app)
         .join(format!(".installing-python-{}", std::process::id()));
-    cleanup_stale_character_maker_stages(app).await;
+    cleanup_stale_install_stages(app).await;
     cleanup_dir(app, "古いキャラ作成導入途中フォルダ", &stage).await;
     cleanup_dir(app, "古い共通Python導入途中フォルダ", &python_stage).await;
     tokio::fs::create_dir_all(&cache).await?;
@@ -677,11 +681,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
             &serde_json::json!({"version":"2026.09.10","python":"3.12.13","comfy":"v0.34.0"}),
         )?;
         replace_installed_pair(
-            (
-                &python_stage,
-                &crate::log_paths::bundled_dir(app).join("python"),
-                "python",
-            ),
+            (&python_stage, &shared_python_dir(app), "python"),
             (
                 &stage,
                 &installed_dir(app, "character-maker"),
@@ -704,7 +704,19 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     result
 }
 
-async fn cleanup_stale_character_maker_stages(app: &AppHandle) {
+fn stale_install_pid(name: &str, current_pid: &str) -> Option<u32> {
+    [
+        ".installing-character-maker-",
+        ".installing-python-",
+        ".installing-whisper-",
+    ]
+    .iter()
+    .find_map(|prefix| name.strip_prefix(prefix))
+    .filter(|pid| *pid != current_pid)
+    .and_then(|pid| pid.parse::<u32>().ok())
+}
+
+async fn cleanup_stale_install_stages(app: &AppHandle) {
     let bundled = crate::log_paths::bundled_dir(app);
     let Ok(mut entries) = tokio::fs::read_dir(&bundled).await else {
         return;
@@ -712,13 +724,9 @@ async fn cleanup_stale_character_maker_stages(app: &AppHandle) {
     let current_pid = std::process::id().to_string();
     while let Ok(Some(entry)) = entries.next_entry().await {
         let name = entry.file_name().to_string_lossy().to_string();
-        let stale_pid = [".installing-character-maker-", ".installing-python-"]
-            .iter()
-            .find_map(|prefix| name.strip_prefix(prefix))
-            .filter(|pid| *pid != current_pid)
-            .and_then(|pid| pid.parse::<u32>().ok());
+        let stale_pid = stale_install_pid(&name, &current_pid);
         if stale_pid.is_some_and(|pid| !process_exists(pid)) {
-            cleanup_dir(app, "終了済みキャラ作成導入途中フォルダ", &entry.path()).await;
+            cleanup_dir(app, "終了済み導入途中フォルダ", &entry.path()).await;
         }
     }
 }
@@ -733,7 +741,11 @@ fn process_exists(pid: u32) -> bool {
         // 判定不能時は削除しない。
         return true;
     };
-    String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\""))
+    let Ok(stdout) = String::from_utf8(output.stdout) else {
+        // 判定不能時は別プロセスの作業中フォルダを消さない。
+        return true;
+    };
+    stdout.contains(&format!("\"{pid}\""))
 }
 
 #[cfg(not(windows))]
@@ -831,6 +843,7 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
     let unpacked = cache.join(format!("whisper-unpacked-{}", std::process::id()));
     let stage = installed_dir(app, "whisper")
         .with_file_name(format!(".installing-whisper-{}", std::process::id()));
+    cleanup_stale_install_stages(app).await;
     cleanup_file(app, "古いWhisper取得途中ファイル", &archive).await;
     cleanup_dir(app, "古いWhisper展開途中フォルダ", &unpacked).await;
     cleanup_dir(app, "古いWhisper導入途中フォルダ", &stage).await;
@@ -1216,6 +1229,37 @@ mod tests {
             assert!(definitions(id).is_some());
         }
         assert!(definitions("unknown").is_none());
+    }
+
+    #[test]
+    fn python環境の配置は共通入口だけで決める() {
+        let components_source = include_str!("components.rs");
+        let maker_source = include_str!("character_maker.rs");
+        assert_eq!(components_source.matches(".join(\"python\")").count(), 1);
+        assert!(!maker_source.contains(".join(\"python\")"));
+        assert!(maker_source.contains("components::shared_python_dir(app)"));
+    }
+
+    #[test]
+    fn 終了済みpid付きの導入途中名だけを回収対象にする() {
+        assert_eq!(
+            stale_install_pid(".installing-whisper-123", "999"),
+            Some(123)
+        );
+        assert_eq!(
+            stale_install_pid(".installing-character-maker-123", "999"),
+            Some(123)
+        );
+        assert_eq!(
+            stale_install_pid(".installing-python-123", "999"),
+            Some(123)
+        );
+        assert_eq!(stale_install_pid(".installing-whisper-999", "999"), None);
+        assert_eq!(stale_install_pid("whisper", "999"), None);
+        assert_eq!(
+            stale_install_pid(".installing-whisper-invalid", "999"),
+            None
+        );
     }
 
     #[test]

@@ -5733,6 +5733,7 @@ async function releaseBootUi() {
   let startupGreeting = "";
   let startupPreparedSpeech = null;
   let startupVoiceError = "";
+  let startupEngineError = "";
   try {
     const characterLoad = await characterLoadPromise;
     if (!characterLoad.ok) throw characterLoad.error;
@@ -5754,7 +5755,10 @@ async function releaseBootUi() {
     if (localEngineRequired && info.onboardingDone) {
       // 送信できない通常画面を先に見せず、利用可能または明示的な失敗になるまで
       // 寝姿の起動画面で進捗を伝える。
-      await waitForEngineReady();
+      const engineState = await waitForEngineReady();
+      if (engineState?.phase === "error") {
+        startupEngineError = engineState.message || "ローカルAIの準備に失敗しました";
+      }
     } else if (localEngineRequired) {
       // 初回セットアップ（追加機能の選択・Live2D追加）はローカルAIを使わない。
       // 数GBのモデル取得が終わるまで案内を出さないと、初回だけ何分も待たせることになる。
@@ -5763,7 +5767,7 @@ async function releaseBootUi() {
         logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
       });
     }
-    if (info.onboardingDone && startupGreeting) {
+    if (!startupEngineError && info.onboardingDone && startupGreeting) {
       const voiceReady = await prepareSelectedVoiceModel();
       if (voiceReady) startupPreparedSpeech = await prepareSpeech(startupGreeting);
       else if (voiceReady === false) {

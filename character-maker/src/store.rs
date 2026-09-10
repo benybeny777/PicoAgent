@@ -33,7 +33,7 @@ pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), std::io::Erro
 fn replace(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
     let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();

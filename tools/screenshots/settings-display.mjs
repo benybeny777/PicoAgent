@@ -117,9 +117,17 @@ window.__TAURI__ = {
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
       { id: "whisper", label: "音声入力・文字起こし", description: "Whisperを端末内で動かします。", sizeLabel: "約0.5GB", ready: false, available: true, removable: false, installMode: "managed", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
+      { id: "character-maker", label: "キャラクター作成（テスト）", description: "原画からキャラクターを生成します。", sizeLabel: "約77GB", ready: false, available: true, removable: true, installMode: "managed", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
       { id: "office", label: "Office変換", description: "LibreOfficeで文書変換を補助します。", sizeLabel: "外部アプリ", ready: false, available: true, removable: false, installMode: "external", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
       { id: "tools", label: "PDF・画像・文書ツール", description: "FFmpeg等を追加します。", sizeLabel: "外部ツール", ready: false, available: true, removable: false, installMode: "external", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
     ];
+    if (name === "settings_components_install" && args.ids?.includes("character-maker")) {
+      for (const callback of window.__listeners["component:progress"] || []) callback({ payload: { message: "Python管理ツールを取得中…", downloaded: 0, total: 0 } });
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      for (const callback of window.__listeners["component:progress"] || []) callback({ payload: { message: "モデルを取得中…", downloaded: 25, total: 100 } });
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      return [];
+    }
     if (name === "pet_list_downloaded_models") return { totalLabel: "2GB", models: [{ name: "gemma-test.gguf", label: "Gemma", sizeLabel: "2GB", active: false }] };
     if (name === "settings_list_models") return [];
     if (name === "settings_check_update") return { status: "available", downloadReady: true, message: "1.1.0を利用できます。" };
@@ -172,7 +180,7 @@ try {
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   await page.getByRole("tab", { name: "基本設定" }).click();
-  if (await page.locator(".quick-settings-card").count() !== 7) throw new Error("よく使う設定への入口が7件ではありません");
+  if (await page.locator(".quick-settings-card").count() !== 8) throw new Error("よく使う設定への入口が8件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
   await page.waitForSelector(".memory-item");
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
@@ -192,6 +200,19 @@ try {
   if ((await page.locator(".component-card").allTextContents()).some(text => text.includes("null"))) throw new Error("追加機能カードに空値が文字として表示されています");
   await page.getByRole("button", { name: "1.2.0へ更新", exact: true }).click();
   if (!(await page.locator(".component-manager-status").textContent())?.includes("音声モデル・辞書・設定は残ります")) throw new Error("更新前に維持データが案内されません");
+  await page.locator(".component-card").filter({ hasText: "キャラクター作成（テスト）" }).getByRole("button", { name: "公式からインストール", exact: true }).click();
+  const operationProgress = page.locator(".operation-progress.is-active");
+  await operationProgress.waitFor();
+  if (!(await operationProgress.textContent())?.includes("Python管理ツールを取得中")) throw new Error("取得中の工程名が進捗欄へ表示されません");
+  await page.waitForFunction(() => document.querySelector(".operation-progress-elapsed")?.textContent?.includes("1秒"));
+  await page.waitForFunction(() => document.querySelector(".operation-progress-track")?.getAttribute("aria-valuenow") === "25");
+  if (!(await operationProgress.textContent())?.includes("モデルを取得中")) throw new Error("取得量が分かる工程へ進捗表示が更新されません");
+  const progressBox = await operationProgress.boundingBox();
+  if (!progressBox || progressBox.y < 0 || progressBox.y + progressBox.height > 760) throw new Error(`導入中の進捗欄が画面内にありません: ${JSON.stringify(progressBox)}`);
+  const progressBackground = await operationProgress.evaluate(node => getComputedStyle(node).backgroundColor);
+  if (progressBackground === "rgba(0, 0, 0, 0)" || progressBackground === "transparent") throw new Error("導入中の進捗欄の背景が透明です");
+  const progressFillBackground = await operationProgress.locator(".operation-progress-fill").evaluate(node => getComputedStyle(node).backgroundImage);
+  if (!progressFillBackground || progressFillBackground === "none") throw new Error("導入中の進捗バーに塗り色がありません");
   await page.screenshot({ path: join(OUT, "components-tab.png") });
   await page.getByRole("tab", { name: "スキル", exact: true }).click();
   for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
@@ -431,7 +452,7 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
-  console.log(`設定画面確認: 入口7件 / キャラ登録・選択・音声の3分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口8件 / キャラ作成・登録・選択・音声の4分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

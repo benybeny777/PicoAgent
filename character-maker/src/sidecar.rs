@@ -4,9 +4,8 @@ use std::{
     path::Path,
     process::{Child, Command, Stdio},
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc,
     },
     thread,
     time::Duration,
@@ -234,7 +233,7 @@ mod tests {
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use windows_sys::Win32::{
         Foundation::WAIT_OBJECT_0,
-        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
     };
 
     fn python() -> Option<std::path::PathBuf> {

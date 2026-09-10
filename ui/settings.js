@@ -1085,7 +1085,8 @@ function buildComponentManager() {
   const operationProgress = createOperationProgress("追加機能の処理進捗");
   const status = operationProgress.message;
   operationProgress.element.classList.add("component-manager-status");
-  sec.append(core, list, operationProgress.element);
+  // 長い追加機能一覧の末尾では導入中の表示が画面外になるため、一覧より前へ固定する。
+  sec.append(core, operationProgress.element, list);
 
   function setBusy(busy) {
     sec.setAttribute("aria-busy", busy ? "true" : "false");
