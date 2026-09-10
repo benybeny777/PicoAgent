@@ -22,7 +22,9 @@ test("管理導入は共通Python一環境と容量・GPU判定を先に行う",
     read("ui/settings.js"),
     read("ui/settings.css"),
   ]);
-  assert.match(components, /join\("python\/Scripts\/python\.exe"\)/);
+  assert.match(components, /shared_python_dir\(app\)\.join\("Scripts\/python\.exe"\)/);
+  assert.match(components, /python_stage\.join\("runtime"\)/);
+  assert.match(components, /"--relocatable"/);
   assert.match(components, /85_000_000_000/);
   assert.match(components, /nvidia-smi\.exe/);
   assert.match(components, /約77GB/);
