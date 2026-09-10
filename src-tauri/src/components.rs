@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::OnceLock;
 
@@ -307,6 +307,37 @@ fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> 
         .map(ToString::to_string))
 }
 
+fn managed_media_ready(id: &str, root: &Path) -> bool {
+    let expected_model = match id {
+        "video-wan" => "wan-2.2-5b",
+        "video-ltx" => "ltx-0.9.8-2b-fp8",
+        _ => return false,
+    };
+    let marker = root.join("install.json");
+    let Ok(text) = std::fs::read_to_string(&marker) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    if value.get("model").and_then(serde_json::Value::as_str) != Some(expected_model) {
+        return false;
+    }
+    let Some(files) = value.get("files").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    !files.is_empty()
+        && files.iter().all(|entry| {
+            let Some(relative) = entry.as_str().map(Path::new) else {
+                return false;
+            };
+            relative
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+                && root.join(relative).is_file()
+        })
+}
+
 fn numeric_version(value: &str) -> Option<Vec<u64>> {
     let core = value.trim().trim_start_matches(['v', 'V']);
     let core = core.split(['-', '+']).next()?;
@@ -319,6 +350,9 @@ fn numeric_version(value: &str) -> Option<Vec<u64>> {
 }
 
 fn compare_versions(installed: &str, target: &str) -> Option<Ordering> {
+    if installed.trim() == target.trim() {
+        return Some(Ordering::Equal);
+    }
     let (Some(mut installed), Some(mut target)) =
         (numeric_version(installed), numeric_version(target))
     else {
@@ -375,12 +409,15 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 .get(id)
                 .with_context(|| format!("{id} の取得元情報がありません"))?
                 .clone();
+            let installed_root = installed_dir(app, id);
             let installed = if id == "character-maker" {
-                installed_dir(app, id).join("install.json").is_file()
+                installed_root.join("install.json").is_file()
                     && shared_python_dir(app).join("Scripts/python.exe").is_file()
-                    && installed_dir(app, id).join("ComfyUI/main.py").is_file()
+                    && installed_root.join("ComfyUI/main.py").is_file()
+            } else if matches!(id, "video-wan" | "video-ltx") {
+                managed_media_ready(id, &installed_root)
             } else {
-                installed_dir(app, id).is_dir()
+                installed_root.is_dir()
             };
             let packaged_root = packaged_dir(app, id).or_else(|| development_dir(id));
             let packaged = packaged_root.is_some();
@@ -419,10 +456,12 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
             let newer_than_target = version_ordering == Some(Ordering::Greater);
             let version_unknown = (installed || packaged)
                 && target_version.is_some()
-                && installed_version
-                    .as_deref()
-                    .and_then(numeric_version)
-                    .is_none();
+                && installed_version.as_deref().is_some_and(|current| {
+                    target_version.as_deref().is_some_and(|target| {
+                        current.trim() != target.trim()
+                            && compare_versions(current, target).is_none()
+                    })
+                });
             if version_unknown && version_error.is_none() {
                 version_error = Some(
                     "導入済み版の表記を比較できません。修復すると推奨版を取得します。".to_string(),
@@ -1527,6 +1566,28 @@ mod tests {
             super::compare_versions("1.2", "1.2.0"),
             Some(std::cmp::Ordering::Equal)
         );
+        assert_eq!(
+            super::compare_versions("wan-2.2-5b", "wan-2.2-5b"),
+            Some(std::cmp::Ordering::Equal)
+        );
+    }
+
+    #[test]
+    fn 動画モデルはマーカーと全ファイルが揃った場合だけ導入済みにする() {
+        let root = test_path("managed-media");
+        std::fs::create_dir_all(root.join("diffusion_models")).unwrap();
+        std::fs::write(root.join("diffusion_models/model.safetensors"), b"model").unwrap();
+        std::fs::write(
+            root.join("install.json"),
+            r#"{"version":"wan-2.2-5b","model":"wan-2.2-5b","files":["diffusion_models/model.safetensors"]}"#,
+        )
+        .unwrap();
+        assert!(super::managed_media_ready("video-wan", &root));
+
+        std::fs::remove_file(root.join("diffusion_models/model.safetensors")).unwrap();
+        assert!(!super::managed_media_ready("video-wan", &root));
+        assert!(!super::managed_media_ready("video-ltx", &root));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

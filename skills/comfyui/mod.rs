@@ -49,6 +49,14 @@ impl Engine {
             "mp4"
         }
     }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::QwenEdit => "画像編集・キャラクター作成基盤",
+            Self::Wan => "Wan 2.2動画生成",
+            Self::Ltx => "LTX軽量動画生成",
+        }
+    }
 }
 
 fn integer(args: &Value, name: &str, default: u64, minimum: u64, maximum: u64) -> u64 {
@@ -108,7 +116,7 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
     if !models.is_dir() {
         return Err(format!(
             "エラー: 設定の「追加機能・更新」から {} を選んで導入してください。選ばなかった動画モデルは取得しません。",
-            if engine == Engine::Wan { "Wan 2.2動画生成" } else { "LTX軽量動画生成" }
+            engine.label()
         ));
     }
     Ok((python, comfy, models))
@@ -168,6 +176,20 @@ impl Tool for ComfyuiTool {
                         .map(|metadata| metadata.is_file())
                         .unwrap_or(false) =>
                 {
+                    let extension = path
+                        .as_path()
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .map(str::to_ascii_lowercase);
+                    if !matches!(extension.as_deref(), Some("png" | "jpg" | "jpeg" | "webp")) {
+                        return "エラー: 入力画像はPNG、JPEG、WebPだけを使用できます。".into();
+                    }
+                    if crate::permissions::fs::metadata(&path)
+                        .map(|metadata| metadata.len() > 100_000_000)
+                        .unwrap_or(true)
+                    {
+                        return "エラー: 入力画像は100MB以下にしてください。".into();
+                    }
                     Some(path)
                 }
                 Ok(path) => return format!("エラー: 入力画像が見つかりません: {}", path.display()),
@@ -205,6 +227,10 @@ impl Tool for ComfyuiTool {
             .unwrap_or(bundled)
             .join("character-maker/temp/completion-gpu.lock");
         let script = assets.join("sidecar/media/generate.py");
+        if !script.is_file() {
+            return "エラー: 画像・動画生成サイドカーが壊れています。アプリを修復してください。"
+                .into();
+        }
         let mut command = crate::tools::process::command(&python);
         command
             .arg(&script)

@@ -19,7 +19,7 @@ MODELS = {
         ("text_encoders/t5xxl_fp16.safetensors", "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5/t5xxl_fp16.safetensors?download=true", "6e480b09fae049a72d2a8c5fbccb8d3e92febeb233bbe9dfe7256958a9167635", 9_787_841_024),
     ],
 }
-VERSIONS = {"wan-2.2-5b": "2.2.5", "ltx-0.9.8-2b-fp8": "0.9.8"}
+VERSIONS = {"wan-2.2-5b": "wan-2.2-5b", "ltx-0.9.8-2b-fp8": "0.9.8"}
 
 
 def digest(path):

@@ -45,7 +45,7 @@
     },
     "video-wan": {
       "installMode": "managed",
-      "targetVersion": "2.2.5",
+      "targetVersion": "wan-2.2-5b",
       "sources": [
         {
           "name": "Wan 2.2 公式GitHub",
