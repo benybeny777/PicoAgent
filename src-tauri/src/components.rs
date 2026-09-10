@@ -460,6 +460,13 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
 
 pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
     anyhow::ensure!(COMPONENT_IDS.contains(&id), "未知の追加機能です: {id}");
+    if id == "character-maker" {
+        anyhow::ensure!(
+            !installed_dir(app, "video-wan").is_dir()
+                && !installed_dir(app, "video-ltx").is_dir(),
+            "先にWanとLTXの動画モデルを削除してください。生成基盤だけを先に削除すると動画モデルが使えなくなります"
+        );
+    }
     let info = manifest(app)?
         .components
         .remove(id)

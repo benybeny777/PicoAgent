@@ -123,6 +123,7 @@ flowchart LR
 | 音声 | whisper.cpp、AivisSpeech | ローカル文字起こしと読み上げ。母音時間を2D口パクへ渡す |
 | キャラクター制作 | Python 3.12、PyTorch、Grounding DINO、SAM 2.1 | 立ち絵の意味解析と原寸部位分解 |
 | 局所画像編集 | 管理下ComfyUI、Qwen-Image-Edit-2511 | 閉眼・隠れ顔・耳を原寸範囲だけ補完する |
+| ローカル画像・動画生成 | Qwen Image Edit、Wan 2.2 5B、LTX-Video 0.9.8 2B FP8 | 入力画像の編集と、テキスト／画像からの動画生成。WanとLTXは選んだ側だけ追加取得 |
 | ビルド・検証 | Cargo、`cargo xtask`、Playwright | セットアップ、同期、ビルド、テスト、実画面キャプチャを一つの入口へ集約する |
 
 ## 数字

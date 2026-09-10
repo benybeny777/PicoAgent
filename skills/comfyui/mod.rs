@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -43,7 +43,11 @@ impl Engine {
     }
 
     fn extension(self) -> &'static str {
-        if self == Self::QwenEdit { "png" } else { "mp4" }
+        if self == Self::QwenEdit {
+            "png"
+        } else {
+            "mp4"
+        }
     }
 }
 
@@ -63,28 +67,30 @@ fn normalized_frames(value: u64) -> u64 {
 }
 
 fn generation_root() -> Result<PathBuf, String> {
-    let bundled = crate::components::runtime_root()
-        .ok_or_else(|| "エラー: PicoAgentの管理領域を取得できません。アプリを再起動してください。".to_string())?;
+    let bundled = crate::components::runtime_root().ok_or_else(|| {
+        "エラー: PicoAgentの管理領域を取得できません。アプリを再起動してください。".to_string()
+    })?;
     bundled
         .parent()
         .map(|parent| parent.join("generated-media"))
         .ok_or_else(|| "エラー: 生成結果の保存先を取得できません。".to_string())
 }
 
-fn unique_output(engine: Engine) -> Result<PathBuf, String> {
-    let root = generation_root()?;
-    std::fs::create_dir_all(&root)
-        .map_err(|error| format!("エラー: 生成結果の保存先を作れません: {error}"))?;
+fn unique_output(engine: Engine) -> Result<crate::permissions::SafePath, String> {
+    let root = crate::permissions::SafePath::app_owned(generation_root()?);
+    crate::permissions::fs::create_dir_all(&root)?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    Ok(root.join(format!(
-        "{}-{}-{}.{}",
-        engine.id(),
-        now.as_secs(),
-        now.subsec_nanos(),
-        engine.extension()
-    )))
+    Ok(crate::permissions::SafePath::app_owned(
+        root.as_path().join(format!(
+            "{}-{}-{}.{}",
+            engine.id(),
+            now.as_secs(),
+            now.subsec_nanos(),
+            engine.extension()
+        )),
+    ))
 }
 
 fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), String> {
@@ -110,13 +116,17 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
 
 #[async_trait]
 impl Tool for ComfyuiTool {
-    fn name(&self) -> &'static str { "comfyui_generate" }
+    fn name(&self) -> &'static str {
+        "comfyui_generate"
+    }
 
     fn intent_keywords(&self) -> &'static [&'static str] {
         &["画像編集", "画像生成", "動画生成", "comfyui", "wan", "ltx"]
     }
 
-    fn label(&self) -> &'static str { "ローカル画像・動画生成" }
+    fn label(&self) -> &'static str {
+        "ローカル画像・動画生成"
+    }
 
     fn description(&self) -> String {
         "管理下ComfyUIで画像編集または動画生成を行います。engineはqwen-edit、wan-2.2-5b、ltx-0.9.8-2b-fp8から選択します。Qwen画像編集はinput_path必須、動画は任意の入力画像からも生成できます。モデルは追加機能で選んだものだけを取得します。".into()
@@ -147,7 +157,11 @@ impl Tool for ComfyuiTool {
             Ok(value) => value,
             Err(error) => return error,
         };
-        let input = match args.get("input_path").and_then(Value::as_str).map(str::trim) {
+        let input = match args
+            .get("input_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+        {
             Some(value) if !value.is_empty() => match crate::permissions::resolve(cfg, value) {
                 Ok(path)
                     if crate::permissions::fs::metadata(&path)
@@ -180,24 +194,45 @@ impl Tool for ComfyuiTool {
         let height = normalized_video_dimension(integer(&args, "height", 512, 256, 1280));
         let frames = normalized_frames(integer(&args, "frames", 97, 9, 257));
         let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64
         });
         let bundled = crate::components::runtime_root().expect("初期化済み管理領域");
-        let lock = bundled.parent().unwrap_or(bundled).join("character-maker/temp/completion-gpu.lock");
+        let lock = bundled
+            .parent()
+            .unwrap_or(bundled)
+            .join("character-maker/temp/completion-gpu.lock");
         let script = assets.join("sidecar/media/generate.py");
         let mut command = crate::tools::process::command(&python);
         command
             .arg(&script)
             .args(["--engine", engine.id(), "--prompt", &prompt])
-            .arg("--output").arg(&output)
-            .arg("--comfy").arg(&comfy)
-            .arg("--models").arg(&models)
-            .arg("--gpu-lock").arg(&lock)
-            .args(["--seed", &seed.to_string(), "--width", &width.to_string(), "--height", &height.to_string(), "--frames", &frames.to_string()]);
+            .arg("--output")
+            .arg(output.as_path())
+            .arg("--comfy")
+            .arg(&comfy)
+            .arg("--models")
+            .arg(&models)
+            .arg("--gpu-lock")
+            .arg(&lock)
+            .args([
+                "--seed",
+                &seed.to_string(),
+                "--width",
+                &width.to_string(),
+                "--height",
+                &height.to_string(),
+                "--frames",
+                &frames.to_string(),
+            ]);
         if let Some(input) = &input {
             command.arg("--input").arg(input.as_path());
         }
-        let result = match crate::tools::process::output(command, 18_000, "ローカル画像・動画生成").await {
+        let result = match crate::tools::process::output(command, 18_000, "ローカル画像・動画生成")
+            .await
+        {
             Ok(value) => value,
             Err(error) => return format!("エラー: {error}"),
         };
@@ -205,10 +240,13 @@ impl Tool for ComfyuiTool {
             let detail = String::from_utf8_lossy(&result.stderr);
             return format!("エラー: 画像・動画生成に失敗しました: {}", detail.trim());
         }
-        if !Path::new(&output).is_file() {
+        if !crate::permissions::fs::metadata(&output)
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false)
+        {
             return "エラー: 生成処理は終了しましたが成果物を確認できません。".into();
         }
-        let path = output.to_string_lossy();
+        let path = output.as_path().to_string_lossy();
         if engine == Engine::QwenEdit {
             format!("![生成画像]({path})\n\n[画像を開く]({path})\nシード: {seed}")
         } else {
