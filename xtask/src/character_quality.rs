@@ -935,7 +935,7 @@ fn write_baseline(path: &Path, findings: &[Finding]) -> Result<()> {
         .collect::<Vec<_>>();
     let document = json!({
         "note": "cargo xtask character-quality の既知の指摘。未記録の種類・レイヤーを失敗にするための基準で、\
-                 解消したら --update-baseline で減らす。増やすのは既存素材を作り直せない場合だけにする。",
+                 解消したら --update-baseline で減らす。新しい指摘の追加は禁止する。",
         "known": known,
     });
     fs::write(path, serde_json::to_string_pretty(&document)? + "\n")?;
