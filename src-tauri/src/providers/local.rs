@@ -240,29 +240,6 @@ pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
     LOCAL_MODEL_PRESETS.iter().find(|preset| preset.id == id)
 }
 
-/// コンテキスト長の引き上げ移行を一度だけ行ったことを記録する設定キー。
-pub const CTX_MIGRATION_KEY: &str = "PICOAGENT_LOCAL_CTX_MIGRATED";
-
-/// 旧版が自動保存していたコンテキスト長。利用者が選んだ値と区別するために使う。
-const LEGACY_AUTO_CTX: &[&str] = &["8192", "16384"];
-
-/// 保存すべきコンテキスト長を返す（変更不要なら None）。
-///
-/// 旧版は初回起動時にプリセットの値をそのまま保存していたため、既存の`config.json`には
-/// 利用者が選んだわけではない8,192／16,384が残っている。これを現行既定へ一度だけ
-/// 引き上げる。利用者が明示的に別の値へ変えている場合と、移行済みの場合は触らない
-/// （引き上げ後に自分で下げた値を、次の起動で勝手に戻さないため）。
-pub fn ctx_to_store(saved: Option<&str>, migrated: bool, preset_ctx: &'static str) -> Option<&'static str> {
-    match saved {
-        None => Some(preset_ctx),
-        Some(_) if migrated => None,
-        Some(current) => {
-            let current = current.trim();
-            (LEGACY_AUTO_CTX.contains(&current) && current != preset_ctx).then_some(preset_ctx)
-        }
-    }
-}
-
 /// 設定画面で一般利用者へ候補として案内してよいプリセットだけを返す。
 /// LFM2.5 1.2BとLLM-jp-4 Thinkingは既存設定との互換用に残すが、連続ツール利用を
 /// 実エンジンで確認できないため新規候補へ出さない。
@@ -362,7 +339,9 @@ fn normalize_for_local(messages: &[Message]) -> Vec<Message> {
 }
 
 pub fn port(cfg: &Config) -> u16 {
-    cfg.get("PICOAGENT_LOCAL_PORT", "11435").parse().unwrap_or(11435)
+    cfg.get("PICOAGENT_LOCAL_PORT", "11435")
+        .parse()
+        .unwrap_or(11435)
 }
 fn base_url(cfg: &Config) -> String {
     format!("http://127.0.0.1:{}/v1", port(cfg))
@@ -390,7 +369,12 @@ impl Provider for Local {
                 "text",
                 DEFAULT_LOCAL_MODEL_URL,
             ),
-            Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
+            Field::new(
+                "PICOAGENT_LOCAL_PORT",
+                "ローカルエンジンのポート",
+                "text",
+                "11435",
+            ),
             Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "32768"),
             Field::new(
                 "PICOAGENT_LOCAL_NGL",
@@ -457,7 +441,12 @@ impl Provider for Local {
             .timeout(std::time::Duration::from_secs(2))
             .build()
         {
-            Ok(c) => c.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false),
+            Ok(c) => c
+                .get(&url)
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false),
             Err(_) => false,
         }
     }
@@ -493,7 +482,15 @@ impl Provider for Local {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("ローカルAIエンジン", "/chat/completions", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error(
+                    "ローカルAIエンジン",
+                    "/chat/completions",
+                    status,
+                    &text
+                )
+            );
         }
         let data: Value = res.json().await?;
         let message = data
@@ -523,7 +520,8 @@ impl Provider for Local {
         let normalized = normalize_for_local(messages);
         let wire = to_wire(&normalized);
         let make_body = |with_tools: bool| {
-            let mut body = json!({ "model": model, "messages": wire, "temperature": 0.6, "stream": true });
+            let mut body =
+                json!({ "model": model, "messages": wire, "temperature": 0.6, "stream": true });
             if with_tools && !tools.is_empty() {
                 body["tools"] = json!(tools);
             }
@@ -557,41 +555,28 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_preset_id, ctx_to_store, normalize_for_local, obsolete_model_file_names, preset,
+        canonical_preset_id, normalize_for_local, obsolete_model_file_names, preset,
         settings_candidate_presets, DEFAULT_LOCAL_MODEL_PRESET, LOCAL_MODEL_PRESETS,
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
 
     #[test]
-    fn 全プリセットのコンテキスト長は現行既定へ揃える() {
+    fn 全プリセットと設定画面のコンテキスト既定は一致する() {
+        use super::{Local, Provider};
+        let field = Local
+            .config_schema()
+            .into_iter()
+            .find(|field| field.key == "PICOAGENT_LOCAL_CTX")
+            .expect("コンテキスト長は設定画面で変更できる");
+        assert_eq!(field.placeholder, "32768");
         for preset in LOCAL_MODEL_PRESETS {
             assert_eq!(
-                preset.ctx, "32768",
+                preset.ctx, field.placeholder,
                 "{}のコンテキスト長が既定と違う",
                 preset.id
             );
         }
-    }
-
-    #[test]
-    fn 初回起動はプリセットのコンテキスト長を保存する() {
-        assert_eq!(ctx_to_store(None, false, "32768"), Some("32768"));
-    }
-
-    #[test]
-    fn 旧版が自動保存したコンテキスト長は一度だけ引き上げる() {
-        assert_eq!(ctx_to_store(Some("8192"), false, "32768"), Some("32768"));
-        assert_eq!(ctx_to_store(Some("16384"), false, "32768"), Some("32768"));
-        // 引き上げ済みなら、その後に利用者が下げた値を戻さない。
-        assert_eq!(ctx_to_store(Some("8192"), true, "32768"), None);
-    }
-
-    #[test]
-    fn 利用者が選んだコンテキスト長は変更しない() {
-        assert_eq!(ctx_to_store(Some("4096"), false, "32768"), None);
-        assert_eq!(ctx_to_store(Some("65536"), false, "32768"), None);
-        assert_eq!(ctx_to_store(Some("32768"), false, "32768"), None);
     }
 
     #[test]
@@ -636,14 +621,12 @@ mod tests {
             assert_eq!(preset.sha256.len(), 64);
             assert!(!preset.japanese_note.is_empty());
             let file_name = preset.url.rsplit('/').next().unwrap_or("");
-            let quantized = ["-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-"]
-                .iter()
-                .any(|marker| file_name.contains(marker));
-            assert!(
-                quantized,
-                "量子化形式が明示されていません: {}",
-                preset.url
-            );
+            let quantized = [
+                "-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-",
+            ]
+            .iter()
+            .any(|marker| file_name.contains(marker));
+            assert!(quantized, "量子化形式が明示されていません: {}", preset.url);
         }
     }
 
