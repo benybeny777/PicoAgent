@@ -72,3 +72,22 @@
 | `ui/renderer.js` | 責務が複数あり分割候補 | PR #168の統合後、キャラクター描画・リップシンク、通知・目覚まし、会話入力の状態所有者とイベント境界を確認する |
 | `src-tauri/src/commands.rs` | Tauri commandの入口は集約する価値があるが、業務処理まで同居している箇所は分割候補 | PR #168の統合後、設定、キャラクター、追加機能、会話についてcommandを薄い委譲にできる責務だけ移す |
 | `xtask/src/assets.rs` | キャラクター同期、UI配信ビルド、管理プロセス回収は副作用と検証が異なるため分割候補 | 共有する配布パス判定を複製せず、各処理を独立テストできる境界を決めてから着手する |
+
+## 法人向け共通処理基盤の段階移行（未着手・設計承認待ち）
+
+<a id="corporate-runtime-tasks"></a>
+
+[未実装の将来設計](../SPEC.md#corporate-runtime-architecture) に対応する。設計・引継ぎと検証記録の正本は本設計のDraft PR。**全段階とも設計承認と実装開始の明示が着手条件。現時点では実装しない。** 各段階は目的別PRとし、前段階の完了条件を満たしてから進む。認証・認可の方式は別設計であり、境界だけ用意して法人公開を許可したことにしない。
+
+| 段階 | 着手条件と実施内容 | 検証・完了条件 |
+|---|---|---|
+| P0 基準固定 | 設計承認後、mainと#255の最新差分を再調査。ui/picoagentの全操作・イベント、全Toolのactionと副作用、可変static、設定/保存先/子プロセスの所有者を棚卸し。法人同時利用数、SLO、保存保持、費用枠、データ移送方針を合意する | 既存IPC/ローカルAPIの契約fixtureとローカル性能基準を固定。未分類Toolをサーバー公開しない一覧、実機試験環境、rollback用データを用意。性能比較条件と予算の未決定を残さない |
+| P1 純粋契約とポート | P0完了。coreの最小DTO、ExecutionContext、EventSink、ConfigView等の契約を追加。新runtime crateを認めるAGENTSの依存例外とguard_scan/verify範囲を同期。既存message/text再公開を維持 | Tauriなしでcoreの単体テスト、Message/wire/tool_call_id/UTF-8の往復、エラーとイベントのschema検査。不変schema以外のglobalを共通層へ移さない。既存呼出側は挙動不変 |
+| P2 デスクトップからruntimeへ抽出 | P1完了。commandsの会話ユースケース、agent/feedback、provider変換、Tool契約を小単位で移す。AppHandleを渡す通知/usage/挨拶取得を必要ポートへ置換。command名と旧payloadはadapterで維持 | 通常/画像会話、挨拶、承認待ち、停止、キャラ切替・新しい会話・古い応答の書戻し拒否、検査前本文非公開、保存失敗を旧実装と比較。Windows/macOS/Ubuntuの既存デスクトップで退行なし。p95/RSS基準の超過なし |
+| P3 状態と副作用のscope化 | P2完了。ConversationStore、Storage、JobManager、ToolExecutorを導入。MCP接続、undo、コマンドジョブ、録音/ブラウザ状態を所有単位へ移す。ローカル既存形式は互換保存、サーバーはCAS/lease/fence/outboxで分離 | 同一ID・同一キーを使う2scopeの同時実行で混入ゼロ。複数workerの二重claim、古いfence、設定変更後の権限、キャンセル競合、未知の外部結果を検証。既存ローカル同時3件/通算5回と単一writerを維持。障害注入で公開済みデータを壊さない |
+| P4 法人HTTPと共通Web接続 | P3完了、HTTP/DB依存は公式安定版・ライセンス監査後に決定。RuntimeClient/HostCapabilities、/pico/v1、SSE、artifact参照を実装。旧API変換を共用しTCP実装の外部公開はしない。認証・認可未完了なら隔離環境限定 | 同じUIでIPC/HTTP契約試験、接続切替中の旧通知排除、SSE再送・期限切れ・遅い購読者・切断、冪等キー衝突・再試行を確認。既存Ollama風/OpenAI/MCP応答と保護条件の互換を確認。1/10/50要求で受付上限・メモリ上限を検証。純ブラウザのlocalhost接続は別途Origin/同一originホスト検証まで無効 |
+| P5 モデル・GPU・キャラ生成 | P4完了、#255の承認・main統合と生成契約再確認後。#255のworktreeは変更しない。ModelRuntimeとworker artifact materializeを導入。現行Windows経路を維持し、法人GPUは対応OS/ドライバー/Python/wheel/モデル固定と資源予約を用意 | 同じ原画・seed・モデルhash・設定で工程/manifest/ハッシュ/生成品質を比較。isolate→decompose→rig2d→completeの順序、取消と再開、GPU不足、stage途中死亡、アップロード途中失敗を実機確認。Linux GPUとmacOS生成を未検証で対応済みにしない。配布/モデル容量・転送・GPU待機費用を実測 |
+| P6 ハイブリッド端末連携 | P4/P5完了、端末登録・認証・認可・データ転送同意の別設計と実装完了。DeviceGatewayと限定action/receiptを導入。会話/jobの正本は法人側、端末へ勝手に複製しない | deviceId誤り・権限失効・sleep/切断/再接続・期限切れ・二重配送で誤実行なし。画面/clip/マイク/ローカルファイルは指定端末のみ。結果不明の送信を自動再実行しない。端末不在をサーバー実行で代替しない |
+| P7 法人運用・配布受入 | P0〜P6と認証・認可・監査/保持の別要件完了。DB/成果物バックアップ、メトリクス/SLO、監査outbox、worker更新、rollbackと旧データ互換を検証。公開先・運用責任者の承認を得る | 障害復旧/復元/旧版復帰演習、複数tenant隔離試験、合意した負荷・費用枠を合格。Windows NSIS、macOS app/DMG、Ubuntu deb/AppImageで導入/起動/削除、端末機能と管理プロセス回収を実証。静的合格・実機合格・法人公開承認を別記録 |
+
+全実装段階の最終検証は該当契約/単体テストと `cargo xtask verify` を行う。共通クレート追加後の走査漏れを許さない。未確認のGPU、GUI、OS、外部サービス、性能は段階PR本文へ残し、完了条件から外して先へ進めない。既存のFreeToken計画、アプリ終了中のジョブ実行、ファイル肥大化の再評価と重なる変更は各正本を参照し、同じ実装を並行して作らない。
