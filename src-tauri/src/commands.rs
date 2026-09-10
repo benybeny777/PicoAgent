@@ -36,9 +36,9 @@ const LEGACY_AUTO_SUMMARY_BEGIN: &str = "[以前の会話の要約（自動）: 
 fn conversation_token_budget(cfg: &Config) -> usize {
     if cfg.get("PICOAGENT_PROVIDER", "local") == "local" {
         let context = cfg
-            .get("PICOAGENT_LOCAL_CTX", "8192")
+            .get("PICOAGENT_LOCAL_CTX", "32768")
             .parse::<usize>()
-            .unwrap_or(8192);
+            .unwrap_or(32768);
         return (context * 3 / 4).clamp(1_500, 24_000);
     }
     MAX_CONTEXT_TOKENS
@@ -2965,7 +2965,7 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_MODEL", "")
         || changed_text("PICOAGENT_MODEL_URL", "")
         || changed_text("PICOAGENT_LOCAL_PORT", "11435")
-        || changed_text("PICOAGENT_LOCAL_CTX", "8192")
+        || changed_text("PICOAGENT_LOCAL_CTX", "32768")
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");

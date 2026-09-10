@@ -573,10 +573,22 @@ async fn ensure_local_model_selection(app: &AppHandle) -> anyhow::Result<()> {
             Value::String(preset.id.to_string()),
         );
     }
-    if !state.config.has_value("PICOAGENT_LOCAL_CTX") {
+    let saved_ctx = state.config.get("PICOAGENT_LOCAL_CTX", "");
+    let saved_ctx = state
+        .config
+        .has_value("PICOAGENT_LOCAL_CTX")
+        .then_some(saved_ctx.as_str());
+    let migrated_ctx = state.config.has_value(local::CTX_MIGRATION_KEY);
+    if let Some(ctx) = local::ctx_to_store(saved_ctx, migrated_ctx, preset.ctx) {
         patch.insert(
             "PICOAGENT_LOCAL_CTX".to_string(),
-            Value::String(preset.ctx.to_string()),
+            Value::String(ctx.to_string()),
+        );
+    }
+    if !migrated_ctx {
+        patch.insert(
+            local::CTX_MIGRATION_KEY.to_string(),
+            Value::String("1".to_string()),
         );
     }
     if !patch.is_empty() {
@@ -616,7 +628,7 @@ fn spawn_server(
     ensure_executable(server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
-    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "8192");
+    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "32768");
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
     let ngl = &candidate.ngl;

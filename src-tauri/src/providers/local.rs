@@ -41,7 +41,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "LFM2.5-1.2B-JP-202606-Q4_K_M-8c74801f.gguf",
         size_bytes: 730_894_624,
         sha256: "23d4d4060cb06463563f6e8644bbbc7d1cb0bfe4cf21d5edf3ccc6f515fd44bb",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
         download_size: "約0.73GB",
@@ -57,7 +57,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "LFM2.5-2.6B-QAD-Q4_0-84022ce7.gguf",
         size_bytes: 1_593_894_944,
         sha256: "a247afd6414918eac8e520a9e6137dc271235461ecbe1180462221d5b8d40b03",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 8,
         download_size: "約1.59GB",
@@ -73,7 +73,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gemma-4-E2B-it-Q4_K_M-0314792d.gguf",
         size_bytes: 3_106_738_272,
         sha256: "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
         download_size: "約3.1GB",
@@ -89,7 +89,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gemma-4-E4B-it-Q4_K_M-bfc15c38.gguf",
         size_bytes: 4_977_171_584,
         sha256: "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 16,
         download_size: "約5.0GB",
@@ -105,7 +105,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gemma-4-12b-it-Q4_K_M-fc034cff.gguf",
         size_bytes: 7_121_861_440,
         sha256: "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
-        ctx: "16384",
+        ctx: "32768",
         recommended_vram_gb: 8,
         recommended_ram_gb: 24,
         download_size: "約7.1GB",
@@ -121,7 +121,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "Qwen3.5-4B-Q4_K_M-e87f1764.gguf",
         size_bytes: 2_740_937_888,
         sha256: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.7GB",
@@ -137,7 +137,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "Qwen3.5-9B-Q4_K_M-3885219b.gguf",
         size_bytes: 5_680_522_464,
         sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
         download_size: "約5.7GB",
@@ -153,7 +153,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gpt-oss-20b-MXFP4-ef9b12f2.gguf",
         size_bytes: 12_109_566_624,
         sha256: "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
-        ctx: "16384",
+        ctx: "32768",
         recommended_vram_gb: 16,
         recommended_ram_gb: 32,
         download_size: "約12.1GB",
@@ -169,7 +169,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "Phi-4-mini-instruct-Q4_K_M-78eb92a4.gguf",
         size_bytes: 2_491_874_272,
         sha256: "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.5GB",
@@ -185,7 +185,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "llm-jp-4-8b-thinking-Q4_K_M-2cc04f0c.gguf",
         size_bytes: 5_304_882_240,
         sha256: "b8a1b3ef962d95dfaa02c241e0d2376e028aaddcda83191cc232e95ed2b14ae8",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
         download_size: "約5.3GB",
@@ -238,6 +238,29 @@ pub fn canonical_preset_id(id: &str) -> &str {
 pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
     let id = canonical_preset_id(id);
     LOCAL_MODEL_PRESETS.iter().find(|preset| preset.id == id)
+}
+
+/// コンテキスト長の引き上げ移行を一度だけ行ったことを記録する設定キー。
+pub const CTX_MIGRATION_KEY: &str = "PICOAGENT_LOCAL_CTX_MIGRATED";
+
+/// 旧版が自動保存していたコンテキスト長。利用者が選んだ値と区別するために使う。
+const LEGACY_AUTO_CTX: &[&str] = &["8192", "16384"];
+
+/// 保存すべきコンテキスト長を返す（変更不要なら None）。
+///
+/// 旧版は初回起動時にプリセットの値をそのまま保存していたため、既存の`config.json`には
+/// 利用者が選んだわけではない8,192／16,384が残っている。これを現行既定へ一度だけ
+/// 引き上げる。利用者が明示的に別の値へ変えている場合と、移行済みの場合は触らない
+/// （引き上げ後に自分で下げた値を、次の起動で勝手に戻さないため）。
+pub fn ctx_to_store(saved: Option<&str>, migrated: bool, preset_ctx: &'static str) -> Option<&'static str> {
+    match saved {
+        None => Some(preset_ctx),
+        Some(_) if migrated => None,
+        Some(current) => {
+            let current = current.trim();
+            (LEGACY_AUTO_CTX.contains(&current) && current != preset_ctx).then_some(preset_ctx)
+        }
+    }
 }
 
 /// 設定画面で一般利用者へ候補として案内してよいプリセットだけを返す。
@@ -368,7 +391,7 @@ impl Provider for Local {
                 DEFAULT_LOCAL_MODEL_URL,
             ),
             Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
-            Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "8192"),
+            Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "32768"),
             Field::new(
                 "PICOAGENT_LOCAL_NGL",
                 "GPU へオフロードするレイヤ数（999=全レイヤ優先 / 0=CPU 固定）",
@@ -534,11 +557,42 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_preset_id, normalize_for_local, obsolete_model_file_names, preset,
+        canonical_preset_id, ctx_to_store, normalize_for_local, obsolete_model_file_names, preset,
         settings_candidate_presets, DEFAULT_LOCAL_MODEL_PRESET, LOCAL_MODEL_PRESETS,
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 全プリセットのコンテキスト長は現行既定へ揃える() {
+        for preset in LOCAL_MODEL_PRESETS {
+            assert_eq!(
+                preset.ctx, "32768",
+                "{}のコンテキスト長が既定と違う",
+                preset.id
+            );
+        }
+    }
+
+    #[test]
+    fn 初回起動はプリセットのコンテキスト長を保存する() {
+        assert_eq!(ctx_to_store(None, false, "32768"), Some("32768"));
+    }
+
+    #[test]
+    fn 旧版が自動保存したコンテキスト長は一度だけ引き上げる() {
+        assert_eq!(ctx_to_store(Some("8192"), false, "32768"), Some("32768"));
+        assert_eq!(ctx_to_store(Some("16384"), false, "32768"), Some("32768"));
+        // 引き上げ済みなら、その後に利用者が下げた値を戻さない。
+        assert_eq!(ctx_to_store(Some("8192"), true, "32768"), None);
+    }
+
+    #[test]
+    fn 利用者が選んだコンテキスト長は変更しない() {
+        assert_eq!(ctx_to_store(Some("4096"), false, "32768"), None);
+        assert_eq!(ctx_to_store(Some("65536"), false, "32768"), None);
+        assert_eq!(ctx_to_store(Some("32768"), false, "32768"), None);
+    }
 
     #[test]
     fn 追加モデルは現行の量子化ggufだけを公開する() {

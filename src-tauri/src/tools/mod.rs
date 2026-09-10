@@ -436,9 +436,9 @@ pub fn tool_output_limit(cfg: &Config) -> usize {
         return CLOUD_TOOL_OUTPUT_CHARS;
     }
     let ctx = cfg
-        .get("PICOAGENT_LOCAL_CTX", "8192")
+        .get("PICOAGENT_LOCAL_CTX", "32768")
         .parse::<usize>()
-        .unwrap_or(8_192);
+        .unwrap_or(32_768);
     // 人格 system・長期メモリ・会話履歴・ツール定義・生成分を残し、ツール出力へ 45% を配分する。
     // 旧実装は下限を8,000にしたため、既定 ctx=8,192 でも計算結果3,686を8,000へ
     // 戻してしまい、自動計算が実質機能していなかった。
