@@ -1,6 +1,6 @@
 # 同梱2Dキャラの制作正本
 
-`mugi` / `rin` / `mai` / `rin-tha3` をPhotoshopで再仕上げするときに使う、処理前1倍PNGです。
+`mugi`をPhotoshopで再仕上げするときに使う、処理前1倍PNGです。りん・まい・セナなどの現行2.5DキャラはLocalVTuberStudio側の`source/input.png`を正本にします。
 同じ画像を何十枚もGitへ置かないよう、`index.json` の配置表と `blobs/` の内容ハッシュ別PNGを正本にします。
 製品実行時には使わず、`cargo xtask sync-characters` の配信対象にも入りません。
 
@@ -8,7 +8,7 @@
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/finish-2d-character-assets.ps1
-uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only
+uv run --with pillow python scripts/build-character-animations.py mugi --compact-only
 cargo xtask sync-characters
 ```
 

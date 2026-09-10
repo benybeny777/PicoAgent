@@ -198,12 +198,30 @@ fn resolve_executable_in(
     for dir in from_path.chain(from_extra) {
         for candidate in &names {
             let path = dir.join(candidate);
-            if path.is_file() {
-                return Some(path);
+            if is_executable_file(&path) {
+                return std::path::absolute(path).ok();
             }
         }
     }
     None
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// 探すファイル名の候補。Windows は `where.exe` と同じく PATHEXT の拡張子まで見る
@@ -560,6 +578,11 @@ mod tests {
         let name = "picoagent-fake-tool";
         let file = dir.join(super::executable_candidates(name).first().unwrap());
         std::fs::write(&file, b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let dir_text = dir.to_string_lossy().to_string();
 
         // PATH にも既知の設置先にも無ければ見つからない。
@@ -575,6 +598,21 @@ mod tests {
             super::resolve_executable_in(name, Some(&path_env), &[]),
             Some(file.clone())
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let fallback = dir.join("fallback");
+            std::fs::create_dir_all(&fallback).unwrap();
+            let executable = fallback.join(name);
+            std::fs::write(&executable, b"").unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let paths = std::env::join_paths([&dir, &fallback]).unwrap();
+            assert_eq!(
+                super::resolve_executable_in(name, Some(&paths), &[]),
+                Some(executable)
+            );
+        }
         // ディレクトリを実行ファイルと取り違えない。
         assert_eq!(
             super::resolve_executable_in(

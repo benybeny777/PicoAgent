@@ -12,7 +12,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 STORE = ROOT / "character-sources"
-CHARACTER_IDS = ("mugi", "rin", "mai", "rin-tha3")
+CHARACTER_IDS = ("mugi",)
 
 
 def digest(path: Path) -> str:

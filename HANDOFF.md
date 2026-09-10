@@ -5,7 +5,7 @@
 ## 現在の状態
 
 - 最終確認日: 2026-09-03
-- 進行中作業: なし。macOS版v1.0.4アルファのビルド・実機QA・Release公開はPR #186で完了した。
+- 進行中作業: Windows版v1.0.5アルファの高精細プレビュー・ビルド・公開を進行中。macOS版v1.0.4アルファはPR #186でビルド・実機QA・Release公開済みで、この版を維持する。
 - 未解決の副次課題は[docs/TASKS.md](docs/TASKS.md)の「配布Repo GitHub Pagesの自動再ビルド」と「macOSの`command_exists`のPATH解決不一致」を参照。
 - 次に着手できる内容: [docs/TASKS.md](docs/TASKS.md)のうち、着手条件を満たした項目
 

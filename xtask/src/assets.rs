@@ -840,7 +840,7 @@ fn remove_source_layers_from_runtime_copy(
     Ok(())
 }
 
-const THA3_MOTION_LAYERS: [&str; 12] = [
+const LEGACY_FULL_BODY_MOTION_LAYERS: [&str; 12] = [
     "idle_breathe",
     "idle_left",
     "idle_right",
@@ -880,7 +880,7 @@ fn validate_sharp_expression_pack(
     {
         return Ok(());
     }
-    let stale = THA3_MOTION_LAYERS
+    let stale = LEGACY_FULL_BODY_MOTION_LAYERS
         .iter()
         .filter(|name| {
             character_dir
@@ -892,7 +892,7 @@ fn validate_sharp_expression_pack(
         .collect::<Vec<_>>();
     if !stale.is_empty() {
         bail!(
-            "{} はsharp-expressionですが旧THA3全身レイヤーが残っています: {}",
+            "{} はsharp-expressionですが旧全身モーションレイヤーが残っています: {}",
             character_dir.display(),
             stale.join(", ")
         );
@@ -972,6 +972,12 @@ fn validate_character_asset_generation(
         );
     }
     validate_mesh_rig_pack(character_dir, manifest)?;
+    if manifest.get("live2d").is_none()
+        && manifest.get("animations").is_none()
+        && manifest.pointer("/meshRig/rig").is_some()
+    {
+        return Ok(());
+    }
     if manifest.get("live2d").is_some() {
         return validate_character_runtime_generation(character_dir, manifest);
     }
@@ -994,9 +1000,27 @@ fn validate_mesh_rig_pack(character_dir: &Path, manifest: &serde_json::Value) ->
     )
     .with_context(|| format!("{} が不正なJSONです", rig_file.display()))?;
     let mode = rig.get("mode").and_then(serde_json::Value::as_str);
+    let lvs_anime25d = rig
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        == Some(3)
+        && rig.get("profile").and_then(serde_json::Value::as_str) == Some("lvs-anime25d-v1")
+        && rig
+            .get("eye_rig_version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(3)
+        && rig
+            .get("lip_rig_version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1)
+        && rig
+            .get("scene_graph_version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1);
     anyhow::ensure!(
-        rig.get("version").and_then(serde_json::Value::as_u64) == Some(1)
-            && matches!(mode, Some("single-sheet-grid-v1" | "layered-grid-v2")),
+        (rig.get("version").and_then(serde_json::Value::as_u64) == Some(1)
+            && matches!(mode, Some("single-sheet-grid-v1" | "layered-grid-v2")))
+            || lvs_anime25d,
         "{} のメッシュリグ形式に対応していません",
         character_dir.display()
     );
@@ -1026,6 +1050,96 @@ fn validate_mesh_rig_pack(character_dir: &Path, manifest: &serde_json::Value) ->
     let root = rig_file
         .parent()
         .ok_or_else(|| anyhow::anyhow!("meshRig.rigの親フォルダがありません"))?;
+    if lvs_anime25d {
+        let motion_version = rig.get("secondary_motion_version");
+        let motion = rig.get("secondary_motion");
+        if motion_version.is_some() || motion.is_some() {
+            anyhow::ensure!(
+                motion_version.and_then(serde_json::Value::as_u64) == Some(1),
+                "{} の髪物理バージョンが不正です",
+                character_dir.display()
+            );
+            let hair = motion.and_then(|value| value.get("hair")).ok_or_else(|| {
+                anyhow::anyhow!("{} の髪物理定義がありません", character_dir.display())
+            })?;
+            anyhow::ensure!(
+                hair.get("role").and_then(serde_json::Value::as_str) == Some("hair"),
+                "{} の髪物理対象が不正です",
+                character_dir.display()
+            );
+            for (name, min, max) in [
+                ("frequency_hz", 0.2, 8.0),
+                ("damping_ratio", 0.2, 2.0),
+                ("strength", 0.0, 2.0),
+            ] {
+                let value = hair.get(name).and_then(serde_json::Value::as_f64);
+                anyhow::ensure!(
+                    value
+                        .is_some_and(|number| number.is_finite() && number >= min && number <= max),
+                    "{} の髪物理{name}が不正です",
+                    character_dir.display()
+                );
+            }
+        }
+        let layers = rig
+            .get("layers")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| anyhow::anyhow!("lvs-anime25d-v1 のlayersが不正です"))?;
+        let graph = rig
+            .get("scene_graph")
+            .and_then(serde_json::Value::as_array)
+            .filter(|items| items.len() >= 6)
+            .ok_or_else(|| anyhow::anyhow!("lvs-anime25d-v1 のscene_graphが不正です"))?;
+        let mut names = graph
+            .iter()
+            .map(|item| {
+                item.get("layer")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| anyhow::anyhow!("scene_graph.layerが不正です"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        names.extend(
+            ["scene_face", "mouth_open", "mouth_closed"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        for side in ["left", "right"] {
+            names.extend(
+                [
+                    "eye_base",
+                    "eye_closed",
+                    "eyelid_upper",
+                    "eye_backplate",
+                    "eye_iris",
+                ]
+                .into_iter()
+                .map(|part| format!("{side}_{part}")),
+            );
+        }
+        names.sort();
+        names.dedup();
+        for name in names {
+            anyhow::ensure!(
+                name.chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'),
+                "lvs-anime25d-v1 の素材名が不正です: {name}"
+            );
+            let layer = layers
+                .get(&name)
+                .ok_or_else(|| anyhow::anyhow!("lvs-anime25d-v1 の必須素材がありません: {name}"))?;
+            let expected_url = format!("/assets/rig2d/parts/{name}.png");
+            anyhow::ensure!(
+                layer.get("url").and_then(serde_json::Value::as_str) == Some(expected_url.as_str()),
+                "lvs-anime25d-v1 の素材URLが不正です: {name}"
+            );
+            anyhow::ensure!(
+                root.join("parts").join(format!("{name}.png")).is_file(),
+                "meshRigのテクスチャがありません: parts/{name}.png"
+            );
+        }
+        return Ok(());
+    }
     let mut textures = vec![rig
         .get("base")
         .and_then(serde_json::Value::as_str)
@@ -1056,6 +1170,12 @@ fn validate_character_runtime_generation(
     character_dir: &Path,
     manifest: &serde_json::Value,
 ) -> Result<()> {
+    if manifest.get("live2d").is_none()
+        && manifest.get("animations").is_none()
+        && manifest.pointer("/meshRig/rig").is_some()
+    {
+        return validate_mesh_rig_pack(character_dir, manifest);
+    }
     if manifest.get("live2d").is_some() {
         return validate_live2d_model_sets(character_dir, manifest);
     }
@@ -2098,6 +2218,10 @@ mod tests {
             let manifest: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(manifest_path).unwrap()).unwrap();
             if manifest.get("live2d").is_some() {
+                continue;
+            }
+            if manifest.get("animations").is_none() && manifest.pointer("/meshRig/rig").is_some() {
+                validate_character_asset_generation(&character, &manifest).unwrap();
                 continue;
             }
             assert_eq!(

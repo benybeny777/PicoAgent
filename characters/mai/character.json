@@ -1,7 +1,6 @@
 {
   "id": "mai",
   "name": "まい",
-  "assetVersion": "lossless-webp-d25f2e0965b8c32d",
   "description": "落ち着いた紫のドレスがよく似合う、包容力のあるやさしいお姉さん。",
   "motionProfile": "full",
   "bodyProportion": "compact",
@@ -45,147 +44,9 @@
       "name": "集中オーラ"
     }
   ],
-  "animations": {
-    "idle": {
-      "frames": 12,
-      "fps": 3.2,
-      "frameDurations": [
-        760,
-        760,
-        760,
-        520,
-        70,
-        90,
-        70,
-        760,
-        760,
-        760,
-        760,
-        1100
-      ],
-      "motion": "live2d-idle",
-      "framePaths": [
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
-        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
-        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
-        "frames/d25f2e0965b8c32d/0d1a6784b27b774819fe.webp",
-        "frames/d25f2e0965b8c32d/0d1a6784b27b774819fe.webp",
-        "frames/d25f2e0965b8c32d/2bb885f896e40fb85e0d.webp",
-        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
-        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
-        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
-        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp"
-      ]
-    },
-    "thinking": {
-      "frames": 12,
-      "fps": 7.0,
-      "frameDurations": [
-        180,
-        150,
-        120,
-        170,
-        150,
-        170,
-        120,
-        120,
-        170,
-        150,
-        170,
-        150
-      ],
-      "motion": "live2d-thinking",
-      "framePaths": [
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
-        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
-        "frames/d25f2e0965b8c32d/49ddc13476847650d967.webp",
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
-        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
-        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
-        "frames/d25f2e0965b8c32d/2bb885f896e40fb85e0d.webp",
-        "frames/d25f2e0965b8c32d/49ddc13476847650d967.webp",
-        "frames/d25f2e0965b8c32d/a9f13dcb4b01af6be8c7.webp",
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp",
-        "frames/d25f2e0965b8c32d/dcd51833930475cb8049.webp",
-        "frames/d25f2e0965b8c32d/9799ad92961b0f489fd3.webp"
-      ]
-    },
-    "talking": {
-      "frames": 12,
-      "fps": 8.0,
-      "frameDurations": [
-        120,
-        90,
-        75,
-        120,
-        120,
-        120,
-        75,
-        120,
-        90,
-        120,
-        75,
-        140
-      ],
-      "motion": "live2d-talking",
-      "framePaths": [
-        "frames/d25f2e0965b8c32d/72a73a4b241f0ed52403.webp",
-        "frames/d25f2e0965b8c32d/d1b7ef0ddbd7bab2a145.webp",
-        "frames/d25f2e0965b8c32d/3c91599f3ec1c2435383.webp",
-        "frames/d25f2e0965b8c32d/72a73a4b241f0ed52403.webp",
-        "frames/d25f2e0965b8c32d/3e7fa300647f8de8bc6c.webp",
-        "frames/d25f2e0965b8c32d/3e7fa300647f8de8bc6c.webp",
-        "frames/d25f2e0965b8c32d/3c91599f3ec1c2435383.webp",
-        "frames/d25f2e0965b8c32d/d1b7ef0ddbd7bab2a145.webp",
-        "frames/d25f2e0965b8c32d/49ddc13476847650d967.webp",
-        "frames/d25f2e0965b8c32d/72a73a4b241f0ed52403.webp",
-        "frames/d25f2e0965b8c32d/5fcd03f175b329a5fd50.webp",
-        "frames/d25f2e0965b8c32d/3e7fa300647f8de8bc6c.webp"
-      ]
-    },
-    "sad": {
-      "frames": 6,
-      "fps": 4.2,
-      "frameDurations": [
-        320,
-        110,
-        150,
-        120,
-        420,
-        560
-      ],
-      "motion": "live2d-sad",
-      "framePaths": [
-        "frames/d25f2e0965b8c32d/b7dac17fae93a81f413c.webp",
-        "frames/d25f2e0965b8c32d/8c8acf62f93f59a44b6a.webp",
-        "frames/d25f2e0965b8c32d/0d1a6784b27b774819fe.webp",
-        "frames/d25f2e0965b8c32d/b7dac17fae93a81f413c.webp",
-        "frames/d25f2e0965b8c32d/9cefa303d8a50570b3b7.webp",
-        "frames/d25f2e0965b8c32d/b7dac17fae93a81f413c.webp"
-      ]
-    }
-  },
-  "boot": {
-    "sleeping": "boot/sleeping.png",
-    "useSleepingOnStartup": true
-  },
-  "frameGeneration": "d25f2e0965b8c32d",
-  "runtimeLayers": {
-    "base": "runtime-layers/base.webp",
-    "blink_half": "runtime-layers/blink_half.webp",
-    "blink_closed": "runtime-layers/blink_closed.webp",
-    "mouth_closed": "runtime-layers/mouth_closed.webp",
-    "mouth_open": "runtime-layers/mouth_open.webp",
-    "gaze_left": "runtime-layers/gaze_left.webp",
-    "gaze_right": "runtime-layers/gaze_right.webp",
-    "expression_happy": "runtime-layers/expression_happy.webp",
-    "expression_sad": "runtime-layers/expression_sad.webp"
-  },
-  "runtimeLayerEncoding": "webp-lossless-v1",
-  "frameEncoding": "webp-lossless-v1",
+  "sourceFraming": "native-full",
   "meshRig": {
-    "rig": "mesh-rig/rig.json"
-  }
+    "rig": "rig2d/rig.json"
+  },
+  "assetVersion": "lvs-schema3-3c1775ebd963412b"
 }

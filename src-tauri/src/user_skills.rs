@@ -760,8 +760,8 @@ mod tests {
 mod guard {
     use crate::guard_scan;
 
-    fn source(ending: &str) -> String {
-        guard_scan::all_sources()
+    fn source(ending: &str) -> &'static str {
+        &guard_scan::all_sources()
             .into_iter()
             .find(|source| {
                 source

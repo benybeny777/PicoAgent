@@ -1,5 +1,7 @@
 {
   "runtimeScale": 1.0,
+  "expressionHappyMode": "disabled",
+  "expressionSadMode": "disabled",
   "grid": [
     9,
     15

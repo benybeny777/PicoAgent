@@ -128,7 +128,6 @@ pub fn run() -> Result<()> {
         },
     );
     check_javascript(&root, &mut report);
-    check_javascript_tests(&root, &mut report);
     report.record(
         "Git差分検査",
         run_process(
@@ -229,26 +228,32 @@ fn tracked_files(root: &Path, patterns: &[&str]) -> Result<Vec<String>, String> 
         .collect()
 }
 
-/// node が使えないときの記録内容。使えるなら `None`。
-fn node_blocker(root: &Path) -> Option<Outcome> {
-    match node_availability(root) {
-        Ok(NodeAvailability::Available) => None,
-        Ok(NodeAvailability::Missing) => {
-            Some(Outcome::Skipped("nodeが見つからないため".to_string()))
-        }
-        Ok(NodeAvailability::Unusable(code)) => Some(Outcome::Failed(format!(
-            "node --versionが失敗しました（終了コード {code:?}）"
-        ))),
-        Err(error) => Some(Outcome::Failed(format!(
-            "nodeの確認に失敗しました: {error}"
-        ))),
-    }
-}
-
 fn check_javascript(root: &Path, report: &mut Report) {
-    if let Some(outcome) = node_blocker(root) {
-        report.record("JavaScript／MJS構文", outcome);
-        return;
+    match node_availability(root) {
+        Ok(NodeAvailability::Available) => {}
+        Ok(NodeAvailability::Missing) => {
+            report.record(
+                "JavaScript／MJS構文",
+                Outcome::Skipped("nodeが見つからないため".to_string()),
+            );
+            return;
+        }
+        Ok(NodeAvailability::Unusable(code)) => {
+            report.record(
+                "JavaScript／MJS構文",
+                Outcome::Failed(format!(
+                    "node --versionが失敗しました（終了コード {code:?}）"
+                )),
+            );
+            return;
+        }
+        Err(error) => {
+            report.record(
+                "JavaScript／MJS構文",
+                Outcome::Failed(format!("nodeの確認に失敗しました: {error}")),
+            );
+            return;
+        }
     }
 
     let files = match tracked_files(root, &["*.js", "*.mjs"]) {
@@ -259,6 +264,11 @@ fn check_javascript(root: &Path, report: &mut Report) {
         }
     };
 
+    let tests: Vec<_> = files
+        .iter()
+        .filter(|path| path.starts_with("tools/tests/") && path.ends_with(".mjs"))
+        .cloned()
+        .collect();
     for path in files {
         let label = format!("JavaScript構文: {path}");
         println!("\n[verify] 開始: {label}");
@@ -273,50 +283,22 @@ fn check_javascript(root: &Path, report: &mut Report) {
         };
         report.record(label, outcome);
     }
-}
-
-/// 画面側の契約テスト（`tools/tests/*.mjs`）を実行する。
-///
-/// `check_javascript` は `node --check`（構文）しか見ておらず、`cargo test` は Rust しか
-/// 走らせない。そのため**この契約テストは1件も実行されないまま増え続けていた**
-/// （読み上げ範囲・目覚ましの判定・配置の保存先など、実装をgrepで固定する検査）。
-/// スキルの書式検査と同じ「検査範囲の穴」なので、追跡中のテストをここで直接 node へ渡す。
-/// 1回の `node --test` へまとめて渡し、失敗したファイルはnode側の出力で分かるようにする。
-fn check_javascript_tests(root: &Path, report: &mut Report) {
-    const LABEL: &str = "画面の契約テスト";
-    if let Some(outcome) = node_blocker(root) {
-        report.record(LABEL, outcome);
-        return;
-    }
-    let files = match tracked_files(root, &["tools/tests/*.mjs"]) {
-        Ok(files) => files,
-        Err(reason) => {
-            report.record(LABEL, Outcome::Failed(reason));
-            return;
+    // 構文検査だけでは、表情や物理の接続が消えたデグレを検出できない。
+    let outcome = if tests.is_empty() {
+        Outcome::Failed("JavaScriptの回帰テストがありません".to_string())
+    } else {
+        match Command::new("node")
+            .arg("--test")
+            .args(tests)
+            .current_dir(root)
+            .status()
+        {
+            Ok(status) if status.success() => Outcome::Passed,
+            Ok(status) => Outcome::Failed(format!("終了コード {:?}", status.code())),
+            Err(error) => Outcome::Failed(format!("nodeを起動できません: {error}")),
         }
     };
-    if files.is_empty() {
-        report.record(
-            LABEL,
-            Outcome::Failed("契約テストが1件も見つかりません".to_string()),
-        );
-        return;
-    }
-    println!("\n[verify] 開始: {LABEL}（{}件）", files.len());
-    let outcome = match Command::new("node")
-        .arg("--test")
-        .args(&files)
-        .current_dir(root)
-        .status()
-    {
-        Ok(status) if status.success() => Outcome::Passed,
-        Ok(status) => Outcome::Failed(format!(
-            "終了コード {:?}（`node --test tools/tests/*.mjs` で再現する）",
-            status.code()
-        )),
-        Err(error) => Outcome::Failed(format!("nodeを起動できません: {error}")),
-    };
-    report.record(LABEL, outcome);
+    report.record("JavaScript回帰テスト", outcome);
 }
 
 fn node_availability(root: &Path) -> io::Result<NodeAvailability> {

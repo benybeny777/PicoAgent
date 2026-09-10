@@ -46,7 +46,6 @@ mod settings_memory;
 mod store;
 mod stream_profile;
 mod text;
-mod tha3_creator;
 mod tools;
 mod tracer;
 mod usage;
@@ -86,7 +85,6 @@ pub fn run() {
         .manage(EngineState::new())
         .manage(AivisState::new())
         .manage(BootScreenState::new())
-        .manage(tha3_creator::Tha3CreatorState::new())
         .manage(WindowLayoutCache::default())
         .manage(tracer::Tracer::new(200))
         // フロントを読み込めなかったときの案内画面（配信経路に依存しないよう埋め込みを返す）。
@@ -133,11 +131,6 @@ pub fn run() {
             commands::settings_character_remove,
             commands::settings_pick_stream_image,
             commands::settings_export_diagnostics,
-            commands::settings_tha3_status,
-            commands::settings_tha3_pick_source,
-            commands::settings_tha3_pick_root,
-            commands::settings_tha3_generate,
-            commands::settings_tha3_cancel,
             commands::pet_user_characters,
             commands::settings_list_models,
             commands::settings_test_tool,
@@ -413,7 +406,6 @@ pub fn run() {
             save_window_layout_on_exit(app_handle);
             // OS へ確保したグローバルホットキーを明示的に返す。
             hotkey::release(app_handle);
-            tha3_creator::shutdown(app_handle);
             aivis::stop(app_handle);
             engine::stop(app_handle);
             mcp::client::stop_all();

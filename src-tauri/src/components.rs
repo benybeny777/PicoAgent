@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
-const COMPONENT_IDS: [&str; 5] = ["aivis", "whisper", "tha3", "office", "tools"];
+const COMPONENT_IDS: [&str; 4] = ["aivis", "whisper", "office", "tools"];
 const WHISPER_RELEASE_API: &str =
     "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest";
 const WHISPER_MODEL_URL: &str =
@@ -126,11 +126,6 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
             "音声入力・文字起こし",
             "whisper.cpp本体とsmallモデルを各公式配布元から直接取得します。",
             "約0.5GB",
-        )),
-        "tha3" => Some((
-            "1枚絵からキャラ作成",
-            "作者のGitHubとモデル配布から利用者が取得し、キャラ設定でTHA3フォルダを指定します。CUDA対応NVIDIA GPUが必要です。",
-            "約5.2GB（Windows・手動導入）",
         )),
         "office" => Some((
             "Office変換",

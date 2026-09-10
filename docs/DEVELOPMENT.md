@@ -1,5 +1,7 @@
 # PicoAgent 開発・配布ガイド
 
+`cargo xtask verify`はNodeが使える環境でJavaScriptの構文だけでなく、追跡中の`tools/tests/*.mjs`の回帰テストも実行する。キャラクター修正時は追加で`python scripts/test-face-landmarks.py`（Pillowが必要）と`node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`を実行し、全7体の実画像を確認する。後者のPlaywrightは`PICO_PLAYWRIGHT_MODULE`で作業用モジュールの絶対パスを指定する。生成成功やCPU検査だけで見た目合格にしない。
+
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
@@ -18,6 +20,8 @@
 | 完了記録 | PR本文とGit履歴 | 目的、採否と理由、検証結果、未確認事項 |
 
 ここでいう「作業状態」はPicoAgent製品の長期メモリ機能とは別物です。共通スキル正本とClaude Code用自動認識ファイルの名前・frontmatter・参照先・本文量は`cargo xtask verify`が機械検査します。
+
+設計ガードのソース走査は `src-tauri/src/guard_scan.rs` に集約する。スキル、バックエンド、内部共通コアを再帰的に列挙し、読み取り・列挙の失敗は対象パス付きで検査失敗にする。同じテストプロセス内では各ソース本文を一度だけ読み、変更できないスナップショットとして共有する。編集後の検査ではテストプロセスを再実行する。
 
 ## 🧩 コネクタで拡張する
 
@@ -58,12 +62,22 @@ graph LR
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
+| `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
 | `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・画面の契約テスト（`tools/tests/*.mjs`）・Git差分の一括検証 |
 
 > `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
 > `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
+
+LocalVTuberStudio形式の実画面検査は、まずリポジトリ直下を`uv run python -m http.server 8776 --bind 0.0.0.0 --directory .`で配信する。Codex DesktopのPlaywrightは製品依存へ追加せず、`load_workspace_dependencies`で取得した現行パスを指定する。2026年9月7日時点では次の形だが、存在しない場合は固定値を推測せず再取得する。
+
+```powershell
+$env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'
+node tools/check-lvs-character.mjs temp/pico-lvs-check
+```
+
+出力は`temp/pico-lvs-check/`の閉口・5母音、まばたき各時点、視線4方向、通常・笑顔・困り・考え・照れの全5表情、全8動作、腕寄せ0／0.5／1、待機5時点のPNGと`report.json`である。腕寄せ非対応パックは`armSupported: false`として撮影を省く。LocalVTuberStudio形式は5表情と6種類以上の動作差分が無ければ失敗する。固有ハッシュ数だけを見た目の合格根拠にせず、Chromeの`tools/mesh-rig-preview/`でも原画との輪郭、透過、目口、首・胴の境界を確認する。腕寄せでは、残余レイヤーに元位置の輪郭や色面が残らないことも3段階すべてで見る。
 ---
 
 ## 📦 配布ビルド
@@ -88,6 +102,8 @@ cargo xtask build-distribution
 # 作成した配布物からlatest.jsonのサイズ・SHA-256を生成（.exe と .dmg を受け付ける）
 cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64-setup.exe "更新内容"
 ```
+
+`bump-version`はソースの現行版を起点に採番する。OS別の公開版が遅れていて`latest.json`がソースより古い場合は許容するが、公開版がソースより新しい場合は二重採番として停止する。
 
 `build-beta` は、販売条件を完了扱いにせず、販売版と同じ軽量同梱範囲で試用インストーラを生成します。`build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売対象はWindowsだけで、コード署名と完全自動更新を必須にしません。macOSは販売対象へ追加する前に署名・公証と実機QAを行います。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
 
@@ -141,10 +157,10 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（WindowsはNSIS、macOSは`.app`／`.dmg`、Ubuntu Linux x64は`.deb`／AppImage）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
-通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと公式取得元マニフェストだけを入れます。Aivis・Whisperは初回起動後に公式配布から直接取得し、THA3・LibreOffice・PDF/画像ツールは利用者による公式導入を案内します。開発用のツール・ドキュメント・README用画像は含まれません。
+通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと公式取得元マニフェストだけを入れます。Aivis・Whisperは初回起動後に公式配布から直接取得し、LibreOffice・PDF/画像ツールは利用者による公式導入を案内します。開発用のツール・ドキュメント・README用画像は含まれません。
 
 <details>
-<summary>同梱物・制作ツールの扱い（エンジン / Aivis / Whisper / Live2D / THA3）</summary>
+<summary>同梱物・制作ツールの扱い（エンジン / Aivis / Whisper / Live2D）</summary>
 
 以下のパスは Windows 表記です。macOSとLinuxでは同等のユーザーデータ配下（`PicoAgent/...`）に読み替えてください。
 
@@ -176,16 +192,10 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 - 開発者が既存サンプルの描画回帰を行う場合だけ `cargo xtask setup live2d-samples` を明示実行します。通常の`build`と販売版は、手元に取得済みでも配布許可リスト外のサンプルを同期しません
 - **ライセンス** — Cubism Core は [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_jp.html)に従います。利用者モデルは配布元ごとに条件が違い、公式サンプルにも[個別の利用条件](https://www.live2d.com/learn/sample/model-terms/)があるため、取得・追加前に利用者自身が確認します
 
-**THA3 キャラクター制作ツール**
-
-- `cargo xtask setup tha3` が固定確認済みリビジョンのTHA3コードと、VRAM自動調整に使う `standard_float` / `standard_half` / `separable_half` を開発用の `src-tauri/resources/bundled/tha3/` へ取得します。実体はGit管理外です
-- 軽量販売版はTHA3コード・モデル・Python／PyTorchを再配布しません。設定画面に作者GitHubと作者案内のモデル配布を表示し、利用者が条件を確認して導入したフォルダを選んで保存します。GUI用制御スクリプトはアプリへ文字列として埋め込み、生成時だけ `app_cache_dir/tha3-creator/` へ一時展開します
-- **ライセンスと帰属** — THA3コードはMIT License、学習済みモデルは[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)です。作者はPramook Khungurn（pkhungurn）で、帰属をREADMEと設定画面に表示します。利用者が用意するPython・PyTorchは各配布物のライセンスに従います
-
 **その他**
 
 - macOS では `llama-server` / `whisper-cli` / Aivis `run` に実行権限を付け直してから起動します。`.app` 配下など chmod できない場所は補正失敗だけで止めず、実際の起動結果で判定します
-- AivisとWhisperはPicoAgent専用ディレクトリ・専用ポートだけを使い、グローバルインストールや既存プロセスへ干渉しません。外部導入のTHA3・LibreOffice・各種ツールはPicoAgentから削除せず、提供元の手順に従います
+- AivisとWhisperはPicoAgent専用ディレクトリ・専用ポートだけを使い、グローバルインストールや既存プロセスへ干渉しません。外部導入のLibreOffice・各種ツールはPicoAgentから削除せず、提供元の手順に従います
 - 配布ビルドでは `cargo xtask build-ui --release` が `ui/` を `ui-dist/` へ差分同期し、コメントと余分な空白を削ったものを同梱します。同期元にない生成先ファイルは削除し、必要な場合だけ`--force`で全再構築します。開発中アルファ版の `ALPHA` バッジは `--beta`（`build-beta` が自動で付与）を付けたときだけ残り、通常ビルドと販売ビルドの配信物からは取り除かれます。Rust の release profile は LTO・strip・panic abort・debug 情報無効化を有効化しています（解析を不可能にするものではなく、読みやすいソースやシンボル情報を減らすための基本対策です）
 
 </details>
@@ -210,11 +220,11 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **インストール（上書き導入）**
 
-NSIS インストーラは、ファイルをコピーする前にインストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisper・THA3のPythonだけを実体パスで特定して止めます。本体だけを終了しても子プロセスは残り、インストール先の実行ファイルとDLLを掴んだままだと上書き導入が失敗して新旧が混ざり、更新後に起動できなくなるためです。PC上の同名プロセスは停止しません。
+NSIS インストーラは、ファイルをコピーする前にインストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止めます。本体だけを終了しても子プロセスは残り、インストール先の実行ファイルとDLLを掴んだままだと上書き導入が失敗して新旧が混ざり、更新後に起動できなくなるためです。PC上の同名プロセスは停止しません。
 
 **アンインストール**
 
-NSIS アンインストーラは、インストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisper・THA3のPythonだけを実体パスで特定して止め、PicoAgent専用の一時ファイルを削除します。PC上の同名プロセスは停止しません。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。
+NSIS アンインストーラは、インストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止め、PicoAgent専用の一時ファイルを削除します。PC上の同名プロセスは停止しません。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。
 
 **署名・自動更新**
 
@@ -235,11 +245,10 @@ PicoAgent/
 ├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
 ├── scripts/          ← キャラクター画像の生成スクリプト（Python）
 ├── .agents/plugins/  ← Codex・Claude Code共用の汎用開発プラグイン
-├── tools/            ← 開発用の作業ツール（tha3-runtime/ はWindows開発用・Git管理外）
+├── tools/            ← 開発用の作業ツール
 ├── docs/            ← 未完了タスク、販売・設計資料、README掲載画像（images/）
 └── src-tauri/
     ├── build.rs      ← コネクタの自動 mod 生成
-    ├── resources/bundled/tha3/ ← 通常の開発ビルド用THA3（販売用軽量版には含めない）
     └── src/
         ├── agent.rs        ← エージェント実行ループ
         ├── agent/          ← systemルールと文脈の合成（prompt）／計画・自己評価（feedback）

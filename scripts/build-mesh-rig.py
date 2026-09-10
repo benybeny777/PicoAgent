@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -191,6 +192,17 @@ def automatic_face_regions(
     return regions
 
 
+def measured_mouth_region(anchors, size):
+    """開口差分の所有を測定された口と接続余白へ制限する。"""
+    mouth = anchors["mouth"]
+    margin = (mouth["x1"] - mouth["x0"]) * 0.22
+    return {
+        "box": [max(0, round(mouth["x0"] - margin)), max(0, round(mouth["y0"] - margin)),
+                min(size[0], round(mouth["x1"] + margin)), min(size[1], round(mouth["y1"] + margin))],
+        "feather": max(1, round(margin * 0.15)),
+    }
+
+
 def build(character_id: str) -> None:
     character_dir = ROOT / "characters" / character_id
     source_config_path = character_dir / "mesh-rig" / "source" / "regions.json"
@@ -198,9 +210,21 @@ def build(character_id: str) -> None:
     scale = float(config.get("runtimeScale", 0.5))
     if not 0 < scale <= 1:
         raise ValueError(f"runtimeScaleは0より大きく1以下にしてください: {scale}")
+    expression_sad_mode = str(config.get("expressionSadMode", "layer"))
+    if expression_sad_mode not in {"layer", "disabled"}:
+        raise ValueError(f"expressionSadModeが不正です: {expression_sad_mode}")
+    expression_happy_mode = str(config.get("expressionHappyMode", "layer"))
+    if expression_happy_mode not in {"layer", "disabled"}:
+        raise ValueError(f"expressionHappyModeが不正です: {expression_happy_mode}")
 
     layers_dir = character_dir / "layers"
     base_path = layers_dir / "mouth_closed.png"
+    landmarks_path = source_config_path.parent / "face-landmarks.json"
+    landmarks = None
+    if landmarks_path.exists():
+        landmarks = json.loads(landmarks_path.read_text(encoding="utf-8"))
+        if landmarks.get("version") != 1 or landmarks.get("source_sha256") != hashlib.sha256(base_path.read_bytes()).hexdigest():
+            raise ValueError("顔特徴点の解析元が現在の正本と一致しません")
     with Image.open(base_path) as opened:
         base = canonicalize_transparent_rgb(opened)
     if base.getchannel("A").getbbox() is None:
@@ -289,6 +313,10 @@ def build(character_id: str) -> None:
                 source = opened.convert("RGBA")
         if source.size != base.size:
             raise ValueError(f"レイヤー寸法が一致しません: {source_name} {source.size} != {base.size}")
+        if landmarks and name == "mouth_open":
+            # 開口差分の画像全体には生成時に変わった目・肌も含まれ得る。
+            # 差分の外接矩形ではなく、原画で測定した口だけを所有させる。
+            region = {**region, **measured_mouth_region(landmarks["anchors"], base.size)}
         runtime = source.resize(runtime_size, Image.Resampling.LANCZOS)
         box = scaled_box(list(region["box"]), scale)
         feather = max(0, round(float(region.get("feather", 0)) * scale))
@@ -320,6 +348,8 @@ def build(character_id: str) -> None:
         "canvas": list(runtime_size),
         "contentBox": list(scaled_box(list(content_box), scale)),
         "runtimeScale": scale,
+        "expressionHappyMode": expression_happy_mode,
+        "expressionSadMode": expression_sad_mode,
         "grid": list(config.get("grid", [9, 15])),
         "base": "parts/base.webp",
         "drawables": drawables,
@@ -344,14 +374,27 @@ def build(character_id: str) -> None:
             ),
         },
     }
+    if landmarks:
+        rig["anchors"] = {
+            name: {key: value * scale for key, value in anchor.items()}
+            for name, anchor in landmarks["anchors"].items()
+        }
+        rig["facialLandmarksSource"] = {key: landmarks[key] for key in ("version", "source_sha256", "analysis_sha256")}
     rig_path = character_dir / "mesh-rig" / "rig.json"
     temporary_rig = rig_path.with_suffix(".json.part")
-    temporary_rig.write_text(json.dumps(rig, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    rig_text = json.dumps(rig, ensure_ascii=False, indent=2) + "\n"
+    temporary_rig.write_text(rig_text, encoding="utf-8")
     temporary_rig.replace(rig_path)
+
+    asset_digest = hashlib.sha256(rig_text.encode("utf-8"))
+    for part_path in sorted(parts_dir.glob("*.webp")):
+        asset_digest.update(part_path.name.encode("utf-8"))
+        asset_digest.update(part_path.read_bytes())
+    mesh_asset_version = asset_digest.hexdigest()[:16]
 
     manifest_path = character_dir / "character.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["meshRig"] = {"rig": "mesh-rig/rig.json"}
+    manifest["meshRig"] = {"rig": "mesh-rig/rig.json", "assetVersion": mesh_asset_version}
     temporary_manifest = manifest_path.with_suffix(".json.part")
     temporary_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary_manifest.replace(manifest_path)

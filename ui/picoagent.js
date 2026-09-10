@@ -210,10 +210,5 @@ window.picoagent = {
     installUpdate: () => call("settings_install_update"),
     removeCharacter: (id) => call("settings_character_remove", { id }),
     pickStreamImage: (kind) => call("settings_pick_stream_image", { kind }),
-    tha3Status: (rootPath = null) => call("settings_tha3_status", { rootPath }),
-    pickTha3Source: () => call("settings_tha3_pick_source"),
-    pickTha3Root: () => call("settings_tha3_pick_root"),
-    generateTha3Character: (sourcePath, tha3RootPath, id, name) => call("settings_tha3_generate", { sourcePath, tha3RootPath, id, name }),
-    cancelTha3Generation: () => call("settings_tha3_cancel"),
   },
 };

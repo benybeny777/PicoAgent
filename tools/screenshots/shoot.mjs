@@ -173,7 +173,6 @@ window.__TAURI__ = {
     if (name === "settings_components_status") return Promise.resolve([
       { id: "aivis", ready: true, available: true },
       { id: "whisper", ready: false, available: true },
-      { id: "tha3", ready: false, available: true },
       { id: "office", ready: false, available: false },
       { id: "tools", ready: false, available: true },
     ]);
@@ -417,7 +416,7 @@ async function shootCharacterMatrix() {
   const warnings = [];
   const selectedCharacters = process.env.SHOOT_CHARACTER_IDS
     ? process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean)
-    : ["mugi", "rin", "mai", "rin-tha3", "koharu", "sena", "noa", "photoreal-prototype"];
+    : ["mugi", "mugi-normal-lvs", "rin", "mai", "sena", "aoi", "photoreal-prototype"];
   const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
     ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
@@ -1698,7 +1697,7 @@ const LIVE2D_CHARACTER = "hiyori";
 const LIVE2D_RUNTIME = [
   "ui/vendor/live2d/live2dcubismcore-5.3.min.js",
   "ui/vendor/live2d/live2dcubismcore-compat.min.js",
-  "ui/vendor/live2d/pixi.min.js",
+  "ui/vendor/pixi/pixi.min.js",
   "ui/vendor/live2d/cubism4.min.js",
 ];
 const LIVE2D_REQUIRED = [...LIVE2D_RUNTIME, `ui/assets/characters/${LIVE2D_CHARACTER}/live2d`];
@@ -1824,12 +1823,12 @@ const GALLERY_ASK = "おはよう。今日もよろしくね";
 // voice: true で読み上げ音声（音節風の振幅を持つWAV）を返させ、口パクを実経路で動かす。
 // 対応キャラは録画中に実際の口開閉が1回以上起きたことまで検査する。
 // 高解像度の比較・保管を明示した場合は、実画面を2倍密度で描画してから960pxへ縮小する。
-// README／LP公開用はこの生描画から480pxへ直接書き出し、既存WebPを再圧縮しない。
+// README／LP公開用はこの生描画から960pxへ直接書き出し、既存WebPを再圧縮しない。
 const GALLERY_SCENE = {
   layout: "pet", width: 900, height: 600, deviceScaleFactor: 2,
   seconds: 12, fps: 30, outputWidth: 960,
-  // README／LPは同じ生PNGから480px・16fpsへ直接書き出す。既存WebPの再エンコードは禁止。
-  siteSeconds: 6, siteOutputWidth: 480, siteOutputFps: 16, siteQuality: 50, voice: true,
+  // README／LPは同じ生PNGから960px・16fpsへ直接書き出す。既存WebPの再エンコードは禁止。
+  siteSeconds: 6, siteOutputWidth: 960, siteOutputFps: 16, siteQuality: 85, voice: true,
 };
 
 // 低頭身のむぎはアプリ既定の上半身構図だと、小さいLP／README枠で顔だけが
@@ -1936,10 +1935,9 @@ const GALLERY = [
   ["mugi", "おはよう！えへへ、今日もそばで見てるね。まずはやること、3つに絞ろっか。"],
   ["rin", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
   ["mai", "おはよう。あせらなくて大丈夫よ、ゆっくり一緒に進めましょう。"],
-  ["koharu", "おはよう。今日のこと、気軽に話してね。"],
   ["sena", "おはよう。今日のステージも、きれいに仕上げようか。"],
-  ["noa", "べ、別に待ってたわけじゃないけど……用件は聞いてあげる。"],
-  ["rin-tha3", "ふ、ふん。来たのね。今日の作業くらい見ててあげる。"],
+  ["aoi", "こんにちは。気になることを、一緒に丁寧に確かめましょう。"],
+  ["mugi-normal-lvs", "こんにちは。今日もいっしょに、のんびり進めようね。"],
   ["photoreal-prototype", "こんにちは。焦らず、今日やることから一緒に整理しましょう。"],
   ["hiyori", "やっほー！今日はなにする？なんでも言ってね、いっしょにがんばろ！", "live2d"],
   ["haru", "こんにちは。今日の作業を落ち着いて進めましょう。", "live2d"],
@@ -1958,7 +1956,7 @@ const GALLERY_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = "png"])
     reply,
     prepare: galleryPrepare(id, kind),
     step: galleryStep,
-    siteQuality: kind === "live2d" ? 45 : 50,
+    siteQuality: 85,
     verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
@@ -1979,14 +1977,14 @@ const GALLERY_STREAM_SHOTS = Object.fromEntries(GALLERY.map(([id, reply, kind = 
     reply,
     prepare: galleryPrepare(id, kind),
     step: galleryStep,
-    siteQuality: kind === "live2d" ? 50 : 55,
+    siteQuality: 85,
     verifyLipSync: id !== "rice",
     requires: galleryRequires(id, kind),
   },
 ]));
 
 // LPへ出す自前キャラはrelease.jsonを正本にし、公式Live2Dサンプルだけを動作例として加える。
-// README専用のrin-tha3など、販売対象外の試作をLP資産へ混ぜない。
+// 販売対象外の試作をLP資産へ混ぜない。
 const RELEASE = JSON.parse(await readFile(join(ROOT, "distribution", "release.json"), "utf8"));
 const SITE_GALLERY_IDS = new Set([
   ...(RELEASE.includedCharacters || []),
@@ -2006,7 +2004,7 @@ const README_GALLERY_FILES = new Set([
 const SHOTS = {
   ...GALLERY_SHOTS,
   ...GALLERY_STREAM_SHOTS,
-  "main-light.webp": { prepare: startReply() },
+  "main-light.webp": { width: 900, height: 600, layout: "pet", deviceScaleFactor: 2, characterFraming: MUGI_PUBLIC_FRAMING, ...DISTRIBUTION_SCENE, outputWidth: 960, voice: true, prepare: prepareDistribution2D, step: distributionStep },
   "main-dark.webp": { theme: "dark", prepare: startReply() },
   "composer-light.webp": {
     reply: COMPOSER_REPLY,
@@ -2016,6 +2014,7 @@ const SHOTS = {
   "fullscreen-light.webp": { width: 900, height: 600, prepare: prepareFullscreen },
   "live2d-light.webp": { characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
   "live2d-dark.webp": { characterId: LIVE2D_CHARACTER, theme: "dark", requires: LIVE2D_REQUIRED, prepare: prepareLive2D },
+  "live2d-motion.webp": { width: 900, height: 600, layout: "pet", deviceScaleFactor: 2, ...DISTRIBUTION_SCENE, outputWidth: 960, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   "distribution-main.webp": { width: 900, height: 600, layout: "pet", characterFraming: MUGI_PUBLIC_FRAMING, ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, prepare: prepareDistribution2D, step: distributionStep },
   "distribution-live2d.webp": { width: 900, height: 600, layout: "pet", ...DISTRIBUTION_SCENE, outputWidth: 640, voice: true, characterId: LIVE2D_CHARACTER, requires: LIVE2D_REQUIRED, prepare: prepareDistributionLive2D, step: distributionStep },
   // 設定画面のプレビューと README は、各形式の実際の既定寸法・本物の CSS から作る。
@@ -2324,10 +2323,10 @@ if (SITE_GALLERY && !only.length && !failed && !skipped.length) {
   // 今回書いていない古いファイルを検査するか、未生成でENOENTになる。
   const bytes = (await Promise.all(galleryFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
-  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-noa.webp", "character-photoreal-prototype.webp"];
+  const indexFiles = ["character-mugi.webp", "character-sena.webp", "character-aoi.webp", "character-photoreal-prototype.webp"];
   const indexBytes = (await Promise.all(indexFiles.map(name => readFile(join(CUSTOM_OUT || SITE_OUT, name)))))
     .reduce((sum, content) => sum + content.length, 0);
-  if (bytes > 15_000_000 || indexBytes > 5_000_000) {
+  if (bytes > 80_000_000 || indexBytes > 20_000_000) {
     throw new Error(`LP画像容量が上限を超えています: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
   }
   console.log(`LP画像容量: キャラ一覧${(bytes / 1_000_000).toFixed(2)}MB / トップ${(indexBytes / 1_000_000).toFixed(2)}MB`);
@@ -2339,7 +2338,7 @@ if (README_GALLERY && !only.length && !failed && !skipped.length) {
   })));
   const total = sizes.reduce((sum, item) => sum + item.size, 0);
   const largest = sizes.reduce((left, right) => left.size >= right.size ? left : right);
-  if (total > 20_000_000 || largest.size > 2_000_000) {
+  if (total > 80_000_000 || largest.size > 8_000_000) {
     throw new Error(`README画像容量が上限を超えています: 合計${(total / 1_000_000).toFixed(2)}MB / 最大${(largest.size / 1_000_000).toFixed(2)}MB（${largest.name}）`);
   }
   console.log(`README画像容量: 合計${(total / 1_000_000).toFixed(2)}MB / 最大${(largest.size / 1_000_000).toFixed(2)}MB（${largest.name}）`);

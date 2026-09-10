@@ -43,6 +43,12 @@ fn dated_name(name: &str) -> String {
 
 /// ファイル名に含まれる `YYYY-MM-DD` を取り出す（ローテーション済みログの判定用）。
 fn date_in_name(name: &str) -> Option<NaiveDate> {
+    // 旧版の診断書き出し名も保持期間へ乗せる。日付より後ろの時刻は検査しない。
+    if let Some(rest) = name.strip_prefix("diagnostics-") {
+        return rest
+            .get(..10)
+            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok());
+    }
     name.split('.')
         .find_map(|part| NaiveDate::parse_from_str(part, "%Y-%m-%d").ok())
 }
@@ -64,7 +70,9 @@ pub fn ensure_log_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
 /// 「ログは1週間で自動削除」と案内しているのに、中身の濃いファイルだけが残り続ける。
 /// 履歴 JSON など、それ以外のファイルは触らない。
 fn is_prunable_log(name: &str) -> bool {
-    name.ends_with(".log") || (name.starts_with("diagnostics.") && name.ends_with(".txt"))
+    name.ends_with(".log")
+        || ((name.starts_with("diagnostics.") || name.starts_with("diagnostics-"))
+            && name.ends_with(".txt"))
 }
 
 /// 保持期間（`LOG_RETAIN_DAYS` 日）より古い日付のログファイルを削除する。
@@ -215,6 +223,12 @@ mod tests {
 
     #[test]
     fn 診断情報の書き出しも保持期間の対象にする() {
+        assert!(is_prunable_log("diagnostics-2026-09-03-080000.txt"));
+        assert_eq!(
+            date_in_name("diagnostics-2026-09-03-080000.txt"),
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 3)
+        );
+        assert_eq!(date_in_name("diagnostics-不正.txt"), None);
         // 「ログは1週間で自動削除」と案内している置き場なので、同じ規則で消える名前にする。
         assert!(is_prunable_log("diagnostics.2026-09-03.080000.txt"));
         assert_eq!(

@@ -1,5 +1,5 @@
 ; PicoAgent管理下の常駐プロセス1種を、実体パス一致だけで停止する。
-; NAME は実行ファイル名、SUBDIR は同梱ディレクトリ名（engine / aivis / whisper / tha3）。
+; NAME は実行ファイル名、SUBDIR は同梱ディレクトリ名（engine / aivis / whisper）。
 ; インストール先と実行時ディレクトリ（%APPDATA%\PicoAgent\bundled\）の両方を見る。
 !macro PICOAGENT_STOP_BUNDLED_PROCESS NAME SUBDIR
   nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq '${NAME}' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\${SUBDIR}\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\${SUBDIR}\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
@@ -17,10 +17,6 @@
   !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "llama-server.exe" "engine"
   !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "run.exe" "aivis"
   !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "whisper-cli.exe" "whisper"
-  ; THA3のPythonは `<tha3>/runtime/venv/Scripts/python.exe` などから動く。
-  ; 導入用uvも含め、生成・導入中に同梱ディレクトリを掴んだまま残る実体を止める。
-  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "python.exe" "tha3"
-  !insertmacro PICOAGENT_STOP_BUNDLED_PROCESS "uv.exe" "tha3-bootstrap"
   ; 停止直後はまだファイルハンドルが返っていないことがある。上書き導入と削除が
   ; 「使用中」で失敗しないよう、ハンドルが閉じるまでの猶予を取る。
   Sleep 1000
@@ -28,15 +24,6 @@
 
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro PICOAGENT_STOP_MANAGED_PROCESSES
-!macroend
-
-!macro NSIS_HOOK_POSTINSTALL
-  DetailPrint "THA3キャラクター制作ランタイムを専用領域へ準備しています（初回は数GB取得します）..."
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\bundled\tha3-bootstrap\install-runtime.ps1" -Tha3Root "$INSTDIR\resources\bundled\tha3" -UvPath "$INSTDIR\resources\bundled\tha3-bootstrap\uv.exe"'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "警告: THA3ランタイムを準備できませんでした。PicoAgent本体は使用できます。"
-  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -48,12 +35,10 @@
   RMDir /r "$INSTDIR\resources\bundled\whisper"
   RMDir /r "$INSTDIR\resources\bundled\aivis"
   RMDir /r "$INSTDIR\resources\bundled\engine"
-  RMDir /r "$INSTDIR\resources\bundled\tha3"
   RMDir /r "$TEMP\picoagent-aivis-runtime"
   RMDir /r "$TEMP\picoagent-aivis"
   RMDir /r "$TEMP\picoagent-engine"
   RMDir /r "$TEMP\picoagent-whisper"
-  RMDir /r "$TEMP\picoagent-tha3-uv-cache"
 
   ; サイレントアンインストールと「いいえ」はユーザーデータを残す。
   ; 設定・会話履歴・追加キャラを無確認で失うことがないよう、対話時だけ明示確認する。

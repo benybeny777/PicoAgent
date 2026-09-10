@@ -25,12 +25,12 @@
   </tr>
 </table>
 <sub>枠なしの透明ウィンドウ。デスクトップにフキダシとキャラクターだけが浮かびます。実際の動きです。<br />
-ダークテーマ、配信表示、同梱 8 体と Live2D 6 体のプレビューは <a href="#-キャラクター">キャラクター</a> にあります。</sub>
+ダークテーマ、配信表示、同梱 7 体と Live2D 6 体のプレビューは <a href="#-キャラクター">キャラクター</a> にあります。</sub>
 
 </div>
 
 > [!WARNING]
-> 公開インストーラは現在、**PicoAgent v1.0.2 Alpha**です。アプリ画面の小型`ALPHA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
+> 公開インストーラは、**Windows版 PicoAgent v1.0.5 Alpha**と**macOS版 v1.0.4 Alpha**です。macOS版は現行v1.0.4を維持します。アプリ画面の小型`ALPHA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
 > アルファ版は`beta-full`ビルドでPro対象を含む全機能を試用可能にし、正式リリースではこのfeatureを付けずFree／Pro制限を有効にします。
 
 ---
@@ -49,7 +49,7 @@ cargo install tauri-cli --version '^2'    # 初回だけ
 cargo xtask dev
 ```
 
-Windows ならリポジトリ直下の **`PicoAgentを起動.bat`** をダブルクリックでも同じです。`dev` は残存プロセス停止・キャラクター同期・UI 生成だけを行う**最小の開発起動**で、数 GB の追加取得はしません。OS ごとの前提パッケージ、ローカル AI・読み上げ・Live2D・THA3 の個別取得は [🚀 まず動かす](#-まず動かす) を参照してください。
+Windows ならリポジトリ直下の **`PicoAgentを起動.bat`** をダブルクリックでも同じです。`dev` は残存プロセス停止・キャラクター同期・UI 生成だけを行う**最小の開発起動**で、数 GB の追加取得はしません。OS ごとの前提パッケージ、ローカル AI・読み上げ・Live2D の個別取得は [🚀 まず動かす](#-まず動かす) を参照してください。
 
 ```bash
 cargo xtask verify   # PR 前の一括ローカル検証（書式・静的解析・テスト・JS 構文・画面の契約テスト・Git 差分）
@@ -64,7 +64,7 @@ cargo xtask verify   # PR 前の一括ローカル検証（書式・静的解析
 | **複数 AI の合議・分担** | 同じ質問を 2〜8 体へ送って統合、または仕事を割り振って統合・個別返却。参加 AI ごとにモデルと「担当の希望」を指定できる |
 | **安全側の既定** | 許可ルート制、削除は OS のゴミ箱、物理削除コマンドは拒否。PC 操作・ブラウザ操作・ローカル API・MCP は既定 OFF |
 | **常駐前提の性能要件** | 描画は単一 `requestAnimationFrame` ループへ合流。定期処理は目覚まし照合 20 秒と居眠り判定 30 秒だけ。上限とタイムアウトは固定値で明文化している |
-| **キャラクターは差し替え可能** | 連番 PNG パック、Cubism 4／5 の Live2D、1 枚絵から生成する THA3。人格・口調・関係性は `character.json` と設定画面で定義する |
+| **キャラクターは差し替え可能** | LocalVTuberStudioの独自2.5Dパック、連番 PNG パック、Cubism 4／5 の Live2D。人格・口調・関係性は `character.json` と設定画面で定義する |
 
 ## アーキテクチャ
 
@@ -85,6 +85,46 @@ flowchart LR
 
 フロントは webview、バックエンドは Rust。アーキテクチャとコネクタ仕様の正本は [SPEC.md](SPEC.md) です。
 
+## キャラクターができて動くまで
+
+付属7体は、キャラごとの専用描画コードではなく、LocalVTuberStudioの同一パイプラインで立ち絵から作った自己完結パックです。制作時だけローカルGPUモデルを使い、PicoAgentで表示するときは完成済みPNGパーツを共通のPIXI描画層で動かします。
+
+```mermaid
+flowchart LR
+  A["1枚の立ち絵<br/>source/input.png"] --> B["背景分離<br/>isolate"]
+  B --> C["意味解析・原寸分解<br/>Grounding DINO + SAM"]
+  C --> D["基底2.5Dリグ<br/>rig2d"]
+  D --> E["目・隠れ顔・耳の局所補完<br/>Qwen + ComfyUI"]
+  E --> F["世代固定キャラクターパック<br/>character.json + rig2d/"]
+  F --> G["PicoAgentへ登録<br/>変換なし"]
+  G --> H["共通PIXI描画<br/>まばたき・5母音・表情・待機動作"]
+```
+
+| 工程 | 保存する主な成果物 | 役割 |
+|---|---|---|
+| 入力登録 | `source/input.png`、人物設定 | 原画を上書きせず、すべての再生成の起点にする |
+| `isolate` | 透過済み立ち絵 | 既存透過を保ち、不透明な入力だけ背景を分離する |
+| `decompose` | 解析結果、原寸マスク、部位PNG、確認用PSD | 目・口・髪・顔・胴体などを意味解析して分ける |
+| `rig2d` | 補完前の基底リグ | 重なり順・座標・可動範囲を検証する。ここでは完成扱いにしない |
+| `complete` | 不変世代の完成リグ、局所編集の証跡 | 閉眼・髪に隠れた顔・耳を局所補完し、検査に通った世代だけ公開する |
+| PicoAgent表示 | `character.json`、`rig2d/rig.json`、`rig2d/parts/*.png` | パックをそのまま読み、キャラ固有分岐なしで連続描画する |
+
+上流だけをやり直した場合は、その工程より後だけを再生成します。失敗中の世代や空素材へ黙って切り替えず、直前の公開済み世代を保持します。現行の自動生成は同梱7体で動作していますが、入力画風を問わずLive2D「ひより」と同等になる保証はまだありません。制作パイプラインの現行仕様と成果物は [LocalVTuberStudio README](https://github.com/benybeny777/test#readme)、PicoAgent側の描画形式は [メッシュ変形リグ設計](docs/MESH-RIG.md)、素材更新手順は [キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)を参照してください。
+
+## 技術スタック
+
+| 領域 | 採用技術 | 役割 |
+|---|---|---|
+| デスクトップアプリ | Tauri 2、Rust、Windows WebView2 | ウィンドウ、設定、権限制御、サイドカーと推論プロセスの管理 |
+| UI | HTML、CSS、JavaScript | 会話・設定・配信表示。製品のビルドと起動にNode.jsは使わない |
+| 2D/2.5D描画 | PIXI.js 6.5.10、独自メッシュリグ | 透過PNGパーツを連続変形し、口・目・視線・髪・身体を動かす |
+| Live2D表示 | Cubism Core、pixi-live2d-display | 利用者が権利を持つCubism 4／5モデルを表示する。モデルは同梱しない |
+| ローカル会話AI | llama.cpp、GGUF | Windows上で会話モデルをローカル推論する |
+| 音声 | whisper.cpp、AivisSpeech | ローカル文字起こしと読み上げ。母音時間を2D口パクへ渡す |
+| キャラクター制作 | Python 3.12、PyTorch、Grounding DINO、SAM 2.1 | 立ち絵の意味解析と原寸部位分解 |
+| 局所画像編集 | 管理下ComfyUI、Qwen-Image-Edit-2511 | 閉眼・隠れ顔・耳を原寸範囲だけ補完する |
+| ビルド・検証 | Cargo、`cargo xtask`、Playwright | セットアップ、同期、ビルド、テスト、実画面キャプチャを一つの入口へ集約する |
+
 ## 数字
 
 | | |
@@ -92,7 +132,7 @@ flowchart LR
 | スキル | **74 種**（会話の内容から自動選択） |
 | 叩く AI | **9 系統** ／ 回答の作り方 **4 モード**（単一・合議・分担＋統合・分担のみ） |
 | 表示形式 | **7 つ**（ミニ／ペット／チャット／バー／作業／配信／ウィジェット） |
-| 同梱キャラクター | 通常 2D **8 体**（ほかに Live2D 動作例 6 体・非同梱） |
+| 同梱キャラクター | 独自 2D/2.5D **7 体**（ほかに Live2D 動作例 6 体・非同梱） |
 | ローカルモデル | 既定は軽量な LFM2.5 2.6B QAD Q4（約 1.59 GB）。PCに合うLFM／Gemma／Qwen等を設定画面で選択 |
 | 最小構成 | RAM 8 GB・GPU なしでも動作（通常推奨 RAM 16 GB・VRAM 4 GB） |
 | 実行構成 | 既定のローカルAIを同梱。追加機能と外部サービスは必要なものだけ選択して利用 |
@@ -103,8 +143,10 @@ flowchart LR
 
 | | |
 |---|---|
-| [🚀 まず動かす](#-まず動かす) | 前提、2 コマンド起動、`setup` 対象、THA3、叩く AI の選択 |
+| [🚀 まず動かす](#-まず動かす) | 前提、2 コマンド起動、`setup` 対象、叩く AI の選択 |
 | [✨ できること](#-できること) | 土台・エージェント・表示形式・スキル一覧 |
+| [キャラクターができて動くまで](#キャラクターができて動くまで) | 立ち絵から2.5Dパックを作り、PicoAgentで描画する工程と成果物 |
+| [技術スタック](#技術スタック) | 製品実行時とキャラクター制作時に使う技術の境界 |
 | [🎭 キャラクター](#-キャラクター) | 同梱 2D・Live2D のプレビューとモーション対応表 |
 | [🖱 使い方](#-使い方) | マウス・キーボード・ホットキー・ファイル受け渡し |
 | [⚙️ 設定](#️-設定) | 設定画面、会話の記憶、主要な設定キー |
@@ -126,7 +168,7 @@ flowchart LR
 
 ### 前提
 
-**対応 OS は Windows、macOS、Ubuntu Linux 24.04 LTS x64です。初期販売版の配布はWindows 10/11 x64から開始します。** macOS版とLinux版の一般公開は、各形式の署名方針と実機QAが揃ってから追加します。
+**対応 OS は Windows、macOS、Ubuntu Linux 24.04 LTS x64です。初期販売版の配布はWindows 10/11 x64から開始します。** macOS版は未署名アルファv1.0.4を公開済みで、正式な一般配布は署名方針と実機QAが揃ってから行います。Linux版の一般公開も実機QA後です。
 
 | | 必要なもの |
 |---|---|
@@ -156,7 +198,7 @@ cargo install tauri-cli --version '^2'   # 初回だけ
 cargo xtask dev
 ```
 
-`cargo xtask dev` は、残存プロセス停止・キャラクター同期・UI生成だけを行う**最小の開発起動**です。未使用の追加機能や取得元の障害で本体起動を止めません。ローカルAI、読み上げ、Live2D、THA3などを使う場合だけ、下表の `cargo xtask setup <対象>` を先に実行してください。Live2Dサンプルモデルも自動取得しません。保存中の追加キャラやLive2Dが欠損・破損・応答停止している場合も、短時間で同梱2Dキャラ「むぎ」へ切り替えて画面を起動します。
+`cargo xtask dev` は、残存プロセス停止・キャラクター同期・UI生成だけを行う**最小の開発起動**です。未使用の追加機能や取得元の障害で本体起動を止めません。ローカルAI、読み上げ、Live2Dなどを使う場合だけ、下表の `cargo xtask setup <対象>` を先に実行してください。Live2Dサンプルモデルも自動取得しません。保存中の追加キャラやLive2Dが欠損・破損・応答停止している場合も、短時間で同梱2.5Dキャラ「むぎ」へ切り替えて画面を起動します。
 
 PR前の一括ローカル検証は次の1コマンドです。
 
@@ -185,14 +227,13 @@ cargo xtask verify
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Cubism Editor 5.3互換のLive2Dランタイム（Cubism 4／5モデル対応。サンプルは含まない） |
 | `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない）。未実行でも `dev` / `build` は通る（対応済みサンプル6体が一覧から外れるだけ） |
-| `cargo xtask setup tha3` | 1枚絵から自作キャラを作るTHA3本体・3段階モデル・開発用Python（開発環境専用。販売版は作者配布物を利用者が用意） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 | `cargo xtask stop` | 残存プロセスの停止（本体・同梱エンジンに加えて、`tools/screenshots/` の撮影ツールが残した `node` と、PicoAgent 専用プロファイルで動く `browser_control` のブラウザも回収します。無関係な `node` や普段使いのブラウザは止めません） |
 
-全対象が本当に必要な場合だけ `cargo xtask setup all` を明示します。引数なしの `cargo xtask setup` は、不要な数GB級ランタイムの取得を防ぐため実行しません。THA3は開発環境で制作機能を確認するための任意対象で、販売用軽量版には再配布しません。再取得は `THA3_FORCE=1` / `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
+全対象が本当に必要な場合だけ `cargo xtask setup all` を明示します。引数なしの `cargo xtask setup` は、不要な数GB級ランタイムの取得を防ぐため実行しません。再取得は `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`。
 
-`cargo xtask build`も任意の大容量追加機能を暗黙取得しない軽量構成です。Aivis、Whisper、THA3、Office、外部CLIまで含む開発用フルビルドが本当に必要な場合だけ、`cargo xtask build-full`を明示します。
+`cargo xtask build`も任意の大容量追加機能を暗黙取得しない軽量構成です。Aivis、Whisper、Office、外部CLIまで含む開発用フルビルドが本当に必要な場合だけ、`cargo xtask build-full`を明示します。
 
 Ubuntu Linuxの配布確認は、Linux x64用エンジンを準備してから標準形式を指定します。AppImageは音声再生に必要なGStreamerを`tauri.linux.conf.json`で同梱します。
 
@@ -204,37 +245,6 @@ cargo xtask build --bundles deb,appimage
 一部の OS では公式のポータブル配布が無いツールがあります。その場合は警告のみで起動を続け、`apt` / `brew` で入れた PATH 上のツールへ自動で切り替わります。
 
 </details>
-
-### 1枚絵から動く自作キャラクターを追加する（THA3）
-
-[Talking Head Anime 3（THA3）](https://github.com/pkhungurn/talking-head-anime-3-demo)を使うと、透過した全身立ち絵から、待機・呼吸・左右の頭／身体揺れ・まばたき・口パク・考え中・落胆を含む**17枚のキーポーズ**を生成し、PicoAgentが使う**42枚の連番アニメ**へ変換できます。通常の自作キャラは名前に「（自作）」、全自作キャラは説明と生成元情報に「自作（THA3）」が付き、組み込みキャラと見分けられます。同じ表示名を使う場合も内部IDを別にすれば別キャラクターとして扱われます。
-
-```powershell
-cargo xtask setup tha3
-```
-
-販売版はTHA3を再配布しません。初回起動と設定の「追加機能・更新」から作者のGitHubとモデル配布を開き、利用者が条件を確認して取得します。取得後は右クリック →「キャラクターの設定…」→「キャラ登録」タブでTHA3フォルダを指定して保存します。保存した場所は次回も使い、「選択解除」で自動検出へ戻せます。開発者向けの `cargo xtask setup tha3` も同じ上流から開発領域へ取得します。グローバルPythonや既存のPyTorchへ黙って干渉しません。
-
-キャラクター選択は同じ画面の画像カードから行えます。名前・内部ID・説明の検索と、`Live2D` / `PNGアニメ` / `自作THA3` / `追加キャラ` の絞り込みに対応し、各カードにも描画形式と内部IDを表示するため、同じ表示名のキャラも区別できます。カードの「このキャラを選ぶ」を押すと上の性格・口調設定もそのキャラへ切り替わり、「保存」で反映します。Cubism 4／5の両モデルを持つLive2Dパックでは「Live2D の SDK 世代」を自動・4固定・5固定から選べるため、自動判定で表示が崩れる場合も切り替えて確認できます。
-
-コマンドで作る経路も残しています。
-
-```powershell
-python scripts/build-tha3-layers.py my-character --input C:\images\source.png --name "マイキャラ"
-```
-
-入力はTHA3上流仕様どおり、`512x512`・RGBA・背景完全透過・正面向きで直立した1人の全身絵にします。頭は上半分中央の128x128付近、手は頭から離してください。スクリプトは測定可能なサイズ・透過・余白・頭部領域を生成前に検査し、既存レイヤーは `--force` がない限り上書きしません。生成後は `character.json` と `characters/index.json` の登録、連番生成、配信コピーの同期まで行います。人格・挨拶は生成後の `characters/<id>/character.json` で調整できます。
-
-```powershell
-# THA3で作った自作キャラだけをOSのゴミ箱へ移し、一覧から外す
-python scripts/build-tha3-layers.py my-character --remove
-```
-
-THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3・Python・GPUを使いません。WindowsはCUDA対応NVIDIA GPUのVRAMを生成前に測り、4～6GB未満は `separable_half`、6～10GB未満は `standard_half`、10GB以上は `standard_float` を自動選択します（4GB未満は生成前に停止）。Apple Silicon MacはMPS＋`standard_float`、Intel Macは対象外です。生成時は6種類の口形から見えるものを自動選択し、差が小さすぎるデフォルメ口だけを自動補正します。全レイヤーは基準ポーズの被写体範囲で切り出し、縦横比を保ったまま445×900へ位置を揃えます。待機中は左右視線とまばたき、読み上げ中は口パクへ切り替わります。なおTHA3の出力は512×512固定で、入力要件どおりに全身を配置すると被写体は150×330程度になるため、445×900で直接描いた同梱キャラより精細さは落ちます（拡大時に軽い鮮鋭化をかけています）。17キーポーズから作るフレームアニメなので、ひよりのLive2Dと同じ連続変形ではありません。本物のLive2Dモデルを使う場合は[キャラクター画像の準備手順](characters/README.md)を参照してください。
-
-既存のPNGキャラを試す場合は、元IDを上書きせず `rin-tha3` / `mai-tha3` のような別IDで作って見比べてください。ひよりなどのLive2DキャラはLive2Dの方が滑らかなため、THA3での作り直しは推奨しません。既知のむぎ素材もこの生成機能では自動変更しません。THA3の512px出力を配置枠へ引き伸ばす処理は禁止しており、元の実効解像度で枠を満たせない場合は生成を停止します。高解像度で直接生成できる経路またはPhotoshop仕上げを用意するまで、その素材を配布品質として採用しないでください。
-
-同梱通常2Dキャラの公開用画像を仕上げ直す場合は、Windows版Photoshopを閉じた状態で `powershell -ExecutionPolicy Bypass -File scripts/finish-2d-character-assets.ps1` を実行します。`character-sources/index.json` と `blobs/` の処理前1倍PNGを正本に、内容ハッシュで重複を除いてPhotoshopの「ディテールを保持 2.0」で通常立ち絵を2倍化します。仕上げスクリプトは208配置を `temp/` へ自動展開します。手編集時は `uv run python scripts/manage-character-sources.py expand --output temp/character-sources-expanded` で展開し、確認後に `compact --input temp/character-sources-expanded` で共有ストアへ戻します。起動用大判画像は元解像度を保ち、白マット除去と元アルファの再適用で輪郭を仕上げます。208点すべての寸法・四隅アルファ・被写体範囲を検査し、白／濃紺／マゼンタ／市松のQA一覧が成功してから `characters/` へ一括反映します。失敗時は製品画像を処理前へ戻します。処理記録はGit管理外の `temp/character-asset-finish/<日時>/` に残り、処理用に起動したPhotoshopは成功・失敗のどちらでも終了します。既に開いているPhotoshopには割り込みません。続けて `uv run --with pillow python scripts/build-character-animations.py mugi rin mai rin-tha3 --compact-only` を実行すると、42フレームの見た目を維持したまま実行画像をlossless WebPへまとめられます。制作正本の `layers/*.png`、`source.png`、Live2Dテクスチャは変更しません。
 
 ### 叩く AI を選ぶ
 
@@ -316,6 +326,7 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 
 - キャラクターパックごとの連続フレームと、状態別（待機 / 傾聴 / 検索 / 作業 / 返答 / 成功 / エラー）の滑らかな補間動作
 - **通常2Dの局所二次動作** — `character.json` の `secondaryMotion` で胸元の範囲と強さをキャラ別に指定し、全身呼吸とは別の遅れた動きを付けられる。Live2Dは不要で、動きを減らすOS設定では停止する
+- **LocalVTuberStudio独自2.5D** — 現行`lvs-anime25d-v1` schema 3を変換せず読み、原寸の分離パーツをPIXIで瞬き・呼吸・小角度・髪揺れ・腕寄せへ連続描画する。`secondary_motion`がある生成物は、保存された周波数・減衰比・強さで髪を頭へ遅延追従させる。待機・会話・考え中・よろこび・困りでは、頭と全身を小さく連動させる。Aivisの母音時間から`MouthOpenY × MouthForm`を駆動し「あ・い・う・え・お」を分ける。同梱むぎは`characters/mugi/rig2d/`へ同形式の成果物をそのまま配置しており、キャラ固有の変換コードを持たない。Live2D対応は従来どおり残り、キャラクターごとに選べる
 - **Live2D 対応** — `character.json` に `live2d.model` があるキャラは Cubism ランタイムで WebGL 描画。Cubism Editor 5.3互換の公式CoreでCubism 4／5モデルを読み込み、まばたき・モーション・声量連動の口パクを行う。視線追従は既定OFFで、設定から有効にした場合だけ顔付近のマウスへ控えめに追従する。サンプルモデルは同梱・自動取得せず、利用者が配布元の条件を確認して取得したzip／フォルダを設定画面から追加する。**2D と Live2D の見た目は[キャラクター](#-キャラクター)で見比べられます**
 - キャラごとに名前・挨拶・性格・口調・一人称を定義でき、設定画面で切替と人格の上書きが可能
 - **ユーザーとの関係を選べる** — 相棒（既定）／友達／恋人／妹／姉／先輩／自由設定。キャラの性格や口調の芯はそのままに、呼び方・距離感・敬語かタメ口かだけが変わります。キャラごとに別の関係を設定することもできます
@@ -324,6 +335,20 @@ THA3が必要なのは制作時だけで、通常のPicoAgent実行時にはTHA3
 - **会話の内容で表情が変わる** — 話の流れから推定した感情（喜び・落ち込み・高揚・落ち着き・興味・驚き）が、キャラのオーラの色・顔色・動きの速さに出ます
 - **スタイルバリアント** — `character.json` の `variants` で同一キャラの別衣装・季節差分・演出を切替可能。**`variants[].live2d` を書けば、同じキャラの「絵版」と「Live2D 版」も切り替えられます**
 - **2Dキャラパック** — `cargo xtask character-pack validate <フォルダ>` で形式・容量・画像寸法・パスを検証し、`install` で途中状態を残さず正本と一覧へ追加できる
+
+#### 独自2.5Dの確認画面
+
+開発中の独自2.5Dは、PicoAgent本番の`mesh-rig.js + PIXI`へ直結した確認画面で見比べる。あおい・むぎ（SD／通常頭身）・りん・まい・セナ・実写テストの7体を切り替え、原画との比較、左右まばたき、視線、閉口と5母音、通常／笑顔／困り顔／考え顔／照れ／怒り、待機／会話／考え中／よろこび／困り／聞く、腕寄せ、全身表示、背景色を個別または自動で確認できる。口パクの無音テストでは発話入力に連動する上体と胸の遅れも確認でき、停止後は微小な呼吸へ戻る。通常頭身むぎは`characters/mugi-normal-lvs/`へ独立したキャラクターパックとして置き、既存のSDむぎを上書きしない。顔・首・襟・胴の境界を保つため、独自2.5Dの動作は上半身を一体で動かし、顔だけを平行移動・回転しない。OBS・VRMの確認機能ではない。
+
+```powershell
+uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
+```
+
+- PCのChrome: `http://127.0.0.1:8776/tools/mesh-rig-preview/`
+- 同じLANのスマホ: `http://<このPCのIPv4アドレス>:8776/tools/mesh-rig-preview/`
+- IPv4確認: `Get-NetIPAddress -AddressFamily IPv4 | Where-Object IPAddress -NotLike '127.*'`
+
+確認用スクリーンショットは`temp/`だけに置き、Gitへ含めない。あおい・むぎ・りん・まい・セナ・実写テストはLocalVTuberStudioが出力した現行schema 3の自己完結パックをそのまま読む。`rig.json`と参照先PNGを同じ配置規則で持ち込めばよく、髪物理を含めてPicoAgent専用の画像変換やキャラ別描画分岐は行わない。旧形式では左右別閉眼と腕寄せを無効表示にする。
 
 ### スキル（一部）
 
@@ -410,18 +435,17 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 <div align="center">
   <h3>同梱キャラクター</h3>
   <details>
-    <summary><strong>同梱キャラクター8体の通常表示・配信表示を開く</strong></summary>
+    <summary><strong>同梱キャラクター7体の通常表示・配信表示を開く</strong></summary>
   <table>
     <tr>
       <td align="center"><img src="docs/images/character-mugi.webp" alt="むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-stream.webp" alt="むぎの配信表示" width="150" /><br /><sub><b>むぎ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-rin.webp" alt="りんの通常表示" width="150" /><br /><img src="docs/images/character-rin-stream.webp" alt="りんの配信表示" width="150" /><br /><sub><b>りん</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-mai.webp" alt="まいの通常表示" width="150" /><br /><img src="docs/images/character-mai-stream.webp" alt="まいの配信表示" width="150" /><br /><sub><b>まい</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-rin-tha3.webp" alt="りん（自作THA3）の通常表示" width="150" /><br /><img src="docs/images/character-rin-tha3-stream.webp" alt="りん（自作THA3）の配信表示" width="150" /><br /><sub><b>りん（自作THA3）</b><br />通常／配信・1枚絵から生成</sub></td>
     </tr>
     <tr>
-      <td align="center"><img src="docs/images/character-koharu.webp" alt="こはるの通常表示" width="150" /><br /><img src="docs/images/character-koharu-stream.webp" alt="こはるの配信表示" width="150" /><br /><sub><b>こはる</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-aoi.webp" alt="あおいの通常表示" width="150" /><br /><img src="docs/images/character-aoi-stream.webp" alt="あおいの配信表示" width="150" /><br /><sub><b>あおい</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-noa.webp" alt="ノアの通常表示" width="150" /><br /><img src="docs/images/character-noa-stream.webp" alt="ノアの配信表示" width="150" /><br /><sub><b>ノア</b><br />通常／配信</sub></td>
+      <td align="center"><img src="docs/images/character-mugi-normal-lvs.webp" alt="通常頭身むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-normal-lvs-stream.webp" alt="通常頭身むぎの配信表示" width="150" /><br /><sub><b>むぎ（通常頭身）</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />84フレーム／目・口7段階</sub></td>
     </tr>
   </table>
@@ -438,9 +462,9 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
     </p>
   </details>
   <sub>
-    各キャラを標準ペット表示と配信表示の両方で、480px・16fps・6秒（96コマ）撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から、既存動画を再圧縮せず直接書き出しています。同じ「おはよう。今日もよろしくね」への返事から、<b>音声同期の口パク → 考え中 → 待機</b>を再生し、まばたきや物理演算もそのまま動かしています。<br />
+    各キャラを標準ペット表示と配信表示の両方で、960px・16fps・6秒（96コマ）撮影しています。通常版は実画面を2倍密度で描画し、配信版はネイティブ1920×1080のフルHD画面から、既存動画を再圧縮せず直接書き出しています。同じ「おはよう。今日もよろしくね」への返事から、<b>音声同期の口パク → 考え中 → 待機</b>を再生し、まばたきや物理演算もそのまま動かしています。<br />
     人格・口調はキャラクターごとに定義されていて、設定画面から編集できます。<br />
-    同梱通常2D 8体はすべて6分離原画の自前メッシュリグを持ち、自然なまばたき、音声再生中の口パク、左右視線、喜び・悲しみの顔差分、頭部・左右腕・呼吸の連続動作を同じ表示寸法で描画します。むぎと実写は分離線を出さないため髪を頭部へ追従させ、まいは手が顔境界へ重なるため頭部移動だけを固定します。WebGLを使えない環境や省モーション設定では従来の差分絵へ戻ります。ミュート中と音量0では口パクしません。<br />
+    同梱7体はLocalVTuberStudio schema 3または互換メッシュリグを直接読み、まばたき、音声再生中の2軸口パク、左右視線、共通表情、頭部・左右腕・呼吸の連続動作を描画します。生成由来の素材充足度と半閉眼の造形品質はキャラごとに異なり、ひより相当のLive2D品質を保証するものではありません。WebGLを使えない環境や省モーション設定では利用可能な従来表示へ戻ります。ミュート中と音量0では口パクしません。<br />
     このほかに Live2D キャラクター（ひより・はる・イプシロン・まお・ライス・わんこ）があります。<br />
     Live2D はランタイムとモデルを配布に含めないため、<code>cargo xtask setup live2d</code> で取得した環境でだけ表示できます。
   </sub>
@@ -453,13 +477,12 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 
 | キャラクター | 形式 | 状態動作 | まばたき | 口パク | 視線 | 感情表情 | 胸元二次動作 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| むぎ / りん / まい / りん（自作THA3） | 自前メッシュ＋PNG退避 | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
-| こはる / セナ / ノア | 自前メッシュ＋PNG退避 | ○ | ◎ | ◎ | ◎ | ◎ | ◎ |
-| 実写・物理演算テスト | 自前メッシュ＋PNG退避 | ○ | ◎ | ◎ | ◎ | ◎ | ◎（8領域） |
+| むぎ / むぎ（通常頭身） / りん / まい / セナ / あおい | LocalVTuberStudio系2.5D | ○ | ◎ | ◎ | ◎ | ○ | ○ |
+| 実写・物理演算テスト | 独自2.5D | ○ | ◎ | ◎ | ◎ | ○ | ◎（8領域） |
 | ひより / はる / イプシロン / まお / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
-通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。同梱通常2Dのうち6体は各42フレーム、実写2Dテストは84フレームで、目・口の各7段階、視線、表情を表現します。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。同梱通常2Dの実行フレームと差分レイヤーは、制作正本PNGと復号画素が完全一致するlossless WebPです。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写と構図調整済みLive2Dは胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。利用者が追加したLive2Dは、モデルごとに異なる顔位置を誤って切らないよう全身表示から始めます。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
+通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。LocalVTuberStudio系は原寸の部位PNGと連続パラメータを使い、固定枚数の紙芝居へ変換しません。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写と構図調整済みLive2Dは胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。利用者が追加したLive2Dは、モデルごとに異なる顔位置を誤って切らないよう全身表示から始めます。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
 
 ---
 
@@ -558,10 +581,10 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 **基本設定** / **画面・操作** / **キャラ登録** / **キャラ選択** / **キャラの音声** / **追加機能・更新** / **AIモデル・連携** / **スキル** / **安全・許可** / **使い方** / **診断・修復** の 11 タブです。基本設定には「キャラ登録」「キャラ選択」「キャラの音声」「画面レイアウト」「使うAI」「追加機能」「困ったとき」の7入口があり、「画面・操作」では7種類の実表示プレビュー、用途、既定寸法をカードで比較できます。
 
 - **安全・許可** — 全スキル共通のファイル・ディレクトリ・実行の許可ルートと拒否パスをまとめて設定（`C:\Windows` と `Program Files` は常に拒否）。各スキルの個別許可ルート設定は廃止し、この共通設定を参照します
-- **キャラ登録** — **自分で用意した Live2D モデルや完成済みキャラクターパックを追加**し、1枚絵からTHA3キャラクターを作成できます。配布元で利用条件を確認して取得したzip／フォルダと表示名・内部IDを指定すれば、`character.json` はアプリが作成します。
+- **キャラ登録** — **自分で用意した Live2D モデルや完成済みキャラクターパックを追加**できます。配布元で利用条件を確認して取得したzip／フォルダと表示名・内部IDを指定すれば、`character.json` はアプリが作成します。
 - **キャラ選択** — 導入済みキャラの選択・表示名変更・人格・構図・配信設定・Live2DのSDK世代（自動／Cubism 4／Cubism 5）をまとめます。追加キャラの参照に使う内部IDは表示名を変えても維持します。削除はOSのゴミ箱へ移動し、設定・会話履歴は残します。
 - **キャラの音声** — 読み上げのON/OFFと音量、選択中キャラのAivis Style IDを設定します。空欄にするとキャラクターパックの既定音声へ戻ります。初回案内は「使い方」→「初回セットアップをもう一度開く」から再表示できます。
-- **追加機能・更新** — AivisとWhisperは各公式配布元から直接PicoAgent専用領域へ取得し、サイズとSHA-256を検証します。Aivisは実体の `engine_manifest.json` からインストール済み版を読み、PicoAgentの推奨版より古ければ「更新あり」、新しければ「推奨版より新しい」、読めなければ「確認が必要」と表示します。更新・推奨版へ戻す・修復・削除は、維持されるデータを画面内で案内してから同じボタンをもう一度押したときだけ実行します。確認待ちは10秒経過または別の場所へ移動すると解除します。音声モデル・辞書・設定は別の利用者データ領域に残します。更新や確認項目は基本設定の入口と初回案内にも件数を表示します。THA3、LibreOffice、PDF・画像・文書ツールは公式ページと設定手順を表示し、PicoAgentが第三者バイナリを再配布しません。オフライン時は取得を見送り、基本機能を継続します。アプリ本体のアップデートでは設定・会話履歴・追加キャラ・ダウンロード済みLLMモデル・追加機能を維持し、各追加機能の版だけをこの画面で個別に管理します
+- **追加機能・更新** — AivisとWhisperは各公式配布元から直接PicoAgent専用領域へ取得し、サイズとSHA-256を検証します。LibreOffice、PDF・画像・文書ツールは公式ページと設定手順を表示し、PicoAgentが第三者バイナリを再配布しません。オフライン時は取得を見送り、基本機能を継続します。
 - **スキル** — カテゴリ見出しとジャンルチップで整理。各カードの ⚙ は既定で折りたたみ。設定不要 / 未設定 / 一部設定 / 設定済みのバッジと、承認ポリシー（低リスク / 外部読取 / 書込・変更 / 送信前確認 / 実行前確認）を表示
 - **AIモデル・連携** — 選択中のプロバイダ設定だけを表示し、未使用プロバイダの API キー欄やモデル欄は畳み込みます。モデル一覧の待ち時間は基本設定の「詳細設定」から変更できます。ローカル API と MCP（外部ツール連携）もこのタブにあります
 - **診断・修復** — 選択中プロバイダ、同梱エンジン、Aivis、トークン使用量、スキル実行状況を確認。製品名・バージョン、ローカル／外部通信の違い、保存データ、第三者ソフトウェアの扱いも表示します
@@ -731,22 +754,9 @@ Windows版の同梱推論エンジンはVulkan対応なので、Radeon内蔵のA
 - RAM 16 GBではOS・GPU・モデルが同じメモリを使うため、他アプリとの併用時に余裕が少なくなります。応答が極端に遅い、またはメモリ不足になる場合は `small` を選ぶか、`PICOAGENT_LOCAL_NGL=0` でCPU固定にしてください
 - BIOS/UEFIのUMA Frame Buffer設定は機種ごとに異なるため必須値にはしません。変更する場合はPCメーカーの仕様を優先してください
 
-- ディスクは上表のモデル本体に加えて、推論エンジン、選択導入したAivis／Whisper、Live2Dランタイム、利用者が用意したTHA3／外部ツールの容量が必要です。販売版はTHA3と文書・画像ツールを再配布しません。取得済み GGUF は「AIモデル・連携」タブから一覧・削除できます
+- ディスクは上表のモデル本体に加えて、推論エンジン、選択導入したAivis／Whisper、Live2Dランタイム、外部ツールの容量が必要です。取得済み GGUF は「AIモデル・連携」タブから一覧・削除できます
 - コンテキスト長は `PICOAGENT_LOCAL_CTX`（既定 `8192`）、GPU オフロードは `PICOAGENT_LOCAL_NGL`（既定 `999`=全レイヤ優先 / `0`=CPU 固定）で調整します
 - クラウド AI を選んだ場合、ローカルモデルは取得も起動もしません
-
-### THA3キャラクター制作の最低要件
-
-| 環境 | 最低要件 | 推奨 | モデル選択 |
-|---|---|---|---|
-| Windows | Windows 10/11 x64、CUDA対応NVIDIA GPU、VRAM 4GB、CUDA 12.8対応ドライバー | VRAM 8GB以上、RAM 16GB以上 | VRAM 4～6GB未満=`separable_half`、6～10GB未満=`standard_half`、10GB以上=`standard_float` |
-| Apple Silicon Mac | Apple Silicon、MPS対応macOS、ユニファイドメモリ16GB | 24GB以上 | 互換性優先の`standard_float` |
-
-AMD APU／AMD GPU、Intel Mac、LinuxでのTHA3生成は対象外です（Windows版THA3はCUDA対応NVIDIA GPUが必須）。`cargo xtask setup tha3` と通常版インストーラは取得開始前にNVIDIA環境を確認し、AMD／Intel／GPUなし環境へCUDA版PyTorchをダウンロードしません。通常のPicoAgent利用、ローカルモデルのVulkan推論、生成済みキャラクターの表示には、このTHA3用GPU要件は適用されません。
-
-- 軽量WindowsインストーラにはTHA3を入れません。作者配布のコードとモデルを利用者が取得し、専用環境を準備した場合の全体容量は実測約5.2GBです
-- 作者配布物から環境を用意するときは、一時キャッシュを含め10GB以上の空き容量を確保してください。開発用 `cargo xtask setup tha3` は成功時に取得キャッシュを片付け、失敗時は再開用キャッシュをPicoAgentの `temp/` に保持します
-- Apple Silicon Macも販売版へPyTorchを同梱しません。作者配布のTHA3とMPS対応PyTorch環境を利用者が用意し、設定画面でそのTHA3フォルダを選びます
 
 ### 応答性・描画
 

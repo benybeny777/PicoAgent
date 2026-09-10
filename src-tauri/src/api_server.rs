@@ -146,12 +146,17 @@ fn parse_head(head: &str) -> Option<(String, String, HeaderList)> {
     Some((method, path, headers))
 }
 
-async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
+async fn read_request(
+    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+) -> Result<HttpRequest, String> {
     let mut buf: Vec<u8> = Vec::with_capacity(2048);
     let mut chunk = [0u8; 2048];
     // ヘッダ終端（\r\n\r\n）まで読む。
     let head_end = loop {
         if let Some(pos) = find_head_end(&buf) {
+            if pos > MAX_HEAD_BYTES {
+                return Err("ヘッダが大きすぎます".to_string());
+            }
             break pos;
         }
         if buf.len() > MAX_HEAD_BYTES {
@@ -184,7 +189,7 @@ async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
             .await
             .map_err(|error| format!("ボディの読み取りに失敗しました: {error}"))?;
         if n == 0 {
-            break;
+            return Err("ボディの受信が完了する前に接続が閉じられました".to_string());
         }
         body.extend_from_slice(&chunk[..n]);
     }
@@ -557,6 +562,45 @@ mod tests {
     fn ヘッダ終端を検出できる() {
         assert_eq!(find_head_end(b"GET / HTTP/1.1\r\n\r\nbody"), Some(14));
         assert_eq!(find_head_end(b"GET / HTTP/1.1\r\n"), None);
+    }
+
+    #[tokio::test]
+    async fn 宣言長に満たない本文は有効なjsonでも拒否する() {
+        let request = b"POST /api/chat HTTP/1.1\r\nContent-Length: 3\r\n\r\n{}";
+        let error = super::read_request(&mut &request[..]).await.err().unwrap();
+        assert!(error.contains("ボディの受信が完了する前"));
+    }
+
+    #[tokio::test]
+    async fn 分割受信した本文を宣言長まで復元する() {
+        let body = "a".repeat(3000);
+        let request = format!(
+            "POST /api/chat HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let parsed = super::read_request(&mut request.as_bytes()).await.unwrap();
+        assert_eq!(parsed.body, body.as_bytes());
+        let get = super::read_request(&mut &b"GET /api/tags HTTP/1.1\r\n\r\n"[..])
+            .await
+            .unwrap();
+        assert!(get.body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ヘッダ終端と同時に届いた上限超過も拒否する() {
+        let prefix = "GET /api/tags HTTP/1.1\r\nX-Test: ";
+        for excess in [0, 1] {
+            let request = format!(
+                "{prefix}{}\r\n\r\n",
+                "a".repeat(super::MAX_HEAD_BYTES + excess - prefix.len())
+            );
+            let result = super::read_request(&mut request.as_bytes()).await;
+            if excess == 0 {
+                assert!(result.is_ok());
+            } else {
+                assert_eq!(result.err().unwrap(), "ヘッダが大きすぎます");
+            }
+        }
     }
 
     /// ブラウザからの横断リクエスト（CSRF / DNS リバインディング）を拒否すること。
