@@ -111,7 +111,7 @@ Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock�
 
 `app_data_dir`配下の専用スキル開発領域を将来追加する。候補、検証済み不変version、active参照、試験結果を分ける。既存 `app_config_dir/user-skills` は互換形式のまま扱う。実際のパスと設定キーは実装PRでSETTINGS/DEVELOPMENTへ同期する。
 
-**保存機構は新規に作らず既存の正本を使う。** 「読む→直す→書き戻す」は`store::lock_state(名前)`を取ってから行い（既存の利用者スキルも`store::lock_state("user-skills")`で直列化している）、書き込みは`store::write_atomic()`／`store::write_json_atomic()`、読めなかったファイルは空で置き換えず`store::quarantine_corrupt()`で退避する。パスは`permissions::resolve`／`SafePath`を通し、独自の許可判定やルート設定キーを増やさない。PicoAgentは単一インスタンス前提なので、プロセス間排他を必要とする設計にしない。`store::guard`と`permissions::guard`のテストがこれらの迂回を検出して失敗させるため、別実装のCASやロックを持ち込むと実装段階で必ず落ちる。新しい設定キーは`docs/SETTINGS.md`へ同時に記載する（`doc_sync::guard`が実装と双方向で検出する）。
+**ローカルadapterの保存機構は既存の正本を使う。** 「読む→直す→書き戻す」は`store::lock_state(名前)`を取ってから行い（既存の利用者スキルも`store::lock_state("user-skills")`で直列化している）、書き込みは`store::write_atomic()`／`store::write_json_atomic()`、読めなかったファイルは空で置き換えず`store::quarantine_corrupt()`で退避する。パスは`permissions::resolve`／`SafePath`を通し、独自の許可判定やルート設定キーを増やさない。ローカルの単一インスタンスでは、同じMutex内でexpectedRevisionと現在のrevisionを比較してからactive参照を更新し、CAS契約を満たす。プロセス内Mutexを法人側の排他へ転用しない。法人adapterはPR #256のStorage／JobManager契約に従い、DBトランザクションとCASへ委譲して複数プロセス間の競合を拒否する。既存`store::guard`／`permissions::guard`のローカル保存・許可の検査を維持し、法人adapter追加時はその保存境界に対応する検査を同じ実装PRで整備する。新しい設定キーは`docs/SETTINGS.md`へ同時に記載する（`doc_sync::guard`が実装と双方向で検出する）。
 
 | パッケージ項目 | 内容 |
 |---|---|
