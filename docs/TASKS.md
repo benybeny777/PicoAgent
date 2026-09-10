@@ -77,7 +77,7 @@
 
 <a id="llm-skill-development-tasks"></a>
 
-[未実装設計](GENERATED-SKILLS.md) に従う。全段階の着手条件は設計承認と実装開始の明示。PR #256と別の機能設計であり、#255のworktreeは変更しない。実装時に#256とのContext/Job/Storage契約を照合し、共有状態を二重実装しない。
+[未実装設計](GENERATED-SKILLS.md) と [設計Draft PR #257](https://github.com/benybeny777/PicoAgent/pull/257) に従う。全段階の着手条件は設計承認と実装開始の明示。PR #256と別の機能設計であり、#255のworktreeは変更しない。実装時に#256とのContext/Job/Storage契約を照合し、共有状態を二重実装しない。
 
 | 段階 | 作業・着手条件 | 完了条件 |
 |---|---|---|
