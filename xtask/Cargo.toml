@@ -25,7 +25,9 @@ ed25519-dalek = { version = "3", features = ["rand_core"] }
 rand = { version = "0.10", default-features = false, features = ["sys_rng"] }
 serde = { version = "1", features = ["derive"] }
 chrono = "0.4"
-image = { version = "0.25.10", default-features = false, features = ["webp"] }
+# 実行画像のlossless WebPに加え、制作正本PNGを画素単位で検査する品質ゲート
+# （character_quality.rs）がPNG復号を使う。
+image = { version = "0.25.10", default-features = false, features = ["webp", "png"] }
 
 # 高精細画像のlossless WebP圧縮はデバッグ最適化なしだと起動前処理として遅すぎる。
 # xtask本体のデバッグ情報は保ち、画像処理依存だけをリリース相当でコンパイルする。
@@ -33,6 +35,17 @@ image = { version = "0.25.10", default-features = false, features = ["webp"] }
 opt-level = 3
 
 [profile.dev.package.image-webp]
+opt-level = 3
+
+# 制作正本PNGの復号（品質ゲート）も同じ理由で最適化する。
+# 1780x3600の9レイヤーをデバッグ最適化なしで復号すると検査だけで分単位になる。
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
 opt-level = 3
 
 [profile.dev.package.moxcms]

@@ -41,6 +41,7 @@ description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2Dキャ�
 - 髪の物理マスクは外側の毛先だけに置き、ぼかし端も目、鼻、口、輪郭、頬へ入れない。顔の二重線、局所拡縮、サイズ変化が出たら不合格にする。
 - 物理演算は最終レイアウトの表示倍率で確認する。移動量が1描画ピクセル未満なら「見える物理演算」として採用せず、複数マスクの重なりで被写体が変形する設定も採用しない。
 - 通常、笑顔、考え中、悲しみ、会話は、顔全体を拡縮せず目元と口元で判別できる差を付ける。静止画1枚ではなく複数時点を比較する。
+- 実画面を見る前に`cargo xtask character-quality`で画素検査を通す。差分レイヤーが顔より下の非輪郭部を書き換えている、半目が閉じ目の透明度変更である、レイヤーが基準画像と一致する、といった不合格は目視より先にここで止める。新規キャラは`--strict`で注意も0件にする。不合格を素材の修正なしに`characters/quality-baseline.json`へ足して回避しない。
 - 表情を比較するときは待機動作・自動まばたき・視線を固定した顔の並列画像も確認する。全身の揺れによるハッシュ差を表情成功と扱わない。旧実写リグと統合顔レイヤーへ眉・口角の計算が届くこと、照れの赤みと頬線が目へ重ならないことを確認する。
 - 1体で見つかった見た目の不具合は、現行の全キャラクターで同じ箇所を確認する。修正後も全員の同条件画像を比較し、確認した対象と未確認の有無を報告する。代表3体だけの合格で共通修正を完了扱いにしない。
 - `node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`で全7体の6表情・6口形・閉眼・発話/停止を単独撮影する。胴体の一様平行移動を除いた局所変位と停止後の収束を検査するが、全画像の目視を省略しない。`scripts/test-face-landmarks.py`で別原画の解析拒否と口差分の目への混入禁止も検査する。
@@ -65,6 +66,7 @@ uv run --with pillow python scripts/build-character-animations.py --character-di
 uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画
 uv run --python 3.12 --with pillow python scripts/build-mesh-rig.py <id> # meshRigを持つ場合だけ
 cargo xtask sync-characters
+cargo xtask character-quality --character <id> --strict
 uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
 $env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'
 node tools/check-lvs-character.mjs temp/pico-lvs-check # LocalVTuberStudio形式の場合

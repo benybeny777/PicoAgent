@@ -63,6 +63,7 @@ graph LR
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
 | `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
+| `cargo xtask character-quality` | 通常2Dの制作正本を画素検査する。独自リグ・Live2Dの画質は対象外。`--strict`は既知を含む全指摘を不合格、`--update-baseline`は既存指摘の削減のみ許可 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
 | `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・画面の契約テスト（`tools/tests/*.mjs`）・Git差分の一括検証 |

@@ -92,7 +92,7 @@ test("実画面検査は全表情と全動作を記録する", () => {
   for (const label of ["通常", "笑顔", "困り顔", "考え顔", "照れ", "待機", "会話", "考え中", "よろこび", "困り", "聞く"]) {
     assert.ok(checker.includes(`"${label}"`), `${label}を実画面検査へ含める`);
   }
-  assert.match(checker, /report\.unique\.expressions < 5/);
+  assert.match(checker, /report\.unique\.expressions < 6/);
   assert.match(checker, /report\.unique\.motions < 6/);
 });
 
