@@ -184,42 +184,44 @@ def main():
     if args.input:
         shutil.copy2(args.input, run / "input/input.png")
     workflow = qwen(args.prompt, args.seed, args.width, args.height) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
-    with gpu_lock(args.gpu_lock):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", args.port))
-        command = [os.fspath(Path(os.sys.executable)), os.fspath(args.comfy / "main.py"), "--listen", "127.0.0.1", "--port", str(args.port), "--base-directory", os.fspath(run), "--models-directory", os.fspath(args.models), "--temp-directory", os.fspath(run / "temp"), "--disable-auto-launch", "--disable-all-custom-nodes", "--disable-api-nodes", "--preview-method", "none"]
-        environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
-        with (run / "comfy.log").open("w", encoding="utf-8") as log:
-            process = subprocess.Popen(command, cwd=args.comfy, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            try:
-                url = f"http://127.0.0.1:{args.port}"
-                wait_for_server(url, process, args.startup_timeout)
-                queued = request_json(url + "/prompt", {"prompt": workflow})
-                prompt_id = queued.get("prompt_id")
-                if not prompt_id:
-                    raise ValueError(f"ワークフローが拒否されました: {queued}")
-                started = time.monotonic()
-                record = None
-                while time.monotonic() - started < args.generation_timeout:
-                    if process.poll() is not None:
-                        raise RuntimeError(f"ComfyUIが生成中に終了しました: {process.returncode}")
-                    record = output_record(request_json(url + "/history/" + prompt_id), prompt_id)
-                    if record:
-                        break
-                    time.sleep(2)
-                if not record:
-                    raise TimeoutError("生成が時間内に完了しませんでした")
-                source = run / record.get("type", "output") / record.get("subfolder", "") / record["filename"]
-                if not source.is_file():
-                    raise FileNotFoundError(f"生成結果が見つかりません: {source}")
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                temporary = args.output.with_suffix(args.output.suffix + ".incoming")
-                shutil.copy2(source, temporary)
-                temporary.replace(args.output)
-                print(json.dumps({"output": os.fspath(args.output), "seed": args.seed}, ensure_ascii=False), flush=True)
-            finally:
-                stop_owned(process)
-                shutil.rmtree(run, ignore_errors=True)
+    try:
+        with gpu_lock(args.gpu_lock):
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", args.port))
+            command = [os.fspath(Path(os.sys.executable)), os.fspath(args.comfy / "main.py"), "--listen", "127.0.0.1", "--port", str(args.port), "--base-directory", os.fspath(run), "--models-directory", os.fspath(args.models), "--temp-directory", os.fspath(run / "temp"), "--disable-auto-launch", "--disable-all-custom-nodes", "--disable-api-nodes", "--preview-method", "none"]
+            environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
+            with (run / "comfy.log").open("w", encoding="utf-8") as log:
+                process = subprocess.Popen(command, cwd=args.comfy, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                try:
+                    url = f"http://127.0.0.1:{args.port}"
+                    wait_for_server(url, process, args.startup_timeout)
+                    queued = request_json(url + "/prompt", {"prompt": workflow})
+                    prompt_id = queued.get("prompt_id")
+                    if not prompt_id:
+                        raise ValueError(f"ワークフローが拒否されました: {queued}")
+                    started = time.monotonic()
+                    record = None
+                    while time.monotonic() - started < args.generation_timeout:
+                        if process.poll() is not None:
+                            raise RuntimeError(f"ComfyUIが生成中に終了しました: {process.returncode}")
+                        record = output_record(request_json(url + "/history/" + prompt_id), prompt_id)
+                        if record:
+                            break
+                        time.sleep(2)
+                    if not record:
+                        raise TimeoutError("生成が時間内に完了しませんでした")
+                    source = run / record.get("type", "output") / record.get("subfolder", "") / record["filename"]
+                    if not source.is_file():
+                        raise FileNotFoundError(f"生成結果が見つかりません: {source}")
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = args.output.with_suffix(args.output.suffix + ".incoming")
+                    shutil.copy2(source, temporary)
+                    temporary.replace(args.output)
+                    print(json.dumps({"output": os.fspath(args.output), "seed": args.seed}, ensure_ascii=False), flush=True)
+                finally:
+                    stop_owned(process)
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
 
 
 if __name__ == "__main__":
