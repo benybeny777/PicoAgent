@@ -342,9 +342,7 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 .clone();
             let installed = if id == "character-maker" {
                 installed_dir(app, id).join("install.json").is_file()
-                    && crate::log_paths::bundled_dir(app)
-                        .join("python/Scripts/python.exe")
-                        .is_file()
+                    && shared_python_dir(app).join("Scripts/python.exe").is_file()
                     && installed_dir(app, id).join("ComfyUI/main.py").is_file()
             } else {
                 installed_dir(app, id).is_dir()
@@ -591,7 +589,9 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         let uv_dir_copy = uv_dir.clone();
         tokio::task::spawn_blocking(move || extract_zip(&uv_zip_copy, &uv_dir_copy)).await??;
         let uv = find_named_file(&uv_dir, "uv.exe", 0).context("uv.exeが配布物にありません")?;
-        let python_store = cache.join("python-runtime");
+        // uvの仮想環境は基準Pythonを参照する。キャッシュへ置くと起動時清掃で壊れるため、
+        // 基準Pythonとvenvを同じ管理対象世代へまとめて原子的に公開する。
+        let python_store = python_stage.join("runtime");
         run_component_command(
             &uv,
             &[
@@ -605,17 +605,24 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         .await?;
         let base_python = find_named_file(&python_store, "python.exe", 0)
             .context("Python 3.12.13を導入できません")?;
-        let python = python_stage.clone();
+        let venv_stage = cache.join("python-venv");
+        cleanup_dir(app, "共通Python仮想環境の作成途中フォルダ", &venv_stage).await;
         run_component_command(
             &uv,
             &[
                 "venv",
-                &python.to_string_lossy(),
+                &venv_stage.to_string_lossy(),
                 "--python",
                 &base_python.to_string_lossy(),
+                "--relocatable",
             ],
         )
         .await?;
+        let python_stage_copy = python_stage.clone();
+        let venv_stage_copy = venv_stage.clone();
+        tokio::task::spawn_blocking(move || copy_dir_all(&venv_stage_copy, &python_stage_copy))
+            .await??;
+        let python = python_stage.clone();
         let assets = character_maker_assets(app)?;
         run_component_command(
             &uv,
@@ -697,7 +704,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         cleanup_file(app, "ComfyUI取得ファイル", &comfy_zip).await;
         cleanup_dir(app, "uv展開フォルダ", &uv_dir).await;
         cleanup_dir(app, "ComfyUI展開フォルダ", &comfy_unpack).await;
-        cleanup_dir(app, "Python取得キャッシュ", &python_store).await;
+        cleanup_dir(app, "共通Python仮想環境の作成途中フォルダ", &venv_stage).await;
         cleanup_dir(app, "モデル取得キャッシュ", &cache.join("model-download")).await;
         Ok::<_, anyhow::Error>(())
     }
@@ -1285,6 +1292,9 @@ mod tests {
         assert_eq!(components_source.matches(".join(\"python\")").count(), 1);
         assert!(!maker_source.contains(".join(\"python\")"));
         assert!(maker_source.contains("components::shared_python_dir(app)"));
+        assert!(components_source.contains("python_stage.join(\"runtime\")"));
+        assert!(components_source.contains("\"--relocatable\""));
+        assert_eq!(components_source.matches("Python取得キャッシュ").count(), 1);
     }
 
     #[test]
