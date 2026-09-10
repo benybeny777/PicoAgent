@@ -109,7 +109,7 @@ flowchart LR
 | `complete` | 不変世代の完成リグ、局所編集の証跡 | 閉眼・髪に隠れた顔・耳を局所補完し、検査に通った世代だけ公開する |
 | PicoAgent表示 | `character.json`、`rig2d/rig.json`、`rig2d/parts/*.png` | パックをそのまま読み、キャラ固有分岐なしで連続描画する |
 
-上流だけをやり直した場合は、その工程より後だけを再生成します。失敗中の世代や空素材へ黙って切り替えず、直前の公開済み世代を保持します。設定の「キャラ作成」から利用でき、初回だけ「追加機能・更新」で約77GBの管理ランタイムを導入します。空き容量85GB以上とCUDA対応NVIDIA GPUが必要です。Python 3.12はTHA3を含まない共通環境1つだけを使います。現行の自動生成は同梱7体で動作していますが、入力画風を問わずLive2D「ひより」と同等になる保証はまだありません。描画形式は [メッシュ変形リグ設計](docs/MESH-RIG.md)、素材更新手順は [キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)を参照してください。
+上流だけをやり直した場合は、その工程より後だけを再生成します。失敗中の世代や空素材へ黙って切り替えず、直前の公開済み世代を保持します。設定の「キャラ作成（テスト）」から利用でき、初回だけ「追加機能・更新」で約77GBの管理ランタイムを導入します。空き容量85GB以上とCUDA対応NVIDIA GPUが必要です。Python 3.12はTHA3を含まない共通環境1つだけを使います。この機能はテスト扱いで、現行の自動生成は同梱7体で動作していますが、入力画風を問わずLive2D「ひより」と同等になる保証はまだありません。描画形式は [メッシュ変形リグ設計](docs/MESH-RIG.md)、素材更新手順は [キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)を参照してください。
 
 ## 技術スタック
 
@@ -446,7 +446,7 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
       <td align="center"><img src="docs/images/character-aoi.webp" alt="あおいの通常表示" width="150" /><br /><img src="docs/images/character-aoi-stream.webp" alt="あおいの配信表示" width="150" /><br /><sub><b>あおい</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-sena.webp" alt="セナの通常表示" width="150" /><br /><img src="docs/images/character-sena-stream.webp" alt="セナの配信表示" width="150" /><br /><sub><b>セナ</b><br />通常／配信</sub></td>
       <td align="center"><img src="docs/images/character-mugi-normal-lvs.webp" alt="通常頭身むぎの通常表示" width="150" /><br /><img src="docs/images/character-mugi-normal-lvs-stream.webp" alt="通常頭身むぎの配信表示" width="150" /><br /><sub><b>むぎ（通常頭身）</b><br />通常／配信</sub></td>
-      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写2Dテストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写2Dテストの配信表示" width="150" /><br /><sub><b>実写2Dテスト</b><br />84フレーム／目・口7段階</sub></td>
+      <td align="center"><img src="docs/images/character-photoreal-prototype.webp" alt="実写テストの通常表示" width="150" /><br /><img src="docs/images/character-photoreal-prototype-stream.webp" alt="実写テストの配信表示" width="150" /><br /><sub><b>実写テスト</b><br />84フレーム／目・口7段階</sub></td>
     </tr>
   </table>
   <details open>
@@ -482,7 +482,7 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 | ひより / はる / イプシロン / まお / わんこ | Live2D | ◎ | ◎ | ◎ | ◎ | モデル動作 | モデル物理 |
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
-通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。LocalVTuberStudio系は原寸の部位PNGと連続パラメータを使い、固定枚数の紙芝居へ変換しません。実写2Dテストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写と構図調整済みLive2Dは胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。利用者が追加したLive2Dは、モデルごとに異なる顔位置を誤って切らないよう全身表示から始めます。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
+通常2Dの口パクは実際の音声再生開始後に声量同期し、ミュート中と音量0では口を閉じます。Live2Dも同じ再生条件でモデルの口パラメータを動かし、ライスだけはモデル設定により口パクを無効にしています。LocalVTuberStudio系は原寸の部位PNGと連続パラメータを使い、固定枚数の紙芝居へ変換しません。実写テストは髪・胸・肩・腰の8領域に実行時の局所バネ物理も併用します。利用者が追加済みのPNGパックはそのまま使えます。低頭身2Dは上半身、長身・実写と構図調整済みLive2Dは胸上を初期構図にし、チャット／バーの小型アイコンは首上で表示します。利用者が追加したLive2Dは、モデルごとに異なる顔位置を誤って切らないよう全身表示から始めます。画像追加・差し替えの再現手順は[キャラクター画像の追加・再生成手順](docs/CHARACTER-ASSET-WORKFLOW.md)に固定しています。
 
 ---
 

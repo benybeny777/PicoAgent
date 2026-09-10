@@ -10,7 +10,7 @@ test("キャラ作成は現行4工程だけをPicoAgent設定へ公開する", a
     read("ui/settings.js"),
   ]);
   assert.match(pipeline, /\["isolate", "decompose", "rig2d", "complete"\]/);
-  assert.match(settings, /id: "character-maker", label: "キャラ作成"/);
+  assert.match(settings, /id: "character-maker", label: "キャラ作成（テスト）"/);
   for (const retired of ["mesh/generate.py", "rigging/generate.py", "facepatch", "obs"]) {
     assert.doesNotMatch(pipeline, new RegExp(retired.replace("/", "\\/")));
   }

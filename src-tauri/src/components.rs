@@ -129,7 +129,7 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
             "約0.5GB",
         )),
         "character-maker" => Some((
-            "キャラクター作成",
+            "キャラクター作成（テスト）",
             "Python 3.12、ComfyUI、背景除去・部位分解・局所補完モデルをPicoAgent専用領域へ導入します。CUDA対応NVIDIA GPU専用です。",
             "約77GB（導入後、作業領域は別。空き85GB以上が必要）",
         )),

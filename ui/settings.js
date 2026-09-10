@@ -919,7 +919,7 @@ function quickSettingsGuide(v) {
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
     { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック" },
-    { tab: "character-maker", title: "キャラ作成", summary: "原画からローカル生成" },
+    { tab: "character-maker", title: "キャラ作成（テスト）", summary: "原画からローカル生成するテスト機能" },
     { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
     { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
@@ -2617,10 +2617,10 @@ function buildDownloadedModelsSection() {
 }
 
 function buildCharacterMaker(registerInstalledCharacter) {
-  const maker = section("原画からキャラクターを作成");
+  const maker = section("原画からキャラクターを作成（テスト）");
   maker.append(el("p", {
     className: "settings-intro",
-    textContent: "1枚の原画から、背景除去・部位分解・2.5Dリグ・局所補完をPC内だけで実行します。元画像は上書きしません。",
+    textContent: "テスト機能です。1枚の原画から、背景除去・部位分解・2.5Dリグ・局所補完をPC内だけで実行します。元画像は上書きしません。",
   }));
   const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "PNG / JPEGを選択" });
   const nameInput = el("input", { type: "text", placeholder: "表示名" });
@@ -2760,7 +2760,7 @@ async function render() {
   const panels = createTabs([
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
-    { id: "character-maker", label: "キャラ作成" },
+    { id: "character-maker", label: "キャラ作成（テスト）" },
     { id: "character-register", label: "キャラ登録" },
     { id: "character", label: "キャラ選択" },
     { id: "voice", label: "キャラの音声" },
