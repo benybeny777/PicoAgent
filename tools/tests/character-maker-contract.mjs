@@ -17,12 +17,21 @@ test("キャラ作成は現行4工程だけをPicoAgent設定へ公開する", a
 });
 
 test("管理導入は共通Python一環境と容量・GPU判定を先に行う", async () => {
-  const components = await read("src-tauri/src/components.rs");
+  const [components, settings, style] = await Promise.all([
+    read("src-tauri/src/components.rs"),
+    read("ui/settings.js"),
+    read("ui/settings.css"),
+  ]);
   assert.match(components, /join\("python\/Scripts\/python\.exe"\)/);
   assert.match(components, /85_000_000_000/);
   assert.match(components, /nvidia-smi\.exe/);
   assert.match(components, /約77GB/);
   assert.doesNotMatch(components.toLowerCase(), /tha3/);
+  assert.match(settings, /function createOperationProgress\(/);
+  assert.match(settings, /operationProgress\.update\(progress\)/);
+  assert.match(settings, /経過 \$\{minutes\}分/);
+  assert.match(style, /operation-progress-track\.is-indeterminate/);
+  assert.match(style, /@keyframes operation-progress-slide/);
 });
 
 test("採用モデルだけを固定SHAで管理領域へ取得する", async () => {

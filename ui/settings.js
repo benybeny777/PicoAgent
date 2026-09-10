@@ -965,6 +965,73 @@ function section(title) {
   return el("div", { className: "section" }, [el("h2", { textContent: title })]);
 }
 
+function createOperationProgress(label = "処理の進捗") {
+  const message = el("span", { className: "operation-progress-message" });
+  message.setAttribute("role", "status");
+  message.setAttribute("aria-live", "polite");
+  const elapsed = el("span", { className: "operation-progress-elapsed" });
+  const fill = el("span", { className: "operation-progress-fill" });
+  const track = el("div", { className: "operation-progress-track is-indeterminate" }, [fill]);
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-label", label);
+  const root = el("div", { className: "operation-progress" }, [
+    el("div", { className: "operation-progress-copy" }, [message, elapsed]),
+    track,
+  ]);
+  let startedAt = 0;
+  let elapsedTimer = null;
+
+  function updateElapsed() {
+    if (!startedAt) return;
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    elapsed.textContent = minutes ? `経過 ${minutes}分${String(rest).padStart(2, "0")}秒` : `経過 ${rest}秒`;
+  }
+
+  function start(initialMessage = "処理中…") {
+    if (!startedAt) startedAt = Date.now();
+    if (!elapsedTimer) elapsedTimer = window.setInterval(updateElapsed, 1000);
+    message.textContent = initialMessage;
+    root.classList.add("is-active");
+    track.classList.add("is-indeterminate");
+    track.removeAttribute("aria-valuenow");
+    fill.style.width = "35%";
+    updateElapsed();
+  }
+
+  function update(progress) {
+    if (!root.classList.contains("is-active")) start();
+    if (progress?.message) message.textContent = progress.message;
+    const downloaded = Number(progress?.downloaded) || 0;
+    const total = Number(progress?.total) || 0;
+    if (total > 0) {
+      const percent = Math.max(0, Math.min(100, Math.round(downloaded / total * 100)));
+      track.classList.remove("is-indeterminate");
+      track.setAttribute("aria-valuenow", String(percent));
+      fill.style.width = `${percent}%`;
+    } else {
+      track.classList.add("is-indeterminate");
+      track.removeAttribute("aria-valuenow");
+      fill.style.width = "35%";
+    }
+  }
+
+  function stop(finalMessage = "") {
+    if (elapsedTimer) window.clearInterval(elapsedTimer);
+    elapsedTimer = null;
+    startedAt = 0;
+    root.classList.remove("is-active");
+    track.classList.add("is-indeterminate");
+    track.removeAttribute("aria-valuenow");
+    fill.style.width = "35%";
+    elapsed.textContent = "";
+    if (finalMessage) message.textContent = finalMessage;
+  }
+
+  return { element: root, message, start, update, stop };
+}
+
 function advancedGroup(title, note, children) {
   return el("details", { className: "advanced-group" }, [
     el("summary", { textContent: title }),
@@ -1015,12 +1082,15 @@ function buildComponentManager() {
     el("span", { className: "component-badge", textContent: "基本" }),
   ]);
   const list = el("div", { className: "component-list" }, [el("p", { className: "hint", textContent: "状態を確認中…" })]);
-  const status = el("p", { className: "hint component-manager-status" });
-  status.setAttribute("aria-live", "polite");
-  sec.append(core, list, status);
+  const operationProgress = createOperationProgress("追加機能の処理進捗");
+  const status = operationProgress.message;
+  operationProgress.element.classList.add("component-manager-status");
+  sec.append(core, list, operationProgress.element);
 
   function setBusy(busy) {
     sec.setAttribute("aria-busy", busy ? "true" : "false");
+    if (busy) operationProgress.start(status.textContent || "処理中…");
+    else operationProgress.stop();
     list.querySelectorAll("button").forEach(action => {
       action.disabled = busy || action.dataset.available === "false";
     });
@@ -1165,8 +1235,7 @@ function buildComponentManager() {
   }
 
   replaceSettingsListener("component-progress", "component:progress", progress => {
-    const percent = progress.total > 0 ? ` ${Math.min(100, Math.round(progress.downloaded / progress.total * 100))}%` : "";
-    status.textContent = `${progress.message}${percent}`;
+    operationProgress.update(progress);
   }).catch(error => {
     logApp("warn", "追加機能の進捗を受け取れませんでした", errorDetail(error));
   });

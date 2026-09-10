@@ -560,6 +560,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     ));
     let python_stage = crate::log_paths::bundled_dir(app)
         .join(format!(".installing-python-{}", std::process::id()));
+    cleanup_stale_character_maker_stages(app).await;
     cleanup_dir(app, "古いキャラ作成導入途中フォルダ", &stage).await;
     cleanup_dir(app, "古い共通Python導入途中フォルダ", &python_stage).await;
     tokio::fs::create_dir_all(&cache).await?;
@@ -701,6 +702,44 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         cleanup_dir(app, "共通Python導入途中フォルダ", &python_stage).await;
     }
     result
+}
+
+async fn cleanup_stale_character_maker_stages(app: &AppHandle) {
+    let bundled = crate::log_paths::bundled_dir(app);
+    let Ok(mut entries) = tokio::fs::read_dir(&bundled).await else {
+        return;
+    };
+    let current_pid = std::process::id().to_string();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let stale_pid = [".installing-character-maker-", ".installing-python-"]
+            .iter()
+            .find_map(|prefix| name.strip_prefix(prefix))
+            .filter(|pid| *pid != current_pid)
+            .and_then(|pid| pid.parse::<u32>().ok());
+        if stale_pid.is_some_and(|pid| !process_exists(pid)) {
+            cleanup_dir(app, "終了済みキャラ作成導入途中フォルダ", &entry.path()).await;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn process_exists(pid: u32) -> bool {
+    let filter = format!("PID eq {pid}");
+    let Ok(output) = crate::tools::process::command_sync("tasklist.exe")
+        .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+        .output()
+    else {
+        // 判定不能時は削除しない。
+        return true;
+    };
+    String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\""))
+}
+
+#[cfg(not(windows))]
+fn process_exists(_pid: u32) -> bool {
+    // Windows専用機能だが、別OSで呼ばれても不明なPIDのフォルダは削除しない。
+    true
 }
 
 fn character_maker_assets(app: &AppHandle) -> Result<PathBuf> {

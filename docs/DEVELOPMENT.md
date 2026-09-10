@@ -4,7 +4,7 @@
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
-キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、Python取得キャッシュ、旧版を残さない。
+キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、Python取得キャッシュ、旧版を残さない。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 

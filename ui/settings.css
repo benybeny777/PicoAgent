@@ -1214,6 +1214,21 @@ button.tab:active {
 .component-card.has-update .component-badge,.component-card.has-warning .component-badge,.component-card.is-newer .component-badge { color:var(--warn-ink); }
 .component-version-warning { color:var(--warn-ink) !important; font-weight:650; }
 .component-manager-status { min-height:20px; margin-top:10px; }
+.operation-progress-copy { display:flex; align-items:baseline; justify-content:space-between; gap:12px; min-height:20px; color:var(--muted); font-size:12px; }
+.operation-progress-message { min-width:0; }
+.operation-progress-elapsed { flex:0 0 auto; font-variant-numeric:tabular-nums; }
+.operation-progress-track { position:relative; height:8px; margin-top:6px; overflow:hidden; border-radius:999px; background:rgba(120,128,140,.2); }
+.operation-progress-fill { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg, var(--accent), #ff9bc8); transition:width .25s ease; }
+.operation-progress:not(.is-active) .operation-progress-track,
+.operation-progress:not(.is-active) .operation-progress-elapsed { display:none; }
+.operation-progress-track.is-indeterminate .operation-progress-fill { animation:operation-progress-slide 1.15s ease-in-out infinite; }
+@keyframes operation-progress-slide {
+  from { transform:translateX(-110%); }
+  to { transform:translateX(310%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .operation-progress-track.is-indeterminate .operation-progress-fill { animation-duration:2.4s; }
+}
 .component-card-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
 .component-card-actions .danger { border-color:var(--err-border); background:var(--err-bg); color:var(--err-ink); }
 @media (max-width:760px) {

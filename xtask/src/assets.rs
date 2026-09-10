@@ -1325,6 +1325,13 @@ pub fn build_ui_dist(release: bool, beta: bool, force: bool) -> Result<()> {
     if !src.exists() {
         bail!("ui が見つかりません: {}", src.display());
     }
+    let pixi = src.join("vendor/pixi/pixi.min.js");
+    if !pixi.is_file() {
+        bail!(
+            "PIXI実行ファイルが見つかりません: {}。先に cargo xtask setup pixi を実行してください",
+            pixi.display()
+        );
+    }
     let stats = sync_dir(&src, &dest, &|_| false, force)?;
     // READMEで実表示を検証した8形式の画像を、設定画面の選択カードにも使う。
     // 正本を二重管理せず、配信用生成物へだけまとめてコピーする。

@@ -80,6 +80,7 @@ function beginWindowDrag(event) {
 // Windowsでドラッグ開始が届かないことがある。起動画面と常設上部バーは明示的に渡す。
 bootScreen?.addEventListener("pointerdown", beginWindowDrag);
 topWindowMenu?.addEventListener("pointerdown", event => {
+  if (event.target instanceof Element && event.target.closest("button,input,select,textarea,a,[contenteditable]")) return;
   beginWindowDrag(event);
 });
 petApp?.addEventListener("pointerdown", event => {
