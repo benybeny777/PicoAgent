@@ -19,7 +19,7 @@ import numpy as np
 
 class CompletionTests(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[2]/'temp'
+        root = Path(__file__).resolve().parents[3]/'temp'
         root.mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(dir=root)
         self.addCleanup(self.temporary.cleanup)
@@ -114,7 +114,7 @@ class CompletionOrchestrationTests(unittest.TestCase):
     """GPU推論と素材抽出だけを代替し、署名・入力検査・公開処理は実行する。"""
 
     def setUp(self):
-        root = Path(__file__).resolve().parents[2]/'temp'
+        root = Path(__file__).resolve().parents[3]/'temp'
         root.mkdir(exist_ok=True)
         temporary = tempfile.TemporaryDirectory(dir=root)
         self.addCleanup(temporary.cleanup)

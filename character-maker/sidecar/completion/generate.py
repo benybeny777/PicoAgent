@@ -2,7 +2,6 @@
 import argparse
 import copy
 import hashlib
-import importlib.util
 import importlib.metadata
 from contextlib import contextmanager
 import json
@@ -31,9 +30,7 @@ from regions import eye_edit_mask, measured_head_region
 from hidden_bridge import prepare_hidden, apply_hidden, assert_hidden_sources
 from raw_reuse import open_raw,pin_generated
 
-spec = importlib.util.spec_from_file_location('completion_comfy_client', HERE.parent/'expression/generate.py')
-client = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(client)
+import comfy_client as client
 VERSION = 5
 # 推論や入力準備の意味を変えた場合に上げる。抽出だけの変更ではGPUを再実行しない。
 IMAGE_GENERATION_VERSION = 5

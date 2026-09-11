@@ -18,7 +18,9 @@ import hidden_bridge
 
 class ControllerTests(unittest.TestCase):
     def setUp(self):
-        folder=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/'temp')
+        root=Path(__file__).resolve().parents[3]/'temp'
+        root.mkdir(parents=True,exist_ok=True)
+        folder=tempfile.TemporaryDirectory(dir=root)
         self.addCleanup(folder.cleanup)
         self.root=Path(folder.name)
         self.args=SimpleNamespace(character=self.root,steps=50,seed=777,fast_disk=True,

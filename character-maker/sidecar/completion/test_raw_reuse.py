@@ -18,7 +18,9 @@ def identity(kind):
 
 class ReuseTests(unittest.TestCase):
     def setUp(self):
-        directory=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
+        root=Path(__file__).resolve().parents[3]/'temp'
+        root.mkdir(parents=True,exist_ok=True)
+        directory=tempfile.TemporaryDirectory(dir=root)
         self.addCleanup(directory.cleanup);self.root=Path(directory.name)
     def save(self,kind):
         cache=self.root/kind;cache.mkdir();(cache/'edited.png').write_bytes(b'raw fixture')
