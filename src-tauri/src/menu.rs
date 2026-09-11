@@ -218,6 +218,17 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                     );
                     return;
                 }
+                // 設定ウィンドウはメインと同じ最前面状態で開く（`open_settings_tab`）。
+                // ここで揃えないと、開いている間にメインを通常表示へ戻しても設定側だけが
+                // 最前面のまま居座り、閉じるまで下ろせなくなる。
+                if let Some(settings) = app.get_webview_window("settings") {
+                    if let Err(error) = settings.set_always_on_top(next) {
+                        crate::log_paths::append_app_log(
+                            app,
+                            &format!("設定画面の常に手前を揃えられません: {error}"),
+                        );
+                    }
+                }
                 let mut patch = serde_json::Map::new();
                 patch.insert(
                     "PICOAGENT_ALWAYS_ON_TOP".to_string(),

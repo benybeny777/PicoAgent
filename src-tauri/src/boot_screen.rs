@@ -155,8 +155,13 @@ const LOG_TAIL_LINES: usize = 12;
 const LOG_TAIL_BYTES: u64 = 8 * 1024;
 
 /// 当日の `app.log` の末尾を読む。読めない場合も案内画面自体は必ず出す。
+///
+/// **この画面は利用者がそのまま撮って送る前提のものなので、APIキー等は診断情報の
+/// 書き出しと同じ規則で伏せる。** 設定を読めない状況では伏せられないため、本文を出さない。
 fn recent_log(app: &AppHandle) -> String {
-    let tail = crate::log_paths::read_tail(app, "app.log", LOG_TAIL_LINES, LOG_TAIL_BYTES);
+    let Some(tail) = crate::commands::redacted_log_tail(app, LOG_TAIL_LINES, LOG_TAIL_BYTES) else {
+        return "設定を読み込めないため、ログの内容は表示しません。".to_string();
+    };
     if tail.trim().is_empty() {
         return "まだ記録がありません。".to_string();
     }

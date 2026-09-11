@@ -36,9 +36,9 @@ const LEGACY_AUTO_SUMMARY_BEGIN: &str = "[以前の会話の要約（自動）: 
 fn conversation_token_budget(cfg: &Config) -> usize {
     if cfg.get("PICOAGENT_PROVIDER", "local") == "local" {
         let context = cfg
-            .get("PICOAGENT_LOCAL_CTX", "8192")
+            .get("PICOAGENT_LOCAL_CTX", "32768")
             .parse::<usize>()
-            .unwrap_or(8192);
+            .unwrap_or(32768);
         return (context * 3 / 4).clamp(1_500, 24_000);
     }
     MAX_CONTEXT_TOKENS
@@ -1595,6 +1595,51 @@ pub fn settings_character_rename(
     }
 }
 
+/// ログ本文から伏せるべき秘密値をかき集める。
+///
+/// 保護保存された文字列（`dpapi:v1:...` など）と復号後の実値の両方を集める。ログへ載るのは
+/// 実値の側で、保存形のほうはキー一覧に出るためどちらも取る。環境変数で渡された分も同様。
+/// **診断情報の書き出しと起動失敗の案内画面は同じ `app.log` の末尾を見せるので、伏せ方も
+/// ここ1本へ揃える**（片方だけ伏せると、利用者が画面ごと撮って送るときに漏れる）。
+pub fn collect_secret_values(
+    config: &Config,
+    stored: &Map<String, Value>,
+    schema_keys: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut values = Vec::new();
+    for (key, value) in stored {
+        if !is_secret_setting(schema_keys, key) {
+            continue;
+        }
+        if let Some(raw) = value.as_str().filter(|raw| !raw.trim().is_empty()) {
+            values.push(raw.to_string());
+        }
+        let resolved = config.get(key, "");
+        if !resolved.trim().is_empty() {
+            values.push(resolved);
+        }
+    }
+    for (key, value) in std::env::vars() {
+        if is_secret_setting(schema_keys, &key) && !value.is_empty() {
+            values.push(value);
+        }
+    }
+    values.sort();
+    values.dedup();
+    values
+}
+
+/// 設定に基づいて、ログ末尾から秘密値を伏せる。状態を取れない場合は本文を返さない
+/// （伏せられないまま見せるより、出さないほうが安全）。
+pub fn redacted_log_tail(app: &AppHandle, max_lines: usize, max_bytes: u64) -> Option<String> {
+    let state = app.try_state::<AppState>()?;
+    let stored = state.config.get_all();
+    let schema_keys = secret_keys();
+    let secrets = collect_secret_values(&state.config, &stored, &schema_keys);
+    let tail = crate::log_paths::read_tail(app, "app.log", max_lines, max_bytes);
+    Some(crate::diagnostics::redact_secrets(&tail, &secrets))
+}
+
 /// 不具合の連絡へ添える診断情報を1ファイルへ書き出し、保存先を返す。
 ///
 /// 保存先はログと同じ置き場にする（新しい保存先やダイアログの権限を増やさない）。
@@ -1607,29 +1652,11 @@ pub fn settings_export_diagnostics(
     let dir = crate::log_paths::ensure_log_dir(&app)
         .map_err(|error| format!("保存先を作れませんでした: {error}"))?;
     let now = chrono::Local::now();
-    let path = dir.join(format!("diagnostics-{}.txt", now.format("%Y-%m-%d-%H%M%S")));
+    // ログと同じ保持期間（`log_paths::prune_old_logs`）で消えるよう、日付を `.` 区切りで挟む。
+    let path = dir.join(format!("diagnostics.{}.txt", now.format("%Y-%m-%d.%H%M%S")));
     let config = state.config.get_all();
     let schema_keys = secret_keys();
-    let mut secret_values = Vec::new();
-    for (key, value) in &config {
-        if !is_secret_setting(&schema_keys, key) {
-            continue;
-        }
-        if let Some(raw) = value.as_str().filter(|raw| !raw.trim().is_empty()) {
-            secret_values.push(raw.to_string());
-        }
-        let resolved = state.config.get(key, "");
-        if !resolved.trim().is_empty() {
-            secret_values.push(resolved);
-        }
-    }
-    for (key, value) in std::env::vars() {
-        if is_secret_setting(&schema_keys, &key) && !value.is_empty() {
-            secret_values.push(value);
-        }
-    }
-    secret_values.sort();
-    secret_values.dedup();
+    let secret_values = collect_secret_values(&state.config, &config, &schema_keys);
     let log_tail = crate::log_paths::read_tail(
         &app,
         "app.log",
@@ -3025,7 +3052,7 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_MODEL", "")
         || changed_text("PICOAGENT_MODEL_URL", "")
         || changed_text("PICOAGENT_LOCAL_PORT", "11435")
-        || changed_text("PICOAGENT_LOCAL_CTX", "8192")
+        || changed_text("PICOAGENT_LOCAL_CTX", "32768")
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
         || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");

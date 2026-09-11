@@ -41,7 +41,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "LFM2.5-1.2B-JP-202606-Q4_K_M-8c74801f.gguf",
         size_bytes: 730_894_624,
         sha256: "23d4d4060cb06463563f6e8644bbbc7d1cb0bfe4cf21d5edf3ccc6f515fd44bb",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
         download_size: "約0.73GB",
@@ -57,7 +57,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "LFM2.5-2.6B-QAD-Q4_0-84022ce7.gguf",
         size_bytes: 1_593_894_944,
         sha256: "a247afd6414918eac8e520a9e6137dc271235461ecbe1180462221d5b8d40b03",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 8,
         download_size: "約1.59GB",
@@ -73,7 +73,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gemma-4-E2B-it-Q4_K_M-0314792d.gguf",
         size_bytes: 3_106_738_272,
         sha256: "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
         download_size: "約3.1GB",
@@ -89,7 +89,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gemma-4-E4B-it-Q4_K_M-bfc15c38.gguf",
         size_bytes: 4_977_171_584,
         sha256: "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 16,
         download_size: "約5.0GB",
@@ -105,7 +105,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gemma-4-12b-it-Q4_K_M-fc034cff.gguf",
         size_bytes: 7_121_861_440,
         sha256: "0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42",
-        ctx: "16384",
+        ctx: "32768",
         recommended_vram_gb: 8,
         recommended_ram_gb: 24,
         download_size: "約7.1GB",
@@ -121,7 +121,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "Qwen3.5-4B-Q4_K_M-e87f1764.gguf",
         size_bytes: 2_740_937_888,
         sha256: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.7GB",
@@ -137,7 +137,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "Qwen3.5-9B-Q4_K_M-3885219b.gguf",
         size_bytes: 5_680_522_464,
         sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
         download_size: "約5.7GB",
@@ -153,7 +153,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "gpt-oss-20b-MXFP4-ef9b12f2.gguf",
         size_bytes: 12_109_566_624,
         sha256: "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
-        ctx: "16384",
+        ctx: "32768",
         recommended_vram_gb: 16,
         recommended_ram_gb: 32,
         download_size: "約12.1GB",
@@ -169,7 +169,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "Phi-4-mini-instruct-Q4_K_M-78eb92a4.gguf",
         size_bytes: 2_491_874_272,
         sha256: "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 4,
         recommended_ram_gb: 12,
         download_size: "約2.5GB",
@@ -185,7 +185,7 @@ pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
         file_name: "llm-jp-4-8b-thinking-Q4_K_M-2cc04f0c.gguf",
         size_bytes: 5_304_882_240,
         sha256: "b8a1b3ef962d95dfaa02c241e0d2376e028aaddcda83191cc232e95ed2b14ae8",
-        ctx: "8192",
+        ctx: "32768",
         recommended_vram_gb: 6,
         recommended_ram_gb: 16,
         download_size: "約5.3GB",
@@ -339,7 +339,9 @@ fn normalize_for_local(messages: &[Message]) -> Vec<Message> {
 }
 
 pub fn port(cfg: &Config) -> u16 {
-    cfg.get("PICOAGENT_LOCAL_PORT", "11435").parse().unwrap_or(11435)
+    cfg.get("PICOAGENT_LOCAL_PORT", "11435")
+        .parse()
+        .unwrap_or(11435)
 }
 fn base_url(cfg: &Config) -> String {
     format!("http://127.0.0.1:{}/v1", port(cfg))
@@ -367,8 +369,13 @@ impl Provider for Local {
                 "text",
                 DEFAULT_LOCAL_MODEL_URL,
             ),
-            Field::new("PICOAGENT_LOCAL_PORT", "ローカルエンジンのポート", "text", "11435"),
-            Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "8192"),
+            Field::new(
+                "PICOAGENT_LOCAL_PORT",
+                "ローカルエンジンのポート",
+                "text",
+                "11435",
+            ),
+            Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "32768"),
             Field::new(
                 "PICOAGENT_LOCAL_NGL",
                 "GPU へオフロードするレイヤ数（999=全レイヤ優先 / 0=CPU 固定）",
@@ -434,7 +441,12 @@ impl Provider for Local {
             .timeout(std::time::Duration::from_secs(2))
             .build()
         {
-            Ok(c) => c.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false),
+            Ok(c) => c
+                .get(&url)
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false),
             Err(_) => false,
         }
     }
@@ -470,7 +482,15 @@ impl Provider for Local {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("ローカルAIエンジン", "/chat/completions", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error(
+                    "ローカルAIエンジン",
+                    "/chat/completions",
+                    status,
+                    &text
+                )
+            );
         }
         let data: Value = res.json().await?;
         let message = data
@@ -500,7 +520,8 @@ impl Provider for Local {
         let normalized = normalize_for_local(messages);
         let wire = to_wire(&normalized);
         let make_body = |with_tools: bool| {
-            let mut body = json!({ "model": model, "messages": wire, "temperature": 0.6, "stream": true });
+            let mut body =
+                json!({ "model": model, "messages": wire, "temperature": 0.6, "stream": true });
             if with_tools && !tools.is_empty() {
                 body["tools"] = json!(tools);
             }
@@ -539,6 +560,24 @@ mod tests {
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 全プリセットと設定画面のコンテキスト既定は一致する() {
+        use super::{Local, Provider};
+        let field = Local
+            .config_schema()
+            .into_iter()
+            .find(|field| field.key == "PICOAGENT_LOCAL_CTX")
+            .expect("コンテキスト長は設定画面で変更できる");
+        assert_eq!(field.placeholder, "32768");
+        for preset in LOCAL_MODEL_PRESETS {
+            assert_eq!(
+                preset.ctx, field.placeholder,
+                "{}のコンテキスト長が既定と違う",
+                preset.id
+            );
+        }
+    }
 
     #[test]
     fn 追加モデルは現行の量子化ggufだけを公開する() {
@@ -582,14 +621,12 @@ mod tests {
             assert_eq!(preset.sha256.len(), 64);
             assert!(!preset.japanese_note.is_empty());
             let file_name = preset.url.rsplit('/').next().unwrap_or("");
-            let quantized = ["-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-"]
-                .iter()
-                .any(|marker| file_name.contains(marker));
-            assert!(
-                quantized,
-                "量子化形式が明示されていません: {}",
-                preset.url
-            );
+            let quantized = [
+                "-Q2_", "-Q3_", "-Q4_", "-Q5_", "-Q6_", "-Q8_", "-IQ", "-MXFP", "-NVFP", "-UD-",
+            ]
+            .iter()
+            .any(|marker| file_name.contains(marker));
+            assert!(quantized, "量子化形式が明示されていません: {}", preset.url);
         }
     }
 

@@ -26,7 +26,8 @@
 | 旧名ローカルモデルの照合表示 | 現行固定サイズ・SHA-256に合う旧保存名GGUFを隔離状態で用意し、起動画面の「ローカルモデルを確認中」表示を確認する |
 | Linuxの専用GPU経路 | 固定llama.cpp版に対応するLinux CUDA／ROCm資産を独自ビルド・配布し、対応実GPUで起動とGPU利用を確認する。現状のUbuntu版はVulkan→CPU |
 | Ubuntu実Wayland | Ubuntu 24.04 LTS x64の実Wayland環境で、画面共有許可、画面取得、入力拒否時の理由付きエラーを確認する |
-| macOSの`command_exists`のPATH解決不一致 | `src-tauri/src/components.rs`の`command_exists()`（LibreOffice／pandoc等の検出）は、`src-tauri/src/aivis.rs`で実際に見つかったのと同じ不具合パターン（`sh -lc "command -v ..."`はログインシェルのPATH再構成で見つかるのに、GUIアプリが継承する実際のPATHには無く、直接spawnすると`No such file or directory`になる）を抱えている可能性がある。PR #186ではAivis側だけ`resolve_executable()`へ修正し、components.rs側は未確認・未修正。LibreOffice連携またはOSSツール群を実機（GUI起動）で使う作業のときに確認・要修正 |
+| 配布Repo GitHub Pagesの自動再ビルド | PR #1（macOS v1.0.4のLPリンク追加、2026-09-02マージ）後、`main`への通常pushでも`POST /pages/builds`の手動トリガーでも新しいPages deploymentが発生せず、公開LPが2026-08-28時点のビルドのまま更新されない状態を確認した（PR #186）。原因はGitHub側の設定かサービス起因の可能性があり、このリポジトリのAPI権限では特定・解消できなかった。配布アカウント管理者がPages設定を直接確認するか、時間を置いて再確認する |
+| macOSのスキル外部CLIのPATH解決不一致 | 追加機能の導入判定（`components.rs`）とAivisの分割書庫展開は共通の`tools::process::resolve_executable()`へ揃えたが、**スキルが実際に起動する経路は未対応**。`tools::resolve_cli_path()`は明示設定にも同梱にも無い場合`"pandoc"`のような素の名前を返し、`ms_office` / `pdf_tools` / `document_convert` / `whisper_transcribe` / `doc_search`はそれをそのままspawnするため、GUI起動のmacOSではHomebrew導入分を掴めない可能性がある。素の名前を絶対パスへ変えると`image_tools`の`if resolved != "magick"`（ImageMagick v6の`convert`へ落とす分岐）と`document_convert`の名前比較が意味を失うので、**解決結果の扱いを決めてから**着手する。macOS実機でLibreOffice連携またはOSSツール群を使う作業のときに確認・修正 |
 | macOS Intel版 | 現在は配布対象外。`xtask/src/bundled.rs`が同梱エンジンの資産をxtask自身のホストarch（`cfg!(target_arch)`）で選ぶため、Apple Silicon機から`--target x86_64-apple-darwin`で作るとarm64版エンジンが入ったx64アプリになり、ローカルAIが起動しない。対象へ加えるには、実機のIntel Macでビルドするか、`bundled.rs`をビルド対象archへ追従させる（xtaskへ対象archを渡し、資産選択・SHA-256照合・配置先をすべてその値で行う）。どちらを採るか決めてから着手する |
 | macOS版の署名・公証 | Apple Developer Programの証明書と`notarytool`を用意し、署名・公証を通してから`distribution/release.json`の`platforms`へ`macos`を追加し、`signing.macosReady`を判定する。未署名アルファの間はGatekeeperの回避手順を取得ページで案内する |
 | 高精細キャラの分離取得 | アルファ版の試用結果を踏まえ、画質を落とさず配布容量を分離する設計を決める |
@@ -96,3 +97,7 @@ VRM対応は知人からの将来要望としてこの凍結範囲の外へ置�
 | `ui/renderer.js` | 責務が複数あり分割候補 | PR #168の統合後、キャラクター描画・リップシンク、通知・目覚まし、会話入力の状態所有者とイベント境界を確認する |
 | `src-tauri/src/commands.rs` | Tauri commandの入口は集約する価値があるが、業務処理まで同居している箇所は分割候補 | PR #168の統合後、設定、キャラクター、追加機能、会話についてcommandを薄い委譲にできる責務だけ移す |
 | `xtask/src/assets.rs` | キャラクター同期、UI配信ビルド、管理プロセス回収は副作用と検証が異なるため分割候補 | 共有する配布パス判定を複製せず、各処理を独立テストできる境界を決めてから着手する |
+
+## 通常2D制作正本の既知の画素指摘
+
+`cargo xtask character-quality` の対象となる旧形式の制作正本では、実写試作の口閉じ差分なし1件が残る。むぎは独自リグへ移行し旧制作正本を廃止したため対象外。実行中の独自リグの画質とは別の検査である。対象素材を再制作するときに原画へ局所差分を合成し、厳格検査と実表示比較を行ってからベースラインを削減する。新しい指摘をベースラインへ追加して回避しない。同じ指摘内の数値悪化は現在のキー照合では検出しないため、再制作時は `--strict` を必須とする。

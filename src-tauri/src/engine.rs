@@ -588,6 +588,7 @@ async fn ensure_local_model_selection(app: &AppHandle) -> anyhow::Result<()> {
             Value::String(preset.id.to_string()),
         );
     }
+    // 保存済み値と環境変数を優先する。旧既定値でも手動指定と区別できないため変更しない。
     if !state.config.has_value("PICOAGENT_LOCAL_CTX") {
         patch.insert(
             "PICOAGENT_LOCAL_CTX".to_string(),
@@ -631,7 +632,7 @@ fn spawn_server(
     ensure_executable(server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
-    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "8192");
+    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "32768");
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
     let ngl = &candidate.ngl;

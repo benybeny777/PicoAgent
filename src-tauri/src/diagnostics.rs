@@ -28,7 +28,9 @@ pub struct Report<'a> {
     pub secret_values: &'a [String],
 }
 
-fn redact_secrets(text: &str, secret_values: &[String]) -> String {
+/// ログ本文から秘密値を伏せる。診断情報の書き出しと起動失敗の案内画面が共用する
+/// （同じ `app.log` の末尾を見せるので、伏せ方を分けない）。
+pub fn redact_secrets(text: &str, secret_values: &[String]) -> String {
     let mut redacted = text.to_string();
     let mut values: Vec<&String> = secret_values
         .iter()
