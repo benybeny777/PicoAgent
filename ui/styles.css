@@ -1151,3 +1151,16 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 }
 [data-layout="widget"] .online { right:18px; bottom:238px; }
 [data-layout="widget"] .relationship-button { right:42px; bottom:232px; width:26px; height:26px; }
+
+/* メッシュの正本顔座標で静止アイコンを切り出し、原画上端の余白を除く。 */
+[data-layout="chat"] .character[data-mesh-icon-framing="true"] .character-view > img,
+[data-layout="bar"] .character[data-mesh-icon-framing="true"] .character-view > img {
+  inset:auto; left:var(--mesh-icon-left); top:var(--mesh-icon-top);
+  width:var(--mesh-icon-width); height:var(--mesh-icon-height);
+  object-fit:fill; transform:none;
+}
+/* 小型アイコンの座標基準は保存ズームではなく丸枠そのものとする。 */
+[data-layout="chat"] .character[data-render-kind="2d"] .character-view,
+[data-layout="bar"] .character[data-render-kind="2d"] .character-view {
+  inset:0; width:100%; height:100%; transform:none;
+}

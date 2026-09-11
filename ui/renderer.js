@@ -1181,7 +1181,9 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
-  animations = variant?.animations || manifest.animations || {};
+  // 単独メッシュも小型表示・省モーションでは既存プレビューへ退避する。
+  animations = variant?.animations || manifest.animations || (manifest.meshRig
+    ? { idle: { framePaths: ["preview.png"], frames: 1, fps: 1 } } : {});
   runtimeLayers = variant?.runtimeLayers || manifest.runtimeLayers || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
   activeMeshRigConfig = variant?.meshRig || manifest.meshRig || null;
@@ -1221,7 +1223,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
         setStatus("高品質リグを読み込めないので差分絵表示で続けるね");
       }
     }
-    if (!meshRigController) await probeRigLayers(); // layers 素材があればリップシンク対応
+    await probeRigLayers(); // メッシュ休止時に使える差分絵も別に判定する
   }
   applyCharacterFraming();
   frame = 0;
@@ -1309,7 +1311,7 @@ function setAnimation(name, force = false) {
   character.dataset.motion = requestedMotion;
   // layers を持つキャラは待機・返答状態を常時リグ描画にする。
   // 口パクは Audio の playing 後にだけ attachLipSync() から開始する。
-  if (rigAvailable && (animationName === "idle" || animationName === "talking")) {
+  if (rigLayersAvailable && (animationName === "idle" || animationName === "talking")) {
     startRig();
     return;
   }
@@ -1368,7 +1370,8 @@ wakeAnimationLoop();
 // runtimeLayers（未指定の追加パックはlayers/*.png）は「同一ポーズの全身差分絵」。
 // 読み上げ中はフレームアニメの代わりに差分絵を切り替え（PNGTuber方式）、
 // WebAudio の振幅解析で実際の声量に合わせて口を動かし、ランダムにまばたきする。
-let rigAvailable = false; // 選択中キャラに layers 素材が揃っているか
+let rigAvailable = false; // 選択中キャラがメッシュまたは差分絵のリグを持つか
+let rigLayersAvailable = false; // メッシュ休止時に表示できる差分絵が揃っているか
 let rigGazeAvailable = false; // 左右視線レイヤーも使えるか
 let rigActive = false;
 let rigFace = "";          // 表示中の差分名（無駄な src 再設定を避ける）
@@ -1439,8 +1442,9 @@ async function probeRigLayers() {
   });
   const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
   const results = await Promise.all(names.map(probe));
-  rigAvailable = results.every(Boolean);
-  if (rigAvailable) {
+  rigLayersAvailable = results.every(Boolean);
+  rigAvailable = rigLayersAvailable || Boolean(meshRigController);
+  if (rigLayersAvailable) {
     const gazeResults = await Promise.all(["gaze_left", "gaze_right"].map(probe));
     rigGazeAvailable = gazeResults.every(Boolean);
   }
@@ -1745,6 +1749,7 @@ function setMeshRigVisible(visible) {
 
 function destroyMeshRig() {
   meshRigActive = false;
+  delete character.dataset.meshIconFraming;
   meshRigController?.destroy();
   meshRigController = null;
   meshRigCanvas = null;
@@ -1782,6 +1787,18 @@ async function prepareMeshRig(cfg) {
     height: LIVE2D_RENDER_HEIGHT,
   });
   meshRigController.setActive(false);
+  const face = meshRigController.rig.anchors?.face;
+  if (face) {
+    // 原画と同じ座標の顔領域を使い、余白が異なる全身絵も首上アイコンへ収める。
+    const side = Math.max((face.x1 - face.x0) * 1.5, (face.y1 - face.y0) * 1.6);
+    const [sourceWidth, sourceHeight] = meshRigController.rig.canvas;
+    const x = (face.x0 + face.x1 - side) / 2;
+    const y = (face.y0 + face.y1 - side) / 2 - side * 0.08;
+    for (const [key, value] of Object.entries({ width: sourceWidth, height: sourceHeight, left: -x, top: -y })) {
+      character.style.setProperty("--mesh-icon-" + key, String(value / side * 100) + "%");
+    }
+    character.dataset.meshIconFraming = "true";
+  }
   applyMeshRigFraming();
 }
 

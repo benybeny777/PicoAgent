@@ -156,3 +156,5 @@ cargo xtask character-quality --update-baseline           # 解消した指摘�
 - `cargo xtask character-quality` の不合格を、素材を直さずベースラインへ足して回避しない
 
 Live2Dの小型アイコンは`live2d.iconFraming`でモデルごとの首上位置を指定する。`layoutFraming[形式]`があれば優先し、未指定の座標は基底設定を引き継ぐ。メッシュ配信の胸上切り出しはPIXI内部で行い、`native-full`は従来の全身表示を維持する。canvasは縦横比を保ち、原画と描画バッファをDPIで換算した上限を超えない。
+
+メッシュが休止するチャット／バーでは、リグの有無と差分画像の有無を分けて判定する。差分画像がなければ`animations.idle`へ退避し、未指定なら既存`preview.png`を使う。原画が`source.png`のパックはidleへ明示する。LVSの顔座標がある場合は同じ原画座標で首上アイコンを切り出し、保存ズームを小型の丸枠へ重ねない。

@@ -130,3 +130,17 @@ test("native-fullのメッシュには内部の胸上倍率も適用しない", 
   runInNewContext(source + "applyMeshRigFraming();", { currentLayout: "stream", character: { dataset: { sourceFraming: "native-full" } }, meshRigController: { setFraming: v => { scale = v; } } });
   assert.equal(scale, 1);
 });
+
+test("メッシュ休止時に差分絵がなければ定義済み静止フレームへ退避する", () => {
+  const source = renderer.slice(renderer.indexOf("function setAnimation("), renderer.indexOf("function frameDuration("));
+  const calls = [];
+  const context = { animations: { idle: { framePaths: ["source.png"] } }, animationName: "idle", frame: 0,
+    lastFrameAt: 0, performance: { now: () => 0 }, character: { dataset: {} }, live2dActive: false,
+    meshRigController: {}, meshRigCanRender: () => false, rigAvailable: true, rigLayersAvailable: false,
+    wakeAnimationLoop() {}, setMeshRigVisible: v => calls.push(["mesh",v]), preloadAnimation() {},
+    startRig: () => { throw new Error("存在しない差分絵を表示してはいけない"); }, stopRig() {},
+    displayPreloadedFrame: (name,index) => calls.push([name,index]),
+  };
+  runInNewContext(source + 'setAnimation("idle", true);', context);
+  assert.deepEqual(calls, [["mesh",false],["idle",0]]);
+});
