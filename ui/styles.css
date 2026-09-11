@@ -1162,3 +1162,10 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="bar"] .character[data-render-kind="2d"] .character-view {
   inset:0; width:100%; height:100%; transform:none;
 }
+/* 狭い形式でもメニュー文字を縦折り返しせず、操作群を32pxの帯へ収める。 */
+.top-window-menu > button { flex:0 0 auto; white-space:nowrap; }
+@media (max-width:480px) {
+  .top-window-menu-brand { display:none; }
+  .top-window-menu > button { padding:0 6px; }
+  .window-caption-controls > button { width:34px; min-width:34px; }
+}
