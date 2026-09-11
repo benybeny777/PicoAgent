@@ -5,12 +5,12 @@
   "bodyProportion": "standard",
   "sourceFraming": "native-full",
   "defaultFraming": {
-    "zoom": 1.0,
+    "zoom": 1,
     "x": 0,
     "y": 0
   },
   "streamFraming": {
-    "zoom": 1.0,
+    "zoom": 1,
     "x": 0,
     "y": 0
   },
@@ -26,5 +26,14 @@
     "rig": "mesh-rig/rig.json",
     "assetVersion": "541255e8034498f"
   },
-  "assetVersion": "541255e8034498f"
+  "assetVersion": "541255e8034498f",
+  "animations": {
+    "idle": {
+      "framePaths": [
+        "source.png"
+      ],
+      "fps": 1,
+      "frames": 1
+    }
+  }
 }

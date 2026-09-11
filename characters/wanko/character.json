@@ -53,6 +53,10 @@
     },
     "scale": 1.2,
     "offsetY": 0,
+    "iconFraming": {
+      "scale": 3.0,
+      "offsetY": 190
+    },
     "lipSyncParam": "PARAM_MOUTH_OPEN_Y"
   }
 }

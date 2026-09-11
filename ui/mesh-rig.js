@@ -429,13 +429,15 @@
   }
 
   class MeshRigController {
-    constructor(app, canvas, rig, planes, lvsFace = null, blush = null) {
+    constructor(app, canvas, rig, planes, lvsFace = null, blush = null, textureFit = 1) {
       this.app = app;
       this.canvas = canvas;
       this.rig = rig;
       this.planes = planes;
       this.lvsFace = lvsFace;
       this.blush = blush;
+      this.textureFit = textureFit;
+      this.framingScale = 1;
       this.active = false;
       this.reducedMotion = false;
       this.mouth = 0;
@@ -464,8 +466,27 @@
       this.startedAt = performance.now();
       this.lastAt = 0;
       this.tick = this.tick.bind(this);
+      this.refreshSourceLimit = this.refreshSourceLimit.bind(this);
+      root.addEventListener("resize", this.refreshSourceLimit);
+      this.refreshSourceLimit();
       this.app.ticker.add(this.tick);
       this.app.ticker.stop();
+    }
+
+    setFraming(scale = 1) {
+      this.framingScale = clamp(scale, 1, 4);
+      this.app.stage.pivot.set(this.app.screen.width / 2, 0);
+      this.app.stage.position.set(this.app.screen.width / 2, 0);
+      this.app.stage.scale.set(this.framingScale);
+      this.refreshSourceLimit();
+    }
+
+    refreshSourceLimit() {
+      const dpr = Math.max(1, root.devicePixelRatio || 1);
+      const visibleSourceHeight = this.app.screen.height / this.textureFit / this.framingScale;
+      // 原画と現在の描画バッファの両方を超えない表示寸法へ制限する。
+      const bufferHeight = this.app.screen.height * this.app.renderer.resolution;
+      this.canvas.style.setProperty("--mesh-source-css-height", `${Math.min(visibleSourceHeight, bufferHeight) / dpr}px`);
     }
 
     setActive(active) {
@@ -947,6 +968,7 @@
     }
 
     destroy() {
+      root.removeEventListener("resize", this.refreshSourceLimit);
       this.app.ticker.remove(this.tick);
       this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       if (this.lvsFace) {
@@ -1198,7 +1220,7 @@
     const blush = createBlushOverlay(app, rig, originX, originY, textureFit);
     canvas.style.background = "transparent";
     canvas.dataset.meshRig = "ready";
-    return new MeshRigController(app, canvas, rig, planes, lvs?.face || null, blush);
+    return new MeshRigController(app, canvas, rig, planes, lvs?.face || null, blush, textureFit);
   }
 
   root.PicoMeshRig = Object.freeze({ create });

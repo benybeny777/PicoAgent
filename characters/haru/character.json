@@ -33,7 +33,11 @@
       "sad": "Shake"
     },
     "scale": 2.1,
-    "offsetY": 315
+    "offsetY": 315,
+    "iconFraming": {
+      "scale": 3.4,
+      "offsetY": 630
+    }
   },
   "boot": {
     "sleeping": "preview.jpg"
