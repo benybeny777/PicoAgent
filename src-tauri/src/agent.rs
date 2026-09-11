@@ -3,7 +3,7 @@
 // 機能: 並列ツール実行・指数バックオフリトライ・ストリーミング応答・分散トレーシング。
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::Timelike;
 use tauri::Manager;
@@ -286,8 +286,45 @@ pub(crate) fn looks_like_private_explanation(answer: &str) -> bool {
     meta_groups >= 3 || prompt_dump
 }
 
+/// いま画面・音声・履歴へ出してはいけない文脈（選択中キャラクターの人格 system プロンプト）。
+///
+/// 公開検査は以前、**呼び出し側が渡した文脈だけ**を照合元にしていた。渡し元は経路ごとに
+/// 違い（会話は `messages` の system、自発雑談は一時 `convo` の system、マルチAIは
+/// `stable_persona_prompt`）、新しい経路が渡し忘れる・空を渡す・古い人格を渡すたびに、
+/// 検査は何も照合できないまま素通りし、人格設定がフキダシと履歴へ出ていた。
+/// 「人格を組み立てた場所」で1度だけ登録し、検査は常にここも見る。これで呼び出し側の
+/// 渡し方に関係なく、いまの人格が公開されることはない。
+static PRIVATE_CONTEXT: Mutex<String> = Mutex::new(String::new());
+
+/// 人格 system プロンプトを組み立てた時点で登録する（`agent::prompt::compose` から呼ぶ）。
+pub(crate) fn remember_private_context(prompt: &str) {
+    let mut current = PRIVATE_CONTEXT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *current != prompt {
+        current.clear();
+        current.push_str(prompt);
+    }
+}
+
+/// 登録済み文脈はプロセス内で共有するため、触るテスト同士を直列化する。
+#[cfg(test)]
+pub(crate) static PRIVATE_CONTEXT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// 登録済みの非公開文脈。まだ人格を組み立てていなければ空。
+fn remembered_private_context() -> String {
+    PRIVATE_CONTEXT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
 /// 画面・音声・履歴へ出す直前の唯一の公開検査。
 /// 内部文脈を部分削除した残骸は返さず、汚染した回答全体を破棄する。
+///
+/// `private_context` はその経路が実際にモデルへ渡した文脈。登録済みの人格
+/// （`remember_private_context`）とあわせて照合するため、呼び出し側が空や古い文脈を
+/// 渡しても、いまの人格設定は必ず検出される。
 pub(crate) fn guard_public_answer(
     answer: String,
     private_context: &str,
@@ -296,7 +333,11 @@ pub(crate) fn guard_public_answer(
     if looks_like_private_explanation(&without_material) {
         return Err("内部設定を説明する文体を検出");
     }
-    let cleaned = remove_prompt_leak(without_material.clone(), private_context);
+    let context = match remembered_private_context() {
+        remembered if remembered.is_empty() => private_context.to_string(),
+        remembered => format!("{private_context}\n{remembered}"),
+    };
+    let cleaned = remove_prompt_leak(without_material.clone(), &context);
     if cleaned != without_material {
         return Err("非公開文脈との一致を検出");
     }
@@ -814,6 +855,8 @@ async fn chat_with_retry(
             }
         }
         let Some(result) = cancel_while(
+            // 非公開利用: 生チャンクは `buffer_only` へ溜めるだけで公開しない。
+            // 画面・音声・履歴へ出るのは `make_safe_final_answer` を通した本文だけ。
             provider.chat_stream(cfg, model, messages, schemas, on_chunk.clone()),
             cancel,
         )
@@ -1515,8 +1558,45 @@ mod tests {
         assert_eq!(system_prompt_of(&messages[1..2]), "");
     }
 
+    /// 再発してきた不具合そのものの回帰テスト。
+    ///
+    /// 公開検査は経路ごとに「モデルへ渡した文脈」を受け取る。新しい経路が渡し忘れる・
+    /// 空を渡す・古い人格を渡す、のどれか1つでも起きると、以前は照合元が無いまま素通りし、
+    /// 人格設定がフキダシと履歴へ出ていた。人格を組み立てた時点で登録しておけば、
+    /// 呼び出し側が何を渡そうと現在の人格は公開されない。
+    #[test]
+    fn 呼び出し側が文脈を渡し忘れても現在の人格は公開しない() {
+        let _lock = super::PRIVATE_CONTEXT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        super::remember_private_context(
+            "選択中キャラクターの人格設定:\n名前: むぎ\n性格: 明るく観察上手な小さな作業相棒",
+        );
+
+        // 文脈を渡し忘れた経路（空文字）でも、人格設定の復唱は公開しない。
+        let leaked =
+            "名前: むぎ\n性格: 明るく観察上手な小さな作業相棒\nこんにちは、今日はなにする？";
+        assert!(guard_public_answer(leaked.to_string(), "").is_err());
+
+        // 整形し直した復唱も同じ扱い（`- 名前：むぎ` のような形）。
+        let reformatted = "- 名前：むぎ\nこんにちは、今日はなにする？";
+        assert!(guard_public_answer(reformatted.to_string(), "").is_err());
+
+        // 普通の返答は落とさない。
+        assert_eq!(
+            guard_public_answer("こんにちは、今日はなにする？".to_string(), "").unwrap(),
+            "こんにちは、今日はなにする？"
+        );
+
+        super::remember_private_context("");
+    }
+
     #[test]
     fn 設定の言い換え説明は部分表示せず回答全体を拒否する() {
+        let _lock = super::PRIVATE_CONTEXT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        super::remember_private_context("");
         let leaked = "こんにちは。ユーザーからの挨拶に対してツンデレな態度で応答する。一貫してキャラクター設定を維持する。";
         assert!(guard_public_answer(leaked.to_string(), "名前: りん").is_err());
         assert_eq!(
@@ -1645,6 +1725,72 @@ mod tests {
         assert_eq!(
             simple_greeting_answer("おはよう", 8, "ふ、ふん。来たのね。").as_deref(),
             Some("おはよう！ふ、ふん。来たのね。")
+        );
+    }
+}
+
+/// 設計ガード: モデルの返答が、公開検査を通らずに利用者へ届く経路を作っていないか検査する。
+///
+/// 「人格設定がフキダシへ出る」不具合は、検査の実装ではなく**経路の増え方**で再発してきた。
+/// 新しい機能がプロバイダを直接呼び、その戻り値をそのまま画面・音声・履歴へ渡すたびに、
+/// 同じ不具合が別の入口から戻る。人のレビューに頼らず、呼び出し位置で機械的に落とす。
+#[cfg(test)]
+mod guard {
+    use crate::guard_scan;
+
+    /// プロバイダへ問い合わせる呼び出しの綴り。
+    const CHAT_CALLS: [&str; 3] = [".chat(", ".chat_stream(", ".chat_with_options("];
+
+    /// 公開検査の入口。どれか1つを通っていれば、その本文は検査済みとして扱う。
+    const PUBLIC_GUARDS: [&str; 3] = [
+        "guard_public_answer",
+        "safe_public_answer_or_fallback",
+        "make_safe_final_answer",
+    ];
+
+    /// 検査を通さないと宣言する印。画面・音声・履歴の本文にならない用途にだけ付ける。
+    const PRIVATE_USE: &str = "// 非公開利用:";
+
+    /// 呼び出しから何行先までに公開検査があれば「通している」と見なすか。
+    const GUARD_WINDOW: usize = 40;
+
+    #[test]
+    fn モデルの返答は公開検査を通してから利用者へ渡す() {
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            // プロバイダコネクタ自身は `chat` の実装元なので対象外。
+            if source.path.starts_with("src-tauri/src/providers") {
+                continue;
+            }
+            let lines: Vec<&str> = source.body().lines().collect();
+            for (index, line) in lines.iter().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") || !CHAT_CALLS.iter().any(|call| line.contains(call)) {
+                    continue;
+                }
+                // 直前の数行に「非公開利用」の宣言があれば、その用途として認める。
+                let declared = lines[index.saturating_sub(3)..index]
+                    .iter()
+                    .any(|above| above.trim_start().starts_with(PRIVATE_USE));
+                if declared {
+                    continue;
+                }
+                let window = &lines[index..lines.len().min(index + GUARD_WINDOW)];
+                if window
+                    .iter()
+                    .any(|near| PUBLIC_GUARDS.iter().any(|guard| near.contains(guard)))
+                {
+                    continue;
+                }
+                violations.push(format!("{}:{}", source.path.display(), index + 1));
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "モデルの返答を公開検査なしで使っています。`agent::guard_public_answer()` \
+             （または `safe_public_answer_or_fallback`）を通してください。画面・音声・履歴の\
+             本文にならない用途なら、呼び出しの直前へ `{PRIVATE_USE} 理由` を書いてください:\n{}",
+            violations.join("\n")
         );
     }
 }

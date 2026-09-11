@@ -339,6 +339,7 @@ async fn maybe_summarize_context(
         Message::new("user", &history_text),
     ];
 
+    // 非公開利用: 要約は system メッセージの中へ入れ直すだけで、利用者へ見せる本文にはならない。
     let Ok(summary_msg) = provider.chat(cfg, model, &summary_msgs, &[]).await else {
         return convo;
     };
@@ -2155,6 +2156,11 @@ fn safe_wake_message(content: &str, prompt: &str) -> Option<String> {
     crate::agent::guard_public_answer(content.trim().to_string(), prompt).ok()
 }
 
+/// 起こし文は `agent::run` を通らない。表示・読み上げへ渡す前に公開検査を通す。
+fn guard_public_answer_for_wake(content: &str, convo: &[Message]) -> Option<String> {
+    safe_wake_message(content, &crate::agent::system_prompt_of(convo))
+}
+
 // 選択中キャラの口調で、やさしい起こし文を生成する（失敗時は None）。
 async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> {
     let id = state.provider_id.lock().unwrap().clone();
@@ -2174,9 +2180,7 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
         .chat(&state.config, &model, &convo, &[])
         .await
         .ok()?;
-    // エージェント経路を通らないので、表示・読み上げへ渡す前に統一公開ガードを通す。
-    let prompt = crate::agent::system_prompt_of(&convo);
-    safe_wake_message(&message.content, &prompt)
+    guard_public_answer_for_wake(&message.content, &convo)
 }
 
 // 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。

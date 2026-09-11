@@ -950,60 +950,6 @@ function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
-// 読み上げから外す人格プロンプト（`loadCharacter` が選択中キャラのぶんへ入れ替える）。
-// blocked は行照合用の正規化済み、inline は1文へ流し込まれた場合に備えた原文。
-let personaSpeechBlocklist = { blocked: [], inline: [] };
-
-// `personaText` が人格設定を組み立てるときの項目名。この形の行は話し言葉ではなく
-// 設定文なので、短くてもプロンプト混入として扱う（Rust の PERSONA_FIELD_LABELS と対）。
-const PERSONA_FIELD_LINE = /^(名前|性格|口調|一人称|ユーザーの呼び方)[:：]/;
-
-// 混入判定のために行を正規化する（空白除去・先頭の箇条書き記号除去・コロンの全角統一）。
-// モデルは `- 名前：むぎ` のように整形し直して復唱することがあるため、見た目の差を均す。
-// Rust の `normalize_leak_line` と同じ規則。
-function normalizeLeakLine(line) {
-  return String(line ?? "")
-    .replace(/\s+/g, "")
-    .replace(/^[-*・>#]+/, "")
-    .replace(/：/g, ":");
-}
-
-// 人格プロンプトが混ざった返答をモデルが返しても、設定文を声に出さないための照合用。
-// 偶然の一致で普通の返答を消さないよう、8文字以上か人格項目行だけを対象にする。
-function setPersonaSpeechBlocklist(profile) {
-  const raw = String(profile ?? "").split("\n").map(line => line.trim());
-  const blocked = raw
-    .map(normalizeLeakLine)
-    .filter(line => Array.from(line).length >= 8 || PERSONA_FIELD_LINE.test(line));
-  personaSpeechBlocklist = {
-    // Rust 側が人格の前へ置く見出し。モデルがプロンプト構造ごと復唱したときに拾う。
-    blocked: [...new Set([...blocked, normalizeLeakLine("選択中キャラクターの人格設定:")])],
-    inline: raw.filter(line => Array.from(line).length >= 12),
-  };
-}
-
-// 人格プロンプトの混入を読み上げテキストから取り除く。
-//
-// 表示と履歴は Rust の `remove_prompt_leak` が消すが、フロント側を省略できない理由が2つある。
-// ストリーム読み上げは最終回答が整う前の途中テキストを声にすること、挨拶・自発雑談・
-// 目覚ましは `prepareSpeech` へ直接来ることの2点。
-function stripPersonaLeak(text) {
-  let out = String(text ?? "");
-  const { blocked, inline } = personaSpeechBlocklist;
-  if (!blocked.length) return out;
-  // 中身が同じ行を落とす（整形し直された復唱も正規化して照合する）。
-  out = out
-    .split("\n")
-    .filter(line => {
-      const normalized = normalizeLeakLine(line);
-      return !normalized || !blocked.includes(normalized);
-    })
-    .join("\n");
-  // 改行を潰して1文へ流し込まれた場合に備え、長い行は文中からも取り除く。
-  for (const line of inline) out = out.split(line).join("");
-  return out;
-}
-
 // variant は見た目の切替なので、フレームアニメと Live2D の切替もここで解決する。
 // variant.live2d があればそれを使い、`false` なら（キャラ本体が Live2D でも）フレーム表示に戻す。
 // これで「同じキャラの絵版と Live2D 版」を1つの character.json で持てる。
@@ -1159,9 +1105,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   if (!hasAnyLive2d && !hasAnyMeshRig && !manifest.animations?.idle) {
     throw new Error("Live2D、メッシュリグ、idleアニメーションのいずれも定義されていません");
   }
+  // 人格が変わったら描画資産を作り直すため、署名の一部として持つ。
+  // 人格プロンプトの混入除去は Rust の公開検査（`agent::guard_public_answer`）が
+  // 受け口側で行うので、画面側では照合表を持たない。
   const profile = personaText(manifest, overrides[manifest.id]);
-  // 同じキャラの再読込で早期 return する場合も含め、照合表は必ず現在の人格へ合わせる。
-  setPersonaSpeechBlocklist(profile);
   const assetVersion = String(manifest.assetVersion || "");
   const savedVariant = localStorage.getItem(`picoagent.variant.${manifest.id}`) || "default";
   const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
@@ -3010,11 +2957,11 @@ function notifyVoiceFailure(error) {
     : "読み上げできません。設定の「追加機能」から音声読み上げを導入してください";
 }
 // 合成のみ行い、再生はしない（起動時に描画と同時再生するための事前合成）。失敗・無効・空は null。
-// 合成前の最後の関門。挨拶・自発雑談・目覚ましは `sanitizeSpeechText` を通さずここへ
-// 直接来るため、人格プロンプトの除去はこの1か所で全経路へ効かせる。
+// ここへ来る本文（会話・挨拶・自発雑談・目覚まし）は、いずれも Rust 側の公開検査を
+// 通ったものだけ。画面側で人格プロンプトを削り直さない。
 async function prepareSpeech(text) {
-  const speech = stripPersonaLeak(String(text ?? "")).trim();
-  if (!speech) return null; // 混入だけの文は合成しない（無音の再生を挟まない）
+  const speech = String(text ?? "").trim();
+  if (!speech) return null; // 空文は合成しない（無音の再生を挟まない）
   try {
     const result = await window.picoagent.speak(speech);
     if (result?.enabled === false) ttsEnabledCache = false;
@@ -3098,7 +3045,6 @@ function combineStartupGreeting(manifestGreeting, dailyReply) {
 // ことで、全文合成を待たずに早く話し始められる（体感待ち時間を短縮）。
 function sanitizeSpeechText(text) {
   let out = String(text ?? "").replace(/\r\n/g, "\n");
-  out = stripPersonaLeak(out); // 人格プロンプトの混入は声に出さない
   out = out.split(/\n\s*参考[:：]/)[0];
   out = out.replace(/!?\[([^\]]*)\]\((?:https?:\/\/|mailto:)[^)]+\)/g, "$1");
   out = out.replace(/https?:\/\/[^\s、。）」』】]+/g, "");

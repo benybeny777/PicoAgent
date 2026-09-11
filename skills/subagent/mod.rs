@@ -66,6 +66,7 @@ async fn provider_chat(
     messages: &[Message],
     session: Option<&crate::providers::agent_cli::Session>,
 ) -> anyhow::Result<Message> {
+    // 非公開利用: 戻り値はツール結果としてエージェントループへ返り、公開は agent.rs の検査を通る。
     let task = provider.chat(cfg, model, messages, &[]);
     match session {
         Some(session) if provider.id() == "agent_cli" => {
