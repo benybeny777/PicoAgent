@@ -2,6 +2,8 @@
 
 VTuber 事務所へ送付する提案書の本文です。**【 】は送付前に必ず差し替えてください。** 取引条件をどう決めたかの根拠と社内向けの判断材料は [docs/IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md) にあり、この文書には先方に見せる内容だけを置きます。
 
+**送付用の PowerPoint は [docs/IP-PROPOSAL-VTUBER.pptx](IP-PROPOSAL-VTUBER.pptx)（全10枚）です。** この Markdown が文面の正本で、PowerPoint は `node tools/ip-proposal-deck/build.js` で生成します。**PowerPoint を直接編集しないでください**（次の生成で上書きされます）。先にこの文書を直し、生成し直します。
+
 > [!IMPORTANT]
 > **1 通目でこの提案書を送らないでください。** 両社とも事業としてのキャラクター利用は事前の問い合わせが前提で、窓口も異なります。まず §0 の照会文で「該当性」と「窓口」を確認し、返信で指定された窓口・様式に合わせてからこの本文を送ります。記載の条件は交渉の出発点であり、確定ではありません。
 

@@ -231,6 +231,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 | `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
+| `tools/ip-proposal-deck/build.js` | VTuber事務所へ送付する提案書PowerPoint（`docs/IP-PROPOSAL-VTUBER.pptx`）の生成。文面の正本は`docs/IP-PROPOSAL-VTUBER.md`で、PowerPointを直接編集しない。使い方は `tools/ip-proposal-deck/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
 | `characters/` | キャラクター正本（一覧 `index.json`・人格定義・レイヤー・連番フレーム・ローディング画像。Live2D キャラは `live2d/` にモデル一式）。画像準備手順は `characters/README.md` |
