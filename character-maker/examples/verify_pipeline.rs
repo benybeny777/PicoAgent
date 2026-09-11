@@ -8,6 +8,7 @@ use std::{
 use picoagent_character_maker::{
     config::MakerConfig,
     pipeline::{NewCharacter, PipelineContext, STAGES},
+    recovery::startup_cleanup_guard,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,6 +22,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !config.python().is_file() || !config.comfy().is_dir() {
         return Err("管理ランタイムが未導入です。自動取得は行いません".into());
     }
+    // 検証出力は分離しても、製品のGPU処理とは同じロックで競合を防ぐ。
+    let data_root = config
+        .component_root
+        .parent()
+        .and_then(|bundled| bundled.parent())
+        .ok_or("管理ランタイムの配置が不正です")?;
+    let _gpu_guard = startup_cleanup_guard(&data_root.join("character-maker/characters"))?;
     let source = PathBuf::from(&args[2]).canonicalize()?;
     let output = PathBuf::from(&args[3]);
     // 既存成果物を再利用・上書きせず、試行ごとに独立したルートを使う。
