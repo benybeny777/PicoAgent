@@ -44,7 +44,7 @@ let scheduleEditorState = null; // スケジュールタスクエディタ（保
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
-const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
+const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const PRESERVE_UNREADABLE_SECRET = "__PRESERVE_UNREADABLE_SECRET__";
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
@@ -919,6 +919,7 @@ function quickSettingsGuide(v) {
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
     { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック" },
+    { tab: "character-maker", title: "キャラ作成（テスト）", summary: "原画からローカル生成するテスト機能" },
     { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
     { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
@@ -962,6 +963,86 @@ function applySettingsTheme(value) {
 
 function section(title) {
   return el("div", { className: "section" }, [el("h2", { textContent: title })]);
+}
+
+function createOperationProgress(label = "処理の進捗") {
+  const message = el("span", { className: "operation-progress-message" });
+  message.setAttribute("role", "status");
+  message.setAttribute("aria-live", "polite");
+  const detail = el("span", { className: "operation-progress-detail" });
+  const elapsed = el("span", { className: "operation-progress-elapsed" });
+  const fill = el("span", { className: "operation-progress-fill" });
+  const track = el("div", { className: "operation-progress-track is-indeterminate" }, [fill]);
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-label", label);
+  const root = el("div", { className: "operation-progress" }, [
+    el("div", { className: "operation-progress-copy" }, [message, detail, elapsed]),
+    track,
+  ]);
+  let startedAt = 0;
+  let elapsedTimer = null;
+
+  function formatSize(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)}GB`;
+    if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}MB`;
+    if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)}KB`;
+    return `${Math.round(bytes)}B`;
+  }
+
+  function updateElapsed() {
+    if (!startedAt) return;
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    elapsed.textContent = minutes ? `経過 ${minutes}分${String(rest).padStart(2, "0")}秒` : `経過 ${rest}秒`;
+  }
+
+  function start(initialMessage = "処理中…") {
+    if (!startedAt) startedAt = Date.now();
+    if (!elapsedTimer) elapsedTimer = window.setInterval(updateElapsed, 1000);
+    message.textContent = initialMessage;
+    root.classList.add("is-active");
+    track.classList.add("is-indeterminate");
+    track.removeAttribute("aria-valuenow");
+    fill.style.width = "35%";
+    detail.textContent = "算出中";
+    updateElapsed();
+  }
+
+  function update(progress) {
+    if (!root.classList.contains("is-active")) start();
+    if (progress?.message) message.textContent = progress.message;
+    const downloaded = Number(progress?.downloaded) || 0;
+    const total = Number(progress?.total) || 0;
+    if (total > 0) {
+      const percent = Math.max(0, Math.min(100, Math.round(downloaded / total * 100)));
+      track.classList.remove("is-indeterminate");
+      track.setAttribute("aria-valuenow", String(percent));
+      fill.style.width = `${percent}%`;
+      detail.textContent = `${percent}% ・ ${formatSize(downloaded)} / ${formatSize(total)}`;
+    } else {
+      track.classList.add("is-indeterminate");
+      track.removeAttribute("aria-valuenow");
+      fill.style.width = "35%";
+      detail.textContent = downloaded > 0 ? formatSize(downloaded) : "算出中";
+    }
+  }
+
+  function stop(finalMessage = "") {
+    if (elapsedTimer) window.clearInterval(elapsedTimer);
+    elapsedTimer = null;
+    startedAt = 0;
+    root.classList.remove("is-active");
+    track.classList.add("is-indeterminate");
+    track.removeAttribute("aria-valuenow");
+    fill.style.width = "35%";
+    detail.textContent = "";
+    elapsed.textContent = "";
+    if (finalMessage) message.textContent = finalMessage;
+  }
+
+  return { element: root, message, start, update, stop };
 }
 
 function advancedGroup(title, note, children) {
@@ -1014,12 +1095,16 @@ function buildComponentManager() {
     el("span", { className: "component-badge", textContent: "基本" }),
   ]);
   const list = el("div", { className: "component-list" }, [el("p", { className: "hint", textContent: "状態を確認中…" })]);
-  const status = el("p", { className: "hint component-manager-status" });
-  status.setAttribute("aria-live", "polite");
-  sec.append(core, list, status);
+  const operationProgress = createOperationProgress("追加機能の処理進捗");
+  const status = operationProgress.message;
+  operationProgress.element.classList.add("component-manager-status");
+  // 長い追加機能一覧の末尾では導入中の表示が画面外になるため、一覧より前へ固定する。
+  sec.append(core, operationProgress.element, list);
 
   function setBusy(busy) {
     sec.setAttribute("aria-busy", busy ? "true" : "false");
+    if (busy) operationProgress.start(status.textContent || "処理中…");
+    else operationProgress.stop();
     list.querySelectorAll("button").forEach(action => {
       action.disabled = busy || action.dataset.available === "false";
     });
@@ -1164,8 +1249,7 @@ function buildComponentManager() {
   }
 
   replaceSettingsListener("component-progress", "component:progress", progress => {
-    const percent = progress.total > 0 ? ` ${Math.min(100, Math.round(progress.downloaded / progress.total * 100))}%` : "";
-    status.textContent = `${progress.message}${percent}`;
+    operationProgress.update(progress);
   }).catch(error => {
     logApp("warn", "追加機能の進捗を受け取れませんでした", errorDetail(error));
   });
@@ -2615,6 +2699,156 @@ function buildDownloadedModelsSection() {
   return sec;
 }
 
+function buildCharacterMaker(registerInstalledCharacter) {
+  const maker = section("原画からキャラクターを作成（テスト）");
+  maker.append(el("p", {
+    className: "settings-intro",
+    textContent: "テスト機能です。1枚の原画から、背景除去・部位分解・2.5Dリグ・局所補完をPC内だけで実行します。元画像は上書きしません。",
+  }));
+  const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "PNG / JPEGを選択" });
+  const nameInput = el("input", { type: "text", placeholder: "表示名" });
+  const personaInput = el("textarea", { placeholder: "性格や話し方（任意）" });
+  const tagsInput = el("input", { type: "text", placeholder: "例: 青髪、正面、笑顔" });
+  const pickButton = el("button", { className: "secondary", type: "button", textContent: "原画を選ぶ" });
+  const createButton = el("button", { className: "primary", type: "button", textContent: "作成を開始" });
+  const status = el("div", { className: "hint" });
+  const list = el("div", { className: "card-list" });
+  let runtimeInstalled = false;
+
+  pickButton.addEventListener("click", async () => {
+    try {
+      const picked = await window.picoagent.settings.characterMakerPickSource();
+      if (picked?.path) sourceInput.value = picked.path;
+    } catch (error) {
+      status.textContent = `原画を選べませんでした: ${error?.message || error}`;
+    }
+  });
+
+  async function run(character, fromStage) {
+    status.textContent = `${character.displayName}を生成しています…`;
+    try {
+      await window.picoagent.settings.characterMakerRun(character.characterId, fromStage);
+      status.textContent = `${character.displayName}の生成が完了しました。`;
+    } catch (error) {
+      status.textContent = `生成を完了できませんでした: ${error?.message || error}`;
+    } finally {
+      await refresh();
+    }
+  }
+
+  function renderCharacter(character) {
+    const stageLabels = { isolate: "背景除去", decompose: "部位分解", rig2d: "2.5Dリグ", complete: "局所補完" };
+    const stages = Object.entries(stageLabels).map(([id, label]) => {
+      const state = character.stages?.[id] || { status: "pending" };
+      return `${label}: ${state.status === "complete" ? "完了" : state.status === "running" ? "実行中" : state.status === "failed" ? "失敗" : "未実行"}`;
+    }).join(" / ");
+    const firstPending = Object.keys(stageLabels).find(id => character.stages?.[id]?.status !== "complete");
+    const runButton = el("button", {
+      className: "primary",
+      type: "button",
+      textContent: firstPending ? "続きから生成" : "最初から再生成",
+      disabled: !runtimeInstalled,
+    });
+    runButton.addEventListener("click", () => run(character, firstPending || "isolate"));
+    const installButton = el("button", {
+      className: "secondary",
+      type: "button",
+      textContent: "PicoAgentへ反映",
+      disabled: character.stages?.complete?.status !== "complete",
+    });
+    installButton.addEventListener("click", async () => {
+      try {
+        const result = await window.picoagent.settings.characterMakerInstall(character.characterId);
+        if (!result.updated) await registerInstalledCharacter(result.id);
+        status.textContent = result.updated
+          ? `${result.name}を新しい生成結果へ更新しました。キャラを選び直すと反映されます。`
+          : `${result.name}を追加して選びました。「保存」で反映します。`;
+      } catch (error) {
+        status.textContent = `PicoAgentへ反映できませんでした: ${error?.message || error}`;
+      }
+    });
+    const previewButton = el("button", {
+      className: "secondary",
+      type: "button",
+      textContent: "動作を確認",
+      disabled: character.stages?.complete?.status !== "complete",
+    });
+    previewButton.addEventListener("click", async () => {
+      previewButton.disabled = true;
+      try {
+        await window.picoagent.settings.characterMakerPreview(character.characterId);
+        status.textContent = `${character.displayName}の確認画面を開きました。`;
+      } catch (error) {
+        status.textContent = `確認画面を開けませんでした: ${error?.message || error}`;
+      } finally {
+        previewButton.disabled = character.stages?.complete?.status !== "complete";
+      }
+    });
+    return markSearchable(el("div", { className: "card-item" }, [
+      el("div", { className: "card-title", textContent: character.displayName }),
+      el("div", { className: "card-desc character-id", textContent: character.characterId }),
+      el("div", { className: "card-desc", textContent: stages }),
+      el("div", { className: "character-add-actions" }, [runButton, previewButton, installButton]),
+    ]), character.displayName, character.characterId, stages);
+  }
+
+  async function refresh() {
+    try {
+      const result = await window.picoagent.settings.characterMakerList();
+      runtimeInstalled = result.runtimeInstalled === true;
+      list.replaceChildren(...(result.characters || []).map(renderCharacter));
+      if (!result.supported) status.textContent = "キャラ作成は現在Windows 10/11 x64専用です。";
+      else if (!runtimeInstalled) status.textContent = "キャラ作成用のローカル実行環境が未導入です。追加機能・更新から導入してください。";
+      else if (!(result.characters || []).length) status.textContent = "原画を選び、最初のキャラクターを作成できます。";
+      applySettingsSearch();
+    } catch (error) {
+      status.textContent = `キャラ作成の状態を取得できませんでした: ${error?.message || error}`;
+    }
+  }
+
+  createButton.addEventListener("click", async () => {
+    if (!sourceInput.value || !nameInput.value.trim()) {
+      status.textContent = "原画と表示名を入力してください。";
+      return;
+    }
+    createButton.disabled = true;
+    try {
+      const character = await window.picoagent.settings.characterMakerCreate({
+        displayName: nameInput.value.trim(),
+        sourcePath: sourceInput.value,
+        personaPrompt: personaInput.value.trim(),
+        identityTags: tagsInput.value.trim(),
+      });
+      await refresh();
+      if (runtimeInstalled) await run(character, "isolate");
+    } catch (error) {
+      status.textContent = `作成を開始できませんでした: ${error?.message || error}`;
+    } finally {
+      createButton.disabled = false;
+    }
+  });
+  replaceSettingsListener("character-maker-progress", "character-maker:progress", progress => {
+    status.textContent = progress?.message || "キャラクターを生成しています…";
+  });
+  replaceSettingsListener("character-maker-state", "character-maker:state", refresh);
+  const cancelButton = el("button", { className: "secondary", type: "button", textContent: "生成を中断" });
+  cancelButton.addEventListener("click", async () => {
+    await window.picoagent.settings.characterMakerCancel();
+    status.textContent = "工程の停止を要求しました。";
+  });
+  maker.append(
+    el("div", { className: "field" }, [el("label", { textContent: "原画" }), sourceInput, pickButton]),
+    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), nameInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "性格・話し方" }), personaInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "見た目の特徴" }), tagsInput]),
+    el("div", { className: "character-add-actions" }, [createButton, cancelButton]),
+    status,
+    list,
+  );
+  refresh();
+  return maker;
+}
+
 async function render() {
   renderingSettings = true;
   form.innerHTML = "";
@@ -2626,6 +2860,7 @@ async function render() {
   const panels = createTabs([
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
+    { id: "character-maker", label: "キャラ作成（テスト）" },
     { id: "character-register", label: "キャラ登録" },
     { id: "character", label: "キャラ選択" },
     { id: "voice", label: "キャラの音声" },
@@ -2637,6 +2872,7 @@ async function render() {
     { id: "diagnostics", label: "診断・修復" },
   ]);
   panels.components.append(buildComponentManager());
+  panels["character-maker"].append(buildCharacterMaker(registerInstalledCharacter));
 
   // --- グローバル設定 ---
   const global = section("基本");

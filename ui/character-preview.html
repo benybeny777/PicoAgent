@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PicoAgent キャラ確認</title>
+  <link rel="stylesheet" href="character-preview.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1 id="title">キャラクター動作確認</h1>
+      <p>原画と、PicoAgentが実際に使う2.5D描画を比較します。</p>
+    </div>
+    <div class="background-buttons" aria-label="確認背景">
+      <button type="button" data-bg="checker" class="active">市松</button>
+      <button type="button" data-bg="dark">黒</button>
+      <button type="button" data-bg="light">白</button>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>立ち絵原画</h2>
+      <div class="stage checker"><img id="source" alt="立ち絵原画"></div>
+    </section>
+    <section>
+      <h2>PicoAgent 2.5D描画</h2>
+      <div id="runtimeStage" class="stage checker"></div>
+    </section>
+  </main>
+  <div class="controls" aria-label="2.5D確認操作">
+    <div class="control-group">
+      <h2>目・視線</h2>
+      <button type="button" id="blink">両目まばたき</button>
+      <button type="button" data-wink="L">左目</button>
+      <button type="button" data-wink="R">右目</button>
+      <label>左右 <input id="gazeX" type="range" min="-1" max="1" step="0.05" value="0"><output>0.00</output></label>
+      <label>上下 <input id="gazeY" type="range" min="-1" max="1" step="0.05" value="0"><output>0.00</output></label>
+      <button type="button" id="gazeReset">中央</button>
+    </div>
+    <div class="control-group">
+      <h2>口</h2>
+      <button type="button" data-mouth="0,0">閉口</button>
+      <button type="button" data-mouth="1,0">あ</button>
+      <button type="button" data-mouth="0.38,0.95">い</button>
+      <button type="button" data-mouth="0.55,-0.95">う</button>
+      <button type="button" data-mouth="0.62,0.70">え</button>
+      <button type="button" data-mouth="0.90,-0.75">お</button>
+      <button type="button" id="faceDemo">口・目を自動確認</button>
+    </div>
+    <div class="control-group">
+      <h2>表情</h2>
+      <button type="button" data-expression="neutral">通常</button>
+      <button type="button" data-expression="happy">笑顔</button>
+      <button type="button" data-expression="concern">困り顔</button>
+      <button type="button" data-expression="thinking">考え顔</button>
+      <button type="button" data-expression="shy">照れ</button>
+      <button type="button" data-expression="angry">怒り</button>
+    </div>
+    <div class="control-group">
+      <h2>動作</h2>
+      <button type="button" data-motion="idle">待機</button>
+      <button type="button" data-motion="talking">会話</button>
+      <button type="button" data-motion="thinking">考え中</button>
+      <button type="button" data-motion="success">よろこび</button>
+      <button type="button" data-motion="concern">困り</button>
+      <button type="button" data-motion="listen">聞く</button>
+      <button type="button" id="motionDemo">全動作を自動確認</button>
+    </div>
+    <div class="control-group">
+      <h2>姿勢</h2>
+      <label>腕を体へ寄せる <input id="arm" type="range" min="0" max="1" step="0.01" value="0"><output>0.00</output></label>
+    </div>
+  </div>
+  <div id="status" role="status">読込中…</div>
+  <script src="picoagent.js"></script>
+  <script src="vendor/pixi/pixi.min.js"></script>
+  <script src="mesh-rig.js"></script>
+  <script src="character-preview.js"></script>
+</body>
+</html>

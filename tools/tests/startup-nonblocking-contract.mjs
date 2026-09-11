@@ -12,7 +12,7 @@ const startup = renderer.slice(startupStart, startupEnd);
 
 test("セットアップ済みのlocal選択はAIと音声の準備完了まで起動画面を維持する", () => {
   assert.match(startup, /localEngineRequired = \(info\.providerId \|\| "local"\) === "local"/);
-  assert.match(startup, /if \(localEngineRequired && info\.onboardingDone\) \{[\s\S]*?await waitForEngineReady\(\)/);
+  assert.match(startup, /if \(localEngineRequired && info\.onboardingDone\) \{[\s\S]*?const engineState = await waitForEngineReady\(\)/);
   assert.match(renderer, /prepareSelectedVoiceModel\(\)[\s\S]*?setStatus\("声を準備中…"\)/);
   assert.match(startup, /await prepareSelectedVoiceModel\(\)[\s\S]*?await prepareSpeech\(startupGreeting\)/);
   assert.doesNotMatch(renderer, /STARTUP_UI_DEADLINE_MS/);
@@ -23,7 +23,7 @@ test("初回セットアップはローカルAIの取得完了を待たない", 
   // 初回案内（追加機能の選択・Live2D追加）はローカルAIを使わない。数GBの取得を
   // 待たせると、初回だけ何分も案内へ入れないため、監視だけ始めて画面を返す。
   assert.match(startup, /\} else if \(localEngineRequired\) \{[\s\S]*?waitForEngineReady\(\)\.catch/);
-  assert.match(startup, /if \(info\.onboardingDone && startupGreeting\)/);
+  assert.match(startup, /if \(!startupEngineError && info\.onboardingDone && startupGreeting\)/);
   assert.match(renderer, /!frontendInitialized \|\| \(localEngineRequired && !localEngineReady\)/);
 });
 
@@ -48,6 +48,11 @@ test("準備完了後に保存形式へ戻し起動音声を再生する", () =>
   assert.match(renderer, /位置・寸法の復旧中/);
   assert.match(renderer, /catch \(error\) \{[\s\S]*?scheduleBootBackendRetry\(\)/);
   assert.doesNotMatch(renderer, /if \(bootUiReleased\) return/);
+});
+
+test("ローカルAIがエラーなら音声準備へ進まず元のエラーを保つ", () => {
+  assert.match(startup, /const engineState = await waitForEngineReady\(\);[\s\S]*?if \(engineState\?\.phase === "error"\) \{[\s\S]*?startupEngineError = engineState\.message/);
+  assert.match(startup, /if \(!startupEngineError && info\.onboardingDone && startupGreeting\) \{[\s\S]*?prepareSelectedVoiceModel/);
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {

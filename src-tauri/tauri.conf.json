@@ -24,21 +24,28 @@
         "skipTaskbar": false,
         "shadow": false,
         "resizable": true,
-        "maximizable": false
+        "maximizable": true,
+        "additionalBrowserArgs": "--disable-http-cache"
       }
     ],
     "security": {
       "csp": "default-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
-          "scope": ["$APPDATA/characters/**", "$APPDATA/display/**"]
+          "scope": ["$APPDATA/characters/**", "$APPDATA/display/**", "$APPDATA/character-maker/characters/**"]
       }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["resources/bundled/**/*", "resources/component-manifest.json"],
+    "resources": {
+      "resources/bundled/**/*": "resources/bundled/",
+      "resources/component-manifest.json": "resources/component-manifest.json",
+      "../character-maker/sidecar/**/*": "character-maker/sidecar/",
+      "../character-maker/installer/setup-runtime-models.py": "character-maker/installer/setup-runtime-models.py",
+      "../character-maker/workflows/**/*": "character-maker/workflows/"
+    },
     "windows": {
       "nsis": {
         "compression": "zlib",

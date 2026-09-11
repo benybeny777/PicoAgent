@@ -90,6 +90,7 @@ window.picoagent = {
   scheduleRuns: () => call("pet_schedule_runs"),
   rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
   openSettings: (tab = null) => call("pet_open_settings", { tab }),
+  openExternalUrl: (url) => call("pet_open_external_url", { url }),
   quit: () => call("pet_quit"),
   alarms: () => call("pet_alarms"),
   alarmWake: (id) => call("pet_alarm_wake", { id }),
@@ -142,6 +143,18 @@ window.picoagent = {
   placeWindow: (position) => call("pet_place_window", { position }),
   // キャラ上の通常ドラッグをOS標準のウィンドウ移動へ渡す。
   startWindowDrag: () => call("pet_start_window_drag"),
+  minimizeWindow: async () => {
+    try { return await getCurrentWindow().minimize(); }
+    catch (error) { logInvokeError("minimize", error); throw error; }
+  },
+  toggleMaximizeWindow: async () => {
+    try { return await getCurrentWindow().toggleMaximize(); }
+    catch (error) { logInvokeError("toggleMaximize", error); throw error; }
+  },
+  closeWindow: async () => {
+    try { return await getCurrentWindow().close(); }
+    catch (error) { logInvokeError("close", error); throw error; }
+  },
   // 枠なしウィンドウの各辺・四隅から、OS標準の縦横リサイズを開始する。
   startWindowResize: async (direction) => {
     try { return await getCurrentWindow().startResizeDragging(direction); }
@@ -201,6 +214,14 @@ window.picoagent = {
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
     renameCharacter: (id, name) => call("settings_character_rename", { id, name }),
+    characterMakerList: () => call("settings_character_maker_list"),
+    characterMakerPickSource: () => call("settings_character_maker_pick_source"),
+    characterMakerCreate: (input) => call("settings_character_maker_create", { input }),
+    characterMakerRun: (characterId, fromStage) => call("settings_character_maker_run", { characterId, fromStage }),
+    characterMakerCancel: () => call("settings_character_maker_cancel"),
+    characterMakerInstall: (characterId) => call("settings_character_maker_install", { characterId }),
+    characterMakerPreview: (characterId) => call("settings_character_maker_preview", { characterId }),
+    characterMakerPreviewData: (characterId) => call("settings_character_maker_preview_data", { characterId }),
     // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),

@@ -984,7 +984,11 @@ pub async fn settings_components_install(
     ids: Vec<String>,
     enable_tts: Option<bool>,
     state: State<'_, AppState>,
+    maker: State<'_, crate::character_maker::CharacterMakerState>,
 ) -> Result<Value, String> {
+    if ids.iter().any(|id| id == "character-maker") && maker.is_running() {
+        return Err("キャラクター生成中は管理ランタイムを更新できません".into());
+    }
     let installed = crate::components::install(&app, &ids)
         .await
         .map_err(|error| {
@@ -1024,7 +1028,14 @@ fn enable_tts_after_component_install(ids: &[String], requested: Option<bool>) -
 
 /// 利用者が選んだ追加コンポーネントだけをPicoAgent専用領域から削除する。
 #[tauri::command]
-pub async fn settings_components_remove(app: AppHandle, id: String) -> Result<Value, String> {
+pub async fn settings_components_remove(
+    app: AppHandle,
+    id: String,
+    maker: State<'_, crate::character_maker::CharacterMakerState>,
+) -> Result<Value, String> {
+    if id == "character-maker" && maker.is_running() {
+        return Err("キャラクター生成中は管理ランタイムを削除できません".into());
+    }
     crate::components::remove(&app, &id)
         .await
         .and_then(|items| serde_json::to_value(items).map_err(Into::into))
@@ -1329,6 +1340,55 @@ pub fn pet_start_window_drag(app: AppHandle) -> Result<(), String> {
         .ok_or_else(|| "メインウィンドウがありません。".to_string())?
         .start_dragging()
         .map_err(|error| format!("ウィンドウの移動を開始できませんでした: {error}"))
+}
+
+/// 返答内のHTTP(S)リンクを既定ブラウザで開く。
+/// WebViewの`target=_blank`は枠なしウィンドウで黙って失敗することがあるため、
+/// URLを検証してOSへ明示的に渡す。ファイルや独自スキームは受け付けない。
+#[tauri::command]
+pub fn pet_open_external_url(url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|_| "リンクのURLが不正です。".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("HTTP(S)リンクだけを開けます。".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+        use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+        let operation: Vec<u16> = OsStr::new("open").encode_wide().chain(Some(0)).collect();
+        let target: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result as isize <= 32 {
+            return Err(format!(
+                "既定ブラウザを開けませんでした（OSエラー {result:?}）。"
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    crate::tools::process::command_sync("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|error| format!("既定ブラウザを開けませんでした: {error}"))?;
+
+    #[cfg(target_os = "linux")]
+    crate::tools::process::command_sync("xdg-open")
+        .arg(&url)
+        .spawn()
+        .map_err(|error| format!("既定ブラウザを開けませんでした: {error}"))?;
+
+    Ok(())
 }
 
 /// ドラッグで確定したフキダシサイズを設定の正本へ保存する。

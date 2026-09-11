@@ -451,6 +451,65 @@ pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
     result
 }
 
+/// キャラ作成機能が導入したパックだけを、同じ生成元IDの完成世代で置き換える。
+/// 利用者が別経路で追加した同名IDは上書きせず、既存の設定上書きはIDを維持して残す。
+pub fn install_or_update_generated(
+    app: &AppHandle,
+    source: &Path,
+    source_character_id: &str,
+) -> Result<(String, String, bool)> {
+    let _state_lock = crate::store::lock_state("user-characters");
+    let root = root(app)?;
+    std::fs::create_dir_all(&root)?;
+    let staging = root.join(format!(".updating-{}", std::process::id()));
+    let backup = root.join(format!(".update-backup-{}", std::process::id()));
+    if staging.exists() || backup.exists() {
+        bail!(
+            "以前のキャラクター更新が完了していません。PicoAgentを再起動してから再試行してください"
+        );
+    }
+    copy_dir(source, &staging)?;
+    let result = (|| -> Result<(String, String, bool)> {
+        let manifest = character_pack::validate(&staging)?;
+        let id = character_pack::required_text(&manifest, "id")?.to_string();
+        let name = character_pack::required_text(&manifest, "name")?.to_string();
+        ensure_id_not_bundled(app, &id)?;
+        let generated_id = manifest
+            .pointer("/characterMaker/sourceCharacterId")
+            .and_then(Value::as_str);
+        if generated_id != Some(source_character_id) {
+            bail!("生成元IDが一致しないため導入できません: {source_character_id}");
+        }
+        let destination = root.join(&id);
+        let updated = destination.exists();
+        if updated {
+            let current: Value =
+                serde_json::from_slice(&std::fs::read(destination.join("character.json"))?)?;
+            let current_source = current
+                .pointer("/characterMaker/sourceCharacterId")
+                .and_then(Value::as_str);
+            if current_source != Some(source_character_id) {
+                bail!("同じIDの別キャラクターが既にあります: {id}");
+            }
+            std::fs::rename(&destination, &backup)?;
+        }
+        if let Err(error) = std::fs::rename(&staging, &destination) {
+            if updated {
+                let _ = std::fs::rename(&backup, &destination);
+            }
+            return Err(error.into());
+        }
+        if updated {
+            std::fs::remove_dir_all(&backup)?;
+        }
+        Ok((id, name, updated))
+    })();
+    if staging.exists() {
+        cleanup_staging(app, &staging);
+    }
+    result
+}
+
 /// 利用者が自分で取得したLive2Dのzip／フォルダをPicoAgentパックへ変換して導入する。
 ///
 /// 元データをPicoAgentが代理取得・再配布せず、利用者が使用条件を確認して入手した

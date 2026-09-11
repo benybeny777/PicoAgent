@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "PicoAgent のメイン/設定ウィンドウに付与する権限",
-  "windows": ["main", "settings"],
+  "windows": ["main", "settings", "character-preview-*"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

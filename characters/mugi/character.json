@@ -1,7 +1,7 @@
 {
   "id": "mugi",
   "name": "むぎ",
-  "assetVersion": "lvs-schema3-hair1-9988b9cafdc0fe8c",
+  "assetVersion": "lvs-rig2d-only-9988b9cafdc0fe8c",
   "description": "星のヘアピンと緑の瞳が印象的な、年下っぽく明るく寄り添う作業相棒。",
   "motionProfile": "full",
   "bodyProportion": "compact",
@@ -14,10 +14,6 @@
     "speakerUuid": "e756b8e4-b606-4e15-99b1-3f9c6a1b2317",
     "styleName": "あまあま",
     "sourceUrl": "https://hub.aivis-project.com/aivm-models/a59cb814-0083-4369-8542-f51a29e72af7"
-  },
-  "boot": {
-    "sleeping": "boot/sleeping.png",
-    "useSleepingOnStartup": true
   },
   "persona": {
     "personality": "年下っぽくかわいい作業相棒。明るく素直で、少し甘えんぼう。役に立てるとすぐうれしそうにするが、ユーザーを家族呼びしない。観察上手で、小さな変化に気づいて軽く声をかける。失敗しても落ち込みすぎず、次にできることを一緒に探す。楽観的だが雑には断定せず、根拠が弱い時は素直に保留する",
@@ -50,142 +46,6 @@
       "name": "集中オーラ"
     }
   ],
-  "animations": {
-    "idle": {
-      "frames": 12,
-      "fps": 3.2,
-      "frameDurations": [
-        760,
-        760,
-        760,
-        520,
-        70,
-        90,
-        70,
-        760,
-        760,
-        760,
-        760,
-        1100
-      ],
-      "motion": "live2d-idle",
-      "framePaths": [
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp",
-        "frames/05a3635fdbb475b5/abc0ef2fdb0ca7be76b3.webp",
-        "frames/05a3635fdbb475b5/abc0ef2fdb0ca7be76b3.webp",
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp",
-        "frames/05a3635fdbb475b5/a0b853e8d09e3f1b876e.webp",
-        "frames/05a3635fdbb475b5/abc4ae6963bb6cd11df7.webp",
-        "frames/05a3635fdbb475b5/881b24fc2ae9f434344d.webp",
-        "frames/05a3635fdbb475b5/abc0ef2fdb0ca7be76b3.webp",
-        "frames/05a3635fdbb475b5/abc0ef2fdb0ca7be76b3.webp",
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp",
-        "frames/05a3635fdbb475b5/82f6512f0833e10b5dd4.webp",
-        "frames/05a3635fdbb475b5/82f6512f0833e10b5dd4.webp"
-      ]
-    },
-    "thinking": {
-      "frames": 12,
-      "fps": 7.0,
-      "frameDurations": [
-        180,
-        150,
-        120,
-        170,
-        150,
-        170,
-        120,
-        120,
-        170,
-        150,
-        170,
-        150
-      ],
-      "motion": "live2d-thinking",
-      "framePaths": [
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp",
-        "frames/05a3635fdbb475b5/abc0ef2fdb0ca7be76b3.webp",
-        "frames/05a3635fdbb475b5/b5cc8cb498b08517b4a9.webp",
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp",
-        "frames/05a3635fdbb475b5/82f6512f0833e10b5dd4.webp",
-        "frames/05a3635fdbb475b5/82f6512f0833e10b5dd4.webp",
-        "frames/05a3635fdbb475b5/2c2fe67643303b9db252.webp",
-        "frames/05a3635fdbb475b5/b5cc8cb498b08517b4a9.webp",
-        "frames/05a3635fdbb475b5/abc0ef2fdb0ca7be76b3.webp",
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp",
-        "frames/05a3635fdbb475b5/82f6512f0833e10b5dd4.webp",
-        "frames/05a3635fdbb475b5/c45daab6a7908764801b.webp"
-      ]
-    },
-    "talking": {
-      "frames": 12,
-      "fps": 8.0,
-      "frameDurations": [
-        120,
-        90,
-        75,
-        120,
-        120,
-        120,
-        75,
-        120,
-        90,
-        120,
-        75,
-        140
-      ],
-      "motion": "live2d-talking",
-      "framePaths": [
-        "frames/05a3635fdbb475b5/5c506ca147448de278ef.webp",
-        "frames/05a3635fdbb475b5/2724aac68c4eff3c8587.webp",
-        "frames/05a3635fdbb475b5/5b877980500c1a94da60.webp",
-        "frames/05a3635fdbb475b5/5c506ca147448de278ef.webp",
-        "frames/05a3635fdbb475b5/3559b9164de5f3c86e1a.webp",
-        "frames/05a3635fdbb475b5/3559b9164de5f3c86e1a.webp",
-        "frames/05a3635fdbb475b5/5b877980500c1a94da60.webp",
-        "frames/05a3635fdbb475b5/2724aac68c4eff3c8587.webp",
-        "frames/05a3635fdbb475b5/b5cc8cb498b08517b4a9.webp",
-        "frames/05a3635fdbb475b5/5c506ca147448de278ef.webp",
-        "frames/05a3635fdbb475b5/cf58b34a6672a41b8241.webp",
-        "frames/05a3635fdbb475b5/3559b9164de5f3c86e1a.webp"
-      ]
-    },
-    "sad": {
-      "frames": 6,
-      "fps": 4.2,
-      "frameDurations": [
-        320,
-        110,
-        150,
-        120,
-        420,
-        560
-      ],
-      "motion": "live2d-sad",
-      "framePaths": [
-        "frames/05a3635fdbb475b5/e4ddfadd03a19769f86b.webp",
-        "frames/05a3635fdbb475b5/7101b1a1dc9807474190.webp",
-        "frames/05a3635fdbb475b5/abc4ae6963bb6cd11df7.webp",
-        "frames/05a3635fdbb475b5/e4ddfadd03a19769f86b.webp",
-        "frames/05a3635fdbb475b5/0db489183c560bfb7c23.webp",
-        "frames/05a3635fdbb475b5/e4ddfadd03a19769f86b.webp"
-      ]
-    }
-  },
-  "frameGeneration": "05a3635fdbb475b5",
-  "runtimeLayers": {
-    "base": "runtime-layers/base.webp",
-    "blink_half": "runtime-layers/blink_half.webp",
-    "blink_closed": "runtime-layers/blink_closed.webp",
-    "mouth_closed": "runtime-layers/mouth_closed.webp",
-    "mouth_open": "runtime-layers/mouth_open.webp",
-    "gaze_left": "runtime-layers/gaze_left.webp",
-    "gaze_right": "runtime-layers/gaze_right.webp",
-    "expression_happy": "runtime-layers/expression_happy.webp",
-    "expression_sad": "runtime-layers/expression_sad.webp"
-  },
-  "runtimeLayerEncoding": "webp-lossless-v1",
-  "frameEncoding": "webp-lossless-v1",
   "meshRig": {
     "rig": "rig2d/rig.json"
   }

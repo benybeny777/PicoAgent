@@ -125,6 +125,10 @@ window.__engineReadyAt = Date.now() + ${JSON.stringify(engineReadyDelayMs)};
 window.__startupMarks = {};
 window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
+    if (name === "pet_start_window_drag") {
+      window.__startDraggingCalls += 1;
+      return Promise.resolve();
+    }
     if (name === "pet_save_layout_placements") {
       localStorage.setItem(window.__placementsKey, JSON.stringify(args.placements || {}));
       return Promise.resolve();
@@ -910,7 +914,10 @@ async function validateInteractionMatrix() {
   const selectedCharacterIds = process.env.SHOOT_CHARACTER_IDS
     ? new Set(process.env.SHOOT_CHARACTER_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
-  let characters = [{ id: "mugi", forcePng: true }];
+  const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
+    ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
+    : null;
+  let characters = [{ id: "mugi", forcePng: false, meshRig: true }];
   if (LIVE2D_REQUIRED.every(path => existsSync(join(ROOT, path)))) {
     characters.push({ id: LIVE2D_CHARACTER, forcePng: false });
   }
@@ -921,6 +928,7 @@ async function validateInteractionMatrix() {
   const results = [];
   for (const target of characters) {
     for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+      if (selectedLayouts && !selectedLayouts.has(layout)) continue;
       const page = await openScene({
         characterId: target.id, layout, width, height, forcePng: target.forcePng,
         initDelayMs: 350, waitForReady: false,
@@ -928,8 +936,21 @@ async function validateInteractionMatrix() {
       try {
         const bootVisible = await page.evaluate(() => document.getElementById("petApp")?.classList.contains("is-booting"));
         if (!bootVisible) throw new Error(`${target.id}/${layout}: 起動画面が表示されません`);
-        await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 40000 });
-        if (!target.forcePng) {
+        try {
+          await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 40000 });
+        } catch (error) {
+          const bootState = await page.evaluate(() => ({
+            classes: document.getElementById("petApp")?.className,
+            status: document.getElementById("bootStatus")?.textContent,
+            renderKind: document.getElementById("character")?.dataset.renderKind,
+            meshRigActive: typeof meshRigActive === "undefined" ? null : meshRigActive,
+            meshRigLoaded: typeof meshRigController === "undefined" ? null : Boolean(meshRigController),
+          }));
+          throw new Error(`${target.id}/${layout}: 起動完了待ちがタイムアウトしました ${JSON.stringify(bootState)}`, { cause: error });
+        }
+        if (target.meshRig) {
+          await page.waitForFunction(() => typeof meshRigActive !== "undefined" && meshRigActive, null, { timeout: 40000 });
+        } else if (!target.forcePng) {
           await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
         }
         // むぎは局所バネを持たず、待機リグはタイマー駆動。Live2DはPIXI tickerが担当するため、
@@ -946,10 +967,20 @@ async function validateInteractionMatrix() {
           throw new Error(`${target.id}/${layout}: アニメーションループの休止状態が不正です ${JSON.stringify({ loopPending, loopExpected })}`);
         }
         const dragCallsBefore = await page.evaluate(() => window.__startDraggingCalls || 0);
+        await page.evaluate(() => document.getElementById("character")?.addEventListener("pointerdown", event => {
+          window.__characterPointerDebug = { button: event.button, pointerType: event.pointerType, target: event.target?.id || event.target?.tagName };
+        }, { once: true }));
         await page.locator("#character").dispatchEvent("pointerdown", { button: 0, pointerType: "mouse" });
         const dragCallsAfter = await page.evaluate(() => window.__startDraggingCalls || 0);
         if (dragCallsAfter - dragCallsBefore !== 1) {
-          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグ開始が一重に渡りません ${JSON.stringify({ dragCallsBefore, dragCallsAfter })}`);
+          const dragState = await page.evaluate(() => ({
+            editing: document.getElementById("petApp")?.classList.contains("is-layout-editing"),
+            characterDisplay: getComputedStyle(document.getElementById("character")).display,
+            characterPointerEvents: getComputedStyle(document.getElementById("character")).pointerEvents,
+            bridge: typeof window.picoagent?.startWindowDrag,
+            event: window.__characterPointerDebug,
+          }));
+          throw new Error(`${target.id}/${layout}: キャラ画像のドラッグ開始が一重に渡りません ${JSON.stringify({ dragCallsBefore, dragCallsAfter, dragState })}`);
         }
         await page.evaluate(() => {
           if (typeof openComposer === "function") openComposer();
@@ -1000,7 +1031,7 @@ async function validateInteractionMatrix() {
       }
     }
   }
-  const formalPage = await openScene({ characterId: "mugi", forcePng: true, betaBuild: false });
+  const formalPage = await openScene({ characterId: "mugi", betaBuild: false });
   try {
     const betaVisible = await formalPage.locator(".beta-badge").isVisible();
     if (betaVisible) throw new Error("通常／正式ビルド相当でもALPHA表示が残っています");
@@ -1008,10 +1039,30 @@ async function validateInteractionMatrix() {
   } finally {
     await formalPage.close();
   }
-  const reducedPage = await openScene({ characterId: "mugi", forcePng: true, reducedMotion: true });
+  const reducedPage = await openScene({ characterId: "mugi", reducedMotion: true });
   try {
-    await reducedPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
+    try {
+      await reducedPage.waitForFunction(
+        () => typeof meshRigActive !== "undefined" && meshRigActive && rigActive,
+        null,
+        { timeout: 20000 },
+      );
+    } catch (error) {
+      const state = await reducedPage.evaluate(() => ({
+        meshRigActive: typeof meshRigActive === "undefined" ? null : meshRigActive,
+        rigActive: typeof rigActive === "undefined" ? null : rigActive,
+        meshRigLoaded: typeof meshRigController === "undefined" ? null : Boolean(meshRigController),
+        renderKind: document.getElementById("character")?.dataset.renderKind,
+        spriteDisplay: getComputedStyle(document.getElementById("petSprite")).display,
+        canvasDisplay: getComputedStyle(document.getElementById("meshRigCanvas")).display,
+      }));
+      throw new Error(`reduced-motionでむぎのメッシュリグが開始しません ${JSON.stringify(state)}`, { cause: error });
+    }
     const rigTimingContract = await reducedPage.evaluate(() => ({
+      thresholds: {
+        open: RIG_MOUTH_OPEN_THRESHOLD,
+        close: RIG_MOUTH_CLOSE_THRESHOLD,
+      },
       staysClosedBelowOpenThreshold: quantizeRigMouthOpen(0.33, false),
       opensAboveOpenThreshold: quantizeRigMouthOpen(0.35, false),
       staysOpenAboveCloseThreshold: quantizeRigMouthOpen(0.23, true),
@@ -1020,22 +1071,38 @@ async function validateInteractionMatrix() {
       sleepy: { ...rigBlinkTimings(true) },
     }));
     const expectedRigTimingContract = {
+      thresholds: { open: 0.34, close: 0.22 },
       staysClosedBelowOpenThreshold: false,
       opensAboveOpenThreshold: true,
       staysOpenAboveCloseThreshold: true,
       closesBelowCloseThreshold: false,
-      normal: { closing: 60, closed: 80, opening: 170 },
-      sleepy: { closing: 130, closed: 260, opening: 300 },
+      normal: { closing: 180, closed: 220, opening: 250 },
+      sleepy: { closing: 220, closed: 360, opening: 320 },
     };
     if (JSON.stringify(rigTimingContract) !== JSON.stringify(expectedRigTimingContract)) {
-      throw new Error(`差分絵リグの口ヒステリシスまたはまばたき配分が不正です ${JSON.stringify(rigTimingContract)}`);
+      throw new Error(`リグの口ヒステリシスまたはまばたき配分が不正です ${JSON.stringify(rigTimingContract)}`);
     }
-    const blinkApplied = await reducedPage.evaluate(() => {
-      rigBlinkPhase = "blink_closed";
-      rigRefresh();
-      return petSprite.src.includes("blink_closed");
+    const blinkApplied = await reducedPage.evaluate(async () => {
+      clearTimeout(rigBlinkTimer);
+      clearTimeout(rigBlinkStepTimer);
+      rigActive = false;
+      meshRigController.setEyeOpen(1, 1);
+      meshRigController.setBlink(0, 100);
+      const closingTween = { ...meshRigController.blinkTween };
+      await new Promise(resolve => setTimeout(resolve, 120));
+      const closed = meshRigController.eyeOpen;
+      meshRigController.setBlink(1, 100);
+      const openingTween = { ...meshRigController.blinkTween };
+      await new Promise(resolve => setTimeout(resolve, 120));
+      const opened = meshRigController.eyeOpen;
+      return { closingTween, closed, openingTween, opened };
     });
-    if (!blinkApplied) throw new Error("アニメーションを減らす設定でまばたき差分が反映されません");
+    if (!(blinkApplied.closingTween.fromL === 1 && blinkApplied.closingTween.to === 0
+      && blinkApplied.closingTween.duration === 100 && blinkApplied.closed < 0.05
+      && blinkApplied.openingTween.fromL < 0.05 && blinkApplied.openingTween.to === 1
+      && blinkApplied.openingTween.duration === 100 && blinkApplied.opened > 0.95)) {
+      throw new Error(`メッシュリグのまばたき補間が不正です ${JSON.stringify(blinkApplied)}`);
+    }
     await reducedPage.waitForTimeout(80);
     if (await reducedPage.evaluate(() => animationLoop?.pending() === true)) {
       throw new Error("アニメーションを減らす設定でも空のフレームループが動いています");
@@ -1048,37 +1115,45 @@ async function validateInteractionMatrix() {
       rigMouthOpen = false;
       rigRefresh();
       setAnimation("talking", true);
-      return petSprite.src;
+      return meshRigController.mouth;
     });
     await reducedPage.waitForTimeout(300);
-    const mutedTalkingState = await reducedPage.evaluate(initialSrc => ({
+    const mutedTalkingState = await reducedPage.evaluate(initialMouth => ({
       mouthOpen: rigMouthOpen,
-      src: petSprite.src,
-      changed: petSprite.src !== initialSrc,
+      mouth: meshRigController.mouth,
+      changed: Math.abs(meshRigController.mouth - initialMouth) > 0.001,
     }), firstTalkingFrame);
-    if (mutedTalkingState.mouthOpen || mutedTalkingState.changed || !mutedTalkingState.src.includes("mouth_closed")) {
-      throw new Error(`ミュート中に差分絵の口が動きました ${JSON.stringify(mutedTalkingState)}`);
+    if (mutedTalkingState.mouthOpen || mutedTalkingState.changed || mutedTalkingState.mouth > 0.001) {
+      throw new Error(`ミュート中にメッシュリグの口が動きました ${JSON.stringify(mutedTalkingState)}`);
     }
     console.log("  reduced-motion検査: まばたき・ミュート口パクOK");
   } finally {
     await reducedPage.close();
   }
-  const gazeOffPage = await openScene({ characterId: "mugi", forcePng: true, width: 900, height: 600 });
+  const gazeOffPage = await openScene({ characterId: "mugi", width: 900, height: 600 });
   try {
-    await gazeOffPage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
+    await gazeOffPage.waitForFunction(
+      () => typeof meshRigActive !== "undefined" && meshRigActive && rigActive,
+      null,
+      { timeout: 20000 },
+    );
     const rect = await gazeOffPage.locator("#character").boundingBox();
     await gazeOffPage.mouse.move(rect.x + rect.width * 0.85, rect.y + rect.height * 0.38);
-    const defaultDirection = await gazeOffPage.evaluate(() => rigLookDirection);
+    const defaultDirection = await gazeOffPage.evaluate(() => meshRigController.gazeTargetX);
     if (defaultDirection !== 0) throw new Error(`既定OFFなのに視線が追従しました: ${defaultDirection}`);
     console.log("  視線設定検査: 既定OFFで正面を維持");
   } finally {
     await gazeOffPage.close();
   }
   const gazePage = await openScene({
-    characterId: "mugi", forcePng: true, width: 900, height: 600, gazeTrackingEnabled: true,
+    characterId: "mugi", width: 900, height: 600, gazeTrackingEnabled: true,
   });
   try {
-    await gazePage.waitForFunction(() => typeof rigAvailable !== "undefined" && rigAvailable && rigActive, null, { timeout: 20000 });
+    await gazePage.waitForFunction(
+      () => typeof meshRigActive !== "undefined" && meshRigActive && rigActive,
+      null,
+      { timeout: 20000 },
+    );
     const rect = await gazePage.locator("#character").boundingBox();
     const batch = await gazePage.evaluate(async ({ x, y }) => {
       let reads = 0;
@@ -1095,9 +1170,9 @@ async function validateInteractionMatrix() {
       }
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       delete character.getBoundingClientRect;
-      return { reads, direction: rigLookDirection };
+      return { reads, direction: meshRigController.gazeTargetX };
     }, { x: rect.x + rect.width * 0.85, y: rect.y + rect.height * 0.38 });
-    if (batch.reads !== 1 || batch.direction !== 1) {
+    if (batch.reads !== 1 || batch.direction < 0.38) {
       throw new Error(`高頻度mousemoveが1フレーム1回へ合流していません: ${JSON.stringify(batch)}`);
     }
     const loopTransitions = await gazePage.evaluate(async () => {
@@ -1126,10 +1201,10 @@ async function validateInteractionMatrix() {
       return { chatPending, petPending, sleep, wake, hiddenPending, visiblePending };
     });
     if (loopTransitions.chatPending || loopTransitions.petPending
-      || !loopTransitions.sleep.napping || loopTransitions.sleep.pending
+      || loopTransitions.sleep.napping || loopTransitions.sleep.pending
       || loopTransitions.wake.napping || loopTransitions.wake.pending || !loopTransitions.wake.rigActive
       || loopTransitions.hiddenPending || !loopTransitions.visiblePending) {
-      throw new Error(`状態変化後のアニメーション再開・休止が不正です: ${JSON.stringify(loopTransitions)}`);
+      throw new Error(`旧寝姿のないメッシュリグで状態変化後の再開・休止が不正です: ${JSON.stringify(loopTransitions)}`);
     }
     await gazePage.emulateMedia({ reducedMotion: "reduce" });
     await gazePage.waitForFunction(() => reduceMotion && !animationLoop.pending());
@@ -1148,14 +1223,14 @@ async function validateInteractionMatrix() {
     }
     await gazePage.mouse.move(450, 590);
     await gazePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const farDirection = await gazePage.evaluate(() => rigLookDirection);
+    const farDirection = await gazePage.evaluate(() => meshRigController.gazeTargetX);
     if (farDirection !== 0) throw new Error(`画面下の遠いカーソルへ視線が張り付いています: ${farDirection}`);
     await gazePage.mouse.move(rect.x + rect.width * 0.85, rect.y + rect.height * 0.38);
     await gazePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const nearDirection = await gazePage.evaluate(() => rigLookDirection);
-    if (nearDirection !== 1) throw new Error(`顔付近の右カーソルへ視線が追従しません: ${nearDirection}`);
+    const nearDirection = await gazePage.evaluate(() => meshRigController.gazeTargetX);
+    if (nearDirection < 0.38) throw new Error(`顔付近の右カーソルへ視線が追従しません: ${nearDirection}`);
     await gazePage.waitForTimeout(800);
-    const resetDirection = await gazePage.evaluate(() => rigLookDirection);
+    const resetDirection = await gazePage.evaluate(() => meshRigController.gazeTargetX);
     if (resetDirection !== 0) throw new Error(`視線が700ms後に正面へ戻りません: ${resetDirection}`);
     console.log("  描画ループ検査: 形式・居眠り・表示・アニメ削減の休止と再開OK");
     console.log("  視線設定検査: 200イベントを1フレームへ合流し、顔周辺だけ追従、700ms後に復帰");
@@ -1165,19 +1240,27 @@ async function validateInteractionMatrix() {
   const springPage = await openScene({ characterId: "sena", forcePng: true, width: 900, height: 600 });
   try {
     await springPage.waitForFunction(
-      () => typeof rigAvailable !== "undefined" && rigAvailable && rigActive && activeSpringMotion.length > 0,
+      () => typeof meshRigActive !== "undefined" && meshRigActive && meshRigController?.secondaryHair,
       null,
       { timeout: 20000 },
     );
-    await springPage.waitForFunction(() => animationLoop.pending());
-    await springPage.evaluate(() => applyLayout("chat"));
     await springPage.waitForTimeout(80);
     if (await springPage.evaluate(() => animationLoop.pending())) {
-      throw new Error("チャット形式で非表示の局所バネがループを維持しています");
+      throw new Error("メッシュリグの局所揺れがrenderer側の重複ループを維持しています");
+    }
+    await springPage.evaluate(() => applyLayout("chat"));
+    await springPage.waitForTimeout(80);
+    const chatState = await springPage.evaluate(() => ({ meshRigActive, pending: animationLoop.pending() }));
+    if (chatState.meshRigActive || chatState.pending) {
+      throw new Error(`チャット形式で非表示のメッシュリグが動いています ${JSON.stringify(chatState)}`);
     }
     await springPage.evaluate(() => applyLayout("pet"));
-    await springPage.waitForFunction(() => animationLoop.pending());
-    console.log("  局所バネ検査: 表示形式に応じた休止・再開OK");
+    await springPage.waitForFunction(() => meshRigActive);
+    await springPage.waitForTimeout(80);
+    if (await springPage.evaluate(() => animationLoop.pending())) {
+      throw new Error("ペット形式へ戻した後にrenderer側の重複ループが動いています");
+    }
+    console.log("  局所揺れ検査: メッシュ側だけで動かし、非表示時は休止OK");
   } finally {
     await springPage.close();
   }

@@ -4,6 +4,12 @@
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
+キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。仮想環境が参照する基準Pythonも同じ管理対象世代の`runtime/`へ含め、起動時に削除する取得キャッシュへ依存させない。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
+
+キャラ作成の補完工程は、リポジトリ直下で `python -m unittest discover -s character-maker/sidecar/completion -p 'test*.py'` を実行してCPU回帰を確認する。NumPy、Pillow、psutilなど導入済みの管理Pythonを使い、この検査のためにGPUモデルを取得しない。ComfyUI通信は `character-maker/sidecar/comfy_client.py` を共通入口とし、旧expression生成スクリプトや移管元Repoへ依存しない。テストの一時出力はリポジトリ直下の `temp/` に置く。CPU合格はGPU生成や画質の合格を意味しない。
+
+キャラ作成のGPU検証は、導入済みランタイムに限り`cargo run --manifest-path character-maker/Cargo.toml --example verify_pipeline -- <bundled/character-maker> <bundled/python> <入力原画> <temp内の新規出力フォルダ>`で実行できる。4工程を製品と同じRustコアで実行し、結果を`report.json`へ保存する。既存出力は拒否し、モデル取得、製品へのキャラ登録、入力原画の変更は行わない。既知の原画での回帰検査と未知原画での品質評価、GPU工程の完走とネイティブ画面操作は別の検証として記録する。
+
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
 ## 作業エージェントのハーネス構成
@@ -268,3 +274,5 @@ PicoAgent/
 **ドキュメント**: [README.md](../README.md)（概要・起動） / [MANUAL.md](../MANUAL.md)（使いかた） / [SPEC.md](../SPEC.md)（仕様） / [SETTINGS.md](SETTINGS.md)（全設定キー） / [AGENTS.md](../AGENTS.md)（作業ルール） / [HANDOFF.md](../HANDOFF.md)（未マージ作業） / [TASKS.md](TASKS.md)（未完了・条件待ち）
 
 ---
+
+LVSリグの静止フォールバックは、連番世代を持たず、`animations.idle`の`framePaths`が`["source.png"]`、`fps`と`frames`が1の構成だけを受理する。`sync-characters`はLVSリグ本体に加え、キャラ直下のリンクでないPNG実体を復号検査する。他状態、複数フレーム、旧世代フォルダ、通常2Dの実行レイヤー宣言を混ぜない。通常2Dのlossless WebP単一世代検査は維持する。
