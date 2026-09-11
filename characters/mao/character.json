@@ -52,7 +52,11 @@
       "sad": "Idle"
     },
     "scale": 3.2,
-    "offsetY": 645,
+    "offsetY": 595,
+    "iconFraming": {
+      "scale": 4.8,
+      "offsetY": 990
+    },
     "lipSyncParam": "ParamA"
   }
 }
