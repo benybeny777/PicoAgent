@@ -2703,7 +2703,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
   const maker = section("原画からキャラクターを作成（テスト）");
   maker.append(el("p", {
     className: "settings-intro",
-    textContent: "テスト機能です。1枚の原画から、背景除去・部位分解・2.5Dリグ・局所補完をPC内だけで実行します。元画像は上書きしません。",
+    textContent: "テスト機能です。1枚の原画から、背景除去・部位分解・2.5Dリグ・局所補完をPC内だけで実行します。元画像は上書きしません。RTX 5060 Laptop GPUの既知原画1体では約77分かかりました。所要時間は原画とPCにより変わります。",
   }));
   const sourceInput = el("input", { type: "text", readOnly: true, placeholder: "PNG / JPEGを選択" });
   const nameInput = el("input", { type: "text", placeholder: "表示名" });
