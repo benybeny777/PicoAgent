@@ -66,6 +66,8 @@
 
 ## PicoAgent内キャラクター作成（テスト機能）
 
+実装・ローカル統合検証はPR #255で完了。残る受入条件は下表の実GPU・実画面・配布実体の確認であり、実機確認待ちを理由にコード統合は保留しない。Windows操作APIはアプリ起動時にアクセス拒否となったため、ネイティブ操作は操作可能なセッションで再確認する。導入済みGPU環境の4工程検証はdocs/DEVELOPMENT.mdのverify_pipeline入口を使用する。既知原画での回帰完走は、未知原画の品質評価とは分ける。
+
 LocalVTuberStudioの現行4工程 `isolate → decompose → rig2d → complete` を、PicoAgentのテスト機能「キャラ作成（テスト）」から実行できるようにする。完成済みパックの登録とは入口を分けるが、出力は既存の `lvs-anime25d-v1` schema 3とし、描画器やキャラ固有の変換処理を増やさない。
 
 この機能は初期状態では未導入とする。Windows 10/11 x64かつCUDA対応NVIDIA GPUと85GB以上の空きを確認し、利用者が「追加機能・更新」で実測約77GB・所要時間・ライセンス表示を読んで明示選択した場合だけ、PicoAgent管理領域へ共通Python 3.12を1環境、ComfyUI、固定モデルを取得する。THA3は廃止済みで復活させない。既存のComfyUI、システムPython、Hugging Faceキャッシュ、ポートを利用・変更せず、macOS／Linux／AMD／Intel環境では大容量ファイルを取得しない。
