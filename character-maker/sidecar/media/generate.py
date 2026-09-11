@@ -148,7 +148,16 @@ def ltx(prompt, seed, width, height, frames, input_image):
 
 
 def output_record(history, prompt_id):
-    for node in history.get(prompt_id, {}).get("outputs", {}).values():
+    result = history.get(prompt_id, {})
+    status = result.get("status", {})
+    if status.get("status_str") == "error":
+        messages = status.get("messages", [])
+        details = [str(message[1].get("exception_message", message[1]))
+                   for message in messages if isinstance(message, (list, tuple))
+                   and len(message) > 1 and message[0] in ("execution_error", "execution_interrupted")
+                   and isinstance(message[1], dict)]
+        raise RuntimeError("ComfyUIの生成に失敗しました: " + ("; ".join(details) or "詳細なし"))
+    for node in result.get("outputs", {}).values():
         for key in ("images", "gifs"):
             values = node.get(key, [])
             if values:
@@ -176,15 +185,18 @@ def main():
     if args.engine == "qwen-edit" and not args.input:
         raise ValueError("Qwen画像編集には入力画像が必要です")
     run = args.output.parent / (".generating-" + args.output.stem)
-    if run.exists():
-        shutil.rmtree(run)
-    (run / "input").mkdir(parents=True)
-    (run / "output").mkdir()
-    (run / "temp").mkdir()
-    if args.input:
-        shutil.copy2(args.input, run / "input/input.png")
-    workflow = qwen(args.prompt, args.seed, args.width, args.height) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
+    temporary = args.output.with_suffix(args.output.suffix + ".incoming")
+    # 既存の処理や完成品を上書きせず、この呼び出しが作った途中物だけを回収する。
+    if args.output.exists() or temporary.exists():
+        raise FileExistsError(f"生成先が既に存在します: {args.output}")
+    run.mkdir(parents=True, exist_ok=False)
     try:
+        (run / "input").mkdir()
+        (run / "output").mkdir()
+        (run / "temp").mkdir()
+        if args.input:
+            shutil.copy2(args.input, run / "input/input.png")
+        workflow = qwen(args.prompt, args.seed, args.width, args.height) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
         with gpu_lock(args.gpu_lock):
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1", args.port))
@@ -214,14 +226,16 @@ def main():
                     if not source.is_file():
                         raise FileNotFoundError(f"生成結果が見つかりません: {source}")
                     args.output.parent.mkdir(parents=True, exist_ok=True)
-                    temporary = args.output.with_suffix(args.output.suffix + ".incoming")
                     shutil.copy2(source, temporary)
                     temporary.replace(args.output)
                     print(json.dumps({"output": os.fspath(args.output), "seed": args.seed}, ensure_ascii=False), flush=True)
                 finally:
                     stop_owned(process)
     finally:
-        shutil.rmtree(run, ignore_errors=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        finally:
+            shutil.rmtree(run)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch, Mock
+from contextlib import nullcontext
+import tempfile
 
 
 HERE = Path(__file__).resolve().parent
@@ -43,6 +46,60 @@ class WorkflowTests(unittest.TestCase):
         video = {"p": {"outputs": {"1": {"gifs": [{"filename": "a.mp4"}]}}}}
         self.assertEqual(GEN.output_record(image, "p")["filename"], "a.png")
         self.assertEqual(GEN.output_record(video, "p")["filename"], "a.mp4")
+
+    def test_failed_history_reports_original_error(self):
+        history = {"p": {"outputs": {}, "status": {"status_str": "error", "messages": [
+            ["execution_error", {"exception_message": "CUDA out of memory"}]]}}}
+        with self.assertRaisesRegex(RuntimeError, "CUDA out of memory"):
+            GEN.output_record(history, "p")
+        with self.assertRaisesRegex(RuntimeError, "詳細なし"):
+            GEN.output_record({"p": {"status": {"status_str": "error"}}}, "p")
+
+    def test_input_and_publish_failures_clean_only_owned_files(self):
+        temporary_root = HERE.parents[2] / "temp"
+        temporary_root.mkdir(exist_ok=True)
+        for failure in ("input", "publish", "history"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+                root = Path(directory)
+                source = root / "source.png"
+                source.write_bytes(b"original")
+                preserved = root / "finished.png"
+                preserved.write_bytes(b"finished")
+                output = root / "result.png"
+                run = root / ".generating-result"
+                incoming = root / "result.png.incoming"
+                argv = ["generate.py", "--engine", "qwen-edit", "--prompt", "edit",
+                        "--input", str(source), "--output", str(output), "--comfy", str(root),
+                        "--models", str(root), "--gpu-lock", str(root / "gpu.lock"),
+                        "--seed", "1", "--width", "256", "--height", "256"]
+                def copy(src, dst):
+                    Path(dst).write_bytes(b"partial")
+                    if failure == "input" or Path(dst) == incoming:
+                        raise OSError("copy failed")
+                history = {"p": {"outputs": {"1": {"images": [{"filename": "image.png"}]}}}}
+                if failure == "history":
+                    history = {"p": {"status": {"status_str": "error", "messages": [
+                        ["execution_error", {"exception_message": "model failed"}]]}}}
+                def ready(*args):
+                    (run / "output/image.png").write_bytes(b"generated")
+                process = Mock()
+                process.poll.return_value = None
+                with patch.object(GEN.os.sys, "argv", argv), \
+                     patch.object(GEN, "gpu_lock", return_value=nullcontext()), \
+                     patch.object(GEN.socket, "socket"), \
+                     patch.object(GEN.subprocess, "Popen", return_value=process), \
+                     patch.object(GEN, "wait_for_server", side_effect=ready), \
+                     patch.object(GEN, "request_json", side_effect=[{"prompt_id": "p"}, history]), \
+                     patch.object(GEN, "stop_owned") as stop, \
+                     patch.object(GEN.shutil, "copy2", side_effect=copy):
+                    with self.assertRaisesRegex((OSError, RuntimeError), "copy failed|model failed"):
+                        GEN.main()
+                    self.assertEqual(stop.call_count, 0 if failure == "input" else 1)
+                self.assertFalse(run.exists())
+                self.assertFalse(incoming.exists())
+                self.assertFalse(output.exists())
+                self.assertEqual(source.read_bytes(), b"original")
+                self.assertEqual(preserved.read_bytes(), b"finished")
 
     def test_download_metadata_is_pinned(self):
         self.assertEqual(set(SETUP.MODELS), {"wan-2.2-5b", "ltx-0.9.8-2b-fp8"})

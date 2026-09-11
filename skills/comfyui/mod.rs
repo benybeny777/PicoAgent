@@ -108,7 +108,7 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
     let comfy = bundled.join("character-maker/ComfyUI");
     let models = match engine {
         Engine::QwenEdit => bundled.join("character-maker/models/qwen-eval"),
-        _ => bundled.join(engine.component()).join("models"),
+        _ => bundled.join(engine.component()),
     };
     if !python.is_file() || !comfy.join("main.py").is_file() {
         return Err("エラー: 設定の「追加機能・更新」から「画像編集・キャラクター作成基盤」を先に導入してください。".into());
@@ -264,7 +264,7 @@ impl Tool for ComfyuiTool {
         if let Some(input) = &input {
             command.arg("--input").arg(input.as_path());
         }
-        let result = match crate::tools::process::output(command, 18_000, "ローカル画像・動画生成")
+        let result = match crate::tools::process::output(command, 7_200, "ローカル画像・動画生成")
             .await
         {
             Ok(value) => value,
