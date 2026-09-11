@@ -33,7 +33,11 @@
       "sad": "FlickDown"
     },
     "scale": 2.0,
-    "offsetY": 280
+    "offsetY": 280,
+    "iconFraming": {
+      "scale": 3.2,
+      "offsetY": 550
+    }
   },
   "boot": {
     "sleeping": "preview.jpg"
