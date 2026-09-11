@@ -1169,3 +1169,11 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   .top-window-menu > button { padding:0 6px; }
   .window-caption-controls > button { width:34px; min-width:34px; }
 }
+/* 内部描画バッファの寸法を表示寸法へ流用せず、保存構図の基準になる枠へ等比率で収める。 */
+[data-layout="mascot"] .character[data-render-kind="mesh-rig"] .character-view > canvas,
+[data-layout="pet"] .character[data-render-kind="mesh-rig"] .character-view > canvas,
+[data-layout="workspace"] .character[data-render-kind="mesh-rig"] .character-view > canvas,
+[data-layout="widget"] .character[data-render-kind="mesh-rig"] .character-view > canvas {
+  top:0; bottom:auto; left:50%; width:auto!important; height:100%!important;
+  transform:translateX(-50%); transform-origin:50% 0%;
+}
