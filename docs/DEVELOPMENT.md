@@ -8,6 +8,8 @@
 
 画像・動画生成は同じ共有PythonとComfyUI本体を再利用し、モデルだけを`bundled/video-wan`または`bundled/video-ltx`へ分離する。追加機能の選択前には取得せず、固定サイズ・SHA-256検査に通ったstagingだけを公開する。生成は`character-maker/sidecar/media/generate.py`が専用ポートと共通GPUロックを所有し、完成品を`generated-media/`へ移してからComfyUIの子孫プロセスと一時領域を回収する。失敗時のモデル取得キャッシュは再開用に残せるが、次回アプリ起動時には全削除する。
 
+キャラ作成のGPU検証は、導入済みランタイムに限り`cargo run --manifest-path character-maker/Cargo.toml --example verify_pipeline -- <bundled/character-maker> <bundled/python> <入力原画> <temp内の新規出力フォルダ>`で実行できる。4工程を製品と同じRustコアで実行し、結果を`report.json`へ保存する。既存出力は拒否し、モデル取得、製品へのキャラ登録、入力原画の変更は行わない。既知の原画での回帰検査と未知原画での品質評価、GPU工程の完走とネイティブ画面操作は別の検証として記録する。
+
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
 ## 作業エージェントのハーネス構成
@@ -20,7 +22,7 @@
 | 再利用手順 | `.agents/skills/<名前>/SKILL.md` | 繰り返す作業の入力条件、工程、停止条件、検証。`.claude/skills/<名前>/SKILL.md`はClaude Codeが自動認識し、同名正本を読むよう案内するだけのファイル |
 | 開始時処理 | `.claude/hooks/` | Claude Code固有のセッション開始時処理。通常の検証手順を複製しない |
 | 作業状態 | `HANDOFF.md` / `docs/TASKS.md` | 前者は未マージ作業と直後の再開手順、後者は未完了・条件待ちだけ |
-| 最終検証 | `cargo xtask verify` | 書式（本体・xtask・`skills/`）、静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、JavaScript構文、Git差分 |
+| 最終検証 | `cargo xtask verify` | 書式（本体・xtask・`skills/`）、静的解析、テスト、共通スキル正本とClaude Code用自動認識ファイルの同期、JavaScript構文、画面の契約テスト（`tools/tests/*.mjs`）、Git差分 |
 | 完了記録 | PR本文とGit履歴 | 目的、採否と理由、検証結果、未確認事項 |
 
 ここでいう「作業状態」はPicoAgent製品の長期メモリ機能とは別物です。共通スキル正本とClaude Code用自動認識ファイルの名前・frontmatter・参照先・本文量は`cargo xtask verify`が機械検査します。
@@ -67,9 +69,10 @@ graph LR
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
 | `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
+| `cargo xtask character-quality` | 通常2Dの制作正本を画素検査する。独自リグ・Live2Dの画質は対象外。`--strict`は既知を含む全指摘を不合格、`--update-baseline`は既存指摘の削減のみ許可 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
 | `cargo xtask build-ui` / `cargo xtask build-ui --release` | `ui/` を配信用 `ui-dist/` へ生成（release はコメント・空白を除去） |
-| `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・Git差分の一括検証 |
+| `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・画面の契約テスト（`tools/tests/*.mjs`）・Git差分の一括検証 |
 
 > `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
 > `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
