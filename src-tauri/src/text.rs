@@ -1,15 +1,12 @@
-// text.rs - 文字列を安全に扱うための共通層（切り詰めと、入力の正規化）。
+// text.rs - 文字列を安全に切り詰めるための共通層。
 //
 // Rust の文字列は UTF-8 バイト列で、`&s[..120]` のようなバイト位置での切り出しは
 // **その位置が文字の途中だと panic する**。日本語は 1 文字 3 バイトなので、固定長で
 // 切ると高い確率で境界を外す。ログ・プレビュー・出力の打ち切りは全体を通して
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
-// 利用者が入力した文字列と、外部由来テキストの照合は `sanitize_input` を通す。
-// ゼロ幅空白や双方向制御文字は、目視で同じに見える別の文字列を作れるため、
-// 表示の偽装と文字列検査のすり抜けの両方に使える（入口は `commands::accept_user_text`）。
 // 実装は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
-pub use picoagent_core::text::{preview, sanitize_input, truncate_bytes, Utf8Stream};
+pub use picoagent_core::text::{preview, truncate_bytes, Utf8Stream};
 
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]
