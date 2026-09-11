@@ -78,6 +78,10 @@ pub fn compose(
             prompt.push_str(context);
         }
     }
+    // 人格を組み立てたこの場所が、公開検査の照合元を更新する唯一の入り口。
+    // 呼び出し側（会話の作り直し・キャラ切替・設定変更）へ登録を任せると、
+    // 増えた経路のどれか1つが忘れた時点で人格設定が画面へ出る。
+    super::remember_private_context(&prompt);
     prompt
 }
 
@@ -105,6 +109,10 @@ mod tests {
 
     #[test]
     fn 新しい会話でも明示した関係設定と各文脈を保つ() {
+        // `compose` は公開検査の照合元を更新するので、同じ静的変数を触るテストと直列化する。
+        let _lock = crate::agent::PRIVATE_CONTEXT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let config = Config::new();
         config.set("PICOAGENT_RELATIONSHIP", "sister_younger");
         let prompt = compose(&config, "名前: むぎ", "mugi", "長期メモリ", "関係性メモリ");
@@ -113,5 +121,8 @@ mod tests {
         assert!(prompt.contains("ユーザーの妹として接する"));
         assert!(prompt.contains("長期メモリ"));
         assert!(prompt.contains("関係性メモリ"));
+        // 組み立てた人格がそのまま公開検査の照合元になる（登録漏れの経路を作らない）。
+        assert!(super::super::guard_public_answer("名前: むぎ".to_string(), "").is_err());
+        super::super::remember_private_context("");
     }
 }

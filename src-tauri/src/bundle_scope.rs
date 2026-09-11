@@ -340,29 +340,34 @@ mod guard {
         );
     }
 
-    /// 人格プロンプトの混入は Rust の `remove_prompt_leak` が最終回答から消すが、
-    /// ストリーム読み上げは最終回答が整う前の途中テキストを声にする。フロント側の
-    /// 除去を外すと、表示には出ないのに設定文だけを喋る状態へ戻る。
+    /// 人格プロンプトの混入除去は**受け口（Rust の公開検査）だけ**が持つ。
+    ///
+    /// 以前は画面側でも表示・読み上げの直前に削り直していた。出口に置くと、経路が
+    /// 増えるたびに同じ除去を足す必要があり、足し忘れるたびに「キャラクターの人格設定が
+    /// フキダシへ出る」不具合が別の入口から戻ってきた。照合元は
+    /// `agent::prompt::compose()` が組み立て時に登録し、`guard_public_answer()` が
+    /// 呼び出し側の文脈と登録済みの人格の両方を見る。
     #[test]
-    fn 読み上げ経路は人格プロンプトの混入を落とす() {
-        let path = guard_scan::repo_root().join("ui/renderer.js");
-        let source = std::fs::read_to_string(path).expect("ui/renderer.js");
+    fn 人格プロンプトの除去は受け口側だけが持つ() {
+        let root = guard_scan::repo_root();
+        let renderer = std::fs::read_to_string(root.join("ui/renderer.js")).expect("renderer.js");
+        for removed in [
+            "stripPersonaLeak",
+            "personaSpeechBlocklist",
+            "setPersonaSpeechBlocklist",
+        ] {
+            assert!(
+                !renderer.contains(removed),
+                "画面側（出口）に人格プロンプトの除去が残っています: {removed}。\
+                 除去は `agent::guard_public_answer()` の1か所だけが持ちます"
+            );
+        }
+        let prompt = std::fs::read_to_string(root.join("src-tauri/src/agent/prompt.rs"))
+            .expect("agent/prompt.rs");
         assert!(
-            source.contains("function stripPersonaLeak(text)")
-                && source.contains("setPersonaSpeechBlocklist(profile)"),
-            "人格プロンプトの除去と、選択中キャラへの照合表の更新を残してください"
-        );
-        // 挨拶・自発雑談・目覚ましは sanitizeSpeechText を通さず prepareSpeech へ直接来る。
-        // 全経路が必ず通るのは prepareSpeech だけなので、除去はそこにあることを確かめる。
-        let prepare = source
-            .split_once("async function prepareSpeech(text)")
-            .expect("prepareSpeech がありません")
-            .1;
-        let body = prepare.split_once("\n}").expect("関数の終端がありません").0;
-        assert!(
-            body.contains("stripPersonaLeak("),
-            "音声合成の唯一の入口 prepareSpeech で人格プロンプトの混入を落としてください\
-             （挨拶・自発雑談・目覚ましは sanitizeSpeechText を通らない）"
+            prompt.contains("super::remember_private_context(&prompt);"),
+            "人格を組み立てた時点で照合元を登録してください（呼び出し側任せにすると\
+             新しい経路が登録を忘れます）"
         );
     }
 

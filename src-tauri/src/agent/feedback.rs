@@ -67,7 +67,10 @@ pub(super) async fn planning_step(
         .enumerate()
         .filter_map(|(index, step)| step.as_str().map(|text| format!("{}. {}", index + 1, text)))
         .collect();
-    Some(format!("【実行計画】\n{}", plan_lines.join("\n")))
+    // 計画は進捗表示としてそのまま画面へ出る。人格を渡さない専用文脈で作らせているが、
+    // 利用者の発話に人格設定が引用されている場合などに復唱しうるので、公開経路と同じ検査を通す。
+    // 落ちたら計画そのものを出さない（部分削除した残骸は見せない）。
+    super::guard_public_answer(format!("【実行計画】\n{}", plan_lines.join("\n")), "").ok()
 }
 
 pub(super) async fn self_improve(
@@ -100,6 +103,7 @@ pub(super) async fn self_improve(
         })
         .cloned()
         .collect();
+    // 非公開利用: 再生成した本文も `agent::run` の `make_safe_final_answer` を必ず通ってから公開される。
     // フォールバック許可: 再生成失敗時は元の回答を返す（会話を止めない）。
     match provider.chat(cfg, model, &clean, &[]).await {
         Ok(message) if !message.content.is_empty() => message.content,
