@@ -1182,7 +1182,9 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const variant = variants.find(item => item.id === savedVariant) || variants[0] || null;
   character.dataset.variant = variant?.id || "default";
   if (variant?.root) characterRoot = `${root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
-  animations = variant?.animations || manifest.animations || {};
+  // 単独メッシュも小型表示・省モーションでは既存プレビューへ退避する。
+  animations = variant?.animations || manifest.animations || (manifest.meshRig
+    ? { idle: { framePaths: ["preview.png"], frames: 1, fps: 1 } } : {});
   runtimeLayers = variant?.runtimeLayers || manifest.runtimeLayers || {};
   activeLive2dConfig = resolveLive2dConfig(manifest, variant);
   activeMeshRigConfig = variant?.meshRig || manifest.meshRig || null;
@@ -1222,7 +1224,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
         setStatus("高品質リグを読み込めないので差分絵表示で続けるね");
       }
     }
-    if (!meshRigController) await probeRigLayers(); // layers 素材があればリップシンク対応
+    await probeRigLayers(); // メッシュ休止時に使える差分絵も別に判定する
   }
   applyCharacterFraming();
   frame = 0;
@@ -1310,7 +1312,7 @@ function setAnimation(name, force = false) {
   character.dataset.motion = requestedMotion;
   // layers を持つキャラは待機・返答状態を常時リグ描画にする。
   // 口パクは Audio の playing 後にだけ attachLipSync() から開始する。
-  if (rigAvailable && (animationName === "idle" || animationName === "talking")) {
+  if (rigLayersAvailable && (animationName === "idle" || animationName === "talking")) {
     startRig();
     return;
   }
@@ -1369,7 +1371,8 @@ wakeAnimationLoop();
 // runtimeLayers（未指定の追加パックはlayers/*.png）は「同一ポーズの全身差分絵」。
 // 読み上げ中はフレームアニメの代わりに差分絵を切り替え（PNGTuber方式）、
 // WebAudio の振幅解析で実際の声量に合わせて口を動かし、ランダムにまばたきする。
-let rigAvailable = false; // 選択中キャラに layers 素材が揃っているか
+let rigAvailable = false; // 選択中キャラがメッシュまたは差分絵のリグを持つか
+let rigLayersAvailable = false; // メッシュ休止時に表示できる差分絵が揃っているか
 let rigGazeAvailable = false; // 左右視線レイヤーも使えるか
 let rigActive = false;
 let rigFace = "";          // 表示中の差分名（無駄な src 再設定を避ける）
@@ -1440,8 +1443,9 @@ async function probeRigLayers() {
   });
   const names = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
   const results = await Promise.all(names.map(probe));
-  rigAvailable = results.every(Boolean);
-  if (rigAvailable) {
+  rigLayersAvailable = results.every(Boolean);
+  rigAvailable = rigLayersAvailable || Boolean(meshRigController);
+  if (rigLayersAvailable) {
     const gazeResults = await Promise.all(["gaze_left", "gaze_right"].map(probe));
     rigGazeAvailable = gazeResults.every(Boolean);
   }
@@ -1746,12 +1750,23 @@ function setMeshRigVisible(visible) {
 
 function destroyMeshRig() {
   meshRigActive = false;
+  delete character.dataset.meshIconFraming;
   meshRigController?.destroy();
   meshRigController = null;
   meshRigCanvas = null;
   petSprite.style.display = "";
   if (!live2dActive) character.dataset.renderKind = "2d";
   updateSpringMotionVisibility();
+}
+
+function applyMeshRigFraming() {
+  if (!meshRigController) return;
+  const scale = (currentLayout !== "stream" || character.dataset.sourceFraming === "native-full")
+    ? 1
+    : character.dataset.sourceFraming === "native-bust"
+      ? 1.35
+      : character.dataset.bodyProportion === "compact" ? 1.65 : 2.6;
+  meshRigController.setFraming(scale);
 }
 
 async function prepareMeshRig(cfg) {
@@ -1774,6 +1789,19 @@ async function prepareMeshRig(cfg) {
   });
   meshRigController.setReducedMotion(reduceMotion);
   meshRigController.setActive(false);
+  const face = meshRigController.rig.anchors?.face;
+  if (face) {
+    // 原画と同じ座標の顔領域を使い、余白が異なる全身絵も首上アイコンへ収める。
+    const side = Math.max((face.x1 - face.x0) * 1.5, (face.y1 - face.y0) * 1.6);
+    const [sourceWidth, sourceHeight] = meshRigController.rig.canvas;
+    const x = (face.x0 + face.x1 - side) / 2;
+    const y = (face.y0 + face.y1 - side) / 2 - side * 0.08;
+    for (const [key, value] of Object.entries({ width: sourceWidth, height: sourceHeight, left: -x, top: -y })) {
+      character.style.setProperty("--mesh-icon-" + key, String(value / side * 100) + "%");
+    }
+    character.dataset.meshIconFraming = "true";
+  }
+  applyMeshRigFraming();
 }
 
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
@@ -1802,6 +1830,27 @@ const LIVE2D_RENDER_HEIGHT = 315;
 // 配信形式では基準キャンバスを最大2.75倍で表示する。CSSだけを拡大すると285x315の
 // 描画結果を引き伸ばして全Live2Dがぼけるため、最初から表示倍率とDPIを含むバッファを持つ。
 const LIVE2D_MAX_DISPLAY_SCALE = 2.75;
+
+// Live2Dは原画キャンバス内の人物位置がモデルごとに異なる。CSSで完成済みキャンバスを
+// 一律に切ると、帽子のあるモデルや非人物モデルでは顔が消えるため、モデル変換を形式別に決める。
+function applyLive2DFraming() {
+  if (!live2dModel || !activeLive2dConfig) return;
+  const sharedIcon = ["chat", "bar"].includes(currentLayout)
+    ? activeLive2dConfig.iconFraming
+    : null;
+  const frame = activeLive2dConfig.layoutFraming?.[currentLayout] || sharedIcon || activeLive2dConfig;
+  const originalWidth = live2dModel.internalModel.originalWidth;
+  const originalHeight = live2dModel.internalModel.originalHeight;
+  const fit = Math.min(LIVE2D_RENDER_WIDTH / originalWidth, LIVE2D_RENDER_HEIGHT / originalHeight);
+  const coordinate = (key) => Number.isFinite(Number(frame[key]))
+    ? Number(frame[key]) : Number(activeLive2dConfig[key]) || 0;
+  live2dModel.scale.set(fit * (Number(frame.scale) || Number(activeLive2dConfig.scale) || 1));
+  live2dModel.anchor.set(0.5, 1);
+  live2dModel.position.set(
+    LIVE2D_RENDER_WIDTH / 2 + coordinate("offsetX"),
+    LIVE2D_RENDER_HEIGHT + coordinate("offsetY"),
+  );
+}
 
 function desiredLive2DResolution() {
   return Math.max(1, (window.devicePixelRatio || 1) * LIVE2D_MAX_DISPLAY_SCALE);
@@ -2003,11 +2052,6 @@ async function startLive2D(cfg) {
     scale: Number(cfg.scale) || 1,
     motionEnabled,
   }));
-  // 表示枠へ等比率で収め、下端中央に立たせる。
-  const fit = Math.min(width / model.internalModel.originalWidth, height / model.internalModel.originalHeight);
-  model.scale.set(fit * (Number(cfg.scale) || 1));
-  model.anchor.set(0.5, 1);
-  model.position.set(width / 2, height + (Number(cfg.offsetY) || 0));
   // 表情・視線・物理・ポーズ更新の後、モデル描画の直前にリップシンク値を上書きする。
   // 口パラメータIDはモデル定義（Groups: LipSync）から自動検出する。旧モデルは
   // PARAM_MOUTH_OPEN_Y のような旧命名のため、固定既定値だと口が動かない。
@@ -2051,6 +2095,7 @@ async function startLive2D(cfg) {
   live2dModel = model;
   live2dActive = true;
   character.dataset.renderKind = "live2d";
+  applyLive2DFraming();
   applyCharacterZoom(characterZoom);
   petSprite.style.display = "none";
   updateSpringMotionVisibility();
@@ -4815,6 +4860,12 @@ function applyCharacterZoom(zoom) {
   const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
   character.style.setProperty("--char-render-size", `${viewZoom * 100}%`);
+  const sourceIsBust = character.dataset.sourceFraming === "native-bust";
+  const compact = character.dataset.bodyProportion === "compact";
+  const streamBase = sourceIsBust ? 135 : compact ? 165 : 260;
+  const streamBaselineZoom = sourceIsBust ? 1 : 1.55;
+  character.style.setProperty("--stream-render-size", `${streamBase * characterZoom / streamBaselineZoom}%`);
+  character.style.setProperty("--stream-mesh-scale", String(2.6 * characterZoom / streamBaselineZoom));
 }
 
 const FRAMING_PRESETS = {
@@ -4832,11 +4883,13 @@ function applyCharacterFraming() {
     // 低頭身2Dは以前の上半身位置を維持し、長身・実写は胸上を標準にする。
     // Live2Dはモデル側のscale/offsetYで胸上へ調整済みなので追加拡大しない。
     // manifestの既定構図は原画固有の余白だけを吸収し、利用者の保存値がある場合は使わない。
-    const isCompact2d = character.dataset.renderKind === "2d"
-      && character.dataset.bodyProportion === "compact";
+    const isImageBased = character.dataset.renderKind === "2d"
+      || character.dataset.renderKind === "mesh-rig";
+    const isCompactImage = isImageBased && character.dataset.bodyProportion === "compact";
+    const isNativeBustImage = isImageBased && character.dataset.sourceFraming === "native-bust";
     const isLive2d = character.dataset.renderKind === "live2d";
-    const usesStream2dCrop = character.dataset.renderKind === "2d" && currentLayout === "stream";
-    const manifestFrame = usesStream2dCrop
+    const usesStreamImageCrop = isImageBased && currentLayout === "stream";
+    const manifestFrame = usesStreamImageCrop
       ? characterManifest?.streamFraming
       : characterManifest?.defaultFraming;
     const fallback = manifestFrame && Number.isFinite(Number(manifestFrame.zoom))
@@ -4845,7 +4898,9 @@ function applyCharacterFraming() {
           x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
           y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
         }
-      : isCompact2d || usesStream2dCrop || isLive2d ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
+      : isNativeBustImage && usesStreamImageCrop
+        ? FRAMING_PRESETS.full
+        : isCompactImage || usesStreamImageCrop || isLive2d ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
     applyCharacterZoom(fallback.zoom);
     applyCharacterOffset(fallback.x, fallback.y, { clamp: false });
     return;
@@ -5226,6 +5281,8 @@ function applyLayout(id) {
   syncWidgetClock();
   applyCharacterOffset(characterOffset.x, characterOffset.y);
   applyCharacterFraming();
+  applyMeshRigFraming();
+  applyLive2DFraming();
   // 履歴を常設する形式では、切り替えた時点の履歴をその場で描き直す。
   renderHistory();
   refreshBubblePlacement();

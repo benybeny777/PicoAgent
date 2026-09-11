@@ -34,7 +34,11 @@
     },
     "lipSyncParam": "ParamMouthOpenY",
     "scale": 2.7,
-    "offsetY": 520
+    "offsetY": 520,
+    "iconFraming": {
+      "scale": 4.3,
+      "offsetY": 900
+    }
   },
   "boot": {
     "sleeping": "preview.jpg"

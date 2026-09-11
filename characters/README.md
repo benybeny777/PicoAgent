@@ -193,3 +193,5 @@ PSD を Cubism Editor で開いたあとの作業（手作業が必要）:
 3. メッシュ・デフォーマ・パラメータ（`ParamEyeLOpen` / `ParamMouthOpenY` など）を設定する。
 4. 組み込みモデル（`.moc3` + `.model3.json`）を書き出し、`characters/<id>/live2d/` に置いて
    `character.json` に `live2d` 定義を追加する（上記「Live2D キャラクター」参照）。
+
+Live2Dの小型アイコンは`live2d.iconFraming`でモデルごとの首上位置を指定する。`layoutFraming[形式]`があれば優先し、未指定の座標は基底設定を引き継ぐ。メッシュ配信の胸上切り出しはPIXI内部で行い、`native-full`は従来の全身表示を維持する。canvasは縦横比を保ち、原画と描画バッファをDPIで換算した上限を超えない。

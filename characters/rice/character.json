@@ -51,8 +51,14 @@
       "talking": "TapBody",
       "sad": "Idle"
     },
-    "scale": 1.8,
-    "offsetY": 0,
+    "scale": 4,
+    "offsetX": -220,
+    "offsetY": 350,
+    "iconFraming": {
+      "scale": 6,
+      "offsetX": -350,
+      "offsetY": 650
+    },
     "lipSync": false
   },
   "boot": {
