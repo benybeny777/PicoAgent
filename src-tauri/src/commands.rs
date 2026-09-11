@@ -24,6 +24,35 @@ fn estimate_tokens(msg: &Message) -> usize {
     japanese * 2 + ascii.div_ceil(4)
 }
 
+/// 1発話として受け付ける最大文字数（最終防壁）。
+///
+/// `pet_send` が受け取るのは入力欄の文字だけではない。添付ファイルの抽出本文
+/// （1件12,000文字 × 最大4件）を前置きした文字列がまとめて届くため、入力欄の
+/// 上限（`ui/renderer.js` の `MAX_INPUT_CHARS` = 20,000）と同じ値にすると
+/// 添付付きの送信を弾いてしまう。両方を足しても収まる天井をここへ置き、
+/// 利用者にとっての実効上限は画面側の手前の関門で知らせる。
+///
+/// 天井を置くこと自体の目的は、履歴ファイル・要約・プロバイダのプロンプト組み立て
+/// （`agent_cli` は24,000文字で切る）へ、上限のない文字列がそのまま流れ込むのを
+/// 止めること。黙って切り詰めると「送れたのに一部しか読まれていない」という形でしか
+/// 利用者に見えないため、切らずに理由を返す。
+pub const USER_TEXT_MAX_CHARS: usize = 80_000;
+
+/// 利用者が入力した文字列を、会話・履歴・モデルへ渡す前に共通の関門へ通す。
+///
+/// 画面（`ui/renderer.js`）でも送信前に同じ正規化と上限確認を行うが、Tauri command は
+/// ローカルAPI（`api_server.rs`）からも呼ばれるため、**受け口側でも必ず通す**。
+pub fn accept_user_text(text: &str) -> Result<String, String> {
+    let text = crate::text::sanitize_input(text);
+    let chars = text.chars().count();
+    if chars > USER_TEXT_MAX_CHARS {
+        return Err(format!(
+            "入力が長すぎます（{chars}文字）。{USER_TEXT_MAX_CHARS}文字以内に分けて送ってください。"
+        ));
+    }
+    Ok(text)
+}
+
 // クラウドなどコンテキスト長を取得できないプロバイダの既定予算。
 const MAX_CONTEXT_TOKENS: usize = 6_000;
 
@@ -1689,7 +1718,7 @@ pub async fn pet_send(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let text = text.trim().to_string();
+    let text = accept_user_text(&text)?;
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
@@ -4216,7 +4245,7 @@ pub async fn pet_send_image(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let text = text.trim().to_string();
+    let text = accept_user_text(&text)?;
     if text.is_empty() && images.is_empty() {
         return Ok(json!({ "reply": "" }));
     }
@@ -4573,6 +4602,39 @@ mod attachment_tests {
         assert_eq!(
             mark_untrusted_if_injection("memo.md", normal.clone()),
             normal
+        );
+    }
+}
+
+#[cfg(test)]
+mod user_text_tests {
+    use super::{accept_user_text, USER_TEXT_MAX_CHARS};
+
+    #[test]
+    fn 入力から表示を偽装する文字を落として受け取る() {
+        // 双方向上書きは表示順を逆転できるので落とす。前後の空白も詰める。
+        assert_eq!(
+            accept_user_text("  請求\u{202E}書.exe  ").unwrap(),
+            "請求書.exe"
+        );
+        // 絵文字の結合子は残す（消すと絵文字が分解される）。
+        let family = "👨\u{200D}👩\u{200D}👧 の写真";
+        assert_eq!(accept_user_text(family).unwrap(), family);
+    }
+
+    #[test]
+    fn 上限超過は黙って切らずに理由を返す() {
+        let ok = "あ".repeat(USER_TEXT_MAX_CHARS);
+        assert_eq!(
+            accept_user_text(&ok).unwrap().chars().count(),
+            USER_TEXT_MAX_CHARS
+        );
+
+        let error = accept_user_text(&"あ".repeat(USER_TEXT_MAX_CHARS + 1)).unwrap_err();
+        assert!(error.contains("長すぎます"), "理由が伝わりません: {error}");
+        assert!(
+            error.contains(&USER_TEXT_MAX_CHARS.to_string()),
+            "上限が示されていません: {error}"
         );
     }
 }

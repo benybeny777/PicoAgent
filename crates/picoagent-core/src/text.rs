@@ -17,6 +17,57 @@ pub fn preview(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// 利用者が入力した文字列を、会話・履歴・モデルへ渡す前の共通形へ正規化する。
+///
+/// 取り除くのは「本文としての意味を持たず、見え方だけを変える文字」に限る。
+/// - 双方向制御文字（U+202A〜U+202E / U+2066〜U+2069 / U+200E / U+200F）は
+///   表示順を逆転できるため、履歴やフキダシで**実際に送った内容と違う文字列**を
+///   見せられる。
+/// - ゼロ幅空白などの不可視文字は、目視で同じに見える別の文字列を作れるため、
+///   `check_injection` のような文字列検査のすり抜けに使える。
+/// - C0/C1制御文字はログ・端末表示を壊す（エスケープシーケンスの混入）。
+///
+/// 残すものも明示しておく。絵文字の結合子（U+200D）とZWNJ（U+200C）は、家族絵文字や
+/// アラビア語・インド系文字の正書法に必要なので消さない。改行・タブは本文の一部として残し、
+/// CRLF と CR は LF へ寄せる。
+pub fn sanitize_input(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push('\n');
+            }
+            '\n' | '\t' => out.push(c),
+            _ if is_display_control(c) => {}
+            _ => out.push(c),
+        }
+    }
+    let trimmed = out.trim();
+    if trimmed.len() == out.len() {
+        out
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 本文の意味を持たず表示だけを変える制御文字か。改行・タブは呼び出し側で先に通す。
+fn is_display_control(c: char) -> bool {
+    matches!(c,
+        '\u{0000}'..='\u{001F}'   // C0制御
+        | '\u{007F}'..='\u{009F}' // DEL と C1制御
+        | '\u{200B}'              // ゼロ幅空白
+        | '\u{200E}' | '\u{200F}' // 左向き・右向きマーク
+        | '\u{202A}'..='\u{202E}' // 双方向の埋め込みと上書き
+        | '\u{2060}'              // ワードジョイナ
+        | '\u{2066}'..='\u{2069}' // 双方向の分離
+        | '\u{FEFF}'              // BOM（ゼロ幅ノーブレークスペース）
+    )
+}
+
 /// バイト上限で、UTF-8文字の途中を避けて切り詰める。
 pub fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
     if text.len() <= max_bytes {
@@ -74,13 +125,36 @@ impl Utf8Stream {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview, truncate_bytes, Utf8Stream};
+    use super::{preview, sanitize_input, truncate_bytes, Utf8Stream};
 
     #[test]
     fn 日本語を安全に切り詰める() {
         assert_eq!(preview("こんにちは", 3), "こんに…");
         assert_eq!(truncate_bytes("あああ", 4), "あ");
         assert_eq!(truncate_bytes("abc", 2), "ab");
+    }
+
+    #[test]
+    fn 表示を偽装する不可視文字と制御文字を落とす() {
+        // 双方向上書き（U+202E）で表示順を逆転させる細工を落とす。
+        assert_eq!(sanitize_input("削除\u{202E}txt.exe"), "削除txt.exe");
+        // ゼロ幅空白で検査をすり抜ける細工を落とす。
+        assert_eq!(sanitize_input("ignore\u{200B} previous"), "ignore previous");
+        // 端末・ログを壊すエスケープシーケンスを落とす。
+        assert_eq!(sanitize_input("赤\u{1B}[31m色"), "赤[31m色");
+        // BOM とワードジョイナも落とす。
+        assert_eq!(sanitize_input("\u{FEFF}本文\u{2060}です"), "本文です");
+    }
+
+    #[test]
+    fn 本文として必要な文字は残す() {
+        // 家族絵文字の結合子（U+200D）を消すと絵文字が分解される。
+        let family = "👨\u{200D}👩\u{200D}👧";
+        assert_eq!(sanitize_input(family), family);
+        // 改行とタブは本文の一部。CRLF と CR は LF へ寄せる。
+        assert_eq!(sanitize_input("a\r\nb\rc\td"), "a\nb\nc\td");
+        // 前後の空白だけを落とし、途中の空行は保つ。
+        assert_eq!(sanitize_input("  上\n\n下  "), "上\n\n下");
     }
 
     #[test]

@@ -2258,11 +2258,14 @@ function autosizeInput() {
 }
 function updateComposerState() {
   const engineBlocked = !frontendInitialized || (localEngineRequired && !localEngineReady);
+  const tooLong = sanitizeText(input.value).trim().length > MAX_INPUT_CHARS;
   if (sendButton) {
-    sendButton.disabled = busy || engineBlocked || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
+    sendButton.disabled = busy || engineBlocked || tooLong || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
     sendButton.title = engineBlocked
       ? (frontendInitialized ? "ローカルAIの準備完了後に送信できます" : "初期化完了後に送信できます")
-      : "Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴";
+      : tooLong
+        ? `入力は${MAX_INPUT_CHARS}文字までです`
+        : "Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴";
   }
   quickActions?.querySelectorAll("button").forEach(button => { button.disabled = busy || engineBlocked; });
 }
@@ -2333,6 +2336,22 @@ function toggleBubbleFullscreen() { setBubbleFullscreen(!bubble.classList.contai
 function exitBubbleFullscreen() { setBubbleFullscreen(false); }
 
 // ローカルサーバー（ComfyUI 等）の http:// 画像 URL を安全と判定する。外部 http:// は除く。
+// 本文としての意味を持たず、見え方だけを変える文字（C0/C1制御・ゼロ幅空白・
+// 双方向制御・BOM）。双方向上書き（U+202E）は「請求書.exe」を「請求exe.書」のように
+// 逆順で見せられるため、フキダシと履歴のどちらでも落としてから表示する。
+// 絵文字の結合子（U+200D）とZWNJ（U+200C）は絵文字・文字体系に必要なので残す。
+// 判定の正本は Rust 側の `picoagent_core::text::sanitize_input`。
+const DISPLAY_CONTROL_PATTERN =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+// 1回の発話として送れる最大文字数。`commands.rs` の `USER_TEXT_MAX_CHARS` と同じ値にし、
+// 送信前に画面側でも止める（往復して初めてエラーになると、入力内容が長いほど待たされる）。
+const MAX_INPUT_CHARS = 20000;
+
+// 表示・送信の共通前処理。改行を LF へ寄せ、見え方だけを変える文字を落とす。
+function sanitizeText(text) {
+  return String(text ?? "").replace(/\r\n?/g, "\n").replace(DISPLAY_CONTROL_PATTERN, "");
+}
+
 function isSafeImageUrl(url) {
   return url.startsWith("https://") ||
     /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url);
@@ -2396,9 +2415,11 @@ function appendInline(parent, raw) {
 // ストリーミング中に部分テキストで繰り返し呼ばれることを想定し、未完了の記法は無視する。
 function renderMarkdown(container, src) {
   container.replaceChildren();
+  // モデル出力・ツール出力・履歴のいずれも外部由来。表示の直前で偽装文字を落とす。
+  src = sanitizeText(src);
   const wrap = document.createElement("div");
   wrap.className = "md";
-  const lines = String(src ?? "").split('\n');
+  const lines = src.split("\n");
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -4151,7 +4172,13 @@ function isScreenshotQuery(text) {
 
 composer.addEventListener("submit", async event => {
   event.preventDefault();
-  const text = input.value.trim();
+  // 見え方だけを変える文字を落としてから送る。画面に出た内容と、履歴・モデルへ
+  // 渡る内容を一致させるため、送信側でも Rust と同じ規則で正規化する。
+  const text = sanitizeText(input.value).trim();
+  if (text.length > MAX_INPUT_CHARS) {
+    setStatus(`入力が長すぎます（${text.length}文字）。${MAX_INPUT_CHARS}文字以内に分けて送るか、ファイルとして添付してください`);
+    return;
+  }
   if (!frontendInitialized) {
     setStatus("初期化を続けています。完了すると送信できます");
     status.classList.add("engine-pending");
@@ -5042,7 +5069,12 @@ input.addEventListener("input", () => {
   promptHistoryIndex = null;
   promptDraft = input.value;
   const len = input.value.length;
-  if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
+  if (!busy) {
+    // 上限は送信時ではなく入力中に知らせる（長文を書き終えてから断られると書き直しになる）。
+    status.textContent = len > MAX_INPUT_CHARS
+      ? `${len}文字（${MAX_INPUT_CHARS}文字まで。分けて送ってください）`
+      : len > 100 ? `${len}文字` : "";
+  }
 });
 // 日本語入力（IME）の変換中かどうか。変換中のキーはアプリの操作へ流さない。
 function isImeComposing(event) {

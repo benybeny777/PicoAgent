@@ -260,23 +260,30 @@ fn openai_completion_json(model: &str, reply: &str) -> Value {
 }
 
 /// リクエスト JSON の messages 配列をエージェント用 Message 列へ変換する。
-fn parse_messages(body: &Value) -> Vec<Message> {
-    body.get("messages")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    let role = item.get("role").and_then(Value::as_str)?;
-                    let content = item.get("content").and_then(Value::as_str)?;
-                    if !matches!(role, "system" | "user" | "assistant") {
-                        return None;
-                    }
-                    Some(Message::new(role, content))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+///
+/// ローカルAPIも利用者入力の受け口なので、画面と同じ関門（`accept_user_text`）を通す。
+/// 上限超過は黙って捨てず、呼び出し側が 400 で理由を返せるようエラーで伝える。
+fn parse_messages(body: &Value) -> Result<Vec<Message>, String> {
+    let Some(items) = body.get("messages").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut messages = Vec::with_capacity(items.len());
+    for item in items {
+        let (Some(role), Some(content)) = (
+            item.get("role").and_then(Value::as_str),
+            item.get("content").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if !matches!(role, "system" | "user" | "assistant") {
+            continue;
+        }
+        messages.push(Message::new(
+            role,
+            &crate::commands::accept_user_text(content)?,
+        ));
+    }
+    Ok(messages)
 }
 
 /// エージェント（スキル込み）を 1 リクエスト分だけステートレスに実行する。
@@ -425,7 +432,10 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
                     })).await;
                 }
             };
-            let messages = parse_messages(&body);
+            let messages = match parse_messages(&body) {
+                Ok(messages) => messages,
+                Err(error) => return respond(&mut stream, 400, &json!({ "error": error })).await,
+            };
             let model_override = body.get("model").and_then(Value::as_str);
             match run_agent(app, messages, model_override).await {
                 Ok((model, reply)) => respond(&mut stream, 200, &json!({
@@ -445,7 +455,12 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
                     })).await;
                 }
             };
-            let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("").trim().to_string();
+            let prompt = match crate::commands::accept_user_text(
+                body.get("prompt").and_then(Value::as_str).unwrap_or(""),
+            ) {
+                Ok(prompt) => prompt,
+                Err(error) => return respond(&mut stream, 400, &json!({ "error": error })).await,
+            };
             let messages = if prompt.is_empty() { Vec::new() } else { vec![Message::new("user", &prompt)] };
             let model_override = body.get("model").and_then(Value::as_str);
             match run_agent(app, messages, model_override).await {
@@ -469,7 +484,15 @@ async fn handle_connection(app: &tauri::AppHandle, mut stream: TcpStream) -> Res
                     })).await;
                 }
             };
-            let messages = parse_messages(&body);
+            let messages = match parse_messages(&body) {
+                Ok(messages) => messages,
+                Err(error) => {
+                    return respond(&mut stream, 400, &json!({
+                        "error": { "message": error, "type": "invalid_request_error" }
+                    }))
+                    .await;
+                }
+            };
             let model_override = body.get("model").and_then(Value::as_str);
             let wants_stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
             match run_agent(app, messages, model_override).await {
@@ -746,10 +769,25 @@ mod tests {
             { "role": "tool", "content": "無視される" },
             { "role": "user" }
         ]});
-        let messages = parse_messages(&body);
+        let messages = parse_messages(&body).unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "system");
         assert_eq!(messages[1].content, "やあ");
-        assert!(parse_messages(&json!({})).is_empty());
+        assert!(parse_messages(&json!({})).unwrap().is_empty());
+    }
+
+    /// ローカルAPIも画面と同じ入力の関門を通ること（不可視文字の除去と文字数上限）。
+    #[test]
+    fn ローカルapiの入力も正規化して上限で断る() {
+        let body = json!({ "messages": [
+            { "role": "user", "content": " 請求\u{202E}書.exe " }
+        ]});
+        let messages = parse_messages(&body).unwrap();
+        assert_eq!(messages[0].content, "請求書.exe");
+
+        let too_long = "あ".repeat(crate::commands::USER_TEXT_MAX_CHARS + 1);
+        let body = json!({ "messages": [{ "role": "user", "content": too_long }] });
+        let error = parse_messages(&body).unwrap_err();
+        assert!(error.contains("長すぎます"), "理由が伝わりません: {error}");
     }
 }
