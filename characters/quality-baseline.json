@@ -1,0 +1,22 @@
+{
+  "known": [
+    "mugi/輪郭ドリフト/blink_closed",
+    "mugi/輪郭ドリフト/blink_half",
+    "mugi/輪郭ドリフト/expression_happy",
+    "mugi/輪郭ドリフト/expression_sad",
+    "mugi/輪郭ドリフト/gaze_left",
+    "mugi/輪郭ドリフト/gaze_right",
+    "mugi/輪郭ドリフト/mouth_closed",
+    "mugi/輪郭ドリフト/mouth_open",
+    "mugi/顔以外の書き換え/blink_closed",
+    "mugi/顔以外の書き換え/blink_half",
+    "mugi/顔以外の書き換え/expression_happy",
+    "mugi/顔以外の書き換え/expression_sad",
+    "mugi/顔以外の書き換え/gaze_left",
+    "mugi/顔以外の書き換え/gaze_right",
+    "mugi/顔以外の書き換え/mouth_closed",
+    "mugi/顔以外の書き換え/mouth_open",
+    "photoreal-prototype/差分なし/mouth_closed"
+  ],
+  "note": "既存の通常2D制作正本に残る指摘。未記録の種類・レイヤーは失敗とし、更新では指摘を減らすだけにする。同じ指摘内の数値悪化は自動判定しない。"
+}
