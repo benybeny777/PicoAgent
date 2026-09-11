@@ -419,11 +419,9 @@ const CLOUD_TOOL_OUTPUT_CHARS: usize = 24_000;
 
 /// ツール出力の最大文字数（コンテキストウィンドウ超過防止）。
 ///
-/// 既定（`auto`）は**実際に使うモデルのコンテキスト長に合わせて**決める。同梱の
-/// 既定モデル（Gemma 4 E2B / E4B）は `PICOAGENT_LOCAL_CTX=8192` なので、日本語では
-/// 1 トークン ≒ 1 文字として使える幅そのものが狭く、ツール出力へ割けるのは全体の一部だけ。
-/// 一方で `PICOAGENT_LOCAL_CTX` を広げた環境ではその分だけ多く読めた方がよいので、
-/// 固定値ではなく ctx から算出して従来値を下回らないようにする。
+/// 既定（`auto`）は使用中のコンテキスト長の45%から算出する。
+/// ローカルの未設定時は32,768なので14,745文字となり、人格・履歴・回答生成の枠を残す。
+/// 保存済みの小さいコンテキスト長にも追従し、下限1,000文字・上限60,000文字に収める。
 pub fn tool_output_limit(cfg: &Config) -> usize {
     let configured = cfg.get("PICOAGENT_TOOL_OUTPUT_MAX_CHARS", "auto");
     let trimmed = configured.trim();
@@ -436,9 +434,9 @@ pub fn tool_output_limit(cfg: &Config) -> usize {
         return CLOUD_TOOL_OUTPUT_CHARS;
     }
     let ctx = cfg
-        .get("PICOAGENT_LOCAL_CTX", "8192")
+        .get("PICOAGENT_LOCAL_CTX", "32768")
         .parse::<usize>()
-        .unwrap_or(8_192);
+        .unwrap_or(32_768);
     // 人格 system・長期メモリ・会話履歴・ツール定義・生成分を残し、ツール出力へ 45% を配分する。
     // 旧実装は下限を8,000にしたため、既定 ctx=8,192 でも計算結果3,686を8,000へ
     // 戻してしまい、自動計算が実質機能していなかった。

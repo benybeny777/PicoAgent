@@ -1,6 +1,6 @@
 # LLMによるスキル開発・追加（未実装の将来設計）
 
-**設計承認待ち。実装・ランタイム導入・生成コード実行は行っていない。** 本機能はPicoAgentで選択したLLMが、利用者の依頼からスキル候補を生成し、試験・修正・有効化まで支援するもの。Codex/Claude等の開発エージェントを自動起動する設計ではない。設計の採否・引継ぎ・検証記録は[設計Draft PR #257](https://github.com/benybeny777/PicoAgent/pull/257) を正本とする。
+**設計受入済み・実装未着手。実装・ランタイム導入・生成コード実行は行っていない。** 本機能はPicoAgentで選択したLLMが、利用者の依頼からスキル候補を生成し、試験・修正・有効化まで支援するもの。Codex/Claude等の開発エージェントを自動起動する設計ではない。設計の採否・引継ぎ・検証記録は[設計PR #257](https://github.com/benybeny777/PicoAgent/pull/257) を正本とする。
 
 ## 目的と初期範囲
 
@@ -265,6 +265,6 @@ headlessはChromeの公式機能であることを [Chrome Headless mode](https:
 
 SPECの現行スキル説明を増殖させず、本書へ未実装契約を分けた。読者は生成機能の実装担当で、更新理由はパッケージ/隔離/承認契約の変更。SPECは現行挙動と本書の入口、TASKSは未完了、PRは採否・検証・引継ぎ記録を所有する。PR #256とは同じ文書の別節なので、統合時は双方の節を保持し一方で上書きしない。
 
-実装は [段階別タスク](TASKS.md#llm-skill-development-tasks) に従う。各段階を別の目的別PRにし、設計承認と実装開始の明示まで着手しない。コード型はS0の方式比較（方式Aの成立、または方式Bの隔離Builder成立・OS配布条件）とモデル評価の合格が必須。依存、設定、Tool追加時は既存共通スキルとガードを同期する。
+実装は [段階別タスク](TASKS.md#llm-skill-development-tasks) に従う。各段階を別の目的別PRにし、設計は受入済みだが、実装開始の明示と各段階の条件充足まで着手しない。コード型はS0の方式比較（方式Aの成立、または方式Bの隔離Builder成立・OS配布条件）とモデル評価の合格が必須。依存、設定、Tool追加時は既存共通スキルとガードを同期する。
 
 実装PRで必ず通す機械検査を、着手前に把握しておく。新しいToolは`SPEC.md`の分類表へ載せる（`doc_sync::guard::スキルはspecの分類表に載せる`）。新しい設定キーは`docs/SETTINGS.md`へ載せる（`doc_sync::guard`の双方向検査）。状態保存とパスは`store::guard`／`permissions::guard`、外部プロセス起動は`tools::process::guard`、HTTPは`tools::http::guard`が違反を検出する。同梱するランタイム・インタプリタ・SDKは`src-tauri/resources/bundled/<機能名>/`へ置き、取得は`cargo xtask setup`相当の明示操作に限る。最終確認は`cargo xtask verify`。

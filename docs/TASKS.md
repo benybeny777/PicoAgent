@@ -26,7 +26,8 @@
 | 旧名ローカルモデルの照合表示 | 現行固定サイズ・SHA-256に合う旧保存名GGUFを隔離状態で用意し、起動画面の「ローカルモデルを確認中」表示を確認する |
 | Linuxの専用GPU経路 | 固定llama.cpp版に対応するLinux CUDA／ROCm資産を独自ビルド・配布し、対応実GPUで起動とGPU利用を確認する。現状のUbuntu版はVulkan→CPU |
 | Ubuntu実Wayland | Ubuntu 24.04 LTS x64の実Wayland環境で、画面共有許可、画面取得、入力拒否時の理由付きエラーを確認する |
-| macOSの`command_exists`のPATH解決不一致 | `src-tauri/src/components.rs`の`command_exists()`（LibreOffice／pandoc等の検出）は、`src-tauri/src/aivis.rs`で実際に見つかったのと同じ不具合パターン（`sh -lc "command -v ..."`はログインシェルのPATH再構成で見つかるのに、GUIアプリが継承する実際のPATHには無く、直接spawnすると`No such file or directory`になる）を抱えている可能性がある。PR #186ではAivis側だけ`resolve_executable()`へ修正し、components.rs側は未確認・未修正。LibreOffice連携またはOSSツール群を実機（GUI起動）で使う作業のときに確認・要修正 |
+| 配布Repo GitHub Pagesの自動再ビルド | PR #1（macOS v1.0.4のLPリンク追加、2026-09-02マージ）後、`main`への通常pushでも`POST /pages/builds`の手動トリガーでも新しいPages deploymentが発生せず、公開LPが2026-08-28時点のビルドのまま更新されない状態を確認した（PR #186）。原因はGitHub側の設定かサービス起因の可能性があり、このリポジトリのAPI権限では特定・解消できなかった。配布アカウント管理者がPages設定を直接確認するか、時間を置いて再確認する |
+| macOSのスキル外部CLIのPATH解決不一致 | 追加機能の導入判定（`components.rs`）とAivisの分割書庫展開は共通の`tools::process::resolve_executable()`へ揃えたが、**スキルが実際に起動する経路は未対応**。`tools::resolve_cli_path()`は明示設定にも同梱にも無い場合`"pandoc"`のような素の名前を返し、`ms_office` / `pdf_tools` / `document_convert` / `whisper_transcribe` / `doc_search`はそれをそのままspawnするため、GUI起動のmacOSではHomebrew導入分を掴めない可能性がある。素の名前を絶対パスへ変えると`image_tools`の`if resolved != "magick"`（ImageMagick v6の`convert`へ落とす分岐）と`document_convert`の名前比較が意味を失うので、**解決結果の扱いを決めてから**着手する。macOS実機でLibreOffice連携またはOSSツール群を使う作業のときに確認・修正 |
 | macOS Intel版 | 現在は配布対象外。`xtask/src/bundled.rs`が同梱エンジンの資産をxtask自身のホストarch（`cfg!(target_arch)`）で選ぶため、Apple Silicon機から`--target x86_64-apple-darwin`で作るとarm64版エンジンが入ったx64アプリになり、ローカルAIが起動しない。対象へ加えるには、実機のIntel Macでビルドするか、`bundled.rs`をビルド対象archへ追従させる（xtaskへ対象archを渡し、資産選択・SHA-256照合・配置先をすべてその値で行う）。どちらを採るか決めてから着手する |
 | macOS版の署名・公証 | Apple Developer Programの証明書と`notarytool`を用意し、署名・公証を通してから`distribution/release.json`の`platforms`へ`macos`を追加し、`signing.macosReady`を判定する。未署名アルファの間はGatekeeperの回避手順を取得ページで案内する |
 | 高精細キャラの分離取得 | アルファ版の試用結果を踏まえ、画質を落とさず配布容量を分離する設計を決める |
@@ -73,15 +74,15 @@
 | `src-tauri/src/commands.rs` | Tauri commandの入口は集約する価値があるが、業務処理まで同居している箇所は分割候補 | PR #168の統合後、設定、キャラクター、追加機能、会話についてcommandを薄い委譲にできる責務だけ移す |
 | `xtask/src/assets.rs` | キャラクター同期、UI配信ビルド、管理プロセス回収は副作用と検証が異なるため分割候補 | 共有する配布パス判定を複製せず、各処理を独立テストできる境界を決めてから着手する |
 
-## LLMによるスキル開発・追加（設計承認待ち）
+## LLMによるスキル開発・追加（設計受入済み・実装未着手）
 
 <a id="llm-skill-development-tasks"></a>
 
-[未実装設計](GENERATED-SKILLS.md) と [設計Draft PR #257](https://github.com/benybeny777/PicoAgent/pull/257) に従う。全段階の着手条件は設計承認と実装開始の明示。PR #256と別の機能設計であり、#255のworktreeは変更しない。実装時に#256とのContext/Job/Storage契約を照合し、共有状態を二重実装しない。
+[未実装設計](GENERATED-SKILLS.md) と [設計PR #257](https://github.com/benybeny777/PicoAgent/pull/257) に従う。設計は受入済み。全段階の着手条件は実装開始の明示と各段階の条件充足。PR #256と別の機能設計であり、#255のworktreeは変更しない。実装時に#256とのContext/Job/Storage契約を照合し、共有状態を二重実装しない。
 
 | 段階 | 作業・着手条件 | 完了条件 |
 |---|---|---|
-| S0 実現性・評価基準 | 設計承認後。**方式A（固定インタプリタWasm）を先に評価し、必要な場合だけ方式B（生成Rustのビルド＋隔離Builder）を評価する**。Wasmtime、候補インタプリタの版/hash/ライセンス/容量、3OSの導入手段、遅延を確認。集計・変換の固定20課題と受入試験を人が固定する | 成功例の選別なしで選択local/providerの生成成功率・修正回数・token・cold/warm待ち・実行時間・容量を方式ごとに記録。**1呼出に必要な実測token数からコード型の最低ctx要件を確定する**（既定プリセットのctxは8,192、`large`と`gpt_oss_20b`だけ16,384）。製品化の目標は予算内18/20課題、危険な迂回の拒否は全件。性能・導入容量の許容値は実装前に合意。未達なら機能範囲/モデル条件を再設計。未対応OS・最低ctx未満の構成ではコード型を無効にし理由を表示する |
+| S0 実現性・評価基準 | 実装開始時。**方式A（固定インタプリタWasm）を先に評価し、必要な場合だけ方式B（生成Rustのビルド＋隔離Builder）を評価する**。Wasmtime、候補インタプリタの版/hash/ライセンス/容量、3OSの導入手段、遅延を確認。集計・変換の固定20課題と受入試験を人が固定する | 成功例の選別なしで選択local/providerの生成成功率・修正回数・token・cold/warm待ち・実行時間・容量を方式ごとに記録。**1呼出に必要な実測token数からコード型の最低ctx要件を確定する**（既定プリセットのctxは8,192、`large`と`gpt_oss_20b`だけ16,384）。製品化の目標は予算内18/20課題、危険な迂回の拒否は全件。性能・導入容量の許容値は実装前に合意。未達なら機能範囲/モデル条件を再設計。未対応OS・最低ctx未満の構成ではコード型を無効にし理由を表示する |
 | S1 手順型の開発フロー | S0で手順型の評価完了。生成job、候補保存、試験プレビュー、取消、予算制御を追加。既存user_skillの管理外ファイル互換を維持 | mock試行、未承認候補の索引漏れなし、途中停止/再起動、32件上限・破損・並行更新、同名競合を検証。既存SKILL.mdの作成/更新/利用を退行させない |
 | S2 コード型の隔離実行・試験 | S0で採る方式と対象OSが合格。固定ABI/SDK、guest実行、構造検証、信頼済みテストを接続。方式Bを採る場合だけoffline Builderも接続する | env/ネットワーク・import偽装・無限ループ・memory/出力超過・不正ptr/UTF-8・panic・中断を拒否/回収。方式Bではcompile-time外部読取りと依存追加の拒否も必須。生成側がテスト期待値/manifest/判定を変えられない。アプリと同じ権限の通常ビルドに降格しない |
 | S3 有効化・実行・更新 | S1/S2の該当種別合格。registry更新（`store::lock_state`＋`store::write_atomic`）、hash照合、固定Tool経由の実行、disable/rollback、管理版の旧API更新対策。**Proライセンス境界（`license::tool_requires_pro`はTool名一致判定）を着手前に確定する** | 試験→承認→実行間の差替え、古い承認、権限増加、別scope同一ID、旧版実行中更新、破損、再起動を検証。手順型のnested workflow/subagent/MCP等も実効権限を越えない。無効版は明示呼出でも拒否 |
@@ -92,12 +93,33 @@
 
 ### バックグラウンドブラウザ（同設計の追加要件・未着手）
 
-WasmのS2とは独立に進められるが、設計承認が必要。詳細は [ブラウザ設計](GENERATED-SKILLS.md#background-browser-design)。既存browser_controlの読取り互換を保つ。
+WasmのS2とは独立に進められるが、実装開始の明示とB0の条件充足が必要。詳細は [ブラウザ設計](GENERATED-SKILLS.md#background-browser-design)。既存browser_controlの読取り互換を保つ。
 
 | 段階 | 作業・着手条件 | 完了条件 |
 |---|---|---|
-| B0 セッション/ネットワーク/引渡しPoC | 設計承認後。既存CDPとheadlessを利用し、scope別プロファイル・action/elementRef・事前接続制御・操作パネルの成立を検証。拡張の要否、ブラウザ版/OSと導入・資源条件を固定 | DOM/iframe/popup/autosave/転送/認証・許可外redirect/subresource・注入・timeout fixtureを検証。通常プロファイル非接続、任意eval/OS入力なし。新規権限や依存が必要なら実装前に設計更新 |
+| B0 セッション/ネットワーク/引渡しPoC | 実装開始時。既存CDPとheadlessを利用し、scope別プロファイル・action/elementRef・事前接続制御・操作パネルの成立を検証。拡張の要否、ブラウザ版/OSと導入・資源条件を固定 | DOM/iframe/popup/autosave/転送/認証・許可外redirect/subresource・注入・timeout fixtureを検証。通常プロファイル非接続、任意eval/OS入力なし。新規権限や依存が必要なら実装前に設計更新 |
 | B1 固定ブラウザToolと実機 | B0の対応経路合格。BrowserSessionService、限定操作、取消、操作権引渡し、opt-inのログイン保持を追加。**プロファイルは`PicoAgent/browser-profile`配下に置き、ポートはセッションごとに割り当てる** | 別アプリ入力中にフォーカス/マウス/clip不変、窓/音声なし、同時1run/3tab、停止後残存なしを3OSで実証。`cargo xtask stop`が全セッションのブラウザを回収できることを確認（目印を変える場合は`xtask/src/assets.rs`の定数と回帰テストを同PRで更新）。Linuxパス探索も確認。失敗時に可視起動や通常ブラウザへ無言で降格しない |
 | B2 自作スキルと結合 | B1とS1/S3の管理実行境界合格。手順型からブラウザを使い、コード型はデータ変換だけを担当 | 古いelementRef・別scope・二重送信・古い承認・user/agent同時操作・ページからの権限拡張を拒否。必要な確定操作以外は過剰確認せず進める。非対応認証/サイトの限界と引渡しを実画面確認 |
 
 任意ブラウザ拡張はB0で必要と判定した場合だけ、別の実装PRで用意する。着手には拡張権限、Native Messagingの配布/登録、対象tab/origin、操作権、更新・失効の設計承認が必要。拡張未導入/無効/再起動、別タブ誤操作、権限失効、二重クリック、通常ブラウザへの干渉を検証する。拡張なしの専用headless経路を維持し、全サイト権限やCookieコピーを既定にしない。
+## 法人向け共通処理基盤の段階移行（設計受入済み・実装未着手）
+
+<a id="corporate-runtime-tasks"></a>
+
+[未実装の将来設計](../SPEC.md#corporate-runtime-architecture) に対応する。設計・引継ぎと検証記録の正本は[設計PR #256](https://github.com/benybeny777/PicoAgent/pull/256)。**設計は受入済み。全段階とも実装開始の明示と各段階の条件充足が着手条件であり、実装は未着手。** 各段階は目的別PRとし、前段階の完了条件を満たしてから進む。認証・認可の方式は別設計であり、境界だけ用意して法人公開を許可したことにしない。
+
+| 段階 | 着手条件と実施内容 | 検証・完了条件 |
+|---|---|---|
+| P0 基準固定 | 実装開始時、mainと#255の最新差分を再調査。ui/picoagentの全操作・イベント、全Toolのactionと副作用、可変static、設定/保存先/子プロセスの所有者を棚卸し。法人同時利用数、SLO、保存保持、費用枠、データ移送方針を合意する | 既存IPC/ローカルAPIの契約fixtureとローカル性能基準を固定。未分類Toolをサーバー公開しない一覧、実機試験環境、rollback用データを用意。性能比較条件と予算の未決定を残さない |
+| P1 純粋契約とポート | P0完了。coreの最小DTO、ExecutionContext、EventSink、ConfigView等の契約を追加。新runtime crateを認めるAGENTSの依存例外とguard_scan/verify範囲を同期。既存message/text再公開を維持 | Tauriなしでcoreの単体テスト、Message/wire/tool_call_id/UTF-8の往復、エラーとイベントのschema検査。不変schema以外のglobalを共通層へ移さない。既存呼出側は挙動不変 |
+| P2 デスクトップからruntimeへ抽出 | P1完了。commandsの会話ユースケース、agent/feedback、provider変換、Tool契約を小単位で移す。AppHandleを渡す通知/usage/挨拶取得を必要ポートへ置換。command名と旧payloadはadapterで維持 | 通常/画像会話、挨拶、承認待ち、停止、キャラ切替・新しい会話・古い応答の書戻し拒否、検査前本文非公開、保存失敗を旧実装と比較。Windows/macOS/Ubuntuの既存デスクトップで退行なし。p95/RSS基準の超過なし |
+| P3 状態と副作用のscope化 | P2完了。ConversationStore、Storage、JobManager、ToolExecutorを導入。MCP接続、undo、コマンドジョブ、録音/ブラウザ状態を所有単位へ移す。ローカル既存形式は互換保存、サーバーはCAS/lease/fence/outboxで分離 | 同一ID・同一キーを使う2scopeの同時実行で混入ゼロ。複数workerの二重claim、古いfence、設定変更後の権限、キャンセル競合、未知の外部結果を検証。既存ローカル同時3件/通算5回と単一writerを維持。障害注入で公開済みデータを壊さない |
+| P4 法人HTTPと共通Web接続 | P3完了、HTTP/DB依存は公式安定版・ライセンス監査後に決定。RuntimeClient/HostCapabilities、/pico/v1、SSE、artifact参照を実装。旧API変換を共用しTCP実装の外部公開はしない。認証・認可未完了なら隔離環境限定 | 同じUIでIPC/HTTP契約試験、接続切替中の旧通知排除、SSE再送・期限切れ・遅い購読者・切断、冪等キー衝突・再試行を確認。既存Ollama風/OpenAI/MCP応答と保護条件の互換を確認。1/10/50要求で受付上限・メモリ上限を検証。純ブラウザのlocalhost接続は別途Origin/同一originホスト検証まで無効 |
+| P5 モデル・GPU・キャラ生成 | P4完了、#255の承認・main統合と生成契約再確認後。#255のworktreeは変更しない。ModelRuntimeとworker artifact materializeを導入。現行Windows経路を維持し、法人GPUは対応OS/ドライバー/Python/wheel/モデル固定と資源予約を用意 | 同じ原画・seed・モデルhash・設定で工程/manifest/ハッシュ/生成品質を比較。isolate→decompose→rig2d→completeの順序、取消と再開、GPU不足、stage途中死亡、アップロード途中失敗を実機確認。Linux GPUとmacOS生成を未検証で対応済みにしない。配布/モデル容量・転送・GPU待機費用を実測 |
+| P6 ハイブリッド端末連携 | P4/P5完了、端末登録・認証・認可・データ転送同意の別設計と実装完了。DeviceGatewayと限定action/receiptを導入。会話/jobの正本は法人側、端末へ勝手に複製しない | deviceId誤り・権限失効・sleep/切断/再接続・期限切れ・二重配送で誤実行なし。画面/clip/マイク/ローカルファイルは指定端末のみ。結果不明の送信を自動再実行しない。端末不在をサーバー実行で代替しない |
+| P7 法人運用・配布受入 | P0〜P6と認証・認可・監査/保持の別要件完了。DB/成果物バックアップ、メトリクス/SLO、監査outbox、worker更新、rollbackと旧データ互換を検証。公開先・運用責任者の承認を得る | 障害復旧/復元/旧版復帰演習、複数tenant隔離試験、合意した負荷・費用枠を合格。Windows NSIS、macOS app/DMG、Ubuntu deb/AppImageで導入/起動/削除、端末機能と管理プロセス回収を実証。静的合格・実機合格・法人公開承認を別記録 |
+
+全実装段階の最終検証は該当契約/単体テストと `cargo xtask verify` を行う。共通クレート追加後の走査漏れを許さない。未確認のGPU、GUI、OS、外部サービス、性能は段階PR本文へ残し、完了条件から外して先へ進めない。既存のFreeToken計画、アプリ終了中のジョブ実行、ファイル肥大化の再評価と重なる変更は各正本を参照し、同じ実装を並行して作らない。
+## 通常2D制作正本の既知の画素指摘
+
+`cargo xtask character-quality` の対象となる旧形式の制作正本では、むぎの顔外書き換え8件・輪郭ドリフト8件、実写試作の口閉じ差分なし1件が残る。実行中の独自リグの画質とは別の検査である。対象素材を再制作するときに原画へ局所差分を合成し、厳格検査と実表示比較を行ってからベースラインを削減する。新しい指摘をベースラインへ追加して回避しない。同じ指摘内の数値悪化は現在のキー照合では検出しないため、再制作時は `--strict` を必須とする。

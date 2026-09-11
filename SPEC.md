@@ -37,6 +37,7 @@ PicoAgent は透明な **Tauri** ウィンドウに常駐する、キャラク�
 - [設定キーリファレンス](#設定キーリファレンス)
 - [外部インターフェース（ローカルAPI / MCP）](#外部インターフェースローカルapi--mcp)
 - [フロント連携と製品化](#フロント連携と製品化)
+- [法人向け共通処理基盤（未実装の将来設計）](#corporate-runtime-architecture)
 
 ---
 
@@ -79,7 +80,7 @@ PicoAgent製品内部のエージェント構成は、名称だけで空の層�
 - `hi` / `こんにちは` などの短い挨拶は `agent::simple_greeting_answer()` がプロバイダを呼ばず直接返す。小型モデルへ「AIとして説明しない」等の内部ガイドをユーザー本文に追記すると、禁止事項そのものを返答として説明・読み上げることがあるため、挨拶経路へ内部指示を混ぜない。履歴へはユーザーが入力した原文と自然な短文だけを残す。返す一言は全キャラ共通の定型文にせず、`pet_set_character_profile` が受け取った `character.json` の `greeting`（人格そのままの挨拶）を使う。時間帯は「おはよう」「こんばんは」のように挨拶自体が指していればそれに合わせ、`hi` / `やっほー` のように時間帯を含まない挨拶は実時刻（5〜10時=朝 / 11〜16時=昼 / それ以外=夜）で決める。朝・夜は先頭の挨拶語だけを差し替えて二重挨拶を避け、キャラクターの挨拶が無い場合だけ既定文へ落とす。
 - キャラの通常ドラッグはOS標準のウィンドウ移動とする。通常2Dは従来の上半身位置 `upper` を標準とし、長身・実写・Live2Dは長身でも腰まで入りすぎない胸上 `bust` を標準にする。Live2Dはモデル別の`live2d.scale` / `offsetY`で胸上へ調整済みなので、未保存時にPNG向け`bust`倍率を重ねず、中立の`upper=1.55`を基準倍率として扱う。立ち絵の構図は設定画面の「キャラごとの構図」で編集し、表示形式ごとにサイズスライダーとプレビュー上のドラッグ（数値入力も併設）で調整する。`PICOAGENT_CHARACTER_FRAMING` はキャラIDと表示形式ごとに `zoom` / `x` / `y` / `preset` を保存する。表示側は `#characterView` に `translate(--char-x, --char-y) scale(--char-zoom)` を当て、中の `img` が持つ待機モーションと干渉させない。
 - 配置編集（上部メニューの「配置」・右クリックの「配置を直接調整」）で決めた位置と倍率は `PICOAGENT_LAYOUT_PLACEMENTS` 1キーへ保存する。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、キャラクターの立ち絵は `characters` の下にキャラクターID×表示形式で持つ。正規化は `layout_placements::normalize()` が正本で、未知の表示形式・対象・不正値を落とし、倍率は0.25〜4.0、位置は±20000pxへ丸め、旧 `talk` は `chat` へ寄せる。保存は確定時（「保存」「閉じる」「表示形式・キャラ切替」「リセット」）だけ `pet_save_layout_placements` で行い、ドラッグ中は書かない。読み込みは `pet_init` の `layoutPlacements`。**旧版が webview の `localStorage` に持っていた値は初回だけ設定へ移す**（移行済みの印を残して二重移行しない）。設定へ移したことで、WebViewデータの初期化・再インストール・別PCへの引き継ぎでも配置が残る。
-- 設定画面には表示モニターの手動指定を置かない。新規作成時と再表示時に、メインウィンドウの `current_monitor()`（未確定時だけ主画面）を基準として同じディスプレイの中央へ配置する。メインのペットウィンドウが「常に手前」（既定有効）の場合、設定ウィンドウにも同じ`always_on_top`を適用する。macOSはウィンドウレベルの階層をWindowsより厳格に扱うため、これを揃えないと常に手前のペットウィンドウの背後へ設定画面が回り込み、選択も保存ボタンのクリックも背後へ吸われて操作できなくなる（PR #186で実機確認）。
+- 設定画面には表示モニターの手動指定を置かない。新規作成時と再表示時に、メインウィンドウの `current_monitor()`（未確定時だけ主画面）を基準として同じディスプレイの中央へ配置する。メインのペットウィンドウが「常に手前」（既定有効）の場合、設定ウィンドウにも同じ`always_on_top`を適用する。macOSはウィンドウレベルの階層をWindowsより厳格に扱うため、これを揃えないと常に手前のペットウィンドウの背後へ設定画面が回り込み、選択も保存ボタンのクリックも背後へ吸われて操作できなくなる（PR #186で実機確認）。右クリックメニューの「常に手前」は、開いている設定ウィンドウにも同時に適用する（メインだけを戻すと、設定側が閉じるまで最前面のまま下ろせなくなる）。
 - `crates/picoagent-core` は非公開の内部共通crateで、Tauri・OS・製品設定に依存しない正規形メッセージとUTF-8安全処理を持つ。`src-tauri/src/{message,text}.rs` は既存のアプリ内参照を保つ互換層で、実装はコアを再公開する。外部配布は行わず `publish = false` を維持する。設計ガードは `guard_scan::all_sources()` を通してコアのRustソースも走査する。逐次UTF-8デコードは不完全な末尾を次のチャンクまで保持し、不正なバイト列を置換する。処理済み領域はチャンクごとに一度だけ除き、不正バイトが連続しても残りのバッファを繰り返し移動しない。
 - 表示形式（画面構成）は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget` の7形式を切り替え、フロントは `<main id="petApp" data-layout="…">` を見て `styles.css` が配置を変える。`chat` は青灰色の壁紙と左右の白／緑吹き出しを持つLINE風表示。旧 `talk` は `chat` へ統合し、選択値、ウィンドウ寸法、キャラ別構図を読み込み時に移行する。**HTML の要素はどの形式でも同じ**で、キャラクター描画・会話履歴・アクションセンター・読み上げ・音声入力・添付・許可判定はすべて共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。切替は設定画面の「画面・操作」にある実表示プレビューカードと、右クリックメニュー「画面レイアウト」の両方から行える。右クリックの「画面レイアウト・位置…」は同ページを直接開く。右クリックメニューは `layout::select()`、設定保存は `remember_current_size()` → 設定保存 → `apply()` の順に処理する。どちらも切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから、次の形式の寸法を当てる。大きい形式へ切り替えてウィンドウが画面外へ出た場合は `pull_back_on_screen()` が見える位置へ戻す。
 - `beta-full`付きのアルファ配布中だけ全形式に小型の`ALPHA`バッジを表示する。**表示は二段で決める。** 実行時は起動初期化が返すビルド種別（`betaBuild`）で決め、既定は `hidden` なので通常`build`と正式な`build-distribution`では出ない。加えて配信UIの生成時に、`build-ui` がアルファ指定以外（`dev` / `build` / `build-distribution`）では `ui-dist/index.html` からバッジの記述自体を取り除くため、販売物にはマークアップも残らない。バッジの記述は `ui/index.html` の1箇所だけで、剥がし処理と実際の記述がずれないよう xtask のテストが記述と除去結果を双方向で検査する。バッジは`pointer-events:none`で入力・ドラッグ・リサイズを妨げず、通常形式は右上、配信形式はLIVE表示・キャラ・操作列を避けたステージ左上へ置く。
@@ -197,7 +198,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 - エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`xtask`（`bundled::fetch_engine`）（`cargo xtask setup engine`）で
   `src-tauri/resources/bundled/engine/` に取得。llama.cpp安定版v0.2.0が配布用に対応付けた`b10566`を正本とし、WindowsはVulkan、Ubuntu LinuxはVulkan、macOSはMetal対応の対象OS別資産名と固定SHA-256をGitHub digest・ダウンロード実体の両方へ照合する。配置後は`picoagent-engine.json`へタグ・資産名・SHA-256を残し、3項目が一致しない既存配置は再取得する。`LLAMACPP_ASSET`で資産を明示変更する場合も対応する`LLAMACPP_SHA256`を必須にする。`tauri.conf.json` の `bundle.resources` で配布物に同梱する。
 - 起動時（既定が `local` のとき）`engine::ensure_and_start` を非同期実行:
-  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、軽量で連続ツール利用を検証済みのLFM2.5 2.6B QAD版を選び、`PICOAGENT_MODEL`と一緒に`config.json`へ保存する。保存できなければ画面へ理由を出してエンジン起動を止め、未保存の選定を黙って使わない。既にGemma 4、Qwen3.5、OpenAI gpt-oss-20b、Phi-4 mini、LFM2.5 1.2B、LLM-jp-4 8B Thinking、`custom`を明示保存している場合は変更しない。LFM2.5 1.2Bは連続2ターン目で別ツールへ切り替えられず、LLM-jp-4 Thinkingは思考文の非表示と連続ツール利用を実エンジンで未確認のため、いずれも互換用プリセットとして残すだけで設定画面の新規候補に出さない。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom`の場合だけ`PICOAGENT_MODEL_URL`を直接使う。
+  1. `PICOAGENT_LOCAL_MODEL_PRESET` が未設定または `auto` の場合、軽量で連続ツール利用を検証済みのLFM2.5 2.6B QAD版を選び、`PICOAGENT_MODEL`と一緒に`config.json`へ保存する。保存できなければ画面へ理由を出してエンジン起動を止め、未保存の選定を黙って使わない。既にGemma 4、Qwen3.5、OpenAI gpt-oss-20b、Phi-4 mini、LFM2.5 1.2B、LLM-jp-4 8B Thinking、`custom`を明示保存している場合は変更しない。LFM2.5 1.2Bは連続2ターン目で別ツールへ切り替えられず、LLM-jp-4 Thinkingは思考文の非表示と連続ツール利用を実エンジンで未確認のため、いずれも互換用プリセットとして残すだけで設定画面の新規候補に出さない。旧Qwen／Llama／Mistral／PhiプリセットIDは同等負荷帯の現行候補へ移行し、`custom`の場合だけ`PICOAGENT_MODEL_URL`を直接使う。同じ工程で`PICOAGENT_LOCAL_CTX`も保存する。全プリセットの既定コンテキスト長は32,768で、保存値と環境変数が未設定の場合だけ保存する。既存の8,192／16,384も自動保存と手動指定の出自を区別できないため保持し、プリセット変更時にも上書きしない。既存インストールで32,768を使う場合は設定画面で変更する。
   2. 選定モデル GGUF がユーザーデータ配下の `PicoAgent/bundled/models/` に無ければプリセットURLまたは `PICOAGENT_MODEL_URL` からストリーミング DL（進捗を `engine:status {phase:"download", percent}` で UI へ）。旧 `app_data_dir/models/` または旧 `PicoAgent/models/` に取得済みモデルがある場合は初回に新保存先へ移行する。
   3. Windowsは実GPUを判定し、Turing以降かつドライバー580以上のNVIDIAは`CUDA 13.3 → Vulkan → CPU`、AMD公式HIP Runtime対応SKUは`ROCm 7.14 → Vulkan → CPU`、Intel Arc／Iris Xe／Core Ultra系の`Intel Graphics`／Data Center Flex・Max／Server GPUは`SYCL → Vulkan → CPU`の順に起動する。Intel SYCLは対応済みだが、想定利用者に占めるIntel GPUのシェアを踏まえて主要な訴求・優先対応の対象には置かず、推奨構成の案内はNVIDIA CUDAまたはAMD ROCmを主軸にする。旧Intel UHD／HD Graphics、公式表にないAMD、Maxwell／Pascal／Voltaまたは古いドライバーのNVIDIAは専用方式を取得せずVulkanから始める。追加配布物は対象GPUの確認後だけ取得し、固定サイズ・SHA-256・安全な展開・`--list-devices`の実認識を通ったステージングだけを原子的に有効化する。追加方式の準備または起動に失敗しても同梱Vulkanへ戻る。`PICOAGENT_LOCAL_NGL=0`は追加取得を行わずCPU固定を優先する。AMD／Intel対応境界はllama.cpp固定版または配布版の更新時に各社公式対応表を再確認する。
      移行判定と旧ファイル削除前の照合は数GBのSHA-256になるため、照合対象が実在するときだけ `engine:status {phase:"verify"}` を出す（無表示だと起動が固まったように見える）。
@@ -293,7 +294,7 @@ Markdownスキルは実行コードでも動的Tool定義でもない。`user_sk
 
 #### LLMによるスキル開発・追加（未実装）
 
-現行のMarkdownスキル管理を保ち、選択LLMによる候補生成・隔離検証・版管理・明示有効化を加える将来設計は [LLMスキル開発設計](docs/GENERATED-SKILLS.md) を参照する。手順型と純粋処理のコード型を分け、任意Python/PowerShell実行をそのまま公開しない。コード型の実行方式は、同梱インタプリタWasmへプログラムを渡す案と生成Rustをビルドする案の2候補があり、どちらもWasm sandbox内で純粋処理に限る。専用バックグラウンドブラウザと、必要時だけ提供する任意ブラウザ拡張の契約も同設計に含む。設計承認待ちであり、生成コードの追加・ブラウザ操作拡張はまだ実装されていない。
+現行のMarkdownスキル管理を保ち、選択LLMによる候補生成・隔離検証・版管理・明示有効化を加える将来設計は [LLMスキル開発設計](docs/GENERATED-SKILLS.md) を参照する。手順型と純粋処理のコード型を分け、任意Python/PowerShell実行をそのまま公開しない。コード型の実行方式は、同梱インタプリタWasmへプログラムを渡す案と生成Rustをビルドする案の2候補があり、どちらもWasm sandbox内で純粋処理に限る。専用バックグラウンドブラウザと、必要時だけ提供する任意ブラウザ拡張の契約も同設計に含む。設計受入済み・実装未着手であり、生成コードの追加・ブラウザ操作拡張はまだ実装されていない。
 
 #### 作業フォルダのAGENTS.md（案件ごとの作法）
 
@@ -492,7 +493,7 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 - 未保存変更がある場合はフッターの「変更を戻す」を有効化し、変更済みの設定行を薄く強調する。「変更を戻す」は最後に読み込んだ、または保存に成功した設定スナップショットからフォームを再描画し、キャラ上書き・音声上書き・目覚ましJSONを含めて未保存状態だけを破棄する。
 - スキル（`tools`）タブには、`settings_load` が返す各ツールの `name` / `label` / `description` / `configSchema` を使い、カテゴリ見出し付きで全スキルを縦に並べる。各カードには `configSchema` と保存値から「設定不要」「未設定」「一部設定」「設定済み」の状態バッジを表示し、`settings.js` の `approvalPolicy()` が送信前確認・実行前確認・書込/変更・外部読取・低リスクの承認ポリシーを表示する。Gmail / Slack / Googleカレンダーは `settings_test_tool` で保存済み設定の接続テストを実行でき、`diagnose_tool_test()` の診断文で token 未設定、401、403、404、timeout、接続失敗を原因候補として示す。設定を持つカードはクリックで展開し、`alarm` と `task_scheduler` は `settings-schedules.js` の専用フォームでJSON保存値を組み立てる。
 - 使い方（`skillguide`）タブには `settings_load` が返す各ツールの `name` / `label` / `description` / `examples` を使い、区分・できること・頼み方例を横断表示する。個別カードだけでは機能全体を把握しづらいため、まず一覧資料として全スキルを見通せるようにする。
-- 診断・修復タブの「診断情報を書き出す」（`settings_export_diagnostics`）は、版・OS・選択中のAI・設定・当日 `app.log` の末尾200行を1つのテキストへまとめ、ログと同じ置き場（`PicoAgent/log/diagnostics-<日時>.txt`）へ保存してパスを返す。**設定スキーマで `password` のキーと `secret::is_secret_key()` に当たるキーは値を出さず「（設定済み）」「（未設定）」だけにし、保存値・復号値・環境変数の秘密値がログに含まれても伏せる**。本文の組み立ては `diagnostics::build_report()` が正本で、秘密値が出ないことを単体テストで固定する。外部への自動送信と会話履歴の同梱は行わない。
+- 診断・修復タブの「診断情報を書き出す」（`settings_export_diagnostics`）は、版・OS・選択中のAI・設定・当日 `app.log` の末尾200行を1つのテキストへまとめ、ログと同じ置き場（`PicoAgent/log/diagnostics.<日付>.<時刻>.txt`）へ保存してパスを返す。**日付を `.` 区切りで挟むのは、`log_paths::prune_old_logs()` の保持期間（7日）へ乗せるため。旧版の `diagnostics-<日付>-<時刻>.txt` も同じ保持期間で回収する**（乗せないと、設定を丸ごと含むファイルだけが置き場へ残り続ける）。**設定スキーマで `password` のキーと `secret::is_secret_key()` に当たるキーは値を出さず「（設定済み）」「（未設定）」だけにし、保存値・復号値・環境変数の秘密値がログに含まれても伏せる**。本文の組み立ては `diagnostics::build_report()` が正本で、秘密値が出ないことを単体テストで固定する。外部への自動送信と会話履歴の同梱は行わない。**同じ `app.log` の末尾を出す起動失敗の案内画面（`boot_screen`）も、`commands::redacted_log_tail()` を通して同じ規則で伏せる**（片方だけ伏せると、利用者が案内画面を撮って送るときに漏れる）。
 - スキル一覧は `settings_load` が返す各ツールの `name` / `label` / `description` をカードで表示する。`config_schema()` を持つスキルは ⚙ 付きのアコーディオンになり、カードをクリックするとそのスキルの設定項目だけがその場に開く（設定項目を末尾へずらずら並べない）。APIキー・OAuth token・Webhook URL が必要なスキル/プロバイダには、設定画面内で取得手順・貼り付け先・公式リンクをまとめた折りたたみ式の設定ガイドを表示する。チャットで設定方法を尋ねた場合も `agent.rs` の固定ガイドで同等の手順とリンクを返す。キャラクター一覧は `assets/characters/index.json` と各 `character.json` から表示し、表示名・内部ID・説明・描画形式バッジ（`PNGアニメ` / `Live2D` / `追加PNG`）と、idle 先頭フレーム（無ければ `boot.sleeping`、どちらも無ければ `_preview-placeholder.png`）を丸い小アイコンとして添える。専用検索は表示名・内部ID・説明を対象とし、`Live2D` / `PNGアニメ` / `追加キャラ` のフィルターと組み合わせて候補件数を表示する。使用中のカードは枠を強調して選択ボタンを「選択中」の無効表示にし、他のカードの「このキャラを選ぶ」でプルダウンと同じ `PICOAGENT_CHARACTER` と人格・口調の編集対象を切り替える（反映は「保存」時。同じ表示名のキャラが並んでも内部IDと描画形式で区別できる）。
 - 「AIモデル・連携」タブのコネクタ設定は、選択中プロバイダの設定だけを表示する（プロバイダを切り替えると表示も切り替わる）。未使用プロバイダのAPIキー欄・モデル欄はDOMにも作らず、プロバイダ切替時にフォームを作り直す。保存時は既存設定を土台に表示中入力だけを上書きし、未表示プロバイダの保存済み設定を消さない。プロバイダ一覧は既定の `local` を先頭に表示し、その他をラベル順に並べる。基本設定タブの「モデル」欄は Ollama のローカルモデル一覧専用とし、local / OpenAI / Claude / DeepSeek / Gemini / xAI / Mistral は「AIモデル・連携」タブ内でモデルを種類・サイズの2段セレクトから選ぶ。保存時は選択プロバイダのモデル設定を `PICOAGENT_MODEL` にも同期する。「AIモデル・連携」タブには「ダウンロード済みモデル」セクションがあり、`pet_list_downloaded_models`（`app_data_dir/bundled/models` 配下の `.gguf` をファイル名・サイズ・対応プリセット名・使用中フラグ付きで列挙）と `pet_delete_downloaded_model`（指定 GGUF を物理削除）でモデルを管理できる。削除はモデルディレクトリ配下の `.gguf` のみを対象とし、パストラバーサルと使用中モデルの削除を拒否する。同梱物（PicoAgent 管理下）のためゴミ箱ではなく削除でディスクを解放する。削除前は再ダウンロードが必要になることを `aria-live` の画面内ステータスへ表示し、同じボタンの二度目の操作だけで実行する。ブラウザ標準の確認／警告ダイアログは使わない。
 - 「診断・修復」タブは `engine_status` / `aivis_status` / `pet_usage` / `pet_traces` を読み、選択中プロバイダ・同梱エンジン状態・Aivis状態・今月/累計トークン使用量・直近スキル実行の件数/平均遅延/エラー数をカードで表示する。`settings_load.product` の製品名・Cargoパッケージ版・識別子に加え、ローカルAIと外部連携の通信境界、保存データ、第三者ソフトウェアの扱いも製品情報として表示する。設定値は変更せず、各取得に失敗した場合も診断カード単位でエラー表示に留める。
@@ -570,7 +571,7 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
 - 永続ジョブ（`durable_jobs.rs` + `job_center`）: `ai_drive`と`artifact_pipeline`だけを対象に、引数・状態・試行回数・結果を`app_data_dir/durable-jobs.json`へ保存する。更新は`store::lock_state("durable-jobs")`で直列化し、`store::write_json_atomic`で確定する。破損時は原本を退避できた場合だけ空で開始する。起動時に`running`を`queued`へ戻し、安全な工程の先頭から再実行する。取り出しは1本のループで行い、実行だけを最大3件まで並べる（重いジョブの後ろで短い転送が待たされないようにする。一覧の更新は同じロックを通るので同時実行でも壊れない）。進捗はスキルが`durable_jobs::report_progress()`で報告し（`ai_drive`はチャンク送信、`artifact_pipeline`は工程単位）、開始・進捗・完了・中止・再試行のたびに`pet:notice`（`kind=durable_job`・`jobId`・`state`・`progress`）を送る。フロントは`jobId`で同じ行を上書きし、未読数は状態が変わったときだけ増やす。途中経過は1〜99へ丸め、0（未着手）と100（完了）の意味を保つ。終了済み・キャンセル済みへ遅れて届いた進捗は捨てる。成果物はジョブ所有マーカーが一致する専用フォルダだけを再生成し、クラウド転送は安定した転送IDで二重登録を避ける。1回30分、自動復旧は通算5回を上限とし（利用者が明示した再試行では数え直す）、ワーカー内の異常終了を次のジョブへ波及させない。アプリ終了中に別プロセスで動作する機能ではない。アップロードセッションURLとワーカー内部トークンは永続化せず、再開時は新しいセッションを作る。401は`waiting_auth`に止め、設定更新後の明示再試行を待つ。`run_command`のプロセスジョブはアプリ終了時に子プロセスを回収する別責務なので統合しない。
 - 画面読み上げへ知らせる範囲は、回答欄（`#reply`、`aria-live="polite"` + `aria-atomic="true"`）と状態行（`#status`、`role="status"`）だけにする。フキダシ全体を生きた領域にするとクイック操作や通知パネルまで読まれ、会話履歴は検索・進捗更新のたびに全件を再構築するため `role="log"` を付けると過去分まで繰り返し読まれる。生成中の回答欄は `aria-busy="true"` で保留し、最初のストリーム断片では外さず、確定描画または中断時にだけ外して1回知らせる。
 - アクションセンター（`renderer.js`）: メインフキダシの通知ボタンは `pet:notice`、`pet_schedule_runs`、会話タスクの状態を同じ一覧へ表示し、未読件数をバッジ表示する。直近50件は `localStorage` に保持する。実行中会話には停止、完了会話には再入力、スケジュール通知には再実行と設定の操作を出す。失敗時はエラー色、成功時は通常色で表示する。
-- 共通プロセス実行（`tools/process.rs`）: スキルからの外部コマンド起動を1箇所へ集約する。`process::command()` がWindows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`（中断時の子プロセス回収）・stdio の既定を適用した `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行し、打ち切り時は `terminate_process_tree()` でプロセスツリーごと回収する。未導入がありうる外部CLIは `output_or_install_hint()` を使い、**起動できなかったときだけ**導入案内を足す（タイムアウトへ付けると、入っているのに導入を促すことになる）。**スキルが `Command::new` を直接使うことと、`tokio::time::timeout(..., command.output())` で自前に包むことは禁止**で、`tools::process::guard` のテストが直接起動・自前 `hide_window` / `CREATE_NO_WINDOW`・自前タイムアウトを検出して失敗させる。
+- 共通プロセス実行（`tools/process.rs`）: スキルからの外部コマンド起動を1箇所へ集約する。`process::command()` がWindows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`（中断時の子プロセス回収）・stdio の既定を適用した `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行し、打ち切り時は `terminate_process_tree()` でプロセスツリーごと回収する。未導入がありうる外部CLIは `output_or_install_hint()` を使い、**起動できなかったときだけ**導入案内を足す（タイムアウトへ付けると、入っているのに導入を促すことになる）。実行ファイルの存在確認は `process::resolve_executable()`（PATH＋macOSではHomebrewの `/opt/homebrew/bin`・`/usr/local/bin`、WindowsではPATHEXT）と `has_executable()` に集約し、**ログインシェル（`sh -lc "command -v ..."`）で確かめない**。ログインシェルは `/etc/paths.d` からPATHを組み直すため「ある」と判定されるのに、GUIアプリが継承する素のPATHには無く、実際にspawnすると `No such file or directory` になる（macOSでp7zipを導入済みでもAivisの分割書庫展開が失敗していた）。**スキルが `Command::new` を直接使うことと、`tokio::time::timeout(..., command.output())` で自前に包むことは禁止**で、`tools::process::guard` のテストが直接起動・自前 `hide_window` / `CREATE_NO_WINDOW`・自前タイムアウトを検出して失敗させる。
 - 共通許可（`permissions.rs`）: ファイル・ディレクトリ・コマンド実行の許可ルールを1箇所へ集約する。許可判定を通過したパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限定する（内部 `PathBuf` は非公開。派生パスも再検証するので `..` で脱出できない）。ファイル操作は `SafePath` だけを受け取る `permissions::fs` を使う。アプリ内部が決めたパス（一時ファイル等）のみ `SafePath::app_owned` で扱う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` のテストが `skills/**/mod.rs` を走査し、自前判定（`fn bounded_path(base:` 等）とパス引数を持つのに `resolve` を通していないスキルを検出して失敗させる（例外は `run_command` / `code_runner` / `trash_file` のみ。いずれも独自の追加制約を持つ実行・削除系）。**正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は設定に関わらず常に拒否する（`is_system_protected`）。許可判定では既存の最深祖先を実体化し、シンボリックリンクやWindowsジャンクション経由のルート外到達も拒否する。全ファイル/実行スキル（`read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `artifact_pipeline` / `ai_drive` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler`）とドロップファイル読込はこの共通ルールを参照する。旧キー（`PICOAGENT_TOOLS_ROOT` / `PICOAGENT_WORKSPACE_ROOT` / `PICOAGENT_DOCUMENT_ROOT` / `PICOAGENT_COMMAND_ROOT` / `PICOAGENT_COMMAND_ALLOWED_PATHS` / `PICOAGENT_MEETING_ROOT`）は設定済みなら許可ルートとして引き継ぐ（移行互換）。設定画面の「安全・許可」タブで編集する。個別スキルの許可ルート設定フィールドは廃止した。
 - プロジェクト文脈の差し込み: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system メッセージの `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**（追記だと課題を足すたびに古いまとめが積み重なる）。台帳が読めないときは差し込まずに会話を続ける（読み取り専用の付加情報で、保存はしないためデータは失われない）。
 - ユーザーへの確認（`ask_user`）: モデルが判断に迷う点を2〜4個の選択肢つきで尋ねる。`run_command` の承認カードと同じマーカー方式で、`agent.rs` がエージェントループを止め、`commands.rs` が質問文と `choices` をフロントへ返す（クイック操作欄が選択肢ボタンに切り替わる）。保留中の質問は `AppState.pending_question` が1件だけ保持し、次のユーザー発話で必ず解除する。返答は番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述としてそのまま会話へ入る。外部送信も設定変更もしない。
@@ -605,3 +606,209 @@ JSON-RPC 2.0。プロトコルバージョンは `2024-11-05`。
   `cargo xtask build`、`build-beta`、`build-distribution` はいずれも `distribution/release.json` の許可キャラだけを同期し、開発用サンプルが手元にあっても製品へ混ぜない。`build-beta` は販売条件を完了扱いにせず、販売版と同じ軽量同梱範囲で試用インストーラを作る。`build-distribution` だけはEULA／プライバシー確認、第三者同梱物台帳、Live2D審査参照、公開URL、3箇所の版一致、販売対象キャラの存在を検査し、未完了なら取得・同期より前に停止する。初期販売は `signing.required=false` / `updates.required=false` とし、OSコード署名・公証・自動更新をブロッカーにはしないが、警告表示と手動更新案内を残す。将来各 `required` を有効にした場合だけ、更新署名・Windows／macOS署名を再び必須検査する。秘密鍵・証明書は販売設定へ含めない。
 - 更新確認の正本は公開配布Gitの `latest.json`（`schemaVersion=1`、`version`、`notes`、`releasePage`、OS別 `url` / `size` / `sha256`）。起動時は新版通知だけを行い、設定の「更新を確認」後に利用者が二段階の「アップデート」を完了した場合だけWindows x64インストーラを取得する。更新対象はPicoAgent本体で、設定・会話履歴・追加キャラ・ユーザーデータ配下のダウンロード済みLLMモデルと追加機能は維持し、再ダウンロードしない。追加機能の版変更は「追加機能・更新」で個別に行う。フィードは256KB、インストーラは512MBを上限とし、URLを公開配布RepoのReleaseに限定してサイズ・SHA-256・PE形式を検証してから起動し、PicoAgent本体を終了する。macOSはアプリ内更新未対応なので更新ボタンを出さない。オフライン・タイムアウトは正常な見送りとして扱う。HTTP異常・不正JSON・未対応schemaは、起動時確認なら画面を妨げず診断ログへ、設定からの明示確認なら操作元へ返す。
 - 製品版番号はSemVerとし、通常の修正・依存／モデル／同梱物更新・文書／LP・既存アルファ再配布では同じ`major.minor`系列の`patch`を自動加算する。`minor`と`major`は製品管理者の明示指示がある場合だけ変更する。`cargo xtask bump-version <major|minor|patch>`は公開中の`latest.json`と現行ソース版の一致を確認してから次版を計算し、`src-tauri/Cargo.toml`、`xtask/Cargo.toml`、`src-tauri/tauri.conf.json`を同期する。不一致時は二重採番を避けるため停止する。同じ版の公開資産は差し替えず、次版のプレリリースを作成する。patch番号も公開画面と成果物へ表示する。起動時の自動確認は`major.minor`だけを比較してpatchを通知しないが、設定画面からの手動確認と手動インストールはSemVer全体を比較してpatchも対象にする。アルファ期間中は製品表示、LP、更新説明、Release名へ`Alpha`を付け、比較用SemVerとタグは数値だけにする。
+
+## 法人向け共通処理基盤（未実装の将来設計）
+
+<a id="corporate-runtime-architecture"></a>
+
+**状態: 設計受入済み・実装未着手。以下の構成・型・APIは提案であり、現行機能ではない。** 認証・認可の方式、権限モデル、テナント管理画面は対象外とする。設計判断・却下案・検証記録と引継ぎの正本は[設計PR #256](https://github.com/benybeny777/PicoAgent/pull/256)、今後の実装作業は [段階別タスク](docs/TASKS.md#corporate-runtime-tasks) に置く。コード・依存・配布仕様はこの設計では変更しない。
+
+### 調査基準と現行依存
+
+基準は2026-09-11の `origin/main`、コミット `95a37ad2a6be4e5bc7153d09d6845231ae213df7`。character-makerだけはmainに存在せず、未マージの [PR #255](https://github.com/benybeny777/PicoAgent/pull/255) の `5f6dec57ed69ead122df98059aea15857fe5ad39` をGitオブジェクトから読み取った。実装着手時は両者の差分を再確認し、#255のworktreeを利用・変更しない。
+
+```mermaid
+graph TD
+  UI[ui renderer / settings] --> B[ui/picoagent.js]
+  B -->|invoke / listen| C[commands.rs / AppState]
+  B -->|window / convertFileSrc| TW[Tauri Webview]
+  TCP[api_server.rs / TcpListener] -->|AppHandle.state| C
+  TCP -->|run_agent: 履歴は要求内| A[agent.rs]
+  TCP --> MCP[mcp/server.rs]
+  C --> A
+  A --> P[providers / Config]
+  A --> T[tools / skills / Config]
+  MCP --> T
+  A -->|任意AppHandle| E[Tauriイベント / usage / tracer]
+  C --> S[history / memory / relationship / store]
+  T --> G[可変static / MCP接続 / 子プロセス / ローカルFS]
+  C --> EN[engine / Aivis / OS資源]
+  A --> CORE[picoagent-core: message / text]
+```
+
+| 現行根拠（ファイル・シンボル） | 再利用可能な部分と制約 |
+|---|---|
+| `ui/picoagent.js` の `call` / `managedListen` / `window.picoagent` | invokeと購読を集中管理する良い入口。ただしロード冒頭で `window.__TAURI__` が必須。`convertFileSrc`、窓サイズ・位置・ドラッグも同居。renderer/settingsの直接Tauri参照だけを探しても、asset URL、D&D、音声、起動通知の意味的依存は残る |
+| `commands.rs::AppState` / `pet_send` / `pet_send_image` | Config、選択AI、会話、キャラ、質問・コマンド承認待ち、感情、CLIセッション、cancelフラグを保持。`conversation_epoch` とキャラIDが古い非同期結果の書戻しを防ぐ。Tauri入口と業務処理が同居 |
+| `agent.rs::run` / `run_scoped` / `agent/prompt.rs::compose` | 正規形によるループは再利用候補だがConfig、Tool登録、時刻、AppHandleによる挨拶取得・通知・usage・tracerに依存。promptもユーザースキル・案件ファイルを読むため全体が純粋関数ではない |
+| `providers/mod.rs::Provider` | `chat` / `chat_stream`、wire変換は共用可能。引数は製品Config、localはローカル配置・エンジン設定、agent_cliは端末プロセス・会話セッションに依存。全プロバイダを一律にcoreへ移さない |
+| `tools/mod.rs::Tool` / `run_tool` / `dispatch_interactive` | `run(&Config, Value) -> String`。失敗・承認が文字列に混在。ライセンス判定、CLI探索、MCPフォールバックも含む。`inventory` / 不変schemaのOnceLockは共用可能だが実行能力の判断とは分離する |
+| `api_server.rs::start` / `run_agent` / `handle_connection` | localhost限定の簡易TCP。要求内の会話を `agent::run(..., None, None)` へ渡すがAppStateのConfig・AI選択とツール環境は共有。履歴がステートレスでも副作用・実行基盤はステートレスではない |
+| 同APIの `/api/chat` / `/api/generate` / `/v1/chat/completions` / `/mcp` | Ollama風応答、OpenAI変換、MCP JSON-RPCは互換層として残せる。OpenAI SSEは全文完成後の単一本文チャンク。通常チャットUI全体の代替APIではない。MCPは `mcp/server.rs::handle_rpc` からツールを呼ぶ |
+| `config.rs::Config` / `store.rs::lock_state` | ファイル・環境変数・既定値の優先順位、OS秘密保存を含む。Mutexと全体書戻しはプロセス内の排他。原子的renameだけで複数プロセスの競合は解決しない |
+| `durable_jobs.rs` / `mcp/client.rs` | 前者はAPP、保存パス、sender等のstatic、既存ジョブ対象はAI Driveとartifact_pipeline、同時3件・自動試行通算5回。後者は接続とツール一覧を可変staticで保持。テナントや実行ごとの状態ではない |
+| `skills/workspace_files` / `run_command/jobs.rs` / `browser_control` / `meeting_recorder` | undo履歴、コマンドジョブ、ブラウザの現在ページ・子、録音がプロセス共有。単にAppHandleを消しても法人共用できない |
+| `crates/picoagent-core/src/{message,text}.rs` | 現在の再利用範囲はMessage・Field・UTF-8等。serde/serde_jsonだけを依存とする非公開crate。`src-tauri/src/{message,text}.rs` は互換再公開。業務ランタイムはまだない |
+| #255の `character-maker/src/{pipeline,sidecar,config,recovery,store}.rs` | Tauri非依存crateだが、PipelineContextはPathBuf、MakerConfigは `Scripts/python.exe`、SidecarProcessは子プロセス・Windows Job Objectを持つ。ローカルFS上の生成・復旧は共用候補。サーバーワーカー実装済みとは扱わない |
+| #255の `src-tauri/src/character_maker.rs` | pathsでapp_data/resourceを解決し、実行Mutex・中断フラグ・イベント・選択ダイアログを所有。Windows x64条件あり。`isolate → decompose → rig2d → complete` の工程・出力契約を参照するだけで変更しない |
+
+### 目標構成と移動対象
+
+依存方向は「各アダプター → 共通ランタイム → 純粋core」に固定する。共通層はTauri・Webview・OS秘密ストア・環境変数・プロセス全体のcwdを参照しない。Rustソースを共用してローカルではインプロセスで実行し、サーバーでは同じランタイムを別バイナリから呼ぶ。全処理をHTTP化する必要はない。
+
+```mermaid
+graph TD
+  WEB[同じWeb UI] --> CLIENT[RuntimeClient / HostCapabilities]
+  CLIENT --> D[DesktopAdapter: Tauri IPC]
+  CLIENT --> H[ServerAdapter: HTTP / SSE]
+  D --> R[picoagent-runtime]
+  H --> R
+  R --> CORE[picoagent-core]
+  R --> PORT[Storage / EventSink / JobManager / ToolExecutor]
+  D --> LOCAL[ローカル保存 / OS / 管理エンジン]
+  H --> SERVER[DB / ArtifactStore / GPUワーカー]
+  PORT -. 注入された実装 .-> LOCAL
+  PORT -. 注入された実装 .-> SERVER
+  SERVER --> MAKER[character-maker / 同一生成ソース]
+  H --> LINK[DeviceGateway]
+  LINK --> DEVICE[端末エージェント / 限定された端末操作]
+```
+
+| 責務・配置案 | 移すもの | 残すもの・公開境界 |
+|---|---|---|
+| `picoagent-core`（既存） | Message、UTF-8、純粋なDTO・エラーcode・状態遷移値。promptは入力を集めた後の合成部分だけ | OS/HTTP/DB依存を入れず `publish=false` を維持。公開型を最小化する |
+| `crates/picoagent-runtime`（将来追加） | 会話ユースケース、agent/feedbackの制御、Provider/Tool契約、候補選択、承認待ち・ジョブ状態遷移、文脈圧縮の方針 | 非公開。入力DTOと明示ポートだけに依存。AppState全体の移植やServiceLocator化をしない |
+| 共用コネクタモジュール（まずruntime配下） | OpenAI互換/Anthropic等の変換・通信、HTTPツール、生成工程の制御を依存切離し後に順次移す | 個別wireはproviderに閉じ込める。登録の正本を1つにし、製品ごとの同じ実装のコピーを作らない。独立配布が必要になるまでツールごとのcrateを増やさない |
+| `src-tauri`（DesktopAdapter） | 既存command名・戻り値・イベント名を保つ薄い変換入口へ段階移行 | 窓・トレイ・メニュー・DPI・ホットキー・ダイアログ・boot監視・OS秘密保護・インストール・管理プロセス回収・ローカルファイル許可を残す |
+| サーバーバイナリ（将来追加） | HTTPルーティング、接続制限、Context生成、DB/ストレージ/ワーカーの組立て | Tauriをリンクしない。サービス固有運用をcoreへ持ち込まない。認証・認可を接続するまで外部公開しない |
+| Web UI | 表示、入力、描画、音声再生、接続先選択と能力に応じた操作表示 | AI実行・保存・再試行を画面に複製しない。ブラウザのマイクやclipboard許可を端末エージェントの権限と同一視しない |
+| character-maker（#255承認・統合後） | manifest、工程と再開判定、生成参照・復旧規則とPythonソースを共用 | OS別起動、作業ディレクトリ、モデル解決をワーカーへ隔離。既存crateをcoreへ丸ごと吸収せず重い画像/GPU依存を通常会話から外す |
+
+server HTTP clientはruntimeが定義する外向き通信ポートまたは設定済みclientを使い、接続プール・timeout・egress制約を共有する。Providerのwire変換はそのclientとは独立して単体検証できる構造にする。`Clock` は現在時刻と利用者のTimeZoneを供給し、ローカル時刻やスケジュールをサーバーOSの時刻設定へ暗黙移行しない。
+
+この新crate構成は、現行AGENTSの「依存はsrc-tauriへ集約、例外はcore」の拡張を要する。承認後の最初の実装PRで依存方向・ガード対象・ルールを同時更新する。本PRではルールやCargoを変更しない。
+
+### 最小インターフェースと状態所有
+
+以下は言語中立の署名で、Rust traitやライブラリの採用を実装済みとしない。小さいユースケースには必要なポートだけを渡す。
+
+| 契約 | 最小操作・入力 | 保証・所有者 |
+|---|---|---|
+| `ExecutionContext` | requestId、runId、scope（tenant/subject/workspaceの不透明ID）、conversationId/epoch、deviceId、deadline、cancel、traceId | アダプターが信頼境界で構築。本文のtenantIdを信頼せず、不明scopeを共有既定値へ落とさない。子実行へscopeを明示継承し、権限を広げない。ローカルは端末内scope |
+| `ConfigView` / `SecretResolver` | `get(key, fallback)`、`resolve(secretRef, providerId)` | 型付き公開設定と秘密参照を分離。ローカルの優先順位・都度参照を維持し、サーバーでプロセス環境を利用者設定にしない。次の操作に設定変更を反映、開始済みrunのprovider/model/資源版は固定。許可は副作用時に再評価 |
+| `EventSink` | `publish(context, event) -> Result` | scopeとrunを必須化。Tauri変換は購読対象ウィンドウに限定。永続状態の正本ではない。配送不能を成功として隠さない |
+| `ConversationStore` | `load(scope,id)`、`commit(expectedRevision,expectedEpoch,delta)`、`reset` | 会話単位に1書込み実行、競合は拒否。ローカルでは現行Mutex/原子的保存/世代検査へ委譲。サーバーはDBトランザクションとCAS、長時間LLM呼出中にDBロックを保持しない |
+| `Storage` / `ArtifactStore` | `read(ref)`、`stage(scope,metadata,stream)`、`commit(expectedRevision)`、`open(ref,range)` | scope・version付きの参照を使用。原子的確定、ハッシュ・容量・型検査、不完全成果物の非公開。OS生パスを共通APIに流さない。削除/ゴミ箱・保持期間は実行場所別に明示 |
+| `ProcessRunner` | `spawn(programRef, argv, cwdRef, envRefs, limits)` → handle、`wait`、`cancelAndReap` | ローカル/ワーカー内部専用。HTTPに任意shell起動口を作らない。所有プロセスの確認、時間/出力上限、子孫回収とwaitを実装側が保証。GPU利用権はModelRuntimeから取得 |
+| `JobManager` | `submit(kind,input,key)`、`get/list`、`cancel`、`retry`、`claim/heartbeat/finish(lease,fence)` | 状態・試行・leaseを保存。GPUワーカーの死亡をAPIプロセス死亡と切離す。ローカル既存ジョブは互換adapter、サーバーはDBによる排他取得 |
+| `ToolExecutor` / `PolicyGate` | `describe(context)`、`check(operation,target,effect)`、`execute(context,call)` → ToolOutcome | 候補提示と実行直前の両方で能力/許可を評価。承認要求にはcallId・引数ハッシュ・期限を結び付ける。認証・認可の中身は別設計。ローカルの許可・Pro制限を維持 |
+| `ModelRuntime` | `capabilities`、`acquire(modelRef,resourceNeeds)`、`endpoint(lease)`、`release` | ローカル管理エンジンと法人GPUワーカーを交換。modelRefは形式・revision・SHA-256・ライセンス参照を持ち、モデル名だけで互換としない |
+| `Telemetry` / `AuditSink` | span、counter/histogram、`append(context,action,targetRef,outcome)` | 診断と監査を分離。監査記録要否はPolicyGate出力を使い、記録必須操作は永続記録不能なら実行を開始しない |
+
+状態のキーは原則 `scope + resourceId`、会話はさらにcharacterId/epoch、CLIセッションはprovider設定版を含める。history、memory、relationship、usage、undo、承認待ち、MCP接続、コマンドジョブを同じグローバルロックや全利用者共通ファイルにしない。現行の各保存責務は維持し、共通の巨大Stateオブジェクトへ集約し直さない。
+
+ステートレス候補はメッセージ変換、UTF-8、スキーマ、不変のツール語彙、文脈を入力として受ける合成。LLM呼出は会話を保存しなくても外部課金・キャッシュ・ネットワーク状態を持つ。モデルロード、HTTPプール、MCP接続、生成キャッシュは状態ありとして資源管理する。不変登録のみプロセス共有可、Cookie/認証付きclient、会話、キャッシュはscopeを分離する。共通モデルの読取専用重みは権利と構成が一致する場合に共有可、KV cache・prompt cache・生成入力は利用者間で再利用しない。
+
+### 共通API契約案（v1）
+
+Tauri IPCとHTTPは同じユースケースDTOを使う。既存互換APIの `/v1/chat/completions` と混同しないよう、新規名前空間は `/pico/v1` とする。
+
+| 操作 | HTTP写像 | 契約 |
+|---|---|---|
+| 接続確認 | `GET /pico/v1/capabilities` | apiVersion、serverInstanceId、deployment、機能/実行場所、制限、eventRetention、asset方式、対応契約版を返す。秘密や生パスは返さない |
+| 同期実行 | `POST /pico/v1/runs`（mode=sync） | `{requestId,idempotencyKey,conversationId?,expectedRevision?,input,modelRef?,target,mode,deadline?}`。永続受付後、完了まで接続内で待つ。HTTP 200 `{runId,status,result,revision}`、待機上限で202 `{runId,status,links}`。処理を無言で作り直さない |
+| ストリーム・非同期開始 | 同POST（mode=stream/job） | 202でrunIdとイベントURLを返す。LLM、ツール、キャラ生成も長時間化できる。ジョブ受付は永続化成功後のみ返す |
+| 状態・結果・進捗 | `GET /pico/v1/runs/{id}`、`GET .../{id}/events`（SSE） | 状態の正本はGET。SSEは `id=seq` と共通イベント包絡。購読開始前の完了も再取得できる |
+| 中断・再試行 | `POST .../{id}/cancel`、`POST .../{id}/retry` | cancelは要求受付と停止完了を区別。retryは許される状態だけ新attemptを作る。同一runId内でattempt増分、別操作の再実行は新runId |
+| 対話待ち | `POST .../{id}/responses` | questionId/approvalId、callId、引数ハッシュ、expectedRevision、回答。期限・scope・run・世代不一致は拒否し、古い承認を転用しない |
+| 会話 | `POST /pico/v1/conversations`、`GET .../{id}`、`POST .../{id}/reset` | 作成でID、読取りでrevision、resetでepoch更新。既存会話へinput.messagesを任意に上書きしない。conversationIdなしの実行は要求内会話、デスクトップ履歴へ保存しない |
+| 入力・生成物 | `POST /pico/v1/artifacts`、`GET .../{id}`、`GET .../{id}/content` | 分離ストリーム転送。artifactRefはscope内のopaque ID＋版、応答に型・寸法・ハッシュ・容量・利用可能期限。要求JSONへ巨大base64や端末の絶対パスを入れない |
+
+共通エラーは `{error:{code,message,requestId,runId?,retryable,retryAfterMs?,details}}`。codeは `invalid_input`(400)、`unauthenticated`(401)、`forbidden`(403)、`not_found`(404)、`conflict`(409)、`expired_cursor`(410)、`too_large`(413)、`unsupported_capability`(422)、`rate_limited`(429)、`internal`(500)、`dependency_unavailable`(503)、`deadline_exceeded`(504)。detailsは安全なfield/reasonだけで、秘密・OSパス・生のstderrを含めない。開始済みrunの失敗/中断はGETの状態とterminalイベントで返し、HTTP接続が成功したことと処理成功を混同しない。既存StringエラーとMCP JSON-RPC形式は互換層で変換し、ツール内部の失敗を文字列の先頭だけから判定する新規実装は作らない。
+
+イベント包絡は `{v,eventId,runId,attempt,seq,conversationId?,epoch?,time,type,payload}`。種別はaccepted、status、progress、output.reset、output.delta、tool.started/completed、input.required、artifact.ready、completed/failed/cancelled。seqはrun内でattemptをまたいで単調増加、terminal遷移はCASで一度だけ確定する。配送は少なくとも1回、UIはeventIdで重複排除し、別接続先・別epochの通知を捨てる。
+
+**公開ストリーミングでも現行の出力検査を省略しない。** 現在は `buffer_only` でproviderの生チャンクを公開せず、`strip_reasoning` と最終回答検査後の `publish_fn` だけが可視化する。v1のoutput.deltaも検査済み本文に限定するため、初期移行では本文の初回表示は全文検査後になる。進捗は途中配信できる。この待ち時間を減らすには別途増分検査の設計・漏出テストが必要で、今回の承認対象に生チャンク公開を含めない。
+
+SSEはLast-Event-IDで再開し、保持期限切れは410で状態取得を要求する。run詳細が最終seqと検査済み出力スナップショットを返し、そこから購読し直す。進捗は間引けるが状態遷移・成果物確定・terminalは永続化する。出力チャンクも有限の再送領域を持つ。遅い購読者は上限到達で接続を切り、再同期させる。API/ワーカーの無制限バッファは禁止。接続切断でrunを自動再送・中断しない。deadlineと明示cancelは子実行へ伝播し、UIが閉じてもjobは存続する。ローカルアプリ終了時は現行の停止・次回再開境界を保つ。
+
+状態遷移はqueued → running → succeeded/failed/cancelled、running → waiting_input/waiting_dependency → queued、queued/running/waiting → cancel_requested → cancelled。副作用や成果物の確定が先に完了した場合はsucceededとし、中断が遅かった事実を返す。旧completedはsucceeded、WaitingAuthはwaiting_dependencyへ互換変換するが、保存形式の書換えは別段階とする。failed/cancelledからのretryは副作用照合に合格した場合だけqueuedへ戻しattemptを増やす。succeededはretry不可。同じ会話の並行送信は409で拒否し、独立会話は並行実行できる。resetは実行中runのcancelも要求するが、epoch検査は停止完了に依存させない。
+
+冪等キーはscope＋操作＋idempotencyKeyに一意制約を持たせ、正規化した入力・対象・モデル版のハッシュを保存する。同キー同内容は同run、内容違いは409。保持期間はcapabilitiesで明示し、最低でもrun存続中と終了後24時間は保持する。期限後はUIが新規キーを発行し、無条件再送しない。再試行は指数バックオフ＋jitterと上限、Retry-Afterを尊重する。既存ローカルジョブの通算5回は維持、共通化時に同じ層で回数を所有してproviderとjobの積算暴走を防ぐ。
+
+「送信先では実行されたが応答を失った」副作用をexactly-onceとは呼ばない。外部操作ごとにoperationId・入力ハッシュ・receiptを記録し、外部冪等キーまたは結果照合がある場合だけ再実行する。証明できなければwaiting_input（結果確認が必要）で止める。手動retryもこの条件を迂回しない。ワーカーはlease切れ後の旧fenceによる成果物確定を拒否し、再取得側だけを正当な所有者にする。
+
+### GPU・ファイル・端末機能の交換境界
+
+GPUジョブはstageごとに `modelRef + input artifactRefs + pipelineVersion + parameters + seed + resourceNeeds` を受け、ワーカーがscope専用作業領域へmaterializeする。Pythonへ渡すローカルパスはワーカー内だけで解決する。既存生成工程をリモート呼出ごとに書き直さず、同じcharacter-maker/Rust・Pythonソースをワーカーへ配置する。Tauri非依存であっても現在のWindowsパス・子プロセス管理のままでLinux GPUへ移せるとは判断しない。
+
+ModelRuntimeはOS/arch/GPU能力と空き資源を取得前に確認し、同一ハッシュの読取専用モデルをlease付きで再利用する。稼働中モデルは削除しない。法人側は配備時のモデル事前配置・検証と、実行時のload/unloadを分ける。自動ダウンロードは許可された管理操作だけ。GPU不足はqueue待ちまたは理由付き失敗で、CPU/クラウドへの移動による遅延・費用・送信先変更を黙って行わない。
+
+成果物はstage用stagingへ出力し、manifest・参照・ハッシュ検証後にversionを原子的公開する。DBとオブジェクト保存は単一renameにはならないため、先に不変blobを保存し、DB transactionでartifact参照とjob完了とoutboxを確定する。未参照blobは猶予後に回収、公開済み旧版は復旧期限と稼働leaseが切れるまで保持する。既存ローカルの内部staging清掃、ユーザー原画非上書き、制作正本と実行画像の分離を維持する。
+
+| 分類方法（action単位） | 現行例 | 配置条件 |
+|---|---|---|
+| 共通 | メッセージ整形、スキーマ・意図判定、引数からの計算 | I/Oなし。timeはClock/TimeZone注入後に共通候補。Tool名だけで判定しない |
+| サーバー利用可 | web_fetch/web_search、SaaS連携、管理workspace内のread_file/edit_file、文書変換、画像・音声ファイル推論 | egress制限、scope保存、資格情報とCLI分離、資源上限を実装・検証したactionだけ。現行のまま利用可能という意味ではない |
+| 端末エージェント必須 | desktop_control、clipboard_text、画面取得、マイク録音、利用者PCのファイル、利用者セッションのbrowser_control、端末agent_cli | 端末登録・接続・利用者同意・OS許可が揃い、明示deviceId宛のみ。サーバーの画面やファイルへ代替しない。ファイル推論とマイク取得は別action |
+| デスクトップ専用 | app_controlの終了、窓配置、トレイ、ホットキー、boot監視、NSIS更新 | Tauriホストだけが実装。Web版で非対応を明示。ブラウザ全画面やダウンロードは別のWeb能力 |
+
+登録metadataは `executionClass, supportedTargets, requiredCapabilities, effects, interactive, retrySafety, inputOutputTypes`。複合Toolはaction単位に厳しい条件を適用する。未分類と動的MCPツールは既定でサーバー利用不可、名前から推測しない。`describe` とdispatchの両方で同じpolicyを使い、Web UI非表示だけを制御にしない。`permissions::SafePath` の解決・実行時再検証をローカルで維持し、サーバーはscope付きartifact/workspace参照から自分の許可済みパスを作る。ローカルパスをサーバーFSへ読み替えない。
+
+### ローカルAPI・Web接続・ハイブリッド
+
+既存ローカルAPIのJSON変換、MCPの入力/出力意味、agent呼出は共用する。loopback、既定無効、キー設定時Bearer、Origin/Content-Type/サイズ制約と既存レスポンスは維持する。手書きTCP parser、ソケットごとのspawn、固定300秒、Connection: close、全文SSEを法人HTTP基盤として外へ広げない。成熟したHTTPスタックの専用adapterでheader/body/接続数・並列run数・送信バッファ上限、TLS終端との境界、graceful shutdownを担う。具体的なHTTP/DBライブラリと版は承認後の依存監査で確定し、今回は追加しない。
+
+同じWeb UIは `RuntimeClient.connect(profile)` → capabilities照合 → `execute/getRun/subscribe/cancel/respond/resolveArtifact` を使う。profileは `profileId, mode(local/corporate/hybrid), endpoint?, deviceId?`。ローカルTauriではIPC、法人ではHTTPS、ハイブリッドでは法人を会話・jobの正本とし端末actionだけDeviceGatewayへ配送する。UIは `HostCapabilities` を別に持ち、ローカルAIの選択とデスクトップ窓操作を混ぜない。
+
+純ブラウザからlocalhostへ接続する経路は既存APIのOrigin設定を広げるだけでは提供しない。将来の同一originローカルWebホスト/端末接続の検証を着手条件にし、それまではローカルモードはTauriホスト限定。企業ページからのloopbackへの暗黙接続は行わない。
+
+接続変更時は旧購読解除とconnection generation更新、送信停止、未保存入力の保持、接続先別の会話/assetキャッシュへ切替を行う。実行中jobは元接続先に残し、移送や履歴アップロードを自動実施しない。オフラインで別接続先へ自動フォールバックしない。apiVersion不一致や能力欠落はその操作を拒否し理由表示する。asset URLはStorage参照からホスト別に解決し、TauriのconvertFileSrc形式をHTTPへ送らない。期限付きURLは期限切れ時に参照から再取得し、認証情報をlocalStorageやログに埋めない。
+
+ハイブリッドの端末接続は端末から張るチャネルと限定actionの要求/receipt契約にし、任意コードを配送しない。DeviceGatewayはscope、deviceId、operationId、期限、引数ハッシュ、必要能力を送る。端末側も実行直前に許可を評価し、重複操作を保存照合する。端末切断・sleepはwaiting_dependency、再接続時は結果照合、別端末への代行は明示操作。端末データの外部転送は別の承認済みartifact転送として追跡する。登録認証・鍵・認可方式は別設計完了まで無効化しておく。
+
+### 観測・復旧・運用上の代償
+
+診断ログはrequest/run/attempt/tool/workerの相関ID、メトリクスは件数・queue待ち・推論時間・エラー・資源使用、トレースは受付→provider/tool→worker→保存を接続する。現行usageの永続集計とtracerの直近計測は互換adapterで残す。本文、画像、token、secret、個人パスを既定ログへ出さない。メトリクスのラベルへ会話ID等の高カーディナリティ値を載せない。
+
+監査イベントは操作主体の不透明参照、対象、判断参照、操作種別、開始/確定/失敗、operationIdを持ち、診断ログ保持と分離する。job/成果物更新と監査outboxを同一transactionにし、外部操作では実行意図を先に永続化しreceiptを後で追記する。監査配送失敗はoutboxから再送し運用へ通知、記録できなかった外部結果はunknownとして照合する。保持・閲覧・改ざん耐性の詳細は法人要件の決定待ちとし、監査未整備のまま法人対応済みにしない。
+
+| 観点 | 採用案の影響・対処 |
+|---|---|
+| 互換性 | 既存IPC名、イベントpayload、設定優先順位、履歴形式を段階adapterで維持。新APIは別version。旧UIに新DTOを直接渡さない。DB移行はcopy→検証→切替、単一writerを維持し二重書込みを避ける |
+| 性能 | ローカルはインプロセスを維持。サーバーはqueue、永続受付、転送で遅延増。検査済み出力の方針により生tokenの即時表示は提供しない。GPUモデル常駐と参照転送で抑制し測定する |
+| 配布容量 | 純粋coreとruntimeへGPU/Python/UI依存を入れず、デスクトップにサーバーDB/HTTPホストを既定同梱しない。サーバーはTauri/音声デバイスを除外。モデル・画像を共有するためだけにユーザー資産を再配布しない。実容量の増減は未測定 |
+| 運用コスト | DB、artifact保存、監査、バックアップ、GPU待機、転送料、端末管理が増える。ジョブ別時間/GPU占有/転送/保存量を測定し、上限・保持・同時実行枠を明示。ローカル実行より安いとは保証しない |
+| 障害復旧 | leaseとfence、idempotency、receipt、outbox、公開前検証で復旧。DB/成果物の整合バックアップを復元試験する。復旧不能な副作用は自動再実行しない。旧デスクトップへ戻す際は旧形式データを保持し、未変換サーバー状態を黙って捨てない |
+| Windows | 既存Vulkan/専用GPU経路、パス・DPAPI・Job Object・DLLロック・単一起動を維持。端末とサービスでOS利用者が違う場合に秘密や画面を共有しない |
+| macOS | Metal・キーチェーン・GUIのPATH・マイク/画面/アクセシビリティ許可をDesktopAdapterへ。character-maker対応を新たに約束しない |
+| Ubuntu 24.04 LTS x64 | 現行Vulkan→CPUとX11/Waylandの能力差を保持。サーバーはヘッドレス、録音/入力を無条件提供しない。Linux GPU workerのCUDA/Python組合せは別途公式対応・実機検証が必要 |
+
+最大リスクは「抽象化した型の裏で、設定・MCP・キャッシュ・ファイル・子プロセスが別利用者と共有されたままになること」。二つのscopeを同じプロセスと複数ワーカーで走らせ、同じ会話ID・ファイル名・冪等キーを意図的に使う隔離試験を、サーバー公開前の必須条件とする。認証・認可の方式が未決定でも、この所有境界は先に固定する。
+
+### 採用案・却下案と分割判断
+
+採用はポートを少数に絞った段階抽出と、同一runtimeを呼ぶ二つのホスト。巨大な一括書換えは既存デスクトップとの同値性を追えず却下する。Tauriモノリス維持は最小工数だがheadless・複数利用者がGUI状態と結合する。サーバー別実装はwire/ループ/ツールの二重保守になる。ローカルAPIの単純外部公開は共有状態・単一本文SSE・受付制御・復旧境界を解消しない。全ToolのRPC化はローカル遅延と運用依存を増やす。全AppHandleを巨大Contextへ名前変更するだけの案は可変globalと副作用を残すため採らない。
+
+基準コミットの行数は肥大化の兆候として使い、行数だけで分割しない。
+
+| 対象（行数） | 将来の境界・維持する正本 |
+|---|---|
+| `commands.rs`（5271） | 会話ユースケースをruntimeへ、設定/窓/端末はadapterへ。command登録と公開名を1入口で維持。相互にAppStateを書き換える細切れファイルは作らない |
+| `agent.rs`（1650） | ループ状態の所有は一体。出力検査・prompt/feedback・イベント配送を独立検証可能な境界として抽出。工程順はループが所有 |
+| `tools/mod.rs`（1014） | 契約・登録・実行方針と、CLI解決/プロセスを分ける。inventory/schemaの正本は一つ |
+| `api_server.rs`（755） | wire互換変換とHTTP transportを分離。簡易TCPは既存ローカル互換の範囲だけ維持 |
+| `engine.rs`（1030） / `durable_jobs.rs`（714） | モデルの解決/配置/プロセス所有と、job状態遷移/永続化/worker配送の境界で分ける。設定や状態の複製はしない |
+| `renderer.js`（5996） / `settings.js`（3671） | RuntimeClientとHostCapabilitiesの呼出へ寄せる。描画状態と設定スナップショットの所有は各画面内に維持し、UI全面再設計を混ぜない |
+| `picoagent.js`（214） | 既存互換facadeを維持し、transportとhost操作だけ分離。各commandごとのファイル化はしない |
+| `SPEC.md`（追加前602） | 本節は将来設計の契約をまとめて同居させ、現行スキル分類表を分割しない。判断履歴と段階別検証記録はPR、未完了はTASKS。別の設計台帳は増やさない |
+
+### 段階移行・検証ゲート
+
+各段階は独立した目的別PRにし、前段階の同値性確認後に進む。着手条件と担当者が再開する具体的作業は [段階別タスク](docs/TASKS.md#corporate-runtime-tasks) を参照する。順序はP0基準固定 → P1純粋契約 → P2runtime抽出 → P3状態/副作用のscope化 → P4法人HTTPとWeb接続 → P5GPU/生成 → P6ハイブリッド → P7運用受入。P5は#255の承認・統合待ち。認証・認可の別設計と実装が完了するまでは、P4以降も隔離検証環境のみとする。
+
+各段階で既存設定・履歴をコピーした隔離データと固定provider応答を用い、挨拶、通常/画像会話、tool_call_id対応、確認待ち、キャンセル、世代変更、保存失敗、再起動を比較する。静的/ロジック検査は `cargo check`、該当unit/契約テスト、段階PR最終は `cargo xtask verify`。新クレートのソースをguard_scanと検証一覧へ先に追加し、検査対象外への移動で合格させない。画像/GUI/実モデルの未確認は静的合格と分ける。
+
+性能の比較条件は同一OS/ハード/モデルhash/入力/並列数、coldとwarmを分離し各30回。最初はmock providerで純粋処理・dispatch・検査済み初回表示・完了時間・RSSを測る。ローカルp95処理時間とRSSが基準比10%超悪化、またはプロセス/購読リークがあれば次段階へ進めない（極小処理の測定ノイズは再測定で確認）。実GPUはqueue待ち、load、推論、転送、保存を分け、画質・モデル・生成設定を落として速度合格にしない。法人は同時1/10/50要求の容量試験を行い、利用者数・遅延SLO・GPU/保存予算はP0で承認するまで数値保証しない。
+
+Windows、Apple Silicon macOS、Ubuntu 24.04 x64の実アプリで、窓/ドラッグ/音声/clip/ファイル/停止/起動を確認し、UbuntuはX11とWayland拒否を分ける。P5の画像は実成果物とWeb表示、P6は端末sleep/切断/権限拒否と重複receipt、P7はDB/worker障害・バックアップ復元と旧版復帰を検証する。今回これらの実装・実機検証・ベンチマークは行っていない。

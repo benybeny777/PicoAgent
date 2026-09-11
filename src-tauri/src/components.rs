@@ -8,7 +8,6 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
@@ -284,35 +283,19 @@ fn compare_versions(installed: &str, target: &str) -> Option<Ordering> {
     Some(installed.cmp(&target))
 }
 
-fn command_exists(program: &str) -> bool {
-    let mut command = if cfg!(windows) {
-        let mut command = crate::tools::process::command_sync("where.exe");
-        command.arg(program);
-        command
-    } else {
-        let mut command = crate::tools::process::command_sync("sh");
-        command.args(["-lc", &format!("command -v {program}")]);
-        command
-    };
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
+/// 外部導入コンポーネントが使える状態か。
+///
+/// 以前は `sh -lc "command -v ..."`（ログインシェル）で存在を見ていたが、ログインシェルは
+/// `/etc/paths.d` から PATH を組み直すため「ある」と判定されるのに、GUI アプリが継承する
+/// 素の PATH には無く、実際に spawn すると `No such file or directory` になる。同じ食い違いが
+/// `aivis.rs` の p7zip で実際に起きたため、判定は共通の `resolve_executable()` へ揃える。
+/// 拡張子は解決側が付けるので、ここでは OS 共通の名前だけを渡す。
 fn external_ready(id: &str) -> bool {
     match id {
-        "office" => command_exists(if cfg!(windows) {
-            "soffice.exe"
-        } else {
-            "soffice"
-        }),
+        "office" => crate::tools::process::has_executable("soffice"),
         "tools" => ["pandoc", "ffmpeg", "qpdf", "pdftotext", "magick", "rg"]
             .into_iter()
-            .all(command_exists),
+            .all(crate::tools::process::has_executable),
         _ => false,
     }
 }
