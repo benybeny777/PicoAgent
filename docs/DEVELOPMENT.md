@@ -274,3 +274,5 @@ PicoAgent/
 **ドキュメント**: [README.md](../README.md)（概要・起動） / [MANUAL.md](../MANUAL.md)（使いかた） / [SPEC.md](../SPEC.md)（仕様） / [SETTINGS.md](SETTINGS.md)（全設定キー） / [AGENTS.md](../AGENTS.md)（作業ルール） / [HANDOFF.md](../HANDOFF.md)（未マージ作業） / [TASKS.md](TASKS.md)（未完了・条件待ち）
 
 ---
+
+LVSリグの静止フォールバックは、連番世代を持たず、`animations.idle`の`framePaths`が`["source.png"]`、`fps`と`frames`が1の構成だけを受理する。`sync-characters`はLVSリグ本体に加え、キャラ直下のリンクでないPNG実体を復号検査する。他状態、複数フレーム、旧世代フォルダ、通常2Dの実行レイヤー宣言を混ぜない。通常2Dのlossless WebP単一世代検査は維持する。

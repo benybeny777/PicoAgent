@@ -972,10 +972,7 @@ fn validate_character_asset_generation(
         );
     }
     validate_mesh_rig_pack(character_dir, manifest)?;
-    if manifest.get("live2d").is_none()
-        && manifest.get("animations").is_none()
-        && manifest.pointer("/meshRig/rig").is_some()
-    {
+    if is_mesh_static_pack(character_dir, manifest)? {
         return Ok(());
     }
     if manifest.get("live2d").is_some() {
@@ -984,6 +981,57 @@ fn validate_character_asset_generation(
     validate_sharp_expression_pack(character_dir, manifest)?;
     validate_full_motion_pack(character_dir, manifest)?;
     validate_character_runtime_generation(character_dir, manifest)
+}
+
+/// 連番世代を持たないリグと、LVS専用の単一静止フォールバックだけを認める。
+fn is_mesh_static_pack(character_dir: &Path, manifest: &serde_json::Value) -> Result<bool> {
+    let Some(rig_path) = manifest
+        .pointer("/meshRig/rig")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(false);
+    };
+    if manifest.get("live2d").is_some() || manifest.get("frameGeneration").is_some() {
+        return Ok(false);
+    }
+    let Some(animations) = manifest.get("animations") else {
+        return Ok(true);
+    };
+    anyhow::ensure!(
+        animations == &serde_json::json!({"idle":{"framePaths":["source.png"],"fps":1,"frames":1}})
+            && [
+                "frameEncoding",
+                "runtimeLayers",
+                "runtimeLayerEncoding",
+                "motionProfile"
+            ]
+            .iter()
+            .all(|key| manifest.get(*key).is_none())
+            && !character_dir.join("frames").exists(),
+        "リグの静止フォールバックはsource.pngの単一idleだけを指定してください"
+    );
+    let rig: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(character_dir.join(rig_path))?)?;
+    anyhow::ensure!(
+        rig.get("profile").and_then(serde_json::Value::as_str) == Some("lvs-anime25d-v1"),
+        "静止フォールバックはLVSリグだけに指定できます"
+    );
+    let source = character_dir.join("source.png");
+    anyhow::ensure!(
+        source.is_file()
+            && !source.is_symlink()
+            && source.canonicalize()?.parent() == Some(character_dir.canonicalize()?.as_path()),
+        "静止フォールバックのsource.pngがキャラ直下の実ファイルではありません"
+    );
+    let reader = ImageReader::open(&source)?.with_guessed_format()?;
+    anyhow::ensure!(
+        reader.format() == Some(image::ImageFormat::Png),
+        "静止フォールバックはPNGである必要があります"
+    );
+    reader
+        .decode()
+        .context("静止フォールバックのPNGを復号できません")?;
+    Ok(true)
 }
 
 fn validate_mesh_rig_pack(character_dir: &Path, manifest: &serde_json::Value) -> Result<()> {
@@ -1170,10 +1218,7 @@ fn validate_character_runtime_generation(
     character_dir: &Path,
     manifest: &serde_json::Value,
 ) -> Result<()> {
-    if manifest.get("live2d").is_none()
-        && manifest.get("animations").is_none()
-        && manifest.pointer("/meshRig/rig").is_some()
-    {
+    if is_mesh_static_pack(character_dir, manifest)? {
         return validate_mesh_rig_pack(character_dir, manifest);
     }
     if manifest.get("live2d").is_some() {
@@ -2214,6 +2259,48 @@ mod tests {
     }
 
     #[test]
+    fn lvs静止フォールバックは単一idleと実在pngだけを許可する() {
+        let root = crate::util::repo_root()
+            .join("temp")
+            .join(format!("mesh-static-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("rig.json"), r#"{"profile":"lvs-anime25d-v1"}"#).unwrap();
+        image::RgbaImage::new(2, 2)
+            .save(root.join("source.png"))
+            .unwrap();
+        let valid = serde_json::json!({"meshRig":{"rig":"rig.json"},
+            "animations":{"idle":{"framePaths":["source.png"],"fps":1,"frames":1}}});
+        assert!(super::is_mesh_static_pack(&root, &valid).unwrap());
+        for paths in [
+            serde_json::json!(["../source.png"]),
+            serde_json::json!(["source.png", "source.png"]),
+            serde_json::json!([]),
+            serde_json::json!(["source.webp"]),
+        ] {
+            let mut changed = valid.clone();
+            changed["animations"]["idle"]["framePaths"] = paths;
+            assert!(super::is_mesh_static_pack(&root, &changed).is_err());
+        }
+        let mut changed = valid.clone();
+        changed["animations"]["talking"] = valid["animations"]["idle"].clone();
+        assert!(super::is_mesh_static_pack(&root, &changed).is_err());
+        changed = valid.clone();
+        changed["motionProfile"] = serde_json::json!("full");
+        assert!(super::is_mesh_static_pack(&root, &changed).is_err());
+        changed = valid.clone();
+        changed["frameGeneration"] = serde_json::json!("current");
+        assert!(!super::is_mesh_static_pack(&root, &changed).unwrap());
+        fs::create_dir(root.join("frames")).unwrap();
+        assert!(super::is_mesh_static_pack(&root, &valid).is_err());
+        fs::remove_dir(root.join("frames")).unwrap();
+        fs::write(root.join("source.png"), b"not a PNG").unwrap();
+        assert!(super::is_mesh_static_pack(&root, &valid).is_err());
+        fs::remove_file(root.join("source.png")).unwrap();
+        assert!(super::is_mesh_static_pack(&root, &valid).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn 同梱2dの実行画像はlossless_webp単一世代にする() {
         let characters = crate::util::repo_root().join("characters");
         for entry in fs::read_dir(characters).unwrap().flatten() {
@@ -2227,7 +2314,7 @@ mod tests {
             if manifest.get("live2d").is_some() {
                 continue;
             }
-            if manifest.get("animations").is_none() && manifest.pointer("/meshRig/rig").is_some() {
+            if super::is_mesh_static_pack(&character, &manifest).unwrap() {
                 validate_character_asset_generation(&character, &manifest).unwrap();
                 continue;
             }
