@@ -21,6 +21,22 @@ SETUP = load("media_setup", HERE / "setup_models.py")
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_real_gpu_lock_blocks_another_process_and_releases(self):
+        temporary_root = HERE.parents[2] / "temp"
+        temporary_root.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+            path = Path(directory) / "characters/temp/completion-gpu.lock"
+            script = ("import sys; from pathlib import Path; "
+                      "sys.path.insert(0, sys.argv[1]); from generate import gpu_lock; "
+                      "lock=gpu_lock(Path(sys.argv[2])); lock.__enter__(); lock.__exit__(None,None,None)")
+            def child():
+                return GEN.subprocess.run([GEN.os.sys.executable, "-c", script, str(HERE), str(path)],
+                    capture_output=True, timeout=10,
+                    creationflags=getattr(GEN.subprocess, "CREATE_NO_WINDOW", 0))
+            with GEN.gpu_lock(path):
+                self.assertNotEqual(child().returncode, 0)
+            self.assertEqual(child().returncode, 0)
+
     def test_qwen_edit_keeps_input_and_prompt(self):
         workflow = GEN.qwen("帽子を赤くする", 12, 768, 512)
         self.assertEqual(workflow["4"]["inputs"]["image"], "input.png")

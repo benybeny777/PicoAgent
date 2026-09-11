@@ -233,7 +233,7 @@ impl Tool for ComfyuiTool {
         let lock = bundled
             .parent()
             .unwrap_or(bundled)
-            .join("character-maker/temp/completion-gpu.lock");
+            .join("character-maker/characters/temp/completion-gpu.lock");
         let script = assets.join("sidecar/media/generate.py");
         if !script.is_file() {
             return "エラー: 画像・動画生成サイドカーが壊れています。アプリを修復してください。"
