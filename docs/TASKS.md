@@ -40,6 +40,7 @@
 | アプリ終了中のジョブ実行 | OSサービス／ログイン項目としての別プロセス化、秘密値の受け渡し、更新時の排他と終了操作を設計する。現状は終了中に停止し、次回起動時に再開する |
 | Office成果物の高度編集 | テンプレート選択、グラフ・画像・複数スライド、セル型と数式、スタイル編集のUIを追加し、最小OOXML生成から高品質な資料編集へ広げる |
 | iCloud DriveのmacOS実機確認 | iCloud Driveを有効にしたApple Silicon Macで`PicoAgent`フォルダの作成、アップロード、オンデマンド取得、別端末への同期、競合時の停止、共通許可ルートを変更した場合の案内を確認する |
+| VTuber事務所への公式キャラクター許諾 | [docs/IP-PROPOSAL-VTUBER.md](IP-PROPOSAL-VTUBER.md)の照会文でカバー（ホロライブ）とANYCOLOR（にじさんじ）へ該当性と窓口を照会し、回答を得る。並行して人格ロック、発言フィルタ、AI生成である旨の常時表示を実装する。3件が揃うまで条件を載せた提案書を送らない。判断材料は[docs/IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md) |
 
 ## FreeTokenローカルエンジンの段階導入
 
