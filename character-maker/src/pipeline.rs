@@ -203,6 +203,14 @@ impl PipelineContext {
                 )));
             }
         }
+        // 補完はPython側で同じロックを取るため、二重取得せずGPU前処理だけをここで保護する。
+        let _gpu_guard = if matches!(stage, "isolate" | "decompose") {
+            Some(crate::recovery::startup_cleanup_guard(
+                &self.characters_root,
+            )?)
+        } else {
+            None
+        };
         self.invalidate_from(&mut manifest, stage_index)?;
         set_stage(&mut manifest, stage, "running", "実行中");
         self.save_character(&manifest)?;
@@ -546,6 +554,54 @@ fn now_iso() -> String {
 mod tests {
     use super::*;
     use image::GenericImageView;
+
+    #[cfg(windows)]
+    #[test]
+    fn gpu前処理は共通ロック競合時に状態変更も子プロセス起動もしない() {
+        let temp_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../temp");
+        fs::create_dir_all(&temp_root).unwrap();
+        let root = tempfile::tempdir_in(temp_root).unwrap();
+        let source = root.path().join("source.png");
+        image::RgbImage::from_pixel(8, 8, image::Rgb([1, 2, 3]))
+            .save(&source)
+            .unwrap();
+        let context = PipelineContext {
+            characters_root: root.path().join("characters"),
+            assets_root: root.path().join("assets"),
+        };
+        let mut character = context
+            .create_character(NewCharacter {
+                display_name: "排他検査".into(),
+                source_path: source.display().to_string(),
+                persona_prompt: String::new(),
+                identity_tags: String::new(),
+            })
+            .unwrap();
+        let config = MakerConfig::managed(root.path().join("missing"), root.path().join("missing"));
+        let _held = crate::recovery::startup_cleanup_guard(&context.characters_root).unwrap();
+        for stage in ["isolate", "decompose"] {
+            if stage == "decompose" {
+                character.stages.get_mut("isolate").unwrap().status = "complete".into();
+                context.save_character(&character).unwrap();
+            }
+            let before = serde_json::to_value(&character).unwrap();
+            let error = context
+                .run_stage(
+                    &config,
+                    &character.character_id,
+                    stage,
+                    Arc::new(AtomicBool::new(false)),
+                    |_| panic!("競合時に進捗を発行しない"),
+                )
+                .unwrap_err();
+            assert!(matches!(error, PipelineError::Io(_)), "{error}");
+            assert_eq!(
+                serde_json::to_value(context.load_character(&character.character_id).unwrap())
+                    .unwrap(),
+                before
+            );
+        }
+    }
 
     #[test]
     fn create_preserves_pixels_as_png_and_initializes_four_stages() {

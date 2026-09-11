@@ -1,124 +1,125 @@
-// skills/comfyui/mod.rs - ComfyUI ローカルサーバーで画像・動画を生成するスキル。
-// ComfyUI を http://127.0.0.1:8188 (設定で変更可) で起動しておく必要がある。
-// APIキー不要。COMFYUI_BASE_URL と COMFYUI_CHECKPOINT だけ設定すれば動く。
-//
-// 基本フロー:
-//   1. KSampler ワークフロー JSON を構築
-//   2. POST /prompt → prompt_id を取得
-//   3. GET /history/{prompt_id} をポーリングして完了を待つ（最大 120 秒）
-//   4. 出力ファイル名を取り出し、/view?filename=... の URL を返す
+// skills/comfyui/mod.rs - PicoAgent管理下のComfyUIで画像編集・動画生成を実行する。
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
-use super::{config_guide, Tool, ToolReg};
+use super::{Tool, ToolReg};
 use crate::config::Config;
-use crate::message::Field;
 
 pub struct ComfyuiTool;
 
-// デフォルトチェックポイント名（ComfyUI の models/checkpoints/ に置くファイル名）。
-const DEFAULT_CHECKPOINT: &str = "v1-5-pruned-emaonly.safetensors";
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8188";
-const POLL_INTERVAL_MS: u64 = 2_000;
-const POLL_MAX_SECS: u64 = 120;
-
-/// txt2img ワークフローの生成パラメータ一式。
-struct Txt2ImgParams<'a> {
-    prompt: &'a str,
-    negative: &'a str,
-    width: u32,
-    height: u32,
-    steps: u32,
-    cfg_scale: f64,
-    seed: i64,
-    checkpoint: &'a str,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Engine {
+    QwenEdit,
+    Wan,
+    Ltx,
 }
 
-fn build_txt2img_workflow(p: &Txt2ImgParams) -> Value {
-    json!({
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": { "ckpt_name": p.checkpoint }
-        },
-        "5": {
-            "class_type": "EmptyLatentImage",
-            "inputs": { "width": p.width, "height": p.height, "batch_size": 1 }
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": p.prompt, "clip": ["4", 1] }
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": { "text": p.negative, "clip": ["4", 1] }
-        },
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": p.seed,
-                "steps": p.steps,
-                "cfg": p.cfg_scale,
-                "sampler_name": "euler",
-                "scheduler": "normal",
-                "denoise": 1.0,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["5", 0]
-            }
-        },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": { "filename_prefix": "PicoAgent", "images": ["8", 0] }
-        }
-    })
-}
-
-/// /history レスポンスから出力ファイル情報を抽出する。
-/// `(filename, subfolder, type)` のタプルを返す。
-fn extract_output(history: &Value, prompt_id: &str) -> Option<(String, String, String)> {
-    let outputs = history.get(prompt_id)?.get("outputs")?;
-    for node_val in outputs.as_object()?.values() {
-        if let Some(images) = node_val.get("images").and_then(|v| v.as_array()) {
-            if let Some(first) = images.first() {
-                let filename = first.get("filename")?.as_str()?.to_string();
-                let subfolder = first
-                    .get("subfolder")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let file_type = first
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("output")
-                    .to_string();
-                return Some((filename, subfolder, file_type));
-            }
-        }
-        // 動画出力（AnimateDiff など）
-        if let Some(gifs) = node_val.get("gifs").and_then(|v| v.as_array()) {
-            if let Some(first) = gifs.first() {
-                let filename = first.get("filename")?.as_str()?.to_string();
-                let subfolder = first
-                    .get("subfolder")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let file_type = first
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("output")
-                    .to_string();
-                return Some((filename, subfolder, file_type));
-            }
+impl Engine {
+    fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.unwrap_or("wan-2.2-5b") {
+            "qwen-edit" => Ok(Self::QwenEdit),
+            "wan-2.2-5b" => Ok(Self::Wan),
+            "ltx-0.9.8-2b-fp8" => Ok(Self::Ltx),
+            other => Err(format!("エラー: 未対応の生成エンジンです: {other}")),
         }
     }
-    None
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::QwenEdit => "qwen-edit",
+            Self::Wan => "wan-2.2-5b",
+            Self::Ltx => "ltx-0.9.8-2b-fp8",
+        }
+    }
+
+    fn component(self) -> &'static str {
+        match self {
+            Self::QwenEdit => "character-maker",
+            Self::Wan => "video-wan",
+            Self::Ltx => "video-ltx",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        if self == Self::QwenEdit {
+            "png"
+        } else {
+            "mp4"
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::QwenEdit => "画像編集・キャラクター作成基盤",
+            Self::Wan => "Wan 2.2動画生成",
+            Self::Ltx => "LTX軽量動画生成",
+        }
+    }
+}
+
+fn integer(args: &Value, name: &str, default: u64, minimum: u64, maximum: u64) -> u64 {
+    args.get(name)
+        .and_then(Value::as_u64)
+        .unwrap_or(default)
+        .clamp(minimum, maximum)
+}
+
+fn normalized_video_dimension(value: u64) -> u64 {
+    (value / 32 * 32).clamp(256, 1280)
+}
+
+fn normalized_frames(value: u64) -> u64 {
+    (((value.saturating_sub(1)) / 8) * 8 + 1).clamp(9, 257)
+}
+
+fn generation_root() -> Result<PathBuf, String> {
+    let bundled = crate::components::runtime_root().ok_or_else(|| {
+        "エラー: PicoAgentの管理領域を取得できません。アプリを再起動してください。".to_string()
+    })?;
+    bundled
+        .parent()
+        .map(|parent| parent.join("generated-media"))
+        .ok_or_else(|| "エラー: 生成結果の保存先を取得できません。".to_string())
+}
+
+fn unique_output(engine: Engine) -> Result<crate::permissions::SafePath, String> {
+    let root = crate::permissions::SafePath::app_owned(generation_root()?);
+    crate::permissions::fs::create_dir_all(&root)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(crate::permissions::SafePath::app_owned(
+        root.as_path().join(format!(
+            "{}-{}-{}.{}",
+            engine.id(),
+            now.as_secs(),
+            now.subsec_nanos(),
+            engine.extension()
+        )),
+    ))
+}
+
+fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let bundled = crate::components::runtime_root()
+        .ok_or_else(|| "エラー: 追加機能の管理領域を取得できません。".to_string())?;
+    let python = bundled.join("python/Scripts/python.exe");
+    let comfy = bundled.join("character-maker/ComfyUI");
+    let models = match engine {
+        Engine::QwenEdit => bundled.join("character-maker/models/qwen-eval"),
+        _ => bundled.join(engine.component()),
+    };
+    if !python.is_file() || !comfy.join("main.py").is_file() {
+        return Err("エラー: 設定の「追加機能・更新」から「画像編集・キャラクター作成基盤」を先に導入してください。".into());
+    }
+    if !models.is_dir() {
+        return Err(format!(
+            "エラー: 設定の「追加機能・更新」から {} を選んで導入してください。選ばなかった動画モデルは取得しません。",
+            engine.label()
+        ));
+    }
+    Ok((python, comfy, models))
 }
 
 #[async_trait]
@@ -129,279 +130,182 @@ impl Tool for ComfyuiTool {
 
     fn intent_keywords(&self) -> &'static [&'static str] {
         &[
+            "画像編集",
+            "画像生成",
+            "動画生成",
             "画像",
-            "絵",
-            "イラスト",
-            "描いて",
-            "生成して",
             "comfyui",
-            "image",
-            "写真",
-            "動画",
+            "wan",
+            "ltx",
         ]
     }
+
     fn label(&self) -> &'static str {
-        "ComfyUI 画像生成"
+        "ローカル画像・動画生成"
     }
+
     fn description(&self) -> String {
-        "ComfyUI ローカルサーバーでテキストから画像（または動画）を生成します。\
-         APIキー不要。ComfyUI を起動しておく必要があります。\
-         パラメータ: prompt（必須）、negative_prompt、width、height、steps、cfg_scale、seed。"
-            .to_string()
+        "管理下ComfyUIで画像編集または動画生成を行います。engineはqwen-edit、wan-2.2-5b、ltx-0.9.8-2b-fp8から選択します。Qwen画像編集はinput_path必須、動画は任意の入力画像からも生成できます。モデルは追加機能で選んだものだけを取得します。".into()
     }
+
     fn parameters(&self) -> Value {
         json!({
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "生成したい画像の説明（英語推奨）"
-                },
-                "negative_prompt": {
-                    "type": "string",
-                    "description": "生成したくない要素（例: blurry, ugly, text）"
-                },
-                "width": {
-                    "type": "integer",
-                    "description": "画像幅（px、デフォルト 512）",
-                    "default": 512
-                },
-                "height": {
-                    "type": "integer",
-                    "description": "画像高さ（px、デフォルト 512）",
-                    "default": 512
-                },
-                "steps": {
-                    "type": "integer",
-                    "description": "サンプリングステップ数（デフォルト 20）",
-                    "default": 20
-                },
-                "cfg_scale": {
-                    "type": "number",
-                    "description": "CFG スケール（デフォルト 7.0）",
-                    "default": 7.0
-                },
-                "seed": {
-                    "type": "integer",
-                    "description": "シード値（-1 でランダム）",
-                    "default": -1
-                }
+            "type":"object",
+            "properties":{
+                "prompt":{"type":"string","description":"生成・編集内容。動画は詳しい英語プロンプトを推奨"},
+                "engine":{"type":"string","enum":["qwen-edit","wan-2.2-5b","ltx-0.9.8-2b-fp8"],"default":"wan-2.2-5b"},
+                "input_path":{"type":"string","description":"許可済み領域にある入力画像。Qwen編集では必須、動画では任意"},
+                "width":{"type":"integer","default":768,"minimum":256,"maximum":1280},
+                "height":{"type":"integer","default":512,"minimum":256,"maximum":1280},
+                "frames":{"type":"integer","default":97,"minimum":9,"maximum":257,"description":"動画フレーム数。8n+1へ切り下げ"},
+                "seed":{"type":"integer","minimum":0}
             },
-            "required": ["prompt"]
+            "required":["prompt"]
         })
-    }
-    fn config_schema(&self) -> Vec<Field> {
-        vec![
-            Field::new(
-                "COMFYUI_BASE_URL",
-                "ComfyUI サーバー URL",
-                "text",
-                DEFAULT_BASE_URL,
-            ),
-            Field::new(
-                "COMFYUI_CHECKPOINT",
-                "チェックポイント名（models/checkpoints/ 内のファイル名）",
-                "text",
-                DEFAULT_CHECKPOINT,
-            ),
-        ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let base_url = cfg
-            .get("COMFYUI_BASE_URL", DEFAULT_BASE_URL)
-            .trim_end_matches('/')
-            .to_string();
-        let checkpoint = cfg.get("COMFYUI_CHECKPOINT", DEFAULT_CHECKPOINT);
-
-        if checkpoint.is_empty() {
-            return config_guide(
-                "ComfyUI 画像生成",
-                &["COMFYUI_CHECKPOINT"],
-                "models/checkpoints/ に配置したモデルファイル名（例: v1-5-pruned-emaonly.safetensors）を設定してください。",
-            );
-        }
-
-        let prompt = match args.get("prompt").and_then(|v| v.as_str()) {
-            Some(p) if !p.is_empty() => p.to_string(),
-            _ => return "エラー: prompt が指定されていません。".to_string(),
+        let prompt = match args.get("prompt").and_then(Value::as_str).map(str::trim) {
+            Some(value) if !value.is_empty() => value.to_string(),
+            _ => return "エラー: prompt が指定されていません。".into(),
         };
-        let negative = args
-            .get("negative_prompt")
-            .and_then(|v| v.as_str())
-            .unwrap_or("worst quality, low quality, blurry, text, watermark")
-            .to_string();
-        let width = args
-            .get("width")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(512)
-            .clamp(64, 2048) as u32;
-        let height = args
-            .get("height")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(512)
-            .clamp(64, 2048) as u32;
-        let steps = args
-            .get("steps")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(20)
-            .clamp(1, 100) as u32;
-        let cfg_scale = args
-            .get("cfg_scale")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(7.0)
-            .clamp(1.0, 30.0);
-        let seed_raw = args.get("seed").and_then(|v| v.as_i64()).unwrap_or(-1);
-        let seed = if seed_raw < 0 { rand_seed() } else { seed_raw };
-
-        let workflow = build_txt2img_workflow(&Txt2ImgParams {
-            prompt: &prompt,
-            negative: &negative,
-            width,
-            height,
-            steps,
-            cfg_scale,
-            seed,
-            checkpoint: &checkpoint,
-        });
-
-        // client_id は ComfyUI がプロンプトの所有者を識別するために使う（UUID形式を推奨）。
-        let client_id = format!(
-            "picoagent-{:016x}",
+        let engine = match Engine::parse(args.get("engine").and_then(Value::as_str)) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+        let input = match args
+            .get("input_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+        {
+            Some(value) if !value.is_empty() => match crate::permissions::resolve(cfg, value) {
+                Ok(path)
+                    if crate::permissions::fs::metadata(&path)
+                        .map(|metadata| metadata.is_file())
+                        .unwrap_or(false) =>
+                {
+                    let extension = path
+                        .as_path()
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .map(str::to_ascii_lowercase);
+                    if !matches!(extension.as_deref(), Some("png" | "jpg" | "jpeg" | "webp")) {
+                        return "エラー: 入力画像はPNG、JPEG、WebPだけを使用できます。".into();
+                    }
+                    if crate::permissions::fs::metadata(&path)
+                        .map(|metadata| metadata.len() > 100_000_000)
+                        .unwrap_or(true)
+                    {
+                        return "エラー: 入力画像は100MB以下にしてください。".into();
+                    }
+                    Some(path)
+                }
+                Ok(path) => return format!("エラー: 入力画像が見つかりません: {}", path.display()),
+                Err(error) => return format!("エラー: {error}"),
+            },
+            _ => None,
+        };
+        if engine == Engine::QwenEdit && input.is_none() {
+            return "エラー: Qwen画像編集には input_path が必要です。".into();
+        }
+        let (python, comfy, models) = match validate_runtime(engine) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+        let assets = match crate::components::character_maker_assets() {
+            Some(path) => path,
+            None => return "エラー: 画像・動画生成サイドカーが見つかりません。アプリを修復してください。".into(),
+        };
+        let output = match unique_output(engine) {
+            Ok(path) => path,
+            Err(error) => return error,
+        };
+        let width = normalized_video_dimension(integer(&args, "width", 768, 256, 1280));
+        let height = normalized_video_dimension(integer(&args, "height", 512, 256, 1280));
+        let frames = normalized_frames(integer(&args, "frames", 97, 9, 257));
+        let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos() as u64
-        );
-
-        let client = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
+        });
+        let bundled = crate::components::runtime_root().expect("初期化済み管理領域");
+        let lock = bundled
+            .parent()
+            .unwrap_or(bundled)
+            .join("character-maker/characters/temp/completion-gpu.lock");
+        let script = assets.join("sidecar/media/generate.py");
+        if !script.is_file() {
+            return "エラー: 画像・動画生成サイドカーが壊れています。アプリを修復してください。"
+                .into();
+        }
+        let mut command = crate::tools::process::command(&python);
+        command
+            .arg(&script)
+            .args(["--engine", engine.id(), "--prompt", &prompt])
+            .arg("--output")
+            .arg(output.as_path())
+            .arg("--comfy")
+            .arg(&comfy)
+            .arg("--models")
+            .arg(&models)
+            .arg("--gpu-lock")
+            .arg(&lock)
+            .args([
+                "--seed",
+                &seed.to_string(),
+                "--width",
+                &width.to_string(),
+                "--height",
+                &height.to_string(),
+                "--frames",
+                &frames.to_string(),
+            ]);
+        if let Some(input) = &input {
+            command.arg("--input").arg(input.as_path());
+        }
+        let result = match crate::tools::process::output(command, 7_200, "ローカル画像・動画生成")
+            .await
         {
-            Ok(c) => c,
-            Err(e) => return format!("エラー: HTTPクライアントの初期化に失敗しました: {e}"),
+            Ok(value) => value,
+            Err(error) => return format!("エラー: {error}"),
         };
-
-        // ── 1. ワークフローをキューへ投入 ──────────────────────────────────
-        let queue_url = format!("{base_url}/prompt");
-        let body = json!({ "prompt": workflow, "client_id": client_id });
-        let res = match client.post(&queue_url).json(&body).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                return format!(
-                    "エラー: ComfyUI ({base_url}) へ接続できませんでした。ComfyUI が起動しているか確認してください。\n詳細: {e}"
-                );
-            }
-        };
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tool_response_text!(res);
-            return format!("エラー: ComfyUI へのキュー投入に失敗しました ({status}): {text}");
+        if !result.status.success() {
+            let detail = String::from_utf8_lossy(&result.stderr);
+            return format!("エラー: 画像・動画生成に失敗しました: {}", detail.trim());
         }
-        let queue_data: Value = match res.json().await {
-            Ok(d) => d,
-            Err(e) => return format!("エラー: ComfyUI レスポンスの解析に失敗しました: {e}"),
-        };
-        let prompt_id = match queue_data.get("prompt_id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => return format!("エラー: prompt_id が取得できませんでした: {queue_data}"),
-        };
-
-        // ── 2. /history/{prompt_id} をポーリングして完了待ち ────────────────
-        let history_url = format!("{base_url}/history/{prompt_id}");
-        let max_polls = (POLL_MAX_SECS * 1_000 / POLL_INTERVAL_MS) as u32;
-        let mut output_info: Option<(String, String, String)> = None;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-            let history: Value = match crate::tools::http::client()
-                .get(&history_url)
-                .timeout(std::time::Duration::from_secs(15))
-                .send()
-                .await
-            {
-                Ok(r) if r.status().is_success() => match r.json().await {
-                    Ok(history) => history,
-                    Err(error) => {
-                        return format!("エラー: ComfyUI の履歴JSONを解析できません: {error}")
-                    }
-                },
-                _ => continue,
-            };
-            if let Some(info) = extract_output(&history, &prompt_id) {
-                output_info = Some(info);
-                break;
-            }
+        if !crate::permissions::fs::metadata(&output)
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false)
+        {
+            return "エラー: 生成処理は終了しましたが成果物を確認できません。".into();
         }
-
-        // ── 3. 出力 URL を組み立てて返す ─────────────────────────────────────
-        let (filename, subfolder, file_type) = match output_info {
-            Some(info) => info,
-            None => {
-                return format!(
-                    "エラー: {POLL_MAX_SECS} 秒以内に ComfyUI の生成が完了しませんでした。\
-                     steps を減らすか、ComfyUI の状態を確認してください。"
-                );
-            }
-        };
-
-        let mut view_url = format!(
-            "{base_url}/view?filename={}&type={}",
-            percent_encode_component(&filename),
-            percent_encode_component(&file_type)
-        );
-        if !subfolder.is_empty() {
-            view_url.push_str(&format!(
-                "&subfolder={}",
-                percent_encode_component(&subfolder)
-            ));
-        }
-
-        let alt: String = prompt.chars().take(40).collect();
-        let is_video =
-            filename.ends_with(".gif") || filename.ends_with(".mp4") || filename.ends_with(".webm");
-        if is_video {
-            format!(
-                "動画を生成しました: [{filename}]({view_url})\n\
-                 シード: {seed} / ステップ: {steps} / CFG: {cfg_scale}"
-            )
+        let path = output.as_path().to_string_lossy();
+        if engine == Engine::QwenEdit {
+            format!("![生成画像]({path})\n\n[画像を開く]({path})\nシード: {seed}")
         } else {
-            format!(
-                "![{alt}]({view_url})\n\
-                 [画像を開く]({view_url})\n\
-                 シード: {seed} / ステップ: {steps} / CFG: {cfg_scale}"
-            )
+            format!("[生成動画を開く]({path})\nエンジン: {} / シード: {seed} / {width}×{height} / {frames}フレーム", engine.id())
         }
     }
 }
 
-fn rand_seed() -> i64 {
-    let d = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    // 秒とナノ秒を混合して範囲を広げる（subsec_nanos のみだと 1e9 未満で衝突しやすい）。
-    (d.as_secs().wrapping_mul(1_000_000_007) ^ d.subsec_nanos() as u64) as i64
-}
-
-/// クエリ値をRFC3986の非予約文字だけ残して百分率符号化する。
-///
-/// `productivity_tools::url_encode` は利用者向け機能の form-urlencoded（空白が `+`）で
-/// 用途が違うため共有しない。
-fn percent_encode_component(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
-                vec![c]
-            } else {
-                let mut buf = [0u8; 4];
-                let bytes = c.encode_utf8(&mut buf).as_bytes().to_vec();
-                bytes
-                    .into_iter()
-                    .flat_map(|b| format!("%{b:02X}").chars().collect::<Vec<_>>())
-                    .collect()
-            }
-        })
-        .collect()
-}
-
 inventory::submit! { ToolReg { make: || Box::new(ComfyuiTool) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 動画寸法とフレーム数をモデル制約へ揃える() {
+        assert_eq!(normalized_video_dimension(777), 768);
+        assert_eq!(normalized_video_dimension(64), 256);
+        assert_eq!(normalized_frames(100), 97);
+        assert_eq!(normalized_frames(1), 9);
+    }
+
+    #[test]
+    fn 未知のエンジンを拒否する() {
+        assert!(Engine::parse(Some("unknown")).is_err());
+        assert!(Engine::parse(Some("wan-2.2-5b")).is_ok());
+    }
+}

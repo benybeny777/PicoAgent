@@ -43,6 +43,34 @@
         }
       ]
     },
+    "video-wan": {
+      "installMode": "managed",
+      "targetVersion": "wan-2.2-5b",
+      "sources": [
+        {
+          "name": "Wan 2.2 公式GitHub",
+          "url": "https://github.com/Wan-Video/Wan2.2"
+        },
+        {
+          "name": "ComfyUI公式Wan 2.2ワークフロー",
+          "url": "https://docs.comfy.org/tutorials/video/wan/wan2_2"
+        }
+      ]
+    },
+    "video-ltx": {
+      "installMode": "managed",
+      "targetVersion": "0.9.8",
+      "sources": [
+        {
+          "name": "Lightricks公式LTX-Videoモデル",
+          "url": "https://huggingface.co/Lightricks/LTX-Video"
+        },
+        {
+          "name": "Lightricks公式LTX 2.5",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5"
+        }
+      ]
+    },
     "office": {
       "installMode": "external",
       "sources": [

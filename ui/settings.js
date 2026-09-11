@@ -1084,7 +1084,7 @@ function buildComponentManager() {
   sec.classList.add("component-manager");
   sec.append(el("p", {
     className: "settings-intro",
-    textContent: "第三者ソフトをPicoAgentから再配布しません。AivisとWhisperは各公式配布元からPicoAgent専用領域へ直接取得し、それ以外は公式ページと設定手順を案内します。読み上げのミュート設定は変わりません。",
+    textContent: "第三者ソフトや生成モデルをPicoAgentから再配布しません。管理対象は各公式配布元からPicoAgent専用領域へ直接取得し、WanとLTXは選んだ一方だけを追加取得できます。読み上げのミュート設定は変わりません。",
   }));
   const core = el("div", { className: "component-card is-ready" }, [
     el("div", { className: "component-card-copy" }, [

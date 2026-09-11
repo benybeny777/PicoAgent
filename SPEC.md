@@ -241,6 +241,8 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 初回セットアップは「追加機能 → Live2D追加案内」の二段階とする。相棒の用途は初回に質問せず、未設定の場合だけ `both`（暮らしと作業の両方）をシステム側で保存し、必要な場合だけ設定画面から変更する。「使い方」から案内を再表示した場合は変更済みの用途を上書きしない。追加機能では Aivis／Whisper／LibreOffice／PDF・画像・文書ツールを個別表示し、選ばなくても本体、ローカルAIエンジン、Live2D表示は使える。「使い方」から初回セットアップ全体を再表示しても履歴・設定・追加済みキャラは削除しない。初回画面で「音声読み上げ」を明示選択してAivisの導入全体が成功した場合だけ `PICOAGENT_TTS_ENABLED=true` を保存する。設定画面からの単なる導入・更新では既存の読み上げON/OFFを変更しない。Aivisは導入先の `engine_manifest.json` にある版と `component-manifest.json` の `targetVersion` を比較し、古ければ「更新あり」、新しければ「推奨版より新しい」、読取不能または比較不能なら「確認が必要」と表示する。版確認の失敗は詳細をログへ残し、他の追加機能の状態表示は継続する。更新・推奨版への復帰・修復・削除は、維持または削除されるデータを画面内に表示する二段階操作とする。二度目の操作を待つ状態は10秒経過またはフォーカス移動で解除し、別の操作を後から誤実行しない。導入・更新・修復・削除は共通の進捗部品で工程名と経過時間を表示し、総取得量が分かる処理は実数パーセント、まだ分からない処理は動き続ける不定バーにする。`PicoAgent/aivis-userdata/` の音声モデル・辞書・設定には触れない。更新・確認件数は設定タブ、基本設定の入口、初回案内へ表示する。配布対象版と公式Releaseリンクが一致しなければ状態取得を失敗させ、配布設定のずれを成功扱いにしない。
 
 - 第三者ソフトウェアをPicoAgentのReleaseへ再アップロードしない。`component-manifest.json` は `version=2` / `policy=direct-upstream`、公式取得元表示、管理対象で固定する `targetVersion` だけを持ち、自前パッケージURL・分割ファイル・公開済みフラグを持たない。
+- ローカル生成基盤は共有Python 3.12とComfyUIを`character-maker`で一度だけ管理し、Qwen画像編集にも再利用する。WanとLTXは`video-wan`／`video-ltx`の別コンポーネントとして利用者が選んだ側だけを取得する。8GB VRAM未満または基盤未導入では取得前に停止し、生成基盤は動画モデルより先に削除できない。
+- この導入判定は8GBでの実動作保証ではない。LTX 0.9.8は低VRAM用途の旧世代候補で、実動画・画質・安定性は未検証。管理ツールの純粋なtext-to-imageとLTX 2.3／最新2.5は未対応。LTX 2.5の公式条件はDesktopが16GB以上、モデル本体のシステム要件が32GB以上と経路で異なる。一次資料と採用境界は[管理モデル](docs/models.md)へまとめる。
 - `installMode=managed` のAivisとWhisperだけは、各公式配布元から利用者データ `PicoAgent/bundled/<id>/` へ直接取得する。GitHub Release APIのサイズとSHA-256 digest、Whisperモデルの固定SHA-256、HTTPS、上限サイズ、zip slip、展開容量を検査し、ステージングから原子的に入れ替える。削除はPicoAgent管理領域だけを対象とする。
 - 追加機能の導入・更新・修復・削除はバックエンドの共通ロックで直列化し、初回案内と設定画面、複数カードから同時に実行されても管理領域を競合更新しない。
 - `installMode=external` のLibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrepは公式ページを表示する。利用者が提供元の条件を確認して導入し、必要なら設定で実行ファイルを指定する。PicoAgentは外部導入物を削除しない。
@@ -447,7 +449,7 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
 | `desktop_control` | デスクトップのマウス・キーボード操作（クリック・ドラッグ・文字入力・キー送出・スクロール）とウィンドウ一覧・前面化 | 既定無効、**シェルを介さない固定 action のみ**、座標の画面内チェック、入力文字数 2,000 上限、1分あたりの操作回数上限。ウィンドウ一覧・前面化は現在Windowsのみ。Linuxの入力操作はX11またはデスクトップ環境の許可範囲で動作し、Waylandが拒否した場合はエラーを返す |
 | `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、CDP は127.0.0.1限定かつ自分が起動した子だけを操作、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
-| `comfyui_generate` | ComfyUI ローカルサーバーで画像・動画を生成（APIキー不要）。KSampler ワークフローを組み立て `/prompt` → `/history` ポーリング → `/view` URL を返す。AnimateDiff 等の動画出力にも対応 | `COMFYUI_BASE_URL`（既定 `http://127.0.0.1:8188`）・`COMFYUI_CHECKPOINT`（モデルファイル名）のみ。120秒 timeout |
+| `comfyui_generate` | PicoAgent管理下のComfyUIを処理ごとに所有して、Qwen Image Edit、Wan 2.2 TI2V 5B、LTX-Video 0.9.8 2B FP8を実行する。入力は共通許可ルートで検査し、完成品を`generated-media/`へ原子的に保存してからComfyUIを停止する | 画像編集は入力必須。動画はテキスト／画像入力。幅・高さは32の倍数、フレームは8n+1へ正規化。共通プロセス層の2時間上限、生成失敗は原因を返して即時停止、途中物を同じ呼び出しで回収、キャラ補完と共通GPUロック、選択モデル未導入時は追加機能へ案内 |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | OfficeCLI と OOXML 直接編集による Word/Excel/PowerPoint の文字列置換・PDF出力 | 共通許可ルート配下のみ、同梱または明示設定した OfficeCLI、timeout |
 | `document_convert` | OfficeCLI / Pandoc による Office・PDF・文書変換 | 共通許可ルート配下のみ、同梱または明示設定した変換エンジン、timeout |
