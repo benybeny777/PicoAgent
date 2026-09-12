@@ -1131,6 +1131,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   [data-layout="widget"] .widget-clock strong { font-size:21px; }
   [data-layout="widget"] .widget-clock span { font-size:10px; }
   [data-layout="widget"] .notice-list { padding-bottom:0; }
+  /* 返答の取り分も少し削る。会話文字を大きくしても状態表示が窓の外へ出ないようにする。 */
+  [data-layout="widget"] .reply { max-height:24%; }
 }
 
 /* 幅520px以下・高さ520px以下: 折り返しで伸びる行（クイック操作・添付）を区切る。

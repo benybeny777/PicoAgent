@@ -5343,7 +5343,9 @@ function applyFontPx(px) {
   reply.style.fontSize = `${n}px`;
   // 入力欄・ステータスも比率を合わせて読みやすくする。
   input.style.fontSize = `${n}px`;
-  status.style.fontSize = `${Math.max(9, Math.round(n * 0.72))}px`;
+  // 状態表示は補助の1行。会話文字を大きくしても上限を設け、行が伸びて
+  // 入力欄や送信ボタンを窓の外へ押し出さないようにする。
+  status.style.fontSize = `${Math.min(18, Math.max(9, Math.round(n * 0.72)))}px`;
 }
 function applyVoiceVolume(value) {
   const n = parseFloat(value);
