@@ -42,7 +42,9 @@ test("管理導入は共通Python一環境と容量・GPU判定を先に行う",
 test("むぎは現行2.5Dリグだけを配信し旧素材へフォールバックしない", async () => {
   const manifest = JSON.parse(await read("characters/mugi/character.json"));
   assert.equal(manifest.meshRig?.rig, "rig2d/rig.json");
-  for (const key of ["boot", "animations", "frameGeneration", "runtimeLayers", "runtimeLayerEncoding", "frameEncoding"]) {
+  assert.equal(manifest.boot?.sleeping, "boot/sleeping.png");
+  assert.equal(manifest.boot?.useSleepingOnStartup, true);
+  for (const key of ["animations", "frameGeneration", "runtimeLayers", "runtimeLayerEncoding", "frameEncoding"]) {
     assert.equal(manifest[key], undefined, key);
   }
 });
