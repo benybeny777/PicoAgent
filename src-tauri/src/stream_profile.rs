@@ -129,6 +129,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn キャラ切替と代替表示で専用背景から共通背景へ戻る() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("config.json");
+        std::fs::write(
+            &file,
+            serde_json::json!({
+                "PICOAGENT_STREAM_BACKGROUND": "gaming",
+                "PICOAGENT_STREAM_PROFILES": {
+                    "demo-a": { "background": "sakura-room" },
+                    "demo-b": { "background": "dog-hobby-room" }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let config = Config::new();
+        config.load(file).unwrap();
+        for (id, background) in [
+            ("demo-a", "sakura-room"),
+            ("demo-b", "dog-hobby-room"),
+            ("mugi", "gaming"),
+            ("demo-a", "sakura-room"),
+        ] {
+            assert_eq!(resolve(&config, id).background, background);
+        }
+    }
+
+    #[test]
     fn 不正な配信上書きを安全な値へ戻す() {
         let value = serde_json::json!({
             "mugi": { "background": "bad", "display": "image", "captionColor": "red" },

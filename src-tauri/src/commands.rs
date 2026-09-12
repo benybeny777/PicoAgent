@@ -1157,7 +1157,15 @@ pub fn pet_set_character_profile(
             state.messages.lock().unwrap().extend(recent);
         }
     }
-    Ok(json!({ "ok": true }))
+    let stream = crate::stream_profile::resolve(&state.config, &character_id);
+    Ok(json!({
+        "ok": true,
+        "streamBackground": stream.background,
+        "streamBackgroundImage": stream.background_image,
+        "streamDisplay": stream.display,
+        "streamDisplayImage": stream.display_image,
+        "streamCaptionColor": stream.caption_color,
+    }))
 }
 
 /// 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
@@ -2490,7 +2498,13 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
 }
 
 fn effective_tts_voice(state: &AppState) -> TtsVoice {
-    let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+    // 読込失敗時の代替キャラも含め、実際に表示できた人格と声を揃える。
+    let active = state.character_id.lock().unwrap().clone();
+    let character_id = if active.is_empty() {
+        state.config.get("PICOAGENT_CHARACTER", "mugi")
+    } else {
+        active
+    };
     let default = default_character_tts_voice(&character_id);
     let override_voice = state
         .config
@@ -3684,6 +3698,18 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
     // 680x430の起動画面を完了状態として固定しない。
     crate::boot_screen::mark_finished(&app);
     Ok(())
+}
+
+/// 最終DOMと描画バッファの準備が済んだ画面だけを表示する。
+#[tauri::command]
+pub fn pet_reveal_main(app: AppHandle) -> Result<(), String> {
+    if !crate::boot_screen::is_finished(&app) {
+        return Err("起動準備が完了していません".to_string());
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or("メイン画面がありません")?;
+    window.show().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -5145,6 +5171,27 @@ mod tests {
             serde_json::json!(r#"[{"provider":"local"}]"#),
         );
         assert!(validate_multi_ai_settings(&Config::new(), &consensus).is_err());
+    }
+
+    #[test]
+    fn 代替表示したキャラの声を保存中のキャラより優先する() {
+        use super::{effective_tts_voice, AppState};
+        let state = AppState::new();
+        state.config.set("PICOAGENT_CHARACTER", "hiyori");
+        assert_eq!(
+            effective_tts_voice(&state).style_name.as_deref(),
+            Some("ふつー")
+        );
+        *state.character_id.lock().unwrap() = "mugi".to_string();
+        assert_eq!(
+            effective_tts_voice(&state).style_name.as_deref(),
+            Some("あまあま")
+        );
+        *state.character_id.lock().unwrap() = "hiyori".to_string();
+        assert_eq!(
+            effective_tts_voice(&state).style_name.as_deref(),
+            Some("ふつー")
+        );
     }
 
     #[test]

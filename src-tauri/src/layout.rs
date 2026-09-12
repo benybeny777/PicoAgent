@@ -258,6 +258,23 @@ pub fn finish_boot(app: &AppHandle, id: &str) -> Result<(), String> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let user_placement = crate::boot_window_placement(app);
+    // 先に対象モニターへ移す。起動時の左画面のDPIで右画面用サイズを計算しない。
+    if let Some(window) = app.get_webview_window("main") {
+        match user_placement {
+            Some(crate::BootWindowPlacement::Position(x, y))
+            | Some(crate::BootWindowPlacement::CenterOnMonitor(x, y)) => {
+                window
+                    .set_position(PhysicalPosition::new(x, y))
+                    .map_err(|error| error.to_string())?;
+            }
+            None => crate::restore_window_position(
+                &window,
+                &app.state::<AppState>().config,
+                BOOT_WIDTH as u32,
+                BOOT_HEIGHT as u32,
+            ),
+        }
+    }
     apply(app, id)?;
     if let Some(window) = app.get_webview_window("main") {
         let (width, height) = applied_physical_size(&window, app, id);
@@ -322,6 +339,9 @@ fn apply_boot_locked(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     begin_boot_size();
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|error| error.to_string())?;
+    }
     apply_window_size(app, BOOT_WIDTH, BOOT_HEIGHT, None)?;
     if let Some(window) = app.get_webview_window("main") {
         crate::center_window_on_saved_monitor(

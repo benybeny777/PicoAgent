@@ -14,6 +14,7 @@
         "label": "main",
         "url": "index.html",
         "title": "PicoAgent",
+        "visible": false,
         "width": 680,
         "height": 430,
         "minWidth": 200,
@@ -29,7 +30,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; img-src 'self' blob: data: asset: http://asset.localhost; media-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
           "scope": ["$APPDATA/characters/**", "$APPDATA/display/**", "$APPDATA/character-maker/characters/**"]

@@ -80,6 +80,17 @@ pub fn run() {
         }))
         // キャラクターパックを選ぶネイティブダイアログ（Rust 側だけで使う）。
         .plugin(tauri_plugin_dialog::init())
+        .on_page_load(|window, payload| {
+            // フロント自体が壊れた場合も、完成した文字だけの診断ページへ到達できる。
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                && (payload.url().scheme() == boot_screen::SCHEME
+                    || payload.url().host_str() == Some("picoboot.localhost"))
+            {
+                if let Err(error) = window.show() {
+                    log_paths::append_app_log(window.app_handle(), &format!("診断画面を表示できません: {error}"));
+                }
+            }
+        })
         // グローバルホットキー（他のアプリの裏に居ても呼び出せるようにする）。
         // 個々のキー登録は設定を読んでから hotkey::apply が行う。
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -174,6 +185,7 @@ pub fn run() {
             commands::pet_frontend_ready,
             commands::pet_boot_progress,
             commands::pet_finish_boot,
+            commands::pet_reveal_main,
             commands::pet_reset_layout,
             commands::pet_save_layout_placements,
             menu::pet_menu,

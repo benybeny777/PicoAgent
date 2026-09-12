@@ -824,64 +824,6 @@ async function loadCharacterManifest(characterId) {
   return { entry, manifest, root };
 }
 
-// 起動画面へ寝姿で出せるのは、専用原画を持つ（`boot.useSleepingOnStartup`）同梱キャラだけ。
-// IDを直書きすると、キャラを足したときの更新漏れが黙って起きるため一覧から取る。
-function startupSleepingCandidates(catalog) {
-  return (catalog?.characters || [])
-    .filter(character => character.bootSleeping === true && character.id)
-    .map(character => character.id);
-}
-
-function chooseStartupSleepingCharacter(candidates, randomValue = Math.random()) {
-  if (!candidates.length) return "";
-  const value = Number.isFinite(Number(randomValue)) ? Number(randomValue) : 0;
-  const index = Math.min(
-    candidates.length - 1,
-    Math.max(0, Math.floor(value * candidates.length)),
-  );
-  return candidates[index];
-}
-
-async function prepareBootCharacter(characterId) {
-  if (!bootPetImage) return;
-  const { manifest, root } = await loadCharacterManifest(characterId);
-  const version = String(manifest.assetVersion || "");
-  bootCharacterName = manifest.name || "キャラクター";
-  bootPetImage.alt = `起動を待つ${bootCharacterName}`;
-  petApp.dataset.bootCharacterId = manifest.id || characterId;
-  const dedicatedSleeping = manifest.boot?.useSleepingOnStartup === true
-    ? manifest.boot?.sleeping
-    : "";
-  petApp.dataset.bootArtwork = dedicatedSleeping ? "sleeping" : "idle";
-  // 寝姿を起動時にも使うのは専用原画を持つ3キャラだけ。他キャラの preview は
-  // 紹介画像や全身コラージュの場合があるため、通常表示と同じ idle 先頭フレームを使う。
-  if (dedicatedSleeping) {
-    bootPetImage.onerror = () => {
-      bootPetImage.onerror = null;
-      bootPetImage.src = "assets/characters/_preview-placeholder.png";
-    };
-    bootPetImage.src = versionedAssetUrl(`${root}/${dedicatedSleeping}`, version);
-    return;
-  }
-  // Live2D の preview.jpg は配布元の紹介画像や全身コラージュの場合があり、実モデルへ
-  // 切り替わる一瞬だけ別の絵に見える。Live2D は仮画像を出さず、読み込み完了した
-  // 実モデルをそのまま起動画面へ出す。2Dキャラは通常表示と同じ idle 先頭フレームを使う。
-  if (manifest.live2d || manifest.mmd) {
-    // 仮画像が無いので、起動画面のキャラ枠は CSS 側で実モデル（.character）へ差し替える。
-    petApp.dataset.bootArtwork = "live2d";
-    bootPetImage.onerror = null;
-    bootPetImage.removeAttribute("src");
-    return;
-  }
-  const bootPath = animationFramePath(manifest.animations?.idle, 0);
-  bootPetImage.onerror = () => {
-    // プレビュー画像を取得できていないキャラ（setup が警告を出した場合）でも起動画面を壊さない。
-    bootPetImage.onerror = null;
-    bootPetImage.src = "assets/characters/_preview-placeholder.png";
-  };
-  bootPetImage.src = versionedAssetUrl(`${root}/${bootPath}`, version);
-}
-
 const animationPreloadCache = new Map();
 const animationPreloadPromises = new Map();
 let deferredAnimationPreload = null;
@@ -1171,6 +1113,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
   const signature = `${manifest.id}\n${assetVersion}\n${savedVariant}\n${sdkPreference}\n${profile}`;
   if (signature === loadedCharacterSignature) return;
+  stopVoice(false); // 切替前のキャラの合成待ち・再生音声を新しい姿へ持ち越さない。
   clearAnimationPreloads();
   characterRoot = root;
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
@@ -1244,8 +1187,12 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
   // 挨拶も渡す。短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため。
-  await window.picoagent.setCharacterProfile(manifest.id, profile, manifest.greeting || "");
+  const appearance = await window.picoagent.setCharacterProfile(manifest.id, profile, manifest.greeting || "");
+  if (loadGeneration !== characterLoadGeneration) return;
+  // 読込失敗で代替キャラを表示した場合も、直前のキャラ用背景を残さない。
+  if (appearance?.streamBackground != null) applyStreamAppearance(appearance.streamBackground, appearance.streamBackgroundImage, appearance.streamDisplay, appearance.streamDisplayImage, appearance.streamCaptionColor);
   loadedCharacterSignature = signature;
+  character.style.removeProperty("visibility");
   if (manifest.greeting) {
     renderReply(manifest.greeting);
     // 起動時は描画と同時に再生するため、ここでは合成しない（boot 側が事前合成→表示と同時再生）。
@@ -5817,6 +5764,7 @@ async function finishBootBackend() {
       .finally(() => { bootBackendFinishPromise = null; });
   }
   await bootBackendFinishPromise;
+  if (bootUiReleased) await window.picoagent.revealMain();
 }
 
 function scheduleBootBackendRetry() {
@@ -5856,6 +5804,11 @@ async function releaseBootUi() {
   petApp.classList.remove("is-booting");
   if (meshRigController) setAnimation(animationName, true);
   stopBootLogTicker();
+  if (bootBackendFinished) {
+    // 非表示の間も最終寸法で一度描画し、未描画canvasを表示しない。
+    mmdController?.capturePreview();
+    await window.picoagent.revealMain();
+  }
 }
 
 (async () => {
@@ -5903,32 +5856,23 @@ async function releaseBootUi() {
   if (bootUiReleased) applyLayout(startupLayout);
   else applyLayout("stream");
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
-  try {
-    setStatus("起動画面のキャラクター画像を読み込み中…");
-    // 候補が無い一覧（寝姿を持つキャラを外した等）でも起動画面は出す。既定キャラへ落とす。
-    const catalog = await loadCharacterCatalog();
-    const sleeping = chooseStartupSleepingCharacter(startupSleepingCandidates(catalog));
-    await prepareBootCharacter(sleeping || catalog.default || info.characterId || "mugi");
-  } catch (error) {
-    logApp("warn", "ローディング画面のキャラクター読込に失敗しました", errorDetail(error));
-  }
+  // 準備中はネイティブ窓を非表示にし、別キャラや仮画像を出さない。
+  bootPetImage?.removeAttribute("src");
   // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
   // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンの準備は
   // このあと起動画面のまま待つ（送信できない通常画面を先に見せない）。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus("選択中のキャラクターを読み込み中…");
   const requestedCharacterId = info.characterId || "mugi";
+  let startupCharacterError = "";
   const loadOptions = { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} };
   const loadStartupCharacter = async () => {
     try {
       await loadCharacter(requestedCharacterId, info.characterOverrides || {}, loadOptions);
     } catch (error) {
-      if (requestedCharacterId === "mugi") throw error;
-      // フォールバック許可: 保存中の任意キャラが欠損・破損・応答停止でも、同梱の
-      // 既定PNGキャラで画面を起動する。失敗理由はログへ残し、1回だけ切り替える。
-      logApp("error", `${requestedCharacterId}を起動できないため既定キャラへ切り替えます`, errorDetail(error));
-      setStatus("選択中のキャラクターを読み込めないので、むぎで起動するね");
-      await loadCharacter("mugi", info.characterOverrides || {}, loadOptions);
+      character.style.visibility = "hidden";
+      startupCharacterError = `選択したキャラを読み込めません: ${error.message}。設定からキャラを確認してください`;
+      throw error;
     }
   };
   const characterLoadPromise = loadStartupCharacter().then(
@@ -5975,7 +5919,7 @@ async function releaseBootUi() {
         logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
       });
     }
-    if (!startupEngineError && info.onboardingDone && startupGreeting) {
+    if (!startupCharacterError && !startupEngineError && info.onboardingDone && startupGreeting) {
       const voiceReady = await prepareSelectedVoiceModel();
       if (voiceReady) startupPreparedSpeech = await prepareSpeech(startupGreeting);
       else if (voiceReady === false) {
@@ -6004,6 +5948,10 @@ async function releaseBootUi() {
     setStatus(startupVoiceError);
     status.classList.add("engine-error");
   }
+  if (startupCharacterError) {
+    setStatus(startupCharacterError);
+    status.classList.add("engine-error");
+  }
   quickActionItems = parseQuickActions(info.quickActions);
   renderQuickActions();
   napMinutes = Number(info.napMinutes) > 0 ? Number(info.napMinutes) : 0;
@@ -6026,6 +5974,7 @@ async function releaseBootUi() {
   }
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
+  character.style.visibility = "hidden";
   setStatus(`起動初期化に失敗: ${error?.message || error}`);
   releaseBootUi().finally(() => wakeAnimationLoop());
 });

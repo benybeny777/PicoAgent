@@ -9,6 +9,9 @@ use tauri::{AppHandle, Manager};
 /// メインウィンドウを表示して前面へ出す。各段の失敗は診断ログへ残して続行する
 /// （どれか1つが失敗しても、残りで前面化できることがあるため）。
 pub fn surface_main_window(app: &AppHandle) {
+    if !crate::boot_screen::is_finished(app) {
+        return;
+    }
     let Some(window) = app.get_webview_window("main") else {
         crate::log_paths::append_app_log(app, "前面化するメインウィンドウがありません。");
         return;

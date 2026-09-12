@@ -123,7 +123,7 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
 
     // 呼び出しキーが無いまま隠れたままにすると、右クリックメニューにも手が届かず
     // アプリを操作できなくなる。呼び戻す手段が無いときは必ず表示へ戻す。
-    if !summon_ready {
+    if !summon_ready && crate::boot_screen::is_finished(app) {
         if let Some(window) = app.get_webview_window("main") {
             if !window.is_visible().unwrap_or(true) {
                 window

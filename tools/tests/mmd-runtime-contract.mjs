@@ -4,6 +4,14 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../../ui/mmd-renderer.js', import.meta.url), 'utf8');
+test('製品CSPはMMDの復号画像とTauriのIPCを許可し外部サイトを許可しない', () => {
+  const config = JSON.parse(readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  const csp = config.app.security.csp;
+  const image = csp.split(';').find(value => value.trim().startsWith('img-src'));
+  assert.match(image, /\bblob:/);
+  assert.doesNotMatch(image, /https:|\*/);
+  assert.match(csp, /connect-src[^;]*http:\/\/ipc\.localhost/);
+});
 function harness(ready = true, Engine = class { constructor() { throw new Error('LOCAL_ASSET_ACCEPTED'); } }) {
   const scripts = [];
   let engines = 0;

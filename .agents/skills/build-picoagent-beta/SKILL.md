@@ -38,7 +38,7 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 
 ## ビルド
 
-1. 長時間実行は`temp/`へ標準出力・標準エラー・PIDを保存し、隠しウィンドウで起動する。
+1. 長時間実行も終了コードと結果を同じ作業内で回収する。利用者が非同期実行を禁止した場合は、追跡可能な実行セッションで完了まで待つ。GUIを起動する場合は最新のモニター指定を守り、検証が終わったら閉じる。
 2. Windowsでは`cargo xtask build-beta --bundles nsis`、macOSでは`cargo xtask build-beta --bundles app,dmg`、Ubuntu Linux x64では`cargo xtask build-beta --bundles deb,appimage`を実行する。LinuxはREADMEのapt依存を先に揃え、AppImageの`bundleMediaFramework`を無効化しない。macOSはXcode Command Line Tools、Tauri CLI、`p7zip`（Aivisの分割書庫展開）を先に揃える。手順は`docs/DEVELOPMENT.md`の「macOS版のビルド（未署名アルファ）」。
    - **macOS向けのコンパイルはWindows環境で検証できていない。** 初回は自前コードの型エラーや同梱物取得のmac経路で止まりうる。止まったら原因を直して同じブランチへコミットし、PRを完成させる。失敗ログだけ残して終えない。
    - 直し方で機能を削らない。macOS分岐のスタブ化、`bundle.targets`の縮小、`Info.plist`の用途説明削除、同梱物の省略でビルドを通した場合は、何を落としたかをPR本文と`docs/TASKS.md`へ必ず残す。
@@ -53,7 +53,7 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 3. `latest.json`のURL、サイズ、SHA-256が実ファイルと完全一致することを再計算して確認する。
 4. `cargo test --manifest-path xtask/Cargo.toml`、変更範囲に応じたRustテスト、全JSの`node --check`、`git diff --check`を通す。
 5. UIや動画を変えた場合は`verify-picoagent-ui`も使い、実WebView成果物を更新する。
-   - キャラ一覧動画は変則的な小型形式を使わず、実利用と同じ標準ペット表示と配信表示で撮る。README用は各キャラ12秒・960px・30fps、LP用は`SHOOT_SITE_GALLERY=1`で同じ撮影経路の生PNGから6秒・480px・16fpsへ直接書き出す（既存960pxの再エンコードは禁止）。通常版は2倍密度描画、配信版はネイティブ1920px画面から縮小し、撮影ツールの引き伸ばし検査とLP容量検査を通す。LPは音声口パクを十分見せてから考え中→待機へ戻し、短時間に多数の状態を巡回させない。
+   - キャラ一覧動画は変則的な小型形式を使わず、実利用と同じ標準ペット表示と配信表示で撮る。README用は`SHOOT_README_GALLERY=1`、LP用は`SHOOT_SITE_GALLERY=1`で同じ撮影経路の生PNGから6秒・960px・16fpsへ直接書き出す（既存動画の再エンコードは禁止）。通常版は2倍密度描画、配信版はネイティブ1920px画面から縮小し、撮影ツールの引き伸ばし検査とLP容量検査を通す。LPは音声口パクを十分見せてから考え中→待機へ戻し、短時間に多数の状態を巡回させない。
    - Live2Dを紹介するときはひよりだけに固定せず、取得済みの全公式サンプルを同条件で撮影する。中間フレームを目視し、画面外・極端な拡大縮小・透明化があれば`character.json`の正本を直して再同期する。
 
 ## Distributionへ公開する
