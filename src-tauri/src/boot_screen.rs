@@ -5,9 +5,9 @@
 // ことをバックエンド側で検知し、埋め込みの案内ページへ `navigate` し直す。
 //
 // 案内ページは配信元（dev サーバ / `ui-dist`）が死んでいるときにこそ出る画面なので、
-// HTML もキャラクター画像もバイナリへ埋め込み、専用 URI スキームから返す。配信経路には依存しない。
+// HTML をバイナリへ埋め込み、専用 URI スキームから返す。配信経路には依存しない。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -40,6 +40,8 @@ pub struct BootScreenState {
     started: AtomicBool,
     /// フロントが `pet_finish_boot` まで到達し、起動画面を終了したか。
     finished: AtomicBool,
+    /// 起動シーケンスの世代。webview を読み込み直すたびに進め、古い監視を終わらせる。
+    generation: AtomicU64,
     /// 起動準備中のフロントから最後に生存通知が届いた時刻。
     last_progress: Mutex<Option<Instant>>,
     /// 案内ページへ切り替え済みか（多重 navigate を避ける）。
@@ -57,11 +59,21 @@ impl BootScreenState {
 }
 
 /// フロントのJavaScript実行開始を記録する。これだけでは起動完了扱いにしない。
+///
+/// 設定反映後の再初期化（`restart_app` → `pet:reload`）でも呼ばれる。そのとき窓は
+/// `layout::restart_boot` で非表示へ戻るため、**停止監視をここで必ず張り直す**。
+/// 張り直さないと、2回目以降の起動が止まったときに案内ページも窓も出ず、
+/// 生きているプロセスを終了させる以外に戻す手段が無くなる。
 pub fn mark_started(app: &AppHandle) {
-    let state = app.state::<BootScreenState>();
-    state.started.store(true, Ordering::SeqCst);
-    state.finished.store(false, Ordering::SeqCst);
-    *state.last_progress.lock().unwrap() = Some(Instant::now());
+    {
+        let state = app.state::<BootScreenState>();
+        state.started.store(true, Ordering::SeqCst);
+        state.finished.store(false, Ordering::SeqCst);
+        // 前回の起動で案内ページを出していても、次の起動では改めて検出できるようにする。
+        state.shown.store(false, Ordering::SeqCst);
+        *state.last_progress.lock().unwrap() = Some(Instant::now());
+    }
+    watch(app.clone());
 }
 
 pub fn is_finished(app: &AppHandle) -> bool {
@@ -82,13 +94,24 @@ pub fn mark_finished(app: &AppHandle) {
     state.finished.store(true, Ordering::SeqCst);
 }
 
+/// Windows / Android で案内ページを載せるホスト名。
+fn page_host() -> String {
+    format!("{SCHEME}.localhost")
+}
+
 /// 案内ページの URL。Windows / Android は `http://<scheme>.localhost/`、他は `<scheme>://localhost/`。
 fn page_url() -> String {
     if cfg!(any(windows, target_os = "android")) {
-        format!("http://{SCHEME}.localhost/")
+        format!("http://{}/", page_host())
     } else {
         format!("{SCHEME}://localhost/")
     }
+}
+
+/// 読み込み完了したページが案内ページかどうか。プラットフォームで URL の形が変わるため、
+/// 判定は `page_url()` と同じ規則をここへ集約する（呼び出し側でホスト名を書かない）。
+pub fn is_page_url(scheme: &str, host: Option<&str>) -> bool {
+    scheme == SCHEME || host.is_some_and(|host| host == page_host())
 }
 
 /// 専用 URI スキームのハンドラ。仮キャラを含まない診断ページを返す。
@@ -203,15 +226,32 @@ pub fn progress_interval_ms(timeout_ms: u64) -> u64 {
     (timeout_ms / 4).clamp(MIN_PROGRESS_INTERVAL_MS, MAX_PROGRESS_INTERVAL_MS)
 }
 
+/// 自分より新しい起動シーケンスが始まっていれば真（古い監視は何もせず終わる）。
+fn outdated(app: &AppHandle, generation: u64) -> bool {
+    app.state::<BootScreenState>()
+        .generation
+        .load(Ordering::SeqCst)
+        != generation
+}
+
 pub fn watch(app: AppHandle) {
     let timeout_ms = timeout_ms(&app);
 
     // 読込開始が来ない障害（配信元の停止・スクリプトの構文エラー）は準備の長さと無関係なので、
     // 案内ページまで2分待たせない。設定で待ち時間を短くした場合はそちらへ合わせる。
     let start_timeout_ms = timeout_ms.min(START_TIMEOUT_MS);
+    // 再読込のたびに張り直すため、古い監視が新しい起動を誤って停止扱いにしないよう世代で分ける。
+    let generation = app
+        .state::<BootScreenState>()
+        .generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
 
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(start_timeout_ms)).await;
+        if outdated(&app, generation) {
+            return;
+        }
         let started = app
             .state::<BootScreenState>()
             .started
@@ -232,7 +272,9 @@ pub fn watch(app: AppHandle) {
         loop {
             let remaining = {
                 let state = app.state::<BootScreenState>();
-                if state.finished.load(Ordering::SeqCst) {
+                if state.generation.load(Ordering::SeqCst) != generation
+                    || state.finished.load(Ordering::SeqCst)
+                {
                     return;
                 }
                 // 最後の通知からの経過分を差し引き、停止の検出を1区間ぶん遅らせない。
@@ -241,6 +283,9 @@ pub fn watch(app: AppHandle) {
             };
             let Some(rest) = remaining else { break };
             tokio::time::sleep(rest).await;
+        }
+        if outdated(&app, generation) {
+            return;
         }
         show_failure(
             &app,
@@ -360,6 +405,18 @@ mod tests {
                 "通知間隔がしきい値以上だと正常な起動でも失敗になる: {timeout}"
             );
         }
+    }
+
+    #[test]
+    fn 案内ページの判定はプラットフォームごとの形式を取りこぼさない() {
+        // 非Windowsの `picoboot://localhost/`。
+        assert!(is_page_url(SCHEME, Some("localhost")));
+        // Windows / Android の `http://picoboot.localhost/`。
+        assert!(is_page_url("http", Some(&page_host())));
+        // 通常のアプリ画面は対象外（ここで真になると起動準備中の窓を出してしまう）。
+        assert!(!is_page_url("http", Some("tauri.localhost")));
+        assert!(!is_page_url("http", Some("localhost")));
+        assert!(!is_page_url("https", None));
     }
 
     #[test]

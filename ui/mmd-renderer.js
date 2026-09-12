@@ -57,8 +57,10 @@
       if (!/\.pmx$/iu.test(url.pathname) || url.search || url.hash || url.username || url.password || !(sameOrigin || localAsset)) throw new Error('同じアプリ内のPMXモデルを指定してください');
       engine = new B.Engine(canvas, true, { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true, stencil: true });
       // CSS寸法の引き伸ばしではなく、実画面の画素密度でモデルを描き直す。
+      let appliedPixelRatio = 0;
       const resize = () => {
-        engine.setHardwareScalingLevel(1 / Math.max(1, window.devicePixelRatio || 1));
+        appliedPixelRatio = Math.max(1, window.devicePixelRatio || 1);
+        engine.setHardwareScalingLevel(1 / appliedPixelRatio);
         engine.resize();
       };
       B.SdefInjector.OverrideEngineCreateEffect(engine);
@@ -181,6 +183,12 @@
         const now = performance.now();
         if (document.hidden || now - lastFrame < 1000 / 30) return;
         lastFrame = now;
+        // CSS寸法が変わらないまま画素密度だけ変わる場合（DPIの違う画面へ移す）は
+        // ResizeObserver が動かないため、描画側で追う。
+        if (Math.max(1, window.devicePixelRatio || 1) !== appliedPixelRatio) {
+          resize();
+          setFraming(framing);
+        }
         update();
         scene.render();
       });

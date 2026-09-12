@@ -14,7 +14,6 @@ const input = document.getElementById("input");
 const status = document.getElementById("status");
 const bootStatus = document.getElementById("bootStatus");
 const bootLog = document.getElementById("bootLog");
-const bootPetImage = document.getElementById("bootPetImage");
 const sendButton = document.getElementById("sendButton");
 const cancelSendButton = document.getElementById("cancelSend");
 const cancelVoiceButton = document.getElementById("cancelVoice");
@@ -5756,6 +5755,15 @@ let bootBackendRetryTimer = null;
 let bootBackendRetryDelayMs = 1500;
 const BOOT_BACKEND_RETRY_MAX_MS = 30000;
 
+// 窓を出す唯一の入口。表示前に一度描き切り、未描画canvasのまま窓を出さない。
+// 起動直後・再試行のどちらから来ても同じ手順を通す。
+async function revealMainWindow() {
+  // 描画確定に失敗しても表示だけは必ず行う。ここで止まると窓が出ないまま操作手段が無くなる。
+  try { mmdController?.capturePreview(); }
+  catch (error) { logApp("warn", "表示前の描画確定に失敗しました", errorDetail(error)); }
+  await window.picoagent.revealMain();
+}
+
 async function finishBootBackend() {
   if (bootBackendFinished) return;
   if (!bootBackendFinishPromise) {
@@ -5764,7 +5772,7 @@ async function finishBootBackend() {
       .finally(() => { bootBackendFinishPromise = null; });
   }
   await bootBackendFinishPromise;
-  if (bootUiReleased) await window.picoagent.revealMain();
+  if (bootUiReleased) await revealMainWindow();
 }
 
 function scheduleBootBackendRetry() {
@@ -5804,11 +5812,7 @@ async function releaseBootUi() {
   petApp.classList.remove("is-booting");
   if (meshRigController) setAnimation(animationName, true);
   stopBootLogTicker();
-  if (bootBackendFinished) {
-    // 非表示の間も最終寸法で一度描画し、未描画canvasを表示しない。
-    mmdController?.capturePreview();
-    await window.picoagent.revealMain();
-  }
+  if (bootBackendFinished) await revealMainWindow();
 }
 
 (async () => {
@@ -5856,11 +5860,8 @@ async function releaseBootUi() {
   if (bootUiReleased) applyLayout(startupLayout);
   else applyLayout("stream");
   applyBubbleLayout(info.bubbleWidth, info.bubbleHeight, info.bubbleLeft, info.bubbleTop);
-  // 準備中はネイティブ窓を非表示にし、別キャラや仮画像を出さない。
-  bootPetImage?.removeAttribute("src");
-  // 通常キャラクターを読み込む。完了したら起動画面のプレビュー画像から実キャラへ
-  // 切り替え、配信画面と同じ大きな立ち絵で見せる。推論・音声エンジンの準備は
-  // このあと起動画面のまま待つ（送信できない通常画面を先に見せない）。
+  // 通常キャラクターを読み込む。窓は隠したままなので、読込中の姿を見せることはない。
+  // 推論・音声エンジンの準備もこのまま待つ（送信できない通常画面を先に見せない）。
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus("選択中のキャラクターを読み込み中…");
   const requestedCharacterId = info.characterId || "mugi";
@@ -5876,10 +5877,7 @@ async function releaseBootUi() {
     }
   };
   const characterLoadPromise = loadStartupCharacter().then(
-    () => {
-      petApp.classList.add("boot-character-ready");
-      return { ok: true };
-    },
+    () => ({ ok: true }),
     error => ({ ok: false, error }),
   );
   let startupGreeting = "";
