@@ -162,7 +162,21 @@ function stableStringify(value) {
 
 function updateDirtyStateNow() {
   if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
-  const current = collect();
+  let current;
+  try {
+    current = collect();
+  } catch (error) {
+    // JSONなどの編集中の不正値も未保存の変更。保存時の検証へ渡し、修正・復元を妨げない。
+    resetChangesBtn.disabled = settingsMutationBusy;
+    saveBtn.disabled = settingsMutationBusy;
+    saveBtn.classList.add("dirty");
+    saveBtn.textContent = "変更を保存";
+    if (dirtySummary) {
+      dirtySummary.textContent = "未保存（入力を確認）";
+      dirtySummary.classList.add("dirty");
+    }
+    return;
+  }
   const changedKeys = new Set(
     [...Object.keys(savedSnapshot), ...Object.keys(current)]
       .filter(key => stableStringify(current[key]) !== stableStringify(savedSnapshot[key]))

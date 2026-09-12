@@ -2360,11 +2360,7 @@ function renderMarkdown(container, src) {
       code.textContent = codeLines.join('\n');
       const copyBtn = document.createElement("button");
       copyBtn.type = "button"; copyBtn.className = "copy-code"; copyBtn.textContent = "コピー";
-      copyBtn.addEventListener("click", () => {
-        navigator.clipboard.writeText(code.textContent || "");
-        copyBtn.textContent = "✓";
-        setTimeout(() => copyBtn.textContent = "コピー", 1500);
-      });
+      copyBtn.addEventListener("click", () => copyCodeBlock(copyBtn, code.textContent || ""));
       pre.append(copyBtn, code);
       wrap.append(pre);
       continue;
@@ -2741,6 +2737,23 @@ async function copyText(text) {
   try { ok = document.execCommand("copy"); }
   finally { area.remove(); }
   return ok;
+}
+
+async function copyCodeBlock(button, text) {
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const ok = await copyText(text);
+    button.textContent = ok ? "コピーしました" : "コピーできませんでした";
+  } catch (error) {
+    logApp("warn", "コードのコピーに失敗しました", errorDetail(error));
+    button.textContent = "コピーできませんでした";
+  } finally {
+    setTimeout(() => {
+      button.textContent = "コピー";
+      button.disabled = false;
+    }, 1500);
+  }
 }
 
 function renderAlarmReply(text) {
@@ -5017,8 +5030,6 @@ input.addEventListener("keydown", event => {
     event.preventDefault();
     composer.requestSubmit();
   }
-  if (event.key === "ArrowUp" && recallInputHistory(-1)) event.preventDefault();
-  else if (event.key === "ArrowDown" && inputHistoryPos !== -1 && recallInputHistory(1)) event.preventDefault();
 });
 let historySearchTimer = 0;
 historySearch?.addEventListener("input", () => {

@@ -110,7 +110,9 @@
         const toolName = el("input", { type: "text", value: task.tool_name || "weather", placeholder: "スキル名 例: weather", className: "schedule-tool" });
         const toolArgs = el("textarea", { value: JSON.stringify(task.tool_args || {}, null, 2), placeholder: "{ }", className: "schedule-json" });
         const program = el("input", { type: "text", value: task.program || "git", placeholder: "program", className: "schedule-program" });
-        const args = el("input", { type: "text", value: Array.isArray(task.args) ? task.args.join(" ") : "", placeholder: "引数（空白区切り）", className: "schedule-args" });
+        const originalArgs = Array.isArray(task.args) ? [...task.args] : [];
+        const args = el("input", { type: "text", value: originalArgs.join(" "), placeholder: "引数（空白区切り）", className: "schedule-args" });
+        const argsText = args.value;
         const cwd = el("input", { type: "text", value: task.cwd || "", placeholder: "作業ディレクトリ（任意）", className: "schedule-cwd" });
         const timeout = el("input", { type: "number", min: "1", max: "120", step: "1", value: String(task.timeout_secs || ""), placeholder: "秒", className: "schedule-timeout" });
         const repeat = el("input", { type: "checkbox", checked: task.repeat !== false });
@@ -133,7 +135,7 @@
             remove,
           ]),
         ]);
-        const entry = { id: task.id || `st${Date.now()}${Math.random().toString(36).slice(2, 6)}`, row, kind, time, cron, label, toolName, toolArgs, program, args, cwd, timeout, repeat, enabled, dayBoxes, toolFields, commandFields };
+        const entry = { original: { ...task }, originalArgs, argsText, id: task.id || `st${Date.now()}${Math.random().toString(36).slice(2, 6)}`, row, kind, time, cron, label, toolName, toolArgs, program, args, cwd, timeout, repeat, enabled, dayBoxes, toolFields, commandFields };
         function updateKind() {
           const isTool = kind.value === "tool";
           toolFields.hidden = !isTool;
@@ -165,6 +167,8 @@
               throw new Error(`スケジュール「${row.label.value.trim() || row.toolName.value.trim() || row.program.value.trim() || row.id}」の tool_args が JSON として読めません。`);
             }
             return {
+              // フォームに無い日付・発火判定状態も保存し、他項目の変更で予約を変質させない。
+              ...row.original,
               id: row.id,
               kind: row.kind.value,
               time: row.cron.value.trim() ? "" : (row.time.value || "09:00"),
@@ -174,12 +178,12 @@
               label: row.label.value.trim(),
               enabled: row.enabled.checked,
               program: row.program.value.trim(),
-              args: row.args.value.trim().split(/\s+/).filter(Boolean),
+              // 未編集の引数は配列の境界を維持する（空白入りのパスや空文字を壊さない）。
+              args: row.args.value === row.argsText ? [...row.originalArgs] : row.args.value.trim().split(/\s+/).filter(Boolean),
               cwd: row.cwd.value.trim(),
               timeout_secs: row.timeout.value ? Math.min(120, Math.max(1, Number(row.timeout.value))) : null,
               tool_name: row.toolName.value.trim(),
               tool_args: parsedArgs,
-              last_run_minute: "",
             };
           }));
         },
