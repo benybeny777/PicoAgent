@@ -5032,7 +5032,7 @@ function applyCharacterFraming() {
 }
 
 function applyStreamAppearance(background, imagePath, display, displayImagePath, captionColor = "#5a3b4b") {
-  petApp.dataset.streamBackground = ["pastel", "gaming", "simple", "custom"].includes(background) ? background : "pastel";
+  petApp.dataset.streamBackground = ["pastel", "gaming", "simple", "sakura-room", "dog-hobby-room", "custom"].includes(background) ? background : "pastel";
   petApp.dataset.streamDisplay = ["dashboard", "game", "clock", "image", "none"].includes(display) ? display : "dashboard";
   const image = imagePath ? `url("${window.picoagent.assetUrl(imagePath)}")` : "none";
   petApp.style.setProperty("--stream-custom-background", image);

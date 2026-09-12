@@ -805,6 +805,16 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .pet-app[data-layout="stream"][data-stream-background="simple"]::before {
   background:linear-gradient(145deg,#fff8f4,#f8e9f2 48%,#e6f1f4);
 }
+.pet-app[data-layout="stream"][data-stream-background="sakura-room"]::before {
+  background:
+    linear-gradient(180deg,rgba(62,33,38,.04),rgba(62,33,38,.14)),
+    url("assets/backgrounds/sakura-room.webp") center center / cover no-repeat;
+}
+.pet-app[data-layout="stream"][data-stream-background="dog-hobby-room"]::before {
+  background:
+    linear-gradient(180deg,rgba(54,24,31,.04),rgba(54,24,31,.15)),
+    url("assets/backgrounds/dog-hobby-room.webp") center center / cover no-repeat;
+}
 .pet-app[data-layout="stream"][data-stream-background="custom"]::before {
   background:linear-gradient(180deg,rgba(24,16,35,.06),rgba(24,16,35,.2)),var(--stream-custom-background) center/cover no-repeat;
 }

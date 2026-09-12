@@ -29,7 +29,7 @@
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 旧版の立ち絵横移動量（px）。通常ドラッグはウィンドウ移動へ戻したため新規には書き込まず、既存値の互換表示と位置リセットだけに使う |
 | `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 旧版の立ち絵縦移動量（px）。同上 |
 | `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget`。旧 `talk` はLINE風の `chat` へ移行し、未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
-| `PICOAGENT_STREAM_BACKGROUND` | `pastel` | 画面 | 配信形式の背景。`pastel` / `gaming` / `simple` / `custom` |
+| `PICOAGENT_STREAM_BACKGROUND` | `pastel` | 画面 | 配信形式の背景。`pastel` / `gaming` / `simple` / `sakura-room`（桜色のくつろぎ部屋）/ `dog-hobby-room`（犬の趣味部屋）/ `custom` |
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |
 | `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |

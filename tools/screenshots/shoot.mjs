@@ -88,7 +88,7 @@ const HISTORY = [
 
 // バックエンドのモック。フキダシの寸法は指定しない（tauri.conf.json の 680x430 +
 // styles.css の既定レイアウトが本物の見た目になる）。
-const mock = ({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }) => `
+const mock = ({ theme, history, reply, characterId, layout, streamBackground, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }) => `
 // README の Live2D プレビューも実アプリと同じ WebAudio 口パク経路を通す。
 // 以前は pet_speak を常に無効化していたため、口パクに見えたものは TapBody の動きだけで、
 // 音声解析の退行を検出できなかった。ひよりの撮影だけ、音節風の振幅を持つ短い WAV を返す。
@@ -140,6 +140,7 @@ window.__TAURI__ = {
       characterFraming: ${JSON.stringify(characterFraming)},
       betaBuild: ${JSON.stringify(betaBuild)},
       layout: ${JSON.stringify(layout)},
+      streamBackground: ${JSON.stringify(streamBackground)},
       live2dSdkOverrides: ${JSON.stringify(live2dSdkOverrides)},
       history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0",
@@ -336,6 +337,7 @@ function unionBounds(boxes) {
 async function openScene({
   width = 900, height = 600, theme = "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
+  streamBackground = process.env.SHOOT_STREAM_BACKGROUND || "pastel",
   characterFraming = {},
   bootHoldMs = 0, sendDelayMs = 80, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
   gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "", bootRandomValue = null,
@@ -347,7 +349,7 @@ async function openScene({
   // 準備の間は resume() で実時間どおりに流す。
   await page.clock.install();
   await page.clock.resume();
-  await page.addInitScript(mock({ theme, history, reply, characterId, layout, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }));
+  await page.addInitScript(mock({ theme, history, reply, characterId, layout, streamBackground, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }));
   if (Number.isFinite(bootRandomValue)) {
     await page.route("**/renderer.js*", async route => {
       const response = await route.fetch();
