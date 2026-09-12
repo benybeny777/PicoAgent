@@ -107,6 +107,9 @@ let subtitlePageTimer = null;
 let localEngineRequired = false;
 let localEngineReady = true;
 let localEnginePhase = "ready";
+// 準備中・失敗の理由。利用者の操作で状態表示を消すときも、この文言だけは残す
+// （SPEC: `error` は診断・修復へ進める理由として常時表示する）。
+let localEngineStatusText = "";
 let frontendInitialized = false;
 const conversationHistory = [];
 let historyQuery = "";
@@ -365,6 +368,12 @@ let reduceMotion = reduceMotionPreference.matches;
 let animationName = "idle";
 let frame = 0;
 let lastFrameAt = 0;
+
+// 一時的な表示（文字数・読み上げ中など）を消す。準備中・失敗の理由が出ているときは、
+// 空にせずその文言へ戻す。空にすると赤い空欄だけが残り、送れない理由が分からなくなる。
+function clearTransientStatus() {
+  status.textContent = localEngineStatusText && !localEngineReady ? localEngineStatusText : "";
+}
 
 function setStatus(text) {
   status.textContent = text;
@@ -3145,7 +3154,7 @@ function playPreparedSpeech(result) {
   audio.volume = voiceVolume;
   audio.addEventListener("ended", () => {
     finishVoice(true, audio);
-    if (!activeAlarmSnooze) status.textContent = "";
+    if (!activeAlarmSnooze) clearTransientStatus();
   }, { once: true });
   audio.addEventListener("error", () => {
     const audioError = audio.error?.message || "";
@@ -3721,7 +3730,7 @@ character.addEventListener("click", event => {
   if (!currentVoice) return;
   event.stopPropagation();
   stopVoice();
-  status.textContent = "";
+  clearTransientStatus();
 });
 character.addEventListener("keydown", event => {
   if (event.key !== "Enter" && event.key !== " ") return;
@@ -5170,7 +5179,10 @@ input.addEventListener("input", () => {
   promptDraft = input.value;
   schedulePersistDraft();
   const len = input.value.length;
-  if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
+  if (!busy) {
+    if (len > 100) status.textContent = `${len}文字`;
+    else clearTransientStatus();
+  }
 });
 // 日本語入力（IME）の変換中かどうか。変換中のキーはアプリの操作へ流さない。
 function isImeComposing(event) {
@@ -5276,6 +5288,7 @@ function applyEngineStatus(s) {
   if (!localEngineRequired) return;
   localEnginePhase = s.phase;
   localEngineReady = s.phase === "ready";
+  localEngineStatusText = "";
   const booting = petApp.classList.contains("is-booting");
   status.classList.toggle("engine-pending", ["idle", "download", "verify", "starting"].includes(s.phase));
   status.classList.toggle("engine-error", s.phase === "error");
@@ -5284,13 +5297,16 @@ function applyEngineStatus(s) {
     const gb = bytes => (Number(bytes) / (1024 ** 3)).toFixed(1);
     const size = Number(s.totalBytes) > 0 ? `（${gb(s.receivedBytes)} / ${gb(s.totalBytes)}GB）` : "";
     setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "verify") {
     // 数GBのモデル照合は分単位かかる。無表示だと起動が固まったように見える。
     setStatus("ローカルモデルを確認中… ※数分かかることがあります");
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "starting") {
     setStatus("ローカルAIを起動中…");
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
@@ -5303,9 +5319,11 @@ function applyEngineStatus(s) {
     }
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "idle") {
     setStatus("ローカルAIの起動を待っています…");
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   }
   updateComposerState();

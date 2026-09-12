@@ -229,3 +229,17 @@ test("窓に収まらないフキダシ保存値は表示側で収める", () =>
   assert.match(refit, /savedBubbleLayout\?\.width/);
   assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*refitBubbleToWindow\(\);/);
 });
+
+test("準備中・失敗の理由は入力や読み上げ操作で消さない", () => {
+  // SPEC: `error` は診断・修復へ進める理由として常時表示する。入力のたびに状態表示を
+  // 空にすると、赤い空欄と無効な送信ボタンだけが残り、送れない理由が分からなくなる。
+  assert.match(renderer, /let localEngineStatusText = ""/);
+  const clear = renderer.match(/function clearTransientStatus\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(clear, /localEngineStatusText && !localEngineReady \? localEngineStatusText : ""/);
+  // 文字数表示は消す側の入口を通す（直接空にしない）。
+  assert.match(renderer, /if \(len > 100\) status\.textContent = `\$\{len\}文字`;\s*\n\s*else clearTransientStatus\(\);/);
+  // 準備中・失敗の文言は applyEngineStatus が控える。
+  const apply = renderer.match(/function applyEngineStatus\(s\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(apply, /localEngineStatusText = "";/);
+  assert.match(apply, /準備に失敗: \$\{s\.message \|\| "不明なエラー"\}`\);\s*\n\s*localEngineStatusText = status\.textContent;/);
+});
