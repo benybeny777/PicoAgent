@@ -207,7 +207,7 @@ window.picoagent = {
     deleteMemory: (category, text, updatedAt) => call("settings_memory_delete", { category, text, updatedAt }),
     listModels: (id) => call("settings_list_models", { id }),
     testTool: (name) => call("settings_test_tool", { name }),
-    save: (patch) => call("settings_save", { patch }),
+    save: (patch, baseRevisions) => call("settings_save", { patch, baseRevisions }),
     // キャラクターパック（フォルダ / zip）の選択・導入・削除。
     userCharacters: () => call("pet_user_characters"),
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),

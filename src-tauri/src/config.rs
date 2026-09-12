@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
+
+const MISSING_REVISION: &str = "missing";
 
 pub struct Config {
     path: Mutex<Option<PathBuf>>,
@@ -160,6 +163,17 @@ impl Config {
         self.values.lock().unwrap().clone()
     }
 
+    /// 設定画面の楽観的排他に使う、値ごとの不可逆な版。
+    /// シークレットの値そのものを画面へ返さず、読込後の変更だけを検出する。
+    pub fn value_revisions(&self) -> Map<String, Value> {
+        self.values
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(key, value)| (key.clone(), Value::String(value_revision(Some(value)))))
+            .collect()
+    }
+
     /// 設定を部分更新して永続化する。
     ///
     /// 内容が1つも変わらない場合はファイルへ書かない。設定は「読み込み → 全体を書き戻す」
@@ -167,6 +181,56 @@ impl Config {
     /// config.json 全体を書き直してしまい、無意味なディスク書き込みが延々と続く。
     pub fn set_all(&self, patch: Map<String, Value>) -> anyhow::Result<()> {
         self.set_all_with_writer(patch, crate::store::write_json_atomic)
+    }
+
+    /// 読込時の版が変わっていない場合だけ、差分を原子的に保存する。
+    /// 比較から書込みまで `write` ロック内で行い、検査直後の更新割込みを許さない。
+    /// 競合検査に成功した場合だけ、同じ保存ロック内で差分の検証・保護変換を行う。
+    /// シークレットを資格情報ストアへ書く処理が競合却下より先に走ることを防ぐ。
+    pub fn set_all_checked_with(
+        &self,
+        mut patch: Map<String, Value>,
+        expected_revisions: &Map<String, Value>,
+        prepare: impl FnOnce(&Map<String, Value>, &mut Map<String, Value>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<(Vec<String>, Map<String, Value>)> {
+        let _write = self
+            .write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let path = self.path.lock().unwrap().clone();
+        let Some(path) = path else {
+            let reason = self.read_only_reason.lock().unwrap().clone();
+            return Err(anyhow::anyhow!(
+                reason.unwrap_or_else(|| "config.load() が未実行です".to_string())
+            ));
+        };
+        let current = self.values.lock().unwrap().clone();
+        let mut conflicts = expected_revisions
+            .iter()
+            .filter_map(|(key, expected)| {
+                let expected = expected.as_str()?;
+                (value_revision(current.get(key)) != expected).then(|| key.clone())
+            })
+            .collect::<Vec<_>>();
+        conflicts.sort();
+        if !conflicts.is_empty() {
+            return Ok((conflicts, patch));
+        }
+        prepare(&current, &mut patch)?;
+        let mut next = current;
+        let mut changed = false;
+        for (key, value) in &patch {
+            if next.get(key) != Some(value) {
+                next.insert(key.clone(), value.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok((Vec::new(), patch));
+        }
+        crate::store::write_json_atomic(&path, &Value::Object(next.clone()))?;
+        *self.values.lock().unwrap() = next;
+        Ok((Vec::new(), patch))
     }
 
     fn set_all_with_writer(
@@ -248,6 +312,14 @@ impl Config {
     }
 }
 
+fn value_revision(value: Option<&Value>) -> String {
+    let Some(value) = value else {
+        return MISSING_REVISION.to_string();
+    };
+    let bytes = serde_json::to_vec(value).unwrap_or_else(|_| b"null".to_vec());
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self::new()
@@ -307,6 +379,44 @@ mod tests {
             .collect();
         assert_eq!(left, vec!["config.json".to_string()]);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn 読込後に変わった設定は差分保存で上書きしない() {
+        use std::cell::Cell;
+
+        let dir = temp_dir("checked-update");
+        let path = dir.join("config.json");
+        let cfg = Config::new();
+        cfg.load(path.clone()).unwrap();
+        cfg.set_string("A", "読込時".to_string()).unwrap();
+        let revisions = cfg.value_revisions();
+
+        cfg.set_string("A", "別経路の更新".to_string()).unwrap();
+        let mut patch = serde_json::Map::new();
+        patch.insert("A".into(), serde_json::json!("画面の更新"));
+        let prepared = Cell::new(false);
+        let (conflicts, _) = cfg
+            .set_all_checked_with(patch, &revisions, |_, _| {
+                prepared.set(true);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(conflicts, vec!["A"]);
+        assert!(!prepared.get(), "競合時に保存前処理を実行してはいけない");
+        assert_eq!(cfg.get("A", ""), "別経路の更新");
+
+        let mut patch = serde_json::Map::new();
+        patch.insert("B".into(), serde_json::json!("追加"));
+        let mut missing = serde_json::Map::new();
+        missing.insert("B".into(), serde_json::json!("missing"));
+        assert!(cfg
+            .set_all_checked_with(patch, &missing, |_, _| Ok(()))
+            .unwrap()
+            .0
+            .is_empty());
+        assert_eq!(cfg.get("B", ""), "追加");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

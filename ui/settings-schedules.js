@@ -166,9 +166,10 @@
             catch {
               throw new Error(`スケジュール「${row.label.value.trim() || row.toolName.value.trim() || row.program.value.trim() || row.id}」の tool_args が JSON として読めません。`);
             }
+            const { last_run_minute: _lastRun, last_checked_minute: _lastChecked, ...definition } = row.original;
             return {
-              // フォームに無い日付・発火判定状態も保存し、他項目の変更で予約を変質させない。
-              ...row.original,
+              // 発火判定状態はschedulerの別状態が所有する。日付等の予約定義は維持する。
+              ...definition,
               id: row.id,
               kind: row.kind.value,
               time: row.cron.value.trim() ? "" : (row.time.value || "09:00"),

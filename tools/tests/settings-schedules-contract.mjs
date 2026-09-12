@@ -114,7 +114,7 @@ test("スケジュールの壊れたtool_argsは保存を中止する", () => {
   assert.throws(() => schedule().getJson(), /「天気」の tool_args/);
 });
 
-test("スケジュールのラベル変更で日付・実行済み状態・追いつき状態を失わない", () => {
+test("スケジュール編集は日付を保ち発火状態を設定DTOへ混ぜない", () => {
   const stored = {
     id: "st-date", kind: "tool", time: "09:00", date: "2026-09-15",
     tool_name: "weather", tool_args: {}, label: "元のラベル",
@@ -126,8 +126,8 @@ test("スケジュールのラベル変更で日付・実行済み状態・追�
   const [saved] = JSON.parse(schedule().getJson());
   assert.equal(saved.label, "新しいラベル");
   assert.equal(saved.date, stored.date);
-  assert.equal(saved.last_run_minute, stored.last_run_minute);
-  assert.equal(saved.last_checked_minute, stored.last_checked_minute);
+  assert.equal(saved.last_run_minute, undefined);
+  assert.equal(saved.last_checked_minute, undefined);
 });
 
 test("未編集のコマンド引数は空白入りパス・空文字・改行を含む配列を維持する", () => {

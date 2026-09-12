@@ -407,7 +407,7 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 | `subagent` | 単独委譲に加え、複数AIへ同じ質問を送る `consensus`、まとめ役が作業を割り振って統合する `collaborate`、分担結果を個別に返す `divide` を実行する | `agents` ごとに provider / model / 任意の focus を指定（2〜8件）。まとめ役 judge も別指定でき、judge の `persona` に選択中キャラの人格設定を渡すと統合結果を本人の口調で返す。候補は宣言順で並べ、完了順に入れ替えない。local候補は同梱モデルの競合を避けて直列、その他は最大同時数まで並行実行。AppHandle は渡さず、タスク単位の `AGENT_DEPTH` と最大深さ（既定2）で再帰を制限。`agent::cancel_flag()` の中断要求は候補ループだけでなく分担計画・統合の通信中にも適用する（停止との競合は `agent::cancel_while` に一本化）。分担計画と統合AIには直前の会話文脈を渡し、失敗・JSON不正・件数不一致では同じ依頼の重複実行へ降格せず理由を返して停止する。合議は候補数＋統合、分担＋統合は計画＋候補数＋統合だけ各AIを呼ぶ |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`、会話中はモデルへ提示しない）。アプリの待機タイマーが `pet_idle_chatter` 経由で利用 | `skills/chitchat/trends.rs` で X API / 急上昇RSS / ニュースRSSの話題メモを取得し、生成は人格込みで `provider.chat`（tools 無し）。生成後は「直前の自発雑談」として会話文脈へ短く残す |
 | `alarm` | 目覚まし時計。声でやさしく起こすアラームを add/list/remove/clear/enable/disable できる。時刻(HH:MM)・曜日・繰り返し・スヌーズ分数を指定 | 一覧は `crate::alarm` 経由で config `PICOAGENT_ALARMS` に保存。発火はフロントの時刻ポーリング（20秒間隔）が `pet_alarm_wake` を呼ぶ。判定は `ui/alarm-runtime.js` の `dueAlarms()` が正本で、**分ちょうどだけでなく直近5分以内に来た予定まで拾う**（スリープ復帰・起動直後・直前の発火が長引いた場合に黙って鳴らないのを防ぐ）。曜日は予定時刻の曜日で判定し、日またぎで取り違えない。発火記録のキーは予定時刻なので遅れて拾っても二重には鳴らない。1分以上遅れる場合は起こし文へ予定時刻を添える。起こし文の生成と音声合成はそれぞれ20秒を上限に待ち、**先に文字を出してから声を鳴らす**。上限を超えた結果は使わず、再通知（スヌーズ）の起点も合成待ちより前に置く。合成中に「おきたよ！」が押された場合は遅れて再生しない。一度きりは発火後に無効化し、`おきたよ！` が押されるまで指定分数おきに再通知 |
-| `task_scheduler` | 指定時刻または cron 風5フィールドで、許可済みコマンドまたは別スキルを定期実行する。add/list/remove/clear/enable/disable に対応 | 一覧は config `PICOAGENT_SCHEDULED_TASKS` に保存。バックエンド常駐タスクが30秒間隔で確認し、実行結果をログ、`app_data_dir/schedule-runs.json`、`pet:notice` へ送る |
+| `task_scheduler` | 指定時刻または cron 風5フィールドで、許可済みコマンドまたは別スキルを定期実行する。add/list/remove/clear/enable/disable に対応 | 予約定義は config `PICOAGENT_SCHEDULED_TASKS`、最終実行・確認分は内部キー `PICOAGENT_SCHEDULED_TASK_STATE` に分離して保存。バックエンド常駐タスクが30秒間隔で確認し、実行結果をログ、`app_data_dir/schedule-runs.json`、`pet:notice` へ送る |
 | `reminder` | 日常リマインダー。指定時刻または数分後に声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。フロントの `pet_daily_events` ポーリングで期限到来分を通知 |
 | `focus_timer` | 集中タイマーと作業見守り。終了時または指定間隔ごとに声で知らせる | `PICOAGENT_DAILY_EVENTS` に保存。見守りは repeat_minutes で次回へ繰り返す |
 | `praise_log` | できたこと・進捗・がんばったことを保存し、あとで振り返る | `PICOAGENT_PRAISE_LOG` に保存。最大100件 |
@@ -486,6 +486,8 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 - 空文字は「未設定」とみなし env → 既定値へフォールバックする。
 
 ### 設定画面（右クリック →「設定を開く…」）
+
+設定画面は利用者が実際に変更したキーと、そのキーを読み込んだ時点の値ごとの版だけを保存コマンドへ渡す。バックエンドは同じ原子的保存ロック内で版を照合し、同じキーが別経路で更新済みなら保存せず競合キーを返す。画面は最新設定を再読込して入力中の差分を載せ直し、利用者が確認して再保存できる状態を保つ。スケジュールの `last_run_minute` / `last_checked_minute` は内部キー `PICOAGENT_SCHEDULED_TASK_STATE` が所有し、予約定義と設定画面の保存対象から分離する。旧形式の予約内にある状態は最初の保存で内部状態へ移す。
 
 AIサービスを切り替えて非表示にした設定の未保存入力は、DOMとは別の草稿に保持して再表示・保存へ引き継ぐ。「未保存の変更を戻す」では草稿も破棄して保存済み値へ戻す。復号不能秘密の未入力は非表示でも保持指定として扱う。モデル一覧は要求世代と入力要素の一致を確認してから成功・失敗を反映し、古い応答や一覧待機中の手入力を上書きしない。
 

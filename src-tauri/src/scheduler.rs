@@ -3,6 +3,7 @@
 // タスク一覧は設定キー `PICOAGENT_SCHEDULED_TASKS` に JSON 文字列で保存する。実行は
 // run_command と同じ許可ルート・allowlist・有効化フラグを使い、shell は使わない。
 
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -14,6 +15,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::config::Config;
 
 pub const CONFIG_KEY: &str = "PICOAGENT_SCHEDULED_TASKS";
+/// 発火判定専用。設定画面が編集する予約定義とは分け、相互上書きを防ぐ。
+pub const STATE_KEY: &str = "PICOAGENT_SCHEDULED_TASK_STATE";
 pub const TOOL_ALLOWLIST_KEY: &str = "PICOAGENT_SCHEDULED_TOOL_ALLOWLIST";
 const DEFAULT_TOOL_ALLOWLIST: &str = "time,weather,web_fetch";
 const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
@@ -89,6 +92,14 @@ pub struct ScheduledRunRecord {
     pub body: String,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct ScheduledTaskState {
+    #[serde(default)]
+    last_run_minute: String,
+    #[serde(default)]
+    last_checked_minute: String,
+}
+
 fn default_kind() -> String {
     "command".to_string()
 }
@@ -104,16 +115,123 @@ pub fn new_id() -> String {
 /// 保存済みのスケジュール一覧を読む。壊れていた場合は空一覧にせずエラーを返す
 /// （空から始めて書き戻すと、登録済みのタスクがすべて消えるため）。
 pub fn load(cfg: &Config) -> Result<Vec<ScheduledTask>, String> {
-    crate::store::load_list(cfg, CONFIG_KEY)
+    let mut tasks: Vec<ScheduledTask> = crate::store::load_list(cfg, CONFIG_KEY)?;
+    let state = load_state(cfg)?;
+    for task in &mut tasks {
+        if let Some(saved) = state.get(&task.id) {
+            task.last_run_minute.clone_from(&saved.last_run_minute);
+            task.last_checked_minute
+                .clone_from(&saved.last_checked_minute);
+        }
+    }
+    Ok(tasks)
 }
 
 pub fn save(cfg: &Config, tasks: &[ScheduledTask]) -> anyhow::Result<()> {
+    let definitions = task_definitions(tasks);
+    let state = task_state(tasks);
     let mut patch = Map::new();
     patch.insert(
         CONFIG_KEY.to_string(),
-        Value::String(serde_json::to_string(tasks)?),
+        Value::String(serde_json::to_string(&definitions)?),
+    );
+    patch.insert(
+        STATE_KEY.to_string(),
+        Value::String(serde_json::to_string(&state)?),
     );
     cfg.set_all(patch)
+}
+
+fn load_state(cfg: &Config) -> Result<BTreeMap<String, ScheduledTaskState>, String> {
+    let raw = cfg.get(STATE_KEY, "");
+    if raw.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    serde_json::from_str(&raw).map_err(|error| {
+        format!("保存済みのスケジュール実行状態を読み取れません（{error}）。上書きを中止しました。")
+    })
+}
+
+fn task_definitions(tasks: &[ScheduledTask]) -> Vec<ScheduledTask> {
+    tasks
+        .iter()
+        .cloned()
+        .map(|mut task| {
+            task.last_run_minute.clear();
+            task.last_checked_minute.clear();
+            task
+        })
+        .collect()
+}
+
+fn task_state(tasks: &[ScheduledTask]) -> BTreeMap<String, ScheduledTaskState> {
+    tasks
+        .iter()
+        .filter(|task| !task.last_run_minute.is_empty() || !task.last_checked_minute.is_empty())
+        .map(|task| {
+            (
+                task.id.clone(),
+                ScheduledTaskState {
+                    last_run_minute: task.last_run_minute.clone(),
+                    last_checked_minute: task.last_checked_minute.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
+/// 設定画面が送った予約定義に、最新の発火状態だけを別キーで維持する。
+pub fn reconcile_settings_patch(
+    current: &Map<String, Value>,
+    patch: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let Some(raw) = patch.get(CONFIG_KEY).and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let definitions: Vec<ScheduledTask> = serde_json::from_str(raw)
+        .map_err(|error| format!("スケジュールタスク一覧を読めません: {error}"))?;
+    let ids = definitions
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<HashSet<_>>();
+    let state_raw = current.get(STATE_KEY).and_then(Value::as_str).unwrap_or("");
+    let mut state: BTreeMap<String, ScheduledTaskState> = if state_raw.trim().is_empty() {
+        BTreeMap::new()
+    } else {
+        serde_json::from_str(state_raw)
+            .map_err(|error| format!("保存済みのスケジュール実行状態を読めません: {error}"))?
+    };
+    // 旧形式は予約定義の中に状態を持つ。初回の設定保存でも二重実行防止状態を移行する。
+    if let Some(current_raw) = current.get(CONFIG_KEY).and_then(Value::as_str) {
+        if let Ok(current_tasks) = serde_json::from_str::<Vec<ScheduledTask>>(current_raw) {
+            for task in current_tasks {
+                if state.contains_key(&task.id)
+                    || (task.last_run_minute.is_empty() && task.last_checked_minute.is_empty())
+                {
+                    continue;
+                }
+                state.insert(
+                    task.id,
+                    ScheduledTaskState {
+                        last_run_minute: task.last_run_minute,
+                        last_checked_minute: task.last_checked_minute,
+                    },
+                );
+            }
+        }
+    }
+    state.retain(|id, _| ids.contains(id.as_str()));
+    patch.insert(
+        CONFIG_KEY.to_string(),
+        Value::String(
+            serde_json::to_string(&task_definitions(&definitions)).map_err(|e| e.to_string())?,
+        ),
+    );
+    patch.insert(
+        STATE_KEY.to_string(),
+        Value::String(serde_json::to_string(&state).map_err(|e| e.to_string())?),
+    );
+    Ok(())
 }
 
 fn run_history_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
@@ -718,9 +836,11 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        minutes_to_check, normalize_days, normalize_time, parse_cron_value, should_run_at,
-        validate_task, ScheduledTask,
+        load, minutes_to_check, normalize_days, normalize_time, parse_cron_value,
+        reconcile_settings_patch, save, should_run_at, validate_task, ScheduledTask, CONFIG_KEY,
+        STATE_KEY,
     };
+    use crate::config::Config;
     use chrono::TimeZone;
 
     fn 固定時刻タスク(time: &str) -> ScheduledTask {
@@ -743,6 +863,60 @@ mod tests {
             last_run_minute: String::new(),
             last_checked_minute: String::new(),
         }
+    }
+
+    fn test_config(label: &str) -> (Config, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "picoagent-scheduler-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = Config::new();
+        cfg.load(dir.join("config.json")).unwrap();
+        (cfg, dir)
+    }
+
+    #[test]
+    fn 予約定義と発火状態を別キーへ保存して再結合する() {
+        let (cfg, dir) = test_config("state-split");
+        let mut task = 固定時刻タスク("07:05");
+        task.last_run_minute = "2026-07-28 07:05".into();
+        task.last_checked_minute = "2026-07-28 07:06".into();
+        save(&cfg, &[task.clone()]).unwrap();
+
+        let definitions = cfg.get(CONFIG_KEY, "");
+        assert!(!definitions.contains("2026-07-28"));
+        assert!(cfg.get(STATE_KEY, "").contains("2026-07-28 07:05"));
+        let loaded = load(&cfg).unwrap();
+        assert_eq!(loaded[0].last_run_minute, task.last_run_minute);
+        assert_eq!(loaded[0].last_checked_minute, task.last_checked_minute);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 設定画面の予約更新は旧状態を移行して削除済みidを除く() {
+        let old = serde_json::json!([{
+            "id":"keep", "time":"09:00", "last_run_minute":"2026-07-28 09:00",
+            "last_checked_minute":"2026-07-28 09:01"
+        }, {"id":"remove", "time":"10:00", "last_run_minute":"2026-07-28 10:00"}]);
+        let mut current = serde_json::Map::new();
+        current.insert(CONFIG_KEY.into(), serde_json::json!(old.to_string()));
+        let mut patch = serde_json::Map::new();
+        patch.insert(
+            CONFIG_KEY.into(),
+            serde_json::Value::String(String::from(r#"[{"id":"keep","time":"11:00"}]"#)),
+        );
+        reconcile_settings_patch(&current, &mut patch).unwrap();
+        let state = patch[STATE_KEY].as_str().unwrap();
+        assert!(state.contains("keep"));
+        assert!(!state.contains("remove"));
+        assert!(!patch[CONFIG_KEY]
+            .as_str()
+            .unwrap()
+            .contains("last_run_minute\":\"2026"));
     }
 
     fn cronタスク(cron: &str) -> ScheduledTask {

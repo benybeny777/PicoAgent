@@ -5,6 +5,7 @@ import test from "node:test";
 
 const renderer = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
 const settings = readFileSync(new URL("../../ui/settings.js", import.meta.url), "utf8");
+const bridge = readFileSync(new URL("../../ui/picoagent.js", import.meta.url), "utf8");
 const between = (start, end) => renderer.slice(renderer.indexOf(start), renderer.indexOf(end, renderer.indexOf(start)));
 
 function keyboard() {
@@ -160,4 +161,42 @@ test("非表示へ切り替えたAIの入力は保存収集でも保持し復号
   assert.equal(patch.BROKEN_KEY, "keep");
   assert.match(settings, /providerDraftValues\[f\.key\] \?\? v\[f\.key\]/);
   assert.match(settings, /async function render\(\) \{\s*\+\+modelLoadRevision;\s*providerDraftValues = \{\};/);
+});
+
+test("設定保存は変更差分だけを送り内部状態を競合対象にしない", () => {
+  const context = vm.createContext({});
+  vm.runInContext(`const PRESERVE_UNREADABLE_SECRET = "keep";
+    const SETTINGS_RUNTIME_KEYS = new Set(["PICOAGENT_WINDOW_LAYOUTS", "PICOAGENT_SCHEDULED_TASK_STATE"]);`, context);
+  vm.runInContext(settings.slice(settings.indexOf("function stableStringify("), settings.indexOf("function updateDirtyStateNow(")), context);
+  const request = context.settingsChangeRequest(
+    { SAME: "x", CHANGE: "new", SECRET: "keep", NEW_KEY: "value", PICOAGENT_WINDOW_LAYOUTS: { pet: {} } },
+    { SAME: "x", CHANGE: "old", SECRET: "", PICOAGENT_WINDOW_LAYOUTS: { pet: { width: 1 } } },
+    { SAME: "r1", CHANGE: "r2", SECRET: "r3", PICOAGENT_WINDOW_LAYOUTS: "runtime" },
+  );
+  assert.deepEqual({ ...request.patch }, { CHANGE: "new", NEW_KEY: "value" });
+  assert.equal(request.baseRevisions.CHANGE, "r2");
+  assert.equal(request.baseRevisions.NEW_KEY, "missing");
+  assert.equal(request.baseRevisions.SAME, undefined);
+  assert.equal(request.baseRevisions.PICOAGENT_WINDOW_LAYOUTS, undefined);
+  assert.match(bridge, /save: \(patch, baseRevisions\) => call\("settings_save", \{ patch, baseRevisions \}\)/);
+});
+
+test("設定競合は草稿を捨てず最新値へ載せ直す", () => {
+  const saveFlow = settings.slice(
+    settings.indexOf('saveBtn.addEventListener("click"'),
+    settings.indexOf('resetChangesBtn?.addEventListener("click"'),
+  );
+  assert.match(saveFlow, /const draft = cloneSettings\(request\.patch\)/);
+  assert.match(saveFlow, /const latest = await window\.picoagent\.settings\.load\(\)/);
+  assert.match(saveFlow, /data\.values = \{ \.\.\.cloneSettings\(latest\.values\), \.\.\.draft \}/);
+  assert.match(saveFlow, /savedSnapshot = latestSnapshot/);
+  assert.match(saveFlow, /入力内容を確認して、もう一度保存してください/);
+});
+
+test("変更判定のcollectはキャラ草稿を書き換えない", () => {
+  const collect = settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面"));
+  assert.doesNotMatch(collect, /saveCurrentCharacter/);
+  assert.match(settings, /saveCurrentCharacterPersona\(displayedCharacterId\)/);
+  assert.match(settings, /saveCurrentCharacterVoice\(displayedCharacterId\)/);
+  assert.match(settings, /saveCurrentCharacterLive2dSdk\(displayedCharacterId\)/);
 });
