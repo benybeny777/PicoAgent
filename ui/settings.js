@@ -39,6 +39,8 @@ let characterLive2dSdkHint;
 let characterCatalog;
 const characterManifestCache = new Map();
 let modelInput;
+let cliModelSelect;
+let modelLoadGeneration = 0;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
@@ -2892,10 +2894,24 @@ async function render() {
   const modelField = field("PICOAGENT_MODEL", "AIモデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
   global.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
-  // Ollama だけは実行中のローカル一覧を基本タブのモデル欄に出す。
+  cliModelSelect = el("select", { ariaLabel: "CLIのAIモデル" });
+  cliModelSelect.addEventListener("change", () => {
+    modelInput.value = cliModelSelect.value;
+    modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const refreshCliModels = el("button", { type: "button", className: "btn", textContent: "モデル一覧を更新" });
+  refreshCliModels.addEventListener("click", () => loadModels("agent_cli"));
+  const cliModelControls = el("div", {}, [cliModelSelect, refreshCliModels,
+    el("p", { className: "hint", textContent: "「アプリのデフォルト」はClaude／Codexの設定に追従します。Codexの候補はCLIが更新するローカル一覧から取得します。" }),
+  ]);
+  modelField.append(cliModelControls);
+  // OllamaとCLIは基本タブのモデル欄に出す。
   // 他プロバイダは「AIモデル・連携」タブで種類とサイズを選ぶため、ここでは隠す。
   function updateModelFieldVisibility() {
-    const hidden = providerSelect.value !== "ollama";
+    const isCli = providerSelect.value === "agent_cli";
+    const hidden = providerSelect.value !== "ollama" && !isCli;
+    modelInput.hidden = isCli;
+    cliModelControls.hidden = !isCli;
     modelField.dataset.conditionHidden = hidden ? "true" : "false";
     modelField.hidden = hidden;
   }
@@ -3603,6 +3619,13 @@ async function render() {
     for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
     activeProviderBlock = block;
     provSec.append(block);
+    // CLIからローカルAIへ戻った際に作り直される入力にも、モデル同期を接続する。
+    inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
+      if (providerSelect.value !== "local" || !modelInput) return;
+      const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
+      modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
+      updateDirtyState();
+    });
   }
   renderProviderConfig(data.active.providerId);
   const multiAiSec = section("複数AIの使い方");
@@ -3639,12 +3662,6 @@ async function render() {
     updateDirtyState();
     applySettingsSearch();
   });
-  inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
-    if (providerSelect.value !== "local" || !modelInput) return;
-    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
-    modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
-    updateDirtyState();
-  });
   await loadModels(providerSelect.value);
   applySettingsSearch();
   renderingSettings = false;
@@ -3671,12 +3688,15 @@ function providerDefaultModel(providerId) {
 }
 
 async function loadModels(providerId, applyProviderDefault = false) {
+  const generation = ++modelLoadGeneration;
   modelOptions.innerHTML = "";
   statusEl.textContent = providerId === "ollama" ? "Ollama のモデル一覧を取得中…" : "";
   let models = [];
   try {
     models = await window.picoagent.settings.listModels(providerId);
+    if (generation !== modelLoadGeneration) return;
   } catch (error) {
+    if (generation !== modelLoadGeneration) return;
     logApp("warn", "モデル一覧を取得できませんでした", errorDetail(error));
     statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
     return;
@@ -3686,8 +3706,18 @@ async function loadModels(providerId, applyProviderDefault = false) {
   const preferred = providerDefaultModel(providerId);
   if (applyProviderDefault) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
-  } else if (providerId === data.active.providerId && !models.includes(modelInput.value)) {
+  } else if (providerId !== "agent_cli" && providerId === data.active.providerId && !models.includes(modelInput.value)) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || modelInput.value);
+  }
+  if (providerId === "agent_cli" && cliModelSelect) {
+    if (!modelInput.value) modelInput.value = preferred;
+    const choices = [...new Set([...models, modelInput.value].filter(Boolean))];
+    cliModelSelect.replaceChildren(...choices.map(value => el("option", {
+      value,
+      textContent: ["claude", "codex", "custom"].includes(value)
+        ? `${value}：アプリのデフォルト` : value.replace(":", "："),
+      selected: value === modelInput.value,
+    })));
   }
   statusEl.textContent = providerId === "ollama"
     ? (models.length ? `${models.length}件の Ollama モデルを読み込みました。` : "Ollama のモデルが見つかりません。")

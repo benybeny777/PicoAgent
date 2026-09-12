@@ -3659,6 +3659,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "toml 1.1.4+spec-1.1.0",
  "url",
  "windows-sys 0.61.2",
  "xcap",
