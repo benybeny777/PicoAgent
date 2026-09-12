@@ -3700,6 +3700,18 @@ pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 最終DOMと描画バッファの準備が済んだ画面だけを表示する。
+#[tauri::command]
+pub fn pet_reveal_main(app: AppHandle) -> Result<(), String> {
+    if !crate::boot_screen::is_finished(&app) {
+        return Err("起動準備が完了していません".to_string());
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or("メイン画面がありません")?;
+    window.show().map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn pet_log(
     level: String,

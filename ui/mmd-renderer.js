@@ -65,8 +65,10 @@
       scene = new B.Scene(engine);
       scene.clearColor = new B.Color4(0, 0, 0, 0);
       scene.ambientColor = new B.Color3(0.65, 0.65, 0.65);
-      new B.HemisphericLight('mmd-fill', new B.Vector3(0, 1, 0), scene).intensity = 0.7;
-      new B.DirectionalLight('mmd-key', new B.Vector3(-0.3, -1, 1), scene).intensity = 0.6;
+      const fill = new B.HemisphericLight('mmd-fill', new B.Vector3(0, 1, 0), scene);
+      fill.intensity = 0.7;
+      fill.groundColor = new B.Color3(1, 1, 1);
+      new B.DirectionalLight('mmd-key', new B.Vector3(-0.3, -0.35, 1), scene).intensity = 0.6;
       const camera = new B.ArcRotateCamera('mmd-camera', -Math.PI / 2, Math.PI / 2, 25, new B.Vector3(0, 14, 0), scene);
       camera.minZ = 0.05;
       camera.wheelPrecision = 35;
@@ -191,7 +193,7 @@
         setMouthLevel(value) { if (!disposed) mouth = clamp(value); },
         setMotionEnabled(enabled) { if (!disposed) { motion = Boolean(enabled); if (!motion) mouth = 0; } },
         setPose(value) { if (!disposed) pose = value === 'original' ? 'original' : 'natural'; },
-        capturePreview() { ensureActive(); update(); scene.render(); return canvas.toDataURL('image/png'); },
+        capturePreview() { ensureActive(); resize(); update(); scene.render(); return canvas.toDataURL('image/png'); },
         capabilities: { mouth: Boolean(mouthMorph), blink: Boolean(blink), happy: Boolean(smile || smileCorners.length), sad: Boolean(sad), physics: false },
         dispose,
       };

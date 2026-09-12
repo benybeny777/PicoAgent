@@ -1,4 +1,4 @@
-// boot_screen.rs - フロントエンドを読み込めなかったときに、キャラクター付きの案内画面へ差し替える。
+// boot_screen.rs - フロントエンドを読み込めなかったときに、文字だけの診断画面へ差し替える。
 //
 // webview（WebView2 / WKWebView）はロードに失敗すると各エンジン固有のエラーページを出す。
 // あの画面は HTML として差し替えられないため、「一定時間フロントから準備完了の通知が来ない」
@@ -32,7 +32,6 @@ const MAX_PROGRESS_INTERVAL_MS: u64 = 10_000;
 const _: () = assert!(START_TIMEOUT_MS < DEFAULT_TIMEOUT_MS && START_TIMEOUT_MS >= MIN_TIMEOUT_MS);
 
 const PAGE_HTML: &str = include_str!("../assets/boot_screen/page.html");
-const CHARACTER_PNG: &[u8] = include_bytes!("../assets/boot_screen/character.png");
 
 /// フロントの準備状況と、案内ページに載せる情報。
 #[derive(Default)]
@@ -61,7 +60,14 @@ impl BootScreenState {
 pub fn mark_started(app: &AppHandle) {
     let state = app.state::<BootScreenState>();
     state.started.store(true, Ordering::SeqCst);
+    state.finished.store(false, Ordering::SeqCst);
     *state.last_progress.lock().unwrap() = Some(Instant::now());
+}
+
+pub fn is_finished(app: &AppHandle) -> bool {
+    app.state::<BootScreenState>()
+        .finished
+        .load(Ordering::SeqCst)
 }
 
 /// フロントが起動準備を継続できていることを記録する。
@@ -85,7 +91,7 @@ fn page_url() -> String {
     }
 }
 
-/// 専用 URI スキームのハンドラ。案内ページ（キャラクター画像を data URI で内包）を返す。
+/// 専用 URI スキームのハンドラ。仮キャラを含まない診断ページを返す。
 pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
     let state = app.state::<BootScreenState>();
     let app_url = state.app_url.lock().unwrap().clone();
@@ -119,7 +125,6 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
     let log_html = format!("<b>直近のログ</b>{}", escape(&recent_log(app)));
 
     let body = PAGE_HTML
-        .replace("__CHARACTER__", &character_data_uri())
         .replace("__HEADLINE__", "あれ…？ うまく起きられなかったみたい")
         .replace(
             "__MESSAGE__",
@@ -138,15 +143,6 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
         .header(tauri::http::header::CACHE_CONTROL, "no-store")
         .body(body.into_bytes())
         .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
-}
-
-/// 埋め込みキャラクター画像を data URI にする（配信経路に依存せず表示するため）。
-fn character_data_uri() -> String {
-    use base64::Engine as _;
-    format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(CHARACTER_PNG)
-    )
 }
 
 /// HTML のテキスト・属性値へ埋めるためのエスケープ。

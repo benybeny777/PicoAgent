@@ -65,17 +65,13 @@ test("長いダウンロード中は進捗通知を続け通常画面で停止�
   assert.match(commands, /pub fn pet_boot_progress[\s\S]*?boot_screen::mark_progress/);
 });
 
-test("起動画面の寝姿は一覧の印から選ぶ", () => {
-  // IDを直書きすると、寝姿を持つキャラを足したときの更新漏れが黙って起きる。
-  assert.doesNotMatch(renderer, /STARTUP_SLEEPING_CHARACTER_IDS/);
-  assert.match(renderer, /character\.bootSleeping === true/);
-  assert.match(renderer, /function chooseStartupSleepingCharacter\(candidates, randomValue = Math\.random\(\)\)/);
-  assert.match(startup, /chooseStartupSleepingCharacter\(startupSleepingCandidates\(catalog\)\)/);
-  // 候補が無くても起動画面は出す（既定キャラへ落とす）。
-  assert.match(startup, /prepareBootCharacter\(sleeping \|\| catalog\.default/);
-  assert.ok(startup.indexOf("startupSleepingCandidates(catalog)") < startup.indexOf("loadStartupCharacter()"),
-    "寝姿を通常キャラクターより先に読み込んでいません");
-  assert.doesNotMatch(startup, /prepareBootCharacter\(info\.characterId\)/);
+test("起動途中の仮キャラを表示せず最終DOMの後で窓を表示する", async () => {
+  assert.doesNotMatch(renderer, /chooseStartupSleepingCharacter|prepareBootCharacter/);
+  const config = JSON.parse(await readFile(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+  assert.equal(config.app.windows.find(w => w.label === 'main').visible, false);
+  const release = renderer.slice(renderer.indexOf('async function releaseBootUi()'), startupStart);
+  assert.ok(release.indexOf('classList.remove("is-booting")') < release.indexOf('revealMain()'));
+  assert.match(release, /if \(bootBackendFinished\)/);
 });
 
 test("finishBoot失敗後も位置意図を保持して再試行できる", () => {
@@ -109,12 +105,12 @@ test("任意キャラクターのI/O待ちはすべて有界化する", () => {
   assert.doesNotMatch(renderer, /petSprite\.src = frameUrl\(animationName, frame\)/, "連番を先読み前に直接表示しない");
 });
 
-test("選択キャラ失敗時は既定PNGへ一度だけ切り替えて起動完了する", () => {
-  assert.match(startup, /await loadCharacter\("mugi"[^;]+;\s*startupCharacterError =/);
+test("選択キャラ失敗時は別キャラを出さず診断を表示する", () => {
+  assert.match(startup, /character\.style\.visibility = "hidden"/);
   assert.match(startup, /if \(!startupCharacterError && !startupEngineError/);
   assert.match(startup, /if \(startupCharacterError\) \{\s*setStatus\(startupCharacterError\)/);
   assert.match(renderer, /const appearance = await window\.picoagent\.setCharacterProfile[\s\S]*?loadGeneration !== characterLoadGeneration[\s\S]*?applyStreamAppearance\(appearance\.streamBackground/);
-  assert.match(startup, /await loadCharacter\("mugi"/);
+  assert.doesNotMatch(startup, /await loadCharacter\("mugi"/);
   assert.match(startup, /const characterLoadPromise = loadStartupCharacter\(\)/);
   assert.match(startup, /finally \{[\s\S]*await releaseBootUi\(\)/);
 });
