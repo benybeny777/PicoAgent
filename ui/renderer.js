@@ -1,5 +1,5 @@
 // バックエンドへ「フロントを読み込めた」ことを最初に伝える。これが届かないと
-// boot_screen が読み込み失敗と判断し、キャラクター付きの案内画面へ切り替える。
+// boot_screen が読み込み失敗と判断し、文字だけの診断画面へ切り替える。
 window.picoagent?.frontendReady?.();
 
 const petApp = document.getElementById("petApp");
@@ -3226,6 +3226,13 @@ function playChunkAndWait(result, session) {
   });
 }
 async function speakReply(text) {
+  // 読み上げが無効、または音量0のときは合成経路へ入らない。入ると音が出ない設定でも
+  // 「読み上げ準備中…」と「読み上げを中止」が出て、準備中に見えるうえ字幕送りも
+  // 合成待ちの間隔で進む。字幕の送りだけ行う（配信以外では表示の変化なし）。
+  if (ttsEnabledCache === false || voiceVolume <= 0.001) {
+    startTimedSubtitlePages(text);
+    return;
+  }
   const chunks = currentLayout === "stream" ? buildSubtitlePages(text) : splitSpeechChunks(text);
   stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
   const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
@@ -4407,8 +4414,7 @@ composer.addEventListener("submit", async event => {
         // ストリーミング中に先行読み上げが走っていれば残りを読み切り、無ければ全文読み上げ。
         if (currentLayout === "stream") {
           cancelStreamSpeech();
-          if (ttsEnabledCache === false || voiceVolume <= 0.001) startTimedSubtitlePages(result.reply);
-          else speakReply(result.reply);
+          speakReply(result.reply);
         } else if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
       } else {
         cancelStreamSpeech();
@@ -5488,7 +5494,12 @@ async function prepareSelectedVoiceModel() {
     logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error));
     return null;
   }
-  if (!statusInfo?.enabled) return null;
+  // 読み上げが無効だとバックエンドが答えた時点で覚える。覚えないと、最初の挨拶だけ
+  // 合成経路を通って「読み上げ準備中…」が出る。
+  if (!statusInfo?.enabled) {
+    ttsEnabledCache = false;
+    return null;
+  }
   setStatus("声を準備中…");
   try {
     await window.picoagent.prepareVoiceModel();
