@@ -1117,9 +1117,12 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
    各形式の既定寸法だけを前提にすると、縮めたときに入力欄・送信ボタン・ウィンドウ操作が
    窓の外へ出て操作できなくなる。スクロールできる親も無いので、はみ出した時点で
    「送信できないアプリ」になる。ここで優先度の低い要素から畳み、操作に必要な
-   入力欄・送信・状態表示・ウィンドウ操作を必ず窓の内側へ残す。 */
+   入力欄・送信・状態表示・ウィンドウ操作を必ず窓の内側へ残す。
 
-/* 高さが足りないとき: 入力欄の最低高を詰め、検索欄とクイック操作を畳む。 */
+   **規則は「ゆるい条件 → きつい条件」の順に置く。** 同じ強さの指定は後ろが勝つため、
+   逆順に置くと狭いときの指定を広いときの指定が上書きしてしまう。 */
+
+/* 高さ560px以下: 入力欄の最低高を詰め、履歴の検索欄を畳む。 */
 @media (max-height:560px) {
   .pet-app[data-layout] .composer textarea { min-height:48px; max-height:38vh; }
   .pet-app[data-layout] .history-tools { display:none; }
@@ -1129,16 +1132,40 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   [data-layout="widget"] .widget-clock span { font-size:10px; }
   [data-layout="widget"] .notice-list { padding-bottom:0; }
 }
+
+/* 幅520px以下・高さ520px以下: 折り返しで伸びる行（クイック操作・添付）を区切る。
+   項目は減らさず、区切った高さの中で送れるようにする。 */
+@media (max-width:520px), (max-height:520px) {
+  .pet-app[data-layout] .quick-actions { max-height:78px; overflow-y:auto; flex:0 0 auto; }
+  .pet-app[data-layout] .image-preview,
+  .pet-app[data-layout] .attachment-suggestions { max-height:64px; overflow-y:auto; flex:0 0 auto; }
+}
+
+/* 高さ420px以下: クイック操作を畳み、返答の取り分と回答操作を小さくする。
+   チャットとバーはキャラのアイコン分の余白も詰める（余白が入力欄を押し出すため）。 */
 @media (max-height:420px) {
   .pet-app[data-layout] .composer textarea { min-height:34px; max-height:30vh; }
   .pet-app[data-layout] .quick-actions { display:none; }
   .pet-app[data-layout] .reply { max-height:26%; }
   .pet-app[data-layout] .reply-actions button { height:28px; }
-  /* ウィジェットの時計は固定の高さを取る。狭いときは時刻だけ小さく残す。 */
   [data-layout="widget"] .widget-clock strong { font-size:17px; }
   [data-layout="widget"] .widget-clock span { display:none; }
+  [data-layout="chat"] .bubble { padding-top:46px; }
+  [data-layout="chat"] .character { left:10px; top:8px; width:34px; height:34px; }
+  [data-layout="bar"] .character { left:10px; top:10px; width:34px; height:34px; }
+  [data-layout="bar"] .composer textarea { padding-left:48px; }
 }
-/* 返答と履歴は縮めても読める側。入力欄より先にこちらを削る。 */
+
+/* いっしょの記録カードは固定寸法（250x290）なので、窓が小さいと下と右へはみ出して
+   閉じるボタンごと届かなくなる。窓の内側に収め、中身は自分でスクロールさせる。 */
+@media (max-width:320px), (max-height:360px) {
+  .relationship-card {
+    right:8px; bottom:8px; left:8px; width:auto;
+    max-height:calc(100% - 56px); max-width:none;
+  }
+}
+
+/* 高さ340px以下: 返答と履歴は縮めても読める側なので、入力欄より先にこちらを削る。 */
 @media (max-height:340px) {
   .pet-app[data-layout] .reply { max-height:20%; }
   .pet-app[data-layout="widget"] .widget-clock { display:none; }
@@ -1150,14 +1177,18 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   .pet-app[data-layout] .reply-actions { margin:-4px -4px 4px 0; }
   .pet-app[data-layout] .reply-actions button { height:24px; }
 }
+
 /* 最小寸法（200x240）付近: 列の高さを食う行を最後まで削る。回答操作は消さず、
    フキダシの上へ重ねて置いて操作できる状態のまま列から外す。 */
 @media (max-height:280px) {
   .pet-app[data-layout] .reply-actions { position:absolute; z-index:6; top:4px; right:10px; margin:0; opacity:.95; }
-  .pet-app[data-layout] .composer textarea { min-height:26px; }
+  .pet-app[data-layout] .composer textarea { min-height:26px; max-height:44px; }
   .pet-app[data-layout] .composer-actions button { height:26px; }
   .pet-app[data-layout] .composer-actions { margin-top:4px; }
   .pet-app[data-layout] .status { min-height:12px; margin-top:3px; font-size:9.5px; }
+  /* 添付は何を付けたか分かる最小限（1段ぶん）まで詰め、おすすめ操作は畳む。 */
+  .pet-app[data-layout] .image-preview { max-height:36px; }
+  .pet-app[data-layout] .attachment-suggestions { display:none; }
   .pet-app[data-layout] .bubble { padding-bottom:4px; }
   .pet-app[data-layout] .reply { padding-top:4px; }
   [data-layout="workspace"] .bubble { gap:4px; }
@@ -1165,22 +1196,6 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   [data-layout="chat"] .character,
   [data-layout="bar"] .character { display:none; }
   [data-layout="bar"] .composer textarea { padding-left:11px; }
-}
-
-/* チャットとバーはキャラのアイコン分だけ上を空けている。縦が足りないときは
-   アイコンごと小さくしないと、入力欄がその余白に押し出される。 */
-@media (max-height:420px) {
-  [data-layout="chat"] .bubble { padding-top:46px; }
-  [data-layout="chat"] .character { left:10px; top:8px; width:34px; height:34px; }
-  [data-layout="bar"] .character { left:10px; top:10px; width:34px; height:34px; }
-  [data-layout="bar"] .composer textarea { padding-left:48px; }
-}
-
-/* クイック操作は幅が狭いと何段にも折り返し（300px幅では8個で7段・227px）、
-   入力欄と送信ボタンをフキダシの外へ押し出す。項目は減らさず、高さを区切って
-   その中で送れるようにする。さらに狭い・低い場合は上の規則で畳む。 */
-@media (max-width:520px), (max-height:520px) {
-  .pet-app[data-layout] .quick-actions { max-height:78px; overflow-y:auto; flex:0 0 auto; }
 }
 
 /* 幅が足りないとき: 送信・音声・連続の3ボタンは既定の最小幅では1行へ並ばず、
