@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "babylon-mmd": "1.3.0",
+    "@babylonjs/core": "9.26.0",
+    "esbuild": "0.28.2"
+  },
+  "lockSha256": "62cb662c2775bd97ace586bccff568bf91f9b6f39ba47ab62684658dfda29092",
+  "files": {
+    "mmd-runtime.js": "d2f1f050e878dfe217ef0b67d8e9e568f3a38699e028f6a52097d753206b4274",
+    "LICENSES.txt": "a1d2b5d7238198c48895c23a842131839aeba30df5d540f273bbc543c14cca97"
+  }
+}

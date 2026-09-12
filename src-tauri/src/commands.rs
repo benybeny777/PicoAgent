@@ -1484,7 +1484,7 @@ pub async fn settings_character_pick(app: AppHandle, folder: bool) -> Result<Val
         });
     } else {
         dialog
-            .add_filter("キャラクターパック", &["zip"])
+            .add_filter("キャラクターパック", &["zip", "pmx"])
             .pick_file(move |picked| {
                 let _ = sender.send(picked.map(|path| path.to_string()));
             });
@@ -1534,6 +1534,31 @@ pub fn settings_character_install_live2d(
         }
         Err(error) => {
             let message = format!("Live2Dキャラクターの導入に失敗しました: {error:#}");
+            crate::log_paths::append_app_log(&app, &message);
+            Err(message)
+        }
+    }
+}
+
+/// 利用者が自分で取得したMMDのzip／フォルダを、パック作成と検証まで行って導入する。
+#[tauri::command(async)]
+pub fn settings_character_install_mmd(
+    app: AppHandle,
+    path: String,
+    id: String,
+    name: String,
+) -> Result<Value, String> {
+    let source = std::path::PathBuf::from(path.trim());
+    match crate::user_characters::install_mmd(&app, &source, &id, &name) {
+        Ok((id, name)) => {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("手元のMMDモデルからキャラクター {name} ({id}) を追加しました。"),
+            );
+            Ok(json!({ "ok": true, "id": id, "name": name }))
+        }
+        Err(error) => {
+            let message = format!("MMDキャラクターの導入に失敗しました: {error:#}");
             crate::log_paths::append_app_log(&app, &message);
             Err(message)
         }

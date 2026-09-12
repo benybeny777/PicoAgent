@@ -213,6 +213,7 @@ window.picoagent = {
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
+    installMmdCharacter: (path, id, name) => call("settings_character_install_mmd", { path, id, name }),
     renameCharacter: (id, name) => call("settings_character_rename", { id, name }),
     characterMakerList: () => call("settings_character_maker_list"),
     characterMakerPickSource: () => call("settings_character_maker_pick_source"),

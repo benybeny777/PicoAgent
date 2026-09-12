@@ -1377,6 +1377,23 @@ pub fn build_ui_dist(release: bool, beta: bool, force: bool) -> Result<()> {
             pixi.display()
         );
     }
+    let mmd = src.join("vendor/mmd");
+    let metadata: serde_json::Value = serde_json::from_slice(
+        &fs::read(mmd.join("runtime.json"))
+            .context("MMDランタイムがありません。cargo xtask setup mmd を実行してください")?,
+    )?;
+    anyhow::ensure!(
+        metadata["schemaVersion"].as_u64() == Some(1)
+            && metadata["lockSha256"].as_str()
+                == Some(file_sha256(&root.join("tools/mmd-runtime/package-lock.json"))?.as_str()),
+        "MMD依存の固定情報が一致しません。cargo xtask setup mmd を実行してください"
+    );
+    for name in ["mmd-runtime.js", "LICENSES.txt"] {
+        anyhow::ensure!(
+            metadata["files"][name].as_str() == Some(file_sha256(&mmd.join(name))?.as_str()),
+            "MMDランタイムの内容が一致しません: {name}。cargo xtask setup mmd を実行してください"
+        );
+    }
     let stats = sync_dir(&src, &dest, &|_| false, force)?;
     // READMEで実表示を検証した8形式の画像を、設定画面の選択カードにも使う。
     // 正本を二重管理せず、配信用生成物へだけまとめてコピーする。

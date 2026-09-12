@@ -338,6 +338,8 @@ window.addEventListener("beforeunload", () => {
   });
   stopLive2D();
   destroyMeshRig();
+  characterLoadGeneration += 1;
+  destroyMmd();
   animationLoop?.stop();
   gazeFrameScheduler?.cancel();
   if (live2dApp) { live2dApp.destroy(true); live2dApp = null; live2dCanvas = null; }
@@ -864,7 +866,7 @@ async function prepareBootCharacter(characterId) {
   // Live2D の preview.jpg は配布元の紹介画像や全身コラージュの場合があり、実モデルへ
   // 切り替わる一瞬だけ別の絵に見える。Live2D は仮画像を出さず、読み込み完了した
   // 実モデルをそのまま起動画面へ出す。2Dキャラは通常表示と同じ idle 先頭フレームを使う。
-  if (manifest.live2d) {
+  if (manifest.live2d || manifest.mmd) {
     // 仮画像が無いので、起動画面のキャラ枠は CSS 側で実モデル（.character）へ差し替える。
     petApp.dataset.bootArtwork = "live2d";
     bootPetImage.onerror = null;
@@ -1145,16 +1147,20 @@ function animateSpringMotion(now) {
 }
 
 async function loadCharacter(characterId, overrides = {}, options = {}) {
+  const loadGeneration = ++characterLoadGeneration;
+  mmdLoadAbortController?.abort();
+  mmdLoadAbortController = null;
   characterOverridesCache = overrides;
   if (options.live2dSdkOverrides) live2dSdkOverridesCache = options.live2dSdkOverrides;
   const { manifest, root } = await loadCharacterManifest(characterId);
+  if (loadGeneration !== characterLoadGeneration) return;
   const hasLive2dDefinition = (config) => Boolean(config?.model || config?.models?.length);
   const hasAnyLive2d = hasLive2dDefinition(manifest.live2d)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => hasLive2dDefinition(item?.live2d)));
   const hasAnyMeshRig = Boolean(manifest.meshRig?.rig)
     || (Array.isArray(manifest.variants) && manifest.variants.some(item => item?.meshRig?.rig));
-  if (!hasAnyLive2d && !hasAnyMeshRig && !manifest.animations?.idle) {
-    throw new Error("Live2D、メッシュリグ、idleアニメーションのいずれも定義されていません");
+  if (!hasAnyLive2d && !hasAnyMeshRig && !manifest.mmd?.model && !manifest.animations?.idle) {
+    throw new Error("MMD、Live2D、メッシュリグ、idleアニメーションのいずれも定義されていません");
   }
   // 人格が変わったら描画資産を作り直すため、署名の一部として持つ。
   // 人格プロンプトの混入除去は Rust の公開検査（`agent::guard_public_answer`）が
@@ -1191,7 +1197,15 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   stopRig();
   detachLipSyncAudio(); // Live2D キャラの口パラメータ解析も解除する
   destroyMeshRig();
-  if (hasLive2dDefinition(activeLive2dConfig)) {
+  destroyMmd();
+  if (manifest.mmd?.model) {
+    stopLive2D();
+    rigAvailable = false;
+    activeMeshRigConfig = null;
+    activeLive2dConfig = null;
+    await startMmd(manifest.mmd, loadGeneration);
+    if (loadGeneration !== characterLoadGeneration) return;
+  } else if (hasLive2dDefinition(activeLive2dConfig)) {
     activeMeshRigConfig = null; // 同一キャラで両方ある場合は審査済みLive2D定義を優先する
     rigAvailable = false; // まばたき・口パクはモデル定義側が担当する
     try {
@@ -1224,6 +1238,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     }
     await probeRigLayers(); // メッシュ休止時に使える差分絵も別に判定する
   }
+  if (loadGeneration !== characterLoadGeneration) return;
   applyCharacterFraming();
   frame = 0;
   setAnimation("idle", true);
@@ -1291,8 +1306,9 @@ function setAnimation(name, force = false) {
     wakeAnimationLoop();
     return;
   }
-  animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
+  animationName = mmdController ? name : (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   wakeAnimationLoop();
+  if (mmdController) { character.dataset.motion = "none"; mmdController.setExpression(name); return; }
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
   // 待機・会話・思考中は同じキャンバスを保つ。thinkingだけ差分絵へ切り替えると、
   // 配信表示のフレーミング差でキャラクター全体が拡縮して見える。
@@ -1331,7 +1347,7 @@ function animate(now) {
   const springActive = animateSpringMotion(now);
   if (document.hidden) return false;
   // Live2D 動作中はフレーム送り不要（PIXI 側の ticker が描画を担当する）。
-  if (live2dActive) return false;
+  if (live2dActive || mmdController) return false;
   // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
   // 待機・思考などの装飾モーションは先頭フレームへ止め、次の状態変化までループも休止する。
   if (reduceMotion && animationName !== "talking") {
@@ -1545,6 +1561,7 @@ function detachLipSyncAudio() {
   rigMouthForm = 0;
   rigMouthOpen = false;
   live2dMouth = -1;
+  mmdController?.setMouthLevel(0);
   rigRefresh();
 }
 
@@ -1581,12 +1598,12 @@ function attachLipSync(audio) {
     detachLipSyncAudio();
     return;
   }
-  if (!rigAvailable && !live2dActive) {
+  if (!rigAvailable && !live2dActive && !mmdController) {
     logApp("info", "リップシンクを保留しました", "キャラクターの表示準備が終わってから接続します");
     pendingLipSyncAudio = audio;
     return;
   }
-  if (!live2dActive) startRig();
+  if (!live2dActive && !mmdController) startRig();
   detachLipSyncAudio();
   // WebAudio の振幅解析を試み、使えない環境ではタイマー口パクへフォールバックする。
   let useTimer = true;
@@ -1610,7 +1627,8 @@ function attachLipSync(audio) {
   }
   if (useTimer) {
     rigMouthTimer = setInterval(() => {
-      if (voiceVolume <= 0.001) {
+      if (!shouldLipSync(audio)) {
+        mmdController?.setMouthLevel(0);
         rigMouthOpen = false;
         live2dMouth = 0;
         rigRefresh();
@@ -1620,7 +1638,8 @@ function attachLipSync(audio) {
       rigMouthForm = mouthFormAt(audio.currentTime, audio.picoLipSync);
       // フォールバックでも最大開口と完全閉口を往復させない。ひよりのような
       // デフォルメ口では 0↔0.8 の矩形波が「口だけ跳ねる」見え方になる。
-      if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
+      if (mmdController) mmdController.setMouthLevel(rigMouthOpen ? 0.58 : 0.08);
+      else if (live2dActive) live2dMouth = rigMouthOpen ? 0.58 : 0.08;
       else rigRefresh();
     }, 150);
     return;
@@ -1628,7 +1647,8 @@ function attachLipSync(audio) {
   const data = new Uint8Array(rigAnalyser.fftSize);
   let peak = 0.04; // 音量差に追従する適応しきい値
   const analyserLoop = () => {
-    if ((!rigActive && !live2dActive) || !rigAnalyser) return;
+    if ((!rigActive && !live2dActive && !mmdController) || !rigAnalyser) return;
+    if (!shouldLipSync(audio)) { detachLipSyncAudio(); return; }
     rigAnalyser.getByteTimeDomainData(data);
     let sum = 0;
     for (let i = 0; i < data.length; i += 1) {
@@ -1654,7 +1674,9 @@ function attachLipSync(audio) {
     if (rigMouthLevel < 0.015) rigMouthLevel = 0;
     const formTarget = mouthFormAt(audio.currentTime, audio.picoLipSync);
     rigMouthForm += (formTarget - rigMouthForm) * Math.min(1, 0.42 + target * 0.25);
-    if (live2dActive) {
+    if (mmdController) {
+      mmdController.setMouthLevel(rigMouthLevel);
+    } else if (live2dActive) {
       live2dMouth = rigMouthLevel;
     } else {
       // 差分絵は開閉2枚しか無く、単一しきい値だと包絡線が境界付近に留まる音節で
@@ -1709,6 +1731,7 @@ function stopRig() {
 // 読み上げ終了時の処理。layers を持つキャラは待機中も常時リグ（まばたき）を続けるため
 // 音声解析だけ解除し、リグ非対応キャラのみ完全に終了してフレーム表示へ戻す。
 function stopLipSync() {
+  if (mmdController) { detachLipSyncAudio(); return; }
   if (live2dActive) { detachLipSyncAudio(); return; }
   if (rigAvailable) { detachLipSyncAudio(); return; }
   const wasActive = rigActive;
@@ -1736,6 +1759,7 @@ function meshRigCanRender() {
 }
 
 function setMeshRigVisible(visible) {
+  if (mmdController || character.dataset.renderKind === "mmd") return false;
   const active = Boolean(visible && meshRigCanRender());
   meshRigActive = active;
   meshRigController?.setActive(active);
@@ -1800,6 +1824,71 @@ async function prepareMeshRig(cfg) {
     character.dataset.meshIconFraming = "true";
   }
   applyMeshRigFraming();
+}
+
+// MMDの元データは変更せず、表示用ボーンとモーフだけをランタイムへ渡す。
+let characterLoadGeneration = 0;
+let mmdController = null;
+let mmdCanvas = null;
+let mmdLoadAbortController = null;
+const mmdPoseRow = document.getElementById("mmdPoseRow");
+const mmdPoseSelect = document.getElementById("mmdPoseSelect");
+mmdPoseSelect?.addEventListener("change", () => mmdController?.setPose(mmdPoseSelect.value));
+
+function destroyMmd() {
+  mmdLoadAbortController?.abort();
+  mmdLoadAbortController = null;
+  mmdController?.setMouthLevel(0);
+  mmdController?.dispose();
+  mmdController = null;
+  mmdCanvas?.remove();
+  mmdCanvas = null;
+  if (mmdPoseRow) mmdPoseRow.hidden = true;
+  if (character.dataset.renderKind === "mmd") character.dataset.renderKind = "2d";
+  petSprite.style.display = "";
+}
+
+async function startMmd(config, generation) {
+  const loadAbort = new AbortController();
+  mmdLoadAbortController = loadAbort;
+  const canvas = document.createElement("canvas");
+  canvas.id = "mmdCanvas";
+  canvas.setAttribute("aria-hidden", "true");
+  characterView.insertBefore(canvas, petSprite);
+  mmdCanvas = canvas;
+  character.dataset.renderKind = "mmd";
+  petSprite.style.display = "none";
+  try {
+    await loadScriptOnce("mmd-renderer.js");
+    if (generation !== characterLoadGeneration) { canvas.remove(); return; }
+    const controller = await window.PicoMMD.create(canvas, {
+      modelUrl: `${characterRoot}/${config.model}`,
+      config,
+      interactive: false,
+      signal: loadAbort.signal,
+    });
+    if (generation !== characterLoadGeneration) {
+      controller.dispose();
+      canvas.remove();
+      return;
+    }
+    mmdController = controller;
+    controller.setFraming(currentLayout);
+    controller.setMotionEnabled(!reduceMotion && !document.hidden);
+    controller.setMouthLevel(0);
+    const pose = config.defaultPose === "original" ? "original" : "natural";
+    controller.setPose(pose);
+    if (mmdPoseSelect) mmdPoseSelect.value = pose;
+    if (mmdPoseRow) mmdPoseRow.hidden = false;
+    retryPendingLipSync();
+  } catch (error) {
+    canvas.remove();
+    if (generation !== characterLoadGeneration) return;
+    destroyMmd();
+    throw new Error(`MMDモデルを読み込めません: ${error.message}`);
+  } finally {
+    if (mmdLoadAbortController === loadAbort) mmdLoadAbortController = null;
+  }
 }
 
 // ── Live2D 本体レンダリング ─────────────────────────────────────────
@@ -2237,6 +2326,7 @@ function onReduceMotionChange(event) {
     }
   }
   meshRigController?.setReducedMotion(reduceMotion);
+  mmdController?.setMotionEnabled(!reduceMotion && !document.hidden);
   if (meshRigController) {
     setAnimation(animationName, true);
     // setAnimation中に非同期の状態更新が重なっても、最終的な表示形式を正本にして
@@ -4762,6 +4852,8 @@ voiceLoopButton?.addEventListener("click", () => {
 updateContinuousVoiceButton();
 
 document.addEventListener("visibilitychange", () => {
+  mmdController?.setMotionEnabled(!reduceMotion && !document.hidden);
+  if (document.hidden) mmdController?.setMouthLevel(0);
   if (document.hidden) {
     animationLoop?.stop();
     gazeFrameScheduler?.cancel();
@@ -4879,7 +4971,7 @@ function applyCharacterZoom(zoom) {
   // Live2D は character.json の scale / offsetY がすでにモデルごとの上半身表示へ調整済み。
   // PNG向けの既定 1.55 倍をさらに重ねると、ひよりは顔だけに切り取られてしまう。
   // Live2D では 1.55 を基準倍率（1倍）として、ユーザーが変えた差分だけを反映する。
-  const viewZoom = live2dActive ? characterZoom / 1.55 : characterZoom;
+  const viewZoom = live2dActive || mmdController ? characterZoom / 1.55 : characterZoom;
   character.style.setProperty("--char-zoom", String(viewZoom));
   character.style.setProperty("--char-render-size", `${viewZoom * 100}%`);
   const sourceIsBust = character.dataset.sourceFraming === "native-bust";
@@ -4909,7 +5001,7 @@ function applyCharacterFraming() {
       || character.dataset.renderKind === "mesh-rig";
     const isCompactImage = isImageBased && character.dataset.bodyProportion === "compact";
     const isNativeBustImage = isImageBased && character.dataset.sourceFraming === "native-bust";
-    const isLive2d = character.dataset.renderKind === "live2d";
+    const isLive2d = ["live2d", "mmd"].includes(character.dataset.renderKind);
     const usesStreamImageCrop = isImageBased && currentLayout === "stream";
     const manifestFrame = usesStreamImageCrop
       ? characterManifest?.streamFraming
@@ -4920,6 +5012,8 @@ function applyCharacterFraming() {
           x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
           y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
         }
+      : character.dataset.renderKind === "mmd" && ["chat", "bar"].includes(currentLayout)
+        ? { zoom: 1.55, x: 0, y: 0 }
       : isNativeBustImage && usesStreamImageCrop
         ? FRAMING_PRESETS.full
         : isCompactImage || usesStreamImageCrop || isLive2d ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
@@ -5017,7 +5111,7 @@ function markActivity() {
 
 function fallAsleep() {
   // 全画面で履歴を読んでいる間（マウス操作なしでも閲覧中）は寝ない。
-  if (napping || busy || currentVoice || !composer.hidden || live2dActive
+  if (napping || busy || currentVoice || !composer.hidden || live2dActive || mmdController
     || bubble.classList.contains("fullscreen")) return;
   const sleeping = characterManifest?.boot?.sleeping;
   if (!sleeping) return;
@@ -5228,6 +5322,7 @@ function applyVoiceVolume(value) {
     rigMouthForm = 0;
     rigMouthOpen = false;
     live2dMouth = 0;
+    mmdController?.setMouthLevel(0);
     rigRefresh();
     if (animationName === "talking") setAnimation("idle", true);
     return;
@@ -5308,6 +5403,7 @@ function applyLayout(id) {
   applyCharacterFraming();
   applyMeshRigFraming();
   applyLive2DFraming();
+  mmdController?.setFraming(currentLayout);
   // 履歴を常設する形式では、切り替えた時点の履歴をその場で描き直す。
   renderHistory();
   refreshBubblePlacement();

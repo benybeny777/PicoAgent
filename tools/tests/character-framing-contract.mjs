@@ -135,7 +135,7 @@ test("メッシュ休止時に差分絵がなければ定義済み静止フレ�
   const source = renderer.slice(renderer.indexOf("function setAnimation("), renderer.indexOf("function frameDuration("));
   const calls = [];
   const context = { animations: { idle: { framePaths: ["source.png"] } }, animationName: "idle", frame: 0,
-    lastFrameAt: 0, performance: { now: () => 0 }, character: { dataset: {} }, live2dActive: false,
+    lastFrameAt: 0, performance: { now: () => 0 }, character: { dataset: {} }, live2dActive: false, mmdController: null,
     meshRigController: {}, meshRigCanRender: () => false, rigAvailable: true, rigLayersAvailable: false,
     wakeAnimationLoop() {}, setMeshRigVisible: v => calls.push(["mesh",v]), preloadAnimation() {},
     startRig: () => { throw new Error("存在しない差分絵を表示してはいけない"); }, stopRig() {},

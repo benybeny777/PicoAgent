@@ -248,6 +248,10 @@ mod guard {
     fn ui配下に開発用ファイルを置かない() {
         let mut violations = Vec::new();
         for relative in ui_files() {
+            // 固定MMDランタイムを配布するために必要なMIT/Apacheライセンス原文。
+            if relative == std::path::Path::new("vendor/mmd/LICENSES.txt") {
+                continue;
+            }
             let extension = relative
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
@@ -264,7 +268,7 @@ mod guard {
         );
     }
 
-    /// 同梱PIXI 6.5.10はWebGL同期関数を`new Function`で生成するため、CSPの
+    /// 固定PIXIとBabylonの実行時コード生成に必要なため、CSPの
     /// `unsafe-eval`を現時点では外せない。必要性を第三者ランタイムだけへ閉じ込め、
     /// PicoAgent自身のコードが同じ緩和へ依存し始めるのを防ぐ。
     #[test]
@@ -272,6 +276,11 @@ mod guard {
         let ui = guard_scan::repo_root().join("ui");
         let mut violations = Vec::new();
         for relative in ui_files() {
+            // 第三者MMDバンドルだけを除外する。lockとSHA-256はbuild-uiで照合する。
+            // 自前のmmd-renderer.jsと他のvendorファイルはこの例外に含めない。
+            if relative == std::path::Path::new("vendor/mmd/mmd-runtime.js") {
+                continue;
+            }
             if relative
                 .extension()
                 .and_then(|extension| extension.to_str())
@@ -303,7 +312,7 @@ mod guard {
         assert!(
             violations.is_empty(),
             "PicoAgent自身のJavaScriptでeval／Functionコンストラクタを使わないでください。\
-             CSPのunsafe-evalはGit管理外の固定PIXIランタイムだけに限定します: {violations:?}"
+             CSPのunsafe-evalは固定PIXIと固定MMDバンドルだけに限定します: {violations:?}"
         );
     }
 

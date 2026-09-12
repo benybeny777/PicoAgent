@@ -72,7 +72,7 @@
       <!-- 立ち絵の拡大・移動はこの枠にかける。待機モーションは中の img を動かすので、
            同じ要素に transform を重ねないよう1枚挟んでいる。 -->
       <div id="characterView" class="character-view">
-        <img id="petSprite" src="assets/characters/mugi/animations/idle/00.png" alt="むぎ" draggable="false" />
+        <img id="petSprite" src="assets/characters/mugi/preview.png" alt="むぎ" draggable="false" />
         <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" hidden></div>
       </div>
       <span id="online" class="online"></span>
@@ -86,6 +86,7 @@
       <div id="relationshipMoments" class="relationship-moments"></div>
       <button id="relationshipClear" class="relationship-clear" type="button">記録をすべて消す</button>
       <label id="variantRow" class="variant-row" hidden>スタイル<select id="variantSelect"></select></label>
+      <label id="mmdPoseRow" class="variant-row" hidden>待機姿勢<select id="mmdPoseSelect"><option value="natural">自然な姿勢</option><option value="original">元の姿勢</option></select></label>
     </aside>
     <!-- 初回案内はLive2D追加の1画面だけ。追加機能の選択画面は廃止した。
          読み上げ（Aivis）は選ばせず起動時に自動導入し、進捗は起動画面の状態表示へ出す。

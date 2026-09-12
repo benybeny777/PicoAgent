@@ -31,6 +31,7 @@ pub struct UserCharacter {
     pub path: String,
     /// Live2D モデルを持つか（一覧の表示用）。
     pub live2d: bool,
+    pub mmd: bool,
 }
 
 /// 追加キャラクターの置き場（`app_data_dir/characters`）。
@@ -123,6 +124,7 @@ pub fn list(app: &AppHandle) -> Result<Vec<UserCharacter>> {
                 .to_string(),
             path: path.to_string_lossy().to_string(),
             live2d: manifest.pointer("/live2d/model").is_some(),
+            mmd: manifest.pointer("/mmd/model").is_some(),
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -160,17 +162,39 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
     let mut total = 0u64;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index)?;
-        // `enclosed_name` は `..` や絶対パスを含むエントリに None を返す（zip slip 対策）。
-        let Some(relative) = entry.enclosed_name() else {
-            bail!("zip に安全でないパスが含まれています: {}", entry.name());
+        let raw = entry.name_raw();
+        let name = match std::str::from_utf8(raw) {
+            Ok(value) => value.to_owned(),
+            Err(_) => {
+                let (value, _, errors) = encoding_rs::SHIFT_JIS.decode(raw);
+                if errors {
+                    bail!("zipのファイル名をUTF-8またはCP932で読めません");
+                }
+                value.into_owned()
+            }
         };
+        let normalized = name.replace('\\', "/");
+        if normalized.contains(':') || normalized.starts_with('/') {
+            bail!("zipに安全でないパスが含まれています: {name}");
+        }
+        let relative = character_pack::safe_relative(&normalized, "zipのパス")
+            .context("zipに安全でないパスが含まれています")?;
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            bail!("zip内にシンボリックリンクは置けません");
+        }
         let target = destination.join(&relative);
+        if target.is_file() {
+            bail!("zip内のファイル名が重複しています: {name}");
+        }
         if entry.is_dir() {
             std::fs::create_dir_all(&target)?;
             continue;
         }
-        if entry.size() > character_pack::MAX_FILE_BYTES {
-            bail!("zip の中身が大きすぎます（合計250MB・1ファイル40MBまで）");
+        if entry.size() > character_pack::file_limit(&target) {
+            bail!("zip の中身が大きすぎます（合計262MB・通常形式42MB・MMD非圧縮画像128MBまで）");
         }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
@@ -178,11 +202,11 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
         let mut out = std::fs::File::create(&target)
             .with_context(|| format!("展開できません: {}", target.display()))?;
         let remaining = MAX_TOTAL_BYTES.saturating_sub(total);
-        let limit = remaining.min(character_pack::MAX_FILE_BYTES);
+        let limit = remaining.min(character_pack::file_limit(&target));
         let mut limited = std::io::Read::take(&mut entry, limit.saturating_add(1));
         let copied = std::io::copy(&mut limited, &mut out)?;
         if copied > limit {
-            bail!("zip の中身が大きすぎます（合計250MB・1ファイル40MBまで）");
+            bail!("zip の中身が大きすぎます（合計262MB・通常形式42MB・MMD非圧縮画像128MBまで）");
         }
         total = total.saturating_add(copied);
     }
@@ -256,11 +280,11 @@ fn copy_dir_bounded(
             let mut input = std::fs::File::open(&from)?;
             let mut output = std::fs::File::create(&to)?;
             let remaining = MAX_TOTAL_BYTES.saturating_sub(*total);
-            let limit = remaining.min(character_pack::MAX_FILE_BYTES);
+            let limit = remaining.min(character_pack::file_limit(&to));
             let mut limited = std::io::Read::take(&mut input, limit.saturating_add(1));
             let copied = std::io::copy(&mut limited, &mut output)?;
             if copied > limit {
-                bail!("フォルダの中身が大きすぎます（合計250MB・1ファイル40MBまで）");
+                bail!("フォルダの中身が大きすぎます（合計262MB・通常形式42MB・MMD非圧縮画像128MBまで）");
             }
             *total = total.saturating_add(copied);
         }
@@ -367,6 +391,57 @@ fn build_live2d_pack(extracted: &Path, pack: &Path, id: &str, name: &str) -> Res
             "scale": 1.0,
             "offsetY": 0
         }
+    });
+    crate::store::write_json_atomic(&pack.join("character.json"), &manifest)?;
+    character_pack::validate(pack)?;
+    Ok(())
+}
+
+fn build_mmd_pack(
+    extracted: &Path,
+    selected: Option<&Path>,
+    pack: &Path,
+    id: &str,
+    name: &str,
+) -> Result<()> {
+    fn collect(root: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+        for entry in std::fs::read_dir(root)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                collect(&path, out)?;
+            } else if path
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.eq_ignore_ascii_case("pmx"))
+            {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+    let model = if let Some(selected) = selected {
+        selected.to_path_buf()
+    } else {
+        let mut models = Vec::new();
+        collect(extracted, &mut models)?;
+        if models.len() != 1 {
+            bail!(
+                "PMXが{}個あります。使用する1体の.pmxファイルを指定してください",
+                models.len()
+            );
+        }
+        models.remove(0)
+    };
+    let relative = model
+        .strip_prefix(extracted)?
+        .to_string_lossy()
+        .replace('\\', "/");
+    copy_dir(extracted, &pack.join("mmd"))?;
+    let manifest = json!({
+        "id": id, "name": name, "description": "自分で追加したMMDモデル。",
+        "greeting": format!("こんにちは、{name}です。よろしくね。"),
+        "persona": { "personality": "親しみやすく、利用者の依頼を丁寧に手伝う。", "speechStyle": "自然で簡潔な日本語で話す。", "firstPerson": name, "userName": "あなた", "systemPrompt": format!("{name}として振る舞い、利用者の依頼を丁寧に手伝う。") },
+        "mmd": { "schemaVersion": 1, "model": format!("mmd/{relative}") }
     });
     crate::store::write_json_atomic(&pack.join("character.json"), &manifest)?;
     character_pack::validate(pack)?;
@@ -558,6 +633,75 @@ pub fn install_live2d(
         prepare_source(source, &extracted)?;
         let pack = staging.join("generated");
         build_live2d_pack(&extracted, &pack, id, name)?;
+        let validated = character_pack::validate(&pack)?;
+        let validated_id = character_pack::required_text(&validated, "id")?.to_string();
+        let validated_name = character_pack::required_text(&validated, "name")?.to_string();
+        std::fs::rename(&pack, &destination)
+            .with_context(|| format!("導入先へ移動できません: {}", destination.display()))?;
+        Ok((validated_id, validated_name))
+    })();
+
+    cleanup_staging(app, &staging);
+    result
+}
+
+/// 未加工のPMXと素材を利用者領域へ導入する。
+pub fn install_mmd(
+    app: &AppHandle,
+    source: &Path,
+    id: &str,
+    name: &str,
+) -> Result<(String, String)> {
+    let _state_lock = crate::store::lock_state("user-characters");
+    if !source.exists() {
+        bail!("指定先が見つかりません: {}", source.display());
+    }
+    let id = id.trim();
+    let name = name.trim();
+    if !character_pack::is_valid_id(id) {
+        bail!(
+            "id は{}文字以内の英数字・ハイフン・アンダースコアだけにしてください",
+            character_pack::MAX_ID_CHARS
+        );
+    }
+    if name.is_empty() {
+        bail!("表示名を入力してください");
+    }
+    ensure_id_not_bundled(app, id)?;
+    let root = root(app)?;
+    std::fs::create_dir_all(&root)
+        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
+    let destination = root.join(id);
+    if destination.exists() {
+        bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
+    }
+
+    let staging = root.join(format!(".installing-mmd-{}", std::process::id()));
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).with_context(|| {
+            format!("古い導入途中データを掃除できません: {}", staging.display())
+        })?;
+    }
+    std::fs::create_dir_all(&staging)?;
+
+    let result = (|| -> Result<(String, String)> {
+        let extracted = staging.join("source");
+        let selected = if source
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.eq_ignore_ascii_case("pmx"))
+        {
+            copy_dir(
+                source.parent().context("PMXの親フォルダがありません")?,
+                &extracted,
+            )?;
+            Some(extracted.join(source.file_name().context("PMX名がありません")?))
+        } else {
+            prepare_source(source, &extracted)?;
+            None
+        };
+        let pack = staging.join("generated");
+        build_mmd_pack(&extracted, selected.as_deref(), &pack, id, name)?;
         let validated = character_pack::validate(&pack)?;
         let validated_id = character_pack::required_text(&validated, "id")?.to_string();
         let validated_name = character_pack::required_text(&validated, "name")?.to_string();
@@ -826,6 +970,64 @@ mod tests {
             "展開先の外へ書き出している"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cp932の日本語ファイル名をそのまま展開する() {
+        let dir = temp_dir("cp932");
+        let archive = dir.join("pack.zip");
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file("aa.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"original").unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let positions: Vec<_> = bytes
+            .windows(6)
+            .enumerate()
+            .filter_map(|(i, p)| (p == b"aa.txt").then_some(i))
+            .collect();
+        assert_eq!(positions.len(), 2);
+        for i in positions {
+            bytes[i..i + 2].copy_from_slice(&[0x82, 0xa0]);
+        }
+        std::fs::write(&archive, bytes).unwrap();
+        extract_zip(&archive, &dir.join("out")).unwrap();
+        assert_eq!(std::fs::read(dir.join("out/あ.txt")).unwrap(), b"original");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn 複数pmxは自動で選ばず直接指定なら原本を保持する() {
+        let dir = temp_dir("mmd-select");
+        let source = dir.join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        let mut pmx = b"PMX ".to_vec();
+        pmx.extend(2.0f32.to_le_bytes());
+        pmx.extend([8, 1, 0, 1, 1, 1, 1, 1, 1]);
+        pmx.extend([0u8; 52]);
+        for name in ["a.pmx", "b.pmx"] {
+            std::fs::write(source.join(name), &pmx).unwrap();
+        }
+        assert!(
+            super::build_mmd_pack(&source, None, &dir.join("ambiguous"), "test", "テスト")
+                .unwrap_err()
+                .to_string()
+                .contains("2個")
+        );
+        let pack = dir.join("pack");
+        super::build_mmd_pack(
+            &source,
+            Some(&source.join("b.pmx")),
+            &pack,
+            "test",
+            "テスト",
+        )
+        .unwrap();
+        let manifest = crate::character_pack::validate(&pack).unwrap();
+        assert_eq!(manifest["mmd"]["model"], "mmd/b.pmx");
+        assert_eq!(std::fs::read(pack.join("mmd/b.pmx")).unwrap(), pmx);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

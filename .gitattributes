@@ -1,6 +1,10 @@
 # 既定: テキストは自動判定し、リポジトリ内では LF に正規化する。
 * text=auto eol=lf
 
+# 固定第三者バンドル内のシェーダー文字列とライセンス原文の空白を保持する。
+ui/vendor/mmd/mmd-runtime.js -whitespace
+ui/vendor/mmd/LICENSES.txt -whitespace
+
 # バイナリ（差分・改行変換しない）
 *.png  binary
 *.jpg  binary
