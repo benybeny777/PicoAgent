@@ -19,7 +19,6 @@
 
 | 内容 | 着手条件・完了条件 |
 |---|---|
-| Claude Code on the webのセッション開始フックが止まる | `.claude/hooks/session-start.sh` は `cargo xtask build-ui` を `set -e` 下で無条件に実行するが、`build-ui` はGit管理外の `ui/vendor/pixi/pixi.min.js`（`cargo xtask setup pixi` で取得）が無いと失敗する。フックは `sync-characters` の失敗だけを許容しており、PIXI未取得では `ui-dist/` が作られずフックごと中断し、`cargo check` も事前ビルドも通らない（2026-09-12のセッションで再現。手元では検証用のダミーPIXIで `ui-dist/` を作って回避した）。さらにこのコンテナからは `cdn.jsdelivr.net` へ到達できないため、フックへ `setup pixi` を足すだけでは解決しない。着手条件は方針決定——(a) PIXIを取得できない環境では `build-ui` をLive2D無効の配信ビルドとして成立させる、(b) PIXIを版固定でGit管理へ入れる、(c) フックがPIXIの取得失敗時だけ最小の `ui-dist/` を作る、のどれを採るか。Live2Dの配布条件と `bundle_scope` のCSP例外（`unsafe-eval` はPIXIだけ）に触れるため、実装前に採否を決める |
 | CLI・初回案内のWindows実機確認 | Claude Code／Codex CLIのセッション再開と更新された前提の反映、停止、初回案内から戻った後の再操作、Aivis導入直後の読み上げを確認する |
 | 完全な新規Windows利用者での初回起動 | Windows Sandboxまたは専用利用者を用意し、既存データを動かさず確認する |
 | 保存状態を伴うWindows操作 | 8方向リサイズ、端寄せ復元、旧版Aivis更新表示、稼働中ローカルAIでのキャラ別挨拶を安全な隔離状態でまとめて確認する |
