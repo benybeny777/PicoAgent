@@ -3699,6 +3699,10 @@ character.addEventListener("click", event => {
 });
 character.addEventListener("keydown", event => {
   if (event.key !== "Enter" && event.key !== " ") return;
+  // 立ち絵の枠の中には ♡（いっしょの記録）ボタンも入っている。枠で受けたキーをそのまま
+  // 奪うと、中のボタンを選んで押したEnter・Spaceまで「キャラに触れる」になり、
+  // キーボードだけではそのボタンを押せなくなる。枠自体に当たったときだけ扱う。
+  if (event.target !== character) return;
   event.preventDefault();
   character.click();
 });

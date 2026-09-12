@@ -43,3 +43,15 @@ test("生成中は回答欄の読み上げを保留する", () => {
   const clearThinkingReply = renderer.slice(renderer.indexOf("function clearThinkingReply()"));
   assert.match(clearThinkingReply.slice(0, 400), /reply\.removeAttribute\("aria-busy"\)/);
 });
+
+test("立ち絵枠のキー操作は中のボタンを奪わない", () => {
+  // `#character` は role="button" の枠で、中に ♡（いっしょの記録）ボタンを重ねている。
+  // 枠のkeydownでEnter・Spaceを無条件に preventDefault すると、中のボタンを選んで
+  // 押したキーまで「キャラに触れる」になり、キーボードだけではそのボタンを押せない。
+  const handler = renderer.match(/character\.addEventListener\("keydown", event => \{[\s\S]*?\n\}\);/)?.[0];
+  assert.ok(handler, "立ち絵枠のkeydown処理が見つかりません");
+  const guard = handler.indexOf("event.target !== character");
+  const prevent = handler.indexOf("event.preventDefault()");
+  assert.ok(guard >= 0 && guard < prevent, "枠自体に当たったときだけ扱う判定が preventDefault より前にない");
+  assert.match(html, /<button id="relationshipButton"[^>]*type="button"/);
+});
