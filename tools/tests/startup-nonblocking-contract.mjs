@@ -23,7 +23,7 @@ test("初回セットアップはローカルAIの取得完了を待たない", 
   // 初回案内（追加機能の選択・Live2D追加）はローカルAIを使わない。数GBの取得を
   // 待たせると、初回だけ何分も案内へ入れないため、監視だけ始めて画面を返す。
   assert.match(startup, /\} else if \(localEngineRequired\) \{[\s\S]*?waitForEngineReady\(\)\.catch/);
-  assert.match(startup, /if \(!startupEngineError && info\.onboardingDone && startupGreeting\)/);
+  assert.match(startup, /if \(!startupCharacterError && !startupEngineError && info\.onboardingDone && startupGreeting\)/);
   assert.match(renderer, /!frontendInitialized \|\| \(localEngineRequired && !localEngineReady\)/);
 });
 
@@ -52,7 +52,7 @@ test("準備完了後に保存形式へ戻し起動音声を再生する", () =>
 
 test("ローカルAIがエラーなら音声準備へ進まず元のエラーを保つ", () => {
   assert.match(startup, /const engineState = await waitForEngineReady\(\);[\s\S]*?if \(engineState\?\.phase === "error"\) \{[\s\S]*?startupEngineError = engineState\.message/);
-  assert.match(startup, /if \(!startupEngineError && info\.onboardingDone && startupGreeting\) \{[\s\S]*?prepareSelectedVoiceModel/);
+  assert.match(startup, /if \(!startupCharacterError && !startupEngineError && info\.onboardingDone && startupGreeting\) \{[\s\S]*?prepareSelectedVoiceModel/);
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
@@ -110,6 +110,10 @@ test("任意キャラクターのI/O待ちはすべて有界化する", () => {
 });
 
 test("選択キャラ失敗時は既定PNGへ一度だけ切り替えて起動完了する", () => {
+  assert.match(startup, /await loadCharacter\("mugi"[^;]+;\s*startupCharacterError =/);
+  assert.match(startup, /if \(!startupCharacterError && !startupEngineError/);
+  assert.match(startup, /if \(startupCharacterError\) \{\s*setStatus\(startupCharacterError\)/);
+  assert.match(renderer, /const appearance = await window\.picoagent\.setCharacterProfile[\s\S]*?loadGeneration !== characterLoadGeneration[\s\S]*?applyStreamAppearance\(appearance\.streamBackground/);
   assert.match(startup, /await loadCharacter\("mugi"/);
   assert.match(startup, /const characterLoadPromise = loadStartupCharacter\(\)/);
   assert.match(startup, /finally \{[\s\S]*await releaseBootUi\(\)/);

@@ -1244,7 +1244,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
   // 挨拶も渡す。短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため。
-  await window.picoagent.setCharacterProfile(manifest.id, profile, manifest.greeting || "");
+  const appearance = await window.picoagent.setCharacterProfile(manifest.id, profile, manifest.greeting || "");
+  if (loadGeneration !== characterLoadGeneration) return;
+  // 読込失敗で代替キャラを表示した場合も、直前のキャラ用背景を残さない。
+  if (appearance?.streamBackground != null) applyStreamAppearance(appearance.streamBackground, appearance.streamBackgroundImage, appearance.streamDisplay, appearance.streamDisplayImage, appearance.streamCaptionColor);
   loadedCharacterSignature = signature;
   if (manifest.greeting) {
     renderReply(manifest.greeting);
@@ -5918,6 +5921,7 @@ async function releaseBootUi() {
   // Live2D も基準寸法で初期化済みなので、現在の表示形式が小さくても崩れない。
   setStatus("選択中のキャラクターを読み込み中…");
   const requestedCharacterId = info.characterId || "mugi";
+  let startupCharacterError = "";
   const loadOptions = { speakGreeting: false, live2dSdkOverrides: info.live2dSdkOverrides || {} };
   const loadStartupCharacter = async () => {
     try {
@@ -5929,6 +5933,7 @@ async function releaseBootUi() {
       logApp("error", `${requestedCharacterId}を起動できないため既定キャラへ切り替えます`, errorDetail(error));
       setStatus("選択中のキャラクターを読み込めないので、むぎで起動するね");
       await loadCharacter("mugi", info.characterOverrides || {}, loadOptions);
+      startupCharacterError = `選択したキャラを読み込めません: ${error.message}。設定からキャラを確認してください`;
     }
   };
   const characterLoadPromise = loadStartupCharacter().then(
@@ -5975,7 +5980,7 @@ async function releaseBootUi() {
         logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error));
       });
     }
-    if (!startupEngineError && info.onboardingDone && startupGreeting) {
+    if (!startupCharacterError && !startupEngineError && info.onboardingDone && startupGreeting) {
       const voiceReady = await prepareSelectedVoiceModel();
       if (voiceReady) startupPreparedSpeech = await prepareSpeech(startupGreeting);
       else if (voiceReady === false) {
@@ -6002,6 +6007,10 @@ async function releaseBootUi() {
   // ただし送信そのものを塞ぐローカルAIの失敗表示は上書きしない（そちらが先に要る）。
   if (startupVoiceError && localEnginePhase !== "error") {
     setStatus(startupVoiceError);
+    status.classList.add("engine-error");
+  }
+  if (startupCharacterError) {
+    setStatus(startupCharacterError);
     status.classList.add("engine-error");
   }
   quickActionItems = parseQuickActions(info.quickActions);

@@ -56,6 +56,11 @@
       const sameOrigin = url.origin !== 'null' && url.origin === new URL(document.baseURI).origin;
       if (!/\.pmx$/iu.test(url.pathname) || url.search || url.hash || url.username || url.password || !(sameOrigin || localAsset)) throw new Error('同じアプリ内のPMXモデルを指定してください');
       engine = new B.Engine(canvas, true, { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true, stencil: true });
+      // CSS寸法の引き伸ばしではなく、実画面の画素密度でモデルを描き直す。
+      const resize = () => {
+        engine.setHardwareScalingLevel(1 / Math.max(1, window.devicePixelRatio || 1));
+        engine.resize();
+      };
       B.SdefInjector.OverrideEngineCreateEffect(engine);
       scene = new B.Scene(engine);
       scene.clearColor = new B.Color4(0, 0, 0, 0);
@@ -150,6 +155,7 @@
         for (const name of affectedMorphs) setMorph(name, 0);
         const time = (performance.now() - start) / 1000;
         if (motion) {
+          rotate('上半身', [Math.sin(time * 1.5) * 0.7, 0, Math.sin(time * 0.7) * 0.6]);
           rotate('首', [Math.sin(time * 0.65) * 1, Math.sin(time * 0.42) * 2, 0]);
           const cycle = time % 4.7;
           setMorph(blink, cycle < 0.16 ? Math.sin(cycle / 0.16 * Math.PI) : 0);
@@ -165,9 +171,9 @@
         model.afterPhysics();
       }
       setFraming(config.framing || 'bust');
-      observer = new ResizeObserver(() => { if (!disposed) { engine.resize(); setFraming(framing); } });
+      observer = new ResizeObserver(() => { if (!disposed) { resize(); setFraming(framing); } });
       observer.observe(canvas);
-      engine.resize();
+      resize();
       let lastFrame = -Infinity;
       engine.runRenderLoop(() => {
         const now = performance.now();
