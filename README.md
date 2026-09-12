@@ -585,6 +585,43 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 
 右クリック →「**設定を開く…**」ですべて GUI から編集できます。基本設定の「まずはここから」または左のカテゴリから目的を選び、普段変更しない項目は各ページの「詳細設定」を開きます。上部には検索候補と解除ボタン、下部には未保存件数が表示され、`Ctrl` / `Cmd` + `S` でも保存できます。保存先は `app_config_dir/config.json`（個人 PC ローカル）です。
 
+### Windowsインストーラー導入後のフォルダー構成
+
+既定の保存先は次のとおりです。`%LOCALAPPDATA%` と `%APPDATA%` はエクスプローラーのアドレス欄へそのまま入力できます。インストール先を変更した場合は、アプリ本体の場所だけ読み替えてください。
+
+```text
+%LOCALAPPDATA%\PicoAgent\               アプリ本体（既定の導入先）
+├── picoagent.exe                     実行ファイル（付属UI・基本キャラを内蔵）
+├── uninstall.exe                     アンインストーラー
+└── resources\
+    ├── component-manifest.json       追加機能の管理情報
+    └── bundled\                     同梱ランタイム（版により内容が異なる）
+        ├── engine\                  ローカルAI推論エンジン
+        └── aivis\                   音声エンジン（関係者同梱版）
+
+%APPDATA%\com.picoagent.desktop\       設定と利用者データ
+├── config.json                      設定・キャラ別の声/背景/配置
+├── history-<キャラID>.json           キャラ別の会話履歴
+├── memory.json                      記憶データ
+├── relationship-<キャラID>.json      キャラ別の関係性データ
+└── characters\<キャラID>\            登録した追加キャラ
+    ├── character.json               キャラ設定
+    └── mmd\                         PMXとテクスチャ（MMDの場合）
+
+%APPDATA%\PicoAgent\                   実行時に追加・更新されるデータ
+├── bundled\                         管理導入したエンジン・追加機能
+│   └── models\                      ダウンロードしたローカルAIモデル
+├── log\                             実行ログ
+├── browser-profile\                 アプリ専用ブラウザープロファイル
+└── aivis-userdata\                   音声エンジン用の実行時領域
+
+%APPDATA%\AivisSpeech-Engine\Models\   Aivisの音声モデル（*.aivmx）
+```
+
+通常公開版は基本キャラと推論エンジンを含み、追加機能は利用時に取得します。関係者用MMD・音声同梱版では `characters\miko-mmd` と `characters\korone-mmd`、2人分のAIVMXも導入します。音声モデルはキャラフォルダー内ではなく、上記Aivisのモデルフォルダーに置かれます。旧版からの更新では、従来の `bundled\` などの配置が残る場合があります。
+
+アプリの更新・再インストールでは既存の設定や登録キャラを保持します。アンインストール時は、ユーザーデータ削除の確認で「いいえ」を選ぶと設定・履歴・キャラを残します。Aivisのモデルフォルダーは別のAivisアプリと共有される場合があるため、PicoAgentのアンインストールでは削除しません。バックアップする際は、アプリを終了してから設定・キャラのフォルダーと必要な音声モデルを保存してください。
+
 ### 反映のタイミング
 
 | 種類 | 例 | 反映 |
