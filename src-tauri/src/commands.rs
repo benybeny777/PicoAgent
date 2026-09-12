@@ -3411,9 +3411,12 @@ pub fn pet_durable_job_cancel(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
-    open_settings_tab(&app, tab.as_deref());
-    Ok(())
+pub async fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
+    // WindowsのWebView2生成は同期コマンド・GUIイベント内で待つと停止する。
+    // ワーカースレッドへ渡し、表示結果を呼び出し元へ返す。
+    tauri::async_runtime::spawn_blocking(move || open_settings_tab(&app, tab.as_deref()))
+        .await
+        .map_err(|error| format!("設定画面の表示処理に失敗しました: {error}"))?
 }
 
 /// 設定反映のための再起動相当処理。重い反映（モデル DL・エンジン/Aivis 起動・
@@ -4762,21 +4765,35 @@ fn extract_xlsx_content(data: &[u8]) -> Result<String, String> {
 
 /// 設定ウィンドウを開く（既にあれば前面化）。
 pub fn open_settings(app: &tauri::AppHandle) {
-    open_settings_tab(app, None);
+    request_settings_from_menu(app, None);
 }
 
 /// プレビュー付きの画面タブを直接開く。
 pub fn open_display_settings(app: &tauri::AppHandle) {
-    open_settings_tab(app, Some("display"));
+    request_settings_from_menu(app, Some("display"));
 }
 
 /// キャラクターの選択・人格・構図タブを直接開く（音声は「キャラの音声」タブ）。
 pub fn open_character_settings(app: &tauri::AppHandle) {
-    open_settings_tab(app, Some("character"));
+    request_settings_from_menu(app, Some("character"));
+}
+
+fn request_settings_from_menu(app: &tauri::AppHandle, tab: Option<&'static str>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = pet_open_settings(app.clone(), tab.map(str::to_string)).await {
+            crate::log_paths::append_app_log(&app, &error);
+        }
+    });
 }
 
 /// 設定ウィンドウを指定タブで開く。既存ウィンドウには遷移イベントを送る。
-fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
+fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) -> Result<(), String> {
+    // タイトルバーとメニューの同時操作で同じラベルを二重生成しない。
+    static OPEN_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = OPEN_LOCK
+        .lock()
+        .map_err(|_| "設定画面の表示状態を取得できません。".to_string())?;
     let tab = settings_tab(tab);
     // メインのペットウィンドウはmacOSで常に最前面のウィンドウレベルを持つため、
     // 設定ウィンドウを通常レベルのまま出すと背後に回り込み、選択も保存ボタンの
@@ -4786,72 +4803,50 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
         .and_then(|main| main.is_always_on_top().ok())
         .unwrap_or(false);
     if let Some(win) = app.get_webview_window("settings") {
-        if let Err(error) = win.set_always_on_top(main_always_on_top) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("設定画面の最前面表示を揃えられません: {error}"),
-            );
-        }
-        if let Err(error) = win.show() {
-            crate::log_paths::append_app_log(app, &format!("設定画面を表示できません: {error}"));
-        }
-        // 表示を先に成立させる。非表示WebViewへの寸法問い合わせを挟むと、Windowsで
-        // 初期化応答を待てず不可視のまま残ることがある。
-        if let Err(error) = center_settings_on_main_monitor(app, &win) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
-            );
-        }
-        if let Err(error) = win.set_focus() {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("設定画面へフォーカスできません: {error}"),
-            );
-        }
+        win.set_always_on_top(main_always_on_top)
+            .map_err(|error| format!("設定画面の最前面表示を揃えられません: {error}"))?;
+        win.show()
+            .map_err(|error| format!("設定画面を表示できません: {error}"))?;
+        // 既存ウィンドウも現在のメイン画面と同じモニターへ揃える。
+        center_settings_on_main_monitor(app, &win)?;
+        win.set_focus()
+            .map_err(|error| format!("設定画面へフォーカスできません: {error}"))?;
         if let Some(tab) = tab {
-            if let Err(error) = win.emit("settings:navigate", tab) {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!("設定画面のタブを切り替えられません: {error}"),
-                );
-            }
+            win.emit("settings:navigate", tab)
+                .map_err(|error| format!("設定画面のタブを切り替えられません: {error}"))?;
         }
-        return;
+        return Ok(());
     }
     let path = tab
         .map(|tab| format!("settings.html?tab={tab}"))
         .unwrap_or_else(|| "settings.html".to_string());
-    match WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()))
+    let browser_args = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .and_then(|window| window.additional_browser_args.as_deref());
+    let mut builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()));
+    // 同じ保存領域を共有するWebView2は起動オプションも一致させる必要がある。
+    if let Some(args) = browser_args {
+        builder = builder.additional_browser_args(args);
+    }
+    let win = builder
         .title("PicoAgent の設定")
         .inner_size(960.0, 760.0)
         .min_inner_size(720.0, 560.0)
-        // 非表示で生成した直後に位置・寸法を問い合わせると、Windows WebView2 の
-        // 初期化前には応答待ちが失敗し、設定画面が見えないまま残ることがある。
-        // Builder側で中央配置し、最初から表示して初期化競合を作らない。
-        .center()
-        .visible(true)
+        // 生成完了後にメイン画面のモニターへ配置する。
+        .visible(false)
         .always_on_top(main_always_on_top)
         .build()
-    {
-        Ok(win) => {
-            if let Err(error) = center_settings_on_main_monitor(app, &win) {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
-                );
-            }
-            if let Err(error) = win.set_focus() {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!("設定画面へフォーカスできません: {error}"),
-                );
-            }
-        }
-        Err(error) => {
-            crate::log_paths::append_app_log(app, &format!("設定画面を開けません: {error}"));
-        }
-    }
+        .map_err(|error| format!("設定画面を開けません: {error}"))?;
+    center_settings_on_main_monitor(app, &win)?;
+    win.show()
+        .map_err(|error| format!("設定画面を表示できません: {error}"))?;
+    win.set_focus()
+        .map_err(|error| format!("設定画面へフォーカスできません: {error}"))?;
+    Ok(())
 }
 
 const SETTINGS_WINDOW_WIDTH: f64 = 960.0;

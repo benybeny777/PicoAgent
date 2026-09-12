@@ -47,7 +47,7 @@ impl CharacterMakerState {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn settings_character_maker_preview(
     app: AppHandle,
     character_id: String,
@@ -99,7 +99,19 @@ pub fn settings_character_maker_preview(
 
     let title = format!("{} - PicoAgent キャラ確認", manifest.display_name);
     let url = format!("character-preview.html?characterId={character_id}");
-    let window = match WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()));
+    // メインと同じWebView2保存領域を使うため、起動オプションも揃える。
+    if let Some(args) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .and_then(|window| window.additional_browser_args.as_deref())
+    {
+        builder = builder.additional_browser_args(args);
+    }
+    let window = match builder
         .title(title)
         .inner_size(1180.0, 820.0)
         .min_inner_size(720.0, 560.0)
