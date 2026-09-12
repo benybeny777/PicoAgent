@@ -5148,7 +5148,7 @@ function wakeUp() {
   if (!napping) return;
   napping = false;
   character.classList.remove("napping");
-  if (status.textContent === "すやすや……") status.textContent = "";
+  if (status.textContent === "すやすや……") clearTransientStatus();
   setAnimation("idle", true);
 }
 
