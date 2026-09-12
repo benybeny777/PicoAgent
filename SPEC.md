@@ -487,6 +487,8 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 
 ### 設定画面（右クリック →「設定を開く…」）
 
+AIサービスを切り替えて非表示にした設定の未保存入力は、DOMとは別の草稿に保持して再表示・保存へ引き継ぐ。「未保存の変更を戻す」では草稿も破棄して保存済み値へ戻す。復号不能秘密の未入力は非表示でも保持指定として扱う。モデル一覧は要求世代と入力要素の一致を確認してから成功・失敗を反映し、古い応答や一覧待機中の手入力を上書きしない。
+
 - `ui/settings.{html,css,js}` の独立 Tauri ウィンドウ。`ui/picoagent.js` の `window.picoagent.settings.*` →
   `commands.rs` の `settings_load` / `settings_list_models` / `settings_save` command で構成。
 - 画面は **基本設定**（`basic`） / **画面・操作**（`display`） / **キャラ登録**（`character-register`） / **キャラ選択**（`character`） / **キャラの音声**（`voice`） / **追加機能・更新**（`components`） / **AIモデル・連携**（`providers`） / **スキル**（`tools`） / **安全・許可**（`permissions`） / **使い方**（`skillguide`） / **診断・修復**（`diagnostics`） の11タブで構成し、導入済みスキル一覧・導入済みキャラクター一覧・各コネクタの `config_schema()` を動的に描画する。旧 `character-add` 入口は `settings_tab()` と `activateSettingsTab()` の両方が `character-register` へ読み替える。キャラ別のAivis Style IDは `PICOAGENT_TTS_CHARACTER_OVERRIDES` へ保存し、空欄はパック既定音声へ戻す。変更頻度の低い項目は `<details class="advanced-group">` へ畳み、検索中は一致した中身だけを開いて見せる（畳んだまま一致させると見つからないのと同じになるため）。「画面・操作」タブはREADME撮影で検証した7形式のWebPを `build-ui` が配信用アセットへコピーし、用途・既定寸法・選択中状態と一緒にカード表示する。カードのIDと既定寸法は `layout::tests` のガードが `LAYOUTS` と突き合わせる。コネクタを足すと一覧も設定項目も自動で増える。

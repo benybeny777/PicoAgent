@@ -16,6 +16,8 @@ let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
 const inputWrappers = new Map(); // key -> field/card 要素
 let savedSnapshot = null; // 最後に読み込んだ、または保存できた設定値
+let providerDraftValues = {}; // 非表示へ切り替えたAI設定の未保存入力。
+let modelLoadRevision = 0; // 古いモデル一覧の応答が現在の選択を上書きしないための世代。
 let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
@@ -145,6 +147,14 @@ function unregisterInputsIn(node) {
     if (!key) continue;
     inputs.delete(key);
     inputWrappers.delete(key);
+  }
+}
+
+function rememberProviderDraft(node) {
+  for (const wrapper of node.querySelectorAll("[data-setting-key]")) {
+    const key = wrapper.dataset.settingKey;
+    const input = inputs.get(key);
+    if (input) providerDraftValues[key] = input.type === "checkbox" ? input.checked : input.value;
   }
 }
 
@@ -2864,6 +2874,8 @@ function buildCharacterMaker(registerInstalledCharacter) {
 }
 
 async function render() {
+  ++modelLoadRevision;
+  providerDraftValues = {};
   renderingSettings = true;
   form.innerHTML = "";
   inputs.clear();
@@ -3595,6 +3607,7 @@ async function render() {
   let activeProviderBlock = null;
   function renderProviderConfig(id) {
     if (activeProviderBlock) {
+      rememberProviderDraft(activeProviderBlock);
       unregisterInputsIn(activeProviderBlock);
       activeProviderBlock.remove();
       activeProviderBlock = null;
@@ -3614,7 +3627,7 @@ async function render() {
     block.append(el("div", { className: "subhead", textContent: provider.label }));
     const guide = setupGuideNode(provider.id, provider.configSchema);
     if (guide) block.append(guide);
-    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, providerDraftValues[f.key] ?? v[f.key], f.placeholder));
     activeProviderBlock = block;
     provSec.append(block);
   }
@@ -3685,20 +3698,28 @@ function providerDefaultModel(providerId) {
 }
 
 async function loadModels(providerId, applyProviderDefault = false) {
+  const revision = ++modelLoadRevision;
+  const targetInput = modelInput;
+  const initialModel = targetInput?.value;
+  const isCurrent = () => revision === modelLoadRevision && targetInput === modelInput;
   modelOptions.innerHTML = "";
   statusEl.textContent = providerId === "ollama" ? "Ollama のモデル一覧を取得中…" : "";
   let models = [];
   try {
     models = await window.picoagent.settings.listModels(providerId);
   } catch (error) {
+    if (!isCurrent()) return;
     logApp("warn", "モデル一覧を取得できませんでした", errorDetail(error));
     statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
     return;
   }
+  if (!isCurrent()) return;
   for (const m of models) modelOptions.append(el("option", { value: m }));
   if (!modelInput) return;
   const preferred = providerDefaultModel(providerId);
-  if (applyProviderDefault) {
+  if (modelInput.value !== initialModel) {
+    // 一覧の取得中に手入力したモデル名は利用者の編集を優先する。
+  } else if (applyProviderDefault) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
   } else if (providerId === data.active.providerId && !models.includes(modelInput.value)) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || modelInput.value);
@@ -3711,12 +3732,13 @@ async function loadModels(providerId, applyProviderDefault = false) {
 
 function collect() {
   const patch = cloneSettings(savedSnapshot || data.values || {});
+  Object.assign(patch, providerDraftValues);
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }
   for (const warning of data.unavailableSecrets || []) {
     const input = inputs.get(warning.key);
-    if (input && input.value === "") patch[warning.key] = PRESERVE_UNREADABLE_SECRET;
+    if ((input || Object.hasOwn(providerDraftValues, warning.key)) && patch[warning.key] === "") patch[warning.key] = PRESERVE_UNREADABLE_SECRET;
   }
   if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
   if (patch.PICOAGENT_PROVIDER === "openai") patch.PICOAGENT_MODEL = patch.OPENAI_MODEL || "";

@@ -105,3 +105,59 @@ test("設定のJSONが不正でも保存失敗後に入力と復元を操作で�
   await saveBtn.click();
   assert.equal(form.inert, false);
 });
+
+test("モデル一覧の逆順応答と古い失敗は現在の選択を上書きしない", async () => {
+  for (const oldFails of [false, true]) {
+    const pending = [];
+    const options = [];
+    const context = vm.createContext({
+      modelInput: { value: "初期値" }, modelOptions: { set innerHTML(_) { options.length = 0; }, append(node) { options.push(node.value); } },
+      statusEl: {}, data: { active: { providerId: "b" } },
+      providerDefaultModel: id => id, el: (_, value) => value,
+      updateDirtyState() {}, logApp() {}, errorDetail: String,
+      window: { picoagent: { settings: { listModels() { return new Promise((resolve, reject) => pending.push({ resolve, reject })); } } } },
+    });
+    vm.runInContext("let modelLoadRevision = 0;", context);
+    vm.runInContext(settings.slice(settings.indexOf("async function loadModels("), settings.indexOf("function collect()")), context);
+    const old = context.loadModels("a", true);
+    const current = context.loadModels("b", true);
+    pending[1].resolve(["b"]);
+    await current;
+    if (oldFails) pending[0].reject(new Error("古い接続失敗"));
+    else pending[0].resolve(["a"]);
+    await old;
+    assert.equal(context.modelInput.value, "b");
+    assert.deepEqual(options, ["b"]);
+    assert.equal(context.statusEl.textContent, "");
+    const manual = context.loadModels("b", true);
+    context.modelInput.value = "手入力モデル";
+    pending[2].resolve(["b"]);
+    await manual;
+    assert.equal(context.modelInput.value, "手入力モデル");
+  }
+});
+
+test("非表示へ切り替えたAIの入力は保存収集でも保持し復号不能秘密を消さない", () => {
+  const inputs = new Map([
+    ["API_KEY", { type: "password", value: "編集中のキー" }],
+    ["BROKEN_KEY", { type: "password", value: "" }],
+  ]);
+  const context = vm.createContext({
+    inputs, cloneSettings: value => JSON.parse(JSON.stringify(value)),
+    data: { values: {}, unavailableSecrets: [{ key: "BROKEN_KEY" }] },
+  });
+  vm.runInContext(`let providerDraftValues = {}; const savedSnapshot = {};
+    const PRESERVE_UNREADABLE_SECRET = "keep";
+    const characterSelect = null, characterPersona = null, characterSpeaker = null, characterLive2dSdkSelect = null;
+    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterFraming = {}, characterStreamProfiles = {};
+    const alarmEditorState = null, scheduleEditorState = null;`, context);
+  vm.runInContext(settings.slice(settings.indexOf("function rememberProviderDraft("), settings.indexOf("function cloneSettings(")), context);
+  vm.runInContext(settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面")), context);
+  context.rememberProviderDraft({ querySelectorAll: () => [...inputs.keys()].map(settingKey => ({ dataset: { settingKey } })) });
+  inputs.clear();
+  const patch = context.collect();
+  assert.equal(patch.API_KEY, "編集中のキー");
+  assert.equal(patch.BROKEN_KEY, "keep");
+  assert.match(settings, /providerDraftValues\[f\.key\] \?\? v\[f\.key\]/);
+  assert.match(settings, /async function render\(\) \{\s*\+\+modelLoadRevision;\s*providerDraftValues = \{\};/);
+});
