@@ -4,7 +4,14 @@ use serde_json::{Map, Value};
 
 use crate::config::Config;
 
-const BACKGROUNDS: [&str; 4] = ["pastel", "gaming", "simple", "custom"];
+const BACKGROUNDS: [&str; 6] = [
+    "pastel",
+    "gaming",
+    "simple",
+    "sakura-room",
+    "dog-hobby-room",
+    "custom",
+];
 const DISPLAYS: [&str; 5] = ["dashboard", "game", "clock", "image", "none"];
 
 fn valid_character_id(value: &str) -> bool {
@@ -138,5 +145,16 @@ mod tests {
     #[test]
     fn 壊れた配信設定を空で上書きしない() {
         assert!(normalize_checked(&serde_json::json!("broken")).is_err());
+    }
+
+    #[test]
+    fn 同梱配信背景をキャラクター別に保持する() {
+        let value = serde_json::json!({
+            "mugi": { "background": "sakura-room" },
+            "rin": { "background": "dog-hobby-room" }
+        });
+        let normalized = normalize(&value);
+        assert_eq!(normalized["mugi"]["background"], "sakura-room");
+        assert_eq!(normalized["rin"]["background"], "dog-hobby-room");
     }
 }

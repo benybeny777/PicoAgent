@@ -2232,6 +2232,8 @@ function streamSettingsField(values) {
     { value: "pastel", label: "パステルスタジオ" },
     { value: "gaming", label: "落ち着いたゲーム部屋" },
     { value: "simple", label: "シンプルグラデーション" },
+    { value: "sakura-room", label: "桜色のくつろぎ部屋" },
+    { value: "dog-hobby-room", label: "犬の趣味部屋" },
     { value: "custom", label: "自分の画像" },
   ]));
   const backgroundPath = el("input", { type: "text", readOnly: true, value: values.PICOAGENT_STREAM_BACKGROUND_IMAGE || "", placeholder: "画像未選択" });
@@ -2265,7 +2267,8 @@ function buildCharacterStreamProfileEditor(values) {
   const enabled = el("input", { type: "checkbox" });
   const background = el("select", {}, [
     ["pastel", "パステルスタジオ"], ["gaming", "落ち着いたゲーム部屋"],
-    ["simple", "シンプルグラデーション"], ["custom", "自分の画像"],
+    ["simple", "シンプルグラデーション"], ["sakura-room", "桜色のくつろぎ部屋"],
+    ["dog-hobby-room", "犬の趣味部屋"], ["custom", "自分の画像"],
   ].map(([value, label]) => el("option", { value, textContent: label })));
   const display = el("select", {}, [
     ["dashboard", "配信ダッシュボード"], ["game", "ゲーム画面風"], ["clock", "時計・ON AIR"],
