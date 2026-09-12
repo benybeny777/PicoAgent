@@ -4792,14 +4792,16 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
                 &format!("設定画面の最前面表示を揃えられません: {error}"),
             );
         }
-        if let Err(error) = place_settings_with_main(app, &win) {
+        if let Err(error) = win.show() {
+            crate::log_paths::append_app_log(app, &format!("設定画面を表示できません: {error}"));
+        }
+        // 表示を先に成立させる。非表示WebViewへの寸法問い合わせを挟むと、Windowsで
+        // 初期化応答を待てず不可視のまま残ることがある。
+        if let Err(error) = center_settings_on_main_monitor(app, &win) {
             crate::log_paths::append_app_log(
                 app,
                 &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
             );
-        }
-        if let Err(error) = win.show() {
-            crate::log_paths::append_app_log(app, &format!("設定画面を表示できません: {error}"));
         }
         if let Err(error) = win.set_focus() {
             crate::log_paths::append_app_log(
@@ -4824,21 +4826,19 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
         .title("PicoAgent の設定")
         .inner_size(960.0, 760.0)
         .min_inner_size(720.0, 560.0)
-        .visible(false)
+        // 非表示で生成した直後に位置・寸法を問い合わせると、Windows WebView2 の
+        // 初期化前には応答待ちが失敗し、設定画面が見えないまま残ることがある。
+        // Builder側で中央配置し、最初から表示して初期化競合を作らない。
+        .center()
+        .visible(true)
         .always_on_top(main_always_on_top)
         .build()
     {
         Ok(win) => {
-            if let Err(error) = place_settings_with_main(app, &win) {
+            if let Err(error) = center_settings_on_main_monitor(app, &win) {
                 crate::log_paths::append_app_log(
                     app,
                     &format!("設定画面をメイン画面と同じディスプレイへ移動できません: {error}"),
-                );
-            }
-            if let Err(error) = win.show() {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!("設定画面を表示できません: {error}"),
                 );
             }
             if let Err(error) = win.set_focus() {
@@ -4854,6 +4854,9 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     }
 }
 
+const SETTINGS_WINDOW_WIDTH: f64 = 960.0;
+const SETTINGS_WINDOW_HEIGHT: f64 = 760.0;
+
 fn centered_window_position(
     monitor_position: tauri::PhysicalPosition<i32>,
     monitor_size: tauri::PhysicalSize<u32>,
@@ -4865,29 +4868,36 @@ fn centered_window_position(
     )
 }
 
-/// 設定画面はモニターを選ばせず、メイン画面が現在あるディスプレイの中央へ出す。
-fn place_settings_with_main(
+/// 設定画面を、メイン画面があるディスプレイの中央へ移す。
+///
+/// 生成直後の設定WebViewへ `outer_size` を問い合わせるとWindowsで初期化応答が返らない
+/// 場合があるため、宣言済みの論理寸法をモニターの倍率で物理寸法へ直して使う。
+fn center_settings_on_main_monitor(
     app: &tauri::AppHandle,
     settings: &tauri::WebviewWindow,
 ) -> Result<(), String> {
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| "メインウィンドウがありません。".to_string())?;
-    // フォールバック許可: 起動直後など current_monitor が未確定なら主画面へ出し、
-    // 設定画面自体が見えなくなることを防ぐ。
     let monitor = main
         .current_monitor()
-        .map_err(|error| error.to_string())?
-        .or(main.primary_monitor().map_err(|error| error.to_string())?)
+        .map_err(|error| format!("メイン画面のディスプレイ取得: {error}"))?
+        .or(main
+            .primary_monitor()
+            .map_err(|error| format!("主ディスプレイ取得: {error}"))?)
         .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
-    let window_size = settings.outer_size().map_err(|error| error.to_string())?;
+    let scale = monitor.scale_factor();
+    let expected_size = tauri::PhysicalSize::new(
+        (SETTINGS_WINDOW_WIDTH * scale).round() as u32,
+        (SETTINGS_WINDOW_HEIGHT * scale).round() as u32,
+    );
     settings
         .set_position(centered_window_position(
             *monitor.position(),
             *monitor.size(),
-            window_size,
+            expected_size,
         ))
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("設定画面の位置反映: {error}"))
 }
 
 fn settings_tab(tab: Option<&str>) -> Option<&str> {
@@ -4914,6 +4924,18 @@ mod tests {
         verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
         MAX_UPDATE_FEED_BYTES,
     };
+
+    #[test]
+    fn 設定画面を負座標モニターの中央へ配置する() {
+        assert_eq!(
+            centered_window_position(
+                tauri::PhysicalPosition::new(-1920, 0),
+                tauri::PhysicalSize::new(1920, 1080),
+                tauri::PhysicalSize::new(960, 760),
+            ),
+            tauri::PhysicalPosition::new(-1440, 160)
+        );
+    }
     use crate::config::Config;
     use crate::message::Message;
 
@@ -4987,17 +5009,6 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 
-    #[test]
-    fn 設定画面を負座標モニターの中央へ配置する() {
-        assert_eq!(
-            centered_window_position(
-                tauri::PhysicalPosition::new(-1920, 0),
-                tauri::PhysicalSize::new(1920, 1080),
-                tauri::PhysicalSize::new(960, 760),
-            ),
-            tauri::PhysicalPosition::new(-1440, 160)
-        );
-    }
     #[test]
     fn 自動要約は積み重ならず最新一件へ置き換わる() {
         let first = replace_auto_summary("人格設定", "最初の要約");

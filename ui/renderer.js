@@ -1783,9 +1783,13 @@ function destroyMeshRig() {
 
 function applyMeshRigFraming() {
   if (!meshRigController) return;
-  const scale = (currentLayout !== "stream" || character.dataset.sourceFraming === "native-full")
+  const scale = currentLayout !== "stream"
     ? 1
-    : character.dataset.sourceFraming === "native-bust"
+    : character.dataset.sourceFraming === "native-full"
+      // 全身原画も既定の上半身倍率を内部描画へ反映する。以前は常に1へ戻していたため、
+      // 配信形式のむぎだけ全身表示となり、保存構図も効かなかった。
+      ? characterZoom
+      : character.dataset.sourceFraming === "native-bust"
       ? 1.35
       : character.dataset.bodyProportion === "compact" ? 1.65 : 2.6;
   meshRigController.setFraming(scale);
