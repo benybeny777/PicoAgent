@@ -5163,6 +5163,7 @@ mod tests {
 
     #[test]
     fn 代替表示したキャラの声を保存中のキャラより優先する() {
+        use super::{effective_tts_voice, AppState};
         let state = AppState::new();
         state.config.set("PICOAGENT_CHARACTER", "hiyori");
         assert_eq!(

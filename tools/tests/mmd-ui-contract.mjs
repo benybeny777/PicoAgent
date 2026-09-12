@@ -4,6 +4,12 @@ import vm from "node:vm";
 import test from "node:test";
 
 const source = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+test("キャラ切替は旧音声の合成待ちと再生を止めてから表示を変える", () => {
+  const load = source.slice(source.indexOf('async function loadCharacter('), source.indexOf('function setAnimation('));
+  const stop = load.indexOf('stopVoice(false)');
+  assert.ok(stop > load.indexOf('signature === loadedCharacterSignature'));
+  assert.ok(stop < load.indexOf('characterManifest = manifest'));
+});
 test("フレーム画像がないMMDでも会話中と喜びの状態を保つ", () => {
   const animation = source.match(/function setAnimation\(name, force = false\) \{[\s\S]*?\n\}/)[0];
   const calls = [];

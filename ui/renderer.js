@@ -1171,6 +1171,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   const sdkPreference = String(live2dSdkOverridesCache[manifest.id] || "auto");
   const signature = `${manifest.id}\n${assetVersion}\n${savedVariant}\n${sdkPreference}\n${profile}`;
   if (signature === loadedCharacterSignature) return;
+  stopVoice(false); // 切替前のキャラの合成待ち・再生音声を新しい姿へ持ち越さない。
   clearAnimationPreloads();
   characterRoot = root;
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
