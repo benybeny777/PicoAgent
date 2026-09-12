@@ -9,7 +9,7 @@
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
 | `PICOAGENT_PROVIDER` | `local` | 基本 | 選択中の叩く AI の id |
-| `PICOAGENT_MODEL` | プロバイダ既定 | 基本 | 選択中モデル |
+| `PICOAGENT_MODEL` | プロバイダ既定 | 基本 | 選択中モデル。agent_cliは `claude` / `codex` で外部アプリ既定、`claude:<モデル>` / `codex:<モデル>` で明示選択。基本設定の選択欄から保存 |
 | `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | 基本 | system メッセージ |
 | `PICOAGENT_THEME` | `system` | 基本 | 表示テーマ。`system` はOS/システム設定に追従、`light` は通常、`dark` はダーク。`pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |

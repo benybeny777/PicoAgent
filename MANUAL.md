@@ -374,7 +374,7 @@ metadata:
 - **GPUに応じた推論経路**: Windowsは対応NVIDIAでCUDA、AMDでROCm、IntelでSYCLを優先し、Vulkan、CPUへ切り替えます。UbuntuはVulkan、Apple Silicon MacはMetalを利用できます。
 - **クラウド**: OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral など。右クリック →「すべての設定…」→「AIモデル・連携」で API キーとモデルを設定します（費用が発生します）。
 - **Ollama**: `ollama serve` 起動後にプロバイダを切り替えると、ローカルのモデル一覧から選べます。
-- **手元のCLIエージェント**: ログイン済みのCodex CLI／Claude Codeを叩くAIとして選べます。各サービスの契約プランと利用上限が適用され、契約枠内なら別途APIキーを設定せず利用できます。
+- **手元のCLIエージェント**: 基本設定の「AIモデル」からClaude／Codexとモデルを選択します。「アプリのデフォルト」は各CLIの設定ファイルを毎回参照します。Codexの新モデルはCLI側で候補が更新された後、「モデル一覧を更新」で取り込みます。Claudeはopus／sonnet／haikuと設定済みモデルを選べます。 ログイン済みのCodex CLI／Claude Codeを叩くAIとして選べます。各サービスの契約プランと利用上限が適用され、契約枠内なら別途APIキーを設定せず利用できます。
 - **マルチAI**: 2～8件のlocal／Ollama／各社API／Codex CLI／Claude Codeを組み合わせ、同じ質問への合議、仕事の分担と統合、分担結果の個別返却を選べます。
 - ダウンロード済み GGUF は「AIモデル・連携」タブの「ダウンロード済みモデル」で一覧・削除できます（使用中のモデルは削除不可）。
 - 会話は**キャラクターごと**に保存・復元されます。トークン使用量は「診断・修復」タブで確認できます。

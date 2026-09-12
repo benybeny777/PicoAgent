@@ -118,7 +118,7 @@ test("モデル一覧の逆順応答と古い失敗は現在の選択を上書�
       updateDirtyState() {}, logApp() {}, errorDetail: String,
       window: { picoagent: { settings: { listModels() { return new Promise((resolve, reject) => pending.push({ resolve, reject })); } } } },
     });
-    vm.runInContext("let modelLoadRevision = 0;", context);
+    vm.runInContext("let modelLoadGeneration = 0; const cliModelSelect = null;", context);
     vm.runInContext(settings.slice(settings.indexOf("async function loadModels("), settings.indexOf("function collect()")), context);
     const old = context.loadModels("a", true);
     const current = context.loadModels("b", true);
@@ -160,7 +160,7 @@ test("非表示へ切り替えたAIの入力は保存収集でも保持し復号
   assert.equal(patch.API_KEY, "編集中のキー");
   assert.equal(patch.BROKEN_KEY, "keep");
   assert.match(settings, /providerDraftValues\[f\.key\] \?\? v\[f\.key\]/);
-  assert.match(settings, /async function render\(\) \{\s*\+\+modelLoadRevision;\s*providerDraftValues = \{\};/);
+  assert.match(settings, /async function render\(\) \{\s*\+\+modelLoadGeneration;\s*providerDraftValues = \{\};/);
 });
 
 test("設定保存は変更差分だけを送り内部状態を競合対象にしない", () => {

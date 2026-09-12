@@ -20,7 +20,6 @@
 // Claude / Codex 自身のツールは既定で封じ、PicoAgent が提示したスキルだけを JSON 経由で
 // 呼ばせる。ここを開けると PicoAgent の権限境界・監査・物理削除拒否を迂回できてしまう。
 
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -28,6 +27,9 @@ use std::sync::{Arc, Mutex};
 use super::{Provider, ProviderReg};
 use crate::config::Config;
 use crate::message::{Field, Message, ToolCall};
+
+#[path = "agent_cli/models.rs"]
+mod models;
 
 pub struct AgentCli;
 
@@ -82,10 +84,12 @@ pub async fn with_session<F: std::future::Future>(session: Session, task: F) -> 
 pub fn session_identity(cfg: &Config, model: &str) -> String {
     let selected = kind_for_model(cfg, model);
     format!(
-        "{:?}|{}|{}",
+        "{:?}|{}|{}|{}|{:?}",
         selected,
         program_for_kind(cfg, selected),
-        cfg.get("PICOAGENT_AGENT_CLI_ARGS", "")
+        cfg.get("PICOAGENT_AGENT_CLI_ARGS", ""),
+        model,
+        models::default_model(selected).ok().flatten()
     )
 }
 
@@ -101,7 +105,9 @@ impl SessionUse {
     fn begin(session: Session, selected: Kind) -> anyhow::Result<Self> {
         let mut state = session.inner.lock().unwrap();
         if state.in_use {
-            anyhow::bail!("同じCLIセッションが並列に呼ばれました。処理を分けて再実行してください。");
+            anyhow::bail!(
+                "同じCLIセッションが並列に呼ばれました。処理を分けて再実行してください。"
+            );
         }
         if state.kind != Some(selected) {
             state.kind = Some(selected);
@@ -164,7 +170,14 @@ fn kind(cfg: &Config) -> Kind {
 /// マルチエージェントからモデル名として `claude` / `codex` を指定した場合は、
 /// グローバル設定を変えずにその実行だけCLIの種類を切り替える。
 fn kind_for_model(cfg: &Config, model: &str) -> Kind {
-    match model.trim().to_ascii_lowercase().as_str() {
+    match model
+        .trim()
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "claude" => Kind::Claude,
         "codex" => Kind::Codex,
         "custom" => Kind::Custom,
@@ -241,11 +254,7 @@ fn lead_args_for_kind(cfg: &Config, selected: Kind) -> Vec<String> {
     }
 }
 
-fn session_args_for_kind(
-    cfg: &Config,
-    selected: Kind,
-    resume_id: Option<&str>,
-) -> Vec<String> {
+fn session_args_for_kind(cfg: &Config, selected: Kind, resume_id: Option<&str>) -> Vec<String> {
     let mut args = lead_args_for_kind(cfg, selected);
     match selected {
         Kind::Claude => {
@@ -273,12 +282,87 @@ fn lead_args(cfg: &Config) -> Vec<String> {
     lead_args_for_kind(cfg, kind(cfg))
 }
 
+/// モデル指定は新規・再開の両方へ適用し、Codexではresumeより前へ置く。
+fn request_args(
+    cfg: &Config,
+    selected: Kind,
+    model: &str,
+    resume: Option<Option<&str>>,
+) -> anyhow::Result<Vec<String>> {
+    let mut args = match resume {
+        Some(id) => session_args_for_kind(cfg, selected, id),
+        None => lead_args_for_kind(cfg, selected),
+    };
+    if selected == Kind::Custom {
+        return Ok(args);
+    }
+    let explicit = model
+        .trim()
+        .split_once(':')
+        .filter(|(kind, _)| {
+            kind.eq_ignore_ascii_case("claude") || kind.eq_ignore_ascii_case("codex")
+        })
+        .map(|(_, model)| model.trim())
+        .filter(|model| !model.is_empty());
+    // 既存の追加引数によるモデル指定は、モデル選択が「既定」のときだけ維持する。
+    let has_argument = args
+        .iter()
+        .any(|arg| arg == "--model" || arg == "-m" || arg.starts_with("--model="));
+    let chosen = if let Some(model) = explicit {
+        let mut filtered = Vec::new();
+        let mut iter = args.into_iter();
+        while let Some(arg) = iter.next() {
+            if arg == "--model" || arg == "-m" {
+                iter.next();
+            } else if !arg.starts_with("--model=") {
+                filtered.push(arg);
+            }
+        }
+        args = filtered;
+        Some(model.to_owned())
+    } else if has_argument {
+        None
+    } else {
+        models::default_model(selected)?
+    };
+    if let Some(model) = chosen {
+        let index = if selected == Kind::Codex && resume.flatten().is_some() {
+            args.len() - 2
+        } else {
+            args.len()
+        };
+        args.splice(index..index, ["--model".to_owned(), model]);
+    }
+    Ok(args)
+}
+
 fn timeout_secs(cfg: &Config) -> u64 {
     cfg.get("PICOAGENT_AGENT_CLI_TIMEOUT_SECS", "180")
         .parse::<u64>()
         .ok()
         .filter(|value| (10..=600).contains(value))
         .unwrap_or(180)
+}
+
+fn model_choices(
+    default: String,
+    mut read: impl FnMut(Kind) -> anyhow::Result<Vec<String>>,
+) -> Vec<String> {
+    let mut choices = vec![default];
+    for (selected, prefix) in [(Kind::Claude, "claude"), (Kind::Codex, "codex")] {
+        if !choices.iter().any(|value| value == prefix) {
+            choices.push(prefix.into());
+        }
+        match read(selected) {
+            Ok(models) => {
+                choices.extend(models.into_iter().map(|model| format!("{prefix}:{model}")))
+            }
+            // フォールバック許可: 候補取得の失敗はCLIごとに隔離する。実行時の既定設定エラーは
+            // request_argsで伝播させ、誤ったモデルによる推論は開始しない。
+            Err(error) => eprintln!("{prefix}のモデル候補を取得できませんでした: {error}"),
+        }
+    }
+    choices
 }
 
 /// 正規形会話をCLIの1ターン用プロンプトへ畳む。初回またはセッション非対応CLIでは
@@ -297,10 +381,7 @@ fn truncate_keep_edges(text: &str, limit: usize) -> String {
     let head_len = content_limit * 2 / 3;
     let tail_len = content_limit - head_len;
     let head: String = text.chars().take(head_len).collect();
-    let tail: String = text
-        .chars()
-        .skip(count.saturating_sub(tail_len))
-        .collect();
+    let tail: String = text.chars().skip(count.saturating_sub(tail_len)).collect();
     format!("{head}{MARKER}{tail}")
 }
 
@@ -403,14 +484,15 @@ fn resumed_system_block(system: &str, limit: usize) -> String {
 /// CLIは更新案内やログイン案内を本文の前後へ混ぜることがある。1行ずつ試して
 /// **JSONとして読めた行だけ**を応答として扱い、案内文でターンごと失敗させない。
 fn first_json_value(text: &str) -> Option<Value> {
-    serde_json::from_str::<Value>(text.trim())
-        .ok()
-        .or_else(|| text.lines().find_map(|line| serde_json::from_str(line.trim()).ok()))
+    serde_json::from_str::<Value>(text.trim()).ok().or_else(|| {
+        text.lines()
+            .find_map(|line| serde_json::from_str(line.trim()).ok())
+    })
 }
 
 fn parse_claude_session_output(text: &str) -> Result<(String, String), String> {
-    let value = first_json_value(text)
-        .ok_or_else(|| "Claude CLIのJSON応答を読めません。".to_string())?;
+    let value =
+        first_json_value(text).ok_or_else(|| "Claude CLIのJSON応答を読めません。".to_string())?;
     if value.get("is_error").and_then(Value::as_bool) == Some(true) {
         return Err(value
             .get("result")
@@ -608,8 +690,7 @@ impl Provider for AgentCli {
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
-        // CLI 側が選ぶため、こちらからは列挙しない。
-        Ok(vec![self.default_model(cfg)])
+        Ok(model_choices(self.default_model(cfg), models::list))
     }
 
     async fn is_up(&self, cfg: &Config) -> bool {
@@ -634,7 +715,9 @@ impl Provider for AgentCli {
         let mut session_use = if selected == Kind::Custom {
             None
         } else {
-            session.map(|session| SessionUse::begin(session, selected)).transpose()?
+            session
+                .map(|session| SessionUse::begin(session, selected))
+                .transpose()?
         };
         let instructions = tool_instructions(tools);
         let instruction_chars = instructions.chars().count();
@@ -685,15 +768,14 @@ impl Provider for AgentCli {
         }
         let program = program_for_kind(cfg, selected);
         let mut command = crate::tools::process::command(&program);
-        if let Some(session) = &session_use {
-            command.args(session_args_for_kind(
-                cfg,
-                selected,
-                session.resume_id.as_deref(),
-            ));
-        } else {
-            command.args(lead_args_for_kind(cfg, selected));
-        }
+        command.args(request_args(
+            cfg,
+            selected,
+            model,
+            session_use
+                .as_ref()
+                .map(|session| session.resume_id.as_deref()),
+        )?);
         // プロンプトは引数として渡す。シェルを経由しないので解釈の事故が起きない。
         command.arg(&prompt);
 
@@ -769,12 +851,54 @@ inventory::submit! { ProviderReg { make: || Box::new(AgentCli) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 片方の候補取得に失敗しても正常側と既定選択を残す() {
+        let choices = super::model_choices("claude".into(), |selected| {
+            if selected == super::Kind::Codex {
+                anyhow::bail!("キャッシュ破損");
+            }
+            Ok(vec!["opus".into(), "future-claude".into()])
+        });
+        assert_eq!(
+            choices,
+            vec!["claude", "claude:opus", "claude:future-claude", "codex"]
+        );
+    }
+    #[test]
+    fn 選択モデルは新規と再開へ安全指定を保って渡す() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_AGENT_CLI_KIND", "codex");
+        cfg.set("PICOAGENT_AGENT_CLI_ARGS", "--model old-model");
+        for resume in [None, Some(None), Some(Some("thread-id"))] {
+            let args = super::request_args(&cfg, super::Kind::Codex, "codex:future-model", resume)
+                .unwrap();
+            assert!(args
+                .windows(2)
+                .any(|pair| pair == ["--model", "future-model"]));
+            assert!(!args.contains(&"old-model".into()));
+            assert!(args.contains(&"--ignore-user-config".into()));
+            if let Some(index) = args.iter().position(|arg| arg == "resume") {
+                assert!(args.iter().position(|arg| arg == "--model").unwrap() < index);
+            }
+        }
+        assert_eq!(
+            super::kind_for_model(&cfg, "claude:sonnet"),
+            super::Kind::Claude
+        );
+        let args =
+            super::request_args(&cfg, super::Kind::Claude, "claude:future-claude", None).unwrap();
+        assert!(args.contains(&"--safe-mode".into()));
+        assert!(args.contains(&"future-claude".into()));
+        assert_ne!(
+            super::session_identity(&cfg, "codex:a"),
+            super::session_identity(&cfg, "codex:b")
+        );
+    }
     use super::{
         flatten, flatten_for_resume, kind, kind_for_model, lead_args, lead_args_for_kind,
         parse_claude_session_output, parse_codex_session_output, parse_tool_call, program,
         program_for_kind, resumed_system_block, session_args_for_kind, system_text, timeout_secs,
-        tool_instructions, Kind,
-        Session, SessionUse, MAX_PROMPT_CHARS,
+        tool_instructions, Kind, Session, SessionUse, MAX_PROMPT_CHARS,
     };
     use crate::config::Config;
     use crate::message::Message;
@@ -807,7 +931,10 @@ mod tests {
         // 初回ターン：全文を送るので、そのときのsystemを覚える。
         SessionUse::begin(session.clone(), Kind::Claude)
             .unwrap()
-            .commit("session-1".to_string(), "人格\n\n[プロジェクト文脈]\nA\n[/プロジェクト文脈]".to_string());
+            .commit(
+                "session-1".to_string(),
+                "人格\n\n[プロジェクト文脈]\nA\n[/プロジェクト文脈]".to_string(),
+            );
 
         // 同じ前提の再開ターンでは更新分を足さない。
         let same = SessionUse::begin(session.clone(), Kind::Claude).unwrap();
@@ -815,13 +942,17 @@ mod tests {
         assert!(!same.system_changed("人格\n\n[プロジェクト文脈]\nA\n[/プロジェクト文脈]"));
         // プロジェクトを切り替えた（＝systemが書き換わった）ターンでは送り直す。
         assert!(same.system_changed("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]"));
-        same.commit("session-1".to_string(), "人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]".to_string());
+        same.commit(
+            "session-1".to_string(),
+            "人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]".to_string(),
+        );
 
         // 送り直した内容が次ターンの基準になる。
         let next = SessionUse::begin(session, Kind::Claude).unwrap();
         assert!(!next.system_changed("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]"));
 
-        let block = resumed_system_block("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]", 1_000);
+        let block =
+            resumed_system_block("人格\n\n[プロジェクト文脈]\nB\n[/プロジェクト文脈]", 1_000);
         assert!(block.starts_with("［前提の更新］"));
         assert!(block.contains("[プロジェクト文脈]\nB"));
     }
@@ -869,7 +1000,9 @@ mod tests {
         assert_eq!(program(&codex), "codex");
         let codex_args = lead_args(&codex);
         assert_eq!(codex_args.first().map(String::as_str), Some("exec"));
-        assert!(codex_args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(codex_args
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "read-only"]));
         assert!(codex_args.iter().any(|arg| arg == "--ignore-user-config"));
         assert!(matches!(kind_for_model(&cfg, "codex"), Kind::Codex));
         assert!(matches!(kind_for_model(&codex, "claude"), Kind::Claude));
@@ -880,7 +1013,9 @@ mod tests {
         let claude = Config::new();
         let first = session_args_for_kind(&claude, Kind::Claude, None);
         assert!(!first.iter().any(|arg| arg == "--no-session-persistence"));
-        assert!(first.windows(2).any(|pair| pair == ["--output-format", "json"]));
+        assert!(first
+            .windows(2)
+            .any(|pair| pair == ["--output-format", "json"]));
         let resumed = session_args_for_kind(&claude, Kind::Claude, Some("claude-session"));
         assert!(resumed
             .windows(2)
@@ -962,21 +1097,29 @@ mod tests {
         assert!(lead_args_for_kind(&cfg, Kind::Claude).contains(&"opus".to_string()));
         assert!(!lead_args_for_kind(&cfg, Kind::Codex).contains(&"opus".to_string()));
         assert_eq!(
-            lead_args_for_kind(&cfg, Kind::Codex).first().map(String::as_str),
+            lead_args_for_kind(&cfg, Kind::Codex)
+                .first()
+                .map(String::as_str),
             Some("exec")
         );
     }
 
     #[test]
     fn 会話は役割ラベル付きで畳まれる() {
-        let text = flatten(&[
-            Message::new("system", "あなたはむぎ"),
-            Message::new("user", "こんにちは"),
-            Message::new("assistant", "やあ"),
-        ], MAX_PROMPT_CHARS);
+        let text = flatten(
+            &[
+                Message::new("system", "あなたはむぎ"),
+                Message::new("user", "こんにちは"),
+                Message::new("assistant", "やあ"),
+            ],
+            MAX_PROMPT_CHARS,
+        );
         assert!(text.contains("［前提］\nあなたはむぎ"), "text: {text}");
         assert!(text.contains("［ユーザー］\nこんにちは"), "text: {text}");
-        assert!(text.contains("［これまでのあなたの返答］\nやあ"), "text: {text}");
+        assert!(
+            text.contains("［これまでのあなたの返答］\nやあ"),
+            "text: {text}"
+        );
     }
 
     #[test]
@@ -992,7 +1135,10 @@ mod tests {
     fn 長すぎる会話は古い方から落とす() {
         let long = "あ".repeat(MAX_PROMPT_CHARS);
         let text = flatten(
-            &[Message::new("user", long), Message::new("user", "最後の指示")],
+            &[
+                Message::new("user", long),
+                Message::new("user", "最後の指示"),
+            ],
             MAX_PROMPT_CHARS,
         );
         assert_eq!(text.chars().count(), MAX_PROMPT_CHARS);
@@ -1001,7 +1147,10 @@ mod tests {
 
     #[test]
     fn 長い会話でもsystemの先頭と末尾を残す() {
-        let system = format!("人格の先頭{}安全指示の末尾", "前提".repeat(MAX_PROMPT_CHARS));
+        let system = format!(
+            "人格の先頭{}安全指示の末尾",
+            "前提".repeat(MAX_PROMPT_CHARS)
+        );
         let text = flatten(
             &[
                 Message::new("system", system),
@@ -1029,7 +1178,10 @@ mod tests {
     #[test]
     fn ツール一覧と返し方を指示文に載せる() {
         let text = tool_instructions(&sample_tools());
-        assert!(text.contains("get_time（引数: timezone）: 現在時刻を返す"), "text: {text}");
+        assert!(
+            text.contains("get_time（引数: timezone）: 現在時刻を返す"),
+            "text: {text}"
+        );
         assert!(text.contains("\"tool\""), "返し方の JSON 形を示す: {text}");
     }
 
@@ -1040,8 +1192,11 @@ mod tests {
 
     #[test]
     fn 決められたjsonをツール呼び出しへ変換する() {
-        let call = parse_tool_call(r#"{"tool":"get_time","args":{"timezone":"Asia/Tokyo"}}"#, &sample_tools())
-            .expect("ツール呼び出しとして解釈する");
+        let call = parse_tool_call(
+            r#"{"tool":"get_time","args":{"timezone":"Asia/Tokyo"}}"#,
+            &sample_tools(),
+        )
+        .expect("ツール呼び出しとして解釈する");
         assert_eq!(call.name, "get_time");
         assert_eq!(call.arguments["timezone"], "Asia/Tokyo");
     }
@@ -1049,9 +1204,15 @@ mod tests {
     #[test]
     fn コードフェンスや前後の文章があっても取り出す() {
         let fenced = "```json\n{\"tool\":\"get_time\",\"args\":{}}\n```";
-        assert!(parse_tool_call(fenced, &sample_tools()).is_some(), "フェンス付きを剥がす");
+        assert!(
+            parse_tool_call(fenced, &sample_tools()).is_some(),
+            "フェンス付きを剥がす"
+        );
         let chatty = "了解です。\n{\"tool\":\"get_time\",\"args\":{}}";
-        assert!(parse_tool_call(chatty, &sample_tools()).is_some(), "前置きがあっても拾う");
+        assert!(
+            parse_tool_call(chatty, &sample_tools()).is_some(),
+            "前置きがあっても拾う"
+        );
     }
 
     #[test]

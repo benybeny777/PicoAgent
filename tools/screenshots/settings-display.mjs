@@ -129,7 +129,8 @@ window.__TAURI__ = {
       return [];
     }
     if (name === "pet_list_downloaded_models") return { totalLabel: "2GB", models: [{ name: "gemma-test.gguf", label: "Gemma", sizeLabel: "2GB", active: false }] };
-    if (name === "settings_list_models") return [];
+    if (name === "settings_list_models") return args.id === "agent_cli"
+      ? ["claude", "claude:opus", "claude:sonnet", "codex", "codex:future-model"] : [];
     if (name === "settings_check_update") return { status: "available", downloadReady: true, message: "1.1.0を利用できます。" };
     if (name === "engine_status") return { phase: "ready" };
     if (name === "aivis_status") return { enabled: true, up: true };
@@ -182,6 +183,21 @@ try {
   await page.getByRole("tab", { name: "基本設定" }).click();
   if (await page.locator(".quick-settings-card").count() !== 8) throw new Error("よく使う設定への入口が8件ではありません");
   if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
+  const providerSelect = page.locator('[data-setting-key="PICOAGENT_PROVIDER"] select');
+  await providerSelect.selectOption("agent_cli");
+  const cliModelSelect = page.getByRole("combobox", { name: "CLIのAIモデル" });
+  await page.waitForFunction(() => document.querySelector('select[aria-label="CLIのAIモデル"]')?.value === "claude");
+  await cliModelSelect.selectOption("codex:future-model");
+  await page.getByRole("button", { name: "モデル一覧を更新", exact: true }).click();
+  if (await cliModelSelect.inputValue() !== "codex:future-model") throw new Error("一覧更新で選択モデルが変わりました");
+  const modelValue = await page.locator('[data-setting-key="PICOAGENT_MODEL"] input').inputValue();
+  if (modelValue !== "codex:future-model") throw new Error("選択モデルが保存用入力へ反映されません");
+  await page.setViewportSize({ width: 400, height: 820 });
+  await cliModelSelect.locator("../..").screenshot({ path: join(OUT, "cli-model-select-narrow.png") });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) throw new Error("CLIモデル欄が狭幅で横にはみ出しています");
+  await page.setViewportSize({ width: 960, height: 760 });
+  await providerSelect.selectOption("local");
+  await page.waitForFunction(() => document.querySelector('[data-setting-key="PICOAGENT_MODEL"]').hidden);
   await page.waitForSelector(".memory-item");
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
   const memoryText = await page.locator(".memory-manager").textContent();
