@@ -277,6 +277,9 @@ body { padding-top:32px; }
   background:#f3f3f3; color:#202020; box-shadow:0 1px 4px rgba(0,0,0,.12);
   opacity:1; backdrop-filter:blur(12px);
 }
+/* 起動準備中は表示形式・設定・ウィンドウ操作を受け付けない。起動レイアウトを
+   途中で変更すると、完了後の位置・寸法復旧と競合して画面状態が崩れるため。 */
+.pet-app.is-booting .top-window-menu { display:none; }
 .top-window-menu-brand { flex:0 0 auto; padding:0 12px 0 6px; font-size:12px; font-weight:600; color:#3a3a3a; }
 .top-window-menu-drag { min-width:18px; height:31px; flex:1 1 auto; }
 .top-window-menu > button,.layout-edit-toggle {

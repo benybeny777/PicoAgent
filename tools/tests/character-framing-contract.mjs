@@ -124,11 +124,11 @@ test("Live2Dは形式別構図を優先して未指定座標を継承し明示0�
   assert.deepEqual(result, { scale: 3, x: 122.5, y: 395 });
 });
 
-test("native-fullのメッシュには内部の胸上倍率も適用しない", () => {
+test("native-fullのメッシュも配信では保存中の上半身倍率を適用する", () => {
   const source = renderer.slice(renderer.indexOf("function applyMeshRigFraming()"), renderer.indexOf("async function prepareMeshRig("));
   let scale;
-  runInNewContext(source + "applyMeshRigFraming();", { currentLayout: "stream", character: { dataset: { sourceFraming: "native-full" } }, meshRigController: { setFraming: v => { scale = v; } } });
-  assert.equal(scale, 1);
+  runInNewContext(source + "applyMeshRigFraming();", { currentLayout: "stream", characterZoom: 1.55, character: { dataset: { sourceFraming: "native-full" } }, meshRigController: { setFraming: v => { scale = v; } } });
+  assert.equal(scale, 1.55);
 });
 
 test("メッシュ休止時に差分絵がなければ定義済み静止フレームへ退避する", () => {

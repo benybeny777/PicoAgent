@@ -30,9 +30,10 @@ test("LocalVTuberStudio schema 3を中間形式へ書き換えず読む", () => 
   assert.match(renderer, /sourceRig\.scene_graph/);
   assert.match(renderer, /sourceRig\.layers\.mouth_closed/);
   assert.match(renderer, /eyeAperture\(sourceRig\.layers\.left_eye_base/);
+  assert.match(renderer, /openness <= 0\.55 && images\.has\(`\$\{side\}_eye_closed`\)/, "半閉眼以下は原画の閉じ目素材へ戻す");
   assert.match(renderer, /openBoost = 1 \+ smoothstep\(0\.62, 1, open\) \* 0\.18/);
   assert.match(renderer, /if \(openness >= 1[^\n]+return/);
-  assert.doesNotMatch(renderer, /images\.has\(`\$\{side\}_eye_closed`\)/);
+  assert.match(renderer, /ctx\.clearRect\(left, top, right - left, bottom - top\)/, "閉じ目素材の範囲だけを置換する");
   assert.match(renderer, /draw\(`\$\{side\}_eye_base`, base\)/);
   assert.match(renderer, /const aperture = base\.eye_aperture/);
   assert.match(renderer, /ctx\.clip\(\);\s*draw\(`\$\{side\}_eye_base`/);

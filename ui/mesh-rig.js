@@ -94,8 +94,19 @@
     const upper = rig.layers[`${side}_eyelid_upper`];
     const points = eyeAperture(base, openness);
     const draw = (name, layer) => ctx.drawImage(images.get(name), layer.texture_box[0], layer.texture_box[1]);
-    // 閉眼下地PNGの周辺肌まで重ねると、半閉眼で矩形の色面になる。
-    // 原画で測定した目の開口内だけへ限定し、その内側を現在の開口で描き戻す。
+    if (openness <= 0.55 && images.has(`${side}_eye_closed`)) {
+      // 半閉眼以下を肌色の再構成だけで描くと、目の輪郭内が丸い色面になり、まぶたの色も
+      // 原画から外れる。閉じ側は制作者が用意した閉眼素材へ局所置換する。
+      const closed = rig.layers[`${side}_eye_closed`];
+      const [left, top, right, bottom] = closed.texture_box;
+      ctx.save();
+      ctx.clearRect(left, top, right - left, bottom - top);
+      draw(`${side}_eye_closed`, closed);
+      ctx.restore();
+      return;
+    }
+    // 半目の下地PNGを矩形で重ねると透明画素のRGBが黒い色面になる。専用閉眼へ
+    // 切り替わるまでの短い区間だけ、原画で測った開口内へ限定して描き戻す。
     const aperture = base.eye_aperture;
     ctx.save();
     ctx.beginPath();
