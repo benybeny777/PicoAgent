@@ -126,6 +126,7 @@
 | `PICOAGENT_WORKSPACES` | （旧キー） | project | 旧ワークスペース一覧。プロジェクト統合時に廃止し、既存値は読み込まない |
 | `PICOAGENT_ACTIVE_WORKSPACE` | （旧キー） | project | 旧ワークスペース選択ID。プロジェクト統合時に廃止し、既存値は読み込まない |
 | `PICOAGENT_SCHEDULED_TASKS` | `[]` | task_scheduler | cron 風のスケジュールタスク一覧（JSON文字列。`kind=command` / `kind=tool`。通常はチャットで設定。設定画面では専用フォームで編集） |
+| `PICOAGENT_SCHEDULED_TASK_STATE` | `{}` | task_scheduler（内部） | スケジュールIDごとの最終実行分・最終確認分。予約定義と分離した内部状態で、設定画面からは編集しない |
 | `PICOAGENT_SCHEDULED_TOOL_ALLOWLIST` | `time,weather,web_fetch` | task_scheduler | 無人スケジュール実行を明示的に許可するスキル名（カンマ区切り） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | （旧キー） | meeting_recorder | 旧キー。設定画面からは廃止。設定済みなら既存利用者向けに追加許可ルートとしてだけ引き継ぐ |

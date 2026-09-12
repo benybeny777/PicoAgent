@@ -16,6 +16,7 @@ let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
 const inputWrappers = new Map(); // key -> field/card 要素
 let savedSnapshot = null; // 最後に読み込んだ、または保存できた設定値
+let providerDraftValues = {}; // 非表示へ切り替えたAI設定の未保存入力。
 let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
@@ -48,6 +49,10 @@ const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
 const PRESERVE_UNREADABLE_SECRET = "__PRESERVE_UNREADABLE_SECRET__";
+const SETTINGS_RUNTIME_KEYS = new Set([
+  "PICOAGENT_WINDOW_LAYOUTS",
+  "PICOAGENT_SCHEDULED_TASK_STATE",
+]);
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
   { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
@@ -150,6 +155,14 @@ function unregisterInputsIn(node) {
   }
 }
 
+function rememberProviderDraft(node) {
+  for (const wrapper of node.querySelectorAll("[data-setting-key]")) {
+    const key = wrapper.dataset.settingKey;
+    const input = inputs.get(key);
+    if (input) providerDraftValues[key] = input.type === "checkbox" ? input.checked : input.value;
+  }
+}
+
 function cloneSettings(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
@@ -162,18 +175,52 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
+function comparisonValue(value) {
+  return value === PRESERVE_UNREADABLE_SECRET ? "" : value;
+}
+
+function settingsChangeRequest(current, saved, revisions) {
+  const patch = {};
+  for (const key of new Set([...Object.keys(saved || {}), ...Object.keys(current || {})])) {
+    if (SETTINGS_RUNTIME_KEYS.has(key)) continue;
+    if (stableStringify(comparisonValue(current[key])) !== stableStringify(comparisonValue(saved[key]))) {
+      patch[key] = current[key];
+    }
+  }
+  const baseRevisions = {};
+  for (const key of Object.keys(patch)) {
+    baseRevisions[key] = revisions?.[key] || "missing";
+  }
+  return { patch, baseRevisions };
+}
+
 function updateDirtyStateNow() {
   if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
-  const current = collect();
-  const changedKeys = new Set(
-    [...Object.keys(savedSnapshot), ...Object.keys(current)]
-      .filter(key => stableStringify(current[key]) !== stableStringify(savedSnapshot[key]))
-  );
+  let current;
+  try {
+    current = collect();
+  } catch (error) {
+    // JSONなどの編集中の不正値も未保存の変更。保存時の検証へ渡し、修正・復元を妨げない。
+    resetChangesBtn.disabled = settingsMutationBusy;
+    saveBtn.disabled = settingsMutationBusy;
+    saveBtn.classList.add("dirty");
+    saveBtn.textContent = "変更を保存";
+    if (dirtySummary) {
+      dirtySummary.textContent = "未保存（入力を確認）";
+      dirtySummary.classList.add("dirty");
+    }
+    return;
+  }
+  const changedKeys = new Set(Object.keys(settingsChangeRequest(
+    current,
+    savedSnapshot,
+    data.valueRevisions,
+  ).patch));
   const dirty = changedKeys.size > 0;
   for (const [key, wrapper] of inputWrappers) {
     const currentValue = current[key];
     const savedValue = savedSnapshot[key];
-    wrapper.classList.toggle("changed", stableStringify(currentValue) !== stableStringify(savedValue));
+    wrapper.classList.toggle("changed", stableStringify(comparisonValue(currentValue)) !== stableStringify(comparisonValue(savedValue)));
   }
   characterPersona?.closest(".field")?.classList.toggle(
     "changed",
@@ -2852,6 +2899,8 @@ function buildCharacterMaker(registerInstalledCharacter) {
 }
 
 async function render() {
+  ++modelLoadGeneration;
+  providerDraftValues = {};
   renderingSettings = true;
   form.innerHTML = "";
   inputs.clear();
@@ -3039,6 +3088,7 @@ async function render() {
     ? requestedCharacter
     : characterCatalog.default;
   const selectedCharacterEntry = characterCatalog.characters.find(character => character.id === selectedCharacter);
+  let displayedCharacterId = selectedCharacter;
   setQuickSettingsSummary("character", selectedCharacterEntry?.name || selectedCharacter);
   for (const character of characterCatalog.characters) {
     characterSelect.append(el("option", {
@@ -3061,7 +3111,10 @@ async function render() {
     chooseCharacterButton,
   ]), "選択中 キャラクター 声 Aivis Style ID");
   characterSpeaker = el("input", { type: "text", inputMode: "numeric", ariaLabel: "このキャラの Aivis Style ID" });
-  characterSpeaker.addEventListener("input", updateDirtyState);
+  characterSpeaker.addEventListener("input", () => {
+    saveCurrentCharacterVoice(displayedCharacterId);
+    updateDirtyState();
+  });
   const characterSpeakerField = markSearchable(el("div", { className: "field" }, [
     el("label", { textContent: "このキャラの Aivis Style ID" }),
     characterSpeaker,
@@ -3108,9 +3161,16 @@ async function render() {
     characterLive2dSdkSelect,
     characterLive2dSdkHint,
   ]), "Live2D Cubism SDK 4 5 自動 互換");
-  characterLive2dSdkSelect.addEventListener("change", updateDirtyState);
+  characterLive2dSdkSelect.addEventListener("change", () => {
+    saveCurrentCharacterLive2dSdk(displayedCharacterId);
+    updateDirtyState();
+  });
   characterSec.append(characterLive2dSdkField);
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
+  characterPersona.addEventListener("input", () => {
+    saveCurrentCharacterPersona(displayedCharacterId);
+    updateDirtyState();
+  });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
   await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
@@ -3129,15 +3189,16 @@ async function render() {
     // 遅く完了した古い読込が新しいキャラの編集欄を上書きしてしまう。
     characterSwitchQueue = characterSwitchQueue.then(async () => {
       try {
-        saveCurrentCharacterPersona(previousCharacter);
-        saveCurrentCharacterVoice(previousCharacter);
-        saveCurrentCharacterLive2dSdk(previousCharacter);
+        saveCurrentCharacterPersona(displayedCharacterId);
+        saveCurrentCharacterVoice(displayedCharacterId);
+        saveCurrentCharacterLive2dSdk(displayedCharacterId);
         await loadCharacterPersona(requestedCharacter);
         loadCharacterVoice(requestedCharacter);
         await loadCharacterLive2dSdk(requestedCharacter);
         await characterFramingEditor?.load();
         characterStreamProfileEditor?.load();
         previousCharacter = requestedCharacter;
+        displayedCharacterId = requestedCharacter;
         characterSelect.value = requestedCharacter;
         const selectedEntry = characterCatalog.characters.find(character => character.id === requestedCharacter);
         setQuickSettingsSummary("character", selectedEntry?.name || requestedCharacter);
@@ -3597,6 +3658,7 @@ async function render() {
   let activeProviderBlock = null;
   function renderProviderConfig(id) {
     if (activeProviderBlock) {
+      rememberProviderDraft(activeProviderBlock);
       unregisterInputsIn(activeProviderBlock);
       activeProviderBlock.remove();
       activeProviderBlock = null;
@@ -3616,7 +3678,7 @@ async function render() {
     block.append(el("div", { className: "subhead", textContent: provider.label }));
     const guide = setupGuideNode(provider.id, provider.configSchema);
     if (guide) block.append(guide);
-    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
+    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, providerDraftValues[f.key] ?? v[f.key], f.placeholder));
     activeProviderBlock = block;
     provSec.append(block);
     // CLIからローカルAIへ戻った際に作り直される入力にも、モデル同期を接続する。
@@ -3689,22 +3751,28 @@ function providerDefaultModel(providerId) {
 
 async function loadModels(providerId, applyProviderDefault = false) {
   const generation = ++modelLoadGeneration;
+  const targetInput = modelInput;
+  const initialModel = targetInput?.value;
+  const isCurrent = () => generation === modelLoadGeneration && targetInput === modelInput;
   modelOptions.innerHTML = "";
   statusEl.textContent = providerId === "ollama" ? "Ollama のモデル一覧を取得中…" : "";
   let models = [];
   try {
     models = await window.picoagent.settings.listModels(providerId);
-    if (generation !== modelLoadGeneration) return;
+    if (!isCurrent()) return;
   } catch (error) {
-    if (generation !== modelLoadGeneration) return;
+    if (!isCurrent()) return;
     logApp("warn", "モデル一覧を取得できませんでした", errorDetail(error));
     statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
     return;
   }
+  if (!isCurrent()) return;
   for (const m of models) modelOptions.append(el("option", { value: m }));
   if (!modelInput) return;
   const preferred = providerDefaultModel(providerId);
-  if (applyProviderDefault) {
+  if (modelInput.value !== initialModel) {
+    // 一覧の取得中に手入力したモデル名は利用者の編集を優先する。
+  } else if (applyProviderDefault) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
   } else if (providerId !== "agent_cli" && providerId === data.active.providerId && !models.includes(modelInput.value)) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || modelInput.value);
@@ -3727,12 +3795,13 @@ async function loadModels(providerId, applyProviderDefault = false) {
 
 function collect() {
   const patch = cloneSettings(savedSnapshot || data.values || {});
+  Object.assign(patch, providerDraftValues);
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;
   }
   for (const warning of data.unavailableSecrets || []) {
     const input = inputs.get(warning.key);
-    if (input && input.value === "") patch[warning.key] = PRESERVE_UNREADABLE_SECRET;
+    if ((input || Object.hasOwn(providerDraftValues, warning.key)) && patch[warning.key] === "") patch[warning.key] = PRESERVE_UNREADABLE_SECRET;
   }
   if (patch.PICOAGENT_PROVIDER === "ollama" && patch.PICOAGENT_MODEL) patch.OLLAMA_MODEL = patch.PICOAGENT_MODEL;
   if (patch.PICOAGENT_PROVIDER === "openai") patch.PICOAGENT_MODEL = patch.OPENAI_MODEL || "";
@@ -3745,9 +3814,6 @@ function collect() {
     const preset = patch.PICOAGENT_LOCAL_MODEL_PRESET || "auto";
     patch.PICOAGENT_MODEL = preset === "auto" ? "" : preset;
   }
-  if (characterSelect && characterPersona) saveCurrentCharacterPersona(characterSelect.value);
-  if (characterSelect && characterSpeaker) saveCurrentCharacterVoice(characterSelect.value);
-  if (characterSelect && characterLive2dSdkSelect) saveCurrentCharacterLive2dSdk(characterSelect.value);
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
@@ -3823,10 +3889,29 @@ saveBtn.addEventListener("click", async () => {
   setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {
-    const patch = collect();
-    const res = await window.picoagent.settings.save(patch);
-    savedSnapshot = cloneSettings(patch);
-    data.values = cloneSettings(patch);
+    const current = collect();
+    const request = settingsChangeRequest(current, savedSnapshot, data.valueRevisions);
+    if (!Object.keys(request.patch).length) {
+      statusEl.textContent = "変更はありません";
+      return;
+    }
+    const res = await window.picoagent.settings.save(request.patch, request.baseRevisions);
+    if (Array.isArray(res.conflicts) && res.conflicts.length) {
+      const draft = cloneSettings(request.patch);
+      const latest = await window.picoagent.settings.load();
+      data = latest;
+      await render();
+      const latestSnapshot = cloneSettings(collect());
+      data.values = { ...cloneSettings(latest.values), ...draft };
+      await render();
+      savedSnapshot = latestSnapshot;
+      updateDirtyState();
+      statusEl.textContent = `別の操作で更新された設定を読み直しました（${res.conflicts.length}件）。入力内容を確認して、もう一度保存してください`;
+      return;
+    }
+    savedSnapshot = cloneSettings(current);
+    data.values = cloneSettings(current);
+    data.valueRevisions = cloneSettings(res.valueRevisions || data.valueRevisions);
     updateDirtyState();
     if (res.requiresRestart) {
       const restartNow = await confirmRestart();
@@ -3848,7 +3933,7 @@ saveBtn.addEventListener("click", async () => {
     }
   } catch (error) {
     logApp("error", "設定保存に失敗しました", errorDetail(error));
-    statusEl.textContent = `保存に失敗: ${error.message}`;
+    statusEl.textContent = `保存に失敗: ${error?.message || error}`;
   } finally {
     setSettingsMutationBusy(false);
   }

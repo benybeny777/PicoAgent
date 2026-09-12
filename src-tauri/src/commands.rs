@@ -2826,7 +2826,10 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
 pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
+    let value_revisions = state.config.value_revisions();
     let mut values = state.config.get_all();
+    // 発火済み時刻などはschedulerだけが所有し、設定画面の編集対象へ出さない。
+    values.remove(crate::scheduler::STATE_KEY);
     // 暗号化済みのシークレットは設定画面で編集できるよう復号して返す（非暗号の値は不変）。
     let mut unavailable_secrets = Vec::new();
     for (key, value) in values.iter_mut() {
@@ -2881,6 +2884,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         },
         "license": crate::license::status(&state.config),
         "values": values,
+        "valueRevisions": value_revisions,
         "unavailableSecrets": unavailable_secrets,
         "active": { "providerId": provider_id, "model": model },
         "defaults": { "systemPrompt": agent::prompt::DEFAULT_SYSTEM_PROMPT },
@@ -2987,12 +2991,13 @@ fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
 #[tauri::command]
 pub async fn settings_save(
     mut patch: Map<String, Value>,
+    base_revisions: Option<Map<String, Value>>,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
-    let current_values = state.config.get_all();
-    preserve_unreadable_secrets(&mut patch, &current_values)?;
-    validate_multi_ai_settings(&state.config, &patch)?;
+    let schedule_guard = patch
+        .contains_key(crate::scheduler::CONFIG_KEY)
+        .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
     if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
         patch.insert(
             "PICOAGENT_CHARACTER_FRAMING".to_string(),
@@ -3040,8 +3045,7 @@ pub async fn settings_save(
             .map(|next| state.config.get_all().get(key) != Some(next))
             .unwrap_or(false)
     };
-    // 設定画面は全項目を送るため、contains_key では毎回「変更あり」になってしまう。
-    // 実値が変わったときだけ system 文脈を作り直し、会話とプロンプトキャッシュを保つ。
+    // 差分に対象キーがある場合だけ実行中状態を更新する。
     let system_context_changed = changed_text("PICOAGENT_SYSTEM_PROMPT", "")
         || changed_text("PICOAGENT_RELATIONSHIP", "assistant")
         || changed_value("PICOAGENT_RELATIONSHIP_OVERRIDES")
@@ -3072,35 +3076,10 @@ pub async fn settings_save(
             .map_err(|e| log_command_error(&app, "切替前の表示サイズ保存に失敗しました", e))?;
     }
 
-    // シークレットは平文保存せず、OSの資格情報保護（Windows DPAPI／macOSキーチェーン）へ預けてから永続化する。
+    // シークレット保護と候補全体の検証は、競合検査に成功した後、設定の原子的保存
+    // ロック内で行う。競合却下なのにキーチェーンだけ変える経路を作らない。
     let schema_keys = secret_keys();
-    let mut encrypted: Vec<(String, String)> = Vec::new();
-    for (key, value) in patch.iter() {
-        if !is_secret_setting(&schema_keys, key) {
-            continue;
-        }
-        if let Some(text) = value.as_str() {
-            if text.is_empty() {
-                // 空にした秘密はOS側の実体も消す（macOSキーチェーンへ古い値を残さない）。
-                crate::secret::forget(key);
-            } else if !crate::secret::is_encrypted(text) {
-                encrypted.push((
-                    key.clone(),
-                    crate::secret::encrypt(key, text).map_err(|error| {
-                        log_command_error(&app, "シークレットを安全に保存できません", error)
-                    })?,
-                ));
-            }
-        }
-    }
-    for (key, value) in encrypted {
-        patch.insert(key, Value::String(value));
-    }
-
-    // 設定画面は読み込み時点の全設定を送り返すため、直前に remember_current_size() が
-    // 更新した内部値を古いスナップショットで戻さない。最新値の採取から set_all まで
-    // 同じ名前付きロックを保持し、右クリック切替との並行更新も直列化する。
-    {
+    let prepared_patch = {
         let _layout_sizes_guard = if layout_changed {
             Some(crate::store::lock_state(crate::layout::SIZES_KEY))
         } else {
@@ -3116,11 +3095,60 @@ pub async fn settings_save(
             patch.insert(crate::layout::SIZES_KEY.to_string(), sizes);
         }
 
-        state
+        let (conflicts, prepared) = state
             .config
-            .set_all(patch)
+            .set_all_checked_with(
+                patch,
+                &base_revisions.unwrap_or_default(),
+                |latest, checked_patch| {
+                    preserve_unreadable_secrets(checked_patch, latest)
+                        .map_err(anyhow::Error::msg)?;
+                    crate::scheduler::reconcile_settings_patch(latest, checked_patch)
+                        .map_err(anyhow::Error::msg)?;
+                    let mut candidate = latest.clone();
+                    candidate.extend(checked_patch.clone());
+                    validate_multi_ai_settings(&state.config, &candidate)
+                        .map_err(anyhow::Error::msg)?;
+                    let mut encrypted = Vec::new();
+                    for (key, value) in checked_patch.iter() {
+                        if !is_secret_setting(&schema_keys, key) {
+                            continue;
+                        }
+                        if let Some(text) = value.as_str() {
+                            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                                encrypted.push((
+                                    key.clone(),
+                                    crate::secret::encrypt(key, text).map_err(|error| {
+                                        anyhow::anyhow!(
+                                            "シークレットを安全に保存できません: {error}"
+                                        )
+                                    })?,
+                                ));
+                            }
+                        }
+                    }
+                    for (key, value) in encrypted {
+                        checked_patch.insert(key, Value::String(value));
+                    }
+                    Ok(())
+                },
+            )
             .map_err(|e| log_command_error(&app, "設定保存に失敗しました", e))?;
+        if !conflicts.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "conflicts": conflicts,
+                "valueRevisions": state.config.value_revisions(),
+            }));
+        }
+        prepared
+    };
+    for (key, value) in &prepared_patch {
+        if is_secret_setting(&schema_keys, key) && value.as_str() == Some("") {
+            crate::secret::forget(key);
+        }
     }
+    drop(schedule_guard);
 
     // モデル DL・エンジン/Aivis 起動・キャラ読込など重い反映は実行中に行わず、
     // 再起動して起動シーケンス（ローディング画面）でまとめて反映する（フキダシに
@@ -3255,6 +3283,7 @@ pub async fn settings_save(
         "restartEngine": restart_engine,
         "restartAivis": restart_aivis,
         "hotkeyWarning": hotkey_warning,
+        "valueRevisions": state.config.value_revisions(),
         "up": current_up(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT).await
     }))
 }
