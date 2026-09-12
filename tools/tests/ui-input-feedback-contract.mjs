@@ -215,3 +215,17 @@ test("停止要求のあと応答が返らなくても画面の待機を解除�
   // 見張りは送信の後始末で必ず解く（次の送信へ持ち越さない）。
   assert.match(renderer, /clearCancelRelease\(\);\s*\n\s*busy = false;/);
 });
+
+test("窓に収まらないフキダシ保存値は表示側で収める", () => {
+  // 広い画面で広げたフキダシの保存値を狭い窓へそのまま当てると、入力欄と送信ボタンが
+  // 窓の外へ出て操作できなくなる。保存値は変えず、当てる寸法だけ窓へ収める。
+  assert.match(renderer, /function fitBubbleSizeToWindow\(width, height\) \{[\s\S]*?Math\.min\(width, maxWidth\)[\s\S]*?Math\.min\(height, maxHeight\)/);
+  const apply = renderer.match(/function applyBubbleLayout\(width, height, left, top\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(apply, /bubble\.style\.width = `\$\{fitBubbleSizeToWindow\(w, h\)\.width\}px`/);
+  assert.match(apply, /bubble\.style\.height = `\$\{fitBubbleSizeToWindow\(w, h\)\.height\}px`/);
+  // 窓が広がれば保存どおりへ戻す。つまみ操作中と拡大中は触らない。
+  const refit = renderer.match(/function refitBubbleToWindow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(refit, /bubble\.classList\.contains\("fullscreen"\) \|\| resizeStart/);
+  assert.match(refit, /savedBubbleLayout\?\.width/);
+  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*refitBubbleToWindow\(\);/);
+});

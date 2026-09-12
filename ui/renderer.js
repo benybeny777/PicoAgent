@@ -5402,6 +5402,15 @@ function applyLayout(id) {
   wakeAnimationLoop();
 }
 
+// 窓に収まる範囲まで縮めたフキダシ寸法。保存値そのものは書き換えないので、
+// 窓が広がればまた元の大きさへ戻す（下の refitBubbleToWindow）。
+const BUBBLE_WINDOW_MARGIN = 12;
+function fitBubbleSizeToWindow(width, height) {
+  const maxWidth = Math.max(180, document.documentElement.clientWidth - BUBBLE_WINDOW_MARGIN * 2);
+  const maxHeight = Math.max(92, document.documentElement.clientHeight - BUBBLE_WINDOW_MARGIN * 2);
+  return { width: Math.min(width, maxWidth), height: Math.min(height, maxHeight) };
+}
+
 function applyBubbleLayout(width, height, left, top) {
   // ペット表示以外はフキダシを CSS が置くので、保存値を当てない
   // （当てるとチャットの縦長パネルがペット時代の寸法に化ける）。
@@ -5411,11 +5420,14 @@ function applyBubbleLayout(width, height, left, top) {
   const x = parseFloat(left);
   const y = parseFloat(top);
   const hasSize = Number.isFinite(w) && w >= 180 && Number.isFinite(h) && h >= 92;
-  if (Number.isFinite(w) && w >= 180) bubble.style.width = `${w}px`;
-  if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
+  // 広い画面で広げたフキダシの保存値を、狭い画面や縮めた窓へそのまま当てると、
+  // 入力欄と送信ボタンが窓の外へ出て操作できなくなる。当てる寸法だけ窓に収める。
+  if (Number.isFinite(w) && w >= 180) bubble.style.width = `${fitBubbleSizeToWindow(w, h).width}px`;
+  if (Number.isFinite(h) && h >= 92) bubble.style.height = `${fitBubbleSizeToWindow(w, h).height}px`;
   if (Number.isFinite(x) && x >= 0) bubble.style.left = `${x}px`;
   if (Number.isFinite(y) && y >= 0) bubble.style.top = `${y}px`;
   // 保存済みの大きいフキダシでも右のキャラと重ならないよう、必要ならウィンドウを拡大する。
+  // 窓が広がれば resize で保存値どおりの大きさへ戻る。
   if (hasSize) {
     const bx = Number.isFinite(x) && x >= 0 ? x : bubble.offsetLeft;
     const by = Number.isFinite(y) && y >= 0 ? y : bubble.offsetTop;
@@ -5423,7 +5435,22 @@ function applyBubbleLayout(width, height, left, top) {
   }
   refreshBubblePlacement();
 }
-window.addEventListener("resize", refreshBubblePlacement);
+
+// 窓の大きさが変わったら、保存値を窓に収まる範囲で当て直す（広がれば戻し、狭まれば縮める）。
+// リサイズつまみの操作中とフキダシ拡大中は、利用者の操作を奪わないので触らない。
+function refitBubbleToWindow() {
+  if (!layoutUsesFreeBubble() || bubble.classList.contains("fullscreen") || resizeStart) return;
+  const w = parseFloat(savedBubbleLayout?.width);
+  const h = parseFloat(savedBubbleLayout?.height);
+  if (!Number.isFinite(w) || w < 180 || !Number.isFinite(h) || h < 92) return;
+  const fitted = fitBubbleSizeToWindow(w, h);
+  if (Math.round(bubble.offsetWidth) !== Math.round(fitted.width)) bubble.style.width = `${fitted.width}px`;
+  if (Math.round(bubble.offsetHeight) !== Math.round(fitted.height)) bubble.style.height = `${fitted.height}px`;
+}
+window.addEventListener("resize", () => {
+  refitBubbleToWindow();
+  refreshBubblePlacement();
+});
 function syncPngNaturalResolution() {
   if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
