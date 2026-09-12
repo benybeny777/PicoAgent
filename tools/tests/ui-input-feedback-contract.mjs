@@ -243,3 +243,14 @@ test("準備中・失敗の理由は入力や読み上げ操作で消さない",
   assert.match(apply, /localEngineStatusText = "";/);
   assert.match(apply, /準備に失敗: \$\{s\.message \|\| "不明なエラー"\}`\);\s*\n\s*localEngineStatusText = status\.textContent;/);
 });
+
+test("フキダシの自動配置は配置基準の枠内へ収める", () => {
+  // 位置はフキダシの配置基準（.pet-app）からの座標で決まる。ウィンドウ全体の高さで
+  // 上限を計算すると上端メニューぶん（body の padding-top 32px）だけ緩くなり、
+  // フキダシが窓の下へはみ出して状態表示が切れる。
+  const place = renderer.match(/function placeBubbleAwayFromCharacter\([\s\S]*?\n\}/)?.[0] || "";
+  assert.match(place, /const container = bubble\.offsetParent instanceof HTMLElement \? bubble\.offsetParent : document\.documentElement/);
+  assert.match(place, /const viewportWidth = container\.clientWidth/);
+  assert.match(place, /const viewportHeight = container\.clientHeight/);
+  assert.doesNotMatch(place, /document\.documentElement\.clientHeight/);
+});

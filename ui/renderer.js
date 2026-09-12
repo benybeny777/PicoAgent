@@ -3884,8 +3884,12 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   if (bubble.classList.contains("fullscreen")) return;
   const margin = 12;
   const gap = 10;
-  const viewportWidth = document.documentElement.clientWidth;
-  const viewportHeight = document.documentElement.clientHeight;
+  // 位置はフキダシの配置基準（`.pet-app`）からの座標で決める。ウィンドウ全体の高さで
+  // 上限を計算すると、上端メニューぶん（body の padding-top 32px）だけ下限が緩くなり、
+  // フキダシが窓の下へはみ出して状態表示が切れる。キャラの座標も同じ基準なので揃う。
+  const container = bubble.offsetParent instanceof HTMLElement ? bubble.offsetParent : document.documentElement;
+  const viewportWidth = container.clientWidth;
+  const viewportHeight = container.clientHeight;
   const charLeftEdge = character.offsetLeft - gap;
   const charTopEdge = character.offsetTop - gap;
   const charRightEdge = character.offsetLeft + character.offsetWidth + gap;

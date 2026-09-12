@@ -1134,6 +1134,9 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   .pet-app[data-layout] .quick-actions { display:none; }
   .pet-app[data-layout] .reply { max-height:26%; }
   .pet-app[data-layout] .reply-actions button { height:28px; }
+  /* ウィジェットの時計は固定の高さを取る。狭いときは時刻だけ小さく残す。 */
+  [data-layout="widget"] .widget-clock strong { font-size:17px; }
+  [data-layout="widget"] .widget-clock span { display:none; }
 }
 /* 返答と履歴は縮めても読める側。入力欄より先にこちらを削る。 */
 @media (max-height:340px) {
@@ -1171,6 +1174,13 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   [data-layout="chat"] .character { left:10px; top:8px; width:34px; height:34px; }
   [data-layout="bar"] .character { left:10px; top:10px; width:34px; height:34px; }
   [data-layout="bar"] .composer textarea { padding-left:48px; }
+}
+
+/* クイック操作は幅が狭いと何段にも折り返し（300px幅では8個で7段・227px）、
+   入力欄と送信ボタンをフキダシの外へ押し出す。項目は減らさず、高さを区切って
+   その中で送れるようにする。さらに狭い・低い場合は上の規則で畳む。 */
+@media (max-width:520px), (max-height:520px) {
+  .pet-app[data-layout] .quick-actions { max-height:78px; overflow-y:auto; flex:0 0 auto; }
 }
 
 /* 幅が足りないとき: 送信・音声・連続の3ボタンは既定の最小幅では1行へ並ばず、
