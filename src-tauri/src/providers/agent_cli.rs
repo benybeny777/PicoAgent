@@ -28,6 +28,7 @@ use super::{Provider, ProviderReg};
 use crate::config::Config;
 use crate::message::{Field, Message, ToolCall};
 
+#[path = "agent_cli/models.rs"]
 mod models;
 
 pub struct AgentCli;
@@ -341,6 +342,27 @@ fn timeout_secs(cfg: &Config) -> u64 {
         .ok()
         .filter(|value| (10..=600).contains(value))
         .unwrap_or(180)
+}
+
+fn model_choices(
+    default: String,
+    mut read: impl FnMut(Kind) -> anyhow::Result<Vec<String>>,
+) -> Vec<String> {
+    let mut choices = vec![default];
+    for (selected, prefix) in [(Kind::Claude, "claude"), (Kind::Codex, "codex")] {
+        if !choices.iter().any(|value| value == prefix) {
+            choices.push(prefix.into());
+        }
+        match read(selected) {
+            Ok(models) => {
+                choices.extend(models.into_iter().map(|model| format!("{prefix}:{model}")))
+            }
+            // フォールバック許可: 候補取得の失敗はCLIごとに隔離する。実行時の既定設定エラーは
+            // request_argsで伝播させ、誤ったモデルによる推論は開始しない。
+            Err(error) => eprintln!("{prefix}のモデル候補を取得できませんでした: {error}"),
+        }
+    }
+    choices
 }
 
 /// 正規形会話をCLIの1ターン用プロンプトへ畳む。初回またはセッション非対応CLIでは
@@ -668,18 +690,7 @@ impl Provider for AgentCli {
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
-        let mut choices = vec![self.default_model(cfg)];
-        for (selected, prefix) in [(Kind::Claude, "claude"), (Kind::Codex, "codex")] {
-            if !choices.iter().any(|value| value == prefix) {
-                choices.push(prefix.into());
-            }
-            choices.extend(
-                models::list(selected)?
-                    .into_iter()
-                    .map(|model| format!("{prefix}:{model}")),
-            );
-        }
-        Ok(choices)
+        Ok(model_choices(self.default_model(cfg), models::list))
     }
 
     async fn is_up(&self, cfg: &Config) -> bool {
@@ -840,6 +851,19 @@ inventory::submit! { ProviderReg { make: || Box::new(AgentCli) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 片方の候補取得に失敗しても正常側と既定選択を残す() {
+        let choices = super::model_choices("claude".into(), |selected| {
+            if selected == super::Kind::Codex {
+                anyhow::bail!("キャッシュ破損");
+            }
+            Ok(vec!["opus".into(), "future-claude".into()])
+        });
+        assert_eq!(
+            choices,
+            vec!["claude", "claude:opus", "claude:future-claude", "codex"]
+        );
+    }
     #[test]
     fn 選択モデルは新規と再開へ安全指定を保って渡す() {
         let cfg = crate::config::Config::new();

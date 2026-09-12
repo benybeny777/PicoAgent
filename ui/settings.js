@@ -3619,6 +3619,13 @@ async function render() {
     for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, v[f.key], f.placeholder));
     activeProviderBlock = block;
     provSec.append(block);
+    // CLIからローカルAIへ戻った際に作り直される入力にも、モデル同期を接続する。
+    inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
+      if (providerSelect.value !== "local" || !modelInput) return;
+      const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
+      modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
+      updateDirtyState();
+    });
   }
   renderProviderConfig(data.active.providerId);
   const multiAiSec = section("複数AIの使い方");
@@ -3654,12 +3661,6 @@ async function render() {
     updateModelFieldVisibility();
     updateDirtyState();
     applySettingsSearch();
-  });
-  inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
-    if (providerSelect.value !== "local" || !modelInput) return;
-    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
-    modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
-    updateDirtyState();
   });
   await loadModels(providerSelect.value);
   applySettingsSearch();
