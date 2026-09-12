@@ -64,24 +64,31 @@ pub(super) fn validate(root: &Path, manifest: &Value) -> Result<()> {
 }
 
 // 展開前の寸法を確認し、画像デコードによるメモリ急増を防ぐ。
+fn image_field<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N]> {
+    Ok(bytes
+        .get(offset..offset + N)
+        .context("画像ヘッダーが途中で終わっています")?
+        .try_into()?)
+}
+
 fn image_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
         return Ok((
-            u32::from_be_bytes(bytes[16..20].try_into()?),
-            u32::from_be_bytes(bytes[20..24].try_into()?),
+            u32::from_be_bytes(image_field(bytes, 16)?),
+            u32::from_be_bytes(image_field(bytes, 20)?),
         ));
     }
     if bytes.starts_with(b"BM") && bytes.len() >= 26 {
-        let dib = u32::from_le_bytes(bytes[14..18].try_into()?);
+        let dib = u32::from_le_bytes(image_field(bytes, 14)?);
         if dib == 12 {
             return Ok((
-                u16::from_le_bytes(bytes[18..20].try_into()?) as u32,
-                u16::from_le_bytes(bytes[20..22].try_into()?) as u32,
+                u16::from_le_bytes(image_field(bytes, 18)?) as u32,
+                u16::from_le_bytes(image_field(bytes, 20)?) as u32,
             ));
         }
         return Ok((
-            i32::from_le_bytes(bytes[18..22].try_into()?).unsigned_abs(),
-            i32::from_le_bytes(bytes[22..26].try_into()?).unsigned_abs(),
+            i32::from_le_bytes(image_field(bytes, 18)?).unsigned_abs(),
+            i32::from_le_bytes(image_field(bytes, 22)?).unsigned_abs(),
         ));
     }
     if bytes.starts_with(&[0xff, 0xd8]) {
@@ -123,8 +130,8 @@ fn image_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
         && [8, 16, 24, 32].contains(&bytes[16])
     {
         return Ok((
-            u16::from_le_bytes(bytes[12..14].try_into()?) as u32,
-            u16::from_le_bytes(bytes[14..16].try_into()?) as u32,
+            u16::from_le_bytes(image_field(bytes, 12)?) as u32,
+            u16::from_le_bytes(image_field(bytes, 14)?) as u32,
         ));
     }
     bail!("対応画像のヘッダーがありません")

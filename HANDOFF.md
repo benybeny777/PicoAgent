@@ -5,7 +5,7 @@
 ## 現在の状態
 
 - 最終確認日: 2026-09-12
-- MMDキャラ実装: PR #273、`codex/mmd-character-design`。利用者が実装再開を明示済み。#270上に積み、Aivisと剛体物理を除外して登録・表示・自然姿勢・人格・口パクを進める。次は固定ランタイム生成、Rust統合検査、公式2モデルの実登録と実画面調整。作業場所は`temp/mmd-character-design`、ローカル人格は同worktreeの`temp/mmd-demo-personas.json`。未検証のままマージしない。
+- MMDキャラ実装: PR #273、`codex/mmd-character-design`。#270上に積み、Aivisと剛体物理を除外して登録・描画・自然姿勢・表情・口パクを追加。次は#270のmain統合後にPRのマージ先をmainへ付け替え、実機確認を進める。#270やその作業ブランチへ本作業からマージしない。作業場所は`temp/mmd-character-design`。ローカル人格は同worktreeの`temp/mmd-demo-personas.json`、2体はアプリの追加キャラクター領域へ登録済み。比較画面は同worktreeの`temp/mmd-app-check/compare.html`。検証結果と未確認事項はPR本文を参照する。
 - UI操作・設定保存の信頼性改善: `codex/ui-ux-reliability` の修正用PR #270。差分保存、キー単位の競合検出、スケジュール状態分離、入力草稿、添付付き再試行まで実装済み。最新main（PR #271）との競合を解消し、`cargo xtask verify` は全54項目、Rust lib 535件、UI 132件が合格。次はWindows実機受入。条件は `docs/TASKS.md`。利用者の依頼はPR作成までで、マージしない。
 - 未完了の素材補修・実機受入・設計のみの将来開発は[docs/TASKS.md](docs/TASKS.md)を参照し、着手条件を満たす項目から進める。
 - 配布版の更新は本体のマージと別に扱い、配布リポジトリの公開状態を確認する。

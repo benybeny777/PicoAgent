@@ -3636,6 +3636,7 @@ dependencies = [
  "cpal",
  "dirs",
  "ed25519-dalek",
+ "encoding_rs",
  "enigo",
  "feed-rs",
  "futures",

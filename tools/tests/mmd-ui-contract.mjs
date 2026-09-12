@@ -4,7 +4,41 @@ import vm from "node:vm";
 import test from "node:test";
 
 const source = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+test("フレーム画像がないMMDでも会話中と喜びの状態を保つ", () => {
+  const animation = source.match(/function setAnimation\(name, force = false\) \{[\s\S]*?\n\}/)[0];
+  const calls = [];
+  const context = vm.createContext({
+    animations: {}, animationName: "idle", live2dActive: false, frame: 0, lastFrameAt: 0,
+    performance: { now: () => 1 }, character: { dataset: {} }, wakeAnimationLoop() {},
+    mmdController: { setExpression: name => calls.push(name) },
+  });
+  vm.runInContext(animation, context);
+  context.setAnimation("talking");
+  assert.equal(context.animationName, "talking");
+  context.setAnimation("pleased");
+  assert.equal(context.animationName, "pleased");
+  assert.deepEqual(calls, ["talking", "pleased"]);
+});
 const start = source.match(/async function startMmd\(config, generation\) \{[\s\S]*?\n\}/)[0];
+test("MMD小型アイコンに通常立ち絵の下方向オフセットを重ねない", () => {
+  const framing = source.match(/function applyCharacterFraming\(\) \{[\s\S]*?\n\}/)[0];
+  const values = {};
+  const context = vm.createContext({
+    characterManifest: { id: "demo" }, characterFraming: {}, currentLayout: "chat",
+    character: { dataset: { renderKind: "mmd" } },
+    FRAMING_PRESETS: { upper: { zoom: 1.55, x: 0, y: 18 }, bust: { zoom: 2.05, x: 0, y: 38 } },
+    applyCharacterZoom: value => { values.zoom = value; },
+    applyCharacterOffset: (x, y) => { values.x = x; values.y = y; },
+  });
+  vm.runInContext(framing, context);
+  for (const layout of ["chat", "bar"]) {
+    context.currentLayout = layout; context.applyCharacterFraming();
+    assert.deepEqual(values, { zoom: 1.55, x: 0, y: 0 });
+  }
+  context.characterFraming = { demo: { bar: { zoom: 2, x: 4, y: 5 } } };
+  context.applyCharacterFraming();
+  assert.deepEqual(values, { zoom: 2, x: 4, y: 5 });
+});
 
 function harness() {
   let finish;

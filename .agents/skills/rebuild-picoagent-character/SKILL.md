@@ -1,6 +1,6 @@
 ---
 name: rebuild-picoagent-character
-description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2Dキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、ローカル物理演算、実画面QAまで再現する。実写テスト、Photoshopでの有効な高精細化、ユーザー指定時のClaude CLIレビュー、旧3D実験の撤去にも使う。
+description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2D、MMDキャラクターを追加・差し替え・高品質化し、胸上構図、透過、局所表情、高フレーム数、実画面QAまで再現する。MMDは元PMXのローカル登録と姿勢・モーフ調整を行う。実写テスト、Photoshopでの有効な高精細化、ユーザー指定時のClaude CLIレビュー、旧3D実験の撤去にも使う。
 ---
 
 # PicoAgentキャラクター再構築

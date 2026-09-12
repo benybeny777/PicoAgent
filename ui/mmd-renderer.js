@@ -90,6 +90,10 @@
       const mesh = container.meshes.find(item => item.metadata?.isMmdModel) || container.meshes[0];
       if (!mesh?.metadata?.skeleton) throw new Error('PMXのボーン情報を読み込めませんでした');
       const morphNames = (mesh.metadata.morphs || []).map(item => item.name);
+      // MMD化後は絶対行列APIが置き換わるため、読み込み直後の骨から顔位置を保存する。
+      const sourceSkeleton = mesh.metadata.skeleton;
+      sourceSkeleton.computeAbsoluteMatrices(true);
+      const eyes = ['左目', '右目'].map(name => sourceSkeleton.bones.find(bone => bone.name === name)?.getAbsolutePosition()).filter(Boolean);
       const runtime = new B.MmdRuntime(scene);
       const model = runtime.createMmdModel(mesh, { buildPhysics: false, materialProxyConstructor: B.MmdStandardMaterialProxy });
       const bones = new Map(model.runtimeBones.map(bone => [bone.name, bone.linkedBone]));
@@ -99,8 +103,10 @@
       const blink = choose('blink', ['まばたき', '瞬き']);
       const mouthMorph = choose('mouth', ['あ', 'あ２', 'A']);
       const smile = choose('happy', ['笑い', 'にこり', '笑顔']);
+      const smileCorners = config.morphs?.happy ? [] : (morphSet.has('口角上げ')
+        ? ['口角上げ'] : ['左口角上げ', '右口角上げ'].filter(name => morphSet.has(name)));
       const sad = choose('sad', ['困る', '悲しい']);
-      const affectedMorphs = [...new Set([blink, mouthMorph, smile, sad].filter(Boolean))];
+      const affectedMorphs = [...new Set([blink, mouthMorph, smile, sad, ...smileCorners].filter(Boolean))];
       const setMorph = (name, value) => { if (name) model.morph.setMorphWeight(name, clamp(value)); };
       let framing = 'bust';
       const positions = mesh.getVerticesData('position');
@@ -108,13 +114,17 @@
       for (let i = 1; i < (positions?.length || 0); i += 3) { low = Math.min(low, positions[i]); high = Math.max(high, positions[i]); }
       if (!Number.isFinite(low) || high <= low) { low = 0; high = 20; }
       const height = high - low;
+      const faceCenter = eyes.length
+        ? eyes.reduce((sum, point) => sum.add(point), B.Vector3.Zero()).scale(1 / eyes.length)
+        : new B.Vector3(0, high - height * 0.15, 0);
+      faceCenter.y -= height * 0.015;
       function setFraming(kind = 'bust') {
         if (disposed) return;
         framing = kind;
         const head = ['head', 'chat', 'bar'].includes(kind);
         const full = kind === 'full';
-        const visibleHeight = height * (full ? 1.08 : head ? 0.28 : 0.48);
-        camera.setTarget(new B.Vector3(0, high - visibleHeight * (full ? 0.47 : 0.44), 0));
+        const visibleHeight = height * (full ? 1.08 : head ? 0.24 : 0.48);
+        camera.setTarget(head ? faceCenter : new B.Vector3(0, high - visibleHeight * (full ? 0.47 : 0.44), 0));
         const aspect = Math.max(0.2, canvas.clientWidth / Math.max(1, canvas.clientHeight));
         camera.radius = visibleHeight / (2 * Math.tan(camera.fov / 2)) * Math.max(1, 0.65 / aspect);
         camera.alpha = -Math.PI / 2;
@@ -122,9 +132,9 @@
       }
       // MMDの左右はモデルから見た側。元の回転を基準に合成し、PMXを保存し直さない。
       const natural = config.naturalPose || {
-        '左肩': [0, 0, -3], '右肩': [0, 0, 3],
-        '左腕': [0, 0, -52], '右腕': [0, 0, 52],
-        '左ひじ': [0, -8, 0], '右ひじ': [0, 8, 0],
+        '左肩': [0, 0, -2], '右肩': [0, 0, 2],
+        '左腕': [0, 0, -35], '右腕': [0, 0, 35],
+        '左ひじ': [0, 10, 0], '右ひじ': [0, -10, 0],
       };
       function rotate(name, angles) {
         const bone = bones.get(name), base = rest.get(name);
@@ -144,7 +154,11 @@
           const cycle = time % 4.7;
           setMorph(blink, cycle < 0.16 ? Math.sin(cycle / 0.16 * Math.PI) : 0);
         }
-        if (expression === 'happy') setMorph(smile, 0.7);
+        // 笑い目の中間値は半目になるため、口角を使えるモデルは開眼の笑顔にする。
+        if (expression === 'happy') {
+          if (smileCorners.length) for (const name of smileCorners) setMorph(name, 0.65);
+          else { setMorph(blink, 0); setMorph(smile, 1); }
+        }
         if (expression === 'sad') setMorph(sad, 0.65);
         setMorph(mouthMorph, mouth);
         model.beforePhysics(null);
@@ -154,15 +168,25 @@
       observer = new ResizeObserver(() => { if (!disposed) { engine.resize(); setFraming(framing); } });
       observer.observe(canvas);
       engine.resize();
-      engine.runRenderLoop(() => { update(); scene.render(); });
+      let lastFrame = -Infinity;
+      engine.runRenderLoop(() => {
+        const now = performance.now();
+        if (document.hidden || now - lastFrame < 1000 / 30) return;
+        lastFrame = now;
+        update();
+        scene.render();
+      });
       const result = {
         setFraming,
-        setExpression(name) { if (!disposed) expression = ['happy', 'sad'].includes(name) ? name : 'normal'; },
+        setExpression(name) {
+          if (!disposed) expression = ['happy', 'pleased', 'success'].includes(name) ? 'happy'
+            : ['sad', 'concern'].includes(name) ? 'sad' : 'normal';
+        },
         setMouthLevel(value) { if (!disposed) mouth = clamp(value); },
         setMotionEnabled(enabled) { if (!disposed) { motion = Boolean(enabled); if (!motion) mouth = 0; } },
         setPose(value) { if (!disposed) pose = value === 'original' ? 'original' : 'natural'; },
         capturePreview() { ensureActive(); update(); scene.render(); return canvas.toDataURL('image/png'); },
-        capabilities: { mouth: Boolean(mouthMorph), blink: Boolean(blink), happy: Boolean(smile), sad: Boolean(sad), physics: false },
+        capabilities: { mouth: Boolean(mouthMorph), blink: Boolean(blink), happy: Boolean(smile || smileCorners.length), sad: Boolean(sad), physics: false },
         dispose,
       };
       instances.set(canvas, result);

@@ -1306,7 +1306,7 @@ function setAnimation(name, force = false) {
     wakeAnimationLoop();
     return;
   }
-  animationName = (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
+  animationName = mmdController ? name : (animations[sourceName] || live2dActive) ? sourceName : "idle"; frame = 0; lastFrameAt = performance.now();
   wakeAnimationLoop();
   if (mmdController) { character.dataset.motion = "none"; mmdController.setExpression(name); return; }
   if (live2dActive) { character.dataset.motion = "none"; playLive2DMotion(animationName); return; }
@@ -5012,6 +5012,8 @@ function applyCharacterFraming() {
           x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
           y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
         }
+      : character.dataset.renderKind === "mmd" && ["chat", "bar"].includes(currentLayout)
+        ? { zoom: 1.55, x: 0, y: 0 }
       : isNativeBustImage && usesStreamImageCrop
         ? FRAMING_PRESETS.full
         : isCompactImage || usesStreamImageCrop || isLive2d ? FRAMING_PRESETS.upper : FRAMING_PRESETS.bust;
