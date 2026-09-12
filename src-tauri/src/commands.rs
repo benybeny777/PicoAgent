@@ -2498,7 +2498,7 @@ fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
 }
 
 fn effective_tts_voice(state: &AppState) -> TtsVoice {
-    // 読込失敗時の代替キャラも含め、実際に表示できた人格と声を揃える。
+    // 保存値ではなく実際に読み込めた人格へ声を揃える（切替直後の取り違えを防ぐ）。
     let active = state.character_id.lock().unwrap().clone();
     let character_id = if active.is_empty() {
         state.config.get("PICOAGENT_CHARACTER", "mugi")
@@ -5174,7 +5174,7 @@ mod tests {
     }
 
     #[test]
-    fn 代替表示したキャラの声を保存中のキャラより優先する() {
+    fn 表示中のキャラの声を保存中のキャラより優先する() {
         use super::{effective_tts_voice, AppState};
         let state = AppState::new();
         state.config.set("PICOAGENT_CHARACTER", "hiyori");

@@ -8,10 +8,12 @@ use tauri::{AppHandle, Manager};
 
 /// メインウィンドウを表示して前面へ出す。各段の失敗は診断ログへ残して続行する
 /// （どれか1つが失敗しても、残りで前面化できることがあるため）。
+///
+/// 呼び出し元はホットキーの呼び出しと多重起動だけで、どちらも利用者が明示的に
+/// 「窓を出して」と操作した場合である。起動準備中は窓を隠すが、ここで隠したままにすると
+/// 準備が長引いたときも止まったときも呼び戻す手段が無くなるため、準備中は
+/// 起動画面（キャラクターを出さない待ち画面）を出して応答する。
 pub fn surface_main_window(app: &AppHandle) {
-    if !crate::boot_screen::is_finished(app) {
-        return;
-    }
     let Some(window) = app.get_webview_window("main") else {
         crate::log_paths::append_app_log(app, "前面化するメインウィンドウがありません。");
         return;

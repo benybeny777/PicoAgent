@@ -16,8 +16,7 @@
     "sourceUrl": "https://hub.aivis-project.com/aivm-models/a59cb814-0083-4369-8542-f51a29e72af7"
   },
   "boot": {
-    "sleeping": "boot/sleeping.png",
-    "useSleepingOnStartup": true
+    "sleeping": "boot/sleeping.png"
   },
   "persona": {
     "personality": "年下っぽくかわいい作業相棒。明るく素直で、少し甘えんぼう。役に立てるとすぐうれしそうにするが、ユーザーを家族呼びしない。観察上手で、小さな変化に気づいて軽く声をかける。失敗しても落ち込みすぎず、次にできることを一緒に探す。楽観的だが雑には断定せず、根拠が弱い時は素直に保留する",

@@ -340,7 +340,7 @@ async function openScene({
   streamBackground = process.env.SHOOT_STREAM_BACKGROUND || "pastel",
   characterFraming = {},
   bootHoldMs = 0, sendDelayMs = 80, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
-  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "", bootRandomValue = null,
+  gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
   engineReadyDelayMs = 0, voiceReadyDelayMs = 0, speechDelayMs = 0,
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
@@ -350,24 +350,6 @@ async function openScene({
   await page.clock.install();
   await page.clock.resume();
   await page.addInitScript(mock({ theme, history, reply, characterId, layout, streamBackground, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }));
-  if (Number.isFinite(bootRandomValue)) {
-    await page.route("**/renderer.js*", async route => {
-      const response = await route.fetch();
-      const source = await response.text();
-      // 乱数を固定して寝姿の選択を検査する。呼び出しの形を変えたらここで気づけるよう、
-      // 見つからなければ差し替えずに失敗させる。
-      const marker = "chooseStartupSleepingCharacter(startupSleepingCandidates(catalog))";
-      if (!source.includes(marker)) throw new Error("起動寝姿のランダム選択箇所を差し替えられません");
-      await route.fulfill({
-        response,
-        contentType: "text/javascript",
-        body: source.replace(
-          marker,
-          `chooseStartupSleepingCharacter(startupSleepingCandidates(catalog), ${JSON.stringify(bootRandomValue)})`,
-        ),
-      });
-    });
-  }
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -2228,45 +2210,6 @@ if (process.env.SHOOT_THINKING_INDICATOR) {
   await browser.close();
   server.close();
   console.log(`考え中表示検査完了: ${output}`);
-  process.exit(0);
-}
-
-if (process.env.SHOOT_BOOT_RANDOM) {
-  const output = join(ROOT, "temp", "boot-random-qa");
-  mkdirSync(output, { recursive: true });
-  // 期待値は一覧（characters/index.json）から導く。キャラを足しても検査が追従する。
-  const bootIndex = JSON.parse(await readFile(join(ROOT, "characters", "index.json"), "utf8"));
-  const sleepingIds = (bootIndex.characters || [])
-    .filter(entry => entry.bootSleeping === true)
-    .map(entry => entry.id);
-  if (sleepingIds.length < 2) throw new Error(`寝姿を持つキャラが足りません: ${sleepingIds.join(",")}`);
-  const pick = value => sleepingIds[Math.min(sleepingIds.length - 1, Math.floor(value * sleepingIds.length))];
-  const cases = [0.05, 0.45, 0.85].map(value => ({ value, expected: pick(value) }));
-  const results = [];
-  for (const item of cases) {
-    // 選択中キャラを寝姿3体以外にして、起動用の絵が選択キャラへ引きずられないことも確認する。
-    const page = await openScene({ characterId: "hiyori", layout: "pet", bootHoldMs: 4000, waitForReady: false, bootRandomValue: item.value });
-    await page.waitForFunction(expected => {
-      const app = document.getElementById("petApp");
-      const image = document.getElementById("bootPetImage");
-      return app?.classList.contains("is-booting") && app?.dataset.bootCharacterId === expected
-        && image?.complete && image.naturalWidth > 0 && image.src.includes(`/assets/characters/${expected}/boot/sleeping.png`);
-    }, item.expected, { timeout: 10000 });
-    const state = await page.evaluate(() => ({
-      selectedCharacterId: typeof characterManifest === "object" ? characterManifest?.id || "" : "",
-      bootCharacterId: document.getElementById("petApp")?.dataset.bootCharacterId || "",
-      bootImage: document.getElementById("bootPetImage")?.src || "",
-    }));
-    const file = join(output, `${item.expected}.png`);
-    await page.screenshot({ path: file, omitBackground: true });
-    results.push({ ...item, ...state, file });
-    await page.close();
-  }
-  await writeFile(join(output, "result.json"), `${JSON.stringify({ results }, null, 2)}\n`);
-  await trimmer.close();
-  await browser.close();
-  server.close();
-  console.log(`起動寝姿ランダム検査完了: ${output}`);
   process.exit(0);
 }
 

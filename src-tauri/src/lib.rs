@@ -83,8 +83,7 @@ pub fn run() {
         .on_page_load(|window, payload| {
             // フロント自体が壊れた場合も、完成した文字だけの診断ページへ到達できる。
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
-                && (payload.url().scheme() == boot_screen::SCHEME
-                    || payload.url().host_str() == Some("picoboot.localhost"))
+                && boot_screen::is_page_url(payload.url().scheme(), payload.url().host_str())
             {
                 if let Err(error) = window.show() {
                     log_paths::append_app_log(window.app_handle(), &format!("診断画面を表示できません: {error}"));

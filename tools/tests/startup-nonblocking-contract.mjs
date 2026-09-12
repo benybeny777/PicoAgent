@@ -5,6 +5,11 @@ import test from "node:test";
 const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
 const commands = await readFile(new URL("../../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const layout = await readFile(new URL("../../src-tauri/src/layout.rs", import.meta.url), "utf8");
+const bootScreen = await readFile(new URL("../../src-tauri/src/boot_screen.rs", import.meta.url), "utf8");
+const windowSurface = await readFile(new URL("../../src-tauri/src/window_surface.rs", import.meta.url), "utf8");
+const lib = await readFile(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const styles = await readFile(new URL("../../ui/styles.css", import.meta.url), "utf8");
+const indexHtml = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
 const startupStart = renderer.indexOf("(async () => {\n  startBootLogTicker();");
 const startupEnd = renderer.indexOf("\n})().catch(error => {", startupStart);
 assert.ok(startupStart >= 0 && startupEnd > startupStart, "起動シーケンスを抽出できません");
@@ -66,12 +71,45 @@ test("長いダウンロード中は進捗通知を続け通常画面で停止�
 });
 
 test("起動途中の仮キャラを表示せず最終DOMの後で窓を表示する", async () => {
-  assert.doesNotMatch(renderer, /chooseStartupSleepingCharacter|prepareBootCharacter/);
+  assert.doesNotMatch(renderer, /chooseStartupSleepingCharacter|prepareBootCharacter|bootPetImage/);
   const config = JSON.parse(await readFile(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
   assert.equal(config.app.windows.find(w => w.label === 'main').visible, false);
   const release = renderer.slice(renderer.indexOf('async function releaseBootUi()'), startupStart);
-  assert.ok(release.indexOf('classList.remove("is-booting")') < release.indexOf('revealMain()'));
-  assert.match(release, /if \(bootBackendFinished\)/);
+  assert.ok(release.indexOf('classList.remove("is-booting")') < release.indexOf('revealMainWindow()'));
+  assert.match(release, /if \(bootBackendFinished\) await revealMainWindow\(\)/);
+});
+
+test("窓を出す入口を1つに保ち再試行経路でも描画を確定させる", () => {
+  // 未描画canvasのまま窓を出さない保証を、初回・再試行のどちらでも通す。
+  const reveal = renderer.slice(renderer.indexOf("async function revealMainWindow()"), renderer.indexOf("async function finishBootBackend()"));
+  assert.match(reveal, /try \{ mmdController\?\.capturePreview\(\); \}/);
+  // 描画確定の失敗で表示まで止めない（窓が出ないと操作手段が無くなる）。
+  assert.ok(reveal.indexOf("catch (error)") < reveal.indexOf("await window.picoagent.revealMain()"));
+  assert.equal(renderer.match(/picoagent\.revealMain\(\)/g).length, 1, "表示の入口はrevealMainWindowだけにする");
+  assert.match(renderer, /if \(bootUiReleased\) await revealMainWindow\(\)/);
+  assert.match(commands, /pub fn pet_reveal_main[\s\S]*?boot_screen::is_finished/);
+});
+
+test("再読込のたびに停止監視を張り直し準備中でも窓を呼び戻せる", () => {
+  // 設定反映後の再初期化（restart_app → pet:reload）も新しい起動として監視する。
+  // 張り直さないと、2回目以降の停止で窓も案内ページも出ず戻す手段が無くなる。
+  assert.match(commands, /pub fn pet_frontend_ready[\s\S]*?boot_screen::mark_started/);
+  assert.match(bootScreen, /pub fn mark_started[\s\S]*?finished\.store\(false[\s\S]*?shown\.store\(false[\s\S]*?watch\(app\.clone\(\)\)/);
+  // 古い監視が新しい起動を停止扱いにしないよう世代で分ける。
+  assert.match(bootScreen, /generation: AtomicU64/);
+  assert.match(bootScreen, /fn outdated\(app: &AppHandle, generation: u64\)/);
+  assert.match(bootScreen, /generation\s*\.fetch_add\(1, Ordering::SeqCst\)/);
+  // 呼び出しホットキーと多重起動は準備中でも応答する（窓を隠したまま閉じ込めない）。
+  assert.doesNotMatch(windowSurface, /is_finished/);
+  // 案内ページのURL規則は boot_screen へ集約する。
+  assert.match(bootScreen, /pub fn is_page_url/);
+  assert.match(lib, /boot_screen::is_page_url\(payload\.url\(\)\.scheme\(\), payload\.url\(\)\.host_str\(\)\)/);
+  assert.doesNotMatch(lib, /picoboot\.localhost/);
+});
+
+test("起動画面はキャラクター枠を持たない", () => {
+  assert.doesNotMatch(indexHtml, /boot-character|boot-shadow/);
+  assert.doesNotMatch(styles, /boot-character|boot-shadow|data-boot-artwork/);
 });
 
 test("finishBoot失敗後も位置意図を保持して再試行できる", () => {
