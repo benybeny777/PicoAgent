@@ -24,9 +24,14 @@ test("上端メニューのボタン操作をウィンドウドラッグが奪�
   assert.match(menu, /if \(button\.disabled\) return;[\s\S]*?button\.disabled = true;/);
   assert.match(menu, /await window\.picoagent\.openSettings\(tab\)/);
   assert.match(menu, /finally \{\s*button\.disabled = false;/);
-  assert.match(commands, /pub fn pet_open_settings[\s\S]*?open_settings_tab\(&app, tab\.as_deref\(\)\);\s*Ok\(\(\)\)/);
-  assert.match(commands, /WebviewWindowBuilder::new\(app, "settings"[\s\S]*?\.center\(\)[\s\S]*?\.visible\(true\)/,
-    "設定画面はWebView初期化前の問い合わせに依存せず表示する");
+  assert.match(commands, /pub async fn pet_open_settings[\s\S]*?spawn_blocking\(move \|\| open_settings_tab\(&app, tab\.as_deref\(\)\)\)\s*\.await/);
+  assert.match(commands, /fn open_settings_tab\([^)]*\)[^{]*-> Result<\(\), String>/);
+  assert.match(commands, /window\.additional_browser_args\.as_deref\(\)/,
+    "メインと設定でWebView2の起動オプションを一致させる");
+  assert.match(commands, /builder = builder\.additional_browser_args\(args\)/);
+  const newSettings = commands.slice(commands.indexOf('let path = tab'), commands.indexOf('const SETTINGS_WINDOW_WIDTH'));
+  assert.doesNotMatch(newSettings, /\.center\(\)/,
+    "WebView初期化前の中央化を行わない");
   assert.doesNotMatch(commands, /settings\.outer_size\(\)/,
     "設定画面の初期化前に設定WebViewへ寸法を問い合わせない");
   const existingSettings = commands.slice(commands.indexOf('if let Some(win) = app.get_webview_window("settings")'), commands.indexOf('let path = tab'));
