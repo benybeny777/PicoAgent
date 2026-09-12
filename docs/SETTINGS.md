@@ -64,11 +64,11 @@
 | `PICOAGENT_COMPANION_MODE` | `both` | 基本 | 相棒の用途（`life` / `work` / `both`）。初回案内では質問せず`both`を保存し、設定画面で変更する |
 | `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` | `true` | 基本 | キャラクター別の関係性と共有作業記録を保存する。OFFでは既存データを消さず、更新とAI文脈への差し込みを止める |
 | `PICOAGENT_ONBOARDING_DONE` | `false` | 基本 | 初回3択案内の完了状態 |
-| `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる |
+| `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる。初回セットアップでAivisの自動導入が成功した時点で `true` を保存する。設定画面からの導入・更新では既存のON/OFFを変えない |
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（内部設定。通常UIでは非表示。旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID（内部設定。通常UIでは非表示） |
-| `PICOAGENT_TTS_VOLUME` | `50` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映。ミュートまたは0では全キャラの口パクも停止 |
+| `PICOAGENT_TTS_VOLUME` | `35` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映。ミュートまたは0では全キャラの口パクも停止 |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker/style ID 上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |

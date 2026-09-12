@@ -87,25 +87,13 @@
       <button id="relationshipClear" class="relationship-clear" type="button">記録をすべて消す</button>
       <label id="variantRow" class="variant-row" hidden>スタイル<select id="variantSelect"></select></label>
     </aside>
-    <section id="onboarding" class="onboarding" hidden aria-modal="true" role="dialog" aria-labelledby="onboardingComponentTitle">
+    <!-- 初回案内はLive2D追加の1画面だけ。追加機能の選択画面は廃止した。
+         読み上げ（Aivis）は選ばせず起動時に自動導入し、進捗は起動画面の状態表示へ出す。
+         音声入力・Office変換・文書ツールは「設定 → 追加機能・更新」で導入する。 -->
+    <section id="onboarding" class="onboarding" hidden aria-modal="true" role="dialog" aria-labelledby="onboardingCharacterTitle">
       <div class="onboarding-card">
         <div class="onboarding-mark">PicoAgent</div>
-        <div id="onboardingComponentStep">
-          <h1 id="onboardingComponentTitle">追加機能を準備する？</h1>
-          <p>必要なものだけ選べます。AivisとWhisperは公式配布元から直接取得します。その他は提供元のページと導入手順を案内します。</p>
-          <div class="onboarding-components">
-            <label data-component-id="aivis"><input type="checkbox" value="aivis"><span><b>音声読み上げ</b><small>Aivis公式配布・約0.8GB＋音声モデル（導入後に読み上げON）</small></span><em>確認中</em></label>
-            <label data-component-id="whisper"><input type="checkbox" value="whisper"><span><b>音声入力・文字起こし</b><small>whisper.cpp公式配布・約0.5GB</small></span><em>確認中</em></label>
-            <label data-component-id="office"><input type="checkbox" value="office"><span><b>Office変換</b><small>LibreOffice公式インストーラ</small></span><em>確認中</em></label>
-            <label data-component-id="tools"><input type="checkbox" value="tools"><span><b>PDF・画像・文書ツール</b><small>各ツールの公式配布</small></span><em>確認中</em></label>
-          </div>
-          <p id="onboardingComponentStatus" class="onboarding-component-status" aria-live="polite"></p>
-          <div class="onboarding-component-actions">
-            <button type="button" data-onboarding-action="install-components">選んだ機能を公式から取得</button>
-            <button type="button" data-onboarding-action="skip-components">今はしない</button>
-          </div>
-        </div>
-        <div id="onboardingCharacterStep" hidden>
+        <div id="onboardingCharacterStep">
           <h1 id="onboardingCharacterTitle">Live2Dモデルを追加する？</h1>
           <p>無料の公式サンプルを取得するか、手元のモデルを追加できます。ダウンロード後はこの画面へ戻って追加してください。</p>
           <div class="onboarding-choices">
@@ -113,7 +101,7 @@
             <button type="button" data-onboarding-action="add-character"><b>取得したLive2DをPicoAgentへ追加</b><span>zip／フォルダを選ぶ画面へ進む</span></button>
             <button type="button" data-onboarding-action="skip-character"><b>今はしない</b><span>いつでも「キャラ登録」から追加できます</span></button>
           </div>
-          <button class="onboarding-back" type="button" data-onboarding-action="back-components">← 追加機能へ戻る</button>
+          <p class="onboarding-component-note">音声入力・Office変換・PDF／画像／文書ツールは「設定 → 追加機能・更新」から導入できます。</p>
         </div>
       </div>
     </section>

@@ -40,9 +40,7 @@ const relationshipClear = document.getElementById("relationshipClear");
 const variantRow = document.getElementById("variantRow");
 const variantSelect = document.getElementById("variantSelect");
 const onboarding = document.getElementById("onboarding");
-const onboardingComponentStep = document.getElementById("onboardingComponentStep");
 const onboardingCharacterStep = document.getElementById("onboardingCharacterStep");
-const onboardingComponentStatus = document.getElementById("onboardingComponentStatus");
 const bubbleResize = document.getElementById("bubbleResize");
 const imagePreview = document.getElementById("imagePreview");
 const attachmentSuggestions = document.getElementById("attachmentSuggestions");
@@ -148,7 +146,7 @@ let animationLoop = null;
 let bootLogTimer = null;
 let lastBootStatus = "";
 let lastAssistantText = "";
-let voiceVolume = 1;
+let voiceVolume = 0.35; // docs/SETTINGS.md の PICOAGENT_TTS_VOLUME 既定(35)と揃える。設定適用前に鳴る音を100%にしない
 let relationshipState = null;
 let relationshipMemoryEnabled = true;
 const NOTICE_STORAGE_KEY = "picoagent.actionCenter.v1";
@@ -5837,7 +5835,11 @@ async function releaseBootUi() {
   if (!info.onboardingDone && onboarding) {
     onboarding.hidden = false;
     stopVoice();
-    showOnboardingStep("components");
+    showOnboarding();
+    // 案内の表示は待たせない。取得は裏で進め、終わったら読み上げが使える状態になる。
+    autoInstallVoiceOnFirstRun().catch(error => {
+      logApp("warn", "音声読み上げの自動準備を開始できませんでした", errorDetail(error));
+    });
   } else {
     scheduleContinuousListening();
   }
@@ -5847,108 +5849,51 @@ async function releaseBootUi() {
   releaseBootUi().finally(() => wakeAnimationLoop());
 });
 
-function showOnboardingStep(step) {
-  const components = step === "components";
-  const character = step === "character";
-  if (onboardingComponentStep) onboardingComponentStep.hidden = !components;
-  if (onboardingCharacterStep) onboardingCharacterStep.hidden = !character;
-  const title = character ? "onboardingCharacterTitle" : "onboardingComponentTitle";
-  onboarding?.setAttribute("aria-labelledby", title);
-  const focusTarget = character ? onboardingCharacterStep?.querySelector("button[data-onboarding-action]")
-    : onboardingComponentStep?.querySelector("input:not([disabled]),button[data-onboarding-action]");
-  focusTarget?.focus();
-  if (components) refreshOnboardingComponents();
+// 初回案内はLive2D追加の1画面だけ。追加機能の選択画面は廃止した。
+// 1件のために全画面のモーダルを挟む価値がなく、読み上げは自動導入、
+// 残りは重要度が低いので「設定 → 追加機能・更新」への一行案内で足りる。
+function showOnboarding() {
+  if (onboardingCharacterStep) onboardingCharacterStep.hidden = false;
+  onboarding?.setAttribute("aria-labelledby", "onboardingCharacterTitle");
+  onboardingCharacterStep?.querySelector("button[data-onboarding-action]")?.focus();
 }
 
-async function refreshOnboardingComponents() {
-  if (!onboardingComponentStep) return;
+// 音声読み上げ（Aivis）は選ばせず、初回に自動で入れる。声はこの製品の中心なので、
+// 選択式にすると多くの利用者が声の出ない状態で使い始めてしまう。
+// 進捗は専用の画面を作らず起動画面へ出す。setStatus は起動中なら起動画面の状態欄と
+// 起動ログへ、通常画面へ戻ったあとはステータス行へ同じ文を流すため、
+// 取得が数分かかっても表示の行き先を失わない。案内も操作も止めない。
+async function autoInstallVoiceOnFirstRun() {
+  const statuses = await window.picoagent.settings.componentStatus();
+  const aivis = statuses.find(item => item.id === "aivis");
+  if (!aivis || aivis.ready || !aivis.available) return;
+  let releaseProgress = null;
   try {
-    const statuses = await window.picoagent.settings.componentStatus();
-    let attentionCount = 0;
-    for (const item of statuses) {
-      const row = onboardingComponentStep.querySelector(`[data-component-id="${item.id}"]`);
-      if (!row) continue;
-      row.classList.toggle("is-ready", item.ready);
-      row.classList.toggle("is-unavailable", !item.available);
-      row.classList.toggle("is-external", item.installMode === "external");
-      const input = row.querySelector("input");
-      if (input) input.disabled = item.ready || !item.available || item.installMode === "external";
-      const badge = row.querySelector("em");
-      const needsAttention = item.updateAvailable || item.newerThanTarget || item.versionUnknown;
-      if (needsAttention) attentionCount += 1;
-      if (badge) badge.textContent = item.updateAvailable
-        ? "設定で更新"
-        : (item.newerThanTarget || item.versionUnknown
-          ? "設定で確認"
-          : (item.ready ? "準備済み" : (item.installMode === "managed" ? "公式から取得" : "設定で案内")));
-      let source = row.querySelector("a.onboarding-component-source");
-      if (item.installMode === "external" && item.sources?.[0]?.url) {
-        if (!source) {
-          source = document.createElement("a");
-          source.className = "onboarding-component-source";
-          source.target = "_blank";
-          source.rel = "noopener noreferrer";
-          source.textContent = "公式ページ";
-          row.append(source);
-        }
-        source.href = item.sources[0].url;
-      } else {
-        source?.remove();
-      }
-    }
-    if (onboardingComponentStatus) {
-      onboardingComponentStatus.textContent = attentionCount
-        ? `導入済みの追加機能に${attentionCount}件の確認項目があります。初回設定の完了後、「設定 → 追加機能・更新」で確認できます。`
+    releaseProgress = await window.picoagent.listen("component:progress", payload => {
+      // ローカルモデルの取得中はそちらが状態行の主。送信を塞いでいる方の理由を消さない。
+      if (localEngineRequired && localEnginePhase !== "ready") return;
+      const downloaded = Number(payload?.downloaded) || 0;
+      const total = Number(payload?.total) || 0;
+      const mb = bytes => (bytes / 1_000_000).toFixed(0);
+      const size = total > 0
+        ? ` ${Math.round(downloaded / total * 100)}%（${mb(downloaded)} / ${mb(total)}MB）`
         : "";
-    }
+      setStatus(`音声読み上げを準備中…${size} ※初回だけ`);
+    });
   } catch (error) {
-    // 状態を取れなかったときは、初期表示の「確認中」を必ず終わらせる。
-    // 放置すると5項目すべてが「確認中」のまま固まり、待てば変わるように見えてしまう。
-    settleOnboardingComponentBadges(navigator.onLine ? "確認できません" : "オフライン");
-    if (!navigator.onLine) {
-      if (onboardingComponentStatus) onboardingComponentStatus.textContent = "オフラインのため取得確認を見送りました。基本機能はそのまま使えます。あとから「設定 → 追加機能・更新」で導入できます。";
-      return;
-    }
-    logApp("warn", "追加機能の状態を確認できませんでした", errorDetail(error));
-    if (onboardingComponentStatus) onboardingComponentStatus.textContent = `状態を確認できません: ${error?.message || error}。このまま進めて、あとから「設定 → 追加機能・更新」で導入できます。`;
+    logApp("warn", "音声読み上げの進捗を受け取れませんでした", errorDetail(error));
   }
-}
-
-// 取得できなかった項目の見出しバッジを、待ち状態のままにしない。
-function settleOnboardingComponentBadges(label) {
-  if (!onboardingComponentStep) return;
-  for (const row of onboardingComponentStep.querySelectorAll("[data-component-id]")) {
-    const badge = row.querySelector("em");
-    if (badge && badge.textContent.trim() === "確認中") badge.textContent = label;
-    const input = row.querySelector("input");
-    if (input) input.disabled = true; // 状態不明のまま取得を走らせない
-  }
-}
-
-async function installSelectedOnboardingComponents() {
-  const ids = [...onboardingComponentStep.querySelectorAll("input:checked:not([disabled])")].map(input => input.value);
-  if (!ids.length) {
-    showOnboardingStep("character");
-    return;
-  }
-  onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = true; });
-  if (onboardingComponentStatus) onboardingComponentStatus.textContent = "選んだ追加機能を準備しています…";
   try {
-    // 初回画面で「音声読み上げ」を明示選択した場合だけ、導入成功後に読み上げも有効にする。
-    // 設定画面からの単なる導入・更新では、既存のON/OFFを勝手に変えない。
-    await window.picoagent.settings.installComponents(ids, ids.includes("aivis"));
-    if (onboardingComponentStatus) onboardingComponentStatus.textContent = "準備できました。";
-    // 成功時も操作を戻しておく。戻さないと、次の画面から「追加機能へ戻る」で帰ってきたとき
-    // 全部が無効のまま操作できない行き止まりになる。
-    onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = false; });
-    showOnboardingStep("character");
+    // 第2引数の true で、導入できた時点で読み上げも有効にする。
+    await window.picoagent.settings.installComponents(["aivis"], true);
+    setStatus("音声読み上げを準備しました");
   } catch (error) {
-    logApp("error", "追加機能を準備できませんでした", errorDetail(error));
-    if (onboardingComponentStatus) onboardingComponentStatus.textContent = navigator.onLine
-      ? `準備できませんでした: ${error?.message || error}`
-      : "オフラインのため取得を見送りました。基本機能はそのまま使えます。";
-    onboardingComponentStep.querySelectorAll("input,button").forEach(item => { item.disabled = false; });
-    await refreshOnboardingComponents();
+    logApp("warn", "音声読み上げを自動で準備できませんでした", errorDetail(error));
+    setStatus(navigator.onLine
+      ? "音声読み上げを準備できませんでした。設定の「追加機能・更新」から入れ直せます"
+      : "オフラインのため音声読み上げの準備を見送りました");
+  } finally {
+    releaseProgress?.();
   }
 }
 
@@ -5982,13 +5927,7 @@ onboarding?.addEventListener("click", async event => {
   const target = event.target instanceof Element ? event.target : null;
   const actionButton = target?.closest("button[data-onboarding-action]");
   const action = actionButton?.dataset.onboardingAction;
-  if (action === "back-components") {
-    showOnboardingStep("components");
-  } else if (action === "install-components") {
-    await installSelectedOnboardingComponents();
-  } else if (action === "skip-components") {
-    showOnboardingStep("character");
-  } else if (action === "add-character") {
+  if (action === "add-character") {
     await completeSelectedOnboarding(true);
   } else if (action === "skip-character") {
     await completeSelectedOnboarding(false);
@@ -6011,7 +5950,7 @@ onboarding?.addEventListener("keydown", event => {
 });
 window.picoagent.listen("pet:show-onboarding", () => {
   onboarding?.querySelectorAll("button").forEach(item => { item.disabled = false; });
-  showOnboardingStep("components");
+  showOnboarding();
   if (onboarding) onboarding.hidden = false;
   stopVoice();
 }).catch(error => {
