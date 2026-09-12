@@ -2962,7 +2962,7 @@ async function render() {
     ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
     setQuickSettingsSummary("voice", enabled ? "読み上げ有効" : "ミュート中");
   });
-  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値50）", "number", v.PICOAGENT_TTS_VOLUME ?? "50", "50"));
+  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値35）", "number", v.PICOAGENT_TTS_VOLUME ?? "35", "35"));
   const memoryManager = window.PicoMemorySettings.buildMemoryManager({
     api: window.picoagent.settings,
     section,

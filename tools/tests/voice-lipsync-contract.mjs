@@ -41,9 +41,12 @@ test("すべてのリップシンク入口が共通判定を使う", () => {
   assert.match(renderer, /if \(!ttsEnabledCache\) stopVoice\(true\)/, "ミュート時に音声と会話モーションを終了する");
 });
 
-test("読み上げ音量の未保存時初期値は50", () => {
-  assert.equal((commands.match(/PICOAGENT_TTS_VOLUME", "50"/g) ?? []).length, 2);
-  assert.match(settings, /PICOAGENT_TTS_VOLUME \?\? "50"/);
+test("読み上げ音量の未保存時初期値は35", () => {
+  // 初回はAivisを自動導入して読み上げを有効にするため、既定値がそのまま最初の音量になる。
+  // 100%相当は初対面の音量として大きすぎるので、画面側の初期値も含めて35へ揃える。
+  assert.equal((commands.match(/PICOAGENT_TTS_VOLUME", "35"/g) ?? []).length, 2);
+  assert.match(settings, /PICOAGENT_TTS_VOLUME \?\? "35"/);
+  assert.match(renderer, /^let voiceVolume = 0\.35;/m);
 });
 
 test("Aivisの時間軸から母音口形を選ぶ", () => {
