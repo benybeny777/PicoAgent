@@ -224,6 +224,9 @@ body { padding-top:32px; }
 .character canvas { position:relative; display:block; filter:drop-shadow(0 7px 5px rgba(37,25,43,.15)) var(--pet-tone,saturate(1)); pointer-events:none; }
 #live2dCanvas { background:transparent !important; filter:none; }
 #meshRigCanvas { background:transparent !important; }
+.character[data-render-kind="mmd"] .character-view::before { display:none; }
+.pet-app .character[data-render-kind="mmd"] .character-view { inset:0 auto auto calc((100% - var(--char-render-size,100%)) / 2)!important; width:var(--char-render-size,100%)!important; height:var(--char-render-size,100%)!important; transform:translate(var(--char-x,0px),var(--char-y,0px))!important; }
+.pet-app .character[data-render-kind="mmd"] .character-view > #mmdCanvas { width:100%!important; height:100%!important; background:transparent!important; filter:none; object-fit:contain; }
 /* 2D立ち絵は透過輪郭を活かし、背景色を選ばず髪先と服の暗部が読めるようにする。
    Live2Dキャンバスには適用せず、PNGキャラだけを同じ質感へ揃える。 */
 .character[data-render-kind="2d"] .character-view::before { display:none; }

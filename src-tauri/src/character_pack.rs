@@ -17,6 +17,9 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
+#[path = "mmd_character_pack.rs"]
+mod mmd_character_pack;
+
 /// パックに置ける拡張子。実行可能なものは入れない。
 pub const ALLOWED_EXTENSIONS: &[&str] = &[
     "json",
@@ -35,11 +38,24 @@ pub const ALLOWED_EXTENSIONS: &[&str] = &[
     "cdi3",
     "userdata3",
     "pose3",
+    "pmx",
+    "bmp",
+    "tga",
+    "sph",
+    "spa",
 ];
 
 pub const MAX_FILES: usize = 4000;
 pub const MAX_TOTAL_BYTES: u64 = 250 * 1024 * 1024;
 pub const MAX_FILE_BYTES: u64 = 40 * 1024 * 1024;
+/// 非圧縮のMMDテクスチャだけは大きな原本をそのまま保持する。
+pub fn file_limit(path: &Path) -> u64 {
+    if ["bmp", "tga", "sph", "spa"].contains(&extension_of(path).as_str()) {
+        128_000_000
+    } else {
+        MAX_FILE_BYTES
+    }
+}
 pub const MAX_ID_CHARS: usize = 64;
 
 /// キャラクターIDとして使ってよい文字列か。**このファイルが唯一の判定元。**
@@ -87,12 +103,13 @@ pub fn validate(source: &Path) -> Result<Value> {
     required_text(&manifest, "name")?;
 
     let live2d_model = manifest.pointer("/live2d/model").and_then(Value::as_str);
+    let mmd_model = manifest.pointer("/mmd/model").and_then(Value::as_str);
     let mesh_rig = manifest.pointer("/meshRig/rig").and_then(Value::as_str);
     let idle_has_frames = manifest
         .pointer("/animations/idle")
         .is_some_and(animation_has_frames);
-    if live2d_model.is_none() && mesh_rig.is_none() && !idle_has_frames {
-        bail!("live2d.model、meshRig.rig、animations.idle のいずれかが必要です");
+    if live2d_model.is_none() && mmd_model.is_none() && mesh_rig.is_none() && !idle_has_frames {
+        bail!("live2d.model、mmd.model、meshRig.rig、animations.idle のいずれかが必要です");
     }
     for pointer in ["/boot/sleeping", "/live2d/model", "/meshRig/rig"] {
         if let Some(relative) = manifest.pointer(pointer).and_then(Value::as_str) {
@@ -103,6 +120,7 @@ pub fn validate(source: &Path) -> Result<Value> {
     if let Some(model) = live2d_model {
         validate_live2d_model(source, model)?;
     }
+    mmd_character_pack::validate(source, &manifest)?;
     validate_mesh_rig(source, &manifest)?;
     validate_animations(source, &manifest)?;
     validate_variants(source, &manifest)?;
@@ -425,10 +443,13 @@ pub fn validate_tree(directory: &Path, canonical_root: &Path, stats: &mut PackSt
             stats.files += 1;
             stats.bytes = stats.bytes.saturating_add(metadata.len());
             if stats.files > MAX_FILES || stats.bytes > MAX_TOTAL_BYTES {
-                bail!("パックは{MAX_FILES}ファイル・250MB以内にしてください");
+                bail!("パックは{MAX_FILES}ファイル・262MB以内にしてください");
             }
-            if metadata.len() > MAX_FILE_BYTES {
-                bail!("1ファイルは40MB以内にしてください: {}", path.display());
+            if metadata.len() > file_limit(&path) {
+                bail!(
+                    "1ファイルは通常形式42MB、MMD非圧縮画像128MB以内にしてください: {}",
+                    path.display()
+                );
             }
             if !ALLOWED_EXTENSIONS.contains(&extension_of(&path).as_str()) {
                 bail!("利用できないファイル形式です: {}", path.display());

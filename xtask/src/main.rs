@@ -165,7 +165,7 @@ struct Build {
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
     let all = [
-        "pixi", "live2d", "engine", "aivis", "whisper", "office", "tools",
+        "pixi", "live2d", "mmd", "engine", "aivis", "whisper", "office", "tools",
     ];
     anyhow::ensure!(
         !targets.is_empty(),
@@ -184,12 +184,19 @@ fn setup(targets: &[String]) -> Result<()> {
             "whisper" => bundled::fetch_whisper()?,
             "pixi" => bundled::fetch_pixi_runtime()?,
             "live2d" => bundled::fetch_live2d_runtime()?,
+            "mmd" => {
+                let status = Command::new("node")
+                    .arg("tools/mmd-runtime/build.mjs")
+                    .current_dir(repo_root())
+                    .status()?;
+                anyhow::ensure!(status.success(), "MMDランタイムの準備に失敗しました");
+            }
             "live2d-samples" => bundled::fetch_live2d_samples()?,
             "aivis" => office::fetch_aivis()?,
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / live2d-samples / office / tools）"
+                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / mmd / live2d-samples / office / tools）"
             ),
         }
     }

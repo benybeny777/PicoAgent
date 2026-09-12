@@ -16,6 +16,12 @@
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
+## MMDランタイムの準備
+
+`cargo xtask setup mmd`は`node tools/mmd-runtime/build.mjs`を実行する。Node.jsとnpmをPATHへ用意する。`tools/mmd-runtime/package-lock.json`に固定したbabylon-mmd 1.3.0、Babylon.js 9.26.0、esbuild 0.28.2を`npm ci`で取得し、`ui/vendor/mmd/`へバンドル、ライセンス、版とSHA-256を含む`runtime.json`を配置する。通常起動・通常ビルドはこの取得を実行しない。ランタイムが無い状態のMMD表示は理由付きエラーとなる。
+
+モデル登録の検証は`character_pack.rs`とPMX検証モジュールを正本とする。キャラクター固有の素材・人格・スクリーンショットは企画デモのローカル管理物として`temp/`または利用者データ領域にだけ置き、Gitや配布物へ含めない。描画・姿勢・モーフの責務は`ui/mmd-renderer.js`、表示切替・音声との接続は`ui/renderer.js`に分ける。物理演算とAivis音声モデル作成は別作業とする。
+
 ## 作業エージェントのハーネス構成
 
 作業ルール、再利用手順、開始時処理、作業状態、最終検証は、更新理由が異なるため次の正本へ分けます。分類名ごとのファイルをさらに増やさず、各正本から別の正本へ手順を複製しません。

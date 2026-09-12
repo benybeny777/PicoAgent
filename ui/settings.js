@@ -967,7 +967,7 @@ function quickSettingsGuide(v) {
   const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
-    { tab: "character-register", title: "キャラ登録", summary: "Live2D・完成パック" },
+    { tab: "character-register", title: "キャラ登録", summary: "MMD・Live2D・完成パック" },
     { tab: "character-maker", title: "キャラ作成（テスト）", summary: "原画からローカル生成するテスト機能" },
     { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
     { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
@@ -1934,6 +1934,7 @@ async function loadUserCharacters(bundled) {
         root: window.picoagent.assetUrl(character.path),
         user: true,
         live2d: !!character.live2d,
+        mmd: !!character.mmd,
       }));
   } catch (error) {
     // フォールバック許可: 追加キャラを取れなくても同梱キャラの設定は開けるようにする。
@@ -2043,11 +2044,13 @@ async function characterIconUrl(character) {
 function characterRenderType(character, manifest) {
   const kind = characterRenderKind(manifest);
   if (kind === "live2d") return "Live2D";
+  if (kind === "mmd") return "MMD";
   if (character.user) return "追加PNG";
   return "PNGアニメ";
 }
 
 function characterRenderKind(manifest) {
+  if (manifest.mmd?.model) return "mmd";
   const hasLive2d = !!manifest.live2d
     || (Array.isArray(manifest.variants) && manifest.variants.some(variant => variant?.live2d));
   if (hasLive2d) return "live2d";
@@ -3333,6 +3336,7 @@ async function render() {
   const filterDefinitions = [
     { id: "all", label: "すべて" },
     { id: "live2d", label: "Live2D" },
+    { id: "mmd", label: "MMD" },
     { id: "png", label: "PNGアニメ" },
     { id: "user", label: "追加キャラ" },
   ];
@@ -3549,7 +3553,7 @@ async function render() {
   const addSec = section("キャラクターを追加");
   const addHint = el("p", {
     className: "hint",
-    textContent: "Live2Dは配布元から自分で取得したzip／フォルダを、そのまま追加できます。PicoAgentがサンプルモデルを代理取得・再配布することはありません。",
+    textContent: "取得したMMDのPMX・zip・フォルダやLive2Dを追加できます。モデルはこのPCのユーザー領域へ保存します。",
   });
   const addStatus = el("p", { className: "hint" });
   const live2dIdInput = el("input", {
@@ -3605,6 +3609,32 @@ async function render() {
     }),
   ]);
 
+  const mmdIdInput = el("input", { type: "text", value: `mmd-${Date.now().toString(36)}`, maxLength: 64 });
+  const mmdNameInput = el("input", { type: "text", value: "マイMMD", maxLength: 80 });
+  async function installRawMmd(folder) {
+    addStatus.textContent = "選択中…";
+    try {
+      const id = mmdIdInput.value.trim();
+      const name = mmdNameInput.value.trim();
+      if (!id || !name) throw new Error("キャラクターIDと表示名を入力してください。");
+      if (characterCatalog.characters.some(character => character.id === id)) {
+        throw new Error(`キャラクターID ${id} は既に使われています。別のIDにしてください。`);
+      }
+      const picked = await window.picoagent.settings.pickCharacterPack(folder);
+      if (!picked?.path) { addStatus.textContent = "選択をキャンセルしました。"; return; }
+      addStatus.textContent = "MMDモデルとテクスチャを確認しています…";
+      const result = await window.picoagent.settings.installMmdCharacter(picked.path, id, name);
+      const added = await registerInstalledCharacter(result.id);
+      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
+    } catch (error) {
+      addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
+    }
+  }
+  const rawMmdButtons = el("div", { className: "character-add-actions" }, [
+    Object.assign(el("button", { className: "primary", type: "button", textContent: "MMDのzip／PMXを追加" }), { onclick: () => installRawMmd(false) }),
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "MMDフォルダを追加" }), { onclick: () => installRawMmd(true) }),
+  ]);
+
   async function installCharacterPack(folder) {
     addStatus.textContent = "選択中…";
     try {
@@ -3632,6 +3662,12 @@ async function render() {
   ]);
   addSec.append(
     addHint,
+    el("div", { className: "subhead", textContent: "MMDモデルを追加" }),
+    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), mmdIdInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), mmdNameInput]),
+    rawMmdButtons,
+    el("p", { className: "hint", textContent: "PMXとテクスチャの相対配置を保ったまま追加します。複数のPMXがある場合は、表示するPMXを直接選んでください。元ファイルは加工しません。" }),
+    el("div", { className: "subhead", textContent: "Live2Dモデルを追加" }),
     officialLinks,
     el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), live2dIdInput]),
     el("div", { className: "field" }, [el("label", { textContent: "表示名" }), live2dNameInput]),

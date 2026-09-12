@@ -242,6 +242,7 @@ cargo xtask verify
 | `cargo xtask setup aivis` | 同梱 Aivis（読み上げ） |
 | `cargo xtask setup whisper` | ローカル Whisper CLI とモデル（録音の文字起こし用） |
 | `cargo xtask setup live2d` | Cubism Editor 5.3互換のLive2Dランタイム（Cubism 4／5モデル対応。サンプルは含まない） |
+| `cargo xtask setup mmd` | MMDのローカル描画ランタイムを固定依存から生成（Node.jsとnpmが必要。モデルは含まない） |
 | `cargo xtask setup live2d-samples` | 開発者が利用条件を確認したうえで公式サンプルを明示取得（製品ビルドには含まない）。未実行でも `dev` / `build` は通る（対応済みサンプル6体が一覧から外れるだけ） |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice。Office ファイルの変換・PDF 出力） |
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
@@ -350,6 +351,7 @@ cargo xtask build --bundles deb,appimage
 - **2Dのふれあい** — 頭・頬・手へのタップとなでなでで、キャラ固有の台詞と照れ・喜びモーションを返す。数値ゲージではなく反応で親しさを表現
 - **会話の内容で表情が変わる** — 話の流れから推定した感情（喜び・落ち込み・高揚・落ち着き・興味・驚き）が、キャラのオーラの色・顔色・動きの速さに出ます
 - **スタイルバリアント** — `character.json` の `variants` で同一キャラの別衣装・季節差分・演出を切替可能。**`variants[].live2d` を書けば、同じキャラの「絵版」と「Live2D 版」も切り替えられます**
+- **MMDキャラ** — 設定「キャラ登録」から手元のPMX 2.0／ZIP／フォルダを追加。元モデルを加工せず、自然な腕の姿勢・瞬き・表情・声量連動の口パクをローカル描画する。剛体物理と音声モデル作成は対象外。
 - **2Dキャラパック** — `cargo xtask character-pack validate <フォルダ>` で形式・容量・画像寸法・パスを検証し、`install` で途中状態を残さず正本と一覧へ追加できる
 
 #### 独自2.5Dの確認画面
