@@ -114,6 +114,34 @@ test("スケジュールの壊れたtool_argsは保存を中止する", () => {
   assert.throws(() => schedule().getJson(), /「天気」の tool_args/);
 });
 
+test("スケジュール編集は日付を保ち発火状態を設定DTOへ混ぜない", () => {
+  const stored = {
+    id: "st-date", kind: "tool", time: "09:00", date: "2026-09-15",
+    tool_name: "weather", tool_args: {}, label: "元のラベル",
+    last_run_minute: "2026-09-12 09:00", last_checked_minute: "2026-09-12 09:01",
+  };
+  const { editors, schedule } = createEditors();
+  const wrap = editors.buildScheduleEditor(JSON.stringify([stored]));
+  findByClass(wrap, "schedule-label").value = "新しいラベル";
+  const [saved] = JSON.parse(schedule().getJson());
+  assert.equal(saved.label, "新しいラベル");
+  assert.equal(saved.date, stored.date);
+  assert.equal(saved.last_run_minute, undefined);
+  assert.equal(saved.last_checked_minute, undefined);
+});
+
+test("未編集のコマンド引数は空白入りパス・空文字・改行を含む配列を維持する", () => {
+  const args = ["status", "C:\\My Project\\file.txt", "", "一行目\n二行目"];
+  const { editors, schedule } = createEditors();
+  const wrap = editors.buildScheduleEditor(JSON.stringify([
+    { id: "st-args", kind: "command", program: "git", args },
+  ]));
+  findByClass(wrap, "schedule-label").value = "別項目だけ変更";
+  assert.deepEqual(JSON.parse(schedule().getJson())[0].args, args);
+  findByClass(wrap, "schedule-args").value = "diff --stat";
+  assert.deepEqual(JSON.parse(schedule().getJson())[0].args, ["diff", "--stat"]);
+});
+
 test("専用モジュールを設定本体より先に読み込む", () => {
   assert.ok(
     settingsHtml.indexOf('<script src="settings-schedules.js"')

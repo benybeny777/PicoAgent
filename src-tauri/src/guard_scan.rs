@@ -114,6 +114,47 @@ fn load_skill_sources() -> Vec<Source> {
     out
 }
 
+/// `ui/*.js` 一式（webview フロントの自前ソース）。
+///
+/// 名前を1つずつ書き並べた一覧で検査していたため、`layout-editor.js` /
+/// `top-menu.js` / `mesh-rig.js` / `character-preview.js` が誰にも見られていなかった。
+/// **ガードの穴はガードが無いのと同じ**なので、フロントの走査範囲もここで決める。
+/// `ui/vendor/` は取得した第三者ランタイム（自前のコードではない）なので、
+/// 直下だけを見て入れ子は追わない。
+pub fn ui_sources() -> &'static [Source] {
+    static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
+    SOURCES.get_or_init(load_ui_sources)
+}
+
+fn load_ui_sources() -> Vec<Source> {
+    let root = repo_root();
+    let dir = root.join("ui");
+    let mut out = Vec::new();
+    for entry in sorted_entries(&dir) {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "js") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("UIソースを読み込めません: {} ({error})", path.display())
+        });
+        out.push(Source {
+            name: path
+                .file_name()
+                .map(|v| v.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            path: path.strip_prefix(&root).unwrap_or(&path).to_path_buf(),
+            text,
+        });
+    }
+    assert!(
+        out.len() > 8,
+        "UIソースの読み込みに失敗している可能性: {}",
+        out.len()
+    );
+    out
+}
+
 /// `src-tauri/src/**/*.rs` 一式。
 pub fn backend_sources() -> &'static [Source] {
     static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
