@@ -200,3 +200,18 @@ test("変更判定のcollectはキャラ草稿を書き換えない", () => {
   assert.match(settings, /saveCurrentCharacterVoice\(displayedCharacterId\)/);
   assert.match(settings, /saveCurrentCharacterLive2dSdk\(displayedCharacterId\)/);
 });
+
+test("停止要求のあと応答が返らなくても画面の待機を解除できる", () => {
+  // 停止を押したあと実行中の送信が返らないと、待機表示が残って入力も再送もできず、
+  // 復帰する手段が無くなる。一定時間で画面側だけ中断扱いにして戻す。
+  assert.match(renderer, /const CANCEL_RELEASE_MS = \d+/);
+  const cancel = renderer.match(/async function requestAgentCancellation\(button\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(cancel, /await window\.picoagent\.cancel\(\);[\s\S]*?cancelReleaseTimer = setTimeout\(/);
+  assert.match(cancel, /releasePendingSend\(\{ stale: true, releasedByCancel: true \}\)/);
+  // 送信は打ち切りの合図と競走させ、既存の「中断扱い」経路（stale）で後始末する。
+  assert.match(renderer, /const releasedByCancel = new Promise\(resolve => \{ releasePendingSend = resolve; \}\)/);
+  assert.match(renderer, /Promise\.race\(\[window\.picoagent\.send\(fullText\), releasedByCancel\]\)/);
+  assert.match(renderer, /result\?\.releasedByCancel\s*\n?\s*\? "停止しました/);
+  // 見張りは送信の後始末で必ず解く（次の送信へ持ち越さない）。
+  assert.match(renderer, /clearCancelRelease\(\);\s*\n\s*busy = false;/);
+});

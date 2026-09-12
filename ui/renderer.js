@@ -390,11 +390,31 @@ function persistNotices() {
 }
 persistNotices();
 
+// 停止要求が届いても、実行中の送信がいつまでも返らないことがある（子プロセスの停止待ち、
+// 応答の来ないプロバイダ接続など）。そのままだと待機表示が残り続け、入力も再送も
+// できないまま復帰する手段が無くなるため、一定時間で画面側の待機だけ解除する。
+const CANCEL_RELEASE_MS = 8000;
+let releasePendingSend = null; // 実行中の送信を「中断扱い」で打ち切る合図
+let cancelReleaseTimer = null;
+
+function clearCancelRelease() {
+  if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
+  cancelReleaseTimer = null;
+  releasePendingSend = null;
+}
+
 async function requestAgentCancellation(button) {
   button.disabled = true;
   setStatus("停止を要求しています…");
   try {
     await window.picoagent.cancel();
+    if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
+    cancelReleaseTimer = setTimeout(() => {
+      cancelReleaseTimer = null;
+      if (!busy || !releasePendingSend) return;
+      logApp("warn", "停止要求のあと応答が返らないため、画面の待機を解除しました");
+      releasePendingSend({ stale: true, releasedByCancel: true });
+    }, CANCEL_RELEASE_MS);
   } catch (error) {
     logApp("warn", "中断要求の送信に失敗しました", errorDetail(error));
     setStatus(`停止を要求できませんでした: ${error?.message || error}`);
@@ -4376,16 +4396,20 @@ composer.addEventListener("submit", async event => {
         logApp("warn", "スクリーンショット取得に失敗しました。", String(shotErr));
       }
     }
+    // 停止要求のあと応答が返らない場合に備え、打ち切りの合図と競走させる。
+    const releasedByCancel = new Promise(resolve => { releasePendingSend = resolve; });
     if (images.length > 0 && window.picoagent.sendImage) {
-      result = await window.picoagent.sendImage(fullText, images);
+      result = await Promise.race([window.picoagent.sendImage(fullText, images), releasedByCancel]);
     }
-    if (!result) result = await window.picoagent.send(fullText);
+    if (!result) result = await Promise.race([window.picoagent.send(fullText), releasedByCancel]);
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";
       setThinkingUi(false);
       clearThinkingReply();
       cancelStreamSpeech();
-      status.textContent = "";
+      status.textContent = result?.releasedByCancel
+        ? "停止しました（応答が返らないので画面の待機を解除したよ）"
+        : "";
       return;
     }
     if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
@@ -4459,6 +4483,7 @@ composer.addEventListener("submit", async event => {
     streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
+    clearCancelRelease();
     busy = false;
     const jobFailed = jobState === "failed";
     const jobCancelled = jobState === "cancelled";
