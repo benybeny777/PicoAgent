@@ -373,22 +373,10 @@ mod guard {
 
     #[test]
     fn フロントのpromise失敗を空のcatchで捨てない() {
-        let root = guard_scan::repo_root();
         let mut offenders = Vec::new();
-        for name in [
-            "renderer.js",
-            "settings.js",
-            "settings-schedules.js",
-            "frame-scheduler.js",
-            "alarm-runtime.js",
-            "memory-settings.js",
-            "common.js",
-            "picoagent.js",
-        ] {
-            let path = root.join("ui").join(name);
-            let source = std::fs::read_to_string(&path).expect("UIソースを読めない");
-            if source.contains(".catch(() => {})") {
-                offenders.push(path.display().to_string());
+        for source in guard_scan::ui_sources() {
+            if source.text.contains(".catch(() => {})") {
+                offenders.push(source.path.display().to_string());
             }
         }
         assert!(

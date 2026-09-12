@@ -90,6 +90,11 @@ let attachedImages = [];
 let attachedFiles = [];
 // エラーリトライ用に最後のユーザー入力テキストを保持する。
 let lastUserText = "";
+// 同じくリトライ・再生成用の添付の控え。文面だけ戻すと、画像やファイルを選び直す
+// ところからやり直しになり、しかも「同じ質問」のつもりで中身の違う要求が飛ぶ。
+// 次の送信で入れ替わり、「新しい会話」（pet:reset）で捨てる。
+let lastUserImages = [];
+let lastUserFiles = [];
 // エージェント進捗（pet:agent_status）を受信するリスナー解除関数。
 let unlistenStatus = null;
 let unlistenActivity = null;
@@ -109,7 +114,36 @@ let historyQuery = "";
 let conversationRevision = 0;
 const promptHistory = [];
 let promptHistoryIndex = null;
-let promptDraft = "";
+// 送らずに閉じた書きかけは、これまでアプリを終了すると消えていた（入力履歴は起動時に
+// 会話履歴から組み直されるが、未送信の下書きはどこにも残っていない）。この webview の
+// localStorage へ残して打ち直させない。破損・期限切れの判定は画面から切り離した
+// PicoComposerDraft が持ち、ここは保存先の出し入れだけを行う。
+const COMPOSER_DRAFT_STORAGE_KEY = "picoagent.composerDraft.v1";
+const composerDraftStore = globalThis.PicoComposerDraft;
+function loadStoredDraft() {
+  try {
+    return composerDraftStore.readDraft(localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY));
+  } catch (error) {
+    // フォールバック許可: localStorage を読めない環境では書きかけの復元だけを諦めて会話は続ける。
+    logApp("warn", "書きかけを読めませんでした", errorDetail(error));
+    return "";
+  }
+}
+let promptDraft = loadStoredDraft();
+let draftPersistTimer = 0;
+function persistDraft() {
+  if (draftPersistTimer) { clearTimeout(draftPersistTimer); draftPersistTimer = 0; }
+  try {
+    localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, composerDraftStore.serializeDraft(promptDraft));
+  } catch (error) {
+    logApp("warn", "書きかけを保存できませんでした", errorDetail(error));
+  }
+}
+// 1打鍵ごとに書き込むと無駄が多い。入力が止まってからまとめて保存する。
+function schedulePersistDraft() {
+  if (draftPersistTimer) clearTimeout(draftPersistTimer);
+  draftPersistTimer = setTimeout(persistDraft, 600);
+}
 // 既定のクイックアクション。設定 PICOAGENT_QUICK_ACTIONS（1行1件「ラベル|本文」）で置き換え可能。
 let quickActionItems = null; // null = 既定を使用
 let pendingChoices = null; // ask_user の選択肢（null = 通常のクイック操作を表示）
@@ -232,19 +266,35 @@ function clearBackgroundFailure(key) {
   notifiedBackgroundFailures.delete(key);
 }
 
+// 直前の送信に付いていた添付を入力欄へ戻す。文面だけ戻すと、画像やファイルを選び直す
+// ところからやり直しになり、しかも見た目は同じ質問なのに添付の無い別の要求が飛ぶ。
+function restoreLastAttachments() {
+  if (!lastUserImages.length && !lastUserFiles.length) return false;
+  attachedImages = [...lastUserImages];
+  attachedFiles = [...lastUserFiles];
+  renderAttachmentPreview();
+  return true;
+}
+// 直前の送信をやり直せるか（添付だけの送信にもリトライ・再生成を出す）。
+function hasLastRequest() {
+  return Boolean(lastUserText) || lastUserImages.length > 0 || lastUserFiles.length > 0;
+}
 // エラー表示後にリトライボタンを返信エリアへ追加する。
 function addRetryButton() {
   const md = reply.querySelector(".md");
-  if (!md || !lastUserText) return;
+  if (!md || !hasLastRequest()) return;
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "retry-btn";
   btn.textContent = "もう一度試す";
   btn.addEventListener("click", () => {
     if (busy) return;
-    input.value = lastUserText;
+    // 先に入力欄を開く（openComposer は空欄のとき書きかけを戻すため、順序を逆にすると
+    // 復元した文面が書きかけで上書きされる）。
     if (composer.hidden) openComposer();
-    else updateComposerState();
+    restoreLastAttachments();
+    setInputValue(lastUserText);
+    input.focus();
   });
   md.append(btn);
 }
@@ -268,6 +318,9 @@ window.addEventListener("beforeunload", () => {
   if (pendingTouchTimer) clearTimeout(pendingTouchTimer);
   if (pushToTalkTimer) clearTimeout(pushToTalkTimer);
   if (historySearchTimer) clearTimeout(historySearchTimer);
+  // 書きかけはデバウンス待ちのまま終了しうる。終了時に必ず書き切ってから閉じる。
+  promptDraft = input.value;
+  persistDraft();
   if (napTimer) clearInterval(napTimer);
   if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
   if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
@@ -2226,6 +2279,9 @@ function rememberPrompt(text) {
 function resetPromptHistoryNavigation() {
   promptHistoryIndex = null;
   promptDraft = input.value;
+  // 送信直後などの区切りで呼ばれる。ここは遅延させず書き切る（遅らせると、送信済みの
+  // 文面が保存されたまま終了したときに次回起動で書きかけとして戻ってしまう）。
+  persistDraft();
 }
 function recallPromptHistory(direction) {
   if (!promptHistory.length) return false;
@@ -2248,6 +2304,9 @@ function recallPromptHistory(direction) {
 function openComposer() {
   if (busy) return;
   composer.hidden = false;
+  // 前回の書きかけを戻す。アプリを閉じても打ち直させない（空のときだけ入れるので、
+  // いま打っている内容を書きかけで上書きすることはない）。
+  if (!input.value && promptDraft) setInputValue(promptDraft);
   reply.classList.add("compact");
   autosizeInput();
   updateComposerState();
@@ -2256,6 +2315,7 @@ function openComposer() {
 }
 function closeComposer() {
   promptDraft = input.value;
+  persistDraft();
   composer.hidden = true;
   reply.classList.remove("compact");
   updateComposerState();
@@ -4127,6 +4187,9 @@ composer.addEventListener("submit", async event => {
   status.textContent = "";
   const pendingImages = [...attachedImages];
   const pendingFiles = [...attachedFiles];
+  // リトライ・再生成で同じ添付を送り直せるよう控えておく（次の送信で入れ替わる）。
+  lastUserImages = pendingImages;
+  lastUserFiles = pendingFiles;
   attachedImages = [];
   attachedFiles = [];
   renderAttachmentPreview();
@@ -4735,9 +4798,11 @@ micButton?.addEventListener("click", async () => {
 
 // ── 再生成: 直前の質問をもう一度送って別の答えをもらう ──────────────────
 document.getElementById("regenReply")?.addEventListener("click", () => {
-  if (busy || !lastUserText) return;
-  setInputValue(lastUserText);
+  if (busy || !hasLastRequest()) return;
+  // 添付ごと送り直す。文面だけ送り直すと「同じ質問」のつもりで中身の違う要求になる。
   if (composer.hidden) openComposer();
+  restoreLastAttachments();
+  setInputValue(lastUserText);
   composer.requestSubmit();
 });
 
@@ -4985,6 +5050,7 @@ input.addEventListener("input", () => {
   updateComposerState();
   promptHistoryIndex = null;
   promptDraft = input.value;
+  schedulePersistDraft();
   const len = input.value.length;
   if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
 });
@@ -5017,8 +5083,6 @@ input.addEventListener("keydown", event => {
     event.preventDefault();
     composer.requestSubmit();
   }
-  if (event.key === "ArrowUp" && recallInputHistory(-1)) event.preventDefault();
-  else if (event.key === "ArrowDown" && inputHistoryPos !== -1 && recallInputHistory(1)) event.preventDefault();
 });
 let historySearchTimer = 0;
 historySearch?.addEventListener("input", () => {
@@ -5068,6 +5132,10 @@ window.picoagent.on("pet:reset", () => {
   promptHistory.length = 0;
   promptHistoryIndex = null;
   promptDraft = "";
+  // 添付の控えは会話に紐づくので「新しい話」で捨てる（打ちかけのテキストは消さない。
+  // この後の closeComposer() が入力欄の現在値を書きかけとして保存し直す）。
+  lastUserImages = [];
+  lastUserFiles = [];
   historyQuery = "";
   if (historySearch) historySearch.value = "";
   renderHistory();
