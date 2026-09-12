@@ -2776,42 +2776,68 @@ function buildSubtitlePages(text) {
   const source = subtitlePlainText(text);
   if (currentLayout !== "stream" || !source.trim()) return source ? [source] : [];
   const pages = [];
-  let page = "";
+  // 実測は字幕欄そのもので行う。同じ字面の隠し要素では高さを再現できない
+  // （字幕欄の高さは中身に応じて上限まで伸びるため、複製すると容量が半分になる）。
   const fits = candidate => {
     renderMarkdown(reply, candidate);
     reply.scrollTop = 0;
     return reply.scrollHeight <= reply.clientHeight + 1;
   };
-  for (const unit of subtitleUnits(source)) {
-    const candidate = page + unit;
-    if (!page && fits(candidate)) {
-      page = candidate;
-      continue;
-    }
-    if (page && fits(candidate)) {
-      page = candidate;
-      continue;
-    }
-    if (page) pages.push(page);
-    page = unit;
-    if (!fits(page)) {
-      // 54文字でも収まらない極端な狭幅では、実測で収まる最大長を二分探索する。
-      let remaining = [...page];
-      while (remaining.length && !fits(remaining.join(""))) {
-        let low = 1;
-        let high = remaining.length;
-        while (low < high) {
-          const middle = Math.ceil((low + high) / 2);
-          if (fits(remaining.slice(0, middle).join(""))) low = middle;
-          else high = middle - 1;
-        }
-        pages.push(remaining.slice(0, low).join(""));
-        remaining = remaining.slice(low);
+  const units = subtitleUnits(source);
+  const joined = (from, count) => units.slice(from, from + count).join("");
+  // 1ページに入る単位数は、同じ幅・高さで測る限りどのページもほぼ同じになる。
+  // 直前のページの単位数を当たりに使うと、1ページあたりの実測（Markdown再描画＋
+  // レイアウト）が2回前後で済む。当たりを使わないと文の数だけ実測することになり、
+  // 長い返答ほど画面が止まる時間が延びる。
+  let guess = 0;
+  let index = 0;
+  while (index < units.length) {
+    const rest = units.length - index;
+    let low = 0;            // 収まると実測できた単位数
+    let high = rest + 1;    // 収まらないと実測できた単位数（番兵）
+    const probe = guess > 0 ? Math.min(guess, rest) : 1;
+    if (fits(joined(index, probe))) {
+      low = probe;
+      // 当たりより入る場合に備えて少しずつ伸ばす。大きく飛ばすと測る文字列が長くなって遅い。
+      let step = 1;
+      while (low + step <= rest && fits(joined(index, low + step))) {
+        low += step;
+        step = Math.min(step * 2, 8);
       }
-      page = remaining.join("");
+      high = Math.min(rest + 1, low + step);
+    } else {
+      high = probe;
     }
+    while (low + 1 < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (fits(joined(index, middle))) low = middle;
+      else high = middle;
+    }
+    if (low === 0) {
+      // 1単位（最大54文字）でも収まらない極端な狭幅では、収まる最大長を文字単位で二分探索する。
+      let remaining = [...units[index]];
+      while (remaining.length && !fits(remaining.join(""))) {
+        let charLow = 1;
+        let charHigh = remaining.length;
+        while (charLow < charHigh) {
+          const middle = Math.ceil((charLow + charHigh) / 2);
+          if (fits(remaining.slice(0, middle).join(""))) charLow = middle;
+          else charHigh = middle - 1;
+        }
+        pages.push(remaining.slice(0, charLow).join(""));
+        remaining = remaining.slice(charLow);
+      }
+      // 収まるところまで削れた残りは、次のページの先頭として通常経路へ戻す
+      // （続く文と一緒に詰められるようにする）。
+      if (remaining.length) units[index] = remaining.join("");
+      else index += 1;
+      guess = 0;
+      continue;
+    }
+    pages.push(joined(index, low));
+    index += low;
+    guess = low;
   }
-  if (page) pages.push(page);
   if (pages.length) setAssistantReply(pages[0], { remember: false, singlePage: true });
   return pages;
 }
