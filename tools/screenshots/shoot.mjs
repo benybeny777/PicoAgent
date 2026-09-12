@@ -997,18 +997,48 @@ async function validateInteractionMatrix() {
         const intersects = rect => rect && rect.width > 0 && rect.height > 0
           && rect.x < viewportRect.width && rect.y < viewportRect.height
           && rect.x + rect.width > 0 && rect.y + rect.height > 0;
+        // 押す要素は「少し掛かっている」では足りない。丸ごと画面内に無いと操作できないので、
+        // 入力欄とボタンだけは完全に収まっていることを条件にする（絵は掛かっていればよい）。
+        const inside = rect => rect && rect.width > 0 && rect.height > 0
+          && rect.x >= -1 && rect.y >= -1
+          && rect.x + rect.width <= viewportRect.width + 1
+          && rect.y + rect.height <= viewportRect.height + 1;
         if (!intersects(state.beta) || state.betaPointerEvents !== "none") {
           throw new Error(`${target.id}/${layout}: ALPHA表示が画面外または操作を遮っています ${JSON.stringify(state.beta)}`);
         }
-        if (!intersects(state.bubble) || !intersects(state.character) || !intersects(state.composer) || !intersects(state.input)) {
+        if (!intersects(state.bubble) || !intersects(state.character) || !intersects(state.composer)) {
           throw new Error(`${target.id}/${layout}: 縮小後に主要UIが画面から消えました ${JSON.stringify(state)}`);
         }
-        if (!state.buttons.length || state.buttons.some(button => !intersects(button))) {
+        if (!inside(state.input)) {
+          throw new Error(`${target.id}/${layout}: 縮小後に入力欄が画面からはみ出しました ${JSON.stringify(state.input)}`);
+        }
+        if (!state.buttons.length || state.buttons.some(button => !inside(button))) {
           throw new Error(`${target.id}/${layout}: 入力操作ボタンが画面外です ${JSON.stringify(state.buttons)}`);
         }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
-        results.push({ characterId: target.id, layout, bootVisible, loopPending, resized, state, file });
+
+        // 既定寸法の78%では、利用者が実際に縮められる下限（tauri.confのminWidth/minHeight）
+        // まで届かない。その下限でも入力欄と送信ボタンが窓の中に残ることを確かめる。
+        const minimum = { width: 200, height: 240 };
+        await page.setViewportSize(minimum);
+        await page.waitForTimeout(150);
+        const atMinimum = await page.evaluate(() => {
+          const rect = id => {
+            const element = document.getElementById(id);
+            if (!element || getComputedStyle(element).display === "none" || getComputedStyle(element).visibility === "hidden") return null;
+            const box = element.getBoundingClientRect();
+            return box.width > 0 || box.height > 0 ? { id, x: box.x, y: box.y, width: box.width, height: box.height } : null;
+          };
+          return ["input", "sendButton", "micButton", "status", "windowClose", "windowMinimize"].map(rect).filter(Boolean);
+        });
+        const outsideAtMinimum = atMinimum.filter(box => !(box.x >= -1 && box.y >= -1
+          && box.x + box.width <= minimum.width + 1 && box.y + box.height <= minimum.height + 1));
+        if (outsideAtMinimum.length) {
+          throw new Error(`${target.id}/${layout}: 最小寸法${minimum.width}x${minimum.height}で操作要素が画面外です ${JSON.stringify(outsideAtMinimum)}`);
+        }
+        await page.setViewportSize(resized);
+        results.push({ characterId: target.id, layout, bootVisible, loopPending, resized, minimum, state, atMinimum, file });
         console.log(`  操作検査: ${target.id}/${layout}`);
       } finally {
         await page.close();
