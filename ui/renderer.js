@@ -415,16 +415,20 @@ function clearCancelRelease() {
 async function requestAgentCancellation(button) {
   button.disabled = true;
   setStatus("停止を要求しています…");
+  // cancel IPC 自体が返らない場合もあるので、応答を待つ前から見張る。成功後に張ると
+  // cancel の呼出しで止まった経路だけ、入力も再送もできない状態へ戻ってしまう。
+  if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
+  cancelReleaseTimer = setTimeout(() => {
+    cancelReleaseTimer = null;
+    if (!busy || !releasePendingSend) return;
+    logApp("warn", "停止要求のあと応答が返らないため、画面の待機を解除しました");
+    releasePendingSend({ stale: true, releasedByCancel: true });
+  }, CANCEL_RELEASE_MS);
   try {
     await window.picoagent.cancel();
-    if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
-    cancelReleaseTimer = setTimeout(() => {
-      cancelReleaseTimer = null;
-      if (!busy || !releasePendingSend) return;
-      logApp("warn", "停止要求のあと応答が返らないため、画面の待機を解除しました");
-      releasePendingSend({ stale: true, releasedByCancel: true });
-    }, CANCEL_RELEASE_MS);
   } catch (error) {
+    if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
+    cancelReleaseTimer = null;
     logApp("warn", "中断要求の送信に失敗しました", errorDetail(error));
     setStatus(`停止を要求できませんでした: ${error?.message || error}`);
     button.disabled = false;
@@ -680,7 +684,7 @@ function pushNotice(notice) {
   renderNoticePanel();
   setStatus(entry.ok ? entry.title : `${entry.title}: エラー`);
   setTimeout(() => {
-    if (status.textContent === entry.title || status.textContent === `${entry.title}: エラー`) status.textContent = "";
+    if (status.textContent === entry.title || status.textContent === `${entry.title}: エラー`) clearTransientStatus();
   }, 6000);
 }
 
@@ -2365,7 +2369,7 @@ function recallPromptHistory(direction) {
   status.textContent = promptHistoryIndex === promptHistory.length ? "編集中の入力に戻しました" : "過去の入力を呼び戻しました";
   setTimeout(() => {
     if (status.textContent === "過去の入力を呼び戻しました" || status.textContent === "編集中の入力に戻しました") {
-      status.textContent = "";
+      clearTransientStatus();
     }
   }, 1400);
   return true;
@@ -2605,7 +2609,7 @@ function renderMarkdown(container, src) {
         btn.addEventListener("click", () => {
           if (busy) {
             status.textContent = "処理中です…少し待ってください";
-            setTimeout(() => { if (status.textContent.startsWith("処理中")) status.textContent = ""; }, 2000);
+            setTimeout(() => { if (status.textContent.startsWith("処理中")) clearTransientStatus(); }, 2000);
             return;
           }
           input.value = val;
@@ -2962,7 +2966,7 @@ function hydrateHistory(items) {
 function setTemporaryStatus(message, ms = 1400) {
   status.textContent = message;
   setTimeout(() => {
-    if (status.textContent === message) status.textContent = "";
+    if (status.textContent === message) clearTransientStatus();
   }, ms);
 }
 
@@ -3291,7 +3295,7 @@ async function speakReply(text) {
   const chunks = currentLayout === "stream" ? buildSubtitlePages(text) : splitSpeechChunks(text);
   stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
   const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
-  if (chunks.length === 0) { status.textContent = ""; return; }
+  if (chunks.length === 0) { clearTransientStatus(); return; }
   setVoiceCancelVisible(true);
   let prepareTimer = null;
   try {
@@ -3334,7 +3338,7 @@ async function speakReply(text) {
     stopLipSync();
     if (animationName === "talking") setAnimation("idle");
     if (status.textContent === "読み上げ中…" || status.textContent.startsWith("読み上げ準備中")) {
-      status.textContent = "";
+      clearTransientStatus();
     }
   } catch (error) {
     if (prepareTimer) clearInterval(prepareTimer);
@@ -3342,7 +3346,7 @@ async function speakReply(text) {
     if (session === voiceSession) stopVoice();
     logApp("error", "読み上げに失敗しました", errorDetail(error));
     status.textContent = `読み上げに失敗: ${error.message || error}`;
-    setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) status.textContent = ""; }, 12000);
+    setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) clearTransientStatus(); }, 12000);
   }
 }
 // ── ストリーミング先行読み上げ: 応答の生成中に、確定した文から順に合成・再生する ──
@@ -3451,7 +3455,7 @@ async function runStreamSpeech() {
     setVoiceCancelVisible(false);
     stopLipSync();
     if (animationName === "talking") setAnimation("idle");
-    if (status.textContent === "読み上げ中…") status.textContent = "";
+    if (status.textContent === "読み上げ中…") clearTransientStatus();
     setTimeout(flushPendingNotice, 0);
   } finally {
     ss.running = false;
@@ -3722,7 +3726,7 @@ character.addEventListener("click", event => {
   const reaction = Array.isArray(reactions) && reactions.length ? reactions[Math.floor(Math.random() * reactions.length)] : ({ head: "ふふっ", cheek: "ちょっと照れるね", hand: "どうしたの？" }[zone]);
   if (reaction) {
     status.textContent = reaction;
-    setTimeout(() => { if (status.textContent === reaction) status.textContent = ""; }, 1600);
+    setTimeout(() => { if (status.textContent === reaction) clearTransientStatus(); }, 1600);
   }
   setAnimation(zone === "cheek" ? "shy" : "pleased", true);
   setTimeout(() => { if (!currentVoice) setAnimation("idle"); }, 850);
@@ -3762,7 +3766,7 @@ copyReplyButton?.addEventListener("click", async event => {
   try {
     const ok = await copyText(lastAssistantText || reply.textContent);
     status.textContent = ok ? "コピーしました" : "コピーできませんでした";
-    setTimeout(() => { if (status.textContent === "コピーしました") status.textContent = ""; }, 1600);
+    setTimeout(() => { if (status.textContent === "コピーしました") clearTransientStatus(); }, 1600);
   } catch (error) {
     logApp("warn", "回答コピーに失敗しました", errorDetail(error));
     status.textContent = "コピーできませんでした";
@@ -3781,14 +3785,14 @@ stopVoiceButton?.addEventListener("click", event => {
   event.preventDefault();
   event.stopPropagation();
   stopVoice();
-  if (!activeAlarmSnooze) status.textContent = "";
+  if (!activeAlarmSnooze) clearTransientStatus();
 });
 
 cancelVoiceButton?.addEventListener("click", event => {
   event.preventDefault();
   event.stopPropagation();
   stopVoice();
-  if (!activeAlarmSnooze) status.textContent = "";
+  if (!activeAlarmSnooze) clearTransientStatus();
 });
 
 toggleFullscreenButton?.addEventListener("click", event => {
@@ -4307,7 +4311,7 @@ composer.addEventListener("submit", async event => {
   stopVoice(false);
   updateComposerState();
   closeComposer();
-  status.textContent = "";
+  clearTransientStatus();
   const pendingImages = [...attachedImages];
   const pendingFiles = [...attachedFiles];
   // リトライ・再生成で同じ添付を送り直せるよう控えておく（次の送信で入れ替わる）。
@@ -4318,7 +4322,7 @@ composer.addEventListener("submit", async event => {
   renderAttachmentPreview();
   setInputValue("");
   resetPromptHistoryNavigation();
-  status.textContent = "";
+  clearTransientStatus();
   reply.classList.remove("reply-error"); // 前回のエラー表示をリセット
   status.classList.add("busy"); // 送信中状態。会話の待機表示はチャット欄の3点UIへ出す。
   setAnimation("thinking");
@@ -4674,7 +4678,7 @@ function cancelPendingVoiceSubmit(message = "音声の送信を取り消しま�
   if (!pendingVoiceSubmitTimer) return false;
   clearTimeout(pendingVoiceSubmitTimer);
   pendingVoiceSubmitTimer = null;
-  status.textContent = "";
+  clearTransientStatus();
   showToast(message, "warn");
   input.focus();
   return true;
@@ -4686,7 +4690,7 @@ function scheduleVoiceSubmit() {
   status.textContent = "1.5秒後に送信（Escで取消）";
   pendingVoiceSubmitTimer = setTimeout(() => {
     pendingVoiceSubmitTimer = null;
-    status.textContent = "";
+    clearTransientStatus();
     if (continuousVoice && input.value.trim() && !busy) composer.requestSubmit();
   }, 1500);
 }
@@ -4702,7 +4706,7 @@ async function finishRecording() {
   const hadInterim = micInterimTexts.length > 0;
   stopMicCapture();
   const seconds = chunks.reduce((sum, c) => sum + c.length, 0) / sampleRate;
-  if (seconds < 0.4) { status.textContent = ""; showToast("録音が短すぎました", "warn"); return; }
+  if (seconds < 0.4) { clearTransientStatus(); showToast("録音が短すぎました", "warn"); return; }
   status.textContent = hadInterim ? "文字起こしを確定中…" : "文字起こし中…";
   status.classList.add("busy");
   try {
@@ -4723,7 +4727,7 @@ async function finishRecording() {
     else showToast("確定に失敗したため途中結果を残しました", "warn");
   } finally {
     status.classList.remove("busy");
-    if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") status.textContent = "";
+    if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
     scheduleVoiceSubmit();
   }
 }
@@ -5116,7 +5120,7 @@ character.addEventListener("pointermove", event => {
       heart.addEventListener("animationend", () => heart.remove());
     }
     status.textContent = "えへへ…";
-    setTimeout(() => { if (status.textContent === "えへへ…") status.textContent = ""; }, 2000);
+    setTimeout(() => { if (status.textContent === "えへへ…") clearTransientStatus(); }, 2000);
     markActivity();
     setAnimation("shy", true);
     recordRelationship("petting");
@@ -5257,7 +5261,7 @@ window.picoagent.on("pet:character-reset", (reset) => {
 });
 window.picoagent.on("pet:model", model => {
   status.textContent = model;
-  setTimeout(() => { if (status.textContent === model) status.textContent = ""; }, 1800);
+  setTimeout(() => { if (status.textContent === model) clearTransientStatus(); }, 1800);
 });
 window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
@@ -5316,7 +5320,7 @@ function applyEngineStatus(s) {
     online.dataset.up = true;
     status.classList.remove("engine-pending", "engine-error");
     if (petApp.classList.contains("is-booting")) {
-      status.textContent = "";
+      clearTransientStatus();
       if (bootStatus) bootStatus.textContent = `${bootCharacterName}を起こしているよ…`;
     } else {
       showStartupReadyMessage();
@@ -5737,7 +5741,7 @@ function clearAlarmSnooze(stopCurrentVoice) {
   activeAlarmSnooze = null;
   reply.querySelector(".alarm-actions")?.remove();
   if (stopCurrentVoice) stopVoice();
-  status.textContent = "";
+  clearTransientStatus();
 }
 function armAlarmSnooze(a) {
   const minutes = alarmSnoozeMinutes(a);

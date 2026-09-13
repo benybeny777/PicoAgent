@@ -3526,6 +3526,16 @@ pub fn restart_app(
 
     // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。
     if let Some(win) = app.get_webview_window("main") {
+        // 前回の完了状態を残したまま再読込すると、JavaScriptの開始通知が届くまで
+        // `surface_main_window` が完成済みと誤認し、中身の無い窓を表示できてしまう。
+        // イベント送信より先に未開始へ戻し、読込開始そのものの停止監視も張り直す。
+        crate::boot_screen::mark_reloading(&app);
+        if let Err(error) = crate::layout::restart_boot(&app) {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("再読込前に起動画面へ戻せませんでした: {error}"),
+            );
+        }
         if let Err(error) = win.emit("pet:reload", ()) {
             crate::log_paths::append_app_log(
                 &app,

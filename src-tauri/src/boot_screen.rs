@@ -76,6 +76,23 @@ pub fn mark_started(app: &AppHandle) {
     watch(app.clone());
 }
 
+/// WebViewを再読込する直前に、新しい起動シーケンスの監視を始める。
+///
+/// `mark_started` を待ってから状態を戻すと、JavaScript自体を読み込めない故障では
+/// 開始通知が永遠に来ず、前回の `started` / `finished` が残る。その間にホットキーや
+/// 多重起動で前面化すると、中身の無いWebViewを表示してしまうため、再読込イベントより
+/// 先に未開始へ戻して開始通知の監視を張る。
+pub fn mark_reloading(app: &AppHandle) {
+    {
+        let state = app.state::<BootScreenState>();
+        state.started.store(false, Ordering::SeqCst);
+        state.finished.store(false, Ordering::SeqCst);
+        state.shown.store(false, Ordering::SeqCst);
+        *state.last_progress.lock().unwrap() = None;
+    }
+    watch(app.clone());
+}
+
 pub fn is_finished(app: &AppHandle) -> bool {
     app.state::<BootScreenState>()
         .finished
