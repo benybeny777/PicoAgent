@@ -18,7 +18,7 @@ enum Engine {
 
 impl Engine {
     fn parse(value: Option<&str>) -> Result<Self, String> {
-        match value.unwrap_or("wan-2.2-5b") {
+        match value.unwrap_or("qwen-edit") {
             "qwen-edit" => Ok(Self::QwenEdit),
             "wan-2.2-5b" => Ok(Self::Wan),
             "ltx-0.9.8-2b-fp8" => Ok(Self::Ltx),
@@ -122,6 +122,69 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
     Ok((python, comfy, models))
 }
 
+/// 文章から新しい画像を作る明示依頼。
+const IMAGE_CREATION_REQUESTS: &[&str] = &[
+    "画像を作成して",
+    "画像を生成して",
+    "画像をつくって",
+    "イラストを生成して",
+    "イラストをかいて",
+    "イラストを描いて",
+    "イラストを作って",
+    "画像を作って",
+    "画像を描いて",
+    "画像作成して",
+    "画像生成して",
+    "イラスト生成して",
+    "イラスト描いて",
+    "イラスト作って",
+    "画像つくって",
+    "画像作って",
+    "画像描いて",
+    "絵をかいて",
+    "絵を描いて",
+    "絵を作って",
+    "絵かいて",
+    "絵描いて",
+    "絵作って",
+];
+/// 入力画像の編集・動画・パス指定は、入力パスやエンジンをモデルに選ばせるため先回りしない。
+const NOT_TEXT_TO_IMAGE_MARKERS: &[&str] = &["この画像", "その画像", "添付", "動画", ":\\", ":/"];
+
+/// 明示的な画像作成依頼から、生成内容（依頼の言い回しを除いた部分）を取り出す。
+fn image_creation_prompt(text: &str) -> Option<String> {
+    let request = IMAGE_CREATION_REQUESTS
+        .iter()
+        .find(|request| text.contains(*request))?;
+    if NOT_TEXT_TO_IMAGE_MARKERS
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return None;
+    }
+    let replaced = text.replacen(request, " ", 1);
+    let trim = |value: &str| -> String {
+        value
+            .trim_matches(|character: char| {
+                character.is_whitespace() || "、。,.！？!?：:".contains(character)
+            })
+            .to_string()
+    };
+    let mut prompt = trim(&replaced);
+    for suffix in ["ください", "ほしい", "欲しい"] {
+        if let Some(stripped) = prompt.strip_suffix(suffix) {
+            prompt = trim(stripped);
+        }
+    }
+    for suffix in ["の", "を", "な", "で"] {
+        if let Some(stripped) = prompt.strip_suffix(suffix) {
+            prompt = trim(stripped);
+            break;
+        }
+    }
+    (!prompt.is_empty()).then_some(prompt)
+}
+
 #[async_trait]
 impl Tool for ComfyuiTool {
     fn name(&self) -> &'static str {
@@ -140,12 +203,26 @@ impl Tool for ComfyuiTool {
         ]
     }
 
+    fn intent_priority(&self) -> i32 {
+        // 「おすすめの猫の画像を作って」などを、Web検索（100）より先に画像生成へ回す。
+        110
+    }
+
+    fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        // 小型モデルのtool_calls判断に任せると呼ばれないため、明示依頼は直接実行する。
+        image_creation_prompt(text).map(|prompt| {
+            crate::tools::IntentInvocation::direct(
+                json!({ "prompt": prompt, "engine": "qwen-edit" }),
+            )
+        })
+    }
+
     fn label(&self) -> &'static str {
         "ローカル画像・動画生成"
     }
 
     fn description(&self) -> String {
-        "管理下ComfyUIで画像編集または動画生成を行います。engineはqwen-edit、wan-2.2-5b、ltx-0.9.8-2b-fp8から選択します。Qwen画像編集はinput_path必須、動画は任意の入力画像からも生成できます。モデルは追加機能で選んだものだけを取得します。".into()
+        "管理下ComfyUIで画像の生成・編集または動画生成を行います。engineはqwen-edit（既定・画像）、wan-2.2-5b、ltx-0.9.8-2b-fp8から選択します。qwen-editはinput_pathを指定すると編集、省略すると文章から新しい画像を生成します。動画は任意の入力画像からも生成できます。モデルは追加機能で選んだものだけを取得します。".into()
     }
 
     fn parameters(&self) -> Value {
@@ -153,10 +230,10 @@ impl Tool for ComfyuiTool {
             "type":"object",
             "properties":{
                 "prompt":{"type":"string","description":"生成・編集内容。動画は詳しい英語プロンプトを推奨"},
-                "engine":{"type":"string","enum":["qwen-edit","wan-2.2-5b","ltx-0.9.8-2b-fp8"],"default":"wan-2.2-5b"},
-                "input_path":{"type":"string","description":"許可済み領域にある入力画像。Qwen編集では必須、動画では任意"},
-                "width":{"type":"integer","default":768,"minimum":256,"maximum":1280},
-                "height":{"type":"integer","default":512,"minimum":256,"maximum":1280},
+                "engine":{"type":"string","enum":["qwen-edit","wan-2.2-5b","ltx-0.9.8-2b-fp8"],"default":"qwen-edit"},
+                "input_path":{"type":"string","description":"許可済み領域にある入力画像。qwen-editでは指定時に編集、省略時は文章から新規生成。動画では任意"},
+                "width":{"type":"integer","minimum":256,"maximum":1280,"description":"省略時は画像512、動画768"},
+                "height":{"type":"integer","minimum":256,"maximum":1280,"description":"省略時は画像512、動画512"},
                 "frames":{"type":"integer","default":97,"minimum":9,"maximum":257,"description":"動画フレーム数。8n+1へ切り下げ"},
                 "seed":{"type":"integer","minimum":0}
             },
@@ -205,9 +282,6 @@ impl Tool for ComfyuiTool {
             },
             _ => None,
         };
-        if engine == Engine::QwenEdit && input.is_none() {
-            return "エラー: Qwen画像編集には input_path が必要です。".into();
-        }
         let (python, comfy, models) = match validate_runtime(engine) {
             Ok(value) => value,
             Err(error) => return error,
@@ -220,8 +294,15 @@ impl Tool for ComfyuiTool {
             Ok(path) => path,
             Err(error) => return error,
         };
-        let width = normalized_video_dimension(integer(&args, "width", 768, 256, 1280));
-        let height = normalized_video_dimension(integer(&args, "height", 512, 256, 1280));
+        // 8GB VRAMでQwen 20Bを動かすと512×512でも約9分かかるため、画像の既定は512四方にする。
+        let (default_width, default_height) = if engine == Engine::QwenEdit {
+            (512, 512)
+        } else {
+            (768, 512)
+        };
+        let width = normalized_video_dimension(integer(&args, "width", default_width, 256, 1280));
+        let height =
+            normalized_video_dimension(integer(&args, "height", default_height, 256, 1280));
         let frames = normalized_frames(integer(&args, "frames", 97, 9, 257));
         let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| {
             std::time::SystemTime::now()
@@ -307,5 +388,39 @@ mod tests {
     fn 未知のエンジンを拒否する() {
         assert!(Engine::parse(Some("unknown")).is_err());
         assert!(Engine::parse(Some("wan-2.2-5b")).is_ok());
+    }
+
+    #[test]
+    fn エンジン省略時は画像生成にする() {
+        assert!(Engine::parse(None) == Ok(Engine::QwenEdit));
+    }
+
+    #[test]
+    fn 明示的な画像作成依頼から生成内容を取り出す() {
+        assert_eq!(
+            image_creation_prompt("青空の下で昼寝をする白い猫の画像を作って").as_deref(),
+            Some("青空の下で昼寝をする白い猫")
+        );
+        assert_eq!(
+            image_creation_prompt("猫のイラストを描いてください").as_deref(),
+            Some("猫")
+        );
+        assert_eq!(image_creation_prompt("画像作って"), None);
+        assert_eq!(image_creation_prompt("この画像を元に画像を作って"), None);
+        assert_eq!(image_creation_prompt("猫の動画を作って"), None);
+        assert_eq!(image_creation_prompt("今日の天気は？"), None);
+    }
+
+    #[test]
+    fn 画像作成依頼はweb検索より先に直接実行する() {
+        let matched = crate::tools::intent_for_text("おすすめの猫の画像を作って")
+            .expect("画像作成依頼は先回り実行する");
+        assert_eq!(matched.tool_name, "comfyui_generate");
+        assert!(matches!(
+            matched.invocation.handling,
+            crate::tools::IntentHandling::Direct
+        ));
+        assert_eq!(matched.invocation.args["prompt"], "おすすめの猫");
+        assert_eq!(matched.invocation.args["engine"], "qwen-edit");
     }
 }

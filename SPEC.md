@@ -244,7 +244,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 - 第三者ソフトウェアをPicoAgentのReleaseへ再アップロードしない。`component-manifest.json` は `version=2` / `policy=direct-upstream`、公式取得元表示、管理対象で固定する `targetVersion` だけを持ち、自前パッケージURL・分割ファイル・公開済みフラグを持たない。
 - ローカル生成基盤は共有Python 3.12とComfyUIを`character-maker`で一度だけ管理し、Qwen画像編集にも再利用する。WanとLTXは`video-wan`／`video-ltx`の別コンポーネントとして利用者が選んだ側だけを取得する。8GB VRAM未満または基盤未導入では取得前に停止し、生成基盤は動画モデルより先に削除できない。
-- この導入判定は8GBでの実動作保証ではない。LTX 0.9.8は低VRAM用途の旧世代候補で、実動画・画質・安定性は未検証。管理ツールの純粋なtext-to-imageとLTX 2.3／最新2.5は未対応。LTX 2.5の公式条件はDesktopが16GB以上、モデル本体のシステム要件が32GB以上と経路で異なる。一次資料と採用境界は[管理モデル](docs/models.md)へまとめる。
+- この導入判定は8GBでの実動作保証ではない。LTX 0.9.8は低VRAM用途の旧世代候補で、実動画・画質・安定性は未検証。専用のtext-to-imageモデルとLTX 2.3／最新2.5は未対応（文章だけの画像生成は、導入済みQwen Image Editを参照画像なしで実行する）。LTX 2.5の公式条件はDesktopが16GB以上、モデル本体のシステム要件が32GB以上と経路で異なる。一次資料と採用境界は[管理モデル](docs/models.md)へまとめる。
 - `installMode=managed` のAivisとWhisperだけは、各公式配布元から利用者データ `PicoAgent/bundled/<id>/` へ直接取得する。GitHub Release APIのサイズとSHA-256 digest、Whisperモデルの固定SHA-256、HTTPS、上限サイズ、zip slip、展開容量を検査し、ステージングから原子的に入れ替える。削除はPicoAgent管理領域だけを対象とする。
 - 追加機能の導入・更新・修復・削除はバックエンドの共通ロックで直列化し、初回起動の自動導入と設定画面、複数カードから同時に実行されても管理領域を競合更新しない。
 - `installMode=external` のLibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrepは公式ページを表示する。利用者が提供元の条件を確認して導入し、必要なら設定で実行ファイルを指定する。PicoAgentは外部導入物を削除しない。
@@ -451,7 +451,7 @@ CSP は `tauri.conf.json` の値を正本とする。`default-src 'self' asset: 
 | `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KBで制限、timeout。取得内容は信頼できない外部データとして扱う |
 | `desktop_control` | デスクトップのマウス・キーボード操作（クリック・ドラッグ・文字入力・キー送出・スクロール）とウィンドウ一覧・前面化 | 既定無効、**シェルを介さない固定 action のみ**、座標の画面内チェック、入力文字数 2,000 上限、1分あたりの操作回数上限。ウィンドウ一覧・前面化は現在Windowsのみ。Linuxの入力操作はX11またはデスクトップ環境の許可範囲で動作し、Waylandが拒否した場合はエラーを返す |
 | `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む。JS 描画ページ・ログインが要るページ向け | 既定無効、CDP は127.0.0.1限定かつ自分が起動した子だけを操作、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、既定は専用プロファイル、読み取り専用（open / read / pages / close）、timeout。取得内容は信頼できない外部データとして `check_injection` を通す |
-| `comfyui_generate` | PicoAgent管理下のComfyUIを処理ごとに所有して、Qwen Image Edit、Wan 2.2 TI2V 5B、LTX-Video 0.9.8 2B FP8を実行する。入力は共通許可ルートで検査し、完成品を`generated-media/`へ原子的に保存してからComfyUIを停止する | 画像編集は入力必須。動画はテキスト／画像入力。幅・高さは32の倍数、フレームは8n+1へ正規化。共通プロセス層の2時間上限、生成失敗は原因を返して即時停止、途中物を同じ呼び出しで回収、キャラ補完と共通GPUロック、選択モデル未導入時は追加機能へ案内 |
+| `comfyui_generate` | PicoAgent管理下のComfyUIを処理ごとに所有して、Qwen Image Edit、Wan 2.2 TI2V 5B、LTX-Video 0.9.8 2B FP8を実行する。入力は共通許可ルートで検査し、完成品を`generated-media/`へ原子的に保存してからComfyUIを停止する | Qwenは入力画像があれば編集、無ければ文章から新規生成（エンジン省略時の既定、画像の既定寸法512×512）。「画像を作って」「イラストを描いて」などの明示依頼は`intent_invocation`で直接実行する（優先度110。入力画像・添付・動画・パスを含む発話はモデルへ任せる）。ComfyUIのポートはOSが選ぶ空きポート（固定番号はWindowsの予約ポート範囲と衝突する）。結果の`generated-media/`内の画像はasset protocolでチャットに表示し、`pet_open_generated_media`で既定アプリを開く（同フォルダ直下の画像・動画だけ許可）。動画はテキスト／画像入力。幅・高さは32の倍数、フレームは8n+1へ正規化。共通プロセス層の2時間上限、生成失敗は原因を返して即時停止、途中物を同じ呼び出しで回収、キャラ補完と共通GPUロック、選択モデル未導入時は追加機能へ案内 |
 | `image_generate` | OpenAI DALL-E 3 による画像生成。テキストプロンプトから画像 URL を返し、フキダシへ `![alt](url)` でインライン表示する | `OPENAI_API_KEY` 必須、90秒 timeout、サイズ/画質パラメータ対応 |
 | `ms_office` | OfficeCLI と OOXML 直接編集による Word/Excel/PowerPoint の文字列置換・PDF出力 | 共通許可ルート配下のみ、同梱または明示設定した OfficeCLI、timeout |
 | `document_convert` | OfficeCLI / Pandoc による Office・PDF・文書変換 | 共通許可ルート配下のみ、同梱または明示設定した変換エンジン、timeout |

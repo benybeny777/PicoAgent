@@ -47,6 +47,13 @@ def request_json(url, payload=None):
         return json.load(response)
 
 
+def reserve_port(requested):
+    """0はOSに空きポートを選ばせる。固定番号はWindowsの予約範囲（Hyper-V等）と衝突すると起動できない。"""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", requested))
+        return probe.getsockname()[1]
+
+
 def wait_for_server(url, process, timeout):
     started = time.monotonic()
     while time.monotonic() - started < timeout:
@@ -85,21 +92,26 @@ def stop_owned(process):
     process.wait()
 
 
-def qwen(prompt, seed, width, height):
-    return {
+def qwen(prompt, seed, width, height, input_image):
+    workflow = {
         "1":{"class_type":"UNETLoader","inputs":{"unet_name":"qwen_image_edit_2511_bf16.safetensors","weight_dtype":"default"}},
         "2":{"class_type":"CLIPLoader","inputs":{"clip_name":"qwen_2.5_vl_7b.safetensors","type":"qwen_image","device":"default"}},
         "3":{"class_type":"VAELoader","inputs":{"vae_name":"qwen_image_vae.safetensors"}},
-        "4":{"class_type":"LoadImage","inputs":{"image":"input.png"}},
         "5":{"class_type":"ModelSamplingAuraFlow","inputs":{"model":["1",0],"shift":3.1}},
         "6":{"class_type":"CFGNorm","inputs":{"model":["5",0],"strength":1}},
-        "7":{"class_type":"TextEncodeQwenImageEditPlus","inputs":{"clip":["2",0],"prompt":prompt,"vae":["3",0],"image1":["4",0]}},
-        "8":{"class_type":"TextEncodeQwenImageEditPlus","inputs":{"clip":["2",0],"prompt":"","vae":["3",0],"image1":["4",0]}},
+        "7":{"class_type":"TextEncodeQwenImageEditPlus","inputs":{"clip":["2",0],"prompt":prompt,"vae":["3",0]}},
+        "8":{"class_type":"TextEncodeQwenImageEditPlus","inputs":{"clip":["2",0],"prompt":"","vae":["3",0]}},
         "9":{"class_type":"EmptySD3LatentImage","inputs":{"width":width,"height":height,"batch_size":1}},
         "10":{"class_type":"KSampler","inputs":{"model":["6",0],"positive":["7",0],"negative":["8",0],"latent_image":["9",0],"seed":seed,"steps":20,"cfg":4,"sampler_name":"euler","scheduler":"simple","denoise":1}},
         "12":{"class_type":"VAEDecode","inputs":{"samples":["10",0],"vae":["3",0]}},
         "13":{"class_type":"SaveImage","inputs":{"images":["12",0],"filename_prefix":"PicoAgent/image"}},
     }
+    # 参照画像は任意入力。無い場合は同じ導入済みモデルで文章だけから新規生成する。
+    if input_image:
+        workflow["4"] = {"class_type":"LoadImage","inputs":{"image":"input.png"}}
+        workflow["7"]["inputs"]["image1"] = ["4",0]
+        workflow["8"]["inputs"]["image1"] = ["4",0]
+    return workflow
 
 
 def wan(prompt, seed, width, height, frames, input_image):
@@ -174,7 +186,7 @@ def main():
     parser.add_argument("--comfy", type=Path, required=True)
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--gpu-lock", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=58130)
+    parser.add_argument("--port", type=int, default=0, help="0は空きポートを自動で選ぶ")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--width", type=int, required=True)
     parser.add_argument("--height", type=int, required=True)
@@ -182,9 +194,7 @@ def main():
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument("--generation-timeout", type=int, default=14400)
     args = parser.parse_args()
-    if args.engine == "qwen-edit" and not args.input:
-        raise ValueError("Qwen画像編集には入力画像が必要です")
-    run = args.output.parent / (".generating-" + args.output.stem)
+    run =args.output.parent / (".generating-" + args.output.stem)
     temporary = args.output.with_suffix(args.output.suffix + ".incoming")
     # 既存の処理や完成品を上書きせず、この呼び出しが作った途中物だけを回収する。
     if args.output.exists() or temporary.exists():
@@ -196,10 +206,9 @@ def main():
         (run / "temp").mkdir()
         if args.input:
             shutil.copy2(args.input, run / "input/input.png")
-        workflow = qwen(args.prompt, args.seed, args.width, args.height) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
+        workflow = qwen(args.prompt, args.seed, args.width, args.height, args.input) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
         with gpu_lock(args.gpu_lock):
-            with socket.socket() as probe:
-                probe.bind(("127.0.0.1", args.port))
+            args.port = reserve_port(args.port)
             command = [os.fspath(Path(os.sys.executable)), os.fspath(args.comfy / "main.py"), "--listen", "127.0.0.1", "--port", str(args.port), "--base-directory", os.fspath(run), "--models-directory", os.fspath(args.models), "--temp-directory", os.fspath(run / "temp"), "--disable-auto-launch", "--disable-all-custom-nodes", "--disable-api-nodes", "--preview-method", "none"]
             environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
             with (run / "comfy.log").open("w", encoding="utf-8") as log:

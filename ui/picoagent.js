@@ -91,6 +91,7 @@ window.picoagent = {
   rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
   openSettings: (tab = null) => call("pet_open_settings", { tab }),
   openExternalUrl: (url) => call("pet_open_external_url", { url }),
+  openGeneratedMedia: (path) => call("pet_open_generated_media", { path }),
   quit: () => call("pet_quit"),
   alarms: () => call("pet_alarms"),
   alarmWake: (id) => call("pet_alarm_wake", { id }),

@@ -2435,10 +2435,45 @@ function externalLink(url, text) {
   return anchor;
 }
 
+// PicoAgentが生成物を保存する管理領域（generated-media直下）のローカルファイルか。
+// 実際に表示できる範囲は asset protocol の scope が同じ領域だけに絞る。ここは表示方法の振り分けだけを行う。
+function isGeneratedMediaPath(path) {
+  return /^(?:[A-Za-z]:[\\/]|\/)[^\n]*[\\/]generated-media[\\/][^\\/\n]+$/.test(path);
+}
+
+function openGeneratedMedia(path) {
+  return window.picoagent.openGeneratedMedia(path).catch(error => {
+    logApp("error", "生成ファイルを開けませんでした", errorDetail(error));
+    showToast("生成ファイルを開けませんでした", "error");
+  });
+}
+
+function generatedMediaImage(path, alt) {
+  const img = document.createElement("img");
+  img.src = window.picoagent.assetUrl(path);
+  img.alt = alt || "生成画像";
+  img.style.cssText = "max-width:100%;border-radius:6px;display:block;margin:4px 0;cursor:pointer";
+  img.title = "クリックして開く";
+  img.addEventListener("click", () => openGeneratedMedia(path));
+  return img;
+}
+
+function generatedMediaLink(path, text) {
+  const anchor = document.createElement("a");
+  anchor.href = "#";
+  anchor.textContent = text;
+  anchor.addEventListener("click", event => {
+    event.preventDefault();
+    openGeneratedMedia(path);
+  });
+  return anchor;
+}
+
 // インライン Markdown（**bold** / *italic* / `code` / リンク / 画像）を DOM へ追加する。
 function appendInline(parent, raw) {
   // bold → italic → code → 画像 → リンク → 裸URL の優先順でマッチ。
-  const pat = /\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*|`([^`\n]+)`|!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>,)[\]]+)/g;
+  // 画像とリンクの参照先は http(s) に加え、生成物のローカル絶対パスも受け付ける。
+  const pat = /\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*|`([^`\n]+)`|!\[([^\]]*)\]\((https?:\/\/[^\s)]+|(?:[A-Za-z]:[\\/]|\/)[^)\n]+)\)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|(?:[A-Za-z]:[\\/]|\/)[^)\n]+)\)|(https?:\/\/[^\s<>,)[\]]+)/g;
   let off = 0;
   for (const m of raw.matchAll(pat)) {
     if (m.index > off) parent.append(document.createTextNode(raw.slice(off, m.index)));
@@ -2450,18 +2485,26 @@ function appendInline(parent, raw) {
       const c = document.createElement("code"); c.textContent = m[3]; parent.append(c);
     } else if (m[4] !== undefined) {
       // 画像 ![alt](url)
-      if (isSafeImageUrl(m[5])) {
+      if (isGeneratedMediaPath(m[5]) && /\.(png|jpe?g|webp)$/i.test(m[5])) {
+        parent.append(generatedMediaImage(m[5], m[4]));
+      } else if (isGeneratedMediaPath(m[5])) {
+        parent.append(generatedMediaLink(m[5], m[4] || "生成ファイルを開く"));
+      } else if (isSafeImageUrl(m[5])) {
         const img = document.createElement("img");
         img.src = m[5]; img.alt = m[4] || "画像";
         img.style.cssText = "max-width:100%;border-radius:6px;display:block;margin:4px 0;cursor:pointer";
         img.title = "クリックして開く";
         img.addEventListener("click", () => openExternalUrl(m[5]));
         parent.append(img);
-      } else {
+      } else if (/^https?:\/\//.test(m[5])) {
         parent.append(externalLink(m[5], m[4] || m[5]));
+      } else {
+        parent.append(document.createTextNode(m[0]));
       }
     } else if (m[6] !== undefined) {
-      parent.append(externalLink(m[7], m[6]));
+      if (isGeneratedMediaPath(m[7])) parent.append(generatedMediaLink(m[7], m[6]));
+      else if (/^https?:\/\//.test(m[7])) parent.append(externalLink(m[7], m[6]));
+      else parent.append(document.createTextNode(m[0]));
     } else {
       parent.append(externalLink(m[0], m[0]));
     }

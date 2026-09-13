@@ -818,16 +818,29 @@ mod tests {
         sorted_registered.sort_unstable();
         assert_eq!(registered, sorted_registered);
 
-        let first = schema_names("画像変換して画像を作って");
-        assert_eq!(first, schema_names("画像変換して画像を作って"));
+        // 同じ優先度どうしは、長い一致語のスキルを先にする。
+        let first = schema_names("PDFを画像変換して");
+        assert_eq!(first, schema_names("PDFを画像変換して"));
         let image_tools = first.iter().position(|name| name == "image_tools").unwrap();
-        let generator = first
+        let pdf_tools = first.iter().position(|name| name == "pdf_tools").unwrap();
+        assert!(
+            image_tools < pdf_tools,
+            "長い一致語を先にしてください: {first:?}"
+        );
+
+        // 明示した優先度は一致語の長さより優先する（画像生成110は画像変換0より先）。
+        let prioritized = schema_names("画像変換して画像を作って");
+        let image_tools = prioritized
+            .iter()
+            .position(|name| name == "image_tools")
+            .unwrap();
+        let generator = prioritized
             .iter()
             .position(|name| name == "comfyui_generate")
             .unwrap();
         assert!(
-            image_tools < generator,
-            "長い一致語を先にしてください: {first:?}"
+            generator < image_tools,
+            "明示した優先度を先にしてください: {prioritized:?}"
         );
 
         let summary = super::capability_summary();
