@@ -1210,6 +1210,26 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   .pet-app[data-layout] .composer-actions button { min-width:36px; padding:0 4px; font-size:10px; }
 }
 
+/* 回答操作（通知・コピー・再生成・読上・停止・拡大）は記号ではなく文字ラベル。
+   チャットと配信は枠の幅が固定分で削られるため、狭い窓では字が切れて読めなくなる。
+   余白・字間・枠の取り分を詰めて、6つとも読める状態を保つ。 */
+@media (max-width:820px) {
+  [data-layout="stream"] .reply-actions {
+    right:calc(var(--stream-chat-width) + 12px);
+    max-width:calc(100% - var(--stream-chat-width) - 26px);
+    gap:3px;
+  }
+  [data-layout="stream"] .reply-actions button { padding:0 5px; font-size:11px; }
+}
+@media (max-width:520px) {
+  [data-layout="chat"] .reply-actions { left:92px; right:10px; gap:3px; }
+  [data-layout="chat"] .reply-actions button { padding:0 3px; font-size:10px; }
+}
+@media (max-width:360px) {
+  [data-layout="chat"] .reply-actions { left:84px; right:8px; gap:2px; }
+  [data-layout="chat"] .reply-actions button { padding:0 2px; font-size:9px; }
+}
+
 /* 幅が足りないとき: メニュー項目を優先度順に落とす。
    ウィンドウ操作（最小化・最大化・閉じる）と「設定」は最後まで残す。落とした項目は
    キャラクターの右クリックメニューからも開ける。 */
