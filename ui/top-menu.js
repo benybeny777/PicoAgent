@@ -27,6 +27,25 @@
     });
   });
 
+  // 「表示」は設定画面を開かず、押した位置に画面レイアウトの一覧を出して1手で切り替える。
+  // 一覧の最後の「画面レイアウト・位置…」から従来の設定画面へ進める。
+  const layoutButton = document.getElementById("layoutMenuButton");
+  layoutButton?.addEventListener("click", async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (layoutButton.disabled) return;
+    layoutButton.disabled = true;
+    // ウィンドウ左上を原点とする論理座標。メイン画面はOS枠を持たないので、WebViewの座標と一致する。
+    const rect = layoutButton.getBoundingClientRect();
+    try {
+      await window.picoagent.layoutMenu(Math.round(rect.left), Math.round(rect.bottom));
+    } catch (error) {
+      window.PicoUI?.logApp?.("error", "画面レイアウトの一覧を開けませんでした", error);
+    } finally {
+      layoutButton.disabled = false;
+    }
+  });
+
   for (const button of menu.querySelectorAll("[data-settings-tab]")) {
     button.addEventListener("click", async event => {
       event.preventDefault();

@@ -1243,7 +1243,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   .top-window-menu > .layout-edit-toggle { display:none; }
 }
 @media (max-width:320px) {
-  .top-window-menu > button[data-settings-tab="display"] { display:none; }
+  .top-window-menu > #layoutMenuButton { display:none; }
 }
 
 /* 配信: チャット列は横幅が要る。狭いときは1列にして入力欄を窓の中へ残す。

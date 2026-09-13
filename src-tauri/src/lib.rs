@@ -189,6 +189,7 @@ pub fn run() {
             commands::pet_reset_layout,
             commands::pet_save_layout_placements,
             menu::pet_menu,
+            menu::pet_layout_menu,
         ])
         .on_menu_event(|app, event| {
             menu::handle_event(app, event.id().as_ref());
