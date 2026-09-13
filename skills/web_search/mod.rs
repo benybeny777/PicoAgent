@@ -45,10 +45,65 @@ fn render_result_material(user_text: &str, tool_result: &str) -> String {
     crate::tools::render_intent_prompt(RESULT_MATERIAL_PROMPT, user_text, tool_result)
 }
 
+/// Webを指す語。単独の「web」は「webpack」などを拾うため、助詞や動作と続く形で判定する。
+const WEB_CONTEXT_MARKERS: &[&str] = &[
+    "webで",
+    "webから",
+    "web検索",
+    "ウェブで",
+    "ウェブから",
+    "ウェブ検索",
+    "ネットで",
+    "ネットから",
+    "ネット検索",
+    "インターネット",
+    "ググ",
+    "ぐぐ",
+];
+/// 調べる動作を表す語。ひらがな書きも含める。
+const SEARCH_ACTION_MARKERS: &[&str] = &["検索", "調べ", "しらべ", "探", "さが", "ググ", "ぐぐ"];
+/// 検索語を作るときに取り除く依頼・催促の言い回し（長いものから順に除く）。
+const REQUEST_PHRASES: &[&str] = &[
+    "インターネットで",
+    "インターネットから",
+    "ネットで",
+    "ネットから",
+    "webで",
+    "webから",
+    "ウェブで",
+    "ウェブから",
+    "検索して",
+    "調べて",
+    "しらべて",
+    "ググって",
+    "ぐぐって",
+    "探して",
+    "さがして",
+    "くれてないの",
+    "くれないの",
+    "くれない",
+    "ください",
+    "ちゃんと",
+    "実際に",
+    "教えて",
+    "おしえて",
+];
+
 pub(crate) fn is_explicit_request(text: &str) -> bool {
-    WEB_SEARCH_REQUESTS
+    if WEB_SEARCH_REQUESTS
         .iter()
         .any(|marker| text.contains(marker))
+    {
+        return true;
+    }
+    // 「WEBからしらべて」「ネットでググって」のように、Webを指す語と調べる動作が揃えば明示依頼とみなす。
+    let lower = text.to_lowercase();
+    WEB_CONTEXT_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+        && SEARCH_ACTION_MARKERS
+            .iter()
+            .any(|marker| lower.contains(marker))
 }
 
 fn should_search(text: &str) -> bool {
@@ -57,6 +112,9 @@ fn should_search(text: &str) -> bool {
     }
     let lower = text.to_lowercase();
     const INFO_MARKERS: &[&str] = &[
+        "しらべ",
+        "ググ",
+        "ぐぐ",
         "最新",
         "ニュース",
         "今日",
@@ -103,10 +161,17 @@ fn should_search(text: &str) -> bool {
     INFO_MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
-fn search_query(text: &str) -> String {
-    let mut query = text.to_string();
-    for marker in WEB_SEARCH_REQUESTS {
-        query = query.replace(marker, " ");
+/// 発話から依頼・催促の言い回しを除いた話題を返す。話題が残らなければ空文字を返す。
+fn strip_request(text: &str) -> String {
+    let mut phrases: Vec<String> = WEB_SEARCH_REQUESTS
+        .iter()
+        .chain(REQUEST_PHRASES)
+        .map(|phrase| phrase.to_lowercase())
+        .collect();
+    phrases.sort_by_key(|phrase| std::cmp::Reverse(phrase.chars().count()));
+    let mut query = text.to_lowercase();
+    for phrase in &phrases {
+        query = query.replace(phrase.as_str(), " ");
     }
     let query = query
         .trim_matches(|character: char| {
@@ -119,13 +184,31 @@ fn search_query(text: &str) -> String {
         .iter()
         .find_map(|suffix| query.strip_suffix(suffix))
         .map(str::trim_end)
-        .filter(|trimmed| !trimmed.is_empty())
         .unwrap_or(query);
-    if query.is_empty() {
+    query.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// 検索語を組み立てる。話題を含まない催促（「WEBから調べてくれてないの？」）では、
+/// 直前の利用者発話（新しい順）から話題を最大2件補い、古い順に並べる。
+fn search_query_in_conversation(text: &str, earlier_user_texts: &[&str]) -> String {
+    let query = strip_request(text);
+    if !query.is_empty() {
+        return query;
+    }
+    let mut topics: Vec<String> = earlier_user_texts
+        .iter()
+        .map(|earlier| strip_request(earlier))
+        .filter(|topic| !topic.is_empty())
+        .take(2)
+        .collect();
+    topics.reverse();
+    let combined = topics.join(" ");
+    let combined = if combined.is_empty() {
         text.trim().to_string()
     } else {
-        query.to_string()
-    }
+        combined
+    };
+    combined.chars().take(MAX_QUERY_CHARS).collect()
 }
 
 fn parse_setting(cfg: &Config, key: &str, fallback: &str, min: usize, max: usize) -> usize {
@@ -136,7 +219,17 @@ fn parse_setting(cfg: &Config, key: &str, fallback: &str, min: usize, max: usize
 fn parse_setting_value(raw: &str, fallback: &str, min: usize, max: usize) -> usize {
     // フォールバック許可: Web検索の補助設定が壊れていても検索自体は既定値で続行する。
     let fallback_value = fallback.parse::<usize>().unwrap_or(min).clamp(min, max);
-    raw.parse::<usize>()
+    // 設定画面でIMEのまま入力された全角数字（「３」）も同じ値として読む。
+    let normalized: String = raw
+        .trim()
+        .chars()
+        .map(|character| match character {
+            '０'..='９' => char::from(b'0' + (character as u32 - '０' as u32) as u8),
+            other => other,
+        })
+        .collect();
+    normalized
+        .parse::<usize>()
         .ok()
         .filter(|value| (min..=max).contains(value))
         .unwrap_or(fallback_value)
@@ -233,9 +326,17 @@ impl Tool for WebSearchTool {
     }
 
     fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
+        self.intent_invocation_in_conversation(text, &[])
+    }
+
+    fn intent_invocation_in_conversation(
+        &self,
+        text: &str,
+        earlier_user_texts: &[&str],
+    ) -> Option<crate::tools::IntentInvocation> {
         should_search(text).then(|| {
             crate::tools::IntentInvocation::material(
-                json!({ "query": search_query(text) }),
+                json!({ "query": search_query_in_conversation(text, earlier_user_texts) }),
                 render_result_material,
                 true,
             )
@@ -357,14 +458,45 @@ inventory::submit! { ToolReg { make: || Box::new(WebSearchTool) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        direct_url, extract_results, is_explicit_request, parse_setting_value, search_query,
-        MAX_RESULTS_LIMIT,
+        direct_url, extract_results, is_explicit_request, parse_setting_value,
+        search_query_in_conversation, WebSearchTool, MAX_RESULTS_LIMIT,
     };
+    use crate::tools::Tool;
 
     #[test]
     fn サイトを探す要求を明示的なweb検索として扱う() {
         assert!(is_explicit_request("天気のサイト探して"));
-        assert_eq!(search_query("天気のサイト探して"), "天気");
+        assert_eq!(
+            search_query_in_conversation("天気のサイト探して", &[]),
+            "天気"
+        );
+    }
+
+    #[test]
+    fn ひらがなや催促の言い回しでもweb検索を明示依頼として扱う() {
+        assert!(is_explicit_request("WEBからしらべてくれてないの？"));
+        assert!(is_explicit_request("ネットでググって"));
+        assert!(!is_explicit_request("webpackの設定ファイルを開いて"));
+    }
+
+    #[test]
+    fn 話題のない催促は直前の発話から検索語を補う() {
+        let earlier = [
+            "考えるじゃなくて実際のやつおしえて",
+            "みこの歌のタイトルを教えて",
+        ];
+        assert_eq!(
+            search_query_in_conversation("WEBからしらべてくれてないの？", &earlier),
+            "みこの歌のタイトル 考えるじゃなくて実際のやつ"
+        );
+        assert_eq!(
+            search_query_in_conversation("ネットでRustの最新版を調べて", &earlier),
+            "rustの最新版"
+        );
+        let invocation = WebSearchTool
+            .intent_invocation_in_conversation("WEBからしらべてくれてないの？", &earlier[1..])
+            .expect("明示的な検索依頼は先回り実行する");
+        assert_eq!(invocation.args["query"], "みこの歌のタイトル");
     }
 
     #[test]
@@ -392,5 +524,6 @@ mod tests {
     fn 壊れた検索設定は既定値へ戻す() {
         assert_eq!(parse_setting_value("abc", "5", 1, MAX_RESULTS_LIMIT), 5);
         assert_eq!(parse_setting_value("999", "15", 3, 60), 15);
+        assert_eq!(parse_setting_value("３", "5", 1, MAX_RESULTS_LIMIT), 3);
     }
 }

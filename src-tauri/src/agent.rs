@@ -1044,6 +1044,15 @@ async fn run_scoped(
     if let Some(user_index) = messages.iter().rposition(|message| message.role == "user") {
         let user_text = messages[user_index].content.clone();
         original_user_text = user_text.clone();
+        // 話題を含まない催促へ文脈を補えるよう、直前の利用者発話を新しい順に渡す。
+        let earlier_user_owned: Vec<String> = messages[..user_index]
+            .iter()
+            .rev()
+            .filter(|message| message.role == "user")
+            .take(3)
+            .map(|message| message.content.clone())
+            .collect();
+        let earlier_user_texts: Vec<&str> = earlier_user_owned.iter().map(String::as_str).collect();
         schemas = tools::schemas_for_text(&user_text);
         let hour = chrono::Local::now().hour();
         let character_greeting = selected_character_greeting(app);
@@ -1051,7 +1060,9 @@ async fn run_scoped(
             return direct_answer(messages, answer);
         } else if let Some(answer) = setup_guide_answer(&user_text) {
             return direct_answer(messages, answer);
-        } else if let Some(matched) = tools::intent_for_text(&user_text) {
+        } else if let Some(matched) =
+            tools::intent_for_conversation(&user_text, &earlier_user_texts)
+        {
             let tools::MatchedIntent {
                 tool_name,
                 invocation,

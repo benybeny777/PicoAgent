@@ -50,6 +50,8 @@ pub fn base(config: &Config) -> String {
         prompt.push_str(&capabilities);
         prompt.push_str("\n「何ができる？」「何が得意？」などと聞かれたら、上のスキルから役立つものをキャラクターの口調で具体的に挙げて教えてください。");
     }
+    // 小型モデルは「今から調べるね、待ってて」と実行しない作業を約束しがちなため、毎回明示する。
+    prompt.push_str("\n\nまだ実行していない作業について「今から調べる」「確認してみる」「ちょっと待ってて」のように後で行う約束をしないでください。調べる・作るなどが必要なら、その応答の中でスキルを実行して結果を伝え、実行できないときはできない理由を正直に伝えてください。");
     crate::user_skills::append_prompt_context(&mut prompt, config);
     // 作業フォルダの AGENTS.md（この案件の作法）。許可ルートを切り替えると内容も入れ替わる。
     crate::project_rules::append_prompt_context(&mut prompt, config);
