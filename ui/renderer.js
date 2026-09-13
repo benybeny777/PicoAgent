@@ -146,34 +146,12 @@ function schedulePersistDraft() {
   if (draftPersistTimer) clearTimeout(draftPersistTimer);
   draftPersistTimer = setTimeout(persistDraft, 600);
 }
-// 既定のクイックアクション。設定 PICOAGENT_QUICK_ACTIONS（1行1件「ラベル|本文」）で置き換え可能。
+// クイック操作の既定一覧・解析・絞り込みは quick-actions.js が持つ。
+// 設定 PICOAGENT_QUICK_ACTIONS（1行1件「ラベル|本文」）で置き換え可能。
 let quickActionItems = null; // null = 既定を使用
 let pendingChoices = null; // ask_user の選択肢（null = 通常のクイック操作を表示）
-function parseQuickActions(text) {
-  const items = String(text ?? "")
-    .split("\n")
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const sep = line.indexOf("|");
-      if (sep <= 0) return null;
-      const label = line.slice(0, sep).trim();
-      const body = line.slice(sep + 1).trim();
-      return label && body ? { label, text: body } : null;
-    })
-    .filter(Boolean);
-  return items.length ? items : null;
-}
-const QUICK_ACTIONS = [
-  { label: "👀 画面を見る", text: "今の画面を見て、状況を短く教えて" },
-  { label: "📋 クリップボード要約", text: "クリップボードの内容を要約して" },
-  { label: "🗓 今日の予定", text: "今日の予定と気をつけることを教えて" },
-  { label: "📧 未読メール要約", text: "Gmailの未読メールを一覧取得して、重要そうな順に短く要約して" },
-  { label: "💬 Slack要約", text: "Slackの既定チャンネルの最新10件を読んで、話題と対応が必要なことを短く要約して" },
-  { label: "📅 予定確認", text: "Googleカレンダーの今日の予定を確認して、次に気をつけることを教えて" },
-  { label: "⏩ さっきの続き", text: "さっきの続きとして、次にやることを整理して" },
-  { label: "✨ できること", text: "あなたが今できることを具体的に教えて" },
-];
+// 既定のうち表示するボタン。設定の有無を確かめるまでは、連携設定の要らないものだけを出す。
+let defaultQuickActions = window.PicoQuickActions.visibleQuickActions(window.PicoQuickActions.DEFAULT_QUICK_ACTIONS, {});
 // アイドル時の自発雑談（雑談スキル）設定とタイマー。
 const chatterCfg = { enabled: false, minSecs: 90, maxSecs: 240 };
 let chatterTimer = null;
@@ -2712,7 +2690,7 @@ function setPendingChoices(choices) {
 function renderQuickActions() {
   if (!quickActions) return;
   quickActions.replaceChildren();
-  for (const action of (pendingChoices || quickActionItems || QUICK_ACTIONS)) {
+  for (const action of (pendingChoices || quickActionItems || defaultQuickActions)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action.label;
@@ -2727,6 +2705,22 @@ function renderQuickActions() {
     quickActions.append(button);
   }
   updateComposerState();
+}
+
+// 連携スキルに頼る既定ボタンは、必要な設定に値が入っているか（値そのものは受け取らない）を
+// 確かめてから出す。未設定のまま押しても設定手順の案内しか返らず、用が済まないため。
+async function refreshDefaultQuickActions() {
+  const { DEFAULT_QUICK_ACTIONS, requiredKeys, visibleQuickActions } = window.PicoQuickActions;
+  try {
+    const presence = await window.picoagent.configPresence(requiredKeys(DEFAULT_QUICK_ACTIONS));
+    defaultQuickActions = visibleQuickActions(DEFAULT_QUICK_ACTIONS, presence);
+  } catch (error) {
+    // フォールバック許可: 確認できないときは連携設定の要らないボタンだけを出す。
+    // 押しても設定案内しか返らないかもしれないボタンを並べるより害が小さい。原因はログへ残す。
+    logApp("warn", "クイック操作の設定状態を確認できませんでした", errorDetail(error));
+    defaultQuickActions = visibleQuickActions(DEFAULT_QUICK_ACTIONS, {});
+  }
+  renderQuickActions();
 }
 
 function renderReply(text) {
@@ -5670,6 +5664,10 @@ window.picoagent.on("pet:ui", (ui) => {
     status.textContent = `キャラクター変更に失敗: ${error.message}`;
   });
   applyChatterConfig(ui); // 設定変更を即反映。
+  // 自分で書いたクイック操作と、連携スキルのトークン保存による既定ボタンの出し分けを、
+  // 再起動を待たずに反映する（以前は起動時にしか読んでいなかった）。
+  if (ui.quickActions != null) quickActionItems = window.PicoQuickActions.parseQuickActions(ui.quickActions);
+  refreshDefaultQuickActions();
 });
 
 noticeToggle?.addEventListener("click", event => {
@@ -6177,8 +6175,9 @@ async function releaseBootUi() {
     setStatus(startupCharacterError);
     status.classList.add("engine-error");
   }
-  quickActionItems = parseQuickActions(info.quickActions);
+  quickActionItems = window.PicoQuickActions.parseQuickActions(info.quickActions);
   renderQuickActions();
+  refreshDefaultQuickActions();
   napMinutes = Number(info.napMinutes) > 0 ? Number(info.napMinutes) : 0;
   markActivity();
   applyChatterConfig(info); // アイドル雑談タイマーを開始。

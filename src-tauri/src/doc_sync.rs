@@ -66,6 +66,7 @@ fn referenced_keys() -> std::collections::BTreeSet<String> {
     // フロント（JS）とタスクランナー（xtask）も設定キーを参照する。
     for relative in [
         "ui/renderer.js",
+        "ui/quick-actions.js",
         "ui/settings.js",
         "ui/settings-schedules.js",
         "ui/picoagent.js",

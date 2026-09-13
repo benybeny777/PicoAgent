@@ -166,6 +166,7 @@ pub fn run() {
             commands::pet_schedule_runs,
             commands::pet_rerun_schedule_task,
             commands::pet_open_settings,
+            commands::pet_config_presence,
             commands::restart_app,
             commands::engine_status,
             commands::pet_list_downloaded_models,
