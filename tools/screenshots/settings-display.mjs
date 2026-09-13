@@ -182,22 +182,10 @@ try {
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   await page.getByRole("tab", { name: "基本設定" }).click();
   if (await page.locator(".quick-settings-card").count() !== 8) throw new Error("よく使う設定への入口が8件ではありません");
-  if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
-  const providerSelect = page.locator('[data-setting-key="PICOAGENT_PROVIDER"] select');
-  await providerSelect.selectOption("agent_cli");
-  const cliModelSelect = page.getByRole("combobox", { name: "CLIのAIモデル" });
-  await page.waitForFunction(() => document.querySelector('select[aria-label="CLIのAIモデル"]')?.value === "claude");
-  await cliModelSelect.selectOption("codex:future-model");
-  await page.getByRole("button", { name: "モデル一覧を更新", exact: true }).click();
-  if (await cliModelSelect.inputValue() !== "codex:future-model") throw new Error("一覧更新で選択モデルが変わりました");
-  const modelValue = await page.locator('[data-setting-key="PICOAGENT_MODEL"] input').inputValue();
-  if (modelValue !== "codex:future-model") throw new Error("選択モデルが保存用入力へ反映されません");
-  await page.setViewportSize({ width: 400, height: 820 });
-  await cliModelSelect.locator("../..").screenshot({ path: join(OUT, "cli-model-select-narrow.png") });
-  if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) throw new Error("CLIモデル欄が狭幅で横にはみ出しています");
-  await page.setViewportSize({ width: 960, height: 760 });
-  await providerSelect.selectOption("local");
-  await page.waitForFunction(() => document.querySelector('[data-setting-key="PICOAGENT_MODEL"]').hidden);
+  // 基本設定は会話と記憶だけにした。別分類の項目が戻っていないことを確かめる。
+  for (const key of ["PICOAGENT_PROVIDER", "PICOAGENT_NAP_MINUTES", "PICOAGENT_HOTKEY_SUMMON", "PICOAGENT_UPDATE_CHECK_ENABLED", "PICOAGENT_API_ENABLED", "PICOAGENT_MCP_SERVERS"]) {
+    if (await page.locator(`#panel-basic [data-setting-key="${key}"]`).count()) throw new Error(`基本設定に別分類の ${key} が残っています`);
+  }
   await page.waitForSelector(".memory-item");
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
   const memoryText = await page.locator(".memory-manager").textContent();
@@ -205,6 +193,20 @@ try {
     if (!memoryText?.includes(expected)) throw new Error(`長期メモリ欄に「${expected}」がありません`);
   }
   await page.screenshot({ path: join(OUT, "basic-tab.png") });
+  // Playwright のクリックは自動でスクロールするため、人が下側のタブへ届くことは別に確かめる。
+  const lastTabReachable = await page.evaluate(() => {
+    const tabs = document.querySelector(".tabs");
+    const last = document.getElementById("tab-diagnostics");
+    if (!tabs || !last) return { ok: false, reason: "タブ一覧がありません" };
+    tabs.scrollTop = tabs.scrollHeight;
+    const listBox = tabs.getBoundingClientRect();
+    const lastBox = last.getBoundingClientRect();
+    const footerTop = document.querySelector("footer")?.getBoundingClientRect().top ?? window.innerHeight;
+    const ok = lastBox.bottom <= listBox.bottom + 1 && lastBox.bottom <= footerTop;
+    tabs.scrollTop = 0;
+    return { ok, listBottom: listBox.bottom, lastBottom: lastBox.bottom, footerTop };
+  });
+  if (!lastTabReachable.ok) throw new Error(`960×760で最下段の診断・修復タブへ届きません: ${JSON.stringify(lastTabReachable)}`);
   await page.locator(".memory-manager").scrollIntoViewIfNeeded();
   await page.locator(".memory-manager").screenshot({ path: join(OUT, "memory-manager.png") });
   await page.locator(".memory-item").first().getByRole("button", { name: /長期メモリから削除/ }).click();
@@ -230,7 +232,17 @@ try {
   const progressFillBackground = await operationProgress.locator(".operation-progress-fill").evaluate(node => getComputedStyle(node).backgroundImage);
   if (!progressFillBackground || progressFillBackground === "none") throw new Error("導入中の進捗バーに塗り色がありません");
   await page.screenshot({ path: join(OUT, "components-tab.png") });
-  await page.getByRole("tab", { name: "スキル", exact: true }).click();
+  if (await page.locator('#panel-components [data-setting-key="PICOAGENT_UPDATE_CHECK_ENABLED"]').count() !== 1) throw new Error("起動時の更新確認が追加機能・更新タブにありません");
+  // アプリ本体の更新は追加機能と同じタブで扱う。維持データの案内と二段階確認を保つ。
+  if (!(await page.locator("#panel-components .product-update-card").textContent())?.includes("再ダウンロードしません")) throw new Error("アプリ更新で維持されるデータが案内されません");
+  await page.locator("#panel-components").getByRole("button", { name: "更新を確認", exact: true }).click();
+  await page.locator("#panel-components").getByRole("button", { name: "アップデート", exact: true }).click();
+  if (await page.getByRole("button", { name: "もう一度押してダウンロード", exact: true }).count() !== 1) throw new Error("アプリ更新が二段階確認になっていません");
+  if (!(await page.locator(".product-update-status").textContent())?.includes("モデル・追加機能は残ります")) throw new Error("アプリ更新前に維持データが案内されません");
+  await page.getByRole("tab", { name: "スキル・連携", exact: true }).click();
+  for (const key of ["PICOAGENT_MCP_SERVERS", "PICOAGENT_API_ENABLED"]) {
+    if (await page.locator(`#panel-tools [data-setting-key="${key}"]`).count() !== 1) throw new Error(`${key} がスキル・連携タブにありません`);
+  }
   for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
     await page.locator(".card-item").filter({ hasText: name }).click();
   }
@@ -334,7 +346,25 @@ try {
     .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
   await userCard.screenshot({ path: join(OUT, "character-rename.png") });
   await page.setViewportSize({ width: 960, height: 760 });
-  await page.getByRole("tab", { name: "AIモデル・連携", exact: true }).click();
+  await page.getByRole("tab", { name: "AIモデル", exact: true }).click();
+  if (await page.locator('[data-setting-key="PICOAGENT_MODEL"]').isVisible()) throw new Error("ローカルAIで不要なAIモデル欄が表示されています");
+  const providerSelect = page.locator('#panel-providers [data-setting-key="PICOAGENT_PROVIDER"] select');
+  await providerSelect.selectOption("agent_cli");
+  const cliModelSelect = page.getByRole("combobox", { name: "CLIのAIモデル" });
+  await page.waitForFunction(() => document.querySelector('select[aria-label="CLIのAIモデル"]')?.value === "claude");
+  await cliModelSelect.selectOption("codex:future-model");
+  await page.getByRole("button", { name: "モデル一覧を更新", exact: true }).click();
+  if (await cliModelSelect.inputValue() !== "codex:future-model") throw new Error("一覧更新で選択モデルが変わりました");
+  const modelValue = await page.locator('[data-setting-key="PICOAGENT_MODEL"] input').inputValue();
+  if (modelValue !== "codex:future-model") throw new Error("選択モデルが保存用入力へ反映されません");
+  await page.setViewportSize({ width: 400, height: 820 });
+  await cliModelSelect.locator("../..").screenshot({ path: join(OUT, "cli-model-select-narrow.png") });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) throw new Error("CLIモデル欄が狭幅で横にはみ出しています");
+  await page.setViewportSize({ width: 960, height: 760 });
+  await providerSelect.selectOption("local");
+  await page.waitForFunction(() => document.querySelector('[data-setting-key="PICOAGENT_MODEL"]').hidden);
+  await page.locator("main").evaluate(node => { node.scrollTop = 0; });
+  await page.screenshot({ path: join(OUT, "providers-tab.png") });
   const localRecommendation = page.locator(".local-model-recommendation");
   if (await page.locator(".local-model-card").count() !== 5) throw new Error("日本語ローカルモデル候補が5件表示されていません");
   const localText = await localRecommendation.textContent();
@@ -373,8 +403,8 @@ try {
   if (await page.getByRole("button", { name: "一覧を再読み込み", exact: true }).count() !== 1) throw new Error("モデル一覧の再読込操作が更新操作と区別できません");
   await page.locator(".model-delete").click();
   if (!(await page.locator(".model-manager-status").textContent())?.includes("再ダウンロードが必要")) throw new Error("モデル削除前に再ダウンロードが案内されません");
-  await page.getByRole("tab", { name: "基本設定" }).click();
-  await page.locator('[data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
+  await page.getByRole("tab", { name: "画面・操作", exact: true }).click();
+  await page.locator('#panel-display [data-setting-key="PICOAGENT_NAP_MINUTES"] input').fill("20");
   await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存"));
   const dirtyText = await page.locator("#dirtySummary").textContent();
   if (!dirtyText?.includes("未保存")) throw new Error(`未保存件数が表示されません: ${dirtyText}`);
@@ -452,11 +482,7 @@ try {
   if (!exportNote?.includes("APIキー等は含みません")) throw new Error(`診断書き出しの案内が不足しています: ${exportNote}`);
   if (await page.locator(".product-info-card").count() !== 5) throw new Error("製品情報カードが5件ではありません");
   if (!(await page.locator(".product-info-card").first().textContent())?.includes("1.0.0")) throw new Error("製品バージョンが表示されません");
-  if (!(await page.locator(".product-update-card").textContent())?.includes("再ダウンロードしません")) throw new Error("アプリ更新で維持されるデータが案内されません");
-  await page.getByRole("button", { name: "更新を確認", exact: true }).click();
-  await page.getByRole("button", { name: "アップデート", exact: true }).click();
-  if (await page.getByRole("button", { name: "もう一度押してダウンロード", exact: true }).count() !== 1) throw new Error("アプリ更新が二段階確認になっていません");
-  if (!(await page.locator(".product-update-status").textContent())?.includes("モデル・追加機能は残ります")) throw new Error("アプリ更新前に維持データが案内されません");
+  if (await page.locator("#panel-diagnostics .product-update-card").count()) throw new Error("アプリ更新が診断・修復タブに残っています");
   await page.screenshot({ path: join(OUT, "diagnostics-tab.png") });
   await page.setViewportSize({ width: 400, height: 820 });
   const [resetBox, saveBox] = await Promise.all([

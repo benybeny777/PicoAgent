@@ -229,7 +229,7 @@ pub fn resolve_cli_path(cfg: &Config, config_key: &str, tool_dir: &str, exe: &st
 
 pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
     let mut out = format!(
-        "エラー: {tool_label} を使うには設定が必要です。\n設定画面（右クリック →「設定…」→「スキル」）で次の項目を入力して保存してください:"
+        "エラー: {tool_label} を使うには設定が必要です。\n設定画面（右クリック →「設定を開く…」→「スキル・連携」）で次の項目を入力して保存してください:"
     );
     for key in keys {
         out.push_str("\n- ");
