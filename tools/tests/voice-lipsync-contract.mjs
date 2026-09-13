@@ -61,3 +61,20 @@ test("Aivisの時間軸から母音口形を選ぶ", () => {
   assert.equal(mouthFormAt(0.55, timeline), -0.95);
   assert.equal(mouthFormAt(0.80, timeline), 0, "母音外は中立へ戻す");
 });
+
+test("読み上げが無効なら合成経路へ入らず準備中表示も出さない", () => {
+  // 音が出ない設定で「読み上げ準備中…」「読み上げを中止」が出ると、準備が続いて
+  // いるように見える。判定は入口の speakReply 1か所に置き、呼び出し側で重ねない。
+  const speakReply = renderer.match(/async function speakReply\(text\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(speakReply, "speakReply の正本が見つかりません");
+  const guard = speakReply.indexOf('ttsEnabledCache === false || voiceVolume <= 0.001');
+  const prepare = speakReply.indexOf('status.textContent = "読み上げ準備中…"');
+  assert.ok(guard >= 0 && guard < prepare, "無効時の分岐が準備中表示より前にない");
+  assert.match(speakReply, /startTimedSubtitlePages\(text\);\s*\n\s*return;/);
+  // 送信経路は同じ判定を重ねない（片方だけ直す取りこぼしを防ぐ）。
+  assert.doesNotMatch(renderer, /cancelStreamSpeech\(\);\s*\n\s*if \(ttsEnabledCache === false/);
+  // バックエンドが「無効」と答えた時点で覚える（最初の挨拶だけ準備中が出るのを防ぐ）。
+  const prepareModel = renderer.match(/async function prepareSelectedVoiceModel\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(prepareModel, "prepareSelectedVoiceModel の正本が見つかりません");
+  assert.match(prepareModel, /if \(!statusInfo\?\.enabled\) \{[\s\S]*?ttsEnabledCache = false;[\s\S]*?return null;/);
+});

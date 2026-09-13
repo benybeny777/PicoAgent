@@ -1,5 +1,5 @@
 // バックエンドへ「フロントを読み込めた」ことを最初に伝える。これが届かないと
-// boot_screen が読み込み失敗と判断し、キャラクター付きの案内画面へ切り替える。
+// boot_screen が読み込み失敗と判断し、文字だけの診断画面へ切り替える。
 window.picoagent?.frontendReady?.();
 
 const petApp = document.getElementById("petApp");
@@ -107,6 +107,9 @@ let subtitlePageTimer = null;
 let localEngineRequired = false;
 let localEngineReady = true;
 let localEnginePhase = "ready";
+// 準備中・失敗の理由。利用者の操作で状態表示を消すときも、この文言だけは残す
+// （SPEC: `error` は診断・修復へ進める理由として常時表示する）。
+let localEngineStatusText = "";
 let frontendInitialized = false;
 const conversationHistory = [];
 let historyQuery = "";
@@ -366,6 +369,12 @@ let animationName = "idle";
 let frame = 0;
 let lastFrameAt = 0;
 
+// 一時的な表示（文字数・読み上げ中など）を消す。準備中・失敗の理由が出ているときは、
+// 空にせずその文言へ戻す。空にすると赤い空欄だけが残り、送れない理由が分からなくなる。
+function clearTransientStatus() {
+  status.textContent = localEngineStatusText && !localEngineReady ? localEngineStatusText : "";
+}
+
 function setStatus(text) {
   status.textContent = text;
   if (bootStatus && petApp.classList.contains("is-booting")) {
@@ -390,11 +399,31 @@ function persistNotices() {
 }
 persistNotices();
 
+// 停止要求が届いても、実行中の送信がいつまでも返らないことがある（子プロセスの停止待ち、
+// 応答の来ないプロバイダ接続など）。そのままだと待機表示が残り続け、入力も再送も
+// できないまま復帰する手段が無くなるため、一定時間で画面側の待機だけ解除する。
+const CANCEL_RELEASE_MS = 8000;
+let releasePendingSend = null; // 実行中の送信を「中断扱い」で打ち切る合図
+let cancelReleaseTimer = null;
+
+function clearCancelRelease() {
+  if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
+  cancelReleaseTimer = null;
+  releasePendingSend = null;
+}
+
 async function requestAgentCancellation(button) {
   button.disabled = true;
   setStatus("停止を要求しています…");
   try {
     await window.picoagent.cancel();
+    if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
+    cancelReleaseTimer = setTimeout(() => {
+      cancelReleaseTimer = null;
+      if (!busy || !releasePendingSend) return;
+      logApp("warn", "停止要求のあと応答が返らないため、画面の待機を解除しました");
+      releasePendingSend({ stale: true, releasedByCancel: true });
+    }, CANCEL_RELEASE_MS);
   } catch (error) {
     logApp("warn", "中断要求の送信に失敗しました", errorDetail(error));
     setStatus(`停止を要求できませんでした: ${error?.message || error}`);
@@ -2756,42 +2785,68 @@ function buildSubtitlePages(text) {
   const source = subtitlePlainText(text);
   if (currentLayout !== "stream" || !source.trim()) return source ? [source] : [];
   const pages = [];
-  let page = "";
+  // 実測は字幕欄そのもので行う。同じ字面の隠し要素では高さを再現できない
+  // （字幕欄の高さは中身に応じて上限まで伸びるため、複製すると容量が半分になる）。
   const fits = candidate => {
     renderMarkdown(reply, candidate);
     reply.scrollTop = 0;
     return reply.scrollHeight <= reply.clientHeight + 1;
   };
-  for (const unit of subtitleUnits(source)) {
-    const candidate = page + unit;
-    if (!page && fits(candidate)) {
-      page = candidate;
-      continue;
-    }
-    if (page && fits(candidate)) {
-      page = candidate;
-      continue;
-    }
-    if (page) pages.push(page);
-    page = unit;
-    if (!fits(page)) {
-      // 54文字でも収まらない極端な狭幅では、実測で収まる最大長を二分探索する。
-      let remaining = [...page];
-      while (remaining.length && !fits(remaining.join(""))) {
-        let low = 1;
-        let high = remaining.length;
-        while (low < high) {
-          const middle = Math.ceil((low + high) / 2);
-          if (fits(remaining.slice(0, middle).join(""))) low = middle;
-          else high = middle - 1;
-        }
-        pages.push(remaining.slice(0, low).join(""));
-        remaining = remaining.slice(low);
+  const units = subtitleUnits(source);
+  const joined = (from, count) => units.slice(from, from + count).join("");
+  // 1ページに入る単位数は、同じ幅・高さで測る限りどのページもほぼ同じになる。
+  // 直前のページの単位数を当たりに使うと、1ページあたりの実測（Markdown再描画＋
+  // レイアウト）が2回前後で済む。当たりを使わないと文の数だけ実測することになり、
+  // 長い返答ほど画面が止まる時間が延びる。
+  let guess = 0;
+  let index = 0;
+  while (index < units.length) {
+    const rest = units.length - index;
+    let low = 0;            // 収まると実測できた単位数
+    let high = rest + 1;    // 収まらないと実測できた単位数（番兵）
+    const probe = guess > 0 ? Math.min(guess, rest) : 1;
+    if (fits(joined(index, probe))) {
+      low = probe;
+      // 当たりより入る場合に備えて少しずつ伸ばす。大きく飛ばすと測る文字列が長くなって遅い。
+      let step = 1;
+      while (low + step <= rest && fits(joined(index, low + step))) {
+        low += step;
+        step = Math.min(step * 2, 8);
       }
-      page = remaining.join("");
+      high = Math.min(rest + 1, low + step);
+    } else {
+      high = probe;
     }
+    while (low + 1 < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (fits(joined(index, middle))) low = middle;
+      else high = middle;
+    }
+    if (low === 0) {
+      // 1単位（最大54文字）でも収まらない極端な狭幅では、収まる最大長を文字単位で二分探索する。
+      let remaining = [...units[index]];
+      while (remaining.length && !fits(remaining.join(""))) {
+        let charLow = 1;
+        let charHigh = remaining.length;
+        while (charLow < charHigh) {
+          const middle = Math.ceil((charLow + charHigh) / 2);
+          if (fits(remaining.slice(0, middle).join(""))) charLow = middle;
+          else charHigh = middle - 1;
+        }
+        pages.push(remaining.slice(0, charLow).join(""));
+        remaining = remaining.slice(charLow);
+      }
+      // 収まるところまで削れた残りは、次のページの先頭として通常経路へ戻す
+      // （続く文と一緒に詰められるようにする）。
+      if (remaining.length) units[index] = remaining.join("");
+      else index += 1;
+      guess = 0;
+      continue;
+    }
+    pages.push(joined(index, low));
+    index += low;
+    guess = low;
   }
-  if (page) pages.push(page);
   if (pages.length) setAssistantReply(pages[0], { remember: false, singlePage: true });
   return pages;
 }
@@ -3099,7 +3154,7 @@ function playPreparedSpeech(result) {
   audio.volume = voiceVolume;
   audio.addEventListener("ended", () => {
     finishVoice(true, audio);
-    if (!activeAlarmSnooze) status.textContent = "";
+    if (!activeAlarmSnooze) clearTransientStatus();
   }, { once: true });
   audio.addEventListener("error", () => {
     const audioError = audio.error?.message || "";
@@ -3226,6 +3281,13 @@ function playChunkAndWait(result, session) {
   });
 }
 async function speakReply(text) {
+  // 読み上げが無効、または音量0のときは合成経路へ入らない。入ると音が出ない設定でも
+  // 「読み上げ準備中…」と「読み上げを中止」が出て、準備中に見えるうえ字幕送りも
+  // 合成待ちの間隔で進む。字幕の送りだけ行う（配信以外では表示の変化なし）。
+  if (ttsEnabledCache === false || voiceVolume <= 0.001) {
+    startTimedSubtitlePages(text);
+    return;
+  }
   const chunks = currentLayout === "stream" ? buildSubtitlePages(text) : splitSpeechChunks(text);
   stopVoice(false);                // 直前の読み上げを止める（idle にはしない）
   const session = ++voiceSession;  // このセッションIDが変わったら以降を打ち切る
@@ -3668,10 +3730,14 @@ character.addEventListener("click", event => {
   if (!currentVoice) return;
   event.stopPropagation();
   stopVoice();
-  status.textContent = "";
+  clearTransientStatus();
 });
 character.addEventListener("keydown", event => {
   if (event.key !== "Enter" && event.key !== " ") return;
+  // 立ち絵の枠の中には ♡（いっしょの記録）ボタンも入っている。枠で受けたキーをそのまま
+  // 奪うと、中のボタンを選んで押したEnter・Spaceまで「キャラに触れる」になり、
+  // キーボードだけではそのボタンを押せなくなる。枠自体に当たったときだけ扱う。
+  if (event.target !== character) return;
   event.preventDefault();
   character.click();
 });
@@ -3818,8 +3884,12 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   if (bubble.classList.contains("fullscreen")) return;
   const margin = 12;
   const gap = 10;
-  const viewportWidth = document.documentElement.clientWidth;
-  const viewportHeight = document.documentElement.clientHeight;
+  // 位置はフキダシの配置基準（`.pet-app`）からの座標で決める。ウィンドウ全体の高さで
+  // 上限を計算すると、上端メニューぶん（body の padding-top 32px）だけ下限が緩くなり、
+  // フキダシが窓の下へはみ出して状態表示が切れる。キャラの座標も同じ基準なので揃う。
+  const container = bubble.offsetParent instanceof HTMLElement ? bubble.offsetParent : document.documentElement;
+  const viewportWidth = container.clientWidth;
+  const viewportHeight = container.clientHeight;
   const charLeftEdge = character.offsetLeft - gap;
   const charTopEdge = character.offsetTop - gap;
   const charRightEdge = character.offsetLeft + character.offsetWidth + gap;
@@ -4369,16 +4439,20 @@ composer.addEventListener("submit", async event => {
         logApp("warn", "スクリーンショット取得に失敗しました。", String(shotErr));
       }
     }
+    // 停止要求のあと応答が返らない場合に備え、打ち切りの合図と競走させる。
+    const releasedByCancel = new Promise(resolve => { releasePendingSend = resolve; });
     if (images.length > 0 && window.picoagent.sendImage) {
-      result = await window.picoagent.sendImage(fullText, images);
+      result = await Promise.race([window.picoagent.sendImage(fullText, images), releasedByCancel]);
     }
-    if (!result) result = await window.picoagent.send(fullText);
+    if (!result) result = await Promise.race([window.picoagent.send(fullText), releasedByCancel]);
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";
       setThinkingUi(false);
       clearThinkingReply();
       cancelStreamSpeech();
-      status.textContent = "";
+      status.textContent = result?.releasedByCancel
+        ? "停止しました（応答が返らないので画面の待機を解除したよ）"
+        : "";
       return;
     }
     if (String(result?.reply || "").includes("いまの処理は途中で止めたよ")) jobState = "cancelled";
@@ -4407,8 +4481,7 @@ composer.addEventListener("submit", async event => {
         // ストリーミング中に先行読み上げが走っていれば残りを読み切り、無ければ全文読み上げ。
         if (currentLayout === "stream") {
           cancelStreamSpeech();
-          if (ttsEnabledCache === false || voiceVolume <= 0.001) startTimedSubtitlePages(result.reply);
-          else speakReply(result.reply);
+          speakReply(result.reply);
         } else if (!finishStreamSpeech(result.reply)) speakReply(result.reply);
       } else {
         cancelStreamSpeech();
@@ -4453,6 +4526,7 @@ composer.addEventListener("submit", async event => {
     streamBuffer = "";
     if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
     if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
+    clearCancelRelease();
     busy = false;
     const jobFailed = jobState === "failed";
     const jobCancelled = jobState === "cancelled";
@@ -5078,7 +5152,7 @@ function wakeUp() {
   if (!napping) return;
   napping = false;
   character.classList.remove("napping");
-  if (status.textContent === "すやすや……") status.textContent = "";
+  if (status.textContent === "すやすや……") clearTransientStatus();
   setAnimation("idle", true);
 }
 
@@ -5109,7 +5183,10 @@ input.addEventListener("input", () => {
   promptDraft = input.value;
   schedulePersistDraft();
   const len = input.value.length;
-  if (!busy) status.textContent = len > 100 ? `${len}文字` : "";
+  if (!busy) {
+    if (len > 100) status.textContent = `${len}文字`;
+    else clearTransientStatus();
+  }
 });
 // 日本語入力（IME）の変換中かどうか。変換中のキーはアプリの操作へ流さない。
 function isImeComposing(event) {
@@ -5215,6 +5292,7 @@ function applyEngineStatus(s) {
   if (!localEngineRequired) return;
   localEnginePhase = s.phase;
   localEngineReady = s.phase === "ready";
+  localEngineStatusText = "";
   const booting = petApp.classList.contains("is-booting");
   status.classList.toggle("engine-pending", ["idle", "download", "verify", "starting"].includes(s.phase));
   status.classList.toggle("engine-error", s.phase === "error");
@@ -5223,13 +5301,16 @@ function applyEngineStatus(s) {
     const gb = bytes => (Number(bytes) / (1024 ** 3)).toFixed(1);
     const size = Number(s.totalBytes) > 0 ? `（${gb(s.receivedBytes)} / ${gb(s.totalBytes)}GB）` : "";
     setStatus(`ローカルモデルを取得中… ${s.percent ?? 0}%${size} ※初回だけ`);
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "verify") {
     // 数GBのモデル照合は分単位かかる。無表示だと起動が固まったように見える。
     setStatus("ローカルモデルを確認中… ※数分かかることがあります");
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "starting") {
     setStatus("ローカルAIを起動中…");
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "ready") {
     online.dataset.up = true;
@@ -5242,9 +5323,11 @@ function applyEngineStatus(s) {
     }
   } else if (s.phase === "error") {
     setStatus(`準備に失敗: ${s.message || "不明なエラー"}`);
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   } else if (s.phase === "idle") {
     setStatus("ローカルAIの起動を待っています…");
+    localEngineStatusText = status.textContent;
     online.dataset.up = false;
   }
   updateComposerState();
@@ -5260,7 +5343,9 @@ function applyFontPx(px) {
   reply.style.fontSize = `${n}px`;
   // 入力欄・ステータスも比率を合わせて読みやすくする。
   input.style.fontSize = `${n}px`;
-  status.style.fontSize = `${Math.max(9, Math.round(n * 0.72))}px`;
+  // 状態表示は補助の1行。会話文字を大きくしても上限を設け、行が伸びて
+  // 入力欄や送信ボタンを窓の外へ押し出さないようにする。
+  status.style.fontSize = `${Math.min(18, Math.max(9, Math.round(n * 0.72)))}px`;
 }
 function applyVoiceVolume(value) {
   const n = parseFloat(value);
@@ -5367,6 +5452,15 @@ function applyLayout(id) {
   wakeAnimationLoop();
 }
 
+// 窓に収まる範囲まで縮めたフキダシ寸法。保存値そのものは書き換えないので、
+// 窓が広がればまた元の大きさへ戻す（下の refitBubbleToWindow）。
+const BUBBLE_WINDOW_MARGIN = 12;
+function fitBubbleSizeToWindow(width, height) {
+  const maxWidth = Math.max(180, document.documentElement.clientWidth - BUBBLE_WINDOW_MARGIN * 2);
+  const maxHeight = Math.max(92, document.documentElement.clientHeight - BUBBLE_WINDOW_MARGIN * 2);
+  return { width: Math.min(width, maxWidth), height: Math.min(height, maxHeight) };
+}
+
 function applyBubbleLayout(width, height, left, top) {
   // ペット表示以外はフキダシを CSS が置くので、保存値を当てない
   // （当てるとチャットの縦長パネルがペット時代の寸法に化ける）。
@@ -5376,11 +5470,14 @@ function applyBubbleLayout(width, height, left, top) {
   const x = parseFloat(left);
   const y = parseFloat(top);
   const hasSize = Number.isFinite(w) && w >= 180 && Number.isFinite(h) && h >= 92;
-  if (Number.isFinite(w) && w >= 180) bubble.style.width = `${w}px`;
-  if (Number.isFinite(h) && h >= 92) bubble.style.height = `${h}px`;
+  // 広い画面で広げたフキダシの保存値を、狭い画面や縮めた窓へそのまま当てると、
+  // 入力欄と送信ボタンが窓の外へ出て操作できなくなる。当てる寸法だけ窓に収める。
+  if (Number.isFinite(w) && w >= 180) bubble.style.width = `${fitBubbleSizeToWindow(w, h).width}px`;
+  if (Number.isFinite(h) && h >= 92) bubble.style.height = `${fitBubbleSizeToWindow(w, h).height}px`;
   if (Number.isFinite(x) && x >= 0) bubble.style.left = `${x}px`;
   if (Number.isFinite(y) && y >= 0) bubble.style.top = `${y}px`;
   // 保存済みの大きいフキダシでも右のキャラと重ならないよう、必要ならウィンドウを拡大する。
+  // 窓が広がれば resize で保存値どおりの大きさへ戻る。
   if (hasSize) {
     const bx = Number.isFinite(x) && x >= 0 ? x : bubble.offsetLeft;
     const by = Number.isFinite(y) && y >= 0 ? y : bubble.offsetTop;
@@ -5388,7 +5485,22 @@ function applyBubbleLayout(width, height, left, top) {
   }
   refreshBubblePlacement();
 }
-window.addEventListener("resize", refreshBubblePlacement);
+
+// 窓の大きさが変わったら、保存値を窓に収まる範囲で当て直す（広がれば戻し、狭まれば縮める）。
+// リサイズつまみの操作中とフキダシ拡大中は、利用者の操作を奪わないので触らない。
+function refitBubbleToWindow() {
+  if (!layoutUsesFreeBubble() || bubble.classList.contains("fullscreen") || resizeStart) return;
+  const w = parseFloat(savedBubbleLayout?.width);
+  const h = parseFloat(savedBubbleLayout?.height);
+  if (!Number.isFinite(w) || w < 180 || !Number.isFinite(h) || h < 92) return;
+  const fitted = fitBubbleSizeToWindow(w, h);
+  if (Math.round(bubble.offsetWidth) !== Math.round(fitted.width)) bubble.style.width = `${fitted.width}px`;
+  if (Math.round(bubble.offsetHeight) !== Math.round(fitted.height)) bubble.style.height = `${fitted.height}px`;
+}
+window.addEventListener("resize", () => {
+  refitBubbleToWindow();
+  refreshBubblePlacement();
+});
 function syncPngNaturalResolution() {
   if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -5488,7 +5600,12 @@ async function prepareSelectedVoiceModel() {
     logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error));
     return null;
   }
-  if (!statusInfo?.enabled) return null;
+  // 読み上げが無効だとバックエンドが答えた時点で覚える。覚えないと、最初の挨拶だけ
+  // 合成経路を通って「読み上げ準備中…」が出る。
+  if (!statusInfo?.enabled) {
+    ttsEnabledCache = false;
+    return null;
+  }
   setStatus("声を準備中…");
   try {
     await window.picoagent.prepareVoiceModel();

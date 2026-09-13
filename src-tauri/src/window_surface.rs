@@ -13,7 +13,15 @@ use tauri::{AppHandle, Manager};
 /// 「窓を出して」と操作した場合である。起動準備中は窓を隠すが、ここで隠したままにすると
 /// 準備が長引いたときも止まったときも呼び戻す手段が無くなるため、準備中は
 /// 起動画面（キャラクターを出さない待ち画面）を出して応答する。
+///
+/// ただしフロントがまだ動き出していない間（webviewの読込中）は、出しても中身の無い
+/// 白い窓になるので出さない。その状態が続く場合は `boot_screen` の監視が
+/// 文字だけの診断ページへ切り替え、そこで窓が出る。
 pub fn surface_main_window(app: &AppHandle) {
+    if !crate::boot_screen::is_started(app) && !crate::boot_screen::is_finished(app) {
+        crate::log_paths::append_app_log(app, "起動画面の準備前なので前面化を見送ります。");
+        return;
+    }
     let Some(window) = app.get_webview_window("main") else {
         crate::log_paths::append_app_log(app, "前面化するメインウィンドウがありません。");
         return;

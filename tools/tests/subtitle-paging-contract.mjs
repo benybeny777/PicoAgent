@@ -17,7 +17,9 @@ test("配信字幕は実DOM寸法で複数ページへ分ける", () => {
 test("音声ありは字幕ページと発話単位を同期し音声なしも時間差表示する", () => {
   assert.match(renderer, /currentLayout === "stream" \? buildSubtitlePages\(text\) : splitSpeechChunks\(text\)/);
   assert.match(renderer, /showSubtitlePage\(chunks\[i\]\)/);
-  assert.match(renderer, /voiceVolume <= 0\.001\) startTimedSubtitlePages\(result\.reply\)/);
+  // 音声なし（無効・音量0）は合成を待たず時間差で送る。判定は speakReply の入口1か所。
+  const speakReply = renderer.match(/async function speakReply\(text\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(speakReply, /ttsEnabledCache === false \|\| voiceVolume <= 0\.001\) \{\s*\n\s*startTimedSubtitlePages\(text\);/);
 });
 
 test("配信画面でも処理中表示を隠さない", () => {

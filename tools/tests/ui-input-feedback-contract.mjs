@@ -200,3 +200,57 @@ test("変更判定のcollectはキャラ草稿を書き換えない", () => {
   assert.match(settings, /saveCurrentCharacterVoice\(displayedCharacterId\)/);
   assert.match(settings, /saveCurrentCharacterLive2dSdk\(displayedCharacterId\)/);
 });
+
+test("停止要求のあと応答が返らなくても画面の待機を解除できる", () => {
+  // 停止を押したあと実行中の送信が返らないと、待機表示が残って入力も再送もできず、
+  // 復帰する手段が無くなる。一定時間で画面側だけ中断扱いにして戻す。
+  assert.match(renderer, /const CANCEL_RELEASE_MS = \d+/);
+  const cancel = renderer.match(/async function requestAgentCancellation\(button\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(cancel, /await window\.picoagent\.cancel\(\);[\s\S]*?cancelReleaseTimer = setTimeout\(/);
+  assert.match(cancel, /releasePendingSend\(\{ stale: true, releasedByCancel: true \}\)/);
+  // 送信は打ち切りの合図と競走させ、既存の「中断扱い」経路（stale）で後始末する。
+  assert.match(renderer, /const releasedByCancel = new Promise\(resolve => \{ releasePendingSend = resolve; \}\)/);
+  assert.match(renderer, /Promise\.race\(\[window\.picoagent\.send\(fullText\), releasedByCancel\]\)/);
+  assert.match(renderer, /result\?\.releasedByCancel\s*\n?\s*\? "停止しました/);
+  // 見張りは送信の後始末で必ず解く（次の送信へ持ち越さない）。
+  assert.match(renderer, /clearCancelRelease\(\);\s*\n\s*busy = false;/);
+});
+
+test("窓に収まらないフキダシ保存値は表示側で収める", () => {
+  // 広い画面で広げたフキダシの保存値を狭い窓へそのまま当てると、入力欄と送信ボタンが
+  // 窓の外へ出て操作できなくなる。保存値は変えず、当てる寸法だけ窓へ収める。
+  assert.match(renderer, /function fitBubbleSizeToWindow\(width, height\) \{[\s\S]*?Math\.min\(width, maxWidth\)[\s\S]*?Math\.min\(height, maxHeight\)/);
+  const apply = renderer.match(/function applyBubbleLayout\(width, height, left, top\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(apply, /bubble\.style\.width = `\$\{fitBubbleSizeToWindow\(w, h\)\.width\}px`/);
+  assert.match(apply, /bubble\.style\.height = `\$\{fitBubbleSizeToWindow\(w, h\)\.height\}px`/);
+  // 窓が広がれば保存どおりへ戻す。つまみ操作中と拡大中は触らない。
+  const refit = renderer.match(/function refitBubbleToWindow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(refit, /bubble\.classList\.contains\("fullscreen"\) \|\| resizeStart/);
+  assert.match(refit, /savedBubbleLayout\?\.width/);
+  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*refitBubbleToWindow\(\);/);
+});
+
+test("準備中・失敗の理由は入力や読み上げ操作で消さない", () => {
+  // SPEC: `error` は診断・修復へ進める理由として常時表示する。入力のたびに状態表示を
+  // 空にすると、赤い空欄と無効な送信ボタンだけが残り、送れない理由が分からなくなる。
+  assert.match(renderer, /let localEngineStatusText = ""/);
+  const clear = renderer.match(/function clearTransientStatus\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(clear, /localEngineStatusText && !localEngineReady \? localEngineStatusText : ""/);
+  // 文字数表示は消す側の入口を通す（直接空にしない）。
+  assert.match(renderer, /if \(len > 100\) status\.textContent = `\$\{len\}文字`;\s*\n\s*else clearTransientStatus\(\);/);
+  // 準備中・失敗の文言は applyEngineStatus が控える。
+  const apply = renderer.match(/function applyEngineStatus\(s\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(apply, /localEngineStatusText = "";/);
+  assert.match(apply, /準備に失敗: \$\{s\.message \|\| "不明なエラー"\}`\);\s*\n\s*localEngineStatusText = status\.textContent;/);
+});
+
+test("フキダシの自動配置は配置基準の枠内へ収める", () => {
+  // 位置はフキダシの配置基準（.pet-app）からの座標で決まる。ウィンドウ全体の高さで
+  // 上限を計算すると上端メニューぶん（body の padding-top 32px）だけ緩くなり、
+  // フキダシが窓の下へはみ出して状態表示が切れる。
+  const place = renderer.match(/function placeBubbleAwayFromCharacter\([\s\S]*?\n\}/)?.[0] || "";
+  assert.match(place, /const container = bubble\.offsetParent instanceof HTMLElement \? bubble\.offsetParent : document\.documentElement/);
+  assert.match(place, /const viewportWidth = container\.clientWidth/);
+  assert.match(place, /const viewportHeight = container\.clientHeight/);
+  assert.doesNotMatch(place, /document\.documentElement\.clientHeight/);
+});
