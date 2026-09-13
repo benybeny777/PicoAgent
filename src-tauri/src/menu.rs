@@ -125,14 +125,17 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .build()
         .map_err(|e| e.to_string())?;
 
+    // 会話 → 画面の置き方 → 設定画面 → リセット → 終了の順に、分野ごとに区切る。
+    // 読み上げの切り替えは会話中によく使う操作なので「話しかける…」と同じまとまりに置く
+    // （以前は画面レイアウトや常に手前表示の間に混ざっていた）。
     let menu = MenuBuilder::new(&app)
         .item(&summon)
+        .item(&tts)
         .separator()
         .item(&layout_menu)
         .item(&placement_menu)
         .item(&edit_layout)
         .item(&ontop)
-        .item(&tts)
         .separator()
         .item(&display_settings)
         .item(&character_settings)
@@ -431,5 +434,26 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
                 &format!("表示リセットを画面へ反映できません: {error}"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod order_guard {
+    /// 読み上げの切り替えを表示系の項目の間へ戻すと、別分野の操作が混ざって探しにくくなる。
+    #[test]
+    fn 読み上げの切り替えは話しかけるの直後に置く() {
+        let source = include_str!("menu.rs");
+        let builder = source
+            .split("let menu = MenuBuilder::new(&app)")
+            .nth(1)
+            .expect("右クリックメニューの組み立てが見つからない");
+        let position = |needle: &str| {
+            builder
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle} が見つからない"))
+        };
+        assert!(position(".item(&summon)") < position(".item(&tts)"));
+        assert!(position(".item(&tts)") < position(".separator()"));
+        assert!(position(".separator()") < position(".item(&layout_menu)"));
     }
 }
