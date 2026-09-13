@@ -38,10 +38,19 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(child().returncode, 0)
 
     def test_qwen_edit_keeps_input_and_prompt(self):
-        workflow = GEN.qwen("帽子を赤くする", 12, 768, 512)
+        workflow = GEN.qwen("帽子を赤くする", 12, 768, 512, Path("input.png"))
         self.assertEqual(workflow["4"]["inputs"]["image"], "input.png")
+        self.assertEqual(workflow["7"]["inputs"]["image1"], ["4", 0])
+        self.assertEqual(workflow["8"]["inputs"]["image1"], ["4", 0])
         self.assertEqual(workflow["7"]["inputs"]["prompt"], "帽子を赤くする")
         self.assertEqual(workflow["10"]["inputs"]["seed"], 12)
+
+    def test_qwen_text_only_generates_without_reference_image(self):
+        workflow = GEN.qwen("青空の下の猫", 3, 768, 768, None)
+        self.assertNotIn("4", workflow)
+        self.assertNotIn("image1", workflow["7"]["inputs"])
+        self.assertNotIn("image1", workflow["8"]["inputs"])
+        self.assertEqual(workflow["9"]["class_type"], "EmptySD3LatentImage")
 
     def test_wan_text_and_image_modes_share_official_core(self):
         text = GEN.wan("move", 1, 768, 512, 97, None)
