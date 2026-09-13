@@ -5664,6 +5664,10 @@ window.picoagent.on("pet:ui", (ui) => {
     status.textContent = `キャラクター変更に失敗: ${error.message}`;
   });
   applyChatterConfig(ui); // 設定変更を即反映。
+  // 自分で書いたクイック操作と、連携スキルのトークン保存による既定ボタンの出し分けを、
+  // 再起動を待たずに反映する（以前は起動時にしか読んでいなかった）。
+  if (ui.quickActions != null) quickActionItems = window.PicoQuickActions.parseQuickActions(ui.quickActions);
+  refreshDefaultQuickActions();
 });
 
 noticeToggle?.addEventListener("click", event => {

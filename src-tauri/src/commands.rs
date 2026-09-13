@@ -3317,6 +3317,8 @@ pub async fn settings_save(
             "streamCaptionColor": stream.caption_color,
             "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         });
+        // 以前は起動時の pet_init でしか渡しておらず、クイック操作の変更が再起動まで反映されなかった。
+        ui["quickActions"] = json!(state.config.get("PICOAGENT_QUICK_ACTIONS", ""));
         if !requires_restart {
             if let Err(error) = win.emit("pet:model", format!("{} / {}", provider.label(), model)) {
                 crate::log_paths::append_app_log(

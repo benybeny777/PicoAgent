@@ -75,3 +75,11 @@ test("画面は quick-actions.js の既定と絞り込みを使い、起動時�
   assert.match(shim, /configPresence: \(keys = \[\]\) => call\("pet_config_presence", \{ keys \}\)/);
   assert.match(lib, /commands::pet_config_presence,/);
 });
+
+test("設定の保存直後にも、自分のクイック操作と既定ボタンの出し分けを反映する", () => {
+  const handler = renderer.slice(renderer.indexOf('window.picoagent.on("pet:ui"'));
+  const body = handler.slice(0, handler.indexOf("\n});"));
+  assert.match(body, /if \(ui\.quickActions != null\) quickActionItems = window\.PicoQuickActions\.parseQuickActions\(ui\.quickActions\);/);
+  assert.match(body, /refreshDefaultQuickActions\(\);/);
+  assert.match(commands, /ui\["quickActions"\] = json!\(state\.config\.get\("PICOAGENT_QUICK_ACTIONS", ""\)\);/);
+});
