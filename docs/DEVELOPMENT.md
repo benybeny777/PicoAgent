@@ -124,6 +124,15 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 `build-beta` は、販売条件を完了扱いにせず、販売版と同じ軽量同梱範囲で試用インストーラを生成します。`build-distribution` はEULA・プライバシー表示・第三者同梱物台帳・Live2D審査参照・サポートURL等を検査し、未完了が1件でもあれば同梱物取得前に停止します。初期販売対象はWindowsだけで、コード署名と完全自動更新を必須にしません。macOSは販売対象へ追加する前に署名・公証と実機QAを行います。販売設定の正本は `distribution/release.json`、手順は [販売準備チェックリスト](SALE-READINESS.md) です。通常の`build`を含む製品ビルドは明示した自作キャラだけを同期し、開発用Live2D公式サンプルと制作途中モデルを含めません。
 
+### 関係者限定の同梱版（Windows）
+
+許諾済み関係者へ非公開で渡す、MMDキャラと音声モデルを同梱した試用インストーラは、リポジトリ直下の `関係者版インストーラをビルド.bat` で生成します（本体は `scripts/build-partner-installer.ps1`。PowerShell 7が必要）。
+
+- 事前に `%APPDATA%\com.picoagent.desktop\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
+- チェックアウトが `origin/main` より古い場合や未コミットの変更がある場合は停止します（そのまま作る場合は引数に `-AllowStale`）。
+- ビルド中は `cargo xtask stop` で起動中のPicoAgentと同梱エンジンを終了します。
+- 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
+
 ### macOS版のビルド（未署名アルファ）
 
 macOSバンドルはmacOS実機でだけ作れます。WindowsやLinuxからのクロスビルドはできません。**配布対象はApple Siliconだけで、Intel Macは対象外です。**
