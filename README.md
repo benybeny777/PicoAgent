@@ -1,3 +1,8 @@
+> **関係者版インストーラ（非公開・許諾済みの関係者向け。MMDキャラと音声モデル同梱）**
+> - 最新: [v1.1.2-partner.1](https://github.com/benybeny777/PicoAgent/releases/tag/v1.1.2-partner.1)（`PicoAgent_1.1.2_Partner-MMD-Voice_x64-setup.exe`、942 MB）。過去の版は[非公開Release一覧](https://github.com/benybeny777/PicoAgent/releases)にあります。
+> - このPCのビルド成果物: `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe`（Git管理外）。作り直すときはリポジトリ直下の `関係者版インストーラをビルド.bat` を実行します。
+> - 一般公開のLP・公開Release・`latest.json` には載せません。指定した関係者以外へ転送・公開しないでください。
+
 > **[PicoAgent 公式ページ・Windowsアルファ版ダウンロード](https://benybeny777.github.io/PicoAgent-Distribution/)**
 
 <div align="center">
