@@ -122,47 +122,51 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
     Ok((python, comfy, models))
 }
 
-/// 文章から新しい画像を作る明示依頼。
-const IMAGE_CREATION_REQUESTS: &[&str] = &[
-    "画像を作成して",
-    "画像を生成して",
-    "画像をつくって",
-    "イラストを生成して",
-    "イラストをかいて",
-    "イラストを描いて",
-    "イラストを作って",
-    "画像を作って",
-    "画像を描いて",
-    "画像作成して",
-    "画像生成して",
-    "イラスト生成して",
-    "イラスト描いて",
-    "イラスト作って",
-    "画像つくって",
-    "画像作って",
-    "画像描いて",
-    "絵をかいて",
-    "絵を描いて",
-    "絵を作って",
-    "絵かいて",
-    "絵描いて",
-    "絵作って",
+/// 作る対象を表す語。音声入力や変換前の入力で届くひらがな書きも含める。
+/// 1文字の「え」は「まえ」「こたえ」などを拾うため入れない。
+const IMAGE_NOUNS: &[&str] = &["イラスト", "いらすと", "がぞう", "画像", "絵"];
+/// 作る動作を表す語（長いものを先に並べ、短い語に先取りさせない）。
+const IMAGE_VERBS: &[&str] = &[
+    "作成して",
+    "生成して",
+    "えがいて",
+    "つくって",
+    "作って",
+    "描いて",
+    "かいて",
+    "書いて",
 ];
+
+/// 「<対象>[を]<動作>」の範囲（開始・終了のバイト位置）を返す。
+fn image_creation_span(text: &str) -> Option<(usize, usize)> {
+    IMAGE_NOUNS.iter().find_map(|noun| {
+        text.match_indices(noun).find_map(|(start, _)| {
+            let after_noun = start + noun.len();
+            let rest = &text[after_noun..];
+            let (particle, rest) = rest
+                .strip_prefix('を')
+                .map(|stripped| ('を'.len_utf8(), stripped))
+                .unwrap_or((0, rest));
+            IMAGE_VERBS
+                .iter()
+                .find(|verb| rest.starts_with(*verb))
+                .map(|verb| (start, after_noun + particle + verb.len()))
+        })
+    })
+}
 /// 入力画像の編集・動画・パス指定は、入力パスやエンジンをモデルに選ばせるため先回りしない。
 const NOT_TEXT_TO_IMAGE_MARKERS: &[&str] = &["この画像", "その画像", "添付", "動画", ":\\", ":/"];
 
 /// 明示的な画像作成依頼から、生成内容（依頼の言い回しを除いた部分）を取り出す。
 fn image_creation_prompt(text: &str) -> Option<String> {
-    let request = IMAGE_CREATION_REQUESTS
-        .iter()
-        .find(|request| text.contains(*request))?;
+    let (start, end) = image_creation_span(text)?;
     if NOT_TEXT_TO_IMAGE_MARKERS
         .iter()
         .any(|marker| text.contains(marker))
     {
         return None;
     }
-    let replaced = text.replacen(request, " ", 1);
+    let replaced = format!("{} {}", &text[..start], &text[end..]);
     let trim = |value: &str| -> String {
         value
             .trim_matches(|character: char| {
@@ -405,7 +409,21 @@ mod tests {
             image_creation_prompt("猫のイラストを描いてください").as_deref(),
             Some("猫")
         );
+        assert_eq!(
+            image_creation_prompt("みこのがぞうつくって").as_deref(),
+            Some("みこ")
+        );
+        assert_eq!(
+            image_creation_prompt("桜の木のいらすとかいて").as_deref(),
+            Some("桜の木")
+        );
+        assert_eq!(
+            image_creation_prompt("夕焼けの海の絵を描いてほしい").as_deref(),
+            Some("夕焼けの海")
+        );
         assert_eq!(image_creation_prompt("画像作って"), None);
+        assert_eq!(image_creation_prompt("まえをかいて"), None);
+        assert_eq!(image_creation_prompt("画像を見て"), None);
         assert_eq!(image_creation_prompt("この画像を元に画像を作って"), None);
         assert_eq!(image_creation_prompt("猫の動画を作って"), None);
         assert_eq!(image_creation_prompt("今日の天気は？"), None);
