@@ -82,6 +82,13 @@ pub fn is_finished(app: &AppHandle) -> bool {
         .load(Ordering::SeqCst)
 }
 
+/// フロントのJavaScriptが動き始めたか（起動画面まで描けているか）。
+pub fn is_started(app: &AppHandle) -> bool {
+    app.state::<BootScreenState>()
+        .started
+        .load(Ordering::SeqCst)
+}
+
 /// フロントが起動準備を継続できていることを記録する。
 pub fn mark_progress(app: &AppHandle) {
     let state = app.state::<BootScreenState>();

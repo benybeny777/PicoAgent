@@ -100,7 +100,9 @@ test("再読込のたびに停止監視を張り直し準備中でも窓を呼�
   assert.match(bootScreen, /fn outdated\(app: &AppHandle, generation: u64\)/);
   assert.match(bootScreen, /generation\s*\.fetch_add\(1, Ordering::SeqCst\)/);
   // 呼び出しホットキーと多重起動は準備中でも応答する（窓を隠したまま閉じ込めない）。
-  assert.doesNotMatch(windowSurface, /is_finished/);
+  // ただしフロントが動き出す前は中身の無い白い窓になるので出さない。
+  assert.match(windowSurface, /if !crate::boot_screen::is_started\(app\) && !crate::boot_screen::is_finished\(app\)/);
+  assert.match(bootScreen, /pub fn is_started\(app: &AppHandle\) -> bool/);
   // 案内ページのURL規則は boot_screen へ集約する。
   assert.match(bootScreen, /pub fn is_page_url/);
   assert.match(lib, /boot_screen::is_page_url\(payload\.url\(\)\.scheme\(\), payload\.url\(\)\.host_str\(\)\)/);
