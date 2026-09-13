@@ -1,7 +1,7 @@
 // menu.rs - 右クリックのネイティブコンテキストメニュー。
 
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{Emitter, Manager, PhysicalPosition};
+use tauri::{Emitter, LogicalPosition, Manager, PhysicalPosition};
 
 use crate::commands::{
     clear_conversation_and_history, open_character_settings, open_display_settings, open_settings,
@@ -67,21 +67,8 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .map_err(|e| e.to_string())?;
 
     // 表示形式は作業に合わせてその場で変えるものなので、設定画面を開かずに選べるようにする。
-    // 選択中の形式にチェックを付けるため、項目は毎回この場で作り直す。
-    let active = {
-        let state = app.state::<AppState>();
-        crate::layout::current(&state.config)
-    };
+    let layout_items = layout_items(&app)?;
     let mut layout_menu = SubmenuBuilder::new(&app, "画面レイアウト");
-    let mut layout_items = Vec::new();
-    for (id, label, _, _) in crate::layout::LAYOUTS {
-        layout_items.push(
-            CheckMenuItemBuilder::with_id(format!("{LAYOUT_ID_PREFIX}{id}"), label)
-                .checked(id == active)
-                .build(&app)
-                .map_err(|e| e.to_string())?,
-        );
-    }
     for item in &layout_items {
         layout_menu = layout_menu.item(item);
     }
@@ -148,6 +135,55 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
         .map_err(|e| e.to_string())?;
 
     window.popup_menu(&menu).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 画面レイアウトの選択肢。選択中の形式にチェックを付けるため、メニューを開くたびに作り直す。
+/// 右クリックの「画面レイアウト」と上端メニューの「表示」で共有する（片方だけ直すと項目やチェックがずれる）。
+fn layout_items(
+    app: &tauri::AppHandle,
+) -> Result<Vec<tauri::menu::CheckMenuItem<tauri::Wry>>, String> {
+    let active = {
+        let state = app.state::<AppState>();
+        crate::layout::current(&state.config)
+    };
+    crate::layout::LAYOUTS
+        .into_iter()
+        .map(|(id, label, _, _)| {
+            CheckMenuItemBuilder::with_id(format!("{LAYOUT_ID_PREFIX}{id}"), label)
+                .checked(id == active)
+                .build(app)
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+/// 上端メニューの「表示」から、画面レイアウトの一覧をボタン直下へ出す。
+/// 設定画面を開いてカードを選び保存するより手数が少ない。一覧の最後から従来の設定画面へも進める。
+/// `x` / `y` はウィンドウ左上を原点とする論理座標（メイン画面はOS枠を持たないのでWebViewの座標と一致する）。
+#[tauri::command]
+pub fn pet_layout_menu(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let layout_items = layout_items(&app)?;
+    let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト・位置…")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
+    let mut menu = MenuBuilder::new(&app);
+    for item in &layout_items {
+        menu = menu.item(item);
+    }
+    let menu = menu
+        .separator()
+        .item(&display_settings)
+        .build()
+        .map_err(|e| e.to_string())?;
+    window
+        .popup_menu_at(&menu, LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
