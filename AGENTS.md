@@ -270,7 +270,7 @@ PicoAgent は同梱推論エンジン（既定）やローカル/リモートの
 │       ├── providers/*.rs      ← 叩く AI（local/ollama/openai/anthropic/gemini/deepseek/xai/mistral/agent_cli。.rs を足すと自動登録）
 │       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
 ├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
-├── scripts/                    ← キャラクター画像の生成・高精細化（*.py と Windows 専用の *.ps1 / *.cs）
+├── scripts/                    ← キャラクター画像の生成・高精細化、関係者版インストーラの生成（*.py と Windows 専用の *.ps1 / *.cs）
 ├── .agents/skills/             ← 複数の作業エージェントで共有する手順スキルの正本
 ├── .claude/                    ← Claude Code の設定、共通スキル自動認識ファイル、セッション開始フック
 ├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
