@@ -936,7 +936,23 @@ async function validateInteractionMatrix() {
           throw new Error(`${target.id}/${layout}: 起動完了待ちがタイムアウトしました ${JSON.stringify(bootState)}`, { cause: error });
         }
         if (target.meshRig) {
-          await page.waitForFunction(() => typeof meshRigActive !== "undefined" && meshRigActive, null, { timeout: 40000 });
+          try {
+            await page.waitForFunction(() => typeof meshRigActive !== "undefined" && meshRigActive, null, { timeout: 40000 });
+          } catch (error) {
+            // 何が欠けて有効にならなかったのかを残す。準備失敗で差分絵へ退避した場合は状態欄に理由が出る。
+            const rigState = await page.evaluate(() => ({
+              layout: document.getElementById("petApp")?.dataset.layout,
+              renderKind: document.getElementById("character")?.dataset.renderKind,
+              variant: document.getElementById("character")?.dataset.variant,
+              status: document.getElementById("status")?.textContent,
+              meshRigLoaded: typeof meshRigController === "undefined" ? null : Boolean(meshRigController),
+              meshRigConfig: typeof activeMeshRigConfig === "undefined" ? null : activeMeshRigConfig,
+              characterRoot: typeof characterRoot === "undefined" ? null : characterRoot,
+              hidden: document.hidden,
+              napping: typeof napping === "undefined" ? null : napping,
+            }));
+            throw new Error(`${target.id}/${layout}: メッシュリグ有効化待ちがタイムアウトしました ${JSON.stringify(rigState)}`, { cause: error });
+          }
         } else if (!target.forcePng) {
           await page.waitForFunction(() => typeof live2dActive !== "undefined" && live2dActive, null, { timeout: 40000 });
         }
