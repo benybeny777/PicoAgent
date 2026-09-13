@@ -151,4 +151,7 @@ test("送信処理と画面が実行中タスクへ状態を渡す", () => {
   assert.match(renderer, /closest\("button,a,textarea,\.reply-actions,\.task-run"\)/);
   assert.match(agent, /"labels": tools\.iter\(\)\.map\(\|name\| crate::tools::label_of\(name\)\)/);
   assert.match(styles, /\.bubble\.task-run-visible \.status\.busy \{ display:none; \}/);
+  // フキダシ内のボタンは既定で絶対配置されるため、見出しに留めるには static の明示が要る。
+  assert.match(styles, /\.task-run-cancel \{ position:static;/);
+  assert.match(styles, /\.bubble\.task-run-visible \.cancel-send \{ display:none; \}/);
 });

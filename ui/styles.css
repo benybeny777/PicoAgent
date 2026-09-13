@@ -1284,7 +1284,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .task-run-head { display:flex; align-items:center; gap:6px; min-height:22px; }
 .task-run-title { font-weight:800; }
 .task-run-total { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
-.task-run-cancel { height:22px; padding:0 9px; font-size:10.5px; }
+/* フキダシ内のボタンは既定で絶対配置される。見出しの右端に留めるため、既存の停止ボタンと同じく明示的に static にする。 */
+.task-run-cancel { position:static; flex:0 0 auto; height:22px; padding:0 9px; border-radius:8px; font-size:10.5px; font-weight:700; }
 .task-run-list { display:grid; gap:3px; max-height:112px; margin:5px 0 0; padding:0; overflow:auto; list-style:none; }
 .task-run-row { display:grid; grid-template-columns:10px minmax(0,1fr) auto auto; align-items:center; gap:6px; }
 .task-run-label { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
@@ -1299,7 +1300,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .bubble.task-run-visible .status.busy { display:none; }
 [data-layout="bar"] .task-run { order:2; }
 [data-layout="workspace"] .task-run { grid-column:2; grid-row:4; margin:0; }
-[data-layout="widget"] .task-run { order:5; }
+/* ウィジェット形式は右下にキャラが座り、入力欄より下は隠れる。一覧は回答の下・入力欄の上へ置く。 */
+[data-layout="widget"] .task-run { order:3; }
 [data-layout="stream"] .task-run {
   position:absolute; z-index:6; left:24px; bottom:clamp(122px,20vh,184px);
   width:min(360px,calc(100% - var(--stream-chat-width) - 48px)); margin:0;
@@ -1315,3 +1317,11 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 @media (prefers-reduced-motion:reduce) {
   .task-run-row[data-state="running"] .task-run-mark { animation:none; border-top-color:var(--accent); }
 }
+/* バー形式は窓の高さが320pxしかない。一覧は見出しと実行中・返事待ちの行だけにして、窓からはみ出させない。 */
+[data-layout="bar"] .task-run { padding:5px 8px; }
+[data-layout="bar"] .task-run-row:not([data-state="running"]):not([data-state="waiting"]) { display:none; }
+[data-layout="bar"] .task-run-list { max-height:34px; margin-top:3px; }
+/* 一覧に停止ボタンがあるあいだは、同じ働きの「処理を止める」を重ねて出さない。 */
+.bubble.task-run-visible .cancel-send { display:none; }
+/* バー形式は回答欄が数ピクセルまで潰れ、考え中の表示が切れて見える。一覧が同じ内容を出すあいだは隠す。 */
+[data-layout="bar"] .bubble.task-run-visible .reply.reply-thinking { display:none; }
