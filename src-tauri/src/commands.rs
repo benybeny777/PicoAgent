@@ -3454,6 +3454,79 @@ pub fn pet_durable_job_cancel(id: String) -> Result<(), String> {
     crate::durable_jobs::cancel(&id)
 }
 
+/// 一度に値の有無を確かめられる設定キーの上限。画面の表示判定に要る数だけを想定する。
+const CONFIG_PRESENCE_MAX_KEYS: usize = 32;
+
+/// 画面の表示判定（クイック操作の出し分けなど）のため、設定キーに値が入っているかだけを返す。
+/// APIキー等の値そのものは返さない。復号できない保護値は `config.get()` が未設定として返すので、
+/// ここでも「値なし」になる。
+#[tauri::command]
+pub fn pet_config_presence(
+    state: State<'_, AppState>,
+    keys: Vec<String>,
+) -> Result<std::collections::HashMap<String, bool>, String> {
+    config_presence(&keys, |key| state.config.get(key, ""))
+}
+
+/// `pet_config_presence` の判定本体。設定の読み出しを差し替えて単体検査できるよう分けている。
+fn config_presence(
+    keys: &[String],
+    get: impl Fn(&str) -> String,
+) -> Result<std::collections::HashMap<String, bool>, String> {
+    if keys.len() > CONFIG_PRESENCE_MAX_KEYS {
+        return Err(format!(
+            "一度に確認できる設定キーは{CONFIG_PRESENCE_MAX_KEYS}件までです"
+        ));
+    }
+    keys.iter()
+        .map(|key| {
+            // 設定以外の値（環境変数名など）の有無を画面から探れないよう、接頭辞で絞る。
+            if !key.starts_with(concat!("PICO", "AGENT_")) {
+                return Err("設定キーではない名前は確認できません".to_string());
+            }
+            Ok((key.clone(), !get(key).trim().is_empty()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod config_presence_tests {
+    use super::{config_presence, CONFIG_PRESENCE_MAX_KEYS};
+
+    fn keys(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn 値の有無だけを返し空白だけの値は未設定として扱う() {
+        let result = config_presence(
+            &keys(&[
+                "PICOAGENT_GMAIL_ACCESS_TOKEN",
+                "PICOAGENT_SLACK_BOT_TOKEN",
+                "PICOAGENT_SLACK_CHANNEL",
+            ]),
+            |key| match key {
+                "PICOAGENT_GMAIL_ACCESS_TOKEN" => "ya29.secret".to_string(),
+                "PICOAGENT_SLACK_BOT_TOKEN" => "   ".to_string(),
+                _ => String::new(),
+            },
+        )
+        .expect("設定キーだけなら判定できる");
+        assert_eq!(result.get("PICOAGENT_GMAIL_ACCESS_TOKEN"), Some(&true));
+        assert_eq!(result.get("PICOAGENT_SLACK_BOT_TOKEN"), Some(&false));
+        assert_eq!(result.get("PICOAGENT_SLACK_CHANNEL"), Some(&false));
+        // 値そのものは戻り値のどこにも含めない。
+        assert!(!format!("{result:?}").contains("ya29"));
+    }
+
+    #[test]
+    fn 設定キー以外の名前と件数超過は拒否する() {
+        assert!(config_presence(&keys(&["OPENAI_API_KEY"]), |_| "x".to_string()).is_err());
+        let too_many = vec!["PICOAGENT_SLACK_CHANNEL".to_string(); CONFIG_PRESENCE_MAX_KEYS + 1];
+        assert!(config_presence(&too_many, |_| String::new()).is_err());
+    }
+}
+
 #[tauri::command]
 pub async fn pet_open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
     // WindowsのWebView2生成は同期コマンド・GUIイベント内で待つと停止する。

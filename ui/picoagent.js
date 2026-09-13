@@ -90,6 +90,8 @@ window.picoagent = {
   scheduleRuns: () => call("pet_schedule_runs"),
   rerunScheduleTask: (taskId) => call("pet_rerun_schedule_task", { taskId }),
   openSettings: (tab = null) => call("pet_open_settings", { tab }),
+  // 設定キーに値が入っているかだけを返す（値そのものは返さない）。クイック操作の出し分けに使う。
+  configPresence: (keys = []) => call("pet_config_presence", { keys }),
   openExternalUrl: (url) => call("pet_open_external_url", { url }),
   openGeneratedMedia: (path) => call("pet_open_generated_media", { path }),
   quit: () => call("pet_quit"),
