@@ -1360,7 +1360,37 @@ pub fn pet_open_external_url(url: String) -> Result<(), String> {
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err("HTTP(S)リンクだけを開けます。".to_string());
     }
+    open_with_default_app(&url)
+}
 
+/// PicoAgentが生成した画像・動画（`generated-media/`直下）だけを既定アプリで開く。
+#[tauri::command]
+pub fn pet_open_generated_media(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let root = crate::log_paths::data_dir(&app)
+        .join("generated-media")
+        .canonicalize()
+        .map_err(|_| "生成ファイルの保存先が見つかりません。".to_string())?;
+    let target = std::path::Path::new(&path)
+        .canonicalize()
+        .map_err(|_| "生成ファイルが見つかりません。".to_string())?;
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase);
+    if target.parent() != Some(root.as_path())
+        || !target.is_file()
+        || !matches!(
+            extension.as_deref(),
+            Some("png" | "jpg" | "jpeg" | "webp" | "mp4")
+        )
+    {
+        return Err("PicoAgentが生成した画像・動画だけを開けます。".to_string());
+    }
+    open_with_default_app(&path)
+}
+
+/// URLまたはファイルをOS既定のアプリで開く。対象の検証は呼び出し側で済ませること。
+fn open_with_default_app(url: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
@@ -1380,7 +1410,7 @@ pub fn pet_open_external_url(url: String) -> Result<(), String> {
         };
         if result as isize <= 32 {
             return Err(format!(
-                "既定ブラウザを開けませんでした（OSエラー {result:?}）。"
+                "既定のアプリで開けませんでした（OSエラー {result:?}）。"
             ));
         }
     }
@@ -1389,13 +1419,13 @@ pub fn pet_open_external_url(url: String) -> Result<(), String> {
     crate::tools::process::command_sync("open")
         .arg(&url)
         .spawn()
-        .map_err(|error| format!("既定ブラウザを開けませんでした: {error}"))?;
+        .map_err(|error| format!("既定のアプリで開けませんでした: {error}"))?;
 
     #[cfg(target_os = "linux")]
     crate::tools::process::command_sync("xdg-open")
         .arg(&url)
         .spawn()
-        .map_err(|error| format!("既定ブラウザを開けませんでした: {error}"))?;
+        .map_err(|error| format!("既定のアプリで開けませんでした: {error}"))?;
 
     Ok(())
 }

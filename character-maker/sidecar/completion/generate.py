@@ -166,9 +166,15 @@ def stop_owned(process):
     process.wait()
 
 
-def generate_image(args, run, workflow):
+def reserve_port(requested):
+    """0はOSに空きポートを選ばせる。固定番号はWindowsの予約範囲（Hyper-V等）と衝突すると起動できない。"""
     with socket.socket() as probe:
-        probe.bind(('127.0.0.1', args.port))
+        probe.bind(('127.0.0.1', requested))
+        return probe.getsockname()[1]
+
+
+def generate_image(args, run, workflow):
+    args.port = reserve_port(args.port)
     command = [sys.executable, str(args.comfy/'main.py'), '--listen', '127.0.0.1', '--port', str(args.port),
                '--base-directory', str(run), '--models-directory', str(args.models),
                '--temp-directory', str(run/'temp'), '--disable-auto-launch', '--disable-all-custom-nodes',
@@ -385,7 +391,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('character', 'base-rig', 'output', 'comfy', 'models', 'workflow', 'overlay','grounding-model','sam-model'):
         parser.add_argument('--'+name, type=Path, required=True)
-    for name, default in (('steps', 50), ('seed', 777), ('resolution', 1024), ('port', 58125),
+    for name, default in (('steps', 50), ('seed', 777), ('resolution', 1024), ('port', 0),
                           ('startup-timeout', 600), ('generation-timeout', 14400)):
         parser.add_argument('--'+name, type=int, default=default)
     parser.add_argument('--mask-margin-ratio', type=float, default=.2)

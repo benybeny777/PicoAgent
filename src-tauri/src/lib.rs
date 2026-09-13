@@ -121,6 +121,7 @@ pub fn run() {
             commands::pet_place_window,
             commands::pet_start_window_drag,
             commands::pet_open_external_url,
+            commands::pet_open_generated_media,
             commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
             commands::pet_relationship_state,

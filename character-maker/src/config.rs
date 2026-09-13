@@ -55,7 +55,8 @@ impl MakerConfig {
             sam2_points_per_batch: 8,
             sam2_pred_iou_threshold: 0.7,
             sam2_stability_threshold: 0.85,
-            comfy_port: 58_120,
+            // 0はサイドカーがOSに空きポートを選ばせる。固定番号はWindowsの予約ポート範囲と衝突して起動できない。
+            comfy_port: 0,
             comfy_startup_timeout_seconds: 600,
             snapshot_part_bytes: 32_000_000,
         }

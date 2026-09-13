@@ -47,6 +47,13 @@ def request_json(url, payload=None):
         return json.load(response)
 
 
+def reserve_port(requested):
+    """0はOSに空きポートを選ばせる。固定番号はWindowsの予約範囲（Hyper-V等）と衝突すると起動できない。"""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", requested))
+        return probe.getsockname()[1]
+
+
 def wait_for_server(url, process, timeout):
     started = time.monotonic()
     while time.monotonic() - started < timeout:
@@ -179,7 +186,7 @@ def main():
     parser.add_argument("--comfy", type=Path, required=True)
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--gpu-lock", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=58130)
+    parser.add_argument("--port", type=int, default=0, help="0は空きポートを自動で選ぶ")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--width", type=int, required=True)
     parser.add_argument("--height", type=int, required=True)
@@ -201,8 +208,7 @@ def main():
             shutil.copy2(args.input, run / "input/input.png")
         workflow = qwen(args.prompt, args.seed, args.width, args.height, args.input) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
         with gpu_lock(args.gpu_lock):
-            with socket.socket() as probe:
-                probe.bind(("127.0.0.1", args.port))
+            args.port = reserve_port(args.port)
             command = [os.fspath(Path(os.sys.executable)), os.fspath(args.comfy / "main.py"), "--listen", "127.0.0.1", "--port", str(args.port), "--base-directory", os.fspath(run), "--models-directory", os.fspath(args.models), "--temp-directory", os.fspath(run / "temp"), "--disable-auto-launch", "--disable-all-custom-nodes", "--disable-api-nodes", "--preview-method", "none"]
             environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
             with (run / "comfy.log").open("w", encoding="utf-8") as log:

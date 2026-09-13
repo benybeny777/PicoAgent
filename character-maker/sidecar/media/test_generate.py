@@ -52,6 +52,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("image1", workflow["8"]["inputs"])
         self.assertEqual(workflow["9"]["class_type"], "EmptySD3LatentImage")
 
+    def test_port_zero_reserves_free_local_port(self):
+        self.assertGreater(GEN.reserve_port(0), 0)
+
     def test_wan_text_and_image_modes_share_official_core(self):
         text = GEN.wan("move", 1, 768, 512, 97, None)
         image = GEN.wan("move", 1, 768, 512, 97, Path("input.png"))
