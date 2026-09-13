@@ -124,6 +124,15 @@ pub trait Tool: Send + Sync {
     fn intent_invocation(&self, _text: &str) -> Option<IntentInvocation> {
         None
     }
+    /// 直前までの利用者発話（新しい順）も踏まえて先回り実行を組み立てる。
+    /// 話題を含まない催促（「調べてくれないの？」）へ文脈を補うスキルだけが上書きする。
+    fn intent_invocation_in_conversation(
+        &self,
+        text: &str,
+        _earlier_user_texts: &[&str],
+    ) -> Option<IntentInvocation> {
+        self.intent_invocation(text)
+    }
     /// このスキル自身が申告した語彙だけで発話との一致を判定する。
     fn matches_intent(&self, text: &str) -> bool {
         let normalized = text.to_lowercase();
@@ -246,14 +255,20 @@ const CORE_AGENT_TOOLS: [&str; 4] = ["get_time", "web_search", "web_fetch", "use
 const MAX_SELECTED_SCHEMAS: usize = 12;
 const TOOL_ROUTES: &[(&str, &[&str])] = &[];
 
-/// 登録済みスキルを優先度・一致語長・名前順で走査し、最初の先回り実行だけを返す。
+/// 登録済みスキルを優先度・一致語長・名前順で走査し、最初の先回り実行だけを返す（文脈なしの検査用）。
+#[cfg(test)]
 pub fn intent_for_text(text: &str) -> Option<MatchedIntent> {
+    intent_for_conversation(text, &[])
+}
+
+/// 直前までの利用者発話（新しい順）も各スキルへ渡して、最初の先回り実行だけを返す。
+pub fn intent_for_conversation(text: &str, earlier_user_texts: &[&str]) -> Option<MatchedIntent> {
     debug_assert!(TOOL_ROUTES.is_empty());
     let normalized = text.to_lowercase();
     let mut matched: Vec<_> = all()
         .iter()
         .filter_map(|tool| {
-            let invocation = tool.intent_invocation(text)?;
+            let invocation = tool.intent_invocation_in_conversation(text, earlier_user_texts)?;
             let score = tool
                 .intent_keywords()
                 .iter()
