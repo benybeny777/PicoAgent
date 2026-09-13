@@ -117,3 +117,15 @@ test("メイン画面が停止可能ループと最新視線イベントを使�
   assert.match(renderer, /gazeFrameScheduler\.schedule\(\{ clientX: event\.clientX, clientY: event\.clientY \}\)/);
   assert.doesNotMatch(renderer, /animationRequestId\s*=\s*requestAnimationFrame\(animate\)/);
 });
+
+test("1枚絵を表示できたら描画ループを休ませる", () => {
+  // チャット・バー形式でメッシュリグを止めたキャラは preview.png の1枚だけを表示する。
+  // 送り先の無い1枚絵で true を返し続けると、変化の無い画面のために毎フレーム予約が続く。
+  const start = renderer.indexOf("function animate(now) {");
+  const body = renderer.slice(start, renderer.indexOf("\n}\n", start));
+  const displayed = body.indexOf("if (!displayPreloadedFrame(animationName, frame)) {");
+  const singleFrame = body.indexOf("if (animationFrameCount(animation) <= 1) return springActive;");
+  const advance = body.indexOf("if (now - lastFrameAt >= frameDuration(animation, frame)) {");
+  assert.ok(displayed >= 0 && singleFrame > displayed, "表示できたかの判定より後で1枚絵を休ませる（読込中は再試行を続ける）");
+  assert.ok(advance > singleFrame, "フレーム送りより前で1枚絵を休ませる");
+});
