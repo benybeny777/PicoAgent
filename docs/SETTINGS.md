@@ -8,9 +8,9 @@
 
 | キー | 既定 | 区分 | 用途 |
 |---|---|---|---|
-| `PICOAGENT_PROVIDER` | `local` | 基本 | 選択中の叩く AI の id |
-| `PICOAGENT_MODEL` | プロバイダ既定 | 基本 | 選択中モデル。agent_cliは `claude` / `codex` で外部アプリ既定、`claude:<モデル>` / `codex:<モデル>` で明示選択。基本設定の選択欄から保存 |
-| `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | 基本 | system メッセージ |
+| `PICOAGENT_PROVIDER` | `local` | AIモデル | 選択中の叩く AI の id |
+| `PICOAGENT_MODEL` | プロバイダ既定 | AIモデル | 選択中モデル。agent_cliは `claude` / `codex` で外部アプリ既定、`claude:<モデル>` / `codex:<モデル>` で明示選択。基本設定の選択欄から保存 |
+| `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | AIモデル | system メッセージ |
 | `PICOAGENT_THEME` | `system` | 基本 | 表示テーマ。`system` はOS/システム設定に追従、`light` は通常、`dark` はダーク。`pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する幅(px)。設定画面には出さない |
@@ -35,19 +35,19 @@
 | `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_PROFILES` | `{}` | キャラクター | キャラクターID別の配信表示上書き。背景、背景画像、画面内ディスプレイ、表示画像、字幕色を保持し、未設定キャラは共通の配信設定を使う。不正なID・選択肢・色は保存時に除去または安全な既定値へ正規化する |
 | `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"chat":{"w":520,"h":760}}`）。既定はミニ360×560／ペット900×600／チャット520×760／バー900×320／作業1400×850／配信1920×1080（フルHD）／ウィジェット440×600。旧 `talk` の保存寸法は `chat` の値がない場合に引き継ぐ。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
-| `PICOAGENT_HOTKEY_ENABLED` | `true` | 基本 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
-| `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 基本 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
-| `PICOAGENT_HOTKEY_HIDE` | `CommandOrControl+Alt+H` | 基本 | 隠す／戻すキー。表示中は `hide()`、隠れているときは呼び出しと同じ動作。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
+| `PICOAGENT_HOTKEY_ENABLED` | `true` | 画面 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
+| `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 画面 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
+| `PICOAGENT_HOTKEY_HIDE` | `CommandOrControl+Alt+H` | 画面 | 隠す／戻すキー。表示中は `hide()`、隠れているときは呼び出しと同じ動作。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
 | `PICOAGENT_BOOT_TIMEOUT_MS` | `120000` | 内部UI | 開始後の起動進捗通知がこの時間だけ途絶えた場合に、キャラクター付きの案内画面へ切り替える。モデル・音声のダウンロード中もフロントが生存通知を送るため、準備の総時間が2分を超えても停止扱いにしない。通知の間隔はこの値の1/4（1〜10秒へ収める）で、値を短くしても正常な起動が案内画面へ落ちない。読込開始（`pet_frontend_ready`）だけは12秒（この値が小さい場合はその値）で判定し、画面を出せない障害の案内を待たせない。設定画面には出さない（`3000`〜`120000` に丸める） |
-| `PICOAGENT_NAP_MINUTES` | `15` | 基本 | 無操作でキャラが居眠りするまでの分数（`0` で居眠りしない） |
-| `PICOAGENT_QUICK_ACTIONS` | 空 | 基本 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |
-| `PICOAGENT_UPDATE_CHECK_ENABLED` | `true` | 基本 | 起動時に公開配布Gitの `latest.json` を確認し、新しければ通知する。オフライン時は通知しない |
+| `PICOAGENT_NAP_MINUTES` | `15` | 画面 | 無操作でキャラが居眠りするまでの分数（`0` で居眠りしない） |
+| `PICOAGENT_QUICK_ACTIONS` | 空 | 画面 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |
+| `PICOAGENT_UPDATE_CHECK_ENABLED` | `true` | 更新 | 起動時に公開配布Gitの `latest.json` を確認し、新しければ通知する。オフライン時は通知しない |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
 | `PICOAGENT_PROJECT_RULES_AUTO_CAPTURE` | `false` | 基本 | 強く言い渡された作法を作業フォルダの `AGENTS.md` へ自動で追記する（既定は無効。利用者のフォルダにあるファイルを書き換えるため） |
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
-| `PICOAGENT_SUPER_AGENT` | `false` | 基本 | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
-| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | 基本 | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
+| `PICOAGENT_SUPER_AGENT` | `false` | AIモデル | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
+| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
 | `PICOAGENT_MULTI_AI_MODE` | `single` | 複数AI | `single` / `consensus` / `collaborate` / `divide`。既定は従来どおり単発。単発以外は Pro 対象の `subagent` を通るため、Pro でなければ保存を拒否し、実行時にライセンスが切れていれば理由を画面へ返す。参加AI設定が壊れていても`single`へ戻す保存は受け付ける |
 | `PICOAGENT_MULTI_AI_AGENTS` | `[]` | 複数AI | 参加AI（name / provider / model / focus）のJSON配列。複数モードでは2〜8件 |
 | `PICOAGENT_MULTI_AI_JUDGE_PROVIDER` | 現在のプロバイダ | 複数AI | 分担計画と回答統合を行うまとめ役のプロバイダ |

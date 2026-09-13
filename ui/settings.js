@@ -75,6 +75,8 @@ function activateSettingsTab(tabId) {
   if (button) {
     button.click();
     form.scrollTop = 0;
+    // タブ一覧は高さ上限の中でスクロールする。下側のタブを開いても選択中が隠れないようにする。
+    button.scrollIntoView({ block: "nearest" });
   }
   return true;
 }
@@ -967,13 +969,14 @@ function quickSettingsGuide(v) {
   const layout = LAYOUT_CHOICES.find(choice => choice.id === layoutId);
   const provider = data.providers.find(item => item.id === (v.PICOAGENT_PROVIDER || data.active.providerId));
   const cards = [
-    { tab: "character-register", title: "キャラ登録", summary: "MMD・Live2D・完成パック" },
-    { tab: "character-maker", title: "キャラ作成（テスト）", summary: "原画からローカル生成するテスト機能" },
+    // 変更頻度の高い順。テスト機能のキャラ作成はタブ一覧からだけ開く。
     { tab: "character", title: "キャラ選択", summary: v.PICOAGENT_CHARACTER || "既定キャラ" },
     { tab: "voice", title: "キャラの音声", summary: v.PICOAGENT_TTS_ENABLED === true ? "読み上げ有効" : "ミュート中" },
     { tab: "display", title: "画面レイアウト", summary: layout?.label || "ペット" },
     { tab: "providers", title: "使うAI", summary: provider?.label || v.PICOAGENT_PROVIDER || "ローカル" },
-    { tab: "components", title: "追加機能", summary: "音声・文字起こし・文書ツール" },
+    { tab: "character-register", title: "キャラ登録", summary: "MMD・Live2D・完成パック" },
+    { tab: "components", title: "追加機能・更新", summary: "音声・文字起こし・アプリ更新" },
+    { tab: "permissions", title: "安全・許可", summary: "触ってよいフォルダ" },
     { tab: "diagnostics", title: "困ったとき", summary: "接続確認と修復" },
   ];
   const grid = el("div", { className: "quick-settings-grid" });
@@ -1197,7 +1200,7 @@ function buildComponentManager() {
         if (!managed) {
           const url = item.sources?.[0]?.url;
           if (url) window.open(url, "_blank", "noopener,noreferrer");
-          status.textContent = `${item.label}は提供元の手順で導入し、必要なら「スキル」で実行ファイルを指定してください。`;
+          status.textContent = `${item.label}は提供元の手順で導入し、必要なら「スキル・連携」で実行ファイルを指定してください。`;
           return;
         }
         if (actionConfirmation && !actionConfirmation.request()) return;
@@ -1317,6 +1320,13 @@ function createTabs(items) {
   const panels = el("div", { className: "tab-panels" });
   const byId = {};
   items.forEach(item => {
+    if (item.heading) {
+      // 分類見出しはタブではない。支援技術がタブ数へ数えないよう読み上げ対象から外す。
+      const heading = el("div", { className: "tab-group-heading", textContent: item.heading });
+      heading.setAttribute("aria-hidden", "true");
+      tabs.append(heading);
+      return;
+    }
     const selected = item.id === activeSettingsTab;
     const button = el("button", {
       className: selected ? "tab active" : "tab",
@@ -1336,7 +1346,7 @@ function createTabs(items) {
     if (!selected) panel.hidden = true;
     button.addEventListener("click", () => {
       activeSettingsTab = item.id;
-      for (const tab of tabs.children) {
+      for (const tab of tabs.querySelectorAll(".tab")) {
         const active = tab === button;
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", active ? "true" : "false");
@@ -1354,6 +1364,8 @@ function createTabs(items) {
     byId[item.id] = panel;
   });
   form.append(tabs, panels);
+  // 起動時に「診断・修復」など一覧の下側を指定して開いた場合も、選択中のタブを見える位置へ送る。
+  tabs.querySelector(".tab.active")?.scrollIntoView({ block: "nearest" });
   return byId;
 }
 
@@ -2602,6 +2614,23 @@ function buildProductInfoSection() {
       el("small", { textContent: "Live2D、Aivis、ローカルモデルなどの表示と配布条件は販売前監査の対象です。" }),
     ]),
   ]));
+  productSec.append(field(
+    "PICOAGENT_LICENSE_TOKEN",
+    "BOOTHなどで購入したライセンスキー",
+    "password",
+    data.values?.PICOAGENT_LICENSE_TOKEN || "",
+    "PA1. から始まるキーを貼り付け"
+  ));
+  productSec.append(el("p", {
+    className: "hint",
+    textContent: "無料版は会話・天気・時刻などを利用できます。ProではPC操作、ファイル編集、Office・外部サービス・MCPなどの高度なスキルが有効になります。キーはWindowsではDPAPIで暗号化、macOSではログインキーチェーンへ預けて保存します。Steam版は将来Steamworksの所有確認へ対応予定です。",
+  }));
+  return markSearchable(productSec, "製品 バージョン データ プライバシー ライセンス サポート");
+}
+
+// アプリ本体の更新は「追加機能・更新」タブの先頭に置き、追加機能の版管理と同じ場所で済ませる。
+function buildAppUpdateSection(v) {
+  const updateSec = section("アプリのアップデート");
   const updateStatus = el("p", {
     className: "hint product-update-status",
     textContent: "起動時の確認が有効なら公開Gitへ一度だけ問い合わせます。オフラインの場合は何も表示しません。ここからも手動で確認できます。",
@@ -2652,30 +2681,19 @@ function buildProductInfoSection() {
     }
   });
   const updateActions = el("div", { className: "product-update-actions" }, [checkUpdate, installUpdate]);
-  productSec.append(el("div", { className: "product-update-card" }, [
-    el("strong", { textContent: "アプリのアップデート" }),
-    el("p", { className: "hint", textContent: "更新するのはPicoAgent本体です。設定・会話履歴・追加キャラ・ダウンロード済みLLMモデル・導入済み追加機能はそのまま使い、再ダウンロードしません。各追加機能の版は「追加機能・更新」で個別に管理します。" }),
+  updateSec.append(el("div", { className: "product-update-card" }, [
+    el("p", { className: "hint", textContent: "更新するのはPicoAgent本体です。設定・会話履歴・追加キャラ・ダウンロード済みLLMモデル・導入済み追加機能はそのまま使い、再ダウンロードしません。各追加機能の版は下の一覧で個別に管理します。" }),
     updateStatus,
     updateActions,
   ]));
+  updateSec.append(field("PICOAGENT_UPDATE_CHECK_ENABLED", "起動時に新しいバージョンを確認する", "checkbox", v.PICOAGENT_UPDATE_CHECK_ENABLED !== false));
   replaceSettingsListener("update-progress", "update:progress", progress => {
     const percent = progress.total > 0 ? Math.min(100, Math.round(progress.downloaded / progress.total * 100)) : 0;
     updateStatus.textContent = `アップデートをダウンロードしています… ${percent}%`;
   }).catch(error => {
     logApp("warn", "アップデート進捗を受け取れませんでした", errorDetail(error));
   });
-  productSec.append(field(
-    "PICOAGENT_LICENSE_TOKEN",
-    "BOOTHなどで購入したライセンスキー",
-    "password",
-    data.values?.PICOAGENT_LICENSE_TOKEN || "",
-    "PA1. から始まるキーを貼り付け"
-  ));
-  productSec.append(el("p", {
-    className: "hint",
-    textContent: "無料版は会話・天気・時刻などを利用できます。ProではPC操作、ファイル編集、Office・外部サービス・MCPなどの高度なスキルが有効になります。キーはWindowsではDPAPIで暗号化、macOSではログインキーチェーンへ預けて保存します。Steam版は将来Steamworksの所有確認へ対応予定です。",
-  }));
-  return markSearchable(productSec, "製品 バージョン データ プライバシー ライセンス サポート 更新");
+  return markSearchable(updateSec, "更新 アップデート バージョン 最新版");
 }
 
 function buildDownloadedModelsSection() {
@@ -2915,39 +2933,46 @@ async function render() {
   scheduleEditorState = null;
   const v = data.values;
   const panels = createTabs([
+    // 同じ分類のタブを見出しの下へ集め、分類内はよく使う順に並べる。
+    { heading: "よく使う" },
     { id: "basic", label: "基本設定" },
     { id: "display", label: "画面・操作" },
-    { id: "character-maker", label: "キャラ作成（テスト）" },
-    { id: "character-register", label: "キャラ登録" },
+    { heading: "キャラクター" },
     { id: "character", label: "キャラ選択" },
     { id: "voice", label: "キャラの音声" },
+    { id: "character-register", label: "キャラ登録" },
+    { id: "character-maker", label: "キャラ作成（テスト）" },
+    { heading: "AI・機能" },
+    { id: "providers", label: "AIモデル" },
+    { id: "tools", label: "スキル・連携" },
     { id: "components", label: "追加機能・更新" },
-    { id: "providers", label: "AIモデル・連携" },
-    { id: "tools", label: "スキル" },
+    { heading: "安全・サポート" },
     { id: "permissions", label: "安全・許可" },
     { id: "skillguide", label: "使い方" },
     { id: "diagnostics", label: "診断・修復" },
   ]);
-  panels.components.append(buildComponentManager());
+  panels.components.append(buildAppUpdateSection(v), buildComponentManager());
   panels["character-maker"].append(buildCharacterMaker(registerInstalledCharacter));
 
-  // --- グローバル設定 ---
-  const global = section("基本");
+  // --- 会話と記憶（基本設定タブ） ---
+  const global = section("会話と記憶");
   global.append(el("p", {
     className: "settings-intro",
-    textContent: "普段変更するのは、使うAI・記憶・居眠り・更新確認です。プロンプトやホットキーなどは下の「詳細設定」にまとめています。",
+    textContent: "キャラクターが会話から覚えることを決めます。使うAIは「AIモデル」、居眠りやホットキーは「画面・操作」にあります。",
   }));
+  // --- 使うAI（AIモデルタブの先頭） ---
+  const aiSec = section("使うAI");
   const providerSelect = el("select");
   for (const p of data.providers) {
     providerSelect.append(el("option", { value: p.id, textContent: p.label, selected: p.id === data.active.providerId }));
   }
-  global.append(registerInput(
+  aiSec.append(registerInput(
     "PICOAGENT_PROVIDER",
     providerSelect,
     markSearchable(el("div", { className: "field" }, [el("label", { textContent: "使うAI" }), providerSelect]), "PICOAGENT_PROVIDER", "叩く AI", "使うAI", "プロバイダ")
   ));
   const modelField = field("PICOAGENT_MODEL", "AIモデル", "text", v.PICOAGENT_MODEL ?? data.active.model, data.active.model);
-  global.append(modelField);
+  aiSec.append(modelField);
   modelInput = inputs.get("PICOAGENT_MODEL");
   cliModelSelect = el("select", { ariaLabel: "CLIのAIモデル" });
   cliModelSelect.addEventListener("change", () => {
@@ -2960,8 +2985,8 @@ async function render() {
     el("p", { className: "hint", textContent: "「アプリのデフォルト」はClaude／Codexの設定に追従します。Codexの候補はCLIが更新するローカル一覧から取得します。" }),
   ]);
   modelField.append(cliModelControls);
-  // OllamaとCLIは基本タブのモデル欄に出す。
-  // 他プロバイダは「AIモデル・連携」タブで種類とサイズを選ぶため、ここでは隠す。
+  // OllamaとCLIは「使うAI」のモデル欄に出す。
+  // 他プロバイダは下の「AIサービスごとの設定」で種類とサイズを選ぶため、ここでは隠す。
   function updateModelFieldVisibility() {
     const isCli = providerSelect.value === "agent_cli";
     const hidden = providerSelect.value !== "ollama" && !isCli;
@@ -2986,21 +3011,24 @@ async function render() {
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
-  global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
-  global.append(field("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", "強く言い渡した作法を作業フォルダのAGENTS.mdへ自動で追記する", "checkbox", v.PICOAGENT_PROJECT_RULES_AUTO_CAPTURE === true));
-  global.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
-  global.append(field("PICOAGENT_UPDATE_CHECK_ENABLED", "起動時に新しいバージョンを確認する", "checkbox", v.PICOAGENT_UPDATE_CHECK_ENABLED !== false));
-  // 変更頻度の低い項目は閉じておき、基本画面を短く保つ。
-  global.append(advancedGroup("詳細設定", "困っていなければ変更する必要はありません。", [
-    field("PICOAGENT_SYSTEM_PROMPT", "全キャラ共通の追加指示", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt),
+  // --- 操作（画面・操作タブ）: 普段の触り方に関わる項目だけを集める ---
+  const operationSec = section("操作");
+  operationSec.append(field("PICOAGENT_NAP_MINUTES", "無操作で居眠りするまでの分数（0で居眠りしない）", "text", v.PICOAGENT_NAP_MINUTES ?? "", "15"));
+  operationSec.append(field("PICOAGENT_QUICK_ACTIONS", "入力欄のクイック操作（1行1件「ラベル|送る文章」。空欄なら既定の一覧）", "textarea", v.PICOAGENT_QUICK_ACTIONS ?? "", "👀 画面を見る|今の画面を見て、状況を短く教えて"));
+  operationSec.append(advancedGroup("ホットキー", "キーボードから呼び出す・隠す組み合わせです。空欄は既定値、off と書くとそのキーだけ無効です。", [
     field("PICOAGENT_HOTKEY_ENABLED", "グローバルホットキーを使う", "checkbox", v.PICOAGENT_HOTKEY_ENABLED !== false),
     field("PICOAGENT_HOTKEY_SUMMON", "呼び出すキー", "text", v.PICOAGENT_HOTKEY_SUMMON ?? "", "CommandOrControl+Alt+P"),
     field("PICOAGENT_HOTKEY_HIDE", "隠す／戻すキー", "text", v.PICOAGENT_HOTKEY_HIDE ?? "", "CommandOrControl+Alt+H"),
-    field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"),
-    field("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", "AIモデル一覧の待ち時間（秒）", "text", v.PICOAGENT_HTTP_METADATA_TIMEOUT_SECS ?? "", "15"),
+  ]));
+  global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
+  global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
+  global.append(field("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", "強く言い渡した作法を作業フォルダのAGENTS.mdへ自動で追記する", "checkbox", v.PICOAGENT_PROJECT_RULES_AUTO_CAPTURE === true));
+  // AIの振る舞いを変える項目は変更頻度が低いので、使うAIの下で閉じておく。
+  aiSec.append(advancedGroup("AIの詳細設定", "困っていなければ変更する必要はありません。", [
+    field("PICOAGENT_SYSTEM_PROMPT", "全キャラ共通の追加指示", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt),
     field("PICOAGENT_SUPER_AGENT", "計画・自己評価・分担を強化する", "checkbox", v.PICOAGENT_SUPER_AGENT === true),
     field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "強化モードの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"),
-    field("PICOAGENT_QUICK_ACTIONS", "クイックアクション（1行1件「ラベル|送る文章」）", "textarea", v.PICOAGENT_QUICK_ACTIONS ?? "", "👀 画面を見る|今の画面を見て、状況を短く教えて"),
+    field("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", "AIモデル一覧の待ち時間（秒）", "text", v.PICOAGENT_HTTP_METADATA_TIMEOUT_SECS ?? "", "15"),
   ]));
   // ローカルAPI（Ollama風）: 外部ツールから 127.0.0.1 の HTTP でエージェントを呼べる。
   const apiSec = section("ローカルAPI（Ollama風）");
@@ -3047,7 +3075,7 @@ async function render() {
     errorDetail,
   });
   panels.basic.append(quickSettingsGuide(v), global, memoryManager);
-  panels.display.append(displaySec);
+  panels.display.append(displaySec, operationSec);
   providerSelect.addEventListener("change", () => {
     const selected = data.providers.find(item => item.id === providerSelect.value);
     setQuickSettingsSummary("providers", selected?.label || providerSelect.value);
@@ -3282,14 +3310,15 @@ async function render() {
     skillSec.append(buildGenreChips(() => skillGenreFilter, value => { skillGenreFilter = value; }));
     skillSec.append(buildSkillCategoryList(data.tools, v));
   }
-  panels.tools.append(skillSec);
+  // MCPとローカルAPIは「AIが使える道具を外部とつなぐ」設定なので、スキルと同じタブに置く。
+  panels.tools.append(skillSec, mcpSec, apiSec);
 
   // --- スキル活用ガイド（読み取り専用の一覧）。設定とは分離して別タブに置く ---
   const skillGuideSec = section("スキル活用ガイド");
   if (!data.tools.length) {
     skillGuideSec.append(el("p", { className: "hint", textContent: "登録されているスキルはありません。" }));
   } else {
-    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。ジャンルで絞り込めます。設定（APIキー等）は「スキル」タブで行います。" }));
+    skillGuideSec.append(el("p", { className: "hint", textContent: "各スキルの「できること」と頼み方の例の一覧です。ジャンルで絞り込めます。設定（APIキー等）は「スキル・連携」タブで行います。" }));
     skillGuideSec.append(buildGenreChips(() => guideGenreFilter, value => { guideGenreFilter = value; }));
     skillGuideSec.append(buildSkillGuide(data.tools));
   }
@@ -3733,13 +3762,9 @@ async function render() {
   multiAiSec.append(multiAiSettingsField(v));
   panels.providers.append(el("p", {
     className: "settings-intro",
-    textContent: "AIの種類と外部連携をまとめています。普段は選択中のAIだけ確認すれば十分です。",
+    textContent: "会話に使うAIとモデルをまとめています。普段は「使うAI」だけ確認すれば十分です。外部ツール連携（MCP）とローカルAPIは「スキル・連携」にあります。",
   }));
-  panels.providers.append(multiAiSec);
-  panels.providers.append(provSec);
-  panels.providers.append(buildDownloadedModelsSection());
-  panels.providers.append(apiSec);
-  panels.providers.append(mcpSec);
+  panels.providers.append(aiSec, provSec, multiAiSec, buildDownloadedModelsSection());
 
   // スキルごとの設定は上のスキル一覧（クリックで展開）に統合済み。
   // --- 許可（ファイル/実行）: 全スキル共通のファイル/ディレクトリ許可ルール ---
@@ -3749,7 +3774,7 @@ async function render() {
   permSec.append(el("p", { className: "field-note", textContent: "ここは相対パスの基準にもなります。空ならホームフォルダを使います。" }));
   permSec.append(field("PICOAGENT_ALLOWED_PATHS", "ほかにも許可するフォルダ（改行または ; 区切り）", "textarea", v.PICOAGENT_ALLOWED_PATHS ?? "", ""));
   permSec.append(field("PICOAGENT_DENIED_PATHS", "拒否パス（改行または ; 区切り。この配下は常に拒否）", "textarea", v.PICOAGENT_DENIED_PATHS ?? "", ""));
-  permSec.append(el("p", { className: "hint", textContent: "コマンド実行（run_command）と自力実行（code_runner）の有効化は「スキル」タブの各スキルカードで切り替えます。既定はどちらも無効です。" }));
+  permSec.append(el("p", { className: "hint", textContent: "コマンド実行（run_command）と自力実行（code_runner）の有効化は「スキル・連携」タブの各スキルカードで切り替えます。既定はどちらも無効です。" }));
   panels.permissions.append(permSec);
 
   panels.diagnostics.append(buildProductInfoSection(), buildDiagnosticsSection());

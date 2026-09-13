@@ -52,7 +52,7 @@ fn ensure_api_key(cfg: &Config) -> anyhow::Result<()> {
     let official = is_official_origin(&url);
     if official && api_key(cfg).trim().is_empty() {
         anyhow::bail!(
-            "OpenAI API キーが未設定です（設定画面の「AIモデル・連携」→ OpenAI で入力してください）"
+            "OpenAI API キーが未設定です（設定画面の「AIモデル」→ OpenAI で入力してください）"
         );
     }
     Ok(())

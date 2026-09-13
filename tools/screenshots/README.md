@@ -29,7 +29,7 @@ npm i -g playwright && npx playwright install chromium
 
 # 配信物（ui-dist/）を作ってから撮る。新しいワークツリーやclone直後は
 # キャラクター資材が ui/assets/characters/ に無く、設定画面の一覧描画が途中で
-# 失敗する（「スキル」タブのカードが見つからない等、原因の分かりにくい失敗になる）。
+# 失敗する（「スキル・連携」タブのカードが見つからない等、原因の分かりにくい失敗になる）。
 cargo xtask sync-characters
 cargo xtask build-ui
 

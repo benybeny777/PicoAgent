@@ -794,7 +794,7 @@ pub async fn ensure_and_start(app: AppHandle) {
             terminate_managed_child(&app);
             set_status(
                 &app,
-                json!({ "phase": "error", "message": "ローカルAIを利用できません。設定の「AIモデル・連携」から使うAIを選び直してください" }),
+                json!({ "phase": "error", "message": "ローカルAIを利用できません。設定の「AIモデル」から使うAIを選び直してください" }),
             );
             return;
         }
