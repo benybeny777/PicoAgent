@@ -3746,8 +3746,15 @@ async function flushPendingNotice() {
   await showAssistantNotice(line, { enqueue: false });
 }
 
+// 実行中のタスク一覧。状態とタイマーは PicoTaskRun が持ち、ここは表示先と停止操作だけを渡す。
+const taskRun = globalThis.PicoTaskRun.createController({
+  container: document.getElementById("taskRun"),
+  onCancel: button => requestAgentCancellation(button),
+  onVisibilityChange: visible => bubble.classList.toggle("task-run-visible", visible),
+});
+
 bubble.addEventListener("click", event => {
-  if (event.target.closest("button,a,textarea,.reply-actions")) return;
+  if (event.target.closest("button,a,textarea,.reply-actions,.task-run")) return;
   // テキスト選択中（コピー操作）はフキダシを入力欄へ切り替えない。
   if (String(window.getSelection?.() ?? "").trim()) return;
   openComposer();
@@ -4389,6 +4396,7 @@ composer.addEventListener("submit", async event => {
   addHistory("user", text);
   setThinkingUi(true);
   upsertJob(jobId, { title: text || "添付ファイルの処理", body: "考え中…", status: "running", prompt: text, at: new Date().toISOString() });
+  taskRun.start();
 
   // スーパーエージェントモードの進捗（計画→実行）をステータス行に表示する。
   try {
@@ -4400,6 +4408,7 @@ composer.addEventListener("submit", async event => {
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
           setThinkingUi(true, status.textContent);
           upsertJob(jobId, { body: status.textContent, status: "running" });
+          taskRun.status(progress);
           if (/検索|search|web|ブラウザ/i.test(progress)) setAnimation("searching", true);
           else if (/ツールを実行中|ステップ/.test(progress)) setAnimation("working", true);
           else if (/計画|考え/.test(progress)) setAnimation("thinking", true);
@@ -4420,6 +4429,7 @@ composer.addEventListener("submit", async event => {
         for (const name of tools) jobTools.add(name);
         if (activity.phase === "started") jobDidWork = tools.length > 0;
         if (activity.phase === "completed" && activity.success === false) jobToolFailed = true;
+        taskRun.activity(activity);
       });
     }
   } catch (error) {
@@ -4592,6 +4602,7 @@ composer.addEventListener("submit", async event => {
     busy = false;
     const jobFailed = jobState === "failed";
     const jobCancelled = jobState === "cancelled";
+    taskRun.finish(jobFailed ? "failed" : jobCancelled ? "cancelled" : "completed");
     upsertJob(jobId, {
       body: jobFailed ? "処理に失敗しました。詳細は会話を確認してください。" : jobCancelled ? "処理を中断しました。" : "処理が完了しました。",
       status: jobFailed ? "failed" : jobCancelled ? "cancelled" : "completed",

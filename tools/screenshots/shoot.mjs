@@ -1625,6 +1625,98 @@ async function validateThinkingIndicator() {
   }
 }
 
+// 実行中のタスク一覧（task-run.js）を7形式で検査する。ツールイベントはモックの購読者へ直接届け、
+// 実行中の行・停止ボタン・窓内への収まり・進捗行との重複なし・完了後に閉じることを確かめる。
+async function validateTaskRun() {
+  const output = join(ROOT, "temp", "task-run-qa");
+  mkdirSync(output, { recursive: true });
+  const selectedLayouts = process.env.SHOOT_LAYOUT_IDS
+    ? process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean)
+    : Object.keys(MATRIX_LAYOUTS);
+  const expectedRows = [["計画を立てています", "completed"], ["Web検索", "completed"], ["ローカル画像・動画生成", "running"]];
+  const results = [];
+  for (const layout of selectedLayouts) {
+    const [width, height] = MATRIX_LAYOUTS[layout];
+    const page = await openScene({ characterId: "mugi", layout, width, height, forcePng: true, sendDelayMs: 4000 });
+    try {
+      await submit(page, "猫の画像を作って");
+      await page.waitForSelector("#taskRun:not([hidden])", { timeout: 10000 });
+      await page.waitForFunction(() => (window.__listeners["pet:agent_activity"] || []).length > 0
+        && (window.__listeners["pet:agent_status"] || []).length > 0, null, { timeout: 10000 });
+      await page.evaluate(() => {
+        const emit = (channel, payload) => (window.__listeners[channel] || []).forEach(callback => callback({ payload }));
+        emit("pet:agent_status", "計画を立てています…");
+        emit("pet:agent_activity", { phase: "started", tools: ["web_search", "comfyui_generate"], labels: ["Web検索", "ローカル画像・動画生成"], failedTools: [] });
+        emit("pet:agent_activity", { phase: "completed", tools: ["web_search"], labels: ["Web検索"], failedTools: [] });
+      });
+      // 経過時間の1秒更新が回ることも見る。
+      await page.waitForTimeout(1300);
+      const running = await page.evaluate(() => {
+        const panel = document.getElementById("taskRun");
+        const rect = panel.getBoundingClientRect();
+        const status = document.getElementById("status");
+        return {
+          hidden: panel.hidden,
+          display: getComputedStyle(panel).display,
+          title: panel.querySelector(".task-run-title")?.textContent || "",
+          total: panel.querySelector(".task-run-total")?.textContent || "",
+          rows: [...panel.querySelectorAll(".task-run-row")].map(row => [row.querySelector(".task-run-label")?.textContent || "", row.dataset.state]),
+          cancel: Boolean(panel.querySelector(".task-run-cancel")),
+          rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+          // 停止ボタンは見出しの中に収まり、状態や経過時間の文字に重ならないこと。
+          cancelRect: (() => {
+            const button = panel.querySelector(".task-run-cancel")?.getBoundingClientRect();
+            const head = panel.querySelector(".task-run-head")?.getBoundingClientRect();
+            return button && head ? { inHead: button.left >= head.left - 1 && button.right <= head.right + 1 && button.top >= head.top - 1 && button.bottom <= head.bottom + 1 } : null;
+          })(),
+          viewport: { width: innerWidth, height: innerHeight },
+          statusBusyVisible: status.classList.contains("busy") && getComputedStyle(status).display !== "none",
+          duplicateCancelVisible: (() => {
+            const button = document.getElementById("cancelSend");
+            return Boolean(button && !button.hidden && getComputedStyle(button).display !== "none");
+          })(),
+        };
+      });
+      const inside = running.rect.width > 0 && running.rect.height > 0 && running.rect.left >= 0 && running.rect.top >= 0
+        && running.rect.right <= running.viewport.width + 1 && running.rect.bottom <= running.viewport.height + 1;
+      if (running.hidden || running.display === "none" || running.title !== "実行中のタスク" || running.total === "経過 0秒"
+          || JSON.stringify(running.rows) !== JSON.stringify(expectedRows) || !running.cancel || !running.cancelRect?.inHead
+          || !inside || running.statusBusyVisible || running.duplicateCancelVisible) {
+        // 何がどう崩れたかを後から見られるよう、止める前にその画面を残す。
+        await page.screenshot({ path: join(output, `${layout}-running-failed.png`) });
+        throw new Error(`${layout}: 実行中タスクの表示が不正です: ${JSON.stringify(running)}`);
+      }
+      await page.screenshot({ path: join(output, `${layout}-running.png`) });
+      // 回答の文字送りと読み上げが終わってから送信処理の後始末が走るため、長めに待つ。
+      try {
+        await page.waitForFunction(() => document.querySelector("#taskRun .task-run-title")?.textContent === "タスク完了", null, { timeout: 45000 });
+      } catch (error) {
+        const state = await page.evaluate(() => ({
+          title: document.querySelector("#taskRun .task-run-title")?.textContent || "",
+          hidden: document.getElementById("taskRun")?.hidden,
+          statusBusy: document.getElementById("status")?.classList.contains("busy"),
+          reply: (document.getElementById("reply")?.textContent || "").slice(0, 80),
+        }));
+        throw new Error(`${layout}: 完了表示へ変わりませんでした: ${JSON.stringify(state)} (${error.message})`);
+      }
+      const finished = await page.evaluate(() => ({
+        rows: [...document.querySelectorAll("#taskRun .task-run-row")].map(row => row.dataset.state),
+        cancel: Boolean(document.querySelector("#taskRun .task-run-cancel")),
+      }));
+      if (finished.cancel || finished.rows.some(state => state === "running" || state === "waiting")) {
+        throw new Error(`${layout}: 完了後に実行中の行や停止ボタンが残りました: ${JSON.stringify(finished)}`);
+      }
+      await page.screenshot({ path: join(output, `${layout}-finished.png`) });
+      await page.waitForFunction(() => document.getElementById("taskRun").hidden, null, { timeout: 10000 });
+      results.push({ layout, running, finished });
+    } finally {
+      await page.close();
+    }
+  }
+  await writeFile(join(output, "result.json"), `${JSON.stringify(results, null, 2)}\n`);
+  return output;
+}
+
 // ---------------------------------------------------------------- 録画と書き出し
 
 const FFMPEG = process.env.SHOOT_FFMPEG || "ffmpeg";
@@ -2231,6 +2323,15 @@ if (process.env.SHOOT_STARTUP_FAILURES) {
   await browser.close();
   server.close();
   console.log(`起動フォールバック検査完了: ${output} / ${JSON.stringify(state)}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_TASK_RUN) {
+  const output = await validateTaskRun();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`実行中タスク表示検査完了: ${output}`);
   process.exit(0);
 }
 

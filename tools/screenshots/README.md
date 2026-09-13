@@ -65,6 +65,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×7形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能とLive2D取得案内を `temp/onboarding-check/` へ撮影する |
+| `SHOOT_TASK_RUN` | `1` なら7形式で送信中の「実行中のタスク」一覧を検査する。ツールの開始・完了イベントを模擬し、行の状態、停止ボタン、窓内への収まり、進捗行と重ならないこと、完了表示と5秒後に閉じることを `temp/task-run-qa/` へ撮影・記録する。`SHOOT_LAYOUT_IDS` で形式を絞れる |
 
 引数に画像名を並べると、その絵だけを撮り直せます。全件撮影は時間がかかるため、普段はこちらを使います。
 
