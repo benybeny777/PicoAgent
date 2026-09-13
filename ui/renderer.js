@@ -3754,6 +3754,21 @@ bubble.addEventListener("dblclick", event => {
   if (event.target.closest("button,a,textarea,.reply-actions,.bubble-resize")) return;
   toggleBubbleFullscreen();
 });
+// 字幕（回答欄）は選択させない。CSSの禁止をすり抜ける選択（ダブルクリック・全選択など）も直ちに解除する。
+reply.addEventListener("selectstart", event => event.preventDefault());
+reply.addEventListener("mousedown", event => {
+  if (event.detail > 1) event.preventDefault();
+});
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    if (selection.getRangeAt(index).intersectsNode(reply)) {
+      selection.removeAllRanges();
+      return;
+    }
+  }
+});
 document.addEventListener("contextmenu", event => {
   if (event.target instanceof Element && event.target.closest("textarea,a,.reply,.history-log")) return;
   event.preventDefault();
