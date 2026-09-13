@@ -95,6 +95,14 @@ test("再読込のたびに停止監視を張り直し準備中でも窓を呼�
   // 張り直さないと、2回目以降の停止で窓も案内ページも出ず戻す手段が無くなる。
   assert.match(commands, /pub fn pet_frontend_ready[\s\S]*?boot_screen::mark_started/);
   assert.match(bootScreen, /pub fn mark_started[\s\S]*?finished\.store\(false[\s\S]*?shown\.store\(false[\s\S]*?watch\(app\.clone\(\)\)/);
+  // 前回の完了状態は再読込イベントより先に消す。開始通知の中だけで戻すと、
+  // JavaScriptを読み込めない故障時に白い窓を呼び戻せてしまい、停止監視も始まらない。
+  const restart = commands.slice(commands.indexOf("pub fn restart_app"), commands.indexOf("pub fn engine_status"));
+  assert.ok(restart.indexOf("boot_screen::mark_reloading") < restart.indexOf('win.emit("pet:reload"'),
+    "再読込前に起動状態を未開始へ戻してください");
+  assert.ok(restart.indexOf("layout::restart_boot") < restart.indexOf('win.emit("pet:reload"'),
+    "再読込前に未完成のメイン窓を非表示へ戻してください");
+  assert.match(bootScreen, /pub fn mark_reloading[\s\S]*?started\.store\(false[\s\S]*?finished\.store\(false[\s\S]*?last_progress[\s\S]*?None[\s\S]*?watch\(app\.clone\(\)\)/);
   // 古い監視が新しい起動を停止扱いにしないよう世代で分ける。
   assert.match(bootScreen, /generation: AtomicU64/);
   assert.match(bootScreen, /fn outdated\(app: &AppHandle, generation: u64\)/);

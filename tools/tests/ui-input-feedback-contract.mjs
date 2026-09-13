@@ -206,7 +206,8 @@ test("停止要求のあと応答が返らなくても画面の待機を解除�
   // 復帰する手段が無くなる。一定時間で画面側だけ中断扱いにして戻す。
   assert.match(renderer, /const CANCEL_RELEASE_MS = \d+/);
   const cancel = renderer.match(/async function requestAgentCancellation\(button\) \{[\s\S]*?\n\}/)?.[0] || "";
-  assert.match(cancel, /await window\.picoagent\.cancel\(\);[\s\S]*?cancelReleaseTimer = setTimeout\(/);
+  assert.ok(cancel.indexOf("cancelReleaseTimer = setTimeout(") < cancel.indexOf("await window.picoagent.cancel()"),
+    "cancel IPC自体が返らない場合にも備え、待機解除の見張りを先に開始してください");
   assert.match(cancel, /releasePendingSend\(\{ stale: true, releasedByCancel: true \}\)/);
   // 送信は打ち切りの合図と競走させ、既存の「中断扱い」経路（stale）で後始末する。
   assert.match(renderer, /const releasedByCancel = new Promise\(resolve => \{ releasePendingSend = resolve; \}\)/);
@@ -242,6 +243,15 @@ test("準備中・失敗の理由は入力や読み上げ操作で消さない",
   const apply = renderer.match(/function applyEngineStatus\(s\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(apply, /localEngineStatusText = "";/);
   assert.match(apply, /準備に失敗: \$\{s\.message \|\| "不明なエラー"\}`\);\s*\n\s*localEngineStatusText = status\.textContent;/);
+});
+
+test("一時表示を消すすべての経路でローカルAIの失敗理由へ戻す", () => {
+  const helperStart = renderer.indexOf("function clearTransientStatus()");
+  const helperEnd = renderer.indexOf("\n}", helperStart) + 2;
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const withoutHelper = renderer.slice(0, helperStart) + renderer.slice(helperEnd);
+  assert.doesNotMatch(withoutHelper, /status\.textContent\s*=\s*""/,
+    "状態表示を空にせず clearTransientStatus() で失敗理由へ戻してください");
 });
 
 test("フキダシの自動配置は配置基準の枠内へ収める", () => {
