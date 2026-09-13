@@ -1276,3 +1276,42 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   [data-layout="workspace"] .composer { grid-column:1; grid-row:5; }
   [data-layout="workspace"] .status { grid-column:1; grid-row:6; }
 }
+
+/* ── 実行中のタスク（task-run.js）─────────────────────────────────────────
+   送信中だけステータス行の位置へ出す。同じ内容の進捗文言（.status.busy）は表示中だけ隠す。 */
+.task-run { flex:0 0 auto; margin-top:6px; padding:7px 9px; border:1px solid var(--panel-border); border-radius:10px; background:var(--panel-bg); color:var(--ink); font-size:11px; }
+.task-run[hidden] { display:none; }
+.task-run-head { display:flex; align-items:center; gap:6px; min-height:22px; }
+.task-run-title { font-weight:800; }
+.task-run-total { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+.task-run-cancel { height:22px; padding:0 9px; font-size:10.5px; }
+.task-run-list { display:grid; gap:3px; max-height:112px; margin:5px 0 0; padding:0; overflow:auto; list-style:none; }
+.task-run-row { display:grid; grid-template-columns:10px minmax(0,1fr) auto auto; align-items:center; gap:6px; }
+.task-run-label { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.task-run-state,.task-run-time { color:var(--muted); font-variant-numeric:tabular-nums; }
+.task-run-mark { width:9px; height:9px; box-sizing:border-box; border-radius:50%; background:var(--muted); }
+.task-run-row[data-state="running"] .task-run-mark { background:transparent; border:2px solid var(--accent); border-top-color:transparent; animation:status-spin .8s linear infinite; }
+.task-run-row[data-state="completed"] .task-run-mark { background:#3f9b6b; }
+.task-run-row[data-state="failed"] .task-run-mark { background:#b43d57; }
+.task-run-row[data-state="failed"] .task-run-state { color:#b43d57; font-weight:800; }
+.task-run-row[data-state="waiting"] .task-run-mark,
+.task-run-row[data-state="cancelled"] .task-run-mark { background:#c99a3c; }
+.bubble.task-run-visible .status.busy { display:none; }
+[data-layout="bar"] .task-run { order:2; }
+[data-layout="workspace"] .task-run { grid-column:2; grid-row:4; margin:0; }
+[data-layout="widget"] .task-run { order:5; }
+[data-layout="stream"] .task-run {
+  position:absolute; z-index:6; left:24px; bottom:clamp(122px,20vh,184px);
+  width:min(360px,calc(100% - var(--stream-chat-width) - 48px)); margin:0;
+  box-shadow:0 4px 14px rgba(70,45,58,.16);
+}
+@media (max-width:820px) {
+  [data-layout="workspace"] .task-run { grid-column:1; grid-row:6; }
+}
+@media (max-height:280px) {
+  .pet-app[data-layout] .task-run { margin-top:3px; padding:4px 7px; font-size:9.5px; }
+  .pet-app[data-layout] .task-run-list { max-height:36px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .task-run-row[data-state="running"] .task-run-mark { animation:none; border-top-color:var(--accent); }
+}

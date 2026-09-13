@@ -321,6 +321,15 @@ pub fn capability_summary() -> String {
     labels.join("、")
 }
 
+/// ツール名から画面表示用のラベルを返す。未登録（外部MCPなど）は `mcp__<サーバ>__<ツール>` のツール部分、
+/// それも無ければ名前をそのまま返す。
+pub fn label_of(name: &str) -> String {
+    index()
+        .get(name)
+        .map(|&idx| all()[idx].label().to_string())
+        .unwrap_or_else(|| name.rsplit("__").next().unwrap_or(name).to_string())
+}
+
 fn index() -> &'static HashMap<&'static str, usize> {
     TOOL_INDEX.get_or_init(|| {
         all()
@@ -770,6 +779,17 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn 実行中タスクには画面用のラベルを渡す() {
+        assert_eq!(super::label_of("web_search"), "Web検索");
+        assert_eq!(
+            super::label_of("comfyui_generate"),
+            "ローカル画像・動画生成"
+        );
+        assert_eq!(super::label_of("mcp__files__read_text"), "read_text");
+        assert_eq!(super::label_of("unknown_tool"), "unknown_tool");
     }
 
     #[test]

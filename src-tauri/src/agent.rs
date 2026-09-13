@@ -89,6 +89,8 @@ fn emit_activity(
         serde_json::json!({
             "phase": phase,
             "tools": tools,
+            // 実行中タスクの表示用。内部のツール名ではなく利用者が読める名前を同じ順で並べる。
+            "labels": tools.iter().map(|name| crate::tools::label_of(name)).collect::<Vec<_>>(),
             "failedTools": failed_tools,
             "success": phase == "completed" && failed_tools.is_empty(),
         }),
