@@ -1325,6 +1325,10 @@ function animate(now) {
     }
     return true;
   }
+  // 1枚絵（チャット・バー形式でメッシュリグを止めたときの preview.png など）は送り先が無い。
+  // 表示できた時点でループを休ませ、変化の無い画面のために毎フレーム予約し続けない。
+  // 状態が変われば setAnimation() や applyLayout() が wakeAnimationLoop() で再開する。
+  if (animationFrameCount(animation) <= 1) return springActive;
   if (now - lastFrameAt >= frameDuration(animation, frame)) {
     const nextFrame = (frame + 1) % animationFrameCount(animation);
     // 壊れたフレームは表示できないが、送りは進める（前の完成フレームを出したまま先へ抜ける）。

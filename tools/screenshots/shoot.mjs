@@ -935,7 +935,14 @@ async function validateInteractionMatrix() {
           }));
           throw new Error(`${target.id}/${layout}: 起動完了待ちがタイムアウトしました ${JSON.stringify(bootState)}`, { cause: error });
         }
-        if (target.meshRig) {
+        if (target.meshRig && (layout === "chat" || layout === "bar")) {
+          // チャット・バーは仕様上メッシュリグを描画しない（meshRigCanRender）。準備済みで止まっていることを待つ。
+          await page.waitForFunction(
+            () => typeof meshRigController !== "undefined" && meshRigController && !meshRigActive,
+            null,
+            { timeout: 40000 },
+          );
+        } else if (target.meshRig) {
           try {
             await page.waitForFunction(() => typeof meshRigActive !== "undefined" && meshRigActive, null, { timeout: 40000 });
           } catch (error) {
@@ -1006,6 +1013,7 @@ async function validateInteractionMatrix() {
             betaPointerEvents: getComputedStyle(document.querySelector(".beta-badge")).pointerEvents,
             bubble: visibleRect(document.getElementById("bubble")),
             character: visibleRect(document.getElementById("character")),
+            characterDisplay: getComputedStyle(document.getElementById("character")).display,
             composer: visibleRect(document.getElementById("composer")),
             input: visibleRect(document.getElementById("input")),
             buttons: [...document.querySelectorAll("#composer button")]
@@ -1025,7 +1033,10 @@ async function validateInteractionMatrix() {
         if (!intersects(state.beta) || state.betaPointerEvents !== "none") {
           throw new Error(`${target.id}/${layout}: ALPHA表示が画面外または操作を遮っています ${JSON.stringify(state.beta)}`);
         }
-        if (!intersects(state.bubble) || !intersects(state.character) || !intersects(state.composer)) {
+        // バーは高さが足りないとき CSS がキャラのアイコンを意図して畳む（SPEC: 最後に畳むのはキャラクターアイコン）。
+        // 畳まれた（display:none）場合だけは合格にし、画面外へはみ出して消えた場合は失敗のままにする。
+        const characterFolded = layout === "bar" && state.characterDisplay === "none";
+        if (!intersects(state.bubble) || !(intersects(state.character) || characterFolded) || !intersects(state.composer)) {
           throw new Error(`${target.id}/${layout}: 縮小後に主要UIが画面から消えました ${JSON.stringify(state)}`);
         }
         if (!inside(state.input)) {
@@ -1218,7 +1229,8 @@ async function validateInteractionMatrix() {
       const petPending = animationLoop.pending();
       fallAsleep();
       await waitFrames();
-      const sleep = { napping, pending: animationLoop.pending() };
+      // 寝姿（boot.sleeping）を持つキャラだけが居眠り表示へ入る（SPEC: 寝姿は居眠り表示にだけ使う）。
+      const sleep = { napping, pending: animationLoop.pending(), hasSleepPose: Boolean(characterManifest?.boot?.sleeping) };
       markActivity();
       await waitFrames();
       const wake = { napping, pending: animationLoop.pending(), rigActive };
@@ -1234,10 +1246,10 @@ async function validateInteractionMatrix() {
       return { chatPending, petPending, sleep, wake, hiddenPending, visiblePending };
     });
     if (loopTransitions.chatPending || loopTransitions.petPending
-      || loopTransitions.sleep.napping || loopTransitions.sleep.pending
+      || loopTransitions.sleep.napping !== loopTransitions.sleep.hasSleepPose || loopTransitions.sleep.pending
       || loopTransitions.wake.napping || loopTransitions.wake.pending || !loopTransitions.wake.rigActive
       || loopTransitions.hiddenPending || !loopTransitions.visiblePending) {
-      throw new Error(`旧寝姿のないメッシュリグで状態変化後の再開・休止が不正です: ${JSON.stringify(loopTransitions)}`);
+      throw new Error(`メッシュリグで状態変化後の再開・休止が不正です（寝姿があるときだけ居眠りし、休止中は予約0）: ${JSON.stringify(loopTransitions)}`);
     }
     await gazePage.emulateMedia({ reducedMotion: "reduce" });
     await gazePage.waitForFunction(() => reduceMotion && !animationLoop.pending());
