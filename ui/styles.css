@@ -377,6 +377,8 @@ button:disabled { opacity:.48; cursor:default; }
 .reply-actions:focus-within { opacity:1; }
 .reply-actions button { position:static; display:flex; flex:0 1 auto; align-items:center; justify-content:center; width:auto; min-width:0; height:36px; padding:0 clamp(5px,2.4cqi,11px); border-radius:8px; background:rgba(242,126,145,.92); font-size:clamp(9px,2.7cqi,12px); line-height:1; white-space:nowrap; overflow:hidden; }
 .reply-actions button:hover { filter:brightness(1.04); }
+/* 読み上げ中だけ出す「停止」などは hidden で隠す。上の display:flex が既定の非表示を打ち消すため明示する。 */
+.reply-actions button[hidden] { display:none; }
 .reply-actions #noticeToggle { position:relative; inset:auto; background:#64a98a; }
 .reply-actions #noticeToggle::after { content:attr(data-count); position:absolute; right:-5px; top:-6px; min-width:14px; height:14px; padding:0 3px; border-radius:999px; background:#c0627a; color:#fff; font-size:9px; line-height:14px; text-align:center; box-shadow:0 1px 4px rgba(42,31,46,.22); }
 .reply-actions #noticeToggle[data-count=""]::after,

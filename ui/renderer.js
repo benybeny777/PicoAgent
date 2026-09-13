@@ -3148,6 +3148,13 @@ let currentVoice = null;
 let voiceSession = 0; // 文分割読み上げ（パイプライン）の世代。変わると進行中の読み上げを打ち切る。
 function setVoiceCancelVisible(visible) {
   if (cancelVoiceButton) cancelVoiceButton.hidden = !visible;
+  // 回答操作の「読上」と「停止」は同じ枠で入れ替える。読み上げていないときの「停止」は
+  // 押しても何も起きず、狭い表示形式では他のボタンの文字を縮めるだけだった。
+  // 押したボタンが隠れてキーボードのフォーカスを失わないよう、入れ替わった側へ移す。
+  const handOff = document.activeElement === (visible ? replayReplyButton : stopVoiceButton);
+  if (stopVoiceButton) stopVoiceButton.hidden = !visible;
+  if (replayReplyButton) replayReplyButton.hidden = visible;
+  if (handOff) (visible ? stopVoiceButton : replayReplyButton)?.focus();
 }
 function finishVoice(toIdle = true, expectedVoice = currentVoice) {
   if (!expectedVoice) return;
