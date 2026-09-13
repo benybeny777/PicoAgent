@@ -154,4 +154,12 @@ test("送信処理と画面が実行中タスクへ状態を渡す", () => {
   // フキダシ内のボタンは既定で絶対配置されるため、見出しに留めるには static の明示が要る。
   assert.match(styles, /\.task-run-cancel \{ position:static;/);
   assert.match(styles, /\.bubble\.task-run-visible \.cancel-send \{ display:none; \}/);
+  // 会話履歴を出す形式では会話の末尾へ置き、キャラの描画面へ浮かせない。
+  assert.match(renderer, /function placeTaskRun\(stickToBottom = false\)/);
+  // 履歴の描き直しで文書から外れた一覧は ID で探せない。最初に見つけた要素を持ち続けること。
+  assert.match(renderer, /const panel = \(placeTaskRun\.panel \|\|= document\.getElementById\("taskRun"\)\);/);
+  assert.match(renderer, /renderHistoryRows\(\);\n  placeTaskRun\(stickToBottom\);/);
+  assert.match(renderer, /onVisibilityChange: visible => \{[\s\S]*?placeTaskRun\(visible\);/);
+  assert.match(styles, /\[data-layout\] \.history-log > \.task-run \{ position:static;/);
+  assert.match(styles, /\.bubble\.task-run-visible \.history-thinking \{ display:none; \}/);
 });

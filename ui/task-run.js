@@ -208,6 +208,7 @@
         list.append(item);
       }
       container.replaceChildren(head, list);
+      if (options.onRender) options.onRender();
     }
 
     // 1秒ごとの更新は時間の文字だけを書き換え、停止ボタンを作り直さない（押している途中で消えないように）。

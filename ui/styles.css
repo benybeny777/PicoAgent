@@ -1325,3 +1325,9 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 .bubble.task-run-visible .cancel-send { display:none; }
 /* バー形式は回答欄が数ピクセルまで潰れ、考え中の表示が切れて見える。一覧が同じ内容を出すあいだは隠す。 */
 [data-layout="bar"] .bubble.task-run-visible .reply.reply-thinking { display:none; }
+/* 会話履歴を出す形式（チャット・作業・配信）では、実行中タスクを会話の末尾へ流し込む。キャラのいる画面には重ねない。
+   同じ内容の「考え中」の行は、一覧を出しているあいだ隠す。 */
+[data-layout] .history-log > .task-run { position:static; width:auto; max-width:100%; margin:6px 0 4px; box-shadow:none; }
+[data-layout="stream"] .history-log > .task-run,
+[data-layout="chat"] .history-log > .task-run { font-size:13px; }
+.bubble.task-run-visible .history-thinking { display:none; }

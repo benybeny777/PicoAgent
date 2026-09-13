@@ -342,6 +342,8 @@ async function openScene({
   bootHoldMs = 0, sendDelayMs = 80, waitForReady = true, forcePng = false, onboardingDone = true, reducedMotion = false,
   gazeTrackingEnabled = false, betaBuild = true, deviceScaleFactor = 1, stallCharacterId = "",
   engineReadyDelayMs = 0, voiceReadyDelayMs = 0, speechDelayMs = 0,
+  // 読み込み前に差し込む追加の検査用スクリプト（起動中の DOM 変化を追う用途）。
+  initScript = "",
 } = {}) {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor });
   if (reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -350,6 +352,7 @@ async function openScene({
   await page.clock.install();
   await page.clock.resume();
   await page.addInitScript(mock({ theme, history, reply, characterId, layout, streamBackground, characterFraming, live2dSdkOverrides, initDelayMs, bootHoldMs, sendDelayMs, onboardingDone, voice, gazeTrackingEnabled, betaBuild, engineReadyDelayMs, voiceReadyDelayMs, speechDelayMs }));
+  if (initScript) await page.addInitScript(initScript);
   if (forcePng) {
     await page.route(`**/assets/characters/${characterId}/character.json*`, async route => {
       const response = await route.fetch();
@@ -1637,10 +1640,64 @@ async function validateTaskRun() {
   const results = [];
   for (const layout of selectedLayouts) {
     const [width, height] = MATRIX_LAYOUTS[layout];
-    const page = await openScene({ characterId: "mugi", layout, width, height, forcePng: true, sendDelayMs: 4000 });
+    // 一覧の要素が文書から外れた瞬間の呼び出し元を、起動中から記録する（出ない不具合の原因を特定するため）。
+    const traceScript = `(() => {
+      window.__taskRunTrace = [];
+      const panel = () => (window.__taskRunEl ||= document.getElementById("taskRun"));
+      const attached = () => Boolean(panel()) && document.contains(panel());
+      const record = (name, self) => window.__taskRunTrace.push(name + " on " + (self.id || self.className || self.nodeName) + ": " + new Error().stack);
+      const watch = (target, name) => {
+        const original = target[name];
+        if (typeof original !== "function") return;
+        target[name] = function (...args) {
+          const before = attached();
+          const result = original.apply(this, args);
+          if (before && !attached()) record(name, this);
+          return result;
+        };
+      };
+      for (const name of ["removeChild", "insertBefore", "appendChild", "replaceChild"]) watch(Node.prototype, name);
+      for (const name of ["replaceChildren", "remove", "append", "prepend", "after", "before", "replaceWith"]) watch(Element.prototype, name);
+      for (const [proto, prop] of [[Node.prototype, "textContent"], [Element.prototype, "innerHTML"]]) {
+        const descriptor = Object.getOwnPropertyDescriptor(proto, prop);
+        Object.defineProperty(proto, prop, { ...descriptor, set(value) {
+          const before = attached();
+          descriptor.set.call(this, value);
+          if (before && !attached()) record(prop, this);
+        } });
+      }
+    })();`;
+    const page = await openScene({ characterId: "mugi", layout, width, height, forcePng: true, sendDelayMs: 4000, initScript: traceScript });
+    const consoleErrors = [];
+    page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
     try {
       await submit(page, "猫の画像を作って");
-      await page.waitForSelector("#taskRun:not([hidden])", { timeout: 10000 });
+      try {
+        await page.waitForSelector("#taskRun:not([hidden])", { timeout: 10000 });
+      } catch (error) {
+        // 一覧が出ない原因を後から追えるよう、状態と画面を残してから止める。
+        const state = await page.evaluate(() => {
+          const panel = document.getElementById("taskRun");
+          const rect = panel?.getBoundingClientRect();
+          return {
+            exists: Boolean(panel),
+            hidden: panel?.hidden,
+            parent: panel?.parentElement ? `${panel.parentElement.tagName}#${panel.parentElement.id}.${panel.parentElement.className}` : null,
+            display: panel ? getComputedStyle(panel).display : null,
+            size: rect ? [rect.width, rect.height] : null,
+            childCount: panel?.childElementCount,
+            statusBusy: document.getElementById("status")?.classList.contains("busy"),
+            layout: document.getElementById("petApp")?.dataset.layout,
+            booting: document.getElementById("petApp")?.classList.contains("is-booting"),
+            bubbleClass: document.getElementById("bubble")?.className,
+            homeParent: document.getElementById("taskRunHome")?.parentElement?.id || null,
+            taskRunCount: document.querySelectorAll(".task-run").length,
+            trace: (window.__taskRunTrace || []).slice(0, 3),
+          };
+        });
+        await page.screenshot({ path: join(output, `${layout}-not-shown.png`) });
+        throw new Error(`${layout}: 実行中タスクの一覧が表示されません: ${JSON.stringify({ state, consoleErrors })} (${error.message})`);
+      }
       await page.waitForFunction(() => (window.__listeners["pet:agent_activity"] || []).length > 0
         && (window.__listeners["pet:agent_status"] || []).length > 0, null, { timeout: 10000 });
       await page.evaluate(() => {
@@ -1662,6 +1719,7 @@ async function validateTaskRun() {
           total: panel.querySelector(".task-run-total")?.textContent || "",
           rows: [...panel.querySelectorAll(".task-run-row")].map(row => [row.querySelector(".task-run-label")?.textContent || "", row.dataset.state]),
           cancel: Boolean(panel.querySelector(".task-run-cancel")),
+          inHistory: Boolean(panel.closest(".history-log")),
           rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
           // 停止ボタンは見出しの中に収まり、状態や経過時間の文字に重ならないこと。
           cancelRect: (() => {
@@ -1681,7 +1739,9 @@ async function validateTaskRun() {
         && running.rect.right <= running.viewport.width + 1 && running.rect.bottom <= running.viewport.height + 1;
       if (running.hidden || running.display === "none" || running.title !== "実行中のタスク" || running.total === "経過 0秒"
           || JSON.stringify(running.rows) !== JSON.stringify(expectedRows) || !running.cancel || !running.cancelRect?.inHead
-          || !inside || running.statusBusyVisible || running.duplicateCancelVisible) {
+          || !inside || running.statusBusyVisible || running.duplicateCancelVisible
+          // 会話履歴を出す形式では会話の末尾、それ以外ではフキダシ内に置く。
+          || running.inHistory !== ["chat", "workspace", "stream"].includes(layout)) {
         // 何がどう崩れたかを後から見られるよう、止める前にその画面を残す。
         await page.screenshot({ path: join(output, `${layout}-running-failed.png`) });
         throw new Error(`${layout}: 実行中タスクの表示が不正です: ${JSON.stringify(running)}`);

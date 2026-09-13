@@ -3032,7 +3032,37 @@ function reuseHistoryItem(text) {
   setTemporaryStatus("入力欄へ戻しました");
 }
 
+// 会話履歴を描き直し、実行中タスクの一覧を表示形式に合った置き場所へ戻す。
 function renderHistory() {
+  const stickToBottom = Boolean(historyLog)
+    && historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
+  renderHistoryRows();
+  placeTaskRun(stickToBottom);
+}
+
+// 実行中タスクの一覧は、会話履歴を出す形式では会話の末尾へ置く（キャラの描画面へ重ねない）。
+// それ以外の形式では、元の置き場所（ステータス行の直後）へ戻す。
+function placeTaskRun(stickToBottom = false) {
+  // 会話履歴の描き直し（historyLog.replaceChildren）で一覧は文書から外れる。外れた要素は
+  // getElementById で見つからず元へ戻せなくなるため、最初に見つけた要素を持ち続けて使う。
+  const panel = (placeTaskRun.panel ||= document.getElementById("taskRun"));
+  if (!panel || !historyLog) return;
+  let home = document.getElementById("taskRunHome");
+  if (!home) {
+    home = document.createElement("span");
+    home.id = "taskRunHome";
+    home.hidden = true;
+    panel.before(home);
+  }
+  if (layoutShowsHistory()) {
+    if (panel.parentElement !== historyLog || panel.nextSibling) historyLog.append(panel);
+    if (stickToBottom) historyLog.scrollTop = historyLog.scrollHeight;
+  } else if (home.nextSibling !== panel) {
+    home.after(panel);
+  }
+}
+
+function renderHistoryRows() {
   if (!historyLog) return;
   // 履歴ログが見えていないときに毎メッセージ全件を Markdown 再構築するのは無駄なので
   // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
@@ -3750,7 +3780,14 @@ async function flushPendingNotice() {
 const taskRun = globalThis.PicoTaskRun.createController({
   container: document.getElementById("taskRun"),
   onCancel: button => requestAgentCancellation(button),
-  onVisibilityChange: visible => bubble.classList.toggle("task-run-visible", visible),
+  onVisibilityChange: visible => {
+    bubble.classList.toggle("task-run-visible", visible);
+    placeTaskRun(visible);
+  },
+  // 会話履歴の末尾に出しているときは、手順が増えても最新の行が見えるようにする。
+  onRender: () => {
+    if (placeTaskRun.panel?.parentElement === historyLog) historyLog.scrollTop = historyLog.scrollHeight;
+  },
 });
 
 bubble.addEventListener("click", event => {
