@@ -81,6 +81,7 @@ graph LR
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
 | `<SBV2>\.venv\Scripts\python.exe scripts/select-voice-training-clips.py <quiet-sections\|measure\|select>` | 許諾済み音声からStyle-Bert-VITS2の学習断片を検査し、BGM・定常ノイズ・他人の声・破裂音・文字起こし不一致を除いた別名データセットを作る。工程は`rebuild-picoagent-character`スキル |
+| `<SBV2>\.venv\Scripts\python.exe scripts/clean-voice-training-pauses.py --source <元> --output <新>` | 選別済み学習データの発話の合間だけをsilero-vadで判定して減衰させた別名データセットを作り、合間の音量の前後値を`pause-cleaning.json`へ残す。合成時の間に出るノイズの原因対策。工程は`rebuild-picoagent-character`スキル |
 | `<SBV2>\.venv\Scripts\python.exe scripts/check-synthesized-voice.py <sbv2\|aivis\|files>` | 学習済み音声モデルの合成結果を、クリップ・定常ノイズ・電子音・境界ノイズ・発音・話者類似度で検査する。`aivis`はPicoAgentと同じ`volumeScale`上限0.72で合成する |
 | `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
 | `cargo xtask character-quality` | 通常2Dの制作正本を画素検査する。独自リグ・Live2Dの画質は対象外。`--strict`は既知を含む全指摘を不合格、`--update-baseline`は既存指摘の削減のみ許可 |
