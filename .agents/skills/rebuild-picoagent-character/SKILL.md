@@ -71,7 +71,19 @@ description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2D、MMD�
 
 Windowsで手動確認だけを行う場合は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。独自2.5Dは比較画面、MMDと登録済みLive2Dは保存中の選択を変えない実アプリ確認を選べる。MMDとLive2Dをブラウザだけの代替表示で合格にしない。
 
-Aivis音声をキャラクターへ割り当てる場合は、本人または権利者が明示的に許諾した公式モデル・収録素材だけを使う。配信・動画から切り出した本人音声を再学習へ流用しない。生成サンプルは複数文で聴取し、0dBへ達するクリップ、定常ノイズ、破裂音、声の混入があれば採用を止める。PicoAgentは合成前の`volumeScale`を0.72以下へ制限して約3dBの余裕を取るが、これは入力素材や学習済みモデルのノイズを直す処理ではない。モデル自体の不良は公式の許諾済みモデルまたは清浄な許諾済み収録へ差し替える。
+Aivis音声をキャラクターへ割り当てる場合は、本人または権利者が明示的に許諾した公式モデル・収録素材だけを使う。配信・動画から切り出した音声は、利用者が権利者の許諾を明示した場合だけ再学習へ使う。生成サンプルは複数文で聴取し、0dBへ達するクリップ、定常ノイズ、破裂音、声の混入があれば採用を止める。PicoAgentは合成前の`volumeScale`を0.72以下へ制限して約3dBの余裕を取るが、これは入力素材や学習済みモデルのノイズを直す処理ではない。モデル自体の不良は、次の手順で清浄な素材から作り直す。
+
+### 音声モデルの再作成（Style-Bert-VITS2 JP-Extra）
+
+- 既存の元音声、`Data/<ID>`、`model_assets/<ID>`、導入済みモデルを上書き・削除しない。作業物は`temp/voice-models/`だけに置き、新データセットは`Data/<ID>-clean-v<N>`、中間の切り出しは`Data/<ID>-v<N>-src*`の新しい名前にする。SBV2の`slice.py`は出力先の`raw`が既にあると削除するため、既存名を指定しない。
+- 元音声はBGM・効果音・ゲーム音・ゲストの声がない単独雑談を選ぶ。候補は途中5分だけ取得し、50msフレームの下位10%、1秒以上-45dB未満になる回数、静区間の狭帯域ピーク数で比べる。BGMが常時ある配信は断片選別でもほぼ全件落ちるため、閾値を緩めず素材を替える。
+- `scripts/select-voice-training-clips.py`だけを選別の正規入口にする。SBV2の`.venv`のPythonで、`quiet-sections`（1分区間の抽出。冒頭・末尾5分を除外）→ SBV2の`slice.py --time_suffix`と`transcribe.py` → `measure`（クリップ、DC、発話率、合間のノイズ床とSNR、境界区間、破裂音、話者類似度、Whisper再認識のカナ誤り率）→ `select`の順に実行する。`select`は複数の元データセットをまとめられ、出力先が存在すれば停止する。まず`--dry-run`で除外理由と分布を確認する。
+- 選別の既定値は-23LUFS正規化後のノイズ床-48dB以下、SNR 22dB以上、境界区間-30dB以下、破裂音フレーム3以下、話者類似度0.55以上（2秒窓0.40以上）、カナ誤り率0.25以下、2〜12秒。音響指標だけを直した場合は`measure --reuse-report`でWhisperと話者埋め込みを流用する。
+- 採用断片はDC除去、発話前120ms・後150msまでの切り詰め、10msフェード、-23LUFSかつピーク-1dBFS以下の単純ゲインだけを行う。SBV2の`resample.py`へ`--normalize`を付けない（pyloudnormの正規化でクリップが発生するため）。
+- 学習は`scripts/train-voice-model.ps1`だけを正規入口にし、`-Stage preprocess` → `train` → `export`の順に実行する。SBV2の`config.yml`の`model_name`は学習とスタイル生成の保存先を決める共有状態なので、キャラを替えるたびにこのスクリプトを通す。GUIや個別コマンドで複数キャラを交互に扱わない。
+- 8GB級GPUではbatch 2、fp32（`bf16_run`は使わない）、保存間隔1000 stepにする。JP-Extraの学習スクリプトは勾配累積に対応しない。学習開始後にWindowsの`\GPU Process Memory(pid_<PID>*)\Shared Usage`を確認し、数GB単位で共有メモリへあふれて1 stepが極端に遅い場合は、品質設定を変えず`-Stage train -BatchSize`だけを下げて再開する。止めるときは、コマンドラインで自分が起動した`train_ms_jp_extra.py`とその親の`train-voice-model.ps1`を確認してからプロセスツリーごと終了する。
+- チェックポイントは学習中に`scripts/check-synthesized-voice.py sbv2 --device cpu`で検査し、GPUを学習から奪わない。旧モデルと同じ文で、ノイズ床・SNR・電子音・冒頭末尾・カナ誤り率・話者類似度が改善しなくなった点、または悪化し始めた点（過学習）を採用候補にする。SBV2の直接合成はピークを0dBへ正規化するため、クリップと音量はAivis経由（`aivis`モード、`volumeScale`上限0.72）で判定する。
+- 採用候補は`-Stage export`でONNXとAIVMXへ書き出し、AIVMX内の`model_name`と話者を確認する。書き出し先に同名のAIVMXがあれば停止する。
 
 ```powershell
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
