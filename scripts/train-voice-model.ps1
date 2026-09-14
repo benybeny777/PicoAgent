@@ -135,7 +135,7 @@ print("学習設定を更新しました:", {keys[k]: v for k, v in values.items
         if ($LASTEXITCODE -ne 0) { throw "AIVMX作成が失敗しました（終了コード $LASTEXITCODE）" }
         # AIVMX内のハイパーパラメータとスタイルベクトルが書き出し元と一致することを確認する。
         $verify = @'
-import json, sys, aivmlib, numpy as np
+import io, json, sys, aivmlib, numpy as np
 from pathlib import Path
 aivmx, asset_dir = Path(sys.argv[1]), Path(sys.argv[2])
 with aivmx.open("rb") as f:
@@ -144,9 +144,12 @@ config = json.loads((asset_dir / "config.json").read_text(encoding="utf-8"))
 if meta.hyper_parameters.model_name != config["model_name"]:
     raise SystemExit(f"model_nameが一致しません: {meta.hyper_parameters.model_name} != {config['model_name']}")
 style = np.load(asset_dir / "style_vectors.npy")
-embedded = np.frombuffer(meta.style_vectors, dtype=np.float32) if isinstance(meta.style_vectors, (bytes, bytearray)) else None
-if embedded is not None and embedded.size != style.size:
-    raise SystemExit("スタイルベクトルの要素数が一致しません")
+# AIVMXにはヘッダー付きのnpyバイト列として埋め込まれるため、np.loadで復元して値まで比べる。
+if not isinstance(meta.style_vectors, (bytes, bytearray)):
+    raise SystemExit("AIVMXにスタイルベクトルが埋め込まれていません")
+embedded = np.load(io.BytesIO(meta.style_vectors))
+if embedded.shape != style.shape or not np.allclose(embedded, style):
+    raise SystemExit(f"スタイルベクトルが一致しません: {embedded.shape} != {style.shape}")
 print(json.dumps({"model_uuid": str(meta.manifest.uuid), "name": meta.manifest.name,
                   "speakers": [{"uuid": str(s.uuid), "name": s.name, "styles": [st.name for st in s.styles]} for s in meta.manifest.speakers]},
                  ensure_ascii=False))
