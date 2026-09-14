@@ -605,6 +605,10 @@ function field(key, label, type, value, placeholder) {
     input.step = "1";
   }
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
+  // 天気の地点は一覧から選べるようにする（自由入力も残す）。
+  if (key === "PICOAGENT_WEATHER_DEFAULT_LOCATION") {
+    input.setAttribute("list", "weatherLocationOptions");
+  }
   return registerInput(key, input, markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder));
 }
 
