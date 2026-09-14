@@ -5,7 +5,14 @@
       "Read", "Edit", "Write", "Glob", "Grep",
       "Bash(cargo *)", "Bash(rustc *)",
       "Bash(npm *)", "Bash(npx *)", "Bash(node *)",
-      "Bash(git *)", "Bash(cygpath *)", "Bash(taskkill *)"
+      "Bash(git *)", "Bash(cygpath *)", "Bash(taskkill *)",
+      "Bash(gh *)",
+      "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)",
+      "Bash(grep *)", "Bash(rg *)", "Bash(find *)", "Bash(wc *)",
+      "Bash(echo *)", "Bash(pwd)", "Bash(which *)", "Bash(curl *)",
+      "PowerShell(Get-Process *)", "PowerShell(Get-CimInstance *)",
+      "PowerShell(Get-ChildItem *)", "PowerShell(Get-Command *)",
+      "PowerShell(Get-Content *)", "PowerShell(Test-Path *)"
     ]
   },
   "hooks": {
