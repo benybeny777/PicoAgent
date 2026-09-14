@@ -1128,6 +1128,10 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
   characterRoot = root;
   activeLive2dSdkPreference = sdkPreference === "4" || sdkPreference === "5" ? sdkPreference : "auto";
   characterManifest = manifest;
+  // 上端メニューのボタンへ表示中のキャラ名を出す。「キャラ選択」という固定文言だけでは
+  // 今どのキャラを出しているかが画面から読み取れない。
+  const characterMenuButton = document.getElementById("characterMenuButton");
+  if (characterMenuButton) characterMenuButton.textContent = manifest.name || "キャラ選択";
   // 配置編集のキャラ位置・倍率は、表示形式だけでなくキャラクターごとに分離する。
   character.dataset.characterId = manifest.id;
   characterAssetVersion = assetVersion;
@@ -5358,6 +5362,19 @@ document.addEventListener("keydown", event => {
 });
 // 右クリックメニュー「表示形式」からの切り替え。ウィンドウ寸法はバックエンドが当て、
 // 中の配置はここで data-layout を書き替えて CSS に任せる。
+// 上端メニューの「キャラ選択」へ渡す一覧。同梱キャラと追加キャラの突き合わせは
+// ここが正本で、メニュー側で作り直さない（片方だけ増減したときに食い違うため）。
+window.PicoCharacters = {
+  async list() {
+    const catalog = await loadCharacterCatalog();
+    const bundled = catalog?.characters || [];
+    const all = bundled.concat(await userCharacterEntries());
+    return all
+      .filter(entry => entry && entry.id)
+      .map(entry => ({ id: entry.id, name: entry.name || entry.id }));
+  },
+};
+
 window.picoagent.on("pet:layout", applyLayout);
 // 右クリックメニュー「立ち絵の位置を戻す」。動かしすぎたときの戻し先。
 window.picoagent.on("pet:character-reset", (reset) => {

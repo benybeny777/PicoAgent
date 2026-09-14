@@ -177,6 +177,7 @@ window.picoagent = {
   menu: () => call("pet_menu"),
   // 上端メニューの「表示」から、ボタン直下（ウィンドウ基準の論理座標）へ画面レイアウトの一覧を出す。
   layoutMenu: (x, y) => call("pet_layout_menu", { x, y }),
+  characterMenu: (x, y, characters) => call("pet_character_menu", { x, y, characters }),
   on: (channel, callback) => {
     if (!["pet:model", "pet:reset", "pet:layout-reset", "pet:layout-edit", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。

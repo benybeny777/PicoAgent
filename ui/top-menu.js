@@ -46,6 +46,27 @@
     }
   });
 
+  // 「キャラ選択」も設定画面を開かず、押した位置に一覧を出して1手で切り替える。
+  // 一覧の最後の「キャラクターの追加・設定…」から従来の設定画面へ進める。
+  const characterButton = document.getElementById("characterMenuButton");
+  characterButton?.addEventListener("click", async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (characterButton.disabled) return;
+    characterButton.disabled = true;
+    const rect = characterButton.getBoundingClientRect();
+    try {
+      // 同梱キャラと追加キャラの突き合わせは本体側が持っている一覧をそのまま使う。
+      const characters = (await window.PicoCharacters?.list?.()) || [];
+      if (!characters.length) throw new Error("キャラクターの一覧を取得できませんでした");
+      await window.picoagent.characterMenu(Math.round(rect.left), Math.round(rect.bottom), characters);
+    } catch (error) {
+      window.PicoUI?.logApp?.("error", "キャラクターの一覧を開けませんでした", error);
+    } finally {
+      characterButton.disabled = false;
+    }
+  });
+
   for (const button of menu.querySelectorAll("[data-settings-tab]")) {
     button.addEventListener("click", async event => {
       event.preventDefault();

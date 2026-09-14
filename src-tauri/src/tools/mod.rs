@@ -308,38 +308,6 @@ pub fn all() -> &'static [Box<dyn Tool>] {
         .as_slice()
 }
 
-/// モデルへ渡す圧縮形のツール定義。説明は先頭1文だけにし、引数の説明は落とす。
-/// 全72件の完全な定義は約48,000文字（約16,000トークン）あり、そのまま毎回送ると
-/// コンテキストの半分を占めてしまう。何をする道具かが分かれば選択はできる。
-fn compact_schema(schema: &Value) -> Value {
-    let mut compact = schema.clone();
-    if let Some(function) = compact.get_mut("function").and_then(Value::as_object_mut) {
-        if let Some(Value::String(description)) = function.get_mut("description") {
-            let head = description
-                .split_terminator(['。', '\n'])
-                .next()
-                .unwrap_or(description)
-                .trim()
-                .to_string();
-            if !head.is_empty() {
-                *description = head;
-            }
-        }
-        if let Some(properties) = function
-            .get_mut("parameters")
-            .and_then(|p| p.get_mut("properties"))
-            .and_then(Value::as_object_mut)
-        {
-            for (_, property) in properties.iter_mut() {
-                if let Some(object) = property.as_object_mut() {
-                    object.remove("description");
-                }
-            }
-        }
-    }
-    compact
-}
-
 /// 1件のツール定義がコンテキストで占める文字数。
 fn schema_chars(schema: &Value) -> usize {
     serde_json::to_string(schema)
@@ -347,8 +315,9 @@ fn schema_chars(schema: &Value) -> usize {
         .unwrap_or(0)
 }
 
-/// ツール定義へ配分する文字数。全72件で約48,000文字あり、狭いコンテキストのローカル
-/// モデルでは人格・履歴・生成の枠を食い潰すため、コンテキスト長の35%までに収める。
+/// ツール定義へ配分する文字数。全72件で約48,000文字あり、人格・履歴・生成の枠を
+/// 食い潰さないようコンテキスト長の35%までに収める。定義そのものは削らない
+/// （説明や引数の説明を削ると、モデルが引数を組み立てられずスキルの精度が落ちる）。
 /// クラウドは十分広いので全件入る値を返す。
 fn schema_budget_chars(cfg: &Config) -> usize {
     if cfg.get("PICOAGENT_PROVIDER", "local") != "local" {
@@ -356,7 +325,7 @@ fn schema_budget_chars(cfg: &Config) -> usize {
     }
     let ctx = crate::providers::local::context_length(cfg);
     // 1トークンあたり約3文字として見積もる（日本語混じりのJSON定義での実測値）。
-    (ctx * 45 / 100 * 3).max(4_000)
+    (ctx * 35 / 100 * 3).max(4_000)
 }
 
 /// スキルが返した文字列が失敗を表すか。
@@ -451,7 +420,7 @@ fn push_schema_by_name(out: &mut Vec<Value>, name: &str) {
         return;
     }
     if let Some(idx) = schema_index().get(name) {
-        out.push(compact_schema(&build_schemas()[*idx]));
+        out.push(build_schemas()[*idx].clone());
     }
 }
 
@@ -526,7 +495,7 @@ pub fn schemas_for_conversation(
         let Some(index) = schema_index().get(name) else {
             continue;
         };
-        let cost = schema_chars(&compact_schema(&build_schemas()[*index]));
+        let cost = schema_chars(&build_schemas()[*index]);
         if used.saturating_add(cost) > budget {
             continue;
         }
@@ -1095,14 +1064,16 @@ mod tests {
         let names = schema_names("こんにちは");
         assert!(names.contains(&"get_time".to_string()));
         assert!(names.contains(&"web_search".to_string()));
+        // キーワードに一致しないスキルも、コンテキストに余裕がある限り候補へ残す。
+        // 入り切らない分は優先度順で落ちるが、それは「一致しないから外す」のとは別の理由。
         assert!(
-            names.contains(&"slack_send_message".to_string()),
-            "一致しない語でも候補から外さない: {names:?}"
+            names.len() >= 30,
+            "既定のコンテキストでは多くのスキルが入る: {}",
+            names.len()
         );
         assert!(
-            names.len() >= 60,
-            "既定のコンテキストではほぼ全スキルが入る: {}",
-            names.len()
+            names.len() > super::CORE_AGENT_TOOLS.len() + 5,
+            "基本ツールだけに絞り込まない: {names:?}"
         );
     }
 
