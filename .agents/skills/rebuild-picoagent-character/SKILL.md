@@ -82,7 +82,7 @@ Aivis音声をキャラクターへ割り当てる場合は、本人または権
 - 採用断片はDC除去、発話前120ms・後150msまでの切り詰め、10msフェード、-23LUFSかつピーク-1dBFS以下の単純ゲインだけを行う。SBV2の`resample.py`へ`--normalize`を付けない（pyloudnormの正規化でクリップが発生するため）。
 - 学習は`scripts/train-voice-model.ps1`だけを正規入口にし、`-Stage preprocess` → `train` → `export`の順に実行する。SBV2の`config.yml`の`model_name`は学習とスタイル生成の保存先を決める共有状態なので、キャラを替えるたびにこのスクリプトを通す。GUIや個別コマンドで複数キャラを交互に扱わない。
 - 8GB級GPUではbatch 2、fp32（`bf16_run`は使わない）、保存間隔1000 stepにする。JP-Extraの学習スクリプトは勾配累積に対応しない。学習開始後にWindowsの`\GPU Process Memory(pid_<PID>*)\Shared Usage`を確認し、数GB単位で共有メモリへあふれて1 stepが極端に遅い場合は、品質設定を変えず`-Stage train -BatchSize`だけを下げて再開する。止めるときは、コマンドラインで自分が起動した`train_ms_jp_extra.py`とその親の`train-voice-model.ps1`を確認してからプロセスツリーごと終了する。
-- チェックポイントは学習中に`scripts/check-synthesized-voice.py sbv2 --device cpu`で検査し、GPUを学習から奪わない。旧モデルと同じ文で、ノイズ床・SNR・電子音・冒頭末尾・カナ誤り率・話者類似度が改善しなくなった点、または悪化し始めた点（過学習）を採用候補にする。SBV2の直接合成はピークを0dBへ正規化するため、クリップと音量はAivis経由（`aivis`モード、`volumeScale`上限0.72）で判定する。
+- チェックポイントの検査を学習と同時に動かさない。GPUではVRAMがあふれ、CPUではWhisper large-v3と合成モデルがメインメモリを使い切り、学習ごと停止する（32GB機で実際に発生）。保存直後に自分が起動した学習を止め、`scripts/check-synthesized-voice.py sbv2 --device cuda`で検査してから`-Stage train`で再開する（最新の`G_*.pth`から続きを学習する）。旧モデルと同じ文で、ノイズ床・SNR・電子音・冒頭末尾・カナ誤り率・話者類似度が改善しなくなった点、または悪化し始めた点（過学習）を採用候補にする。SBV2の直接合成はピークを0dBへ正規化するため、クリップと音量はAivis経由（`aivis`モード、`volumeScale`上限0.72）で判定する。
 - 採用候補は`-Stage export`でONNXとAIVMXへ書き出し、AIVMX内の`model_name`と話者を確認する。書き出し先に同名のAIVMXがあれば停止する。
 
 ```powershell
