@@ -9,6 +9,9 @@
     success: 'happy', pleased: 'happy', shy: 'happy', concern: 'sad', failed: 'sad', error: 'sad',
     searching: 'thinking', working: 'thinking', listening: 'thinking',
   });
+  function aliasFor(state) {
+    return Object.hasOwn(stateAliases, state) ? stateAliases[state] : null;
+  }
   function normalizeState(value) {
     const state = String(value || 'idle').trim().toLowerCase();
     return state && state.length <= 32 ? state : 'idle';
@@ -40,8 +43,34 @@
   function profileFor(profiles, state) {
     const exact = normalizeState(state);
     if (Object.hasOwn(profiles, exact)) return profiles[exact];
-    const alias = stateAliases[exact];
+    const alias = aliasFor(exact);
     return alias && Object.hasOwn(profiles, alias) ? profiles[alias] : null;
+  }
+  // 状態切替の補間量。撮影・表示確定（settle）では目標値へ一度で到達させ、
+  // 半端な姿勢・表情のまま窓を出したりPNGへ残したりしない。
+  const blendFactor = (delta, settle) =>
+    settle ? 1 : 1 - Math.exp(-Math.min(0.1, Math.max(0, Number(delta) || 0)) * 10);
+  // 状態ごとの目標モーフ。設定された表情を優先し、無い場合だけモデルが持つモーフで組み立てる。
+  function expressionTargets(state, { profiles = {}, smile = '', smileCorners = [], sad = '' } = {}) {
+    const configured = profileFor(profiles, state);
+    if (configured) return { morphs: configured.morphs, suppressBlink: configured.autoBlink === false };
+    const exact = normalizeState(state), alias = aliasFor(exact) || exact;
+    // 笑い目の中間値は半目になるため、口角を使えるモデルは開眼の笑顔にする。
+    // 笑い目モーフしか無いモデルだけまばたきを止める（笑顔モーフが無いモデルは止めない）。
+    if (alias === 'happy') {
+      if (smileCorners.length) return { morphs: Object.fromEntries(smileCorners.map(name => [name, 0.65])), suppressBlink: false };
+      return smile ? { morphs: { [smile]: 1 }, suppressBlink: true } : { morphs: {}, suppressBlink: false };
+    }
+    if (alias === 'sad' && sad) return { morphs: { [sad]: 0.65 }, suppressBlink: false };
+    return { morphs: {}, suppressBlink: false };
+  }
+  // 表情由来のまばたき値と自動まばたきを重ねる。状態を離れた瞬間に目が開ききらないよう、
+  // 表情側は他モーフと同じ補間を通した値を受け取る。
+  function blinkWeight({ expression = 0, time = 0, motion = false, suppressBlink = false, configured = false, settle = false } = {}) {
+    const held = clamp(expression);
+    if (configured || suppressBlink || settle || !motion) return held;
+    const cycle = time % 4.7;
+    return Math.max(held, cycle < 0.16 ? Math.sin(cycle / 0.16 * Math.PI) : 0);
   }
   function combinePose(base, overlay) {
     const combined = new Map();
@@ -208,11 +237,11 @@
       let lastUpdateAt = start;
       let currentPose = pose === 'natural' ? combinePose(natural, profileFor(poseProfiles, state)) : new Map();
       const currentExpressions = new Map(affectedMorphs.map(name => [name, 0]));
-      function update() {
+      function update({ settle = false } = {}) {
         if (disposed) return;
-        const now = performance.now(), delta = Math.min(0.1, Math.max(0, (now - lastUpdateAt) / 1000));
+        const now = performance.now(), delta = (now - lastUpdateAt) / 1000;
         lastUpdateAt = now;
-        const blend = 1 - Math.exp(-delta * 10);
+        const blend = blendFactor(delta, settle);
         for (const [name, bone] of bones) bone.rotationQuaternion.copyFrom(rest.get(name));
         const targetPose = pose === 'natural' ? combinePose(natural, profileFor(poseProfiles, state)) : new Map();
         const nextPose = new Map();
@@ -235,34 +264,21 @@
         }
         for (const [name, angles] of renderedPose) rotate(name, angles);
 
-        const configuredExpression = profileFor(expressionProfiles, state);
-        const alias = stateAliases[state] || state;
-        let targetExpressions = configuredExpression?.morphs || {};
-        let suppressBlink = configuredExpression?.autoBlink === false;
-        if (!configuredExpression && alias === 'happy') {
-          targetExpressions = smileCorners.length
-            ? Object.fromEntries(smileCorners.map(name => [name, 0.65]))
-            : smile ? { [smile]: 1 } : {};
-          suppressBlink = !smileCorners.length;
-        }
-        if (!configuredExpression && alias === 'sad' && sad) targetExpressions = { [sad]: 0.65 };
+        const { morphs: targetExpressions, suppressBlink } = expressionTargets(state, {
+          profiles: expressionProfiles, smile, smileCorners, sad,
+        });
         for (const name of affectedMorphs) {
-          if (name === blink || name === mouthMorph) continue;
-          const current = currentExpressions.get(name) || 0, target = targetExpressions[name] || 0;
+          if (name === mouthMorph) continue;
+          const current = currentExpressions.get(name) || 0;
+          const target = Object.hasOwn(targetExpressions, name) ? targetExpressions[name] : 0;
           const value = current + (target - current) * blend;
           currentExpressions.set(name, value);
-          setMorph(name, value);
+          if (name !== blink) setMorph(name, value);
         }
-        const configuredBlink = blink && Object.hasOwn(targetExpressions, blink);
-        if (configuredBlink) {
-          const current = currentExpressions.get(blink) || 0, target = targetExpressions[blink];
-          const value = current + (target - current) * blend;
-          currentExpressions.set(blink, value);
-          setMorph(blink, value);
-        } else if (motion && !suppressBlink) {
-          const cycle = time % 4.7;
-          setMorph(blink, cycle < 0.16 ? Math.sin(cycle / 0.16 * Math.PI) : 0);
-        } else setMorph(blink, 0);
+        if (blink) setMorph(blink, blinkWeight({
+          expression: currentExpressions.get(blink) || 0, time, motion, suppressBlink,
+          configured: Object.hasOwn(targetExpressions, blink), settle,
+        }));
         setMorph(mouthMorph, mouth);
         model.beforePhysics(null);
         model.afterPhysics();
@@ -291,7 +307,7 @@
         setMouthLevel(value) { if (!disposed) mouth = clamp(value); },
         setMotionEnabled(enabled) { if (!disposed) { motion = Boolean(enabled); if (!motion) mouth = 0; } },
         setPose(value) { if (!disposed) pose = value === 'original' ? 'original' : 'natural'; },
-        capturePreview() { ensureActive(); resize(); update(); scene.render(); return canvas.toDataURL('image/png'); },
+        capturePreview() { ensureActive(); resize(); update({ settle: true }); scene.render(); return canvas.toDataURL('image/png'); },
         capabilities: {
           mouth: Boolean(mouthMorph), blink: Boolean(blink), happy: Boolean(smile || smileCorners.length), sad: Boolean(sad),
           poseStates: Object.keys(poseProfiles), expressionStates: Object.keys(expressionProfiles), physics: false,
@@ -302,5 +318,8 @@
       return result;
     } catch (error) { dispose(); throw error; }
   }
-  window.PicoMMD = Object.freeze({ create, normalizeState, normalizePoseMap, normalizeExpressionProfile, normalizeProfiles, profileFor, combinePose });
+  window.PicoMMD = Object.freeze({
+    create, normalizeState, normalizePoseMap, normalizeExpressionProfile, normalizeProfiles,
+    profileFor, combinePose, blendFactor, expressionTargets, blinkWeight,
+  });
 })();
