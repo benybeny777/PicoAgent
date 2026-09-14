@@ -1,20 +1,21 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Start PicoAgent
+chcp 65001 >nul
+title PicoAgentを起動
 
 where cargo >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] Rust ^(cargo^) was not found.
-  echo Install Rust from https://rustup.rs/ and run this file again.
+  echo [エラー] Rust ^(cargo^) が見つかりません。
+  echo https://rustup.rs/ からRustを導入して、このファイルをもう一度実行してください。
   echo.
   pause
   exit /b 1
 )
 
-echo Starting PicoAgent...
-echo The first run may take time to download and build required files.
-echo Keep this window open until PicoAgent exits.
+echo PicoAgentを起動します。
+echo 初回は必要なファイルの準備とビルドに時間がかかる場合があります。
+echo PicoAgentを終了するまで、この画面を閉じないでください。
 echo.
 
 cargo xtask dev
@@ -23,8 +24,8 @@ set "PICOAGENT_RUN_EXIT_CODE=%ERRORLEVEL%"
 if "%PICOAGENT_RUN_EXIT_CODE%"=="0" exit /b 0
 
 echo.
-echo [ERROR] PicoAgent could not start ^(exit code: %PICOAGENT_RUN_EXIT_CODE%^).
-echo Check the message above for details.
+echo [エラー] PicoAgentを起動できませんでした ^(終了コード: %PICOAGENT_RUN_EXIT_CODE%^)。
+echo 詳細は上のメッセージを確認してください。
 echo.
 pause
 exit /b %PICOAGENT_RUN_EXIT_CODE%

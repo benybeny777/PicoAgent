@@ -216,7 +216,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
 
-`PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。音声再生中のみ会話アニメーションを維持する。起動時・キャラクター変更時に吹き出しへ出る挨拶（`character.json` の `greeting`）も同じ経路で読み上げる。
+`PICOAGENT_TTS_ENABLED` が有効な場合、回答テキストを AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を生成し、フロントで再生する。モデル既定値が0dBへ張り付いてクリップしないよう、`/synthesis`へ渡す前に`volumeScale`を0.72以下へ制限し、約3dBの余裕を確保する。利用者の再生音量はこの合成音量とは別にフロントで適用する。音声再生中のみ会話アニメーションを維持する。起動時・キャラクター変更時に吹き出しへ出る挨拶（`character.json` の `greeting`）も同じ経路で読み上げる。
 
 - 読み上げにはPicoAgent管理下の Aivis だけを使う。通常開発版はアプリ資源、軽量販売版は初回／設定画面で選択導入した利用者データ側を解決する。接続先は `http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）とする。旧固定ポート `10102` が保存されている場合は起動時に旧既定扱いで `11436` へ移行する。`PICOAGENT_TTS_ENABLED` が有効な場合はアプリ起動時に AivisSpeech Engine を即 spawn する。設定画面で表示する音声項目は ON/OFF と音量だけにし、デバイス・ポート・speaker ID は通常UIでは非表示の内部設定として扱う。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
 - フロントは `pet_speak` が返す WAV バイト列を `Blob` / `Audio` で再生するため、Tauri の CSP は `media-src 'self' blob: data:` を許可する。再生時は `PICOAGENT_TTS_VOLUME`（0〜100）を `Audio.volume` に反映し、設定保存後の `pet:ui` で再生中の音量も即時変更する。再生失敗時はエラー内容をステータスへ表示する。

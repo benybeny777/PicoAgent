@@ -69,6 +69,10 @@ description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2D、MMD�
 
 ## 再構築と検証
 
+Windowsで手動確認だけを行う場合は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。独自2.5Dは比較画面、MMDと登録済みLive2Dは保存中の選択を変えない実アプリ確認を選べる。MMDとLive2Dをブラウザだけの代替表示で合格にしない。
+
+Aivis音声をキャラクターへ割り当てる場合は、本人または権利者が明示的に許諾した公式モデル・収録素材だけを使う。配信・動画から切り出した本人音声を再学習へ流用しない。生成サンプルは複数文で聴取し、0dBへ達するクリップ、定常ノイズ、破裂音、声の混入があれば採用を止める。PicoAgentは合成前の`volumeScale`を0.72以下へ制限して約3dBの余裕を取るが、これは入力素材や学習済みモデルのノイズを直す処理ではない。モデル自体の不良は公式の許諾済みモデルまたは清浄な許諾済み収録へ差し替える。
+
 ```powershell
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
 uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画

@@ -58,6 +58,8 @@ cargo xtask dev
 
 Windows ならリポジトリ直下の **`PicoAgentを起動.bat`** をダブルクリックでも同じです。`dev` は残存プロセス停止・キャラクター同期・UI 生成だけを行う**最小の開発起動**で、数 GB の追加取得はしません。OS ごとの前提パッケージ、ローカル AI・読み上げ・Live2D の個別取得は [🚀 まず動かす](#-まず動かす) を参照してください。
 
+キャラクターだけを確認するときは **`キャラクター確認画面を開く.bat`** をダブルクリックし、独自2.5D、MMDさくらみこ、MMD戌神ころね、登録済みLive2Dから選びます。独自2.5Dは本番と同じメッシュ描画の比較画面、MMDとLive2Dは保存中の選択を変えずに対象キャラを指定した実アプリを開きます。
+
 ```bash
 cargo xtask verify   # PR 前の一括ローカル検証（書式・静的解析・テスト・JS 構文・画面の契約テスト・Git 差分）
 ```
@@ -366,6 +368,8 @@ cargo xtask build --bundles deb,appimage
 ```powershell
 uv run python -m http.server 8776 --bind 0.0.0.0 --directory .
 ```
+
+Windowsではリポジトリ直下の`キャラクター確認画面を開く.bat`から「独自2.5D」を選んでも同じ画面を開けます。確認終了時にBATの画面でEnterを押すと、確認用サーバーも終了します。
 
 - PCのChrome: `http://127.0.0.1:8776/tools/mesh-rig-preview/`
 - 同じLANのスマホ: `http://<このPCのIPv4アドレス>:8776/tools/mesh-rig-preview/`

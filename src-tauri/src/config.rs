@@ -1,6 +1,7 @@
 // config.rs - 設定の正本（永続ストア）。
 //
 // 値の優先順位: 永続ファイル（app_config_dir/config.json）> 環境変数 > ハードコード既定値。
+// キャラ確認用の PICO_PREVIEW_CHARACTER だけは保存値を書き換えず実描画を選ぶため最優先にする。
 // コネクタは get() で都度読むため、設定画面での保存はアプリ再起動なしに反映される。
 
 use std::path::PathBuf;
@@ -101,6 +102,13 @@ impl Config {
 
     /// 文字列設定を取得。空文字は未設定とみなし env → 既定値へフォールバック。
     pub fn get(&self, key: &str, fallback: &str) -> String {
+        if cfg!(debug_assertions) && key == "PICOAGENT_CHARACTER" {
+            if let Ok(preview_character) = std::env::var("PICO_PREVIEW_CHARACTER") {
+                if !preview_character.is_empty() {
+                    return preview_character;
+                }
+            }
+        }
         if let Some(v) = self.values.lock().unwrap().get(key) {
             if let Some(s) = v.as_str() {
                 if !s.is_empty() {
