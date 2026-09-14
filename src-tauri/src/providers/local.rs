@@ -28,6 +28,21 @@ pub struct LocalModelPreset {
     pub note: &'static str,
 }
 
+/// コンテキスト長の下限。全スキル定義だけで約16,000トークンあり、旧既定の 8,192 では
+/// 人格・履歴・生成の枠が残らず、モデルへ渡せるスキルが数件まで削られる
+/// （実機で「今日の天気は？」の次のターンに weather が候補から消えた）。
+pub const MIN_LOCAL_CTX: usize = 32_768;
+
+/// ローカルエンジンのコンテキスト長。保存値が下限未満でも下限まで引き上げる。
+/// 旧既定 8,192 が保存されたままの環境も対象にする。
+pub fn context_length(cfg: &Config) -> usize {
+    cfg.get("PICOAGENT_LOCAL_CTX", "32768")
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(MIN_LOCAL_CTX)
+        .max(MIN_LOCAL_CTX)
+}
+
 pub const DEFAULT_LOCAL_MODEL_PRESET: &str = "lfm25_2_6b";
 const DEFAULT_LOCAL_MODEL_URL: &str = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/84022ce711b28455e8c4fc364ce68c00cf995875/LFM2.5-2.6B-QAD-Q4_0.gguf";
 
@@ -463,8 +478,11 @@ impl Provider for Local {
         let normalized = normalize_for_local(messages);
         let wire = to_wire(&normalized);
 
-        // まず tools 付きで送る。Gemma など tools 非対応テンプレートのモデルでも
-        // 会話が成立するよう、失敗したら tools 無しで一度だけ再試行する。
+        // tools 付きで送り、失敗しても tools を外して再送しない。外すとツールが使えない
+        // ことを誰にも伝えないまま機能だけが落ち、モデルが本文へ `web_search{...}` のような
+        // 呼び出しを書いて利用者に見せてしまう。失敗は理由ごと上位へ返す（AGENTS.md の
+        // 無言フォールバック禁止）。同梱エンジンは --jinja 起動で、既定の LFM2.5 も Gemma 4 も
+        // ツール呼び出しに対応することを実機で確認している。
         let send = |with_tools: bool| {
             let mut body = json!({ "model": model, "messages": wire, "temperature": 0.6 });
             if with_tools && !tools.is_empty() {
@@ -473,10 +491,7 @@ impl Provider for Local {
             crate::tools::http::client().post(&url).json(&body).send()
         };
 
-        let mut res = send(!tools.is_empty()).await?;
-        if !res.status().is_success() && !tools.is_empty() {
-            res = send(false).await?;
-        }
+        let res = send(!tools.is_empty()).await?;
         if !res.status().is_success() {
             let status = res.status();
             let text = crate::tools::http::response_text(res)
@@ -527,8 +542,8 @@ impl Provider for Local {
             }
             body
         };
-        // chat() と同じ方針: tools 付きで失敗したら tools 無しで一度だけ再試行する。
-        // ただしチャンクを1つでも流した後の失敗は再試行しない（二重表示を防ぐ）。
+        // chat() と同じ方針: tools を外した再送はしない。
+        // 何が起きたかを追えるよう、チャンクを流し始めていたかだけはエラーへ添える。
         let emitted = std::sync::Arc::new(AtomicBool::new(false));
         let probe: std::sync::Arc<dyn Fn(String) + Send + Sync> = {
             let emitted = emitted.clone();
@@ -538,15 +553,15 @@ impl Provider for Local {
                 inner(chunk);
             })
         };
-        match super::openai::stream_chat(&url, "", make_body(true), probe).await {
-            Ok(message) => Ok(message),
-            Err(error) => {
-                if tools.is_empty() || emitted.load(Ordering::Relaxed) {
-                    return Err(error);
+        super::openai::stream_chat(&url, "", make_body(!tools.is_empty()), probe)
+            .await
+            .map_err(|error| {
+                if emitted.load(Ordering::Relaxed) {
+                    error
+                } else {
+                    anyhow::anyhow!("{error}（ツール定義 {} 件つきの要求で失敗）", tools.len())
                 }
-                super::openai::stream_chat(&url, "", make_body(false), on_chunk).await
-            }
-        }
+            })
     }
 }
 

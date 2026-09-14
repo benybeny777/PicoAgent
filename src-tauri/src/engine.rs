@@ -632,7 +632,9 @@ fn spawn_server(
     ensure_executable(server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config).to_string();
-    let ctx = state.config.get("PICOAGENT_LOCAL_CTX", "32768");
+    // 保存値が旧既定（8,192）のままでも下限まで引き上げて起動する。狭いコンテキストだと
+    // スキル定義が入らず、モデルが道具を選べなくなる。
+    let ctx = local::context_length(&state.config).to_string();
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
     let ngl = &candidate.ngl;

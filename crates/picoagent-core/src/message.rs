@@ -96,9 +96,79 @@ pub fn strip_reasoning(content: &str) -> String {
     out.trim().to_string()
 }
 
+/// 本文へ漏れたツール呼び出しの検出結果。
+#[derive(Debug, PartialEq, Eq)]
+pub struct LeakedToolCall {
+    /// 漏れた呼び出しのツール名。
+    pub name: String,
+    /// 呼び出し表記を取り除いた本文。
+    pub cleaned: String,
+}
+
+/// 本文へ漏れたツール呼び出しを見つけ、表示用に取り除いた本文と一緒に返す。
+///
+/// 小型のローカルモデルは、テンプレートのツール記法を崩して `web_search{query:...}` の
+/// ような文字列を本文へ書くことがある。`tool_calls` が空のままこれを表示すると、利用者
+/// には意味不明な文字列だけが届き、ツールも実行されない。引数の解釈までは行わない。壊れ
+/// た表記から引数を推測して実行すると、誤った対象へ副作用を与えるおそれがあるため、検出
+/// と除去に留めて、呼び出し自体はモデルへ出し直させる。
+pub fn find_leaked_tool_call(content: &str, known_names: &[&str]) -> Option<LeakedToolCall> {
+    for name in known_names {
+        let mut from = 0;
+        while let Some(offset) = content[from..].find(*name) {
+            let start = from + offset;
+            let end = start + name.len();
+            from = end;
+            // 前後が識別子の一部なら別の語。長い名前の一部を拾わない。
+            let boundary_before = content[..start]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+            if !boundary_before {
+                continue;
+            }
+            let rest = content[end..].trim_start();
+            let close = match rest.chars().next() {
+                Some('{') => '}',
+                Some('(') => ')',
+                _ => continue,
+            };
+            let open_at = content.len() - rest.len();
+            let Some(close_at) = balanced_end(&content[open_at..], close) else {
+                continue;
+            };
+            let mut cleaned = String::with_capacity(content.len());
+            cleaned.push_str(&content[..start]);
+            cleaned.push_str(&content[open_at + close_at + close.len_utf8()..]);
+            return Some(LeakedToolCall {
+                name: (*name).to_string(),
+                cleaned: cleaned.trim().to_string(),
+            });
+        }
+    }
+    None
+}
+
+/// 開き括弧から対応する閉じ括弧までの相対位置を返す。
+fn balanced_end(text: &str, close: char) -> Option<usize> {
+    let open = if close == '}' { '{' } else { '(' };
+    let mut depth = 0usize;
+    for (index, character) in text.char_indices() {
+        if character == open {
+            depth += 1;
+        } else if character == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{strip_reasoning, Message, TokenUsage};
+    use super::{find_leaked_tool_call, strip_reasoning, Message, TokenUsage};
 
     #[test]
     fn 推論ブロックを取り除く() {
@@ -108,6 +178,36 @@ mod tests {
         );
         assert_eq!(strip_reasoning("やあ、元気？"), "やあ、元気？");
         assert_eq!(strip_reasoning("答えるね<think>reasoning..."), "答えるね");
+    }
+
+    #[test]
+    fn 本文へ漏れたツール呼び出しを取り除く() {
+        // 実機のローカルモデルが本文へ書いた形。引用符がテンプレートのトークンごと崩れている。
+        let leaked = find_leaked_tool_call(
+            "web_search{query:<|\">神奈川県 の今日の天気<|\">}",
+            &["web_search", "read_file"],
+        )
+        .expect("漏れた呼び出しを見つける");
+        assert_eq!(leaked.name, "web_search");
+        assert_eq!(leaked.cleaned, "");
+    }
+
+    #[test]
+    fn 漏れた呼び出しの前後の文は残す() {
+        let leaked = find_leaked_tool_call(
+            "調べるね web_search(query: 天気) 少し待ってね",
+            &["web_search"],
+        )
+        .expect("漏れた呼び出しを見つける");
+        assert_eq!(leaked.cleaned, "調べるね  少し待ってね");
+    }
+
+    #[test]
+    fn 普通の本文はツール呼び出しとみなさない() {
+        assert!(find_leaked_tool_call("web_search で調べておくね", &["web_search"]).is_none());
+        assert!(find_leaked_tool_call("今日はいい天気だよ", &["web_search"]).is_none());
+        // 長い名前の一部に一致しただけのものは拾わない。
+        assert!(find_leaked_tool_call("my_web_search{a:1}", &["web_search"]).is_none());
     }
 
     #[test]
