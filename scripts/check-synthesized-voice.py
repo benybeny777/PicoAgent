@@ -44,6 +44,13 @@ DEFAULT_TEXTS = [
     "午後三時にリマインダーを設定しました。忘れないように声をかけるね。",
     "ぴょんぴょん跳ねるカエルと、ぷかぷか浮かぶ風船を見に行こう。",
 ]
+# 読点・疑問符・感嘆符・言いよどみの間に出るノイズを見るための追加文（--text-set pauses）
+PAUSE_TEXTS = [
+    "うーん、ちょっと待ってね。今、確認してみるから。",
+    "ねえ、聞いて！昨日、すごく面白いことがあったんだよ。",
+    "それで、どうしたの？そっか、大変だったね。",
+    "午後三時に会議があります。資料は、もう準備できていますか？",
+]
 
 _spec = importlib.util.spec_from_file_location(
     "voice_clip_metrics", Path(__file__).with_name("select-voice-training-clips.py")
@@ -216,6 +223,10 @@ def main() -> int:
     common.add_argument("--reference", help="選別スクリプトのclip-metrics.jsonl。話者類似度の基準にする")
     common.add_argument("--texts-file", help="1行1文。省略時は既定の6文")
     common.add_argument("--device", default="cuda")
+    common.add_argument("--text-set", choices=["default", "pauses"], default="default",
+                        help="pausesは既定6文に間を含む4文を加える")
+    common.add_argument("--repeat", type=int, default=1,
+                        help="合成は毎回ゆらぐため、文の並び全体をこの回数だけ繰り返して合成する")
     sbv2 = sub.add_parser("sbv2", parents=[common])
     sbv2.add_argument("--sbv2-root", required=True)
     sbv2.add_argument("--model-dir", required=True)
@@ -229,9 +240,12 @@ def main() -> int:
 
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    texts = DEFAULT_TEXTS
+    texts = DEFAULT_TEXTS + (PAUSE_TEXTS if args.text_set == "pauses" else [])
     if args.texts_file:
         texts = [t.strip() for t in Path(args.texts_file).read_text(encoding="utf-8").splitlines() if t.strip()]
+    if args.repeat < 1:
+        raise SystemExit("--repeat は1以上にしてください")
+    texts = texts * args.repeat
     reference = Path(args.reference).resolve() if args.reference else None
 
     if args.mode == "sbv2":

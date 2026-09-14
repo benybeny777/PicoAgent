@@ -12,6 +12,7 @@
 .EXAMPLE
   pwsh -File scripts/train-voice-model.ps1 -SbvRoot temp/voice-models/Style-Bert-VITS2 -Dataset sakura-miko-clean-v2 -Stage preprocess -BatchSize 4 -Epochs 200 -SaveEverySteps 1000
   pwsh -File scripts/train-voice-model.ps1 -SbvRoot temp/voice-models/Style-Bert-VITS2 -Dataset sakura-miko-clean-v2 -Stage train
+  pwsh -File scripts/train-voice-model.ps1 -SbvRoot temp/voice-models/Style-Bert-VITS2 -Dataset sakura-miko-clean-v3-gated -Stage train -StopAtStep 2000
   pwsh -File scripts/train-voice-model.ps1 -SbvRoot temp/voice-models/Style-Bert-VITS2 -Dataset sakura-miko-clean-v2 -Stage export -Checkpoint model_assets/sakura-miko-clean-v2/sakura-miko-clean-v2_e100_s6000.safetensors -OutputDir temp/voice-models/release/sakura-miko-clean-v2
 #>
 param(
@@ -21,6 +22,8 @@ param(
     [int]$BatchSize = 4,
     [int]$Epochs = 200,
     [int]$SaveEverySteps = 1000,
+    # 0より大きい場合、-Stage trainでこのstepの保存を検知したら学習を止める（検査を学習と同時に動かさないため）
+    [int]$StopAtStep = 0,
     [string]$Checkpoint,
     [string]$OutputDir
 )
@@ -113,7 +116,37 @@ print("学習設定を更新しました:", {keys[k]: v for k, v in values.items
 '@
             Invoke-Sbv2 '学習設定の更新' @('-c', $updateConfig, $configPath, ($overrides | ConvertTo-Json -Compress))
         }
-        Invoke-Sbv2 '学習' @('train_ms_jp_extra.py', '-c', "Data\$Dataset\config.json", '-m', "Data\$Dataset", '--no_progress_bar')
+        $trainArgs = @('train_ms_jp_extra.py', '-c', "Data\$Dataset\config.json", '-m', "Data\$Dataset", '--no_progress_bar')
+        if ($StopAtStep -le 0) {
+            Invoke-Sbv2 '学習' $trainArgs
+            break
+        }
+        # 検査は学習と同時に動かせないため、指定stepの保存を検知したら自分が起動した学習だけを止める。
+        $log = Join-Path $datasetDir "train-until-s$StopAtStep.log"
+        $err = Join-Path $datasetDir "train-until-s$StopAtStep-stderr.log"
+        $pattern = "_s$StopAtStep\.safetensors"
+        Write-Output "== 学習（${StopAtStep} stepの保存で停止） ログ: $log"
+        $proc = Start-Process -FilePath $python -ArgumentList $trainArgs -WorkingDirectory $root -NoNewWindow -PassThru `
+            -RedirectStandardOutput $log -RedirectStandardError $err
+        try {
+            while ($true) {
+                Start-Sleep -Seconds 30
+                if (Select-String -LiteralPath $log, $err -Pattern $pattern -Quiet -ErrorAction SilentlyContinue) {
+                    # safetensorsの保存ログはG/D/WDの保存後に出るため、書き込み完了を少し待ってから止める。
+                    Start-Sleep -Seconds 10
+                    Write-Output "${StopAtStep} stepの保存を検知しました"
+                    break
+                }
+                if ($proc.HasExited) { throw "学習が${StopAtStep} step前に終了しました（終了コード $($proc.ExitCode)）: $err" }
+                $last = @((Get-Item -LiteralPath $log).LastWriteTime, (Get-Item -LiteralPath $err).LastWriteTime) | Sort-Object | Select-Object -Last 1
+                if ((Get-Date) - $last -gt [TimeSpan]::FromMinutes(15)) { throw "学習ログが15分更新されないため停止します: $log" }
+            }
+        } finally {
+            if (-not $proc.HasExited) {
+                & taskkill.exe /PID $proc.Id /T /F | Out-Null
+                $proc.WaitForExit()
+            }
+        }
     }
     'export' {
         if (-not $Checkpoint -or -not $OutputDir) { throw '-Stage export には -Checkpoint と -OutputDir が必要です' }
