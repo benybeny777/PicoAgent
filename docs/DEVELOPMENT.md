@@ -20,7 +20,9 @@
 
 `cargo xtask setup mmd`は`node tools/mmd-runtime/build.mjs`を実行する。再生成時はNode.jsとnpmをPATHへ用意する。`tools/mmd-runtime/package-lock.json`に固定したbabylon-mmd 1.3.0、Babylon.js 9.26.0、esbuild 0.28.2を`npm ci`で取得し、`ui/vendor/mmd/`へバンドル、ライセンス、版とSHA-256を含む`runtime.json`を配置する。生成済みランタイムはGit管理し、通常起動・通常ビルドは取得を実行しない。`build-ui`は固定lockと配信ファイルのSHA-256を照合し、欠損・不一致を明示して停止する。ライセンス原文はLFへ揃えてからハッシュを計算し、Windowsと他OSの改行変換で不一致を起こさない。
 
-モデル登録の検証は`character_pack.rs`とPMX検証モジュールを正本とする。キャラクター固有の素材・人格・スクリーンショットは企画デモのローカル管理物として`temp/`または利用者データ領域にだけ置き、Gitや配布物へ含めない。描画・姿勢・モーフの責務は`ui/mmd-renderer.js`、表示切替・音声との接続は`ui/renderer.js`に分ける。物理演算とAivis音声モデル作成は別作業とする。
+モデル登録の検証は`character_pack.rs`とPMX検証モジュールを正本とする。キャラクター固有の素材・人格・スクリーンショットは企画デモのローカル管理物として`temp/`または利用者データ領域にだけ置き、Gitや配布物へ含めない。描画・姿勢・モーフの責務は`ui/mmd-renderer.js`、表示切替・音声との接続は`ui/renderer.js`に分ける。状態別ポーズは`mmd.poses`、複合表情は`mmd.expressions`にモデル固有の骨名・モーフ名で定義し、PMXへ書き戻さない。物理演算とAivis音声モデル作成は別作業とする。
+
+開発中の骨・モーフ調査には`mmd-mcp`をCodexまたはClaude Codeのユーザー範囲MCPとして任意利用できる。これはMikuMikuDanceを人の目で確認しながら調整する開発支援であり、PicoAgentの実行依存・同梱物・自動取得対象にしない。実行中のMMD画面と未保存シーンを先に識別し、元PMXとテクスチャは読み取り用のまま保つ。調整値の採用判定はMikuMikuDanceだけで終えず、最終的にPicoAgentの実WebViewで両モデルを確認する。
 
 ## 作業エージェントのハーネス構成
 

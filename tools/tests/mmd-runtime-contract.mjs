@@ -4,6 +4,41 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../../ui/mmd-renderer.js', import.meta.url), 'utf8');
+function profileApi() {
+  const window = {};
+  const context = vm.createContext({ window, document: { baseURI: 'http://localhost/', currentScript: null }, URL, DOMException });
+  vm.runInContext(source, context);
+  return window.PicoMMD;
+}
+
+test('MMDの状態別ポーズはモデル固有値を正規化し、基底姿勢へ加算する', () => {
+  const api = profileApi();
+  const poses = api.normalizeProfiles({
+    happy: { '右腕': [10, 20, 200], broken: [1, 2] },
+    success: { '右腕': [4, 5, 6] },
+  }, api.normalizePoseMap);
+  assert.deepEqual(JSON.parse(JSON.stringify(poses)), {
+    happy: { '右腕': [10, 20, 180] },
+    success: { '右腕': [4, 5, 6] },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(api.profileFor(poses, 'success'))), { '右腕': [4, 5, 6] });
+  assert.deepEqual(JSON.parse(JSON.stringify(api.profileFor(poses, 'pleased'))), { '右腕': [10, 20, 180] });
+  assert.deepEqual(JSON.parse(JSON.stringify(api.profileFor(poses, 'shy'))), { '右腕': [10, 20, 180] });
+  assert.deepEqual(JSON.parse(JSON.stringify([...api.combinePose({ '右腕': [0, 0, 35] }, poses.happy)])), [['右腕', [10, 20, 180]]]);
+});
+
+test('MMDの複合表情はウェイトを制限し、自動まばたき停止を保持する', () => {
+  const api = profileApi();
+  const profile = api.normalizeExpressionProfile({
+    morphs: { 'にこり': 0.6, '赤面': 2, invalid: '1' },
+    autoBlink: false,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(profile)), {
+    morphs: { 'にこり': 0.6, '赤面': 1 },
+    autoBlink: false,
+  });
+});
+
 test('製品CSPはMMDの復号画像とTauriのIPCを許可し外部サイトを許可しない', () => {
   const config = JSON.parse(readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
   const csp = config.app.security.csp;
