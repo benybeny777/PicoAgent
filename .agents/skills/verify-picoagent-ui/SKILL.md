@@ -36,6 +36,15 @@ description: PicoAgentの画面崩れ、ドラッグ、最大化、キャラ位�
 - スクリーンショットを実際に開き、キャラの鮮明さ、切れ、左右位置、前後関係、操作部品を目視する。
 - 一時画像・結果は`temp/`だけへ置き、成果物のREADME WebPだけを`docs/images/`へ出す。
 
+## 実Tauri WebViewを直接検査する
+
+- ブラウザ配信では足りないMMD描画・CSP・assetプロトコルは、WebView2のリモートデバッグで実アプリを検査する。`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 cargo xtask dev`で起動し、`http://127.0.0.1:9222/json/list`のページターゲットへ`Runtime.evaluate`を送る。`renderer.js`はモジュールではないため、`mmdController`や`characterRoot`などのスクリプトスコープ変数をそのまま評価できる。
+- 利用者の登録データを書き換えない。検証用の表情やモーフ名は、同じPMXを隠しcanvas（`position:fixed;left:-10000px`）へ読み直した第2のコントローラへ渡し、成功・失敗のどちらでも`dispose()`とcanvas削除を通す。
+- 待ちは`setTimeout`で刻む。`requestAnimationFrame`はウィンドウが背面だと絞られて戻らず、評価そのものが返らなくなる。
+- 画像はページ内で切り出し・縮小してからJPEGで運ぶ。等倍PNG（1枚300KB超）を`returnByValue`で返すと受信が返らない。canvasの実バッファは画素密度で拡大されるため、切り出し座標は`canvas.width`基準の比率で指定する。
+- 補間やまばたきのように途中経過を見る対象は、`capturePreview()`（目標へ一度で到達する）ではなく描画ループのバッファを連続で取り、目領域の暗部率のような数値と画像の両方で確認する。
+- 検査後は`cargo xtask stop`でアプリと付随プロセスを回収し、一時スクリプトと画像は`temp/`だけへ置く。
+
 ## キャラ作成のGPU工程を検証する
 
 - 導入済みの管理PythonとComfyUI、モデル実体を確認してから、docs/DEVELOPMENT.mdのverify_pipeline入口を使う。検証のための追加取得や製品への登録を混ぜない。
