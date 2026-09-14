@@ -9,6 +9,8 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 
+/// 既定地点の設定キー。保存とロック名で同じ文字列を使う。
+const DEFAULT_LOCATION_KEY: &str = "PICOAGENT_WEATHER_DEFAULT_LOCATION";
 const GEOCODE_URL: &str = "https://geocoding-api.open-meteo.com/v1/search";
 const FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
 
@@ -39,6 +41,69 @@ fn is_weather_source_search(text: &str) -> bool {
     const SEARCH_WORDS: &[&str] = &["探して", "検索", "調べて"];
     SOURCE_WORDS.iter().any(|word| text.contains(word))
         && SEARCH_WORDS.iter().any(|word| text.contains(word))
+}
+
+/// 都道府県名だけを言われたときに使う代表地点（県庁所在地）。
+/// Open-Meteo の地名検索は「神奈川県」のような都道府県名では候補を1件も返さないため、
+/// ここで市へ読み替える。読み替えた事実は表示名（「横浜市（神奈川県）」）から分かる。
+const PREFECTURE_CAPITALS: &[(&str, &str)] = &[
+    ("北海道", "札幌市"),
+    ("青森県", "青森市"),
+    ("岩手県", "盛岡市"),
+    ("宮城県", "仙台市"),
+    ("秋田県", "秋田市"),
+    ("山形県", "山形市"),
+    ("福島県", "福島市"),
+    ("茨城県", "水戸市"),
+    ("栃木県", "宇都宮市"),
+    ("群馬県", "前橋市"),
+    ("埼玉県", "さいたま市"),
+    ("千葉県", "千葉市"),
+    ("東京都", "新宿区"),
+    ("神奈川県", "横浜市"),
+    ("新潟県", "新潟市"),
+    ("富山県", "富山市"),
+    ("石川県", "金沢市"),
+    ("福井県", "福井市"),
+    ("山梨県", "甲府市"),
+    ("長野県", "長野市"),
+    ("岐阜県", "岐阜市"),
+    ("静岡県", "静岡市"),
+    ("愛知県", "名古屋市"),
+    ("三重県", "津市"),
+    ("滋賀県", "大津市"),
+    ("京都府", "京都市"),
+    ("大阪府", "大阪市"),
+    ("兵庫県", "神戸市"),
+    ("奈良県", "奈良市"),
+    ("和歌山県", "和歌山市"),
+    ("鳥取県", "鳥取市"),
+    ("島根県", "松江市"),
+    ("岡山県", "岡山市"),
+    ("広島県", "広島市"),
+    ("山口県", "山口市"),
+    ("徳島県", "徳島市"),
+    ("香川県", "高松市"),
+    ("愛媛県", "松山市"),
+    ("高知県", "高知市"),
+    ("福岡県", "福岡市"),
+    ("佐賀県", "佐賀市"),
+    ("長崎県", "長崎市"),
+    ("熊本県", "熊本市"),
+    ("大分県", "大分市"),
+    ("宮崎県", "宮崎市"),
+    ("鹿児島県", "鹿児島市"),
+    ("沖縄県", "那覇市"),
+];
+
+/// 都道府県名なら県庁所在地へ読み替える。市区町村名はそのまま返す。
+fn resolvable_location(location: &str) -> &str {
+    let trimmed = location.trim();
+    PREFECTURE_CAPITALS
+        .iter()
+        .find(|(prefecture, _)| *prefecture == trimmed)
+        .map(|(_, capital)| *capital)
+        .unwrap_or(trimmed)
 }
 
 fn configured_location(value: &str) -> Option<&str> {
@@ -144,7 +209,7 @@ impl Tool for WeatherTool {
                 "PICOAGENT_WEATHER_DEFAULT_LOCATION",
                 "天気の地点（市区町村・都道府県。空欄なら現在地を自動取得）",
                 "text",
-                "",
+                "例: 横浜市（一覧から選ぶか入力。会話で地名を言うと自動で保存されます）",
             ),
             Field::new(
                 "PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION",
@@ -196,7 +261,23 @@ impl Tool for WeatherTool {
         } else if let Some(location) = &explicit_location {
             // 利用者が明示した地点を別地点へ黙って置き換えない。
             match geocode(&client, location).await {
-                Ok(found) => found,
+                Ok(found) => {
+                    // 会話で言われた地点は既定として覚え、次から地名を聞き直さない。
+                    // 「読んで比べてから書き戻す」ので、同時に複数の問い合わせが走っても
+                    // 片方の保存が消えないよう名前付きロックの中で行う（await を挟まない）。
+                    // 保存に失敗しても今回の天気は返す（覚えられないだけで回答は作れる）。
+                    {
+                        let _guard = crate::store::lock_state(DEFAULT_LOCATION_KEY);
+                        if cfg.get(DEFAULT_LOCATION_KEY, "") != *location {
+                            if let Err(error) =
+                                cfg.set_string(DEFAULT_LOCATION_KEY, location.clone())
+                            {
+                                eprintln!("天気の既定地点を保存できませんでした: {error}");
+                            }
+                        }
+                    }
+                    found
+                }
                 Err(error) => return format!("エラー: {}", error),
             }
         } else {
@@ -299,6 +380,8 @@ async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Va
 }
 
 async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, String), String> {
+    // 都道府県名は候補が返らないので県庁所在地へ読み替える。
+    let location = resolvable_location(location);
     let mut candidates = fetch_candidates(client, location).await?;
     // 「横浜」のように自治体の種別を省いた言い方では、小さな同名の町が先に来る。
     // 「市」を補った候補も集めてから人口で選ぶ。
@@ -472,6 +555,17 @@ inventory::submit! { ToolReg { make: || Box::new(WeatherTool) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 都道府県名は県庁所在地へ読み替える() {
+        // Open-Meteo の地名検索は都道府県名では候補を1件も返さない。
+        assert_eq!(super::resolvable_location("神奈川県"), "横浜市");
+        assert_eq!(super::resolvable_location(" 大阪府 "), "大阪市");
+        assert_eq!(super::resolvable_location("東京都"), "新宿区");
+        // 市区町村はそのまま使う。
+        assert_eq!(super::resolvable_location("横浜市"), "横浜市");
+        assert_eq!(super::resolvable_location("横浜"), "横浜");
+    }
+
     #[test]
     fn 同名の地点では人口の多い方を選ぶ() {
         // 「横浜」は青森県横浜町（人口4,412）が先に返るが、利用者が指すのは横浜市。
