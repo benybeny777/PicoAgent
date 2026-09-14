@@ -308,6 +308,71 @@ pub fn all() -> &'static [Box<dyn Tool>] {
         .as_slice()
 }
 
+/// モデルへ渡す圧縮形のツール定義。説明は先頭1文だけにし、引数の説明は落とす。
+/// 全72件の完全な定義は約48,000文字（約16,000トークン）あり、そのまま毎回送ると
+/// コンテキストの半分を占めてしまう。何をする道具かが分かれば選択はできる。
+fn compact_schema(schema: &Value) -> Value {
+    let mut compact = schema.clone();
+    if let Some(function) = compact.get_mut("function").and_then(Value::as_object_mut) {
+        if let Some(Value::String(description)) = function.get_mut("description") {
+            let head = description
+                .split_terminator(['。', '\n'])
+                .next()
+                .unwrap_or(description)
+                .trim()
+                .to_string();
+            if !head.is_empty() {
+                *description = head;
+            }
+        }
+        if let Some(properties) = function
+            .get_mut("parameters")
+            .and_then(|p| p.get_mut("properties"))
+            .and_then(Value::as_object_mut)
+        {
+            for (_, property) in properties.iter_mut() {
+                if let Some(object) = property.as_object_mut() {
+                    object.remove("description");
+                }
+            }
+        }
+    }
+    compact
+}
+
+/// 1件のツール定義がコンテキストで占める文字数。
+fn schema_chars(schema: &Value) -> usize {
+    serde_json::to_string(schema)
+        .map(|s| s.chars().count())
+        .unwrap_or(0)
+}
+
+/// ツール定義へ配分する文字数。全72件で約48,000文字あり、狭いコンテキストのローカル
+/// モデルでは人格・履歴・生成の枠を食い潰すため、コンテキスト長の35%までに収める。
+/// クラウドは十分広いので全件入る値を返す。
+fn schema_budget_chars(cfg: &Config) -> usize {
+    if cfg.get("PICOAGENT_PROVIDER", "local") != "local" {
+        return usize::MAX;
+    }
+    let ctx = crate::providers::local::context_length(cfg);
+    // 1トークンあたり約3文字として見積もる（日本語混じりのJSON定義での実測値）。
+    (ctx * 45 / 100 * 3).max(4_000)
+}
+
+/// スキルが返した文字列が失敗を表すか。
+/// スキルは `run()` の失敗を `Result` ではなく「エラー: 〜」の文字列で返す慣習
+/// （AGENTS.md のコネクタ規則）なので、その接頭辞で判定する。
+pub fn is_failure_text(text: &str) -> bool {
+    let head = text.trim_start();
+    head.starts_with("エラー:") || head.starts_with("エラー：")
+}
+
+/// 登録済みスキル（ツール）の名前一覧。
+/// モデルが本文へ書いてしまったツール呼び出しを見分けるために使う。
+pub fn names() -> Vec<&'static str> {
+    all().iter().map(|tool| tool.name()).collect()
+}
+
 /// エージェントが会話中に使えるスキル（ツール）のラベル一覧を「、」区切りで返す。
 /// 「何ができる？」への回答をモデルが具体的に答えられるよう、system プロンプトに添える用途。
 pub fn capability_summary() -> String {
@@ -386,43 +451,90 @@ fn push_schema_by_name(out: &mut Vec<Value>, name: &str) {
         return;
     }
     if let Some(idx) = schema_index().get(name) {
-        out.push(build_schemas()[*idx].clone());
+        out.push(compact_schema(&build_schemas()[*idx]));
     }
 }
 
 /// ユーザー発話に応じて、LLMへ渡す function schema を絞り込む。
 /// 実行自体は dispatch で全スキルを呼べるため、これはモデルに見せる候補の圧縮だけを担う。
 pub fn schemas_for_text(text: &str) -> Vec<Value> {
-    let normalized = text.to_lowercase();
+    schemas_for_conversation(&Config::new(), text, &[])
+}
+
+/// 直前までの利用者発話も見て、LLMへ渡す function schema を絞り込む。
+///
+/// 現在の発話だけで選ぶと、「今日の天気は？」→「神奈川県でよろー」のように地名だけを返す
+/// 2ターン目で weather が候補から外れ、モデルは web_search しか呼べなくなる（実機で確認）。
+/// 直前の発話にもキーワードを当てて、会話が続いている間は同じスキルを候補へ残す。
+pub fn schemas_for_conversation(
+    cfg: &Config,
+    text: &str,
+    earlier_user_texts: &[&str],
+) -> Vec<Value> {
+    // 見る過去発話の件数。0ですべての発話を見る。
+    let turns = cfg
+        .get("PICOAGENT_TOOL_CONTEXT_TURNS", "5")
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(5);
+    let context = earlier_user_texts
+        .iter()
+        .take(if turns == 0 {
+            earlier_user_texts.len()
+        } else {
+            turns
+        })
+        .map(|line| line.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let normalized = format!("{} {}", text.to_lowercase(), context);
     let mut selected = Vec::new();
     for name in CORE_AGENT_TOOLS {
         push_schema_by_name(&mut selected, name);
     }
-    let mut matched: Vec<_> = all()
+    // どのスキルを使うかはモデルが決める。キーワードは「候補から外す」ためではなく
+    // 「予算内で先に積む」順序付けだけに使う。以前はキーワードに一致しないスキルを
+    // 候補から落としており、「今日の天気は？」→「神奈川県でよろー」の2ターン目で
+    // weather が消えてモデルが web_search しか呼べなくなっていた。
+    let mut ranked: Vec<_> = all()
         .iter()
         .filter(|tool| tool.agent_callable())
-        .filter_map(|tool| {
+        .map(|tool| {
             let score = tool
                 .intent_keywords()
                 .iter()
                 .filter(|keyword| normalized.contains(&keyword.to_lowercase()))
                 .map(|keyword| keyword.chars().count())
-                .max()?;
-            Some((tool.intent_priority(), score, tool.name()))
+                .max()
+                .unwrap_or(0);
+            (score > 0, tool.intent_priority(), score, tool.name())
         })
         .collect();
-    matched.sort_unstable_by(|left, right| {
+    // 一致あり → 申告した優先度 → 一致語の長さ → 名前、の順で安定させる。
+    // 予算に収まる限り全件渡すので、この順序は「入り切らないとき何を先に積むか」を決める。
+    ranked.sort_unstable_by(|left, right| {
         right
             .0
             .cmp(&left.0)
             .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| left.2.cmp(right.2))
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.3.cmp(right.3))
     });
-    for (_, _, name) in matched {
-        if selected.len() >= MAX_SELECTED_SCHEMAS {
-            break;
+    let budget = schema_budget_chars(cfg);
+    let mut used: usize = selected.iter().map(schema_chars).sum();
+    for (_, _, _, name) in ranked {
+        let Some(index) = schema_index().get(name) else {
+            continue;
+        };
+        let cost = schema_chars(&compact_schema(&build_schemas()[*index]));
+        if used.saturating_add(cost) > budget {
+            continue;
         }
+        let before = selected.len();
         push_schema_by_name(&mut selected, name);
+        if selected.len() > before {
+            used = used.saturating_add(cost);
+        }
     }
     // 外部 MCP サーバのツール（ユーザーが明示設定したもの）は常に候補へ加える。
     for schema in crate::mcp::client::schemas() {
@@ -457,10 +569,7 @@ pub fn tool_output_limit(cfg: &Config) -> usize {
     if cfg.get("PICOAGENT_PROVIDER", "local") != "local" {
         return CLOUD_TOOL_OUTPUT_CHARS;
     }
-    let ctx = cfg
-        .get("PICOAGENT_LOCAL_CTX", "32768")
-        .parse::<usize>()
-        .unwrap_or(32_768);
+    let ctx = crate::providers::local::context_length(cfg);
     // 人格 system・長期メモリ・会話履歴・ツール定義・生成分を残し、ツール出力へ 45% を配分する。
     // 旧実装は下限を8,000にしたため、既定 ctx=8,192 でも計算結果3,686を8,000へ
     // 戻してしまい、自動計算が実質機能していなかった。
@@ -551,7 +660,18 @@ pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::schemas_for_text;
+    use super::{is_failure_text, schemas_for_text};
+
+    #[test]
+    fn スキルの失敗文を見分ける() {
+        // スキルは run() の失敗を「エラー: 〜」の文字列で返す（AGENTS.md のコネクタ規則）。
+        assert!(is_failure_text(
+            "エラー: 天気の地点が未設定です。設定で市区町村または都道府県を入力してください。"
+        ));
+        assert!(is_failure_text("  エラー：全角コロンの失敗文"));
+        assert!(!is_failure_text("今日の東京は晴れ、最高気温は28度だよ。"));
+        assert!(!is_failure_text("エラーの直し方を説明するね"));
+    }
 
     fn validate_schema(value: &serde_json::Value, location: &str) {
         let object = value
@@ -969,11 +1089,21 @@ mod tests {
     }
 
     #[test]
-    fn 通常発話では基本ツールだけを中心に返す() {
+    fn 発話に関係なくコンテキストに収まるスキルはすべて渡す() {
+        // どれを使うかはモデルが決める。キーワードに一致しないという理由で候補から
+        // 外すと、言い回しが変わっただけで機能が届かなくなる。
         let names = schema_names("こんにちは");
         assert!(names.contains(&"get_time".to_string()));
         assert!(names.contains(&"web_search".to_string()));
-        assert!(!names.contains(&"slack_send_message".to_string()));
+        assert!(
+            names.contains(&"slack_send_message".to_string()),
+            "一致しない語でも候補から外さない: {names:?}"
+        );
+        assert!(
+            names.len() >= 60,
+            "既定のコンテキストではほぼ全スキルが入る: {}",
+            names.len()
+        );
     }
 
     #[test]
@@ -991,16 +1121,17 @@ mod tests {
     #[test]
     fn ツール出力の上限はコンテキスト長に追随する() {
         use crate::config::Config;
+        // 旧既定の 8,192 が保存されていても下限 32,768 まで引き上げて計算する。
         let narrow = Config::new();
         narrow.set("PICOAGENT_LOCAL_CTX", "8192");
         assert_eq!(
             super::tool_output_limit(&narrow),
-            3_686,
-            "既定のコンテキストでも system・履歴・生成用に過半を残す"
+            14_745,
+            "下限未満の保存値は 32,768 として扱う"
         );
 
         let wide = Config::new();
-        wide.set("PICOAGENT_LOCAL_CTX", "32768");
+        wide.set("PICOAGENT_LOCAL_CTX", "65536");
         assert!(
             super::tool_output_limit(&wide) > super::tool_output_limit(&narrow),
             "コンテキストを広げた分だけ多く読める"

@@ -906,6 +906,8 @@ async fn chat_with_retry(
 }
 
 /// ユーザーが停止ボタンで中断を要求したときに返す一言。
+/// 同じ引数での再実行を止めたときにモデルへ返す文。次の一手へ促す。
+const REPEATED_TOOL_CALL: &str = "同じ引数での再実行は行いませんでした。結果は前回と同じです。設定や入力が足りない場合は利用者へ質問し、そうでなければ別の引数か別の方法へ切り替えてください。";
 const CANCEL_MESSAGE: &str = "りょうかい、いまの処理は途中で止めたよ。";
 
 /// 停止したときにキャラクターが返す一言。マルチAIのように `run` を通らない経路でも
@@ -1055,7 +1057,7 @@ async fn run_scoped(
             .map(|message| message.content.clone())
             .collect();
         let earlier_user_texts: Vec<&str> = earlier_user_owned.iter().map(String::as_str).collect();
-        schemas = tools::schemas_for_text(&user_text);
+        schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts);
         let hour = chrono::Local::now().hour();
         let character_greeting = selected_character_greeting(app);
         if let Some(answer) = simple_greeting_answer(&user_text, hour, &character_greeting) {
@@ -1073,7 +1075,30 @@ async fn run_scoped(
                 tools::IntentHandling::Direct => {
                     let answer =
                         dispatch_with_activity(cfg, app, tool_name, invocation.args, cancel).await;
-                    return direct_answer(messages, answer);
+                    if !crate::tools::is_failure_text(&answer) {
+                        return direct_answer(messages, answer);
+                    }
+                    // 先回り実行の結果をそのまま返すのは成功時だけにする。失敗文をそのまま返すと
+                    // 「エラー: 天気の地点が未設定です。設定で…」という生の文が、キャラクターの
+                    // 発言として会話へ並ぶ（実機で確認）。失敗は内部資料としてモデルへ渡し、
+                    // 人格を通して説明させる。
+                    let mut private = Message::new(
+                        "system",
+                        format!(
+                            "利用者の依頼:
+{user_text}
+
+{}スキルの実行結果（失敗）:
+{answer}
+
+                             この失敗を、あなた自身の言葉で短く伝えてください。原文のエラー文を                             そのまま繰り返さず、利用者が次に何をすればよいかを1つだけ示してください。",
+                            crate::tools::label_of(tool_name)
+                        ),
+                    );
+                    private.name = Some("picoagent_private_context".to_string());
+                    // systemをuserより後ろへ置くと拒否するproviderがあるため、
+                    // 利用者原文の直前へ挿入してrole順序も保つ。
+                    messages.insert(user_index, private);
                 }
                 tools::IntentHandling::Material {
                     renderer,
@@ -1120,6 +1145,11 @@ async fn run_scoped(
         // 計画は進捗表示だけに使い、利用者原文やモデル会話へ混ぜない。
     }
 
+    // 本文へ漏れたツール呼び出しの出し直しは、同じ失敗で往復し続けないよう1度だけにする。
+    let mut retried_leaked_tool_call = false;
+    // 実行済みのツール呼び出し（名前＋引数）。同じ呼び出しの空回りを止めるために使う。
+    let mut executed_tool_calls: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for step in 0..max_steps {
         // 停止ボタンによる中断要求はステップ境界で受け付ける（会話履歴の整合を保てる位置）。
         if step > 0 && cancelled() {
@@ -1156,6 +1186,35 @@ async fn run_scoped(
         // reasoning モデルの <think> 推論ブロックを最終回答・履歴・読み上げから除外する
         // （DeepSeek-R1 / Qwen3 系などで英語/中国語の推論が混ざるのを防ぐ）。
         msg.content = crate::message::strip_reasoning(&msg.content);
+        // モデルがツール呼び出しを tool_calls ではなく本文へ書いてしまった場合の救済。
+        // 小型のローカルモデルはテンプレートのツール記法を崩すことがあり、そのまま表示すると
+        // 利用者には `web_search{query:...}` のような文字列だけが届き、ツールも実行されない。
+        // 引数は推測せず（誤った対象へ副作用を与えうる）、1度だけ正しい形式で出し直させる。
+        if msg.tool_calls.as_ref().is_none_or(|calls| calls.is_empty()) {
+            if let Some(leaked) =
+                crate::message::find_leaked_tool_call(&msg.content, &crate::tools::names())
+            {
+                let label = crate::tools::label_of(&leaked.name);
+                msg.content = leaked.cleaned;
+                if !retried_leaked_tool_call {
+                    retried_leaked_tool_call = true;
+                    emit_status(format!("{label}の呼び出しをやり直しています…"));
+                    msg.content.clear();
+                    messages.push(msg);
+                    // 出し直しの指示は利用者への発言ではない。画面・履歴へ出さないよう
+                    // 非公開の内部文脈として積む（Material 経路と同じ扱い）。
+                    let mut notice = Message::new(
+                        "system",
+                        "直前の返答は、ツール呼び出しが本文へ混ざった壊れた形式でした。同じ内容を、必ずツール呼び出しの仕組み（tool_calls）だけで出し直してください。本文へツール名や引数を書かないでください。",
+                    );
+                    notice.name = Some("picoagent_private_context".to_string());
+                    messages.push(notice);
+                    continue;
+                }
+                // 2度目は出し直させず、壊れた表記を利用者へ見せないことだけ担保する。
+                emit_status(format!("{label}を呼び出せませんでした"));
+            }
+        }
         // トークン使用量を記録する（AppHandle がある場合のみ）。
         if let (Some(handle), Some(usage)) = (app, &msg.usage) {
             crate::usage::record(
@@ -1201,12 +1260,21 @@ async fn run_scoped(
                 // 並列ツール実行: 複数の tool_calls を同時に実行して応答速度を向上する。
                 // 引数 JSON が壊れている（_raw フィールドあり）場合はエラーを返し再試行を促す。
                 // 各ツールを個別に計測しながら並列実行する（結果は (出力, 実行ms)）。
+                // 同じツールを同じ引数で呼び直しても結果は変わらない。地点未設定のように
+                // 利用者の操作が要る失敗では、モデルが同じ呼び出しを繰り返してステップ上限まで
+                // 空回りする（実機で「今日の天気は？」が延々と再実行された）。2回目以降は実行
+                // せず、別の手段へ切り替えるよう促す結果を返す。
                 let futs: Vec<_> = cs
                     .iter()
                     .map(|c| {
                         let name = c.name.clone();
                         let args = c.arguments.clone();
+                        let repeated =
+                            !executed_tool_calls.insert(format!("{}::{}", c.name, c.arguments));
                         async move {
+                            if repeated {
+                                return (REPEATED_TOOL_CALL.to_string(), 0);
+                            }
                             let span = crate::tracer::Tracer::start_span(name.as_str());
                             let content = dispatch_or_error(cfg, name.as_str(), args).await;
                             (content, span.finish().1)

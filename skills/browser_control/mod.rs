@@ -483,8 +483,9 @@ mod tests {
 
     #[test]
     fn 本文予算はコンテキスト長に追随する() {
-        let narrow = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "8192")]));
-        let wide = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "32768")]));
+        // 32,768 が下限なので、追随するかは下限より上の値どうしで比べる。
+        let narrow = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "32768")]));
+        let wide = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "131072")]));
         assert!(
             wide > narrow,
             "コンテキストを広げたら本文予算も増える: {narrow} -> {wide}"

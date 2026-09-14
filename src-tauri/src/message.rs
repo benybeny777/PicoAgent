@@ -1,6 +1,8 @@
 // message.rs - picoagent-core の正規形をアプリ内の既存パスで公開する互換層。
 
-pub use picoagent_core::message::{strip_reasoning, Message, TokenUsage, ToolCall};
+pub use picoagent_core::message::{
+    find_leaked_tool_call, strip_reasoning, Message, TokenUsage, ToolCall,
+};
 use serde::Serialize;
 
 /// コネクタがPicoAgentの設定画面へ申告する設定項目。

@@ -48,6 +48,7 @@
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
 | `PICOAGENT_SUPER_AGENT` | `false` | AIモデル | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
 | `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
+| `PICOAGENT_TOOL_CONTEXT_TURNS` | `5` | AIモデル | モデルへ渡すスキル定義の並び順を決めるときに見る、過去の利用者発話の件数。`0` ですべての発話を見る。候補から外す判断には使わず、コンテキストに収まる分はすべて渡す |
 | `PICOAGENT_MULTI_AI_MODE` | `single` | 複数AI | `single` / `consensus` / `collaborate` / `divide`。既定は従来どおり単発。単発以外は Pro 対象の `subagent` を通るため、Pro でなければ保存を拒否し、実行時にライセンスが切れていれば理由を画面へ返す。参加AI設定が壊れていても`single`へ戻す保存は受け付ける |
 | `PICOAGENT_MULTI_AI_AGENTS` | `[]` | 複数AI | 参加AI（name / provider / model / focus）のJSON配列。複数モードでは2〜8件 |
 | `PICOAGENT_MULTI_AI_JUDGE_PROVIDER` | 現在のプロバイダ | 複数AI | 分担計画と回答統合を行うまとめ役のプロバイダ |
@@ -73,7 +74,7 @@
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
-| `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。既存の値は旧既定も含めて保持する |
+| `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。**下限は 32,768 で、これより小さい保存値（旧既定の 8,192 など）は読み取り時に引き上げる**。全スキル定義だけで約16,000トークンあり、狭いコンテキストではモデルへ渡せるスキルが数件まで削られるため |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`）。保存名は同じバックエンド候補だけへ渡し、CUDA等の別候補は各方式の既定先頭デバイスで起動する |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |

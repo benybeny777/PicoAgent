@@ -3028,6 +3028,7 @@ async function render() {
     field("PICOAGENT_SYSTEM_PROMPT", "全キャラ共通の追加指示", "textarea", v.PICOAGENT_SYSTEM_PROMPT ?? "", data.defaults.systemPrompt),
     field("PICOAGENT_SUPER_AGENT", "計画・自己評価・分担を強化する", "checkbox", v.PICOAGENT_SUPER_AGENT === true),
     field("PICOAGENT_SUPER_AGENT_MAX_STEPS", "強化モードの最大ループ数", "text", v.PICOAGENT_SUPER_AGENT_MAX_STEPS ?? "", "12"),
+    field("PICOAGENT_TOOL_CONTEXT_TURNS", "スキル選びで見る過去発話数（0ですべて）", "text", v.PICOAGENT_TOOL_CONTEXT_TURNS ?? "", "5"),
     field("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", "AIモデル一覧の待ち時間（秒）", "text", v.PICOAGENT_HTTP_METADATA_TIMEOUT_SECS ?? "", "15"),
   ]));
   // ローカルAPI（Ollama風）: 外部ツールから 127.0.0.1 の HTTP でエージェントを呼べる。

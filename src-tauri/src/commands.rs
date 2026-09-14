@@ -35,10 +35,7 @@ const LEGACY_AUTO_SUMMARY_BEGIN: &str = "[以前の会話の要約（自動）: 
 /// local は実際の llama-server コンテキスト長へ追従し、それ以外は安全側の既定値にする。
 fn conversation_token_budget(cfg: &Config) -> usize {
     if cfg.get("PICOAGENT_PROVIDER", "local") == "local" {
-        let context = cfg
-            .get("PICOAGENT_LOCAL_CTX", "32768")
-            .parse::<usize>()
-            .unwrap_or(32768);
+        let context = crate::providers::local::context_length(cfg);
         return (context * 3 / 4).clamp(1_500, 24_000);
     }
     MAX_CONTEXT_TOKENS

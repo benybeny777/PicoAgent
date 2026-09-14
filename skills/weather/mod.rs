@@ -216,7 +216,9 @@ impl Tool for WeatherTool {
                     None => return "エラー: 現在地を取得できませんでした。設定で天気の地点を入力してください。".to_string(),
                 }
             } else {
-                return "エラー: 天気の地点が未設定です。設定で市区町村または都道府県を入力してください。".to_string();
+                // 自動取得を切っているために地点が無い、という理由まで伝える。
+                // 「未設定です」だけだと、利用者は設定で自分が無効にしたことへ到達できない。
+                return "エラー: 天気の地点が未設定で、現在地の自動取得も設定で無効になっています。設定で市区町村を入力するか、現在地の自動取得を有効にしてください。".to_string();
             }
         };
         let response = match client
@@ -246,12 +248,36 @@ impl Tool for WeatherTool {
     }
 }
 
-async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, String), String> {
+/// 候補の中から実際に使う地点を選ぶ。
+///
+/// Open-Meteo の地名検索は一致順で返すため、「横浜」では青森県横浜町（人口4,412）が
+/// 先頭に来て、横浜市の天気を聞いたのに別の町の天気を返していた。利用者が地名だけを
+/// 言うときは大きい自治体を指すことがほとんどなので、人口の多い候補を選ぶ。
+/// 同じ地名が複数県にあることを利用者が確かめられるよう、表示名へ都道府県を添える。
+fn pick_location(candidates: &[Value]) -> Option<(f64, f64, String)> {
+    let best = candidates
+        .iter()
+        .max_by_key(|item| item.get("population").and_then(Value::as_u64).unwrap_or(0))?;
+    let lat = best.get("latitude").and_then(Value::as_f64)?;
+    let lon = best.get("longitude").and_then(Value::as_f64)?;
+    let name = best
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let label = match best.get("admin1").and_then(Value::as_str) {
+        Some(area) if !area.is_empty() && area != name => format!("{name}（{area}）"),
+        _ => name,
+    };
+    Some((lat, lon, label))
+}
+
+async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Value>, String> {
     let response = client
         .get(GEOCODE_URL)
         .query(&[
-            ("name", location),
-            ("count", "1"),
+            ("name", name),
+            ("count", "10"),
             ("language", "ja"),
             ("format", "json"),
         ])
@@ -265,25 +291,24 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
     }
     let parsed: Value = serde_json::from_str(&body)
         .map_err(|error| format!("地名検索結果を解析できません: {}", error))?;
-    let first = parsed
+    Ok(parsed
         .get("results")
         .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .ok_or_else(|| format!("地点が見つかりません: {}", location))?;
-    let lat = first
-        .get("latitude")
-        .and_then(Value::as_f64)
-        .ok_or_else(|| "緯度を取得できません。".to_string())?;
-    let lon = first
-        .get("longitude")
-        .and_then(Value::as_f64)
-        .ok_or_else(|| "経度を取得できません。".to_string())?;
-    let name = first
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or(location)
-        .to_string();
-    Ok((lat, lon, name))
+        .cloned()
+        .unwrap_or_default())
+}
+
+async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, String), String> {
+    let mut candidates = fetch_candidates(client, location).await?;
+    // 「横浜」のように自治体の種別を省いた言い方では、小さな同名の町が先に来る。
+    // 「市」を補った候補も集めてから人口で選ぶ。
+    if !location.ends_with(['市', '区', '町', '村']) {
+        if let Ok(extra) = fetch_candidates(client, &format!("{location}市")).await {
+            candidates.extend(extra);
+        }
+    }
+    pick_location(&candidates)
+        .ok_or_else(|| format!("地点が見つかりません: {location}。市区町村まで指定してください。"))
 }
 
 // IP から現在地（緯度経度・市名）をHTTPSで推定する。失敗時は None。
@@ -447,6 +472,32 @@ inventory::submit! { ToolReg { make: || Box::new(WeatherTool) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 同名の地点では人口の多い方を選ぶ() {
+        // 「横浜」は青森県横浜町（人口4,412）が先に返るが、利用者が指すのは横浜市。
+        let candidates = vec![
+            serde_json::json!({"name":"横浜","latitude":41.08,"longitude":141.25,"population":4412,"admin1":"青森県"}),
+            serde_json::json!({"name":"横浜市","latitude":35.43,"longitude":139.65,"population":3777491,"admin1":"神奈川県"}),
+        ];
+        let (lat, _, label) = super::pick_location(&candidates).expect("地点を選べる");
+        assert_eq!(label, "横浜市（神奈川県）");
+        assert!((lat - 35.43).abs() < 0.01);
+    }
+
+    #[test]
+    fn 人口不明の候補しかなくても選べる() {
+        let candidates = vec![
+            serde_json::json!({"name":"神奈川","latitude":35.47,"longitude":139.62,"admin1":"神奈川県"}),
+        ];
+        let (_, _, label) = super::pick_location(&candidates).expect("地点を選べる");
+        assert_eq!(label, "神奈川（神奈川県）");
+    }
+
+    #[test]
+    fn 候補が空なら選ばない() {
+        assert!(super::pick_location(&[]).is_none());
+    }
+
     use super::{
         configured_location, extract_location, is_direct_query, is_weather_source_search,
         parse_ip_location,
