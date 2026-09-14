@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../../ui/mmd-renderer.js', import.meta.url), 'utf8');
+// vm内で作った値は原型が別になるため、構造比較の前に素のオブジェクトへ写す。
+const plain = value => JSON.parse(JSON.stringify(value));
 function profileApi() {
   const window = {};
   const context = vm.createContext({ window, document: { baseURI: 'http://localhost/', currentScript: null }, URL, DOMException });
@@ -37,6 +39,36 @@ test('MMDの複合表情はウェイトを制限し、自動まばたき停止�
     morphs: { 'にこり': 0.6, '赤面': 1 },
     autoBlink: false,
   });
+});
+
+test('MMDの表示確定は目標の姿勢と表情へ一度で到達する', () => {
+  const api = profileApi();
+  // 撮影・表示確定は補間を待たない。1フレームだけ進める既定値では目標へ届かないことも併せて固定する。
+  assert.equal(api.blendFactor(1 / 30, true), 1);
+  assert.equal(api.blendFactor(10, true), 1);
+  assert.ok(api.blendFactor(1 / 30, false) < 0.5);
+  assert.ok(api.blendFactor(10, false) < 0.65);
+  // 目を閉じる自動まばたきの山に当たっていても、確定フレームは半目・閉眼で残さない。
+  assert.equal(api.blinkWeight({ time: 0.08, motion: true, settle: true }), 0);
+  assert.ok(api.blinkWeight({ time: 0.08, motion: true }) > 0.9);
+});
+
+test('MMDの表情はまばたきモーフを含めて補間し、笑顔モーフが無いモデルの瞬きを止めない', () => {
+  const api = profileApi();
+  const profiles = api.normalizeProfiles({ shy: { morphs: { 'まばたき': 1, '赤面': 0.8 } } }, api.normalizeExpressionProfile);
+  const shy = api.expressionTargets('shy', { profiles, smile: '笑い' });
+  assert.deepEqual(plain(shy), { morphs: { 'まばたき': 1, '赤面': 0.8 }, suppressBlink: false });
+  // 設定表情から離れた直後は、閉眼値が残っている間だけ自動まばたきへ戻さない。
+  assert.equal(api.blinkWeight({ expression: 1, time: 2, motion: true, configured: true }), 1);
+  assert.equal(api.blinkWeight({ expression: 0.6, time: 2, motion: true }), 0.6);
+  assert.equal(api.blinkWeight({ expression: 0, time: 2, motion: true }), 0);
+  // 笑い目モーフだけのモデルは閉眼になるため瞬きを止め、笑顔モーフが無いモデルは止めない。
+  assert.deepEqual(plain(api.expressionTargets('success', { smile: '笑い' })), { morphs: { '笑い': 1 }, suppressBlink: true });
+  assert.deepEqual(plain(api.expressionTargets('success', { smileCorners: ['口角上げ'] })), { morphs: { '口角上げ': 0.65 }, suppressBlink: false });
+  assert.deepEqual(plain(api.expressionTargets('success', {})), { morphs: {}, suppressBlink: false });
+  // 状態名がObject.prototypeの名前でも継承値を別名として拾わない。
+  assert.deepEqual(plain(api.expressionTargets('constructor', { smile: '笑い' })), { morphs: {}, suppressBlink: false });
+  assert.equal(api.profileFor(profiles, '__proto__'), null);
 });
 
 test('製品CSPはMMDの復号画像とTauriのIPCを許可し外部サイトを許可しない', () => {
