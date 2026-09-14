@@ -10,6 +10,7 @@ use crate::commands::{
 
 /// 表示形式メニュー項目の ID 接頭辞。`layout:chat` のように形式 ID を続ける。
 const LAYOUT_ID_PREFIX: &str = "layout:";
+const CHARACTER_ID_PREFIX: &str = "character:";
 const PLACE_ID_PREFIX: &str = "place:";
 
 #[tauri::command]
@@ -187,10 +188,86 @@ pub fn pet_layout_menu(
     Ok(())
 }
 
+/// 上端メニューの「キャラ選択」から、キャラクターの一覧をボタン直下へ出す。
+///
+/// 以前は設定画面のキャラ選択タブを開くだけで、隣の「表示」がその場でメニューを出すのと
+/// 挙動が揃っておらず、切り替えるだけなのに設定画面まで往復する必要があった。
+/// 一覧は同梱キャラと追加キャラを突き合わせたフロント側の一覧をそのまま受け取る
+/// （突き合わせを二重に実装すると、片方だけ増減したときに食い違う）。
+#[tauri::command]
+pub fn pet_character_menu(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    characters: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let active = {
+        let state = app.state::<AppState>();
+        state.config.get("PICOAGENT_CHARACTER", "mugi")
+    };
+    let items: Vec<_> = characters
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(serde_json::Value::as_str)?;
+            let name = entry
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(id);
+            CheckMenuItemBuilder::with_id(format!("{CHARACTER_ID_PREFIX}{id}"), name)
+                .checked(id == active)
+                .build(&app)
+                .ok()
+        })
+        .collect();
+    let settings = MenuItemBuilder::with_id("character_settings", "キャラクターの追加・設定…")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
+    let mut menu = MenuBuilder::new(&app);
+    for item in &items {
+        menu = menu.item(item);
+    }
+    let menu = menu
+        .separator()
+        .item(&settings)
+        .build()
+        .map_err(|e| e.to_string())?;
+    window
+        .popup_menu_at(&menu, LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// メニューで選ばれたキャラクターへ切り替える。
+/// 設定画面での保存と同じ経路（設定の保存 → 再初期化）を通すため、人格・背景・音声・
+/// 履歴の切り替えが設定画面から変えた場合と一致する。エンジンとAivisは動かしたままにする。
+fn select_character(app: &tauri::AppHandle, character_id: &str) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let mut patch = serde_json::Map::new();
+        patch.insert(
+            "PICOAGENT_CHARACTER".to_string(),
+            serde_json::json!(character_id),
+        );
+        state
+            .config
+            .set_all(patch)
+            .map_err(|error| format!("キャラクターの保存に失敗しました: {error}"))?;
+    }
+    crate::commands::restart_app(app.clone(), app.state::<AppState>(), false, false)?;
+    Ok(())
+}
+
 /// メニュー選択イベントの処理（main.rs の on_menu_event から呼ぶ）。
 pub fn handle_event(app: &tauri::AppHandle, id: &str) {
     if let Some(layout_id) = id.strip_prefix(LAYOUT_ID_PREFIX) {
         if let Err(error) = crate::layout::select(app, layout_id) {
+            crate::log_paths::append_app_log(app, &error);
+        }
+        return;
+    }
+    if let Some(character_id) = id.strip_prefix(CHARACTER_ID_PREFIX) {
+        if let Err(error) = select_character(app, character_id) {
             crate::log_paths::append_app_log(app, &error);
         }
         return;

@@ -821,7 +821,17 @@ async fn dispatch_with_activity(
         emit_activity(app, "completed", &names, &[]);
         return CANCEL_MESSAGE.to_string();
     };
-    let failed = if answer.starts_with("エラー:") {
+    let failed = if tools::is_failure_text(&answer) {
+        // 失敗内容の先頭だけを app.log に残す（原因調査用。全文はモデルまたは画面へ渡る）。
+        // 以前はモデルの tool_calls 経由の失敗しか記録しておらず、先回り実行で失敗しても
+        // ログに何も出ないため、画面の「天気 失敗」から原因へたどれなかった。
+        if let Some(handle) = app {
+            let preview: String = answer.chars().take(200).collect();
+            crate::log_paths::append_app_log(
+                handle,
+                &format!("スキル {name} が失敗（先回り実行）: {preview}"),
+            );
+        }
         names.clone()
     } else {
         Vec::new()
@@ -906,6 +916,33 @@ async fn chat_with_retry(
 }
 
 /// ユーザーが停止ボタンで中断を要求したときに返す一言。
+/// 「これから実行する」と言っているだけの返答か。
+///
+/// 小さなモデルは、道具を呼ばずに「調べてみるね！」「今すぐ確認するね！」とだけ答えて
+/// 会話を終えることがある。利用者からは実行されたように見えて何も起きないため、
+/// このターンで一度もツールを実行していない場合はやり直させる。
+fn promises_without_acting(answer: &str) -> bool {
+    const PROMISES: &[&str] = &[
+        "調べてみる",
+        "調べるね",
+        "調べてくる",
+        "確認するね",
+        "確認してみる",
+        "チェックするね",
+        "チェックしてみる",
+        "見てみるね",
+        "取ってくる",
+        "待ってて",
+        "少々お待ち",
+        "今すぐ確認",
+        "今すぐ調べ",
+    ];
+    PROMISES.iter().any(|phrase| answer.contains(phrase))
+}
+
+/// 約束だけで終わった返答をやり直させるときにモデルへ渡す指示。
+const ACT_INSTEAD_OF_PROMISE: &str = "その返答は、これから実行するという約束だけで終わっていて、利用者には何も届きません。必要な道具を今このターンで呼び出して、結果そのものを答えてください。呼び出せない場合は、できない理由と次に必要な情報を伝えてください。";
+
 /// 同じ引数での再実行を止めたときにモデルへ返す文。次の一手へ促す。
 const REPEATED_TOOL_CALL: &str = "同じ引数での再実行は行いませんでした。結果は前回と同じです。設定や入力が足りない場合は利用者へ質問し、そうでなければ別の引数か別の方法へ切り替えてください。";
 const CANCEL_MESSAGE: &str = "りょうかい、いまの処理は途中で止めたよ。";
@@ -1073,6 +1110,7 @@ async fn run_scoped(
             } = matched;
             match invocation.handling {
                 tools::IntentHandling::Direct => {
+                    let args = invocation.args.clone();
                     let answer =
                         dispatch_with_activity(cfg, app, tool_name, invocation.args, cancel).await;
                     if !crate::tools::is_failure_text(&answer) {
@@ -1080,25 +1118,24 @@ async fn run_scoped(
                     }
                     // 先回り実行の結果をそのまま返すのは成功時だけにする。失敗文をそのまま返すと
                     // 「エラー: 天気の地点が未設定です。設定で…」という生の文が、キャラクターの
-                    // 発言として会話へ並ぶ（実機で確認）。失敗は内部資料としてモデルへ渡し、
-                    // 人格を通して説明させる。
-                    let mut private = Message::new(
-                        "system",
-                        format!(
-                            "利用者の依頼:
-{user_text}
-
-{}スキルの実行結果（失敗）:
-{answer}
-
-                             この失敗を、あなた自身の言葉で短く伝えてください。原文のエラー文を                             そのまま繰り返さず、利用者が次に何をすればよいかを1つだけ示してください。",
-                            crate::tools::label_of(tool_name)
-                        ),
-                    );
-                    private.name = Some("picoagent_private_context".to_string());
-                    // systemをuserより後ろへ置くと拒否するproviderがあるため、
-                    // 利用者原文の直前へ挿入してrole順序も保つ。
-                    messages.insert(user_index, private);
+                    // 発言として会話へ並ぶ（実機で確認）。
+                    //
+                    // 失敗はモデルへ「通常のツール失敗」と同じ形（assistant の tool_calls と
+                    // 対になる tool 結果）で見せる。system の内部文脈として渡す方式では、
+                    // 長い人格プロンプトと結合されて指示が埋もれ、実機のローカルモデルが
+                    // 失敗を無視して「調べてみるね！」と実行しない約束を返していた。
+                    let call_id = format!("intent_{tool_name}");
+                    let mut call = Message::new("assistant", "");
+                    call.tool_calls = Some(vec![crate::message::ToolCall {
+                        id: call_id.clone(),
+                        name: tool_name.to_string(),
+                        arguments: args,
+                    }]);
+                    messages.push(call);
+                    let mut result = Message::new("tool", answer);
+                    result.tool_call_id = Some(call_id);
+                    result.name = Some(tool_name.to_string());
+                    messages.push(result);
                 }
                 tools::IntentHandling::Material {
                     renderer,
@@ -1150,6 +1187,8 @@ async fn run_scoped(
     // 実行済みのツール呼び出し（名前＋引数）。同じ呼び出しの空回りを止めるために使う。
     let mut executed_tool_calls: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // 約束だけの返答のやり直しも、同じ失敗で往復し続けないよう1度だけにする。
+    let mut promised_retry_done = false;
     for step in 0..max_steps {
         // 停止ボタンによる中断要求はステップ境界で受け付ける（会話履歴の整合を保てる位置）。
         if step > 0 && cancelled() {
@@ -1393,6 +1432,18 @@ async fn run_scoped(
             }
             // tool_calls が無ければ最終応答（自己評価が有効なら品質チェックして返す）。
             _ => {
+                // 道具を1度も呼ばずに「調べてみるね！」で終わる返答を、実行済みとして返さない。
+                // 実機で「横浜」と地名を答えた次のターンに繰り返し起きた。
+                if executed_tool_calls.is_empty()
+                    && !promised_retry_done
+                    && promises_without_acting(&last)
+                {
+                    promised_retry_done = true;
+                    let mut notice = Message::new("system", ACT_INSTEAD_OF_PROMISE);
+                    notice.name = Some("picoagent_private_context".to_string());
+                    messages.push(notice);
+                    continue;
+                }
                 let prompt = system_prompt_of(messages);
                 let answer = append_sources(remove_material_leaks(last), &sources);
                 // 混入の除去は self_improve の後に置く。自己評価は回答を作り直すことがあり、
