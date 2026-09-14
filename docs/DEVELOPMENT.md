@@ -91,7 +91,7 @@ graph LR
 
 LocalVTuberStudio形式の実画面検査は、まずリポジトリ直下を`uv run python -m http.server 8776 --bind 0.0.0.0 --directory .`で配信する。Codex DesktopのPlaywrightは製品依存へ追加せず、`load_workspace_dependencies`で取得した現行パスを指定する。2026年9月7日時点では次の形だが、存在しない場合は固定値を推測せず再取得する。
 
-Windowsで人が確認する場合は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。「独自2.5D」は確認用HTTPサーバーと比較画面をまとめて起動し、終了操作で自分が起動したサーバーを回収する。MMDの2体と、実体から列挙する登録済みLive2Dは`PICO_PREVIEW_CHARACTER`をその起動中だけ指定して`cargo xtask dev`を実行するため、保存済みのキャラ選択を書き換えない。MMDとLive2Dはブラウザ用の代替描画ではなく、製品CSPとWebViewを通る実アプリで確認する。
+WindowsのBATは、`cmd.exe`のコードページ差で日本語を命令として誤解しないようASCIIだけの入口とし、利用者向け表示と実処理をUTF-8のPowerShellスクリプトへ置く。通常起動は`PicoAgentを起動.bat`から`scripts/start-picoagent.ps1`を呼ぶ。キャラクター確認は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。「独自2.5D」は確認用HTTPサーバーと比較画面をまとめて起動し、終了操作で自分が起動したサーバーを回収する。MMDの2体と、実体から列挙する登録済みLive2Dは`PICO_PREVIEW_CHARACTER`をその起動中だけ指定して`cargo xtask dev`を実行するため、保存済みのキャラ選択を書き換えない。MMDとLive2Dはブラウザ用の代替描画ではなく、製品CSPとWebViewを通る実アプリで確認する。
 
 ```powershell
 $env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'

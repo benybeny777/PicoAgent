@@ -14,6 +14,20 @@ const previewLauncher = readFileSync(
 );
 const config = readFileSync(new URL("../../src-tauri/src/config.rs", import.meta.url), "utf8");
 
+test("WindowsのBAT入口はcmdの文字コードに依存しない", () => {
+  for (const name of [
+    "PicoAgentを起動.bat",
+    "キャラクター確認画面を開く.bat",
+    "関係者版インストーラをビルド.bat",
+  ]) {
+    const bytes = readFileSync(new URL(`../../${name}`, import.meta.url));
+    assert.ok(
+      bytes.every((byte) => byte < 0x80),
+      `${name}はASCIIだけでPowerShell入口を呼ぶ`,
+    );
+  }
+});
+
 test("Windowsの確認入口は2.5D・MMD・登録済みLive2Dを選べる", () => {
   assert.match(previewLauncher, /'2d', 'live2d', 'miko-mmd', 'korone-mmd'/);
   assert.match(previewLauncher, /manifest\.live2d/);
