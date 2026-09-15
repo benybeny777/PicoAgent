@@ -30,6 +30,12 @@ test("進捗文言は考え中の行の名前にし、ツール実行中の文�
   assert.deepEqual(summary(run), [["計画を立てています", "running"]]);
 });
 
+test("内部ループの番号を利用者向けの作業名へ出さない", () => {
+  assert.doesNotMatch(agent, /ステップ \{\}\/\{\} を実行中/);
+  assert.match(agent, /emit_status\("考え中…"\.to_string\(\)\)/);
+  assert.match(agent, /emit_status\("考え直しています…"\.to_string\(\)\)/);
+});
+
 test("ツール開始で考え中を完了にし、表示名で実行中の行を足す", () => {
   const run = TaskRun.createRun(0);
   TaskRun.applyActivity(run, { phase: "started", tools: ["web_search", "comfyui_generate"], labels: ["Web検索", "ローカル画像・動画生成"] }, 2000);

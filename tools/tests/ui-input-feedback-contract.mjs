@@ -231,6 +231,11 @@ test("窓に収まらないフキダシ保存値は表示側で収める", () =>
   assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*refitBubbleToWindow\(\);/);
 });
 
+test("ダブルクリックでは全画面へ切り替えず拡大ボタンだけを使う", () => {
+  assert.doesNotMatch(renderer, /addEventListener\("dblclick"/);
+  assert.match(renderer, /toggleFullscreenButton\?\.addEventListener\("click"[\s\S]*?toggleBubbleFullscreen\(\)/);
+});
+
 test("準備中・失敗の理由は入力や読み上げ操作で消さない", () => {
   // SPEC: `error` は診断・修復へ進める理由として常時表示する。入力のたびに状態表示を
   // 空にすると、赤い空欄と無効な送信ボタンだけが残り、送れない理由が分からなくなる。
