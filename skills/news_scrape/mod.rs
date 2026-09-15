@@ -47,6 +47,9 @@ fn is_summary_query(text: &str) -> bool {
     if lower.contains("ニュースリリース")
         || lower.contains("リリースノート")
         || lower.contains("release note")
+        || ["詳しく", "詳細", "深掘り", "深堀り", "掘り下げ", "背景を"]
+            .iter()
+            .any(|marker| normalized.contains(marker))
     {
         return false;
     }
@@ -307,7 +310,7 @@ inventory::submit! { ToolReg { make: || Box::new(NewsScrapeTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_items, NewsSource};
+    use super::{extract_items, is_summary_query, NewsSource};
 
     #[test]
     fn google_newsの見出しを抽出する() {
@@ -331,5 +334,12 @@ mod tests {
         let items = extract_items(&source, html, 5).unwrap();
         assert_eq!(items[0].0, "社会ニュースの重要な見出し");
         assert!(items[0].1.contains("news.yahoo.co.jp/articles/abc123"));
+    }
+
+    #[test]
+    fn ニュースの深掘り質問を一般ニュース一覧へ戻さない() {
+        assert!(!is_summary_query("このニュースを詳しく教えて"));
+        assert!(!is_summary_query("宇宙開発のニュースを深掘りして"));
+        assert!(is_summary_query("今日のニュースは？"));
     }
 }

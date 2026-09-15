@@ -110,6 +110,9 @@ struct SourceLink {
 
 fn source_title(line: &str) -> Option<String> {
     let trimmed = line.trim();
+    if let Some(title) = trimmed.strip_prefix("参照見出し: ") {
+        return Some(title.trim().to_string());
+    }
     if let Some(title) = trimmed.strip_prefix("- ") {
         return (!title.starts_with("エラー:")).then(|| title.trim().to_string());
     }
@@ -469,6 +472,11 @@ fn remove_material_leaks(answer: String) -> String {
         strip_between_markers(answer, "--- ニュースRSS開始 ---", "--- ニュースRSS終了 ---");
     let answer =
         strip_between_markers(answer, "--- Web検索結果開始 ---", "--- Web検索結果終了 ---");
+    let answer = strip_between_markers(
+        answer,
+        "--- 記事内部資料開始 ---",
+        "--- 記事内部資料終了 ---",
+    );
     answer
         .lines()
         .filter(|line| {
@@ -1143,6 +1151,15 @@ async fn run_scoped(
             .map(|message| message.content.clone())
             .collect();
         let earlier_user_texts: Vec<&str> = earlier_user_owned.iter().map(String::as_str).collect();
+        let earlier_assistant_owned: Vec<String> = messages[..user_index]
+            .iter()
+            .rev()
+            .filter(|message| message.role == "assistant")
+            .take(3)
+            .map(|message| message.content.clone())
+            .collect();
+        let earlier_assistant_texts: Vec<&str> =
+            earlier_assistant_owned.iter().map(String::as_str).collect();
         schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts);
         let hour = chrono::Local::now().hour();
         let character_greeting = selected_character_greeting(app);
@@ -1151,7 +1168,7 @@ async fn run_scoped(
         } else if let Some(answer) = setup_guide_answer(&user_text) {
             return direct_answer(messages, answer);
         } else if let Some(matched) =
-            tools::intent_for_conversation(&user_text, &earlier_user_texts)
+            tools::intent_for_dialogue(&user_text, &earlier_user_texts, &earlier_assistant_texts)
         {
             let tools::MatchedIntent {
                 tool_name,
