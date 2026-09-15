@@ -19,6 +19,8 @@ use crate::gpu::{GpuDevice, GpuMemory, GpuVendor};
 pub enum GenerationBackend {
     Cuda,
     Rocm,
+    /// Apple SiliconのMetal（PyTorchのMPSバックエンド）。
+    Mps,
 }
 
 impl GenerationBackend {
@@ -27,6 +29,7 @@ impl GenerationBackend {
         match self {
             Self::Cuda => "CUDA",
             Self::Rocm => "ROCm",
+            Self::Mps => "MPS（Metal）",
         }
     }
 
@@ -35,6 +38,7 @@ impl GenerationBackend {
         match self {
             Self::Cuda => "cuda",
             Self::Rocm => "rocm",
+            Self::Mps => "mps",
         }
     }
 
@@ -43,6 +47,7 @@ impl GenerationBackend {
         match self {
             Self::Cuda => CUDA_RELEASE,
             Self::Rocm => ROCM_RELEASE,
+            Self::Mps => MPS_RELEASE,
         }
     }
 
@@ -51,6 +56,7 @@ impl GenerationBackend {
         match self {
             Self::Cuda => CUDA_TORCH_VERSION,
             Self::Rocm => ROCM_TORCH_VERSION,
+            Self::Mps => MPS_TORCH_VERSION,
         }
     }
 
@@ -59,6 +65,18 @@ impl GenerationBackend {
         match self {
             Self::Cuda => "requirements-comfy.lock",
             Self::Rocm => "requirements-comfy-rocm.lock",
+            Self::Mps => "requirements-comfy-mps.lock",
+        }
+    }
+
+    /// ComfyUIの`--lowvram`を使ってよいバックエンドか。
+    ///
+    /// MPSでは**実機で検証済みの起動引数だけ**を使う。専用VRAMを持たない
+    /// ユニファイドメモリ機に、専用VRAM前提の省メモリ指定を流用しない。
+    pub fn supports_lowvram(self) -> bool {
+        match self {
+            Self::Cuda | Self::Rocm => true,
+            Self::Mps => false,
         }
     }
 }
@@ -77,6 +95,13 @@ const ROCM_RELEASE: &str = "rocm-7.2.1";
 const ROCM_TORCH_VERSION: &str = "2.9.1+rocm7.2.1";
 /// 利用者へ案内する必要ドライバー。
 pub const ROCM_REQUIRED_DRIVER: &str = "26.2.2";
+
+/// MPS側の固定情報。
+///
+/// macOS arm64のPyTorchはPyPIの標準wheelがMetal（MPS）を含むため、専用インデックスも
+/// 専用ビルドも使わない。版はCUDA側と同じ2.11.0系へ揃える。Intel Macは対象外。
+const MPS_RELEASE: &str = "metal-mps";
+const MPS_TORCH_VERSION: &str = "2.11.0";
 
 /// Windowsで公式ROCm版PyTorchが対応するGPU（正規化した小文字名の完全一致）。
 ///
@@ -173,6 +198,16 @@ pub fn select(devices: &[GpuDevice], nvidia_cuda_ready: bool) -> BackendSelectio
             device.name
         ));
     }
+    // Apple Silicon（ユニファイドメモリ）はMetal（MPS）を使う。Intel Macは対象外。
+    if let Some(device) = devices
+        .iter()
+        .find(|device| device.vendor == GpuVendor::Apple)
+    {
+        return BackendSelection::Supported(SelectedBackend {
+            backend: GenerationBackend::Mps,
+            device: device.clone(),
+        });
+    }
     if let Some(device) = devices
         .iter()
         .find(|device| device.vendor == GpuVendor::Intel)
@@ -199,10 +234,27 @@ pub struct LowVramDecision {
     pub reason: String,
 }
 
-/// 生成に使うGPUから`--lowvram`の要否を決める。
+/// 生成に使うGPUとバックエンドから`--lowvram`の要否を決める。
 ///
-/// 専用VRAM16GB未満・共有メモリ・取得失敗はすべてlowvram（安全側）。
-pub fn lowvram_decision(device: Option<&GpuDevice>) -> LowVramDecision {
+/// 専用VRAM16GB未満・共有メモリ・取得失敗はすべてlowvram（安全側）。ただし
+/// **MPS（Apple Silicon）では専用VRAMの判定を流用しない。** ユニファイドメモリは
+/// OSとアプリの作業領域を含む総量であり、専用VRAMと同じ意味を持たないうえ、
+/// MPSでは実機で検証済みの起動引数だけを使うためである。
+pub fn lowvram_decision(
+    backend: Option<GenerationBackend>,
+    device: Option<&GpuDevice>,
+) -> LowVramDecision {
+    if backend.is_some_and(|backend| !backend.supports_lowvram())
+        || matches!(
+            device.map(|device| device.memory),
+            Some(GpuMemory::Unified(_))
+        )
+    {
+        return LowVramDecision {
+            lowvram: false,
+            reason: "ユニファイドメモリのMacでは専用VRAM前提の省メモリ指定を使わず、検証済みの起動設定で実行します。".into(),
+        };
+    }
     match device.map(|device| device.memory) {
         Some(GpuMemory::Dedicated(bytes)) if bytes >= LOWVRAM_THRESHOLD_BYTES => LowVramDecision {
             lowvram: false,
@@ -238,11 +290,116 @@ const VIDEO_MODEL_MIN_VRAM_BYTES: u64 = 7_500_000_000;
 /// 8GB級のVRAMを確保しても本体側が足りる構成に限る。
 const VIDEO_MODEL_MIN_SHARED_RAM_BYTES: u64 = 32_000_000_000;
 
-/// 動画モデルを取得してよいメモリがあるか。足りない場合は日本語の理由を返す。
+/// ユニファイドメモリ機で、OSと作業領域のために空けておく分。
 ///
-/// **共有メモリを専用VRAMへ加算しない。** 判定できない場合は取得しない。
-pub fn video_memory_shortage(device: &GpuDevice, total_ram_bytes: Option<u64>) -> Option<String> {
+/// ユニファイドメモリはCPUとGPUで同じ実体を使うため、重みの合計をそのまま
+/// 載せられるわけではない。必要量は「そのモデルの最大重み＋この余白」で見積もる。
+const UNIFIED_MEMORY_MARGIN_BYTES: u64 = 8_000_000_000;
+
+/// MPS（Apple Silicon）での確認状態。
+///
+/// **実機で確認するまで「対応」と表示しない。** 確認結果に応じてこの表だけを変える。
+/// `Verified`と`Unsupported`は実機検証後に`GENERATION_MODELS`へ入れる状態なので、
+/// まだ表に無くても消さない（消すと確認結果を書き戻す場所が無くなる）。
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MpsSupport {
+    /// 実機で生成まで確認済み。
+    Verified,
+    /// 実行はできるが実機未確認。画面には「未検証」と明示する。
+    Unverified,
+    /// 実機確認の結果、使わないと決めた（理由を添える）。
+    Unsupported(&'static str),
+}
+
+/// 生成機能が使うモデル一式と、必要メモリ・MPSでの確認状態。
+#[derive(Clone, Copy, Debug)]
+pub struct GenerationModel {
+    /// 追加機能のID（`character-maker` / `video-wan` / `video-ltx`）。
+    pub component: &'static str,
+    pub label: &'static str,
+    /// そのworkflowで読み込む最大の重み（バイト）。固定済みのモデルサイズから取る。
+    pub largest_weight_bytes: u64,
+    pub mps: MpsSupport,
+}
+
+impl GenerationModel {
+    /// ユニファイドメモリ機で必要になる総メモリの目安。
+    ///
+    /// 「最大の重み＋OSと作業領域の余白」。**実機計測が済むまでの暫定値**で、
+    /// 計測後に`docs/models.md`とこの表を実測へ置き換える。
+    pub fn required_unified_bytes(self) -> u64 {
+        self.largest_weight_bytes + UNIFIED_MEMORY_MARGIN_BYTES
+    }
+}
+
+/// モデルごとの必要メモリとMPSでの確認状態。
+///
+/// 重みの大きさは`character-maker/sidecar/media/setup_models.py`と
+/// `character-maker/installer/setup-runtime-models.py`が固定しているモデルに対応する。
+/// Qwen Image Edit 2511 BF16（約41GB）はキャラクター作成基盤に含まれ、
+/// Grounding DINOとSAM 2.1（いずれも1GB未満）は同じ基盤へ同梱される。
+pub const GENERATION_MODELS: &[GenerationModel] = &[
+    GenerationModel {
+        component: "character-maker",
+        label: "Qwen画像編集・キャラクター作成（Grounding DINO、SAM 2.1を含む）",
+        largest_weight_bytes: 41_000_000_000,
+        mps: MpsSupport::Unverified,
+    },
+    GenerationModel {
+        component: "video-wan",
+        label: "Wan 2.2動画生成",
+        largest_weight_bytes: 9_999_658_848,
+        mps: MpsSupport::Unverified,
+    },
+    GenerationModel {
+        component: "video-ltx",
+        label: "LTX軽量動画生成",
+        largest_weight_bytes: 9_787_841_024,
+        mps: MpsSupport::Unverified,
+    },
+];
+
+/// 追加機能IDからモデル情報を引く。
+pub fn model_for(component: &str) -> Option<GenerationModel> {
+    GENERATION_MODELS
+        .iter()
+        .find(|model| model.component == component)
+        .copied()
+}
+
+/// そのモデルをこのGPUで取得・実行してよいか。使えない場合は日本語の理由を返す。
+///
+/// **共有メモリとユニファイドメモリを専用VRAMへ加算しない。** ユニファイドメモリ機は
+/// 専用VRAMの判定を流用せず、モデルごとの必要メモリで判定する。判定できない場合は
+/// 取得しない。
+pub fn model_memory_shortage(
+    model: GenerationModel,
+    device: &GpuDevice,
+    total_ram_bytes: Option<u64>,
+) -> Option<String> {
+    if let MpsSupport::Unsupported(reason) = model.mps {
+        if device.vendor == GpuVendor::Apple {
+            return Some(format!(
+                "{}はApple Silicon Macでは対応していません（{reason}）。取得していません。",
+                model.label
+            ));
+        }
+    }
     match device.memory {
+        GpuMemory::Unified(bytes) => {
+            let required = model.required_unified_bytes();
+            (bytes < required).then(|| {
+                format!(
+                    "{}には{}GB以上のユニファイドメモリが必要です（このMacは{}GB）。取得していません。",
+                    model.label,
+                    decimal_gb_label(required),
+                    decimal_gb_label(bytes)
+                )
+            })
+        }
+        // キャラクター作成基盤は従来どおり専用VRAM量では止めない（CUDA既存経路を変えない）。
+        _ if model.component == "character-maker" => None,
         GpuMemory::Dedicated(bytes) if bytes >= VIDEO_MODEL_MIN_VRAM_BYTES => None,
         GpuMemory::Dedicated(bytes) => Some(format!(
             "動画モデルには専用VRAM 8GB以上が必要です（このGPUは{}GB）。動画モデルは取得していません。",
@@ -262,6 +419,16 @@ pub fn video_memory_shortage(device: &GpuDevice, total_ram_bytes: Option<u64>) -
             "GPUの専用VRAM量を確認できないため、動画モデルは取得していません。".into(),
         ),
     }
+}
+
+/// MPSで未検証のモデルを実行するときに画面へ出す注意。対象外なら`None`。
+pub fn mps_unverified_notice(model: GenerationModel, backend: GenerationBackend) -> Option<String> {
+    (backend == GenerationBackend::Mps && model.mps == MpsSupport::Unverified).then(|| {
+        format!(
+            "{}はApple Silicon Macでの実機確認が済んでいません。結果が壊れる場合は設定から取り消してください。",
+            model.label
+        )
+    })
 }
 
 /// 十進GBの表示（小数第1位まで）。
@@ -298,9 +465,16 @@ pub const GPU_OOM_EXIT_CODE: i32 = 3;
 /// `--lowvram`を付けて1回だけやり直すかどうか。
 ///
 /// 通常起動のOOMだけが対象。lowvram中のOOM、OOM以外の失敗、終了コードを取得できない
-/// 場合は再試行しない（無限再試行を作らない）。
-pub fn should_retry_with_lowvram(exit_code: Option<i32>, lowvram_used: bool) -> bool {
-    !lowvram_used && exit_code == Some(GPU_OOM_EXIT_CODE)
+/// 場合は再試行しない（無限再試行を作らない）。`--lowvram`を検証していないバックエンド
+/// （MPS）では、メモリ不足でも未検証の起動引数へ切り替えない。
+pub fn should_retry_with_lowvram(
+    backend: Option<GenerationBackend>,
+    exit_code: Option<i32>,
+    lowvram_used: bool,
+) -> bool {
+    backend.is_none_or(GenerationBackend::supports_lowvram)
+        && !lowvram_used
+        && exit_code == Some(GPU_OOM_EXIT_CODE)
 }
 
 /// 生成に使うGPU。導入済みランタイムのベンダーに一致するものを選ぶ。
@@ -514,6 +688,169 @@ mod tests {
         }
     }
 
+    fn apple(memory: GpuMemory) -> GpuDevice {
+        device(GpuVendor::Apple, "Apple M3 Pro", memory)
+    }
+
+    #[test]
+    fn apple_siliconではmpsだけを選ぶ() {
+        let selection = select(&[apple(GpuMemory::Unified(36_000_000_000))], false);
+        let selected = selection.supported().expect("MPSを選ぶ");
+        assert_eq!(selected.backend, GenerationBackend::Mps);
+        assert_eq!(
+            selected.backend.lock_file_name(),
+            "requirements-comfy-mps.lock"
+        );
+        assert_eq!(selected.backend.torch_version(), "2.11.0");
+    }
+
+    #[test]
+    fn mpsでは専用vramの判定を流用しない() {
+        // ユニファイドメモリ16GB未満でもlowvramにしない（専用VRAMと同じ意味を持たない）。
+        let decision = lowvram_decision(
+            Some(GenerationBackend::Mps),
+            Some(&apple(GpuMemory::Unified(8_000_000_000))),
+        );
+        assert!(!decision.lowvram);
+        assert!(
+            decision.reason.contains("ユニファイドメモリ"),
+            "{}",
+            decision.reason
+        );
+        // 16GB以上でも同じ扱いにする（境界で挙動を変えない）。
+        assert!(
+            !lowvram_decision(
+                Some(GenerationBackend::Mps),
+                Some(&apple(GpuMemory::Unified(64_000_000_000)))
+            )
+            .lowvram
+        );
+        assert!(!GenerationBackend::Mps.supports_lowvram());
+    }
+
+    #[test]
+    fn mpsではメモリ不足でも未検証の起動引数へ切り替えない() {
+        assert!(!should_retry_with_lowvram(
+            Some(GenerationBackend::Mps),
+            Some(GPU_OOM_EXIT_CODE),
+            false
+        ));
+    }
+
+    #[test]
+    fn ユニファイドメモリが足りないmacではモデルを取得しない() {
+        let wan = model_for("video-wan").expect("Wanのモデル情報");
+        // 必要量は「最大の重み＋OSと作業領域の余白」。
+        assert_eq!(
+            wan.required_unified_bytes(),
+            wan.largest_weight_bytes + UNIFIED_MEMORY_MARGIN_BYTES
+        );
+        let short = model_memory_shortage(
+            wan,
+            &apple(GpuMemory::Unified(16_000_000_000)),
+            Some(16_000_000_000),
+        )
+        .expect("不足を止める");
+        assert!(short.contains("取得していません"), "{short}");
+        assert!(model_memory_shortage(
+            wan,
+            &apple(GpuMemory::Unified(36_000_000_000)),
+            Some(36_000_000_000)
+        )
+        .is_none());
+        // キャラクター作成基盤（Qwen）はさらに大きいメモリを要求する。
+        let maker = model_for("character-maker").expect("キャラ作成のモデル情報");
+        assert!(maker.required_unified_bytes() > wan.required_unified_bytes());
+        assert!(model_memory_shortage(
+            maker,
+            &apple(GpuMemory::Unified(36_000_000_000)),
+            Some(36_000_000_000)
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn 共有メモリとユニファイドメモリを別々に判定する() {
+        let wan = model_for("video-wan").expect("Wanのモデル情報");
+        // 共有メモリのWindows機は搭載RAMで判定し、ユニファイドは必要メモリで判定する。
+        assert!(model_memory_shortage(
+            wan,
+            &device(
+                GpuVendor::Amd,
+                "AMD Radeon 8060S Graphics",
+                GpuMemory::Shared
+            ),
+            Some(16_000_000_000)
+        )
+        .is_some());
+        assert!(model_memory_shortage(
+            wan,
+            &device(
+                GpuVendor::Amd,
+                "AMD Radeon 8060S Graphics",
+                GpuMemory::Shared
+            ),
+            Some(64_000_000_000)
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn mps未対応と決めたモデルはmacで取得しない() {
+        let unsupported = GenerationModel {
+            component: "video-wan",
+            label: "Wan 2.2動画生成",
+            largest_weight_bytes: 1,
+            mps: MpsSupport::Unsupported("実機で映像破損が再現したため"),
+        };
+        let reason = model_memory_shortage(
+            unsupported,
+            &apple(GpuMemory::Unified(128_000_000_000)),
+            Some(128_000_000_000),
+        )
+        .expect("非対応は止める");
+        assert!(reason.contains("映像破損"), "{reason}");
+        // 同じモデルでもWindows側は止めない（Macだけの判断にする）。
+        assert!(model_memory_shortage(
+            unsupported,
+            &device(
+                GpuVendor::Nvidia,
+                "NVIDIA GeForce RTX 5080",
+                GpuMemory::Dedicated(16_000_000_000)
+            ),
+            Some(64_000_000_000)
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn mps実機未確認のモデルは未検証と伝える() {
+        let wan = model_for("video-wan").expect("Wanのモデル情報");
+        assert_eq!(wan.mps, MpsSupport::Unverified);
+        let notice =
+            mps_unverified_notice(wan, GenerationBackend::Mps).expect("未検証を隠さず伝える");
+        assert!(notice.contains("実機確認が済んでいません"), "{notice}");
+        // CUDA／ROCmでは出さない。
+        assert!(mps_unverified_notice(wan, GenerationBackend::Cuda).is_none());
+        // 確認済みへ変えたら出さない。
+        let verified = GenerationModel {
+            mps: MpsSupport::Verified,
+            ..wan
+        };
+        assert!(mps_unverified_notice(verified, GenerationBackend::Mps).is_none());
+    }
+
+    #[test]
+    fn 全モデルに必要メモリとmps確認状態を持たせる() {
+        for component in ["character-maker", "video-wan", "video-ltx"] {
+            let model =
+                model_for(component).unwrap_or_else(|| panic!("{component}のモデル情報が必要"));
+            assert!(model.largest_weight_bytes > 0, "{component}");
+            assert!(!model.label.is_empty(), "{component}");
+        }
+        assert!(model_for("aivis").is_none());
+    }
+
     #[test]
     fn gpuなしでは生成用アセットを取得しない() {
         assert!(matches!(
@@ -581,14 +918,23 @@ mod tests {
 
     #[test]
     fn 通常起動のoomだけlowvramで1回再試行する() {
-        assert!(should_retry_with_lowvram(Some(GPU_OOM_EXIT_CODE), false));
+        let cuda = Some(GenerationBackend::Cuda);
+        assert!(should_retry_with_lowvram(
+            cuda,
+            Some(GPU_OOM_EXIT_CODE),
+            false
+        ));
         // lowvram中のOOMでは再試行しない。
-        assert!(!should_retry_with_lowvram(Some(GPU_OOM_EXIT_CODE), true));
+        assert!(!should_retry_with_lowvram(
+            cuda,
+            Some(GPU_OOM_EXIT_CODE),
+            true
+        ));
         // OOM以外の失敗では再試行しない。
-        assert!(!should_retry_with_lowvram(Some(1), false));
-        assert!(!should_retry_with_lowvram(Some(0), false));
+        assert!(!should_retry_with_lowvram(cuda, Some(1), false));
+        assert!(!should_retry_with_lowvram(cuda, Some(0), false));
         // 終了コードを取得できない場合も再試行しない。
-        assert!(!should_retry_with_lowvram(None, false));
+        assert!(!should_retry_with_lowvram(cuda, None, false));
     }
 
     #[test]
@@ -614,46 +960,58 @@ mod tests {
 
     #[test]
     fn 専用vramが16gb未満ならlowvramにする() {
-        let decision = lowvram_decision(Some(&device(
-            GpuVendor::Nvidia,
-            "NVIDIA GeForce RTX 5060 Laptop GPU",
-            GpuMemory::Dedicated(15_999_999_999),
-        )));
+        let decision = lowvram_decision(
+            Some(GenerationBackend::Cuda),
+            Some(&device(
+                GpuVendor::Nvidia,
+                "NVIDIA GeForce RTX 5060 Laptop GPU",
+                GpuMemory::Dedicated(15_999_999_999),
+            )),
+        );
         assert!(decision.lowvram);
         assert!(decision.reason.contains("lowvram"), "{}", decision.reason);
     }
 
     #[test]
     fn 専用vramが16gb以上なら通常起動にする() {
-        let decision = lowvram_decision(Some(&device(
-            GpuVendor::Amd,
-            "AMD Radeon RX 9070 XT",
-            GpuMemory::Dedicated(LOWVRAM_THRESHOLD_BYTES),
-        )));
+        let decision = lowvram_decision(
+            Some(GenerationBackend::Rocm),
+            Some(&device(
+                GpuVendor::Amd,
+                "AMD Radeon RX 9070 XT",
+                GpuMemory::Dedicated(LOWVRAM_THRESHOLD_BYTES),
+            )),
+        );
         assert!(!decision.lowvram);
     }
 
     #[test]
     fn 共有メモリならlowvramにする() {
-        let decision = lowvram_decision(Some(&device(
-            GpuVendor::Amd,
-            "AMD Radeon 8060S Graphics",
-            GpuMemory::Shared,
-        )));
+        let decision = lowvram_decision(
+            Some(GenerationBackend::Rocm),
+            Some(&device(
+                GpuVendor::Amd,
+                "AMD Radeon 8060S Graphics",
+                GpuMemory::Shared,
+            )),
+        );
         assert!(decision.lowvram);
     }
 
     #[test]
     fn vram取得失敗ならlowvramにする() {
         assert!(
-            lowvram_decision(Some(&device(
-                GpuVendor::Amd,
-                "AMD Radeon RX 9070 XT",
-                GpuMemory::Unknown
-            )))
+            lowvram_decision(
+                Some(GenerationBackend::Rocm),
+                Some(&device(
+                    GpuVendor::Amd,
+                    "AMD Radeon RX 9070 XT",
+                    GpuMemory::Unknown
+                ))
+            )
             .lowvram
         );
-        assert!(lowvram_decision(None).lowvram);
+        assert!(lowvram_decision(None, None).lowvram);
     }
 
     #[test]
@@ -661,11 +1019,14 @@ mod tests {
         // 16GiB（17_179_869_184）ではなく十進16GBを境界にする。
         assert_eq!(LOWVRAM_THRESHOLD_BYTES, 16_000_000_000);
         assert!(
-            !lowvram_decision(Some(&device(
-                GpuVendor::Nvidia,
-                "NVIDIA GeForce RTX 5080",
-                GpuMemory::Dedicated(16_000_000_000)
-            )))
+            !lowvram_decision(
+                Some(GenerationBackend::Cuda),
+                Some(&device(
+                    GpuVendor::Nvidia,
+                    "NVIDIA GeForce RTX 5080",
+                    GpuMemory::Dedicated(16_000_000_000)
+                ))
+            )
             .lowvram
         );
     }

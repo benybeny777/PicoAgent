@@ -5,10 +5,36 @@
 77GBのモデル取得を始めない。
 
 ROCm版PyTorchも互換APIとして`torch.cuda`名前空間を使う。`.to("rocm")`のような置換はしない。
+MPS（Apple Silicon）だけは`torch.cuda`ではなく`torch.backends.mps`と`mps`デバイスを使う。
 """
 import argparse
 import json
 import sys
+
+
+def check_mps(torch, detail):
+    """Apple SiliconのMetal（MPS）バックエンドを確かめる。"""
+    if not torch.backends.mps.is_available():
+        built = torch.backends.mps.is_built()
+        raise SystemExit(json.dumps(
+            {"error": f"MPSを利用できません（is_available=False, is_built={built}）", **detail},
+            ensure_ascii=False))
+    device = torch.device("mps")
+    detail["device"] = "Apple Silicon GPU (MPS)"
+    # 最小テンソル演算。MPSで実際に計算できることを確かめる。
+    left = torch.ones((64, 64), device=device, dtype=torch.float16)
+    product = (left @ left).float().sum().item()
+    if product != 64 * 64 * 64:
+        raise SystemExit(json.dumps({"error": f"行列積の結果が不正です: {product}", **detail},
+                                    ensure_ascii=False))
+    image = torch.ones((1, 1, 8, 8), device=device, dtype=torch.float16)
+    weight = torch.ones((1, 1, 3, 3), device=device, dtype=torch.float16)
+    convolved = torch.nn.functional.conv2d(image, weight).float().sum().item()
+    if convolved != 9 * 36:
+        raise SystemExit(json.dumps({"error": f"畳み込みの結果が不正です: {convolved}", **detail},
+                                    ensure_ascii=False))
+    torch.mps.synchronize()
+    return detail
 
 
 def check(backend):
@@ -20,6 +46,8 @@ def check(backend):
         "cuda": torch.version.cuda,
         "hip": getattr(torch.version, "hip", None),
     }
+    if backend == "mps":
+        return check_mps(torch, detail)
     if not torch.cuda.is_available():
         raise SystemExit(json.dumps(
             {"error": "GPUを利用できません（torch.cuda.is_available()がFalse）", **detail},
@@ -55,7 +83,7 @@ def check(backend):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=("cuda", "rocm"), required=True)
+    parser.add_argument("--backend", choices=("cuda", "rocm", "mps"), required=True)
     args = parser.parse_args()
     try:
         detail = check(args.backend)

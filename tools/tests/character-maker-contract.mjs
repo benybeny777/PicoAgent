@@ -28,7 +28,10 @@ test("管理導入は共通Python一環境と容量・GPU判定を先に行う",
     read("ui/settings.js"),
     read("ui/settings.css"),
   ]);
-  assert.match(components, /shared_python_dir\(app\)\.join\("Scripts\/python\.exe"\)/);
+  // 共通Python環境は1つのまま、実行ファイル名だけをOS別に解決する。
+  assert.match(components, /python_executable\(&shared_python_dir\(app\)\)/);
+  assert.match(components, /python_root\.join\("Scripts\/python\.exe"\)/);
+  assert.match(components, /python_root\.join\("bin\/python3"\)/);
   assert.match(components, /python_stage\.join\("runtime"\)/);
   assert.match(components, /"--relocatable"/);
   assert.match(components, /85_000_000_000/);

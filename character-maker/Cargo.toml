@@ -14,5 +14,9 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting"] }
 tempfile = "3"
 
+# macOSではプロセスグループごと回収するためにkillpgを使う。
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }

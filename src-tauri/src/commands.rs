@@ -982,11 +982,11 @@ pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
 pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, String> {
     use crate::generation_backend::BackendSelection;
 
-    let selection = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+    let selection = if crate::components::generation_platform_supported() {
         crate::components::generation_selection().await
     } else {
         BackendSelection::Unsupported(
-            "画像・動画・キャラクター生成は現在Windows x64専用です。何も取得していません。".into(),
+            "画像・動画・キャラクター生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）。何も取得していません。".into(),
         )
     };
     let installed = crate::components::installed_generation_runtime(&app);
@@ -996,7 +996,13 @@ pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, St
             crate::generation_backend::generation_device(&crate::gpu::devices(), installed.as_ref())
         }
     };
-    let lowvram = crate::generation_backend::lowvram_decision(device.as_ref());
+    let lowvram = crate::generation_backend::lowvram_decision(
+        selection
+            .supported()
+            .map(|selected| selected.backend)
+            .or_else(|| installed.as_ref().map(|runtime| runtime.backend)),
+        device.as_ref(),
+    );
     Ok(json!({
         "supported": matches!(selection, BackendSelection::Supported(_)),
         "backendLabel": selection
@@ -1020,6 +1026,19 @@ pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, St
                 .is_none_or(|selected| !runtime.is_reusable_for(selected))
         }),
         "rocmRequiredDriver": crate::generation_backend::ROCM_REQUIRED_DRIVER,
+        // Apple Siliconで実機確認が済んでいないモデルは「対応」と表示しない。
+        "mpsUnverified": selection
+            .supported()
+            .map(|selected| {
+                crate::generation_backend::GENERATION_MODELS
+                    .iter()
+                    .filter_map(|model| {
+                        crate::generation_backend::mps_unverified_notice(*model, selected.backend)
+                            .map(|_| model.label)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
     }))
 }
 

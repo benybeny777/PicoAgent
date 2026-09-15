@@ -287,6 +287,25 @@ pub(crate) fn shared_python_dir(app: &AppHandle) -> PathBuf {
     crate::log_paths::bundled_dir(app).join("python")
 }
 
+/// 仮想環境のPython実行ファイル。OSでレイアウトが違うのでここへ集約する。
+///
+/// Windowsは`Scripts/python.exe`、macOSは`bin/python3`。
+pub(crate) fn python_executable(python_root: &Path) -> PathBuf {
+    if cfg!(windows) {
+        python_root.join("Scripts/python.exe")
+    } else {
+        python_root.join("bin/python3")
+    }
+}
+
+/// 画像・動画・キャラクター生成に対応するOSとCPUアーキテクチャか。
+///
+/// Windowsはx64、macOSはApple Silicon（aarch64）だけを対象にする。Intel Macは対象外。
+pub(crate) fn generation_platform_supported() -> bool {
+    cfg!(all(target_os = "windows", target_arch = "x86_64"))
+        || cfg!(all(target_os = "macos", target_arch = "aarch64"))
+}
+
 /// nvidia-smiがCUDA対応GPUを報告するか。NVIDIAの既存判定を変えない。
 #[cfg(windows)]
 async fn nvidia_cuda_ready() -> bool {
@@ -462,7 +481,7 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
             let installed = if id == "character-maker" {
                 runtime_mismatch.is_none()
                     && installed_root.join("install.json").is_file()
-                    && shared_python_dir(app).join("Scripts/python.exe").is_file()
+                    && python_executable(&shared_python_dir(app)).is_file()
                     && installed_root.join("ComfyUI/main.py").is_file()
             } else if matches!(id, "video-wan" | "video-ltx") {
                 managed_media_ready(id, &installed_root)
@@ -658,10 +677,80 @@ pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentSta
     statuses(app)
 }
 
+/// uvの配布形式。OSで書庫が違う。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UvArchive {
+    Zip,
+    TarGz,
+}
+
+/// OS別のuv公式アセット。
+struct UvAsset {
+    url: &'static str,
+    cache_name: &'static str,
+    executable: &'static str,
+    size: u64,
+    sha256: &'static str,
+    archive: UvArchive,
+}
+
+/// この環境向けのuv公式アセット。対象外のOSでは`None`。
+fn uv_asset() -> Option<UvAsset> {
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Some(UvAsset {
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip",
+            cache_name: "uv.zip.part",
+            executable: "uv.exe",
+            size: 16_996_332,
+            sha256: "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9",
+            archive: UvArchive::Zip,
+        });
+    }
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return Some(UvAsset {
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-apple-darwin.tar.gz",
+            cache_name: "uv.tar.gz.part",
+            executable: "uv",
+            size: 16_640_518,
+            sha256: "e01b69ee15e81918d5e8fc9cf39b3db7f59c5576e5e306cd9b7aeb2c7b7321c3",
+            archive: UvArchive::TarGz,
+        });
+    }
+    None
+}
+
+/// tar.gzをOS標準のtarで展開する（macOS）。
+///
+/// 展開先を作ってから`-C`で中へ入れ、書庫の外へは出させない。
+fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
+    std::fs::create_dir_all(destination)?;
+    let mut command = crate::tools::process::command_sync("tar");
+    let output = command
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(destination)
+        .output()?;
+    // このファイルはストリーミング受信も行うため、`text::guard`が禁じる
+    // 逐次デコードなしの置換変換を使わずにエラー本文を取り出す。
+    let stderr = String::from_utf8(output.stderr).unwrap_or_else(|error| {
+        format!(
+            "標準エラーがUTF-8ではありません（{}バイト）",
+            error.as_bytes().len()
+        )
+    });
+    anyhow::ensure!(
+        output.status.success(),
+        "書庫を展開できません: {}",
+        stderr.trim()
+    );
+    Ok(())
+}
+
 async fn install_character_maker(app: &AppHandle) -> Result<()> {
     anyhow::ensure!(
-        cfg!(all(target_os = "windows", target_arch = "x86_64")),
-        "キャラクター作成はWindows x64専用です"
+        generation_platform_supported(),
+        "キャラクター作成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
     // 取得開始前にGPUを判定する。非対応GPUではランタイムも大容量モデルも取得しない。
     let selected = match generation_selection().await {
@@ -694,9 +783,9 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         "キャラクター作成の導入には85GB以上の空き容量が必要です。何も取得していません"
     );
 
-    const UV_URL: &str =
-        "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip";
-    const UV_SHA: &str = "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9";
+    // uvは同じ0.12.11をOS別の公式アセットで取る。サイズとSHA-256は公式の
+    // `<資産名>.sha256`と照合済み（Windows: 2026-09-10、macOS: 2026-09-15）。
+    let uv_asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
     const COMFY_URL: &str =
         "https://github.com/Comfy-Org/ComfyUI/archive/12d5279438bfefc058a269eae805ceab6047777f.zip";
     const COMFY_SHA: &str = "a3c51a42bc7568d4b57267af3a1aa86a6cb379a199f95a90e8e3679c52651241";
@@ -721,27 +810,33 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     tokio::fs::create_dir_all(&cache).await?;
     tokio::fs::create_dir_all(&stage).await?;
     let result = async {
-        let uv_zip = cache.join("uv.zip.part");
+        let uv_zip = cache.join(uv_asset.cache_name);
         download_to(
             app,
             &client,
             DownloadSpec {
                 id: "character-maker",
-                url: UV_URL,
+                url: uv_asset.url,
                 destination: &uv_zip,
-                expected_size: 16_996_332,
+                expected_size: uv_asset.size,
                 max_size: 30_000_000,
                 message: "Python管理ツールを取得中…",
             },
         )
         .await?;
-        verify_sha256(&uv_zip, UV_SHA)?;
+        verify_sha256(&uv_zip, uv_asset.sha256)?;
         let uv_dir = cache.join("uv");
         cleanup_dir(app, "uv展開途中フォルダ", &uv_dir).await;
         let uv_zip_copy = uv_zip.clone();
         let uv_dir_copy = uv_dir.clone();
-        tokio::task::spawn_blocking(move || extract_zip(&uv_zip_copy, &uv_dir_copy)).await??;
-        let uv = find_named_file(&uv_dir, "uv.exe", 0).context("uv.exeが配布物にありません")?;
+        let archive_kind = uv_asset.archive;
+        tokio::task::spawn_blocking(move || match archive_kind {
+            UvArchive::Zip => extract_zip(&uv_zip_copy, &uv_dir_copy),
+            UvArchive::TarGz => extract_tar_gz(&uv_zip_copy, &uv_dir_copy),
+        })
+        .await??;
+        let uv = find_named_file(&uv_dir, uv_asset.executable, 0)
+            .with_context(|| format!("{}が配布物にありません", uv_asset.executable))?;
         // uvの仮想環境は基準Pythonを参照する。キャッシュへ置くと起動時清掃で壊れるため、
         // 基準Pythonとvenvを同じ管理対象世代へまとめて原子的に公開する。
         let python_store = python_stage.join("runtime");
@@ -776,7 +871,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         tokio::task::spawn_blocking(move || copy_dir_all(&venv_stage_copy, &python_stage_copy))
             .await??;
         let python = python_stage.clone();
-        let staged_python = python.join("Scripts/python.exe");
+        let staged_python = python_executable(&python);
         // 実GPUに必要なバックエンドのwheelだけを入れる。CUDA版とROCm版を同じ環境へ同時に導入しない。
         let mut sync = vec![
             "pip".to_string(),
@@ -852,7 +947,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         run_component_command_with_progress(
             app,
             "character-maker",
-            &python.join("Scripts/python.exe"),
+            &python_executable(&python),
             &[
                 &assets
                     .join("installer/setup-runtime-models.py")
@@ -909,10 +1004,10 @@ async fn install_media_model(
     required_free: u64,
 ) -> Result<()> {
     anyhow::ensure!(
-        cfg!(all(target_os = "windows", target_arch = "x86_64")),
-        "ローカル動画生成はWindows x64専用です"
+        generation_platform_supported(),
+        "ローカル動画生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
-    let python = shared_python_dir(app).join("Scripts/python.exe");
+    let python = python_executable(&shared_python_dir(app));
     anyhow::ensure!(
         installed_dir(app, "character-maker")
             .join("ComfyUI/main.py")
@@ -931,11 +1026,14 @@ async fn install_media_model(
             anyhow::bail!("{reason}")
         }
     };
-    if let Some(reason) = crate::generation_backend::video_memory_shortage(
-        &selected.device,
-        crate::engine::total_memory_bytes(),
-    ) {
-        anyhow::bail!("{reason}");
+    if let Some(model) = crate::generation_backend::model_for(id) {
+        if let Some(reason) = crate::generation_backend::model_memory_shortage(
+            model,
+            &selected.device,
+            crate::engine::total_memory_bytes(),
+        ) {
+            anyhow::bail!("{reason}");
+        }
     }
     emit_progress(
         app,

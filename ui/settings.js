@@ -1170,7 +1170,10 @@ function buildComponentManager() {
       const reinstall = info.needsReinstall
         ? " 導入済みランタイムがこのGPU向けではありません。入れ直してください。"
         : "";
-      generation.textContent = `画像・動画・キャラクター生成: ${gpu} を ${info.backendLabel} で使用します。ComfyUIは${start}します（${info.lowvramReason}）。${reinstall}`;
+      const unverified = (info.mpsUnverified || []).length
+        ? ` このMacでは次のモデルが実機未確認です: ${info.mpsUnverified.join("、")}。`
+        : "";
+      generation.textContent = `画像・動画・キャラクター生成: ${gpu} を ${info.backendLabel} で使用します。ComfyUIは${start}します（${info.lowvramReason}）。${reinstall}${unverified}`;
     } catch (error) {
       generation.textContent = `画像・動画・キャラクター生成: GPUを確認できません（${error?.message || error}）`;
     }

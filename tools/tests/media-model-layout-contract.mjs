@@ -27,7 +27,9 @@ test('省メモリ再試行で生成条件を変えない', () => {
   assert.match(tool, /if lowvram \{\s*arguments\.push\("--lowvram"\.into\(\)\);/);
   assert.match(pipeline, /fn with_lowvram\(arguments: &\[OsString\], lowvram: bool\)/);
   // 再試行はGPUメモリ不足の終了コードだけを見て、1回だけ行う。
-  assert.match(tool, /should_retry_with_lowvram\(result\.status\.code\(\), lowvram\)/);
+  assert.match(tool, /should_retry_with_lowvram\(\s*backend,\s*result\.status\.code\(\),\s*lowvram,?\s*\)/);
+  // MPS（Apple Silicon）では未検証の起動引数へ切り替えない。
+  assert.match(tool, /lowvram_decision\(backend, device\.as_ref\(\)\)/);
   assert.match(pipeline, /GPU_OOM_EXIT_CODE: i32 = 3;/);
   assert.match(media, /OOM_EXIT_CODE = 3/);
   assert.match(completion, /OOM_EXIT_CODE = 3/);

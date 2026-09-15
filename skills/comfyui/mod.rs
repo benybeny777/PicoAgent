@@ -163,7 +163,7 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
     if let Some(reason) = crate::components::generation_runtime_mismatch_for_app() {
         return Err(format!("エラー: {reason}"));
     }
-    let python = bundled.join("python/Scripts/python.exe");
+    let python = crate::components::python_executable(&bundled.join("python"));
     let comfy = bundled.join("character-maker/ComfyUI");
     let models = match engine {
         Engine::QwenEdit => bundled.join("character-maker/models/qwen-eval"),
@@ -384,16 +384,30 @@ impl Tool for ComfyuiTool {
                 .into();
         }
         // 専用VRAM16GB未満・共有メモリ・VRAM不明はlowvramで起動する。
+        // MPS（Apple Silicon）は専用VRAM判定を流用せず、検証済みの起動設定だけを使う。
+        let installed = crate::components::installed_generation_runtime_for_app();
+        let backend = installed.as_ref().map(|runtime| runtime.backend);
         let device = crate::generation_backend::generation_device(
             &crate::gpu::devices(),
-            crate::components::installed_generation_runtime_for_app().as_ref(),
+            installed.as_ref(),
         );
-        let decision = crate::generation_backend::lowvram_decision(device.as_ref());
+        let decision = crate::generation_backend::lowvram_decision(backend, device.as_ref());
         if decision.lowvram {
             crate::generation_backend::notify_progress(
                 "省メモリ設定で画像・動画生成を始めます",
                 &decision.reason,
             );
+        }
+        // Apple Siliconで実機確認が済んでいないモデルは、その旨を隠さず伝える。
+        if let Some((model, backend)) =
+            crate::generation_backend::model_for(engine.component()).zip(backend)
+        {
+            if let Some(notice) = crate::generation_backend::mps_unverified_notice(model, backend) {
+                crate::generation_backend::notify_progress(
+                    "実機未確認のモデルで生成します",
+                    &notice,
+                );
+            }
         }
         let request = SidecarRequest {
             script: &script,
@@ -424,7 +438,11 @@ impl Tool for ComfyuiTool {
             };
         // 通常起動のGPUメモリ不足だけ、省メモリ設定で1回だけやり直す。
         // サイドカーは終了前にComfyUIと子孫プロセス、途中出力を必ず回収している。
-        if crate::generation_backend::should_retry_with_lowvram(result.status.code(), lowvram) {
+        if crate::generation_backend::should_retry_with_lowvram(
+            backend,
+            result.status.code(),
+            lowvram,
+        ) {
             crate::generation_backend::notify_progress(
                 "GPUメモリ不足のため省メモリ設定でやり直します",
                 "同じ指示・シード・モデルのまま、省メモリ設定（lowvram）で1回だけ再実行します。",
@@ -443,7 +461,12 @@ impl Tool for ComfyuiTool {
         }
         if !result.status.success() {
             if result.status.code() == Some(crate::generation_backend::GPU_OOM_EXIT_CODE) {
-                return "エラー: GPUメモリが不足しています。省メモリ設定でも生成できませんでした。画像・動画のサイズかフレーム数を小さくしてください。".into();
+                return if lowvram {
+                    "エラー: GPUメモリが不足しています。省メモリ設定でも生成できませんでした。画像・動画のサイズかフレーム数を小さくしてください。".into()
+                } else {
+                    // MPSでは未検証の起動引数へ切り替えず、条件を小さくする案内だけを返す。
+                    "エラー: GPUメモリが不足しています。画像・動画のサイズかフレーム数を小さくして試してください。".to_string()
+                };
             }
             // 英語の例外や内部コマンドを利用者へそのまま見せない。原文はログへ残す。
             let detail = String::from_utf8_lossy(&result.stderr);

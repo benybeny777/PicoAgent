@@ -61,6 +61,13 @@ impl SidecarProcess {
             use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
             command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
         }
+        #[cfg(unix)]
+        {
+            // macOSにはJob Objectが無い。サイドカーを独立したプロセスグループの
+            // リーダーにして、ComfyUIなどの孫まで`killpg`でまとめて回収できるようにする。
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         let child = command.spawn().map_err(SidecarError::Spawn)?;
         let mut process = Self {
             child: Some(child),
@@ -132,12 +139,18 @@ impl SidecarProcess {
             #[cfg(windows)]
             self.job.take();
             // 既に終了した場合のkill失敗でもwaitと読取スレッド回収を省略しない。
+            #[cfg(unix)]
+            terminate_process_group(child.id());
             let _ = child.kill();
         }
+        #[cfg(unix)]
+        let group = child.id();
         let status = child.wait();
         // 親が正常終了しても、pipeを継承した孫を先に回収して読取待ちを解く。
         #[cfg(windows)]
         self.job.take();
+        #[cfg(unix)]
+        terminate_process_group(group);
         let _ = reader.join();
         let error_result = error_reader.join().map_err(|_| {
             SidecarError::Io(std::io::Error::other("stderr読取スレッドが停止しました"))
@@ -163,9 +176,27 @@ impl Drop for SidecarProcess {
         #[cfg(windows)]
         self.job.take();
         if let Some(child) = &mut self.child {
+            #[cfg(unix)]
+            terminate_process_group(child.id());
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+/// 自分が作ったプロセスグループだけをまとめて終了させる（macOS・Linux）。
+///
+/// `spawn`時に`process_group(0)`でサイドカーをグループリーダーにしているため、
+/// グループIDは子のPIDと一致する。名前による列挙・終了は行わない。
+#[cfg(unix)]
+fn terminate_process_group(pid: u32) {
+    let group = pid as i32;
+    if group <= 0 {
+        return;
+    }
+    // 安全性: 自分が起動したプロセスグループのIDだけを渡す。
+    unsafe {
+        libc::killpg(group, libc::SIGTERM);
     }
 }
 

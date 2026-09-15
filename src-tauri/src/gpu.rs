@@ -1,4 +1,4 @@
-// gpu.rs - GPU情報（ベンダー・型番・専用VRAM・共有メモリ）の正本。
+// gpu.rs - GPU情報（ベンダー・型番・専用VRAM・共有メモリ・ユニファイドメモリ）の正本。
 //
 // 表示アダプタ名だけを見る判定は、Intel GPUをAMD扱いにしたり、共有メモリのAPUを
 // 専用VRAM搭載機と誤認したりする。取得開始前に必要な事実をここで1度だけ集め、
@@ -12,6 +12,8 @@ pub enum GpuVendor {
     Nvidia,
     Amd,
     Intel,
+    /// Apple Silicon の統合GPU（ユニファイドメモリ）。
+    Apple,
     /// 判別できないベンダー（仮想ディスプレイ、リモート表示など）。
     Other,
 }
@@ -34,22 +36,28 @@ impl GpuVendor {
             Self::Nvidia => "NVIDIA",
             Self::Amd => "AMD",
             Self::Intel => "Intel",
+            Self::Apple => "Apple",
             Self::Other => "不明なベンダー",
         }
     }
 }
 
-/// GPUが使うメモリの素性。**共有メモリを専用VRAMへ加算しない。**
+/// GPUが使うメモリの素性。**共有メモリとユニファイドメモリを専用VRAMへ加算しない。**
 ///
-/// 生成対象はWindowsだけなので、他OSのビルドでは値を作る側が無い。
+/// 生成対象はWindowsとApple Silicon Macだけなので、他OSのビルドでは値を作る側が無い。
 /// 判定ロジックはOSに依らずテストするため、型は隠さず警告だけ止める。
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuMemory {
     /// 専用VRAM（バイト）。
     Dedicated(u64),
-    /// APUなど、システムRAMを共有するGPU。
+    /// APUなど、システムRAMを共有するGPU（搭載量は別途判定する）。
     Shared,
+    /// Apple Siliconのユニファイドメモリ（バイト）。CPUとGPUで同じ実体を使う。
+    ///
+    /// **専用VRAMの判定を流用しない。** 16GBの専用VRAMと16GBのユニファイドメモリは
+    /// 同じ意味を持たない（後者はOSとアプリの作業領域を含む総量である）。
+    Unified(u64),
     /// 正確に取得できなかった。推測で埋めない。
     Unknown,
 }
@@ -153,9 +161,70 @@ pub fn adapter_names() -> Vec<String> {
     Vec::new()
 }
 
-#[cfg(not(windows))]
+/// Apple Silicon Macの統合GPU。ユニファイドメモリの総量をそのまま持つ。
+///
+/// Intel Macは対象外なので、`aarch64`のときだけGPUを名乗る。GPU名はチップ名
+/// （`machdep.cpu.brand_string`。例: `Apple M3 Pro`）を使い、取得できない場合も
+/// Apple Siliconであること自体は確定しているため総称で返す。
+#[cfg(target_os = "macos")]
 pub fn devices() -> Vec<GpuDevice> {
-    // Windows以外は生成機能の対象外。推測でGPUを名乗らない。
+    if !cfg!(target_arch = "aarch64") {
+        // Intel Macは生成機能の対象外。推測でGPUを名乗らない。
+        return Vec::new();
+    }
+    let memory = crate::engine::total_memory_bytes()
+        .map(GpuMemory::Unified)
+        .unwrap_or(GpuMemory::Unknown);
+    vec![GpuDevice {
+        vendor: GpuVendor::Apple,
+        name: apple_chip_name().unwrap_or_else(|| "Apple Silicon".to_string()),
+        memory,
+    }]
+}
+
+#[cfg(target_os = "macos")]
+fn apple_chip_name() -> Option<String> {
+    let mut size = 0usize;
+    let name = c"machdep.cpu.brand_string";
+    // 安全性: 1回目は長さ取得だけを行い、2回目はその長さのバッファへ書かせる。
+    if unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+        || size == 0
+        || size > 256
+    {
+        return None;
+    }
+    let mut buffer = vec![0u8; size];
+    if unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+    {
+        return None;
+    }
+    let end = buffer
+        .iter()
+        .position(|&ch| ch == 0)
+        .unwrap_or(buffer.len());
+    let text = String::from_utf8_lossy(&buffer[..end]).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn devices() -> Vec<GpuDevice> {
+    // Windows・Apple Silicon Mac以外は生成機能の対象外。推測でGPUを名乗らない。
     Vec::new()
 }
 

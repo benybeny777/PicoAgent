@@ -15,14 +15,29 @@ PicoAgentはモデルを再配布せず、利用者が追加機能を選んだ�
 
 ## GPUバックエンドとモデルの関係
 
-モデル重みとComfyUIのworkflowはCUDA専用品ではない。上表のモデルはNVIDIA（CUDA）とAMD（ROCm）で**同じものを共有**し、GPU別に同じモデルを二重取得しない。GPUごとに違うのは実行ランタイム（PyTorchのビルド）だけで、判定と導入は`src-tauri/src/generation_backend.rs`が行う。
+モデル重みとComfyUIのworkflowはCUDA専用品ではない。上表のモデルはNVIDIA（CUDA）、AMD（ROCm）、Apple Silicon（MPS）で**同じものを共有**し、GPU別に同じモデルを二重取得しない。GPUごとに違うのは実行ランタイム（PyTorchのビルド）だけで、判定と導入は`src-tauri/src/generation_backend.rs`が行う。
 
 | バックエンド | 対象 | PyTorch | 依存ロック |
 |---|---|---|---|
 | CUDA | Windows x64・CUDA対応NVIDIA GPU | 2.11.0+cu128 | `sidecar/requirements-comfy.lock` |
 | ROCm | Windows x64・AMD公式のWindows向けROCm対応GPU（Radeonソフトウェア26.2.2以降） | 2.9.1+rocm7.2.1 | `sidecar/requirements-comfy-rocm.lock` |
+| MPS（Metal） | Apple Silicon Mac（Intel Macは対象外） | 2.11.0 | `sidecar/requirements-comfy-mps.lock` |
 
-共通依存は`sidecar/requirements-comfy-common.in`に置き、CUDA／ROCm固有の`.in`がそれぞれのPyTorchだけを足す。ROCm版wheelはAMD公式配布（`repo.radeon.com`）のURLを直接固定し、PyPIのCPU版torchで上書きされないようにする。
+共通依存は`sidecar/requirements-comfy-common.in`に置き、CUDA／ROCm／MPS固有の`.in`がそれぞれのPyTorchだけを足す。ROCm版wheelはAMD公式配布（`repo.radeon.com`）のURLを直接固定し、PyPIのCPU版torchで上書きされないようにする。macOS arm64はPyPIの標準wheelがMetal（MPS）を含むため、専用インデックスも専用ビルドも使わない。
+
+### Apple Silicon Macのメモリ判定
+
+**専用VRAMの判定を流用しない。** ユニファイドメモリはCPUとGPUで同じ実体を使い、OSとアプリの作業領域を含む総量なので、16GBの専用VRAMと16GBのユニファイドメモリは同じ意味を持たない。Macではモデルごとに必要メモリを判定し、足りなければ取得を始めない。
+
+| モデル | 最大の重み | 必要なユニファイドメモリ（暫定） |
+|---|---:|---:|
+| Qwen画像編集・キャラクター作成（Grounding DINO、SAM 2.1を含む） | 約41GB | 約49GB |
+| Wan 2.2動画生成 | 約10.0GB | 約18.0GB |
+| LTX軽量動画生成 | 約9.8GB | 約17.8GB |
+
+必要量は「そのworkflowで読み込む最大の重み＋8GB（OSと作業領域）」で見積もっている。**実機計測が済むまでの暫定値**であり、計測後にこの表と`src-tauri/src/generation_backend.rs`の`GENERATION_MODELS`を実測へ置き換える。
+
+Qwen、Grounding DINO、SAM 2.1、Wan 2.2、LTXはMPSでの実機確認が済んでいない。確認が済むまで設定画面と生成時に「実機未確認」と明示し、`対応`とは表示しない。Wanの映像破損が再現した場合は動画生成だけを`非対応`にする（`MpsSupport::Unsupported`）。LTXのFP8重みとWanのFP8テキストエンコーダーはMPSでの可否が未確認で、精度を変える場合は上の記録手順に従う。
 
 AMD実機で未確認の事項（Qwen Image Edit、Grounding DINO、SAM 2.1、Wan 2.2、LTXの実動作、LTXのFP8可否、Wan 2.2の既知問題、ROCm wheelのSHA-256）は[未完了タスク](TASKS.md)に置く。**AMDで精度やモデルを変える場合は、対応GPU、必要VRAMとRAM、取得量、速度と画質への影響、公式URL、固定リビジョン、SHA-256をここへ記録してから切り替える。NVIDIAの既存精度（LTXのFP8を含む）は変更しない。**
 
@@ -36,8 +51,11 @@ ComfyUIを使う画像・動画・キャラクター生成は、専用VRAM量で
 | 専用VRAM 16GB未満 | `--lowvram` |
 | APUなど共有メモリ | `--lowvram` |
 | 専用VRAM量を取得できない | `--lowvram`（安全側） |
+| Apple Siliconのユニファイドメモリ | 通常起動（`--lowvram`は使わない） |
 
 通常起動でGPUメモリ不足になった場合だけ、ComfyUIと子孫プロセスを停止し、途中出力を回収したうえで、同じ入力・シード・モデル・workflow・出力先のまま`--lowvram`で**1回だけ**やり直す。既に`--lowvram`で動いていた場合、GPUメモリ不足以外の失敗では再試行しない。
+
+**MPSでは`--lowvram`を使わず、メモリ不足でも再試行しない。** MPSで実機検証済みの起動引数だけを使うという方針のためで、代わりに画像・動画のサイズかフレーム数を小さくするよう案内する。
 
 参照先:
 

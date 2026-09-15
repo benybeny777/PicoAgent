@@ -4,7 +4,7 @@
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
-キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入は取得前にGPUの素性（ベンダー・型番・専用VRAM・共有メモリか）と85GB以上の空きを検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。実行バックエンドは`src-tauri/src/generation_backend.rs`がCUDA（NVIDIA）かROCm（AMD公式のWindows向け対応GPU）を1つだけ選び、選んだ側のPyTorchだけを`uv pip sync`で導入する。依存は共通の`sidecar/requirements-comfy-common.in`と、バックエンド別の`requirements-comfy.in`／`requirements-comfy-rocm.in`へ分けてロックする。ROCmのロックはAMD公式配布へ到達できるWindows機で次のように再生成してコミットする（ロックが無い間、AMD経路は取得を開始せず理由を表示する）。
+キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入は取得前にGPUの素性（ベンダー・型番・専用VRAM・共有メモリか）と85GB以上の空きを検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。実行バックエンドは`src-tauri/src/generation_backend.rs`がCUDA（NVIDIA）かROCm（AMD公式のWindows向け対応GPU）を1つだけ選び、選んだ側のPyTorchだけを`uv pip sync`で導入する。依存は共通の`sidecar/requirements-comfy-common.in`と、バックエンド別の`requirements-comfy.in`／`requirements-comfy-rocm.in`／`requirements-comfy-mps.in`へ分けてロックする。MPS（Apple Silicon）のロックは`--python-platform aarch64-apple-darwin`で生成済みで、PyPIの標準wheelがMetalを含むため専用インデックスを使わない。ROCmのロックはAMD公式配布へ到達できるWindows機で次のように再生成してコミットする（ロックが無い間、AMD経路は取得を開始せず理由を表示する）。
 
 ```
 uv pip compile sidecar/requirements-comfy-rocm.in \

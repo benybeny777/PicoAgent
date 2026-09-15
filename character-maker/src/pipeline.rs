@@ -39,8 +39,10 @@ fn with_lowvram(arguments: &[OsString], lowvram: bool) -> Vec<OsString> {
 /// 省メモリ設定で1回だけやり直すか。
 ///
 /// 通常起動のGPUメモリ不足だけが対象。lowvram中のOOM、OOM以外の失敗、中断では再試行しない。
-fn should_retry_with_lowvram(error: &PipelineError, lowvram_used: bool) -> bool {
-    !lowvram_used
+/// `allowed`が偽のバックエンド（MPSなど`--lowvram`を検証していないもの）では再試行しない。
+fn should_retry_with_lowvram(error: &PipelineError, lowvram_used: bool, allowed: bool) -> bool {
+    allowed
+        && !lowvram_used
         && matches!(
             error,
             PipelineError::Sidecar(SidecarError::Failed {
@@ -546,7 +548,7 @@ impl PipelineContext {
         let Err(error) = first else {
             return Ok(());
         };
-        if !should_retry_with_lowvram(&error, lowvram) {
+        if !should_retry_with_lowvram(&error, lowvram, config.comfy_lowvram_retry) {
             return Err(error);
         }
         lowvram = true;
@@ -644,23 +646,33 @@ mod tests {
     fn 補完は通常起動のoomだけlowvramで1回再試行する() {
         assert!(should_retry_with_lowvram(
             &failed(Some(GPU_OOM_EXIT_CODE)),
-            false
+            false,
+            true
         ));
         // lowvram中のOOMでは再試行しない。
         assert!(!should_retry_with_lowvram(
             &failed(Some(GPU_OOM_EXIT_CODE)),
+            true,
             true
         ));
+        // `--lowvram`を検証していないバックエンド（MPS）では再試行しない。
+        assert!(!should_retry_with_lowvram(
+            &failed(Some(GPU_OOM_EXIT_CODE)),
+            false,
+            false
+        ));
         // OOM以外の失敗・中断・終了コード不明では再試行しない。
-        assert!(!should_retry_with_lowvram(&failed(Some(1)), false));
-        assert!(!should_retry_with_lowvram(&failed(None), false));
+        assert!(!should_retry_with_lowvram(&failed(Some(1)), false, true));
+        assert!(!should_retry_with_lowvram(&failed(None), false, true));
         assert!(!should_retry_with_lowvram(
             &PipelineError::Sidecar(SidecarError::Cancelled),
-            false
+            false,
+            true
         ));
         assert!(!should_retry_with_lowvram(
             &PipelineError::Invalid("補完の生成設定が範囲外です".into()),
-            false
+            false,
+            true
         ));
     }
 
