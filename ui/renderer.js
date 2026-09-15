@@ -2381,7 +2381,7 @@ function closeComposer() {
   setTimeout(flushPendingNotice, 0);
 }
 
-// ダブルクリックでウィンドウをフルスクリーン化し、その中でフキダシを大きく広げる／元に戻すトグル。
+// 明示的な「拡大」ボタンでウィンドウをフルスクリーン化し、フキダシを広げる／戻す。
 async function setBubbleFullscreen(on) {
   if (bubble.classList.contains("fullscreen") === on) return;
   bubble.classList.toggle("fullscreen", on);
@@ -3843,12 +3843,6 @@ character.addEventListener("keydown", event => {
 });
 character.addEventListener("animationend", event => {
   if (event.animationName === "pet-boop") character.classList.remove("boop");
-});
-character.addEventListener("dblclick", toggleBubbleFullscreen);
-// フキダシ自体をダブルクリックしても、画面最大化のように大きく広げる／戻す。
-bubble.addEventListener("dblclick", event => {
-  if (event.target.closest("button,a,textarea,.reply-actions,.bubble-resize")) return;
-  toggleBubbleFullscreen();
 });
 // 字幕（回答欄）は選択させない。CSSの禁止をすり抜ける選択（ダブルクリック・全選択など）も直ちに解除する。
 reply.addEventListener("selectstart", event => event.preventDefault());
