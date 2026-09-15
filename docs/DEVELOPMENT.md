@@ -141,6 +141,16 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 - ビルド中は `cargo xtask stop` で起動中のPicoAgentと同梱エンジンを終了します。
 - 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
 
+### holo Indie審査への限定共有版（Windows）
+
+holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審査版インストーラをビルド.bat`で生成します（本体は`scripts/build-holo-indie-review-installer.ps1`。PowerShell 7が必要）。通常版、関係者版、審査版を同じ成果物として扱いません。
+
+- `%APPDATA%\com.picoagent.desktop\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
+- 配信・動画から学習した音声モデル、AIVMX、Aivis本体、音声用初期設定は含めません。読み上げは既定で無効です。
+- 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
+- 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。
+- 生成物は`temp\holo-indie-review-installer\PicoAgent_<版>_holo-Indie-Review_x64-setup.exe`です。holo Indie審査への限定共有専用であり、公開LP、公開Release、`latest.json`へ載せません。一般配布は許諾後に別の配布設定と実機検証で作ります。
+
 ### macOS版のビルド（未署名アルファ）
 
 macOSバンドルはmacOS実機でだけ作れます。WindowsやLinuxからのクロスビルドはできません。**配布対象はApple Siliconだけで、Intel Macは対象外です。**

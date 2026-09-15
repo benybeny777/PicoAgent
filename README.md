@@ -3,6 +3,10 @@
 > - このPCのビルド成果物: `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe`（Git管理外）。作り直すときはリポジトリ直下の `関係者版インストーラをビルド.bat` を実行します。
 > - 一般公開のLP・公開Release・`latest.json` には載せません。指定した関係者以外へ転送・公開しないでください。
 
+> **holo Indie審査版（限定共有・音声モデルなし）**
+> - `holo Indie審査版インストーラをビルド.bat`は、さくらみこ公式MMDだけを含み、配信・動画から学習した音声モデルとAivisを含めません。
+> - 通常版とは別の利用者領域へ導入し、審査以外へ公開しません。詳しい条件は[開発ガイド](docs/DEVELOPMENT.md#holo-indie審査への限定共有版windows)を参照してください。
+
 > **[PicoAgent 公式ページ・Windowsアルファ版ダウンロード](https://benybeny777.github.io/PicoAgent-Distribution/)**
 
 <div align="center">

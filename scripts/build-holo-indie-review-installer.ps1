@@ -1,0 +1,164 @@
+#Requires -Version 7
+# holo Indie審査へ限定共有する、公式MMD 1体・音声モデルなしのWindows版を生成する。
+# 正規入口はリポジトリ直下の「holo Indie審査版インストーラをビルド.bat」。
+[CmdletBinding()]
+param(
+    # 専用設定と生成物の保存先。Git管理外。
+    [string]$OutputDir = 'temp\holo-indie-review-installer',
+    # origin/mainより古い、または未コミット変更のあるチェックアウトでもビルドする。
+    [switch]$AllowStale,
+    # 同梱範囲と生成設定だけを検査し、重いビルドは行わない。
+    [switch]$PrepareOnly
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+if (-not $IsWindows) {
+    throw 'holo Indie審査版インストーラはWindowsでだけ生成できます。'
+}
+
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location -LiteralPath $root
+
+# 初回審査は出所を確認できたさくらみこ公式MMDだけを使う。
+# 配信・動画から学習した音声モデルとAivis本体は一切同梱しない。
+$characterId = 'miko-mmd'
+$reviewIdentifier = 'com.picoagent.holo-indie-review'
+$characterRoot = Join-Path $env:APPDATA 'com.picoagent.desktop\characters'
+$characterSource = Join-Path $characterRoot $characterId
+$characterJson = Join-Path $characterSource 'character.json'
+$licenseReadme = Join-Path $characterSource 'mmd\readme.txt'
+$missing = @(
+    @($characterJson, $licenseReadme) | Where-Object {
+        -not (Test-Path -LiteralPath $_ -PathType Leaf)
+    }
+)
+if ($missing.Count -gt 0) {
+    throw "審査版に必要な公式MMDまたは利用条件が見つかりません:`n  " + ($missing -join "`n  ")
+}
+
+function Invoke-Step {
+    param([string]$Label, [string]$File, [string[]]$Arguments)
+    Write-Host "==> $Label"
+    & $File @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label に失敗しました（終了コード $LASTEXITCODE）。"
+    }
+}
+
+Invoke-Step 'origin/mainを取得' 'git' @('fetch', '--quiet', 'origin', 'main')
+$behind = [int](git rev-list --count 'HEAD..origin/main')
+$dirty = @(git status --porcelain --untracked-files=no)
+Write-Host "ビルド対象: $(git log --oneline -1)"
+if (($behind -gt 0 -or $dirty.Count -gt 0) -and -not $AllowStale) {
+    throw "チェックアウトがorigin/mainより $behind コミット古いか、未コミットの変更があります。最新化してから再実行してください（このまま作る場合は -AllowStale）。"
+}
+$version = (Get-Content -Raw -Encoding UTF8 -LiteralPath 'src-tauri\tauri.conf.json' | ConvertFrom-Json).version
+
+$outputRoot = Join-Path $root $OutputDir
+New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+$hookPath = Join-Path $outputRoot 'installer-holo-indie-review.nsh'
+$configPath = Join-Path $outputRoot 'tauri.holo-indie-review.conf.json'
+$initialConfigPath = Join-Path $outputRoot 'config.holo-indie-review.json'
+
+$initialConfig = [ordered]@{
+    PICOAGENT_CHARACTER       = $characterId
+    PICOAGENT_LAYOUT          = 'chat'
+    PICOAGENT_PROVIDER        = 'local'
+    PICOAGENT_TTS_ENABLED     = $false
+    PICOAGENT_CHATTER_ENABLED = $false
+}
+[System.IO.File]::WriteAllText(
+    $initialConfigPath,
+    ($initialConfig | ConvertTo-Json -Depth 5),
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+$hook = [System.Collections.Generic.List[string]]::new()
+$hook.Add("!include `"$(Join-Path $root 'src-tauri\installer-hooks-lite.nsh')`"")
+$hook.Add('')
+$hook.Add('; holo Indie審査への限定共有用。通常版とは別の利用者領域へ配置する。')
+$hook.Add('!macro NSIS_HOOK_POSTINSTALL')
+$hook.Add('  SetOverwrite off')
+$hook.Add("  SetOutPath `"`$APPDATA\$reviewIdentifier\characters\$characterId`"")
+$hook.Add("  File /r `"$characterSource\*`"")
+$hook.Add('  SetOverwrite on')
+$hook.Add("  SetOutPath `"`$APPDATA\$reviewIdentifier`"")
+$hook.Add("  File /oname=config.json `"$initialConfigPath`"")
+$hook.Add('!macroend')
+[System.IO.File]::WriteAllText($hookPath, ($hook -join "`r`n") + "`r`n", [System.Text.UTF8Encoding]::new($true))
+
+$config = [ordered]@{
+    productName = 'PicoAgent holo Indie 審査版'
+    identifier  = $reviewIdentifier
+    bundle      = [ordered]@{
+        resources = @(
+            'resources/bundled/engine/**/*',
+            'resources/component-manifest.json'
+        )
+        windows   = [ordered]@{
+            nsis = [ordered]@{ installerHooks = ($hookPath -replace '\\', '/') }
+        }
+    }
+}
+[System.IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
+
+$forbidden = @('aivis', '.aivmx', 'seed-voices')
+$generated = (Get-Content -Raw -Encoding UTF8 -LiteralPath $hookPath) + (Get-Content -Raw -Encoding UTF8 -LiteralPath $configPath)
+foreach ($word in $forbidden) {
+    if ($generated -match [regex]::Escape($word)) {
+        throw "審査版の生成設定へ音声資産を示す文字列が混入しています: $word"
+    }
+}
+if ($generated -match 'SetOutPath\s+"\$APPDATA\\com\.picoagent\.desktop(?:\\|\")') {
+    throw '審査版が通常版のキャラクター領域を上書きする設定になっています。'
+}
+
+if ($PrepareOnly) {
+    Write-Host ''
+    Write-Host "準備検査完了: $outputRoot"
+    Write-Host '公式MMD: さくらみこ1体 / 音声モデル: なし / 読み上げ: 既定OFF / 通常版と利用者領域を分離'
+    exit 0
+}
+
+$started = Get-Date
+Invoke-Step '起動中のPicoAgentと同梱エンジンを停止' 'cargo' @('xtask', 'stop')
+Invoke-Step 'Live2DとローカルAIエンジンを準備' 'cargo' @('xtask', 'setup', 'live2d', 'engine')
+Invoke-Step '配布対象キャラクターを同期' 'cargo' @('xtask', 'preview-distribution')
+Invoke-Step 'アルファ版の画面を生成' 'cargo' @('xtask', 'build-ui', '--release', '--beta')
+Invoke-Step 'NSISインストーラを生成' 'cargo' @(
+    'tauri', 'build', '--features', 'beta-full', '--bundles', 'nsis',
+    '--config', 'src-tauri/tauri.distribution.conf.json',
+    '--config', ($configPath -replace '\\', '/')
+)
+
+$bundleRoot = Join-Path $root 'src-tauri\target\release\bundle\nsis'
+$items = @(
+    Get-ChildItem -LiteralPath $bundleRoot -Filter '*_x64-setup.exe' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $started }
+)
+if ($items.Count -ne 1) {
+    throw "今回のビルドで生成されたインストーラを1件に特定できません: $bundleRoot"
+}
+$bundle = $items[0].FullName
+$item = $items[0]
+$magic = [byte[]]::new(2)
+$stream = [System.IO.File]::OpenRead($bundle)
+try {
+    [void]$stream.Read($magic, 0, 2)
+}
+finally {
+    $stream.Dispose()
+}
+if ($magic[0] -ne 0x4D -or $magic[1] -ne 0x5A) {
+    throw "生成物がWindows実行ファイルではありません: $bundle"
+}
+$destination = Join-Path $outputRoot "PicoAgent_${version}_holo-Indie-Review_x64-setup.exe"
+Move-Item -LiteralPath $bundle -Destination $destination -Force
+$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $destination).Hash
+$sizeMb = [math]::Round((Get-Item -LiteralPath $destination).Length / 1e6)
+Write-Host ''
+Write-Host "完了: $destination"
+Write-Host "版: $version / 容量: 約 $sizeMb MB / SHA-256: $hash"
+Write-Host 'この成果物はholo Indie審査への限定共有専用です。公開配布しないでください。'
