@@ -175,9 +175,9 @@ AivisSpeech Engine は保存先を `platformdirs` の `user_data_dir("AivisSpeec
 
 Aivisの学習・モデル導入と、元PMXの剛体・制約を使う物理対応は今回の対象外であり、別途開始指示後に扱う。
 
-## Windows AMD GPU（ROCm）での画像・動画・キャラクター生成の実機受入
+## 画像・動画・キャラクター生成のGPU別実機受入（AMD ROCm・Apple Silicon MPS）
 
-対象PRは [ROCm対応とlowvram起動](https://github.com/benybeny777/PicoAgent/pull/319)。設計・実装・静的検査は同PRにまとめる。この節には、**AMD実機とネットワークが無いと確定できない項目だけ**を残す。実機確認が終わるまでAMD対応を「完了」と表示しない。
+対象PRは [ROCm・MPS対応とlowvram起動](https://github.com/benybeny777/PicoAgent/pull/319)。設計・実装・静的検査は同PRにまとめる。この節には、**AMD実機・Apple Silicon実機・公式配布へのネットワークが無いと確定できない項目だけ**を残す。実機確認が終わるまで、AMD対応もApple Silicon対応も「完了」と表示しない。NVIDIA（CUDA）の既存経路は対象外である。
 
 | 内容 | 着手条件・完了条件 |
 |---|---|
