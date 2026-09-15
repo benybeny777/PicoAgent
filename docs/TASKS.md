@@ -44,7 +44,8 @@
 | アプリ終了中のジョブ実行 | OSサービス／ログイン項目としての別プロセス化、秘密値の受け渡し、更新時の排他と終了操作を設計する。現状は終了中に停止し、次回起動時に再開する |
 | Office成果物の高度編集 | テンプレート選択、グラフ・画像・複数スライド、セル型と数式、スタイル編集のUIを追加し、最小OOXML生成から高品質な資料編集へ広げる |
 | iCloud DriveのmacOS実機確認 | iCloud Driveを有効にしたApple Silicon Macで`PicoAgent`フォルダの作成、アップロード、オンデマンド取得、別端末への同期、競合時の停止、共通許可ルートを変更した場合の案内を確認する |
-| VTuber事務所への公式キャラクター許諾 | [docs/IP-PROPOSAL-VTUBER.md](IP-PROPOSAL-VTUBER.md)の照会文でカバー（ホロライブ）とANYCOLOR（にじさんじ）へ該当性と窓口を照会し、回答を得る。並行して人格ロック、発言フィルタ、AI生成である旨の常時表示を実装する。3件が揃うまで条件を載せた提案書を送らない。判断材料は[docs/IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md) |
+| holo Indie応募の最終受入 | `holo Indie審査版インストーラをビルド.bat`で実インストーラを作り、通常版と別領域へ導入されること、さくらみこ公式MMDだけが表示されること、音声モデルとAivisが含まれず読み上げが無効なことを新規Windows利用者相当で確認する。企画書とビルドの限定共有先を用意し、応募フォームの送信は利用者が明示した場合だけ行う。人格固定、話題ガード、AI生成の常時表示は審査側の要件を受けて一般配布前に実装する |
+| VTuber事務所への公式キャラクター許諾 | にじさんじ等、holo Indie以外の事務所については[docs/IP-PROPOSAL-VTUBER.md](IP-PROPOSAL-VTUBER.md)の照会文で該当性と窓口を確認する。判断材料は[docs/IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md) |
 | 本体無料化に伴う実装の作り替え | [docs/SALES.md](SALES.md) §4の本体無料・キャラ課金へ実装を合わせる。(1) `license::tool_requires_pro()` の Free／Pro 境界を撤去し、キャラパック単位の所有判定へ作り替える。(2) `distribution/release.json` の `includedCharacters` を看板キャラ1体へ絞り、残り6体を有償パックへ回す。(3) README／MANUAL／設定画面のPro表記を無料本体の記述へ更新する。着手条件は看板キャラの決定。3件は同一作業で行い、途中の版でキャラが消えたり無料機能が有料に見えたりしないようにする |
 
 ## FreeTokenローカルエンジンの段階導入
