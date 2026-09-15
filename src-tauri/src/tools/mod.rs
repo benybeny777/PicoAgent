@@ -272,6 +272,7 @@ pub fn intent_for_text(text: &str) -> Option<MatchedIntent> {
 }
 
 /// 直前までの利用者発話（新しい順）も各スキルへ渡して、最初の先回り実行だけを返す。
+#[cfg(test)]
 pub fn intent_for_conversation(text: &str, earlier_user_texts: &[&str]) -> Option<MatchedIntent> {
     intent_for_dialogue(text, earlier_user_texts, &[])
 }
