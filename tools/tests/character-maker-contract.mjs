@@ -4,6 +4,12 @@ import test from "node:test";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
+test("キャラ選択の決定ボタンはピンクで選択中と区別する", async () => {
+  const style = await read("ui/settings.css");
+  assert.match(style, /\.character-card \.character-select-button \{[\s\S]*?background: var\(--pink\);[\s\S]*?color: #fff;/);
+  assert.match(style, /\.character-card \.character-select-button:disabled \{[\s\S]*?background: var\(--pink-soft\);[\s\S]*?color: var\(--pink\);/);
+});
+
 test("キャラ作成は現行4工程だけをPicoAgent設定へ公開する", async () => {
   const [pipeline, settings] = await Promise.all([
     read("character-maker/src/pipeline.rs"),

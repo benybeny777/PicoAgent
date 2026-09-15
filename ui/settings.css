@@ -537,8 +537,18 @@ body.searching .tab-panel {
   height: 28px;
   margin-top: 7px;
   padding: 0 10px;
+  border-color: transparent;
+  background: var(--pink);
+  color: #fff;
+  font-weight: 700;
 }
-.character-card .character-select-button:disabled { opacity: .72; cursor: default; }
+.character-card .character-select-button:disabled {
+  border-color: var(--pink);
+  background: var(--pink-soft);
+  color: var(--pink);
+  opacity: 1;
+  cursor: default;
+}
 .character-id { font-family: Consolas,"Yu Gothic UI",monospace; }
 .card-name { font-size: 13px; font-weight: 600; }
 .config-badge {
