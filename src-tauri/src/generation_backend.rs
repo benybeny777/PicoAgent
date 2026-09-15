@@ -470,6 +470,51 @@ mod tests {
     }
 
     #[test]
+    fn ローカルllmとpytorchで対応表を共有しない() {
+        // llama.cppのROCmビルドが動くGPUと、PyTorch ROCmが公式対応するGPUは一致しない。
+        // 片方の表を流用すると、非対応GPUで数十GBの取得を始めてしまう。
+        let sources = crate::guard_scan::backend_sources();
+        let text = |name: &str| {
+            sources
+                .iter()
+                .find(|source| source.path.ends_with(name))
+                .unwrap_or_else(|| panic!("{name}を読み込める"))
+                .text
+                .clone()
+        };
+        let engine = text("src-tauri/src/engine_backend.rs");
+        let generation = text("src-tauri/src/generation_backend.rs");
+        // このテスト自身も走査対象に入るため、定数名は分割して組み立てる。
+        let runtime_table = format!("WINDOWS_ROCM_{}", "RUNTIME_SKUS");
+        let pytorch_table = format!("WINDOWS_ROCM_{}", "PYTORCH_SKUS");
+        assert!(!generation.contains(&runtime_table));
+        assert!(!engine.contains(&pytorch_table));
+        assert!(!engine.contains("generation_backend::"));
+        // llama.cppのROCm対応SKUをPyTorch側が自動で対応扱いにしない。
+        assert!(engine.contains("\"radeon rx 6600\""));
+        assert!(!is_supported_amd_pytorch_name("AMD Radeon RX 6600"));
+    }
+
+    #[test]
+    fn cuda側の固定版を変えない() {
+        // 既存のCUDA経路（対応GPU・モデル・画質・手順）を、AMD対応で動かさない。
+        assert_eq!(CUDA_TORCH_VERSION, "2.11.0+cu128");
+        assert_eq!(CUDA_RELEASE, "cuda-12.8");
+        let lock = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("リポジトリルート")
+            .join("character-maker/sidecar/requirements-comfy.lock");
+        let text = std::fs::read_to_string(lock).expect("CUDA固定情報を読み込める");
+        for pinned in [
+            "torch==2.11.0+cu128",
+            "torchvision==0.26.0+cu128",
+            "torchaudio==2.11.0+cu128",
+        ] {
+            assert!(text.contains(pinned), "{pinned}");
+        }
+    }
+
+    #[test]
     fn gpuなしでは生成用アセットを取得しない() {
         assert!(matches!(
             select(&[], false),
