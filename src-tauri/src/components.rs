@@ -920,6 +920,10 @@ async fn install_media_model(
             && python.is_file(),
         "先に「画像編集・キャラクター作成基盤」を導入してください。動画モデルはまだ取得していません"
     );
+    // 導入済みランタイムが今のGPU向けでないまま、動画モデルだけを取得させない。
+    if let Some(reason) = generation_runtime_mismatch(app) {
+        anyhow::bail!("{reason}動画モデルは取得していません。");
+    }
     // 動画モデルも、取得開始前にGPUを判定する。非対応GPUでは何も取得しない。
     let selected = match generation_selection().await {
         crate::generation_backend::BackendSelection::Supported(value) => value,
