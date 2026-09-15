@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use url::Url;
 
-use super::{Tool, ToolReg};
+use super::{IntentInvocation, Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 
@@ -16,6 +16,123 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_REDIRECTS: usize = 5;
 
 pub struct WebFetchTool;
+
+const DETAIL_MATERIAL_PROMPT: &str = include_str!("prompts/detail-material.md");
+
+fn render_detail_material(user_text: &str, tool_result: &str) -> String {
+    crate::tools::render_intent_prompt(DETAIL_MATERIAL_PROMPT, user_text, tool_result)
+}
+
+fn markdown_links(text: &str) -> Vec<(String, String)> {
+    let mut links = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        rest = &rest[open + 1..];
+        let Some(middle) = rest.find("](") else {
+            continue;
+        };
+        let title = rest[..middle].trim();
+        rest = &rest[middle + 2..];
+        let Some(close) = rest.find(')') else {
+            break;
+        };
+        let url = rest[..close].trim();
+        rest = &rest[close + 1..];
+        if !title.is_empty()
+            && (url.starts_with("https://") || url.starts_with("http://"))
+            && !links.iter().any(|(_, existing)| existing == url)
+        {
+            links.push((title.to_string(), url.to_string()));
+        }
+    }
+    links
+}
+
+fn detail_query(text: &str) -> bool {
+    [
+        "詳しく",
+        "詳細",
+        "深掘り",
+        "深堀り",
+        "掘り下げ",
+        "どういうこと",
+        "背景を教えて",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
+fn referenced_index(text: &str) -> Option<usize> {
+    for (index, markers) in [
+        ["1番目", "一番目", "一番上", "最初"],
+        ["2番目", "二番目", "二つ目", "2つ目"],
+        ["3番目", "三番目", "三つ目", "3つ目"],
+        ["4番目", "四番目", "四つ目", "4つ目"],
+        ["5番目", "五番目", "五つ目", "5つ目"],
+    ]
+    .iter()
+    .enumerate()
+    {
+        if markers.iter().any(|marker| text.contains(marker)) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn topic_hint(text: &str) -> String {
+    [
+        "この",
+        "その",
+        "さっきの",
+        "今の",
+        "ニュース",
+        "記事",
+        "について",
+        "詳しく",
+        "詳細",
+        "深掘り",
+        "深堀り",
+        "掘り下げて",
+        "教えて",
+        "知りたい",
+        "してほしい",
+        "して",
+        "を",
+        "の",
+        "は",
+        "？",
+        "?",
+        " ",
+    ]
+    .into_iter()
+    .fold(text.to_string(), |current, marker| {
+        current.replace(marker, "")
+    })
+}
+
+fn select_link(text: &str, earlier_assistant_texts: &[&str]) -> Option<(String, String)> {
+    let links = earlier_assistant_texts
+        .iter()
+        .flat_map(|answer| markdown_links(answer))
+        .collect::<Vec<_>>();
+    if links.is_empty() {
+        return None;
+    }
+    if let Some(index) = referenced_index(text) {
+        return links.get(index).cloned();
+    }
+    let hint = topic_hint(text);
+    if hint.chars().count() >= 2 {
+        if let Some(link) = links
+            .iter()
+            .find(|(title, _)| title.contains(&hint) || hint.contains(title))
+        {
+            return Some(link.clone());
+        }
+    }
+    (links.len() == 1).then(|| links[0].clone())
+}
 
 fn allowed_domain(cfg: &Config, url: &Url) -> bool {
     let allowed = cfg.get("PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS", "");
@@ -40,6 +157,31 @@ impl Tool for WebFetchTool {
 
     fn label(&self) -> &'static str {
         "URL取得"
+    }
+
+    fn intent_keywords(&self) -> &'static [&'static str] {
+        &["詳しく", "詳細", "深掘り", "深堀り", "記事"]
+    }
+
+    fn intent_priority(&self) -> i32 {
+        1_400
+    }
+
+    fn intent_invocation_in_dialogue(
+        &self,
+        text: &str,
+        _earlier_user_texts: &[&str],
+        earlier_assistant_texts: &[&str],
+    ) -> Option<IntentInvocation> {
+        if !detail_query(text) {
+            return None;
+        }
+        let (title, url) = select_link(text, earlier_assistant_texts)?;
+        Some(IntentInvocation::material(
+            json!({ "url": url, "source_title": title }),
+            render_detail_material,
+            true,
+        ))
     }
 
     fn description(&self) -> String {
@@ -78,6 +220,11 @@ impl Tool for WebFetchTool {
             Some(url) if !url.is_empty() => url,
             _ => return "エラー: url が指定されていません。".to_string(),
         };
+        let source_title = args
+            .get("source_title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty());
         let url = match Url::parse(raw_url) {
             Ok(url) if url.scheme() == "http" || url.scheme() == "https" => url,
             Ok(_) => return "エラー: url は http または https を指定してください。".to_string(),
@@ -173,8 +320,41 @@ impl Tool for WebFetchTool {
         } else {
             String::new()
         };
-        format!("URL: {}\n---\n{}{suffix}", current, text)
+        let heading = source_title
+            .map(|title| format!("参照見出し: {title}\n"))
+            .unwrap_or_default();
+        format!("{heading}URL: {}\n---\n{}{suffix}", current, text)
     }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(WebFetchTool) } }
+
+#[cfg(test)]
+mod tests {
+    use super::{markdown_links, select_link};
+
+    const ANSWER: &str = "確認できた主なニュースです。\n- [最初の社会ニュース](https://example.com/one)\n- [宇宙開発の新しい発表](https://example.com/two)";
+
+    #[test]
+    fn 回答から見出し付きリンクを取り出す() {
+        let links = markdown_links(ANSWER);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].0, "最初の社会ニュース");
+        assert_eq!(links[1].1, "https://example.com/two");
+    }
+
+    #[test]
+    fn 番号または見出し語で深掘り先を選ぶ() {
+        assert_eq!(
+            select_link("2番目を詳しく", &[ANSWER]).unwrap().1,
+            "https://example.com/two"
+        );
+        assert_eq!(
+            select_link("宇宙開発のニュースを深掘りして", &[ANSWER])
+                .unwrap()
+                .1,
+            "https://example.com/two"
+        );
+        assert!(select_link("このニュースを詳しく", &[ANSWER]).is_none());
+    }
+}

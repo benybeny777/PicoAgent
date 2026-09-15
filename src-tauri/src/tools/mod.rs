@@ -133,6 +133,16 @@ pub trait Tool: Send + Sync {
     ) -> Option<IntentInvocation> {
         self.intent_invocation(text)
     }
+    /// 直前の回答も含めて先回り実行を組み立てる。
+    /// 回答内の出典を「これ」「2番目の記事」のように参照するスキルだけが上書きする。
+    fn intent_invocation_in_dialogue(
+        &self,
+        text: &str,
+        earlier_user_texts: &[&str],
+        _earlier_assistant_texts: &[&str],
+    ) -> Option<IntentInvocation> {
+        self.intent_invocation_in_conversation(text, earlier_user_texts)
+    }
     /// このスキル自身が申告した語彙だけで発話との一致を判定する。
     fn matches_intent(&self, text: &str) -> bool {
         let normalized = text.to_lowercase();
@@ -263,12 +273,25 @@ pub fn intent_for_text(text: &str) -> Option<MatchedIntent> {
 
 /// 直前までの利用者発話（新しい順）も各スキルへ渡して、最初の先回り実行だけを返す。
 pub fn intent_for_conversation(text: &str, earlier_user_texts: &[&str]) -> Option<MatchedIntent> {
+    intent_for_dialogue(text, earlier_user_texts, &[])
+}
+
+/// 直前までの利用者発話と回答（いずれも新しい順）を各スキルへ渡す。
+pub fn intent_for_dialogue(
+    text: &str,
+    earlier_user_texts: &[&str],
+    earlier_assistant_texts: &[&str],
+) -> Option<MatchedIntent> {
     debug_assert!(TOOL_ROUTES.is_empty());
     let normalized = text.to_lowercase();
     let mut matched: Vec<_> = all()
         .iter()
         .filter_map(|tool| {
-            let invocation = tool.intent_invocation_in_conversation(text, earlier_user_texts)?;
+            let invocation = tool.intent_invocation_in_dialogue(
+                text,
+                earlier_user_texts,
+                earlier_assistant_texts,
+            )?;
             let score = tool
                 .intent_keywords()
                 .iter()
@@ -868,6 +891,19 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn 直前回答の見出しを指定した深掘りは記事本文を取得する() {
+        let previous = "主なニュースです。\n- [宇宙開発の新しい発表](https://example.com/space)";
+        let matched =
+            super::intent_for_dialogue("宇宙開発のニュースを深掘りして", &[], &[previous]).unwrap();
+        assert_eq!(matched.tool_name, "web_fetch");
+        assert_eq!(matched.invocation.args["url"], "https://example.com/space");
+        assert_eq!(
+            matched.invocation.args["source_title"],
+            "宇宙開発の新しい発表"
+        );
     }
 
     #[test]
