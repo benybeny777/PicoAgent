@@ -23,7 +23,7 @@ Set-Location -LiteralPath $root
 
 # 同梱する許諾済み素材。キャラはPicoAgentの登録データ、音声はAivisのモデルフォルダーから取り込む。
 $characters = @('miko-mmd', 'korone-mmd')
-$voiceModels = @('dedf12ff-a7b6-48c7-aa1f-c66f9d3d2d83', '17ba19b0-e811-4553-b032-34a5504e8579')
+$voiceModels = @('8e120ad8-9ea4-451d-ab07-4a8e8dbb9956', '360c3bb8-1400-4a3a-ac00-4ad5b5444994')
 
 function Invoke-Step {
     param([string]$Label, [string]$File, [string[]]$Arguments)

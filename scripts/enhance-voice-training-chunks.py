@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
-"""選別済み学習データをAdobe Podcast Enhanceで補正するため、送信用チャンクへ連結し、補正版を元の断片へ切り戻す。
+"""選別済み学習データをノイズ除去用チャンクへ連結し、補正版を元の断片へ切り戻す。
 
-Style-Bert-VITS2の `.venv` のPythonで実行する。Adobe Podcast Enhance（Web版）への送受信はブラウザ操作で行い、
-このスクリプトはファイルの準備と取り込みだけを担当する。
+Style-Bert-VITS2の `.venv` のPythonで実行する。既定の補正経路はローカルのDeepFilterNetであり、
+外部サービスへのアップロードや手作業を必要としない。
 
-  # 1. 断片を1秒の無音をはさんで連結し、1本10MB未満のWAVとmanifest.jsonを作る
-  python scripts/adobe-enhance-voice-chunks.py pack --source <Data/元> --out <送信用フォルダ>
+  # 1. 断片を1秒の無音をはさんで連結し、1本9MB以下のWAVとmanifest.jsonを作る
+  python scripts/enhance-voice-training-chunks.py pack --source <Data/元> --out <連結フォルダ>
 
-  # 2. Adobe Podcast Enhanceで chunk-XX.wav を1本ずつ補正し、補正版を別フォルダへ chunk-XX.wav として置く
-  #    （manifest.jsonも同じフォルダへ複製する）
+  # 2. 版とハッシュを固定したDeepFilterNetで全チャンクを補正する
+  python scripts/enhance-voice-training-chunks.py deepfilter --source <連結フォルダ> \
+      --out <補正版フォルダ> --binary <deep-filter.exe>
 
   # 3. 補正版を検証して元の断片へ切り戻し、-23LUFS・ピーク-1dBFS以下へそろえた別名データセットを作る
-  python scripts/adobe-enhance-voice-chunks.py unpack --source <Data/元> --enhanced <補正版フォルダ> --output <Data/新>
+  python scripts/enhance-voice-training-chunks.py unpack --source <Data/元> \
+      --enhanced <補正版フォルダ> --output <Data/新>
 
 注意:
-- FLACはAdobe側の受付一覧にあるが「未対応」で拒否されたためWAVで送る（2026-09-15確認）。
-- 補正版は48kHzモノラルで返り、長さは元と一致する。unpackは全チャンクの長さを実データで照合し、1本でも違えば停止する。
-- ChromeはデータがそろってもGUID名の`.tmp`のまま数分保存を確定しないことがある。`.tmp`を使う場合は、実データを
-  最後まで読んで長さが元と一致したものだけを複製する（unpackの照合でも検出する）。
+- DeepFilterNetは公式Windows版0.5.6のSHA-256を照合する。別版や別バイナリは黙って使わない。
+- `--compensate-delay`は約30ms短くなって切り出し位置がずれるため使わない。
+- deepfilterとunpackは全チャンクのサンプルレートと長さを照合し、1本でも違えば停止する。
 - 出力先が既にあれば停止する（既存データセットを上書きしない）。
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,6 +39,8 @@ GAP_SECONDS = 1.0
 MAX_BYTES = 9_000_000
 TARGET_LUFS = -23.0
 PEAK_CEILING_DBFS = -1.0
+DEEPFILTER_VERSION = "deep_filter 0.5.6"
+DEEPFILTER_SHA256 = "75e11fa16445f560cb6b021521ddb89e89270d13b83089705d98776f58fd7915"
 
 
 def entries(source: Path):
@@ -93,6 +98,57 @@ def load_pause_levels():
     return module.pause_levels
 
 
+def deepfilter(source: Path, out: Path, binary: Path) -> None:
+    if out.exists():
+        raise SystemExit(f"出力先が既にあるため停止します: {out}")
+    incoming = out.with_name(f"{out.name}.incoming")
+    if incoming.exists():
+        raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
+    if not binary.is_file():
+        raise SystemExit(f"DeepFilterNetの実行ファイルがありません: {binary}")
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    if digest != DEEPFILTER_SHA256:
+        raise SystemExit(f"DeepFilterNetのSHA-256が一致しません: {digest}")
+    version = subprocess.run(
+        [str(binary), "--version"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    if version != DEEPFILTER_VERSION:
+        raise SystemExit(f"DeepFilterNetの版が一致しません: {version}")
+
+    manifest_path = source / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    numbers = sorted({clip["chunk"] for clip in manifest["clips"]})
+    incoming.mkdir(parents=True)
+    for number in numbers:
+        name = f"chunk-{number:02d}.wav"
+        original = source / name
+        if not original.is_file():
+            raise SystemExit(f"連結チャンクがありません: {original}")
+        print(f"DeepFilterNet処理中: {name}", flush=True)
+        subprocess.run(
+            [str(binary), str(original), "--output-dir", str(incoming)], check=True
+        )
+        enhanced = incoming / name
+        original_info = sf.info(original)
+        enhanced_info = sf.info(enhanced)
+        if original_info.samplerate != enhanced_info.samplerate:
+            raise SystemExit(f"補正前後のサンプルレートが一致しません: {name}")
+        if abs(original_info.frames - enhanced_info.frames) > 1:
+            raise SystemExit(f"補正前後の長さが一致しません: {name}")
+
+    manifest["enhancement"] = {
+        "engine": "DeepFilterNet",
+        "version": DEEPFILTER_VERSION.removeprefix("deep_filter "),
+        "sha256": digest,
+        "compensate_delay": False,
+    }
+    (incoming / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    incoming.replace(out)
+    print(f"DeepFilterNet補正完了: {len(numbers)}チャンク / 出力 {out}")
+
+
 def unpack(source: Path, enhanced: Path, output: Path) -> None:
     import pyloudnorm
 
@@ -108,7 +164,7 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
             raise SystemExit(f"補正版がありません: {path}")
         audio, sr = sf.read(path, dtype="float64", always_2d=True)
         # 送信チャンクの長さは「最後の断片の終端」か、末尾に無音1秒を足した長さ。
-        # 補正版はAdobeで長さが変わらないため、この範囲外なら書き込み途中や取り違えとみなして止める。
+        # 補正前後の長さを維持する前提。この範囲外なら書き込み途中や取り違えとみなして止める。
         last_end = max(c["end_s"] for c in manifest["clips"] if c["chunk"] == number)
         extra = len(audio) / sr - last_end
         if not -0.01 < extra < GAP_SECONDS + 0.01:
@@ -143,7 +199,10 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
         "pauses": len(levels), "pause_median_db": round(float(np.median(lv)), 1),
         "pauses_louder_than_-48db": round(float(np.mean(lv > -48)), 3),
     }
-    (output / "adobe-enhance.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    report["enhancement"] = manifest.get("enhancement", {"engine": "外部補正（詳細不明）"})
+    (output / "voice-enhancement.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
@@ -153,6 +212,10 @@ def main() -> int:
     p = sub.add_parser("pack")
     p.add_argument("--source", required=True)
     p.add_argument("--out", required=True)
+    d = sub.add_parser("deepfilter")
+    d.add_argument("--source", required=True)
+    d.add_argument("--out", required=True)
+    d.add_argument("--binary", required=True)
     u = sub.add_parser("unpack")
     u.add_argument("--source", required=True)
     u.add_argument("--enhanced", required=True)
@@ -160,6 +223,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.mode == "pack":
         pack(Path(args.source).resolve(), Path(args.out).resolve())
+    elif args.mode == "deepfilter":
+        deepfilter(Path(args.source).resolve(), Path(args.out).resolve(), Path(args.binary).resolve())
     else:
         unpack(Path(args.source).resolve(), Path(args.enhanced).resolve(), Path(args.output).resolve())
     return 0

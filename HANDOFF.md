@@ -5,9 +5,10 @@
 ## 現在の状態
 
 - 最終確認日: 2026-09-15
-- 進行中: PR #312（ブランチ `codex/voice-noise-character-preview`、Draft）。さくらみこ・戌神ころねの音声モデルを、学習データの合間を静かにしたデータセットで作り直している。**再開手順・成果物の場所・判断待ちの論点はPR本文冒頭の「引き継ぎ」節が正本。**
-  - 再開に必要な環境: `temp\voice-models\Style-Bert-VITS2`（SBV2 2.7.0と`.venv`、Git管理外）、RTX 5060 Laptop 8GB。GPUを使う前処理・学習・検査は同時に動かさない。
-  - この作業環境（Claude Code）からはAppDataの書き込みが実体と別の場所へ振り替えられたため、Aivisエンジンへのモデル登録と`config.json`変更は、利用者が通常起動したPicoAgentに対してHTTPと設定画面で行う。
+- 進行中: PR #312（ブランチ `codex/voice-noise-character-preview`、Draft）。さくらみこ・戌神ころねの音声モデルは、Adobe手作業を廃止してDeepFilterNet 0.5.6のローカル一括補正で作り直した。**再開手順・成果物の場所・判断待ちの論点はPR本文冒頭の「引き継ぎ」節が正本。**
+  - 採用モデル: みこ`e7/s1000`（AIVMX UUID `8e120ad8-9ea4-451d-ab07-4a8e8dbb9956`）、ころね`e11/s2000`（`360c3bb8-1400-4a3a-ac00-4ad5b5444994`）。通常起動したPicoAgentのAivisへ追加登録し、キャラ別設定も新しい話者UUIDと「ノーマル」へ更新済み。旧モデルは保持している。
+  - 実Aivisの10文×3回検査では、みこ29/30、ころね28/30が静音で、真ピークはそれぞれ-2.63dB、-2.58dB。2000 stepのみこは静音28/30と発音が悪化したため不採用。AIVMXと検査結果は`temp\voice-models\release\`と`temp\voice-models\compare\`に保持している。
+  - 再開に必要な環境: `temp\voice-models\Style-Bert-VITS2`（SBV2 2.7.0と`.venv`、Git管理外）、RTX 5060 Laptop 8GB。GPUを使う前処理・学習・検査は同時に動かさない。batch 2で共有GPUメモリへ4.59GBあふれた場合は、スキル記載どおりbatch 1へ下げる。
 - 実機での未確認事項は `docs/TASKS.md` を参照する。
 - 未完了の素材補修・実機受入・設計のみの将来開発は[docs/TASKS.md](docs/TASKS.md)を参照し、着手条件を満たす項目から進める。
 - 配布版の更新は本体のマージと別に扱い、配布リポジトリの公開状態を確認する。
