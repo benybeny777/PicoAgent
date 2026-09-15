@@ -1260,11 +1260,12 @@ async fn run_scoped(
         if step > 0 && cancelled() {
             return direct_answer(messages, CANCEL_MESSAGE.to_string());
         }
-        if super_agent {
-            emit_status(format!("ステップ {}/{} を実行中…", step + 1, max_steps));
-        } else if step > 0 {
-            // 2ターン目以降（ツール結果を受けて再考する場合）は固まって見えないよう通知する。
+        if step > 0 {
+            // ツール結果を受けて再考する段階だけ、最初の思考と区別する。
             emit_status("考え直しています…".to_string());
+        } else if super_agent {
+            // 内部ループの上限は利用者の作業名ではない。進捗には現在の状態だけを出す。
+            emit_status("考え中…".to_string());
         }
         // このステップの本文を最初から表示・読み上げさせる（前ステップの残りを捨てる）。
         emit_stream_reset();
