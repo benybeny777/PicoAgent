@@ -24,6 +24,8 @@ pub struct MakerConfig {
     pub sam2_points_per_batch: u32,
     pub sam2_pred_iou_threshold: f32,
     pub sam2_stability_threshold: f32,
+    /// ComfyUIを`--lowvram`で起動するか。判定はアプリ側のGPU情報が正本。
+    pub comfy_lowvram: bool,
     pub comfy_port: u16,
     pub comfy_startup_timeout_seconds: u32,
     pub snapshot_part_bytes: u64,
@@ -55,6 +57,8 @@ impl MakerConfig {
             sam2_points_per_batch: 8,
             sam2_pred_iou_threshold: 0.7,
             sam2_stability_threshold: 0.85,
+            // 専用VRAM量を判定できない呼び出し（テスト・CLI）は安全側のlowvramで始める。
+            comfy_lowvram: true,
             // 0はサイドカーがOSに空きポートを選ばせる。固定番号はWindowsの予約ポート範囲と衝突して起動できない。
             comfy_port: 0,
             comfy_startup_timeout_seconds: 600,

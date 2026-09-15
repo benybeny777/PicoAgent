@@ -1,0 +1,19 @@
+# ROCm（AMD）向けの直接実行依存。共通分へROCm版PyTorchだけを足す。
+#
+# 取得元はAMD公式のWindows向け配布（repo.radeon.com）で、ROCm 7.2.1・Python 3.12・
+# Radeonソフトウェア26.2.2以降が前提。PyPIのCPU版torchで上書きされないよう、
+# 追加インデックスではなく公式wheelのURLを直接固定する。
+#
+# ロックの再生成（ネットワークのあるWindows機で実行し、結果をコミットする）:
+#
+#   uv pip compile sidecar/requirements-comfy-rocm.in \
+#     --output-file sidecar/requirements-comfy-rocm.lock \
+#     --generate-hashes --index-strategy unsafe-best-match \
+#     --python-platform windows --python-version 3.12
+#
+# ロックが無い間、AMD経路は取得を開始せず理由を表示する（推測のハッシュを置かない）。
+-r requirements-comfy-common.in
+
+torch @ https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
+torchvision @ https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
+torchaudio @ https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl

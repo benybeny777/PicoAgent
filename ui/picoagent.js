@@ -233,6 +233,7 @@ window.picoagent = {
     // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
+    generationEnvironment: () => call("settings_generation_environment"),
     installComponents: (ids, enableTts = false) => call("settings_components_install", { ids, enableTts }),
     removeComponent: (id) => call("settings_components_remove", { id }),
     checkUpdate: () => call("settings_check_update"),

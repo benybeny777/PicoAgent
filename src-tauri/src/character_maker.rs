@@ -190,12 +190,22 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
     } else {
         development_assets
     };
+    let mut config = MakerConfig::managed(managed, crate::components::shared_python_dir(app));
+    // 専用VRAM16GB未満・共有メモリ・VRAM不明では、ComfyUIを省メモリ設定で起動する。
+    config.comfy_lowvram = crate::generation_backend::lowvram_decision(
+        crate::generation_backend::generation_device(
+            &crate::gpu::devices(),
+            crate::components::installed_generation_runtime(app).as_ref(),
+        )
+        .as_ref(),
+    )
+    .lowvram;
     Ok((
         PipelineContext {
             characters_root: data.join("character-maker/characters"),
             assets_root,
         },
-        MakerConfig::managed(managed, crate::components::shared_python_dir(app)),
+        config,
     ))
 }
 

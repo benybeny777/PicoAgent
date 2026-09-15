@@ -22,6 +22,7 @@ mod durable_jobs;
 mod emotion;
 mod engine;
 mod engine_backend;
+mod generation_backend;
 mod gpu;
 #[cfg(test)]
 mod guard_scan;
@@ -132,6 +133,7 @@ pub fn run() {
             commands::pet_complete_onboarding,
             commands::pet_show_onboarding,
             commands::settings_components_status,
+            commands::settings_generation_environment,
             commands::settings_components_install,
             commands::settings_components_remove,
             commands::settings_check_update,

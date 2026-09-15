@@ -975,6 +975,54 @@ pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
         .map_err(|error| format!("{error:#}"))
 }
 
+/// 画像・動画・キャラクター生成に使うGPUと実行バックエンド（CUDA／ROCm）の現在地。
+///
+/// 非対応GPUでは取得を始める前に理由を見せるため、導入前でも呼べるようにする。
+#[tauri::command(async)]
+pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, String> {
+    use crate::generation_backend::BackendSelection;
+
+    let selection = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        crate::components::generation_selection().await
+    } else {
+        BackendSelection::Unsupported(
+            "画像・動画・キャラクター生成は現在Windows x64専用です。何も取得していません。".into(),
+        )
+    };
+    let installed = crate::components::installed_generation_runtime(&app);
+    let device = match &selection {
+        BackendSelection::Supported(selected) => Some(selected.device.clone()),
+        BackendSelection::Unsupported(_) => {
+            crate::generation_backend::generation_device(&crate::gpu::devices(), installed.as_ref())
+        }
+    };
+    let lowvram = crate::generation_backend::lowvram_decision(device.as_ref());
+    Ok(json!({
+        "supported": matches!(selection, BackendSelection::Supported(_)),
+        "backendLabel": selection
+            .supported()
+            .map(|selected| selected.backend.label()),
+        "gpuName": device.as_ref().map(|device| device.name.clone()),
+        "gpuVendor": device.as_ref().map(|device| device.vendor.label()),
+        "reason": match &selection {
+            BackendSelection::Supported(_) => None,
+            BackendSelection::Unsupported(reason) => Some(reason.clone()),
+        },
+        "lowvram": lowvram.lowvram,
+        "lowvramReason": lowvram.reason,
+        "installedBackendLabel": installed
+            .as_ref()
+            .map(|runtime| runtime.backend.label()),
+        // 導入済みランタイムがいまのGPU向けでない場合は、そのまま使わず入れ直させる。
+        "needsReinstall": installed.as_ref().is_some_and(|runtime| {
+            selection
+                .supported()
+                .is_none_or(|selected| !runtime.is_reusable_for(selected))
+        }),
+        "rocmRequiredDriver": crate::generation_backend::ROCM_REQUIRED_DRIVER,
+    }))
+}
+
 /// 選択した追加コンポーネントをPicoAgent専用領域へ導入する。
 #[tauri::command]
 pub async fn settings_components_install(
@@ -1420,7 +1468,7 @@ fn open_with_default_app(url: &str) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     crate::tools::process::command_sync("xdg-open")
-        .arg(&url)
+        .arg(url)
         .spawn()
         .map_err(|error| format!("既定のアプリで開けませんでした: {error}"))?;
 

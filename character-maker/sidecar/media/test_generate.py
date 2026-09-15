@@ -129,6 +129,74 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(source.read_bytes(), b"original")
                 self.assertEqual(preserved.read_bytes(), b"finished")
 
+    def run_main(self, root, *, lowvram, history):
+        """ComfyUIとGPUだけを差し替えてmain()を通し、起動コマンドと後片付けを確かめる。"""
+        source = root / "source.png"
+        source.write_bytes(b"original")
+        output = root / "result.png"
+        run = root / ".generating-result"
+        argv = ["generate.py", "--engine", "qwen-edit", "--prompt", "edit",
+                "--input", str(source), "--output", str(output), "--comfy", str(root),
+                "--models", str(root), "--gpu-lock", str(root / "gpu.lock"),
+                "--seed", "1", "--width", "256", "--height", "256"]
+        if lowvram:
+            argv.append("--lowvram")
+        def ready(*args):
+            (run / "output/image.png").write_bytes(b"generated")
+        process = Mock()
+        process.poll.return_value = None
+        with patch.object(GEN.os.sys, "argv", argv), \
+             patch.object(GEN, "gpu_lock", return_value=nullcontext()), \
+             patch.object(GEN, "reserve_port", return_value=18188), \
+             patch.object(GEN.subprocess, "Popen", return_value=process) as popen, \
+             patch.object(GEN, "wait_for_server", side_effect=ready), \
+             patch.object(GEN, "request_json", side_effect=[{"prompt_id": "p"}, history]), \
+             patch.object(GEN, "stop_owned") as stop:
+            error = None
+            try:
+                GEN.main()
+            except BaseException as raised:  # noqa: BLE001 - 呼び出し側で種類を確かめる
+                error = raised
+        return {"command": popen.call_args[0][0], "stop": stop.call_count,
+                "error": error, "run": run, "output": output}
+
+    def test_lowvram_flag_only_changes_comfy_startup(self):
+        temporary_root = HERE.parents[2] / "temp"
+        temporary_root.mkdir(exist_ok=True)
+        history = {"p": {"outputs": {"1": {"images": [{"filename": "image.png"}]}}}}
+        commands = {}
+        for lowvram in (False, True):
+            with self.subTest(lowvram=lowvram), tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+                result = self.run_main(Path(directory), lowvram=lowvram, history=history)
+                self.assertIsNone(result["error"])
+                # 作業ディレクトリは実行ごとに変わるため、比較の前だけ差し替える。
+                commands[lowvram] = [str(part).replace(directory, "ROOT") for part in result["command"]]
+                self.assertEqual("--lowvram" in result["command"], lowvram)
+        # 変わるのは--lowvramの有無だけ。seed・モデル・入力・出力先は同じにする。
+        self.assertEqual(commands[True], commands[False] + ["--lowvram"])
+
+    def test_gpu_out_of_memory_uses_dedicated_exit_code_and_leaves_nothing(self):
+        temporary_root = HERE.parents[2] / "temp"
+        temporary_root.mkdir(exist_ok=True)
+        for message in ("CUDA out of memory. Tried to allocate 2.00 GiB",
+                        "HIP error: out of memory",
+                        "Allocation on device failed"):
+            with self.subTest(message=message), tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+                history = {"p": {"outputs": {}, "status": {"status_str": "error", "messages": [
+                    ["execution_error", {"exception_message": message}]]}}}
+                result = self.run_main(Path(directory), lowvram=False, history=history)
+                self.assertIsInstance(result["error"], GEN.GpuOutOfMemory)
+                # 再試行の前にComfyUIと子孫プロセスを回収し、途中成果物を残さない。
+                self.assertEqual(result["stop"], 1)
+                self.assertFalse(result["run"].exists())
+                self.assertFalse(result["output"].exists())
+        self.assertEqual(GEN.OOM_EXIT_CODE, 3)
+
+    def test_non_memory_failures_are_not_reported_as_out_of_memory(self):
+        self.assertFalse(GEN.is_out_of_memory("ComfyUIの生成に失敗しました: model failed"))
+        self.assertFalse(GEN.is_out_of_memory("生成が時間内に完了しませんでした"))
+        self.assertTrue(GEN.is_out_of_memory("torch.OutOfMemoryError"))
+
     def test_download_metadata_is_pinned(self):
         self.assertEqual(set(SETUP.MODELS), {"wan-2.2-5b", "ltx-0.9.8-2b-fp8"})
         for items in SETUP.MODELS.values():

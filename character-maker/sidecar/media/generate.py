@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -14,6 +15,38 @@ import psutil
 
 
 NEGATIVE = "low quality, worst quality, deformed, distorted, disfigured, motion smear, artifacts, text, watermark"
+# GPUメモリ不足だけを呼び出し元（Rust側）へ区別して返す終了コード。
+# 再試行するかどうかはRust側が決める。ここでは「OOMだった」ことだけを伝える。
+OOM_EXIT_CODE = 3
+# CUDA・ROCmの両方で出るGPUメモリ不足の目印。
+OOM_MARKERS = (
+    "out of memory",
+    "outofmemoryerror",
+    "allocation on device",
+    "hip error: out of memory",
+    "insufficient memory",
+    "failed to allocate",
+)
+
+
+class GpuOutOfMemory(RuntimeError):
+    """ComfyUIがGPUメモリ不足で失敗した。"""
+
+
+def is_out_of_memory(text):
+    lowered = str(text).lower()
+    return any(marker in lowered for marker in OOM_MARKERS)
+
+
+def log_tail(path, limit=8192):
+    """失敗原因の判定に使うログ末尾。読めなければ空文字を返す。"""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - limit))
+            return handle.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
 
 
 @contextmanager
@@ -193,6 +226,8 @@ def main():
     parser.add_argument("--frames", type=int, default=97)
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument("--generation-timeout", type=int, default=14400)
+    # 省メモリ起動の要否はGPU判定を持つRust側が決める。ここでは指示どおりに渡すだけにする。
+    parser.add_argument("--lowvram", action="store_true", help="ComfyUIを--lowvramで起動する")
     args = parser.parse_args()
     run =args.output.parent / (".generating-" + args.output.stem)
     temporary = args.output.with_suffix(args.output.suffix + ".incoming")
@@ -210,7 +245,11 @@ def main():
         with gpu_lock(args.gpu_lock):
             args.port = reserve_port(args.port)
             command = [os.fspath(Path(os.sys.executable)), os.fspath(args.comfy / "main.py"), "--listen", "127.0.0.1", "--port", str(args.port), "--base-directory", os.fspath(run), "--models-directory", os.fspath(args.models), "--temp-directory", os.fspath(run / "temp"), "--disable-auto-launch", "--disable-all-custom-nodes", "--disable-api-nodes", "--preview-method", "none"]
+            if args.lowvram:
+                command.append("--lowvram")
             environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
+            print(json.dumps({"event": "comfy_starting", "lowvram": bool(args.lowvram)}, ensure_ascii=False), flush=True)
+            failure = None
             with (run / "comfy.log").open("w", encoding="utf-8") as log:
                 process = subprocess.Popen(command, cwd=args.comfy, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 try:
@@ -238,9 +277,18 @@ def main():
                     shutil.copy2(source, temporary)
                     temporary.replace(args.output)
                     print(json.dumps({"output": os.fspath(args.output), "seed": args.seed}, ensure_ascii=False), flush=True)
+                except Exception as error:  # noqa: BLE001 - 原因の分類は下の判定でまとめて行う
+                    failure = error
                 finally:
+                    # 再試行の前に、ComfyUIと子孫プロセスを必ず回収する。
                     stop_owned(process)
+            if failure is not None:
+                # GPUメモリ不足かどうかは、例外本文とComfyUIのログ末尾の両方で判定する。
+                if is_out_of_memory(f"{type(failure).__name__}: {failure}\n{log_tail(run / 'comfy.log')}"):
+                    raise GpuOutOfMemory(str(failure)) from failure
+                raise failure
     finally:
+        # 失敗した途中成果物を残さない（完成品として公開しない）。
         try:
             temporary.unlink(missing_ok=True)
         finally:
@@ -248,4 +296,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except GpuOutOfMemory as error:
+        print(json.dumps({"event": "gpu_out_of_memory", "detail": str(error)}, ensure_ascii=False), flush=True)
+        print(f"GPUメモリが不足しました: {error}", file=sys.stderr)
+        sys.exit(OOM_EXIT_CODE)

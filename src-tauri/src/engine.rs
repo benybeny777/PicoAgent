@@ -444,7 +444,7 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn total_memory_bytes() -> Option<u64> {
+pub(crate) fn total_memory_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
         // WMI を PowerShell 経由で叩くのをやめ、OS の API を直接呼ぶ。

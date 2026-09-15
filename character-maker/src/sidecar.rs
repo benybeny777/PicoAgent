@@ -25,7 +25,12 @@ pub enum SidecarError {
     #[error("サイドカーを中断しました")]
     Cancelled,
     #[error("サイドカーが失敗しました ({status}): {stderr}")]
-    Failed { status: String, stderr: String },
+    Failed {
+        status: String,
+        /// 終了コード。GPUメモリ不足など、呼び出し元が分類したい失敗を文言ではなく数値で受ける。
+        code: Option<i32>,
+        stderr: String,
+    },
 }
 
 pub struct SidecarProcess {
@@ -146,6 +151,7 @@ impl SidecarProcess {
         } else {
             Err(SidecarError::Failed {
                 status: status.to_string(),
+                code: status.code(),
                 stderr: error_text,
             })
         }
