@@ -445,8 +445,19 @@ impl Tool for ComfyuiTool {
             if result.status.code() == Some(crate::generation_backend::GPU_OOM_EXIT_CODE) {
                 return "エラー: GPUメモリが不足しています。省メモリ設定でも生成できませんでした。画像・動画のサイズかフレーム数を小さくしてください。".into();
             }
+            // 英語の例外や内部コマンドを利用者へそのまま見せない。原文はログへ残す。
             let detail = String::from_utf8_lossy(&result.stderr);
-            return format!("エラー: 画像・動画生成に失敗しました: {}", detail.trim());
+            if let Some(app) = crate::durable_jobs::app_handle() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("画像・動画生成に失敗しました: {}", detail.trim()),
+                );
+            }
+            return format!(
+                "エラー: 画像・動画生成に失敗しました（{}／{}）。指示や画像サイズを変えて試すか、設定の「診断・修復」からログを確認してください。",
+                engine.label(),
+                if lowvram { "省メモリ設定" } else { "通常起動" }
+            );
         }
         if !crate::permissions::fs::metadata(&output)
             .map(|metadata| metadata.is_file())
