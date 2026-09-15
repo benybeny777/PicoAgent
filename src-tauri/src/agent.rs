@@ -102,39 +102,85 @@ fn emit_activity(
     }
 }
 
-// Web検索結果テキスト（web_search.rs 出力）の "URL: ..." 行から参照元URLを順序保持で取り出す。
-fn extract_source_urls(search_result: &str) -> Vec<String> {
-    let mut urls: Vec<String> = Vec::new();
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceLink {
+    title: String,
+    url: String,
+}
+
+fn source_title(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if let Some(title) = trimmed.strip_prefix("- ") {
+        return (!title.starts_with("エラー:")).then(|| title.trim().to_string());
+    }
+    let (_, title) = trimmed.split_once(". ")?;
+    trimmed
+        .split_once('.')
+        .is_some_and(|(number, _)| number.chars().all(|ch| ch.is_ascii_digit()))
+        .then(|| title.trim().to_string())
+}
+
+// 検索・ニュース取得結果の見出しとURLを順序保持で取り出す。
+fn extract_source_links(search_result: &str) -> Vec<SourceLink> {
+    let mut links: Vec<SourceLink> = Vec::new();
+    let mut pending_title: Option<String> = None;
     for line in search_result.lines() {
+        if let Some(title) = source_title(line) {
+            pending_title = Some(title);
+            continue;
+        }
         if let Some(url) = line.trim().strip_prefix("URL: ") {
             let url = url.trim();
             if (url.starts_with("http://") || url.starts_with("https://"))
-                && !urls.iter().any(|existing| existing == url)
+                && !links.iter().any(|existing| existing.url == url)
             {
-                urls.push(url.to_string());
+                links.push(SourceLink {
+                    title: pending_title
+                        .take()
+                        .filter(|title| !title.is_empty())
+                        .unwrap_or_else(|| "参照元".to_string()),
+                    url: url.to_string(),
+                });
             }
         }
     }
-    urls
+    links
 }
 
-// 最終回答の末尾へ、本文にまだ含まれていない参照元URLを「参考:」として追記する。
-// URL 行は読み上げ側（speech_text）で除外されるため音声には乗らない。
-fn append_sources(answer: String, sources: &[String]) -> String {
-    let missing: Vec<&String> = sources
-        .iter()
-        .filter(|url| !answer.contains(url.as_str()))
-        .collect();
-    if missing.is_empty() {
+// モデルが出典を1件も載せなかった場合だけ、取得済み見出しを最大5件補う。
+// 一部を使った回答へ未使用URLを全件追記すると、要約よりURL一覧が長くなるため行わない。
+fn append_sources(answer: String, sources: &[SourceLink]) -> String {
+    if sources.is_empty()
+        || sources
+            .iter()
+            .any(|source| answer.contains(source.url.as_str()))
+    {
         return answer;
     }
     let mut out = answer;
     out.push_str("\n\n参考:");
-    for url in missing {
-        out.push('\n');
-        out.push_str(url);
+    for source in sources.iter().take(5) {
+        out.push_str(&format!("\n- [{}]({})", source.title, source.url));
     }
     out
+}
+
+// 取得後もモデルが「これから検索する」としか返さない場合の確定的な救済表示。
+fn source_fallback_answer(sources: &[SourceLink]) -> String {
+    let mut answer = String::from("確認できた主なニュースです。");
+    for source in sources.iter().take(5) {
+        answer.push_str(&format!("\n- [{}]({})", source.title, source.url));
+    }
+    answer
+}
+
+fn finalize_sourced_answer(answer: String, sources: &[SourceLink]) -> String {
+    let cleaned = remove_material_leaks(answer);
+    if promises_without_acting(&cleaned) && !sources.is_empty() {
+        source_fallback_answer(sources)
+    } else {
+        append_sources(cleaned, sources)
+    }
 }
 
 fn strip_between_markers(mut text: String, start: &str, end: &str) -> String {
@@ -936,6 +982,9 @@ fn promises_without_acting(answer: &str) -> bool {
         "少々お待ち",
         "今すぐ確認",
         "今すぐ調べ",
+        "検索してみる",
+        "検索するね",
+        "検索してくる",
     ];
     PROMISES.iter().any(|phrase| answer.contains(phrase))
 }
@@ -1041,7 +1090,7 @@ async fn run_scoped(
     let mut schemas = tools::schemas_for_text("");
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
-    let mut sources: Vec<String> = Vec::new();
+    let mut sources: Vec<SourceLink> = Vec::new();
     // 計画ステップ用に元のユーザー発話を保持する（if/else ブロック内の変換前テキスト）。
     let mut original_user_text = String::new();
 
@@ -1148,7 +1197,7 @@ async fn run_scoped(
                         String::new()
                     };
                     if collect_sources {
-                        sources = extract_source_urls(&result);
+                        sources = extract_source_links(&result);
                     }
                     let mut private = Message::new("system", renderer(&user_text, &result));
                     private.name = Some("picoagent_private_context".to_string());
@@ -1445,7 +1494,7 @@ async fn run_scoped(
                     continue;
                 }
                 let prompt = system_prompt_of(messages);
-                let answer = append_sources(remove_material_leaks(last), &sources);
+                let answer = remove_material_leaks(last);
                 // 混入の除去は self_improve の後に置く。自己評価は回答を作り直すことがあり、
                 // 先に消しても作り直した側が素通りしてしまうため。
                 let Some(improved) = cancel_while(
@@ -1456,6 +1505,9 @@ async fn run_scoped(
                 else {
                     return direct_answer(messages, CANCEL_MESSAGE.to_string());
                 };
+                // 自己評価が回答を作り直しても、「これから検索する」という約束や出典欠落を
+                // 最終表示へ戻さない。取得済み見出しによる救済もここより前では書き換えられる。
+                let improved = finalize_sourced_answer(improved, &sources);
                 let safe = make_safe_final_answer(
                     provider,
                     cfg,
@@ -1488,7 +1540,7 @@ async fn run_scoped(
             cfg,
             model,
             messages,
-            append_sources(remove_material_leaks(answer), &sources),
+            remove_material_leaks(answer),
         ),
         cancel,
     )
@@ -1496,6 +1548,7 @@ async fn run_scoped(
     else {
         return direct_answer(messages, CANCEL_MESSAGE.to_string());
     };
+    let improved = finalize_sourced_answer(improved, &sources);
     let safe = make_safe_final_answer(
         provider,
         cfg,
@@ -1517,9 +1570,9 @@ async fn run_scoped(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_cancelled_tool_results, append_sources, extract_source_urls, guard_public_answer,
-        remove_material_leaks, remove_prompt_leak, setup_guide_answer, simple_greeting_answer,
-        system_prompt_of,
+        append_cancelled_tool_results, append_sources, extract_source_links,
+        finalize_sourced_answer, guard_public_answer, remove_material_leaks, remove_prompt_leak,
+        setup_guide_answer, simple_greeting_answer, system_prompt_of,
     };
     use crate::message::{Message, ToolCall};
 
@@ -1755,13 +1808,43 @@ mod tests {
     #[test]
     fn 検索結果から参照元urlを抽出して末尾に添える() {
         let search = "Web検索結果\n\n1. 例\nURL: https://example.com/a\n概要: x\n\n2. 別\nURL: https://example.com/b\n概要: y\n";
-        let urls = extract_source_urls(search);
-        assert_eq!(urls, vec!["https://example.com/a", "https://example.com/b"]);
-        // 本文に既にあるURLは重複させない。
-        let answer = append_sources("答え [例](https://example.com/a)".to_string(), &urls);
-        assert!(answer.contains("参考:"));
-        assert!(answer.contains("https://example.com/b"));
+        let links = extract_source_links(search);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].title, "例");
+        assert_eq!(links[0].url, "https://example.com/a");
+        // 本文に出典が1件でもあれば、使っていないURLを追加しない。
+        let answer = append_sources("答え [例](https://example.com/a)".to_string(), &links);
+        assert!(!answer.contains("参考:"));
+        assert!(!answer.contains("https://example.com/b"));
         assert_eq!(answer.matches("https://example.com/a").count(), 1);
+    }
+
+    #[test]
+    fn 出典が無い回答には見出し付きで最大5件だけ補う() {
+        let search = (1..=7)
+            .map(|index| format!("{index}. 見出し{index}\nURL: https://example.com/{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let links = extract_source_links(&search);
+        let answer = append_sources("要約です。".to_string(), &links);
+        assert_eq!(answer.matches("https://").count(), 5);
+        assert!(answer.contains("[見出し1](https://example.com/1)"));
+        assert!(!answer.contains("https://example.com/6"));
+    }
+
+    #[test]
+    fn 検索の約束だけが続いた場合は取得済み見出しを返す() {
+        assert!(super::promises_without_acting(
+            "最新のニュースを検索してみるね！"
+        ));
+        let links =
+            extract_source_links("- 社会ニュースの重要な見出し\n  URL: https://example.com/news");
+        let answer =
+            finalize_sourced_answer("最新のニュースを検索してみるね！".to_string(), &links);
+        assert_eq!(
+            answer,
+            "確認できた主なニュースです。\n- [社会ニュースの重要な見出し](https://example.com/news)"
+        );
     }
 
     #[test]
