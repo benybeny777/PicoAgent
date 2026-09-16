@@ -335,16 +335,37 @@ impl Tool for WeatherTool {
     }
 }
 
+/// 候補名が、利用者の言った地名と同じ場所を指しているか。
+///
+/// Open-Meteo は別名・読み・近い綴りにも一致するため、候補には言われていない地名が
+/// 混ざる。漢字の地名では「今治」と「今治市」のように一方がもう一方を含む形になるので、
+/// その関係があるものだけを「言われた地名」として扱う。かな・ローマ字で尋ねた場合は
+/// どちらにも当てはまらないため、この判定では絞らず人口順の選び方へ任せる。
+fn names_same_place(query: &str, name: &str) -> bool {
+    let query = query.trim();
+    let name = name.trim();
+    !query.is_empty() && !name.is_empty() && (name.contains(query) || query.contains(name))
+}
+
 /// 候補の中から実際に使う地点を選ぶ。
 ///
 /// Open-Meteo の地名検索は一致順で返すため、「横浜」では青森県横浜町（人口4,412）が
 /// 先頭に来て、横浜市の天気を聞いたのに別の町の天気を返していた。利用者が地名だけを
 /// 言うときは大きい自治体を指すことがほとんどなので、人口の多い候補を選ぶ。
+/// ただし**人口だけで選ぶと、言われていない大都市が言われた小さな街に勝つ**ため、
+/// 名前が一致する候補を先に立てる（一致が1件も無いときだけ従来どおり人口順）。
 /// 同じ地名が複数県にあることを利用者が確かめられるよう、表示名へ都道府県を添える。
-fn pick_location(candidates: &[Value]) -> Option<(f64, f64, String)> {
-    let best = candidates
-        .iter()
-        .max_by_key(|item| item.get("population").and_then(Value::as_u64).unwrap_or(0))?;
+fn pick_location(query: &str, candidates: &[Value]) -> Option<(f64, f64, String)> {
+    let best = candidates.iter().max_by_key(|item| {
+        let matched = item
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| names_same_place(query, name));
+        (
+            matched,
+            item.get("population").and_then(Value::as_u64).unwrap_or(0),
+        )
+    })?;
     let lat = best.get("latitude").and_then(Value::as_f64)?;
     let lon = best.get("longitude").and_then(Value::as_f64)?;
     let name = best
@@ -396,7 +417,7 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
             candidates.extend(extra);
         }
     }
-    pick_location(&candidates)
+    pick_location(location, &candidates)
         .ok_or_else(|| format!("地点が見つかりません: {location}。市区町村まで指定してください。"))
 }
 
@@ -579,9 +600,33 @@ mod tests {
             serde_json::json!({"name":"横浜","latitude":41.08,"longitude":141.25,"population":4412,"admin1":"青森県"}),
             serde_json::json!({"name":"横浜市","latitude":35.43,"longitude":139.65,"population":3777491,"admin1":"神奈川県"}),
         ];
-        let (lat, _, label) = super::pick_location(&candidates).expect("地点を選べる");
+        let (lat, _, label) = super::pick_location("横浜", &candidates).expect("地点を選べる");
         assert_eq!(label, "横浜市（神奈川県）");
         assert!((lat - 35.43).abs() < 0.01);
+    }
+
+    #[test]
+    fn 言われていない大都市を人口だけで選ばない() {
+        // 別名一致などで混ざった無関係の大都市が、言われた小さな街に勝たないこと。
+        // 選んだ地点は既定として保存されるため、ここで取り違えると次回以降も引きずる。
+        let candidates = vec![
+            serde_json::json!({"name":"松山市","latitude":33.83,"longitude":132.76,"population":505000,"admin1":"愛媛県"}),
+            serde_json::json!({"name":"今治市","latitude":34.06,"longitude":132.99,"population":150000,"admin1":"愛媛県"}),
+        ];
+        let (_, _, label) = super::pick_location("今治", &candidates).expect("地点を選べる");
+        assert_eq!(label, "今治市（愛媛県）");
+    }
+
+    #[test]
+    fn 名前で一致しない尋ね方では人口順のままにする() {
+        // かな・ローマ字では候補名と文字が重ならない。ここで絞ると選べなくなるため、
+        // 一致が1件も無いときは従来どおり人口の多い候補を選ぶ。
+        let candidates = vec![
+            serde_json::json!({"name":"横浜","latitude":41.08,"longitude":141.25,"population":4412,"admin1":"青森県"}),
+            serde_json::json!({"name":"横浜市","latitude":35.43,"longitude":139.65,"population":3777491,"admin1":"神奈川県"}),
+        ];
+        let (_, _, label) = super::pick_location("よこはま", &candidates).expect("地点を選べる");
+        assert_eq!(label, "横浜市（神奈川県）");
     }
 
     #[test]
@@ -589,13 +634,13 @@ mod tests {
         let candidates = vec![
             serde_json::json!({"name":"神奈川","latitude":35.47,"longitude":139.62,"admin1":"神奈川県"}),
         ];
-        let (_, _, label) = super::pick_location(&candidates).expect("地点を選べる");
+        let (_, _, label) = super::pick_location("神奈川", &candidates).expect("地点を選べる");
         assert_eq!(label, "神奈川（神奈川県）");
     }
 
     #[test]
     fn 候補が空なら選ばない() {
-        assert!(super::pick_location(&[]).is_none());
+        assert!(super::pick_location("横浜", &[]).is_none());
     }
 
     use super::{
