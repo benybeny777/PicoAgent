@@ -69,6 +69,8 @@ impl SidecarProcess {
             command.process_group(0);
         }
         let child = command.spawn().map_err(SidecarError::Spawn)?;
+        // Job Objectへ所属させるのはWindowsだけなので、他OSでは`mut`が不要になる。
+        #[cfg_attr(not(windows), allow(unused_mut))]
         let mut process = Self {
             child: Some(child),
             #[cfg(windows)]

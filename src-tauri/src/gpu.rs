@@ -44,8 +44,9 @@ impl GpuVendor {
 
 /// GPUが使うメモリの素性。**共有メモリとユニファイドメモリを専用VRAMへ加算しない。**
 ///
-/// 生成対象はWindowsとApple Silicon Macだけなので、他OSのビルドでは値を作る側が無い。
-/// 判定ロジックはOSに依らずテストするため、型は隠さず警告だけ止める。
+/// 生成対象はWindowsとApple Silicon Macだけで、`Unified`を作るのはmacOSの実装だけ、
+/// `Dedicated`／`Shared`を作るのはWindowsの実装だけである。判定ロジックはOSに依らず
+/// テストするため、型は隠さずビルドごとに使われない列挙子の警告だけ止める。
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuMemory {

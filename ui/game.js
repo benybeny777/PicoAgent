@@ -335,6 +335,10 @@
     if (answer.length < 10) return;
     clearTimer();
     session.phase = "judging";
+    // 採点を待つ間に閉じる・やり直すと session が入れ替わる。応答が届いた時点で
+    // 同じ対局かを確かめないと、閉じた後の画面を書き換えたり null を触って落ちる。
+    const judging = session;
+    const stale = () => session !== judging;
     const previousAnswers = [...session.answers];
     content.innerHTML = `<div class="game-judging"><div class="game-thinking" aria-hidden="true"><i></i><i></i><i></i></div><strong>AIが採点中…</strong><span>回答のどこがAIっぽいか見ています</span></div>`;
     setStatus("この採点は通常の会話履歴へ入りません。", "busy");
@@ -347,11 +351,13 @@
         previousAnswers,
         fault: session.fault ? `${session.fault[0]}：${session.fault[1]}` : "",
       });
+      if (stale()) return;
       session.answers.push(answer);
       session.results.push(result);
       playTone("score");
       renderRoundResult(result, false);
     } catch (error) {
+      if (stale()) return;
       playTone("error");
       session.phase = "question";
       content.innerHTML = `<div class="game-error"><strong>採点できませんでした</strong><p>${escapeHtml(error?.message || error)}</p><div><button class="game-secondary" type="button" data-action="quit">ゲーム選択へ</button><button class="game-primary" type="button" data-action="retry">同じ回答を再採点</button></div></div>`;

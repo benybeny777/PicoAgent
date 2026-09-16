@@ -4,6 +4,8 @@ use std::{fs, io, path::Path};
 pub(crate) fn plain(path: &Path) -> io::Result<()> {
     for ancestor in path.ancestors() {
         let metadata = fs::symlink_metadata(ancestor)?;
+        // 追記するのはWindowsの再解析ポイント判定だけなので、他OSでは`mut`が不要になる。
+        #[cfg_attr(not(windows), allow(unused_mut))]
         let mut linked = metadata.file_type().is_symlink();
         #[cfg(windows)]
         {

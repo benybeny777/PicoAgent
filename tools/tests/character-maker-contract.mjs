@@ -4,10 +4,14 @@ import test from "node:test";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("キャラ選択の決定ボタンはピンクで選択中と区別する", async () => {
+test("キャラ選択の決定ボタンはピンクで選択中と区別し、文字を読める濃さにする", async () => {
   const style = await read("ui/settings.css");
-  assert.match(style, /\.character-card \.character-select-button \{[\s\S]*?background: var\(--pink\);[\s\S]*?color: #fff;/);
-  assert.match(style, /\.character-card \.character-select-button:disabled \{[\s\S]*?background: var\(--pink-soft\);[\s\S]*?color: var\(--pink\);/);
+  // 淡い --pink に白文字（2.4:1）、--pink-soft に --pink の文字（2.0:1）はどちらも
+  // WCAG AAの4.5:1に届かない。ピンクのまま読める濃さの専用トークンを使う。
+  assert.match(style, /\.character-card \.character-select-button \{[\s\S]*?background: var\(--pink-strong\);[\s\S]*?color: #fff;/);
+  assert.match(style, /\.character-card \.character-select-button:disabled \{[\s\S]*?background: var\(--pink-soft\);[\s\S]*?color: var\(--pink-on-soft\);/);
+  assert.match(style, /--pink-strong: #b4477f;/);
+  assert.match(style, /--pink-on-soft: #e98ab6;/);
 });
 
 test("キャラ作成は現行4工程だけをPicoAgent設定へ公開する", async () => {

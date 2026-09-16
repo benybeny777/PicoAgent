@@ -111,6 +111,26 @@ fn topic_hint(text: &str) -> String {
     })
 }
 
+// 直前の回答そのものを指している言い回しか。
+//
+// 出典を1件だけ含む回答は珍しくないため、「詳しく」だけで唯一のリンクへ飛ばすと、
+// 天気や設定の追質問まで記事取得へ奪われる（この先回りは`weather`より優先度が高い）。
+// 番号でも見出し語でも特定できない場合は、直前の回答を指す語がある時だけ引き継ぐ。
+fn refers_to_previous_answer(text: &str) -> bool {
+    [
+        "この",
+        "その",
+        "さっき",
+        "先ほど",
+        "今の",
+        "それ",
+        "ニュース",
+        "記事",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
 fn select_link(text: &str, earlier_assistant_texts: &[&str]) -> Option<(String, String)> {
     let links = earlier_assistant_texts
         .iter()
@@ -131,7 +151,7 @@ fn select_link(text: &str, earlier_assistant_texts: &[&str]) -> Option<(String, 
             return Some(link.clone());
         }
     }
-    (links.len() == 1).then(|| links[0].clone())
+    (links.len() == 1 && refers_to_previous_answer(text)).then(|| links[0].clone())
 }
 
 fn allowed_domain(cfg: &Config, url: &Url) -> bool {
@@ -356,5 +376,17 @@ mod tests {
             "https://example.com/two"
         );
         assert!(select_link("このニュースを詳しく", &[ANSWER]).is_none());
+    }
+
+    const ONE_LINK: &str = "まとめです。\n- [宇宙開発の新しい発表](https://example.com/two)";
+
+    #[test]
+    fn 直前の回答を指していない追質問は記事取得へ奪わない() {
+        // 出典1件の回答の後に別の話題を詳しく尋ねただけで、その記事を取りに行かない。
+        assert!(select_link("天気を詳しく教えて", &[ONE_LINK]).is_none());
+        assert_eq!(
+            select_link("さっきのを詳しく", &[ONE_LINK]).unwrap().1,
+            "https://example.com/two"
+        );
     }
 }
