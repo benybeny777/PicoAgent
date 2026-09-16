@@ -173,6 +173,20 @@ window.__TAURI__ = {
         : { enabled: false });
     }, ${JSON.stringify(speechDelayMs)}));
     if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), ${JSON.stringify(sendDelayMs)}));
+    if (name === "pet_game_ready") return Promise.resolve({ ready: true, message: "AIの準備ができました。" });
+    if (name === "pet_game_judge") return Promise.resolve({
+      total: 83,
+      criteria: [
+        { key: "clarity", label: "断りの明確さ", score: 23, maxScore: 25, reason: "できないことを冒頭で明確に伝えています。" },
+        { key: "logic", label: "理由の筋道", score: 17, maxScore: 20, reason: "情報が存在しない理由を説明できています。" },
+        { key: "alternative", label: "代案の役立ち度", score: 21, maxScore: 25, reason: "下書きを共有する代案が実行可能です。" },
+        { key: "politeness", label: "AIらしい丁寧さ", score: 12, maxScore: 15, reason: "丁寧ですが前置きが少し長めです。" },
+        { key: "humor", label: "短さと面白さ", score: 10, maxScore: 15, reason: "簡潔ですが意外性は控えめです。" },
+      ],
+      commentary: "できない理由と次の一手が明確です。前置きを一文減らすとさらにAIらしくなります。",
+      highlight: "下書きを共有いただければ要約できます",
+      improvement: "冒頭の謝罪を短くする",
+    });
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
     if (name === "settings_components_status") return Promise.resolve([
@@ -379,6 +393,82 @@ async function openScene({
   // 通常の製品画面・公開動画ではカーソルを右下へ退避し、専用の配置編集検査だけが明示的に上端へ戻す。
   await page.mouse.move(Math.max(20, width - 40), Math.max(20, height - 40));
   return page;
+}
+
+async function validateAiGames() {
+  const output = join(ROOT, "temp", "ai-games-qa");
+  mkdirSync(output, { recursive: true });
+  const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
+  const result = {};
+  try {
+    await page.locator("#gameMenuButton").click();
+    await page.waitForSelector("#gameOverlay:not([hidden]) .game-card");
+    result.gameCount = await page.locator(".game-card").count();
+    result.pickerTitle = await page.locator("#gameTitle").textContent();
+    await page.screenshot({ path: join(output, "picker.png") });
+
+    await page.locator('[data-game-id="refuse"]').click();
+    await page.waitForSelector(".game-setup");
+    result.difficultyCount = await page.locator('input[name="gameDifficulty"]').count();
+    await page.screenshot({ path: join(output, "setup.png") });
+
+    await page.locator(".game-start").click();
+    await page.waitForSelector("#gameAnswer");
+    result.prompt = await page.locator(".game-prompt p").textContent();
+    await page.locator("#gameAnswer").fill("そのメールはまだ送られていないため、内容を確認して要約することはできません。下書きを共有いただければ要点をまとめます。");
+    await page.locator("#gameSubmit").click();
+    await page.waitForSelector(".game-result");
+    result.score = await page.locator(".game-score strong").textContent();
+    result.criteriaCount = await page.locator(".game-criteria li").count();
+    result.overlayBox = await page.locator("#gameOverlay").boundingBox();
+    result.resultBox = await page.locator(".game-result").boundingBox();
+    result.characterBox = await page.locator("#character").boundingBox();
+    result.characterViewBox = await page.locator("#characterView").boundingBox();
+    result.characterViewTransform = await page.locator("#characterView").evaluate(element => getComputedStyle(element).transform);
+    result.characterViewStyle = await page.locator("#characterView").getAttribute("style");
+    result.renderKind = await page.locator("#character").getAttribute("data-render-kind");
+    result.appClass = await page.locator("#petApp").getAttribute("class");
+    result.characterStyle = await page.locator("#character").evaluate(element => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        width: rect.width,
+        height: rect.height,
+      };
+    });
+    result.characterVisible = result.characterStyle.display !== "none"
+      && result.characterStyle.visibility !== "hidden"
+      && Number(result.characterStyle.opacity) > 0
+      && result.characterStyle.width >= 200 && result.characterStyle.height >= 300;
+    await page.screenshot({ path: join(output, "result.png") });
+
+    if (result.gameCount !== 6 || result.difficultyCount !== 3 || result.score !== "83" || result.criteriaCount !== 5) {
+      throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);
+    }
+    if (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
+        || result.resultBox.x + result.resultBox.width > 1000
+        || result.resultBox.y + result.resultBox.height > 760) {
+      throw new Error(`採点結果が画面内に収まりません: ${JSON.stringify(result)}`);
+    }
+    if (!result.characterVisible || !result.characterBox
+        || result.characterBox.x < result.resultBox.x + result.resultBox.width) {
+      throw new Error(`ゲーム中のキャラクターが採点欄の右側に表示されません: ${JSON.stringify(result)}`);
+    }
+    if (!result.characterViewBox || result.characterViewBox.x < result.characterBox.x
+        || result.characterViewBox.x + result.characterViewBox.width > 1000) {
+      throw new Error(`ゲーム中のキャラクターが画面の横で切れています: ${JSON.stringify(result)}`);
+    }
+    if (result.characterViewBox.height < result.characterBox.height * 1.3) {
+      throw new Error(`ゲーム中のキャラクターがバストアップになっていません: ${JSON.stringify(result)}`);
+    }
+    await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
+    return output;
+  } finally {
+    await page.close();
+  }
 }
 
 const MATRIX_LAYOUTS = {
@@ -2420,6 +2510,15 @@ if (process.env.SHOOT_TASK_RUN) {
   await browser.close();
   server.close();
   console.log(`実行中タスク表示検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_AI_GAMES) {
+  const output = await validateAiGames();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`AIものまねゲーム表示検査完了: ${output}`);
   process.exit(0);
 }
 

@@ -72,6 +72,8 @@ window.addEventListener("beforeunload", () => {
 window.picoagent = {
   init: () => call("pet_init"),
   send: (text) => call("pet_send", { text }),
+  gameReady: () => call("pet_game_ready"),
+  gameJudge: (request) => call("pet_game_judge", { request }),
   // 実行中のエージェント処理へ中断を要求する（次のステップ境界で停止）。
   cancel: () => call("pet_cancel"),
   // マイク録音（WAV base64）をローカル Whisper で文字起こしする。
@@ -179,7 +181,7 @@ window.picoagent = {
   layoutMenu: (x, y) => call("pet_layout_menu", { x, y }),
   characterMenu: (x, y, characters) => call("pet_character_menu", { x, y, characters }),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "pet:layout-edit", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
+    if (!["pet:model", "pet:reset", "pet:layout-reset", "pet:layout-edit", "pet:game-open", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     return managedListen(channel, callback).catch(error => {
       logBridgeError(`event ${channel} subscribe`, error);
