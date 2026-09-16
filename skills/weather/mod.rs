@@ -130,7 +130,6 @@ fn extract_location(text: &str) -> Option<String> {
         "現在",
         "いまの",
         "今の",
-        "今",
         "この",
         "教えて",
         "おしえて",
@@ -150,6 +149,13 @@ fn extract_location(text: &str) -> Option<String> {
         "　",
     ] {
         query = query.replace(word, "");
+    }
+    // 「今」は地名の一部にもなる（今治市・今別町など）。落として2文字以上残るときだけ
+    // 時刻の言い回しとして外す。無条件に外すと「今治の天気」が地名なしの依頼になり、
+    // 保存済みの地点や現在地の天気を、聞かれた街の天気として黙って返してしまう。
+    let without_now = query.replace('今', "");
+    if without_now.trim().chars().count() >= 2 {
+        query = without_now;
     }
     let query = query.trim();
     (query.chars().count() >= 2).then(|| query.to_string())
@@ -596,6 +602,18 @@ mod tests {
         configured_location, extract_location, is_direct_query, is_weather_source_search,
         parse_ip_location,
     };
+
+    #[test]
+    fn 地名に含まれる今を時刻の言い回しとして消さない() {
+        // 「今」を無条件に外すと今治が1文字になり、別の地点の天気を黙って返していた。
+        assert_eq!(extract_location("今治の天気は？").as_deref(), Some("今治"));
+        assert_eq!(
+            extract_location("今、東京の天気を教えて").as_deref(),
+            Some("東京")
+        );
+        assert_eq!(extract_location("今日の天気"), None);
+        assert_eq!(extract_location("今の天気"), None);
+    }
 
     #[test]
     fn 天気そのものの質問だけを直接実行する() {

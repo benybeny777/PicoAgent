@@ -149,6 +149,21 @@ fn limited(text: &str, max: usize, label: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+/// 過去の回答を採点の文脈へ渡す形へ整える。
+///
+/// 時間切れの回答は空文字で記録されるため、そのまま必須項目として検査すると
+/// 「過去の回答が空です。」で採点そのものが失敗する。1問でも時間切れにすると
+/// 残りの問題が最後まで採点できなくなるので、空は文脈から外して採点は続ける。
+fn previous_answer_context(previous: &[String]) -> Result<Vec<String>, String> {
+    previous
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .take(2)
+        .map(|item| limited(item, MAX_ANSWER_CHARS, "過去の回答"))
+        .collect()
+}
+
 fn extract_json_object(text: &str) -> Option<Value> {
     if let Ok(value) = serde_json::from_str::<Value>(text.trim()) {
         if value.is_object() {
@@ -167,6 +182,30 @@ fn short_text(value: Option<&Value>, fallback: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
+/// 項目の点数を読む。
+///
+/// 整数で返すよう指示しているが、小型のローカルモデルは `"20"`・`20.0`・`"20点"` の
+/// ように返すことがある。数として読めるものを0点扱いにすると、しっかり書いた回答が
+/// 全項目0点になり、ゲームとして成立しない。読めない場合だけ0点にする。
+fn criterion_score(raw: Option<&Value>, max_score: u8) -> u8 {
+    let number = match raw {
+        Some(Value::Number(number)) => number.as_f64(),
+        Some(Value::String(text)) => {
+            let digits: String = text
+                .trim()
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+                .collect();
+            digits.parse::<f64>().ok()
+        }
+        _ => None,
+    };
+    number
+        .filter(|score| score.is_finite())
+        .map(|score| score.round().clamp(0.0, max_score as f64) as u8)
+        .unwrap_or(0)
+}
+
 fn normalize_result(spec: &GameSpec, value: &Value) -> Result<GameJudgeResult, String> {
     let raw_criteria = value
         .get("criteria")
@@ -178,11 +217,7 @@ fn normalize_result(spec: &GameSpec, value: &Value) -> Result<GameJudgeResult, S
             .iter()
             .find(|item| item.get("key").and_then(Value::as_str) == Some(expected.key))
             .ok_or_else(|| format!("AIの採点に「{}」がありません。", expected.label))?;
-        let score = raw
-            .get("score")
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .min(expected.max_score as u64) as u8;
+        let score = criterion_score(raw.get("score"), expected.max_score);
         criteria.push(CriterionResult {
             key: expected.key.to_string(),
             label: expected.label.to_string(),
@@ -263,12 +298,7 @@ pub async fn pet_game_judge(
     }
     let prompt = limited(&request.prompt, MAX_PROMPT_CHARS, "お題")?;
     let answer = limited(&request.answer, MAX_ANSWER_CHARS, "回答")?;
-    let previous_answers: Vec<String> = request
-        .previous_answers
-        .iter()
-        .take(2)
-        .map(|item| limited(item, MAX_ANSWER_CHARS, "過去の回答"))
-        .collect::<Result<_, _>>()?;
+    let previous_answers = previous_answer_context(&request.previous_answers)?;
     let fault: String = request.fault.trim().chars().take(100).collect();
     let criteria_text = spec
         .criteria
@@ -337,7 +367,9 @@ pub async fn pet_game_judge(
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_json_object, game_spec, normalize_result};
+    use super::{
+        criterion_score, extract_json_object, game_spec, normalize_result, previous_answer_context,
+    };
     use serde_json::json;
 
     #[test]
@@ -365,6 +397,33 @@ mod tests {
         });
         let result = normalize_result(&spec, &value).unwrap();
         assert_eq!(result.total, 100);
+    }
+
+    #[test]
+    fn 時間切れの回答なしがあっても採点を続ける() {
+        // 時間切れは空文字で記録される。必須項目として弾くと、以降の問題が
+        // すべて「過去の回答が空です。」で採点できなくなる。
+        let previous = ["".to_string(), "  ".to_string(), "一問目の回答".to_string()];
+        assert_eq!(
+            previous_answer_context(&previous).unwrap(),
+            vec!["一問目の回答".to_string()]
+        );
+        assert_eq!(previous_answer_context(&[]).unwrap(), Vec::<String>::new());
+        // 長すぎる回答は今までどおり入力の誤りとして拒む。
+        let too_long = vec!["あ".repeat(super::MAX_ANSWER_CHARS + 1)];
+        assert!(previous_answer_context(&too_long).is_err());
+    }
+
+    #[test]
+    fn 文字列や小数で返った点数も読み取る() {
+        // 形式の揺れで満点近い回答を0点にしない。読めないものだけ0点にする。
+        assert_eq!(criterion_score(Some(&json!("20")), 25), 20);
+        assert_eq!(criterion_score(Some(&json!("18点")), 25), 18);
+        assert_eq!(criterion_score(Some(&json!(19.6)), 25), 20);
+        assert_eq!(criterion_score(Some(&json!(99)), 25), 25);
+        assert_eq!(criterion_score(Some(&json!(-3)), 25), 0);
+        assert_eq!(criterion_score(Some(&json!("よかった")), 25), 0);
+        assert_eq!(criterion_score(None, 25), 0);
     }
 
     #[test]
