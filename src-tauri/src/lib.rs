@@ -548,7 +548,7 @@ fn overlap(monitor: MonitorRect, x: i32, y: i32, win_w: u32, win_h: u32) -> (i32
     (overlap_w, overlap_h)
 }
 
-/// 収め直さずに尊重する重なりの下限。これだけ見えていれば掴んで動かせる。
+/// 収め直さずに尊重する重なりの下限。小さい窓でもこれだけ見えていれば掴んで動かせる。
 const MIN_GRABBABLE_PX: i32 = 80;
 
 /// 保存位置と最も重なるモニタを選び、掴める大きさが残っていなければ内側へ収め直す。
@@ -570,9 +570,11 @@ fn clamp_to_best_monitor(
     if overlap_w == 0 || overlap_h == 0 {
         return None;
     }
-    if overlap_w >= MIN_GRABBABLE_PX.min(win_w as i32)
-        && overlap_h >= MIN_GRABBABLE_PX.min(win_h as i32)
-    {
+    // 大きな窓に80pxだけの判定を使うと、配信形式の大半が画面外でも保存位置を
+    // 尊重してしまう。各辺の半分以上を見せつつ、小型ペットの端寄せは維持する。
+    let min_visible_w = MIN_GRABBABLE_PX.max(win_w as i32 / 2).min(win_w as i32);
+    let min_visible_h = MIN_GRABBABLE_PX.max(win_h as i32 / 2).min(win_h as i32);
+    if overlap_w >= min_visible_w && overlap_h >= min_visible_h {
         return Some((x, y));
     }
     let max_x = (monitor.x + monitor.width.saturating_sub(win_w) as i32).max(monitor.x);
@@ -1056,6 +1058,20 @@ mod window_layout_tests {
         assert_eq!(
             clamp_to_best_monitor(&monitors, -2100, -80, 680, 430),
             Some((-2100, -80))
+        );
+    }
+
+    #[test]
+    fn 大きい配信窓は半分以上見える位置へ戻す() {
+        let right = vec![MonitorRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        }];
+        assert_eq!(
+            clamp_to_best_monitor(&right, 1528, 509, 1280, 696),
+            Some((640, 504))
         );
     }
 

@@ -41,6 +41,12 @@ test("回答は配信中に一息で書ける文字数と時間に収める", ()
   assert.match(game, /textarea id="gameAnswer"[^>]*rows="4"/);
 });
 
+test("やさしいだけ各ゲーム専用の回答見本を表示する", () => {
+  assert.equal(game.match(/^\s*example: "/gm)?.length, 6);
+  assert.match(game, /config\.hint \? `<div class="game-example"><small>回答見本（別のお題）<\/small>/);
+  assert.match(styles, /\.game-example/);
+});
+
 test("採点は通常会話と分離しRust側で固定配点を検査する", () => {
   assert.match(bridge, /gameReady: \(\) => call\("pet_game_ready"\)/);
   assert.match(bridge, /gameJudge: \(request\) => call\("pet_game_judge", \{ request \}\)/);

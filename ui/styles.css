@@ -315,6 +315,9 @@ body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .c
 .game-prompt small { color:#ffb2c2; font-weight:900; }
 .game-prompt p { margin:8px 0 0; font-size:17px; font-weight:800; line-height:1.55; }
 .game-hint { margin:9px 2px 0; color:#f0d98e; font-size:11px; }
+.game-example { margin-top:9px; padding:10px 12px; border:1px dashed rgba(255,255,255,.28); border-radius:12px; background:rgba(255,255,255,.07); }
+.game-example small { display:block; margin-bottom:4px; color:#ffb6d0; font-weight:800; }
+.game-example p { margin:0; color:#fff; font-size:13px; line-height:1.55; }
 .game-answer { display:block; margin-top:15px; }
 .game-answer > span { display:block; margin-bottom:7px; font-size:12px; font-weight:900; }
 .game-answer textarea { box-sizing:border-box; width:100%; resize:none; padding:14px 15px; border:1px solid rgba(255,255,255,.18); border-radius:15px; outline:none; background:rgba(13,8,18,.28); color:#fff; font:14px/1.65 inherit; }
