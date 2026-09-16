@@ -11,6 +11,8 @@
 
   const BEST_KEY = "picoagent.ai-games.best.v1";
   const SOUND_KEY = "picoagent.ai-games.sound.v1";
+  const FUN_BONUS_PER_ROUND = 10;
+  const FUN_BONUS_MAX = FUN_BONUS_PER_ROUND * 3;
   const DIFFICULTIES = {
     easy: { label: "やさしい", seconds: 60, maxLength: 120, maxScore: 300, hint: true },
     normal: { label: "ふつう", seconds: 45, maxLength: 80, maxScore: 600, hint: false },
@@ -168,7 +170,8 @@
     return true;
   };
   const difficultyScore = (rawScore, difficulty) => Math.round(rawScore * DIFFICULTIES[difficulty].maxScore / 300);
-  const difficultyMax = difficulty => DIFFICULTIES[difficulty].maxScore;
+  const difficultyBaseMax = difficulty => DIFFICULTIES[difficulty].maxScore;
+  const difficultyMax = difficulty => difficultyBaseMax(difficulty) + FUN_BONUS_MAX;
   const scoreLabel = score => Number(score) > 0 ? `${score}点` : "—";
 
   function playTone(kind = "tap") {
@@ -246,16 +249,16 @@
         <div class="game-rule"><span class="game-rule-icon">${game.icon}</span><p>${escapeHtml(game.rule)}</p></div>
         <h2>難易度</h2>
         <div class="game-difficulties">
-          ${Object.entries(DIFFICULTIES).map(([key, value]) => `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === "normal" ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントと見本あり" : ""}</span><b>最大${difficultyMax(key)}点換算</b></label>`).join("")}
+          ${Object.entries(DIFFICULTIES).map(([key, value]) => `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === "normal" ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントと見本あり" : ""}</span><b>基本${difficultyBaseMax(key)}点＋ボーナス最大${FUN_BONUS_MAX}点</b></label>`).join("")}
         </div>
-        <div class="game-setup-meta"><span>全3問</span><span>素点は各100点</span><span id="gameDifficultyScore"></span><span id="gameDifficultyBest"></span></div>
+        <div class="game-setup-meta"><span>全3問</span><span>通常5軸100点＋おもしろ加点10点</span><span id="gameDifficultyScore"></span><span id="gameDifficultyBest"></span></div>
         <button class="game-primary game-start" type="button">ゲーム開始</button>
       </div>`;
     content.querySelector('[data-action="picker"]').addEventListener("click", renderPicker);
     const syncDifficulty = () => {
       const difficulty = content.querySelector('input[name="gameDifficulty"]:checked')?.value || "normal";
       const config = DIFFICULTIES[difficulty];
-      document.getElementById("gameDifficultyScore").textContent = `${config.label}は最大${difficultyMax(difficulty)}点へ換算`;
+      document.getElementById("gameDifficultyScore").textContent = `${config.label}は基本${difficultyBaseMax(difficulty)}点＋ボーナス`;
       document.getElementById("gameDifficultyBest").textContent = `この難易度の自己ベスト ${scoreLabel(bestFor(id, difficulty))}`;
     };
     content.querySelectorAll('input[name="gameDifficulty"]').forEach(input => input.addEventListener("change", syncDifficulty));
@@ -391,14 +394,16 @@
 
   function renderRoundResult(result, timedOut) {
     session.phase = "result";
-    const criteria = result.criteria?.length ? result.criteria.map(item => `
-      <li><div><strong>${escapeHtml(item.label)}</strong><span>${item.score} / ${item.maxScore}</span></div><meter min="0" max="${item.maxScore}" value="${item.score}"></meter><p>${escapeHtml(item.reason)}</p></li>`).join("") : `<li class="game-no-score">回答なしのため項目別採点はありません。</li>`;
+    const criteria = result.criteria?.length ? result.criteria.map(item => {
+      const bonus = item.key === "fun_bonus";
+      return `<li class="${bonus ? "game-criterion-bonus" : ""}"><div><strong>${escapeHtml(item.label)}</strong><span>${bonus ? "+" : ""}${item.score} / ${item.maxScore}</span></div><meter min="0" max="${item.maxScore}" value="${item.score}"></meter><p>${escapeHtml(item.reason)}</p></li>`;
+    }).join("") : `<li class="game-no-score">回答なしのため項目別採点はありません。</li>`;
     const nextLabel = session.round >= 2 ? "総合結果を見る" : "次の問題へ";
     title.textContent = timedOut ? "時間切れ" : `${result.total}点`;
     setStatus("");
     content.innerHTML = `
       <div class="game-result">
-        <div class="game-score"><strong>${result.total}</strong><span>/ 100</span></div>
+        <div class="game-score"><strong>${result.total}</strong><span>/ 100 ＋ ボーナス10</span></div>
         <p class="game-commentary">${escapeHtml(result.commentary)}</p>
         <ul class="game-criteria">${criteria}</ul>
         <div class="game-feedback"><p><small>見せ場</small>${escapeHtml(result.highlight)}</p><p><small>次の一手</small>${escapeHtml(result.improvement)}</p></div>
@@ -426,8 +431,14 @@
   function renderFinal() {
     clearTimer();
     session.phase = "final";
+    const bonusTotal = session.results.reduce((sum, result) => {
+      const bonus = result.criteria?.find(item => item.key === "fun_bonus");
+      return sum + Number(bonus?.score || 0);
+    }, 0);
     const rawTotal = session.results.reduce((sum, result) => sum + Number(result.total || 0), 0);
-    const total = difficultyScore(rawTotal, session.difficulty);
+    const rawBaseTotal = Math.max(0, rawTotal - bonusTotal);
+    const convertedBase = difficultyScore(rawBaseTotal, session.difficulty);
+    const total = convertedBase + bonusTotal;
     const maxTotal = difficultyMax(session.difficulty);
     const config = DIFFICULTIES[session.difficulty];
     const previousBest = bestFor(session.game.id, session.difficulty);
@@ -440,14 +451,14 @@
         ${isBest ? '<div class="game-new-best">NEW BEST</div>' : ""}
         <span>${escapeHtml(session.game.title)}</span>
         <div class="game-total"><strong>${total}</strong><small>/ ${maxTotal}</small></div>
-        <div class="game-total-breakdown"><span>素点 ${rawTotal} / 300</span><b>${escapeHtml(config.label)}・最大${maxTotal}点換算</b></div>
+        <div class="game-total-breakdown"><span>基本点 ${rawBaseTotal} / 300 → ${convertedBase}</span><b>おもしろボーナス +${bonusTotal}・合計最大${maxTotal}点</b></div>
         <h2>${rankFor(total)}</h2>
         <div class="game-round-scores">${session.results.map((result, index) => `<div><span>第${index + 1}問</span><strong>${result.total}</strong></div>`).join("")}</div>
         <div class="game-final-actions"><button class="game-secondary" type="button" data-action="picker">ゲーム選択</button><button class="game-primary" type="button" data-action="again">もう一度</button></div>
       </div>`;
     content.querySelector('[data-action="picker"]').addEventListener("click", renderPicker);
     content.querySelector('[data-action="again"]').addEventListener("click", () => renderSetup(session.game.id));
-    speakGame(`素点${rawTotal}点、${config.label}の最大${maxTotal}点換算で、総合得点${total}点。称号は、${rankFor(total)}。${isBest ? "自己ベスト更新です。" : ""}`);
+    speakGame(`基本点${rawBaseTotal}点を${config.label}の${difficultyBaseMax(session.difficulty)}点へ換算し、おもしろボーナス${bonusTotal}点を加えて、総合得点${total}点。称号は、${rankFor(total)}。${isBest ? "自己ベスト更新です。" : ""}`);
   }
 
   function open() {
