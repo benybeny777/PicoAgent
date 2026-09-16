@@ -35,9 +35,9 @@ test("6ゲームは各20題と故障カード8件を持つ", () => {
 });
 
 test("回答は配信中に一息で書ける文字数と時間に収める", () => {
-  assert.match(game, /easy:\s*\{ label: "やさしい", seconds: 60, maxLength: 120, hint: true \}/);
-  assert.match(game, /normal:\s*\{ label: "ふつう", seconds: 45, maxLength: 80, hint: false \}/);
-  assert.match(game, /hard:\s*\{ label: "むずかしい", seconds: 30, maxLength: 50, hint: false \}/);
+  assert.match(game, /easy:\s*\{ label: "やさしい", seconds: 60, maxLength: 120, maxScore: 300, hint: true \}/);
+  assert.match(game, /normal:\s*\{ label: "ふつう", seconds: 45, maxLength: 80, maxScore: 600, hint: false \}/);
+  assert.match(game, /hard:\s*\{ label: "むずかしい", seconds: 30, maxLength: 50, maxScore: 1000, hint: false \}/);
   assert.match(game, /textarea id="gameAnswer"[^>]*rows="4"/);
 });
 
@@ -45,6 +45,20 @@ test("やさしいだけ各ゲーム専用の回答見本を表示する", () =>
   assert.equal(game.match(/^\s*example: "/gm)?.length, 6);
   assert.match(game, /config\.hint \? `<div class="game-example"><small>回答見本（別のお題）<\/small>/);
   assert.match(styles, /\.game-example/);
+});
+
+test("難易度倍率を総合点と難易度別自己ベストへ反映する", () => {
+  assert.match(game, /Math\.round\(rawScore \* DIFFICULTIES\[difficulty\]\.maxScore \/ 300\)/);
+  assert.match(game, /bestKey = \(id, difficulty\) => `\$\{id\}:\$\{difficulty\}`/);
+  assert.match(game, /const rawTotal = session\.results\.reduce/);
+  assert.match(game, /const total = difficultyScore\(rawTotal, session\.difficulty\)/);
+  assert.match(game, /素点 \$\{rawTotal\} \/ 300/);
+  assert.match(game, /if \(score >= 850\) return "AI超越"/);
+  assert.match(game, /if \(score >= 600\) return "AIそのもの"/);
+  assert.match(game, /if \(score >= 400\) return "AI完全再現"/);
+  assert.match(manual, /やさしいは300点「ほぼAI本人」、ふつうは600点「AIそのもの」、むずかしいは1000点「AI超越」/);
+  assert.match(spec, /やさしいは最大300点、ふつうは最大600点、むずかしいは最大1000点/);
+  assert.match(game, /scoreLabel = score => Number\(score\) > 0 \? `\$\{score\}点` : "—"/);
 });
 
 test("採点は通常会話と分離しRust側で固定配点を検査する", () => {
@@ -62,10 +76,11 @@ test("ゲームは通常の読み上げ経路と設定を共有する", () => {
   assert.match(renderer, /window\.PicoVoice = \{ speak: speakReply, stop: stopVoice \}/);
   assert.match(game, /speakGame\(`第\$\{round \+ 1\}問/);
   assert.match(game, /speakGame\(`\$\{result\.total\}点/);
-  assert.match(game, /speakGame\(`総合得点/);
+  assert.match(game, /speakGame\(`素点\$\{rawTotal\}点、\$\{config\.label\}の最大\$\{maxTotal\}点換算/);
   assert.match(styles, /\.game-overlay/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
-  assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*height:72%;[^}]*overflow:hidden;/);
+  assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*height:72%;[^}]*overflow:visible;/);
+  assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*right:clamp\(36px,7vw,90px\);[^}]*top:36px;/);
   assert.match(styles, /body \.pet-app\.is-playing-game\[data-layout\] \.character \.character-view \{[^}]*position:absolute!important;[^}]*height:139%!important;[^}]*scale\(1\)!important;/);
   assert.match(styles, /data-render-kind="live2d"[^}]*#live2dCanvas \{[^}]*width:100%!important;[^}]*height:auto!important;/);
   assert.match(styles, /data-render-kind="mmd"[^}]*#mmdCanvas \{[^}]*width:100%!important;[^}]*height:100%!important;/);
