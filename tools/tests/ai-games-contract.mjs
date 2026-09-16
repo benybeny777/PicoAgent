@@ -22,6 +22,14 @@ test("上端と右クリックの遊ぶが同じゲーム画面を開く", () =>
   assert.match(game, /window\.picoagent\.on\("pet:game-open", open\)/);
 });
 
+test("採点待ちの間に閉じても、閉じた後の画面を書き換えない", () => {
+  // 応答が届く前に閉じると session は null になる。同じ対局か確かめずに触ると
+  // 例外で止まり、閉じたはずの画面へ採点結果や失敗表示が出る。
+  assert.match(game, /const judging = session;\s*\n\s*const stale = \(\) => session !== judging;/);
+  assert.match(game, /if \(stale\(\)\) return;\s*\n\s*session\.answers\.push\(answer\);/);
+  assert.match(game, /catch \(error\) \{\s*\n\s*if \(stale\(\)\) return;/);
+});
+
 test("6ゲームは各20題と故障カード8件を持つ", () => {
   const ids = [...game.matchAll(/\bid: "(excuse|broken|apology|wrong|safety|refuse)"/g)].map(match => match[1]);
   assert.deepEqual(ids, ["excuse", "broken", "apology", "wrong", "safety", "refuse"]);
