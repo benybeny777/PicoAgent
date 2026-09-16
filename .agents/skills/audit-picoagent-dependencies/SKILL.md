@@ -19,7 +19,7 @@ description: PicoAgentのCargo依存、JavaScript・Python等のパッケージ�
 3. `rg`で `VERSION`、`targetVersion`、`releases/download`、`releases/latest`、`resolve/main`、`sha256`、`integrity`、CDN URLを再検索し、棚卸しスクリプトの漏れを点検する。
 4. Git管理外の `src-tauri/resources/bundled/` 実体も、実行ファイルの版表示または同梱マーカーで確認する。
 5. 大容量取得の呼び出し元を逆引きし、起動、通常ビルド、引数省略、インストール後処理が任意モデル・ランタイム・SDKを暗黙取得していないか確認する。
-6. OS、CPUアーキテクチャ、GPU種別、必要能力を取得前に判定しているか確認する。CUDA版はCUDA対応NVIDIA GPUだけを対象とし、AMD／Intel／GPUなし環境では取得しない。CPU版を選ぶのは対象機能がCPU実行を正式対応する場合だけにする。
+6. OS、CPUアーキテクチャ、GPU種別、必要能力を取得前に判定しているか確認する。CUDA版はCUDA対応NVIDIA GPUだけ、ROCm版は各社公式対応表に載るAMD GPUだけを対象とし、非対応GPUとGPUなし環境では取得しない。1つの機能へ複数バックエンドの大容量ランタイムを同時導入していないか、導入済みマニフェストへGPU種別とバックエンドを記録して不一致の再利用を止めているかも確認する。CPU版を選ぶのは対象機能がCPU実行を正式対応する場合だけにする。
 7. PicoAgent管理下に旧版、退避、staging、`.part`、`.incoming`、`*-old-*`、成功済み処理の再開キャッシュが残っていないか確認する。新版検証後の旧版削除と、失敗後の次回成功時回収を取得処理ごとに追う。
 
 ## 公式最新版と照合する

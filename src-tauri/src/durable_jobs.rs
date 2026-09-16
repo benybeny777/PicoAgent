@@ -341,6 +341,14 @@ fn job_body(job: &DurableJob) -> String {
     }
 }
 
+/// 画面へ通知するためのアプリハンドル。`start()` より前は `None`。
+///
+/// 永続ジョブ以外のスキルも、`AppHandle` を引数で受け取れない位置から
+/// 利用者へ知らせたいことがある（生成のlowvram起動・OOM後の再試行など）。
+pub(crate) fn app_handle() -> Option<&'static AppHandle> {
+    APP.get()
+}
+
 /// スキルの実行中から現在地を知らせる。`percent` は 1〜99 に収める
 /// （0 は未着手、100 は完了の意味を持たせているため、途中経過で使わせない）。
 pub fn report_progress(job_id: &str, percent: u8, step: &str) {

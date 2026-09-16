@@ -124,7 +124,7 @@ flowchart LR
 
 | 利用条件・目安 | 内容 |
 |---|---|
-| 対応環境 | Windows 10/11 x64、CUDA対応NVIDIA GPU、空き容量85GB以上 |
+| 対応環境 | Windows 10/11 x64（CUDA対応NVIDIA GPUまたはAMD公式のWindows向けROCm対応GPU）、またはApple Silicon Mac（Metal／MPS。Intel Macは対象外）、空き容量85GB以上 |
 | 初回導入 | 「追加機能・更新」で約77GBの管理ランタイムを選択導入。共通Python 3.12を1環境だけ使い、THA3は含まない |
 | 生成時間 | RTX 5060 Laptop GPUで通常頭身むぎの既知原画1体は約77分。導入済みモデルでの実測で、取得時間を除く。原画とPCにより変わる |
 | 品質 | テスト機能。工程完走は品質合格ではなく、未知原画やLive2D「ひより」と同等の品質は未確認 |
@@ -799,6 +799,8 @@ Gemma 4は既存選択を維持し、いつでも手動で選べます。ほか�
 CUDA／ROCm／SYCLの追加エンジンは対象GPUを確認したPCだけが取得します。固定サイズとSHA-256を照合し、実行ファイル自身が対象GPUを列挙できた場合だけ有効化します。古い／未掲載GPUを高速経路へ無理に含めず、同梱VulkanまたはCPUで動かします。UbuntuのCUDA／ROCm専用版は固定上流Releaseに配布資産がないため未対応で、Vulkanより速くなる可能性のある専用経路を現時点では使いません。
 
 Intel SYCLは対応済みです。ただし想定利用者に占めるIntel GPUのシェアを踏まえ、主要な訴求・優先対応の対象には置きません。機能とフォールバックは維持し、推奨構成の案内はNVIDIA CUDAまたはAMD ROCmを主軸にします。
+
+**この表はローカルAI（llama.cpp）の対応境界です。** 画像・動画・キャラクター生成（ComfyUI／PyTorch）は対応GPUが同じとは限らないため、別の対応表で判定します。生成側はWindows x64のCUDA対応NVIDIA GPUがCUDA、AMD公式のWindows向けROCm対応GPUがROCm、Apple Silicon MacがMPS（Metal）で、対応表にないAMD、Intel GPU、Intel Mac、GPUなしでは生成ランタイムも大容量モデルも取得しません（Intel GPUのローカルAI利用はこれまでどおり使えます）。Macは専用VRAMの判定を流用せず、ユニファイドメモリの総量とモデルごとの必要メモリで判定します。詳細は [管理導入する画像・動画モデル](docs/models.md#gpuバックエンドとモデルの関係) を参照してください。
 
 Windows ROCmの対象AMD機種（2026-08-24確認）は次のとおりです。「この番号以降」ではなく、[AMD公式HIP SDK Windows対応表](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/shared/hipsdk/reference/system-requirements.html)でRuntime対応になっている下記SKUだけを対象にします。
 

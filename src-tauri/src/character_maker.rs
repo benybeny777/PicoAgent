@@ -190,12 +190,24 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
     } else {
         development_assets
     };
+    let mut config = MakerConfig::managed(managed, crate::components::shared_python_dir(app));
+    // 専用VRAM16GB未満・共有メモリ・VRAM不明では、ComfyUIを省メモリ設定で起動する。
+    // MPS（Apple Silicon）は専用VRAM判定を流用せず、検証済みの起動設定だけを使う。
+    let installed = crate::components::installed_generation_runtime(app);
+    let backend = installed.as_ref().map(|runtime| runtime.backend);
+    let device =
+        crate::generation_backend::generation_device(&crate::gpu::devices(), installed.as_ref());
+    config.comfy_lowvram =
+        crate::generation_backend::lowvram_decision(backend, device.as_ref()).lowvram;
+    // 省メモリ再試行を許すのは、その起動引数を検証済みのバックエンドだけにする。
+    config.comfy_lowvram_retry =
+        backend.is_none_or(crate::generation_backend::GenerationBackend::supports_lowvram);
     Ok((
         PipelineContext {
             characters_root: data.join("character-maker/characters"),
             assets_root,
         },
-        MakerConfig::managed(managed, crate::components::shared_python_dir(app)),
+        config,
     ))
 }
 
@@ -361,7 +373,7 @@ pub fn settings_character_maker_list(app: AppHandle) -> Result<Value, String> {
     let (pipeline, config) = paths(&app).map_err(error_text)?;
     let characters = pipeline.list_characters().map_err(error_text)?;
     Ok(json!({
-        "supported": cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "supported": crate::components::generation_platform_supported(),
         "runtimeInstalled": config.python().is_file() && config.comfy().is_dir(),
         "characters": characters,
     }))
@@ -383,8 +395,10 @@ pub async fn settings_character_maker_run(
     from_stage: Option<String>,
     state: State<'_, CharacterMakerState>,
 ) -> Result<CharacterManifest, String> {
-    if !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        return Err("キャラ作成は現在Windows 10/11 x64専用です".into());
+    if !crate::components::generation_platform_supported() {
+        return Err(
+            "キャラ作成はWindows 10/11 x64とApple Silicon Mac専用です（Intel Macは対象外）".into(),
+        );
     }
     let _execution = state.execution.lock().await;
     let cancelled = Arc::new(AtomicBool::new(false));

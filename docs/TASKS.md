@@ -174,3 +174,21 @@ AivisSpeech Engine は保存先を `platformdirs` の `user_data_dir("AivisSpeec
 表示確定・まばたき補間（PR #305）のうち、笑顔モーフも笑い目モーフも一切持たないMMDモデルでhappy系の状態を維持したときにまばたきが続くことだけが実描画で未確認。登録済みの2体（さくらみこ・戌神ころね）はどちらも笑顔モーフを持つため、この分岐へ実モデルで入れない。該当モデルを登録できたときに確認する。判定関数（`PicoMMD.expressionTargets`）が`suppressBlink: false`を返すことは実アプリ上で確認済み。
 
 Aivisの学習・モデル導入と、元PMXの剛体・制約を使う物理対応は今回の対象外であり、別途開始指示後に扱う。
+
+## 画像・動画・キャラクター生成のGPU別実機受入（AMD ROCm・Apple Silicon MPS）
+
+対象PRは [ROCm・MPS対応とlowvram起動](https://github.com/benybeny777/PicoAgent/pull/319)。設計・実装・静的検査は同PRにまとめる。この節には、**AMD実機・Apple Silicon実機・公式配布へのネットワークが無いと確定できない項目だけ**を残す。実機確認が終わるまで、AMD対応もApple Silicon対応も「完了」と表示しない。NVIDIA（CUDA）の既存経路は対象外である。
+
+| 内容 | 着手条件・完了条件 |
+|---|---|
+| ROCm版PyTorch wheelの固定情報 | AMD公式のWindows向けPyTorch配布（`repo.radeon.com/rocm/windows/rocm-rel-<版>/`）へ到達できる環境で、`torch` / `torchvision` / `torchaudio`の実ファイルサイズとSHA-256を取得し、`character-maker/sidecar/rocm-torch.json`へ記録する。記録が無い間、AMD経路は取得を開始せず理由を表示する |
+| ROCm対応GPU表の公式照合 | AMDの「Windows support matrices by ROCm version」と「PyTorch via PIP installation」を直接参照し、`generation_backend.rs`の`WINDOWS_ROCM_PYTORCH_SKUS`、必要ドライバー版、Python版、PyTorch版を照合して確認日を更新する |
+| AMD実機での生成受入 | 公式対応AMD GPUのWindows機で、ROCmランタイム導入、再起動後のランタイム再利用、Qwen画像生成・画像編集、キャラクター作成4工程、Grounding DINO、SAM 2.1、Wan 2.2、LTX、lowvram起動、VRAM使用量、所要時間、完成物の目視、OOM後の1回再試行、終了後のプロセス・一時物回収を確認する |
+| LTXのFP8可否 | AMD実機でFP8重みが動くかを確認する。動かない場合はFP16／BF16版の公式URL・固定リビジョン・SHA-256・必要VRAM・取得量・速度と画質への影響を記録してから切り替える。NVIDIAのFP8は変更しない |
+| Wan 2.2のAMD既知問題 | AMD公式の既知問題一覧を確認し、対象GPUで色異常・クラッシュ・生成失敗が残る場合は対応済みと扱わず、対象GPU、再現条件、着手条件をここへ残す |
+| Apple Silicon Macでの生成受入 | Apple Silicon Mac（Intel Macは対象外）で、MPSランタイム導入、再起動後のランタイム再利用、Qwen画像生成・画像編集、キャラクター作成4工程、Grounding DINO、SAM 2.1、Wan 2.2、LTXを**モデルごとに個別**確認する。必要ユニファイドメモリの実測、所要時間、完成物の目視、メモリ不足時の表示、終了後のプロセス・一時物回収まで見る。確認できたモデルだけ`MpsSupport::Verified`へ変える |
+| MPSでのWan 2.2映像破損 | Apple Siliconで映像破損が再現する場合、**動画生成だけ**を`MpsSupport::Unsupported`にして理由を記録する。画像とキャラクター作成は巻き込まない |
+| MPSでのFP8可否 | LTXのFP8重みとWanのFP8テキストエンコーダーがMPSで動くかを確認する。動かない場合はFP16／BF16の公式モデルへ切り替え、対応GPU、必要メモリ、取得量、速度と画質への影響、公式URL、固定リビジョン、SHA-256を`docs/models.md`へ記録する。NVIDIAとAMDの既存精度は変えない |
+| MPSの必要メモリ実測 | `GENERATION_MODELS`の必要ユニファイドメモリは「最大の重み＋8GB」の暫定値。実機で生成中の最大使用量を測り、暫定値を実測へ置き換える |
+| MPSで検証済みの起動引数 | ComfyUIの省メモリ系オプションはMPSで未検証のため使っていない。実機で効果と安全性を確認できたものだけを、検証結果とともに追加する |
+| Intel GPUの生成対応 | 将来候補。XPU版PyTorch、IPEX、Intel向けモデルの公式安定版と対応GPUが揃ってから、別の目的別PRで検討する。今回は判定だけ行い、取得も表示上の対応もしない |

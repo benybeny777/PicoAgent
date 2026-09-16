@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[4]
-PACKAGE_FILES = re.compile(r"(^|/)(Cargo\.toml|Cargo\.lock|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|uv\.lock|requirements[^/]*\.txt)$")
+PACKAGE_FILES = re.compile(r"(^|/)(Cargo\.toml|Cargo\.lock|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|uv\.lock|requirements[^/]*\.(txt|in|lock))$")
 APP_PATHS = (
     "src-tauri/resources/",
     "src-tauri/src/aivis.rs",

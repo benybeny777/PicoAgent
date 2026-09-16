@@ -4,7 +4,16 @@
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
-キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。仮想環境が参照する基準Pythonも同じ管理対象世代の`runtime/`へ含め、起動時に削除する取得キャッシュへ依存させない。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
+キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入は取得前にGPUの素性（ベンダー・型番・専用VRAM・共有メモリか）と85GB以上の空きを検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。実行バックエンドは`src-tauri/src/generation_backend.rs`がCUDA（NVIDIA）かROCm（AMD公式のWindows向け対応GPU）を1つだけ選び、選んだ側のPyTorchだけを`uv pip sync`で導入する。依存は共通の`sidecar/requirements-comfy-common.in`と、バックエンド別の`requirements-comfy.in`／`requirements-comfy-rocm.in`／`requirements-comfy-mps.in`へ分けてロックする。MPS（Apple Silicon）のロックは`--python-platform aarch64-apple-darwin`で生成済みで、PyPIの標準wheelがMetalを含むため専用インデックスを使わない。ROCmのロックはAMD公式配布へ到達できるWindows機で次のように再生成してコミットする（ロックが無い間、AMD経路は取得を開始せず理由を表示する）。
+
+```
+uv pip compile sidecar/requirements-comfy-rocm.in \
+  --output-file sidecar/requirements-comfy-rocm.lock \
+  --generate-hashes --index-strategy unsafe-best-match \
+  --python-platform windows --python-version 3.12
+```
+
+導入直後は`sidecar/verify_backend.py`でimport、`torch.cuda.is_available()`、`torch.version.hip`／`cuda`、デバイス名、最小テンソル演算を実GPUで確認し、通った場合だけモデル取得へ進む。導入済みのGPU種別・バックエンド・PyTorch版は`install.json`の`runtime`へ記録し、GPU交換後は再導入させる。ComfyUIは専用VRAMが十進16GB未満・共有メモリ・VRAM不明のとき`--lowvram`で起動し、通常起動のGPUメモリ不足だけ同条件で1回だけ再実行する（サイドカーは終了コード3でGPUメモリ不足を返し、再試行の可否はRust側が決める）。仮想環境が参照する基準Pythonも同じ管理対象世代の`runtime/`へ含め、起動時に削除する取得キャッシュへ依存させない。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
 
 画像・動画生成は同じ共有PythonとComfyUI本体を再利用し、モデルだけを`bundled/video-wan`または`bundled/video-ltx`へ分離する。追加機能の選択前には取得せず、固定サイズ・SHA-256検査に通ったstagingだけを公開する。生成は`character-maker/sidecar/media/generate.py`が専用ポートと共通GPUロックを所有し、完成品を`generated-media/`へ移してからComfyUIの子孫プロセスと一時領域を回収する。失敗時のモデル取得キャッシュは再開用に残せるが、次回アプリ起動時には全削除する。
 

@@ -59,6 +59,61 @@ impl Engine {
     }
 }
 
+/// サイドカーへ渡す1回分の生成条件。
+///
+/// OOM後の再試行でも、ここから同じ引数列を作り直す。**変えてよいのは`--lowvram`だけ**で、
+/// 入力・seed・モデル・workflow・出力先は必ず同じにする。
+struct SidecarRequest<'a> {
+    script: &'a std::path::Path,
+    engine: Engine,
+    prompt: &'a str,
+    output: &'a std::path::Path,
+    comfy: &'a std::path::Path,
+    models: &'a std::path::Path,
+    gpu_lock: &'a std::path::Path,
+    seed: u64,
+    width: u64,
+    height: u64,
+    frames: u64,
+    input: Option<&'a std::path::Path>,
+}
+
+impl SidecarRequest<'_> {
+    fn arguments(&self, lowvram: bool) -> Vec<std::ffi::OsString> {
+        let mut arguments: Vec<std::ffi::OsString> = vec![
+            self.script.into(),
+            "--engine".into(),
+            self.engine.id().into(),
+            "--prompt".into(),
+            self.prompt.into(),
+            "--output".into(),
+            self.output.into(),
+            "--comfy".into(),
+            self.comfy.into(),
+            "--models".into(),
+            self.models.into(),
+            "--gpu-lock".into(),
+            self.gpu_lock.into(),
+            "--seed".into(),
+            self.seed.to_string().into(),
+            "--width".into(),
+            self.width.to_string().into(),
+            "--height".into(),
+            self.height.to_string().into(),
+            "--frames".into(),
+            self.frames.to_string().into(),
+        ];
+        if let Some(input) = self.input {
+            arguments.push("--input".into());
+            arguments.push(input.into());
+        }
+        if lowvram {
+            arguments.push("--lowvram".into());
+        }
+        arguments
+    }
+}
+
 fn integer(args: &Value, name: &str, default: u64, minimum: u64, maximum: u64) -> u64 {
     args.get(name)
         .and_then(Value::as_u64)
@@ -104,7 +159,11 @@ fn unique_output(engine: Engine) -> Result<crate::permissions::SafePath, String>
 fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let bundled = crate::components::runtime_root()
         .ok_or_else(|| "エラー: 追加機能の管理領域を取得できません。".to_string())?;
-    let python = bundled.join("python/Scripts/python.exe");
+    // GPUを交換した後、導入時と違うバックエンドのPyTorchをそのまま使わない。
+    if let Some(reason) = crate::components::generation_runtime_mismatch_for_app() {
+        return Err(format!("エラー: {reason}"));
+    }
+    let python = crate::components::python_executable(&bundled.join("python"));
     let comfy = bundled.join("character-maker/ComfyUI");
     let models = match engine {
         Engine::QwenEdit => bundled.join("character-maker/models/qwen-eval"),
@@ -324,40 +383,104 @@ impl Tool for ComfyuiTool {
             return "エラー: 画像・動画生成サイドカーが壊れています。アプリを修復してください。"
                 .into();
         }
-        let mut command = crate::tools::process::command(&python);
-        command
-            .arg(&script)
-            .args(["--engine", engine.id(), "--prompt", &prompt])
-            .arg("--output")
-            .arg(output.as_path())
-            .arg("--comfy")
-            .arg(&comfy)
-            .arg("--models")
-            .arg(&models)
-            .arg("--gpu-lock")
-            .arg(&lock)
-            .args([
-                "--seed",
-                &seed.to_string(),
-                "--width",
-                &width.to_string(),
-                "--height",
-                &height.to_string(),
-                "--frames",
-                &frames.to_string(),
-            ]);
-        if let Some(input) = &input {
-            command.arg("--input").arg(input.as_path());
+        // 専用VRAM16GB未満・共有メモリ・VRAM不明はlowvramで起動する。
+        // MPS（Apple Silicon）は専用VRAM判定を流用せず、検証済みの起動設定だけを使う。
+        let installed = crate::components::installed_generation_runtime_for_app();
+        let backend = installed.as_ref().map(|runtime| runtime.backend);
+        let device = crate::generation_backend::generation_device(
+            &crate::gpu::devices(),
+            installed.as_ref(),
+        );
+        let decision = crate::generation_backend::lowvram_decision(backend, device.as_ref());
+        if decision.lowvram {
+            crate::generation_backend::notify_progress(
+                "省メモリ設定で画像・動画生成を始めます",
+                &decision.reason,
+            );
         }
-        let result = match crate::tools::process::output(command, 7_200, "ローカル画像・動画生成")
-            .await
+        // Apple Siliconで実機確認が済んでいないモデルは、その旨を隠さず伝える。
+        if let Some((model, backend)) =
+            crate::generation_backend::model_for(engine.component()).zip(backend)
         {
-            Ok(value) => value,
-            Err(error) => return format!("エラー: {error}"),
+            if let Some(notice) = crate::generation_backend::mps_unverified_notice(model, backend) {
+                crate::generation_backend::notify_progress(
+                    "実機未確認のモデルで生成します",
+                    &notice,
+                );
+            }
+        }
+        let request = SidecarRequest {
+            script: &script,
+            engine,
+            prompt: &prompt,
+            output: output.as_path(),
+            comfy: &comfy,
+            models: &models,
+            gpu_lock: &lock,
+            seed,
+            width,
+            height,
+            frames,
+            input: input.as_ref().map(|path| path.as_path()),
         };
+        let build = |lowvram: bool| {
+            let mut command = crate::tools::process::command(&python);
+            command.args(request.arguments(lowvram));
+            command
+        };
+        let mut lowvram = decision.lowvram;
+        let mut result =
+            match crate::tools::process::output(build(lowvram), 7_200, "ローカル画像・動画生成")
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => return format!("エラー: {error}"),
+            };
+        // 通常起動のGPUメモリ不足だけ、省メモリ設定で1回だけやり直す。
+        // サイドカーは終了前にComfyUIと子孫プロセス、途中出力を必ず回収している。
+        if crate::generation_backend::should_retry_with_lowvram(
+            backend,
+            result.status.code(),
+            lowvram,
+        ) {
+            crate::generation_backend::notify_progress(
+                "GPUメモリ不足のため省メモリ設定でやり直します",
+                "同じ指示・シード・モデルのまま、省メモリ設定（lowvram）で1回だけ再実行します。",
+            );
+            lowvram = true;
+            result = match crate::tools::process::output(
+                build(lowvram),
+                7_200,
+                "ローカル画像・動画生成（省メモリ再試行）",
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(error) => return format!("エラー: {error}"),
+            };
+        }
         if !result.status.success() {
+            if result.status.code() == Some(crate::generation_backend::GPU_OOM_EXIT_CODE) {
+                return if lowvram {
+                    "エラー: GPUメモリが不足しています。省メモリ設定でも生成できませんでした。画像・動画のサイズかフレーム数を小さくしてください。".into()
+                } else {
+                    // MPSでは未検証の起動引数へ切り替えず、条件を小さくする案内だけを返す。
+                    "エラー: GPUメモリが不足しています。画像・動画のサイズかフレーム数を小さくして試してください。".to_string()
+                };
+            }
+            // 英語の例外や内部コマンドを利用者へそのまま見せない。原文はログへ残す。
             let detail = String::from_utf8_lossy(&result.stderr);
-            return format!("エラー: 画像・動画生成に失敗しました: {}", detail.trim());
+            if let Some(app) = crate::durable_jobs::app_handle() {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("画像・動画生成に失敗しました: {}", detail.trim()),
+                );
+            }
+            return format!(
+                "エラー: 画像・動画生成に失敗しました（{}／{}）。指示や画像サイズを変えて試すか、設定の「診断・修復」からログを確認してください。",
+                engine.label(),
+                if lowvram { "省メモリ設定" } else { "通常起動" }
+            );
         }
         if !crate::permissions::fs::metadata(&output)
             .map(|metadata| metadata.is_file())
@@ -386,6 +509,32 @@ mod tests {
         assert_eq!(normalized_video_dimension(64), 256);
         assert_eq!(normalized_frames(100), 97);
         assert_eq!(normalized_frames(1), 9);
+    }
+
+    #[test]
+    fn 再試行で変わるのはlowvramだけにする() {
+        let request = SidecarRequest {
+            script: std::path::Path::new("C:/pico/sidecar/media/generate.py"),
+            engine: Engine::Wan,
+            prompt: "白い猫が走る",
+            output: std::path::Path::new("C:/pico/generated-media/wan-1.mp4"),
+            comfy: std::path::Path::new("C:/pico/character-maker/ComfyUI"),
+            models: std::path::Path::new("C:/pico/video-wan"),
+            gpu_lock: std::path::Path::new("C:/pico/completion-gpu.lock"),
+            seed: 12_345,
+            width: 768,
+            height: 512,
+            frames: 97,
+            input: Some(std::path::Path::new("C:/pico/input.png")),
+        };
+        let normal = request.arguments(false);
+        let retry = request.arguments(true);
+        assert_eq!(retry.len(), normal.len() + 1);
+        assert_eq!(&retry[..normal.len()], normal.as_slice());
+        assert_eq!(retry[normal.len()], std::ffi::OsString::from("--lowvram"));
+        assert!(!normal.contains(&std::ffi::OsString::from("--lowvram")));
+        // 同じ条件からは常に同じ引数列ができる（seed・入力・出力先が揺れない）。
+        assert_eq!(request.arguments(false), normal);
     }
 
     #[test]

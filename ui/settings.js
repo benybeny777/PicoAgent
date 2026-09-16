@@ -1154,8 +1154,30 @@ function buildComponentManager() {
   const operationProgress = createOperationProgress("追加機能の処理進捗");
   const status = operationProgress.message;
   operationProgress.element.classList.add("component-manager-status");
-  // 長い追加機能一覧の末尾では導入中の表示が画面外になるため、一覧より前へ固定する。
-  sec.append(core, operationProgress.element, list);
+  // 画像・動画・キャラクター生成に使うGPUと実行バックエンドを、取得を始める前に見せる。
+  const generation = el("p", { className: "hint", textContent: "GPUを確認中…" });
+  sec.append(core, generation, operationProgress.element, list);
+
+  async function refreshGenerationEnvironment() {
+    try {
+      const info = await window.picoagent.settings.generationEnvironment();
+      const gpu = info?.gpuName ? `${info.gpuName}（${info.gpuVendor}）` : "GPU不明";
+      if (!info?.supported) {
+        generation.textContent = `画像・動画・キャラクター生成: ${info?.reason || "対応GPUを確認できません。"}`;
+        return;
+      }
+      const start = info.lowvram ? "省メモリ設定（lowvram）で起動" : "通常起動";
+      const reinstall = info.needsReinstall
+        ? " 導入済みランタイムがこのGPU向けではありません。入れ直してください。"
+        : "";
+      const unverified = (info.mpsUnverified || []).length
+        ? ` このMacでは次のモデルが実機未確認です: ${info.mpsUnverified.join("、")}。`
+        : "";
+      generation.textContent = `画像・動画・キャラクター生成: ${gpu} を ${info.backendLabel} で使用します。ComfyUIは${start}します（${info.lowvramReason}）。${reinstall}${unverified}`;
+    } catch (error) {
+      generation.textContent = `画像・動画・キャラクター生成: GPUを確認できません（${error?.message || error}）`;
+    }
+  }
 
   function setBusy(busy) {
     sec.setAttribute("aria-busy", busy ? "true" : "false");
@@ -1167,6 +1189,7 @@ function buildComponentManager() {
   }
 
   async function refresh() {
+    refreshGenerationEnvironment();
     const items = await window.picoagent.settings.componentStatus();
     list.innerHTML = "";
     const attentionCount = items.filter(item => item.updateAvailable || item.newerThanTarget || item.versionUnknown).length;

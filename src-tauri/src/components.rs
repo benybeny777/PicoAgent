@@ -8,7 +8,6 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
@@ -155,17 +154,17 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
         )),
         "character-maker" => Some((
             "画像編集・キャラクター作成基盤",
-            "Python 3.12、ComfyUI、Qwen画像編集、背景除去・部位分解モデルをPicoAgent専用領域へ導入します。CUDA対応NVIDIA GPU専用です。",
+            "Python 3.12、ComfyUI、Qwen画像編集、背景除去・部位分解モデルをPicoAgent専用領域へ導入します。Windows x64のCUDA対応NVIDIA GPU、またはAMD公式のWindows向けROCm対応GPUで動きます。実GPUに合う方のPyTorchだけを取得します。",
             "約77GB（導入後、作業領域は別。空き85GB以上が必要）",
         )),
         "video-wan" => Some((
             "Wan 2.2動画生成",
-            "8GB VRAM向けの標準候補Wan 2.2 TI2V 5Bです。テキストまたは画像から動画を生成します。選択時だけ取得します。",
+            "8GB VRAM向けの標準候補Wan 2.2 TI2V 5Bです。テキストまたは画像から動画を生成します。選択時だけ取得します。モデルはCUDA・ROCmで共通です。",
             "約18.1GB（空き22GB以上が必要）",
         )),
         "video-ltx" => Some((
             "LTX軽量動画生成",
-            "8GB VRAM向けのLTX-Video 0.9.8 2B FP8です。最新LTX 2.5は公式基準16GB以上のため取得しません。",
+            "8GB VRAM向けのLTX-Video 0.9.8 2B FP8です。最新LTX 2.5は公式基準16GB以上のため取得しません。FP8重みはAMD実機での可否が未確認です。",
             "約14.3GB（空き18GB以上が必要）",
         )),
         "office" => Some((
@@ -280,9 +279,88 @@ fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
     crate::log_paths::bundled_dir(app).join(id)
 }
 
-/// CUDA対応Python機能は、機能ごとにPythonと同一wheelを複製せず、この1環境を共有する。
+/// GPUを使うPython機能は、機能ごとにPythonと同一wheelを複製せず、この1環境を共有する。
+///
+/// 共有するのはPython 3.12本体と仮想環境までで、PyTorchは実GPUに合うバックエンド
+/// （CUDAまたはROCm）を1つだけ導入する。両方を予備として入れない。
 pub(crate) fn shared_python_dir(app: &AppHandle) -> PathBuf {
     crate::log_paths::bundled_dir(app).join("python")
+}
+
+/// 仮想環境のPython実行ファイル。OSでレイアウトが違うのでここへ集約する。
+///
+/// Windowsは`Scripts/python.exe`、macOSは`bin/python3`。
+pub(crate) fn python_executable(python_root: &Path) -> PathBuf {
+    if cfg!(windows) {
+        python_root.join("Scripts/python.exe")
+    } else {
+        python_root.join("bin/python3")
+    }
+}
+
+/// 画像・動画・キャラクター生成に対応するOSとCPUアーキテクチャか。
+///
+/// Windowsはx64、macOSはApple Silicon（aarch64）だけを対象にする。Intel Macは対象外。
+pub(crate) fn generation_platform_supported() -> bool {
+    cfg!(all(target_os = "windows", target_arch = "x86_64"))
+        || cfg!(all(target_os = "macos", target_arch = "aarch64"))
+}
+
+/// nvidia-smiがCUDA対応GPUを報告するか。NVIDIAの既存判定を変えない。
+#[cfg(windows)]
+async fn nvidia_cuda_ready() -> bool {
+    let mut command = crate::tools::process::command("nvidia-smi.exe");
+    command.args(["--query-gpu=name", "--format=csv,noheader"]);
+    crate::tools::process::output(command, 10, "NVIDIA GPU確認")
+        .await
+        .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
+}
+
+#[cfg(not(windows))]
+async fn nvidia_cuda_ready() -> bool {
+    false
+}
+
+/// 取得を始める前に、実GPUから生成バックエンドを判定する。
+pub(crate) async fn generation_selection() -> crate::generation_backend::BackendSelection {
+    let devices = crate::gpu::devices();
+    crate::generation_backend::select(&devices, nvidia_cuda_ready().await)
+}
+
+/// 導入済みの生成ランタイムの素性。記録が無い、または壊れている場合は`None`。
+pub(crate) fn installed_generation_runtime(
+    app: &AppHandle,
+) -> Option<crate::generation_backend::InstalledRuntime> {
+    let text =
+        std::fs::read_to_string(installed_dir(app, "character-maker").join("install.json")).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    serde_json::from_value(value.get("runtime")?.clone()).ok()
+}
+
+/// `AppHandle`を受け取れないスキルから使う、導入済みランタイムの読み取り。
+pub(crate) fn installed_generation_runtime_for_app(
+) -> Option<crate::generation_backend::InstalledRuntime> {
+    installed_generation_runtime(crate::durable_jobs::app_handle()?)
+}
+
+/// `AppHandle`を受け取れないスキルから使う、導入済みランタイムの照合。
+pub(crate) fn generation_runtime_mismatch_for_app() -> Option<String> {
+    generation_runtime_mismatch(crate::durable_jobs::app_handle()?)
+}
+
+/// 導入済みランタイムをいまのGPUで使い続けてよいか。使えない場合は日本語の理由を返す。
+pub(crate) fn generation_runtime_mismatch(app: &AppHandle) -> Option<String> {
+    let installed = installed_generation_runtime(app)?;
+    let devices = crate::gpu::devices();
+    if installed.matches_present_gpu(&devices) {
+        return None;
+    }
+    Some(format!(
+        "導入済みの生成ランタイムは{}（{}）向けですが、いまのPCでは{}を確認できません。設定の「追加機能・更新」から入れ直してください。",
+        installed.gpu_vendor,
+        installed.backend.label(),
+        installed.gpu_vendor
+    ))
 }
 
 fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
@@ -394,9 +472,16 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 .with_context(|| format!("{id} の取得元情報がありません"))?
                 .clone();
             let installed_root = installed_dir(app, id);
+            // GPUを交換した後は、導入済みでも不一致バックエンドを再利用させない。
+            let runtime_mismatch = if id == "character-maker" {
+                generation_runtime_mismatch(app)
+            } else {
+                None
+            };
             let installed = if id == "character-maker" {
-                installed_root.join("install.json").is_file()
-                    && shared_python_dir(app).join("Scripts/python.exe").is_file()
+                runtime_mismatch.is_none()
+                    && installed_root.join("install.json").is_file()
+                    && python_executable(&shared_python_dir(app)).is_file()
                     && installed_root.join("ComfyUI/main.py").is_file()
             } else if matches!(id, "video-wan" | "video-ltx") {
                 managed_media_ready(id, &installed_root)
@@ -450,6 +535,9 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 version_error = Some(
                     "導入済み版の表記を比較できません。修復すると推奨版を取得します。".to_string(),
                 );
+            }
+            if let Some(reason) = runtime_mismatch {
+                version_error = Some(reason);
             }
             Ok(ComponentStatus {
                 id,
@@ -589,21 +677,104 @@ pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentSta
     statuses(app)
 }
 
+/// uvの配布形式。OSで書庫が違う。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UvArchive {
+    Zip,
+    TarGz,
+}
+
+/// OS別のuv公式アセット。
+struct UvAsset {
+    url: &'static str,
+    cache_name: &'static str,
+    executable: &'static str,
+    size: u64,
+    sha256: &'static str,
+    archive: UvArchive,
+}
+
+/// この環境向けのuv公式アセット。対象外のOSでは`None`。
+fn uv_asset() -> Option<UvAsset> {
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return Some(UvAsset {
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip",
+            cache_name: "uv.zip.part",
+            executable: "uv.exe",
+            size: 16_996_332,
+            sha256: "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9",
+            archive: UvArchive::Zip,
+        });
+    }
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return Some(UvAsset {
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-apple-darwin.tar.gz",
+            cache_name: "uv.tar.gz.part",
+            executable: "uv",
+            size: 16_640_518,
+            sha256: "e01b69ee15e81918d5e8fc9cf39b3db7f59c5576e5e306cd9b7aeb2c7b7321c3",
+            archive: UvArchive::TarGz,
+        });
+    }
+    None
+}
+
+/// tar.gzをOS標準のtarで展開する（macOS）。
+///
+/// 展開先を作ってから`-C`で中へ入れ、書庫の外へは出させない。
+fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
+    std::fs::create_dir_all(destination)?;
+    let mut command = crate::tools::process::command_sync("tar");
+    let output = command
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(destination)
+        .output()?;
+    // このファイルはストリーミング受信も行うため、`text::guard`が禁じる
+    // 逐次デコードなしの置換変換を使わずにエラー本文を取り出す。
+    let stderr = String::from_utf8(output.stderr).unwrap_or_else(|error| {
+        format!(
+            "標準エラーがUTF-8ではありません（{}バイト）",
+            error.as_bytes().len()
+        )
+    });
+    anyhow::ensure!(
+        output.status.success(),
+        "書庫を展開できません: {}",
+        stderr.trim()
+    );
+    Ok(())
+}
+
 async fn install_character_maker(app: &AppHandle) -> Result<()> {
     anyhow::ensure!(
-        cfg!(all(target_os = "windows", target_arch = "x86_64")),
-        "キャラクター作成はWindows x64専用です"
+        generation_platform_supported(),
+        "キャラクター作成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
-    let gpu = tokio::task::spawn_blocking(|| {
-        crate::tools::process::command_sync("nvidia-smi.exe")
-            .args(["--query-gpu=name", "--format=csv,noheader"])
-            .stdin(Stdio::null())
-            .output()
-    })
-    .await??;
-    anyhow::ensure!(
-        gpu.status.success() && !gpu.stdout.is_empty(),
-        "CUDA対応NVIDIA GPUを確認できません。何も取得していません"
+    // 取得開始前にGPUを判定する。非対応GPUではランタイムも大容量モデルも取得しない。
+    let selected = match generation_selection().await {
+        crate::generation_backend::BackendSelection::Supported(value) => value,
+        crate::generation_backend::BackendSelection::Unsupported(reason) => {
+            anyhow::bail!("{reason}")
+        }
+    };
+    let backend = selected.backend;
+    let assets = character_maker_assets().context("キャラ作成資源がありません")?;
+    let lock =
+        crate::generation_backend::lock_path(&assets, backend).map_err(anyhow::Error::msg)?;
+    emit_progress(
+        app,
+        "character-maker",
+        "download",
+        format!(
+            "{}（{}）向けに{}版PyTorchを準備します",
+            selected.device.name,
+            selected.device.vendor.label(),
+            backend.label()
+        ),
+        0,
+        0,
     );
     let bundled = crate::log_paths::bundled_dir(app);
     std::fs::create_dir_all(&bundled)?;
@@ -612,9 +783,9 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         "キャラクター作成の導入には85GB以上の空き容量が必要です。何も取得していません"
     );
 
-    const UV_URL: &str =
-        "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip";
-    const UV_SHA: &str = "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9";
+    // uvは同じ0.12.11をOS別の公式アセットで取る。サイズとSHA-256は公式の
+    // `<資産名>.sha256`と照合済み（Windows: 2026-09-10、macOS: 2026-09-15）。
+    let uv_asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
     const COMFY_URL: &str =
         "https://github.com/Comfy-Org/ComfyUI/archive/12d5279438bfefc058a269eae805ceab6047777f.zip";
     const COMFY_SHA: &str = "a3c51a42bc7568d4b57267af3a1aa86a6cb379a199f95a90e8e3679c52651241";
@@ -639,27 +810,33 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     tokio::fs::create_dir_all(&cache).await?;
     tokio::fs::create_dir_all(&stage).await?;
     let result = async {
-        let uv_zip = cache.join("uv.zip.part");
+        let uv_zip = cache.join(uv_asset.cache_name);
         download_to(
             app,
             &client,
             DownloadSpec {
                 id: "character-maker",
-                url: UV_URL,
+                url: uv_asset.url,
                 destination: &uv_zip,
-                expected_size: 16_996_332,
+                expected_size: uv_asset.size,
                 max_size: 30_000_000,
                 message: "Python管理ツールを取得中…",
             },
         )
         .await?;
-        verify_sha256(&uv_zip, UV_SHA)?;
+        verify_sha256(&uv_zip, uv_asset.sha256)?;
         let uv_dir = cache.join("uv");
         cleanup_dir(app, "uv展開途中フォルダ", &uv_dir).await;
         let uv_zip_copy = uv_zip.clone();
         let uv_dir_copy = uv_dir.clone();
-        tokio::task::spawn_blocking(move || extract_zip(&uv_zip_copy, &uv_dir_copy)).await??;
-        let uv = find_named_file(&uv_dir, "uv.exe", 0).context("uv.exeが配布物にありません")?;
+        let archive_kind = uv_asset.archive;
+        tokio::task::spawn_blocking(move || match archive_kind {
+            UvArchive::Zip => extract_zip(&uv_zip_copy, &uv_dir_copy),
+            UvArchive::TarGz => extract_tar_gz(&uv_zip_copy, &uv_dir_copy),
+        })
+        .await??;
+        let uv = find_named_file(&uv_dir, uv_asset.executable, 0)
+            .with_context(|| format!("{}が配布物にありません", uv_asset.executable))?;
         // uvの仮想環境は基準Pythonを参照する。キャッシュへ置くと起動時清掃で壊れるため、
         // 基準Pythonとvenvを同じ管理対象世代へまとめて原子的に公開する。
         let python_store = python_stage.join("runtime");
@@ -694,25 +871,50 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         tokio::task::spawn_blocking(move || copy_dir_all(&venv_stage_copy, &python_stage_copy))
             .await??;
         let python = python_stage.clone();
-        let assets = character_maker_assets().context("キャラ作成資源がありません")?;
+        let staged_python = python_executable(&python);
+        // 実GPUに必要なバックエンドのwheelだけを入れる。CUDA版とROCm版を同じ環境へ同時に導入しない。
+        let mut sync = vec![
+            "pip".to_string(),
+            "sync".to_string(),
+            "--python".to_string(),
+            staged_python.to_string_lossy().to_string(),
+            lock.to_string_lossy().to_string(),
+            "--index-strategy".to_string(),
+            "unsafe-best-match".to_string(),
+            "--require-hashes".to_string(),
+        ];
+        if backend == crate::generation_backend::GenerationBackend::Cuda {
+            // CUDA版torchはPyTorch公式インデックスから取る（既存経路を変えない）。
+            // ROCm版はロック内の公式wheel URLを直接使うため追加インデックスを渡さない
+            // （渡すとPyPIのCPU版torchで上書きされることがある）。
+            sync.push("--extra-index-url".to_string());
+            sync.push("https://download.pytorch.org/whl/cu128".to_string());
+        }
+        run_component_command(&uv, &sync.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+        // ROCmを有効にする前に、実際のGPUで動くことを確かめる。失敗したら大容量モデルを取得しない。
+        emit_progress(
+            app,
+            "character-maker",
+            "verify",
+            format!("{}版PyTorchの動作を確認しています…", backend.label()),
+            0,
+            0,
+        );
         run_component_command(
-            &uv,
+            &staged_python,
             &[
-                "pip",
-                "sync",
-                "--python",
-                &python.join("Scripts/python.exe").to_string_lossy(),
-                &assets
-                    .join("sidecar/requirements-comfy.lock")
-                    .to_string_lossy(),
-                "--extra-index-url",
-                "https://download.pytorch.org/whl/cu128",
-                "--index-strategy",
-                "unsafe-best-match",
-                "--require-hashes",
+                &assets.join("sidecar/verify_backend.py").to_string_lossy(),
+                "--backend",
+                backend.id(),
             ],
         )
-        .await?;
+        .await
+        .with_context(|| {
+            format!(
+                "{}版PyTorchが実GPUで動作しません。何も有効にしていません",
+                backend.label()
+            )
+        })?;
         let comfy_zip = cache.join("comfy.zip.part");
         download_to(
             app,
@@ -745,7 +947,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         run_component_command_with_progress(
             app,
             "character-maker",
-            &python.join("Scripts/python.exe"),
+            &python_executable(&python),
             &[
                 &assets
                     .join("installer/setup-runtime-models.py")
@@ -762,7 +964,14 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         .await?;
         crate::store::write_json_atomic(
             &stage.join("install.json"),
-            &serde_json::json!({"version":"2026.09.10","python":"3.12.13","comfy":"v0.34.0"}),
+            &serde_json::json!({
+                "version":"2026.09.10",
+                "python":"3.12.13",
+                "comfy":"v0.34.0",
+                // GPU種別・バックエンド・PyTorch版・CUDA／ROCm版を残し、
+                // GPU交換やドライバー変更後に古いバックエンドを再利用しない。
+                "runtime": crate::generation_backend::InstalledRuntime::of(&selected),
+            }),
         )?;
         replace_installed_pair(
             (&python_stage, &shared_python_dir(app), "python"),
@@ -795,10 +1004,10 @@ async fn install_media_model(
     required_free: u64,
 ) -> Result<()> {
     anyhow::ensure!(
-        cfg!(all(target_os = "windows", target_arch = "x86_64")),
-        "ローカル動画生成はWindows x64専用です"
+        generation_platform_supported(),
+        "ローカル動画生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
-    let python = shared_python_dir(app).join("Scripts/python.exe");
+    let python = python_executable(&shared_python_dir(app));
     anyhow::ensure!(
         installed_dir(app, "character-maker")
             .join("ComfyUI/main.py")
@@ -806,23 +1015,38 @@ async fn install_media_model(
             && python.is_file(),
         "先に「画像編集・キャラクター作成基盤」を導入してください。動画モデルはまだ取得していません"
     );
-    let gpu = tokio::task::spawn_blocking(|| {
-        crate::tools::process::command_sync("nvidia-smi.exe")
-            .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
-            .stdin(Stdio::null())
-            .output()
-    })
-    .await??;
-    let gpu_text =
-        std::str::from_utf8(&gpu.stdout).context("nvidia-smiの出力をUTF-8として読めません")?;
-    let memory_mb = gpu_text
-        .lines()
-        .filter_map(|line| line.trim().parse::<u64>().ok())
-        .max()
-        .unwrap_or(0);
-    anyhow::ensure!(
-        gpu.status.success() && memory_mb >= 7_500,
-        "8GB以上のCUDA対応NVIDIA GPUを確認できません。動画モデルは取得していません"
+    // 導入済みランタイムが今のGPU向けでないまま、動画モデルだけを取得させない。
+    if let Some(reason) = generation_runtime_mismatch(app) {
+        anyhow::bail!("{reason}動画モデルは取得していません。");
+    }
+    // 動画モデルも、取得開始前にGPUを判定する。非対応GPUでは何も取得しない。
+    let selected = match generation_selection().await {
+        crate::generation_backend::BackendSelection::Supported(value) => value,
+        crate::generation_backend::BackendSelection::Unsupported(reason) => {
+            anyhow::bail!("{reason}")
+        }
+    };
+    if let Some(model) = crate::generation_backend::model_for(id) {
+        if let Some(reason) = crate::generation_backend::model_memory_shortage(
+            model,
+            &selected.device,
+            crate::engine::total_memory_bytes(),
+        ) {
+            anyhow::bail!("{reason}");
+        }
+    }
+    emit_progress(
+        app,
+        id,
+        "download",
+        format!(
+            "{}（{}）向けに{}で動く動画モデルを取得します",
+            selected.device.name,
+            selected.device.vendor.label(),
+            selected.backend.label()
+        ),
+        0,
+        0,
     );
     let bundled = crate::log_paths::bundled_dir(app);
     std::fs::create_dir_all(&bundled)?;

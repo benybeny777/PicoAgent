@@ -344,5 +344,40 @@ class CompletionOrchestrationTests(unittest.TestCase):
         self.inference.assert_not_called()
 
 
+
+class CompletionLowVramTests(unittest.TestCase):
+    """省メモリ起動とGPUメモリ不足の扱い（ComfyUIを起動せずCPUだけで確かめる）。"""
+
+    def test_lowvram_flag_only_changes_comfy_startup(self):
+        """省メモリ起動はComfyUIの引数だけを変える（生成条件は変えない）。"""
+        commands = {}
+        for lowvram in (False, True):
+            with self.subTest(lowvram=lowvram), tempfile.TemporaryDirectory() as directory:
+                run = Path(directory)
+                (run/'output').mkdir()
+                arguments = SimpleNamespace(
+                    comfy=run, models=run, port=18188, fast_disk=False, lowvram=lowvram,
+                    startup_timeout=1, generation_timeout=1)
+                history = {'p': {'outputs': {'13': {'images': [{'filename': 'done.png'}]}}}}
+                (run/'output/done.png').write_bytes(b'image')
+                process = SimpleNamespace(poll=lambda: None, returncode=0)
+                with patch.object(generate, 'reserve_port', return_value=18188), \
+                     patch.object(generate.subprocess, 'Popen', return_value=process) as popen, \
+                     patch.object(generate.client, 'wait_for_server'), \
+                     patch.object(generate.client, 'request_json',
+                                  side_effect=[{'prompt_id': 'p'}, history]), \
+                     patch.object(generate, 'stop_owned'):
+                    generate.generate_image(arguments, run, {'node': 'fixed'})
+                commands[lowvram] = [str(part).replace(directory, 'ROOT') for part in popen.call_args[0][0]]
+                self.assertEqual('--lowvram' in commands[lowvram], lowvram)
+        self.assertEqual(commands[True], commands[False] + ['--lowvram'])
+
+    def test_out_of_memory_is_distinguished_from_other_failures(self):
+        self.assertTrue(generate.is_out_of_memory('CUDA out of memory'))
+        self.assertTrue(generate.is_out_of_memory('HIP error: out of memory'))
+        self.assertFalse(generate.is_out_of_memory('閉眼補完が制限時間を超えました'))
+        self.assertEqual(generate.OOM_EXIT_CODE, 3)
+
+
 if __name__ == '__main__':
     unittest.main()

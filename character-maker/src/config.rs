@@ -24,6 +24,13 @@ pub struct MakerConfig {
     pub sam2_points_per_batch: u32,
     pub sam2_pred_iou_threshold: f32,
     pub sam2_stability_threshold: f32,
+    /// ComfyUIを`--lowvram`で起動するか。判定はアプリ側のGPU情報が正本。
+    pub comfy_lowvram: bool,
+    /// GPUメモリ不足のときに`--lowvram`で1回だけやり直してよいか。
+    ///
+    /// MPS（Apple Silicon）のように`--lowvram`を検証していないバックエンドでは偽にし、
+    /// 未検証の起動引数へ切り替えない。判定はアプリ側のバックエンド情報が正本。
+    pub comfy_lowvram_retry: bool,
     pub comfy_port: u16,
     pub comfy_startup_timeout_seconds: u32,
     pub snapshot_part_bytes: u64,
@@ -55,6 +62,9 @@ impl MakerConfig {
             sam2_points_per_batch: 8,
             sam2_pred_iou_threshold: 0.7,
             sam2_stability_threshold: 0.85,
+            // 専用VRAM量を判定できない呼び出し（テスト・CLI）は安全側のlowvramで始める。
+            comfy_lowvram: true,
+            comfy_lowvram_retry: true,
             // 0はサイドカーがOSに空きポートを選ばせる。固定番号はWindowsの予約ポート範囲と衝突して起動できない。
             comfy_port: 0,
             comfy_startup_timeout_seconds: 600,
@@ -62,8 +72,13 @@ impl MakerConfig {
         }
     }
 
+    /// 仮想環境のPython実行ファイル。Windowsは`Scripts/python.exe`、macOSは`bin/python3`。
     pub fn python(&self) -> PathBuf {
-        self.python_root.join("Scripts/python.exe")
+        if cfg!(windows) {
+            self.python_root.join("Scripts/python.exe")
+        } else {
+            self.python_root.join("bin/python3")
+        }
     }
 
     pub fn comfy(&self) -> PathBuf {

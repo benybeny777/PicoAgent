@@ -32,6 +32,32 @@ from raw_reuse import open_raw,pin_generated
 
 import comfy_client as client
 VERSION = 5
+# GPUメモリ不足だけを呼び出し元（Rust側）へ区別して返す終了コード。
+# 再試行するかどうかはRust側（pipeline.rs）が決める。
+OOM_EXIT_CODE = 3
+# CUDA・ROCmの両方で出るGPUメモリ不足の目印。
+OOM_MARKERS = ('out of memory', 'outofmemoryerror', 'allocation on device',
+               'hip error: out of memory', 'insufficient memory', 'failed to allocate')
+
+
+class GpuOutOfMemory(RuntimeError):
+    """ComfyUIがGPUメモリ不足で失敗した。"""
+
+
+def is_out_of_memory(text):
+    lowered = str(text).lower()
+    return any(marker in lowered for marker in OOM_MARKERS)
+
+
+def log_tail(path, limit=8192):
+    """失敗原因の判定に使うログ末尾。読めなければ空文字を返す。"""
+    try:
+        with path.open('rb') as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell()-limit))
+            return handle.read().decode('utf-8', 'replace')
+    except OSError:
+        return ''
 # 推論や入力準備の意味を変えた場合に上げる。抽出だけの変更ではGPUを再実行しない。
 IMAGE_GENERATION_VERSION = 5
 PROMPT = ('Close only the specified eye completely, preserving the original character identity and original rendering style. '
@@ -181,7 +207,10 @@ def generate_image(args, run, workflow):
                '--disable-api-nodes', '--preview-method', 'none']
     if args.fast_disk:
         command.append('--fast-disk')
+    if args.lowvram:
+        command.append('--lowvram')
     environment = dict(os.environ, HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1')
+    print(json.dumps({'event': 'completion_comfy_starting', 'lowvram': bool(args.lowvram)}, ensure_ascii=False), flush=True)
     with (run/'comfy.log').open('w', encoding='utf-8') as log:
         process = subprocess.Popen(command, cwd=args.comfy, env=environment, stdout=log,
                                    stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -211,6 +240,13 @@ def generate_image(args, run, workflow):
                 print(json.dumps({'event': 'completion_generating', 'seconds': round(time.monotonic()-started)}), flush=True)
                 time.sleep(5)
             raise TimeoutError('閉眼補完が制限時間を超えました')
+        except Exception as error:
+            # GPUメモリ不足かどうかは、例外本文とComfyUIのログ末尾の両方で判定する。
+            # 先に子プロセスを回収してからログを読む（再試行前にComfyUIを残さない）。
+            stop_owned(process)
+            if is_out_of_memory(f'{type(error).__name__}: {error}\n{log_tail(run/"comfy.log")}'):
+                raise GpuOutOfMemory(str(error)) from error
+            raise
         finally:
             stop_owned(process)
 
@@ -397,6 +433,8 @@ def main():
     parser.add_argument('--mask-margin-ratio', type=float, default=.2)
     parser.add_argument('--mask-core-ratio', type=float, required=True)
     parser.add_argument('--fast-disk', action='store_true')
+    # 省メモリ起動の要否はGPU情報を持つRust側が決める。ここでは指示どおりに渡すだけにする。
+    parser.add_argument('--lowvram', action='store_true', help='ComfyUIを--lowvramで起動する')
     parser.add_argument('--prompt', default=PROMPT)
     for name in ('hidden-prompt','side-prompt'):
         parser.add_argument('--'+name,required=True)
@@ -407,4 +445,9 @@ def main():
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    main()
+    try:
+        main()
+    except GpuOutOfMemory as error:
+        print(json.dumps({'event': 'gpu_out_of_memory', 'detail': str(error)}, ensure_ascii=False), flush=True)
+        print(f'GPUメモリが不足しました: {error}', file=sys.stderr)
+        sys.exit(OOM_EXIT_CODE)
