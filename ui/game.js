@@ -124,9 +124,20 @@
     },
   ];
 
+  // webview の保存領域は読み書きとも失敗しうる。読めないだけで遊べなくなったり、
+  // 保存に失敗しただけで総合結果が出なくなったりしないよう、両方を包む。
+  const readStorage = key => {
+    try { return localStorage.getItem(key); }
+    catch { return null; }
+  };
+  const writeStorage = (key, value) => {
+    try { localStorage.setItem(key, value); }
+    catch (error) { window.PicoUI?.logApp?.("warn", "ゲームの記録を保存できませんでした", error); }
+  };
+
   let session = null;
   let timerId = null;
-  let soundEnabled = localStorage.getItem(SOUND_KEY) !== "off";
+  let soundEnabled = readStorage(SOUND_KEY) !== "off";
   let audioContext = null;
 
   const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -142,7 +153,7 @@
     return copy;
   };
   const readBests = () => {
-    try { return JSON.parse(localStorage.getItem(BEST_KEY) || "{}"); }
+    try { return JSON.parse(readStorage(BEST_KEY) || "{}"); }
     catch { return {}; }
   };
   const bestFor = id => Number(readBests()[id] || 0);
@@ -150,7 +161,7 @@
     const bests = readBests();
     if (score <= Number(bests[id] || 0)) return false;
     bests[id] = score;
-    localStorage.setItem(BEST_KEY, JSON.stringify(bests));
+    writeStorage(BEST_KEY, JSON.stringify(bests));
     return true;
   };
 
@@ -442,7 +453,7 @@
   closeButton.addEventListener("click", close);
   soundButton.addEventListener("click", () => {
     soundEnabled = !soundEnabled;
-    localStorage.setItem(SOUND_KEY, soundEnabled ? "on" : "off");
+    writeStorage(SOUND_KEY, soundEnabled ? "on" : "off");
     syncSoundButton();
     playTone("tap");
   });
