@@ -464,6 +464,42 @@ async function validateAiGames() {
     if (result.characterViewBox.height < result.characterBox.height * 1.3) {
       throw new Error(`ゲーム中のキャラクターがバストアップになっていません: ${JSON.stringify(result)}`);
     }
+
+    result.renderKinds = {};
+    for (const kind of ["live2d", "mmd"]) {
+      const geometry = await page.evaluate(renderKind => {
+        const character = document.getElementById("character");
+        const view = document.getElementById("characterView");
+        for (const child of view.querySelectorAll(":scope > img,:scope > canvas,:scope > .character-spring-motion")) {
+          child.style.display = "none";
+        }
+        const canvas = document.createElement("canvas");
+        canvas.id = renderKind === "live2d" ? "live2dCanvas" : "mmdCanvas";
+        canvas.width = renderKind === "live2d" ? 285 : 320;
+        canvas.height = renderKind === "live2d" ? 315 : 716;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ff91aa";
+        context.beginPath();
+        context.arc(canvas.width / 2, canvas.height * .25, canvas.width * .19, 0, Math.PI * 2);
+        context.fill();
+        context.fillRect(canvas.width * .25, canvas.height * .4, canvas.width * .5, canvas.height * .6);
+        view.appendChild(canvas);
+        character.dataset.renderKind = renderKind;
+        const characterRect = character.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        return {
+          character: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
+          canvas: { x: canvasRect.x, y: canvasRect.y, width: canvasRect.width, height: canvasRect.height },
+          visibleHeight: Math.max(0, Math.min(characterRect.bottom, canvasRect.bottom) - Math.max(characterRect.top, canvasRect.top)),
+        };
+      }, kind);
+      result.renderKinds[kind] = geometry;
+      if (geometry.canvas.x < geometry.character.x - 1
+          || geometry.canvas.x + geometry.canvas.width > 1001
+          || geometry.visibleHeight < 300) {
+        throw new Error(`${kind}のゲーム用キャラクター枠が画面内へ収まりません: ${JSON.stringify(result)}`);
+      }
+    }
     await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
     return output;
   } finally {
