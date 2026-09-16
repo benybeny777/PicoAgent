@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::message::Message;
 
@@ -24,9 +24,7 @@ const MAX_CONTEXT_LOAD: usize = 20;
 const LEGACY_GREETING_GUIDANCE: &str = "\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。";
 
 fn data_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    app.path()
-        .app_data_dir()
-        .map_err(|error| anyhow::anyhow!("会話履歴の保存先を取得できません: {error}"))
+    Ok(crate::log_paths::data_dir(app))
 }
 
 /// キャラクターIDをファイル名に使える形へ正規化する（想定外の文字は落とす）。

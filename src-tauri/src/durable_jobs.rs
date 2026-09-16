@@ -483,16 +483,7 @@ fn recover() -> Result<Vec<String>, String> {
 }
 
 pub fn start(app: AppHandle) {
-    let path = match app.path().app_data_dir() {
-        Ok(dir) => dir.join(STORE_NAME),
-        Err(error) => {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("永続ジョブの保存先を取得できません: {error}"),
-            );
-            return;
-        }
-    };
+    let path = crate::log_paths::data_dir(&app).join(STORE_NAME);
     let _ = APP.set(app.clone());
     let _ = STORE_PATH.set(path.clone());
     let token = format!(

@@ -25,7 +25,8 @@ Set-Location -LiteralPath $root
 # 配信・動画から学習した音声モデルとAivis本体は一切同梱しない。
 $characterId = 'miko-mmd'
 $reviewIdentifier = 'com.picoagent.holo-indie-review'
-$characterRoot = Join-Path $env:APPDATA 'com.picoagent.desktop\characters'
+$reviewDataRoot = "PicoAgent\instances\$reviewIdentifier"
+$characterRoot = Join-Path $env:APPDATA 'PicoAgent\characters'
 $characterSource = Join-Path $characterRoot $characterId
 $characterJson = Join-Path $characterSource 'character.json'
 $licenseReadme = Join-Path $characterSource 'mmd\readme.txt'
@@ -81,10 +82,10 @@ $hook.Add('')
 $hook.Add('; holo Indie審査への限定共有用。通常版とは別の利用者領域へ配置する。')
 $hook.Add('!macro NSIS_HOOK_POSTINSTALL')
 $hook.Add('  SetOverwrite off')
-$hook.Add("  SetOutPath `"`$APPDATA\$reviewIdentifier\characters\$characterId`"")
+$hook.Add("  SetOutPath `"`$APPDATA\$reviewDataRoot\characters\$characterId`"")
 $hook.Add("  File /r `"$characterSource\*`"")
 $hook.Add('  SetOverwrite on')
-$hook.Add("  SetOutPath `"`$APPDATA\$reviewIdentifier`"")
+$hook.Add("  SetOutPath `"`$APPDATA\$reviewDataRoot`"")
 $hook.Add("  File /oname=config.json `"$initialConfigPath`"")
 $hook.Add('!macroend')
 [System.IO.File]::WriteAllText($hookPath, ($hook -join "`r`n") + "`r`n", [System.Text.UTF8Encoding]::new($true))

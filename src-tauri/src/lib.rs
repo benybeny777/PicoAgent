@@ -202,6 +202,28 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
+            let managed_data = log_paths::data_dir(app.handle());
+            std::fs::create_dir_all(&managed_data)?;
+            if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
+                log_paths::append_app_log(
+                    app.handle(),
+                    &format!("旧保存先からのデータ移行に失敗しました: {error}"),
+                );
+            }
+            if app.get_webview_window("main").is_none() {
+                let config = app
+                    .config()
+                    .app
+                    .windows
+                    .iter()
+                    .find(|window| window.label == "main")
+                    .ok_or("mainウィンドウ設定がありません")?;
+                let webview_data = managed_data.join("webview/main");
+                std::fs::create_dir_all(&webview_data)?;
+                tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+                    .data_directory(webview_data)
+                    .build()?;
+            }
             // WebViewの描画キャッシュと中断した取得途中だけを毎回回収する。
             // 設定・会話・完成キャラ・導入済みモデルはapp data/bundled側なので保持する。
             startup_cleanup::run(app.handle());
@@ -212,15 +234,9 @@ pub fn run() {
             // 設定まわりの失敗で `setup` を中断すると、`build()` の `expect` がそのまま
             // パニックになり、ウィンドウも案内画面も出ないまま終了する（＝利用者から見て
             // 「起動しない」）。保存先を決められない場合も、読み取り専用で起動だけは通す。
-            match app.path().app_config_dir() {
-                Ok(config_dir) => {
-                    if let Err(error) = migration::migrate_identity_dirs(app.handle(), &config_dir)
-                    {
-                        log_paths::append_app_log(
-                            app.handle(),
-                            &format!("旧識別子からのデータ移行に失敗しました: {error}"),
-                        );
-                    }
+            let config_dir = managed_data;
+            match std::fs::create_dir_all(&config_dir) {
+                Ok(()) => {
                     let config_path = config_dir.join("config.json");
                     match state.config.load(config_path) {
                         Ok(Some(warning)) => log_paths::append_app_log(app.handle(), &warning),

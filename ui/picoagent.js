@@ -114,7 +114,7 @@ window.picoagent = {
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
-  // 自分で追加したキャラクター（app_data_dir/characters 配下）。
+  // 自分で追加したキャラクター（PicoAgent/characters 配下）。
   userCharacters: () => call("pet_user_characters"),
   // 追加キャラクターの実ファイルを webview から読める URL へ変換する。
   assetUrl: (path) => convertFileSrc(path),

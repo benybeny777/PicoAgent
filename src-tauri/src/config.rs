@@ -1,6 +1,6 @@
 // config.rs - 設定の正本（永続ストア）。
 //
-// 値の優先順位: 永続ファイル（app_config_dir/config.json）> 環境変数 > ハードコード既定値。
+// 値の優先順位: 永続ファイル（PicoAgent/config.json）> 環境変数 > ハードコード既定値。
 // コネクタは get() で都度読むため、設定画面での保存はアプリ再起動なしに反映される。
 
 use std::path::PathBuf;
@@ -309,6 +309,12 @@ impl Config {
             .lock()
             .unwrap()
             .insert(key.to_string(), Value::String(value.to_string()));
+    }
+
+    /// テスト専用: JSONオブジェクトや配列をインメモリへ設定する。
+    #[cfg(test)]
+    pub fn set_value(&self, key: &str, value: Value) {
+        self.values.lock().unwrap().insert(key.to_string(), value);
     }
 }
 

@@ -85,7 +85,7 @@ test("完成キャラをアプリ内の本番描画経路で確認できる", as
   for (const control of ["blink", "gazeX", "gazeY", "faceDemo", "motionDemo", "arm"]) {
     assert.match(preview, new RegExp(`getElementById\\(\"${control}\"\\)`));
   }
-  assert.match(config, /\$APPDATA\/character-maker\/characters\/\*\*/);
+  assert.match(config, /\$DATA\/PicoAgent\/character-maker\/characters\/\*\*/);
   assert.match(capability, /character-preview-\*/);
 });
 

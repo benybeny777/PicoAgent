@@ -139,7 +139,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 許諾済み関係者へ非公開で渡す、MMDキャラと音声モデルを同梱した試用インストーラは、リポジトリ直下の `関係者版インストーラをビルド.bat` で生成します（本体は `scripts/build-partner-installer.ps1`。PowerShell 7が必要）。
 
-- 事前に `%APPDATA%\com.picoagent.desktop\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
+- 事前に `%APPDATA%\PicoAgent\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
 - チェックアウトが `origin/main` より古い場合や未コミットの変更がある場合は停止します（そのまま作る場合は引数に `-AllowStale`）。
 - ビルド中は `cargo xtask stop` で起動中のPicoAgentと同梱エンジンを終了します。
 - 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
@@ -148,7 +148,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審査版インストーラをビルド.bat`で生成します（本体は`scripts/build-holo-indie-review-installer.ps1`。PowerShell 7が必要）。通常版、関係者版、審査版を同じ成果物として扱いません。
 
-- `%APPDATA%\com.picoagent.desktop\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
+- `%APPDATA%\PicoAgent\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
 - 配信・動画から学習した音声モデル、AIVMX、Aivis本体、音声用初期設定は含めません。読み上げは既定で無効です。
 - 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
 - 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。
@@ -261,8 +261,8 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **識別子とデータ**
 
-- アプリ識別子は `com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app`。初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行へコピー移行）
-- 設定・履歴・メモリは `app_config_dir` / `app_data_dir` 配下、同梱系の実行時取得物は `PicoAgent/bundled/`、ログは `PicoAgent/log/`
+- アプリ識別子は `com.picoagent.desktop`。保存先は識別子別フォルダを使わず、設定・履歴・追加キャラ・管理ランタイムを`PicoAgent`配下へ集約する。初回起動時に現行および旧識別子（`com.picoagent.app` / `com.coda.app`）配下の全データを移す
+- 設定・履歴・メモリ・追加キャラ・同梱系の実行時取得物・ログ・キャッシュは、OSの利用者データ領域にある`PicoAgent/`配下へ集約する
 - アイコンは `src-tauri/icons/`（`cargo tauri icon src-tauri/icon-source.png` で再生成）
 
 **インストール（上書き導入）**

@@ -1956,7 +1956,7 @@ function buildSkillCategoryList(tools, values) {
   return wrap;
 }
 
-// 自分で追加したキャラクター（app_data_dir/characters 配下）を一覧の形へそろえる。
+// 自分で追加したキャラクター（PicoAgent/characters 配下）を一覧の形へそろえる。
 // 同梱と同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
 async function loadUserCharacters(bundled) {
   const known = new Set(bundled.map(character => character.id));
@@ -3090,6 +3090,17 @@ async function render() {
     setQuickSettingsSummary("voice", enabled ? "読み上げ有効" : "ミュート中");
   });
   voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値35）", "number", v.PICOAGENT_TTS_VOLUME ?? "35", "35"));
+  voiceSec.append(field(
+    "PICOAGENT_TTS_ENDPOINT",
+    "外部VOICEVOX互換API（任意・このPC上のURL）",
+    "text",
+    v.PICOAGENT_TTS_ENDPOINT ?? "",
+    "例: http://127.0.0.1:50021"
+  ));
+  voiceSec.append(el("p", {
+    className: "hint",
+    textContent: "空欄ではPicoAgent専用のAivisを11436番ポートで起動します。外部APIを使うときだけURLを明示してください。既定ポートへ自動接続したり、外部APIのモデルを変更したりしません。",
+  }));
   const memoryManager = window.PicoMemorySettings.buildMemoryManager({
     api: window.picoagent.settings,
     section,
@@ -3608,7 +3619,7 @@ async function render() {
 
   // --- キャラクターを自分で追加する ---
   // 同梱キャラは実行ファイルへ焼き込まれているため増減できない。追加分はユーザー領域
-  // （app_data_dir/characters）へ入れる。導入は検証を通ってから確定するので、
+  // （PicoAgent/characters）へ入れる。導入は検証を通ってから確定するので、
   // 壊れたパックが一覧へ出ることはない。
   const addSec = section("キャラクターを追加");
   const addHint = el("p", {

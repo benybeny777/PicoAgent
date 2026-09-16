@@ -162,12 +162,6 @@ WasmのS2とは独立に進められるが、実装開始の明示とB0の条件
 
 `cargo xtask character-quality` の対象となる旧形式の制作正本では、実写試作の口閉じ差分なし1件が残る。むぎは独自リグへ移行し旧制作正本を廃止したため対象外。実行中の独自リグの画質とは別の検査である。対象素材を再制作するときに原画へ局所差分を合成し、厳格検査と実表示比較を行ってからベースラインを削減する。新しい指摘をベースラインへ追加して回避しない。同じ指摘内の数値悪化は現在のキー照合では検出しないため、再制作時は `--strict` を必須とする。
 
-## Aivisの音声データをPicoAgent管理下へ集約する
-
-AivisSpeech Engine は保存先を `platformdirs` の `user_data_dir("AivisSpeech-Engine")` でハードコードしており（`run.py` が `get_save_dir()/"Models"` を直接渡す）、CLIオプションにも環境変数にも指定手段が無い。Windows の platformdirs は Known Folder API を使うため、`aivis.rs` が子プロセスへ渡している `APPDATA` / `LOCALAPPDATA` はモデルの保存先には効かない（GPUキャッシュなど環境変数を見る一部にだけ効いている）。その結果、音声合成モデルは `%APPDATA%AivisSpeech-EngineModels` に置かれ、本家 AivisSpeech アプリを入れている環境ではそのアプリと同じ領域を共有する。AGENTS.md の「既存の手動インストール先を既定で使わない」と、SPEC.md の「PicoAgent のユーザーデータ配下に閉じ込める」に対して未達の状態。
-
-実体を `PicoAgent/aivis-userdata/AivisSpeech-Engine` へ移し、元の場所へディレクトリジャンクション（非特権で作成できる）を張る方式を実装して検証したが、**開発環境のシェルが `APPDATA` を仮想化していると誤った場所へリンクを張る**ことが分かり、実際にモデル13件が分断された（復旧済み）。検証の土台が信頼できないため実装は取り下げた。着手条件は、仮想化されていない環境で「エンジン停止中に移設 → ジャンクション作成 → 話者一覧が移設前と一致」まで確認できること。移設後は本家アプリもリンク経由で同じ実体を使うため、PicoAgent の削除処理がこの実体を消さないこと（現状 `components::remove` の対象は `bundled/aivis` だけで条件は満たす）を回帰テストで固定する。
-
 ## MMDキャラクターの実機確認と次段階
 
 未加工PMXの登録・描画・姿勢・表情・口パクの実装は [PR #273](https://github.com/benybeny777/PicoAgent/pull/273) にまとめる。残る実行環境の確認はWindows本体WebView2のassetプロトコル、macOS、Ubuntu、DPI移動、インストーラー、各機種の速度とメモリ計測。ブラウザ上の本体UI検証をネイティブアプリ全体の動作確認として扱わない。素材のGit登録・同梱・再配布は行わない。

@@ -128,7 +128,12 @@ async fn export_pdf(
         return format!("エラー: 出力フォルダ作成に失敗しました: {error}");
     }
     let mut command = crate::tools::process::command(&program);
+    let profile = match crate::tools::document_convert::isolated_office_profile_arg() {
+        Ok(value) => value,
+        Err(error) => return format!("エラー: {error}"),
+    };
     command
+        .arg(profile)
         .args(["--headless", "--convert-to", "pdf", "--outdir"])
         .arg(&out_dir)
         .arg(input);

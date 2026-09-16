@@ -100,7 +100,12 @@ pub fn settings_character_maker_preview(
     let title = format!("{} - PicoAgent キャラ確認", manifest.display_name);
     let url = format!("character-preview.html?characterId={character_id}");
     let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()));
-    // メインと同じWebView2保存領域を使うため、起動オプションも揃える。
+    builder = builder.data_directory(
+        crate::log_paths::data_dir(&app)
+            .join("webview")
+            .join(&label),
+    );
+    // WebView2の起動条件はメイン画面と揃える。
     if let Some(args) = app
         .config()
         .app

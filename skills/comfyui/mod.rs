@@ -114,6 +114,40 @@ impl SidecarRequest<'_> {
     }
 }
 
+fn prepare_generation_environment(bundled: &std::path::Path) -> Result<PathBuf, String> {
+    let root = bundled
+        .parent()
+        .unwrap_or(bundled)
+        .join("generation-runtime-data");
+    for directory in [root.join("home"), root.join("cache"), root.join("temp")] {
+        std::fs::create_dir_all(&directory)
+            .map_err(|error| format!("生成ランタイムの管理領域を作成できません: {error}"))?;
+    }
+    Ok(root)
+}
+
+fn configure_generation_environment(command: &mut tokio::process::Command, root: &std::path::Path) {
+    let home = root.join("home");
+    let cache = root.join("cache");
+    let temp = root.join("temp");
+    command
+        .env("HOME", &home)
+        .env("XDG_CACHE_HOME", &cache)
+        .env("HF_HOME", cache.join("huggingface"))
+        .env("TORCH_HOME", cache.join("torch"))
+        .env("PIP_CACHE_DIR", cache.join("pip"))
+        .env("UV_CACHE_DIR", cache.join("uv"))
+        .env("PYTHONPYCACHEPREFIX", cache.join("pycache"))
+        .env("TMPDIR", &temp)
+        .env("TMP", &temp)
+        .env("TEMP", &temp);
+    #[cfg(windows)]
+    command
+        .env("USERPROFILE", &home)
+        .env("APPDATA", home.join("AppData/Roaming"))
+        .env("LOCALAPPDATA", home.join("AppData/Local"));
+}
+
 fn integer(args: &Value, name: &str, default: u64, minimum: u64, maximum: u64) -> u64 {
     args.get(name)
         .and_then(Value::as_u64)
@@ -423,9 +457,14 @@ impl Tool for ComfyuiTool {
             frames,
             input: input.as_ref().map(|path| path.as_path()),
         };
+        let generation_environment = match prepare_generation_environment(bundled) {
+            Ok(value) => value,
+            Err(error) => return format!("エラー: {error}"),
+        };
         let build = |lowvram: bool| {
             let mut command = crate::tools::process::command(&python);
             command.args(request.arguments(lowvram));
+            configure_generation_environment(&mut command, &generation_environment);
             command
         };
         let mut lowvram = decision.lowvram;
