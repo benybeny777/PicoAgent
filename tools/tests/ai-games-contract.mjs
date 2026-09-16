@@ -34,6 +34,13 @@ test("6ゲームは各20題と故障カード8件を持つ", () => {
   assert.equal(faultBlock.match(/^\s*\["/gm)?.length, 8);
 });
 
+test("回答は配信中に一息で書ける文字数と時間に収める", () => {
+  assert.match(game, /easy:\s*\{ label: "やさしい", seconds: 60, maxLength: 120, hint: true \}/);
+  assert.match(game, /normal:\s*\{ label: "ふつう", seconds: 45, maxLength: 80, hint: false \}/);
+  assert.match(game, /hard:\s*\{ label: "むずかしい", seconds: 30, maxLength: 50, hint: false \}/);
+  assert.match(game, /textarea id="gameAnswer"[^>]*rows="4"/);
+});
+
 test("採点は通常会話と分離しRust側で固定配点を検査する", () => {
   assert.match(bridge, /gameReady: \(\) => call\("pet_game_ready"\)/);
   assert.match(bridge, /gameJudge: \(request\) => call\("pet_game_judge", \{ request \}\)/);

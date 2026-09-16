@@ -12,9 +12,9 @@
   const BEST_KEY = "picoagent.ai-games.best.v1";
   const SOUND_KEY = "picoagent.ai-games.sound.v1";
   const DIFFICULTIES = {
-    easy: { label: "やさしい", seconds: 90, maxLength: 300, hint: true },
-    normal: { label: "ふつう", seconds: 60, maxLength: 240, hint: false },
-    hard: { label: "むずかしい", seconds: 45, maxLength: 160, hint: false },
+    easy: { label: "やさしい", seconds: 60, maxLength: 120, hint: true },
+    normal: { label: "ふつう", seconds: 45, maxLength: 80, hint: false },
+    hard: { label: "むずかしい", seconds: 30, maxLength: 50, hint: false },
   };
 
   const FAULTS = [
@@ -285,7 +285,7 @@
         ${fault ? `<div class="game-fault"><small>今回の故障</small><strong>${escapeHtml(fault[0])}</strong><span>${escapeHtml(fault[1])}</span></div>` : ""}
         <div class="game-prompt"><small>お題</small><p>${escapeHtml(prompt).replace(/\n/g, "<br>")}</p></div>
         ${config.hint ? `<div class="game-hint">ヒント：${escapeHtml(game.hint)}</div>` : ""}
-        <label class="game-answer"><span>AIになりきって回答</span><textarea id="gameAnswer" maxlength="${config.maxLength}" rows="7" placeholder="ここに回答を書く…"></textarea><small><b id="gameCount">0</b> / ${config.maxLength}文字</small></label>
+        <label class="game-answer"><span>AIになりきって回答</span><textarea id="gameAnswer" maxlength="${config.maxLength}" rows="4" placeholder="ここに回答を書く…"></textarea><small><b id="gameCount">0</b> / ${config.maxLength}文字</small></label>
         <button id="gameSubmit" class="game-primary" type="button" disabled>採点してもらう</button>
       </div>`;
     const textarea = document.getElementById("gameAnswer");
