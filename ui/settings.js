@@ -3089,7 +3089,7 @@ async function render() {
     ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
     setQuickSettingsSummary("voice", enabled ? "読み上げ有効" : "ミュート中");
   });
-  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値35）", "number", v.PICOAGENT_TTS_VOLUME ?? "35", "35"));
+  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "音声・ゲーム効果音の音量（0〜100・初期値35）", "number", v.PICOAGENT_TTS_VOLUME ?? "35", "35"));
   voiceSec.append(field(
     "PICOAGENT_TTS_ENDPOINT",
     "外部VOICEVOX互換API（任意・このPC上のURL）",

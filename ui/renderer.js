@@ -3433,7 +3433,7 @@ async function speakReply(text) {
 }
 // ゲームなど通常会話以外の画面も、音量・停止・字幕・口パクを含む同じ読み上げ経路を使う。
 // `pet_speak` を各画面が直接扱うと、音声の重複やObject URLの解放漏れが起きるため公開口を1つに絞る。
-window.PicoVoice = { speak: speakReply, stop: stopVoice };
+window.PicoVoice = { speak: speakReply, stop: stopVoice, volume: () => voiceVolume };
 // ── ストリーミング先行読み上げ: 応答の生成中に、確定した文から順に合成・再生する ──
 // 全文の生成完了を待たずに話し始めることで、読み上げ開始までの体感遅延を大きく縮める。
 // 最終本文が届いたら残り（未読分）をキューへ足して読み切る（finishStreamSpeech）。
