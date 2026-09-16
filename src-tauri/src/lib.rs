@@ -22,6 +22,7 @@ mod durable_jobs;
 mod emotion;
 mod engine;
 mod engine_backend;
+mod game;
 mod generation_backend;
 mod gpu;
 #[cfg(test)]
@@ -109,6 +110,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::pet_init,
             commands::pet_send,
+            game::pet_game_ready,
+            game::pet_game_judge,
             commands::pet_idle_chatter,
             commands::pet_daily_events,
             commands::pet_daily_greeting,

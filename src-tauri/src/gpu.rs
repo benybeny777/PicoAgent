@@ -46,7 +46,7 @@ impl GpuVendor {
 ///
 /// 生成対象はWindowsとApple Silicon Macだけなので、他OSのビルドでは値を作る側が無い。
 /// 判定ロジックはOSに依らずテストするため、型は隠さず警告だけ止める。
-#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuMemory {
     /// 専用VRAM（バイト）。

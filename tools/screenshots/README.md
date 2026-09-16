@@ -66,6 +66,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能とLive2D取得案内を `temp/onboarding-check/` へ撮影する |
 | `SHOOT_TASK_RUN` | `1` なら7形式で送信中の「実行中のタスク」一覧を検査する。ツールの開始・完了イベントを模擬し、行の状態、停止ボタン、窓内への収まり、進捗行と重ならないこと、完了表示と5秒後に閉じることを `temp/task-run-qa/` へ撮影・記録する。`SHOOT_LAYOUT_IDS` で形式を絞れる |
+| `SHOOT_AI_GAMES` | `1` なら「遊ぶ」から6ゲームの選択、3難易度、出題、回答、AI採点結果まで進め、要素数と画面内の収まりを検査して `temp/ai-games-qa/` へ撮影・記録する。採点は固定応答なので実モデルの採点品質は証明しない |
 
 引数に画像名を並べると、その絵だけを撮り直せます。全件撮影は時間がかかるため、普段はこちらを使います。
 
