@@ -130,4 +130,19 @@ mod tests {
         assert!(!cache.exists());
         assert!(local_storage.join("user-data").is_file());
     }
+
+    #[test]
+    fn webviewを作る前にキャッシュを回収する() {
+        let source = include_str!("lib.rs");
+        let cleanup = source
+            .find("startup_cleanup::run(app.handle())")
+            .expect("起動時キャッシュ回収がある");
+        let webview = source
+            .find("WebviewWindowBuilder::from_config")
+            .expect("メインWebViewを作成する");
+        assert!(
+            cleanup < webview,
+            "WebView作成後はキャッシュがロックされます"
+        );
+    }
 }

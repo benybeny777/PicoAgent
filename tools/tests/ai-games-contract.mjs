@@ -53,7 +53,7 @@ test("ゲームは通常の読み上げ経路と設定を共有する", () => {
   assert.match(styles, /\.game-overlay/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*height:72%;[^}]*overflow:hidden;/);
-  assert.match(styles, /body \.pet-app\.is-playing-game\[data-layout\] \.character \.character-view \{[^}]*height:139%!important;[^}]*scale\(1\)!important;/);
+  assert.match(styles, /body \.pet-app\.is-playing-game\[data-layout\] \.character \.character-view \{[^}]*position:absolute!important;[^}]*height:139%!important;[^}]*scale\(1\)!important;/);
   assert.match(styles, /data-render-kind="live2d"[^}]*#live2dCanvas \{[^}]*width:100%!important;[^}]*height:auto!important;/);
   assert.match(styles, /data-render-kind="mmd"[^}]*#mmdCanvas \{[^}]*width:100%!important;[^}]*height:100%!important;/);
   assert.match(manual, /通常の読み上げが有効なら、お題、採点後の点数と講評、総合結果を読み上げ/);

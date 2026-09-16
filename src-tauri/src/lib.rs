@@ -210,6 +210,10 @@ pub fn run() {
                     &format!("旧保存先からのデータ移行に失敗しました: {error}"),
                 );
             }
+            // WebViewを作るとキャッシュが直ちにロックされる。画面を作る前に、
+            // 描画キャッシュと中断した取得途中だけを回収する。
+            // 設定・会話・完成キャラ・導入済みモデルは削除対象に含めない。
+            startup_cleanup::run(app.handle());
             if app.get_webview_window("main").is_none() {
                 let config = app
                     .config()
@@ -224,9 +228,6 @@ pub fn run() {
                     .data_directory(webview_data)
                     .build()?;
             }
-            // WebViewの描画キャッシュと中断した取得途中だけを毎回回収する。
-            // 設定・会話・完成キャラ・導入済みモデルはapp data/bundled側なので保持する。
-            startup_cleanup::run(app.handle());
             character_maker::cleanup_startup(app.handle());
             components::init(app.handle());
             // 設定の正本を読み込み、選択中プロバイダ・モデル・会話を初期化する。
