@@ -161,6 +161,11 @@ let bootLogTimer = null;
 let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 0.35; // docs/SETTINGS.md の PICOAGENT_TTS_VOLUME 既定(35)と揃える。設定適用前に鳴る音を100%にしない
+// 画面の0〜100は人が感じる音量として扱う。振幅へ直線変換すると1%でも大きく聞こえるため、
+// 音声とゲームで共通の二乗カーブを通す（1%なら実効ゲイン0.0001）。
+function voiceOutputGain() {
+  return voiceVolume * voiceVolume;
+}
 let relationshipState = null;
 let relationshipMemoryEnabled = true;
 const NOTICE_STORAGE_KEY = "picoagent.actionCenter.v1";
@@ -3237,7 +3242,7 @@ function playPreparedSpeech(result) {
   const audio = new Audio(url);
   audio.picoLipSync = result.lipSync || [];
   currentVoice = audio;
-  audio.volume = voiceVolume;
+  audio.volume = voiceOutputGain();
   audio.addEventListener("ended", () => {
     finishVoice(true, audio);
     if (!activeAlarmSnooze) clearTransientStatus();
@@ -3334,7 +3339,7 @@ function playChunkAndWait(result, session) {
     const audio = new Audio(url);
     audio.picoLipSync = result.lipSync || [];
     currentVoice = audio;
-    audio.volume = voiceVolume;
+    audio.volume = voiceOutputGain();
     let settled = false;
     const cleanup = () => {
       if (settled) return;
@@ -3433,7 +3438,7 @@ async function speakReply(text) {
 }
 // ゲームなど通常会話以外の画面も、音量・停止・字幕・口パクを含む同じ読み上げ経路を使う。
 // `pet_speak` を各画面が直接扱うと、音声の重複やObject URLの解放漏れが起きるため公開口を1つに絞る。
-window.PicoVoice = { speak: speakReply, stop: stopVoice, volume: () => voiceVolume };
+window.PicoVoice = { speak: speakReply, stop: stopVoice, volume: () => voiceVolume, gain: voiceOutputGain };
 // ── ストリーミング先行読み上げ: 応答の生成中に、確定した文から順に合成・再生する ──
 // 全文の生成完了を待たずに話し始めることで、読み上げ開始までの体感遅延を大きく縮める。
 // 最終本文が届いたら残り（未読分）をキューへ足して読み切る（finishStreamSpeech）。
@@ -5480,7 +5485,7 @@ function applyVoiceVolume(value) {
   const n = parseFloat(value);
   if (!Number.isFinite(n)) return;
   voiceVolume = Math.min(1, Math.max(0, n / 100));
-  if (currentVoice) currentVoice.volume = voiceVolume;
+  if (currentVoice) currentVoice.volume = voiceOutputGain();
   if (voiceVolume <= 0.001) {
     rigMouthLevel = 0;
     rigMouthForm = 0;

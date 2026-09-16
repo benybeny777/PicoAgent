@@ -73,12 +73,12 @@ test("採点は通常会話と分離しRust側で固定配点を検査する", (
 });
 
 test("ゲームは通常の読み上げ経路と設定を共有する", () => {
-  assert.match(renderer, /window\.PicoVoice = \{ speak: speakReply, stop: stopVoice, volume: \(\) => voiceVolume \}/);
+  assert.match(renderer, /window\.PicoVoice = \{ speak: speakReply, stop: stopVoice, volume: \(\) => voiceVolume, gain: voiceOutputGain \}/);
   assert.match(game, /speakGame\(`第\$\{round \+ 1\}問/);
   assert.match(game, /speakGame\(`\$\{result\.total\}点/);
   assert.match(game, /speakGame\(`素点\$\{rawTotal\}点、\$\{config\.label\}の最大\$\{maxTotal\}点換算/);
-  assert.match(game, /const masterVolume = [^;]*window\.PicoVoice\?\.volume\?\.\(\)/);
-  assert.match(game, /0\.06 \* masterVolume/);
+  assert.match(game, /const masterGain = [^;]*window\.PicoVoice\?\.gain\?\.\(\)/);
+  assert.match(game, /0\.06 \* masterGain/);
   assert.match(styles, /\.game-overlay/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*height:72%;[^}]*overflow:visible;/);

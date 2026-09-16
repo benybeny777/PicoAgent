@@ -173,8 +173,8 @@
 
   function playTone(kind = "tap") {
     if (!soundEnabled) return;
-    const masterVolume = Math.min(1, Math.max(0, Number(window.PicoVoice?.volume?.() ?? 0.35)));
-    if (masterVolume <= 0.001) return;
+    const masterGain = Math.min(1, Math.max(0, Number(window.PicoVoice?.gain?.() ?? 0.1225)));
+    if (masterGain <= 0) return;
     try {
       audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioContext.createOscillator();
@@ -183,9 +183,9 @@
       const frequencies = { tap: 420, start: 560, score: 660, best: 880, error: 180 };
       oscillator.frequency.setValueAtTime(frequencies[kind] || 420, now);
       oscillator.type = kind === "error" ? "sawtooth" : "sine";
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.06 * masterVolume), now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === "best" ? 0.32 : 0.14));
+      gain.gain.setValueAtTime(0.000001, now);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.000001, 0.06 * masterGain), now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.000001, now + (kind === "best" ? 0.32 : 0.14));
       oscillator.connect(gain).connect(audioContext.destination);
       oscillator.start(now);
       oscillator.stop(now + (kind === "best" ? 0.34 : 0.16));
