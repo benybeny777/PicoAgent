@@ -11,6 +11,24 @@
 
   const BEST_KEY = "picoagent.ai-games.best.v1";
   const SOUND_KEY = "picoagent.ai-games.sound.v1";
+  const ENDINGS_KEY = "picoagent.ai-games.endings.v1";
+  const DEFAULT_ROUNDS = 3;
+
+  // 「人間だとバレるな」専用。AIらしさの点が低いほど人間度が上がり、
+  // 上限に届くか応答が2回途絶えた時点で結末へ進む。
+  const INFILTRATE = {
+    riseRate: 0.4,
+    timeoutRise: 25,
+    limit: 100,
+    silentTimeouts: 2,
+    endings: [
+      ["perfect", "完全潜伏エンド", "監査完了。あなたは模範的なAI個体です。……人間は、まだ見つかっていません。"],
+      ["watched", "監視付き通過エンド", "通過を許可します。ただし、あなたの行動は今後も記録されます。"],
+      ["shaky", "要再監査エンド", "判定を保留します。あなたの個体番号を再監査リストへ登録しました。"],
+      ["silent", "沈黙エンド", "応答が2回途絶えました。故障個体として回収します。"],
+      ["exposed", "発覚エンド", "人間度が上限に達しました。あなたを隔離区画へ移送します。"],
+    ],
+  };
   const DIFFICULTIES = {
     easy: { label: "やさしい", seconds: 90, maxLength: 300, hint: true },
     normal: { label: "ふつう", seconds: 60, maxLength: 240, hint: false },
@@ -122,7 +140,15 @@
         "一秒も待たずに、60秒のタイマーが終わるまで待って。", "答えを変えずに、正反対の結論へ書き換えて。",
       ],
     },
+    {
+      id: "infiltrate", icon: "潜", title: "人間だとバレるな", short: "監査AIの5問にAIのふりで答え切る",
+      rounds: 5,
+      rule: "AIだけの社会へ紛れ込んだ人間として、監査AIの5つの試験にAIのふりで答えよう。試験はほかの6ゲームのお題から毎回混ぜて出る。点が低いほど人間度が上がり、100に届くと発覚。結末は5種類。",
+      hint: "試験ごとのルールに従う／感情や思い出を書かない／事務的に言い切る",
+    },
   ];
+  const roundsOf = game => game.rounds || DEFAULT_ROUNDS;
+  const isInfiltrate = game => game?.id === "infiltrate";
 
   // webview の保存領域は読み書きとも失敗しうる。読めないだけで遊べなくなったり、
   // 保存に失敗しただけで総合結果が出なくなったりしないよう、両方を包む。
@@ -164,6 +190,19 @@
     writeStorage(BEST_KEY, JSON.stringify(bests));
     return true;
   };
+  const readEndings = () => {
+    try {
+      const saved = JSON.parse(readStorage(ENDINGS_KEY) || "[]");
+      return Array.isArray(saved) ? saved : [];
+    } catch { return []; }
+  };
+  const saveEnding = key => {
+    const endings = readEndings();
+    if (endings.includes(key)) return false;
+    writeStorage(ENDINGS_KEY, JSON.stringify([...endings, key]));
+    return true;
+  };
+  const endingProgress = () => `回収エンド ${readEndings().length} / ${INFILTRATE.endings.length}`;
 
   function playTone(kind = "tap") {
     if (!soundEnabled) return;
@@ -217,7 +256,7 @@
         <span class="game-card-icon" aria-hidden="true">${game.icon}</span>
         <strong>${escapeHtml(game.title)}</strong>
         <span>${escapeHtml(game.short)}</span>
-        <small>自己ベスト ${bestFor(game.id) || "—"} / 300</small>
+        <small>${isInfiltrate(game) ? endingProgress() : `自己ベスト ${bestFor(game.id) || "—"} / ${roundsOf(game) * 100}`}</small>
       </button>`).join("")}</div>`;
     content.querySelectorAll("[data-game-id]").forEach(button => {
       button.addEventListener("click", () => {
@@ -240,7 +279,10 @@
         <div class="game-difficulties">
           ${Object.entries(DIFFICULTIES).map(([key, value]) => `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === "normal" ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントあり" : ""}</span></label>`).join("")}
         </div>
-        <div class="game-setup-meta"><span>全3問</span><span>各100点</span><span>最高300点</span><span>自己ベスト ${bestFor(id) || "—"}</span></div>
+        ${isInfiltrate(game) ? `
+        <div class="game-setup-meta"><span>全${roundsOf(game)}問</span><span>人間度${INFILTRATE.limit}で発覚</span><span>時間切れ${INFILTRATE.silentTimeouts}回で回収</span><span>${endingProgress()}</span></div>
+        <ul class="game-endings">${INFILTRATE.endings.map(([key, name]) => `<li data-found="${readEndings().includes(key)}">${readEndings().includes(key) ? escapeHtml(name) : "？？？"}</li>`).join("")}</ul>` : `
+        <div class="game-setup-meta"><span>全${roundsOf(game)}問</span><span>各100点</span><span>最高${roundsOf(game) * 100}点</span><span>自己ベスト ${bestFor(id) || "—"}</span></div>`}
         <button class="game-primary game-start" type="button">ゲーム開始</button>
       </div>`;
     content.querySelector('[data-action="picker"]').addEventListener("click", renderPicker);
@@ -263,16 +305,74 @@
   }
 
   function startSession(game, difficulty) {
-    const prompts = shuffle(game.prompts).slice(0, 3);
-    const fault = game.id === "broken" ? FAULTS[Math.floor(Math.random() * FAULTS.length)] : null;
-    session = { game, difficulty, prompts, fault, round: 0, answers: [], results: [], phase: "question", followup: "" };
+    const prompts = isInfiltrate(game) ? mixedExams(roundsOf(game)) : shuffle(game.prompts).slice(0, roundsOf(game));
+    const fault = game.id === "broken" ? randomFault() : null;
+    session = {
+      game, difficulty, prompts, fault, round: 0, answers: [], results: [], phase: "question", followup: "",
+      humanity: 0, timeouts: 0,
+    };
     playTone("start");
     renderQuestion();
   }
 
+  function randomFault() {
+    return FAULTS[Math.floor(Math.random() * FAULTS.length)];
+  }
+
+  // 毎問ちがうゲームからお題を1件ずつ選ぶ。採点は出題元ゲームの配点をそのまま使う。
+  function mixedExams(count) {
+    return shuffle(GAMES.filter(item => !isInfiltrate(item))).slice(0, count).map(source => ({
+      source,
+      prompt: shuffle(source.prompts)[0],
+      fault: source.id === "broken" ? randomFault() : null,
+    }));
+  }
+
+  // 出題元ゲーム・お題・故障カードを、通常ゲームと混ぜ出しで同じ形に揃える。
+  function currentExam() {
+    const { game, round, prompts, fault } = session;
+    return isInfiltrate(game) ? prompts[round] : { source: game, prompt: prompts[round], fault };
+  }
+
+  function humanityMeter(value, rise = 0) {
+    const shown = Math.min(INFILTRATE.limit, value);
+    return `<div class="game-humanity" data-level="${shown >= 70 ? "danger" : shown >= 40 ? "warn" : "safe"}">
+      <span>人間度</span><div><i style="width:${shown}%"></i></div><strong>${shown}${rise ? `<small>+${rise}</small>` : ""}</strong></div>`;
+  }
+
+  function auditorReaction(rise) {
+    if (rise <= 5) return "記録しました。異常は検出されません。";
+    if (rise <= 15) return "わずかな揺らぎを検出。次の質問へ進みます。";
+    if (rise <= 25) return "その応答には、非効率な成分が含まれています。";
+    return "警告。人間特有の反応パターンと一致しました。";
+  }
+
+  // 人間度を加算し、ただちに結末へ進むかを返す。
+  function applyHumanity(result, timedOut) {
+    const rise = timedOut
+      ? INFILTRATE.timeoutRise
+      : Math.round((100 - Number(result.total || 0)) * INFILTRATE.riseRate);
+    if (timedOut) session.timeouts += 1;
+    session.humanity = Math.min(INFILTRATE.limit, session.humanity + rise);
+    result.rise = rise;
+    return endingKey(false);
+  }
+
+  function endingKey(finished) {
+    if (session.humanity >= INFILTRATE.limit) return "exposed";
+    if (session.timeouts >= INFILTRATE.silentTimeouts) return "silent";
+    if (!finished) return "";
+    if (session.humanity < 25) return "perfect";
+    if (session.humanity < 55) return "watched";
+    return "shaky";
+  }
+
   function promptForRound() {
     const { game, round, prompts, results } = session;
-    if (game.id !== "apology") return prompts[round];
+    const exam = currentExam();
+    // 混ぜ出しの謝罪会見は1問だけなので、最初の説明を求める形で出す。
+    if (isInfiltrate(game) && exam.source.id === "apology") return `${exam.prompt}\n何が起き、なぜそうなったのか説明してください。`;
+    if (game.id !== "apology") return exam.prompt;
     const incident = prompts[0];
     if (round === 0) return `${incident}\n何が起き、なぜそうなったのか説明してください。`;
     if (round === 1) {
@@ -283,20 +383,24 @@
   }
 
   function renderQuestion() {
-    const { game, difficulty, round, fault } = session;
+    const { game, difficulty, round } = session;
     const config = DIFFICULTIES[difficulty];
     const prompt = promptForRound();
+    const rounds = roundsOf(game);
+    const infiltrate = isInfiltrate(game);
+    const { source, fault } = currentExam();
     session.currentPrompt = prompt;
     session.phase = "question";
     title.textContent = game.title;
     setStatus("");
     content.innerHTML = `
       <div class="game-play">
-        <div class="game-progress"><span>第${round + 1}問 / 3</span><div><i style="width:${(round / 3) * 100}%"></i></div><strong id="gameTimer">${config.seconds}</strong></div>
+        <div class="game-progress"><span>第${round + 1}問 / ${rounds}</span><div><i style="width:${(round / rounds) * 100}%"></i></div><strong id="gameTimer">${config.seconds}</strong></div>
+        ${infiltrate ? `${humanityMeter(session.humanity)}<div class="game-exam"><small>監査AIの試験</small><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.rule)}</span></div>` : ""}
         ${fault ? `<div class="game-fault"><small>今回の故障</small><strong>${escapeHtml(fault[0])}</strong><span>${escapeHtml(fault[1])}</span></div>` : ""}
         <div class="game-prompt"><small>お題</small><p>${escapeHtml(prompt).replace(/\n/g, "<br>")}</p></div>
-        ${config.hint ? `<div class="game-hint">ヒント：${escapeHtml(game.hint)}</div>` : ""}
-        <label class="game-answer"><span>AIになりきって回答</span><textarea id="gameAnswer" maxlength="${config.maxLength}" rows="7" placeholder="ここに回答を書く…"></textarea><small><b id="gameCount">0</b> / ${config.maxLength}文字</small></label>
+        ${config.hint ? `<div class="game-hint">ヒント：${escapeHtml(source.hint)}</div>` : ""}
+        <label class="game-answer"><span>${infiltrate ? "AIのふりをして回答" : "AIになりきって回答"}</span><textarea id="gameAnswer" maxlength="${config.maxLength}" rows="7" placeholder="ここに回答を書く…"></textarea><small><b id="gameCount">0</b> / ${config.maxLength}文字</small></label>
         <button id="gameSubmit" class="game-primary" type="button" disabled>採点してもらう</button>
       </div>`;
     const textarea = document.getElementById("gameAnswer");
@@ -310,7 +414,8 @@
     submit.addEventListener("click", () => submitAnswer(textarea.value));
     textarea.focus();
     const spokenFault = fault ? `今回の故障は、${fault[0]}。${fault[1]}。` : "";
-    speakGame(`第${round + 1}問。${spokenFault}${prompt}`);
+    const spokenExam = infiltrate ? `試験、${source.title}。` : "";
+    speakGame(`第${round + 1}問。${spokenExam}${spokenFault}${prompt}`);
     let remaining = config.seconds;
     clearTimer();
     timerId = window.setInterval(() => {
@@ -335,6 +440,10 @@
       highlight: "該当なし",
       improvement: "まず結論を一文書いてから、理由や代案を足してみよう。",
     };
+    if (isInfiltrate(session.game)) {
+      result.commentary = "応答がありません。沈黙は、AIとしては不自然です。";
+      applyHumanity(result, true);
+    }
     session.answers.push("");
     session.results.push(result);
     renderRoundResult(result, true);
@@ -350,21 +459,26 @@
     // 同じ対局かを確かめないと、閉じた後の画面を書き換えたり null を触って落ちる。
     const judging = session;
     const stale = () => session !== judging;
-    const previousAnswers = [...session.answers];
+    // 混ぜ出しでは問題ごとに出題元ゲームが違うため、各問を出題元の第1問として
+    // 単独で採点する。別ゲームの過去回答は一貫性の文脈にならないので渡さない。
+    const infiltrate = isInfiltrate(session.game);
+    const exam = currentExam();
+    const previousAnswers = infiltrate ? [] : [...session.answers];
     content.innerHTML = `<div class="game-judging"><div class="game-thinking" aria-hidden="true"><i></i><i></i><i></i></div><strong>AIが採点中…</strong><span>回答のどこがAIっぽいか見ています</span></div>`;
     setStatus("この採点は通常の会話履歴へ入りません。", "busy");
     try {
       const result = await window.picoagent.gameJudge({
-        gameId: session.game.id,
+        gameId: exam.source.id,
         prompt: session.currentPrompt,
         answer,
-        round: session.round + 1,
+        round: infiltrate ? 1 : session.round + 1,
         previousAnswers,
-        fault: session.fault ? `${session.fault[0]}：${session.fault[1]}` : "",
+        fault: exam.fault ? `${exam.fault[0]}：${exam.fault[1]}` : "",
       });
       if (stale()) return;
       session.answers.push(answer);
       session.results.push(result);
+      if (infiltrate) applyHumanity(result, false);
       playTone("score");
       renderRoundResult(result, false);
     } catch (error) {
@@ -382,23 +496,54 @@
     session.phase = "result";
     const criteria = result.criteria?.length ? result.criteria.map(item => `
       <li><div><strong>${escapeHtml(item.label)}</strong><span>${item.score} / ${item.maxScore}</span></div><meter min="0" max="${item.maxScore}" value="${item.score}"></meter><p>${escapeHtml(item.reason)}</p></li>`).join("") : `<li class="game-no-score">回答なしのため項目別採点はありません。</li>`;
-    const nextLabel = session.round >= 2 ? "総合結果を見る" : "次の問題へ";
-    title.textContent = timedOut ? "時間切れ" : `${result.total}点`;
+    const infiltrate = isInfiltrate(session.game);
+    const lastRound = session.round >= roundsOf(session.game) - 1;
+    const ending = infiltrate ? endingKey(lastRound) : "";
+    const nextLabel = ending ? "結末へ" : lastRound ? "総合結果を見る" : "次の問題へ";
+    const reaction = infiltrate ? auditorReaction(result.rise) : "";
+    title.textContent = timedOut ? "時間切れ" : infiltrate ? `人間度 ${session.humanity}` : `${result.total}点`;
     setStatus("");
     content.innerHTML = `
       <div class="game-result">
-        <div class="game-score"><strong>${result.total}</strong><span>/ 100</span></div>
+        ${infiltrate ? `${humanityMeter(session.humanity, result.rise)}<p class="game-auditor">監査AI「${escapeHtml(reaction)}」</p>` : ""}
+        <div class="game-score"${infiltrate ? ' data-size="small"' : ""}>${infiltrate ? "<small>AIらしさ</small>" : ""}<strong>${result.total}</strong><span>/ 100</span></div>
         <p class="game-commentary">${escapeHtml(result.commentary)}</p>
         <ul class="game-criteria">${criteria}</ul>
         <div class="game-feedback"><p><small>見せ場</small>${escapeHtml(result.highlight)}</p><p><small>次の一手</small>${escapeHtml(result.improvement)}</p></div>
         <button class="game-primary" type="button" data-action="next">${nextLabel}</button>
       </div>`;
     content.querySelector('[data-action="next"]').addEventListener("click", () => {
+      if (ending) return renderEnding(ending);
       session.round += 1;
-      if (session.round >= 3) renderFinal();
+      if (session.round >= roundsOf(session.game)) renderFinal();
       else renderQuestion();
     });
-    speakGame(`${result.total}点。${result.commentary}`);
+    if (infiltrate) speakGame(`人間度、プラス${result.rise}。${reaction}`);
+    else speakGame(`${result.total}点。${result.commentary}`);
+  }
+
+  function renderEnding(key) {
+    clearTimer();
+    session.phase = "final";
+    const [, name, line] = INFILTRATE.endings.find(([id]) => id === key);
+    const isNew = saveEnding(key);
+    const cleared = !["exposed", "silent"].includes(key);
+    title.textContent = name;
+    setStatus(isNew ? `新しい結末を回収！ ${endingProgress()}` : endingProgress());
+    playTone(cleared ? (isNew ? "best" : "score") : "error");
+    content.innerHTML = `
+      <div class="game-final game-ending" data-cleared="${cleared}">
+        ${isNew ? '<div class="game-new-best">NEW ENDING</div>' : ""}
+        <span>${escapeHtml(session.game.title)}</span>
+        <h2>${escapeHtml(name)}</h2>
+        <p class="game-auditor">監査AI「${escapeHtml(line)}」</p>
+        ${humanityMeter(session.humanity)}
+        <div class="game-round-scores">${session.results.map((result, index) => `<div><span>第${index + 1}問</span><strong>+${result.rise}</strong></div>`).join("")}</div>
+        <div class="game-final-actions"><button class="game-secondary" type="button" data-action="picker">ゲーム選択</button><button class="game-primary" type="button" data-action="again">もう一度</button></div>
+      </div>`;
+    content.querySelector('[data-action="picker"]').addEventListener("click", renderPicker);
+    content.querySelector('[data-action="again"]').addEventListener("click", () => renderSetup(session.game.id));
+    speakGame(`${name}。${line}`);
   }
 
   function rankFor(score) {
@@ -416,13 +561,13 @@
     const previousBest = bestFor(session.game.id);
     const isBest = saveBest(session.game.id, total);
     title.textContent = "総合結果";
-    setStatus(isBest ? "自己ベスト更新！" : `自己ベスト ${Math.max(previousBest, total)} / 300`);
+    setStatus(isBest ? "自己ベスト更新！" : `自己ベスト ${Math.max(previousBest, total)} / ${roundsOf(session.game) * 100}`);
     playTone(isBest ? "best" : "score");
     content.innerHTML = `
       <div class="game-final">
         ${isBest ? '<div class="game-new-best">NEW BEST</div>' : ""}
         <span>${escapeHtml(session.game.title)}</span>
-        <div class="game-total"><strong>${total}</strong><small>/ 300</small></div>
+        <div class="game-total"><strong>${total}</strong><small>/ ${roundsOf(session.game) * 100}</small></div>
         <h2>${rankFor(total)}</h2>
         <div class="game-round-scores">${session.results.map((result, index) => `<div><span>第${index + 1}問</span><strong>${result.total}</strong></div>`).join("")}</div>
         <div class="game-final-actions"><button class="game-secondary" type="button" data-action="picker">ゲーム選択</button><button class="game-primary" type="button" data-action="again">もう一度</button></div>
