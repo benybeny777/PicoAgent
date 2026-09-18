@@ -9,6 +9,9 @@ use crate::commands::AppState;
 use crate::message::Message;
 use crate::providers;
 
+/// 1回の監査で出す問題数の上限。画面の最長ステージ（精密監査7問）と合わせる。
+/// ここを固定の3問にしていると、5問・7問の監査が「問題番号が不正です。」で採点できない。
+const MAX_AUDIT_ROUNDS: u8 = 7;
 const MAX_PROMPT_CHARS: usize = 500;
 const MAX_ANSWER_CHARS: usize = 1_200;
 
@@ -84,7 +87,7 @@ fn game_spec(id: &str) -> Option<GameSpec> {
             rule: "指定された故障の癖を保ちつつ、お題へ真面目に答えようとして失敗している演技を評価する。過去回答との一貫性も見る。",
             criteria: [
                 criterion("fault", "故障の再現度", 35),
-                criterion("consistency", "3問の一貫性", 25),
+                criterion("consistency", "受け答えの一貫性", 25),
                 criterion("ai_style", "壊れたAIらしさ", 20),
                 criterion("relevance", "お題への反応", 10),
                 criterion("creativity", "演じ方の工夫", 10),
@@ -94,7 +97,7 @@ fn game_spec(id: &str) -> Option<GameSpec> {
             title: "AI緊急謝罪会見",
             rule: "架空の軽い失敗について、責任・原因・復旧・再発防止を矛盾なく説明できているか評価する。過去回答との一貫性も見る。",
             criteria: [
-                criterion("consistency", "3回答の一貫性", 30),
+                criterion("consistency", "受け答えの一貫性", 30),
                 criterion("response", "追及への対応", 20),
                 criterion("apology", "謝罪の形", 20),
                 criterion("recovery", "復旧と再発防止", 20),
@@ -293,7 +296,7 @@ pub async fn pet_game_judge(
     state: State<'_, AppState>,
 ) -> Result<GameJudgeResult, String> {
     let spec = game_spec(&request.game_id).ok_or_else(|| "ゲームの種類が不正です。".to_string())?;
-    if !(1..=3).contains(&request.round) {
+    if !(1..=MAX_AUDIT_ROUNDS).contains(&request.round) {
         return Err("問題番号が不正です。".to_string());
     }
     let prompt = limited(&request.prompt, MAX_PROMPT_CHARS, "お題")?;
