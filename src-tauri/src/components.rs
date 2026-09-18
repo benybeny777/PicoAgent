@@ -794,10 +794,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         .read_timeout(std::time::Duration::from_secs(120))
         .user_agent("PicoAgent/1.0 character maker installer")
         .build()?;
-    let cache = app
-        .path()
-        .app_cache_dir()?
-        .join("character-maker-installer");
+    let cache = crate::log_paths::cache_dir(app).join("character-maker-installer");
     let stage = installed_dir(app, "character-maker").with_file_name(format!(
         ".installing-character-maker-{}",
         std::process::id()
@@ -1057,9 +1054,7 @@ async fn install_media_model(
     );
     let stage =
         installed_dir(app, id).with_file_name(format!(".installing-{id}-{}", std::process::id()));
-    let cache = app
-        .path()
-        .app_cache_dir()?
+    let cache = crate::log_paths::cache_dir(app)
         .join("media-model-installer")
         .join(id);
     cleanup_dir(app, "古い動画モデル導入途中フォルダ", &stage).await;
@@ -1159,12 +1154,43 @@ fn process_exists(_pid: u32) -> bool {
     true
 }
 
+fn configure_component_environment(
+    command: &mut tokio::process::Command,
+    program: &Path,
+) -> Result<()> {
+    let root = program
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("picoagent-runtime-data");
+    let home = root.join("home");
+    let cache = root.join("cache");
+    let temp = root.join("temp");
+    std::fs::create_dir_all(&home)?;
+    std::fs::create_dir_all(&cache)?;
+    std::fs::create_dir_all(&temp)?;
+    command
+        .env("HOME", &home)
+        .env("XDG_CACHE_HOME", &cache)
+        .env("HF_HOME", cache.join("huggingface"))
+        .env("TORCH_HOME", cache.join("torch"))
+        .env("PIP_CACHE_DIR", cache.join("pip"))
+        .env("UV_CACHE_DIR", cache.join("uv"))
+        .env("PYTHONPYCACHEPREFIX", cache.join("pycache"))
+        .env("TMPDIR", &temp)
+        .env("TMP", &temp)
+        .env("TEMP", &temp);
+    #[cfg(windows)]
+    command
+        .env("USERPROFILE", &home)
+        .env("APPDATA", home.join("AppData/Roaming"))
+        .env("LOCALAPPDATA", home.join("AppData/Local"));
+    Ok(())
+}
+
 async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
     let mut command = crate::tools::process::command(program);
-    command.args(args).env(
-        "UV_CACHE_DIR",
-        program.parent().unwrap_or(Path::new(".")).join("cache"),
-    );
+    command.args(args);
+    configure_component_environment(&mut command, program)?;
     let output = crate::tools::process::output(command, 7_200, "キャラクター作成ランタイム導入")
         .await
         .map_err(anyhow::Error::msg)?;
@@ -1190,10 +1216,8 @@ async fn run_component_command_with_progress(
     progress_path: &Path,
 ) -> Result<()> {
     let mut command = crate::tools::process::command(program);
-    command.args(args).env(
-        "UV_CACHE_DIR",
-        program.parent().unwrap_or(Path::new(".")).join("cache"),
-    );
+    command.args(args);
+    configure_component_environment(&mut command, program)?;
     let output = crate::tools::process::output(command, 7_200, "キャラクター作成モデル導入");
     tokio::pin!(output);
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(250));
@@ -1270,11 +1294,7 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
         .json::<serde_json::Value>()
         .await?;
     let (asset_url, asset_size, asset_sha256) = whisper_asset(&release)?;
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .context("キャッシュフォルダを取得できません")?
-        .join("component-installer");
+    let cache = crate::log_paths::cache_dir(app).join("component-installer");
     tokio::fs::create_dir_all(&cache).await?;
     let archive = cache.join("whisper.zip.part");
     let unpacked = cache.join(format!("whisper-unpacked-{}", std::process::id()));

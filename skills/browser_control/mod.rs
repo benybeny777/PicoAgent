@@ -79,10 +79,6 @@ fn launch_options(cfg: &Config) -> Result<cdp::LaunchOptions, String> {
             .get("PICOAGENT_BROWSER_HEADLESS", "false")
             .trim()
             .eq_ignore_ascii_case("true"),
-        use_default_profile: cfg
-            .get("PICOAGENT_BROWSER_PROFILE", "isolated")
-            .trim()
-            .eq_ignore_ascii_case("default"),
         startup_timeout_secs: timeout_secs(cfg),
     })
 }
@@ -259,12 +255,6 @@ impl Tool for BrowserControlTool {
                 "開いてよいドメイン（必須。例: example.com,docs.example.com）",
                 "textarea",
                 "",
-            ),
-            Field::new(
-                "PICOAGENT_BROWSER_PROFILE",
-                "プロファイル（isolated=専用 / default=ブラウザの既定プロファイル）",
-                "text",
-                "isolated",
             ),
             Field::new(
                 "PICOAGENT_BROWSER_HEADLESS",

@@ -68,8 +68,9 @@
 | `PICOAGENT_TTS_ENABLED` | `false` | 音声 | Aivis で回答を読み上げる。初回セットアップでAivisの自動導入が成功した時点で `true` を保存する。設定画面からの導入・更新では既存のON/OFFを変えない |
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（内部設定。通常UIでは非表示。旧既定 `10102` は起動時に `11436` へ移行） |
+| `PICOAGENT_TTS_ENDPOINT` | （空） | 音声 | 外部VOICEVOX互換APIのURL。空ならPicoAgent専用Aivisを使う。指定時はこのPC上のHTTP URLだけを許可し、外部APIの起動・モデル導入・データ管理は行わない |
 | `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID（内部設定。通常UIでは非表示） |
-| `PICOAGENT_TTS_VOLUME` | `35` | 音声 | キャラボイス再生音量（0〜100）。フロントで即反映。ミュートまたは0では全キャラの口パクも停止 |
+| `PICOAGENT_TTS_VOLUME` | `35` | 音声 | キャラボイスとゲーム効果音の共通音量（0〜100）。人が感じる音量に合わせた共通カーブでフロントへ即反映し、1%は実効ゲイン0.0001とする。ゲーム画面の「消音」は効果音だけを追加で止める。ミュートまたは0では全キャラの口パクも停止 |
 | `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker/style ID 上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
@@ -239,7 +240,6 @@
 | `PICOAGENT_BROWSER_ENABLED` | `false` | browser_control | ブラウザ操作の有効化（既定は無効） |
 | `PICOAGENT_BROWSER_PATH` | （空=自動検出） | browser_control | Chrome / Edge の実行ファイルパス |
 | `PICOAGENT_BROWSER_ALLOWED_DOMAINS` | （空） | browser_control | 開いてよいドメイン（カンマ区切り。空なら全拒否） |
-| `PICOAGENT_BROWSER_PROFILE` | `isolated` | browser_control | `isolated`=専用プロファイル / `default`=ブラウザの既定プロファイル（ログイン済みセッションを使う） |
 | `PICOAGENT_BROWSER_HEADLESS` | `false` | browser_control | 画面を出さずに操作する |
 | `PICOAGENT_BROWSER_PORT` | `11437` | browser_control | CDP のデバッグポート |
 | `PICOAGENT_BROWSER_TIMEOUT_SECS` | `30` | browser_control | 1操作の待ち時間（秒、5〜180） |

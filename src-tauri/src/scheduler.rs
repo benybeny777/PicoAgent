@@ -235,11 +235,7 @@ pub fn reconcile_settings_patch(
 }
 
 fn run_history_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|error| anyhow::anyhow!("スケジュール実行履歴の保存先を取得できません: {error}"))?
-        .join("schedule-runs.json"))
+    Ok(crate::log_paths::data_dir(app).join("schedule-runs.json"))
 }
 
 pub fn load_run_history(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRunRecord>> {

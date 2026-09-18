@@ -261,8 +261,8 @@ html[data-theme="dark"] .top-window-menu > button:focus-visible { background:rgb
 .game-overlay { position:fixed; z-index:210; inset:32px 0 0; padding:18px; overflow:auto; background:linear-gradient(145deg,rgba(37,29,49,.97),rgba(75,44,70,.97)); color:#fff; }
 .game-overlay[hidden] { display:none; }
 .game-shell { width:min(720px,calc(100% - clamp(220px,32vw,340px) - 16px)); min-height:100%; margin:0 auto 0 0; display:flex; flex-direction:column; }
-.pet-app.is-playing-game[data-layout] .character { z-index:215; right:clamp(8px,2.5vw,30px); left:auto; top:12px; bottom:auto; width:clamp(210px,32vw,340px); height:72%; overflow:hidden; pointer-events:none; }
-body .pet-app.is-playing-game[data-layout] .character .character-view { inset:0!important; width:100%!important; height:139%!important; scale:1!important; transform:translate(0,0) scale(1)!important; }
+.pet-app.is-playing-game[data-layout] .character { z-index:215; right:clamp(36px,7vw,90px); left:auto; top:36px; bottom:auto; width:clamp(210px,32vw,340px); height:72%; overflow:visible; pointer-events:none; }
+body .pet-app.is-playing-game[data-layout] .character .character-view { position:absolute!important; inset:0!important; width:100%!important; height:139%!important; scale:1!important; transform:translate(0,0) scale(1)!important; }
 body .pet-app.is-playing-game[data-layout] .character[data-render-kind="live2d"] .character-view > #live2dCanvas { top:0; bottom:auto; width:100%!important; height:auto!important; transform:translateX(-50%); }
 body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .character-view > #mmdCanvas { top:0; bottom:auto; width:100%!important; height:100%!important; transform:translateX(-50%); }
 .pet-app.is-playing-game .relationship-button,.pet-app.is-playing-game .relationship-card { display:none; }

@@ -11,16 +11,28 @@ const LOG_RETAIN_DAYS: i64 = 7;
 
 pub fn data_dir(app: &AppHandle) -> PathBuf {
     match app.path().app_data_dir() {
-        Ok(path) => path
-            .parent()
-            .map(|parent| parent.join("PicoAgent"))
-            .unwrap_or(path),
+        Ok(path) => {
+            let root = path
+                .parent()
+                .map(|parent| parent.join("PicoAgent"))
+                .unwrap_or(path);
+            let identifier = app.config().identifier.as_str();
+            if identifier == "com.picoagent.desktop" {
+                root
+            } else {
+                root.join("instances").join(identifier)
+            }
+        }
         // フォールバック許可: 保存先取得自体の失敗を記録するため、ログだけは一時領域へ退避する。
         Err(error) => {
             eprintln!("ログ保存先を取得できないため一時領域を使います: {error}");
             std::env::temp_dir().join("PicoAgent")
         }
     }
+}
+
+pub fn cache_dir(app: &AppHandle) -> PathBuf {
+    data_dir(app).join("cache")
 }
 
 pub fn log_dir(app: &AppHandle) -> PathBuf {
