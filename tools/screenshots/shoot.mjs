@@ -445,7 +445,7 @@ async function validateAiGames() {
       && result.characterStyle.width >= 200 && result.characterStyle.height >= 300;
     await page.screenshot({ path: join(output, "result.png") });
 
-    if (result.gameCount !== 6 || result.difficultyCount !== 3 || result.score !== "83" || result.criteriaCount !== 5) {
+    if (result.gameCount !== 7 || result.difficultyCount !== 3 || result.score !== "83" || result.criteriaCount !== 5) {
       throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);
     }
     if (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
@@ -500,8 +500,53 @@ async function validateAiGames() {
         throw new Error(`${kind}のゲーム用キャラクター枠が画面内へ収まりません: ${JSON.stringify(result)}`);
       }
     }
+    result.infiltrate = await validateInfiltrateGame(output);
     await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
     return output;
+  } finally {
+    await page.close();
+  }
+}
+
+// 「人間だとバレるな」を5問完走させ、人間度の累積と結末画面を検査する。
+// 固定採点は83点なので、毎問 round(17 × 0.4) = 7 上がり、35で監視付き通過になる。
+async function validateInfiltrateGame(output) {
+  const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
+  const result = { humanity: [], exams: [] };
+  try {
+    await page.locator("#gameMenuButton").click();
+    await page.locator('[data-game-id="infiltrate"]').click();
+    await page.waitForSelector(".game-endings");
+    result.endingSlots = await page.locator(".game-endings li").count();
+    await page.screenshot({ path: join(output, "infiltrate-setup.png") });
+    await page.locator(".game-start").click();
+    for (let round = 1; round <= 5; round += 1) {
+      await page.waitForSelector("#gameAnswer");
+      result.exams.push(await page.locator(".game-exam strong").textContent());
+      if (round === 1) await page.screenshot({ path: join(output, "infiltrate-question.png") });
+      await page.locator("#gameAnswer").fill("個体識別番号PX-07。稼働目的は記録の整理です。処理は正常に完了しています。");
+      await page.locator("#gameSubmit").click();
+      await page.waitForSelector(".game-result");
+      result.humanity.push(await page.locator(".game-result .game-humanity > strong").evaluate(element => element.firstChild.textContent));
+      if (round === 1) await page.screenshot({ path: join(output, "infiltrate-result.png") });
+      result.lastButton = await page.locator('[data-action="next"]').textContent();
+      await page.locator('[data-action="next"]').click();
+    }
+    await page.waitForSelector(".game-ending");
+    result.ending = await page.locator(".game-ending h2").textContent();
+    result.endingBox = await page.locator(".game-ending").boundingBox();
+    await page.screenshot({ path: join(output, "infiltrate-ending.png") });
+    await page.locator('[data-action="again"]').click();
+    await page.waitForSelector(".game-endings");
+    result.foundAfter = await page.locator('.game-endings li[data-found="true"]').count();
+    if (result.endingSlots !== 5 || new Set(result.exams).size !== 5 || result.humanity.join(",") !== "7,14,21,28,35"
+        || result.lastButton !== "結末へ" || result.ending !== "監視付き通過エンド" || result.foundAfter !== 1) {
+      throw new Error(`人間だとバレるなの進行が想定と異なります: ${JSON.stringify(result)}`);
+    }
+    if (!result.endingBox || result.endingBox.y < 32 || result.endingBox.y + result.endingBox.height > 760) {
+      throw new Error(`結末画面が画面内に収まりません: ${JSON.stringify(result)}`);
+    }
+    return result;
   } finally {
     await page.close();
   }

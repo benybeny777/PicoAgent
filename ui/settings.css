@@ -2,6 +2,11 @@
 :root {
   --pink: #e98ab6;
   --pink-soft: #fbeaf2;
+  /* 白文字を載せる濃いピンク。淡い --pink に白を重ねると 2.4:1 までしか出ず、
+     ボタンの文字が読めない（WCAG AAの4.5:1を満たす濃さにする）。 */
+  --pink-strong: #b4477f;
+  /* --pink-soft の上へ置く文字色。明るい面では濃いピンク、夜色では淡いピンク。 */
+  --pink-on-soft: #b4477f;
   --ink: #3a2b33;
   --muted: #8a7a82;
   --line: #ecdfe6;
@@ -18,6 +23,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --pink-soft: #493241;
+    --pink-on-soft: #e98ab6;
     --ink: #ece5f1;
     --muted: #a89bb1;
     --line: #453b4e;
@@ -35,6 +41,7 @@ html[data-theme="light"] {
   color-scheme: light;
   --pink: #e98ab6;
   --pink-soft: #fbeaf2;
+  --pink-on-soft: #b4477f;
   --ink: #3a2b33;
   --muted: #8a7a82;
   --line: #ecdfe6;
@@ -50,6 +57,7 @@ html[data-theme="light"] {
 html[data-theme="dark"] {
   color-scheme: dark;
   --pink-soft: #493241;
+  --pink-on-soft: #e98ab6;
   --ink: #ece5f1;
   --muted: #a89bb1;
   --line: #453b4e;
@@ -538,14 +546,14 @@ body.searching .tab-panel {
   margin-top: 7px;
   padding: 0 10px;
   border-color: transparent;
-  background: var(--pink);
+  background: var(--pink-strong);
   color: #fff;
   font-weight: 700;
 }
 .character-card .character-select-button:disabled {
-  border-color: var(--pink);
+  border-color: var(--pink-strong);
   background: var(--pink-soft);
-  color: var(--pink);
+  color: var(--pink-on-soft);
   opacity: 1;
   cursor: default;
 }
