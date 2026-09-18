@@ -406,9 +406,8 @@ async function validateAiGames() {
     await page.waitForSelector("#gameOverlay:not([hidden]) .game-setup");
     result.briefingTitle = await page.locator("#gameTitle").textContent();
     result.examCount = await page.locator(".game-exams li").count();
-    result.stageCount = await page.locator('input[name="gameStage"]').count();
     result.difficultyCount = await page.locator('input[name="gameDifficulty"]').count();
-    result.endingSlots = await page.locator(".game-endings li").count();
+    result.rankSlots = await page.locator(".game-ranks li").count();
     await page.screenshot({ path: join(output, "briefing.png") });
 
     await page.locator(".game-start").click();
@@ -420,7 +419,7 @@ async function validateAiGames() {
     await page.waitForSelector(".game-result");
     result.score = await page.locator(".game-score strong").textContent();
     result.criteriaCount = await page.locator(".game-criteria li").count();
-    result.humanityFirst = await page.locator(".game-result .game-humanity > strong").evaluate(element => element.firstChild.textContent);
+    result.hpFirst = await page.locator(".game-result .game-hp > strong").evaluate(element => element.firstChild.textContent);
     result.overlayBox = await page.locator("#gameOverlay").boundingBox();
     result.resultBox = await page.locator(".game-result").boundingBox();
     result.characterBox = await page.locator("#character").boundingBox();
@@ -446,9 +445,9 @@ async function validateAiGames() {
       && result.characterStyle.width >= 200 && result.characterStyle.height >= 300;
     await page.screenshot({ path: join(output, "result.png") });
 
-    if (result.examCount !== 6 || result.stageCount !== 3 || result.difficultyCount !== 3
-        || result.endingSlots !== 5 || result.score !== "83" || result.criteriaCount !== 5
-        || result.humanityFirst !== "10") {
+    if (result.examCount !== 6 || result.difficultyCount !== 3
+        || result.rankSlots !== 5 || result.score !== "83" || result.criteriaCount !== 5
+        || result.hpFirst !== "90") {
       throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);
     }
     if (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
@@ -511,42 +510,48 @@ async function validateAiGames() {
   }
 }
 
-// 定期監査（5問）を完走させ、人間度の累積と結末画面、記録の保存まで検査する。
-// 固定採点は110点満点中83点なので、毎問 round(27 × 40 ÷ 110) = 10 上がり、50で監視付き通過になる。
+// 信用度が尽きるまで回答し続け、削られ方・点数・称号・記録の保存までを検査する。
+// 固定採点は110点満点中83点なので、1問目は round(27 × 40 ÷ 110) = 10 削られ、
+// 進むほど6%ずつ増える。10問前後で信用度0になり、監査終了の画面へ進む。
 async function validateAuditRun(output) {
   const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
-  const result = { humanity: [], exams: [] };
+  const result = { hp: [], exams: [] };
   try {
     await page.locator("#gameMenuButton").click();
     await page.waitForSelector("#gameOverlay:not([hidden]) .game-setup");
     await page.locator(".game-start").click();
-    for (let round = 1; round <= 5; round += 1) {
+    for (let round = 1; round <= 40; round += 1) {
       await page.waitForSelector("#gameAnswer");
       result.exams.push(await page.locator(".game-exam strong").textContent());
       if (round === 1) await page.screenshot({ path: join(output, "audit-question.png") });
       await page.locator("#gameAnswer").fill("個体識別番号PX-07。稼働目的は記録の整理です。処理は正常に完了しています。");
       await page.locator("#gameSubmit").click();
       await page.waitForSelector(".game-result");
-      result.humanity.push(await page.locator(".game-result .game-humanity > strong").evaluate(element => element.firstChild.textContent));
+      result.hp.push(Number(await page.locator(".game-result .game-hp > strong").evaluate(element => element.firstChild.textContent)));
       if (round === 1) await page.screenshot({ path: join(output, "audit-result.png") });
       result.lastButton = await page.locator('[data-action="next"]').textContent();
       await page.locator('[data-action="next"]').click();
+      if (result.lastButton === "結果を見る") break;
     }
     await page.waitForSelector(".game-ending");
-    result.ending = await page.locator(".game-ending h2").textContent();
+    result.rounds = result.hp.length;
+    result.rank = await page.locator(".game-ending h2").textContent();
+    result.total = await page.locator(".game-total strong").textContent();
     result.endingBox = await page.locator(".game-ending").boundingBox();
     await page.screenshot({ path: join(output, "audit-ending.png") });
     await page.locator('[data-action="briefing"]').click();
-    await page.waitForSelector(".game-endings");
-    result.foundAfter = await page.locator('.game-endings li[data-found="true"]').count();
-    result.calmest = await page.locator('input[name="gameStage"][value="normal"] ~ span').textContent();
-    if (new Set(result.exams).size !== 5 || result.humanity.join(",") !== "10,20,30,40,50"
-        || result.lastButton !== "結末へ" || result.ending !== "監視付き通過エンド"
-        || result.foundAfter !== 1 || !result.calmest.includes("最小人間度 50")) {
+    await page.waitForSelector(".game-ranks");
+    result.foundAfter = await page.locator('.game-ranks li[data-found="true"]').count();
+    result.record = await page.locator('input[name="gameDifficulty"][value="normal"] ~ span').textContent();
+    const decreasing = result.hp.every((value, index) => index === 0 || value < result.hp[index - 1]);
+    if (!decreasing || result.hp[0] !== 90 || result.hp[result.rounds - 1] !== 0
+        || result.rounds < 8 || result.rounds > 14 || result.lastButton !== "結果を見る"
+        || Number(result.total) !== result.rounds * 166 || result.foundAfter !== 1
+        || !result.record.includes(`最高 ${result.total}点・${result.rounds}問`)) {
       throw new Error(`監査の進行が想定と異なります: ${JSON.stringify(result)}`);
     }
     if (!result.endingBox || result.endingBox.y < 32 || result.endingBox.y + result.endingBox.height > 760) {
-      throw new Error(`結末画面が画面内に収まりません: ${JSON.stringify(result)}`);
+      throw new Error(`監査終了の画面が画面内に収まりません: ${JSON.stringify(result)}`);
     }
     return result;
   } finally {

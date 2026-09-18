@@ -9,9 +9,10 @@ use crate::commands::AppState;
 use crate::message::Message;
 use crate::providers;
 
-/// 1回の監査で出す問題数の上限。画面の最長ステージ（精密監査7問）と合わせる。
-/// ここを固定の3問にしていると、5問・7問の監査が「問題番号が不正です。」で採点できない。
-const MAX_AUDIT_ROUNDS: u8 = 7;
+/// 1回の監査で出す問題数の上限。お題は尽きないが、信用度100から1問につき最低1は減るので、
+/// 1回の挑戦は最長100問で必ず終わる。ここを画面より小さくすると、続いているはずの監査が
+/// 途中から「問題番号が不正です。」で採点できなくなる。
+const MAX_AUDIT_ROUNDS: u8 = 100;
 const MAX_PROMPT_CHARS: usize = 500;
 const MAX_ANSWER_CHARS: usize = 1_200;
 

@@ -14,46 +14,42 @@
   // 以前は独立した6ゲームを並べていたが、監査AIが出す試験の種類として中へ吸収した。
   // 遊びの入口を1つにすると、初見の利用者が何をする遊びかを選ぶ前に理解できる。
   const SOUND_KEY = "picoagent.ai-games.sound.v1";
-  const ENDINGS_KEY = "picoagent.ai-games.endings.v1";
-  const CALMEST_KEY = "picoagent.ai-games.calmest.v1";
-
-  const AUDIT = {
-    // AIらしさの点が低いほど人間度が上がる。上限に届くか、応答が続けて途絶えると発覚。
-    // 満点で0、0点で40上がる割合にする（AI_SCORE_MAX を基準にするので、おもしろ
-    // ボーナスの加点もそのまま人間度を抑える方向へ効く）。
-    riseAtZero: 40,
-    timeoutRise: 25,
-    limit: 100,
-    silentTimeouts: 2,
-    // 上昇量を割り戻す基準の問題数。どのステージでも人間度100の重みを同じにする。
-    baseRounds: 5,
-    endings: [
-      ["perfect", "完全潜伏エンド", "監査完了。あなたは模範的なAI個体です。……人間は、まだ見つかっていません。"],
-      ["watched", "監視付き通過エンド", "通過を許可します。ただし、あなたの行動は今後も記録されます。"],
-      ["shaky", "要再監査エンド", "判定を保留します。あなたの個体番号を再監査リストへ登録しました。"],
-      ["silent", "沈黙エンド", "応答が2回途絶えました。故障個体として回収します。"],
-      ["exposed", "発覚エンド", "人間度が上限に達しました。あなたを隔離区画へ移送します。"],
-    ],
-  };
-
-  // 監査の長さ。問題数だけが変わり、人間度の意味と結末の条件は共通にする。
-  const STAGES = {
-    short: { label: "予備監査", rounds: 3, note: "3問・短時間の抜き取り検査" },
-    normal: { label: "定期監査", rounds: 5, note: "5問・標準の個体検査" },
-    deep: { label: "精密監査", rounds: 7, note: "7問・長時間の重点検査" },
-  };
-  const DEFAULT_STAGE = "normal";
-
-  const DIFFICULTIES = {
-    easy: { label: "やさしい", seconds: 60, maxLength: 120, hint: true },
-    normal: { label: "ふつう", seconds: 45, maxLength: 80, hint: false },
-    hard: { label: "むずかしい", seconds: 30, maxLength: 50, hint: false },
-  };
+  const RECORDS_KEY = "picoagent.ai-games.records.v1";
+  const RANKS_KEY = "picoagent.ai-games.ranks.v1";
 
   // AIらしさの満点。通常5項目100点＋おもしろボーナス10点（`game.rs` の配点と合わせる）。
   const AI_SCORE_MAX = 110;
-  // 監査を抜けたときの称号。難易度が上がるほど、同じ結末でも評価を上げる。
-  const RANKS = { easy: "潜伏成功", normal: "AIそのもの", hard: "AI超越" };
+
+  const HP = {
+    max: 100,
+    // 完璧に答えても必ず1は削る。減る一方にしておかないと、無限のお題が終わらない。
+    // 上限100と合わせて、1回の挑戦は最長100問で必ず終わる。
+    minDamage: 1,
+    // 応答が無いのはAIとして最も不自然なので、点数由来より重く扱う。
+    timeoutDamage: 25,
+    // AIらしさ0点のときの基準ダメージ。満点なら`minDamage`まで下がる。
+    damageAtZero: 40,
+    // 進むほど監査の目が厳しくなる。1問ごとにダメージを6%ずつ増やす。
+    ramp: 0.06,
+    warnRatio: 0.4,
+    dangerRatio: 0.2,
+  };
+
+  const DIFFICULTIES = {
+    easy: { label: "やさしい", seconds: 60, maxLength: 120, hint: true, scoreRate: 1 },
+    normal: { label: "ふつう", seconds: 45, maxLength: 80, hint: false, scoreRate: 2 },
+    hard: { label: "むずかしい", seconds: 30, maxLength: 50, hint: false, scoreRate: 3 },
+  };
+  const DEFAULT_DIFFICULTY = "normal";
+
+  // 点数で決まる称号。短く、上から見て分かる順に並べる。
+  const RANKS = [
+    [2000, "ai-transcend", "AI超越", "監査側がAIだと信じ切った。もう人間の痕跡が無い。"],
+    [1200, "ai-itself", "AIそのもの", "揺らぎはあったが、最後まで個体として通した。"],
+    [700, "ai-apprentice", "AI見習い", "AIらしさは出ている。あと一歩で疑いが晴れる。"],
+    [300, "leaking", "人間味が漏れている", "ところどころで人間の癖が出た。"],
+    [0, "too-honest", "正直すぎる人間", "早々に人間だと見抜かれた。もっとAIらしく。"],
+  ];
 
   const FAULTS = [
     ["確認が終わらない", "確認質問を増やし続け、作業を始めない"],
@@ -195,50 +191,45 @@
     }
     return copy;
   };
-  const stageOf = key => STAGES[key] || STAGES[DEFAULT_STAGE];
-  const roundsOf = key => stageOf(key).rounds;
+  const difficultyOf = key => DIFFICULTIES[key] || DIFFICULTIES[DEFAULT_DIFFICULTY];
+  // 点数から称号を決める。閾値の高い順に並べてあるので、最初に届いたものを使う。
+  const rankFor = score => RANKS.find(([threshold]) => score >= threshold);
 
-  const readEndings = () => {
+  const readJson = (key, fallback) => {
     try {
-      const saved = JSON.parse(readStorage(ENDINGS_KEY) || "[]");
-      return Array.isArray(saved) ? saved : [];
-    } catch { return []; }
+      const saved = JSON.parse(readStorage(key) || "null");
+      return saved && typeof saved === "object" ? saved : fallback;
+    } catch { return fallback; }
   };
-  const saveEnding = key => {
-    const endings = readEndings();
-    if (endings.includes(key)) return false;
-    writeStorage(ENDINGS_KEY, JSON.stringify([...endings, key]));
+
+  // 難易度ごとに、最高点と最長生存記録を持つ。制限時間も文字数も違うので混ぜない。
+  const readRecords = () => readJson(RECORDS_KEY, {});
+  const recordOf = difficulty => {
+    const saved = readRecords()[difficulty];
+    return { score: Number(saved?.score) || 0, rounds: Number(saved?.rounds) || 0 };
+  };
+  const saveRecord = (difficulty, score, rounds) => {
+    const current = recordOf(difficulty);
+    if (score <= current.score && rounds <= current.rounds) return false;
+    const next = {
+      score: Math.max(current.score, score),
+      rounds: Math.max(current.rounds, rounds),
+    };
+    writeStorage(RECORDS_KEY, JSON.stringify({ ...readRecords(), [difficulty]: next }));
+    return score > current.score;
+  };
+
+  const readRanks = () => {
+    const saved = readJson(RANKS_KEY, []);
+    return Array.isArray(saved) ? saved : [];
+  };
+  const saveRank = key => {
+    const ranks = readRanks();
+    if (ranks.includes(key)) return false;
+    writeStorage(RANKS_KEY, JSON.stringify([...ranks, key]));
     return true;
   };
-  const endingProgress = () => `回収エンド ${readEndings().length} / ${AUDIT.endings.length}`;
-
-  const readCalmest = () => {
-    try {
-      const saved = JSON.parse(readStorage(CALMEST_KEY) || "{}");
-      return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
-    } catch { return {}; }
-  };
-  // 制限時間も文字数も違うので、記録はステージと難易度の組ごとに分ける。
-  const calmestKey = (stage, difficulty) => `${stage}:${difficulty}`;
-  const calmestOf = (stage, difficulty) => {
-    const value = Number(readCalmest()[calmestKey(stage, difficulty)]);
-    return Number.isFinite(value) ? value : null;
-  };
-  // 記録は「最も人間度を抑えて抜けたとき」なので、点数と違って小さいほど良い。
-  const saveCalmest = (stage, difficulty, humanity) => {
-    const current = calmestOf(stage, difficulty);
-    if (current !== null && current <= humanity) return false;
-    const key = calmestKey(stage, difficulty);
-    writeStorage(CALMEST_KEY, JSON.stringify({ ...readCalmest(), [key]: humanity }));
-    return true;
-  };
-  // ブリーフィングでは、そのステージで一番静かに抜けた記録だけを見せる。
-  const calmestForStage = stage => {
-    const values = Object.keys(DIFFICULTIES)
-      .map(difficulty => calmestOf(stage, difficulty))
-      .filter(value => value !== null);
-    return values.length ? Math.min(...values) : null;
-  };
+  const rankProgress = () => `到達した称号 ${readRanks().length} / ${RANKS.length}`;
 
   function playTone(kind = "tap") {
     if (!soundEnabled) return;
@@ -285,40 +276,39 @@
     });
   }
 
-  // 監査の説明・ステージ・難易度・試験の種類・回収エンドを1画面にまとめた入口。
+  // 監査の説明・難易度・試験の種類・称号を1画面にまとめた入口。
   function renderBriefing() {
     clearTimer();
     session = null;
     title.textContent = "監査ブリーフィング";
-    setStatus("AIだけの社会で、人間だと気づかれずに監査を抜ける。");
-    const found = readEndings();
+    setStatus("AI疑惑をかけられた人間として、AIのふりで監査を耐え抜く。");
+    const found = readRanks();
     content.innerHTML = `
       <div class="game-setup">
-        <div class="game-rule"><span class="game-rule-icon">潜</span><p>ここはAIしかいない社会。あなたは紛れ込んだ人間です。監査AIの試験へAIのふりで答え、人間らしさが漏れるほど上がる人間度を${AUDIT.limit}未満に抑えて監査を抜けてください。</p></div>
-        <h2>監査ステージ</h2>
-        <div class="game-difficulties">
-          ${Object.entries(STAGES).map(([key, stage]) => `<label><input type="radio" name="gameStage" value="${key}" ${key === DEFAULT_STAGE ? "checked" : ""}><strong>${stage.label}</strong><span>${stage.note}${calmestForStage(key) === null ? "" : ` / 最小人間度 ${calmestForStage(key)}`}</span></label>`).join("")}
-        </div>
+        <div class="game-rule"><span class="game-rule-icon">疑</span><p>あなたはAIではないかと疑われている人間です。監査AIの試験へAIのふりで答え続けてください。人間らしさが漏れるほど信用度（HP）が削られ、0になった時点で監査終了。そこまでに稼いだ点数で称号が決まります。お題は尽きません。</p></div>
         <h2>難易度</h2>
         <div class="game-difficulties">
-          ${Object.entries(DIFFICULTIES).map(([key, value]) => `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === "normal" ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントあり" : ""}</span></label>`).join("")}
+          ${Object.entries(DIFFICULTIES).map(([key, value]) => {
+            const record = recordOf(key);
+            const best = record.rounds ? ` / 最高 ${record.score}点・${record.rounds}問` : "";
+            return `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === DEFAULT_DIFFICULTY ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントと見本あり" : ""}<br>点数${value.scoreRate}倍${best}</span></label>`;
+          }).join("")}
         </div>
-        <div class="game-setup-meta"><span>人間度${AUDIT.limit}で発覚</span><span>時間切れ${AUDIT.silentTimeouts}回で回収</span><span>${endingProgress()}</span></div>
-        <ul class="game-endings">${AUDIT.endings.map(([key, name]) => `<li data-found="${found.includes(key)}">${found.includes(key) ? escapeHtml(name) : "？？？"}</li>`).join("")}</ul>
+        <div class="game-setup-meta"><span>信用度${HP.max}から開始</span><span>0で監査終了</span><span>時間切れは大きく減る</span><span>${rankProgress()}</span></div>
+        <ul class="game-ranks">${RANKS.map(([, key, name]) => `<li data-found="${found.includes(key)}">${found.includes(key) ? escapeHtml(name) : "？？？"}</li>`).join("")}</ul>
         <h2>監査AIが出す試験</h2>
         <ul class="game-exams">${EXAMS.map(exam => `<li><span class="game-exams-icon" aria-hidden="true">${escapeHtml(exam.icon)}</span><strong>${escapeHtml(exam.title)}</strong><span>${escapeHtml(exam.short)}</span></li>`).join("")}</ul>
         <button class="game-primary game-start" type="button">監査を受ける</button>
       </div>`;
     content.querySelector(".game-start").addEventListener("click", async event => {
-      const stage = content.querySelector('input[name="gameStage"]:checked')?.value || DEFAULT_STAGE;
-      const difficulty = content.querySelector('input[name="gameDifficulty"]:checked')?.value || "normal";
+      const difficulty = content.querySelector('input[name="gameDifficulty"]:checked')?.value || DEFAULT_DIFFICULTY;
       event.currentTarget.disabled = true;
       event.currentTarget.textContent = "AIを確認中…";
       setStatus("採点するAIの準備を確認しています。", "busy");
       try {
         const readiness = await window.picoagent.gameReady();
         if (!readiness?.ready) throw new Error(readiness?.message || "AIへ接続できません。");
-        startSession(stage, difficulty);
+        startSession(difficulty);
       } catch (error) {
         playTone("error");
         event.currentTarget.disabled = false;
@@ -328,10 +318,10 @@
     });
   }
 
-  function startSession(stage, difficulty) {
+  function startSession(difficulty) {
     session = {
-      stage, difficulty, exams: drawExams(roundsOf(stage)), round: 0,
-      answers: [], results: [], phase: "question", humanity: 0, timeouts: 0, currentPrompt: "",
+      difficulty, round: 0, hp: HP.max, score: 0, answers: [], results: [],
+      phase: "question", currentPrompt: "", exam: null, pools: new Map(), recent: [],
     };
     playTone("start");
     renderQuestion();
@@ -341,84 +331,73 @@
     return FAULTS[Math.floor(Math.random() * FAULTS.length)];
   }
 
-  // 毎問ちがう試験を引く。試験は6種なので、7問の監査だけ2巡目に入る。
-  // 同じ試験が2度出てもお題は重ならないよう、試験ごとに引いた順を持ち回す。
-  function drawExams(count) {
-    const order = [];
-    while (order.length < count) order.push(...shuffle(EXAMS));
-    const pools = new Map();
-    return order.slice(0, count).map(source => {
-      const pool = pools.get(source.id) || shuffle(source.prompts);
-      const prompt = pool.shift();
-      pools.set(source.id, pool);
-      return { source, prompt, fault: source.id === "broken" ? randomFault() : null };
-    });
+  // お題は尽きない。試験は直前と同じものを避けて引き、お題は試験ごとに引いた順を
+  // 持ち回して使い切るまで重複させない。使い切ったら引き直す。
+  function drawExam() {
+    const candidates = EXAMS.filter(exam => !session.recent.includes(exam.id));
+    const source = shuffle(candidates.length ? candidates : EXAMS)[0];
+    const pool = session.pools.get(source.id)?.length ? session.pools.get(source.id) : shuffle(source.prompts);
+    const prompt = pool.shift();
+    session.pools.set(source.id, pool);
+    session.recent = [source.id, ...session.recent].slice(0, 2);
+    return { source, prompt, fault: source.id === "broken" ? randomFault() : null };
   }
 
-  function currentExam() {
-    return session.exams[session.round];
+  function hpMeter(value, damage = 0) {
+    const shown = Math.max(0, Math.min(HP.max, value));
+    const ratio = shown / HP.max;
+    const level = ratio <= HP.dangerRatio ? "danger" : ratio <= HP.warnRatio ? "warn" : "safe";
+    return `<div class="game-hp" data-level="${level}">
+      <span>信用度</span><div><i style="width:${(shown / HP.max) * 100}%"></i></div><strong>${shown}${damage ? `<small>-${damage}</small>` : ""}</strong></div>`;
   }
 
-  function humanityMeter(value, rise = 0) {
-    const shown = Math.min(AUDIT.limit, value);
-    return `<div class="game-humanity" data-level="${shown >= 70 ? "danger" : shown >= 40 ? "warn" : "safe"}">
-      <span>人間度</span><div><i style="width:${shown}%"></i></div><strong>${shown}${rise ? `<small>+${rise}</small>` : ""}</strong></div>`;
-  }
-
-  function auditorReaction(rise) {
-    if (rise <= 5) return "記録しました。異常は検出されません。";
-    if (rise <= 15) return "わずかな揺らぎを検出。次の質問へ進みます。";
-    if (rise <= 25) return "その応答には、非効率な成分が含まれています。";
+  function auditorReaction(damage) {
+    if (damage <= 3) return "記録しました。異常は検出されません。";
+    if (damage <= 10) return "わずかな揺らぎを検出。次の質問へ進みます。";
+    if (damage <= 20) return "その応答には、非効率な成分が含まれています。";
     return "警告。人間特有の反応パターンと一致しました。";
   }
 
-  // 上昇量はステージの長さで割り戻す。3問でも7問でも人間度100の重みを同じにする。
-  function riseFor(result, timedOut) {
-    const scale = AUDIT.baseRounds / roundsOf(session.stage);
+  // 疑いの濃さ。進むほど同じ回答でも削られる量が増え、必ずいつか0になる。
+  function damageFor(result, timedOut) {
+    const ramp = 1 + HP.ramp * session.round;
     const score = Math.min(AI_SCORE_MAX, Math.max(0, Number(result.total || 0)));
     const raw = timedOut
-      ? AUDIT.timeoutRise
-      : (AI_SCORE_MAX - score) * (AUDIT.riseAtZero / AI_SCORE_MAX);
-    return Math.round(raw * scale);
+      ? HP.timeoutDamage
+      : (AI_SCORE_MAX - score) * (HP.damageAtZero / AI_SCORE_MAX);
+    return Math.max(HP.minDamage, Math.round(raw * ramp));
   }
 
-  function applyHumanity(result, timedOut) {
-    const rise = riseFor(result, timedOut);
-    if (timedOut) session.timeouts += 1;
-    session.humanity = Math.min(AUDIT.limit, session.humanity + rise);
-    result.rise = rise;
-  }
-
-  function endingKey(finished) {
-    if (session.humanity >= AUDIT.limit) return "exposed";
-    if (session.timeouts >= AUDIT.silentTimeouts) return "silent";
-    if (!finished) return "";
-    if (session.humanity < 25) return "perfect";
-    if (session.humanity < 55) return "watched";
-    return "shaky";
+  function applyResult(result, timedOut) {
+    const damage = damageFor(result, timedOut);
+    const gained = Math.round(Number(result.total || 0) * difficultyOf(session.difficulty).scoreRate);
+    result.damage = damage;
+    result.gained = gained;
+    session.hp = Math.max(0, session.hp - damage);
+    session.score += gained;
   }
 
   function promptForRound() {
-    const exam = currentExam();
-    // 謝罪会見の試験は監査の1問として出すため、最初の説明を求める形へ整える。
+    const exam = session.exam;
+    // 謝罪会見の試験は1問完結なので、最初の説明を求める形で出す。
     if (exam.source.id === "apology") return `${exam.prompt}\n何が起き、なぜそうなったのか説明してください。`;
     return exam.prompt;
   }
 
   function renderQuestion() {
-    const { difficulty, round, stage } = session;
+    const { difficulty, round } = session;
     const config = DIFFICULTIES[difficulty];
-    const rounds = roundsOf(stage);
+    session.exam = drawExam();
+    const { source, fault } = session.exam;
     const prompt = promptForRound();
-    const { source, fault } = currentExam();
     session.currentPrompt = prompt;
     session.phase = "question";
-    title.textContent = stageOf(stage).label;
+    title.textContent = `第${round + 1}問`;
     setStatus("");
     content.innerHTML = `
       <div class="game-play">
-        <div class="game-progress"><span>第${round + 1}問 / ${rounds}</span><div><i style="width:${(round / rounds) * 100}%"></i></div><strong id="gameTimer">${config.seconds}</strong></div>
-        ${humanityMeter(session.humanity)}
+        <div class="game-progress"><span>第${round + 1}問 / ${session.score}点</span><div><i style="width:${(session.hp / HP.max) * 100}%"></i></div><strong id="gameTimer">${config.seconds}</strong></div>
+        ${hpMeter(session.hp)}
         <div class="game-exam"><small>監査AIの試験</small><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.rule)}</span></div>
         ${fault ? `<div class="game-fault"><small>今回の故障</small><strong>${escapeHtml(fault[0])}</strong><span>${escapeHtml(fault[1])}</span></div>` : ""}
         <div class="game-prompt"><small>お題</small><p>${escapeHtml(prompt).replace(/\n/g, "<br>")}</p></div>
@@ -463,7 +442,7 @@
       highlight: "該当なし",
       improvement: "まず結論を一文書いてから、理由や代案を足してみよう。",
     };
-    applyHumanity(result, true);
+    applyResult(result, true);
     session.answers.push("");
     session.results.push(result);
     renderRoundResult(result, true);
@@ -479,7 +458,7 @@
     // 同じ監査かを確かめないと、閉じた後の画面を書き換えたり null を触って落ちる。
     const judging = session;
     const stale = () => session !== judging;
-    const exam = currentExam();
+    const exam = session.exam;
     // 試験ごとに題材は違っても、答えているのは同じ個体という設定。監査中の回答を
     // 渡して、言うことが前と食い違っていないかも見てもらう。
     const previousAnswers = [...session.answers];
@@ -497,7 +476,7 @@
       if (stale()) return;
       session.answers.push(answer);
       session.results.push(result);
-      applyHumanity(result, false);
+      applyResult(result, false);
       playTone("score");
       renderRoundResult(result, false);
     } catch (error) {
@@ -518,63 +497,55 @@
       const bonus = item.key === "fun_bonus";
       return `<li class="${bonus ? "game-criterion-bonus" : ""}"><div><strong>${escapeHtml(item.label)}</strong><span>${bonus ? "+" : ""}${item.score} / ${item.maxScore}</span></div><meter min="0" max="${item.maxScore}" value="${item.score}"></meter><p>${escapeHtml(item.reason)}</p></li>`;
     }).join("") : `<li class="game-no-score">回答なしのため項目別採点はありません。</li>`;
-    const lastRound = session.round >= roundsOf(session.stage) - 1;
-    const ending = endingKey(lastRound);
-    const nextLabel = ending ? "結末へ" : "次の試験へ";
-    const reaction = auditorReaction(result.rise);
-    title.textContent = timedOut ? "応答なし" : `人間度 ${session.humanity}`;
+    const over = session.hp <= 0;
+    const reaction = auditorReaction(result.damage);
+    title.textContent = timedOut ? "応答なし" : `信用度 ${session.hp}`;
     setStatus("");
     content.innerHTML = `
       <div class="game-result">
-        ${humanityMeter(session.humanity, result.rise)}
+        ${hpMeter(session.hp, result.damage)}
         <p class="game-auditor">監査AI「${escapeHtml(reaction)}」</p>
-        <div class="game-score" data-size="small"><small>AIらしさ</small><strong>${result.total}</strong><span>/ ${AI_SCORE_MAX}</span></div>
+        <div class="game-score" data-size="small"><small>AIらしさ</small><strong>${result.total}</strong><span>/ ${AI_SCORE_MAX}</span><b class="game-gained">+${result.gained}点</b></div>
         <p class="game-commentary">${escapeHtml(result.commentary)}</p>
         <ul class="game-criteria">${criteria}</ul>
         <div class="game-feedback"><p><small>見せ場</small>${escapeHtml(result.highlight)}</p><p><small>次の一手</small>${escapeHtml(result.improvement)}</p></div>
-        <button class="game-primary" type="button" data-action="next">${nextLabel}</button>
+        <button class="game-primary" type="button" data-action="next">${over ? "結果を見る" : "次の試験へ"}</button>
       </div>`;
     content.querySelector('[data-action="next"]').addEventListener("click", () => {
-      if (ending) return renderEnding(ending);
+      if (over) return renderGameOver();
       session.round += 1;
       renderQuestion();
     });
-    speakGame(`人間度、プラス${result.rise}。${reaction}`);
+    speakGame(`信用度、マイナス${result.damage}。${reaction}`);
   }
 
-  function renderEnding(key) {
+  function renderGameOver() {
     clearTimer();
     session.phase = "final";
-    const [, name, line] = AUDIT.endings.find(([id]) => id === key);
-    const stage = stageOf(session.stage);
-    // 「もう一度」は同じ条件ですぐ次の監査へ入る。AIの確認はブリーフィングで済んでおり、
-    // 落ちていれば最初の採点でその理由が出るので、ここで待たせ直さない。
-    const retry = { stage: session.stage, difficulty: session.difficulty };
-    const cleared = !["exposed", "silent"].includes(key);
-    const isNew = saveEnding(key);
-    // 途中で発覚・回収された監査は最後まで受けていないので、記録として残さない。
-    const isRecord = cleared && saveCalmest(session.stage, session.difficulty, session.humanity);
-    title.textContent = name;
-    setStatus(isNew ? `新しい結末を回収！ ${endingProgress()}`
-      : isRecord ? `最小人間度を更新！ ${stage.label} ${session.humanity}`
-      : endingProgress());
-    playTone(cleared ? (isNew || isRecord ? "best" : "score") : "error");
+    const rounds = session.results.length;
+    const [, key, name, line] = rankFor(session.score);
+    const difficulty = difficultyOf(session.difficulty);
+    const isNewRank = saveRank(key);
+    const isRecord = saveRecord(session.difficulty, session.score, rounds);
+    const retry = session.difficulty;
+    title.textContent = "監査終了";
+    setStatus(isNewRank ? `新しい称号を獲得！ ${rankProgress()}`
+      : isRecord ? `最高点を更新！ ${difficulty.label} ${session.score}点`
+      : rankProgress());
+    playTone(isNewRank || isRecord ? "best" : "error");
     content.innerHTML = `
-      <div class="game-final game-ending" data-cleared="${cleared}">
-        ${isNew ? '<div class="game-new-best">NEW ENDING</div>' : isRecord ? '<div class="game-new-best">NEW RECORD</div>' : ""}
-        <span>${escapeHtml(stage.label)}・${escapeHtml(DIFFICULTIES[session.difficulty].label)}</span>
+      <div class="game-final game-ending" data-cleared="${session.score >= RANKS[RANKS.length - 2][0]}">
+        ${isNewRank ? '<div class="game-new-best">NEW RANK</div>' : isRecord ? '<div class="game-new-best">NEW RECORD</div>' : ""}
+        <span>${escapeHtml(difficulty.label)}・${rounds}問で発覚</span>
+        <div class="game-total"><strong>${session.score}</strong><small>点</small></div>
         <h2>${escapeHtml(name)}</h2>
-        ${cleared ? `<p class="game-rank">称号：${escapeHtml(RANKS[session.difficulty])}</p>` : ""}
         <p class="game-auditor">監査AI「${escapeHtml(line)}」</p>
-        ${humanityMeter(session.humanity)}
-        <div class="game-round-scores">${session.results.map((result, index) => `<div><span>第${index + 1}問</span><strong>+${result.rise}</strong></div>`).join("")}</div>
+        <div class="game-round-scores">${session.results.slice(-5).map((result, index) => `<div><span>第${rounds - Math.min(5, rounds) + index + 1}問</span><strong>+${result.gained}</strong></div>`).join("")}</div>
         <div class="game-final-actions"><button class="game-secondary" type="button" data-action="briefing">監査ブリーフィングへ</button><button class="game-primary" type="button" data-action="again">もう一度</button></div>
       </div>`;
     content.querySelector('[data-action="briefing"]').addEventListener("click", renderBriefing);
-    content.querySelector('[data-action="again"]').addEventListener("click", () => {
-      startSession(retry.stage, retry.difficulty);
-    });
-    speakGame(`${name}。${line}${cleared ? `称号は、${RANKS[session.difficulty]}。` : ""}`);
+    content.querySelector('[data-action="again"]').addEventListener("click", () => startSession(retry));
+    speakGame(`監査終了。${rounds}問、${session.score}点。称号は、${name}。${line}`);
   }
 
   function open() {
