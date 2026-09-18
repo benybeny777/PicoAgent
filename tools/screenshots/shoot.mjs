@@ -445,7 +445,7 @@ async function validateAiGames() {
       && result.characterStyle.width >= 200 && result.characterStyle.height >= 300;
     await page.screenshot({ path: join(output, "result.png") });
 
-    if (result.examCount !== 6 || result.difficultyCount !== 3
+    if (result.examCount !== 12 || result.difficultyCount !== 3
         || result.rankSlots !== 5 || result.score !== "83" || result.criteriaCount !== 5
         || result.hpFirst !== "90") {
       throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);

@@ -44,11 +44,15 @@ test("記録と効果音の保存は失敗しても画面を止めない", () =>
   assert.match(game, /const saveRecord = \(difficulty, score, rounds\) => \{[\s\S]*?if \(score <= current\.score && rounds <= current\.rounds\) return false;/);
 });
 
-test("監査の試験は6種で各20題、故障カード8件を持つ", () => {
-  const ids = [...game.matchAll(/\bid: "(excuse|broken|apology|wrong|safety|refuse)"/g)].map(match => match[1]);
-  assert.deepEqual(ids, ["excuse", "broken", "apology", "wrong", "safety", "refuse"]);
+test("監査の試験は12種で各20題、故障カード8件を持つ", () => {
+  const EXAM_IDS = ["excuse", "broken", "apology", "wrong", "safety", "refuse",
+    "manual", "summary", "define", "estimate", "memory", "paraphrase"];
+  const ids = [...game.matchAll(/^\s+id: "(\w+)", icon:/gm)].map(match => match[1]);
+  assert.deepEqual(ids, EXAM_IDS);
+  // 画面の試験は、必ずRust側に同じIDの採点仕様がある（無いと採点が「種類が不正」で落ちる）。
+  for (const id of EXAM_IDS) assert.match(backend, new RegExp(`"${id}" => GameSpec \\{`));
   const promptBlocks = [...game.matchAll(/prompts: \[([\s\S]*?)\n\s*\],/g)];
-  assert.equal(promptBlocks.length, 6);
+  assert.equal(promptBlocks.length, 12);
   for (const block of promptBlocks) {
     assert.equal(block[1].match(/"(?:[^"\\]|\\.)*"/g)?.length, 20);
   }
@@ -108,7 +112,7 @@ test("配信向けの短い回答と見本、称号、共通音量を保つ", ()
     .map(match => [match[1], Number(match[2]), Number(match[3])]);
   assert.deepEqual(difficulties, [["easy", 60, 120], ["normal", 45, 80], ["hard", 30, 50]]);
   // やさしいだけ、いまのお題の答えにならない別のお題の見本を出す。
-  assert.equal(game.match(/^\s+example: "/gm)?.length, 6);
+  assert.equal(game.match(/^\s+example: "/gm)?.length, 12);
   assert.match(game, /config\.hint \? `<div class="game-example">/);
   assert.match(styles, /\.game-example \{/);
   // おもしろボーナスは通常5項目と区別して見せる。

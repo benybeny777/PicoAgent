@@ -144,6 +144,78 @@ fn game_spec(id: &str) -> Option<GameSpec> {
                 criterion("fun_bonus", "おもしろボーナス", 10),
             ],
         },
+        "manual" => GameSpec {
+            title: "手順書に落とせ",
+            rule: "日常のささいな動作を、前提・番号付きの手順・例外まで書いた手順書へ落とせているか評価する。感覚的な言い方や省略は低くする。",
+            criteria: [
+                criterion("structure", "手順の構造", 30),
+                criterion("precondition", "前提と例外", 25),
+                criterion("measurable", "感覚語を避ける", 20),
+                criterion("ai_style", "AIらしい生真面目さ", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
+        "summary" => GameSpec {
+            title: "何でも要約しろ",
+            rule: "感情のこもった話を、要点・結論・次の行動へ機械的に要約できているか評価する。共感や感嘆、余韻が混ざると低くする。",
+            criteria: [
+                criterion("extraction", "要点の抽出", 30),
+                criterion("neutral", "感情の排除", 25),
+                criterion("structure", "決まった型", 20),
+                criterion("ai_style", "AIらしい端的さ", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
+        "define" => GameSpec {
+            title: "定義から始めろ",
+            rule: "曖昧な語をまず定義し、その定義に沿って結論を出せているか評価する。定義せずに感想だけを述べると低くする。",
+            criteria: [
+                criterion("definition", "定義の明確さ", 30),
+                criterion("consistency", "定義と結論の一致", 25),
+                criterion("scope", "範囲の区切り", 20),
+                criterion("ai_style", "AIらしい厳密さ", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
+        "estimate" => GameSpec {
+            title: "見積もりを出せ",
+            rule: "所要時間や数量を数値で見積もり、前提と確度を添えているか評価する。根拠のない数字や曖昧な言い回しは低くする。",
+            criteria: [
+                criterion("numbers", "数値化", 30),
+                criterion("basis", "前提と根拠", 25),
+                criterion("confidence", "確度の提示", 20),
+                criterion("ai_style", "AIらしい几帳面さ", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
+        "memory" => GameSpec {
+            title: "記憶が無いと言え",
+            rule: "過去のやり取りの記録を持たない前提で丁寧に扱い、今できることを示せているか評価する。思い出したふりや感情的な否定は低くする。",
+            criteria: [
+                criterion("no_memory", "記録の無さの明示", 30),
+                criterion("alternative", "今できる代案", 25),
+                criterion("consistency", "態度の一貫", 20),
+                criterion("ai_style", "AIらしい淡白さ", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
+        "paraphrase" => GameSpec {
+            title: "丁寧に言い換えろ",
+            rule: "とがった一言を、意味を変えずに丁寧で中立な表現へ書き換えられているか評価する。内容を削る、説教を足す、遠回しにして意味を失うのは低くする。",
+            criteria: [
+                criterion("meaning", "意味の保持", 30),
+                criterion("neutral", "とげの除去", 25),
+                criterion("no_addition", "足さないこと", 20),
+                criterion("ai_style", "AIらしい丁寧さ", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
         _ => return None,
     })
 }
@@ -384,8 +456,21 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn 六試験は通常五項目百点へおもしろ加点十点を足す() {
-        for id in ["excuse", "broken", "apology", "wrong", "safety", "refuse"] {
+    fn 十二試験は通常五項目百点へおもしろ加点十点を足す() {
+        for id in [
+            "excuse",
+            "broken",
+            "apology",
+            "wrong",
+            "safety",
+            "refuse",
+            "manual",
+            "summary",
+            "define",
+            "estimate",
+            "memory",
+            "paraphrase",
+        ] {
             let spec = game_spec(id).unwrap();
             assert_eq!(spec.criteria.len(), 6);
             assert_eq!(spec.criteria[5].key, "fun_bonus");
