@@ -121,6 +121,13 @@ print("学習設定を更新しました:", {keys[k]: v for k, v in values.items
             Invoke-Sbv2 '学習' $trainArgs
             break
         }
+        $modelAssetDir = Join-Path $root "model_assets\$Dataset"
+        $savedSteps = @(Get-ChildItem -LiteralPath $modelAssetDir -Filter '*.safetensors' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.BaseName -match '_s(?<step>\d+)$') { [int]$Matches.step }
+        })
+        if ($savedSteps.Count -gt 0 -and ($savedSteps | Measure-Object -Maximum).Maximum -ge $StopAtStep) {
+            throw "保存済みチェックポイントが停止目標 ${StopAtStep} step以上です。既存候補を検査するか、より大きい停止目標を指定してください: $modelAssetDir"
+        }
         # 検査は学習と同時に動かせないため、指定stepの保存を検知したら自分が起動した学習だけを止める。
         $log = Join-Path $datasetDir "train-until-s$StopAtStep.log"
         $err = Join-Path $datasetDir "train-until-s$StopAtStep-stderr.log"
@@ -153,18 +160,22 @@ print("学習設定を更新しました:", {keys[k]: v for k, v in values.items
         $checkpointPath = (Resolve-Path -LiteralPath (Join-Path $root $Checkpoint) -ErrorAction SilentlyContinue).Path
         if (-not $checkpointPath) { $checkpointPath = (Resolve-Path -LiteralPath $Checkpoint).Path }
         $assetDir = Split-Path -Parent $checkpointPath
-        $output = New-Item -ItemType Directory -Force -Path $OutputDir
-        $aivmx = Join-Path $output.FullName "$Dataset.aivmx"
-        if (Test-Path -LiteralPath $aivmx) { throw "出力先に既にAIVMXがあるため停止します（上書きしない）: $aivmx" }
-        $onnx = [IO.Path]::ChangeExtension($checkpointPath, '.onnx')
-        if (-not (Test-Path -LiteralPath $onnx)) {
-            Invoke-Sbv2 'ONNX変換' @('convert_onnx.py', '--model', $checkpointPath)
-        }
-        foreach ($file in @($checkpointPath, $onnx, (Join-Path $assetDir 'config.json'), (Join-Path $assetDir 'style_vectors.npy'))) {
+        $outputPath = [IO.Path]::GetFullPath($OutputDir)
+        $incomingPath = "$outputPath.incoming"
+        if (Test-Path -LiteralPath $outputPath) { throw "出力先が既にあるため停止します（上書きしない）: $outputPath" }
+        if (Test-Path -LiteralPath $incomingPath) { throw "前回の未完了出力があるため停止します: $incomingPath" }
+        $output = New-Item -ItemType Directory -Path $incomingPath
+        foreach ($file in @($checkpointPath, (Join-Path $assetDir 'config.json'), (Join-Path $assetDir 'style_vectors.npy'))) {
             Copy-Item -LiteralPath $file -Destination $output.FullName
         }
+        # 元のmodel_assetsに残った同名ONNXを再利用せず、今回のチェックポイントのコピーから必ず変換する。
+        $checkpointCopy = Join-Path $output.FullName (Split-Path -Leaf $checkpointPath)
+        Invoke-Sbv2 'ONNX変換' @('convert_onnx.py', '--model', $checkpointCopy)
+        $onnx = [IO.Path]::ChangeExtension($checkpointCopy, '.onnx')
+        if (-not (Test-Path -LiteralPath $onnx -PathType Leaf)) { throw "ONNX変換結果がありません: $onnx" }
+        $aivmx = Join-Path $output.FullName "$Dataset.aivmx"
         $aivmlib = Join-Path $root '.venv\Scripts\aivmlib.exe'
-        & $aivmlib create-aivmx -o $aivmx -m $onnx -h (Join-Path $assetDir 'config.json') -s (Join-Path $assetDir 'style_vectors.npy') -a 'Style-Bert-VITS2 (JP-Extra)'
+        & $aivmlib create-aivmx -o $aivmx -m $onnx -h (Join-Path $output.FullName 'config.json') -s (Join-Path $output.FullName 'style_vectors.npy') -a 'Style-Bert-VITS2 (JP-Extra)'
         if ($LASTEXITCODE -ne 0) { throw "AIVMX作成が失敗しました（終了コード $LASTEXITCODE）" }
         # AIVMX内のハイパーパラメータとスタイルベクトルが書き出し元と一致することを確認する。
         $verify = @'
@@ -187,6 +198,7 @@ print(json.dumps({"model_uuid": str(meta.manifest.uuid), "name": meta.manifest.n
                   "speakers": [{"uuid": str(s.uuid), "name": s.name, "styles": [st.name for st in s.styles]} for s in meta.manifest.speakers]},
                  ensure_ascii=False))
 '@
-        Invoke-Sbv2 'AIVMX整合確認' @('-c', $verify, $aivmx, $assetDir)
+        Invoke-Sbv2 'AIVMX整合確認' @('-c', $verify, $aivmx, $output.FullName)
+        Move-Item -LiteralPath $output.FullName -Destination $outputPath
     }
 }

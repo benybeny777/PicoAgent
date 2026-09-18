@@ -88,7 +88,12 @@ def main() -> int:
     source, output = data / args.source, data / args.output
     if output.exists():
         raise SystemExit(f"出力先が既にあるため停止します（上書きしない）: {output}")
+    incoming = output.with_name(f"{output.name}.incoming")
+    if incoming.exists():
+        raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
     entries = clips.read_candidates(source)
+    if not entries:
+        raise SystemExit(f"補正する断片がありません: {source}")
     models = clips.load_models("cpu", vad_only=True)
 
     before, after, gated_ratio, lines = [], [], [], []
@@ -98,14 +103,14 @@ def main() -> int:
         info = sf.info(src)
         x = audio.mean(axis=1)
         y, ratio = gate(models, x, sr, args.pad_ms, args.fade_ms, args.attenuation_db)
-        dst = output / "raw" / file_name
+        dst = incoming / "raw" / file_name
         dst.parent.mkdir(parents=True, exist_ok=True)
         sf.write(dst, y.astype(np.float32), sr, subtype=info.subtype)
         before += pause_levels(x, sr)
         after += pause_levels(y, sr)
         gated_ratio.append(ratio)
         lines.append(f"{file_name}|{args.output}|{language}|{text}")
-    (output / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def summary(values: list[float]) -> dict:
         arr = np.array(values) if values else np.array([0.0])
@@ -118,7 +123,8 @@ def main() -> int:
         "gated_ratio_median": round(float(np.median(gated_ratio)), 3),
         "pauses_before": summary(before), "pauses_after": summary(after),
     }
-    (output / "pause-cleaning.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    (incoming / "pause-cleaning.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    incoming.replace(output)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

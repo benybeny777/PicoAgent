@@ -5124,6 +5124,10 @@ mod tests {
         let mut missing_query = serde_json::json!({});
         limit_aivis_volume(&mut missing_query);
         assert_eq!(missing_query["volumeScale"], 0.72);
+
+        let mut invalid_negative_query = serde_json::json!({ "volumeScale": -1.0 });
+        limit_aivis_volume(&mut invalid_negative_query);
+        assert_eq!(invalid_negative_query["volumeScale"], 0.0);
     }
 
     #[test]

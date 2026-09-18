@@ -30,7 +30,7 @@ test("WindowsのBAT入口はcmdの文字コードに依存しない", () => {
 
 test("Windowsの確認入口は2.5D・MMD・登録済みLive2Dを選べる", () => {
   assert.match(previewLauncher, /'2d', 'live2d', 'miko-mmd', 'korone-mmd'/);
-  assert.match(previewLauncher, /manifest\.live2d/);
+  assert.match(previewLauncher, /PSObject\.Properties\['live2d'\]/);
   assert.match(previewLauncher, /PICO_PREVIEW_CHARACTER/);
   assert.match(previewLauncher, /& cargo xtask dev/);
   const override = config.indexOf('std::env::var("PICO_PREVIEW_CHARACTER")');

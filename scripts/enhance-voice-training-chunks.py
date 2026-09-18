@@ -53,20 +53,26 @@ def entries(source: Path):
 def pack(source: Path, out: Path) -> None:
     if out.exists():
         raise SystemExit(f"出力先が既にあるため停止します: {out}")
-    out.mkdir(parents=True)
+    incoming = out.with_name(f"{out.name}.incoming")
+    if incoming.exists():
+        raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
+    source_entries = list(entries(source))
+    if not source_entries:
+        raise SystemExit(f"連結する断片がありません: {source}")
+    incoming.mkdir(parents=True)
     manifest, chunk, cursor, index, sample_rate = [], [], 0, 1, None
 
     def flush() -> None:
         nonlocal chunk, cursor, index
         if not chunk:
             return
-        path = out / f"chunk-{index:02d}.wav"
+        path = incoming / f"chunk-{index:02d}.wav"
         sf.write(path, np.concatenate(chunk), sample_rate, subtype="PCM_16")
         if path.stat().st_size > MAX_BYTES:
             raise SystemExit(f"1本の上限を超えました: {path}")
         chunk, cursor, index = [], 0, index + 1
 
-    for file_name, language, text in entries(source):
+    for file_name, language, text in source_entries:
         x, sr = sf.read(source / "raw" / file_name, dtype="float32")
         sample_rate = sample_rate or sr
         if sr != sample_rate or x.ndim != 1:
@@ -84,9 +90,10 @@ def pack(source: Path, out: Path) -> None:
     if chunk:
         chunk.append(np.zeros(int(GAP_SECONDS * sample_rate), dtype=np.float32))
     flush()
-    (out / "manifest.json").write_text(
+    (incoming / "manifest.json").write_text(
         json.dumps({"sample_rate": sample_rate, "source": source.name, "clips": manifest}, ensure_ascii=False, indent=1),
         encoding="utf-8")
+    incoming.replace(out)
     print(f"チャンク数 {index - 1} / 断片数 {len(manifest)} / 出力 {out}")
 
 
@@ -155,6 +162,16 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
     if output.exists():
         raise SystemExit(f"出力先が既にあるため停止します: {output}")
     manifest = json.loads((enhanced / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("source") != source.name:
+        raise SystemExit(f"補正版の元データセットが一致しません: {manifest.get('source')} != {source.name}")
+    source_entries = list(entries(source))
+    manifest_entries = [(clip["file"], clip["language"], clip["text"]) for clip in manifest["clips"]]
+    if manifest_entries != source_entries:
+        raise SystemExit("補正版manifestの断片・言語・文章が元データセットと一致しません")
+    expected_sample_rate = int(manifest["sample_rate"])
+    incoming = output.with_name(f"{output.name}.incoming")
+    if incoming.exists():
+        raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
     originals = sorted({clip["chunk"] for clip in manifest["clips"]})
     # 先に全チャンクを検証し、途中で止まって半端なデータセットを残さない。
     chunks = {}
@@ -163,6 +180,8 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
         if not path.exists():
             raise SystemExit(f"補正版がありません: {path}")
         audio, sr = sf.read(path, dtype="float64", always_2d=True)
+        if sr != expected_sample_rate:
+            raise SystemExit(f"補正版のサンプルレートがmanifestと一致しません: {path} {sr} != {expected_sample_rate}")
         # 送信チャンクの長さは「最後の断片の終端」か、末尾に無音1秒を足した長さ。
         # 補正前後の長さを維持する前提。この範囲外なら書き込み途中や取り違えとみなして止める。
         last_end = max(c["end_s"] for c in manifest["clips"] if c["chunk"] == number)
@@ -176,22 +195,27 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
     for clip in manifest["clips"]:
         x, sr = chunks[clip["chunk"]]
         segment = x[int(round(clip["start_s"] * sr)): int(round(clip["end_s"] * sr))]
+        if not len(segment) or not np.isfinite(segment).all():
+            raise SystemExit(f"切り戻した断片が空または不正です: {clip['file']}")
         segment = segment - segment.mean()
         meter = pyloudnorm.Meter(sr)
-        gain = 10 ** ((TARGET_LUFS - meter.integrated_loudness(segment)) / 20)
+        loudness = meter.integrated_loudness(segment)
+        if not np.isfinite(loudness):
+            raise SystemExit(f"切り戻した断片の音量を計算できません: {clip['file']}")
+        gain = 10 ** ((TARGET_LUFS - loudness) / 20)
         peak = float(np.max(np.abs(segment * gain)))
         ceiling = 10 ** (PEAK_CEILING_DBFS / 20)
         if peak > ceiling:
             gain *= ceiling / peak
         y = segment * gain
-        path = output / "raw" / clip["file"]
+        path = incoming / "raw" / clip["file"]
         path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(path, y.astype(np.float32), sr, subtype="PCM_16")
         loudness_after.append(meter.integrated_loudness(y))
         peaks.append(20 * np.log10(max(float(np.max(np.abs(y))), 1e-9)))
         levels += pause_levels(y, sr)
         lines.append(f"{clip['file']}|{output.name}|{clip['language']}|{clip['text']}")
-    (output / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
     lv = np.array(levels) if levels else np.array([0.0])
     report = {
         "source": source.name, "output": output.name, "clips": len(lines),
@@ -200,9 +224,10 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
         "pauses_louder_than_-48db": round(float(np.mean(lv > -48)), 3),
     }
     report["enhancement"] = manifest.get("enhancement", {"engine": "外部補正（詳細不明）"})
-    (output / "voice-enhancement.json").write_text(
+    (incoming / "voice-enhancement.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    incoming.replace(output)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

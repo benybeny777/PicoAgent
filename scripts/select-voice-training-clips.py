@@ -20,6 +20,7 @@ Style-Bert-VITS2の `.venv` のPythonで実行する。元データセットと�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -82,6 +83,23 @@ def read_candidates(dataset_root: Path) -> list[tuple[str, str, str, str]]:
         file_name, speaker, language, text = line.split("|", 3)
         entries.append((file_name, speaker, language, text.strip()))
     return entries
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def unique_candidates(entries: list[tuple[str, str, str, str]], label: str) -> dict[str, tuple[str, str, str]]:
+    result: dict[str, tuple[str, str, str]] = {}
+    for file_name, speaker, language, text in entries:
+        if file_name in result:
+            raise SystemExit(f"候補一覧に同名WAVが重複しています: {label} {file_name}")
+        result[file_name] = (speaker, language, text)
+    return result
 
 
 def kana(text: str) -> str:
@@ -279,23 +297,48 @@ def command_measure(args: argparse.Namespace) -> int:
     dataset_root = Path(args.sbv2_root) / "Data" / args.dataset
     report = Path(args.report)
     report.parent.mkdir(parents=True, exist_ok=True)
+    candidates = read_candidates(dataset_root)
+    if args.limit:
+        candidates = candidates[: args.limit]
+    candidate_map = unique_candidates(candidates, args.dataset)
     done: set[str] = set()
     if report.exists():
         for line in report.read_text(encoding="utf-8").splitlines():
             if line.strip():
-                done.add(json.loads(line)["file"])
-    candidates = read_candidates(dataset_root)
-    if args.limit:
-        candidates = candidates[: args.limit]
+                row = json.loads(line)
+                file_name = row["file"]
+                if file_name in done:
+                    raise SystemExit(f"測定レポートに同名WAVが重複しています: {report} {file_name}")
+                if file_name not in candidate_map:
+                    raise SystemExit(f"測定レポートに現在の候補一覧にないWAVがあります: {report} {file_name}")
+                speaker, language, text = candidate_map[file_name]
+                if (row.get("speaker"), row.get("language"), row.get("text")) != (speaker, language, text):
+                    raise SystemExit(f"測定レポートの話者・言語・文章が現在の候補と一致しません: {file_name}")
+                wav_path = dataset_root / "raw" / file_name
+                if wav_path.exists():
+                    expected_hash = row.get("source_sha256")
+                    if not expected_hash or expected_hash != file_sha256(wav_path):
+                        raise SystemExit(f"測定済みWAVの内容が現在の候補と一致しません。新しいレポート名で再測定してください: {file_name}")
+                done.add(file_name)
     previous_rows: dict[str, dict] = {}
     if args.reuse_report:
         for line in Path(args.reuse_report).read_text(encoding="utf-8").splitlines():
             if line.strip():
                 previous = json.loads(line)
+                if previous["file"] in previous_rows:
+                    raise SystemExit(f"流用元レポートに同名WAVが重複しています: {previous['file']}")
                 previous_rows[previous["file"]] = previous
         missing = [c[0] for c in candidates if c[0] not in previous_rows]
         if missing:
             raise SystemExit(f"流用元の測定に無い断片があります: {missing[:3]}")
+        required = {"_embedding", "_window_embeddings", "asr_text", "kana_length", "kana_cer"}
+        for file_name, speaker, language, text in candidates:
+            previous = previous_rows[file_name]
+            if (previous.get("speaker"), previous.get("language"), previous.get("text")) != (speaker, language, text):
+                raise SystemExit(f"流用元の話者・言語・文章が現在の候補と一致しません: {file_name}")
+            absent = sorted(key for key in required if previous.get(key) is None)
+            if absent:
+                raise SystemExit(f"流用元の測定値が不足しています: {file_name} {absent}")
     models = load_models(args.device, vad_only=bool(previous_rows))
     with report.open("a", encoding="utf-8") as output:
         for index, (file_name, speaker, language, text) in enumerate(candidates, 1):
@@ -306,6 +349,7 @@ def command_measure(args: argparse.Namespace) -> int:
             if not wav_path.exists():
                 row["missing"] = True
             else:
+                row["source_sha256"] = file_sha256(wav_path)
                 row.update(measure_clip(models, wav_path, text, previous_rows.get(file_name)))
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
@@ -319,16 +363,33 @@ def command_measure(args: argparse.Namespace) -> int:
 
 
 def speaker_scores(rows: list[dict]) -> None:
-    usable = [r for r in rows if r.get("_embedding")]
-    matrix = np.array([r["_embedding"] for r in usable])
+    usable = [r for r in rows if not r.get("missing")]
+    missing = [r.get("file", "<不明>") for r in usable if not r.get("_embedding")]
+    if missing:
+        raise SystemExit(f"話者埋め込みが無い測定があります: {missing[:3]}")
+    if not usable:
+        raise SystemExit("話者埋め込みを計算できる候補がありません")
+    matrix = np.asarray([r["_embedding"] for r in usable], dtype=np.float64)
+    if matrix.ndim != 2 or not np.isfinite(matrix).all():
+        raise SystemExit("話者埋め込みに不正な値があります")
+    for row in usable:
+        windows = np.asarray(row.get("_window_embeddings") or [], dtype=np.float64)
+        if windows.size and (windows.ndim != 2 or windows.shape[1] != matrix.shape[1] or not np.isfinite(windows).all()):
+            raise SystemExit(f"話者の窓別埋め込みに不正な値があります: {row['file']}")
     centroid = matrix.mean(axis=0)
     # 外れ値に引っ張られないよう、上位70%で重心を2回作り直す。
     for _ in range(2):
-        centroid /= np.linalg.norm(centroid)
+        norm = float(np.linalg.norm(centroid))
+        if not math.isfinite(norm) or norm <= 1e-12:
+            raise SystemExit("話者埋め込みの重心を計算できません")
+        centroid /= norm
         similarity = matrix @ centroid
         keep = similarity >= np.quantile(similarity, 0.3)
         centroid = matrix[keep].mean(axis=0)
-    centroid /= np.linalg.norm(centroid)
+    norm = float(np.linalg.norm(centroid))
+    if not math.isfinite(norm) or norm <= 1e-12:
+        raise SystemExit("話者埋め込みの重心を計算できません")
+    centroid /= norm
     for row in usable:
         row["speaker_similarity"] = round(float(np.dot(row["_embedding"], centroid)), 4)
         windows = row.get("_window_embeddings") or []
@@ -466,9 +527,20 @@ def command_select(args: argparse.Namespace) -> int:
     for dataset, report_path in zip(args.dataset, args.report):
         dataset_rows = [json.loads(line) for line in Path(report_path).read_text(encoding="utf-8").splitlines() if line.strip()]
         candidates = read_candidates(sbv2_root / "Data" / dataset)
-        if len(dataset_rows) != len(candidates):
+        candidate_map = unique_candidates(candidates, dataset)
+        report_map = {row["file"]: row for row in dataset_rows}
+        if len(report_map) != len(dataset_rows):
+            raise SystemExit(f"測定レポートに同名WAVが重複しています: {report_path}")
+        if set(report_map) != set(candidate_map):
             raise SystemExit(f"測定が未完了です: {dataset} {len(dataset_rows)}/{len(candidates)}")
         for row in dataset_rows:
+            expected = candidate_map[row["file"]]
+            if (row.get("speaker"), row.get("language"), row.get("text")) != expected:
+                raise SystemExit(f"測定レポートの話者・言語・文章が候補一覧と一致しません: {dataset} {row['file']}")
+            wav_path = sbv2_root / "Data" / dataset / "raw" / row["file"]
+            if not row.get("missing"):
+                if not wav_path.is_file() or row.get("source_sha256") != file_sha256(wav_path):
+                    raise SystemExit(f"測定レポートと現在のWAVが一致しません。新しいレポート名で再測定してください: {dataset} {row['file']}")
             row["dataset"] = dataset
         rows.extend(dataset_rows)
     speaker_scores(rows)
@@ -514,19 +586,26 @@ def command_select(args: argparse.Namespace) -> int:
         raise SystemExit(f"出力先が既に存在するため停止します（既存データを上書きしない）: {output_root}")
     if len(accepted) < args.min_clips:
         raise SystemExit(f"採用断片が少なすぎます: {len(accepted)} < {args.min_clips}")
-    (output_root / "raw").mkdir(parents=True)
+    accepted_names = [row["file"] for row in accepted]
+    if len(set(accepted_names)) != len(accepted_names):
+        raise SystemExit("複数データセットの採用断片に同名WAVがあります。上書きを避けるため元データ側で一意の名前にしてください")
+    incoming = output_root.with_name(f"{output_root.name}.incoming")
+    if incoming.exists():
+        raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
+    (incoming / "raw").mkdir(parents=True)
     lines, outputs = [], []
     for row in accepted:
-        info = write_clean_clip(sbv2_root / "Data" / row["dataset"] / "raw" / row["file"], output_root / "raw" / row["file"], row)
+        info = write_clean_clip(sbv2_root / "Data" / row["dataset"] / "raw" / row["file"], incoming / "raw" / row["file"], row)
         if info["output_peak_dbfs"] > PEAK_CEILING_DBFS + 0.05:
             raise SystemExit(f"正規化後のピークが上限を超えました: {row['file']} {info}")
         outputs.append({"file": row["file"], **info})
         lines.append(f"{row['file']}|{args.output_dataset}|{row['language']}|{row['text']}")
-    (output_root / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (output_root / "esd.rejected.tsv").write_text(
+    (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (incoming / "esd.rejected.tsv").write_text(
         "".join(f"{';'.join(r['reasons'])}\t{r['file']}|{r['text']}\n" for r in rejected), encoding="utf-8"
     )
-    (output_root / "clean-clips.json").write_text(json.dumps(outputs, ensure_ascii=False, indent=1), encoding="utf-8")
+    (incoming / "clean-clips.json").write_text(json.dumps(outputs, ensure_ascii=False, indent=1), encoding="utf-8")
+    incoming.replace(output_root)
     print(f"新データセットを作成しました: {output_root}（{len(accepted)}断片）")
     return 0
 

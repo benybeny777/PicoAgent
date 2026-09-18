@@ -78,14 +78,29 @@ def reference_centroid(path: Path) -> np.ndarray:
     decisions = path.with_name("clip-decisions.jsonl")
     accepted = None
     if decisions.exists():
-        accepted = {
-            json.loads(line)["file"]
+        decision_rows = [
+            json.loads(line)
             for line in decisions.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not json.loads(line)["reasons"]
-        }
-    vectors = [r["_embedding"] for r in rows if r.get("_embedding") and (not accepted or r["file"] in accepted)]
-    centroid = np.mean(np.array(vectors), axis=0)
-    return centroid / np.linalg.norm(centroid)
+            if line.strip()
+        ]
+        accepted = {row["file"] for row in decision_rows if not row.get("reasons")}
+        if not accepted:
+            raise SystemExit(f"話者基準に使える採用断片がありません: {decisions}")
+    vectors = [
+        r["_embedding"]
+        for r in rows
+        if r.get("_embedding") and (accepted is None or r["file"] in accepted)
+    ]
+    if not vectors:
+        raise SystemExit(f"話者基準の埋め込みがありません: {path}")
+    matrix = np.asarray(vectors, dtype=np.float64)
+    if matrix.ndim != 2 or not np.isfinite(matrix).all():
+        raise SystemExit(f"話者基準の埋め込みが不正です: {path}")
+    centroid = np.mean(matrix, axis=0)
+    norm = float(np.linalg.norm(centroid))
+    if not math.isfinite(norm) or norm <= 1e-12:
+        raise SystemExit(f"話者基準の重心を計算できません: {path}")
+    return centroid / norm
 
 
 def inspect_wav(models, wav_path: Path, text: str, centroid: np.ndarray | None, judge_level: bool = True) -> dict:
@@ -201,7 +216,7 @@ def synthesize_aivis(args: argparse.Namespace, texts: list[str], out_dir: Path) 
         query_url = f"{args.endpoint}/audio_query?" + urllib.parse.urlencode({"text": text, "speaker": args.speaker})
         with urllib.request.urlopen(urllib.request.Request(query_url, method="POST"), timeout=180) as response:
             query = json.loads(response.read())
-        query["volumeScale"] = min(float(query.get("volumeScale", 1.0)), AIVIS_MAX_VOLUME_SCALE)
+        query["volumeScale"] = min(max(float(query.get("volumeScale", 1.0)), 0.0), AIVIS_MAX_VOLUME_SCALE)
         request = urllib.request.Request(
             f"{args.endpoint}/synthesis?" + urllib.parse.urlencode({"speaker": args.speaker}),
             data=json.dumps(query).encode("utf-8"),
@@ -239,7 +254,12 @@ def main() -> int:
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    incoming = out_dir.with_name(f"{out_dir.name}.incoming")
+    if out_dir.exists():
+        raise SystemExit(f"出力先が既にあるため停止します（検査結果を上書きしない）: {out_dir}")
+    if incoming.exists():
+        raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
+    incoming.mkdir(parents=True)
     texts = DEFAULT_TEXTS + (PAUSE_TEXTS if args.text_set == "pauses" else [])
     if args.texts_file:
         texts = [t.strip() for t in Path(args.texts_file).read_text(encoding="utf-8").splitlines() if t.strip()]
@@ -249,9 +269,9 @@ def main() -> int:
     reference = Path(args.reference).resolve() if args.reference else None
 
     if args.mode == "sbv2":
-        wavs = synthesize_sbv2(args, texts, out_dir)
+        wavs = synthesize_sbv2(args, texts, incoming)
     elif args.mode == "aivis":
-        wavs = synthesize_aivis(args, texts, out_dir)
+        wavs = synthesize_aivis(args, texts, incoming)
     else:
         wavs = [Path(p).resolve() for p in args.wav]
         if len(wavs) != len(texts):
@@ -261,6 +281,9 @@ def main() -> int:
     centroid = reference_centroid(reference) if reference else None
     judge_level = args.mode != "sbv2"
     results = [inspect_wav(models, wav, text, centroid, judge_level) for wav, text in zip(wavs, texts)]
+    if args.mode != "files":
+        for result in results:
+            result["wav"] = str(out_dir / Path(result["wav"]).name)
     summary = {
         "mode": args.mode,
         "level_judged": judge_level,
@@ -274,7 +297,8 @@ def main() -> int:
         "failures": {Path(r["wav"]).name: r["failures"] for r in results if r["failures"]},
         "clips": results,
     }
-    (out_dir / "qa-report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    (incoming / "qa-report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    incoming.replace(out_dir)
     print(json.dumps({k: v for k, v in summary.items() if k != "clips"}, ensure_ascii=False, indent=2))
     return 0 if summary["passed"] else 1
 

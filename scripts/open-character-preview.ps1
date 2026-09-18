@@ -86,7 +86,9 @@ if ($Mode -eq 'live2d') {
             if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
             try {
                 $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json
-                if ($null -ne $manifest.live2d -and $seen.Add([string]$manifest.id)) {
+                $live2dProperty = $manifest.PSObject.Properties['live2d']
+                if ($null -ne $live2dProperty -and $null -ne $live2dProperty.Value -and
+                    $seen.Add([string]$manifest.id)) {
                     $live2dCharacters.Add([pscustomobject]@{
                         Id = [string]$manifest.id
                         Name = [string]$manifest.name
