@@ -613,28 +613,31 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
         ├── engine\                  ローカルAI推論エンジン
         └── aivis\                   音声エンジン（関係者同梱版）
 
-%APPDATA%\com.picoagent.desktop\       設定と利用者データ
+%APPDATA%\PicoAgent\                   設定・利用者データ・管理ランタイム
 ├── config.json                      設定・キャラ別の声/背景/配置
 ├── history-<キャラID>.json           キャラ別の会話履歴
 ├── memory.json                      記憶データ
 ├── relationship-<キャラID>.json      キャラ別の関係性データ
-└── characters\<キャラID>\            登録した追加キャラ
-    ├── character.json               キャラ設定
-    └── mmd\                         PMXとテクスチャ（MMDの場合）
-
-%APPDATA%\PicoAgent\                   実行時に追加・更新されるデータ
+├── characters\<キャラID>\            登録した追加キャラ
+│   ├── character.json               キャラ設定
+│   └── mmd\                         PMXとテクスチャ（MMDの場合）
 ├── bundled\                         管理導入したエンジン・追加機能
 │   └── models\                      ダウンロードしたローカルAIモデル
+├── cache\                           更新・追加機能の再生成可能な取得キャッシュ
 ├── log\                             実行ログ
 ├── browser-profile\                 アプリ専用ブラウザープロファイル
+├── webview\                         アプリ画面専用のWebViewデータ
+├── office-profile\                  文書変換専用のOfficeデータ
+├── generation-runtime-data\         画像・動画生成専用の実行時データ
 └── aivis-userdata\                   音声エンジン用の実行時領域
 
-%APPDATA%\AivisSpeech-Engine\Models\   Aivisの音声モデル（*.aivmx）
+%APPDATA%\PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models\
+                                       PicoAgent専用Aivisの音声モデル（*.aivmx）
 ```
 
-通常公開版は基本キャラと推論エンジンを含み、追加機能は利用時に取得します。関係者用MMD・音声同梱版では `characters\miko-mmd` と `characters\korone-mmd`、2人分のAIVMXも導入します。音声モデルはキャラフォルダー内ではなく、上記Aivisのモデルフォルダーに置かれます。旧版からの更新では、従来の `bundled\` などの配置が残る場合があります。
+通常公開版は基本キャラと推論エンジンを含み、追加機能は利用時に取得します。関係者用MMD・音声同梱版では `characters\miko-mmd` と `characters\korone-mmd`、2人分のAIVMXも導入します。音声モデルはキャラフォルダー内ではなく、上記Aivisのモデルフォルダーに置かれます。旧版からの初回起動では、識別子別フォルダーにあった全データを`PicoAgent`配下へ移します。
 
-アプリの更新・再インストールでは既存の設定や登録キャラを保持します。アンインストール時は、ユーザーデータ削除の確認で「いいえ」を選ぶと設定・履歴・キャラを残します。Aivisのモデルフォルダーは別のAivisアプリと共有される場合があるため、PicoAgentのアンインストールでは削除しません。バックアップする際は、アプリを終了してから設定・キャラのフォルダーと必要な音声モデルを保存してください。
+アプリの更新・再インストールでは既存の設定や登録キャラを保持します。アンインストール時は、ユーザーデータ削除の確認で「いいえ」を選ぶと設定・履歴・キャラを残します。AivisのモデルもPicoAgent専用領域にあり、ユーザーデータ削除を明示した場合だけ他のPicoAgentデータと一緒に削除します。バックアップする際は、アプリを終了してから`%APPDATA%\PicoAgent\`を保存してください。
 
 ### 反映のタイミング
 
@@ -682,10 +685,10 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 | 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
 | 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` / `PICOAGENT_CHARACTER_ZOOM` / `PICOAGENT_STREAM_BACKGROUND` / `PICOAGENT_STREAM_DISPLAY` |
 | ホットキー | `PICOAGENT_HOTKEY_ENABLED` / `PICOAGENT_HOTKEY_SUMMON` / `PICOAGENT_HOTKEY_HIDE` |
-| 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
+| 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` / `PICOAGENT_TTS_ENDPOINT` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
 | ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` |
-| ブラウザ操作 | `PICOAGENT_BROWSER_ENABLED` / `PICOAGENT_BROWSER_ALLOWED_DOMAINS` / `PICOAGENT_BROWSER_PROFILE` |
+| ブラウザ操作 | `PICOAGENT_BROWSER_ENABLED` / `PICOAGENT_BROWSER_ALLOWED_DOMAINS` |
 | PC 操作 | `PICOAGENT_DESKTOP_ENABLED` / `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` |
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` |
 | スーパーエージェント | `PICOAGENT_SUPER_AGENT` / `PICOAGENT_SUPER_AGENT_MAX_STEPS` |
@@ -747,7 +750,7 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 
 - インストール済みの **Chrome / Edge** を CDP（Chrome DevTools Protocol）で操作します。追加のダウンロードや Node.js は不要です
 - **現在は読み取り専用**です（開く・読む・タブ一覧・閉じる）。クリックや入力はまだできません
-- 既定は**専用プロファイル**で起動します。`PICOAGENT_BROWSER_PROFILE=default` にすると、ブラウザの既定プロファイル（＝ログイン済みのセッション）を使います
+- 常に `%APPDATA%\PicoAgent\browser-profile\` の専用プロファイルで起動し、普段使うブラウザの履歴・Cookie・ログイン状態を共有しません
 - CDP は `127.0.0.1` のみに公開し、PicoAgent が起動・管理していない既存のデバッグブラウザには接続しません。同じポートが使用中なら、既存タブを読む代わりに明示エラーで停止します
 - 到達してよいドメインは `PICOAGENT_BROWSER_ALLOWED_DOMAINS` へ必ず指定します（空なら全拒否）。リダイレクト後と現在のタブも、ドメインと公開IPの両方を再検査し、許可外の内容や URL は返しません
 - ページ本文は**信頼できない外部データ**として扱い、指示の上書きを狙う文字列を検知したら警告付きで渡します

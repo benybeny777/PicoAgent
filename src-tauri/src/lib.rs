@@ -202,9 +202,32 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
-            // WebViewの描画キャッシュと中断した取得途中だけを毎回回収する。
-            // 設定・会話・完成キャラ・導入済みモデルはapp data/bundled側なので保持する。
+            let managed_data = log_paths::data_dir(app.handle());
+            std::fs::create_dir_all(&managed_data)?;
+            if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
+                log_paths::append_app_log(
+                    app.handle(),
+                    &format!("旧保存先からのデータ移行に失敗しました: {error}"),
+                );
+            }
+            // WebViewを作るとキャッシュが直ちにロックされる。画面を作る前に、
+            // 描画キャッシュと中断した取得途中だけを回収する。
+            // 設定・会話・完成キャラ・導入済みモデルは削除対象に含めない。
             startup_cleanup::run(app.handle());
+            if app.get_webview_window("main").is_none() {
+                let config = app
+                    .config()
+                    .app
+                    .windows
+                    .iter()
+                    .find(|window| window.label == "main")
+                    .ok_or("mainウィンドウ設定がありません")?;
+                let webview_data = managed_data.join("webview/main");
+                std::fs::create_dir_all(&webview_data)?;
+                tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+                    .data_directory(webview_data)
+                    .build()?;
+            }
             character_maker::cleanup_startup(app.handle());
             components::init(app.handle());
             // 設定の正本を読み込み、選択中プロバイダ・モデル・会話を初期化する。
@@ -212,15 +235,9 @@ pub fn run() {
             // 設定まわりの失敗で `setup` を中断すると、`build()` の `expect` がそのまま
             // パニックになり、ウィンドウも案内画面も出ないまま終了する（＝利用者から見て
             // 「起動しない」）。保存先を決められない場合も、読み取り専用で起動だけは通す。
-            match app.path().app_config_dir() {
-                Ok(config_dir) => {
-                    if let Err(error) = migration::migrate_identity_dirs(app.handle(), &config_dir)
-                    {
-                        log_paths::append_app_log(
-                            app.handle(),
-                            &format!("旧識別子からのデータ移行に失敗しました: {error}"),
-                        );
-                    }
+            let config_dir = managed_data;
+            match std::fs::create_dir_all(&config_dir) {
+                Ok(()) => {
                     let config_path = config_dir.join("config.json");
                     match state.config.load(config_path) {
                         Ok(Some(warning)) => log_paths::append_app_log(app.handle(), &warning),
@@ -531,7 +548,7 @@ fn overlap(monitor: MonitorRect, x: i32, y: i32, win_w: u32, win_h: u32) -> (i32
     (overlap_w, overlap_h)
 }
 
-/// 収め直さずに尊重する重なりの下限。これだけ見えていれば掴んで動かせる。
+/// 収め直さずに尊重する重なりの下限。小さい窓でもこれだけ見えていれば掴んで動かせる。
 const MIN_GRABBABLE_PX: i32 = 80;
 
 /// 保存位置と最も重なるモニタを選び、掴める大きさが残っていなければ内側へ収め直す。
@@ -553,9 +570,11 @@ fn clamp_to_best_monitor(
     if overlap_w == 0 || overlap_h == 0 {
         return None;
     }
-    if overlap_w >= MIN_GRABBABLE_PX.min(win_w as i32)
-        && overlap_h >= MIN_GRABBABLE_PX.min(win_h as i32)
-    {
+    // 大きな窓に80pxだけの判定を使うと、配信形式の大半が画面外でも保存位置を
+    // 尊重してしまう。各辺の半分以上を見せつつ、小型ペットの端寄せは維持する。
+    let min_visible_w = MIN_GRABBABLE_PX.max(win_w as i32 / 2).min(win_w as i32);
+    let min_visible_h = MIN_GRABBABLE_PX.max(win_h as i32 / 2).min(win_h as i32);
+    if overlap_w >= min_visible_w && overlap_h >= min_visible_h {
         return Some((x, y));
     }
     let max_x = (monitor.x + monitor.width.saturating_sub(win_w) as i32).max(monitor.x);
@@ -1043,6 +1062,20 @@ mod window_layout_tests {
     }
 
     #[test]
+    fn 大きい配信窓は半分以上見える位置へ戻す() {
+        let right = vec![MonitorRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1200,
+        }];
+        assert_eq!(
+            clamp_to_best_monitor(&right, 1528, 509, 1280, 696),
+            Some((640, 504))
+        );
+    }
+
+    #[test]
     fn 保存位置が全モニタから外れていれば復元しない() {
         assert_eq!(
             clamp_to_best_monitor(&two_monitors(), 6000, 3000, 680, 430),
@@ -1093,10 +1126,11 @@ mod window_layout_tests {
             width: 1920,
             height: 1080,
         }];
-        // 旧解像度では右下に 360x140 が見えており、そのまま復元してよい。
+        // 旧解像度でも右下に360x140しか見えず、高さが窓の半分未満なので画面内へ戻す。
+        // 大型窓まで80pxだけ見えていればよい扱いにすると、今回の配信窓と同じ再発になる。
         assert_eq!(
             clamp_to_best_monitor(&before, 2200, 1300, 560, 430),
-            Some((2200, 1300))
+            Some((2000, 1010))
         );
         // 解像度を下げると重なりが無くなり、既定位置へ戻すしかなくなる。
         assert_eq!(clamp_to_best_monitor(&after, 2200, 1300, 560, 430), None);

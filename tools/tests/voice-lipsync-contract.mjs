@@ -47,6 +47,9 @@ test("読み上げ音量の未保存時初期値は35", () => {
   assert.equal((commands.match(/PICOAGENT_TTS_VOLUME", "35"/g) ?? []).length, 2);
   assert.match(settings, /PICOAGENT_TTS_VOLUME \?\? "35"/);
   assert.match(renderer, /^let voiceVolume = 0\.35;/m);
+  assert.match(renderer, /function voiceOutputGain\(\) \{\s*return voiceVolume \* voiceVolume;/);
+  assert.match(renderer, /PicoVoice = \{ speak: speakReply, stop: stopVoice, volume: \(\) => voiceVolume, gain: voiceOutputGain \}/);
+  assert.match(settings, /音声・ゲーム効果音の音量（0〜100・初期値35）/);
 });
 
 test("Aivisの時間軸から母音口形を選ぶ", () => {

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::config::Config;
 
@@ -29,11 +29,7 @@ pub struct MemoryStore {
 }
 
 pub fn path(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|error| anyhow::anyhow!("長期メモリの保存先を取得できません: {error}"))?
-        .join("memory.json"))
+    Ok(crate::log_paths::data_dir(app).join("memory.json"))
 }
 
 pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {

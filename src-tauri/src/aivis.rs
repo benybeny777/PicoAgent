@@ -103,7 +103,69 @@ pub fn port(app: &tauri::AppHandle, state: &AppState) -> u16 {
 }
 
 pub fn endpoint(app: &tauri::AppHandle, state: &AppState) -> String {
+    let external = state.config.get("PICOAGENT_TTS_ENDPOINT", "");
+    if !external.trim().is_empty() {
+        return external.trim().trim_end_matches('/').to_string();
+    }
     format!("http://127.0.0.1:{}", port(app, state))
+}
+
+pub fn uses_external_endpoint(state: &AppState) -> bool {
+    !state
+        .config
+        .get("PICOAGENT_TTS_ENDPOINT", "")
+        .trim()
+        .is_empty()
+}
+
+fn validate_external_endpoint(endpoint: &str) -> anyhow::Result<()> {
+    let url = reqwest::Url::parse(endpoint)
+        .map_err(|error| anyhow::anyhow!("外部VOICEVOX互換APIのURLが不正です: {error}"))?;
+    anyhow::ensure!(
+        url.scheme() == "http",
+        "外部VOICEVOX互換APIはローカルの http URLだけ指定できます"
+    );
+    anyhow::ensure!(
+        url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none(),
+        "外部VOICEVOX互換APIのURLに認証情報・クエリ・フラグメントは指定できません"
+    );
+    let host = url.host_str().unwrap_or_default();
+    anyhow::ensure!(
+        matches!(host, "127.0.0.1" | "localhost" | "::1"),
+        "外部VOICEVOX互換APIはこのPC上のURLだけ指定できます"
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+fn managed_user_profile_paths(data_dir: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    // AivisSpeech Engine は Windows の利用者プロファイルから保存先を決める。
+    // APPDATA だけでは Known Folder の参照先が変わらず、手動導入した Aivis と
+    // Models・辞書・キャッシュを共有していた。専用プロファイル4変数を同時に渡し、
+    // すべての実データを PicoAgent 管理下へ閉じ込める。
+    let profile = data_dir.join("aivis-userdata").join("profile");
+    let roaming = profile.join("AppData").join("Roaming");
+    let local = profile.join("AppData").join("Local");
+    let aivis_data = roaming.join("AivisSpeech-Engine");
+    (profile, roaming, local, aivis_data)
+}
+
+#[cfg(windows)]
+fn configure_managed_user_profile(
+    command: &mut std::process::Command,
+    data_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    let (profile, roaming, local, aivis_data) = managed_user_profile_paths(data_dir);
+    std::fs::create_dir_all(&roaming)?;
+    std::fs::create_dir_all(&local)?;
+    command.env("USERPROFILE", &profile);
+    command.env("HOME", &profile);
+    command.env("APPDATA", &roaming);
+    command.env("LOCALAPPDATA", &local);
+    Ok(aivis_data)
 }
 
 async fn is_up(endpoint: &str) -> bool {
@@ -1008,12 +1070,8 @@ fn spawn_engine(
         std::fs::create_dir_all(parent)?;
     }
     #[cfg(windows)]
-    {
-        let aivis_user_root = crate::log_paths::data_dir(app).join("aivis-userdata");
-        std::fs::create_dir_all(&aivis_user_root)?;
-        command.env("APPDATA", &aivis_user_root);
-        command.env("LOCALAPPDATA", &aivis_user_root);
-    }
+    let managed_user_data =
+        configure_managed_user_profile(&mut command, &crate::log_paths::data_dir(app))?;
     let mut log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1025,6 +1083,8 @@ fn spawn_engine(
         label,
         device.flag()
     )?;
+    #[cfg(windows)]
+    writeln!(log, "Aivis 利用者データ: {}", managed_user_data.display())?;
     let err_log = log.try_clone()?;
     command
         .stdin(Stdio::null())
@@ -1056,6 +1116,13 @@ fn spawn_engine(
 }
 
 pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    let Some(state) = app.try_state::<AppState>() else {
+        anyhow::bail!("AppState を取得できません。");
+    };
+    if uses_external_endpoint(&state) {
+        validate_external_endpoint(&endpoint(app, &state))?;
+        return Ok(());
+    }
     if has_running_child(app) {
         return Ok(());
     }
@@ -1113,7 +1180,12 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
     }
     let app_state = app.state::<AppState>();
     let endpoint = endpoint(app, &app_state);
-    if is_up(&endpoint).await {
+    if uses_external_endpoint(&app_state) {
+        validate_external_endpoint(&endpoint)?;
+        anyhow::ensure!(
+            is_up(&endpoint).await,
+            "明示設定した外部VOICEVOX互換APIへ接続できません: {endpoint}"
+        );
         return Ok(());
     }
     let mode = device_mode(&app_state);
@@ -1138,6 +1210,11 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
             }
         }
     }
+
+    anyhow::ensure!(
+        !is_up(&endpoint).await,
+        "Aivis用ポートがPicoAgent管理外のプロセスに使われています: {endpoint}。外部サービスを使う場合はPICOAGENT_TTS_ENDPOINTへ明示設定してください"
+    );
 
     match mode {
         DeviceMode::Cpu => {
@@ -1271,7 +1348,27 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::replace_install_tree;
+    use super::{replace_install_tree, validate_external_endpoint};
+
+    #[test]
+    fn 外部音声apiはローカルhttpだけを許可する() {
+        assert!(validate_external_endpoint("http://127.0.0.1:10101").is_ok());
+        assert!(validate_external_endpoint("http://localhost:50021").is_ok());
+        assert!(validate_external_endpoint("https://127.0.0.1:10101").is_err());
+        assert!(validate_external_endpoint("http://example.com:10101").is_err());
+        assert!(validate_external_endpoint("http://user:pass@localhost:10101").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn aivisの利用者データはpicoagent専用プロファイルへ固定する() {
+        let root = std::path::PathBuf::from(r"C:\PicoAgent");
+        let (_profile, roaming, local, actual) = super::managed_user_profile_paths(&root);
+        let profile = root.join("aivis-userdata").join("profile");
+        assert_eq!(roaming, profile.join("AppData/Roaming"));
+        assert_eq!(local, profile.join("AppData/Local"));
+        assert_eq!(actual, profile.join("AppData/Roaming/AivisSpeech-Engine"));
+    }
 
     #[test]
     fn aivis入れ替え失敗時は旧版を復元する() {

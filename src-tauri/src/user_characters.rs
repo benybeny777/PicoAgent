@@ -1,7 +1,7 @@
 // user_characters.rs - ユーザーが自分で追加したキャラクター（Live2D モデル等）の管理。
 //
 // 同梱キャラクターは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれる。
-// 実行時には書き換えられないため、**追加したキャラは `app_data_dir/characters/<id>/` に置く**。
+// 実行時には書き換えられないため、**追加したキャラは `PicoAgent/characters/<id>/` に置く**。
 // webview へは asset プロトコル（`convertFileSrc`）で読ませる。
 //
 // 導入はフォルダでも zip でも受け付ける。zip は「一時フォルダへ展開 → 検証 → rename で確定」
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::character_pack;
 
@@ -34,13 +34,9 @@ pub struct UserCharacter {
     pub mmd: bool,
 }
 
-/// 追加キャラクターの置き場（`app_data_dir/characters`）。
+/// 追加キャラクターの置き場（`PicoAgent/characters`）。
 pub fn root(app: &AppHandle) -> Result<PathBuf> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .context("追加キャラクターの保存先を取得できません")?
-        .join("characters"))
+    Ok(crate::log_paths::data_dir(app).join("characters"))
 }
 
 /// 導入済みの追加キャラクター一覧。壊れているものは飛ばして続ける。
