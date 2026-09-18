@@ -448,7 +448,7 @@ async function validateAiGames() {
 
     if (result.examCount !== 6 || result.stageCount !== 3 || result.difficultyCount !== 3
         || result.endingSlots !== 5 || result.score !== "83" || result.criteriaCount !== 5
-        || result.humanityFirst !== "7") {
+        || result.humanityFirst !== "10") {
       throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);
     }
     if (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
@@ -512,7 +512,7 @@ async function validateAiGames() {
 }
 
 // 定期監査（5問）を完走させ、人間度の累積と結末画面、記録の保存まで検査する。
-// 固定採点は83点なので、毎問 round(17 × 0.4 × 5 ÷ 5) = 7 上がり、35で監視付き通過になる。
+// 固定採点は110点満点中83点なので、毎問 round(27 × 40 ÷ 110) = 10 上がり、50で監視付き通過になる。
 async function validateAuditRun(output) {
   const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
   const result = { humanity: [], exams: [] };
@@ -540,9 +540,9 @@ async function validateAuditRun(output) {
     await page.waitForSelector(".game-endings");
     result.foundAfter = await page.locator('.game-endings li[data-found="true"]').count();
     result.calmest = await page.locator('input[name="gameStage"][value="normal"] ~ span').textContent();
-    if (new Set(result.exams).size !== 5 || result.humanity.join(",") !== "7,14,21,28,35"
+    if (new Set(result.exams).size !== 5 || result.humanity.join(",") !== "10,20,30,40,50"
         || result.lastButton !== "結末へ" || result.ending !== "監視付き通過エンド"
-        || result.foundAfter !== 1 || !result.calmest.includes("最小人間度 35")) {
+        || result.foundAfter !== 1 || !result.calmest.includes("最小人間度 50")) {
       throw new Error(`監査の進行が想定と異なります: ${JSON.stringify(result)}`);
     }
     if (!result.endingBox || result.endingBox.y < 32 || result.endingBox.y + result.endingBox.height > 760) {

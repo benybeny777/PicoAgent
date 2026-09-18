@@ -41,7 +41,9 @@ test("記録と効果音の保存は失敗しても画面を止めない", () =>
   assert.equal(game.match(/localStorage\.getItem\(/g)?.length, 1);
   assert.equal(game.match(/localStorage\.setItem\(/g)?.length, 1);
   // 人間度は低いほど良い記録なので、最小値を更新したときだけ書き戻す。
-  assert.match(game, /const saveCalmest = \(stage, humanity\) => \{[\s\S]*?if \(current !== null && current <= humanity\) return false;/);
+  assert.match(game, /const saveCalmest = \(stage, difficulty, humanity\) => \{[\s\S]*?if \(current !== null && current <= humanity\) return false;/);
+  // 制限時間も文字数も違うため、記録はステージと難易度の組ごとに分ける。
+  assert.match(game, /const calmestKey = \(stage, difficulty\) => `\$\{stage\}:\$\{difficulty\}`;/);
 });
 
 test("監査の試験は6種で各20題、故障カード8件を持つ", () => {
@@ -66,6 +68,11 @@ test("3・5・7問のどの監査でも人間度と結末の意味を揃える",
   // 問題数で割り戻さないと、短い監査ほど人間度が上がらず結末の条件が崩れる。
   assert.match(game, /const scale = AUDIT\.baseRounds \/ roundsOf\(session\.stage\);/);
   assert.match(game, /return Math\.round\(raw \* scale\);/);
+  // 人間度はおもしろボーナスを含む110点満点を基準にする。100点で割り戻すと、
+  // ボーナスで満点を超えた回答の人間度が負へ振れる。
+  assert.match(game, /const AI_SCORE_MAX = 110;/);
+  assert.match(game, /\(AI_SCORE_MAX - score\) \* \(AUDIT\.riseAtZero \/ AI_SCORE_MAX\)/);
+  assert.match(backend, /criterion\("fun_bonus", "おもしろボーナス", 10\)/);
   const endings = [...game.matchAll(/^\s*\["(perfect|watched|shaky|silent|exposed)", "/gm)].map(match => match[1]);
   assert.deepEqual(endings, ["perfect", "watched", "shaky", "silent", "exposed"]);
   assert.match(game, /writeStorage\(ENDINGS_KEY,/);
@@ -95,11 +102,31 @@ test("採点は通常会話と分離しRust側で固定配点を検査する", (
   assert.doesNotMatch(backend, /"infiltrate"/);
 });
 
+test("配信向けの短い回答と見本、称号、共通音量を保つ", () => {
+  // 一発ネタとしてテンポよく書ける長さに保つ（60/45/30秒、120/80/50文字）。
+  const difficulties = [...game.matchAll(/(easy|normal|hard): \{ label: "[^"]+", seconds: (\d+), maxLength: (\d+)/g)]
+    .map(match => [match[1], Number(match[2]), Number(match[3])]);
+  assert.deepEqual(difficulties, [["easy", 60, 120], ["normal", 45, 80], ["hard", 30, 50]]);
+  // やさしいだけ、いまのお題の答えにならない別のお題の見本を出す。
+  assert.equal(game.match(/^\s+example: "/gm)?.length, 6);
+  assert.match(game, /config\.hint \? `<div class="game-example">/);
+  assert.match(styles, /\.game-example \{/);
+  // おもしろボーナスは通常5項目と区別して見せる。
+  assert.match(game, /const bonus = item\.key === "fun_bonus";/);
+  assert.match(styles, /\.game-criteria \.game-criterion-bonus \{/);
+  // 効果音だけ本体の音量設定を迂回して大きく鳴らさない。
+  assert.match(game, /const masterGain = [^;]*window\.PicoVoice\?\.gain\?\.\(\)/);
+  assert.match(game, /0\.06 \* masterGain/);
+  // 抜けた結末には難易度に応じた称号を添える。
+  assert.match(game, /const RANKS = \{ easy: "[^"]+", normal: "[^"]+", hard: "[^"]+" \};/);
+  assert.match(game, /称号：\$\{escapeHtml\(RANKS\[session\.difficulty\]\)\}/);
+});
+
 test("ゲームは通常の読み上げ経路と設定を共有する", () => {
   assert.match(renderer, /window\.PicoVoice = \{ speak: speakReply, stop: stopVoice, volume: \(\) => voiceVolume, gain: voiceOutputGain \}/);
   assert.match(game, /speakGame\(`第\$\{round \+ 1\}問/);
   assert.match(game, /speakGame\(`人間度、プラス\$\{result\.rise\}/);
-  assert.match(game, /speakGame\(`\$\{name\}。\$\{line\}`\)/);
+  assert.match(game, /speakGame\(`\$\{name\}。\$\{line\}\$\{cleared \? `称号は、/);
   assert.match(styles, /\.game-overlay/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
   assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*height:72%;[^}]*overflow:visible;/);

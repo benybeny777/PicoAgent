@@ -343,6 +343,13 @@ body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .c
 .game-final-actions,.game-error > div { display:flex; justify-content:center; gap:10px; }
 .game-error { padding:28px; border:1px solid rgba(255,140,150,.3); border-radius:18px; background:rgba(160,40,60,.14); text-align:center; }
 .game-error strong { font-size:21px; }.game-error p { color:#f0dfe2; line-height:1.6; }
+.game-example { margin-top:9px; padding:10px 12px; border:1px dashed rgba(255,255,255,.28); border-radius:12px; background:rgba(255,255,255,.06); }
+.game-example small { display:block; margin-bottom:4px; color:#ffb6d0; font-weight:800; }
+.game-example p { margin:0; color:#fff; font-size:13px; line-height:1.55; }
+.game-criteria .game-criterion-bonus { border:1px solid rgba(255,190,90,.38); background:rgba(255,174,65,.11); }
+.game-criteria .game-criterion-bonus strong,.game-criteria .game-criterion-bonus span { color:#ffd28a; }
+.game-criteria .game-criterion-bonus meter { accent-color:#ffb74f; }
+.game-rank { margin:-12px 0 14px; color:#ffd28a; font-size:13px; font-weight:800; letter-spacing:.06em; }
 .game-humanity { display:grid; grid-template-columns:auto 1fr 64px; align-items:center; gap:12px; margin:0 0 12px; padding:10px 14px; border:1px solid rgba(120,220,200,.3); border-radius:14px; background:rgba(40,120,110,.14); --game-humanity:#5fd6bd; }
 .game-humanity[data-level="warn"] { border-color:rgba(246,200,95,.4); background:rgba(160,120,30,.14); --game-humanity:#f6c85f; }
 .game-humanity[data-level="danger"] { border-color:rgba(255,110,120,.45); background:rgba(160,40,60,.18); --game-humanity:#ff6f7d; }

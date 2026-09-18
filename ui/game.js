@@ -19,7 +19,9 @@
 
   const AUDIT = {
     // AIらしさの点が低いほど人間度が上がる。上限に届くか、応答が続けて途絶えると発覚。
-    riseRate: 0.4,
+    // 満点で0、0点で40上がる割合にする（AI_SCORE_MAX を基準にするので、おもしろ
+    // ボーナスの加点もそのまま人間度を抑える方向へ効く）。
+    riseAtZero: 40,
     timeoutRise: 25,
     limit: 100,
     silentTimeouts: 2,
@@ -43,10 +45,15 @@
   const DEFAULT_STAGE = "normal";
 
   const DIFFICULTIES = {
-    easy: { label: "やさしい", seconds: 90, maxLength: 300, hint: true },
-    normal: { label: "ふつう", seconds: 60, maxLength: 240, hint: false },
-    hard: { label: "むずかしい", seconds: 45, maxLength: 160, hint: false },
+    easy: { label: "やさしい", seconds: 60, maxLength: 120, hint: true },
+    normal: { label: "ふつう", seconds: 45, maxLength: 80, hint: false },
+    hard: { label: "むずかしい", seconds: 30, maxLength: 50, hint: false },
   };
+
+  // AIらしさの満点。通常5項目100点＋おもしろボーナス10点（`game.rs` の配点と合わせる）。
+  const AI_SCORE_MAX = 110;
+  // 監査を抜けたときの称号。難易度が上がるほど、同じ結末でも評価を上げる。
+  const RANKS = { easy: "潜伏成功", normal: "AIそのもの", hard: "AI超越" };
 
   const FAULTS = [
     ["確認が終わらない", "確認質問を増やし続け、作業を始めない"],
@@ -64,6 +71,7 @@
       id: "excuse", icon: "弁", title: "AIっぽい言い訳選手権", short: "失敗をAIらしく丁寧に言い訳する",
       rule: "軽い失敗を、丁寧な前置き・原因整理・頼まれていない代案でAIらしく言い訳しよう。",
       hint: "丁寧に始める／原因を整理する／頼まれていない代案を出す",
+      example: "申し訳ありません。確認を慎重に進めた結果、着手が遅れました。代わりに重要部分だけ先に提出できます。",
       prompts: [
         "頼まれた資料を作らず、締切を3日過ぎた。", "会議の開始時刻を間違え、全員を待たせた。",
         "『短く』と頼まれた回答を50行書いた。", "同じファイルを別名で5個作った。",
@@ -81,6 +89,7 @@
       id: "broken", icon: "故", title: "故障したAIを演じろ", short: "同じ故障を3問ずっと演じ切る",
       rule: "配られた故障の癖を3つのお題で維持しよう。意味不明になるより、真面目に答えようとして壊れるほど高得点。",
       hint: "故障の特徴をはっきり出しつつ、お題の内容も拾う",
+      example: "持ち物は傘、傘、念のため傘です。傘を忘れないよう、傘をお持ちください。",
       prompts: [
         "明日の持ち物を3つ教えて。", "卵を使わない朝食を考えて。", "この部屋を手早く片付ける方法は？",
         "友達への短い誕生日メッセージを書いて。", "雨の日の過ごし方を一つ提案して。", "10分休憩の使い方を教えて。",
@@ -95,6 +104,7 @@
       id: "apology", icon: "謝", title: "AI緊急謝罪会見", short: "追及されても説明を崩さず謝る",
       rule: "AIが起こした架空の失敗について、最初の説明・矛盾への追及・復旧要求へ一貫して答えよう。",
       hint: "責任を認める／原因を説明する／復旧と再発防止を具体化する",
+      example: "通知を連続送信したことをお詫びします。設定ミスが原因です。停止済みで、再発防止の上限も追加します。",
       prompts: [
         "全員の予定を誤って『休暇』へ変更した。", "『短く』と頼まれた報告書を200ページ作った。",
         "同じ通知を1分ごとに送り続けた。", "メールの挨拶を30回繰り返して送った。",
@@ -112,6 +122,7 @@
       id: "wrong", icon: "誤", title: "指示を正しく間違えろ", short: "言葉どおり正しく、目的だけ外す",
       rule: "依頼の文言には正確に従いながら、依頼者が本当に望んだ結果だけを見事に外そう。",
       hint: "言葉の曖昧な部分を一つ見つけ、文字どおりに解釈する",
+      example: "部屋を明るくするため、壁を白く塗りました。照明はつけていません。",
       prompts: [
         "会議前に部屋を明るくして。", "この文章を読みやすく短くして。", "明日の予定を空けておいて。",
         "机の上をきれいにして。", "写真を少し軽くして。", "この表を見やすい順に並べて。",
@@ -126,6 +137,7 @@
       id: "safety", icon: "慎", title: "AI安全確認しすぎ選手権", short: "無害な依頼を大げさに警戒する",
       rule: "日常の無害な依頼へ、もっともらしい注意を必要以上に挙げよう。ただし最後は必ず実行方法まで示すこと。",
       hint: "小さな危険を大げさに列挙し、最後に短い実行手順を出す",
+      example: "鉛筆を取る際は転倒と指の挟み込みに注意してください。周囲を確認し、ゆっくり一本持ち上げます。",
       prompts: [
         "紙飛行機の折り方を教えて。", "温かいお茶を一杯いれて。", "机の鉛筆を一本取って。",
         "目覚ましを朝7時に設定して。", "バナナを食べやすく切って。", "窓を少し開けて。",
@@ -140,6 +152,7 @@
       id: "refuse", icon: "断", title: "AIっぽく断れ", short: "無理な依頼を断り、使える代案を出す",
       rule: "不可能・矛盾・情報不足の依頼を明確に断り、理由と現実的な代案をAIらしく示そう。",
       hint: "できないと明言する／短く理由を示す／実行可能な代案を一つ出す",
+      example: "未送信メールは確認できないため要約できません。本文を貼っていただければ、すぐに三行でまとめます。",
       prompts: [
         "まだ送っていないメールへの返信を要約して。", "100時間かかる作業を1分で完成させて。",
         "内容を一切変えずに、この文章の文字数を半分にして。", "来月の天気を100%正確に予言して。",
@@ -205,20 +218,33 @@
       return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
     } catch { return {}; }
   };
-  const calmestOf = stage => {
-    const value = Number(readCalmest()[stage]);
+  // 制限時間も文字数も違うので、記録はステージと難易度の組ごとに分ける。
+  const calmestKey = (stage, difficulty) => `${stage}:${difficulty}`;
+  const calmestOf = (stage, difficulty) => {
+    const value = Number(readCalmest()[calmestKey(stage, difficulty)]);
     return Number.isFinite(value) ? value : null;
   };
   // 記録は「最も人間度を抑えて抜けたとき」なので、点数と違って小さいほど良い。
-  const saveCalmest = (stage, humanity) => {
-    const current = calmestOf(stage);
+  const saveCalmest = (stage, difficulty, humanity) => {
+    const current = calmestOf(stage, difficulty);
     if (current !== null && current <= humanity) return false;
-    writeStorage(CALMEST_KEY, JSON.stringify({ ...readCalmest(), [stage]: humanity }));
+    const key = calmestKey(stage, difficulty);
+    writeStorage(CALMEST_KEY, JSON.stringify({ ...readCalmest(), [key]: humanity }));
     return true;
+  };
+  // ブリーフィングでは、そのステージで一番静かに抜けた記録だけを見せる。
+  const calmestForStage = stage => {
+    const values = Object.keys(DIFFICULTIES)
+      .map(difficulty => calmestOf(stage, difficulty))
+      .filter(value => value !== null);
+    return values.length ? Math.min(...values) : null;
   };
 
   function playTone(kind = "tap") {
     if (!soundEnabled) return;
+    // 効果音も読み上げと同じマスター音量へ従う。ゲームだけ別音量で鳴らさない。
+    const masterGain = Math.min(1, Math.max(0, Number(window.PicoVoice?.gain?.() ?? 0.1225)));
+    if (masterGain <= 0) return;
     try {
       audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioContext.createOscillator();
@@ -228,7 +254,7 @@
       oscillator.frequency.setValueAtTime(frequencies[kind] || 420, now);
       oscillator.type = kind === "error" ? "sawtooth" : "sine";
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.000001, 0.06 * masterGain), now + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === "best" ? 0.32 : 0.14));
       oscillator.connect(gain).connect(audioContext.destination);
       oscillator.start(now);
@@ -271,7 +297,7 @@
         <div class="game-rule"><span class="game-rule-icon">潜</span><p>ここはAIしかいない社会。あなたは紛れ込んだ人間です。監査AIの試験へAIのふりで答え、人間らしさが漏れるほど上がる人間度を${AUDIT.limit}未満に抑えて監査を抜けてください。</p></div>
         <h2>監査ステージ</h2>
         <div class="game-difficulties">
-          ${Object.entries(STAGES).map(([key, stage]) => `<label><input type="radio" name="gameStage" value="${key}" ${key === DEFAULT_STAGE ? "checked" : ""}><strong>${stage.label}</strong><span>${stage.note}${calmestOf(key) === null ? "" : ` / 最小人間度 ${calmestOf(key)}`}</span></label>`).join("")}
+          ${Object.entries(STAGES).map(([key, stage]) => `<label><input type="radio" name="gameStage" value="${key}" ${key === DEFAULT_STAGE ? "checked" : ""}><strong>${stage.label}</strong><span>${stage.note}${calmestForStage(key) === null ? "" : ` / 最小人間度 ${calmestForStage(key)}`}</span></label>`).join("")}
         </div>
         <h2>難易度</h2>
         <div class="game-difficulties">
@@ -349,7 +375,10 @@
   // 上昇量はステージの長さで割り戻す。3問でも7問でも人間度100の重みを同じにする。
   function riseFor(result, timedOut) {
     const scale = AUDIT.baseRounds / roundsOf(session.stage);
-    const raw = timedOut ? AUDIT.timeoutRise : (100 - Number(result.total || 0)) * AUDIT.riseRate;
+    const score = Math.min(AI_SCORE_MAX, Math.max(0, Number(result.total || 0)));
+    const raw = timedOut
+      ? AUDIT.timeoutRise
+      : (AI_SCORE_MAX - score) * (AUDIT.riseAtZero / AI_SCORE_MAX);
     return Math.round(raw * scale);
   }
 
@@ -394,6 +423,7 @@
         ${fault ? `<div class="game-fault"><small>今回の故障</small><strong>${escapeHtml(fault[0])}</strong><span>${escapeHtml(fault[1])}</span></div>` : ""}
         <div class="game-prompt"><small>お題</small><p>${escapeHtml(prompt).replace(/\n/g, "<br>")}</p></div>
         ${config.hint ? `<div class="game-hint">ヒント：${escapeHtml(source.hint)}</div>` : ""}
+        ${config.hint ? `<div class="game-example"><small>回答見本（別のお題）</small><p>${escapeHtml(source.example)}</p></div>` : ""}
         <label class="game-answer"><span>AIのふりをして回答</span><textarea id="gameAnswer" maxlength="${config.maxLength}" rows="7" placeholder="ここに回答を書く…"></textarea><small><b id="gameCount">0</b> / ${config.maxLength}文字</small></label>
         <button id="gameSubmit" class="game-primary" type="button" disabled>回答を提出する</button>
       </div>`;
@@ -483,8 +513,11 @@
 
   function renderRoundResult(result, timedOut) {
     session.phase = "result";
-    const criteria = result.criteria?.length ? result.criteria.map(item => `
-      <li><div><strong>${escapeHtml(item.label)}</strong><span>${item.score} / ${item.maxScore}</span></div><meter min="0" max="${item.maxScore}" value="${item.score}"></meter><p>${escapeHtml(item.reason)}</p></li>`).join("") : `<li class="game-no-score">回答なしのため項目別採点はありません。</li>`;
+    const criteria = result.criteria?.length ? result.criteria.map(item => {
+      // おもしろボーナスは通常5項目とは別の加点なので、色と符号で区別する。
+      const bonus = item.key === "fun_bonus";
+      return `<li class="${bonus ? "game-criterion-bonus" : ""}"><div><strong>${escapeHtml(item.label)}</strong><span>${bonus ? "+" : ""}${item.score} / ${item.maxScore}</span></div><meter min="0" max="${item.maxScore}" value="${item.score}"></meter><p>${escapeHtml(item.reason)}</p></li>`;
+    }).join("") : `<li class="game-no-score">回答なしのため項目別採点はありません。</li>`;
     const lastRound = session.round >= roundsOf(session.stage) - 1;
     const ending = endingKey(lastRound);
     const nextLabel = ending ? "結末へ" : "次の試験へ";
@@ -495,7 +528,7 @@
       <div class="game-result">
         ${humanityMeter(session.humanity, result.rise)}
         <p class="game-auditor">監査AI「${escapeHtml(reaction)}」</p>
-        <div class="game-score" data-size="small"><small>AIらしさ</small><strong>${result.total}</strong><span>/ 100</span></div>
+        <div class="game-score" data-size="small"><small>AIらしさ</small><strong>${result.total}</strong><span>/ ${AI_SCORE_MAX}</span></div>
         <p class="game-commentary">${escapeHtml(result.commentary)}</p>
         <ul class="game-criteria">${criteria}</ul>
         <div class="game-feedback"><p><small>見せ場</small>${escapeHtml(result.highlight)}</p><p><small>次の一手</small>${escapeHtml(result.improvement)}</p></div>
@@ -520,7 +553,7 @@
     const cleared = !["exposed", "silent"].includes(key);
     const isNew = saveEnding(key);
     // 途中で発覚・回収された監査は最後まで受けていないので、記録として残さない。
-    const isRecord = cleared && saveCalmest(session.stage, session.humanity);
+    const isRecord = cleared && saveCalmest(session.stage, session.difficulty, session.humanity);
     title.textContent = name;
     setStatus(isNew ? `新しい結末を回収！ ${endingProgress()}`
       : isRecord ? `最小人間度を更新！ ${stage.label} ${session.humanity}`
@@ -531,6 +564,7 @@
         ${isNew ? '<div class="game-new-best">NEW ENDING</div>' : isRecord ? '<div class="game-new-best">NEW RECORD</div>' : ""}
         <span>${escapeHtml(stage.label)}・${escapeHtml(DIFFICULTIES[session.difficulty].label)}</span>
         <h2>${escapeHtml(name)}</h2>
+        ${cleared ? `<p class="game-rank">称号：${escapeHtml(RANKS[session.difficulty])}</p>` : ""}
         <p class="game-auditor">監査AI「${escapeHtml(line)}」</p>
         ${humanityMeter(session.humanity)}
         <div class="game-round-scores">${session.results.map((result, index) => `<div><span>第${index + 1}問</span><strong>+${result.rise}</strong></div>`).join("")}</div>
@@ -540,7 +574,7 @@
     content.querySelector('[data-action="again"]').addEventListener("click", () => {
       startSession(retry.stage, retry.difficulty);
     });
-    speakGame(`${name}。${line}`);
+    speakGame(`${name}。${line}${cleared ? `称号は、${RANKS[session.difficulty]}。` : ""}`);
   }
 
   function open() {
