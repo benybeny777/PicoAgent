@@ -1372,6 +1372,7 @@ function createTabs(items) {
       id: `tab-${item.id}`,
       textContent: item.label,
       type: "button",
+      tabIndex: selected ? 0 : -1,
     });
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", selected ? "true" : "false");
@@ -1389,6 +1390,7 @@ function createTabs(items) {
         const active = tab === button;
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", active ? "true" : "false");
+        tab.tabIndex = active ? 0 : -1;
       }
       for (const current of panels.children) {
         const active = current === panel;
@@ -1397,6 +1399,20 @@ function createTabs(items) {
       }
       form.scrollTop = 0;
       applySettingsSearch();
+    });
+    button.addEventListener("keydown", event => {
+      if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+      const tabButtons = [...tabs.querySelectorAll(".tab")];
+      const index = tabButtons.indexOf(button);
+      let next;
+      if (["ArrowRight", "ArrowDown"].includes(event.key)) next = (index + 1) % tabButtons.length;
+      else if (["ArrowLeft", "ArrowUp"].includes(event.key)) next = (index - 1 + tabButtons.length) % tabButtons.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabButtons.length - 1;
+      else return;
+      event.preventDefault();
+      tabButtons[next].click();
+      tabButtons[next].focus();
     });
     tabs.append(button);
     panels.append(panel);

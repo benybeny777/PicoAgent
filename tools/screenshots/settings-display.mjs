@@ -162,6 +162,14 @@ try {
     }
   }
   await page.waitForSelector(".layout-card-grid .layout-card");
+  const displayTab = page.getByRole("tab", { name: "画面・操作", exact: true });
+  await displayTab.focus();
+  for (const [key, expected] of [["Home", "基本設定"], ["End", "診断・修復"], ["ArrowRight", "基本設定"], ["ArrowLeft", "診断・修復"], ["Home", "基本設定"], ["ArrowDown", "画面・操作"]]) {
+    await page.keyboard.press(key);
+    const tab = page.getByRole("tab", { name: expected, exact: true });
+    if (await tab.getAttribute("aria-selected") !== "true" || !(await tab.evaluate(node => node === document.activeElement))) throw new Error(`${key}で設定タブを移動できません`);
+    if (await page.locator('.tabs .tab[tabindex="0"]').count() !== 1) throw new Error("Tabキーの移動先が選択中のタブに絞られていません");
+  }
   const cardCount = await page.locator(".layout-card").count();
   if (cardCount !== 7) throw new Error(`表示形式カードが7件ではありません: ${cardCount}`);
   await page.waitForFunction(() => [...document.querySelectorAll(".layout-card img")].every(image => image.complete && image.naturalWidth > 0));
