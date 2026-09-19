@@ -264,6 +264,9 @@ try {
   await skillGenres.getByRole("button", { name: "SNS/投稿", exact: true }).click();
   if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "SNS/投稿") throw new Error("スキルの絞り込み状態が読み上げに反映されません");
   if (await page.locator(".card-item:visible").filter({ hasText: "Google スプレッドシート" }).count()) throw new Error("ジャンル外のスキルが表示されています");
+  await page.locator("#settingsSearch").fill("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN");
+  if (await page.locator("#status").textContent() !== "検索に一致する設定はありません") throw new Error("ジャンルで隠れた設定だけの一致が検索結果として残っています");
+  await page.locator("#clearSettingsSearch").click();
   await skillGenres.getByRole("button", { name: "すべて", exact: true }).click();
   if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "すべて") throw new Error("絞り込み解除後の状態が読み上げに反映されません");
   for (const key of ["PICOAGENT_MCP_SERVERS", "PICOAGENT_API_ENABLED"]) {

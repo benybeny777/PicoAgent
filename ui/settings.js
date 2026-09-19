@@ -386,7 +386,14 @@ function applySettingsSearch() {
       continue;
     }
     const ownMatch = nodeSearchText(sectionNode.querySelector("h2") || sectionNode).includes(query);
-    const childMatch = [...sectionNode.querySelectorAll(".searchable")].some(item => !item.hidden);
+    const childMatch = [...sectionNode.querySelectorAll(".searchable")].some(item => {
+      if (item.hidden) return false;
+      for (let parent = item.parentElement; parent && parent !== sectionNode; parent = parent.parentElement) {
+        // セクションと詳細グループの表示は検索結果から再計算する。ジャンルなどの非表示条件だけを先に尊重する。
+        if (parent.hidden && !parent.matches(".section, .advanced-group")) return false;
+      }
+      return true;
+    });
     sectionNode.hidden = !(ownMatch || childMatch);
   }
   // 「詳細設定」などの折りたたみ: 中身が一致したら開いて見せ、一致しなければ畳んで隠す。
