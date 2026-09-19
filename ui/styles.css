@@ -467,7 +467,7 @@ html[data-theme="dark"] .window-caption-controls > .window-close:focus-visible {
 .history-item.user .history-meta { flex-direction:row-reverse; }
 .history-item.user .history-body { background:var(--user-msg); }
 .history-item.assistant .history-body { background:var(--assistant-msg); }
-.history-empty { padding:14px 8px; color:var(--muted); font-size:12px; text-align:center; }
+.history-empty { padding:14px 8px; color:var(--ink); font-size:12px; line-height:1.7; text-align:center; }
 .reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:none; -webkit-user-select:none; overflow:auto; }
 /* 字幕・回答欄は選択できなくてよい。選択が残ると字幕が薄く見えなくなるため、子要素も禁止し、万一の選択も塗らない。 */
 .reply *, .reply .md, .reply .md * { user-select:none; -webkit-user-select:none; }

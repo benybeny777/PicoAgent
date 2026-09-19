@@ -3093,7 +3093,10 @@ function renderHistoryRows() {
   const stickToBottom = historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
   historyLog.replaceChildren();
   if (!conversationHistory.length && !historyThinking) {
-    historyLog.append(document.createElement("div"));
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "まだ会話はありません。入力欄から話しかけてください。";
+    historyLog.append(empty);
     return;
   }
   const query = historyQuery.trim().toLowerCase();

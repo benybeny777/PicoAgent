@@ -121,6 +121,7 @@ test("最初の添付のみの送信でも検索結果なしではなく考え�
   context.historyThinking = false;
   context.renderHistoryRows();
   assert.equal(historyLog.children.some(item => item.className?.includes("history-thinking")), false);
+  assert.match(historyLog.children[0].textContent, /まだ会話はありません/);
 });
 
 test("会話リセット後に旧質問の再生成や旧回答のコピーと読み上げをしない", () => {
