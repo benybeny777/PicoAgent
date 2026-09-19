@@ -3564,6 +3564,7 @@ async function render() {
           const result = await window.picoagent.settings.renameCharacter(character.id, nextName);
           character.name = result.name;
           renameInput.value = result.name;
+          renameInput.setAttribute("aria-label", `${result.name}の表示名`);
           nameText.textContent = result.name;
           icon.alt = `${result.name}のアイコン`;
           const option = [...characterSelect.options].find(item => item.value === character.id);

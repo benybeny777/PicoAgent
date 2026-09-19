@@ -358,7 +358,7 @@ try {
   await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
   const userCard = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await userCard.waitFor();
-  const renameInput = userCard.getByRole("textbox", { name: "追加テストの表示名" });
+  const renameInput = userCard.locator(".character-rename-row input");
   await renameInput.fill("変換中の名前");
   for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
     const prevented = await renameInput.evaluate((node, composing) => {
@@ -373,6 +373,7 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
     .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
   if (!(await userCard.textContent())?.includes("Nicole")) throw new Error("追加キャラの表示名がカードへ反映されません");
+  if (await renameInput.getAttribute("aria-label") !== "Nicoleの表示名") throw new Error("名前変更後の入力欄が以前の名前で読み上げられます");
   const renamedOption = await page.locator('select option[value="user-test"]').textContent();
   if (!renamedOption?.includes("Nicole") || !renamedOption.includes("user-test")) {
     throw new Error(`追加キャラの表示名または内部IDが選択肢へ反映されません: ${renamedOption}`);
