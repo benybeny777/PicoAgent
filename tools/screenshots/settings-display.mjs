@@ -288,6 +288,19 @@ try {
   await verifyLongSkillLabels(600);
   await verifyLongSkillLabels(400);
   await page.setViewportSize({ width: 960, height: 760 });
+  // 検索で一時的に変わった開閉状態は、検索語を変更しても元の状態へ戻す。
+  const blueskyCard = page.locator(".card-item").filter({ hasText: "Bluesky" });
+  await blueskyCard.click();
+  await page.locator("#settingsSearch").fill("Bluesky");
+  if (!(await blueskyCard.getAttribute("class"))?.includes("open")) throw new Error("検索に一致するスキル設定が開きません");
+  await page.locator("#settingsSearch").fill("Microsoft Graph");
+  await page.locator("#clearSettingsSearch").click();
+  for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
+    const card = page.locator(".card-item").filter({ hasText: name });
+    const open = await card.evaluate(node => node.classList.contains("open") && !node.nextElementSibling.hidden);
+    if (open !== (name !== "Bluesky")) throw new Error(`${name}の検索前の開閉状態が復元されません`);
+  }
+  await blueskyCard.click();
   for (const tabName of ["キャラ登録", "キャラ選択", "キャラの音声"]) {
     if (await page.getByRole("tab", { name: tabName, exact: true }).count() !== 1) throw new Error(`${tabName}タブが独立していません`);
   }

@@ -341,6 +341,7 @@ function applySettingsSearch() {
   for (const panel of form.querySelectorAll(".card-config")) {
     const card = panel.previousElementSibling;
     if (query) {
+      if (panel.dataset.userOpen == null) panel.dataset.userOpen = card?.classList.contains("open") ? "1" : "0";
       const open = nodeSearchText(panel).includes(query);
       panel.hidden = !open;
       if (card) {
@@ -348,6 +349,10 @@ function applySettingsSearch() {
         if (open) card.hidden = false;
       }
     } else {
+      if (panel.dataset.userOpen != null) {
+        card?.classList.toggle("open", panel.dataset.userOpen === "1");
+        delete panel.dataset.userOpen;
+      }
       panel.hidden = !(card && card.classList.contains("open"));
     }
   }
