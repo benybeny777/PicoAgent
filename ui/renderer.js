@@ -4465,7 +4465,7 @@ composer.addEventListener("submit", async event => {
     if (window.picoagent.listen) {
       if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; } // 多重購読防止
       unlistenStatus = await window.picoagent.listen("pet:agent_status", (progress) => {
-        if (busy && typeof progress === "string" && progress) {
+        if (busy && requestRevision === conversationRevision && typeof progress === "string" && progress) {
           // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
           setThinkingUi(true, status.textContent);
@@ -4486,7 +4486,7 @@ composer.addEventListener("submit", async event => {
     if (window.picoagent.listen) {
       if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
       unlistenActivity = await window.picoagent.listen("pet:agent_activity", activity => {
-        if (!busy || !activity || typeof activity !== "object") return;
+        if (!busy || requestRevision !== conversationRevision || !activity || typeof activity !== "object") return;
         const tools = Array.isArray(activity.tools) ? activity.tools.filter(name => typeof name === "string") : [];
         for (const name of tools) jobTools.add(name);
         if (activity.phase === "started") jobDidWork = tools.length > 0;
@@ -4527,6 +4527,7 @@ composer.addEventListener("submit", async event => {
         if (!streamRenderFrame) {
           streamRenderFrame = requestAnimationFrame(() => {
             streamRenderFrame = null;
+            if (!busy || requestRevision !== conversationRevision) return;
             // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
             const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
             renderMarkdown(reply, streamBuffer);
@@ -5444,7 +5445,10 @@ window.picoagent.on("pet:reset", () => {
   lastUserFiles = [];
   historyQuery = "";
   if (historySearch) historySearch.value = "";
-  renderHistory();
+  if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+  streamBuffer = "";
+  cancelStreamSpeech();
+  setThinkingUi(false);
   stopVoice();
   renderReply("新しい話をしよう。");
   closeComposer();

@@ -131,6 +131,9 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
     lastUserText: "古い質問", lastAssistantText: "古い回答", lastUserImages: ["画像"], lastUserFiles: ["資料"],
     historyQuery: "古い検索", historySearch: { value: "古い検索" },
     reply: { textContent: "古い回答" }, input: { value: "未送信の下書き" },
+    streamRenderFrame: 12, streamBuffer: "リセット前の返答", historyThinking: true,
+    cancelAnimationFrame(id) { assert.equal(id, 12); }, cancelStreamSpeech() {},
+    setThinkingUi(active) { context.historyThinking = active; },
     renderHistory() {}, stopVoice() {}, closeComposer() {}, scheduleChatter() {},
     renderReply(text) { context.reply.textContent = text; },
   });
@@ -143,6 +146,45 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
   assert.equal(context.lastAssistantText || context.reply.textContent, "新しい話をしよう。");
   assert.equal(context.input.value, "未送信の下書き");
   assert.equal(context.conversationHistory.length, 0);
+  assert.equal(context.streamRenderFrame, null);
+  assert.equal(context.streamBuffer, "");
+  assert.equal(context.historyThinking, false);
+});
+
+test("リセット前の進捗と予約済みストリーム描画は画面へ戻らない", async () => {
+  const callbacks = {};
+  let frame;
+  let renders = 0;
+  let activities = 0;
+  const context = vm.createContext({
+    window: { picoagent: { async listen(name, callback) { callbacks[name] = callback; } } },
+    busy: true, requestRevision: 0, conversationRevision: 0,
+    status: { textContent: "" }, setThinkingUi() {}, upsertJob() {}, jobId: "検証", setAnimation() {},
+    taskRun: { status() {}, activity() { activities++; } }, jobTools: new Set(), jobDidWork: false, jobToolFailed: false,
+    streamBuffer: "", historyThinking: false, currentLayout: "chat", feedStreamSpeech() {},
+    reply: { classList: { add() {} }, scrollHeight: 100, scrollTop: 0, clientHeight: 100 },
+    streamRenderFrame: null, requestAnimationFrame(callback) { frame = callback; return 1; },
+    renderMarkdown() { renders++; }, animationName: "idle",
+  });
+  const registrations = ["unlistenStatus", "unlistenActivity", "unlistenStream"].map(name => {
+    const start = renderer.indexOf(`${name} = await window.picoagent.listen(`);
+    const end = renderer.indexOf("\n      });", start) + "\n      });".length;
+    return renderer.slice(start, end);
+  }).join("\n");
+  await vm.runInContext(`(async () => { ${registrations} })()`, context);
+  callbacks["pet:agent_status"]("処理中");
+  callbacks["pet:agent_activity"]({ phase: "started", tools: ["検証"] });
+  callbacks["pet:stream_chunk"]("古い返答");
+  assert.equal(context.status.textContent, "処理中");
+  assert.equal(activities, 1);
+  context.conversationRevision++;
+  context.status.textContent = "新しい会話";
+  callbacks["pet:agent_status"]("古い進捗");
+  callbacks["pet:agent_activity"]({ phase: "started", tools: ["古い処理"] });
+  frame();
+  assert.equal(context.status.textContent, "新しい会話");
+  assert.equal(activities, 1);
+  assert.equal(renders, 0);
 });
 
 test("リセット前の通信失敗は新しい会話に書き戻さず通常の失敗は表示する", () => {
