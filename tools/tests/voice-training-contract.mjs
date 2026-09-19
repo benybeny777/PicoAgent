@@ -64,6 +64,10 @@ test("合間が0件の統計を閾値超過として記録しない", () => {
 
 test("AIVMX書き出しは採用チェックポイントからONNXを作り直す", () => {
   assert.match(trainer, /保存済みチェックポイントが停止目標/);
+  assert.match(trainer, /if \(\$Stage -ne 'export'\)/);
+  assert.match(trainer, /model_assets\\\$Dataset/);
+  assert.match(trainer, /\[string\]::Equals\(\$assetDir, \$expectedAssetDir/);
+  assert.match(trainer, /\$assetConfig\.model_name -cne \$Dataset/);
   assert.match(trainer, /\$checkpointCopy = Join-Path/);
   assert.match(trainer, /'convert_onnx\.py', '--model', \$checkpointCopy/);
   assert.doesNotMatch(trainer, /if \(-not \(Test-Path -LiteralPath \$onnx\)\)/);

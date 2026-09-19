@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   入力は scripts/select-voice-training-clips.py が作った Data/<Dataset>（raw/ と esd.list）。
-  SBV2の共有設定 config.yml の model_name / dataset_path を毎回このデータセットへ合わせてから実行する。
+  前処理と学習では、SBV2の共有設定 config.yml の model_name / dataset_path を毎回このデータセットへ合わせてから実行する。
   合わせないまま別キャラを続けて扱うと、train_ms_jp_extra.py が別キャラの Data/<ID>/config.json と
   model_assets/<ID>/style_vectors.npy を上書きする（2026-09-12の旧みこ・ころねモデルで発生）。
   既存の model_assets や導入済みAIVMXは上書きしない。長時間の学習は呼び出し側で終了コードとログを追跡する。
@@ -67,7 +67,9 @@ data["dataset_path"] = str(Path("Data") / dataset)
 data["train_ms"]["keep_ckpts"] = 1
 path.write_text(yaml.dump(data, allow_unicode=True), encoding="utf-8")
 '@
-Invoke-Sbv2 'config.ymlの対象切替' @('-c', $selectConfig, $root, $Dataset)
+if ($Stage -ne 'export') {
+    Invoke-Sbv2 'config.ymlの対象切替' @('-c', $selectConfig, $root, $Dataset)
+}
 
 switch ($Stage) {
     'preprocess' {
@@ -166,12 +168,29 @@ print("学習設定を更新しました:", {keys[k]: v for k, v in values.items
         $checkpointPath = (Resolve-Path -LiteralPath (Join-Path $root $Checkpoint) -ErrorAction SilentlyContinue).Path
         if (-not $checkpointPath) { $checkpointPath = (Resolve-Path -LiteralPath $Checkpoint).Path }
         $assetDir = Split-Path -Parent $checkpointPath
+        $expectedAssetDir = (Resolve-Path -LiteralPath (Join-Path $root "model_assets\$Dataset") -ErrorAction SilentlyContinue).Path
+        if (-not $expectedAssetDir -or -not [string]::Equals($assetDir, $expectedAssetDir, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "チェックポイントは指定データセットのmodel_assets直下から選んでください: $checkpointPath"
+        }
+        if ([IO.Path]::GetExtension($checkpointPath) -ne '.safetensors') {
+            throw "チェックポイントはsafetensorsを指定してください: $checkpointPath"
+        }
+        $assetConfigPath = Join-Path $assetDir 'config.json'
+        $styleVectorsPath = Join-Path $assetDir 'style_vectors.npy'
+        if (-not (Test-Path -LiteralPath $assetConfigPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $styleVectorsPath -PathType Leaf)) {
+            throw "チェックポイントと同じフォルダーにconfig.jsonとstyle_vectors.npyが必要です: $assetDir"
+        }
+        $assetConfig = Get-Content -Raw -Encoding UTF8 -LiteralPath $assetConfigPath | ConvertFrom-Json
+        if ([string]$assetConfig.model_name -cne $Dataset) {
+            throw "config.jsonのmodel_nameが指定データセットと一致しません: $($assetConfig.model_name) != $Dataset"
+        }
         $outputPath = [IO.Path]::GetFullPath($OutputDir)
         $incomingPath = "$outputPath.incoming"
         if (Test-Path -LiteralPath $outputPath) { throw "出力先が既にあるため停止します（上書きしない）: $outputPath" }
         if (Test-Path -LiteralPath $incomingPath) { throw "前回の未完了出力があるため停止します: $incomingPath" }
         $output = New-Item -ItemType Directory -Path $incomingPath
-        foreach ($file in @($checkpointPath, (Join-Path $assetDir 'config.json'), (Join-Path $assetDir 'style_vectors.npy'))) {
+        foreach ($file in @($checkpointPath, $assetConfigPath, $styleVectorsPath)) {
             Copy-Item -LiteralPath $file -Destination $output.FullName
         }
         # 元のmodel_assetsに残った同名ONNXを再利用せず、今回のチェックポイントのコピーから必ず変換する。
