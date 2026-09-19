@@ -3100,7 +3100,7 @@ function renderHistoryRows() {
   const items = query
     ? conversationHistory.filter(item => item.content.toLowerCase().includes(query))
     : conversationHistory;
-  if (!items.length) {
+  if (!items.length && query) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
     empty.textContent = "一致する履歴はありません。";

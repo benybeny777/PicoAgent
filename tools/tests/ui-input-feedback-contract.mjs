@@ -98,6 +98,31 @@ test("履歴検索のEscapeは画面を閉じず検索だけを解除しIME取�
   assert.equal(prevented && stopped, true);
 });
 
+test("最初の添付のみの送信でも検索結果なしではなく考え中を表示する", () => {
+  const node = () => ({ children: [], append(...children) { this.children.push(...children); }, replaceChildren() { this.children = []; } });
+  const historyLog = node();
+  Object.assign(historyLog, { scrollHeight: 100, scrollTop: 0, clientHeight: 100 });
+  const context = vm.createContext({
+    historyLog, document: { createElement: node },
+    bubble: { classList: { contains: () => false } }, layoutShowsHistory: () => true,
+    conversationHistory: [], historyThinking: true, historyQuery: "", historyThinkingText: "考え中",
+    characterManifest: { name: "むぎ" }, createTypingIndicator: label => ({ label }),
+  });
+  vm.runInContext(between("function renderHistoryRows()", "function scheduleAppQuit()"), context);
+  context.renderHistoryRows();
+  assert.equal(historyLog.children.length, 1);
+  assert.equal(historyLog.children[0].className, "history-item assistant history-thinking");
+  assert.equal(historyLog.children[0].children[1].children[0].label, "考え中");
+  context.historyQuery = "存在しない履歴";
+  context.renderHistoryRows();
+  assert.equal(historyLog.children[0].className, "history-empty");
+  assert.equal(historyLog.children[0].textContent, "一致する履歴はありません。");
+  context.historyQuery = "";
+  context.historyThinking = false;
+  context.renderHistoryRows();
+  assert.equal(historyLog.children.some(item => item.className?.includes("history-thinking")), false);
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;
