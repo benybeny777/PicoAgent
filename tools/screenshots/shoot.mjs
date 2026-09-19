@@ -1259,6 +1259,22 @@ async function validateInteractionMatrix() {
           throw new Error(`${target.id}/${layout}: 最小寸法${minimum.width}x${minimum.height}で操作要素が画面外です ${JSON.stringify(outsideAtMinimum)}`);
         }
         await page.setViewportSize(resized);
+        if (layout === "chat") {
+          const resetState = await page.evaluate(async () => {
+            setInputValue("未送信の下書き");
+            setPendingChoices([{ label: "古い会話の選択肢" }]);
+            lastUserText = "リセット前の質問";
+            lastAssistantText = "リセット前の回答";
+            const typing = renderReplySpeaking("リセット前の文字送り".repeat(10));
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            for (const listener of window.__listeners["pet:reset"] || []) listener({ payload: null });
+            await typing;
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            return { reply: reply.textContent, history: conversationHistory.length, draft: input.value, canRetry: hasLastRequest(), previousReply: lastAssistantText, choices: pendingChoices };
+          });
+          if (resetState.reply !== "新しい話をしよう。" || resetState.history || resetState.canRetry || resetState.previousReply || resetState.choices || resetState.draft !== "未送信の下書き") throw new Error(`会話リセット後に古い状態が残りました: ${JSON.stringify(resetState)}`);
+          await page.screenshot({ path: join(output, `${target.id}-chat-reset.png`), omitBackground: true });
+        }
         results.push({ characterId: target.id, layout, bootVisible, loopPending, resized, minimum, state, atMinimum, file });
         console.log(`  操作検査: ${target.id}/${layout}`);
       } finally {

@@ -130,6 +130,7 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
     conversationRevision: 0, speakingToken: 0, conversationHistory: ["古い会話"], promptHistory: ["古い質問"], promptHistoryIndex: 0, promptDraft: "下書き",
     lastUserText: "古い質問", lastAssistantText: "古い回答", lastUserImages: ["画像"], lastUserFiles: ["資料"],
     historyQuery: "古い検索", historySearch: { value: "古い検索" },
+    pendingChoices: ["古い選択肢"], setPendingChoices(choices) { context.pendingChoices = choices; },
     reply: { textContent: "古い回答" }, input: { value: "未送信の下書き" },
     streamRenderFrame: 12, streamBuffer: "リセット前の返答", historyThinking: true,
     cancelAnimationFrame(id) { assert.equal(id, 12); }, cancelStreamSpeech() {},
@@ -150,6 +151,7 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
   assert.equal(context.streamBuffer, "");
   assert.equal(context.historyThinking, false);
   assert.equal(context.speakingToken, 1);
+  assert.equal(context.pendingChoices, null);
 });
 
 test("文字送りの途中で無効化した回答は予約描画も最終描画もしない", async () => {

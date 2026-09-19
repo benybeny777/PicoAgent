@@ -5448,6 +5448,7 @@ window.picoagent.on("pet:reset", () => {
   promptDraft = "";
   lastUserText = "";
   lastAssistantText = "";
+  setPendingChoices(null);
   // 再生成・コピー・読み上げと添付の控えは「新しい話」で捨てる（打ちかけのテキストは消さない。
   // この後の closeComposer() が入力欄の現在値を書きかけとして保存し直す）。
   lastUserImages = [];
