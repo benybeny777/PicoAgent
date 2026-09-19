@@ -254,6 +254,12 @@ try {
   if (await page.getByRole("button", { name: "もう一度押してダウンロード", exact: true }).count() !== 1) throw new Error("アプリ更新が二段階確認になっていません");
   if (!(await page.locator(".product-update-status").textContent())?.includes("モデル・追加機能は残ります")) throw new Error("アプリ更新前に維持データが案内されません");
   await page.getByRole("tab", { name: "スキル・連携", exact: true }).click();
+  const skillGenres = page.locator("#panel-tools .genre-filter").first();
+  await skillGenres.getByRole("button", { name: "SNS/投稿", exact: true }).click();
+  if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "SNS/投稿") throw new Error("スキルの絞り込み状態が読み上げに反映されません");
+  if (await page.locator(".card-item:visible").filter({ hasText: "Google スプレッドシート" }).count()) throw new Error("ジャンル外のスキルが表示されています");
+  await skillGenres.getByRole("button", { name: "すべて", exact: true }).click();
+  if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "すべて") throw new Error("絞り込み解除後の状態が読み上げに反映されません");
   for (const key of ["PICOAGENT_MCP_SERVERS", "PICOAGENT_API_ENABLED"]) {
     if (await page.locator(`#panel-tools [data-setting-key="${key}"]`).count() !== 1) throw new Error(`${key} がスキル・連携タブにありません`);
   }

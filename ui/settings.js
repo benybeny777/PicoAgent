@@ -304,7 +304,11 @@ function buildGenreChips(getValue, setValue) {
   const bar = el("div", { className: "genre-filter" });
   const buttons = new Map();
   function refresh() {
-    for (const [id, button] of buttons) button.classList.toggle("active", id === getValue());
+    for (const [id, button] of buttons) {
+      const active = id === getValue();
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
   }
   for (const id of ids) {
     const label = id === "all" ? "すべて" : (SKILL_CATEGORY_LABELS[id] || id);
