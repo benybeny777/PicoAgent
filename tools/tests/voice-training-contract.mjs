@@ -49,6 +49,8 @@ test("データセット名はData直下の単一フォルダーだけを許可�
 
 test("ノイズ補正版は元データとサンプルレートを照合してから確定する", () => {
   assert.match(enhancer, /manifest\.get\("source"\) != source\.name/);
+  assert.match(enhancer, /"source_sha256": file_sha256\(source_wav\)/);
+  assert.match(enhancer, /file_sha256\(source_wav\) != expected_hash/);
   assert.match(enhancer, /sr != expected_sample_rate/);
   assert.match(enhancer, /incoming\.replace\(output\)/);
 });

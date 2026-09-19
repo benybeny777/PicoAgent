@@ -51,6 +51,14 @@ def entries(source: Path):
             yield file_name, language, text
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def pack(source: Path, out: Path) -> None:
     if out.exists():
         raise SystemExit(f"出力先が既にあるため停止します: {out}")
@@ -75,7 +83,8 @@ def pack(source: Path, out: Path) -> None:
         chunk, cursor, index = [], 0, index + 1
 
     for file_name, language, text in source_entries:
-        x, sr = sf.read(wav_path(source / "raw", file_name), dtype="float32")
+        source_wav = wav_path(source / "raw", file_name)
+        x, sr = sf.read(source_wav, dtype="float32")
         sample_rate = sample_rate or sr
         if sr != sample_rate or x.ndim != 1:
             raise SystemExit(f"サンプルレートまたはチャンネル数が揃っていません: {file_name}")
@@ -87,7 +96,8 @@ def pack(source: Path, out: Path) -> None:
         start = cursor + len(gap)
         chunk += [gap, x]
         cursor = start + len(x)
-        manifest.append({"chunk": index, "file": file_name, "start_s": start / sr, "end_s": cursor / sr,
+        manifest.append({"chunk": index, "file": file_name, "source_sha256": file_sha256(source_wav),
+                         "start_s": start / sr, "end_s": cursor / sr,
                          "language": language, "text": text})
     if chunk:
         chunk.append(np.zeros(int(GAP_SECONDS * sample_rate), dtype=np.float32))
@@ -171,6 +181,11 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
     manifest_entries = [(clip["file"], clip["language"], clip["text"]) for clip in manifest["clips"]]
     if manifest_entries != source_entries:
         raise SystemExit("補正版manifestの断片・言語・文章が元データセットと一致しません")
+    for clip in manifest["clips"]:
+        source_wav = wav_path(source / "raw", clip["file"])
+        expected_hash = clip.get("source_sha256")
+        if not expected_hash or not source_wav.is_file() or file_sha256(source_wav) != expected_hash:
+            raise SystemExit(f"補正版manifestと現在の元WAVが一致しません。packからやり直してください: {clip['file']}")
     expected_sample_rate = int(manifest["sample_rate"])
     incoming = output.with_name(f"{output.name}.incoming")
     if incoming.exists():
