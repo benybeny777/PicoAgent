@@ -3295,10 +3295,15 @@ async function render() {
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
   let characterSwitchPending = 0;
+  let characterSwitchOwnsBusy = false;
   let restoreCharacterSelectFocus = false;
   function queueCharacterSwitch(requestedCharacter) {
-    characterSwitchPending += 1;
     restoreCharacterSelectFocus ||= document.activeElement === characterSelect;
+    if (characterSwitchPending === 0 && !settingsMutationBusy) {
+      characterSwitchOwnsBusy = true;
+      setSettingsMutationBusy(true);
+    }
+    characterSwitchPending += 1;
     characterSelect.disabled = true;
     characterSelect.setAttribute("aria-busy", "true");
     // 素早い連続選択でも、表示中の人格を読み終えてから次へ進む。並列に読むと、
@@ -3337,6 +3342,11 @@ async function render() {
       if (characterSwitchPending === 0) {
         characterSelect.disabled = false;
         characterSelect.setAttribute("aria-busy", "false");
+        // 名前変更・削除の内側から呼ばれた場合、その処理のロックは解除しない。
+        if (characterSwitchOwnsBusy) {
+          characterSwitchOwnsBusy = false;
+          setSettingsMutationBusy(false);
+        }
         if (restoreCharacterSelectFocus) characterSelect.focus({ preventScroll: true });
         restoreCharacterSelectFocus = false;
       }

@@ -359,8 +359,12 @@ try {
   // 固定されると名前変更に人格が追従せず、旧名の文が未保存の上書きとして残る。
   // 実機の名前変更は character.json の定型人格も書き換えるので、再取得分だけ差し替える。
   let renamedPersonaName = "";
+  let holdCharacterLoad = true;
+  let releaseCharacterLoad;
+  const characterLoadGate = new Promise(resolveGate => { releaseCharacterLoad = resolveGate; });
   await page.route("**/assets/characters/mugi/character.json*", async route => {
     const response = await route.fetch();
+    if (holdCharacterLoad) await characterLoadGate;
     const manifest = JSON.parse(await response.text());
     if (renamedPersonaName) {
       manifest.name = renamedPersonaName;
@@ -371,7 +375,16 @@ try {
     }
     await route.fulfill({ response, contentType: "application/json", body: JSON.stringify(manifest) });
   });
-  await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
+  await page.evaluate(() => characterManifestCache.delete("user-test"));
+  try {
+    await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
+    if (!(await page.locator("#save").isDisabled())) throw new Error("キャラ設定の読込中に保存できてしまいます");
+    if (!(await page.locator("#form").evaluate(node => node.inert))) throw new Error("キャラ設定の読込中に別の項目を編集できてしまいます");
+  } finally {
+    holdCharacterLoad = false;
+    releaseCharacterLoad();
+  }
+  await page.waitForFunction(() => !document.getElementById("form").inert);
   // 切替は非同期。選択1件だけが未保存になった状態を基準にする。
   await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "未保存 1件");
   const dirtyAfterSelect = await page.locator("#dirtySummary").textContent();
