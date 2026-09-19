@@ -151,6 +151,25 @@ test("録音の再開はマイク許可を待つ前に以前の送信予約を�
   assert.equal(context.micButton.disabled, false);
 });
 
+test("古いマイク許可要求の失敗は新しい録音の所有状態を消さない", async () => {
+  let reject;
+  const effects = [];
+  const context = vm.createContext({
+    status: { textContent: "" }, micButton: {}, cancelPendingVoiceSubmit() {}, stopVoice() {}, errorDetail() {},
+    logApp() { effects.push("エラー"); }, showToast() { effects.push("通知"); },
+    navigator: { mediaDevices: { getUserMedia() { return new Promise((_, fail) => { reject = fail; }); } } },
+  });
+  vm.runInContext('let micStream = null; let micStarting = false; let micStartRequest = 0; const busy = false;', context);
+  vm.runInContext(between("async function startRecording()", "function updateContinuousVoiceButton()"), context);
+  const pending = vm.runInContext("startRecording()", context);
+  vm.runInContext('micStartRequest++; micStream = { id: "新しい録音" }; micStarting = true;', context);
+  reject(new Error("古い要求の許可拒否"));
+  await pending;
+  assert.equal(vm.runInContext("micStream.id", context), "新しい録音");
+  assert.equal(vm.runInContext("micStarting", context), true);
+  assert.deepEqual(effects, []);
+});
+
 test("文中と選択中の上下キーは通常のカーソル操作を保つ", () => {
   const input = keyboard();
   input.selectionStart = input.selectionEnd = 1;

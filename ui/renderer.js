@@ -4929,6 +4929,7 @@ async function startRecording() {
     }
     micStream = stream;
   } catch (error) {
+    if (request !== micStartRequest) return;
     logApp("warn", "マイクを利用できません", errorDetail(error));
     showToast("マイクを利用できません（権限を確認してね）", "error");
     micStream = null;
