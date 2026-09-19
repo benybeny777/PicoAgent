@@ -102,7 +102,13 @@ window.__memoryItems = [
 ];
 window.__TAURI__ = {
   core: { convertFileSrc: path => path, invoke: async (name, args = {}) => {
-    if (name === "settings_load") return ${JSON.stringify(settingsData)};
+    if (name === "settings_load") {
+      if (location.search.includes("load-failure") && !sessionStorage.getItem("settings-load-retried")) {
+        sessionStorage.setItem("settings-load-retried", "1");
+        throw new Error("設定読込の検証用エラー");
+      }
+      return ${JSON.stringify(settingsData)};
+    }
     if (name === "settings_memory_list") return { items: window.__memoryItems };
     if (name === "settings_memory_delete") {
       window.__memoryItems = window.__memoryItems.filter(item => !(
@@ -539,6 +545,18 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
+  const recoveryPage = await browser.newPage();
+  await recoveryPage.addInitScript(mock);
+  await recoveryPage.goto(`http://127.0.0.1:${port}/settings.html?load-failure=1`);
+  await recoveryPage.getByRole("heading", { name: "設定を読み込めませんでした" }).waitFor();
+  if (!(await recoveryPage.locator("#save").isDisabled())) throw new Error("設定読込失敗中に保存できてしまいます");
+  if (await recoveryPage.locator("#loading").count()) throw new Error("設定読込失敗後も読み込み中表示が残っています");
+  await recoveryPage.locator('[data-settings-query="画面"]').click();
+  if (!(await recoveryPage.locator("#status").textContent())?.includes("設定読込の検証用エラー")) throw new Error("読込失敗の原因が表示されません");
+  await recoveryPage.getByRole("button", { name: "再読み込み", exact: true }).click();
+  await recoveryPage.getByRole("tab", { name: "基本設定", exact: true }).waitFor();
+  await recoveryPage.waitForFunction(() => !document.getElementById("save").disabled);
+  await recoveryPage.close();
   console.log(`設定画面確認: 入口8件 / キャラ作成・登録・選択・音声の4分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();

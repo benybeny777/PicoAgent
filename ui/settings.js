@@ -326,7 +326,7 @@ function buildGenreChips(getValue, setValue) {
 }
 
 function applySettingsSearch() {
-  if (!settingsSearch) return;
+  if (!settingsSearch || !data) return;
   const query = settingsSearch.value.trim().toLowerCase();
   document.body.classList.toggle("searching", Boolean(query));
   const topPanels = form.querySelector(":scope > .tab-panels");
@@ -4031,7 +4031,7 @@ function confirmRestart() {
 }
 
 saveBtn.addEventListener("click", async () => {
-  if (settingsMutationBusy) return;
+  if (settingsMutationBusy || !savedSnapshot) return;
   setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {
@@ -4145,8 +4145,8 @@ document.addEventListener("keydown", event => {
 });
 
 (async () => {
-  data = await window.picoagent.settings.load();
   try {
+    data = await window.picoagent.settings.load();
     await render();
     savedSnapshot = cloneSettings(collect());
     updateDirtyState();
@@ -4158,8 +4158,19 @@ document.addEventListener("keydown", event => {
   }
   catch (error) {
     renderingSettings = false;
+    data = null;
+    savedSnapshot = null;
+    saveBtn.disabled = true;
+    resetChangesBtn.disabled = true;
     logApp("error", "設定画面の読み込みに失敗しました", errorDetail(error));
-    statusEl.textContent = `設定画面の読み込みに失敗: ${error.message}`;
+    statusEl.textContent = `設定画面の読み込みに失敗: ${error?.message || error}`;
+    const retry = el("button", { type: "button", textContent: "再読み込み" });
+    retry.addEventListener("click", () => window.location.reload());
+    form.replaceChildren(
+      el("h2", { textContent: "設定を読み込めませんでした" }),
+      el("p", { textContent: "設定は変更していません。再読み込みしても失敗する場合は、下のエラー内容を確認してください。" }),
+      retry,
+    );
   }
 })().catch(error => {
   renderingSettings = false;
