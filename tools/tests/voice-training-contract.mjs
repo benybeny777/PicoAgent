@@ -28,6 +28,7 @@ test("合成QAは空の話者基準と既存結果の上書きを拒否する", 
 test("学習断片の測定と選別はWAVの同一性と一意名を検証する", () => {
   assert.match(selector, /source_sha256/);
   assert.match(selector, /file_sha256\(source_wav\)/);
+  assert.match(selector, /流用元の測定と現在のWAVが一致しません/);
   assert.match(selector, /unique_wav_names\(accepted_names, "複数データセットの採用断片"\)/);
   assert.match(selector, /output_root\.with_name\(f"\{output_root\.name\}\.incoming"\)/);
 });

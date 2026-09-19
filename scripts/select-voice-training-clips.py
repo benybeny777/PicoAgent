@@ -337,6 +337,10 @@ def command_measure(args: argparse.Namespace) -> int:
             previous = previous_rows[file_name]
             if (previous.get("speaker"), previous.get("language"), previous.get("text")) != (speaker, language, text):
                 raise SystemExit(f"流用元の話者・言語・文章が現在の候補と一致しません: {file_name}")
+            source_wav = wav_path(dataset_root / "raw", file_name)
+            expected_hash = previous.get("source_sha256")
+            if not expected_hash or not source_wav.is_file() or file_sha256(source_wav) != expected_hash:
+                raise SystemExit(f"流用元の測定と現在のWAVが一致しません。Whisperと話者埋め込みを再測定してください: {file_name}")
             absent = sorted(key for key in required if previous.get(key) is None)
             if absent:
                 raise SystemExit(f"流用元の測定値が不足しています: {file_name} {absent}")
