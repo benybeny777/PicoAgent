@@ -1216,6 +1216,16 @@ async function validateInteractionMatrix() {
         if (!state.buttons.length || state.buttons.some(button => !inside(button))) {
           throw new Error(`${target.id}/${layout}: 入力操作ボタンが画面外です ${JSON.stringify(state.buttons)}`);
         }
+        if (await page.locator("#historySearch").isVisible()) {
+          const draft = await page.locator("#input").inputValue();
+          await page.locator("#input").focus();
+          await page.keyboard.press("Control+f");
+          if (!(await page.locator("#historySearch").evaluate(node => node === document.activeElement))) throw new Error(`${layout}: Ctrl+Fで履歴検索へ移動できません`);
+          await page.locator("#historySearch").fill("一致しない履歴の検証用文字列");
+          await page.locator(".history-empty").waitFor();
+          await page.keyboard.press("Escape");
+          if (await page.locator("#historySearch").inputValue() !== "" || await page.locator("#input").inputValue() !== draft || await page.locator("#composer").isHidden()) throw new Error(`${layout}: 検索解除で下書きまたは入力欄が失われました`);
+        }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
 

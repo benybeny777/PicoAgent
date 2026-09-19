@@ -5357,8 +5357,16 @@ historySearch?.addEventListener("keydown", event => {
   renderHistory();
 });
 document.addEventListener("keydown", event => {
+  if (event.defaultPrevented || isImeComposing(event)) return;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f"
+    && frontendInitialized && historySearch?.getClientRects().length
+    && getComputedStyle(historySearch).visibility === "visible") {
+    event.preventDefault();
+    historySearch.focus();
+    historySearch.select();
+    return;
+  }
   if (event.key !== "Escape") return;
-  if (isImeComposing(event)) return; // 変換の取消を画面の Escape として扱わない
   if (cancelPendingVoiceSubmit()) return;
   if (relationshipCard && !relationshipCard.hidden) {
     relationshipCard.hidden = true;
