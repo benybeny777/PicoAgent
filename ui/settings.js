@@ -142,6 +142,12 @@ function markSearchable(node, ...parts) {
 
 function registerInput(key, input, wrapper) {
   wrapper.dataset.settingKey = key;
+  const label = wrapper.querySelector(":scope > label");
+  // 複合エディタの保存専用hiddenには、見出しラベルを結び付けない。
+  if (label && input.type !== "hidden" && !label.htmlFor) {
+    if (!input.id) input.id = `setting-${key}`;
+    label.htmlFor = input.id;
+  }
   inputs.set(key, input);
   inputWrappers.set(key, wrapper);
   return wrapper;

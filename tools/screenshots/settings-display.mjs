@@ -187,6 +187,12 @@ try {
     if (await page.locator(`#panel-basic [data-setting-key="${key}"]`).count()) throw new Error(`基本設定に別分類の ${key} が残っています`);
   }
   await page.waitForSelector(".memory-item");
+  const memoryCheckbox = page.getByRole("checkbox", { name: "会話から好みや継続指示を暗黙的に覚える", exact: true });
+  const memoryEnabled = await memoryCheckbox.isChecked();
+  const memoryLabel = page.locator("label").filter({ hasText: "会話から好みや継続指示を暗黙的に覚える" });
+  await memoryLabel.click();
+  if (await memoryCheckbox.isChecked() === memoryEnabled) throw new Error("チェック項目のラベルを押しても値が切り替わりません");
+  await memoryLabel.click();
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
   const memoryText = await page.locator(".memory-manager").textContent();
   for (const expected of ["全キャラクター", "覚えた日時", "言及 4回", "この記憶を削除"]) {
@@ -293,6 +299,11 @@ try {
   };
   await verifyLongSkillLabels(600);
   await verifyLongSkillLabels(400);
+  for (const label of ["Google スプレッドシートの OAuth アクセストークン", "Bluesky の識別子（ハンドルまたはメール）"]) {
+    const control = page.getByLabel(label, { exact: true });
+    await page.locator("label").filter({ hasText: label }).click();
+    if (!(await control.evaluate(node => node === document.activeElement))) throw new Error(`${label}を押しても入力欄へ移動しません`);
+  }
   await page.setViewportSize({ width: 960, height: 760 });
   // 検索で一時的に変わった開閉状態は、検索語を変更しても元の状態へ戻す。
   const blueskyCard = page.locator(".card-item").filter({ hasText: "Bluesky" });
