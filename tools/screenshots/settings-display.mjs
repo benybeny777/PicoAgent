@@ -279,6 +279,12 @@ try {
     if (await card.getAttribute("aria-expanded") !== "true") throw new Error(`${name}をEnterで開けません`);
     await card.press("Space");
     if (await card.getAttribute("aria-expanded") !== "false") throw new Error(`${name}をSpaceで閉じられません`);
+    const repeatBlocked = await card.evaluate(node => {
+      const event = new KeyboardEvent("keydown", { key: " ", repeat: true, bubbles: true, cancelable: true });
+      node.dispatchEvent(event);
+      return event.defaultPrevented && node.getAttribute("aria-expanded") === "false";
+    });
+    if (!repeatBlocked) throw new Error(`${name}のSpace長押しでスクロールまたは再開閉が発生します`);
     await card.press("Enter");
   }
   const verifyLongSkillLabels = async width => {

@@ -1963,10 +1963,10 @@ function renderSkillCard(tool, values) {
       applySettingsSearch();
     });
     card.addEventListener("keydown", event => {
-      if (event.target !== card || event.isComposing || event.repeat) return;
+      if (event.target !== card || event.isComposing) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      card.click();
+      if (!event.repeat) card.click();
     });
     nodes.push(panel);
   }
