@@ -234,12 +234,13 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
         levels += pause_levels(y, sr)
         lines.append(f"{clip['file']}|{output.name}|{clip['language']}|{clip['text']}")
     (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    lv = np.array(levels) if levels else np.array([0.0])
+    lv = np.array(levels)
     report = {
         "source": source.name, "output": output.name, "clips": len(lines),
         "lufs_median": round(float(np.median(loudness_after)), 1), "peak_max_dbfs": round(float(max(peaks)), 2),
-        "pauses": len(levels), "pause_median_db": round(float(np.median(lv)), 1),
-        "pauses_louder_than_-48db": round(float(np.mean(lv > -48)), 3),
+        "pauses": len(levels),
+        "pause_median_db": round(float(np.median(lv)), 1) if levels else None,
+        "pauses_louder_than_-48db": round(float(np.mean(lv > -48)), 3) if levels else None,
     }
     report["enhancement"] = manifest.get("enhancement", {"engine": "外部補正（詳細不明）"})
     (incoming / "voice-enhancement.json").write_text(

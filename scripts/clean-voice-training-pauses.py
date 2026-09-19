@@ -116,7 +116,9 @@ def main() -> int:
     (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def summary(values: list[float]) -> dict:
-        arr = np.array(values) if values else np.array([0.0])
+        if not values:
+            return {"count": 0, "median_db": None, "louder_than_-48db": None}
+        arr = np.array(values)
         return {"count": len(values), "median_db": round(float(np.median(arr)), 1),
                 "louder_than_-48db": round(float(np.mean(arr > -48)), 3)}
 

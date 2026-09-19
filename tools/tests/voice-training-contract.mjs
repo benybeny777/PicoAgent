@@ -7,6 +7,7 @@ const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "
 const preview = read("scripts/open-character-preview.ps1");
 const checker = read("scripts/check-synthesized-voice.py");
 const selector = read("scripts/select-voice-training-clips.py");
+const cleaner = read("scripts/clean-voice-training-pauses.py");
 const enhancer = read("scripts/enhance-voice-training-chunks.py");
 const trainer = read("scripts/train-voice-model.ps1");
 const common = read("scripts/voice_training_common.py");
@@ -53,6 +54,12 @@ test("ノイズ補正版は元データとサンプルレートを照合して�
   assert.match(enhancer, /file_sha256\(source_wav\) != expected_hash/);
   assert.match(enhancer, /sr != expected_sample_rate/);
   assert.match(enhancer, /incoming\.replace\(output\)/);
+});
+
+test("合間が0件の統計を閾値超過として記録しない", () => {
+  assert.match(cleaner, /"count": 0, "median_db": None, "louder_than_-48db": None/);
+  assert.match(enhancer, /"pause_median_db": .* if levels else None/);
+  assert.match(enhancer, /"pauses_louder_than_-48db": .* if levels else None/);
 });
 
 test("AIVMX書き出しは採用チェックポイントからONNXを作り直す", () => {
