@@ -111,6 +111,30 @@ test("前の録音の遅延結果や失敗は再録音の入力と送信予約�
   }
 });
 
+test("前の逐次文字起こしの失敗は次の録音のタイマーを止めない", async () => {
+  for (const stale of [false, true]) {
+    let reject;
+    let entered;
+    const waiting = new Promise(resolve => { entered = resolve; });
+    const effects = [];
+    const context = vm.createContext({
+      Blob, encodeWav() { return new ArrayBuffer(2); }, blobToDataUrl() { return "音声"; },
+      window: { picoagent: { transcribeAudio() { entered(); return new Promise((_, fail) => { reject = fail; }); } } },
+      logApp() { effects.push("失敗通知"); }, errorDetail() {}, clearInterval(timer) { effects.push(timer); },
+    });
+    vm.runInContext('let micInterimBusy = false; let micSession = 1; const micStream = {}; let micInterimIndex = 0; const micChunks = [new Float32Array(32000)]; const micSampleRate = 16000; let micInterimTimer = "録音1";', context);
+    vm.runInContext(between("async function transcribeInterim(session)", "// Float32 の PCM"), context);
+    const pending = vm.runInContext("transcribeInterim(1)", context);
+    await waiting;
+    if (stale) vm.runInContext('micSession = 2; micInterimTimer = "録音2";', context);
+    reject(new Error("遅延した失敗"));
+    await pending;
+    assert.deepEqual(effects, stale ? [] : ["失敗通知", "録音1"]);
+    assert.equal(vm.runInContext("micInterimTimer", context), stale ? "録音2" : null);
+    assert.equal(vm.runInContext("micInterimBusy", context), false);
+  }
+});
+
 test("文中と選択中の上下キーは通常のカーソル操作を保つ", () => {
   const input = keyboard();
   input.selectionStart = input.selectionEnd = 1;

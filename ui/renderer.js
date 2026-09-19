@@ -4780,6 +4780,7 @@ async function transcribeInterim(session) {
   try {
     const wav = encodeWav(micChunks.slice(from, to), micSampleRate);
     const b64 = await blobToDataUrl(new Blob([wav], { type: "audio/wav" }));
+    if (session !== micSession) return;
     const result = await window.picoagent.transcribeAudio(b64);
     if (session !== micSession) return; // 停止・再録音後に届いた途中結果は捨てる
     const text = String(result?.text ?? "").trim();
@@ -4791,6 +4792,7 @@ async function transcribeInterim(session) {
     }
   } catch (error) {
     // Whisper 未設定などで失敗したら、この録音では逐次変換を止める（停止時の一括変換に任せる）。
+    if (session !== micSession) return;
     logApp("warn", "途中の文字起こしに失敗しました", errorDetail(error));
     if (micInterimTimer) { clearInterval(micInterimTimer); micInterimTimer = null; }
   } finally {
