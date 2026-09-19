@@ -127,7 +127,7 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
   let reset;
   const context = vm.createContext({
     window: { picoagent: { on: (_, callback) => { reset = callback; } } },
-    conversationRevision: 0, conversationHistory: ["古い会話"], promptHistory: ["古い質問"], promptHistoryIndex: 0, promptDraft: "下書き",
+    conversationRevision: 0, speakingToken: 0, conversationHistory: ["古い会話"], promptHistory: ["古い質問"], promptHistoryIndex: 0, promptDraft: "下書き",
     lastUserText: "古い質問", lastAssistantText: "古い回答", lastUserImages: ["画像"], lastUserFiles: ["資料"],
     historyQuery: "古い検索", historySearch: { value: "古い検索" },
     reply: { textContent: "古い回答" }, input: { value: "未送信の下書き" },
@@ -149,6 +149,43 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
   assert.equal(context.streamRenderFrame, null);
   assert.equal(context.streamBuffer, "");
   assert.equal(context.historyThinking, false);
+  assert.equal(context.speakingToken, 1);
+});
+
+test("文字送りの途中で無効化した回答は予約描画も最終描画もしない", async () => {
+  let paint;
+  let resume;
+  let rendered = 0;
+  const context = vm.createContext({
+    speakingToken: 0, reply: {}, currentVoice: null,
+    requestAnimationFrame(callback) { paint = callback; return 1; }, cancelAnimationFrame() {},
+    setTimeout(callback) { resume = callback; }, renderMarkdown() { rendered++; },
+    setAssistantReply() { rendered++; }, setAnimation() {},
+  });
+  vm.runInContext(between("async function renderReplySpeaking(text)", "function showStartupReadyMessage"), context);
+  const pending = context.renderReplySpeaking("古い回答");
+  context.speakingToken++;
+  paint();
+  resume();
+  await pending;
+  assert.equal(rendered, 0);
+});
+
+test("文字送り完了後もリセット済みの回答は履歴と終了操作へ渡さない", () => {
+  const effects = [];
+  const context = vm.createContext({
+    requestRevision: 0, conversationRevision: 1, jobState: "running",
+    result: { reply: "古い回答", quitApp: true },
+    addHistory() { effects.push("履歴"); }, scheduleAppQuit() { effects.push("終了"); },
+  });
+  const source = between("// 文字送りを待っている間に会話がリセットされた場合も", "\n    }\n  } catch (error) {");
+  vm.runInContext(`function completeReply() { ${source} }`, context);
+  context.completeReply();
+  assert.equal(context.jobState, "cancelled");
+  assert.deepEqual(effects, []);
+  context.conversationRevision = 0;
+  context.completeReply();
+  assert.deepEqual(effects, ["履歴", "終了"]);
 });
 
 test("リセット前の進捗と予約済みストリーム描画は画面へ戻らない", async () => {

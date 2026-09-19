@@ -3595,7 +3595,10 @@ async function renderReplySpeaking(text) {
   // （rAF スロットルで1フレーム1回に抑える）。
   let shown = 0;
   let frame = 0;
-  const paint = () => { frame = 0; renderMarkdown(reply, chars.slice(0, shown).join("")); };
+  const paint = () => {
+    frame = 0;
+    if (token === speakingToken) renderMarkdown(reply, chars.slice(0, shown).join(""));
+  };
   for (; shown < chars.length; shown += 1) {
     if (token !== speakingToken) { if (frame) cancelAnimationFrame(frame); return; }
     if (!frame) frame = requestAnimationFrame(paint);
@@ -4630,6 +4633,11 @@ composer.addEventListener("submit", async event => {
       } else {
         await renderReplySpeaking(result.reply);
       }
+      // 文字送りを待っている間に会話がリセットされた場合も、古い本文を戻さない。
+      if (requestRevision !== conversationRevision) {
+        jobState = "cancelled";
+        return;
+      }
       addHistory("assistant", result.reply);
       if (result.quitApp) scheduleAppQuit();
     }
@@ -5433,6 +5441,7 @@ window.picoagent.on("pet:model", model => {
 window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
   conversationRevision += 1;
+  ++speakingToken;
   conversationHistory.length = 0;
   promptHistory.length = 0;
   promptHistoryIndex = null;
