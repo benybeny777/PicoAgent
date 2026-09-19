@@ -62,6 +62,8 @@ test("ノイズ補正版は元データとサンプルレートを照合して�
   assert.match(enhancer, /"source_sha256": file_sha256\(source_wav\)/);
   assert.match(enhancer, /file_sha256\(source_wav\) != expected_hash/);
   assert.match(enhancer, /sr != expected_sample_rate/);
+  assert.match(enhancer, /original_info\.channels != enhanced_info\.channels/);
+  assert.match(enhancer, /audio\.shape\[1\] != 1/);
   assert.match(enhancer, /incoming\.replace\(output\)/);
 });
 

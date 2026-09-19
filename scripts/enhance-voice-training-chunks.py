@@ -18,7 +18,7 @@ Style-Bert-VITS2の `.venv` のPythonで実行する。既定の補正経路は�
 注意:
 - DeepFilterNetは公式Windows版0.5.6のSHA-256を照合する。別版や別バイナリは黙って使わない。
 - `--compensate-delay`は約30ms短くなって切り出し位置がずれるため使わない。
-- deepfilterとunpackは全チャンクのサンプルレートと長さを照合し、1本でも違えば停止する。
+- deepfilterとunpackは全チャンクのサンプルレート、長さ、モノラルを照合し、1本でも違えば停止する。
 - 出力先が既にあれば停止する（既存データセットを上書きしない）。
 """
 
@@ -152,6 +152,8 @@ def deepfilter(source: Path, out: Path, binary: Path) -> None:
         enhanced_info = sf.info(enhanced)
         if original_info.samplerate != enhanced_info.samplerate:
             raise SystemExit(f"補正前後のサンプルレートが一致しません: {name}")
+        if original_info.channels != enhanced_info.channels:
+            raise SystemExit(f"補正前後のチャンネル数が一致しません: {name}")
         if abs(original_info.frames - enhanced_info.frames) > 1:
             raise SystemExit(f"補正前後の長さが一致しません: {name}")
 
@@ -200,6 +202,8 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
         audio, sr = sf.read(path, dtype="float64", always_2d=True)
         if sr != expected_sample_rate:
             raise SystemExit(f"補正版のサンプルレートがmanifestと一致しません: {path} {sr} != {expected_sample_rate}")
+        if audio.shape[1] != 1:
+            raise SystemExit(f"補正版がモノラルではありません: {path} {audio.shape[1]}チャンネル")
         # 送信チャンクの長さは「最後の断片の終端」か、末尾に無音1秒を足した長さ。
         # 補正前後の長さを維持する前提。この範囲外なら書き込み途中や取り違えとみなして止める。
         last_end = max(c["end_s"] for c in manifest["clips"] if c["chunk"] == number)
