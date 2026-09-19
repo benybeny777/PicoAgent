@@ -67,6 +67,36 @@ test("提案文とテキストドロップは入力履歴の途中でも新し�
   }
 });
 
+test("記録からの再開は新しい下書きを保存し処理中には入力を変えない", async () => {
+  for (const busy of [false, true]) {
+    let listener;
+    let saved;
+    const input = { value: "前の入力", focus() {}, setSelectionRange() {} };
+    class Target { closest() { return { dataset: { action: "resume", prompt: "記録の続き" } }; } }
+    const context = vm.createContext({
+      input, busy, Element: Target, status: {}, setTimeout() {},
+      composer: { hidden: false }, relationshipCard: { hidden: false }, relationshipButton: { setAttribute() {} },
+      relationshipMoments: { addEventListener(_, callback) { listener = callback; } },
+      setInputValue(value) { input.value = value; }, persistDraft() { saved = input.value; },
+      setTemporaryStatus() {}, setRelationshipBusy() {},
+    });
+    vm.runInContext('const promptHistory = ["前の入力"]; let promptHistoryIndex = 0; let promptDraft = "以前の下書き";', context);
+    vm.runInContext(between("function resetPromptHistoryNavigation()", "function openComposer()"), context);
+    vm.runInContext(between("function reuseHistoryItem(text)", "// 会話履歴を描き直し"), context);
+    vm.runInContext(between('relationshipMoments?.addEventListener("click"', "const relationshipClearConfirmation"), context);
+    await listener({ target: new Target() });
+    if (busy) {
+      assert.equal(input.value, "前の入力");
+      assert.equal(saved, undefined);
+      assert.equal(context.relationshipCard.hidden, false);
+    } else {
+      assert.equal(saved, "記録の続き");
+      vm.runInContext("recallPromptHistory(-1); recallPromptHistory(1);", context);
+      assert.equal(input.value, "記録の続き");
+    }
+  }
+});
+
 test("上下キーは未定義処理を呼ばず履歴と下書きを往復する", () => {
   const input = keyboard();
   assert.equal(press(input, "ArrowUp"), true);

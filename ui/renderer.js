@@ -506,10 +506,7 @@ function renderNoticePanel() {
         retry.textContent = "もう一度";
         retry.addEventListener("click", event => {
           event.stopPropagation();
-          if (busy) return;
-          setInputValue(notice.prompt);
-          if (composer.hidden) openComposer();
-          input.focus();
+          reuseHistoryItem(notice.prompt);
         });
         actions.append(retry);
       }
@@ -3767,13 +3764,12 @@ document.getElementById("relationshipClose")?.addEventListener("click", () => {
 relationshipMoments?.addEventListener("click", async event => {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (!button) return;
+  if (button.dataset.action === "resume" && busy) return;
   try {
     if (button.dataset.action === "resume") {
       relationshipCard.hidden = true;
       relationshipButton?.setAttribute("aria-expanded", "false");
-      openComposer();
-      setInputValue(button.dataset.prompt || "");
-      input.focus();
+      reuseHistoryItem(button.dataset.prompt || "");
       return;
     }
     if (button.dataset.action === "delete" && !button.picoConfirmation?.request()) return;
