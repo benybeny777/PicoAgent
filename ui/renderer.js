@@ -4901,7 +4901,10 @@ async function finishRecording() {
     if (isCurrentRecording()) {
       status.classList.remove("busy");
       if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
-      if (hasTranscript) scheduleVoiceSubmit();
+      if (hasTranscript) {
+        resetPromptHistoryNavigation();
+        scheduleVoiceSubmit();
+      }
     }
   }
 }

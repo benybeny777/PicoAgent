@@ -107,22 +107,26 @@ test("上下キーは未定義処理を呼ばず履歴と下書きを往復す�
 
 test("前の録音の遅延結果や失敗は再録音の入力と送信予約を変更しない", async () => {
   for (const mode of ["success", "failure", "empty", "interim-failure", "stale-success", "stale-failure", "stale-encoding"]) {
+    let saved;
     let settle;
     let entered;
     const waiting = new Promise(resolve => { entered = resolve; });
     const delayed = new Promise((resolve, reject) => { settle = () => mode.endsWith("failure") ? reject(new Error("文字起こし失敗")) : resolve({ text: mode === "empty" ? "" : "確定した音声" }); });
     const effects = [];
-    const input = { value: "次の下書き", focus() {} };
+    const input = { value: "次の下書き", focus() {}, setSelectionRange() {} };
     const context = vm.createContext({
       input, Blob, status: { textContent: "", classList: { add() {}, remove() { effects.push("状態解除"); } } },
       encodeWav() { return new ArrayBuffer(2); },
       blobToDataUrl() { if (mode === "stale-encoding") { entered(); return delayed; } return "音声"; },
       window: { picoagent: { transcribeAudio() { effects.push("変換要求"); entered(); return delayed; } } },
       setInputValue(value) { input.value = value; },
+      persistDraft() { saved = input.value; }, setTimeout() {},
       clearTransientStatus() {}, logApp() {}, errorDetail() {}, preview(value) { return value; },
       showToast() { effects.push("通知"); }, scheduleVoiceSubmit() { effects.push("送信予約"); },
     });
     vm.runInContext('let micStream = {}; let micChunks = [new Float32Array(8000)]; let micSamples = 8000; const micSampleRate = 16000; const micInterimBase = ""; const micInterimTexts = []; let micSession = 0; let micStartRequest = 0; function stopMicCapture() { micStream = null; micSession++; micStartRequest++; }', context);
+    vm.runInContext('const promptHistory = ["前の入力"]; let promptHistoryIndex = 0; let promptDraft = "以前の下書き";', context);
+    vm.runInContext(between("function resetPromptHistoryNavigation()", "function openComposer()"), context);
     if (mode === "interim-failure") vm.runInContext('micInterimTexts.push("途中の音声"); input.value = "途中の音声";', context);
     vm.runInContext(between("async function finishRecording()", "async function startRecording()"), context);
     const pending = vm.runInContext("finishRecording()", context);
@@ -138,6 +142,12 @@ test("前の録音の遅延結果や失敗は再録音の入力と送信予約�
       assert.equal(input.value, mode === "success" ? "確定した音声" : mode === "interim-failure" ? "途中の音声" : "次の下書き");
       assert.deepEqual(effects, ["変換要求", ...(mode === "empty" ? [] : ["通知"]), "状態解除", ...(["success", "interim-failure"].includes(mode) ? ["送信予約"] : [])]);
     }
+    if (["success", "interim-failure"].includes(mode)) {
+      const draft = input.value;
+      assert.equal(saved, draft);
+      vm.runInContext("recallPromptHistory(-1); recallPromptHistory(1);", context);
+      assert.equal(input.value, draft);
+    } else assert.equal(saved, undefined);
   }
 });
 
