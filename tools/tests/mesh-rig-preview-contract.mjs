@@ -39,6 +39,16 @@ test("Windowsの確認入口は2.5D・MMD・登録済みLive2Dを選べる", () 
   assert.ok(override >= 0 && persisted > override, "確認対象は保存値より先に、その起動中だけ解決する");
 });
 
+test("関係者版ビルドのダブルクリック入口は結果を読むまで閉じない", () => {
+  const launcher = readFileSync(
+    new URL("../../関係者版インストーラをビルド.bat", import.meta.url),
+    "ascii",
+  );
+  assert.match(launcher, /set "PICOAGENT_BUILD_EXIT_CODE=%ERRORLEVEL%"/);
+  assert.match(launcher, /wait-before-close\.ps1/);
+  assert.match(launcher, /exit \/b %PICOAGENT_BUILD_EXIT_CODE%/);
+});
+
 test("確認画面はあおい・むぎ2種・りん・まい・セナ・実写を本番メッシュ描画で切り替える", () => {
   assert.match(preview, /value="aoi"/);
   assert.match(preview, /value="mugi"/);

@@ -9,4 +9,6 @@ if errorlevel 1 (
 )
 
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-partner-installer.ps1" %*
-exit /b %ERRORLEVEL%
+set "PICOAGENT_BUILD_EXIT_CODE=%ERRORLEVEL%"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\wait-before-close.ps1"
+exit /b %PICOAGENT_BUILD_EXIT_CODE%
