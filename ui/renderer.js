@@ -4557,10 +4557,12 @@ composer.addEventListener("submit", async event => {
 
   try {
     // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     let fileContext = "";
     if (pendingFiles.length > 0 && window.picoagent.readFileContent) {
       status.textContent = "ファイルを読み込み中…";
       for (const f of pendingFiles) {
+        if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
         // ネイティブD&D由来の添付は実パスも伝え、PDF抽出や画像変換などのスキルが直接使えるようにする。
         const label = f.path ? `${f.name}（パス: ${f.path}）` : f.name;
         try {
@@ -4572,6 +4574,7 @@ composer.addEventListener("submit", async event => {
         }
       }
     }
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     const fullText = fileContext
       ? `${fileContext}${text || "このファイルについて教えて"}`
       : text;
@@ -4588,11 +4591,13 @@ composer.addEventListener("submit", async event => {
         logApp("warn", "スクリーンショット取得に失敗しました。", String(shotErr));
       }
     }
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     // 停止要求のあと応答が返らない場合に備え、打ち切りの合図と競走させる。
     const releasedByCancel = new Promise(resolve => { releasePendingSend = resolve; });
     if (images.length > 0 && window.picoagent.sendImage) {
       result = await Promise.race([window.picoagent.sendImage(fullText, images), releasedByCancel]);
     }
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     if (!result) result = await Promise.race([window.picoagent.send(fullText), releasedByCancel]);
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";

@@ -272,6 +272,34 @@ test("再生成は送信控えとAIの準備が揃い処理中でないときだ
   check(false);
 });
 
+test("添付準備中や画像送信後にリセットした質問を新しい会話へ送らない", async () => {
+  const source = between("// ── ファイル内容をテキストへ変換してコンテキストに付加", "    if (result?.stale || requestRevision !== conversationRevision)");
+  for (const phase of ["開始前", "ファイル読込", "画面取得", "画像送信", "通常送信"]) {
+    const calls = [];
+    let context;
+    const invoke = async name => {
+      calls.push(name);
+      if (name === phase) context.conversationRevision++;
+      return name === "画面取得" ? { dataUrl: "画像" } : undefined;
+    };
+    context = vm.createContext({
+      requestRevision: 0, conversationRevision: phase === "開始前" ? 1 : 0, jobState: "running",
+      pendingFiles: [{ name: "資料1" }, { name: "資料2" }], pendingImages: [], text: "質問", status: {},
+      isScreenshotQuery: () => phase !== "通常送信", logApp() {},
+      window: { picoagent: {
+        readFileContent: () => invoke("ファイル読込"), captureScreen: () => invoke("画面取得"),
+        sendImage: () => invoke("画像送信"), send: () => { calls.push("送信"); return Promise.resolve({ reply: "回答" }); },
+      } },
+    });
+    await vm.runInContext(`(async () => { ${source} })()`, context);
+    assert.equal(calls.includes("送信"), phase === "通常送信");
+    assert.equal(context.jobState, phase === "通常送信" ? "running" : "cancelled");
+    if (phase === "開始前") assert.deepEqual(calls, []);
+    if (phase === "ファイル読込") assert.deepEqual(calls, ["ファイル読込"]);
+    if (phase === "画面取得") assert.equal(calls.includes("画像送信"), false);
+  }
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;
