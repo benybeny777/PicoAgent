@@ -48,6 +48,12 @@ test("データセット名はData直下の単一フォルダーだけを許可�
   assert.match(trainer, /データセット名はData直下の安全なフォルダー名/);
 });
 
+test("長尺音声の出力接頭辞で指定フォルダー外へ書き込まない", () => {
+  assert.match(selector, /prefix = output_prefix\(args\.prefix\)/);
+  assert.match(selector, /name = f"\{prefix\}-/);
+  assert.match(selector, /f"\{prefix\}-sections\.json"/);
+});
+
 test("ノイズ補正版は元データとサンプルレートを照合してから確定する", () => {
   assert.match(enhancer, /manifest\.get\("source"\) != source\.name/);
   assert.match(enhancer, /"source_sha256": file_sha256\(source_wav\)/);

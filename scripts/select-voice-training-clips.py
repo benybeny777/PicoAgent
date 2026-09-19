@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-from voice_training_common import dataset_name, unique_wav_names, wav_path
+from voice_training_common import dataset_name, output_prefix, unique_wav_names, wav_path
 
 # 取得済みキャッシュだけを使い、測定のために新しいモデルを取得しない。
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -620,6 +620,7 @@ def command_quiet_sections(args: argparse.Namespace) -> int:
 
     source = Path(args.source)
     output_dir = Path(args.output_dir)
+    prefix = output_prefix(args.prefix)
     if output_dir.exists() and any(output_dir.iterdir()):
         raise SystemExit(f"出力先が空ではないため停止します: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -658,7 +659,7 @@ def command_quiet_sections(args: argparse.Namespace) -> int:
             and row["clip_samples"] == 0
         )
         if row["accepted"]:
-            name = f"{args.prefix}-{int(start / sr):05d}.wav"
+            name = f"{prefix}-{int(start / sr):05d}.wav"
             sf.write(output_dir / name, x, sr, subtype="PCM_16")
             kept_seconds += window / sr
         sections.append(row)
@@ -669,7 +670,7 @@ def command_quiet_sections(args: argparse.Namespace) -> int:
         "accepted_sections": sum(r["accepted"] for r in sections),
         "accepted_minutes": round(kept_seconds / 60, 1),
     }
-    (output_dir.parent / f"{args.prefix}-sections.json").write_text(
+    (output_dir.parent / f"{prefix}-sections.json").write_text(
         json.dumps({**summary, "detail": sections}, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))

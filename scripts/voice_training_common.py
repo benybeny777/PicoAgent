@@ -11,10 +11,10 @@ WINDOWS_RESERVED_NAMES = {
 }
 
 
-def dataset_name(value: str) -> str:
-    """Data直下で使える単一のWindowsフォルダー名だけを返す。"""
+def windows_name(value: str, label: str) -> str:
+    """Windowsで安全に使える単一のファイル名要素だけを返す。"""
     if not isinstance(value, str) or not value or value != value.strip():
-        raise SystemExit(f"データセット名が不正です: {value!r}")
+        raise SystemExit(f"{label}が不正です: {value!r}")
     path = PureWindowsPath(value.replace("/", "\\"))
     invalid = '<>:"/\\|?*'
     if (
@@ -27,8 +27,18 @@ def dataset_name(value: str) -> str:
         or any(character in invalid or ord(character) < 32 for character in value)
         or value.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES
     ):
-        raise SystemExit(f"データセット名はData直下の安全なフォルダー名にしてください: {value}")
+        raise SystemExit(f"{label}は区切りや親参照を含まない安全な名前にしてください: {value}")
     return value
+
+
+def dataset_name(value: str) -> str:
+    """Data直下で使える単一のWindowsフォルダー名だけを返す。"""
+    return windows_name(value, "データセット名")
+
+
+def output_prefix(value: str) -> str:
+    """切り出しWAVとレポートへ使える単一の接頭辞だけを返す。"""
+    return windows_name(value, "出力接頭辞")
 
 
 def relative_wav_parts(file_name: str) -> tuple[str, ...]:
