@@ -407,9 +407,11 @@ function applySettingsSearch() {
       }
     }
   }
-  for (const panel of form.querySelectorAll(".tab-panel")) {
+  for (const panel of [...form.querySelectorAll(".tab-panel")].reverse()) {
     if (!query) continue;
-    const hasVisibleContent = [...panel.children].some(child => !child.hidden);
+    // 説明文だけ残るタブを検索結果に数えず、隠れた親の中にある一致も除外する。
+    const hasVisibleContent = [...panel.querySelectorAll(".searchable, .section")]
+      .some(child => !child.closest("[hidden]"));
     panel.hidden = !hasVisibleContent;
   }
   if (query && !form.querySelector(".tab-panel:not([hidden])")) {

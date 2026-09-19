@@ -332,6 +332,10 @@ try {
   if (!(await blueskyCard.getAttribute("class"))?.includes("open")) throw new Error("検索に一致するスキル設定が開きません");
   await page.locator("#settingsSearch").fill("Microsoft Graph");
   await page.locator("#clearSettingsSearch").click();
+  await page.locator("#settingsSearch").fill("存在しない設定の検証用文字列");
+  if (await page.locator("#status").textContent() !== "検索に一致する設定はありません") throw new Error("設定の検索結果なしが表示されません");
+  if (await page.locator(".tab-panel:visible").count()) throw new Error("一致する設定のないタブが残っています");
+  await page.locator("#clearSettingsSearch").click();
   for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
     const card = page.locator(".card-item").filter({ hasText: name });
     const open = await card.evaluate(node => node.classList.contains("open") && !node.nextElementSibling.hidden);
