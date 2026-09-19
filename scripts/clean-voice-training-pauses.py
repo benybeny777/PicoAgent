@@ -94,16 +94,17 @@ def main() -> int:
     entries = clips.read_candidates(source)
     if not entries:
         raise SystemExit(f"補正する断片がありません: {source}")
+    clips.unique_candidates(entries, args.source)
     models = clips.load_models("cpu", vad_only=True)
 
     before, after, gated_ratio, lines = [], [], [], []
     for file_name, _speaker, language, text in entries:
-        src = source / "raw" / file_name
+        src = clips.wav_path(source / "raw", file_name)
         audio, sr = sf.read(src, dtype="float64", always_2d=True)
         info = sf.info(src)
         x = audio.mean(axis=1)
         y, ratio = gate(models, x, sr, args.pad_ms, args.fade_ms, args.attenuation_db)
-        dst = incoming / "raw" / file_name
+        dst = clips.wav_path(incoming / "raw", file_name)
         dst.parent.mkdir(parents=True, exist_ok=True)
         sf.write(dst, y.astype(np.float32), sr, subtype=info.subtype)
         before += pause_levels(x, sr)

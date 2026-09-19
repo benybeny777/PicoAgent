@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from voice_training_common import unique_wav_names, wav_path
 
 # 取得済みキャッシュだけを使い、測定のために新しいモデルを取得しない。
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -94,10 +95,9 @@ def file_sha256(path: Path) -> str:
 
 
 def unique_candidates(entries: list[tuple[str, str, str, str]], label: str) -> dict[str, tuple[str, str, str]]:
+    unique_wav_names([file_name for file_name, _speaker, _language, _text in entries], label)
     result: dict[str, tuple[str, str, str]] = {}
     for file_name, speaker, language, text in entries:
-        if file_name in result:
-            raise SystemExit(f"候補一覧に同名WAVが重複しています: {label} {file_name}")
         result[file_name] = (speaker, language, text)
     return result
 
@@ -314,10 +314,10 @@ def command_measure(args: argparse.Namespace) -> int:
                 speaker, language, text = candidate_map[file_name]
                 if (row.get("speaker"), row.get("language"), row.get("text")) != (speaker, language, text):
                     raise SystemExit(f"測定レポートの話者・言語・文章が現在の候補と一致しません: {file_name}")
-                wav_path = dataset_root / "raw" / file_name
-                if wav_path.exists():
+                source_wav = wav_path(dataset_root / "raw", file_name)
+                if source_wav.exists():
                     expected_hash = row.get("source_sha256")
-                    if not expected_hash or expected_hash != file_sha256(wav_path):
+                    if not expected_hash or expected_hash != file_sha256(source_wav):
                         raise SystemExit(f"測定済みWAVの内容が現在の候補と一致しません。新しいレポート名で再測定してください: {file_name}")
                 done.add(file_name)
     previous_rows: dict[str, dict] = {}
@@ -344,13 +344,13 @@ def command_measure(args: argparse.Namespace) -> int:
         for index, (file_name, speaker, language, text) in enumerate(candidates, 1):
             if file_name in done:
                 continue
-            wav_path = dataset_root / "raw" / file_name
+            source_wav = wav_path(dataset_root / "raw", file_name)
             row = {"file": file_name, "speaker": speaker, "language": language, "text": text}
-            if not wav_path.exists():
+            if not source_wav.exists():
                 row["missing"] = True
             else:
-                row["source_sha256"] = file_sha256(wav_path)
-                row.update(measure_clip(models, wav_path, text, previous_rows.get(file_name)))
+                row["source_sha256"] = file_sha256(source_wav)
+                row.update(measure_clip(models, source_wav, text, previous_rows.get(file_name)))
             output.write(json.dumps(row, ensure_ascii=False) + "\n")
             output.flush()
             if index % 20 == 0 or index == len(candidates):
@@ -537,9 +537,9 @@ def command_select(args: argparse.Namespace) -> int:
             expected = candidate_map[row["file"]]
             if (row.get("speaker"), row.get("language"), row.get("text")) != expected:
                 raise SystemExit(f"測定レポートの話者・言語・文章が候補一覧と一致しません: {dataset} {row['file']}")
-            wav_path = sbv2_root / "Data" / dataset / "raw" / row["file"]
+            source_wav = wav_path(sbv2_root / "Data" / dataset / "raw", row["file"])
             if not row.get("missing"):
-                if not wav_path.is_file() or row.get("source_sha256") != file_sha256(wav_path):
+                if not source_wav.is_file() or row.get("source_sha256") != file_sha256(source_wav):
                     raise SystemExit(f"測定レポートと現在のWAVが一致しません。新しいレポート名で再測定してください: {dataset} {row['file']}")
             row["dataset"] = dataset
         rows.extend(dataset_rows)
@@ -595,7 +595,9 @@ def command_select(args: argparse.Namespace) -> int:
     (incoming / "raw").mkdir(parents=True)
     lines, outputs = [], []
     for row in accepted:
-        info = write_clean_clip(sbv2_root / "Data" / row["dataset"] / "raw" / row["file"], incoming / "raw" / row["file"], row)
+        source_wav = wav_path(sbv2_root / "Data" / row["dataset"] / "raw", row["file"])
+        destination_wav = wav_path(incoming / "raw", row["file"])
+        info = write_clean_clip(source_wav, destination_wav, row)
         if info["output_peak_dbfs"] > PEAK_CEILING_DBFS + 0.05:
             raise SystemExit(f"正規化後のピークが上限を超えました: {row['file']} {info}")
         outputs.append({"file": row["file"], **info})

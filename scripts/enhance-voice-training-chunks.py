@@ -34,6 +34,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from voice_training_common import unique_wav_names, wav_path
 
 GAP_SECONDS = 1.0
 MAX_BYTES = 9_000_000
@@ -59,6 +60,7 @@ def pack(source: Path, out: Path) -> None:
     source_entries = list(entries(source))
     if not source_entries:
         raise SystemExit(f"連結する断片がありません: {source}")
+    unique_wav_names([file_name for file_name, _language, _text in source_entries], source.name)
     incoming.mkdir(parents=True)
     manifest, chunk, cursor, index, sample_rate = [], [], 0, 1, None
 
@@ -73,7 +75,7 @@ def pack(source: Path, out: Path) -> None:
         chunk, cursor, index = [], 0, index + 1
 
     for file_name, language, text in source_entries:
-        x, sr = sf.read(source / "raw" / file_name, dtype="float32")
+        x, sr = sf.read(wav_path(source / "raw", file_name), dtype="float32")
         sample_rate = sample_rate or sr
         if sr != sample_rate or x.ndim != 1:
             raise SystemExit(f"サンプルレートまたはチャンネル数が揃っていません: {file_name}")
@@ -165,6 +167,7 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
     if manifest.get("source") != source.name:
         raise SystemExit(f"補正版の元データセットが一致しません: {manifest.get('source')} != {source.name}")
     source_entries = list(entries(source))
+    unique_wav_names([file_name for file_name, _language, _text in source_entries], source.name)
     manifest_entries = [(clip["file"], clip["language"], clip["text"]) for clip in manifest["clips"]]
     if manifest_entries != source_entries:
         raise SystemExit("補正版manifestの断片・言語・文章が元データセットと一致しません")
@@ -208,7 +211,7 @@ def unpack(source: Path, enhanced: Path, output: Path) -> None:
         if peak > ceiling:
             gain *= ceiling / peak
         y = segment * gain
-        path = incoming / "raw" / clip["file"]
+        path = wav_path(incoming / "raw", clip["file"])
         path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(path, y.astype(np.float32), sr, subtype="PCM_16")
         loudness_after.append(meter.integrated_loudness(y))

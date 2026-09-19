@@ -9,6 +9,7 @@ const checker = read("scripts/check-synthesized-voice.py");
 const selector = read("scripts/select-voice-training-clips.py");
 const enhancer = read("scripts/enhance-voice-training-chunks.py");
 const trainer = read("scripts/train-voice-model.ps1");
+const common = read("scripts/voice_training_common.py");
 
 test("Live2D列挙は任意プロパティをStrictModeでも安全に読む", () => {
   assert.match(preview, /PSObject\.Properties\['live2d'\]/);
@@ -25,9 +26,17 @@ test("合成QAは空の話者基準と既存結果の上書きを拒否する", 
 
 test("学習断片の測定と選別はWAVの同一性と一意名を検証する", () => {
   assert.match(selector, /source_sha256/);
-  assert.match(selector, /file_sha256\(wav_path\)/);
+  assert.match(selector, /file_sha256\(source_wav\)/);
   assert.match(selector, /複数データセットの採用断片に同名WAVがあります/);
   assert.match(selector, /output_root\.with_name\(f"\{output_root\.name\}\.incoming"\)/);
+});
+
+test("学習WAVは管理下の相対パスだけを許可する", () => {
+  assert.match(common, /path\.is_absolute\(\) or path\.drive or path\.root/);
+  assert.match(common, /part in \("", "\.", "\.\."\)/);
+  assert.match(common, /path\.suffix\.casefold\(\) != "\.wav"/);
+  assert.match(common, /candidate\.relative_to\(resolved_root\)/);
+  assert.match(common, /part\.casefold\(\)/);
 });
 
 test("ノイズ補正版は元データとサンプルレートを照合してから確定する", () => {
