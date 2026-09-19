@@ -25,6 +25,7 @@ test("WindowsのBAT入口はcmdの文字コードに依存しない", () => {
       bytes.every((byte) => byte < 0x80),
       `${name}はASCIIだけでPowerShell入口を呼ぶ`,
     );
+    assert.match(bytes.toString("ascii"), /show-powershell7-required\.ps1/);
   }
 });
 
