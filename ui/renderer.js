@@ -4871,6 +4871,9 @@ async function finishRecording() {
   const base = micInterimBase;      // 録音開始時点の入力欄（逐次プレビューを除いた確定部分）
   const hadInterim = micInterimTexts.length > 0;
   stopMicCapture();
+  const session = micSession;
+  const startRequest = micStartRequest;
+  const isCurrentRecording = () => session === micSession && startRequest === micStartRequest;
   const seconds = chunks.reduce((sum, c) => sum + c.length, 0) / sampleRate;
   if (seconds < 0.4) { clearTransientStatus(); showToast("録音が短すぎました", "warn"); return; }
   status.textContent = hadInterim ? "文字起こしを確定中…" : "文字起こし中…";
@@ -4878,7 +4881,9 @@ async function finishRecording() {
   try {
     const wav = encodeWav(chunks, sampleRate);
     const b64 = await blobToDataUrl(new Blob([wav], { type: "audio/wav" }));
+    if (!isCurrentRecording()) return;
     const result = await window.picoagent.transcribeAudio(b64);
+    if (!isCurrentRecording()) return;
     const text = String(result?.text ?? "").trim();
     if (text) {
       // 逐次プレビューは区間切りの境界で欠けることがあるため、全体の文字起こしで置き換えて確定する。
@@ -4887,20 +4892,27 @@ async function finishRecording() {
       showToast("文字起こししました", "success");
     }
   } catch (error) {
+    if (!isCurrentRecording()) return;
     logApp("error", "音声入力に失敗しました", errorDetail(error));
     // 逐次プレビューが入力欄に残っていれば、それを最終結果として使う。
     if (!hadInterim) showToast(preview(error?.message || error || "文字起こしに失敗しました", 60), "error");
     else showToast("確定に失敗したため途中結果を残しました", "warn");
   } finally {
-    status.classList.remove("busy");
-    if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
-    scheduleVoiceSubmit();
+    if (isCurrentRecording()) {
+      status.classList.remove("busy");
+      if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
+      scheduleVoiceSubmit();
+    }
   }
 }
 
 async function startRecording() {
   if (micStream || micStarting) return;
   const request = ++micStartRequest;
+  if (!busy && (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…")) {
+    status.classList.remove("busy");
+    clearTransientStatus();
+  }
   micStarting = true;
   if (micButton) micButton.disabled = true;
   stopVoice(false); // 読み上げ中でも話し始められるよう、マイク操作を割り込みとして扱う。

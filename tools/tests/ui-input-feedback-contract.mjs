@@ -75,6 +75,41 @@ test("上下キーは未定義処理を呼ばず履歴と下書きを往復す�
   assert.equal(input.value, "下書き");
 });
 
+test("前の録音の遅延結果や失敗は再録音の入力と送信予約を変更しない", async () => {
+  for (const mode of ["success", "failure", "stale-success", "stale-failure", "stale-encoding"]) {
+    let settle;
+    let entered;
+    const waiting = new Promise(resolve => { entered = resolve; });
+    const delayed = new Promise((resolve, reject) => { settle = () => mode.endsWith("failure") ? reject(new Error("文字起こし失敗")) : resolve({ text: "確定した音声" }); });
+    const effects = [];
+    const input = { value: "次の下書き", focus() {} };
+    const context = vm.createContext({
+      input, Blob, status: { textContent: "", classList: { add() {}, remove() { effects.push("状態解除"); } } },
+      encodeWav() { return new ArrayBuffer(2); },
+      blobToDataUrl() { if (mode === "stale-encoding") { entered(); return delayed; } return "音声"; },
+      window: { picoagent: { transcribeAudio() { effects.push("変換要求"); entered(); return delayed; } } },
+      setInputValue(value) { input.value = value; },
+      clearTransientStatus() {}, logApp() {}, errorDetail() {}, preview(value) { return value; },
+      showToast() { effects.push("通知"); }, scheduleVoiceSubmit() { effects.push("送信予約"); },
+    });
+    vm.runInContext('let micStream = {}; let micChunks = [new Float32Array(8000)]; let micSamples = 8000; const micSampleRate = 16000; const micInterimBase = ""; const micInterimTexts = []; let micSession = 0; let micStartRequest = 0; function stopMicCapture() { micStream = null; micSession++; micStartRequest++; }', context);
+    vm.runInContext(between("async function finishRecording()", "async function startRecording()"), context);
+    const pending = vm.runInContext("finishRecording()", context);
+    await waiting;
+    if (mode.startsWith("stale")) vm.runInContext('micStartRequest++; status.textContent = "次の録音中";', context);
+    settle();
+    await pending;
+    if (mode.startsWith("stale")) {
+      assert.equal(input.value, "次の下書き");
+      assert.deepEqual(effects, mode === "stale-encoding" ? [] : ["変換要求"]);
+      assert.equal(context.status.textContent, "次の録音中");
+    } else {
+      assert.equal(input.value, mode === "success" ? "確定した音声" : "次の下書き");
+      assert.deepEqual(effects, ["変換要求", "通知", "状態解除", "送信予約"]);
+    }
+  }
+});
+
 test("文中と選択中の上下キーは通常のカーソル操作を保つ", () => {
   const input = keyboard();
   input.selectionStart = input.selectionEnd = 1;
