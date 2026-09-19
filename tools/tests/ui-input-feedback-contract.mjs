@@ -71,6 +71,33 @@ test("修飾キー付きの上下操作は履歴で入力を置き換えない",
   }
 });
 
+test("履歴検索のEscapeは画面を閉じず検索だけを解除しIME取消を妨げない", () => {
+  const handlers = {};
+  let renders = 0;
+  let cancelled = 0;
+  const historySearch = { value: "検索語", addEventListener(type, handler) { handlers[type] = handler; } };
+  const context = vm.createContext({
+    historySearch, historyQuery: "検索語",
+    isImeComposing: event => event.isComposing || event.keyCode === 229,
+    renderHistory() { renders++; },
+    clearTimeout() { cancelled++; }, setTimeout() { return 1; },
+  });
+  vm.runInContext(between("let historySearchTimer = 0;", 'document.addEventListener("keydown", event => {'), context);
+  for (const extra of [{ key: "Enter" }, { isComposing: true }, { keyCode: 229 }]) {
+    handlers.keydown({ key: "Escape", ...extra, preventDefault() { assert.fail("通常入力を阻害"); }, stopPropagation() { assert.fail("IME取消を阻害"); } });
+    assert.equal(historySearch.value, "検索語");
+  }
+  handlers.input();
+  let prevented = false;
+  let stopped = false;
+  handlers.keydown({ key: "Escape", preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+  assert.equal(historySearch.value, "");
+  assert.equal(context.historyQuery, "");
+  assert.equal(renders, 1);
+  assert.equal(cancelled, 2);
+  assert.equal(prevented && stopped, true);
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;

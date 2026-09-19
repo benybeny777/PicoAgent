@@ -5347,6 +5347,15 @@ historySearch?.addEventListener("input", () => {
   clearTimeout(historySearchTimer);
   historySearchTimer = setTimeout(renderHistory, 120);
 });
+historySearch?.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || isImeComposing(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  clearTimeout(historySearchTimer);
+  historySearch.value = "";
+  historyQuery = "";
+  renderHistory();
+});
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
   if (isImeComposing(event)) return; // 変換の取消を画面の Escape として扱わない
