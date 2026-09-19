@@ -3125,7 +3125,10 @@ function renderHistoryRows() {
     meta.className = "history-meta";
     const label = document.createElement("div");
     label.className = "history-role";
-    label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+    const roleName = document.createElement("span");
+    roleName.className = "history-role-name";
+    roleName.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+    label.append(roleName);
     if (item.at) {
       // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
       const time = document.createElement("span");
@@ -3162,7 +3165,10 @@ function renderHistoryRows() {
     meta.className = "history-meta";
     const label = document.createElement("div");
     label.className = "history-role";
-    label.textContent = characterManifest?.name || "むぎ";
+    const roleName = document.createElement("span");
+    roleName.className = "history-role-name";
+    roleName.textContent = characterManifest?.name || "むぎ";
+    label.append(roleName);
     meta.append(label);
     const body = document.createElement("div");
     body.className = "history-body";

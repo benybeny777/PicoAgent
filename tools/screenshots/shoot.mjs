@@ -1260,6 +1260,9 @@ async function validateInteractionMatrix() {
         }
         await page.setViewportSize(resized);
         if (layout === "chat") {
+          await page.evaluate(() => addHistory("user", "時刻表示の確認"));
+          if (!(await page.locator(".history-item.user .history-time").last().isVisible())) throw new Error("チャットの送信時刻が発言者名と一緒に隠れています");
+          await page.screenshot({ path: join(output, `${target.id}-chat-time.png`), omitBackground: true });
           const resetState = await page.evaluate(async () => {
             setInputValue("未送信の下書き");
             setPendingChoices([{ label: "古い会話の選択肢" }]);

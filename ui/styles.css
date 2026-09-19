@@ -816,12 +816,13 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 @media (prefers-color-scheme:dark) { :root { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-user-msg:#5f9f48; } }
 html[data-theme="light"] { --chat-wall-a:#8fa8c0; --chat-wall-b:#a8bacb; --chat-user-msg:#9eea6a; }
 html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-user-msg:#5f9f48; }
-[data-layout="chat"] .history-role { display:none; }
+[data-layout="chat"] .history-role-name { display:none; }
 [data-layout="chat"] .history-meta { margin-bottom:0; }
 [data-layout="chat"] .history-time { margin:0; font-size:9px; }
 [data-layout="chat"] .history-item { display:flex; align-items:flex-end; gap:5px; margin-bottom:9px; }
 [data-layout="chat"] .history-item.user { flex-direction:row-reverse; }
 [data-layout="chat"] .history-meta { order:2; flex:0 0 auto; align-self:flex-end; }
+[data-layout="chat"] .history-item .history-meta { flex-direction:column; align-items:flex-end; gap:3px; }
 [data-layout="chat"] .history-body { order:1; box-shadow:0 1px 2px rgba(30,20,36,.12); }
 [data-layout="chat"] .history-item.assistant .history-body { background:var(--paper); border-radius:4px 13px 13px 13px; }
 [data-layout="chat"] .history-item.user .history-body { background:var(--chat-user-msg); border-radius:13px 4px 13px 13px; }
