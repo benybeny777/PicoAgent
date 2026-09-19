@@ -4874,6 +4874,7 @@ async function finishRecording() {
   const session = micSession;
   const startRequest = micStartRequest;
   const isCurrentRecording = () => session === micSession && startRequest === micStartRequest;
+  let hasTranscript = hadInterim;
   const seconds = chunks.reduce((sum, c) => sum + c.length, 0) / sampleRate;
   if (seconds < 0.4) { clearTransientStatus(); showToast("録音が短すぎました", "warn"); return; }
   status.textContent = hadInterim ? "文字起こしを確定中…" : "文字起こし中…";
@@ -4887,6 +4888,7 @@ async function finishRecording() {
     const text = String(result?.text ?? "").trim();
     if (text) {
       // 逐次プレビューは区間切りの境界で欠けることがあるため、全体の文字起こしで置き換えて確定する。
+      hasTranscript = true;
       setInputValue(base ? `${base} ${text}` : text);
       input.focus();
       showToast("文字起こししました", "success");
@@ -4901,7 +4903,7 @@ async function finishRecording() {
     if (isCurrentRecording()) {
       status.classList.remove("busy");
       if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
-      scheduleVoiceSubmit();
+      if (hasTranscript) scheduleVoiceSubmit();
     }
   }
 }
