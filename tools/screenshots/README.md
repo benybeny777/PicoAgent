@@ -61,7 +61,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_BUBBLE_BLUR` | `1` ならフキダシの`backdrop-filter`有無を、立ち絵を動かした状態でペット／ミニ／配信×重なり有無×負荷有無の12条件、各3試行ずつ交互に測り `temp/bubble-blur/metrics.json` へ書く。ffmpeg不要 |
 | `SHOOT_LAYOUT_SIZE` | `SHOOT_CHARACTER_MATRIX=1` と併用し、`pet=520x430,mascot=300x480` のように形式ごとの撮影寸法を上書きする。窓を狭めたときも回答操作が1段のままか、フキダシが潰れていないかを確認する用 |
 | `SHOOT_LAYOUT_EDITOR` | `1` ならMoveable編集モードのドラッグ、拡大縮小、ウィンドウドラッグ抑止、保存、再読込復元、既定へ戻すを検査する |
-| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まり、描画ループの休止・再開、視線イベントのフレーム合流を `temp/layout-interaction-matrix/` へ検査する。収まりは既定寸法の78%と、利用者が縮められる下限200x240の2段階で見て、入力欄・送信・音声・状態表示・ウィンドウ操作が**完全に窓の内側にある**ことを条件にする |
+| `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まり、描画ループの休止・再開、視線イベントのフレーム合流を `temp/layout-interaction-matrix/` へ検査する。メッシュの思考中は専用tickerの継続とモーション反映を確認し、不要な連番ループは休止を保つ。収まりは既定寸法の78%と、利用者が縮められる下限200x240の2段階で見て、入力欄・送信・音声・状態表示・ウィンドウ操作が**完全に窓の内側にある**ことを条件にする |
 | `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×7形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
 | `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能とLive2D取得案内を `temp/onboarding-check/` へ撮影する |

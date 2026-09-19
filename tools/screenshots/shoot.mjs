@@ -1431,11 +1431,14 @@ async function validateInteractionMatrix() {
       throw new Error("局所バネのない待機リグで空のフレームループが再開しています");
     }
     await gazePage.evaluate(() => setAnimation("thinking", true));
-    await gazePage.waitForFunction(() => animationLoop.pending());
+    // 思考中もメッシュ側のtickerが描画する。rendererの連番ループを動かす必要はない。
+    await gazePage.waitForFunction(() => meshRigActive && rigActive
+      && meshRigController.motion === "thinking" && meshRigController.app.ticker.started
+      && !animationLoop.pending());
     await gazePage.evaluate(() => setAnimation("idle", true));
     await gazePage.waitForTimeout(80);
     if (await gazePage.evaluate(() => animationLoop.pending())) {
-      throw new Error("フレームモーションから待機リグへ戻った後もループが残っています");
+      throw new Error("思考モーションから待機リグへ戻った後も空のループが残っています");
     }
     await gazePage.mouse.move(450, 590);
     await gazePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
