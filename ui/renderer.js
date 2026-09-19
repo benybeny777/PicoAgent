@@ -4912,6 +4912,7 @@ async function finishRecording() {
 
 async function startRecording() {
   if (micStream || micStarting) return;
+  cancelPendingVoiceSubmit("録音を再開するため音声送信を取り消しました");
   const request = ++micStartRequest;
   if (!busy && (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…")) {
     status.classList.remove("busy");

@@ -135,6 +135,22 @@ test("前の逐次文字起こしの失敗は次の録音のタイマーを止�
   }
 });
 
+test("録音の再開はマイク許可を待つ前に以前の送信予約を取り消す", async () => {
+  const effects = [];
+  const context = vm.createContext({
+    input: { focus() {} }, status: { textContent: "" }, micButton: {},
+    clearTimeout(timer) { effects.push(timer); }, clearTransientStatus() {}, showToast() {}, stopVoice() {}, logApp() {}, errorDetail() {},
+    navigator: { mediaDevices: { async getUserMedia() { effects.push("マイク要求"); throw new Error("テスト用の許可拒否"); } } },
+  });
+  vm.runInContext('let pendingVoiceSubmitTimer = "前の送信予約"; let micStream = null; let micStarting = false; let micStartRequest = 0; const busy = false;', context);
+  vm.runInContext(between("function cancelPendingVoiceSubmit(", "function scheduleVoiceSubmit()"), context);
+  vm.runInContext(between("async function startRecording()", "function updateContinuousVoiceButton()"), context);
+  await vm.runInContext("startRecording()", context);
+  assert.deepEqual(effects, ["前の送信予約", "マイク要求"]);
+  assert.equal(vm.runInContext("pendingVoiceSubmitTimer", context), null);
+  assert.equal(context.micButton.disabled, false);
+});
+
 test("文中と選択中の上下キーは通常のカーソル操作を保つ", () => {
   const input = keyboard();
   input.selectionStart = input.selectionEnd = 1;
