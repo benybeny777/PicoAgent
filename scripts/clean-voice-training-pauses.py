@@ -85,7 +85,9 @@ def main() -> int:
     args = parser.parse_args()
 
     data = Path(args.sbv2_root).resolve() / "Data"
-    source, output = data / args.source, data / args.output
+    source_name = clips.dataset_name(args.source)
+    output_name = clips.dataset_name(args.output)
+    source, output = data / source_name, data / output_name
     if output.exists():
         raise SystemExit(f"出力先が既にあるため停止します（上書きしない）: {output}")
     incoming = output.with_name(f"{output.name}.incoming")
@@ -94,7 +96,7 @@ def main() -> int:
     entries = clips.read_candidates(source)
     if not entries:
         raise SystemExit(f"補正する断片がありません: {source}")
-    clips.unique_candidates(entries, args.source)
+    clips.unique_candidates(entries, source_name)
     models = clips.load_models("cpu", vad_only=True)
 
     before, after, gated_ratio, lines = [], [], [], []
@@ -110,7 +112,7 @@ def main() -> int:
         before += pause_levels(x, sr)
         after += pause_levels(y, sr)
         gated_ratio.append(ratio)
-        lines.append(f"{file_name}|{args.output}|{language}|{text}")
+        lines.append(f"{file_name}|{output_name}|{language}|{text}")
     (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def summary(values: list[float]) -> dict:

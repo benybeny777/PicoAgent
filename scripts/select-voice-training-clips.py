@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-from voice_training_common import unique_wav_names, wav_path
+from voice_training_common import dataset_name, unique_wav_names, wav_path
 
 # 取得済みキャッシュだけを使い、測定のために新しいモデルを取得しない。
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -294,13 +294,14 @@ def measure_clip(models: Models, wav_path: Path, text: str, previous: dict | Non
 
 
 def command_measure(args: argparse.Namespace) -> int:
-    dataset_root = Path(args.sbv2_root) / "Data" / args.dataset
+    dataset = dataset_name(args.dataset)
+    dataset_root = Path(args.sbv2_root) / "Data" / dataset
     report = Path(args.report)
     report.parent.mkdir(parents=True, exist_ok=True)
     candidates = read_candidates(dataset_root)
     if args.limit:
         candidates = candidates[: args.limit]
-    candidate_map = unique_candidates(candidates, args.dataset)
+    candidate_map = unique_candidates(candidates, dataset)
     done: set[str] = set()
     if report.exists():
         for line in report.read_text(encoding="utf-8").splitlines():
@@ -520,11 +521,13 @@ def write_clean_clip(source: Path, destination: Path, row: dict) -> dict:
 
 def command_select(args: argparse.Namespace) -> int:
     sbv2_root = Path(args.sbv2_root)
-    output_root = sbv2_root / "Data" / args.output_dataset
+    output_dataset = dataset_name(args.output_dataset)
+    datasets = [dataset_name(dataset) for dataset in args.dataset]
+    output_root = sbv2_root / "Data" / output_dataset
     if len(args.dataset) != len(args.report):
         raise SystemExit("--dataset と --report は同じ数だけ、同じ順で指定してください")
     rows = []
-    for dataset, report_path in zip(args.dataset, args.report):
+    for dataset, report_path in zip(datasets, args.report):
         dataset_rows = [json.loads(line) for line in Path(report_path).read_text(encoding="utf-8").splitlines() if line.strip()]
         candidates = read_candidates(sbv2_root / "Data" / dataset)
         candidate_map = unique_candidates(candidates, dataset)
@@ -554,8 +557,8 @@ def command_select(args: argparse.Namespace) -> int:
         (rejected if reasons else accepted).append(row)
     total_seconds = sum(r["duration"] for r in accepted)
     summary = {
-        "source_dataset": args.dataset,
-        "output_dataset": args.output_dataset,
+        "source_dataset": datasets,
+        "output_dataset": output_dataset,
         "thresholds": vars(limits),
         "candidates": len(rows),
         "accepted": len(accepted),
@@ -601,7 +604,7 @@ def command_select(args: argparse.Namespace) -> int:
         if info["output_peak_dbfs"] > PEAK_CEILING_DBFS + 0.05:
             raise SystemExit(f"正規化後のピークが上限を超えました: {row['file']} {info}")
         outputs.append({"file": row["file"], **info})
-        lines.append(f"{row['file']}|{args.output_dataset}|{row['language']}|{row['text']}")
+        lines.append(f"{row['file']}|{output_dataset}|{row['language']}|{row['text']}")
     (incoming / "esd.list").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (incoming / "esd.rejected.tsv").write_text(
         "".join(f"{';'.join(r['reasons'])}\t{r['file']}|{r['text']}\n" for r in rejected), encoding="utf-8"

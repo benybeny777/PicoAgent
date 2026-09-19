@@ -39,6 +39,14 @@ test("学習WAVは管理下の相対パスだけを許可する", () => {
   assert.match(common, /part\.casefold\(\)/);
 });
 
+test("データセット名はData直下の単一フォルダーだけを許可する", () => {
+  assert.match(common, /len\(path\.parts\) != 1/);
+  assert.match(common, /WINDOWS_RESERVED_NAMES/);
+  assert.match(selector, /datasets = \[dataset_name\(dataset\) for dataset in args\.dataset\]/);
+  assert.match(trainer, /\[IO\.Path\]::IsPathRooted\(\$Dataset\)/);
+  assert.match(trainer, /データセット名はData直下の安全なフォルダー名/);
+});
+
 test("ノイズ補正版は元データとサンプルレートを照合してから確定する", () => {
   assert.match(enhancer, /manifest\.get\("source"\) != source\.name/);
   assert.match(enhancer, /sr != expected_sample_rate/);

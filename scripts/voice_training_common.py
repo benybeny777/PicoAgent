@@ -4,6 +4,32 @@ from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
 
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
+
+
+def dataset_name(value: str) -> str:
+    """Data直下で使える単一のWindowsフォルダー名だけを返す。"""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise SystemExit(f"データセット名が不正です: {value!r}")
+    path = PureWindowsPath(value.replace("/", "\\"))
+    invalid = '<>:"/\\|?*'
+    if (
+        path.is_absolute()
+        or path.drive
+        or path.root
+        or len(path.parts) != 1
+        or value in (".", "..")
+        or value.endswith((".", " "))
+        or any(character in invalid or ord(character) < 32 for character in value)
+        or value.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES
+    ):
+        raise SystemExit(f"データセット名はData直下の安全なフォルダー名にしてください: {value}")
+    return value
+
 
 def relative_wav_parts(file_name: str) -> tuple[str, ...]:
     """WindowsのWAV相対パスを検証し、管理ルートへ安全に結合できる部品を返す。"""

@@ -30,6 +30,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+if ($Dataset -ne $Dataset.Trim() -or $Dataset -in @('.', '..') -or
+    [IO.Path]::IsPathRooted($Dataset) -or $Dataset -match '[\x00-\x1F\\/<>:"|?*]' -or
+    $Dataset.EndsWith('.') -or $Dataset.EndsWith(' ') -or
+    $Dataset.Split('.')[0] -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
+    throw "データセット名はData直下の安全なフォルダー名にしてください: $Dataset"
+}
 $root = (Resolve-Path -LiteralPath $SbvRoot).Path
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $datasetDir = Join-Path $root "Data\$Dataset"
