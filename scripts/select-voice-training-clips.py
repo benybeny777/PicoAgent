@@ -590,8 +590,7 @@ def command_select(args: argparse.Namespace) -> int:
     if len(accepted) < args.min_clips:
         raise SystemExit(f"採用断片が少なすぎます: {len(accepted)} < {args.min_clips}")
     accepted_names = [row["file"] for row in accepted]
-    if len(set(accepted_names)) != len(accepted_names):
-        raise SystemExit("複数データセットの採用断片に同名WAVがあります。上書きを避けるため元データ側で一意の名前にしてください")
+    unique_wav_names(accepted_names, "複数データセットの採用断片")
     incoming = output_root.with_name(f"{output_root.name}.incoming")
     if incoming.exists():
         raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
