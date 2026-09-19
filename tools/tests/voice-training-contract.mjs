@@ -22,6 +22,8 @@ test("合成QAは空の話者基準と既存結果の上書きを拒否する", 
   assert.match(checker, /話者基準の埋め込みがありません/);
   assert.match(checker, /検査結果を上書きしない/);
   assert.match(checker, /result\["wav"\] = str\(out_dir/);
+  assert.match(checker, /centroid = reference_centroid\(reference\)[\s\S]*?if args\.mode == "sbv2"/);
+  assert.match(checker, /if args\.mode == "files":\s+incoming\.mkdir\(parents=True\)/);
   assert.match(checker, /incoming\.replace\(out_dir\)/);
 });
 

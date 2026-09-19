@@ -259,7 +259,6 @@ def main() -> int:
         raise SystemExit(f"出力先が既にあるため停止します（検査結果を上書きしない）: {out_dir}")
     if incoming.exists():
         raise SystemExit(f"前回の未完了出力があるため停止します: {incoming}")
-    incoming.mkdir(parents=True)
     texts = DEFAULT_TEXTS + (PAUSE_TEXTS if args.text_set == "pauses" else [])
     if args.texts_file:
         texts = [t.strip() for t in Path(args.texts_file).read_text(encoding="utf-8").splitlines() if t.strip()]
@@ -267,20 +266,27 @@ def main() -> int:
         raise SystemExit("--repeat は1以上にしてください")
     texts = texts * args.repeat
     reference = Path(args.reference).resolve() if args.reference else None
+    centroid = reference_centroid(reference) if reference else None
 
     if args.mode == "sbv2":
+        incoming.mkdir(parents=True)
         wavs = synthesize_sbv2(args, texts, incoming)
     elif args.mode == "aivis":
+        incoming.mkdir(parents=True)
         wavs = synthesize_aivis(args, texts, incoming)
     else:
         wavs = [Path(p).resolve() for p in args.wav]
         if len(wavs) != len(texts):
             raise SystemExit(f"WAVと文の数が一致しません: {len(wavs)} != {len(texts)}")
+        missing = [str(wav) for wav in wavs if not wav.is_file()]
+        if missing:
+            raise SystemExit(f"検査するWAVがありません: {missing[:3]}")
 
     models = clips.load_models(args.device)
-    centroid = reference_centroid(reference) if reference else None
     judge_level = args.mode != "sbv2"
     results = [inspect_wav(models, wav, text, centroid, judge_level) for wav, text in zip(wavs, texts)]
+    if args.mode == "files":
+        incoming.mkdir(parents=True)
     if args.mode != "files":
         for result in results:
             result["wav"] = str(out_dir / Path(result["wav"]).name)
