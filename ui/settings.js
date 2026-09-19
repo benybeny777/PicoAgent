@@ -3296,12 +3296,14 @@ async function render() {
   let characterSwitchQueue = Promise.resolve();
   let characterSwitchPending = 0;
   let characterSwitchOwnsBusy = false;
+  const characterSwitchMessage = "キャラ設定を読み込み中…";
   let restoreCharacterSelectFocus = false;
   function queueCharacterSwitch(requestedCharacter) {
     restoreCharacterSelectFocus ||= document.activeElement === characterSelect;
     if (characterSwitchPending === 0 && !settingsMutationBusy) {
       characterSwitchOwnsBusy = true;
       setSettingsMutationBusy(true);
+      statusEl.textContent = characterSwitchMessage;
     }
     characterSwitchPending += 1;
     characterSelect.disabled = true;
@@ -3346,6 +3348,10 @@ async function render() {
         if (characterSwitchOwnsBusy) {
           characterSwitchOwnsBusy = false;
           setSettingsMutationBusy(false);
+          if (statusEl.textContent === characterSwitchMessage) {
+            const selected = characterCatalog.characters.find(item => item.id === displayedCharacterId);
+            statusEl.textContent = `${selected?.name || displayedCharacterId} [${displayedCharacterId}] を選びました。「保存」で反映します。`;
+          }
         }
         if (restoreCharacterSelectFocus) characterSelect.focus({ preventScroll: true });
         restoreCharacterSelectFocus = false;
@@ -3516,7 +3522,6 @@ async function render() {
     selectButton.addEventListener("click", () => {
       characterSelect.value = character.id;
       characterSelect.dispatchEvent(new Event("change"));
-      statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
     });
     const nameText = el("span", { textContent: character.name });
     const texts = [

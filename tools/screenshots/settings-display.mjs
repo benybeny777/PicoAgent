@@ -380,11 +380,13 @@ try {
     await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
     if (!(await page.locator("#save").isDisabled())) throw new Error("キャラ設定の読込中に保存できてしまいます");
     if (!(await page.locator("#form").evaluate(node => node.inert))) throw new Error("キャラ設定の読込中に別の項目を編集できてしまいます");
+    if (!(await page.locator("#status").textContent())?.includes("キャラ設定を読み込み中")) throw new Error("キャラ切替の待機理由が表示されません");
   } finally {
     holdCharacterLoad = false;
     releaseCharacterLoad();
   }
   await page.waitForFunction(() => !document.getElementById("form").inert);
+  if ((await page.locator("#status").textContent())?.includes("キャラ設定を読み込み中")) throw new Error("キャラ切替後も待機表示が残っています");
   // 切替は非同期。選択1件だけが未保存になった状態を基準にする。
   await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "未保存 1件");
   const dirtyAfterSelect = await page.locator("#dirtySummary").textContent();
