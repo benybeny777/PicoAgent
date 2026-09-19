@@ -4633,6 +4633,10 @@ composer.addEventListener("submit", async event => {
       if (result.quitApp) scheduleAppQuit();
     }
   } catch (error) {
+    if (requestRevision !== conversationRevision) {
+      jobState = "cancelled";
+      return;
+    }
     jobState = "failed";
     setThinkingUi(false);
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));

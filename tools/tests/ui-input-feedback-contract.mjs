@@ -145,6 +145,28 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーと�
   assert.equal(context.conversationHistory.length, 0);
 });
 
+test("リセット前の通信失敗は新しい会話に書き戻さず通常の失敗は表示する", () => {
+  const marker = renderer.indexOf('logApp("error", "AI応答の取得に失敗しました"');
+  const start = renderer.lastIndexOf("} catch (error) {", marker) + "} catch (error) {".length;
+  const end = renderer.indexOf("} finally {", marker);
+  for (const revision of [0, 1]) {
+    const replies = [];
+    const history = [];
+    const context = vm.createContext({
+      requestRevision: 0, conversationRevision: revision, jobState: "running", speakingToken: 0,
+      setThinkingUi() {}, logApp() {}, errorDetail: String, cancelStreamSpeech() {}, stopVoice() {},
+      renderReply: text => replies.push(text), addHistory: (_, text) => history.push(text),
+      reply: { classList: { add() {} } }, addRetryButton() {}, status: { textContent: "" }, setAnimation() {}, setTimeout() {},
+    });
+    vm.runInContext(`function handleFailure(error) { ${renderer.slice(start, end)} }`, context);
+    context.handleFailure(new Error("接続失敗"));
+    assert.equal(context.jobState, revision ? "cancelled" : "failed");
+    assert.equal(replies.length, revision ? 0 : 1);
+    assert.equal(history.length, revision ? 0 : 1);
+    if (!revision) assert.match(replies[0], /接続失敗/);
+  }
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;
