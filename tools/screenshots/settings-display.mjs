@@ -244,7 +244,13 @@ try {
     if (await page.locator(`#panel-tools [data-setting-key="${key}"]`).count() !== 1) throw new Error(`${key} がスキル・連携タブにありません`);
   }
   for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
-    await page.locator(".card-item").filter({ hasText: name }).click();
+    const card = page.getByRole("button", { name: `${name}の設定`, exact: true });
+    await card.focus();
+    await card.press("Enter");
+    if (await card.getAttribute("aria-expanded") !== "true") throw new Error(`${name}をEnterで開けません`);
+    await card.press("Space");
+    if (await card.getAttribute("aria-expanded") !== "false") throw new Error(`${name}をSpaceで閉じられません`);
+    await card.press("Enter");
   }
   const verifyLongSkillLabels = async width => {
     await page.setViewportSize({ width, height: 820 });
@@ -299,6 +305,7 @@ try {
     const card = page.locator(".card-item").filter({ hasText: name });
     const open = await card.evaluate(node => node.classList.contains("open") && !node.nextElementSibling.hidden);
     if (open !== (name !== "Bluesky")) throw new Error(`${name}の検索前の開閉状態が復元されません`);
+    if (await card.getAttribute("aria-expanded") !== String(open)) throw new Error(`${name}の開閉状態と読み上げ情報が一致しません`);
   }
   await blueskyCard.click();
   for (const tabName of ["キャラ登録", "キャラ選択", "キャラの音声"]) {

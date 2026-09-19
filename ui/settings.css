@@ -783,6 +783,7 @@ body.searching .tab-panel {
 /* 設定を持つスキルはクリックで開閉できるアコーディオン。 */
 .card-accordion { cursor: pointer; }
 .card-accordion:hover { border-color: var(--pink); }
+.card-accordion:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
 .card-accordion .card-name::after { content: " ▸"; color: var(--muted); font-weight: 400; }
 .card-accordion.open .card-name::after { content: " ▾"; }
 .card-config {

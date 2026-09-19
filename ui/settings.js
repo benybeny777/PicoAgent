@@ -355,6 +355,7 @@ function applySettingsSearch() {
       }
       panel.hidden = !(card && card.classList.contains("open"));
     }
+    card?.setAttribute("aria-expanded", String(!panel.hidden));
   }
   // ジャンルフィルタ: スキル設定タブのカテゴリ群を絞る（検索と併用可能）。
   // ジャンル不一致、または検索中にそのカテゴリの可視カードが無ければ見出しごと隠す。
@@ -1895,12 +1896,17 @@ function renderSkillCard(tool, values) {
   const nodes = [card];
   if (hasConfig) {
     const panel = markSearchable(
-      el("div", { className: "card-config" }),
+      el("div", { className: "card-config", id: `skill-config-${tool.name}` }),
       tool.name,
       tool.label,
       tool.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
     );
     panel.hidden = true;
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `${tool.label || tool.name}の設定`);
+    card.setAttribute("aria-controls", panel.id);
+    card.setAttribute("aria-expanded", "false");
     const guide = setupGuideNode(tool.name, tool.configSchema);
     if (guide) panel.append(guide);
     if (supportsConnectionTest(tool)) {
@@ -1920,6 +1926,12 @@ function renderSkillCard(tool, values) {
       panel.hidden = !open;
       card.classList.toggle("open", open);
       applySettingsSearch();
+    });
+    card.addEventListener("keydown", event => {
+      if (event.target !== card || event.isComposing || event.repeat) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      card.click();
     });
     nodes.push(panel);
   }
