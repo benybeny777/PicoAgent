@@ -5328,10 +5328,11 @@ input.addEventListener("keydown", event => {
     event.stopPropagation();
     closeComposer();
   }
-  if (event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
+  const plainArrow = !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+  if (plainArrow && event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
     if (recallPromptHistory(-1)) event.preventDefault();
   }
-  if (event.key === "ArrowDown" && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+  if (plainArrow && event.key === "ArrowDown" && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
     if (recallPromptHistory(1)) event.preventDefault();
   }
   if (event.key === "Enter" && (!event.shiftKey || event.ctrlKey || event.metaKey)) {

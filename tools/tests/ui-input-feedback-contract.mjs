@@ -57,6 +57,20 @@ test("IME候補操作と変換確定は履歴・送信へ流さない", () => {
   }
 });
 
+test("修飾キー付きの上下操作は履歴で入力を置き換えない", () => {
+  for (const modifier of ["shiftKey", "ctrlKey", "altKey", "metaKey"]) {
+    const input = keyboard();
+    assert.equal(press(input, "ArrowUp", { [modifier]: true }), false);
+    assert.equal(input.value, "下書き");
+    press(input, "ArrowUp");
+    input.selectionStart = input.selectionEnd = input.value.length;
+    assert.equal(press(input, "ArrowDown", { [modifier]: true }), false);
+    assert.equal(input.value, "直前の入力");
+    assert.equal(press(input, "ArrowDown"), true);
+    assert.equal(input.value, "下書き");
+  }
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;
