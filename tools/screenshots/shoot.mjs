@@ -1263,6 +1263,19 @@ async function validateInteractionMatrix() {
           await page.evaluate(() => addHistory("user", "時刻表示の確認"));
           if (!(await page.locator(".history-item.user .history-time").last().isVisible())) throw new Error("チャットの送信時刻が発言者名と一緒に隠れています");
           await page.screenshot({ path: join(output, `${target.id}-chat-time.png`), omitBackground: true });
+          const previousTheme = await page.evaluate(() => {
+            const theme = document.documentElement.getAttribute("data-theme");
+            document.documentElement.dataset.theme = "dark";
+            return theme;
+          });
+          try {
+            await page.screenshot({ path: join(output, `${target.id}-chat-time-dark.png`), omitBackground: true });
+          } finally {
+            await page.evaluate(theme => {
+              if (theme === null) document.documentElement.removeAttribute("data-theme");
+              else document.documentElement.dataset.theme = theme;
+            }, previousTheme);
+          }
           const resetState = await page.evaluate(async () => {
             setInputValue("未送信の下書き");
             setPendingChoices([{ label: "古い会話の選択肢" }]);
