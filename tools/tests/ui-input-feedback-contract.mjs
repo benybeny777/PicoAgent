@@ -31,6 +31,42 @@ function press(input, key, extra = {}) {
   return prevented;
 }
 
+test("提案文とテキストドロップは入力履歴の途中でも新しい下書きになる", () => {
+  for (const mode of ["suggestion", "drop"]) {
+    let saved = "";
+    let drop;
+    const buttons = [];
+    const input = { value: "前の入力", focus() {}, setSelectionRange() {} };
+    const context = vm.createContext({
+      input, status: {}, setTimeout() {}, markActivity() {},
+      composer: { hidden: false },
+      attachmentSuggestions: { replaceChildren() {}, append(button) { buttons.push(button); } },
+      attachedFiles: [{ name: "資料.pdf" }], attachedImages: [],
+      document: {
+        createElement() { return { addEventListener(_, callback) { this.click = callback; } }; },
+        addEventListener(_, callback) { drop = callback; },
+      },
+      setInputValue(value) { input.value = value; },
+      persistDraft() { saved = input.value; },
+    });
+    vm.runInContext('const promptHistory = ["前の入力", "直前の入力"]; let promptHistoryIndex = 0; let promptDraft = "以前の下書き";', context);
+    vm.runInContext(between("function resetPromptHistoryNavigation()", "function openComposer()"), context);
+    if (mode === "suggestion") {
+      vm.runInContext(between("function renderAttachmentSuggestions()", "function fileIcon(name)"), context);
+      vm.runInContext("renderAttachmentSuggestions()", context);
+      buttons[0].click();
+    } else {
+      vm.runInContext(between('document.addEventListener("drop", (e) => {', "// 画面を見てほしい系"), context);
+      drop({ preventDefault() {}, dataTransfer: { files: [], getData() { return "追加テキスト"; } } });
+    }
+    const draft = input.value;
+    assert.notEqual(draft, "前の入力");
+    assert.equal(saved, draft);
+    vm.runInContext("recallPromptHistory(-1); recallPromptHistory(1);", context);
+    assert.equal(input.value, draft);
+  }
+});
+
 test("上下キーは未定義処理を呼ばず履歴と下書きを往復する", () => {
   const input = keyboard();
   assert.equal(press(input, "ArrowUp"), true);

@@ -4247,7 +4247,7 @@ function renderAttachmentSuggestions() {
     button.textContent = suggestion.label;
     button.addEventListener("click", () => {
       setInputValue(suggestion.text);
-      autosizeInput();
+      resetPromptHistoryNavigation();
       input.focus();
     });
     attachmentSuggestions.append(button);
@@ -4418,7 +4418,7 @@ document.addEventListener("drop", (e) => {
   markActivity();
   if (composer.hidden) openComposer();
   setInputValue(input.value.trim() ? `${input.value.trimEnd()} ${text}` : text);
-  autosizeInput();
+  resetPromptHistoryNavigation();
   input.focus();
 });
 
