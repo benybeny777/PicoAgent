@@ -5,7 +5,7 @@
 ## 現在の状態
 
 - 最終確認日: 2026-09-19
-- UIの継続レビュー・改善はDraft PR [#329](https://github.com/benybeny777/PicoAgent/pull/329)、ブランチ`codex/ui-review-continuous`。次に会話履歴の検索・コピー・実行中表示を確認する。利用者から終了指示があるまで問題別コミットで継続する。
+- UIの継続レビュー・改善はDraft PR [#329](https://github.com/benybeny777/PicoAgent/pull/329)、ブランチ`codex/ui-review-continuous`。利用者の優先順位は「チャットの使いやすさ ＞ 設定画面の簡潔さ ＞ 余白・読みやすさ」。利用者から終了指示があるまで問題別コミットで継続する。直近の到達点と検証はPR本文を読む。
 - 実機での未確認事項は `docs/TASKS.md` を参照する。検証済み範囲と設計判断はPR本文に記録する。
 - 未完了の素材補修・実機受入・設計のみの将来開発は[docs/TASKS.md](docs/TASKS.md)を参照し、着手条件を満たす項目から進める。
 - 配布版の更新は本体のマージと別に扱い、配布リポジトリの公開状態を確認する。
