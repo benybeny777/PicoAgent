@@ -8,6 +8,7 @@ window.__picoagentPerformance = { startedAt: performance.now() };
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
 const historyLog = document.getElementById("historyLog");
+const historyJumpLatest = document.getElementById("historyJumpLatest");
 const reply = document.getElementById("reply");
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
@@ -3045,7 +3046,20 @@ function renderHistory() {
     && historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
   renderHistoryRows();
   placeTaskRun(stickToBottom);
+  updateHistoryJump();
 }
+
+function updateHistoryJump() {
+  if (!historyLog || !historyJumpLatest) return;
+  historyJumpLatest.hidden = historyLog.clientHeight === 0
+    || historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
+}
+historyLog?.addEventListener("scroll", updateHistoryJump, { passive: true });
+historyJumpLatest?.addEventListener("click", () => {
+  historyLog.scrollTop = historyLog.scrollHeight;
+  updateHistoryJump();
+  historySearch?.focus({ preventScroll: true });
+});
 
 // 実行中タスクの一覧は、会話履歴を出す形式では会話の末尾へ置く（キャラの描画面へ重ねない）。
 // それ以外の形式では、元の置き場所（ステータス行の直後）へ戻す。

@@ -1217,6 +1217,16 @@ async function validateInteractionMatrix() {
           throw new Error(`${target.id}/${layout}: 入力操作ボタンが画面外です ${JSON.stringify(state.buttons)}`);
         }
         if (await page.locator("#historySearch").isVisible()) {
+          const canScroll = await page.locator("#historyLog").evaluate(node => {
+            node.scrollTop = 0;
+            node.dispatchEvent(new Event("scroll"));
+            return node.scrollHeight - node.clientHeight >= 48;
+          });
+          if (canScroll) {
+            await page.getByRole("button", { name: "末尾へ", exact: true }).click();
+            const remaining = await page.locator("#historyLog").evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
+            if (remaining >= 48 || await page.locator("#historyJumpLatest").isVisible()) throw new Error(`${layout}: 履歴の末尾へ戻れません`);
+          }
           const draft = await page.locator("#input").inputValue();
           await page.locator("#input").focus();
           await page.keyboard.press("Control+f");

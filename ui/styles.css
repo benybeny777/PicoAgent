@@ -679,10 +679,10 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .pet-heart { position:absolute; z-index:5; bottom:55%; font-size:18px; color:#f27e91; pointer-events:none; opacity:0; animation:heart-float 1.2s ease-out forwards; text-shadow:0 1px 3px rgba(0,0,0,.15); }
 @keyframes heart-float { 0% { opacity:0; transform:translateY(0) scale(.6); } 25% { opacity:1; } 100% { opacity:0; transform:translateY(-46px) scale(1.15); } }
 /* 居眠りは寝顔（差し替え画像）だけで伝え、全身は動かさない。 */
-/* 履歴の書き出しボタン（検索欄の右）。 */
+/* 履歴の末尾移動・書き出しボタン（検索欄の右）。 */
 .history-tools { gap:8px; }
-.history-tools #exportHistory { position:static; flex:0 0 auto; height:30px; padding:0 12px; border-radius:9px; background:var(--chip-bg); border:1px solid var(--chip-border); color:var(--muted); font-size:11px; font-weight:700; }
-.history-tools #exportHistory:hover { color:var(--ink); border-color:var(--field-focus); }
+.history-tools button { position:static; flex:0 0 auto; height:30px; padding:0 12px; border-radius:9px; background:var(--chip-bg); border:1px solid var(--chip-border); color:var(--muted); font-size:11px; font-weight:700; }
+.history-tools button:hover { color:var(--ink); border-color:var(--field-focus); }
 @media (prefers-reduced-motion:reduce) { #micButton.recording, .pet-heart { animation:none!important; } }
 .history-tools input { flex:1 1 auto; min-width:0; }
 /* ネイティブD&D: ウィンドウ全体のドロップ受け入れ表示 */
