@@ -19,6 +19,7 @@ const sendButton = document.getElementById("sendButton");
 const cancelSendButton = document.getElementById("cancelSend");
 const cancelVoiceButton = document.getElementById("cancelVoice");
 const copyReplyButton = document.getElementById("copyReply");
+const regenerateReplyButton = document.getElementById("regenReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
 const toggleFullscreenButton = document.getElementById("toggleFullscreen");
@@ -2321,6 +2322,13 @@ function autosizeInput() {
 }
 function updateComposerState() {
   const engineBlocked = !frontendInitialized || (localEngineRequired && !localEngineReady);
+  if (regenerateReplyButton) {
+    regenerateReplyButton.disabled = busy || engineBlocked || !hasLastRequest();
+    regenerateReplyButton.title = busy ? "返答が終わると再生成できます"
+      : engineBlocked ? "AIの準備完了後に再生成できます"
+      : !hasLastRequest() ? "会話を送信すると再生成できます"
+      : "同じ質問と添付で別の答えを生成";
+  }
   if (sendButton) {
     sendButton.disabled = busy || engineBlocked || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
     sendButton.title = engineBlocked
@@ -5077,7 +5085,7 @@ micButton?.addEventListener("click", async () => {
 });
 
 // ── 再生成: 直前の質問をもう一度送って別の答えをもらう ──────────────────
-document.getElementById("regenReply")?.addEventListener("click", () => {
+regenerateReplyButton?.addEventListener("click", () => {
   if (busy || !hasLastRequest()) return;
   // 添付ごと送り直す。文面だけ送り直すと「同じ質問」のつもりで中身の違う要求になる。
   if (composer.hidden) openComposer();

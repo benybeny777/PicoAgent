@@ -249,6 +249,29 @@ test("リセット前の通信失敗は新しい会話に書き戻さず通常�
   }
 });
 
+test("再生成は送信控えとAIの準備が揃い処理中でないときだけ有効になる", () => {
+  const context = vm.createContext({
+    regenerateReplyButton: {}, sendButton: {}, quickActions: null,
+    frontendInitialized: false, localEngineRequired: true, localEngineReady: false, busy: false,
+    input: { value: "" }, attachedImages: [], attachedFiles: [], lastUserText: "", lastUserImages: [], lastUserFiles: [],
+  });
+  vm.runInContext(between("function hasLastRequest()", "// エラー表示後に"), context);
+  vm.runInContext(between("function updateComposerState()", "function setInputValue"), context);
+  const check = disabled => { context.updateComposerState(); assert.equal(context.regenerateReplyButton.disabled, disabled); };
+  check(true);
+  context.frontendInitialized = context.localEngineReady = true;
+  check(true);
+  context.lastUserImages = ["添付のみの送信"];
+  check(false);
+  context.busy = true;
+  check(true);
+  context.busy = false;
+  context.localEngineReady = false;
+  check(true);
+  context.localEngineRequired = false;
+  check(false);
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;
