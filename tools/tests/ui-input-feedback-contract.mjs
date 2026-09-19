@@ -123,6 +123,28 @@ test("最初の添付のみの送信でも検索結果なしではなく考え�
   assert.equal(historyLog.children.some(item => item.className?.includes("history-thinking")), false);
 });
 
+test("会話リセット後に旧質問の再生成や旧回答のコピーと読み上げをしない", () => {
+  let reset;
+  const context = vm.createContext({
+    window: { picoagent: { on: (_, callback) => { reset = callback; } } },
+    conversationRevision: 0, conversationHistory: ["古い会話"], promptHistory: ["古い質問"], promptHistoryIndex: 0, promptDraft: "下書き",
+    lastUserText: "古い質問", lastAssistantText: "古い回答", lastUserImages: ["画像"], lastUserFiles: ["資料"],
+    historyQuery: "古い検索", historySearch: { value: "古い検索" },
+    reply: { textContent: "古い回答" }, input: { value: "未送信の下書き" },
+    renderHistory() {}, stopVoice() {}, closeComposer() {}, scheduleChatter() {},
+    renderReply(text) { context.reply.textContent = text; },
+  });
+  vm.runInContext(between('window.picoagent.on("pet:reset",', "// 感情状態が更新されたら"), context);
+  vm.runInContext(between("function hasLastRequest()", "// エラー表示後に"), context);
+  assert.equal(context.hasLastRequest(), true);
+  reset();
+  assert.equal(context.hasLastRequest(), false);
+  assert.equal(context.lastAssistantText, "");
+  assert.equal(context.lastAssistantText || context.reply.textContent, "新しい話をしよう。");
+  assert.equal(context.input.value, "未送信の下書き");
+  assert.equal(context.conversationHistory.length, 0);
+});
+
 test("コードコピーは成功・拒否・非対応を区別し再操作できる", async () => {
   for (const outcome of [true, false, new Error("拒否")]) {
     let finish;
