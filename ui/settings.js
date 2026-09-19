@@ -3585,6 +3585,7 @@ async function render() {
         }
       });
       renameInput.addEventListener("keydown", event => {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === "Enter") {
           event.preventDefault();
           renameButton.click();

@@ -359,8 +359,17 @@ try {
   const userCard = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await userCard.waitFor();
   const renameInput = userCard.getByRole("textbox", { name: "追加テストの表示名" });
+  await renameInput.fill("変換中の名前");
+  for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
+    const prevented = await renameInput.evaluate((node, composing) => {
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...composing });
+      node.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, composing);
+    if (prevented) throw new Error("日本語変換確定のEnterでキャラ名変更が実行されます");
+  }
   await renameInput.fill("Nicole");
-  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await renameInput.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
     .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
   if (!(await userCard.textContent())?.includes("Nicole")) throw new Error("追加キャラの表示名がカードへ反映されません");
