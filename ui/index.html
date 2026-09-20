@@ -11,7 +11,7 @@
     <span class="beta-badge" aria-label="アルファ版" hidden>ALPHA</span>
     <section id="bootScreen" class="boot-screen" aria-live="polite">
       <div class="boot-stage">
-        <div id="bootLog" class="boot-log" aria-label="起動ログ"></div>
+        <div id="bootLog" class="boot-log" role="group" aria-label="起動ログ"></div>
         <div class="boot-progress" aria-hidden="true"><span></span></div>
         <div id="bootStatus" class="boot-status"></div>
       </div>
@@ -19,7 +19,7 @@
     <!-- 生きた領域は回答欄（#reply）だけに絞る。フキダシ全体や、全件を再構築する履歴へ
          付けると、クイック操作や通知の変更、過去の会話まで繰り返し読み上げられる。 -->
     <section id="bubble" class="bubble">
-      <div id="replyActions" class="reply-actions" aria-label="回答操作">
+      <div id="replyActions" class="reply-actions" role="group" aria-label="回答操作">
         <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">通知</button>
         <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">コピー</button>
         <button id="regenReply" type="button" aria-label="別の答えを生成" title="同じ質問で別の答えを生成">再生成</button>
@@ -34,24 +34,24 @@
         </div>
         <div id="noticeList" class="notice-list"></div>
       </div>
-      <div id="historyTools" class="history-tools" aria-label="会話履歴操作">
+      <div id="historyTools" class="history-tools" role="group" aria-label="会話履歴操作">
         <input id="historySearch" type="search" autocomplete="off" placeholder="履歴を検索" />
         <button id="exportHistory" type="button" title="会話をMarkdownで書き出し">書き出し</button>
       </div>
-      <div id="historyLog" class="history-log" aria-label="会話履歴"></div>
+      <div id="historyLog" class="history-log" role="group" aria-label="会話履歴"></div>
       <!-- ウィジェット表示のときだけ出す時計。他の表示形式では CSS で隠す。 -->
       <div id="widgetClock" class="widget-clock" aria-hidden="true"><strong></strong><span></span></div>
-      <div id="streamInfo" class="stream-info" aria-label="配信情報">
+      <div id="streamInfo" class="stream-info" role="group" aria-label="配信情報">
         <span class="stream-live">● LIVE</span><strong></strong><span></span>
       </div>
-      <div id="streamDisplay" class="stream-display" aria-label="配信画面内ディスプレイ">
+      <div id="streamDisplay" class="stream-display" role="group" aria-label="配信画面内ディスプレイ">
         <strong>PICO STUDIO</strong><span>CHAT &amp; CHARACTER</span>
       </div>
       <div id="reply" class="reply" aria-live="polite" aria-atomic="true">こんにちは。クリックして話しかけてね。</div>
       <form id="composer" class="composer" hidden>
         <div id="imagePreview" class="image-preview" hidden></div>
-        <div id="attachmentSuggestions" class="attachment-suggestions" hidden aria-label="添付ファイルのおすすめ操作"></div>
-        <div id="quickActions" class="quick-actions" aria-label="クイック操作"></div>
+        <div id="attachmentSuggestions" class="attachment-suggestions" hidden role="group" aria-label="添付ファイルのおすすめ操作"></div>
+        <div id="quickActions" class="quick-actions" role="group" aria-label="クイック操作"></div>
         <textarea id="input" rows="2" placeholder="話しかける… / 画像をペーストまたはドロップ"></textarea>
         <div class="composer-actions">
           <button id="voiceLoopButton" class="voice-loop-button" type="button" aria-pressed="false" title="返答後も自動で聞き続ける">連続</button>
@@ -60,7 +60,7 @@
         </div>
       </form>
       <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
-      <div id="taskRun" class="task-run" aria-label="実行中のタスク" hidden></div>
+      <div id="taskRun" class="task-run" role="group" aria-label="実行中のタスク" hidden></div>
       <button id="cancelVoice" class="cancel-voice" type="button" hidden>読み上げを中止</button>
       <button id="cancelSend" class="cancel-send" type="button" hidden>処理を止める</button>
       <button id="bubbleResize" class="bubble-resize" type="button" aria-label="フキダシのサイズを変更" title="ドラッグしてサイズ変更"></button>
