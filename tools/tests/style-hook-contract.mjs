@@ -48,3 +48,29 @@ test("JavaScriptが付けるクラスは見た目か処理へ繋がっている"
     "見た目も参照も無いクラスです。CSSを足すか、付けるのをやめてください",
   );
 });
+
+// JavaScriptが組み立てるクラス名の接頭辞。`notice-state-${state}` のように
+// 末尾が動くものは、CSS側の完全な名前がソースへ現れない。
+const DYNAMIC_PREFIXES = ["boot-kind-", "notice-state-", "toast-"];
+// 取り込んだ外部ランタイムが自分で付けるクラス。
+const VENDOR_PREFIXES = ["moveable-"];
+
+test("CSSのクラスは実際に付く要素がある", () => {
+  // 名前を間違えたまま置かれた規則は、何も起きないのに残り続ける。実際に
+  // `[data-layout="stream"] .history-name`（正しくは `.history-role`）は
+  // 書かれた時から一度も効いておらず、`.placement-actions` は要素の削除後も残っていた。
+  const referenced = `${scripts.text}\n${markup.text}`;
+  const unused = new Set();
+  for (const match of styles.text.matchAll(/\.([a-zA-Z][a-zA-Z0-9_-]*)/g)) {
+    const className = match[1];
+    if (referenced.includes(className)) continue;
+    if (DYNAMIC_PREFIXES.some(prefix => className.startsWith(prefix))) continue;
+    if (VENDOR_PREFIXES.some(prefix => className.startsWith(prefix))) continue;
+    unused.add(className);
+  }
+  assert.deepEqual(
+    [...unused],
+    [],
+    "どの要素にも付かないクラスです。名前を直すか、規則ごと消してください",
+  );
+});

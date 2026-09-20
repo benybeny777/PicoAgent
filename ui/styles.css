@@ -1053,7 +1053,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   border:1px solid var(--panel-border); background:var(--panel-bg);
 }
 [data-layout="stream"] .history-body { padding:10px 12px; font-size:14px; line-height:1.65; }
-[data-layout="stream"] .history-name { font-size:11px; }
+[data-layout="stream"] .history-role { font-size:11px; }
 [data-layout="stream"] .history-log { border-radius:13px 13px 0 0; border-bottom:0; }
 [data-layout="stream"] .composer {
   position:relative; z-index:3; grid-column:2; grid-row:2 / span 2; margin:0; padding:12px; align-self:stretch;
