@@ -288,3 +288,12 @@ test("生成中の本文描画は最短間隔をあけて組み直す", () => {
   // 送信直後とステップ境界では、最初のチャンクを待たせない。
   assert.equal(renderer.match(/(?<!let )lastStreamRenderAt = 0;/g)?.length, 2);
 });
+
+test("設定検索は購読1本で1フレーム1回だけ絞り込む", () => {
+  // 検索は全設定項目の文面を走査する。1打鍵ごとに走らせると入力が引っかかるため、
+  // 変更印の更新と同じ共通部品でまとめる。消去ボタンの出し入れだけは待たせない。
+  assert.equal(settings.match(/settingsSearch\?\.addEventListener\("input"/g)?.length, 1);
+  assert.match(settings, /settingsSearchScheduler = window\.PicoFrameScheduler\.create\(applySettingsSearch\)/);
+  assert.match(settings, /settingsSearch\?\.addEventListener\("input", \(\) => \{[\s\S]*?clearSettingsSearch\.hidden = !settingsSearch\.value;[\s\S]*?settingsSearchScheduler\.schedule\(\);/);
+  assert.match(settings, /settingsSearchScheduler\?\.cancel\(\);/);
+});

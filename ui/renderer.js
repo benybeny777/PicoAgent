@@ -651,6 +651,14 @@ function pushNotice(notice) {
     upsertDurableJob(notice);
     return;
   }
+  // 裏で繰り返し失敗する機能（会話履歴の保存など）は、通知一覧へ積むと同じ行が並ぶ。
+  // 原因ごとに1度だけ知らせ、復旧したら次の失敗をまた知らせる共通経路へ回す。
+  if (String(notice?.kind || "") === "background_failure") {
+    const key = String(notice?.key || "background");
+    if (notice?.ok === true) { clearBackgroundFailure(key); return; }
+    notifyBackgroundFailure(key, String(notice?.body || notice?.title || "処理に失敗しました"), key);
+    return;
+  }
   const entry = {
     kind: String(notice?.kind || ""),
     title: String(notice?.title || "通知"),

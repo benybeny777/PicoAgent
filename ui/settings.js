@@ -45,6 +45,7 @@ let modelLoadGeneration = 0;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
+let settingsSearchScheduler = null; // 検索の絞り込みを1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
@@ -109,6 +110,7 @@ replaceSettingsListener("navigate", "settings:navigate", tabId => {
 
 window.addEventListener("beforeunload", () => {
   dirtyStateScheduler?.cancel();
+  settingsSearchScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
 });
@@ -4070,7 +4072,14 @@ form.addEventListener("click", event => {
   }
 });
 
-settingsSearch?.addEventListener("input", applySettingsSearch);
+// 検索は全設定項目の文面を走査するため、1打鍵ごとに走らせると入力が引っかかる。
+// 変更印の更新と同じく1フレーム1回へまとめる（購読も1本にする）。
+settingsSearchScheduler = window.PicoFrameScheduler.create(applySettingsSearch);
+settingsSearch?.addEventListener("input", () => {
+  // 消去ボタンの出し入れは見た目だけなので待たせない。
+  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
+  settingsSearchScheduler.schedule();
+});
 clearSettingsSearch?.addEventListener("click", () => {
   settingsSearch.value = "";
   clearSettingsSearch.hidden = true;
@@ -4085,9 +4094,6 @@ for (const shortcut of document.querySelectorAll("[data-settings-query]")) {
     settingsSearch.focus();
   });
 }
-settingsSearch?.addEventListener("input", () => {
-  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
-});
 document.addEventListener("keydown", event => {
   if (modalOpen) return; // 確認ダイアログ表示中は裏の保存・検索を動かさない
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
