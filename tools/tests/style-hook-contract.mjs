@@ -74,3 +74,22 @@ test("CSSのクラスは実際に付く要素がある", () => {
     "どの要素にも付かないクラスです。名前を直すか、規則ごと消してください",
   );
 });
+
+test("画面が購読するイベントは橋渡しの一覧に載っている", async () => {
+  // `on()` は一覧に無いチャンネルを購読しない。載せ忘れると、名前は合っているのに
+  // 画面だけ無反応になるため、購読側と一覧を突き合わせる。
+  const bridge = await readFile(new URL("picoagent.js", uiDir), "utf8");
+  const listed = bridge.match(/const PET_EVENT_CHANNELS = \[([\s\S]*?)\];/)?.[1] || "";
+  assert.ok(listed.includes("pet:notice"), "イベント一覧を読み取れませんでした");
+  const subscribed = new Set();
+  for (const match of scripts.text.matchAll(/\.on\??\.?\("([a-z][a-z:_-]+)"/g)) {
+    subscribed.add(match[1]);
+  }
+  // `.on("drag")` のような外部ライブラリの購読は対象外（`pet:` と `engine:` だけ見る）。
+  const petChannels = [...subscribed].filter(name => name.includes(":"));
+  assert.ok(petChannels.length > 5, `購読の抽出に失敗している可能性: ${petChannels.length}件`);
+  const unlisted = petChannels.filter(name => !listed.includes(`"${name}"`));
+  assert.deepEqual(unlisted, [], "picoagent.js の PET_EVENT_CHANNELS へ追加してください");
+  // 一覧に無いチャンネルは黙って捨てず、理由をログへ残す。
+  assert.match(bridge, /if \(!PET_EVENT_CHANNELS\.includes\(channel\)\) \{[\s\S]*?logBridgeError\(/);
+});

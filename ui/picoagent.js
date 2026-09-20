@@ -36,6 +36,25 @@ async function call(name, args) {
   }
 }
 
+// `on()` で購読できるイベント。旧 Electron 版の `window.picoagent.on` と同じ名前だけを扱う。
+// ストリーミングなど画面固有の購読は `listen()` を直接使う。
+const PET_EVENT_CHANNELS = [
+  "pet:model",
+  "pet:reset",
+  "pet:layout-reset",
+  "pet:layout-edit",
+  "pet:game-open",
+  "engine:status",
+  "pet:ui",
+  "pet:reload",
+  "pet:emotion",
+  "pet:agent_status",
+  "pet:notice",
+  "pet:hotkey",
+  "pet:layout",
+  "pet:character-reset",
+];
+
 async function managedListen(channel, callback) {
   const unlisten = await listen(channel, (event) => {
     try {
@@ -181,7 +200,13 @@ window.picoagent = {
   layoutMenu: (x, y) => call("pet_layout_menu", { x, y }),
   characterMenu: (x, y, characters) => call("pet_character_menu", { x, y, characters }),
   on: (channel, callback) => {
-    if (!["pet:model", "pet:reset", "pet:layout-reset", "pet:layout-edit", "pet:game-open", "engine:status", "pet:ui", "pet:reload", "pet:emotion", "pet:agent_status", "pet:notice", "pet:hotkey", "pet:layout", "pet:character-reset"].includes(channel)) return Promise.resolve(() => {});
+    // 想定外のチャンネルを黙って捨てない。以前は購読が何も起きない空関数を返すだけで、
+    // 名前を間違えても、Rust側へイベントを足して一覧へ入れ忘れても、画面は無反応のまま
+    // 原因が分からなかった。購読はしないが理由はログへ残す。
+    if (!PET_EVENT_CHANNELS.includes(channel)) {
+      logBridgeError(`event ${channel} subscribe`, new Error("購読対象に入っていないイベントです"));
+      return Promise.resolve(() => {});
+    }
     // Tauri のイベントは payload に値が入る。Electron の callback(value) 形に合わせる。
     return managedListen(channel, callback).catch(error => {
       logBridgeError(`event ${channel} subscribe`, error);
