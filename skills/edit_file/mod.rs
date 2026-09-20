@@ -213,6 +213,14 @@ impl Tool for EditFileTool {
                 target.display()
             );
         }
+        // 読む前に実寸で弾く（読んでから弾くと上限ぶんを超えて抱えてしまう）。
+        if let Err(size) = permissions::fs::ensure_within(&target, MAX_FILE_BYTES) {
+            return format!(
+                "エラー: {} バイトを超えるファイルは編集できません（{size} バイト）: {}",
+                MAX_FILE_BYTES,
+                target.display()
+            );
+        }
         let mut content = match permissions::fs::read_to_string(&target) {
             Ok(content) => content,
             Err(error) => {
@@ -222,14 +230,6 @@ impl Tool for EditFileTool {
                 )
             }
         };
-        if content.len() > MAX_FILE_BYTES {
-            return format!(
-                "エラー: {} バイトを超えるファイルは編集できません（{} バイト）: {}",
-                MAX_FILE_BYTES,
-                content.len(),
-                target.display()
-            );
-        }
 
         let mut applied = Vec::with_capacity(edits.len());
         for (index, edit) in edits.iter().enumerate() {
