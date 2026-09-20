@@ -174,6 +174,61 @@ impl InstalledManifest {
     }
 }
 
+// GPU別バックエンドの違いを1か所へ集める。取得・検証・入れ替えの手順は3種とも同じで、
+// 以前は `ensure_cuda_engine` / `ensure_rocm_engine` / `ensure_sycl_engine` が同じ処理を
+// 3本持っていた（CUDAだけ入れ替えを自前で書き、退避の戻し方が他と違っていた）。
+#[cfg_attr(not(windows), allow(dead_code))]
+struct GpuBackend {
+    /// 候補一覧とログに出す表示名。
+    label: &'static str,
+    /// 配置フォルダ（`engine-<id>`）と退避・staging フォルダ名に使う識別子。
+    id: &'static str,
+    /// 取得開始を知らせる文言。
+    preparing: &'static str,
+    /// 取得する配布物（ファイル名・固定サイズ・SHA-256）。
+    archives: &'static [(&'static str, u64, &'static str)],
+    /// 導入済み判定に使う固定マニフェスト。
+    manifest: fn() -> InstalledManifest,
+    /// `--list-devices` の出力に現れるデバイス見出し。どれか1つでも出れば実機で使える。
+    device_markers: &'static [&'static str],
+    /// 実機で認識できなかったときに利用者へ返す理由。
+    device_missing: &'static str,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+const GPU_BACKENDS: &[GpuBackend] = &[
+    GpuBackend {
+        label: "CUDA",
+        id: "cuda",
+        preparing: "NVIDIA GPU向けのCUDA推論エンジンを準備しています",
+        archives: &[
+            (CUDA_CORE_NAME, CUDA_CORE_SIZE, CUDA_CORE_SHA256),
+            (CUDA_RUNTIME_NAME, CUDA_RUNTIME_SIZE, CUDA_RUNTIME_SHA256),
+        ],
+        manifest: InstalledManifest::cuda,
+        device_markers: &["CUDA0:"],
+        device_missing: "CUDA版llama-serverがNVIDIA GPUを認識しません",
+    },
+    GpuBackend {
+        label: "ROCm",
+        id: "rocm",
+        preparing: "AMD GPU向けのROCm推論エンジンを準備しています",
+        archives: &[(ROCM_NAME, ROCM_SIZE, ROCM_SHA256)],
+        manifest: InstalledManifest::rocm,
+        device_markers: &["ROCm0:", "HIP0:"],
+        device_missing: "ROCm版llama-serverがAMD GPUを認識しません",
+    },
+    GpuBackend {
+        label: "SYCL",
+        id: "sycl",
+        preparing: "Intel GPU向けのSYCL推論エンジンを準備しています",
+        archives: &[(SYCL_NAME, SYCL_SIZE, SYCL_SHA256)],
+        manifest: InstalledManifest::sycl,
+        device_markers: &["SYCL0:"],
+        device_missing: "SYCL版llama-serverがIntel GPUを認識しません",
+    },
+];
+
 pub async fn candidates(
     app: &AppHandle,
     bundled_server: PathBuf,
@@ -192,62 +247,36 @@ pub async fn candidates(
 
     let mut result = Vec::new();
     #[cfg(windows)]
-    if has_nvidia_cuda_device().await {
-        crate::engine::set_status(
-            app,
-            serde_json::json!({
-                "phase": "download",
-                "message": "NVIDIA GPU向けのCUDA推論エンジンを準備しています"
-            }),
-        );
-        match ensure_cuda_engine(app).await {
-            Ok(server) => result.push(BackendCandidate {
-                label: "CUDA",
-                server,
-                ngl: configured_ngl.clone(),
-            }),
-            Err(error) => crate::log_paths::append_app_log(
+    {
+        // 大容量の追加配布物は、実機で使えると判定できたGPU1種だけを取得する。
+        let detected = if has_nvidia_cuda_device().await {
+            GPU_BACKENDS.iter().find(|entry| entry.id == "cuda")
+        } else if has_supported_amd_rocm_device() {
+            GPU_BACKENDS.iter().find(|entry| entry.id == "rocm")
+        } else if has_supported_intel_sycl_device() {
+            GPU_BACKENDS.iter().find(|entry| entry.id == "sycl")
+        } else {
+            None
+        };
+        if let Some(backend) = detected {
+            crate::engine::set_status(
                 app,
-                &format!("CUDA推論エンジンを利用できないためVulkanへ切り替えます: {error}"),
-            ),
-        }
-    } else if has_supported_amd_rocm_device() {
-        crate::engine::set_status(
-            app,
-            serde_json::json!({
-                "phase": "download",
-                "message": "AMD GPU向けのROCm推論エンジンを準備しています"
-            }),
-        );
-        match ensure_rocm_engine(app).await {
-            Ok(server) => result.push(BackendCandidate {
-                label: "ROCm",
-                server,
-                ngl: configured_ngl.clone(),
-            }),
-            Err(error) => crate::log_paths::append_app_log(
-                app,
-                &format!("ROCm推論エンジンを利用できないためVulkanへ切り替えます: {error}"),
-            ),
-        }
-    } else if has_supported_intel_sycl_device() {
-        crate::engine::set_status(
-            app,
-            serde_json::json!({
-                "phase": "download",
-                "message": "Intel GPU向けのSYCL推論エンジンを準備しています"
-            }),
-        );
-        match ensure_sycl_engine(app).await {
-            Ok(server) => result.push(BackendCandidate {
-                label: "SYCL",
-                server,
-                ngl: configured_ngl.clone(),
-            }),
-            Err(error) => crate::log_paths::append_app_log(
-                app,
-                &format!("SYCL推論エンジンを利用できないためVulkanへ切り替えます: {error}"),
-            ),
+                serde_json::json!({ "phase": "download", "message": backend.preparing }),
+            );
+            match ensure_gpu_engine(app, backend).await {
+                Ok(server) => result.push(BackendCandidate {
+                    label: backend.label,
+                    server,
+                    ngl: configured_ngl.clone(),
+                }),
+                Err(error) => crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "{}推論エンジンを利用できないためVulkanへ切り替えます: {error}",
+                        backend.label
+                    ),
+                ),
+            }
         }
     }
 
@@ -340,90 +369,65 @@ fn is_supported_intel_sycl_name(name: &str) -> bool {
         || name.contains("intel server gpu")
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
+impl GpuBackend {
+    /// 取得した `llama-server.exe` が実機GPUを認識するか確かめる。
+    #[cfg(windows)]
+    async fn probe(&self, server: &Path) -> bool {
+        let mut command = crate::tools::process::command(server);
+        command.arg("--list-devices");
+        let label = format!("{}推論エンジン確認", self.label);
+        crate::tools::process::output(command, 30, &label)
+            .await
+            .is_ok_and(|output| {
+                output.status.success()
+                    && self
+                        .device_markers
+                        .iter()
+                        .any(|marker| output_contains(&output, marker))
+            })
+    }
+}
+
+// 異常終了で残った staging・退避フォルダかどうかを名前だけで判定する。
+// 正常経路は自分で消すが、取得中にプロセスが落ちると数百MBがそのまま残り続ける。
+// 実行中の自分のフォルダ（末尾が現在のプロセスID）は対象にしない。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_stale_engine_work_dir(name: &str, current_pid: u32) -> bool {
+    if !name.starts_with(".engine-") {
+        return false;
+    }
+    if !name.contains("-stage-") && !name.contains("-backup-") {
+        return false;
+    }
+    !name.ends_with(&format!("-{current_pid}"))
+}
+
+/// PicoAgent は同時に1つしか動かないため、他プロセスIDの残骸は回収してよい。
 #[cfg(windows)]
-async fn ensure_cuda_engine(app: &AppHandle) -> Result<PathBuf> {
-    let root = crate::log_paths::bundled_dir(app).join("engine-cuda");
-    let server = root.join("llama-server.exe");
-    let manifest_path = root.join("picoagent-engine-backend.json");
-    if server.is_file()
-        && root.join("ggml-cuda.dll").is_file()
-        && root.join("cudart64_13.dll").is_file()
-        && std::fs::read(&manifest_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<InstalledManifest>(&bytes).ok())
-            .is_some_and(|manifest| manifest.is_current())
-        && cuda_probe(&server).await
-    {
-        return Ok(server);
-    }
-
-    let parent = root.parent().context("CUDAエンジンの配置先が不正です")?;
-    std::fs::create_dir_all(parent)?;
-    let work = parent.join(format!(".engine-cuda-stage-{}", std::process::id()));
-    if work.exists() {
-        std::fs::remove_dir_all(&work)?;
-    }
-    std::fs::create_dir_all(&work)?;
-    let result = install_cuda_engine(&work).await;
-    if let Err(error) = result {
-        let _ = std::fs::remove_dir_all(&work);
-        return Err(error);
-    }
-
-    let staged_server = work.join("llama-server.exe");
-    anyhow::ensure!(
-        staged_server.is_file(),
-        "CUDA版llama-serverが配布物にありません"
-    );
-    anyhow::ensure!(
-        cuda_probe(&staged_server).await,
-        "CUDA版llama-serverがNVIDIA GPUを認識しません"
-    );
-    crate::store::write_json_atomic(
-        &work.join("picoagent-engine-backend.json"),
-        &InstalledManifest::cuda(),
-    )?;
-
-    let backup = parent.join(format!(".engine-cuda-backup-{}", std::process::id()));
-    if backup.exists() {
-        std::fs::remove_dir_all(&backup)?;
-    }
-    if root.exists() {
-        std::fs::rename(&root, &backup)?;
-    }
-    if let Err(error) = std::fs::rename(&work, &root) {
-        if backup.exists() {
-            let _ = std::fs::rename(&backup, &root);
+fn sweep_stale_engine_work_dirs(app: &AppHandle, parent: &Path) {
+    let current = std::process::id();
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !is_stale_engine_work_dir(name, current) {
+            continue;
         }
-        return Err(error.into());
+        if let Err(error) = std::fs::remove_dir_all(entry.path()) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("前回の推論エンジン取得の残骸を削除できませんでした（{name}）: {error}"),
+            );
+        }
     }
-    if backup.exists() {
-        std::fs::remove_dir_all(backup)?;
-    }
-    Ok(root.join("llama-server.exe"))
 }
 
 #[cfg(windows)]
-async fn install_cuda_engine(work: &Path) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(1800))
-        .build()?;
-    for (name, size, sha256) in [
-        (CUDA_CORE_NAME, CUDA_CORE_SIZE, CUDA_CORE_SHA256),
-        (CUDA_RUNTIME_NAME, CUDA_RUNTIME_SIZE, CUDA_RUNTIME_SHA256),
-    ] {
-        let archive = work.join(format!("{name}.part"));
-        download_fixed(&client, asset_url(name), &archive, size).await?;
-        verify_sha256(&archive, sha256)?;
-        extract_zip_merge(&archive, work)?;
-        std::fs::remove_file(archive)?;
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-async fn ensure_rocm_engine(app: &AppHandle) -> Result<PathBuf> {
-    let root = crate::log_paths::bundled_dir(app).join("engine-rocm");
+async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<PathBuf> {
+    let root = crate::log_paths::bundled_dir(app).join(format!("engine-{}", backend.id));
     let server = root.join("llama-server.exe");
     let manifest_path = root.join("picoagent-engine-backend.json");
     if server.is_file()
@@ -431,94 +435,65 @@ async fn ensure_rocm_engine(app: &AppHandle) -> Result<PathBuf> {
             .ok()
             .and_then(|bytes| serde_json::from_slice::<InstalledManifest>(&bytes).ok())
             .is_some_and(|manifest| manifest.is_current())
-        && rocm_probe(&server).await
+        && backend.probe(&server).await
     {
         return Ok(server);
     }
 
-    let parent = root.parent().context("ROCmエンジンの配置先が不正です")?;
+    let parent = root.parent().context("推論エンジンの配置先が不正です")?;
     std::fs::create_dir_all(parent)?;
-    let work = parent.join(format!(".engine-rocm-stage-{}", std::process::id()));
+    sweep_stale_engine_work_dirs(app, parent);
+    let work = parent.join(format!(
+        ".engine-{}-stage-{}",
+        backend.id,
+        std::process::id()
+    ));
     if work.exists() {
         std::fs::remove_dir_all(&work)?;
     }
     std::fs::create_dir_all(&work)?;
-    let archive = work.join(format!("{ROCM_NAME}.part"));
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(1800))
         .build()?;
+    let staged_server = work.join("llama-server.exe");
     let install = async {
-        download_fixed(&client, asset_url(ROCM_NAME), &archive, ROCM_SIZE).await?;
-        verify_sha256(&archive, ROCM_SHA256)?;
-        extract_zip_merge(&archive, &work)?;
-        std::fs::remove_file(&archive)?;
+        for (name, size, sha256) in backend.archives {
+            let archive = work.join(format!("{name}.part"));
+            download_fixed(&client, asset_url(name), &archive, *size).await?;
+            verify_sha256(&archive, sha256)?;
+            extract_zip_merge(&archive, &work)?;
+            std::fs::remove_file(&archive)?;
+        }
         anyhow::ensure!(
-            rocm_probe(&work.join("llama-server.exe")).await,
-            "ROCm版llama-serverがAMD GPUを認識しません"
+            staged_server.is_file(),
+            "{}版llama-serverが配布物にありません",
+            backend.label
+        );
+        anyhow::ensure!(
+            backend.probe(&staged_server).await,
+            "{}",
+            backend.device_missing
         );
         crate::store::write_json_atomic(
             &work.join("picoagent-engine-backend.json"),
-            &InstalledManifest::rocm(),
+            &(backend.manifest)(),
         )?;
         Ok::<_, anyhow::Error>(())
     }
     .await;
     if let Err(error) = install {
-        let _ = std::fs::remove_dir_all(&work);
+        if let Err(cleanup) = std::fs::remove_dir_all(&work) {
+            crate::log_paths::append_app_log(
+                app,
+                &format!(
+                    "取得に失敗した推論エンジンの作業フォルダを削除できませんでした: {cleanup}"
+                ),
+            );
+        }
         return Err(error);
     }
-    replace_directory(&work, &root, "rocm")?;
-    Ok(root.join("llama-server.exe"))
-}
-
-#[cfg(windows)]
-async fn ensure_sycl_engine(app: &AppHandle) -> Result<PathBuf> {
-    let root = crate::log_paths::bundled_dir(app).join("engine-sycl");
-    let server = root.join("llama-server.exe");
-    let manifest_path = root.join("picoagent-engine-backend.json");
-    if server.is_file()
-        && std::fs::read(&manifest_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<InstalledManifest>(&bytes).ok())
-            .is_some_and(|manifest| manifest.is_current())
-        && sycl_probe(&server).await
-    {
-        return Ok(server);
-    }
-
-    let parent = root.parent().context("SYCLエンジンの配置先が不正です")?;
-    std::fs::create_dir_all(parent)?;
-    let work = parent.join(format!(".engine-sycl-stage-{}", std::process::id()));
-    if work.exists() {
-        std::fs::remove_dir_all(&work)?;
-    }
-    std::fs::create_dir_all(&work)?;
-    let archive = work.join(format!("{SYCL_NAME}.part"));
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(1800))
-        .build()?;
-    let install = async {
-        download_fixed(&client, asset_url(SYCL_NAME), &archive, SYCL_SIZE).await?;
-        verify_sha256(&archive, SYCL_SHA256)?;
-        extract_zip_merge(&archive, &work)?;
-        std::fs::remove_file(&archive)?;
-        anyhow::ensure!(
-            sycl_probe(&work.join("llama-server.exe")).await,
-            "SYCL版llama-serverがIntel GPUを認識しません"
-        );
-        crate::store::write_json_atomic(
-            &work.join("picoagent-engine-backend.json"),
-            &InstalledManifest::sycl(),
-        )?;
-        Ok::<_, anyhow::Error>(())
-    }
-    .await;
-    if let Err(error) = install {
-        let _ = std::fs::remove_dir_all(&work);
-        return Err(error);
-    }
-    replace_directory(&work, &root, "sycl")?;
-    Ok(root.join("llama-server.exe"))
+    replace_directory(&work, &root, backend.id)?;
+    Ok(server)
 }
 
 #[cfg(windows)]
@@ -534,8 +509,15 @@ fn replace_directory(stage: &Path, destination: &Path, id: &str) -> Result<()> {
         std::fs::rename(destination, &backup)?;
     }
     if let Err(error) = std::fs::rename(stage, destination) {
+        // 戻しにも失敗すると、動いていたエンジンが退避先に残ったまま本来の場所から消える。
+        // 「入れ替えに失敗した」だけを返すと、利用者は復旧先を知らないまま再取得へ進む。
         if backup.exists() {
-            let _ = std::fs::rename(&backup, destination);
+            if let Err(restore) = std::fs::rename(&backup, destination) {
+                anyhow::bail!(
+                    "推論エンジンの入れ替えに失敗し、元の内容も戻せませんでした。退避先: {} ({error} / {restore})",
+                    backup.display()
+                );
+            }
         }
         return Err(error.into());
     }
@@ -615,14 +597,14 @@ fn extract_zip_merge(archive: &Path, destination: &Path) -> Result<()> {
     let mut zip = zip::ZipArchive::new(file)?;
     anyhow::ensure!(
         zip.len() <= MAX_FILES,
-        "CUDA配布物のファイル数が上限を超えています"
+        "推論エンジン配布物のファイル数が上限を超えています"
     );
     let mut extracted = 0_u64;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index)?;
         let relative = entry
             .enclosed_name()
-            .context("CUDA配布物に危険なパスがあります")?
+            .context("推論エンジン配布物に危険なパスがあります")?
             .to_path_buf();
         let output = destination.join(relative);
         if entry.is_dir() {
@@ -640,41 +622,11 @@ fn extract_zip_merge(archive: &Path, destination: &Path) -> Result<()> {
         )?;
         anyhow::ensure!(
             copied <= remaining,
-            "CUDA配布物の展開サイズが上限を超えています"
+            "推論エンジン配布物の展開サイズが上限を超えています"
         );
         extracted = extracted.saturating_add(copied);
     }
     Ok(())
-}
-
-#[cfg(windows)]
-async fn cuda_probe(server: &Path) -> bool {
-    let mut command = crate::tools::process::command(server);
-    command.arg("--list-devices");
-    crate::tools::process::output(command, 30, "CUDA推論エンジン確認")
-        .await
-        .is_ok_and(|output| output.status.success() && output_contains(&output, "CUDA0:"))
-}
-
-#[cfg(windows)]
-async fn rocm_probe(server: &Path) -> bool {
-    let mut command = crate::tools::process::command(server);
-    command.arg("--list-devices");
-    crate::tools::process::output(command, 30, "ROCm推論エンジン確認")
-        .await
-        .is_ok_and(|output| {
-            output.status.success()
-                && (output_contains(&output, "ROCm0:") || output_contains(&output, "HIP0:"))
-        })
-}
-
-#[cfg(windows)]
-async fn sycl_probe(server: &Path) -> bool {
-    let mut command = crate::tools::process::command(server);
-    command.arg("--list-devices");
-    crate::tools::process::output(command, 30, "SYCL推論エンジン確認")
-        .await
-        .is_ok_and(|output| output.status.success() && output_contains(&output, "SYCL0:"))
 }
 
 #[cfg(windows)]
@@ -712,6 +664,33 @@ mod tests {
         assert!(is_supported_intel_sycl_name("Intel(R) Graphics"));
         assert!(!is_supported_intel_sycl_name("Intel(R) UHD Graphics 630"));
         assert!(!is_supported_intel_sycl_name("Intel(R) HD Graphics 630"));
+    }
+
+    #[test]
+    fn 実行中プロセス以外の取得残骸だけを回収対象にする() {
+        assert!(is_stale_engine_work_dir(".engine-cuda-stage-1234", 4321));
+        assert!(is_stale_engine_work_dir(".engine-rocm-backup-1234", 4321));
+        // 実行中の自分の作業フォルダは消さない（取得中の中身が飛ぶ）。
+        assert!(!is_stale_engine_work_dir(".engine-sycl-stage-4321", 4321));
+        // 完成済みの配置フォルダと無関係なフォルダには触れない。
+        assert!(!is_stale_engine_work_dir("engine-cuda", 4321));
+        assert!(!is_stale_engine_work_dir(".engine-cuda", 4321));
+        assert!(!is_stale_engine_work_dir("models", 4321));
+    }
+
+    #[test]
+    fn gpuバックエンド表は識別子と配布物を重複なく持つ() {
+        for backend in GPU_BACKENDS {
+            assert!(!backend.archives.is_empty(), "{}", backend.label);
+            assert!(!backend.device_markers.is_empty(), "{}", backend.label);
+            // マニフェストは自分のバックエンド用のものであること（取り違えると再取得が毎回走る）。
+            assert!((backend.manifest)().is_current(), "{}", backend.label);
+        }
+        let ids: Vec<&str> = GPU_BACKENDS.iter().map(|entry| entry.id).collect();
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(ids.len(), unique.len(), "識別子が重複しています: {ids:?}");
     }
 
     #[test]
