@@ -234,9 +234,10 @@ test("窓に収まらないフキダシ保存値は表示側で収める", () =>
   assert.match(handler, /refreshBubblePlacement\(\);/);
   assert.match(handler, /applyCharacterOffset\(characterOffset\.x, characterOffset\.y, \{ clamp: false \}\)/);
   assert.equal(renderer.match(/window\.addEventListener\("resize"/g)?.length, 1);
-  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*if \(windowResizeFrame\) return;\s*\n\s*windowResizeFrame = requestAnimationFrame\(handleWindowResize\);/);
+  assert.match(renderer, /const windowResizeScheduler = window\.PicoFrameScheduler\.create\(handleWindowResize\)/);
+  assert.match(renderer, /window\.addEventListener\("resize", \(\) => windowResizeScheduler\.schedule\(\)\)/);
   // 間引き用のフレーム予約は終了時に取り消す（解放漏れを残さない）。
-  assert.match(renderer, /if \(windowResizeFrame\) \{ cancelAnimationFrame\(windowResizeFrame\); windowResizeFrame = 0; \}/);
+  assert.match(renderer, /windowResizeScheduler\?\.cancel\(\);/);
 });
 
 test("ダブルクリックでは全画面へ切り替えず拡大ボタンだけを使う", () => {
@@ -276,4 +277,14 @@ test("フキダシの自動配置は配置基準の枠内へ収める", () => {
   assert.match(place, /const viewportWidth = container\.clientWidth/);
   assert.match(place, /const viewportHeight = container\.clientHeight/);
   assert.doesNotMatch(place, /document\.documentElement\.clientHeight/);
+});
+
+test("生成中の本文描画は最短間隔をあけて組み直す", () => {
+  // 1回の描画で本文全体を組み直すため、トークンが毎フレーム届くローカルAIでは
+  // 長い回答ほど入力とアニメが引っかかっていた。読める速さは保ったまま間引く。
+  assert.match(renderer, /const STREAM_RENDER_MIN_MS = 80;/);
+  assert.match(renderer, /if \(performance\.now\(\) - lastStreamRenderAt < STREAM_RENDER_MIN_MS\) \{\s*\n\s*streamRenderFrame = requestAnimationFrame\(paintStream\);\s*\n\s*return;/);
+  assert.match(renderer, /lastStreamRenderAt = performance\.now\(\);\s*\n[\s\S]{0,200}?renderMarkdown\(reply, streamBuffer\);/);
+  // 送信直後とステップ境界では、最初のチャンクを待たせない。
+  assert.equal(renderer.match(/(?<!let )lastStreamRenderAt = 0;/g)?.length, 2);
 });

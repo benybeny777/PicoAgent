@@ -102,6 +102,10 @@ let streamBuffer = "";
 let unlistenStream = null;
 let unlistenStreamReset = null;
 let streamRenderFrame = null;
+// ストリーミング表示の最短再描画間隔（ms）と直前の描画時刻。
+// 12回/秒なら文字が流れて見える速さを保てて、毎フレーム組み直すより描画量が大きく減る。
+const STREAM_RENDER_MIN_MS = 80;
+let lastStreamRenderAt = 0;
 let subtitlePageToken = 0;
 let subtitlePageTimer = null;
 let localEngineRequired = false;
@@ -309,7 +313,7 @@ window.addEventListener("beforeunload", () => {
   if (napTimer) clearInterval(napTimer);
   if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
   if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
-  if (windowResizeFrame) { cancelAnimationFrame(windowResizeFrame); windowResizeFrame = 0; }
+  windowResizeScheduler?.cancel();
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
   if (unlistenStream) { unlistenStream(); unlistenStream = null; }
@@ -4488,6 +4492,7 @@ composer.addEventListener("submit", async event => {
 
   // ストリーミングチャンクをリアルタイム表示する（rAF スロットルで1フレーム1描画）。
   streamBuffer = "";
+  lastStreamRenderAt = 0; // 最初のチャンクは待たせず描く
   beginStreamSpeech(); // 生成中の先行読み上げを準備（読み上げ無効なら何もしない）
   try {
     if (window.picoagent.listen) {
@@ -4501,6 +4506,7 @@ composer.addEventListener("submit", async event => {
         streamBuffer = "";
         // 表示にも残さない（最終回答に含まれない途中テキストを見せ続けない）。
         if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+        lastStreamRenderAt = 0; // 次のステップの最初のチャンクは待たせず描く
         renderMarkdown(reply, "");
         setThinkingUi(true, status.textContent || "考え中");
         resetStreamSpeech();
@@ -4513,14 +4519,23 @@ composer.addEventListener("submit", async event => {
         reply.classList.add("streaming"); // 文末の点滅カーソル表示
         if (currentLayout === "stream") return;
         if (!streamRenderFrame) {
-          streamRenderFrame = requestAnimationFrame(() => {
+          const paintStream = () => {
+            // 1回の描画は本文全体を組み直すので、文章が伸びるほど重くなる。トークンが
+            // 毎フレーム届くローカルAIでは、長い回答ほど入力やアニメが引っかかっていた。
+            // 読める速さは保ったまま、最短間隔をあけて描き直す。
+            if (performance.now() - lastStreamRenderAt < STREAM_RENDER_MIN_MS) {
+              streamRenderFrame = requestAnimationFrame(paintStream);
+              return;
+            }
             streamRenderFrame = null;
+            lastStreamRenderAt = performance.now();
             // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
             const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
             renderMarkdown(reply, streamBuffer);
             if (nearBottom) reply.scrollTop = reply.scrollHeight;
             if (animationName === "thinking") setAnimation("talking");
-          });
+          };
+          streamRenderFrame = requestAnimationFrame(paintStream);
         }
       });
     }
@@ -5629,9 +5644,7 @@ function refitBubbleToWindow() {
 // 枠なしウィンドウは8方向ドラッグでリサイズするため、resize は1回の操作で連続して届く。
 // 購読を分けていた頃は、同じ同期レイアウト計算（`offset*` の読み取りと style 書き込み）が
 // 1イベントで2本走っていた。1本へまとめ、次の描画フレームまで間引く。
-let windowResizeFrame = 0;
 function handleWindowResize() {
-  windowResizeFrame = 0;
   // 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
   // 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
   applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
@@ -5640,10 +5653,8 @@ function handleWindowResize() {
   refitBubbleToWindow();
   refreshBubblePlacement();
 }
-window.addEventListener("resize", () => {
-  if (windowResizeFrame) return;
-  windowResizeFrame = requestAnimationFrame(handleWindowResize);
-});
+const windowResizeScheduler = window.PicoFrameScheduler.create(handleWindowResize);
+window.addEventListener("resize", () => windowResizeScheduler.schedule());
 function syncPngNaturalResolution() {
   if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
