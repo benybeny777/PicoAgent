@@ -315,7 +315,9 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
         };
         let writer_for_stream = writer.clone();
         let error_callback = |error| {
-            crate::log_paths::log_detached(&format!("会議録音の取り込みでエラーが発生しました: {error}"))
+            crate::log_paths::log_detached(&format!(
+                "会議録音の取り込みでエラーが発生しました: {error}"
+            ))
         };
         let stream_config: cpal::StreamConfig = config.into();
         let stream = match config.sample_format() {
