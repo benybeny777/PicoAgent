@@ -297,3 +297,15 @@ test("設定検索は購読1本で1フレーム1回だけ絞り込む", () => {
   assert.match(settings, /settingsSearch\?\.addEventListener\("input", \(\) => \{[\s\S]*?clearSettingsSearch\.hidden = !settingsSearch\.value;[\s\S]*?settingsSearchScheduler\.schedule\(\);/);
   assert.match(settings, /settingsSearchScheduler\?\.cancel\(\);/);
 });
+
+test("閉じている通知一覧を作り直さず保存もまとめる", () => {
+  // エージェント実行中は進捗のたびに `upsertJob` が呼ばれる。閉じている一覧の
+  // DOMを50件ぶん捨てては作り直し、localStorage も毎回書いていた。
+  assert.match(renderer, /function renderNoticePanel\(\) \{[\s\S]*?if \(noticePanel\?\.hidden\) return;/);
+  // 開くときは必ず組み立て直す（飛ばした更新をここで取り戻す）。
+  assert.match(renderer, /noticePanel\.hidden = !open;\s*\n\s*if \(open\) \{[\s\S]*?renderNoticePanel\(\);/);
+  assert.match(renderer, /const noticePersistScheduler = window\.PicoFrameScheduler\.create\(persistNoticesNow\)/);
+  assert.match(renderer, /function persistNotices\(\) \{\s*\n\s*noticePersistScheduler\.schedule\(\);\s*\n\}/);
+  // 終了時はまとめ待ちを書き切る（通知の取りこぼしを残さない）。
+  assert.match(renderer, /noticePersistScheduler\.flush\(\);/);
+});

@@ -310,6 +310,8 @@ window.addEventListener("beforeunload", () => {
   // 書きかけはデバウンス待ちのまま終了しうる。終了時に必ず書き切ってから閉じる。
   promptDraft = input.value;
   persistDraft();
+  // まとめ待ちの通知保存も、終了前に必ず書き切る。
+  noticePersistScheduler.flush();
   if (napTimer) clearInterval(napTimer);
   if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
   if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
@@ -381,11 +383,17 @@ function updateNoticeBadge() {
   noticeToggle.classList.toggle("has-notices", noticeEntries.length > 0);
 }
 
-function persistNotices() {
+function persistNoticesNow() {
   try { localStorage.setItem(NOTICE_STORAGE_KEY, JSON.stringify(noticeEntries.slice(0, 50))); }
   catch (error) { logApp("warn", "アクションセンターの保存に失敗しました", errorDetail(error)); }
 }
-persistNotices();
+// 通知の保存は50件の直列化とlocalStorage書き込み。エージェント実行中は進捗のたびに
+// 呼ばれるため、1フレーム1回へまとめる。終了時は `beforeunload` で必ず書き切る。
+const noticePersistScheduler = window.PicoFrameScheduler.create(persistNoticesNow);
+function persistNotices() {
+  noticePersistScheduler.schedule();
+}
+persistNoticesNow();
 
 // 停止要求が届いても、実行中の送信がいつまでも返らないことがある（子プロセスの停止待ち、
 // 応答の来ないプロバイダ接続など）。そのままだと待機表示が残り続け、入力も再送も
@@ -425,6 +433,10 @@ async function requestAgentCancellation(button) {
 
 function renderNoticePanel() {
   if (!noticeList) return;
+  // 閉じている一覧を作り直しても誰も見ない。エージェント実行中は進捗のたびに
+  // `upsertJob` から呼ばれるため、そのぶん50件ぶんのDOMを捨てては作り直していた。
+  // 開くときに必ず呼び直すので、閉じている間は組み立てを飛ばす。
+  if (noticePanel?.hidden) return;
   noticeList.replaceChildren();
   if (noticeEntries.length === 0) {
     noticeList.append(document.createElement("div"));
