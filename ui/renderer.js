@@ -379,8 +379,8 @@ function setStatus(text) {
 
 function updateNoticeBadge() {
   if (!noticeToggle) return;
+  // バッジの数字だけが未読を伝える。 は対応する見た目が無いまま残っていた。
   noticeToggle.dataset.count = unreadNoticeCount > 0 ? String(Math.min(99, unreadNoticeCount)) : "";
-  noticeToggle.classList.toggle("has-notices", noticeEntries.length > 0);
 }
 
 function persistNoticesNow() {
@@ -5294,7 +5294,6 @@ function fallAsleep() {
   setMeshRigVisible(false);
   stopRig();
   character.dataset.motion = "none";
-  character.classList.add("napping");
   petSprite.src = versionedAssetUrl(`${characterRoot}/${sleeping}`, characterAssetVersion);
   status.textContent = "すやすや……";
 }
@@ -5302,7 +5301,6 @@ function fallAsleep() {
 function wakeUp() {
   if (!napping) return;
   napping = false;
-  character.classList.remove("napping");
   if (status.textContent === "すやすや……") clearTransientStatus();
   setAnimation("idle", true);
 }
