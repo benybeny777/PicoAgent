@@ -39,7 +39,7 @@ pub struct BrowserControlTool;
 /// アプリ終了時にブラウザを閉じる（`lib.rs` の `RunEvent::Exit` から呼ぶ）。
 pub fn stop() {
     if let Err(error) = cdp::stop() {
-        eprintln!("{error}");
+        crate::log_paths::log_detached(&format!("ブラウザを終了できません: {error}"));
     }
 }
 
