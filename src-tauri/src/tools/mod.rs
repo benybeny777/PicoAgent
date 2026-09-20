@@ -257,6 +257,10 @@ static TOOLS: OnceLock<Vec<Box<dyn Tool>>> = OnceLock::new();
 static TOOL_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
 static TOOL_SCHEMAS: OnceLock<Vec<Value>> = OnceLock::new();
 static TOOL_SCHEMA_INDEX: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
+/// 定義1件ぶんの文字数。起動後は変わらないので1度だけ数える。
+static TOOL_SCHEMA_CHARS: OnceLock<Vec<usize>> = OnceLock::new();
+/// 各スキルの語彙（小文字化した形と、元の文字数）。`all()` と同じ並び。
+static TOOL_KEYWORDS_LOWER: OnceLock<Vec<Vec<(String, usize)>>> = OnceLock::new();
 
 // 利用者追加スキルは名前が任意で、発話だけから静的な語彙一致を作れない。
 // `user_skill` の小さな管理schemaだけは常に提示し、毎ターン差し込む一覧から必要な
@@ -287,19 +291,14 @@ pub fn intent_for_dialogue(
     let normalized = text.to_lowercase();
     let mut matched: Vec<_> = all()
         .iter()
-        .filter_map(|tool| {
+        .enumerate()
+        .filter_map(|(index, tool)| {
             let invocation = tool.intent_invocation_in_dialogue(
                 text,
                 earlier_user_texts,
                 earlier_assistant_texts,
             )?;
-            let score = tool
-                .intent_keywords()
-                .iter()
-                .filter(|keyword| normalized.contains(&keyword.to_lowercase()))
-                .map(|keyword| keyword.chars().count())
-                .max()
-                .unwrap_or(0);
+            let score = keyword_score(index, &normalized);
             Some((tool.intent_priority(), score, tool.name(), invocation))
         })
         .collect();
@@ -333,9 +332,55 @@ pub fn all() -> &'static [Box<dyn Tool>] {
 }
 
 /// 1件のツール定義がコンテキストで占める文字数。
-fn schema_chars(schema: &Value) -> usize {
-    serde_json::to_string(schema)
-        .map(|s| s.chars().count())
+///
+/// 定義は起動後に変わらないので1度だけ数えて使い回す。以前は候補を積むたびに
+/// `serde_json::to_string` をやり直しており、1ターンで全件ぶんを直列化していた。
+fn schema_chars_at(index: usize) -> usize {
+    TOOL_SCHEMA_CHARS
+        .get_or_init(|| {
+            build_schemas()
+                .iter()
+                .map(|schema| {
+                    serde_json::to_string(schema)
+                        .map(|text| text.chars().count())
+                        .unwrap_or(0)
+                })
+                .collect()
+        })
+        .get(index)
+        .copied()
+        .unwrap_or(0)
+}
+
+/// 各スキルの語彙を小文字化して覚える。発話との照合は毎ターン走るため、
+/// そのたびに全スキルの全語彙を小文字化し直さない。
+/// 文字数は元の語彙のまま数える（並び順の判定基準を変えないため）。
+fn lowered_keywords() -> &'static [Vec<(String, usize)>] {
+    TOOL_KEYWORDS_LOWER.get_or_init(|| {
+        all()
+            .iter()
+            .map(|tool| {
+                tool.intent_keywords()
+                    .iter()
+                    .map(|keyword| (keyword.to_lowercase(), keyword.chars().count()))
+                    .collect()
+            })
+            .collect()
+    })
+}
+
+/// 発話に当たった語彙のうち、いちばん長いものの文字数。0は不一致。
+/// `index` は `all()` での位置。
+fn keyword_score(index: usize, normalized: &str) -> usize {
+    lowered_keywords()
+        .get(index)
+        .and_then(|keywords| {
+            keywords
+                .iter()
+                .filter(|(keyword, _)| normalized.contains(keyword.as_str()))
+                .map(|(_, chars)| *chars)
+                .max()
+        })
         .unwrap_or(0)
 }
 
@@ -491,15 +536,10 @@ pub fn schemas_for_conversation(
     // weather が消えてモデルが web_search しか呼べなくなっていた。
     let mut ranked: Vec<_> = all()
         .iter()
-        .filter(|tool| tool.agent_callable())
-        .map(|tool| {
-            let score = tool
-                .intent_keywords()
-                .iter()
-                .filter(|keyword| normalized.contains(&keyword.to_lowercase()))
-                .map(|keyword| keyword.chars().count())
-                .max()
-                .unwrap_or(0);
+        .enumerate()
+        .filter(|(_, tool)| tool.agent_callable())
+        .map(|(index, tool)| {
+            let score = keyword_score(index, &normalized);
             (score > 0, tool.intent_priority(), score, tool.name())
         })
         .collect();
@@ -514,12 +554,16 @@ pub fn schemas_for_conversation(
             .then_with(|| left.3.cmp(right.3))
     });
     let budget = schema_budget_chars(cfg);
-    let mut used: usize = selected.iter().map(schema_chars).sum();
+    let mut used: usize = CORE_AGENT_TOOLS
+        .iter()
+        .filter_map(|name| schema_index().get(name))
+        .map(|index| schema_chars_at(*index))
+        .sum();
     for (_, _, _, name) in ranked {
         let Some(index) = schema_index().get(name) else {
             continue;
         };
-        let cost = schema_chars(&build_schemas()[*index]);
+        let cost = schema_chars_at(*index);
         if used.saturating_add(cost) > budget {
             continue;
         }
