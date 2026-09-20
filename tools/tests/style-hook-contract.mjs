@@ -93,3 +93,15 @@ test("画面が購読するイベントは橋渡しの一覧に載っている",
   // 一覧に無いチャンネルは黙って捨てず、理由をログへ残す。
   assert.match(bridge, /if \(!PET_EVENT_CHANNELS\.includes\(channel\)\) \{[\s\S]*?logBridgeError\(/);
 });
+
+test("画面のHTMLへ版を手書きしない", () => {
+  // 配信用ビルドの `stamp_asset_versions()` が内容ハッシュの `?v=` を打つ。
+  // 元のHTMLに書いた版は製品へ届かず、更新したつもりで効かない指定が残る。
+  const written = [];
+  markup.targets.forEach((name, index) => {
+    for (const match of markup.bodies[index].matchAll(/(?:src|href)="([^"]*\?v=[^"]*)"/g)) {
+      written.push(`${name}: ${match[1]}`);
+    }
+  });
+  assert.deepEqual(written, [], "版は配信用ビルドが内容ハッシュで打ちます");
+});
