@@ -3094,17 +3094,81 @@ function placeTaskRun(stickToBottom = false) {
   }
 }
 
+// 直前に描いた内容の控え。会話が伸びただけのときは末尾へ足すだけで済ませる。
+// 全件を Markdown から組み直すと、80件たまった会話では発言のたびに数百要素を
+// 作り直すことになる（チャット・作業形式では毎ターン2回起きる）。
+let renderedHistory = { query: null, items: [], name: "" };
+
+function historyRowElement(item) {
+  const row = document.createElement("div");
+  row.className = `history-item ${item.role}`;
+  const meta = document.createElement("div");
+  meta.className = "history-meta";
+  const label = document.createElement("div");
+  label.className = "history-role";
+  label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+  if (item.at) {
+    // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
+    const time = document.createElement("span");
+    time.className = "history-time";
+    time.textContent = new Date(item.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    label.append(time);
+  }
+  const actions = document.createElement("div");
+  actions.className = "history-actions";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "コピー";
+  copy.addEventListener("click", () => copyHistoryItem(item.content));
+  actions.append(copy);
+  if (item.role === "user") {
+    const reuse = document.createElement("button");
+    reuse.type = "button";
+    reuse.textContent = "再利用";
+    reuse.addEventListener("click", () => reuseHistoryItem(item.content));
+    actions.append(reuse);
+  }
+  meta.append(label, actions);
+  const body = document.createElement("div");
+  body.className = "history-body";
+  renderMarkdown(body, item.content);
+  row.append(meta, body);
+  return row;
+}
+
+function historyThinkingRowElement() {
+  const row = document.createElement("div");
+  row.className = "history-item assistant history-thinking";
+  // 名前行は他の発言と同じ `history-meta` に入れる（表示形式ごとの並び・余白を共有する）。
+  const meta = document.createElement("div");
+  meta.className = "history-meta";
+  const label = document.createElement("div");
+  label.className = "history-role";
+  label.textContent = characterManifest?.name || "むぎ";
+  meta.append(label);
+  const body = document.createElement("div");
+  body.className = "history-body";
+  body.append(createTypingIndicator(historyThinkingText));
+  row.append(meta, body);
+  return row;
+}
+
 function renderHistoryRows() {
   if (!historyLog) return;
   // 履歴ログが見えていないときに毎メッセージ全件を Markdown 再構築するのは無駄なので
   // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
-  if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) return;
+  if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) {
+    // 描かない間も会話は進む。次に見えたときは必ず全件を組み直す。
+    renderedHistory = { query: null, items: [], name: "" };
+    return;
+  }
   // 「考え中」の文言更新でも作り直すため、読み返している最中に最下部へ引き戻さない。
   // 既に最下部付近にいるときだけ追従する（新しい発言は今までどおり見える）。
   const stickToBottom = historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
-  historyLog.replaceChildren();
+  const name = characterManifest?.name || "むぎ";
   if (!conversationHistory.length && !historyThinking) {
-    historyLog.append(document.createElement("div"));
+    historyLog.replaceChildren(document.createElement("div"));
+    renderedHistory = { query: null, items: [], name };
     return;
   }
   const query = historyQuery.trim().toLowerCase();
@@ -3115,61 +3179,23 @@ function renderHistoryRows() {
     const empty = document.createElement("div");
     empty.className = "history-empty";
     empty.textContent = "一致する履歴はありません。";
-    historyLog.append(empty);
+    historyLog.replaceChildren(empty);
+    renderedHistory = { query: null, items: [], name };
     return;
   }
-  for (const item of items) {
-    const row = document.createElement("div");
-    row.className = `history-item ${item.role}`;
-    const meta = document.createElement("div");
-    meta.className = "history-meta";
-    const label = document.createElement("div");
-    label.className = "history-role";
-    label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
-    if (item.at) {
-      // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
-      const time = document.createElement("span");
-      time.className = "history-time";
-      time.textContent = new Date(item.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-      label.append(time);
-    }
-    const actions = document.createElement("div");
-    actions.className = "history-actions";
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.textContent = "コピー";
-    copy.addEventListener("click", () => copyHistoryItem(item.content));
-    actions.append(copy);
-    if (item.role === "user") {
-      const reuse = document.createElement("button");
-      reuse.type = "button";
-      reuse.textContent = "再利用";
-      reuse.addEventListener("click", () => reuseHistoryItem(item.content));
-      actions.append(reuse);
-    }
-    meta.append(label, actions);
-    const body = document.createElement("div");
-    body.className = "history-body";
-    renderMarkdown(body, item.content);
-    row.append(meta, body);
-    historyLog.append(row);
-  }
-  if (historyThinking && !query) {
-    const row = document.createElement("div");
-    row.className = "history-item assistant history-thinking";
-    // 名前行は他の発言と同じ `history-meta` に入れる（表示形式ごとの並び・余白を共有する）。
-    const meta = document.createElement("div");
-    meta.className = "history-meta";
-    const label = document.createElement("div");
-    label.className = "history-role";
-    label.textContent = characterManifest?.name || "むぎ";
-    meta.append(label);
-    const body = document.createElement("div");
-    body.className = "history-body";
-    body.append(createTypingIndicator(historyThinkingText));
-    row.append(meta, body);
-    historyLog.append(row);
-  }
+  // 絞り込み条件も名前も同じで、前回描いた発言がそのまま先頭から続いているなら、
+  // 増えたぶんだけを足す。切替・検索・古い発言の切り捨てでは一致しないので全件を組み直す。
+  const appendOnly = renderedHistory.query === query
+    && renderedHistory.name === name
+    && renderedHistory.items.length > 0
+    && items.length >= renderedHistory.items.length
+    && renderedHistory.items.every((item, index) => items[index] === item);
+  const added = appendOnly ? items.slice(renderedHistory.items.length) : items;
+  if (appendOnly) historyLog.querySelector(".history-thinking")?.remove();
+  else historyLog.replaceChildren();
+  for (const item of added) historyLog.append(historyRowElement(item));
+  if (historyThinking && !query) historyLog.append(historyThinkingRowElement());
+  renderedHistory = { query, items: [...items], name };
   if (stickToBottom) historyLog.scrollTop = historyLog.scrollHeight;
 }
 
