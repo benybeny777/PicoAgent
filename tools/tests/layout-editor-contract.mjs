@@ -57,7 +57,12 @@ test("縮小しすぎと画面外への消失を防ぐ", () => {
   assert.match(editor, /const KEEP_VISIBLE = 48/);
   assert.match(editor, /moveable\.on\("drag", event => \{[\s\S]*?constrainSource\(event\.target\)/);
   assert.match(editor, /moveable\.on\("scale", event => \{[\s\S]*?constrainSource\(event\.target\)/);
-  assert.match(editor, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*Object\.values\(sources\)\.forEach\(constrainSource\)/);
+  // リサイズは連続して届くので、収め直しは描画フレームごとに1回へまとめる。
+  assert.match(editor, /const resizeScheduler = window\.PicoFrameScheduler\.create\(\(\) => \{\s*\n\s*Object\.values\(sources\)\.forEach\(constrainSource\);/);
+  // つまみの位置合わせは編集中だけでよい（閉じている間も毎回やり直さない）。
+  assert.match(editor, /if \(editing\) moveable\?\.updateRect\(\);/);
+  assert.match(editor, /window\.addEventListener\("resize", \(\) => resizeScheduler\.schedule\(\)\)/);
+  assert.match(editor, /resizeScheduler\.cancel\(\);/);
   // 押し戻した軸は安全側へ丸める（四捨五入だと最大0.5px戻し足りない）。
   assert.ok(editor.includes("correction > 0 ? Math.ceil(value) : correction < 0 ? Math.floor(value)"),
     "押し戻した軸の丸めが安全側になっていません");
