@@ -309,6 +309,7 @@ window.addEventListener("beforeunload", () => {
   if (napTimer) clearInterval(napTimer);
   if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
   if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+  if (windowResizeFrame) { cancelAnimationFrame(windowResizeFrame); windowResizeFrame = 0; }
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
   if (unlistenStream) { unlistenStream(); unlistenStream = null; }
@@ -4007,10 +4008,14 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   const container = bubble.offsetParent instanceof HTMLElement ? bubble.offsetParent : document.documentElement;
   const viewportWidth = container.clientWidth;
   const viewportHeight = container.clientHeight;
-  const charLeftEdge = character.offsetLeft - gap;
-  const charTopEdge = character.offsetTop - gap;
-  const charRightEdge = character.offsetLeft + character.offsetWidth + gap;
-  const charBottomEdge = character.offsetTop + character.offsetHeight + gap;
+  // キャラの実寸はここで1度だけ読む。候補ごとに読み直すと、25候補×4項目の
+  // レイアウト参照がリサイズのたびに走る。
+  const charLeft = character.offsetLeft;
+  const charTop = character.offsetTop;
+  const charLeftEdge = charLeft - gap;
+  const charTopEdge = charTop - gap;
+  const charRightEdge = charLeft + character.offsetWidth + gap;
+  const charBottomEdge = charTop + character.offsetHeight + gap;
   const maxLeft = Math.max(margin, viewportWidth - width - margin);
   const maxTop = Math.max(margin, viewportHeight - height - margin);
   const baseLeft = clampNumber(preferredLeft, margin, maxLeft);
@@ -4037,7 +4042,7 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
       const left = clampNumber(rawLeft, margin, maxLeft);
       const top = clampNumber(rawTop, margin, maxTop);
       if (candidates.some(item => item.left === left && item.top === top)) continue;
-      const overlap = overlapAreaWithCharacter(left, top, width, height, gap);
+      const overlap = overlapArea(left, top, width, height, charLeftEdge, charTopEdge, charRightEdge, charBottomEdge);
       const distance = Math.hypot(left - baseLeft, top - baseTop);
       candidates.push({ left, top, overlap, distance });
     }
@@ -4050,11 +4055,8 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   bubble.style.top = `${Math.round(best.top)}px`;
 }
 
-function overlapAreaWithCharacter(left, top, width, height, gap = 10) {
-  const charLeft = character.offsetLeft - gap;
-  const charTop = character.offsetTop - gap;
-  const charRight = character.offsetLeft + character.offsetWidth + gap;
-  const charBottom = character.offsetTop + character.offsetHeight + gap;
+// 与えられた矩形同士の重なり面積。キャラの辺は呼び出し元が1度だけ読んで渡す。
+function overlapArea(left, top, width, height, charLeft, charTop, charRight, charBottom) {
   const overlapWidth = Math.max(0, Math.min(left + width, charRight) - Math.max(left, charLeft));
   const overlapHeight = Math.max(0, Math.min(top + height, charBottom) - Math.max(top, charTop));
   return overlapWidth * overlapHeight;
@@ -5195,13 +5197,6 @@ character.addEventListener("pointerdown", event => {
   });
 });
 
-// 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
-// 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
-window.addEventListener("resize", () => {
-  applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
-  syncLive2DResolution();
-  syncPngNaturalResolution();
-});
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];
@@ -5631,9 +5626,23 @@ function refitBubbleToWindow() {
   if (Math.round(bubble.offsetWidth) !== Math.round(fitted.width)) bubble.style.width = `${fitted.width}px`;
   if (Math.round(bubble.offsetHeight) !== Math.round(fitted.height)) bubble.style.height = `${fitted.height}px`;
 }
-window.addEventListener("resize", () => {
+// 枠なしウィンドウは8方向ドラッグでリサイズするため、resize は1回の操作で連続して届く。
+// 購読を分けていた頃は、同じ同期レイアウト計算（`offset*` の読み取りと style 書き込み）が
+// 1イベントで2本走っていた。1本へまとめ、次の描画フレームまで間引く。
+let windowResizeFrame = 0;
+function handleWindowResize() {
+  windowResizeFrame = 0;
+  // 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
+  // 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
+  applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
+  syncLive2DResolution();
+  syncPngNaturalResolution();
   refitBubbleToWindow();
   refreshBubblePlacement();
+}
+window.addEventListener("resize", () => {
+  if (windowResizeFrame) return;
+  windowResizeFrame = requestAnimationFrame(handleWindowResize);
 });
 function syncPngNaturalResolution() {
   if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;

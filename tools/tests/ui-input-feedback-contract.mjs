@@ -228,7 +228,15 @@ test("窓に収まらないフキダシ保存値は表示側で収める", () =>
   const refit = renderer.match(/function refitBubbleToWindow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(refit, /bubble\.classList\.contains\("fullscreen"\) \|\| resizeStart/);
   assert.match(refit, /savedBubbleLayout\?\.width/);
-  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*refitBubbleToWindow\(\);/);
+  // リサイズ中の再計算は1本の購読へまとめ、描画フレームごとに1回へ間引く。
+  const handler = renderer.match(/function handleWindowResize\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(handler, /refitBubbleToWindow\(\);/);
+  assert.match(handler, /refreshBubblePlacement\(\);/);
+  assert.match(handler, /applyCharacterOffset\(characterOffset\.x, characterOffset\.y, \{ clamp: false \}\)/);
+  assert.equal(renderer.match(/window\.addEventListener\("resize"/g)?.length, 1);
+  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*if \(windowResizeFrame\) return;\s*\n\s*windowResizeFrame = requestAnimationFrame\(handleWindowResize\);/);
+  // 間引き用のフレーム予約は終了時に取り消す（解放漏れを残さない）。
+  assert.match(renderer, /if \(windowResizeFrame\) \{ cancelAnimationFrame\(windowResizeFrame\); windowResizeFrame = 0; \}/);
 });
 
 test("ダブルクリックでは全画面へ切り替えず拡大ボタンだけを使う", () => {
