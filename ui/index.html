@@ -163,7 +163,6 @@
       <div id="gameStatus" class="game-status" role="status" aria-live="polite"></div>
     </div>
   </section>
-  <script src="vendor/moveable/moveable.min.js"></script>
   <script src="picoagent.js"></script>
   <script src="common.js"></script>
   <script src="frame-scheduler.js?v=20260819-renderer-scheduler"></script>
@@ -175,6 +174,9 @@
   <script src="renderer.js"></script>
   <script src="game.js"></script>
   <script src="top-menu.js"></script>
+  <!-- 配置編集の部品は245KBある。先に読むと、起動の合図（frontendReady）と pet_init が
+       そのぶん遅れる。使う layout-editor.js の直前まで下げ、起動の待ちに重ねる。 -->
+  <script src="vendor/moveable/moveable.min.js"></script>
   <script src="layout-editor.js"></script>
 </body>
 </html>
