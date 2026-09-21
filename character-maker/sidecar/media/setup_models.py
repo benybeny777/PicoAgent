@@ -90,8 +90,16 @@ def progress(path, message, downloaded, total):
     temporary.unlink(missing_ok=True)
 
 
+def checked_root(root):
+    root = Path(os.path.abspath(root))
+    for part in (root, *root.parents):
+        if part.is_symlink() or (hasattr(part, "is_junction") and part.is_junction()):
+            raise ValueError("モデル保存先のルートと親にリンクを使用できません")
+    return root.resolve()
+
+
 def safe_path(root, relative):
-    root = root.resolve()
+    root = checked_root(root)
     target = root / relative
     if not target.resolve().is_relative_to(root):
         raise ValueError("モデル保存先が管理ディレクトリ外です")
@@ -174,8 +182,8 @@ def main():
     parser.add_argument("--accept-license", help="利用者が確認したモデル利用条件の版")
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
-    root = args.runtime.resolve()
-    cache = args.cache.resolve()
+    root = checked_root(args.runtime)
+    cache = checked_root(args.cache)
     root.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
     args.progress.parent.mkdir(parents=True, exist_ok=True)

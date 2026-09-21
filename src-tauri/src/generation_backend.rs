@@ -436,7 +436,7 @@ pub fn model_memory_shortage(
     if is_nvfp4_component(model.component)
         && (device.vendor != GpuVendor::Nvidia
             || !matches!(device.memory, GpuMemory::Dedicated(bytes) if bytes >= 8_000_000_000)
-            || !total_ram_bytes.is_some_and(|bytes| bytes >= 32_000_000_000))
+            || total_ram_bytes.is_none_or(|bytes| bytes < 32_000_000_000))
     {
         return Some("NVFP4構成はNVIDIA専用VRAM 8GB以上・RAM 32GB以上が必要です。情報不明の場合も取得しません。".into());
     }

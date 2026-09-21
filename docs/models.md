@@ -22,7 +22,9 @@ Hugging Face側の条件同意はPicoAgentの同意とは別である。認証�
 
 新経路は共通Python 3.12本体を再利用し、`bundled/media-runtime/venv`とComfyUI 0.37.0を分離する。既存ComfyUI 0.34.0・Qwen・Wan・旧LTXを上書きしない。専用環境はPyTorch 2.11 CUDA 13で、固定依存は`sidecar/requirements-media.lock`で管理する。現段階では既存管理PythonがあるWindows x64だけが導入対象であり、クリーン環境のPython初回導入、Linux、macOS、AMDへのNVFP4対応は未完了である。未対応環境向けに代替の大容量モデルを取得しない。
 
-VRAM 16GB未満では`--lowvram --reserve-vram 1 --cache-none`、テキスト処理のCPU配置、VAEのタイル復号を使う。CPU退避はVRAMを減らす代わりに転送・CPU計算で遅くなる場合がある。LTXは軽いConv VAEを使い、公式の2段階高解像度化と重いDiffVAEは省くため、顔・文字・細部の画質が劣る可能性がある。補間による見かけの拡大は行わず、参照画像が生成寸法より小さい場合も拒否する。高品質構成まで検証済みとは扱わない。
+VRAM 16GB未満では`--lowvram --reserve-vram 1 --cache-none`とVAEのタイル復号を使う。Kreaの4Bテキスト処理はComfyのGPU自動管理に任せ、LTXの大きい12BだけCPUへ配置する。CPU退避はVRAMを減らす代わりに転送・CPU計算で遅くなる場合がある。LTXは軽いConv VAEを使い、公式の2段階高解像度化と重いDiffVAEは省くため、顔・文字・細部の画質が劣る可能性がある。補間による見かけの拡大は行わず、参照画像が生成寸法より小さい場合も拒否する。高品質構成まで検証済みとは扱わない。
+
+2026-09-21のRTX 5060 Laptop 8GB・RAM約34GBでは、Krea 512×512・8ステップ・同じプロンプトとシードの単発生成が成功した。テキストCPU配置の初回は起動込み334秒、GPU自動管理の次回は47秒で、両方の猫画像を目視確認した。コールド起動・キャッシュ・他処理の条件が揃っていないため、倍率や一般的な速度保証には使わない。連続生成、他GPU、GUI経由の受入は別途必要である。
 
 ## GPUバックエンドとモデルの関係
 

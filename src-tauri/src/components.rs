@@ -171,7 +171,7 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
         )),
         "image-krea2" => Some((
             "Krea 2 Turbo画像生成（NVFP4）",
-            "Windows x64で文章から画像を生成します。Blackwell以降・専用VRAM 8GB以上・RAM 32GB以上が必要です。独自ライセンスへの本人の同意が必要です。8GB実機品質・速度は未検証です。",
+            "Windows x64で文章から画像を生成します。Blackwell以降・専用VRAM 8GB以上・RAM 32GB以上が必要です。独自ライセンスへの本人の同意が必要です。RTX 5060 Laptop 8GBで単発生成を確認済み、連続実行は未検証です。",
             "約13.2GB（実行環境と作業領域は別）",
         )),
         "video-ltx25" => Some((

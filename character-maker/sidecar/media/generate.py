@@ -219,7 +219,8 @@ def modern_workflow(engine, prompt, seed, width, height, frames, input_image, lo
         raise ValueError("Krea 2のこの構成は文章からの生成専用です。編集はQwenを選んでください")
     workflow = {
         "1": node("UNETLoader", unet_name="krea2_turbo_nvfp4.safetensors" if krea else "ltx-2.5-22b-distilled-transformer-nvfp4.safetensors", weight_dtype="default"),
-        "2": node("CLIPLoader", clip_name="qwen3vl_4b_fp8_scaled.safetensors" if krea else "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", type="krea2" if krea else "ltxv", device="cpu" if lowvram else "default"),
+        # Kreaの4Bは8GB実機でGPU配置を確認済み。大きいLTXの12BだけCPUへ退避する。
+        "2": node("CLIPLoader", clip_name="qwen3vl_4b_fp8_scaled.safetensors" if krea else "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", type="krea2" if krea else "ltxv", device="cpu" if lowvram and not krea else "default"),
         "3": node("VAELoader", vae_name="qwen_image_vae.safetensors" if krea else "ltx-2.5-video-vae-conv-bf16.safetensors"),
         "4": node("CLIPTextEncode", clip=["2", 0], text=prompt),
         "5": node("ConditioningZeroOut", conditioning=["4", 0]),
@@ -250,7 +251,8 @@ def modern_workflow(engine, prompt, seed, width, height, frames, input_image, lo
         "20": node("VAEDecodeTiled", samples=["19", 0], vae=["3", 0], tile_size=256 if lowvram else 512, overlap=64, temporal_size=16, temporal_overlap=4),
         "21": node("LTXVAudioVAEDecode", samples=["19", 1], audio_vae=["10", 0]),
         "22": node("CreateVideo", images=["20", 0], audio=["21", 0], fps=24),
-        "23": node("SaveVideo", video=["22", 0], filename_prefix="PicoAgent/ltx25", format={"format": "mp4", "codec": {"codec": "h264"}}),
+        # ComfyUI V3のDynamicComboはAPI上ではドット付きの平坦なキーで渡す。
+        "23": node("SaveVideo", video=["22", 0], filename_prefix="PicoAgent/ltx25", format="mp4", **{"format.codec": "h264", "format.codec.encoding": "auto"}),
     })
     if input_image:
         workflow["24"] = node("LoadImage", image="input.png")

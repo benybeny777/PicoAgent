@@ -50,6 +50,7 @@ description: PicoAgentのCargo依存、JavaScript・Python等のパッケージ�
 5. `generate.py --lowvram`の小さい固定条件で生成し、静的テスト、実ノード登録、実生成、画質、速度を別々に報告する。成功・失敗の双方で専用Comfyと子プロセスを回収する。未確認の機種、品質経路、クリーン導入は`docs/TASKS.md`へ残す。
 
 ## 毎月点検する
+
 1. CodexのScheduled taskでは毎月1日に、このリポジトリを分離worktreeで開き、`$audit-picoagent-dependencies all`を実行するよう登録する。
 2. 更新があれば目的別ブランチで修正、検証、PR、squash mergeまで行う。更新が無ければ変更を作らず、点検結果だけを報告する。
 3. Scheduled taskの実行にはCodexデスクトップアプリが起動中で、PCが稼働している必要がある。CLIだけで登録済みと主張せず、Scheduled画面に登録が見えることを確認する。

@@ -215,14 +215,16 @@ class WorkflowTests(unittest.TestCase):
         workflow = GEN.modern_workflow("krea-2-turbo-nvfp4", "猫", 1, 512, 512, 9, None, True)
         self.assertEqual(workflow["7"]["inputs"]["steps"], 8)
         self.assertEqual(workflow["6"]["inputs"]["width"], 512)
-        self.assertEqual(workflow["2"]["inputs"]["device"], "cpu")
+        self.assertEqual(workflow["2"]["inputs"]["device"], "default")
         self.assertEqual(workflow["8"]["class_type"], "VAEDecodeTiled")
 
     def test_LTX25は音声付き一段階生成でリンクが全て存在する(self):
         for reference in (None, Path("x.png")):
             workflow = GEN.modern_workflow("ltx-2.5-nvfp4", "猫", 1, 512, 320, 49, reference, True)
+            self.assertEqual(workflow["2"]["inputs"]["device"], "cpu")
             self.assertEqual(workflow["22"]["inputs"]["audio"], ["21", 0])
-            self.assertEqual(workflow["23"]["inputs"]["format"]["codec"]["codec"], "h264")
+            self.assertEqual(workflow["23"]["inputs"]["format"], "mp4")
+            self.assertEqual(workflow["23"]["inputs"]["format.codec"], "h264")
             self.assertNotIn("LatentUpscale", str(workflow))
             for node in workflow.values():
                 for value in node["inputs"].values():
