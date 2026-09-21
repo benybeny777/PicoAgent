@@ -521,8 +521,15 @@ fn replace_directory(stage: &Path, destination: &Path, id: &str) -> Result<()> {
         }
         return Err(error.into());
     }
+    // 新版はもう配置済み。旧版を消せないだけで失敗扱いにすると、使えるエンジンを捨てて
+    // Vulkan へ落ちるので成功として返す（残りは次回の `sweep_stale_engine_work_dirs` が消す）。
     if backup.exists() {
-        std::fs::remove_dir_all(backup)?;
+        if let Err(error) = std::fs::remove_dir_all(&backup) {
+            crate::log_paths::log_detached(&format!(
+                "入れ替え前の推論エンジンを削除できません（次回の起動時に消します）: {} ({error})",
+                backup.display()
+            ));
+        }
     }
     Ok(())
 }

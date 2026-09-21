@@ -1327,12 +1327,10 @@ async fn cleanup_stale_install_stages(app: &AppHandle) {
 }
 
 /// `replace_installed` の退避先名 `.backup-<id>-<pid>` から、別プロセスのものだけを読み取る。
+/// id は管理対象の追加機能（と共通Python）に限り、知らない名前のフォルダには触らない。
 fn stale_backup(name: &str, current_pid: &str) -> Option<(String, u32)> {
     let (id, pid) = name.strip_prefix(".backup-")?.rsplit_once('-')?;
-    if pid == current_pid
-        || id.is_empty()
-        || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    {
+    if pid == current_pid || (id != "python" && definitions(id).is_none()) {
         return None;
     }
     Some((id.to_string(), pid.parse().ok()?))
