@@ -270,7 +270,7 @@ test("履歴検索のEscapeは画面を閉じず検索だけを解除しIME取�
 });
 
 test("最初の添付のみの送信でも検索結果なしではなく考え中を表示する", () => {
-  const node = () => ({ children: [], append(...children) { this.children.push(...children); }, replaceChildren() { this.children = []; } });
+  const node = () => ({ children: [], append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = [...children]; } });
   const historyLog = node();
   Object.assign(historyLog, { scrollHeight: 100, scrollTop: 0, clientHeight: 100 });
   const context = vm.createContext({
@@ -279,7 +279,7 @@ test("最初の添付のみの送信でも検索結果なしではなく考え�
     conversationHistory: [], historyThinking: true, historyQuery: "", historyThinkingText: "考え中",
     characterManifest: { name: "むぎ" }, createTypingIndicator: label => ({ label }),
   });
-  vm.runInContext(between("function renderHistoryRows()", "function scheduleAppQuit()"), context);
+  vm.runInContext(between("let renderedHistory =", "function scheduleAppQuit()"), context);
   context.renderHistoryRows();
   assert.equal(historyLog.children.length, 1);
   assert.equal(historyLog.children[0].className, "history-item assistant history-thinking");

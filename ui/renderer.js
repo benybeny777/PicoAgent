@@ -4596,6 +4596,10 @@ composer.addEventListener("submit", async event => {
         if (currentLayout === "stream") return;
         if (!streamRenderFrame) {
           const paintStream = () => {
+            if (!busy || requestRevision !== conversationRevision) {
+              streamRenderFrame = null;
+              return;
+            }
             // 1回の描画は本文全体を組み直すので、文章が伸びるほど重くなる。トークンが
             // 毎フレーム届くローカルAIでは、長い回答ほど入力やアニメが引っかかっていた。
             // 読める速さは保ったまま、最短間隔をあけて描き直す。
@@ -4604,7 +4608,6 @@ composer.addEventListener("submit", async event => {
               return;
             }
             streamRenderFrame = null;
-            if (!busy || requestRevision !== conversationRevision) return;
             lastStreamRenderAt = performance.now();
             // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
             const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
