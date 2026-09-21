@@ -3065,6 +3065,12 @@ async function render() {
   apiSec.append(field("PICOAGENT_API_ENABLED", "ローカルAPIを有効にする（127.0.0.1 のみ。変更は再起動後に反映）", "checkbox", v.PICOAGENT_API_ENABLED === true));
   apiSec.append(field("PICOAGENT_API_PORT", "APIポート", "text", v.PICOAGENT_API_PORT ?? "", "11500"));
   apiSec.append(field("PICOAGENT_API_KEY", "APIキー（空なら認証なし。Authorization: Bearer で送る）", "password", v.PICOAGENT_API_KEY ?? ""));
+  // キーなしで有効にすると、このPCで動くどのプログラムからでもエージェントを呼べる。
+  // ブラウザからの横断呼び出しは Origin 検査で塞いであるが、ローカルのプログラムは塞げない。
+  apiSec.append(el("p", {
+    className: "hint",
+    textContent: "APIキーを空のまま有効にすると、このPCで動くどのプログラムからでもエージェント（ファイル操作やコマンド実行を含む）を呼び出せます。有効にするときはキーを設定してください。",
+  }));
   // MCP: 外部 MCP サーバのツールをエージェントから使えるようにする（stdio）。
   const mcpSec = section("MCP（外部ツール連携）");
   mcpSec.append(field(

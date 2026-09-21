@@ -94,6 +94,16 @@ test("画面が購読するイベントは橋渡しの一覧に載っている",
   assert.match(bridge, /if \(!PET_EVENT_CHANNELS\.includes\(channel\)\) \{[\s\S]*?logBridgeError\(/);
 });
 
+test("キーなしのローカルAPIは危険を画面で伝える", async () => {
+  // 127.0.0.1 に閉じていても、キーが空なら同じPCのどのプログラムからでも
+  // エージェント（ファイル操作・コマンド実行を含む）を呼べる。設定画面と設定一覧の
+  // 両方で同じことを伝える（片方だけ直す取りこぼしを防ぐ）。
+  const settings = await readFile(new URL("settings.js", uiDir), "utf8");
+  assert.match(settings, /APIキーを空のまま有効にすると、このPCで動くどのプログラムからでもエージェント/);
+  const doc = await readFile(new URL("../../docs/SETTINGS.md", import.meta.url), "utf8");
+  assert.match(doc, /空のまま有効にすると、同じPCで動くどのプログラムからでもエージェント/);
+});
+
 test("画面のHTMLへ版を手書きしない", () => {
   // 配信用ビルドの `stamp_asset_versions()` が内容ハッシュの `?v=` を打つ。
   // 元のHTMLに書いた版は製品へ届かず、更新したつもりで効かない指定が残る。
