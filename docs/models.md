@@ -7,15 +7,28 @@ PicoAgentはモデルを再配布せず、利用者が追加機能を選んだ�
 | 画像編集・キャラ補完 | Qwen-Image-Edit-2511 BF16 | キャラ作成基盤約77GBの内数 | Apache-2.0。入力画像を保った局所編集に使い、純粋なテキスト画像生成とは分ける |
 | 標準動画 | Wan 2.2 TI2V 5B FP16 | 約18.1GB | Apache-2.0。ComfyUI公式が8GB VRAM向けと案内し、テキスト／画像から動画を生成できる |
 | 軽量LTX動画 | LTX-Video 0.9.8 2B Distilled FP8 | 約14.3GB | LTX-Video Open Weights License。低VRAM用途の旧世代候補。公式は13B distilledより品質低下と説明するが、8GBでの実動作・画質は未検証 |
-| 高VRAM候補（未対応） | LTX 2.5 22B | 取得しない | 最新世代。公式Desktopのローカル条件は16GB以上、モデル本体のシステム要件は32GB以上。経路ごとの条件が異なり、8GB環境では既定取得しない |
+| 文章から画像（任意導入） | Krea 2 Turbo NVFP4 | 約13.2GB | Krea 2 Community License。Windows x64・NVIDIA演算能力12.0以上・VRAM 8GB以上・RAM 32GB以上で評価する。編集はQwenを使う |
+| 音声付き動画（任意導入） | LTX 2.5 22B Distilled NVFP4 | 約35.9GB | LTX 2.x Community License。Kreaと同じ評価条件。INT8 Gemma 4、Conv VAE、1段階8ステップ。公式DesktopやBF16本体の必要量とは別経路 |
 
-2026-09-11に公式一次資料を確認した。LTX 0.9.8は8GB環境で評価する候補であり、8GB動作保証ではない。Wanとの同条件画質比較も未実施。現在の管理ツールの画像モデルはQwen Image Edit 2511だけで、参照画像なしで実行して文章からの画像生成にも使う（専用のQwen-Image等との画質比較は未実施。2026-09-13にRTX 5060 Laptop 8GB・RAM 34GB・ローカルAI常駐の条件で512×512・20ステップの生成に約9分）。専用のtext-to-imageモデルとLTX 2.3／最新2.5は未対応である。旧モデルの導入でこれらを代替完了と扱わない。LTX 2.5の低メモリ経路まで不可能と断定せず、対応GPU・固定ワークフロー・ライセンス条件を確認できる環境で別途評価する。
+2026-09-21に新モデルの公式配布情報を確認した。新しいNVFP4経路も8GB動作保証ではなく、速度・画質・長時間安定性の受入は別途必要である。Qwenは参照画像なしの生成も維持する（2026-09-13のRTX 5060 Laptop 8GB・RAM 34GBで512×512・20ステップは約9分）。旧LTXとWanの同条件画質比較も未実施。LTX 2.3は追加しない。
 
-固定URL、リビジョン、SHA-256、サイズの実行正本は`character-maker/sidecar/media/setup_models.py`と`character-maker/installer/setup-runtime-models.py`に置く。ライセンスや配布内容は更新時に公式モデルカードを再確認する。
+固定URL、リビジョン、SHA-256、サイズの実行正本は`character-maker/sidecar/media/setup_models.py`、同じ場所の`model_catalog.py`、`character-maker/installer/setup-runtime-models.py`に置く。ライセンスや配布内容は更新時に公式モデルカードを再確認する。
+
+## 新しいNVFP4経路の導入条件と制限
+
+設定の追加機能でモデルごとに提供元リンクを読み、本人が同意欄を選んだ場合だけ取得する。起動、ビルド、通常の生成要求では取得しない。利用条件の確認版は2026-09-21。Kreaは関連会社を含む年間売上100万米ドル未満、LTXは1,000万米ドル未満がコミュニティ版の商用利用の目安であり、該当額以上は提供元の別契約条件を確認する。金額だけで全条件を満たすわけではない。モデル・派生モデルの提供には元ライセンス、必要な告知、受領者への条件提示が必要であり、生成物の扱いとは区別する。生成物にも用途・商用利用・権利などの条件がある。生成前の入力と公開前の出力を人が確認し、モデルの安全策を無効化しない。生成物を無人で外部配信する用途はこの確認経路の対象外とする。
+
+Hugging Face側の条件同意はPicoAgentの同意とは別である。認証が必要な場合は同意した本人のアカウントで`hf auth login`を実行する。標準保存先、`HF_HOME`、`HF_TOKEN_PATH`、`HF_TOKEN`を取得時だけ参照し、秘密値はログやコマンド引数に出さず、別ホストへの転送時にも渡さない。認証不足はモデルとランタイムの大容量取得前に停止する。
+
+新経路は共通Python 3.12本体を再利用し、`bundled/media-runtime/venv`とComfyUI 0.37.0を分離する。既存ComfyUI 0.34.0・Qwen・Wan・旧LTXを上書きしない。専用環境はPyTorch 2.11 CUDA 13で、固定依存は`sidecar/requirements-media.lock`で管理する。現段階では既存管理PythonがあるWindows x64だけが導入対象であり、クリーン環境のPython初回導入、Linux、macOS、AMDへのNVFP4対応は未完了である。未対応環境向けに代替の大容量モデルを取得しない。
+
+VRAM 16GB未満では`--lowvram --reserve-vram 1 --cache-none`とVAEのタイル復号を使う。Kreaの4Bテキスト処理はComfyのGPU自動管理に任せ、LTXの大きい12BだけCPUへ配置する。CPU退避はVRAMを減らす代わりに転送・CPU計算で遅くなる場合がある。LTXは軽いConv VAEを使い、公式の2段階高解像度化と重いDiffVAEは省くため、顔・文字・細部の画質が劣る可能性がある。補間による見かけの拡大は行わず、参照画像が生成寸法より小さい場合も拒否する。高品質構成まで検証済みとは扱わない。
+
+2026-09-21のRTX 5060 Laptop 8GB・RAM約34GBでは、Krea 512×512・8ステップ・同じプロンプトとシードの単発生成が成功した。テキストCPU配置の初回は起動込み334秒、GPU自動管理の次回は47秒で、両方の猫画像を目視確認した。コールド起動・キャッシュ・他処理の条件が揃っていないため、倍率や一般的な速度保証には使わない。LTXは512×320・49フレーム・約2秒をCPUテキスト配置で起動込み378秒で生成した。静かな鳥の声を指定した猫動画の音声は非常に小さかったが、GPUテキスト配置を試した別プロンプトのベル動画は十分な音量で生成された。条件が異なるため配置の優劣や音声品質の合格までは判断せず、LTXの既定はCPU配置を維持する。連続生成、他GPU、GUI経由の受入は別途必要である。
 
 ## GPUバックエンドとモデルの関係
 
-モデル重みとComfyUIのworkflowはCUDA専用品ではない。上表のモデルはNVIDIA（CUDA）、AMD（ROCm）、Apple Silicon（MPS）で**同じものを共有**し、GPU別に同じモデルを二重取得しない。GPUごとに違うのは実行ランタイム（PyTorchのビルド）だけで、判定と導入は`src-tauri/src/generation_backend.rs`が行う。
+既存のQwen・Wan・LTX 0.9.8はNVIDIA（CUDA）、AMD（ROCm）、Apple Silicon（MPS）で同じモデルを共有し、GPU別に二重取得しない。新しいNVFP4構成はこの共有対象ではなく、Windows x64のNVIDIA Blackwell以降に限定する。判定と導入は`src-tauri/src/generation_backend.rs`が行う。
 
 | バックエンド | 対象 | PyTorch | 依存ロック |
 |---|---|---|---|
@@ -64,6 +77,8 @@ ComfyUIを使う画像・動画・キャラクター生成は、専用VRAM量で
 - [Wan 2.2公式リポジトリ](https://github.com/Wan-Video/Wan2.2)
 - [LTX-Video公式モデル](https://huggingface.co/Lightricks/LTX-Video)
 - [LTX 2.5公式モデル](https://huggingface.co/Lightricks/LTX-2.5)
+- [Krea 2 Turbo公式モデル・利用条件](https://huggingface.co/krea/Krea-2-Turbo)
+- [ComfyUI公式Krea 2量子化モデル](https://huggingface.co/Comfy-Org/Krea-2)
 - [LTX Desktop公式の実行条件](https://github.com/Lightricks/LTX-Desktop)
 - [LTX 2.5モデル本体のシステム要件](https://docs.ltx.io/open-source-model/getting-started/system-requirements)
 - [LTX 2.xライセンス](https://github.com/Lightricks/LTX-2/blob/main/LICENSE.md)

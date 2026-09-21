@@ -19,12 +19,14 @@ use tauri::{AppHandle, Emitter, Manager};
 const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
-const COMPONENT_IDS: [&str; 7] = [
+const COMPONENT_IDS: [&str; 9] = [
     "aivis",
     "whisper",
     "character-maker",
     "video-wan",
     "video-ltx",
+    "image-krea2",
+    "video-ltx25",
     "office",
     "tools",
 ];
@@ -164,8 +166,18 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
         )),
         "video-ltx" => Some((
             "LTX軽量動画生成",
-            "8GB VRAM向けのLTX-Video 0.9.8 2B FP8です。最新LTX 2.5は公式基準16GB以上のため取得しません。FP8重みはAMD実機での可否が未確認です。",
+            "8GB VRAM向けのLTX-Video 0.9.8 2B FP8です。LTX 2.5 NVFP4は別の任意機能で提供します。FP8重みはAMD実機での可否が未確認です。",
             "約14.3GB（空き18GB以上が必要）",
+        )),
+        "image-krea2" => Some((
+            "Krea 2 Turbo画像生成（NVFP4）",
+            "Windows x64で文章から画像を生成します。Blackwell以降・専用VRAM 8GB以上・RAM 32GB以上が必要です。独自ライセンスへの本人の同意が必要です。RTX 5060 Laptop 8GBで単発生成を確認済み、連続実行は未検証です。",
+            "約13.2GB（実行環境と作業領域は別）",
+        )),
+        "video-ltx25" => Some((
+            "LTX 2.5動画生成（NVFP4）",
+            "Windows x64で文章または画像から短い動画を生成します。Blackwell以降・専用VRAM 8GB以上・RAM 32GB以上が必要です。提供元の利用条件への本人の同意が必要です。8GB実機で文章からの単発生成を確認済み、音声品質・画像入力・連続実行は検証中です。",
+            "約35.9GB（実行環境と作業領域は別）",
         )),
         "office" => Some((
             "Office変換",
@@ -366,7 +378,9 @@ pub(crate) fn generation_runtime_mismatch(app: &AppHandle) -> Option<String> {
 fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
     let manifest_name = match id {
         "aivis" => "engine_manifest.json",
-        "character-maker" | "video-wan" | "video-ltx" => "install.json",
+        "character-maker" | "video-wan" | "video-ltx" | "image-krea2" | "video-ltx25" => {
+            "install.json"
+        }
         _ => return Ok(None),
     };
     let path = root.join(manifest_name);
@@ -389,6 +403,8 @@ fn managed_media_ready(id: &str, root: &Path) -> bool {
     let expected_model = match id {
         "video-wan" => "wan-2.2-5b",
         "video-ltx" => "ltx-0.9.8-2b-fp8",
+        "image-krea2" => "krea-2-turbo-nvfp4",
+        "video-ltx25" => "ltx-2.5-nvfp4",
         _ => return false,
     };
     let marker = root.join("install.json");
@@ -414,6 +430,28 @@ fn managed_media_ready(id: &str, root: &Path) -> bool {
                 .all(|part| matches!(part, Component::Normal(_)))
                 && root.join(relative).is_file()
         })
+}
+
+/// モデルだけを導入済みと誤認しない。専用環境の固定版と実行入口も必要とする。
+fn modern_media_runtime_ready(root: &Path) -> bool {
+    if !python_executable(&root.join("venv")).is_file() || !root.join("ComfyUI/main.py").is_file() {
+        return false;
+    }
+    let Ok(text) = std::fs::read_to_string(root.join("install.json")) else {
+        return false;
+    };
+    let Ok(marker) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    let lock_hash = hex::encode(Sha256::digest(include_bytes!(
+        "../../character-maker/sidecar/requirements-media.lock"
+    )));
+    marker.get("version").and_then(serde_json::Value::as_str) == Some("2026-09-21")
+        && marker
+            .get("comfyCommit")
+            .and_then(serde_json::Value::as_str)
+            == Some("73c9bad4d21e7addbe1d13bc92eee0f1431b017d")
+        && marker.get("lockSha256").and_then(serde_json::Value::as_str) == Some(lock_hash.as_str())
 }
 
 fn numeric_version(value: &str) -> Option<Vec<u64>> {
@@ -483,8 +521,13 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                     && installed_root.join("install.json").is_file()
                     && python_executable(&shared_python_dir(app)).is_file()
                     && installed_root.join("ComfyUI/main.py").is_file()
-            } else if matches!(id, "video-wan" | "video-ltx") {
+            } else if matches!(
+                id,
+                "video-wan" | "video-ltx" | "image-krea2" | "video-ltx25"
+            ) {
                 managed_media_ready(id, &installed_root)
+                    && (!crate::generation_backend::is_nvfp4_component(id)
+                        || modern_media_runtime_ready(&installed_dir(app, "media-runtime")))
             } else {
                 installed_root.is_dir()
             };
@@ -555,7 +598,11 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                     "missing"
                 },
                 available: true,
-                removable: installed && info.install_mode == "managed",
+                // 専用runtimeが欠損していても、残った管理モデルの削除は許可する。
+                removable: (installed
+                    || (crate::generation_backend::is_nvfp4_component(id)
+                        && installed_root.is_dir()))
+                    && info.install_mode == "managed",
                 install_mode: info.install_mode,
                 installed_version,
                 target_version,
@@ -574,8 +621,10 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
     if id == "character-maker" {
         anyhow::ensure!(
             !installed_dir(app, "video-wan").is_dir()
-                && !installed_dir(app, "video-ltx").is_dir(),
-            "先にWanとLTXの動画モデルを削除してください。生成基盤だけを先に削除すると動画モデルが使えなくなります"
+                && !installed_dir(app, "video-ltx").is_dir()
+                && !installed_dir(app, "image-krea2").is_dir()
+                && !installed_dir(app, "video-ltx25").is_dir(),
+            "先に追加の画像・動画モデルを削除してください。共通Pythonを先に削除すると生成機能が使えなくなります"
         );
     }
     let info = manifest(app)?
@@ -638,9 +687,17 @@ fn emit_progress(
     }
 }
 
-pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentStatus>> {
+pub async fn install(
+    app: &AppHandle,
+    ids: &[String],
+    accepted_license_ids: &[String],
+) -> Result<Vec<ComponentStatus>> {
     let manifest = manifest(app)?;
     for id in ids {
+        anyhow::ensure!(
+            !crate::generation_backend::is_nvfp4_component(id) || accepted_license_ids.contains(id),
+            "{id}は提供元の利用条件を確認し、本人が同意してから導入してください。何も取得していません"
+        );
         anyhow::ensure!(
             COMPONENT_IDS.contains(&id.as_str()),
             "未知の追加機能です: {id}"
@@ -670,6 +727,13 @@ pub async fn install(app: &AppHandle, ids: &[String]) -> Result<Vec<ComponentSta
             }
             "video-ltx" => {
                 install_media_model(app, "video-ltx", "ltx-0.9.8-2b-fp8", 18_000_000_000).await?
+            }
+            "image-krea2" => {
+                install_media_model(app, "image-krea2", "krea-2-turbo-nvfp4", 18_000_000_000)
+                    .await?
+            }
+            "video-ltx25" => {
+                install_media_model(app, "video-ltx25", "ltx-2.5-nvfp4", 45_000_000_000).await?
             }
             _ => anyhow::bail!("{id} は自動導入の対象ではありません"),
         }
@@ -994,6 +1058,86 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     result
 }
 
+async fn install_modern_media_runtime(app: &AppHandle, id: &str, model: &str) -> Result<()> {
+    crate::generation_backend::validate_nvfp4_hardware()
+        .await
+        .map_err(anyhow::Error::msg)?;
+    anyhow::ensure!(
+        cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "NVFP4専用ランタイムはWindows x64専用です"
+    );
+    let python = python_executable(&shared_python_dir(app));
+    anyhow::ensure!(python.is_file(), "共通Pythonが未導入です。画像モデルは取得していません。既存キャラクター作成環境または開発用の共通Python導入が必要です");
+    let assets = character_maker_assets().context("生成資源がありません")?;
+    let cache = crate::log_paths::cache_dir(app).join("media-runtime-installer");
+    tokio::fs::create_dir_all(&cache).await?;
+    let model_root = installed_dir(app, id);
+    tokio::fs::create_dir_all(&model_root).await?;
+    // 利用条件・認証の不足で止まる場合、先に大容量の実行環境を取得しない。
+    run_component_command(
+        &python,
+        &[
+            &assets
+                .join("sidecar/media/setup_models.py")
+                .to_string_lossy(),
+            "--model",
+            model,
+            "--runtime",
+            &model_root.to_string_lossy(),
+            "--cache",
+            &cache.to_string_lossy(),
+            "--progress",
+            &cache.join("progress.json").to_string_lossy(),
+            "--accept-license",
+            "2026-09-21",
+            "--preflight-only",
+        ],
+    )
+    .await?;
+    let uv_asset = uv_asset().context("Python管理ツールが未対応です")?;
+    let archive = cache.join(uv_asset.cache_name);
+    download_to(
+        app,
+        crate::tools::http::client(),
+        DownloadSpec {
+            id,
+            url: uv_asset.url,
+            destination: &archive,
+            expected_size: uv_asset.size,
+            max_size: 30_000_000,
+            message: "専用生成環境の管理ツールを取得中…",
+        },
+    )
+    .await?;
+    verify_sha256(&archive, uv_asset.sha256)?;
+    let uv_dir = cache.join("uv");
+    cleanup_dir(app, "Python管理ツールの展開途中", &uv_dir).await;
+    let extract_archive = archive.clone();
+    let extract_root = uv_dir.clone();
+    tokio::task::spawn_blocking(move || extract_zip(&extract_archive, &extract_root)).await??;
+    let uv = find_named_file(&uv_dir, uv_asset.executable, 0)
+        .context("Python管理ツールが見つかりません")?;
+    run_component_command(
+        &python,
+        &[
+            &assets
+                .join("sidecar/media/setup_runtime.py")
+                .to_string_lossy(),
+            "--runtime",
+            &installed_dir(app, "media-runtime").to_string_lossy(),
+            "--cache",
+            &cache.join("runtime").to_string_lossy(),
+            "--uv",
+            &uv.to_string_lossy(),
+            "--accept-license",
+            "2026-09-21",
+        ],
+    )
+    .await?;
+    cleanup_dir(app, "専用生成環境の取得キャッシュ", &cache).await;
+    Ok(())
+}
+
 async fn install_media_model(
     app: &AppHandle,
     id: &'static str,
@@ -1004,17 +1148,32 @@ async fn install_media_model(
         generation_platform_supported(),
         "ローカル動画生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
-    let python = python_executable(&shared_python_dir(app));
+    let nvfp4 = crate::generation_backend::is_nvfp4_component(id);
+    if nvfp4 {
+        install_modern_media_runtime(app, id, model).await?;
+    }
+    let runtime = installed_dir(
+        app,
+        if nvfp4 {
+            "media-runtime"
+        } else {
+            "character-maker"
+        },
+    );
+    let python = if nvfp4 {
+        python_executable(&runtime.join("venv"))
+    } else {
+        python_executable(&shared_python_dir(app))
+    };
     anyhow::ensure!(
-        installed_dir(app, "character-maker")
-            .join("ComfyUI/main.py")
-            .is_file()
-            && python.is_file(),
-        "先に「画像編集・キャラクター作成基盤」を導入してください。動画モデルはまだ取得していません"
+        runtime.join("ComfyUI/main.py").is_file() && python.is_file(),
+        "対応する生成ランタイムと共通Pythonを先に導入してください。モデルはまだ取得していません"
     );
     // 導入済みランタイムが今のGPU向けでないまま、動画モデルだけを取得させない。
-    if let Some(reason) = generation_runtime_mismatch(app) {
-        anyhow::bail!("{reason}動画モデルは取得していません。");
+    if !nvfp4 {
+        if let Some(reason) = generation_runtime_mismatch(app) {
+            anyhow::bail!("{reason}動画モデルは取得していません。");
+        }
     }
     // 動画モデルも、取得開始前にGPUを判定する。非対応GPUでは何も取得しない。
     let selected = match generation_selection().await {
@@ -1064,24 +1223,24 @@ async fn install_media_model(
     let assets = character_maker_assets().context("画像・動画生成資源がありません")?;
     let script = assets.join("sidecar/media/setup_models.py");
     let download_cache = cache.join("download");
-    let result = run_component_command_with_progress(
-        app,
-        id,
-        &python,
-        &[
-            &script.to_string_lossy(),
-            "--model",
-            model,
-            "--runtime",
-            &stage.to_string_lossy(),
-            "--cache",
-            &download_cache.to_string_lossy(),
-            "--progress",
-            &progress.to_string_lossy(),
-        ],
-        &progress,
-    )
-    .await;
+    let mut arguments = vec![
+        script.to_string_lossy().into_owned(),
+        "--model".into(),
+        model.into(),
+        "--runtime".into(),
+        stage.to_string_lossy().into_owned(),
+        "--cache".into(),
+        download_cache.to_string_lossy().into_owned(),
+        "--progress".into(),
+        progress.to_string_lossy().into_owned(),
+    ];
+    if nvfp4 {
+        // 呼出元installで本人の同意を確認したモデルだけ、取得スクリプトへ渡す。
+        arguments.push("--accept-license".into());
+        arguments.push("2026-09-21".into());
+    }
+    let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    let result = run_component_command_with_progress(app, id, &python, &arguments, &progress).await;
     if let Err(error) = result {
         cleanup_dir(app, "動画モデル導入途中フォルダ", &stage).await;
         return Err(error);
@@ -1109,6 +1268,9 @@ fn stale_install_pid(name: &str, current_pid: &str) -> Option<u32> {
         ".installing-whisper-",
         ".installing-video-wan-",
         ".installing-video-ltx-",
+        ".installing-image-krea2-",
+        ".installing-video-ltx25-",
+        ".installing-media-runtime-",
     ]
     .iter()
     .find_map(|prefix| name.strip_prefix(prefix))
@@ -1158,6 +1320,17 @@ fn configure_component_environment(
     command: &mut tokio::process::Command,
     program: &Path,
 ) -> Result<()> {
+    // ホームを管理領域へ隔離しても、本人のHF CLI認証ファイルの場所は維持する。
+    // 秘密値は読み出さず、標準クライアントが参照するパスだけを子へ引き継ぐ。
+    if std::env::var_os("HF_TOKEN_PATH").is_none() {
+        let hf_home = std::env::var_os("HF_HOME").map(PathBuf::from).or_else(|| {
+            std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .map(|home| PathBuf::from(home).join(".cache/huggingface"))
+        });
+        if let Some(home) = hf_home {
+            command.env("HF_TOKEN_PATH", home.join("token"));
+        }
+    }
     let root = program
         .parent()
         .unwrap_or(Path::new("."))
@@ -1800,6 +1973,34 @@ mod tests {
             super::compare_versions("wan-2.2-5b", "wan-2.2-5b"),
             Some(std::cmp::Ordering::Equal)
         );
+    }
+
+    #[test]
+    fn 新生成環境は固定マーカーとpythonとcomfyの全てを必須にする() {
+        let root = test_path("modern-media-runtime");
+        let python = super::python_executable(&root.join("venv"));
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(root.join("ComfyUI")).unwrap();
+        let marker = serde_json::json!({
+            "version": "2026-09-21",
+            "comfyCommit": "73c9bad4d21e7addbe1d13bc92eee0f1431b017d",
+            "lockSha256": hex::encode(Sha256::digest(include_bytes!(
+                "../../character-maker/sidecar/requirements-media.lock"
+            ))),
+        })
+        .to_string();
+        std::fs::write(root.join("install.json"), &marker).unwrap();
+        assert!(!super::modern_media_runtime_ready(&root));
+        std::fs::write(&python, b"python").unwrap();
+        assert!(!super::modern_media_runtime_ready(&root));
+        std::fs::write(root.join("ComfyUI/main.py"), b"main").unwrap();
+        assert!(super::modern_media_runtime_ready(&root));
+        std::fs::write(root.join("install.json"), b"{}").unwrap();
+        assert!(!super::modern_media_runtime_ready(&root));
+        std::fs::write(root.join("install.json"), &marker).unwrap();
+        std::fs::remove_file(&python).unwrap();
+        assert!(!super::modern_media_runtime_ready(&root));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

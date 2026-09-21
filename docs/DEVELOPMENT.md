@@ -15,7 +15,9 @@ uv pip compile sidecar/requirements-comfy-rocm.in \
 
 導入直後は`sidecar/verify_backend.py`でimport、`torch.cuda.is_available()`、`torch.version.hip`／`cuda`、デバイス名、最小テンソル演算を実GPUで確認し、通った場合だけモデル取得へ進む。導入済みのGPU種別・バックエンド・PyTorch版は`install.json`の`runtime`へ記録し、GPU交換後は再導入させる。ComfyUIは専用VRAMが十進16GB未満・共有メモリ・VRAM不明のとき`--lowvram`で起動し、通常起動のGPUメモリ不足だけ同条件で1回だけ再実行する（サイドカーは終了コード3でGPUメモリ不足を返し、再試行の可否はRust側が決める）。仮想環境が参照する基準Pythonも同じ管理対象世代の`runtime/`へ含め、起動時に削除する取得キャッシュへ依存させない。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
 
-画像・動画生成は同じ共有PythonとComfyUI本体を再利用し、モデルだけを`bundled/video-wan`または`bundled/video-ltx`へ分離する。追加機能の選択前には取得せず、固定サイズ・SHA-256検査に通ったstagingだけを公開する。生成は`character-maker/sidecar/media/generate.py`が専用ポートと共通GPUロックを所有し、完成品を`generated-media/`へ移してからComfyUIの子孫プロセスと一時領域を回収する。失敗時のモデル取得キャッシュは再開用に残せるが、次回アプリ起動時には全削除する。
+既存の画像・動画生成は同じ共有PythonとComfyUI本体を再利用し、モデルだけを`bundled/video-wan`または`bundled/video-ltx`へ分離する。Krea 2／LTX 2.5 NVFP4はWindows x64向けに共通Python本体だけを再利用し、`media/setup_runtime.py`で`bundled/media-runtime/venv`とComfyUI 0.37.0を分離する。CUDA 13用PyTorch 2.11と依存の固定正本は`sidecar/requirements-media.in/.lock`で、更新時はWindows x64・Python 3.12指定でハッシュ付きlockを再生成する。CUDA 12.8では新Comfyの高速バックエンドが無効になるため、新経路へ流用しない。旧環境のlockは変更しない。
+
+追加機能の選択・本人の利用条件への同意・GPU/RAM/空き容量/モデル提供元への認証確認が済む前には取得しない。固定サイズ・SHA-256検査に通ったstagingだけを公開する。新モデルの固定資産は`media/model_catalog.py`、取得と再開は`media/setup_models.py`を使う。生成は`media/generate.py`が専用ポートと共通GPUロックを所有し、完成品を`generated-media/`へ移してからComfyUIの子孫プロセスと一時領域を回収する。失敗時のモデル取得キャッシュは再開用に残せるが、次回アプリ起動時には全削除する。新しい導入・ワークフローのCPU回帰は`python -m unittest discover -s character-maker/sidecar/media -p 'test*.py'`を使い、実GPU生成と混同しない。
 
 キャラ作成の補完工程は、リポジトリ直下で `python -m unittest discover -s character-maker/sidecar/completion -p 'test*.py'` を実行してCPU回帰を確認する。NumPy、Pillow、psutilなど導入済みの管理Pythonを使い、この検査のためにGPUモデルを取得しない。ComfyUI通信は `character-maker/sidecar/comfy_client.py` を共通入口とし、旧expression生成スクリプトや移管元Repoへ依存しない。テストの一時出力はリポジトリ直下の `temp/` に置く。CPU合格はGPU生成や画質の合格を意味しない。
 
@@ -89,6 +91,10 @@ graph LR
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
+| `<SBV2>\.venv\Scripts\python.exe scripts/select-voice-training-clips.py <quiet-sections\|measure\|select>` | 許諾済み音声からStyle-Bert-VITS2の学習断片を検査し、BGM・定常ノイズ・他人の声・破裂音・文字起こし不一致を除いた別名データセットを作る。工程は`rebuild-picoagent-character`スキル |
+| `<SBV2>\.venv\Scripts\python.exe scripts/clean-voice-training-pauses.py --source <元> --output <新>` | 選別済み学習データの発話の合間だけをsilero-vadで判定して減衰させた別名データセットを作り、合間の音量の前後値を`pause-cleaning.json`へ残す。合成時の間に出るノイズの原因対策。工程は`rebuild-picoagent-character`スキル |
+| `<SBV2>\.venv\Scripts\python.exe scripts/enhance-voice-training-chunks.py <pack\|deepfilter\|unpack>` | 選別済み学習データを9MB以下のWAVへ連結し、ハッシュ固定したDeepFilterNet 0.5.6でローカル一括補正してから、サンプルレート・長さ・モノラルを照合して元の断片へ切り戻し、-23LUFSへそろえた別名データセットを作る |
+| `<SBV2>\.venv\Scripts\python.exe scripts/check-synthesized-voice.py <sbv2\|aivis\|files>` | 学習済み音声モデルの合成結果を、クリップ・定常ノイズ・電子音・境界ノイズ・発音・話者類似度で検査する。`aivis`はPicoAgentと同じ`volumeScale`上限0.72で合成する |
 | `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
 | `cargo xtask character-quality` | 通常2Dの制作正本を画素検査する。独自リグ・Live2Dの画質は対象外。`--strict`は既知を含む全指摘を不合格、`--update-baseline`は既存指摘の削減のみ許可 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
@@ -99,6 +105,8 @@ graph LR
 > `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
 
 LocalVTuberStudio形式の実画面検査は、まずリポジトリ直下を`uv run python -m http.server 8776 --bind 0.0.0.0 --directory .`で配信する。Codex DesktopのPlaywrightは製品依存へ追加せず、`load_workspace_dependencies`で取得した現行パスを指定する。2026年9月7日時点では次の形だが、存在しない場合は固定値を推測せず再取得する。
+
+WindowsのBATは、`cmd.exe`のコードページ差で日本語を命令として誤解しないようASCIIだけの入口とし、利用者向け表示と実処理をUTF-8のPowerShellスクリプトへ置く。通常起動は`PicoAgentを起動.bat`から`scripts/start-picoagent.ps1`を呼ぶ。キャラクター確認は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。「独自2.5D」は確認用HTTPサーバーと比較画面をまとめて起動し、終了操作で自分が起動したサーバーを回収する。MMDの2体と、実体から列挙する登録済みLive2Dは`PICO_PREVIEW_CHARACTER`をその起動中だけ指定して`cargo xtask dev`を実行するため、保存済みのキャラ選択を書き換えない。MMDとLive2Dはブラウザ用の代替描画ではなく、製品CSPとWebViewを通る実アプリで確認する。
 
 ```powershell
 $env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'
@@ -213,7 +221,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **同梱推論エンジン（llama-server）**
 
-- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux Vulkan x64の資産名とSHA-256をコードで照合します。WindowsのNVIDIA CUDA 13.3版、AMD ROCm 7.14版、Intel SYCL版は対応GPUを検出した場合だけ公式Releaseから追加取得し、固定サイズ・SHA-256・`--list-devices`の実認識をすべて確認した後に使います。取得済み配置もマニフェストのタグ・方式・資産名・SHA-256が一致する場合だけ再利用します
+- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux Vulkan x64の資産名とSHA-256をコードで照合します。WindowsのNVIDIA CUDA 13.3版、AMD ROCm 7.14版、Intel SYCL版は対応GPUを検出した場合だけ公式Releaseから追加取得し、固定サイズ・SHA-256・`--list-devices`の実認識をすべて確認した後に使います。取得済み配置もマニフェストのタグ・方式・資産名・SHA-256が一致する場合だけ再利用します。3方式の取得・検証・入れ替えは`engine_backend.rs`の`GPU_BACKENDS`表と`ensure_gpu_engine()`に1本化してあり、方式を足すときは表へ1行足します
 - 実行ファイルは配布物へ同梱しますが、モデル GGUF（数 GB）は含めず、初回起動時に `%APPDATA%\PicoAgent\bundled\models\` へ取得します
 - 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します
 

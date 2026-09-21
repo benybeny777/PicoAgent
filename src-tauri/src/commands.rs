@@ -1048,21 +1048,23 @@ pub async fn settings_components_install(
     app: AppHandle,
     ids: Vec<String>,
     enable_tts: Option<bool>,
+    accepted_license_ids: Option<Vec<String>>,
     state: State<'_, AppState>,
     maker: State<'_, crate::character_maker::CharacterMakerState>,
 ) -> Result<Value, String> {
     if ids.iter().any(|id| id == "character-maker") && maker.is_running() {
         return Err("キャラクター生成中は管理ランタイムを更新できません".into());
     }
-    let installed = crate::components::install(&app, &ids)
-        .await
-        .map_err(|error| {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("追加機能の導入に失敗しました: {error:#}"),
-            );
-            format!("{error:#}")
-        })?;
+    let installed =
+        crate::components::install(&app, &ids, &accepted_license_ids.unwrap_or_default())
+            .await
+            .map_err(|error| {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("追加機能の導入に失敗しました: {error:#}"),
+                );
+                format!("{error:#}")
+            })?;
     if enable_tts_after_component_install(&ids, enable_tts) {
         let mut patch = Map::new();
         patch.insert("PICOAGENT_TTS_ENABLED".to_string(), json!(true));
@@ -2723,10 +2725,11 @@ pub async fn pet_speak(
             format!("HTTP {}", query.status()),
         ));
     }
-    let audio_query: Value = query
+    let mut audio_query: Value = query
         .json()
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声クエリを読めませんでした", error))?;
+    limit_aivis_volume(&mut audio_query);
     let synthesis_url = format!("{endpoint}/synthesis");
     let wav = client
         .post(&synthesis_url)
@@ -2753,6 +2756,22 @@ pub async fn pet_speak(
         "audio": bytes.to_vec(),
         "lipSync": lip_sync
     }))
+}
+
+/// Aivisのモデルによっては既定出力が0dBへ張り付き、クリップ由来のざらつきが出る。
+/// 再生側で音量を下げても失われた波形は戻らないため、合成前に約3dBの余裕を確保する。
+fn limit_aivis_volume(query: &mut Value) {
+    const MAX_VOLUME_SCALE: f64 = 0.72;
+    let requested = query
+        .get("volumeScale")
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
+    if let Some(object) = query.as_object_mut() {
+        object.insert(
+            "volumeScale".to_string(),
+            json!(requested.clamp(0.0, MAX_VOLUME_SCALE)),
+        );
+    }
 }
 
 /// AivisのAudioQueryから、合成音声と同じ時間軸の日本語母音列を作る。
@@ -5133,10 +5152,10 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 mod tests {
     use super::{
         aivis_lip_sync_timeline, centered_window_position, compacted_conversation,
-        default_character_tts_voice, enable_tts_after_component_install, multi_ai_context,
-        parse_update_feed, preserve_unreadable_secrets, probe_with_timeout, replace_auto_summary,
-        resolved_judge_model, safe_wake_message, settings_tab, speech_text, stable_persona_prompt,
-        update_series_is_newer, update_status, validate_multi_ai_settings,
+        default_character_tts_voice, enable_tts_after_component_install, limit_aivis_volume,
+        multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
+        replace_auto_summary, resolved_judge_model, safe_wake_message, settings_tab, speech_text,
+        stable_persona_prompt, update_series_is_newer, update_status, validate_multi_ai_settings,
         verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
         MAX_UPDATE_FEED_BYTES,
     };
@@ -5175,6 +5194,25 @@ mod tests {
         assert!((start - 0.15).abs() < 1e-9);
         assert!((end - 0.35).abs() < 1e-9);
         assert_eq!(timeline[1]["form"], 0.95);
+    }
+
+    #[test]
+    fn aivisの合成音量はクリップ防止上限を超えない() {
+        let mut default_query = serde_json::json!({ "volumeScale": 1.0 });
+        limit_aivis_volume(&mut default_query);
+        assert_eq!(default_query["volumeScale"], 0.72);
+
+        let mut quiet_query = serde_json::json!({ "volumeScale": 0.5 });
+        limit_aivis_volume(&mut quiet_query);
+        assert_eq!(quiet_query["volumeScale"], 0.5);
+
+        let mut missing_query = serde_json::json!({});
+        limit_aivis_volume(&mut missing_query);
+        assert_eq!(missing_query["volumeScale"], 0.72);
+
+        let mut invalid_negative_query = serde_json::json!({ "volumeScale": -1.0 });
+        limit_aivis_volume(&mut invalid_negative_query);
+        assert_eq!(invalid_negative_query["volumeScale"], 0.0);
     }
 
     #[test]

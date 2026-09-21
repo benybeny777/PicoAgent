@@ -45,6 +45,7 @@ let modelLoadGeneration = 0;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
+let settingsSearchScheduler = null; // 検索の絞り込みを1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
@@ -109,6 +110,7 @@ replaceSettingsListener("navigate", "settings:navigate", tabId => {
 
 window.addEventListener("beforeunload", () => {
   dirtyStateScheduler?.cancel();
+  settingsSearchScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
 });
@@ -1248,6 +1250,18 @@ function buildComponentManager() {
           if (status.textContent === confirmationMessage) status.textContent = "";
         },
       }) : null;
+      const licensedModel = ["image-krea2", "video-ltx25"].includes(item.id);
+      let licenseAccepted = null;
+      let licenseConsent = null;
+      if (licensedModel) {
+        const consent = document.createElement("label");
+        licenseAccepted = document.createElement("input");
+        licenseAccepted.type = "checkbox";
+        consent.append(licenseAccepted, document.createTextNode(item.id === "image-krea2"
+          ? " 提供元の利用条件を読み、関連会社を含む年間売上100万米ドル未満、または別契約済みであることを本人が確認し、利用条件に同意します。生成前のプロンプトと公開前の成果物の内容・権利を本人が確認します。"
+          : " 提供元の利用条件を読み、年間売上1,000万米ドル以上の事業利用では別契約が必要なことを本人が確認し、利用条件に同意します。生成前のプロンプトと公開前の成果物の内容・権利を本人が確認します。"));
+        licenseConsent = consent;
+      }
       button.addEventListener("click", async () => {
         if (!managed) {
           const url = item.sources?.[0]?.url;
@@ -1256,6 +1270,10 @@ function buildComponentManager() {
           return;
         }
         if (actionConfirmation && !actionConfirmation.request()) return;
+        if (licensedModel && !licenseAccepted?.checked) {
+          status.textContent = "提供元リンクで利用条件を確認し、本人が同意欄を選んでください。Hugging Face側の同意・アクセス許可も別途必要な場合があります。";
+          return;
+        }
         setBusy(true);
         // 取得はバックエンドで走るので、この画面を閉じても止まらない。黙っていると
         // 「閉じれば止まる」と誤解され、数百MBの取得が知らないうちに続くことになる。
@@ -1265,7 +1283,7 @@ function buildComponentManager() {
           ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…${keepsRunning}`
           : `${item.label}を公式配布元から取得しています…${keepsRunning}`;
         try {
-          await window.picoagent.settings.installComponents([item.id]);
+          await window.picoagent.settings.installComponents([item.id], false, licensedModel ? [item.id] : []);
           const successMessage = item.updateAvailable
             ? `${item.label}を${item.targetVersion}へ更新しました。`
             : (item.newerThanTarget
@@ -1344,6 +1362,7 @@ function buildComponentManager() {
           versionText ? el("small", { textContent: versionText }) : null,
           item.versionError ? el("small", { className: "component-version-warning", textContent: item.versionError }) : null,
           sourceLinks,
+          licenseConsent,
         ].filter(Boolean)),
         el("span", { className: "component-badge", textContent: badgeText }),
         actions,
@@ -3115,6 +3134,12 @@ async function render() {
   apiSec.append(field("PICOAGENT_API_ENABLED", "ローカルAPIを有効にする（127.0.0.1 のみ。変更は再起動後に反映）", "checkbox", v.PICOAGENT_API_ENABLED === true));
   apiSec.append(field("PICOAGENT_API_PORT", "APIポート", "text", v.PICOAGENT_API_PORT ?? "", "11500"));
   apiSec.append(field("PICOAGENT_API_KEY", "APIキー（空なら認証なし。Authorization: Bearer で送る）", "password", v.PICOAGENT_API_KEY ?? ""));
+  // キーなしで有効にすると、このPCで動くどのプログラムからでもエージェントを呼べる。
+  // ブラウザからの横断呼び出しは Origin 検査で塞いであるが、ローカルのプログラムは塞げない。
+  apiSec.append(el("p", {
+    className: "hint",
+    textContent: "APIキーを空のまま有効にすると、このPCで動くどのプログラムからでもエージェント（ファイル操作やコマンド実行を含む）を呼び出せます。有効にするときはキーを設定してください。",
+  }));
   // MCP: 外部 MCP サーバのツールをエージェントから使えるようにする（stdio）。
   const mcpSec = section("MCP（外部ツール連携）");
   mcpSec.append(field(
@@ -4139,7 +4164,14 @@ form.addEventListener("click", event => {
   }
 });
 
-settingsSearch?.addEventListener("input", applySettingsSearch);
+// 検索は全設定項目の文面を走査するため、1打鍵ごとに走らせると入力が引っかかる。
+// 変更印の更新と同じく1フレーム1回へまとめる（購読も1本にする）。
+settingsSearchScheduler = window.PicoFrameScheduler.create(applySettingsSearch);
+settingsSearch?.addEventListener("input", () => {
+  // 消去ボタンの出し入れは見た目だけなので待たせない。
+  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
+  settingsSearchScheduler.schedule();
+});
 clearSettingsSearch?.addEventListener("click", () => {
   settingsSearch.value = "";
   clearSettingsSearch.hidden = true;
@@ -4154,9 +4186,6 @@ for (const shortcut of document.querySelectorAll("[data-settings-query]")) {
     settingsSearch.focus();
   });
 }
-settingsSearch?.addEventListener("input", () => {
-  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
-});
 document.addEventListener("keydown", event => {
   if (modalOpen) return; // 確認ダイアログ表示中は裏の保存・検索を動かさない
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {

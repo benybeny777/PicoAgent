@@ -88,14 +88,15 @@ fn list_cells(cells: &[Value]) -> String {
 }
 
 fn load(target: &SafePath) -> Result<(Value, Vec<Value>), String> {
-    let raw = permissions::fs::read_to_string(target)
-        .map_err(|error| format!("読み取りに失敗しました（{error}）: {}", target.display()))?;
-    if raw.len() > MAX_FILE_BYTES {
+    // 読む前に実寸で弾く（読んでから弾くと上限ぶんを超えて抱えてしまう）。
+    if let Err(size) = permissions::fs::ensure_within(target, MAX_FILE_BYTES) {
         return Err(format!(
-            "{MAX_FILE_BYTES} バイトを超えるノートブックは編集できません: {}",
+            "{MAX_FILE_BYTES} バイトを超えるノートブックは編集できません（{size} バイト）: {}",
             target.display()
         ));
     }
+    let raw = permissions::fs::read_to_string(target)
+        .map_err(|error| format!("読み取りに失敗しました（{error}）: {}", target.display()))?;
     let notebook: Value = serde_json::from_str(&raw).map_err(|error| {
         format!(
             "ノートブックとして読めません（{error}）: {}",

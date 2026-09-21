@@ -358,6 +358,18 @@ pub const GENERATION_MODELS: &[GenerationModel] = &[
         largest_weight_bytes: 9_787_841_024,
         mps: MpsSupport::Unverified,
     },
+    GenerationModel {
+        component: "image-krea2",
+        label: "Krea 2 Turbo画像生成（NVFP4）",
+        largest_weight_bytes: 7_673_668_448,
+        mps: MpsSupport::Unsupported("NVFP4専用構成のためCUDA演算能力12以上が必要"),
+    },
+    GenerationModel {
+        component: "video-ltx25",
+        label: "LTX 2.5動画生成（NVFP4）",
+        largest_weight_bytes: 18_721_548_408,
+        mps: MpsSupport::Unsupported("NVFP4専用構成のためCUDA演算能力12以上が必要"),
+    },
 ];
 
 /// 追加機能IDからモデル情報を引く。
@@ -366,6 +378,49 @@ pub fn model_for(component: &str) -> Option<GenerationModel> {
         .iter()
         .find(|model| model.component == component)
         .copied()
+}
+
+pub fn is_nvfp4_component(component: &str) -> bool {
+    matches!(component, "image-krea2" | "video-ltx25")
+}
+
+/// 名前から世代を推測せず、実GPUが報告する演算能力と専用メモリを確認する。
+fn nvfp4_hardware_supported(report: &str, ram: Option<u64>) -> bool {
+    ram.is_some_and(|bytes| bytes >= 32_000_000_000)
+        && !report.trim().is_empty()
+        && report.lines().all(|line| {
+            let fields: Vec<_> = line.split(',').map(str::trim).collect();
+            fields.len() == 2
+                && fields[0]
+                    .parse::<f32>()
+                    .is_ok_and(|capability| capability >= 12.0)
+                && fields[1]
+                    .parse::<u64>()
+                    .is_ok_and(|memory| memory.saturating_mul(1_048_576) >= 8_000_000_000)
+        })
+}
+
+pub async fn validate_nvfp4_hardware() -> Result<(), String> {
+    let mut command = crate::tools::process::command("nvidia-smi");
+    command.args([
+        "--query-gpu=compute_cap,memory.total",
+        "--format=csv,noheader,nounits",
+    ]);
+    let output = crate::tools::process::output(command, 10, "NVFP4対応GPU確認")
+        .await
+        .map_err(|_| {
+            "NVFP4対応GPUを確認できません。モデルは取得・実行していません。".to_string()
+        })?;
+    if output.status.success()
+        && nvfp4_hardware_supported(
+            &String::from_utf8_lossy(&output.stdout),
+            crate::engine::total_memory_bytes(),
+        )
+    {
+        Ok(())
+    } else {
+        Err("このNVFP4構成にはNVIDIA Blackwell以降（CUDA演算能力12以上）、専用VRAM 8GB以上、RAM 32GB以上が必要です。容量・演算能力不明の場合も取得・実行を停止します。".into())
+    }
 }
 
 /// そのモデルをこのGPUで取得・実行してよいか。使えない場合は日本語の理由を返す。
@@ -378,6 +433,13 @@ pub fn model_memory_shortage(
     device: &GpuDevice,
     total_ram_bytes: Option<u64>,
 ) -> Option<String> {
+    if is_nvfp4_component(model.component)
+        && (device.vendor != GpuVendor::Nvidia
+            || !matches!(device.memory, GpuMemory::Dedicated(bytes) if bytes >= 8_000_000_000)
+            || total_ram_bytes.is_none_or(|bytes| bytes < 32_000_000_000))
+    {
+        return Some("NVFP4構成はNVIDIA専用VRAM 8GB以上・RAM 32GB以上が必要です。情報不明の場合も取得しません。".into());
+    }
     if let MpsSupport::Unsupported(reason) = model.mps {
         if device.vendor == GpuVendor::Apple {
             return Some(format!(
@@ -566,6 +628,19 @@ impl InstalledRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nvfp4は演算能力と専用容量とramの全条件を必須にする() {
+        assert!(nvfp4_hardware_supported("12.0, 8151", Some(34_000_000_000)));
+        for report in ["8.9, 24576", "12.0, 4096", "N/A, 8151", "12.0, N/A", ""] {
+            assert!(!nvfp4_hardware_supported(report, Some(34_000_000_000)));
+        }
+        assert!(!nvfp4_hardware_supported("12.0, 8151", None));
+        assert!(!nvfp4_hardware_supported(
+            "12.0, 8151",
+            Some(16_000_000_000)
+        ));
+    }
 
     fn device(vendor: GpuVendor, name: &str, memory: GpuMemory) -> GpuDevice {
         GpuDevice {
@@ -842,7 +917,13 @@ mod tests {
 
     #[test]
     fn 全モデルに必要メモリとmps確認状態を持たせる() {
-        for component in ["character-maker", "video-wan", "video-ltx"] {
+        for component in [
+            "character-maker",
+            "video-wan",
+            "video-ltx",
+            "image-krea2",
+            "video-ltx25",
+        ] {
             let model =
                 model_for(component).unwrap_or_else(|| panic!("{component}のモデル情報が必要"));
             assert!(model.largest_weight_bytes > 0, "{component}");

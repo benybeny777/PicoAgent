@@ -14,6 +14,8 @@ enum Engine {
     QwenEdit,
     Wan,
     Ltx,
+    Krea2,
+    Ltx25,
 }
 
 impl Engine {
@@ -22,6 +24,8 @@ impl Engine {
             "qwen-edit" => Ok(Self::QwenEdit),
             "wan-2.2-5b" => Ok(Self::Wan),
             "ltx-0.9.8-2b-fp8" => Ok(Self::Ltx),
+            "krea-2-turbo-nvfp4" => Ok(Self::Krea2),
+            "ltx-2.5-nvfp4" => Ok(Self::Ltx25),
             other => Err(format!("エラー: 未対応の生成エンジンです: {other}")),
         }
     }
@@ -31,6 +35,8 @@ impl Engine {
             Self::QwenEdit => "qwen-edit",
             Self::Wan => "wan-2.2-5b",
             Self::Ltx => "ltx-0.9.8-2b-fp8",
+            Self::Krea2 => "krea-2-turbo-nvfp4",
+            Self::Ltx25 => "ltx-2.5-nvfp4",
         }
     }
 
@@ -39,11 +45,13 @@ impl Engine {
             Self::QwenEdit => "character-maker",
             Self::Wan => "video-wan",
             Self::Ltx => "video-ltx",
+            Self::Krea2 => "image-krea2",
+            Self::Ltx25 => "video-ltx25",
         }
     }
 
     fn extension(self) -> &'static str {
-        if self == Self::QwenEdit {
+        if matches!(self, Self::QwenEdit | Self::Krea2) {
             "png"
         } else {
             "mp4"
@@ -55,6 +63,8 @@ impl Engine {
             Self::QwenEdit => "画像編集・キャラクター作成基盤",
             Self::Wan => "Wan 2.2動画生成",
             Self::Ltx => "LTX軽量動画生成",
+            Self::Krea2 => "Krea 2 Turbo画像生成（NVFP4）",
+            Self::Ltx25 => "LTX 2.5動画生成（NVFP4）",
         }
     }
 }
@@ -194,11 +204,25 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
     let bundled = crate::components::runtime_root()
         .ok_or_else(|| "エラー: 追加機能の管理領域を取得できません。".to_string())?;
     // GPUを交換した後、導入時と違うバックエンドのPyTorchをそのまま使わない。
-    if let Some(reason) = crate::components::generation_runtime_mismatch_for_app() {
-        return Err(format!("エラー: {reason}"));
+    if !crate::generation_backend::is_nvfp4_component(engine.component()) {
+        if let Some(reason) = crate::components::generation_runtime_mismatch_for_app() {
+            return Err(format!("エラー: {reason}"));
+        }
     }
-    let python = crate::components::python_executable(&bundled.join("python"));
-    let comfy = bundled.join("character-maker/ComfyUI");
+    let python = crate::components::python_executable(&bundled.join(
+        if crate::generation_backend::is_nvfp4_component(engine.component()) {
+            "media-runtime/venv"
+        } else {
+            "python"
+        },
+    ));
+    let comfy = bundled.join(
+        if crate::generation_backend::is_nvfp4_component(engine.component()) {
+            "media-runtime/ComfyUI"
+        } else {
+            "character-maker/ComfyUI"
+        },
+    );
     let models = match engine {
         Engine::QwenEdit => bundled.join("character-maker/models/qwen-eval"),
         _ => bundled.join(engine.component()),
@@ -248,7 +272,20 @@ fn image_creation_span(text: &str) -> Option<(usize, usize)> {
     })
 }
 /// 入力画像の編集・動画・パス指定は、入力パスやエンジンをモデルに選ばせるため先回りしない。
-const NOT_TEXT_TO_IMAGE_MARKERS: &[&str] = &["この画像", "その画像", "添付", "動画", ":\\", ":/"];
+const NOT_TEXT_TO_IMAGE_MARKERS: &[&str] = &[
+    "この画像",
+    "その画像",
+    "添付",
+    "動画",
+    ":\\",
+    ":/",
+    "Krea",
+    "krea",
+    "KREA",
+    "クレア",
+    "LTX",
+    "ltx",
+];
 
 /// 明示的な画像作成依頼から、生成内容（依頼の言い回しを除いた部分）を取り出す。
 fn image_creation_prompt(text: &str) -> Option<String> {
@@ -319,7 +356,7 @@ impl Tool for ComfyuiTool {
     }
 
     fn description(&self) -> String {
-        "管理下ComfyUIで画像の生成・編集または動画生成を行います。engineはqwen-edit（既定・画像）、wan-2.2-5b、ltx-0.9.8-2b-fp8から選択します。qwen-editはinput_pathを指定すると編集、省略すると文章から新しい画像を生成します。動画は任意の入力画像からも生成できます。モデルは追加機能で選んだものだけを取得します。".into()
+        "管理下ComfyUIで画像の生成・編集または動画生成を行います。engineはqwen-edit（既定・画像）、krea-2-turbo-nvfp4（画像生成専用）、wan-2.2-5b、ltx-0.9.8-2b-fp8、ltx-2.5-nvfp4から選択します。qwen-editはinput_pathを指定すると編集、省略すると新規画像生成です。動画は任意の入力画像からも生成できます。NVFP4はBlackwell以降の専用構成で、利用条件への同意と任意導入が必要です。".into()
     }
 
     fn parameters(&self) -> Value {
@@ -327,10 +364,10 @@ impl Tool for ComfyuiTool {
             "type":"object",
             "properties":{
                 "prompt":{"type":"string","description":"生成・編集内容。動画は詳しい英語プロンプトを推奨"},
-                "engine":{"type":"string","enum":["qwen-edit","wan-2.2-5b","ltx-0.9.8-2b-fp8"],"default":"qwen-edit"},
+                "engine":{"type":"string","enum":["qwen-edit","wan-2.2-5b","ltx-0.9.8-2b-fp8","krea-2-turbo-nvfp4","ltx-2.5-nvfp4"],"default":"qwen-edit"},
                 "input_path":{"type":"string","description":"許可済み領域にある入力画像。qwen-editでは指定時に編集、省略時は文章から新規生成。動画では任意"},
-                "width":{"type":"integer","minimum":256,"maximum":1280,"description":"省略時は画像512、動画768"},
-                "height":{"type":"integer","minimum":256,"maximum":1280,"description":"省略時は画像512、動画512"},
+                "width":{"type":"integer","minimum":256,"maximum":1280,"description":"省略時は画像とLTX 2.5が512、その他動画768"},
+                "height":{"type":"integer","minimum":256,"maximum":1280,"description":"省略時はLTX 2.5が320、その他512"},
                 "frames":{"type":"integer","default":97,"minimum":9,"maximum":257,"description":"動画フレーム数。8n+1へ切り下げ"},
                 "seed":{"type":"integer","minimum":0}
             },
@@ -379,6 +416,14 @@ impl Tool for ComfyuiTool {
             },
             _ => None,
         };
+        if engine == Engine::Krea2 && input.is_some() {
+            return "エラー: Krea 2 Turboは文章からの画像生成専用です。入力画像の編集にはqwen-editを指定してください。".into();
+        }
+        if crate::generation_backend::is_nvfp4_component(engine.component()) {
+            if let Err(reason) = crate::generation_backend::validate_nvfp4_hardware().await {
+                return format!("エラー: {reason}");
+            }
+        }
         let (python, comfy, models) = match validate_runtime(engine) {
             Ok(value) => value,
             Err(error) => return error,
@@ -392,15 +437,24 @@ impl Tool for ComfyuiTool {
             Err(error) => return error,
         };
         // 8GB VRAMでQwen 20Bを動かすと512×512でも約9分かかるため、画像の既定は512四方にする。
-        let (default_width, default_height) = if engine == Engine::QwenEdit {
+        let (default_width, default_height) = if matches!(engine, Engine::QwenEdit | Engine::Krea2)
+        {
             (512, 512)
+        } else if engine == Engine::Ltx25 {
+            (512, 320)
         } else {
             (768, 512)
         };
         let width = normalized_video_dimension(integer(&args, "width", default_width, 256, 1280));
         let height =
             normalized_video_dimension(integer(&args, "height", default_height, 256, 1280));
-        let frames = normalized_frames(integer(&args, "frames", 97, 9, 257));
+        let frames = normalized_frames(integer(
+            &args,
+            "frames",
+            if engine == Engine::Ltx25 { 49 } else { 97 },
+            9,
+            257,
+        ));
         let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -528,10 +582,15 @@ impl Tool for ComfyuiTool {
             return "エラー: 生成処理は終了しましたが成果物を確認できません。".into();
         }
         let path = output.as_path().to_string_lossy();
-        if engine == Engine::QwenEdit {
-            format!("![生成画像]({path})\n\n[画像を開く]({path})\nシード: {seed}")
+        let review_notice = if crate::generation_backend::is_nvfp4_component(engine.component()) {
+            "\n公開前に成果物の内容・権利・提供元の利用条件を本人が確認してください。"
         } else {
-            format!("[生成動画を開く]({path})\nエンジン: {} / シード: {seed} / {width}×{height} / {frames}フレーム", engine.id())
+            ""
+        };
+        if matches!(engine, Engine::QwenEdit | Engine::Krea2) {
+            format!("![生成画像]({path})\n\n[画像を開く]({path})\nモデル: {} / シード: {seed}{review_notice}", engine.label())
+        } else {
+            format!("[生成動画を開く]({path})\nモデル: {} / エンジン: {} / シード: {seed} / {width}×{height} / {frames}フレーム{review_notice}", engine.label(), engine.id())
         }
     }
 }
@@ -585,6 +644,16 @@ mod tests {
     #[test]
     fn エンジン省略時は画像生成にする() {
         assert!(Engine::parse(None) == Ok(Engine::QwenEdit));
+    }
+
+    #[test]
+    fn 新量子化エンジンのモデルと成果物形式を分離する() {
+        assert!(Engine::parse(Some("krea-2-turbo-nvfp4")) == Ok(Engine::Krea2));
+        assert!(Engine::parse(Some("ltx-2.5-nvfp4")) == Ok(Engine::Ltx25));
+        assert_eq!(Engine::Krea2.component(), "image-krea2");
+        assert_eq!(Engine::Krea2.extension(), "png");
+        assert_eq!(Engine::Ltx25.component(), "video-ltx25");
+        assert_eq!(Engine::Ltx25.extension(), "mp4");
     }
 
     #[test]
