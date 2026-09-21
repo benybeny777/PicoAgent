@@ -618,6 +618,6 @@ AIサービスを切り替えても、入力途中のAPIキーやサービス別
 | macOS で背景が透過しない | `tauri.conf.json` の `app.macOSPrivateApi: true` を確認して再ビルド |
 | 文字起こしできない | `cargo xtask setup whisper`（macOS は公式バイナリ配布が無く手動導入が必要な場合あり） |
 
-その他は [README のトラブルシューティング](README.md#-トラブルシューティング) を参照してください。
+その他は [README の「困ったとき」](README.md#-困ったとき) を参照してください。
 
 ---
