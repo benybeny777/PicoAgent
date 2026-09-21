@@ -94,6 +94,15 @@ def install(runtime, cache, uv, accepted_license):
     marker = checked_path(runtime / "install.json")
     stage = runtime.with_name(f".installing-media-runtime-{os.getpid()}")
     backup = checked_path(runtime.with_name("media-runtime-old"))
+    if backup.exists() and not runtime.exists():
+        # 旧版退避直後の中断は、取得や空き容量検査より先に元の配置へ戻す。
+        # 既存の本体は上書きせず、最終配置で起動できなければ復旧用の原本を保持する。
+        backup.rename(runtime)
+        try:
+            verify_runtime(runtime)
+        except BaseException:
+            runtime.rename(backup)
+            raise
     if marker.is_file() and json.loads(marker.read_text(encoding="utf-8")) == signature:
         verify_runtime(runtime)
         # 新版は確認済みで旧版の清掃だけ失敗した前回実行を、再取得せず完了させる。

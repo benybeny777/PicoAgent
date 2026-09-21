@@ -759,10 +759,7 @@ fn recover_interrupted_install(app: &tauri::AppHandle) {
     };
     for (name, action) in interrupted_install_actions(parent, &install, std::process::id()) {
         let path = parent.join(&name);
-        let result = match action {
-            InterruptedAction::Remove => std::fs::remove_dir_all(&path),
-            InterruptedAction::Restore => std::fs::rename(&path, &install),
-        };
+        let (action, result) = apply_interrupted_install_action(&path, &install, action);
         let verb = match action {
             InterruptedAction::Remove => "片付けました",
             InterruptedAction::Restore => "元の場所へ戻しました",
@@ -786,8 +783,27 @@ enum InterruptedAction {
     Restore,
 }
 
+fn apply_interrupted_install_action(
+    path: &Path,
+    install: &Path,
+    planned: InterruptedAction,
+) -> (InterruptedAction, std::io::Result<()>) {
+    // 先行候補を戻せたかは実際の配置で判定する。復元失敗を成功と見なして
+    // 後続の退避先まで消すと、利用可能な旧版を失ってしまう。
+    let action = if planned == InterruptedAction::Restore && !install.exists() {
+        InterruptedAction::Restore
+    } else {
+        InterruptedAction::Remove
+    };
+    let result = match action {
+        InterruptedAction::Remove => std::fs::remove_dir_all(path),
+        InterruptedAction::Restore => std::fs::rename(path, install),
+    };
+    (action, result)
+}
+
 /// 片付け対象と処理を決める（ファイル操作をしない純粋な判定）。
-/// 導入途中は消し、退避先は本体が無ければ1つだけ戻して残りは消す。
+/// 本体が無ければ全退避先を復元候補にし、実際に戻せてから後続を消す。
 fn interrupted_install_actions(
     parent: &Path,
     install: &Path,
@@ -796,23 +812,29 @@ fn interrupted_install_actions(
     let Ok(entries) = std::fs::read_dir(parent) else {
         return Vec::new();
     };
-    let current = format!("-{current_pid}-");
     let mut names: Vec<String> = entries
         .flatten()
-        .filter(|entry| entry.path().is_dir())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .filter(|name| {
-            (name.starts_with(".installing-aivis-") || name.starts_with(".backup-aivis-"))
-                && !name.contains(&current)
+            let Some(suffix) = name
+                .strip_prefix(".installing-aivis-")
+                .or_else(|| name.strip_prefix(".backup-aivis-"))
+            else {
+                return false;
+            };
+            let Some((pid, nonce)) = suffix.split_once('-') else {
+                return false;
+            };
+            pid.parse::<u32>().is_ok_and(|pid| pid != current_pid) && nonce.parse::<u64>().is_ok()
         })
         .collect();
     names.sort();
-    let mut restored = install.exists();
+    let installed = install.exists();
     names
         .into_iter()
         .map(|name| {
-            if name.starts_with(".backup-aivis-") && !restored {
-                restored = true;
+            if name.starts_with(".backup-aivis-") && !installed {
                 (name, InterruptedAction::Restore)
             } else {
                 (name, InterruptedAction::Remove)
@@ -1485,6 +1507,82 @@ mod tests {
             "本体があるなら旧版で上書きしない: {actions:?}"
         );
         std::fs::remove_dir_all(&parent).unwrap();
+    }
+
+    #[test]
+    fn 復元失敗時は後続の退避先を削除せず成功後だけ片付ける() {
+        let parent = std::env::temp_dir().join(format!(
+            "picoagent-aivis-recover-failure-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&parent).unwrap();
+        let blocked = parent.join("blocked");
+        std::fs::write(&blocked, "復元先の親を作れない状態").unwrap();
+        let install = blocked.join("aivis");
+        let names = [".backup-aivis-111-0", ".backup-aivis-222-0"];
+        for name in names {
+            std::fs::create_dir_all(parent.join(name)).unwrap();
+        }
+        let actions = interrupted_install_actions(&parent, &install, 999);
+        assert_eq!(actions.len(), 2);
+        for (name, planned) in &actions {
+            let path = parent.join(name);
+            let (action, result) =
+                super::apply_interrupted_install_action(&path, &install, *planned);
+            assert_eq!(action, InterruptedAction::Restore);
+            assert!(result.is_err());
+            assert!(path.is_dir(), "復元できない退避先を削除してはいけません");
+        }
+        std::fs::remove_file(&blocked).unwrap();
+        std::fs::create_dir(&blocked).unwrap();
+        for (index, (name, planned)) in actions.iter().enumerate() {
+            let (action, result) =
+                super::apply_interrupted_install_action(&parent.join(name), &install, *planned);
+            result.unwrap();
+            assert_eq!(
+                action,
+                if index == 0 {
+                    InterruptedAction::Restore
+                } else {
+                    InterruptedAction::Remove
+                }
+            );
+        }
+        assert!(install.is_dir());
+        std::fs::remove_dir_all(&parent).unwrap();
+    }
+
+    #[test]
+    fn aivisの途中名は数値のpidと連番が揃うものだけを処理する() {
+        let parent = std::env::temp_dir().join(format!(
+            "picoagent-aivis-recover-names-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for name in [
+            ".backup-aivis-user-data",
+            ".installing-aivis-111",
+            ".backup-aivis-111-2-extra",
+            ".backup-aivis-999-1",
+            ".backup-aivis-111-999",
+        ] {
+            std::fs::create_dir_all(parent.join(name)).unwrap();
+        }
+        assert_eq!(
+            interrupted_install_actions(&parent, &parent.join("aivis"), 999),
+            vec![(
+                ".backup-aivis-111-999".to_string(),
+                InterruptedAction::Restore
+            )]
+        );
+        std::fs::remove_dir_all(parent).unwrap();
     }
 
     #[test]

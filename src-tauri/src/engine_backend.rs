@@ -405,7 +405,7 @@ fn is_stale_engine_work_dir(name: &str, current_pid: u32) -> bool {
 
 /// PicoAgent は同時に1つしか動かないため、他プロセスIDの残骸は回収してよい。
 #[cfg(windows)]
-fn sweep_stale_engine_work_dirs(app: &AppHandle, parent: &Path) {
+fn sweep_stale_engine_work_dirs(app: &AppHandle, parent: &Path, completed_backend: Option<&str>) {
     let current = std::process::id();
     let Ok(entries) = std::fs::read_dir(parent) else {
         return;
@@ -413,7 +413,11 @@ fn sweep_stale_engine_work_dirs(app: &AppHandle, parent: &Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !is_stale_engine_work_dir(name, current) {
+        let stale = match completed_backend {
+            Some(id) => is_completed_engine_backup(name, id, current),
+            None => is_stale_engine_work_dir(name, current),
+        };
+        if !stale {
             continue;
         }
         if let Err(error) = std::fs::remove_dir_all(entry.path()) {
@@ -423,6 +427,13 @@ fn sweep_stale_engine_work_dirs(app: &AppHandle, parent: &Path) {
             );
         }
     }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_completed_engine_backup(name: &str, id: &str, current_pid: u32) -> bool {
+    name.strip_prefix(&format!(".engine-{id}-backup-"))
+        .and_then(|pid| pid.parse::<u32>().ok())
+        .is_some_and(|pid| pid != current_pid)
 }
 
 #[cfg(windows)]
@@ -437,12 +448,17 @@ async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<Path
             .is_some_and(|manifest| manifest.is_current())
         && backend.probe(&server).await
     {
+        // 正常な既存エンジンは取得処理へ進まないため、この経路でも削除失敗した
+        // 旧版を回収する。確認済みの方式だけに限定し、別方式の復旧用には触れない。
+        if let Some(parent) = root.parent() {
+            sweep_stale_engine_work_dirs(app, parent, Some(backend.id));
+        }
         return Ok(server);
     }
 
     let parent = root.parent().context("推論エンジンの配置先が不正です")?;
     std::fs::create_dir_all(parent)?;
-    sweep_stale_engine_work_dirs(app, parent);
+    sweep_stale_engine_work_dirs(app, parent, None);
     let work = parent.join(format!(
         ".engine-{}-stage-{}",
         backend.id,
@@ -645,6 +661,23 @@ fn output_contains(output: &std::process::Output, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 検証済み方式の終了済み退避先だけを回収する() {
+        assert!(is_completed_engine_backup(
+            ".engine-cuda-backup-123",
+            "cuda",
+            999
+        ));
+        for name in [
+            ".engine-cuda-backup-999",
+            ".engine-rocm-backup-123",
+            ".engine-cuda-stage-123",
+            ".engine-cuda-backup-invalid",
+        ] {
+            assert!(!is_completed_engine_backup(name, "cuda", 999));
+        }
+    }
 
     #[test]
     fn 固定バックエンドマニフェストだけを現行として扱う() {
