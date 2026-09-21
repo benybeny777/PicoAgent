@@ -69,6 +69,23 @@ description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2D、MMD�
 
 ## 再構築と検証
 
+Windowsで手動確認だけを行う場合は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。独自2.5Dは比較画面、MMDと登録済みLive2Dは保存中の選択を変えない実アプリ確認を選べる。MMDとLive2Dをブラウザだけの代替表示で合格にしない。
+
+Aivis音声をキャラクターへ割り当てる場合は、本人または権利者が明示的に許諾した公式モデル・収録素材だけを使う。配信・動画から切り出した音声は、利用者が権利者の許諾を明示した場合だけ再学習へ使う。生成サンプルは複数文で聴取し、0dBへ達するクリップ、定常ノイズ、破裂音、声の混入があれば採用を止める。PicoAgentは合成前の`volumeScale`を0.72以下へ制限して約3dBの余裕を取るが、これは入力素材や学習済みモデルのノイズを直す処理ではない。モデル自体の不良は、次の手順で清浄な素材から作り直す。
+
+### 音声モデルの再作成（Style-Bert-VITS2 JP-Extra）
+
+- 既存の元音声、`Data/<ID>`、`model_assets/<ID>`、導入済みモデルを上書き・削除しない。作業物は`temp/voice-models/`だけに置き、新データセットは`Data/<ID>-clean-v<N>`、中間の切り出しは`Data/<ID>-v<N>-src*`の新しい名前にする。データセット名は`Data`直下の単一フォルダー名に限定し、絶対パス、区切り、親参照、Windows予約名を使わない。SBV2の`slice.py`は出力先の`raw`が既にあると削除するため、既存名を指定しない。
+- 元音声はBGM・効果音・ゲーム音・ゲストの声がない単独雑談を選ぶ。候補は途中5分だけ取得し、50msフレームの下位10%、1秒以上-45dB未満になる回数、静区間の狭帯域ピーク数で比べる。BGMが常時ある配信は断片選別でもほぼ全件落ちるため、閾値を緩めず素材を替える。
+- `scripts/select-voice-training-clips.py`だけを選別の正規入口にする。SBV2の`.venv`のPythonで、`quiet-sections`（1分区間の抽出。冒頭・末尾5分を除外）→ SBV2の`slice.py --time_suffix`と`transcribe.py` → `measure`（クリップ、DC、発話率、合間のノイズ床とSNR、境界区間、破裂音、話者類似度、Whisper再認識のカナ誤り率）→ `select`の順に実行する。`quiet-sections`の`--prefix`は区切りや親参照を含まない単一名にする。測定レポートはWAVのSHA-256、話者、言語、文章と結び付け、元WAVを変えた場合は新しいレポート名で測定し直す。WAV名は`raw/`配下の相対パスだけを許可し、絶対パス、親参照、WAV以外、大文字小文字や区切りだけが違う同名実体を拒否する。`select`は複数の元データセットをまとめられるが、同名WAVが重複する場合は元データ側で一意の名前へ直す。出力先が存在すれば停止し、まず`--dry-run`で除外理由と分布を確認する。
+- 選別の既定値は-23LUFS正規化後のノイズ床-48dB以下、SNR 22dB以上、境界区間-30dB以下、破裂音フレーム3以下、話者類似度0.55以上（2秒窓0.40以上）、カナ誤り率0.25以下、2〜12秒。音響指標だけを直した場合は`measure --reuse-report`でWhisperと話者埋め込みを流用する。
+- 採用断片はDC除去、発話前120ms・後150msまでの切り詰め、10msフェード、-23LUFSかつピーク-1dBFS以下の単純ゲインだけを行う。SBV2の`resample.py`へ`--normalize`を付けない（pyloudnormの正規化でクリップが発生するため）。
+- 学習データの合間（0.25秒以上の間）は、合成音の検査と同じピーク基準でも測る。SBV2は学習データの合間に残る環境音を覚え、合成時の読点・疑問符・言いよどみの間にそのまま出す（clean-v2のみこは合間の中央値がピーク基準-41.9dBで、合成音の合間ノイズも-42〜-48dBだった）。-23LUFS基準の絶対値だけで「清浄」と判定しない。合間がうるさい場合は`scripts/clean-voice-training-pauses.py`で発話区間外だけを減衰させた別名データセット（`Data/<ID>-clean-v<N>-gated`）を作り、`pause-cleaning.json`の前後値を確認する。声に重なる雑音や残響は`scripts/enhance-voice-training-chunks.py`の`pack`→`deepfilter`→`unpack`で除去し、`Data/<ID>-clean-v<N>-deepfilter`へ切り戻す。`pack`後に元WAVを変更した場合は、manifestのSHA-256照合を回避せず`pack`からやり直す。[DeepFilterNet公式リリース](https://github.com/Rikorose/DeepFilterNet/releases/tag/v0.5.6)のWindows版0.5.6（約27MB、SHA-256 `75e11fa16445f560cb6b021521ddb89e89270d13b83089705d98776f58fd7915`）を明示取得し、`--compensate-delay`は使わない。外部サービスへのアップロードと手動補正を正規工程にしない。合間減衰版と同じstep数で検査し、ノイズと話者類似度で採否を決める。学習量の追加、合成パラメータ、読み上げ文の分割では直らない。
+- 学習は`scripts/train-voice-model.ps1`だけを正規入口にし、`-Stage preprocess` → `train` → `export`の順に実行する。SBV2の`config.yml`の`model_name`は学習とスタイル生成の保存先を決める共有状態なので、前処理または学習でキャラを替えるたびにこのスクリプトを通す。書き出しだけでは共有設定を変更しない。GUIや個別コマンドで複数キャラを交互に扱わない。
+- 8GB級GPUではbatch 2、fp32（`bf16_run`は使わない）、保存間隔1000 stepにする。JP-Extraの学習スクリプトは勾配累積に対応しない。学習開始後にWindowsの`\GPU Process Memory(pid_<PID>*)\Shared Usage`を確認し、数GB単位で共有メモリへあふれて1 stepが極端に遅い場合は、品質設定を変えず`-Stage train -BatchSize`だけを下げて再開する。止めるときは、コマンドラインで自分が起動した`train_ms_jp_extra.py`とその親の`train-voice-model.ps1`を確認してからプロセスツリーごと終了する。
+- チェックポイントの検査を学習と同時に動かさない。GPUではVRAMがあふれ、CPUではWhisper large-v3と合成モデルがメインメモリを使い切り、学習ごと停止する（32GB機で実際に発生）。保存直後に自分が起動した学習を止め、`scripts/check-synthesized-voice.py sbv2 --device cuda`で検査してから`-Stage train`で再開する（最新の`G_*.pth`から続きを学習する）。合成は毎回ゆらぐため、1文1回の比較で判断しない。`--text-set pauses --repeat 3`（既定6文に読点・疑問符・感嘆符・言いよどみを含む4文を加え、全体を3周）で合成し、旧モデル・別データセットと同じstep数どうしで比べる。学習は`-Stage train -StopAtStep <N>`で指定stepの保存後に自動で止めてから検査する。保存済み候補が停止目標以上なら、既存候補を検査するか、より大きい目標を指定する。ノイズ床・SNR・電子音・冒頭末尾・カナ誤り率・話者類似度が改善しなくなった点、または悪化し始めた点（過学習）を採用候補にする。SBV2の直接合成はピークを0dBへ正規化するため、クリップと音量はAivis経由（`aivis`モード、`volumeScale`上限0.72）で判定する。
+- 採用候補は`-Stage export`でONNXとAIVMXへ書き出し、AIVMX内の`model_name`と話者を確認する。チェックポイントは`model_assets/<Dataset>/`直下から選び、同じフォルダーの`config.json`の`model_name`と`-Dataset`を一致させる。既存ONNXは再利用せず、採用チェックポイントのコピーから一時出力先へ変換し、整合確認後だけ確定名へ移す。書き出し先または未完了の`.incoming`があれば停止する。
+
 ```powershell
 uv run --with pillow python scripts/build-character-animations.py --character-dir characters/<id>
 uv run --python 3.12 --with pillow --with numpy --with opencv-python-headless python scripts/build-separated-mesh-sources.py <id> # 同梱通常2Dの分離原画

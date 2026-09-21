@@ -91,6 +91,10 @@ graph LR
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |
+| `<SBV2>\.venv\Scripts\python.exe scripts/select-voice-training-clips.py <quiet-sections\|measure\|select>` | 許諾済み音声からStyle-Bert-VITS2の学習断片を検査し、BGM・定常ノイズ・他人の声・破裂音・文字起こし不一致を除いた別名データセットを作る。工程は`rebuild-picoagent-character`スキル |
+| `<SBV2>\.venv\Scripts\python.exe scripts/clean-voice-training-pauses.py --source <元> --output <新>` | 選別済み学習データの発話の合間だけをsilero-vadで判定して減衰させた別名データセットを作り、合間の音量の前後値を`pause-cleaning.json`へ残す。合成時の間に出るノイズの原因対策。工程は`rebuild-picoagent-character`スキル |
+| `<SBV2>\.venv\Scripts\python.exe scripts/enhance-voice-training-chunks.py <pack\|deepfilter\|unpack>` | 選別済み学習データを9MB以下のWAVへ連結し、ハッシュ固定したDeepFilterNet 0.5.6でローカル一括補正してから、サンプルレート・長さ・モノラルを照合して元の断片へ切り戻し、-23LUFSへそろえた別名データセットを作る |
+| `<SBV2>\.venv\Scripts\python.exe scripts/check-synthesized-voice.py <sbv2\|aivis\|files>` | 学習済み音声モデルの合成結果を、クリップ・定常ノイズ・電子音・境界ノイズ・発音・話者類似度で検査する。`aivis`はPicoAgentと同じ`volumeScale`上限0.72で合成する |
 | `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
 | `cargo xtask character-quality` | 通常2Dの制作正本を画素検査する。独自リグ・Live2Dの画質は対象外。`--strict`は既知を含む全指摘を不合格、`--update-baseline`は既存指摘の削減のみ許可 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |
@@ -101,6 +105,8 @@ graph LR
 > `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
 
 LocalVTuberStudio形式の実画面検査は、まずリポジトリ直下を`uv run python -m http.server 8776 --bind 0.0.0.0 --directory .`で配信する。Codex DesktopのPlaywrightは製品依存へ追加せず、`load_workspace_dependencies`で取得した現行パスを指定する。2026年9月7日時点では次の形だが、存在しない場合は固定値を推測せず再取得する。
+
+WindowsのBATは、`cmd.exe`のコードページ差で日本語を命令として誤解しないようASCIIだけの入口とし、利用者向け表示と実処理をUTF-8のPowerShellスクリプトへ置く。通常起動は`PicoAgentを起動.bat`から`scripts/start-picoagent.ps1`を呼ぶ。キャラクター確認は、リポジトリ直下の`キャラクター確認画面を開く.bat`を使う。「独自2.5D」は確認用HTTPサーバーと比較画面をまとめて起動し、終了操作で自分が起動したサーバーを回収する。MMDの2体と、実体から列挙する登録済みLive2Dは`PICO_PREVIEW_CHARACTER`をその起動中だけ指定して`cargo xtask dev`を実行するため、保存済みのキャラ選択を書き換えない。MMDとLive2Dはブラウザ用の代替描画ではなく、製品CSPとWebViewを通る実アプリで確認する。
 
 ```powershell
 $env:PICO_PLAYWRIGHT_MODULE='C:\Users\benyb\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright\index.mjs'

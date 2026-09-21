@@ -1,25 +1,21 @@
 # 引き継ぎ
 
-この文書は、現在進行中の作業だけを次の担当へ渡すための短い入口です。完了した作業の経緯はPR、恒久ルールは[AGENTS.md](AGENTS.md)、現行仕様は[SPEC.md](SPEC.md)、未着手・未確認項目は[docs/TASKS.md](docs/TASKS.md)を参照してください。
+恒久ルールは[AGENTS.md](AGENTS.md)、未完了の実機受入・素材品質・将来開発は[docs/TASKS.md](docs/TASKS.md)、改修設計と検証結果は各PRを正本とする。
 
 ## 現在の状態
 
-- 最終確認日: 2026-09-21
-- [Draft PR #331](https://github.com/benybeny777/PicoAgent/pull/331)、`codex/krea-ltx25-lowvram`でKrea 2 Turbo／LTX 2.5 NVFP4を追加中。本人承認済みの両モデル取得と実機生成は成功し、LTX音声品質とGUI経由の受入などが残る。改修設計と最新検証状態はPRを正本にする。
-- 作業場は`C:\00_PG\20_PicoAgent\temp\krea-ltx25-lowvram`。MiniMax H3は利用者が中止したため対象外。既存Qwen／Wan／旧LTXと共通Python本体は保持する。
-- 再開時は管理モデルの`install.json`、実プロセスのコマンドライン、`temp/*progress.json`、PR本文を照合してから続ける。HFトークンは表示しない。未確認事項は`docs/TASKS.md`を参照する。
-- 未完了の素材補修・実機受入・設計のみの将来開発は[docs/TASKS.md](docs/TASKS.md)を参照し、着手条件を満たす項目から進める。
-- 配布版の更新は本体のマージと別に扱い、配布リポジトリの公開状態を確認する。
+- 最終確認日: 2026-09-22
+- UI改善は[PR #329](https://github.com/benybeny777/PicoAgent/pull/329)、`codex/ui-review-continuous`。ローカルの未pushコミットも保持して統合する。
+- 音声の最終聴感・画像動画の実機受入残件は`docs/TASKS.md`を参照する。採用済み音声モデル・比較素材・既存の`output/`は変更しない。モデルを再取得せず、HFトークンを表示しない。
+- 配布・リリースは今回のマージと別作業とする。
 
 ## 再開時の順序
 
-1. `AGENTS.md`を読む。
-2. `git status --short --branch`、`git log -5 --oneline`、開いているPRを確認する。
-3. 進行中PRがあれば、そのPR本文と差分から再開する。
-4. 進行中作業がなければ`docs/TASKS.md`から、着手条件を満たす項目だけを選ぶ。
+1. `AGENTS.md`と`git status --short --branch`を確認する。
+2. 開いているPRの本文、差分、実行中プロセスを照合する。
+3. 未完了項目と検証境界を引き継ぎ、既存成果物を保護する。
 
 ## 更新ルール
 
-- 未マージの作業、再開に必要な環境、直後に行うことだけを書く。
-- 完了した作業の説明、テスト結果、過去のPR一覧は残さない。PRへ記録する。
-- マージ後に進行中項目を削除し、何もなければ「進行中作業なし」とする。
+- 完了した作業の経緯はPRへ残し、この文書には未マージ作業と再開方法だけを書く。
+- マージ後は該当する進行中項目を削除する。

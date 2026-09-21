@@ -8,6 +8,46 @@ const preview = readFileSync(
 );
 const renderer = readFileSync(new URL("../../ui/mesh-rig.js", import.meta.url), "utf8");
 const appRenderer = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const previewLauncher = readFileSync(
+  new URL("../../scripts/open-character-preview.ps1", import.meta.url),
+  "utf8",
+);
+const config = readFileSync(new URL("../../src-tauri/src/config.rs", import.meta.url), "utf8");
+
+test("WindowsのBAT入口はcmdの文字コードに依存しない", () => {
+  for (const name of [
+    "PicoAgentを起動.bat",
+    "キャラクター確認画面を開く.bat",
+    "関係者版インストーラをビルド.bat",
+  ]) {
+    const bytes = readFileSync(new URL(`../../${name}`, import.meta.url));
+    assert.ok(
+      bytes.every((byte) => byte < 0x80),
+      `${name}はASCIIだけでPowerShell入口を呼ぶ`,
+    );
+    assert.match(bytes.toString("ascii"), /show-powershell7-required\.ps1/);
+  }
+});
+
+test("Windowsの確認入口は2.5D・MMD・登録済みLive2Dを選べる", () => {
+  assert.match(previewLauncher, /'2d', 'live2d', 'miko-mmd', 'korone-mmd'/);
+  assert.match(previewLauncher, /PSObject\.Properties\['live2d'\]/);
+  assert.match(previewLauncher, /PICO_PREVIEW_CHARACTER/);
+  assert.match(previewLauncher, /& cargo xtask dev/);
+  const override = config.indexOf('std::env::var("PICO_PREVIEW_CHARACTER")');
+  const persisted = config.indexOf("self.values.lock().unwrap().get(key)", override);
+  assert.ok(override >= 0 && persisted > override, "確認対象は保存値より先に、その起動中だけ解決する");
+});
+
+test("関係者版ビルドのダブルクリック入口は結果を読むまで閉じない", () => {
+  const launcher = readFileSync(
+    new URL("../../関係者版インストーラをビルド.bat", import.meta.url),
+    "ascii",
+  );
+  assert.match(launcher, /set "PICOAGENT_BUILD_EXIT_CODE=%ERRORLEVEL%"/);
+  assert.match(launcher, /wait-before-close\.ps1/);
+  assert.match(launcher, /exit \/b %PICOAGENT_BUILD_EXIT_CODE%/);
+});
 
 test("確認画面はあおい・むぎ2種・りん・まい・セナ・実写を本番メッシュ描画で切り替える", () => {
   assert.match(preview, /value="aoi"/);
