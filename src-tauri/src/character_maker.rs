@@ -549,12 +549,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stages_are_the_current_four_stage_pipeline() {
+    fn 工程は現行の4段構成にする() {
         assert_eq!(STAGES, ["isolate", "decompose", "rig2d", "complete"]);
     }
 
     #[test]
-    fn source_does_not_reference_the_retired_product_paths() {
+    fn 廃止した製品パスを参照しない() {
         let source = include_str!("../../character-maker/src/pipeline.rs");
         for retired in [
             "mesh/generate.py",

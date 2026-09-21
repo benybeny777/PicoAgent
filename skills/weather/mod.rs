@@ -278,7 +278,9 @@ impl Tool for WeatherTool {
                             if let Err(error) =
                                 cfg.set_string(DEFAULT_LOCATION_KEY, location.clone())
                             {
-                                eprintln!("天気の既定地点を保存できませんでした: {error}");
+                                crate::log_paths::log_detached(&format!(
+                                    "天気の既定地点を保存できませんでした: {error}"
+                                ));
                             }
                         }
                     }

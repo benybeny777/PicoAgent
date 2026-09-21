@@ -259,7 +259,7 @@
 | `PICOAGENT_SETUP_TOOLS` | （空） | xtask | `cargo xtask setup tools` で取得対象を絞る開発用環境変数（カンマ区切り） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
-| `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする（`password` 型。キー名に `API_KEY` を含むためシークレットとして扱われ、Windows は DPAPI 暗号化、macOS はログインキーチェーンへ預けて保存される） |
+| `PICOAGENT_API_KEY` | 空 | ローカルAPI | 設定すると `Authorization: Bearer` を必須にする。**空のまま有効にすると、同じPCで動くどのプログラムからでもエージェント（ファイル操作・コマンド実行を含む）を呼び出せる**（ブラウザからの横断呼び出しは `PICOAGENT_API_ALLOWED_ORIGINS` の検査で塞がるが、ローカルのプログラムは塞げない）（`password` 型。キー名に `API_KEY` を含むためシークレットとして扱われ、Windows は DPAPI 暗号化、macOS はログインキーチェーンへ預けて保存される） |
 | `PICOAGENT_LICENSE_TOKEN` | 空 | 製品ライセンス | `PA1.<payload>.<Ed25519署名>` 形式のPro／Businessライセンス。`password` 型で、WindowsはDPAPI暗号化、macOSはログインキーチェーンへ預けて保存。無効・期限切れ・未設定は無料版として動作し、PC操作・ファイル編集・Office・外部サービス・MCP等の高度なスキルを共通dispatch境界で拒否する |
 | `PICOAGENT_API_ALLOWED_ORIGINS` | 空 | ローカルAPI | ブラウザからの横断リクエストを許可する Origin（カンマ区切り。空＝Origin 付きは全て拒否） |
 | `PICOAGENT_MCP_SERVERS` | 空 | MCP | 外部 MCP サーバ（1行1件「名前\|コマンド 引数…」。stdio 接続。`#` でコメント。変更は再起動後に反映） |

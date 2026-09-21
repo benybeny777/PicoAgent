@@ -359,7 +359,9 @@ fn model_choices(
             }
             // フォールバック許可: 候補取得の失敗はCLIごとに隔離する。実行時の既定設定エラーは
             // request_argsで伝播させ、誤ったモデルによる推論は開始しない。
-            Err(error) => eprintln!("{prefix}のモデル候補を取得できませんでした: {error}"),
+            Err(error) => crate::log_paths::log_detached(&format!(
+                "{prefix}のモデル候補を取得できませんでした: {error}"
+            )),
         }
     }
     choices

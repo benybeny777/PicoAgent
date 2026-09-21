@@ -585,7 +585,19 @@ mod tests {
             };
             // 起動途中で失敗した場合もブラウザを残さないよう、guard は起動より先に持つ。
             let _guard = BrowserGuard;
-            ensure_running(&options).await.expect("ブラウザを起動できる");
+            // 利用者が普段使いのブラウザを開いていると、専用プロファイルでの起動要求が
+            // 既存ウィンドウへ引き継がれて起動できない（製品の診断文がそう答える）。
+            // これは実装の異常ではなく環境の状態なので、`cargo xtask verify` を
+            // 赤にせず理由を出して飛ばす。ブラウザが無いときと同じ扱い。
+            if let Err(error) = ensure_running(&options).await {
+                let reason = error.to_string();
+                assert!(
+                    reason.contains("既に通常起動している"),
+                    "ブラウザを起動できる: {reason}"
+                );
+                eprintln!("ブラウザが通常起動中のためスキップ: {reason}");
+                return;
+            }
             let target = new_page(options.port).await.expect("タブを開ける");
             let mut conn = PageConn::connect(&target.ws_url, 30)
                 .await

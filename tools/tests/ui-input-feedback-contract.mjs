@@ -228,7 +228,16 @@ test("窓に収まらないフキダシ保存値は表示側で収める", () =>
   const refit = renderer.match(/function refitBubbleToWindow\(\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(refit, /bubble\.classList\.contains\("fullscreen"\) \|\| resizeStart/);
   assert.match(refit, /savedBubbleLayout\?\.width/);
-  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{\s*\n\s*refitBubbleToWindow\(\);/);
+  // リサイズ中の再計算は1本の購読へまとめ、描画フレームごとに1回へ間引く。
+  const handler = renderer.match(/function handleWindowResize\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(handler, /refitBubbleToWindow\(\);/);
+  assert.match(handler, /refreshBubblePlacement\(\);/);
+  assert.match(handler, /applyCharacterOffset\(characterOffset\.x, characterOffset\.y, \{ clamp: false \}\)/);
+  assert.equal(renderer.match(/window\.addEventListener\("resize"/g)?.length, 1);
+  assert.match(renderer, /const windowResizeScheduler = window\.PicoFrameScheduler\.create\(handleWindowResize\)/);
+  assert.match(renderer, /window\.addEventListener\("resize", \(\) => windowResizeScheduler\.schedule\(\)\)/);
+  // 間引き用のフレーム予約は終了時に取り消す（解放漏れを残さない）。
+  assert.match(renderer, /windowResizeScheduler\?\.cancel\(\);/);
 });
 
 test("ダブルクリックでは全画面へ切り替えず拡大ボタンだけを使う", () => {
@@ -268,4 +277,35 @@ test("フキダシの自動配置は配置基準の枠内へ収める", () => {
   assert.match(place, /const viewportWidth = container\.clientWidth/);
   assert.match(place, /const viewportHeight = container\.clientHeight/);
   assert.doesNotMatch(place, /document\.documentElement\.clientHeight/);
+});
+
+test("生成中の本文描画は最短間隔をあけて組み直す", () => {
+  // 1回の描画で本文全体を組み直すため、トークンが毎フレーム届くローカルAIでは
+  // 長い回答ほど入力とアニメが引っかかっていた。読める速さは保ったまま間引く。
+  assert.match(renderer, /const STREAM_RENDER_MIN_MS = 80;/);
+  assert.match(renderer, /if \(performance\.now\(\) - lastStreamRenderAt < STREAM_RENDER_MIN_MS\) \{\s*\n\s*streamRenderFrame = requestAnimationFrame\(paintStream\);\s*\n\s*return;/);
+  assert.match(renderer, /lastStreamRenderAt = performance\.now\(\);\s*\n[\s\S]{0,200}?renderMarkdown\(reply, streamBuffer\);/);
+  // 送信直後とステップ境界では、最初のチャンクを待たせない。
+  assert.equal(renderer.match(/(?<!let )lastStreamRenderAt = 0;/g)?.length, 2);
+});
+
+test("設定検索は購読1本で1フレーム1回だけ絞り込む", () => {
+  // 検索は全設定項目の文面を走査する。1打鍵ごとに走らせると入力が引っかかるため、
+  // 変更印の更新と同じ共通部品でまとめる。消去ボタンの出し入れだけは待たせない。
+  assert.equal(settings.match(/settingsSearch\?\.addEventListener\("input"/g)?.length, 1);
+  assert.match(settings, /settingsSearchScheduler = window\.PicoFrameScheduler\.create\(applySettingsSearch\)/);
+  assert.match(settings, /settingsSearch\?\.addEventListener\("input", \(\) => \{[\s\S]*?clearSettingsSearch\.hidden = !settingsSearch\.value;[\s\S]*?settingsSearchScheduler\.schedule\(\);/);
+  assert.match(settings, /settingsSearchScheduler\?\.cancel\(\);/);
+});
+
+test("閉じている通知一覧を作り直さず保存もまとめる", () => {
+  // エージェント実行中は進捗のたびに `upsertJob` が呼ばれる。閉じている一覧の
+  // DOMを50件ぶん捨てては作り直し、localStorage も毎回書いていた。
+  assert.match(renderer, /function renderNoticePanel\(\) \{[\s\S]*?if \(noticePanel\?\.hidden\) return;/);
+  // 開くときは必ず組み立て直す（飛ばした更新をここで取り戻す）。
+  assert.match(renderer, /noticePanel\.hidden = !open;\s*\n\s*if \(open\) \{[\s\S]*?renderNoticePanel\(\);/);
+  assert.match(renderer, /const noticePersistScheduler = window\.PicoFrameScheduler\.create\(persistNoticesNow\)/);
+  assert.match(renderer, /function persistNotices\(\) \{\s*\n\s*noticePersistScheduler\.schedule\(\);\s*\n\}/);
+  // 終了時はまとめ待ちを書き切る（通知の取りこぼしを残さない）。
+  assert.match(renderer, /noticePersistScheduler\.flush\(\);/);
 });

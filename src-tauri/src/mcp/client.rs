@@ -289,7 +289,9 @@ pub fn stop_all() {
         for (name, connection) in drained {
             let Ok(lock) = tokio::time::timeout(Duration::from_secs(2), connection.lock()).await
             else {
-                eprintln!("MCP サーバ「{name}」は処理中のため終了待ちがタイムアウトしました");
+                crate::log_paths::log_detached(&format!(
+                    "MCP サーバ「{name}」は処理中のため終了待ちがタイムアウトしました"
+                ));
                 continue;
             };
             let mut guard = lock;
@@ -297,11 +299,15 @@ pub fn stop_all() {
                 Ok(Some(_)) => {}
                 Ok(None) => {
                     if let Err(error) = guard.child.kill().await {
-                        eprintln!("MCP サーバ「{name}」の停止と回収に失敗しました: {error}");
+                        crate::log_paths::log_detached(&format!(
+                            "MCP サーバ「{name}」の停止と回収に失敗しました: {error}"
+                        ));
                     }
                 }
                 Err(error) => {
-                    eprintln!("MCP サーバ「{name}」の終了状態を確認できません: {error}");
+                    crate::log_paths::log_detached(&format!(
+                        "MCP サーバ「{name}」の終了状態を確認できません: {error}"
+                    ));
                 }
             }
         }

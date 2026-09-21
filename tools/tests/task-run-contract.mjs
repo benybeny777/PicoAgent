@@ -169,3 +169,35 @@ test("送信処理と画面が実行中タスクへ状態を渡す", () => {
   assert.match(styles, /\[data-layout\] \.history-log > \.task-run \{ position:static;/);
   assert.match(styles, /\.bubble\.task-run-visible \.history-thinking \{ display:none; \}/);
 });
+
+test("同じ進捗文言では作り直さず停止ボタンを入れ替えない", () => {
+  // 進捗イベントは同じ文言が何度も届く。そのたびに作り直すと、押している最中の
+  // 「停止」ボタンが別の要素へ入れ替わり、クリックが空振りする。
+  let renders = 0;
+  const node = () => ({
+    children: [], dataset: {}, classList: { add() {} },
+    setAttribute() {}, addEventListener() {},
+    append(...items) { this.children.push(...items); },
+    querySelector() { return null; },
+  });
+  const doc = { createElement: () => node() };
+  const container = { ...node(), ownerDocument: doc, hidden: true, replaceChildren(...items) { this.children = items; } };
+  const timers = { setInterval: () => 1, clearInterval() {}, setTimeout: () => 2, clearTimeout() {} };
+  const controller = TaskRun.createController({
+    container, timers, now: () => 0, onCancel() {}, onRender() { renders += 1; },
+  });
+  controller.start();
+  assert.equal(renders, 1);
+  controller.status("計画中");
+  assert.equal(renders, 2, "文言が変われば描き直す");
+  controller.status("計画中");
+  controller.status("計画中…");
+  assert.equal(renders, 2, "同じ見た目では描き直さない");
+  controller.activity({ phase: "started", tools: ["web_search"], labels: ["Web検索"] });
+  assert.equal(renders, 3, "行が増えたら描き直す");
+  controller.finish("completed");
+  assert.equal(renders, 4, "終了状態は必ず描き直す");
+  // 別の実行では同じ内容でも描き直す（前回の表示を残さない）。
+  controller.start();
+  assert.equal(renders, 5);
+});

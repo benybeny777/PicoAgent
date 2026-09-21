@@ -127,6 +127,14 @@ impl Tool for ReadFileTool {
             .map(|limit| (limit as usize).clamp(1, MAX_LINES))
             .unwrap_or(DEFAULT_LINES);
 
+        // 読む前に実寸で弾く。読んでから len() で弾くと、巨大なファイルを
+        // 指定された時点でその容量をまるごと抱えることになる。
+        if let Err(size) = permissions::fs::ensure_within(&target, MAX_FILE_BYTES) {
+            return format!(
+                "エラー: {MAX_FILE_BYTES} バイトを超えるファイルは読めません（{size} バイト）: {}",
+                target.display()
+            );
+        }
         let content = match permissions::fs::read_to_string(&target) {
             Ok(content) => content,
             Err(error) => {
@@ -136,13 +144,6 @@ impl Tool for ReadFileTool {
                 )
             }
         };
-        if content.len() > MAX_FILE_BYTES {
-            return format!(
-                "エラー: {MAX_FILE_BYTES} バイトを超えるファイルは読めません（{} バイト）: {}",
-                content.len(),
-                target.display()
-            );
-        }
         format!(
             "{}\n{}\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）",
             target.display(),

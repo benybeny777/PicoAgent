@@ -295,10 +295,14 @@
       undoButton.click();
     }
   });
-  window.addEventListener("resize", () => {
+  // 枠なしウィンドウの8方向ドラッグでは resize が連続して届く。保存済みの配置を
+  // 画面内へ収め直す処理は実寸を読むので、描画フレームごとに1回へまとめる。
+  // つまみの位置合わせ（updateRect）は編集中だけでよい。
+  const resizeScheduler = window.PicoFrameScheduler.create(() => {
     Object.values(sources).forEach(constrainSource);
-    requestAnimationFrame(() => moveable?.updateRect());
+    if (editing) moveable?.updateRect();
   });
+  window.addEventListener("resize", () => resizeScheduler.schedule());
   // 監視コールバックは属性が変わった後に走るので、切替前の保存先を覚えておく。
   let editingLayout = layoutId();
   let editingCharacter = characterId();
@@ -336,6 +340,7 @@
   }
   // Moveable は document へ独自のリスナを張るので、離脱時に明示的に解放する。
   window.addEventListener("pagehide", () => {
+    resizeScheduler.cancel();
     layoutObserver.disconnect();
     characterObserver.disconnect();
     moveable.destroy();
