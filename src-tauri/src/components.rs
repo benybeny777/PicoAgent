@@ -110,6 +110,13 @@ pub fn init(app: &AppHandle) {
     if let Some(root) = packaged.or(development) {
         let _ = CHARACTER_MAKER_ASSETS.set(root);
     }
+    // 前回の導入・入れ替えが途中で落ちた残りを起動時に片付ける。導入操作のときだけ
+    // 片付けると、それまで数十GBの途中データや未導入に見える機能が残り続ける。
+    // 対象は終了済みプロセスの名前を持つものだけなので、この起動の導入とは競合しない。
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        cleanup_stale_install_stages(&app).await;
+    });
 }
 
 pub fn runtime_root() -> Option<&'static Path> {
@@ -1289,8 +1296,46 @@ async fn cleanup_stale_install_stages(app: &AppHandle) {
         let stale_pid = stale_install_pid(&name, &current_pid);
         if stale_pid.is_some_and(|pid| !process_exists(pid)) {
             cleanup_dir(app, "終了済み導入途中フォルダ", &entry.path()).await;
+            continue;
+        }
+        // 入れ替えの途中で落ちた退避先。名前にプロセスIDを含むため、拾わないと
+        // 数十GBの旧版が残り続け、配置前に落ちた場合は機能が未導入に見える。
+        if let Some((id, pid)) = stale_backup(&name, &current_pid) {
+            if process_exists(pid) {
+                continue;
+            }
+            let destination = bundled.join(&id);
+            if destination.exists() {
+                cleanup_dir(app, "入れ替え済み追加機能の退避先", &entry.path()).await;
+            } else {
+                match tokio::fs::rename(entry.path(), &destination).await {
+                    Ok(()) => crate::log_paths::append_app_log(
+                        app,
+                        &format!("中断した入れ替えから追加機能の旧版を戻しました: {id}"),
+                    ),
+                    Err(error) => crate::log_paths::append_app_log(
+                        app,
+                        &format!(
+                            "中断した入れ替えから追加機能の旧版を戻せません: {} ({error})",
+                            entry.path().display()
+                        ),
+                    ),
+                }
+            }
         }
     }
+}
+
+/// `replace_installed` の退避先名 `.backup-<id>-<pid>` から、別プロセスのものだけを読み取る。
+fn stale_backup(name: &str, current_pid: &str) -> Option<(String, u32)> {
+    let (id, pid) = name.strip_prefix(".backup-")?.rsplit_once('-')?;
+    if pid == current_pid
+        || id.is_empty()
+        || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return None;
+    }
+    Some((id.to_string(), pid.parse().ok()?))
 }
 
 #[cfg(windows)]
@@ -1311,9 +1356,16 @@ fn process_exists(pid: u32) -> bool {
 }
 
 #[cfg(not(windows))]
-fn process_exists(_pid: u32) -> bool {
-    // Windows専用機能だが、別OSで呼ばれても不明なPIDのフォルダは削除しない。
-    true
+fn process_exists(pid: u32) -> bool {
+    // キャラ作成は Apple Silicon Mac でも導入するため、macOS / Linux でも判定する。
+    // `ps -p` は対象が無いと失敗で終わる。起動自体できない判定不能時は削除しない。
+    match crate::tools::process::command_sync("ps")
+        .args(["-p", &pid.to_string()])
+        .output()
+    {
+        Ok(output) => output.status.success(),
+        Err(_) => true,
+    }
 }
 
 fn configure_component_environment(
@@ -1772,11 +1824,22 @@ fn replace_installed(stage: &Path, destination: &Path, id: &str) -> Result<()> {
             }
             return Err(error.into());
         }
-        std::fs::remove_dir_all(backup)?;
+        remove_replaced_backup(&backup);
     } else {
         std::fs::rename(stage, destination)?;
     }
     Ok(())
+}
+
+/// 入れ替え後の旧版を消す。新版はもう配置済みなので、消せなくても導入は成功として扱う
+/// （残った退避先は次回の `cleanup_stale_install_stages` が片付ける）。
+fn remove_replaced_backup(backup: &Path) {
+    if let Err(error) = std::fs::remove_dir_all(backup) {
+        crate::log_paths::log_detached(&format!(
+            "入れ替え前の追加機能を削除できません（次回の起動時に消します）: {} ({error})",
+            backup.display()
+        ));
+    }
 }
 
 fn replace_installed_pair(first: (&Path, &Path, &str), second: (&Path, &Path, &str)) -> Result<()> {
@@ -1832,7 +1895,7 @@ fn replace_installed_pair(first: (&Path, &Path, &str), second: (&Path, &Path, &s
     }
     for backup in backups {
         if backup.exists() {
-            std::fs::remove_dir_all(backup)?;
+            remove_replaced_backup(&backup);
         }
     }
     Ok(())
@@ -1893,6 +1956,24 @@ mod tests {
             stale_install_pid(".installing-whisper-invalid", "999"),
             None
         );
+    }
+
+    #[test]
+    fn 別プロセスの入れ替え退避先からidとpidを読む() {
+        assert_eq!(
+            stale_backup(".backup-character-maker-123", "999"),
+            Some(("character-maker".to_string(), 123))
+        );
+        assert_eq!(
+            stale_backup(".backup-python-123", "999"),
+            Some(("python".to_string(), 123))
+        );
+        // この起動の入れ替え中のもの・名前が違うもの・pidでないものは触らない。
+        assert_eq!(stale_backup(".backup-python-999", "999"), None);
+        assert_eq!(stale_backup(".backup-python-x", "999"), None);
+        assert_eq!(stale_backup(".backup--123", "999"), None);
+        assert_eq!(stale_backup("python", "999"), None);
+        assert_eq!(stale_backup(".backup-../x-123", "999"), None);
     }
 
     #[test]

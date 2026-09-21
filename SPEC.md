@@ -285,6 +285,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 - **版の表示**: Aivis は導入先の `engine_manifest.json` の版と `component-manifest.json` の `targetVersion` を比べ、「更新あり」「推奨版より新しい」「確認が必要」を出す。版確認の失敗はログへ残し、他の機能の表示は続ける。配布対象版と公式 Release リンクが一致しなければ状態取得を失敗させる。更新・確認件数は設定タブと基本設定の入口へ出す。
 - **操作**: 更新・推奨版への復帰・修復・削除は、維持または削除されるデータを画面内に示す二段階操作（10秒経過またはフォーカス移動で解除）。進捗は共通の部品で工程名と経過時間を出し、総量が分かれば実数パーセント、分からなければ不定バーにする。導入・更新・修復・削除はバックエンドの共通ロックで直列化する。`PicoAgent/aivis-userdata/` の音声モデル・辞書・設定には触れない。
+- **中断からの復旧**: 起動時に、終了済みプロセスの名前を持つ導入途中フォルダを消し、入れ替え中の退避先（追加機能の `.backup-<id>-<pid>`、Aivis の `.backup-aivis-*`）は本体が無ければ旧版を戻し、あれば消す。新版を配置できた後に旧版の掃除だけ失敗しても導入は成功として扱い、残りは次回片付ける。
 - **取得元**: 第三者ソフトウェアを PicoAgent の Release へ再アップロードしない。`component-manifest.json` は `version=2` / `policy=direct-upstream`、公式取得元表示、管理対象の `targetVersion` だけを持つ。`installMode=managed`（Aivis、Whisper、生成基盤と選んだモデル）は各公式配布元から `PicoAgent/bundled/<id>/` へ直接取得し、GitHub Release API のサイズと SHA-256 digest、固定モデルの SHA-256、HTTPS、上限サイズ、zip slip、展開容量を検査してから原子的に入れ替える。`installMode=external`（LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep）は公式ページを表示するだけで、外部導入物を削除しない。
 - **生成基盤**: 共有 Python 3.12 と ComfyUI を `character-maker` で管理し、Qwen 画像編集にも使う。Wan と LTX 0.9.8 は `video-wan`／`video-ltx` の別コンポーネント。Krea 2／LTX 2.5（`krea-2-turbo-nvfp4`、`ltx-2.5-nvfp4`）は Python 本体だけを再利用し、`media-runtime` へ独立 venv と ComfyUI を置く。対象は Windows x64・CUDA 13・演算能力12以上・VRAM 8GB以上・RAM 32GB以上で、8GBでの実動作保証ではない。利用条件と GPU・RAM・空き容量・権限を取得前に確かめ、条件不足を非量子化モデルへの切替などで回避しない。低VRAMでは CPU 退避・タイル復号・小さい既定寸法を使い、補間拡大はしない。共通 Python 未導入なら取得前に止め、共通 Python を含む基盤は追加モデルより先に削除できない。確認状態は [管理モデル](docs/models.md) を参照。
 - **オフライン**: 起動時確認は黙って見送り、明示操作では同じ画面内に「オフラインのため見送り」と出す（エラー画面・モーダル・フキダシは出さない）。
@@ -392,6 +393,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
   - 「zip を開くとモデル名のフォルダが1つ」という配布形は1階層だけ潜って `character.json` を探す（複数なら拒否）。
   - 「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順で、検証を通らないものを導入先へ残さない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
   - GUI生成・導入・削除は同じ `user-characters` 状態ロックで直列化する。
+  - 異常終了で残った途中データ（`.installing-*` / `.updating-*`）は一覧取得と更新の前に片付け、更新中の退避先 `.update-backup-*` は元の場所が空いていれば戻し、新版があれば消す。新版を配置できた後に旧版の掃除だけ失敗しても更新は成功として扱う。
 - **ID**: **英数字・ハイフン・アンダースコアだけの64文字以内**。判定は `character_pack::is_valid_id()` の1箇所で、導入・削除・構図保存・配信設定・関係性はすべてこれを通す。同梱キャラと**同じidのパックは導入を拒否する**（一覧は同梱側を優先するため選べなくなる）。判定は配信物 `assets/characters/index.json` を `asset_resolver` から読み、読めない構成では設定画面の事前検査に任せる。
 - **名前変更**: 追加キャラの表示名だけを変えられる（`settings_character_rename`）。内部IDとフォルダ名は変えない。自動生成した挨拶・人格の定型文だけを新しい名前へ追従させ、利用者が書いた文には触れない。再保存はキーの並びを保つ（`serde_json` の `preserve_order`）。
 - **削除**: OS のゴミ箱へ移す。保存中の選択キャラを消すときは先に `PICOAGENT_CHARACTER` を既定へ戻し、ゴミ箱移動が失敗したら、自分が設定した既定値のままである場合だけ元へ戻す。成功応答は実際の保存中キャラを返す。設定画面は削除中の変更と保存を止め、キャラ切替キューの完了を待って一覧・選択欄・人格欄・保存スナップショットを更新する。設定・会話履歴は消さない。
