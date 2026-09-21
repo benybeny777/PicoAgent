@@ -261,7 +261,7 @@ window.picoagent = {
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
     generationEnvironment: () => call("settings_generation_environment"),
-    installComponents: (ids, enableTts = false) => call("settings_components_install", { ids, enableTts }),
+    installComponents: (ids, enableTts = false, acceptedLicenseIds = []) => call("settings_components_install", { ids, enableTts, acceptedLicenseIds }),
     removeComponent: (id) => call("settings_components_remove", { id }),
     checkUpdate: () => call("settings_check_update"),
     installUpdate: () => call("settings_install_update"),

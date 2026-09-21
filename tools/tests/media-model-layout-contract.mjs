@@ -10,7 +10,10 @@ test('選択動画モデルの導入先と生成参照先が同じコンポー�
   const tool = source('skills/comfyui/mod.rs');
   assert.match(installer, /"--runtime",\s*&stage\.to_string_lossy\(\)/);
   assert.match(installer, /replace_installed\(&stage, &installed_dir\(app, id\), id\)/);
-  assert.match(setup, /root = args\.runtime\.resolve\(\)/);
+  // 導入先は `--runtime` で受けたコンポーネント直下。`checked_root()` が絶対パス化し、
+  // 導入先と親にリンク（シンボリックリンク・ジャンクション）が無いことを確かめてから解決する。
+  assert.match(setup, /root = checked_root\(args\.runtime\)/);
+  assert.match(setup, /def checked_root\(root\):[\s\S]*?is_symlink\(\)[\s\S]*?is_junction\(\)[\s\S]*?return root\.resolve\(\)/);
   assert.match(setup, /destination = safe_path\(root, relative\)/);
   assert.match(tool, /_ => bundled\.join\(engine\.component\(\)\),/);
   // 生成参照先は`--models`でサイドカーへ渡す（省メモリ再試行でも同じ引数列を作り直す）。

@@ -41,6 +41,14 @@ description: PicoAgentのCargo依存、JavaScript・Python等のパッケージ�
 6. Git管理外の同梱実体を配布する場合は、最終ビルド直前に正規取得入口から再取得し、実体の版を再確認する。
 7. 現行情報をREADMEとSPECへ反映し、監査結果をPR本文へ書く。未完了・条件待ちだけを`docs/TASKS.md`へ反映し、未マージ作業の再開情報が変わる場合だけHANDOFFを更新する。
 
+## 任意の画像・動画モデルを実機で導入する
+
+1. `docs/models.md`と`character-maker/sidecar/media/model_catalog.py`を照合する。利用者へ取得量、GPU・RAM条件、商用条件、低メモリ化の速度・画質差を示し、明示承認の前にはモデルを取得しない。
+2. 新NVFP4経路では`setup_models.py --preflight-only`で本人の利用条件確認版、実GPU、空き容量、全資産へのアクセスを先に検査する。認証は本人の`hf auth login`を使い、トークンを会話・ログ・引数へ出さない。
+3. `setup_runtime.py`を正規入口にして、共通Python本体を再利用する独立した`bundled/media-runtime`を作る。既存キャラ作成venvを書き換えず、旧モデル77GBの導入を代用しない。新Comfyで高速CUDAバックエンドが有効なことも確認する。
+4. `setup_models.py`から承認済みモデルだけを取得し、固定サイズ・SHA-256・利用条件文書・導入マーカーを検証する。転送停止は再開位置と実プロセスを確認して復旧し、取得中と誤報告しない。成功後はその処理が所有する再開用ファイルだけを回収する。
+5. `generate.py --lowvram`の小さい固定条件で生成し、静的テスト、実ノード登録、実生成、画質、速度を別々に報告する。成功・失敗の双方で専用Comfyと子プロセスを回収する。未確認の機種、品質経路、クリーン導入は`docs/TASKS.md`へ残す。
+
 ## 毎月点検する
 
 1. CodexのScheduled taskでは毎月1日に、このリポジトリを分離worktreeで開き、`$audit-picoagent-dependencies all`を実行するよう登録する。

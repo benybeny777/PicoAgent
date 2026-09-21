@@ -1048,21 +1048,23 @@ pub async fn settings_components_install(
     app: AppHandle,
     ids: Vec<String>,
     enable_tts: Option<bool>,
+    accepted_license_ids: Option<Vec<String>>,
     state: State<'_, AppState>,
     maker: State<'_, crate::character_maker::CharacterMakerState>,
 ) -> Result<Value, String> {
     if ids.iter().any(|id| id == "character-maker") && maker.is_running() {
         return Err("キャラクター生成中は管理ランタイムを更新できません".into());
     }
-    let installed = crate::components::install(&app, &ids)
-        .await
-        .map_err(|error| {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("追加機能の導入に失敗しました: {error:#}"),
-            );
-            format!("{error:#}")
-        })?;
+    let installed =
+        crate::components::install(&app, &ids, &accepted_license_ids.unwrap_or_default())
+            .await
+            .map_err(|error| {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("追加機能の導入に失敗しました: {error:#}"),
+                );
+                format!("{error:#}")
+            })?;
     if enable_tts_after_component_install(&ids, enable_tts) {
         let mut patch = Map::new();
         patch.insert("PICOAGENT_TTS_ENABLED".to_string(), json!(true));
