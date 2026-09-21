@@ -9,7 +9,7 @@ PowerShell 7、Rust/Tauri、認証済みの`gh`、各版の許諾済み同梱素
 - `Windows関係者版をビルドしてUP.bat`: 関係者版だけ。
 - `Windows審査版をビルドしてUP.bat`: 審査版だけ。
 
-共通本体は`scripts/publish-windows.ps1`。`-PrepareOnly`はネットワークで版・権限・ビルド元を確認するが、ビルドやアップロードはしない。既存Release本文の`source_commit`から直前版を特定できない場合は、記録を照合して`-PreviousSourceCommit <40桁SHA>`を指定する。関係者版の初期設定素材は`-PartnerSourceDir <フォルダーの絶対パス>`でも指定できる。
+共通本体は`scripts/publish-windows.ps1`。`-PrepareOnly`はネットワークで版・権限・ビルド元を確認するが、ビルドやアップロードはしない。既存Release本文の`source_commit`から直前版を特定できない場合は、記録を照合して`-PreviousSourceCommit <40桁SHA>`を指定する。関係者版の初期設定素材は`-PartnerSourceDir <フォルダーの絶対パス>`でも指定できる。実効差分では日本語パスも検出し、採番だけの違いとして除外するのは本体・xtaskの`[package]`の版、対応lock内の自packageの版、Tauri設定の最上位`version`だけに限定する。依存やモデルの版更新は除外しない。
 
 全種類ではAlphaだけを公開リポジトリ`benybeny777/PicoAgent-Distribution`の`v<版>`へ、関係者・審査の2種類を非公開`benybeny777/PicoAgent`の`v<版>-windows-private`へ分離する。単体の関係者・審査も同じprivateタグ体系を使う。同じ数値版が存在したら、後日追加・差し替えはせず新patchの採番を求めて止まる。起動中アプリ・管理エンジンがある場合も、利用者が終了するまで止める。
 

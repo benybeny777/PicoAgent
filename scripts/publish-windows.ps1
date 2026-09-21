@@ -35,6 +35,46 @@ function Assert-Installer {
     finally { $stream.Dispose() }
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
+function Get-VersionNeutralContent {
+    param([string]$Path, [string]$Content)
+    switch -Exact ($Path) {
+        'src-tauri/tauri.conf.json' {
+            $config = $Content | ConvertFrom-Json
+            $config.version = '__APP_VERSION__'
+            return ($config | ConvertTo-Json -Depth 100 -Compress)
+        }
+        { $_ -in 'src-tauri/Cargo.toml', 'xtask/Cargo.toml' } {
+            # 自packageの節だけを対象にし、依存節のversionには触れない。
+            return [regex]::Replace($Content, '(?ms)^\[package\]\r?\n.*?(?=^\[|\z)', {
+                param($section)
+                [regex]::Replace($section.Value, '(?m)^(version\s*=\s*")[^"]+("\s*)$', '${1}__APP_VERSION__${2}')
+            })
+        }
+        { $_ -in 'src-tauri/Cargo.lock', 'xtask/Cargo.lock' } {
+            $package = if ($Path -eq 'src-tauri/Cargo.lock') { 'picoagent' } else { 'xtask' }
+            return [regex]::Replace($Content, "(?m)(^\[\[package\]\]\r?\nname = `"$package`"\r?\nversion = `")[^`"]+(`")", '${1}__APP_VERSION__${2}')
+        }
+        default { return $Content }
+    }
+}
+function Test-EffectiveChange {
+    param([string]$Before, [string]$After)
+    # 日本語パスをGitのCエスケープへ変換させない。差分行全体からversionを消さない。
+    $paths = @(Invoke-Checked git @('-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', $Before, $After, '--', 'src-tauri', 'ui', 'skills', 'crates', 'characters', 'xtask', 'character-maker', 'distribution/release.json', 'scripts/build-partner-installer.ps1', 'scripts/build-holo-indie-review-installer.ps1'))
+    $selfVersionFiles = @('src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'xtask/Cargo.toml', 'xtask/Cargo.lock')
+    foreach ($path in $paths) {
+        if ($path -notin $selfVersionFiles) { return $true }
+        # 追加・削除された設定ファイルは、版の違いではなく実効変更として扱う。
+        & git cat-file -e "${Before}:$path" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $true }
+        & git cat-file -e "${After}:$path" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $true }
+        $old = (Invoke-Checked git @('show', "${Before}:$path")) -join "`n"
+        $new = (Invoke-Checked git @('show', "${After}:$path")) -join "`n"
+        if ((Get-VersionNeutralContent $path $old) -cne (Get-VersionNeutralContent $path $new)) { return $true }
+    }
+    return $false
+}
 
 # テストは関数だけを読み込み、外部コマンドを実行しない。
 if ($MyInvocation.InvocationName -eq '.') { return }
@@ -70,11 +110,7 @@ try {
     }
     if (-not $PreviousSourceCommit) { throw '直前版のビルド元が不明です。Release記録を確認し -PreviousSourceCommit に40桁のコミットを指定してください。' }
     Invoke-Checked git @('cat-file', '-e', "$PreviousSourceCommit`^{commit}")
-    $changed = @(Invoke-Checked git @('diff', '--name-only', $PreviousSourceCommit, $source, '--', 'src-tauri', 'ui', 'skills', 'crates', 'characters', 'xtask', 'character-maker', 'distribution/release.json', 'scripts/build-partner-installer.ps1', 'scripts/build-holo-indie-review-installer.ps1'))
-    # 版だけの変更を実効変更として扱わない。
-    if ($changed.Count -eq 0) { throw '実効内容が同じなのでビルド・アップロードしません。' }
-    $effective = @(Invoke-Checked git (@('diff', '--unified=0', $PreviousSourceCommit, $source, '--') + $changed)) | Where-Object { ($_ -match '^Binary files ' -or $_ -match '^[+-]') -and $_ -notmatch '^(---|\+\+\+)' -and $_ -notmatch '^[+-]\s*("?version"?\s*[:=]|"version":)' }
-    if (@($effective).Count -eq 0) { throw '実効内容が同じなのでビルド・アップロードしません。' }
+    if (-not (Test-EffectiveChange $PreviousSourceCommit $source)) { throw '実効内容が同じなのでビルド・アップロードしません。' }
     if ($Kind -eq 'All') {
         $publicTags = @(Invoke-Checked gh @('api', 'repos/benybeny777/PicoAgent-Distribution/releases', '--paginate', '--jq', '.[].tag_name'))
         if (@($publicTags | Where-Object { $_ -match "^v?$([regex]::Escape($version))(?:$|-)" }).Count) { throw '公開先にも同じ版が存在します。新しいpatch版で実行してください。' }
