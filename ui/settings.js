@@ -45,6 +45,7 @@ let modelLoadGeneration = 0;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
+let settingsSearchScheduler = null; // 検索の絞り込みを1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
@@ -109,6 +110,7 @@ replaceSettingsListener("navigate", "settings:navigate", tabId => {
 
 window.addEventListener("beforeunload", () => {
   dirtyStateScheduler?.cancel();
+  settingsSearchScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
 });
@@ -3080,6 +3082,12 @@ async function render() {
   apiSec.append(field("PICOAGENT_API_ENABLED", "ローカルAPIを有効にする（127.0.0.1 のみ。変更は再起動後に反映）", "checkbox", v.PICOAGENT_API_ENABLED === true));
   apiSec.append(field("PICOAGENT_API_PORT", "APIポート", "text", v.PICOAGENT_API_PORT ?? "", "11500"));
   apiSec.append(field("PICOAGENT_API_KEY", "APIキー（空なら認証なし。Authorization: Bearer で送る）", "password", v.PICOAGENT_API_KEY ?? ""));
+  // キーなしで有効にすると、このPCで動くどのプログラムからでもエージェントを呼べる。
+  // ブラウザからの横断呼び出しは Origin 検査で塞いであるが、ローカルのプログラムは塞げない。
+  apiSec.append(el("p", {
+    className: "hint",
+    textContent: "APIキーを空のまま有効にすると、このPCで動くどのプログラムからでもエージェント（ファイル操作やコマンド実行を含む）を呼び出せます。有効にするときはキーを設定してください。",
+  }));
   // MCP: 外部 MCP サーバのツールをエージェントから使えるようにする（stdio）。
   const mcpSec = section("MCP（外部ツール連携）");
   mcpSec.append(field(
@@ -4087,7 +4095,14 @@ form.addEventListener("click", event => {
   }
 });
 
-settingsSearch?.addEventListener("input", applySettingsSearch);
+// 検索は全設定項目の文面を走査するため、1打鍵ごとに走らせると入力が引っかかる。
+// 変更印の更新と同じく1フレーム1回へまとめる（購読も1本にする）。
+settingsSearchScheduler = window.PicoFrameScheduler.create(applySettingsSearch);
+settingsSearch?.addEventListener("input", () => {
+  // 消去ボタンの出し入れは見た目だけなので待たせない。
+  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
+  settingsSearchScheduler.schedule();
+});
 clearSettingsSearch?.addEventListener("click", () => {
   settingsSearch.value = "";
   clearSettingsSearch.hidden = true;
@@ -4102,9 +4117,6 @@ for (const shortcut of document.querySelectorAll("[data-settings-query]")) {
     settingsSearch.focus();
   });
 }
-settingsSearch?.addEventListener("input", () => {
-  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
-});
 document.addEventListener("keydown", event => {
   if (modalOpen) return; // 確認ダイアログ表示中は裏の保存・検索を動かさない
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {

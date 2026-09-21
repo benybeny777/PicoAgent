@@ -45,7 +45,7 @@ test("2Dキャラは小さい合成面をtransformで拡大しない", () => {
   assert.match(styles, /inset:0 auto auto 50%; width:260%; height:260%; translate:-50% 0/);
   assert.doesNotMatch(styles, /data-render-kind="2d"[^}]*left:-80%/);
   assert.match(renderer, /function syncPngNaturalResolution\(\)/);
-  assert.match(renderer, /window\.addEventListener\("resize", \(\) => \{[\s\S]*?syncPngNaturalResolution\(\)/);
+  assert.match(renderer, /function handleWindowResize\(\) \{[\s\S]*?syncPngNaturalResolution\(\)/);
   assert.match(renderer, /petSprite\.naturalWidth \/ dpr/);
   assert.match(renderer, /petSprite\.naturalHeight \/ dpr/);
   assert.match(renderer, /petSprite\.getBoundingClientRect\(\)/);

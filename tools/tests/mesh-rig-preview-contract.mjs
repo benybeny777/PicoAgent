@@ -59,16 +59,28 @@ test("確認画面は目・視線・5母音・表情・全動作・腕の操作�
   assert.match(renderer, /setEyeOpen\(left, right = left\)/);
   assert.match(renderer, /apertureWidth \* 0\.08/);
   assert.match(renderer, /setExpression\(name\)/);
+  // 表情の固定値は共有の `EXPRESSION_POSES` が持つ（描画ループから何度も引くため）。
   for (const expression of ["happy", "concern", "thinking"]) {
     assert.match(
       renderer,
-      new RegExp(`this\\.expression === "${expression}"[\\s\\S]{0,120}return \\{ eye: 1,`),
+      new RegExp(`${expression}: Object\\.freeze\\(\\{ eye: 1,`),
       `${expression}は表情選択だけで半目にしない`,
     );
   }
+  // 表情ごとの値は読み取り専用で共有する（毎フレーム作り直さない）。
+  assert.match(renderer, /const EXPRESSION_POSES = Object\.freeze\(\{/);
+  assert.match(renderer, /expressionPose\(\) \{\s*\n\s*return EXPRESSION_POSES\[this\.expression\] \|\| EXPRESSION_POSES\.neutral;/);
+  // 顔の描き直し判定は毎フレーム通る。比較のために配列や文字列を作らない。
+  assert.doesNotMatch(renderer, /\.map\(value => value\.toFixed\(3\)\)\.join/);
+  assert.match(renderer, /const next = face\.keyScratch \|\|= new Int32Array\(7\);/);
+  assert.match(renderer, /if \(last && last\.every\(\(value, index\) => value === next\[index\]\)\) return;/);
+  // 初回は必ず描く（まだ値が無いことを null で表す）。
+  assert.match(renderer, /lastKey: null, keyScratch: null/);
+  // 形式の判定でも毎フレーム配列を作らない。
+  assert.doesNotMatch(renderer, /\["anime25d-v1", "lvs-anime25d-v1"\]\.includes/);
   assert.doesNotMatch(preview, /data-motion="(?:wake|sleep)"/, "不要な起床・睡眠動作を確認画面へ戻さない");
   assert.doesNotMatch(renderer, /this\.expression === "sleep"|\/sleep\//, "独自2.5Dへ寝顔専用分岐を戻さない");
-  assert.match(renderer, /this\.expression === "shy"[\s\S]{0,160}blush: 1/, "照れ表情は開眼と頬染めを使う");
+  assert.match(renderer, /shy: Object\.freeze\(\{ eye: 1,[\s\S]{0,160}blush: 1/, "照れ表情は開眼と頬染めを使う");
   assert.match(renderer, /const eyeOpen = this\.eyeOpen \* expression\.eye;/, "旧2.5Dでも寝顔の閉眼係数を適用する");
   assert.match(renderer, /this\.rig\.expressionSadMode !== "disabled"/, "不自然な旧悲しみ差分をパック設定で無効化できる");
   assert.match(renderer, /this\.rig\.expressionHappyMode !== "disabled"/, "不自然な旧笑顔差分をパック設定で無効化できる");

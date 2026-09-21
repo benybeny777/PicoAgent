@@ -351,8 +351,6 @@ body.searching .tab-panel {
 .layout-selected-badge { position: absolute; top: 7px; right: 7px; display: none; padding: 3px 8px; border-radius: 999px; background: var(--pink); color: #fff; font-size: 10px; font-weight: 800; box-shadow: 0 2px 8px rgba(37, 23, 44, .24); }
 .layout-card.selected .layout-selected-badge { display: block; }
 @media (max-width: 560px) { .layout-card-grid { grid-template-columns: 1fr; } }
-.placement-actions { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
-.placement-actions button { min-height:42px; }
 .stream-settings { margin:18px 0; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-soft); }
 .stream-settings .field button { margin-top:8px; min-height:40px; }
 .tts-master-status { margin:0 0 12px; padding:11px 13px; border-radius:10px; font-size:13px; font-weight:800; }
@@ -379,7 +377,6 @@ body.searching .tab-panel {
 .stream-profile-preview[data-background="dog-hobby-room"] { background:url("assets/backgrounds/dog-hobby-room.webp") center/cover no-repeat; }
 .stream-profile-preview > span { position:absolute; left:10px; top:10px; padding:5px 8px; border-radius:8px; background:#433746bb; color:#fff; font-size:11px; font-weight:800; }
 .stream-profile-preview > strong { width:100%; padding:12px; border-left:5px solid var(--pink); border-radius:9px; background:#fff9; font-size:18px; }
-@media (max-width:700px) { .placement-actions { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .field.changed {
   padding-left: 8px;
   border-left: 3px solid var(--pink);
