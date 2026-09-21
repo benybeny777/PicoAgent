@@ -168,3 +168,15 @@ test("ゲームは通常の読み上げ経路と設定を共有する", () => {
   assert.match(manual, /選択中のキャラクターはゲーム画面の右側へバストアップで表示したまま/);
   assert.match(spec, /`PicoVoice`の共通経路/);
 });
+
+test("採点欄はキャラクターの幅と右余白の両方を空ける", () => {
+  // キャラは右端から余白を取って置かれる。採点欄が幅だけを差し引いていた頃は、
+  // 1000px幅で採点欄の右端36pxがキャラの下へ隠れ、「12 / 15」の分母が読めなかった。
+  const character = styles.match(/\.pet-app\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
+  const width = character.match(/width:(clamp\([^)]*\))/)?.[1];
+  const right = character.match(/right:(clamp\([^)]*\))/)?.[1];
+  assert.ok(width && right, "ゲーム中のキャラの幅・右余白を読み取れません");
+  const shell = styles.match(/^\.game-shell \{([^}]*)\}/m)?.[1] || "";
+  assert.ok(shell.includes(`- ${width}`), "採点欄がキャラの幅を空けていません");
+  assert.ok(shell.includes(`- ${right}`), "採点欄がキャラの右余白を空けていません");
+});
