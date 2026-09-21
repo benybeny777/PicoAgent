@@ -50,7 +50,7 @@ class 専用ランタイム検査(unittest.TestCase):
     def test_解決前にrootと親とcacheのリンクを拒否する(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for suffix in ("bundled/media-runtime", "bundled", "cache"):
+            for suffix in ("bundled/media-runtime", "bundled", "cache", "bundled/media-runtime-old"):
                 linked = root / suffix
                 with patch.object(Path, "is_junction", lambda path: path == linked), \
                         patch.object(runtime, "check_hardware"), \
@@ -111,14 +111,19 @@ class 専用ランタイム検査(unittest.TestCase):
             self.assertEqual(download.call_count, 1)
 
     def test_タイムアウトで子と親を回収して終了を待つ(self):
-        import psutil
+        # プロセス回収の契約だけを検査し、実プロセスや追加パッケージに依存しない。
+        class プロセスなし(Exception):
+            pass
+
+        psutil = Mock(NoSuchProcess=プロセスなし, Error=Exception)
         process = Mock(pid=12345)
         process.wait.side_effect = [runtime.subprocess.TimeoutExpired("uv", 7200), 0]
         process.poll.return_value = None
         child = Mock()
         parent = Mock()
         parent.children.return_value = [child]
-        with patch.object(runtime.subprocess, "Popen", return_value=process), \
+        with patch.dict(runtime.sys.modules, {"psutil": psutil}), \
+                patch.object(runtime.subprocess, "Popen", return_value=process), \
                 patch.object(psutil, "Process", return_value=parent), \
                 patch.object(psutil, "wait_procs", return_value=([child], [])):
             with self.assertRaises(runtime.subprocess.TimeoutExpired):
@@ -126,6 +131,41 @@ class 専用ランタイム検査(unittest.TestCase):
         child.kill.assert_called_once()
         process.kill.assert_called_once()
         self.assertEqual(process.wait.call_args.kwargs["timeout"], 10)
+
+    def test_旧版だけ残った中断は空き容量不足でも再取得せず復旧する(self):
+        with tempfile.TemporaryDirectory() as temporary, self.準備(Path(temporary)) as (target, cache, download):
+            runtime.install(target, cache, Path("uv"), runtime.LICENSE_REVISION)
+            backup = target.with_name("media-runtime-old")
+            target.rename(backup)
+            with patch.object(runtime.shutil, "disk_usage", return_value=type("容量", (), {"free": 0})()), \
+                    patch.object(runtime, "verify_runtime", wraps=runtime.verify_runtime) as verify:
+                runtime.install(target, cache, Path("uv"), runtime.LICENSE_REVISION)
+            self.assertTrue((target / "install.json").is_file())
+            self.assertFalse(backup.exists())
+            self.assertEqual(download.call_count, 1)
+            verify.assert_any_call(target)
+
+    def test_復旧先で起動できなければ退避版を残し取得を止める(self):
+        with tempfile.TemporaryDirectory() as temporary, self.準備(Path(temporary)) as (target, cache, download):
+            backup = target.with_name("media-runtime-old")
+            target.rename(backup)
+            with patch.object(runtime, "verify_runtime", side_effect=RuntimeError("復旧先の起動失敗")):
+                with self.assertRaisesRegex(RuntimeError, "復旧先"):
+                    runtime.install(target, cache, Path("uv"), runtime.LICENSE_REVISION)
+            self.assertFalse(target.exists())
+            self.assertTrue((backup / "旧環境.txt").is_file())
+            download.assert_not_called()
+
+    def test_本体と退避版の両方がある場合は本体を上書きしない(self):
+        with tempfile.TemporaryDirectory() as temporary, self.準備(Path(temporary)) as (target, cache, download):
+            backup = target.with_name("media-runtime-old")
+            backup.mkdir()
+            (backup / "退避版.txt").write_text("退避版を保持", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "復旧確認"):
+                runtime.install(target, cache, Path("uv"), runtime.LICENSE_REVISION)
+            self.assertTrue((target / "旧環境.txt").is_file())
+            self.assertTrue((backup / "退避版.txt").is_file())
+            download.assert_not_called()
 
     def test_旧環境を変更せず独立venvを公開する(self):
         with tempfile.TemporaryDirectory() as temporary:

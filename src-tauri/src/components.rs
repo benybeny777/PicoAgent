@@ -112,10 +112,16 @@ pub fn init(app: &AppHandle) {
     }
     // 前回の導入・入れ替えが途中で落ちた残りを起動時に片付ける。導入操作のときだけ
     // 片付けると、それまで数十GBの途中データや未導入に見える機能が残り続ける。
-    // 対象は終了済みプロセスの名前を持つものだけなので、この起動の導入とは競合しない。
+    // 退避先の復元は現在の配置先も変更するため、導入・削除と同じ排他を取る。
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        cleanup_stale_install_stages(&app).await;
+        let _operation = COMPONENT_OPERATION_LOCK.lock().await;
+        if let Err(error) = cleanup_stale_install_stages(&app).await {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("追加機能の中断復旧に失敗しました: {error:#}"),
+            );
+        }
     });
 }
 
@@ -643,6 +649,7 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
         "外部アプリはPicoAgentから削除できません。提供元の手順で削除してください"
     );
     let _operation = COMPONENT_OPERATION_LOCK.lock().await;
+    cleanup_stale_install_stages(app).await?;
     if id == "aivis" {
         crate::aivis::stop(app);
     }
@@ -720,6 +727,7 @@ pub async fn install(
         );
     }
     let _operation = COMPONENT_OPERATION_LOCK.lock().await;
+    cleanup_stale_install_stages(app).await?;
     for id in ids {
         match id.as_str() {
             "aivis" => {
@@ -872,7 +880,6 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     ));
     let python_stage = crate::log_paths::bundled_dir(app)
         .join(format!(".installing-python-{}", std::process::id()));
-    cleanup_stale_install_stages(app).await;
     cleanup_dir(app, "古いキャラ作成導入途中フォルダ", &stage).await;
     cleanup_dir(app, "古い共通Python導入途中フォルダ", &python_stage).await;
     tokio::fs::create_dir_all(&cache).await?;
@@ -1058,7 +1065,14 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         Ok::<_, anyhow::Error>(())
     }
     .await;
-    if result.is_err() {
+    if result.is_err()
+        && !["python", "character-maker"].iter().any(|id| {
+            crate::log_paths::bundled_dir(app)
+                .join(format!(".backup-{id}-{}", std::process::id()))
+                .exists()
+        })
+    {
+        // 復元も失敗した場合、次回起動で組を戻す判断に必要な途中配置は残す。
         cleanup_dir(app, "キャラ作成導入途中フォルダ", &stage).await;
         cleanup_dir(app, "共通Python導入途中フォルダ", &python_stage).await;
     }
@@ -1285,17 +1299,43 @@ fn stale_install_pid(name: &str, current_pid: &str) -> Option<u32> {
     .and_then(|pid| pid.parse::<u32>().ok())
 }
 
-async fn cleanup_stale_install_stages(app: &AppHandle) {
+async fn cleanup_stale_install_stages(app: &AppHandle) -> Result<()> {
     let bundled = crate::log_paths::bundled_dir(app);
-    let Ok(mut entries) = tokio::fs::read_dir(&bundled).await else {
-        return;
+    let mut entries = match tokio::fs::read_dir(&bundled).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
     };
     let current_pid = std::process::id().to_string();
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let name = entry.file_name().to_string_lossy().to_string();
+    // 個別の途中フォルダを消す前に、Python と生成基盤を組で旧版へ戻す。
+    // Python 配置直後の停止で、新 Python と旧 ComfyUI が混ざることを防ぐ。
+    let mut paths = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        paths.push(entry.path());
+    }
+    for path in &paths {
+        let name = path
+            .file_name()
+            .context("追加機能の名前がありません")?
+            .to_string_lossy();
+        if let Some((id, pid)) = stale_backup(&name, &current_pid) {
+            if matches!(id.as_str(), "python" | "character-maker") && !process_exists(pid) {
+                recover_installed_pair(&bundled, pid)?;
+            }
+        }
+    }
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .context("追加機能の名前がありません")?
+            .to_string_lossy()
+            .to_string();
         let stale_pid = stale_install_pid(&name, &current_pid);
         if stale_pid.is_some_and(|pid| !process_exists(pid)) {
-            cleanup_dir(app, "終了済み導入途中フォルダ", &entry.path()).await;
+            cleanup_dir(app, "終了済み導入途中フォルダ", &path).await;
             continue;
         }
         // 入れ替えの途中で落ちた退避先。名前にプロセスIDを含むため、拾わないと
@@ -1306,24 +1346,59 @@ async fn cleanup_stale_install_stages(app: &AppHandle) {
             }
             let destination = bundled.join(&id);
             if destination.exists() {
-                cleanup_dir(app, "入れ替え済み追加機能の退避先", &entry.path()).await;
+                cleanup_dir(app, "入れ替え済み追加機能の退避先", &path).await;
             } else {
-                match tokio::fs::rename(entry.path(), &destination).await {
+                match tokio::fs::rename(&path, &destination).await {
                     Ok(()) => crate::log_paths::append_app_log(
                         app,
                         &format!("中断した入れ替えから追加機能の旧版を戻しました: {id}"),
                     ),
-                    Err(error) => crate::log_paths::append_app_log(
-                        app,
-                        &format!(
-                            "中断した入れ替えから追加機能の旧版を戻せません: {} ({error})",
-                            entry.path().display()
-                        ),
-                    ),
+                    Err(error) => {
+                        return Err(error).with_context(|| {
+                            format!(
+                                "中断した入れ替えから追加機能の旧版を戻せません: {}",
+                                path.display()
+                            )
+                        })
+                    }
                 }
             }
         }
     }
+    Ok(())
+}
+
+fn recover_installed_pair(bundled: &Path, pid: u32) -> Result<()> {
+    let pairs = ["python", "character-maker"].map(|id| {
+        (
+            bundled.join(format!(".installing-{id}-{pid}")),
+            bundled.join(id),
+            bundled.join(format!(".backup-{id}-{pid}")),
+        )
+    });
+    if !pairs.iter().any(|(stage, _, _)| stage.exists()) {
+        // 両方とも配置済みなら、後続の通常掃除で旧版だけを回収する。
+        return Ok(());
+    }
+    for (stage, destination, backup) in &pairs {
+        if !stage.exists() && destination.exists() {
+            std::fs::rename(destination, stage).with_context(|| {
+                format!(
+                    "中断した組み合わせの新版を退避できません: {}",
+                    destination.display()
+                )
+            })?;
+        }
+        if backup.exists() {
+            std::fs::rename(backup, destination).with_context(|| {
+                format!(
+                    "中断した組み合わせの旧版を復元できません: {}",
+                    backup.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// `replace_installed` の退避先名 `.backup-<id>-<pid>` から、別プロセスのものだけを読み取る。
@@ -1523,7 +1598,6 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
     let unpacked = cache.join(format!("whisper-unpacked-{}", std::process::id()));
     let stage = installed_dir(app, "whisper")
         .with_file_name(format!(".installing-whisper-{}", std::process::id()));
-    cleanup_stale_install_stages(app).await;
     cleanup_file(app, "古いWhisper取得途中ファイル", &archive).await;
     cleanup_dir(app, "古いWhisper展開途中フォルダ", &unpacked).await;
     cleanup_dir(app, "古いWhisper導入途中フォルダ", &stage).await;
@@ -1972,6 +2046,45 @@ mod tests {
         assert_eq!(stale_backup(".backup--123", "999"), None);
         assert_eq!(stale_backup("python", "999"), None);
         assert_eq!(stale_backup(".backup-../x-123", "999"), None);
+    }
+
+    #[test]
+    fn 組の入れ替え途中では両方を旧版へ戻し配置完了後は新版を保つ() {
+        for completed in 1..=4 {
+            let root = test_path("pair-recovery");
+            let paths = ["python", "character-maker"].map(|id| {
+                (
+                    root.join(format!(".installing-{id}-123")),
+                    root.join(id),
+                    root.join(format!(".backup-{id}-123")),
+                )
+            });
+            for (stage, destination, _) in &paths {
+                std::fs::create_dir_all(stage).unwrap();
+                std::fs::create_dir_all(destination).unwrap();
+                std::fs::write(stage.join("version"), b"new").unwrap();
+                std::fs::write(destination.join("version"), b"old").unwrap();
+            }
+            for (index, (_, destination, backup)) in paths.iter().enumerate() {
+                if completed > index {
+                    std::fs::rename(destination, backup).unwrap();
+                }
+            }
+            for (index, (stage, destination, _)) in paths.iter().enumerate() {
+                if completed > index + 2 {
+                    std::fs::rename(stage, destination).unwrap();
+                }
+            }
+            recover_installed_pair(&root, 123).unwrap();
+            recover_installed_pair(&root, 123).unwrap();
+            for (_, destination, _) in &paths {
+                assert_eq!(
+                    std::fs::read(destination.join("version")).unwrap(),
+                    if completed == 4 { b"new" } else { b"old" }
+                );
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
