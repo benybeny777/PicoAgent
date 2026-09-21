@@ -7,6 +7,13 @@
   const minimize = document.getElementById("windowMinimize");
   const maximize = document.getElementById("windowMaximize");
   const close = document.getElementById("windowClose");
+  const gameButton = document.getElementById("gameMenuButton");
+
+  gameButton?.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    window.PicoGames?.open?.();
+  });
 
   minimize?.addEventListener("click", event => {
     event.stopPropagation();

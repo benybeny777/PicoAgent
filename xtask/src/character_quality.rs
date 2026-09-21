@@ -1087,7 +1087,7 @@ mod tests {
     }
 
     #[test]
-    fn content_box_ignores_transparent_padding() {
+    fn 内容の外接枠は透明余白を無視する() {
         let mut image = canvas(10, 10);
         image.put_pixel(3, 4, Rgba([1, 2, 3, 255]));
         image.put_pixel(6, 8, Rgba([1, 2, 3, 128]));
@@ -1096,7 +1096,7 @@ mod tests {
     }
 
     #[test]
-    fn a_local_face_patch_passes() {
+    fn 顔まわりの局所差分は合格にする() {
         let base = subject(200, 400);
         let analysis = analyze_base(&base).unwrap();
         let mut layer = base.clone();
@@ -1115,7 +1115,7 @@ mod tests {
     }
 
     #[test]
-    fn a_whole_body_regeneration_fails() {
+    fn 全身の作り直しは失敗させる() {
         let base = subject(200, 400);
         let analysis = analyze_base(&base).unwrap();
         let mut layer = base.clone();
@@ -1148,7 +1148,7 @@ mod tests {
     }
 
     #[test]
-    fn contour_drift_is_a_warning_not_a_failure() {
+    fn 輪郭のずれは失敗ではなく警告にする() {
         let base = subject(200, 400);
         let analysis = analyze_base(&base).unwrap();
         let stats = compare(&base, &shift_contour(&base), &analysis);
@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn a_layer_identical_to_base_is_reported() {
+    fn 基準と同一のレイヤーを報告する() {
         let base = subject(200, 400);
         let analysis = analyze_base(&base).unwrap();
         let stats = compare(&base, &base.clone(), &analysis);
@@ -1173,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn half_blink_must_not_be_a_transparency_change_of_the_closed_eye() {
+    fn 半目を閉じ目の透明度違いにしない() {
         let closed = subject(100, 200);
         let mut half = closed.clone();
         for pixel in half.pixels_mut() {
@@ -1195,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn canvas_margin_rejects_a_subject_cut_at_the_edge() {
+    fn 端で切れた被写体を余白検査で弾く() {
         let mut image = canvas(50, 80);
         for y in 0..40 {
             for x in 0..20 {
@@ -1211,7 +1211,7 @@ mod tests {
     /// しきい値は実測に基づく。滑らかな輪郭（完全な楕円でも被写体高さの0.139）を
     /// 巻き込まず、背景板（1.000）だけを拾う位置にあることを固定する。
     #[test]
-    fn rectangle_edges_are_flagged_but_curves_are_not() {
+    fn 矩形の縁は指摘し曲線は指摘しない() {
         let mut plate = canvas(60, 200);
         for y in 20..180 {
             for x in 10..50 {
@@ -1227,7 +1227,7 @@ mod tests {
     }
 
     #[test]
-    fn default_zoom_follows_the_renderer_priority() {
+    fn 既定倍率は描画側の優先順位に従う() {
         assert_eq!(
             default_zoom(&json!({ "defaultFraming": { "zoom": 1.72 } })),
             1.72
@@ -1237,7 +1237,7 @@ mod tests {
     }
 
     #[test]
-    fn native_scale_warns_only_when_the_default_framing_magnifies() {
+    fn 既定構図が拡大するときだけ警告する() {
         let tall = subject(890, 1800);
         let analysis = analyze_base(&tall).unwrap();
         let character = input("t", json!({ "bodyProportion": "compact" }));
@@ -1255,7 +1255,7 @@ mod tests {
 
     /// 生成元と突き合わせる引き伸ばし検査。統計ではなく実寸の比で判定する。
     #[test]
-    fn a_pack_larger_than_its_recorded_source_is_rejected() {
+    fn 記録した元絵より大きいパックを弾く() {
         let root = std::env::temp_dir().join(format!(
             "picoagent-generator-upscale-{}",
             std::process::id()
@@ -1305,7 +1305,7 @@ mod tests {
 
     /// 引き伸ばした画像は最細スケールに情報が無いため、実効解像度が下がる。
     #[test]
-    fn native_detail_drops_for_an_upscaled_image() {
+    fn 引き伸ばし画像は実効解像度が落ちる() {
         let original = subject(200, 400);
         let content = content_box(&original).unwrap();
         let small =
@@ -1323,7 +1323,7 @@ mod tests {
 
     /// 検証ツール自体が不正な入力で落ちないこと。
     #[test]
-    fn degenerate_images_do_not_panic() {
+    fn 退化した画像でもpanicしない() {
         let mut column = canvas(1, 8);
         column.put_pixel(0, 3, Rgba([10, 20, 30, 255]));
         let analysis = analyze_base(&column).expect("被写体がある");
@@ -1339,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn narrowing_the_baseline_keeps_only_the_inspected_character() {
+    fn 基準を絞ると検査対象キャラだけ残す() {
         let baseline = [
             "noa/半目/blink_half",
             "noa/差分なし/mouth_closed",
@@ -1356,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn baseline_keys_are_stable_against_message_changes() {
+    fn 基準の鍵は文言変更で変わらない() {
         let finding = Finding {
             severity: Severity::Fail,
             character: "sena".to_string(),

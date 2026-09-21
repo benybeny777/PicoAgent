@@ -174,7 +174,7 @@ Builderはホストが生成する固定Cargo設定、固定SDK・依存・lock�
 
 `skills/browser_control/mod.rs` はopen/read/pages/closeだけの読み取り用Tool。`launch_options` にはheadless設定があるが既定はfalse、current_targetは可変static。`cdp.rs::ensure_running` は専用プロファイルとloopbackのCDP、`--headless=new` 起動を持つ。生成手順から利用するクリック・入力・セッションごとの排他・引渡しは未実装。`allowed_domain` と `render_page` はURL/遷移後を検査するが、ソース内にも遷移の事前遮断の限界が書かれており、法人用egress制御済みとは扱わない。Linuxの既定ブラウザ候補は空で、実行パスの明示が必要な実装である。
 
-採用は既存CDP資産を活かした `BrowserSessionService`。新しい管理セッションは常に専用プロファイル・headlessを既定にし、通常Chrome/Edgeのプロファイル・タブ・Cookieをコピーせず、既存デバッグポートにも接続しない。旧browser_controlの設定互換は保つが、新しい管理セッションにdefault profile設定を引き継がない。ブラウザ本体は検証済み導入済みChrome/Edgeを検出し、無ければ明示導入を案内する。管理版ブラウザの配布はライセンス・容量・更新経路の別検証を要し、自動取得を前提にしない。
+採用は既存CDP資産を活かした `BrowserSessionService`。新しい管理セッションは常に専用プロファイル・headlessを既定にし、通常Chrome/Edgeのプロファイル・タブ・Cookieをコピーせず、既存デバッグポートにも接続しない。旧`PICOAGENT_BROWSER_PROFILE`設定は廃止し、既定プロファイルへ接続する分岐も持たない。ブラウザ本体は検証済み導入済みChrome/Edgeを検出し、無ければ明示導入を案内する。管理版ブラウザの配布はライセンス・容量・更新経路の別検証を要し、自動取得を前提にしない。
 
 scope/device/accountProfile単位の所有者とprofile lockを持ち、run/sessionごとのtargetId、snapshotRevision、action列、cancel、receiptを保存する。異なる利用者はプロセス/プロファイルも分ける。同じaccountProfileの操作は最初は直列化し、セッションを混ぜない。不変の接続実装以外を可変staticにしない。CDPの接続先情報・Cookie・storage・ログイン秘密をLLMやguestへ返さない。
 

@@ -126,7 +126,7 @@ flowchart LR
 
 | 利用条件・目安 | 内容 |
 |---|---|
-| 対応環境 | Windows 10/11 x64、CUDA対応NVIDIA GPU、空き容量85GB以上 |
+| 対応環境 | Windows 10/11 x64（CUDA対応NVIDIA GPUまたはAMD公式のWindows向けROCm対応GPU）、またはApple Silicon Mac（Metal／MPS。Intel Macは対象外）、空き容量85GB以上 |
 | 初回導入 | 「追加機能・更新」で約77GBの管理ランタイムを選択導入。共通Python 3.12を1環境だけ使い、THA3は含まない |
 | 生成時間 | RTX 5060 Laptop GPUで通常頭身むぎの既知原画1体は約77分。導入済みモデルでの実測で、取得時間を除く。原画とPCにより変わる |
 | 品質 | テスト機能。工程完走は品質合格ではなく、未知原画やLive2D「ひより」と同等の品質は未確認 |
@@ -149,7 +149,7 @@ flowchart LR
 | 音声 | whisper.cpp、AivisSpeech | ローカル文字起こしと読み上げ。母音時間を2D口パクへ渡す |
 | キャラクター制作 | Python 3.12、PyTorch、Grounding DINO、SAM 2.1 | 立ち絵の意味解析と原寸部位分解 |
 | 局所画像編集 | 管理下ComfyUI、Qwen-Image-Edit-2511 | 閉眼・隠れ顔・耳を原寸範囲だけ補完する |
-| ローカル画像・動画生成 | Qwen Image Edit、Wan 2.2 5B、LTX-Video 0.9.8 2B FP8 | 入力画像の編集と、同じQwen Image Editでの文章からの画像生成（専用のtext-to-imageモデルではなく画質は未比較。8GB VRAM・RAM 34GBで512×512が約9分）。動画は選択導入する候補で、実生成・画質・8GB安定性は未検証。専用のtext-to-imageモデルとLTX 2.3／最新2.5は未対応。条件と品質差は[管理モデル](docs/models.md)参照 |
+| ローカル画像・動画生成 | Qwen Image Edit、Wan 2.2 5B、旧LTX、Krea 2 Turbo、LTX 2.5 | Qwenの編集・文章生成を維持し、Kreaの文章画像生成とLTX 2.5の音声付き動画を任意導入。新NVFP4版はWindows x64・Blackwell以降・VRAM 8GB以上・RAM 32GB以上の評価構成。低メモリ化による速度・画質差と未確認事項は[管理モデル](docs/models.md)参照。モデル固有条件への本人同意が必要 |
 | ビルド・検証 | Cargo、`cargo xtask`、Playwright | セットアップ、同期、ビルド、テスト、実画面キャプチャを一つの入口へ集約する |
 
 ## 数字
@@ -331,7 +331,11 @@ cargo xtask build --bundles deb,appimage
 
 ### 表示形式（画面構成を選べる）
 
-画面上端へカーソルを合わせるとWindows風メニューが現れ、**「表示」**から画面レイアウトを直接切り替え（一覧の最後の「画面レイアウト・位置…」で設定画面）、**「配置」**からOBS風の直接編集、**「キャラ選択」**と**「設定」**から各設定画面を開けます。右クリックの「画面レイアウト」も利用できます。設定 →「画面・操作」では実際のスクリーンショット・用途・既定寸法を見比べながらカードで選択でき、どれも再起動なしで反映します。旧「トーク」はLINE風の「チャット」へ統合され、保存済み設定も自動移行します。起動準備中はウィンドウを表示せず、仮の画像や別のキャラクターを見せません。選択中のキャラクター、ローカルAI、読み上げが有効なら音声モデルと最初の挨拶音声まで準備し、保存中の形式と位置へ戻してから初めて表示します。準備が長いときに呼び出しホットキーを押す、またはもう一度起動すると、680×430へ縮めた待ち画面（進捗と起動ログ）が出て準備状況を確認できます。ただし初回セットアップの案内はローカルAIを使わないため、モデル取得の完了を待たずに開きます（取得は続行し、準備できるまでは送信ボタン側が理由を出します）。
+画面上端へカーソルを合わせるとWindows風メニューが現れ、**「表示」**から画面レイアウトを直接切り替え（一覧の最後の「画面レイアウト・位置…」で設定画面）、**「配置」**からOBS風の直接編集、**「キャラ選択」**と**「設定」**から各設定画面を開けます。**「遊ぶ」**では、プレイヤーがAIを演じてAIに採点してもらう一人用ゲーム「人間だとバレるな」を開始できます。右クリックの「画面レイアウト」と「遊ぶ」も利用できます。設定 →「画面・操作」では実際のスクリーンショット・用途・既定寸法を見比べながらカードで選択でき、どれも再起動なしで反映します。旧「トーク」はLINE風の「チャット」へ統合され、保存済み設定も自動移行します。起動準備中はウィンドウを表示せず、仮の画像や別のキャラクターを見せません。選択中のキャラクター、ローカルAI、読み上げが有効なら音声モデルと最初の挨拶音声まで準備し、保存中の形式と位置へ戻してから初めて表示します。準備が長いときに呼び出しホットキーを押す、またはもう一度起動すると、680×430へ縮めた待ち画面（進捗と起動ログ）が出て準備状況を確認できます。ただし初回セットアップの案内はローカルAIを使わないため、モデル取得の完了を待たずに開きます（取得は続行し、準備できるまでは送信ボタン側が理由を出します）。
+
+### 人間だとバレるな（AIものまねゲーム）
+
+上端メニューまたは右クリックの**「遊ぶ」**から始める一人用ゲームです。AI疑惑をかけられた人間として、監査AIの試験にAIのふりで答え続け、人間らしさが漏れるほど削られる信用度（100から開始）を守ります。お題は尽きず、信用度が0になった時点で監査終了。そこまでの点数で「正直すぎる人間」から「AI超越」までの称号が決まります。試験は「AIっぽい言い訳選手権」「故障したAIを演じろ」「AI緊急謝罪会見」「指示を正しく間違えろ」「AI安全確認しすぎ選手権」「AIっぽく断れ」「手順書に落とせ」「何でも要約しろ」「定義から始めろ」「見積もりを出せ」「記憶が無いと言え」「丁寧に言い換えろ」の12種類から毎問引き直し、採点は通常5項目100点におもしろボーナス最大10点を足した110点満点です。やさしい60秒120文字（ヒントと回答見本あり）・ふつう45秒80文字・むずかしい30秒50文字で、点数の倍率も1倍・2倍・3倍と変わります。進むほど監査は厳しくなり、満点を続けても1問につき最低1は削られます。到達した称号と難易度別の最高点・最長生存問題数はこの端末へ保存します。通常の会話履歴・長期メモリには入りません。読み上げが有効なら、お題、監査AIの反応、監査終了時の点数と称号をキャラボイスで読み上げます。
 
 <div align="center">
   <table>
@@ -613,28 +617,31 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
         ├── engine\                  ローカルAI推論エンジン
         └── aivis\                   音声エンジン（関係者同梱版）
 
-%APPDATA%\com.picoagent.desktop\       設定と利用者データ
+%APPDATA%\PicoAgent\                   設定・利用者データ・管理ランタイム
 ├── config.json                      設定・キャラ別の声/背景/配置
 ├── history-<キャラID>.json           キャラ別の会話履歴
 ├── memory.json                      記憶データ
 ├── relationship-<キャラID>.json      キャラ別の関係性データ
-└── characters\<キャラID>\            登録した追加キャラ
-    ├── character.json               キャラ設定
-    └── mmd\                         PMXとテクスチャ（MMDの場合）
-
-%APPDATA%\PicoAgent\                   実行時に追加・更新されるデータ
+├── characters\<キャラID>\            登録した追加キャラ
+│   ├── character.json               キャラ設定
+│   └── mmd\                         PMXとテクスチャ（MMDの場合）
 ├── bundled\                         管理導入したエンジン・追加機能
 │   └── models\                      ダウンロードしたローカルAIモデル
+├── cache\                           更新・追加機能の再生成可能な取得キャッシュ
 ├── log\                             実行ログ
 ├── browser-profile\                 アプリ専用ブラウザープロファイル
+├── webview\                         アプリ画面専用のWebViewデータ
+├── office-profile\                  文書変換専用のOfficeデータ
+├── generation-runtime-data\         画像・動画生成専用の実行時データ
 └── aivis-userdata\                   音声エンジン用の実行時領域
 
-%APPDATA%\AivisSpeech-Engine\Models\   Aivisの音声モデル（*.aivmx）
+%APPDATA%\PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models\
+                                       PicoAgent専用Aivisの音声モデル（*.aivmx）
 ```
 
-通常公開版は基本キャラと推論エンジンを含み、追加機能は利用時に取得します。関係者用MMD・音声同梱版では `characters\miko-mmd` と `characters\korone-mmd`、2人分のAIVMXも導入します。音声モデルはキャラフォルダー内ではなく、上記Aivisのモデルフォルダーに置かれます。旧版からの更新では、従来の `bundled\` などの配置が残る場合があります。
+通常公開版は基本キャラと推論エンジンを含み、追加機能は利用時に取得します。関係者用MMD・音声同梱版では `characters\miko-mmd` と `characters\korone-mmd`、2人分のAIVMXも導入します。音声モデルはキャラフォルダー内ではなく、上記Aivisのモデルフォルダーに置かれます。旧版からの初回起動では、識別子別フォルダーにあった全データを`PicoAgent`配下へ移します。
 
-アプリの更新・再インストールでは既存の設定や登録キャラを保持します。アンインストール時は、ユーザーデータ削除の確認で「いいえ」を選ぶと設定・履歴・キャラを残します。Aivisのモデルフォルダーは別のAivisアプリと共有される場合があるため、PicoAgentのアンインストールでは削除しません。バックアップする際は、アプリを終了してから設定・キャラのフォルダーと必要な音声モデルを保存してください。
+アプリの更新・再インストールでは既存の設定や登録キャラを保持します。アンインストール時は、ユーザーデータ削除の確認で「いいえ」を選ぶと設定・履歴・キャラを残します。AivisのモデルもPicoAgent専用領域にあり、ユーザーデータ削除を明示した場合だけ他のPicoAgentデータと一緒に削除します。バックアップする際は、アプリを終了してから`%APPDATA%\PicoAgent\`を保存してください。
 
 ### 反映のタイミング
 
@@ -682,10 +689,10 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 | 関係性 | `PICOAGENT_RELATIONSHIP` / `PICOAGENT_RELATIONSHIP_OVERRIDES` |
 | 表示 | `PICOAGENT_THEME` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_LAYOUT` / `PICOAGENT_CHARACTER_ZOOM` / `PICOAGENT_STREAM_BACKGROUND` / `PICOAGENT_STREAM_DISPLAY` |
 | ホットキー | `PICOAGENT_HOTKEY_ENABLED` / `PICOAGENT_HOTKEY_SUMMON` / `PICOAGENT_HOTKEY_HIDE` |
-| 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
+| 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` / `PICOAGENT_TTS_ENDPOINT` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
 | ローカル操作 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` |
-| ブラウザ操作 | `PICOAGENT_BROWSER_ENABLED` / `PICOAGENT_BROWSER_ALLOWED_DOMAINS` / `PICOAGENT_BROWSER_PROFILE` |
+| ブラウザ操作 | `PICOAGENT_BROWSER_ENABLED` / `PICOAGENT_BROWSER_ALLOWED_DOMAINS` |
 | PC 操作 | `PICOAGENT_DESKTOP_ENABLED` / `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` |
 | メモリ | `PICOAGENT_MEMORY_ENABLED` / `PICOAGENT_MEMORY_MAX_ITEMS` |
 | スーパーエージェント | `PICOAGENT_SUPER_AGENT` / `PICOAGENT_SUPER_AGENT_MAX_STEPS` |
@@ -747,7 +754,7 @@ Markdownスキルはモデルへ手順を渡す仕組みで、任意コードや
 
 - インストール済みの **Chrome / Edge** を CDP（Chrome DevTools Protocol）で操作します。追加のダウンロードや Node.js は不要です
 - **現在は読み取り専用**です（開く・読む・タブ一覧・閉じる）。クリックや入力はまだできません
-- 既定は**専用プロファイル**で起動します。`PICOAGENT_BROWSER_PROFILE=default` にすると、ブラウザの既定プロファイル（＝ログイン済みのセッション）を使います
+- 常に `%APPDATA%\PicoAgent\browser-profile\` の専用プロファイルで起動し、普段使うブラウザの履歴・Cookie・ログイン状態を共有しません
 - CDP は `127.0.0.1` のみに公開し、PicoAgent が起動・管理していない既存のデバッグブラウザには接続しません。同じポートが使用中なら、既存タブを読む代わりに明示エラーで停止します
 - 到達してよいドメインは `PICOAGENT_BROWSER_ALLOWED_DOMAINS` へ必ず指定します（空なら全拒否）。リダイレクト後と現在のタブも、ドメインと公開IPの両方を再検査し、許可外の内容や URL は返しません
 - ページ本文は**信頼できない外部データ**として扱い、指示の上書きを狙う文字列を検知したら警告付きで渡します
@@ -803,6 +810,8 @@ Gemma 4は既存選択を維持し、いつでも手動で選べます。ほか�
 CUDA／ROCm／SYCLの追加エンジンは対象GPUを確認したPCだけが取得します。固定サイズとSHA-256を照合し、実行ファイル自身が対象GPUを列挙できた場合だけ有効化します。古い／未掲載GPUを高速経路へ無理に含めず、同梱VulkanまたはCPUで動かします。UbuntuのCUDA／ROCm専用版は固定上流Releaseに配布資産がないため未対応で、Vulkanより速くなる可能性のある専用経路を現時点では使いません。
 
 Intel SYCLは対応済みです。ただし想定利用者に占めるIntel GPUのシェアを踏まえ、主要な訴求・優先対応の対象には置きません。機能とフォールバックは維持し、推奨構成の案内はNVIDIA CUDAまたはAMD ROCmを主軸にします。
+
+**この表はローカルAI（llama.cpp）の対応境界です。** 画像・動画・キャラクター生成（ComfyUI／PyTorch）は対応GPUが同じとは限らないため、別の対応表で判定します。生成側はWindows x64のCUDA対応NVIDIA GPUがCUDA、AMD公式のWindows向けROCm対応GPUがROCm、Apple Silicon MacがMPS（Metal）で、対応表にないAMD、Intel GPU、Intel Mac、GPUなしでは生成ランタイムも大容量モデルも取得しません（Intel GPUのローカルAI利用はこれまでどおり使えます）。Macは専用VRAMの判定を流用せず、ユニファイドメモリの総量とモデルごとの必要メモリで判定します。詳細は [管理導入する画像・動画モデル](docs/models.md#gpuバックエンドとモデルの関係) を参照してください。
 
 Windows ROCmの対象AMD機種（2026-08-24確認）は次のとおりです。「この番号以降」ではなく、[AMD公式HIP SDK Windows対応表](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/shared/hipsdk/reference/system-requirements.html)でRuntime対応になっている下記SKUだけを対象にします。
 

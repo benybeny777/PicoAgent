@@ -4,9 +4,20 @@
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 
-キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入はCUDA対応NVIDIA GPUと85GB以上の空きを取得前に検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。仮想環境が参照する基準Pythonも同じ管理対象世代の`runtime/`へ含め、起動時に削除する取得キャッシュへ依存させない。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
+キャラクター作成は`character-maker/`の4工程をTauriから起動する。管理導入は取得前にGPUの素性（ベンダー・型番・専用VRAM・共有メモリか）と85GB以上の空きを検査し、共通Python 3.12を`bundled/python`へ1環境だけ配置する。実行バックエンドは`src-tauri/src/generation_backend.rs`がCUDA（NVIDIA）かROCm（AMD公式のWindows向け対応GPU）を1つだけ選び、選んだ側のPyTorchだけを`uv pip sync`で導入する。依存は共通の`sidecar/requirements-comfy-common.in`と、バックエンド別の`requirements-comfy.in`／`requirements-comfy-rocm.in`／`requirements-comfy-mps.in`へ分けてロックする。MPS（Apple Silicon）のロックは`--python-platform aarch64-apple-darwin`で生成済みで、PyPIの標準wheelがMetalを含むため専用インデックスを使わない。ROCmのロックはAMD公式配布へ到達できるWindows機で次のように再生成してコミットする（ロックが無い間、AMD経路は取得を開始せず理由を表示する）。
 
-画像・動画生成は同じ共有PythonとComfyUI本体を再利用し、モデルだけを`bundled/video-wan`または`bundled/video-ltx`へ分離する。追加機能の選択前には取得せず、固定サイズ・SHA-256検査に通ったstagingだけを公開する。生成は`character-maker/sidecar/media/generate.py`が専用ポートと共通GPUロックを所有し、完成品を`generated-media/`へ移してからComfyUIの子孫プロセスと一時領域を回収する。失敗時のモデル取得キャッシュは再開用に残せるが、次回アプリ起動時には全削除する。
+```
+uv pip compile sidecar/requirements-comfy-rocm.in \
+  --output-file sidecar/requirements-comfy-rocm.lock \
+  --generate-hashes --index-strategy unsafe-best-match \
+  --python-platform windows --python-version 3.12
+```
+
+導入直後は`sidecar/verify_backend.py`でimport、`torch.cuda.is_available()`、`torch.version.hip`／`cuda`、デバイス名、最小テンソル演算を実GPUで確認し、通った場合だけモデル取得へ進む。導入済みのGPU種別・バックエンド・PyTorch版は`install.json`の`runtime`へ記録し、GPU交換後は再導入させる。ComfyUIは専用VRAMが十進16GB未満・共有メモリ・VRAM不明のとき`--lowvram`で起動し、通常起動のGPUメモリ不足だけ同条件で1回だけ再実行する（サイドカーは終了コード3でGPUメモリ不足を返し、再試行の可否はRust側が決める）。仮想環境が参照する基準Pythonも同じ管理対象世代の`runtime/`へ含め、起動時に削除する取得キャッシュへ依存させない。THA3は廃止済みで同梱しない。ComfyUIと固定SHAモデルは`bundled/character-maker`へstagingから公開し、正常終了後は`.part`、展開フォルダ、旧版を残さない。キャラ作成、共通Python、WhisperのPID付き導入途中フォルダは、所有PIDが終了済みの場合だけ次回の管理導入前に回収する。アプリ起動時はキャラごとの原画、manifest、現行公開世代を残し、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を回収する。未完成工程はすべてpendingへ戻す。確認画面は`character-preview.html`から現行公開世代をReader leaseで保持し、`ui/mesh-rig.js`の本番描画を使う。UIビルド前には`cargo xtask setup pixi`で固定SHAのPIXI 6.5.10を準備する。欠けた状態の`build-ui`は、メッシュ表示と設定操作が壊れた実行ファイルを作らず明示的に失敗する。
+
+既存の画像・動画生成は同じ共有PythonとComfyUI本体を再利用し、モデルだけを`bundled/video-wan`または`bundled/video-ltx`へ分離する。Krea 2／LTX 2.5 NVFP4はWindows x64向けに共通Python本体だけを再利用し、`media/setup_runtime.py`で`bundled/media-runtime/venv`とComfyUI 0.37.0を分離する。CUDA 13用PyTorch 2.11と依存の固定正本は`sidecar/requirements-media.in/.lock`で、更新時はWindows x64・Python 3.12指定でハッシュ付きlockを再生成する。CUDA 12.8では新Comfyの高速バックエンドが無効になるため、新経路へ流用しない。旧環境のlockは変更しない。
+
+追加機能の選択・本人の利用条件への同意・GPU/RAM/空き容量/モデル提供元への認証確認が済む前には取得しない。固定サイズ・SHA-256検査に通ったstagingだけを公開する。新モデルの固定資産は`media/model_catalog.py`、取得と再開は`media/setup_models.py`を使う。生成は`media/generate.py`が専用ポートと共通GPUロックを所有し、完成品を`generated-media/`へ移してからComfyUIの子孫プロセスと一時領域を回収する。失敗時のモデル取得キャッシュは再開用に残せるが、次回アプリ起動時には全削除する。新しい導入・ワークフローのCPU回帰は`python -m unittest discover -s character-maker/sidecar/media -p 'test*.py'`を使い、実GPU生成と混同しない。
 
 キャラ作成の補完工程は、リポジトリ直下で `python -m unittest discover -s character-maker/sidecar/completion -p 'test*.py'` を実行してCPU回帰を確認する。NumPy、Pillow、psutilなど導入済みの管理Pythonを使い、この検査のためにGPUモデルを取得しない。ComfyUI通信は `character-maker/sidecar/comfy_client.py` を共通入口とし、旧expression生成スクリプトや移管元Repoへ依存しない。テストの一時出力はリポジトリ直下の `temp/` に置く。CPU合格はGPU生成や画質の合格を意味しない。
 
@@ -136,7 +147,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 許諾済み関係者へ非公開で渡す、MMDキャラと音声モデルを同梱した試用インストーラは、リポジトリ直下の `関係者版インストーラをビルド.bat` で生成します（本体は `scripts/build-partner-installer.ps1`。PowerShell 7が必要）。
 
-- 事前に `%APPDATA%\com.picoagent.desktop\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
+- 事前に `%APPDATA%\PicoAgent\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
 - チェックアウトが `origin/main` より古い場合や未コミットの変更がある場合は停止します（そのまま作る場合は引数に `-AllowStale`）。
 - ビルド中は `cargo xtask stop` で起動中のPicoAgentと同梱エンジンを終了します。
 - 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
@@ -145,7 +156,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審査版インストーラをビルド.bat`で生成します（本体は`scripts/build-holo-indie-review-installer.ps1`。PowerShell 7が必要）。通常版、関係者版、審査版を同じ成果物として扱いません。
 
-- `%APPDATA%\com.picoagent.desktop\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
+- `%APPDATA%\PicoAgent\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
 - 配信・動画から学習した音声モデル、AIVMX、Aivis本体、音声用初期設定は含めません。読み上げは既定で無効です。
 - 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
 - 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。
@@ -210,7 +221,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **同梱推論エンジン（llama-server）**
 
-- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux Vulkan x64の資産名とSHA-256をコードで照合します。WindowsのNVIDIA CUDA 13.3版、AMD ROCm 7.14版、Intel SYCL版は対応GPUを検出した場合だけ公式Releaseから追加取得し、固定サイズ・SHA-256・`--list-devices`の実認識をすべて確認した後に使います。取得済み配置もマニフェストのタグ・方式・資産名・SHA-256が一致する場合だけ再利用します
+- llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux Vulkan x64の資産名とSHA-256をコードで照合します。WindowsのNVIDIA CUDA 13.3版、AMD ROCm 7.14版、Intel SYCL版は対応GPUを検出した場合だけ公式Releaseから追加取得し、固定サイズ・SHA-256・`--list-devices`の実認識をすべて確認した後に使います。取得済み配置もマニフェストのタグ・方式・資産名・SHA-256が一致する場合だけ再利用します。3方式の取得・検証・入れ替えは`engine_backend.rs`の`GPU_BACKENDS`表と`ensure_gpu_engine()`に1本化してあり、方式を足すときは表へ1行足します
 - 実行ファイルは配布物へ同梱しますが、モデル GGUF（数 GB）は含めず、初回起動時に `%APPDATA%\PicoAgent\bundled\models\` へ取得します
 - 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します
 
@@ -258,8 +269,8 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 **識別子とデータ**
 
-- アプリ識別子は `com.picoagent.desktop`（旧 `com.picoagent.app` / `com.coda.app`。初回起動時に旧識別子配下の `config.json` / `history.json` / `memory.json` を現行へコピー移行）
-- 設定・履歴・メモリは `app_config_dir` / `app_data_dir` 配下、同梱系の実行時取得物は `PicoAgent/bundled/`、ログは `PicoAgent/log/`
+- アプリ識別子は `com.picoagent.desktop`。保存先は識別子別フォルダを使わず、設定・履歴・追加キャラ・管理ランタイムを`PicoAgent`配下へ集約する。初回起動時に現行および旧識別子（`com.picoagent.app` / `com.coda.app`）配下の全データを移す
+- 設定・履歴・メモリ・追加キャラ・同梱系の実行時取得物・ログ・キャッシュは、OSの利用者データ領域にある`PicoAgent/`配下へ集約する
 - アイコンは `src-tauri/icons/`（`cargo tauri icon src-tauri/icon-source.png` で再生成）
 
 **インストール（上書き導入）**

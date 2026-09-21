@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
@@ -81,11 +81,7 @@ impl UsageStore {
 }
 
 fn path(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|error| anyhow::anyhow!("トークン使用量の保存先を取得できません: {error}"))?
-        .join("usage.json"))
+    Ok(crate::log_paths::data_dir(app).join("usage.json"))
 }
 
 pub fn load(app: &AppHandle) -> anyhow::Result<UsageStore> {

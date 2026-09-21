@@ -18,10 +18,8 @@ Windows版のアンインストール時に削除を選ばなければ、設定�
 
 - `%APPDATA%\PicoAgent`
 - `%LOCALAPPDATA%\PicoAgent`
-- `%APPDATA%\com.picoagent.desktop`
-- `%LOCALAPPDATA%\com.picoagent.desktop`
 
-旧版から移行した利用者に限り `com.picoagent.app` / `com.coda.app` が残る場合があります。販売開始前に、バックアップ・復元・ログ書き出しのGUI導線を追加するか判断します。
+旧版の`com.picoagent.desktop` / `com.picoagent.app` / `com.coda.app`にあったデータは初回起動で`PicoAgent`配下へ移ります。同名で内容が異なるデータは`migration-conflicts`へ退避されます。販売開始前に、バックアップ・復元・ログ書き出しのGUI導線を追加するか判断します。
 
 ## 販売前に決めること
 

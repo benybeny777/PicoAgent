@@ -178,7 +178,10 @@ async fn running_server_uses_model(app: &AppHandle, model: &Path) -> bool {
             id == file_name || id == &expected_path || id.ends_with(&format!("/{file_name}"))
         }),
         Err(error) => {
-            eprintln!("既存ローカルエンジンのモデル確認に失敗しました: {error}");
+            crate::log_paths::append_app_log(
+                app,
+                &format!("既存ローカルエンジンのモデル確認に失敗しました: {error}"),
+            );
             false
         }
     }
@@ -444,7 +447,7 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn total_memory_bytes() -> Option<u64> {
+pub(crate) fn total_memory_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
         // WMI を PowerShell 経由で叩くのをやめ、OS の API を直接呼ぶ。

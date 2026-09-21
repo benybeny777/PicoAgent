@@ -11,16 +11,28 @@ const LOG_RETAIN_DAYS: i64 = 7;
 
 pub fn data_dir(app: &AppHandle) -> PathBuf {
     match app.path().app_data_dir() {
-        Ok(path) => path
-            .parent()
-            .map(|parent| parent.join("PicoAgent"))
-            .unwrap_or(path),
+        Ok(path) => {
+            let root = path
+                .parent()
+                .map(|parent| parent.join("PicoAgent"))
+                .unwrap_or(path);
+            let identifier = app.config().identifier.as_str();
+            if identifier == "com.picoagent.desktop" {
+                root
+            } else {
+                root.join("instances").join(identifier)
+            }
+        }
         // フォールバック許可: 保存先取得自体の失敗を記録するため、ログだけは一時領域へ退避する。
         Err(error) => {
             eprintln!("ログ保存先を取得できないため一時領域を使います: {error}");
             std::env::temp_dir().join("PicoAgent")
         }
     }
+}
+
+pub fn cache_dir(app: &AppHandle) -> PathBuf {
+    data_dir(app).join("cache")
 }
 
 pub fn log_dir(app: &AppHandle) -> PathBuf {
@@ -155,6 +167,19 @@ pub fn append_app_log(app: &AppHandle, message: &str) {
     }
 }
 
+/// `AppHandle` を引数で受け取れない位置（終了処理、コールバック、スキルの内部）から
+/// app ログへ残す。
+///
+/// GUIアプリには標準エラー出力の行き先が無い（Windowsはコンソールへ接続しない）。
+/// `eprintln!` で書いた失敗はどこにも残らないため、原因の追跡ができなくなる。
+/// ハンドルがまだ無い起動最初期だけ、最後の手段として stderr へ落とす。
+pub fn log_detached(message: &str) {
+    match crate::durable_jobs::app_handle() {
+        Some(app) => append_app_log(app, message),
+        None => eprintln!("{message}"),
+    }
+}
+
 pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
     let new_path = log_file(app, name);
     if new_path.exists() {
@@ -213,6 +238,37 @@ mod guard {
             violations.is_empty(),
             "画面操作と通知の失敗は診断ログへ残してください:\n{}",
             violations.join("\n")
+        );
+    }
+
+    /// GUIアプリには標準エラー出力の行き先が無い（Windowsはコンソールへ接続しない）。
+    /// `eprintln!` で書いた失敗はどこにも残らず、握りつぶしたのと同じになる。
+    /// 例外は、ログ基盤そのものがまだ使えない起動最初期だけ。
+    #[test]
+    fn 本番経路の失敗をstderrへ捨てない() {
+        // 理由付きの例外。どちらも「ログへ書けないこと自体」を伝える最後の手段。
+        const ALLOWED: &[&str] = &[
+            "src/log_paths.rs", // ログ保存先の取得失敗と app.log への書き込み失敗
+            "src/lib.rs",       // ログ置き場を作れなかった起動最初期
+        ];
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            let path = source.path.display().to_string().replace('\\', "/");
+            if ALLOWED.iter().any(|allowed| path.ends_with(allowed)) {
+                continue;
+            }
+            for (number, line) in source.body().lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                if line.contains("eprintln!") {
+                    violations.push(format!("{path}:{}", number + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "失敗は log_paths::append_app_log / log_detached でログへ残してください（stderr はGUIでは届きません）: {violations:?}"
         );
     }
 }

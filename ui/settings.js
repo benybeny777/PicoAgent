@@ -45,6 +45,7 @@ let modelLoadGeneration = 0;
 let alarmEditorState = null; // 目覚ましエディタ（保存時に PICOAGENT_ALARMS を組み立てる）
 let scheduleEditorState = null; // スケジュールタスクエディタ（保存時に PICOAGENT_SCHEDULED_TASKS を組み立てる）
 let dirtyStateScheduler = null; // 高頻度入力の変更印更新を1フレーム1回へまとめる。
+let settingsSearchScheduler = null; // 検索の絞り込みを1フレーム1回へまとめる。
 const characterManifestCacheKey = "2026-07-03-live2d-jp-voice-v1";
 const noSearchResultMessage = "検索に一致する設定はありません";
 const SETTINGS_TAB_IDS = new Set(["basic", "display", "character-maker", "character-register", "character", "voice", "components", "providers", "tools", "permissions", "skillguide", "diagnostics"]);
@@ -109,6 +110,7 @@ replaceSettingsListener("navigate", "settings:navigate", tabId => {
 
 window.addEventListener("beforeunload", () => {
   dirtyStateScheduler?.cancel();
+  settingsSearchScheduler?.cancel();
   for (const slot of settingsListeners.values()) slot.release?.();
   settingsListeners.clear();
 });
@@ -1154,8 +1156,30 @@ function buildComponentManager() {
   const operationProgress = createOperationProgress("追加機能の処理進捗");
   const status = operationProgress.message;
   operationProgress.element.classList.add("component-manager-status");
-  // 長い追加機能一覧の末尾では導入中の表示が画面外になるため、一覧より前へ固定する。
-  sec.append(core, operationProgress.element, list);
+  // 画像・動画・キャラクター生成に使うGPUと実行バックエンドを、取得を始める前に見せる。
+  const generation = el("p", { className: "hint", textContent: "GPUを確認中…" });
+  sec.append(core, generation, operationProgress.element, list);
+
+  async function refreshGenerationEnvironment() {
+    try {
+      const info = await window.picoagent.settings.generationEnvironment();
+      const gpu = info?.gpuName ? `${info.gpuName}（${info.gpuVendor}）` : "GPU不明";
+      if (!info?.supported) {
+        generation.textContent = `画像・動画・キャラクター生成: ${info?.reason || "対応GPUを確認できません。"}`;
+        return;
+      }
+      const start = info.lowvram ? "省メモリ設定（lowvram）で起動" : "通常起動";
+      const reinstall = info.needsReinstall
+        ? " 導入済みランタイムがこのGPU向けではありません。入れ直してください。"
+        : "";
+      const unverified = (info.mpsUnverified || []).length
+        ? ` このMacでは次のモデルが実機未確認です: ${info.mpsUnverified.join("、")}。`
+        : "";
+      generation.textContent = `画像・動画・キャラクター生成: ${gpu} を ${info.backendLabel} で使用します。ComfyUIは${start}します（${info.lowvramReason}）。${reinstall}${unverified}`;
+    } catch (error) {
+      generation.textContent = `画像・動画・キャラクター生成: GPUを確認できません（${error?.message || error}）`;
+    }
+  }
 
   function setBusy(busy) {
     sec.setAttribute("aria-busy", busy ? "true" : "false");
@@ -1167,6 +1191,7 @@ function buildComponentManager() {
   }
 
   async function refresh() {
+    refreshGenerationEnvironment();
     const items = await window.picoagent.settings.componentStatus();
     list.innerHTML = "";
     const attentionCount = items.filter(item => item.updateAvailable || item.newerThanTarget || item.versionUnknown).length;
@@ -1200,6 +1225,18 @@ function buildComponentManager() {
           if (status.textContent === confirmationMessage) status.textContent = "";
         },
       }) : null;
+      const licensedModel = ["image-krea2", "video-ltx25"].includes(item.id);
+      let licenseAccepted = null;
+      let licenseConsent = null;
+      if (licensedModel) {
+        const consent = document.createElement("label");
+        licenseAccepted = document.createElement("input");
+        licenseAccepted.type = "checkbox";
+        consent.append(licenseAccepted, document.createTextNode(item.id === "image-krea2"
+          ? " 提供元の利用条件を読み、関連会社を含む年間売上100万米ドル未満、または別契約済みであることを本人が確認し、利用条件に同意します。生成前のプロンプトと公開前の成果物の内容・権利を本人が確認します。"
+          : " 提供元の利用条件を読み、年間売上1,000万米ドル以上の事業利用では別契約が必要なことを本人が確認し、利用条件に同意します。生成前のプロンプトと公開前の成果物の内容・権利を本人が確認します。"));
+        licenseConsent = consent;
+      }
       button.addEventListener("click", async () => {
         if (!managed) {
           const url = item.sources?.[0]?.url;
@@ -1208,6 +1245,10 @@ function buildComponentManager() {
           return;
         }
         if (actionConfirmation && !actionConfirmation.request()) return;
+        if (licensedModel && !licenseAccepted?.checked) {
+          status.textContent = "提供元リンクで利用条件を確認し、本人が同意欄を選んでください。Hugging Face側の同意・アクセス許可も別途必要な場合があります。";
+          return;
+        }
         setBusy(true);
         // 取得はバックエンドで走るので、この画面を閉じても止まらない。黙っていると
         // 「閉じれば止まる」と誤解され、数百MBの取得が知らないうちに続くことになる。
@@ -1217,7 +1258,7 @@ function buildComponentManager() {
           ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…${keepsRunning}`
           : `${item.label}を公式配布元から取得しています…${keepsRunning}`;
         try {
-          await window.picoagent.settings.installComponents([item.id]);
+          await window.picoagent.settings.installComponents([item.id], false, licensedModel ? [item.id] : []);
           const successMessage = item.updateAvailable
             ? `${item.label}を${item.targetVersion}へ更新しました。`
             : (item.newerThanTarget
@@ -1296,6 +1337,7 @@ function buildComponentManager() {
           versionText ? el("small", { textContent: versionText }) : null,
           item.versionError ? el("small", { className: "component-version-warning", textContent: item.versionError }) : null,
           sourceLinks,
+          licenseConsent,
         ].filter(Boolean)),
         el("span", { className: "component-badge", textContent: badgeText }),
         actions,
@@ -1933,7 +1975,7 @@ function buildSkillCategoryList(tools, values) {
   return wrap;
 }
 
-// 自分で追加したキャラクター（app_data_dir/characters 配下）を一覧の形へそろえる。
+// 自分で追加したキャラクター（PicoAgent/characters 配下）を一覧の形へそろえる。
 // 同梱と同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
 async function loadUserCharacters(bundled) {
   const known = new Set(bundled.map(character => character.id));
@@ -3040,6 +3082,12 @@ async function render() {
   apiSec.append(field("PICOAGENT_API_ENABLED", "ローカルAPIを有効にする（127.0.0.1 のみ。変更は再起動後に反映）", "checkbox", v.PICOAGENT_API_ENABLED === true));
   apiSec.append(field("PICOAGENT_API_PORT", "APIポート", "text", v.PICOAGENT_API_PORT ?? "", "11500"));
   apiSec.append(field("PICOAGENT_API_KEY", "APIキー（空なら認証なし。Authorization: Bearer で送る）", "password", v.PICOAGENT_API_KEY ?? ""));
+  // キーなしで有効にすると、このPCで動くどのプログラムからでもエージェントを呼べる。
+  // ブラウザからの横断呼び出しは Origin 検査で塞いであるが、ローカルのプログラムは塞げない。
+  apiSec.append(el("p", {
+    className: "hint",
+    textContent: "APIキーを空のまま有効にすると、このPCで動くどのプログラムからでもエージェント（ファイル操作やコマンド実行を含む）を呼び出せます。有効にするときはキーを設定してください。",
+  }));
   // MCP: 外部 MCP サーバのツールをエージェントから使えるようにする（stdio）。
   const mcpSec = section("MCP（外部ツール連携）");
   mcpSec.append(field(
@@ -3066,7 +3114,18 @@ async function render() {
     ttsMasterStatus.textContent = enabled ? "読み上げ：有効" : "読み上げ：ミュート中（起動時も話しません）";
     setQuickSettingsSummary("voice", enabled ? "読み上げ有効" : "ミュート中");
   });
-  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "キャラボイスの音量（0〜100・初期値35）", "number", v.PICOAGENT_TTS_VOLUME ?? "35", "35"));
+  voiceSec.append(field("PICOAGENT_TTS_VOLUME", "音声・ゲーム効果音の音量（0〜100・初期値35）", "number", v.PICOAGENT_TTS_VOLUME ?? "35", "35"));
+  voiceSec.append(field(
+    "PICOAGENT_TTS_ENDPOINT",
+    "外部VOICEVOX互換API（任意・このPC上のURL）",
+    "text",
+    v.PICOAGENT_TTS_ENDPOINT ?? "",
+    "例: http://127.0.0.1:50021"
+  ));
+  voiceSec.append(el("p", {
+    className: "hint",
+    textContent: "空欄ではPicoAgent専用のAivisを11436番ポートで起動します。外部APIを使うときだけURLを明示してください。既定ポートへ自動接続したり、外部APIのモデルを変更したりしません。",
+  }));
   const memoryManager = window.PicoMemorySettings.buildMemoryManager({
     api: window.picoagent.settings,
     section,
@@ -3585,7 +3644,7 @@ async function render() {
 
   // --- キャラクターを自分で追加する ---
   // 同梱キャラは実行ファイルへ焼き込まれているため増減できない。追加分はユーザー領域
-  // （app_data_dir/characters）へ入れる。導入は検証を通ってから確定するので、
+  // （PicoAgent/characters）へ入れる。導入は検証を通ってから確定するので、
   // 壊れたパックが一覧へ出ることはない。
   const addSec = section("キャラクターを追加");
   const addHint = el("p", {
@@ -4036,7 +4095,14 @@ form.addEventListener("click", event => {
   }
 });
 
-settingsSearch?.addEventListener("input", applySettingsSearch);
+// 検索は全設定項目の文面を走査するため、1打鍵ごとに走らせると入力が引っかかる。
+// 変更印の更新と同じく1フレーム1回へまとめる（購読も1本にする）。
+settingsSearchScheduler = window.PicoFrameScheduler.create(applySettingsSearch);
+settingsSearch?.addEventListener("input", () => {
+  // 消去ボタンの出し入れは見た目だけなので待たせない。
+  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
+  settingsSearchScheduler.schedule();
+});
 clearSettingsSearch?.addEventListener("click", () => {
   settingsSearch.value = "";
   clearSettingsSearch.hidden = true;
@@ -4051,9 +4117,6 @@ for (const shortcut of document.querySelectorAll("[data-settings-query]")) {
     settingsSearch.focus();
   });
 }
-settingsSearch?.addEventListener("input", () => {
-  if (clearSettingsSearch) clearSettingsSearch.hidden = !settingsSearch.value;
-});
 document.addEventListener("keydown", event => {
   if (modalOpen) return; // 確認ダイアログ表示中は裏の保存・検索を動かさない
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {

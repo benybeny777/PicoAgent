@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -14,6 +15,38 @@ import psutil
 
 
 NEGATIVE = "low quality, worst quality, deformed, distorted, disfigured, motion smear, artifacts, text, watermark"
+# GPUメモリ不足だけを呼び出し元（Rust側）へ区別して返す終了コード。
+# 再試行するかどうかはRust側が決める。ここでは「OOMだった」ことだけを伝える。
+OOM_EXIT_CODE = 3
+# CUDA・ROCmの両方で出るGPUメモリ不足の目印。
+OOM_MARKERS = (
+    "out of memory",
+    "outofmemoryerror",
+    "allocation on device",
+    "hip error: out of memory",
+    "insufficient memory",
+    "failed to allocate",
+)
+
+
+class GpuOutOfMemory(RuntimeError):
+    """ComfyUIがGPUメモリ不足で失敗した。"""
+
+
+def is_out_of_memory(text):
+    lowered = str(text).lower()
+    return any(marker in lowered for marker in OOM_MARKERS)
+
+
+def log_tail(path, limit=8192):
+    """失敗原因の判定に使うログ末尾。読めなければ空文字を返す。"""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - limit))
+            return handle.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
 
 
 @contextmanager
@@ -177,9 +210,60 @@ def output_record(history, prompt_id):
     return None
 
 
+def modern_workflow(engine, prompt, seed, width, height, frames, input_image, lowvram):
+    """公式ComfyUIの蒸留モデルを、補間拡大せず指定寸法で生成する。"""
+    def node(kind, **inputs):
+        return {"class_type": kind, "inputs": inputs}
+    krea = engine == "krea-2-turbo-nvfp4"
+    if krea and input_image:
+        raise ValueError("Krea 2のこの構成は文章からの生成専用です。編集はQwenを選んでください")
+    workflow = {
+        "1": node("UNETLoader", unet_name="krea2_turbo_nvfp4.safetensors" if krea else "ltx-2.5-22b-distilled-transformer-nvfp4.safetensors", weight_dtype="default"),
+        # Kreaの4Bは8GB実機でGPU配置を確認済み。大きいLTXの12BだけCPUへ退避する。
+        "2": node("CLIPLoader", clip_name="qwen3vl_4b_fp8_scaled.safetensors" if krea else "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", type="krea2" if krea else "ltxv", device="cpu" if lowvram and not krea else "default"),
+        "3": node("VAELoader", vae_name="qwen_image_vae.safetensors" if krea else "ltx-2.5-video-vae-conv-bf16.safetensors"),
+        "4": node("CLIPTextEncode", clip=["2", 0], text=prompt),
+        "5": node("ConditioningZeroOut", conditioning=["4", 0]),
+    }
+    if krea:
+        workflow.update({
+            "6": node("EmptyLatentImage", width=width, height=height, batch_size=1),
+            "7": node("KSampler", model=["1", 0], positive=["4", 0], negative=["5", 0], latent_image=["6", 0], seed=seed, steps=8, cfg=1, sampler_name="euler", scheduler="simple", denoise=1),
+            "8": node("VAEDecodeTiled", samples=["7", 0], vae=["3", 0], tile_size=256 if lowvram else 512, overlap=64, temporal_size=16, temporal_overlap=4),
+            "9": node("SaveImage", images=["8", 0], filename_prefix="PicoAgent/krea2"),
+        })
+        return workflow
+    if engine != "ltx-2.5-nvfp4":
+        raise ValueError(f"未対応の生成エンジンです: {engine}")
+    # 低VRAMでは重いDiffVAEと二段階高解像度化を使わず、Conv VAEで直接復号する。
+    workflow.update({
+        "6": node("EmptyLTXVLatentVideo", width=width, height=height, length=frames, batch_size=1),
+        "10": node("VAELoader", vae_name="ltx-2.5-audio-vae-bf16.safetensors"),
+        "11": node("LTXVEmptyLatentAudio", audio_vae=["10", 0], frames_number=frames, frame_rate=24, batch_size=1),
+        "12": node("LTXVConcatAVLatent", video_latent=["6", 0], audio_latent=["11", 0]),
+        "13": node("LTXVConditioning", positive=["4", 0], negative=["5", 0], frame_rate=24),
+        "14": node("LTXVDualCFGGuider", model=["1", 0], positive=["13", 0], negative=["13", 1], video_cfg=1, audio_cfg=1),
+        "15": node("RandomNoise", noise_seed=seed),
+        "16": node("KSamplerSelect", sampler_name="euler_ancestral"),
+        "17": node("ManualSigmas", sigmas="1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"),
+        "18": node("SamplerCustomAdvanced", noise=["15", 0], guider=["14", 0], sampler=["16", 0], sigmas=["17", 0], latent_image=["12", 0]),
+        "19": node("LTXVSeparateAVLatent", av_latent=["18", 0]),
+        "20": node("VAEDecodeTiled", samples=["19", 0], vae=["3", 0], tile_size=256 if lowvram else 512, overlap=64, temporal_size=16, temporal_overlap=4),
+        "21": node("LTXVAudioVAEDecode", samples=["19", 1], audio_vae=["10", 0]),
+        "22": node("CreateVideo", images=["20", 0], audio=["21", 0], fps=24),
+        # ComfyUI V3のDynamicComboはAPI上ではドット付きの平坦なキーで渡す。
+        "23": node("SaveVideo", video=["22", 0], filename_prefix="PicoAgent/ltx25", format="mp4", **{"format.codec": "h264", "format.codec.encoding": "auto"}),
+    })
+    if input_image:
+        workflow["24"] = node("LoadImage", image="input.png")
+        workflow["25"] = node("LTXVImgToVideoInplace", vae=["3", 0], image=["24", 0], latent=["6", 0], strength=1, bypass=False)
+        workflow["12"]["inputs"]["video_latent"] = ["25", 0]
+    return workflow
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--engine", choices=("qwen-edit", "wan-2.2-5b", "ltx-0.9.8-2b-fp8"), required=True)
+    parser.add_argument("--engine", choices=("qwen-edit", "wan-2.2-5b", "ltx-0.9.8-2b-fp8", "krea-2-turbo-nvfp4", "ltx-2.5-nvfp4"), required=True)
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path, required=True)
@@ -193,7 +277,29 @@ def main():
     parser.add_argument("--frames", type=int, default=97)
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument("--generation-timeout", type=int, default=14400)
+    # 省メモリ起動の要否はGPU判定を持つRust側が決める。ここでは指示どおりに渡すだけにする。
+    parser.add_argument("--lowvram", action="store_true", help="ComfyUIを--lowvramで起動する")
     args = parser.parse_args()
+    # 子プロセスはComfyUIの作業場で動くため、相対パスを起動元で確定する。
+    for name in ("input", "output", "comfy", "models", "gpu_lock"):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, value.resolve())
+    if args.engine in ("krea-2-turbo-nvfp4", "ltx-2.5-nvfp4"):
+        from model_catalog import check_hardware, LICENSE_REVISION
+        check_hardware()
+        marker = json.loads((args.models / "install.json").read_text(encoding="utf-8"))
+        if marker.get("model") != args.engine or marker.get("licenseRevision") != LICENSE_REVISION:
+            raise RuntimeError("モデルの導入情報または利用条件の確認が一致しません。追加機能から再確認してください")
+        if min(args.width, args.height) < 128 or args.width % 32 or args.height % 32:
+            raise ValueError("生成寸法は128以上・32の倍数にしてください")
+        if args.engine == "ltx-2.5-nvfp4" and (args.frames < 9 or args.frames % 8 != 1):
+            raise ValueError("LTXのフレーム数は9以上・8の倍数+1にしてください")
+        if args.input:
+            from PIL import Image
+            with Image.open(args.input) as reference:
+                if reference.width < args.width or reference.height < args.height:
+                    raise ValueError("参照画像の補間拡大は行いません。生成寸法を参照画像以下にしてください")
     run =args.output.parent / (".generating-" + args.output.stem)
     temporary = args.output.with_suffix(args.output.suffix + ".incoming")
     # 既存の処理や完成品を上書きせず、この呼び出しが作った途中物だけを回収する。
@@ -206,11 +312,20 @@ def main():
         (run / "temp").mkdir()
         if args.input:
             shutil.copy2(args.input, run / "input/input.png")
-        workflow = qwen(args.prompt, args.seed, args.width, args.height, args.input) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
+        if args.engine in ("krea-2-turbo-nvfp4", "ltx-2.5-nvfp4"):
+            workflow = modern_workflow(args.engine, args.prompt, args.seed, args.width, args.height, args.frames, args.input, args.lowvram)
+        else:
+            workflow = qwen(args.prompt, args.seed, args.width, args.height, args.input) if args.engine == "qwen-edit" else (wan(args.prompt, args.seed, args.width, args.height, args.frames, args.input) if args.engine == "wan-2.2-5b" else ltx(args.prompt, args.seed, args.width, args.height, args.frames, args.input))
         with gpu_lock(args.gpu_lock):
             args.port = reserve_port(args.port)
             command = [os.fspath(Path(os.sys.executable)), os.fspath(args.comfy / "main.py"), "--listen", "127.0.0.1", "--port", str(args.port), "--base-directory", os.fspath(run), "--models-directory", os.fspath(args.models), "--temp-directory", os.fspath(run / "temp"), "--disable-auto-launch", "--disable-all-custom-nodes", "--disable-api-nodes", "--preview-method", "none"]
+            if args.lowvram:
+                command.append("--lowvram")
+                if args.engine in ("krea-2-turbo-nvfp4", "ltx-2.5-nvfp4"):
+                    command.extend(["--reserve-vram", "1", "--cache-none"])
             environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
+            print(json.dumps({"event": "comfy_starting", "lowvram": bool(args.lowvram)}, ensure_ascii=False), flush=True)
+            failure = None
             with (run / "comfy.log").open("w", encoding="utf-8") as log:
                 process = subprocess.Popen(command, cwd=args.comfy, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 try:
@@ -238,9 +353,18 @@ def main():
                     shutil.copy2(source, temporary)
                     temporary.replace(args.output)
                     print(json.dumps({"output": os.fspath(args.output), "seed": args.seed}, ensure_ascii=False), flush=True)
+                except Exception as error:  # noqa: BLE001 - 原因の分類は下の判定でまとめて行う
+                    failure = error
                 finally:
+                    # 再試行の前に、ComfyUIと子孫プロセスを必ず回収する。
                     stop_owned(process)
+            if failure is not None:
+                # GPUメモリ不足かどうかは、例外本文とComfyUIのログ末尾の両方で判定する。
+                if is_out_of_memory(f"{type(failure).__name__}: {failure}\n{log_tail(run / 'comfy.log')}"):
+                    raise GpuOutOfMemory(str(failure)) from failure
+                raise failure
     finally:
+        # 失敗した途中成果物を残さない（完成品として公開しない）。
         try:
             temporary.unlink(missing_ok=True)
         finally:
@@ -248,4 +372,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except GpuOutOfMemory as error:
+        print(json.dumps({"event": "gpu_out_of_memory", "detail": str(error)}, ensure_ascii=False), flush=True)
+        print(f"GPUメモリが不足しました: {error}", file=sys.stderr)
+        sys.exit(OOM_EXIT_CODE)

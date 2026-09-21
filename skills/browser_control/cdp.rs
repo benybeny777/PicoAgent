@@ -147,8 +147,6 @@ pub struct LaunchOptions {
     pub browser_path: String,
     pub port: u16,
     pub headless: bool,
-    /// true なら `--user-data-dir` を渡さず、ブラウザの既定プロファイル（＝ログイン済み）を使う。
-    pub use_default_profile: bool,
     pub startup_timeout_secs: u64,
 }
 
@@ -206,16 +204,14 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         .arg("--no-default-browser-check")
         .arg("--disable-background-networking")
         .arg("--disable-popup-blocking");
-    if !options.use_default_profile {
-        let profile = isolated_profile_dir()?;
-        if let Err(error) = std::fs::create_dir_all(&profile) {
-            return Err(format!(
-                "エラー: ブラウザ用プロファイルを作成できません（{}）: {error}",
-                profile.display()
-            ));
-        }
-        command.arg(format!("--user-data-dir={}", profile.display()));
+    let profile = isolated_profile_dir()?;
+    if let Err(error) = std::fs::create_dir_all(&profile) {
+        return Err(format!(
+            "エラー: ブラウザ用プロファイルを作成できません（{}）: {error}",
+            profile.display()
+        ));
     }
+    command.arg(format!("--user-data-dir={}", profile.display()));
     if options.headless {
         command.arg("--headless=new");
     }
@@ -247,7 +243,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
         // タイムアウトするだけなので、子プロセスの終了を見て原因を名指しで返す。
         if child_exited() {
             let mut error = format!(
-                "エラー: ブラウザは既に通常起動しているため、デバッグポート（{}）付きの起動要求が既存のウィンドウへ引き継がれました。ブラウザをすべて閉じてからやり直すか、PICOAGENT_BROWSER_PROFILE=isolated（既定）で専用プロファイルを使ってください。",
+                "エラー: ブラウザは既に通常起動しているため、デバッグポート（{}）付きの起動要求が既存のウィンドウへ引き継がれました。PicoAgent専用プロファイルで起動できるよう、ブラウザをすべて閉じてからやり直してください。",
                 options.port
             );
             if let Err(cleanup) = stop() {
@@ -585,12 +581,23 @@ mod tests {
                 // 実運用の既定ポートと衝突しないテスト用ポート。
                 port: 11446,
                 headless: true,
-                use_default_profile: false,
                 startup_timeout_secs: 60,
             };
             // 起動途中で失敗した場合もブラウザを残さないよう、guard は起動より先に持つ。
             let _guard = BrowserGuard;
-            ensure_running(&options).await.expect("ブラウザを起動できる");
+            // 利用者が普段使いのブラウザを開いていると、専用プロファイルでの起動要求が
+            // 既存ウィンドウへ引き継がれて起動できない（製品の診断文がそう答える）。
+            // これは実装の異常ではなく環境の状態なので、`cargo xtask verify` を
+            // 赤にせず理由を出して飛ばす。ブラウザが無いときと同じ扱い。
+            if let Err(error) = ensure_running(&options).await {
+                let reason = error.to_string();
+                assert!(
+                    reason.contains("既に通常起動している"),
+                    "ブラウザを起動できる: {reason}"
+                );
+                eprintln!("ブラウザが通常起動中のためスキップ: {reason}");
+                return;
+            }
             let target = new_page(options.port).await.expect("タブを開ける");
             let mut conn = PageConn::connect(&target.ws_url, 30)
                 .await

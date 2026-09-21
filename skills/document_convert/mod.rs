@@ -31,6 +31,18 @@ fn bundled_office_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// LibreOfficeの設定・ロック・キャッシュをPicoAgent管理下へ固定する起動引数。
+pub(crate) fn isolated_office_profile_arg() -> Result<String, String> {
+    let bundled = crate::components::runtime_root()
+        .ok_or_else(|| "PicoAgent管理領域を取得できません".to_string())?;
+    let profile = bundled.parent().unwrap_or(bundled).join("office-profile");
+    std::fs::create_dir_all(&profile)
+        .map_err(|error| format!("Office専用プロファイルを作成できません: {error}"))?;
+    let url = reqwest::Url::from_directory_path(&profile)
+        .map_err(|_| "Office専用プロファイルのURLを作成できません".to_string())?;
+    Ok(format!("-env:UserInstallation={url}"))
+}
+
 fn soffice_name() -> &'static str {
     if cfg!(windows) {
         "soffice.exe"
@@ -221,7 +233,12 @@ impl Tool for DocumentConvertTool {
                 .arg(&pandoc_output);
         } else {
             command = crate::tools::process::command(office_cli_path(cfg));
+            let profile = match isolated_office_profile_arg() {
+                Ok(value) => value,
+                Err(error) => return format!("エラー: {error}"),
+            };
             command
+                .arg(profile)
                 .args(["--headless", "--convert-to", format, "--outdir"])
                 .arg(&output_dir)
                 .arg(&input);

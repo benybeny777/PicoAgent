@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const MAX_MOMENTS: usize = 36;
 
@@ -95,10 +95,7 @@ fn path(app: &AppHandle, character_id: &str) -> Result<PathBuf, String> {
     if !crate::character_pack::is_valid_id(character_id) {
         return Err("キャラクターIDが不正です。".to_string());
     }
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("関係性データの保存先を取得できません: {error}"))?;
+    let root = crate::log_paths::data_dir(app);
     Ok(root.join(format!("relationship-{character_id}.json")))
 }
 

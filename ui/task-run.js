@@ -140,6 +140,7 @@
     let run = null;
     let tick = null;
     let hideTimer = null;
+    let renderedSignature = "";
 
     function stopTick() {
       if (tick === null) return;
@@ -159,8 +160,23 @@
       if (options.onVisibilityChange) options.onVisibilityChange(visible);
     }
 
+    // 表示に出る内容だけを並べた印。経過時間は `refreshTimes` が書き換えるので含めない。
+    function runSignature(target) {
+      if (!target) return "";
+      const rows = target.rows
+        .map(row => `${row.id}${row.state}${row.label}`)
+        .join("");
+      return `${target.state}|${rows}`;
+    }
+
     function render() {
       if (!container || !run) return;
+      // 進捗イベントは同じ文言が何度も届く。見た目が変わらないのに作り直すと、
+      // 押している最中の「停止」ボタンが入れ替わってクリックが空振りする
+      // （1秒ごとの更新で作り直さない理由と同じ）。
+      const signature = runSignature(run);
+      if (signature === renderedSignature) return;
+      renderedSignature = signature;
       const doc = container.ownerDocument;
       const at = now();
       const head = doc.createElement("div");
@@ -228,6 +244,7 @@
         stopTick();
         stopHide();
         run = createRun(now());
+        renderedSignature = ""; // 前回の実行と同じ内容でも必ず描き直す
         render();
         setVisible(true);
         tick = timers.setInterval(refreshTimes, TICK_MS);
@@ -257,6 +274,7 @@
         stopTick();
         stopHide();
         run = null;
+        renderedSignature = "";
         setVisible(false);
       },
       snapshot() {

@@ -37,8 +37,8 @@ function Invoke-Step {
 # 1. 同梱素材がそろっているかをビルド前に確かめる。
 $sourceRoot = Join-Path $root $SourceDir
 $seedScript = Join-Path $sourceRoot 'seed-voices.ps1'
-$characterRoot = Join-Path $env:APPDATA 'com.picoagent.desktop\characters'
-$voiceRoot = Join-Path $env:APPDATA 'AivisSpeech-Engine\Models'
+$characterRoot = Join-Path $env:APPDATA 'PicoAgent\characters'
+$voiceRoot = Join-Path $env:APPDATA 'PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models'
 $missing = [System.Collections.Generic.List[string]]::new()
 if (-not (Test-Path -LiteralPath $seedScript -PathType Leaf)) {
     $missing.Add($seedScript)
@@ -82,10 +82,10 @@ $hook.Add('; 許諾済み関係者の試用向け。既存の登録データと�
 $hook.Add('!macro NSIS_HOOK_POSTINSTALL')
 $hook.Add('  SetOverwrite off')
 foreach ($id in $characters) {
-    $hook.Add("  SetOutPath `"`$APPDATA\com.picoagent.desktop\characters\$id`"")
+    $hook.Add("  SetOutPath `"`$APPDATA\PicoAgent\characters\$id`"")
     $hook.Add("  File /r `"$(Join-Path $characterRoot $id)\*`"")
 }
-$hook.Add('  SetOutPath "$APPDATA\AivisSpeech-Engine\Models"')
+$hook.Add('  SetOutPath "$APPDATA\PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models"')
 foreach ($uuid in $voiceModels) {
     $hook.Add("  File `"$(Join-Path $voiceRoot "$uuid.aivmx")`"")
 }
@@ -93,7 +93,7 @@ $hook.Add('  SetOverwrite on')
 $hook.Add('  InitPluginsDir')
 $hook.Add('  SetOutPath "$PLUGINSDIR"')
 $hook.Add("  File `"$seedScript`"")
-$hook.Add('  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\seed-voices.ps1" -ConfigPath "$APPDATA\com.picoagent.desktop\config.json"`')
+$hook.Add('  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\seed-voices.ps1" -ConfigPath "$APPDATA\PicoAgent\config.json"`')
 $hook.Add('  Pop $0')
 $hook.Add('  StrCmp $0 "0" +3')
 $hook.Add('  DetailPrint "関係者デモの初期設定に失敗しました。インストールを再実行してください。"')

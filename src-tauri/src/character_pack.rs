@@ -60,7 +60,7 @@ pub const MAX_ID_CHARS: usize = 64;
 
 /// キャラクターIDとして使ってよい文字列か。**このファイルが唯一の判定元。**
 ///
-/// IDはそのままフォルダ名（`app_data_dir/characters/<id>/`）と設定キーの一部になるため、
+/// IDはそのままフォルダ名（`PicoAgent/characters/<id>/`）と設定キーの一部になるため、
 /// 英数字・ハイフン・アンダースコアだけに絞って `.` や区切り文字を弾く。
 ///
 /// 以前は同じ規則が6箇所へ写されており、`character_framing` と `stream_profile` の

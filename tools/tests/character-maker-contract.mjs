@@ -4,10 +4,14 @@ import test from "node:test";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("キャラ選択の決定ボタンはピンクで選択中と区別する", async () => {
+test("キャラ選択の決定ボタンはピンクで選択中と区別し、文字を読める濃さにする", async () => {
   const style = await read("ui/settings.css");
-  assert.match(style, /\.character-card \.character-select-button \{[\s\S]*?background: var\(--pink\);[\s\S]*?color: #fff;/);
-  assert.match(style, /\.character-card \.character-select-button:disabled \{[\s\S]*?background: var\(--pink-soft\);[\s\S]*?color: var\(--pink\);/);
+  // 淡い --pink に白文字（2.4:1）、--pink-soft に --pink の文字（2.0:1）はどちらも
+  // WCAG AAの4.5:1に届かない。ピンクのまま読める濃さの専用トークンを使う。
+  assert.match(style, /\.character-card \.character-select-button \{[\s\S]*?background: var\(--pink-strong\);[\s\S]*?color: #fff;/);
+  assert.match(style, /\.character-card \.character-select-button:disabled \{[\s\S]*?background: var\(--pink-soft\);[\s\S]*?color: var\(--pink-on-soft\);/);
+  assert.match(style, /--pink-strong: #b4477f;/);
+  assert.match(style, /--pink-on-soft: #e98ab6;/);
 });
 
 test("キャラ作成は現行4工程だけをPicoAgent設定へ公開する", async () => {
@@ -28,7 +32,10 @@ test("管理導入は共通Python一環境と容量・GPU判定を先に行う",
     read("ui/settings.js"),
     read("ui/settings.css"),
   ]);
-  assert.match(components, /shared_python_dir\(app\)\.join\("Scripts\/python\.exe"\)/);
+  // 共通Python環境は1つのまま、実行ファイル名だけをOS別に解決する。
+  assert.match(components, /python_executable\(&shared_python_dir\(app\)\)/);
+  assert.match(components, /python_root\.join\("Scripts\/python\.exe"\)/);
+  assert.match(components, /python_root\.join\("bin\/python3"\)/);
   assert.match(components, /python_stage\.join\("runtime"\)/);
   assert.match(components, /"--relocatable"/);
   assert.match(components, /85_000_000_000/);
@@ -82,7 +89,7 @@ test("完成キャラをアプリ内の本番描画経路で確認できる", as
   for (const control of ["blink", "gazeX", "gazeY", "faceDemo", "motionDemo", "arm"]) {
     assert.match(preview, new RegExp(`getElementById\\(\"${control}\"\\)`));
   }
-  assert.match(config, /\$APPDATA\/character-maker\/characters\/\*\*/);
+  assert.match(config, /\$DATA\/PicoAgent\/character-maker\/characters\/\*\*/);
   assert.match(capability, /character-preview-\*/);
 });
 

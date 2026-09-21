@@ -322,6 +322,21 @@ pub mod fs {
             .map_err(|error| format!("ファイルを読めません（{}）: {}", path.display(), error))
     }
 
+    /// 上限を超えていないか実寸で確かめる。超えていれば実バイト数を返す。
+    ///
+    /// 先に全体をメモリへ載せてから `len()` で弾くと、巨大なファイルを指定された時点で
+    /// その容量をまるごと抱えることになり、上限を設けた意味が無くなる。読む前に確かめること。
+    pub fn ensure_within(path: &SafePath, max_bytes: usize) -> Result<(), u64> {
+        // 実寸を取れない場合は読み取り側のエラーに任せる（ここで二重に理由を出さない）。
+        let Ok(size) = metadata(path).map(|info| info.len()) else {
+            return Ok(());
+        };
+        if size > max_bytes as u64 {
+            return Err(size);
+        }
+        Ok(())
+    }
+
     /// ファイルの一部だけを読む。分割送信のように、全体をメモリへ載せずに
     /// 順に処理したい用途で使う（`read()` は上限の無い全体読み取り）。
     pub fn read_range(path: &SafePath, offset: u64, length: usize) -> Result<Vec<u8>, String> {
@@ -532,6 +547,34 @@ mod guard {
     const OWN_CHECK_ALLOWED: [&str; 3] = ["run_command", "code_runner", "trash_file"];
 
     use crate::guard_scan;
+
+    /// サイズ上限は読む前に確かめること。
+    ///
+    /// 先に全体をメモリへ載せてから `len()` で弾くと、巨大なファイルを指定された時点で
+    /// その容量をまるごと抱えることになり、上限を設けた意味が無くなる。
+    /// 実際に `read_file` / `edit_file` / `notebook_edit` の3スキルがこの形だった。
+    #[test]
+    fn サイズ上限は読み込む前に確かめる() {
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            let lines: Vec<&str> = source.body().lines().collect();
+            for (index, line) in lines.iter().enumerate() {
+                let reads = line.contains("fs::read_to_string(") || line.contains("fs::read(");
+                if !reads || line.trim_start().starts_with("//") {
+                    continue;
+                }
+                // 読み取りの直後に上限との比較があれば「読んでから弾く」形。
+                let tail = lines[index..lines.len().min(index + 16)].join("\n");
+                if tail.contains(".len() > MAX_") {
+                    violations.push(format!("{}:{}", source.path.display(), index + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "読む前に permissions::fs::ensure_within() で実寸を確かめてください（読んでから弾くと上限ぶんを超えて抱えます）: {violations:?}"
+        );
+    }
 
     /// スキル内に許可判定の再実装（`starts_with(base)` 方式のコピー）が無いこと。
     #[test]

@@ -975,27 +975,96 @@ pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
         .map_err(|error| format!("{error:#}"))
 }
 
+/// 画像・動画・キャラクター生成に使うGPUと実行バックエンド（CUDA／ROCm）の現在地。
+///
+/// 非対応GPUでは取得を始める前に理由を見せるため、導入前でも呼べるようにする。
+#[tauri::command(async)]
+pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, String> {
+    use crate::generation_backend::BackendSelection;
+
+    let selection = if crate::components::generation_platform_supported() {
+        crate::components::generation_selection().await
+    } else {
+        BackendSelection::Unsupported(
+            "画像・動画・キャラクター生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）。何も取得していません。".into(),
+        )
+    };
+    let installed = crate::components::installed_generation_runtime(&app);
+    let device = match &selection {
+        BackendSelection::Supported(selected) => Some(selected.device.clone()),
+        BackendSelection::Unsupported(_) => {
+            crate::generation_backend::generation_device(&crate::gpu::devices(), installed.as_ref())
+        }
+    };
+    let lowvram = crate::generation_backend::lowvram_decision(
+        selection
+            .supported()
+            .map(|selected| selected.backend)
+            .or_else(|| installed.as_ref().map(|runtime| runtime.backend)),
+        device.as_ref(),
+    );
+    Ok(json!({
+        "supported": matches!(selection, BackendSelection::Supported(_)),
+        "backendLabel": selection
+            .supported()
+            .map(|selected| selected.backend.label()),
+        "gpuName": device.as_ref().map(|device| device.name.clone()),
+        "gpuVendor": device.as_ref().map(|device| device.vendor.label()),
+        "reason": match &selection {
+            BackendSelection::Supported(_) => None,
+            BackendSelection::Unsupported(reason) => Some(reason.clone()),
+        },
+        "lowvram": lowvram.lowvram,
+        "lowvramReason": lowvram.reason,
+        "installedBackendLabel": installed
+            .as_ref()
+            .map(|runtime| runtime.backend.label()),
+        // 導入済みランタイムがいまのGPU向けでない場合は、そのまま使わず入れ直させる。
+        "needsReinstall": installed.as_ref().is_some_and(|runtime| {
+            selection
+                .supported()
+                .is_none_or(|selected| !runtime.is_reusable_for(selected))
+        }),
+        "rocmRequiredDriver": crate::generation_backend::ROCM_REQUIRED_DRIVER,
+        // Apple Siliconで実機確認が済んでいないモデルは「対応」と表示しない。
+        "mpsUnverified": selection
+            .supported()
+            .map(|selected| {
+                crate::generation_backend::GENERATION_MODELS
+                    .iter()
+                    .filter_map(|model| {
+                        crate::generation_backend::mps_unverified_notice(*model, selected.backend)
+                            .map(|_| model.label)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    }))
+}
+
 /// 選択した追加コンポーネントをPicoAgent専用領域へ導入する。
 #[tauri::command]
 pub async fn settings_components_install(
     app: AppHandle,
     ids: Vec<String>,
     enable_tts: Option<bool>,
+    accepted_license_ids: Option<Vec<String>>,
     state: State<'_, AppState>,
     maker: State<'_, crate::character_maker::CharacterMakerState>,
 ) -> Result<Value, String> {
     if ids.iter().any(|id| id == "character-maker") && maker.is_running() {
         return Err("キャラクター生成中は管理ランタイムを更新できません".into());
     }
-    let installed = crate::components::install(&app, &ids)
-        .await
-        .map_err(|error| {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("追加機能の導入に失敗しました: {error:#}"),
-            );
-            format!("{error:#}")
-        })?;
+    let installed =
+        crate::components::install(&app, &ids, &accepted_license_ids.unwrap_or_default())
+            .await
+            .map_err(|error| {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("追加機能の導入に失敗しました: {error:#}"),
+                );
+                format!("{error:#}")
+            })?;
     if enable_tts_after_component_install(&ids, enable_tts) {
         let mut patch = Map::new();
         patch.insert("PICOAGENT_TTS_ENABLED".to_string(), json!(true));
@@ -1105,7 +1174,7 @@ pub async fn pet_prepare_voice_model(
         .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
     let endpoint = aivis::endpoint(&app, &state);
     let voice = effective_tts_voice(&state);
-    prepare_tts_voice_model(&app, &endpoint, &voice).await?;
+    prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
     let speaker = resolve_tts_speaker(&endpoint, voice).await;
     Ok(json!({ "enabled": true, "ready": true, "speaker": speaker }))
 }
@@ -1420,7 +1489,7 @@ fn open_with_default_app(url: &str) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     crate::tools::process::command_sync("xdg-open")
-        .arg(&url)
+        .arg(url)
         .spawn()
         .map_err(|error| format!("既定のアプリで開けませんでした: {error}"))?;
 
@@ -2551,13 +2620,26 @@ fn effective_tts_voice(state: &AppState) -> TtsVoice {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let override_speaker_uuid = override_voice
+        .as_ref()
+        .and_then(|value| value.get("speakerUuid"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let override_style_name = override_voice
+        .as_ref()
+        .and_then(|value| value.get("styleName"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if let Some(speaker) = override_speaker {
-        // ユーザーが明示指定した style ID はそのまま使う（実行時解決はしない）。
+        // 数値IDはフォールバックとして保ちつつ、保存済みの安定した話者UUIDを優先する。
+        // モデルの再読込でstyle IDが変わっても、同じキャラクターの声を解決できる。
         return TtsVoice {
             speaker: speaker.to_string(),
             model_uuid: override_model_uuid.map(str::to_string),
-            speaker_uuid: None,
-            style_name: None,
+            speaker_uuid: override_speaker_uuid.map(str::to_string),
+            style_name: override_style_name.map(str::to_string),
         };
     }
     default.unwrap_or_else(|| TtsVoice {
@@ -2570,9 +2652,14 @@ fn effective_tts_voice(state: &AppState) -> TtsVoice {
 
 async fn prepare_tts_voice_model(
     app: &AppHandle,
+    state: &AppState,
     endpoint: &str,
     voice: &TtsVoice,
 ) -> Result<(), String> {
+    // 外部APIのモデル領域はPicoAgentの管理外。存在確認・導入は外部サービス側へ委ねる。
+    if aivis::uses_external_endpoint(state) {
+        return Ok(());
+    }
     if let (Some(model_uuid), Some(speaker_uuid)) =
         (voice.model_uuid.as_deref(), voice.speaker_uuid.as_deref())
     {
@@ -2614,7 +2701,7 @@ pub async fn pet_speak(
     let endpoint = aivis::endpoint(&app, &state);
     let voice = effective_tts_voice(&state);
     // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
-    prepare_tts_voice_model(&app, &endpoint, &voice).await?;
+    prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
     // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
     // 解決できなければ設定値の style ID を使う。
     let speaker = resolve_tts_speaker(&endpoint, voice).await;
@@ -3137,7 +3224,8 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_MEMORY_MAX_ITEMS", "80");
     let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
         || changed_text("PICOAGENT_TTS_DEVICE", "auto")
-        || changed_text("PICOAGENT_TTS_PORT", "11436");
+        || changed_text("PICOAGENT_TTS_PORT", "11436")
+        || changed_text("PICOAGENT_TTS_ENDPOINT", "");
     let provider_changed = changed_text("PICOAGENT_PROVIDER", "local");
     let local_engine_changed = changed_text("PICOAGENT_LOCAL_MODEL_PRESET", "auto")
         || changed_text("PICOAGENT_MODEL", "")
@@ -4152,11 +4240,7 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
         .filter(|sha| sha.len() == 64 && sha.chars().all(|c| c.is_ascii_hexdigit()))
         .ok_or_else(|| "更新インストーラのSHA-256がありません".to_string())?
         .to_ascii_lowercase();
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| error.to_string())?
-        .join("updates");
+    let cache = crate::log_paths::cache_dir(&app).join("updates");
     tokio::fs::create_dir_all(&cache)
         .await
         .map_err(|error| error.to_string())?;
@@ -4983,7 +5067,8 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) -> Result<(), St
         .find(|window| window.label == "main")
         .and_then(|window| window.additional_browser_args.as_deref());
     let mut builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()));
-    // 同じ保存領域を共有するWebView2は起動オプションも一致させる必要がある。
+    builder = builder.data_directory(crate::log_paths::data_dir(app).join("webview/settings"));
+    // WebView2の起動条件はメイン画面と揃える。
     if let Some(args) = browser_args {
         builder = builder.additional_browser_args(args);
     }
@@ -5340,6 +5425,22 @@ mod tests {
             effective_tts_voice(&state).style_name.as_deref(),
             Some("ふつー")
         );
+    }
+
+    #[test]
+    fn キャラ声の数値idと話者uuidを両方保持する() {
+        use super::{effective_tts_voice, AppState};
+        let state = AppState::new();
+        state.config.set("PICOAGENT_CHARACTER", "miko-mmd");
+        state.config.set_value(
+            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
+            serde_json::json!({"miko-mmd":{"speaker":"1533692672","modelUuid":"8e120ad8","speakerUuid":"15bfc9c1","styleName":"ノーマル"}}),
+        );
+        let voice = effective_tts_voice(&state);
+        assert_eq!(voice.speaker, "1533692672");
+        assert_eq!(voice.model_uuid.as_deref(), Some("8e120ad8"));
+        assert_eq!(voice.speaker_uuid.as_deref(), Some("15bfc9c1"));
+        assert_eq!(voice.style_name.as_deref(), Some("ノーマル"));
     }
 
     #[test]

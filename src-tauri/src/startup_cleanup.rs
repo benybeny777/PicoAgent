@@ -2,22 +2,18 @@
 
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// 設定、会話、完成キャラ、導入済みモデルを避けた起動時削除対象。
 /// WebViewのプロファイル全体を消すとlocalStorageまで失われるため、キャッシュ名を列挙する。
-fn cache_targets(cache_root: &Path) -> Vec<PathBuf> {
-    let webview = cache_root.join("EBWebView");
-    let default = webview.join("Default");
+fn chromium_cache_targets(root: &Path) -> Vec<PathBuf> {
+    let default = root.join("Default");
     vec![
-        cache_root.join("character-maker-installer"),
-        cache_root.join("media-model-installer"),
-        cache_root.join("component-installer"),
-        webview.join("component_crx_cache"),
-        webview.join("extensions_crx_cache"),
-        webview.join("GPUPersistentCache"),
-        webview.join("GrShaderCache"),
-        webview.join("ShaderCache"),
+        root.join("component_crx_cache"),
+        root.join("extensions_crx_cache"),
+        root.join("GPUPersistentCache"),
+        root.join("GrShaderCache"),
+        root.join("ShaderCache"),
         default.join("AutofillAiModelCache"),
         default.join("Cache"),
         default.join("Code Cache"),
@@ -28,6 +24,29 @@ fn cache_targets(cache_root: &Path) -> Vec<PathBuf> {
         default.join("Service Worker/CacheStorage"),
         default.join("Shared Dictionary/cache"),
     ]
+}
+
+fn webview_cache_targets(profile_root: &Path) -> Vec<PathBuf> {
+    chromium_cache_targets(&profile_root.join("EBWebView"))
+}
+
+fn cache_targets(data_root: &Path) -> Vec<PathBuf> {
+    let cache_root = data_root.join("cache");
+    let mut targets = vec![
+        cache_root.join("character-maker-installer"),
+        cache_root.join("media-model-installer"),
+        cache_root.join("component-installer"),
+    ];
+    targets.extend(chromium_cache_targets(&data_root.join("browser-profile")));
+    let webview_root = data_root.join("webview");
+    if let Ok(entries) = std::fs::read_dir(&webview_root) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                targets.extend(webview_cache_targets(&entry.path()));
+            }
+        }
+    }
+    targets
 }
 
 fn remove_target(path: &Path) -> std::io::Result<()> {
@@ -41,10 +60,7 @@ fn remove_target(path: &Path) -> std::io::Result<()> {
 }
 
 pub fn run(app: &AppHandle) {
-    let Ok(root) = app.path().app_cache_dir() else {
-        crate::log_paths::append_app_log(app, "起動時キャッシュの場所を取得できませんでした。");
-        return;
-    };
+    let root = crate::log_paths::data_dir(app);
     for target in cache_targets(&root) {
         if let Err(error) = remove_target(&target) {
             crate::log_paths::append_app_log(
@@ -80,26 +96,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_history_characters_and_installed_models_are_not_targets() {
-        let root = Path::new("cache-root");
+    fn 設定と履歴とキャラと導入済みモデルは消さない() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("webview/main")).unwrap();
         let targets = cache_targets(root);
-        assert!(targets.contains(&root.join("character-maker-installer")));
-        assert!(targets.contains(&root.join("media-model-installer")));
-        assert!(targets.contains(&root.join("EBWebView/Default/Cache")));
+        assert!(targets.contains(&root.join("cache/character-maker-installer")));
+        assert!(targets.contains(&root.join("cache/media-model-installer")));
+        assert!(targets.contains(&root.join("browser-profile/Default/Cache")));
+        assert!(targets.contains(&root.join("webview/main/EBWebView/Default/Cache")));
         for preserved in [
             "config.json",
             "history.json",
             "characters",
             "bundled/character-maker",
-            "EBWebView/Default/Local Storage",
-            "EBWebView/Default/IndexedDB",
+            "webview/main/EBWebView/Default/Local Storage",
+            "webview/main/EBWebView/Default/IndexedDB",
         ] {
             assert!(!targets.contains(&root.join(preserved)), "{preserved}");
         }
     }
 
     #[test]
-    fn removes_only_the_named_directory() {
+    fn 名指ししたフォルダだけを消す() {
         let temp = tempfile::tempdir().unwrap();
         let cache = temp.path().join("Cache");
         let local_storage = temp.path().join("Local Storage");
@@ -110,5 +129,20 @@ mod tests {
         remove_target(&cache).unwrap();
         assert!(!cache.exists());
         assert!(local_storage.join("user-data").is_file());
+    }
+
+    #[test]
+    fn webviewを作る前にキャッシュを回収する() {
+        let source = include_str!("lib.rs");
+        let cleanup = source
+            .find("startup_cleanup::run(app.handle())")
+            .expect("起動時キャッシュ回収がある");
+        let webview = source
+            .find("WebviewWindowBuilder::from_config")
+            .expect("メインWebViewを作成する");
+        assert!(
+            cleanup < webview,
+            "WebView作成後はキャッシュがロックされます"
+        );
     }
 }

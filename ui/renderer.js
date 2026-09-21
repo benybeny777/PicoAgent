@@ -102,6 +102,10 @@ let streamBuffer = "";
 let unlistenStream = null;
 let unlistenStreamReset = null;
 let streamRenderFrame = null;
+// ストリーミング表示の最短再描画間隔（ms）と直前の描画時刻。
+// 12回/秒なら文字が流れて見える速さを保てて、毎フレーム組み直すより描画量が大きく減る。
+const STREAM_RENDER_MIN_MS = 80;
+let lastStreamRenderAt = 0;
 let subtitlePageToken = 0;
 let subtitlePageTimer = null;
 let localEngineRequired = false;
@@ -161,6 +165,11 @@ let bootLogTimer = null;
 let lastBootStatus = "";
 let lastAssistantText = "";
 let voiceVolume = 0.35; // docs/SETTINGS.md の PICOAGENT_TTS_VOLUME 既定(35)と揃える。設定適用前に鳴る音を100%にしない
+// 画面の0〜100は人が感じる音量として扱う。振幅へ直線変換すると1%でも大きく聞こえるため、
+// 音声とゲームで共通の二乗カーブを通す（1%なら実効ゲイン0.0001）。
+function voiceOutputGain() {
+  return voiceVolume * voiceVolume;
+}
 let relationshipState = null;
 let relationshipMemoryEnabled = true;
 const NOTICE_STORAGE_KEY = "picoagent.actionCenter.v1";
@@ -301,9 +310,12 @@ window.addEventListener("beforeunload", () => {
   // 書きかけはデバウンス待ちのまま終了しうる。終了時に必ず書き切ってから閉じる。
   promptDraft = input.value;
   persistDraft();
+  // まとめ待ちの通知保存も、終了前に必ず書き切る。
+  noticePersistScheduler.flush();
   if (napTimer) clearInterval(napTimer);
   if (widgetClockTimer) { clearInterval(widgetClockTimer); widgetClockTimer = null; }
   if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+  windowResizeScheduler?.cancel();
   if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
   if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
   if (unlistenStream) { unlistenStream(); unlistenStream = null; }
@@ -367,15 +379,21 @@ function setStatus(text) {
 
 function updateNoticeBadge() {
   if (!noticeToggle) return;
+  // バッジの数字だけが未読を伝える。 は対応する見た目が無いまま残っていた。
   noticeToggle.dataset.count = unreadNoticeCount > 0 ? String(Math.min(99, unreadNoticeCount)) : "";
-  noticeToggle.classList.toggle("has-notices", noticeEntries.length > 0);
 }
 
-function persistNotices() {
+function persistNoticesNow() {
   try { localStorage.setItem(NOTICE_STORAGE_KEY, JSON.stringify(noticeEntries.slice(0, 50))); }
   catch (error) { logApp("warn", "アクションセンターの保存に失敗しました", errorDetail(error)); }
 }
-persistNotices();
+// 通知の保存は50件の直列化とlocalStorage書き込み。エージェント実行中は進捗のたびに
+// 呼ばれるため、1フレーム1回へまとめる。終了時は `beforeunload` で必ず書き切る。
+const noticePersistScheduler = window.PicoFrameScheduler.create(persistNoticesNow);
+function persistNotices() {
+  noticePersistScheduler.schedule();
+}
+persistNoticesNow();
 
 // 停止要求が届いても、実行中の送信がいつまでも返らないことがある（子プロセスの停止待ち、
 // 応答の来ないプロバイダ接続など）。そのままだと待機表示が残り続け、入力も再送も
@@ -415,6 +433,10 @@ async function requestAgentCancellation(button) {
 
 function renderNoticePanel() {
   if (!noticeList) return;
+  // 閉じている一覧を作り直しても誰も見ない。エージェント実行中は進捗のたびに
+  // `upsertJob` から呼ばれるため、そのぶん50件ぶんのDOMを捨てては作り直していた。
+  // 開くときに必ず呼び直すので、閉じている間は組み立てを飛ばす。
+  if (noticePanel?.hidden) return;
   noticeList.replaceChildren();
   if (noticeEntries.length === 0) {
     noticeList.append(document.createElement("div"));
@@ -639,6 +661,14 @@ async function loadDurableJobNotices() {
 function pushNotice(notice) {
   if (String(notice?.kind || "") === "durable_job" && notice?.jobId) {
     upsertDurableJob(notice);
+    return;
+  }
+  // 裏で繰り返し失敗する機能（会話履歴の保存など）は、通知一覧へ積むと同じ行が並ぶ。
+  // 原因ごとに1度だけ知らせ、復旧したら次の失敗をまた知らせる共通経路へ回す。
+  if (String(notice?.kind || "") === "background_failure") {
+    const key = String(notice?.key || "background");
+    if (notice?.ok === true) { clearBackgroundFailure(key); return; }
+    notifyBackgroundFailure(key, String(notice?.body || notice?.title || "処理に失敗しました"), key);
     return;
   }
   const entry = {
@@ -3064,17 +3094,81 @@ function placeTaskRun(stickToBottom = false) {
   }
 }
 
+// 直前に描いた内容の控え。会話が伸びただけのときは末尾へ足すだけで済ませる。
+// 全件を Markdown から組み直すと、80件たまった会話では発言のたびに数百要素を
+// 作り直すことになる（チャット・作業形式では毎ターン2回起きる）。
+let renderedHistory = { query: null, items: [], name: "" };
+
+function historyRowElement(item) {
+  const row = document.createElement("div");
+  row.className = `history-item ${item.role}`;
+  const meta = document.createElement("div");
+  meta.className = "history-meta";
+  const label = document.createElement("div");
+  label.className = "history-role";
+  label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+  if (item.at) {
+    // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
+    const time = document.createElement("span");
+    time.className = "history-time";
+    time.textContent = new Date(item.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    label.append(time);
+  }
+  const actions = document.createElement("div");
+  actions.className = "history-actions";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "コピー";
+  copy.addEventListener("click", () => copyHistoryItem(item.content));
+  actions.append(copy);
+  if (item.role === "user") {
+    const reuse = document.createElement("button");
+    reuse.type = "button";
+    reuse.textContent = "再利用";
+    reuse.addEventListener("click", () => reuseHistoryItem(item.content));
+    actions.append(reuse);
+  }
+  meta.append(label, actions);
+  const body = document.createElement("div");
+  body.className = "history-body";
+  renderMarkdown(body, item.content);
+  row.append(meta, body);
+  return row;
+}
+
+function historyThinkingRowElement() {
+  const row = document.createElement("div");
+  row.className = "history-item assistant history-thinking";
+  // 名前行は他の発言と同じ `history-meta` に入れる（表示形式ごとの並び・余白を共有する）。
+  const meta = document.createElement("div");
+  meta.className = "history-meta";
+  const label = document.createElement("div");
+  label.className = "history-role";
+  label.textContent = characterManifest?.name || "むぎ";
+  meta.append(label);
+  const body = document.createElement("div");
+  body.className = "history-body";
+  body.append(createTypingIndicator(historyThinkingText));
+  row.append(meta, body);
+  return row;
+}
+
 function renderHistoryRows() {
   if (!historyLog) return;
   // 履歴ログが見えていないときに毎メッセージ全件を Markdown 再構築するのは無駄なので
   // 描画しない（全画面切替時と表示形式の切替時に呼び直す）。
-  if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) return;
+  if (!bubble.classList.contains("fullscreen") && !layoutShowsHistory()) {
+    // 描かない間も会話は進む。次に見えたときは必ず全件を組み直す。
+    renderedHistory = { query: null, items: [], name: "" };
+    return;
+  }
   // 「考え中」の文言更新でも作り直すため、読み返している最中に最下部へ引き戻さない。
   // 既に最下部付近にいるときだけ追従する（新しい発言は今までどおり見える）。
   const stickToBottom = historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
-  historyLog.replaceChildren();
+  const name = characterManifest?.name || "むぎ";
   if (!conversationHistory.length && !historyThinking) {
-    historyLog.append(document.createElement("div"));
+    historyLog.replaceChildren(document.createElement("div"));
+    renderedHistory = { query: null, items: [], name };
     return;
   }
   const query = historyQuery.trim().toLowerCase();
@@ -3085,61 +3179,23 @@ function renderHistoryRows() {
     const empty = document.createElement("div");
     empty.className = "history-empty";
     empty.textContent = "一致する履歴はありません。";
-    historyLog.append(empty);
+    historyLog.replaceChildren(empty);
+    renderedHistory = { query: null, items: [], name };
     return;
   }
-  for (const item of items) {
-    const row = document.createElement("div");
-    row.className = `history-item ${item.role}`;
-    const meta = document.createElement("div");
-    meta.className = "history-meta";
-    const label = document.createElement("div");
-    label.className = "history-role";
-    label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
-    if (item.at) {
-      // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
-      const time = document.createElement("span");
-      time.className = "history-time";
-      time.textContent = new Date(item.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-      label.append(time);
-    }
-    const actions = document.createElement("div");
-    actions.className = "history-actions";
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.textContent = "コピー";
-    copy.addEventListener("click", () => copyHistoryItem(item.content));
-    actions.append(copy);
-    if (item.role === "user") {
-      const reuse = document.createElement("button");
-      reuse.type = "button";
-      reuse.textContent = "再利用";
-      reuse.addEventListener("click", () => reuseHistoryItem(item.content));
-      actions.append(reuse);
-    }
-    meta.append(label, actions);
-    const body = document.createElement("div");
-    body.className = "history-body";
-    renderMarkdown(body, item.content);
-    row.append(meta, body);
-    historyLog.append(row);
-  }
-  if (historyThinking && !query) {
-    const row = document.createElement("div");
-    row.className = "history-item assistant history-thinking";
-    // 名前行は他の発言と同じ `history-meta` に入れる（表示形式ごとの並び・余白を共有する）。
-    const meta = document.createElement("div");
-    meta.className = "history-meta";
-    const label = document.createElement("div");
-    label.className = "history-role";
-    label.textContent = characterManifest?.name || "むぎ";
-    meta.append(label);
-    const body = document.createElement("div");
-    body.className = "history-body";
-    body.append(createTypingIndicator(historyThinkingText));
-    row.append(meta, body);
-    historyLog.append(row);
-  }
+  // 絞り込み条件も名前も同じで、前回描いた発言がそのまま先頭から続いているなら、
+  // 増えたぶんだけを足す。切替・検索・古い発言の切り捨てでは一致しないので全件を組み直す。
+  const appendOnly = renderedHistory.query === query
+    && renderedHistory.name === name
+    && renderedHistory.items.length > 0
+    && items.length >= renderedHistory.items.length
+    && renderedHistory.items.every((item, index) => items[index] === item);
+  const added = appendOnly ? items.slice(renderedHistory.items.length) : items;
+  if (appendOnly) historyLog.querySelector(".history-thinking")?.remove();
+  else historyLog.replaceChildren();
+  for (const item of added) historyLog.append(historyRowElement(item));
+  if (historyThinking && !query) historyLog.append(historyThinkingRowElement());
+  renderedHistory = { query, items: [...items], name };
   if (stickToBottom) historyLog.scrollTop = historyLog.scrollHeight;
 }
 
@@ -3237,7 +3293,7 @@ function playPreparedSpeech(result) {
   const audio = new Audio(url);
   audio.picoLipSync = result.lipSync || [];
   currentVoice = audio;
-  audio.volume = voiceVolume;
+  audio.volume = voiceOutputGain();
   audio.addEventListener("ended", () => {
     finishVoice(true, audio);
     if (!activeAlarmSnooze) clearTransientStatus();
@@ -3334,7 +3390,7 @@ function playChunkAndWait(result, session) {
     const audio = new Audio(url);
     audio.picoLipSync = result.lipSync || [];
     currentVoice = audio;
-    audio.volume = voiceVolume;
+    audio.volume = voiceOutputGain();
     let settled = false;
     const cleanup = () => {
       if (settled) return;
@@ -3431,6 +3487,9 @@ async function speakReply(text) {
     setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) clearTransientStatus(); }, 12000);
   }
 }
+// ゲームなど通常会話以外の画面も、音量・停止・字幕・口パクを含む同じ読み上げ経路を使う。
+// `pet_speak` を各画面が直接扱うと、音声の重複やObject URLの解放漏れが起きるため公開口を1つに絞る。
+window.PicoVoice = { speak: speakReply, stop: stopVoice, volume: () => voiceVolume, gain: voiceOutputGain };
 // ── ストリーミング先行読み上げ: 応答の生成中に、確定した文から順に合成・再生する ──
 // 全文の生成完了を待たずに話し始めることで、読み上げ開始までの体感遅延を大きく縮める。
 // 最終本文が届いたら残り（未読分）をキューへ足して読み切る（finishStreamSpeech）。
@@ -3999,10 +4058,14 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   const container = bubble.offsetParent instanceof HTMLElement ? bubble.offsetParent : document.documentElement;
   const viewportWidth = container.clientWidth;
   const viewportHeight = container.clientHeight;
-  const charLeftEdge = character.offsetLeft - gap;
-  const charTopEdge = character.offsetTop - gap;
-  const charRightEdge = character.offsetLeft + character.offsetWidth + gap;
-  const charBottomEdge = character.offsetTop + character.offsetHeight + gap;
+  // キャラの実寸はここで1度だけ読む。候補ごとに読み直すと、25候補×4項目の
+  // レイアウト参照がリサイズのたびに走る。
+  const charLeft = character.offsetLeft;
+  const charTop = character.offsetTop;
+  const charLeftEdge = charLeft - gap;
+  const charTopEdge = charTop - gap;
+  const charRightEdge = charLeft + character.offsetWidth + gap;
+  const charBottomEdge = charTop + character.offsetHeight + gap;
   const maxLeft = Math.max(margin, viewportWidth - width - margin);
   const maxTop = Math.max(margin, viewportHeight - height - margin);
   const baseLeft = clampNumber(preferredLeft, margin, maxLeft);
@@ -4029,7 +4092,7 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
       const left = clampNumber(rawLeft, margin, maxLeft);
       const top = clampNumber(rawTop, margin, maxTop);
       if (candidates.some(item => item.left === left && item.top === top)) continue;
-      const overlap = overlapAreaWithCharacter(left, top, width, height, gap);
+      const overlap = overlapArea(left, top, width, height, charLeftEdge, charTopEdge, charRightEdge, charBottomEdge);
       const distance = Math.hypot(left - baseLeft, top - baseTop);
       candidates.push({ left, top, overlap, distance });
     }
@@ -4042,11 +4105,8 @@ function placeBubbleAwayFromCharacter(width, height, preferredLeft = bubble.offs
   bubble.style.top = `${Math.round(best.top)}px`;
 }
 
-function overlapAreaWithCharacter(left, top, width, height, gap = 10) {
-  const charLeft = character.offsetLeft - gap;
-  const charTop = character.offsetTop - gap;
-  const charRight = character.offsetLeft + character.offsetWidth + gap;
-  const charBottom = character.offsetTop + character.offsetHeight + gap;
+// 与えられた矩形同士の重なり面積。キャラの辺は呼び出し元が1度だけ読んで渡す。
+function overlapArea(left, top, width, height, charLeft, charTop, charRight, charBottom) {
   const overlapWidth = Math.max(0, Math.min(left + width, charRight) - Math.max(left, charLeft));
   const overlapHeight = Math.max(0, Math.min(top + height, charBottom) - Math.max(top, charTop));
   return overlapWidth * overlapHeight;
@@ -4478,6 +4538,7 @@ composer.addEventListener("submit", async event => {
 
   // ストリーミングチャンクをリアルタイム表示する（rAF スロットルで1フレーム1描画）。
   streamBuffer = "";
+  lastStreamRenderAt = 0; // 最初のチャンクは待たせず描く
   beginStreamSpeech(); // 生成中の先行読み上げを準備（読み上げ無効なら何もしない）
   try {
     if (window.picoagent.listen) {
@@ -4491,6 +4552,7 @@ composer.addEventListener("submit", async event => {
         streamBuffer = "";
         // 表示にも残さない（最終回答に含まれない途中テキストを見せ続けない）。
         if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+        lastStreamRenderAt = 0; // 次のステップの最初のチャンクは待たせず描く
         renderMarkdown(reply, "");
         setThinkingUi(true, status.textContent || "考え中");
         resetStreamSpeech();
@@ -4503,14 +4565,23 @@ composer.addEventListener("submit", async event => {
         reply.classList.add("streaming"); // 文末の点滅カーソル表示
         if (currentLayout === "stream") return;
         if (!streamRenderFrame) {
-          streamRenderFrame = requestAnimationFrame(() => {
+          const paintStream = () => {
+            // 1回の描画は本文全体を組み直すので、文章が伸びるほど重くなる。トークンが
+            // 毎フレーム届くローカルAIでは、長い回答ほど入力やアニメが引っかかっていた。
+            // 読める速さは保ったまま、最短間隔をあけて描き直す。
+            if (performance.now() - lastStreamRenderAt < STREAM_RENDER_MIN_MS) {
+              streamRenderFrame = requestAnimationFrame(paintStream);
+              return;
+            }
             streamRenderFrame = null;
+            lastStreamRenderAt = performance.now();
             // ユーザーが上へスクロール中でなければ、生成に合わせて下端へ追従する。
             const nearBottom = reply.scrollHeight - reply.scrollTop - reply.clientHeight < 48;
             renderMarkdown(reply, streamBuffer);
             if (nearBottom) reply.scrollTop = reply.scrollHeight;
             if (animationName === "thinking") setAnimation("talking");
-          });
+          };
+          streamRenderFrame = requestAnimationFrame(paintStream);
         }
       });
     }
@@ -5187,13 +5258,6 @@ character.addEventListener("pointerdown", event => {
   });
 });
 
-// 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
-// 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
-window.addEventListener("resize", () => {
-  applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
-  syncLive2DResolution();
-  syncPngNaturalResolution();
-});
 
 // ── なでなで: キャラの上でマウスを素早く左右に往復させると照れる ─────────
 let petStrokes = [];
@@ -5256,7 +5320,6 @@ function fallAsleep() {
   setMeshRigVisible(false);
   stopRig();
   character.dataset.motion = "none";
-  character.classList.add("napping");
   petSprite.src = versionedAssetUrl(`${characterRoot}/${sleeping}`, characterAssetVersion);
   status.textContent = "すやすや……";
 }
@@ -5264,7 +5327,6 @@ function fallAsleep() {
 function wakeUp() {
   if (!napping) return;
   napping = false;
-  character.classList.remove("napping");
   if (status.textContent === "すやすや……") clearTransientStatus();
   setAnimation("idle", true);
 }
@@ -5477,7 +5539,7 @@ function applyVoiceVolume(value) {
   const n = parseFloat(value);
   if (!Number.isFinite(n)) return;
   voiceVolume = Math.min(1, Math.max(0, n / 100));
-  if (currentVoice) currentVoice.volume = voiceVolume;
+  if (currentVoice) currentVoice.volume = voiceOutputGain();
   if (voiceVolume <= 0.001) {
     rigMouthLevel = 0;
     rigMouthForm = 0;
@@ -5623,10 +5685,20 @@ function refitBubbleToWindow() {
   if (Math.round(bubble.offsetWidth) !== Math.round(fitted.width)) bubble.style.width = `${fitted.width}px`;
   if (Math.round(bubble.offsetHeight) !== Math.round(fitted.height)) bubble.style.height = `${fitted.height}px`;
 }
-window.addEventListener("resize", () => {
+// 枠なしウィンドウは8方向ドラッグでリサイズするため、resize は1回の操作で連続して届く。
+// 購読を分けていた頃は、同じ同期レイアウト計算（`offset*` の読み取りと style 書き込み）が
+// 1イベントで2本走っていた。1本へまとめ、次の描画フレームまで間引く。
+function handleWindowResize() {
+  // 最大化・復元で構図の保存座標を変えない。サイズ変更のたびに現在の画面へ丸めると、
+  // 復元後も丸めた座標が残り、設定で決めたキャラ位置がずれてしまう。
+  applyCharacterOffset(characterOffset.x, characterOffset.y, { clamp: false });
+  syncLive2DResolution();
+  syncPngNaturalResolution();
   refitBubbleToWindow();
   refreshBubblePlacement();
-});
+}
+const windowResizeScheduler = window.PicoFrameScheduler.create(handleWindowResize);
+window.addEventListener("resize", () => windowResizeScheduler.schedule());
 function syncPngNaturalResolution() {
   if (!petSprite.complete || petSprite.naturalWidth < 1 || petSprite.naturalHeight < 1) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);

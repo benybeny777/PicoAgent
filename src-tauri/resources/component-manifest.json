@@ -71,6 +71,21 @@
         }
       ]
     },
+    "image-krea2": {
+      "installMode": "managed",
+      "targetVersion": "2026-09-21",
+      "sources": [
+        { "name": "Krea 2 Turbo公式モデル・利用条件", "url": "https://huggingface.co/krea/Krea-2-Turbo" },
+        { "name": "ComfyUI公式Krea 2量子化モデル", "url": "https://huggingface.co/Comfy-Org/Krea-2" }
+      ]
+    },
+    "video-ltx25": {
+      "installMode": "managed",
+      "targetVersion": "2026-09-21",
+      "sources": [
+        { "name": "Lightricks公式LTX 2.5モデル・利用条件", "url": "https://huggingface.co/Lightricks/LTX-2.5" }
+      ]
+    },
     "office": {
       "installMode": "external",
       "sources": [

@@ -173,6 +173,20 @@ window.__TAURI__ = {
         : { enabled: false });
     }, ${JSON.stringify(speechDelayMs)}));
     if (name === "pet_send") return new Promise(r => setTimeout(() => r({ reply: ${JSON.stringify(reply)} }), ${JSON.stringify(sendDelayMs)}));
+    if (name === "pet_game_ready") return Promise.resolve({ ready: true, message: "AIの準備ができました。" });
+    if (name === "pet_game_judge") return Promise.resolve({
+      total: 83,
+      criteria: [
+        { key: "clarity", label: "断りの明確さ", score: 23, maxScore: 25, reason: "できないことを冒頭で明確に伝えています。" },
+        { key: "logic", label: "理由の筋道", score: 17, maxScore: 20, reason: "情報が存在しない理由を説明できています。" },
+        { key: "alternative", label: "代案の役立ち度", score: 21, maxScore: 25, reason: "下書きを共有する代案が実行可能です。" },
+        { key: "politeness", label: "AIらしい丁寧さ", score: 12, maxScore: 15, reason: "丁寧ですが前置きが少し長めです。" },
+        { key: "humor", label: "短さと面白さ", score: 10, maxScore: 15, reason: "簡潔ですが意外性は控えめです。" },
+      ],
+      commentary: "できない理由と次の一手が明確です。前置きを一文減らすとさらにAIらしくなります。",
+      highlight: "下書きを共有いただければ要約できます",
+      improvement: "冒頭の謝罪を短くする",
+    });
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
     if (name === "settings_components_status") return Promise.resolve([
@@ -379,6 +393,170 @@ async function openScene({
   // 通常の製品画面・公開動画ではカーソルを右下へ退避し、専用の配置編集検査だけが明示的に上端へ戻す。
   await page.mouse.move(Math.max(20, width - 40), Math.max(20, height - 40));
   return page;
+}
+
+async function validateAiGames() {
+  const output = join(ROOT, "temp", "ai-games-qa");
+  mkdirSync(output, { recursive: true });
+  const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
+  const result = {};
+  try {
+    // 遊びは「人間だとバレるな」1本。開いた直後が監査ブリーフィングになる。
+    await page.locator("#gameMenuButton").click();
+    await page.waitForSelector("#gameOverlay:not([hidden]) .game-setup");
+    result.briefingTitle = await page.locator("#gameTitle").textContent();
+    result.examCount = await page.locator(".game-exams li").count();
+    result.difficultyCount = await page.locator('input[name="gameDifficulty"]').count();
+    result.rankSlots = await page.locator(".game-ranks li").count();
+    await page.screenshot({ path: join(output, "briefing.png") });
+
+    await page.locator(".game-start").click();
+    await page.waitForSelector("#gameAnswer");
+    result.exam = await page.locator(".game-exam strong").textContent();
+    result.prompt = await page.locator(".game-prompt p").textContent();
+    await page.locator("#gameAnswer").fill("そのメールはまだ送られていないため、内容を確認して要約することはできません。下書きを共有いただければ要点をまとめます。");
+    await page.locator("#gameSubmit").click();
+    await page.waitForSelector(".game-result");
+    result.score = await page.locator(".game-score strong").textContent();
+    result.criteriaCount = await page.locator(".game-criteria li").count();
+    result.hpFirst = await page.locator(".game-result .game-hp > strong").evaluate(element => element.firstChild.textContent);
+    result.overlayBox = await page.locator("#gameOverlay").boundingBox();
+    result.resultBox = await page.locator(".game-result").boundingBox();
+    result.characterBox = await page.locator("#character").boundingBox();
+    result.characterViewBox = await page.locator("#characterView").boundingBox();
+    result.characterViewTransform = await page.locator("#characterView").evaluate(element => getComputedStyle(element).transform);
+    result.characterViewStyle = await page.locator("#characterView").getAttribute("style");
+    result.renderKind = await page.locator("#character").getAttribute("data-render-kind");
+    result.appClass = await page.locator("#petApp").getAttribute("class");
+    result.characterStyle = await page.locator("#character").evaluate(element => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        width: rect.width,
+        height: rect.height,
+      };
+    });
+    result.characterVisible = result.characterStyle.display !== "none"
+      && result.characterStyle.visibility !== "hidden"
+      && Number(result.characterStyle.opacity) > 0
+      && result.characterStyle.width >= 200 && result.characterStyle.height >= 300;
+    await page.screenshot({ path: join(output, "result.png") });
+
+    if (result.examCount !== 12 || result.difficultyCount !== 3
+        || result.rankSlots !== 5 || result.score !== "83" || result.criteriaCount !== 5
+        || result.hpFirst !== "90") {
+      throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);
+    }
+    if (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
+        || result.resultBox.x + result.resultBox.width > 1000
+        || result.resultBox.y + result.resultBox.height > 760) {
+      throw new Error(`採点結果が画面内に収まりません: ${JSON.stringify(result)}`);
+    }
+    if (!result.characterVisible || !result.characterBox
+        || result.characterBox.x < result.resultBox.x + result.resultBox.width) {
+      throw new Error(`ゲーム中のキャラクターが採点欄の右側に表示されません: ${JSON.stringify(result)}`);
+    }
+    if (!result.characterViewBox || result.characterViewBox.x < result.characterBox.x
+        || result.characterViewBox.x + result.characterViewBox.width > 1000) {
+      throw new Error(`ゲーム中のキャラクターが画面の横で切れています: ${JSON.stringify(result)}`);
+    }
+    if (result.characterViewBox.height < result.characterBox.height * 1.3) {
+      throw new Error(`ゲーム中のキャラクターがバストアップになっていません: ${JSON.stringify(result)}`);
+    }
+
+    result.renderKinds = {};
+    for (const kind of ["live2d", "mmd"]) {
+      const geometry = await page.evaluate(renderKind => {
+        const character = document.getElementById("character");
+        const view = document.getElementById("characterView");
+        for (const child of view.querySelectorAll(":scope > img,:scope > canvas,:scope > .character-spring-motion")) {
+          child.style.display = "none";
+        }
+        const canvas = document.createElement("canvas");
+        canvas.id = renderKind === "live2d" ? "live2dCanvas" : "mmdCanvas";
+        canvas.width = renderKind === "live2d" ? 285 : 320;
+        canvas.height = renderKind === "live2d" ? 315 : 716;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ff91aa";
+        context.beginPath();
+        context.arc(canvas.width / 2, canvas.height * .25, canvas.width * .19, 0, Math.PI * 2);
+        context.fill();
+        context.fillRect(canvas.width * .25, canvas.height * .4, canvas.width * .5, canvas.height * .6);
+        view.appendChild(canvas);
+        character.dataset.renderKind = renderKind;
+        const characterRect = character.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        return {
+          character: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
+          canvas: { x: canvasRect.x, y: canvasRect.y, width: canvasRect.width, height: canvasRect.height },
+          visibleHeight: Math.max(0, Math.min(characterRect.bottom, canvasRect.bottom) - Math.max(characterRect.top, canvasRect.top)),
+        };
+      }, kind);
+      result.renderKinds[kind] = geometry;
+      if (geometry.canvas.x < geometry.character.x - 1
+          || geometry.canvas.x + geometry.canvas.width > 1001
+          || geometry.visibleHeight < 300) {
+        throw new Error(`${kind}のゲーム用キャラクター枠が画面内へ収まりません: ${JSON.stringify(result)}`);
+      }
+    }
+    result.audit = await validateAuditRun(output);
+    await writeFile(join(output, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
+    return output;
+  } finally {
+    await page.close();
+  }
+}
+
+// 信用度が尽きるまで回答し続け、削られ方・点数・称号・記録の保存までを検査する。
+// 固定採点は110点満点中83点なので、1問目は round(27 × 40 ÷ 110) = 10 削られ、
+// 進むほど6%ずつ増える。10問前後で信用度0になり、監査終了の画面へ進む。
+async function validateAuditRun(output) {
+  const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
+  const result = { hp: [], exams: [] };
+  try {
+    await page.locator("#gameMenuButton").click();
+    await page.waitForSelector("#gameOverlay:not([hidden]) .game-setup");
+    await page.locator(".game-start").click();
+    for (let round = 1; round <= 40; round += 1) {
+      await page.waitForSelector("#gameAnswer");
+      result.exams.push(await page.locator(".game-exam strong").textContent());
+      if (round === 1) await page.screenshot({ path: join(output, "audit-question.png") });
+      await page.locator("#gameAnswer").fill("個体識別番号PX-07。稼働目的は記録の整理です。処理は正常に完了しています。");
+      await page.locator("#gameSubmit").click();
+      await page.waitForSelector(".game-result");
+      result.hp.push(Number(await page.locator(".game-result .game-hp > strong").evaluate(element => element.firstChild.textContent)));
+      if (round === 1) await page.screenshot({ path: join(output, "audit-result.png") });
+      result.lastButton = await page.locator('[data-action="next"]').textContent();
+      await page.locator('[data-action="next"]').click();
+      if (result.lastButton === "結果を見る") break;
+    }
+    await page.waitForSelector(".game-ending");
+    result.rounds = result.hp.length;
+    result.rank = await page.locator(".game-ending h2").textContent();
+    result.total = await page.locator(".game-total strong").textContent();
+    result.endingBox = await page.locator(".game-ending").boundingBox();
+    await page.screenshot({ path: join(output, "audit-ending.png") });
+    await page.locator('[data-action="briefing"]').click();
+    await page.waitForSelector(".game-ranks");
+    result.foundAfter = await page.locator('.game-ranks li[data-found="true"]').count();
+    result.record = await page.locator('input[name="gameDifficulty"][value="normal"] ~ span').textContent();
+    const decreasing = result.hp.every((value, index) => index === 0 || value < result.hp[index - 1]);
+    if (!decreasing || result.hp[0] !== 90 || result.hp[result.rounds - 1] !== 0
+        || result.rounds < 8 || result.rounds > 14 || result.lastButton !== "結果を見る"
+        || Number(result.total) !== result.rounds * 166 || result.foundAfter !== 1
+        || !result.record.includes(`最高 ${result.total}点・${result.rounds}問`)) {
+      throw new Error(`監査の進行が想定と異なります: ${JSON.stringify(result)}`);
+    }
+    if (!result.endingBox || result.endingBox.y < 32 || result.endingBox.y + result.endingBox.height > 760) {
+      throw new Error(`監査終了の画面が画面内に収まりません: ${JSON.stringify(result)}`);
+    }
+    return result;
+  } finally {
+    await page.close();
+  }
 }
 
 const MATRIX_LAYOUTS = {
@@ -2420,6 +2598,15 @@ if (process.env.SHOOT_TASK_RUN) {
   await browser.close();
   server.close();
   console.log(`実行中タスク表示検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_AI_GAMES) {
+  const output = await validateAiGames();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`「人間だとバレるな」表示検査完了: ${output}`);
   process.exit(0);
 }
 

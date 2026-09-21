@@ -22,6 +22,36 @@ use crate::{
 
 pub const STAGES: [&str; 4] = ["isolate", "decompose", "rig2d", "complete"];
 
+/// サイドカーがGPUメモリ不足で終了したときの終了コード（`sidecar/completion/generate.py`と共有）。
+pub const GPU_OOM_EXIT_CODE: i32 = 3;
+
+/// `--lowvram`の有無だけを変えた引数列を作る。
+///
+/// 入力・seed・モデル・workflow・出力先は元のまま複製する。再試行で生成条件を変えない。
+fn with_lowvram(arguments: &[OsString], lowvram: bool) -> Vec<OsString> {
+    let mut arguments = arguments.to_vec();
+    if lowvram {
+        arguments.push("--lowvram".into());
+    }
+    arguments
+}
+
+/// 省メモリ設定で1回だけやり直すか。
+///
+/// 通常起動のGPUメモリ不足だけが対象。lowvram中のOOM、OOM以外の失敗、中断では再試行しない。
+/// `allowed`が偽のバックエンド（MPSなど`--lowvram`を検証していないもの）では再試行しない。
+fn should_retry_with_lowvram(error: &PipelineError, lowvram_used: bool, allowed: bool) -> bool {
+    allowed
+        && !lowvram_used
+        && matches!(
+            error,
+            PipelineError::Sidecar(SidecarError::Failed {
+                code: Some(GPU_OOM_EXIT_CODE),
+                ..
+            })
+        )
+}
+
 #[derive(Debug, Error)]
 pub enum PipelineError {
     #[error("ファイル操作に失敗しました: {0}")]
@@ -473,7 +503,7 @@ impl PipelineContext {
                 .join("sam2.1-hiera-tiny")
                 .into_os_string(),
         ]);
-        self.run_sidecar(config, args, cancelled, relay)?;
+        self.run_completion_sidecar(config, args, cancelled, relay)?;
         let reader =
             crate::generation_reference::Reader::acquire(&directory, config.snapshot_part_bytes)?;
         let rig: serde_json::Value =
@@ -487,6 +517,46 @@ impl PipelineContext {
             ));
         }
         Ok("局所補完済みの不変世代を公開しました".into())
+    }
+
+    /// 局所補完（ComfyUI）を実行する。省メモリ起動とOOM後の1回だけの再試行を扱う。
+    ///
+    /// 通常起動でGPUメモリ不足になった場合だけ、同じ原画・seed・モデル・workflow・出力先の
+    /// まま`--lowvram`付きで1回だけやり直す。既に`--lowvram`で動いていた場合、OOM以外の
+    /// 失敗、2回目の失敗では再試行しない。サイドカーは終了時にComfyUIと子孫プロセス、
+    /// 途中成果物を必ず回収してから終了コードを返す。
+    fn run_completion_sidecar(
+        &self,
+        config: &MakerConfig,
+        arguments: Vec<OsString>,
+        cancelled: Arc<AtomicBool>,
+        relay: &mut impl FnMut(serde_json::Value),
+    ) -> Result<(), PipelineError> {
+        let mut lowvram = config.comfy_lowvram;
+        if lowvram {
+            relay(serde_json::json!({
+                "event": "completion_lowvram",
+                "message": "GPUメモリに合わせて省メモリ設定（lowvram）で画像生成を始めます",
+            }));
+        }
+        let first = self.run_sidecar(
+            config,
+            with_lowvram(&arguments, lowvram),
+            cancelled.clone(),
+            relay,
+        );
+        let Err(error) = first else {
+            return Ok(());
+        };
+        if !should_retry_with_lowvram(&error, lowvram, config.comfy_lowvram_retry) {
+            return Err(error);
+        }
+        lowvram = true;
+        relay(serde_json::json!({
+            "event": "completion_lowvram_retry",
+            "message": "GPUメモリ不足のため、同じ原画・シード・モデルのまま省メモリ設定（lowvram）で1回だけやり直します",
+        }));
+        self.run_sidecar(config, with_lowvram(&arguments, lowvram), cancelled, relay)
     }
 
     fn run_sidecar(
@@ -554,6 +624,57 @@ fn now_iso() -> String {
 mod tests {
     use super::*;
     use image::GenericImageView;
+
+    fn failed(code: Option<i32>) -> PipelineError {
+        PipelineError::Sidecar(SidecarError::Failed {
+            status: format!("exit code: {code:?}"),
+            code,
+            stderr: String::new(),
+        })
+    }
+
+    #[test]
+    fn 補完の再試行で変わるのはlowvramだけにする() {
+        let base: Vec<OsString> = vec!["generate.py".into(), "--seed".into(), "777".into()];
+        assert_eq!(with_lowvram(&base, false), base);
+        let retried = with_lowvram(&base, true);
+        assert_eq!(&retried[..base.len()], base.as_slice());
+        assert_eq!(retried[base.len()], OsString::from("--lowvram"));
+    }
+
+    #[test]
+    fn 補完は通常起動のoomだけlowvramで1回再試行する() {
+        assert!(should_retry_with_lowvram(
+            &failed(Some(GPU_OOM_EXIT_CODE)),
+            false,
+            true
+        ));
+        // lowvram中のOOMでは再試行しない。
+        assert!(!should_retry_with_lowvram(
+            &failed(Some(GPU_OOM_EXIT_CODE)),
+            true,
+            true
+        ));
+        // `--lowvram`を検証していないバックエンド（MPS）では再試行しない。
+        assert!(!should_retry_with_lowvram(
+            &failed(Some(GPU_OOM_EXIT_CODE)),
+            false,
+            false
+        ));
+        // OOM以外の失敗・中断・終了コード不明では再試行しない。
+        assert!(!should_retry_with_lowvram(&failed(Some(1)), false, true));
+        assert!(!should_retry_with_lowvram(&failed(None), false, true));
+        assert!(!should_retry_with_lowvram(
+            &PipelineError::Sidecar(SidecarError::Cancelled),
+            false,
+            true
+        ));
+        assert!(!should_retry_with_lowvram(
+            &PipelineError::Invalid("補完の生成設定が範囲外です".into()),
+            false,
+            true
+        ));
+    }
 
     #[cfg(windows)]
     #[test]

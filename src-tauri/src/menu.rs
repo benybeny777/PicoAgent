@@ -21,6 +21,9 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     let settings = MenuItemBuilder::with_id("settings", "設定を開く…")
         .build(&app)
         .map_err(|e| e.to_string())?;
+    let games = MenuItemBuilder::with_id("games", "遊ぶ")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
     let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト・位置…")
         .build(&app)
         .map_err(|e| e.to_string())?;
@@ -119,6 +122,7 @@ pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(
     let menu = MenuBuilder::new(&app)
         .item(&summon)
         .item(&tts)
+        .item(&games)
         .separator()
         .item(&layout_menu)
         .item(&placement_menu)
@@ -302,6 +306,16 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
             }
         }
         "settings" => open_settings(app),
+        "games" => {
+            if let Some(win) = app.get_webview_window("main") {
+                if let Err(error) = win.emit("pet:game-open", ()) {
+                    crate::log_paths::append_app_log(
+                        app,
+                        &format!("ゲーム選択画面を開けません: {error}"),
+                    );
+                }
+            }
+        }
         "display_settings" => open_display_settings(app),
         "character_settings" => open_character_settings(app),
         "edit_layout" => {

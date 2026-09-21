@@ -8,6 +8,19 @@
     return t * t * (3 - 2 * t);
   };
 
+  // 表情ごとの固定値。描画ループから1フレームに5回引くため、共有の読み取り専用値にする
+  // （毎回作ると毎秒300個ぶんのごみになる）。凍結して、うっかり書き換えたらその場で分かるようにする。
+  const EXPRESSION_POSES = Object.freeze({
+    angry: Object.freeze({ eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -0.8, browY: -6, browInnerY: 24, blush: 0 }),
+    shy: Object.freeze({ eye: 1, mouthOpen: 0.04, mouthForm: 0.5, mouthCurve: 0.65, browY: 2, browInnerY: -12, blush: 1 }),
+    happy: Object.freeze({ eye: 1, mouthOpen: 0.38, mouthForm: 0.65, mouthCurve: 0.6, browY: -8, browInnerY: 0, blush: 0 }),
+    concern: Object.freeze({ eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -1.6, browY: 8, browInnerY: -28, blush: 0 }),
+    thinking: Object.freeze({ eye: 1, mouthOpen: 0, mouthForm: -0.15, mouthCurve: -0.65, browY: 7, browInnerY: 7, blush: 0 }),
+    neutral: Object.freeze({ eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: 0, browY: 0, browInnerY: 0, blush: 0 }),
+  });
+  // 口・目の局所差分を持つメッシュ形式。毎フレームの判定で配列を作らないよう外へ出す。
+  const APERTURE_RIG_MODES = Object.freeze(["anime25d-v1", "lvs-anime25d-v1"]);
+
   function versioned(url, version) {
     if (!version) return url;
     return `${url}${url.includes("?") ? "&" : "?"}v=${encodeURIComponent(version)}`;
@@ -320,7 +333,7 @@
       x0: legacyBox[0], y0: legacyBox[1], x1: legacyBox[2], y1: legacyBox[3],
     } : null);
     if (!face) return null;
-    const anime = ["anime25d-v1", "lvs-anime25d-v1"].includes(rig.mode);
+    const anime = APERTURE_RIG_MODES.includes(rig.mode);
     const width = face.x1 - face.x0;
     const height = face.y1 - face.y0;
     const measured = cheekLayout(rig.anchors);
@@ -573,23 +586,10 @@
       this.motionStartedAt = performance.now();
     }
 
+    // 表情ごとの固定値は `EXPRESSION_POSES` を共有する。1フレームに5回引くので、
+    // そのたびにオブジェクトを作ると毎秒300個ぶんのごみになる。
     expressionPose() {
-      if (this.expression === "angry") {
-        return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -0.8, browY: -6, browInnerY: 24, blush: 0 };
-      }
-      if (this.expression === "shy") {
-        return { eye: 1, mouthOpen: 0.04, mouthForm: 0.5, mouthCurve: 0.65, browY: 2, browInnerY: -12, blush: 1 };
-      }
-      if (this.expression === "happy") {
-        return { eye: 1, mouthOpen: 0.38, mouthForm: 0.65, mouthCurve: 0.6, browY: -8, browInnerY: 0, blush: 0 };
-      }
-      if (this.expression === "concern") {
-        return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: -1.6, browY: 8, browInnerY: -28, blush: 0 };
-      }
-      if (this.expression === "thinking") {
-        return { eye: 1, mouthOpen: 0, mouthForm: -0.15, mouthCurve: -0.65, browY: 7, browInnerY: 7, blush: 0 };
-      }
-      return { eye: 1, mouthOpen: 0, mouthForm: 0, mouthCurve: 0, browY: 0, browInnerY: 0, blush: 0 };
+      return EXPRESSION_POSES[this.expression] || EXPRESSION_POSES.neutral;
     }
 
     anime25dMotionPose(now) {
@@ -645,10 +645,12 @@
       const expression = this.expressionPose();
       const mouthOpen = Math.max(this.mouth, expression.mouthOpen);
       if (this.lvsFace) return;
-      if (["anime25d-v1", "lvs-anime25d-v1"].includes(this.rig.mode)) {
+      if (APERTURE_RIG_MODES.includes(this.rig.mode)) {
         for (const entry of this.planes.values()) {
           const fade = entry.item?.fade;
-          const side = String(entry.item?.side || "").toUpperCase();
+          // 左右の別は素材の定義で決まり、途中で変わらない。毎フレーム文字列を
+          // 作り直さず、最初に見たときだけ求めて覚える。
+          const side = entry.sideKey ??= String(entry.item?.side || "").toUpperCase();
           const rawEyeOpen = side === "L" ? this.eyeOpenL : side === "R" ? this.eyeOpenR : this.eyeOpen;
           const eyeOpen = rawEyeOpen * expression.eye;
           let alpha = 1;
@@ -693,10 +695,21 @@
       const mouthForm = this.mouth > 0.05 ? this.mouthForm : expression.mouthForm;
       const eyeL = this.eyeOpenL * expression.eye;
       const eyeR = this.eyeOpenR * expression.eye;
-      const key = [eyeL, eyeR, mouthOpen, mouthForm, expression.mouthCurve, this.gazeX, this.gazeY]
-        .map(value => value.toFixed(3)).join(",");
-      if (key === face.lastKey) return;
-      face.lastKey = key;
+      // 変化判定のためだけに配列と文字列を作らない。毎フレーム通る経路なので、
+      // 以前は「何も変わっていない」と答えるだけで毎秒500個以上のごみが出ていた。
+      // 小数3桁へ丸めた整数をそのまま比べる（判定の細かさは `toFixed(3)` と同じ）。
+      const next = face.keyScratch ||= new Int32Array(7);
+      next[0] = Math.round(eyeL * 1000);
+      next[1] = Math.round(eyeR * 1000);
+      next[2] = Math.round(mouthOpen * 1000);
+      next[3] = Math.round(mouthForm * 1000);
+      next[4] = Math.round(expression.mouthCurve * 1000);
+      next[5] = Math.round(this.gazeX * 1000);
+      next[6] = Math.round(this.gazeY * 1000);
+      const last = face.lastKey;
+      if (last && last.every((value, index) => value === next[index])) return;
+      face.lastKey = last || new Int32Array(7);
+      face.lastKey.set(next);
       const box = this.rig.sourceRig.layers.scene_face.texture_box;
       const { ctx, canvas, images, sourceAlpha } = face;
       ctx.save();
@@ -901,7 +914,7 @@
       this.speechEnvelope += (this.mouth - this.speechEnvelope) * (1 - Math.exp(-response * step));
       this.speechBody = springStep(this.speechBody, this.speechEnvelope, step, 1.2, 0.9);
       this.chestFollow = springStep(this.chestFollow, this.speechBody.value, step, 1.8, 0.6);
-      if (["anime25d-v1", "lvs-anime25d-v1"].includes(this.rig.mode)) {
+      if (APERTURE_RIG_MODES.includes(this.rig.mode)) {
         this.updateAnime25dMesh(now, dt);
         this.previousAngleX = this.angleX;
         return;
@@ -1129,7 +1142,9 @@
     };
     return { rig: normalized, face: {
       canvas: faceCanvas, ctx: faceContext, images, sourceAlpha, texture: faceTexture,
-      residualCanvas, lastKey: "",
+      // 表情の変化判定は小数3桁へ丸めた整数7個で行う（`updateLvsAppearance`）。
+      // 初回は必ず描き直すよう、まだ値が無いことを null で表す。
+      residualCanvas, lastKey: null, keyScratch: null,
     } };
   }
 

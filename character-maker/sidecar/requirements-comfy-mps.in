@@ -1,0 +1,19 @@
+# MPS（Apple Silicon Mac）向けの直接実行依存。共通分へmacOS arm64版PyTorchだけを足す。
+#
+# macOS arm64のPyTorchはPyPIの標準wheelがMetal（MPS）バックエンドを含むため、
+# CUDAやROCmのような専用インデックスも専用ビルドも使わない。版はCUDA側と同じ
+# 2.11.0系へ揃え、バックエンド差がPyTorch本体の版差にならないようにする。
+#
+# ロックの再生成:
+#
+#   uv pip compile sidecar/requirements-comfy-mps.in \
+#     --output-file sidecar/requirements-comfy-mps.lock \
+#     --generate-hashes --index-strategy unsafe-best-match \
+#     --python-platform aarch64-apple-darwin --python-version 3.12
+#
+# Intel Macは対象外（Apple Silicon専用）。
+-r requirements-comfy-common.in
+
+torch==2.11.0
+torchvision==0.26.0
+torchaudio==2.11.0

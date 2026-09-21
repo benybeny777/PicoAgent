@@ -8,9 +8,10 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::message::Message;
 
@@ -24,9 +25,7 @@ const MAX_CONTEXT_LOAD: usize = 20;
 const LEGACY_GREETING_GUIDANCE: &str = "\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。";
 
 fn data_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    app.path()
-        .app_data_dir()
-        .map_err(|error| anyhow::anyhow!("会話履歴の保存先を取得できません: {error}"))
+    Ok(crate::log_paths::data_dir(app))
 }
 
 /// キャラクターIDをファイル名に使える形へ正規化する（想定外の文字は落とす）。
@@ -249,6 +248,9 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
                 "会話履歴を読めなかったため保存を止めています（原本を保護中）: {character_id}"
             ),
         );
+        // 起動後のキャラクター切替で読めなくなった場合、起動時の案内には間に合わない。
+        // 同じ印で知らせるので、起動時に出していれば二重には出ない。
+        notify_blocked(app);
         return;
     }
     let convo: Vec<&Message> = messages.iter().filter(|m| m.role != "system").collect();
@@ -269,9 +271,69 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
         crate::store::write_json_atomic(&target, &recent)?;
         Ok(())
     })();
-    // フォールバック許可: 履歴保存の失敗は会話継続を優先し、ログのみに留める。
-    if let Err(error) = result {
-        crate::log_paths::append_app_log(app, &format!("会話履歴の保存に失敗しました: {error}"));
+    // フォールバック許可: 履歴保存の失敗で会話は止めない。ただし黙ってもいけない。
+    match result {
+        Ok(()) => {
+            // 直前まで失敗していたなら、画面の警告を解いて次の失敗をまた知らせる。
+            if SAVE_FAILED.swap(false, Ordering::Relaxed) {
+                notify_save_state(app, true, "会話履歴の保存が復旧しました");
+            }
+        }
+        Err(error) => {
+            let message = format!("会話履歴の保存に失敗しました: {error}");
+            crate::log_paths::append_app_log(app, &message);
+            // 同じ原因が毎ターン届くので、状態が変わったときだけ画面へ送る
+            // （画面側 `notifyBackgroundFailure` も原因ごとに1度へ間引く）。
+            if !SAVE_FAILED.swap(true, Ordering::Relaxed) {
+                notify_save_state(
+                    app,
+                    false,
+                    "会話履歴を保存できません。このままだと再起動で今の会話が残りません",
+                );
+            }
+        }
+    }
+}
+
+/// 直前の保存が失敗していたか。復旧を知らせるために覚えておく。
+static SAVE_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// 原本保護で保存を止めていることを画面へ知らせる（画面側が原因ごとに1度へ間引く）。
+fn notify_blocked(app: &AppHandle) {
+    let payload = serde_json::json!({
+        "kind": "background_failure",
+        "key": "history-save-blocked",
+        "title": "会話履歴の保存",
+        "body": "会話履歴を読めなかったため、この会話は保存されません（元の履歴は残しています）",
+        "ok": false,
+        "at": chrono::Local::now().to_rfc3339(),
+    });
+    if let Err(error) = app.emit("pet:notice", payload) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("会話履歴の保存停止を画面へ通知できません: {error}"),
+        );
+    }
+}
+
+/// 会話履歴の保存状態を画面へ知らせる。
+///
+/// ログだけで済ませると、利用者は「保存できている」と思ったまま会話を続け、
+/// 再起動でその分がまるごと消える（AGENTS.md の「ログだけで済ませない」）。
+fn notify_save_state(app: &AppHandle, ok: bool, message: &str) {
+    let payload = serde_json::json!({
+        "kind": "background_failure",
+        "key": "history-save",
+        "title": "会話履歴の保存",
+        "body": message,
+        "ok": ok,
+        "at": chrono::Local::now().to_rfc3339(),
+    });
+    if let Err(error) = app.emit("pet:notice", payload) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("会話履歴の保存状態を画面へ通知できません: {error}"),
+        );
     }
 }
 
