@@ -55,3 +55,19 @@ test("立ち絵枠のキー操作は中のボタンを奪わない", () => {
   assert.ok(guard >= 0 && guard < prevent, "枠自体に当たったときだけ扱う判定が preventDefault より前にない");
   assert.match(html, /<button id="relationshipButton"[^>]*type="button"/);
 });
+
+test("名前を付けた入れ物には役割も付ける", async () => {
+  // `<div>` の既定の役割（generic）は名前を持てない。`aria-label` だけを書いても
+  // 画面読み上げには一切届かず、付けたつもりの見出しが黙って消えていた。
+  const { readdir, readFile } = await import("node:fs/promises");
+  const uiDir = new URL("../../ui/", import.meta.url);
+  const pages = (await readdir(uiDir)).filter(name => name.endsWith(".html"));
+  const offenders = [];
+  for (const page of pages) {
+    const body = await readFile(new URL(page, uiDir), "utf8");
+    for (const match of body.matchAll(/<div\b[^>]*aria-label="([^"]+)"[^>]*>/g)) {
+      if (!/\brole="/.test(match[0])) offenders.push(`${page}: ${match[1]}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "role を付けるか、aria-label をやめてください");
+});

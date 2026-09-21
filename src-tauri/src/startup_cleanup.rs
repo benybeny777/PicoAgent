@@ -96,7 +96,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_history_characters_and_installed_models_are_not_targets() {
+    fn 設定と履歴とキャラと導入済みモデルは消さない() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("webview/main")).unwrap();
@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn removes_only_the_named_directory() {
+    fn 名指ししたフォルダだけを消す() {
         let temp = tempfile::tempdir().unwrap();
         let cache = temp.path().join("Cache");
         let local_storage = temp.path().join("Local Storage");

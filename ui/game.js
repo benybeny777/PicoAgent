@@ -321,11 +321,20 @@
   };
   const rankProgress = () => `到達した称号 ${readRanks().length} / ${RANKS.length}`;
 
+  // 効果音の音量。読み上げと同じ設定（PICOAGENT_TTS_VOLUME）に従う。
+  // 固定値で鳴らしていた頃は、音量を下げても・0にしても効果音だけ同じ大きさで鳴っていた。
+  // 既定35%のとき従来と同じ 0.06 になる係数を掛ける。
+  const TONE_LEVEL_RATIO = 0.5;
+  function tonePeakGain() {
+    const level = Number(window.PicoVoice?.gain?.());
+    return (Number.isFinite(level) ? level : 0.1225) * TONE_LEVEL_RATIO;
+  }
+
   function playTone(kind = "tap") {
     if (!soundEnabled) return;
-    // 効果音も読み上げと同じマスター音量へ従う。ゲームだけ別音量で鳴らさない。
-    const masterGain = Math.min(1, Math.max(0, Number(window.PicoVoice?.gain?.() ?? 0.1225)));
-    if (masterGain <= 0) return;
+    const peak = tonePeakGain();
+    // exponentialRampToValueAtTime は 0 を取れない。実質無音ならオシレータを起こさない。
+    if (!(peak > 0.0002)) return;
     try {
       audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioContext.createOscillator();
@@ -335,14 +344,29 @@
       oscillator.frequency.setValueAtTime(frequencies[kind] || 420, now);
       oscillator.type = kind === "error" ? "sawtooth" : "sine";
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.000001, 0.06 * masterGain), now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(peak, now + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === "best" ? 0.32 : 0.14));
       oscillator.connect(gain).connect(audioContext.destination);
       oscillator.start(now);
       oscillator.stop(now + (kind === "best" ? 0.34 : 0.16));
+      // 鳴り終わったノードは繋いだままにせず切り離す（1回の対局で数十回鳴る）。
+      oscillator.addEventListener("ended", () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      }, { once: true });
     } catch (error) {
       window.PicoUI?.logApp?.("warn", "ゲーム効果音を再生できませんでした", error);
     }
+  }
+
+  // 効果音用の AudioContext を解放する。ゲームを閉じている間は音を鳴らさないので、
+  // 抱えたままにせず OS の音声デバイスを返す。次に鳴らすときは作り直す。
+  function releaseAudioContext() {
+    const context = audioContext;
+    audioContext = null;
+    context?.close?.().catch(error => {
+      window.PicoUI?.logApp?.("warn", "ゲーム効果音を解放できませんでした", error);
+    });
   }
 
   function syncSoundButton() {
@@ -651,10 +675,16 @@
     clearTimer();
     session = null;
     window.PicoVoice?.stop?.();
+    releaseAudioContext();
     overlay.hidden = true;
     document.getElementById("petApp")?.classList.remove("is-playing-game");
     setStatus("");
   }
+
+  window.addEventListener("beforeunload", () => {
+    clearTimer();
+    releaseAudioContext();
+  });
 
   closeButton.addEventListener("click", close);
   soundButton.addEventListener("click", () => {

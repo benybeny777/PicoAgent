@@ -173,3 +173,20 @@ test("プロバイダ疎通は起動時の短い上限でfalseへ正規化する
   assert.match(commands, /SETTINGS_PROVIDER_PROBE_TIMEOUT: std::time::Duration =\s*std::time::Duration::from_secs\(10\)/);
   assert.match(commands, /current_up\(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT\)/);
 });
+
+test("起動の合図より前に重い部品を読み込まない", () => {
+  // `renderer.js` の先頭が `frontendReady()` を送り、起動シーケンスを始める。
+  // その前に置いた部品のぶんだけ、毎回の起動が遅れる。
+  const order = name => indexHtml.indexOf(`src="${name}"`);
+  const rendererAt = indexHtml.indexOf('src="renderer.js"');
+  assert.ok(rendererAt > 0, "renderer.js の読み込みが見つかりません");
+  // 配置編集の部品（245KB）は、使う layout-editor.js の直前まで下げる。
+  assert.ok(
+    order("vendor/moveable/moveable.min.js") > rendererAt,
+    "重い配置編集の部品を起動の合図より前に読み込んでいます",
+  );
+  assert.ok(
+    order("vendor/moveable/moveable.min.js") < order("layout-editor.js"),
+    "配置編集の部品が layout-editor.js より後になっています",
+  );
+});

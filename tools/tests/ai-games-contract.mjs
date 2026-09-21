@@ -119,12 +119,37 @@ test("配信向けの短い回答と見本、称号、共通音量を保つ", ()
   assert.match(game, /const bonus = item\.key === "fun_bonus";/);
   assert.match(styles, /\.game-criteria \.game-criterion-bonus \{/);
   // 効果音だけ本体の音量設定を迂回して大きく鳴らさない。
-  assert.match(game, /const masterGain = [^;]*window\.PicoVoice\?\.gain\?\.\(\)/);
-  assert.match(game, /0\.06 \* masterGain/);
+  // 効果音は読み上げと共通のマスター音量へ従う（詳細は「効果音も読み上げ音量に従い…」）。
+  assert.match(game, /function tonePeakGain\(\)[\s\S]*?window\.PicoVoice\?\.gain\?\.\(\)/);
   // 難易度は点数の倍率で効かせる（短い制限時間ほど点が伸びる）。
   assert.match(game, /easy: \{[^}]*scoreRate: 1 \}/);
   assert.match(game, /normal: \{[^}]*scoreRate: 2 \}/);
   assert.match(game, /hard: \{[^}]*scoreRate: 3 \}/);
+});
+
+test("手引きの難易度は実装の値と一致する", () => {
+  // PR #323 のマージで、実装を伴わないゲーム改良案の文面が MANUAL へ入り、
+  // 出荷版に無い制限時間・文字数を利用者へ案内していた。値は実装から読み、手引きと突き合わせる
+  // （固定値を写すと、実装を変えたときにこのテストだけが古い値を守り続ける）。
+  const difficulties = game.match(/const DIFFICULTIES = \{[\s\S]*?\n  \};/)?.[0] || "";
+  const entries = [...difficulties.matchAll(/label: "([^"]+)", seconds: (\d+), maxLength: (\d+)/g)];
+  assert.equal(entries.length, 3, "難易度の定義を読み取れません");
+  for (const [, label, seconds, maxLength] of entries) {
+    assert.ok(manual.includes(`${label}${seconds}秒・${maxLength}文字`), `${label}の案内が実装と違う`);
+  }
+});
+
+test("効果音も読み上げ音量に従い、閉じたら音声資源を返す", () => {
+  // 固定値で鳴らしていた頃は、音量を下げても0にしても効果音だけ同じ大きさで鳴っていた。
+  assert.match(game, /function tonePeakGain\(\)[\s\S]*?window\.PicoVoice\?\.gain\?\.\(\)/);
+  assert.match(game, /const peak = tonePeakGain\(\);[\s\S]*?if \(!\(peak > 0\.0002\)\) return;/);
+  assert.match(game, /exponentialRampToValueAtTime\(peak, now \+ 0\.01\)/);
+  assert.doesNotMatch(game, /exponentialRampToValueAtTime\(0\.06,/);
+  // 確保した AudioContext とノードは、閉じたときと終了時に解放する。
+  assert.match(game, /function releaseAudioContext\(\)[\s\S]*?context\?\.close\?\.\(\)/);
+  assert.match(game, /window\.PicoVoice\?\.stop\?\.\(\);\s*\n\s*releaseAudioContext\(\);/);
+  assert.match(game, /window\.addEventListener\("beforeunload", \(\) => \{\s*\n\s*clearTimer\(\);\s*\n\s*releaseAudioContext\(\);/);
+  assert.match(game, /oscillator\.addEventListener\("ended"[\s\S]*?oscillator\.disconnect\(\);\s*\n\s*gain\.disconnect\(\);/);
 });
 
 test("ゲームは通常の読み上げ経路と設定を共有する", () => {

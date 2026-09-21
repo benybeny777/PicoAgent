@@ -330,11 +330,15 @@ pub fn stop_all() {
         if let Some(mut child) = job.child.take() {
             if let Err(error) = child.kill() {
                 if error.kind() != std::io::ErrorKind::InvalidInput {
-                    eprintln!("バックグラウンドジョブを停止できません: {error}");
+                    crate::log_paths::log_detached(&format!(
+                        "バックグラウンドジョブを停止できません: {error}"
+                    ));
                 }
             }
             if let Err(error) = child.wait() {
-                eprintln!("バックグラウンドジョブの終了ハンドルを回収できません: {error}");
+                crate::log_paths::log_detached(&format!(
+                    "バックグラウンドジョブの終了ハンドルを回収できません: {error}"
+                ));
             }
             job.status = Status::Stopped;
         }

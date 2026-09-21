@@ -70,3 +70,16 @@ test("目覚まし・リマインダー・履歴保存の失敗が画面へ出�
   assert.match(renderer, /info\.historySaveBlocked === true/, "履歴の保存停止を画面へ出していません");
   assert.match(commands, /"historySaveBlocked": crate::history::saving_blocked/, "保存停止の状態を返していません");
 });
+
+test("履歴の保存失敗と保存停止は会話中も画面へ届く", async () => {
+  // 起動時の案内だけでは、会話中に書けなくなった場合（容量不足・権限・切替後の保護）に
+  // 何も出ない。保存できていないまま会話を続け、再起動でその分が消える。
+  const history = await readFile(new URL("../../src-tauri/src/history.rs", import.meta.url), "utf8");
+  assert.match(history, /"kind": "background_failure",\s*\n\s*"key": "history-save",/);
+  assert.match(history, /"kind": "background_failure",\s*\n\s*"key": "history-save-blocked",/);
+  // 失敗と復旧は状態が変わったときだけ送る（毎ターン同じ通知を流さない）。
+  assert.match(history, /if !SAVE_FAILED\.swap\(true, Ordering::Relaxed\)/);
+  assert.match(history, /if SAVE_FAILED\.swap\(false, Ordering::Relaxed\)/);
+  // 画面側は通知一覧へ積まず、原因ごとに1度だけ知らせる経路へ回す。
+  assert.match(renderer, /if \(String\(notice\?\.kind \|\| ""\) === "background_failure"\) \{[\s\S]*?clearBackgroundFailure\(key\); return;[\s\S]*?notifyBackgroundFailure\(key,/);
+});

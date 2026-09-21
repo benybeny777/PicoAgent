@@ -173,7 +173,7 @@ fn enqueue_inner(
         .try_send(id.clone())
     {
         let message = format!("永続ジョブを実行キューへ送れません: {error}");
-        let _ = fail_without_execution(&id, &message);
+        fail_without_execution(&id, &message);
         return Err(message);
     }
     Ok(id)
@@ -192,7 +192,23 @@ pub fn enqueue_unique(
     enqueue_inner(tool_name, args, label.into(), unique_key)
 }
 
-fn fail_without_execution(id: &str, message: &str) -> Result<(), String> {
+/// 実行に入る前に失敗が確定したジョブへ理由を記録する。
+///
+/// 記録自体に失敗すると、そのジョブは `Queued` のまま残り、次回起動の復旧で
+/// 「頼んでいないのに走り出す」ことになる。呼び出し側は失敗理由を利用者へ返すので、
+/// ここでは記録できなかったことをログへ残して取りこぼしを追えるようにする。
+fn fail_without_execution(id: &str, message: &str) {
+    if let Err(error) = write_failure(id, message) {
+        if let Some(app) = APP.get() {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("永続ジョブの失敗理由を保存できません（{id}）: {error}"),
+            );
+        }
+    }
+}
+
+fn write_failure(id: &str, message: &str) -> Result<(), String> {
     update(|jobs| {
         let job = jobs
             .iter_mut()
@@ -244,7 +260,7 @@ pub fn retry(id: &str) -> Result<(), String> {
         .try_send(id.to_string())
     {
         let message = format!("再試行を開始できません: {error}");
-        let _ = fail_without_execution(id, &message);
+        fail_without_execution(id, &message);
         return Err(message);
     }
     Ok(())
@@ -394,30 +410,59 @@ fn apply_progress(job: &mut DurableJob, percent: u8, step: &str) -> bool {
     true
 }
 
-fn mark_started(id: &str) -> Result<Option<DurableJob>, String> {
-    let mut selected = None;
+/// `mark_started()` の結果。「開始した」と「開始せず終了が確定した」を区別する。
+///
+/// 以前は `Option<DurableJob>` で返しており、再試行上限に達して `Failed` になった場合も
+/// `None` として黙って戻っていた。状態ファイルには理由が入るのに画面へは何も届かず、
+/// ジョブセンターは「順番待ちです。」のまま再起動まで残っていた。
+enum StartOutcome {
+    Started(DurableJob),
+    /// 開始せずに終了状態が確定した。実行はしないが、理由は画面へ知らせる。
+    Rejected(DurableJob),
+    /// すでに実行中・終了済みなど、このキュー投入では何もしない。
+    Skipped,
+}
+
+/// 状態ファイルに触れない開始判定。取り出したジョブ1件だけを見て遷移を決める。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartDecision {
+    Start,
+    Reject,
+    Skip,
+}
+
+fn decide_start(job: &mut DurableJob) -> StartDecision {
+    if job.state != JobState::Queued {
+        return StartDecision::Skip;
+    }
+    if job.attempts >= MAX_ATTEMPTS {
+        job.state = JobState::Failed;
+        job.error = format!("再試行上限（{MAX_ATTEMPTS}回）に達しました。");
+        job.updated_at = now();
+        return StartDecision::Reject;
+    }
+    job.state = JobState::Running;
+    job.progress = 1;
+    job.step = "開始しました".to_string();
+    job.attempts += 1;
+    job.updated_at = now();
+    StartDecision::Start
+}
+
+fn mark_started(id: &str) -> Result<StartOutcome, String> {
+    let mut outcome = StartOutcome::Skipped;
     update(|jobs| {
         let Some(job) = jobs.iter_mut().find(|job| job.id == id) else {
             return Ok(());
         };
-        if job.state != JobState::Queued {
-            return Ok(());
-        }
-        if job.attempts >= MAX_ATTEMPTS {
-            job.state = JobState::Failed;
-            job.error = format!("再試行上限（{MAX_ATTEMPTS}回）に達しました。");
-            job.updated_at = now();
-            return Ok(());
-        }
-        job.state = JobState::Running;
-        job.progress = 1;
-        job.step = "開始しました".to_string();
-        job.attempts += 1;
-        job.updated_at = now();
-        selected = Some(job.clone());
+        outcome = match decide_start(job) {
+            StartDecision::Start => StartOutcome::Started(job.clone()),
+            StartDecision::Reject => StartOutcome::Rejected(job.clone()),
+            StartDecision::Skip => StartOutcome::Skipped,
+        };
         Ok(())
     })?;
-    Ok(selected)
+    Ok(outcome)
 }
 
 fn mark_finished(id: &str, result: String) -> Result<DurableJob, String> {
@@ -523,7 +568,7 @@ pub fn start(app: AppHandle) {
     for id in pending {
         if let Err(error) = tx.try_send(id.clone()) {
             let message = format!("復旧ジョブを実行キューへ送れません: {error}");
-            let _ = fail_without_execution(&id, &message);
+            fail_without_execution(&id, &message);
             crate::log_paths::append_app_log(&app, &message);
         }
     }
@@ -547,8 +592,21 @@ pub fn start(app: AppHandle) {
 
 /// 1件のジョブを実行し、結果を保存して画面へ知らせる。
 async fn run_job(app: &AppHandle, id: &str) {
-    let Ok(Some(job)) = mark_started(id) else {
-        return;
+    let job = match mark_started(id) {
+        Ok(StartOutcome::Started(job)) => job,
+        // 上限到達などで開始できなかった理由は、ジョブセンターへ出さないと伝わらない。
+        Ok(StartOutcome::Rejected(job)) => {
+            notify(&job);
+            return;
+        }
+        Ok(StartOutcome::Skipped) => return,
+        Err(error) => {
+            // 状態ファイルへ書けないときこそ、待機表示のまま放置しない。
+            let message = format!("予約した処理を開始できません: {error}");
+            crate::log_paths::append_app_log(app, &message);
+            notify_store_failure(app, id, "予約した処理", &message);
+            return;
+        }
     };
     // 完了まで無音にせず、走り始めた時点で画面へ出す。
     notify(&job);
@@ -580,10 +638,37 @@ async fn run_job(app: &AppHandle, id: &str) {
     };
     match mark_finished(id, result) {
         Ok(finished) => notify(&finished),
-        Err(error) => crate::log_paths::append_app_log(
+        Err(error) => {
+            // 保存に失敗すると状態は `Running` のまま残り、画面は完了も失敗も分からない
+            // 「処理中です。」で止まる。ログだけにせず、結果を残せなかったことを知らせる。
+            let message = format!("予約した処理の結果を保存できません: {error}");
+            crate::log_paths::append_app_log(app, &message);
+            notify_store_failure(app, id, &job.label, &message);
+        }
+    }
+}
+
+/// 状態ファイルへ書けないときでも、その1件の失敗を画面へ届ける。
+///
+/// 通常の通知は保存済みのジョブから組み立てるが、保存自体が失敗した経路では
+/// 読み直しても古い状態しか返らない。受け側は `jobId` で上書きするため、
+/// 同じIDで失敗として送れば待機表示が残らない。
+fn notify_store_failure(app: &AppHandle, id: &str, title: &str, message: &str) {
+    let payload = json!({
+        "kind": "durable_job",
+        "jobId": id,
+        "title": title,
+        "body": message,
+        "ok": false,
+        "state": JobState::Failed,
+        "progress": 0,
+        "at": now(),
+    });
+    if let Err(error) = app.emit("pet:notice", payload) {
+        crate::log_paths::append_app_log(
             app,
-            &format!("永続ジョブの結果を保存できません: {error}"),
-        ),
+            &format!("永続ジョブの失敗を画面へ通知できません: {error}"),
+        );
     }
 }
 
@@ -650,6 +735,26 @@ mod tests {
 
         for state in [JobState::Running, JobState::Queued] {
             assert!(requeue_for_retry(&mut 見本(state, 0)).is_err());
+        }
+    }
+
+    #[test]
+    fn 上限到達で開始できないジョブは理由付きで画面へ返す() {
+        // 以前は上限到達も「何もしなかった」と同じ扱いで戻っており、状態ファイルだけが
+        // 失敗になって画面は「順番待ちです。」のまま残っていた。
+        let mut limited = 見本(JobState::Queued, MAX_ATTEMPTS);
+        assert_eq!(decide_start(&mut limited), StartDecision::Reject);
+        assert_eq!(limited.state, JobState::Failed);
+        assert!(limited.error.contains("再試行上限"));
+
+        let mut ready = 見本(JobState::Queued, MAX_ATTEMPTS - 1);
+        assert_eq!(decide_start(&mut ready), StartDecision::Start);
+        assert_eq!(ready.state, JobState::Running);
+        assert_eq!(ready.attempts, MAX_ATTEMPTS);
+
+        // 待機中以外は二重実行しない。
+        for state in [JobState::Running, JobState::Completed, JobState::Cancelled] {
+            assert_eq!(decide_start(&mut 見本(state, 0)), StartDecision::Skip);
         }
     }
 

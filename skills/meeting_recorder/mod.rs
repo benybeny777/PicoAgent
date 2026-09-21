@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -35,8 +35,13 @@ struct RecordingState {
     path: SafePath,
     started: Instant,
     stop_tx: Sender<()>,
+    /// 録音スレッドの確定結果。`join()` と違い、待ち時間に上限を付けられる。
+    done_rx: Receiver<Result<(), String>>,
     join: JoinHandle<Result<(), String>>,
 }
+
+/// 停止の待ち上限。これを過ぎたら回収を別スレッドへ任せ、画面を固めない。
+const STOP_WAIT: Duration = Duration::from_secs(10);
 
 static RECORDING: OnceLock<Mutex<Option<RecordingState>>> = OnceLock::new();
 
@@ -288,86 +293,97 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
     }
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+    let (done_tx, done_rx) = mpsc::sync_channel::<Result<(), String>>(1);
     let thread_path = path.clone();
     let join = thread::spawn(move || {
-        let host = cpal::default_host();
-        let Some(device) = host.default_input_device() else {
-            let _ = ready_tx.send(Err("既定のマイク入力デバイスが見つかりません。".to_string()));
-            return Ok(());
-        };
-        let config = match device.default_input_config() {
-            Ok(config) => config,
-            Err(error) => {
-                let _ = ready_tx.send(Err(format!("マイク設定を取得できません: {error}")));
+        // 確定結果は join() とは別に送る。停止側が待ち時間に上限を付けられるようにするため。
+        let result = (|| -> Result<(), String> {
+            let host = cpal::default_host();
+            let Some(device) = host.default_input_device() else {
+                let _ =
+                    ready_tx.send(Err("既定のマイク入力デバイスが見つかりません。".to_string()));
+                return Ok(());
+            };
+            let config = match device.default_input_config() {
+                Ok(config) => config,
+                Err(error) => {
+                    let _ = ready_tx.send(Err(format!("マイク設定を取得できません: {error}")));
+                    return Ok(());
+                }
+            };
+            let spec = wav_spec(&config);
+            let writer = match WavWriter::create(&thread_path, spec) {
+                Ok(writer) => Arc::new(Mutex::new(RecordingSink {
+                    writer: Some(writer),
+                    error: None,
+                })),
+                Err(error) => {
+                    let _ = ready_tx.send(Err(format!("WAVファイルを作成できません: {error}")));
+                    return Ok(());
+                }
+            };
+            let writer_for_stream = writer.clone();
+            let error_callback = |error| {
+                crate::log_paths::log_detached(&format!(
+                    "会議録音の取り込みでエラーが発生しました: {error}"
+                ))
+            };
+            let stream_config: cpal::StreamConfig = config.into();
+            let stream = match config.sample_format() {
+                SampleFormat::F32 => device.build_input_stream(
+                    stream_config,
+                    move |data: &[f32], _| write_input_f32(data, &writer_for_stream),
+                    error_callback,
+                    None,
+                ),
+                SampleFormat::I16 => device.build_input_stream(
+                    stream_config,
+                    move |data: &[i16], _| write_input(data, &writer_for_stream),
+                    error_callback,
+                    None,
+                ),
+                SampleFormat::U16 => device.build_input_stream(
+                    stream_config,
+                    move |data: &[u16], _| write_input(data, &writer_for_stream),
+                    error_callback,
+                    None,
+                ),
+                other => {
+                    let _ = ready_tx.send(Err(format!("未対応の録音サンプル形式です: {other:?}")));
+                    return Ok(());
+                }
+            };
+            let stream = match stream {
+                Ok(stream) => stream,
+                Err(error) => {
+                    let _ = ready_tx.send(Err(format!("録音ストリームを開始できません: {error}")));
+                    return Ok(());
+                }
+            };
+            if let Err(error) = stream.play() {
+                let _ = ready_tx.send(Err(format!("録音を開始できません: {error}")));
                 return Ok(());
             }
-        };
-        let spec = wav_spec(&config);
-        let writer = match WavWriter::create(&thread_path, spec) {
-            Ok(writer) => Arc::new(Mutex::new(RecordingSink {
-                writer: Some(writer),
-                error: None,
-            })),
-            Err(error) => {
-                let _ = ready_tx.send(Err(format!("WAVファイルを作成できません: {error}")));
-                return Ok(());
+            let _ = ready_tx.send(Ok(()));
+            if stop_rx.recv().is_err() {
+                return Err("録音停止シグナルの受信に失敗しました。".to_string());
             }
-        };
-        let writer_for_stream = writer.clone();
-        let error_callback = |error| eprintln!("meeting_recorder stream error: {error}");
-        let stream_config: cpal::StreamConfig = config.into();
-        let stream = match config.sample_format() {
-            SampleFormat::F32 => device.build_input_stream(
-                stream_config,
-                move |data: &[f32], _| write_input_f32(data, &writer_for_stream),
-                error_callback,
-                None,
-            ),
-            SampleFormat::I16 => device.build_input_stream(
-                stream_config,
-                move |data: &[i16], _| write_input(data, &writer_for_stream),
-                error_callback,
-                None,
-            ),
-            SampleFormat::U16 => device.build_input_stream(
-                stream_config,
-                move |data: &[u16], _| write_input(data, &writer_for_stream),
-                error_callback,
-                None,
-            ),
-            other => {
-                let _ = ready_tx.send(Err(format!("未対応の録音サンプル形式です: {other:?}")));
-                return Ok(());
+            drop(stream);
+            let mut sink = writer
+                .lock()
+                .map_err(|_| "録音データの状態を取得できません。".to_string())?;
+            if let Some(error) = sink.error.take() {
+                return Err(error);
             }
-        };
-        let stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                let _ = ready_tx.send(Err(format!("録音ストリームを開始できません: {error}")));
-                return Ok(());
+            if let Some(writer) = sink.writer.take() {
+                writer
+                    .finalize()
+                    .map_err(|error| format!("WAVファイルを確定できません: {error}"))?;
             }
-        };
-        if let Err(error) = stream.play() {
-            let _ = ready_tx.send(Err(format!("録音を開始できません: {error}")));
-            return Ok(());
-        }
-        let _ = ready_tx.send(Ok(()));
-        if stop_rx.recv().is_err() {
-            return Err("録音停止シグナルの受信に失敗しました。".to_string());
-        }
-        drop(stream);
-        let mut sink = writer
-            .lock()
-            .map_err(|_| "録音データの状態を取得できません。".to_string())?;
-        if let Some(error) = sink.error.take() {
-            return Err(error);
-        }
-        if let Some(writer) = sink.writer.take() {
-            writer
-                .finalize()
-                .map_err(|error| format!("WAVファイルを確定できません: {error}"))?;
-        }
-        Ok(())
+            Ok(())
+        })();
+        let _ = done_tx.send(result.clone());
+        result
     });
     match ready_rx.recv_timeout(Duration::from_secs(10)) {
         Ok(Ok(())) => {}
@@ -392,8 +408,10 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
                 .name("picoagent-recording-reaper".to_string())
                 .spawn(move || match join.join() {
                     Ok(Ok(())) => {}
-                    Ok(Err(error)) => eprintln!("録音スレッドの終了に失敗しました: {error}"),
-                    Err(_) => eprintln!("録音スレッドが異常終了しました"),
+                    Ok(Err(error)) => crate::log_paths::log_detached(&format!(
+                        "録音スレッドの終了に失敗しました: {error}"
+                    )),
+                    Err(_) => crate::log_paths::log_detached("録音スレッドが異常終了しました"),
                 })
                 .err();
             let cleanup = signal_error
@@ -413,6 +431,7 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
         path: path.clone(),
         started: Instant::now(),
         stop_tx,
+        done_rx,
         join,
     });
     format!(
@@ -422,21 +441,48 @@ fn start_recording(cfg: &Config, args: &Value) -> String {
 }
 
 fn stop_recording() -> String {
-    let mut state = match recording_state().lock() {
-        Ok(state) => state,
-        Err(_) => return "エラー: 録音状態を取得できません。".to_string(),
-    };
-    let Some(active) = state.take() else {
-        return "エラー: 録音中ではありません。".to_string();
+    // 取り出したらロックを手放してから待つ。OSの音声ドライバ内で停止が止まった場合に
+    // ロックを握ったまま待つと、`status` も次の `start` も同じところで固まる
+    // （開始側は同じ理由で回収スレッドへ逃がしてある）。
+    let active = {
+        let mut state = match recording_state().lock() {
+            Ok(state) => state,
+            Err(_) => return "エラー: 録音状態を取得できません。".to_string(),
+        };
+        match state.take() {
+            Some(active) => active,
+            None => return "エラー: 録音中ではありません。".to_string(),
+        }
     };
     let elapsed = active.started.elapsed();
     if let Err(error) = active.stop_tx.send(()) {
         return format!("エラー: 録音停止を通知できません: {error}");
     }
-    match active.join.join() {
+    match active.done_rx.recv_timeout(STOP_WAIT) {
         Ok(Ok(())) => {}
         Ok(Err(error)) => return format!("エラー: {error}"),
-        Err(_) => return "エラー: 録音スレッドが異常終了しました。".to_string(),
+        Err(_) => {
+            // 待ち切らずに戻る。録音スレッドの回収は専用スレッドへ渡し、
+            // 確定できていない可能性を利用者へ伝える。
+            let reaper = thread::Builder::new()
+                .name("picoagent-recording-reaper".to_string())
+                .spawn(move || match active.join.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => crate::log_paths::log_detached(&format!(
+                        "録音スレッドの終了に失敗しました: {error}"
+                    )),
+                    Err(_) => crate::log_paths::log_detached("録音スレッドが異常終了しました"),
+                });
+            if let Err(error) = reaper {
+                crate::log_paths::log_detached(&format!(
+                    "録音の回収スレッドを起動できません: {error}"
+                ));
+            }
+            return format!(
+                "エラー: 録音の停止が{}秒以内に終わりませんでした。録音ファイルが確定していない可能性があります。",
+                STOP_WAIT.as_secs()
+            );
+        }
     }
     format!(
         "録音を停止しました: {}\n録音時間: {} 秒",
@@ -901,6 +947,41 @@ mod tests {
     use crate::config::Config;
     use crate::permissions::SafePath;
     use std::path::Path;
+
+    #[test]
+    fn 停止は確定結果を待ってから状態を空へ戻す() {
+        use super::{recording_state, stop_recording, RecordingState};
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Instant;
+
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+        let join = thread::spawn(move || {
+            stop_rx
+                .recv()
+                .map_err(|error| format!("停止シグナルを受け取れません: {error}"))?;
+            let _ = done_tx.send(Ok(()));
+            Ok(())
+        });
+        *recording_state().lock().expect("録音状態のロック") = Some(RecordingState {
+            path: SafePath::app_owned(Path::new("meetings/test.wav").to_path_buf()),
+            started: Instant::now(),
+            stop_tx,
+            done_rx,
+            join,
+        });
+
+        let message = stop_recording();
+        assert!(message.starts_with("録音を停止しました"), "{message}");
+        // 停止後は状態を空へ戻し、次の開始を塞がない。
+        assert!(recording_state()
+            .lock()
+            .expect("録音状態のロック")
+            .is_none());
+        // 録音していないときの停止は理由を返す。
+        assert_eq!(stop_recording(), "エラー: 録音中ではありません。");
+    }
 
     #[test]
     fn 引数テンプレートを展開する() {
