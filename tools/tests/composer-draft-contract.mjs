@@ -85,7 +85,7 @@ test("やり直しと再生成は添付ごと送り直す", () => {
   assert.match(retry, /restoreLastAttachments\(\);/);
   // 入力欄を開いてから文面を入れる（逆順だと書きかけの復元に上書きされる）。
   assert.ok(retry.indexOf("openComposer()") < retry.indexOf("setInputValue(lastUserText)"));
-  const regen = renderer.slice(renderer.indexOf('getElementById("regenReply")'));
+  const regen = renderer.slice(renderer.indexOf('regenerateReplyButton?.addEventListener("click"'));
   const regenBody = regen.slice(0, regen.indexOf("\n});"));
   assert.match(regenBody, /restoreLastAttachments\(\);/);
   assert.ok(regenBody.indexOf("openComposer()") < regenBody.indexOf("setInputValue(lastUserText)"));

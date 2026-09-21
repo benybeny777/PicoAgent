@@ -472,7 +472,7 @@ html[data-theme="dark"] .window-caption-controls > .window-close:focus-visible {
 .history-item.user .history-meta { flex-direction:row-reverse; }
 .history-item.user .history-body { background:var(--user-msg); }
 .history-item.assistant .history-body { background:var(--assistant-msg); }
-.history-empty { padding:14px 8px; color:var(--muted); font-size:12px; text-align:center; }
+.history-empty { padding:14px 8px; color:var(--ink); font-size:12px; line-height:1.7; text-align:center; }
 .reply { min-height:0; font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; user-select:none; -webkit-user-select:none; overflow:auto; }
 /* 字幕・回答欄は選択できなくてよい。選択が残ると字幕が薄く見えなくなるため、子要素も禁止し、万一の選択も塗らない。 */
 .reply *, .reply .md, .reply .md * { user-select:none; -webkit-user-select:none; }
@@ -684,10 +684,10 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .pet-heart { position:absolute; z-index:5; bottom:55%; font-size:18px; color:#f27e91; pointer-events:none; opacity:0; animation:heart-float 1.2s ease-out forwards; text-shadow:0 1px 3px rgba(0,0,0,.15); }
 @keyframes heart-float { 0% { opacity:0; transform:translateY(0) scale(.6); } 25% { opacity:1; } 100% { opacity:0; transform:translateY(-46px) scale(1.15); } }
 /* 居眠りは寝顔（差し替え画像）だけで伝え、全身は動かさない。 */
-/* 履歴の書き出しボタン（検索欄の右）。 */
+/* 履歴の末尾移動・書き出しボタン（検索欄の右）。 */
 .history-tools { gap:8px; }
-.history-tools #exportHistory { position:static; flex:0 0 auto; height:30px; padding:0 12px; border-radius:9px; background:var(--chip-bg); border:1px solid var(--chip-border); color:var(--muted); font-size:11px; font-weight:700; }
-.history-tools #exportHistory:hover { color:var(--ink); border-color:var(--field-focus); }
+.history-tools button { position:static; flex:0 0 auto; height:30px; padding:0 12px; border-radius:9px; background:var(--chip-bg); border:1px solid var(--chip-border); color:var(--muted); font-size:11px; font-weight:700; }
+.history-tools button:hover { color:var(--ink); border-color:var(--field-focus); }
 @media (prefers-reduced-motion:reduce) { #micButton.recording, .pet-heart { animation:none!important; } }
 .history-tools input { flex:1 1 auto; min-width:0; }
 /* ネイティブD&D: ウィンドウ全体のドロップ受け入れ表示 */
@@ -821,12 +821,13 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 @media (prefers-color-scheme:dark) { :root { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-user-msg:#5f9f48; } }
 html[data-theme="light"] { --chat-wall-a:#8fa8c0; --chat-wall-b:#a8bacb; --chat-user-msg:#9eea6a; }
 html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-user-msg:#5f9f48; }
-[data-layout="chat"] .history-role { display:none; }
+[data-layout="chat"] .history-role-name { display:none; }
 [data-layout="chat"] .history-meta { margin-bottom:0; }
-[data-layout="chat"] .history-time { margin:0; font-size:9px; }
+[data-layout="chat"] .history-time { margin:0; font-size:11px; color:var(--ink); opacity:1; }
 [data-layout="chat"] .history-item { display:flex; align-items:flex-end; gap:5px; margin-bottom:9px; }
 [data-layout="chat"] .history-item.user { flex-direction:row-reverse; }
 [data-layout="chat"] .history-meta { order:2; flex:0 0 auto; align-self:flex-end; }
+[data-layout="chat"] .history-item .history-meta { flex-direction:column; align-items:flex-end; gap:3px; }
 [data-layout="chat"] .history-body { order:1; box-shadow:0 1px 2px rgba(30,20,36,.12); }
 [data-layout="chat"] .history-item.assistant .history-body { background:var(--paper); border-radius:4px 13px 13px 13px; }
 [data-layout="chat"] .history-item.user .history-body { background:var(--chat-user-msg); border-radius:13px 4px 13px 13px; }

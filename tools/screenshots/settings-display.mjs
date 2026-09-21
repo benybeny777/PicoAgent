@@ -102,7 +102,13 @@ window.__memoryItems = [
 ];
 window.__TAURI__ = {
   core: { convertFileSrc: path => path, invoke: async (name, args = {}) => {
-    if (name === "settings_load") return ${JSON.stringify(settingsData)};
+    if (name === "settings_load") {
+      if (location.search.includes("load-failure") && !sessionStorage.getItem("settings-load-retried")) {
+        sessionStorage.setItem("settings-load-retried", "1");
+        throw new Error("設定読込の検証用エラー");
+      }
+      return ${JSON.stringify(settingsData)};
+    }
     if (name === "settings_memory_list") return { items: window.__memoryItems };
     if (name === "settings_memory_delete") {
       window.__memoryItems = window.__memoryItems.filter(item => !(
@@ -162,6 +168,14 @@ try {
     }
   }
   await page.waitForSelector(".layout-card-grid .layout-card");
+  const displayTab = page.getByRole("tab", { name: "画面・操作", exact: true });
+  await displayTab.focus();
+  for (const [key, expected] of [["Home", "基本設定"], ["End", "診断・修復"], ["ArrowRight", "基本設定"], ["ArrowLeft", "診断・修復"], ["Home", "基本設定"], ["ArrowDown", "画面・操作"]]) {
+    await page.keyboard.press(key);
+    const tab = page.getByRole("tab", { name: expected, exact: true });
+    if (await tab.getAttribute("aria-selected") !== "true" || !(await tab.evaluate(node => node === document.activeElement))) throw new Error(`${key}で設定タブを移動できません`);
+    if (await page.locator('.tabs .tab[tabindex="0"]').count() !== 1) throw new Error("Tabキーの移動先が選択中のタブに絞られていません");
+  }
   const cardCount = await page.locator(".layout-card").count();
   if (cardCount !== 7) throw new Error(`表示形式カードが7件ではありません: ${cardCount}`);
   await page.waitForFunction(() => [...document.querySelectorAll(".layout-card img")].every(image => image.complete && image.naturalWidth > 0));
@@ -187,6 +201,12 @@ try {
     if (await page.locator(`#panel-basic [data-setting-key="${key}"]`).count()) throw new Error(`基本設定に別分類の ${key} が残っています`);
   }
   await page.waitForSelector(".memory-item");
+  const memoryCheckbox = page.getByRole("checkbox", { name: "会話から好みや継続指示を暗黙的に覚える", exact: true });
+  const memoryEnabled = await memoryCheckbox.isChecked();
+  const memoryLabel = page.locator("label").filter({ hasText: "会話から好みや継続指示を暗黙的に覚える" });
+  await memoryLabel.click();
+  if (await memoryCheckbox.isChecked() === memoryEnabled) throw new Error("チェック項目のラベルを押しても値が切り替わりません");
+  await memoryLabel.click();
   if (await page.locator(".memory-item").count() !== 2) throw new Error("長期メモリが2件表示されていません");
   const memoryText = await page.locator(".memory-manager").textContent();
   for (const expected of ["全キャラクター", "覚えた日時", "言及 4回", "この記憶を削除"]) {
@@ -240,11 +260,33 @@ try {
   if (await page.getByRole("button", { name: "もう一度押してダウンロード", exact: true }).count() !== 1) throw new Error("アプリ更新が二段階確認になっていません");
   if (!(await page.locator(".product-update-status").textContent())?.includes("モデル・追加機能は残ります")) throw new Error("アプリ更新前に維持データが案内されません");
   await page.getByRole("tab", { name: "スキル・連携", exact: true }).click();
+  const skillGenres = page.locator("#panel-tools .genre-filter").first();
+  await skillGenres.getByRole("button", { name: "SNS/投稿", exact: true }).click();
+  if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "SNS/投稿") throw new Error("スキルの絞り込み状態が読み上げに反映されません");
+  if (await page.locator(".card-item:visible").filter({ hasText: "Google スプレッドシート" }).count()) throw new Error("ジャンル外のスキルが表示されています");
+  await page.locator("#settingsSearch").fill("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN");
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "検索に一致する設定はありません");
+  if (await page.locator("#status").textContent() !== "検索に一致する設定はありません") throw new Error("ジャンルで隠れた設定だけの一致が検索結果として残っています");
+  await page.locator("#clearSettingsSearch").click();
+  await skillGenres.getByRole("button", { name: "すべて", exact: true }).click();
+  if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "すべて") throw new Error("絞り込み解除後の状態が読み上げに反映されません");
   for (const key of ["PICOAGENT_MCP_SERVERS", "PICOAGENT_API_ENABLED"]) {
     if (await page.locator(`#panel-tools [data-setting-key="${key}"]`).count() !== 1) throw new Error(`${key} がスキル・連携タブにありません`);
   }
   for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
-    await page.locator(".card-item").filter({ hasText: name }).click();
+    const card = page.getByRole("button", { name: `${name}の設定`, exact: true });
+    await card.focus();
+    await card.press("Enter");
+    if (await card.getAttribute("aria-expanded") !== "true") throw new Error(`${name}をEnterで開けません`);
+    await card.press("Space");
+    if (await card.getAttribute("aria-expanded") !== "false") throw new Error(`${name}をSpaceで閉じられません`);
+    const repeatBlocked = await card.evaluate(node => {
+      const event = new KeyboardEvent("keydown", { key: " ", repeat: true, bubbles: true, cancelable: true });
+      node.dispatchEvent(event);
+      return event.defaultPrevented && node.getAttribute("aria-expanded") === "false";
+    });
+    if (!repeatBlocked) throw new Error(`${name}のSpace長押しでスクロールまたは再開閉が発生します`);
+    await card.press("Enter");
   }
   const verifyLongSkillLabels = async width => {
     await page.setViewportSize({ width, height: 820 });
@@ -287,19 +329,55 @@ try {
   };
   await verifyLongSkillLabels(600);
   await verifyLongSkillLabels(400);
+  for (const label of ["Google スプレッドシートの OAuth アクセストークン", "Bluesky の識別子（ハンドルまたはメール）"]) {
+    const control = page.getByLabel(label, { exact: true });
+    await page.locator("label").filter({ hasText: label }).click();
+    if (!(await control.evaluate(node => node === document.activeElement))) throw new Error(`${label}を押しても入力欄へ移動しません`);
+  }
   await page.setViewportSize({ width: 960, height: 760 });
+  // 検索で一時的に変わった開閉状態は、検索語を変更しても元の状態へ戻す。
+  const blueskyCard = page.locator(".card-item").filter({ hasText: "Bluesky" });
+  await blueskyCard.click();
+  await page.locator("#settingsSearch").fill("Bluesky");
+  await page.waitForFunction(() => [...document.querySelectorAll(".card-item")].some(card => card.textContent.includes("Bluesky") && card.classList.contains("open")));
+  if (!(await blueskyCard.getAttribute("class"))?.includes("open")) throw new Error("検索に一致するスキル設定が開きません");
+  await page.locator("#settingsSearch").fill("Microsoft Graph");
+  await page.waitForFunction(() => [...document.querySelectorAll(".card-item")].some(card => card.textContent.includes("Microsoft Graph") && card.classList.contains("open")));
+  await page.locator("#clearSettingsSearch").click();
+  await page.locator("#settingsSearch").fill("存在しない設定の検証用文字列");
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "検索に一致する設定はありません");
+  if (await page.locator("#status").textContent() !== "検索に一致する設定はありません") throw new Error("設定の検索結果なしが表示されません");
+  if (await page.locator(".tab-panel:visible").count()) throw new Error("一致する設定のないタブが残っています");
+  await page.locator("#clearSettingsSearch").click();
+  for (const name of ["Google スプレッドシート", "Bluesky", "Microsoft Graph"]) {
+    const card = page.locator(".card-item").filter({ hasText: name });
+    const open = await card.evaluate(node => node.classList.contains("open") && !node.nextElementSibling.hidden);
+    if (open !== (name !== "Bluesky")) throw new Error(`${name}の検索前の開閉状態が復元されません`);
+    if (await card.getAttribute("aria-expanded") !== String(open)) throw new Error(`${name}の開閉状態と読み上げ情報が一致しません`);
+  }
+  await blueskyCard.click();
   for (const tabName of ["キャラ登録", "キャラ選択", "キャラの音声"]) {
     if (await page.getByRole("tab", { name: tabName, exact: true }).count() !== 1) throw new Error(`${tabName}タブが独立していません`);
   }
   await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
   const userCard = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await userCard.waitFor();
-  const renameInput = userCard.getByRole("textbox", { name: "追加テストの表示名" });
+  const renameInput = userCard.locator(".character-rename-row input");
+  await renameInput.fill("変換中の名前");
+  for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
+    const prevented = await renameInput.evaluate((node, composing) => {
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...composing });
+      node.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, composing);
+    if (prevented) throw new Error("日本語変換確定のEnterでキャラ名変更が実行されます");
+  }
   await renameInput.fill("Nicole");
-  await userCard.getByRole("button", { name: "名前を変更", exact: true }).click();
+  await renameInput.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll(".character-card")]
     .some(card => card.textContent.includes("ID: user-test") && card.textContent.includes("Nicoleへ変更しました")));
   if (!(await userCard.textContent())?.includes("Nicole")) throw new Error("追加キャラの表示名がカードへ反映されません");
+  if (await renameInput.getAttribute("aria-label") !== "Nicoleの表示名") throw new Error("名前変更後の入力欄が以前の名前で読み上げられます");
   const renamedOption = await page.locator('select option[value="user-test"]').textContent();
   if (!renamedOption?.includes("Nicole") || !renamedOption.includes("user-test")) {
     throw new Error(`追加キャラの表示名または内部IDが選択肢へ反映されません: ${renamedOption}`);
@@ -308,8 +386,12 @@ try {
   // 固定されると名前変更に人格が追従せず、旧名の文が未保存の上書きとして残る。
   // 実機の名前変更は character.json の定型人格も書き換えるので、再取得分だけ差し替える。
   let renamedPersonaName = "";
+  let holdCharacterLoad = true;
+  let releaseCharacterLoad;
+  const characterLoadGate = new Promise(resolveGate => { releaseCharacterLoad = resolveGate; });
   await page.route("**/assets/characters/mugi/character.json*", async route => {
     const response = await route.fetch();
+    if (holdCharacterLoad) await characterLoadGate;
     const manifest = JSON.parse(await response.text());
     if (renamedPersonaName) {
       manifest.name = renamedPersonaName;
@@ -320,7 +402,18 @@ try {
     }
     await route.fulfill({ response, contentType: "application/json", body: JSON.stringify(manifest) });
   });
-  await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
+  await page.evaluate(() => characterManifestCache.delete("user-test"));
+  try {
+    await userCard.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
+    if (!(await page.locator("#save").isDisabled())) throw new Error("キャラ設定の読込中に保存できてしまいます");
+    if (!(await page.locator("#form").evaluate(node => node.inert))) throw new Error("キャラ設定の読込中に別の項目を編集できてしまいます");
+    if (!(await page.locator("#status").textContent())?.includes("キャラ設定を読み込み中")) throw new Error("キャラ切替の待機理由が表示されません");
+  } finally {
+    holdCharacterLoad = false;
+    releaseCharacterLoad();
+  }
+  await page.waitForFunction(() => !document.getElementById("form").inert);
+  if ((await page.locator("#status").textContent())?.includes("キャラ設定を読み込み中")) throw new Error("キャラ切替後も待機表示が残っています");
   // 切替は非同期。選択1件だけが未保存になった状態を基準にする。
   await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "未保存 1件");
   const dirtyAfterSelect = await page.locator("#dirtySummary").textContent();
@@ -494,6 +587,18 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
+  const recoveryPage = await browser.newPage();
+  await recoveryPage.addInitScript(mock);
+  await recoveryPage.goto(`http://127.0.0.1:${port}/settings.html?load-failure=1`);
+  await recoveryPage.getByRole("heading", { name: "設定を読み込めませんでした" }).waitFor();
+  if (!(await recoveryPage.locator("#save").isDisabled())) throw new Error("設定読込失敗中に保存できてしまいます");
+  if (await recoveryPage.locator("#loading").count()) throw new Error("設定読込失敗後も読み込み中表示が残っています");
+  await recoveryPage.locator('[data-settings-query="画面"]').click();
+  if (!(await recoveryPage.locator("#status").textContent())?.includes("設定読込の検証用エラー")) throw new Error("読込失敗の原因が表示されません");
+  await recoveryPage.getByRole("button", { name: "再読み込み", exact: true }).click();
+  await recoveryPage.getByRole("tab", { name: "基本設定", exact: true }).waitFor();
+  await recoveryPage.waitForFunction(() => !document.getElementById("save").disabled);
+  await recoveryPage.close();
   console.log(`設定画面確認: 入口8件 / キャラ作成・登録・選択・音声の4分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();

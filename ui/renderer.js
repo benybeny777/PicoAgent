@@ -8,6 +8,7 @@ window.__picoagentPerformance = { startedAt: performance.now() };
 const bubble = document.getElementById("bubble");
 const historySearch = document.getElementById("historySearch");
 const historyLog = document.getElementById("historyLog");
+const historyJumpLatest = document.getElementById("historyJumpLatest");
 const reply = document.getElementById("reply");
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
@@ -18,6 +19,7 @@ const sendButton = document.getElementById("sendButton");
 const cancelSendButton = document.getElementById("cancelSend");
 const cancelVoiceButton = document.getElementById("cancelVoice");
 const copyReplyButton = document.getElementById("copyReply");
+const regenerateReplyButton = document.getElementById("regenReply");
 const replayReplyButton = document.getElementById("replayReply");
 const stopVoiceButton = document.getElementById("stopVoice");
 const toggleFullscreenButton = document.getElementById("toggleFullscreen");
@@ -521,10 +523,7 @@ function renderNoticePanel() {
         retry.textContent = "もう一度";
         retry.addEventListener("click", event => {
           event.stopPropagation();
-          if (busy) return;
-          setInputValue(notice.prompt);
-          if (composer.hidden) openComposer();
-          input.focus();
+          reuseHistoryItem(notice.prompt);
         });
         actions.append(retry);
       }
@@ -2345,6 +2344,13 @@ function autosizeInput() {
 }
 function updateComposerState() {
   const engineBlocked = !frontendInitialized || (localEngineRequired && !localEngineReady);
+  if (regenerateReplyButton) {
+    regenerateReplyButton.disabled = busy || engineBlocked || !hasLastRequest();
+    regenerateReplyButton.title = busy ? "返答が終わると再生成できます"
+      : engineBlocked ? "AIの準備完了後に再生成できます"
+      : !hasLastRequest() ? "会話を送信すると再生成できます"
+      : "同じ質問と添付で別の答えを生成";
+  }
   if (sendButton) {
     sendButton.disabled = busy || engineBlocked || (!input.value.trim() && attachedImages.length === 0 && attachedFiles.length === 0);
     sendButton.title = engineBlocked
@@ -3070,7 +3076,20 @@ function renderHistory() {
     && historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
   renderHistoryRows();
   placeTaskRun(stickToBottom);
+  updateHistoryJump();
 }
+
+function updateHistoryJump() {
+  if (!historyLog || !historyJumpLatest) return;
+  historyJumpLatest.hidden = historyLog.clientHeight === 0
+    || historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
+}
+historyLog?.addEventListener("scroll", updateHistoryJump, { passive: true });
+historyJumpLatest?.addEventListener("click", () => {
+  historyLog.scrollTop = historyLog.scrollHeight;
+  updateHistoryJump();
+  historySearch?.focus({ preventScroll: true });
+});
 
 // 実行中タスクの一覧は、会話履歴を出す形式では会話の末尾へ置く（キャラの描画面へ重ねない）。
 // それ以外の形式では、元の置き場所（ステータス行の直後）へ戻す。
@@ -3106,7 +3125,10 @@ function historyRowElement(item) {
   meta.className = "history-meta";
   const label = document.createElement("div");
   label.className = "history-role";
-  label.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+  const roleName = document.createElement("span");
+  roleName.className = "history-role-name";
+  roleName.textContent = item.role === "user" ? "あなた" : (characterManifest?.name || "むぎ");
+  label.append(roleName);
   if (item.at) {
     // 今セッションで発生した発言だけ時刻を添える（復元分には時刻情報が無い）。
     const time = document.createElement("span");
@@ -3144,7 +3166,10 @@ function historyThinkingRowElement() {
   meta.className = "history-meta";
   const label = document.createElement("div");
   label.className = "history-role";
-  label.textContent = characterManifest?.name || "むぎ";
+  const roleName = document.createElement("span");
+  roleName.className = "history-role-name";
+  roleName.textContent = characterManifest?.name || "むぎ";
+  label.append(roleName);
   meta.append(label);
   const body = document.createElement("div");
   body.className = "history-body";
@@ -3167,7 +3192,10 @@ function renderHistoryRows() {
   const stickToBottom = historyLog.scrollHeight - historyLog.scrollTop - historyLog.clientHeight < 48;
   const name = characterManifest?.name || "むぎ";
   if (!conversationHistory.length && !historyThinking) {
-    historyLog.replaceChildren(document.createElement("div"));
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "まだ会話はありません。入力欄から話しかけてください。";
+    historyLog.replaceChildren(empty);
     renderedHistory = { query: null, items: [], name };
     return;
   }
@@ -3175,7 +3203,7 @@ function renderHistoryRows() {
   const items = query
     ? conversationHistory.filter(item => item.content.toLowerCase().includes(query))
     : conversationHistory;
-  if (!items.length) {
+  if (!items.length && query) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
     empty.textContent = "一致する履歴はありません。";
@@ -3632,7 +3660,10 @@ async function renderReplySpeaking(text) {
   // （rAF スロットルで1フレーム1回に抑える）。
   let shown = 0;
   let frame = 0;
-  const paint = () => { frame = 0; renderMarkdown(reply, chars.slice(0, shown).join("")); };
+  const paint = () => {
+    frame = 0;
+    if (token === speakingToken) renderMarkdown(reply, chars.slice(0, shown).join(""));
+  };
   for (; shown < chars.length; shown += 1) {
     if (token !== speakingToken) { if (frame) cancelAnimationFrame(frame); return; }
     if (!frame) frame = requestAnimationFrame(paint);
@@ -3784,13 +3815,12 @@ document.getElementById("relationshipClose")?.addEventListener("click", () => {
 relationshipMoments?.addEventListener("click", async event => {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (!button) return;
+  if (button.dataset.action === "resume" && busy) return;
   try {
     if (button.dataset.action === "resume") {
       relationshipCard.hidden = true;
       relationshipButton?.setAttribute("aria-expanded", "false");
-      openComposer();
-      setInputValue(button.dataset.prompt || "");
-      input.focus();
+      reuseHistoryItem(button.dataset.prompt || "");
       return;
     }
     if (button.dataset.action === "delete" && !button.picoConfirmation?.request()) return;
@@ -4265,7 +4295,7 @@ function renderAttachmentSuggestions() {
     button.textContent = suggestion.label;
     button.addEventListener("click", () => {
       setInputValue(suggestion.text);
-      autosizeInput();
+      resetPromptHistoryNavigation();
       input.focus();
     });
     attachmentSuggestions.append(button);
@@ -4436,7 +4466,7 @@ document.addEventListener("drop", (e) => {
   markActivity();
   if (composer.hidden) openComposer();
   setInputValue(input.value.trim() ? `${input.value.trimEnd()} ${text}` : text);
-  autosizeInput();
+  resetPromptHistoryNavigation();
   input.focus();
 });
 
@@ -4503,7 +4533,7 @@ composer.addEventListener("submit", async event => {
     if (window.picoagent.listen) {
       if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; } // 多重購読防止
       unlistenStatus = await window.picoagent.listen("pet:agent_status", (progress) => {
-        if (busy && typeof progress === "string" && progress) {
+        if (busy && requestRevision === conversationRevision && typeof progress === "string" && progress) {
           // 改行は1行表示に収める（計画本文など複数行が来てもステータス行が崩れないように）。
           status.textContent = progress.replace(/\s*\n+\s*/g, " / ");
           setThinkingUi(true, status.textContent);
@@ -4524,7 +4554,7 @@ composer.addEventListener("submit", async event => {
     if (window.picoagent.listen) {
       if (unlistenActivity) { unlistenActivity(); unlistenActivity = null; }
       unlistenActivity = await window.picoagent.listen("pet:agent_activity", activity => {
-        if (!busy || !activity || typeof activity !== "object") return;
+        if (!busy || requestRevision !== conversationRevision || !activity || typeof activity !== "object") return;
         const tools = Array.isArray(activity.tools) ? activity.tools.filter(name => typeof name === "string") : [];
         for (const name of tools) jobTools.add(name);
         if (activity.phase === "started") jobDidWork = tools.length > 0;
@@ -4566,6 +4596,10 @@ composer.addEventListener("submit", async event => {
         if (currentLayout === "stream") return;
         if (!streamRenderFrame) {
           const paintStream = () => {
+            if (!busy || requestRevision !== conversationRevision) {
+              streamRenderFrame = null;
+              return;
+            }
             // 1回の描画は本文全体を組み直すので、文章が伸びるほど重くなる。トークンが
             // 毎フレーム届くローカルAIでは、長い回答ほど入力やアニメが引っかかっていた。
             // 読める速さは保ったまま、最短間隔をあけて描き直す。
@@ -4591,10 +4625,12 @@ composer.addEventListener("submit", async event => {
 
   try {
     // ── ファイル内容をテキストへ変換してコンテキストに付加 ──────────────────
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     let fileContext = "";
     if (pendingFiles.length > 0 && window.picoagent.readFileContent) {
       status.textContent = "ファイルを読み込み中…";
       for (const f of pendingFiles) {
+        if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
         // ネイティブD&D由来の添付は実パスも伝え、PDF抽出や画像変換などのスキルが直接使えるようにする。
         const label = f.path ? `${f.name}（パス: ${f.path}）` : f.name;
         try {
@@ -4606,6 +4642,7 @@ composer.addEventListener("submit", async event => {
         }
       }
     }
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     const fullText = fileContext
       ? `${fileContext}${text || "このファイルについて教えて"}`
       : text;
@@ -4622,11 +4659,13 @@ composer.addEventListener("submit", async event => {
         logApp("warn", "スクリーンショット取得に失敗しました。", String(shotErr));
       }
     }
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     // 停止要求のあと応答が返らない場合に備え、打ち切りの合図と競走させる。
     const releasedByCancel = new Promise(resolve => { releasePendingSend = resolve; });
     if (images.length > 0 && window.picoagent.sendImage) {
       result = await Promise.race([window.picoagent.sendImage(fullText, images), releasedByCancel]);
     }
+    if (requestRevision !== conversationRevision) { jobState = "cancelled"; return; }
     if (!result) result = await Promise.race([window.picoagent.send(fullText), releasedByCancel]);
     if (result?.stale || requestRevision !== conversationRevision) {
       jobState = "cancelled";
@@ -4678,10 +4717,19 @@ composer.addEventListener("submit", async event => {
       } else {
         await renderReplySpeaking(result.reply);
       }
+      // 文字送りを待っている間に会話がリセットされた場合も、古い本文を戻さない。
+      if (requestRevision !== conversationRevision) {
+        jobState = "cancelled";
+        return;
+      }
       addHistory("assistant", result.reply);
       if (result.quitApp) scheduleAppQuit();
     }
   } catch (error) {
+    if (requestRevision !== conversationRevision) {
+      jobState = "cancelled";
+      return;
+    }
     jobState = "failed";
     setThinkingUi(false);
     logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
@@ -4794,6 +4842,7 @@ async function transcribeInterim(session) {
   try {
     const wav = encodeWav(micChunks.slice(from, to), micSampleRate);
     const b64 = await blobToDataUrl(new Blob([wav], { type: "audio/wav" }));
+    if (session !== micSession) return;
     const result = await window.picoagent.transcribeAudio(b64);
     if (session !== micSession) return; // 停止・再録音後に届いた途中結果は捨てる
     const text = String(result?.text ?? "").trim();
@@ -4805,6 +4854,7 @@ async function transcribeInterim(session) {
     }
   } catch (error) {
     // Whisper 未設定などで失敗したら、この録音では逐次変換を止める（停止時の一括変換に任せる）。
+    if (session !== micSession) return;
     logApp("warn", "途中の文字起こしに失敗しました", errorDetail(error));
     if (micInterimTimer) { clearInterval(micInterimTimer); micInterimTimer = null; }
   } finally {
@@ -4885,6 +4935,10 @@ async function finishRecording() {
   const base = micInterimBase;      // 録音開始時点の入力欄（逐次プレビューを除いた確定部分）
   const hadInterim = micInterimTexts.length > 0;
   stopMicCapture();
+  const session = micSession;
+  const startRequest = micStartRequest;
+  const isCurrentRecording = () => session === micSession && startRequest === micStartRequest;
+  let hasTranscript = hadInterim;
   const seconds = chunks.reduce((sum, c) => sum + c.length, 0) / sampleRate;
   if (seconds < 0.4) { clearTransientStatus(); showToast("録音が短すぎました", "warn"); return; }
   status.textContent = hadInterim ? "文字起こしを確定中…" : "文字起こし中…";
@@ -4892,29 +4946,43 @@ async function finishRecording() {
   try {
     const wav = encodeWav(chunks, sampleRate);
     const b64 = await blobToDataUrl(new Blob([wav], { type: "audio/wav" }));
+    if (!isCurrentRecording()) return;
     const result = await window.picoagent.transcribeAudio(b64);
+    if (!isCurrentRecording()) return;
     const text = String(result?.text ?? "").trim();
     if (text) {
       // 逐次プレビューは区間切りの境界で欠けることがあるため、全体の文字起こしで置き換えて確定する。
+      hasTranscript = true;
       setInputValue(base ? `${base} ${text}` : text);
       input.focus();
       showToast("文字起こししました", "success");
     }
   } catch (error) {
+    if (!isCurrentRecording()) return;
     logApp("error", "音声入力に失敗しました", errorDetail(error));
     // 逐次プレビューが入力欄に残っていれば、それを最終結果として使う。
     if (!hadInterim) showToast(preview(error?.message || error || "文字起こしに失敗しました", 60), "error");
     else showToast("確定に失敗したため途中結果を残しました", "warn");
   } finally {
-    status.classList.remove("busy");
-    if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
-    scheduleVoiceSubmit();
+    if (isCurrentRecording()) {
+      status.classList.remove("busy");
+      if (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…") clearTransientStatus();
+      if (hasTranscript) {
+        resetPromptHistoryNavigation();
+        scheduleVoiceSubmit();
+      }
+    }
   }
 }
 
 async function startRecording() {
   if (micStream || micStarting) return;
+  cancelPendingVoiceSubmit("録音を再開するため音声送信を取り消しました");
   const request = ++micStartRequest;
+  if (!busy && (status.textContent === "文字起こし中…" || status.textContent === "文字起こしを確定中…")) {
+    status.classList.remove("busy");
+    clearTransientStatus();
+  }
   micStarting = true;
   if (micButton) micButton.disabled = true;
   stopVoice(false); // 読み上げ中でも話し始められるよう、マイク操作を割り込みとして扱う。
@@ -4926,6 +4994,7 @@ async function startRecording() {
     }
     micStream = stream;
   } catch (error) {
+    if (request !== micStartRequest) return;
     logApp("warn", "マイクを利用できません", errorDetail(error));
     showToast("マイクを利用できません（権限を確認してね）", "error");
     micStream = null;
@@ -5110,7 +5179,7 @@ micButton?.addEventListener("click", async () => {
 });
 
 // ── 再生成: 直前の質問をもう一度送って別の答えをもらう ──────────────────
-document.getElementById("regenReply")?.addEventListener("click", () => {
+regenerateReplyButton?.addEventListener("click", () => {
   if (busy || !hasLastRequest()) return;
   // 添付ごと送り直す。文面だけ送り直すと「同じ質問」のつもりで中身の違う要求になる。
   if (composer.hidden) openComposer();
@@ -5382,10 +5451,11 @@ input.addEventListener("keydown", event => {
     event.stopPropagation();
     closeComposer();
   }
-  if (event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
+  const plainArrow = !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+  if (plainArrow && event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
     if (recallPromptHistory(-1)) event.preventDefault();
   }
-  if (event.key === "ArrowDown" && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+  if (plainArrow && event.key === "ArrowDown" && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
     if (recallPromptHistory(1)) event.preventDefault();
   }
   if (event.key === "Enter" && (!event.shiftKey || event.ctrlKey || event.metaKey)) {
@@ -5400,9 +5470,26 @@ historySearch?.addEventListener("input", () => {
   clearTimeout(historySearchTimer);
   historySearchTimer = setTimeout(renderHistory, 120);
 });
+historySearch?.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || isImeComposing(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  clearTimeout(historySearchTimer);
+  historySearch.value = "";
+  historyQuery = "";
+  renderHistory();
+});
 document.addEventListener("keydown", event => {
+  if (event.defaultPrevented || isImeComposing(event)) return;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f"
+    && frontendInitialized && historySearch?.getClientRects().length
+    && getComputedStyle(historySearch).visibility === "visible") {
+    event.preventDefault();
+    historySearch.focus();
+    historySearch.select();
+    return;
+  }
   if (event.key !== "Escape") return;
-  if (isImeComposing(event)) return; // 変換の取消を画面の Escape として扱わない
   if (cancelPendingVoiceSubmit()) return;
   if (relationshipCard && !relationshipCard.hidden) {
     relationshipCard.hidden = true;
@@ -5450,17 +5537,24 @@ window.picoagent.on("pet:model", model => {
 window.picoagent.on("pet:notice", pushNotice);
 window.picoagent.on("pet:reset", () => {
   conversationRevision += 1;
+  ++speakingToken;
   conversationHistory.length = 0;
   promptHistory.length = 0;
   promptHistoryIndex = null;
   promptDraft = "";
-  // 添付の控えは会話に紐づくので「新しい話」で捨てる（打ちかけのテキストは消さない。
+  lastUserText = "";
+  lastAssistantText = "";
+  setPendingChoices(null);
+  // 再生成・コピー・読み上げと添付の控えは「新しい話」で捨てる（打ちかけのテキストは消さない。
   // この後の closeComposer() が入力欄の現在値を書きかけとして保存し直す）。
   lastUserImages = [];
   lastUserFiles = [];
   historyQuery = "";
   if (historySearch) historySearch.value = "";
-  renderHistory();
+  if (streamRenderFrame) { cancelAnimationFrame(streamRenderFrame); streamRenderFrame = null; }
+  streamBuffer = "";
+  cancelStreamSpeech();
+  setThinkingUi(false);
   stopVoice();
   renderReply("新しい話をしよう。");
   closeComposer();

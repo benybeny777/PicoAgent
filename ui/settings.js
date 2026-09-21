@@ -144,6 +144,12 @@ function markSearchable(node, ...parts) {
 
 function registerInput(key, input, wrapper) {
   wrapper.dataset.settingKey = key;
+  const label = wrapper.querySelector(":scope > label");
+  // 複合エディタの保存専用hiddenには、見出しラベルを結び付けない。
+  if (label && input.type !== "hidden" && !label.htmlFor) {
+    if (!input.id) input.id = `setting-${key}`;
+    label.htmlFor = input.id;
+  }
   inputs.set(key, input);
   inputWrappers.set(key, wrapper);
   return wrapper;
@@ -300,7 +306,11 @@ function buildGenreChips(getValue, setValue) {
   const bar = el("div", { className: "genre-filter" });
   const buttons = new Map();
   function refresh() {
-    for (const [id, button] of buttons) button.classList.toggle("active", id === getValue());
+    for (const [id, button] of buttons) {
+      const active = id === getValue();
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
   }
   for (const id of ids) {
     const label = id === "all" ? "すべて" : (SKILL_CATEGORY_LABELS[id] || id);
@@ -318,7 +328,7 @@ function buildGenreChips(getValue, setValue) {
 }
 
 function applySettingsSearch() {
-  if (!settingsSearch) return;
+  if (!settingsSearch || !data) return;
   const query = settingsSearch.value.trim().toLowerCase();
   document.body.classList.toggle("searching", Boolean(query));
   const topPanels = form.querySelector(":scope > .tab-panels");
@@ -343,6 +353,7 @@ function applySettingsSearch() {
   for (const panel of form.querySelectorAll(".card-config")) {
     const card = panel.previousElementSibling;
     if (query) {
+      if (panel.dataset.userOpen == null) panel.dataset.userOpen = card?.classList.contains("open") ? "1" : "0";
       const open = nodeSearchText(panel).includes(query);
       panel.hidden = !open;
       if (card) {
@@ -350,8 +361,13 @@ function applySettingsSearch() {
         if (open) card.hidden = false;
       }
     } else {
+      if (panel.dataset.userOpen != null) {
+        card?.classList.toggle("open", panel.dataset.userOpen === "1");
+        delete panel.dataset.userOpen;
+      }
       panel.hidden = !(card && card.classList.contains("open"));
     }
+    card?.setAttribute("aria-expanded", String(!panel.hidden));
   }
   // ジャンルフィルタ: スキル設定タブのカテゴリ群を絞る（検索と併用可能）。
   // ジャンル不一致、または検索中にそのカテゴリの可視カードが無ければ見出しごと隠す。
@@ -372,7 +388,14 @@ function applySettingsSearch() {
       continue;
     }
     const ownMatch = nodeSearchText(sectionNode.querySelector("h2") || sectionNode).includes(query);
-    const childMatch = [...sectionNode.querySelectorAll(".searchable")].some(item => !item.hidden);
+    const childMatch = [...sectionNode.querySelectorAll(".searchable")].some(item => {
+      if (item.hidden) return false;
+      for (let parent = item.parentElement; parent && parent !== sectionNode; parent = parent.parentElement) {
+        // セクションと詳細グループの表示は検索結果から再計算する。ジャンルなどの非表示条件だけを先に尊重する。
+        if (parent.hidden && !parent.matches(".section, .advanced-group")) return false;
+      }
+      return true;
+    });
     sectionNode.hidden = !(ownMatch || childMatch);
   }
   // 「詳細設定」などの折りたたみ: 中身が一致したら開いて見せ、一致しなければ畳んで隠す。
@@ -393,9 +416,11 @@ function applySettingsSearch() {
       }
     }
   }
-  for (const panel of form.querySelectorAll(".tab-panel")) {
+  for (const panel of [...form.querySelectorAll(".tab-panel")].reverse()) {
     if (!query) continue;
-    const hasVisibleContent = [...panel.children].some(child => !child.hidden);
+    // 説明文だけ残るタブを検索結果に数えず、隠れた親の中にある一致も除外する。
+    const hasVisibleContent = [...panel.querySelectorAll(".searchable, .section")]
+      .some(child => !child.closest("[hidden]"));
     panel.hidden = !hasVisibleContent;
   }
   if (query && !form.querySelector(".tab-panel:not([hidden])")) {
@@ -1379,6 +1404,7 @@ function createTabs(items) {
       id: `tab-${item.id}`,
       textContent: item.label,
       type: "button",
+      tabIndex: selected ? 0 : -1,
     });
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", selected ? "true" : "false");
@@ -1396,6 +1422,7 @@ function createTabs(items) {
         const active = tab === button;
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", active ? "true" : "false");
+        tab.tabIndex = active ? 0 : -1;
       }
       for (const current of panels.children) {
         const active = current === panel;
@@ -1404,6 +1431,20 @@ function createTabs(items) {
       }
       form.scrollTop = 0;
       applySettingsSearch();
+    });
+    button.addEventListener("keydown", event => {
+      if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+      const tabButtons = [...tabs.querySelectorAll(".tab")];
+      const index = tabButtons.indexOf(button);
+      let next;
+      if (["ArrowRight", "ArrowDown"].includes(event.key)) next = (index + 1) % tabButtons.length;
+      else if (["ArrowLeft", "ArrowUp"].includes(event.key)) next = (index - 1 + tabButtons.length) % tabButtons.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabButtons.length - 1;
+      else return;
+      event.preventDefault();
+      tabButtons[next].click();
+      tabButtons[next].focus();
     });
     tabs.append(button);
     panels.append(panel);
@@ -1909,12 +1950,17 @@ function renderSkillCard(tool, values) {
   const nodes = [card];
   if (hasConfig) {
     const panel = markSearchable(
-      el("div", { className: "card-config" }),
+      el("div", { className: "card-config", id: `skill-config-${tool.name}` }),
       tool.name,
       tool.label,
       tool.configSchema.map(field => `${field.key} ${field.label}`).join(" ")
     );
     panel.hidden = true;
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `${tool.label || tool.name}の設定`);
+    card.setAttribute("aria-controls", panel.id);
+    card.setAttribute("aria-expanded", "false");
     const guide = setupGuideNode(tool.name, tool.configSchema);
     if (guide) panel.append(guide);
     if (supportsConnectionTest(tool)) {
@@ -1934,6 +1980,12 @@ function renderSkillCard(tool, values) {
       panel.hidden = !open;
       card.classList.toggle("open", open);
       applySettingsSearch();
+    });
+    card.addEventListener("keydown", event => {
+      if (event.target !== card || event.isComposing) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (!event.repeat) card.click();
     });
     nodes.push(panel);
   }
@@ -3277,10 +3329,17 @@ async function render() {
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
   let characterSwitchPending = 0;
+  let characterSwitchOwnsBusy = false;
+  const characterSwitchMessage = "キャラ設定を読み込み中…";
   let restoreCharacterSelectFocus = false;
   function queueCharacterSwitch(requestedCharacter) {
-    characterSwitchPending += 1;
     restoreCharacterSelectFocus ||= document.activeElement === characterSelect;
+    if (characterSwitchPending === 0 && !settingsMutationBusy) {
+      characterSwitchOwnsBusy = true;
+      setSettingsMutationBusy(true);
+      statusEl.textContent = characterSwitchMessage;
+    }
+    characterSwitchPending += 1;
     characterSelect.disabled = true;
     characterSelect.setAttribute("aria-busy", "true");
     // 素早い連続選択でも、表示中の人格を読み終えてから次へ進む。並列に読むと、
@@ -3319,6 +3378,15 @@ async function render() {
       if (characterSwitchPending === 0) {
         characterSelect.disabled = false;
         characterSelect.setAttribute("aria-busy", "false");
+        // 名前変更・削除の内側から呼ばれた場合、その処理のロックは解除しない。
+        if (characterSwitchOwnsBusy) {
+          characterSwitchOwnsBusy = false;
+          setSettingsMutationBusy(false);
+          if (statusEl.textContent === characterSwitchMessage) {
+            const selected = characterCatalog.characters.find(item => item.id === displayedCharacterId);
+            statusEl.textContent = `${selected?.name || displayedCharacterId} [${displayedCharacterId}] を選びました。「保存」で反映します。`;
+          }
+        }
         if (restoreCharacterSelectFocus) characterSelect.focus({ preventScroll: true });
         restoreCharacterSelectFocus = false;
       }
@@ -3488,7 +3556,6 @@ async function render() {
     selectButton.addEventListener("click", () => {
       characterSelect.value = character.id;
       characterSelect.dispatchEvent(new Event("change"));
-      statusEl.textContent = `${character.name} [${character.id}] を選びました。「保存」で反映します。`;
     });
     const nameText = el("span", { textContent: character.name });
     const texts = [
@@ -3522,6 +3589,7 @@ async function render() {
           const result = await window.picoagent.settings.renameCharacter(character.id, nextName);
           character.name = result.name;
           renameInput.value = result.name;
+          renameInput.setAttribute("aria-label", `${result.name}の表示名`);
           nameText.textContent = result.name;
           icon.alt = `${result.name}のアイコン`;
           const option = [...characterSelect.options].find(item => item.value === character.id);
@@ -3543,6 +3611,7 @@ async function render() {
         }
       });
       renameInput.addEventListener("keydown", event => {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === "Enter") {
           event.preventDefault();
           renameButton.click();
@@ -4013,7 +4082,7 @@ function confirmRestart() {
 }
 
 saveBtn.addEventListener("click", async () => {
-  if (settingsMutationBusy) return;
+  if (settingsMutationBusy || !savedSnapshot) return;
   setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {
@@ -4131,8 +4200,8 @@ document.addEventListener("keydown", event => {
 });
 
 (async () => {
-  data = await window.picoagent.settings.load();
   try {
+    data = await window.picoagent.settings.load();
     await render();
     savedSnapshot = cloneSettings(collect());
     updateDirtyState();
@@ -4144,8 +4213,19 @@ document.addEventListener("keydown", event => {
   }
   catch (error) {
     renderingSettings = false;
+    data = null;
+    savedSnapshot = null;
+    saveBtn.disabled = true;
+    resetChangesBtn.disabled = true;
     logApp("error", "設定画面の読み込みに失敗しました", errorDetail(error));
-    statusEl.textContent = `設定画面の読み込みに失敗: ${error.message}`;
+    statusEl.textContent = `設定画面の読み込みに失敗: ${error?.message || error}`;
+    const retry = el("button", { type: "button", textContent: "再読み込み" });
+    retry.addEventListener("click", () => window.location.reload());
+    form.replaceChildren(
+      el("h2", { textContent: "設定を読み込めませんでした" }),
+      el("p", { textContent: "設定は変更していません。再読み込みしても失敗する場合は、下のエラー内容を確認してください。" }),
+      retry,
+    );
   }
 })().catch(error => {
   renderingSettings = false;

@@ -1223,6 +1223,26 @@ async function validateInteractionMatrix() {
         if (!state.buttons.length || state.buttons.some(button => !inside(button))) {
           throw new Error(`${target.id}/${layout}: 入力操作ボタンが画面外です ${JSON.stringify(state.buttons)}`);
         }
+        if (await page.locator("#historySearch").isVisible()) {
+          const canScroll = await page.locator("#historyLog").evaluate(node => {
+            node.scrollTop = 0;
+            node.dispatchEvent(new Event("scroll"));
+            return node.scrollHeight - node.clientHeight >= 48;
+          });
+          if (canScroll) {
+            await page.getByRole("button", { name: "末尾へ", exact: true }).click();
+            const remaining = await page.locator("#historyLog").evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
+            if (remaining >= 48 || await page.locator("#historyJumpLatest").isVisible()) throw new Error(`${layout}: 履歴の末尾へ戻れません`);
+          }
+          const draft = await page.locator("#input").inputValue();
+          await page.locator("#input").focus();
+          await page.keyboard.press("Control+f");
+          if (!(await page.locator("#historySearch").evaluate(node => node === document.activeElement))) throw new Error(`${layout}: Ctrl+Fで履歴検索へ移動できません`);
+          await page.locator("#historySearch").fill("一致しない履歴の検証用文字列");
+          await page.locator(".history-empty").waitFor();
+          await page.keyboard.press("Escape");
+          if (await page.locator("#historySearch").inputValue() !== "" || await page.locator("#input").inputValue() !== draft || await page.locator("#composer").isHidden()) throw new Error(`${layout}: 検索解除で下書きまたは入力欄が失われました`);
+        }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
 
@@ -1246,6 +1266,38 @@ async function validateInteractionMatrix() {
           throw new Error(`${target.id}/${layout}: 最小寸法${minimum.width}x${minimum.height}で操作要素が画面外です ${JSON.stringify(outsideAtMinimum)}`);
         }
         await page.setViewportSize(resized);
+        if (layout === "chat") {
+          await page.evaluate(() => addHistory("user", "時刻表示の確認"));
+          if (!(await page.locator(".history-item.user .history-time").last().isVisible())) throw new Error("チャットの送信時刻が発言者名と一緒に隠れています");
+          await page.screenshot({ path: join(output, `${target.id}-chat-time.png`), omitBackground: true });
+          const previousTheme = await page.evaluate(() => {
+            const theme = document.documentElement.getAttribute("data-theme");
+            document.documentElement.dataset.theme = "dark";
+            return theme;
+          });
+          try {
+            await page.screenshot({ path: join(output, `${target.id}-chat-time-dark.png`), omitBackground: true });
+          } finally {
+            await page.evaluate(theme => {
+              if (theme === null) document.documentElement.removeAttribute("data-theme");
+              else document.documentElement.dataset.theme = theme;
+            }, previousTheme);
+          }
+          const resetState = await page.evaluate(async () => {
+            setInputValue("未送信の下書き");
+            setPendingChoices([{ label: "古い会話の選択肢" }]);
+            lastUserText = "リセット前の質問";
+            lastAssistantText = "リセット前の回答";
+            const typing = renderReplySpeaking("リセット前の文字送り".repeat(10));
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            for (const listener of window.__listeners["pet:reset"] || []) listener({ payload: null });
+            await typing;
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            return { reply: reply.textContent, history: conversationHistory.length, draft: input.value, canRetry: hasLastRequest(), previousReply: lastAssistantText, choices: pendingChoices };
+          });
+          if (resetState.reply !== "新しい話をしよう。" || resetState.history || resetState.canRetry || resetState.previousReply || resetState.choices || resetState.draft !== "未送信の下書き") throw new Error(`会話リセット後に古い状態が残りました: ${JSON.stringify(resetState)}`);
+          await page.screenshot({ path: join(output, `${target.id}-chat-reset.png`), omitBackground: true });
+        }
         results.push({ characterId: target.id, layout, bootVisible, loopPending, resized, minimum, state, atMinimum, file });
         console.log(`  操作検査: ${target.id}/${layout}`);
       } finally {
@@ -1438,11 +1490,14 @@ async function validateInteractionMatrix() {
       throw new Error("局所バネのない待機リグで空のフレームループが再開しています");
     }
     await gazePage.evaluate(() => setAnimation("thinking", true));
-    await gazePage.waitForFunction(() => animationLoop.pending());
+    // 思考中もメッシュ側のtickerが描画する。rendererの連番ループを動かす必要はない。
+    await gazePage.waitForFunction(() => meshRigActive && rigActive
+      && meshRigController.motion === "thinking" && meshRigController.app.ticker.started
+      && !animationLoop.pending());
     await gazePage.evaluate(() => setAnimation("idle", true));
     await gazePage.waitForTimeout(80);
     if (await gazePage.evaluate(() => animationLoop.pending())) {
-      throw new Error("フレームモーションから待機リグへ戻った後もループが残っています");
+      throw new Error("思考モーションから待機リグへ戻った後も空のループが残っています");
     }
     await gazePage.mouse.move(450, 590);
     await gazePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
