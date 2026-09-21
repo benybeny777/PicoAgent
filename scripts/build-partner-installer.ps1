@@ -35,7 +35,7 @@ function Invoke-Step {
 }
 
 # 1. 同梱素材がそろっているかをビルド前に確かめる。
-$sourceRoot = Join-Path $root $SourceDir
+$sourceRoot = if ([System.IO.Path]::IsPathRooted($SourceDir)) { $SourceDir } else { Join-Path $root $SourceDir }
 $seedScript = Join-Path $sourceRoot 'seed-voices.ps1'
 $characterRoot = Join-Path $env:APPDATA 'PicoAgent\characters'
 $voiceRoot = Join-Path $env:APPDATA 'PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models'
