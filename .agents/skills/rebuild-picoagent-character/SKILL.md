@@ -35,6 +35,7 @@ description: PicoAgentの通常2D、LocalVTuberStudio独自2.5D、Live2D、MMD�
 - Photoshop「ディテールを保持 2.0」は、同倍率で顔、髪、輪郭が実際に改善するときだけ使う。候補を別名で保存し、元画像を上書きしない。
 - Photoshopの生成AIは、権利を持つ画像の局所補修に限定する。本人性、服、髪型、構図を無断で作り替えない。
 - Pillow、ブラウザ、CSS等による単純なピクセル拡大を高精細化と呼ばない。
+- `animationQualityMode=sharp-expression` の高精細キャラは `scripts/rebuild-sharp-expression-assets.ps1` だけを再生成入口にする。工程順は「基準寸法で局所差分を合成 → Photoshop「ディテールを保持 2.0」で全9レイヤーを1780×3600以上へ再サンプリング → 元アルファ再適用 → 連番生成 → キャラ同期」で固定する。Photoshop拡大後に差分合成スクリプトを再実行して890×1800へ戻さない。`cargo xtask sync-characters` は1780×3600未満の高精細レイヤーを拒否する。
 - `characters/<id>/layers/*.png` は制作正本として残し、`scripts/build-character-animations.py` だけで `runtime-layers/*.webp` と `frames/<世代>/*.webp` へ変換する。変換後は寸法と復号RGBAを元画像と完全一致させ、1画素でも違えば採用しない。
 - 生成後に `cargo xtask sync-characters` を通し、配信コピーから制作正本の `layers/` が除外され、manifestの `runtimeLayers` と `framePaths` がlossless WebPだけを指すことを確認する。
 - 自前メッシュリグは`mesh-rig/source/regions.json`を制作設定とする。同梱通常2Dは`build-separated-mesh-sources.py`で胴、後ろ髪、左右腕、顔、前髪の同一座標PNGを先に生成し、`build-mesh-rig.py`で`parts/*.webp`と`rig.json`を再生成する。中立合成が基準画像と画素一致しない場合は停止する。`runtimeScale`は1以下、`source/`は配信除外とし、広可動域へ広げる場合は隠れ領域を描き足した原画が揃うまで実装済みと扱わない。

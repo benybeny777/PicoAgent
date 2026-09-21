@@ -308,35 +308,112 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ---
 
+## 📄 主要ファイル
+
+| ファイル | 役割 |
+|---|---|
+| `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |
+| `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState` |
+| `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
+| `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
+| `crates/picoagent-core/` | **非公開の内部共通コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。外部公開は行わず `publish = false` を保つ |
+| `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで7形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。旧 `talk` はLINE風の `chat` へ移行する。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
+| `src-tauri/src/window_surface.rs` | メインウィンドウを利用者の目の前へ出す共通手順（表示 → 最小化解除 → 前面化）。ホットキー呼び出しと、多重起動時に2つ目の起動が既存ウィンドウを前面化する経路が共有する |
+| `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
+| `src-tauri/src/secret.rs` | シークレット（`password` 型設定）をOSの資格情報保護へ預ける（Windows は DPAPI、macOS はログインキーチェーン）。Linux は平文 |
+| `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |
+| `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
+| `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |
+| `src-tauri/src/agent.rs` / `agent/{prompt,feedback}.rs` | エージェント実行ループ／systemルールと文脈の合成／任意の計画・自己評価。スキルとメモリは既存の各正本を使い、実体のないhooks層は作らない |
+| `src-tauri/src/api_server.rs` | Ollama 風ローカル HTTP API（既定無効・127.0.0.1 のみ・`PICOAGENT_API_KEY` で Bearer 認証。`/api/chat` `/api/generate` `/v1/chat/completions` `/mcp` ほか） |
+| `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_text からフォールバック参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
+| `src-tauri/src/permissions.rs` | **全スキル共通のファイル許可の正本**。`resolve()` が許可判定を通した `SafePath` を返し（生成経路は resolve / join / sibling のみ）、`permissions::fs` が `SafePath` 専用のファイル操作を提供する。`permissions::guard` のテストがスキルの自前実装・`resolve` 漏れを検出 |
+| `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
+| `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `docs/SETTINGS.md` に載っているか、逆に一覧だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
+| `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる。**キャラクターIDの判定 `is_valid_id()` もここが唯一の定義元**（IDはフォルダ名と設定キーの一部になるため、判定を写さない） |
+| `src-tauri/src/components.rs` | **初回追加機能の公式取得元・検証・導入境界**。Aivis／Whisperは各公式配布元からPicoAgent管理領域へ直接取得し、LibreOffice／文書ツールは公式ページと手動設定を案内する。第三者ソフトをPicoAgentのReleaseへ再配布しない |
+| `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないか、キャラクターID判定の写しが増えていないか、`character_pack.rs` が `crate::` のアプリ内部へ依存していないか（xtask のビルドが壊れる）を検出する |
+| `src-tauri/src/project_rules.rs` | **作業フォルダの`AGENTS.md`を案件の作法としてsystem文へ載せる**（許可ルート直下1枚。`project`スキルがルートを切り替えると作法も入れ替わる）。本文は利用者の指示ではなく「フォルダに置かれていた文章」として扱い、上位ルール・確認・許可・外部送信制限を上書きできないことを毎回明示する。読み書きは`project`の`rules_show` / `rules_save`。`PICOAGENT_PROJECT_RULES_AUTO_CAPTURE=true`のとき、強く言い渡された作法を専用見出しへ自動追記し、通知から取り消せる（既定は無効。利用者のフォルダを書き換えるため） |
+| `src-tauri/src/user_skills.rs` / `skills/user_skill/mod.rs` | 利用者追加の`SKILL.md`を検証・原子的保存し、チャットから作成・更新・適用する。Markdownは指示だけを持ち、実操作は既存Toolの許可・確認境界を通す |
+| `src-tauri/src/bundle_scope.rs` | **配布物の範囲を固定する設計ガード**（テスト専用）。製品に入るのは `ui/` を写した `ui-dist/` と `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・撮影用画像（`tools/` `docs/` `scripts/` `xtask/`）が混ざらないよう、リソース指定・配信元・`ui/` に置ける拡張子を allowlist で固定する。CSPの`unsafe-eval`へ依存できるのはGit管理外のLive2D用PIXIだけとし、追跡JavaScriptの`eval`／`Function`コンストラクタも拒否する |
+| `src-tauri/src/guard_scan.rs` | **設計ガードの走査範囲の正本**（テスト専用）。`all_sources()` がスキルとバックエンド `src-tauri/src/` の全ソースを返す。スキル側は `mod.rs` だけでなく `skills/<スキル名>/*.rs` の補助モジュール（`run_command/jobs.rs` など）も含める（`mod.rs` だけ見ると、補助モジュールへ書いた違反を見逃す）。各ガードが自前でディレクトリを歩くと範囲がずれて違反を見逃すため、`guard_scan::guard` のメタガードが自前走査を検出 |
+| `src-tauri/src/store.rs` | **アプリ状態ファイル永続化の共通層**。`write_atomic()` / `write_json_atomic()` が「一時ファイル → `sync_all` → `rename`」で原子的に書き換え、途中で落ちても既存データを壊さない。`quarantine_corrupt()` は読めなかったファイルを `.corrupt-<日時>` へ退避する。`store::guard` のテストが `fs::write` の直接使用を検出 |
+| `src-tauri/src/tools/process.rs` | **外部プロセス実行の共通層**。`command()` が Windows のコンソール窓抑止・`kill_on_drop`・stdio 既定を適用し、`output()` / `output_text()` / `output_or_install_hint()` がタイムアウト付きで実行し、打ち切り時はプロセスツリーごと回収する。外部コマンドの存在確認は `resolve_executable()` / `has_executable()` に集約する（`sh -lc "command -v ..."` はログインシェルがPATHを組み直すため、GUIアプリが実際にspawnするPATHと食い違う）。`tools::process::guard` のテストが `Command::new` の直接使用と、自前の `tokio::time::timeout(..., .output()/.wait())` を検出 |
+| `src-tauri/src/durable_jobs.rs` | **アプリ再起動後も再開するツール単位の永続ジョブ**（`app_data_dir/durable-jobs.json`）。対象は`ai_drive`と`artifact_pipeline`だけ。取り出しは1本のループ、実行は最大3件同時。スキルは`report_progress()`で現在地を報告し、開始・進捗・完了・中止・再試行を`pet:notice`（`kind=durable_job`）で画面へ送る。自動復旧の試行上限は通算5回で、利用者が明示した再試行では数え直す |
+| `src-tauri/src/scheduler.rs` | cron 風スケジュールタスクの常駐実行と実行履歴（`app_data_dir/schedule-runs.json`）。日と曜日を両方制限した場合は標準cron互換のOR条件。**検出（同期）と実行（単一ワーカー）はキューで分離**し、長時間タスク中も検出が止まらないようにしている（`scheduler::tests` の設計ガードが検出関数の `async` 化を検出） |
+| `src-tauri/src/memory.rs` / `emotion.rs` | 暗黙的な長期メモリ（`app_data_dir/memory.json`）／ルールベースの感情状態推定 |
+| `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
+| `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |
+| `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
+| `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。読込開始（`pet_frontend_ready`）は12秒（`PICOAGENT_BOOT_TIMEOUT_MS` がそれより小さければその値）、開始後は進捗通知（`pet_boot_progress`。初期化中は1秒、設定取得後は `PICOAGENT_BOOT_TIMEOUT_MS` の1/4を1〜10秒へ収めた間隔）が `PICOAGENT_BOOT_TIMEOUT_MS` だけ途絶えたことを監視し、届かなければ webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する（起動完了 `pet_finish_boot` が来れば監視を終える。モデル取得などで準備が長引いても、進捗が続く限り案内画面へ落とさない）。**起動完了の記録はウィンドウ寸法の復元より先に行う**（寸法変更の失敗で、動いている画面を案内画面へ差し替えないため）。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。案内画面には状況・読み込み先・ログの置き場所に加えて**当日 `app.log` の末尾12行**を出す（読み取りは末尾8KBまで）。**この画面はそのまま撮って送られる前提なので、ログ本文は診断情報の書き出しと同じ `commands::redacted_log_tail()` を通し、APIキー等を伏せてから出す**（設定を読めないときは本文を出さない）。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
+| `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
+| `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |
+| `xtask/src/util.rs` | **同梱物取得と差分同期の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。`sync_dir()`はサイズと更新日時が同じファイルを飛ばし、同期元にない生成先だけを削除する。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
+| `xtask`（`bundled::fetch_engine`） | 同梱エンジン取得（`cargo xtask setup engine`） |
+| `xtask`（`bundled::fetch_whisper`） | 同梱Whisper CLIとモデル取得（`cargo xtask setup whisper`） |
+| `xtask/src/office.rs` | OfficeCLI（LibreOffice）と AivisSpeech Engine の取得（`cargo xtask setup office` / `setup aivis`。`src-tauri/resources/bundled/` 配下、Git 管理外。どちらもベストエフォート） |
+| `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
+| `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
+| `xtask`（`bundled::fetch_live2d_runtime`） | Live2D ランタイムを `ui/vendor/live2d/` へ取得（`cargo xtask setup live2d`）。公式サンプルは自動取得せず、開発者が条件確認後に `cargo xtask setup live2d-samples` を明示実行する。いずれも git 管理外 |
+| `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |
+| `xtask/src/bundled.rs` / `tools.rs` | 同梱推論エンジン・Whisper・Live2D の取得／精度向上用 OSS CLI 群の取得 |
+| `xtask/src/cli.rs` | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`） |
+| `xtask/src/verify.rs` / `agent_harness.rs` | PR前の一括ローカル検証（`cargo xtask verify`）。本体・xtask・`skills/`の書式・共通スキル正本とClaude Code用自動認識ファイル・追跡JavaScript／MJS構文・画面の契約テスト（`tools/tests/*.mjs`を`node --test`へまとめて渡す）・Git差分を途中失敗後も最後まで実行し、`node`未導入だけを明示スキップする。検査対象の列挙は`tracked_files()`（`git ls-files -z`）に集約する |
+| `xtask`（`assets::build_ui_dist`） | `ui/` を Tauri 配信用 `ui-dist/` へコピー。製品ビルドでは HTML/CSS のコメント・余分な空白と JS の空行・行頭行末空白を削る。仕上げに `stamp_asset_versions()` が HTML の同梱 CSS / JS 参照へ内容ハッシュの `?v=…` を打つ（版を手書きしない） |
+| `scripts/build-character-animations.py` | `characters/<id>/layers/*.png` を正本に、復号RGBA完全一致の `runtime-layers/*.webp` と単一世代 `frames/<世代>/*.webp` を生成し、`character.json` の `animations` / `runtimeLayers` / `assetVersion` を更新する |
+| `scripts/build-live2d-psd.py` | `characters/<id>/layers/` から Live2D Cubism Editor 用のレイヤー分け PSD（ひよりのパーツ構成）を `live2d-src/` へ生成する（`python scripts/build-live2d-psd.py`。生成物は Git 管理外） |
+| `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
+| `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
+| `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
+| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。`sync-characters` は git-lfs 未導入で必ず失敗するため、理由を出して続行し `ui-dist/` の生成を止めない。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
+| `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
+| `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
+| `tools/ip-proposal-deck/build.js` | VTuber事務所へ送付する提案書PowerPoint（`docs/IP-PROPOSAL-VTUBER.pptx`）の生成。文面の正本は`docs/IP-PROPOSAL-VTUBER.md`で、PowerPointを直接編集しない。使い方は `tools/ip-proposal-deck/README.md` |
+| `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
+| `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |
+| `characters/` | キャラクター正本（一覧 `index.json`・人格定義・レイヤー・連番フレーム・ローディング画像。Live2D キャラは `live2d/` にモデル一式）。画像準備手順は `characters/README.md` |
+| `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
+| `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
+| `ui/index.html` / `renderer.js` / `styles.css` | ペット UI |
+| `ui/settings.{html,js,css}` | 設定ウィンドウ（全設定の GUI 編集） |
+
 ## 📁 フォルダ構成
 
 ```text
-PicoAgent/
-├── crates/picoagent-core/ ← 非公開の内部共通コア（publish=false）
-├── characters/       ← キャラクター正本（人格定義・連番フレームまたは Live2D モデル）
-├── skills/           ← エージェント機能コネクタ（<スキル名>/mod.rs と補助ファイル）
-├── ui/               ← webview フロント（ペット UI・設定画面）
-├── xtask/            ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
-├── scripts/          ← キャラクター画像の生成スクリプト（Python）
-├── .agents/plugins/  ← Codex・Claude Code共用の汎用開発プラグイン
-├── tools/            ← 開発用の作業ツール
-├── docs/            ← 未完了タスク、販売・設計資料、README掲載画像（images/）
-└── src-tauri/
-    ├── build.rs      ← コネクタの自動 mod 生成
-    └── src/
-        ├── agent.rs        ← エージェント実行ループ
-        ├── agent/          ← systemルールと文脈の合成（prompt）／計画・自己評価（feedback）
-        ├── providers/      ← 叩く AI コネクタ（.rs を足すと自動登録）
-        ├── tools/          ← Tool登録・意図語彙・HTTP・プロセス実行の共通層
-        ├── mcp/            ← MCP クライアント / サーバ
-        ├── permissions.rs  ← 全スキル共通のファイル許可（SafePath）
-        ├── store.rs        ← 状態ファイルの原子的な保存
-        ├── durable_jobs.rs ← 再起動後に再開するツールジョブの永続キュー
-        ├── user_skills.rs  ← 利用者のSKILL.md検証・索引・原子的保存
-        └── character_framing.rs / stream_profile.rs / config.rs / commands.rs / …
+20_PicoAgent/
+├── crates/picoagent-core/       ← 非公開の内部共通コア（publish=false）
+├── characters/                 ← キャラクター正本（index.json・人格定義・連番フレーム）
+├── skills/                     ← エージェント機能（スキル）連結ディレクトリ（<スキル名>/mod.rs を足すと自動登録）
+│   └── {time,weather,currency_rates,...}/mod.rs
+├── ui/                         ← webview フロント正本（編集対象）
+│   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
+│   ├── index.html / renderer.js / styles.css       ← ペット UI
+│   ├── settings.html / settings*.js / settings.css ← 設定ウィンドウ
+│   ├── vendor/live2d/          ← Live2D ランタイム（git 管理外、setup live2d で取得）
+│   └── assets/characters/      ← characters/ の配信コピー（git 管理外、sync:characters で生成）
+├── ui-dist/                    ← Tauri frontendDist（git 管理外、build-ui-dist で生成）
+├── src-tauri/
+│   ├── Cargo.toml / build.rs / tauri.conf.json
+│   ├── capabilities/default.json   ← 権限（ACL）
+│   ├── icons/                      ← 生成アイコン一式
+│   ├── resources/bundled/          ← 同梱物（engine/aivis/whisper。git 管理外、cargo xtask setup で取得）
+│   └── src/
+│       ├── main.rs / lib.rs / commands.rs / menu.rs
+│       ├── config.rs / agent.rs / message.rs / engine.rs
+│       ├── providers/*.rs      ← 叩く AI（local/ollama/openai/anthropic/gemini/deepseek/xai/mistral/agent_cli。.rs を足すと自動登録）
+│       └── tools/mod.rs        ← スキルの Tool トレイト・レジストリ本体
+├── xtask/                      ← 開発タスクランナー（cargo xtask setup / dev / build / cli / stop）
+├── scripts/                    ← キャラクター画像の生成・高精細化、関係者版インストーラの生成（*.py と Windows 専用の *.ps1 / *.cs）
+├── .agents/skills/             ← 複数の作業エージェントで共有する手順スキルの正本
+├── .claude/                    ← Claude Code の設定、共通スキル自動認識ファイル、セッション開始フック
+├── AGENTS.md / CLAUDE.md       ← ルール正本 / リダイレクト
+├── README.md / MANUAL.md / SPEC.md
+├── docs/SETTINGS.md             ← 全設定キーの唯一の一覧
+├── docs/DEVELOPMENT.md          ← 開発・xtask・配布ビルド・リポジトリ構成
+├── HANDOFF.md                  ← 未マージ作業の短い引き継ぎ
+├── docs/TASKS.md               ← 未完了・条件待ちだけを置く一覧
 ```
-
-`ui/assets/characters/` は `characters/` の配信コピー、`ui/vendor/live2d/` は Live2D ランタイムで、いずれも自動生成・自動取得です。
 
 **ドキュメント**: [README.md](../README.md)（概要・起動） / [MANUAL.md](../MANUAL.md)（使いかた） / [SPEC.md](../SPEC.md)（仕様） / [SETTINGS.md](SETTINGS.md)（全設定キー） / [AGENTS.md](../AGENTS.md)（作業ルール） / [HANDOFF.md](../HANDOFF.md)（未マージ作業） / [TASKS.md](TASKS.md)（未完了・条件待ち）
 
