@@ -265,6 +265,7 @@ try {
   if (await skillGenres.getByRole("button", { pressed: true }).textContent() !== "SNS/投稿") throw new Error("スキルの絞り込み状態が読み上げに反映されません");
   if (await page.locator(".card-item:visible").filter({ hasText: "Google スプレッドシート" }).count()) throw new Error("ジャンル外のスキルが表示されています");
   await page.locator("#settingsSearch").fill("PICOAGENT_GOOGLE_SHEETS_ACCESS_TOKEN");
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "検索に一致する設定はありません");
   if (await page.locator("#status").textContent() !== "検索に一致する設定はありません") throw new Error("ジャンルで隠れた設定だけの一致が検索結果として残っています");
   await page.locator("#clearSettingsSearch").click();
   await skillGenres.getByRole("button", { name: "すべて", exact: true }).click();
@@ -338,10 +339,13 @@ try {
   const blueskyCard = page.locator(".card-item").filter({ hasText: "Bluesky" });
   await blueskyCard.click();
   await page.locator("#settingsSearch").fill("Bluesky");
+  await page.waitForFunction(() => [...document.querySelectorAll(".card-item")].some(card => card.textContent.includes("Bluesky") && card.classList.contains("open")));
   if (!(await blueskyCard.getAttribute("class"))?.includes("open")) throw new Error("検索に一致するスキル設定が開きません");
   await page.locator("#settingsSearch").fill("Microsoft Graph");
+  await page.waitForFunction(() => [...document.querySelectorAll(".card-item")].some(card => card.textContent.includes("Microsoft Graph") && card.classList.contains("open")));
   await page.locator("#clearSettingsSearch").click();
   await page.locator("#settingsSearch").fill("存在しない設定の検証用文字列");
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "検索に一致する設定はありません");
   if (await page.locator("#status").textContent() !== "検索に一致する設定はありません") throw new Error("設定の検索結果なしが表示されません");
   if (await page.locator(".tab-panel:visible").count()) throw new Error("一致する設定のないタブが残っています");
   await page.locator("#clearSettingsSearch").click();
