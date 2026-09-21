@@ -79,7 +79,7 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 ## 許諾済み関係者向けの同梱版
 
 - MMD・音声同梱版の正規入口はリポジトリ直下の`関係者版インストーラをビルド.bat`（本体は`scripts/build-partner-installer.ps1`、PowerShell 7必須）にする。スクリプトは同梱素材（`miko-mmd`・`korone-mmd`の登録データ、2人分のAIVMX、`temp/settings-runtime/seed-voices.ps1`）と`origin/main`との一致を検査し、専用Tauri設定とNSIS hookを`temp/partner-installer/`へ現在のチェックアウトの絶対パスで生成してから、`preview-distribution`→`build-ui --release --beta`→`beta-full`付き`cargo tauri build --bundles nsis`を実行する。成果物は`temp/partner-installer/PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe`へ移し、容量とSHA-256を表示する。hookの絶対パスを手で書き換えない。
-- 関係者版を作り直して非公開Releaseへ添付したら、本体`README.md`最上段の「関係者版インストーラ」欄にある最新版のリンク・ファイル名・容量を、同じ作業のPRで更新する。
+- 関係者版の取得先は非公開Release一覧を正本にし、版ごとのリンク・ファイル名・容量を本体の文書へ書き写さない（`docs/DEVELOPMENT.md` の関係者版節は一覧へのリンクだけを持つ）。ファイル名・容量・SHA-256はReleaseの説明へ書く。
 - 利用者が指定した許諾範囲と共有先に限定する。非公開配布を指定された場合、一般公開LP・公開Release・latest.jsonへ専用資産を混ぜない。指定リポジトリが実際に非公開であることをAPIで確認する。
 - 検証済み本体と同じ版・feature・配信UIを使い、専用Tauri設定とNSIS hookは`temp/`に分離する。公開用設定や許可キャラ一覧を専用版の都合で変更しない。
 - 追加するモデル・テクスチャ・音声だけを名指しする。利用者の設定ファイル、履歴、APIキー、ブラウザープロファイルはコピーしない。
