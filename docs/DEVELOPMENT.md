@@ -170,6 +170,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 - チェックアウトが `origin/main` より古い場合や未コミットの変更がある場合は停止します（そのまま作る場合は引数に `-AllowStale`）。
 - ビルド中は `cargo xtask stop` で起動中のPicoAgentと同梱エンジンを終了します。
 - 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
+- 配布済みの版は[非公開Release一覧](https://github.com/benybeny777/PicoAgent/releases)にあります。指定した関係者以外へ転送・公開しないでください。
 
 ### holo Indie審査への限定共有版（Windows）
 
