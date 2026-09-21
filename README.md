@@ -1,9 +1,10 @@
 > **関係者版インストーラ（非公開・許諾済みの関係者向け。MMDキャラと音声モデル同梱）**
-> - 最新: [v1.1.3-partner.2](https://github.com/benybeny777/PicoAgent/releases/tag/v1.1.3-partner.2)（`PicoAgent_1.1.3_Partner-MMD-Voice_x64-setup.exe`、942 MB）。過去の版は[非公開Release一覧](https://github.com/benybeny777/PicoAgent/releases)にあります。
+> - 最新: [v1.1.4-windows-private](https://github.com/benybeny777/PicoAgent/releases/tag/v1.1.4-windows-private)（`PicoAgent_1.1.4_Partner-MMD-Voice_x64-setup.exe`、942 MB）。過去の版は[非公開Release一覧](https://github.com/benybeny777/PicoAgent/releases)にあります。
 > - このPCのビルド成果物: `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe`（Git管理外）。作り直すときはリポジトリ直下の `関係者版インストーラをビルド.bat` を実行します。
 > - 一般公開のLP・公開Release・`latest.json` には載せません。指定した関係者以外へ転送・公開しないでください。
 
 > **holo Indie審査版（限定共有・音声モデルなし）**
+> - 取得先: [v1.1.4-windows-private](https://github.com/benybeny777/PicoAgent/releases/tag/v1.1.4-windows-private)の`PicoAgent_1.1.4_holo-Indie-Review_x64-setup.exe`。
 > - `holo Indie審査版インストーラをビルド.bat`は、さくらみこ公式MMDだけを含み、配信・動画から学習した音声モデルとAivisを含めません。
 > - 通常版とは別の利用者領域へ導入し、審査以外へ公開しません。詳しい条件は[開発ガイド](docs/DEVELOPMENT.md#holo-indie審査への限定共有版windows)を参照してください。
 
@@ -39,7 +40,7 @@
 </div>
 
 > [!WARNING]
-> 公開インストーラは、**Windows版 PicoAgent v1.0.5 Alpha**と**macOS版 v1.0.4 Alpha**です。macOS版は現行v1.0.4を維持します。アプリ画面の小型`ALPHA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
+> 公開インストーラは、**Windows版 PicoAgent v1.1.4 Alpha**と**macOS版 v1.0.4 Alpha**です。macOS版は現行v1.0.4を維持します。アプリ画面の小型`ALPHA`表示はクリックを妨げず、配信形式では操作UIと重ならない位置へ表示します。
 > アルファ版は`beta-full`ビルドでPro対象を含む全機能を試用可能にし、正式リリースではこのfeatureを付けずFree／Pro制限を有効にします。
 
 ---
