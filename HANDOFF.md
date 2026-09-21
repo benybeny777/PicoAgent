@@ -4,8 +4,10 @@
 
 ## 現在の状態
 
-- 最終確認日: 2026-09-12
-- 進行中作業なし。実機での未確認事項は `docs/TASKS.md` を参照する。
+- 最終確認日: 2026-09-21
+- `codex/krea-ltx25-lowvram`でKrea 2 Turbo／LTX 2.5 NVFP4を追加中。本人承認済みのモデル取得と実機生成の受入を進めている。改修設計と最新検証状態は同名ブランチのDraft PRを正本にする。
+- 作業場は`C:\00_PG\20_PicoAgent\temp\krea-ltx25-lowvram`。MiniMax H3は利用者が中止したため対象外。既存Qwen／Wan／旧LTXと共通Python本体は保持する。
+- 再開時は管理モデルの`install.json`、実プロセスのコマンドライン、`temp/*progress.json`、PR本文を照合してから続ける。HFトークンは表示しない。未確認事項は`docs/TASKS.md`を参照する。
 - 未完了の素材補修・実機受入・設計のみの将来開発は[docs/TASKS.md](docs/TASKS.md)を参照し、着手条件を満たす項目から進める。
 - 配布版の更新は本体のマージと別に扱い、配布リポジトリの公開状態を確認する。
 

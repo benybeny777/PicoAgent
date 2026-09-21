@@ -1223,6 +1223,18 @@ function buildComponentManager() {
           if (status.textContent === confirmationMessage) status.textContent = "";
         },
       }) : null;
+      const licensedModel = ["image-krea2", "video-ltx25"].includes(item.id);
+      let licenseAccepted = null;
+      let licenseConsent = null;
+      if (licensedModel) {
+        const consent = document.createElement("label");
+        licenseAccepted = document.createElement("input");
+        licenseAccepted.type = "checkbox";
+        consent.append(licenseAccepted, document.createTextNode(item.id === "image-krea2"
+          ? " 提供元の利用条件を読み、関連会社を含む年間売上100万米ドル未満、または別契約済みであることを本人が確認し、利用条件に同意します。生成前のプロンプトと公開前の成果物の内容・権利を本人が確認します。"
+          : " 提供元の利用条件を読み、年間売上1,000万米ドル以上の事業利用では別契約が必要なことを本人が確認し、利用条件に同意します。生成前のプロンプトと公開前の成果物の内容・権利を本人が確認します。"));
+        licenseConsent = consent;
+      }
       button.addEventListener("click", async () => {
         if (!managed) {
           const url = item.sources?.[0]?.url;
@@ -1231,6 +1243,10 @@ function buildComponentManager() {
           return;
         }
         if (actionConfirmation && !actionConfirmation.request()) return;
+        if (licensedModel && !licenseAccepted?.checked) {
+          status.textContent = "提供元リンクで利用条件を確認し、本人が同意欄を選んでください。Hugging Face側の同意・アクセス許可も別途必要な場合があります。";
+          return;
+        }
         setBusy(true);
         // 取得はバックエンドで走るので、この画面を閉じても止まらない。黙っていると
         // 「閉じれば止まる」と誤解され、数百MBの取得が知らないうちに続くことになる。
@@ -1240,7 +1256,7 @@ function buildComponentManager() {
           ? `${item.label} ${item.targetVersion}を公式配布元から取得しています…${keepsRunning}`
           : `${item.label}を公式配布元から取得しています…${keepsRunning}`;
         try {
-          await window.picoagent.settings.installComponents([item.id]);
+          await window.picoagent.settings.installComponents([item.id], false, licensedModel ? [item.id] : []);
           const successMessage = item.updateAvailable
             ? `${item.label}を${item.targetVersion}へ更新しました。`
             : (item.newerThanTarget
@@ -1319,6 +1335,7 @@ function buildComponentManager() {
           versionText ? el("small", { textContent: versionText }) : null,
           item.versionError ? el("small", { className: "component-version-warning", textContent: item.versionError }) : null,
           sourceLinks,
+          licenseConsent,
         ].filter(Boolean)),
         el("span", { className: "component-badge", textContent: badgeText }),
         actions,

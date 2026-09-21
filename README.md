@@ -147,7 +147,7 @@ flowchart LR
 | 音声 | whisper.cpp、AivisSpeech | ローカル文字起こしと読み上げ。母音時間を2D口パクへ渡す |
 | キャラクター制作 | Python 3.12、PyTorch、Grounding DINO、SAM 2.1 | 立ち絵の意味解析と原寸部位分解 |
 | 局所画像編集 | 管理下ComfyUI、Qwen-Image-Edit-2511 | 閉眼・隠れ顔・耳を原寸範囲だけ補完する |
-| ローカル画像・動画生成 | Qwen Image Edit、Wan 2.2 5B、LTX-Video 0.9.8 2B FP8 | 入力画像の編集と、同じQwen Image Editでの文章からの画像生成（専用のtext-to-imageモデルではなく画質は未比較。8GB VRAM・RAM 34GBで512×512が約9分）。動画は選択導入する候補で、実生成・画質・8GB安定性は未検証。専用のtext-to-imageモデルとLTX 2.3／最新2.5は未対応。条件と品質差は[管理モデル](docs/models.md)参照 |
+| ローカル画像・動画生成 | Qwen Image Edit、Wan 2.2 5B、旧LTX、Krea 2 Turbo、LTX 2.5 | Qwenの編集・文章生成を維持し、Kreaの文章画像生成とLTX 2.5の音声付き動画を任意導入。新NVFP4版はWindows x64・Blackwell以降・VRAM 8GB以上・RAM 32GB以上の評価構成。低メモリ化による速度・画質差と未確認事項は[管理モデル](docs/models.md)参照。モデル固有条件への本人同意が必要 |
 | ビルド・検証 | Cargo、`cargo xtask`、Playwright | セットアップ、同期、ビルド、テスト、実画面キャプチャを一つの入口へ集約する |
 
 ## 数字

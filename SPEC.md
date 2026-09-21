@@ -245,7 +245,7 @@ Gemma 等のチャットテンプレートは user/assistant の厳密な交互�
 
 - 第三者ソフトウェアをPicoAgentのReleaseへ再アップロードしない。`component-manifest.json` は `version=2` / `policy=direct-upstream`、公式取得元表示、管理対象で固定する `targetVersion` だけを持ち、自前パッケージURL・分割ファイル・公開済みフラグを持たない。
 - ローカル生成基盤は共有Python 3.12とComfyUIを`character-maker`で一度だけ管理し、Qwen画像編集にも再利用する。WanとLTXは`video-wan`／`video-ltx`の別コンポーネントとして利用者が選んだ側だけを取得する。8GB VRAM未満または基盤未導入では取得前に停止し、生成基盤は動画モデルより先に削除できない。
-- この導入判定は8GBでの実動作保証ではない。LTX 0.9.8は低VRAM用途の旧世代候補で、実動画・画質・安定性は未検証。専用のtext-to-imageモデルとLTX 2.3／最新2.5は未対応（文章だけの画像生成は、導入済みQwen Image Editを参照画像なしで実行する）。LTX 2.5の公式条件はDesktopが16GB以上、モデル本体のシステム要件が32GB以上と経路で異なる。一次資料と採用境界は[管理モデル](docs/models.md)へまとめる。
+- この導入判定は8GBでの実動作保証ではない。旧Qwen・Wan・LTX 0.9.8を維持し、任意選択の`krea-2-turbo-nvfp4`（文章から画像）と`ltx-2.5-nvfp4`（文章／画像から音声付き動画）を追加する。新モデルは利用条件の確認、対応GPU・RAM・空き容量・ランタイム・取得権限の検査を取得前に行う。条件不足を自動取得や非量子化モデルへの切替で回避しない。低VRAMではCPU退避、タイル復号、小さい既定寸法・短い動画を使用し、指定を超える解像度へ補間拡大しない。速度・画質・8GB実機動作の確認状態は[管理モデル](docs/models.md)と未完了項目へ分離する。
 - `installMode=managed` のAivisとWhisperだけは、各公式配布元から利用者データ `PicoAgent/bundled/<id>/` へ直接取得する。GitHub Release APIのサイズとSHA-256 digest、Whisperモデルの固定SHA-256、HTTPS、上限サイズ、zip slip、展開容量を検査し、ステージングから原子的に入れ替える。削除はPicoAgent管理領域だけを対象とする。
 - 追加機能の導入・更新・修復・削除はバックエンドの共通ロックで直列化し、初回起動の自動導入と設定画面、複数カードから同時に実行されても管理領域を競合更新しない。
 - `installMode=external` のLibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrepは公式ページを表示する。利用者が提供元の条件を確認して導入し、必要なら設定で実行ファイルを指定する。PicoAgentは外部導入物を削除しない。
