@@ -43,6 +43,7 @@ pub fn root(app: &AppHandle) -> Result<PathBuf> {
 pub fn list(app: &AppHandle) -> Result<Vec<UserCharacter>> {
     let _state_lock = crate::store::lock_state("user-characters");
     let root = root(app)?;
+    log_recovery(app, recover_interrupted_work(&root));
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -343,6 +344,86 @@ fn prepare_source(source: &Path, destination: &Path) -> Result<()> {
     }
 }
 
+/// 異常終了で残った導入・更新の途中データを片付ける（呼び出し側が `user-characters` のロックを持つ）。
+///
+/// 途中データの名前はプロセスIDを含むため、再起動後の新しいプロセスは同じ名前を見ない。
+/// ここで拾わないと、更新中に落ちたキャラは退避先 `.update-backup-*` に残ったまま一覧から消え、
+/// 導入途中の `.installing-*` / `.updating-*` も容量を占めたまま溜まり続ける。
+/// - 退避先は、元の場所が空いていれば戻し（旧版の復元）、新版が既にあれば消す。
+/// - 導入途中のフォルダは消す（検証前の中途半端な内容で、確定済みのものは無い）。
+///
+/// 返り値はログへ残す文。失敗しても一覧・導入は止めない（次の機会にやり直す）。
+fn recover_interrupted_work(root: &Path) -> Vec<String> {
+    let mut messages = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return messages;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !path.is_dir() {
+            continue;
+        }
+        if name.starts_with(".update-backup-") {
+            let id = std::fs::read(path.join("character.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .and_then(|manifest| manifest.get("id")?.as_str().map(str::to_string))
+                .filter(|id| character_pack::is_valid_id(id));
+            let Some(id) = id else {
+                messages.push(format!(
+                    "中断した更新の退避先からキャラクターIDを読めないため残します: {}",
+                    path.display()
+                ));
+                continue;
+            };
+            let destination = root.join(&id);
+            if destination.exists() {
+                match std::fs::remove_dir_all(&path) {
+                    Ok(()) => {
+                        messages.push(format!("更新済みキャラクターの退避先を消しました: {id}"))
+                    }
+                    Err(error) => messages.push(format!(
+                        "更新済みキャラクターの退避先を消せません: {} ({error})",
+                        path.display()
+                    )),
+                }
+            } else {
+                match std::fs::rename(&path, &destination) {
+                    Ok(()) => messages.push(format!(
+                        "中断した更新から元のキャラクターを戻しました: {id}"
+                    )),
+                    Err(error) => messages.push(format!(
+                        "中断した更新から元のキャラクターを戻せません: {} ({error})",
+                        path.display()
+                    )),
+                }
+            }
+        } else if name.starts_with(".installing-") || name.starts_with(".updating-") {
+            if let Err(error) = std::fs::remove_dir_all(&path) {
+                messages.push(format!(
+                    "導入途中のフォルダを消せません: {} ({error})",
+                    path.display()
+                ));
+            } else {
+                messages.push(format!(
+                    "導入途中のフォルダを消しました: {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    messages
+}
+
+fn log_recovery(app: &AppHandle, messages: Vec<String>) {
+    for message in messages {
+        crate::log_paths::append_app_log(app, &message);
+    }
+}
+
 fn cleanup_staging(app: &AppHandle, staging: &Path) {
     if staging.exists() {
         if let Err(error) = std::fs::remove_dir_all(staging) {
@@ -532,11 +613,13 @@ pub fn install_or_update_generated(
     let _state_lock = crate::store::lock_state("user-characters");
     let root = root(app)?;
     std::fs::create_dir_all(&root)?;
+    log_recovery(app, recover_interrupted_work(&root));
     let staging = root.join(format!(".updating-{}", std::process::id()));
     let backup = root.join(format!(".update-backup-{}", std::process::id()));
     if staging.exists() || backup.exists() {
         bail!(
-            "以前のキャラクター更新が完了していません。PicoAgentを再起動してから再試行してください"
+            "以前のキャラクター更新の途中データを片付けられません。ログの理由を確認してください: {}",
+            root.display()
         );
     }
     copy_dir(source, &staging)?;
@@ -566,12 +649,28 @@ pub fn install_or_update_generated(
         }
         if let Err(error) = std::fs::rename(&staging, &destination) {
             if updated {
-                let _ = std::fs::rename(&backup, &destination);
+                if let Err(restore) = std::fs::rename(&backup, &destination) {
+                    // 戻せなかった旧版は退避先に残る。次に一覧を開いたとき
+                    // `recover_interrupted_work` が元の場所へ戻す。
+                    bail!(
+                        "更新したキャラクターを配置できず、元のキャラクターも戻せませんでした（次回の起動時に戻します）: {error} / {restore}"
+                    );
+                }
             }
             return Err(error.into());
         }
         if updated {
-            std::fs::remove_dir_all(&backup)?;
+            // 新版はもう配置済みなので、旧版の掃除に失敗しても更新は成功として返す
+            // （退避先は次回 `recover_interrupted_work` が消す）。
+            if let Err(error) = std::fs::remove_dir_all(&backup) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!(
+                        "更新前のキャラクターを掃除できません（次回の起動時に消します）: {} ({error})",
+                        backup.display()
+                    ),
+                );
+            }
         }
         Ok((id, name, updated))
     })();
@@ -903,7 +1002,7 @@ mod guard {
 mod tests {
     use super::{
         build_live2d_pack, extract_zip, find_live2d_model, pack_root, parse_bundled_ids,
-        rename_manifest,
+        recover_interrupted_work, rename_manifest,
     };
     use serde_json::json;
     use std::io::Write;
@@ -917,6 +1016,74 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("picoagent-uc-{label}-{nanos}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn write_character(dir: &std::path::Path, id: &str, marker: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("character.json"),
+            json!({ "id": id, "name": marker }).to_string(),
+        )
+        .unwrap();
+    }
+
+    /// 更新中に落ちて退避先だけが残ったキャラは、再起動後（別のプロセスID）に元の場所へ戻る。
+    #[test]
+    fn 中断した更新の退避先から元のキャラを戻す() {
+        let root = temp_dir("recover-restore");
+        write_character(&root.join(".update-backup-111"), "mine", "旧版");
+
+        let messages = recover_interrupted_work(&root);
+
+        let restored = std::fs::read_to_string(root.join("mine/character.json")).unwrap();
+        assert!(
+            restored.contains("旧版"),
+            "元のキャラが戻っていません: {restored}"
+        );
+        assert!(!root.join(".update-backup-111").exists());
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("戻しました")));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 新版の配置まで済んでいれば、退避先の旧版は消す（新版を旧版で上書きしない）。
+    #[test]
+    fn 更新済みなら退避先の旧版を消して新版を残す() {
+        let root = temp_dir("recover-updated");
+        write_character(&root.join("mine"), "mine", "新版");
+        write_character(&root.join(".update-backup-222"), "mine", "旧版");
+
+        recover_interrupted_work(&root);
+
+        let current = std::fs::read_to_string(root.join("mine/character.json")).unwrap();
+        assert!(
+            current.contains("新版"),
+            "新版が旧版で上書きされました: {current}"
+        );
+        assert!(!root.join(".update-backup-222").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 導入途中の一時フォルダは片付け、導入済みのキャラと読めない退避先には触らない。
+    #[test]
+    fn 導入途中のフォルダだけを片付けて導入済みキャラは残す() {
+        let root = temp_dir("recover-staging");
+        write_character(&root.join("kept"), "kept", "導入済み");
+        write_character(&root.join(".installing-live2d-333"), "half", "途中");
+        write_character(&root.join(".updating-444"), "half", "途中");
+        std::fs::create_dir_all(root.join(".update-backup-555")).unwrap();
+
+        recover_interrupted_work(&root);
+
+        assert!(root.join("kept/character.json").exists());
+        assert!(!root.join(".installing-live2d-333").exists());
+        assert!(!root.join(".updating-444").exists());
+        assert!(
+            root.join(".update-backup-555").exists(),
+            "IDを読めない退避先は利用者のデータかもしれないので消さない"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// 「zip を開くとフォルダが1つ」という一般的な配布形を吸収できること。

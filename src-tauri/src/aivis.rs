@@ -727,11 +727,98 @@ fn replace_install_tree(stage: &Path, install: &Path) -> anyhow::Result<()> {
             }
             return Err(error.into());
         }
-        std::fs::remove_dir_all(backup)?;
+        // 新版はもう配置済みなので、旧版を消せなくても入れ替えは成功として扱う
+        // （残った退避先は次回の `recover_interrupted_install` が消す）。
+        if let Err(error) = std::fs::remove_dir_all(&backup) {
+            crate::log_paths::log_detached(&format!(
+                "入れ替え前の Aivis を削除できません（次回の起動時に消します）: {} ({error})",
+                backup.display()
+            ));
+        }
     } else {
         std::fs::rename(stage, install)?;
     }
     Ok(())
+}
+
+/// 前回の入れ替えが途中で落ちた残り（`.installing-aivis-<pid>-<n>` / `.backup-aivis-<pid>-<n>`）を片付ける。
+///
+/// 名前にプロセスIDを含むため、次の起動は同じ名前を見ない。拾わないと約0.8GBの旧版が残り続け、
+/// 配置前に落ちた場合は Aivis が消えたように見えて取り直しになる。PicoAgent は同時に1つしか
+/// 動かないので、別プロセスIDのものは終了済みとして扱える。
+fn recover_interrupted_install(app: &tauri::AppHandle) {
+    let Ok(install) = install_dir(app) else {
+        return;
+    };
+    let Some(parent) = install.parent() else {
+        return;
+    };
+    let _guard = match AIVIS_INSTALL_FS_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    for (name, action) in interrupted_install_actions(parent, &install, std::process::id()) {
+        let path = parent.join(&name);
+        let result = match action {
+            InterruptedAction::Remove => std::fs::remove_dir_all(&path),
+            InterruptedAction::Restore => std::fs::rename(&path, &install),
+        };
+        let verb = match action {
+            InterruptedAction::Remove => "片付けました",
+            InterruptedAction::Restore => "元の場所へ戻しました",
+        };
+        match result {
+            Ok(()) => append_log_best_effort(
+                app,
+                &format!("中断した Aivis の入れ替えの残りを{verb}: {name}"),
+            ),
+            Err(error) => append_log_best_effort(
+                app,
+                &format!("中断した Aivis の入れ替えの残りを処理できません: {name} ({error})"),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum InterruptedAction {
+    Remove,
+    Restore,
+}
+
+/// 片付け対象と処理を決める（ファイル操作をしない純粋な判定）。
+/// 導入途中は消し、退避先は本体が無ければ1つだけ戻して残りは消す。
+fn interrupted_install_actions(
+    parent: &Path,
+    install: &Path,
+    current_pid: u32,
+) -> Vec<(String, InterruptedAction)> {
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let current = format!("-{current_pid}-");
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| {
+            (name.starts_with(".installing-aivis-") || name.starts_with(".backup-aivis-"))
+                && !name.contains(&current)
+        })
+        .collect();
+    names.sort();
+    let mut restored = install.exists();
+    names
+        .into_iter()
+        .map(|name| {
+            if name.starts_with(".backup-aivis-") && !restored {
+                restored = true;
+                (name, InterruptedAction::Restore)
+            } else {
+                (name, InterruptedAction::Remove)
+            }
+        })
+        .collect()
 }
 
 fn stage_and_replace(app: &tauri::AppHandle, source: &Path, install: &Path) -> anyhow::Result<()> {
@@ -779,6 +866,7 @@ async fn ensure_installed_inner(
     app: &tauri::AppHandle,
     force_repair: bool,
 ) -> anyhow::Result<PathBuf> {
+    recover_interrupted_install(app);
     migrate_legacy_install(app)?;
     if !force_repair {
         if let Some(path) = runtime_engine_path(app) {
@@ -1348,7 +1436,56 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{replace_install_tree, validate_external_endpoint};
+    use super::{
+        interrupted_install_actions, replace_install_tree, validate_external_endpoint,
+        InterruptedAction,
+    };
+
+    /// 前回の起動で入れ替え中に落ちた残りを、本体の有無に応じて戻すか消す。
+    #[test]
+    fn 中断した入れ替えは本体が無ければ旧版を戻し残りを消す() {
+        let parent = std::env::temp_dir().join(format!(
+            "picoagent-aivis-recover-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let install = parent.join("aivis");
+        for name in [
+            ".backup-aivis-111-0",
+            ".installing-aivis-111-1",
+            ".backup-aivis-999-0",
+        ] {
+            std::fs::create_dir_all(parent.join(name)).unwrap();
+        }
+
+        let actions = interrupted_install_actions(&parent, &install, 999);
+        assert_eq!(
+            actions,
+            vec![
+                (
+                    ".backup-aivis-111-0".to_string(),
+                    InterruptedAction::Restore
+                ),
+                (
+                    ".installing-aivis-111-1".to_string(),
+                    InterruptedAction::Remove
+                ),
+            ],
+            "この起動（pid 999）の入れ替え中のものには触らない"
+        );
+
+        std::fs::create_dir_all(&install).unwrap();
+        let actions = interrupted_install_actions(&parent, &install, 999);
+        assert!(
+            actions
+                .iter()
+                .all(|(_, action)| *action == InterruptedAction::Remove),
+            "本体があるなら旧版で上書きしない: {actions:?}"
+        );
+        std::fs::remove_dir_all(&parent).unwrap();
+    }
 
     #[test]
     fn 外部音声apiはローカルhttpだけを許可する() {
