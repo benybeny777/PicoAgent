@@ -43,6 +43,9 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 
 ## ビルド
 
+- Windowsのまとめ実行は`Windows全種類をビルドしてUP.bat`、個別は`Windows公開Alpha版をビルドしてUP.bat`／`Windows関係者版をビルドしてUP.bat`／`Windows審査版をビルドしてUP.bat`を使える。共通正本`scripts/publish-windows.ps1`は各既存ビルド入口を直列に呼び、MZ・時刻・SHAと再取得を検査する。最初は`-PrepareOnly`で新しい版・最新main・保存先のvisibility・直前版との実効差分を確かめる。不明なビルド元は確認して`-PreviousSourceCommit`で指定し、素材は`-PartnerSourceDir`で絶対パスも指定できる。
+- 全種類はAlphaだけ公開先Draft、関係者・審査は非公開の新規`v<版>-windows-private`へ分離する。既存数値版へ追加せず、失敗後も新patchで再実行する。公開先Draftまでの場合は終了コード2であり公開完了としない。21側の目的別PR・更新情報・Pages検証後に公開を完了する。詳細は`docs/DEVELOPMENT.md`のWindows各版手順を使う。
+
 1. 長時間実行も終了コードと結果を同じ作業内で回収する。利用者が非同期実行を禁止した場合は、追跡可能な実行セッションで完了まで待つ。GUIを起動する場合は最新のモニター指定を守り、検証が終わったら閉じる。
 2. Windowsでは`cargo xtask build-beta --bundles nsis`、macOSでは`cargo xtask build-beta --bundles app,dmg`、Ubuntu Linux x64では`cargo xtask build-beta --bundles deb,appimage`を実行する。LinuxはREADMEのapt依存を先に揃え、AppImageの`bundleMediaFramework`を無効化しない。macOSはXcode Command Line Tools、Tauri CLI、`p7zip`（Aivisの分割書庫展開）を先に揃える。手順は`docs/DEVELOPMENT.md`の「macOS版のビルド（未署名アルファ）」。
    - **macOS向けのコンパイルはWindows環境で検証できていない。** 初回は自前コードの型エラーや同梱物取得のmac経路で止まりうる。止まったら原因を直して同じブランチへコミットし、PRを完成させる。失敗ログだけ残して終えない。

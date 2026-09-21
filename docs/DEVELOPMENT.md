@@ -1,5 +1,24 @@
 # PicoAgent 開発・配布ガイド
 
+## Windows各版のビルドとアップロード
+
+PowerShell 7、Rust/Tauri、認証済みの`gh`、各版の許諾済み同梱素材を用意する。新しい数値版を採番してPRをマージした、追跡変更のない最新`origin/main`から実行する。バッチ自身は採番・マージ・任意モデル取得をしない。
+
+- `Windows全種類をビルドしてUP.bat`: Alpha・関係者・holo Indie審査の3種類。
+- `Windows公開Alpha版をビルドしてUP.bat`: Alphaだけ。
+- `Windows関係者版をビルドしてUP.bat`: 関係者版だけ。
+- `Windows審査版をビルドしてUP.bat`: 審査版だけ。
+
+共通本体は`scripts/publish-windows.ps1`。`-PrepareOnly`はネットワークで版・権限・ビルド元を確認するが、ビルドやアップロードはしない。既存Release本文の`source_commit`から直前版を特定できない場合は、記録を照合して`-PreviousSourceCommit <40桁SHA>`を指定する。関係者版の初期設定素材は`-PartnerSourceDir <フォルダーの絶対パス>`でも指定できる。
+
+全種類ではAlphaだけを公開リポジトリ`benybeny777/PicoAgent-Distribution`の`v<版>`へ、関係者・審査の2種類を非公開`benybeny777/PicoAgent`の`v<版>-windows-private`へ分離する。単体の関係者・審査も同じprivateタグ体系を使う。同じ数値版が存在したら、後日追加・差し替えはせず新patchの採番を求めて止まる。起動中アプリ・管理エンジンがある場合も、利用者が終了するまで止める。
+
+全成果物のビルド時刻・MZ・SHA-256を確認した後だけ新規Draft Releaseを作り、認証付き再取得で照合する。全選択先の検証成功後に非公開側だけDraftを解除する。途中失敗では後続公開を止め、残ったDraftを自動削除・追加更新しない。原因を確認して次のpatch版で全対象を作り直す。
+
+**公開Alphaはアップロードまでであり、公開完了ではない。** 公開先Draftがある場合は終了コード`2`で明示する。`C:\00_PG\21_PicoAgent-LP`側で更新情報・LPの目的別PRを作成し、実ファイルと`latest.json`の照合・Pages検証を行ってからDraftを解除する。20側の`distribution/site/`一括同期はしない。非公開のみが完了した場合は`0`、失敗は非`0`となる。生成物と照合用コピーは`temp/windows-publish/<版>-<実行ID>/`に残る。
+
+ローカル検査: `pwsh -NoProfile -File scripts/test-publish-windows.ps1`。これは実ビルド・GitHub書き込みを行わない。
+
 `cargo xtask verify`はNodeが使える環境でJavaScriptの構文だけでなく、追跡中の`tools/tests/*.mjs`の回帰テストも実行する。キャラクター修正時は追加で`python scripts/test-face-landmarks.py`（Pillowが必要）と`node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`を実行し、全7体の実画像を確認する。後者のPlaywrightは`PICO_PLAYWRIGHT_MODULE`で作業用モジュールの絶対パスを指定する。生成成功やCPU検査だけで見た目合格にしない。
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
