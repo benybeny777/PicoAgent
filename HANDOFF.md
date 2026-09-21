@@ -5,7 +5,7 @@
 ## 現在の状態
 
 - 最終確認日: 2026-09-21
-- [Draft PR #331](https://github.com/benybeny777/PicoAgent/pull/331)、`codex/krea-ltx25-lowvram`でKrea 2 Turbo／LTX 2.5 NVFP4を追加中。本人承認済みの両モデル取得を終え、実機生成の受入を進めている。改修設計と最新検証状態はPRを正本にする。
+- [Draft PR #331](https://github.com/benybeny777/PicoAgent/pull/331)、`codex/krea-ltx25-lowvram`でKrea 2 Turbo／LTX 2.5 NVFP4を追加中。本人承認済みの両モデル取得と実機生成は成功し、LTX音声品質とGUI経由の受入などが残る。改修設計と最新検証状態はPRを正本にする。
 - 作業場は`C:\00_PG\20_PicoAgent\temp\krea-ltx25-lowvram`。MiniMax H3は利用者が中止したため対象外。既存Qwen／Wan／旧LTXと共通Python本体は保持する。
 - 再開時は管理モデルの`install.json`、実プロセスのコマンドライン、`temp/*progress.json`、PR本文を照合してから続ける。HFトークンは表示しない。未確認事項は`docs/TASKS.md`を参照する。
 - 未完了の素材補修・実機受入・設計のみの将来開発は[docs/TASKS.md](docs/TASKS.md)を参照し、着手条件を満たす項目から進める。

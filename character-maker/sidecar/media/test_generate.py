@@ -23,6 +23,15 @@ SETUP = load("media_setup", HERE / "setup_models.py")
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_相対パスを子プロセス起動前に絶対パスへ確定する(self):
+        from argparse import Namespace
+        args = Namespace(engine="qwen-edit", input=None, output=Path(__file__).relative_to(Path.cwd()) if Path(__file__).is_relative_to(Path.cwd()) else Path(__file__), comfy=Path("comfy"), models=Path("models"), gpu_lock=Path("gpu.lock"))
+        with patch.object(GEN.argparse.ArgumentParser, "parse_args", return_value=args):
+            with self.assertRaises(FileExistsError):
+                GEN.main()
+        for name in ("output", "comfy", "models", "gpu_lock"):
+            self.assertTrue(getattr(args, name).is_absolute())
+
     def test_real_gpu_lock_blocks_another_process_and_releases(self):
         temporary_root = HERE.parents[2] / "temp"
         temporary_root.mkdir(exist_ok=True)

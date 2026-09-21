@@ -280,6 +280,11 @@ def main():
     # 省メモリ起動の要否はGPU判定を持つRust側が決める。ここでは指示どおりに渡すだけにする。
     parser.add_argument("--lowvram", action="store_true", help="ComfyUIを--lowvramで起動する")
     args = parser.parse_args()
+    # 子プロセスはComfyUIの作業場で動くため、相対パスを起動元で確定する。
+    for name in ("input", "output", "comfy", "models", "gpu_lock"):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, value.resolve())
     if args.engine in ("krea-2-turbo-nvfp4", "ltx-2.5-nvfp4"):
         from model_catalog import check_hardware, LICENSE_REVISION
         check_hardware()

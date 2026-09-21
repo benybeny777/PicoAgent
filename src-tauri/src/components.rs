@@ -176,7 +176,7 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
         )),
         "video-ltx25" => Some((
             "LTX 2.5動画生成（NVFP4）",
-            "Windows x64で文章または画像から短い動画を生成します。Blackwell以降・専用VRAM 8GB以上・RAM 32GB以上が必要です。提供元の利用条件への本人の同意が必要です。8GB実機品質・速度は未検証です。",
+            "Windows x64で文章または画像から短い動画を生成します。Blackwell以降・専用VRAM 8GB以上・RAM 32GB以上が必要です。提供元の利用条件への本人の同意が必要です。8GB実機で文章からの単発生成を確認済み、音声品質・画像入力・連続実行は検証中です。",
             "約35.9GB（実行環境と作業領域は別）",
         )),
         "office" => Some((
