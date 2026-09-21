@@ -260,7 +260,10 @@ html[data-theme="dark"] .top-window-menu > button:focus-visible { background:rgb
 /* ── AIものまねゲーム ──────────────────────────────────────────────── */
 .game-overlay { position:fixed; z-index:210; inset:32px 0 0; padding:18px; overflow:auto; background:linear-gradient(145deg,rgba(37,29,49,.97),rgba(75,44,70,.97)); color:#fff; }
 .game-overlay[hidden] { display:none; }
-.game-shell { width:min(720px,calc(100% - clamp(220px,32vw,340px) - 16px)); min-height:100%; margin:0 auto 0 0; display:flex; flex-direction:column; }
+/* 右側のキャラ（幅 clamp(210px,32vw,340px)・右余白 clamp(36px,7vw,90px)）と重ねない。
+   以前は右余白を差し引いておらず、1000px幅で採点欄の右端36pxがキャラの下へ隠れていた。
+   `.game-overlay` の左右余白18pxぶんが、そのまま採点欄とキャラの隙間になる。 */
+.game-shell { width:min(720px,calc(100% - clamp(210px,32vw,340px) - clamp(36px,7vw,90px))); min-height:100%; margin:0 auto 0 0; display:flex; flex-direction:column; }
 .pet-app.is-playing-game[data-layout] .character { z-index:215; right:clamp(36px,7vw,90px); left:auto; top:36px; bottom:auto; width:clamp(210px,32vw,340px); height:72%; overflow:visible; pointer-events:none; }
 body .pet-app.is-playing-game[data-layout] .character .character-view { position:absolute!important; inset:0!important; width:100%!important; height:139%!important; scale:1!important; transform:translate(0,0) scale(1)!important; }
 body .pet-app.is-playing-game[data-layout] .character[data-render-kind="live2d"] .character-view > #live2dCanvas { top:0; bottom:auto; width:100%!important; height:auto!important; transform:translateX(-50%); }
