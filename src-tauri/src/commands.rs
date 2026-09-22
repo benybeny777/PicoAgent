@@ -1474,9 +1474,19 @@ fn open_with_default_app(url: &str) -> Result<(), String> {
                 SW_SHOWNORMAL,
             )
         };
-        if result as isize <= 32 {
+        // 32以下は失敗コード（ハンドルではない）。ポインタ表記のまま見せず、理由へ直す。
+        let code = result as isize;
+        if code <= 32 {
+            let reason = match code {
+                2 | 3 => "対象が見つかりません",
+                5 => "アクセスが拒否されました",
+                8 | 0 => "メモリが足りません",
+                26 => "対象が別のアプリで使用中です",
+                27 | 31 => "開くアプリが関連付けられていません",
+                _ => "OSが開くのを拒否しました",
+            };
             return Err(format!(
-                "既定のアプリで開けませんでした（OSエラー {result:?}）。"
+                "既定のアプリで開けませんでした（{reason}。OSエラー {code}）。"
             ));
         }
     }
