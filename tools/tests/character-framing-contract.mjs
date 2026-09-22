@@ -207,3 +207,17 @@ test("配信の胸上原画メッシュは下端基準で置き、字幕の上�
   assert.match(rule, /transform-origin:50% 100%;/);
   assert.match(rule, /var\(--mesh-source-css-height,9999px\)/);
 });
+
+test("キャラ枠の中のハートと接続点は枠の内側に置き、枠はスクロールさせない", () => {
+  // チャットのハート（left:88px）と接続点は62pxの丸枠の外にあり、切り取られて押せなかった。
+  // hidden の枠はfocusやクリックで中身がスクロールし、丸アイコンの顔が横へずれたまま戻らなかった。
+  const chatHeart = styles.match(/\[data-layout="chat"\] \.relationship-button \{([^}]*)\}/)?.[1] || "";
+  assert.match(chatHeart, /right:2px; bottom:2px;/);
+  const widgetHeart = styles.match(/\[data-layout="widget"\] \.relationship-button \{ right:auto;([^}]*)\}/)?.[1] || "";
+  assert.match(widgetHeart, /bottom:2px;/);
+  assert.match(styles, /\[data-layout="widget"\] \.character \{ display:block; overflow:hidden; overflow:clip; \}/);
+  assert.match(styles, /border-radius:50%; overflow:hidden; overflow:clip;/);
+  // 配信の拡大でキャラを操作UIより前へ出さない（「拡大」ボタンを覆って戻せなくなる）。
+  assert.match(styles, /\[data-layout="stream"\] \.bubble\.fullscreen ~ \.character \{ z-index:2; \}/);
+  assert.match(renderer, /relationshipButton\?\.focus\(\{ preventScroll: true \}\)/);
+});

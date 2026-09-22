@@ -2683,6 +2683,79 @@ if (process.env.SHOOT_LAYOUT_EDITOR) {
   process.exit(0);
 }
 
+// 通知（アクションセンター）・いっしょの記録・フキダシ拡大の3パネルを7形式で開き、窓の内側に
+// 収まって閉じる操作まで届くことを確かめる。パネルは形式ごとの配置規則を持つため、
+// 代表形式だけでは小型の形式で閉じるボタンが窓の外へ出ても気づけない。
+async function validatePanels() {
+  const output = join(ROOT, "temp", "panels-qa");
+  mkdirSync(output, { recursive: true });
+  const results = [];
+  for (const [layout, [width, height]] of Object.entries(MATRIX_LAYOUTS)) {
+    const page = await openScene({ width, height, layout, forcePng: true });
+    const inside = async selector => page.locator(selector).evaluate((node, size) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0,
+        inside: rect.left >= -1 && rect.top >= -1 && rect.right <= size.width + 1 && rect.bottom <= size.height + 1,
+        rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+      };
+    }, { width, height });
+
+    await page.locator("#noticeToggle").click();
+    await page.waitForSelector("#noticePanel:not([hidden])");
+    // 開くときのフェード（0.18秒）が終わってから撮る。途中だと背後が透けて崩れに見える。
+    await page.waitForTimeout(300);
+    const notice = await inside("#noticePanel");
+    await page.screenshot({ path: join(output, `${layout}-notice.png`), omitBackground: true });
+    await page.locator("#noticeToggle").click();
+
+    let relationship = null;
+    if (await page.locator("#relationshipButton").isVisible()) {
+      await page.locator("#relationshipButton").click();
+      await page.waitForSelector("#relationshipCard:not([hidden])");
+      await page.waitForTimeout(300);
+      relationship = { card: await inside("#relationshipCard"), close: await inside("#relationshipClose") };
+      await page.screenshot({ path: join(output, `${layout}-relationship.png`), omitBackground: true });
+      await page.locator("#relationshipClose").click();
+    }
+
+    // パネル操作で枠の中身がスクロールすると、丸アイコンの顔がずれたまま戻らない。
+    const characterScroll = await page.locator("#character").evaluate(node => ({ top: node.scrollTop, left: node.scrollLeft }));
+    await page.locator("#toggleFullscreen").click();
+    await page.waitForTimeout(250);
+    const fullscreen = { bubble: await inside("#bubble"), toggle: await inside("#toggleFullscreen") };
+    await page.screenshot({ path: join(output, `${layout}-fullscreen.png`), omitBackground: true });
+    await page.locator("#toggleFullscreen").click();
+    await page.close();
+
+    const problems = [];
+    if (!notice.visible || !notice.inside) problems.push(`通知 ${JSON.stringify(notice.rect)}`);
+    if (relationship && (!relationship.card.inside || !relationship.close.visible || !relationship.close.inside)) {
+      problems.push(`いっしょの記録 ${JSON.stringify(relationship)}`);
+    }
+    if (characterScroll.top || characterScroll.left) problems.push(`キャラ枠がスクロール ${JSON.stringify(characterScroll)}`);
+    if (!fullscreen.bubble.inside || !fullscreen.toggle.visible || !fullscreen.toggle.inside) {
+      problems.push(`拡大 ${JSON.stringify(fullscreen)}`);
+    }
+    results.push({ layout, notice, relationship, fullscreen, problems });
+    console.log(`  パネル検査: ${layout}${problems.length ? ` NG ${problems.join(" / ")}` : " OK"}`);
+  }
+  await writeFile(join(output, "result.json"), `${JSON.stringify(results, null, 2)}\n`);
+  const failed = results.filter(result => result.problems.length);
+  if (failed.length) throw new Error(`パネルが窓の外へ出ています: ${failed.map(result => result.layout).join(", ")}`);
+  return output;
+}
+
+if (process.env.SHOOT_PANELS) {
+  const output = await validatePanels();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`パネル表示検査完了: ${output}`);
+  process.exit(0);
+}
+
 if (process.env.SHOOT_INTERACTION_MATRIX) {
   const matrix = await validateInteractionMatrix();
   await trimmer.close();
