@@ -269,13 +269,16 @@ html[data-theme="dark"] .top-window-menu > button:focus-visible { background:rgb
    以前は拡大を scale(1) で打ち消し、縦長の枠へ全身画像をはみ出させていたため、仕様の
    「横切れのないバストアップ」が全身表示になっていた。画像キャラはペット形式の1.32倍を0.9倍
    （1.188）へ抑え、髪の左右を枠で切らない。Live2Dはモデル側の scale/offset が構図の正本なので縮めない。 */
-.pet-app.is-playing-game[data-layout] .character { z-index:215; right:clamp(36px,7vw,90px); left:auto; top:auto; bottom:0; width:clamp(210px,32vw,340px); height:auto; aspect-ratio:430 / 540; overflow:hidden; pointer-events:none; }
-body .pet-app.is-playing-game[data-layout] .character .character-view { position:absolute!important; inset:0!important; width:100%!important; height:100%!important; scale:1!important; transform:translate(0,var(--char-y,0px)) scale(var(--char-zoom,1.55))!important; transform-origin:50% 0%!important; }
-body .pet-app.is-playing-game[data-layout] .character:is([data-render-kind="2d"],[data-render-kind="mesh-rig"]) .character-view { scale:1.188!important; }
-body .pet-app.is-playing-game[data-layout] .character .character-view > img { inset:0!important; width:100%!important; height:100%!important; object-fit:contain!important; object-position:50% 0%!important; transform:none!important; }
-body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mesh-rig"] .character-view > canvas { top:0; bottom:auto; left:50%; width:auto!important; height:100%!important; transform:translateX(-50%); transform-origin:50% 0%; }
-body .pet-app.is-playing-game[data-layout] .character[data-render-kind="live2d"] .character-view > #live2dCanvas { top:auto; bottom:0; width:100%!important; height:88%!important; max-width:none; object-fit:fill; transform:translateX(-50%); transform-origin:50% 100%; }
-body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .character-view > #mmdCanvas { top:0; bottom:auto; width:100%!important; height:100%!important; transform:translateX(-50%); }
+/* ゲームは通常形式の上に重ねる。IDで通常の配信・丸アイコン規則より優先し、画面形式を
+   変更しても枠・canvasの切り出しを持ち込まない。モデル内部の構図はrendererが同期する。 */
+#petApp.is-playing-game[data-layout] .character { display:block!important; z-index:215; right:clamp(36px,7vw,90px); left:auto; top:auto; bottom:0; width:clamp(210px,32vw,340px); height:auto; aspect-ratio:430 / 540; overflow:hidden; pointer-events:none; border:0; border-radius:0; background:none; box-shadow:none; transform:none; }
+body #petApp.is-playing-game[data-layout] .character .character-view { position:absolute!important; inset:0!important; width:100%!important; height:100%!important; scale:1!important; transform:translate(var(--char-x,0px),var(--char-y,0px)) scale(var(--char-zoom,1.55))!important; transform-origin:50% 0%!important; }
+body #petApp.is-playing-game[data-layout] .character:is([data-render-kind="2d"],[data-render-kind="mesh-rig"]) .character-view { scale:1.188!important; }
+body #petApp.is-playing-game[data-layout] .character .character-view > img { inset:0!important; width:100%!important; height:100%!important; object-fit:contain!important; object-position:50% 0%!important; transform:none!important; translate:none; }
+body #petApp.is-playing-game[data-layout] .character .character-view > canvas { position:absolute; left:50%; right:auto; translate:none; }
+body #petApp.is-playing-game[data-layout] .character[data-render-kind="mesh-rig"] .character-view > canvas { top:0; bottom:auto; left:50%; width:auto!important; height:100%!important; max-width:none; transform:translateX(-50%); transform-origin:50% 0%; }
+body #petApp.is-playing-game[data-layout] .character[data-render-kind="live2d"] .character-view > #live2dCanvas { top:auto; bottom:0; width:100%!important; height:88%!important; max-width:none; object-fit:fill; transform:translateX(-50%); transform-origin:50% 100%; }
+body #petApp.is-playing-game[data-layout] .character[data-render-kind="mmd"] .character-view > #mmdCanvas { top:0; bottom:auto; width:100%!important; height:100%!important; transform:translateX(-50%); }
 /* 接続状態の点とハートはキャラ枠の中にあり、ゲームのバストアップでは顔・胸の上へ乗る。 */
 .pet-app.is-playing-game .relationship-button,.pet-app.is-playing-game .relationship-card,.pet-app.is-playing-game .online { display:none; }
 .game-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:4px 2px 16px; }
@@ -399,7 +402,7 @@ body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .c
 @media (max-width:470px) {
   .game-overlay { padding:12px; }
   .game-shell { width:calc(100% - 112px); }
-  .pet-app.is-playing-game[data-layout] .character { right:4px; width:120px; height:auto; opacity:.82; }
+  #petApp.is-playing-game[data-layout] .character { right:4px; width:120px; height:auto; opacity:.82; }
   .game-difficulties,.game-feedback,.game-exams { grid-template-columns:1fr; }
   /* 狭い窓ではアイコン分の横幅で説明文が1行7文字ほどの細い列になる。アイコンを上へ積む。 */
   .game-rule { flex-direction:column; align-items:flex-start; gap:10px; padding:14px; }

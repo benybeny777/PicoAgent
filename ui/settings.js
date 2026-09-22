@@ -2543,12 +2543,15 @@ function buildCharacterFramingEditor() {
   ]);
   const defaults = { bust: { zoom: 2.05, x: 0, y: 38 }, upper: { zoom: 1.55, x: 0, y: 18 }, full: { zoom: 1, x: 0, y: 0 } };
   const current = () => characterFraming?.[characterSelect.value]?.[layoutSelect.value];
+  // 本体の独立した scale:1.32 は、transform 内の拡大だけでなく移動量にも掛かる。
+  // 描画とドラッグの逆変換で同じ縮尺を使い、保存済みの座標は変換しない。
+  const previewPositionScale = () => (preview.querySelector("img").clientHeight || 182) / 315 * 1.32;
   const updatePreview = () => {
     const image = preview.querySelector("img");
     // 本体（styles.css の .character-view）と同じ計算で描く。枠は285:315、上端基準で
-    // 「構図倍率 × 画像形式の補正1.32」を掛け、位置は枠の縮尺ぶんだけ縮めて動かす。
-    const frameScale = (image.clientHeight || 182) / 315;
-    image.style.transform = `translate(calc(-50% + ${Number(x.value) * frameScale}px),${Number(y.value) * frameScale}px) scale(${Number(zoom.value) * 1.32})`;
+    // 「構図倍率 × 画像形式の補正1.32」を掛け、位置にも同じ形式補正を反映する。
+    const positionScale = previewPositionScale();
+    image.style.transform = `translate(calc(-50% + ${Number(x.value) * positionScale}px),${Number(y.value) * positionScale}px) scale(${Number(zoom.value) * 1.32})`;
     zoomValue.textContent = `${Number(zoom.value).toFixed(2)}倍`;
     positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
   };
@@ -2595,7 +2598,7 @@ function buildCharacterFramingEditor() {
   preview.addEventListener("pointermove", event => {
     if (!drag || drag.pointerId !== event.pointerId) return;
     // プレビュー上の移動量を本体の座標へ戻す（updatePreview の縮尺の逆数）。画像が指に付いて動く。
-    const toApp = 315 / (preview.querySelector("img")?.clientHeight || 182);
+    const toApp = 1 / previewPositionScale();
     x.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.x + (event.clientX - drag.startX) * toApp))));
     y.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.y + (event.clientY - drag.startY) * toApp))));
     presetSelect.value = "custom";
