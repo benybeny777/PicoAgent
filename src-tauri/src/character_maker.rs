@@ -450,7 +450,19 @@ pub async fn settings_character_maker_run(
     })
     .await
     .map_err(error_text)?
-    .map_err(error_text);
+    .map_err(|error| {
+        // 画面へは要点だけを返すため、生成ツールの出力全文は診断用にログへ残す。
+        if let picoagent_character_maker::pipeline::PipelineError::Sidecar(
+            picoagent_character_maker::sidecar::SidecarError::Failed { stderr, .. },
+        ) = &error
+        {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("キャラ作成の工程が失敗しました: {error}\n--- 出力全文 ---\n{stderr}"),
+            );
+        }
+        error_text(error)
+    });
     if let Ok(mut active) = state.cancellation.lock() {
         *active = None;
     }

@@ -24,13 +24,41 @@ pub enum SidecarError {
     Json(#[from] serde_json::Error),
     #[error("サイドカーを中断しました")]
     Cancelled,
-    #[error("サイドカーが失敗しました ({status}): {stderr}")]
+    /// 画面へは末尾の要点だけを出す。Pythonのトレースバックや生成ツールのログは数百行に
+    /// なり、状態欄へ全文を流すと原因の1行が埋もれる。全文は `stderr` に残す。
+    #[error("サイドカーが失敗しました ({status}): {}", stderr_summary(stderr))]
     Failed {
         status: String,
         /// 終了コード。GPUメモリ不足など、呼び出し元が分類したい失敗を文言ではなく数値で受ける。
         code: Option<i32>,
         stderr: String,
     },
+}
+
+const SUMMARY_LINES: usize = 6;
+const SUMMARY_CHARS: usize = 600;
+
+/// 標準エラー出力の末尾（例外名と原因が出る位置）から空行を除いた数行だけを返す。
+pub fn stderr_summary(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let start = lines.len().saturating_sub(SUMMARY_LINES);
+    let mut summary = lines[start..].join("\n");
+    let total = summary.chars().count();
+    if total > SUMMARY_CHARS {
+        summary = summary.chars().skip(total - SUMMARY_CHARS).collect();
+    }
+    if start > 0 || total > SUMMARY_CHARS {
+        summary.insert_str(0, "…\n");
+    }
+    if summary.is_empty() {
+        "出力なし".into()
+    } else {
+        summary
+    }
 }
 
 pub struct SidecarProcess {
@@ -263,6 +291,42 @@ fn resume_owned_thread(pid: u32) -> std::io::Result<()> {
         Err(std::io::Error::other(
             "起動したサイドカーの初期スレッドが見つかりません",
         ))
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn 失敗表示はトレースバック末尾の要点だけにする() {
+        let mut stderr = String::from("Traceback (most recent call last):\n");
+        for index in 0..200 {
+            stderr.push_str(&format!("  File \"x.py\", line {index}, in f\n\n"));
+        }
+        stderr.push_str("RuntimeError: CUDA out of memory\n");
+        let error = SidecarError::Failed {
+            status: "exit code: 1".into(),
+            code: Some(1),
+            stderr,
+        };
+        let text = error.to_string();
+        assert!(text.ends_with("RuntimeError: CUDA out of memory"), "{text}");
+        assert!(text.contains('…'), "省略した印を付ける: {text}");
+        assert!(text.lines().count() <= SUMMARY_LINES + 2, "{text}");
+    }
+
+    #[test]
+    fn 短い出力と空の出力はそのまま分かる形で出す() {
+        assert_eq!(stderr_summary("失敗しました\n"), "失敗しました");
+        assert_eq!(stderr_summary("\n  \n"), "出力なし");
+    }
+
+    #[test]
+    fn 一行が長すぎても文字数で末尾を残す() {
+        let summary = stderr_summary(&"あ".repeat(5000));
+        assert_eq!(summary.chars().count(), SUMMARY_CHARS + 2);
+        assert!(summary.starts_with("…\n"));
     }
 }
 
