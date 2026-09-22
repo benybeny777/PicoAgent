@@ -4,11 +4,6 @@
   "description": "紺色のボブと星の髪飾りが目印の、冷静で好奇心旺盛な作業相棒。",
   "bodyProportion": "standard",
   "sourceFraming": "native-full",
-  "defaultFraming": {
-    "zoom": 1.0,
-    "x": 0,
-    "y": 0
-  },
   "streamFraming": {
     "zoom": 1.0,
     "x": 0,

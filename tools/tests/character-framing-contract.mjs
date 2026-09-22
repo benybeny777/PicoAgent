@@ -167,3 +167,20 @@ test("キャラを重ねて置く形式では入力と返答の文字・ボタ�
   const tiny = styles.match(/@media \(max-height:280px\) \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.match(tiny, /\[data-layout="bar"\] \.composer textarea \{ padding-right:min\(290px,50%\); \}/);
 });
+
+test("長身の画像キャラは既定構図を全身にしない（胸上の規則）", async () => {
+  // 規則: 低頭身2Dは上半身、長身・実写・Live2Dは胸上が初期構図（README/SPEC）。
+  // あおい・通常頭身むぎが defaultFraming.zoom=1（全身）を持ち、ペット形式で太ももまで映っていた。
+  const { readdirSync, existsSync } = await import("node:fs");
+  const root = new URL("../../characters/", import.meta.url);
+  const offenders = [];
+  for (const id of readdirSync(root)) {
+    const file = new URL(`${id}/character.json`, root);
+    if (!existsSync(file)) continue;
+    const manifest = JSON.parse(readFileSync(file, "utf8"));
+    if (manifest.live2d || manifest.mmd || manifest.bodyProportion === "compact") continue;
+    const zoom = Number(manifest.defaultFraming?.zoom);
+    if (Number.isFinite(zoom) && zoom <= 1) offenders.push(`${id}: zoom ${zoom}`);
+  }
+  assert.deepEqual(offenders, []);
+});

@@ -4,11 +4,6 @@
   "description": "むぎの通常頭身立ち絵をLocalVTuberStudioで生成した独自2.5D作業相棒。",
   "bodyProportion": "standard",
   "sourceFraming": "native-full",
-  "defaultFraming": {
-    "zoom": 1,
-    "x": 0,
-    "y": 0
-  },
   "streamFraming": {
     "zoom": 1,
     "x": 0,
