@@ -50,7 +50,7 @@ const windowResizeHandles = document.querySelectorAll("[data-resize-direction]")
 const bootScreen = document.getElementById("bootScreen");
 const topWindowMenu = document.getElementById("topWindowMenu");
 let busy = false;
-const { errorDetail, logApp, preview, twoStepAction } = window.PicoUI;
+const { errorDetail, errorMessage, logApp, preview, twoStepAction } = window.PicoUI;
 
 // decorations:false の透明ウィンドウにはOSの枠が無いため、各辺と四隅を明示的な
 // リサイズ領域にする。幅だけ・高さだけ・縦横同時のいずれもOS標準操作で変更できる。
@@ -228,7 +228,7 @@ function showToast(msg, kind = "info", options = {}) {
       try { await options.onAction(); }
       catch (error) {
         logApp("error", "通知アクションに失敗しました", errorDetail(error));
-        showToast(`操作できませんでした: ${preview(error?.message || error, 60)}`, "error");
+        showToast(`操作できませんでした: ${preview(errorMessage(error), 60)}`, "error");
       }
       dismiss();
     });
@@ -428,7 +428,7 @@ async function requestAgentCancellation(button) {
     if (cancelReleaseTimer) clearTimeout(cancelReleaseTimer);
     cancelReleaseTimer = null;
     logApp("warn", "中断要求の送信に失敗しました", errorDetail(error));
-    setStatus(`停止を要求できませんでした: ${error?.message || error}`);
+    setStatus(`停止を要求できませんでした: ${errorMessage(error)}`);
     button.disabled = false;
   }
 }
@@ -498,7 +498,7 @@ function renderNoticePanel() {
             pushNotice({
               kind: "schedule",
               title: "スケジュール再実行失敗",
-              body: error?.message || String(error),
+              body: errorMessage(error),
               ok: false,
               at: new Date().toISOString(),
             });
@@ -541,7 +541,7 @@ function renderNoticePanel() {
             setStatus(running ? "ジョブを中止しました" : "ジョブを再試行します");
           } catch (error) {
             // 失敗を黙って飲まない（押したのに何も起きない状態を作らない）。
-            setStatus(`${running ? "中止" : "再試行"}できませんでした: ${error?.message || error}`);
+            setStatus(`${running ? "中止" : "再試行"}できませんでした: ${errorMessage(error)}`);
             action.disabled = false;
           }
         });
@@ -560,7 +560,7 @@ function renderNoticePanel() {
             if (removed) undo.textContent = "取り消し済み";
             else undo.disabled = false;
           } catch (error) {
-            setStatus(`取り消せませんでした: ${error?.message || error}`);
+            setStatus(`取り消せませんでした: ${errorMessage(error)}`);
             undo.disabled = false;
           }
         });
@@ -573,7 +573,7 @@ function renderNoticePanel() {
         event.stopPropagation();
         settings.disabled = true;
         try { await window.picoagent.openSettings(); }
-        catch (error) { setStatus(`設定を開けませんでした: ${error?.message || error}`); }
+        catch (error) { setStatus(`設定を開けませんでした: ${errorMessage(error)}`); }
         finally { settings.disabled = false; }
       });
       actions.append(settings);
@@ -1883,7 +1883,7 @@ async function startMmd(config, generation) {
     canvas.remove();
     if (generation !== characterLoadGeneration) return;
     destroyMmd();
-    throw new Error(`MMDモデルを読み込めません: ${error.message}`);
+    throw new Error(`MMDモデルを読み込めません: ${errorMessage(error)}`);
   } finally {
     if (mmdLoadAbortController === loadAbort) mmdLoadAbortController = null;
   }
@@ -1989,7 +1989,7 @@ async function ensurePixiRuntime() {
   if (!pixiRuntimePromise) {
     pixiRuntimePromise = loadScriptOnce("vendor/pixi/pixi.min.js?v=6.5.10-pinned").catch(error => {
       pixiRuntimePromise = null;
-      throw new Error(`PIXIランタイムを読み込めません（cargo xtask setup pixi を実行してください）: ${error.message}`);
+      throw new Error(`PIXIランタイムを読み込めません（cargo xtask setup pixi を実行してください）: ${errorMessage(error)}`);
     });
   }
   await pixiRuntimePromise;
@@ -2049,7 +2049,7 @@ async function ensureLive2DRuntime(sdk) {
     })().catch(error => {
       live2dRuntimePromise = null; // 取得後の再選択で再試行できるようにする
       live2dRuntimeSdk = "";
-      throw new Error(`Live2D ランタイムを読み込めません（cargo xtask setup live2d を実行してください）: ${error.message}`);
+      throw new Error(`Live2D ランタイムを読み込めません（cargo xtask setup live2d を実行してください）: ${errorMessage(error)}`);
     });
   }
   await live2dRuntimePromise;
@@ -2424,7 +2424,7 @@ async function setBubbleFullscreen(on) {
   refreshBubblePlacement();
   renderHistory();
   try { await window.picoagent.setFullscreen(on); }
-  catch (error) { bubble.classList.toggle("fullscreen", !on); status.textContent = `全画面切替に失敗: ${error}`; }
+  catch (error) { bubble.classList.toggle("fullscreen", !on); status.textContent = `全画面切替に失敗: ${errorMessage(error)}`; }
   refreshBubblePlacement();
   setTimeout(refreshBubblePlacement, 120);
   if (!on) setTimeout(flushPendingNotice, 0);
@@ -3511,7 +3511,7 @@ async function speakReply(text) {
     setVoiceCancelVisible(false);
     if (session === voiceSession) stopVoice();
     logApp("error", "読み上げに失敗しました", errorDetail(error));
-    status.textContent = `読み上げに失敗: ${error.message || error}`;
+    status.textContent = `読み上げに失敗: ${errorMessage(error)}`;
     setTimeout(() => { if (status.textContent.startsWith("読み上げに失敗")) clearTransientStatus(); }, 12000);
   }
 }
@@ -3799,7 +3799,7 @@ relationshipButton?.addEventListener("click", async event => {
       renderRelationship(await window.picoagent.relationshipState());
     } catch (error) {
       logApp("warn", "いっしょの記録を読めませんでした", errorDetail(error));
-      relationshipMoments.textContent = `記録を読み込めませんでした: ${error?.message || error}`;
+      relationshipMoments.textContent = `記録を読み込めませんでした: ${errorMessage(error)}`;
     } finally {
       relationshipButton.disabled = false;
     }
@@ -4215,7 +4215,7 @@ async function finishBubbleResize(event) {
     await ensureWindowFitsBubble(w, h, left, top);
     await window.picoagent.setBubbleLayout(w, h, left, top);
   } catch (error) {
-    status.textContent = `フキダシ位置を保存できませんでした: ${error}`;
+    status.textContent = `フキダシ位置を保存できませんでした: ${errorMessage(error)}`;
   }
 }
 bubbleResize.addEventListener("pointerup", finishBubbleResize);
@@ -4736,7 +4736,7 @@ composer.addEventListener("submit", async event => {
     ++speakingToken;
     cancelStreamSpeech();
     stopVoice();
-    const message = `応答に失敗しました: ${error?.message || error}`;
+    const message = `応答に失敗しました: ${errorMessage(error)}`;
     renderReply(message);
     reply.classList.add("reply-error");
     addRetryButton();
@@ -5849,7 +5849,7 @@ window.picoagent.on("pet:ui", (ui) => {
     live2dSdkOverrides: ui.live2dSdkOverrides || {},
   }).catch(error => {
     logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
-    status.textContent = `キャラクター変更に失敗: ${error.message}`;
+    status.textContent = `キャラクター変更に失敗: ${errorMessage(error)}`;
   });
   applyChatterConfig(ui); // 設定変更を即反映。
   // 自分で書いたクイック操作と、連携スキルのトークン保存による既定ボタンの出し分けを、
@@ -6285,7 +6285,7 @@ async function releaseBootUi() {
       await loadCharacter(requestedCharacterId, info.characterOverrides || {}, loadOptions);
     } catch (error) {
       character.style.visibility = "hidden";
-      startupCharacterError = `選択したキャラを読み込めません: ${error.message}。設定からキャラを確認してください`;
+      startupCharacterError = `選択したキャラを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`;
       throw error;
     }
   };
@@ -6341,7 +6341,7 @@ async function releaseBootUi() {
     }
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
-    setStatus(`キャラクター読込に失敗: ${error.message}`);
+    setStatus(`キャラクター読込に失敗: ${errorMessage(error)}`);
   } finally {
     // キャラクター・履歴・必要なAIと音声が揃ってから通常画面へ戻す。
     if (!status.textContent) setStatus(`${bootCharacterName}を起こしているよ…`);
@@ -6387,7 +6387,7 @@ async function releaseBootUi() {
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   character.style.visibility = "hidden";
-  setStatus(`起動初期化に失敗: ${error?.message || error}`);
+  setStatus(`起動初期化に失敗: ${errorMessage(error)}`);
   releaseBootUi().finally(() => wakeAnimationLoop());
 });
 

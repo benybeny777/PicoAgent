@@ -9,6 +9,16 @@
     catch { return String(error); }
   }
 
+  // 画面へ出す短い理由。Tauri の invoke は失敗を文字列で返すため、`error.message` だけを
+  // 読むと「undefined」と表示される。Error・文字列・{message} のどれでも本文を取り出す。
+  function errorMessage(error) {
+    if (error == null || error === "") return "原因不明のエラー";
+    if (typeof error === "string") return error;
+    if (typeof error.message === "string" && error.message) return error.message;
+    try { return JSON.stringify(error); }
+    catch { return String(error); }
+  }
+
   function logApp(level, message, detail) {
     try {
       window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(error => {
@@ -75,5 +85,5 @@
     return Object.freeze({ request, reset, isArmed: () => armed });
   }
 
-  window.PicoUI = Object.freeze({ errorDetail, logApp, preview, tail, twoStepAction });
+  window.PicoUI = Object.freeze({ errorDetail, errorMessage, logApp, preview, tail, twoStepAction });
 }());

@@ -407,7 +407,7 @@ test("リセット前の通信失敗は新しい会話に書き戻さず通常�
     const history = [];
     const context = vm.createContext({
       requestRevision: 0, conversationRevision: revision, jobState: "running", speakingToken: 0,
-      setThinkingUi() {}, logApp() {}, errorDetail: String, cancelStreamSpeech() {}, stopVoice() {},
+      setThinkingUi() {}, logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error), cancelStreamSpeech() {}, stopVoice() {},
       renderReply: text => replies.push(text), addHistory: (_, text) => history.push(text),
       reply: { classList: { add() {} } }, addRetryButton() {}, status: { textContent: "" }, setAnimation() {}, setTimeout() {},
     });
@@ -477,7 +477,7 @@ test("コードコピーは成功・拒否・非対応を区別し再操作で�
     let calls = 0;
     const context = vm.createContext({
       async copyText() { calls++; if (outcome instanceof Error) throw outcome; return outcome; },
-      logApp() {}, errorDetail: String,
+      logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error),
       setTimeout(callback) { finish = callback; },
     });
     vm.runInContext(between("async function copyCodeBlock(", "function renderAlarmReply("), context);
@@ -501,7 +501,7 @@ test("設定のJSONが不正でも保存失敗後に入力と復元を操作で�
   const context = vm.createContext({
     saveBtn, resetChangesBtn, form, dirtySummary: button(), statusEl: {},
     collect() { throw new Error("ツール引数は正しいJSONを入力してください"); },
-    logApp() {}, errorDetail: String,
+    logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error),
     window: { picoagent: { settings: { save() { saves++; } } } },
   });
   vm.runInContext("let renderingSettings = false; let savedSnapshot = {}; let settingsMutationBusy = false;", context);
@@ -529,7 +529,7 @@ test("モデル一覧の逆順応答と古い失敗は現在の選択を上書�
       modelInput: { value: "初期値" }, modelOptions: { set innerHTML(_) { options.length = 0; }, append(node) { options.push(node.value); } },
       statusEl: {}, data: { active: { providerId: "b" } },
       providerDefaultModel: id => id, el: (_, value) => value,
-      updateDirtyState() {}, logApp() {}, errorDetail: String,
+      updateDirtyState() {}, logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error),
       window: { picoagent: { settings: { listModels() { return new Promise((resolve, reject) => pending.push({ resolve, reject })); } } } },
     });
     vm.runInContext("let modelLoadGeneration = 0; const cliModelSelect = null;", context);
