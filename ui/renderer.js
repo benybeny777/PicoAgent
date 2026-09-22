@@ -52,6 +52,27 @@ const topWindowMenu = document.getElementById("topWindowMenu");
 let busy = false;
 const { errorDetail, errorMessage, logApp, preview, twoStepAction } = window.PicoUI;
 
+// GPU描画（WebGL）の失敗を検出したら、次回起動時に描画キャッシュを消すよう本体へ予約する。
+// 描画キャッシュはふだん残して初回描画を速くし、壊れたシェーダキャッシュで描けない状態だけを
+// 利用者の操作なしで直す。素材不足など GPU と無関係な失敗では消さない。
+const GPU_FAILURE_PATTERN = /webgl|shader|gpu|context ?lost|getcontext|シェーダ/i;
+let gpuCacheResetRequested = false;
+function reportGpuFailure(reason, { force = false } = {}) {
+  const text = errorMessage(reason);
+  if (gpuCacheResetRequested || (!force && !GPU_FAILURE_PATTERN.test(text))) return;
+  gpuCacheResetRequested = true;
+  window.picoagent.requestGpuCacheReset?.(text).catch(error => {
+    gpuCacheResetRequested = false;
+    logApp("warn", "描画キャッシュ削除を予約できませんでした", errorDetail(error));
+  });
+}
+// 描画中にGPUが描画面を失った（ドライバー更新・GPUの再起動・壊れたキャッシュ等）。
+// webglcontextlost は伝播しないため、捕捉段階で全canvas分を受ける。
+document.addEventListener("webglcontextlost", event => {
+  reportGpuFailure("WebGL context lost", { force: true });
+  logApp("warn", "GPU描画の描画面が失われました", event.target?.id || "canvas");
+}, true);
+
 // decorations:false の透明ウィンドウにはOSの枠が無いため、各辺と四隅を明示的な
 // リサイズ領域にする。幅だけ・高さだけ・縦横同時のいずれもOS標準操作で変更できる。
 windowResizeHandles.forEach(handle => {
@@ -1204,6 +1225,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
       // 持つキャラは表示を継続する。制作途中のモデルを variant に登録しておけるようにするため、
       // ここは「失敗」ではなく「PNG 表示で続行」として伝える。
       logApp("error", "Live2D の初期化に失敗しました（PNG 表示で継続）", errorDetail(error));
+      reportGpuFailure(error);
       setStatus("Live2D を読み込めないので PNG 表示で続けるね");
       preloadAnimations();
       await probeRigLayers();
@@ -1219,6 +1241,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
         destroyMeshRig();
         activeMeshRigConfig = null;
         logApp("error", "メッシュリグの初期化に失敗しました（差分絵表示で継続）", errorDetail(error));
+        reportGpuFailure(error);
         setStatus("高品質リグを読み込めないので差分絵表示で続けるね");
       }
     }
@@ -1883,6 +1906,7 @@ async function startMmd(config, generation) {
     canvas.remove();
     if (generation !== characterLoadGeneration) return;
     destroyMmd();
+    reportGpuFailure(error);
     throw new Error(`MMDモデルを読み込めません: ${errorMessage(error)}`);
   } finally {
     if (mmdLoadAbortController === loadAbort) mmdLoadAbortController = null;

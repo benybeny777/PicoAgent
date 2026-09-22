@@ -160,6 +160,7 @@ pub fn run() {
             character_maker::settings_character_maker_preview_data,
             commands::settings_pick_stream_image,
             commands::settings_export_diagnostics,
+            commands::pet_request_gpu_cache_reset,
             commands::pet_user_characters,
             commands::settings_list_models,
             commands::settings_test_tool,

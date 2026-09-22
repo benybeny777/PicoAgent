@@ -11,23 +11,58 @@ fn chromium_cache_targets(root: &Path) -> Vec<PathBuf> {
     vec![
         root.join("component_crx_cache"),
         root.join("extensions_crx_cache"),
-        root.join("GPUPersistentCache"),
-        root.join("GrShaderCache"),
-        root.join("ShaderCache"),
         default.join("AutofillAiModelCache"),
         default.join("Cache"),
         default.join("Code Cache"),
-        default.join("DawnGraphiteCache"),
-        default.join("DawnWebGPUCache"),
-        default.join("GPUCache"),
         default.join("optimization_guide_hint_cache_store"),
         default.join("Service Worker/CacheStorage"),
         default.join("Shared Dictionary/cache"),
     ]
 }
 
-fn webview_cache_targets(profile_root: &Path) -> Vec<PathBuf> {
-    chromium_cache_targets(&profile_root.join("EBWebView"))
+/// GPU・シェーダのキャッシュ。起動のたびに消すと、次の起動でGPUがシェーダを作り直し、
+/// Live2D・MMD・メッシュの初回描画が毎回もたつく（容量は合わせて十数MB）。
+/// ふだんは残し、描画（WebGL）の初期化失敗や描画面の消失が起きたときだけ、画面から予約を受けて消す。
+fn chromium_gpu_cache_targets(root: &Path) -> Vec<PathBuf> {
+    let default = root.join("Default");
+    vec![
+        root.join("GPUPersistentCache"),
+        root.join("GrShaderCache"),
+        root.join("ShaderCache"),
+        default.join("DawnGraphiteCache"),
+        default.join("DawnWebGPUCache"),
+        default.join("GPUCache"),
+    ]
+}
+
+/// 次回起動時にGPU・シェーダのキャッシュを消す予約印（データ領域の直下に置く）。
+const GPU_CACHE_RESET_MARKER: &str = "gpu-cache-reset-requested";
+
+/// GPU描画のエラーから回復するため、次回起動時にGPU・シェーダのキャッシュを消すよう予約する。
+/// 起動中のWebViewが使用中のファイルは消せないため、その場では消さない。
+pub fn request_gpu_cache_reset(app: &AppHandle) -> std::io::Result<()> {
+    let root = crate::log_paths::data_dir(app);
+    crate::store::write_atomic(&root.join(GPU_CACHE_RESET_MARKER), b"requested\n")
+        .map_err(std::io::Error::other)
+}
+
+fn profile_roots(data_root: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![data_root.join("browser-profile")];
+    if let Ok(entries) = std::fs::read_dir(data_root.join("webview")) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                roots.push(entry.path().join("EBWebView"));
+            }
+        }
+    }
+    roots
+}
+
+fn gpu_cache_targets(data_root: &Path) -> Vec<PathBuf> {
+    profile_roots(data_root)
+        .iter()
+        .flat_map(|root| chromium_gpu_cache_targets(root))
+        .collect()
 }
 
 fn cache_targets(data_root: &Path) -> Vec<PathBuf> {
@@ -37,14 +72,8 @@ fn cache_targets(data_root: &Path) -> Vec<PathBuf> {
         cache_root.join("media-model-installer"),
         cache_root.join("component-installer"),
     ];
-    targets.extend(chromium_cache_targets(&data_root.join("browser-profile")));
-    let webview_root = data_root.join("webview");
-    if let Ok(entries) = std::fs::read_dir(&webview_root) {
-        for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                targets.extend(webview_cache_targets(&entry.path()));
-            }
-        }
+    for root in profile_roots(data_root) {
+        targets.extend(chromium_cache_targets(&root));
     }
     targets
 }
@@ -61,7 +90,13 @@ fn remove_target(path: &Path) -> std::io::Result<()> {
 
 pub fn run(app: &AppHandle) {
     let root = crate::log_paths::data_dir(app);
-    for target in cache_targets(&root) {
+    let mut targets = cache_targets(&root);
+    let marker = root.join(GPU_CACHE_RESET_MARKER);
+    let gpu_reset = marker.exists();
+    if gpu_reset {
+        targets.extend(gpu_cache_targets(&root));
+    }
+    for target in targets {
         if let Err(error) = remove_target(&target) {
             crate::log_paths::append_app_log(
                 app,
@@ -71,6 +106,24 @@ pub fn run(app: &AppHandle) {
                 ),
             );
         }
+    }
+    if gpu_reset {
+        // 消し切れなかった分は次回も再試行する（予約印を残す）。
+        if gpu_cache_targets(&root)
+            .iter()
+            .all(|target| !target.exists())
+        {
+            if let Err(error) = remove_target(&marker) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("描画キャッシュ削除の予約を解除できません: {error}"),
+                );
+            }
+        }
+        crate::log_paths::append_app_log(
+            app,
+            "予約どおり描画（GPU・シェーダ）キャッシュを削除しました",
+        );
     }
     let generated = crate::log_paths::data_dir(app).join("generated-media");
     if let Ok(entries) = std::fs::read_dir(&generated) {
@@ -94,6 +147,24 @@ pub fn run(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpuとシェーダのキャッシュは毎回の起動では消さない() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("webview/main")).unwrap();
+        let targets = cache_targets(root);
+        for kept in [
+            "webview/main/EBWebView/GrShaderCache",
+            "webview/main/EBWebView/Default/GPUCache",
+            "browser-profile/ShaderCache",
+        ] {
+            assert!(!targets.contains(&root.join(kept)), "{kept}");
+        }
+        let gpu = gpu_cache_targets(root);
+        assert!(gpu.contains(&root.join("webview/main/EBWebView/GrShaderCache")));
+        assert!(gpu.contains(&root.join("browser-profile/Default/GPUCache")));
+    }
 
     #[test]
     fn 設定と履歴とキャラと導入済みモデルは消さない() {

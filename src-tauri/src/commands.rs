@@ -1780,6 +1780,23 @@ pub fn redacted_log_tail(app: &AppHandle, max_lines: usize, max_bytes: u64) -> O
     Some(crate::diagnostics::redact_secrets(&tail, &secrets))
 }
 
+/// 画面がGPU描画のエラー（WebGL初期化失敗・描画面の消失）を検出したとき、
+/// 次回起動時にGPU・シェーダのキャッシュを消すよう予約する。壊れたシェーダキャッシュで
+/// 描画できない状態が続くのを、利用者の操作なしで直すため。
+#[tauri::command]
+pub fn pet_request_gpu_cache_reset(app: AppHandle, reason: String) -> Result<(), String> {
+    crate::startup_cleanup::request_gpu_cache_reset(&app)
+        .map_err(|error| format!("描画キャッシュ削除を予約できません: {error}"))?;
+    crate::log_paths::append_app_log(
+        &app,
+        &format!(
+            "GPU描画のエラーを検出したため、次回起動時に描画キャッシュを削除します: {}",
+            crate::text::preview(&reason, 200)
+        ),
+    );
+    Ok(())
+}
+
 /// 不具合の連絡へ添える診断情報を1ファイルへ書き出し、保存先を返す。
 ///
 /// 保存先はログと同じ置き場にする（新しい保存先やダイアログの権限を増やさない）。
