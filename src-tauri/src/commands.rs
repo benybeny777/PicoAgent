@@ -2085,8 +2085,9 @@ pub async fn pet_send(
 
 // アイドル時の自発雑談を生成する。雑談スキル(chitchat)が指示文を提供し、ここで
 // 選択中キャラの人格(system)込みでプロバイダへ依頼する。Web検索やツールは使わない。
-// 生成後は「直前の自発雑談」として会話文脈にも短く残す。
+// 生成後はキャラの発話として会話文脈にも残す。
 // ユーザーが「今の雑談は何の話？」と聞いたとき、モデルが直前の独り言を参照できるようにするため。
+// 会話文脈はそのまま履歴として保存・表示されるので、内部向けの見出しは付けない。
 // 現在のローカル日時と時間帯を、雑談が時間に合った内容を言えるよう短く渡す。
 fn current_time_context() -> String {
     use chrono::{Datelike, Local, Timelike};
@@ -2225,10 +2226,7 @@ pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Res
                 }
                 let compacted = {
                     let mut messages = state.messages.lock().unwrap();
-                    messages.push(Message::new(
-                        "assistant",
-                        format!("直前の自発雑談: {reply}"),
-                    ));
+                    messages.push(Message::new("assistant", reply.clone()));
                     compacted_conversation(&messages, conversation_token_budget(&state.config))
                 };
                 *state.messages.lock().unwrap() = compacted.clone();
