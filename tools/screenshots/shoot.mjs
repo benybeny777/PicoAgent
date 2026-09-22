@@ -792,48 +792,77 @@ async function shootCharacterMatrix() {
   return { output, results, warnings };
 }
 
-// セナの自前メッシュリグを実WebViewで動かし、連続パラメータと省モーション退避を検査する。
+// セナの自前メッシュリグを実WebViewで動かし、口・目・視線・頭部の連続パラメータと省モーション時の固定を検査する。
+// セナはLocalVTuberStudio形式（lvs-anime25d-v1）で、口と目は部品の透明度ではなく顔テクスチャの
+// 描き直し（updateLvsAppearance）で変わる。部品名や透明度ではなく、描画結果の画素差で判定する。
 async function validateMeshRig() {
   const output = join(ROOT, "temp", "mesh-rig-qa");
   mkdirSync(output, { recursive: true });
   const page = await openScene({ characterId: "sena", layout: "stream", width: 1920, height: 1080 });
   await page.waitForFunction(() => document.getElementById("character")?.dataset.renderKind === "mesh-rig", null, { timeout: 20000 });
   await page.waitForTimeout(800);
+  // 描画ループを止め、指定した状態だけを1フレーム描いて、顔周辺の画素を取り出す。
   await page.evaluate(() => {
     meshRigController.app.ticker.stop();
-    meshRigController.setMouth(0);
-    meshRigController.setBlink(1, 0);
-    meshRigController.setGaze(0, 0);
-    meshRigController.gazeX = 0;
-    meshRigController.updateAlphas();
-    meshRigController.updateMesh(performance.now(), 1 / 60);
-    meshRigController.app.renderer.render(meshRigController.app.stage);
-  });
-  await page.screenshot({ path: join(output, "neutral.png"), omitBackground: true });
-  await page.evaluate(() => {
-    meshRigController.setMouth(1);
-    meshRigController.setBlink(0, 0);
-    meshRigController.setGaze(1, 0);
-    meshRigController.gazeX = 1;
-    meshRigController.updateAlphas();
-    meshRigController.updateMesh(performance.now(), 1 / 60);
-    meshRigController.app.renderer.render(meshRigController.app.stage);
+    window.__meshRigFrame = (state, region = [0.38, 0.12, 0.24, 0.2]) => {
+      const rig = meshRigController;
+      // まぶた・瞳・頭部は目標値へなめらかに近づくので、同じ状態を数コマ描いて落ち着かせる。
+      // 呼吸・髪の揺れは時刻で動くので、比較用のコマは待機開始時刻へ固定して描く。
+      // 顔テクスチャの描き直しは次の描画で反映されるため、落ち着かせる間も毎コマ描画する。
+      for (let step = 0; step < 180; step += 1) {
+        rig.setMouth(state.mouth);
+        rig.setBlink(state.eyeOpen, 0);
+        rig.setGaze(state.gaze, 0);
+        rig.gazeX = state.gaze;
+        rig.angleX = state.angleX ?? 0;
+        rig.updateLvsAppearance?.();
+        rig.updateAlphas();
+        rig.updateMesh(rig.startedAt ?? 0, 1 / 60);
+        rig.app.renderer.render(rig.app.stage);
+      }
+      const source = document.getElementById("meshRigCanvas");
+      const copy = document.createElement("canvas");
+      copy.width = 256;
+      copy.height = 256;
+      const context = copy.getContext("2d", { willReadFrequently: true });
+      // 既定は顔の周り。視線は瞳だけが動くので、比較は目の周りだけを切り出す。
+      const [left, top, width, height] = region;
+      context.drawImage(source, source.width * left, source.height * top, source.width * width, source.height * height, 0, 0, 256, 256);
+      return Array.from(context.getImageData(0, 0, 256, 256).data);
+    };
+    window.__meshRigDiff = (left, right) => {
+      let changed = 0;
+      for (let index = 0; index < left.length; index += 4) {
+        const delta = Math.abs(left[index] - right[index]) + Math.abs(left[index + 1] - right[index + 1])
+          + Math.abs(left[index + 2] - right[index + 2]) + Math.abs(left[index + 3] - right[index + 3]);
+        if (delta > 24) changed += 1;
+      }
+      return changed;
+    };
   });
   const active = await page.evaluate(() => {
-    const plane = name => meshRigController.planes.get(name)?.plane;
-    const base = meshRigController.planes.get("base");
+    const neutral = __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 0 });
+    const neutralAgain = __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 0 });
+    const talkBlink = __meshRigFrame({ mouth: 1, eyeOpen: 0, gaze: 0 });
+    const eyes = [0.4, 0.17, 0.18, 0.07];
+    const eyesNeutral = __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 0 }, eyes);
+    const eyesNeutralAgain = __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 0 }, eyes);
+    const gazeRight = __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 1 }, eyes);
+    const gazeLeft = __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: -1 }, eyes);
+    __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 0, angleX: 12 });
     let vertexDelta = 0;
-    if (base) {
-      for (let index = 0; index < base.original.length; index += 1) {
-        vertexDelta = Math.max(vertexDelta, Math.abs(base.buffer.data[index] - base.original[index]));
+    for (const entry of meshRigController.planes.values()) {
+      for (let index = 0; index < entry.original.length; index += 1) {
+        vertexDelta = Math.max(vertexDelta, Math.abs(entry.buffer.data[index] - entry.original[index]));
       }
     }
     return {
       renderKind: document.getElementById("character")?.dataset.renderKind || "",
-      mouthAlpha: plane("mouth_open")?.alpha || 0,
-      blinkClosedAlpha: plane("blink_closed")?.alpha || 0,
-      gazeDrawable: Boolean(plane("gaze_right")),
-      gazeRightClosedAlpha: plane("gaze_right")?.alpha || 0,
+      lvs: Boolean(meshRigController.lvsFace),
+      stableNoise: __meshRigDiff(neutral, neutralAgain),
+      talkBlinkDiff: __meshRigDiff(neutral, talkBlink),
+      eyesNoise: __meshRigDiff(eyesNeutral, eyesNeutralAgain),
+      gazeDiff: __meshRigDiff(gazeRight, gazeLeft),
       angleX: meshRigController.angleX,
       vertexDelta,
       canvas: {
@@ -842,28 +871,15 @@ async function validateMeshRig() {
       },
     };
   });
+  await page.evaluate(() => __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 0 }));
+  await page.screenshot({ path: join(output, "neutral.png"), omitBackground: true });
+  await page.evaluate(() => __meshRigFrame({ mouth: 1, eyeOpen: 0, gaze: 0 }));
   await page.screenshot({ path: join(output, "talk-blink.png"), omitBackground: true });
-  await page.evaluate(() => {
-    meshRigController.setBlink(1, 0);
-    meshRigController.updateAlphas();
-    meshRigController.app.renderer.render(meshRigController.app.stage);
-  });
-  const gazeRight = await page.evaluate(() => ({
-    rightAlpha: meshRigController.planes.get("gaze_right")?.plane.alpha || 0,
-    leftAlpha: meshRigController.planes.get("gaze_left")?.plane.alpha || 0,
-  }));
+  await page.evaluate(() => __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: 1 }));
   await page.screenshot({ path: join(output, "gaze-right.png"), omitBackground: true });
-  await page.evaluate(() => {
-    meshRigController.setGaze(-1, 0);
-    meshRigController.gazeX = -1;
-    meshRigController.updateAlphas();
-    meshRigController.app.renderer.render(meshRigController.app.stage);
-  });
-  const gazeLeft = await page.evaluate(() => ({
-    rightAlpha: meshRigController.planes.get("gaze_right")?.plane.alpha || 0,
-    leftAlpha: meshRigController.planes.get("gaze_left")?.plane.alpha || 0,
-  }));
+  await page.evaluate(() => __meshRigFrame({ mouth: 0, eyeOpen: 1, gaze: -1 }));
   await page.screenshot({ path: join(output, "gaze-left.png"), omitBackground: true });
+  await page.evaluate(() => meshRigController.app.ticker.start());
   const successBefore = await page.locator("#meshRigCanvas").boundingBox();
   await page.evaluate(() => setAnimation("success", true));
   await page.waitForTimeout(50);
@@ -885,10 +901,11 @@ async function validateMeshRig() {
   await page.waitForTimeout(100);
   await page.screenshot({ path: join(output, "thinking.png"), omitBackground: true });
   await page.close();
-  if (active.renderKind !== "mesh-rig" || active.mouthAlpha < 0.99 || active.blinkClosedAlpha < 0.99
-      || !active.gazeDrawable || active.gazeRightClosedAlpha > 0.01
-      || gazeRight.rightAlpha < 0.99 || gazeRight.leftAlpha > 0.01
-      || gazeLeft.leftAlpha < 0.99 || gazeLeft.rightAlpha > 0.01
+  // 口の開閉・閉眼は顔の中で千画素前後、視線は目の周りの切り出しで数百画素変わる（256px縮小時）。
+  // 静止状態どうしの差（二次動作などの揺らぎ）の何倍かで判定する。
+  if (active.renderKind !== "mesh-rig"
+      || active.talkBlinkDiff < Math.max(400, active.stableNoise * 10)
+      || active.gazeDiff < Math.max(300, active.eyesNoise * 5)
       || !success.before || !success.after
       || Math.abs(success.before.x - success.after.x) > 2
       || Math.abs(success.before.width - success.after.width) > 0.5
@@ -899,18 +916,22 @@ async function validateMeshRig() {
       || Math.abs(thinking.before.height - thinking.after.height) > 0.5
       || Math.abs(active.angleX) < 0.01 || active.vertexDelta < 0.01
       || active.canvas.height < 1400) {
-    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify({ active, gazeRight, gazeLeft, success, thinking })}`);
+    throw new Error(`メッシュリグの連続描画が不正です: ${JSON.stringify({ active, success, thinking })}`);
   }
+  // 省モーションでもメッシュを出したまま、受動的な待機動作だけを固定する（SPEC）。
   const reduced = await openScene({ characterId: "sena", layout: "pet", width: 900, height: 600, reducedMotion: true });
+  await reduced.waitForFunction(() => document.getElementById("character")?.dataset.renderKind === "mesh-rig", null, { timeout: 20000 });
   const reducedState = await reduced.evaluate(() => ({
     renderKind: document.getElementById("character")?.dataset.renderKind || "",
-    imageVisible: getComputedStyle(document.getElementById("petSprite")).display !== "none",
+    canvasVisible: getComputedStyle(document.getElementById("meshRigCanvas")).display !== "none",
+    reducedMotion: Boolean(meshRigController?.reducedMotion),
   }));
+  await reduced.screenshot({ path: join(output, "reduced-motion.png"), omitBackground: true });
   await reduced.close();
-  if (reducedState.renderKind !== "2d" || !reducedState.imageVisible) {
-    throw new Error(`省モーション時に差分絵へ退避できません: ${JSON.stringify(reducedState)}`);
+  if (reducedState.renderKind !== "mesh-rig" || !reducedState.canvasVisible || !reducedState.reducedMotion) {
+    throw new Error(`省モーション時にメッシュのまま待機動作を固定できません: ${JSON.stringify(reducedState)}`);
   }
-  const metrics = { generatedAt: new Date().toISOString(), active, gazeRight, gazeLeft, success, thinking, reduced: reducedState };
+  const metrics = { generatedAt: new Date().toISOString(), active, success, thinking, reduced: reducedState };
   await writeFile(join(output, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
   return { output, metrics };
 }
