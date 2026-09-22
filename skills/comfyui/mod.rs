@@ -461,7 +461,11 @@ impl Tool for ComfyuiTool {
                 .unwrap_or_default()
                 .as_nanos() as u64
         });
-        let bundled = crate::components::runtime_root().expect("初期化済み管理領域");
+        // 起動処理（`components::init`）より前に呼ばれた場合も、スキルは失敗を文字列で返す。
+        let Some(bundled) = crate::components::runtime_root() else {
+            return "エラー: 追加機能の管理領域がまだ準備できていません。少し待ってから再試行してください。"
+                .into();
+        };
         let lock = bundled
             .parent()
             .unwrap_or(bundled)
