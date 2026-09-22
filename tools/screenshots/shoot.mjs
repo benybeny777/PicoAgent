@@ -2838,16 +2838,14 @@ if (process.env.SHOOT_DEBUG_BOOT) {
 
 if (process.env.SHOOT_DEBUG_ONBOARDING) {
   const page = await openScene({ width: 680, height: 430, onboardingDone: false });
-  await page.waitForSelector("#onboardingComponentStep:not([hidden])");
+  // 初回セットアップはLive2D追加案内の1画面だけ（SPEC）。追加機能の選択画面は廃止済み。
+  await page.waitForSelector("#onboarding:not([hidden]) #onboardingCharacterStep");
   await page.waitForTimeout(300);
   const debugDir = join(ROOT, "temp", "onboarding-check");
   mkdirSync(debugDir, { recursive: true });
-  await page.screenshot({ path: join(debugDir, "components.png"), omitBackground: true });
-  await page.locator('button[data-onboarding-action="skip-components"]').click();
-  await page.waitForSelector("#onboardingCharacterStep:not([hidden])");
   await page.screenshot({ path: join(debugDir, "live2d-guide.png"), omitBackground: true });
   await page.close();
-  console.log(`  初回案内確認: ${join(debugDir, "components.png")} / ${join(debugDir, "live2d-guide.png")}`);
+  console.log(`  初回案内確認: ${join(debugDir, "live2d-guide.png")}`);
   await trimmer.close();
   await browser.close();
   server.close();
