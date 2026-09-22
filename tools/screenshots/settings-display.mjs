@@ -119,7 +119,7 @@ window.__TAURI__ = {
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
     if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
-    if (name === "settings_export_diagnostics") return { path: "C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\log\\diagnostics.2026-09-02.080000.txt" };
+    if (name === "settings_export_diagnostics") return { path: "C:\\\\Users\\\\me\\\\AppData\\\\Roaming\\\\PicoAgent\\\\log\\\\diagnostics.2026-09-02.080000.txt" };
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
       { id: "whisper", label: "音声入力・文字起こし", description: "Whisperを端末内で動かします。", sizeLabel: "約0.5GB", ready: false, available: true, removable: false, installMode: "managed", updateAvailable: false, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
@@ -492,6 +492,20 @@ try {
   const multiAiOverflow = await multiAi.evaluate(node => node.scrollWidth > node.clientWidth);
   if (multiAiOverflow) throw new Error("400px幅で複数AI設定が横にはみ出しています");
   await multiAi.screenshot({ path: join(OUT, "multi-ai-400px.png") });
+  // カード単体が収まっていても、ページ全体が横へはみ出すと見出しや保存ボタンの左端が切れる。
+  const pageOverflow = await page.evaluate(() => {
+    const root = document.scrollingElement;
+    const width = root.clientWidth;
+    const wide = [...document.querySelectorAll("body *")]
+      .map(node => ({ node, rect: node.getBoundingClientRect() }))
+      .filter(({ node, rect }) => rect.width > 0 && (rect.right > width + 1 || rect.left < -1) && getComputedStyle(node).position !== "fixed")
+      .slice(0, 8)
+      .map(({ node, rect }) => `${node.tagName.toLowerCase()}.${[...node.classList].join(".")} ${Math.round(rect.left)}..${Math.round(rect.right)}`);
+    return { scrollWidth: root.scrollWidth, clientWidth: width, scrollLeft: root.scrollLeft, wide };
+  });
+  if (pageOverflow.scrollWidth > pageOverflow.clientWidth + 1 || pageOverflow.scrollLeft > 0) {
+    throw new Error(`400px幅で設定画面が横にはみ出しています ${JSON.stringify(pageOverflow)}`);
+  }
   await page.setViewportSize({ width: 960, height: 760 });
   if (await page.getByRole("button", { name: "一覧を再読み込み", exact: true }).count() !== 1) throw new Error("モデル一覧の再読込操作が更新操作と区別できません");
   await page.locator(".model-delete").click();

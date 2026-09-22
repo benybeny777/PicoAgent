@@ -184,3 +184,18 @@ test("長身の画像キャラは既定構図を全身にしない（胸上の�
   }
   assert.deepEqual(offenders, []);
 });
+
+test("ゲーム中のキャラは胸上の枠で切り取り、拡大を打ち消さない", () => {
+  // 以前は拡大を scale(1) で打ち消し、縦長の枠から全身画像をはみ出させていたため、
+  // 仕様の「横切れのないバストアップ」が全身表示になっていた。
+  const box = styles.match(/\.pet-app\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
+  assert.match(box, /overflow:hidden;/);
+  assert.match(box, /aspect-ratio:430 \/ 540;/);
+  const view = styles.match(/body \.pet-app\.is-playing-game\[data-layout\] \.character \.character-view \{([^}]*)\}/)?.[1] || "";
+  assert.match(view, /scale\(var\(--char-zoom,1\.55\)\)!important/);
+  assert.doesNotMatch(view, /height:139%/);
+  // 下の通常画面のボタンや返答がゲームの見出しの後ろへ透けないよう、背景は不透明にする。
+  const overlay = styles.match(/\.game-overlay \{([^}]*)\}/)?.[1] || "";
+  assert.doesNotMatch(overlay, /rgba\([^)]*,\s*\.\d+\)/);
+  assert.match(styles, /\.pet-app\.is-playing-game \.online \{ display:none; \}|\.pet-app\.is-playing-game \.online \{/ );
+});

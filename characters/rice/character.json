@@ -56,7 +56,7 @@
     "offsetY": 350,
     "iconFraming": {
       "scale": 6,
-      "offsetX": -350,
+      "offsetX": -250,
       "offsetY": 650
     },
     "lipSync": false

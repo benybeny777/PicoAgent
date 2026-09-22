@@ -258,17 +258,26 @@ html[data-theme="dark"] .top-window-menu > button:hover,
 html[data-theme="dark"] .top-window-menu > button:focus-visible { background:rgba(255,255,255,.1); }
 
 /* ── AIものまねゲーム ──────────────────────────────────────────────── */
-.game-overlay { position:fixed; z-index:210; inset:32px 0 0; padding:18px; overflow:auto; background:linear-gradient(145deg,rgba(37,29,49,.97),rgba(75,44,70,.97)); color:#fff; }
+.game-overlay { position:fixed; z-index:210; inset:32px 0 0; padding:18px; overflow:auto; background:linear-gradient(145deg,rgb(37,29,49),rgb(75,44,70)); color:#fff; }
 .game-overlay[hidden] { display:none; }
 /* 右側のキャラ（幅 clamp(210px,32vw,340px)・右余白 clamp(36px,7vw,90px)）と重ねない。
    以前は右余白を差し引いておらず、1000px幅で採点欄の右端36pxがキャラの下へ隠れていた。
    `.game-overlay` の左右余白18pxぶんが、そのまま採点欄とキャラの隙間になる。 */
 .game-shell { width:min(720px,calc(100% - clamp(210px,32vw,340px) - clamp(36px,7vw,90px))); min-height:100%; margin:0 auto 0 0; display:flex; flex-direction:column; }
-.pet-app.is-playing-game[data-layout] .character { z-index:215; right:clamp(36px,7vw,90px); left:auto; top:36px; bottom:auto; width:clamp(210px,32vw,340px); height:72%; overflow:visible; pointer-events:none; }
-body .pet-app.is-playing-game[data-layout] .character .character-view { position:absolute!important; inset:0!important; width:100%!important; height:139%!important; scale:1!important; transform:translate(0,0) scale(1)!important; }
-body .pet-app.is-playing-game[data-layout] .character[data-render-kind="live2d"] .character-view > #live2dCanvas { top:0; bottom:auto; width:100%!important; height:auto!important; transform:translateX(-50%); }
+/* ゲーム中も通常画面と同じ構図（低頭身2Dは上半身、長身・Live2Dは胸上）を当てる。どの表示形式から
+   開いてもペット形式の枠（430:540）と同じ比率・同じ拡大で描き、画面の下端へ揃えて枠の外は切る。
+   以前は拡大を scale(1) で打ち消し、縦長の枠へ全身画像をはみ出させていたため、仕様の
+   「横切れのないバストアップ」が全身表示になっていた。画像キャラはペット形式の1.32倍を0.9倍
+   （1.188）へ抑え、髪の左右を枠で切らない。Live2Dはモデル側の scale/offset が構図の正本なので縮めない。 */
+.pet-app.is-playing-game[data-layout] .character { z-index:215; right:clamp(36px,7vw,90px); left:auto; top:auto; bottom:0; width:clamp(210px,32vw,340px); height:auto; aspect-ratio:430 / 540; overflow:hidden; pointer-events:none; }
+body .pet-app.is-playing-game[data-layout] .character .character-view { position:absolute!important; inset:0!important; width:100%!important; height:100%!important; scale:1!important; transform:translate(0,var(--char-y,0px)) scale(var(--char-zoom,1.55))!important; transform-origin:50% 0%!important; }
+body .pet-app.is-playing-game[data-layout] .character:is([data-render-kind="2d"],[data-render-kind="mesh-rig"]) .character-view { scale:1.188!important; }
+body .pet-app.is-playing-game[data-layout] .character .character-view > img { inset:0!important; width:100%!important; height:100%!important; object-fit:contain!important; object-position:50% 0%!important; transform:none!important; }
+body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mesh-rig"] .character-view > canvas { top:0; bottom:auto; left:50%; width:auto!important; height:100%!important; transform:translateX(-50%); transform-origin:50% 0%; }
+body .pet-app.is-playing-game[data-layout] .character[data-render-kind="live2d"] .character-view > #live2dCanvas { top:auto; bottom:0; width:100%!important; height:88%!important; max-width:none; object-fit:fill; transform:translateX(-50%); transform-origin:50% 100%; }
 body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .character-view > #mmdCanvas { top:0; bottom:auto; width:100%!important; height:100%!important; transform:translateX(-50%); }
-.pet-app.is-playing-game .relationship-button,.pet-app.is-playing-game .relationship-card { display:none; }
+/* 接続状態の点とハートはキャラ枠の中にあり、ゲームのバストアップでは顔・胸の上へ乗る。 */
+.pet-app.is-playing-game .relationship-button,.pet-app.is-playing-game .relationship-card,.pet-app.is-playing-game .online { display:none; }
 .game-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:4px 2px 16px; }
 .game-header h1 { margin:2px 0 0; font-size:clamp(22px,4vw,34px); line-height:1.15; }
 .game-kicker { color:#ffb1c1; font-size:11px; font-weight:900; letter-spacing:.16em; }
@@ -390,8 +399,11 @@ body .pet-app.is-playing-game[data-layout] .character[data-render-kind="mmd"] .c
 @media (max-width:470px) {
   .game-overlay { padding:12px; }
   .game-shell { width:calc(100% - 112px); }
-  .pet-app.is-playing-game[data-layout] .character { right:4px; width:120px; height:46%; opacity:.82; }
+  .pet-app.is-playing-game[data-layout] .character { right:4px; width:120px; height:auto; opacity:.82; }
   .game-difficulties,.game-feedback,.game-exams { grid-template-columns:1fr; }
+  /* 狭い窓ではアイコン分の横幅で説明文が1行7文字ほどの細い列になる。アイコンを上へ積む。 */
+  .game-rule { flex-direction:column; align-items:flex-start; gap:10px; padding:14px; }
+  .game-rule-icon { flex-basis:auto; width:40px; height:40px; border-radius:12px; }
   .game-ranks { grid-template-columns:repeat(2,1fr); }
   .game-header-actions #gameSound { display:none; }
   .game-total strong { font-size:68px; }
@@ -754,6 +766,11 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
    下へ詰めて、吹き出しに顔が隠れたまま打ち続ける状態にしない。 */
 [data-layout="mascot"] .bubble:has(.composer:not([hidden])) { max-height:52%; }
 [data-layout="mascot"] .bubble:has(.composer:not([hidden])) ~ .character { top:55%; }
+/* 実行中のタスク一覧（約95px）も同じ扱いにする。上限のままだと返答が1行未満へ潰れ、
+   完了直後の返答が半行しか読めなかった。返答には2行ぶんを確保する。 */
+[data-layout="mascot"] .bubble:has(.task-run:not([hidden])) { max-height:52%; }
+[data-layout="mascot"] .bubble:has(.task-run:not([hidden])) ~ .character { top:55%; }
+[data-layout="mascot"] .bubble:has(.task-run:not([hidden])) .reply:not(:empty) { flex-shrink:0; min-height:3.5em; }
 [data-layout="mascot"] .bubble::after { right:auto; left:18px; top:auto; bottom:-13px; width:18px; height:16px; clip-path:polygon(0 0,100% 0,30% 100%); }
 [data-layout="mascot"] .reply { font-size:11.5px; }
 [data-layout="mascot"] .reply-actions { margin:-5px -5px 5px 0; }
@@ -1231,6 +1248,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="widget"] .notice-item { font-size:13px; }
 /* 全身のキャラは頭が入力欄の上の返答まで届く。返答の末尾が頭の下へ潜らないよう右を空ける。 */
 [data-layout="widget"] .reply { max-height:32%; padding-right:100px; font-size:14px; line-height:1.65; }
+/* 実行中のタスク一覧も入力欄の直上に出る。右端の状態・経過時間がキャラの頭に隠れないよう空ける。 */
+[data-layout="widget"] .task-run { margin-right:100px; }
 /* キャラ（右16px・幅112px）は入力欄の右下へ重ねて置く。入力した文字がキャラの下へ
    潜らないよう、その幅だけ右の余白を取る。 */
 [data-layout="widget"] .composer textarea { min-height:82px; padding-right:108px; }

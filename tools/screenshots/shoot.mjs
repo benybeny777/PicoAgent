@@ -398,11 +398,19 @@ async function openScene({
 async function validateAiGames() {
   const output = join(ROOT, "temp", "ai-games-qa");
   mkdirSync(output, { recursive: true });
-  const page = await openScene({ width: 1000, height: 760, layout: "pet", forcePng: true });
+  // 既定は麦のPNG。SHOOT_GAME_CHARACTER でLive2D・長身キャラのゲーム中の構図も目視できる。
+  const gameCharacter = process.env.SHOOT_GAME_CHARACTER;
+  // SHOOT_GAME_SIZE=360x560 のように狭い窓でも同じ判定を行う（既定は1000x760）。
+  const [gameWidth, gameHeight] = (process.env.SHOOT_GAME_SIZE || "1000x760").split("x").map(Number);
+  const page = await openScene(gameCharacter
+    ? { width: gameWidth, height: gameHeight, layout: "pet", characterId: gameCharacter, voice: true }
+    : { width: gameWidth, height: gameHeight, layout: "pet", forcePng: true });
   const result = {};
   try {
     // 遊びは「人間だとバレるな」1本。開いた直後が監査ブリーフィングになる。
-    await page.locator("#gameMenuButton").click();
+    // 幅420px以下では上端の「遊ぶ」は畳まれ、右クリックメニューから開く設計。同じ入口を直接押す。
+    if (gameWidth <= 420) await page.evaluate(() => document.getElementById("gameMenuButton").click());
+    else await page.locator("#gameMenuButton").click();
     await page.waitForSelector("#gameOverlay:not([hidden]) .game-setup");
     result.briefingTitle = await page.locator("#gameTitle").textContent();
     result.examCount = await page.locator(".game-exams li").count();
@@ -442,7 +450,9 @@ async function validateAiGames() {
     result.characterVisible = result.characterStyle.display !== "none"
       && result.characterStyle.visibility !== "hidden"
       && Number(result.characterStyle.opacity) > 0
-      && result.characterStyle.width >= 200 && result.characterStyle.height >= 300;
+      // 幅470px以下は採点欄を優先してキャラ枠を120px幅へ縮める設計。
+      && result.characterStyle.width >= (gameWidth <= 470 ? 100 : 200)
+      && result.characterStyle.height >= (gameWidth <= 470 ? 120 : 300);
     await page.screenshot({ path: join(output, "result.png") });
 
     if (result.examCount !== 12 || result.difficultyCount !== 3
@@ -450,25 +460,41 @@ async function validateAiGames() {
         || result.hpFirst !== "90") {
       throw new Error(`ゲーム画面の内容が不足しています: ${JSON.stringify(result)}`);
     }
-    if (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
-        || result.resultBox.x + result.resultBox.width > 1000
-        || result.resultBox.y + result.resultBox.height > 760) {
+    // 狭い窓では採点結果が縦に収まらずゲーム画面内でスクロールするのが正しい動き。収まりは既定寸法で見る。
+    if (!process.env.SHOOT_GAME_SIZE && (!result.resultBox || result.resultBox.x < 0 || result.resultBox.y < 32
+        || result.resultBox.x + result.resultBox.width > gameWidth
+        || result.resultBox.y + result.resultBox.height > gameHeight)) {
       throw new Error(`採点結果が画面内に収まりません: ${JSON.stringify(result)}`);
     }
     if (!result.characterVisible || !result.characterBox
         || result.characterBox.x < result.resultBox.x + result.resultBox.width) {
       throw new Error(`ゲーム中のキャラクターが採点欄の右側に表示されません: ${JSON.stringify(result)}`);
     }
-    if (!result.characterViewBox || result.characterViewBox.x < result.characterBox.x
-        || result.characterViewBox.x + result.characterViewBox.width > 1000) {
+    // キャラ枠は overflow:hidden で、見えるのは枠の中だけ。描画面（拡大後）の外形ではなく枠で測る。
+    // 以前は描画面の高さが枠の1.3倍あれば「バストアップ」とみなしていたが、下端基準の全身画像が
+    // 枠からはみ出して全身のまま見えていても合格していた。胸上の枠比（ペット形式と同じ430:540）と
+    // 上端基準の拡大、枠による切り取りを確かめる。
+    result.characterClip = await page.locator("#character").evaluate(element => {
+      const style = getComputedStyle(element);
+      const view = getComputedStyle(document.getElementById("characterView"));
+      return { overflow: style.overflow, aspect: style.aspectRatio, origin: view.transformOrigin };
+    });
+    if (!result.characterBox || result.characterBox.x + result.characterBox.width > gameWidth + 1
+        || result.characterBox.y + result.characterBox.height > gameHeight + 1) {
       throw new Error(`ゲーム中のキャラクターが画面の横で切れています: ${JSON.stringify(result)}`);
     }
-    if (result.characterViewBox.height < result.characterBox.height * 1.3) {
+    const boxRatio = result.characterBox.width / result.characterBox.height;
+    if (result.characterClip.overflow !== "hidden" || Math.abs(boxRatio - 430 / 540) > 0.02
+        || !result.characterClip.origin.endsWith(" 0px")
+        // Live2D・MMDはモデル側の scale/offset が胸上の正本で、画面側の拡大は1倍のまま。
+        || (!["live2d", "mmd"].includes(result.renderKind)
+          && result.characterViewBox.height < result.characterBox.height * 1.3)) {
       throw new Error(`ゲーム中のキャラクターがバストアップになっていません: ${JSON.stringify(result)}`);
     }
 
     result.renderKinds = {};
-    for (const kind of ["live2d", "mmd"]) {
+    // 模擬canvasの判定は、画面側の拡大が1倍に近い既定キャラ（麦のPNG）で行う。
+    for (const kind of gameCharacter || process.env.SHOOT_GAME_SIZE ? [] : ["live2d", "mmd"]) {
       const geometry = await page.evaluate(renderKind => {
         const character = document.getElementById("character");
         const view = document.getElementById("characterView");
@@ -493,11 +519,13 @@ async function validateAiGames() {
           character: { x: characterRect.x, y: characterRect.y, width: characterRect.width, height: characterRect.height },
           canvas: { x: canvasRect.x, y: canvasRect.y, width: canvasRect.width, height: canvasRect.height },
           visibleHeight: Math.max(0, Math.min(characterRect.bottom, canvasRect.bottom) - Math.max(characterRect.top, canvasRect.top)),
+          visibleWidth: Math.max(0, Math.min(characterRect.right, canvasRect.right) - Math.max(characterRect.left, canvasRect.left)),
         };
       }, kind);
       result.renderKinds[kind] = geometry;
-      if (geometry.canvas.x < geometry.character.x - 1
-          || geometry.canvas.x + geometry.canvas.width > 1001
+      // 枠の外は切り取られるため、拡大後の描画面ではなく枠の中に見える範囲で測る。
+      if (geometry.character.x + geometry.character.width > gameWidth + 1
+          || geometry.visibleWidth < geometry.character.width * 0.95
           || geometry.visibleHeight < 300) {
         throw new Error(`${kind}のゲーム用キャラクター枠が画面内へ収まりません: ${JSON.stringify(result)}`);
       }
