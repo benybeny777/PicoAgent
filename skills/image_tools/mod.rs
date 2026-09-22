@@ -14,6 +14,7 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 use crate::permissions::SafePath;
+use crate::text;
 
 pub struct ImageToolsTool;
 
@@ -152,7 +153,7 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
                 .code()
                 .map(|code| code.to_string())
                 .unwrap_or_else(|| "シグナル終了".to_string()),
-            String::from_utf8_lossy(&result.stderr)
+            text::command_output(&result.stderr)
         );
     }
     format!(
@@ -191,7 +192,7 @@ async fn run_info(cfg: &Config, args: &Value, timeout: u64) -> String {
     if !result.status.success() {
         return format!(
             "エラー: 画像情報の取得に失敗しました:\n{}",
-            String::from_utf8_lossy(&result.stderr)
+            text::command_output(&result.stderr)
         );
     }
     let text = String::from_utf8_lossy(&result.stdout);
