@@ -23,6 +23,23 @@ test("狭い画面で上端メニューを畳む規則が「表示」ボタン�
   assert.doesNotMatch(styles, /data-settings-tab="display"/);
 });
 
+test("上端メニューの項目を指すCSS規則はすべて実在するボタンに当たる", () => {
+  // ボタンを属性からIDへ付け替えると、畳む規則だけが空振りして残る。「キャラ選択」は
+  // キャラ名を表示するため、名前の長いキャラ（ひより）の最小寸法でだけ閉じるボタンを押し出していた。
+  const nav = index.match(/<nav id="topWindowMenu"[\s\S]*?<\/nav>/)?.[0];
+  assert.ok(nav, "上端メニューのマークアップが見つかりません");
+  const selectors = [...styles.matchAll(/\.top-window-menu > (#[\w-]+|button\[[^\]]+\]|\.[\w-]+)/g)].map(match => match[1]);
+  assert.ok(selectors.length > 0);
+  const missing = [...new Set(selectors)].filter(selector => {
+    if (selector.startsWith("#")) return !nav.includes(`id="${selector.slice(1)}"`);
+    if (selector.startsWith(".")) return !new RegExp(`class="[^"]*\\b${selector.slice(1)}\\b`).test(nav);
+    const [, name, value] = selector.match(/button\[([\w-]+)(?:="([^"]*)")?\]/) || [];
+    return !nav.includes(value === undefined ? name : `${name}="${value}"`);
+  });
+  assert.deepEqual(missing, [], "上端メニューに無い要素を指す規則");
+  assert.match(styles, /\.top-window-menu > #characterMenuButton \{ max-width:9em; overflow:hidden; text-overflow:ellipsis; \}/);
+});
+
 test("「表示」ボタンは設定タブではなく画面レイアウトの一覧を開く", () => {
   assert.match(index, /<button id="layoutMenuButton"[^>]*aria-haspopup="menu"[^>]*>表示<\/button>/);
   assert.doesNotMatch(index, /data-settings-tab="display"/);
