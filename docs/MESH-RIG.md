@@ -8,6 +8,12 @@ PIXIの独立取得、半目・閉眼・開口・左右視線・感情の共通�
 
 LocalVTuberStudioの現行`lvs-anime25d-v1` schema 3は変換せず直接読む。これはLive2D対応を置き換えず、同じキャラクター選択・音声・描画枠へ並行して載る独自2.5D形式である。Cubism SDK・`.moc3`・Editorは不要で、PicoAgent既存のPIXI 6.5.10描画層を使う。旧PoCの`anime25d-v1` version 2も互換用に残す。
 
+## 開口原画の口パク
+
+開いた口を描いた原画には`character.json`の`meshRig.mouthMode: "source-open"`を指定する。LVSの`mouth_closed`素材に含まれる実測`feature_box`の原画口を局所変形し、開口0で細い閉口、1で原画相当の開口へ連続させる。母音で幅を、表情で口角を変え、肌パッチで元位置の口を消してから描く。元絵にない歯・舌・暗い空洞は追加しない。SDむぎで採用しているが、キャラIDによる分岐は持たない。
+
+未指定は従来の上下唇分割方式。原画が閉口のパックへ`source-open`を自動推定で適用しない。PNGとLVSリグを再生成せず、パックの指定と描画器を同期する。本体と比較プレビューは同じ指定値を渡す。
+
 ## LocalVTuberStudioの独自2.5D形式
 
 正規入力はLocalVTuberStudioが出力した`schema_version: 3`、`profile: "lvs-anime25d-v1"`の`rig2d/rig.json`と`rig2d/parts/*.png`である。PicoAgent側で中間リグへ変換せず、`scene_graph`、実測した`eye_aperture`、`lip_seam`、`texture_box`を直接検証・描画する。PSDを実行時に解析せず、生成時に原寸で切り詰めたPNGパーツだけを読む。

@@ -50,6 +50,7 @@
     }
   ],
   "meshRig": {
-    "rig": "rig2d/rig.json"
+    "rig": "rig2d/rig.json",
+    "mouthMode": "source-open"
   }
 }

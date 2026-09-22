@@ -1832,6 +1832,7 @@ async function prepareMeshRig(cfg) {
     rigUrl: `${characterRoot}/${rigPath}`,
     rootUrl: `${characterRoot}/${rigRoot}`,
     assetVersion: cfg.assetVersion || characterAssetVersion,
+    mouthMode: cfg.mouthMode,
     width: LIVE2D_RENDER_WIDTH,
     height: LIVE2D_RENDER_HEIGHT,
   });
