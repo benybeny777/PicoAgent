@@ -1158,7 +1158,17 @@ async function validateInteractionMatrix() {
           // 状態変更直後の単発wakeは許可し、空ループが1秒以内に予約0へ収束することを見る。
           await page.waitForFunction(() => animationLoop?.pending() !== true, null, { timeout: 1000 });
         }
-        const loopPending = await page.evaluate(() => animationLoop?.pending() === true);
+        // 1回の読み取りでは、口パクの開始・終了などで起きた単発wake（次フレームで自ら止まる）と
+        // 回り続ける空ループを区別できず、音声付きのひよりで形式を問わず散発的に落ちていた。
+        // 300msの標本で、大半の時点で予約が残っているときだけ「回り続けている」とみなす。
+        const loopPending = await page.evaluate(async () => {
+          let pendingSamples = 0;
+          for (let index = 0; index < 10; index += 1) {
+            if (animationLoop?.pending() === true) pendingSamples += 1;
+            await new Promise(resolve => setTimeout(resolve, 30));
+          }
+          return pendingSamples >= 8;
+        });
         if (loopPending !== loopExpected) {
           throw new Error(`${target.id}/${layout}: アニメーションループの休止状態が不正です ${JSON.stringify({ loopPending, loopExpected })}`);
         }
