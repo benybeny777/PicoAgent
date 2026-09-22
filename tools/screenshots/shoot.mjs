@@ -1263,6 +1263,23 @@ async function validateInteractionMatrix() {
         }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
+        // 窓を縮めても、キャラが送信・音声・連続ボタンを覆わないこと。キャラはドラッグを
+        // 受け付けるため、重なったボタンは押せない。作業形式で通知ペインを畳んだとき、
+        // その下にいた300x380のキャラが中央の入力欄とボタンへ重なっていた。
+        const coveredButtons = await page.evaluate(() => {
+          const character = document.getElementById("character");
+          if (!character || getComputedStyle(character).display === "none") return [];
+          const box = character.getBoundingClientRect();
+          return ["voiceLoopButton", "micButton", "sendButton"].filter(id => {
+            const button = document.getElementById(id);
+            if (!button || getComputedStyle(button).display === "none") return false;
+            const rect = button.getBoundingClientRect();
+            return rect.width > 0 && rect.left < box.right && rect.right > box.left && rect.top < box.bottom && rect.bottom > box.top;
+          });
+        });
+        if (coveredButtons.length) {
+          throw new Error(`${target.id}/${layout}: キャラが入力操作を覆っています ${JSON.stringify(coveredButtons)}`);
+        }
         // 操作部品が窓内にあっても、キャラの頭がフキダシの下に潜っていれば不合格にする。
         // 固定寸法のLive2D canvasが縮んだキャラ枠から上へはみ出し、顔が隠れたのを見逃した。
         if (layout === "mascot") {
