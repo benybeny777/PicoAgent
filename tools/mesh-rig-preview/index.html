@@ -237,6 +237,7 @@
         rigUrl: `${packRoot}/${manifest.meshRig.rig}`,
         rootUrl: `${packRoot}/${rigRoot}`,
         assetVersion: manifest.meshRig.assetVersion || manifest.assetVersion,
+        mouthMode: manifest.meshRig.mouthMode,
         width: 540,
         height: 760,
         contentBox: query.get("view") === "full" ? [0, 0, rigWidth, rigHeight] : undefined,

@@ -308,6 +308,56 @@
     }
   }
 
+  // 開いた口が原画に含まれる素材では、口内を生成せず原画の口だけを縮めて閉じる。
+  // 顔全体・素材余白は変形しない。最大開口・中立口形では元の座標へ正確に戻す。
+  function sourceOpenMouthGeometry(layer, opening, form, curvature = 0) {
+    const feature = layer?.feature_box;
+    const box = layer?.texture_box;
+    if (!Array.isArray(feature) || feature.length !== 4 || !feature.every(Number.isFinite)
+      || !Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite)
+      || feature[2] <= feature[0] || feature[3] <= feature[1]
+      || feature[0] < box[0] || feature[1] < box[1] || feature[2] > box[2] || feature[3] > box[3]) {
+      throw new Error("原画開口モードの口領域が不正です");
+    }
+    const [left, top, right, bottom] = feature;
+    const width = right - left, height = bottom - top;
+    const open = clamp(opening, 0, 1), shape = clamp(form, -1, 1), curve = clamp(curvature, -2, 2);
+    const centerX = (left + right) / 2, centerY = (top + bottom) / 2;
+    const heightScale = 0.04 + open * 0.96;
+    const targetCenterY = centerY - height * 0.12 * (1 - open);
+    const widthScale = 1 + shape * 0.08;
+    const source = [], target = [];
+    for (let index = 0; index <= 16; index += 1) {
+      const ratio = index / 16, x = left + width * ratio;
+      const bend = -curve * height * 0.07 * (2 * ratio - 1) ** 2 * (0.3 + 0.7 * open);
+      const targetX = centerX + (x - centerX) * widthScale;
+      source.push([[x, top], [x, bottom]]);
+      target.push([
+        [targetX, targetCenterY + (top - centerY) * heightScale + bend],
+        [targetX, targetCenterY + (bottom - centerY) * heightScale + bend],
+      ]);
+    }
+    return { source, target, box, feature, rectangular: curve === 0 };
+  }
+
+  function drawSourceOpenMouth(ctx, image, layer, opening, form, curvature = 0) {
+    const mesh = sourceOpenMouthGeometry(layer, opening, form, curvature);
+    if (mesh.rectangular) {
+      const [left, top, right, bottom] = mesh.feature;
+      const first = mesh.target[0][0], last = mesh.target.at(-1)[1];
+      // 通常の発話は平行な矩形なので一度で描く。三角形クリップの継ぎ目を作らない。
+      ctx.drawImage(image, left - mesh.box[0], top - mesh.box[1], right - left, bottom - top,
+        first[0], first[1], last[0] - first[0], last[1] - first[1]);
+      return;
+    }
+    for (let index = 0; index < mesh.source.length - 1; index += 1) {
+      const a = mesh.source[index], b = mesh.source[index + 1];
+      const ta = mesh.target[index], tb = mesh.target[index + 1];
+      texturedTriangle(ctx, image, [a[0], b[0], b[1]], [ta[0], tb[0], tb[1]], mesh.box);
+      texturedTriangle(ctx, image, [a[0], b[1], a[1]], [ta[0], tb[1], ta[1]], mesh.box);
+    }
+  }
+
   function cheekLayout(anchors) {
     const left = anchors?.eyeL, right = anchors?.eyeR, mouth = anchors?.mouth;
     if (!left || !right || !mouth) return null;
@@ -718,7 +768,7 @@
       ctx.drawImage(images.get("scene_face"), box[0], box[1]);
       drawBlink(ctx, images, this.rig.sourceRig, "left", eyeL, this.gazeX, this.gazeY);
       drawBlink(ctx, images, this.rig.sourceRig, "right", eyeR, this.gazeX, this.gazeY);
-      if (mouthOpen > 0 || mouthForm !== 0 || expression.mouthCurve !== 0) {
+      if (this.rig.mouthMode === "source-open" || mouthOpen > 0 || mouthForm !== 0 || expression.mouthCurve !== 0) {
         // 口素材の余白や三角形の補間が、傾いた顔の目領域へ届かないよう所有を分離する。
         ctx.save();
         ctx.beginPath();
@@ -730,7 +780,15 @@
         ctx.clip("evenodd");
         const mouthBox = this.rig.sourceRig.layers.mouth_open.texture_box;
         ctx.drawImage(images.get("mouth_open"), mouthBox[0], mouthBox[1]);
-        drawTexturedMouth(ctx, images.get("mouth_closed"), this.rig.sourceRig.layers.mouth_closed, mouthOpen, mouthForm, this.rig.sourceRig.layers.mouth_open.line_color, expression.mouthCurve);
+        if (this.rig.mouthMode === "source-open") {
+          // 肌パッチで消した領域内だけへ原画の口を戻す。目・顎・顔輪郭へ広げない。
+          ctx.beginPath();
+          ctx.rect(mouthBox[0], mouthBox[1], mouthBox[2] - mouthBox[0], mouthBox[3] - mouthBox[1]);
+          ctx.clip();
+          drawSourceOpenMouth(ctx, images.get("mouth_closed"), this.rig.sourceRig.layers.mouth_closed, mouthOpen, mouthForm, expression.mouthCurve);
+        } else {
+          drawTexturedMouth(ctx, images.get("mouth_closed"), this.rig.sourceRig.layers.mouth_closed, mouthOpen, mouthForm, this.rig.sourceRig.layers.mouth_open.line_color, expression.mouthCurve);
+        }
         ctx.restore();
       }
       ctx.restore();
@@ -1148,16 +1206,25 @@
     } };
   }
 
-  async function create({ canvas, rigUrl, rootUrl, assetVersion, width, height, contentBox: requestedContentBox }) {
+  async function create({ canvas, rigUrl, rootUrl, assetVersion, width, height, contentBox: requestedContentBox, mouthMode = "split" }) {
+    if (!["split", "source-open"].includes(mouthMode)) throw new Error(`未対応のメッシュ口描画モードです: ${mouthMode}`);
     if (!root.PIXI?.Application || !root.PIXI?.SimplePlane) {
       throw new Error("PIXI 6のメッシュ描画機能がありません");
     }
     const response = await fetch(versioned(rigUrl, assetVersion));
     if (!response.ok) throw new Error(`rig.jsonを取得できません（HTTP ${response.status}）`);
     const incomingRig = await response.json();
+    if (mouthMode === "source-open"
+      && !(incomingRig?.schema_version === 3 && incomingRig?.profile === "lvs-anime25d-v1")) {
+      throw new Error("原画開口モードはLocalVTuberStudio形式の素材が必要です");
+    }
     const lvs = incomingRig?.schema_version === 3 && incomingRig?.profile === "lvs-anime25d-v1"
       ? await normalizeLvsRig(incomingRig, rootUrl, assetVersion) : null;
     const rig = lvs?.rig || incomingRig;
+    if (lvs) {
+      rig.mouthMode = mouthMode;
+      if (mouthMode === "source-open") sourceOpenMouthGeometry(incomingRig.layers.mouth_closed, 0, 0);
+    }
     const legacy = rig?.version === 1 && ["single-sheet-grid-v1", "layered-grid-v2"].includes(rig?.mode);
     const anime25d = rig?.version === 2 && rig?.mode === "anime25d-v1";
     const lvsAnime25d = rig?.version === 3 && rig?.mode === "lvs-anime25d-v1";

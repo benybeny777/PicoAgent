@@ -607,6 +607,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - 表情・口・発話連動の二次動作の正規描画は `ui/mesh-rig.js`。`character.json` の `meshRig.rig` でリグJSONを指定する。同梱2Dキャラ7体は `lvs-anime25d-v1` schema 3 で、LocalVTuberStudio が出力した原寸PNGとシーングラフを変換せず読む。同梱SDむぎは `characters/mugi/rig2d/rig.json`、通常頭身むぎは `characters/mugi-normal-lvs/mesh-rig/rig.json` と各参照PNGを直接使い、キャラ固有の変換コードを持たない。`single-sheet-grid-v1` と `layered-grid-v2` は追加パック互換用に読む。詳細は [メッシュリグ設計](docs/MESH-RIG.md)。
 - 左右別の閉眼、`MouthOpenY × MouthForm`、表情、腕寄せ、髪の被覆補完、全身と頭部の小角度動作を同じ描画器へ渡す。両形式が共通の発話状態を更新し、固定表情の開口は胸の駆動へ混ぜない。腕寄せでは、`scene_residual` に残った可動腕の原位置を腕素材のアルファと解像度比例の余白で除き、輪郭残像を出さない。
 - 笑顔・困り顔・考え顔・照れは口、眉、頬染めで表現し、表情選択だけでは目を閉じない。目の開閉はまばたき・片目操作・睡眠動作だけが担う。
+- 開いた口が描かれたLVS原画は、任意の`meshRig.mouthMode: "source-open"`で原画の口内色・輪郭を使って局所的に開閉する。SDむぎで採用し、人工的な歯・舌・空洞は足さない。実測した口領域だけを変形し、元位置の口を肌パッチで消してから描画する。未指定は従来の上下唇分割方式を維持し、未対応の指定値は読み込みエラーにする。
 - `secondary_motion_version: 1` があれば周波数・減衰比・強さを検証し、最大10ms刻みの減衰ばねで髪全体を頭へ遅延追従させる。
 - 旧リグの任意 `anchors` は、原画SHAを照合した DINO/SAM 解析から生成して `facialLandmarksSource` へ出自を記録する。測定した口以外を開口差分へ含めない。
 - 透明余白ではなく `contentBox` を基準に3%の上端安全余白を付け、原画寸法の違うキャラを切り替えても表示寸法を変えない。
