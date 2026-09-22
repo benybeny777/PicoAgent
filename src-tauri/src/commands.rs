@@ -1391,18 +1391,22 @@ pub fn pet_place_window(position: String, app: AppHandle) -> Result<(), String> 
     .or_else(|| monitors.first())
     .ok_or_else(|| "ディスプレイが見つかりません。".to_string())?;
     let size = window.outer_size().map_err(|error| error.to_string())?;
+    let logical_size =
+        size.to_logical::<f64>(window.scale_factor().map_err(|error| error.to_string())?);
+    let target_size = logical_size.to_physical::<u32>(selected.scale_factor());
     let (x, y) = crate::layout::centered_physical_position(
         selected.position().x,
         selected.position().y,
         selected.size().width,
         selected.size().height,
-        size.width,
-        size.height,
+        target_size.width,
+        target_size.height,
     );
     window
         .set_position(tauri::PhysicalPosition::new(x, y))
         .map_err(|error| error.to_string())?;
     crate::remember_boot_window_center(&app, selected.position().x, selected.position().y);
+    crate::remember_window_position(&app)?;
     Ok(())
 }
 
@@ -3680,6 +3684,7 @@ pub fn restart_app(
     restart_aivis: bool,
 ) -> Result<Value, String> {
     crate::log_paths::append_app_log(&app, "設定反映のため再初期化します。");
+    crate::remember_window_position(&app)?;
 
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
     *state.provider_id.lock().unwrap() = pid.clone();

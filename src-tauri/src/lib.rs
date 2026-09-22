@@ -931,6 +931,41 @@ pub(crate) fn restore_window_position(
     }
 }
 
+/// 通常画面の位置を再初期化前・明示配置後に保存し、終了前でも同じ画面へ戻せるようにする。
+pub(crate) fn remember_window_position(app: &tauri::AppHandle) -> Result<(), String> {
+    if layout::boot_size_active() {
+        return Ok(());
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    if window.is_minimized().map_err(|error| error.to_string())?
+        || window.is_fullscreen().map_err(|error| error.to_string())?
+    {
+        return Ok(());
+    }
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    if position.x <= -30000 && position.y <= -30000 {
+        return Ok(());
+    }
+    save_window_position(&app.state::<AppState>().config, position.x, position.y)
+}
+
+fn save_window_position(config: &config::Config, x: i32, y: i32) -> Result<(), String> {
+    let mut patch = serde_json::Map::new();
+    patch.insert(
+        "PICOAGENT_WINDOW_LEFT_PX".to_string(),
+        serde_json::json!(x.to_string()),
+    );
+    patch.insert(
+        "PICOAGENT_WINDOW_TOP_PX".to_string(),
+        serde_json::json!(y.to_string()),
+    );
+    config
+        .set_all(patch)
+        .map_err(|error| format!("ウィンドウ位置を保存できませんでした: {error}"))
+}
+
 /// 終了時に、生存中のイベントで控えておいたサイズと絶対座標を設定へ保存する。
 /// `RunEvent::Exit` ではウィンドウ座標を取得できないため、キャッシュ値のみを書き出す。
 fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
@@ -943,16 +978,7 @@ fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
         return;
     };
     let state = app_handle.state::<AppState>();
-    let mut patch = serde_json::Map::new();
-    patch.insert(
-        "PICOAGENT_WINDOW_LEFT_PX".to_string(),
-        serde_json::json!(layout.x.to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_WINDOW_TOP_PX".to_string(),
-        serde_json::json!(layout.y.to_string()),
-    );
-    if let Err(error) = state.config.set_all(patch) {
+    if let Err(error) = save_window_position(&state.config, layout.x, layout.y) {
         log_paths::append_app_log(
             app_handle,
             &format!("終了時のウィンドウ位置・サイズ保存に失敗しました: {error}"),
