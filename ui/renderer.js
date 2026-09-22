@@ -3803,13 +3803,14 @@ relationshipButton?.addEventListener("click", async event => {
     } finally {
       relationshipButton.disabled = false;
     }
-    if (!relationshipCard.hidden) document.getElementById("relationshipClose")?.focus();
+    if (!relationshipCard.hidden) document.getElementById("relationshipClose")?.focus({ preventScroll: true });
   }
 });
 document.getElementById("relationshipClose")?.addEventListener("click", () => {
   relationshipCard.hidden = true;
   relationshipButton?.setAttribute("aria-expanded", "false");
-  relationshipButton?.focus();
+  // ハートは丸アイコン枠（overflow:hidden）の端にある。通常のfocusは枠の中身をスクロールさせ、顔がずれる。
+  relationshipButton?.focus({ preventScroll: true });
 });
 
 relationshipMoments?.addEventListener("click", async event => {

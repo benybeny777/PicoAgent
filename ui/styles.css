@@ -736,12 +736,14 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 /* キャラ枠の大きさを変える形式は、立ち絵を枠の中へ絶対配置で収める。
    （既定の display:grid + place-items:end のままだと、子の height:100% が行の
    内容高さに対して解決され、画像が枠を縦へ突き抜ける） */
+/* clip はスクロールできないはみ出し処理。hidden だと枠内のハートへfocusやクリックが来たとき
+   ブラウザが枠の中身をスクロールし、丸アイコンの顔が横へずれたまま戻らなかった。 */
 [data-layout="mascot"] .character,
 [data-layout="chat"] .character,
 [data-layout="bar"] .character,
 [data-layout="stream"] .character,
 [data-layout="workspace"] .character,
-[data-layout="widget"] .character { display:block; overflow:hidden; }
+[data-layout="widget"] .character { display:block; overflow:hidden; overflow:clip; }
 [data-layout="mascot"] .character img,
 [data-layout="chat"] .character img,
 [data-layout="bar"] .character img,
@@ -769,7 +771,11 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 [data-layout="mascot"] .bubble:has(.composer:not([hidden])) ~ .character { top:55%; }
 /* 実行中のタスク一覧（約95px）も同じ扱いにする。上限のままだと返答が1行未満へ潰れ、
    完了直後の返答が半行しか読めなかった。返答には2行ぶんを確保する。 */
-[data-layout="mascot"] .bubble:has(.task-run:not([hidden])) { max-height:52%; }
+[data-layout="mascot"] .bubble:has(.task-run:not([hidden])),
+[data-layout="mascot"] .bubble:has(.notice-panel:not([hidden])) { max-height:52%; }
+/* 通知パネルはフキダシの中に重ねるため、上限32%のままだと見出しだけが残り中身が切れていた。 */
+[data-layout="mascot"] .bubble:has(.notice-panel:not([hidden])) { min-height:min(220px,52%); }
+[data-layout="mascot"] .bubble:has(.notice-panel:not([hidden])) ~ .character { top:55%; }
 [data-layout="mascot"] .bubble:has(.task-run:not([hidden])) ~ .character { top:55%; }
 [data-layout="mascot"] .bubble:has(.task-run:not([hidden])) .reply:not(:empty) { flex-shrink:0; min-height:3.5em; }
 [data-layout="mascot"] .bubble::after { right:auto; left:18px; top:auto; bottom:-13px; width:18px; height:16px; clip-path:polygon(0 0,100% 0,30% 100%); }
@@ -794,7 +800,7 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 [data-layout="chat"] .bubble { padding-top:100px; }
 [data-layout="chat"] .character {
   z-index:5; left:18px; top:16px; right:auto; bottom:auto; width:62px; height:62px;
-  border:1px solid var(--chip-border); border-radius:50%; overflow:hidden;
+  border:1px solid var(--chip-border); border-radius:50%; overflow:hidden; overflow:clip;
   background:radial-gradient(circle at 50% 35%,var(--paper),var(--chip-bg));
   box-shadow:inset 0 1px 0 var(--panel-highlight),0 5px 14px rgba(42,31,46,.16); transform:none;
 }
@@ -809,8 +815,10 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
   width:auto!important; height:100%!important;
   transform:translateX(-50%); transform-origin:50% 50%;
 }
-[data-layout="chat"] .online { right:auto; bottom:auto; left:70px; top:68px; width:9px; height:9px; border-width:2px; }
-[data-layout="chat"] .relationship-button { right:auto; bottom:auto; left:88px; top:35px; width:24px; height:24px; font-size:12px; }
+/* ハートと接続点は丸アイコン（62px・はみ出しを切る）の子。枠の外（left:70px・88px）に置くと
+   切り取られて見えず、押せなかった。枠の内側の下端へ置く。 */
+[data-layout="chat"] .online { right:auto; top:auto; left:6px; bottom:6px; width:9px; height:9px; border-width:2px; }
+[data-layout="chat"] .relationship-button { left:auto; top:auto; right:2px; bottom:2px; width:22px; height:22px; font-size:11px; }
 /* 履歴と入力欄を常設する。全画面にしなくても会話の流れが読める。 */
 [data-layout="chat"] .history-log,
 [data-layout="workspace"] .history-log,
@@ -984,6 +992,14 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   z-index:2; left:8px; right:calc(var(--stream-chat-width) + 16px); top:12px;
   bottom:8px; width:auto; height:auto; transform:none;
 }
+/* 配信の「拡大」は窓の全画面化だけで、ステージとチャット列の配置はそのまま使う。共通の拡大規則が
+   キャラを z-index:7 へ上げると、z-index:auto の配信フキダシの操作UI（3以上）より前に出て
+   「拡大」ボタンを覆い、元へ戻せなくなっていた。共通の履歴検索も配信には置き場がない。 */
+[data-layout="stream"] .bubble.fullscreen ~ .character { z-index:2; }
+/* チャット・バーのキャラはフキダシの中の丸アイコン。拡大中にフキダシ（z-index:8）の下へ入ると消える。 */
+[data-layout="chat"] .bubble.fullscreen ~ .character,
+[data-layout="bar"] .bubble.fullscreen ~ .character { z-index:9; }
+[data-layout="stream"] .bubble.fullscreen .history-tools { display:none; }
 /* WebGLの内部描画寸法は維持し、通常配信時だけキャンバスの表示寸法を --stream-canvas-scale 倍にする。
    視線追従のtransformを持つ立ち絵枠（--char-frame-*）を配置基準にすると上端で切れるため、
    描画レイヤーは左ステージへ直接固定する。 */
@@ -1261,8 +1277,9 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   width:auto!important; height:100%!important;
   object-fit:contain; object-position:50% 100%;
 }
-[data-layout="widget"] .online { right:18px; bottom:238px; }
-[data-layout="widget"] .relationship-button { right:42px; bottom:232px; width:26px; height:26px; }
+/* ハートと接続点はキャラ枠の中に置く。枠の上232pxはフキダシの中で、フキダシの裏に隠れて押せなかった。 */
+[data-layout="widget"] .online { right:auto; left:32px; bottom:6px; }
+[data-layout="widget"] .relationship-button { right:auto; left:2px; bottom:2px; width:26px; height:26px; }
 /* メッシュの正本顔座標で静止アイコンを切り出し、原画上端の余白を除く。 */
 [data-layout="chat"] .character[data-mesh-icon-framing="true"] .character-view > img,
 [data-layout="bar"] .character[data-mesh-icon-framing="true"] .character-view > img {
