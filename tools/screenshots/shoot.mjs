@@ -622,7 +622,7 @@ async function shootCharacterMatrix() {
       if (selectedLayouts && !selectedLayouts.has(layout)) continue;
       const [width, height] = LAYOUT_SIZE_OVERRIDES.get(layout) || defaultSize;
       const started = performance.now();
-      const page = await openScene({ characterId, layout, width, height, forcePng: true });
+      const page = await openScene({ characterId, layout, width, height, forcePng: true, theme: process.env.SHOOT_THEME || undefined });
       try {
         await page.waitForFunction(() => {
           const image = document.getElementById("petSprite");
@@ -746,8 +746,11 @@ async function shootCharacterMatrix() {
           const avatarOk = chat?.avatar?.width === 62 && chat.avatar.height === 62;
           const onlineOk = chat?.online?.width > 0 && chat.online.height > 0
             && chat.online.x >= chat.avatar.x && chat.online.y >= chat.avatar.y;
-          const relationshipOk = chat?.relationship?.width === 24 && chat.relationship.height === 24
-            && chat.relationshipText.trim() === "♡" && chat.relationship.x > chat.avatar.x;
+          // ♡は丸アイコン（はみ出しを切る）の内側に置く。外に出すと切り取られて押せない（#353）。
+          const relationshipOk = chat?.relationship?.width === 22 && chat.relationship.height === 22
+            && chat.relationshipText.trim() === "♡" && chat.relationship.x >= chat.avatar.x
+            && chat.relationship.x + chat.relationship.width <= chat.avatar.x + chat.avatar.width
+            && chat.relationship.y + chat.relationship.height <= chat.avatar.y + chat.avatar.height;
           const bubblesOk = chat?.userBubble && chat.assistantBubble && chat.userBubble !== chat.assistantBubble;
           if (!avatarOk || !onlineOk || !relationshipOk || !bubblesOk) {
             throw new Error(`${characterId}/${layout}: LINE風チャットの配置・配色が不正です ${JSON.stringify(chat)}`);
