@@ -1247,6 +1247,8 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 }
 /* 狭い形式でもメニュー文字を縦折り返しせず、操作群を32pxの帯へ収める。 */
 .top-window-menu > button { flex:0 0 auto; white-space:nowrap; }
+/* キャラ選択はキャラ名を出すため長さが決まらない。長い名前で閉じるボタンを押し出さない。 */
+.top-window-menu > #characterMenuButton { max-width:9em; overflow:hidden; text-overflow:ellipsis; }
 @media (max-width:480px) {
   .top-window-menu-brand { display:none; }
   .top-window-menu > button { padding:0 6px; }
@@ -1383,7 +1385,7 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
    ウィンドウ操作（最小化・最大化・閉じる）と「設定」は最後まで残す。落とした項目は
    キャラクターの右クリックメニューからも開ける。 */
 @media (max-width:420px) {
-  .top-window-menu > button[data-settings-tab="character"] { display:none; }
+  .top-window-menu > #characterMenuButton { display:none; }
   .top-window-menu > #gameMenuButton { display:none; }
 }
 @media (max-width:360px) {
