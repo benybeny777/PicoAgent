@@ -22,6 +22,8 @@ const MAX_CONTEXT_LOAD: usize = 20;
 
 // 2026-08-07以前は短い挨拶の末尾へこの内部ガイドを追記して保存していた。
 // 小型モデルがガイド自体を発話したため、読み込み時に原文へ戻す。
+/// 旧版（#215 以前）が雑談・相談の発話へ付けていた内部ガイド。利用者の吹き出しにそのまま出ていた。
+const LEGACY_CHAT_GUIDANCE: &str = "\n\nこれは雑談や相談です。Web検索は不要です。選択中キャラクター本人として、自然に短めに答えてください。最新情報・事実確認が必要なときだけ、その旨を伝えてください。";
 const LEGACY_GREETING_GUIDANCE: &str = "\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。";
 
 fn data_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
@@ -100,7 +102,10 @@ fn clean_legacy_greeting_guidance(messages: &mut [Message]) -> usize {
         if message.role != "user" {
             continue;
         }
-        let Some(original) = message.content.strip_suffix(LEGACY_GREETING_GUIDANCE) else {
+        let Some(original) = [LEGACY_GREETING_GUIDANCE, LEGACY_CHAT_GUIDANCE]
+            .iter()
+            .find_map(|guidance| message.content.strip_suffix(guidance))
+        else {
             continue;
         };
         message.content = original.to_string();
@@ -376,9 +381,23 @@ pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
 mod tests {
     use super::{
         allow_saving, block_saving, clean_legacy_greeting_guidance, remove_known_prompt_leaks,
-        saving_blocked, strip_legacy_label, LEGACY_GREETING_GUIDANCE,
+        saving_blocked, strip_legacy_label, LEGACY_CHAT_GUIDANCE, LEGACY_GREETING_GUIDANCE,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 旧版の雑談ガイドは利用者の発言から外す() {
+        let mut messages = vec![
+            Message::new("user", format!("かわいいね{LEGACY_CHAT_GUIDANCE}")),
+            Message::new("assistant", format!("ありがと{LEGACY_CHAT_GUIDANCE}")),
+        ];
+        assert_eq!(clean_legacy_greeting_guidance(&mut messages), 1);
+        assert_eq!(messages[0].content, "かわいいね");
+        assert!(
+            messages[1].content.ends_with(LEGACY_CHAT_GUIDANCE),
+            "キャラの発話は書き換えない"
+        );
+    }
 
     #[test]
     fn 旧版の自発雑談の内部見出しは読み込み時に外す() {
