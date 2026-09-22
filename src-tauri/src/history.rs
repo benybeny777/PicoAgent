@@ -236,7 +236,24 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
     // ここまで来たら原本の中身は分かっている（読めた／退避済み）ので保存を再開してよい。
     allow_saving(character_id);
     let start = all.len().saturating_sub(MAX_CONTEXT_LOAD);
-    Ok(all[start..].to_vec())
+    Ok(all[start..]
+        .iter()
+        .cloned()
+        .map(strip_legacy_label)
+        .collect())
+}
+
+/// 旧版が自発雑談へ付けていた内部向けの見出し。履歴として画面にそのまま出ていた。
+const LEGACY_CHATTER_LABEL: &str = "直前の自発雑談: ";
+
+/// 保存済みの旧データから、画面に出すべきでない内部向けの見出しを外す。
+fn strip_legacy_label(mut message: Message) -> Message {
+    if message.role == "assistant" {
+        if let Some(rest) = message.content.strip_prefix(LEGACY_CHATTER_LABEL) {
+            message.content = rest.to_string();
+        }
+    }
+    message
 }
 
 /// 指定キャラクターの会話（system 以外）を末尾 MAX_PERSIST 件だけ保存する。
@@ -359,9 +376,21 @@ pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
 mod tests {
     use super::{
         allow_saving, block_saving, clean_legacy_greeting_guidance, remove_known_prompt_leaks,
-        saving_blocked, LEGACY_GREETING_GUIDANCE,
+        saving_blocked, strip_legacy_label, LEGACY_GREETING_GUIDANCE,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 旧版の自発雑談の内部見出しは読み込み時に外す() {
+        let cleaned =
+            strip_legacy_label(Message::new("assistant", "直前の自発雑談: 今日もがんばろ"));
+        assert_eq!(cleaned.content, "今日もがんばろ");
+        let user = strip_legacy_label(Message::new("user", "直前の自発雑談: 引用"));
+        assert_eq!(
+            user.content, "直前の自発雑談: 引用",
+            "利用者の発言は書き換えない"
+        );
+    }
 
     #[test]
     fn 読めなかった履歴はキャラ単位で保存を止めて復旧で再開する() {

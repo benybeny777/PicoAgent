@@ -221,3 +221,9 @@ test("キャラ枠の中のハートと接続点は枠の内側に置き、枠�
   assert.match(styles, /\[data-layout="stream"\] \.bubble\.fullscreen ~ \.character \{ z-index:2; \}/);
   assert.match(renderer, /relationshipButton\?\.focus\(\{ preventScroll: true \}\)/);
 });
+
+test("配信の拡大中もチャット列の余白を保つ", () => {
+  // 共通の拡大規則（余白0・下12px）が配信の履歴列を上書きし、実機の全画面で
+  // 履歴が列の左端に貼り付き、入力欄との間に背景の抜けた帯が出ていた。
+  assert.match(styles, /\[data-layout="stream"\] \.bubble\.fullscreen \.history-log \{ margin:0; padding:14px; \}/);
+});

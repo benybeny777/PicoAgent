@@ -1000,6 +1000,9 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="chat"] .bubble.fullscreen ~ .character,
 [data-layout="bar"] .bubble.fullscreen ~ .character { z-index:9; }
 [data-layout="stream"] .bubble.fullscreen .history-tools { display:none; }
+/* 共通の拡大規則（余白0・下12px空け）が配信のチャット列を上書きし、実機の全画面で
+   履歴が列の左端に貼り付き、入力欄との間に背景の抜けた帯が出ていた。配信の見た目を保つ。 */
+[data-layout="stream"] .bubble.fullscreen .history-log { margin:0; padding:14px; }
 /* WebGLの内部描画寸法は維持し、通常配信時だけキャンバスの表示寸法を --stream-canvas-scale 倍にする。
    視線追従のtransformを持つ立ち絵枠（--char-frame-*）を配置基準にすると上端で切れるため、
    描画レイヤーは左ステージへ直接固定する。 */
