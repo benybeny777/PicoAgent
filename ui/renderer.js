@@ -3951,7 +3951,10 @@ document.addEventListener("selectionchange", () => {
 document.addEventListener("contextmenu", event => {
   if (event.target instanceof Element && event.target.closest("textarea,a,.reply,.history-log")) return;
   event.preventDefault();
-  window.picoagent.menu();
+  // 失敗はブリッジが app.log へ残す。利用者には右クリックが無反応に見えるので理由も出す。
+  window.picoagent.menu().catch(error => {
+    showToast(`メニューを開けませんでした: ${preview(errorMessage(error), 60)}`, "error");
+  });
 });
 
 copyReplyButton?.addEventListener("click", async event => {
