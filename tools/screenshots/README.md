@@ -64,7 +64,7 @@ node tools/screenshots/shoot.mjs
 | `SHOOT_INTERACTION_MATRIX` | `1` なら麦／ひより×7形式で起動遷移、入力欄、ボタン、縮小後の画面内収まり、描画ループの休止・再開、視線イベントのフレーム合流を `temp/layout-interaction-matrix/` へ検査する。メッシュの思考中は専用tickerの継続とモーション反映を確認し、不要な連番ループは休止を保つ。収まりは既定寸法の78%と、利用者が縮められる下限200x240の2段階で見て、入力欄・送信・音声・状態表示・ウィンドウ操作が**完全に窓の内側にある**ことを条件にする |
 | `SHOOT_LIVE2D_MATRIX` | `1` なら導入済み全Live2Dモデル×7形式のSDK、口パラメータ、canvas表示を `temp/live2d-layout-matrix/` へ検査する |
 | `SHOOT_LIVE2D_IDS` | `SHOOT_LIVE2D_MATRIX=1` と併用し、`hiyori` のようにLive2D検査対象だけを絞る |
-| `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップの追加機能とLive2D取得案内を `temp/onboarding-check/` へ撮影する |
+| `SHOOT_DEBUG_ONBOARDING` | `1` なら初回セットアップ（Live2D追加案内の1画面）を `temp/onboarding-check/` へ撮影する |
 | `SHOOT_TASK_RUN` | `1` なら7形式で送信中の「実行中のタスク」一覧を検査する。ツールの開始・完了イベントを模擬し、行の状態、停止ボタン、窓内への収まり、進捗行と重ならないこと、完了表示と5秒後に閉じることを `temp/task-run-qa/` へ撮影・記録する。`SHOOT_LAYOUT_IDS` で形式を絞れる |
 | `SHOOT_AI_GAMES` | `1` なら「遊ぶ」から監査ブリーフィング（試験12種・3難易度・称号5枠）、出題、回答、AI採点結果（5項目・信用度の減り）まで進め、採点欄とキャラクターが重ならず画面内に収まること、各描画形式でゲーム用のキャラ枠が画面内に収まることを確かめる。続けて信用度が尽きるまで監査を続け、終了画面の称号・合計点、到達した称号と難易度別の記録の保存まで確認し、`temp/ai-games-qa/` へ撮影・記録する。採点は固定応答なので実モデルの採点品質は証明しない |
 | `SHOOT_GAME_CHARACTER` | `SHOOT_AI_GAMES=1` と併用し、`hiyori`・`aoi` のようにゲームを開くキャラを指定する。未指定は麦のPNG。Live2D・長身キャラがゲーム中も胸上（横切れなし）で表示されるかを目視する用。Live2D・MMDの模擬canvas判定は既定キャラのときだけ行う |

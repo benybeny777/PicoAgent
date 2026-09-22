@@ -714,7 +714,8 @@ textarea::placeholder, input::placeholder { color:var(--muted); opacity:.75; }
 .onboarding-card h1 { margin:5px 0 4px; font-size:22px; }
 .onboarding-card p { margin:0 0 15px; color:var(--muted); font-size:12px; }
 .onboarding-choices { display:grid; gap:8px; }
-.onboarding-choices button,.onboarding-link { position:static; display:block; height:auto; padding:11px 13px; border:1px solid var(--field-border); border-radius:12px; background:var(--field-bg); color:var(--ink); text-align:left; text-decoration:none; }
+/* 取得リンク（<a>）と追加・スキップ（<button>）で既定の文字サイズが違い、1件目だけ大きく見えていた。 */
+.onboarding-choices button,.onboarding-link { position:static; display:block; height:auto; padding:11px 13px; border:1px solid var(--field-border); border-radius:12px; background:var(--field-bg); color:var(--ink); text-align:left; text-decoration:none; font-size:13px; font-weight:400; line-height:1.45; }
 .onboarding-choices button:hover,.onboarding-link:hover { border-color:var(--accent); background:var(--chip-bg); }
 .onboarding-choices b,.onboarding-choices span { display:block; }
 .onboarding-choices span { margin-top:2px; color:var(--muted); font-size:10.5px; font-weight:500; }
@@ -1040,11 +1041,13 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
   inset:0 auto auto 50%; width:100%; height:135%;
 }
 /* メッシュ描画へ切り替わってもnative-bust指定を維持する。
-   全身絵向けの260%クロップを適用すると、胸上原画が顔だけになる。 */
+   全身絵向けの260%クロップを適用すると、胸上原画が顔だけになる。
+   高さは原画の可視画素で頭打ちになる（引き伸ばしてぼかさない）。胸上原画は下端が胸で切れて
+   いるため、上端基準のままだと頭打ちの分だけ字幕の上で体が途切れて宙に浮く。下端へ揃える。 */
 .pet-app[data-layout="stream"]:not(.is-booting) .character[data-render-kind="mesh-rig"][data-source-framing="native-bust"] .character-view > canvas {
-  inset:0 auto auto 50%; left:50%; bottom:auto;
+  inset:auto auto 0 50%; left:50%; top:auto; bottom:0;
   width:auto!important; height:min(calc(76vh * var(--stream-mesh-scale,2.6) / 2.6),var(--mesh-source-css-height,9999px))!important;
-  transform:translateX(-50%); transform-origin:50% 0%;
+  transform:translateX(-50%); transform-origin:50% 100%;
 }
 .pet-app[data-layout="stream"]:not(.is-booting) .character-view > canvas {
   position:absolute; left:50%; top:auto; bottom:0;

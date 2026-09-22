@@ -199,3 +199,11 @@ test("ゲーム中のキャラは胸上の枠で切り取り、拡大を打ち�
   assert.doesNotMatch(overlay, /rgba\([^)]*,\s*\.\d+\)/);
   assert.match(styles, /\.pet-app\.is-playing-game \.online \{ display:none; \}|\.pet-app\.is-playing-game \.online \{/ );
 });
+
+test("配信の胸上原画メッシュは下端基準で置き、字幕の上で体を途切れさせない", () => {
+  // 原画の可視画素で高さが頭打ちになると、上端基準では胸で切れた下端が舞台の途中に浮いた。
+  const rule = styles.match(/\.pet-app\[data-layout="stream"\]:not\(\.is-booting\) \.character\[data-render-kind="mesh-rig"\]\[data-source-framing="native-bust"\] \.character-view > canvas \{([^}]*)\}/)?.[1] || "";
+  assert.match(rule, /bottom:0;/);
+  assert.match(rule, /transform-origin:50% 100%;/);
+  assert.match(rule, /var\(--mesh-source-css-height,9999px\)/);
+});
