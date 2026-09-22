@@ -1108,8 +1108,12 @@ button.tab:active {
 }
 
 @media (max-width: 760px) {
+  /* 見出し・検索・すぐ探すを固定したままだと、400px幅では設定の中身に高さの3割しか残らなかった。
+     狭い幅では見出しごとページをスクロールさせ、タブの帯と保存の帯だけを上下へ固定する。 */
+  body { height: auto; min-height: 100vh; }
   header { padding: 14px 16px 12px; }
-  main { display: block; padding: 12px 16px 18px; }
+  main { display: block; flex: 1 0 auto; min-width: 0; overflow: visible; overflow-x: clip; padding: 12px 16px 18px; }
+  footer { position: sticky; bottom: 0; z-index: 5; }
   .tabs {
     top: 0;
     flex-direction: row;

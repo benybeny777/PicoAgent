@@ -51,3 +51,17 @@ test("遅い古い取得結果で最新の選択肢を上書きしない", async
   assert.ok(ctx.cliModelSelect.options.some(option => option.value === "codex:new"));
   assert.ok(!ctx.cliModelSelect.options.some(option => option.value === "codex:old"));
 });
+
+test("狭い設定画面では見出しごとスクロールし、タブと保存の帯だけを固定する", async () => {
+  // 見出し・検索・すぐ探すを固定したままだと、400px幅では設定の中身に高さの3割しか残らなかった。
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../../ui/settings.css", import.meta.url), "utf8");
+  // 760px以下のメディアクエリは複数ある。今回の配置規則のブロックを説明文で探す。
+  const start = css.indexOf("狭い幅では見出しごとページをスクロールさせ");
+  assert.ok(start > 0, "狭幅の配置規則が見つかりません");
+  const narrow = css.slice(start, css.indexOf("\n}", start));
+  assert.match(narrow, /body \{ height: auto; min-height: 100vh; \}/);
+  assert.match(narrow, /main \{ display: block; flex: 1 0 auto; min-width: 0; overflow: visible; overflow-x: clip;/);
+  assert.match(narrow, /footer \{ position: sticky; bottom: 0; z-index: 5; \}/);
+  assert.match(narrow, /\.tabs \{\s*top: 0;/);
+});
