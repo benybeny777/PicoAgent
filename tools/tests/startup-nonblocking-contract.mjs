@@ -142,6 +142,22 @@ test("WebView再読込の起動リセットは完了処理と同じロック内�
   assert.doesNotMatch(restart, /apply_boot\(app\)/);
 });
 
+test("再初期化は通常画面の位置を保存してから起動用の配置へ移る", () => {
+  const start = commands.indexOf("pub fn restart_app(");
+  const restart = commands.slice(start, commands.indexOf("\n}", start));
+  const remember = restart.indexOf("crate::remember_window_position(&app)?");
+  assert.ok(remember >= 0 && remember < restart.indexOf("state.bump_conversation_epoch()"));
+  assert.ok(remember < restart.indexOf("crate::layout::restart_boot(&app)"));
+  const finishStart = layout.indexOf("pub fn finish_boot(");
+  const finish = layout.slice(finishStart, layout.indexOf("\n}", finishStart));
+  assert.ok(finish.indexOf("apply(app, id)?") < finish.indexOf("remember_window_position(app)?"));
+  const saveStart = lib.indexOf("pub(crate) fn remember_window_position(");
+  const save = lib.slice(saveStart, lib.indexOf("\n}", saveStart));
+  for (const guard of ["boot_size_active()", "is_minimized()", "is_fullscreen()", "position.x <= -30000"]) {
+    assert.ok(save.indexOf(guard) >= 0 && save.indexOf(guard) < save.indexOf("save_window_position("));
+  }
+});
+
 test("任意キャラクターのI/O待ちはすべて有界化する", () => {
   assert.match(renderer, /fetchJsonWithTimeout/);
   assert.match(renderer, /new AbortController\(\)/);

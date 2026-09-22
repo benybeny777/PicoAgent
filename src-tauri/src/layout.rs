@@ -322,6 +322,7 @@ pub fn finish_boot(app: &AppHandle, id: &str) -> Result<(), String> {
         }
     }
     crate::clear_boot_window_placement(app);
+    crate::remember_window_position(app)?;
     BOOT_FINISHED.store(true, Ordering::Release);
     Ok(())
 }
