@@ -349,7 +349,7 @@ function unionBounds(boxes) {
 
 // ペット形式の既定寸法。各レイアウト画像はそれぞれの実寸で撮る。
 async function openScene({
-  width = 900, height = 600, theme = "light", history = HISTORY,
+  width = 900, height = 600, theme = process.env.SHOOT_THEME || "light", history = HISTORY,
   reply = REPLY, characterId = "mugi", layout = "pet", live2dSdkOverrides = {}, initDelayMs = 0, voice = false,
   streamBackground = process.env.SHOOT_STREAM_BACKGROUND || "pastel",
   characterFraming = {},
@@ -622,7 +622,7 @@ async function shootCharacterMatrix() {
       if (selectedLayouts && !selectedLayouts.has(layout)) continue;
       const [width, height] = LAYOUT_SIZE_OVERRIDES.get(layout) || defaultSize;
       const started = performance.now();
-      const page = await openScene({ characterId, layout, width, height, forcePng: true, theme: process.env.SHOOT_THEME || undefined });
+      const page = await openScene({ characterId, layout, width, height, forcePng: true });
       try {
         await page.waitForFunction(() => {
           const image = document.getElementById("petSprite");
