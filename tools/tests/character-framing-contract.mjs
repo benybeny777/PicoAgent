@@ -154,3 +154,16 @@ test("マスコットのLive2D canvasは縮んだキャラ枠の高さを超え�
   assert.match(rule, /width:auto!important/);
   assert.doesNotMatch(rule, /height:\d+px!important/);
 });
+
+test("キャラを重ねて置く形式では入力と返答の文字・ボタンの居場所を空ける", () => {
+  // 作業形式は通知ペインを畳むと、その下のキャラが中央の入力欄と送信・音声ボタンを覆った。
+  const narrow = styles.match(/@media \(max-width:1100px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(narrow, /\[data-layout="workspace"\] \.bubble \{ padding-right:230px; \}/);
+  assert.match(narrow, /\[data-layout="workspace"\] \.character \{[^}]*width:200px;/);
+  // ウィジェットはキャラを入力欄の右下へ重ねるため、入力・返答の文字が潜らないよう右を空ける。
+  assert.match(styles, /\[data-layout="widget"\] \.composer textarea \{[^}]*padding-right:108px;/);
+  assert.match(styles, /\[data-layout="widget"\] \.reply \{[^}]*padding-right:100px;/);
+  // 最小付近のバーは回答操作を入力欄の右上へ重ねる。その下へ文字を潜らせない。
+  const tiny = styles.match(/@media \(max-height:280px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(tiny, /\[data-layout="bar"\] \.composer textarea \{ padding-right:min\(290px,50%\); \}/);
+});
