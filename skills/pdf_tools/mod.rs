@@ -9,6 +9,9 @@ use crate::message::Field;
 use crate::permissions::SafePath;
 use crate::text;
 
+/// 出力先なしの本文抽出でモデルへ返す上限。read_file と同じ大きさにそろえる。
+const MAX_EXTRACT_BYTES: usize = 128 * 1024;
+
 pub struct PdfToolsTool;
 
 /// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
@@ -260,7 +263,7 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
                             input.display()
                         )
                     } else {
-                        format!("{} の抽出テキスト:\n{}", input.display(), trimmed)
+                        extracted_text(&input.display().to_string(), trimmed)
                     }
                 }
             }
@@ -269,9 +272,33 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
     }
 }
 
+/// 抽出本文を上限で切り、切ったときは続きの読み方を添える。数百ページのPDFを
+/// そのまま返すと、小型モデルの文脈があふれて応答できなくなる。
+fn extracted_text(input: &str, text: &str) -> String {
+    let kept = text::truncate_bytes(text, MAX_EXTRACT_BYTES);
+    if kept.len() == text.len() {
+        return format!("{input} の抽出テキスト:\n{text}");
+    }
+    format!(
+        "{input} の抽出テキスト（{MAX_EXTRACT_BYTES} バイトで打ち切り。続きは first_page / last_page でページを絞るか、output_path に書き出して read_file で読んでください）:\n{kept}…"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn 長い抽出本文は上限で切って続きの読み方を添える() {
+        let long = "あ".repeat(super::MAX_EXTRACT_BYTES);
+        let out = super::extracted_text("a.pdf", &long);
+        assert!(out.len() < super::MAX_EXTRACT_BYTES + 400, "{}", out.len());
+        assert!(out.contains("first_page"));
+        assert_eq!(
+            super::extracted_text("a.pdf", "短い"),
+            "a.pdf の抽出テキスト:\n短い"
+        );
+    }
 
     fn have(cmd: &str) -> bool {
         std::process::Command::new(cmd)
