@@ -83,3 +83,22 @@ test("履歴の保存失敗と保存停止は会話中も画面へ届く", async
   // 画面側は通知一覧へ積まず、原因ごとに1度だけ知らせる経路へ回す。
   assert.match(renderer, /if \(String\(notice\?\.kind \|\| ""\) === "background_failure"\) \{[\s\S]*?clearBackgroundFailure\(key\); return;[\s\S]*?notifyBackgroundFailure\(key,/);
 });
+
+test("GPU描画の失敗だけで描画キャッシュ削除を予約する", () => {
+  // 描画キャッシュはふだん残す（毎回消すと初回描画がもたつく）。GPU由来の失敗だけで消す。
+  const source = renderer.match(/const GPU_FAILURE_PATTERN = [\s\S]*?\n}\n/)?.[0];
+  assert.ok(source, "reportGpuFailure の正本が見つかりません");
+  const calls = [];
+  const build = Function("window", "errorMessage", "logApp", "errorDetail",
+    `"use strict"; ${source}; return reportGpuFailure;`);
+  const report = build(
+    { picoagent: { requestGpuCacheReset: reason => { calls.push(reason); return Promise.resolve(); } } },
+    error => error?.message || String(error), () => {}, String,
+  );
+  report(new Error("キャラ定義: HTTP 404"));
+  assert.deepEqual(calls, [], "素材不足では消さない");
+  report(new Error("WebGLを初期化できません"));
+  report(new Error("WebGL context lost"));
+  assert.deepEqual(calls, ["WebGLを初期化できません"], "1回の起動で予約は1度だけ");
+  assert.match(renderer, /document\.addEventListener\("webglcontextlost", event => \{\s*reportGpuFailure\("WebGL context lost", \{ force: true \}\);/);
+});

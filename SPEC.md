@@ -593,6 +593,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 設定「キャラ作成（テスト）」は `isolate → decompose → rig2d → complete` を順に実行し、完成検査済みの `lvs-anime25d-v1` schema 3 だけを追加キャラクターへ反映する。完成カードの「動作を確認」は Windows 標準枠の別ウィンドウで原画と `ui/mesh-rig.js` の本番描画を並べ、瞬き・片目・視線・5母音・表情・動作・腕を操作する。表示中の不変世代は Reader lease で保持し、閉じたら解放する。
 
 - **起動時の回収**: 設定、原画、manifest、現行公開世代、反映済みキャラ、導入済みモデルを残し、WebViewキャッシュ、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を消す。未完成キャラの工程はすべて pending へ戻し、原画から作り直す。
+- **描画キャッシュ**: WebView・ブラウザプロファイルのGPU・シェーダキャッシュ（`GPUCache`・`GrShaderCache`・`ShaderCache` 等）は、Live2D・MMD・メッシュの初回描画を速くするため起動時に消さない。画面が WebGL の初期化失敗（エラー文に WebGL／シェーダ／GPU を含むもの）または描画面の消失（`webglcontextlost`）を検出したときだけ `pet_request_gpu_cache_reset` で予約し、次回起動時の `startup_cleanup::run()` が消す。素材不足など GPU と無関係な失敗では消さない。
 - **対応環境**: Windows 10/11 x64 と Apple Silicon Mac（Intel Mac は対象外）。初回導入前に85GB以上の空きを求める（実測配置は約77GB）。Python 3.12 は `bundled/python` の共通1環境だけを使い、ComfyUI とモデルは `bundled/character-maker` へ置いて利用者の既存環境を参照しない。
 - **バックエンド選択**: 取得開始前にGPUの素性（ベンダー・型番・専用VRAM・共有メモリ・ユニファイドメモリ）から1つだけ選ぶ。CUDA対応 NVIDIA は CUDA 版 PyTorch、AMD 公式の Windows 向け ROCm 対応GPUは ROCm 版、Apple Silicon は MPS（Metal）版。対応表にない AMD、Intel GPU、Intel Mac、GPUなしでは生成ランタイムも大容量モデルも取得せず理由を出す。DirectML、ZLUDA、非公式 ROCm ビルドは使わない。CUDA 版と ROCm 版を同じ環境へ同時に入れない。
   - 導入時の GPU 種別・バックエンド・PyTorch 版・CUDA／ROCm 版を `install.json` へ記録し、GPU交換後に不一致のバックエンドを再利用しない。ROCm は import、`torch.cuda.is_available()`、`torch.version.hip`、デバイス名、最小テンソル演算の実検査を通った場合だけ有効にする。モデル重みと workflow は CUDA／ROCm で共有する。
