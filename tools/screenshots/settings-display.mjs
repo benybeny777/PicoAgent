@@ -561,7 +561,11 @@ try {
   if (await addedCharacter.count()) throw new Error("削除した追加キャラが一覧に残っています");
   if (await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').inputValue() !== "mugi") throw new Error("未保存選択の削除後に保存中キャラへ戻りません");
   if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("年下っぽく")) throw new Error("削除後の選択と人格表示が一致しません");
-  if (await page.locator("#dirtySummary").textContent() !== "保存済み") throw new Error("既定人格だけで未保存扱いになっています");
+  const settled = await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み", null, { timeout: 5000 }).then(() => true, () => false);
+  if (!settled) {
+    const detail = await page.evaluate(() => ({ summary: document.getElementById("dirtySummary")?.textContent, title: document.getElementById("dirtySummary")?.title }));
+    throw new Error("既定人格だけで未保存扱いになっています " + JSON.stringify(detail));
+  }
   await page.getByRole("tab", { name: "キャラの音声", exact: true }).click();
   const voiceHeadingBox = await page.getByRole("heading", { name: "キャラの音声設定", exact: true }).boundingBox();
   if (!voiceHeadingBox || voiceHeadingBox.y < 0 || voiceHeadingBox.y > 260) throw new Error("音声タブが先頭から表示されません");
@@ -601,6 +605,17 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
+  // キャラ一覧のアイコンを全件撮る。メッシュ化したキャラが同梱の仮画像に落ちていないかを目視する。
+  await page.setViewportSize({ width: 960, height: 2600 });
+  await page.getByRole("tab", { name: "キャラ選択", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".character-card img.character-icon")].every(img => img.hidden || img.complete));
+  const placeholderIcons = await page.locator(".character-card img.character-icon").evaluateAll(images => images
+    .filter(img => !img.hidden && img.src.includes("_preview-placeholder"))
+    .map(img => img.alt));
+  const cardList = page.locator(".character-card").first().locator("xpath=..");
+  await cardList.screenshot({ path: join(OUT, "character-icons.png") });
+  if (placeholderIcons.length) throw new Error(`キャラ一覧のアイコンが仮画像です: ${placeholderIcons.join(", ")}`);
+  await page.setViewportSize({ width: 960, height: 820 });
   // 全タブを通常幅と400px幅で撮り、横へのはみ出しがないことを確かめる。個別検査のないタブ
   // （安全・許可、使い方、キャラ作成など）も目視できるよう画像を残す。
   const tabsDir = join(OUT, "tabs");
@@ -615,7 +630,15 @@ try {
       const wide = await page.evaluate(() => {
         const width = document.documentElement.clientWidth;
         const nodes = [...document.querySelectorAll(".tab-panel:not([hidden]) *")]
-          .filter(node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.right > width + 1; })
+          .filter(node => {
+            const rect = node.getBoundingClientRect();
+            if (!(rect.width > 0 && rect.right > width + 1)) return false;
+            // 構図プレビューのように、はみ出しを切り取る枠の中なら見た目には出ない。
+            for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+              if (["hidden", "clip", "auto", "scroll"].includes(getComputedStyle(parent).overflowX)) return parent.getBoundingClientRect().right > width + 1;
+            }
+            return true;
+          })
           .slice(0, 3)
           .map(node => `${node.tagName.toLowerCase()}.${[...node.classList].join(".")}`);
         return { page: document.documentElement.scrollWidth > width, nodes };

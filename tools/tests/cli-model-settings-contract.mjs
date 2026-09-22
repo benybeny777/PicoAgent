@@ -65,3 +65,15 @@ test("狭い設定画面では見出しごとスクロールし、タブと保�
   assert.match(narrow, /footer \{ position: sticky; bottom: 0; z-index: 5; \}/);
   assert.match(narrow, /\.tabs \{\s*top: 0;/);
 });
+
+test("キャラ一覧のアイコンは顔を切り出し、構図プレビューは本体と同じ式で描く", async () => {
+  // メッシュ化したキャラは待機アニメーションを持たず、一覧が同梱の仮画像（灰色の人型）になっていた。
+  assert.match(settings, /async function meshFaceIconUrl\(rigUrl, version\)/);
+  assert.match(settings, /if \(\["live2d", "mmd"\]\.includes\(characterRenderKind\(manifest\)\)\) return "";/);
+  assert.match(settings, /characterIconUrl\(character, \{ face: false \}\)/);
+  // 構図プレビューは 285:315 の枠・上端基準・構図倍率×1.32（本体の .character-view と同じ）。
+  assert.match(settings, /scale\(\$\{Number\(zoom\.value\) \* 1\.32\}\)/);
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../../ui/settings.css", import.meta.url), "utf8");
+  assert.match(css, /\.framing-preview img \{[^}]*aspect-ratio:285 \/ 315;[^}]*transform-origin:50% 0%;/);
+});

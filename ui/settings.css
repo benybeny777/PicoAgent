@@ -364,7 +364,8 @@ body.searching .tab-panel {
 .framing-controls > output { align-self:end; padding:9px 10px; color:var(--muted); font-size:12px; text-align:center; }
 .framing-preview { position:relative; height:260px; margin-top:10px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:linear-gradient(145deg,#f9e9f1,#e6f1f3); cursor:grab; touch-action:none; user-select:none; }
 .framing-preview.is-dragging { cursor:grabbing; }
-.framing-preview img { position:absolute; left:25%; top:12%; width:50%; height:70%; object-fit:contain; transform-origin:50% 40%; }
+/* 本体のキャラ枠（285:315・上端基準）と同じ比率で置く。倍率と位置は settings.js が本体と同じ式で掛ける。 */
+.framing-preview img { position:absolute; left:50%; top:12%; height:70%; width:auto; aspect-ratio:285 / 315; object-fit:contain; object-position:50% 0%; transform-origin:50% 0%; }
 .framing-preview strong { position:absolute; top:9px; left:50%; z-index:2; transform:translateX(-50%); padding:5px 9px; border-radius:999px; background:rgba(67,55,70,.78); color:#fff; font-size:11px; white-space:nowrap; pointer-events:none; }
 .framing-preview span { position:absolute; left:10px; right:10px; bottom:10px; padding:8px 12px; border:1px solid #e7b9c8; border-left:5px solid var(--pink); border-radius:9px; background:rgba(255,250,250,.94); color:#684454; font-weight:700; }
 .stream-profile-editor { margin-top:16px; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-soft); }
@@ -731,11 +732,13 @@ body.searching .tab-panel {
   border-radius: 50%;
   background: var(--pink-soft);
 }
+/* 全身の縦長画像を contain で収めると、丸の中で数px大の立ち姿になり誰か分からなかった。
+   メッシュのキャラは顔を切り出した正方形画像、それ以外は上寄りに切り取って頭から肩を丸へ入れる。 */
 .character-icon {
-  width: 58px;
-  height: 58px;
-  object-fit: contain;
-  object-position: center 30%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 6%;
 }
 .character-icon-fallback {
   font-size: 17px;

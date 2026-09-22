@@ -2136,15 +2136,81 @@ async function loadCharacterManifestForSettings(character) {
   return manifest;
 }
 
-async function characterIconUrl(character) {
+// 画像を実際に読み込めたURLだけを返す。存在しない候補を <img> へ渡すと壊れた画像になる。
+function firstLoadableImage(urls) {
+  return urls.reduce((previous, url) => previous.then(found => found || new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => resolve(url);
+    image.onerror = () => resolve("");
+    image.src = url;
+  })), Promise.resolve(""));
+}
+
+// メッシュのリグ定義にある顔の位置で、合成画像（neutral.png）から顔の周りだけを切り出す。
+// 全身画像を丸へ縮めると頭が数pxになり、誰のアイコンか分からなかった。
+async function meshFaceIconUrl(rigUrl, version) {
+  try {
+    const response = await fetch(`${rigUrl}${version}`, { cache: "no-store" });
+    if (!response.ok) return "";
+    const rig = await response.json();
+    const face = rig.layers?.face?.bbox || rig.layers?.scene_face?.texture_box;
+    const neutral = rig.layers?.neutral;
+    if (!Array.isArray(face) || !neutral?.url || !Array.isArray(neutral.texture_box)) return "";
+    const partUrl = `${rigUrl.replace(/[^/]+$/, "")}${String(neutral.url).replace(/^.*\/parts\//, "parts/")}${version}`;
+    const image = await new Promise((resolve, reject) => {
+      const loaded = new Image();
+      loaded.onload = () => resolve(loaded);
+      loaded.onerror = reject;
+      loaded.src = partUrl;
+    });
+    // 顔の外接枠を中心に、髪と肩が少し入る大きさの正方形で切り出す。
+    const [left, top, right, bottom] = face;
+    const size = Math.max(right - left, bottom - top) * 1.7;
+    const centerX = (left + right) / 2 - neutral.texture_box[0];
+    const centerY = (top + bottom) / 2 - neutral.texture_box[1];
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    canvas.getContext("2d").drawImage(image, centerX - size / 2, centerY - size / 2, size, size, 0, 0, 128, 128);
+    return canvas.toDataURL("image/png");
+  } catch (error) {
+    // フォールバック許可: 顔の切り出しに失敗しても、呼び出し側の通常の画像候補で表示できる。
+    logApp("warn", "キャラクターアイコンの顔切り出しに失敗しました", errorDetail(error));
+    return "";
+  }
+}
+
+// `face: false` は構図プレビュー用。全身の配置を見るため顔の切り出しをしない。
+async function characterIconUrl(character, { face = true } = {}) {
   try {
     const manifest = await loadCharacterManifestForSettings(character);
     const root = character.root;
     const idle = manifest.animations?.idle;
-    const imagePath = idle?.path ? `${idle.path}/00.png` : manifest.boot?.sleeping;
-    if (!imagePath) return "assets/characters/_preview-placeholder.png";
+    if (!face) {
+      // 構図プレビューは本体と同じ画像で描く。メッシュのキャラは本体の2D退避と同じ preview.png。
+      // 以前は寝姿（boot.sleeping）へ落ち、構図の確認に寝転んだ絵が出ていた。
+      const imagePath = idle?.path ? `${idle.path}/00.png`
+        : manifest.meshRig ? "preview.png" : manifest.boot?.sleeping;
+      if (!imagePath) return "assets/characters/_preview-placeholder.png";
+      const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
+      return `${root}/${imagePath}${version}`;
+    }
+    // Live2D・MMDの同梱画像は宣伝用の横長画像で、丸へ切り取っても顔にならない。
+    // 画像を出さず、呼び出し側の頭文字表示に任せる。
+    if (["live2d", "mmd"].includes(characterRenderKind(manifest))) return "";
+    // メッシュ化したキャラ（#193以降）は待機アニメーションを持たず、以前は同梱の仮画像になっていた。
+    // 待機画像 → 余白を詰めたメッシュの合成画像 → preview → 原画 → 寝姿の順で実在するものを使う。
+    const candidates = [
+      idle?.framePaths?.[0] || (idle?.path ? `${idle.path}/00.png` : ""),
+      manifest.meshRig?.rig ? `${String(manifest.meshRig.rig).replace(/[^/]+$/, "")}parts/neutral.png` : "",
+      "preview.png",
+      "source.png",
+      manifest.boot?.sleeping,
+    ].filter(Boolean);
     const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
-    return `${root}/${imagePath}${version}`;
+    const faceIcon = face && manifest.meshRig?.rig ? await meshFaceIconUrl(`${root}/${manifest.meshRig.rig}`, version) : "";
+    if (faceIcon) return faceIcon;
+    return await firstLoadableImage(candidates.map(path => `${root}/${path}${version}`));
   } catch (error) {
     logApp("warn", "キャラクターアイコンの読込に失敗しました", `${character.id}: ${errorDetail(error)}`);
     return "";
@@ -2479,7 +2545,10 @@ function buildCharacterFramingEditor() {
   const current = () => characterFraming?.[characterSelect.value]?.[layoutSelect.value];
   const updatePreview = () => {
     const image = preview.querySelector("img");
-    image.style.transform = `translate(${Number(x.value) / 8}px,${Number(y.value) / 8}px) scale(${Number(zoom.value) / 1.55})`;
+    // 本体（styles.css の .character-view）と同じ計算で描く。枠は285:315、上端基準で
+    // 「構図倍率 × 画像形式の補正1.32」を掛け、位置は枠の縮尺ぶんだけ縮めて動かす。
+    const frameScale = (image.clientHeight || 182) / 315;
+    image.style.transform = `translate(calc(-50% + ${Number(x.value) * frameScale}px),${Number(y.value) * frameScale}px) scale(${Number(zoom.value) * 1.32})`;
     zoomValue.textContent = `${Number(zoom.value).toFixed(2)}倍`;
     positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
   };
@@ -2496,7 +2565,7 @@ function buildCharacterFramingEditor() {
     const image = preview.querySelector("img");
     image.removeAttribute("src");
     try {
-      const url = character ? await characterIconUrl(character) : "";
+      const url = character ? await characterIconUrl(character, { face: false }) : "";
       if (url) image.src = url;
       image.alt = "選択キャラの構図プレビュー";
     } catch (error) {
@@ -2525,8 +2594,10 @@ function buildCharacterFramingEditor() {
   });
   preview.addEventListener("pointermove", event => {
     if (!drag || drag.pointerId !== event.pointerId) return;
-    x.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.x + (event.clientX - drag.startX) * 8))));
-    y.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.y + (event.clientY - drag.startY) * 8))));
+    // プレビュー上の移動量を本体の座標へ戻す（updatePreview の縮尺の逆数）。画像が指に付いて動く。
+    const toApp = 315 / (preview.querySelector("img")?.clientHeight || 182);
+    x.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.x + (event.clientX - drag.startX) * toApp))));
+    y.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.y + (event.clientY - drag.startY) * toApp))));
     presetSelect.value = "custom";
     save();
   });
