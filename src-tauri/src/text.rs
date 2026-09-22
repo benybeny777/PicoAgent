@@ -6,7 +6,7 @@
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
 // 実装は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
-pub use picoagent_core::text::{preview, truncate_bytes, Utf8Stream};
+pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stream};
 
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]

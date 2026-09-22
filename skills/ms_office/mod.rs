@@ -21,6 +21,7 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 use crate::permissions::SafePath;
+use crate::text;
 
 pub struct MsOfficeTool;
 
@@ -153,8 +154,8 @@ async fn export_pdf(
     if !result.status.success() {
         return format!(
             "エラー: PDF 変換に失敗しました。\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr)
+            text::command_output(&result.stdout),
+            text::command_output(&result.stderr)
         );
     }
     // 変換結果（LibreOffice が出力する入力名.pdf）も許可判定を通してから扱う。
@@ -168,8 +169,8 @@ async fn export_pdf(
         return format!(
             "エラー: PDF 変換は終了コード 0 でしたが、出力ファイルが作られませんでした（{}）。入力ファイルの形式か、LibreOffice の導入状態を確認してください。\nstdout:\n{}\nstderr:\n{}",
             converted.display(),
-            String::from_utf8_lossy(&result.stdout).trim(),
-            String::from_utf8_lossy(&result.stderr).trim()
+            text::command_output(&result.stdout).trim(),
+            text::command_output(&result.stderr).trim()
         );
     }
     // output_path 指定時は変換結果をその名前へ移す。

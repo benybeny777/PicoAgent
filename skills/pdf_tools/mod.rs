@@ -7,6 +7,7 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 use crate::permissions::SafePath;
+use crate::text;
 
 pub struct PdfToolsTool;
 
@@ -178,8 +179,8 @@ impl Tool for PdfToolsTool {
                     .code()
                     .map(|code| code.to_string())
                     .unwrap_or_else(|| "シグナル終了".to_string()),
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+                text::command_output(&output.stdout),
+                text::command_output(&output.stderr)
             ),
             Err(error) => format!("エラー: {error}"),
         }
@@ -245,7 +246,7 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
                         .code()
                         .map(|code| code.to_string())
                         .unwrap_or_else(|| "シグナル終了".to_string()),
-                    String::from_utf8_lossy(&output.stderr)
+                    text::command_output(&output.stderr)
                 );
             }
             match output_path {

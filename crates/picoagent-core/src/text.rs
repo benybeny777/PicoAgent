@@ -17,6 +17,31 @@ pub fn preview(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// 末尾 `max_chars` 文字だけを残し、切り詰めた場合だけ先頭に `…` を付ける。
+///
+/// 外部コマンドのエラー出力は原因（例外名・最後のメッセージ）が末尾に出るため、
+/// 先頭を残す `preview` では肝心の行が落ちる。
+pub fn tail(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars {
+        return text.to_string();
+    }
+    let mut out = String::from('…');
+    out.extend(text.chars().skip(total - max_chars));
+    out
+}
+
+/// 外部コマンドの出力をモデルへ返せる長さへ絞る上限（文字数）。
+pub const COMMAND_OUTPUT_TAIL_CHARS: usize = 2000;
+
+/// 外部コマンドの標準出力・標準エラーを文字列にし、末尾だけを残す。
+///
+/// 変換ツールは失敗時に進捗や警告を数千行出すことがあり、全文をツール結果へ入れると
+/// 小型モデルの文脈を埋めて原因の行を読めなくする。
+pub fn command_output(bytes: &[u8]) -> String {
+    tail(&String::from_utf8_lossy(bytes), COMMAND_OUTPUT_TAIL_CHARS)
+}
+
 /// バイト上限で、UTF-8文字の途中を避けて切り詰める。
 pub fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
     if text.len() <= max_bytes {
@@ -74,7 +99,13 @@ impl Utf8Stream {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview, truncate_bytes, Utf8Stream};
+    use super::{preview, tail, truncate_bytes, Utf8Stream};
+
+    #[test]
+    fn tailは末尾を残して先頭に省略記号を付ける() {
+        assert_eq!(tail("あいうえお", 10), "あいうえお");
+        assert_eq!(tail("あいうえお", 2), "…えお");
+    }
 
     #[test]
     fn 日本語を安全に切り詰める() {

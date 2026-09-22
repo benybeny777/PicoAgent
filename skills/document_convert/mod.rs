@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::text;
 
 pub struct DocumentConvertTool;
 
@@ -268,8 +269,8 @@ impl Tool for DocumentConvertTool {
                         .code()
                         .map(|code| code.to_string())
                         .unwrap_or_else(|| "シグナル終了".to_string()),
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
+                    text::command_output(&output.stdout),
+                    text::command_output(&output.stderr)
                 )
             }
             Err(error) => format!("エラー: {error}"),
