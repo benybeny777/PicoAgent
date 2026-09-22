@@ -31,6 +31,8 @@ test("MMD小型アイコンに通常立ち絵の下方向オフセットを重�
   const values = {};
   const context = vm.createContext({
     characterManifest: { id: "demo" }, characterFraming: {}, currentLayout: "chat",
+    petApp: { classList: { contains: () => false } },
+    characterFramingLayout: () => context.currentLayout,
     character: { dataset: { renderKind: "mmd" } },
     FRAMING_PRESETS: { upper: { zoom: 1.55, x: 0, y: 18 }, bust: { zoom: 2.05, x: 0, y: 38 } },
     applyCharacterZoom: value => { values.zoom = value; },
@@ -63,7 +65,7 @@ function harness() {
     document: { hidden: false, createElement: () => ({ setAttribute() {}, remove: () => removed++ }) },
     characterView: { insertBefore() {} }, petSprite: { style: {} },
     character: { dataset: {} }, characterRoot: "user-characters/demo", characterLoadGeneration: 1,
-    currentLayout: "widget", reduceMotion: false, mmdController: null, mmdCanvas: null,
+    currentLayout: "widget", characterFramingLayout: () => "widget", reduceMotion: false, mmdController: null, mmdCanvas: null,
     mmdLoadAbortController: null,
     mmdPoseRow: {}, mmdPoseSelect: {}, retryPendingLipSync() {}, destroyMmd() {},
     loadScriptOnce: async () => {},

@@ -83,7 +83,7 @@ graph TD
 
 - 表示形式は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget` の7形式を切り替え、`styles.css` が `<main id="petApp" data-layout="…">` を見て配置を変える。`chat` は青灰色の壁紙と左右の白／緑吹き出しを持つLINE風表示。**HTML の要素はどの形式でも同じ**で、描画・履歴・アクションセンター・読み上げ・音声入力・添付・許可判定は共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。
 - 切替は設定画面「画面・操作」の実表示プレビューカード、右クリック「画面レイアウト」、上端メニューから行う。上端メニューの「表示」は `pet_layout_menu` で同じ形式一覧（選択中にチェック）と「画面レイアウト・位置…」をボタン直下へ出す。右クリックは `layout::select()`、設定保存は `remember_current_size()` → 設定保存 → `apply()` の順に処理し、どちらも切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから次の形式の寸法を当てる。画面外へ出た場合は `pull_back_on_screen()` が戻す。
-- キャラの通常ドラッグはOS標準のウィンドウ移動とする。構図の標準は、通常2Dが上半身 `upper`、長身・実写・Live2Dが胸上 `bust`。Live2Dはモデル別の `live2d.scale` / `offsetY` で胸上へ調整済みなので、未保存時にPNG向け `bust` 倍率を重ねず `upper=1.55` を基準倍率にする。`PICOAGENT_CHARACTER_FRAMING` はキャラIDと表示形式ごとに `zoom` / `x` / `y` / `preset` を持ち、表示側は `#characterView` に `translate(--char-x, --char-y) scale(--char-zoom)` を当てて中の `img` の待機モーションと干渉させない。
+- キャラの通常ドラッグはOS標準のウィンドウ移動とする。構図の標準は、通常2Dが上半身 `upper`、長身・実写・Live2Dが胸上 `bust`。Live2Dはモデル別の `live2d.scale` / `offsetY` で胸上へ調整済みなので、未保存時にPNG向け `bust` 倍率を重ねず `upper=1.55` を基準倍率にする。`PICOAGENT_CHARACTER_FRAMING` はキャラIDと表示形式ごとに `zoom` / `x` / `y` / `preset` を持ち、表示側は `#characterView` に `translate(--char-x, --char-y) scale(--char-zoom)` を当てて中の `img` の待機モーションと干渉させない。 設定の構図プレビューは本体の標準ペット形式の拡大補正1.32を位置にも適用し、ドラッグはその逆変換で保存座標へ戻す。
 - 配置編集（上端メニュー「配置」・右クリック「配置を直接調整」）の位置と倍率は `PICOAGENT_LAYOUT_PLACEMENTS` 1キーへ保存する。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、立ち絵は `characters` の下にキャラクターID×表示形式で持つ。正規化は `layout_placements::normalize()` が正本で、未知の形式・対象・不正値を落とし、倍率は0.25〜4.0、位置は±20000pxへ丸める。保存は確定時（保存・閉じる・表示形式／キャラ切替・リセット）だけ `pet_save_layout_placements` で行い、ドラッグ中は書かない。読み込みは `pet_init` の `layoutPlacements`。
 - 設定画面には表示モニターの手動指定を置かず、メインウィンドウの `current_monitor()`（未確定時だけ主画面）の中央へ出す。メインが「常に手前」（既定有効）なら設定ウィンドウにも同じ `always_on_top` を当てる（macOSでは揃えないと設定画面が背後へ回り込み操作できない）。右クリックの「常に手前」は開いている設定ウィンドウにも同時に適用する。
 - `beta-full` 付きのアルファ配布だけ、全形式に小型の `ALPHA` バッジを出す。実行時は起動初期化が返す `betaBuild` で決め（既定は `hidden`）、配信UI生成時も `build-ui` がアルファ指定以外（`dev` / `build` / `build-distribution`）では `ui-dist/index.html` からバッジの記述を取り除く。記述は `ui/index.html` の1箇所だけで、xtask のテストが記述と除去結果を双方向で検査する。バッジは `pointer-events:none` で、通常形式は右上、配信形式はステージ左上へ置く。
@@ -419,7 +419,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 
 | name | 機能 | 安全策 |
 |---|---|---|
-| `get_time` | 現在の日付・時刻（任意で IANA タイムゾーン、`chrono-tz`） | 副作用なし |
+| `get_time` | 現在の日付・時刻・日本語の曜日（任意で IANA タイムゾーン、`chrono-tz`）。ローカルの現在日時だけを尋ねる質問は検索より優先する。期間・予定・地域指定・複合依頼は通常のツール選択へ渡す | 副作用なし |
 | `weather` | Open-Meteo による現在天気・日別予報を天気アイコン＋気温スパークライン（時間別/日別）で表示。保存地点を優先し、未設定時だけHTTPSのIP位置情報から現在地を概算。「天気サイトを探して」はWeb検索へ譲る | APIキー不要、自動位置は無効化可 |
 | `currency_rates` | Frankfurter API による為替レート・換算・推移スパークライン（`chart=true` / `days`） | APIキー不要 |
 | `market_indices` | Yahoo Finance chart API による日経平均・TOPIX・NYダウ・NASDAQ・S&P500 と推移スパークライン | APIキー不要、User-Agent 指定 |
@@ -593,7 +593,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 設定「キャラ作成（テスト）」は `isolate → decompose → rig2d → complete` を順に実行し、完成検査済みの `lvs-anime25d-v1` schema 3 だけを追加キャラクターへ反映する。完成カードの「動作を確認」は Windows 標準枠の別ウィンドウで原画と `ui/mesh-rig.js` の本番描画を並べ、瞬き・片目・視線・5母音・表情・動作・腕を操作する。表示中の不変世代は Reader lease で保持し、閉じたら解放する。
 
 - **起動時の回収**: 設定、原画、manifest、現行公開世代、反映済みキャラ、導入済みモデルを残し、WebViewキャッシュ、解析、分解レイヤー、基底リグ、補完入力、失敗した一時実行、旧公開世代を消す。未完成キャラの工程はすべて pending へ戻し、原画から作り直す。
-- **描画キャッシュ**: WebView・ブラウザプロファイルのGPU・シェーダキャッシュ（`GPUCache`・`GrShaderCache`・`ShaderCache` 等）は、Live2D・MMD・メッシュの初回描画を速くするため起動時に消さない。画面が WebGL の初期化失敗（エラー文に WebGL／シェーダ／GPU を含むもの）または描画面の消失（`webglcontextlost`）を検出したときだけ `pet_request_gpu_cache_reset` で予約し、次回起動時の `startup_cleanup::run()` が消す。素材不足など GPU と無関係な失敗では消さない。
+- **描画キャッシュ**: WebView・ブラウザプロファイルのGPU・シェーダキャッシュ（`GPUCache`・`GrShaderCache`・`ShaderCache` 等）は、Live2D・MMD・メッシュの初回描画を速くするため起動時に消さない。画面が WebGL の初期化失敗（エラー文に WebGL／シェーダ／GPU を含むもの）または描画面の消失（`webglcontextlost`）を検出したときだけ `pet_request_gpu_cache_reset` で予約し、次回起動時の `startup_cleanup::run()` が消す。素材不足など GPU と無関係な失敗では消さない。削除に失敗した場合は予約を維持して次回再試行し、対象の削除と予約解除が完了した場合だけ成功を記録する。
 - **対応環境**: Windows 10/11 x64 と Apple Silicon Mac（Intel Mac は対象外）。初回導入前に85GB以上の空きを求める（実測配置は約77GB）。Python 3.12 は `bundled/python` の共通1環境だけを使い、ComfyUI とモデルは `bundled/character-maker` へ置いて利用者の既存環境を参照しない。
 - **バックエンド選択**: 取得開始前にGPUの素性（ベンダー・型番・専用VRAM・共有メモリ・ユニファイドメモリ）から1つだけ選ぶ。CUDA対応 NVIDIA は CUDA 版 PyTorch、AMD 公式の Windows 向け ROCm 対応GPUは ROCm 版、Apple Silicon は MPS（Metal）版。対応表にない AMD、Intel GPU、Intel Mac、GPUなしでは生成ランタイムも大容量モデルも取得せず理由を出す。DirectML、ZLUDA、非公式 ROCm ビルドは使わない。CUDA 版と ROCm 版を同じ環境へ同時に入れない。
   - 導入時の GPU 種別・バックエンド・PyTorch 版・CUDA／ROCm 版を `install.json` へ記録し、GPU交換後に不一致のバックエンドを再利用しない。ROCm は import、`torch.cuda.is_available()`、`torch.version.hip`、デバイス名、最小テンソル演算の実検査を通った場合だけ有効にする。モデル重みと workflow は CUDA／ROCm で共有する。
@@ -740,6 +740,8 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 #### 人間だとバレるな（AIものまねゲーム）
 
 上端メニューと右クリックの「遊ぶ」が同じ `gameOverlay` を開き、ゲーム選択を挟まず監査ブリーフィングを出す。遊びは1本で、監査AIが出す試験の種類として12種類を持つ。ゲーム中も選択中のキャラを右側へ横切れのないバストアップで表示し、左側の操作・採点欄とは重ねず、読み上げ時の口パクを見せる。
+
+ゲームのキャラ構図は開始元の表示形式と保存済み位置に依存せず、標準ペット形式のモデル既定構図を使う。通常形式の保存値は変更せず、閉じた時点の表示形式と保存値で描画を戻す。Live2D・MMD・メッシュの内部構図にも同じ規則を適用する。
 
 - **AI疑惑をかけられた人間として、信用度（HP）が尽きるまで無限に出題される耐久戦**。`ui/game.js` が試験12種各20題（計240題）と回答見本、故障カード8件、難易度、制限時間、信用度、点数、称号を持つ。画面の試験は必ず `game.rs` に同じIDの採点仕様（通常5項目100点＋おもしろ加点10点）を持たせる（片方だけ足すと「ゲームの種類が不正です。」で採点が落ちる）。
 - 難易度はやさしい60秒・120文字・ヒントと回答見本あり、ふつう45秒・80文字、むずかしい30秒・50文字。見本は今のお題の答えにならないよう別のお題の例を出す。試験は毎問引き直し、直前2問と同じ試験は避け、お題は試験ごとに引いた順を持ち回して使い切るまで重複させない。

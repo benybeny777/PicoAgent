@@ -158,11 +158,11 @@ test("ゲームは通常の読み上げ経路と設定を共有する", () => {
   assert.match(game, /speakGame\(`信用度、マイナス\$\{result\.damage\}/);
   assert.match(game, /speakGame\(`監査終了。\$\{rounds\}問、\$\{session\.score\}点。称号は、/);
   assert.match(styles, /\.game-overlay/);
-  assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
+  assert.match(styles, /#petApp\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
   // 胸上の枠（ペット形式と同じ430:540）を画面下端へ揃え、枠の外は切る。拡大は打ち消さない。
-  assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*bottom:0;[^}]*aspect-ratio:430 \/ 540;[^}]*overflow:hidden;/);
-  assert.match(styles, /\.pet-app\.is-playing-game\[data-layout\] \.character \{[^}]*right:clamp\(36px,7vw,90px\);/);
-  assert.match(styles, /body \.pet-app\.is-playing-game\[data-layout\] \.character \.character-view \{[^}]*position:absolute!important;[^}]*height:100%!important;[^}]*scale\(var\(--char-zoom,1\.55\)\)!important;/);
+  assert.match(styles, /#petApp\.is-playing-game\[data-layout\] \.character \{[^}]*bottom:0;[^}]*aspect-ratio:430 \/ 540;[^}]*overflow:hidden;/);
+  assert.match(styles, /#petApp\.is-playing-game\[data-layout\] \.character \{[^}]*right:clamp\(36px,7vw,90px\);/);
+  assert.match(styles, /body #petApp\.is-playing-game\[data-layout\] \.character \.character-view \{[^}]*position:absolute!important;[^}]*height:100%!important;[^}]*scale\(var\(--char-zoom,1\.55\)\)!important;/);
   assert.match(styles, /data-render-kind="live2d"[^}]*#live2dCanvas \{[^}]*width:100%!important;[^}]*height:88%!important;/);
   assert.match(styles, /data-render-kind="mmd"[^}]*#mmdCanvas \{[^}]*width:100%!important;[^}]*height:100%!important;/);
   assert.match(manual, /通常の読み上げが有効なら、お題、監査AIの反応、監査終了時の点数と称号を読み上げ/);
@@ -173,7 +173,7 @@ test("ゲームは通常の読み上げ経路と設定を共有する", () => {
 test("採点欄はキャラクターの幅と右余白の両方を空ける", () => {
   // キャラは右端から余白を取って置かれる。採点欄が幅だけを差し引いていた頃は、
   // 1000px幅で採点欄の右端36pxがキャラの下へ隠れ、「12 / 15」の分母が読めなかった。
-  const character = styles.match(/\.pet-app\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
+  const character = styles.match(/#petApp\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
   const width = character.match(/width:(clamp\([^)]*\))/)?.[1];
   const right = character.match(/right:(clamp\([^)]*\))/)?.[1];
   assert.ok(width && right, "ゲーム中のキャラの幅・右余白を読み取れません");

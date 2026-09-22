@@ -17,6 +17,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { extname, isAbsolute, join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { validateGameFraming } from "./game-framing.mjs";
 
 const run = promisify(execFile);
 
@@ -2866,6 +2867,18 @@ if (process.env.SHOOT_TASK_RUN) {
   await browser.close();
   server.close();
   console.log(`実行中タスク表示検査完了: ${output}`);
+  process.exit(0);
+}
+
+if (process.env.SHOOT_GAME_FRAMING) {
+  try {
+    const output = await validateGameFraming(openScene, ROOT);
+    console.log(`全キャラのゲーム構図検査完了: ${output}`);
+  } finally {
+    await trimmer.close();
+    await browser.close();
+    server.close();
+  }
   process.exit(0);
 }
 

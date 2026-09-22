@@ -41,7 +41,7 @@ test("低頭身メッシュは配信でも低頭身用の胸上構図を保つ",
 test("Live2Dの小型アイコンはモデル固有の顔位置を適用できる", () => {
   assert.match(renderer, /function applyLive2DFraming\(\)/);
   assert.match(renderer, /activeLive2dConfig\.iconFraming/);
-  assert.match(renderer, /activeLive2dConfig\.layoutFraming\?\.\[currentLayout\]/);
+  assert.match(renderer, /activeLive2dConfig\.layoutFraming\?\.\[layout\]/);
   assert.match(renderer, /applyLive2DFraming\(\);/);
 });
 
@@ -112,6 +112,7 @@ test("Live2Dは形式別構図を優先して未指定座標を継承し明示0�
   const functionBody = renderer.slice(renderer.indexOf("function applyLive2DFraming()"), renderer.indexOf("function desiredLive2DResolution()"));
   const result = {};
   const context = { currentLayout: "chat", LIVE2D_RENDER_WIDTH: 285, LIVE2D_RENDER_HEIGHT: 315,
+    characterFramingLayout: () => context.currentLayout,
     activeLive2dConfig: { scale: 2, offsetX: -20, offsetY: 30, iconFraming: { scale: 3, offsetY: 80 }, layoutFraming: { chat: { scale: 4, offsetY: 0 } } },
     live2dModel: { internalModel: { originalWidth: 285, originalHeight: 315 },
       scale: { set: v => { result.scale = v; } }, anchor: { set() {} },
@@ -127,7 +128,7 @@ test("Live2Dは形式別構図を優先して未指定座標を継承し明示0�
 test("native-fullのメッシュも配信では保存中の上半身倍率を適用する", () => {
   const source = renderer.slice(renderer.indexOf("function applyMeshRigFraming()"), renderer.indexOf("async function prepareMeshRig("));
   let scale;
-  runInNewContext(source + "applyMeshRigFraming();", { currentLayout: "stream", characterZoom: 1.55, character: { dataset: { sourceFraming: "native-full" } }, meshRigController: { setFraming: v => { scale = v; } } });
+  runInNewContext(source + "applyMeshRigFraming();", { characterFramingLayout: () => "stream", characterZoom: 1.55, character: { dataset: { sourceFraming: "native-full" } }, meshRigController: { setFraming: v => { scale = v; } } });
   assert.equal(scale, 1.55);
 });
 
@@ -188,10 +189,10 @@ test("長身の画像キャラは既定構図を全身にしない（胸上の�
 test("ゲーム中のキャラは胸上の枠で切り取り、拡大を打ち消さない", () => {
   // 以前は拡大を scale(1) で打ち消し、縦長の枠から全身画像をはみ出させていたため、
   // 仕様の「横切れのないバストアップ」が全身表示になっていた。
-  const box = styles.match(/\.pet-app\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
+  const box = styles.match(/#petApp\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
   assert.match(box, /overflow:hidden;/);
   assert.match(box, /aspect-ratio:430 \/ 540;/);
-  const view = styles.match(/body \.pet-app\.is-playing-game\[data-layout\] \.character \.character-view \{([^}]*)\}/)?.[1] || "";
+  const view = styles.match(/body #petApp\.is-playing-game\[data-layout\] \.character \.character-view \{([^}]*)\}/)?.[1] || "";
   assert.match(view, /scale\(var\(--char-zoom,1\.55\)\)!important/);
   assert.doesNotMatch(view, /height:139%/);
   // 下の通常画面のボタンや返答がゲームの見出しの後ろへ透けないよう、背景は不透明にする。

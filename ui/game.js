@@ -665,6 +665,7 @@
   function open() {
     overlay.hidden = false;
     document.getElementById("petApp")?.classList.add("is-playing-game");
+    window.dispatchEvent(new Event("pico:game-visibility"));
     if (!session) renderBriefing();
     closeButton.focus();
   }
@@ -678,6 +679,7 @@
     releaseAudioContext();
     overlay.hidden = true;
     document.getElementById("petApp")?.classList.remove("is-playing-game");
+    window.dispatchEvent(new Event("pico:game-visibility"));
     setStatus("");
   }
 

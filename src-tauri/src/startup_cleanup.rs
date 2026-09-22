@@ -88,15 +88,40 @@ fn remove_target(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// 削除操作の結果で完了を判定する。存在確認だけではアクセス拒否も「存在しない」になる。
+fn reset_gpu_cache(
+    marker: &Path,
+    targets: &[PathBuf],
+    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+    mut log: impl FnMut(&str),
+) {
+    let mut complete = true;
+    for target in targets {
+        if let Err(error) = remove(target) {
+            complete = false;
+            log(&format!(
+                "描画キャッシュを削除できません: {} ({error})",
+                target.display()
+            ));
+        }
+    }
+    if !complete {
+        log("描画キャッシュの削除は未完了です。予約を残して次回起動時に再試行します");
+        return;
+    }
+    if let Err(error) = remove(marker) {
+        log(&format!(
+            "描画キャッシュ削除の予約を解除できません: {error}"
+        ));
+        return;
+    }
+    log("予約どおり描画（GPU・シェーダ）キャッシュを削除しました");
+}
+
 pub fn run(app: &AppHandle) {
     let root = crate::log_paths::data_dir(app);
-    let mut targets = cache_targets(&root);
     let marker = root.join(GPU_CACHE_RESET_MARKER);
-    let gpu_reset = marker.exists();
-    if gpu_reset {
-        targets.extend(gpu_cache_targets(&root));
-    }
-    for target in targets {
+    for target in cache_targets(&root) {
         if let Err(error) = remove_target(&target) {
             crate::log_paths::append_app_log(
                 app,
@@ -107,22 +132,12 @@ pub fn run(app: &AppHandle) {
             );
         }
     }
-    if gpu_reset {
-        // 消し切れなかった分は次回も再試行する（予約印を残す）。
-        if gpu_cache_targets(&root)
-            .iter()
-            .all(|target| !target.exists())
-        {
-            if let Err(error) = remove_target(&marker) {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!("描画キャッシュ削除の予約を解除できません: {error}"),
-                );
-            }
-        }
-        crate::log_paths::append_app_log(
-            app,
-            "予約どおり描画（GPU・シェーダ）キャッシュを削除しました",
+    if marker.exists() {
+        reset_gpu_cache(
+            &marker,
+            &gpu_cache_targets(&root),
+            remove_target,
+            |message| crate::log_paths::append_app_log(app, message),
         );
     }
     let generated = crate::log_paths::data_dir(app).join("generated-media");
@@ -147,6 +162,44 @@ pub fn run(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu削除失敗は予約を残し再試行成功後だけ完了を記録する() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join(GPU_CACHE_RESET_MARKER);
+        let cache = temp.path().join("GPUCache");
+        std::fs::write(&marker, b"requested").unwrap();
+        std::fs::create_dir(&cache).unwrap();
+        let targets = vec![cache.clone()];
+        let mut logs = Vec::new();
+        reset_gpu_cache(
+            &marker,
+            &targets,
+            |path| {
+                if path == cache {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "検証用のアクセス拒否",
+                    ))
+                } else {
+                    remove_target(path)
+                }
+            },
+            |message| logs.push(message.to_string()),
+        );
+        assert!(marker.exists());
+        assert!(cache.exists());
+        assert!(logs.iter().any(|message| message.contains("未完了")));
+        assert!(!logs.iter().any(|message| message.contains("削除しました")));
+
+        logs.clear();
+        reset_gpu_cache(&marker, &targets, remove_target, |message| {
+            logs.push(message.to_string())
+        });
+        assert!(!marker.exists());
+        assert!(!cache.exists());
+        assert!(logs.iter().any(|message| message.contains("削除しました")));
+    }
 
     #[test]
     fn gpuとシェーダのキャッシュは毎回の起動では消さない() {

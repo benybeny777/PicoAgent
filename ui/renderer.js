@@ -1248,7 +1248,7 @@ async function loadCharacter(characterId, overrides = {}, options = {}) {
     await probeRigLayers(); // メッシュ休止時に使える差分絵も別に判定する
   }
   if (loadGeneration !== characterLoadGeneration) return;
-  applyCharacterFraming();
+  applyAllCharacterFraming();
   frame = 0;
   setAnimation("idle", true);
   character.title = `${manifest.name}：右クリックで設定`;
@@ -1764,7 +1764,7 @@ let meshRigActive = false;
 let pixiRuntimePromise = null;
 
 function meshRigCanRender() {
-  const layout = petApp.dataset.layout || "pet";
+  const layout = characterFramingLayout();
   return Boolean(
     meshRigController
     && !document.hidden
@@ -1798,9 +1798,14 @@ function destroyMeshRig() {
   updateSpringMotionVisibility();
 }
 
+// ゲームは通常画面の設定を保持したまま、モデルのペット形式の既定構図を使う。
+function characterFramingLayout() {
+  return petApp.classList.contains("is-playing-game") ? "pet" : currentLayout;
+}
+
 function applyMeshRigFraming() {
   if (!meshRigController) return;
-  const scale = currentLayout !== "stream"
+  const scale = characterFramingLayout() !== "stream"
     ? 1
     : character.dataset.sourceFraming === "native-full"
       // 全身原画も既定の上半身倍率を内部描画へ反映する。以前は常に1へ戻していたため、
@@ -1894,7 +1899,7 @@ async function startMmd(config, generation) {
       return;
     }
     mmdController = controller;
-    controller.setFraming(currentLayout);
+    controller.setFraming(characterFramingLayout());
     controller.setMotionEnabled(!reduceMotion && !document.hidden);
     controller.setMouthLevel(0);
     const pose = config.defaultPose === "original" ? "original" : "natural";
@@ -1944,10 +1949,11 @@ const LIVE2D_MAX_DISPLAY_SCALE = 2.75;
 // 一律に切ると、帽子のあるモデルや非人物モデルでは顔が消えるため、モデル変換を形式別に決める。
 function applyLive2DFraming() {
   if (!live2dModel || !activeLive2dConfig) return;
-  const sharedIcon = ["chat", "bar"].includes(currentLayout)
+  const layout = characterFramingLayout();
+  const sharedIcon = ["chat", "bar"].includes(layout)
     ? activeLive2dConfig.iconFraming
     : null;
-  const frame = activeLive2dConfig.layoutFraming?.[currentLayout] || sharedIcon || activeLive2dConfig;
+  const frame = activeLive2dConfig.layoutFraming?.[layout] || sharedIcon || activeLive2dConfig;
   const originalWidth = live2dModel.internalModel.originalWidth;
   const originalHeight = live2dModel.internalModel.originalHeight;
   const fit = Math.min(LIVE2D_RENDER_WIDTH / originalWidth, LIVE2D_RENDER_HEIGHT / originalHeight);
@@ -5295,7 +5301,9 @@ const FRAMING_PRESETS = {
 
 function applyCharacterFraming() {
   const characterId = characterManifest?.id;
-  const saved = characterId && characterFraming?.[characterId]?.[currentLayout];
+  const layout = characterFramingLayout();
+  const saved = !petApp.classList.contains("is-playing-game")
+    && characterId && characterFraming?.[characterId]?.[layout];
   // 旧版の全キャラ共通offsetを別キャラへ引き継がない。個別構図がないキャラは
   // 画面中央基準へ戻さないと、前に調整したキャラの座標で画面外へ消える。
   if (!saved) {
@@ -5307,7 +5315,7 @@ function applyCharacterFraming() {
     const isCompactImage = isImageBased && character.dataset.bodyProportion === "compact";
     const isNativeBustImage = isImageBased && character.dataset.sourceFraming === "native-bust";
     const isLive2d = ["live2d", "mmd"].includes(character.dataset.renderKind);
-    const usesStreamImageCrop = isImageBased && currentLayout === "stream";
+    const usesStreamImageCrop = isImageBased && layout === "stream";
     const manifestFrame = usesStreamImageCrop
       ? characterManifest?.streamFraming
       : characterManifest?.defaultFraming;
@@ -5317,7 +5325,7 @@ function applyCharacterFraming() {
           x: Number.isFinite(Number(manifestFrame.x)) ? Number(manifestFrame.x) : 0,
           y: Number.isFinite(Number(manifestFrame.y)) ? Number(manifestFrame.y) : 0,
         }
-      : character.dataset.renderKind === "mmd" && ["chat", "bar"].includes(currentLayout)
+      : character.dataset.renderKind === "mmd" && ["chat", "bar"].includes(layout)
         ? { zoom: 1.55, x: 0, y: 0 }
       : isNativeBustImage && usesStreamImageCrop
         ? FRAMING_PRESETS.full
@@ -5331,6 +5339,21 @@ function applyCharacterFraming() {
   applyCharacterZoom(saved.zoom ?? frame.zoom ?? FRAMING_PRESETS.bust.zoom);
   applyCharacterOffset(saved.x ?? frame.x ?? 0, saved.y ?? frame.y ?? 0, { clamp: false });
 }
+
+function applyAllCharacterFraming() {
+  applyCharacterFraming();
+  applyMeshRigFraming();
+  applyLive2DFraming();
+  mmdController?.setFraming(characterFramingLayout());
+  // chat/barでは通常メッシュを休止するが、ゲーム中は立ち絵と口パクを再開する。
+  if (meshRigController) {
+    setAnimation(animationName, true);
+    setMeshRigVisible(true);
+  }
+}
+
+// 閉じたときも最新のキャラ・表示形式・保存値から再計算し、開いた時点の古い値へ戻さない。
+window.addEventListener("pico:game-visibility", applyAllCharacterFraming);
 
 function applyStreamAppearance(background, imagePath, display, displayImagePath, captionColor = "#5a3b4b") {
   petApp.dataset.streamBackground = ["pastel", "gaming", "simple", "sakura-room", "dog-hobby-room", "custom"].includes(background) ? background : "pastel";
@@ -5745,20 +5768,13 @@ function applyLayout(id) {
   }
   syncWidgetClock();
   applyCharacterOffset(characterOffset.x, characterOffset.y);
-  applyCharacterFraming();
-  applyMeshRigFraming();
-  applyLive2DFraming();
-  mmdController?.setFraming(currentLayout);
+  applyAllCharacterFraming();
   // 履歴を常設する形式では、切り替えた時点の履歴をその場で描き直す。
   renderHistory();
   refreshBubblePlacement();
   gazeFrameScheduler?.cancel();
   resetLook();
   if (!reduceMotion && gazeTrackingEnabled) scheduleGaze();
-  if (meshRigController) {
-    setAnimation(animationName, true);
-    setMeshRigVisible(true);
-  }
   wakeAnimationLoop();
 }
 
