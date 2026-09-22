@@ -2756,6 +2756,46 @@ if (process.env.SHOOT_PANELS) {
   process.exit(0);
 }
 
+// 起動画面（準備中の状態表示）を代表寸法で撮る。起動画面は通常すぐ消えるため、
+// 初期化を遅らせて表示中のまま撮影し、文字の切れや窓外へのはみ出しを確かめる。
+async function validateBootScreen() {
+  const output = join(ROOT, "temp", "boot-qa");
+  mkdirSync(output, { recursive: true });
+  const results = [];
+  for (const [name, [width, height]] of Object.entries({ default: [680, 430], mascot: [360, 560], small: [320, 300] })) {
+    const page = await openScene({ width, height, layout: "pet", forcePng: true, initDelayMs: 8000, waitForReady: false });
+    await page.waitForFunction(() => document.getElementById("petApp")?.classList.contains("is-booting"));
+    await page.waitForTimeout(600);
+    const state = await page.evaluate(size => {
+      const stage = document.querySelector(".boot-stage")?.getBoundingClientRect();
+      const overflow = [...document.querySelectorAll(".boot-screen *")]
+        .filter(node => {
+          const rect = node.getBoundingClientRect();
+          return rect.width > 0 && (rect.right > size.width + 1 || rect.bottom > size.height + 1 || rect.left < -1);
+        })
+        .slice(0, 5)
+        .map(node => `${node.tagName.toLowerCase()}.${[...node.classList].join(".")}`);
+      return { stage: stage && { width: Math.round(stage.width), height: Math.round(stage.height) }, overflow };
+    }, { width, height });
+    await page.screenshot({ path: join(output, `${name}.png`), omitBackground: true });
+    await page.close();
+    results.push({ name, width, height, ...state });
+    console.log(`  起動画面: ${name} ${width}x${height}${state.overflow.length ? ` はみ出し ${state.overflow.join(", ")}` : " OK"}`);
+  }
+  await writeFile(join(output, "result.json"), `${JSON.stringify(results, null, 2)}\n`);
+  if (results.some(result => result.overflow.length)) throw new Error("起動画面の要素が窓の外へ出ています");
+  return output;
+}
+
+if (process.env.SHOOT_BOOT_SCREEN) {
+  const output = await validateBootScreen();
+  await trimmer.close();
+  await browser.close();
+  server.close();
+  console.log(`起動画面検査完了: ${output}`);
+  process.exit(0);
+}
+
 if (process.env.SHOOT_INTERACTION_MATRIX) {
   const matrix = await validateInteractionMatrix();
   await trimmer.close();
