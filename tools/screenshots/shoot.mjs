@@ -1083,8 +1083,16 @@ async function validateInteractionMatrix() {
     ? new Set(process.env.SHOOT_LAYOUT_IDS.split(",").map(value => value.trim()).filter(Boolean))
     : null;
   let characters = [{ id: "mugi", forcePng: false, meshRig: true }];
-  if (LIVE2D_REQUIRED.every(path => existsSync(join(ROOT, path)))) {
+  const missingLive2D = LIVE2D_REQUIRED.filter(path => !existsSync(join(ROOT, path)));
+  if (!missingLive2D.length) {
     characters.push({ id: LIVE2D_CHARACTER, forcePng: false });
+  } else {
+    // 黙って外すと「全件合格」に見える。新しいworktreeはGit管理外のLive2Dを持たないため、
+    // 名前の長いLive2Dキャラだけで起きる崩れを見逃した。対象外にした理由を必ず出す。
+    console.warn(`  操作検査: ${LIVE2D_CHARACTER} を対象外にしました（未配置: ${missingLive2D.join(", ")}）。cargo xtask setup live2d（ランタイム）と setup live2d-samples（モデル）、または本体チェックアウトから配置してください`);
+  }
+  if (selectedCharacterIds?.has(LIVE2D_CHARACTER) && missingLive2D.length) {
+    throw new Error(`${LIVE2D_CHARACTER} の操作検査を指定しましたが、Live2D資材がありません: ${missingLive2D.join(", ")}`);
   }
   if (selectedCharacterIds) {
     characters = characters.filter(character => selectedCharacterIds.has(character.id));
@@ -1245,6 +1253,19 @@ async function validateInteractionMatrix() {
         }
         const file = `${target.id}-${layout}.png`;
         await page.screenshot({ path: join(output, file), omitBackground: true });
+        // 操作部品が窓内にあっても、キャラの頭がフキダシの下に潜っていれば不合格にする。
+        // 固定寸法のLive2D canvasが縮んだキャラ枠から上へはみ出し、顔が隠れたのを見逃した。
+        if (layout === "mascot") {
+          const overlap = await page.evaluate(() => {
+            const canvas = document.getElementById("live2dCanvas");
+            const bubble = document.querySelector(".bubble");
+            if (!canvas || getComputedStyle(canvas).display === "none" || !bubble) return null;
+            return { canvasTop: canvas.getBoundingClientRect().top, bubbleBottom: bubble.getBoundingClientRect().bottom };
+          });
+          if (overlap && overlap.canvasTop < overlap.bubbleBottom - 8) {
+            throw new Error(`${target.id}/${layout}: Live2Dの描画がフキダシの下へ潜っています ${JSON.stringify(overlap)}`);
+          }
+        }
 
         // 既定寸法の78%では、利用者が実際に縮められる下限（tauri.confのminWidth/minHeight）
         // まで届かない。その下限でも入力欄と送信ボタンが窓の中に残ることを確かめる。
