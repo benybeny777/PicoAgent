@@ -601,6 +601,32 @@ try {
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
+  // 全タブを通常幅と400px幅で撮り、横へのはみ出しがないことを確かめる。個別検査のないタブ
+  // （安全・許可、使い方、キャラ作成など）も目視できるよう画像を残す。
+  const tabsDir = join(OUT, "tabs");
+  mkdirSync(tabsDir, { recursive: true });
+  const tabNames = await page.locator(".tabs .tab").evaluateAll(nodes => nodes.map(node => node.textContent.trim()));
+  const tabOverflow = [];
+  for (const [label, width] of [["wide", 960], ["narrow", 400]]) {
+    await page.setViewportSize({ width, height: 820 });
+    for (const [index, name] of tabNames.entries()) {
+      await page.locator(".tabs .tab").nth(index).click();
+      await page.waitForTimeout(150);
+      const wide = await page.evaluate(() => {
+        const width = document.documentElement.clientWidth;
+        const nodes = [...document.querySelectorAll(".tab-panel:not([hidden]) *")]
+          .filter(node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.right > width + 1; })
+          .slice(0, 3)
+          .map(node => `${node.tagName.toLowerCase()}.${[...node.classList].join(".")}`);
+        return { page: document.documentElement.scrollWidth > width, nodes };
+      });
+      if (wide.page || wide.nodes.length) tabOverflow.push(`${label}/${name}: ${wide.nodes.join(", ")}`);
+      await page.evaluate(() => window.scrollTo(0, 260));
+      await page.screenshot({ path: join(tabsDir, `${String(index).padStart(2, "0")}-${label}.png`) });
+      await page.evaluate(() => window.scrollTo(0, 0));
+    }
+  }
+  if (tabOverflow.length) throw new Error(`設定タブが横にはみ出しています: ${tabOverflow.join(" / ")}`);
   const recoveryPage = await browser.newPage();
   await recoveryPage.addInitScript(mock);
   await recoveryPage.goto(`http://127.0.0.1:${port}/settings.html?load-failure=1`);
