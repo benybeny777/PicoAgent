@@ -1175,8 +1175,13 @@ html[data-theme="dark"] { --chat-wall-a:#2d3b49; --chat-wall-b:#344555; --chat-u
 [data-layout="widget"] .character[data-render-kind="mesh-rig"] .character-view {
   scale:1.32; transform-origin:50% 0%;
 }
+/* 入力欄を開くとキャラ枠は窓の下45%まで縮む。固定の360x398のまま下端へ置くと、枠より
+   上へはみ出した頭がフキダシの下に潜る（Live2Dだけで起き、PNGは枠へ収まる）。
+   描画バッファは285:315の固定比なので、枠の高さを上限に同じ比率のまま縮める。 */
 [data-layout="mascot"] .character-view > canvas {
-  position:absolute; left:50%; top:auto; bottom:0; width:360px!important; height:398px!important;
+  position:absolute; left:50%; top:auto; bottom:0;
+  width:auto!important; height:min(398px,100%)!important; max-width:100%;
+  object-fit:contain; object-position:50% 100%;
   transform:translateX(-50%); transform-origin:50% 100%;
 }
 [data-layout="mascot"] .reply { font-size:14px; line-height:1.6; }

@@ -144,3 +144,13 @@ test("メッシュ休止時に差分絵がなければ定義済み静止フレ�
   runInNewContext(source + 'setAnimation("idle", true);', context);
   assert.deepEqual(calls, [["mesh",false],["idle",0]]);
 });
+
+test("マスコットのLive2D canvasは縮んだキャラ枠の高さを超えない", () => {
+  // 入力欄を開くとキャラ枠は窓の下45%に縮む。固定398pxのまま下端へ置くと、はみ出した頭が
+  // フキダシの下に潜った（操作部品の収まりだけを見る検査では合格していた）。
+  const rule = styles.match(/\[data-layout="mascot"\] \.character-view > canvas \{([^}]*)\}/)?.[1];
+  assert.ok(rule, "マスコットのcanvas規則が見つかりません");
+  assert.match(rule, /height:min\(398px,100%\)!important/);
+  assert.match(rule, /width:auto!important/);
+  assert.doesNotMatch(rule, /height:\d+px!important/);
+});
