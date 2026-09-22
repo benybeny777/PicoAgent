@@ -10,7 +10,7 @@ const modelOptions = document.getElementById("modelOptions");
 const settingsSearch = document.getElementById("settingsSearch");
 const clearSettingsSearch = document.getElementById("clearSettingsSearch");
 const dirtySummary = document.getElementById("dirtySummary");
-const { errorDetail, logApp, tail, twoStepAction } = window.PicoUI;
+const { errorDetail, errorMessage, logApp, tail, twoStepAction } = window.PicoUI;
 
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
@@ -1202,7 +1202,7 @@ function buildComponentManager() {
         : "";
       generation.textContent = `画像・動画・キャラクター生成: ${gpu} を ${info.backendLabel} で使用します。ComfyUIは${start}します（${info.lowvramReason}）。${reinstall}${unverified}`;
     } catch (error) {
-      generation.textContent = `画像・動画・キャラクター生成: GPUを確認できません（${error?.message || error}）`;
+      generation.textContent = `画像・動画・キャラクター生成: GPUを確認できません（${errorMessage(error)}）`;
     }
   }
 
@@ -1298,7 +1298,7 @@ function buildComponentManager() {
           }
         } catch (error) {
           status.textContent = navigator.onLine
-            ? `導入できませんでした: ${error?.message || error}`
+            ? `導入できませんでした: ${errorMessage(error)}`
             : "オフラインのため導入を見送りました。接続後にもう一度押してください。";
           button.textContent = actionLabel;
         } finally {
@@ -1337,7 +1337,7 @@ function buildComponentManager() {
               status.textContent = `${successMessage} 状態表示だけ再読み込みできませんでした。`;
             }
           } catch (error) {
-            status.textContent = `削除できませんでした: ${error?.message || error}`;
+            status.textContent = `削除できませんでした: ${errorMessage(error)}`;
             remove.textContent = removeLabel;
           } finally {
             setBusy(false);
@@ -1381,7 +1381,7 @@ function buildComponentManager() {
     if (componentTab) componentTab.textContent = "追加機能・更新（要確認）";
     setQuickSettingsSummary("components", "状態を確認できません");
     list.innerHTML = "";
-    list.append(el("p", { className: "hint", textContent: `状態を確認できません: ${error?.message || error}` }));
+    list.append(el("p", { className: "hint", textContent: `状態を確認できません: ${errorMessage(error)}` }));
   });
   return sec;
 }
@@ -1896,7 +1896,7 @@ function buildConnectionTest(tool) {
     } catch (error) {
       logApp("warn", "スキル接続テストに失敗しました", `${tool.name}: ${errorDetail(error)}`);
       result.className = "connection-test-result error";
-      result.textContent = `接続テストに失敗: ${error.message || error}`;
+      result.textContent = `接続テストに失敗: ${errorMessage(error)}`;
       diagnosis.textContent = "PicoAgent 内部の接続テスト呼び出しに失敗しました。アプリログを確認してください。";
     } finally {
       button.disabled = false;
@@ -2048,7 +2048,7 @@ async function loadUserCharacters(bundled) {
       }));
   } catch (error) {
     // フォールバック許可: 追加キャラを取れなくても同梱キャラの設定は開けるようにする。
-    statusEl.textContent = `追加キャラクターを読み込めませんでした: ${error?.message || error}`;
+    statusEl.textContent = `追加キャラクターを読み込めませんでした: ${errorMessage(error)}`;
     return [];
   }
 }
@@ -2301,7 +2301,7 @@ function layoutResetField() {
       statusEl.textContent = "ウィンドウとフキダシの位置・サイズを既定へ戻しました。";
     } catch (error) {
       logApp("error", `${label}に失敗しました`, errorDetail(error));
-      statusEl.textContent = `${label}に失敗: ${error?.message || error}`;
+      statusEl.textContent = `${label}に失敗: ${errorMessage(error)}`;
     } finally {
       button.disabled = false;
     }
@@ -2329,7 +2329,7 @@ function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () =
       statusEl.textContent = `${label}を選びました。「変更を保存」で反映します。`;
     } catch (error) {
       logApp("warn", `${label}を取り込めませんでした`, errorDetail(error));
-      statusEl.textContent = `${label}を取り込めませんでした: ${error?.message || error}`;
+      statusEl.textContent = `${label}を取り込めませんでした: ${errorMessage(error)}`;
     } finally {
       button.disabled = !isAvailable();
     }
@@ -2581,7 +2581,7 @@ function diagnosticRepairButton(label, handler) {
     try { await handler(); }
     catch (error) {
       logApp("error", `${label}に失敗しました`, errorDetail(error));
-      statusEl.textContent = `${label}に失敗: ${error?.message || error}`;
+      statusEl.textContent = `${label}に失敗: ${errorMessage(error)}`;
       button.disabled = false;
     }
   });
@@ -2607,7 +2607,7 @@ function buildDiagnosticsSection() {
       const result = await window.picoagent.settings.exportDiagnostics();
       exportStatus.textContent = `保存しました（APIキー等は含みません）: ${result?.path || ""}`;
     } catch (error) {
-      exportStatus.textContent = `書き出せませんでした: ${error?.message || error}`;
+      exportStatus.textContent = `書き出せませんでした: ${errorMessage(error)}`;
     } finally {
       exportDiagnostics.disabled = false;
     }
@@ -2752,7 +2752,7 @@ function buildAppUpdateSection(v) {
       installUpdate.hidden = !(result.status === "available" && result.downloadReady);
     } catch (error) {
       updateStatus.textContent = navigator.onLine
-        ? `更新情報を確認できませんでした: ${error?.message || error}`
+        ? `更新情報を確認できませんでした: ${errorMessage(error)}`
         : "オフラインのため更新確認を見送りました。";
     } finally {
       checkUpdate.disabled = false;
@@ -2772,7 +2772,7 @@ function buildAppUpdateSection(v) {
       }
     } catch (error) {
       updateStatus.textContent = navigator.onLine
-        ? `アップデートできませんでした: ${error?.message || error}`
+        ? `アップデートできませんでした: ${errorMessage(error)}`
         : "オフラインのためアップデートを見送りました。";
       installUpdate.disabled = false;
       checkUpdate.disabled = false;
@@ -2850,7 +2850,7 @@ function buildDownloadedModelsSection() {
               logApp("warn", "モデル削除に失敗しました", `${model.name}: ${errorDetail(error)}`);
               action.disabled = false;
               action.textContent = "削除";
-              modelStatus.textContent = `削除に失敗しました: ${error?.message || error}`;
+              modelStatus.textContent = `削除に失敗しました: ${errorMessage(error)}`;
             }
           });
         }
@@ -2858,7 +2858,7 @@ function buildDownloadedModelsSection() {
       }
     } catch (error) {
       logApp("warn", "モデル一覧の取得に失敗しました", errorDetail(error));
-      list.replaceChildren(el("div", { className: "hint", textContent: `一覧の取得に失敗しました: ${error?.message || error}` }));
+      list.replaceChildren(el("div", { className: "hint", textContent: `一覧の取得に失敗しました: ${errorMessage(error)}` }));
     } finally {
       refresh.disabled = false;
       applySettingsSearch();
@@ -2891,7 +2891,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
       const picked = await window.picoagent.settings.characterMakerPickSource();
       if (picked?.path) sourceInput.value = picked.path;
     } catch (error) {
-      status.textContent = `原画を選べませんでした: ${error?.message || error}`;
+      status.textContent = `原画を選べませんでした: ${errorMessage(error)}`;
     }
   });
 
@@ -2901,7 +2901,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
       await window.picoagent.settings.characterMakerRun(character.characterId, fromStage);
       status.textContent = `${character.displayName}の生成が完了しました。`;
     } catch (error) {
-      status.textContent = `生成を完了できませんでした: ${error?.message || error}`;
+      status.textContent = `生成を完了できませんでした: ${errorMessage(error)}`;
     } finally {
       await refresh();
     }
@@ -2935,7 +2935,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
           ? `${result.name}を新しい生成結果へ更新しました。キャラを選び直すと反映されます。`
           : `${result.name}を追加して選びました。「保存」で反映します。`;
       } catch (error) {
-        status.textContent = `PicoAgentへ反映できませんでした: ${error?.message || error}`;
+        status.textContent = `PicoAgentへ反映できませんでした: ${errorMessage(error)}`;
       }
     });
     const previewButton = el("button", {
@@ -2950,7 +2950,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
         await window.picoagent.settings.characterMakerPreview(character.characterId);
         status.textContent = `${character.displayName}の確認画面を開きました。`;
       } catch (error) {
-        status.textContent = `確認画面を開けませんでした: ${error?.message || error}`;
+        status.textContent = `確認画面を開けませんでした: ${errorMessage(error)}`;
       } finally {
         previewButton.disabled = character.stages?.complete?.status !== "complete";
       }
@@ -2973,7 +2973,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
       else if (!(result.characters || []).length) status.textContent = "原画を選び、最初のキャラクターを作成できます。";
       applySettingsSearch();
     } catch (error) {
-      status.textContent = `キャラ作成の状態を取得できませんでした: ${error?.message || error}`;
+      status.textContent = `キャラ作成の状態を取得できませんでした: ${errorMessage(error)}`;
     }
   }
 
@@ -2993,7 +2993,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
       await refresh();
       if (runtimeInstalled) await run(character, "isolate");
     } catch (error) {
-      status.textContent = `作成を開始できませんでした: ${error?.message || error}`;
+      status.textContent = `作成を開始できませんでした: ${errorMessage(error)}`;
     } finally {
       createButton.disabled = false;
     }
@@ -3004,8 +3004,16 @@ function buildCharacterMaker(registerInstalledCharacter) {
   replaceSettingsListener("character-maker-state", "character-maker:state", refresh);
   const cancelButton = el("button", { className: "secondary", type: "button", textContent: "生成を中断" });
   cancelButton.addEventListener("click", async () => {
-    await window.picoagent.settings.characterMakerCancel();
-    status.textContent = "工程の停止を要求しました。";
+    cancelButton.disabled = true;
+    try {
+      await window.picoagent.settings.characterMakerCancel();
+      status.textContent = "工程の停止を要求しました。";
+    } catch (error) {
+      logApp("warn", "キャラ作成の中断を要求できませんでした", errorDetail(error));
+      status.textContent = `中断を要求できませんでした: ${errorMessage(error)}`;
+    } finally {
+      cancelButton.disabled = false;
+    }
   });
   maker.append(
     el("div", { className: "field" }, [el("label", { textContent: "原画" }), sourceInput, pickButton]),
@@ -3363,7 +3371,7 @@ async function render() {
       } catch (error) {
         characterSelect.value = previousCharacter;
         logApp("warn", "キャラクター設定の切替に失敗しました", errorDetail(error));
-        statusEl.textContent = `人格設定を読み込めませんでした: ${error?.message || error}`;
+        statusEl.textContent = `人格設定を読み込めませんでした: ${errorMessage(error)}`;
       }
       refreshCharacterCards();
       updateDirtyState();
@@ -3371,7 +3379,7 @@ async function render() {
       // 表示更新の想定外エラーでもキューを rejected のまま残さず、次の切替操作を受け付ける。
       characterSelect.value = previousCharacter;
       logApp("error", "キャラクター設定の表示更新に失敗しました", errorDetail(error));
-      statusEl.textContent = `キャラクター設定の表示を更新できませんでした: ${error?.message || error}`;
+      statusEl.textContent = `キャラクター設定の表示を更新できませんでした: ${errorMessage(error)}`;
     });
     return characterSwitchQueue.finally(() => {
       characterSwitchPending -= 1;
@@ -3468,7 +3476,7 @@ async function render() {
       await window.picoagent.showOnboarding();
       reopenOnboardingStatus.textContent = "";
     } catch (error) {
-      reopenOnboardingStatus.textContent = `開けませんでした: ${error?.message || error}`;
+      reopenOnboardingStatus.textContent = `開けませんでした: ${errorMessage(error)}`;
     } finally {
       reopenOnboardingButton.disabled = false;
     }
@@ -3604,7 +3612,7 @@ async function render() {
           statusEl.textContent = renameStatus.textContent;
           applyCharacterFilters();
         } catch (error) {
-          renameStatus.textContent = `名前を変更できませんでした: ${error?.message || error}`;
+          renameStatus.textContent = `名前を変更できませんでした: ${errorMessage(error)}`;
         } finally {
           renameButton.disabled = false;
           setSettingsMutationBusy(false);
@@ -3657,7 +3665,7 @@ async function render() {
         } catch (error) {
           removeButton.disabled = false;
           removeButton.textContent = "削除";
-          removeStatus.textContent = `削除できませんでした: ${error?.message || error}`;
+          removeStatus.textContent = `削除できませんでした: ${errorMessage(error)}`;
         } finally {
           setSettingsMutationBusy(false);
         }
@@ -3761,7 +3769,7 @@ async function render() {
       const added = await registerInstalledCharacter(result.id);
       addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
-      addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
+      addStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
     }
   }
 
@@ -3792,7 +3800,7 @@ async function render() {
       const added = await registerInstalledCharacter(result.id);
       addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
-      addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
+      addStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
     }
   }
   const rawMmdButtons = el("div", { className: "character-add-actions" }, [
@@ -3814,7 +3822,7 @@ async function render() {
       addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       // 検証で弾いた理由をそのまま見せる（何を直せばよいか分かるようにする）。
-      addStatus.textContent = `追加できませんでした: ${error?.message || error}`;
+      addStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
     }
   }
   const addButtons = el("div", { className: "character-add-actions" }, [
@@ -3960,7 +3968,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   } catch (error) {
     if (!isCurrent()) return;
     logApp("warn", "モデル一覧を取得できませんでした", errorDetail(error));
-    statusEl.textContent = `モデル一覧を取得できませんでした: ${error.message}`;
+    statusEl.textContent = `モデル一覧を取得できませんでした: ${errorMessage(error)}`;
     return;
   }
   if (!isCurrent()) return;
@@ -4130,7 +4138,7 @@ saveBtn.addEventListener("click", async () => {
     }
   } catch (error) {
     logApp("error", "設定保存に失敗しました", errorDetail(error));
-    statusEl.textContent = `保存に失敗: ${error?.message || error}`;
+    statusEl.textContent = `保存に失敗: ${errorMessage(error)}`;
   } finally {
     setSettingsMutationBusy(false);
   }
@@ -4148,7 +4156,7 @@ resetChangesBtn?.addEventListener("click", async () => {
     saveBtn.classList.remove("dirty");
   } catch (error) {
     logApp("error", "設定の復元表示に失敗しました", errorDetail(error));
-    statusEl.textContent = `設定の復元表示に失敗: ${error.message}`;
+    statusEl.textContent = `設定の復元表示に失敗: ${errorMessage(error)}`;
   } finally {
     renderingSettings = false;
     setSettingsMutationBusy(false);
@@ -4218,7 +4226,7 @@ document.addEventListener("keydown", event => {
     saveBtn.disabled = true;
     resetChangesBtn.disabled = true;
     logApp("error", "設定画面の読み込みに失敗しました", errorDetail(error));
-    statusEl.textContent = `設定画面の読み込みに失敗: ${error?.message || error}`;
+    statusEl.textContent = `設定画面の読み込みに失敗: ${errorMessage(error)}`;
     const retry = el("button", { type: "button", textContent: "再読み込み" });
     retry.addEventListener("click", () => window.location.reload());
     form.replaceChildren(
@@ -4230,5 +4238,5 @@ document.addEventListener("keydown", event => {
 })().catch(error => {
   renderingSettings = false;
   logApp("error", "設定初期化に失敗しました", errorDetail(error));
-  statusEl.textContent = `設定初期化に失敗: ${error?.message || error}`;
+  statusEl.textContent = `設定初期化に失敗: ${errorMessage(error)}`;
 });
