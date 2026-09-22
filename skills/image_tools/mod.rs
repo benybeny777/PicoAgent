@@ -16,6 +16,9 @@ use crate::message::Field;
 use crate::permissions::SafePath;
 use crate::text;
 
+/// 画像情報で返すレイヤー・フレームの行数上限。
+const MAX_INFO_LINES: usize = 50;
+
 pub struct ImageToolsTool;
 
 /// 入出力パスを共通の許可ルール（許可ルート・拒否パス・リンク実体）で解決する。
@@ -197,11 +200,24 @@ async fn run_info(cfg: &Config, args: &Value, timeout: u64) -> String {
     }
     let text = String::from_utf8_lossy(&result.stdout);
     let lines: Vec<&str> = text.lines().collect();
+    // 動画的なGIFはフレームごとに1行出るため、先頭だけを返す（数千フレームで文脈があふれる）。
+    let shown = lines
+        .iter()
+        .take(MAX_INFO_LINES)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let omitted = lines.len().saturating_sub(MAX_INFO_LINES);
     format!(
-        "{} の画像情報（{}レイヤー/フレーム）:\n{}",
+        "{} の画像情報（{}レイヤー/フレーム）:\n{}{}",
         input.display(),
         lines.len().max(1),
-        text.trim()
+        shown.trim(),
+        if omitted > 0 {
+            format!("\n…（残り {omitted} フレームは省略）")
+        } else {
+            String::new()
+        }
     )
 }
 
