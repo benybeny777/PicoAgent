@@ -13,7 +13,8 @@ const SRC_IMG = path.join(ROOT, "docs", "images");
 const OUT = path.join(ROOT, "docs", "IP-PROPOSAL-VTUBER.pptx");
 
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
-const IMG = fs.mkdtempSync(path.join(os.tmpdir(), "picoagent-deck-"));
+fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
+const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "picoagent-deck-"));
 const USED = ["layout-shot-stream", "layout-shot-workspace", "layout-shot-pet"];
 
 async function prepareImages() {
@@ -181,8 +182,8 @@ function badge(s, o) {
   });
   s.addText(
     [
-      { text: "本体アプリケーションは全機能を無料で配布しており、当方の収益源はキャラクターパックの販売のみです。", options: { bold: true, color: TEXT, breakLine: true } },
-      { text: "貴社キャラクターが生む売上は、そのすべてが分配の対象になります。お借りしたモデルデータが製品に含まれることはありません。", options: { color: MUTED } },
+      { text: "継続的な開発・運営のために収益化を目指します。本体の有償・無償、課金対象、価格、販売方式は未定です。", options: { bold: true, color: TEXT, breakLine: true } },
+      { text: "キャラクターパック販売と収益分配は検討案です。お借りしたモデルデータが製品に含まれることはありません。", options: { color: MUTED } },
     ],
     { x: M + 0.32, y: 6.04, w: CW - 0.64, h: 0.7, isTextBox: true, margin: 0, fontFace: JP, fontSize: 13, lineSpacing: 22 }
   );

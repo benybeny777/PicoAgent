@@ -458,6 +458,9 @@ function build() {
     s.addText("人格ロックとAI生成の常時表示は、審査側の要件を受けて一般配布前に実装します。", {
       x: M, y: 6.4, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
     });
+    s.addText("収益化を目指します。本体の有償・無償、課金対象、価格、販売方式は未定です。", {
+      x: M, y: 6.8, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
+    });
     pageNo(s, 9, true);
   }
 }
