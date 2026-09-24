@@ -3858,29 +3858,68 @@ async function render() {
 
   const mmdIdInput = el("input", { type: "text", value: `mmd-${Date.now().toString(36)}`, maxLength: 64 });
   const mmdNameInput = el("input", { type: "text", value: "マイMMD", maxLength: 80 });
-  async function installRawMmd(folder) {
-    addStatus.textContent = "選択中…";
+  // `terms` を渡した導線（ホロライブ公式MMD）は、配布元の規約を確認したチェックを必須にする。
+  async function installRawMmd(folder, { idInput = mmdIdInput, nameInput = mmdNameInput, terms = null, status = addStatus } = {}) {
+    status.textContent = "選択中…";
     try {
-      const id = mmdIdInput.value.trim();
-      const name = mmdNameInput.value.trim();
+      if (terms && !terms.checked) throw new Error("ホロライブの利用規約と二次創作ガイドラインを確認してください。");
+      const id = idInput.value.trim();
+      const name = nameInput.value.trim();
       if (!id || !name) throw new Error("キャラクターIDと表示名を入力してください。");
       if (characterCatalog.characters.some(character => character.id === id)) {
         throw new Error(`キャラクターID ${id} は既に使われています。別のIDにしてください。`);
       }
       const picked = await window.picoagent.settings.pickCharacterPack(folder);
-      if (!picked?.path) { addStatus.textContent = "選択をキャンセルしました。"; return; }
-      addStatus.textContent = "MMDモデルとテクスチャを確認しています…";
+      if (!picked?.path) { status.textContent = "選択をキャンセルしました。"; return; }
+      status.textContent = "MMDモデルとテクスチャを確認しています…";
       const result = await window.picoagent.settings.installMmdCharacter(picked.path, id, name);
       const added = await registerInstalledCharacter(result.id);
-      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
+      status.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
-      addStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
+      status.textContent = `追加できませんでした: ${errorMessage(error)}`;
     }
   }
   const rawMmdButtons = el("div", { className: "character-add-actions" }, [
     Object.assign(el("button", { className: "primary", type: "button", textContent: "MMDのzip／PMXを追加" }), { onclick: () => installRawMmd(false) }),
     Object.assign(el("button", { className: "secondary", type: "button", textContent: "MMDフォルダを追加" }), { onclick: () => installRawMmd(true) }),
   ]);
+
+  // --- ホロライブ公式モデルを取得して追加する導線 ---
+  // モデルはPicoAgentから再配布しない。利用者が公式配布ページで規約を確認して取得し、
+  // 取得したzipをそのまま既存のMMD追加（元ファイルを加工しない）へ渡す。
+  // 公式のLive2Dモデルは一般配布されていないため、配布ページへのリンクは置かない。
+  const HOLOLIVE_LINKS = [
+    ["公式MMD配布ページ", "https://www.mmd.hololive.tv/"],
+    ["MMDモデル利用規約", "https://www.mmd.hololive.tv/terms"],
+    ["二次創作ガイドライン", "https://hololivepro.com/terms/"],
+  ];
+  const hololiveLinks = el("div", { className: "setup-guide-links" }, HOLOLIVE_LINKS.map(([label, href]) => {
+    const link = el("a", { href, textContent: label });
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noreferrer");
+    return link;
+  }));
+  const hololiveIdInput = el("input", { type: "text", value: `holo-mmd-${Date.now().toString(36)}`, maxLength: 64 });
+  const hololiveNameInput = el("input", { type: "text", value: "", placeholder: "例: さくらみこ", maxLength: 80 });
+  const hololiveTermsInput = el("input", { type: "checkbox" });
+  // 欄の最下部にある共通の結果表示では、上にあるこの欄のボタンを押しても気づけない。
+  const hololiveStatus = el("p", { className: "hint", role: "status" });
+  const installHololiveMmd = folder => {
+    if (!hololiveNameInput.value.trim()) {
+      hololiveStatus.textContent = "追加できませんでした: 表示名（タレント名など）を入力してください。";
+      return;
+    }
+    installRawMmd(folder, { idInput: hololiveIdInput, nameInput: hololiveNameInput, terms: hololiveTermsInput, status: hololiveStatus });
+  };
+  const hololiveButtons = el("div", { className: "character-add-actions" }, [
+    Object.assign(el("button", { className: "primary", type: "button", textContent: "ダウンロードしたzip／PMXを追加" }), { onclick: () => installHololiveMmd(false) }),
+    Object.assign(el("button", { className: "secondary", type: "button", textContent: "展開したフォルダを追加" }), { onclick: () => installHololiveMmd(true) }),
+  ]);
+  const hololiveSteps = el("ol", { className: "hint hololive-steps" }, [
+    "「公式MMD配布ページ」を開き、使うタレントのモデルをダウンロードする（配布はニコニ立体）",
+    "「MMDモデル利用規約」と「二次創作ガイドライン」を読み、下のチェックを入れる",
+    "表示名を入れて「ダウンロードしたzip／PMXを追加」を押し、ダウンロードしたzipを選ぶ（zipにPMXが複数あるときは、展開して使うPMXを直接選ぶ）",
+  ].map(text => el("li", { textContent: text })));
 
   async function installCharacterPack(folder) {
     addStatus.textContent = "選択中…";
@@ -3909,6 +3948,19 @@ async function render() {
   ]);
   addSec.append(
     addHint,
+    el("div", { className: "subhead", textContent: "ホロライブ公式MMDモデルを取得して追加" }),
+    el("p", { className: "hint", textContent: "ホロライブ公式のMMDモデルは公式サイトから無料で配布されています。PicoAgentはモデルを同梱・再配布しないので、公式ページからご自身で取得してください。" }),
+    hololiveLinks,
+    hololiveSteps,
+    el("div", { className: "field" }, [el("label", { textContent: "表示名" }), hololiveNameInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), hololiveIdInput]),
+    el("label", { className: "check-row" }, [
+      hololiveTermsInput,
+      el("span", { textContent: "ホロライブの利用規約と二次創作ガイドラインを確認し、それに従って使います" }),
+    ]),
+    hololiveButtons,
+    hololiveStatus,
+    el("p", { className: "hint", textContent: "ホロライブ公式のLive2Dモデルは一般配布されていません。正式に提供を受けたLive2Dモデルは、下の「Live2Dモデルを追加」から追加できます。" }),
     el("div", { className: "subhead", textContent: "MMDモデルを追加" }),
     el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), mmdIdInput]),
     el("div", { className: "field" }, [el("label", { textContent: "表示名" }), mmdNameInput]),
