@@ -371,7 +371,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `tools/screenshots/native-inspect.mjs` | 起動中の実WebViewの状態取得・撮影。`noDefaults: true`でテーマ・省モーション・フォーカスを上書きせず接続し、一時画像は`temp/`へ保存する。検査用デバッグポートは終了後に設定から外す |
-| `tools/holo-indie-deck/build.js` | holo Indieへ応募する作品（本体はPicoAgent、ミニゲームはおまけ）の企画書PowerPoint（`docs/HOLO-INDIE-PLAN.pptx`）の生成。文面の正本は`docs/HOLO-INDIE-PLAN.md`で、PowerPointを直接編集しない。ミニゲームの画面は同じ場所の `capture.mjs` で撮る。使い方は `tools/holo-indie-deck/README.md` |
+| `tools/holo-indie-deck/build.js` | holo Indieへ応募する作品（本体はPicoAgent、ミニゲームはおまけ）の企画書PowerPoint（`docs/HOLO-INDIE-PLAN.pptx`）の生成。文面の正本は`docs/HOLO-INDIE-PLAN.md`で、PowerPointを直接編集しない。ミニゲームの画面は同じ場所の `capture.mjs`、さくらみこ・ひよりの画面と埋め込み動画は `capture-motion.mjs` で撮る。使い方は `tools/holo-indie-deck/README.md` |
 | `tools/ip-proposal-deck/build.js` | VTuber事務所へ送付する提案書PowerPoint（`docs/IP-PROPOSAL-VTUBER.pptx`）の生成。文面の正本は`docs/IP-PROPOSAL-VTUBER.md`で、PowerPointを直接編集しない。使い方は `tools/ip-proposal-deck/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |

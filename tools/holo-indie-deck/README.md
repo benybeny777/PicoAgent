@@ -9,24 +9,31 @@ holo Indie へ応募する作品 PicoAgent の企画書 `docs/HOLO-INDIE-PLAN.pp
 ## 使い方
 
 ```bash
-npm install -g pptxgenjs sharp playwright   # 初回だけ。アプリのビルドには不要な作業用ツール
+npm install -g pptxgenjs sharp jszip playwright   # 初回だけ。アプリのビルドには不要な作業用ツール
 git lfs pull                                 # docs/images/ の実体が必要
 node tools/holo-indie-deck/capture.mjs       # ミニゲームの結果画面を撮影（ゲーム画面を変えたときだけ）
+node tools/holo-indie-deck/capture-motion.mjs # さくらみこ・ひよりの実描画を録画
 node tools/holo-indie-deck/build.js          # docs/HOLO-INDIE-PLAN.pptx を生成
 ```
 
 Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODULE=<playwright の index.mjs>`、Chromium を指定する場合は `CHROMIUM_PATH` を渡します。
 
-## 掲載画像
+録画にはFFmpeg（H.264エンコーダ付き）、同期済みの`ui/assets/characters/hiyori/live2d/`、Live2D/MMDランタイム、`%APPDATA%/PicoAgent/characters/miko-mmd/character.json`とそのモデルが必要です。自動取得はしません。`PLAYWRIGHT_MODULE`でPlaywrightの`index.mjs`、`SHOOT_FFMPEG`でFFmpegを指定できます。別の作業ツリーに既存UI資産がある場合は`PICO_CAPTURE_SOURCE`にそのリポジトリの絶対パスを指定します。未指定時は現在のリポジトリを使用します。出力はこの生成ツールがあるリポジトリの`docs/images/`です。
 
-本体の画面は自社キャラクター「むぎ」の表示例です。公式キャラクター（審査版のさくらみこ公式MMD）の素材はリポジトリに無く、企画書にも入れません。画像の下に、審査版では公式モデルを表示する旨を書いています。
+## 掲載する画像と動画
 
-| 画像 | 使用箇所 |
+本体の画面例はさくらみこ公式MMDモデルで統一します。4枚目には、さくらみこのMMDとひよりのLive2Dを無音MP4として埋め込みます。さくらみこは7秒・30fps、ひよりは6秒・60fpsです。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。PowerPointのスライドショーで各動画をクリックすると再生します。静止画プレビューやPDFでは動画は動きません。
+
+| 素材 | 使用箇所 |
 |---|---|
-| `layout-shot-stream.webp` | 表紙、4枚目（配信用の表示） |
-| `layout-shot-pet.webp` | 3枚目（ペット形式） |
-| `layout-shot-chat.webp` | 5枚目（チャット形式） |
+| `holo-miko-stream.png` | 表紙（さくらみこの配信表示） |
+| `holo-miko-pet.png` | 3枚目（さくらみこのペット表示） |
+| `holo-miko-chat.png` | 5枚目（さくらみこのチャット表示） |
+| `holo-miko-motion.mp4` と `holo-miko-motion-poster.png` | 4枚目（さくらみこの動作） |
+| `holo-hiyori-motion.mp4` と `holo-hiyori-motion-poster.png` | 4枚目（ひよりのLive2D動作） |
 | `holo-indie-result.webp` | 6枚目（おまけのミニゲーム） |
+
+`capture-motion.mjs`は既存の`tools/screenshots/shoot.mjs`と同じ実フロントを使い、バックエンド応答だけを撮影用に固定します。AIの実応答や実音声の検証ではありません。導入済みモデルだけを読み取り、さくらみこのPMX・テクスチャや利用者設定は変更しません。モデル本体はPPTにもGitにも追加せず、表示した画面と録画だけを保存します。動画はH.264・yuv420pで、外部リンクに依存せずPPT内へ埋め込みます。
 
 `holo-indie-result.webp` は `capture.mjs` が撮ります。`ui/index.html`・`ui/styles.css`・`ui/game.js` をそのまま読み込み、採点AIだけを固定の採点結果へ差し替え、乱数も固定するので、同じゲーム画面からは同じ画像ができます。撮るのは操作・採点欄だけで、右側のキャラクター表示は含めません。
 

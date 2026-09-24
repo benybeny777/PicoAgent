@@ -1,12 +1,13 @@
 // docs/HOLO-INDIE-PLAN.md の内容から、holo Indie へ応募する作品（PicoAgent）の企画書PowerPointを生成する。
 // 実行: node tools/holo-indie-deck/build.js
-// 前提: pptxgenjs と sharp（アプリのビルドには不要な作業用ツール）。ミニゲームの画面は capture.mjs で撮る。
+// 前提: pptxgenjs・sharp・jszip（アプリのビルドには不要な作業用ツール）。ミニゲームの画面は capture.mjs で撮る。
 // 文面の正本は docs/HOLO-INDIE-PLAN.md（おまけのミニゲームは docs/HOLO-INDIE-MINIGAME.md）。
 // 先に正本を直してからこのスクリプトへ反映する。
 const fs = require("fs");
 const path = require("path");
 const pptxgen = require("pptxgenjs");
 const sharp = require("sharp");
+const JSZip = require("jszip");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const SRC_IMG = path.join(ROOT, "docs", "images");
@@ -15,12 +16,12 @@ const OUT = path.join(ROOT, "docs", "HOLO-INDIE-PLAN.pptx");
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
 fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
 const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "holo-indie-deck-"));
-// 本体の画面は自社キャラクター「むぎ」の表示例。公式キャラクターの素材はリポジトリに無く、企画書にも入れない。
-const USED = ["layout-shot-stream", "layout-shot-pet", "layout-shot-chat", "holo-indie-result"];
+// 本体画面はさくらみこ、ひよりはLive2Dの動作例として別に紹介する。
+const USED = ["holo-miko-stream", "holo-miko-pet", "holo-miko-chat", "holo-indie-result"];
 
 async function prepareImages() {
   for (const name of USED) {
-    const from = path.join(SRC_IMG, name + ".webp");
+    const from = path.join(SRC_IMG, name + (name === "holo-indie-result" ? ".webp" : ".png"));
     if (!fs.existsSync(from)) throw new Error("画像が見つかりません（holo-indie-* は capture.mjs で撮影してください）: " + from);
     const head = fs.readFileSync(from, { encoding: "utf8", flag: "r" }).slice(0, 20);
     if (head.startsWith("version https")) {
@@ -109,6 +110,9 @@ function shot(s, name, o) {
     fill: { color: NIGHT }, line: { color: NIGHT }, shadow: shadow(),
   });
   s.addImage({ path: path.join(IMG, name + ".png"), x: o.x, y: o.y, w: o.w, h: o.h });
+  if (name.startsWith("holo-miko-")) {
+    s.addNotes("さくらみこ公式MMDモデルをPicoAgentの実フロントで描画した画面。会話は撮影用の固定応答。モデル本体と利用者設定は変更していない。");
+  }
   if (o.caption) {
     s.addText(o.caption, {
       x: o.x - 0.2, y: o.y + o.h + 0.12, w: o.w + 0.4, h: 0.26, isTextBox: true, margin: 0,
@@ -118,7 +122,7 @@ function shot(s, name, o) {
 }
 
 function build() {
-  const SAMPLE = "画面は自社キャラクター「むぎ」での表示例。審査版ではさくらみこ公式MMDモデルを表示します";
+  const SAMPLE = "さくらみこ公式MMDモデルによる表示例";
 
   /* ---------- 1. 表紙 ---------- */
   {
@@ -157,7 +161,7 @@ function build() {
       ],
       { x: M, y: 5.35, w: 6, h: 1.0, isTextBox: true, margin: 0, fontFace: JP, fontSize: 13, color: NIGHT_MUTED, lineSpacing: 22 }
     );
-    shot(s, "layout-shot-stream", { x: 7.55, y: 2.0, w: 5.05, h: 2.84, caption: SAMPLE, dark: true });
+    shot(s, "holo-miko-stream", { x: 7.55, y: 2.0, w: 5.05, h: 2.84, caption: SAMPLE, dark: true });
   }
 
   /* ---------- 2. 企画の要点 ---------- */
@@ -218,7 +222,7 @@ function build() {
         x: M + 0.78, y: y + 0.38, w: 5.6, h: 0.52, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: MUTED, lineSpacing: 18, valign: "top",
       });
     });
-    shot(s, "layout-shot-pet", { x: 7.35, y: 1.9, w: 5.2, h: 3.47, caption: SAMPLE });
+    shot(s, "holo-miko-pet", { x: 7.35, y: 1.9, w: 5.2, h: 3.47, caption: SAMPLE });
     s.addText("ペット形式：左にフキダシ、右にキャラクター。いちばん普段づかいの表示です。", {
       x: 7.35, y: 5.95, w: 5.2, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
     });
@@ -229,40 +233,34 @@ function build() {
   {
     const s = pres.addSlide();
     s.background = { color: WHITE };
-    title(s, "CHARACTER", "キャラクターの表現");
-    const cards = [
-      { icon: "動", color: PINK, fill: PINK_SOFT, t: "動き", b: "審査版のMMDモデルは、自然な待機姿勢、上半身と首の控えめな待機動作、まばたき、表情の切り替えを端末内で描画します。元のモデルデータは加工しません。" },
-      { icon: "情", color: GOLD, fill: GOLD_SOFT, t: "感情", b: "話の流れから推定した感情（うれしい・悲しい・考え中など）に合わせて表情を変えます。" },
-      { icon: "映", color: MINT, fill: MINT_SOFT, t: "表示形式", b: "7種類を再起動なしで切り替えられます。フルHDの配信用表示では、背景つきの画面にキャラクターと会話を並べます。" },
+    title(s, "CHARACTER", "キャラクターが動く様子");
+    const demos = [
+      { name: "holo-miko-motion", label: "さくらみこ｜MMD", x: M, y: 2.15, w: 5.8, h: 3.2625,
+        body: "待機動作・まばたき・表情の変化", detail: "ホロライブ向けのキャラクター表示例" },
+      { name: "holo-hiyori-motion", label: "ひより｜Live2D", x: 6.85, y: 2.03, w: 5.75, h: 3.833333,
+        body: "滑らかな体の動き・髪の揺れ・口パク", detail: "Live2Dの動作例（ホロライブのキャラクターではありません）" },
     ];
-    cards.forEach((it, i) => {
-      const y = 1.72 + i * 1.62;
-      card(s, { x: M, y, w: 6.2, h: 1.42, fill: it.fill, line: it.fill });
-      badge(s, { x: M + 0.28, y: y + 0.28, d: 0.62, label: it.icon, fill: it.color, size: 18 });
-      s.addText(it.t, {
-        x: M + 1.15, y: y + 0.2, w: 4.8, h: 0.36, isTextBox: true, margin: 0, fontFace: JP, fontSize: 16, bold: true, color: TEXT,
-      });
-      s.addText(it.b, {
-        x: M + 1.15, y: y + 0.6, w: 4.85, h: 0.76, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11.5, color: TEXT, lineSpacing: 17, valign: "top",
-      });
+    for (const demo of demos) {
+      s.addText(demo.label, { x: demo.x, y: 1.65, w: demo.w, h: 0.32, margin: 0,
+        fontFace: JP, fontSize: 18, bold: true, color: TEXT });
+      const video = path.join(SRC_IMG, demo.name + ".mp4");
+      const poster = path.join(SRC_IMG, demo.name + "-poster.png");
+      for (const asset of [video, poster]) {
+        if (!fs.existsSync(asset) || fs.readFileSync(asset).subarray(0, 20).toString().startsWith("version https")) {
+          throw new Error("動画またはポスターの実体がありません。capture-motion.mjsで撮影してください: " + asset);
+        }
+      }
+      s.addMedia({ type: "video", path: video, cover: "image/png;base64," + fs.readFileSync(poster).toString("base64"),
+        x: demo.x, y: demo.y, w: demo.w, h: demo.h, objectName: demo.name });
+      s.addText(demo.body, { x: demo.x, y: 5.95, w: demo.w, h: 0.35, margin: 0,
+        fontFace: JP, fontSize: 16, bold: true, color: TEXT });
+      s.addText(demo.detail, { x: demo.x, y: 6.4, w: demo.w, h: 0.42, margin: 0,
+        fontFace: JP, fontSize: 11, color: MUTED });
+    }
+    s.addText("スライドショーで各動画をクリックして再生（音声なし）", {
+      x: M, y: 7.0, w: 10.8, h: 0.25, margin: 0, fontFace: JP, fontSize: 10, color: MUTED,
     });
-    const layouts = ["ミニ", "ペット", "チャット", "ウィジェット", "バー", "作業", "配信"];
-    const lx = 7.3;
-    s.addText("7つの表示形式", {
-      x: lx, y: 1.75, w: 5.2, h: 0.34, isTextBox: true, margin: 0, fontFace: JP, fontSize: 15, bold: true, color: TEXT,
-    });
-    layouts.forEach((t, i) => {
-      const x = lx + (i % 4) * 1.32;
-      const y = 2.25 + Math.floor(i / 4) * 0.56;
-      s.addShape(pres.ShapeType.roundRect, {
-        x, y, w: 1.2, h: 0.42, rectRadius: 0.21, fill: { color: t === "配信" ? PINK : ALT }, line: { color: t === "配信" ? PINK : LINE },
-      });
-      s.addText(t, {
-        x, y, w: 1.2, h: 0.42, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, bold: true,
-        color: t === "配信" ? WHITE : TEXT, align: "center", valign: "middle",
-      });
-    });
-    shot(s, "layout-shot-stream", { x: 7.35, y: 3.62, w: 5.15, h: 2.9, caption: "配信用の表示（" + SAMPLE.replace("画面は", "") + "）" });
+    s.addNotes("PicoAgentの実フロント描画を録画。会話は撮影用固定応答。さくらみこはローカル登録の公式MMDモデル、ひよりは導入済みLive2Dモデル。モデル本体は変更せず、録画のみ埋め込み。ひよりは描画機能の参考例で、holo Indie審査ビルドへの同梱キャラクターではない。");
     pageNo(s, 4);
   }
 
@@ -292,7 +290,7 @@ function build() {
     s.addText("PC操作や外部サービスとの連携は、安全のため既定では無効です。", {
       x: M, y: 6.1, w: 6.9, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
     });
-    shot(s, "layout-shot-chat", { x: 8.65, y: 1.25, w: 3.4, h: 4.97, caption: "チャット形式（審査版の初期表示。自社キャラでの表示例）" });
+    shot(s, "holo-miko-chat", { x: 8.65, y: 1.25, w: 3.4, h: 4.25, caption: "さくらみこ：チャット形式（審査版の初期表示）" });
     pageNo(s, 5);
   }
 
@@ -468,11 +466,27 @@ function build() {
   }
 }
 
+// 生成ライブラリが残す未使用マスター宣言と、動画クリックの空参照を正規化する。
+// 動画のクリック動作・実体への参照・スライドの内容は保つ。
+async function normalizePackage() {
+  const zip = await JSZip.loadAsync(fs.readFileSync(OUT));
+  const types = await zip.file("[Content_Types].xml").async("string");
+  zip.file("[Content_Types].xml", types.replace(/<Override\b[^>]*PartName="([^"]+)"[^>]*\/>/g,
+    (entry, name) => zip.file(name.replace(/^\//, "")) ? entry : ""));
+  for (const name of Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))) {
+    const xml = await zip.file(name).async("string");
+    zip.file(name, xml.replace(/<a:hlinkClick r:id="" action="ppaction:\/\/media"\/>/g,
+      '<a:hlinkClick action="ppaction://media"/>'));
+  }
+  fs.writeFileSync(OUT, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+}
+
 (async () => {
   try {
     await prepareImages();
     build();
     await pres.writeFile({ fileName: OUT });
+    await normalizePackage();
     console.log("生成しました: " + OUT);
   } finally {
     fs.rmSync(IMG, { recursive: true, force: true });
