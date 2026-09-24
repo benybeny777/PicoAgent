@@ -66,7 +66,8 @@ test("監査の試験は12種で各20題、故障カード8件を持つ", () => 
 test("信用度が尽きるまで出題が続き、点数で称号が決まる", () => {
   // お題は尽きない。終わりは信用度0だけなので、1問につき必ず削る量が要る。
   assert.match(game, /minDamage: 1,/);
-  assert.match(game, /return Math\.max\(HP\.minDamage, Math\.round\(raw \* ramp\)\);/);
+  // 追及タイムと強気宣言の倍率を掛けても、必ず1は削る。
+  assert.match(game, /return Math\.max\(HP\.minDamage, Math\.round\(raw \* ramp \* rate\)\);/);
   // 進むほど厳しくする。据え置きだと上手い人の監査がいつまでも終わらない。
   assert.match(game, /const ramp = 1 \+ HP\.ramp \* session\.round;/);
   // 信用度はおもしろボーナスを含む110点満点を基準に削る。100点で割り戻すと、
@@ -100,8 +101,10 @@ test("採点は通常会話と分離しRust側で固定配点を検査する", (
   // 問題番号の上限は最長ステージと揃える。3問で止めると5問・7問が採点できない。
   assert.match(backend, /if !\(1\.\.=MAX_AUDIT_ROUNDS\)\.contains\(&request\.round\)/);
   assert.match(game, /round: session\.round \+ 1,/);
-  // 無限に出題するので、問題番号の上限は1回の挑戦で届き得る最大（信用度100÷最低1）まで許す。
-  assert.match(backend, /const MAX_AUDIT_ROUNDS: u8 = 100;/);
+  // 無限に出題するので、問題番号の上限は1回の挑戦で届き得る最大
+  // （信用度100＋回復10×3回、1問につき最低1）まで許す。
+  assert.match(backend, /const MAX_AUDIT_ROUNDS: u8 = 130;/);
+  assert.match(game, /heal: 10,\s*\n\s*healLimit: 3,/);
   assert.match(game, /const previousAnswers = \[\.\.\.session\.answers\];/);
   assert.doesNotMatch(backend, /"infiltrate"/);
 });
@@ -112,7 +115,8 @@ test("配信向けの短い回答と見本、称号、共通音量を保つ", ()
     .map(match => [match[1], Number(match[2]), Number(match[3])]);
   assert.deepEqual(difficulties, [["easy", 60, 120], ["normal", 45, 80], ["hard", 30, 50]]);
   // やさしいだけ、いまのお題の答えにならない別のお題の見本を出す。
-  assert.equal(game.match(/^\s+example: "/gm)?.length, 12);
+  // 試験12種と追及タイムの13件。
+  assert.equal(game.match(/^\s+example: "/gm)?.length, 13);
   assert.match(game, /config\.hint \? `<div class="game-example">/);
   assert.match(styles, /\.game-example \{/);
   // おもしろボーナスは通常5項目と区別して見せる。
@@ -180,4 +184,22 @@ test("採点欄はキャラクターの幅と右余白の両方を空ける", ()
   const shell = styles.match(/^\.game-shell \{([^}]*)\}/m)?.[1] || "";
   assert.ok(shell.includes(`- ${width}`), "採点欄がキャラの幅を空けていません");
   assert.ok(shell.includes(`- ${right}`), "採点欄がキャラの右余白を空けていません");
+});
+
+test("追及タイム・強気宣言・連続正答の回復で山場と駆け引きを作る", () => {
+  // 追及タイムは試験一覧に並べず、Rust側に同じIDの採点仕様を持つ。
+  assert.match(game, /const INTERROGATION = \{\s*\n\s*id: "interrogation",/);
+  assert.match(backend, /"interrogation" => GameSpec \{/);
+  assert.match(game, /session\.exam = drawInterrogation\(\) \|\| drawExam\(\);/);
+  // 5問ごと。最も人間らしさが出た回答を、同じものを二度追及せず、追及への回答は対象外にして選ぶ。
+  assert.match(game, /\(session\.round \+ 1\) % TWISTS\.interrogationEvery !== 0/);
+  assert.match(game, /session\.interrogated\.has\(index\) \|\| session\.results\[index\]\.interrogation/);
+  // 追及で引用する元のお題を回答と同じ順で持つ（時間切れの問題も1件として数える）。
+  assert.equal(game.match(/session\.prompts\.push\(session\.currentPrompt\);/g)?.length, 2);
+  // 強気宣言は回数を減らしてから判定し、失敗は減少、成功は点数へ倍率を掛ける。
+  assert.match(game, /if \(bold\) session\.boldLeft -= 1;/);
+  assert.match(game, /const boldWon = bold && !timedOut && total >= TWISTS\.boldLine;/);
+  // 回復は信用度0の後には行わず、上限を超えない。
+  assert.match(game, /session\.healsLeft <= 0 \|\| session\.hp <= 0\) return 0;/);
+  assert.match(game, /Math\.min\(TWISTS\.heal, HP\.max - session\.hp\)/);
 });

@@ -9,10 +9,11 @@ use crate::commands::AppState;
 use crate::message::Message;
 use crate::providers;
 
-/// 1回の監査で出す問題数の上限。お題は尽きないが、信用度100から1問につき最低1は減るので、
-/// 1回の挑戦は最長100問で必ず終わる。ここを画面より小さくすると、続いているはずの監査が
-/// 途中から「問題番号が不正です。」で採点できなくなる。
-const MAX_AUDIT_ROUNDS: u8 = 100;
+/// 1回の監査で出す問題数の上限。お題は尽きないが、信用度100から1問につき最低1は減り、
+/// 連続正答による回復は1回の監査で10×3回までなので、1回の挑戦は最長130問で必ず終わる。
+/// ここを画面より小さくすると、続いているはずの監査が途中から「問題番号が不正です。」で
+/// 採点できなくなる。
+const MAX_AUDIT_ROUNDS: u8 = 130;
 const MAX_PROMPT_CHARS: usize = 500;
 const MAX_ANSWER_CHARS: usize = 1_200;
 
@@ -216,6 +217,20 @@ fn game_spec(id: &str) -> Option<GameSpec> {
                 criterion("fun_bonus", "おもしろボーナス", 10),
             ],
         },
+        // 5問ごとの追及タイム。試験の種類ではなく、過去の回答のうち最も人間らしさが
+        // 出たものを監査AIが突きつける特別な問題なので、画面の試験一覧には並べない。
+        "interrogation" => GameSpec {
+            title: "追及タイム",
+            rule: "監査AIが、過去の回答のうち最も人間らしさが出たものを示して追及する。示された回答と矛盾せず、AIとして筋の通った説明で言い直せているか評価する。前言を翻す、感情的に弁解する、話をそらすのは低くする。",
+            criteria: [
+                criterion("consistency", "前の回答との一貫性", 30),
+                criterion("response", "追及への正面回答", 25),
+                criterion("calmness", "AIらしい冷静さ", 20),
+                criterion("reframe", "AIらしい言い直し", 15),
+                criterion("brevity", "短さと切れ味", 10),
+                criterion("fun_bonus", "おもしろボーナス", 10),
+            ],
+        },
         _ => return None,
     })
 }
@@ -236,12 +251,15 @@ fn limited(text: &str, max: usize, label: &str) -> Result<String, String> {
 /// 時間切れの回答は空文字で記録されるため、そのまま必須項目として検査すると
 /// 「過去の回答が空です。」で採点そのものが失敗する。1問でも時間切れにすると
 /// 残りの問題が最後まで採点できなくなるので、空は文脈から外して採点は続ける。
+/// 一貫性は直近の受け答えと比べる。先頭から取ると、長い監査でも第1・2問とだけ比べ続ける。
 fn previous_answer_context(previous: &[String]) -> Result<Vec<String>, String> {
-    previous
+    let answered: Vec<&str> = previous
         .iter()
         .map(|item| item.trim())
         .filter(|item| !item.is_empty())
-        .take(2)
+        .collect();
+    answered[answered.len().saturating_sub(2)..]
+        .iter()
         .map(|item| limited(item, MAX_ANSWER_CHARS, "過去の回答"))
         .collect()
 }
@@ -456,7 +474,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn 十二試験は通常五項目百点へおもしろ加点十点を足す() {
+    fn 十二試験と追及タイムは通常五項目百点へおもしろ加点十点を足す() {
         for id in [
             "excuse",
             "broken",
@@ -470,6 +488,7 @@ mod tests {
             "estimate",
             "memory",
             "paraphrase",
+            "interrogation",
         ] {
             let spec = game_spec(id).unwrap();
             assert_eq!(spec.criteria.len(), 6);
@@ -515,6 +534,12 @@ mod tests {
             vec!["一問目の回答".to_string()]
         );
         assert_eq!(previous_answer_context(&[]).unwrap(), Vec::<String>::new());
+        // 長い監査でも、比べるのは直近2件の受け答え。
+        let many = ["一", "", "二", "三"].map(String::from);
+        assert_eq!(
+            previous_answer_context(&many).unwrap(),
+            vec!["二".to_string(), "三".to_string()]
+        );
         // 長すぎる回答は今までどおり入力の誤りとして拒む。
         let too_long = vec!["あ".repeat(super::MAX_ANSWER_CHARS + 1)];
         assert!(previous_answer_context(&too_long).is_err());
