@@ -4,7 +4,6 @@
 // 文面の正本は docs/HOLO-INDIE-PLAN.md（おまけのミニゲームは docs/HOLO-INDIE-MINIGAME.md）。
 // 先に正本を直してからこのスクリプトへ反映する。
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const pptxgen = require("pptxgenjs");
 const sharp = require("sharp");
@@ -14,7 +13,8 @@ const SRC_IMG = path.join(ROOT, "docs", "images");
 const OUT = path.join(ROOT, "docs", "HOLO-INDIE-PLAN.pptx");
 
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
-const IMG = fs.mkdtempSync(path.join(os.tmpdir(), "holo-indie-deck-"));
+fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
+const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "holo-indie-deck-"));
 // 本体の画面は自社キャラクター「むぎ」の表示例。公式キャラクターの素材はリポジトリに無く、企画書にも入れない。
 const USED = ["layout-shot-stream", "layout-shot-pet", "layout-shot-chat", "holo-indie-result"];
 

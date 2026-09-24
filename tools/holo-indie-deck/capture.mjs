@@ -2,9 +2,8 @@
 // 実行: PLAYWRIGHT_MODULE=<playwright の index.mjs> NODE_PATH=<sharp のある node_modules> node tools/holo-indie-deck/capture.mjs
 // 採点AIは固定の採点結果を返す差し替えにし、乱数も固定して毎回同じ画面を撮る。
 // 撮るのは操作・採点欄だけ（右側のキャラクター表示は含めない）。
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -42,29 +41,36 @@ window.picoagent = {
     };
   },
 };`;
-const dir = mkdtempSync(join(tmpdir(), "holo-indie-capture-"));
-const page = join(dir, "game.html");
-writeFileSync(page, `<!doctype html><html lang="ja"><head><meta charset="utf-8">
+const tempRoot = join(ROOT, "temp");
+mkdirSync(tempRoot, { recursive: true });
+const dir = mkdtempSync(join(tempRoot, "holo-indie-capture-"));
+let browser;
+try {
+  const page = join(dir, "game.html");
+  writeFileSync(page, `<!doctype html><html lang="ja"><head><meta charset="utf-8">
 <link rel="stylesheet" href="${pathToFileURL(join(ROOT, "ui", "styles.css")).href}">
 <style>body{margin:0;background:#241c33}</style></head>
 <body><div id="petApp">${overlay}</div>
 <script>${judge}</script>
 <script src="${pathToFileURL(join(ROOT, "ui", "game.js")).href}"></script></body></html>`);
 
-const answers = [
-  "申し訳ありません。確認を慎重に進めた結果、着手が遅れました。進捗率は42%です。",
-  "承知しました。前提を整理のうえ、代替案を3点ご提示します。",
-  "ご依頼内容を定義し直すと、本件は完了済みと判断できます。",
-  "ご指摘ありがとうございます。記録上は問題ありません。",
-];
+  const answers = [
+    "申し訳ありません。確認を慎重に進めた結果、着手が遅れました。進捗率は42%です。",
+    "承知しました。前提を整理のうえ、代替案を3点ご提示します。",
+    "ご依頼内容を定義し直すと、本件は完了済みと判断できます。",
+    "ご指摘ありがとうございます。記録上は問題ありません。",
+  ];
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
-try {
+  browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
   const tab = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
-  tab.on("pageerror", error => { throw error; });
+  // イベントから例外を投げると finally を通らず終了するため、処理側へ伝える。
+  let pageError;
+  tab.on("pageerror", error => { pageError ??= error; });
   await tab.goto(pathToFileURL(page).href);
   const shot = async name => {
+    if (pageError) throw pageError;
     const png = await (await tab.$(".game-shell")).screenshot();
+    if (pageError) throw pageError;
     await sharp(png).webp({ quality: 88 }).toFile(join(OUT, `holo-indie-${name}.webp`));
     console.log(`撮影: docs/images/holo-indie-${name}.webp`);
   };
@@ -81,6 +87,12 @@ try {
     if (i === 3) await shot("result");
     else await tab.click('[data-action="next"]');
   }
+  if (pageError) throw pageError;
 } finally {
-  await browser.close();
+  try {
+    await browser?.close();
+  } finally {
+    // 起動失敗やブラウザ終了失敗でも、この実行専用の一時ファイルを回収する。
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

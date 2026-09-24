@@ -1879,6 +1879,10 @@ pub async fn pet_send(
         },
         None => text,
     };
+    // 番号を選択肢へ展開した本文も、要約・複数AI・履歴保存へ渡す前に照合する。
+    if let Some(reply) = topic_guard_reply(&app, &text) {
+        return Ok(reply);
+    }
     let user_text = text.clone();
     let request_character_id = active_character_id(&state);
     let request_epoch = state.conversation_epoch();
@@ -5731,6 +5735,31 @@ mod project_context_tests {
 
 #[cfg(test)]
 mod guard {
+    #[test]
+    fn 選択肢へ展開した本文は要約や複数aiへ渡す前に話題を照合する() {
+        let source = &crate::guard_scan::backend_sources()
+            .iter()
+            .find(|source| source.path.ends_with("src-tauri/src/commands.rs"))
+            .expect("commands.rsを読み込める")
+            .text;
+        let send = source.split_once("pub async fn pet_send(").unwrap().1;
+        let resolved = send
+            .split_once("resolve_answer(&question, &text)")
+            .unwrap()
+            .1;
+        let checked = resolved.find("topic_guard_reply(&app, &text)").unwrap();
+        for next in [
+            "let user_text",
+            "configured_multi_ai_args(",
+            "maybe_summarize_context(",
+        ] {
+            assert!(
+                checked < resolved.find(next).unwrap(),
+                "{next} より前に照合が必要です"
+            );
+        }
+    }
+
     /// ファイル走査・展開・書き込みを行うcommandを同期IPCへ戻すと、処理中にWebViewが固まる。
     #[test]
     fn 重いio_commandはtauriの非同期実行枠を使う() {
