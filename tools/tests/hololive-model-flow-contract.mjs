@@ -29,3 +29,15 @@ test("初回案内から公式MMD配布ページを開ける", () => {
   assert.match(index, /<a class="onboarding-link" href="https:\/\/www\.mmd\.hololive\.tv\/" target="_blank" rel="noreferrer"><b>ホロライブ公式MMDを取得<\/b>/);
   assert.match(index, /data-onboarding-action="add-character"><b>取得したモデルをPicoAgentへ追加<\/b>/);
 });
+
+test("Live2Dは公式サンプル（桃瀬ひより など）の日本語ページへ案内する", () => {
+  const links = settings.match(/const LIVE2D_SAMPLE_LINKS = \[([\s\S]*?)\n  \];/)?.[1] || "";
+  const urls = [...links.matchAll(/"(https:\/\/[^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(urls, [
+    "https://www.live2d.com/learn/sample/",
+    "https://www.live2d.com/eula/live2d-sample-model-terms_jp.html",
+  ]);
+  // 英語版（/en/）へは案内しない。
+  assert.doesNotMatch(settings + index, /live2d\.com\/en\//);
+  assert.match(index, /<b>Live2D公式サンプル（桃瀬ひより など）を取得<\/b>/);
+});
