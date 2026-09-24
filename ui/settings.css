@@ -692,6 +692,15 @@ body.searching .tab-panel {
   margin: 4px 0;
   line-height: 1.45;
 }
+.hololive-steps {
+  margin: 6px 0 10px;
+  padding-left: 1.4em;
+}
+
+.hololive-steps li {
+  margin: 3px 0;
+}
+
 .setup-guide-links {
   display: flex;
   flex-wrap: wrap;
