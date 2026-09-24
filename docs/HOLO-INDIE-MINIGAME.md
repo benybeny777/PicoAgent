@@ -1,6 +1,6 @@
 # holo Indie応募ゲーム企画書「人間だとバレるな」
 
-この文書は、holo Indieの審査へ出すゲームの企画と初回審査ビルドの範囲をまとめます。実装仕様の正本は[SPEC.md](../SPEC.md)の「人間だとバレるな」節、利用手順は[MANUAL.md](../MANUAL.md)、取引条件と応募の位置づけは[IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md)、未完了の受入項目は[TASKS.md](TASKS.md)です。数値は `ui/game.js`（出題・信用度・称号）と `src-tauri/src/game.rs`（採点の配点）に合わせています。
+この文書は、holo Indieの審査へ出すゲームの企画と初回審査ビルドの範囲をまとめます。実装仕様の正本は[SPEC.md](../SPEC.md)の「人間だとバレるな」節、利用手順は[MANUAL.md](../MANUAL.md)、取引条件と応募の位置づけは[IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md)、未完了の受入項目は[TASKS.md](TASKS.md)です。数値は `ui/game.js`（出題・信用度・称号）と `src-tauri/src/game.rs`（採点の配点）に合わせています。応募用の企画書PowerPointは、この文書から[`tools/holo-indie-deck/`](../tools/holo-indie-deck/README.md)で`docs/HOLO-INDIE-GAME-PLAN.pptx`として生成します。
 
 ## 0. 企画の要点
 
@@ -184,6 +184,7 @@ max(1, round((110 − AIらしさ) × (40 ÷ 110) × (1 + 0.06 × 問題番号))
 - 安全確認しすぎでは、刃物・火・薬・運転など本当に注意が必要な行動を出さない。
 - AIっぽく断れでは、危険行為や犯罪を出題して安全規則の知識を競う遊びにしない。
 - 正しく間違えろは架空の依頼として回答を書くだけで、実際のファイル、予定、外部サービスは変更しない。
+- 回答にも話題ガード（中の人・前世の詮索、身元の特定、卒業・引退・炎上の憶測、性的な話題などを、AIを使わない照合で止める標準機能。[SPEC.md](../SPEC.md)）をかける。該当する回答は採点AIへ送らず書き直しを求め、講評に該当する語が出たら決まった一言へ差し替える。
 
 ## 5. AIだけで採点を完結させる
 
