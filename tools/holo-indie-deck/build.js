@@ -437,6 +437,9 @@ function build() {
     s.addText("今後の予定", {
       x: M, y: 0.8, w: CW, h: 0.6, isTextBox: true, margin: 0, fontFace: JP, fontSize: 28, bold: true, color: WHITE,
     });
+    s.addText("会話・音声・表情を中心に、実務機能の削減や専用版からの除外も検討します。対象は未定です。", {
+      x: M, y: 1.45, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
+    });
     const next = [
       ["鍵", "人格ロック", "公式キャラクターの人格・口調を、利用者が上書きできなくする"],
       ["表", "AI生成である旨の常時表示", "「AIによる生成であり、ご本人の発言ではない」旨をアプリ内に常に表示する"],
