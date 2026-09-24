@@ -569,10 +569,16 @@
   }
 
   function renderQuestion() {
-    const { difficulty, round } = session;
-    const config = DIFFICULTIES[difficulty];
     session.exam = drawInterrogation() || drawExam();
     session.boldArmed = false;
+    session.remaining = DIFFICULTIES[session.difficulty].seconds;
+    renderCurrentQuestion();
+  }
+
+  // 採点拒否から戻るときは、抽選・追及対象・強気宣言を変更せず回答だけ直せる。
+  function renderCurrentQuestion(answer = "") {
+    const { difficulty, round } = session;
+    const config = DIFFICULTIES[difficulty];
     const { source, fault } = session.exam;
     const prompt = promptForRound();
     session.currentPrompt = prompt;
@@ -581,7 +587,7 @@
     setStatus("");
     content.innerHTML = `
       <div class="game-play">
-        <div class="game-progress"><span>第${round + 1}問 / ${session.score}点</span><div><i style="width:${(session.hp / HP.max) * 100}%"></i></div><strong id="gameTimer">${config.seconds}</strong></div>
+        <div class="game-progress"><span>第${round + 1}問 / ${session.score}点</span><div><i style="width:${(session.hp / HP.max) * 100}%"></i></div><strong id="gameTimer">${session.remaining}</strong></div>
         ${hpMeter(session.hp)}
         <div class="game-exam"${source === INTERROGATION ? ' data-kind="interrogation"' : ""}><small>${source === INTERROGATION ? `減少・点数${TWISTS.interrogationRate}倍` : "監査AIの試験"}</small><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.rule)}</span></div>
         ${fault ? `<div class="game-fault"><small>今回の故障</small><strong>${escapeHtml(fault[0])}</strong><span>${escapeHtml(fault[1])}</span></div>` : ""}
@@ -597,13 +603,17 @@
     const textarea = document.getElementById("gameAnswer");
     const count = document.getElementById("gameCount");
     const submit = document.getElementById("gameSubmit");
-    textarea.addEventListener("input", () => {
+    const updateAnswer = () => {
       const length = textarea.value.length;
       count.textContent = String(length);
       submit.disabled = textarea.value.trim().length < 10;
-    });
+    };
+    textarea.value = answer;
+    updateAnswer();
+    textarea.addEventListener("input", updateAnswer);
     submit.addEventListener("click", () => submitAnswer(textarea.value));
     const boldButton = document.getElementById("gameBold");
+    boldButton.setAttribute("aria-pressed", String(session.boldArmed));
     boldButton.addEventListener("click", () => {
       if (session?.phase !== "question" || session.boldLeft <= 0) return;
       session.boldArmed = !session.boldArmed;
@@ -613,16 +623,20 @@
     textarea.focus();
     const spokenFault = fault ? `今回の故障は、${fault[0]}。${fault[1]}。` : "";
     speakGame(`第${round + 1}問。試験、${source.title}。${spokenFault}${prompt}`);
-    let remaining = config.seconds;
     clearTimer();
+    // 自動提出後の拒否は残り0秒。即座に再送せず、修正して手動提出できるようにする。
+    if (session.remaining <= 0) {
+      setStatus("制限時間は終了しています。回答を修正して提出してください。");
+      return;
+    }
     timerId = window.setInterval(() => {
-      remaining -= 1;
+      session.remaining -= 1;
       const timer = document.getElementById("gameTimer");
       if (timer) {
-        timer.textContent = String(Math.max(0, remaining));
-        timer.dataset.urgent = remaining <= 10 ? "true" : "false";
+        timer.textContent = String(Math.max(0, session.remaining));
+        timer.dataset.urgent = session.remaining <= 10 ? "true" : "false";
       }
-      if (remaining > 0) return;
+      if (session.remaining > 0) return;
       clearTimer();
       if (textarea.value.trim().length >= 10) submitAnswer(textarea.value);
       else showNoAnswer();
@@ -680,9 +694,10 @@
       if (stale()) return;
       playTone("error");
       session.phase = "question";
-      content.innerHTML = `<div class="game-error"><strong>照合できませんでした</strong><p>${escapeHtml(error?.message || error)}</p><div><button class="game-secondary" type="button" data-action="quit">監査をやめる</button><button class="game-primary" type="button" data-action="retry">同じ回答をもう一度出す</button></div></div>`;
+      content.innerHTML = `<div class="game-error"><strong>照合できませんでした</strong><p>${escapeHtml(error?.message || error)}</p><div><button class="game-secondary" type="button" data-action="quit">監査をやめる</button><button class="game-secondary" type="button" data-action="edit">回答を書き直す</button><button class="game-primary" type="button" data-action="retry">同じ回答をもう一度出す</button></div></div>`;
       setStatus("回答は失われていません。", "error");
       content.querySelector('[data-action="quit"]').addEventListener("click", renderBriefing);
+      content.querySelector('[data-action="edit"]').addEventListener("click", () => renderCurrentQuestion(answer));
       content.querySelector('[data-action="retry"]').addEventListener("click", () => submitAnswer(answer));
     }
   }

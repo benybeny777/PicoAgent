@@ -12,6 +12,24 @@ const clearSettingsSearch = document.getElementById("clearSettingsSearch");
 const dirtySummary = document.getElementById("dirtySummary");
 const { errorDetail, errorMessage, logApp, tail, twoStepAction } = window.PicoUI;
 
+// 公式モデルの取得・規約リンクは、WebViewの新窓ではなく既定ブラウザで開く。
+function officialModelLink(label, href, status) {
+  const link = el("a", { href, textContent: label });
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noreferrer");
+  link.addEventListener("click", async event => {
+    event.preventDefault();
+    status.textContent = "公式ページを開いています…";
+    try {
+      await window.picoagent.openExternalUrl(href);
+      status.textContent = "公式ページを既定ブラウザで開きました。";
+    } catch (error) {
+      status.textContent = `公式ページを開けませんでした: ${errorMessage(error)}`;
+    }
+  });
+  return link;
+}
+
 let data; // settings:load の結果
 const inputs = new Map(); // key -> input 要素
 const inputWrappers = new Map(); // key -> field/card 要素
@@ -3818,15 +3836,10 @@ async function render() {
     ["Live2D公式サンプルデータ集", "https://www.live2d.com/learn/sample/"],
     ["サンプルデータ利用条件", "https://www.live2d.com/eula/live2d-sample-model-terms_jp.html"],
   ];
-  const officialLinks = el("div", { className: "setup-guide-links" }, LIVE2D_SAMPLE_LINKS.map(([label, href]) => {
-    const link = el("a", { href, textContent: label });
-    link.setAttribute("target", "_blank");
-    link.setAttribute("rel", "noreferrer");
-    return link;
-  }));
-
   // 結果はLive2D欄のボタン直下へ出す（欄の最下部の共通表示では気づけない）。
   const live2dStatus = el("p", { className: "hint", role: "status" });
+  const officialLinks = el("div", { className: "setup-guide-links" },
+    LIVE2D_SAMPLE_LINKS.map(([label, href]) => officialModelLink(label, href, live2dStatus)));
   async function installRawLive2d(folder) {
     live2dStatus.textContent = "選択中…";
     try {
@@ -3898,17 +3911,13 @@ async function render() {
     ["MMDモデル利用規約", "https://www.mmd.hololive.tv/terms"],
     ["二次創作ガイドライン", "https://hololivepro.com/terms/"],
   ];
-  const hololiveLinks = el("div", { className: "setup-guide-links" }, HOLOLIVE_LINKS.map(([label, href]) => {
-    const link = el("a", { href, textContent: label });
-    link.setAttribute("target", "_blank");
-    link.setAttribute("rel", "noreferrer");
-    return link;
-  }));
   const hololiveIdInput = el("input", { type: "text", value: `holo-mmd-${Date.now().toString(36)}`, maxLength: 64 });
   const hololiveNameInput = el("input", { type: "text", value: "", placeholder: "例: さくらみこ", maxLength: 80 });
   const hololiveTermsInput = el("input", { type: "checkbox" });
   // 欄の最下部にある共通の結果表示では、上にあるこの欄のボタンを押しても気づけない。
   const hololiveStatus = el("p", { className: "hint", role: "status" });
+  const hololiveLinks = el("div", { className: "setup-guide-links" },
+    HOLOLIVE_LINKS.map(([label, href]) => officialModelLink(label, href, hololiveStatus)));
   const installHololiveMmd = folder => {
     if (!hololiveNameInput.value.trim()) {
       hololiveStatus.textContent = "追加できませんでした: 表示名（タレント名など）を入力してください。";

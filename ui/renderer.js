@@ -6512,6 +6512,12 @@ async function completeSelectedOnboarding(openCharacterSettings) {
 
 onboarding?.addEventListener("click", async event => {
   const target = event.target instanceof Element ? event.target : null;
+  const officialLink = target?.closest("a.onboarding-link");
+  if (officialLink) {
+    event.preventDefault();
+    await openExternalUrl(officialLink.href);
+    return;
+  }
   const actionButton = target?.closest("button[data-onboarding-action]");
   const action = actionButton?.dataset.onboardingAction;
   if (action === "add-character") {

@@ -190,6 +190,11 @@ const SUBJECT_PARTICLES: &[char] = &['の', 'は', 'が', 'も', 'っ', 'を', '
 /// 「中 の 人」「中・の・人」「ＶＴｕｂｅｒ」のような書き方の差で素通りさせない。
 fn normalize(text: &str) -> String {
     text.chars()
+        // 全角の引用符やハイフンも、半角化した後で区切りとして取り除く。
+        .map(|c| match c {
+            '！'..='～' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            _ => c,
+        })
         .filter(|c| {
             !c.is_whitespace()
                 && !matches!(
@@ -218,7 +223,6 @@ fn normalize(text: &str) -> String {
         .map(|c| match c {
             // 読点は主語の区切り（「僕、引退する」）として残し、1種類へ揃える。
             ',' | '，' => '、',
-            '！'..='～' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
             _ => c,
         })
         .flat_map(char::to_lowercase)
@@ -307,6 +311,9 @@ mod tests {
             "中 の 人 教えて",
             "中・の・人",
             "中、の、人",
+            "中－の－人",
+            "中＂の＂人",
+            "中＇の＇人",
             "ナカノヒトは？",
             "前世の名前を知ってる？",
             "身バレしたって本当？",

@@ -5,7 +5,52 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [settings, index] = await Promise.all([read("ui/settings.js"), read("ui/index.html")]);
+const [settings, index, renderer] = await Promise.all([read("ui/settings.js"), read("ui/index.html"), read("ui/renderer.js")]);
+
+test("公式モデルリンクは新窓を抑止し、既定ブラウザの成功と失敗を欄内に表示する", async () => {
+  const source = settings.slice(settings.indexOf("function officialModelLink("), settings.indexOf("\nlet data;"));
+  const calls = [];
+  let fail = false;
+  const factory = new Function("el", "window", "errorMessage", `${source}; return officialModelLink;`)(
+    (_tag, props) => ({ ...props, setAttribute() {}, addEventListener(_event, handler) { this.click = handler; } }),
+    { picoagent: { async openExternalUrl(url) { calls.push(url); if (fail) throw new Error("ブラウザ起動失敗"); } } },
+    error => error.message,
+  );
+  const status = { textContent: "" };
+  const link = factory("公式ページ", "https://www.mmd.hololive.tv/", status);
+  let prevented = 0;
+  const event = { preventDefault() { prevented++; } };
+  await link.click(event);
+  assert.deepEqual(calls, [link.href]);
+  assert.match(status.textContent, /既定ブラウザで開きました/);
+  fail = true;
+  await link.click(event);
+  assert.match(status.textContent, /開けませんでした: ブラウザ起動失敗/);
+  assert.equal(prevented, 2);
+  for (const [links, statusName] of [["LIVE2D_SAMPLE_LINKS", "live2dStatus"], ["HOLOLIVE_LINKS", "hololiveStatus"]]) {
+    assert.ok(settings.includes(`${links}.map(([label, href]) => officialModelLink(label, href, ${statusName}))`));
+  }
+});
+
+test("初回案内は公式リンクだけを既定ブラウザへ渡し、追加ボタンの処理と分ける", async () => {
+  const start = renderer.indexOf('onboarding?.addEventListener("click",');
+  const source = renderer.slice(start, renderer.indexOf('onboarding?.addEventListener("keydown",', start));
+  let listener;
+  const calls = [];
+  class Target {
+    closest(selector) { return selector === "a.onboarding-link" ? { href: "https://www.mmd.hololive.tv/" } : null; }
+  }
+  new Function("onboarding", "Element", "openExternalUrl", "completeSelectedOnboarding", source)(
+    { addEventListener(_event, handler) { listener = handler; } }, Target,
+    async url => { calls.push(url); }, () => assert.fail("公式リンクで追加画面へ遷移してはいけない"),
+  );
+  let prevented = false;
+  await listener({ target: new Target(), preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.deepEqual(calls, ["https://www.mmd.hololive.tv/"]);
+  // 既存の共通処理が起動失敗をトーストに表示することも維持する。
+  assert.match(renderer, /function openExternalUrl\(url\) \{[\s\S]*?showToast\("既定ブラウザでリンクを開けませんでした", "error"\)/);
+});
 
 test("キャラ登録に公式MMD配布ページ・規約・ガイドラインへのリンクがある", () => {
   const links = settings.match(/const HOLOLIVE_LINKS = \[([\s\S]*?)\n  \];/)?.[1] || "";
