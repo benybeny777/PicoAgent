@@ -51,6 +51,7 @@ mod store;
 mod stream_profile;
 mod text;
 mod tools;
+mod topic_guard;
 mod tracer;
 mod usage;
 mod user_characters;

@@ -430,6 +430,13 @@ pub(crate) fn guard_public_answer(
     if cleaned.trim().is_empty() {
         return Err("公開可能な本文が空");
     }
+    // 話題ガード: 止める話題に触れた本文は、再生成せず固定の一言へ差し替える
+    // （再生成しても同じ話題へ戻りやすく、AIの判断に任せない）。
+    if crate::topic_guard::blocked_category(&cleaned, crate::topic_guard::Direction::Output)
+        .is_some()
+    {
+        return Ok(crate::topic_guard::BLOCKED_REPLY.to_string());
+    }
     Ok(cleaned)
 }
 
@@ -1096,6 +1103,27 @@ pub async fn run(
     app: Option<&tauri::AppHandle>,
     cancel: Option<&AtomicBool>,
 ) -> anyhow::Result<String> {
+    // 話題ガード: 止める話題の依頼はAIへ送らない。会話・ローカルAPI・予定実行の
+    // どの入口から来ても、ここを必ず通る。
+    if let Some(category) = messages
+        .iter()
+        .rfind(|message| message.role == "user")
+        .and_then(|message| {
+            crate::topic_guard::blocked_category(
+                &message.content,
+                crate::topic_guard::Direction::Input,
+            )
+        })
+    {
+        if let Some(handle) = app {
+            crate::log_paths::append_app_log(
+                handle,
+                &format!("話題ガードで依頼を止めました: {category}"),
+            );
+        }
+        messages.push(Message::new("assistant", crate::topic_guard::BLOCKED_REPLY));
+        return Ok(crate::topic_guard::BLOCKED_REPLY.to_string());
+    }
     let depth = agent_depth().saturating_add(1);
     AGENT_DEPTH
         .scope(

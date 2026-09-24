@@ -417,6 +417,18 @@ fn record_turn(
     Ok(json!({ "reply": reply }))
 }
 
+/// 話題ガードに当たった発話へ、AIへ送らずに返す固定の返答。
+///
+/// 止めた発話は会話履歴へ残さない。残すと次のターン以降、AIが履歴からその話題を拾い直す。
+/// `agent::run` の入口にも同じ照合があるが、そちらは履歴へ書き戻す経路の後ろにあるため、
+/// 利用者の発話を受ける送信コマンドでは先にここで止める。
+fn topic_guard_reply(app: &AppHandle, text: &str) -> Option<Value> {
+    let category =
+        crate::topic_guard::blocked_category(text, crate::topic_guard::Direction::Input)?;
+    crate::log_paths::append_app_log(app, &format!("話題ガードで発話を止めました: {category}"));
+    Some(json!({ "reply": crate::topic_guard::BLOCKED_REPLY }))
+}
+
 /// 選択中のプロバイダとモデル名を解決する。未登録ならフロント向けエラー JSON を Err で返す。
 fn selected_provider(
     state: &AppState,
@@ -1853,6 +1865,9 @@ pub async fn pet_send(
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
+    }
+    if let Some(reply) = topic_guard_reply(&app, &text) {
+        return Ok(reply);
     }
     // ask_user で提示した質問への返答なら、番号やラベルを選択肢名へ寄せてから会話へ入れる
     // （モデルが「2」だけを見て何の2か分からなくなるのを防ぐ）。答え方が自由記述なら素通しする。
@@ -4549,6 +4564,9 @@ pub async fn pet_send_image(
     let text = text.trim().to_string();
     if text.is_empty() && images.is_empty() {
         return Ok(json!({ "reply": "" }));
+    }
+    if let Some(reply) = topic_guard_reply(&app, &text) {
+        return Ok(reply);
     }
     // 画像の枚数・サイズ制限（1枚あたり最大 10MB base64、最大 8 枚）。
     if images.len() > 8 {
