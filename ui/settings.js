@@ -3809,21 +3809,26 @@ async function render() {
     placeholder: "例: my-live2d",
     maxLength: 64,
   });
-  const live2dNameInput = el("input", { type: "text", value: "マイLive2D", maxLength: 80 });
+  const live2dNameInput = el("input", { type: "text", value: "", placeholder: "例: 桃瀬ひより", maxLength: 80 });
   const termsInput = el("input", { type: "checkbox" });
 
-  const officialLinks = el("div", { className: "setup-guide-links" }, [
-    ["Live2D公式サンプル", "https://www.live2d.com/learn/sample/"],
-    ["サンプル利用条件", "https://www.live2d.com/learn/sample/model-terms/"],
-  ].map(([label, href]) => {
+  // Live2Dの無料モデル（桃瀬ひより など）はLive2D社の公式サンプルデータ集から取得してもらう。
+  // 利用者が読むページなので、日本語版へ案内する。
+  const LIVE2D_SAMPLE_LINKS = [
+    ["Live2D公式サンプルデータ集", "https://www.live2d.com/learn/sample/"],
+    ["サンプルデータ利用条件", "https://www.live2d.com/eula/live2d-sample-model-terms_jp.html"],
+  ];
+  const officialLinks = el("div", { className: "setup-guide-links" }, LIVE2D_SAMPLE_LINKS.map(([label, href]) => {
     const link = el("a", { href, textContent: label });
     link.setAttribute("target", "_blank");
     link.setAttribute("rel", "noreferrer");
     return link;
   }));
 
+  // 結果はLive2D欄のボタン直下へ出す（欄の最下部の共通表示では気づけない）。
+  const live2dStatus = el("p", { className: "hint", role: "status" });
   async function installRawLive2d(folder) {
-    addStatus.textContent = "選択中…";
+    live2dStatus.textContent = "選択中…";
     try {
       if (!termsInput.checked) throw new Error("配布元の利用条件とモデルの利用権を確認してください。");
       const id = live2dIdInput.value.trim();
@@ -3835,15 +3840,15 @@ async function render() {
       }
       const picked = await window.picoagent.settings.pickCharacterPack(folder);
       if (!picked?.path) {
-        addStatus.textContent = "選択をキャンセルしました。";
+        live2dStatus.textContent = "選択をキャンセルしました。";
         return;
       }
-      addStatus.textContent = "Live2Dモデルを確認し、キャラクターパックを作成しています…";
+      live2dStatus.textContent = "Live2Dモデルを確認し、キャラクターパックを作成しています…";
       const result = await window.picoagent.settings.installLive2dCharacter(picked.path, id, name);
       const added = await registerInstalledCharacter(result.id);
-      addStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
+      live2dStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
-      addStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
+      live2dStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
     }
   }
 
@@ -3960,21 +3965,27 @@ async function render() {
     ]),
     hololiveButtons,
     hololiveStatus,
-    el("p", { className: "hint", textContent: "ホロライブ公式のLive2Dモデルは一般配布されていません。正式に提供を受けたLive2Dモデルは、下の「Live2Dモデルを追加」から追加できます。" }),
-    el("div", { className: "subhead", textContent: "MMDモデルを追加" }),
+    el("div", { className: "subhead", textContent: "手元のMMDモデルを追加" }),
     el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), mmdIdInput]),
     el("div", { className: "field" }, [el("label", { textContent: "表示名" }), mmdNameInput]),
     rawMmdButtons,
     el("p", { className: "hint", textContent: "PMXとテクスチャの相対配置を保ったまま追加します。複数のPMXがある場合は、表示するPMXを直接選んでください。元ファイルは加工しません。" }),
-    el("div", { className: "subhead", textContent: "Live2Dモデルを追加" }),
+    el("div", { className: "subhead", textContent: "Live2D公式サンプル（桃瀬ひより など）を取得して追加" }),
+    el("p", { className: "hint", textContent: "Live2D社が公式サンプルデータを無料で配布しています。PicoAgentはモデルを同梱・再配布しないので、公式ページからご自身で取得してください。手元のLive2Dモデルもここから追加できます。" }),
     officialLinks,
-    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), live2dIdInput]),
+    el("ol", { className: "hint hololive-steps" }, [
+      "「Live2D公式サンプルデータ集」を開き、使うモデル（桃瀬ひより など）のデータをダウンロードする",
+      "「サンプルデータ利用条件」を読み、下のチェックを入れる",
+      "表示名を入れて「Live2Dのzipを追加」を押し、ダウンロードしたzipを選ぶ",
+    ].map(text => el("li", { textContent: text }))),
     el("div", { className: "field" }, [el("label", { textContent: "表示名" }), live2dNameInput]),
+    el("div", { className: "field" }, [el("label", { textContent: "キャラクターID（英数字・-・_）" }), live2dIdInput]),
     el("label", { className: "check-row" }, [
       termsInput,
       el("span", { textContent: "配布元の利用条件を確認し、このモデルを使う権利があります" }),
     ]),
     rawLive2dButtons,
+    live2dStatus,
     el("p", { className: "hint", textContent: ".model3.jsonが1個だけ含まれるデータを選んでください。編集用ファイルは取り込まず、同じフォルダの組み込み用データだけを保存します。" }),
     el("div", { className: "subhead", textContent: "PicoAgentキャラクターパックを追加" }),
     el("p", { className: "hint", textContent: "character.jsonを含む完成済みパックを持っている場合はこちらを使います。" }),
