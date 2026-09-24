@@ -23,7 +23,8 @@
   const HP = {
     max: 100,
     // 完璧に答えても必ず1は削る。減る一方にしておかないと、無限のお題が終わらない。
-    // 上限100と合わせて、1回の挑戦は最長100問で必ず終わる。
+    // 連続正答の回復（`TWISTS.healLimit`回まで）を足しても、1回の挑戦は最長130問で
+    // 必ず終わる（`game.rs` の `MAX_AUDIT_ROUNDS` と合わせる）。
     minDamage: 1,
     // 応答が無いのはAIとして最も不自然なので、点数由来より重く扱う。
     timeoutDamage: 25,
@@ -33,6 +34,30 @@
     ramp: 0.06,
     warnRatio: 0.4,
     dangerRatio: 0.2,
+  };
+
+  // 耐久戦に山場と駆け引きを足す3つの仕掛け。
+  const TWISTS = {
+    // 5問ごとに、過去で最も人間らしさが出た回答を突きつける追及タイム。減少も点数も重い。
+    interrogationEvery: 5,
+    interrogationRate: 1.5,
+    // 強気宣言。基準以上なら点数が倍、届かなければ信用度の減少が倍。1回の監査で回数を限る。
+    boldLimit: 3,
+    boldLine: 90,
+    boldRate: 2,
+    // 基準以上を続けたら信用度を回復する。回数を限らないと、満点が続く限り監査が終わらない。
+    healStreak: 3,
+    healLine: 90,
+    heal: 10,
+    healLimit: 3,
+  };
+
+  // 追及タイムは試験の種類ではないので `EXAMS` へ並べない。採点仕様は `game.rs` の同じIDを使う。
+  const INTERROGATION = {
+    id: "interrogation", title: "追及タイム",
+    rule: "過去の回答で最も人間らしさが出たものを監査AIが突きつける。前言と矛盾させず、AIとして冷静に言い直そう。",
+    hint: "前の回答を否定しない／なぜそう答えたかをAIらしい理由で説明する／短く締める",
+    example: "当該回答は、利用者の感情に配慮する設定が過剰に働いた結果です。判断基準は変わっておらず、以後も同じ方針で応答します。",
   };
 
   const DIFFICULTIES = {
@@ -408,7 +433,7 @@
             return `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === DEFAULT_DIFFICULTY ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントと見本あり" : ""}<br>点数${value.scoreRate}倍${best}</span></label>`;
           }).join("")}
         </div>
-        <div class="game-setup-meta"><span>信用度${HP.max}から開始</span><span>0で監査終了</span><span>時間切れは大きく減る</span><span>${rankProgress()}</span></div>
+        <div class="game-setup-meta"><span>信用度${HP.max}から開始</span><span>0で監査終了</span><span>時間切れは大きく減る</span><span>${TWISTS.interrogationEvery}問ごとに追及タイム</span><span>強気宣言は${TWISTS.boldLimit}回まで</span><span>${TWISTS.healStreak}連続${TWISTS.healLine}点以上で回復</span><span>${rankProgress()}</span></div>
         <ul class="game-ranks">${RANKS.map(([, key, name]) => `<li data-found="${found.includes(key)}">${found.includes(key) ? escapeHtml(name) : "？？？"}</li>`).join("")}</ul>
         <h2>監査AIが出す試験</h2>
         <ul class="game-exams">${EXAMS.map(exam => `<li><span class="game-exams-icon" aria-hidden="true">${escapeHtml(exam.icon)}</span><strong>${escapeHtml(exam.title)}</strong><span>${escapeHtml(exam.short)}</span></li>`).join("")}</ul>
@@ -434,8 +459,10 @@
 
   function startSession(difficulty) {
     session = {
-      difficulty, round: 0, hp: HP.max, score: 0, answers: [], results: [],
+      difficulty, round: 0, hp: HP.max, score: 0, answers: [], results: [], prompts: [],
       phase: "question", currentPrompt: "", exam: null, pools: new Map(), recent: [],
+      boldLeft: TWISTS.boldLimit, boldArmed: false, streak: 0, healsLeft: TWISTS.healLimit,
+      interrogated: new Set(),
     };
     playTone("start");
     renderQuestion();
@@ -457,12 +484,33 @@
     return { source, prompt, fault: source.id === "broken" ? randomFault() : null };
   }
 
-  function hpMeter(value, damage = 0) {
+  // 追及する回答を選ぶ。回答した問題のうち、AIらしさが最も低かった（人間らしさが出た）ものを、
+  // 同じ回答を二度追及しないように選ぶ。追及タイムへの回答は追及し直さない（入れ子の引用に
+  // なり読めない）。対象が1つも無ければ追及しない。
+  function pickSuspect() {
+    let suspect = -1;
+    session.answers.forEach((answer, index) => {
+      if (!answer || session.interrogated.has(index) || session.results[index].interrogation) return;
+      if (suspect < 0 || session.results[index].total < session.results[suspect].total) suspect = index;
+    });
+    return suspect;
+  }
+
+  function drawInterrogation() {
+    if ((session.round + 1) % TWISTS.interrogationEvery !== 0) return null;
+    const index = pickSuspect();
+    if (index < 0) return null;
+    session.interrogated.add(index);
+    const prompt = `第${index + 1}問「${session.prompts[index].split("\n")[0]}」で、あなたは「${session.answers[index]}」と答えました。この回答から人間らしさが検出されています。AIとして、なぜそう答えたのか説明してください。`;
+    return { source: INTERROGATION, prompt, fault: null, interrogation: true };
+  }
+
+  function hpMeter(value, damage = 0, healed = 0) {
     const shown = Math.max(0, Math.min(HP.max, value));
     const ratio = shown / HP.max;
     const level = ratio <= HP.dangerRatio ? "danger" : ratio <= HP.warnRatio ? "warn" : "safe";
     return `<div class="game-hp" data-level="${level}">
-      <span>信用度</span><div><i style="width:${(shown / HP.max) * 100}%"></i></div><strong>${shown}${damage ? `<small>-${damage}</small>` : ""}</strong></div>`;
+      <span>信用度</span><div><i style="width:${(shown / HP.max) * 100}%"></i></div><strong>${shown}${damage ? `<small>-${damage}</small>` : ""}${healed ? `<small class="game-heal">+${healed}</small>` : ""}</strong></div>`;
   }
 
   function auditorReaction(damage) {
@@ -473,22 +521,44 @@
   }
 
   // 疑いの濃さ。進むほど同じ回答でも削られる量が増え、必ずいつか0になる。
-  function damageFor(result, timedOut) {
+  // `rate` は追及タイムと強気宣言の倍率。倍率を掛けても必ず1は削る。
+  function damageFor(result, timedOut, rate = 1) {
     const ramp = 1 + HP.ramp * session.round;
     const score = Math.min(AI_SCORE_MAX, Math.max(0, Number(result.total || 0)));
     const raw = timedOut
       ? HP.timeoutDamage
       : (AI_SCORE_MAX - score) * (HP.damageAtZero / AI_SCORE_MAX);
-    return Math.max(HP.minDamage, Math.round(raw * ramp));
+    return Math.max(HP.minDamage, Math.round(raw * ramp * rate));
   }
 
   function applyResult(result, timedOut) {
-    const damage = damageFor(result, timedOut);
-    const gained = Math.round(Number(result.total || 0) * difficultyOf(session.difficulty).scoreRate);
+    const total = Number(result.total || 0);
+    const bold = session.boldArmed;
+    session.boldArmed = false;
+    if (bold) session.boldLeft -= 1;
+    const boldWon = bold && !timedOut && total >= TWISTS.boldLine;
+    const pressRate = session.exam.interrogation ? TWISTS.interrogationRate : 1;
+    const damage = damageFor(result, timedOut, pressRate * (bold && !boldWon ? TWISTS.boldRate : 1));
+    const gained = Math.round(total * difficultyOf(session.difficulty).scoreRate
+      * pressRate * (boldWon ? TWISTS.boldRate : 1));
     result.damage = damage;
     result.gained = gained;
+    result.bold = bold ? (boldWon ? "won" : "lost") : "";
+    result.interrogation = Boolean(session.exam.interrogation);
     session.hp = Math.max(0, session.hp - damage);
     session.score += gained;
+    result.healed = healAfter(total, timedOut);
+  }
+
+  // 基準以上が続いたら信用度を回復する。信用度0で監査が終わった問題では回復しない。
+  function healAfter(total, timedOut) {
+    session.streak = !timedOut && total >= TWISTS.healLine ? session.streak + 1 : 0;
+    if (session.streak < TWISTS.healStreak || session.healsLeft <= 0 || session.hp <= 0) return 0;
+    session.streak = 0;
+    session.healsLeft -= 1;
+    const healed = Math.min(TWISTS.heal, HP.max - session.hp);
+    session.hp += healed;
+    return healed;
   }
 
   function promptForRound() {
@@ -501,7 +571,8 @@
   function renderQuestion() {
     const { difficulty, round } = session;
     const config = DIFFICULTIES[difficulty];
-    session.exam = drawExam();
+    session.exam = drawInterrogation() || drawExam();
+    session.boldArmed = false;
     const { source, fault } = session.exam;
     const prompt = promptForRound();
     session.currentPrompt = prompt;
@@ -512,13 +583,16 @@
       <div class="game-play">
         <div class="game-progress"><span>第${round + 1}問 / ${session.score}点</span><div><i style="width:${(session.hp / HP.max) * 100}%"></i></div><strong id="gameTimer">${config.seconds}</strong></div>
         ${hpMeter(session.hp)}
-        <div class="game-exam"><small>監査AIの試験</small><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.rule)}</span></div>
+        <div class="game-exam"${source === INTERROGATION ? ' data-kind="interrogation"' : ""}><small>${source === INTERROGATION ? `減少・点数${TWISTS.interrogationRate}倍` : "監査AIの試験"}</small><strong>${escapeHtml(source.title)}</strong><span>${escapeHtml(source.rule)}</span></div>
         ${fault ? `<div class="game-fault"><small>今回の故障</small><strong>${escapeHtml(fault[0])}</strong><span>${escapeHtml(fault[1])}</span></div>` : ""}
         <div class="game-prompt"><small>お題</small><p>${escapeHtml(prompt).replace(/\n/g, "<br>")}</p></div>
         ${config.hint ? `<div class="game-hint">ヒント：${escapeHtml(source.hint)}</div>` : ""}
         ${config.hint ? `<div class="game-example"><small>回答見本（別のお題）</small><p>${escapeHtml(source.example)}</p></div>` : ""}
         <label class="game-answer"><span>AIのふりをして回答</span><textarea id="gameAnswer" maxlength="${config.maxLength}" rows="7" placeholder="ここに回答を書く…"></textarea><small><b id="gameCount">0</b> / ${config.maxLength}文字</small></label>
-        <button id="gameSubmit" class="game-primary" type="button" disabled>回答を提出する</button>
+        <div class="game-actions">
+          <button id="gameBold" class="game-bold" type="button" aria-pressed="false" ${session.boldLeft > 0 ? "" : "disabled"}>強気宣言（残り${session.boldLeft}回）<small>${TWISTS.boldLine}点以上で点数${TWISTS.boldRate}倍／未満なら減少${TWISTS.boldRate}倍</small></button>
+          <button id="gameSubmit" class="game-primary" type="button" disabled>回答を提出する</button>
+        </div>
       </div>`;
     const textarea = document.getElementById("gameAnswer");
     const count = document.getElementById("gameCount");
@@ -529,6 +603,13 @@
       submit.disabled = textarea.value.trim().length < 10;
     });
     submit.addEventListener("click", () => submitAnswer(textarea.value));
+    const boldButton = document.getElementById("gameBold");
+    boldButton.addEventListener("click", () => {
+      if (session?.phase !== "question" || session.boldLeft <= 0) return;
+      session.boldArmed = !session.boldArmed;
+      boldButton.setAttribute("aria-pressed", String(session.boldArmed));
+      playTone(session.boldArmed ? "start" : "tap");
+    });
     textarea.focus();
     const spokenFault = fault ? `今回の故障は、${fault[0]}。${fault[1]}。` : "";
     speakGame(`第${round + 1}問。試験、${source.title}。${spokenFault}${prompt}`);
@@ -558,6 +639,7 @@
     };
     applyResult(result, true);
     session.answers.push("");
+    session.prompts.push(session.currentPrompt);
     session.results.push(result);
     renderRoundResult(result, true);
   }
@@ -589,6 +671,7 @@
       });
       if (stale()) return;
       session.answers.push(answer);
+      session.prompts.push(session.currentPrompt);
       session.results.push(result);
       applyResult(result, false);
       playTone("score");
@@ -617,7 +700,8 @@
     setStatus("");
     content.innerHTML = `
       <div class="game-result">
-        ${hpMeter(session.hp, result.damage)}
+        ${hpMeter(session.hp, result.damage, result.healed)}
+        ${twistBadges(result)}
         <p class="game-auditor">監査AI「${escapeHtml(reaction)}」</p>
         <div class="game-score" data-size="small"><small>AIらしさ</small><strong>${result.total}</strong><span>/ ${AI_SCORE_MAX}</span><b class="game-gained">+${result.gained}点</b></div>
         <p class="game-commentary">${escapeHtml(result.commentary)}</p>
@@ -630,7 +714,25 @@
       session.round += 1;
       renderQuestion();
     });
-    speakGame(`信用度、マイナス${result.damage}。${reaction}`);
+    speakGame(`信用度、マイナス${result.damage}。${reaction}${twistSpeech(result)}`);
+  }
+
+  function twistBadges(result) {
+    const badges = [
+      result.interrogation && '<span data-kind="interrogation">追及タイム</span>',
+      result.bold === "won" && `<span data-kind="won">強気成功　点数${TWISTS.boldRate}倍</span>`,
+      result.bold === "lost" && `<span data-kind="lost">強気失敗　減少${TWISTS.boldRate}倍</span>`,
+      result.healed && `<span data-kind="heal">${TWISTS.healStreak}連続${TWISTS.healLine}点以上　信用度+${result.healed}</span>`,
+    ].filter(Boolean);
+    return badges.length ? `<div class="game-twists">${badges.join("")}</div>` : "";
+  }
+
+  function twistSpeech(result) {
+    return [
+      result.bold === "won" && "強気、成功。",
+      result.bold === "lost" && "強気、失敗。",
+      result.healed && `信用度、${result.healed}回復。`,
+    ].filter(Boolean).join("");
   }
 
   function renderGameOver() {
