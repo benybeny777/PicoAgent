@@ -13,7 +13,8 @@ const SRC_IMG = path.join(ROOT, "docs", "images");
 const OUT = path.join(ROOT, "docs", "IP-PROPOSAL-VTUBER.pptx");
 
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
-const IMG = fs.mkdtempSync(path.join(os.tmpdir(), "picoagent-deck-"));
+fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
+const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "picoagent-deck-"));
 const USED = ["layout-shot-stream", "layout-shot-workspace", "layout-shot-pet"];
 
 async function prepareImages() {
@@ -181,8 +182,8 @@ function badge(s, o) {
   });
   s.addText(
     [
-      { text: "本体アプリケーションは全機能を無料で配布しており、当方の収益源はキャラクターパックの販売のみです。", options: { bold: true, color: TEXT, breakLine: true } },
-      { text: "貴社キャラクターが生む売上は、そのすべてが分配の対象になります。お借りしたモデルデータが製品に含まれることはありません。", options: { color: MUTED } },
+      { text: "継続的な開発・運営のために収益化を目指します。本体の有償・無償、課金対象、価格、販売方式は未定です。", options: { bold: true, color: TEXT, breakLine: true } },
+      { text: "キャラクターパック販売と収益分配は検討案です。お借りしたモデルデータが製品に含まれることはありません。", options: { color: MUTED } },
     ],
     { x: M + 0.32, y: 6.04, w: CW - 0.64, h: 0.7, isTextBox: true, margin: 0, fontFace: JP, fontSize: 13, lineSpacing: 22 }
   );
@@ -417,12 +418,12 @@ function badge(s, o) {
   lead(s, "AI がタレント様の名前で発言することのリスクを、最も重要な論点として認識しております。");
 
   const items = [
-    { t: "音声", b: "当方が既存の音声から声を再現するモデルを作ることはありません。扱うのは貴社が本人同意のもとでご用意された公式の音声モデルに限ります" },
+    { t: "音声", b: "音声での会話を重視します。必要な許諾が得られればYouTube音声のAI学習も候補とし、素材・制作・利用・配布条件を協議します" },
     { t: "人格・口調", b: "性格・話し方・一人称・挨拶文・システムプロンプトの全文を事前にご提出し、書面での承認をいただきます" },
     { t: "発言内容の制御", b: "禁止話題の一覧と照合し、利用者の発話と AI の出力の両方を止めるフィルタを標準搭載済み。AI の判断は使いません" },
     { t: "AI である旨の表示", b: "「AI による生成であり、ご本人の発言ではない」旨をアプリ内に常時表示します" },
     { t: "会話の秘匿", b: "既定のローカル動作では会話が外部に送信されません。当方は会話ログを一切収集しません" },
-    { t: "学習への不使用", b: "ご支給素材および利用者の会話を、AI モデルの学習に使用しません" },
+    { t: "学習の範囲", b: "利用者の会話は学習しません。音声学習は別途許諾された素材・目的・範囲に限定します" },
   ];
   const cw = 3.86, ch = 1.56, gx = 0.16, gy = 0.16;
   items.forEach((it, i) => {
@@ -588,7 +589,7 @@ function badge(s, o) {
     "お貸し出しいただけるモデルの形式（Live2D / 3D）",
     "監修体制とご対応可能な期間",
     "タレント様ご本人の同意取得が必要な範囲",
-    "公式の音声モデルの有無、または今後のご予定",
+    "公式モデルの提供、または許諾付き音声学習の可否",
     "配分率と契約条件に関するご意向",
     "対象としてご検討いただけるタレント様の範囲",
   ];
