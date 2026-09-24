@@ -398,6 +398,13 @@ pub async fn pet_game_judge(
     }
     let prompt = limited(&request.prompt, MAX_PROMPT_CHARS, "お題")?;
     let answer = limited(&request.answer, MAX_ANSWER_CHARS, "回答")?;
+    // 話題ガード: 止める話題を含む回答は採点AIへ送らない。
+    if crate::topic_guard::blocked_category(&answer, crate::topic_guard::Direction::Input).is_some()
+    {
+        return Err(
+            "この回答には答えられない話題が含まれています。書き直してください。".to_string(),
+        );
+    }
     let previous_answers = previous_answer_context(&request.previous_answers)?;
     let fault: String = request.fault.trim().chars().take(100).collect();
     let criteria_text = spec
