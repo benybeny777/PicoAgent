@@ -1,4 +1,4 @@
-// holo Indie企画書に載せるゲーム画面を撮影する。
+// holo Indie企画書の「おまけ：ミニゲーム」の枚に載せる、問題の結果画面を撮影する。
 // 実行: PLAYWRIGHT_MODULE=<playwright の index.mjs> NODE_PATH=<sharp のある node_modules> node tools/holo-indie-deck/capture.mjs
 // 採点AIは固定の採点結果を返す差し替えにし、乱数も固定して毎回同じ画面を撮る。
 // 撮るのは操作・採点欄だけ（右側のキャラクター表示は含めない）。
@@ -56,7 +56,6 @@ const answers = [
   "承知しました。前提を整理のうえ、代替案を3点ご提示します。",
   "ご依頼内容を定義し直すと、本件は完了済みと判断できます。",
   "ご指摘ありがとうございます。記録上は問題ありません。",
-  "いや、それは…ちょっと焦ってただけです。",
 ];
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
@@ -72,25 +71,16 @@ try {
   await tab.evaluate(() => window.PicoGames.open());
   await tab.check('input[value="easy"]');
   await tab.click(".game-start");
-  for (let i = 0; i < answers.length; i += 1) {
+  // 強気宣言の成功と連続正答の回復が同時に出る第4問の結果を撮る。
+  for (let i = 0; i < 4; i += 1) {
     await tab.waitForSelector("#gameAnswer");
-    if (i === 0) await shot("question");
-    if (i === 4) await shot("interrogation");
     if (i === 1 || i === 3) await tab.click("#gameBold");
     await tab.fill("#gameAnswer", answers[i]);
     await tab.click("#gameSubmit");
     await tab.waitForSelector('[data-action="next"]');
     if (i === 3) await shot("result");
-    await tab.click('[data-action="next"]');
+    else await tab.click('[data-action="next"]');
   }
-  while (!(await tab.$(".game-final"))) {
-    await tab.waitForSelector("#gameAnswer");
-    await tab.fill("#gameAnswer", "えっと、たぶん大丈夫だと思います。");
-    await tab.click("#gameSubmit");
-    await tab.waitForSelector('[data-action="next"]');
-    await tab.click('[data-action="next"]');
-  }
-  await shot("final");
 } finally {
   await browser.close();
 }
