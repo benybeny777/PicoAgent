@@ -18,7 +18,7 @@ use crate::providers::local;
 
 static VISION_READY: AtomicBool = AtomicBool::new(false);
 
-/// ゲーム操作前に、画像を扱える管理エンジンの起動完了を確かめる。
+/// 画像を扱う全経路で、管理エンジンの起動完了を確かめる。
 pub fn ensure_vision_available(cfg: &crate::config::Config) -> anyhow::Result<()> {
     anyhow::ensure!(
         local::vision_enabled(cfg),
@@ -37,15 +37,15 @@ async fn vision_projector(app: &AppHandle) -> anyhow::Result<Option<PathBuf>> {
     local::validate_vision_model(&state.config)?;
     let name = local::vision_asset::FILE_NAME;
     let mut candidates = vec![crate::log_paths::bundled_dir(app)
-        .join("game-vision")
+        .join("local-vision")
         .join(name)];
     if let Ok(resources) = app.path().resource_dir() {
-        candidates.push(resources.join("resources/bundled/game-vision").join(name));
-        candidates.push(resources.join("bundled/game-vision").join(name));
+        candidates.push(resources.join("resources/bundled/local-vision").join(name));
+        candidates.push(resources.join("bundled/local-vision").join(name));
     }
     candidates.push(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/bundled/game-vision")
+            .join("resources/bundled/local-vision")
             .join(name),
     );
     select_vision_projector(
@@ -66,13 +66,13 @@ async fn select_vision_projector(
         if candidate.exists() {
             anyhow::ensure!(
                 model_file_matches(candidate, size, sha256).await?,
-                "画像入力用資産が破損または非対応です: {}。cargo xtask setup game-vision で再導入してください",
+                "画像入力用資産が破損または非対応です: {}。cargo xtask setup local-vision で再導入してください",
                 candidate.display()
             );
             return Ok(candidate.clone());
         }
     }
-    anyhow::bail!("画像入力用資産がありません。cargo xtask setup game-vision で約986MBの追加資産を明示導入してください。取得元: {}", local::vision_asset::URL)
+    anyhow::bail!("画像入力用資産がありません。cargo xtask setup local-vision で約986MBの追加資産を明示導入してください。取得元: {}", local::vision_asset::URL)
 }
 
 pub struct EngineState {

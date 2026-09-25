@@ -25,15 +25,16 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Default)]
 struct Budget {
+    request: Weak<()>,
     owner: Weak<AtomicBool>,
     used: usize,
     history: Vec<Value>,
     stopped: bool,
 }
 
-fn budget() -> &'static Mutex<Budget> {
-    static BUDGET: OnceLock<Mutex<Budget>> = OnceLock::new();
-    BUDGET.get_or_init(|| Mutex::new(Budget::default()))
+fn budgets() -> &'static Mutex<Vec<Budget>> {
+    static BUDGETS: OnceLock<Mutex<Vec<Budget>>> = OnceLock::new();
+    BUDGETS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
 /// Futureの破棄も中断として扱う。入力済みの操作を再実行させない。
@@ -192,21 +193,41 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), String> {
 }
 
 fn stop_active() {
-    if let Ok(budget) = budget().lock() {
-        if let Some(owner) = budget.owner.upgrade() {
-            owner.store(true, Ordering::SeqCst);
+    if let Ok(budgets) = budgets().lock() {
+        for budget in budgets
+            .iter()
+            .filter(|budget| budget.request.strong_count() > 0)
+        {
+            if let Some(owner) = budget.owner.upgrade() {
+                owner.store(true, Ordering::SeqCst);
+            }
         }
     }
 }
 
-fn reserve(owner: &Arc<AtomicBool>, limit: usize, sequence: usize) -> Result<Vec<Value>, String> {
-    let mut budget = budget().lock().map_err(|_| "操作回数を確認できません。")?;
-    if !budget.owner.ptr_eq(&Arc::downgrade(owner)) {
-        *budget = Budget {
+fn reserve(
+    request: &Arc<()>,
+    owner: &Arc<AtomicBool>,
+    limit: usize,
+    sequence: usize,
+) -> Result<Vec<Value>, String> {
+    let mut budgets = budgets().lock().map_err(|_| "操作回数を確認できません。")?;
+    budgets.retain(|budget| budget.request.strong_count() > 0);
+    let request_weak = Arc::downgrade(request);
+    if !budgets
+        .iter()
+        .any(|budget| budget.request.ptr_eq(&request_weak))
+    {
+        budgets.push(Budget {
+            request: request_weak.clone(),
             owner: Arc::downgrade(owner),
             ..Budget::default()
-        };
+        });
     }
+    let budget = budgets
+        .iter_mut()
+        .find(|budget| budget.request.ptr_eq(&request_weak))
+        .ok_or("依頼の操作回数を確認できません。")?;
     if budget.stopped {
         return Err(
             "この依頼のゲーム操作は停止済みです。状態を確認して新しく依頼してください。".into(),
@@ -268,7 +289,8 @@ async fn step(cfg: &Config, operation: &mut Operation, sequence: usize) -> Resul
     }
     crate::engine::ensure_vision_available(cfg).map_err(|e| e.to_string())?;
     check_cancel(cancel)?;
-    let history = reserve(cancel, settings.limit, sequence)?;
+    let request = crate::agent::request_id().ok_or("依頼を識別できないため停止しました。")?;
+    let history = reserve(&request, cancel, settings.limit, sequence)?;
     let target = platform::select(&settings.title)?;
     let root = cfg.config_dir()?.join("gameplay");
     let root_safe = SafePath::app_owned(root.clone());
@@ -340,7 +362,11 @@ async fn step(cfg: &Config, operation: &mut Operation, sequence: usize) -> Resul
     let result = json!({"status":"observed_after_input","input_at":input_at,"observed_at":chrono::Utc::now().to_rfc3339(),
         "action":action,"observation":observed,"after":"after.png","decision":"decision.json"});
     save_json(&result_path, &result)?;
-    let mut budget = budget().lock().map_err(|_| "履歴を保存できません。")?;
+    let mut budgets = budgets().lock().map_err(|_| "履歴を保存できません。")?;
+    let budget = budgets
+        .iter_mut()
+        .find(|budget| budget.request.ptr_eq(&Arc::downgrade(&request)))
+        .ok_or("依頼の履歴を確認できません。")?;
     budget.history.push(result);
     if budget.history.len() > 16 {
         budget.history.remove(0);
@@ -464,8 +490,15 @@ impl Tool for GamePlayTool {
             }
             Err(error) => {
                 operation.failure = Some(error.clone());
-                if let Ok(mut budget) = budget().lock() {
-                    budget.stopped = true;
+                if let (Some(request), Ok(mut budgets)) =
+                    (crate::agent::request_id(), budgets().lock())
+                {
+                    if let Some(budget) = budgets
+                        .iter_mut()
+                        .find(|budget| budget.request.ptr_eq(&Arc::downgrade(&request)))
+                    {
+                        budget.stopped = true;
+                    }
                 }
                 let record_result = operation.record_stop();
                 operation.complete = true;
@@ -542,19 +575,52 @@ mod tests {
         assert!(Settings::read(&cfg).is_err());
     }
 
-    #[test]
-    fn 同一依頼で上限と連番を迂回できず停止は実行中の所有者へ届く() {
+    #[tokio::test]
+    async fn 同じ停止フラグの連続依頼は別予算で同一依頼の並列と委譲は共有する() {
         let owner = Arc::new(AtomicBool::new(false));
-        assert!(reserve(&owner, 2, 1).is_ok());
-        assert!(reserve(&owner, 2, 1).is_err());
-        assert!(reserve(&owner, 2, 2).is_ok());
-        assert!(reserve(&owner, 2, 3).is_err());
-        stop_active();
-        assert!(check_cancel(&owner).is_err());
-        let next = Arc::new(AtomicBool::new(false));
-        assert!(reserve(&next, 1, 1).is_ok());
-        budget().lock().unwrap().stopped = true;
-        assert!(reserve(&next, 100, 2).is_err());
+        crate::agent::with_cancel(owner.clone(), async {
+            let request = crate::agent::request_id().unwrap();
+            let (first, duplicate) =
+                tokio::join!(async { reserve(&request, &owner, 2, 1) }, async {
+                    reserve(&request, &owner, 2, 1)
+                },);
+            assert_ne!(first.is_ok(), duplicate.is_ok());
+            crate::agent::with_cancel(owner.clone(), async {
+                let nested = crate::agent::request_id().unwrap();
+                assert!(Arc::ptr_eq(&request, &nested));
+                assert!(reserve(&nested, &owner, 2, 1).is_err());
+                assert!(reserve(&nested, &owner, 2, 2).is_ok());
+                assert!(reserve(&nested, &owner, 2, 3).is_err());
+            })
+            .await;
+            stop_active();
+            assert!(check_cancel(&owner).is_err());
+            let mut budgets = budgets().lock().unwrap();
+            budgets
+                .iter_mut()
+                .find(|budget| budget.request.ptr_eq(&Arc::downgrade(&request)))
+                .unwrap()
+                .stopped = true;
+        })
+        .await;
+        // GUIと同じく停止用Arcを再利用し、次の利用者依頼を開始する。
+        owner.store(false, Ordering::SeqCst);
+        crate::agent::with_cancel(owner.clone(), async {
+            let request = crate::agent::request_id().unwrap();
+            assert!(reserve(&request, &owner, 1, 1).is_ok());
+            assert!(reserve(&request, &owner, 1, 2).is_err());
+        })
+        .await;
+    }
+
+    #[test]
+    fn 別依頼が間に入っても生存中の依頼の予算を初期化しない() {
+        let first = Arc::new(());
+        let second = Arc::new(());
+        let owner = Arc::new(AtomicBool::new(false));
+        assert!(reserve(&first, &owner, 1, 1).is_ok());
+        assert!(reserve(&second, &owner, 1, 1).is_ok());
+        assert!(reserve(&first, &owner, 1, 1).is_err());
     }
 
     #[test]

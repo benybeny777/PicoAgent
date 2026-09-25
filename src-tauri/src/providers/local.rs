@@ -24,6 +24,21 @@ pub fn validate_vision_model(cfg: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 通常チャットとスキルの双方で、画像を黙って無視させない。
+fn validate_image_input(cfg: &Config, messages: &[Message]) -> anyhow::Result<()> {
+    if messages.iter().any(|message| {
+        message
+            .images
+            .as_ref()
+            .is_some_and(|images| !images.is_empty())
+    }) {
+        crate::engine::ensure_vision_available(cfg).map_err(|error| anyhow::anyhow!(
+            "{error}。この会話には添付画像が含まれています。画像入力を有効にするか、画像を含まない会話で続けてください"
+        ))?;
+    }
+    Ok(())
+}
+
 pub struct Local;
 
 pub struct LocalModelPreset {
@@ -497,6 +512,7 @@ impl Provider for Local {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
+        validate_image_input(cfg, messages)?;
         let url = format!("{}/chat/completions", base_url(cfg));
         // Gemma 等の「user/assistant 交互・user 始まり」要求に合わせて正規化してから送る。
         let normalized = normalize_for_local(messages);
@@ -555,6 +571,7 @@ impl Provider for Local {
     ) -> anyhow::Result<Message> {
         use std::sync::atomic::{AtomicBool, Ordering};
 
+        validate_image_input(cfg, messages)?;
         let url = format!("{}/chat/completions", base_url(cfg));
         let normalized = normalize_for_local(messages);
         let wire = to_wire(&normalized);
@@ -599,6 +616,26 @@ mod tests {
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 通常チャットでも画像未準備を拒否しテキストのみは利用できる() {
+        let cfg = crate::config::Config::new();
+        assert!(super::validate_image_input(&cfg, &[Message::new("user", "こんにちは")]).is_ok());
+        let image =
+            Message::user_with_images("画像を説明して", vec!["data:image/png;base64,AA".into()]);
+        assert!(
+            super::validate_image_input(&cfg, std::slice::from_ref(&image))
+                .unwrap_err()
+                .to_string()
+                .contains("画像入力が無効")
+        );
+        cfg.set("PICOAGENT_LOCAL_MODEL_PRESET", "small");
+        cfg.set("PICOAGENT_LOCAL_VISION_ENABLED", "true");
+        assert!(super::validate_image_input(&cfg, &[image])
+            .unwrap_err()
+            .to_string()
+            .contains("起動が完了していません"));
+    }
 
     #[test]
     fn 画像入力は明示有効化と対応モデルを必要とする() {

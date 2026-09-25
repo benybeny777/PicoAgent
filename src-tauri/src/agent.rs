@@ -38,6 +38,8 @@ tokio::task_local! {
     /// 現在の非同期タスクへ伝播する中断要求。ツール経由で起動した子エージェントも
     /// 同じ停止ボタンで止められるよう、呼び出し側がスコープを張って渡す。
     static CANCEL_FLAG: Arc<AtomicBool>;
+    /// 同じ停止フラグを再利用するGUIでも、依頼ごとの操作上限を区別する。
+    static REQUEST_ID: Arc<()>;
 }
 
 /// このタスクへ伝播している中断フラグ。スコープ外（スケジューラ経由など）は None。
@@ -45,9 +47,17 @@ pub fn cancel_flag() -> Option<Arc<AtomicBool>> {
     CANCEL_FLAG.try_with(Arc::clone).ok()
 }
 
+pub fn request_id() -> Option<Arc<()>> {
+    REQUEST_ID.try_with(Arc::clone).ok()
+}
+
 /// 中断フラグを配下の非同期処理へ伝播させる。
 pub async fn with_cancel<F: std::future::Future>(flag: Arc<AtomicBool>, task: F) -> F::Output {
-    CANCEL_FLAG.scope(flag, task).await
+    // 委譲先が再びスコープを張っても同じ依頼の予算を初期化させない。
+    let request = request_id().unwrap_or_else(|| Arc::new(()));
+    REQUEST_ID
+        .scope(request, CANCEL_FLAG.scope(flag, task))
+        .await
 }
 
 /// スーパーエージェントモード。計画ステップ・自己評価・深い自律ループ・進捗可視化を一括で有効化する。
@@ -1224,68 +1234,80 @@ async fn run_scoped(
         let earlier_assistant_texts: Vec<&str> =
             earlier_assistant_owned.iter().map(String::as_str).collect();
         schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts);
-        let hour = chrono::Local::now().hour();
-        let character_greeting = selected_character_greeting(app);
-        if let Some(answer) = simple_greeting_answer(&user_text, hour, &character_greeting) {
-            return direct_answer(messages, answer);
-        } else if let Some(answer) = setup_guide_answer(&user_text) {
-            return direct_answer(messages, answer);
-        } else if let Some(matched) =
-            tools::intent_for_dialogue(&user_text, &earlier_user_texts, &earlier_assistant_texts)
-        {
-            let tools::MatchedIntent {
-                tool_name,
-                invocation,
-            } = matched;
-            match invocation.handling {
-                tools::IntentHandling::Direct => {
-                    let args = invocation.args.clone();
-                    let answer =
-                        dispatch_with_activity(cfg, app, tool_name, invocation.args, cancel).await;
-                    if !crate::tools::is_failure_text(&answer) {
-                        return direct_answer(messages, answer);
+        // 画像付き依頼は本文だけでは意図を決められない。先回り実行や定型回答を
+        // 適用せず、画像と依頼をモデルへ渡してから通常のツール選択へ進む。
+        let has_images = messages[user_index]
+            .images
+            .as_ref()
+            .is_some_and(|images| !images.is_empty());
+        if !has_images {
+            let hour = chrono::Local::now().hour();
+            let character_greeting = selected_character_greeting(app);
+            if let Some(answer) = simple_greeting_answer(&user_text, hour, &character_greeting) {
+                return direct_answer(messages, answer);
+            } else if let Some(answer) = setup_guide_answer(&user_text) {
+                return direct_answer(messages, answer);
+            } else if let Some(matched) = tools::intent_for_dialogue(
+                &user_text,
+                &earlier_user_texts,
+                &earlier_assistant_texts,
+            ) {
+                let tools::MatchedIntent {
+                    tool_name,
+                    invocation,
+                } = matched;
+                match invocation.handling {
+                    tools::IntentHandling::Direct => {
+                        let args = invocation.args.clone();
+                        let answer =
+                            dispatch_with_activity(cfg, app, tool_name, invocation.args, cancel)
+                                .await;
+                        if !crate::tools::is_failure_text(&answer) {
+                            return direct_answer(messages, answer);
+                        }
+                        // 先回り実行の結果をそのまま返すのは成功時だけにする。失敗文をそのまま返すと
+                        // 「エラー: 天気の地点が未設定です。設定で…」という生の文が、キャラクターの
+                        // 発言として会話へ並ぶ（実機で確認）。
+                        //
+                        // 失敗はモデルへ「通常のツール失敗」と同じ形（assistant の tool_calls と
+                        // 対になる tool 結果）で見せる。system の内部文脈として渡す方式では、
+                        // 長い人格プロンプトと結合されて指示が埋もれ、実機のローカルモデルが
+                        // 失敗を無視して「調べてみるね！」と実行しない約束を返していた。
+                        let call_id = format!("intent_{tool_name}");
+                        let mut call = Message::new("assistant", "");
+                        call.tool_calls = Some(vec![crate::message::ToolCall {
+                            id: call_id.clone(),
+                            name: tool_name.to_string(),
+                            arguments: args,
+                        }]);
+                        messages.push(call);
+                        let mut result = Message::new("tool", answer);
+                        result.tool_call_id = Some(call_id);
+                        result.name = Some(tool_name.to_string());
+                        messages.push(result);
                     }
-                    // 先回り実行の結果をそのまま返すのは成功時だけにする。失敗文をそのまま返すと
-                    // 「エラー: 天気の地点が未設定です。設定で…」という生の文が、キャラクターの
-                    // 発言として会話へ並ぶ（実機で確認）。
-                    //
-                    // 失敗はモデルへ「通常のツール失敗」と同じ形（assistant の tool_calls と
-                    // 対になる tool 結果）で見せる。system の内部文脈として渡す方式では、
-                    // 長い人格プロンプトと結合されて指示が埋もれ、実機のローカルモデルが
-                    // 失敗を無視して「調べてみるね！」と実行しない約束を返していた。
-                    let call_id = format!("intent_{tool_name}");
-                    let mut call = Message::new("assistant", "");
-                    call.tool_calls = Some(vec![crate::message::ToolCall {
-                        id: call_id.clone(),
-                        name: tool_name.to_string(),
-                        arguments: args,
-                    }]);
-                    messages.push(call);
-                    let mut result = Message::new("tool", answer);
-                    result.tool_call_id = Some(call_id);
-                    result.name = Some(tool_name.to_string());
-                    messages.push(result);
-                }
-                tools::IntentHandling::Material {
-                    renderer,
-                    run_tool,
-                    collect_sources,
-                } => {
-                    let result = if run_tool {
-                        dispatch_with_activity(cfg, app, tool_name, invocation.args, cancel).await
-                    } else {
-                        String::new()
-                    };
-                    if collect_sources {
-                        sources = extract_source_links(&result);
+                    tools::IntentHandling::Material {
+                        renderer,
+                        run_tool,
+                        collect_sources,
+                    } => {
+                        let result = if run_tool {
+                            dispatch_with_activity(cfg, app, tool_name, invocation.args, cancel)
+                                .await
+                        } else {
+                            String::new()
+                        };
+                        if collect_sources {
+                            sources = extract_source_links(&result);
+                        }
+                        // 資料として差し込む本文も、通常のツール結果と同じ混入検査を通す。
+                        let result = mark_untrusted_tool_output(result);
+                        let mut private = Message::new("system", renderer(&user_text, &result));
+                        private.name = Some("picoagent_private_context".to_string());
+                        // systemをuserより後ろへ置くと拒否するproviderがあるため、
+                        // 利用者原文の直前へ挿入してrole順序も保つ。
+                        messages.insert(user_index, private);
                     }
-                    // 資料として差し込む本文も、通常のツール結果と同じ混入検査を通す。
-                    let result = mark_untrusted_tool_output(result);
-                    let mut private = Message::new("system", renderer(&user_text, &result));
-                    private.name = Some("picoagent_private_context".to_string());
-                    // systemをuserより後ろへ置くと拒否するproviderがあるため、
-                    // 利用者原文の直前へ挿入してrole順序も保つ。
-                    messages.insert(user_index, private);
                 }
             }
         }
@@ -1679,6 +1701,89 @@ mod tests {
     }
 
     struct SlowProvider;
+
+    struct ImageRequestProvider(std::sync::atomic::AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl crate::providers::Provider for ImageRequestProvider {
+        fn id(&self) -> &'static str {
+            "image-request-test"
+        }
+        fn label(&self) -> &'static str {
+            "画像依頼テスト"
+        }
+        fn default_model(&self, _cfg: &crate::config::Config) -> String {
+            "test".into()
+        }
+        async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn is_up(&self, _cfg: &crate::config::Config) -> bool {
+            true
+        }
+        async fn chat(
+            &self,
+            _cfg: &crate::config::Config,
+            _model: &str,
+            messages: &[Message],
+            tools: &[serde_json::Value],
+        ) -> anyhow::Result<Message> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let latest = messages
+                .iter()
+                .rev()
+                .find(|message| message.role == "user")
+                .unwrap();
+            assert_eq!(
+                latest.images.as_ref().unwrap(),
+                &["data:image/png;base64,AA"]
+            );
+            assert!(!messages.iter().any(|message| message.role == "tool"
+                || message.name.as_deref() == Some("picoagent_private_context")));
+            // 自動実行だけを抑制し、モデル自身が選べるツール定義は残す。
+            assert!(!tools.is_empty());
+            Ok(Message::new(
+                "assistant",
+                "画像には赤い丸と青い四角が見えます。",
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn 画像付き最新依頼は挨拶や先回り検索より先にモデルへ渡す() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
+        cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
+        for text in [
+            "こんにちは",
+            "今何時？",
+            "添付画像だけを見て、上部の文字と数字、左と右の図形の色と形を日本語で答えてください。外部検索や別ツールは使わないでください。",
+        ] {
+            let provider = ImageRequestProvider(std::sync::atomic::AtomicUsize::new(0));
+            let mut messages = vec![Message::user_with_images(text, vec!["data:image/png;base64,AA".into()])];
+            let answer = super::run(&cfg, &provider, "test", &mut messages, 2, None, None).await.unwrap();
+            assert_eq!(answer, "画像には赤い丸と青い四角が見えます。");
+            assert_eq!(provider.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn 過去の画像は最新のテキスト依頼の定型処理を妨げない() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
+        cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
+        let provider = ImageRequestProvider(std::sync::atomic::AtomicUsize::new(0));
+        let mut messages = vec![
+            Message::user_with_images("画像を見て", vec!["data:image/png;base64,AA".into()]),
+            Message::new("assistant", "赤い丸です。"),
+            Message::new("user", "こんにちは"),
+        ];
+        let answer = super::run(&cfg, &provider, "test", &mut messages, 2, None, None)
+            .await
+            .unwrap();
+        assert!(!answer.is_empty());
+        assert_eq!(provider.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
 
     #[async_trait::async_trait]
     impl crate::providers::Provider for SlowProvider {

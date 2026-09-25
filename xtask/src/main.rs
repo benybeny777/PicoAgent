@@ -40,7 +40,7 @@ const USAGE: &str = "\
   update-feed <配布物> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
-  setup <対象…>        取得対象は all / engine / game-vision / aivis / whisper / pixi / live2d / live2d-samples / office / tools
+  setup <対象…>        取得対象は all / engine / local-vision / aivis / whisper / pixi / live2d / live2d-samples / office / tools
                       （不要な大容量取得を防ぐため対象指定は必須）
   sync-characters [--force] characters/ を ui/assets/characters/ へ差分同期（--force で全再構築）
   character-pack      2Dキャラクターパックを検証・導入
@@ -169,7 +169,7 @@ fn setup(targets: &[String]) -> Result<()> {
         "live2d",
         "mmd",
         "engine",
-        "game-vision",
+        "local-vision",
         "aivis",
         "whisper",
         "office",
@@ -189,7 +189,7 @@ fn setup(targets: &[String]) -> Result<()> {
     for target in wanted {
         match target {
             "engine" => bundled::fetch_engine()?,
-            "game-vision" => bundled::fetch_game_vision()?,
+            "local-vision" | "game-vision" => bundled::fetch_local_vision()?,
             "whisper" => bundled::fetch_whisper()?,
             "pixi" => bundled::fetch_pixi_runtime()?,
             "live2d" => bundled::fetch_live2d_runtime()?,
@@ -205,7 +205,7 @@ fn setup(targets: &[String]) -> Result<()> {
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（all / engine / game-vision / aivis / whisper / pixi / live2d / mmd / live2d-samples / office / tools）"
+                "未知の取得対象です: {other}（all / engine / local-vision / aivis / whisper / pixi / live2d / mmd / live2d-samples / office / tools）"
             ),
         }
     }

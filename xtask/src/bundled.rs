@@ -15,8 +15,8 @@ use sha2::{Digest, Sha256};
 mod vision_asset;
 
 /// 利用者が指定したときだけ、Gemma 4 E2B の画像入力資産を導入する。
-pub fn fetch_game_vision() -> Result<()> {
-    let dir = repo_root().join("src-tauri/resources/bundled/game-vision");
+pub fn fetch_local_vision() -> Result<()> {
+    let dir = repo_root().join("src-tauri/resources/bundled/local-vision");
     let dest = dir.join(vision_asset::FILE_NAME);
     let asset = ReleaseAsset {
         name: vision_asset::FILE_NAME.to_string(),
@@ -31,7 +31,7 @@ pub fn fetch_game_vision() -> Result<()> {
             &incoming.with_extension("incoming.part"),
             "画像入力資産の取得途中ファイル",
         )?;
-        log("setup:game-vision", "検証済みの画像入力資産を利用します");
+        log("setup:local-vision", "検証済みの画像入力資産を利用します");
         return Ok(());
     }
     fs::create_dir_all(&dir)?;
@@ -49,7 +49,7 @@ pub fn fetch_game_vision() -> Result<()> {
             .with_context(|| format!("元の導入エラー: {error:#}"))?;
         return Err(error);
     }
-    log("setup:game-vision", "画像入力資産（約986MB）を検証して導入しました。ローカル画像入力を有効にしてAIを再起動してください");
+    log("setup:local-vision", "画像入力資産（約986MB）を検証して導入しました。ローカル画像入力を有効にしてAIを再起動してください");
     Ok(())
 }
 
