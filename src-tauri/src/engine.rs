@@ -16,6 +16,65 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::commands::AppState;
 use crate::providers::local;
 
+static VISION_READY: AtomicBool = AtomicBool::new(false);
+
+/// ゲーム操作前に、画像を扱える管理エンジンの起動完了を確かめる。
+pub fn ensure_vision_available(cfg: &crate::config::Config) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        local::vision_enabled(cfg),
+        "ローカル画像入力が無効です。設定で有効にしてローカルAIを再起動してください"
+    );
+    local::validate_vision_model(cfg)?;
+    anyhow::ensure!(VISION_READY.load(Ordering::SeqCst), "画像入力用エンジンの起動が完了していません。追加資産を導入してローカルAIを再起動してください");
+    Ok(())
+}
+
+async fn vision_projector(app: &AppHandle) -> anyhow::Result<Option<PathBuf>> {
+    let state = app.state::<AppState>();
+    if !local::vision_enabled(&state.config) {
+        return Ok(None);
+    }
+    local::validate_vision_model(&state.config)?;
+    let name = local::vision_asset::FILE_NAME;
+    let mut candidates = vec![crate::log_paths::bundled_dir(app)
+        .join("game-vision")
+        .join(name)];
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("resources/bundled/game-vision").join(name));
+        candidates.push(resources.join("bundled/game-vision").join(name));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/bundled/game-vision")
+            .join(name),
+    );
+    select_vision_projector(
+        &candidates,
+        local::vision_asset::SIZE,
+        local::vision_asset::SHA256,
+    )
+    .await
+    .map(Some)
+}
+
+async fn select_vision_projector(
+    candidates: &[PathBuf],
+    size: u64,
+    sha256: &str,
+) -> anyhow::Result<PathBuf> {
+    for candidate in candidates {
+        if candidate.exists() {
+            anyhow::ensure!(
+                model_file_matches(candidate, size, sha256).await?,
+                "画像入力用資産が破損または非対応です: {}。cargo xtask setup game-vision で再導入してください",
+                candidate.display()
+            );
+            return Ok(candidate.clone());
+        }
+    }
+    anyhow::bail!("画像入力用資産がありません。cargo xtask setup game-vision で約986MBの追加資産を明示導入してください。取得元: {}", local::vision_asset::URL)
+}
+
 pub struct EngineState {
     pub status: Mutex<Value>,
     pub child: Mutex<Option<Child>>,
@@ -630,6 +689,7 @@ fn spawn_server(
     app: &AppHandle,
     model: &PathBuf,
     candidate: &crate::engine_backend::BackendCandidate,
+    projector: Option<&Path>,
 ) -> anyhow::Result<()> {
     let server = &candidate.server;
     ensure_executable(server)?;
@@ -658,6 +718,12 @@ fn spawn_server(
         .arg("-ngl")
         .arg(ngl)
         .arg("--jinja");
+    if let Some(projector) = projector {
+        cmd.arg("--mmproj").arg(projector);
+        if ngl.trim() == "0" {
+            cmd.arg("--no-mmproj-offload");
+        }
+    }
     // Qwen3.5 は既定で推論過程を生成する。キャラクターの発話へ内部推論を混ぜず、
     // llama.cpp のツール呼び出し解析を安定させるため、非推論モードで起動する。
     if model
@@ -725,6 +791,17 @@ pub async fn ensure_and_start(app: AppHandle) {
         );
         return;
     }
+    let projector = match vision_projector(&app).await {
+        Ok(projector) => projector,
+        Err(error) => {
+            VISION_READY.store(false, Ordering::SeqCst);
+            set_status(
+                &app,
+                json!({ "phase": "error", "message": error.to_string() }),
+            );
+            return;
+        }
+    };
     let model = model_path(&app);
     if let Err(e) = migrate_legacy_model(&app, &model).await {
         set_status(&app, json!({ "phase": "error", "message": e.to_string() }));
@@ -761,7 +838,9 @@ pub async fn ensure_and_start(app: AppHandle) {
     if let Some(provider) = crate::providers::get("local") {
         let state = app.state::<AppState>();
         if provider.is_up(&state.config).await {
-            if running_server_uses_model(&app, &model).await {
+            if running_server_uses_model(&app, &model).await
+                && (projector.is_none() || VISION_READY.load(Ordering::SeqCst))
+            {
                 set_status(&app, json!({ "phase": "ready" }));
                 return;
             }
@@ -810,13 +889,15 @@ pub async fn ensure_and_start(app: AppHandle) {
             &app,
             json!({ "phase": "starting", "message": format!("{}でローカルAIを起動しています", candidate.label) }),
         );
-        if let Err(error) = spawn_server(&app, &model, &candidate) {
+        VISION_READY.store(false, Ordering::SeqCst);
+        if let Err(error) = spawn_server(&app, &model, &candidate, projector.as_deref()) {
             failures.push(format!("{}: {error}", candidate.label));
             continue;
         }
         let mut failed = None;
         for _ in 0..300 {
             if provider.is_up(&state.config).await {
+                VISION_READY.store(projector.is_some(), Ordering::SeqCst);
                 crate::log_paths::append_app_log(
                     &app,
                     &format!("ローカルAIを{}バックエンドで起動しました", candidate.label),
@@ -874,6 +955,7 @@ fn managed_child_exit_status(app: &AppHandle) -> Result<Option<std::process::Exi
     };
     match child.try_wait() {
         Ok(Some(status)) => {
+            VISION_READY.store(false, Ordering::SeqCst);
             *slot = None;
             Ok(Some(status))
         }
@@ -916,6 +998,7 @@ fn terminate_child(app: &AppHandle, child: &mut std::process::Child) {
 }
 
 fn terminate_managed_child(app: &AppHandle) {
+    VISION_READY.store(false, Ordering::SeqCst);
     let Some(engine) = app.try_state::<EngineState>() else {
         return;
     };
@@ -955,6 +1038,56 @@ mod tests {
         remove_obsolete_model_files,
     };
     use crate::providers::local;
+
+    #[tokio::test]
+    async fn 画像資産は優先候補を検証し破損時に別候補へ降格しない() {
+        use sha2::{Digest, Sha256};
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../temp")
+            .join(format!(
+                "vision-test-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&root).unwrap();
+        let first = root.join("first.gguf");
+        let second = root.join("second.gguf");
+        let candidates = [first.clone(), second.clone()];
+        let hash = hex::encode(Sha256::digest(b"valid"));
+        assert!(super::select_vision_projector(&candidates, 5, &hash)
+            .await
+            .is_err());
+        std::fs::write(&second, b"valid").unwrap();
+        assert_eq!(
+            super::select_vision_projector(&candidates, 5, &hash)
+                .await
+                .unwrap(),
+            second
+        );
+        std::fs::write(&first, b"valid").unwrap();
+        assert_eq!(
+            super::select_vision_projector(&candidates, 5, &hash)
+                .await
+                .unwrap(),
+            first
+        );
+        std::fs::remove_file(&second).unwrap();
+        assert_eq!(
+            super::select_vision_projector(&candidates, 5, &hash)
+                .await
+                .unwrap(),
+            first
+        );
+        std::fs::write(&second, b"valid").unwrap();
+        std::fs::write(&first, b"wrong").unwrap();
+        assert!(super::select_vision_projector(&candidates, 5, &hash)
+            .await
+            .is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn revision保存名への移行候補に旧配布名も含める() {

@@ -3281,7 +3281,8 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_LOCAL_PORT", "11435")
         || changed_text("PICOAGENT_LOCAL_CTX", "32768")
         || changed_text("PICOAGENT_LOCAL_NGL", "999")
-        || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "");
+        || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "")
+        || changed_bool("PICOAGENT_LOCAL_VISION_ENABLED", false);
     let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
     let live2d_sdk_changed = changed_value("PICOAGENT_LIVE2D_SDK_OVERRIDES");
     let layout_changed = changed_text("PICOAGENT_LAYOUT", crate::layout::DEFAULT);

@@ -40,7 +40,7 @@ const USAGE: &str = "\
   update-feed <配布物> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
-  setup <対象…>        取得対象は all / engine / aivis / whisper / pixi / live2d / live2d-samples / office / tools
+  setup <対象…>        取得対象は all / engine / game-vision / aivis / whisper / pixi / live2d / live2d-samples / office / tools
                       （不要な大容量取得を防ぐため対象指定は必須）
   sync-characters [--force] characters/ を ui/assets/characters/ へ差分同期（--force で全再構築）
   character-pack      2Dキャラクターパックを検証・導入
@@ -165,7 +165,15 @@ struct Build {
 /// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
 fn setup(targets: &[String]) -> Result<()> {
     let all = [
-        "pixi", "live2d", "mmd", "engine", "aivis", "whisper", "office", "tools",
+        "pixi",
+        "live2d",
+        "mmd",
+        "engine",
+        "game-vision",
+        "aivis",
+        "whisper",
+        "office",
+        "tools",
     ];
     anyhow::ensure!(
         !targets.is_empty(),
@@ -181,6 +189,7 @@ fn setup(targets: &[String]) -> Result<()> {
     for target in wanted {
         match target {
             "engine" => bundled::fetch_engine()?,
+            "game-vision" => bundled::fetch_game_vision()?,
             "whisper" => bundled::fetch_whisper()?,
             "pixi" => bundled::fetch_pixi_runtime()?,
             "live2d" => bundled::fetch_live2d_runtime()?,
@@ -196,7 +205,7 @@ fn setup(targets: &[String]) -> Result<()> {
             "office" => office::fetch_office()?,
             "tools" => tools::fetch_all()?,
             other => bail!(
-                "未知の取得対象です: {other}（all / engine / aivis / whisper / pixi / live2d / mmd / live2d-samples / office / tools）"
+                "未知の取得対象です: {other}（all / engine / game-vision / aivis / whisper / pixi / live2d / mmd / live2d-samples / office / tools）"
             ),
         }
     }
@@ -382,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn 販売資料のスキル数が実装と一致する() {
+    fn 本体文書のスキル数が実装と一致する() {
         let root = super::repo_root();
         let skill_count = std::fs::read_dir(root.join("skills"))
             .unwrap()
@@ -394,19 +403,12 @@ mod tests {
             sales.contains(&format!("実務スキル {skill_count} 種")),
             "docs/SALES.md のスキル数が実装（{skill_count}種）と一致しません"
         );
-        // 本体リポジトリで正本として保守する利用者向け文書と公開LPを照合する。
+        // 本体文書は開発中の実装に合わせる。公開LPは21側の別リポジトリで
+        // 公開版に合わせて保守するため、未公開機能の数との一致を要求しない。
         for (path, expected) in [
             ("README.md", format!("{skill_count} 種のスキル")),
             ("README.md", format!("スキル {skill_count} 種")),
             ("MANUAL.md", format!("{skill_count}種のスキルを内蔵")),
-            (
-                "distribution/site/README.md",
-                format!("実務スキル{skill_count}種"),
-            ),
-            (
-                "distribution/site/index.html",
-                format!("{skill_count}種のスキル"),
-            ),
         ] {
             let text = std::fs::read_to_string(root.join(path)).unwrap();
             assert!(

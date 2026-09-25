@@ -9,6 +9,21 @@ use super::{Provider, ProviderReg};
 use crate::config::Config;
 use crate::message::{Field, Message};
 
+#[path = "../engine_vision_asset.rs"]
+pub mod vision_asset;
+
+pub fn vision_enabled(cfg: &Config) -> bool {
+    cfg.get_bool("PICOAGENT_LOCAL_VISION_ENABLED", false)
+}
+
+pub fn validate_vision_model(cfg: &Config) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        preset_by_url(&model_url(cfg)).is_some_and(|preset| preset.id == "small"),
+        "画像入力は Gemma 4 E2B（small）に対応しています。モデルを選び直してください"
+    );
+    Ok(())
+}
+
 pub struct Local;
 
 pub struct LocalModelPreset {
@@ -340,6 +355,9 @@ fn normalize_for_local(messages: &[Message]) -> Vec<Message> {
                     }
                     last.content.push_str(&m.content);
                 }
+                if let Some(images) = m.images {
+                    last.images.get_or_insert_with(Vec::new).extend(images);
+                }
                 continue;
             }
         }
@@ -391,6 +409,12 @@ impl Provider for Local {
                 "11435",
             ),
             Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "32768"),
+            Field::new(
+                "PICOAGENT_LOCAL_VISION_ENABLED",
+                "ローカル画像入力（Gemma 4 E2B・追加資産の明示導入と再起動が必要）",
+                "checkbox",
+                "false",
+            ),
             Field::new(
                 "PICOAGENT_LOCAL_NGL",
                 "GPU へオフロードするレイヤ数（999=全レイヤ優先 / 0=CPU 固定）",
@@ -575,6 +599,40 @@ mod tests {
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 画像入力は明示有効化と対応モデルを必要とする() {
+        let cfg = crate::config::Config::new();
+        assert!(!super::vision_enabled(&cfg));
+        assert!(super::validate_vision_model(&cfg).is_err());
+        cfg.set("PICOAGENT_LOCAL_MODEL_PRESET", "small");
+        assert!(super::validate_vision_model(&cfg).is_ok());
+        cfg.set("PICOAGENT_MODEL", "balanced");
+        assert!(super::validate_vision_model(&cfg).is_err());
+        cfg.set("PICOAGENT_MODEL", "small");
+        cfg.set("PICOAGENT_LOCAL_VISION_ENABLED", "true");
+        assert!(super::vision_enabled(&cfg));
+        assert!(super::validate_vision_model(&cfg).is_ok());
+    }
+
+    #[test]
+    fn 連続する利用者メッセージの添付画像を順番どおり保持する() {
+        let messages = vec![
+            Message::new("user", "説明"),
+            Message::user_with_images("操作前", vec!["data:image/png;base64,AA".into()]),
+            Message::user_with_images("操作後", vec!["data:image/png;base64,BB".into()]),
+        ];
+        let normalized = normalize_for_local(&messages);
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].content, "説明\n\n操作前\n\n操作後");
+        assert_eq!(
+            normalized[0].images.as_ref().unwrap(),
+            &vec![
+                "data:image/png;base64,AA".to_string(),
+                "data:image/png;base64,BB".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn 全プリセットと設定画面のコンテキスト既定は一致する() {
